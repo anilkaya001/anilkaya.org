@@ -479,7 +479,7 @@
   border: 1px solid var(--hairline);
   border-radius: 6px;
   color: var(--ink-faint);
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-size: 0.68rem;
 }
 
@@ -638,7 +638,7 @@
 .placement-explanation summary::-webkit-details-marker { display: none; }
 .placement-explanation summary::after { content: "+"; grid-column: 4; color: var(--gold-harvest); }
 .placement-explanation[open] summary::after { content: "−"; }
-.placement-explanation__number { color: var(--ink-faint); font-family: var(--font-mono); font-size: 0.7rem; }
+.placement-explanation__number { color: var(--ink-faint); font-family: var(--font-ui); font-size: 0.7rem; }
 .placement-explanation__topic { color: var(--ink-dim); font-size: 0.86rem; }
 .placement-explanation summary strong { font-size: 0.75rem; }
 .placement-explanation.is-correct summary strong { color: #c4d9a3; }

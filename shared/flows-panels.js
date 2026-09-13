@@ -348,6 +348,34 @@ export const TICKER_PANELS = Object.freeze([
   { key: "path", id: "ftPath", span: 1, group: "tape", tier: "chart",
     title: "Session path",
     question: "How did the flow accumulate through the session?" },
+  /* THE SAME QUANTITY ON THE OTHER AXIS, AND IT GOES DIRECTLY BELOW `path`
+     FOR THAT REASON. `path` draws net premium minute by minute inside today;
+     this draws one bar a session across the archive's window. A reader who
+     has just seen today's shape asks "is that unusual for this name" next,
+     and until now nothing on this site could answer it — the figure was
+     published on the board for today and died with the run.
+
+     SPAN 2, ON THE ARGUMENT topContracts MAKES BELOW: the axis is up to
+     forty-two sessions. In a span-1 host at 1216px (456px) that is under
+     eleven pixels a bar including its gap, at which point the sign is still
+     legible but the MAGNITUDE — which is the reading — is a rounding error.
+     A full-width host doubles it. This is the one panel here whose x-axis
+     length is set by the archive rather than by the name. */
+  /* `ftPremTrack`, NOT `ftPrem`: the sticky band already serves a premium-desk
+     link under that id, and the worker suite caught the collision by counting
+     the slot. Two elements sharing an id is a getElementById that silently
+     returns the wrong one. */
+  { key: "premiumTrack", id: "ftPremTrack", span: 2, group: "tape", tier: "chart",
+    title: "Net premium by session",
+    question: "How has this name’s net premium moved across sessions?" },
+  /* THE SAME SESSIONS AS A LOOKUP RATHER THAN AS A SHAPE, directly beneath
+     the two charts it reads. A chart answers "what has this been doing"; a
+     reader who wants "what happened on the 14th" is scanning, and scanning
+     wants rows. It is a SENTINEL — no payload key of its own — because every
+     cell is already published by a panel above it; see sessionLedger. */
+  { key: "__sessions", id: "ftLedger", span: 2, group: "tape", tier: "table",
+    title: "Session by session",
+    question: "What did this name close, score and clear on each of the last sessions?" },
   /* SPAN 2 BECAUSE THE COLUMN THAT PAYS IS THE LAST ONE. Nine columns in a
      span-1 host (456px at a 1216px viewport) push `Net aggr` outside the
      scroll wrapper's visible width, so the panel's whole answer — which lines
@@ -441,6 +469,12 @@ export const TICKER_PANELS = Object.freeze([
  * each out of several of them. Both mount and both draw, and neither is a key
  * the pipeline publishes.
  *
+ * THE THIRD IS `__sessions`, the ledger: one row a session, every cell read
+ * out of the score-overlay and net-premium panels already on the card. The
+ * set's whole argument is why it is a set — adding it is one line here and
+ * nothing anywhere else, where a `!== SCORE_KEY` shape would have needed
+ * finding in every exclusion in the repository, correctly, or leaked.
+ *
  * A SET AND NOT A CONSTANT, BECAUSE ONE OF THEM WAS ABOUT TO LEAK. While
  * there was exactly one sentinel it was a string, `SCORE_KEY`, and every
  * exclusion in the repo was written `!== SCORE_KEY` — a shape that silently
@@ -451,7 +485,7 @@ export const TICKER_PANELS = Object.freeze([
  * to save nothing. Both are asserted against this set in
  * tests/flows-ticker-contract.mjs, in the direction that fails.
  */
-export const SENTINEL_KEYS = new Set(["__score", "__stats"]);
+export const SENTINEL_KEYS = new Set(["__score", "__stats", "__sessions"]);
 
 /**
  * The five stations, in the order the page reads them.

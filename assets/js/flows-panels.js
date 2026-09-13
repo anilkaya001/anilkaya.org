@@ -906,6 +906,39 @@
         " in that window carry no score and are drawn as no bar at all." : ""));
     host.append(svg);
 
+    /* THE CURSOR READS THE ROWS THE MARKS WERE DRAWN FROM, which is the whole
+       reason it cannot disagree with them: `xOf(i)` is the same function that
+       placed the price vertex and the score bar, and the values are the same
+       `rows[i]`. A cursor that re-derived either would be a second opinion
+       about one series.
+
+       AN UNSCORED SESSION SAYS SO RATHER THAN PRINTING A ZERO. The bar for it
+       was deliberately not drawn — this panel's own comment explains that a
+       zero "would be worse still" — so the readout keeps that distinction
+       instead of quietly filling the gap the drawing refuses to fill.
+
+       THE RULE IS BOUNDED TO THE PLOT so it does not run down through the date
+       axis, and the chart's aria-label above already says what it is; the
+       cursor adds the per-point reading a static chart withholds. */
+    if (window.FlowsCursor && rows.length) {
+      window.FlowsCursor.attach(svg, {
+        name: "Score against price",
+        band: { y0: padT, y1: padT + plotH },
+        points: rows.map((r, i) => {
+          const sc = isNum(r.score);
+          return {
+            x: xOf(i),
+            label: r.d,
+            rows: [
+              { k: "Close", v: px2(r.close) },
+              { k: "Score", v: sc === null ? "unscored" : (sc > 0 ? "+" : "") + sc,
+                cls: sc === null ? "" : sc > 0 ? "is-pos" : sc < 0 ? "is-neg" : "" },
+            ],
+          };
+        }),
+      });
+    }
+
     host.append(statList([
       ["Shared sessions", String(join.overlap)],
       ["From", first.d],
@@ -972,10 +1005,156 @@
     }
   }
 
+  /**
+   * The score as a POSITION, which is the one thing the digit cannot say.
+   *
+   * THE NUMBER IS ALREADY ON THIS PAGE — the hero states it and this panel's
+   * own stat list repeats it — so a gauge that only restated it would be a
+   * third copy of one sentence. What it adds is the SCALE: this score is
+   * bounded to ±100, and until now that bound was stated in exactly one
+   * place, a closing sentence inside the score-over-price note. A reader
+   * seeing "+16" had nothing on the page telling them whether that is most of
+   * the range or a rounding error in it. The arc says so by construction.
+   *
+   * THE ENDS ARE LABELLED, THE MARKER IS NOT. "Bearish" and "Bullish" sit at
+   * the ends as AXIS LABELS — they name what the left and right of the scale
+   * mean, the same job "$10" and "$60" do on a price axis. The verdict word
+   * for THIS name stays in the hero, which owns it; printing it again here
+   * would be the copy this file's own rule refuses, and a copy is the thing
+   * that drifts.
+   *
+   * NO DEAD BAND IS DRAWN, because the card does not publish one at this
+   * level — it reaches the page inside the overlay panel's join, and a band
+   * this function guessed at would be a free parameter dressed as a
+   * measurement. So the arc is a scale and not a verdict, and a score of 0
+   * sits at the top of it as the real reading it is rather than as a side.
+   *
+   * AND AN ABSENT SCORE DOES NOT POINT AT ZERO. The marker is withheld
+   * entirely when there is nothing to place, because a needle standing
+   * straight up is the most confident thing this drawing can do and "no score
+   * was published" is the opposite of confident.
+   */
+  const GAUGE_MAX = 100;
+  function scoreGauge(host, card) {
+    const score = isNum(card.score);
+    /* SIZED FROM THE HOST, THROUGH panelWidth, LIKE EVERY OTHER DRAWING HERE.
+
+       THE FIRST DRAFT HARD-CODED 128x78 and the ticker suite refused it in
+       one line: "a span-1 panel at least doubles when enlarged (128 to 128)".
+       A fixed viewBox makes the enlarge button a no-op — the dialog hands the
+       drawing ~1100px of host and the gauge kept drawing 128 of it — which is
+       the one thing that button exists not to do. Going through panelWidth
+       rather than reading clientWidth here also buys the floor and the
+       rounding rule that helper's own comment argues for, instead of a
+       seventh answer to "how wide is this chart". */
+    const W = panelWidth(host);
+    /* The radius is capped so a 1900px dialog does not draw a half-circle
+       taller than the screen, and floored so a 282px phone still gets an arc
+       whose ends are distinguishable. Between those it tracks the host, so
+       enlarging genuinely enlarges. */
+    const R = Math.max(46, Math.min(150, W * 0.3));
+    const SW = R * 0.17;
+    const CX = W / 2, CY = R + SW / 2 + 2, H = CY + 4;
+    /* Polar on the upper half: -100 is due left, +100 due right, 0 straight
+       up. One conversion, used by the arc ends and by the marker, so the
+       scale the segments draw and the scale the marker lands on cannot
+       disagree. */
+    const pt = (v) => {
+      const a = Math.PI * (1 - (v + GAUGE_MAX) / (2 * GAUGE_MAX));
+      return [CX + R * Math.cos(a), CY - R * Math.sin(a)];
+    };
+    const arc = (from, to, cls) => {
+      const [x1, y1] = pt(from), [x2, y2] = pt(to);
+      return svgEl("path", {
+        class: cls, "stroke-width": SW.toFixed(2),
+        d: "M" + x1.toFixed(2) + " " + y1.toFixed(2) +
+          "A" + R.toFixed(2) + " " + R.toFixed(2) + " 0 0 1 " +
+          x2.toFixed(2) + " " + y2.toFixed(2),
+      });
+    };
+
+    const box = el("div", "fc-gauge" + (score === null ? " is-null" : ""));
+    /* The number sits over the arc's mouth and the end labels under its ends,
+       so both are positioned from the radius rather than from a constant that
+       would only be right at one width. */
+    box.style.setProperty("--gauge-lift", (R * 0.52).toFixed(1) + "px");
+    box.style.setProperty("--gauge-w", (2 * R).toFixed(1) + "px");
+    const svg = svgEl("svg", {
+      viewBox: "0 0 " + W + " " + H.toFixed(2), width: W, height: H.toFixed(2),
+      preserveAspectRatio: "xMidYMid meet", role: "img",
+      "aria-label": "Options score on a scale from " + MINUS + GAUGE_MAX +
+        ", most bearish, to +" + GAUGE_MAX + ", most bullish" +
+        (score === null ? " \u2014 no score published for this name" : ""),
+    });
+    /* Three segments rather than a gradient: a gradient invites reading a
+       colour as a value, and only the marker carries a value here. */
+    svg.append(arc(-GAUGE_MAX, -GAUGE_MAX / 3, "fc-gauge-a is-neg"));
+    svg.append(arc(-GAUGE_MAX / 3, GAUGE_MAX / 3, "fc-gauge-a is-flat"));
+    svg.append(arc(GAUGE_MAX / 3, GAUGE_MAX, "fc-gauge-a is-pos"));
+
+    if (score !== null) {
+      /* CLAMPED, AND THE CLAMP IS VISIBLE. The scorer bounds to +/-100, so a
+         value outside it is a payload this drawing cannot represent; it is
+         pinned to the end and marked, never silently folded back inside. */
+      const at = Math.max(-GAUGE_MAX, Math.min(GAUGE_MAX, score));
+      const [mx, my] = pt(at);
+      const inset = R * 0.26;
+      const [ix, iy] = [CX + (R - inset) * (mx - CX) / R, CY + (R - inset) * (my - CY) / R];
+      svg.append(svgEl("line", {
+        class: "fc-gauge-n " + polarity(score), "stroke-width": (SW * 0.42).toFixed(2),
+        x1: ix.toFixed(2), y1: iy.toFixed(2), x2: mx.toFixed(2), y2: my.toFixed(2),
+      }));
+      if (at !== score) svg.append(svgEl("circle", {
+        class: "fc-gauge-clip", cx: mx.toFixed(2), cy: my.toFixed(2), r: (SW * 0.4).toFixed(2) }));
+    }
+    /* NO CURSOR HERE, AND THAT IS A DECISION RATHER THAN AN OVERSIGHT.
+
+       Every other drawing in this section encodes a SERIES, where the value
+       at a given point is recoverable only by measuring pixels against an
+       axis — which is the whole case for the shared cursor. This dial
+       encodes ONE observation, and the box it sits in prints that number
+       over the arc's mouth with the scale's ends labelled beneath. A cursor
+       would step through a list of length one and announce a figure already
+       on screen an inch above it.
+
+       Said in the markup rather than left to be rediscovered: the preview
+       harness counts drawings against cursors, and without this attribute
+       that census reports a working panel as unfinished work every time it
+       runs. `face` means the drawing prints its own reading. */
+    svg.dataset.fxRead = "face";
+    box.append(svg);
+
+    const read = el("div", "fc-gauge-read");
+    const v = el("b", "fc-gauge-v " + (score === null ? "is-null" : polarity(score)),
+      score === null ? DASH : score > 0 ? "+" + score : score < 0 ? MINUS + Math.abs(score) : "0");
+    read.append(v);
+    read.append(el("span", "fc-gauge-scale",
+      score === null ? "no score published for this name"
+        : "of " + MINUS + GAUGE_MAX + " to +" + GAUGE_MAX));
+    box.append(read);
+
+    /* THE ENDS CARRY THE WORDS AND NOT THE NUMBERS. Both were here in the
+       first draft — "Bearish -100" and "+100 Bullish" — which put the bounds
+       on the page twice, two lines apart, and at the gauge's real width the
+       two labels ran into each other into "Bearish -100+100 Bullish". The
+       line above states the bounds; these name what the ends MEAN. */
+    const ends = el("div", "fc-gauge-ends");
+    ends.append(el("span", null, "Bearish"));
+    ends.append(el("span", null, "Bullish"));
+    box.append(ends);
+    if (score === null) box.setAttribute("data-empty", "unavailable");
+    host.append(box);
+  }
+
   function renderScore(host, card, questionIn) {
     const question = questionIn || "Why is this name on the board, and how much of the score came from where?";
     if (!card.fam) return deadPanel(host, question, "no decomposition was published");
     panelHead(host, question);
+    /* THE GAUGE LEADS, because the panel's question is "why is this name on
+       the board" and the first half of that answer is how far onto it the
+       score actually reaches. The decomposition below then says where those
+       points came from. */
+    scoreGauge(host, card);
 
     const weights = card.weights || {};
     const wTotal = Object.values(weights).reduce((a, w) => a + (isNum(w) || 0), 0);

@@ -154,8 +154,22 @@ const SURFACES = [
   { key: "board:long", file: "assets/js/flows-overview.js", at: "const poolCount = (payload)",
     to: "\n  };", label: "poolCount", vars: ["payload"] },
   { key: "flowalerts", file: "assets/js/flows-overview.js", fn: "paintVerdict", vars: ["alerts"] },
-  { key: "board:long", file: "assets/js/flows-overview.js", fn: "paintVerdict", vars: ["long"] },
-  { key: "board:short", file: "assets/js/flows-overview.js", fn: "paintVerdict", vars: ["short"] },
+  /* THE TWO BOARD ENTRIES POINT AT boardsRead() AND NOT AT paintVerdict, and
+     this suite is what said so. The session used to be a tile in the verdict
+     strip, so paintVerdict read `long.sessionDate` and `long.status`
+     directly; the session is the strip's CAPTION now and both reads moved
+     into boardsRead, which the caption and the Cleared tile share.
+
+     Left pointing at paintVerdict the scan found zero `long.` reads there and
+     failed on its own vacuity guard — "zero reads means the regex or the
+     variable name is wrong, and a vacuous pass is worse than a failure" —
+     which is exactly the failure this file is built to produce rather than
+     quietly passing a site it can no longer see. Anchored on the function
+     that does the reading, the guard is live again: rename `sessionDate` and
+     the caption goes silent on a session both boards published, which is what
+     this entry exists to catch. */
+  { key: "board:long", file: "assets/js/flows-overview.js", fn: "boardsRead", vars: ["long"] },
+  { key: "board:short", file: "assets/js/flows-overview.js", fn: "boardsRead", vars: ["short"] },
   /* renderSpine() is the page's one chart, and it reads the band, the scored
      population and the neutral count off the board root. `deadBand` renamed
      draws an axis with no hatch and a caption stating the band's width is not
@@ -751,7 +765,7 @@ console.log(`✓ flows-payload-shape: ${checks} assertions — the publisher and
   `the card's panel-level renderers finally in scope: the market-wide join's drawer read ` +
   `against the panel the pipeline emits, on BOTH arms of its union, with the coverage of the ` +
   `join and the prior-session date of its ranking asserted on the wire, and the landing page ` +
-  `whole rather than half of it: the score index, the seven verdict tiles, the spine and the ` +
+  `whole rather than half of it: the score index, the five verdict tiles and the caption that carries the two readings they shed, the spine and the ` +
   `closure that writes the region subtitles all read against the payloads they are handed — ` +
   `and the two market-wide keys whose renderers have not been written yet pinned on the ` +
   `publisher's side while that is still free to fix: the sector option lean's three reads ` +

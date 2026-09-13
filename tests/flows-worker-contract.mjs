@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 import { signSession } from "../shared/session.js";
 import { TICKER_PANELS } from "../shared/flows-panels.js";
 import { archiveWriteAction, ARCHIVE_REFUSALS } from "../shared/flows-archive.js";
+import { UA_BANNED_CLAIMS } from "../shared/flows-unusual.js";
 import {
   startWorker, SESSION_SECRET, FLOWS_PASSWORD, FLOWS_TEST_USER,
 } from "./worker-server.mjs";
@@ -372,10 +373,15 @@ try {
          refusals — the lede and the basis panel. One anywhere else, in a
          table header, a caption or a status strip, is the page claiming it.
 
-         "order" is excluded from the vocabulary because it occurs in ordinary
-         prose ("in no documented order"); the per-trade words are the ones
-         that carry a claim. */
-      const banned = /\b(print|trade|block|sweep|bought|sold|paid|whale|smart money|institutional)\b/ig;
+         THE VOCABULARY ITSELF MOVED TO shared/flows-unusual.js, beside the
+         builder that shapes these rows, so this suite and contracts.mjs read
+         one list. This suite needs a dev server and cannot run in every
+         sandbox; a rule only an un-runnable suite knows is a rule that gets
+         broken locally and found in CI, which is exactly how it was broken
+         by a COMMENT in shared markup. contracts.mjs now sweeps the same
+         markup with no server, so the round trip is caught before a push.
+         ("order" is deliberately absent from the list; see its comment.) */
+      const banned = new RegExp(UA_BANNED_CLAIMS.source, "ig");
       const refusalProse = [
         ...uaHtml.matchAll(/<p class="flows-lede">[\s\S]*?<\/p>/g),
         ...uaHtml.matchAll(/<section[^>]*id="uaBasisPanel"[\s\S]*?<\/section>/g),

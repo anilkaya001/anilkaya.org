@@ -62,41 +62,44 @@
   --flow-mag-dim: color-mix(in srgb, var(--ink-dim) 55%, transparent);
   --flow-surface: color-mix(in srgb, var(--bg-elev) 92%, transparent);
 
-  /* ONE FAMILY, AND THIS TOKEN IS WHAT USED TO BE --font-mono.
-     Flows is set entirely in Latin Modern. The 158 rules below that once
-     said `var(--font-figure)` now say `var(--font-figure)`, because the face
-     they resolve to is NOT monospaced and a token that keeps the old name
-     would be telling the next reader something measurement contradicts.
+  /* ONE FAMILY, AND IT IS INTER NOW, NOT LATIN MODERN.
 
-     THE JOB THE TOKEN STILL DOES, now that it no longer picks a second
-     family: it marks the DATA role — figures, tickers, labels, axis text —
-     which is what governs the weight discipline below and the letter-spacing
-     these rules carry. Prose uses --font-serif; both resolve to Latin Modern
-     today, and the distinction is what lets one of them move later.
+     Flows was set entirely in a book face. Latin Modern is a beautiful one
+     and it is the wrong tool for this section: a serif designed for
+     continuous prose, asked to carry a hundred small figures a reader takes
+     in at a glance. The two jobs pull in opposite directions — a book face
+     spends its detail on the texture of a paragraph, an interface face spends
+     it on legibility at 11px in a table cell. The owner's design for both
+     Flows pages is set in a neutral grotesque, and this is it.
 
-     WHY NUMERIC COLUMNS STILL LINE UP WITHOUT A MONOSPACED FACE. Measured in
-     Chromium against the four committed faces: Latin Modern's digits are
-     tabular WITHIN a weight — all ten are 0.500 em at weight 400 and 0.570 em
-     at 700, spread 0.0000px at both. So a column aligns as long as its cells
-     share a weight, which they do: `.c-num` sets no font-weight and nothing
-     overrides one, so every cell in a column inherits the same.
-     The 14.0% advance difference BETWEEN those weights is the trap — a column
-     that mixed 400 and 600 rows would misalign by that much per character —
-     so do not add a weight to a numeric cell rule without checking what its
-     column-mates resolve to.
+     THE ACADEMY IS UNTOUCHED. It keeps Latin Modern for prose and JetBrains
+     Mono for notation; this token and the section's prose face are the only
+     two that moved, so the change stops at the /flows/ boundary.
 
-     THE FALLBACK STACK DELIBERATELY SKIPS GEORGIA, which --font-serif lists.
-     Georgia's figures are OLDSTYLE: they vary in height and sit off the
-     baseline, which is correct for prose and wrong for a column of readings.
-     Times New Roman's are lining and tabular, so a reader who never receives
-     the webfont still gets a table rather than a ransom note.
+     THE JOB THE TOKEN DOES IS UNCHANGED: it marks the DATA role — figures,
+     tickers, labels, axis text — which is what governs the weight discipline
+     and the letter-spacing the rules below carry.
 
-     `font-variant-numeric: tabular-nums` is kept on the 38 rules that carry
-     it even though Latin Modern ships no `tnum` feature and the property is
-     therefore INERT against the webfont. It is not decoration: it is what
-     makes the fallback faces above tabular too, on the one path where this
-     token does not resolve to Latin Modern at all. */
-  --font-figure: "Latin Modern", "Latin Modern Roman", "Times New Roman", Times, serif;
+     WHY NUMERIC COLUMNS LINE UP. Inter ships a real `tnum` feature, so the
+     `font-variant-numeric: tabular-nums` on the 38 rules that carry it is
+     LIVE against the webfont rather than inert against it — which is what it
+     was under Latin Modern, whose digits happened to be tabular within a
+     weight and so aligned by luck rather than by instruction. The old note
+     recorded a 14% advance difference BETWEEN weights as the trap this
+     created; with a real tnum feature the trap is gone and a numeric cell may
+     take a weight without misaligning its column.
+
+     THE FALLBACK STACK IS THE SYSTEM UI FACE and not a serif: a reader who
+     never receives the webfont should get the same KIND of face, not a
+     different design. system-ui first, then the named faces it resolves to on
+     each platform, so the fallback is a grotesque everywhere. */
+  --font-figure: "Inter", system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  /* THE SECTION'S PROSE FACE, WHICH USED TO BE --font-serif. Notes, leads and
+     qualifiers are set here. It is the same family as the figures on purpose:
+     the design this follows uses one face at several weights, and a second
+     family on a page this dense is a second thing to parse. */
+  --font-ui: var(--font-figure);
 
   /* ---- GLASS, AND THE FLOOR THAT SET ITS ALPHA ----
 
@@ -189,22 +192,14 @@
      image to the viewport rather than the document: the longest route here
      measures ten thousand pixels, and an unpinned cover image would show one
      flat slice per screen, which is the thing this replaces. */
-  --flows-ground:
-    /* THE SCRIM IS A GRADIENT, NOT A FLAT WASH, because the image is not
-       evenly bright. A single opacity that let the navy through turned the
-       lit haze below the horizon into glare behind every card in the lower
-       two thirds of the page — the render showed the bullish table sitting on
-       brown. Light at the top where the sky is already dark, heavy below the
-       horizon where it is not. */
-    linear-gradient(180deg,
-      rgba(8, 8, 10, 0.42) 0%,
-      rgba(8, 8, 10, 0.50) 34%,
-      rgba(8, 8, 10, 0.72) 52%,
-      rgba(9, 8, 7, 0.88) 68%,
-      rgba(9, 8, 7, 0.94) 100%),
-    radial-gradient(62% 48% at 8% 0%, rgba(122, 170, 214, 0.07), transparent 70%),
-    url("/assets/img/atmosphere.svg?v=158") center / cover no-repeat,
-    linear-gradient(180deg, #0a1020 0%, #101c33 34%, #2a2416 56%, #100e0b 100%);
+  /* ALIASED, NOT RESTATED. The image, the scrim and the fallback moved to
+     base.css as --site-ground when the ground stopped being this section's
+     alone — Home, Articles and the Econometrics Lab paint it too now. The
+     name survives because it is what the reduced-transparency block below
+     overrides and what .flows-body paints: a section that ever needs its own
+     ground changes one line here rather than re-stating a four-layer stack it
+     would then have to keep in step with base.css by hand. */
+  --flows-ground: var(--site-ground);
 
   /* ---- MOTION, HELD AS TOKENS FOR THE REASON THE GLASS IS ----
 
@@ -424,6 +419,17 @@
   min-height: 100vh;
   background: var(--flows-ground);
   background-attachment: fixed;
+  /* THE SECTION'S FACE, SET ONCE AT ITS ROOT. base.css gives the document
+     --font-serif; this is where /flows/ stops inheriting it. Everything under
+     here — prose, tables, notes, the 158 rules that name --font-figure
+     explicitly — now resolves to the same grotesque, which is what the design
+     this follows does: one family, several weights. The Academy is outside
+     this selector and keeps the serif. */
+  font-family: var(--font-ui);
+  /* THE FEATURE IS LIVE NOW. Inter ships `tnum`, so every column that asks
+     for tabular figures gets them from the webfont rather than from a
+     fallback face. Set here so a numeric rule cannot forget it. */
+  font-variant-numeric: tabular-nums;
 }
 
 .flows-kicker {
@@ -620,6 +626,7 @@
   align-items: center;
   gap: 0.8rem;
 }
+
 
 .flows-user {
   font-family: var(--font-figure);
@@ -1579,6 +1586,36 @@ p.fb-empty:is([data-empty="quiet"], [data-empty="pending"],
 .ovl-bar.is-neg { fill: var(--flow-down); }
 .ovl-bar.is-zero { fill: var(--ink-faint); }
 
+/* ---------- net premium by session --------------------------------
+   THE SAME OBJECT AS THE OVERLAY'S SCORE BARS, ON A DIFFERENT QUANTITY, and
+   it reuses the flow palette rather than the gold: these are dollars of call
+   flow against dollars of put flow, which is exactly what --flow-up and
+   --flow-down are the tokens for. The overlay's gold means "score", and a
+   second meaning on the same colour is how a page stops having a legend. */
+.pt-chart { display: block; width: 100%; height: auto; }
+.pt-bar {
+  fill: var(--flow-up);
+  stroke: none;
+  shape-rendering: crispEdges;
+}
+.pt-bar.is-neg { fill: var(--flow-down); }
+/* A SESSION PRICED FLAT, WHICH IS NOT A DIRECTION. Neutral ink and the 0.8
+   sliver the drawer gives it: visible, so it cannot be mistaken for the
+   nothing an unpriced session draws, and colourless, so it cannot be read as
+   a small move either way. */
+.pt-bar.is-zero { fill: var(--ink-faint); }
+.pt-zero {
+  stroke: var(--hairline);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.pt-date {
+  fill: var(--ink-faint);
+  font-family: var(--font-figure);
+  font-size: var(--fs-fine);
+  letter-spacing: 0.02em;
+}
+
 /* ---------- session path ------------------------------------------ */
 
 .fp { display: block; width: 100%; height: auto; }
@@ -1752,13 +1789,65 @@ p.fb-empty:is([data-empty="quiet"], [data-empty="pending"],
    Marked with weight as well as colour, so the signal is not colour-only. */
 .fc-congress .is-late { color: var(--flow-down); font-weight: 600; }
 
+/* ---------- the score gauge ----------------------------------------
+
+   THE ARC IS A SCALE, so it is drawn in the same weight at every point and
+   only the marker carries emphasis. The three segments are tinted because
+   the ends MEAN bearish and bullish, but each is held well below the
+   marker's contrast: a reader must not be able to read a value off the
+   colour, because the colour has none — the marker's angle does.
+
+   COLOUR IS NEVER THE ONLY CHANNEL (--flow-up states the rule). The
+   segments differ in tint; the marker differs in tint AND in angle, and the
+   angle is the reading. A monochrome rendering of this drawing still
+   answers the question. */
+
+.fc-gauge { display: grid; justify-items: center; gap: 0.15rem; margin: 0 0 0.7rem; }
+.fc-gauge svg { display: block; max-width: 100%; height: auto; overflow: visible; }
+/* Stroke widths come from the renderer, which derives them from the radius
+   it just measured — a constant here would only be right at one host width. */
+.fc-gauge-a { fill: none; stroke-linecap: butt; }
+.fc-gauge-a.is-pos  { stroke: color-mix(in srgb, var(--flow-up) 55%, transparent); }
+.fc-gauge-a.is-neg  { stroke: color-mix(in srgb, var(--flow-down) 55%, transparent); }
+.fc-gauge-a.is-flat { stroke: var(--ink-faint); }
+.fc-gauge-n { stroke-linecap: round; stroke: var(--ink); }
+.fc-gauge-n.is-pos  { stroke: var(--flow-up); }
+.fc-gauge-n.is-neg  { stroke: var(--flow-down); }
+.fc-gauge-n.is-flat { stroke: var(--ink-dim); }
+/* The clip mark: this score sat outside ±100, so the marker is pinned at the
+   end rather than placed. A drawn end with nothing on it would read as a
+   measurement AT the end. */
+.fc-gauge-clip { fill: none; stroke: var(--ink); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+
+.fc-gauge-read { display: grid; justify-items: center; gap: 0.05rem; margin-top: calc(-1 * var(--gauge-lift, 1.9rem)); }
+.fc-gauge-v { font-size: 1.75rem; line-height: 1; font-weight: 600; font-variant-numeric: tabular-nums; }
+.fc-gauge-v.is-pos  { color: var(--flow-up); }
+.fc-gauge-v.is-neg  { color: var(--flow-down); }
+.fc-gauge-v.is-flat { color: var(--ink); }
+.fc-gauge-v.is-null { color: var(--ink-dim); }
+.fc-gauge-scale { font-size: var(--fs-micro); color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+
+/* Sized to the arc, not to the panel: these are the scale's end labels and
+   they have to sit under the ends they label. The gap keeps them apart at
+   the narrowest width this panel is ever laid out at. */
+.fc-gauge-ends {
+  display: flex; justify-content: space-between; gap: 1rem;
+  width: 100%; max-width: var(--gauge-w, 148px);
+  font-size: var(--fs-micro); color: var(--ink-dim);
+}
+
 /* ---------- score derivation --------------------------------------- */
 
 .fc-fam { list-style: none; margin: 0; padding: 0; }
 
 .fc-fam li {
   display: grid;
-  grid-template-columns: 1.4rem minmax(4rem, 8rem) 3rem 1fr;
+  /* THE TRACK GAVE WIDTH BACK TO THE LABEL, and the panel got shorter for it.
+     At 8rem the track took 128px of a ~340px panel and every one of the five
+     labels wrapped — "Flow 65% of the / blend" — so the list spent five extra
+     text lines saying nothing. The bar is a magnitude and reads at 88px as
+     well as at 128; the label is a sentence and either fits or costs a row. */
+  grid-template-columns: 1.4rem minmax(3rem, 5.5rem) 3rem 1fr;
   align-items: center;
   gap: 0.6rem;
   padding: 0.32rem 0;
@@ -3702,6 +3791,194 @@ body.is-stale .flows-tablewrap {
   padding: 0 0.3rem;
   border: 1px solid var(--hairline);
   border-radius: 999px;
+  /* THE COUNT SITS AT THE FAR EDGE, which is what makes a column of them
+     scannable: eleven badges that each start where their label ended are
+     eleven positions to find. */
+  margin-left: auto;
+}
+
+/* ---------- the rail's icons, its lead group and its foot ----------
+
+   THE ICON IS A LANDMARK AND THE LABEL IS THE READING. It inherits colour
+   from the link, so the active item tints both with one rule and greyscale
+   loses nothing — the weight, the rule down the left and aria-current all
+   still say which page this is. */
+.flows-rail .ic {
+  flex: none;
+  opacity: 0.72;
+}
+.flows-rail a:hover .ic,
+.flows-rail a.is-on .ic { opacity: 1; }
+.rail-label { min-width: 0; }
+
+/* The assistant sits above both groups with no group label of its own: it
+   answers the question a reader arrives with rather than one of the two
+   this rail sorts destinations into. */
+.rail-items--lead { margin-bottom: 0.2rem; }
+
+/* WHAT THE PRODUCT IS, AT THE BOTTOM OF THE COLUMN, in the smallest type on
+   the page — three claims a reader can check against the pages above it
+   rather than a slogan. Hidden on the phone drawer, where the rail is a
+   horizontal strip of destinations and a three-line tagline would push the
+   destinations off-screen. */
+.rail-foot {
+  margin: auto 0 0.2rem;
+  padding: 0.9rem 0.75rem 0;
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  line-height: 1.7;
+  letter-spacing: 0.04em;
+  color: var(--ink-faint);
+  border-top: 1px solid var(--hairline);
+}
+
+/* ---------- the top bar's session tools ----------
+
+   THE SEARCH, THE NAME, AND NOTHING THAT DOES NOT WORK. The design also
+   carries a notification bell; the warnings that would fill it are published
+   (shared/flows-warnings.js writes them into the briefing key, four raised
+   from twelve checks on the last dry run) but no page reads them yet, and a
+   bell that opens nothing is a promise the product does not keep. It lands
+   with the panel that reads them, not before. */
+.topbar__tools {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+.flows-find {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0 0.5rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-deep) 55%, transparent);
+  color: var(--ink-faint);
+}
+.flows-find:focus-within { border-color: var(--ink-faint); color: var(--ink-dim); }
+.flows-find .ic { flex: none; }
+.flows-find-i {
+  font-family: var(--font-figure);
+  font-size: var(--fs-fine);
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  outline: none;
+  padding: 0.34rem 0;
+  /* SIZED IN CHARACTERS, because what goes in it is at most ten of them. The
+     first pass measured the LIMIT rather than the label and the render came
+     back with the placeholder clipped — twice: 8ch cut "Ticker" to "Tic",
+     and 11ch cut "Search a ticker" to "Search a". Sized to the words a
+     reader is shown, measured in the face they are shown in. */
+  width: 18ch;
+  min-width: 0;
+}
+.flows-find-i::placeholder { color: var(--ink-faint); }
+.flows-find-i::-webkit-search-cancel-button { filter: grayscale(1) opacity(0.6); }
+
+/* THE READER'S OWN INITIALS. No photo, no generated face: the session knows
+   a username and nothing else about the person holding it. */
+/* THE TRAIL, ABOVE THE TITLE, at the size of the chrome rather than of the
+   page: it says where a reader is, and a breadcrumb that competes with the
+   H1 under it has misunderstood which of the two is the heading. */
+.flows-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 0.35rem;
+  font-family: var(--font-figure);
+  font-size: var(--fs-fine);
+  color: var(--ink-faint);
+}
+.flows-crumbs a { color: var(--ink-faint); text-decoration: none; }
+.flows-crumbs a:hover, .flows-crumbs a:focus-visible { color: var(--ink); text-decoration: underline; }
+.flows-crumbs [aria-current="page"] { color: var(--ink-dim); }
+.flows-crumbs-sep { opacity: 0.55; }
+
+/* THE SIGN-OUT IN THE BAR IS CHROME, NOT A PRIMARY CONTROL. The 44px tap
+   floor this stylesheet keeps for primary controls would make it the tallest
+   thing in a 56px bar; it keeps a real target on a coarse pointer through
+   padding instead, and the bar gives it room. */
+.topbar__out { display: flex; }
+.topbar__out .flows-signout {
+  min-height: 0;
+  padding: 0.34rem 0.7rem;
+  font-size: var(--fs-micro);
+  border-color: var(--panel-border);
+}
+@media (pointer: coarse) {
+  .topbar__out .flows-signout { padding: 0.6rem 0.8rem; }
+}
+@media (max-width: 46rem) {
+  /* At phone width the pill's four destinations and the search are what a
+     reader came for; signing out is not, and it stays reachable from the
+     avatar's own title until this bar grows a menu. */
+  .topbar__out { display: none; }
+}
+
+.topbar__who {
+  display: grid;
+  place-items: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  background: color-mix(in srgb, var(--gold-harvest) 12%, transparent);
+  color: var(--ink-dim);
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+/* 59.99, NOT 60, AND base.css STATES WHY IN PROSE THIS FILE HAD TO RELEARN.
+   "A MIN AND A MAX AT THE SAME STEP are written `min-width: 60rem` and
+   `max-width: 59.99rem`. That is one tier, not two." Written 60/60 both
+   queries match at exactly 960px, so the page spends one whole tier applying
+   two mutually exclusive rail layouts and the winner is whichever rule sits
+   later in the file — here the rail would have been a horizontal drawer AND
+   a 13rem sticky column at once. The pair below was introduced with the
+   two-group rail in this wave and tests/flows-motion.mjs caught it, which is
+   what that scan exists for. */
+@media (max-width: 59.99rem) {
+  /* The rail is a horizontal drawer here; a column foot inside a row would
+     stretch the strip to three lines of type nobody asked for. */
+  .rail-foot { display: none; }
+  /* The search keeps its place in the bar and gives up width first: the
+     pill's four destinations are the thing that must not wrap. */
+  .flows-find-i { width: 7ch; }
+}
+
+/* THE SEARCH LEAVES THE BAR ON A PHONE, and it is the only thing in it that
+   has somewhere else to be. Measured at 320px: the Flows bar ran 86px past
+   the viewport — far worse than the public bar's 5px, because this one
+   carries a search field, an avatar and a sign-out on top of the same
+   four-tab pill. The tabs are what must not wrap (the tier above says so),
+   the identity and the way out belong together where a reader looks for them,
+   and the ticker search is one tap away: /flows/ticker/ serves its own find
+   field in the fixed band, and the rail's "Ask the data" takes a name in
+   prose.
+
+   29.99rem, NOT 25rem, AND THE FIRST DRAFT WAS 25. Written there it fixed
+   320px and opened a hole from 401 to 479: the search came back at 25rem
+   while the pill kept its wider size until 30rem, so the bar overflowed by
+   18px at 420 and read as FIXED at 320, 390 and 400 either side of it. The
+   sweep is what found it — 400 measured +18 and 420 measured −18, twenty
+   pixels of viewport making it thirty-six worse, which is a tier boundary and
+   nothing else. Hiding until 30rem lines the search up with the tier that
+   also restores the pill's size, so the two changes happen together instead
+   of 79px apart. Measured after, in slack: 11 at 320, 18 from 360 to 460, 19
+   at 479 and 480, 21 at 520, 26 at 640 — positive everywhere, no tab
+   off-screen.
+
+   THIS ROUTE IS GATED, so tests/regression.mjs — which asserts exactly this
+   geometry on the eleven public pages, at nine widths — cannot reach it.
+   scripts/render-preview measures the same thing on the ticker page, and it
+   samples a sweep rather than one width for the reason above: a single 320px
+   sample called this fixed while 420 was broken. */
+@media (max-width: 29.99rem) {
+  .flows-find { display: none; }
 }
 
 @media (min-width: 60rem) {
@@ -3921,6 +4198,198 @@ body.is-stale .flows-tablewrap {
      scroll-margin rule further down this section is its only reader. */
   --ft-bar-h: 5.5rem;
 }
+/* ---------- the ticker page's arrival header ----------------------
+   FIVE BLOCKS ON ONE ROW, EACH ONE A READING WITH ITS OWN LABEL. The sticky
+   strip further down is the same facts run together on one line, which is the
+   right shape for something that has to survive the whole scroll and the
+   wrong shape for what a reader lands on.
+
+   auto-fit WITH A FLOOR rather than a fixed count: the blocks are genuinely
+   different widths — a ticker and a company name against a two-digit
+   conviction — so a fixed track would size every one of them to the widest.
+   The floor is what stops the score block wrapping its pill under its bar. */
+.ft-hero {
+  display: grid;
+  /* 11rem WAS SIZED FOR FIVE BLOCKS AND THERE ARE SIX. The strip gained the
+     two volatility columns the design puts beside the price, and at 1440 the
+     last of them wrapped onto a second row — a row of one, under five, which
+     is the shape this stylesheet spends the most words refusing everywhere
+     else. 8.5rem is the widest track that fits six at 1280 and still holds
+     the longest label ("Options score") on one line; `auto-fit` keeps the
+     old behaviour at every narrower width, where wrapping is correct. */
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, auto));
+  /* TWO NAMED ROWS AND EVERY BLOCK SHARES THEM, which is what puts the
+     labels on one line.
+
+     The first draft bottom-aligned five blocks of different internal heights,
+     and the result was three labels at three heights — "Options score" at
+     360, "Conviction" at 400, "Sector" at 427 — because a block with four
+     children pushed its own label further up than a block with two. Aligning
+     to the top instead only moves the problem: the ticker is set at 3rem and
+     would then sit on the label line.
+
+     `subgrid` is the tool for exactly this: the row track is decided once, by
+     the whole strip, and each block adopts it rather than sizing itself. The
+     label row is as tall as the tallest label and the value row as tall as
+     the tallest value, at every viewport, with no measurement in JavaScript
+     and nothing to keep in sync. */
+  grid-template-rows: auto auto;
+  align-items: end;
+  gap: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-2);
+  padding: var(--space-3) 0 var(--space-3);
+  border-bottom: 1px solid var(--hairline);
+}
+.ft-hero > * {
+  grid-row: span 2;
+  display: grid;
+  grid-template-rows: subgrid;
+  align-content: end;
+  gap: 0.28rem;
+  min-width: 0;
+}
+/* THE NAME SPANS BOTH ROWS AND IS THE ONE BLOCK WITH NO LABEL. A symbol set
+   at 3rem does not need one, and "Ticker" over a ticker is the kind of label
+   that exists to satisfy a grid rather than a reader. It gets its own flex
+   column back so the company name sits tight under the symbol instead of
+   being pushed into the value row. */
+.ft-hero-id {
+  display: flex; flex-direction: column; justify-content: flex-end;
+  gap: 0.1rem; min-width: 0;
+}
+/* WHAT IDENTIFIES THE NAME, UNDER THE NAME: its sector and the session every
+   figure beside it is of, on one line, at the size of a caption. They were a
+   column in the strip and the strip wrapped to two rows at 1440 because of
+   it. */
+.ft-hero-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.15rem 0.5rem;
+  min-width: 0;
+}
+.ft-hero-t {
+  font-family: var(--font-figure);
+  font-size: clamp(2rem, 4.4vw, 3rem);
+  line-height: 1;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+}
+/* THE COMPANY NAME IS A SECOND LINE AND NOT A PARENTHESIS. A forty-character
+   name set beside the symbol pushes the symbol off the left edge a reader
+   scans down — the same finding the ranked rows on the landing page record. */
+.ft-hero-nm {
+  font-size: var(--fs-note);
+  color: var(--ink-faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* The change rides UNDER the price inside ONE row cell rather than taking a
+   row of its own: it is a qualifier on the figure above it, not a fifth
+   reading, and a row track sized to hold it would push every label up. */
+.ft-hero-stack {
+  display: flex; flex-direction: column; gap: 0.25rem;
+  align-items: start; justify-content: end;
+  min-width: 0;
+}
+/* The figure and its bar read as one object, so they share a line: the bar is
+   the figure drawn, not a second reading under it. */
+.ft-hero-row { display: flex; align-items: center; gap: 0.6rem; min-width: 0; }
+.ft-hero-b { min-width: 0; }
+.ft-hero-k {
+  font-family: var(--font-figure);
+  font-size: var(--fs-label);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.ft-hero-v {
+  font-family: var(--font-figure);
+  font-size: clamp(1.4rem, 2.4vw, 1.9rem);
+  line-height: 1.05;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.ft-hero-v.is-pos { color: var(--flow-up); }
+.ft-hero-v.is-neg { color: var(--flow-down); }
+.ft-hero-v[data-empty] { color: var(--ink-faint); }
+.ft-hero-chg {
+  font-family: var(--font-figure);
+  font-size: var(--fs-note);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim);
+}
+.ft-hero-chg.is-pos { color: var(--flow-up); }
+.ft-hero-chg.is-neg { color: var(--flow-down); }
+
+/* THE SCORE BAR IS CENTRED ON ZERO, so a −49 and a +49 are mirror images and
+   the eye reads the side before the digits. Same construction as the ranked
+   rows' .cc-score-scale — one way a score is drawn across the section. */
+.ft-hero-bar {
+  position: relative; display: block;
+  width: 7rem; flex: none; height: 5px;
+  border-radius: 3px;
+  background: var(--hairline);
+  overflow: hidden;
+}
+.ft-hero-bar > i {
+  position: absolute; top: 0; bottom: 0;
+  background: var(--ink-dim);
+  border-radius: 3px;
+}
+.ft-hero-bar > i.is-pos { background: var(--flow-up); }
+.ft-hero-bar > i.is-neg { background: var(--flow-down); }
+
+.ft-hero-pill {
+  align-self: start;
+  font-family: var(--font-figure);
+  font-size: var(--fs-label);
+  letter-spacing: 0.1em;
+  padding: 0.16rem 0.5rem;
+  border-radius: var(--radius-1);
+  border: 1px solid currentColor;
+  color: var(--ink-dim);
+}
+.ft-hero-pill.is-pos { color: var(--flow-up); }
+.ft-hero-pill.is-neg { color: var(--flow-down); }
+
+/* CONVICTION AS FIVE SEGMENTS. Coarser than the digits beside it on purpose:
+   the number is the measurement and the segments are the glance. */
+.ft-hero-seg { display: flex; gap: 3px; }
+.ft-hero-seg > i {
+  display: block; width: 1.15rem; height: 5px;
+  border-radius: 2px;
+  background: var(--hairline);
+}
+.ft-hero-seg > i.is-on { background: var(--gold-harvest); }
+.ft-hero-m { font-size: var(--fs-note); color: var(--ink-dim); }
+
+/* ---------- the flags row -----------------------------------------
+   MARKS, NOT BUTTONS. Nothing here is clickable and nothing here is new: each
+   one restates a panel's reading past a threshold its own title names. Set at
+   the label size so the row scans in one pass rather than reading as a
+   sentence. */
+.ft-flags {
+  display: flex; flex-wrap: wrap; gap: 0.35rem;
+  margin: 0 0 var(--space-3);
+}
+.ft-flag {
+  font-family: var(--font-figure);
+  font-size: var(--fs-fine);
+  letter-spacing: 0.03em;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  color: var(--ink-dim);
+  background: var(--panel-glass);
+  cursor: help;
+}
+.ft-flag.is-pos { color: var(--flow-up); border-color: color-mix(in srgb, var(--flow-up) 40%, transparent); }
+.ft-flag.is-neg { color: var(--flow-down); border-color: color-mix(in srgb, var(--flow-down) 40%, transparent); }
+
+@media (max-width: 40rem) {
+  .ft-hero { grid-template-columns: repeat(auto-fit, minmax(8rem, auto)); gap: var(--space-2); }
+}
+
 .ft-station {
   display: grid; gap: var(--space-3);
   grid-template-columns: minmax(0, 1fr);
@@ -3964,7 +4433,7 @@ body.is-stale .flows-tablewrap {
 .ft-station-lead {
   grid-column: 1 / -1;
   margin: 0;
-  font-family: var(--font-serif);
+  font-family: var(--font-ui);
   font-size: var(--fs-note);
   color: var(--ink-dim);
 }
@@ -6310,6 +6779,21 @@ body.is-stale .flows-tablewrap {
   gap: var(--space-3);
   grid-template-columns: repeat(12, minmax(0, 1fr));
   margin-top: var(--space-3);
+  /* ALIGN-ITEMS: START, AND THIS IS THE CASE THE TICKER'S PANELS ARE NOT.
+
+     The argument recorded at .ft-panel — that `start` converts filled dead
+     space into ragged dead space and reclaims nothing, so the surplus should
+     be GIVEN to the drawing instead — holds for a panel whose chart can grow
+     into whatever height its row has. It does not hold here, and the bearish
+     region is the proof: on a session with three bearish names beside ten
+     bullish ones, that region is a three-row table stretched to a ten-row
+     one. There is no drawing to give the surplus to and no eleventh name to
+     put in it; the region has said everything it has to say by row three.
+
+     So the two rules disagree on purpose, and the thing that separates them
+     is whether the content can use the height. A chart can. A list of every
+     name there was cannot. */
+  align-items: start;
 }
 /* MIN-WIDTH:0 IS LOAD-BEARING. A grid item's default min-width is auto, so
    a region holding a wide table would refuse to shrink below that table and
@@ -6321,6 +6805,173 @@ body.is-stale .flows-tablewrap {
    One hairline grid: the 1px gap over a border-coloured background draws
    every divider, so the tiles need no borders of their own and cannot
    double up at the seams. */
+/* ---------- a region's own qualifier ------------------------------
+   THE SENTENCE THAT SAYS WHAT THE DRAWING ABOVE IT IS OF: which series, in
+   which unit, over which population. It sits at the reading size and in dim
+   ink because it is apparatus, not prose — the figure is the content and
+   this is its caption. Constrained to a measure: a qualifier running the
+   full width of a 12-column region is a paragraph, and a reader skips
+   paragraphs. */
+.cc-note {
+  margin: 0.6rem 0 0;
+  max-width: 68ch;
+  color: var(--ink-dim);
+  font-size: var(--fs-note);
+  line-height: 1.5;
+}
+
+/* A REGION WHOSE WHOLE BODY IS A SILENCE IS A LINE, NOT A PANEL.
+
+   "What changed" on a session with no change layer was a full-width card
+   holding one italic apology, as tall as a card holding ten ranked names —
+   the page's most prominent empty statement. The silence still says all four
+   of the things it has to say; it just stops being furniture. */
+.cc-body:has(> .flows-empty:only-child) { padding-block: 0; }
+.cc-body > .flows-empty:only-child { margin-top: 0.35rem; max-width: 90ch; }
+
+/* ---------- the session's caption --------------------------------
+   THE DATE AND THE POPULATION EVERY FIGURE BELOW IS OF. Set as metadata, not
+   as a reading: small, letterspaced, faint — the register of a slug line, so
+   the eye passes over it on the way to the numbers and can come back to it
+   when it needs to know which session it is reading. */
+.cc-meta {
+  grid-column: 1 / -1;
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: 0.4rem 1rem;
+  margin: 0 0 -0.35rem;
+  font-family: var(--font-figure);
+  font-size: var(--fs-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.cc-meta-d { color: var(--ink-dim); }
+.cc-meta-d[data-empty] { font-style: italic; }
+/* THE READ STAMP CARRIES A DOT, and the dot is the only thing on this line
+   that is not text: a reader scanning for "how fresh is this" finds it
+   without reading the line. */
+.cc-meta-live::before {
+  content: ""; display: inline-block;
+  width: 0.42em; height: 0.42em; margin-right: 0.45em;
+  border-radius: 50%;
+  background: var(--flow-up);
+  vertical-align: 0.05em;
+}
+
+/* ---------- the period / basis segmented control -----------------
+   THE SAME OBJECT AS THE PANEL WINDOW PICKER (.fp-win), in a region heading
+   rather than inside a drawing, so it sits on one line with the heading and
+   right-aligns to the region's edge. Same face, same size, same current
+   state: two controls that do the same thing must not look like two things. */
+.cc-seg { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-left: auto; }
+.cc-seg-b {
+  font: inherit;
+  font-family: var(--font-figure);
+  font-size: var(--fs-fine);
+  letter-spacing: 0.04em;
+  padding: 0.16rem 0.5rem;
+  color: var(--ink-dim);
+  background: transparent;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-1);
+  cursor: pointer;
+}
+.cc-seg-b:hover { color: var(--ink); border-color: var(--ink-faint); }
+.cc-seg-b[aria-current="true"] {
+  color: var(--ground);
+  background: var(--gold-harvest);
+  border-color: var(--gold-harvest);
+}
+
+/* ---------- the intraday flow ------------------------------------
+   TWO SIGNED BARS A SLOT AGAINST A MARKED ZERO. The flow palette carries the
+   meaning — green is call premium, red is put premium — and it is the same
+   pair used by every other call/put reading on this site, so the legend is a
+   reminder rather than a key a reader has to learn. */
+.cc-tide { grid-column: 1 / -1; }
+.cc-tide-c {
+  display: block; width: 100%; height: 230px;
+  margin: 0.2rem 0 0;
+}
+.cc-tide-b { shape-rendering: crispEdges; }
+.cc-tide-b.is-call { fill: var(--flow-up); }
+.cc-tide-b.is-put { fill: var(--flow-down); }
+/* THE THREE VALUE RULES. The zero is the one a bar is signed against, so it
+   reads; the two extremes are fainter because they are a scale and not a
+   reading. */
+.cc-tide-g {
+  stroke: var(--hairline); stroke-width: 1;
+  stroke-opacity: 0.5;
+  vector-effect: non-scaling-stroke;
+}
+.cc-tide-y {
+  fill: var(--ink-faint);
+  font-family: var(--font-figure);
+  font-size: 13px;
+}
+.cc-tide-x {
+  fill: var(--ink-faint);
+  font-family: var(--font-figure);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+.cc-tide-k {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem 1.1rem;
+  font-family: var(--font-figure);
+  font-size: var(--fs-fine);
+  color: var(--ink-dim);
+}
+.cc-tide-key::before {
+  content: ""; display: inline-block;
+  width: 0.55em; height: 0.55em; margin-right: 0.4em;
+  border-radius: 2px;
+  vertical-align: 0.02em;
+}
+.cc-tide-key.is-call::before { background: var(--flow-up); }
+.cc-tide-key.is-put::before { background: var(--flow-down); }
+.cc-tide-scale { margin-left: auto; color: var(--ink-faint); }
+
+/* ---------- the call/put ring ------------------------------------
+   AN ARC, NOT A PIE: the hole is where the total goes, so the share and the
+   quantity it is a share of are read in one place. Stroke-drawn from two
+   circles — the put arc is the whole ring and the call arc is laid over it,
+   which is what guarantees the two close with no seam of background between
+   them that would read as a third slice. */
+.cc-ring { display: block; width: 128px; height: 128px; flex: none; }
+.cc-ring-put { fill: none; stroke: var(--flow-down); }
+.cc-ring-call { fill: none; stroke: var(--flow-up); }
+.cc-ring-v {
+  fill: var(--ink);
+  font-family: var(--font-figure);
+  font-size: 19px;
+}
+.cc-ring-c {
+  fill: var(--ink-faint);
+  font-family: var(--font-figure);
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.cc-split-w { display: flex; align-items: center; gap: 1.1rem; flex-wrap: wrap; }
+.cc-split-l { display: flex; flex-direction: column; gap: 0.35rem; min-width: 0; }
+.cc-split-r {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-family: var(--font-figure);
+  font-size: var(--fs-fine);
+}
+.cc-split-dot {
+  width: 0.55em; height: 0.55em; border-radius: 2px;
+  align-self: center;
+}
+.cc-split-r.is-call .cc-split-dot { background: var(--flow-up); }
+.cc-split-r.is-put .cc-split-dot { background: var(--flow-down); }
+.cc-split-n { color: var(--ink-dim); }
+.cc-split-p { color: var(--ink); font-variant-numeric: tabular-nums; }
+.cc-split-d { color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+
 .cc-verdict {
   grid-column: 1 / -1;
   display: grid;
@@ -6335,7 +6986,7 @@ body.is-stale .flows-tablewrap {
      construction at any viewport that can hold seven, and the two media
      steps below hand it 4 and 2 — counts that divide the row evenly and
      leave no short final row. */
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   /* AND THE SAME FOR HEIGHT. The tiles are peers — one label, one figure,
      the same two lines of content — so a tile that happens to wrap its
      value must not leave its row-mates short. This is the .flows-deck rule
@@ -6345,15 +6996,21 @@ body.is-stale .flows-tablewrap {
      — the comment further down records what happened when it was copied
      there. */
   grid-auto-rows: 1fr;
-  background: var(--panel-glass);
-  backdrop-filter: var(--glass-filter);
-  -webkit-backdrop-filter: var(--glass-filter);
-  border: 1px solid var(--panel-border);
-  border-radius: var(--radius-2);
-  box-shadow: var(--glass-edge), var(--shadow-card);
-  overflow: hidden;
 }
-/* SEVEN TILES ONLY WHERE SEVEN FIT, AND 1100px WAS MEASURED AGAINST THE
+/* FIVE CARDS, NOT ONE PANE WITH FOUR DIVIDERS IN IT.
+
+   The strip carried the glass and each tile was a hole cut in it, which is
+   why the row read as a single block of numbers: a reader scanning it had to
+   find the boundaries before they could compare anything, and the 1px gaps
+   doing that work disappear against a translucent ground at any scale below
+   full size. Five separate surfaces make the comparison the strip exists for
+   — this figure against that one — the first thing the layout says.
+
+   The gap grows from 1px to a real one for the same reason: a hairline
+   between two panes is a divider, and space between two cards is what makes
+   them two objects. */
+.cc-verdict { gap: var(--space-2); }
+/* FIVE TILES ONLY WHERE FIVE FIT, AND 1100px WAS MEASURED AGAINST THE
    WRONG FACE. The rule above is unchanged and correct — a value may not wrap,
    and a viewport that cannot hold one gets fewer columns — but the threshold
    it relies on was set with a preview harness that served no webfont and
@@ -6366,16 +7023,39 @@ body.is-stale .flows-tablewrap {
    width each and the longest value needs more; above it main grows with the
    viewport and seven fit. Tying the strip to the tier that decides its width
    is what stops these two drifting apart again. */
-@media (max-width: 91.99rem) { .cc-verdict { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
-@media (max-width: 620px)  { .cc-verdict { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* THE STEPS MOVED WITH THE COUNT. Five no longer divides into four, so the
+   old first step left a single tile alone on a second row — the ragged final
+   row the rule above exists to prevent. Three and one both divide five
+   without leaving a short row at a DIFFERENT track width from the row above
+   it: three leaves a row of two on the same tracks, and one is a column. */
+/* AND THE THRESHOLD CAME DOWN WITH THE COUNT, because 91.99rem was measured
+   against SEVEN tiles and kept while the strip became five.
+
+   Measured at 1440px with the real Latin Modern: the strip is ~1416px of
+   inner width, so five tracks are ~283px and the longest value on it,
+   "41 bull / 48 bear", sets ~230px. It fits with room, and the old threshold
+   was dropping a five-tile strip to three columns on the widest desk this
+   site is designed for — three tiles on the first row, two on the second, and
+   two empty cells where the eye expects the row to continue.
+
+   60rem is where five tracks fall under ~190px, which is the width that value
+   needs at this face. Below it the strip goes to two even columns and then to
+   one; three is skipped entirely, since five over three always leaves the
+   ragged final row the comment above refuses. */
+@media (max-width: 59.99rem) { .cc-verdict { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 30rem)    { .cc-verdict { grid-template-columns: minmax(0, 1fr); } }
 .cc-tile {
-  /* THE TILE IS THE GLASS'S HOLE, NOT A SECOND PANE. Stacking a translucent
-     tile on a translucent strip doubles the blur and the wash, and seven of
-     them draw seven slightly different greys where the 1px gap is supposed
-     to be the only line. The strip carries the surface; the tile carries a
-     hairline of it so the dividers read. */
-  background: rgba(255, 255, 255, 0.012);
-  padding: 0.6rem 0.85rem;
+  /* THE TILE IS THE PANE NOW. The strip above carries no surface at all, so
+     there is exactly one layer of glass under any figure here — the doubling
+     the old note worried about is gone by construction rather than by keeping
+     the tile nearly transparent. */
+  background: var(--panel-glass);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-2);
+  box-shadow: var(--glass-edge), var(--shadow-card);
+  padding: 0.7rem 0.9rem 0.8rem;
   display: flex;
   flex-direction: column;
   /* LABELS ON ONE BASELINE, NOT CENTRED IN THEIR OWN BOX. With
@@ -6415,6 +7095,22 @@ body.is-stale .flows-tablewrap {
 .cc-tile-v.is-pos { color: var(--flow-up); }
 .cc-tile-v.is-neg { color: var(--flow-down); }
 .cc-tile-s { font-size: var(--fs-label); color: var(--ink-faint); }
+/* THE DEMOTED READING. Same size as the silence line above it, but it is a
+   figure rather than a sentence, so it takes the tabular figures and can
+   carry a sign-tone of its own — a tile whose value and whose sub disagree in
+   sign is the whole reason both are on screen. */
+.cc-tile-q {
+  font-size: var(--fs-label); color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+.cc-tile-q.is-pos  { color: var(--flow-up); }
+.cc-tile-q.is-neg  { color: var(--flow-down); }
+.cc-tile-q.is-flat { color: var(--ink-dim); }
+/* A demoted reading that is SILENT wears the same marks the tile's own
+   silence does, on its own element, so the two kinds stay legible apart. */
+.cc-tile-q[data-empty] { color: var(--ink-faint); }
+.cc-tile-q[data-empty]::before { content: "\2014\00a0"; }
+.cc-tile-q[data-empty="pending"]::before { content: "\2026\00a0"; }
 
 /* THE SHAPE OF THE TILE'S OWN NUMBER. A 100x8 viewBox stretched to the tile
    with preserveAspectRatio:none — the bar carries a proportion, not a length,
@@ -6428,6 +7124,10 @@ body.is-stale .flows-tablewrap {
    not carry — the same rule the score bars follow. */
 .cc-viz.is-zero .cc-viz-t { fill: var(--ink-faint); }
 /* The split reads bull-first because the value beside it does. */
+/* THE DISTRIBUTION BARS ARE NEUTRAL ON PURPOSE. Every value in a `hist` is a
+   magnitude — a premium, never a direction — so tinting them with the flow
+   palette would assert a side the numbers do not carry. */
+.cc-viz-h { fill: var(--ink-dim); shape-rendering: crispEdges; }
 .cc-viz-a { fill: var(--flow-up); }
 .cc-viz-b { fill: var(--flow-down); }
 
@@ -6502,6 +7202,18 @@ body.is-stale .flows-tablewrap {
   min-width: 0;
   text-align: right;
 }
+/* THE ROUTE TO THE WHOLE POPULATION, beside the count rather than under it.
+   It is an anchor in a row of captions, so it reads as one of them until a
+   pointer or a focus ring says otherwise — the underline is what marks it as
+   a way out, and it is drawn at the same size as the count it sits next to so
+   the header stays one line of type rather than two weights. */
+.cc-h-all {
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+  text-decoration-color: var(--ink-faint);
+  white-space: nowrap;
+}
+.cc-h-all:hover, .cc-h-all:focus-visible { color: var(--ink); }
 /* Where the subtitle is the way to the rest of the rows, it is a real
    anchor — linkable, middle-clickable, sendable — and it says how many the
    region is NOT showing rather than "more". */
@@ -6527,7 +7239,22 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
    narrow than wide — a headline set across seven columns of a 132rem canvas
    is one line of forty words, which is the shape nobody reads. */
 .cc-lean   { grid-column: span 7; }
-.cc-news   { grid-column: span 5; }
+/* THE RING TAKES THE SLOT THE TAPE HELD, because it is the lean table's
+   natural row-mate: the table says where each basket leaned and the ring says
+   what the whole session's two sides came to, which is the denominator every
+   row of that table is a slice of. Five columns is what the figure needs —
+   a 128px ring beside a four-column legend — and no more. */
+.cc-split  { grid-column: span 5; }
+/* AND THE TAPE MOVED DOWN TO ITS OWN ROW AT FULL WIDTH, which its own note
+   argued against — "a headline set across seven columns is one line of forty
+   words" — so the fix that note was reaching for is applied where it belongs:
+   the measure is constrained on the TEXT, below, rather than by starving the
+   region of width. A region narrowed to control its line length also narrows
+   its meta line, its status and its rules, which is why that trade never
+   worked. */
+.cc-news   { grid-column: span 12; }
+.cc-news .cc-tbl td:first-child,
+.cc-news li { max-width: 74ch; }
 .cc-spine  { grid-column: 1 / -1; }
 .cc-spine > .spine { padding: 0.6rem 0.85rem; margin: 0.4rem 0 0; }
 
@@ -6556,7 +7283,15 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   /* Both go full width here rather than 7/5 of a pinned main: at this tier the
      lean table's six columns and the tape's meta line each need the whole
      width more than they need to sit side by side. */
-  .cc-lean, .cc-news { grid-column: span 12; }
+  /* THE LEAN TABLE AND THE RING STAY ROW-MATES AT THIS TIER. Sending both to
+     full width leaves the ring — a 128px figure with a four-line legend — in
+     an expanse of empty region at 1440px, which is the width most desks
+     actually are. The pair fits: seven columns of a pinned 78rem main is
+     ~700px for the table's six columns, and five is ~500px for a figure that
+     needs ~420. */
+  .cc-lean { grid-column: span 7; }
+  .cc-split { grid-column: span 5; }
+  .cc-news { grid-column: span 12; }
 }
 /* One column. A phone gets the same nine regions in the same order, not a
    shrunken twelve-column desk.
@@ -6810,6 +7545,24 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
    column, which is the whole reason they are on one axis. */
 .cc-ln-name { white-space: nowrap; }
 .cc-ln-note { border-bottom: 1px solid var(--panel-border); }
+
+/* ---------- the sector strip's three modes ----------
+   THE GLANCE IS ONE BLOCK so the toggle redraws the reading, the strip and the
+   sentence about the mode together; the table below it never moves, which is
+   what makes the record stable while the glance changes hands. */
+.cc-lean-glance { display: flex; flex-direction: column; gap: 0.5rem; margin: 0 0 0.9rem; }
+/* THE MODE'S OWN SENTENCE IS NOT A SECTION RULE. It sits under its strip and
+   belongs to it, so it takes the note's type and drops the note's border —
+   a rule here would read as the end of the region rather than the end of a
+   paragraph. */
+.cc-ln-note.is-mode {
+  border-bottom: 0;
+  margin: 0;
+  max-width: 78ch;
+  font-size: var(--fs-note);
+  line-height: 1.5;
+  color: var(--ink-faint);
+}
 
 /* ---------- the headline tape ----------
    THE AGE IS THE FIRST THING IN THE REGION AND IT IS STYLED AS A WARNING
@@ -7649,7 +8402,10 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
    dollar figure sits, so it is set in italic serif at the reading size — the
    one value on the page that is a word, wearing a word's clothes. */
 .sg-facts dd.is-unbounded {
-  font-family: var(--font-serif);
+  /* ITALIC IS WHAT MARKS IT NOW, not a second family: the section is one
+     face, so "a word where a figure goes" is said with a slope rather than
+     with a serif. */
+  font-family: var(--font-ui);
   font-style: italic;
   font-size: var(--fs-note);
   color: var(--gold-celadon);
@@ -8309,7 +9065,15 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   top:1rem;
 }
 .flows-body {
-  --flow-reading-font:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  /* A FIFTH STACK THAT NAMED NO WEBFONT AT ALL. This token set the section's
+     reading prose — statuses, silences, notes, leads, warnings — in whatever
+     system-ui resolves to on the reader's machine, which is a different face
+     on every platform and none of them the one the rest of the page is in. It
+     was invisible because it only reaches prose, and prose beside a figure in
+     another family reads as a style rather than as a defect. It resolves
+     through the one family now, and keeps its name so the rules below still
+     say what they are setting. */
+  --flow-reading-font: var(--font-ui);
 }
 .flows-body .flows-status,.flows-body .cc-quiet,.flows-body[data-flows-page="overview"] .fc-note,.flows-body[data-flows-page="overview"] .fc-reading,.flows-body .ak-warn-say,.flows-body .cc-tile-s {
   font-family:var(--flow-reading-font);
@@ -8832,3 +9596,1103 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   .cc-region, .ft-panel[data-panel] { animation: none; }
   .cc-region::before, .ft-panel[data-panel]::before { transition: none; }
 }
+
+/* ---------- the session ledger ------------------------------------
+   A LOOKUP TABLE UNDER TWO CHARTS OF THE SAME SESSIONS. Dates in the figure
+   face and left-aligned because they are keys, every measurement right-
+   aligned and tabular because they are compared down the column. */
+.ft-ledger { width: 100%; }
+.ft-ledger-d {
+  font-family: var(--font-figure);
+  font-size: var(--fs-fine);
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+/* THE BOARD-ONLY MARK IS QUIETER THAN THE DATE IT QUALIFIES: it says where a
+   row came from, which matters only when a reader is asking why a cell beside
+   it is empty. */
+.ft-ledger-src {
+  margin-left: 0.35rem;
+  font-size: var(--fs-label);
+  letter-spacing: 0.05em;
+  color: var(--ink-faint);
+  cursor: help;
+}
+
+/* ---------- the sector strip --------------------------------------
+   ELEVEN BASKETS AS ELEVEN CHIPS, in the publisher's own order. auto-fit with
+   a floor rather than a fixed eleven: at a pinned 78rem main, eleven tracks
+   are 62px each and a sector name does not fit in one, so the strip wraps to
+   two rows of six and five rather than clipping every label. */
+.cc-chips {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+  margin: 0.6rem 0 0;
+  /* THE CONTAINER CARRIES THE CHIP'S OWN GROUND. Eleven chips never fill a
+     grid of five, ten or twelve columns exactly, so there are always trailing
+     cells with nothing in them — and a container that let the region's
+     background show through them ended the strip with a pale slab that reads
+     as a twelfth basket. Same fill as a chip, so an empty cell is simply the
+     strip continuing and stopping. */
+  background: var(--bg-elev);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-2);
+  overflow: hidden;
+}
+/* THE DIVIDERS ARE ON THE CHIPS, NOT IN THE GAP, and that is what eleven
+   chips in a five-column grid forced.
+
+   The verdict strip's construction — a 1px grid gap over a border-coloured
+   ground — draws every divider for free and is right there, because five
+   tiles fill five columns exactly. Eleven do not: the last row holds one chip
+   and four EMPTY cells, and an empty cell in that construction is a pane of
+   the divider colour, so the strip ended with a wide blank slab that reads as
+   a twelfth basket nobody named. Borders on the chip itself draw nothing
+   where there is no chip. The container clips the outermost edges. */
+.cc-chip {
+  display: flex; flex-direction: column; gap: 0.3rem;
+  padding: 0.5rem 0.6rem 0.55rem;
+  background: var(--bg-elev);
+  border-right: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+  min-width: 0;
+  cursor: help;
+}
+.cc-chip-n {
+  font-family: var(--font-figure);
+  font-size: var(--fs-label);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cc-chip-v {
+  font-family: var(--font-figure);
+  font-size: var(--fs-note);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim);
+}
+.cc-chip.is-pos .cc-chip-v { color: var(--flow-up); }
+.cc-chip.is-neg .cc-chip-v { color: var(--flow-down); }
+/* CENTRED ON ZERO AND ON ONE SCALE FOR EVERY CHIP: two chips side by side are
+   comparable, which is the only reason to put them side by side. */
+.cc-chip-bar {
+  position: relative; display: block;
+  width: 100%; height: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--ink-faint) 22%, transparent);
+  overflow: hidden;
+}
+.cc-chip-bar > i {
+  position: absolute; top: 0; bottom: 0;
+  border-radius: 2px;
+  background: var(--ink-dim);
+}
+.cc-chip.is-pos .cc-chip-bar > i { background: var(--flow-up); }
+.cc-chip.is-neg .cc-chip-bar > i { background: var(--flow-down); }
+/* A BASKET WITH NO READABLE LEAN GETS NO BAR AND A DIMMED LABEL — the chip is
+   present because the basket is, and says nothing because nothing was read. */
+.cc-chip.is-null { opacity: 0.55; }
+
+/* THE QUALIFIER LIST. Set as the note it is, with the marker outside the
+   measure so the claims align down a left edge a reader can run an eye along
+   rather than hunting sentence boundaries in a block. */
+ul.cc-ln-note { list-style: none; padding: 0; margin: 0.6rem 0 0; max-width: 78ch; }
+ul.cc-ln-note > li { position: relative; padding-left: 0.9rem; margin: 0 0 0.3rem; }
+ul.cc-ln-note > li::before {
+  content: ""; position: absolute; left: 0; top: 0.62em;
+  width: 4px; height: 4px; border-radius: 50%;
+  background: var(--ink-faint);
+}
+
+/* THE TILE SPARKLINE. A stroke and no fill: an area under a signed series
+   reads as something accumulated, and every point here is a level. */
+.cc-viz-s {
+  stroke: var(--ink-dim);
+  stroke-width: 1.4;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.cc-viz-s.is-pos { stroke: var(--flow-up); }
+.cc-viz-s.is-neg { stroke: var(--flow-down); }
+
+/* ---------- the change block's verdict ----------------------------
+   TWO WORDS AND A MARK, ahead of the sentence that qualifies them. The mark
+   is a ring rather than a bare glyph so it reads as an object at the head of
+   a card rather than as punctuation in front of a heading. */
+.ft-chg-verdict {
+  display: flex; align-items: center; gap: 0.6rem;
+  margin: 0.5rem 0 0.1rem;
+}
+.ft-chg-mark {
+  display: grid; place-items: center;
+  width: 1.9rem; height: 1.9rem; flex: none;
+  border-radius: 50%;
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--ink-dim);
+  background: color-mix(in srgb, var(--ink-faint) 16%, transparent);
+}
+.ft-chg-word {
+  font-family: var(--font-figure);
+  font-size: var(--fs-lead);
+  color: var(--ink);
+}
+.ft-chg-verdict.is-pos .ft-chg-mark {
+  color: var(--flow-up);
+  background: color-mix(in srgb, var(--flow-up) 16%, transparent);
+}
+.ft-chg-verdict.is-neg .ft-chg-mark {
+  color: var(--flow-down);
+  background: color-mix(in srgb, var(--flow-down) 16%, transparent);
+}
+
+
+/* ---------- the chart cursor ----------
+
+   THE READOUT IS FIXED-POSITIONED, so a panel that clips or scrolls cannot
+   clip it, and it is removed on leave rather than hidden behind the thing it
+   was reading. It never takes pointer events: a box that follows the cursor
+   and eats the cursor's own events is a box that flickers.
+
+   THE RULE IS THE CHART'S OWN INK, one step brighter than its grid, drawn
+   with a non-scaling stroke so it stays a hairline in a panel scaled up. */
+.fx-cursor line {
+  stroke: var(--ink-faint);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0.9;
+}
+.fx-cursor[hidden] { display: none; }
+
+.fx-read {
+  position: fixed;
+  z-index: 60;
+  pointer-events: none;
+  min-width: 8rem;
+  max-width: 18rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 0.4rem;
+  background: color-mix(in srgb, var(--bg-elev) 94%, transparent);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  font-family: var(--font-figure);
+  font-size: var(--fs-fine);
+  line-height: 1.45;
+  color: var(--ink);
+}
+.fx-read[hidden] { display: none; }
+.fx-read-k {
+  margin: 0 0 0.2rem;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.fx-read-r {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.9rem;
+  margin: 0;
+}
+.fx-read-rk { color: var(--ink-dim); }
+.fx-read-rv { font-variant-numeric: tabular-nums; }
+.fx-read-rv.is-pos { color: var(--flow-up); }
+.fx-read-rv.is-neg { color: var(--flow-down); }
+
+/* A CHART THAT TAKES FOCUS MUST SHOW IT. The ring is on the SVG itself
+   rather than a wrapper, because the SVG is what the tab stop is. */
+svg[data-fx-cursor="on"]:focus-visible {
+  outline: 2px solid var(--gold-harvest);
+  outline-offset: 2px;
+}
+svg[data-fx-cursor="on"] { touch-action: pan-y; }
+
+
+/* ---------- the two columns under the header ----------
+
+   THE DESIGN PUTS THE SESSION'S FIGURES ON THE LEFT AND WHAT THE CARD FOUND
+   ON THE RIGHT, and until now this page stacked all of it full-width: the
+   findings index ran the whole measure, so a reader scrolled past 514px of
+   summary to reach the stations it indexes. Beside the figures it is what it
+   is meant to be — a thing you glance at while reading the left.
+
+   ONE COLUMN UNTIL 72rem, AND THE NUMBER IS A MEASUREMENT. With the 13rem
+   rail and the shell's padding, a 1152px viewport leaves main about 830px;
+   20rem of side column takes 320 of it and leaves ~490px for six cards and
+   the change region, which is the point at which the cards stop fitting three
+   across. Below it the two boxes are one column in source order — figures,
+   then findings — which is the order they were stacked in before, so a phone
+   loses nothing.
+
+   NO PAIRED MAX AT THIS STEP. A min and a max at one width both match on the
+   width itself; the rail's 60/60 pair did exactly that until this wave, so
+   this tier is a min alone and the single-column case is the unqualified
+   default above. */
+.ft-split { display: grid; gap: var(--space-3); }
+@media (min-width: 72rem) {
+  .ft-split {
+    grid-template-columns: minmax(0, 1fr) 20rem;
+    /* START, NOT STRETCH. The right column is three boxes whose height is
+       their content; stretched to the left column's height they would grow a
+       tail of empty panel under the sector strip. */
+    align-items: start;
+  }
+  /* STICKY, BECAUSE THE LEFT COLUMN IS THE LONGER ONE. What the card found is
+     an index INTO the page, so it earns its place beside the reading rather
+     than scrolling away from it. Capped at the viewport with its own overflow
+     for the reason the rail's note gives: a sticky box taller than the screen
+     hides its own tail with no affordance saying so. */
+  .ft-split-side {
+    position: sticky;
+    top: calc(var(--ft-bar-h, 9rem) + 1rem);
+    max-height: calc(100vh - var(--ft-bar-h, 9rem) - 2rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+.ft-split-main { min-width: 0; }
+.ft-split-side { min-width: 0; display: flex; flex-direction: column; }
+/* The three boxes already carry their own bottom margin from the stacked
+   layout; in a flex column that margin is the gap, so the last one's is
+   removed rather than a second spacing system introduced. */
+.ft-split-side > :last-child { margin-bottom: 0; }
+
+
+/* ---------- the six cards ----------
+   THE SESSION'S FLOW ABOVE THE STATIONS, in the shape the design specifies: a
+   row of equal cards, each a label, a figure, a small drawing and the coverage
+   that qualifies it. They wrap rather than scroll, and a card that has no
+   reading is not drawn at all — six greyed boxes would turn six silences into
+   six claims that the session was quiet. */
+.ft-cards {
+  display: grid;
+  /* 8rem, NOT 10.5, AND THE NUMBER IS A PHONE MEASUREMENT. At 10.5rem (168px)
+     the track never fits twice inside a 320px viewport's content box — two
+     columns want 2x168 plus the gap against about 288px available — so all
+     six cards stacked and the row measured 576px tall. Six full-width boxes
+     is not a row of cards, it is a list, and it pushed the station tabs below
+     the fold on its own: see the note beside #ftBar in shared/flows-pages.js.
+     At 8rem (128px) two columns need 264px and fit, halving the block to
+     about 288px, and nothing changes above 320px because auto-fit still takes
+     as many tracks as the width allows. The floor is what a card's widest
+     figure needs, not a round number: --$220.7M sets it. */
+  grid-template-columns: repeat(auto-fit, minmax(min(8rem, 100%), 1fr));
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+}
+.ft-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.22rem;
+  min-width: 0;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--bg-elev) 55%, transparent);
+}
+.ft-card-k {
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  /* TWO LINES OF ROOM WHETHER OR NOT THE LABEL USES THEM, so every figure in
+     the row starts at the same height. The row is six cards on one baseline
+     and "SESSION PREMIUM" is the only label that wraps — at full width none
+     of them did, and the wrap appeared the moment these cards moved into the
+     left column of the split above. One wrapped label pushed one figure a
+     line lower than its five neighbours, which is the row reading uneven
+     for a reason that is about typesetting rather than about the session.
+
+     RESERVED RATHER THAN PREVENTED: shortening the label to fit would be
+     this stylesheet editing a reading to suit its own grid, and truncating it
+     would hide which measurement the card is of. lh is the line box of this
+     element's own font-size and line-height, so it stays correct if either
+     changes. */
+  min-height: 2lh;
+}
+.ft-card-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-width: 0;
+  /* IT STACKS RATHER THAN RUNNING INTO THE NEXT CARD. The figure and its
+     sparkline sat side by side on a row that could not wrap, beside a
+     sparkline that could not shrink — so on a narrow card the pair simply
+     overflowed, and nothing clipped it: the premium run's line ran out of its
+     own box and struck through the neighbouring card's figure. It was always
+     wrong and the two-column split made it plain, because the six cards went
+     from the full measure to the left column's share of it.
+
+     WRAPPING IS THE HONEST FIX AND CLIPPING IS NOT. `overflow: hidden` would
+     have cut the line at the card edge with nothing saying so, the silent
+     truncation this codebase refuses everywhere else. Shrinking is no better:
+     the figure alone is most of the card's inner width, so there is no room
+     to give beside it. Below it there is.
+
+     AND THE ROW STAYS EVEN. .ft-cards is a grid, so its items stretch to the
+     tallest in the row — a card that wraps makes every card taller by the
+     same amount rather than making one of them odd. */
+  flex-wrap: wrap;
+}
+.ft-card-v {
+  font-family: var(--font-figure);
+  font-size: var(--fs-lead);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.ft-card-v.is-pos { color: var(--flow-up); }
+.ft-card-v.is-neg { color: var(--flow-down); }
+.ft-card-s {
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  line-height: 1.4;
+  color: var(--ink-faint);
+}
+/* Never wider than the card, whatever the width attribute says:
+   preserveAspectRatio is "none" on this drawing, so a capped width compresses
+   the line horizontally rather than overflowing — the sequence of sessions is
+   the reading and it survives the squeeze. */
+.ft-card-spark { flex: none; max-width: 100%; opacity: 0.85; }
+.ft-card-line { stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+.ft-card-line.is-pos { stroke: var(--flow-up); }
+.ft-card-line.is-neg { stroke: var(--flow-down); }
+/* A SERIES THAT ENDED EXACTLY EVEN IS NEITHER, and it is a measurement rather
+   than an absence — so it draws, in the neutral ink, instead of borrowing the
+   positive colour the way a two-arm sign would have given it. */
+.ft-card-line.is-flat { stroke: var(--ink-dim); }
+/* The centred bar the tiles elsewhere use, at card scale: zero is the middle,
+   and a magnitude runs out from it on the side its sign says. */
+.ft-card-bar {
+  position: relative;
+  flex: none;
+  width: 4.5rem;
+  height: 0.3rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink-faint) 22%, transparent);
+  overflow: hidden;
+}
+.ft-card-bar > i {
+  position: absolute;
+  top: 0; bottom: 0;
+  border-radius: 999px;
+  background: var(--ink-dim);
+}
+.ft-card-bar > i.is-pos { background: var(--flow-up); }
+.ft-card-bar > i.is-neg { background: var(--flow-down); }
+
+
+/* ---------- what this card found ----------
+   THE INDEX AT THE TOP, in the shape the design gives its summary panel: a
+   short stack of findings, each one a link into the panel that made it. It is
+   a list rather than prose because a reader scans it for the one line that
+   matters and then leaves. */
+.ft-brief {
+  margin: 0 0 var(--space-3);
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--bg-elev) 45%, transparent);
+}
+.ft-brief-h {
+  margin: 0 0 0.45rem;
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.ft-brief-l { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.ft-brief-i + .ft-brief-i { border-top: 1px solid var(--hairline); }
+.ft-brief-a {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.4rem 0;
+  color: var(--ink-dim);
+  text-decoration: none;
+  /* A NEUTRAL MARK, NOT A SEVERITY DOT: nothing on this card ranks its own
+     findings, so the bullet says "one of several" and nothing more. */
+  position: relative;
+}
+.ft-brief-a::before {
+  content: "";
+  position: absolute;
+  left: -0.55rem;
+  top: 0.85em;
+  width: 0.3rem;
+  height: 0.3rem;
+  border-radius: 999px;
+  background: var(--ink-faint);
+  opacity: 0.7;
+}
+.ft-brief-a:hover, .ft-brief-a:focus-visible { color: var(--ink); }
+.ft-brief-a:hover .ft-brief-c, .ft-brief-a:focus-visible .ft-brief-c { color: var(--gold-harvest); }
+.ft-brief-t { font-size: var(--fs-note); line-height: 1.5; min-width: 0; }
+.ft-brief-c { flex: none; color: var(--ink-faint); font-size: var(--fs-lead); line-height: 1; }
+.ft-brief-s {
+  margin: 0.5rem 0 0;
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  color: var(--ink-faint);
+}
+
+
+/* ---------- the other names in this sector ----------
+   CHIPS, BECAUSE THE ANSWER IS A SET AND NOT A RANKING. They are ordered by
+   score magnitude, but a reader takes them in as a group — "this is a sector
+   move" or "this is one name" — which is what a row of chips says and a
+   numbered table does not. */
+.ft-rel {
+  margin: 0 0 var(--space-3);
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--bg-elev) 40%, transparent);
+}
+.ft-rel-h {
+  margin: 0 0 0.5rem;
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.ft-rel-l { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.ft-rel-c {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  font-family: var(--font-figure);
+  font-size: var(--fs-fine);
+  color: var(--ink-dim);
+  text-decoration: none;
+}
+/* A chip with no card is not a door, and must not look like one. */
+span.ft-rel-c { opacity: 0.62; border-style: dashed; }
+a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: var(--ink-faint); }
+.ft-rel-t { font-weight: 700; letter-spacing: 0.04em; }
+.ft-rel-v { font-variant-numeric: tabular-nums; }
+.ft-rel-c.is-pos .ft-rel-v { color: var(--flow-up); }
+.ft-rel-c.is-neg .ft-rel-v { color: var(--flow-down); }
+.ft-rel-s {
+  margin: 0.5rem 0 0;
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  line-height: 1.45;
+  color: var(--ink-faint);
+}
+
+/* ---------- the option chain, and the key-levels card ---------------
+
+   BOTH ARE THE SAME OBJECT AS .ft-brief AND .ft-rel BESIDE THEM: one
+   border, one radius, one elevated ground, one uppercase caption. That
+   repetition is the point — four cards in one column that each chose
+   their own chrome read as four unrelated widgets, and the column's job
+   is to read as one summary.
+
+   THE CHAIN IS WIDER THAN THE COLUMN, so it lives in .ft-split-main
+   under the six cards rather than beside them, and its table is the one
+   place on this page allowed to scroll sideways. Seven columns of
+   tabular figures do not fit a phone at any type size that is still
+   readable, and the alternatives are both worse: wrapping turns one
+   contract into two visual rows, and dropping columns silently removes
+   readings a reader cannot then discover. */
+.ft-chain {
+  margin: var(--space-3) 0 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--bg-elev) 45%, transparent);
+}
+.ft-chain-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.55rem;
+}
+.ft-chain-h {
+  margin: 0;
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.ft-chain-tabs { display: flex; gap: 0.3rem; }
+.ft-chain-tab {
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  line-height: 1;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+}
+.ft-chain-tab:hover { color: var(--ink); }
+.ft-chain-tab.is-on {
+  color: var(--bg);
+  background: var(--gold-harvest);
+  border-color: var(--gold-harvest);
+  font-weight: 700;
+}
+/* THE ONE SIDEWAYS SCROLLER ON THIS PAGE, and it is on the table's own
+   box rather than on the card, so the caption and the subtitle stay put
+   while the figures move. */
+.ft-chain-body { overflow-x: auto; min-width: 0; }
+.ftc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-note);
+}
+/* TIGHT, BECAUSE THIS TABLE NOW LIVES IN THE NARROWER OF TWO COLUMNS.
+   Seven columns of figures at the old 0.5rem gutter overflowed its track
+   and clipped the IV column mid-number, which reads as a broken renderer
+   rather than as a scroller. The cells carry their own tabular figures, so
+   the space between them is the only thing that had to give. */
+.ftc-table th, .ftc-table td {
+  padding: 0.28rem 0.3rem;
+  white-space: nowrap;
+}
+@media (min-width: 60rem) {
+  .ftc-table { font-size: var(--fs-micro); }
+  .ftc-table th, .ftc-table td { padding: 0.26rem 0.22rem; }
+}
+.ftc-headrow th {
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  border-bottom: 1px solid var(--hairline);
+  text-align: right;
+}
+.ftc-headrow th.ftc-side { text-align: left; }
+/* THE SIDE LABEL IS A ROWSPAN RAIL, which is what lets one word stand
+   against a block of rows without repeating on each — the same shape the
+   target draws, and the reason it is a <th scope="rowgroup"> rather than
+   a decorated cell: a screen reader announces the side once per block. */
+.ftc-side {
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  /* CENTRED ALONG THE BLOCK IT LABELS, and `center` rather than `left`
+     because this cell is rotated: in vertical-rl, `left` is the TOP of the
+     run, and the 180deg turn then lands it at the bottom — which is where
+     the first render put both words, against the last row of each side
+     rather than beside the middle of it. `center` is invariant to the
+     rotation, so the label sits against the middle of its rowgroup at any
+     row count. */
+  text-align: center;
+  vertical-align: middle;
+  width: 1.5rem;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  color: var(--ink-faint);
+}
+.ftc-side.is-call { color: var(--flow-up); }
+.ftc-side.is-put { color: var(--flow-down); }
+.ftc-table td { text-align: right; }
+.ftc-row + .ftc-row td { border-top: 1px solid color-mix(in srgb, var(--hairline) 55%, transparent); }
+.ftc-k { font-weight: 700; }
+.ftc-body.is-call .ftc-k { color: var(--flow-up); }
+.ftc-body.is-put .ftc-k { color: var(--flow-down); }
+.ftc-bid { color: var(--flow-down); }
+.ftc-ask { color: var(--flow-up); }
+/* NEAREST THE MONEY, MARKED THE WAY THE TARGET MARKS IT — a warm wash and
+   a left rule. It is a measured row, not a selected one, so it carries no
+   hover or focus affordance that would suggest it can be activated. */
+.ftc-row.is-near td { background: color-mix(in srgb, var(--gold-harvest) 12%, transparent); }
+.ftc-row.is-near .ftc-k { box-shadow: inset 2px 0 0 var(--gold-harvest); }
+.ftc-spotc {
+  padding: 0.3rem 0.5rem;
+  text-align: left;
+  border-top: 1px solid var(--gold-harvest);
+  border-bottom: 1px solid var(--gold-harvest);
+  background: color-mix(in srgb, var(--gold-harvest) 8%, transparent);
+}
+.ftc-spot-k {
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-right: 0.5rem;
+}
+.ftc-spot-v { font-weight: 700; font-variant-numeric: tabular-nums; }
+.ft-chain-s {
+  margin: 0.5rem 0 0;
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  line-height: 1.45;
+  color: var(--ink-faint);
+}
+
+.ft-lv {
+  margin: 0 0 var(--space-3);
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--bg-elev) 40%, transparent);
+}
+.ft-lv-h {
+  margin: 0 0 0.5rem;
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.ft-lv-l { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+/* FOUR TRACKS, NOT A FLEX ROW: the price, the name, the bar and the
+   distance line up down the card, which is the whole reason a set of
+   levels reads as a set. A flex row sizes each item to its own content,
+   so a two-word label and a four-word one put their bars in different
+   places and the column stops being comparable. */
+.ft-lv-i {
+  display: grid;
+  grid-template-columns: auto 1fr minmax(2.5rem, 4rem) auto;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.ft-lv-px {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-note);
+}
+.ft-lv-px.is-pos { color: var(--flow-up); }
+.ft-lv-px.is-neg { color: var(--flow-down); }
+.ft-lv-k {
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  color: var(--ink-faint);
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+.ft-lv-bar {
+  height: 0.32rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--hairline) 70%, transparent);
+  overflow: hidden;
+  display: block;
+}
+.ft-lv-fill { display: block; height: 100%; border-radius: 999px; background: var(--ink-faint); }
+.ft-lv-fill.is-pos { background: var(--flow-up); }
+.ft-lv-fill.is-neg { background: var(--flow-down); }
+.ft-lv-d {
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+.ft-lv-s {
+  margin: 0.5rem 0 0;
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  line-height: 1.45;
+  color: var(--ink-faint);
+}
+
+/* ---------- recent flow: the vendor's alerts for this name ----------
+
+   FIVE TRACKS DOWN THE CARD, same reasoning as .ft-lv-i above: time,
+   contract, size, premium and an optional mark line up column-wise so
+   the rows read as a set. The sweep chip is the only optional track,
+   so it is last — a column that appears on some rows and not others
+   cannot sit between two that always do. */
+.ft-flow {
+  margin: 0 0 var(--space-3);
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--bg-elev) 40%, transparent);
+}
+.ft-flow-h {
+  margin: 0 0 0.5rem;
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.ft-flow-l { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.ft-flow-i {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-note);
+}
+.ft-flow-i + .ft-flow-i { border-top: 1px solid color-mix(in srgb, var(--hairline) 55%, transparent); }
+.ft-flow-t { font-family: var(--font-figure); font-size: var(--fs-micro); color: var(--ink-faint); }
+.ft-flow-c { font-weight: 700; }
+.ft-flow-c.is-call { color: var(--flow-up); }
+.ft-flow-c.is-put { color: var(--flow-down); }
+.ft-flow-z { color: var(--ink-faint); text-align: right; }
+.ft-flow-p { font-weight: 700; text-align: right; }
+/* THE SWEEP MARK WRAPS TO ITS OWN LINE rather than adding a fifth track,
+   because it is on a minority of rows: a column reserved for it would
+   put a gap in every row that has none. */
+.ft-flow-w {
+  grid-column: 1 / -1;
+  justify-self: start;
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.1em;
+  padding: 0.05rem 0.35rem;
+  border-radius: 0.25rem;
+  color: var(--gold-harvest);
+  background: color-mix(in srgb, var(--gold-harvest) 14%, transparent);
+}
+.ft-flow-s {
+  margin: 0.5rem 0 0;
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  line-height: 1.45;
+  color: var(--ink-faint);
+}
+
+/* THE TICKER ROUTE'S PAGE HEADER, COLLAPSED OUT OF THE VIEWPORT.
+
+   Same geometry as .visually-hidden in base.css and deliberately the same
+   geometry rather than `display:none`: the <h1> stays in the accessibility
+   tree and in the document outline, so the route still has a heading on the
+   picker path, where the name-sized header is `hidden` behind a fetch.
+
+   WHY IT IS WORTH A RULE AT ALL: measured 150px of a 900px viewport, spent
+   to print "Ticker" directly beneath a breadcrumb that has just said Flows /
+   Ticker. The design opens this page on the name, and this is what makes
+   room for it. */
+.flows-head--quiet {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%);
+  white-space: nowrap; border: 0;
+}
+
+/* ---------- the series block, and the row it shares with the chain ---
+
+   One grid, chart left and chain right, collapsing to a stack below the
+   same width .ft-split uses. Two tables of figures side by side on a
+   phone is two sideways scrollers. */
+/* min-width:0 ON THE GRID AND ON BOTH CHILDREN, which is the whole fix for
+   a 26px sideways scroll at 320px. A grid item's min-width defaults to
+   `auto`, so the chain table's min-content width — seven nowrap columns —
+   propagated out through the item, through the track and through the grid
+   itself, making all three 329px inside a 320px viewport. The scroller on
+   .ft-chain-body could not contain it because the box AROUND the scroller
+   was still sized by its content. */
+.ft-top {
+  display: grid; gap: var(--space-3); margin-top: var(--space-3);
+  min-width: 0;
+}
+.ft-top > * { min-width: 0; }
+@media (min-width: 60rem) {
+  /* STRETCH, NOT START. The two cards are one row of the design and a row
+     whose halves end at different heights is the unevenness this wave is
+     measured on. The chart is the half that can absorb height — its plot
+     grows — so it is the one given a growing body below; the chain's rows
+     are fixed by how many contracts traded. */
+  .ft-top { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); align-items: stretch; }
+  .ft-chart { display: flex; flex-direction: column; }
+  .ft-chart-body { flex: 1; display: flex; align-items: center; }
+}
+.ft-chart {
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--bg-elev) 45%, transparent);
+  min-width: 0;
+}
+.ft-chain { margin-top: 0; }
+.ft-chart-top {
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  justify-content: space-between; gap: 0.5rem; margin-bottom: 0.55rem;
+}
+.ft-chart-h {
+  margin: 0;
+  font-family: var(--font-figure); font-size: var(--fs-micro); font-weight: 700;
+  letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint);
+}
+.ft-chart-tabs { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.ft-chart-tab {
+  font-family: var(--font-figure); font-size: var(--fs-micro); line-height: 1;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--panel-border); border-radius: 999px;
+  background: transparent; color: var(--ink-faint); cursor: pointer;
+}
+.ft-chart-tab:hover { color: var(--ink); }
+.ft-chart-tab.is-on {
+  color: var(--bg); background: var(--gold-harvest);
+  border-color: var(--gold-harvest); font-weight: 700;
+}
+.ft-chart-body { min-width: 0; }
+.ft-chart-svg { display: block; width: 100%; height: auto; }
+.ft-chart-svg:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
+.ft-chart-line { stroke: var(--gold-harvest); stroke-width: 1.6; }
+.ft-chart-rule { stroke: color-mix(in srgb, var(--hairline) 60%, transparent); stroke-width: 1; }
+.ft-chart-zero { stroke: var(--ink-faint); stroke-width: 1; }
+.ft-chart-bar.is-pos { fill: var(--flow-up); }
+.ft-chart-bar.is-neg { fill: var(--flow-down); }
+.ft-chart-bar.is-flat { fill: var(--ink-faint); }
+.ft-chart-ax {
+  fill: var(--ink-faint); font-family: var(--font-figure); font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+.ft-chart-dead {
+  margin: 0; padding: 1.2rem 0;
+  font-family: var(--font-figure); font-size: var(--fs-micro);
+  line-height: 1.5; color: var(--ink-faint);
+}
+.ft-chart-s {
+  margin: 0.5rem 0 0;
+  font-family: var(--font-figure); font-size: var(--fs-micro);
+  line-height: 1.45; color: var(--ink-faint);
+}
+
+/* The bell: same size and affordance as the avatar beside it, so the
+   three tools in the corner read as one row rather than three widgets. */
+.topbar__bell {
+  display: inline-flex; align-items: center; justify-content: center;
+  position: relative;
+  width: 2rem; height: 2rem; flex: none;
+  border: 1px solid var(--panel-border); border-radius: 999px;
+  color: var(--ink-faint); text-decoration: none;
+}
+.topbar__bell:hover, .topbar__bell:focus-visible { color: var(--ink); }
+.topbar__bell svg { width: 1rem; height: 1rem; }
+.topbar__bell-n {
+  position: absolute; top: -0.25rem; right: -0.25rem;
+  min-width: 1rem; padding: 0 0.2rem;
+  font-family: var(--font-figure); font-size: 0.6rem; line-height: 1rem;
+  text-align: center; border-radius: 999px;
+  color: var(--bg); background: var(--gold-harvest); font-weight: 700;
+}
+
+/* ---------- ONE CARD SYSTEM FOR THE WHOLE PAGE ----------------------
+
+   The blocks this wave added — the series chart, the chain, key levels,
+   recent flow, the findings index and the sector peers — each arrived with
+   their own chrome: a flat tint, a 0.6rem radius and a faint uppercase
+   caption. The twenty-five panels below them use the section's established
+   card: --panel-glass over --panel-border at --radius-2, a glass edge and a
+   card shadow, under a celadon header strip.
+
+   Two card systems on one page is the incoherence, and the established one
+   wins because it is the one the rest of the section already speaks. This
+   block is the reconciliation: same ground, same border, same radius, same
+   elevation, same header. Nothing below changes a layout — only surface —
+   so no geometry assertion moves.
+
+   THE HEADERS ARE h2 HERE AND h3 THERE, which is why the rules are written
+   out rather than folded into .fc-panel h3: the outline is a property of the
+   document (these six are siblings of the grid, not panels inside a station)
+   and it should not be bent to save a selector. */
+.ft-chart,
+.ft-chain,
+.ft-lv,
+.ft-flow,
+.ft-brief,
+.ft-rel {
+  background: var(--panel-glass);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-2);
+  box-shadow: var(--glass-edge), var(--shadow-card);
+  padding: var(--space-2) var(--panel-pad-x) var(--space-3);
+}
+.ft-chart-h,
+.ft-chain-h,
+.ft-lv-h,
+.ft-flow-h,
+.ft-brief-h,
+.ft-rel-h {
+  margin: calc(var(--space-2) * -1) calc(var(--panel-pad-x) * -1) var(--space-2);
+  padding: var(--space-1) var(--panel-pad-x);
+  border-bottom: 1px solid var(--panel-border);
+  background: var(--panel-head-glass);
+  border-radius: var(--radius-2) var(--radius-2) 0 0;
+  font-family: var(--font-figure);
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold-celadon);
+}
+/* The two cards that carry a control beside their name keep the name and the
+   control on one line, so the header strip reads the same as every other. */
+.ft-chart-top,
+.ft-chain-top {
+  display: flex; flex-wrap: wrap; align-items: center;
+  justify-content: space-between; gap: 0.5rem;
+  margin: calc(var(--space-2) * -1) calc(var(--panel-pad-x) * -1) var(--space-2);
+  padding: var(--space-1) var(--panel-pad-x);
+  border-bottom: 1px solid var(--panel-border);
+  background: var(--panel-head-glass);
+  border-radius: var(--radius-2) var(--radius-2) 0 0;
+}
+.ft-chart-top .ft-chart-h,
+.ft-chain-top .ft-chain-h {
+  margin: 0; padding: 0; border: 0; background: none; border-radius: 0;
+}
+@media (max-width: 30rem) {
+  .ft-chart, .ft-chain, .ft-lv, .ft-flow, .ft-brief, .ft-rel { --panel-pad-x: 0px; }
+  .ft-chart-h, .ft-chain-h, .ft-lv-h, .ft-flow-h, .ft-brief-h, .ft-rel-h,
+  .ft-chart-top, .ft-chain-top { padding-inline: var(--space-2); }
+}
+
+/* ---------- the band under the row, and the volume ring -------------
+
+   auto-fit so the band holds one card today and three later without a
+   layout change; the card carries the same chrome as everything else. */
+.ft-band3 {
+  display: grid; gap: var(--space-3); margin-top: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(min(17rem, 100%), 1fr));
+  min-width: 0;
+}
+.ft-band3 > * { min-width: 0; }
+.ft-mix {
+  background: var(--panel-glass);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-2);
+  box-shadow: var(--glass-edge), var(--shadow-card);
+  padding: var(--space-2) var(--panel-pad-x) var(--space-3);
+}
+.ft-mix-h {
+  margin: calc(var(--space-2) * -1) calc(var(--panel-pad-x) * -1) var(--space-2);
+  padding: var(--space-1) var(--panel-pad-x);
+  border-bottom: 1px solid var(--panel-border);
+  background: var(--panel-head-glass);
+  border-radius: var(--radius-2) var(--radius-2) 0 0;
+  font-family: var(--font-figure);
+  font-size: var(--fs-label); font-weight: 600;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--gold-celadon);
+}
+/* Ring and legend side by side, stacking when the card is narrow — the
+   legend is the readable half, so it is the one that keeps its width. */
+.ft-mix-body {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: var(--space-2); min-width: 0;
+}
+.ft-mix-svg { width: 8.75rem; height: 8.75rem; flex: none; }
+.ft-mix-arc.is-call { stroke: var(--flow-up); }
+.ft-mix-arc.is-put { stroke: var(--flow-down); }
+.ft-mix-v {
+  fill: var(--ink); font-family: var(--font-figure);
+  font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.ft-mix-c {
+  fill: var(--ink-faint); font-family: var(--font-figure); font-size: 9px;
+  letter-spacing: 0.1em; text-transform: uppercase;
+}
+.ft-mix-l { list-style: none; margin: 0; padding: 0; flex: 1 1 8rem; min-width: 0; }
+.ft-mix-i {
+  display: grid; grid-template-columns: 0.55rem 1fr auto auto;
+  align-items: center; gap: 0.45rem;
+  padding: 0.25rem 0;
+  font-size: var(--fs-note); font-variant-numeric: tabular-nums;
+}
+.ft-mix-i + .ft-mix-i { border-top: 1px solid color-mix(in srgb, var(--hairline) 55%, transparent); }
+.ft-mix-dot { width: 0.55rem; height: 0.55rem; border-radius: 999px; display: block; }
+.ft-mix-dot.is-call { background: var(--flow-up); }
+.ft-mix-dot.is-put { background: var(--flow-down); }
+.ft-mix-k { font-family: var(--font-figure); font-size: var(--fs-micro); color: var(--ink-faint); }
+.ft-mix-n { font-weight: 700; }
+.ft-mix-p { color: var(--ink-faint); }
+.ft-mix-s {
+  margin: 0.5rem 0 0;
+  font-family: var(--font-figure); font-size: var(--fs-micro);
+  line-height: 1.45; color: var(--ink-faint);
+}
+@media (max-width: 30rem) { .ft-mix { --panel-pad-x: 0px; } .ft-mix-h { padding-inline: var(--space-2); } }
+
+/* The period row sits in the hero as its own labelled block, so it reads as
+   one of the header's readings rather than as chrome floating beside them.
+   A disabled pill stays visible and keeps its title: it is the only place a
+   reader learns how far back this card actually reaches. */
+.ft-hero-b--period { justify-content: flex-start; }
+.ft-period { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.ft-period-b {
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  line-height: 1;
+  padding: 0.32rem 0.5rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.ft-period-b:hover:not(:disabled) { color: var(--ink); }
+.ft-period-b.is-on {
+  color: var(--bg);
+  background: var(--gold-harvest);
+  border-color: var(--gold-harvest);
+  font-weight: 700;
+}
+.ft-period-b:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  border-style: dashed;
+}
+
+/* FIVE PILLS ON ONE ROW WHERE THERE IS ROOM FOR FIVE PILLS. The hero is an
+   auto-fit grid and the period block is its eighth member, so it was handed
+   a track narrower than its own content and broke 3M and 1Y onto a second
+   line — two rows of buttons under a one-line label, against seven
+   neighbours that are each one reading tall. Below the breakpoint they wrap
+   as before, because there five pills genuinely do not fit. */
+@media (min-width: 60rem) {
+  .ft-hero-b--period { min-width: 12rem; }
+  .ft-period { flex-wrap: nowrap; }
+}
+
+/* The control that pays for the sector peers. It sits where the chips will,
+   so pressing it replaces itself with what it fetched rather than moving the
+   card's contents around under the reader's cursor. */
+.ft-rel-load {
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  line-height: 1;
+  padding: 0.42rem 0.7rem;
+  border: 1px dashed var(--panel-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+}
+.ft-rel-load:hover:not(:disabled) { color: var(--ink); border-color: var(--gold-harvest); }
+.ft-rel-load:disabled { opacity: 0.6; cursor: progress; }

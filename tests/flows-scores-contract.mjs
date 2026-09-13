@@ -63,6 +63,47 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "a second call produces identical bytes — the immutable dated key depends on it");
 }
 
+/* ---------- §1b the archived net premium -------------------------- */
+{
+  /* The same four-way confusion as the score, one column over. A name
+     nobody priced and a name priced flat both render as "no premium"
+     unless the archive keeps them apart, and this is the only place
+     that distinction can be made: the board row that carried the two
+     legs is gone by the next run. */
+  const rows = scoresRows({
+    long: [
+      { ticker: "DIR", score: 9, netPrem: 13072372.4 },
+      { ticker: "LEG", score: 8, net_call_premium: 5_000_000, net_put_premium: 1_500_000 },
+      { ticker: "PUT", score: 7, net_put_premium: 2_200_000 },
+    ],
+    short: [
+      { ticker: "FLAT", score: -6, net_call_premium: 0, net_put_premium: 0 },
+      { ticker: "NONE", score: -5 },
+    ],
+  });
+  const p = (t) => rows.find((r) => r.t === t);
+
+  eq(p("DIR").p, 13072372,
+    "a row that already carries netPrem is archived from it, rounded to whole " +
+    "dollars — the unit the boards publish in, so no reader has to be told a scale");
+  eq(p("LEG").p, 3500000,
+    "two legs are folded to ONE SIGNED number, calls minus puts: the sign is the " +
+    "reading, and archiving the legs separately would double the bytes to say it");
+  eq(p("PUT").p, -2200000,
+    "a quoted put leg with no call leg is a NEGATIVE premium, not a missing one — " +
+    "the absent side is zero dollars of flow, which is a measurement");
+  eq(p("FLAT").p, 0,
+    "both legs quoted at zero archives AS zero: the screener priced this name and " +
+    "found it flat");
+  ok(!("p" in p("NONE")),
+    "NO LEG QUOTED ARCHIVES NO KEY AT ALL. This is the pair that matters: FLAT and " +
+    "NONE both draw as a bar of no height, and once `p: 0` is written for a name " +
+    "nobody priced, no later reader can ever recover which it was");
+  eq(JSON.stringify(rows).includes('"p":null'), false,
+    "and absence is never spelled as a null value — an omitted key survives the " +
+    "size cap and a null does not");
+}
+
 /* ---------- §2 boards folded into a backfill day ------------------ */
 {
   const rows = boardsToScoreRows([

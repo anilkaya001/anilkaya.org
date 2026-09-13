@@ -863,38 +863,101 @@ if (diffBase) {
     "Latin Modern draws none of the three");
 
   /* ---- AND THE SAME TRIPWIRE FOR THE FACE FLOWS IS NOW SET IN ----
-     Flows stopped using the mono family entirely: assets/css/flows.css defines
-     --font-figure as Latin Modern and its 158 rules resolve there, so on that
-     section the minus sign above is served by THESE files and not by the one
-     asserted above. The old assertion would have stayed green while every
-     negative number on the product's densest pages fell back.
 
-     Measured in Chromium against all four committed faces, rather than assumed
-     from the family name: U+2212, U+0393 Γ and U+0394 Δ are present, digits are
-     tabular within a weight (0.500 em at 400, 0.570 em at 700, spread 0.0000px),
-     and U+03C3 σ is ABSENT — which is why the ATR-normalised distances that used
-     to print "2.00σ" now print "2.00 ATR" and why no Flows surface may
-     reintroduce the glyph. */
+     THE SECTION MOVED TO INTER, AND THIS BLOCK MOVED WITH IT. It asserted
+     Latin Modern because Latin Modern was the decision; the owner's design
+     for both Flows pages is a neutral grotesque, so the decision changed and
+     the test that encodes it changes rather than outranks it. What does NOT
+     change is the SHAPE of the check: whatever the section is set in, the
+     files are committed, they are real woff2, and they cover the glyphs the
+     section actually prints.
+
+     TWO SUBSETS AND BOTH ARE LOAD-BEARING. Flows prints U+2212 on every
+     negative reading, and Γ (the gamma regime) and Δ (every score move, every
+     open-interest change) — the first is in the latin file, the other two are
+     Greek and would otherwise fall back to the system face mid-string, beside
+     the number that is the reading. The ranges are checked in base.css rather
+     than the family name trusted, because a declared range that omits a
+     codepoint makes the glyph unreachable even when the file carries it. */
+  for (const face of ["Inter-latin.woff2", "Inter-greek.woff2"]) {
+    const fp = path.join(ROOT, "assets/fonts", face);
+    assert(existsSync(fp), `${face} is committed — Flows is set entirely in Inter`);
+    const buf2 = readFileSync(fp);
+    assert.equal(buf2.subarray(0, 4).toString("latin1"), "wOF2", `${face} is a woff2 container`);
+    assert(buf2.subarray(0, 512).toString("latin1").includes("cmap") || buf2.length > 8 * 1024,
+      `${face} carries a character map`);
+  }
+  const interLatin = base.slice(base.indexOf("Inter-latin.woff2"));
+  assert(/U\+2212/.test(interLatin.slice(0, interLatin.indexOf("}"))),
+    "base.css must declare U+2212 in Inter's latin unicode-range, or every minus sign " +
+    "in Flows falls back to the system face");
+  /* EVERY DECLARED RANGE IS WELL FORMED, WHICH THE CHECKS AROUND THIS ONE
+     COULD NOT SEE. They assert that a particular codepoint range APPEARS in a
+     block; they cannot notice a second, malformed entry beside it — and one
+     was there: Inter's greek subset declared `U+038E-038A`, whose start is
+     above its end. Per CSS Fonts an invalid <urange> invalidates the WHOLE
+     descriptor, so that subset stopped being a subset and claimed every
+     codepoint, competing with the latin file for ordinary text. It shipped
+     because the correct `U+038E-03A1` sat next to it and satisfied the regex.
+
+     So this reads every range in every @font-face and checks the only thing
+     that makes one meaningful: that it runs forwards. */
+  for (const block of base.match(/@font-face\s*\{[^}]*\}/g) || []) {
+    const face = (block.match(/font-family:\s*"([^"]+)"/) || [])[1] || "a face";
+    const file = (block.match(/([A-Za-z0-9-]+\.woff2)/) || [])[1] || "?";
+    const list = (block.match(/unicode-range:([^;]+);/) || [])[1];
+    if (!list) continue;
+    for (const part of list.split(",")) {
+      const m = part.trim().match(/^U\+([0-9A-Fa-f]+)-([0-9A-Fa-f]+)$/);
+      if (!m) continue;
+      assert(parseInt(m[1], 16) <= parseInt(m[2], 16),
+        `${face} (${file}) declares ${part.trim()}, whose start is above its end — one ` +
+        `malformed range invalidates the whole unicode-range descriptor, and the subset ` +
+        `then claims every codepoint instead of its own`);
+    }
+  }
+
+  const interGreek = base.slice(base.indexOf("Inter-greek.woff2"));
+  const greekRange = interGreek.slice(0, interGreek.indexOf("}"));
+  assert(/U\+038E-03A1/.test(greekRange),
+    "and the greek subset must declare U+038E-03A1 — that is the range carrying " +
+    "\u0393 (the gamma regime) and \u0394 (every score move and open-interest change), " +
+    "both of which Flows prints beside a figure");
+  /* THE FOUR LATIN MODERN FACES STAY COMMITTED AND STAY CHECKED. They are the
+     ACADEMY'S face — that section's prose is still set in them — so the files
+     are as load-bearing as they ever were; what changed is which section they
+     serve. */
   for (const face of ["LM-regular.woff2", "LM-bold.woff2", "LM-italic.woff2", "LM-bold-italic.woff2"]) {
     const lmPath = path.join(ROOT, "assets/fonts", face);
-    assert(existsSync(lmPath), `${face} is committed — Flows is set entirely in Latin Modern`);
+    assert(existsSync(lmPath), `${face} is committed — the Academy's prose is set in Latin Modern`);
     const lm = readFileSync(lmPath);
     assert.equal(lm.subarray(0, 4).toString("latin1"), "wOF2", `${face} is a woff2 container`);
     assert(lm.subarray(0, 512).toString("latin1").includes("cmap") || lm.length > 8 * 1024,
       `${face} carries a character map`);
   }
   const flowsCss = read("assets/css/flows.css");
-  assert(/--font-figure:\s*"Latin Modern"/.test(flowsCss),
-    "flows.css must define --font-figure as Latin Modern — it is what the section's " +
+  assert(/--font-figure:\s*"Inter"/.test(flowsCss),
+    "flows.css must define --font-figure as Inter — it is what the section's " +
     "figures, tickers, labels and axis text all resolve through");
+  assert(/--font-ui:\s*var\(--font-figure\)/.test(flowsCss),
+    "and --font-ui must resolve to the same family: the section is ONE face at " +
+    "several weights, and a second family on pages this dense is a second thing " +
+    "for a reader to parse");
   assert(!/var\(--font-mono\)/.test(flowsCss),
     "and nothing in Flows may reach for --font-mono: that token is the Academy's " +
     "JetBrains stack, and a Flows rule using it puts a second family back on the page");
-  /* σ IS RETIRED FROM FLOWS, AND THIS IS WHAT KEEPS IT RETIRED. Latin Modern
-     does not draw it, so a renderer that reintroduces it does not fail — it
-     falls back to the system face for one glyph, mid-string, beside the number
-     that is the reading. That is silent, so it needs a test rather than a
-     convention. Comments are exempt: they explain the retirement. */
+  assert(!/var\(--font-serif\)/.test(flowsCss),
+    "nor for --font-serif, for the same reason in the other direction: that is the " +
+    "Academy's book face, and Flows left it");
+  /* σ STAYS RETIRED FROM FLOWS, AND THE REASON IS NOW THE ONLY REASON.
+
+     It used to be kept out by a happy accident of the face — Latin Modern
+     draws no σ, so the glyph fell back visibly. Inter draws it, so that
+     tripwire is gone and this assertion is the whole guard. The reason it was
+     retired was never really the face: "2.00σ" hid TWO different denominators
+     behind one glyph, the card's ATR and the desk's standard deviation, and a
+     reader could not tell which they were holding. That argument does not
+     depend on what a font can draw. Comments are exempt: they explain it. */
   for (const file of filesUnder("assets/js", (f) => /flows-.*\.js$/.test(f))) {
     const src = read(file);
     const code = src
@@ -1222,6 +1285,40 @@ let citationsChecked = 0;
     `a comment cites a line its file does not have, which is a pointer at nothing: ` +
     `${stale.join("; ")}. Cite the SYMBOL rather than re-deriving the number, so the next ` +
     `move cannot break it again.`);
+}
+
+/* ---- the unusual page never claims a transaction, checked WITHOUT a server.
+
+   flows-worker-contract already asserts this, and it is the suite that
+   cannot run in a sandbox with no egress — so the rule was enforced only in
+   CI, and it was broken there by a COMMENT in shared markup using "block" as
+   an ordinary noun. Shared markup means every byte of shell(), rail(),
+   topbar() and dock() is served on this route, comments included.
+
+   This is the same rule read off the same exported list, applied to the HTML
+   the emitter produces rather than to a served response, so it costs a
+   second and catches the mistake before a push instead of after a twelve
+   minute run. Where the two could drift they cannot: UA_BANNED_CLAIMS is
+   defined once, in shared/flows-unusual.js. */
+{
+  const { FLOWS_PAGES } = await import("../shared/flows-pages.js");
+  const { UA_BANNED_CLAIMS } = await import("../shared/flows-unusual.js");
+  const uaHtml = FLOWS_PAGES.unusualPage({ username: "contract" });
+  const refusalProse = [
+    ...uaHtml.matchAll(/<p class="flows-lede">[\s\S]*?<\/p>/g),
+    ...uaHtml.matchAll(/<section[^>]*id="uaBasisPanel"[\s\S]*?<\/section>/g),
+  ].map((x) => x[0]).join("\n");
+  const stray = [];
+  for (const hit of uaHtml.matchAll(new RegExp(UA_BANNED_CLAIMS.source, "ig"))) {
+    const around = uaHtml.slice(Math.max(0, hit.index - 60), hit.index + 60);
+    if (!refusalProse.includes(around.slice(10, -10))) {
+      stray.push(hit[0] + ": " + around.replace(/\s+/g, " "));
+    }
+  }
+  assert.equal(stray.length, 0,
+    "the unusual page names a transaction only where it is refusing to call it one. " +
+    "This is SHARED markup: shell(), rail(), topbar() and dock() are served here too, " +
+    "and their COMMENTS are served with them. " + stray.slice(0, 2).join(" | "));
 }
 
 console.log(`✓ contracts: ${topicIds.length} curricula, ${referenceCount} versioned assets, ${citationsChecked} line citations resolved against the files they name, session hardening`);

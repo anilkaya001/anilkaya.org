@@ -157,6 +157,12 @@ const truncated = cards.filter((c) =>
     aggressor: 550, pricedMove: 584, surface: 668, ivSurface: 640, oiDeltas: 661,
     marketRank: 865, path: 712, darkpool: 688, gamma: 795, skewTerm: 829,
     volContext: 756, topContracts: 1044, __score: 1034,
+    /* MEASURED THE SAME WAY AS THE TWENTY-THREE ABOVE — rendered at 1440 with
+       the real Latin Modern, panel content height off getBoundingClientRect,
+       both span-2 and so both 763px wide, the width scoreOverlay's 506 was
+       taken at. `__sessions` is the tallest panel in the registry and that is
+       what it is: twenty rows, five columns, three stats and a qualifier. */
+    premiumTrack: 460, __sessions: 996,
   };
   eq(Object.keys(PANEL_H).length, TICKER_PANELS.length,
      `the measured-height table covers every registry panel (${Object.keys(PANEL_H).length} ` +
@@ -244,8 +250,15 @@ const truncated = cards.filter((c) =>
      dies at "all four chain panels (0 do)", about the chain leg on a run where
      it is fine. Hence the same exclusion above that filter, where it fails
      first; the rest of the contract is here. */
-  eq(SENTINEL_KEYS.size, 2,
-     "the registry declares both sentinels — the score derivation and the key statistics");
+  /* THREE NOW: the score derivation, the key statistics and the session
+     ledger. The count is asserted rather than the names, and it is asserted
+     at all because the SET is what stops a sentinel leaking — a count that
+     drifts without anyone noticing is a sentinel added to the registry and
+     not to the set, which is the failure the comment above measures. Raising
+     it is a decision and it looks like one here. */
+  eq(SENTINEL_KEYS.size, 3,
+     "the registry declares all three sentinels — the score derivation, the key " +
+     "statistics and the session ledger");
   for (const key of SENTINEL_KEYS) {
     ok(TICKER_PANELS.some((p) => p.key === key),
        `the sentinel "${key}" is a panel the registry actually mounts`);
@@ -2893,9 +2906,32 @@ try {
     eq(TICKER_PANELS[0].span, 2,
        "the series keeps both columns, because a 60-session line in a 424px host is a " +
        "sparkline and the panel's whole claim is that a reading is new");
+    /* STILL 1, AND THIS TIME THE NUMBER WAS RE-MEASURED RATHER THAN INHERITED.
+
+       The gauge added ~125px to this panel, so span 2 was tried: the worst
+       side-by-side gap on the page fell from 607px to 433px and the
+       derivation stopped appearing in the worst pair at all. THAT READING WAS
+       AN ARTEFACT. A row holding one span-2 panel has a gap of zero because
+       it has nothing to differ from, so emptying a row scores as evening it.
+
+       Occupancy says what the gap could not, at 1440 on an emitted card:
+
+         span 1   scoreOverlay 763 + __score 373 = 1136 of 1152 — a full row
+         span 2   scoreOverlay 763 alone, __score 763 alone — 389px of void, twice
+
+       So span 2 traded one uneven row for two half-empty ones. The original
+       reasoning — five gauges and their weights set their own width — was
+       right about the outcome even though the panel has since gained a
+       drawing that does size to its host: the second column still buys more
+       void than arc, because the panel it would take it from is the one
+       span-1 panel that fills the row beside it.
+
+       The render harness now reports that occupancy beside the gap, because
+       this is the second time a layout change here was scored by a number
+       that could not see it. */
     eq(TICKER_PANELS[1].span, 1,
-       "and the derivation gives its second column up — five gauges and their weights set " +
-       "their own width, and a span-2 host spent the rest on white space");
+       "and the derivation gives its second column up — it is the span-1 panel that fills " +
+       "the series' row, and a span-2 host spends the difference on void, not on arc");
     const page = await browser.newPage({ viewport: { width: 1280, height: 1200 } });
     await mount(page, withChain[0], { ticker: withChain[0].ticker });
     const order = await page.evaluate(() =>

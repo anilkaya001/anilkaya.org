@@ -236,9 +236,30 @@ const market = {
 const alerts = {
   v: 2, status: "ok", sessionDate: SESSION, generatedAt: new Date().toISOString(),
   readAt: "2026-08-25T10:28:20.000Z", refreshed: "nightly", seen: 7, cap: 60,
+  /* THE SPAN AND THE SIDE SPLIT, WHICH THE SHAPER HAS ALWAYS PUBLISHED AND
+     THIS FIXTURE DID NOT CARRY. shared/flows-alerts.js writes `spanStart`,
+     `spanEnd`, `askPrem` and `bidPrem` on every row; the table now draws the
+     first two as an Eastern clock and the last two as the vendor's ask/bid
+     attribution. Without them here the two new columns would be asserted as
+     em dashes forever — a column exercised only in its absent state is a
+     column no test has actually read.
+
+     THE OFFSET IS EXPLICIT (-04:00) so the Eastern clock is deterministic:
+     an instant written as UTC would print a different hour depending on
+     where the suite runs, and the whole point of that column is that it
+     names its zone.
+
+     THE THIRD ROW KEEPS ITS SILENCES ON PURPOSE. KLA carries no span and no
+     split, so the table must print the em dash for both on that row while
+     the two above it print figures — which is what proves the columns
+     distinguish an absent reading from a measured one. */
   rows: [
-    { t: "ORCL", cp: "C", k: 250, exp: "2026-09-18", prem: 2980960, rule: "RepeatedHits" },
-    { t: "PFE", cp: "P", k: 24, exp: "2026-09-18", prem: 1450000, rule: "SteadyAccumulation" },
+    { t: "ORCL", cp: "C", k: 250, exp: "2026-09-18", prem: 2980960, rule: "RepeatedHits",
+      spanStart: "2026-08-24T13:47:00-04:00", spanEnd: "2026-08-24T13:52:00-04:00",
+      askPrem: 2235720, bidPrem: 745240 },
+    { t: "PFE", cp: "P", k: 24, exp: "2026-09-18", prem: 1450000, rule: "SteadyAccumulation",
+      spanStart: "2026-08-24T09:35:00-04:00", spanEnd: "2026-08-24T09:41:00-04:00",
+      askPrem: 348000, bidPrem: 1102000 },
     { t: "KLA", cp: "C", k: 820, exp: "2026-10-16", prem: 940000, rule: "LowHistoricVolume" },
   ],
 };
@@ -272,6 +293,54 @@ const eventsPayload = {
   ],
 };
 
+/* THE MARKET PULSE, AND WHY IT IS PUBLISHED HERE AS OF THIS CHANGE.
+
+   The verdict strip used to read four keys and now reads five: the Premium
+   tile and the Flow bias sparkline are drawn from `pulse.totals`, and the
+   daily flow chart under them draws the same rows. This file called its
+   store "a fully published session" and asserted that no tile wears a
+   silence mark — while never publishing the key two of those readings come
+   from. So the strip was correctly marking an ABSENT key, and the assertion
+   was correctly failing; what was wrong was the fixture's claim to be
+   complete. The renderer is not the thing that changed here.
+
+   SHAPED LIKE THE PUBLISHER'S OUTPUT, FIELD FOR FIELD, because a fixture
+   that invents a shape tests the renderer against a payload nobody serves.
+   `totals` rows are NEWEST FIRST and carry GROSS, non-negative premium;
+   `tide` points are oldest-first and carry NET, signed premium
+   (shared/flows-pulse.js, shapeTotals and shapeTide) — two different
+   quantities under field names that read alike, which is the exact
+   confusion the renderer's own comments were written against, so the
+   fixture keeps both shapes honest rather than reusing one.
+
+   THE NUMBERS ARE DELIBERATE: three sessions, each clearing more call than
+   put premium, so the Flow bias sub-line and the Premium tile both have
+   something to say, and the newest session is the one the tile prints. */
+const pulsePayload = {
+  v: 2, status: "ok", sessionDate: SESSION, generatedAt: new Date().toISOString(),
+  readAt: new Date().toISOString(), cadenceMinutes: 15,
+  totals: {
+    status: "ok", seen: 3, cap: 20, shed: 0,
+    rows: [
+      { date: SESSION, callPrem: 17036252974, callVol: 12202894,
+        putPrem: 13054676706, putVol: 6493149 },
+      { date: "2026-08-21", callPrem: 15548052618, callVol: 9169998,
+        putPrem: 14209345121, putVol: 7101223 },
+      { date: "2026-08-20", callPrem: 12980114003, callVol: 8110447,
+        putPrem: 12118880554, putVol: 6902551 },
+    ],
+  },
+  tide: {
+    status: "ok", seen: 3, cap: 78, shed: 0,
+    points: [
+      { t: SESSION + "T09:30:00-04:00", callPrem: -146307772, putPrem: -83670685, vol: -916838 },
+      { t: SESSION + "T09:35:00-04:00", callPrem: 39938956, putPrem: 61514946, vol: 681275 },
+      { t: SESSION + "T09:40:00-04:00", callPrem: 88110432, putPrem: -12004881, vol: 402117 },
+    ],
+  },
+};
+
+await post("pulse", pulsePayload);
 await post("board:long", board("long", bullRows, SESSION, { deep: 4 }));
 await post("board:short", board("short", bearRows, SESSION, { deep: 4 }));
 await post("board:watch", watch);
@@ -282,6 +351,88 @@ await post("scoretrack", scoretrack(TRACK_DAYS));
    unpublished key with {status:"pending"}, which is the silence this file
    needs a live example of — an endpoint that has not spoken is not an
    endpoint that measured nothing. */
+
+/* ---------- one shape for a verdict tile, because four had drifted ----
+
+   THIS FILE READ THE VERDICT STRIP IN FOUR PLACES, and each place listed
+   the fields it happened to need on the day it was written. Three were
+   object-shaped and nearly identical, so every slot the strip grew had to
+   be added to each of them by hand — and was not. That cost three separate
+   CI failures in one wave, each with the same signature: a projection that
+   could not see a slot, failing against a page that was drawing that slot
+   correctly. A contract which reports a working page as broken is the most
+   expensive kind of wrong one can be, because the next move it provokes is
+   an edit to the page.
+
+   SO THE SHAPE IS DEFINED ONCE, HERE, AND SHIPPED INTO THE PAGE AS SOURCE.
+   `page.evaluate` cannot take a function as an argument, so this crosses as
+   its own `toString()`, pasted into the expression each reader evaluates. It
+   closes over nothing from this module, which is what makes that legal — and
+   if it ever does, the page throws a ReferenceError on the first call rather
+   than quietly handing back an object one field short.
+
+   IT COLLECTS EVERY SLOT THE TILE HAS, not the union of what today's
+   readers ask for. A projection sized to its callers is precisely the thing
+   that drifted; one sized to the ELEMENT cannot, because the next slot is
+   added here and every reader has it the same hour. Two consequences worth
+   stating: `.cc-tile-q` is a reading MOVED into another tile's sub-line —
+   the equal-weight tilt lives there since the strip went to five — and it
+   carries its own silence and its own sign, because the demotion cost that
+   tilt its tile and was not allowed to cost it either of those. And it is
+   its own element, never the tile's silence span: reading both off one
+   selector is how the two get conflated, and on a failed key both are
+   present.
+
+   THE COMPUTED STYLE IS READ FOR EVERY TILE, not only in the block that
+   asserts the silence marks. Five tiles, once per load, against a field
+   that cannot then be missing from a reader that needs it.
+
+   WHAT THIS DOES NOT REPLACE: the four single-tile reads further down that
+   `.find` one label and take `v` and `s` off it. Those name the two fields
+   they want, so a slot that vanishes throws there instead of arriving as
+   `undefined` — a loud failure, and a different defect from the one above. */
+function tileShape(t) {
+  const val = t.querySelector(".cc-tile-v");
+  const sub = t.querySelector(".cc-tile-s");
+  const q = t.querySelector(".cc-tile-q");
+  const cs = getComputedStyle(t);
+  return {
+    k: t.querySelector(".cc-tile-k")?.textContent.trim(),
+    v: val ? val.textContent.trim() : undefined,
+    cls: val ? val.className : "",
+    s: sub ? sub.textContent.trim() : "",
+    kind: t.dataset.empty || null,
+    q: q ? q.textContent.trim() : "",
+    subKind: q ? q.dataset.empty || null : null,
+    subCls: q ? q.className : "",
+    /* SHAPE AND GLYPH, NEVER HUE. The four silences are told apart by the
+       border and the ::before glyph, so a reader who cannot see colour tells
+       them apart too — and that is what the mark assertions compare. */
+    mark: cs.borderLeftStyle + " " + cs.borderLeftWidth + " " +
+      (sub ? getComputedStyle(sub, "::before").content : "none"),
+  };
+}
+const TILE_SHAPE = tileShape.toString();
+
+/* THE TWO READINGS OF THE STRIP every block below takes: a list in drawing
+   order, and the same objects keyed by their label. Both are built from the
+   one shape above, so neither can know a field the other does not.
+
+   THE SHAPE IS PASTED INTO AN EXPRESSION, NOT REBUILT BY `new Function`.
+   Both get the source across; only one of them runs eval INSIDE the page,
+   where the served Content-Security-Policy decides whether that is allowed.
+   It is today — worker.js lists `unsafe-eval` in script-src — but a contract
+   that fails the moment someone tightens that header is a contract holding
+   the header hostage, and it would fail as a page defect rather than as what
+   it is. A string handed to `page.evaluate` is evaluated by the driver
+   instead, so this file asserts nothing about the CSP by accident. */
+const tileList = (pg) => pg.evaluate(
+  `Array.from(document.querySelectorAll("#ccVerdict .cc-tile"), ${TILE_SHAPE})`);
+
+const tilesByKey = (pg) => pg.evaluate(
+  `Object.fromEntries(Array.from(
+     document.querySelectorAll("#ccVerdict .cc-tile"),
+     (t) => { const o = (${TILE_SHAPE})(t); return [o.k, o]; }))`);
 
 const browser = await chromium.launch();
 try {
@@ -315,26 +466,47 @@ try {
   ok(await page.locator(".cc-lede").isVisible(), "scope opens with a native keyboard-accessible disclosure");
   await page.locator(".cc-change-detail summary").click();
   eq(await page.locator(".cc-score-scale").count(), 9, "each measured candidate score has a signed scale");
-  eq(await page.locator(".cc-jump a").count(), 6, "overview sections have direct navigation");
+  /* EVERY JUMP LINK RESOLVES, WHICH IS THE PROPERTY — not that there are six
+     of them. The count was restated here and went stale the moment the page
+     grew a region: it failed at 8 !== 6 on a change that ADDED two working
+     links, which is the shape of failure this repository keeps finding in its
+     own comments. What can actually break is a heading id renamed out from
+     under an anchor, leaving a jump that scrolls nowhere, and a count has
+     never been able to catch that. */
+  {
+    const jumps = await page.$$eval(".cc-jump a", (as) => as.map((a) => a.getAttribute("href")));
+    ok(jumps.length >= 6,
+       `the overview offers direct navigation to its sections (${jumps.length})`);
+    const dead = await page.evaluate((hrefs) => hrefs.filter(
+      (h) => !h || !h.startsWith("#") || !document.getElementById(h.slice(1))), jumps);
+    eq(dead.length, 0,
+       `and every jump resolves to a section on the page (dead: ${dead.join(", ")})`);
+  }
 
   /* ---------- the verdict bar ------------------------------------ */
   {
-    /* SIX READINGS ACROSS FOUR PAYLOADS, on one line, before anything else.
+    /* FIVE READINGS ACROSS FOUR PAYLOADS, on one line, before anything else.
        The page it replaced could not state the session's level at all: the
        board score is a cross-sectional residual, so whether the tape was
        bought or sold had been neutralised out of every number on it. */
-    const tiles = await page.evaluate(() => Array.from(
-      document.querySelectorAll("#ccVerdict .cc-tile"), (t) => ({
-        k: t.querySelector(".cc-tile-k")?.textContent.trim(),
-        v: t.querySelector(".cc-tile-v")?.textContent.trim(),
-        s: t.querySelector(".cc-tile-s")?.textContent.trim() || "",
-        cls: t.querySelector(".cc-tile-v")?.className || "",
-      })));
-    eq(tiles.length, 7, "the verdict bar states seven readings");
+    const tiles = await tileList(page);
+    /* FIVE, AND THE TWO THAT LEFT WERE NOT READINGS.
+
+       This strip's only use is comparing one tile to the next, and `Session`
+       is a date while `Screened` is a population — neither could be compared
+       to anything on it. Both are drawn above the strip now, by paintMeta,
+       where a reader looks to answer "is this today" before reading a figure;
+       they are asserted there, below, rather than dropped. */
+    eq(tiles.length, 5, "the verdict bar states five readings");
     const by = Object.fromEntries(tiles.map((t) => [t.k, t]));
 
-    eq(by.Session?.v, SESSION, "the verdict names the session it is about");
-    eq(by.Screened?.v, "264", "and how many names were screened, from the market payload");
+    ok(!("Session" in by) && !("Screened" in by),
+       "the session and the screened population are the strip's CAPTION, not two of " +
+       "its readings — a date and a count that cannot be compared to a lean");
+    eq(await page.locator("#ccMetaDate").textContent(), SESSION,
+       "the caption names the session every figure below it is of");
+    ok((await page.locator("#ccMetaScreened").textContent()).includes("264"),
+       "and how many names were screened, from the market payload");
 
     /* TWO TILTS, BECAUSE THE PAYLOAD PUBLISHES TWO AND REFUSES TO CHOOSE
        BETWEEN THEM. breadth.tilt counts names and premium.tilt weights
@@ -344,13 +516,17 @@ try {
        the landing page showed the opposite sign to /flows/market/ over the
        same payload — and it printed a bounded ratio to four decimals with no
        unit at all. U+2212, not a hyphen, in both. */
-    eq(by["Lean · names"]?.v, "−1.4%",
-       "the equal-weight tilt is a share of names, with its unit");
-    eq(by["Lean · dollars"]?.v, "−2.1%",
-       "and the dollar-weight tilt is a share of premium, on the same tile row");
+    /* THE STRIP IS FIVE TILES NOW, ON AN EXPLICIT DESIGN DIRECTIVE, and the
+       dollar tilt is the one that keeps a tile. The equal-weight tilt is
+       still printed — demoted to that tile's sub-line, not deleted — so both
+       weightings still reach the reader on one screen. */
+    eq(by["Flow bias"]?.v, "−2.1%",
+       "the dollar-weight tilt is a share of premium, with its unit");
+    ok(/−1\.4%/.test(by["Flow bias"]?.q || ""),
+       `and the equal-weight tilt is printed beneath it rather than dropped (${by["Flow bias"]?.q})`);
     /* AND NO TILE GLOSSES ITSELF WHILE ITS NUMBER IS REAL.
 
-       Seven tiles each carrying a line of definition underneath is a
+       Five tiles each carrying a line of definition underneath is a
        paragraph wearing a strip's clothes, and the strip is the one element
        on this page meant to be taken in at a glance. The denominators those
        two lines stated are not lost: breadth.tilt's and premium.tilt's are
@@ -358,12 +534,23 @@ try {
        standing when the difference between the two weightings can change a
        reading. Asserted over EVERY tile, not just the two that prompted it,
        so a definition cannot creep back one tile at a time. */
-    eq(tiles.filter((t) => t.s).length, 0,
-       `no tile explains itself while its value is a measurement (${
-         tiles.filter((t) => t.s).map((t) => t.k + ": " + t.s).join(" | ")})`);
-    ok(/is-neg/.test(by["Lean · names"]?.cls || "") &&
-       /is-neg/.test(by["Lean · dollars"]?.cls || ""),
-       `and a sold tape is toned as one on both (${by["Lean · names"]?.cls})`);
+    /* THE RULE IS ABOUT DEFINITIONS, AND IT STANDS. What it forbade was a
+       tile GLOSSING itself — a line of prose under a live number, five of
+       which turn a strip meant to be read at a glance into a paragraph. What
+       sits under these tiles now is not a gloss: it is a second READING, with
+       its own figure, its own sign and its own silence. So the assertion
+       narrows from "no sub-line" to "no sub-line that is prose": every sub
+       under a live value must carry a digit. */
+    const glosses = tiles.filter((t) => t.q && !/\d/.test(t.q));
+    eq(glosses.length, 0,
+       `no tile explains itself in prose while its value is a measurement (${
+         glosses.map((t) => t.k + ": " + t.q).join(" | ")})`);
+    /* BOTH STILL CARRY THEIR OWN SIGN, one on the value and one on the sub —
+       the demotion cost the equal-weight tilt its tile, and it was not
+       allowed to cost it its tone. */
+    ok(/is-neg/.test(by["Flow bias"]?.cls || "") &&
+       /is-neg/.test(by["Flow bias"]?.subCls || ""),
+       `and a sold tape is toned as one on both (${by["Flow bias"]?.cls} / ${by["Flow bias"]?.subCls})`);
     /* AND THE VALUE READS IN ONE DIRECTION. "9 / 12" needed a line
        underneath saying "bull / bear" and could be divided the wrong way
        round by anyone who did not read it; the words are inside the value
@@ -789,8 +976,28 @@ try {
        "the flagged-window region draws the vendor's rows");
     const alert = await page.locator("#ccAlerts tbody tr").first()
       .locator("td").allTextContents();
-    deep(alert.map((s) => s.trim()), ["ORCL", "C 250 09-18", "$3.0M", "RepeatedHits"],
-      "each flagged window names the contract, the premium and the rule that fired");
+    /* SIX COLUMNS NOW, AND THE TWO NEW ONES ARE THE POINT OF THE CHANGE. A
+       reader could see that $3.0M was flagged on ORCL and not WHEN inside the
+       session nor which side of the quote the vendor attributed it to — both
+       of which every row has carried since the feed shipped.
+
+       13:47 IS EASTERN, WHICH IS WHY THE FIXTURE WRITES ITS OFFSET. "ask 75%"
+       is 2,235,720 of 2,980,960 — the vendor's attribution as a share of the
+       two sides, which is the only reading either figure supports alone. */
+    deep(alert.map((s) => s.trim()),
+      ["13:47", "ORCL", "C 250 09-18", "$3.0M", "ask 75%", "RepeatedHits"],
+      "each flagged window names when it opened, the contract, the premium, which side " +
+      "of the quote the vendor attributed it to, and the rule that fired");
+
+    /* AND A ROW WITH NEITHER PRINTS NEITHER. KLA carries no span and no
+       split, so both columns are the em dash on that row while the row above
+       prints figures — an absent reading and a measured one are told apart in
+       the same column. */
+    const quietAlert = await page.locator("#ccAlerts tbody tr").nth(2)
+      .locator("td").allTextContents();
+    deep([quietAlert[0].trim(), quietAlert[4].trim()], ["\u2014", "\u2014"],
+      "a window the vendor timed and split for neither prints the em dash in both, " +
+      "rather than a zero o'clock and an even split nobody measured");
 
     eq(await page.locator("#ccWatch .cc-moves li").count(), 2,
        "and the dead band's residents are listed rather than counted");
@@ -862,8 +1069,23 @@ try {
       if (!m) return null;
       return Number(m[1]) * ({ B: 1e9, M: 1e6, K: 1e3 }[m[2]] || 1);
     };
-    const premCells = (await page.locator("#ccAlerts tbody tr td:nth-child(3)")
-      .allTextContents()).map(asUsd);
+    /* THE COLUMN IS FOUND BY ITS HEADER, NOT BY ITS POSITION, and that is a
+       fix rather than a flourish. This read `td:nth-child(3)` — correct when
+       the table was Name, Contract, Premium, Rule, and silently wrong the
+       moment the table grew a Time column in front: the third cell became the
+       CONTRACT, every parse returned null, and the check failed. It could
+       just as easily have found another dollar column and passed while
+       measuring the wrong thing.
+
+       So the index is derived from the rendered header row. A table that
+       renames or drops its premium column now fails with "no Premium column",
+       which is a sentence about the page rather than a puzzle. */
+    const alertHeads = (await page.locator("#ccAlerts thead th").allTextContents())
+      .map((h) => h.trim());
+    const premAt = alertHeads.findIndex((h) => /^premium$/i.test(h));
+    ok(premAt >= 0, `the flagged-window table has a Premium column (${alertHeads.join(" | ")})`);
+    const premCells = (await page.locator(
+      "#ccAlerts tbody tr td:nth-child(" + (premAt + 1) + ")").allTextContents()).map(asUsd);
     ok(premCells.length >= 2 && premCells.every((one) => one !== null),
        `every drawn premium parses (${premCells.join(", ")}) — a column this check could not ` +
        "read would let it pass by comparing nothing");
@@ -943,8 +1165,8 @@ try {
     /* THE SIX REGIONS THAT ANSWERED ARE STILL DRAWN. Every one of these
        counts is zero against the loadBoard this phase exists to delete,
        because on that version none of them was painted at all. */
-    eq(await page.locator("#ccVerdict .cc-tile").count(), 7,
-       "the verdict bar still states its seven readings");
+    eq(await page.locator("#ccVerdict .cc-tile").count(), 5,
+       "the verdict bar still states its five readings");
     eq(await page.locator(".cc-bear tbody tr").count(), 4,
        "the pole that DID answer still draws its whole side");
     eq(await page.locator("#ccChg tbody tr").count(), 7,
@@ -961,14 +1183,16 @@ try {
        answered, because neither half is the page's session: they are two
        writes of one, and the mismatch warning already fires when they
        disagree. */
-    const tiles = await page.evaluate(() => Object.fromEntries(
-      Array.from(document.querySelectorAll("#ccVerdict .cc-tile"), (t) => [
-        t.querySelector(".cc-tile-k")?.textContent.trim(),
-        t.querySelector(".cc-tile-v")?.textContent.trim()])));
-    eq(tiles.Cleared, "\u2014 bull / 4 bear",
+    const tiles = await tilesByKey(page);
+    eq(tiles.Cleared?.v, "\u2014 bull / 4 bear",
        "the unreadable side is an em dash, never a 0 — and each side keeps its own word, " +
        "so a half-silent tile cannot be read as a ratio");
-    eq(tiles.Session, SESSION, "and the session is taken off the half that answered");
+    /* THE SESSION IS THE CAPTION'S NOW, and this is the case it was written
+       for: one board answered 500 and the other did not, and neither half is
+       the page's session — they are two writes of one. The caption reads it
+       off whichever half came back. */
+    eq(await page.locator("#ccMetaDate").textContent(), SESSION,
+       "and the session is taken off the half that answered");
 
     /* AND THE PAGE SAYS SO ON THE ONE LINE THAT REPORTS ON THIS PAGE. The
        em dash above is the right glyph for "not known" and it is the same
@@ -1026,8 +1250,8 @@ try {
        "the flagged windows still draw");
     eq(await page.locator("#ccWatch .cc-moves li").count(), 2,
        "the dead band's residents still draw");
-    eq(await page.locator("#ccVerdict .cc-tile").count(), 7,
-       "and the verdict bar still states seven readings, every count of them an em dash");
+    eq(await page.locator("#ccVerdict .cc-tile").count(), 5,
+       "and the verdict bar still states five readings, every count of them an em dash");
     const both = await page.evaluate(() => ({
       bull: document.querySelector("#ccBull [data-empty]")?.dataset.empty || null,
       bear: document.querySelector("#ccBear [data-empty]")?.dataset.empty || null,
@@ -1835,16 +2059,12 @@ try {
       premium: { ...market.premium, tilt: -0.0300 } });
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".cc-bull tbody tr", { timeout: 15000 });
-    const tiles = await page.evaluate(() => Object.fromEntries(
-      Array.from(document.querySelectorAll("#ccVerdict .cc-tile"), (t) => [
-        t.querySelector(".cc-tile-k")?.textContent.trim(),
-        { v: t.querySelector(".cc-tile-v")?.textContent.trim(),
-          s: t.querySelector(".cc-tile-s")?.textContent.trim() || "",
-          cls: t.querySelector(".cc-tile-v")?.className || "" }])));
-    eq(tiles["Lean · names"]?.v, "+5.0%", "both weightings are printed, each as its own share");
-    eq(tiles["Lean · dollars"]?.v, "−3.0%", "so the page cannot show one sign and hide the other");
-    ok(/is-pos/.test(tiles["Lean · names"]?.cls || "") &&
-       /is-neg/.test(tiles["Lean · dollars"]?.cls || ""),
+    const tiles = await tilesByKey(page);
+    eq(tiles["Flow bias"]?.v, "−3.0%", "the dollar weighting is the tile's value");
+    ok(/\+5\.0%/.test(tiles["Flow bias"]?.q || ""),
+       "and the equal weighting is printed beneath it, so the page cannot show one sign and hide the other");
+    ok(/is-neg/.test(tiles["Flow bias"]?.cls || "") &&
+       /is-pos/.test(tiles["Flow bias"]?.subCls || ""),
        "and each carries its own sign in the glyph before any hue is applied");
     /* THE DISAGREEMENT IS SHOWN, NOT ANNOUNCED — and the shape it used to be
        announced in was wrong twice over.
@@ -1857,14 +2077,24 @@ try {
        lost both denominators — the one thing that explains how the same
        ratio can carry two signs.
 
-       What actually communicates it is the thing asserted two lines up: two
-       tiles, side by side, one +5.0% and one −3.0%, each carrying its own
-       sign in the glyph before any hue. A reader who can see both cannot
-       miss that they differ; a sentence saying so is the page narrating its
-       own screenshot. So the assertion is that NEITHER tile grows a
-       sentence, on the one session that used to produce two. */
-    eq((tiles["Lean · names"]?.s || "") + (tiles["Lean · dollars"]?.s || ""), "",
-       "neither tilt narrates the disagreement its own two glyphs already show");
+       What actually communicates it is the thing asserted two lines up: one
+       −3.0% and one +5.0% on the same tile, each carrying its own sign in
+       the glyph before any hue. A reader who can see both cannot miss that
+       they differ; a sentence saying so is the page narrating its own
+       screenshot. So the assertion is that the tile grows no SENTENCE about
+       the disagreement, on the one session that used to produce two.
+
+       AND THIS PARAGRAPH USED TO ARGUE FOR TWO SIBLING TILES, which is worth
+       recording rather than quietly rewriting. Its case was that peers side
+       by side are what make a disagreement unmissable, and that case was
+       sound. It was overridden by an explicit design directive for a
+       five-tile strip — not by a better argument — and what the override had
+       to preserve was carried across deliberately: both figures still on one
+       screen, each still signed, each still carrying its own silence. What
+       it did cost is the peerage, and that is a real cost, stated here so
+       the next reader knows it was paid rather than overlooked. */
+    ok(!/disagree/i.test(tiles["Flow bias"]?.q || ""),
+       "the tilt does not narrate the disagreement its own two glyphs already show");
     await post("market", market);
   }
 
@@ -1879,20 +2109,19 @@ try {
        carries the kind on data-empty, and the stylesheet draws the mark the
        region silences wear, so the four are told apart without prose and
        without colour: the mark is read here as shape and glyph only. */
-    const readTiles = () => page.evaluate(() => Object.fromEntries(
-      Array.from(document.querySelectorAll("#ccVerdict .cc-tile"), (t) => {
-        const sub = t.querySelector(".cc-tile-s");
-        const cs = getComputedStyle(t);
-        const glyph = sub ? getComputedStyle(sub, "::before").content : "none";
-        return [t.querySelector(".cc-tile-k")?.textContent.trim(), {
-          v: t.querySelector(".cc-tile-v")?.textContent.trim(),
-          s: sub ? sub.textContent.trim() : "",
-          kind: t.dataset.empty || null,
-          mark: cs.borderLeftStyle + " " + cs.borderLeftWidth + " " + glyph,
-        }];
-      })));
+    const readTiles = () => tilesByKey(page);
     const marks = new Map();
-    const TILTS = ["Lean · names", "Lean · dollars"];
+    /* ONE TILE AND ONE SUB-LINE, AND BOTH ARE CHECKED HERE.
+
+       The strip is five tiles now, so the equal-weight tilt lives under the
+       dollar tilt rather than beside it. That demotion is exactly the kind of
+       move that loses silences — the first draft of it rendered the sub only
+       when the value was non-null, which turned four distinct facts into one
+       absent line — so this phase asserts the sub's OWN kind and its OWN
+       wording on every one of the four, not just the tile's. */
+    const TILTS = ["Flow bias"];
+    const subKindOf = (t) => t["Flow bias"]?.subKind || null;
+    const subTextOf = (t) => t["Flow bias"]?.q || "";
 
     /* 1. UNREADABLE: the request did not come back. This page's fault. */
     allowFetchFailure = true;
@@ -1901,13 +2130,34 @@ try {
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".cc-bull tbody tr", { timeout: 15000 });
     let tiles = await readTiles();
-    for (const k of [...TILTS, "Breadth", "Screened"]) {
+    for (const k of [...TILTS, "Breadth"]) {
       eq(tiles[k]?.v, k === "Breadth" ? "— bull / — bear" : "—",
          `${k} is an em dash when the market payload could not be read`);
       eq(tiles[k]?.kind, "unreadable", `and is marked as this page's fault (${k})`);
       ok(/could not be read/.test(tiles[k]?.s) && !/not measured/.test(tiles[k]?.s),
          `worded as the fetch silence, never as a reading about the session (${tiles[k]?.s})`);
     }
+    /* AND THE DEMOTED TILT CARRIES THE SAME SILENCE ON ITS OWN SLOT. */
+    eq(subKindOf(tiles), "unreadable",
+       "the equal-weight tilt is marked unreadable on its own sub-line, not merely absent");
+    ok(/could not be read/.test(subTextOf(tiles)),
+       `and worded as the fetch silence there too (${subTextOf(tiles)})`);
+    /* THE SCREENED POPULATION LEFT THE STRIP FOR THE CAPTION AND KEPT ALL
+       FOUR SILENCES, which is the only reason it is allowed to leave. It
+       reads the same keySilence() the three tiles above do, so a market key
+       that failed to read and one nobody has published stay two facts on the
+       caption exactly as they were on the tile. A caption that simply hid the
+       slot would have made them one — the collapse this whole phase exists to
+       catch, one element further up the page. */
+    const metaScreened = await page.evaluate(() => {
+      const el = document.getElementById("ccMetaScreened");
+      return { text: el.textContent.trim(), kind: el.dataset.empty || null, hidden: el.hidden };
+    });
+    eq(metaScreened.kind, "unreadable",
+       "the screened population is marked as this page's fault on the caption too");
+    ok(!metaScreened.hidden, "and is stated rather than hidden, which would be a fourth silence");
+    ok(/could not be read/.test(metaScreened.text) && !/not measured/.test(metaScreened.text),
+       `worded as the fetch silence, never as a reading (${metaScreened.text})`);
     marks.set("unreadable", tiles[TILTS[0]].mark);
     await page.unroute("**/api/flows/market");
     allowFetchFailure = false;
@@ -1923,8 +2173,12 @@ try {
     for (const k of TILTS) {
       eq(tiles[k]?.v, "—", `${k} is an em dash on an unpublished market key`);
       eq(tiles[k]?.kind, "pending", `and is marked pending (${k})`);
-      eq(tiles[k]?.s, "not published yet", `in the pipeline's own silence (${k})`);
+      ok(/not published yet/.test(tiles[k]?.s), `in the pipeline's own silence (${k})`);
     }
+    eq(subKindOf(tiles), "pending",
+       "and the equal-weight tilt is pending on its own sub-line rather than absent");
+    ok(/not published yet/.test(subTextOf(tiles)),
+       `in the same words (${subTextOf(tiles)})`);
     marks.set("pending", tiles[TILTS[0]].mark);
     await page.unroute("**/api/flows/market");
 
@@ -1939,8 +2193,13 @@ try {
     for (const k of TILTS) {
       eq(tiles[k]?.v, "—", `${k} is an em dash when the payload carries no tilt`);
       eq(tiles[k]?.kind, "unavailable", `and is marked as the payload's gap (${k})`);
-      eq(tiles[k]?.s, "not on this payload", `worded as one, not as a session that measured nothing (${k})`);
+      ok(/not on this payload/.test(tiles[k]?.s),
+         `worded as one, not as a session that measured nothing (${k})`);
     }
+    eq(subKindOf(tiles), "unavailable",
+       "and the equal-weight tilt marks the payload's gap on its own sub-line");
+    ok(/not on this payload/.test(subTextOf(tiles)),
+       `in the same words (${subTextOf(tiles)})`);
     eq(tiles.Breadth?.v, "9 bull / 12 bear",
        "while the breadth the same payload does carry still prints");
     eq(tiles.Breadth?.kind, null, "with no mark on a tile that has its reading");
@@ -1957,10 +2216,17 @@ try {
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".cc-bull tbody tr", { timeout: 15000 });
     tiles = await readTiles();
-    eq(tiles["Lean · names"]?.kind, "empty", "a session in which no name leaned is measured-empty");
-    eq(tiles["Lean · names"]?.s, "no name leaned", "and says so as a reading about the session");
-    eq(tiles["Lean · dollars"]?.kind, "empty", "the dollar weighting over a zero gross the same");
-    eq(tiles["Lean · dollars"]?.s, "no net premium was priced", "in its own denominator's words");
+    /* THE ONE SILENCE THAT IS A READING, AND BOTH WEIGHTINGS STILL CARRY IT
+       SEPARATELY — the tile for the dollar denominator, the sub for the name
+       denominator, each in its own denominator's words. Collapsing these two
+       into one sentence would say a session measured nothing when in fact two
+       different quantities each measured zero. */
+    eq(tiles["Flow bias"]?.kind, "empty", "the dollar weighting over a zero gross is measured-empty");
+    ok(/no net premium was priced/.test(tiles["Flow bias"]?.s || ""),
+       "in its own denominator's words");
+    eq(subKindOf(tiles), "empty", "a session in which no name leaned is measured-empty too");
+    ok(/no name leaned/.test(subTextOf(tiles)),
+       `and says so as a reading about the session (${subTextOf(tiles)})`);
     eq(tiles.Breadth?.v, "0 bull / 0 bear", "and the measured zeros behind it print as zeros");
     eq(tiles.Breadth?.kind, null, "which are a reading, not a silence");
     marks.set("empty", tiles[TILTS[0]].mark);
@@ -1986,9 +2252,18 @@ try {
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccChg tbody tr", { timeout: 15000 });
     tiles = await readTiles();
-    eq(tiles.Session?.v, "—", "with both boards unreadable the session is an em dash");
-    eq(tiles.Session?.kind, "unreadable", "marked as this page's fault");
-    ok(/could not be read/.test(tiles.Session?.s), `and worded as one (${tiles.Session?.s})`);
+    /* THE SESSION MOVED TO THE CAPTION AND ITS FOUR SILENCES MOVED WITH IT.
+       This is the phase that proves it: the line above the strip reads the
+       SAME boardsRead() the Cleared tile below does, so a session that could
+       not be read and a session nobody has published yet stay two facts —
+       which is what a caption printing one sentence for both would have
+       destroyed, silently, in a layout change. */
+    const metaSession = await page.evaluate(() => {
+      const el = document.getElementById("ccMetaDate");
+      return { text: el.textContent.trim(), kind: el.dataset.empty || null };
+    });
+    eq(metaSession.kind, "unreadable", "with both boards unreadable the session is marked as this page's fault");
+    ok(/could not be read/.test(metaSession.text), `and worded as one (${metaSession.text})`);
     eq(tiles.Cleared?.v, "— bull / — bear", "and so is the pool on both sides");
     eq(tiles.Cleared?.kind, "unreadable", "under the same mark");
     for (const side of ["long", "short"]) await page.unroute("**/api/flows/board?side=" + side);
@@ -2002,8 +2277,13 @@ try {
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccChg tbody tr", { timeout: 15000 });
     tiles = await readTiles();
-    eq(tiles.Session?.kind, "pending", "with both boards unpublished the session is pending");
-    eq(tiles.Session?.s, "not published yet", "in the pipeline's own words");
+    const metaPending = await page.evaluate(() => {
+      const el = document.getElementById("ccMetaDate");
+      return { text: el.textContent.trim(), kind: el.dataset.empty || null };
+    });
+    eq(metaPending.kind, "pending", "with both boards unpublished the session is pending");
+    ok(/not published yet/.test(metaPending.text),
+       `in the pipeline's own words (${metaPending.text})`);
     eq(tiles.Cleared?.kind, "pending", "and so is the pool");
     for (const side of ["long", "short"]) await page.unroute("**/api/flows/board?side=" + side);
 
@@ -2019,9 +2299,13 @@ try {
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".cc-bull tbody tr", { timeout: 15000 });
     tiles = await readTiles();
-    eq(tiles.Session?.kind, "unavailable",
+    const metaGap = await page.evaluate(() => {
+      const el = document.getElementById("ccMetaDate");
+      return { text: el.textContent.trim(), kind: el.dataset.empty || null };
+    });
+    eq(metaGap.kind, "unavailable",
        "a board published without a session date is the payload's gap, not a fetch that failed");
-    eq(tiles.Session?.s, "not on this payload", "and is worded as one");
+    ok(/not on this payload/.test(metaGap.text), `and is worded as one (${metaGap.text})`);
     eq(tiles.Cleared?.v, "5 bull / — bear",
        "while the pool prints the half that answered beside a dash for the half that has not — " +
        "and each side keeps its own word, so the half-silent tile still says WHICH half is missing");
@@ -2068,18 +2352,29 @@ try {
 
     const status = await page.evaluate(
       () => document.getElementById("flowsStatus").textContent.trim());
-    /* THE SESSION MOVED TO THE TILE THAT CARRIES IT, so the claim is asserted
-       where it now lives rather than deleted. The status line used to reprint
-       meta.sessionDate an inch under the Session tile; the page must still
-       name the session it is describing, and this is the element that does. */
-    const sessionTile = await page.evaluate(() => {
-      const t = [...document.querySelectorAll("#ccVerdict .cc-tile")].find(
-        (el) => el.querySelector(".cc-tile-k")?.textContent.trim() === "Session");
-      return t ? t.querySelector(".cc-tile-v")?.textContent.trim() : null;
+    /* THE SESSION MOVED TWICE AND THIS ASSERTION FOLLOWED IT BOTH TIMES,
+       which is the only reason it is still worth anything. It began on the
+       status line, moved to a Session TILE in the verdict strip, and now sits
+       in the strip's caption — and each move it was rewritten to read the new
+       element rather than deleted. THE CLAIM NEVER CHANGED: the page must
+       name the session every figure on it is of.
+
+       THIS PHASE IS WHY THE CLAIM EXISTS. One pole is unpublished and the
+       other is live, and boardsRead takes the date off whichever half
+       ANSWERED — so the caption must print the short board's session, not
+       inherit the pending long board's silence. The kind is asserted beside
+       the text because a caption reading the date correctly while still
+       carrying a silence mark would be the same bug wearing the right
+       number. */
+    const metaLive = await page.evaluate(() => {
+      const el = document.getElementById("ccMetaDate");
+      return { text: el.textContent.trim(), kind: el.dataset.empty || null };
     });
-    eq(sessionTile, SESSION,
-       `and the page still names the session it is describing, on the Session tile ` +
-       `(${sessionTile})`);
+    eq(metaLive.text, SESSION,
+       `and the page still names the session it is describing, in the caption ` +
+       `(${metaLive.text})`);
+    eq(metaLive.kind, null,
+       "unmarked, because one half answering is enough to know which session this is");
     ok(/15 of 24 inside the band/.test(status),
        `and still states how much of the pool the band held (${status})`);
     ok(/\u2014 bullish · 4 bearish/.test(status),
@@ -2434,7 +2729,7 @@ try {
        section opens on. loadBoard read r.json() and dropped the
        X-Payload-Updated header the Worker stamps on every payload, so during
        a pipeline outage /flows/long/ warned and /flows/ rendered Tuesday's
-       board on Friday with a "Session" tile naming a date and no warning
+       board on Friday with a session date in its caption and no warning
        anywhere on the page.
 
        TWO INDEPENDENT FAILURES. A dead pipeline has an old WRITE time and a
@@ -2871,11 +3166,17 @@ try {
        each sentence is required to be IN the qualifier paragraph, which no
        absence can satisfy; the fold check is kept beside it for the payload
        whose method DOES pass the wall. */
-    const openQual = await page.locator("#ccLean p.is-qualifier").count();
+    /* THE CLASS, NOT THE TAG, which is what this assertion's own message
+       already says: "the class is what draws the rule down the left". It was
+       written as `p.is-qualifier` and the caveats are a <ul> now — seven
+       claims joined into one paragraph rendered as a block a reader skips,
+       and a skipped qualifier does not qualify. The count and every sentence
+       check below are unchanged; only the element is. */
+    const openQual = await page.locator("#ccLean .is-qualifier").count();
     eq(openQual, 1,
-       "the caveats are exactly one paragraph marked as qualifiers — the class is what draws " +
+       "the caveats are exactly one block marked as qualifiers — the class is what draws " +
        "the rule down the left, and a caveat that reads as method is one nobody weighs");
-    const qualText = (await page.locator("#ccLean p.is-qualifier").textContent()).trim();
+    const qualText = (await page.locator("#ccLean .is-qualifier").textContent()).trim();
     const foldedText = (await page.locator("#ccLean details").allTextContents()).join(" ");
     for (const [what, pattern] of [
       ["the quiet baskets and why 0/0 is not a neutral lean", /0\/0 is undefined/],

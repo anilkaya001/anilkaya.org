@@ -64,6 +64,23 @@ const round = (v, d) => (v === null ? null : Number(v.toFixed(d)));
  * measurement — they are the boundary of the population being ranked, which
  * is a different kind of decision and has to be visible to be argued with.
  */
+/* THE PER-TRANSACTION VOCABULARY THIS PAGE MAY NOT CLAIM IN.
+
+   The source is one row per listed strike with a volume total — no size, no
+   timestamp, no execution price — so naming any of these outside the prose
+   whose job is to REFUSE them is the page asserting something the data
+   cannot support. The list lives here, beside the builder that shapes those
+   rows, because two tests read it now: flows-worker-contract sweeps the
+   served page, and contracts.mjs sweeps the same markup without a server.
+
+   IT IS HERE RATHER THAN IN A TEST because the server-bound suite cannot run
+   in every sandbox, and a rule only one un-runnable suite knows is a rule
+   that gets broken and found in CI. "order" is deliberately absent: it
+   occurs in ordinary prose ("in no documented order"); these are the words
+   that carry a per-transaction claim. */
+export const UA_BANNED_CLAIMS =
+  /\b(print|trade|block|sweep|bought|sold|paid|whale|smart money|institutional)\b/ig;
+
 export const UA_MIN_VOLUME = 250;
 export const UA_MIN_OI = 100;
 export const UA_ROWS = 50;

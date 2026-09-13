@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "158";
+export const ASSET_VERSION = "196";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -38,7 +38,78 @@ const head = (title, description) => `<!doctype html>
 <link rel="stylesheet" href="${v("/assets/css/flows.css")}">
 </head>`;
 
-const topbar = (active) => `
+/* ---------- one icon set, drawn once ----------------------------
+
+   THE REPOSITORY HAD NO ICONS AT ALL and the design the section is being
+   built to has one on every rail item and in the search field. So this is
+   the set, and it is deliberately the smallest thing that can be: 16px
+   line glyphs on a 24-unit grid, stroked in currentColor so every one of
+   them inherits the state of the element it sits in — an active rail item
+   tints its icon by tinting its text, with no second rule.
+
+   INLINE AND NOT A SPRITE FILE. A sprite is a second request on a route
+   whose first paint is already the thing being optimised, and these are
+   HTML bytes rather than JavaScript ones: they cost no parse, and no
+   route's weight ceiling measures them. They are emitted once per page by
+   the server that already emits the markup around them.
+
+   `aria-hidden` ON EVERY ONE, WITHOUT EXCEPTION. Each of these sits beside
+   its own text label; an icon announced next to the word it duplicates is
+   one more thing for a screen reader to read and nothing more to know. */
+const ICONS = {
+  overview: "M4 5h7v6H4zM13 5h7v4h-7zM13 11h7v8h-7zM4 13h7v6H4z",
+  ticker: "M4 19V9M9 19V5M14 19v-7M19 19V7",
+  unusual: "M12 3v3M12 18v3M3 12h3M18 12h3M7.8 7.8 5.6 5.6M18.4 18.4l-2.2-2.2M16.2 7.8l2.2-2.2M5.6 18.4l2.2-2.2",
+  watch: "M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6Z M12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z",
+  long: "M4 17 10 11l4 4 6-7M20 8v5M20 8h-5",
+  short: "M4 7l6 6 4-4 6 7M20 16v-5M20 16h-5",
+  events: "M4 6h16v14H4zM4 10h16M8 3v4M16 3v4",
+  market: "M3 17l5-6 4 3 4-6 5 4M3 21h18",
+  desk: "M12 3 3 8l9 5 9-5-9-5ZM3 13l9 5 9-5M3 17.5l9 5 9-5",
+  strategy: "M9 3h6M10 3v6.2L4.8 17.6A2 2 0 0 0 6.5 21h11a2 2 0 0 0 1.7-3.4L14 9.2V3M7.2 14h9.6",
+  political: "M3 20h18M5 20V9M9.5 20V9M14.5 20V9M19 20V9M12 3 3 8h18Z",
+  ask: "M4 5h16v11H9l-5 4Z M8.6 9.2a3.4 3.4 0 0 1 5.6 2.1c0 1.7-2 2-2 3.2M12.2 17.4h.01",
+  search: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14ZM20 20l-4.2-4.2",
+  bell: "M12 3a6 6 0 0 0-6 6c0 4-1.5 5.5-2 6h16c-.5-.5-2-2-2-6a6 6 0 0 0-6-6ZM10 19a2 2 0 0 0 4 0",
+};
+const icon = (name) => {
+  const d = ICONS[name];
+  return d
+    ? `<svg class="ic" viewBox="0 0 24 24" width="16" height="16" fill="none" ` +
+      `stroke="currentColor" stroke-width="1.6" stroke-linecap="round" ` +
+      `stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`
+    : "";
+};
+
+/* THE INITIALS ARE THE READER'S OWN NAME, SHORTENED, AND NOTHING ELSE.
+
+   The design has a round avatar in the corner. There is no profile behind
+   it, no photo store and no display name — what the session carries is the
+   username the credential was issued for, so that is what it draws: one or
+   two letters taken off the name itself. A generated face, a gravatar or a
+   stock silhouette would each be a claim about a person this product has
+   never been told anything about. */
+const initials = (username) => {
+  const name = String(username || "").trim();
+  if (!name) return "\u2014";
+  const parts = name.split(/[^A-Za-z0-9]+/).filter(Boolean);
+  const said = parts.length >= 2
+    ? parts[0].slice(0, 1) + parts[1].slice(0, 1)
+    : name.replace(/[^A-Za-z0-9]/g, "").slice(0, 2);
+  return escapeHTML(said.toUpperCase() || "\u2014");
+};
+
+/* THE TOP BAR CARRIES THE SESSION'S TOOLS ON THE GATED ROUTES ONLY.
+
+   The pill is the site's and is identical on all four sections; what joins
+   it here is a search that only means something behind the gate and a name
+   that only exists behind it. THE GATE IS THE USERNAME, NOT THE SECTION —
+   which is not a distinction I drew until the suite drew it: keyed on
+   `active`, the sign-in page rendered a ticker search and an avatar for a
+   session that does not exist yet, and referenced a name that is not in
+   scope there. `active` still marks the pill; the tools belong to whoever
+   is signed in. */
+const topbar = (active, username) => `
 <header class="topbar">
   <a class="topbar__brand" href="/" aria-label="Home">&#949;</a>
   <nav class="pill" aria-label="Primary">
@@ -46,7 +117,44 @@ const topbar = (active) => `
     <a href="/articles/">Articles</a>
     <a href="/lab/"><span class="lab-full">Econometrics&nbsp;Lab</span><span class="lab-short">Lab</span></a>
     <a href="/flows/"${active ? ' class="is-active" aria-current="page"' : ""}>Flows</a>
-  </nav>
+  </nav>${username ? `
+  <div class="topbar__tools">
+    <!-- A PLAIN GET FORM, WHICH IS THE WHOLE IMPLEMENTATION. It works with
+         JavaScript disabled, it works with the back button, and what it
+         produces is a bookmarkable URL rather than an in-page state.
+         flows-ticker.js already uppercases and validates what arrives in
+         ?t=, so nothing here is a second spelling of that rule. -->
+    <form class="flows-find" method="GET" action="/flows/ticker/" role="search">
+      <label class="visually-hidden" for="flowsFind">Open a ticker page</label>
+      ${icon("search")}
+      <input class="flows-find-i" id="flowsFind" name="t" type="search"
+             autocomplete="off" spellcheck="false" maxlength="10"
+             pattern="[A-Za-z][A-Za-z0-9.\\-]{0,9}" placeholder="Search a ticker"
+             title="A ticker symbol: a letter, then up to nine letters, digits, dots or dashes.">
+    </form>
+    <!-- THE BELL, AND IT GOES SOMEWHERE. The design puts one here; a bell
+         that opens nothing is chrome. This one leads to the session
+         briefing, which is where shared/flows-warnings.js publishes what
+         disagrees with what — the only thing on this site a notification
+         would be about.
+
+         ITS COUNT IS SERVED EMPTY AND HIDDEN, filled by whichever
+         controller already holds the brief, exactly as the rail counts are.
+         A badge reading 0 while a fetch is in flight is a claim that
+         nothing is wrong; an absent badge is not. -->
+    <a class="topbar__bell" href="/flows/ask/" aria-label="Session briefing and warnings">
+      ${icon("bell")}<span class="topbar__bell-n" data-warn-count hidden></span>
+    </a>
+    <span class="topbar__who" title="Signed in as ${escapeHTML(String(username || ""))}"
+          aria-label="Signed in as ${escapeHTML(String(username || ""))}">${initials(username)}</span>
+    <!-- THE WAY OUT SITS WITH THE IDENTITY, WHICH IS WHERE A READER LOOKS FOR
+         IT, and it is a POST form rather than a link because signing out
+         changes state on the server — a GET that ends a session is one
+         prefetch away from ending it for a reader who never clicked. -->
+    <form method="POST" action="/flows/logout" class="topbar__out">
+      <button type="submit" class="flows-signout">Sign out</button>
+    </form>
+  </div>` : ""}
 </header>`;
 
 
@@ -106,43 +214,70 @@ const rail = (active) => {
        error, which is why it survived. The set and the fillers agree now. */
     const badge = key === "long" || key === "short" || key === "watch" || key === "events"
       ? `<span class="rail-count" data-rail-count="${key}" hidden></span>` : "";
+    /* THE ICON IS BEFORE THE LABEL AND CARRIES NO INFORMATION OF ITS OWN.
+       It is a landmark for a reader who already knows where they are going —
+       which is what a rail is for on the fifth visit — and it is aria-hidden,
+       so the label remains the whole of what is announced. */
     return `<a href="${href}"${on ? ' class="is-on" aria-current="page"' : ""}>` +
-      `<span class="rail-label">${label}</span>${badge}</a>`;
+      `${icon(key)}<span class="rail-label">${label}</span>${badge}</a>`;
   };
   return `
 <nav class="flows-rail" aria-label="Flows">
-  <!-- FIRST, BECAUSE IT IS THE FRONT DOOR. Every group below answers a
-       question a reader already knew to ask; this one answers the question
-       they arrive with. A rail that buried it under a dozen destinations
-       would be a table of contents for a book nobody opened — which is also
-       why the track record and the score track came off it. -->
-  <p class="rail-group" id="railBrief">Briefing</p>
-  <div class="rail-items" role="group" aria-labelledby="railBrief">
+  <!-- TWO GROUPS, WHICH IS THE SHAPE OF THE DESIGN THIS IS BUILT TO, and the
+       destinations are this product's own. The reference rail names Scanner,
+       Strategies, Volatility and Macro; three of those are this section's
+       routes under different words and one of them is not built, so what is
+       drawn here is every route that exists and nothing that does not. A rail
+       item that leads nowhere is the one thing a rail must never contain.
+
+       THE SPLIT IS BY WHAT A READER IS ASKING, not by how the pipeline is
+       organised. The first group is the session and the names inside it: what
+       happened, to whom, and where to look next. The second is the market
+       around them — the whole tape, the desks that price it, and who
+       disclosed what.
+
+       THE ASSISTANT LEADS, AS IT DID. It answers the question a reader
+       arrives with rather than one they already knew to ask, so it stays
+       first, above both groups. -->
+  <div class="rail-items rail-items--lead" role="group" aria-label="Ask">
     ${item("/flows/ask/", "Ask the data", "ask")}
   </div>
-  <p class="rail-group" id="railSession">Session</p>
+  <p class="rail-group" id="railSession">Options flow</p>
   <div class="rail-items" role="group" aria-labelledby="railSession">
     ${item("/flows/", "Overview", "overview")}
+    ${item("/flows/ticker/", "Ticker", "ticker")}
+    ${item("/flows/unusual/", "Unusual", "unusual")}
+    ${item("/flows/watch/", "Watch", "watch")}
     ${item("/flows/long/", "Bullish", "long")}
     ${item("/flows/short/", "Bearish", "short")}
-    ${item("/flows/watch/", "Watch", "watch")}
-    ${item("/flows/market/", "Market", "market")}
-    ${item("/flows/unusual/", "Unusual", "unusual")}
     ${item("/flows/events/", "Events", "events")}
   </div>
-  <p class="rail-group" id="railName">Name</p>
-  <div class="rail-items" role="group" aria-labelledby="railName">
-    ${item("/flows/ticker/", "Ticker page", "ticker")}
-  </div>
-  <p class="rail-group" id="railDesk">Desk</p>
-  <div class="rail-items" role="group" aria-labelledby="railDesk">
+  <p class="rail-group" id="railMarket">Market</p>
+  <div class="rail-items" role="group" aria-labelledby="railMarket">
+    ${item("/flows/market/", "Market", "market")}
     ${item("/flows/desk/", "Premium desk", "desk")}
     ${item("/flows/strategy/", "Strategy tester", "strategy")}
-  </div>
-  <p class="rail-group" id="railDisclosures">Disclosures</p>
-  <div class="rail-items" role="group" aria-labelledby="railDisclosures">
     ${item("/flows/political/", "Political", "political")}
   </div>
+  <!-- THE FOOT SAYS WHAT THE PRODUCT IS, AND IT IS NOT "REAL-TIME".
+
+       The design's rail ends with a three-line claim, and the first word of
+       it is one this product cannot make: the boards are built by a nightly
+       pipeline and the intraday keys refresh on a cadence each page states.
+       So the shape is kept and the claim is made true — three short lines,
+       each one a thing a reader can check on the page above it.
+
+       AND THE WORDING OF THIS COMMENT IS ITSELF CONSTRAINED, which is worth
+       recording because it cost a CI run. This rail is SHARED markup, so
+       every word of it — comments included — is served on the unusual route,
+       where flows-worker-contract holds a list of per-transaction words that
+       may appear ONLY inside the prose whose job is to refuse them. The
+       sentence above used one of them as an ordinary verb. The rule is right
+       and the comment was wrong: a reader cannot tell which served bytes were
+       meant for them, so the page either keeps that vocabulary out or it is
+       making the claim. The list lives in that test; do not restate it here,
+       because restating it trips it. -->
+  <p class="rail-foot">Nightly pipeline.<br>Intraday refresh.<br>Every silence named.</p>
 </nav>`;
 };
 
@@ -344,17 +479,54 @@ function neuronDock(summary, { scope = "this session" } = {}) {
 const shell = (title, kicker, active, username, body) => `
 <body class="flows-body has-rail" data-flows-page="${active}">
 <a class="flows-skip" href="#flowsMain">Skip to content</a>
-${topbar(true)}
+${topbar(true, username)}
 ${rail(active)}
 <main class="flows-main" id="flowsMain" tabindex="-1">
-  <header class="flows-head">
+  <!-- THE BREADCRUMB THE DESIGN OPENS WITH, AND IT REPLACES A SECOND COPY OF
+       THE READER'S NAME. The header carried the username and a Sign out
+       button; both now live beside the avatar in the top bar, which is where
+       the design puts them and where they are said once rather than twice.
+
+       IT IS A REAL TRAIL, NOT A DECORATION: the first crumb is a link to the
+       section's front door and the last is the page a reader is on, marked
+       aria-current so it is announced as the destination rather than read as
+       one more place to go. -->
+  <nav class="flows-crumbs" aria-label="Breadcrumb">
+    <a href="/flows/">Flows</a>
+    <span class="flows-crumbs-sep" aria-hidden="true">/</span>
+    <span aria-current="page">${title}</span>
+  </nav>
+  <!-- THE PAGE HEADER IS COLLAPSED ON THE TICKER ROUTE, AND ONLY THERE.
+
+       The design opens that page on the NAME: breadcrumb, then IREN at
+       display size with its figures. This shell's own header — the kicker
+       and an <h1> reading "Ticker" — sits between those two and measured
+       150px of a 900px viewport, spent every visit to say which route a
+       reader is on directly under a breadcrumb that just said it.
+
+       COLLAPSED, NOT DELETED, and the distinction is the document outline.
+       The <h1> is still served and still first in the outline; it is
+       visually hidden, so a screen reader and a search result still get the
+       page's name while the viewport is spent on the name a reader came
+       for. Deleting it would leave the route's only <h1> inside a section
+       that is hidden until a fetch resolves — no heading at all on the
+       picker path, which is a real regression for one saved fold.
+
+       AND THE WORD IN THAT SENTENCE IS "SECTION" FOR A REASON. This is
+       SHARED markup: every byte of it, comments included, is served on the
+       unusual route, where flows-worker-contract bans a list of
+       per-transaction words outside the prose whose job is to refuse them.
+       The first draft of this paragraph used one of them as an ordinary
+       noun and took the whole suite red. The rail's own footer comment
+       records the identical mistake; do not restate the list here, and
+       re-read that comment before writing prose into this function.
+
+       EVERY OTHER ROUTE KEEPS IT. They are not opened to read one name, and
+       their <h1> is the whole of what they are. -->
+  <header class="flows-head${active === "ticker" ? " flows-head--quiet" : ""}">
     <div>
       <p class="flows-kicker">${kicker}</p>
       <h1>${title}</h1>
-    </div>
-    <div class="flows-session">
-      <span class="flows-user">${escapeHTML(username)}</span>
-      <form method="POST" action="/flows/logout"><button type="submit" class="flows-signout">Sign out</button></form>
     </div>
   </header>
 ${body}
@@ -464,14 +636,49 @@ ${neuronDock(summary)}
   <nav class="cc-jump" aria-label="Overview sections">
     <a href="#ccChgH">Changes</a><a href="#ccBullH">Candidates</a>
     <a href="#ccAlertsH">Activity</a><a href="#ccEventsH">Catalysts</a>
-    <a href="#ccLeanH">Sectors</a><a href="#ccSpineH">Distribution</a>
+    <a href="#ccTideH">Daily flow</a><a href="#ccLeanH">Sectors</a>
+    <a href="#ccSplitH">Split</a><a href="#ccSpineH">Distribution</a>
   </nav>
   <div class="cc">
 
     <!-- Six readings the rest of the page then explains. Any of them may be an
          em dash: a tile whose endpoint did not answer says so by not saying a
          number. -->
+    <!-- THE SESSION'S OWN IDENTITY, ABOVE THE READINGS RATHER THAN AMONG THEM.
+         "Session" and "Screened" were tiles, sitting in a row of five
+         MEASUREMENTS as though a date were one. They are the row's caption:
+         which session these numbers are of, and how many names it looked at.
+         A reader checking "is this today" should not have to scan a grid of
+         figures to find out, and a tile that can never be compared to its
+         neighbours does not belong beside them. -->
+    <div class="cc-meta" id="ccMeta" hidden>
+      <span class="cc-meta-d" id="ccMetaDate"></span>
+      <span class="cc-meta-n" id="ccMetaScreened"></span>
+      <span class="cc-meta-live" id="ccMetaLive" hidden></span>
+    </div>
+
     <section class="cc-verdict" id="ccVerdict" aria-label="Session verdict"></section>
+
+    <!-- HOW THE MARKET GOT HERE, WHICH THIS PAGE HAS NEVER DRAWN.
+         Every other region here reports a LEVEL at today's close; the pulse
+         key has carried a dated call/put premium series all along and no
+         route asked for it. Both are drawn as two bars from a marked zero at
+         each session, each on its own sign, because both are net figures that
+         go negative and an unsigned bar would turn premium sold into premium
+         bought.
+
+         DAILY, AND THE PERIOD CONTROL IS A WINDOW RATHER THAN A SOURCE: every
+         length offered is the same series, so a reader moving between them is
+         changing how far back they look and nothing else. The same key also
+         carries an intraday series; it answers a different question — how did
+         TODAY accumulate — and is left to a panel that asks it. -->
+    <section class="cc-region cc-tide" aria-labelledby="ccTideH">
+      <div class="cc-h">
+        <h2 class="cc-h-t" id="ccTideH">Daily flow</h2>
+        <div class="cc-seg" id="ccTideSeg" role="group" aria-label="How many sessions this flow is drawn over"></div>
+      </div>
+      <div class="cc-body" id="ccTide"></div>
+    </section>
 
     <section class="cc-region cc-bull" aria-labelledby="ccBullH">
       <div class="cc-h">
@@ -518,6 +725,16 @@ ${neuronDock(summary)}
       <div class="cc-h">
         <h2 class="cc-h-t" id="ccAlertsH">Largest flagged windows</h2>
         <span class="cc-h-s" id="ccAlertsSub"></span>
+        <!-- THE WAY TO THE REST OF THEM, AND IT IS A DIFFERENT SENTENCE FROM
+             THE ONE BESIDE IT. #ccAlertsSub states how many of how many this
+             region drew and when the feed was read — a measurement, written
+             by flows-overview.js. This is the address of the route that draws
+             the whole population, and it is static because it is true whether
+             or not the key read: a reader whose alerts key failed here is
+             exactly the reader who wants the other route. Two elements rather
+             than one anchor, so the count can keep being asserted as its own
+             text. -->
+        <a class="cc-h-s cc-h-all" href="/flows/unusual/">All flagged windows \u2192</a>
       </div>
       <div class="cc-body" id="ccAlerts"></div>
     </section>
@@ -581,6 +798,14 @@ ${neuronDock(summary)}
              of baskets that actually leaned is a measurement and is written
              by flows-overview.js. -->
         <span class="cc-h-s" id="ccLeanSub">options premium, not price momentum</span>
+        <!-- THREE QUANTITIES, ONE STRIP. The baskets can be ranked on the
+             dollars they cleared, on the contracts they traded, or on the
+             share of their own premium that leaned — and each answers a
+             different question, so none of them is the strip's "real" number.
+             The buttons are written by flows-overview.js, which is the only
+             place that knows which of the three actually read. -->
+        <div class="cc-seg" id="ccLeanSeg" role="group"
+             aria-label="Which quantity the sector strip draws"></div>
       </div>
       <div class="cc-body" id="ccLean"></div>
     </section>
@@ -614,6 +839,20 @@ ${neuronDock(summary)}
          headline and a name this product ranks — but a detail card exists only
          for the names the run went deep on, so the rest are printed plain. A
          link to a reader with nothing to read is worse than no link. -->
+    <!-- THE SESSION'S CALL/PUT SPLIT AS ONE FIGURE. The two numbers are on
+         market.premium and were reachable only as a signed tilt ratio in a
+         tile — a reader who wanted "how much of the session was calls" had to
+         invert a percentage. A ring states the share and the two dollar totals
+         beside it state what it is a share OF, so neither can be read without
+         the other. -->
+    <section class="cc-region cc-split" aria-labelledby="ccSplitH">
+      <div class="cc-h">
+        <h2 class="cc-h-t" id="ccSplitH">Flow distribution</h2>
+        <span class="cc-h-s" id="ccSplitSub"></span>
+      </div>
+      <div class="cc-body" id="ccSplit"></div>
+    </section>
+
     <section class="cc-region cc-news" aria-labelledby="ccNewsH">
       <div class="cc-h">
         <h2 class="cc-h-t" id="ccNewsH">Headlines</h2>
@@ -667,6 +906,9 @@ ${neuronDock(summary)}
      module scope, and two deferred scripts execute in document order, so the
      library has to be the earlier tag. It is a hard dependency and the page
      says so on the status line rather than throwing when it is missing. -->
+<!-- Before the renderer that registers with it; both deferred, so both run in
+     document order after parsing. -->
+<script src="${v("/assets/js/flows-cursor.js")}" defer></script>
 <script src="${v("/assets/js/flows-ui.js")}" defer></script>
 <script src="${v("/assets/js/flows-overview.js")}" defer></script>
 </body>
@@ -1560,6 +1802,152 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
        once. The other six Flows routes keep theirs; they are not opened
        daily to re-read one name. -->
 
+  <!-- THE ARRIVAL HEADER, AND IT IS NOT THE STICKY ONE.
+
+       .ft-head below is re-parented into the sticky bar by the controller and
+       has to stay one line for that to be worth having: a four-line block
+       pinned under the topbar would spend a fifth of a laptop viewport on
+       chrome for the whole scroll. So the two headers are two jobs. This one
+       is what a reader lands on — the name, what it costs, what this product
+       thinks of it and how strongly — laid out so each of those is a block
+       rather than a chip in a run-on line. That one is what survives the
+       scroll, and it stays terse.
+
+       ABOVE THE STICKY BAR, NOT BELOW IT, and that is a position rather than
+       a preference. The controller inserts the change section as the bar's
+       nextSibling, so anything served between the bar and .ft-head lands
+       UNDER a full panel of prose — the first draft of this block rendered
+       735px down the page, below the reading it was meant to introduce.
+       Above the bar it is what a reader lands on and it scrolls away, leaving
+       the tabs and the terse strip pinned, which is the division of labour
+       the two headers were split for.
+
+       NOTHING HERE IS A SECOND MEASUREMENT. Every slot is filled from the
+       same value the strip and the panels use; the difference is presentation
+       only. A hero that re-derived a score would be a header that can
+       disagree with the panel under it. -->
+  <section class="ft-hero" id="ftHero" hidden aria-label="This name at a glance">
+    <!-- THE IDENTITY IS THE SYMBOL AND WHAT IDENTIFIES IT, stacked, which is
+         where the design puts the company name and where a "Sector" column of
+         its own does not need to be. The strip wrapped to two rows at 1440
+         with seven blocks in it; folding the two identity lines under the
+         symbol is what puts it back on one — and it reads better, because a
+         sector is a property of the name rather than a fifth measurement
+         beside four figures. -->
+    <div class="ft-hero-id">
+      <span class="ft-hero-t" id="ftHeroT"></span>
+      <span class="ft-hero-nm" id="ftHeroNm" hidden></span>
+      <span class="ft-hero-sub">
+        <span class="ft-hero-m" id="ftHeroSector"></span>
+        <!-- WHICH SESSION EVERY FIGURE ON THIS PAGE IS OF. -->
+        <span class="ft-hero-m is-faint" id="ftHeroWhen"></span>
+      </span>
+    </div>
+    <div class="ft-hero-px">
+      <span class="ft-hero-k">Last</span>
+      <!-- THE PRICE AND ITS CHANGE SHARE ONE ROW CELL, in a wrapper, so the
+           change is a qualifier under the figure rather than a fifth reading
+           taking a row track of its own. Separate elements, because the
+           controller writes the price with textContent and a nested child
+           would be wiped by it. -->
+      <span class="ft-hero-stack">
+        <span class="ft-hero-v" id="ftHeroPx"></span>
+        <span class="ft-hero-chg" id="ftHeroChg" hidden></span>
+      </span>
+    </div>
+    <!-- EVERY BLOCK IS LABEL + ONE CELL, whatever it holds. The strip's rows
+         are shared by all five (subgrid, see flows.css), so a block that put
+         four children straight into the grid would spread them across tracks
+         sized for two and land its bar on top of its own figure. The stack
+         wrapper is what keeps the row count at two while the contents vary. -->
+    <div class="ft-hero-b" id="ftHeroScoreB">
+      <span class="ft-hero-k">Options score</span>
+      <span class="ft-hero-stack">
+        <span class="ft-hero-row">
+          <span class="ft-hero-v" id="ftHeroScore"></span>
+          <span class="ft-hero-bar" id="ftHeroScoreBar" aria-hidden="true"></span>
+        </span>
+        <span class="ft-hero-pill" id="ftHeroSide" hidden></span>
+      </span>
+    </div>
+    <div class="ft-hero-b" id="ftHeroConvB">
+      <span class="ft-hero-k">Conviction</span>
+      <span class="ft-hero-stack">
+        <span class="ft-hero-v" id="ftHeroConv"></span>
+        <span class="ft-hero-seg" id="ftHeroConvSeg" aria-hidden="true"></span>
+      </span>
+    </div>
+    <!-- THE TWO VOLATILITY COLUMNS THE DESIGN PUTS BESIDE THE PRICE, and they
+         are the two of its four that this product actually publishes. The
+         reference's header carries IV, IV Rank, Volume and Mkt Cap; the card
+         carries at-the-money vol and an IV rank on every name, and carries
+         neither a whole-tape share volume nor a market capitalisation on any
+         name. Two real columns beat four with two invented ones. -->
+    <div class="ft-hero-b" id="ftHeroIvB" hidden>
+      <span class="ft-hero-k">ATM IV</span>
+      <span class="ft-hero-stack">
+        <span class="ft-hero-v" id="ftHeroIv"></span>
+        <span class="ft-hero-m is-faint" id="ftHeroIvSub" hidden></span>
+      </span>
+    </div>
+    <div class="ft-hero-b" id="ftHeroIvrB" hidden>
+      <span class="ft-hero-k">IV rank</span>
+      <span class="ft-hero-stack">
+        <span class="ft-hero-v" id="ftHeroIvr"></span>
+        <span class="ft-hero-seg" id="ftHeroIvrSeg" aria-hidden="true"></span>
+      </span>
+    </div>
+    <!-- THE PERIOD CONTROL, WHERE THE DESIGN PUTS IT, WINDOWING THE SERIES
+         BLOCK BELOW.
+
+         IT NARROWS THE WINDOW; IT DOES NOT FETCH. Everything it can show is
+         already on this card, so no period here costs a request — and no
+         period can reach further back than the card's own window, which is
+         the whole reason the disabled states below exist.
+
+         A PERIOD THIS CARD CANNOT REACH IS DISABLED AND SAYS WHY, rather
+         than being dropped from the row or drawn empty. The price window is
+         about forty sessions, so 3M and 1Y are outside it on every name and
+         the pill says so when a reader asks. A control that silently does
+         nothing is worse than one that explains itself.
+
+         AND THE PERIODS MEAN DIFFERENT THINGS PER TAB, because the tabs are
+         on different clocks — sessions for price and premium, intraday
+         buckets for net flow, tenor for the volatility curve. The chart's
+         own note states the window it drew, which is the same rule the
+         overview's control follows: the control switches what is shown and
+         the note names it. -->
+    <div class="ft-hero-b ft-hero-b--period">
+      <span class="ft-hero-k">Period</span>
+      <div class="ft-period" id="ftPeriod" role="group"
+           aria-label="Window the series below"></div>
+    </div>
+
+  </section>
+  <!-- THE BAR SITS DIRECTLY UNDER THE HERO, AND IT USED TO SIT UNDER FOUR
+       MORE BLOCKS. The six cards, the findings index, the flag row and the
+       sector strip were all added above it in this wave, and on a phone they
+       are not a column beside the page — they stack. Measured at 320px on a
+       fresh load: hero 307 + cards 576 + brief 514 + flags 61 + related 87
+       put #ftBar's top at 1,941px in a 900px viewport, so the five station
+       tabs — this page's whole navigation — were nearly two screens below the
+       fold and could not be reached without scrolling past everything they
+       exist to skip. Moving it under the CARDS was not enough on its own:
+       that still measured 1,230px, because hero and cards alone are 883 of
+       it. Under the hero it measures 629.
+
+       IT WAS NOT MERELY UGLY, IT FAILED A CONTRACT. flows-ticker-contract
+       hit-tests a tab with elementFromPoint at 320px and counts the rows of
+       pixels that actually reach it; a rect 1,941px down returns null at
+       every one of them, so the assertion read "0px over a 25px box" — a
+       touch target that does not exist rather than one that is merely small.
+       A geometry assertion on the pseudo-element would have passed.
+
+       MOVED RATHER THAN SHRUNK: nothing above it was cut. The identity and
+       the tabs belong between the name's figures and the stations they index,
+       which is where the design puts them, and the three blocks read just as
+       well after the bar as before it — they are what this card FOUND, and a
+       reader reaches them by scrolling rather than by scrolling past. -->
   <!-- THE STICKY BAR IS SERVED NOW, AND THE IDENTITY BLOCK STILL MOVES INTO
        IT. The controller used to build this <div> from nothing on first paint,
        which put the whole index — five tabs and their counts — behind a fetch
@@ -1605,10 +1993,241 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
       <span class="ft-band-v" id="ftEarn" hidden></span>
     </div>
   </div>
+  <!-- WHAT IS TRUE OF THIS NAME RIGHT NOW, AS A ROW OF MARKS.
+
+       Each one is a threshold already computed and already drawn somewhere on
+       this page; the row is a scan layer over them, not a new opinion. A flag
+       appears only when its own reading is present and past its threshold —
+       never as a greyed-out "no", which would turn five absences into five
+       claims. The threshold rides in the title of each. -->
+  <!-- SIX CARDS, WHICH IS THE SHAPE OF THE DESIGN AND NOT A COPY OF THE STRIP
+       ABOVE IT. The header already carries price, score, conviction and the
+       two volatility figures; repeating any of them here would spend a card
+       on a number a reader has just read. These six are the name's FLOW —
+       what the session cleared, over how long, on which side of the quote,
+       where the open interest moved, how much printed off-exchange, and what
+       delta the tape ended up holding — each from its own panel and each
+       carrying that panel's own unit and coverage.
+
+       THE CARDS ARE WRITTEN BY flows-ticker.js. The host is served empty and
+       hidden, the same way the hero above is, so a page whose card never
+       arrives shows no empty furniture. -->
+  <!-- THE TWO COLUMNS THE DESIGN PUTS UNDER THE HEADER, and the reason they
+       are a WRAPPER rather than a rule on .flows-main. A grid placed on the
+       page shell would have to give each of its fourteen children an explicit
+       column, and auto-placement would drop the right-hand cards into rows of
+       their own below the left instead of beside it. Two boxes and one grid
+       between them is what actually produces the shape.
+
+       WHAT IS IN EACH. Left: this session's figures and what changed since
+       the last one — the reading a visitor came for. Right: what this card
+       FOUND, the flags, and the other names in the sector — the design's
+       summary column, in its order. Nothing moved between them; the same
+       blocks are in the same order they were stacked in.
+
+       IT IS ONE COLUMN UNTIL THERE IS WIDTH FOR TWO, and the breakpoint is in
+       flows.css beside the rule, not here. #ftChange is inserted by the
+       controller after #ftCards, so it lands inside the left column without
+       this markup naming it — the one place these two files have to agree,
+       and the insertion says so at its own end. -->
+  <div class="ft-split">
+    <div class="ft-split-main">
+  <div class="ft-cards" id="ftCards" hidden aria-label="This session's flow"></div>
+  <!-- THE TWO BLOCKS THE DESIGN PUTS SIDE BY SIDE UNDER THE FIGURES: a
+       series on the left, the book on the right. They are one grid rather
+       than two stacked sections because that pairing is the shape of the
+       page — the chart answers "what has this done" and the chain answers
+       "what is priced now", and a reader checks one against the other.
+
+       IT COLLAPSES TO ONE COLUMN BELOW THE SAME BREAKPOINT .ft-split USES.
+       Two tables of figures side by side on a phone is two sideways
+       scrollers, which is worse than a stack. -->
+  <div class="ft-top">
+  <!-- THE SERIES BLOCK, AND WHAT MAKES IT NOT A SECOND DRAWING OF A PANEL.
+
+       Every tab here draws a series the payload already publishes, read
+       straight out of the field the panel below reads — the same array,
+       through the same helper, with no arithmetic of its own. That is the
+       precedent .ft-brief already set on this page: one source rendered
+       twice is not two spellings of one reading, and the two cannot
+       disagree because there is only one derivation. What this block must
+       never do is compute a return, a change or a summary of its own; the
+       sentences about these series belong to the panels that own them.
+
+       THE TAB SWITCHES SOURCE, NOT ZOOM, AND THE NOTE NAMES THE CLOCK.
+       These five series do not share an x-axis: price and premium are by
+       SESSION, net flow is by intraday BUCKET, and the volatility curve is
+       by TENOR. The overview's period control settled this exact question
+       and its rule is copied deliberately — two quantities on two clocks
+       behind one control is only honest if it says so — so the note under
+       the chart names the clock of whichever tab is drawn.
+
+       AND ONE TAB HAS NO SERIES AT ALL. The design draws a Volume tab;
+       there is no per-name volume series in this payload. The tab is kept
+       and says so when it is opened, rather than being dropped from a row
+       the design specifies or drawn from a quantity that is not volume. -->
+  <section class="ft-chart" id="ftChart" hidden aria-labelledby="ftChartH">
+    <div class="ft-chart-top">
+      <h2 class="ft-chart-h" id="ftChartH">Series</h2>
+      <div class="ft-chart-tabs" id="ftChartTabs" role="tablist"
+           aria-label="Which series to draw"></div>
+    </div>
+    <div class="ft-chart-body" id="ftChartBody"></div>
+    <p class="ft-chart-s" id="ftChartS"></p>
+  </section>
+  <!-- THE OPTION CHAIN, WHICH IS THE SAME ROWS THE TOP-CONTRACTS PANEL
+       RANKS, ASKED A DIFFERENT QUESTION.
+
+       That panel orders by VOLUME and answers "which single lines carried
+       the day". This one orders by STRIKE, splits the two sides and rules
+       the last price between them, and answers "what does the book look
+       like around spot". Two orderings of one array are not two spellings
+       of one reading: a volume ranking cannot show where spot sits in the
+       ladder, and a ladder cannot show which line was the largest. Neither
+       block restates the other's sentence, and the design carries both for
+       that reason — a chain above, a ranked tape below.
+
+       SERVED EMPTY AND HIDDEN, like every other block on this page. A
+       chain card over a name whose chain leg never ran is furniture. -->
+  <section class="ft-chain" id="ftChain" hidden aria-labelledby="ftChainH">
+    <div class="ft-chain-top">
+      <h2 class="ft-chain-h" id="ftChainH">Options chain</h2>
+      <div class="ft-chain-tabs" id="ftChainTabs" role="tablist"
+           aria-label="How to order the chain"></div>
+    </div>
+    <div class="ft-chain-body" id="ftChainBody"></div>
+    <p class="ft-chain-s" id="ftChainS"></p>
+  </section>
+  </div>
+  <!-- THE BAND THE DESIGN PUTS UNDER THE ROW. One card today; it is an
+       auto-fit grid so the next one joins it without a layout change.
+
+       THE MIX IS THE ONE READING IN THIS BAND THAT IS DRAWN NOWHERE ELSE.
+       The aggressor panel below draws NET contracts by strike — calls lifted
+       minus puts lifted — which is a direction. How much of the volume was
+       calls and how much was puts is a different quantity, published per
+       strike as calls and puts on the same ladder, and until now it
+       reached a reader only through that panel's cursor readout. A ring is
+       what a share of a whole looks like.
+
+       THE POPULATION IS THE LADDER, NOT THE CHAIN, and the card says so.
+       The ladder keeps the strikes nearest the money and publishes how many
+       it measured, how many the chain had, and how many carried no split at
+       all — so the share is of what was measured rather than of everything
+       that traded. -->
+  <div class="ft-band3">
+    <section class="ft-mix" id="ftMix" hidden aria-labelledby="ftMixH">
+      <h2 class="ft-mix-h" id="ftMixH">Volume by type</h2>
+      <div class="ft-mix-body" id="ftMixBody"></div>
+      <p class="ft-mix-s" id="ftMixS"></p>
+    </section>
+  </div>
+    </div>
+    <aside class="ft-split-side" aria-label="What this card found">
+  <!-- WHAT THIS CARD FOUND, AND WHY IT IS AN INDEX RATHER THAN A SUMMARY.
+
+       The design puts a findings panel at the top right and calls it an AI
+       summary. This product has one of those — Neuron, on the overview — and
+       it is generated per SESSION, not per name; a per-name one is a pipeline
+       change, not a renderer change, so calling this that would be a claim
+       about how it was made. What this is instead: the leads the panels below
+       already publish, gathered at the top with a way into each.
+
+       IT IS ONE SOURCE RENDERED TWICE, NOT TWO SPELLINGS OF ONE READING. Each
+       line is the panel's own published lead — the same string the panel
+       prints, read from the same field — so
+       the two cannot disagree about a number; what this adds is that a reader
+       sees the findings before scrolling, and can go straight to the one that
+       matters. A second sentence ABOUT the same data, written here, is what
+       the rule forbids, and there is none.
+
+       NO SEVERITY DOTS. The design colours each bullet red, amber or green.
+       Nothing on this card ranks its findings by severity, so a coloured dot
+       would be this renderer inventing an opinion the payload does not carry;
+       the marks are neutral and the reading carries its own sign in its own
+       words. -->
+  <aside class="ft-brief" id="ftBrief" hidden aria-labelledby="ftBriefH">
+    <h2 class="ft-brief-h" id="ftBriefH">What this card found</h2>
+    <ol class="ft-brief-l" id="ftBriefL"></ol>
+    <p class="ft-brief-s" id="ftBriefS"></p>
+  </aside>
+  <div class="ft-flags" id="ftFlags" hidden></div>
+  <!-- KEY LEVELS, PROMOTED OUT OF THE GRID INTO THE COLUMN THE DESIGN PUTS
+       THEM IN — and this is a MOVE, not a second drawing.
+
+       The levels panel keeps its table in the grid, which carries every
+       level with its two distances and its provenance. What this card adds
+       is position: the design wants the prices a move runs into visible
+       WITHOUT scrolling, beside the findings, because they are what a
+       reader checks a quote against. Same panel, same field, same numbers,
+       read from panels.levels.levels — the nearest-first order is the
+       payload's own, sorted at shared/flows-card.js:304, so this card does
+       not re-sort and cannot disagree about which level is nearest.
+
+       THE DESIGN NAMES THEM RESISTANCE AND SUPPORT. This payload does not
+       publish either word. What it publishes is a gamma flip, a max pain,
+       a call wall and a put wall — each a named construction with a stated
+       derivation — so the labels stay the payload's own. Renaming a gamma
+       flip "resistance" would be this renderer asserting a behaviour the
+       card never measured. -->
+  <aside class="ft-lv" id="ftLv" hidden aria-labelledby="ftLvH">
+    <h2 class="ft-lv-h" id="ftLvH">Key levels</h2>
+    <ol class="ft-lv-l" id="ftLvL"></ol>
+    <p class="ft-lv-s" id="ftLvS"></p>
+  </aside>
+  <!-- RECENT FLOW, AND THE WORD "RECENT" IS DOING LESS WORK THAN IT LOOKS.
+
+       The rows are the vendor's own FLOW ALERTS for this name: each one is a
+       window of activity in ONE contract that one of the vendor's rules
+       flagged, carrying the window's span, its execution count, a total size
+       and a total premium. shared/flows-alerts.js states the two caveats this
+       card has to carry and does: a row AGGREGATES a window, so it is never
+       "a trade" and this card does not call it one; and the population is
+       what the vendor's rules chose to flag, ranked by premium and capped, so
+       a name with no rows here is a name the rules did not flag — NOT a name
+       with no options flow.
+
+       WHICH IS WHY THE EMPTY CASE IS A SENTENCE RATHER THAN A HIDDEN CARD.
+       Everywhere else on this page an absent reading hides its block; here
+       the absence is itself the thing most likely to be misread, so it is
+       stated. A reader who sees nothing and concludes "quiet name" has been
+       misled by the silence; a reader told "the vendor's rules flagged
+       nothing for this name among the sixty rows this run kept" has not.
+
+       A SECOND FETCH, DEFERRED. The alerts key is market-wide and is not on
+       the card, so this is the one block here that waits on a request of its
+       own — taken in the same idle pass as the boards, because both fill the
+       right-hand column and neither is above the fold. -->
+  <aside class="ft-flow" id="ftFlow" hidden aria-labelledby="ftFlowH">
+    <h2 class="ft-flow-h" id="ftFlowH">Recent flow</h2>
+    <ol class="ft-flow-l" id="ftFlowL"></ol>
+    <p class="ft-flow-s" id="ftFlowS"></p>
+  </aside>
+  <!-- THE OTHER NAMES IN THIS SECTOR, which the design puts at the foot of its
+       right column and calls Related. Drawn from the same session's BOARDS —
+       the only place this page learns about any name but its own — so the
+       claim is that one run ranked them and put them in one sector, and the
+       subtitle says so rather than letting the word "related" imply a model
+       nobody built. Written by flows-ticker.js once the boards arrive, which
+       is a different fetch from the card's. -->
+  <aside class="ft-rel" id="ftRel" hidden aria-labelledby="ftRelH">
+    <h2 class="ft-rel-h" id="ftRelH">Others in this sector</h2>
+    <div class="ft-rel-l" id="ftRelL"></div>
+    <p class="ft-rel-s" id="ftRelS"></p>
+  </aside>
+    </aside>
+  </div>
+
 
   <header class="ft-head" id="ftHead" hidden>
     <h2 id="ftTicker" tabindex="-1">&nbsp;</h2>
     <span class="fc-score" id="ftScore"></span>
+    <!-- THREE SLOTS THE CONTROLLER NO LONGER FILLS, kept because emptying a
+         served slot is cheaper and safer than deleting one: the chrome check
+         reads this markup, and a slot that exists and is empty is the page's
+         own honest served state. Conviction and the session date moved to the
+         hero above; the gamma regime is the gamma panel's own lead, stated
+         beside the ladder it was measured from. See paintCard. -->
     <span class="fc-meta" id="ftConv"></span>
     <span class="fc-meta" id="ftRegime"></span>
     <span class="fc-meta" id="ftDates"></span>
@@ -1679,6 +2298,13 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
   </div>
 </dialog>
 <script src="${v("/assets/js/nav.js")}" defer></script>
+<!-- BEFORE THE LIBRARY THAT REGISTERS WITH IT. Both are deferred, so both run
+     in document order after parsing: the cursor defines window.FlowsCursor
+     and the panel library asks for it while drawing. Reversing these two
+     would not throw — every call site tests for it first — it would simply
+     draw every chart without a cursor, silently, which is the worse failure
+     of the two. -->
+<script src="${v("/assets/js/flows-cursor.js")}" defer></script>
 <script src="${v("/assets/js/flows-panels.js")}" defer></script>
 <script src="${v("/assets/js/flows-ticker.js")}" defer></script>
 </body>

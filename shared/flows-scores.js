@@ -213,7 +213,44 @@ export function scoresRows(sides) {
        zero residual is a real reading that means "exactly at the pool
        median". */
     const q = num(r && r.residual);
-    rows.push(q === null ? { t, s } : { t, s, q: Math.round(q * 1e4) });
+    /* `p` IS THE SESSION'S NET PREMIUM, SIDE-SIGNED, AND IT IS HERE BECAUSE
+       THE ARCHIVE IS THE ONLY PLACE IT CAN LIVE.
+
+       Net premium is published on every board row for TODAY and dies with the
+       run, exactly as the score distribution used to: the session path panel
+       can draw it minute by minute inside one session, and nothing anywhere
+       could answer "what has this name's net premium done across sessions".
+       That is the question a reader asks of a flow signal first.
+
+       IN THIS KEY RATHER THAN A NEW ONE. A parallel `premium:<date>` lane
+       would need its own write, its own archive walk, its own prune and its
+       own read-back — four mechanisms for one number per name per session,
+       when this key is already written once a session, already swept, and
+       already walked. One field on a row that is already there costs a walk
+       nobody has to write.
+
+       WHOLE DOLLARS, NOT THOUSANDS. The saving would be three characters a
+       name and the cost would be a unit this file has to state and every
+       reader has to honour — the exact trap this codebase keeps finding in
+       its own columns. `q` is scaled because a residual has no natural unit
+       and four decimals is a resolution choice; dollars have one.
+
+       NULL, NOT ZERO, when the screener quoted neither leg: a name nobody
+       priced and a name that priced flat are different sessions, and a zero
+       here would make them the same forever. */
+    const prem = (() => {
+      if (!r) return null;
+      const direct = num(r.netPrem);
+      if (direct !== null) return direct;
+      const call = r.net_call_premium, put = r.net_put_premium;
+      if (call === undefined && put === undefined) return null;
+      const c = num(call), pu = num(put);
+      if (c === null && pu === null) return null;
+      return (c || 0) - (pu || 0);
+    })();
+    const row = q === null ? { t, s } : { t, s, q: Math.round(q * 1e4) };
+    if (prem !== null) row.p = Math.round(prem);
+    rows.push(row);
   }
   rows.sort((a, b) => (a.t < b.t ? -1 : a.t > b.t ? 1 : 0));
   return rows;
@@ -264,6 +301,25 @@ export function buildScoreTrack(days, {
      double a payload that already sits against a 128KB cap. */
   const series = new Map();
   const resid = new Map();
+  /* NET PREMIUM RIDES IN A THIRD PARALLEL MAP, and unlike the other two it
+     never reaches the published payload at all — see the `premium` key on
+     the return, which the pipeline destructures away before publishing.
+
+     The arithmetic above settles it: a name row costs ~243 bytes, of which
+     the 42-session series is ~5 bytes a session. A premium series is not 5
+     bytes a session — it is eight-to-ten digits — so at two-to-three hundred
+     names it would roughly TRIPLE the body against a 96KB ceiling that is
+     already the binding one. The byte cap would absorb that by shedding a
+     third of the names, which is the wrong trade: the track page is about
+     scores, and it would pay for a field it does not draw.
+
+     The names that DO draw it are the card loop's fifty-odd, one card at a
+     time, where 42 numbers is nothing. So the series is built once here — in
+     the pass that already walks these rows, against the calendar `sessions`
+     is aligned to — and handed out per name. Rebuilding it beside the track
+     from the same days would produce a second calendar, and two calendars is
+     how an index-aligned pair drifts. */
+  const premium = new Map();
   dates.forEach((d, i) => {
     for (const row of byDate.get(d).rows) {
       const t = row && row.t;
@@ -275,6 +331,15 @@ export function buildScoreTrack(days, {
       if (q !== null) {
         if (!resid.has(t)) resid.set(t, new Array(dates.length).fill(null));
         resid.get(t)[i] = q;
+      }
+      /* ABSENT STAYS ABSENT. `p` is omitted by scoresRows when neither leg
+         was quoted and written as 0 when both were quoted flat, so a null
+         here means "not priced that session" and a 0 means "priced flat" —
+         the distinction the archive was extended to keep. */
+      const pv = num(row && row.p);
+      if (pv !== null) {
+        if (!premium.has(t)) premium.set(t, new Array(dates.length).fill(null));
+        premium.get(t)[i] = pv;
       }
     }
   });
@@ -511,6 +576,15 @@ export function buildScoreTrack(days, {
     },
     status: names.length ? "ok" : "empty",
     notes: SCORES_NOTES,
+    /* HELD, NOT PUBLISHED — a Map keyed by ticker, each value index-aligned
+       to `sessions` exactly as `names[].s` is.
+
+       A MAP RATHER THAN AN OBJECT, deliberately: the publish site spreads
+       this return into a payload body, and JSON.stringify of a Map is `{}`.
+       So the destructure that removes it is the contract, and a future
+       caller who forgets it ships sixteen bytes rather than sixty kilobytes
+       and a 413 at 05:20. */
+    premium,
   };
 }
 
@@ -527,7 +601,27 @@ export function boardsToScoreRows(boardRowsBySide) {
       const s = num(r && r.s);
       if (!t || s === null || seen.has(t)) continue;
       seen.add(t);
-      rows.push({ t, s });
+      /* `netPrem` HAS BEEN ON EVERY ARCHIVED BOARD ROW ALL ALONG, and this
+         fold was dropping it.
+
+         That is worth more than it looks. The dated scores key only began
+         carrying premium the day that field shipped, so a history read from
+         it alone starts empty and lengthens by one session a day — a panel
+         that says nothing for a month. The board archive already holds the
+         same figure for every session it covers, so reading it here backfills
+         the whole window at once, today.
+
+         WHAT THE BACKFILL IS AND IS NOT. A board day carries only the names
+         that MADE a board, so its premium coverage is exactly as sparse in
+         names as its score coverage, and sparse in the same way — which is
+         the sparseness the payload already marks board-only and the notes
+         already explain. It is not sparser in DATES, and it is not a
+         different measurement: it is the same `netPrem` the pipeline
+         published that morning, read out of the row it published it on. */
+      const p = num(r && r.netPrem);
+      const out = { t, s };
+      if (p !== null) out.p = Math.round(p);
+      rows.push(out);
     }
   }
   rows.sort((a, b) => (a.t < b.t ? -1 : a.t > b.t ? 1 : 0));

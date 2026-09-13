@@ -916,6 +916,53 @@
       "A solid border is a print from today, a dashed one did not trade today, a dotted one " +
       "carries no volume field at all.");
 
+    /* A HEATMAP HAS TWO INDICES AND THIS CURSOR SEARCHES ONE, so which one
+       is the whole design of this registration.
+
+       Reading a single CELL would need both, and a cell already shows its own
+       number wherever the column is wide enough for `withNumbers`; where it
+       is not, the honest fix is a wider panel, not a cursor that reads one
+       cell of thirteen.
+
+       WHAT THE PICTURE CANNOT STATE IS THE COLUMN. Each expiry carries
+       published readings of its own — atmIv, atmStrike, days, how many of its
+       cells printed today — and none is drawn anywhere in the grid, because
+       the column head has room for the tenor and little else. Every row below
+       is a field off `cols[j]`, so this is not a second opinion about the
+       surface; it is the column's own header data made reachable. */
+    if (window.FlowsCursor && cols.length) {
+      window.FlowsCursor.attach(svg, {
+        name: "Implied volatility surface, by expiry",
+        band: { y0: padT, y1: padT + gridH },
+        points: cols.map((e, j) => {
+          const atmIv = isNum(e && e.atmIv);
+          const days = isNum(e && e.days);
+          const k = isNum(e && e.atmStrike);
+          const fresh = isNum(e && e.fresh);
+          return {
+            x: plotL + j * colW + colW / 2,
+            label: String((e && e.expiry) || DASH) +
+              (days === null ? "" : " \u00b7 " + days + "d out"),
+            rows: [
+              /* ftsVol RETURNS THE NUMBER AND NOT THE UNIT — every other
+                 caller in this drawer appends the sign itself, and a readout
+                 that dropped it would print a bare 32.8 beside prices. */
+              { k: "At-the-money IV",
+                v: atmIv === null
+                  ? (e && e.atmReason ? String(e.atmReason) : "not published")
+                  : ftsVol(atmIv) + "%" },
+              /* No sign handling on a strike: a strike is a price and prices
+                 on this chain are positive, so there is no hyphen to promote
+                 to a minus and `neg` is not in this drawer's scope anyway. */
+              { k: "At the strike", v: k === null ? "not published" : k.toFixed(2) },
+              { k: "Traded today",
+                v: fresh === null ? "not published" : fresh + " of this column's cells" },
+            ],
+          };
+        }),
+      });
+    }
+
     host.append(svg);
 
     /* ---- the numbers the picture cannot state exactly ---------------- */
@@ -1503,6 +1550,36 @@
             ? ` ${missing.length} of ${cols.length} columns carry no level and are marked ` +
               "on the rail below the axis."
             : ""));
+
+    /* THE AXIS HERE PRINTS TENORS, NOT LEVELS, so "what was the level at 53
+       days" had no answer short of measuring a bar against the rail. The
+       sentence above states the first and last measured columns, which is a
+       summary and not a substitute for reading the middle.
+
+       `tenorOf` is the phrase that closing sentence uses, so one column
+       cannot be named two ways on one panel; and a column with no level
+       prints its published reason, which is what the miss rail below the
+       axis exists to say in ink. */
+    if (window.FlowsCursor && cols.length) {
+      window.FlowsCursor.attach(svg, {
+        name: "At-the-money level along the term",
+        band: { y0: padT, y1: baseY },
+        points: cols.map((col, j) => {
+          const v = levelOf(col);
+          const why = col.point && col.point.reason ? String(col.point.reason) : null;
+          return {
+            x: cxOf(j),
+            label: String((col.point && col.point.expiry) || DASH) +
+              " \u00b7 " + tenorOf(col),
+            rows: [
+              { k: "At-the-money IV",
+                v: v === null ? (why || "no level on this column") : vol1(v) },
+            ],
+          };
+        }),
+      });
+    }
+
     host.append(svg);
 
     /* ---------- the two bases, under the readings they support -------
@@ -3422,6 +3499,51 @@
         ? `${partialRows} of ${bars.length} strikes publish an incomplete volume total.`
         : "Every strike drawn publishes a complete volume total."));
 
+    /* THE SECOND TRANSPOSED LADDER, AND `axis: "y"` FOR THE SAME REASON.
+       This panel's geometry is renderGamma's on purpose — same row pitch,
+       same rails, so one strike sits at one height across both — and the
+       cursor follows.
+
+       THREE NUMBERS, BECAUSE A NET WITHOUT A DENOMINATOR IS UNREADABLE. A net
+       of +400 on 500 contracts and the same net on 40,000 are opposite
+       findings, and the bar draws only the first of those.
+
+       AND THE OTHER TWO ARE NOT THE NET'S TERMS. `calls` and `puts` are the
+       CALL AND PUT VOLUME at the strike (shared/flows-chain.js sums them by
+       `p.type`), so they add to `vol` and do not subtract to `net` — `net` is
+       aggressor-signed, positive where a contract was bought. A first draft
+       of this readout labelled them "Bought / sold", which is a confident
+       statement of the wrong quantity, and the fixture caught it: 1,785 and
+       3,864 against a net of 1,247 and a volume of 5,649. They are the
+       composition of the volume, and that is what they are called. */
+    if (window.FlowsCursor && bars.length) {
+      window.FlowsCursor.attach(svg, {
+        name: "Net aggressor volume by strike",
+        axis: "y",
+        band: { x0: plotL, x1: plotR },
+        points: bars.map((b, i) => {
+          /* faGrouped IS THIS PANEL'S OWN FORMATTER and it carries the sign
+             and the absence itself — MINUS for a negative, the em dash for a
+             number that is not there. Reaching past it for a second spelling
+             is how one panel comes to print two forms of the same figure.
+             The strike goes to two decimals because this readout is an HTML
+             box with no 46px budget to clip it, unlike the rail label. */
+          const side = (v) => (isNum(v) === null ? "not split" : faGrouped(v));
+          return {
+            y: yOfIndex(i),
+            label: neg(b.k.toFixed(2)),
+            rows: [
+              { k: "Net aggressor", v: faGrouped(b.net),
+                cls: b.net > 0 ? "is-pos" : b.net < 0 ? "is-neg" : "" },
+              { k: "Call / put volume", v: side(b.calls) + " / " + side(b.puts) },
+              { k: "Volume at strike",
+                v: isNum(b.vol) === null ? "not reported" : faGrouped(b.vol) },
+            ],
+          };
+        }),
+      });
+    }
+
     host.append(svg);
 
     /* ---------- what the panel does NOT show ---------------------------- */
@@ -4062,6 +4184,35 @@
         t.textContent = fvcPct(v);
         svg.append(t);
       }
+
+      /* THE CURVE ALREADY HELD THIS READING AND ONLY A MOUSE COULD REACH IT.
+         Every dot carries a <title> with these same values — a native
+         tooltip, which appears after a delay, one dot at a time, and which a
+         keyboard never reaches at all. Read off the same `pts` entries, so
+         the two cannot disagree; what this adds is arrow keys and no hover.
+
+         The title DROPS the implied-move clause when it is absent, which
+         reads as a curve that has no such thing. Rule 2 in flows-cursor.js
+         is why the readout says so instead. */
+      if (window.FlowsCursor && pts.length) {
+        window.FlowsCursor.attach(svg, {
+          name: "Implied volatility along the term",
+          band: { y0: padT, y1: H - padB },
+          points: pts.map((p) => {
+            const imp = isNum(p.r.impliedMovePerc);
+            return {
+              x: xOf(p.x),
+              label: String(p.r.expiry) +
+                (p.dte === null ? "" : " \u00b7 " + p.dte + "d out"),
+              rows: [
+                { k: "Implied vol", v: vol1(p.y) },
+                { k: "Implied move", v: imp === null ? "not reported" : vol1(imp) + " of spot" },
+              ],
+            };
+          }),
+        });
+      }
+
       termHost.append(svg);
 
       /* The mini-table: the FIRST rows in calendar order, stated as a slice
@@ -4196,6 +4347,30 @@
             cx: xO(i).toFixed(1), cy: yO(v).toFixed(1), r: i === n - 1 ? 2 : 1.5,
           }));
         });
+
+        /* THE STRIP DRAWS EVERY SESSION AND LABELS NONE OF THEM. It is
+           deliberately spare and the headline states only the latest, so
+           "what was it in March" had no answer on the page: dots are drawn
+           for two specific reasons and most sessions carry no mark to hover
+           even if hovering worked.
+
+           A SESSION WITH NO RANK KEEPS ITS PLACE IN THE LIST. Dropping it
+           would slide every later session left on a calendar axis; the line
+           already breaks rather than bridges across those sessions, and the
+           readout makes the same distinction. */
+        const dated = rankRows.slice().reverse();
+        window.FlowsCursor && window.FlowsCursor.attach(svg, {
+          name: "One-year implied-volatility rank by session",
+          band: { y0: sPadY, y1: SH - sPadY },
+          points: series.map((v, i) => ({
+            x: xO(i),
+            label: (dated[i] && dated[i].date) || "an unnamed session",
+            rows: [
+              { k: "IV rank", v: v === null ? "not published" : neg(v.toFixed(1)) },
+            ],
+          })),
+        });
+
         rankHost.append(svg);
       }
 
@@ -4670,6 +4845,211 @@
    * for the latest date costs 60 comparisons and cannot be wrong when a future
    * payload changes its order.
    */
+  /* HOW MANY SESSIONS THE LEDGER DRAWS.
+
+     The window is up to forty-two and a table of forty-two rows on a page of
+     twenty-four panels is a second page. Twenty is a month of sessions, which
+     is the span a reader asks a ledger about — "what has it done lately" —
+     and the two charts above still show the whole window, which is what a
+     chart is for. The cap is stated in the note under the table rather than
+     left for a reader to discover by counting. */
+  const LEDGER_MAX = 20;
+
+  /* ---------- the session ledger -----------------------------------
+
+     THE THREE SERIES THIS CARD ALREADY CARRIES, ON ONE ROW PER SESSION.
+
+     A reader wanting "what has this name done" had to read three drawings and
+     hold them in their head: the score-over-price chart has close and score,
+     the change block has the move, and the premium panel has the flow. Each
+     is a chart because a chart is what shows a SHAPE — but the question "what
+     happened on the 14th" is a lookup, and a lookup wants a table.
+
+     A SENTINEL, LIKE `__stats`, AND FOR THE SAME REASON. Nothing here is a
+     new measurement: every cell is read out of a panel this card already
+     publishes, so the payload does not grow by one byte and no figure here
+     can disagree with the panel it came from. The precedent is keyStats, one
+     station up, which gathers eight headline figures the same way.
+
+     JOINED ON THE DATE, NEVER ON THE INDEX. The overlay's rows are the
+     sessions its price window shares with the score archive; the premium
+     panel's rows are the sessions the archive holds at all. Those two windows
+     are not the same length and need not start on the same day — an index zip
+     would draw a plausible table out of two different calendars, which is the
+     defect shared/flows-overlay.js exists to name. */
+  function sessionLedger(host, _panel, card, question) {
+    const { panelHead, quietPanel, emptyPanel, statList, isNum, el, money, px2, signed } = P;
+    const panels = (card && card.panels) || {};
+    const ovl = panels.scoreOverlay, prem = panels.premiumTrack;
+
+    /* THE TWO SILENCES STAY APART. Neither panel is required — a card can
+       carry price history with no archived premium, or the other way round —
+       so the table draws on either, and only says nothing when it has
+       neither. Which one is missing is stated, because "no sessions" and "no
+       premium for these sessions" are different facts about the archive. */
+    const ovlRows = ovl && ovl.status === "ok" && Array.isArray(ovl.rows) ? ovl.rows : [];
+    const premRows = prem && prem.status === "ok" && Array.isArray(prem.rows) ? prem.rows : [];
+    if (!ovlRows.length && !premRows.length) {
+      return emptyPanel(host, question,
+        ovl && ovl.status !== "ok" ? ovl
+          : prem && prem.status !== "ok" ? prem
+            : { status: "quiet", reason: "this card carries no dated session history" });
+    }
+    panelHead(host, question);
+
+    const byDate = new Map();
+    const take = (rows, fill) => {
+      for (const r of rows) {
+        const d = r && r.d;
+        if (typeof d !== "string" || !d) continue;
+        if (!byDate.has(d)) byDate.set(d, { d, close: null, score: null, p: null, source: null });
+        fill(byDate.get(d), r);
+      }
+    };
+    take(ovlRows, (row, r) => {
+      row.close = isNum(r.close);
+      row.score = isNum(r.score);
+    });
+    take(premRows, (row, r) => {
+      row.p = isNum(r.p);
+      row.source = typeof r.source === "string" ? r.source : null;
+    });
+
+    /* NEWEST FIRST, WHICH IS THE ONLY ORDER A LEDGER IS READ IN. The two
+       charts run oldest-to-newest because a time axis does; a table is
+       scanned from the top and the top is today. */
+    const all = [...byDate.values()].sort((a, b) => (a.d < b.d ? 1 : a.d > b.d ? -1 : 0));
+    const rows = all.slice(0, LEDGER_MAX);
+
+    /* THE SCORE MOVE IS DIFFERENCED HERE AND IT CARRIES ITS OWN GAP, because
+       consecutive ROWS are not consecutive SCORED sessions: a name unscored
+       for three days has three rows between its two readings, and a naive
+       row-over-row subtraction would label a three-session move as an
+       overnight one. Against the previous SCORED row, with the gap in the
+       cell's title — the same rule the change layer states and the ranked
+       rows on the landing page follow. */
+    const scoredIdx = [];
+    all.forEach((r, i) => { if (r.score !== null) scoredIdx.push(i); });
+    const priorScored = new Map();
+    for (let k = 1; k < scoredIdx.length; k++) {
+      /* `all` is newest-first, so the PRIOR session is the NEXT index. */
+      priorScored.set(scoredIdx[k - 1], scoredIdx[k]);
+    }
+
+    /* `fc-tablewrap` AND `fc-levels`, WHICH ARE THE SECTION'S TABLE, not a
+       pair of classes invented here. Every other panel table on this page is
+       built from those two — the first scrolls horizontally on a narrow
+       viewport, the second carries the header rule, the cell padding and the
+       numeric alignment — and the first draft of this one reached for
+       `fc-scroll`/`fc-tbl`, neither of which exists in the stylesheet. It
+       rendered with the header row set at heading size and the Close and
+       Score columns run together with no gap: an unstyled table looks like a
+       styling choice, which is why it survived a screenshot. */
+    const wrap = el("div", "fc-tablewrap");
+    wrap.setAttribute("role", "region");
+    wrap.setAttribute("aria-label", "This name session by session, newest first");
+    wrap.tabIndex = 0;
+    const table = el("table", "fc-levels ft-ledger");
+    const thead = el("thead"), htr = el("tr");
+    /* EVERY HEADER CARRIES WHAT ITS COLUMN IS, as the other panel tables do:
+       a column called "Score" over a signed integer is two conventions a
+       reader has to know — which scale, and measured against what. */
+    for (const [label, cls, why] of [
+      ["Session", null, "The trading session the row describes, newest first."],
+      ["Close", "c-num", "The settled close for that session, from this card's own price window."],
+      ["Score", "c-num",
+        "The board's composite for that session, on a fixed −100 to +100 scale. " +
+        "Not a return forecast."],
+      ["Δ score", "c-num",
+        "The move since this name's PREVIOUS SCORED session, which need not be the row " +
+        "below: the span is in each cell's own title."],
+      ["Net premium", "c-num",
+        "Call premium minus put premium for that session, in dollars, as the board " +
+        "published it that morning. The sign is the reading."],
+    ]) {
+      const th = el("th", cls, label);
+      th.scope = "col";
+      th.title = why;
+      htr.append(th);
+    }
+    thead.append(htr);
+    table.append(thead);
+
+    const body = el("tbody");
+    let drawn = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const tr = el("tr");
+      const d = el("td", "ft-ledger-d", r.d);
+      /* A BOARD-ONLY SESSION IS MARKED, because its sparseness is a fact
+         about the archive: those days carry only the names that made a board,
+         so a gap beside one is more often a name that missed the board than a
+         name nobody priced. */
+      if (r.source === "boards") {
+        const mark = el("span", "ft-ledger-src", "· board");
+        mark.title = "Reconstructed from the archived boards for that session, which " +
+          "carry only the names that made a board that day.";
+        d.append(mark);
+      }
+      tr.append(d);
+      tr.append(el("td", "c-num", r.close === null ? DASH : px2(r.close)));
+      tr.append(el("td", "c-num" + P.polarity(r.score),
+        r.score === null ? DASH : signed(r.score, (a) => String(a))));
+
+      const iAll = all.indexOf(r);
+      const pj = priorScored.has(iAll) ? priorScored.get(iAll) : null;
+      const dCell = el("td", "c-num");
+      if (r.score !== null && pj !== null && all[pj].score !== null) {
+        const mv = r.score - all[pj].score;
+        const gap = pj - iAll;
+        dCell.className = "c-num" + P.polarity(mv);
+        dCell.textContent = signed(mv, (a) => String(a));
+        dCell.title = mv + " score points since " + all[pj].d + ", " +
+          gap + (gap === 1 ? " session" : " sessions") + " earlier.";
+      } else {
+        dCell.textContent = DASH;
+        dCell.title = r.score === null
+          ? "This name was not scored on this session."
+          : "No earlier scored session inside this window to measure against.";
+      }
+      tr.append(dCell);
+
+      const pCell = el("td", "c-num" + P.polarity(r.p));
+      pCell.textContent = r.p === null ? DASH : money(r.p);
+      if (r.p === null) {
+        pCell.title = "No archived net premium for this name on this session — which is " +
+          "not the same as a session it was priced flat in.";
+      }
+      tr.append(pCell);
+      body.append(tr);
+      drawn++;
+    }
+    table.append(body);
+    wrap.append(table);
+    host.append(wrap);
+
+    const priced = all.filter((r) => r.p !== null).length;
+    const scored = all.filter((r) => r.score !== null).length;
+    host.append(statList([
+      ["Sessions held", String(all.length)],
+      ["Scored", scored + " of " + all.length],
+      ["Priced", priced + " of " + all.length],
+    ]));
+
+    /* THE POPULATION AND THE JOIN, OPEN. Both change what a row MEANS: a
+       reader who does not know this is capped, or that the two columns come
+       from two windows joined on the date, reads a different table. */
+    const capped = all.length > drawn;
+    host.append(el("p", "fc-note is-qualifier",
+      "One row a session, newest first, over the window this card's price history and " +
+      "the score archive between them cover" +
+      (capped ? " — the newest " + drawn + " of " + all.length + " are drawn" : "") +
+      ". Close and score come from the score-over-price panel and net premium from the " +
+      "net-premium panel; the two are joined on the DATE, not by position, because the " +
+      "two windows need not be the same length or start on the same day. A dash is a " +
+      "session that column has no reading for, never a zero."));
+  }
+
   function keyStats(host, _panel, card, question) {
     const { panelHead, statList, isNum } = P;
     panelHead(host, question);
@@ -4803,6 +5183,7 @@
     calendar: "calendar",
     pricedMove: "pricedMove",
     path: "path",
+    premiumTrack: "premiumTrack",
     context: "context",
     congress: "congress",
     marketRank: drawMarketRank,
@@ -4824,6 +5205,7 @@
        the DOM, as they read the question. */
     __score: (host, panel, card, question) => P.score(host, card, question),
     __stats: keyStats,
+    __sessions: sessionLedger,
   };
 
   /* ---------- the walk --------------------------------------------- */
@@ -5436,6 +5818,7 @@
     scoreOverlay: { group: "signal", tier: "lead" },
     __score: { group: "signal", tier: "table" },
     __stats: { group: "signal", tier: "table" },
+    __sessions: { group: "tape", tier: "table" },
     gamma: { group: "convexity", tier: "lead" },
     levels: { group: "convexity", tier: "reading" },
     displacement: { group: "convexity", tier: "reading" },
@@ -5450,6 +5833,7 @@
     volContext: { group: "volatility", tier: "chart" },
     aggressor: { group: "tape", tier: "lead" },
     path: { group: "tape", tier: "chart" },
+    premiumTrack: { group: "tape", tier: "chart" },
     topContracts: { group: "tape", tier: "table" },
     darkpool: { group: "tape", tier: "table" },
     oiDeltas: { group: "tape", tier: "table" },
@@ -5502,7 +5886,28 @@
     changeEl.id = "ftChange";
     changeEl.hidden = true;
     changeEl.setAttribute("aria-labelledby", "ftChangeH");
-    barEl.parentNode.insertBefore(changeEl, barEl.nextSibling);
+    /* AFTER THE CARDS, NOT IMMEDIATELY AFTER THE BAR. The bar moved above the
+       six cards to keep the station tabs inside a phone's first screen (see
+       the note beside #ftBar in shared/flows-pages.js), and this insertion
+       had been written against the old order: anchored to the bar, it landed
+       BETWEEN the identity and the session's figures, so on a 320px page the
+       cards were 851px of prose below the header they belong to.
+
+       Anchored to the cards instead, the order reads the way the design lays
+       it out — identity, navigation, this session's figures, then what
+       changed. The bar stays the fallback: a card that publishes no figure at
+       all leaves #ftCards hidden, and inserting after a hidden element still
+       puts this region exactly where it used to be. */
+    /* AFTER THE CHART-AND-CHAIN ROW, NOT BETWEEN THE FIGURES AND IT.
+
+       The design goes figures, then the series beside the book, with
+       nothing in between; this block landed in that gap and pushed the row
+       it introduces most of a viewport down. It belongs under them — it is
+       what changed SINCE the session those two draw, so it reads after
+       them. Falls back to the cards and then to the bar, so the insertion
+       survives either block being absent. */
+    const after = document.querySelector(".ft-top") || $("ftCards") || barEl;
+    after.parentNode.insertBefore(changeEl, after.nextSibling);
   }
 
   /**
@@ -6038,6 +6443,1660 @@
   }
 
   /**
+   * THE SIDE, STATED AGAINST THE PUBLISHED DEAD BAND rather than against zero.
+   *
+   * A score of +1 with a band of ±1 is not a bullish name; it is a name the
+   * board declined to rank, and calling it bullish in a header is exactly the
+   * confident reading this product exists to refuse.
+   *
+   * ONE FUNCTION BECAUSE THERE ARE NOW THREE READERS. This lived inline in
+   * paintIdentity while the sticky strip was the only place a side was
+   * printed. The hero prints it as a pill and the flags row prints it as a
+   * mark, and a second copy of this decision is how one of the three comes to
+   * call a name bullish while the other two call it unranked — on the same
+   * screen, four lines apart.
+   *
+   * @returns {{text: string, word: string|null, cls: string, empty: string|null, title: string}}
+   *   `word` is null for every case that is NOT a directional claim — no score,
+   *   and inside the band — so a caller that wants only the direction cannot
+   *   accidentally treat "inside the dead band" as one.
+   */
+  function sideOf(card, chg) {
+    const score = isNum(card && card.score);
+    const band = chg && chg.status === "ok" ? chg.band : null;
+    if (score === null) {
+      return { text: DASH, word: null, cls: "is-null", empty: "unavailable",
+        title: "This card carries no score, so it has no side." };
+    }
+    const word = score < 0 ? "bearish" : score > 0 ? "bullish" : "neutral";
+    if (band === null) {
+      return { text: word, word, cls: P.polarity(score), empty: null,
+        title: "No dead band was published on this card, so the side is stated " +
+          "against zero rather than against the board's own membership rule." };
+    }
+    if (Math.abs(score) <= band) {
+      return { text: "inside the dead band", word: null, cls: "is-flat", empty: null,
+        title: "Within ±" + band + POINTS(band) + " of zero, which is the band " +
+          "the board declines to rank inside." };
+    }
+    return { text: word, word, cls: P.polarity(score), empty: null,
+      title: "Outside the published dead band of ±" + band + POINTS(band) + "." };
+  }
+
+  /* ---------- the arrival header ------------------------------------
+
+     THE SAME FACTS AS THE STICKY STRIP, LAID OUT RATHER THAN RUN TOGETHER.
+
+     The strip is one line by necessity — it is re-parented into the sticky bar
+     and every pixel of its height is spent for the whole scroll — so it reads
+     as "SYN002 +16 $34.87 −1.7% bullish +1 score point over 1 session — 81
+     conviction short Γ session 2026-08-24": seven readings a reader has to
+     parse apart before they can use any one of them. This block is what a
+     reader LANDS on, where height is free, and each reading is its own object
+     with its own label.
+
+     NOT ONE SECOND MEASUREMENT ANYWHERE IN IT. Score and conviction are read
+     off the card's top level, spot through the same spotOf() the strip uses,
+     the change off the context panel. A hero that re-derived any of them would
+     be a header that can disagree with the panel beneath it, which is the one
+     failure this page cannot afford at the top of itself. */
+  function paintHero(card, chg) {
+    const hero = $("ftHero");
+    if (!hero) return;
+
+    const t = $("ftHeroT");
+    if (t) t.textContent = card.ticker || "";
+    /* THE COMPANY NAME IS ON THE CARD NOW. It used to be a board field this
+       page could not reach without a second fetch, so the slot was empty on
+       arrival for every reader; shared/flows-card.js carries it across at a
+       cost of about thirty bytes. Absent stays hidden rather than falling
+       back to the symbol: a name equal to its own ticker is what an absent
+       name looks like after a fallback, and no reader could tell. */
+    const nm = typeof card.nm === "string" && card.nm.trim() ? card.nm.trim() : null;
+    const nmEl = $("ftHeroNm");
+    if (nmEl) {
+      nmEl.textContent = nm && nm !== card.ticker ? nm : "";
+      nmEl.hidden = !(nm && nm !== card.ticker);
+    }
+
+    const spot = spotOf(card);
+    const px = $("ftHeroPx");
+    if (px) {
+      px.textContent = spot === null ? DASH : "$" + spot.v.toFixed(2);
+      if (spot === null) px.setAttribute("data-empty", "unavailable");
+      else px.removeAttribute("data-empty");
+      px.title = spot === null
+        ? "No panel on this card published a spot price."
+        : "Spot as the " + spot.from + " panel resolved it.";
+    }
+
+    /* THE PERCENTAGE AND NOT A DOLLAR CHANGE. The mockup this follows prints
+       both — "+0.35 (+0.8%)" — and the dollar figure is derivable from spot
+       and this ratio. It is not printed, because the two come from DIFFERENT
+       PANELS: spot from levels/pricedMove/gamma, the ratio from context. A
+       dollar change computed across that seam is a third quantity neither
+       panel published, and the first time those two panels disagree about the
+       session it would be wrong in a way nothing on the page could catch. */
+    const ctx = card.panels && card.panels.context;
+    const chgPct = ctx && ctx.status === "ok" ? isNum(ctx.changePct) : null;
+    const chgEl = $("ftHeroChg");
+    if (chgEl) {
+      chgEl.textContent = chgPct === null ? "" : P.pct1(chgPct);
+      chgEl.className = "ft-hero-chg" + P.polarity(chgPct);
+      chgEl.hidden = chgPct === null;
+      chgEl.title = "Change against the previous close, from the price context panel.";
+    }
+
+    /* THE SCORE, ITS BAR AND ITS SIDE. The bar is the same ±100 scale the
+       board's rows use and the pill is the same word the strip prints — one
+       vocabulary for a direction across the section, so a reader who learned
+       it on the landing page does not learn it again here. */
+    const score = isNum(card.score);
+    const sEl = $("ftHeroScore");
+    if (sEl) {
+      sEl.textContent = score === null ? DASH : P.signed(score, (a) => String(a));
+      sEl.className = "ft-hero-v" + P.polarity(score);
+      if (score === null) sEl.setAttribute("data-empty", "unavailable");
+      else sEl.removeAttribute("data-empty");
+    }
+    const bar = $("ftHeroScoreBar");
+    if (bar) {
+      bar.replaceChildren();
+      bar.hidden = score === null;
+      if (score !== null) {
+        const fill = el("i", P.polarity(score).trim() || null);
+        /* HALF THE TRACK IS EACH SIDE, so the bar grows from the centre and a
+           −49 and a +49 are mirror images. Clamped, because the scale is the
+           claim: a score past ±100 would otherwise draw past its own track. */
+        const half = Math.min(50, Math.abs(score) / 2);
+        fill.style.width = half + "%";
+        fill.style.left = (score < 0 ? 50 - half : 50) + "%";
+        bar.append(fill);
+      }
+    }
+    /* THE PILL CARRIES THE SIDE ONLY WHERE THERE IS ONE. sideOf returns a
+       null `word` for the two cases that are not a direction — no score, and
+       inside the dead band — and the pill is absent for both rather than
+       printing "NEUTRAL", which would read as a measured middle instead of as
+       a name the board declined to rank. The strip below still states those
+       two in words; a pill is the wrong object for a refusal. */
+    const sd = sideOf(card, chg);
+    const pill = $("ftHeroSide");
+    if (pill) {
+      pill.textContent = sd.word ? sd.word.toUpperCase() : "";
+      pill.className = "ft-hero-pill" + (sd.word === "bullish" ? " is-pos"
+        : sd.word === "bearish" ? " is-neg" : "");
+      pill.title = sd.title;
+      pill.hidden = !sd.word;
+    }
+
+    /* CONVICTION AS FIVE SEGMENTS, WHICH IS WHAT IT IS. The number is a 0-100
+       reading and five lit segments out of five is a coarser statement than
+       the digits beside it — deliberately: the digits are the measurement and
+       the segments are the glance. A segment lights on its own fifth being
+       reached, so the last one needs 80 and not 100, and four lit means "past
+       four fifths" rather than "80 exactly". */
+    const conv = isNum(card.conviction);
+    const cEl = $("ftHeroConv");
+    if (cEl) {
+      cEl.textContent = conv === null ? DASH : String(Math.round(conv));
+      if (conv === null) cEl.setAttribute("data-empty", "unavailable");
+      else cEl.removeAttribute("data-empty");
+    }
+    const seg = $("ftHeroConvSeg");
+    if (seg) {
+      seg.replaceChildren();
+      seg.hidden = conv === null;
+      if (conv !== null) {
+        for (let i = 0; i < 5; i++) {
+          seg.append(el("i", conv >= (i + 1) * 20 ? "is-on" : null));
+        }
+      }
+    }
+
+    /* ---- THE TWO VOLATILITY COLUMNS ----------------------------------
+
+       BOTH ARE READ, NEITHER IS DERIVED. `atmVol` and `ivRank` are published
+       side by side on the priced-move panel, which also publishes the rule
+       that decides the horizon they are measured over — so the horizon is
+       quoted from `horizonRule` rather than described here, and the two
+       cannot drift.
+
+       THE RANK IS A FRACTION AND THE PIPELINE SAYS SO IN AS MANY WORDS:
+       ivRankFraction divides by 100 when the vendor sends 0..100, and its
+       comment records what happens when that is missed — "1352% of its year"
+       on a card. It is printed as a percentage of its own year here, with
+       the year named, because a bare "84" beside a vol of "44.2%" is two
+       units under one heading. */
+    const pm = card.panels && card.panels.pricedMove;
+    const pmOk = pm && pm.status === "ok";
+    const atmVol = pmOk ? isNum(pm.atmVol) : null;
+    const ivRank = pmOk ? isNum(pm.ivRank) : null;
+    const horizon = pmOk && typeof pm.horizonRule === "string" && pm.horizonRule
+      ? pm.horizonRule : null;
+
+    const ivB = $("ftHeroIvB"), ivEl = $("ftHeroIv"), ivSub = $("ftHeroIvSub");
+    if (ivB && ivEl) {
+      ivEl.textContent = atmVol === null ? DASH : (atmVol * 100).toFixed(1) + "%";
+      if (atmVol === null) ivEl.setAttribute("data-empty", "unavailable");
+      else ivEl.removeAttribute("data-empty");
+      if (ivSub) {
+        ivSub.textContent = horizon ? "at " + horizon : "";
+        ivSub.hidden = !horizon;
+      }
+      ivB.title = atmVol === null
+        ? "The priced-move panel published no at-the-money volatility for this name."
+        : "At-the-money implied volatility, over " + (horizon || "the panel's own horizon") +
+          ", as the priced-move panel measured it.";
+      /* THE BLOCK SHOWS WHENEVER THE PANEL READ, even where the figure did
+         not: a column that vanishes on an absent reading takes the silence
+         with it, and the strip's other blocks all print their own em dash. */
+      ivB.hidden = !pmOk;
+    }
+
+    const ivrB = $("ftHeroIvrB"), ivrEl = $("ftHeroIvr"), ivrSeg = $("ftHeroIvrSeg");
+    if (ivrB && ivrEl) {
+      ivrEl.textContent = ivRank === null ? DASH : Math.round(ivRank * 100) + "%";
+      if (ivRank === null) ivrEl.setAttribute("data-empty", "unavailable");
+      else ivrEl.removeAttribute("data-empty");
+      if (ivrSeg) {
+        ivrSeg.replaceChildren();
+        ivrSeg.hidden = ivRank === null;
+        if (ivRank !== null) {
+          /* FIVE SEGMENTS, THE SAME FIVE THE CONVICTION BLOCK BESIDE IT USES,
+             so two bounded 0-100 readings in one strip are read the same way
+             rather than each inventing a scale. */
+          for (let i = 0; i < 5; i++) {
+            ivrSeg.append(el("i", ivRank * 100 >= (i + 1) * 20 ? "is-on" : null));
+          }
+        }
+      }
+      ivrB.title = ivRank === null
+        ? "The priced-move panel published no IV rank for this name."
+        : "Where this name's implied volatility sits inside its own past year: " +
+          Math.round(ivRank * 100) + "% of that year was lower. A percentile of its own " +
+          "history, not a level comparable across names.";
+      ivrB.hidden = !pmOk;
+    }
+
+    const sector = typeof card.sector === "string" && card.sector.trim()
+      ? card.sector.trim() : null;
+    /* THE SECTOR AND THE SESSION SIT UNDER THE SYMBOL NOW, in the identity
+       block rather than in a sixth column of their own. Neither is a
+       measurement of the session — one is a property of the name and the
+       other says which day every figure above is of — so a column beside four
+       figures was the wrong shape for both, and it was the block that pushed
+       the strip onto two rows. Each still prints or stays empty on its own:
+       a card with no sector still has a session. */
+    const secEl = $("ftHeroSector"), whenEl = $("ftHeroWhen");
+    const when = card.sessionDate ? "session " + fmtDate(card.sessionDate) : null;
+    if (whenEl) whenEl.textContent = when || "";
+    if (secEl) secEl.textContent = sector || "";
+
+    hero.hidden = false;
+  }
+
+  /* ---------- the flags row -----------------------------------------
+
+     FIVE MARKS, EACH ONE A THRESHOLD ALREADY DRAWN SOMEWHERE BELOW.
+
+     THE ROW ADDS NO OPINION AND THAT IS THE POINT: every flag is a restatement
+     of a panel's own number past a line this function names in the flag's own
+     title, so a reader can always find the reading it came from. What it adds
+     is SCAN — five yes/no marks at the top, where the page's answer to "why
+     am I looking at this name" used to be spread over four stations.
+
+     ABSENT, NEVER GREYED OUT. A flag that draws itself dim to mean "no" turns
+     five silences into five negative claims, and most of these readings are
+     missing on some card on some day. A flag appears when its reading is
+     present AND past its line; otherwise there is nothing there. */
+  /* ---------- the six cards ------------------------------------------
+
+     THE SESSION'S FLOW, AT A GLANCE, AND NOT A SECOND COPY OF THE HEADER.
+     The strip above already carries price, score, conviction and the two
+     volatility figures. These six answer a different question — what the
+     flow DID — and every one of them is a figure some panel further down
+     states in full, lifted to the top where a reader looks first.
+
+     EACH CARD IS ONE PANEL'S READING, WITH THAT PANEL'S OWN UNIT. Not one
+     composite: a card that averaged premium with contracts would be a number
+     with no unit at all. Where a panel publishes a coverage caveat — a count
+     the vendor did not report, a clearing day's lag, rows shed to a cap —
+     that caveat is the card's sub-line rather than something a reader has to
+     scroll to find.
+
+     A PANEL THAT DID NOT READ GETS NO CARD. Six greyed-out boxes would turn
+     six silences into six claims that the session was quiet; the strip simply
+     carries fewer cards, and the panels below still say which of them are
+     absent and why. */
+  function paintCards(card) {
+    const host = $("ftCards");
+    if (!host) return;
+    host.replaceChildren();
+    const P0 = window.FlowsPanels;
+    if (!P0) { host.hidden = true; return; }
+    const panels = card.panels || {};
+    const ok = (k) => {
+      const p = panels[k];
+      return p && p.status === "ok" ? p : null;
+    };
+    const n = (v) => isNum(v);
+
+    const track = ok("premiumTrack"), path = ok("path"), aggr = ok("aggressor");
+    const oiD = ok("oiDeltas"), dark = ok("darkpool");
+
+    /* THE SPARKLINE IS THE PANEL'S OWN SERIES, drawn from the same rows the
+       premium-track panel draws in full — a shape, with the figure beside it
+       carrying the magnitude. A session the track could not price is a GAP in
+       the line rather than a zero, which is the same refusal the panel makes
+       in its own drawing. */
+    const spark = (vals) => {
+      const pts = vals.map((v, i) => [i, n(v)]).filter((x) => x[1] !== null);
+      if (pts.length < 2) return null;
+      const W = 76, H = 20;
+      let lo = Infinity, hi = -Infinity;
+      for (const [, v] of pts) { if (v < lo) lo = v; if (v > hi) hi = v; }
+      if (lo === hi) { lo -= 1; hi += 1; }
+      const x = (i) => (i / Math.max(1, vals.length - 1)) * W;
+      const y = (v) => H - ((v - lo) / (hi - lo)) * H;
+      const svg = svgEl("svg", { class: "ft-card-spark", viewBox: "0 0 " + W + " " + H,
+        width: W, height: H, preserveAspectRatio: "none", "aria-hidden": "true" });
+      svg.append(svgEl("path", {
+        /* THREE ARMS, THROUGH THE SHARED HELPER. A two-arm sign puts a
+           measured zero — a session that cleared exactly even, which this
+           pipeline does assign — on the positive side, and flows-sign refuses
+           that everywhere in this section by structure rather than by
+           review. */
+        class: "ft-card-line " + P0.polarity(pts[pts.length - 1][1]),
+        fill: "none",
+        d: pts.map(([i, v], k) => (k ? "L" : "M") + x(i).toFixed(1) + " " + y(v).toFixed(1)).join(" "),
+      }));
+      return svg;
+    };
+
+    /* A SIGNED BAR ONLY WHERE THERE IS SOMETHING TO BE A SHARE OF.
+
+       The first draft gave four cards a bar and passed each one its OWN
+       magnitude as the peak — so every bar came out exactly half full, in the
+       direction of its sign, on every card and every session. Read back off
+       the rendered page: width 50% left 0%, width 50% left 0%, width 50% left
+       50%. That is not a reading, it is a shape that looks like one, and the
+       one card with a real denominator (open interest, where the call side is
+       measured against the larger of the two sides) was hidden among three
+       that had none.
+
+       So the bar belongs to the card that has a comparison and nowhere else;
+       the rest print their figure and their unit, which is the whole of what
+       they know. */
+    const bar = (v, peak) => {
+      const val = n(v);
+      if (val === null || !(peak > 0)) return null;
+      const b = el("span", "ft-card-bar");
+      const fill = el("i", val < 0 ? "is-neg" : val > 0 ? "is-pos" : "");
+      const half = Math.min(50, (Math.abs(val) / peak) * 50);
+      fill.style.width = Math.max(1.5, half) + "%";
+      fill.style.left = (val < 0 ? 50 - half : 50) + "%";
+      b.append(fill);
+      return b;
+    };
+
+    const cards = [];
+
+    if (track) {
+      const rows = Array.isArray(track.rows) ? track.rows : [];
+      cards.push(["Premium run", P0.money(track.net),
+        P0.polarity(n(track.net)),
+        track.sessions + " sessions, " + track.priced + " priced" +
+          (track.gaps ? ", " + track.gaps + " unpriced" : ""),
+        spark(rows.map((r) => r && r.p)),
+        "Net premium — calls minus puts — summed over the sessions this card carries. " +
+        (track.unit || "")]);
+    }
+    if (path) {
+      /* BOTH OF THESE CARDS PRINT THE LAST POINT OF A SERIES THEY WERE NOT
+         DRAWING. `path.series` is the intraday tape already on this card,
+         cumulated — column 1 is net premium and column 0 is net delta — and
+         each card's figure is that column's final value. So the shape was
+         there all along and the card showed only its end. Drawn from the
+         SAME array, through the same spark() the premium-run card uses, so
+         the line and the figure cannot disagree. */
+      const tape = Array.isArray(path.series) ? path.series : [];
+      cards.push(["Session premium", P0.money(path.netPremium),
+        P0.polarity(n(path.netPremium)),
+        path.netPremiumUnit || "",
+        spark(tape.map((r) => (Array.isArray(r) ? r[1] : null))),
+        "What this one session cleared, side-signed, over " +
+          (n(path.minutes) === null ? "the session" : path.minutes + " minutes") + "."]);
+      cards.push(["Net delta", P0.fmtOr(path.netDelta, (v) => P0.signed(v, (a) => P0.compact(a))),
+        P0.polarity(n(path.netDelta)),
+        path.netDeltaUnit || "",
+        spark(tape.map((r) => (Array.isArray(r) ? r[0] : null))),
+        "Delta-weighted contracts the tape ended holding, signed by side."]);
+    }
+    if (aggr && aggr.lead && aggr.lead.n) {
+      const net = n(aggr.lead.n.ladderNetExact);
+      cards.push(["Aggressor", P0.fmtOr(net, (v) => P0.signed(v, (a) => P0.compact(a))),
+        P0.polarity(net),
+        aggr.reported + " reported, " + aggr.unreported + " not",
+        /* THE TOP STRIKE AGAINST THE WHOLE LADDER, which the panel publishes
+           as two figures side by side — so this bar is a share of something
+           rather than a restatement of its own value. */
+        bar(n(aggr.lead.n.topNetExact), Math.abs(net) || 0),
+        aggr.relation || ""]);
+    }
+    if (oiD && oiD.lead && oiD.lead.n) {
+      const cN = n(oiD.lead.n.callNet), pN = n(oiD.lead.n.putNet);
+      const both = cN !== null && pN !== null;
+      cards.push(["Open interest", both ? P0.signed(cN - pN, (a) => P0.compact(a)) : DASH,
+        both ? P0.polarity(cN - pN) : "",
+        both ? P0.compact(Math.abs(cN)) + " call / " + P0.compact(Math.abs(pN)) + " put" : "",
+        both ? bar(cN - pN, Math.max(Math.abs(cN), Math.abs(pN))) : null,
+        "Contract-level open-interest change on the lines the vendor surfaced. An open " +
+        "interest change compares two clearing snapshots, so it is a settled fact a day " +
+        "late by construction — never today's tape."]);
+    }
+    if (dark && dark.lead && dark.lead.n) {
+      const d = n(dark.lead.n.dollars);
+      cards.push(["Off-exchange", P0.money(d), "",
+        dark.lead.n.kept + " of " + dark.lead.n.seen + " prints" +
+          (n(dark.lead.n.topPct) === null ? "" : ", top " + dark.lead.n.topPct + "%"),
+        null,
+        "Off-exchange equity executions in this name, by their own dollar size. The tape " +
+        "reports them with delay and attributes no side and no participant."]);
+    }
+
+    for (const [k, v, cls, sub, viz, why] of cards.slice(0, 6)) {
+      const c = el("div", "ft-card");
+      c.title = why || "";
+      c.append(el("span", "ft-card-k", k));
+      const row = el("span", "ft-card-row");
+      row.append(el("span", "ft-card-v" + (cls ? " " + cls : ""), v));
+      if (viz) row.append(viz);
+      c.append(row);
+      if (sub) c.append(el("span", "ft-card-s", sub));
+      host.append(c);
+    }
+    host.hidden = !cards.length;
+  }
+
+  /* ---------- what this card found ----------------------------------
+
+     THE PANELS' OWN LEADS, GATHERED, WITH A WAY INTO EACH. Not a new
+     analysis and not a second sentence about the same numbers: every line is
+     `panels[key].lead.say`, the exact string the panel prints, so the index
+     and the panel cannot disagree about a figure. What it adds is that the
+     findings are visible before a reader scrolls, and that each one is a link
+     to the panel that made it.
+
+     THE ORDER IS THE PAGE'S. It walks `.ft-panel[data-panel]` in DOM order —
+     the same walk the grid uses — so the index reads down the page rather
+     than ranking findings by an importance nothing on this card publishes.
+
+     AND IT SAYS HOW MANY IT IS NOT SHOWING. A list of five under a card with
+     nineteen readings is a selection, and a selection that does not state its
+     own denominator reads as a census. */
+  function paintBrief(card) {
+    const host = $("ftBrief"), list = $("ftBriefL"), sub = $("ftBriefS");
+    if (!host || !list) return;
+    list.replaceChildren();
+    const panels = card.panels || {};
+    const found = [];
+    for (const section of document.querySelectorAll(".ft-panel[data-panel]")) {
+      const key = section.getAttribute("data-panel");
+      const p = key ? panels[key] : null;
+      const say = p && p.status === "ok" && p.lead && typeof p.lead.say === "string"
+        ? p.lead.say.trim() : "";
+      if (!say) continue;
+      const title = section.querySelector(".ft-panel-t");
+      found.push({ key, say, title: title ? title.textContent.trim() : key });
+    }
+    const CAP = 5;
+    for (const f of found.slice(0, CAP)) {
+      const li = el("li", "ft-brief-i");
+      const a = el("a", "ft-brief-a");
+      a.href = "#panel-" + f.key;
+      /* THE PANEL'S NAME IS THE LINK'S DESTINATION SAID OUT LOUD, because
+         "read more" repeated five times is five links a screen reader cannot
+         tell apart. */
+      a.setAttribute("aria-label", f.say + " \u2014 open " + f.title);
+      a.append(el("span", "ft-brief-t", f.say));
+      a.append(el("span", "ft-brief-c", "\u203a"));
+      li.append(a);
+      list.append(li);
+    }
+    if (sub) {
+      sub.textContent = found.length > CAP
+        ? "The first " + CAP + " of " + found.length + " findings on this card, in page order."
+        : (found.length
+          ? found.length + (found.length === 1 ? " finding" : " findings") +
+            " on this card, in page order."
+          : "");
+    }
+    host.hidden = !found.length;
+  }
+
+  /* ---------- the series block, one tab per published series ---------
+
+     NOTHING HERE DERIVES A NUMBER. Each tab reads the array the panel below
+     it reads, out of the same field, and draws it. There is no return, no
+     change, no summary computed in this function — those sentences belong to
+     the panels that own the series, and a second derivation is how a header
+     and the panel under it come to disagree about one name.
+
+     THE TABS DO NOT SHARE AN X-AXIS, WHICH IS WHY EACH CARRIES ITS CLOCK.
+     Price and premium are indexed by SESSION, net flow by an intraday
+     BUCKET, the volatility curve by TENOR. The overview's period control
+     settled this and its rule is reused rather than re-argued: the control
+     switches SOURCE, and the note names the clock of what is drawn.
+
+     A TAB WITH NO SERIES KEEPS ITS PLACE AND SAYS SO. There is no per-name
+     volume series in this payload. Dropping the tab would silently edit the
+     design; drawing contract counts under a "Volume" heading would be a
+     different quantity wearing its label. */
+  /* THE PERIODS THE DESIGN DRAWS, IN SESSIONS.
+
+     A window, never a fetch: everything any of these can show is already on
+     the card. `n` is how many of the series' own points the period keeps —
+     each entry carries a SESSION COUNT rather than a duration because the
+     card's clocks are sessions and intraday buckets, not wall time, and
+     converting between them here would invent trading days.
+
+     3M AND 1Y ARE ON THIS LIST AND WILL USUALLY BE DISABLED. The price
+     window is about forty sessions, so they are outside it on every name
+     this pipeline builds. They stay because the row is the design's, and a
+     control that is present and explains its own limit tells a reader more
+     than a row that quietly has two fewer buttons. */
+  const PERIODS = [
+    { key: "1D", n: 1 },
+    { key: "1W", n: 5 },
+    { key: "1M", n: 21 },
+    { key: "3M", n: 63 },
+    { key: "1Y", n: 252 },
+  ];
+  let period = "1M";
+
+  const CHART_TABS = ["price", "iv", "volume", "premium", "netflow"];
+  const CHART_LABEL = {
+    price: "Price", iv: "IV", volume: "Volume",
+    premium: "Premium", netflow: "Net Flow",
+  };
+  let chartTab = "price";
+
+  /**
+   * The series for one tab, or the reason there is none.
+   *
+   * Returns either { points, kind, unit, clock } or { silence }. `points`
+   * are { v, label, rows } — v is the value, rows are what the cursor
+   * prints, and both come off the payload row rather than being rebuilt.
+   */
+  function chartSeries(key, card) {
+    const panels = (card && card.panels) || {};
+    const ok = (k) => { const p = panels[k]; return p && p.status === "ok" ? p : null; };
+
+    if (key === "price") {
+      const c = ok("context");
+      if (!c) return { silence: "No price window was published for this name this run." };
+      const closes = Array.isArray(c.closes) ? c.closes : [];
+      const dates = Array.isArray(c.closeDates) ? c.closeDates : [];
+      if (closes.length < 2) return { silence: "Fewer than two closes were published." };
+      /* THE PANEL'S OWN WARNING, CARRIED. buildContext publishes `dropped`
+         and its comment says a non-zero value means the INDEX IS NOT TIME:
+         sessions the window could not price are absent, so evenly spaced
+         marks would be evenly spaced days that are not evenly spaced. The
+         clock says which it is rather than the chart implying either. */
+      const dropped = isNum(c.dropped);
+      return {
+        kind: "line", unit: "close",
+        clock: "one mark a session, " + closes.length + " of them" +
+          (dates.length ? ", " + dates[0] + " to " + dates[dates.length - 1] : "") +
+          (dropped ? " — " + dropped + " session" + (dropped === 1 ? "" : "s") +
+            " the window could not price are absent, so the spacing is by index " +
+            "rather than by date" : ""),
+        points: closes.map((v, i) => ({
+          v: isNum(v),
+          label: dates[i] ? String(dates[i]) : "Session " + (i + 1),
+          rows: [{ k: "Close", v: px2(v) }],
+        })),
+      };
+    }
+
+    if (key === "iv") {
+      const v = ok("volContext");
+      const term = v && v.term;
+      if (!term || term.status !== "ok" || !Array.isArray(term.rows) || term.rows.length < 2) {
+        return { silence: term && term.reason
+          ? String(term.reason)
+          : "No volatility term curve was published for this name this run." };
+      }
+      return {
+        kind: "line", unit: "implied volatility",
+        clock: "one mark an EXPIRY, " + term.rows.length + " of them — this axis is " +
+          "tenor, not time, so it is a curve across the term and not a history",
+        points: term.rows.map((r) => {
+          const dte = isNum(r.dte);
+          const mv = isNum(r.impliedMovePerc);
+          return {
+            v: isNum(r.vol),
+            label: String(r.expiry || DASH) + (dte === null ? "" : " · " + dte + "d out"),
+            rows: [
+              { k: "Implied vol", v: isNum(r.vol) === null ? "not published" : vol1(r.vol) },
+              { k: "Implied move",
+                v: mv === null ? "not published" : vol1(mv) + " of spot" },
+            ],
+          };
+        }),
+      };
+    }
+
+    if (key === "volume") {
+      /* NOT A FAILURE AND NOT AN EMPTY READ. The key does not exist: no
+         surface in this payload carries a per-name volume series. Said in
+         those words so it is not mistaken for a run that came back thin. */
+      return { silence: "This payload publishes no per-name volume series — not a thin " +
+        "run, a field that does not exist. Contract volume is published per STRIKE and " +
+        "per contract, which the chain and the aggressor ladder draw; neither is a " +
+        "series through time, so neither can be drawn here under this label." };
+    }
+
+    if (key === "premium") {
+      const t = ok("premiumTrack");
+      const rows = t && Array.isArray(t.rows) ? t.rows : [];
+      if (!rows.length) return { silence: "No net-premium history was published for this name." };
+      return {
+        kind: "bars", unit: (t && t.unit) || "net premium",
+        clock: "one bar a session, " + rows.length + " of them, against a marked zero",
+        points: rows.map((r) => ({
+          v: isNum(r.p),
+          label: String(r.d || DASH),
+          rows: [
+            { k: "Net premium", v: isNum(r.p) === null ? "not priced" : "$" + compact(r.p),
+              cls: isNum(r.p) === null ? "" : r.p > 0 ? "is-pos" : r.p < 0 ? "is-neg" : "" },
+            /* THE ROW'S OWN PROVENANCE, because this series is joined from
+               two sources and a reader comparing two bars should be able to
+               see when they came from different ones. */
+            { k: "Source", v: r.source ? String(r.source) : "not stated" },
+          ],
+        })),
+      };
+    }
+
+    const p = ok("path");
+    const series = p && Array.isArray(p.series) ? p.series : [];
+    if (series.length < 2) {
+      return { silence: (p && p.reason) ||
+        "No intraday tape was published for this name this session." };
+    }
+    const mins = isNum(p.minutes);
+    return {
+      kind: "line", unit: (p && p.netPremiumUnit) || "cumulative net premium",
+      clock: "one mark a five-minute bucket, " + series.length + " of them across the " +
+        "session" + (mins === null ? "" : " (" + mins + " minutes of tape)") +
+        " — this axis is intraday, where every other tab here is by session",
+      points: series.map((row, i) => {
+        const d = isNum(row && row[0]);
+        return {
+          v: isNum(row && row[1]),
+          label: "Bucket " + (i + 1) + " of " + series.length,
+          rows: [
+            { k: "Net premium", v: isNum(row && row[1]) === null ? "not reported"
+              : "$" + compact(row[1]),
+              cls: !isNum(row && row[1]) ? "" : row[1] > 0 ? "is-pos" : row[1] < 0 ? "is-neg" : "" },
+            { k: "Net delta", v: d === null ? "not reported" : compact(d) + " contracts" },
+          ],
+        };
+      }),
+    };
+  }
+
+  function paintChart(card) {
+    const host = $("ftChart"), body = $("ftChartBody"), sub = $("ftChartS");
+    const tabs = $("ftChartTabs");
+    if (!host || !body) return;
+    body.replaceChildren();
+    if (tabs) tabs.replaceChildren();
+
+    /* THE TAB ROW IS DRAWN WHATEVER THE SELECTED TAB HOLDS, so a reader who
+       opens a silent tab can still leave it. A control row that disappears
+       with its content strands them. */
+    for (const key of CHART_TABS) {
+      const b = el("button", "ft-chart-tab" + (chartTab === key ? " is-on" : ""),
+        CHART_LABEL[key]);
+      b.type = "button";
+      b.setAttribute("role", "tab");
+      b.setAttribute("aria-selected", chartTab === key ? "true" : "false");
+      b.addEventListener("click", () => {
+        if (chartTab === key) return;
+        chartTab = key;
+        paintChart(card);
+        /* THE PILLS ARE RE-TESTED AGAINST THE NEW TAB. Each tab has its own
+           point count and its own clock, so a period reachable on one can be
+           unreachable on the next; leaving the row as it was would offer a
+           window this series does not have. */
+        paintPeriod(card);
+      });
+      if (tabs) tabs.append(b);
+    }
+
+    const spec = chartSeries(chartTab, card);
+    /* THE WINDOW IS APPLIED HERE, ON THE POINTS THE SERIES RETURNED, so
+       every tab gets it and no tab has to know the control exists. The
+       tenor curve is exempt: "the last five expiries" is a cut of the term,
+       not a period of time, and labelling it 1W would put a right number
+       under a wrong word. */
+    const per = PERIODS.find((x) => x.key === period) || null;
+    let windowed = null;
+    if (spec.points && per && chartTab !== "iv") {
+      const have = spec.points.length;
+      /* NET FLOW IS ONE SESSION BY CONSTRUCTION, so a multi-session period
+         cannot narrow it and 1D is the whole of it. Cutting its buckets to
+         "five sessions" would be arithmetic on the wrong clock. */
+      if (chartTab === "netflow") windowed = per.key === "1D" ? have : null;
+      else if (per.n <= have) windowed = per.n;
+      if (windowed !== null && windowed < have) {
+        spec.points = spec.points.slice(have - windowed);
+      }
+    }
+
+    if (spec.silence) {
+      const p = el("p", "ft-chart-dead", spec.silence);
+      body.append(p);
+      if (sub) sub.textContent = "";
+      host.hidden = false;
+      return;
+    }
+
+    const live = spec.points.filter((pt) => pt.v !== null);
+    if (live.length < 2) {
+      body.append(el("p", "ft-chart-dead",
+        "Fewer than two of the " + spec.points.length + " points in this series carry a " +
+        "value, so there is no shape to draw."));
+      if (sub) sub.textContent = "";
+      host.hidden = false;
+      return;
+    }
+
+    const W = 620, H = 260, padL = 8, padR = 46, padT = 12, padB = 22;
+    const plotL = padL, plotW = W - padL - padR;
+    const plotT = padT, plotH = H - padT - padB;
+
+    let lo = Infinity, hi = -Infinity;
+    for (const pt of live) { if (pt.v < lo) lo = pt.v; if (pt.v > hi) hi = pt.v; }
+    /* BARS ARE MEASURED FROM ZERO AND A LINE IS NOT. A signed bar whose axis
+       starts at the smallest value encodes its length against an arbitrary
+       floor, which is the defect this wave already fixed once on the premium
+       panel: bar length has to mean the quantity. A line is a shape and may
+       be framed on its own range. */
+    if (spec.kind === "bars") { lo = Math.min(0, lo); hi = Math.max(0, hi); }
+    if (lo === hi) { lo -= 1; hi += 1; }
+
+    const n = spec.points.length;
+    const x = (i) => plotL + (n === 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+    const y = (v) => plotT + plotH - ((v - lo) / (hi - lo)) * plotH;
+
+    const svg = svgEl("svg", {
+      class: "ft-chart-svg", viewBox: "0 0 " + W + " " + H,
+      role: "img", tabindex: "0",
+      "aria-label": CHART_LABEL[chartTab] + ", " + spec.points.length + " points",
+    });
+
+    /* THREE AXIS LABELS AND NO GRID: the readout carries every value, so a
+       grid here would be ink that repeats what a cursor already says. */
+    for (const frac of [0, 0.5, 1]) {
+      const v = lo + (hi - lo) * frac;
+      const yy = y(v);
+      svg.append(svgEl("line", { class: "ft-chart-rule",
+        x1: plotL, x2: plotL + plotW, y1: yy, y2: yy }));
+      const t = svgEl("text", { class: "ft-chart-ax", x: plotL + plotW + 4, y: yy + 3 });
+      t.textContent = spec.kind === "bars" || Math.abs(v) >= 1000 ? compact(v) : px2(v);
+      svg.append(t);
+    }
+
+    if (spec.kind === "bars") {
+      const bw = Math.max(1.5, (plotW / n) * 0.62);
+      const zero = y(0);
+      for (let i = 0; i < n; i++) {
+        const pt = spec.points[i];
+        if (pt.v === null) continue;
+        const yy = y(pt.v);
+        svg.append(svgEl("rect", {
+          class: "ft-chart-bar " + (pt.v > 0 ? "is-pos" : pt.v < 0 ? "is-neg" : "is-flat"),
+          x: x(i) - bw / 2, width: bw,
+          y: Math.min(yy, zero), height: Math.max(1, Math.abs(yy - zero)),
+        }));
+      }
+      svg.append(svgEl("line", { class: "ft-chart-zero",
+        x1: plotL, x2: plotL + plotW, y1: zero, y2: zero }));
+    } else {
+      /* A GAP IS A GAP. A session the payload could not price breaks the
+         line rather than being bridged to its neighbour, which would draw a
+         value nobody measured. */
+      let d = "", pen = false;
+      for (let i = 0; i < n; i++) {
+        const pt = spec.points[i];
+        if (pt.v === null) { pen = false; continue; }
+        d += (pen ? "L" : "M") + x(i).toFixed(2) + " " + y(pt.v).toFixed(2) + " ";
+        pen = true;
+      }
+      svg.append(svgEl("path", { class: "ft-chart-line", d: d.trim(), fill: "none" }));
+    }
+
+    const ends = svgEl("text", { class: "ft-chart-ax", x: plotL, y: H - 6 });
+    ends.textContent = String(spec.points[0].label || "");
+    svg.append(ends);
+    const end2 = svgEl("text", {
+      class: "ft-chart-ax", x: plotL + plotW, y: H - 6, "text-anchor": "end" });
+    end2.textContent = String(spec.points[n - 1].label || "");
+    svg.append(end2);
+
+    body.append(svg);
+
+    /* THE CURSOR IS HANDED THE SAME ARRAY THE MARKS WERE PLACED FROM, and
+       the same x() that placed them — rule 1 of the three in
+       flows-cursor.js. Nothing is recomputed, so the rule cannot land on one
+       mark while the readout prints another. */
+    if (window.FlowsCursor) {
+      window.FlowsCursor.attach(svg, {
+        name: CHART_LABEL[chartTab] + " series",
+        band: { y0: plotT, y1: plotT + plotH },
+        points: spec.points.map((pt, i) => ({
+          x: x(i),
+          label: String(pt.label || ""),
+          rows: pt.v === null
+            ? [{ k: CHART_LABEL[chartTab], v: "not reported" }]
+            : pt.rows,
+        })),
+      });
+    }
+
+    if (sub) {
+      sub.textContent = CHART_LABEL[chartTab] + " — " + spec.unit + ". " +
+        spec.clock.charAt(0).toUpperCase() + spec.clock.slice(1) + "." +
+        (chartTab === "iv"
+          ? " The period control does not apply to a curve across the term."
+          : windowed !== null
+            ? " Windowed to " + period + "."
+            : " " + period + " is outside this card's window, so the whole " +
+              "series is drawn.");
+    }
+    host.hidden = false;
+  }
+
+  /* ---------- the period pills, drawn from what the card can reach ------
+
+     EACH PILL IS ENABLED ONLY IF THE SERIES ON SCREEN HAS THE POINTS FOR IT,
+     and a disabled one says how far this card actually reaches. That is the
+     honest version of the design's row: every button is there, and the ones
+     that cannot be satisfied explain themselves rather than redrawing the
+     same picture and calling it a year. */
+  function paintPeriod(card) {
+    const host = $("ftPeriod");
+    if (!host) return;
+    host.replaceChildren();
+    const spec = chartSeries(chartTab, card);
+    const have = spec && spec.points ? spec.points.length : 0;
+    for (const pd of PERIODS) {
+      const b = el("button", "ft-period-b" + (period === pd.key ? " is-on" : ""), pd.key);
+      b.type = "button";
+      let can, why;
+      if (chartTab === "iv") {
+        can = false;
+        why = "The volatility tab is a curve across the TERM, not a history, so a " +
+          "period does not apply to it.";
+      } else if (chartTab === "netflow") {
+        can = pd.key === "1D";
+        why = can
+          ? "The intraday tape is one session, which is what 1D means here."
+          : "The intraday tape is a single session, so it cannot be windowed to " +
+            pd.key + ".";
+      } else if (!have) {
+        can = false;
+        why = "This series published no points, so there is nothing to window.";
+      } else {
+        can = pd.n <= have;
+        why = can
+          ? "The last " + pd.n + " of the " + have + " points this card carries."
+          : "This card carries " + have + " point" + (have === 1 ? "" : "s") + " and " +
+            pd.key + " needs " + pd.n + ", so it is outside the published window.";
+      }
+      b.disabled = !can;
+      b.title = why;
+      b.setAttribute("aria-pressed", period === pd.key ? "true" : "false");
+      b.setAttribute("aria-label", pd.key + ": " + why);
+      b.addEventListener("click", () => {
+        if (period === pd.key) return;
+        period = pd.key;
+        paintChart(card);
+        paintPeriod(card);
+      });
+      host.append(b);
+    }
+  }
+
+  /* ---------- the option chain, ordered by strike around spot --------
+
+     THE SAME ROWS THE TOP-CONTRACTS PANEL RANKS, ASKED A DIFFERENT
+     QUESTION — which is what makes this a second DRAWING and not a second
+     spelling of one reading. That panel orders by volume and answers
+     "which single lines carried the day"; ordering the same array by
+     STRIKE and ruling spot through it answers "what does the book look
+     like around the money", which a volume ranking cannot show at all.
+     Neither writes the other's sentence, and the target design carries
+     both blocks for exactly that reason.
+
+     THE SPOT ROW IS A SIDE BOUNDARY, NOT A STRIKE BOUNDARY, and the
+     subtitle says so. It separates the calls from the puts and states the
+     price both ladders are measured against. Reading it as "everything
+     above is above spot" would be wrong on any chain where a call strike
+     sits below the money, which is most of them.
+
+     NO DELTA COLUMN, WHICH IS THE DESIGN'S ONE COLUMN THIS PAYLOAD
+     CANNOT FILL. Per-contract delta is not published, and
+     shared/flows-chain.js states in its own header why it is not derived
+     either: a delta needs a risk-free rate and a dividend, neither of
+     which the vendor sends. The column is ABSENT rather than filled with
+     the aggressor count that happens to share its sign — that
+     substitution is the mislabelling this wave already caught once, on
+     this same panel's call/put volume.
+
+     ORDER IS A CONTROL, AND IT IS THE ONE INTERACTION A TABLE TAKES.
+     Strike ascending is the chain's own reading; volume descending is the
+     ranked one. Both are orderings of the rows in hand — nothing is
+     re-derived and no row enters or leaves — so the control cannot change
+     what the card claims, only what a reader meets first. */
+  const CHAIN_ORDER = [
+    { key: "k", label: "Strike", how: "by strike, ascending" },
+    { key: "vol", label: "Volume", how: "by volume, largest first" },
+  ];
+  let chainOrder = "k";
+
+  function paintChain(card) {
+    const host = $("ftChain"), body = $("ftChainBody"), sub = $("ftChainS");
+    const tabs = $("ftChainTabs");
+    if (!host || !body) return;
+    body.replaceChildren();
+    if (tabs) tabs.replaceChildren();
+
+    const panels = card.panels || {};
+    const panel = panels.topContracts;
+    const rows = panel && panel.status === "ok" && Array.isArray(panel.rows)
+      ? panel.rows : [];
+    /* HIDDEN RATHER THAN DEAD-PANELLED. The grid's own topContracts panel
+       states the silence in full, with the payload's reason; a second
+       statement of one absence in the column beside it is the copy this
+       page refuses. */
+    if (!rows.length) { host.hidden = true; return; }
+
+    const lv = panels.levels;
+    const spot = lv && lv.status === "ok" ? isNum(lv.spot) : null;
+
+    for (const o of CHAIN_ORDER) {
+      const b = el("button", "ft-chain-tab" + (chainOrder === o.key ? " is-on" : ""), o.label);
+      b.type = "button";
+      b.setAttribute("role", "tab");
+      b.setAttribute("aria-selected", chainOrder === o.key ? "true" : "false");
+      b.setAttribute("aria-label", "Order the chain " + o.how);
+      b.addEventListener("click", () => {
+        if (chainOrder === o.key) return;
+        chainOrder = o.key;
+        paintChain(card);
+      });
+      if (tabs) tabs.append(b);
+    }
+
+    /* THE TWO SIDES ARE PARTITIONED BEFORE ANYTHING IS ORDERED, so a row
+       whose symbol carried no parsable type joins NEITHER ladder rather
+       than defaulting into the calls. The count of those is said below. */
+    const calls = [], puts = [];
+    let untyped = 0;
+    for (const r of rows) {
+      if (r.cp === "C") calls.push(r);
+      else if (r.cp === "P") puts.push(r);
+      else untyped++;
+    }
+
+    const order = (list) => list.slice().sort((a, b) => {
+      if (chainOrder === "vol") {
+        const av = isNum(a.vol), bv = isNum(b.vol);
+        /* A ROW THE VENDOR DID NOT COUNT SORTS LAST IN EITHER DIRECTION,
+           rather than ahead of every counted row as a silent zero. */
+        if (av === null && bv === null) return 0;
+        if (av === null) return 1;
+        if (bv === null) return -1;
+        return bv - av;
+      }
+      const ak = isNum(a.k), bk = isNum(b.k);
+      if (ak === null && bk === null) return 0;
+      if (ak === null) return 1;
+      if (bk === null) return -1;
+      return ak - bk;
+    });
+
+    const COLS = [
+      { k: "k", label: "Strike", cls: "c-num ftc-k" },
+      { k: "bidPx", label: "Bid", cls: "c-num ftc-bid" },
+      { k: "askPx", label: "Ask", cls: "c-num ftc-ask" },
+      { k: "vol", label: "Vol", cls: "c-num ftc-vol" },
+      { k: "oi", label: "OI", cls: "c-num ftc-oi" },
+      { k: "iv", label: "IV", cls: "c-num ftc-iv" },
+    ];
+
+    const cellText = (r, key) => {
+      if (key === "k" || key === "bidPx" || key === "askPx") return px2(r[key]);
+      if (key === "vol" || key === "oi") return compact(r[key]);
+      /* IV IS A FRACTION IN THE PAYLOAD and vol1 is the one place this
+         section turns a fraction into a percentage. A second conversion
+         written here would be a second definition of the unit. */
+      return isNum(r.iv) === null ? DASH : vol1(r.iv);
+    };
+
+    const table = el("table", "ftc-table");
+    const thead = el("thead");
+    const hr = el("tr", "ftc-headrow");
+    const corner = el("th", "ftc-side");
+    corner.scope = "col";
+    corner.append(el("span", "visually-hidden", "Side"));
+    hr.append(corner);
+    for (const c of COLS) {
+      const th = el("th", c.cls, c.label);
+      th.scope = "col";
+      hr.append(th);
+    }
+    thead.append(hr);
+    table.append(thead);
+
+    /* NEAREST THE MONEY IS MARKED, ON EACH SIDE, AND ONLY WITH A SPOT.
+       The target highlights one row; the row it highlights is the one a
+       reader's eye goes to, so which row that is has to be a measured
+       fact rather than a position in the list. With no spot there is no
+       "nearest", and nothing is marked. */
+    const nearestOf = (list) => {
+      if (spot === null) return null;
+      let best = null, bestD = Infinity;
+      for (const r of list) {
+        const k = isNum(r.k);
+        if (k === null) continue;
+        const d = Math.abs(k - spot);
+        if (d < bestD) { bestD = d; best = r; }
+      }
+      return best;
+    };
+
+    const section = (label, list, cls) => {
+      if (!list.length) return;
+      const tbody = el("tbody", "ftc-body " + cls);
+      const near = nearestOf(list);
+      const shown = order(list);
+      shown.forEach((r, i) => {
+        const tr = el("tr", "ftc-row" + (r === near ? " is-near" : ""));
+        if (i === 0) {
+          const th = el("th", "ftc-side " + cls, label);
+          th.scope = "rowgroup";
+          th.rowSpan = shown.length;
+          tr.append(th);
+        }
+        for (const c of COLS) {
+          const td = el("td", c.cls, cellText(r, c.k));
+          if (c.k === "k" && r.expiry) td.title = "Expires " + r.expiry;
+          tr.append(td);
+        }
+        if (r === near) {
+          tr.title = "Nearest the money on the " +
+            (cls === "is-call" ? "call" : "put") + " side.";
+        }
+        tbody.append(tr);
+      });
+      table.append(tbody);
+    };
+
+    section("Calls", calls, "is-call");
+
+    /* THE SPOT RULE, AND IT IS OMITTED RATHER THAN DASHED WHEN THERE IS
+       NO SPOT. A rule reading "Spot —" between two ladders says a price
+       was measured and lost; the levels panel says why it is absent. */
+    if (spot !== null) {
+      const tb = el("tbody", "ftc-spotb");
+      const tr = el("tr", "ftc-spot");
+      const td = el("td", "ftc-spotc");
+      td.colSpan = COLS.length + 1;
+      td.append(el("span", "ftc-spot-k", "Spot"));
+      td.append(el("span", "ftc-spot-v", px2(spot)));
+      tr.append(td);
+      tb.append(tr);
+      table.append(tb);
+    }
+
+    section("Puts", puts, "is-put");
+    body.append(table);
+
+    if (sub) {
+      const bits = [];
+      bits.push("The " + rows.length + " contract" + (rows.length === 1 ? "" : "s") +
+        " on this chain that traded today, " +
+        (chainOrder === "vol" ? "by volume, largest first" : "by strike, ascending") +
+        " within each side");
+      bits.push(spot === null
+        ? "no spot price resolved this run, so the sides are not ruled against one"
+        : "the rule between them is the last price, not a strike boundary: a " +
+          "call below it and a put above it are both ordinary");
+      if (untyped) {
+        bits.push(untyped + " row" + (untyped === 1 ? "" : "s") +
+          " carried no parsable option type and " +
+          (untyped === 1 ? "is" : "are") + " in neither ladder");
+      }
+      /* THE POPULATION, SAID IN THE SAME BREATH AS THE ORDERING. `total`
+         is every contract that traded; `rows` is what the payload kept.
+         A table that shows a cut without saying it is the completeness
+         claim this section refuses by name. */
+      const total = isNum(panel.total);
+      if (total !== null && total > rows.length) {
+        bits.push("cut from " + total + " that traded, the largest by volume kept");
+      }
+      bits.push("no per-contract delta: it needs a rate and a dividend the vendor " +
+        "does not send, so the column is absent rather than guessed");
+      /* EACH CLAUSE IS A SENTENCE, SO EACH STARTS WITH A CAPITAL. The first
+         draft joined the clauses with ". " and left them as written, which
+         rendered "…within each side. the rule between them…" — four
+         lowercase sentence openings in one subtitle. Capitalising at the
+         JOIN rather than in each string keeps the clauses composable: a
+         clause is added or dropped above without anyone having to remember
+         which position it will land in. */
+      sub.textContent = bits
+        .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+        .join(". ") + ".";
+    }
+    host.hidden = false;
+  }
+
+  /* ---------- volume by type: the split the ladder publishes ---------
+
+     A DIFFERENT QUANTITY FROM THE PANEL IT READS. The aggressor ladder draws
+     NET contracts per strike — calls lifted minus puts lifted — which is a
+     direction and can be zero on a strike where thousands traded. `calls`
+     and `puts` on the same rows are VOLUME, and their share of the total is
+     drawn nowhere: until now it reached a reader only by driving that
+     panel's cursor onto one strike at a time.
+
+     THE POPULATION IS THE LADDER. The ladder keeps the strikes nearest the
+     money and publishes measuredStrikes, total and strikesUnreported for
+     exactly this reason, so the subtitle says what the share is a share OF
+     rather than letting a ring imply the whole chain.
+
+     TWO ARMS AND A MEASURED ZERO. A name whose ladder carries no volume at
+     all is not a fifty-fifty split; it is no reading, and the card hides. */
+  function paintMix(card) {
+    const host = $("ftMix"), body = $("ftMixBody"), sub = $("ftMixS");
+    if (!host || !body) return;
+    body.replaceChildren();
+    const p = (card.panels || {}).aggressor;
+    const bars = p && p.status === "ok" && Array.isArray(p.bars) ? p.bars : [];
+    if (!bars.length) { host.hidden = true; return; }
+
+    let calls = 0, puts = 0, missing = 0;
+    for (const b of bars) {
+      const c = isNum(b && b.calls), q = isNum(b && b.puts);
+      if (c !== null) calls += c;
+      if (q !== null) puts += q;
+      const m = isNum(b && b.volMissing);
+      if (m !== null) missing += m;
+    }
+    const total = calls + puts;
+    if (!(total > 0)) { host.hidden = true; return; }
+
+    const R = 54, T = 15, C = 70, TAU = Math.PI * 2;
+    const svg = svgEl("svg", {
+      class: "ft-mix-svg", viewBox: "0 0 140 140",
+      role: "img",
+      "aria-label": "Call and put volume, " + compact(calls) + " calls and " +
+        compact(puts) + " puts of " + compact(total) + " contracts",
+    });
+    /* ONE ARC A SIDE, DRAWN FROM THE SHARE ITSELF. The stroke-dasharray is
+       the circumference times the share, so the ink IS the number — there is
+       no rounding to a whole degree between the figure and the drawing. */
+    const circ = TAU * R;
+    const ring = (share, cls, offset) => {
+      const el2 = svgEl("circle", {
+        class: "ft-mix-arc " + cls, cx: C, cy: C, r: R, fill: "none",
+        "stroke-width": T,
+        "stroke-dasharray": (circ * share).toFixed(2) + " " + (circ * (1 - share)).toFixed(2),
+        "stroke-dashoffset": (-circ * offset).toFixed(2),
+        transform: "rotate(-90 " + C + " " + C + ")",
+      });
+      svg.append(el2);
+    };
+    ring(calls / total, "is-call", 0);
+    ring(puts / total, "is-put", calls / total);
+
+    const mid = svgEl("text", { class: "ft-mix-v", x: C, y: C + 2,
+      "text-anchor": "middle" });
+    mid.textContent = compact(total);
+    svg.append(mid);
+    const cap = svgEl("text", { class: "ft-mix-c", x: C, y: C + 18,
+      "text-anchor": "middle" });
+    cap.textContent = "contracts";
+    svg.append(cap);
+    body.append(svg);
+
+    const legend = el("ul", "ft-mix-l");
+    const row = (label, v, cls) => {
+      const li = el("li", "ft-mix-i");
+      li.append(el("span", "ft-mix-dot " + cls));
+      li.append(el("span", "ft-mix-k", label));
+      li.append(el("span", "ft-mix-n", compact(v)));
+      li.append(el("span", "ft-mix-p", Math.round((v / total) * 100) + "%"));
+      legend.append(li);
+    };
+    row("Calls", calls, "is-call");
+    row("Puts", puts, "is-put");
+    body.append(legend);
+
+    if (sub) {
+      const shown = isNum(p.measuredStrikes);
+      const all = isNum(p.total);
+      const unrep = isNum(p.strikesUnreported);
+      const bits = ["Contracts traded at the " + bars.length + " strike" +
+        (bars.length === 1 ? "" : "s") + " this ladder draws" +
+        (shown === null || all === null || all <= shown ? ""
+          : ", of " + all + " on the chain")];
+      if (unrep) {
+        bits.push(unrep + " strike" + (unrep === 1 ? "" : "s") +
+          " carried no aggressor split and are in neither arc");
+      }
+      if (missing) {
+        bits.push(missing + " contract" + (missing === 1 ? "" : "s") +
+          " the vendor reported no volume for are counted in neither");
+      }
+      bits.push("This is the volume SPLIT, not the net: the ladder beside it " +
+        "draws calls lifted minus puts lifted, which is a direction and can be " +
+        "zero where thousands traded");
+      sub.textContent = bits.join(". ") + ".";
+    }
+    host.hidden = false;
+  }
+
+  /* ---------- key levels, in the column the design puts them in ------
+
+     A MOVE, NOT A SECOND DRAWING. The levels panel keeps its full table
+     in the grid; what this adds is POSITION — the prices a move runs into,
+     visible without scrolling, beside the findings. Same panel, same
+     field, same order: `levels` is sorted nearest-first by the payload at
+     shared/flows-card.js:304, so this card does not re-sort and cannot
+     disagree with the panel about which level is nearest.
+
+     THE LABELS ARE THE PAYLOAD'S. The design says "Resistance" and
+     "Support"; this card publishes a gamma flip, a max pain, a call wall
+     and a put wall, each a named construction with a stated derivation.
+     Calling a gamma flip "resistance" would assert a behaviour nothing
+     here measured.
+
+     THE BAR IS THE DISTANCE, SCALED ACROSS THE LEVELS DRAWN. It is not a
+     probability and not a strength: it is |distance| as a share of the
+     furthest level on this card, which is the only thing a bar over a set
+     of levels can honestly encode. The figure beside it carries the
+     signed percentage, so the bar never has to mean direction. */
+  function paintLevels(card) {
+    const host = $("ftLv"), list = $("ftLvL"), sub = $("ftLvS");
+    if (!host || !list) return;
+    list.replaceChildren();
+    const panels = card.panels || {};
+    const p = panels.levels;
+    const levels = p && p.status === "ok" && Array.isArray(p.levels) ? p.levels : [];
+    if (!levels.length) { host.hidden = true; return; }
+
+    const spot = isNum(p.spot);
+    let widest = 0;
+    for (const lv of levels) {
+      const d = isNum(lv.distPct);
+      if (d !== null && Math.abs(d) > widest) widest = Math.abs(d);
+    }
+
+    for (const lv of levels) {
+      const li = el("li", "ft-lv-i");
+      const px = isNum(lv.px);
+      const d = isNum(lv.distPct);
+      const above = d === null ? null : d > 0 ? true : d < 0 ? false : null;
+      li.append(el("span", "ft-lv-px" + (
+        above === null ? "" : above ? " is-pos" : " is-neg"), px2(px)));
+      li.append(el("span", "ft-lv-k", lv.label || lv.kind || DASH));
+
+      const bar = el("span", "ft-lv-bar");
+      bar.setAttribute("aria-hidden", "true");
+      if (d !== null && widest > 0) {
+        const fill = el("span", "ft-lv-fill" + (
+          above === null ? "" : above ? " is-pos" : " is-neg"));
+        fill.style.width = Math.max(4, Math.round((Math.abs(d) / widest) * 100)) + "%";
+        bar.append(fill);
+      }
+      li.append(bar);
+
+      const dist = el("span", "ft-lv-d");
+      /* THE ATR DISTANCE IS THE ONE A READER SIZES WITH and it is
+         omitted, never zeroed, when ATR did not resolve — the same
+         sentence buildLevels uses for the same field.
+
+         AND THE UNIT IS SPELLED OUT, NOT SET AS A SIGMA. contracts.mjs
+         refuses that glyph in this file and gives the reason: the card's
+         distances are in ATR and the desk's are in SD, two different
+         denominators that one Greek letter used to hide. */
+      const atr = isNum(lv.distAtr);
+      dist.textContent = d === null ? DASH
+        : neg((d * 100).toFixed(1)) + "%" + (atr === null ? "" : " · " +
+          neg(Math.abs(atr).toFixed(2)) + " ATR");
+      li.append(dist);
+
+      li.title = (lv.label || lv.kind || "This level") +
+        (px === null ? "" : " at " + px.toFixed(2)) +
+        (spot === null || d === null ? "" :
+          ", " + Math.abs(d * 100).toFixed(1) + "% " +
+          (above ? "above" : "below") + " spot " + spot.toFixed(2)) +
+        (atr === null ? ". ATR did not resolve this run, so there is no sigma distance."
+          : ", " + Math.abs(atr).toFixed(2) + " ATR away.");
+      list.append(li);
+    }
+
+    if (sub) {
+      sub.textContent = levels.length + " level" + (levels.length === 1 ? "" : "s") +
+        " resolved this run, nearest first" +
+        (spot === null ? "" : ", against spot " + spot.toFixed(2)) +
+        ". The bar is each level's distance as a share of the furthest drawn here, " +
+        "not a probability.";
+    }
+    host.hidden = false;
+  }
+
+  /* ---------- recent flow: the vendor's alerts for this name ---------
+
+     WHAT A ROW IS, restated from shared/flows-alerts.js because this is the
+     surface a reader meets it on: ONE ALERT — a window of activity in one
+     contract that one of the vendor's rules flagged — carrying the window's
+     span, its execution count, a total size and a total premium. It
+     AGGREGATES `trades` executions, so it is never a single trade and
+     nothing here calls it one. The column is headed by the window's start.
+
+     THE SELECTION IS THE VENDOR'S, AND THAT IS THE HEADLINE CAVEAT. These
+     rows exist because a rule fired; the rules are the vendor's own and are
+     not published. So the population is "what the vendor chose to flag",
+     ranked by its own premium and capped at the key's `cap` — and a name
+     with no rows is a name the RULES did not flag, not a name with no flow.
+
+     WHICH IS WHY THIS BLOCK STATES ITS EMPTY CASE INSTEAD OF HIDING.
+     Every other block on this page hides when it has nothing, because a
+     hidden block claims nothing. Here the absence is the thing most likely
+     to be misread — a reader who sees no rows and concludes "quiet name"
+     has drawn a conclusion the data does not support — so the silence is
+     written out. That is the one deliberate exception on the page and it is
+     the four-silences rule applied, not waived: the sentence says which
+     silence it is. */
+  function paintFlow(ticker, feed) {
+    const host = $("ftFlow"), list = $("ftFlowL"), sub = $("ftFlowS");
+    if (!host || !list) return;
+    list.replaceChildren();
+
+    /* UNREADABLE IS NOT EMPTY. A failed fetch and a feed that flagged
+       nothing are different facts, and the second is the one this card
+       exists to state carefully. */
+    if (!feed || typeof feed !== "object") {
+      if (sub) {
+        sub.textContent = "The vendor's flow alerts could not be read just now, so this " +
+          "card cannot say whether any were raised on " + ticker + ". That is a failed " +
+          "read, not a quiet name.";
+      }
+      host.hidden = false;
+      return;
+    }
+    if (feed.status === "pending") {
+      if (sub) {
+        sub.textContent = "No flow-alert feed has been published yet this session, so " +
+          "there is nothing to filter for " + ticker + " — nothing here is a reading " +
+          "about the name.";
+      }
+      host.hidden = false;
+      return;
+    }
+
+    const all = Array.isArray(feed.rows) ? feed.rows : [];
+    const mine = all.filter((r) => r && String(r.t || "").toUpperCase() === ticker);
+
+    /* NEWEST FIRST, ON THE WINDOW'S START. The feed's own order is by
+       PREMIUM — that is what its header says it ranks by — so a card headed
+       "recent" has to re-order or stop using the word. A row whose span the
+       vendor did not stamp sorts last rather than being read as oldest. */
+    const timed = mine.slice().sort((a, b) => {
+      const at = a.spanStart ? Date.parse(a.spanStart) : NaN;
+      const bt = b.spanStart ? Date.parse(b.spanStart) : NaN;
+      const aok = Number.isFinite(at), bok = Number.isFinite(bt);
+      if (!aok && !bok) return 0;
+      if (!aok) return 1;
+      if (!bok) return -1;
+      return bt - at;
+    });
+
+    const CAP = 6;
+    const shown = timed.slice(0, CAP);
+
+    /* THE WINDOW'S START, IN THE READER'S OWN ZONE. `spanStart` is an
+       INSTANT, and the card's session date is an Eastern calendar day, so
+       slicing characters out of the ISO string prints a UTC clock beside an
+       Eastern session — the same class of defect indexCrossFeed carries a
+       paragraph about. toLocaleTimeString renders it where the reader is. */
+    const clock = (iso) => {
+      if (!iso) return DASH;
+      const t = Date.parse(iso);
+      if (!Number.isFinite(t)) return DASH;
+      try {
+        return new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      } catch (_) { return DASH; }
+    };
+
+    for (const r of shown) {
+      const li = el("li", "ft-flow-i");
+      li.append(el("span", "ft-flow-t", clock(r.spanStart)));
+
+      /* THE CONTRACT, AS THE TARGET WRITES IT: strike then side, "44P".
+         A row whose symbol carried no parsable strike or type prints the
+         dash rather than half a contract name. */
+      const k = isNum(r.k);
+      const side = r.cp === "C" ? "C" : r.cp === "P" ? "P" : "";
+      const oc = el("span", "ft-flow-c" + (
+        side === "C" ? " is-call" : side === "P" ? " is-put" : ""));
+      oc.textContent = k === null || !side ? DASH : px2(k) + side;
+      if (r.exp) oc.title = "Expires " + r.exp;
+      li.append(oc);
+
+      li.append(el("span", "ft-flow-z", compact(r.size)));
+
+      const prem = el("span", "ft-flow-p");
+      prem.textContent = isNum(r.prem) === null ? DASH : "$" + compact(r.prem);
+      li.append(prem);
+
+      /* THE SWEEP MARK IS THE VENDOR'S FLAG AND ONLY WHEN IT SENT ONE.
+         flows-alerts.js keeps `false` and null apart on purpose: the vendor
+         looking and finding no sweep is not the vendor saying nothing. Only
+         a true prints a mark; neither of the other two prints anything,
+         because a mark for "no" would make two different silences look like
+         one claim. */
+      if (r.sweep === true) {
+        const s = el("span", "ft-flow-w", "SWEEP");
+        s.title = "The vendor flagged this window as a sweep.";
+        li.append(s);
+      }
+
+      const trades = isNum(r.trades);
+      li.title = (k === null || !side ? "This alert" : px2(k) + side) +
+        (r.exp ? " expiring " + r.exp : "") +
+        (trades === null
+          ? ", a window the vendor did not count executions for"
+          : ", " + trades + " execution" + (trades === 1 ? "" : "s") + " aggregated") +
+        (r.rule ? ", flagged by the vendor's " + r.rule + " rule." : ".");
+      list.append(li);
+    }
+
+    if (sub) {
+      const cap = isNum(feed.cap);
+      const seen = isNum(feed.seen);
+      const pool = "the " + all.length + " row" + (all.length === 1 ? "" : "s") +
+        " this run kept" +
+        (cap === null ? "" : " of a " + cap + "-row cap") +
+        (seen === null || seen <= all.length ? "" : ", cut from " + seen + " read");
+      if (!mine.length) {
+        /* THE SENTENCE THIS CARD EXISTS FOR. Said in full rather than as
+           "no recent flow", which is the reading the data does not carry. */
+        sub.textContent = "The vendor's rules flagged nothing on " + ticker + " in " +
+          pool + ". The rules are the vendor's own and are not published, so this is " +
+          "what its screens chose to raise — not a measurement of how much traded in " +
+          "this name.";
+      } else {
+        sub.textContent = "Newest first" +
+          (mine.length > CAP ? ", the " + CAP + " newest of " + mine.length : "") +
+          ". Each row is one ALERT — a window of activity in one contract that a vendor " +
+          "rule flagged, aggregating its executions — never a single trade. Selected " +
+          "from " + pool + " by the vendor's own rules, which are not published.";
+      }
+    }
+    host.hidden = false;
+  }
+
+  /* ---------- the other names in this sector -------------------------
+
+     THE ONE THING ON THIS PAGE THAT IS NOT ABOUT THIS NAME, and the design
+     puts it at the bottom of its right column. Every other reading here was
+     measured on this ticker; this says which OTHER names the same session's
+     boards ranked in the same sector, so a reader who has just formed a view
+     can see whether it is one name or a group.
+
+     IT IS TODAY'S BOARDS AND NOT A CORRELATION. Nothing here models how these
+     names move together — the claim is only that the same run ranked them and
+     put them in the same sector, which is what the board publishes. The
+     subtitle says exactly that, because "Related" on its own invites the
+     stronger reading.
+
+     ONLY NAMES WITH A CARD GET A LINK, by the rule this file already keeps
+     for the switch list: a link that opens nothing is worse than no link. A
+     ranked name with no card is still shown — it is part of the answer — but
+     as text rather than as a door. */
+  function paintRelated(card) {
+    const host = $("ftRel"), list = $("ftRelL"), sub = $("ftRelS");
+    if (!host || !list) return;
+    list.replaceChildren();
+    const mine = typeof card.sector === "string" && card.sector.trim()
+      ? card.sector.trim() : null;
+    const rows = mine && switchRows
+      ? switchRows.filter((r) => r.sector === mine && r.t !== card.ticker)
+      : [];
+    /* RANKED BY THE SCORE'S MAGNITUDE, which is how this product orders a
+       board, with the unscored at the tail rather than seated at zero. */
+    const ranked = rows.slice().sort((a, b) => {
+      const x = isNum(a.s), y = isNum(b.s);
+      if (x === null && y === null) return 0;
+      if (x === null) return 1;
+      if (y === null) return -1;
+      return Math.abs(y) - Math.abs(x);
+    });
+    const CAP = 8;
+    for (const r of ranked.slice(0, CAP)) {
+      const sc = isNum(r.s);
+      const chip = el(r.card === false ? "span" : "a",
+        "ft-rel-c" + (sc === null ? "" : " " + P.polarity(sc)));
+      if (r.card !== false) chip.href = "/flows/ticker/?t=" + encodeURIComponent(r.t);
+      chip.append(el("span", "ft-rel-t", r.t));
+      chip.append(el("span", "ft-rel-v", sc === null ? DASH : P.signed(sc, (a) => String(a))));
+      chip.title = (r.card === false ? r.t + " was ranked but has no card, so there is nothing to open. " : "")
+        + (sc === null ? "No score published for this name." : "Options score " + P.signed(sc, (a) => String(a)) + ".")
+        + (r.chg === null ? "" : " Session move " + P.pct1(r.chg) + ".");
+      list.append(chip);
+    }
+    /* THE CONTROL THAT PAYS FOR THE PEERS, shown only while the boards are
+       unread. Pressing it is the reader saying two requests about other
+       names are worth it; until then this page costs exactly the card. */
+    if (mine && switchRows === null) {
+      const b = el("button", "ft-rel-load", "Show sector peers");
+      b.type = "button";
+      b.title = "Reads today's two boards — an index of every name this run ranked — " +
+        "to find the others in " + mine + ".";
+      b.addEventListener("click", () => {
+        b.disabled = true;
+        b.textContent = "Reading today\u2019s boards\u2026";
+        ensureBoards().then(() => paintRelated(card));
+      });
+      list.append(b);
+    }
+    if (sub) {
+      sub.textContent = !mine
+        ? "This card publishes no sector, so no peer set can be drawn."
+        : switchRows === null
+          /* THE BOARDS HAVE NOT BEEN READ, WHICH IS NOT AN EMPTY SECTOR. This
+             said "No other Energy name was ranked on today's boards" before a
+             single board had been fetched — a measurement claimed over a key
+             nobody had opened, which is the exact collapse this product
+             refuses everywhere else.
+
+             AND IT NO LONGER SAYS "READING…" EITHER, because nothing is
+             reading. The boards are two requests about OTHER names, and this
+             page does not spend them on a reader who did not ask: the button
+             below is where that bargain is struck, the same one the switcher
+             strikes. "Reading…" over a fetch that was never started is a
+             different false statement from the one this comment removed. */
+          ? "The other names in " + mine + " are on today's boards, which are two " +
+            "requests about names other than this one. They are not read unless " +
+            "you ask for them."
+        : boardsWhy === "unreadable"
+          ? "Today's boards did not come back, so the other " + mine +
+            " names cannot be named. That is this page's failure to read them, " +
+            "not a quiet sector."
+        : boardsWhy === "pending"
+          ? "Today's boards have not been published yet, so there is nothing to " +
+            "compare this name against."
+        : boardsWhy
+          ? "Today's boards were read and carried no rows at all, so no " + mine +
+            " peer can be named."
+        : ranked.length
+          ? (ranked.length > CAP ? CAP + " of " + ranked.length : String(ranked.length)) +
+            " other " + mine + " name" + (ranked.length === 1 ? "" : "s") +
+            " on today's boards, by score. Ranked together, not modelled together."
+          : "No other " + mine + " name was ranked on today's boards.";
+    }
+    host.hidden = !mine;
+  }
+
+  function paintFlags(card, chg) {
+    const host = $("ftFlags");
+    if (!host) return;
+    host.replaceChildren();
+
+    const marks = [];
+    const score = isNum(card.score);
+    const conv = isNum(card.conviction);
+
+    const sd = sideOf(card, chg);
+    if (sd.word && score !== null) {
+      marks.push([sd.word === "bullish" ? "Bullish flow" : "Bearish flow",
+        sd.word === "bullish" ? "is-pos" : "is-neg", sd.title]);
+    }
+
+    /* THE MOVE, WITH ITS SPAN AND ONLY WHERE IT IS ABOUT THIS SESSION.
+
+       Two guards, and each one is a claim this flag would otherwise make
+       falsely. `gap` is how many sessions the move spans: +23 over one
+       session and +23 over five, with the name off the board in between, are
+       different facts, so the span rides in the title. `stale` is how far the
+       newest SCORED session is from the newest session in the window: a flag
+       reading "Score down" off a reading taken a week ago claims an event
+       that did not happen today, which is the trap the ranked rows on the
+       landing page already name. Stale readings get no flag; the change
+       region below still lists them, dated, which is where a reading that is
+       not about today belongs. */
+    const d1 = chg && chg.status === "ok" ? chg.d1 : null;
+    const move = d1 ? isNum(d1.v) : null;
+    if (move !== null && isNum(d1.gap) !== null && chg.stale === 0 && Math.abs(move) >= 10) {
+      /* THREE ARMS, though the |move| >= 10 guard above means the third can
+         never fire today. It is written because the guard is a THRESHOLD and
+         thresholds get tuned: the day someone lowers it to 0 this line would
+         start calling a measured-flat session "Score down" in red, and the
+         defect would be one edit away with nothing pointing at it. The class
+         comes from the shared polarity() rather than a fourth local copy. */
+      marks.push([move > 0 ? "Score up" : move < 0 ? "Score down" : "Score flat",
+        P.polarity(move),
+        P.signed(move, (a) => String(a)) + " score points over " +
+        d1.gap + (d1.gap === 1 ? " session" : " sessions") +
+        ", against a threshold of 10."]);
+    }
+
+    if (conv !== null && conv >= 70) {
+      marks.push(["High conviction", "",
+        "Conviction " + Math.round(conv) + ", against a threshold of 70. Conviction is " +
+        "how strongly the components agree, not how large the move is."]);
+    }
+
+    /* UNUSUAL ACTIVITY IS THE TAPE'S OWN COUNT, not a judgement made here.
+       The top-contracts panel publishes how many lines it drew and the
+       aggressor panel whether any of them were lifted; either being present
+       and non-empty is what the vendor's rules already flagged. */
+    const top = card.panels && card.panels.topContracts;
+    const rows = top && top.status === "ok" && Array.isArray(top.rows) ? top.rows.length : 0;
+    if (rows >= 10) {
+      marks.push(["Unusual activity", "",
+        rows + " contract lines carried enough volume to make this name's tape panel, " +
+        "against a threshold of 10."]);
+    }
+
+    /* A CROSS-SECTION FLAG WAS DRAFTED HERE AND IS NOT SHIPPED, because the
+       field it wanted does not exist. marketRank publishes no single
+       percentile for a name: it carries a per-FEED block, each with its own
+       population, its own `asOf` and its own rank within that feed — so "top
+       decile" would have to pick one feed and present it as the name's place
+       in the session, which is a claim the payload deliberately refuses to
+       make. The panel states all of them, ranked, with their populations. A
+       flag that flattened that would be inventing the number the panel exists
+       to avoid inventing. */
+
+    for (const [label, cls, why] of marks) {
+      const chip = el("span", "ft-flag" + (cls ? " " + cls : ""), label);
+      chip.title = why;
+      host.append(chip);
+    }
+    host.hidden = !marks.length;
+  }
+
+  /**
    * Name, price, side, score — and rank when the page can honestly state it.
    *
    * RANK IS NOT ON THIS PAYLOAD. It is published per side on the board
@@ -6163,32 +8222,8 @@
       });
     }
 
-    /* THE SIDE, STATED AGAINST THE PUBLISHED DEAD BAND rather than against
-       zero. A score of +1 with a band of ±1 is not a bullish name; it is a
-       name the board declined to rank, and calling it bullish in the header
-       is exactly the confident reading this product exists to refuse. */
-    const band = chg && chg.status === "ok" ? chg.band : null;
-    let sideText, sideCls, sideEmpty = null, sideTitle;
-    if (score === null) {
-      sideText = DASH;
-      sideCls = "is-null";
-      sideEmpty = "unavailable";
-      sideTitle = "This card carries no score, so it has no side.";
-    } else if (band === null) {
-      sideText = score < 0 ? "bearish" : score > 0 ? "bullish" : "neutral";
-      sideCls = P.polarity(score);
-      sideTitle = "No dead band was published on this card, so the side is stated " +
-        "against zero rather than against the board's own membership rule.";
-    } else if (Math.abs(score) <= band) {
-      sideText = "inside the dead band";
-      sideCls = "is-flat";
-      sideTitle = "Within ±" + band + POINTS(band) + " of zero, which is the band " +
-        "the board declines to rank inside.";
-    } else {
-      sideText = score < 0 ? "bearish" : score > 0 ? "bullish" : "neutral";
-      sideCls = P.polarity(score);
-      sideTitle = "Outside the published dead band of ±" + band + POINTS(band) + ".";
-    }
+    const { text: sideText, cls: sideCls, empty: sideEmpty, title: sideTitle } =
+      sideOf(card, chg);
     const side = idChip("ftSide", "", sideText,
       { cls: sideCls, empty: sideEmpty, title: sideTitle });
 
@@ -6342,6 +8377,59 @@
       changeEl.append(tag);
     }
 
+    /* ---- THE VERDICT, IN TWO WORDS, BEFORE THE SENTENCE ----
+
+       WHAT THIS BLOCK ANSWERS IS "did anything happen", and a reader had to
+       read a sentence to find out. The sentence is good and it stays; what it
+       lacked is a headline — the one thing every other panel on this page has
+       and the block a reader lands on did not.
+
+       THE WORD IS DERIVED FROM WHAT THE PAYLOAD ALREADY DECIDED, never from a
+       fresh threshold invented here: a dead-band CROSSING is an event and
+       says which one; everything else is drift, and drift is named by its
+       direction and nothing more. So this adds no opinion — it promotes the
+       decision the change layer already published into the position a reader
+       reads first.
+
+       AND IT IS HONEST ABOUT THE FLAT CASE. A move of exactly zero is a
+       measurement, so it gets its own word rather than being rounded into one
+       of the two directions. A window with no earlier score gets no verdict
+       at all: there is nothing to be a verdict about, and "no change" would
+       be a claim.
+
+       THE MARK IS A GLYPH AND NOT A COLOUR. The arrow says the direction to a
+       reader who cannot see the hue, which is the rule every signed figure on
+       this section already follows. */
+    const mv = chg.d1 ? isNum(chg.d1.v) : null;
+    const verdict = (() => {
+      if (mv === null) return null;
+      if (chg.cross === "cleared") return ["Cleared the band", "\u2191", "is-pos"];
+      if (chg.cross === "faded") return ["Faded out of the band", "\u2193", "is-neg"];
+      if (chg.cross === "flipped") {
+        if (mv > 0) return ["Flipped bullish", "\u2191", "is-pos"];
+        if (mv < 0) return ["Flipped bearish", "\u2193", "is-neg"];
+        /* A FLIP IS A CROSSING, so a move of exactly zero beside one is the
+           payload disagreeing with itself. The two-armed version resolved
+           that contradiction by calling it BEARISH — picking a side on no
+           evidence, which is the one thing this section never does. State the
+           crossing, claim no direction, and let the figures below say what is
+           actually known. */
+        return ["Flipped", "\u2192", "is-flat"];
+      }
+      if (mv > 0) return ["Bullish drift", "\u2191", "is-pos"];
+      if (mv < 0) return ["Bearish drift", "\u2193", "is-neg"];
+      return ["Unchanged", "\u2192", "is-flat"];
+    })();
+    if (verdict) {
+      const [word, glyph, cls] = verdict;
+      const head = el("div", "ft-chg-verdict " + cls);
+      const mark = el("span", "ft-chg-mark", glyph);
+      mark.setAttribute("aria-hidden", "true");
+      head.append(mark);
+      head.append(el("span", "ft-chg-word", word));
+      changeEl.append(head);
+    }
+
     /* THE HEADLINE. The sign is in the glyph before it is in the hue, and the
        gap is in the same sentence as the delta. */
     const lead = el("p", "ft-chg-lead");
@@ -6454,19 +8542,60 @@
       : (score > 0 ? "+" : score < 0 ? MINUS : "") + Math.abs(score);
     badge.className = "fc-score " +
       (score === null ? "" : score < 0 ? "is-neg" : score > 0 ? "is-pos" : "is-flat");
-    const conv = isNum(card.conviction);
-    $("ftConv").textContent = conv === null ? DASH : conv + " conviction";
-    const regime = card.regime && card.regime.label;
-    $("ftRegime").textContent =
-      regime === "short" ? "short \u0393" : regime === "long" ? "long \u0393" : DASH;
-    $("ftDates").textContent =
-      "session " + fmtDate(card.sessionDate) + " \u00b7 built " + fmtDate(card.generatedAt);
+    /* THREE SLOTS LEFT THIS STRIP WHEN THE HERO ARRIVED, and each one for the
+       same reason: this strip is what SURVIVES THE SCROLL, and every reading
+       in it is paid for in pinned height on every screen of every panel. That
+       is the budget a reading has to earn.
+
+       Conviction, the gamma regime and the two dates do not earn it, and each
+       one has a home that was CHECKED rather than assumed:
+
+         - conviction and the session date are in the hero, four lines up;
+         - the regime is stated by the gamma panel, off `spotGammaShare`,
+           beside the ladder it was measured from;
+         - the BUILD time is in the stale banner — and only when it is a
+           reading. `markStale` prints "this card was last written N days
+           ago" once the age passes STALE_WRITE_MS, which is the one state in
+           which a build timestamp tells a reader anything. On a fresh card it
+           said "built 2026-09-12" on every screen of every panel to report
+           that nothing was wrong.
+
+       That last one is the honest exception and it is written down because
+       the first draft of this comment claimed all four were "in the hero or
+       one scroll away in a panel". Three were. The build time is not in a
+       panel at all; it is conditional, and a comment that rounded it up to
+       the other three is how a reader later concludes the page states
+       something it does not.
+
+       WHAT STAYS IS WHAT A READER DEEP IN A PANEL ACTUALLY NEEDS: which name,
+       what it scores, what it costs, which way it moved. The slots are still
+       served — flows-pages.js emits them and they are empty, which the page's
+       own rule allows — so nothing here has to guess at markup. */
 
     /* CHANGE BEFORE DETAIL. paintChange returns its own derivation so the
        identity strip states the same numbers rather than deriving them a
        second time — two derivations of one move is two chances for the
        header and the block under it to disagree about the same name. */
     const chg = paintChange(card);
+    /* THE HERO AND THE FLAGS TAKE THE SAME CHANGE LAYER THE STRIP DOES, for
+       the reason directly above: one derivation of this name's move, read by
+       every surface that states it. */
+    paintHero(card, chg);
+    paintCards(card);
+    /* THE CHAIN AND THE LEVELS PAINT FROM THE CARD ALONE, so they are in
+       this pass rather than the board handler's: both read panels the card
+       payload already carries and neither waits on a second fetch. */
+    paintChart(card);
+    paintPeriod(card);
+    paintChain(card);
+    paintMix(card);
+    paintBrief(card);
+    paintLevels(card);
+    paintFlags(card, chg);
+    /* AFTER THE BOARDS ARRIVE, NOT WITH THE CARD. switchRows is filled by a
+       separate fetch; when the card paints first this draws nothing and the
+       board's own handler calls it again. */
+    paintRelated(card);
     paintIdentity(card, chg);
 
     /* THE STATION IS CHOSEN BEFORE THE DRAW NOW, AND THAT REORDERING IS THE
@@ -6529,6 +8658,94 @@
      switch, and the card is what this page is. Fetched once and kept, because
      opening the switcher twice is not two different questions. */
   let switchRows = null;
+  let boardsAsked = null;
+  let boardsWhy = null;
+
+  /* THE BOARDS, FETCHED ONCE, AND NOW FOR TWO READERS RATHER THAN ONE.
+
+     They were fetched only when someone opened the switcher. Two things on
+     this page need them and neither is the switcher: the rank chip ("3 of
+     40", a board field the card carries no copy of) and the sector peer set.
+     Both were therefore blank on every visit where nobody clicked.
+
+     THE PROMISE IS KEPT, NOT THE RESULT, so a click during the idle load
+     waits on the same fetch instead of starting a second pair.
+
+     AND WHAT IT COSTS IS TWO CACHED GETS PER VISIT, said plainly: this page
+     used to make them only on demand, and now makes them on every view.
+     They are the same two payloads four other routes already serve, and the
+     alternative was a peer strip that announces an empty sector on a page
+     that simply had not looked. */
+  function ensureBoards() {
+    if (boardsAsked) return boardsAsked;
+    boardsAsked = Promise.all([
+      getJSON("/api/flows/board?side=long").catch(() => null),
+      getJSON("/api/flows/board?side=short").catch(() => null),
+    ]).then(([long, short]) => {
+      switchRows = boardRows(long, short);
+      /* WHICH SILENCE AN EMPTY LIST IS, WHICH boardRows CANNOT SAY. It maps
+         `payload.rows || []`, so a board that has not published yet, one that
+         failed to read, and one that genuinely ranked nobody all arrive here
+         as the same empty array — and a renderer handed that array will say
+         "nobody was ranked", which is a measurement over a key it never saw.
+         The three are told apart from the envelopes, once, here.
+
+         A FETCH THAT THREW IS null (the callers catch), and that is the
+         page's own failure rather than the publisher's — the one silence
+         this product calls unreadable. */
+      const side = (p) => {
+        if (!p || typeof p !== "object") return "unreadable";
+        if (p.status && p.status !== "ok") return p.status;
+        return Array.isArray(p.rows) ? "ok" : "unavailable";
+      };
+      const states = [side(long), side(short)];
+      boardsWhy = states.includes("ok") ? null
+        : states.includes("unreadable") ? "unreadable"
+        : states.includes("pending") ? "pending"
+        : states[0];
+      paintRank();
+      if (painted) paintRelated(painted);
+      return switchRows;
+    });
+    return boardsAsked;
+  }
+
+  /* AFTER FIRST PAINT, NEVER DURING IT. The card is what this page is; the
+     boards qualify it. requestIdleCallback where it exists, a timeout where
+     it does not, so the two fetches never compete with the card's own. */
+  /* THE ALERTS READ WAITS FOR AN IDLE FRAME. THE BOARDS ARE NOT READ AT ALL.
+
+     AND THAT SECOND HALF IS A DEFECT OF MINE, FOUND BY A CONTRACT THAT
+     PREDATES IT. This function used to call ensureBoards() here so the
+     sector-peers card could fill itself. flows-ticker-contract asserts, in
+     so many words, that loading a named ticker page fetches NO board —
+     "two requests on every ticker page view would be paid by every reader
+     to serve the few who switch, and the card is what this page is". The
+     sector card is exactly that: two requests, every reader, for names that
+     are not the one being read. The assertion passed for a while only
+     because the idle callback had not fired by the time the test counted.
+
+     THE ASSERTION IS RIGHT AND THE FEATURE WAS WRONG, so the feature moved
+     rather than the assertion. paintRelated now offers the peers behind a
+     control; pressing it is the reader saying the two requests are worth it,
+     which is the same bargain the switcher already strikes and the same one
+     that comment argues for.
+
+     THE FLOW ALERTS STAY HERE, and the difference is what they are ABOUT.
+     They are this name's own flagged windows — one request, for the card a
+     reader came to read — where the boards are a market-wide index of other
+     names. A FAILED READ REACHES paintFlow AS null rather than as a skipped
+     call, so the card can say "this could not be read" instead of nothing. */
+  function boardsWhenIdle(ticker) {
+    const go = () => {
+      if (!ticker) return;
+      getJSON("/api/flows/flowalerts")
+        .then((feed) => paintFlow(ticker, feed))
+        .catch(() => paintFlow(ticker, null));
+    };
+    if (typeof requestIdleCallback === "function") requestIdleCallback(go, { timeout: 3000 });
+    else setTimeout(go, 1200);
+  }
 
   function wireSwitch(card) {
     const btn = document.getElementById("ftSwitch");
@@ -6539,17 +8756,7 @@
       const prev = btn.textContent;
       btn.textContent = "Loading names…";
       try {
-        if (!switchRows) {
-          const [long, short] = await Promise.all([
-            getJSON("/api/flows/board?side=long").catch(() => null),
-            getJSON("/api/flows/board?side=short").catch(() => null),
-          ]);
-          switchRows = boardRows(long, short);
-          /* THE ONLY MOMENT THIS PAGE CAN HONESTLY STATE A RANK. It is a
-             board field and the card carries no copy of it; now that a board
-             has actually been read, the chip can be filled. */
-          paintRank();
-        }
+        await ensureBoards();
         const shown = carded(switchRows);
         if (!shown.length) {
           /* NOT AN ERROR AND NOT A BLANK LIST, and now three reasons rather
@@ -6669,6 +8876,12 @@
       for (const row of rows) {
         out.push({
           t: row.t, r: row.r, s: row.s, side,
+          /* TWO FIELDS THE BOARD HAS ALWAYS PUBLISHED AND THIS WALK DROPPED.
+             `sector` is what makes a peer a peer, and `chg` is the session
+             move — both on every board row since the board shipped. Carried
+             here rather than fetched again: this list is already in hand. */
+          sector: typeof row.sector === "string" && row.sector ? row.sector : null,
+          chg: isNum(row.chg),
           card: knowsDeep ? row.dp === 1 : null,
           of: rows.length,
         });
@@ -6910,6 +9123,7 @@
       }
       paint(card);
       wireSwitch(card);
+      boardsWhenIdle(ticker);
       return null;
     }).catch(() => {
       statusEl.textContent = "This page could not be loaded. Reload to try again.";

@@ -106,6 +106,32 @@
      over 6 sessions" is. A delta printed without its span is the exact
      defect the shared change layer replaced, and it is not allowed back in
      through a terse cell. */
+  /* AN INSTANT ON THE EASTERN CLOCK, "HH:MM", or null.
+
+     THE SHAPE IS CHECKED BEFORE THE PARSE, for the reason shared/flows-
+     freshness.js states about the same conversion: Date.parse is lenient
+     enough to be dangerous, and a bare "2026-01-05" is not merely lenient
+     but wrong — midnight UTC is the previous evening in New York. A
+     timestamp with no time is refused rather than guessed at.
+
+     NOT THE VIEWER'S ZONE, deliberately. Everything measured here is a
+     window inside one Eastern session, and the region's subtitle already
+     carries the READ instant on the viewer's own wall clock; a table of
+     session windows in Istanbul time would be two clocks on one region
+     with nothing saying which is which. */
+  const etTime = (at) => {
+    if (typeof at !== "string" || !/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(at.trim())) {
+      return null;
+    }
+    const d = new Date(at);
+    if (Number.isNaN(d.getTime())) return null;
+    try {
+      return new Intl.DateTimeFormat("en-GB", {
+        timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: false,
+      }).format(d);
+    } catch { return null; }
+  };
+
   const sessionsSaid = (n) => n + (n === 1 ? " session" : " sessions");
   const daysSaid = (n) => n + (n === 1 ? " calendar day" : " calendar days");
 
@@ -405,6 +431,24 @@
      show: whether a name arrived at this score this morning or has been
      sitting on it for a month. */
   function sideTable(into, rows, knowsDeep, track, label, evBy) {
+    /* A COLUMN EVERY ROW ANSWERS WITH A DASH IS NOT A COLUMN.
+
+       The score strip is the most useful cell on this table when the archive
+       has a trace for the name — and on a session where the track published
+       nothing for any name on this side, it was ten rows of em dash under a
+       header promising a series. That is a full column of the reader's
+       attention spent on the absence of one, and it crowds the columns that
+       do carry numbers.
+
+       Decided per SIDE rather than per row, because a table whose column set
+       changed between its two halves would be worse than either. The absence
+       itself still reaches the reader: the score-track region below states
+       what the track carried, which is where a fact about the archive
+       belongs. */
+    const drawsTrack = rows.slice(0, ROW_MAX).some((row) => {
+      const series = track.byName[row && row.t];
+      return Array.isArray(series) && series.some((v) => isNum(v) !== null);
+    });
     const wrap = tableWrap(label);
     const table = el("table", "cc-tbl");
     table.append(headRow([
@@ -421,8 +465,8 @@
         "The session's price return: close over the prior close. Not the " +
         "score move — that is the \u0394 score column in the region above, " +
         "and it is in score points."],
-      ["Net prem", "c-num"], [track.label, "cc-trk"],
-    ]));
+      ["Net prem", "c-num"],
+    ].concat(drawsTrack ? [[track.label, "cc-trk"]] : [])));
 
     const body = el("tbody");
     for (const row of rows.slice(0, ROW_MAX)) {
@@ -455,6 +499,7 @@
       tr.append(el("td", "c-num" + tone(row.chg), pct(row.chg)));
       tr.append(el("td", "c-num" + tone(row.netPrem), usd(row.netPrem)));
 
+      if (!drawsTrack) { body.append(tr); continue; }
       const cell = el("td", "cc-trk");
       const series = track.byName[row.t];
       const measured = (series || []).filter((v) => isNum(v) !== null).length;
@@ -463,11 +508,58 @@
            rescales to its own extremes, and a name drifting ±2 draws the
            same picture as one swinging ±40 — so a bull strip and a bear
            strip could not be read against each other at all. */
-        scoreStrip(cell, {
+        const strip = scoreStrip(cell, {
           values: series, width: 150, height: 22,
           domain: track.domain, deadBand: track.deadBand, prefix: "cc",
           ariaLabel: "Score for " + row.t + " across " + measured + " archived sessions",
         });
+        /* REGISTERED HERE AND NOT INSIDE scoreStrip, which is the whole
+           reason this is four lines at a call site rather than one option on
+           the builder. flows-ui.js is served on four routes and only THIS one
+           links flows-cursor.js — /flows/long/, /flows/track/ and the strategy
+           tester do not — so a registration inside the builder would ship the
+           bytes to three routes where `window.FlowsCursor` is undefined and
+           the feature cannot exist. A deferred cost is still a cost, and so
+           is a cost that can never be spent.
+
+           WHAT THE STRIP WITHHOLDS. It is the name's whole archived score
+           run, and the row beside it prints ONLY the newest of those scores;
+           the aria-label names the population and no value in it. So the one
+           question the drawing invites — what was this on the 14th — had no
+           answer anywhere on the page, and the marks are 150px wide, which is
+           about seven pixels a session.
+
+           A SESSION THIS NAME WAS NOT SCORED IN IS NOT A ZERO. The strip
+           already refuses to bridge those — a run is drawn between adjacent
+           MEASURED points only — and the readout says so rather than
+           printing a number for a session that has none. */
+        if (window.FlowsCursor && strip) {
+          /* THE COLUMN CENTRES COME FROM THE FUNCTION THAT PLACED THEM.
+             flows-ui.js exports stripGeometry beside scoreStrip precisely so
+             a caller can ask where a column is instead of reproducing the
+             arithmetic — and the first draft of this block did reproduce it,
+             which is the one thing flows-cursor.js's contract forbids. Same
+             count, same width as the call above, so the same centres.
+
+             THE BAND IS THE WHOLE CANVAS HERE, and that is not an oversight:
+             this drawing is a bare 150x22 sparkline in a table cell with no
+             axis, no labels and no rail, so its plot rectangle and its canvas
+             are the same rectangle. */
+          const geo = UI.stripGeometry(series.length, 150);
+          window.FlowsCursor.attach(strip, {
+            name: "Score for " + row.t + " by session",
+            band: { y0: 0, y1: 22 },
+            points: series.map((raw, i) => {
+              const v = isNum(raw);
+              return {
+                x: geo.xMid(i),
+                label: track.dates[i] || "session " + (i + 1),
+                rows: [{ k: "Score", v: v === null ? "not scored" : fmtSigned(v, 0),
+                         cls: v === null ? "" : v > 0 ? "is-pos" : v < 0 ? "is-neg" : "" }],
+              };
+            }),
+          });
+        }
       } else {
         /* No trace for this name is an ABSENCE, not a flat line at zero. */
         cell.textContent = DASH;
@@ -521,6 +613,12 @@
     }
     return {
       byName, moveBy, domain: { lo, hi },
+      /* THE SESSION EACH COLUMN IS, in the series' own order. Every strip is
+         drawn against these indices and none of them names a date anywhere,
+         so a reader can see a name fall and not say when. `d` is what the
+         track publishes; a row that carries none stays null rather than
+         becoming an index worn as a date. */
+      dates: sessionRows.map((r) => (r && r.d) || null),
       deadBand: payload ? isNum(payload.deadBand) : null,
       /* The column header states the window it drew rather than a constant:
          a track that published nothing gets a header that promises nothing. */
@@ -941,6 +1039,35 @@
     into.append(wrap);
   }
 
+  /* ---------- one key's silence, for every surface that reads it ----
+
+     FOUR KINDS, ONE FUNCTION. `unreadable` is the request not coming back and
+     is this page's fault; `pending` is a key never published for this session;
+     `unavailable` is the key published WITHOUT the field, which is the payload
+     predating the layer; `empty` is the pipeline measuring and finding nothing
+     — and that last one is the only one of the four that says anything about
+     the market. Returns [kind, sentence] for a silence and null for a reading.
+
+     LIFTED OUT OF paintVerdict FOR THE SAME REASON boardsRead WAS. The
+     screened population was a tile in the verdict strip and is the strip's
+     caption now, so two surfaces ask this of the same payload. The first
+     draft of the caption asked nothing and simply hid the slot when the
+     figure was missing — which turns four facts into one absence, on a page
+     whose whole argument is that they are four.
+
+     `quietSaid` is passed only where the caller's own denominator is a
+     published zero: a null ratio with no such denominator is the payload's
+     gap, not the market's. Same kinds, precedence and data-empty names as
+     quiet()/silent() give a region, so a tile, a caption and the region
+     beneath them never word one fact three ways. */
+  const keySilence = (payload, read, quietSaid) => {
+    if (!payload) return ["unreadable", "could not be read — refresh to try again"];
+    if (payload.status === "pending") return ["pending", "not published yet"];
+    if (read) return null;
+    if (quietSaid) return ["empty", quietSaid];
+    return ["unavailable", "not on this payload"];
+  };
+
   /* ---------- the verdict bar --------------------------------------
 
      Seven readings the rest of the page then explains. Every one of them is
@@ -948,9 +1075,67 @@
      by not saying a number, which is the only honest thing a tile can do —
      and then says WHICH of the four silences the dash stands for, because
      the dash alone is one glyph for four facts. */
-  function paintVerdict(into, long, short, market, alerts) {
+  function paintVerdict(into, long, short, market, alerts, pulse) {
     const breadth = (market && market.breadth) || {};
     const premium = (market && market.premium) || {};
+
+    /* THE TWO LEAN TILES GET THEIR OWN RECENT HISTORY, out of the same daily
+       totals the flow chart draws — so the sparkline on a tile and the bars
+       in the region below it are the same numbers, and a reader who compares
+       them finds them agreeing.
+
+       DERIVED HERE AND NOT PUBLISHED ANYWHERE: a daily lean is
+       (call − put) / (call + put) per session, which is the same construction
+       `premium.tilt` uses for today. That is why the line can sit under
+       today's figure at all — it is the same quantity, one point a session,
+       rather than a second measurement with a similar name.
+
+       NEWEST LAST, because a line runs left to right and the payload orders
+       these newest first. Reversed on a copy: the array is the payload's. */
+    const daily = (() => {
+      const tot = pulse && pulse.totals;
+      if (!tot || tot.status !== "ok" || !Array.isArray(tot.rows)) return null;
+      const rows = tot.rows.slice().reverse().slice(-21);
+      const lean = [], gross = [];
+      for (const r of rows) {
+        const c = isNum(r && r.callPrem), pu = isNum(r && r.putPrem);
+        if (c === null || pu === null) { lean.push(null); gross.push(null); continue; }
+        const g = Math.abs(c) + Math.abs(pu);
+        lean.push(g > 0 ? (c - pu) / g : null);
+        gross.push(g);
+      }
+      return { lean, gross };
+    })();
+
+    /* THE SPLIT AS TWO SHARES, which is what the target prints under each of
+       these bars ("85% call / 15% put"). The counts are already the tile's
+       value; this says what fraction of the WHOLE each side is, which a
+       reader otherwise does in their head off two three-digit numbers.
+
+       BOTH SIDES OR NEITHER. A share needs a denominator, so one half missing
+       leaves no sentence rather than a percentage of a number nobody has —
+       the em dash in the value above is already saying which half is absent.
+       A denominator of zero is a measured session in which nothing cleared;
+       that gets no percentage either, because 0/0 is undefined and "0%" would
+       be a claim. */
+    const shareOf = (a, b) => {
+      if (a === null || b === null) return null;
+      const whole = a + b;
+      if (!(whole > 0)) return null;
+      return [Math.round((a / whole) * 100) + "% bull / " +
+        Math.round((b / whole) * 100) + "% bear", null, null];
+    };
+
+    /* THE NEWEST SESSION'S TOTAL, for the Premium tile. Taken off the end of
+       the series the sparkline draws, so the figure is the last point of its
+       own line rather than a second read that could differ from it. */
+    const grossNow = (() => {
+      if (!daily || !Array.isArray(daily.gross)) return null;
+      for (let i = daily.gross.length - 1; i >= 0; i--) {
+        if (daily.gross[i] !== null) return daily.gross[i];
+      }
+      return null;
+    })();
 
     /* FOUR SILENCES, FOUR SENTENCES, ON A TILE. Both tilt tiles printed "not
        measured this session" whenever the ratio was null — whether
@@ -963,27 +1148,9 @@
        only when the caller's own denominator is a published zero — a null
        ratio with no such denominator is the payload's gap, not the market's.
        Returns [kind, sentence] for a silence and null for a reading. */
-    const tileSilence = (payload, read, quietSaid) => {
-      if (!payload) return ["unreadable", "could not be read — refresh to try again"];
-      if (payload.status === "pending") return ["pending", "not published yet"];
-      if (read) return null;
-      if (quietSaid) return ["empty", quietSaid];
-      return ["unavailable", "not on this payload"];
-    };
+    const tileSilence = keySilence;
 
-    /* THE TWO BOARDS ARE ONE PAYLOAD FOR THE SESSION AND CLEARED TILES: a
-       half that answered names it, and only when neither did is the tile a
-       silence — unreadable if either fetch failed, pending if both are
-       unpublished, unavailable if a half answered without the field. */
-    const answered = [long, short].filter((p) => p && p.status !== "pending");
-    const boardsSilence = (read) => read ? null
-      : answered.length ? ["unavailable", "not on this payload"]
-        : (!long || !short) ? ["unreadable", "could not be read — refresh to try again"]
-          : ["pending", "not published yet"];
-    const longDate = answered.includes(long) ? long.sessionDate : null;
-    const shortDate = answered.includes(short) ? short.sessionDate : null;
-    const sessionDate = (typeof longDate === "string" && longDate) ||
-      (typeof shortDate === "string" && shortDate) || null;
+    const { silence: boardsSilence, date: sessionDate } = boardsRead(long, short);
 
     /* THE POOL, NOT THE ROWS — poolCount, the number the rail badges, so the
        rail, this tile and each board's own status line agree. The counted-
@@ -1044,25 +1211,82 @@
        silences are what separate "not published yet" from "the fetch broke"
        from "measured, and empty". Dropping those sentences would not make
        the page denser; it would make four different facts look like one. */
+    /* FIVE TILES, NOT SEVEN, AND THE TWO THAT LEFT WERE NOT MEASUREMENTS.
+
+       `Session` is a date and `Screened` is a population — the row's caption,
+       not two of its readings. They sat in a strip a reader is meant to take
+       in at a glance, where the only useful move is comparing one tile to the
+       next, and neither could be compared to anything. Both are drawn above
+       the strip now, by paintMeta, in the place a reader looks to answer "is
+       this today" before reading any figure at all.
+
+       WHAT REMAINS IS FIVE THINGS THAT MOVED TODAY, each with the shape of
+       its own number beside it: two counts that split, two ratios that lean,
+       and one census with a ceiling on it. */
+    const flagSpread = (() => {
+      /* THE FLAGGED TILE'S OWN DISTRIBUTION, out of the rows the page already
+         holds. A count with a ceiling on it says how many windows there were
+         and nothing about whether they were alike — eight windows of $1M and
+         one of $8M beside seven of $30k are the same integer. The bars are
+         the premium of the largest windows in hand, largest first, which is
+         the shape that integer is hiding. */
+      const rows = Array.isArray(alerts && alerts.rows) ? alerts.rows : [];
+      const prems = rows.map((r) => isNum(r && r.prem))
+        .filter((v) => v !== null && v > 0).sort((a2, b2) => b2 - a2).slice(0, 14);
+      return prems.length >= 3 ? ["hist", prems] : null;
+    })();
+
     const tiles = [
-      /* EITHER HALF CAN NAME THE SESSION. This read the long board alone,
-         so a long board that did not answer — or has not published yet —
-         put an em dash here while the short board in the same closure
-         carried the date. Neither half is the page's session; they are two
-         writes of one. */
-      ["Session", sessionDate || DASH, null, boardsSilence(sessionDate !== null)],
-      ["Screened", isNum(market && market.n) === null ? DASH : String(market.n), null,
-        tileSilence(market, isNum(market && market.n) !== null, null)],
-      ["Lean · names", pct(bt, 1), tone(bt), btSilence, ["signed", bt]],
-      ["Lean · dollars", pct(pt, 1), tone(pt), ptSilence, ["signed", pt]],
       ["Breadth",
         (bull === null ? DASH : String(bull)) + " bull / " + (bear === null ? DASH : String(bear)) + " bear",
-        null, tileSilence(market, bull !== null && bear !== null, null), ["split", bull, bear]],
+        null, tileSilence(market, bull !== null && bear !== null, null), ["split", bull, bear],
+        shareOf(bull, bear)],
       ["Cleared",
         (bulls === null ? DASH : bulls) + " bull / " + (bears === null ? DASH : bears) + " bear",
-        null, boardsSilence(bulls !== null || bears !== null), ["split", bulls, bears]],
+        null, boardsSilence(bulls !== null || bears !== null), ["split", bulls, bears],
+        shareOf(bulls, bears)],
+      /* FIVE TILES, AND THE DEMOTED READING KEEPS EVERYTHING IT HAD.
+
+         The target strip reads BREADTH / CLEARED / FLOW BIAS / PREMIUM /
+         FLAGGED. This page publishes two tilts — names-weighted and
+         dollars-weighted — and shared/flows-market.js says publishing both is
+         what removes the choice between them, so neither is deleted.
+
+         THE FIRST ATTEMPT AT THIS FOLD WAS A SILENCE COLLAPSE. The name lean
+         went into the dollar tile's sub-line as a bare `pct(bt, 1)` rendered
+         only when the value was non-null — so unreadable, pending,
+         unavailable and empty all became "no sub-line", four facts flattened
+         into one absence. CI caught the missing VALUE; it would not have
+         caught the missing silences for much longer, which is the worse half,
+         and it is the same defect this branch opened with.
+
+         So the sub-line carries what the tile carried: the figure when there
+         is one, that reading's OWN silence sentence when there is not, its
+         own kind on data-empty for the mark, and its own sign-tone. A
+         qualifier slot that cannot do those three things is not somewhere a
+         reading can be moved to. */
+      ["Flow bias", pct(pt, 1), tone(pt), ptSilence,
+        daily && daily.lean ? ["spark", daily.lean] : ["signed", pt],
+        bt !== null
+          ? [pct(bt, 1) + " weighting names equally", null, tone(bt)]
+          : (btSilence ? ["Names equally weighted: " + btSilence[1], btSilence[0], null] : null)],
+      /* THE DOLLAR TOTAL, FROM THE SERIES THE RING AND THE CHART ALREADY
+         READ. `daily.gross` is |callPrem| + |putPrem| a session, built two
+         hundred lines up from the same pulse rows paintSplit takes its ring
+         from — so the tile, the ring and the daily chart cannot disagree
+         about what a session's premium was. It was computed and then used for
+         nothing until now.
+
+         NO SESSION-OVER-SESSION DELTA, which the target prints beside this
+         figure as "+4.1%". Nothing publishes one for this population, and the
+         two newest rows of a 20-row window are not it: that would be a
+         reading invented at the render, which is the one thing this strip
+         does not do. The sparkline carries the direction instead. */
+      ["Premium", grossNow === null ? DASH : usd(grossNow), null,
+        tileSilence(pulse, grossNow !== null, null),
+        daily && daily.gross ? ["spark", daily.gross] : null],
       ["Flagged windows", seen === null ? DASH : (atLimit ? "\u2265" : "") + seen, null,
-        tileSilence(alerts, seen !== null, null)],
+        tileSilence(alerts, seen !== null, null), flagSpread],
     ];
 
     /* A silent tile keeps its dash, prints the silence's sentence as its sub
@@ -1112,18 +1336,600 @@
         svg.append(svgEl("rect", { class: "cc-viz-b", x: w, y: 1, width: 100 - w, height: 6 }));
         return svg;
       }
+      /* A SERIES, AS A LINE, WHICH IS WHAT A TILE CANNOT SAY IN ONE FIGURE.
+
+         "−2.5%" is today. Whether today is the third session leaning the same
+         way or a reversal of a fortnight is a different fact, and the tile
+         had no room for it in words. Scaled to the SERIES' own range and
+         anchored at zero where the series crosses it, so the line's shape is
+         the reading and its height is not comparable to any other tile's —
+         which is why no value is drawn beside it. The figure above is the
+         number; this is its recent history and nothing more.
+
+         A POLYLINE AND NOT AN AREA: an area fill under a signed series reads
+         as a quantity accumulated, and this is a level at each point. */
+      if (spec[0] === "spark") {
+        const vals = Array.isArray(spec[1]) ? spec[1].map((v) => isNum(v)) : [];
+        const seen = vals.filter((v) => v !== null);
+        if (seen.length < 3) return null;
+        const lo = Math.min(0, ...seen), hi = Math.max(0, ...seen);
+        const range = (hi - lo) || 1;
+        const step = vals.length > 1 ? 100 / (vals.length - 1) : 100;
+        const pts = [];
+        vals.forEach((v, i) => {
+          if (v === null) return;
+          pts.push((step * i).toFixed(2) + "," + (8 - ((v - lo) / range) * 8).toFixed(2));
+        });
+        if (pts.length < 3) return null;
+        /* THE ZERO RULE ONLY WHERE ZERO IS INSIDE THE RANGE. Drawn at the
+           edge of a one-sided series it is not a reference, it is a border. */
+        if (lo < 0 && hi > 0) {
+          const zy = (8 - ((0 - lo) / range) * 8).toFixed(2);
+          svg.append(svgEl("line", { class: "cc-viz-z", x1: 0, x2: 100, y1: zy, y2: zy }));
+        }
+        const last = seen[seen.length - 1];
+        svg.append(svgEl("polyline", {
+          class: "cc-viz-s" + (last < 0 ? " is-neg" : last > 0 ? " is-pos" : ""),
+          points: pts.join(" "), fill: "none",
+        }));
+        return svg;
+      }
+      /* A DISTRIBUTION, WHICH THE COUNT BESIDE IT CANNOT CARRY. Scaled to the
+         largest bar in the set and never to a constant: this is a shape, and
+         the only claim it makes is the relative one — the tile's digits are
+         what carry magnitude. Anchored at the BOTTOM rather than centred,
+         because every value in it is a magnitude with no sign to place. */
+      if (spec[0] === "hist") {
+        const vals = Array.isArray(spec[1]) ? spec[1].map((v) => isNum(v)).filter((v) => v !== null) : [];
+        if (vals.length < 3) return null;
+        const top = Math.max(...vals.map(Math.abs));
+        if (!(top > 0)) return null;
+        const step = 100 / vals.length;
+        vals.forEach((v, i) => {
+          const h = Math.max(0.8, (Math.abs(v) / top) * 8);
+          svg.append(svgEl("rect", { class: "cc-viz-h",
+            x: (step * i + step * 0.16).toFixed(2), width: (step * 0.68).toFixed(2),
+            y: (8 - h).toFixed(2), height: h.toFixed(2) }));
+        });
+        return svg;
+      }
       return null;
     };
 
-    for (const [key, value, cls, silence, spec] of tiles) {
+    /* THE SUB-LINE IS EITHER THE SILENCE OR THE QUALIFIER, NEVER BOTH.
+       A silent tile has no reading for a qualifier to be about, so the two
+       cannot collide — and the silence always wins, because "not measured" is
+       the more important of the two things a reader could be told. */
+    for (const [key, value, cls, silence, spec, sub] of tiles) {
       const tile = el("div", "cc-tile");
       if (silence) tile.dataset.empty = silence[0];
       tile.append(el("span", "cc-tile-k", key));
       tile.append(el("span", "cc-tile-v" + (cls || ""), String(value)));
       const bar = silence ? null : viz(spec);
       if (bar) tile.append(bar);
+      /* TWO SLOTS, NOT ONE, AND THEY ARE NOT ALTERNATIVES.
+
+         `.cc-tile-s` is the TILE's own silence. `.cc-tile-q` is a READING
+         that was demoted into this tile and carries its own figure, its own
+         sign and its own silence. An `else if` between them was the second
+         version of the same collapse: on a market key that failed to read,
+         BOTH tilts are silent, the tile's sentence won, and the equal-weight
+         tilt's silence was never rendered at all — two facts shown as one,
+         which is the thing this strip exists to refuse. */
       if (silence && silence[1]) tile.append(el("span", "cc-tile-s", silence[1]));
+      if (sub) {
+        const se = el("span", "cc-tile-q" + (sub[2] || ""), sub[0]);
+        if (sub[1]) se.dataset.empty = sub[1];
+        tile.append(se);
+      }
       into.append(tile);
+    }
+  }
+
+  /* ---------- what the two boards say about the session -------------
+
+     THE TWO BOARDS ARE TWO WRITES OF ONE SESSION, so "which session is this"
+     and "is that a silence" are one question asked of both halves: a half
+     that answered names it, and only when neither did is there a silence —
+     unreadable if either fetch failed, pending if both are unpublished,
+     unavailable if a half answered without the field.
+
+     LIFTED OUT OF paintVerdict BECAUSE THERE ARE TWO CALLERS NOW. The session
+     used to be a tile in the verdict strip and is the strip's caption; the
+     `Cleared` tile is still in the strip. A second copy of this decision is
+     how the caption comes to say "not published yet" over a strip that says
+     "could not be read", about the same two payloads, four lines apart —
+     and it is how the four silences quietly become one, which is the
+     distinction this page exists to keep. */
+  function boardsRead(long, short) {
+    const answered = [long, short].filter((p) => p && p.status !== "pending");
+    const longDate = answered.includes(long) ? long.sessionDate : null;
+    const shortDate = answered.includes(short) ? short.sessionDate : null;
+    const date = (typeof longDate === "string" && longDate) ||
+      (typeof shortDate === "string" && shortDate) || null;
+    const silence = (read) => read ? null
+      : answered.length ? ["unavailable", "not on this payload"]
+        : (!long || !short) ? ["unreadable", "could not be read — refresh to try again"]
+          : ["pending", "not published yet"];
+    return { silence, date };
+  }
+
+  /* ---------- the session's caption --------------------------------
+
+     WHICH SESSION, OVER HOW MANY NAMES, AND WHETHER IT IS STILL MOVING. The
+     first two were tiles in the verdict strip until this change; they are
+     stated here because they qualify every figure on the page rather than
+     being one of them.
+
+     THE THIRD IS NEW AND IT IS A HONESTY FIX, not a decoration. Some keys on
+     this page refresh intraday and some are written once at the open, so
+     "16:28 UTC" on the alerts region and a morning board sat on one screen
+     with nothing saying they were read hours apart. The stamp here is the
+     NEWEST read across the payloads the page actually holds, and it is
+     labelled as a read time rather than as a session time. */
+  function paintMeta(box, dateEl, screenedEl, liveEl, boards, market, reads) {
+    if (!box) return;
+    let said = false;
+    /* THE FOUR SILENCES SURVIVED THE MOVE, and keeping them was the whole
+       care in it. This line replaced a TILE that carried them — "could not be
+       read", "not published yet", "not on this payload" are three different
+       facts about the pipeline and only one of them is about the market — and
+       the first draft of this caption printed one sentence for all three.
+       That is the collapse this page is built to refuse, reintroduced by a
+       layout change. Same function the strip's Cleared tile reads, so the two
+       cannot word one fact two ways. */
+    const { silence: boardsSilence, date } = boardsRead(boards[0], boards[1]);
+    const quiet = boardsSilence(date !== null);
+    if (dateEl) {
+      dateEl.textContent = date || (quiet ? "session " + quiet[1] : "");
+      if (quiet) dateEl.dataset.empty = quiet[0];
+      else delete dateEl.dataset.empty;
+      said = said || Boolean(date) || Boolean(quiet);
+    }
+    /* AND THE SCREENED POPULATION KEEPS ITS FOUR SILENCES TOO. It was a tile
+       that carried them and the first draft of this caption hid the slot
+       whenever the figure was absent — so a market key that failed to read
+       and one that has never been published looked identical, which is
+       exactly the collapse the session line above was fixed for. Hiding is
+       reserved for the one case that is not a silence at all: a page with no
+       market payload in play. */
+    const n = isNum(market && market.n);
+    const nQuiet = keySilence(market, n !== null, null);
+    if (screenedEl) {
+      screenedEl.textContent = n === null
+        ? (nQuiet ? "screened " + nQuiet[1] : "")
+        : n + " names screened";
+      if (nQuiet) screenedEl.dataset.empty = nQuiet[0];
+      else delete screenedEl.dataset.empty;
+      screenedEl.hidden = n === null && !nQuiet;
+      said = said || n !== null || Boolean(nQuiet);
+    }
+    /* THE NEWEST STAMP WINS AND A MISSING ONE IS NOT A ZERO. Payloads that
+       carry no readAt simply do not vote; if none does, the line is absent
+       rather than showing the page-load time, which would be this browser's
+       clock dressed as the pipeline's. */
+    const stamps = reads.map((r) => (typeof r === "string" && /T\d{2}:\d{2}/.test(r) ? r : null))
+      .filter(Boolean).sort();
+    if (liveEl && stamps.length) {
+      const newest = stamps[stamps.length - 1];
+      const m = /T(\d{2}:\d{2})/.exec(newest);
+      liveEl.textContent = m ? "read " + m[1] + " UTC" : "";
+      liveEl.hidden = !m;
+      said = said || Boolean(m);
+    }
+    box.hidden = !said;
+  }
+
+  /* ---------- the market's flow, session by session -----------------
+
+     THE ONE REGION ON THIS PAGE WITH TIME ON AN AXIS. Everything else states
+     a level at today's close; this states how the market got here, out of a
+     `pulse` key that has been published and served and drawn nowhere.
+
+     DAILY, NOT INTRADAY, AND THAT IS A DECISION RATHER THAN WHAT WAS EASIEST.
+     The same key carries BOTH: `tide` is the vendor's intraday series at its
+     own cadence, and `totals` is one row a session. The first draft of this
+     region led on the intraday one and offered the daily periods beside it,
+     which meant one control sliding between two quantities on two different
+     clocks — the unit conflation this codebase keeps finding in its own
+     columns, rebuilt on purpose and then explained in a paragraph. The owner
+     asked for the daily reading and that resolves it: every period here is
+     the same series at a different length, so the control is a WINDOW and not
+     a source, and the note under the chart is one sentence instead of two.
+
+     `tide` is still on the payload and still unread. It is a different
+     question — "how did TODAY accumulate" — and it belongs to a panel that
+     asks it, not to this one.
+
+     TWO BARS PER SESSION, BY SIDE — AND THE SIDE IS NOT A SIGN.
+
+     THIS PARAGRAPH USED TO SAY THE OPPOSITE AND IT WAS WRONG. It read: "call
+     premium and put premium are NET figures: the vendor publishes them
+     signed... and the sign is the reading." That is true of `pulse.points`,
+     which shapeTide builds from `net_call_premium` / `net_put_premium`
+     (shared/flows-pulse.js:132-133) — and this chart does not draw that
+     series. Every period below reads `totals`, which shapeTotals builds from
+     the vendor's `call_premium` / `put_premium` columns
+     (shared/flows-pulse.js:154-155): GROSS sums, non-negative by
+     construction. The two arrays carry the same FIELD NAMES for two different
+     quantities, which is how the claim survived the switch to a daily source.
+
+     So there is no sign to read here, and pretending otherwise would be the
+     confident reading this whole section exists to refuse. What the two sides
+     mean is drawn instead: call premium upward, put premium downward, both as
+     MAGNITUDES from a common zero. The picture is the one a reader expects —
+     green above, red below — and the axis names the side rather than printing
+     a minus sign in front of a number that was never negative. */
+  const TIDE_PERIODS = [
+    ["1W", "totals", 5],
+    ["1M", "totals", 21],
+    ["3M", "totals", 63],
+    ["All", "totals", null],
+  ];
+
+  /* ONE SOURCE, AND THE PARAMETER IS GONE WITH IT. While this read two keys
+     the shape had to carry which one; every period is `totals` now, so a
+     branch on a source would be a branch that cannot be taken — and a dead
+     branch is how the next reader concludes the other source is still live
+     here. `span` is a count of SESSIONS, null for the whole window. */
+  function tideSeries(pulse, span) {
+    const tot = pulse && pulse.totals;
+    if (!tot || tot.status !== "ok" || !Array.isArray(tot.rows)) return null;
+    /* THE PAYLOAD ORDERS THESE NEWEST FIRST and a time axis runs the other
+       way. Reversed on a COPY: the array is the payload's and two regions
+       read it. */
+    const rows = tot.rows.slice().reverse()
+      .map((r) => ({ at: r && r.date, call: isNum(r && r.callPrem), put: isNum(r && r.putPrem) }))
+      .filter((r) => r.call !== null || r.put !== null);
+    const kept = span && span < rows.length ? rows.slice(-span) : rows;
+    return kept.length >= 2 ? kept : null;
+  }
+
+  function paintTide(into, seg, pulse) {
+    if (silent(into, pulse, "market pulse feed")) return;
+
+    /* WHICH PERIODS ARE OFFERED IS DECIDED BY WHAT READS, not by the list.
+       A button that selects an empty chart is worse than an absent one: it
+       tells a reader the data exists and that they mis-clicked. */
+    const live = TIDE_PERIODS
+      .map(([label, , span]) => [label, span, tideSeries(pulse, span)])
+      .filter(([, , rows]) => rows);
+    if (!live.length) {
+      quiet(into, "empty",
+        "The pulse key carried no timestamped premium series for this session.");
+      return;
+    }
+    /* A WIDER PERIOD THAT DRAWS THE SAME ROWS AS A NARROWER ONE IS NOT A
+       CHOICE. Twenty sessions of history offered as both "1M" and "All" is
+       one chart behind two labels, and a reader who clicks between them and
+       sees nothing move learns the control is decorative. */
+    const seen = new Set();
+    const periods = live.filter(([, , rows]) => {
+      if (seen.has(rows.length)) return false;
+      seen.add(rows.length);
+      return true;
+    });
+
+    let active = 0;
+    const draw = () => {
+      into.replaceChildren();
+      seg.replaceChildren();
+      periods.forEach(([label], i) => {
+        const b = el("button", "cc-seg-b", label);
+        b.type = "button";
+        if (i === active) b.setAttribute("aria-current", "true");
+        b.addEventListener("click", () => { active = i; draw(); });
+        seg.append(b);
+      });
+
+      const [label, , rows] = periods[active];
+      /* ROOM ON THE RIGHT FOR THE VALUE MARKS, and a little more at the top so
+         the highest label is not clipped by the viewBox. A label drawn
+         outside the box is a label nobody sees. */
+      const W = 1000, H = 230, padT = 20, padB = 26, padL = 0, padR = 96;
+      const plotH = H - padT - padB, plotW = W - padL - padR;
+      /* THE DOMAIN IS THE RANGE THE DATA ACTUALLY OCCUPIES, ANCHORED AT ZERO.
+
+         A symmetric ±peak axis is the reflex for a signed series and it is
+         wrong whenever the series does not straddle zero: on a week where
+         every session cleared positive premium, half the plot was empty and
+         every bar was drawn at half the height it had room for. Anchored
+         instead — lo = min(0, smallest), hi = max(0, largest) — the axis
+         covers exactly what was measured and still contains its own origin,
+         so a positive bar and a negative bar are drawn against ONE linear
+         scale and remain comparable by height. That is the property a
+         symmetric axis was protecting, and it survives.
+
+         The three value marks below are drawn from lo, 0 and hi for the same
+         reason: they are the ends of the scale and its origin, which is what
+         fixes a linear axis. */
+      /* THE PUT SIDE IS PLOTTED AT ITS NEGATIVE and is not a negative number.
+         `lo` is the downward reach of the put bars and `hi` the upward reach
+         of the call bars; both are magnitudes, and the marks below say which
+         side each end belongs to rather than signing it. A gross figure that
+         arrives negative is a payload this drawing cannot represent, so it is
+         clamped to zero rather than drawn on the wrong side of the rule. */
+      let lo = 0, hi = 0;
+      for (const r of rows) {
+        const c = r.call === null ? null : Math.max(0, r.call);
+        const p = r.put === null ? null : Math.max(0, r.put);
+        if (c !== null && c > hi) hi = c;
+        if (p !== null && -p < lo) lo = -p;
+      }
+      if (!(hi > lo)) { hi = 1; lo = 0; }
+      const span = hi - lo;
+      const yOf = (v) => padT + (1 - (Math.max(lo, Math.min(hi, v)) - lo) / span) * plotH;
+      const zeroY = yOf(0);
+      const step = plotW / rows.length;
+      /* TWO BARS IN THE SLOT, SIDE BY SIDE, AND THE WIDTH IS CAPPED.
+
+         The gap is a FRACTION of the slot rather than a constant, because a
+         constant wins at twenty sessions and erases the bars at sixty. The
+         cap is what the first draft was missing: at five sessions the slot is
+         200 units of a 1000-unit box and a proportional bar is 78 of them —
+         drawn, that is a block, not a bar, and a week of flow read as five
+         coloured panels. Capped, a short window is sparse bars on a wide
+         axis, which is what five sessions actually are. */
+      const barW = Math.max(0.6, Math.min(22, (step * 0.78) / 2));
+
+      /* NOT "none": that scales x and y apart, so bar HEIGHTS — the whole
+         reading — get multiplied by whatever the host/viewBox ratio happens
+         to be. The same defect was found and fixed on the premium-track panel
+         this session; this is its twin on the landing page. */
+      const svg = svgEl("svg", { class: "cc-tide-c", viewBox: "0 0 " + W + " " + H,
+        width: "100%", height: H, preserveAspectRatio: "xMidYMid meet", role: "img" });
+      const g = svgEl("g", { class: "cc-tide-bars" });
+      rows.forEach((r, i) => {
+        const x0 = padL + step * i + step * 0.11;
+        for (const [v, cls, off] of [
+          [r.call === null ? null : Math.max(0, r.call), "is-call", 0],
+          [r.put === null ? null : -Math.max(0, r.put), "is-put", barW],
+        ]) {
+          if (v === null) continue;
+          const y = yOf(v);
+          g.append(svgEl("rect", {
+            class: "cc-tide-b " + cls,
+            x: (x0 + off).toFixed(2), width: barW.toFixed(2),
+            y: Math.min(y, zeroY).toFixed(2),
+            height: Math.max(0.7, Math.abs(zeroY - y)).toFixed(2),
+          }));
+        }
+      });
+      svg.append(g);
+
+      /* THE ENDS OF THE AXIS AND THE SCALE, AND NOTHING ELSE. A tick per
+         bucket is 78 labels; a tick every nth is a ruler whose spacing means
+         nothing. The two ends say which window this is and the scale says
+         what a full-height bar is worth, which together are what a bar can
+         be measured against. */
+      const stamp = (v) => {
+        if (typeof v !== "string") return null;
+        const m = /T(\d{2}:\d{2})/.exec(v);
+        return m ? m[1] : (/^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : null);
+      };
+      const ends = [[stamp(rows[0].at), 2, "start"], [stamp(rows[rows.length - 1].at), W - 2, "end"]];
+      for (const [text, x, anchor] of ends) {
+        if (!text) continue;
+        const t = svgEl("text", { class: "cc-tide-x", x, y: H - 8, "text-anchor": anchor });
+        t.textContent = text;
+        svg.append(t);
+      }
+
+      /* THREE VALUE MARKS ON THE RIGHT: the two extremes of the scale and its
+         zero. A bar is only measurable against a number, and "full height
+         $25.30B" in the corner told a reader what the TALLEST bar is worth
+         without telling them what a half-height one is. Three marks is the
+         fewest that fix a linear scale — the ends and the origin — and on a
+         symmetric axis they are the only three whose positions are known
+         without a tick ladder a reader has to count along.
+
+         RIGHT-HAND SIDE, WHICH IS WHERE THE SERIES ENDS. A left axis is read
+         before the data on a chart that runs left to right; this one is read
+         after, when the question is "how big was that". */
+      for (const v of [hi, 0, lo]) {
+        const y = yOf(v);
+        svg.append(svgEl("line", { class: "cc-tide-g", x1: padL, x2: W - padR, y1: y, y2: y }));
+        const lab = svgEl("text", { class: "cc-tide-y", x: W - padR - 4, y: y - 4, "text-anchor": "end" });
+        /* THE MARK CARRIES THE SIDE, NOT A SIGN. usd(lo) would print
+           "-$60M" for a put total that is not negative and never was. */
+        lab.textContent = v === 0 ? "$0"
+          : v > 0 ? usd(v) + " call" : usd(-v) + " put";
+        svg.append(lab);
+      }
+      svg.setAttribute("aria-label",
+        rows.length + " sessions" +
+        " from " + (stamp(rows[0].at) || "the start of the window") +
+        " to " + (stamp(rows[rows.length - 1].at) || "its end") +
+        ", the vendor's gross call and put premium drawn as two bars a session " +
+        "against one common scale — calls upward to " + usd(hi) + ", puts downward " +
+        "to " + usd(-lo) + ". Both are magnitudes; neither side is a negative number.");
+
+      const key = el("div", "cc-tide-k");
+      key.append(el("span", "cc-tide-key is-call", "Call premium"));
+      key.append(el("span", "cc-tide-key is-put", "Put premium"));
+      /* THE LEGEND NO LONGER CARRIES THE SCALE. It said "full height $25.30B",
+         which is the same fact the top axis mark now states — in the place a
+         reader measures a bar against rather than in a corner. */
+      into.append(key);
+      into.append(svg);
+
+      /* THE CURSOR OVER THE SAME ROWS THE BARS WERE DRAWN FROM. A session's
+         two bars are a pair, so the readout is the pair — call above put,
+         each a magnitude, which is what the axis marks above already say and
+         what stops a reader reading the downward bar as a negative number.
+
+         AN ABSENT SIDE PRINTS THE EM DASH RATHER THAN $0, for the same reason
+         the bar for it is not drawn at all: a session the feed did not carry
+         and a session that cleared nothing are two different facts, and this
+         chart has always refused to merge them.
+
+         x IS THE MIDDLE OF THE PAIR, not of the call bar: the rule should
+         land between the two bars a reader is being told about, and the pair
+         occupies step*0.11 to step*0.11 + 2*barW inside its slot. */
+      if (window.FlowsCursor && rows.length) {
+        window.FlowsCursor.attach(svg, {
+          name: "Daily call and put premium, " + label,
+          band: { y0: padT, y1: padT + plotH },
+          points: rows.map((r, i) => ({
+            x: padL + step * i + step * 0.11 + barW,
+            /* `at`, NOT `d`. tideSeries names the session `at` — the row it
+               maps from carries `date` and it renames it — and the first
+               registration here read `.d`, the board row's key, which is the
+               same confusion that once printed "undefined leans most bullish"
+               in the sector region. Driven rather than read: every readout
+               came back with an em dash for its heading, which is what sent
+               me to the shaper. */
+            label: r.at || DASH,
+            rows: [
+              { k: "Call", v: r.call === null ? DASH : usd(Math.max(0, r.call)), cls: "is-pos" },
+              { k: "Put", v: r.put === null ? DASH : usd(Math.max(0, r.put)), cls: "is-neg" },
+            ],
+          })),
+        });
+      }
+
+      /* THE POPULATION AND THE UNIT, IN WORDS. Every period draws the same
+         series at a different length, so this says what a bar IS once and
+         then says how many of them are on screen. It never folds: a reader
+         who does not know these are whole-session totals carried without
+         cumulation reads a different chart. */
+      into.append(el("p", "cc-note",
+        label + " is " + rows.length + " session" + (rows.length === 1 ? "" : "s") +
+        " of the vendor's own daily call and put premium, one bar a session, carried " +
+        "without cumulation or smoothing. Each pair is what crossed that session — " +
+        "not a running total, and not a forecast of anything."));
+    };
+    draw();
+  }
+
+  /* ---------- the session's call/put split -------------------------
+
+     ONE FIGURE FOR A NUMBER THAT WAS ONLY EVER REACHABLE AS ITS OWN INVERSE.
+     `market.premium` publishes netPositive and netNegative — dollars of
+     bullish and bearish option premium — and the page's only reading of them
+     was `tilt`, a signed ratio in a tile. A reader who wanted "how much of
+     this session was calls" had to take a percentage, invert it and halve it.
+
+     THE RING IS THE SHARE AND THE TWO TOTALS ARE WHAT IT IS A SHARE OF, side
+     by side, because a percentage with no denominator is the reading this
+     codebase refuses everywhere else. A session of $400M against one of $4M
+     can print the identical ring.
+
+     DRAWN AS AN ARC RATHER THAN A BAR because the two parts are shares of one
+     whole and always sum to it — the one case where a ring says something a
+     split bar does not: that there IS a whole, and that it closes. */
+  /* THIS RING READ THE WRONG FIELD AND SAID SO IN THE LEGEND.
+
+     It was built on `market.premium.netPositive` / `netNegative`, assigned
+     them to variables named `call` and `put`, and labelled them "Calls" and
+     "Puts". Those two fields are the sums of POSITIVE and NEGATIVE net
+     premium across names — and shared/flows-market.js:147-150 says, verbatim,
+     that they are "not call premium and not put premium, both of which are
+     separate screener columns a reader could hold beside these and have no
+     way to know are unrelated". A name whose flow was heavily put-buying but
+     whose net came out positive counted toward "Calls". The comment warning
+     against exactly this was written before the ring existed and the ring did
+     it anyway.
+
+     THE CALL/PUT SPLIT IS A REAL READING AND IT HAS A REAL FIELD: the pulse
+     key's daily totals carry the vendor's own `callPrem` / `putPrem` for each
+     session (shared/flows-pulse.js:154-155). Those ARE call premium and put
+     premium. The newest row is this session's, and the sub-line below names
+     its date rather than assuming it is the session the rest of the page is
+     describing — the two feeds have disagreed before. */
+  function paintSplit(into, sub, pulse) {
+    if (silent(into, pulse, "market pulse feed")) return;
+    const tot = (pulse && pulse.totals) || null;
+    if (!tot || tot.status !== "ok" || !Array.isArray(tot.rows)) {
+      quiet(into, "unavailable",
+        "The pulse key is published without the daily totals this split is built from.");
+      return;
+    }
+    if (!tot.rows.length) {
+      quiet(into, "empty", "The daily totals were read and carried no session.");
+      return;
+    }
+    /* NEWEST FIRST, as the payload orders them — see tideSeries, which reverses
+       a COPY for its own axis and leaves this order alone. */
+    const row = tot.rows[0] || {};
+    const call = isNum(row.callPrem), put = isNum(row.putPrem);
+    if (call === null || put === null) {
+      quiet(into, "unavailable",
+        "The newest session carries no call/put premium pair, so there is no split to take.");
+      return;
+    }
+    /* GROSS AND NON-NEGATIVE BY CONSTRUCTION. A ring of a negative share is
+       not a smaller ring, it is a meaningless one, so a figure that arrives
+       negative is taken as its magnitude and the note says the session. */
+    const a = Math.abs(call), b = Math.abs(put), whole = a + b;
+    if (!(whole > 0)) {
+      quiet(into, "empty",
+        "Neither side of the session carried any premium, so there is no split to take.");
+      return;
+    }
+    const callShare = a / whole;
+
+    const R = 54, C = 64, SW = 15, circ = 2 * Math.PI * R;
+    const svg = svgEl("svg", { class: "cc-ring", viewBox: "0 0 128 128", role: "img",
+      "aria-label": "Calls are " + (callShare * 100).toFixed(0) + "% of " + usd(whole) +
+        " in premium and puts are " + ((1 - callShare) * 100).toFixed(0) + "%." });
+    /* THE PUT ARC IS THE FULL RING AND THE CALL ARC IS DRAWN OVER IT, so the
+       two always close: a rounding that left a hairline of background between
+       them would read as a third category. */
+    svg.append(svgEl("circle", { class: "cc-ring-put", cx: C, cy: C, r: R, "stroke-width": SW }));
+    svg.append(svgEl("circle", { class: "cc-ring-call", cx: C, cy: C, r: R, "stroke-width": SW,
+      "stroke-dasharray": (circ * callShare).toFixed(2) + " " + circ.toFixed(2),
+      transform: "rotate(-90 " + C + " " + C + ")" }));
+    /* BOTH LINES INSIDE THE HOLE, AND THE HOLE IS 93px ACROSS, not 128. The
+       ring is stroked 15 units wide on r=54, so the clear circle is r=46.5 —
+       and a caption on the baseline 20 below centre has only 2*sqrt(46.5² −
+       20²) = 84 units of room, which "total premium" overran. Raised to 14
+       below centre (88 units) and shortened to the one word that is not
+       already implied by the figure above it. */
+    const mid = svgEl("text", { class: "cc-ring-v", x: C, y: C - 2, "text-anchor": "middle" });
+    mid.textContent = usd(whole);
+    svg.append(mid);
+    const cap = svgEl("text", { class: "cc-ring-c", x: C, y: C + 14, "text-anchor": "middle" });
+    cap.textContent = "premium";
+    svg.append(cap);
+    /* NO CURSOR: EVERY NUMBER THIS RING ENCODES IS ALREADY ON SCREEN. The
+       total sits in the hole and the legend below prints both shares and both
+       dollar figures, so there is nothing a cursor could reveal — it holds two
+       observations and would offer two stops that read back two labels the
+       reader is looking at. Declared rather than remembered, so the preview
+       harness's chart census can prove "every drawing reads out" instead of
+       carrying this as a standing exception. */
+    svg.dataset.fxRead = "face";
+
+    const wrap = el("div", "cc-split-w");
+    wrap.append(svg);
+    const legend = el("div", "cc-split-l");
+    for (const [cls, label, share, dollars] of [
+      ["is-call", "Calls", callShare, a],
+      ["is-put", "Puts", 1 - callShare, b],
+    ]) {
+      const row = el("div", "cc-split-r " + cls);
+      row.append(el("span", "cc-split-dot"));
+      row.append(el("span", "cc-split-n", label));
+      row.append(el("span", "cc-split-p", (share * 100).toFixed(0) + "%"));
+      row.append(el("span", "cc-split-d", usd(dollars)));
+      legend.append(row);
+    }
+    wrap.append(legend);
+    into.append(wrap);
+
+    /* WHICH SESSION, BECAUSE IT IS NOT NECESSARILY THIS PAGE'S. The old
+       sub-line printed the market key's `priced` / `oneLegged` population,
+       which described a different field entirely and has no meaning for this
+       one. The pulse feed dates itself and has disagreed with the run's
+       session before, so the honest qualifier here is the date of the row
+       actually drawn. */
+    if (sub) {
+      const when = typeof row.date === "string" && row.date ? row.date : null;
+      sub.textContent = when
+        ? "the vendor's gross call and put premium for " + when
+        : "the vendor's gross call and put premium, for a session the feed did not date";
+      sub.hidden = false;
     }
   }
 
@@ -1177,15 +1983,69 @@
 
     const wrap = tableWrap("Flagged option windows, largest premium first");
     const table = el("table", "cc-tbl");
-    table.append(headRow([["Name", null], ["Contract", null], ["Premium", "c-num"], ["Rule", null]]));
+    /* TWO COLUMNS THE PAYLOAD HAS ALWAYS CARRIED AND THIS TABLE NEVER DREW.
+
+       WHEN. `spanStart` is the vendor's own start of the window — a window is
+       a span rather than a print, so the cell states the start and the title
+       carries both ends. In EASTERN time, named in the header: these are
+       session windows, and a clock with no zone on a table of session windows
+       is a number a reader cannot place. The viewer's own zone is deliberately
+       not used here — the alerts subtitle above already carries the READ
+       instant in the viewer's wall clock, and those two are different facts.
+
+       WHICH SIDE. `askPrem` and `bidPrem` are the vendor's attribution of the
+       window's premium to the ask and the bid, and the share of the two is
+       the only reading either supports on its own. It is ATTRIBUTION and the
+       header's title says so: a trade printing at the ask is not proof it was
+       bought, and this column would be a claim about intent if it were named
+       "bought" or "sold". */
+    table.append(headRow([
+      ["Time \u00b7 ET", null, "The start of the vendor's flagged window, in Eastern time. " +
+        "A window is a span rather than a print; hover a cell for both ends."],
+      ["Name", null], ["Contract", null], ["Premium", "c-num"],
+      ["Side", "c-num", "The vendor's ATTRIBUTION of this window's premium to the ask or the " +
+        "bid, as a share of the two. A print at the ask is not proof of a buyer, so this " +
+        "column names the side of the quote and never an intent."],
+      ["Rule", null],
+    ]));
     const body = el("tbody");
     for (const row of drawn) {
       const tr = el("tr");
+
+      const at = etTime(row.spanStart);
+      const when = el("td", "c-num cc-dim", at === null ? DASH : at);
+      if (at !== null) {
+        const to = etTime(row.spanEnd);
+        when.title = to === null
+          ? "Window opened " + at + " ET; the vendor stated no end for it."
+          : "Window ran " + at + " to " + to + " ET.";
+      }
+      tr.append(when);
+
       tr.append(el("td", "cc-t", row.t || DASH));
       tr.append(el("td", null,
         (row.cp || DASH) + " " + (isNum(row.k) === null ? DASH : row.k) +
         (row.exp ? " " + String(row.exp).slice(5) : "")));
       tr.append(el("td", "c-num", usd(row.prem)));
+
+      /* BOTH TERMS REQUIRED, and a measured zero on one side is a reading
+         rather than an absence: a window whose whole premium printed at the
+         bid is bid 100%, and a window the vendor split for neither side is
+         the em dash. */
+      const ask = isNum(row.askPrem), bid = isNum(row.bidPrem);
+      const two = ask === null || bid === null ? null : Math.abs(ask) + Math.abs(bid);
+      const askShare = two === null || two === 0 ? null : Math.abs(ask) / two;
+      /* NO HUE ON THIS COLUMN, AND THAT IS THE POINT OF IT. Green and red
+         mean bullish and bearish everywhere else on this page, and tinting
+         an ask-side share green would assert by colour the exact claim the
+         header's title refuses in words: a print at the ask is not proof of
+         a buyer. The words "ask" and "bid" carry the whole reading. */
+      tr.append(el("td", "c-num",
+        askShare === null ? DASH
+          : askShare === 0.5 ? "even"
+          : (askShare > 0.5 ? "ask " : "bid ") +
+            ((askShare > 0.5 ? askShare : 1 - askShare) * 100).toFixed(0) + "%"));
+
       tr.append(el("td", "cc-dim", row.rule || DASH));
       body.append(tr);
     }
@@ -1441,7 +2301,11 @@
   /**
    * Eleven sectors on one axis: where the option premium leaned today.
    */
-  function paintLean(into, payload) {
+  function paintLean(into, payload, seg) {
+    /* THE BUTTONS BELONG TO THE STRIP, so they are cleared before any of the
+       silences below can return: a toggle standing over a region that could
+       not be drawn offers a reader three ways to select nothing. */
+    if (seg) seg.replaceChildren();
     const sub = host("ccLeanSub");
     const saySub = (said) => { if (sub) sub.textContent = said; };
     saySub("options premium, not price momentum");
@@ -1519,7 +2383,9 @@
     caveats.push("Ordered on the RATIO — the share of each basket's own two-sided premium " +
       "that leaned one way — because that is what the publisher ranks on" +
       (lean && typeof lean.rejected === "string" && lean.rejected
-        ? ", having rejected " + lean.rejected : "") + ".");
+        ? ", having rejected " + lean.rejected : "") +
+      " — the table below keeps that rank in every mode; the strip above it is ordered " +
+      "on whichever quantity its toggle is showing.");
     caveats.push("The dollars ride beside it because a ratio carries no size: +90% on $30k of " +
       "premium and +90% on $300M are not the same fact.");
     method.push("Sign is carried by POSITION — left of the centre rule is bearish premium — " +
@@ -1542,48 +2408,207 @@
         "on /flows/market/ draws, in basis points per session.");
     }
 
-    /* THE READING LEADS, THE DERIVATION FOLLOWS — the first draft put ~1,100
-       characters of method above the table, the shape this product's own
-       prose audit named. Built from the rows the table draws, through the
-       same pct() the cells use, so lead and column cannot disagree; and only
-       when something leaned, since `ordered` keeps the quiet and unreadable
-       baskets at its tail. */
-    const leaners = ordered.filter((r) => isNum(r && r.leanRatio) !== null);
-    if (leaners.length) {
-      const hi = leaners[0], lo = leaners[leaners.length - 1];
-      /* NAMED BY THE FIELD THE ROW CARRIES. Sector rows are keyed `etf` and
-         `sector` (the name cell below reads the same two); this read `.t`,
-         the board row's key, so the region's lead reading printed "undefined
-         leans most bullish at +27.8% …; undefined most bearish at −22.1%."
-         on every session.
+    /* ---- THREE QUANTITIES, ONE STRIP, AND THE TABLE UNDER IT UNCHANGED ----
 
-         THE NAME LEADS NOW, AND THE TICKER USED TO. The old order was argued
-         — "the ticker is what can be looked up" — and it is the wrong trade
-         in a SENTENCE: "XLE leans most bearish" asks a reader to expand an
-         abbreviation mid-clause, while "Energy leans most bearish" is already
-         the reading. The ticker is still the better handle in a TABLE, where
-         it is a key rather than prose, and the name cell below keeps it —
-         one step quieter. flows-market.js:710 has always ordered it this way,
-         so this also ends two routes disagreeing about the same row. */
-      const basket = (r) => r.sector || r.fullName || r.etf || DASH;
-      const finding = leaners.length === 1
-        ? basket(hi) + " is the only basket with a readable lean, at " + pct(hi.leanRatio, 1) +
-          " of its own premium."
-        : basket(hi) + " leans most bullish at " + pct(hi.leanRatio, 1) + " of its own premium; " +
-          basket(lo) + " most bearish at " + pct(lo.leanRatio, 1) + ".";
-      /* THE PANEL'S FINDING, AT THE SIZE A FINDING GETS, through the same
-         helper as the other three. `.is-lead` is the same element one step up
-         in --fs-lead: this sentence was already first and already the
-         reading, and was drawn at note size beneath a subtitle, so it read as
-         a caption for the table rather than as the answer to the region. It
-         appended the pair by hand until the fourth lead site made that a
-         second spelling of what a lead is. */
-      lead(into, finding);
-    } else {
-      into.append(el("p", "cc-quiet",
-        "No basket carried a readable lean this session, so none is named."));
-    }
+       A BASKET CAN BE RANKED THREE WAYS AND NONE OF THEM IS THE REAL ONE.
+       The dollars it cleared, the contracts it traded, and the share of its
+       own premium that leaned are three different questions, and a page that
+       picks one for the reader has answered the other two by hiding them.
+       So the strip takes a toggle and the buttons name the quantity.
 
+       THE SILENCES ARE PER MODE, AND THAT IS THE PROPERTY WORTH HAVING.
+       `read` on a row is about the PREMIUM pair — bullish and bearish — and
+       the volumes are read independently of it, so a basket can carry a
+       readable call and put volume while its premium is unreadable, and the
+       other way round. Each mode therefore counts its OWN reporting baskets
+       and names its own missing ones; switching modes honestly changes which
+       sectors report, and a shared count would have been a lie in two of the
+       three.
+
+       THE TABLE DOES NOT MOVE. It is the record, it is ordered on the
+       publisher's own rank, and it prints all three quantities at once —
+       which is what a reader asking about one basket needs. The toggle is
+       the glance, not the record. */
+
+    /* CONTRACTS AT THE SCALE THEY LIVE ON, SIGNED, and abbreviated the same
+       way usd() abbreviates: sector volumes run to the low millions, and
+       "1961758" in a chip is a number nobody reads. */
+    const cts = (v) => {
+      const n = isNum(v);
+      if (n === null) return DASH;
+      const sign = n < 0 ? MINUS : n > 0 ? "+" : "";
+      const a = Math.abs(n);
+      if (a >= 1e6) return sign + (a / 1e6).toFixed(2) + "M";
+      if (a >= 1e3) return sign + (a / 1e3).toFixed(0) + "K";
+      return sign + String(Math.round(a));
+    };
+    /* ARITHMETIC ON TWO PUBLISHED COUNTS IN ONE UNIT, not a derived signal:
+       both terms are required, because a net needs both sides and a missing
+       put volume is not zero puts. */
+    const netCts = (r) => {
+      const c = isNum(r && r.callVolume), p = isNum(r && r.putVolume);
+      return c === null || p === null ? null : c - p;
+    };
+    const basket = (r) => r.sector || r.fullName || r.etf || DASH;
+
+    const MODES = [
+      { label: "$ Premium", noun: "net option premium",
+        val: (r) => isNum(r && r.netPremiumUsd), fmt: usd, axis: null,
+        said: (n, d) => n + " of " + d + " cleared readable premium",
+        one: (b, v) => b + " is the only basket with a readable premium sum, at " +
+          usd(v) + " net.",
+        two: (bh, vh, bl, vl) => bh + " cleared the most bullish net premium at " + usd(vh) +
+          "; " + bl + " the most bearish at " + usd(vl) + ".",
+        none: "No basket carried a readable premium sum this session, so none is named.",
+        why: "Showing NET PREMIUM in dollars — bullish minus bearish — so basket size is in " +
+          "the bar. The bars are scaled to the largest figure on this strip rather than to a " +
+          "fixed axis, so heights compare baskets within this session and not one session " +
+          "with another." },
+      { label: "# Contracts", noun: "net contracts",
+        val: netCts, fmt: cts, axis: null,
+        said: (n, d) => n + " of " + d + " reported both volumes",
+        one: (b, v) => b + " is the only basket that reported both volumes, at " + cts(v) +
+          " contracts net.",
+        two: (bh, vh, bl, vl) => bh + " traded the most calls over puts at " + cts(vh) +
+          " contracts; " + bl + " the most puts over calls at " + cts(vl) + ".",
+        none: "No basket reported both a call and a put volume this session, so none is named.",
+        why: "Showing NET CONTRACTS — call volume minus put volume, arithmetic on two counts " +
+          "the publisher carries per basket, in one unit. A count says nothing about what the " +
+          "contracts cost: a million five-cent contracts and a thousand fifty-dollar ones are " +
+          "the same figure here. Volumes are read independently of the premium sums, so this " +
+          "mode can report a basket the other two cannot, and the other way round." },
+      { label: "Flow Ratio", noun: "share of its own premium",
+        val: (r) => isNum(r && r.leanRatio), fmt: (v) => pct(v, 1), axis: 1,
+        said: (n, d) => n + " of " + d + " leaned",
+        one: (b, v) => b + " is the only basket with a readable lean, at " + pct(v, 1) +
+          " of its own premium.",
+        two: (bh, vh, bl, vl) => bh + " leans most bullish at " + pct(vh, 1) +
+          " of its own premium; " + bl + " most bearish at " + pct(vl, 1) + ".",
+        none: "No basket carried a readable lean this session, so none is named.",
+        why: "Showing the FLOW RATIO — the share of each basket's own two-sided premium that " +
+          "leaned one way — on a fixed ±1 axis, which is the one mode whose bar heights " +
+          "mean the same thing on every session. It carries no size: +90% on $30K of premium " +
+          "and +90% on $300M are not the same fact, and the dollars are in the table below." },
+    ];
+    /* THE DEFAULT IS THE RATIO, AND THE MOCKUP LEADS WITH THE DOLLARS. The
+       ratio is what the publisher ranks on and what the table under the strip
+       is ordered by, so opening on it is the one choice where the glance and
+       the record agree before a reader touches anything. */
+    let mode = 2;
+
+    const glance = el("div", "cc-lean-glance");
+    into.append(glance);
+
+    const drawGlance = () => {
+      const M = MODES[mode];
+      glance.replaceChildren();
+      if (seg) {
+        seg.replaceChildren();
+        MODES.forEach((m, i) => {
+          const b = el("button", "cc-seg-b", m.label);
+          b.type = "button";
+          if (i === mode) b.setAttribute("aria-current", "true");
+          b.addEventListener("click", () => { mode = i; drawGlance(); });
+          seg.append(b);
+        });
+      }
+
+      /* READ THROUGH THE MODE ONCE, so the count, the lead, the ordering and
+         every chip are the same set of numbers by construction. */
+      const vals = new Map();
+      for (const r of ordered) vals.set(r, M.val(r));
+      const reporting = ordered.filter((r) => vals.get(r) !== null);
+      saySub(M.said(reporting.length, ordered.length));
+
+      /* ORDERED ON THE QUANTITY BEING DRAWN, nulls at the tail rather than
+         seated at zero — an absent reading is not a middling one. In ratio
+         mode this reproduces the publisher's own rank, which is what the
+         table draws, so the default strip and the record cannot disagree. */
+      const strung = reporting.slice().sort((a, b) => vals.get(b) - vals.get(a));
+      const rank = strung.concat(ordered.filter((r) => vals.get(r) === null));
+
+      if (reporting.length) {
+        const hi = strung[0], lo = strung[strung.length - 1];
+        lead(glance, reporting.length === 1
+          ? M.one(basket(hi), vals.get(hi))
+          : M.two(basket(hi), vals.get(hi), basket(lo), vals.get(lo)));
+      } else {
+        glance.append(el("p", "cc-quiet", M.none));
+      }
+
+      /* THE AXIS IS THE MODE'S. A ratio is bounded to ±1 by construction
+         and gets that fixed axis; a dollar sum and a contract count are not
+         bounded by anything, so their bars are scaled to the largest MAGNITUDE
+         on the strip — and the mode's own sentence says so, because a bar whose
+         scale changes between sessions is a bar a reader must be told about. */
+      const peak = M.axis !== null ? M.axis
+        : reporting.reduce((m, r) => Math.max(m, Math.abs(vals.get(r))), 0);
+
+      const strip = el("div", "cc-chips");
+      strip.setAttribute("role", "list");
+      for (const r of rank) {
+        const v = vals.get(r);
+        const chip = el("div", "cc-chip" +
+          (v === null ? " is-null" : v > 0 ? " is-pos" : v < 0 ? " is-neg" : ""));
+        chip.setAttribute("role", "listitem");
+        chip.append(el("span", "cc-chip-n", basket(r)));
+        chip.append(el("span", "cc-chip-v", v === null ? DASH : M.fmt(v)));
+
+        /* A basket with no readable figure in THIS mode gets no bar: a
+           zero-width mark at the centre is what a measured zero draws, and an
+           absence is not a measured zero. A peak of 0 — every reporting basket
+           measured exactly even — leaves every bar at the rule, which is the
+           reading. */
+        if (v !== null) {
+          const bar = el("span", "cc-chip-bar");
+          const fill = el("i");
+          const half = peak > 0 ? Math.min(50, Math.abs(v) / peak * 50) : 0;
+          fill.style.width = Math.max(1.5, half) + "%";
+          fill.style.left = (v < 0 ? 50 - half : 50) + "%";
+          bar.append(fill);
+          chip.append(bar);
+        }
+
+        /* THE OTHER TWO QUANTITIES RIDE IN THE TITLE, so a reader hovering a
+           chip in one mode is not cut off from the other two — and the row's
+           own published reason is what an unreadable chip says, never a
+           sentence this file invented about it. */
+        const net = isNum(r && r.netPremiumUsd), ratio = isNum(r && r.leanRatio);
+        const nc = netCts(r);
+        chip.title = v === null
+          ? (typeof r.reason === "string" && r.reason ? r.reason
+            : "This basket carried no readable " + M.noun + ", so it is not placed.")
+          : (r.etf ? r.etf + ": " : "") + M.fmt(v) + " " + M.noun + " · " +
+            "net " + usd(net) + " · " + cts(nc) + " contracts" +
+            " · " + pct(ratio, 1) + " of its own premium.";
+        strip.append(chip);
+      }
+      glance.append(strip);
+
+      /* WHAT THIS MODE IS MADE OF, IN THE OPEN, UNDER ITS OWN STRIP. It
+         changes what a drawn bar means — the axis, the unit, and which
+         baskets could report at all — so it cannot live in the region's
+         static prose, which is written once and would then describe whichever
+         mode happened to be selected when it was written. */
+      glance.append(el("p", "cc-ln-note is-mode", M.why));
+    };
+    drawGlance();
+
+    /* THE TABLE STAYS OPEN UNDER THE STRIP, and the first draft folded it.
+
+       The argument for folding was that the strip already carries every
+       basket, its lean and its rank, so what the fold hid was only the exact
+       dollars — method rather than meaning. That argument is wrong here, and
+       this region's own qualifier is what makes it wrong: "the dollars ride
+       beside it because a ratio carries no size: +90% on $30k of premium and
+       +90% on $300M are not the same fact." A page cannot make that claim and
+       then put the dollars behind a click. The claim is the reason the column
+       exists.
+
+       So the two layers stack: the strip is the glance — where did the money
+       go — and the table is the record, which is what a reader asking about
+       one basket needs. That is a real cost in height and it is the honest
+       one. */
     const wrap = tableWrap("Sector option-premium lean, most bullish first");
     const table = el("table", "cc-tbl");
     /* UNITS TRAVEL WITH NUMBERS, AND A RATIO AND A DOLLAR SUM NEVER SHARE A
@@ -1659,8 +2684,22 @@
        drifted — onto `.ft-link` and onto `.ft-tab::after` — so the comment
        pointed confidently at the wrong rules. tests/contracts.mjs argues the
        convention in full and fails a citation that outlives its file. */
+    /* ONE QUALIFIER A LINE, NOT SEVEN JOINED INTO A PARAGRAPH.
+
+       Every sentence here has to stay — each one is a population, a unit, an
+       ordering or a NOT-CLAIMED, and this section may not fold any of those.
+       What it may do is stop running them together: joined with a space they
+       rendered as an eleven-line block of prose under a chart, which is the
+       shape a reader skips, and skipping it is how a qualifier fails to
+       qualify. As a list each claim is found in one glance and read on its
+       own — the same words, the same count, none of them folded.
+
+       This is a DIFFERENT operation from the fold above, and the difference
+       is the rule: the fold hides method and this only re-sets qualifiers. */
     if (caveats.length) {
-      into.append(el("p", "fc-note is-qualifier cc-ln-note", caveats.join(" ")));
+      const box = el("ul", "fc-note is-qualifier cc-ln-note");
+      for (const c of caveats) box.append(el("li", null, c));
+      into.append(box);
     }
     appendMethod(into, method, "How this lean was derived");
   }
@@ -2047,6 +3086,7 @@
        that cleared the band, so the reader can see how far the tail actually
        reaches and how much of it arrived this morning. */
     let trails = 0;
+    const marks = [];
     for (const [rows, cls] of [[payload.__bull, "is-bull"], [payload.__bear, "is-bear"]]) {
       for (const r of rows || []) {
         const s = isNum(r.s);
@@ -2123,6 +3163,11 @@
           (usable && typeof mv.d1.cross === "string" ? " · " + mv.d1.cross : "");
         dot.append(label);
         svg.append(dot);
+        /* KEPT AS THE LOOP PLACES IT, so the cursor below reads the marks
+           this pass actually drew — including the `usable` decision, which
+           is what separates a real span from two payloads disagreeing. */
+        marks.push({ s, t, v, gap, cross: usable && typeof mv.d1.cross === "string"
+          ? mv.d1.cross : null, on: mv && mv.on ? mv.on : null });
       }
     }
 
@@ -2142,6 +3187,53 @@
       ((payload.__bull || []).length) + " bullish and " + ((payload.__bear || []).length) +
       " bearish names cleared it." +
       (trails ? " " + trails + " of them trail the move since their previous scored session." : ""));
+
+    /* THE ONE AXIS ON THIS PAGE WHERE A MARK IS A NAME, AND THE ONLY PLACE
+       MOST OF THOSE NAMES APPEAR AT ALL. The regions above list the first ten
+       a side; a wide session puts dozens of dots here that are named nowhere
+       else, and each carries a <title> a mouse can find one at a time.
+
+       GROUPED BY SCORE, BECAUSE THE MARKS ARE. Two names on +62 are two
+       circles at one x — the axis cannot separate them and neither can a
+       pointer. A cursor that searched the flat list would report whichever
+       of them happened to be first and silently drop the rest, which is a
+       reading that is wrong rather than absent. One point per score, naming
+       everyone on it, is what the drawing actually shows.
+
+       THE ROWS ARE CAPPED AND THE CAP IS SAID. A crowded score can hold more
+       names than a readout can print; the count of what is not shown goes in
+       a row of its own rather than the list simply ending. */
+    if (window.FlowsCursor && marks.length) {
+      const byScore = new Map();
+      for (const m of marks) {
+        if (!byScore.has(m.s)) byScore.set(m.s, []);
+        byScore.get(m.s).push(m);
+      }
+      const SHOW = 6;
+      window.FlowsCursor.attach(svg, {
+        name: "Every cleared name on the score axis",
+        band: { y0: axisY - 16, y1: axisY + 16 },
+        points: [...byScore.keys()].sort((a, b) => a - b).map((score) => {
+          const at = byScore.get(score);
+          const rows = at.slice(0, SHOW).map((m) => ({
+            k: m.t,
+            /* THE MOVE ONLY WHERE THE SPAN CAME WITH IT — the same rule the
+               <title> follows, and the reason `usable` exists: a delta with
+               no span attached is the defect this layer replaced. */
+            v: m.v !== null && m.gap !== null
+              ? fmtSigned(m.v, 0) + " over " + sessionsSaid(m.gap)
+              : m.on ? "last scored " + m.on : "no earlier scored session",
+            cls: m.v === null ? "" : m.v > 0 ? "is-pos" : m.v < 0 ? "is-neg" : "",
+          }));
+          if (at.length > SHOW) {
+            rows.push({ k: "and " + (at.length - SHOW) + " more",
+                        v: "at this same score", cls: "" });
+          }
+          return { x: xOf(score), label: fmtSigned(score, 0), rows };
+        }),
+      });
+    }
+
     spineHost.append(svg);
   }
 
@@ -2298,7 +3390,12 @@
        ask. Live data, invisible. */
     loadRegion("/api/flows/sector-premium"),
     loadRegion("/api/flows/news"),
-  ]).then(([lng, sht, watch, market, alerts, events, track, lean, news]) => {
+    /* THE THIRD KEY THAT WAS PUBLISHED, SERVED AND DRAWN NOWHERE. worker.js
+       has answered /api/flows/pulse since the intraday wave; this list — the
+       only place the landing page asks for anything — did not ask, so the
+       one timestamped series in the whole product reached no reader. */
+    loadRegion("/api/flows/pulse"),
+  ]).then(([lng, sht, watch, market, alerts, events, track, lean, news, pulse]) => {
     /* ONLY the redirect stops the render. Two boards that both failed to
        read still leave five regions with something true to say, and the
        version of this guard that tested `!lng && !sht` could not tell a
@@ -2331,8 +3428,18 @@
       }
     }
 
-    /* ---- the verdict bar and the two ranked sides ---- */
-    paintVerdict(verdictHost, lng, sht, market, alerts);
+    /* ---- the caption, the verdict bar and the two ranked sides ---- */
+    paintMeta(host("ccMeta"), host("ccMetaDate"), host("ccMetaScreened"), host("ccMetaLive"),
+      [lng, sht], market,
+      [alerts && alerts.readAt, pulse && pulse.readAt, lean && lean.readAt,
+        news && news.readAt, market && market.generatedAt]);
+    paintVerdict(verdictHost, lng, sht, market, alerts, pulse);
+    /* THE SESSION AS IT HAPPENED, AND THE SPLIT IT ENDED ON. Both read keys
+       already in this closure and both were unreachable before this change. */
+    const tideHost = host("ccTide"), tideSeg = host("ccTideSeg");
+    if (tideHost && tideSeg) paintTide(tideHost, tideSeg, pulse);
+    const splitHost = host("ccSplit");
+    if (splitHost) paintSplit(splitHost, host("ccSplitSub"), pulse);
 
     const trk = readTrack(track && track.status !== "pending" ? track : null);
 
@@ -2462,7 +3569,7 @@
        identically must not print different ages. */
     const drawnAt = Date.now();
     const lea = host("ccLean");
-    if (lea) { lea.replaceChildren(); paintLean(lea, lean); }
+    if (lea) { lea.replaceChildren(); paintLean(lea, lean, host("ccLeanSeg")); }
     const nws = host("ccNews");
     if (nws) { nws.replaceChildren(); paintNews(nws, news, cards, drawnAt); }
 

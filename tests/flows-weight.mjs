@@ -402,7 +402,12 @@ const CEILING_KIB = {
      Almost all of it is comment, and it is the comment that was the point.
      Flows stopped using the mono family in this change: --font-mono was a
      JetBrains stack chosen for a FIXED 0.600 em advance, and the section now
-     resolves --font-figure to Latin Modern, which is proportional. Two
+     resolves --font-figure to Inter, which is proportional. (This line read
+     "Latin Modern" until the section was re-set; the argument below is
+     unchanged by the swap, because it turns on PROPORTIONAL vs fixed and both
+     faces are proportional — but the name had to be corrected, and AXIS_CH
+     is owed a re-measurement against Inter that this note does not pretend to
+     have done.) Two
      measurements had to be written down beside the code that rests on them or
      the next reader inherits a number whose face no longer exists — AXIS_CH,
      re-derived from 6.421 to the widest real caption at 5.079 and rounded to
@@ -552,7 +557,504 @@ const CEILING_KIB = {
      why a change in COLUMN COUNT is what retired it.
 
      417 LEAVES 1,852 B. */
-  tickerPage: 417,
+  /* 439, FOR THE HEADER A READER LANDS ON AND THE LEDGER UNDER THE CHARTS:
+
+       flows-dock.js      6,007      nav.js             2,560
+       flows-panels.js   61,048      flows-ticker.js  378,964
+       total            448,579 B = 438.07 KiB, 21,459 B over 417
+
+     WHAT IT BOUGHT, AND THIS ROUTE OWES AN ACCOUNT OF EVERY KILOBYTE:
+
+       - THE ARRIVAL HEADER. The page's answer to "what is this name" was one
+         run-on line — "SYN002 +16 $34.87 −1.7% bullish +1 score point over 1
+         session — 81 conviction short Γ session 2026-08-24 · built
+         2026-09-12" — seven readings a reader parses apart before using one.
+         It is five labelled blocks now, above the sticky bar rather than in
+         it, because a block that has to survive the whole scroll must stay
+         one line and a block a reader lands on has height for free.
+       - THE FLAGS ROW. Five marks, each a restatement of a panel's own
+         reading past a threshold its title names. No new opinion; a scan
+         layer over four stations' worth of findings.
+       - THE SESSION LEDGER. One row a session — close, score, the move and
+         net premium — joined ON THE DATE from two panels already on the card.
+         A sentinel like __stats, so the payload does not grow: the charts
+         above show the shape and this answers "what happened on the 14th",
+         which is a lookup and wants rows.
+
+     AND ONE THING IT DID NOT BUY: `sideOf`, which is a REMOVAL. The
+     side-against-the-dead-band decision now exists once for the three
+     surfaces that state it, where a second copy is how a header comes to call
+     a name bullish while a pill four lines up calls it unranked.
+
+     THE PATTERN THE PARAGRAPH ABOVE NAMES IS NOW A LEDGER OF ITS OWN: this is
+     the fourth raise on this route, and unlike the three before it this one
+     is BEHAVIOUR rather than reasoning — three surfaces that did not exist.
+     That does not retire the argument, it sharpens it. The route's real fix
+     is still the comment strip: built, merged, measured at ~253 KB of comment
+     on this route, and waiting on one Workers Builds field that is not mine
+     to set. This route is 438 KiB of source and roughly 185 KiB of it is
+     what a browser would actually parse with that field set.
+
+     439 LEAVES 917 B, which is deliberately not room for anything: the next
+     change to this route should have to come here and argue in the open. */
+  /* 441, AND THE 917 B ABOVE IS WHY THIS PARAGRAPH EXISTS AT ALL.
+
+       flows-dock.js      6,007   nav.js             2,560
+       flows-panels.js   62,318   flows-ticker.js  379,949
+       total            450,834 B = 440.27 KiB, 1,298 B over 439
+
+     The change block leads on a two-word verdict now — "Bullish drift",
+     "Cleared the band" — with a glyph that says the direction without the
+     hue. The block answers "did anything happen" and a reader had to read a
+     sentence to find out; every other panel on this page has a headline and
+     the one a reader lands on did not.
+
+     IT ADDS NO OPINION, which is what made it cheap: the word is derived from
+     the crossing the change layer already published, and drift is named by
+     its own sign. A move of exactly zero gets its own word rather than being
+     rounded into a direction, and a window with no earlier score gets no
+     verdict at all — there is nothing for one to be about.
+
+     441 LEAVES 750 B. The reserve is smaller than the last raise left, on
+     purpose: this route is 440 KiB of source and roughly 187 KiB of it is
+     what a browser would parse with the comment strip's one Workers Builds
+     field set. Every kilobyte argued here is a kilobyte that field would
+     return. */
+  /* 441 -> 449, THE FIFTH RAISE, and the first that buys a DRAWING.
+
+       flows-dock.js      6,007   nav.js             2,560
+       flows-panels.js   69,370   flows-ticker.js  380,664
+       total            458,601 B = 447.85 KiB, 6,857 B over 441
+
+     +7,052 B, all of it in flows-panels.js: the score gauge at the head of
+     the score-derivation panel.
+
+     WHAT IT BOUGHT IS A SCALE, NOT A NUMBER. The score is on this page twice
+     already — the hero states it, this panel's stat list repeats it — and a
+     third printing would have been worth nothing. What no surface stated was
+     the RANGE: the score is bounded to +/-100, and that bound appeared in
+     exactly one place on the whole route, a closing sentence inside the
+     score-over-price note. So "+16" arrived with no way to tell whether it
+     was most of the scale or a rounding error in it. The arc answers that by
+     construction, which is the only reason it earns bytes on this route.
+
+     AND IT ADDS NO VERDICT. "Bearish" and "Bullish" sit at the ends as axis
+     labels, naming what the ends of the scale mean; the word for THIS name
+     stays in the hero, which owns it. No dead band is drawn, because the card
+     does not publish one at this level and a guessed band is a free parameter
+     wearing a measurement's clothes. An absent score withholds the marker
+     rather than pointing it at zero.
+
+     1,924 OF THOSE BYTES ARE A DEFECT THE TICKER SUITE FOUND, and they are
+     the most useful ones in the raise. The first draft drew a fixed 128x78
+     box; flows-ticker-contract refused it in one line — "a span-1 panel at
+     least doubles when enlarged (128 to 128)" — because a fixed viewBox makes
+     the enlarge button a no-op on the panel it was pressed for. The shipped
+     version sizes through panelWidth() like every other drawing here, and
+     radius, stroke, marker inset, the number's lift and the end labels' width
+     are all derived from that one measurement rather than from constants that
+     would only be right at one host width. The suite counts 28 more
+     assertions than before this raise: the gauge is now a chart it checks.
+
+     449 LEAVES 1,175 B, AND 448 WAS REJECTED FOR LEAVING 151. A reserve below
+     the cost of one edited sentence is not a reserve — it is a promise that
+     the next typo fix on this route fails CI and gets "fixed" by deleting a
+     comment, which is the bookkeeping the unusualPage paragraph below refuses
+     by name. 1,175 B is the same order as the 917 and 750 the last two raises
+     left: room for a fix, not for a feature.
+
+     AND THE RESERVE WAS SPENT ON A FIX, WHICH IS WHAT IT WAS FOR — 449 -> 450
+     in the same session. flows-sign found two places in flows-ticker.js where
+     this branch decided a sign in two arms: the flags row calling a move of
+     exactly zero "Score down", and the change verdict calling a zero-move
+     flip "Flipped bearish". Both now carry a third arm, at 960 B of reasoning.
+
+       flows-dock.js      6,007   nav.js             2,560
+       flows-panels.js   69,370   flows-ticker.js  381,624
+       total            459,561 B = 448.79 KiB, 215 B under 449
+
+     215 B is by the argument above not a reserve, so the ceiling follows the
+     fix rather than leaving the next one nothing: 450 leaves 1,239 B, the
+     same order as before. A reserve that is never allowed to be spent is just
+     a smaller ceiling with extra steps; one that is spent and not restored is
+     a trap for whoever edits next.
+
+     THE STANDING ACCOUNT IS UNCHANGED AND IT IS STILL THE REAL ANSWER: this
+     route is 448 KiB of source and roughly 191 KiB of it is what a browser
+     would parse with the comment strip's one Workers Builds field set. Every
+     kilobyte argued here is a kilobyte that field would return. */
+  /* 450 -> 454 FOR THE TWO VOLATILITY COLUMNS. Re-derived on disk against
+     `git show HEAD:` rather than read off the paragraph above:
+
+       file                  before      after
+       flows-ticker.js     381,624    385,079
+       flows-panels.js      69,370     69,370
+       nav.js                2,560      2,560
+       flows-dock.js         6,007      6,007
+       total               459,561    463,016 B = 452.16 KiB
+
+     The room under 450 was 1,239 B and this needs 3,455.
+
+     WHAT IT BOUGHT: the header the owner's design specifies carries four
+     figures beside the price — IV, IV rank, volume and market cap — and this
+     card publishes two of them on every name and neither of the other two on
+     any name. So the strip grew the two that are real, each reading its own
+     published field and quoting the panel's own horizon rule rather than
+     describing it, and the two that are not published were left out rather
+     than filled with something adjacent. The sector and the session moved
+     under the symbol in the same pass, which is where the design puts a
+     name's identity and which is what keeps the strip on one row.
+
+     454 LEAVES 1,880 B, AND THE REST OF THIS WAVE WILL NOT FIT IN IT. The
+     stat cards and the chart interactivity the same design calls for are
+     several kilobytes each, and each will have to argue its own raise here.
+     That is the honest cost of this route carrying ~253 KB of comment that
+     the comment-stripping build already knows how to remove: it is built and
+     merged and waits on one dashboard field, and until that lands every
+     feature on this route is paying for prose the browser parses and no
+     reader reads. */
+  /* 454 -> 464 FOR THE CURSOR EVERY CHART SHARES. Derived on disk:
+
+       file                  before      after
+       flows-cursor.js            0     10,016   (new)
+       flows-panels.js       69,370     70,841
+       flows-ticker.js      385,079    385,079
+       nav.js                 2,560      2,560
+       flows-dock.js          6,007      6,007
+       total                463,016    474,503 B = 463.38 KiB
+
+     WHAT IT BOUGHT, AND WHY IT IS A FILE RATHER THAN A FUNCTION. Every chart
+     in this section draws a series and labels a handful of ticks, which
+     answers "what is the shape" and refuses "what was it on the 14th" — the
+     values were all in hand when the marks were placed. Some charts carried a
+     native title per mark: a tooltip a mouse can find, after a delay, one
+     mark at a time, and one a keyboard cannot reach at all.
+
+     flows-cursor.js is that reading, once: a renderer hands over the points
+     it already computed and gets a rule, a readout, arrow-key navigation and
+     a live region. It is a separate file because the same cursor belongs on
+     the overview and the market charts next, and a copy per bundle is how two
+     charts end up disagreeing about what a hover means.
+
+     VERIFIED BY DRIVING IT, not by reading it: on the rendered ticker page a
+     pointer at 35% of the score chart reports 2026-08-04, close 34.47, score
+     +13, and the rule lands at x=265.8; moving to 75% reports 2026-08-17 and
+     the rule moves to x=560.4. Focus plus Home then ArrowRight reports
+     2026-07-24 in both the readout and the live region, and Escape clears
+     both. The values come from the same rows array the marks were drawn from,
+     so the readout cannot disagree with the drawing.
+
+     464 LEAVES 897 B, which is not room for the next thing and is not meant
+     to be. This route is 463 KiB of JavaScript of which roughly 253 KiB is
+     comment that the merged comment-stripping build already knows how to
+     remove; until that is switched on, every feature here is paying to ship
+     prose the browser parses and no reader reads. The next raise on this
+     route should be that switch, not another ten kilobytes. */
+  /* 464 -> 473 FOR THE SIX CARDS AND THE CURSOR'S SECOND AXIS. On disk:
+
+       file                  before      after
+       flows-cursor.js       10,016     12,009
+       flows-ticker.js      385,079    392,544
+       flows-panels.js       70,841     70,841
+       nav.js                 2,560      2,560
+       flows-dock.js          6,007      6,007
+       total                474,503    483,961 B = 472.62 KiB
+
+     THE CARDS ARE THE DESIGN'S SIX AND NOT THE HEADER'S FIVE AGAIN. The strip
+     above them carries price, score, conviction and the two volatility
+     figures; these six say what the FLOW did — the premium run and its gaps,
+     the session's own premium, the net delta the tape ended holding, the
+     aggressor ladder, where open interest moved, and what printed
+     off-exchange. Each is one panel's published figure with that panel's own
+     unit and coverage caveat, lifted to the top of the page; a panel that did
+     not read gets no card, because six greyed boxes would turn six silences
+     into six claims that the session was quiet.
+
+     THE CURSOR GREW A SECOND AXIS in the same pass. A reading agent sent to
+     spec the gamma profile's cursor came back with "not drawable": that chart
+     is transposed — its shared index is the STRIKE, down the y axis — so an
+     x-only cursor either had nothing to say there or would have been forced
+     onto the wrong axis to look like it worked. `axis: "y"` searches the
+     other coordinate and draws a horizontal rule; the readout is unchanged.
+
+     473 LEAVES 1,110 B. Third raise on this route in one wave, each measured,
+     and the reason is the same each time: 253 KiB of this route is comment
+     that the merged stripping build removes and that is waiting on one
+     dashboard field. */
+  /* 473 -> 477 FOR THE FINDINGS INDEX. On disk: flows-ticker.js 384,452 ->
+     386,860 and flows-drawers.js is not on this route, so the route moves
+     484,268 -> 486,832 B = 475.42 KiB.
+
+     WHAT IT BOUGHT: the design's top-right panel, which it calls an AI
+     summary. This product's AI summary is Neuron and it is generated per
+     SESSION, not per name, so calling this that would be a claim about how it
+     was made. What it is instead is the panels' OWN published leads, gathered
+     above the fold with a link into each — one source rendered twice, not two
+     spellings of one reading, so the index and the panel cannot disagree
+     about a figure. It states its own denominator ("the first 5 of 18"),
+     because a list of five under a card with eighteen readings is a selection
+     and a selection that hides its denominator reads as a census.
+
+     477 LEAVES 1,616 B. Fourth raise on this route in one wave. Every one is
+     measured and argued, and every one is also evidence for the same point:
+     253 KiB of what this route ships is comment that the merged stripping
+     build removes, and it is waiting on one dashboard field. */
+  /* 477 -> 482 FOR THE SECTOR PEERS. flows-ticker.js 386,860 -> 392,336, so
+     the route moves 486,832 -> 492,308 B = 480.77 KiB.
+
+     WHAT IT BOUGHT, AND IT IS THE ONE THING ON THIS PAGE THAT IS NOT ABOUT
+     THIS NAME. Every other reading here was measured on this ticker; the peer
+     strip says which OTHER names the same session's boards ranked in the same
+     sector, so a reader who has just formed a view can see whether it is one
+     name or a group. It is today's boards and not a correlation, and the
+     subtitle says that in those words.
+
+     AND IT CHANGED WHEN THE BOARDS ARE FETCHED, which is the part to weigh.
+     They were fetched only when someone opened the name switcher, so the rank
+     chip ("3 of 40", a board field the card has no copy of) and the peer set
+     were blank on every visit where nobody clicked. They are now fetched once
+     on idle, after first paint: two cached GETs per visit that this page did
+     not previously make, for two readings that could not otherwise exist. The
+     alternative was a peer strip announcing an empty sector on a page that
+     had simply never looked — which it did, in the first render, until the
+     pending silence was given its own sentence.
+
+     482 -> 483 IN THE SAME WAVE, FOR A SILENCE ONE LEVEL DOWN. The peer
+     strip's pending sentence fixed the case where the boards had not been
+     FETCHED; the preview harness then showed the case underneath it, because
+     it stubs those fetches with a payload that carries no rows: boardRows
+     maps `payload.rows || []`, so a board that has not published, one that
+     failed to read, and one that genuinely ranked nobody all arrive as the
+     same empty array — and the strip announced an empty sector for all three.
+     The envelopes are read once now and the three get three sentences.
+     493,943 B = 482.37 KiB.
+
+     483 LEAVES 649 B. */
+
+  /* 483 -> 494, AND THE ROUTE CAME HERE AND ARGUED, which is what every
+     paragraph above asks of it. Byte-exact, `git cat-file -s HEAD:` against
+     `stat` on disk:
+
+       flows-dock.js       6,007      nav.js             2,560
+       flows-cursor.js    12,009 ->  13,123  (+1,114)
+       flows-panels.js    70,841 ->  71,727  (+  886)
+       flows-ticker.js   402,526 -> 411,696  (+9,170)
+       total             493,943 -> 505,113 B = 493.27 KiB — 10,521 B over
+
+     AND THIS PARAGRAPH SAID 493 UNTIL TEN MINUTES AGO, which belongs in the
+     file whose subject is figures going stale — this time caught inside a
+     single change rather than a PR later. It was derived against a 503,715 B
+     route and read "493 leaves 1,117 B". Then CI failed a second assertion,
+     flows-ticker-contract's phone-width hit test, the fix for it added 1,398
+     B of reasoning to flows-ticker.js, and the ceiling I had just argued for
+     was 281 B short. Re-derived rather than re-quoted, and the trigger is the
+     same one every paragraph above records: editing this comment does not
+     change the file it describes.
+
+     WHAT THE 9,772 B BOUGHT: every drawing on this route now reads out. The
+     count is not a vibe — the preview harness censuses it, and before this
+     change it stood at 7 drawings of 21 with a cursor. It is 16 of 18 now,
+     and the other two are accounted for rather than outstanding: the score
+     dial and the priced-move band each hold ONE observation and print every
+     number they encode on their own face, which they now say in the markup
+     with data-fx-read="face" so the census can prove the claim instead of
+     carrying two remembered exceptions. Nothing is left in `bare`.
+
+     (21 became 18 because the first census counted three legend swatches as
+     charts. A swatch is an <svg> holding a drawn line; the discriminator is
+     aria-hidden, which is the renderer saying there is nothing here to read.)
+
+     THE FIVE NEW REGISTRATIONS ARE NOT FIVE COPIES OF ONE. Two are transposed
+     — gamma and aggressor share a strike ladder that runs DOWN the panel, and
+     they are the reason `axis: "y"` exists in flows-cursor.js at all. One
+     covers three panels at once, because vanna, charm and delta exposure
+     already share a drawer. One reads a heatmap's COLUMN headers rather than
+     its cells, because the cells print their own numbers and the columns
+     never printed theirs. Each of those is a decision that had to be argued
+     where the code is.
+
+     6,915 B OF THE 9,772 IS COMMENT, and 1,114 of the rest is the de-
+     duplication that made this raise smaller than it started. The first draft
+     restated the same three contract rules at each of five sites; they are
+     properties of the API, so they moved into flows-cursor.js's header once —
+     the trade greekTermPanel's own comment records making for its repeated
+     paragraph, measured there at 1,350 bytes. It cost this route 1,114 B in
+     flows-cursor.js and saved 2,600 in the two renderers, and it also costs
+     overviewPage 1,114 B, which is why that ceiling moves below.
+
+     THE EXECUTABLE COST IS 3,764 B, not 9,772: stripComments over the route's
+     five scripts gives 227,657 -> 231,421. That is context and not an excuse.
+     This table measures the REPOSITORY, deliberately — the paragraph on the
+     404 reduction says why, and the strip still waits on the dashboard field
+     — so 9,772 is the number that moves this ceiling.
+
+     THE SECOND FIX IS WHY THE CARDS AND THE BAR CHANGED PLACES. The six
+     cards, the findings index, the flag row and the sector strip all landed
+     above #ftBar in this wave, and at 320px they stack: measured on a fresh
+     load, the station tabs sat 1,941px down a 900px viewport, so the page's
+     whole navigation was two screens below the fold and the contract's
+     elementFromPoint walk reached it on zero rows of pixels. The bar moved
+     above the cards, the cards went two-up at phone width, and the "what
+     changed" region's insertion re-anchored from the bar to the cards so it
+     could not land between the identity and the figures. 639px now.
+
+     494 LEAVES 743 B, which is room for a fix and not for a feature, the
+     standard every raise above claimed and the 496 paragraph made real.
+
+     494 -> 508 ON 2026-09-13, AND THE MEASUREMENT FIRST. `stat` on disk
+     against `git cat-file -s 12a6952:` — the head this branch was green on
+     before the change:
+
+       flows-dock.js      6,007 ->   6,007
+       nav.js             2,560 ->   2,560
+       flows-cursor.js   13,123 ->  13,123
+       flows-panels.js   71,727 ->  71,727
+       flows-ticker.js  411,696 -> 425,971   (+14,275)
+       ----------------------------------------------
+       total            505,113 -> 519,388 B = 507.21 KiB
+
+     Four of the five files are byte-identical: everything here is in the
+     controller. 505,113 sat 743 B inside the 494 KiB (505,856 B) ceiling, so
+     the route is 13,532 B over it now.
+
+     AND THE FIRST VERSION OF THIS PARAGRAPH HAD THE WRONG NUMBER IN IT,
+     which is worth leaving written down because it is the exact failure this
+     file exists to prevent. It read 425,132 and 518,549 — measured honestly,
+     but measured BEFORE two late fixes to the same commit (the subtitle's
+     capitalisation and the ATR unit, each with its comment). The figures
+     shipped 839 B stale. A derivation is only evidence if it describes the
+     bytes that actually shipped, so it is re-measured against the commit
+     rather than against the working tree it was written in.
+
+     WHAT THE 13,436 B BOUGHT: the option chain and the key-levels card, the
+     two blocks the target design puts beside the price chart and in the
+     right column, neither of which existed on this route. Both are drawn
+     from panels the card payload ALREADY carries — topContracts and levels —
+     so the payload does not grow and this page makes no additional fetch.
+
+     AND IT IS TWO DRAWINGS, NOT TWO SPELLINGS OF ONE READING, which is the
+     bar this file holds every addition to. The chain orders topContracts'
+     rows by STRIKE and rules spot between the sides; the grid's own panel
+     orders the same array by VOLUME. A volume ranking cannot show where spot
+     sits in the ladder and a ladder cannot show which line was the largest,
+     so neither block writes the other's sentence — the two orderings answer
+     two questions. The levels card is a MOVE: same panel, same field, same
+     nearest-first order the payload publishes, read at a position where it
+     does not need a scroll.
+
+     508 AND NOT 507. 507 KiB is 519,168 B and would leave 619 B — and 619 B
+     is one paragraph of the comments this change just added. That is exactly
+     the trap the unusualPage entry below names by name: a ceiling so tight
+     that the next typo fix fails CI and gets "fixed" by deleting prose, which
+     is bookkeeping rather than engineering. 508 KiB is 520,192 B and leaves
+     1,643 B — the same order the 493 -> 496 raise chose deliberately, and on
+     the same reasoning: room for a fix, not for a feature. This route is
+     still owed the reduction the paragraph above describes, so the next
+     change to it should have to argue in the open rather than find
+     pre-authorised room waiting.
+
+     508 -> 517 THE SAME DAY, and the same measurement discipline. `stat` on
+     disk against `git cat-file -s 98df3bd:`:
+
+       flows-ticker.js  425,971 -> 433,944   (+7,973)
+       the other four   byte-identical again
+       ----------------------------------------------
+       total            519,388 -> 527,361 B = 515.00 KiB
+
+     WHAT THE 7,973 B BOUGHT: the recent-flow card — the vendor's own flow
+     alerts filtered to this name — and the collapse of the shell's page
+     header on this route.
+
+     THE ALERTS CARD IS THE ONE BLOCK ON THIS PAGE THAT STATES ITS EMPTY
+     CASE INSTEAD OF HIDING, and most of its bytes are that sentence. A row
+     here is one ALERT: a window of activity in one contract that one of the
+     vendor's own unpublished rules flagged, aggregating its executions — so
+     it is never "a trade", and a name with NO rows is a name the rules did
+     not flag rather than a name with no flow. Hiding on empty, which is what
+     every other block here does, would let a reader draw the second
+     conclusion from the first fact. The four silences are applied rather
+     than waived: the card says which silence it is, and tells a failed read
+     from a published feed that flagged nothing.
+
+     517 AND NOT 516. 516 KiB leaves 1,023 B; 517 leaves 2,047 B, which is
+     the order the 508 raise fixed as this route's standard two paragraphs
+     up — room for a fix, not for a feature. 1,023 B is under the size of a
+     single comment paragraph in this codebase, which is the tightness that
+     gets "fixed" by deleting prose.
+
+     AND THE CUMULATIVE STORY, STATED RATHER THAN LEFT TO BE NOTICED:
+     494 -> 508 -> 517 is 23 KiB in one day, on a route this file already
+     says is owed a REDUCTION. Each raise argues for itself above and each
+     is measured, but three in a day is a ratchet unless someone says so.
+     Nothing here retires that debt: the drawer split and the comment strip
+     are still the route's real fixes, and the next addition to it should
+     have to argue against this paragraph as well as its own.
+
+     517 -> 530, for the series block. `stat` against `git cat-file -s
+     c6e534b:`: flows-ticker.js 433,944 -> 447,275 (+13,331), the other four
+     route files identical again, total 527,361 -> 540,692 B = 528.02 KiB.
+
+     WHAT IT BOUGHT: the chart the design puts left of the chain, with its
+     five tabs, and the row that pairs them. Every tab reads the array the
+     panel below it reads, out of the same field — no return, no change, no
+     summary is computed here, so this block cannot disagree with a panel
+     about a number. Two of the five are the honest cases and cost most of
+     the prose: the volatility curve says its axis is TENOR rather than
+     time, and Volume says this payload publishes no per-name volume series
+     at all rather than borrowing a contract count to fill its label.
+
+     530 LEAVES 2,188 B, the same order 508 and 517 fixed as this route's
+     standard. The ratchet paragraph above stands and is not retired by
+     this: 494 -> 530 in one day is 36 KiB, and the drawer split and the
+     comment strip are still what this route actually needs.
+
+     530 -> 535, for the volume ring. flows-ticker.js 447,275 -> 451,842
+     (+4,567) against git cat-file -s 383ef66:, the other four identical,
+     total 540,692 -> 545,259 B = 532.48 KiB. Leaves 2,581 B.
+
+     WHAT IT BOUGHT, AND WHY IT IS NOT A SECOND DRAWING OF THE LADDER: the
+     aggressor panel draws NET contracts per strike — calls lifted minus puts
+     lifted — which is a direction and is zero on a strike where thousands
+     traded in balance. The `calls` and `puts` fields on those same rows are
+     VOLUME, a different quantity, and they were drawn nowhere: a reader could
+     only reach them by driving that panel's cursor onto one strike at a time.
+     The ring is their share, and the arc length is computed from the share
+     itself rather than from a rounded angle, so the ink is the number.
+
+     THE RATCHET PARAGRAPH STILL STANDS. 494 -> 535 in one day is 41 KiB.
+
+     535 -> 542, for the period control and the fix it uncovered.
+     flows-ticker.js 452,522 -> 459,285 (+6,763) against
+     git cat-file -s cd62e30:, the other four identical, total
+     545,939 -> 552,702 B = 539.75 KiB. 542 KiB is 555,008 B and leaves
+     2,306 B; 540 would have left 258, which is under this route's own
+     standard and under a single comment paragraph.
+
+     MOST OF THOSE BYTES ARE THE DISABLED STATES, and that is the point. The
+     control windows a series the card already holds — it fetches nothing —
+     so the arithmetic is four lines. What costs is that every pill has to
+     know whether the series on screen can reach it and say so: a tenor curve
+     takes no period at all, the intraday tape is one session so only 1D
+     means anything on it, and 3M and 1Y are outside a forty-session window
+     on every name this pipeline builds. Those three sentences are the
+     difference between a row of buttons that explains its own limit and a
+     row where two of them silently redraw the same picture.
+
+     THE REST OF THE RAISE IS A DEFECT THIS ONE UNCOVERED, and it is the more
+     important half. The sector-peers card, added earlier in this wave, had
+     been calling ensureBoards() from an idle callback — two requests about
+     OTHER names, on every ticker page view. This suite's 6h block asserts in
+     so many words that a named ticker page fetches NO board, and gives the
+     reason: "the card is what this page is". The assertion had been passing
+     only because the idle callback had not fired by the time it counted, and
+     the extra work the period control added to first paint tipped it.
+
+     The assertion was right and the feature was wrong, so the FEATURE moved:
+     the peers now sit behind a control, and pressing it is the reader
+     electing to spend those two requests — the same bargain the switcher
+     already strikes. The flow-alerts read stays on the idle pass, because it
+     is one request about THIS name rather than an index of others. */
+  tickerPage: 542,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between
@@ -662,7 +1164,353 @@ const CEILING_KIB = {
 
      166 LEAVES 586 B, which is tight on purpose: this route is still owed the
      comment strip, and the next change should have to come here too. */
-  overviewPage: 166,
+  /* 185, FOR THE THREE THINGS THIS PAGE PUBLISHED, SERVED AND NEVER DREW:
+
+       flows-dock.js   6,007   nav.js            2,560
+       flows-ui.js    25,136   flows-overview.js 154,731
+       total         188,434 B = 184.02 KiB, 18,450 B over 166
+
+     The raise is one number and it buys three regions, so it is worth saying
+     what each cost and what each is:
+
+       - INTRADAY FLOW. The `pulse` key has carried a timestamped net-premium
+         series — 78 intraday intervals plus twenty sessions of daily totals —
+         since the intraday wave, worker.js has answered /api/flows/pulse
+         since then, and the landing page's fetch list never asked for it. The
+         one series in this product with TIME on an axis reached no reader at
+         all. Two signed bars a slot against a marked zero, plus a period
+         control that switches SOURCE and says which source is drawn.
+       - FLOW DISTRIBUTION. `market.premium` publishes the two premium pools
+         and the page's only reading of them was a signed tilt ratio in a
+         tile — a reader who wanted "how much of this session was calls" had
+         to invert a percentage. A ring, with the total in its hole and both
+         dollar pools beside it.
+       - THE SESSION'S CAPTION. Two tiles that were never measurements — a
+         date and a population — moved out of the verdict strip into the
+         line above it, and took the newest read stamp across the payloads
+         with them.
+
+     THE ROUTE PARSES MORE AND THE READER GETS THREE SURFACES THAT DID NOT
+     EXIST, out of keys already fetched or one fetch added. That is the trade
+     and it is a good one; what makes it a decision rather than a drift is
+     that it is written here.
+
+     185 LEAVES 1,006 B. The paragraph above still stands and is now overdue:
+     the structural fix this route is owed is the comment strip — measured,
+     merged, and waiting on one Workers Builds field — and until it lands
+     every raise here is paid for in a reader's parse time. */
+  /* 196, FOR THE SECTOR STRIP AND THE TILE THAT CARRIES ITS OWN HISTORY:
+
+       flows-dock.js   6,007   nav.js            2,560
+       flows-ui.js    25,136   flows-overview.js 166,062
+       total         199,765 B = 195.08 KiB, 10,325 B over 185
+
+     Two additions and one re-setting:
+
+       - THE SECTOR STRIP. Eleven baskets as eleven chips in the publisher's
+         own order, each with its signed lean and a bar on one shared ±1
+         scale. The region answered "what exactly did Energy clear" with an
+         eleven-row table and had no answer at all to "where did the money go
+         this session", which is what a reader opens it for — that question
+         was being answered by reading eleven names, finding the numeric
+         column and ranking eleven figures by eye. The table is the record and
+         folds behind a summary; every figure in it is also in the strip.
+       - THE DOLLAR LEAN'S RECENT HISTORY. A 21-session sparkline under the
+         tile's figure, derived from the same daily totals the flow chart
+         draws — so the line on the tile and the bars in the region below are
+         the same numbers. "−4.1%" is today; whether today is the third
+         session leaning that way or a reversal of a fortnight is a different
+         fact the tile could not state in words.
+       - THE QUALIFIERS ARE A LIST, NOT A PARAGRAPH. Seven claims joined with
+         spaces rendered as an eleven-line block under a chart, which is the
+         shape a reader skips — and a qualifier that is skipped does not
+         qualify. Same words, same count, none folded, one to a line.
+
+     196 LEAVES 916 B, which is again deliberately not room for anything. This
+     route and the ticker are now both within a kilobyte of their ceilings and
+     both are owed the same structural fix. */
+  /* 198, FOR A COLLAPSE THIS CHANGE INTRODUCED AND THEN HAD TO UNDO:
+
+       flows-dock.js   6,007   nav.js            2,560
+       flows-ui.js    25,136   flows-overview.js 167,664
+       total         201,367 B = 196.65 KiB, 663 B over 196
+
+     The session moved out of the verdict strip and into the caption above it,
+     and the first draft of that caption printed ONE sentence for what the
+     tile had said four ways — "could not be read", "not published yet", "not
+     on this payload" are three different facts about the pipeline and only
+     one of them is about the market. That is the collapse this whole page is
+     built to refuse, reintroduced by a layout change, and it would have
+     shipped: the page renders, the line reads plausibly, and nothing about it
+     looks wrong.
+
+     The 663 B is `boardsRead`, lifted out of paintVerdict so the caption and
+     the Cleared tile decide it once. Two callers, one decision — which is
+     also why a second copy was never the cheaper option: it is how the
+     caption comes to say "not published yet" over a strip saying "could not
+     be read", about the same two payloads, four lines apart.
+
+     198 LEAVES 1,385 B. */
+  /* 200, FOR THE SECOND HALF OF THE SAME COLLAPSE:
+
+       flows-dock.js   6,007   nav.js            2,560
+       flows-ui.js    25,136   flows-overview.js 169,742
+       total         203,445 B = 198.68 KiB, 693 B over 198
+
+     The session kept its four silences when it moved to the caption; the
+     SCREENED POPULATION, which moved with it, did not. That slot simply hid
+     itself whenever the figure was absent — so a market key that failed to
+     read and one nobody has published looked identical, which is the same
+     collapse one line over and was caught by the same suite, one phase
+     further in.
+
+     `keySilence` is the 693 B: the four-kind decision lifted out of
+     paintVerdict so the strip's tiles and the caption's two slots ask it of
+     one function. That is now the second helper this change had to lift for
+     the same reason — boardsRead was the first — and the pattern is worth
+     naming: moving a reading from one element to another moves nothing else
+     with it. Every silence, unit and population it carried has to be carried
+     across by hand, and the only way to know they were is a test that asks.
+
+     200 LEAVES 1,355 B. */
+  /* 200 -> 203, AND THE 1,355 B WENT ON TWO WRONG READINGS.
+
+       flows-dock.js      6,007   nav.js             2,560
+       flows-ui.js       25,136   flows-overview.js 173,641
+       total            207,344 B = 202.48 KiB, 2,544 B over 200
+
+     +3,899 B in flows-overview.js, and almost all of it is the reasoning for
+     two defects this route had SHIPPED. Neither was a layout slip; both were
+     the confident reading this section exists to refuse.
+
+     THE DAILY CHART CLAIMED A SIGN IT DOES NOT HAVE. paintTide's own comment
+     said "call premium and put premium are NET figures: the vendor publishes
+     them signed... and the sign is the reading". True of `pulse.points`,
+     which shapeTide builds from net_call_premium/net_put_premium — and this
+     chart draws `pulse.totals`, which shapeTotals builds from the GROSS
+     call_premium/put_premium columns. The two arrays carry the SAME FIELD
+     NAMES for two different quantities (shared/flows-pulse.js:132-133 against
+     :154-155), which is exactly how the claim survived being re-pointed at a
+     daily source. Calls are drawn upward and puts downward as magnitudes now,
+     and the axis marks name the side instead of printing "-$60M" for a total
+     that was never negative.
+
+     THE RING CALLED TWO POOLS "CALLS" AND "PUTS". paintSplit read
+     market.premium.netPositive/netNegative — the sums of positive and
+     negative NET premium — assigned them to variables named `call` and `put`,
+     and labelled them so. shared/flows-market.js:147-150 says verbatim that
+     these are "not call premium and not put premium, both of which are
+     separate screener columns a reader could hold beside these and have no
+     way to know are unrelated". The warning predates the ring; the ring did
+     it anyway. It reads the pulse totals' own callPrem/putPrem now, which ARE
+     those columns, and its sub-line names the session the row is dated to
+     rather than assuming it is this page's.
+
+     A third fix rides along at no argument: the chart carried
+     preserveAspectRatio="none", the same defect found on the premium-track
+     panel this session, which scales bar HEIGHTS by the host ratio.
+
+     203 LEAVES 1,424 B, the same order the last two raises left. The route is
+     owed the comment strip like every other one here. */
+  /* 203 -> 207, FOR THE STRIP THE TARGET DESIGN ASKS FOR.
+
+     The verdict strip now reads BREADTH / CLEARED / FLOW BIAS / PREMIUM /
+     FLAGGED, which is the target's five. Three things bought the bytes:
+
+       - A SIXTH SLOT ON THE TILE TUPLE, so a tile can carry a qualifier when
+         it is NOT silent. The silence sentence still wins when there is one:
+         a silent tile has no reading for a qualifier to be about.
+       - THE TWO LEANS BECAME ONE TILE WITHOUT LOSING ONE. The payload
+         publishes a names-weighted and a dollars-weighted tilt on purpose —
+         shared/flows-market.js says publishing both is what removes the
+         choice — so matching the target by deleting one would have made that
+         choice silently. The dollar lean takes the tile, the name lean takes
+         its sub-line, and they end up beside each other where they are
+         actually comparable.
+       - THE PREMIUM TILE, which cost almost nothing to feed: `daily.gross`
+         was already built from the same pulse rows the ring and the daily
+         chart read, and used for nothing. The tile, the ring and the chart
+         now cannot disagree about a session's premium.
+
+     NO DELTA BESIDE THAT FIGURE, though the target prints "+4.1%". Nothing
+     publishes a session-over-session premium delta for this population, and
+     differencing the two newest rows of a 20-row window at the render is an
+     invented reading. The sparkline carries the direction instead.
+
+     207 LEAVES 1,368 B. */
+  /* 207 -> 209, AND THE BYTES ARE A SILENCE THAT WAS NEARLY LOST TWICE.
+
+       flows-dock.js      6,007   nav.js             2,560
+       flows-ui.js       25,136   flows-overview.js 178,098
+       total            211,801 B = 206.84 KiB, 167 B under 207
+
+     The five-tile strip demotes the equal-weight tilt into the dollar tilt's
+     tile. Demoting a reading is where silences die, and this one nearly died
+     twice in one sitting:
+
+       - FIRST as a bare pct() rendered only when the value was non-null, so
+         unreadable / pending / unavailable / empty all became "no sub-line".
+         CI caught the missing VALUE. It would not have caught the missing
+         silences.
+       - THEN as an `else if` against the tile's own silence span, so on a
+         market key that failed to read — where BOTH tilts are silent — the
+         tile's sentence won and the demoted one was never rendered at all.
+         Two facts shown as one, which is the same collapse in a new place.
+
+     What ships is two slots that are not alternatives: `.cc-tile-s` is the
+     tile's own silence, `.cc-tile-q` is the demoted reading with its own
+     figure, its own sign-tone and its own data-empty. The contract asserts
+     the sub's kind and wording on all four phases, not just the tile's,
+     because the first draft passed every assertion that only looked at the
+     tile.
+
+     209 LEAVES 2,215 B. Deliberately a little wider than this route's last
+     two raises: it is now carrying a second reading per tile and the next
+     edit here should not have to argue for forty bytes. */
+  /* 209 -> 213 FOR THE SECTOR STRIP'S THREE QUANTITIES. Re-derived rather
+     than reasoned from the paragraph above — `stat` on disk against
+     `git cat-file -s HEAD:` at the branch head:
+
+       file                  before      after
+       flows-overview.js    178,098    182,865
+       flows-ui.js           25,136     25,136
+       nav.js                 2,560      2,560
+       flows-dock.js          6,007      6,007
+       total                211,801    216,568 B = 211.49 KiB
+
+     The room under 209 was 2,215 B and this change needs 4,767, so 209 is
+     2,552 B short and no amount of re-reading makes it fit.
+
+     WHAT IT BOUGHT. The sector strip could be read three ways — net premium
+     in dollars, net contracts, and the share of a basket's own premium that
+     leaned — and drew only the third, which is the one quantity that carries
+     no size. The other two were already published per basket
+     (`netPremiumUsd`; `callVolume` and `putVolume`, whose difference is
+     arithmetic on two counts in one unit), so what was missing was a way to
+     ask for them. It is a toggle rather than three strips because eleven
+     baskets drawn three times is a region nobody scrolls past.
+
+     AND THE SILENCES ARE PER MODE, which is the half that cost the bytes. A
+     row's `read` state is about its PREMIUM pair, and the volumes are read
+     independently of it, so each mode counts its own reporting baskets, names
+     its own missing ones in its own sentence, and scales its own axis — a
+     ratio is bounded to +/-1 by construction and a dollar sum is not. One
+     shared count over three quantities would have been wrong in two of them.
+
+     213 LEAVES 1,544 B, which is less than the last raise left on purpose:
+     this route has now taken three raises in a row, and the next edit to it
+     should have to make its argument in the open rather than find room
+     already cleared for it.
+
+     213 -> 217, ONE COMMIT LATER, WHICH IS THE ARGUMENT THAT PARAGRAPH ASKED
+     FOR. Re-derived the same way:
+
+       flows-overview.js  182,865 -> 187,001; the other three unchanged
+       total              216,568 -> 220,704 B = 215.53 KiB
+
+     WHAT IT BOUGHT: the flagged-windows table drew four columns over rows
+     carrying `spanStart`, `spanEnd`, `askPrem` and `bidPrem` — so a reader
+     could see that $3.0M was flagged and not WHEN inside the session, nor
+     which side of the quote the vendor attributed it to. Both are now
+     columns: the window start on the EASTERN clock, named in the header
+     because a table of session windows with an unnamed clock is a number
+     nobody can place, with both ends of the span in the cell's title; and
+     the ask/bid share, which carries no hue precisely because green means
+     bullish everywhere else on this page and a print at the ask is not
+     proof of a buyer. Plus the route to the whole population beside the
+     count, which is markup rather than script.
+
+     217 LEAVES 1,504 B. The paragraph above said the next edit to this route
+     should argue in the open rather than find room waiting, and this is that
+     argument rather than an exception to it: two raises inside one PR is
+     worth saying out loud, and what a reader gets for them is five readings
+     the payload was already carrying and the page was dropping. */
+  /* 217 -> 227 FOR THE SAME CURSOR, ON THE PAGE WITH THE OTHER BIG CHART.
+     Derived on disk:
+
+       file                  before      after
+       flows-cursor.js            0     10,016   (the ticker route's file,
+       flows-overview.js    187,001    187,927    served here too)
+       flows-ui.js           25,136     25,136
+       nav.js                 2,560      2,560
+       flows-dock.js          6,007      6,007
+       total                220,704    232,620 B = 227.17 KiB
+
+     ONE FILE, TWO ROUTES, AND THAT IS THE ARGUMENT. The daily flow chart is
+     this page's largest drawing and it withheld every session's two figures
+     between its axis marks. It could have grown its own hover — a few hundred
+     bytes here — and then the ticker's cursor and the overview's would be two
+     implementations of one idea, drifting on what a rule looks like and
+     whether a keyboard can reach it. The shared file is the more expensive
+     and the more honest of the two.
+
+     228 AND NOT 227, AND THE 502 BYTES BETWEEN THEM ARE THE POINT. 227 was
+     written against 232,118 B — the figure before the label fix that went in
+     with it. The cursor's first registration here read `r.d` for the session,
+     which is the BOARD row's key; tideSeries renames `date` to `at`, so every
+     readout printed an em dash for its heading. That was caught by driving
+     the chart rather than by reading the diff, and the comment recording it
+     is what took the route 172 B past a ceiling set minutes earlier. Raising
+     to the measurement rather than trimming the note is this file's own rule
+     — "bookkeeping rather than engineering" is what it calls the alternative.
+
+     228 -> 230, AND THIS ROUTE DID NOT CHANGE. flows-cursor.js grew from
+     10,016 to 12,009 B when it learned a second axis for the ticker's
+     transposed gamma profile, and this route serves the same file: 232,620 ->
+     234,613 B = 229.11 KiB. That is the cost of one implementation instead of
+     two, and it is worth saying out loud rather than discovering twice — a
+     change to the shared cursor lands on every route that serves it, so the
+     next feature added to it is a raise HERE as well as there.
+
+     230 LEAVES 1,907 B. As on the ticker route, the real answer to this
+     route's weight is the comment-stripping build that is already merged and
+     waiting on a switch, not a further raise here. */
+  /* 230 -> 231, AND THIS ROUTE DID NOT GAIN A FEATURE. flows-cursor.js is
+     shared with the ticker, and the ticker's cursor work moved three
+     contract rules out of five renderer comments and into that file's
+     header: 12,009 -> 13,123 B, +1,114, of which this route pays every byte
+     and gains nothing it can see. Measured:
+
+       flows-dock.js   6,007   nav.js         2,560   flows-ui.js     25,136
+       flows-cursor.js 12,009 -> 13,123       flows-overview.js  188,901
+       total         234,613 -> 235,727 B = 230.20 KiB — 207 B over
+
+     SAYING SO IS THE POINT. A shared file's comment is billed to every route
+     that serves it, and the de-duplication that made the ticker's raise
+     smaller made this one necessary — a net win across the two (+1,114 here
+     against −2,600 there) but not a free one, and a ceiling that absorbed it
+     quietly would hide the transfer. 231 leaves 817 B. */
+
+  /* 231 -> 237, AND THIS TIME THE ROUTE DID GAIN SOMETHING. The chart census
+     the ticker's raise describes was pointed at this page too — the directive
+     is about the section, not one route — and it read 1 cursor against 20
+     drawings. It reads 19 and 1 now, with nothing left in `bare`. Byte-exact,
+     `git cat-file -s HEAD:` against `stat`:
+
+       flows-dock.js    6,007   nav.js            2,560   flows-cursor.js 13,123
+       flows-ui.js     25,136   flows-overview.js 188,901 -> 195,296 (+6,395)
+       total          235,727 -> 242,122 B = 236.45 KiB — 5,578 B over
+
+     THREE DRAWINGS, THREE DIFFERENT ANSWERS. The call/put ring declares
+     data-fx-read="face": its total sits in the hole and its legend prints
+     both shares and both dollar figures, so a cursor would read back what is
+     already on screen. The spine takes one, grouped BY SCORE rather than by
+     mark — two names on +62 are two circles at one x, and a cursor over the
+     flat list would have named one of them and silently dropped the rest.
+
+     THE PER-ROW SCORE STRIPS ARE THE REST, AND THEY REGISTER AT THE CALL SITE
+     rather than inside scoreStrip. flows-ui.js is served on four routes and
+     only this one links flows-cursor.js — /flows/long/, /flows/track/ and the
+     strategy tester do not — so the shared builder would have shipped the
+     bytes to three routes where the feature cannot exist at all. That is the
+     mirror of the deferral trap this file already names: not a cost moved out
+     of a measurement, but a cost that could never be spent. Those three
+     ceilings are untouched by this change, which is the evidence the
+     placement was right.
+
+     237 LEAVES 566 B, tighter than the 817 above and deliberately so: this
+     route is owed the same comment strip the ticker is. */
+  overviewPage: 237,
   /* 300 -> 306 FOR THE DOCKED ASSISTANT, WHICH COST 5k ON EVERY ROUTE WHEN
      THIS WAS WRITTEN AND COSTS 6k NOW. The board was at 297k and the tab,
      the empty panel and the loader took it to 302k. Raising the number is

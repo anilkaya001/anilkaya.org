@@ -175,9 +175,19 @@ try {
     };
     return pairs;
   }, TICKER_PANELS.map((e) => [e.id, e.key]));
-  eq(DRAWN_HOSTS.length, 13,
-     `thirteen registry panels are drawn by window.FlowsPanels — the ten this file was ` +
-     `written for plus the three second-order Greeks that share one drawer (${
+  /* 13 -> 14: premiumTrack, the net-premium history panel this branch added.
+     Eleven panels with a drawer of their own, plus the three second-order
+     Greeks that share one.
+
+     AND THE REASON IT TOOK THIS LONG TO SAY SO. This suite runs after
+     flows-overview, which failed on the two commits before this one, so it
+     never executed against this branch at all until the overview went green —
+     the same ordering trap PR #91 hit, where a failure at suite 37 hid six
+     suites behind it. A count like this one breaks the moment the registry
+     grows and is silent until something ahead of it stops failing. */
+  eq(DRAWN_HOSTS.length, 14,
+     `fourteen registry panels are drawn by window.FlowsPanels — eleven with a drawer ` +
+     `of their own plus the three second-order Greeks that share one (${
        DRAWN_HOSTS.length})`);
   /* Through the module's own exported surface, not a private hook — see above. */
   await page.evaluate(() => {

@@ -3,42 +3,98 @@
    Loaded on every page (home + articles).
    ============================================================= */
 
+/* ---- Inter (Rasmus Andersson, SIL OFL 1.1) ----
+
+   THE FACE FLOWS IS SET IN. The section was in Latin Modern, which is a book
+   face: it is beautiful in prose and wrong for a dense instrument panel,
+   where the job is a hundred small figures read at a glance rather than a
+   paragraph read in sequence. The owner's design for both Flows pages is set
+   in a neutral grotesque and this is it.
+
+   ONE FILE PER SUBSET AND BOTH ARE VARIABLE, weight 400 to 700 in a single
+   container: 48 KB latin + 19 KB greek against the four static Latin Modern
+   faces it replaces on this section. Nothing outside /flows/ changes — the
+   Academy keeps Latin Modern for prose and JetBrains Mono for notation.
+
+   THE GREEK SUBSET IS NOT OPTIONAL. Flows prints Γ (the gamma regime) and Δ
+   (every score move, every open-interest change), both outside the latin
+   range — without this file they fall back to the system face mid-string,
+   beside the number that is the reading. tests/contracts.mjs checks both
+   ranges rather than trusting the family name. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  /* A RANGE, NOT A WEIGHT. The variable axis covers 400-700, so every weight
+     the section asks for is drawn by this file rather than synthesised. */
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/assets/fonts/Inter-latin.woff2?v=196") format("woff2");
+  /* U+2212 IS IN HERE and it is the one that matters: it is the minus sign
+     every negative reading on the section is set with. */
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/assets/fonts/Inter-greek.woff2?v=196") format("woff2");
+  /* U+038E-038A WAS IN THIS LIST AND IS A MALFORMED RANGE: its start is above
+     its end. An invalid <urange> invalidates the WHOLE unicode-range
+     descriptor, which drops it to its initial value of U+0-10FFFF — so this
+     subset stopped being a subset and claimed every codepoint on the page,
+     competing with the latin file for ordinary text. The JetBrains block
+     below carries the identical list without that entry, which is what makes
+     it a copy-paste corruption rather than a deliberate range.
+
+     IT PASSED THE TEST THAT EXISTS. contracts.mjs asserts /U\+038E-03A1/
+     appears in this block; the correct entry beside the malformed one
+     satisfied that, so the check could never see it. */
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C,
+    U+038E-03A1, U+03A3-03FF;
+}
+
 /* ---- Latin Modern (GUST e-foundry, GUST Font License / OFL) ---- */
 @font-face {
   font-family: "Latin Modern";
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("/assets/fonts/LM-regular.woff2?v=158") format("woff2");
+  src: url("/assets/fonts/LM-regular.woff2?v=196") format("woff2");
 }
 @font-face {
   font-family: "Latin Modern";
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url("/assets/fonts/LM-italic.woff2?v=158") format("woff2");
+  src: url("/assets/fonts/LM-italic.woff2?v=196") format("woff2");
 }
 @font-face {
   font-family: "Latin Modern";
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url("/assets/fonts/LM-bold.woff2?v=158") format("woff2");
+  src: url("/assets/fonts/LM-bold.woff2?v=196") format("woff2");
 }
 @font-face {
   font-family: "Latin Modern";
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url("/assets/fonts/LM-bold-italic.woff2?v=158") format("woff2");
+  src: url("/assets/fonts/LM-bold-italic.woff2?v=196") format("woff2");
 }
 
 /* ---- JetBrains Mono (JetBrains Mono Project Authors, SIL OFL 1.1) ----
 
    THIS IS THE ACADEMY'S FACE NOW, NOT THE SITE'S. It was both until Flows
-   moved to one family: assets/css/flows.css defines --font-figure as Latin
-   Modern and its 158 rules resolve there, so nothing under /flows/ reaches
-   --font-mono any more (tests/contracts.mjs asserts that it cannot). What
+   moved to one family: assets/css/flows.css defines --font-figure as INTER
+   (flows.css:96) and its rules resolve there, so nothing under /flows/
+   reaches --font-mono any more (tests/contracts.mjs asserts that it cannot).
+   This sentence said "Latin Modern" until the section was re-set in Inter and
+   nothing updated it — a stale face in a comment is the same defect as a
+   stale number, and this file argues that case two paragraphs down. What
    still does: lab.css, article.css, placement.css and review.css. Scoping
    the claim is the point — a comment that says "this site" about two
    sections when it is true of one is the kind of sentence this repository
@@ -51,24 +107,34 @@
    axis labels the charts size their margins against are measured from a font
    the measuring code has never seen. Self-hosting fixes the width to one
    known number: 0.6 em per character, everywhere. (Flows keeps the same
-   guarantee by a different route: Latin Modern's digits are tabular WITHIN a
-   weight — measured 0.500 em at 400, 0.570 em at 700, spread 0.0000px — so a
-   column there aligns as long as its cells share a weight.)
+   guarantee by a different route, and it is no longer the face that provides
+   it: Inter is proportional, so the alignment comes from
+   `font-variant-numeric: tabular-nums`, declared on .flows-body at
+   flows.css:440 and inherited by the tables under it. The figures this
+   paragraph used to quote — 0.500 em at 400, 0.570 em at 700 — were Latin
+   Modern's and are deleted rather than restated, because nobody re-measured
+   them for Inter and a measurement nobody took is worse than none.)
 
    Two files, not four. The Google build is variable on the weight axis, so
    one file per subset covers the 400 and the 700 this site uses, and
    `font-weight: 100 800` is what tells the browser so. The Greek subset is
    not decoration, and the notation it serves is the ACADEMY's: σ, β and ε run
-   through the curriculum, and Latin Modern draws none of them. Flows used to
-   need it too, for σ on its ATR-normalised distances; those print "2.00 ATR"
-   now, precisely because Latin Modern does not draw the glyph and one letter
-   falling back to the system stack changes width mid-line. */
+   through the curriculum, and Latin Modern draws none of them — which is why
+   the Academy needs this file and still does.
+
+   FLOWS USED TO NEED IT TOO AND THE REASON HAS EXPIRED. Its ATR-normalised
+   distances print "2.00 ATR" rather than a σ, and this paragraph justified
+   that with "Latin Modern does not draw the glyph". The section is set in
+   Inter now and this repo commits Inter's Greek subset, so Flows COULD draw
+   one. The rule stands anyway and tests/contracts.mjs states why on its own
+   terms; what is deleted here is the dead justification, because a rule kept
+   for a reason that has expired is a rule nobody can argue with. */
 @font-face {
   font-family: "JetBrains Mono";
   font-style: normal;
   font-weight: 100 800;
   font-display: swap;
-  src: url("/assets/fonts/JBM-latin.woff2?v=158") format("woff2");
+  src: url("/assets/fonts/JBM-latin.woff2?v=196") format("woff2");
   /* The latin range carries U+2212 MINUS SIGN, which every negative number on
      this site is written with rather than a hyphen. */
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
@@ -80,7 +146,7 @@
   font-style: normal;
   font-weight: 100 800;
   font-display: swap;
-  src: url("/assets/fonts/JBM-greek.woff2?v=158") format("woff2");
+  src: url("/assets/fonts/JBM-greek.woff2?v=196") format("woff2");
   unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1,
     U+03A3-03FF;
 }
@@ -105,7 +171,31 @@
   --ink-faint: #8a8571;   /* ≥4.5:1 (WCAG AA) on all site surfaces */
   --hairline:  rgba(201, 198, 172, 0.14);
 
-  /* Type */
+  /* ---- Type: ONE FAMILY, EVERY SECTION ----
+
+     THE SITE WAS SET IN TWO FACES AND THE SEAM WAS VISIBLE. Flows moved to
+     Inter when the section's design did; Home, Articles and the Econometrics
+     Lab stayed in Latin Modern. So a reader crossing the top-bar pill from
+     Articles to Flows changed typeface mid-session, and the four sections
+     read as four products rather than one site. The owner's design for the
+     whole site is a single neutral grotesque, so this is now ONE token and
+     every section resolves through it.
+
+     LATIN MODERN STAYS COMMITTED AND STAYS CHECKED. tests/contracts.mjs
+     keeps the four faces under test because a committed font that nothing
+     serves is still a file the repository is responsible for — what changed
+     is which section reaches for it, which is nothing, today. The token
+     below is kept, named for what it IS rather than deleted, so a deliberate
+     serif setting has something to ask for instead of a literal stack.
+
+     MONOSPACE IS NOT A SECOND TYPEFACE HERE, IT IS A DIFFERENT KIND OF TEXT.
+     `code`, `pre`, `kbd` and the notebook's output cells stay mono because
+     alignment and glyph distinction are the point of them — a proportional
+     `l` beside a `1` in a code sample is a defect, not a style. Every LABEL
+     and every FIGURE that was in mono for flavour is now in the one family,
+     which carries tabular figures for exactly this reason. */
+  --font-ui:    "Inter", system-ui, -apple-system, "Segoe UI", Roboto,
+                "Helvetica Neue", Arial, sans-serif;
   --font-serif: "Latin Modern", "Latin Modern Roman", Georgia, "Times New Roman", serif;
   /* The fallback stack is kept in full and in width order behind the webfont:
      if the woff2 fails to load, or a glyph falls outside both subsets, what
@@ -179,6 +269,41 @@
          the viewBox, which is how an axis label ends up 1.71x its intended
          size. Those px values are their own small ladder, listed in
          flows.css beside the charts that use them. */
+  /* ---- THE GROUND, SHARED BY ALL FOUR SECTIONS ----
+
+     assets/img/atmosphere.svg IS the picture, as a file: vector, ~2.8 KB,
+     resolution-independent, stamped by the version ritual like any other
+     asset. The subject is light through air, which is what an SVG gradient
+     already is, so nothing is lost to its not being a photograph.
+
+     THE SCRIM IS WHAT MAKES IT A GROUND AND NOT A WALLPAPER. The image is
+     bright — a white sun at the left edge and a lit horizon across the middle
+     — and at full strength it would pull the eye off every reading on the
+     page, which is the one thing a background must not do. The flat layers
+     over it hold it to roughly a fifth of its own luminance: enough that the
+     navy, the band and the horizon are all still THERE, not enough to compete
+     with a number.
+
+     A GRADIENT SCRIM, NOT A FLAT WASH, because the image is not evenly
+     bright. One opacity that let the navy through turned the lit haze below
+     the horizon into glare behind every card in the lower two thirds — the
+     render showed a table sitting on brown. Light at the top where the sky is
+     already dark, heavy below the horizon where it is not.
+
+     THE LAST LAYER IS THE COLOUR FALLBACK, for a request where the SVG does
+     not arrive. It is a gradient rather than a flat fill so the page still
+     has a horizon without the asset. */
+  --site-ground:
+    linear-gradient(180deg,
+      rgba(8, 8, 10, 0.42) 0%,
+      rgba(8, 8, 10, 0.50) 34%,
+      rgba(8, 8, 10, 0.72) 52%,
+      rgba(9, 8, 7, 0.88) 68%,
+      rgba(9, 8, 7, 0.94) 100%),
+    radial-gradient(62% 48% at 8% 0%, rgba(122, 170, 214, 0.07), transparent 70%),
+    url("/assets/img/atmosphere.svg?v=196") center / cover no-repeat,
+    linear-gradient(180deg, #0a1020 0%, #101c33 34%, #2a2416 56%, #100e0b 100%);
+
   --fs-micro: 0.64rem;   /* table headers, rail group labels, micro chrome */
   --fs-label: 0.68rem;   /* panel eyebrows: mono, uppercase, letterspaced   */
   --fs-fine:  0.74rem;   /* dense cells, chips, marks                      */
@@ -253,10 +378,50 @@ html {
 }
 
 body {
-  font-family: var(--font-serif);
-  font-size: clamp(1rem, 0.95rem + 0.25vw, 1.18rem);
+  font-family: var(--font-ui);
+  /* PUNTO 12, AND IT IS THE SAME TWELVE EVERYWHERE.
+
+     This was clamp(1rem, 0.95rem + 0.25vw, 1.18rem): a floor of exactly 12pt
+     that grew to 18.88px on a wide screen. So the same page was set at one
+     size on a laptop and another on a desk, and Flows — which inherits this
+     body size for its prose — disagreed with the target designs by a third.
+     Pinned at 12pt, the four sections read at one size at every width.
+
+     12pt RATHER THAN 1rem, though they are the same 16px, because the unit is
+     the instruction: the ask was a POINT size and writing it as one keeps the
+     next reader from "simplifying" it into a rem and losing what it meant.
+     The --fs-* scale below stays in rem and is unaffected — those resolve
+     against the ROOT, not against this. */
+  font-size: 12pt;
   line-height: 1.65;
   color: var(--ink);
+  /* (The colour fallback is declared AFTER the shorthand below, not here:
+     `background:` resets background-color, so a declaration above it does not
+     survive. The first draft put it here and the computed body colour came
+     back rgba(0,0,0,0) — caught by rendering the three public pages and
+     reading the computed style back, not by looking.) */
+  /* ONE GROUND, ALL FOUR SECTIONS. This lived in flows.css as --flows-ground
+     and painted /flows/ alone, so Home and Articles were flat near-black and
+     the Econometrics Lab was too — four sections, three different grounds.
+     The token is defined once here now and flows.css aliases it, which is
+     also what makes the alias worth having: a section that needs to opt out
+     overrides one name rather than re-stating an image, a scrim and a
+     fallback it would then have to keep in step by hand.
+
+     `fixed` pins it to the viewport rather than the document: the longest
+     route on this site measures ten thousand pixels, and an unpinned cover
+     image would show one flat slice per screen.
+
+     ONE SHORTHAND, NOT THREE LONGHANDS. The first draft here split the token
+     into layers/position/size so each could be read on its own — and a
+     multi-layer background needs its position and size lists to line up with
+     the layer list by INDEX, so three tokens is three places to keep a
+     four-layer stack in step. The composite carries `center / cover` inline
+     on the one layer that needs it, which is what flows.css has shipped. */
+  background: var(--site-ground);
+  background-attachment: fixed;
+  /* AFTER the shorthand, so it is the real bottom layer: a printer, a
+     forced-colours mode, and any request where the SVG does not arrive. */
   background-color: var(--bg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -471,8 +636,29 @@ a:hover { color: var(--gold-celadon); text-decoration-color: currentColor; }
    width independent of which page is active; the sliding gold indicator and
    colour still mark "current".
    Verified clip-free at 320/360/390 on all eleven pages. */
+/* 0.44rem -> 0.36rem, AND THE MEASUREMENT ABOVE IS WHY THIS HAD TO MOVE.
+   That note ends "Verified clip-free at 320/360/390 on all eleven pages" —
+   true when it was written, and true of the face it was written against. This
+   wave set `body` to Inter so every surface shares one font, and the nav pill
+   inherits from body: the same four labels at the same size simply measure
+   wider in Inter than in the serif they were fitted to. The pill went to
+   258.1px against 235.2px of room, and tests/regression.mjs caught it on / at
+   320px with the social button's right edge at 325.
+
+   NOT A ROUNDING, A RE-MEASUREMENT. Reproduced locally against the real pages
+   at the suite's own nine widths — the tightest fit is / at 320px, and it read
+   exactly the 325 CI reported. Candidates measured rather than reasoned about:
+   0.40rem and 0.38rem both resolve to a 250px pill (2.7px of slack, the same
+   number, because the difference is sub-pixel); 0.36rem gives 246px and 6.7px;
+   0.34rem gives 242px. 0.36 is the first value with a margin comparable to
+   what this ladder carried before the face changed.
+
+   THE TOUCH TARGET IS UNCHANGED. `.pill a::after` extends the hit area by 8px
+   vertically and 2px horizontally regardless of this padding, which is what
+   the 44px effective target is built from — visual padding is not the target
+   and shrinking it by 1.3px a side does not shrink what a thumb hits. */
 @media (max-width: 25rem) {
-  .pill a { padding: 0.46rem 0.44rem; }
+  .pill a { padding: 0.46rem 0.36rem; }
   .pill a.is-current { font-weight: 400; }
 }
 
