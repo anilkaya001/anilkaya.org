@@ -9832,34 +9832,32 @@ svg[data-fx-cursor="on"] { touch-action: pan-y; }
    width itself; the rail's 60/60 pair did exactly that until this wave, so
    this tier is a min alone and the single-column case is the unqualified
    default above. */
+/* ONE COLUMN, FULL WIDTH. The sticky right column this used to carry is
+   gone: the design keeps the findings index to one row beside the figures
+   (.ft-row0) and runs every band under it across the whole width. */
 .ft-split { display: grid; gap: var(--space-3); }
+.ft-split-main { min-width: 0; }
+/* ROW 0: the six cards and what this card found, side by side once there is
+   room for both. The index is the narrower half and keeps a fixed track so
+   the cards' auto-fit does not squeeze it. */
+.ft-row0 { display: grid; gap: var(--space-3); min-width: 0; }
+.ft-row0 > * { min-width: 0; }
+.ft-row0-l { display: grid; gap: var(--space-2); align-content: start; min-width: 0; }
+.ft-row0-l > * { margin: 0; }
+/* SIX IN ONE ROW BESIDE THE INDEX: the 8rem floor (a phone measurement) wraps
+   the sixth card under the other five once the index takes its 22rem. */
+@media (min-width: 72rem) { .ft-row0-l .ft-cards { grid-template-columns: repeat(auto-fit, minmax(min(6.5rem, 100%), 1fr)); } }
+.ft-row0-r { min-width: 0; }
+.ft-row0-r > .ft-brief { margin: 0; }
 @media (min-width: 72rem) {
-  .ft-split {
-    grid-template-columns: minmax(0, 1fr) 20rem;
-    /* START, NOT STRETCH. The right column is three boxes whose height is
-       their content; stretched to the left column's height they would grow a
-       tail of empty panel under the sector strip. */
-    align-items: start;
-  }
-  /* STICKY, BECAUSE THE LEFT COLUMN IS THE LONGER ONE. What the card found is
-     an index INTO the page, so it earns its place beside the reading rather
-     than scrolling away from it. Capped at the viewport with its own overflow
-     for the reason the rail's note gives: a sticky box taller than the screen
-     hides its own tail with no affordance saying so. */
-  .ft-split-side {
-    position: sticky;
-    top: calc(var(--ft-bar-h, 9rem) + 1rem);
-    max-height: calc(100vh - var(--ft-bar-h, 9rem) - 2rem);
-    overflow-y: auto;
-    overscroll-behavior: contain;
+  .ft-row0 { grid-template-columns: minmax(0, 1fr) 22rem; align-items: stretch; }
+  /* THE CARDS SET THE HEIGHT. The index is taken out of flow inside its cell
+     so its five findings cannot stretch the row; it scrolls inside the box. */
+  .ft-row0-r { position: relative; }
+  .ft-row0-r > .ft-brief {
+    position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain;
   }
 }
-.ft-split-main { min-width: 0; }
-.ft-split-side { min-width: 0; display: flex; flex-direction: column; }
-/* The three boxes already carry their own bottom margin from the stacked
-   layout; in a flex column that margin is the gap, so the last one's is
-   removed rather than a second spacing system introduced. */
-.ft-split-side > :last-child { margin-bottom: 0; }
 
 
 /* ---------- the six cards ----------
@@ -10013,26 +10011,39 @@ svg[data-fx-cursor="on"] { touch-action: pan-y; }
 .ft-brief-i + .ft-brief-i { border-top: 1px solid var(--hairline); }
 .ft-brief-a {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.4rem 0;
+  align-items: flex-start;
+  gap: 0.55rem;
+  padding: 0.45rem 0;
   color: var(--ink-dim);
   text-decoration: none;
-  /* A NEUTRAL MARK, NOT A SEVERITY DOT: nothing on this card ranks its own
-     findings, so the bullet says "one of several" and nothing more. */
-  position: relative;
 }
-.ft-brief-a::before {
-  content: "";
-  position: absolute;
-  left: -0.55rem;
-  top: 0.85em;
-  width: 0.3rem;
-  height: 0.3rem;
-  border-radius: 999px;
-  background: var(--ink-faint);
-  opacity: 0.7;
+/* THE DOT TAKES ITS STATION'S COLOUR, not a severity: see the note beside
+   #ftBrief in shared/flows-pages.js. Five stations, five hues the rail and
+   the tab row already use for the same groups. */
+.ft-brief-d {
+  flex: none; width: 0.5rem; height: 0.5rem; margin-top: 0.45em;
+  border-radius: 999px; background: var(--ink-faint);
+}
+.ft-brief-d.is-signal { background: var(--gold-harvest); }
+.ft-brief-d.is-overview { background: var(--gold-harvest); }
+.ft-brief-d.is-convexity { background: var(--flow-down); }
+.ft-brief-d.is-volatility { background: #7aa7ff; }
+.ft-brief-d.is-tape { background: var(--flow-up); }
+.ft-brief-d.is-context { background: var(--flow-up); }
+.ft-brief-t { flex: 1 1 auto; }
+.ft-brief-h {
+  display: flex; align-items: center; gap: 0.45rem;
+  text-transform: none; letter-spacing: 0; font-size: var(--fs-note);
+  color: var(--ink);
+}
+.ft-brief-ic { display: inline-flex; color: var(--gold-harvest); }
+.ft-brief-ic svg { width: 1rem; height: 1rem; }
+.ft-brief-hn { font-weight: 600; }
+.ft-brief-beta {
+  font-family: var(--font-figure); font-size: 0.6rem; line-height: 1;
+  letter-spacing: 0.12em; text-transform: uppercase; font-weight: 700;
+  padding: 0.2rem 0.4rem; border-radius: 0.3rem;
+  color: var(--gold-harvest); border: 1px solid var(--gold-harvest);
 }
 .ft-brief-a:hover, .ft-brief-a:focus-visible { color: var(--ink); }
 .ft-brief-a:hover .ft-brief-c, .ft-brief-a:focus-visible .ft-brief-c { color: var(--gold-harvest); }
@@ -10423,9 +10434,75 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
      grows — so it is the one given a growing body below; the chain's rows
      are fixed by how many contracts traded. */
   .ft-top { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); align-items: stretch; }
-  .ft-chart { display: flex; flex-direction: column; }
-  .ft-chart-body { flex: 1; display: flex; align-items: center; }
+  .ft-chart, .ft-garch { display: flex; flex-direction: column; }
+  .ft-chart-body { flex: 1; display: flex; flex-direction: column; justify-content: center; }
 }
+/* ROW 2: chain | ring | levels over flow. The two stacks are plain columns
+   so the grid lays out three items; each stack's cards keep their own gap. */
+.ft-band3 { grid-template-columns: minmax(0, 1fr); }
+.ft-col { display: grid; gap: var(--space-3); align-content: start; min-width: 0; }
+.ft-col > * { margin: 0; min-width: 0; }
+@media (min-width: 60rem) {
+  .ft-band3 { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+}
+/* ROW 3: what changed | the term structure | the sector peers. */
+.ft-band4 {
+  display: grid; gap: var(--space-3); margin-top: var(--space-3);
+  grid-template-columns: minmax(0, 1fr); min-width: 0;
+}
+.ft-band4 > * { min-width: 0; margin: 0; }
+@media (min-width: 60rem) {
+  .ft-band4 { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); align-items: start; }
+}
+/* The chart header carries the period pills between its name and its tabs. */
+.ft-chart-top .ft-period { margin-inline: auto 0; }
+.ft-chart-ctl { display: inline-flex; gap: 0.3rem; margin-left: 0.35rem; padding-left: 0.5rem;
+  border-left: 1px solid var(--panel-border); }
+.ft-chart-tab--sma.is-on { color: var(--bg); }
+.ft-chart-ohlc {
+  display: flex; flex-wrap: wrap; gap: 0.2rem 0.55rem; align-items: baseline;
+  margin: 0 0 0.35rem; font-family: var(--font-figure); font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+}
+.ft-chart-ohlc-k { color: var(--ink-faint); }
+.ft-chart-ohlc-v { color: var(--ink); font-weight: 600; }
+.ft-chart-ohlc-v.is-sma { color: var(--gold-harvest); }
+.ft-chart-wick.is-pos, .ft-chart-body.is-pos, .ft-chart-vol.is-pos { stroke: var(--flow-up); fill: var(--flow-up); }
+.ft-chart-wick.is-neg, .ft-chart-body.is-neg, .ft-chart-vol.is-neg { stroke: var(--flow-down); fill: var(--flow-down); }
+.ft-chart-wick.is-flat, .ft-chart-body.is-flat, .ft-chart-vol.is-flat { stroke: var(--ink-faint); fill: var(--ink-faint); }
+.ft-chart-wick { stroke-width: 1; }
+.ft-chart-vol { opacity: 0.55; }
+.ft-chart-sma { stroke: var(--gold-harvest); stroke-width: 1.4; }
+.ft-chart-tag { fill: var(--gold-harvest); }
+.ft-chart-tag-t { fill: var(--bg); font-family: var(--font-figure); font-size: 9px; font-weight: 700;
+  font-variant-numeric: tabular-nums; }
+/* The volatility card. */
+.ft-garch-line { stroke: var(--gold-harvest); stroke-width: 1.3; }
+.ft-garch-ret { opacity: 0.55; }
+.ft-garch-ret.is-pos { fill: var(--flow-up); }
+.ft-garch-ret.is-neg { fill: var(--flow-down); }
+.ft-garch-legend { display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; margin: 0.3rem 0 0;
+  font-family: var(--font-figure); font-size: var(--fs-micro); color: var(--ink-faint); }
+.ft-garch-lg::before { content: ""; display: inline-block; width: 0.9rem; height: 2px;
+  vertical-align: middle; margin-right: 0.35rem; background: var(--gold-harvest); }
+.ft-garch-lg.is-ret::before { height: 0.5rem; background: color-mix(in srgb, var(--ink-faint) 60%, transparent); }
+.ft-garch-dist { margin-top: var(--space-2); padding-top: var(--space-2);
+  border-top: 1px solid var(--panel-border); }
+.ft-garch-h3 { margin: 0 0 0.35rem; font-size: var(--fs-note); font-weight: 600; color: var(--ink); }
+.ft-garch-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2);
+  align-items: center; min-width: 0; }
+.ft-garch-row > * { min-width: 0; }
+.ft-garch-dsvg { width: 100%; }
+.ft-garch-bin { fill: color-mix(in srgb, var(--ink-faint) 55%, transparent); }
+.ft-garch-ged { stroke: var(--gold-harvest); stroke-width: 1.5; }
+.ft-garch-params { margin: 0; display: grid; grid-template-columns: auto auto; gap: 0.2rem 0.8rem;
+  font-family: var(--font-figure); font-size: var(--fs-micro); font-variant-numeric: tabular-nums;
+  padding: 0.45rem 0.6rem; border: 1px solid var(--panel-border); border-radius: var(--radius-1, 0.4rem); }
+.ft-garch-params dt { color: var(--ink-faint); }
+.ft-garch-params dd { margin: 0; text-align: right; color: var(--ink); font-weight: 600; }
+@media (max-width: 30rem) { .ft-garch-row { grid-template-columns: minmax(0, 1fr); } }
+.ft-ivt-dot { fill: var(--gold-harvest); }
+.ft-ivt-h { display: block; }
 .ft-chart {
   padding: 0.75rem 0.9rem;
   border: 1px solid var(--panel-border);
@@ -10518,6 +10595,8 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
    document (these six are siblings of the grid, not panels inside a station)
    and it should not be bent to save a selector. */
 .ft-chart,
+.ft-garch,
+.ft-ivt,
 .ft-chain,
 .ft-lv,
 .ft-flow,
@@ -10565,8 +10644,14 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
 .ft-chain-top .ft-chain-h {
   margin: 0; padding: 0; border: 0; background: none; border-radius: 0;
 }
+/* The findings index keeps the strip but wears the design's title: mixed
+   case, an icon, a Beta pill. Declared after the strip so it wins. */
+.ft-brief-h {
+  text-transform: none; letter-spacing: 0; font-size: var(--fs-note);
+  color: var(--ink); display: flex; align-items: center; gap: 0.45rem;
+}
 @media (max-width: 30rem) {
-  .ft-chart, .ft-chain, .ft-lv, .ft-flow, .ft-brief, .ft-rel { --panel-pad-x: 0px; }
+  .ft-chart, .ft-garch, .ft-ivt, .ft-chain, .ft-lv, .ft-flow, .ft-brief, .ft-rel { --panel-pad-x: 0px; }
   .ft-chart-h, .ft-chain-h, .ft-lv-h, .ft-flow-h, .ft-brief-h, .ft-rel-h,
   .ft-chart-top, .ft-chain-top { padding-inline: var(--space-2); }
 }

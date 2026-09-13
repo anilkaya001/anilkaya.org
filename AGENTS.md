@@ -360,6 +360,7 @@ flows-warnings         flows-sign              flows-ask
 flows-stock-contract   flows-premium-contract  flows-pulse-contract
 flows-events-contract  flows-mint-contract     flows-permits-contract
 flows-political-contract  flows-record-contract  flows-universe-contract
+flows-garch
 flows-chain-panels     flows-auth-contract     mastery-contract
 academy-contract
 ```

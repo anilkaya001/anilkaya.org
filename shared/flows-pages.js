@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "197";
+export const ASSET_VERSION = "198";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -71,6 +71,7 @@ const ICONS = {
   ask: "M4 5h16v11H9l-5 4Z M8.6 9.2a3.4 3.4 0 0 1 5.6 2.1c0 1.7-2 2-2 3.2M12.2 17.4h.01",
   search: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14ZM20 20l-4.2-4.2",
   bell: "M12 3a6 6 0 0 0-6 6c0 4-1.5 5.5-2 6h16c-.5-.5-2-2-2-6a6 6 0 0 0-6-6ZM10 19a2 2 0 0 0 4 0",
+  sun: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4",
 };
 const icon = (name) => {
   const d = ICONS[name];
@@ -1897,31 +1898,6 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
         <span class="ft-hero-seg" id="ftHeroIvrSeg" aria-hidden="true"></span>
       </span>
     </div>
-    <!-- THE PERIOD CONTROL, WHERE THE DESIGN PUTS IT, WINDOWING THE SERIES
-         BLOCK BELOW.
-
-         IT NARROWS THE WINDOW; IT DOES NOT FETCH. Everything it can show is
-         already on this card, so no period here costs a request — and no
-         period can reach further back than the card's own window, which is
-         the whole reason the disabled states below exist.
-
-         A PERIOD THIS CARD CANNOT REACH IS DISABLED AND SAYS WHY, rather
-         than being dropped from the row or drawn empty. The price window is
-         about forty sessions, so 3M and 1Y are outside it on every name and
-         the pill says so when a reader asks. A control that silently does
-         nothing is worse than one that explains itself.
-
-         AND THE PERIODS MEAN DIFFERENT THINGS PER TAB, because the tabs are
-         on different clocks — sessions for price and premium, intraday
-         buckets for net flow, tenor for the volatility curve. The chart's
-         own note states the window it drew, which is the same rule the
-         overview's control follows: the control switches what is shown and
-         the note names it. -->
-    <div class="ft-hero-b ft-hero-b--period">
-      <span class="ft-hero-k">Period</span>
-      <div class="ft-period" id="ftPeriod" role="group"
-           aria-label="Window the series below"></div>
-    </div>
 
   </section>
   <!-- THE BAR SITS DIRECTLY UNDER THE HERO, AND IT USED TO SIT UNDER FOUR
@@ -2032,7 +2008,56 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
        and the insertion says so at its own end. -->
   <div class="ft-split">
     <div class="ft-split-main">
+  <!-- ROW 0 OF THE DESIGN: the session's figures with what this card found
+       beside them. The findings index used to hold a sticky column of its own
+       down the right edge; the design keeps it to one row-mate of the cards,
+       and everything under that row runs the full width. THE CARDS SET THE
+       ROW'S HEIGHT and the index fills it, scrolling inside its own box when
+       it has more findings than the row has room for — its last line already
+       counts them. -->
+  <div class="ft-row0">
+    <div class="ft-row0-l">
   <div class="ft-cards" id="ftCards" hidden aria-label="This session's flow"></div>
+  <div class="ft-flags" id="ftFlags" hidden></div>
+    </div>
+    <div class="ft-row0-r">
+  <!-- WHAT THIS CARD FOUND, AND WHY IT IS AN INDEX RATHER THAN A SUMMARY.
+
+       The design puts a findings panel at the top right and calls it an AI
+       summary. This product has one of those — Neuron, on the overview — and
+       it is generated per SESSION, not per name; a per-name one is a pipeline
+       change, not a renderer change, so calling this that would be a claim
+       about how it was made. What this is instead: the leads the panels below
+       already publish, gathered at the top with a way into each.
+
+       IT IS ONE SOURCE RENDERED TWICE, NOT TWO SPELLINGS OF ONE READING. Each
+       line is the panel's own published lead — the same string the panel
+       prints, read from the same field — so
+       the two cannot disagree about a number; what this adds is that a reader
+       sees the findings before scrolling, and can go straight to the one that
+       matters. A second sentence ABOUT the same data, written here, is what
+       the rule forbids, and there is none.
+
+       THE DOTS ARE STATION COLOURS, NOT SEVERITIES. The design colours each
+       bullet, and the panel asked for the design's look by name. Nothing on
+       this card ranks its findings by severity, so a red/amber/green dot
+       would be this renderer inventing an opinion the payload does not
+       carry; each dot instead takes the colour of the station its finding
+       came from, which is a fact about the page and one a reader can check
+       by following the link. The heading is the design's; the line under
+       the list still says what the list is: the panels' own findings,
+       counted. -->
+  <aside class="ft-brief" id="ftBrief" hidden aria-labelledby="ftBriefH">
+    <h2 class="ft-brief-h" id="ftBriefH">
+      <span class="ft-brief-ic" aria-hidden="true">${icon("sun")}</span>
+      <span class="ft-brief-hn">AI Summary</span>
+      <span class="ft-brief-beta">Beta</span>
+    </h2>
+    <ol class="ft-brief-l" id="ftBriefL"></ol>
+    <p class="ft-brief-s" id="ftBriefS"></p>
+  </aside>
+    </div>
+  </div>
   <!-- THE TWO BLOCKS THE DESIGN PUTS SIDE BY SIDE UNDER THE FIGURES: a
        series on the left, the book on the right. They are one grid rather
        than two stacked sections because that pairing is the shape of the
@@ -2067,14 +2092,76 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
        and says so when it is opened, rather than being dropped from a row
        the design specifies or drawn from a quantity that is not volume. -->
   <section class="ft-chart" id="ftChart" hidden aria-labelledby="ftChartH">
+  <!-- THE PERIOD CONTROL, WHERE THE DESIGN PUTS IT: IN THE CHART'S OWN HEADER,
+         windowing the series it sits over.
+
+         IT NARROWS THE WINDOW; IT DOES NOT FETCH. Everything it can show is
+         already on this card, so no period here costs a request — and no
+         period can reach further back than the card's own window, which is
+         the whole reason the disabled states below exist.
+
+         A PERIOD THIS CARD CANNOT REACH IS DISABLED AND SAYS WHY, rather
+         than being dropped from the row or drawn empty. The price window is
+         about forty sessions, so 3M and 1Y are outside it on every name and
+         the pill says so when a reader asks. A control that silently does
+         nothing is worse than one that explains itself.
+
+         AND THE PERIODS MEAN DIFFERENT THINGS PER TAB, because the tabs are
+         on different clocks — sessions for price and premium, intraday
+         buckets for net flow, tenor for the volatility curve. The chart's
+         own note states the window it drew, which is the same rule the
+         overview's control follows: the control switches what is shown and
+         the note names it. -->
     <div class="ft-chart-top">
       <h2 class="ft-chart-h" id="ftChartH">Series</h2>
+      <div class="ft-period" id="ftPeriod" role="group"
+           aria-label="Window the series below"></div>
       <div class="ft-chart-tabs" id="ftChartTabs" role="tablist"
            aria-label="Which series to draw"></div>
     </div>
     <div class="ft-chart-body" id="ftChartBody"></div>
     <p class="ft-chart-s" id="ftChartS"></p>
   </section>
+  <!-- THE VOLATILITY MODEL BESIDE THE PRICE. GARCH(1,1) with GED
+       innovations, fitted ONCE in the pipeline from the same year of closes
+       the candles draw (shared/flows-garch.js) and published on the context
+       panel: four parameters, the conditional-volatility path, the returns.
+       The card draws the path over the returns and bins the standardised
+       returns under the density the fitted shape implies; it fits nothing
+       and forecasts nothing, and its note says so. Its own period row,
+       because a month of price against a year of volatility is an ordinary
+       thing to want to see. -->
+  <section class="ft-garch" id="ftGarch" hidden aria-labelledby="ftGarchH">
+    <div class="ft-chart-top">
+      <h2 class="ft-chart-h" id="ftGarchH">GARCH(1,1) — GED</h2>
+      <div class="ft-period" id="ftGarchTabs" role="group"
+           aria-label="Window the volatility path"></div>
+    </div>
+    <div class="ft-chart-body" id="ftGarchBody"></div>
+    <p class="ft-chart-s" id="ftGarchS"></p>
+  </section>
+  </div>
+  <!-- THE BAND THE DESIGN PUTS UNDER THE ROW. One card today; it is an
+       auto-fit grid so the next one joins it without a layout change.
+
+       THE MIX IS THE ONE READING IN THIS BAND THAT IS DRAWN NOWHERE ELSE.
+       The aggressor panel below draws NET contracts by strike — calls lifted
+       minus puts lifted — which is a direction. How much of the volume was
+       calls and how much was puts is a different quantity, published per
+       strike as calls and puts on the same ladder, and until now it
+       reached a reader only through that panel's cursor readout. A ring is
+       what a share of a whole looks like.
+
+       THE POPULATION IS THE LADDER, NOT THE CHAIN, and the card says so.
+       The ladder keeps the strikes nearest the money and publishes how many
+       it measured, how many the chain had, and how many carried no split at
+       all — so the share is of what was measured rather than of everything
+       that traded. -->
+  <!-- ROW 2 OF THE DESIGN: the chain on the left, the volume ring over the
+       recent flow in the middle, the levels over the sector peers on the right. Three
+       columns until there is no width for them; the two stacks are plain
+       columns so the grid sees three items and not five. -->
+  <div class="ft-band3">
   <!-- THE OPTION CHAIN, WHICH IS THE SAME ROWS THE TOP-CONTRACTS PANEL
        RANKS, ASKED A DIFFERENT QUESTION.
 
@@ -2098,83 +2185,12 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
     <div class="ft-chain-body" id="ftChainBody"></div>
     <p class="ft-chain-s" id="ftChainS"></p>
   </section>
-  </div>
-  <!-- THE BAND THE DESIGN PUTS UNDER THE ROW. One card today; it is an
-       auto-fit grid so the next one joins it without a layout change.
-
-       THE MIX IS THE ONE READING IN THIS BAND THAT IS DRAWN NOWHERE ELSE.
-       The aggressor panel below draws NET contracts by strike — calls lifted
-       minus puts lifted — which is a direction. How much of the volume was
-       calls and how much was puts is a different quantity, published per
-       strike as calls and puts on the same ladder, and until now it
-       reached a reader only through that panel's cursor readout. A ring is
-       what a share of a whole looks like.
-
-       THE POPULATION IS THE LADDER, NOT THE CHAIN, and the card says so.
-       The ladder keeps the strikes nearest the money and publishes how many
-       it measured, how many the chain had, and how many carried no split at
-       all — so the share is of what was measured rather than of everything
-       that traded. -->
-  <div class="ft-band3">
+    <div class="ft-col">
     <section class="ft-mix" id="ftMix" hidden aria-labelledby="ftMixH">
       <h2 class="ft-mix-h" id="ftMixH">Volume by type</h2>
       <div class="ft-mix-body" id="ftMixBody"></div>
       <p class="ft-mix-s" id="ftMixS"></p>
     </section>
-  </div>
-    </div>
-    <aside class="ft-split-side" aria-label="What this card found">
-  <!-- WHAT THIS CARD FOUND, AND WHY IT IS AN INDEX RATHER THAN A SUMMARY.
-
-       The design puts a findings panel at the top right and calls it an AI
-       summary. This product has one of those — Neuron, on the overview — and
-       it is generated per SESSION, not per name; a per-name one is a pipeline
-       change, not a renderer change, so calling this that would be a claim
-       about how it was made. What this is instead: the leads the panels below
-       already publish, gathered at the top with a way into each.
-
-       IT IS ONE SOURCE RENDERED TWICE, NOT TWO SPELLINGS OF ONE READING. Each
-       line is the panel's own published lead — the same string the panel
-       prints, read from the same field — so
-       the two cannot disagree about a number; what this adds is that a reader
-       sees the findings before scrolling, and can go straight to the one that
-       matters. A second sentence ABOUT the same data, written here, is what
-       the rule forbids, and there is none.
-
-       NO SEVERITY DOTS. The design colours each bullet red, amber or green.
-       Nothing on this card ranks its findings by severity, so a coloured dot
-       would be this renderer inventing an opinion the payload does not carry;
-       the marks are neutral and the reading carries its own sign in its own
-       words. -->
-  <aside class="ft-brief" id="ftBrief" hidden aria-labelledby="ftBriefH">
-    <h2 class="ft-brief-h" id="ftBriefH">What this card found</h2>
-    <ol class="ft-brief-l" id="ftBriefL"></ol>
-    <p class="ft-brief-s" id="ftBriefS"></p>
-  </aside>
-  <div class="ft-flags" id="ftFlags" hidden></div>
-  <!-- KEY LEVELS, PROMOTED OUT OF THE GRID INTO THE COLUMN THE DESIGN PUTS
-       THEM IN — and this is a MOVE, not a second drawing.
-
-       The levels panel keeps its table in the grid, which carries every
-       level with its two distances and its provenance. What this card adds
-       is position: the design wants the prices a move runs into visible
-       WITHOUT scrolling, beside the findings, because they are what a
-       reader checks a quote against. Same panel, same field, same numbers,
-       read from panels.levels.levels — the nearest-first order is the
-       payload's own, sorted at shared/flows-card.js:304, so this card does
-       not re-sort and cannot disagree about which level is nearest.
-
-       THE DESIGN NAMES THEM RESISTANCE AND SUPPORT. This payload does not
-       publish either word. What it publishes is a gamma flip, a max pain,
-       a call wall and a put wall — each a named construction with a stated
-       derivation — so the labels stay the payload's own. Renaming a gamma
-       flip "resistance" would be this renderer asserting a behaviour the
-       card never measured. -->
-  <aside class="ft-lv" id="ftLv" hidden aria-labelledby="ftLvH">
-    <h2 class="ft-lv-h" id="ftLvH">Key levels</h2>
-    <ol class="ft-lv-l" id="ftLvL"></ol>
-    <p class="ft-lv-s" id="ftLvS"></p>
-  </aside>
   <!-- RECENT FLOW, AND THE WORD "RECENT" IS DOING LESS WORK THAN IT LOOKS.
 
        The rows are the vendor's own FLOW ALERTS for this name: each one is a
@@ -2203,6 +2219,31 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
     <ol class="ft-flow-l" id="ftFlowL"></ol>
     <p class="ft-flow-s" id="ftFlowS"></p>
   </aside>
+    </div>
+    <div class="ft-col">
+  <!-- KEY LEVELS, PROMOTED OUT OF THE GRID INTO THE COLUMN THE DESIGN PUTS
+       THEM IN — and this is a MOVE, not a second drawing.
+
+       The levels panel keeps its table in the grid, which carries every
+       level with its two distances and its provenance. What this card adds
+       is position: the design wants the prices a move runs into visible
+       WITHOUT scrolling, beside the findings, because they are what a
+       reader checks a quote against. Same panel, same field, same numbers,
+       read from panels.levels.levels — the nearest-first order is the
+       payload's own, sorted at shared/flows-card.js:304, so this card does
+       not re-sort and cannot disagree about which level is nearest.
+
+       THE DESIGN NAMES THEM RESISTANCE AND SUPPORT. This payload does not
+       publish either word. What it publishes is a gamma flip, a max pain,
+       a call wall and a put wall — each a named construction with a stated
+       derivation — so the labels stay the payload's own. Renaming a gamma
+       flip "resistance" would be this renderer asserting a behaviour the
+       card never measured. -->
+  <aside class="ft-lv" id="ftLv" hidden aria-labelledby="ftLvH">
+    <h2 class="ft-lv-h" id="ftLvH">Key levels</h2>
+    <ol class="ft-lv-l" id="ftLvL"></ol>
+    <p class="ft-lv-s" id="ftLvS"></p>
+  </aside>
   <!-- THE OTHER NAMES IN THIS SECTOR, which the design puts at the foot of its
        right column and calls Related. Drawn from the same session's BOARDS —
        the only place this page learns about any name but its own — so the
@@ -2215,7 +2256,24 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
     <div class="ft-rel-l" id="ftRelL"></div>
     <p class="ft-rel-s" id="ftRelS"></p>
   </aside>
-    </aside>
+    </div>
+  </div>
+  <!-- ROW 3 OF THE DESIGN: what changed beside the term structure. #ftChange is inserted by the controller as this row's first
+       child — the one place these two files have to agree, and the insertion
+       says so at its own end. -->
+  <div class="ft-band4">
+  <!-- THE VOLATILITY TERM STRUCTURE AS ITS OWN CARD, where the design puts
+       it. It is the series chart's IV tab drawn a second time from the same
+       field through the same helper — one source rendered twice, the
+       precedent .ft-brief set — so the two cannot disagree; what this adds is
+       that the curve is on the page without a tab being opened. -->
+  <section class="ft-ivt" id="ftIvt" hidden aria-labelledby="ftIvtH">
+    <h2 class="ft-chart-h ft-ivt-h" id="ftIvtH">Implied volatility term structure</h2>
+    <div class="ft-chart-body" id="ftIvtBody"></div>
+    <p class="ft-chart-s" id="ftIvtS"></p>
+  </section>
+  </div>
+    </div>
   </div>
 
 
@@ -2865,3 +2923,4 @@ export const FLOWS_PAGES = {
   politicalPage,
   tickerPage, unusualPage, eventsPage, trackPage, strategyPage, askPage, ASSET_VERSION,
 };
+
