@@ -1287,4 +1287,38 @@ let citationsChecked = 0;
     `move cannot break it again.`);
 }
 
+/* ---- the unusual page never claims a transaction, checked WITHOUT a server.
+
+   flows-worker-contract already asserts this, and it is the suite that
+   cannot run in a sandbox with no egress — so the rule was enforced only in
+   CI, and it was broken there by a COMMENT in shared markup using "block" as
+   an ordinary noun. Shared markup means every byte of shell(), rail(),
+   topbar() and dock() is served on this route, comments included.
+
+   This is the same rule read off the same exported list, applied to the HTML
+   the emitter produces rather than to a served response, so it costs a
+   second and catches the mistake before a push instead of after a twelve
+   minute run. Where the two could drift they cannot: UA_BANNED_CLAIMS is
+   defined once, in shared/flows-unusual.js. */
+{
+  const { FLOWS_PAGES } = await import("../shared/flows-pages.js");
+  const { UA_BANNED_CLAIMS } = await import("../shared/flows-unusual.js");
+  const uaHtml = FLOWS_PAGES.unusualPage({ username: "contract" });
+  const refusalProse = [
+    ...uaHtml.matchAll(/<p class="flows-lede">[\s\S]*?<\/p>/g),
+    ...uaHtml.matchAll(/<section[^>]*id="uaBasisPanel"[\s\S]*?<\/section>/g),
+  ].map((x) => x[0]).join("\n");
+  const stray = [];
+  for (const hit of uaHtml.matchAll(new RegExp(UA_BANNED_CLAIMS.source, "ig"))) {
+    const around = uaHtml.slice(Math.max(0, hit.index - 60), hit.index + 60);
+    if (!refusalProse.includes(around.slice(10, -10))) {
+      stray.push(hit[0] + ": " + around.replace(/\s+/g, " "));
+    }
+  }
+  assert.equal(stray.length, 0,
+    "the unusual page names a transaction only where it is refusing to call it one. " +
+    "This is SHARED markup: shell(), rail(), topbar() and dock() are served here too, " +
+    "and their COMMENTS are served with them. " + stray.slice(0, 2).join(" | "));
+}
+
 console.log(`✓ contracts: ${topicIds.length} curricula, ${referenceCount} versioned assets, ${citationsChecked} line citations resolved against the files they name, session hardening`);

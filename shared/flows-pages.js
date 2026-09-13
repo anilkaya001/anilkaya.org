@@ -508,9 +508,18 @@ ${rail(active)}
        The <h1> is still served and still first in the outline; it is
        visually hidden, so a screen reader and a search result still get the
        page's name while the viewport is spent on the name a reader came
-       for. Deleting it would leave the route's only <h1> inside a block that
-       is hidden until a fetch resolves — no heading at all on the picker
-       path, which is a real regression for one saved fold.
+       for. Deleting it would leave the route's only <h1> inside a section
+       that is hidden until a fetch resolves — no heading at all on the
+       picker path, which is a real regression for one saved fold.
+
+       AND THE WORD IN THAT SENTENCE IS "SECTION" FOR A REASON. This is
+       SHARED markup: every byte of it, comments included, is served on the
+       unusual route, where flows-worker-contract bans a list of
+       per-transaction words outside the prose whose job is to refuse them.
+       The first draft of this paragraph used one of them as an ordinary
+       noun and took the whole suite red. The rail's own footer comment
+       records the identical mistake; do not restate the list here, and
+       re-read that comment before writing prose into this function.
 
        EVERY OTHER ROUTE KEEPS IT. They are not opened to read one name, and
        their <h1> is the whole of what they are. -->
