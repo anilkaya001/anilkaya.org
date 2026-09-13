@@ -300,7 +300,58 @@
       .map((c, i) => ({ ...c, i }))
       .filter((c) => Math.abs(c.p - target) < 1e-9);
     const spread = (list) => list.length > 1 && list[list.length - 1].i - list[0].i === list.length - 1;
+    /* THE TIE SET AS MAXIMAL CONTIGUOUS RUNS, because `spread` is all-or-
+       nothing and an iron condor is neither.
+
+       Its maximum loss is attained on TWO regions — the flat stretch below
+       the lower strikes and the ray above the upper one — so the whole list
+       is not contiguous, `spread` answers false, and the sentence fell back
+       to naming each breakpoint: "at $0.00 and at $85.00 and at $120.00".
+       Every price in that sentence is true and the sentence is still wrong,
+       because everything BETWEEN $0 and $85 is also a maximum loss and a
+       reader is told three points where there is a segment.
+
+       Runs of adjacent candidate indices are exactly the flat segments —
+       the payoff being linear between breakpoints, a tie at both ends of an
+       interval means the whole interval is at that value, which is the same
+       argument `spread` already makes for the single-run case. */
+    const runs = (list) => {
+      const out = [];
+      for (const c of list) {
+        const last = out[out.length - 1];
+        if (last && c.i === last[last.length - 1].i + 1) last.push(c);
+        else out.push([c]);
+      }
+      return out.map((r) => ({ from: r[0].S, to: r[r.length - 1].S, flat: r.length > 1 }));
+    };
     const bestAt = at(best), worstAt = at(worst);
+    /* THE RAY THIS FUNCTION COULD NOT SEE, AND THE FALSE SENTENCE IT PRINTED.
+
+       The candidate set is zero plus the strikes, so nothing above the
+       highest strike is ever sampled. When the right-hand slope is zero the
+       payoff is CONSTANT from that strike upward — and every extreme attained
+       there is attained on a ray to infinity, not at a price. The page said
+       otherwise, on the most ordinary structures this tool exists to build:
+
+         a 100/110 bull call spread printed "Max profit +$700.00 ... Reached
+         at an underlying of $110 at expiry", and the payoff at $160 is also
+         700;
+         a short $100 put printed "Reached at an underlying of $100", and the
+         payoff at $150 is also 500.
+
+       The DOLLARS were right in every case — the arithmetic was re-checked
+       against six hand-worked structures and matched. What was wrong was the
+       "where", which is the half a reader uses to decide whether the number
+       is reachable.
+
+       NO FAKE CANDIDATE IS ADDED TO FIX IT. Pushing some large finite price
+       into `cands` would invent a number the position never names and shift
+       every index `spread()` depends on. The ray is a PROPERTY, derived from
+       two things already known — the slope is flat, and the tie set reaches
+       the highest strike — and carried out as its own flag for the sentence
+       to read. */
+    const topK = cands[cands.length - 1].S;
+    const toRight = (list) => rs === 0 && list.some((c) => c.S === topK);
     return {
       rightSlope: rs,
       profitUnbounded: rs > 0,
@@ -308,21 +359,54 @@
       maxProfit: rs > 0 ? null : best,
       maxProfitAt: rs > 0 ? null : bestAt.map((c) => c.S),
       maxProfitFlat: rs > 0 ? false : spread(bestAt),
+      maxProfitToRight: rs > 0 ? false : toRight(bestAt),
+      maxProfitRuns: rs > 0 ? null : runs(bestAt),
       maxLoss: rs < 0 ? null : worst,
       maxLossAt: rs < 0 ? null : worstAt.map((c) => c.S),
       maxLossFlat: rs < 0 ? false : spread(worstAt),
+      maxLossToRight: rs < 0 ? false : toRight(worstAt),
+      maxLossRuns: rs < 0 ? null : runs(worstAt),
     };
   }
 
-  /** "at $100", "anywhere from $0 to $100", "at $95 and at $120". */
-  function whereText(list, flat) {
-    if (!list || !list.length) return "";
-    if (list.length === 1) return "at an underlying of " + fmtPx(list[0]) + " at expiry";
-    if (flat) {
-      return "anywhere from " + fmtPx(list[0]) + " to " + fmtPx(list[list.length - 1]) +
-        " at expiry, where the payoff is flat";
+  /**
+   * Where an extreme is reached: one run, several runs, and the ray.
+   *
+   * "at an underlying of $100 at expiry"
+   * "anywhere from $0 to $100 at expiry, where the payoff is flat"
+   * "anywhere from $0 to $85, and at $120 and at every price above it"
+   *
+   * EACH RUN IS A SEGMENT OR A POINT, never a list of points standing in for
+   * a segment, and the ray is appended to the LAST run rather than replacing
+   * it — both halves are true and a reader needs both. A condor's maximum
+   * loss really is attained on the flat stretch below the lower strikes AND
+   * on every price above the upper one; naming only one drops a region.
+   */
+  function whereText(runs, toRight) {
+    if (!runs || !runs.length) return "";
+    const ray = toRight
+      ? " and at every price above " + fmtPx(runs[runs.length - 1].to) : "";
+    /* THE ONE-RUN WORDING IS UNCHANGED, TO THE CHARACTER. It is what
+       tests/flows-strategy.mjs asserts and what every single-region
+       structure — a long call's flat loss, a straddle's point loss, a short
+       put's zero — has always printed. Only the several-regions case is new,
+       because only it was being said as a list of points. */
+    if (runs.length === 1) {
+      const r = runs[0];
+      return (r.flat
+        ? "anywhere from " + fmtPx(r.from) + " to " + fmtPx(r.to) +
+          " at expiry, where the payoff is flat"
+        : "at an underlying of " + fmtPx(r.from) + " at expiry") + ray;
     }
-    return "at " + list.map(fmtPx).join(" and at ") + " at expiry";
+    /* "at expiry" MOVES TO THE FRONT once there is more than one region, so
+       it qualifies the whole sentence rather than trailing the last clause
+       and reading as though only that region were at expiry. The flatness
+       note goes in brackets for the same reason: inline it collided with the
+       next "and" and produced "flat and at $120.00". */
+    return "at expiry " + runs.map((r) => (r.flat
+      ? "anywhere from " + fmtPx(r.from) + " to " + fmtPx(r.to) +
+        " (where the payoff is flat)"
+      : "at " + fmtPx(r.from))).join(", ") + ray;
   }
 
   /** Every underlying price at which the expiry payoff is exactly zero. */
@@ -1256,7 +1340,7 @@
       ext.profitUnbounded
         ? "The position is net long calls, so its profit rises without limit as the " +
           "underlying rises. There is no number here, so none is printed."
-        : "Reached " + whereText(ext.maxProfitAt, ext.maxProfitFlat) + ".",
+        : "Reached " + whereText(ext.maxProfitRuns, ext.maxProfitToRight) + ".",
       ext.profitUnbounded ? "is-unbounded" : null);
 
     /* THE BOUNDED SHORT PUT, SAID OUT LOUD. A naked short put is routinely
@@ -1270,7 +1354,7 @@
       ext.lossUnbounded
         ? "The position is net short calls. A share has no upper bound, so neither does " +
           "this loss — which is why it is reported as unbounded and not as a large number."
-        : "Reached " + whereText(ext.maxLossAt, ext.maxLossFlat) + "." +
+        : "Reached " + whereText(ext.maxLossRuns, ext.maxLossToRight) + "." +
           (zeroOnly
             ? " A share cannot trade below zero, so this loss is bounded — the 'unlimited " +
               "downside' often printed against a naked short put is not what the " +
