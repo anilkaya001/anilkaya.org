@@ -988,8 +988,26 @@ const CEILING_KIB = {
      is measured, but three in a day is a ratchet unless someone says so.
      Nothing here retires that debt: the drawer split and the comment strip
      are still the route's real fixes, and the next addition to it should
-     have to argue against this paragraph as well as its own. */
-  tickerPage: 517,
+     have to argue against this paragraph as well as its own.
+
+     517 -> 530, for the series block. `stat` against `git cat-file -s
+     c6e534b:`: flows-ticker.js 433,944 -> 447,275 (+13,331), the other four
+     route files identical again, total 527,361 -> 540,692 B = 528.02 KiB.
+
+     WHAT IT BOUGHT: the chart the design puts left of the chain, with its
+     five tabs, and the row that pairs them. Every tab reads the array the
+     panel below it reads, out of the same field — no return, no change, no
+     summary is computed here, so this block cannot disagree with a panel
+     about a number. Two of the five are the honest cases and cost most of
+     the prose: the volatility curve says its axis is TENOR rather than
+     time, and Volume says this payload publishes no per-name volume series
+     at all rather than borrowing a contract count to fill its label.
+
+     530 LEAVES 2,188 B, the same order 508 and 517 fixed as this route's
+     standard. The ratchet paragraph above stands and is not retired by
+     this: 494 -> 530 in one day is 36 KiB, and the drawer split and the
+     comment strip are still what this route actually needs. */
+  tickerPage: 530,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between

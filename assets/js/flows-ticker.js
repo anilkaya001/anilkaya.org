@@ -5898,7 +5898,15 @@
        changed. The bar stays the fallback: a card that publishes no figure at
        all leaves #ftCards hidden, and inserting after a hidden element still
        puts this region exactly where it used to be. */
-    const after = $("ftCards") || barEl;
+    /* AFTER THE CHART-AND-CHAIN ROW, NOT BETWEEN THE FIGURES AND IT.
+
+       The design goes figures, then the series beside the book, with
+       nothing in between; this block landed in that gap and pushed the row
+       it introduces most of a viewport down. It belongs under them — it is
+       what changed SINCE the session those two draw, so it reads after
+       them. Falls back to the cards and then to the bar, so the insertion
+       survives either block being absent. */
+    const after = document.querySelector(".ft-top") || $("ftCards") || barEl;
     after.parentNode.insertBefore(changeEl, after.nextSibling);
   }
 
@@ -6917,6 +6925,298 @@
           : "");
     }
     host.hidden = !found.length;
+  }
+
+  /* ---------- the series block, one tab per published series ---------
+
+     NOTHING HERE DERIVES A NUMBER. Each tab reads the array the panel below
+     it reads, out of the same field, and draws it. There is no return, no
+     change, no summary computed in this function — those sentences belong to
+     the panels that own the series, and a second derivation is how a header
+     and the panel under it come to disagree about one name.
+
+     THE TABS DO NOT SHARE AN X-AXIS, WHICH IS WHY EACH CARRIES ITS CLOCK.
+     Price and premium are indexed by SESSION, net flow by an intraday
+     BUCKET, the volatility curve by TENOR. The overview's period control
+     settled this and its rule is reused rather than re-argued: the control
+     switches SOURCE, and the note names the clock of what is drawn.
+
+     A TAB WITH NO SERIES KEEPS ITS PLACE AND SAYS SO. There is no per-name
+     volume series in this payload. Dropping the tab would silently edit the
+     design; drawing contract counts under a "Volume" heading would be a
+     different quantity wearing its label. */
+  const CHART_TABS = ["price", "iv", "volume", "premium", "netflow"];
+  const CHART_LABEL = {
+    price: "Price", iv: "IV", volume: "Volume",
+    premium: "Premium", netflow: "Net Flow",
+  };
+  let chartTab = "price";
+
+  /**
+   * The series for one tab, or the reason there is none.
+   *
+   * Returns either { points, kind, unit, clock } or { silence }. `points`
+   * are { v, label, rows } — v is the value, rows are what the cursor
+   * prints, and both come off the payload row rather than being rebuilt.
+   */
+  function chartSeries(key, card) {
+    const panels = (card && card.panels) || {};
+    const ok = (k) => { const p = panels[k]; return p && p.status === "ok" ? p : null; };
+
+    if (key === "price") {
+      const c = ok("context");
+      if (!c) return { silence: "No price window was published for this name this run." };
+      const closes = Array.isArray(c.closes) ? c.closes : [];
+      const dates = Array.isArray(c.closeDates) ? c.closeDates : [];
+      if (closes.length < 2) return { silence: "Fewer than two closes were published." };
+      /* THE PANEL'S OWN WARNING, CARRIED. buildContext publishes `dropped`
+         and its comment says a non-zero value means the INDEX IS NOT TIME:
+         sessions the window could not price are absent, so evenly spaced
+         marks would be evenly spaced days that are not evenly spaced. The
+         clock says which it is rather than the chart implying either. */
+      const dropped = isNum(c.dropped);
+      return {
+        kind: "line", unit: "close",
+        clock: "one mark a session, " + closes.length + " of them" +
+          (dates.length ? ", " + dates[0] + " to " + dates[dates.length - 1] : "") +
+          (dropped ? " — " + dropped + " session" + (dropped === 1 ? "" : "s") +
+            " the window could not price are absent, so the spacing is by index " +
+            "rather than by date" : ""),
+        points: closes.map((v, i) => ({
+          v: isNum(v),
+          label: dates[i] ? String(dates[i]) : "Session " + (i + 1),
+          rows: [{ k: "Close", v: px2(v) }],
+        })),
+      };
+    }
+
+    if (key === "iv") {
+      const v = ok("volContext");
+      const term = v && v.term;
+      if (!term || term.status !== "ok" || !Array.isArray(term.rows) || term.rows.length < 2) {
+        return { silence: term && term.reason
+          ? String(term.reason)
+          : "No volatility term curve was published for this name this run." };
+      }
+      return {
+        kind: "line", unit: "implied volatility",
+        clock: "one mark an EXPIRY, " + term.rows.length + " of them — this axis is " +
+          "tenor, not time, so it is a curve across the term and not a history",
+        points: term.rows.map((r) => {
+          const dte = isNum(r.dte);
+          const mv = isNum(r.impliedMovePerc);
+          return {
+            v: isNum(r.vol),
+            label: String(r.expiry || DASH) + (dte === null ? "" : " · " + dte + "d out"),
+            rows: [
+              { k: "Implied vol", v: isNum(r.vol) === null ? "not published" : vol1(r.vol) },
+              { k: "Implied move",
+                v: mv === null ? "not published" : vol1(mv) + " of spot" },
+            ],
+          };
+        }),
+      };
+    }
+
+    if (key === "volume") {
+      /* NOT A FAILURE AND NOT AN EMPTY READ. The key does not exist: no
+         surface in this payload carries a per-name volume series. Said in
+         those words so it is not mistaken for a run that came back thin. */
+      return { silence: "This payload publishes no per-name volume series — not a thin " +
+        "run, a field that does not exist. Contract volume is published per STRIKE and " +
+        "per contract, which the chain and the aggressor ladder draw; neither is a " +
+        "series through time, so neither can be drawn here under this label." };
+    }
+
+    if (key === "premium") {
+      const t = ok("premiumTrack");
+      const rows = t && Array.isArray(t.rows) ? t.rows : [];
+      if (!rows.length) return { silence: "No net-premium history was published for this name." };
+      return {
+        kind: "bars", unit: (t && t.unit) || "net premium",
+        clock: "one bar a session, " + rows.length + " of them, against a marked zero",
+        points: rows.map((r) => ({
+          v: isNum(r.p),
+          label: String(r.d || DASH),
+          rows: [
+            { k: "Net premium", v: isNum(r.p) === null ? "not priced" : "$" + compact(r.p),
+              cls: isNum(r.p) === null ? "" : r.p > 0 ? "is-pos" : r.p < 0 ? "is-neg" : "" },
+            /* THE ROW'S OWN PROVENANCE, because this series is joined from
+               two sources and a reader comparing two bars should be able to
+               see when they came from different ones. */
+            { k: "Source", v: r.source ? String(r.source) : "not stated" },
+          ],
+        })),
+      };
+    }
+
+    const p = ok("path");
+    const series = p && Array.isArray(p.series) ? p.series : [];
+    if (series.length < 2) {
+      return { silence: (p && p.reason) ||
+        "No intraday tape was published for this name this session." };
+    }
+    const mins = isNum(p.minutes);
+    return {
+      kind: "line", unit: (p && p.netPremiumUnit) || "cumulative net premium",
+      clock: "one mark a five-minute bucket, " + series.length + " of them across the " +
+        "session" + (mins === null ? "" : " (" + mins + " minutes of tape)") +
+        " — this axis is intraday, where every other tab here is by session",
+      points: series.map((row, i) => {
+        const d = isNum(row && row[0]);
+        return {
+          v: isNum(row && row[1]),
+          label: "Bucket " + (i + 1) + " of " + series.length,
+          rows: [
+            { k: "Net premium", v: isNum(row && row[1]) === null ? "not reported"
+              : "$" + compact(row[1]),
+              cls: !isNum(row && row[1]) ? "" : row[1] > 0 ? "is-pos" : row[1] < 0 ? "is-neg" : "" },
+            { k: "Net delta", v: d === null ? "not reported" : compact(d) + " contracts" },
+          ],
+        };
+      }),
+    };
+  }
+
+  function paintChart(card) {
+    const host = $("ftChart"), body = $("ftChartBody"), sub = $("ftChartS");
+    const tabs = $("ftChartTabs");
+    if (!host || !body) return;
+    body.replaceChildren();
+    if (tabs) tabs.replaceChildren();
+
+    /* THE TAB ROW IS DRAWN WHATEVER THE SELECTED TAB HOLDS, so a reader who
+       opens a silent tab can still leave it. A control row that disappears
+       with its content strands them. */
+    for (const key of CHART_TABS) {
+      const b = el("button", "ft-chart-tab" + (chartTab === key ? " is-on" : ""),
+        CHART_LABEL[key]);
+      b.type = "button";
+      b.setAttribute("role", "tab");
+      b.setAttribute("aria-selected", chartTab === key ? "true" : "false");
+      b.addEventListener("click", () => {
+        if (chartTab === key) return;
+        chartTab = key;
+        paintChart(card);
+      });
+      if (tabs) tabs.append(b);
+    }
+
+    const spec = chartSeries(chartTab, card);
+    if (spec.silence) {
+      const p = el("p", "ft-chart-dead", spec.silence);
+      body.append(p);
+      if (sub) sub.textContent = "";
+      host.hidden = false;
+      return;
+    }
+
+    const live = spec.points.filter((pt) => pt.v !== null);
+    if (live.length < 2) {
+      body.append(el("p", "ft-chart-dead",
+        "Fewer than two of the " + spec.points.length + " points in this series carry a " +
+        "value, so there is no shape to draw."));
+      if (sub) sub.textContent = "";
+      host.hidden = false;
+      return;
+    }
+
+    const W = 620, H = 260, padL = 8, padR = 46, padT = 12, padB = 22;
+    const plotL = padL, plotW = W - padL - padR;
+    const plotT = padT, plotH = H - padT - padB;
+
+    let lo = Infinity, hi = -Infinity;
+    for (const pt of live) { if (pt.v < lo) lo = pt.v; if (pt.v > hi) hi = pt.v; }
+    /* BARS ARE MEASURED FROM ZERO AND A LINE IS NOT. A signed bar whose axis
+       starts at the smallest value encodes its length against an arbitrary
+       floor, which is the defect this wave already fixed once on the premium
+       panel: bar length has to mean the quantity. A line is a shape and may
+       be framed on its own range. */
+    if (spec.kind === "bars") { lo = Math.min(0, lo); hi = Math.max(0, hi); }
+    if (lo === hi) { lo -= 1; hi += 1; }
+
+    const n = spec.points.length;
+    const x = (i) => plotL + (n === 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+    const y = (v) => plotT + plotH - ((v - lo) / (hi - lo)) * plotH;
+
+    const svg = svgEl("svg", {
+      class: "ft-chart-svg", viewBox: "0 0 " + W + " " + H,
+      role: "img", tabindex: "0",
+      "aria-label": CHART_LABEL[chartTab] + ", " + spec.points.length + " points",
+    });
+
+    /* THREE AXIS LABELS AND NO GRID: the readout carries every value, so a
+       grid here would be ink that repeats what a cursor already says. */
+    for (const frac of [0, 0.5, 1]) {
+      const v = lo + (hi - lo) * frac;
+      const yy = y(v);
+      svg.append(svgEl("line", { class: "ft-chart-rule",
+        x1: plotL, x2: plotL + plotW, y1: yy, y2: yy }));
+      const t = svgEl("text", { class: "ft-chart-ax", x: plotL + plotW + 4, y: yy + 3 });
+      t.textContent = spec.kind === "bars" || Math.abs(v) >= 1000 ? compact(v) : px2(v);
+      svg.append(t);
+    }
+
+    if (spec.kind === "bars") {
+      const bw = Math.max(1.5, (plotW / n) * 0.62);
+      const zero = y(0);
+      for (let i = 0; i < n; i++) {
+        const pt = spec.points[i];
+        if (pt.v === null) continue;
+        const yy = y(pt.v);
+        svg.append(svgEl("rect", {
+          class: "ft-chart-bar " + (pt.v > 0 ? "is-pos" : pt.v < 0 ? "is-neg" : "is-flat"),
+          x: x(i) - bw / 2, width: bw,
+          y: Math.min(yy, zero), height: Math.max(1, Math.abs(yy - zero)),
+        }));
+      }
+      svg.append(svgEl("line", { class: "ft-chart-zero",
+        x1: plotL, x2: plotL + plotW, y1: zero, y2: zero }));
+    } else {
+      /* A GAP IS A GAP. A session the payload could not price breaks the
+         line rather than being bridged to its neighbour, which would draw a
+         value nobody measured. */
+      let d = "", pen = false;
+      for (let i = 0; i < n; i++) {
+        const pt = spec.points[i];
+        if (pt.v === null) { pen = false; continue; }
+        d += (pen ? "L" : "M") + x(i).toFixed(2) + " " + y(pt.v).toFixed(2) + " ";
+        pen = true;
+      }
+      svg.append(svgEl("path", { class: "ft-chart-line", d: d.trim(), fill: "none" }));
+    }
+
+    const ends = svgEl("text", { class: "ft-chart-ax", x: plotL, y: H - 6 });
+    ends.textContent = String(spec.points[0].label || "");
+    svg.append(ends);
+    const end2 = svgEl("text", {
+      class: "ft-chart-ax", x: plotL + plotW, y: H - 6, "text-anchor": "end" });
+    end2.textContent = String(spec.points[n - 1].label || "");
+    svg.append(end2);
+
+    body.append(svg);
+
+    /* THE CURSOR IS HANDED THE SAME ARRAY THE MARKS WERE PLACED FROM, and
+       the same x() that placed them — rule 1 of the three in
+       flows-cursor.js. Nothing is recomputed, so the rule cannot land on one
+       mark while the readout prints another. */
+    if (window.FlowsCursor) {
+      window.FlowsCursor.attach(svg, {
+        name: CHART_LABEL[chartTab] + " series",
+        band: { y0: plotT, y1: plotT + plotH },
+        points: spec.points.map((pt, i) => ({
+          x: x(i),
+          label: String(pt.label || ""),
+          rows: pt.v === null
+            ? [{ k: CHART_LABEL[chartTab], v: "not reported" }]
+            : pt.rows,
+        })),
+      });
+    }
+
+    if (sub) sub.textContent = CHART_LABEL[chartTab] + " — " + spec.unit + ". " +
+      spec.clock.charAt(0).toUpperCase() + spec.clock.slice(1) + ".";
+    host.hidden = false;
   }
 
   /* ---------- the option chain, ordered by strike around spot --------
@@ -8042,6 +8342,7 @@
     /* THE CHAIN AND THE LEVELS PAINT FROM THE CARD ALONE, so they are in
        this pass rather than the board handler's: both read panels the card
        payload already carries and neither waits on a second fetch. */
+    paintChart(card);
     paintChain(card);
     paintBrief(card);
     paintLevels(card);

@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "190";
+export const ASSET_VERSION = "191";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -132,6 +132,19 @@ const topbar = (active, username) => `
              pattern="[A-Za-z][A-Za-z0-9.\\-]{0,9}" placeholder="Search a ticker"
              title="A ticker symbol: a letter, then up to nine letters, digits, dots or dashes.">
     </form>
+    <!-- THE BELL, AND IT GOES SOMEWHERE. The design puts one here; a bell
+         that opens nothing is chrome. This one leads to the session
+         briefing, which is where shared/flows-warnings.js publishes what
+         disagrees with what — the only thing on this site a notification
+         would be about.
+
+         ITS COUNT IS SERVED EMPTY AND HIDDEN, filled by whichever
+         controller already holds the brief, exactly as the rail counts are.
+         A badge reading 0 while a fetch is in flight is a claim that
+         nothing is wrong; an absent badge is not. -->
+    <a class="topbar__bell" href="/flows/ask/" aria-label="Session briefing and warnings">
+      ${icon("bell")}<span class="topbar__bell-n" data-warn-count hidden></span>
+    </a>
     <span class="topbar__who" title="Signed in as ${escapeHTML(String(username || ""))}"
           aria-label="Signed in as ${escapeHTML(String(username || ""))}">${initials(username)}</span>
     <!-- THE WAY OUT SITS WITH THE IDENTITY, WHICH IS WHERE A READER LOOKS FOR
@@ -1986,6 +1999,48 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
   <div class="ft-split">
     <div class="ft-split-main">
   <div class="ft-cards" id="ftCards" hidden aria-label="This session's flow"></div>
+  <!-- THE TWO BLOCKS THE DESIGN PUTS SIDE BY SIDE UNDER THE FIGURES: a
+       series on the left, the book on the right. They are one grid rather
+       than two stacked sections because that pairing is the shape of the
+       page — the chart answers "what has this done" and the chain answers
+       "what is priced now", and a reader checks one against the other.
+
+       IT COLLAPSES TO ONE COLUMN BELOW THE SAME BREAKPOINT .ft-split USES.
+       Two tables of figures side by side on a phone is two sideways
+       scrollers, which is worse than a stack. -->
+  <div class="ft-top">
+  <!-- THE SERIES BLOCK, AND WHAT MAKES IT NOT A SECOND DRAWING OF A PANEL.
+
+       Every tab here draws a series the payload already publishes, read
+       straight out of the field the panel below reads — the same array,
+       through the same helper, with no arithmetic of its own. That is the
+       precedent .ft-brief already set on this page: one source rendered
+       twice is not two spellings of one reading, and the two cannot
+       disagree because there is only one derivation. What this block must
+       never do is compute a return, a change or a summary of its own; the
+       sentences about these series belong to the panels that own them.
+
+       THE TAB SWITCHES SOURCE, NOT ZOOM, AND THE NOTE NAMES THE CLOCK.
+       These five series do not share an x-axis: price and premium are by
+       SESSION, net flow is by intraday BUCKET, and the volatility curve is
+       by TENOR. The overview's period control settled this exact question
+       and its rule is copied deliberately — two quantities on two clocks
+       behind one control is only honest if it says so — so the note under
+       the chart names the clock of whichever tab is drawn.
+
+       AND ONE TAB HAS NO SERIES AT ALL. The design draws a Volume tab;
+       there is no per-name volume series in this payload. The tab is kept
+       and says so when it is opened, rather than being dropped from a row
+       the design specifies or drawn from a quantity that is not volume. -->
+  <section class="ft-chart" id="ftChart" hidden aria-labelledby="ftChartH">
+    <div class="ft-chart-top">
+      <h2 class="ft-chart-h" id="ftChartH">Series</h2>
+      <div class="ft-chart-tabs" id="ftChartTabs" role="tablist"
+           aria-label="Which series to draw"></div>
+    </div>
+    <div class="ft-chart-body" id="ftChartBody"></div>
+    <p class="ft-chart-s" id="ftChartS"></p>
+  </section>
   <!-- THE OPTION CHAIN, WHICH IS THE SAME ROWS THE TOP-CONTRACTS PANEL
        RANKS, ASKED A DIFFERENT QUESTION.
 
@@ -2009,6 +2064,7 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
     <div class="ft-chain-body" id="ftChainBody"></div>
     <p class="ft-chain-s" id="ftChainS"></p>
   </section>
+  </div>
     </div>
     <aside class="ft-split-side" aria-label="What this card found">
   <!-- WHAT THIS CARD FOUND, AND WHY IT IS AN INDEX RATHER THAN A SUMMARY.
