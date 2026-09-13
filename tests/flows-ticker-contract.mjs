@@ -4765,13 +4765,38 @@ try {
       ok(!oi.cut.qualifier,
          `the cut is NOT a qualifier on a name that placed ("${(oi.cut.text || "").slice(0, 55)}") ` +
          "— the name is in the list, so how the list was cut is method");
-      ok(oi.cut.inDetails && !oi.cut.open,
-         "and it is folded behind the shut disclosure with the rest of the method");
+      /* THE FOLD IS AN OUTCOME, NOT THE BRANCH — which is what the comment
+         beside `folded()` above already says, and this assertion was the one
+         line in the block that ignored it. It read
+         `oi.cut.inDetails && !oi.cut.open`, and that is exactly the
+         "passes by accident whenever the folded set happens to be under the
+         420-character wall" it warns about. It passed for a year because the
+         folded set on this fixture happened to clear the wall.
+
+         WHAT MOVED IT: the marketRank coverage population. It was the
+         board's fifty; it is now every name that gets a card, because the
+         panel is drawn on all of them and a denominator that excluded the
+         name being read would describe a different population than the card
+         it is written on. At 19 of 50 the coverage line was folded; at 19 of
+         100 `in * 5 < of` is true, so the renderer moves it into the open —
+         which is the branch fmrCoverageLine's own note is written for, since
+         "most cards will say they are not in it" is a sentence a reader must
+         meet unopened. The folded set then falls under the wall and
+         appendMethod appends in place rather than building a disclosure.
+
+         So the property is asserted as the branch plus the one thing that
+         must never happen: the cut may be inlined, but it must never be
+         raised as a qualifier, and any disclosure holding it must be shut. */
+      ok(!oi.cut.qualifier && (!oi.cut.inDetails || !oi.cut.open),
+         "and it is method either way — inlined when the method set is short, never " +
+         "raised as a qualifier, and never behind a disclosure left open");
       ok(/last place in the feed held|reaches back to|no order this run could measure/
         .test(oi.all),
          "and still readable in the block's text with the disclosure shut");
-      ok(oi.said.inDetails,
-         "so is the sentence about what a cross-section is, which is method by any reading");
+      ok(!oi.said.qualifier && (!oi.said.inDetails || !oi.said.open),
+         "so is the sentence about what a cross-section is, which is method by any reading — " +
+         "same rule as the cut above, and for the same reason: the renderer never puts it on " +
+         "the open side, so the class is the assertion and the disclosure is its usual effect");
       ok(!/This name places \d+ of \d+/.test(oi.all),
          "and the rank is stated ONCE — the prose copy under the figures is gone, because " +
          "two copies of one number are two numbers that can drift");
