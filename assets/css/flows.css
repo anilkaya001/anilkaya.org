@@ -4189,7 +4189,6 @@ body.is-stale .flows-tablewrap {
    own; measured at 320, 1280 and 1840, every host is the width it was before
    this wrapper existed. The fix for a failure there is this rule. */
 .ft-grid {
-  display: block;
   /* THE FALLBACK UNTIL THE BAR HAS BEEN MEASURED. The controller writes the
      sticky bar's real height back onto this element as an inline property on
      every paint and resize; this value is only what an anchor lands against
@@ -4390,7 +4389,7 @@ body.is-stale .flows-tablewrap {
   .ft-hero { grid-template-columns: repeat(auto-fit, minmax(8rem, auto)); gap: var(--space-2); }
 }
 
-.ft-station {
+.ft-grid {
   display: grid; gap: var(--space-3);
   grid-template-columns: minmax(0, 1fr);
   /* CARDS TAKE THE HEIGHT OF WHAT IS IN THEM. A grid item stretches to its
@@ -4413,7 +4412,9 @@ body.is-stale .flows-tablewrap {
    pixel: one row gap plus the top margin the group heading carried and no
    longer needs. VERTICAL ONLY — a horizontal margin would narrow every panel
    in this station and nothing else, the misalignment the note above refuses. */
-.ft-station + .ft-station { margin-top: calc(var(--space-3) + var(--space-2)); }
+/* The between-station margin belonged to a box .ft-station no longer
+   generates; the one grid's own gap is the whole of the space now. */
+.ft-station + .ft-station { margin-top: 0; }
 /* PR 4 fills this with the station's one-line answer. Until then an empty
    block still takes a grid row and a gap, opening a hole under every heading
    that reads as a sentence missing rather than one not yet written. */
@@ -4533,11 +4534,11 @@ body.is-stale .flows-tablewrap {
    the ladder keeps `is-wide` as a SPAN OF TWO — which is a wide card in a
    dense grid, not a band across the page. */
 @media (min-width: 76rem) {
-  .ft-station { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ft-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .ft-panel.is-wide { grid-column: span 2; }
 }
 @media (min-width: 110rem) {
-  .ft-station { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .ft-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 
 /* SEVEN FIGURES ARE PRIME, SO SOME ROW IS ALWAYS SHORT — the question is only
@@ -6592,7 +6593,7 @@ body.is-stale .flows-tablewrap {
    while the content was still clamped at 1248, which is how it came to hand
    out 380px tracks — narrower than the two-column tier it replaced. */
 @media (min-width: 108rem) {
-  .ft-station { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ft-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 /* AT FOUR TRACKS .is-wide STOPS TAKING THE ROW. A full-row panel here is
@@ -6623,7 +6624,7 @@ body.is-stale .flows-tablewrap {
    grid of independently labelled regions is not worth a focus-order defect,
    so the 8% stays on the table deliberately. */
 @media (min-width: 132rem) {
-  .ft-station { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .ft-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .ft-panel.is-wide { grid-column: span 2; }
   .ft-panel[data-panel="ivSurface"],
   .ft-panel[data-panel="skewTerm"] { grid-column: span 2; }
@@ -10696,3 +10697,48 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
 }
 .ft-rel-load:hover:not(:disabled) { color: var(--ink); border-color: var(--gold-harvest); }
 .ft-rel-load:disabled { opacity: 0.6; cursor: progress; }
+
+/* ---------- ONE CONTINUOUS CARD GRID, WHICH IS THE TARGET'S SHAPE --------
+
+   The design lays its lower half out as one flat wall of cards. This page
+   drew five separate grids — one per station — so a station with four panels
+   left a ragged row and started the next group on a fresh line, and the wall
+   read as five walls.
+
+   THE GRID MOVED UP A LEVEL RATHER THAN BEING WRITTEN TWICE. Every track
+   rule that was on .ft-station is now on .ft-grid, unchanged — same columns,
+   same tiers, same align-items, same gap — and .ft-station is display:contents
+   so its panels become items of that one grid. Writing fresh media queries
+   here instead was the first attempt and it was wrong: 110rem resolved
+   differently against .ft-grid than the shipped rules did against a station,
+   and the tier assertion caught a third column that had become a fourth.
+   Moving the declarations guarantees the tiers are the ones that shipped.
+
+   NOTHING LEAVES THE DOM. The sections keep their data-group, their ids and
+   their role="tabpanel", so the machinery that defers each group's drawers,
+   answers ?s= and resolves a #hash is untouched. This is presentation only. */
+.ft-station { display: contents; }
+
+/* THE STATION HEADINGS COME OUT OF THE WALL, WHICH IS THE REST OF THE JOIN.
+
+   display:contents alone gave one grid and five full-width headings sitting
+   in it, so the tracks still broke into five blocks — a continuous grid that
+   looked exactly like the five it replaced. The target has no section
+   headings in its lower half: it is one wall of cards.
+
+   VISUALLY HIDDEN, NOT DELETED, and for the same reason the route's <h1> is.
+   Each heading is a real <h2> inside a role="tabpanel" section and is what
+   the tab's accessible name resolves against; removing it would strip the
+   document outline and leave five tabpanels labelled by nothing. It stays in
+   the accessibility tree and leaves the visual grid.
+
+   The coverage line goes with it: it is that section's metadata, and a
+   sentence about a group whose heading is not drawn has nothing to qualify. */
+.ft-station > h2,
+.ft-station > .ft-station-lead {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%);
+  white-space: nowrap; border: 0;
+}
