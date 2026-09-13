@@ -112,3 +112,40 @@ export function isRefreshWindow(date) {
   if (clock.weekday === "Sat" || clock.weekday === "Sun") return false;
   return clock.minutes >= OPEN_MINUTES && clock.minutes <= CLOSE_MINUTES;
 }
+
+/**
+ * THE MOST RECENT SESSION A NIGHTLY PUBLISH COULD DESCRIBE, as an Eastern
+ * date: the last weekday whose close-settle (16:15 ET) has passed at the
+ * given instant. Used by the assistant to tell a reader — and the model —
+ * that the facts it holds are from an OLDER session than the one a reader
+ * standing at this instant would expect, which is the one kind of stale
+ * that no readAt can express: every stamp on the key is honest, and the
+ * key is still yesterday's.
+ *
+ * HOLIDAYS ARE NOT MODELLED, for the reason isRefreshWindow gives: the
+ * cost of a false "stale" on a market holiday is one cautious sentence,
+ * and the cost of an exchange calendar is keeping it true forever. A
+ * weekend is modelled, because it is not a calendar.
+ *
+ * Null on an unreadable instant.
+ */
+export function lastCompletedSession(date) {
+  const d = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(d.getTime())) return null;
+  const clock = easternClock(d);
+  if (!clock) return null;
+  /* Walk back a calendar day at a time, in Eastern terms: the first step
+     is taken only when today's session has not closed yet (or today is a
+     weekend), and each further step is one day earlier. */
+  let steps = 0;
+  const closed = clock.weekday !== "Sat" && clock.weekday !== "Sun" &&
+    clock.minutes > CLOSE_MINUTES;
+  if (!closed) steps = 1;
+  for (let i = 0; i < 7; i++) {
+    const at = new Date(d.getTime() - steps * 86400000);
+    const c = easternClock(at);
+    if (c && c.weekday !== "Sat" && c.weekday !== "Sun") return easternDay(at);
+    steps += 1;
+  }
+  return null;
+}

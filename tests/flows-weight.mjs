@@ -1559,7 +1559,7 @@ const CEILING_KIB = {
      on the one route a shed could not cover.
 
      WHAT IS NOT COUNTED HERE IS THE RENDERER THE DOCK FETCHES. flows-ask.js
-     is 94k as measured 2026-09-05 — it was 55k when this note was written
+     is 96k as measured 2026-09-13 — it was 55k when this note was written
      and 79k at the last re-measure, and a figure left at the size a file
      used to be is worse than no figure, because a reader takes it for a
      measurement. It arrives only when a reader opens the panel, so it is
@@ -1725,7 +1725,25 @@ const CEILING_KIB = {
      shared/flows-ask.js, which the Worker bundles and the browser never
      fetches — is no longer owed at some point, it is owed before the next
      sentence of code lands on this route. */
-  askPage: 97,
+  /* 97 -> 99, AND THE SENTENCE ABOVE IS NOT RETIRED BY THIS. flows-ask.js
+     96,755 -> 97,907 (+1,152) against git cat-file -s 6e8dc7c:, nav.js
+     2,560 unchanged, total 99,315 -> 100,467 B = 98.11 KiB. 99 KiB is
+     101,376 B and leaves 909 B.
+
+     WHAT IT BOUGHT IS TWO SILENCES THE ROUTE NOW TELLS APART. The Worker
+     answers /api/flows/ask with `unreadable` when the store read FAILED,
+     where it used to answer `pending` — a fault on this site was being
+     reported as a run that had not happened. And it sends `session`: how
+     old the facts are against the last session that has closed, so a
+     reader asking on a morning the pipeline did not run is told, above the
+     answer, that the readings are yesterday's. Neither branch could be
+     shed to the shared module: both are the page choosing what to print,
+     which is the one thing the browser has to hold.
+
+     THE SHED IS STILL OWED, and it is now the next thing this route does:
+     the paragraph above measured 14k of prose that belongs in
+     shared/flows-ask.js, and 909 B of hand is not a second sentence. */
+  askPage: 99,
   strategyPage: 120,
   trackPage: 118,
   /* 95 -> 102, THE SAME DOCK AS EVERY OTHER ROUTE. The market page was the

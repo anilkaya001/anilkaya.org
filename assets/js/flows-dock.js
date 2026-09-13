@@ -15,12 +15,12 @@
 
    IT LOADS NOTHING UNTIL IT IS OPENED, which is why this file is
    separate from the renderer it mounts. assets/js/flows-ask.js is
-   94k as measured on 2026-09-05, in the unit and rounding
+   96k as measured on 2026-09-13, in the unit and rounding
    tests/flows-weight.mjs prints — one file measured once reads as
    one number in both places. On all twelve dock routes it would
    break every ceiling; the widest headroom of the twelve is strategy's
    12k. flows-weight measures what a route loads ON ARRIVAL, so the
-   deferred 94k is absent there: a real cost, paid on open, said here
+   deferred 96k is absent there: a real cost, paid on open, said here
    rather than left to look free.
 
    NOT ON /flows/ask, where the page IS the assistant: two mounts

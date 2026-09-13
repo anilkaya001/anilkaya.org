@@ -1093,6 +1093,11 @@ async function refreshFlowsIntraday(env) {
     "ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, updated_at=excluded.updated_at",
   ).bind(key, JSON.stringify(obj), Date.now()).run();
 
+  /* THE TWO FEEDS THIS FIRING ACTUALLY WROTE, so the assistant's index can
+     be told below. Null until a write happens; a declined write leaves it
+     null and the index untouched, which is the same rule the feeds follow. */
+  const written = { flowalerts: null, pulse: null };
+
   /* Each refresh fails alone, and a failure is logged rather than thrown:
      the scheduled handler's other duties never pay for a vendor outage. */
   try {
@@ -1163,11 +1168,12 @@ async function refreshFlowsIntraday(env) {
            generatedAt, sessionDate, vendorLimit, vendorTruncated — still
            rides through from `prev` untouched, because the cron is not a
            second publisher of this key's shape. */
-        await upsert("flowalerts", {
+        written.flowalerts = {
           ...prev, ...merged,
           readAt: readAt.toISOString(),
           refreshed: "intraday",
-        });
+        };
+        await upsert("flowalerts", written.flowalerts);
         /* What the merge actually did, in the numbers that distinguish it
            from the replacement it replaced: `carried` is the count of windows
            the vendor's rolling list has already dropped and this record still
@@ -1206,16 +1212,46 @@ async function refreshFlowsIntraday(env) {
       /* A quiet or failed read never overwrites a series that has data:
          better a stale tide with an honest readAt than an empty fresh one. */
       if (tide.status === "ok") {
-        await upsert("pulse", {
+        written.pulse = {
           ...prev, tide,
           readAt: new Date().toISOString(),
           refreshed: "intraday",
-        });
+        };
+        await upsert("pulse", written.pulse);
       }
     }
   } catch (error) {
     console.error(JSON.stringify({ message: "pulse tide intraday refresh failed",
       error: error instanceof Error ? error.message : String(error) }));
+  }
+
+  /* THE ASSISTANT'S INDEX IS TOLD. Until this, the two feeds above were
+     fresh on their pages and stale in the `brief` the question box answers
+     from: a reader asking "how many alerts today" at 14:00 was answered
+     from 08:00, beside a page showing the 14:00 count. The repair rebuilds
+     ONLY the facts sourced from the two keys written above, through the
+     same builders the nightly index used (shared/flows-ask.js,
+     refreshIntradayFacts), and leaves every other fact as published — this
+     is not a second publisher of the index, it is the same constructor run
+     over a newer copy of two inputs. Parsing the key costs the cron ~120KB
+     once per firing inside the session, never a request. */
+  if (written.flowalerts || written.pulse) {
+    try {
+      const stored = await readFlowsPayload(env, "brief");
+      if (stored) {
+        const index = JSON.parse(stored.payload);
+        const next = FLOWS_ASK.refreshIntradayFacts(index, written);
+        const n = Object.values(next.replaced || {}).reduce((a, b) => a + b, 0);
+        if (n > 0) {
+          await upsert("brief", next);
+          console.log(JSON.stringify({ message: "brief intraday facts refreshed",
+            replaced: next.replaced, refreshedAt: next.refreshedAt }));
+        }
+      }
+    } catch (error) {
+      console.error(JSON.stringify({ message: "brief intraday refresh failed",
+        error: error instanceof Error ? error.message : String(error) }));
+    }
   }
 }
 
@@ -1529,7 +1565,7 @@ async function refreshFlowsSummary(env) {
 
   const fingerprint = FLOWS_ASK.summaryFingerprint(facts);
   const prior = await env.DB.prepare(
-    "SELECT fingerprint, llm, guard FROM flows_ai_summary WHERE scope = ?",
+    "SELECT fingerprint, llm, guard, generated_at FROM flows_ai_summary WHERE scope = ?",
   ).bind("board").first().catch(() => null);
 
   /* WHEN TO SPEND NOTHING, and the second clause is the one worth reading.
@@ -1565,6 +1601,22 @@ async function refreshFlowsSummary(env) {
       && prior.guard !== "unreachable:empty";
     if (!retryable) return;
   }
+  /* THE FACTS NOW MOVE INSIDE THE SESSION TOO. refreshFlowsIntraday rewrites
+     the two intraday fact groups every firing it writes a feed, so the
+     fingerprint can change up to ~26 times a session rather than once a
+     day. A summary that follows every one would spend ~550 neurons a day on
+     restating alert counts; one that ignores them would describe 08:00 at
+     15:00. The middle: an LLM summary less than 45 minutes old is kept
+     when the only thing that changed is an intraday re-read, so the
+     standing text moves at most three times an hour of session and never
+     lags it by more. A nightly change (the session date moves, or the
+     prior text was not the model's) still regenerates at once. */
+  const intradayOnly = typeof index.refreshedAt === "string" && index.refreshedAt !== "";
+  if (prior && prior.llm && intradayOnly && typeof prior.generated_at === "string") {
+    const ageMs = Date.now() - Date.parse(prior.generated_at);
+    if (Number.isFinite(ageMs) && ageMs < 45 * 60 * 1000) return;
+  }
+  const age = FLOWS_ASK.briefAge(index, new Date());
 
   const plain = FLOWS_ASK.renderSummaryPlain(facts);
   const write = (text, llm, model, guard) => env.DB.prepare(
@@ -1587,7 +1639,7 @@ async function refreshFlowsSummary(env) {
 
   let generated = null;
   try {
-    const { system, user } = FLOWS_ASK.promptForSummary(facts);
+    const { system, user } = FLOWS_ASK.promptForSummary(facts, age);
     const out = await env.AI.run(model, {
       messages: [{ role: "system", content: system }, { role: "user", content: user }],
       /* 320 -> 1024, AND THE ARGUMENT THE OLD NUMBER MADE IS ANSWERED RATHER
@@ -1790,6 +1842,12 @@ async function askAnswer(question, env, index, updatedAt, subject) {
      without one. A fallback assembled only inside a catch is a
      fallback nobody runs until the morning it is needed. */
   const plain = FLOWS_ASK.renderFactsPlain(picked, framed);
+  /* HOW OLD THE FACTS ARE, decided once and carried on every branch. The
+     Worker's clock is used for exactly one comparison — the session the
+     index describes against the last session that has closed — and the
+     result reaches the model (in the prompt's dated header) and the reader
+     (as `session`, printed above the answer when stale) in the same words. */
+  const age = FLOWS_ASK.briefAge(index, new Date());
   /* READ BEFORE THE CALL, so every branch below carries it — including the
      ones that never reach a model. A reader told the allowance is spent
      needs the gauge most, and a gauge that only appears on success is
@@ -1816,6 +1874,7 @@ async function askAnswer(question, env, index, updatedAt, subject) {
     subjectApplied: sel.subjectApplied === true,
     facts: picked, silences: index.silences || null,
     briefUpdatedAt: updatedAt || null, model: null, note: null, spend,
+    session: age,
   };
 
   const model = askModel(env);
@@ -1825,7 +1884,7 @@ async function askAnswer(question, env, index, updatedAt, subject) {
         "pipeline's own wording. Every figure in it was measured." });
   }
 
-  const { system, user } = FLOWS_ASK.promptFor(picked, framed);
+  const { system, user } = FLOWS_ASK.promptFor(picked, framed, age);
   let generated = null;
   /* The meter as it stands AFTER the model call, or null if no call was
      recorded. Declared out here because it is set inside the try and read
@@ -4103,13 +4162,22 @@ async function route(request, env, url, ctx) {
          parsing the seventeen surfaces it was built from, here, on every
          question, would not be. */
       const { question: asked, subject: onPage } = await askQuestion(request);
-      const stored = await readFlowsPayload(env, "brief");
+      /* TRACED, so a read that FAILED is not answered as a briefing that was
+         never published: the two are different silences, the page prints
+         them in different words, and a reader told to wait for a run waits
+         while the fault stays where it is. */
+      const trace = {};
+      const stored = await readFlowsPayload(env, "brief", trace);
 
       if (stored === null) {
-        return json({ status: "pending", question: asked, answer: null, llm: false,
-          facts: [], guard: null, model: null, spend: await askSpend(env),
-          note: "The briefing has not been published for this session yet, so there is " +
-            "nothing measured to answer from. Nothing is claimed about the market by that." });
+        return json({ status: trace.failed ? "unreadable" : "pending", question: asked,
+          answer: null, llm: false, facts: [], guard: null, model: null,
+          spend: await askSpend(env),
+          note: trace.failed
+            ? "The briefing could not be read from the store, so no answer is offered. " +
+              "That is a fault on this site rather than a fact about the session."
+            : "The briefing has not been published for this session yet, so there is " +
+              "nothing measured to answer from. Nothing is claimed about the market by that." });
       }
       let index;
       try {
