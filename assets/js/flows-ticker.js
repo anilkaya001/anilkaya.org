@@ -6813,16 +6813,24 @@
         (track.unit || "")]);
     }
     if (path) {
+      /* BOTH OF THESE CARDS PRINT THE LAST POINT OF A SERIES THEY WERE NOT
+         DRAWING. `path.series` is the intraday tape already on this card,
+         cumulated — column 1 is net premium and column 0 is net delta — and
+         each card's figure is that column's final value. So the shape was
+         there all along and the card showed only its end. Drawn from the
+         SAME array, through the same spark() the premium-run card uses, so
+         the line and the figure cannot disagree. */
+      const tape = Array.isArray(path.series) ? path.series : [];
       cards.push(["Session premium", P0.money(path.netPremium),
         P0.polarity(n(path.netPremium)),
         path.netPremiumUnit || "",
-        null,
+        spark(tape.map((r) => (Array.isArray(r) ? r[1] : null))),
         "What this one session cleared, side-signed, over " +
           (n(path.minutes) === null ? "the session" : path.minutes + " minutes") + "."]);
       cards.push(["Net delta", P0.fmtOr(path.netDelta, (v) => P0.signed(v, (a) => P0.compact(a))),
         P0.polarity(n(path.netDelta)),
         path.netDeltaUnit || "",
-        null,
+        spark(tape.map((r) => (Array.isArray(r) ? r[0] : null))),
         "Delta-weighted contracts the tape ended holding, signed by side."]);
     }
     if (aggr && aggr.lead && aggr.lead.n) {
