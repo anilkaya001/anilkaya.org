@@ -11097,10 +11097,22 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
   --gold-celadon: #9bb4e8;
   --gold-mystic:  #6f86b8;
 
-  /* ---- THE CHART FAMILY. Five hues that are not the signed pair and
-     not the accent, for the charts that draw several series at once:
-     the volatility fit against its density, a donut of four shares, a
-     term structure. Each is AA over the card and over the head.
+  /* ---- THE CHART FAMILY. Five hues for the charts that draw several
+     series at once: the volatility fit against its density, a donut of
+     four shares, a term structure. Each is AA over the card and over
+     the head.
+
+     NONE OF THEM IS THE SIGNED PAIR, WHICH IS THE RULE THAT MATTERS and
+     the one this comment originally got wrong in both directions. It
+     claimed the family was also "not the accent" while --acc-blue was
+     byte-identical to --gold-harvest, and it claimed separation from the
+     signed pair while --acc-jade was byte-identical to --flow-up. The
+     second was a real defect and is fixed below. The first is not: the
+     family's blue IS the accent's blue, deliberately, because a section
+     with one blue reads as one product and a second, nearly-equal blue
+     would be a distinction a reader has to look for and cannot use. An
+     accent-coloured series claims emphasis, which is harmless; a
+     jade-coloured category dot claimed DIRECTION, which is not. ---- */
 
      THEY ARE A FAMILY AND NOT A RAINBOW. Blue, violet and rose are
      one sweep of the wheel and read as three positions on a scale;
@@ -11112,7 +11124,14 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
   --acc-blue:   #5b93f7;
   --acc-violet: #9b7cf6;
   --acc-rose:   #f062a8;
-  --acc-jade:   #3ecf7f;
+  /* TEAL, NOT THE UP-GREEN, AND THIS IS A CORRECTION TO THIS BLOCK'S OWN
+     CLAIM. It was #3ecf7f — byte-identical to --flow-up below. So the one
+     change the findings-dot rule names as its fix, moving `.is-tape` off the
+     bullish green, did not happen: the dot was still exactly the up colour,
+     reached through a different token name. A category scale that collides
+     with the direction scale is the defect whether or not the two spellings
+     differ. #35c3a6 measures 8.246 over the card and 7.775 over the head. */
+  --acc-jade:   #35c3a6;
   --acc-amber:  #f0a33a;
 
   /* ---- THE SIGNED PAIR, moved onto the cool ground. The old jade and
@@ -11561,7 +11580,7 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
    left to right — which is the order a reader takes the strip in anyway. */
 .ft-hero:not([hidden]) > * {
   animation: ft-settle var(--dur-enter) var(--ease-out) both;
-  animation-delay: calc(var(--stagger) * var(--i, 0));
+  animation-delay: calc(var(--stagger) * var(--i, 10));
 }
 .ft-hero > *:nth-child(2) { --i: 1; }
 .ft-hero > *:nth-child(3) { --i: 2; }
@@ -11582,7 +11601,7 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
 .ft-grid .ft-panel {
   animation: ft-rise var(--dur-enter) var(--ease-out) both;
   /* Capped: see the stagger note above. */
-  animation-delay: calc(var(--stagger) * min(var(--i, 0), 12));
+  animation-delay: calc(var(--stagger) * min(var(--i, 10), 12));
 }
 
 /* THE FINDINGS ARRIVE AS A LIST BEING WRITTEN, so each row slides in just
@@ -11612,3 +11631,31 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
     animation: none;
   }
 }
+
+/* ---------- THE LABELS THAT STAYED WARM ON A COOL BUTTON ------------
+
+   FOUR RULES PAINT #1a1407 — A BROWN-BLACK — AS THE TEXT ON A FILLED
+   ACCENT, and the accent is a blue now. They predate this repaint and the
+   token remap could not reach them, because the ink is a literal rather
+   than a token: that is exactly why the block at the top of this file
+   counts the file's literal hexes and why the count matters.
+
+   ONE OF THEM IS THE SIGN-IN BUTTON, which is the first thing every reader
+   of this section sees, on the one page they cannot skip. Brown-black on
+   periwinkle is legible — it measures 6.069 against the accent's darker
+   stop — and it reads as a warm label somebody forgot to change, which on
+   the entry page is the worst place to look unfinished. #08101f is the ink
+   this design already established for text on a filled accent, and it
+   measures 6.304 on the same stop and 9.135 on the lighter one.
+
+   SCOPED TO .flows-body, SO THE ACADEMY KEEPS ITS OWN. base.css's
+   `.btn--gold` and `.pill a.is-current` carry the same literal and are
+   correct everywhere else on the site, where the accent really is gold —
+   which is the whole reason the token block redefines on this ancestor
+   rather than on :root. The override reaches those two through the same
+   boundary. */
+.flows-body .flows-submit,
+.flows-body .flows-side.is-on,
+.flows-body .desk-add,
+.flows-body .btn--gold,
+.flows-body .pill a.is-current { color: #08101f; }
