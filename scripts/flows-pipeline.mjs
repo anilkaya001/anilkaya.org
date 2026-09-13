@@ -8873,6 +8873,127 @@ async function main() {
       ? `, ${deadlineSkipped} skipped past the ${DEADLINE_MS / 60000}min deadline`
       : ""),
   );
+  /* ---------- THE CROSS-SECTION'S OWN CARDS ------------------------
+
+     WHAT THIS FIXES, MEASURED BEFORE IT WAS WRITTEN. The production store
+     held 213 card rows. Fifty carried candles and a volatility fit — the
+     fifty this run rebuilt. The other 163 were leftovers from fourteen
+     earlier days, the oldest nineteen days back, and not one of them
+     carried either, because both fields postdate the day that card was
+     last written. AAPL was one of them: a reader who typed the most
+     obvious symbol on the site got a two-day-old card, no candles, no
+     GARCH, and a small grey line naming the session it was actually of.
+
+     THE CAUSE WAS A ONE-LINE SCOPE. `cardTickers` is [...onBoard.keys()],
+     so a card is built for a name only while it is one of the fifty
+     furthest from neutral. Fall off the board and your card stops being
+     rewritten — it is never deleted and never marked, so it is served
+     tomorrow, and next month, exactly as it was served on the morning it
+     was true.
+
+     AND THE DATA WAS ALREADY BOUGHT. `liquid` is this run's enriched
+     cross-section — 143 names on the run that was measured, against 50 on
+     the board — and enrich() computes `candles` and `garch` for every one
+     of them, at line 1826 and 1833, out of the same year of closes the
+     score is derived from. For the ~93 names not on the board, all of that
+     is computed, used for the ranking, and dropped on the floor. This lane
+     writes it down.
+
+     WHAT IT COSTS: NO VENDOR CALLS AT ALL. Not a cheaper card — the same
+     card, minus the six per-name legs (max pain, the gamma surface, dark
+     pool, open-interest deltas, term structure, IV rank) and the chain,
+     which are the only things the board lane spends calls on. Everything
+     this lane writes is already in memory. The cost is one ingest POST per
+     name, through the same `publish()` permit queue the board lane uses,
+     so the Worker sees one departure every PUBLISH_SPACING_MS however many
+     lanes are producing.
+
+     AND THE MISSING PANELS SAY WHY, IN THOSE WORDS. `unfetched` is
+     threaded into buildCard so every panel whose raw is absent reports a
+     read that was never dispatched, rather than one that was attempted and
+     failed. That distinction is the whole reason this lane is honest:
+     "the feed could not be read this run" invites a reload, and no reload
+     will ever produce these panels for an off-board name.
+
+     IT RUNS AFTER THE BOARD LANE AND UNDER THE SAME DEADLINE. A morning
+     that runs long loses these before it loses a board card, which is the
+     right order: a board name's full card is worth more than an off-board
+     name's partial one. */
+  let extraBuilt = 0, extraFailed = 0, extraSkipped = 0;
+  {
+    const extraTickers = [...byTicker.keys()].filter((t) => !onBoard.has(t));
+    if (extraTickers.length) {
+      const unfetched =
+        "this name was measured in the run's cross-section but is not on today's board, " +
+        "so the run did not spend the per-name vendor calls this panel needs — it was " +
+        "never requested, rather than requested and refused, and reloading will not " +
+        "produce it";
+      const lane = poolWidth(2);
+      console.log(`  cross-section cards: ${extraTickers.length} name(s) off the board, ` +
+        `${lane.width} in flight — no vendor calls, the enrichment is already in hand`);
+      const run = await runPooled(extraTickers, async (ticker) => {
+        const e = byTicker.get(ticker);
+        if (!e) return { status: "unenriched" };
+        try {
+          const card = buildCard({
+            ticker,
+            row: e.row,
+            features: { ...e.features, ...(scoredByTicker.get(ticker) || {}) },
+            strikes: e.raw.strikes,
+            ticks: e.raw.ticks,
+            expiries: e.raw.expiries,
+            /* THE SEVEN THE RUN DID NOT BUY FOR THIS NAME. Explicit nulls
+               rather than omitted keys, so buildCard takes the unfetched
+               branch and says so, instead of falling through to a default
+               phrased as a failed read. */
+            surface: null, chain: null, maxPain: null, congress: null,
+            darkpool: null, oiDeltas: null, termStructure: null, ivRank: null,
+            scoreHistory: scoreTrack
+              ? {
+                sessions: scoreTrack.sessions,
+                scores: (scoreTrack.names.find((n) => n && n.t === ticker) || {}).s,
+                deadBand: scoreTrack.deadBand,
+                premium: scoreTrackPremium ? scoreTrackPremium.get(ticker) : undefined,
+              }
+              : null,
+            weights: first.weights || null,
+            generatedAt, sessionDate,
+            marketCross,
+            unfetched,
+          });
+          const body = JSON.stringify(card);
+          /* NO SHED LADDER HERE, AND NONE IS NEEDED: this card carries
+             neither the chain four nor the wave-2 three, which is every
+             entry on the board lane's ladder bar one. If one ever exceeds
+             the cap it is a fact worth seeing rather than absorbing. */
+          if (body.length > 100 * 1024) {
+            throw new Error(`cross-section card is ${(body.length / 1024).toFixed(0)}KB, over the ingest cap`);
+          }
+          await publish("card:" + ticker, card);
+          return { status: "built" };
+        } catch (error) {
+          console.warn(`  cross-section card ${ticker}: ${error.message}`);
+          return { status: "failed" };
+        }
+      }, {
+        width: lane.width,
+        stopEarly: () => Date.now() > deadline,
+      });
+      for (let i = 0; i < extraTickers.length; i++) {
+        const r = run.results[i];
+        if (!r) extraSkipped++;
+        else if (r.status === "built") extraBuilt++;
+        else if (r.status === "failed") extraFailed++;
+        else extraSkipped++;
+      }
+      console.log(
+        `  cross-section cards: ${extraBuilt}/${extraTickers.length} built` +
+        (extraFailed ? `, ${extraFailed} failed` : "") +
+        (extraSkipped ? `, ${extraSkipped} skipped past the deadline` : "") +
+        ` — ${cardsBuilt + extraBuilt} name(s) now carry a card for this session`);
+    }
+  }
+
   /* ONE LINE, ONCE PER RUN, AND IT DECIDES A DESIGN ARGUMENT. The gamma
      ladder's own note tells the reader to treat bar length as rank rather
      than magnitude — a chart disclaiming its primary channel — and the
@@ -8909,6 +9030,15 @@ async function main() {
       enriched: enriched.length,
       liquid: liquid.length,
       cardsBuilt, cardsFailed, cardsSkipped,
+      /* THE OFF-BOARD LANE, COUNTED SEPARATELY AND NOT FOLDED INTO
+         cardsBuilt. The two are different objects: a board card carries the
+         seven per-name legs and a cross-section card states that it does
+         not. Adding them would make one number that answers neither "how
+         many full cards did this run write" nor "how many names can a
+         reader open", and the first of those is what the completeness gate
+         and every past run log mean by cardsBuilt. */
+      crossSectionCards: extraBuilt,
+      cardsTotal: cardsBuilt + extraBuilt,
       apiCalls: stats.calls,
       /* Wave-B scouting results ride the diagnostic key so a later session
          can read the observed shapes without re-fetching the job log. */

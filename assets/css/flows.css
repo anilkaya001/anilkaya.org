@@ -11433,3 +11433,205 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
    that named a literal or an inherited colour and would otherwise have been
    the only gold left on a blue page. */
 .flows-body :focus-visible { outline-color: var(--acc-blue); }
+
+/* ===================================================================
+   THE FINDINGS CARD: A QUESTION BOX, AND A SUMMARY THAT WRITES ITSELF.
+   =================================================================== */
+
+/* THE CARET IS DRAWN BY THE LIST, NOT BY EACH LINE. `.is-writing` is set for
+   the length of the reveal and removed by the same `finish()` every exit path
+   calls, so a caret can never outlive the animation that justifies it. It
+   sits after the last line rather than after each — five blinking carets is
+   five things moving, and what a reader should see is one hand writing. */
+.ft-brief-l.is-writing > .ft-brief-i:last-child .ft-brief-t::after {
+  content: "";
+  display: inline-block;
+  width: 0.5ch;
+  height: 1em;
+  margin-left: 0.1ch;
+  vertical-align: -0.14em;
+  background: var(--acc-blue);
+  animation: ft-caret 1s steps(2, jump-none) infinite;
+}
+@keyframes ft-caret { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+/* THE ROW DOES NOT REFLOW AS IT FILLS. A line growing a character at a time
+   through a wrapping paragraph re-wraps on every frame, which reads as the
+   card twitching rather than as text appearing — and it moves the links under
+   it, so a reader reaching for one is aiming at a target that keeps sliding.
+   A fixed minimum height on the text reserves the line before it is written. */
+.ft-brief-l.is-writing .ft-brief-t { min-height: 1.5em; }
+
+/* ---------- the question box -------------------------------------
+
+   It sits under the findings and inside their card, separated by the same
+   hairline the list uses between rows, because it belongs to this card rather
+   than being a second block stacked under it. */
+.ft-brief-ask {
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--hairline);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.ft-brief-ask-l {
+  font-size: var(--fs-micro);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.ft-brief-ask-row { display: flex; gap: 0.4rem; align-items: stretch; min-width: 0; }
+.ft-brief-ask-i {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  font-size: var(--fs-data);
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--radius-1);
+  border: 1px solid var(--panel-border);
+  background: rgba(5, 8, 16, 0.5);
+  color: var(--ink);
+}
+.ft-brief-ask-i::placeholder { color: var(--ink-faint); }
+.ft-brief-ask-i:focus-visible { outline: 2px solid var(--acc-blue); outline-offset: 1px; }
+.ft-brief-ask-b {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.7rem;
+  border-radius: var(--radius-1);
+  border: 1px solid transparent;
+  background: var(--acc-blue);
+  color: #08101f;
+  font: inherit;
+  font-size: var(--fs-data);
+  font-weight: 650;
+  cursor: pointer;
+  transition: filter var(--dur-tap) var(--ease);
+}
+.ft-brief-ask-b:hover { filter: brightness(1.08); }
+@media (max-width: 26rem) {
+  /* The word goes and the icon stays: at this width the field is what needs
+     the room, and a send button with a recognisable glyph is still a button.
+     The accessible name is unaffected — the icon is aria-hidden and the text
+     is only visually hidden, never removed. */
+  .ft-brief-ask-bt {
+    position: absolute; width: 1px; height: 1px;
+    overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+}
+
+/* ===================================================================
+   THE SECTION'S MOTION, WHICH IS ENTRANCE AND NOTHING ELSE.
+
+   WHAT MOVES AND WHAT MUST NOT. Every animation below moves a card, a tile or
+   a row INTO PLACE. Not one of them animates a figure, a bar, an axis or a
+   path: a chart whose bars grow from zero is drawing a value that was never
+   measured, and a reader who looks away for the first 300ms of the page has
+   then seen a number this product never published. The line is exactly there
+   — chrome may arrive, data may not perform.
+
+   ONLY transform AND opacity. Both are composited, so a staggered entrance
+   over twenty panels costs no layout and no paint; animating height, top or
+   margin over the same twenty would reflow the grid twenty times on the one
+   frame a reader is judging the page by.
+
+   THE STAGGER IS BOUNDED BY COUNT, NOT BY INDEX. `--i` is capped at 12 in the
+   calc below, so a station of twenty panels does not hand the twentieth a
+   two-second delay: past the twelfth they all arrive together. An entrance
+   whose length grows with the data is an entrance that gets worse exactly
+   when the page has the most to say.
+
+   AND IT RUNS ONCE. `animation-fill-mode: both` with a single iteration and
+   no class toggling, so a repaint does not replay it — the findings card is
+   drawn again on every card change and a re-entering panel wall would make
+   switching names feel slower than it is.
+
+   CONSENT: every duration here is a TOKEN, never a literal and never a
+   literal inside a calc. The preference block at line 391 zeroes all of them,
+   and the belt-and-braces rule at the end of this block removes the
+   animations outright — the same twice-covered argument that block already
+   makes about the deck card's lift. */
+
+@keyframes ft-rise {
+  from { opacity: 0; transform: translate3d(0, 10px, 0); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes ft-settle {
+  from { opacity: 0; transform: translate3d(0, 6px, 0) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* EVERY CHILD OF THE HERO, IN DOM ORDER, AND NOT JUST THE TILES.
+
+   The first draft staggered `.ft-hero-b` by :nth-child, which silently did
+   almost nothing: the hero's children are the identity block, the price
+   block and THEN the metered tiles, so `.ft-hero-b:nth-child(2)` matches no
+   element at all and the indices that did match were off by two. CSS has no
+   nth-of-class, and inventing one with a counter would be a second ordering
+   to keep in step with the markup.
+
+   The blocks are staggered as siblings instead, which is both correct and
+   better: the symbol arrives first, then the price, then the four figures
+   left to right — which is the order a reader takes the strip in anyway. */
+.ft-hero:not([hidden]) > * {
+  animation: ft-settle var(--dur-enter) var(--ease-out) both;
+  animation-delay: calc(var(--stagger) * var(--i, 0));
+}
+.ft-hero > *:nth-child(2) { --i: 1; }
+.ft-hero > *:nth-child(3) { --i: 2; }
+.ft-hero > *:nth-child(4) { --i: 3; }
+.ft-hero > *:nth-child(5) { --i: 4; }
+.ft-hero > *:nth-child(6) { --i: 5; }
+.ft-hero > *:nth-child(7) { --i: 6; }
+.ft-hero > *:nth-child(n+8) { --i: 7; }
+
+/* THE SIX CARDS, THE FOUR BANDS AND THE PANEL WALL, one rule. They are
+   different blocks with one arrival, which is what makes the page read as a
+   single thing assembling rather than as nine regions each doing its own
+   trick. */
+.ft-chart, .ft-garch, .ft-ivt, .ft-chain, .ft-lv, .ft-flow, .ft-brief,
+.ft-rel, .ft-mix {
+  animation: ft-rise var(--dur-enter) var(--ease-out) both;
+}
+.ft-grid .ft-panel {
+  animation: ft-rise var(--dur-enter) var(--ease-out) both;
+  /* Capped: see the stagger note above. */
+  animation-delay: calc(var(--stagger) * min(var(--i, 0), 12));
+}
+
+/* THE FINDINGS ARRIVE AS A LIST BEING WRITTEN, so each row slides in just
+   ahead of its own text. The delay shares the writer's clock by construction
+   rather than by a number copied from it: --stagger is the same token the
+   panel wall uses, and the JS budget is fixed, so the two cannot drift into
+   an order where a line's text is typed before its row has arrived. */
+.ft-brief-i { animation: ft-rise var(--dur-move) var(--ease-out) both; }
+.ft-brief-i:nth-child(2) { animation-delay: calc(var(--stagger) * 1); }
+.ft-brief-i:nth-child(3) { animation-delay: calc(var(--stagger) * 2); }
+.ft-brief-i:nth-child(4) { animation-delay: calc(var(--stagger) * 3); }
+.ft-brief-i:nth-child(5) { animation-delay: calc(var(--stagger) * 4); }
+
+/* THE SECOND COVER, AND THE REASON IT IS NOT REDUNDANT.
+
+   Zeroing the duration tokens makes every animation above take no time, which
+   is almost the same thing as not running — but not quite: a zero-duration
+   animation still fires animationstart, still promotes a layer, and still
+   applies `both` fill, so an element is still handed over to the animation
+   system for a frame. `animation: none` takes them out of it entirely. The
+   file's own note at line 385 makes this argument about `transform: none`
+   versus `translateY(0px)` for exactly the same reason. */
+@media (prefers-reduced-motion: reduce) {
+  .ft-hero:not([hidden]) .ft-hero-b,
+  .ft-chart, .ft-garch, .ft-ivt, .ft-chain, .ft-lv, .ft-flow, .ft-brief,
+  .ft-rel, .ft-mix, .ft-grid .ft-panel, .ft-brief-i,
+  .ft-brief-l.is-writing > .ft-brief-i:last-child .ft-brief-t::after {
+    animation: none;
+  }
+  /* The caret is not slowed to nothing, it is removed: a block that does not
+     blink is a block sitting after the text for no reason. */
+  .ft-brief-l.is-writing > .ft-brief-i:last-child .ft-brief-t::after {
+    content: none;
+  }
+}

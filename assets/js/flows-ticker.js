@@ -6901,6 +6901,77 @@
      AND IT SAYS HOW MANY IT IS NOT SHOWING. A list of five under a card with
      nineteen readings is a selection, and a selection that does not state its
      own denominator reads as a census. */
+  /* ---------- the findings, written out --------------------------------
+
+     WHAT THIS IS AND WHAT IT IS NOT. The card is titled "AI Summary" and the
+     owner asked for it to read as one being written. The animation is the
+     only thing here that is new: every sentence is still `panels[key].lead.say`
+     verbatim, still written once by the panel that owns the number, and the
+     reveal cannot change a character of it. A typing effect over a sentence a
+     model had composed live would be honest; over gathered findings it is
+     presentation, so it is built to be unable to alter what it presents.
+
+     THE THREE PROPERTIES THAT MAKE A REVEAL SAFE TO SHIP:
+
+     1. THE PAGE IS READABLE AT REST. The text starts in `data-say`, not in a
+        stylesheet and not behind an opacity that an interrupted animation
+        could leave at zero. If this function never runs, `finish()` below is
+        still what every other path calls, and it writes the full string.
+     2. IT ALWAYS COMPLETES. One rAF loop drives every line off a single
+        clock, and a hard deadline writes all of them out whatever the frame
+        rate did — a slow device gets a shorter animation, never a truncated
+        sentence. A second paint cancels the first by generation, so two
+        overlapping cards cannot interleave characters.
+     3. CONSENT IS OBEYED BY NOT ANIMATING AT ALL. `calm` is the same
+        MediaQueryList the cursor spotlight reads, re-checked per paint
+        rather than latched at boot, and under it the lines are simply
+        written. Not slower: absent.
+
+     THE BUDGET IS FIXED, NOT PER-CHARACTER. Five findings at a character a
+     frame would run past six seconds and turn a summary into a wait. The
+     whole reveal is capped at WRITE_MS and the per-line share divides it, so
+     the last sentence lands at the same moment whether the card carries two
+     findings or five. */
+  const WRITE_MS = 1500;
+  let writeGen = 0;
+
+  function writeOut(list) {
+    const spans = [...list.querySelectorAll(".ft-brief-t[data-say]")];
+    if (!spans.length) return;
+    const gen = ++writeGen;
+    const finish = () => {
+      for (const s of spans) s.textContent = s.getAttribute("data-say") || "";
+      list.classList.remove("is-writing");
+    };
+    if (calm.matches || typeof requestAnimationFrame !== "function") { finish(); return; }
+    for (const s of spans) s.textContent = "";
+    list.classList.add("is-writing");
+    /* EACH LINE STARTS WHERE THE ONE ABOVE IS HALF DONE. Fully sequential
+       reads as a queue and fully simultaneous reads as a flicker; a half-line
+       overlap is what looks like writing. */
+    const step = WRITE_MS / (spans.length + 1);
+    const span = WRITE_MS - step * (spans.length - 1) / 2;
+    const t0 = performance.now();
+    const tick = (now) => {
+      if (gen !== writeGen) return;                 // a newer card is drawing
+      const since = now - t0;
+      let done = true;
+      for (let i = 0; i < spans.length; i++) {
+        const say = spans[i].getAttribute("data-say") || "";
+        const p = Math.max(0, Math.min(1, (since - i * step / 2) / span));
+        /* Math.round, not floor: floor leaves the final character unwritten
+           until p reaches exactly 1, which on a frame that overshoots the
+           deadline never happens. */
+        const n = Math.round(p * say.length);
+        if (spans[i].textContent.length !== n) spans[i].textContent = say.slice(0, n);
+        if (p < 1) done = false;
+      }
+      if (done || since > WRITE_MS * 2) finish();
+      else requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+
   function paintBrief(card) {
     const host = $("ftBrief"), list = $("ftBriefL"), sub = $("ftBriefS");
     if (!host || !list) return;
@@ -6929,11 +7000,27 @@
       a.setAttribute("aria-label", f.say + " \u2014 open " + f.title);
       /* THE DOT IS THE STATION'S COLOUR — see the note beside #ftBrief. */
       a.append(el("span", "ft-brief-d" + (f.group ? " is-" + f.group : "")));
-      a.append(el("span", "ft-brief-t", f.say));
+      /* THE TEXT NODE IS BUILT EMPTY AND THE SENTENCE RIDES AN ATTRIBUTE.
+
+         The writing animation below fills it a character at a time, so the
+         string has to live somewhere that a second paint, an interrupted
+         animation or a reader who never sees the animation at all can
+         recover it from. `data-say` is that somewhere: one place holds the
+         finding, and the visible text is a view of it rather than a second
+         copy that can be left half-written.
+
+         AND THE ACCESSIBLE NAME IS ALREADY COMPLETE. The aria-label above
+         carries the whole sentence from the first frame, so a screen reader
+         reads the finding immediately and never hears it being typed \u2014
+         which is the correct behaviour for a decorative reveal. */
+      const t = el("span", "ft-brief-t");
+      t.setAttribute("data-say", f.say);
+      a.append(t);
       a.append(el("span", "ft-brief-c", "\u203a"));
       li.append(a);
       list.append(li);
     }
+    writeOut(list);
     if (sub) {
       sub.textContent = found.length > CAP
         ? "The first " + CAP + " of " + found.length + " findings on this card, in page order."
@@ -6943,6 +7030,95 @@
           : "");
     }
     host.hidden = !found.length;
+
+    /* THE QUESTION BOX OPENS WITH THE CARD AND CLOSES WITH IT.
+
+       It is inside the findings card, so it appears only when the card does —
+       a box offering to answer questions about a name whose panels all came
+       back silent would be inviting a reader to spend a model call on
+       nothing. Wired once per page rather than per paint: `askWired` guards
+       it, because paintBrief runs again on every card and a listener added
+       each time would submit the same question once per name ever viewed. */
+    const form = $("ftBriefAsk");
+    if (form) {
+      form.hidden = host.hidden;
+      const field = $("ftBriefQ");
+      if (field) {
+        field.placeholder = "What changed in " + (card.ticker || "this name") + "?";
+      }
+      if (!askWired) {
+        askWired = true;
+        form.addEventListener("submit", (e) => {
+          e.preventDefault();
+          const q = $("ftBriefQ");
+          const said = q ? q.value.trim() : "";
+          /* THE NAME TRAVELS WITH THE QUESTION, because the assistant is
+             shared by twelve routes and has no idea which card a reader was
+             looking at. Prefixed rather than appended so the symbol is the
+             first thing its fact selection sees, and only when the reader
+             did not already type it. */
+          const sym = painted && painted.ticker ? String(painted.ticker) : "";
+          const text = said && sym && said.toUpperCase().indexOf(sym) === -1
+            ? sym + ": " + said
+            : said;
+          handOff(text);
+          if (q) q.value = "";
+        });
+      }
+    }
+  }
+  let askWired = false;
+
+  /* THE HANDOFF TO THE DOCKED ASSISTANT, DRIVEN FROM THIS SIDE ONLY.
+
+     WHY NOT IN flows-dock.js, WHICH IS WHERE IT OBVIOUSLY BELONGS. It was
+     there first, as a `flows:ask` event the dock listened for, and the
+     weight suite priced it: +2,471 B on a file that loads on TWELVE routes,
+     which took overview, side, market, unusual and history over their
+     ceilings and left history 186 B of air. Five ceilings raised so that one
+     page could hand another a string is the wrong trade — the routes that
+     would have paid it do not have this box.
+
+     So the traffic goes the other way. The dock exposes no API and needs
+     none: its tab is a button with a known id, and clicking a button is a
+     thing a page may do. The field is `#askQ`, a document-wide id the
+     renderer already owns. Nothing here reaches into the dock's internals;
+     it uses the same two affordances a reader would.
+
+     THE TAB TOGGLES, SO THE STATE IS CHECKED FIRST. Clicking it while the
+     panel is already open would CLOSE the assistant on a reader who just
+     asked it something — the one outcome this must never produce.
+
+     IT FILLS AND FOCUSES, IT DOES NOT SUBMIT. On a first open the renderer
+     is still being fetched and owns the form's submit handler; firing submit
+     at a form whose handler is not bound yet either does nothing or reloads
+     the page. The reader sees their words with the caret after them and
+     presses Enter — which also keeps the decision to spend a model call with
+     the person, on a control they can see. */
+  function handOff(text) {
+    const tab = document.getElementById("askDockTab");
+    if (!tab) return;
+    if (tab.getAttribute("aria-expanded") !== "true") tab.click();
+    /* THE FIELD MAY NOT EXIST YET: eight tries a frame apart covers a script
+       that is still parsing and stops well short of spinning if the fetch
+       failed — in which case the panel is already showing the dock's own
+       unreadable notice and there is nothing to fill. */
+    let tries = 0;
+    const place = () => {
+      const field = document.getElementById("askQ");
+      if (!field) { if (tries++ < 8) requestAnimationFrame(place); return; }
+      if (text) {
+        field.value = text;
+        /* The renderer watches the field for its own character count and
+           enabled state; a value set from script fires nothing on its own. */
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      try {
+        field.focus();
+        if (field.setSelectionRange) field.setSelectionRange(field.value.length, field.value.length);
+      } catch (e) { /* a detached node; harmless */ }
+    };
+    requestAnimationFrame(place);
   }
 
   /* ---------- the series block, one tab per published series ---------

@@ -1085,7 +1085,45 @@ const CEILING_KIB = {
      it waited on is set, so production parses the stripped tree — 254 KiB
      on this route as of #113 — and this table measures the repository. The
      rest of it stands: a raise here is still an argument in the open. */
-  tickerPage: 568,
+  /* 568 -> 576, for the findings card doing the two things its title claims.
+     flows-ticker.js 486,402 -> 495,244 (+8,842) against
+     git cat-file -s 9de92a2:, the other FOUR identical — flows-panels.js
+     71,727, flows-cursor.js 13,123, flows-dock.js 6,005, nav.js 2,560 —
+     total 579,817 -> 588,659 B = 574.86 KiB. 576 KiB is 589,824 B and
+     leaves 1,165 B, which is the narrow order of hand the 470->480
+     paragraph argues for rather than the 2,988 B the raise above left: this
+     route is still owed a reduction, so the next change to it should have
+     to argue in the open rather than find room waiting.
+
+     WHAT IT BOUGHT, IN TWO PARTS.
+
+     (1) THE SUMMARY WRITES ITSELF. Every sentence is still the panel's own
+     `lead.say`, gathered and never composed, and the reveal is built so it
+     CANNOT alter what it reveals: the string lives in `data-say`, the
+     accessible name carries it whole from the first frame, one rAF loop
+     drives every line off a single clock with a hard deadline, and a
+     generation counter stops two cards interleaving characters. Under
+     `prefers-reduced-motion` it does not run — not slower, absent.
+
+     (2) A QUESTION BOX IN THE CARD THE ANSWERS CAME FROM, which is the half
+     with the weight argument worth reading.
+
+     IT WAS IN flows-dock.js FIRST AND THIS SUITE PRICED IT OUT. As a
+     `flows:ask` event the dock listened for, it cost +2,471 B on a file
+     that loads on TWELVE routes: overview, side, market and unusual all
+     went over, and history was left 186 B of air. Five ceilings raised so
+     that one page could hand another a string is the wrong trade, because
+     the four routes that would have paid it do not have the box.
+
+     So the traffic reversed and the cost landed here, on the one route that
+     benefits. The dock exposes no API and needs none: this page clicks its
+     tab (checking aria-expanded first, since the tab TOGGLES and clicking
+     an open dock would close the assistant on a reader who just asked it
+     something) and fills `#askQ`, which are the same two affordances a
+     reader uses. A second mount was never an option — flows-ask.js takes
+     #askApp by id and flows-dock.js's header records that two mounts
+     collide on it. */
+  tickerPage: 576,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between
