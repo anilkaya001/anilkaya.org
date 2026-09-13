@@ -880,15 +880,24 @@ try {
        box, every span-1 host still above the 300 chart floor, and .is-wide
        still `1 / -1` across all three — the same span rule, not a new one. */
     if (width >= 1840) {
-      /* READ OFF A STATION, NOT OFF #ftGrid: the track list moved down a
-         level with the five <section>s, and .ft-grid's computed
-         grid-template-columns is "none" now, so this would count zero. */
+      /* READ OFF #ftGrid, AND THAT IS THE SECOND TIME THIS MOVED. It was
+         here originally, went down a level when the five <section>s became
+         the grids, and has come back up now that they are display:contents
+         and the panels are items of ONE grid again. The page draws a single
+         continuous wall of cards, which is what the target draws, so there
+         is one track list to read rather than five to agree with each other.
+
+         THE TIER IS UNCHANGED AND THAT IS THE POINT. Every column rule moved
+         from .ft-station to .ft-grid verbatim rather than being rewritten —
+         76rem/110rem/108rem/132rem, in that cascade order, where the later
+         108rem block is what holds this at three tracks past 110rem. A first
+         attempt DID rewrite them, mirroring only two of the four, and 1840px
+         opened a fourth column; this assertion is what caught it. */
       const tracks = await page.evaluate(() =>
-        [...document.querySelectorAll(".ft-station")].map((s) =>
-          getComputedStyle(s).gridTemplateColumns
-            .split(" ").filter((t) => parseFloat(t) > 0).length));
-      eq(tracks.join(","), new Array(TICKER_GROUPS.length).fill(3).join(","),
-         `${width}px: every station opens its third column at the 108rem tier (${tracks})`);
+        getComputedStyle(document.getElementById("ftGrid")).gridTemplateColumns
+          .split(" ").filter((t) => parseFloat(t) > 0).length);
+      eq(tracks, 3,
+         `${width}px: the grid opens its third column at the 108rem tier (${tracks})`);
     }
     await page.close();
   }
@@ -4161,23 +4170,41 @@ try {
         }),
       };
     });
-    eq(boxes.gridDisplay, "block",
-       "the grid itself lays nothing out any more — the track list moved into the stations, " +
-       "because a wrapper between a grid and its items un-grids them");
+    /* THE GRID LAYS THE PANELS OUT AGAIN, AND THE STATIONS LAY OUT NOTHING.
+       This asserted "block" while the five <section>s were the grids — the
+       wrapper-between-a-grid-and-its-items problem, stated in its own
+       sentence. The wrapper is still there and still carries every station's
+       data-group, id and role="tabpanel"; what changed is display:contents,
+       which stops it generating a box at all. So the panels are items of ONE
+       grid and the wall runs continuously, which is the shape the target
+       draws — and the same rule that made a wrapper dangerous is what makes
+       this safe: a station that lays nothing out cannot un-grid anything. */
+    eq(boxes.gridDisplay, "grid",
+       "the grid lays the panels out, as one continuous wall rather than five");
     eq(boxes.bandH, 0, "the served band measures nothing — every one of its slots is hidden");
     eq(boxes.bandM, "0px", "so it carries no margin under it either, until PR 4 paints it");
     eq(boxes.allM, "0px",
        "and the all-panels link declares no vertical margin, which an inline anchor discards");
+    /* THE STATION GENERATES NO BOX, WHICH IS THE STRONGER FORM OF WHAT THIS
+       BLOCK USED TO MEASURE.
+
+       It used to assert that each station WAS a grid and then check, four
+       ways, that its box inset nothing: no inline padding, no border, no
+       margin, starting where the grid starts and exactly as wide. Every one
+       of those was guarding the same hazard — a wrapper between a grid and
+       its items narrows every panel inside it and nothing else, which is a
+       chart drawn at a width its viewBox was not measured for.
+
+       display:contents removes the box rather than zeroing it, so there is
+       no padding, border, margin, inset or width left to get wrong. Asserting
+       the four zeros now would be measuring a box that does not exist; this
+       asserts the property that replaced them. The width proof below is
+       unchanged and is the one that actually matters: span-2 panels in three
+       different stations still mount at the same width, which they could not
+       do if any wrapper were in the layout. */
     for (const st of boxes.stations) {
-      eq(st.display, "grid", `the ${st.group} station is the grid now`);
-      eq(st.pad.join(" "), "0px 0px", `and adds no inline padding (${st.group})`);
-      eq(st.border.join(" "), "0px 0px", `no inline border (${st.group})`);
-      eq(st.margin.join(" "), "0px 0px", `and no inline margin (${st.group})`);
-      ok(Math.abs(st.inset) < 0.5,
-         `so it starts exactly where the grid starts (${st.group}, ${st.inset.toFixed(2)}px in)`);
-      ok(Math.abs(st.width - boxes.gridWidth) < 0.5,
-         `and is exactly as wide as the grid (${st.group}, ${st.width.toFixed(2)} vs ` +
-         `${boxes.gridWidth.toFixed(2)}), so every panel measures what it did before`);
+      eq(st.display, "contents",
+         `the ${st.group} station lays nothing out — one grid holds every panel`);
     }
     const wideW = boxes.wide.filter(([, w]) => w !== null).map(([, w]) => w);
     ok(wideW.length >= 3, "there are span-2 panels in more than one station to compare");
