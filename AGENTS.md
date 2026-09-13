@@ -368,7 +368,15 @@ Confirmed to need one: `flows-overview-contract`, `flows-board-render`,
 `flows-watch-render`, `flows-political-render`, `flows-ask-render`,
 `flows-legacy-payload`, `flows-worker-contract`, `flows-desk-contract`,
 `flows-chain-contract`, `flows-sections-contract`, `worker-regression`,
-`placement-contract`.
+`placement-contract`, `flows-motion`.
+
+`flows-motion` was in NEITHER list until 2026-09-13 and was measured then: it
+boots workerd, so in this sandbox it hangs on `workers.cloudflare.com` and
+`sparrow.cloudflare.com` until the timeout kills it. That matters beyond the
+bookkeeping — a suite that HANGS reports as a failure to any runner that wraps
+it in `timeout`, so an unmeasured suite can be mistaken for a real assertion
+failure and sent chasing a defect that does not exist. If a suite produces no
+output and dies at the timeout, check the proxy before reading it as red.
 Anything not named in either list has not been measured — run it and find
 out rather than assuming.
 
