@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "201";
+export const ASSET_VERSION = "202";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -2705,6 +2705,32 @@ ${shell("Strategy Tester", "Options-flow intelligence", "strategy", username, `
     <p class="fc-note" id="sgContextNote"></p>
   </section>
 
+  <!-- THE DESK: THE BOOK AND THE LEDGER ON ONE SIDE, THE ANSWER ON THE OTHER.
+
+       This page is a calculator, and the whole of its use is the loop between
+       picking a contract and seeing what the position it joins now pays. In
+       one column that loop is a scroll: the chain is a 26rem scroller at the
+       top and the payoff diagram is two thousand pixels below it, so every
+       Buy is followed by a journey and a comparison from memory. Side by side
+       the diagram redraws in view of the row that changed it, which is the
+       difference between reading a result and working.
+
+       LEFT IS WHAT YOU PICK FROM AND WHAT YOU HAVE PICKED: the chain, then
+       the ledger of legs it built. Both are wide numeric tables and they want
+       the same column. RIGHT IS WHAT IT MEANS: the payoff, the five numbers
+       that line reduces to, and the scenario.
+
+       ONE COLUMN REMAINS THE DEFAULT and the grid appears only where there is
+       width for two, measured rather than guessed: the chain is 736px at the
+       density the stylesheet sets and the diagram wants 300 before its axis
+       type starts colliding, so the tier opens at 94rem and not before.
+
+       THE REFUSALS AND THE METHOD ARE OUTSIDE IT, deliberately: they are not
+       part of the loop, they are what the page will not do, and they run the
+       full width underneath where a reader meets them after the work rather
+       than in the middle of it. -->
+  <div class="sg-desk">
+  <div class="sg-desk__book">
   <section class="fc-panel sg-panel" id="sgChainPanel" hidden aria-labelledby="sgChainH">
     <h2 class="fc-panel-h" id="sgChainH">The book, one expiry at a time</h2>
     <div class="sg-controls">
@@ -2731,26 +2757,40 @@ ${shell("Strategy Tester", "Options-flow intelligence", "strategy", username, `
          aria-label="Listed contracts at the selected expiry" hidden>
       <table class="flows-table sg-chain">
         <caption class="flows-caption">
-          Every contract the vendor lists at this expiry, unfiltered. The premium
-          desk screens this same endpoint down to what is sellable; this page does
-          not, because a long in-the-money call is a position a reader builds and
-          the desk&#39;s universe cannot express it. A greek the vendor did not send
-          is an em dash — the vendor marks all five nullable and its own example
-          carries a row with none of them.
+          Every contract the vendor lists at this expiry, unfiltered. Click an
+          ASK to buy that contract and a BID to sell it — the side each price is
+          actually dealt on. The premium desk screens this same endpoint down to
+          what is sellable; this page does not, because a long in-the-money call
+          is a position a reader builds and the desk&#39;s universe cannot express
+          it. A greek the vendor did not send is an em dash — the vendor marks
+          all five nullable and its own example carries a row with none of them.
         </caption>
+        <!-- THE TWO SIDES MIRROR AROUND THE STRIKE, which is the shape a chain
+             is read in: the quotes nearest the strike column are the ones
+             compared across it, and delta and implied volatility sit outside
+             them because they qualify a side rather than trade against the
+             other. The call side therefore runs outward-in and the put side
+             inward-out, and the renderer appends its cells in that order. -->
         <thead>
           <tr>
-            <th scope="col" class="c-num">Bid</th>
-            <th scope="col" class="c-num">Ask</th>
+            <th scope="col" colspan="4" class="sg-side">Calls</th>
+            <!-- The strike column's banner cell is deliberately empty: the row
+                 below names it, and the two sides it separates are named here.
+                 The visually-hidden class is base.css's own, so the cell still
+                 has an accessible name for a table a screen reader walks. -->
+            <th scope="col" class="c-num sg-k"><span class="visually-hidden">Strike</span></th>
+            <th scope="col" colspan="4" class="sg-side">Puts</th>
+          </tr>
+          <tr>
+            <th scope="col" class="c-num"><abbr title="Delta as quoted, per share">&#916;</abbr></th>
             <th scope="col" class="c-num"><abbr title="The vendor's implied volatility for this contract, as a fraction. The percent-or-fraction convention is decided once from the whole expiry's median, never per contract">IV</abbr></th>
-            <th scope="col" class="c-num"><abbr title="Delta as quoted, per share">&#916;</abbr></th>
-            <th scope="col" class="c-num">Call</th>
+            <th scope="col" class="c-num"><abbr title="The bid. Click it to SELL this contract — a short leg is opened at the bid, which is the price a seller is actually offered">Bid</abbr></th>
+            <th scope="col" class="c-num"><abbr title="The ask. Click it to BUY this contract — a long leg is opened at the ask, which is the price a buyer actually pays">Ask</abbr></th>
             <th scope="col" class="c-num sg-k">Strike</th>
-            <th scope="col" class="c-num">Put</th>
-            <th scope="col" class="c-num"><abbr title="Delta as quoted, per share">&#916;</abbr></th>
+            <th scope="col" class="c-num"><abbr title="The bid. Click it to SELL this contract">Bid</abbr></th>
+            <th scope="col" class="c-num"><abbr title="The ask. Click it to BUY this contract">Ask</abbr></th>
             <th scope="col" class="c-num"><abbr title="The vendor's implied volatility for this contract, as a fraction">IV</abbr></th>
-            <th scope="col" class="c-num">Bid</th>
-            <th scope="col" class="c-num">Ask</th>
+            <th scope="col" class="c-num"><abbr title="Delta as quoted, per share">&#916;</abbr></th>
           </tr>
         </thead>
         <tbody id="sgChainBody"></tbody>
@@ -2799,16 +2839,21 @@ ${shell("Strategy Tester", "Options-flow intelligence", "strategy", username, `
     <div class="fc-note" id="sgLegsNote"></div>
   </section>
 
-  <section class="fc-panel sg-panel" id="sgReadPanel" hidden aria-labelledby="sgReadH">
-    <h2 class="fc-panel-h" id="sgReadH">What it costs, what it can pay, what it is exposed to</h2>
-    <div id="sgReadings"></div>
-    <p class="fc-note" id="sgReadNote"></p>
-  </section>
-
+  </div>
+  <div class="sg-desk__work">
+  <!-- THE DIAGRAM LEADS THE COLUMN, because it is the answer: the readings
+       under it are that same line reduced to five numbers, and a reader who
+       has just clicked Buy is looking for the shape before the figures. -->
   <section class="fc-panel sg-panel" id="sgPlotPanel" hidden aria-labelledby="sgPlotH">
     <h2 class="fc-panel-h" id="sgPlotH">Payoff at expiry</h2>
     <div id="sgPlot"></div>
     <p class="fc-note" id="sgPlotNote"></p>
+  </section>
+
+  <section class="fc-panel sg-panel" id="sgReadPanel" hidden aria-labelledby="sgReadH">
+    <h2 class="fc-panel-h" id="sgReadH">What it costs, what it can pay, what it is exposed to</h2>
+    <div id="sgReadings"></div>
+    <p class="fc-note" id="sgReadNote"></p>
   </section>
 
   <section class="fc-panel sg-panel" id="sgScenePanel" hidden aria-labelledby="sgSceneH">
@@ -2826,6 +2871,8 @@ ${shell("Strategy Tester", "Options-flow intelligence", "strategy", username, `
     <div id="sgScene"></div>
     <p class="fc-note" id="sgSceneNote"></p>
   </section>
+  </div>
+  </div>
 
   <!-- STATIC, AND IN THE DOCUMENT RATHER THAN IN THE RENDERER. These are the
        claims the page declines to make; they are true before any fetch, they
@@ -2835,40 +2882,48 @@ ${shell("Strategy Tester", "Options-flow intelligence", "strategy", username, `
   <section class="fc-panel sg-panel" id="sgRefusePanel" aria-labelledby="sgRefuseH">
     <h2 class="fc-panel-h" id="sgRefuseH">What this page will not tell you</h2>
     <dl class="sg-refuse">
-      <dt>Buying power reduction</dt>
-      <dd>
-        <strong>Refused.</strong> It is a broker&#39;s number, not the market&#39;s:
-        the same short put reduces buying power by different amounts at two
-        brokers on the same afternoon, and by different amounts again in a
-        portfolio-margin account. Nothing in the vendor&#39;s specification
-        mentions buying power, margin or collateral anywhere in its 28,755
-        lines. Publishing one would be inventing a figure about your money.
-      </dd>
-      <dt>Conditional value at risk</dt>
-      <dd>
-        <strong>Refused.</strong> A tail expectation is an average over a
-        distribution, and no distribution is quoted anywhere on this page. It
-        would need a volatility surface, a drift and a horizon, none of which
-        the vendor supplies and all of which would be chosen here. The
-        distribution-free statement this page can make instead is the maximum
-        loss at expiry, which is below and is exact.
-      </dd>
-      <dt>Beta-weighted delta</dt>
-      <dd>
-        <strong>Published, with its terms stated.</strong> It is not delta
-        times beta. It is delta &#215; beta &#215; (this stock&#39;s price &#247; the
-        index&#39;s price), so it needs a reference index and that index&#39;s live
-        price, and it is a different number against a different index. Both
-        are named and printed in the readings above rather than assumed, and
-        when either is missing the reading is an em dash — never a zero.
-      </dd>
-      <dt>A share leg</dt>
-      <dd>
-        <strong>Not offered yet.</strong> A covered call or a collar cannot be
-        expressed here, because this page builds positions out of listed
-        contracts only. Said out loud rather than left for you to discover by
-        looking for a control that is not there.
-      </dd>
+      <div class="sg-refuse-i">
+        <dt>Buying power reduction</dt>
+        <dd>
+          <strong>Refused.</strong> It is a broker&#39;s number, not the market&#39;s:
+          the same short put reduces buying power by different amounts at two
+          brokers on the same afternoon, and by different amounts again in a
+          portfolio-margin account. Nothing in the vendor&#39;s specification
+          mentions buying power, margin or collateral anywhere in its 28,755
+          lines. Publishing one would be inventing a figure about your money.
+        </dd>
+      </div>
+      <div class="sg-refuse-i">
+        <dt>Conditional value at risk</dt>
+        <dd>
+          <strong>Refused.</strong> A tail expectation is an average over a
+          distribution, and no distribution is quoted anywhere on this page. It
+          would need a volatility surface, a drift and a horizon, none of which
+          the vendor supplies and all of which would be chosen here. The
+          distribution-free statement this page can make instead is the maximum
+          loss at expiry, which is below and is exact.
+        </dd>
+      </div>
+      <div class="sg-refuse-i">
+        <dt>Beta-weighted delta</dt>
+        <dd>
+          <strong>Published, with its terms stated.</strong> It is not delta
+          times beta. It is delta &#215; beta &#215; (this stock&#39;s price &#247; the
+          index&#39;s price), so it needs a reference index and that index&#39;s live
+          price, and it is a different number against a different index. Both
+          are named and printed in the readings above rather than assumed, and
+          when either is missing the reading is an em dash — never a zero.
+        </dd>
+      </div>
+      <div class="sg-refuse-i">
+        <dt>A share leg</dt>
+        <dd>
+          <strong>Not offered yet.</strong> A covered call or a collar cannot be
+          expressed here, because this page builds positions out of listed
+          contracts only. Said out loud rather than left for you to discover by
+          looking for a control that is not there.
+        </dd>
+      </div>
     </dl>
   </section>
 

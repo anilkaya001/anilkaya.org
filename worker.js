@@ -2554,18 +2554,49 @@ async function buildStrategyContext(env, ctx, ticker) {
      it lets the picker warn BEFORE the read rather than the payload confessing
      after it — which on a calculator is the difference between "your strike is
      not listed" and "your strike was cut off and nothing said so". */
-  const expiries = [];
-  for (const row of unwrapRows(breakdown)) {
-    const expiry = row && typeof row.expiry === "string" ? row.expiry.slice(0, 10) : null;
-    if (!expiry || !EXPIRY_RE.test(expiry)) continue;
-    expiries.push({
-      expiry,
-      chains: numOrNull(row.chains),
-      oi: numOrNull(row.open_interest),
-      volume: numOrNull(row.volume),
-    });
+  const readExpiries = (raw) => {
+    const out = [];
+    for (const row of unwrapRows(raw)) {
+      const expiry = row && typeof row.expiry === "string" ? row.expiry.slice(0, 10) : null;
+      if (!expiry || !EXPIRY_RE.test(expiry)) continue;
+      out.push({
+        expiry,
+        chains: numOrNull(row.chains),
+        oi: numOrNull(row.open_interest),
+        volume: numOrNull(row.volume),
+      });
+    }
+    out.sort((a, b) => (a.expiry < b.expiry ? -1 : a.expiry > b.expiry ? 1 : 0));
+    return out;
+  };
+
+  let expiries = readExpiries(breakdown);
+  /* THE ONE RETRY, AND WHY AN EMPTY FIRST READ IS NOT A READING ABOUT THE
+     NAME. The vendor documents this endpoint as "all expirations for the
+     GIVEN TRADING DAY", with `date` optional — so an omitted date is the
+     vendor's idea of today, and its idea of today is empty before the
+     session has a breakdown: overnight, at a weekend, on a holiday, and in
+     the pre-open. The page then printed "NVDA was read and lists no option
+     expiries. That is a reading about the name" over a symbol with three
+     thousand listed contracts, which is the collapse this codebase refuses
+     everywhere else — a parameter default rendered as a fact about the
+     market.
+
+     `asOf` is the session the candles and the tape already agree on, which
+     is the date the rest of this payload is measured at, so asking again
+     with it is asking the question the page thought it was asking. Bounded
+     at one extra call, spent only when the first read came back empty, and
+     never on the hot path: a name that genuinely lists nothing pays it once
+     per cache life and then says so with the date it asked about. */
+  let expiryDate = null;
+  if (breakdown !== null && !expiries.length && asOf) {
+    const retry = await uwFetch(env, `/api/stock/${t}/expiry-breakdown`, { date: asOf })
+      .catch(() => null);
+    if (retry !== null) {
+      const dated = readExpiries(retry);
+      if (dated.length) { expiries = dated; expiryDate = asOf; }
+    }
   }
-  expiries.sort((a, b) => (a.expiry < b.expiry ? -1 : a.expiry > b.expiry ? 1 : 0));
 
   const index = await cachedIndexSpot(env, ctx);
 
@@ -2583,6 +2614,12 @@ async function buildStrategyContext(env, ctx, ticker) {
        exactly the sentence this codebase refuses to let two silences share. */
     expiries,
     expiryStatus: breakdown === null ? "unreadable" : (expiries.length ? "ok" : "quiet"),
+    /* WHICH DAY THE LIST IS OF, when it took the dated retry above to get
+       one. Null means the vendor's own default answered, which is the
+       ordinary case inside a session; a date means this page had to name the
+       session, and the picker says so rather than implying the vendor
+       volunteered it. */
+    expiryDate,
     /* Beta is `undefined` on an /info entry cached before beta was read, and
        null when the vendor has none. Both are absences and both must render as
        one; neither is a beta of zero. */

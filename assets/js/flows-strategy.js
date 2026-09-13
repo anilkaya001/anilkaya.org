@@ -444,6 +444,10 @@
     basis: "mid",
     window: 0.25,
     scene: { px: null, days: 0, vol: DEFAULT_VOL_BUMP },
+    /* WHICH (expiry, window) PAIR THE CHAIN HAS ALREADY BEEN CENTRED FOR, so
+       the scroller is placed at the money once when a book opens and never
+       again while a reader is using it. */
+    centred: null,
     seq: 0,
   };
 
@@ -712,10 +716,19 @@
     if (!c) return;
 
     const dl = el("dl", "sg-facts");
+    /* EACH PAIR IS ONE CELL, which is the whole of the fix for a strip that
+       read as nonsense. The dt and dd were separate grid items in an auto-fit
+       track, so the flow put SPOT's label in one column and its value in the
+       next, then wrapped — landing a session date under the word SPOT and the
+       label SESSION at the end of the row above it. Every figure on this strip
+       sat beside a term it did not belong to. A div grouping a dt with its dd
+       inside a dl is exactly what HTML5 added that wrapper for. */
     const add = (term, value, hint) => {
+      const cell = el("div", "sg-fact");
       const dt = el("dt", null, term);
       if (hint) dt.title = hint;
-      dl.append(dt, el("dd", null, value));
+      cell.append(dt, el("dd", null, value));
+      dl.append(cell);
     };
 
     /* WHICH PRICE, AND HOW OLD, both ship — the premium desk's rule, and it
@@ -864,8 +877,34 @@
     const windowEmpty = width > 0 && shown.length === 0 && rows.length > 0;
     const use = shown.length ? shown : rows;
 
-    for (const r of use) chainBody.append(strikeRow(r, spot));
+    const atm = atmStrike(use, spot);
+    for (const r of use) chainBody.append(strikeRow(r, spot, atm));
     if (chainWrap) chainWrap.hidden = false;
+
+    /* THE BOOK OPENS AT THE MONEY. A chain is sorted by strike and a scroller
+       starts at the top, so the page opened on the lowest strike it holds —
+       the deepest in-the-money calls, the furthest out-of-the-money puts,
+       which is the one part of the book almost nobody wants first. Every
+       reader then scrolled to the middle before doing anything at all.
+
+       CENTRED RATHER THAN SCROLLED-TO, because scrollIntoView() puts the row
+       at an edge and the rows either side of the money are half the reason to
+       look. Done once per (expiry, window) pair: re-centring after every
+       render would yank the list out from under a reader who had scrolled
+       somewhere deliberately, which is worse than opening in the wrong place.
+       The key carries the window because changing it rebuilds the list. */
+    const anchor = state.expiry + "/" + width;
+    if (chainWrap && atm !== null && state.centred !== anchor) {
+      state.centred = anchor;
+      const row = chainBody.querySelector("tr.is-atm");
+      if (row) {
+        /* MEASURED FROM THE SCROLLER, NOT FROM THE VIEWPORT: offsetTop is
+           relative to the nearest positioned ancestor, and the table's rows
+           sit inside the wrapper that actually scrolls. */
+        const mid = row.offsetTop - (chainWrap.clientHeight / 2) + (row.offsetHeight / 2);
+        chainWrap.scrollTop = Math.max(0, mid);
+      }
+    }
 
     if (note) {
       note.textContent = "";
@@ -931,19 +970,48 @@
     return [...byStrike.values()].sort((a, b) => a.k - b.k);
   }
 
-  function strikeRow(entryRow, spot) {
-    const tr = el("tr");
-    if (spot !== null && Math.abs(entryRow.k / spot - 1) < 0.005) tr.className = "is-atm";
+  /** The listed strike nearest spot, which is the row a chain is read from. */
+  function atmStrike(rows, spot) {
+    if (spot === null) return null;
+    let best = null, gap = Infinity;
+    for (const r of rows) {
+      const d = Math.abs(r.k - spot);
+      if (d < gap) { gap = d; best = r.k; }
+    }
+    return best;
+  }
 
+  function strikeRow(entryRow, spot, atm) {
+    const tr = el("tr");
+    /* THE MARK IS THE NEAREST LISTED STRIKE, NOT A STRIKE WITHIN HALF A
+       PERCENT. On a $221 name the strikes are $2.50 apart, so 0.5% is a
+       $1.10 band that catches a strike on some days and none on others —
+       and a chain with no marked row at all is the state a reader meets
+       most mornings. "Nearest" always exists once a strike does, which is
+       what makes it a landmark rather than a coincidence. */
+    if (atm !== null && entryRow.k === atm) tr.className = "is-atm";
+
+    /* THE PRICE IS THE CONTROL, WHICH IS BOTH THE DENSER LAYOUT AND THE ONE
+       EVERY OPTIONS PLATFORM ALREADY TEACHES: you buy at the ask and you
+       sell at the bid, so the ask cell adds a long leg and the bid cell adds
+       a short one. It replaces a pair of Buy/Sell buttons per side that cost
+       230 of this table's 881 pixels — the difference between a chain that
+       fits beside the diagram and one that scrolls sideways with the put
+       side out of sight.
+
+       IT IS A BUTTON, NOT A CLICKABLE CELL. A div with a handler is
+       unreachable by keyboard and invisible to a screen reader; a button
+       carries a label that says the whole action, which is more than the two
+       it replaced said ("Buy the 2026-09-18 $220 call" never named a price).
+
+       A QUOTE THAT IS NOT THERE IS NOT A CONTROL. An unquoted side renders as
+       the em dash it always did, with no button: there is nothing to price a
+       leg at, and offering the action anyway would add a leg this page could
+       not value. */
     const quoteCells = (row, side) => {
       const cells = [];
-      const num = (text) => {
-        const td = el("td", "c-num", text);
-        return td;
-      };
+      const num = (text) => el("td", "c-num", text);
       if (!row) {
-        /* NOT LISTED AT ALL is a different absence from LISTED WITH NO QUOTE,
-           and both are em dashes — so the row's title says which. */
         for (let i = 0; i < 4; i++) {
           const td = num(DASH);
           td.title = "No " + side + " is listed at this strike";
@@ -951,40 +1019,43 @@
         }
         return cells;
       }
-      cells.push(num(fmtQuote(row.bid)));
-      cells.push(num(fmtQuote(row.ask)));
+      const quote = (which) => {
+        const px = isNum(which === "bid" ? row.bid : row.ask);
+        const td = el("td", "c-num sg-q");
+        if (px === null) {
+          td.textContent = DASH;
+          td.title = "The provider quotes no " + which + " for this contract, so there is " +
+            "nothing to price a leg at.";
+          return td;
+        }
+        const dir = which === "ask" ? "long" : "short";
+        const b = el("button", "sg-qb sg-qb--" + dir, fmtQuote(px));
+        b.type = "button";
+        b.setAttribute("aria-label",
+          (dir === "long" ? "Buy" : "Sell") + " the " + state.expiry + " " +
+          fmtPx(entryRow.k) + " " + side + " at the " + which + ", " + fmtQuote(px));
+        b.title = (dir === "long" ? "Buy" : "Sell") + " at the " + which;
+        b.addEventListener("click", () => addLeg(row.sym, side, dir));
+        td.append(b);
+        return td;
+      };
+      cells.push(quote("bid"));
+      cells.push(quote("ask"));
       const iv = isNum(row.iv);
       cells.push(num(iv === null ? DASH : (iv * 100).toFixed(1) + "%"));
       cells.push(num(fmtNum(row.dl, 3)));
       return cells;
     };
 
-    const actionCell = (row, side) => {
-      const td = el("td", "c-num sg-act");
-      if (!row) { td.textContent = DASH; return td; }
-      for (const dir of ["long", "short"]) {
-        const b = el("button", "sg-btn sg-btn--" + dir, dir === "long" ? "Buy" : "Sell");
-        b.type = "button";
-        b.setAttribute("aria-label",
-          (dir === "long" ? "Buy" : "Sell") + " the " + state.expiry + " " +
-          fmtPx(entryRow.k) + " " + side);
-        b.addEventListener("click", () => addLeg(row.sym, side, dir));
-        td.append(b);
-      }
-      return td;
-    };
-
     const c = quoteCells(entryRow.call, "call");
-    tr.append(c[0], c[1], c[2], c[3]);
-    tr.append(actionCell(entryRow.call, "call"));
+    tr.append(c[3], c[2], c[0], c[1]);
 
     const th = el("th", "c-num sg-k", fmtPx(entryRow.k));
     th.scope = "row";
     tr.append(th);
 
-    tr.append(actionCell(entryRow.put, "put"));
     const p = quoteCells(entryRow.put, "put");
-    tr.append(p[3], p[2], p[0], p[1]);
+    tr.append(p[0], p[1], p[2], p[3]);
     return tr;
   }
 
@@ -1151,11 +1222,15 @@
   function renderReadings(host, note, legs, cost, ext, bes) {
     if (!host) return;
     const dl = el("dl", "sg-facts");
+    /* ONE CELL PER PAIR, for the reason renderContext() gives: loose dt and dd
+       in an auto-fit grid flow independently and a wrap lands a figure beside
+       a term that is not its own. */
     const add = (term, value, hint, cls) => {
+      const cell = el("div", "sg-fact");
       const dt = el("dt", null, term);
       if (hint) dt.title = hint;
-      const dd = el("dd", cls || null, value);
-      dl.append(dt, dd);
+      cell.append(dt, el("dd", cls || null, value));
+      dl.append(cell);
     };
 
     /* UNITS TRAVEL WITH NUMBERS. Every term below names what the number is
@@ -1300,7 +1375,11 @@
 
   /* ---------- the diagram ---------------------------------------- */
 
-  const PLOT_H = 260;
+  /* 260 -> 300. The diagram moved out of a full-width band and into the work
+     column beside the book, so it is no longer a 1,240x260 letterbox: at
+     roughly 600px wide, 300 tall is a shape a payoff curve reads in, and the
+     extra 40px is where the y-axis gained a labelled midpoint. */
+  const PLOT_H = 300;
   const PAD = { top: 18, right: 16, bottom: 34, left: 62 };
 
   function renderPlot(host, note, legs, cost, ext, bes) {
@@ -1404,6 +1483,26 @@
       const t = svgEl("text", {
         class: "sg-axis", x: PAD.left - 6,
         y: (Y(v) + (v === yHi ? 8 : 0)).toFixed(2), "text-anchor": anchor,
+      });
+      t.textContent = fmtUSD(v, true);
+      svg.append(t);
+    }
+    /* TWO MORE LABELLED LEVELS, ONE EACH SIDE OF ZERO, and they are the
+       halfway points of the two REGIONS rather than of the whole range: a
+       diagram whose axis carries only a top, a bottom and a zero can be read
+       for its shape and not for its size, and the halves of the profit and
+       the loss bands are the two numbers a reader estimates against. Skipped
+       when a band is too thin to hold a label without colliding with the zero
+       rule, which is the case a straddle at full range produces. */
+    for (const v of [yHi / 2, yLo / 2]) {
+      if (!Number.isFinite(v) || Math.abs(Y(v) - zeroY) < 16) continue;
+      if (Math.abs(Y(v) - Y(v > 0 ? yHi : yLo)) < 14) continue;
+      svg.append(svgEl("line", {
+        class: "sg-grid", x1: PAD.left, y1: Y(v).toFixed(2),
+        x2: width - PAD.right, y2: Y(v).toFixed(2),
+      }));
+      const t = svgEl("text", {
+        class: "sg-axis", x: PAD.left - 6, y: (Y(v) + 3).toFixed(2), "text-anchor": "end",
       });
       t.textContent = fmtUSD(v, true);
       svg.append(t);
@@ -1576,9 +1675,11 @@
     const px = state.scene.px === null ? spot : state.scene.px;
     const dl = el("dl", "sg-facts");
     const add = (term, value, hint) => {
+      const cell = el("div", "sg-fact");
       const dt = el("dt", null, term);
       if (hint) dt.title = hint;
-      dl.append(dt, el("dd", null, value));
+      cell.append(dt, el("dd", null, value));
+      dl.append(cell);
     };
 
     if (px === null) {

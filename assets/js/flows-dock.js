@@ -18,7 +18,7 @@
    96k as measured on 2026-09-13, in the unit and rounding
    tests/flows-weight.mjs prints — one file measured once reads as
    one number in both places. On all twelve dock routes it would
-   break every ceiling; the widest headroom of the twelve is strategy's
+   break every ceiling; the widest headroom of the twelve is events's
    12k. flows-weight measures what a route loads ON ARRIVAL, so the
    deferred 96k is absent there: a real cost, paid on open, said here
    rather than left to look free.
