@@ -28,7 +28,7 @@
      the section asks for is drawn by this file rather than synthesised. */
   font-weight: 400 700;
   font-display: swap;
-  src: url("/assets/fonts/Inter-latin.woff2?v=194") format("woff2");
+  src: url("/assets/fonts/Inter-latin.woff2?v=196") format("woff2");
   /* U+2212 IS IN HERE and it is the one that matters: it is the minus sign
      every negative reading on the section is set with. */
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
@@ -40,7 +40,7 @@
   font-style: normal;
   font-weight: 400 700;
   font-display: swap;
-  src: url("/assets/fonts/Inter-greek.woff2?v=194") format("woff2");
+  src: url("/assets/fonts/Inter-greek.woff2?v=196") format("woff2");
   /* U+038E-038A WAS IN THIS LIST AND IS A MALFORMED RANGE: its start is above
      its end. An invalid <urange> invalidates the WHOLE unicode-range
      descriptor, which drops it to its initial value of U+0-10FFFF — so this
@@ -62,28 +62,28 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("/assets/fonts/LM-regular.woff2?v=194") format("woff2");
+  src: url("/assets/fonts/LM-regular.woff2?v=196") format("woff2");
 }
 @font-face {
   font-family: "Latin Modern";
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url("/assets/fonts/LM-italic.woff2?v=194") format("woff2");
+  src: url("/assets/fonts/LM-italic.woff2?v=196") format("woff2");
 }
 @font-face {
   font-family: "Latin Modern";
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url("/assets/fonts/LM-bold.woff2?v=194") format("woff2");
+  src: url("/assets/fonts/LM-bold.woff2?v=196") format("woff2");
 }
 @font-face {
   font-family: "Latin Modern";
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url("/assets/fonts/LM-bold-italic.woff2?v=194") format("woff2");
+  src: url("/assets/fonts/LM-bold-italic.woff2?v=196") format("woff2");
 }
 
 /* ---- JetBrains Mono (JetBrains Mono Project Authors, SIL OFL 1.1) ----
@@ -134,7 +134,7 @@
   font-style: normal;
   font-weight: 100 800;
   font-display: swap;
-  src: url("/assets/fonts/JBM-latin.woff2?v=194") format("woff2");
+  src: url("/assets/fonts/JBM-latin.woff2?v=196") format("woff2");
   /* The latin range carries U+2212 MINUS SIGN, which every negative number on
      this site is written with rather than a hyphen. */
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
@@ -146,7 +146,7 @@
   font-style: normal;
   font-weight: 100 800;
   font-display: swap;
-  src: url("/assets/fonts/JBM-greek.woff2?v=194") format("woff2");
+  src: url("/assets/fonts/JBM-greek.woff2?v=196") format("woff2");
   unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1,
     U+03A3-03FF;
 }
@@ -301,7 +301,7 @@
       rgba(9, 8, 7, 0.88) 68%,
       rgba(9, 8, 7, 0.94) 100%),
     radial-gradient(62% 48% at 8% 0%, rgba(122, 170, 214, 0.07), transparent 70%),
-    url("/assets/img/atmosphere.svg?v=194") center / cover no-repeat,
+    url("/assets/img/atmosphere.svg?v=196") center / cover no-repeat,
     linear-gradient(180deg, #0a1020 0%, #101c33 34%, #2a2416 56%, #100e0b 100%);
 
   --fs-micro: 0.64rem;   /* table headers, rail group labels, micro chrome */

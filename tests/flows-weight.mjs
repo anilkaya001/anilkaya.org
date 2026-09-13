@@ -1021,8 +1021,40 @@ const CEILING_KIB = {
      The ring is their share, and the arc length is computed from the share
      itself rather than from a rounded angle, so the ink is the number.
 
-     THE RATCHET PARAGRAPH STILL STANDS. 494 -> 535 in one day is 41 KiB. */
-  tickerPage: 535,
+     THE RATCHET PARAGRAPH STILL STANDS. 494 -> 535 in one day is 41 KiB.
+
+     535 -> 542, for the period control and the fix it uncovered.
+     flows-ticker.js 452,522 -> 459,285 (+6,763) against
+     git cat-file -s cd62e30:, the other four identical, total
+     545,939 -> 552,702 B = 539.75 KiB. 542 KiB is 555,008 B and leaves
+     2,306 B; 540 would have left 258, which is under this route's own
+     standard and under a single comment paragraph.
+
+     MOST OF THOSE BYTES ARE THE DISABLED STATES, and that is the point. The
+     control windows a series the card already holds — it fetches nothing —
+     so the arithmetic is four lines. What costs is that every pill has to
+     know whether the series on screen can reach it and say so: a tenor curve
+     takes no period at all, the intraday tape is one session so only 1D
+     means anything on it, and 3M and 1Y are outside a forty-session window
+     on every name this pipeline builds. Those three sentences are the
+     difference between a row of buttons that explains its own limit and a
+     row where two of them silently redraw the same picture.
+
+     THE REST OF THE RAISE IS A DEFECT THIS ONE UNCOVERED, and it is the more
+     important half. The sector-peers card, added earlier in this wave, had
+     been calling ensureBoards() from an idle callback — two requests about
+     OTHER names, on every ticker page view. This suite's 6h block asserts in
+     so many words that a named ticker page fetches NO board, and gives the
+     reason: "the card is what this page is". The assertion had been passing
+     only because the idle callback had not fired by the time it counted, and
+     the extra work the period control added to first paint tipped it.
+
+     The assertion was right and the feature was wrong, so the FEATURE moved:
+     the peers now sit behind a control, and pressing it is the reader
+     electing to spend those two requests — the same bargain the switcher
+     already strikes. The flow-alerts read stays on the idle pass, because it
+     is one request about THIS name rather than an index of others. */
+  tickerPage: 542,
   /* 300 -> 312 on 2026-09-04, and this is a decision rather than an absorbed
      overrun. The route gained two regions a reader asked for: the eleven-
      basket sector premium lean and the news feed, ~27k of renderer between

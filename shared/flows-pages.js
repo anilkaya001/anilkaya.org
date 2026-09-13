@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "194";
+export const ASSET_VERSION = "196";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -1896,6 +1896,31 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
         <span class="ft-hero-v" id="ftHeroIvr"></span>
         <span class="ft-hero-seg" id="ftHeroIvrSeg" aria-hidden="true"></span>
       </span>
+    </div>
+    <!-- THE PERIOD CONTROL, WHERE THE DESIGN PUTS IT, WINDOWING THE SERIES
+         BLOCK BELOW.
+
+         IT NARROWS THE WINDOW; IT DOES NOT FETCH. Everything it can show is
+         already on this card, so no period here costs a request — and no
+         period can reach further back than the card's own window, which is
+         the whole reason the disabled states below exist.
+
+         A PERIOD THIS CARD CANNOT REACH IS DISABLED AND SAYS WHY, rather
+         than being dropped from the row or drawn empty. The price window is
+         about forty sessions, so 3M and 1Y are outside it on every name and
+         the pill says so when a reader asks. A control that silently does
+         nothing is worse than one that explains itself.
+
+         AND THE PERIODS MEAN DIFFERENT THINGS PER TAB, because the tabs are
+         on different clocks — sessions for price and premium, intraday
+         buckets for net flow, tenor for the volatility curve. The chart's
+         own note states the window it drew, which is the same rule the
+         overview's control follows: the control switches what is shown and
+         the note names it. -->
+    <div class="ft-hero-b ft-hero-b--period">
+      <span class="ft-hero-k">Period</span>
+      <div class="ft-period" id="ftPeriod" role="group"
+           aria-label="Window the series below"></div>
     </div>
 
   </section>

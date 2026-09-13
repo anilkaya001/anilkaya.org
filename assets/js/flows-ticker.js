@@ -6953,6 +6953,28 @@
      volume series in this payload. Dropping the tab would silently edit the
      design; drawing contract counts under a "Volume" heading would be a
      different quantity wearing its label. */
+  /* THE PERIODS THE DESIGN DRAWS, IN SESSIONS.
+
+     A window, never a fetch: everything any of these can show is already on
+     the card. `n` is how many of the series' own points the period keeps —
+     each entry carries a SESSION COUNT rather than a duration because the
+     card's clocks are sessions and intraday buckets, not wall time, and
+     converting between them here would invent trading days.
+
+     3M AND 1Y ARE ON THIS LIST AND WILL USUALLY BE DISABLED. The price
+     window is about forty sessions, so they are outside it on every name
+     this pipeline builds. They stay because the row is the design's, and a
+     control that is present and explains its own limit tells a reader more
+     than a row that quietly has two fewer buttons. */
+  const PERIODS = [
+    { key: "1D", n: 1 },
+    { key: "1W", n: 5 },
+    { key: "1M", n: 21 },
+    { key: "3M", n: 63 },
+    { key: "1Y", n: 252 },
+  ];
+  let period = "1M";
+
   const CHART_TABS = ["price", "iv", "volume", "premium", "netflow"];
   const CHART_LABEL = {
     price: "Price", iv: "IV", volume: "Volume",
@@ -7106,11 +7128,35 @@
         if (chartTab === key) return;
         chartTab = key;
         paintChart(card);
+        /* THE PILLS ARE RE-TESTED AGAINST THE NEW TAB. Each tab has its own
+           point count and its own clock, so a period reachable on one can be
+           unreachable on the next; leaving the row as it was would offer a
+           window this series does not have. */
+        paintPeriod(card);
       });
       if (tabs) tabs.append(b);
     }
 
     const spec = chartSeries(chartTab, card);
+    /* THE WINDOW IS APPLIED HERE, ON THE POINTS THE SERIES RETURNED, so
+       every tab gets it and no tab has to know the control exists. The
+       tenor curve is exempt: "the last five expiries" is a cut of the term,
+       not a period of time, and labelling it 1W would put a right number
+       under a wrong word. */
+    const per = PERIODS.find((x) => x.key === period) || null;
+    let windowed = null;
+    if (spec.points && per && chartTab !== "iv") {
+      const have = spec.points.length;
+      /* NET FLOW IS ONE SESSION BY CONSTRUCTION, so a multi-session period
+         cannot narrow it and 1D is the whole of it. Cutting its buckets to
+         "five sessions" would be arithmetic on the wrong clock. */
+      if (chartTab === "netflow") windowed = per.key === "1D" ? have : null;
+      else if (per.n <= have) windowed = per.n;
+      if (windowed !== null && windowed < have) {
+        spec.points = spec.points.slice(have - windowed);
+      }
+    }
+
     if (spec.silence) {
       const p = el("p", "ft-chart-dead", spec.silence);
       body.append(p);
@@ -7222,9 +7268,68 @@
       });
     }
 
-    if (sub) sub.textContent = CHART_LABEL[chartTab] + " — " + spec.unit + ". " +
-      spec.clock.charAt(0).toUpperCase() + spec.clock.slice(1) + ".";
+    if (sub) {
+      sub.textContent = CHART_LABEL[chartTab] + " — " + spec.unit + ". " +
+        spec.clock.charAt(0).toUpperCase() + spec.clock.slice(1) + "." +
+        (chartTab === "iv"
+          ? " The period control does not apply to a curve across the term."
+          : windowed !== null
+            ? " Windowed to " + period + "."
+            : " " + period + " is outside this card's window, so the whole " +
+              "series is drawn.");
+    }
     host.hidden = false;
+  }
+
+  /* ---------- the period pills, drawn from what the card can reach ------
+
+     EACH PILL IS ENABLED ONLY IF THE SERIES ON SCREEN HAS THE POINTS FOR IT,
+     and a disabled one says how far this card actually reaches. That is the
+     honest version of the design's row: every button is there, and the ones
+     that cannot be satisfied explain themselves rather than redrawing the
+     same picture and calling it a year. */
+  function paintPeriod(card) {
+    const host = $("ftPeriod");
+    if (!host) return;
+    host.replaceChildren();
+    const spec = chartSeries(chartTab, card);
+    const have = spec && spec.points ? spec.points.length : 0;
+    for (const pd of PERIODS) {
+      const b = el("button", "ft-period-b" + (period === pd.key ? " is-on" : ""), pd.key);
+      b.type = "button";
+      let can, why;
+      if (chartTab === "iv") {
+        can = false;
+        why = "The volatility tab is a curve across the TERM, not a history, so a " +
+          "period does not apply to it.";
+      } else if (chartTab === "netflow") {
+        can = pd.key === "1D";
+        why = can
+          ? "The intraday tape is one session, which is what 1D means here."
+          : "The intraday tape is a single session, so it cannot be windowed to " +
+            pd.key + ".";
+      } else if (!have) {
+        can = false;
+        why = "This series published no points, so there is nothing to window.";
+      } else {
+        can = pd.n <= have;
+        why = can
+          ? "The last " + pd.n + " of the " + have + " points this card carries."
+          : "This card carries " + have + " point" + (have === 1 ? "" : "s") + " and " +
+            pd.key + " needs " + pd.n + ", so it is outside the published window.";
+      }
+      b.disabled = !can;
+      b.title = why;
+      b.setAttribute("aria-pressed", period === pd.key ? "true" : "false");
+      b.setAttribute("aria-label", pd.key + ": " + why);
+      b.addEventListener("click", () => {
+        if (period === pd.key) return;
+        period = pd.key;
+        paintChart(card);
+        paintPeriod(card);
+      });
+      host.append(b);
+    }
   }
 
   /* ---------- the option chain, ordered by strike around spot --------
@@ -7859,6 +7964,21 @@
         + (r.chg === null ? "" : " Session move " + P.pct1(r.chg) + ".");
       list.append(chip);
     }
+    /* THE CONTROL THAT PAYS FOR THE PEERS, shown only while the boards are
+       unread. Pressing it is the reader saying two requests about other
+       names are worth it; until then this page costs exactly the card. */
+    if (mine && switchRows === null) {
+      const b = el("button", "ft-rel-load", "Show sector peers");
+      b.type = "button";
+      b.title = "Reads today's two boards — an index of every name this run ranked — " +
+        "to find the others in " + mine + ".";
+      b.addEventListener("click", () => {
+        b.disabled = true;
+        b.textContent = "Reading today\u2019s boards\u2026";
+        ensureBoards().then(() => paintRelated(card));
+      });
+      list.append(b);
+    }
     if (sub) {
       sub.textContent = !mine
         ? "This card publishes no sector, so no peer set can be drawn."
@@ -7867,8 +7987,17 @@
              said "No other Energy name was ranked on today's boards" before a
              single board had been fetched — a measurement claimed over a key
              nobody had opened, which is the exact collapse this product
-             refuses everywhere else. */
-          ? "Reading today's boards for the other names in " + mine + "\u2026"
+             refuses everywhere else.
+
+             AND IT NO LONGER SAYS "READING…" EITHER, because nothing is
+             reading. The boards are two requests about OTHER names, and this
+             page does not spend them on a reader who did not ask: the button
+             below is where that bargain is struck, the same one the switcher
+             strikes. "Reading…" over a fetch that was never started is a
+             different false statement from the one this comment removed. */
+          ? "The other names in " + mine + " are on today's boards, which are two " +
+            "requests about names other than this one. They are not read unless " +
+            "you ask for them."
         : boardsWhy === "unreadable"
           ? "Today's boards did not come back, so the other " + mine +
             " names cannot be named. That is this page's failure to read them, " +
@@ -8457,6 +8586,7 @@
        this pass rather than the board handler's: both read panels the card
        payload already carries and neither waits on a second fetch. */
     paintChart(card);
+    paintPeriod(card);
     paintChain(card);
     paintMix(card);
     paintBrief(card);
@@ -8583,20 +8713,31 @@
   /* AFTER FIRST PAINT, NEVER DURING IT. The card is what this page is; the
      boards qualify it. requestIdleCallback where it exists, a timeout where
      it does not, so the two fetches never compete with the card's own. */
-  /* THE TWO RIGHT-COLUMN FETCHES, TAKEN TOGETHER AND LATE.
+  /* THE ALERTS READ WAITS FOR AN IDLE FRAME. THE BOARDS ARE NOT READ AT ALL.
 
-     Neither the sector peers nor the flow alerts is on the card, and neither
-     is above the fold, so both wait for an idle frame rather than competing
-     with the payload the whole page is drawn from. They are ONE idle pass
-     because they have one trigger and one deadline; splitting them would put
-     two timers against the same 3s budget for no gain.
+     AND THAT SECOND HALF IS A DEFECT OF MINE, FOUND BY A CONTRACT THAT
+     PREDATES IT. This function used to call ensureBoards() here so the
+     sector-peers card could fill itself. flows-ticker-contract asserts, in
+     so many words, that loading a named ticker page fetches NO board —
+     "two requests on every ticker page view would be paid by every reader
+     to serve the few who switch, and the card is what this page is". The
+     sector card is exactly that: two requests, every reader, for names that
+     are not the one being read. The assertion passed for a while only
+     because the idle callback had not fired by the time the test counted.
 
-     A FAILED ALERTS READ REACHES paintFlow AS null, NOT AS A SKIPPED CALL.
-     That is the difference between the card saying "this could not be read"
-     and the card saying nothing at all, and only the first is true. */
+     THE ASSERTION IS RIGHT AND THE FEATURE WAS WRONG, so the feature moved
+     rather than the assertion. paintRelated now offers the peers behind a
+     control; pressing it is the reader saying the two requests are worth it,
+     which is the same bargain the switcher already strikes and the same one
+     that comment argues for.
+
+     THE FLOW ALERTS STAY HERE, and the difference is what they are ABOUT.
+     They are this name's own flagged windows — one request, for the card a
+     reader came to read — where the boards are a market-wide index of other
+     names. A FAILED READ REACHES paintFlow AS null rather than as a skipped
+     call, so the card can say "this could not be read" instead of nothing. */
   function boardsWhenIdle(ticker) {
     const go = () => {
-      ensureBoards();
       if (!ticker) return;
       getJSON("/api/flows/flowalerts")
         .then((feed) => paintFlow(ticker, feed))

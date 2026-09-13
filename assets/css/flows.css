@@ -10637,3 +10637,62 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
   line-height: 1.45; color: var(--ink-faint);
 }
 @media (max-width: 30rem) { .ft-mix { --panel-pad-x: 0px; } .ft-mix-h { padding-inline: var(--space-2); } }
+
+/* The period row sits in the hero as its own labelled block, so it reads as
+   one of the header's readings rather than as chrome floating beside them.
+   A disabled pill stays visible and keeps its title: it is the only place a
+   reader learns how far back this card actually reaches. */
+.ft-hero-b--period { justify-content: flex-start; }
+.ft-period { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.ft-period-b {
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  line-height: 1;
+  padding: 0.32rem 0.5rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.ft-period-b:hover:not(:disabled) { color: var(--ink); }
+.ft-period-b.is-on {
+  color: var(--bg);
+  background: var(--gold-harvest);
+  border-color: var(--gold-harvest);
+  font-weight: 700;
+}
+.ft-period-b:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  border-style: dashed;
+}
+
+/* FIVE PILLS ON ONE ROW WHERE THERE IS ROOM FOR FIVE PILLS. The hero is an
+   auto-fit grid and the period block is its eighth member, so it was handed
+   a track narrower than its own content and broke 3M and 1Y onto a second
+   line — two rows of buttons under a one-line label, against seven
+   neighbours that are each one reading tall. Below the breakpoint they wrap
+   as before, because there five pills genuinely do not fit. */
+@media (min-width: 60rem) {
+  .ft-hero-b--period { min-width: 12rem; }
+  .ft-period { flex-wrap: nowrap; }
+}
+
+/* The control that pays for the sector peers. It sits where the chips will,
+   so pressing it replaces itself with what it fetched rather than moving the
+   card's contents around under the reader's cursor. */
+.ft-rel-load {
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  line-height: 1;
+  padding: 0.42rem 0.7rem;
+  border: 1px dashed var(--panel-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+}
+.ft-rel-load:hover:not(:disabled) { color: var(--ink); border-color: var(--gold-harvest); }
+.ft-rel-load:disabled { opacity: 0.6; cursor: progress; }
