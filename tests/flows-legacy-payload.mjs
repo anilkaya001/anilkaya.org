@@ -84,7 +84,7 @@ const withheldSort = await page.evaluate(() => ({
   firstTicker: document.querySelector("#flowsBody tr .fb-tk").textContent.trim(),
 }));
 
-await page.goto(url("/flows/ticker/?t=INTC&s=signal&from=long"), { waitUntil: "networkidle" });
+await page.goto(url("/flows/ticker/?t=INTC&s=signal&from=long"), { waitUntil: "load" });
 await page.waitForSelector("#ftWhy .fc-fam li");
 const fam = await page.evaluate(() => [...document.querySelectorAll("#ftWhy .fc-fam li")].map((li) => ({
   k: li.querySelector(".fc-fam-k").textContent,
@@ -117,7 +117,7 @@ currentBoard.shed = 4;
 await post("board:long", currentBoard);
 await post("card:CURR", currentCard);
 
-await page.goto(url("/flows/ticker/?t=CURR&s=signal&from=long"), { waitUntil: "networkidle" });
+await page.goto(url("/flows/ticker/?t=CURR&s=signal&from=long"), { waitUntil: "load" });
 await page.waitForSelector("#ftWhy .fc-fam li");
 const famV2 = await page.evaluate(() => [...document.querySelectorAll("#ftWhy .fc-fam li")].map((li) => ({
   k: li.querySelector(".fc-fam-k").textContent,

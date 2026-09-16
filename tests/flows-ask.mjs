@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { buildFactIndex, selectFacts, numeralsIn, guardAnswer, renderFactsPlain, promptFor,
          tickerCoverage, shedCardFacts, emptySilences, fileSilence, SILENCE_KINDS,
-         promptForSummary, renderSummaryPlain, summaryFingerprint,
+         promptForSummary, renderSummaryPlain, summaryFingerprint, cardFacts,
          refreshIntradayFacts, briefAge, INTRADAY_SOURCES }
   from "../shared/flows-ask.js";
 
@@ -1841,4 +1841,26 @@ console.log(`✓ flows-ask: ${checks} assertions — an index whose every figure
 
   ok(summaryFingerprint(FACTS) !== summaryFingerprint([FACTS[2], FACTS[1], FACTS[0]]),
      "and re-ordering the same facts is a different prompt, so it is a different fingerprint");
+
+  const one = promptForSummary(FACTS, {}, { subject: "NVDA" });
+  ok(/ONE name, NVDA,/.test(one.system) && /about NVDA only/.test(one.system),
+     "a subject narrows the summary prompt to one name, named in the system rules");
+  ok(/two or three plain sentences/.test(one.system) && !/three or four/.test(one.system),
+     "and asks for two or three sentences rather than the board's three or four");
+  ok(/Facts measured for NVDA this session:/.test(one.user),
+     "the facts header names the subject");
+  eq(promptForSummary(FACTS, {}, { subject: "nvda" }).system, promptForSummary(FACTS, {}).system,
+     "a subject that is not a ticker is ignored rather than trusted");
+  eq(promptForSummary(FACTS, {}, {}).user, promptForSummary(FACTS, {}).user,
+     "and no subject leaves the board prompt byte-identical");
+
+  const thin = {
+    ticker: "THN", status: "ok", depth: "cross-section", sessionDate: "2026-09-04",
+    generatedAt: STAMP, score: 12, conviction: 40, regime: { label: "long gamma" }, panels: {},
+  };
+  eq(cardFacts({ "card:THN": thin }).facts.length, 0,
+     "the board index still skips a cross-section card by default");
+  const thinFacts = cardFacts({ "card:THN": thin }, { includeThin: true }).facts;
+  ok(thinFacts.length === 1 && /THN scored 12/.test(thinFacts[0].say),
+     "and the per-name lane reads it when asked to, because a thin card is still that name's card");
 }

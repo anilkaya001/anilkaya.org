@@ -3710,6 +3710,12 @@
     if (scroller) scroller.addEventListener("scroll", schedule, { passive: true });
   }
 
+  if (scroller) {
+    const edge = () => scroller.classList.toggle("is-scrolled", scroller.scrollTop > 2);
+    scroller.addEventListener("scroll", edge, { passive: true });
+    edge();
+  }
+
   function writeHash(value) {
     try {
       history.replaceState(null, "",
@@ -3905,6 +3911,7 @@
     if (secEl) secEl.textContent = sector || "";
 
     hero.hidden = false;
+    if (lastLive !== null) applyLive();
   }
 
   function paintCards(card) {
@@ -5828,6 +5835,201 @@
     return boardsAsked;
   }
 
+  const NEURON_CLAMP = 32;
+  let neuronState = null;
+
+  function paintNeuron(res) {
+    const host = $("ftNeuron"), head = $("ftNeuronH"), say = $("ftNeuronSay"), src = $("ftNeuronSrc");
+    if (!host || !head || !say || !src) return;
+    const r = res && typeof res === "object" ? res : null;
+    const status = r && typeof r.status === "string" ? r.status : "unavailable";
+    const text = r && typeof r.summary === "string" && r.summary.trim() ? r.summary.trim() : "";
+    const mark = host.querySelector(".ak-nn");
+    host.hidden = false;
+    host.classList.toggle("is-pending", status !== "ok");
+    host.classList.toggle("is-llm", status === "ok" && r.llm === true);
+    if (mark) mark.classList.toggle("is-live", status === "pending" || (status === "ok" && r.llm === true));
+
+    head.replaceChildren(document.createTextNode("Neuron"));
+    if (status === "ok" && typeof r.generatedAt === "string" && r.generatedAt.length >= 16) {
+      const when = el("span", "ak-neuron-when");
+      when.append(document.createTextNode(" \u00b7 written "));
+      const time = document.createElement("time");
+      time.dateTime = r.generatedAt;
+      time.textContent = r.generatedAt.slice(11, 16) + " UTC";
+      when.append(time);
+      head.append(when);
+    }
+
+    if (status === "ok" && text) {
+      if (neuronState === "ok:" + text) return;
+      say.replaceChildren();
+      say.removeAttribute("data-empty");
+      const words = text.split(/\s+/).filter(Boolean);
+      words.forEach((w, wi) => {
+        if (wi) say.append(" ");
+        const sp = el("span", "ak-w", w);
+        sp.style.setProperty("--d", String(Math.min(wi, NEURON_CLAMP)));
+        say.append(sp);
+      });
+      const caret = el("span", "ak-caret");
+      caret.style.setProperty("--d", String(Math.min(words.length, NEURON_CLAMP) + 1));
+      caret.setAttribute("aria-hidden", "true");
+      say.append(caret);
+      say.setAttribute("aria-label", text);
+      src.textContent = typeof r.provenance === "string" && r.provenance
+        ? r.provenance
+        : (r.llm ? "Wording by a language model; figures measured by the pipeline."
+          : "Deterministic reading. No model was asked.");
+      neuronState = "ok:" + text;
+      return;
+    }
+
+    const note = r && typeof r.note === "string" && r.note ? r.note : null;
+    const said = status === "pending"
+      ? (note || "Neuron is writing this name\u2019s summary now.")
+      : status === "quiet"
+        ? (note || "This card carries no reading a summary could be written over.")
+        : status === "unreadable"
+          ? (note || "The card was published and could not be read.")
+          : "No summary could be read for this name.";
+    if (neuronState === status + ":" + said) return;
+    say.replaceChildren(document.createTextNode(said));
+    say.removeAttribute("aria-label");
+    say.setAttribute("data-empty", status === "pending" ? "pending"
+      : status === "quiet" ? "quiet" : status === "unreadable" ? "unreadable" : "unavailable");
+    src.textContent = status === "pending"
+      ? "Not published yet \u2014 not a quiet name. Nothing here is claimed about it."
+      : "Nothing here is claimed about the name.";
+    neuronState = status + ":" + said;
+  }
+
+  function fetchNeuron(ticker) {
+    if (!ticker) return Promise.resolve();
+    return getJSON("/api/flows/summary?t=" + encodeURIComponent(ticker))
+      .then((res) => paintNeuron(res))
+      .catch(() => paintNeuron({ status: "unavailable" }));
+  }
+
+  let lastLive = null;
+  let liveTimer = null;
+  let liveTicks = 0;
+  let liveTicker = null;
+
+  function fmtClock(iso) {
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return "";
+    const two = (n) => String(n).padStart(2, "0");
+    return two(d.getUTCHours()) + ":" + two(d.getUTCMinutes()) + ":" + two(d.getUTCSeconds()) + " UTC";
+  }
+
+  function applyLive() {
+    const badge = $("ftHeroLive");
+    const px = $("ftHeroPx"), chgEl = $("ftHeroChg");
+    const bar = $("ftPrice"), barChg = $("ftChgPct");
+    const live = lastLive;
+    if (!badge) return;
+    badge.hidden = false;
+    if (!live || live.status !== "ok" || isNum(live.price) === null) {
+      badge.classList.remove("is-on");
+      badge.setAttribute("data-empty", "unavailable");
+      badge.textContent = live && live.status === "quiet"
+        ? "live read empty \u00b7 session close"
+        : "not live \u00b7 session close";
+      badge.title = "The vendor\u2019s live quote could not be read on the last attempt, so the " +
+        "price shown is the session close the card published. The page keeps trying every " +
+        "five seconds.";
+      return;
+    }
+    const price = isNum(live.price);
+    const pct = isNum(live.changePct);
+    const tick = (node, text) => {
+      if (!node) return;
+      if (node.textContent !== text) {
+        node.textContent = text;
+        node.classList.remove("is-ticked");
+        void node.offsetWidth;
+        node.classList.add("is-ticked");
+      }
+    };
+    if (px) {
+      tick(px, "$" + price.toFixed(2));
+      px.removeAttribute("data-empty");
+      px.title = "Last price from the vendor\u2019s live quote, read " + fmtClock(live.readAt) +
+        (live.tapeTime ? "; tape time " + String(live.tapeTime) : "") + ".";
+    }
+    if (chgEl) {
+      chgEl.textContent = pct === null ? "" : P.pct1(pct);
+      chgEl.className = "ft-hero-chg" + P.polarity(pct);
+      chgEl.hidden = pct === null;
+      chgEl.title = pct === null
+        ? "The live quote carried no previous close, so no day change is stated."
+        : "Change against the previous close carried by the live quote.";
+    }
+    if (bar) {
+      const b = bar.querySelector("b");
+      if (b) tick(b, "$" + price.toFixed(2));
+      bar.removeAttribute("data-empty");
+      bar.title = "Last price from the vendor\u2019s live quote, read " + fmtClock(live.readAt) + ".";
+    }
+    if (barChg && pct !== null) {
+      const b = barChg.querySelector("b");
+      if (b) b.textContent = P.pct1(pct);
+      barChg.className = "fc-meta ft-id" + P.polarity(pct);
+      barChg.removeAttribute("data-empty");
+      barChg.title = "Change against the previous close carried by the live quote.";
+    }
+    badge.classList.add("is-on");
+    badge.removeAttribute("data-empty");
+    badge.textContent = "live \u00b7 " + fmtClock(live.readAt);
+    badge.title = "Re-read from the vendor every five seconds while this page is visible. " +
+      "Every other reading on this page is the session\u2019s, as the card published it.";
+  }
+
+  function fetchLive(ticker) {
+    return getJSON("/api/flows/live?t=" + encodeURIComponent(ticker))
+      .then((live) => {
+        lastLive = live && typeof live === "object" && typeof live.status === "string"
+          ? live : { status: "unavailable" };
+      })
+      .catch(() => { lastLive = { status: "unavailable" }; })
+      .then(applyLive);
+  }
+
+  function refreshCard(ticker) {
+    return getJSON("/api/flows/card?t=" + encodeURIComponent(ticker)).then((card) => {
+      if (!card || card.status === "pending" || !card.panels) return;
+      const was = painted && painted.__updatedAt ? painted.__updatedAt : null;
+      const now = card.__updatedAt || null;
+      if (was !== null && now !== null && now <= was) return;
+      if (was === null && now === null) return;
+      return paint(card).then(() => { neuronState = null; return fetchNeuron(ticker); });
+    }).catch(() => {});
+  }
+
+  function liveTick() {
+    if (document.hidden || !liveTicker) return;
+    liveTicks++;
+    const t = liveTicker;
+    fetchLive(t);
+    if (neuronState === null || !neuronState.startsWith("ok:") || liveTicks % 12 === 0) fetchNeuron(t);
+    if (liveTicks % 6 === 0) {
+      getJSON("/api/flows/flowalerts").then((feed) => paintFlow(t, feed)).catch(() => {});
+    }
+    if (liveTicks % 12 === 0) refreshCard(t);
+  }
+
+  function startLive(ticker) {
+    liveTicker = ticker || null;
+    if (liveTimer !== null) { clearInterval(liveTimer); liveTimer = null; }
+    if (!liveTicker) return;
+    liveTicks = 0;
+    fetchLive(liveTicker);
+    fetchNeuron(liveTicker);
+    liveTimer = setInterval(liveTick, 5000);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) liveTick(); });
+  }
+
   function boardsWhenIdle(ticker) {
     const go = () => {
       if (!ticker) return;
@@ -6103,6 +6305,7 @@
       paint(card);
       wireSwitch(card);
       boardsWhenIdle(ticker);
+      startLive(ticker);
       return null;
     }).catch(() => {
       statusEl.textContent = "This page could not be loaded. Reload to try again.";
