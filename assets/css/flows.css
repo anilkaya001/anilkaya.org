@@ -7114,16 +7114,12 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
 }
 
 @media (min-width: 60rem) {
-  .flows-body.has-rail > .flows-main { transition: padding-right var(--dur-open) var(--ease-out); }
   .flows-body.has-dock-open > .flows-main { padding-right: calc(min(30rem, 92vw) + var(--pad)); }
   .flows-scroll { border-top: 1px solid transparent; }
   .flows-scroll.is-scrolled {
     border-top-color: var(--hairline);
     box-shadow: inset 0 14px 12px -12px rgb(0 0 0 / 0.6);
   }
-}
-@media (prefers-reduced-motion: reduce) {
-  .flows-body.has-rail > .flows-main { transition: none; }
 }
 
 .ft-neuron {
