@@ -5934,8 +5934,8 @@
       badge.classList.remove("is-on");
       badge.setAttribute("data-empty", "unavailable");
       badge.textContent = live && live.status === "quiet"
-        ? "live read empty \u00b7 session close shown"
-        : "live read unavailable \u00b7 session close shown";
+        ? "live read empty \u00b7 session close"
+        : "not live \u00b7 session close";
       badge.title = "The vendor\u2019s live quote could not be read on the last attempt, so the " +
         "price shown is the session close the card published. The page keeps trying every " +
         "five seconds.";

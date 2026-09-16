@@ -7147,11 +7147,14 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-faint);
-  white-space: nowrap;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .ft-hero-live[hidden] { display: none; }
 .ft-hero-live::before {
   content: "";
+  flex: none;
   width: 0.45rem;
   height: 0.45rem;
   border-radius: 50%;
