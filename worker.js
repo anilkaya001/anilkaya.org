@@ -2981,13 +2981,21 @@ async function route(request, env, url, ctx) {
       if (!FLOWS_TICKER_RE.test(ticker)) {
         throw new HttpError(400, "invalid_ticker", "Unknown ticker");
       }
-      return serveCachedVendorRead({
-        ctx,
-        cacheKey: new Request(`https://flows-live.internal/${ticker}`, { method: "GET" }),
-        wantsRefresh: false,
-        ttlSeconds: LIVE_TTL_SECONDS,
-        build: () => buildLivePayload(env, ticker),
-      });
+      try {
+        return await serveCachedVendorRead({
+          ctx,
+          cacheKey: new Request(`https://flows-live.internal/${ticker}`, { method: "GET" }),
+          wantsRefresh: false,
+          ttlSeconds: LIVE_TTL_SECONDS,
+          build: () => buildLivePayload(env, ticker),
+        });
+      } catch (error) {
+        if (!(error instanceof HttpError)) throw error;
+        return json({ ticker, status: "unavailable", why: error.code,
+          readAt: new Date().toISOString(), price: null, prevClose: null, changePct: null,
+          open: null, high: null, low: null, volume: null, marketTime: null, tapeTime: null },
+        200, { "Cache-Control": "no-store" });
+      }
     }
 
     if (path === "/api/flows/brief") {

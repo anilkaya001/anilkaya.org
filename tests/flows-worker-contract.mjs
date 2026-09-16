@@ -547,11 +547,13 @@ try {
       eq((await get("/api/flows/live?t=AAPL")).status, 401,
          "the live quote is behind the gate too");
       const live = await get("/api/flows/live?t=AAPL", { headers: auth });
-      eq(live.status, 503,
-         "and with no vendor key configured in this harness it says so with a 503 rather " +
-         "than serving a price it did not read");
-      eq((await live.json()).error.code, "chain_unconfigured",
-         "naming the configuration fault in the project error envelope");
+      eq(live.status, 200,
+         "and with no vendor key configured in this harness it still answers 200: a live " +
+         "read that failed is a silence the page draws, not an error a console should log");
+      const liveBody = await live.json();
+      eq(liveBody.status, "unavailable", "the silence is UNAVAILABLE");
+      eq(liveBody.why, "chain_unconfigured", "and it names the configuration fault");
+      eq(liveBody.price, null, "with no price a page could mistake for a reading");
 
       eq((await get("/api/flows/ai-usage")).status, 401,
          "the meter is behind the same gate as everything else here: what this site spends " +
