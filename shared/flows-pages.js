@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "211";
+export const ASSET_VERSION = "212";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -625,6 +625,12 @@ export function overviewPage({ username = "", summary = null } = {}) {
 ${shell("Session Overview", "Options-flow intelligence", "overview", username, `
   <div class="flows-status" id="flowsStatus" role="status">Loading the latest session…</div>
   <p class="flows-stale" id="flowsStale" role="status" hidden></p>
+  <!-- THE BOX THAT SCROLLS -- the overview's, on the ticker page's pattern
+       (flows.css, "THE SHELL"). At desktop widths the body is the viewport:
+       the rail, the topbar and the two bands above stay put, and the Neuron
+       block, the jump strip, the command center and the foot scroll inside
+       this element, with the jump strip sticking to its top. -->
+  <div class="flows-scroll" id="ccScroll">
 ${neuronDock(summary)}
 
   <!-- THE COMMAND CENTER. Twelve columns at desk widths, stacking to one on a
@@ -901,6 +907,7 @@ ${neuronDock(summary)}
     is measured rather than asserted, session by session, on the
     <a href="/flows/history/">track record</a>.</span>
   </p>
+  </div>
 `)}
 <script src="${v("/assets/js/nav.js")}" defer></script>
 <!-- flows-ui.js BEFORE flows-overview.js: the overview reads window.FlowsUI at
@@ -1833,7 +1840,7 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
        the sticky bar, the rows and the panel grid -- scrolls inside this one
        element. On a phone the shell is off and this is an ordinary div. The
        controller reads its scrollTop where it used to read window.scrollY. -->
-  <div class="ft-scroll" id="ftScroll">
+  <div class="ft-scroll flows-scroll" id="ftScroll">
   <section class="ft-hero" id="ftHero" hidden aria-label="This name at a glance">
     <!-- THE IDENTITY IS THE SYMBOL AND WHAT IDENTIFIES IT, stacked, which is
          where the design puts the company name and where a "Sector" column of
