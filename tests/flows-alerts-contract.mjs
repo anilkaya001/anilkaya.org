@@ -1,24 +1,3 @@
-/* =============================================================
-   flows-alerts-contract.mjs — the vendor's flow alerts, shaped.
-
-   WHAT IS WORTH ASSERTING. This module sits between a vendor feed
-   whose field set was established by probe (three live runs, not
-   documentation) and a page whose predecessor panel is BUILT on the
-   refusal to say "trade". The expensive defects are all quiet
-   category confusions:
-
-     - an absent vendor flag read as FALSE (the vendor not asking is
-       not the vendor answering no);
-     - a row with nothing measurable shaped into a row of dashes;
-     - the vendor's selection presented as the market's ranking;
-     - prose that drifts into claims the data cannot support.
-
-   The tie-break fixture below exists because the FIRST draft of the
-   sort had `x || y < z ? -1 : 1` — precedence made the whole chain a
-   truthiness test — and only a fixture with two null-premium rows of
-   different sizes can see that class of bug at all.
-   ============================================================= */
-
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
@@ -34,7 +13,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
 const stageOf = (t) => (t === "AAA" ? "deep" : t === "BBB" ? "gated" : null);
 
-/* ---------- §1 one row, shaped ------------------------------------ */
 {
   const row = alertRow({
     ticker: "AAA",
@@ -70,7 +48,6 @@ const stageOf = (t) => (t === "AAA" ? "deep" : t === "BBB" ? "gated" : null);
     "a name the funnel never saw is foreign, not a dash");
 }
 
-/* ---------- §2 unusable rows are counted, not dashed -------------- */
 {
   eq(alertRow({ option_chain: "AAA260918C00150000", total_premium: 5 }), null,
     "no ticker, no row");
@@ -82,15 +59,14 @@ const stageOf = (t) => (t === "AAA" ? "deep" : t === "BBB" ? "gated" : null);
     "but a MEASURED zero premium is a measurement and the row survives");
 }
 
-/* ---------- §3 ranking inside the vendor's selection -------------- */
 {
   const built = buildFlowAlerts([
     { ticker: "CCC", total_premium: 50 },
     { ticker: "AAA", total_premium: 900 },
-    { ticker: "DDD", trade_count: 3, total_size: 10 },      // no premium
-    { ticker: "BBB", total_premium: 900 },                   // tie with AAA
-    { ticker: "EEE", trade_count: 2, total_size: 90 },       // no premium, bigger
-    { ticker: null, total_premium: 5 },                      // unusable
+    { ticker: "DDD", trade_count: 3, total_size: 10 },
+    { ticker: "BBB", total_premium: 900 },
+    { ticker: "EEE", trade_count: 2, total_size: 90 },
+    { ticker: null, total_premium: 5 },
   ], { stageOf });
 
   deep(built.rows.map((r) => r.t), ["AAA", "BBB", "CCC", "EEE", "DDD"],
@@ -114,7 +90,6 @@ const stageOf = (t) => (t === "AAA" ? "deep" : t === "BBB" ? "gated" : null);
     "two builds over one response publish identical bytes");
 }
 
-/* ---------- §4 the cap and its shed ------------------------------- */
 {
   const many = [];
   for (let i = 0; i < ALERT_ROWS + 7; i++) {
@@ -128,19 +103,17 @@ const stageOf = (t) => (t === "AAA" ? "deep" : t === "BBB" ? "gated" : null);
   eq(built.rows[0].prem, 1000, "the shed takes the smallest premiums, never the largest");
 }
 
-/* ---------- §5 flags in coverage count ONLY the affirmative ------- */
 {
   const built = buildFlowAlerts([
     { ticker: "AAA", total_premium: 3, has_sweep: true },
     { ticker: "BBB", total_premium: 2, has_sweep: false },
-    { ticker: "CCC", total_premium: 1 },                     // flag absent
+    { ticker: "CCC", total_premium: 1 },
   ]);
   eq(built.coverage.sweeps, 1,
     "the sweep count counts true and only true — counting an absent flag either " +
     "way would manufacture a measurement the vendor never sent");
 }
 
-/* ---------- §6 empty is quiet, said in a word --------------------- */
 {
   const built = buildFlowAlerts([]);
   eq(built.status, "quiet", "an empty response reports quiet");
@@ -149,17 +122,11 @@ const stageOf = (t) => (t === "AAA" ? "deep" : t === "BBB" ? "gated" : null);
     "basis panel must explain the surface even when it is empty");
 }
 
-/* ---------- §6b the movers band cut from the same rows ------------
-   The band exists because the movers' premium lists are byName and a
-   stale comment said contract-level needed an endpoint "this key does
-   not reach". It is cut from ALREADY-RANKED rows, so its one honest
-   job is subsetting without re-ordering and without inventing rank
-   for rows the ranking could not place. */
 {
   const built = buildFlowAlerts([
     { ticker: "AAA", option_chain: "AAA260918C00150000", total_premium: 900, has_sweep: true },
     { ticker: "BBB", total_premium: 500 },
-    { ticker: "CCC", trade_count: 3, total_size: 10 },        // no premium
+    { ticker: "CCC", trade_count: 3, total_size: 10 },
   ]);
   const band = alertBand(built.rows, { cap: 2 });
   deep(band.rows.map((r) => r.t), ["AAA", "BBB"],
@@ -179,12 +146,6 @@ const stageOf = (t) => (t === "AAA" ? "deep" : t === "BBB" ? "gated" : null);
   deep(alertBand(null).rows, [], "and junk input is an empty band, not a throw");
 }
 
-/* ---------- §7 the vocabulary holds in the payload's own prose ----
-   The unusual page's ban exists because its counter cannot support the
-   claims; THIS surface supports more (a size, a span, a side) and still
-   not these. The notes are scanned with NO allow-list: the prose was
-   written to need no exception, and an edit that introduces one should
-   have to come here and argue for it. */
 {
   const BAN = /\b(print|trade|block|bought|sold|paid|whale|smart money|institutional|fill)\b/gi;
   const scan = (value, at) => {
@@ -206,17 +167,6 @@ const stageOf = (t) => (t === "AAA" ? "deep" : t === "BBB" ? "gated" : null);
     "fact about this feed");
 }
 
-/* ---------- the envelope both writers must survive -----------------
-   THE DEFECT THIS SECTION EXISTS FOR. Two writers publish the `flowalerts`
-   key: the nightly pipeline, whose uw() unwraps `body.data` before calling;
-   and the worker's fifteen-minute cron, whose uwFetch() returns the parsed
-   body verbatim. This suite only ever fed the shaper a bare array — the one
-   shape the CRON NEVER SENDS — so the shaper's `Array.isArray` guard silently
-   iterated nothing on every intraday refresh, and the unguarded write put a
-   well-formed empty feed over sixty real rows. The Overview then reported
-   "FLAGGED WINDOWS 0" across 569 screened names: a confident claim about the
-   market, manufactured by a type check, wearing the provenance "refreshed
-   intraday". Both envelopes are now fed to the one shaper here. */
 {
   const rows = [
     { ticker: "AAA", option_chain: "AAA260918C00100000", total_premium: "900000",
@@ -246,34 +196,15 @@ const stageOf = (t) => (t === "AAA" ? "deep" : t === "BBB" ? "gated" : null);
   eq(buildFlowAlerts({ data: "nope" }, { stageOf: () => null }).status, "quiet",
     "as is an envelope whose data is not a list");
 
-  /* The write guard's own condition, asserted where the shaper can see it:
-     the cron writes only on `status === "ok" && rows.length`, so these two
-     readings are exactly what must keep a stale-but-real feed in place. */
   ok(buildFlowAlerts({ data: [] }, { stageOf: () => null }).rows.length === 0,
     "an empty read publishes no rows, which is the condition the cron's write " +
     "guard tests — better a stale feed with an honest readAt than an empty fresh one");
 }
 
-/* ---------- §8 THE SESSION'S RECORD, not the vendor's window ------
-   THE DEFECT THIS SECTION EXISTS FOR, and it is a different one from
-   §7's. The cron's write was fixed to stop publishing an EMPTY feed
-   over a real one; it still published a REPLACEMENT one. The vendor's
-   flow-alerts list is a rolling window of its newest flags, so
-   `{...prev, ...alerts}` every fifteen minutes meant a name flagged at
-   09:31 was gone from the page at 09:46 — not because anything changed
-   about the name, but because the vendor's window had rolled past it.
-   The page carried a heading a reader reads as "what was flagged
-   today" over a body that meant "what was flagged in the last few
-   minutes".
-
-   Every assertion below is about a fact a single read cannot state:
-   that a window was flagged EARLY, that it was flagged AGAIN, and that
-   the record covers one named day and not a smear of two. */
-
-const T1 = "2026-08-28T13:31:00.000Z";   // 09:31 ET
-const T2 = "2026-08-28T13:46:00.000Z";   // 09:46 ET, the next cron firing
-const T3 = "2026-08-31T13:31:00.000Z";   // the NEXT session
-const T4 = "2026-08-28T14:01:00.000Z";   // 10:01 ET, still the same session
+const T1 = "2026-08-28T13:31:00.000Z";
+const T2 = "2026-08-28T13:46:00.000Z";
+const T3 = "2026-08-31T13:31:00.000Z";
+const T4 = "2026-08-28T14:01:00.000Z";
 const D28 = "2026-08-28", D31 = "2026-08-31";
 
 const win = (t, oc, start, prem, extra = {}) => ({
@@ -282,15 +213,12 @@ const win = (t, oc, start, prem, extra = {}) => ({
   alert_rule: "RepeatedHits", ...extra,
 });
 
-/* The nightly publish: an envelope with rows and NO record, because the
-   pipeline writes one read of a session that has already closed. */
 const nightly = {
   v: 1, generatedAt: "2026-08-27T22:04:00.000Z", sessionDate: "2026-08-27",
   readAt: "2026-08-27T22:04:00.000Z", refreshed: "nightly",
   ...buildFlowAlerts([win("OLD", "OLD260918C00100000", "2026-08-27T18:00:00.000Z", 5e6)]),
 };
 
-/* ---- the first intraday read of a new day ---- */
 const read1 = buildFlowAlerts([
   win("AAA", "AAA260918C00150000", T1, 900000),
   win("BBB", "BBB260918P00050000", T1, 500000),
@@ -311,10 +239,9 @@ eq(merge1.record.reads, 1, "one read in it");
 eq(merge1.rows[0].firstAt, T1, "every row's first sighting is this read");
 eq(merge1.rows[0].reads, 1, "seen once");
 
-/* ---- the second read: the window has rolled past AAA ---- */
 const read2 = buildFlowAlerts([
-  win("BBB", "BBB260918P00050000", T1, 650000),   // same window, restated larger
-  win("CCC", "CCC260918C00075000", T2, 300000),   // new this read
+  win("BBB", "BBB260918P00050000", T1, 650000),
+  win("CCC", "CCC260918C00075000", T2, 300000),
 ]);
 const merge2 = mergeAlerts(state1, read2, { at: T2, sessionDate: D28 });
 const state2 = { ...state1, ...merge2, readAt: T2 };
@@ -353,7 +280,6 @@ deep(merge2.rows.map((r) => r.t), ["AAA", "BBB", "CCC"],
 eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two — the " +
   "page prints “N of seen flagged windows” and that denominator is now the day's");
 
-/* ---- the session boundary ---- */
 {
   const read3 = buildFlowAlerts([win("DDD", "DDD260918C00020000", T3, 100000)]);
   const merge3 = mergeAlerts(state2, read3, { at: T3, sessionDate: D31 });
@@ -376,7 +302,6 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
   eq(undated.record.date, null, "and the date it publishes is null, not a guess");
 }
 
-/* ---- the ceiling, and which one bit ---- */
 {
   const wide = [];
   for (let i = 0; i < 12; i++) {
@@ -394,11 +319,6 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
   eq(capped.seen, 12, "and `seen` still names the population the ceiling cut from");
   eq(capped.record.everEntered, 12, "as does the day's running entry count");
 
-  /* THE CEILING COMPOUNDS, which is the reason `everEntered` exists at all:
-     the next read merges into the rows this one KEPT, so `union` can never
-     exceed cap + one read again however busy the session gets. A reader
-     watching `union` alone would see the day's population stop growing at the
-     exact moment it started overflowing. */
   const more = [];
   for (let i = 0; i < 4; i++) {
     more.push(win("X" + i, "X" + i + "260918C00010000", T2, 2000 + i));
@@ -430,7 +350,6 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
     "than the read that built it");
 }
 
-/* ---- identity across reads ---- */
 {
   eq(alertKey({ t: null, oc: "X", spanStart: T1 }), null,
     "a row with no ticker has no identity — it can never be found again, so it cannot " +
@@ -443,8 +362,6 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
      alertKey({ t: "AAA", oc: "O", spanStart: T1, prem: 999 }),
     "while one window restated with new numbers is still that window");
 
-  /* A vendor row with no start_time: nothing is left to identify it by, so those
-     collapse per (name, contract, rule) rather than re-entering on every read. */
   const spanless = (rule) => ({ ticker: "SSS", option_chain: "S1", total_premium: 10, alert_rule: rule });
   const s1 = mergeAlerts(null, buildFlowAlerts([spanless("RuleA")]), { at: T1, sessionDate: D28 });
   const s2 = mergeAlerts(s1, buildFlowAlerts([spanless("RuleA")]),
@@ -457,8 +374,6 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
     { at: T2, sessionDate: D28 });
   eq(s3.rows.length, 2, "but a different rule on the same contract is a different alert");
 
-  /* One read that lists a window twice is one sighting: `reads` is a claim about
-     the session, not about the vendor's response shape. */
   const twice = mergeAlerts(null, buildFlowAlerts([
     win("DUP", "DUP260918C00010000", T1, 90),
     win("DUP", "DUP260918C00010000", T1, 90),
@@ -468,14 +383,11 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
     "session's would inflate the number the page leads on");
 }
 
-/* ---- a row carried out of an older payload ---- */
 {
-  /* `undefined !== null` is true, so a stored row missing `prem` would sail past
-     the comparator's null test and land in `b.prem - a.prem` as NaN, silently
-     randomising the whole ranking. This fixture is the only kind that can see it. */
+
   const stale = {
     record: { date: D28, reads: 4, firstReadAt: T1 },
-    rows: [{ t: "OLD", oc: "OLD1", spanStart: T1, st: "foreign" }],   // no prem, no record fields
+    rows: [{ t: "OLD", oc: "OLD1", spanStart: T1, st: "foreign" }],
   };
   const merged = mergeAlerts(stale, buildFlowAlerts([win("NEW", "NEW1", T2, 42)]),
     { at: T2, sessionDate: D28 });
@@ -490,14 +402,6 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
   eq(merged.record.reads, 5, "the read count continues from the stored record");
 }
 
-/* ---- an empty read never reaches the store ---------------------
-   THE GUARD IS AT THE CALL SITE and merging must not weaken it. Two
-   assertions, because they certify two different halves: the shaper
-   half (an empty read still produces no rows, so the condition the
-   cron tests is still reachable) and the WORKER half (that condition
-   is still the only path to the write). The second reads worker.js as
-   source because that is the only place the guard exists — asserting
-   a copy of it here would certify the copy. */
 {
   const emptyRead = buildFlowAlerts({ data: [] }, { stageOf: () => null });
   eq(emptyRead.rows.length, 0, "an empty vendor read still shapes to no rows");
@@ -522,9 +426,7 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
     "page's claim about how fresh the rows are — over rows nothing confirmed");
   eq((body.match(/upsert\("flowalerts"/g) || []).length, 1,
     "with exactly one write to the key in the handler, so the guard cannot be routed around");
-  /* Positional rather than adjacent: the guard and the write are allowed to have
-     the handler's reasoning between them, but the write must be INSIDE the
-     branch the guard opens and before the else that logs the refusal. */
+
   const guardAt = body.indexOf("if (merged && merged.rows.length) {");
   const writeAt = body.indexOf("await upsert(\"flowalerts\"");
   const elseAt = body.indexOf("} else {", guardAt);
@@ -536,17 +438,8 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
     "`{...prev, ...alerts}` is the exact expression that deleted the morning's flags");
 }
 
-/* ---------- §9 THE MAP THAT COULD NOT ANSWER, AND THE RECORD THAT
-   LOST ITS OWN COUNTERS ---------------------------------------------
-   Four defects with one shape between them: a value published where the
-   truthful answer was "not known". `st` said "foreign" — which the page
-   spells out as "the screener never returned this name" — because a map
-   that never held the name missed it. The record's own counters rebuilt
-   themselves as 0 and as this read's instant when a stored payload
-   arrived without them. Each is a fact manufactured out of an absence,
-   which is the same defect Number(null) === 0 is. */
 {
-  /* ---- the partial stage map ---- */
+
   const one = (t) => ({ ticker: t, option_chain: t + "260918C00100000",
     total_premium: 1e6, start_time: T1, end_time: T2, alert_rule: "RepeatedHits" });
 
@@ -574,9 +467,6 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
     "and a partial map that DOES hold the name still carries its stage forward — " +
     "the flag suppresses the invented answer, not the remembered one");
 
-  /* THE STICKINESS the record introduced, which is why this could not stay a
-     transient per-read blemish: a stage is read back out of the row the last
-     read wrote, so a wrong one is written once and then re-derived all day. */
   const readA = buildFlowAlerts([one("ZZZ")], { stageOf: () => null, stageComplete: false });
   const mA = mergeAlerts(null, readA, { at: T1, sessionDate: D28 });
   const lastStage = new Map(mA.rows.map((r) => [r.t, r.st]));
@@ -587,17 +477,11 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
     "into “foreign” — under the old default the first read stamped the word and " +
     "every read after it read that stamp back out and re-published it");
 
-  /* The cron is the caller that must pass it, and worker.js is the only place
-     that call exists, so assert the source rather than a copy of it here. */
   const worker = readFileSync(new URL("../worker.js", import.meta.url), "utf8");
   const handler = worker.slice(
     worker.indexOf("async function refreshFlowsIntraday"),
     worker.indexOf("async function readFlowsPayload"));
-  /* THE CALL, NOT THE HANDLER. The first draft of this assertion scanned the
-     whole handler for the literal — and the handler's own comment SPELLS the
-     literal while explaining it, so deleting the argument left the assertion
-     green. A source scan that its own prose can satisfy certifies nothing;
-     this one reads the argument list of the call it is about. */
+
   const callAt = handler.indexOf("buildFlowAlerts(raw");
   const call = handler.slice(callAt, handler.indexOf("});", callAt) + 3);
   ok(callAt > 0 && /stageComplete:\s*false/.test(call),
@@ -606,7 +490,6 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
     "otherwise is back to publishing the falsehood, so the declaration is asserted " +
     "where it is made");
 
-  /* ---- a stored record that never named its day ---- */
   {
     const dateless = {
       record: { date: null, reads: 3, firstReadAt: T1, everEntered: 3 },
@@ -625,13 +508,9 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
       "compared with this read's day at all");
   }
 
-  /* ---- a stored record that lost its counters ----
-     Reachable for exactly as long as a deploy takes, and this key is rewritten
-     every fifteen minutes while that is true. The fixture is a record with rows
-     and no counts — the shape a build older than the counters wrote. */
   {
     const lost = {
-      record: { date: D28 },                       // no reads, no everEntered, no firstReadAt
+      record: { date: D28 },
       rows: [
         { t: "AAA", oc: "A1", spanStart: T1, prem: 900, st: "board:long",
           firstAt: T1, lastAt: T1, reads: 2 },
@@ -658,11 +537,10 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
       "rows carried in were flagged before now, so stamping 10:01 here would " +
       "publish “N reads since 10:01” over a row whose own firstAt reads 09:31");
 
-    /* The same choice one level down, on the field the whole layer exists for. */
     const lostRow = {
       record: { date: D28, reads: 2, firstReadAt: T1, everEntered: 2 },
       rows: [{ t: "AAA", oc: "AAA260918C00100000", spanStart: T1, prem: 900, st: null,
-               lastAt: T1, reads: 1 }],                       // held, but no firstAt
+               lastAt: T1, reads: 1 }],
     };
     const reseen = mergeAlerts(lostRow, buildFlowAlerts([{
       ticker: "AAA", option_chain: "AAA260918C00100000", total_premium: 950,
@@ -679,8 +557,6 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
     eq(reseen.rows[0].reads, 2, "and the sighting count still climbs from the minimum " +
       "certainly true");
 
-    /* The same fields on a record that is genuinely STARTING are measurements,
-       not silences — the fixture that keeps the fallback from swallowing them. */
     const fresh = mergeAlerts(null, buildFlowAlerts([one("CCC")]), { at: T4, sessionDate: D28 });
     eq(fresh.record.reads, 1, "a record that is starting has had exactly one read");
     eq(fresh.record.everEntered, 1, "one window has entered it");
@@ -689,7 +565,6 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
       "null above cannot simply be “null whenever we are unsure”");
   }
 
-  /* ---- a merge handed something that is not a shaped read ---- */
   {
     const junk = mergeAlerts(
       { record: { date: D28, reads: 1, firstReadAt: T1, everEntered: 1 },
@@ -705,11 +580,6 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
       "with a measured zero where one belongs — nothing entered, and that WAS counted");
   }
 
-  /* ---- the ceilings against the size the other writer is held to ----
-     A ceiling justified only in a comment is a ceiling nobody re-derives when
-     the row shape grows a field. This builds the widest row the shaper can
-     emit, fills the record to both published ceilings, and measures the whole
-     stored payload against worker.js's own constant. */
   {
     const wide = (i) => ({
       ticker: "ABCD", option_chain: `ABCD260918C00${String(100000 + i).slice(0, 6)}`,
@@ -730,11 +600,6 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
     ok(full.record.bytes <= MERGED_ALERT_BYTES,
       "inside the published byte ceiling at the same time");
 
-    /* AND THE OTHER CEILING, WHICH THE FIXTURE ABOVE CANNOT REACH. At 180 rows
-       the ROW ceiling bites first, so that measurement holds however wrong
-       MERGED_ALERT_BYTES is — it was raised eightfold in a mutation run and
-       nothing here noticed. A record whose row cap is out of the way is the
-       only fixture that puts the byte ceiling under load. */
     const byBytes = mergeAlerts(null, buildFlowAlerts(rowsIn, { stageOf: () => "board:long", cap: 400 }),
       { at: T1, sessionDate: D28, cap: 4000 });
     eq(byBytes.record.shedBy, "bytes", "with the row ceiling out of the way the BYTE " +

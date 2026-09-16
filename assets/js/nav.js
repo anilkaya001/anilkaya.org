@@ -1,11 +1,3 @@
-/* =============================================================
-   nav.js — the pill nav's sliding gold indicator.
-   Every tab is normalised to the widest tab's width, so the
-   indicator is a FIXED size that only ever glides horizontally —
-   solid, never "flippy". It marks the active tab, follows the
-   pointer on hover, and returns on leave. Re-measures on resize
-   and font load.
-   ============================================================= */
 (() => {
   "use strict";
   const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -21,8 +13,6 @@
 
     let target = active;
 
-    // Normalise every tab to the widest tab's width → the indicator never
-    // resizes; it only translates.
     function equalize() {
       links.forEach((l) => (l.style.width = ""));
       let w = 0;
@@ -36,7 +26,7 @@
       ind.style.height = link.offsetHeight + "px";
       ind.style.transform = "translate(" + link.offsetLeft + "px," + link.offsetTop + "px)";
       links.forEach((l) => l.classList.toggle("is-current", l === link));
-      if (!animate) { void ind.offsetWidth; ind.style.transition = ""; }  // restore after reflow
+      if (!animate) { void ind.offsetWidth; ind.style.transition = ""; }
     }
 
     function layout(animate) { equalize(); place(target, animate); }

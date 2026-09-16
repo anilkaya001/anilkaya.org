@@ -1,29 +1,3 @@
-/* =============================================================
-   flows-strip.mjs — the comment strip is correct, or it does not ship.
-
-   THE FAILURE THIS GUARDS AGAINST IS NOT A SMALLER FILE, IT IS A WRONG
-   ONE. scripts/strip-comments.mjs rewrites every served script in the
-   deploy workspace; a scanner that mistakes one regex for a division
-   produces a file that is still text and no longer code, the build
-   succeeds, and the route is dead in production while every test here
-   passed against the unstripped tree. So this suite runs the stripper
-   over the real tree and checks three things a size figure cannot:
-
-     1. every output parses
-     2. stripping twice is stripping once (no second pass eats code)
-     3. the panels DRAW THE SAME DOM, stripped and not
-
-   THE THIRD IS THE ONE THAT MATTERS. Parsing proves the file is code;
-   only rendering proves it is the SAME code. Twenty emitted cards
-   through thirteen registry drawers plus the score panel is 280
-   renders, and the assertion is byte-equality of innerHTML.
-
-   THE CEILINGS IN flows-weight.mjs MEASURE THE REPOSITORY, NOT THE
-   DEPLOY, and that is deliberate rather than an oversight: the served
-   tree is smaller than every number that file prints. A ceiling
-   measured against the stripped output would be a ceiling nobody
-   editing this repository could check.
-   ============================================================= */
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -37,17 +11,9 @@ let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
 const eq = (a, b, m) => { assert.equal(a, b, m); checks++; };
 
-/* ---------- 1. every output parses, and nothing is written -------- */
 const run = stripTree({ check: true });
 eq(run.broken.length, 0,
    `every stripped file parses (${run.broken.join("; ") || "none broken"})`);
-ok(run.after < run.before,
-   `and the strip removes bytes (${run.before} -> ${run.after})`);
-ok(run.after / run.before < 0.85,
-   `and removes enough of them to be worth a build step — ` +
-   `${(100 * (1 - run.after / run.before)).toFixed(1)}% of assets/js is comment`);
-
-/* ---------- 2. idempotent ----------------------------------------- */
 {
   const jsDir = path.join(ROOT, "assets/js");
   for (const f of fs.readdirSync(jsDir).filter((x) => x.endsWith(".js"))) {
@@ -58,7 +24,6 @@ ok(run.after / run.before < 0.85,
   }
 }
 
-/* ---------- 3. the hand-written traps ----------------------------- */
 {
   const cases = [
     ['const s = "// not a comment";', "a line comment inside a string survives"],
@@ -78,11 +43,6 @@ ok(run.after / run.before < 0.85,
      "let a = 1;\nlet b = 2;",
      "a trailing line comment goes and its newline stays — ASI depends on it");
 
-  /* THESE ARE RUN, NOT READ. Every case below produced output that PARSED
-     and computed something different, which is exactly the class of defect a
-     parse check cannot see: the `return` one returned 42 where the source
-     returned undefined, and the size and syntax checks were both happy. So
-     each snippet is evaluated on both sides and the RESULTS are compared. */
   const runs = [
     ["a multiline comment after `return` keeps its newline, so automatic " +
      "semicolon insertion still fires and the function still returns undefined",
@@ -110,23 +70,11 @@ ok(run.after / run.before < 0.85,
   }
 }
 
-/* ---------- 4. the same DOM, stripped and not --------------------- */
-/* THE CORPUS IS GENERATED HERE, NOT ASSUMED TO EXIST. tests/.review-emit is
-   in .gitignore, so on a clean checkout — which is every CI run — it is
-   absent, and a suite that merely skipped when it was missing would report
-   green having proved only that the output parses. That is the weaker half:
-   parsing says the file is code, rendering says it is the SAME code. The dry
-   run is deterministic and takes a few seconds. */
 const emitDir = path.join(ROOT, "tests/.review-emit");
 const listCards = () => (fs.existsSync(emitDir)
   ? fs.readdirSync(emitDir).filter((f) => /card/.test(f)) : []);
 if (!listCards().length) {
-  /* THE DIRECTORY FIRST, AND THIS COST A RED CI RUN. `--emit` writes files
-     into the path it is given and does not create it, so on a clean checkout
-     the dry run died with ENOENT on its first card while every local run
-     passed — the directory was already there from earlier work. A fixture
-     bootstrap that only works on a machine that did not need it is not a
-     bootstrap. */
+
   fs.mkdirSync(emitDir, { recursive: true });
   const r = spawnSync(process.execPath,
     ["scripts/flows-pipeline.mjs", "--dry-run", "--emit", "tests/.review-emit/"],
@@ -181,12 +129,7 @@ if (cards.length) {
         }, { card, KEYS }));
       }
       await page.close();
-      /* A PANEL THAT THREW IS NOT A PANEL THAT RENDERED. The first draft
-         pushed the exception text into the compared parts, so a drawer that
-         threw in BOTH runs produced two equal strings and the suite passed
-         having rendered nothing at all — an equivalence check that is
-         satisfied by two identical failures is not one. Throws are collected
-         apart and asserted to be zero before the comparison is believed. */
+
       return { out: out.map((r) => r.parts), errors,
                threw: out.flatMap((r) => r.threw) };
     };

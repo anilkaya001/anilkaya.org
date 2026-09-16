@@ -1,278 +1,13 @@
-/* =============================================================
-   flows-panels.js — the ticker page's panel registry.
-
-   PURE DATA. No DOM, no network, no imports. Read by
-   shared/flows-pages.js on the Worker side to EMIT the markup, and
-   by tests to assert that the emitted markup, the browser's drawer
-   table and the pipeline's shed order all name the same panels.
-
-   WHY A REGISTRY AND NOT THREE HAND-WRITTEN LISTS. The retired card
-   dialog's markup WAS ten hand-written <section class="fc-panel">
-   blocks in flows-pages.js, its drawer table a second list in the
-   browser, and the pipeline's shed ladder a third in
-   flows-pipeline.mjs. Three hand-maintained lists of the same panels
-   is three chances for one to exist in two of them and be silently
-   invisible — which this repo has shipped: the four chain panels
-   below were published in every card since the chain leg landed and
-   NOTHING EVER DREW THEM. Two of those three went with the dialog —
-   its markup blocks and its drawer table, both deleted with it. The
-   third, the pipeline's shed ladder, is still live, and so is a
-   fourth this count used to leave out: assets/js/flows-ticker.js's
-   DRAW table, which exists only because `shared/` is never served
-   and a browser module cannot import this file. So TWO hand-written
-   lists remain, and tests/flows-ticker-contract.mjs pins both
-   against this one: a key with no drawer renders a visible "no
-   renderer is registered" panel, and a drawer with no key fails a
-   test.
-
-   EVERYTHING THE BROWSER NEEDS FROM THIS FILE REACHES IT AS MARKUP.
-   `shared/` is listed in .assetsignore and is never served, so a
-   browser module cannot import it. flows-pages.js therefore emits
-   each panel's `question` into a data-question attribute AND into a
-   visible <p class="ft-panel-q">, its `group` and `tier` into
-   data-group and data-tier, and its sentinel-ness into a bare
-   data-sentinel — four facts the controller reads off the DOM rather
-   than restating. A renderer reading `entry.question` at runtime
-   gets `undefined` and prints an empty question, failing nothing.
-
-   THE ONE PROJECTION THAT SURVIVES IS A CHECK, NOT A SOURCE.
-   assets/js/flows-ticker.js still carries a PANEL_CHROME table of
-   group and tier and no longer WRITES either: the served markup
-   does, from this file, and mountChrome only reports a disagreement.
-   It is pinned the way the DRAW table is — tests/flows-ticker-
-   contract.mjs asserts the two agree key for key AND value for
-   value, both directions. A duplicate a test cannot see is a drift;
-   a duplicate a test compares is a projection.
-   ============================================================= */
-
-/**
- * The panels of /flows/ticker/, in reading order.
- *
- * `span: 2` means the panel occupies both grid columns above the 76rem
- * breakpoint. It is a LAYOUT fact with a DATA consequence in exactly one
- * place: `ivSurface` and `skewTerm` are both `span: 2` and adjacent, which
- * is what lets the term line's j-th bar centre coincide with the surface's
- * j-th column centre. At span 1 and span 2 the two hosts measure 424px and
- * 896px at a 1216px viewport and could never share a column geometry at any
- * width — the alignment requirement and the layout would make each other
- * impossible, and the assertion that checks it would be unsatisfiable rather
- * than merely failing.
- *
- * IT IS ALSO HOW A PANEL IS TAKEN OUT OF THE PAIRING, and that use is newer
- * than the paragraph above. A grid row is as tall as its tallest member, so
- * two panels sharing a row share a height whether or not they have that much
- * to say: measured across six names and four widths, the worst mismatch on
- * this page was `__score` at 1034px beside `__stats` at 330px — 3.13x, and
- * the stretch handed an eight-row stat list seven hundred pixels of ground.
- * `gamma` and `__stats` are span 2 for that reason and for no geometric one;
- * each entry says so.
- *
- * WHICH ONE OF A MISMATCHED PAIR IS WIDENED IS NOT FREE, AND THE SUITE OWNS
- * THE ANSWER. Widening the TALL panel is the obvious move and it is wrong
- * here: this file tried it, and the contract refused with a measurement it
- * already held — `__score` is five gauges and their weights, which set their
- * own width, so a span-2 host spends the difference on white space. The rule
- * that survives is about the CONTENT, not the height: widen the panel whose
- * layout can absorb width. `__stats` is a `.fc-stats` grid, and that rule is
- * `repeat(auto-fit, minmax(min(8.5rem, 100%), 1fr))` — a wider host buys it
- * more COLUMNS and a shorter box, which is the opposite of what it buys the
- * gauges. So the short panel is widened and the tall one keeps its column.
- *
- * `group` IS THE PAGE'S TABLE OF CONTENTS, and it is a field rather than a
- * heading because a group is now three things at once — a served <section
- * class="ft-station">, a heading inside it, a tab in the bar above it — and
- * three hand-written lists of five labels is this file's own defect, one
- * level up.
- *
- * ORDER IS THE ARGUMENT THE PAGE MAKES, and it has changed three times. It
- * was "the four chain panels come first, being the half of the payload never
- * drawn" — correct until they were drawn. Then "the score derivation leads,
- * because a reader arrives from a board row carrying a score", with the other
- * twenty regrouped so `levels` sat beside `surface`.
- *
- * IT IS NOW A SEQUENCE OF STATIONS: five sections a reader tabs between
- * rather than five headings in one scroll, so a group is what a reader is ON
- * and the order within one is what they read top to bottom. Three entries
- * moved for that reading — `displacement`, `path` and `marketRank` each
- * move up beside the panel they are the second reading of. (`scoreOverlay`
- * once led here; it was dropped from the page, see below.)
- *
- * AND ORDER IS NOW ALSO A HEIGHT ARGUMENT, which is the fourth rewrite. At two
- * columns a station's span-1 panels pair off in this order, and a pair shares
- * the taller one's height — so which panels are adjacent decides how much
- * blank ground the page opens. Measured intrinsic heights turned that into a
- * matching problem with an answer: today's order left a worst row mismatch of
- * 704px and a mean of 280px; sorting by height alone fixed the mean (181px)
- * and not the worst; the order below, with `gamma` and `__stats` lifted out to
- * span 2, measures 233px worst and 99px mean. The remaining gaps — 19, 24, 47,
- * 85, 111, 172 and 233 pixels — are small enough for the shorter panel's own
- * drawing to grow into honestly, which is what the fills are for.
- *
- * AN ODD STATION LEAVES ITS SHORTEST PANEL ALONE, deliberately. `context`
- * (350px) ends its station without a row-mate; pairing it with either
- * neighbour stretched it, and the half-row that leaves is at the station's end
- * where it reads as a closing rather than as a defect.
- *
- * REACHING THAT COST AN EDITORIAL DECISION, AND IT IS THE ONLY ONE IN THE
- * HEIGHT PASS. `context` was this station's LEAD, so it had to come first, and
- * `marketRank` had to sit directly under it — two rules argued in this file,
- * and together they forced `context` (350px) to be `marketRank`'s (865px)
- * row-mate: a 515px stretch, the last one on the page and the only one the
- * matching could not route around. Every ordering that fixed it broke one of
- * them. The owner chose which to break: `marketRank` leads the station now.
- *
- * WHAT THAT CHANGES IS WHAT THE STATION CLAIMS TO BE ABOUT. It opens on where
- * this name places against every other name and closes on where today sits in
- * its own year, rather than the reverse. The two placement questions are still
- * one question at two scales and they are still adjacent — the order of the
- * asking is what moved, and the adjacency assertion in
- * flows-ticker-contract.mjs moved with it rather than being deleted.
- *
- * The groups themselves are contiguous by contract:
- *
- *   signal      what the number is, what it just did, and its headline figures
- *   convexity   the dealer book that produced it
- *   volatility  what the chain is charging for the move
- *   tape        what actually traded
- *   context     the name's own year, and who else is in it
- *
- * WITHIN A GROUP THE FIRST ENTRY IS ITS LEAD, and carries `tier: "lead"`.
- * That is not decoration: with 23 boxes of identical chrome the eye has no
- * way to find the primary reading of a section, so the lead wears heavier
- * chrome and everything under it is evidence for it. Exactly one lead per
- * group, always first — asserted, because "roughly one" is not a rule.
- *
- * `tier` IS THE PANEL'S SHAPE, NOT ITS IMPORTANCE (beyond the lead):
- *
- *   lead     the group's primary reading
- *   chart    a drawing, sized from its host
- *   table    rows the reader scans and scrolls
- *   reading  two or three numbers and a sentence
- *
- * A two-number panel and a fifty-row table wearing the same box is what made
- * the flat scroll unreadable; the tier is what lets the stylesheet tell them
- * apart without a per-panel rule.
- */
 export const TICKER_PANELS = Object.freeze([
-  /* ---------- SIGNAL: the number, what it did, and its figures ------
 
-     THE HISTORY LEADS, and the ordering argument above has been rewritten a
-     second time because it expired a second time.
-
-     The score derivation led while this page was one scroll: a reader off a
-     board row carrying a score was owed, first, what that score is made of.
-     That is still true of the DERIVATION and it is not what a reader opens a
-     station for. This is the one panel built from two payloads and the only
-     one carrying a SERIES — the card's dated price window joined, in the
-     pipeline, against the dated score history for every name on the board.
-     Everything else describes one session in enormous detail; this is the
-     only thing that can say a reading is NEW, the claim the product makes.
-
-     The join is in the pipeline, which holds both payloads when it builds a
-     card, so it is done once by a shaper a contract test can run without a
-     browser; fetching the track in the page would put an untested date join
-     inside a drawing function. The header strip's overnight move comes off
-     these same rows, so this panel is the working that strip summarises. */
-  /* SPAN 2, AND IT STAYS 2 — TRIED AT 1, MEASURED, REVERTED.
-
-     The reasoning for 1 was good: `__score` is the only other span-1 panel in
-     this station, so it sat alone in a row with a column of white space
-     beside it while this panel took a whole row, and pairing them is one row
-     instead of two. The suite refused it, with the number:
-
-       signal: "scoreOverlay" (506px) and "__score" (1034px) are row-mates at
-       two columns, so the shorter is stretched 528px — past the 250px a
-       panel can fill honestly
-
-     528px of stretched nothing inside a bordered card is exactly the ragged,
-     unequal box this station spent three PRs removing, and it is the single
-     thing the reader of this page complains about most. A shorter panel does
-     not become a good row-mate by being shorter; it becomes a worse one.
-
-     THE HEIGHT CAME OUT OF THE DRAWING INSTEAD, which is where it belonged:
-     the chart went 190 -> 132 and the score became bars, so this panel is
-     ~60px shorter on its own row without any panel being stretched to meet
-     it. The row-mate for `__score` has to be a panel near 1034px, and none
-     exists in this station — that is a real finding about `__score`, whose
-     1034px is three prose blocks, and it is not fixed from here. */
-  /* THE SCORE-OVER-PRICE SERIES IS GONE FROM THE PAGE, by the reader's own
-     verdict: a daily score laid over a close told them nothing they used.
-     The JOIN it drew is still published (panels.scoreOverlay) and still read
-     — "what changed" is derived from it — so nothing is lost but a drawing.
-     The derivation leads the signal station again, at its own width. */
-  /* THE DERIVATION, FIRST AND NARROW. Five gauges and their weights are a
-     column of rows, not a drawing, and a span-2 host spent the extra 470px on
-     white space beside a list that sets its own width. `tier: "lead"` because
-     every station has exactly one lead and it is the first panel a reader
-     meets; the series that held it is gone, and the derivation is what the
-     station opens on now. */
   { key: "__score", id: "ftWhy", span: 1, group: "signal", tier: "lead",
     title: "Score derivation",
     question: "Which components produced this score, and how heavily?" },
-  /* THE SECOND SENTINEL, AND THE FIRST PANEL HERE NOT ABOUT ONE PAYLOAD KEY.
-     Spot, ATR, the gamma flip, the priced move and the IV rank are each
-     published by a DIFFERENT panel below and each answer the same kind of
-     question — "what is the headline number" — so a reader hunting one opens
-     whichever station it lives in and scans a chart for a figure that is one
-     line of text. Gathering them costs no vendor call and no payload field.
 
-     IT WAS DELIBERATELY EMPTY WHEN IT SHIPPED, and that sentence outlived the
-     patch that filled it: keyStats() emits eight pairs — spot, ATR, max pain,
-     both walls, the gamma flip, the priced move and the IV rank — each
-     carrying the silence of the panel it was gathered from. The comment is
-     corrected here rather than deleted, because "this panel is empty on
-     purpose" is exactly the claim a later reader would have believed.
-
-     AND IT IS span 2, WHICH IS A HEIGHT FIX APPLIED TO THE SHORT PANEL.
-     Intrinsic heights: `__score` is 1034px and this panel is 330px — 3.13x,
-     the widest mismatch on the page, and `signal` holds no third span-1 panel
-     to pair either with. Stretch gave this eight-row list the derivation's
-     full height and asked it to fill 700px it has nothing to say into.
-
-     THE FIRST ATTEMPT WIDENED `__score` AND THE SUITE REFUSED IT, holding a
-     measurement this change had not made: five gauges and their weights set
-     their own width, so a span-2 host spends the difference on white space —
-     vertical dead space traded for horizontal. This panel is the one that can
-     take the width instead. `.fc-stats` is `repeat(auto-fit, minmax(min(
-     8.5rem, 100%), 1fr))`, so a full-width host lays the same eight readings
-     out in more columns and fewer rows: wider AND shorter, which ends the
-     pairing from the other side.
-
-     THE COST IS ONE HALF-ROW, STATED RATHER THAN HIDDEN. `__score` keeps its
-     column and now has no row-mate, so the cell beside it is empty and that
-     cell is not at the station's end. It is the smaller of the two costs —
-     an empty half-row against 700px of stretched-open stat list — and it
-     closes when this panel becomes the large-type readout it is headed for. */
   { key: "__stats", id: "ftStats", span: 2, group: "signal", tier: "table",
     title: "Key statistics",
     question: "What are this name’s headline figures, gathered from the panels that publish them?" },
 
-  /* ---------- CONVEXITY: the dealer book ---------------------------
-     Gamma leads: it is the one panel a reader opens on a name they already
-     know. Then the joint its ladder is a marginal of, and only then the two
-     short readings that measure spot against the same standing bars.
-
-     THE ORDER MOVED SO THAT `levels` AND `displacement` ARE ACTUALLY BESIDE
-     EACH OTHER. The sentence this replaces said `displacement` "belongs
-     beside" `levels` and the registry did put them adjacent — but adjacency
-     in a LIST is not adjacency in a GRID. At two columns the old order seated
-     `levels` in row 1 column 2 and `displacement` in row 2 column 1: one below
-     the other, which is the arrangement the sentence was written to refuse.
-     `surface` moving up one place is what makes them row-mates, and it is
-     also the better reading order — the joint before its marginals.
-
-     AND IT CLOSES A HOLE. `surface` is span 2, so it can only begin a row.
-     Sitting at an odd cell index it could not start until the next row and
-     left the cell beside `displacement` empty — a gap in the middle of the
-     station, which reads as a broken renderer rather than as the end of a
-     section.
-
-     `gamma` IS span 2 NOW, and that is what leaves it without a row-mate.
-     Measured intrinsic heights put it at 795px against `levels` 313 and
-     `displacement` 360; pairing it with either would have stretched a short
-     reading across nearly 500px of ground it cannot fill. Its ladder is also
-     the panel the 76rem breakpoint exists for (see .ft-station in flows.css),
-     so the extra width is a reading improvement and not a layout dodge. */
   { key: "gamma", id: "ftGamma", span: 2, group: "convexity", tier: "lead",
     title: "Gamma convexity",
     question: "Where is the dealer book long and short gamma?" },
@@ -291,20 +26,7 @@ export const TICKER_PANELS = Object.freeze([
   { key: "charm", id: "ftCharm", span: 1, group: "convexity", tier: "chart",
     title: "Charm by expiry",
     question: "How fast is that exposure decaying with time alone, spot unchanged?" },
-  /* THE SECOND-ORDER GREEKS, PAID FOR AND THEN INVISIBLE.
 
-     These three came off a vendor call the pipeline was already making for
-     the gamma profile — no extra spend — and were published on every card
-     while no renderer touched them. That is the same defect the four chain
-     panels had, and the reason the registry test now asserts BOTH directions:
-     every registry key names a published panel AND every published panel is
-     either drawn or named in an explicit exemption. One direction only is how
-     a payload comes to carry a field nobody has looked at in weeks.
-
-     Three entries and one drawer: they differ in what the number means, and
-     the payload carries that as `unit`. They sit here, under the gamma book
-     they are derivatives of, rather than below the off-exchange tape where
-     the order in which they were ADDED had left them. */
   { key: "deltaExposure", id: "ftDelta", span: 1, group: "convexity", tier: "chart",
     title: "Dealer delta by expiry",
     question: "How much directional exposure are dealers carrying, and where along the term?" },
@@ -312,14 +34,6 @@ export const TICKER_PANELS = Object.freeze([
     title: "Vanna by expiry",
     question: "How much would that exposure move on a one-point change in implied volatility?" },
 
-  /* ---------- VOLATILITY: what the chain charges -------------------
-     THE PAIR STAYS ADJACENT AND STAYS span 2. The term line's j-th bar centre
-     has to coincide with the surface's j-th column centre, which can only
-     hold if the two mount at the same host width. Moving either out of the
-     other's shadow, or dropping one to span 1, does not merely misalign the
-     chart — it makes the alignment assertion unsatisfiable. Wrapping the
-     groups in stations does not touch it: both panels are inside THIS
-     station, and a station lays out nothing horizontally of its own. */
   { key: "ivSurface", id: "ftIvs", span: 2, group: "volatility", tier: "lead",
     title: "Implied volatility — moneyness × expiry",
     question: "What shape is the smile, and how does it change with tenor?" },
@@ -333,96 +47,32 @@ export const TICKER_PANELS = Object.freeze([
     title: "Volatility context",
     question: "What does the chain charge across tenors, and where does implied volatility sit in its own year?" },
 
-  /* ---------- TAPE: what actually traded ---------------------------
-     THE TWO READINGS OF THE SAME TAPE ARE ADJACENT NOW. `aggressor` says
-     which strikes were taken at the offer and `path` says how that flow
-     accumulated through the session — the same executions, once by strike and
-     once by clock. The fifty-row contract table used to sit between them, so
-     a reader holding one against the other scrolled past it twice. */
   { key: "aggressor", id: "ftAggr", span: 1, group: "tape", tier: "lead",
     title: "Who is lifting, by strike",
     question: "At which strikes were contracts taken at the offer?" },
   { key: "path", id: "ftPath", span: 1, group: "tape", tier: "chart",
     title: "Session path",
     question: "How did the flow accumulate through the session?" },
-  /* THE SAME QUANTITY ON THE OTHER AXIS, AND IT GOES DIRECTLY BELOW `path`
-     FOR THAT REASON. `path` draws net premium minute by minute inside today;
-     this draws one bar a session across the archive's window. A reader who
-     has just seen today's shape asks "is that unusual for this name" next,
-     and until now nothing on this site could answer it — the figure was
-     published on the board for today and died with the run.
 
-     SPAN 2, ON THE ARGUMENT topContracts MAKES BELOW: the axis is up to
-     forty-two sessions. In a span-1 host at 1216px (456px) that is under
-     eleven pixels a bar including its gap, at which point the sign is still
-     legible but the MAGNITUDE — which is the reading — is a rounding error.
-     A full-width host doubles it. This is the one panel here whose x-axis
-     length is set by the archive rather than by the name. */
-  /* `ftPremTrack`, NOT `ftPrem`: the sticky band already serves a premium-desk
-     link under that id, and the worker suite caught the collision by counting
-     the slot. Two elements sharing an id is a getElementById that silently
-     returns the wrong one. */
   { key: "premiumTrack", id: "ftPremTrack", span: 2, group: "tape", tier: "chart",
     title: "Net premium by session",
     question: "How has this name’s net premium moved across sessions?" },
-  /* THE SAME SESSIONS AS A LOOKUP RATHER THAN AS A SHAPE, directly beneath
-     the two charts it reads. A chart answers "what has this been doing"; a
-     reader who wants "what happened on the 14th" is scanning, and scanning
-     wants rows. It is a SENTINEL — no payload key of its own — because every
-     cell is already published by a panel above it; see sessionLedger. */
+
   { key: "__sessions", id: "ftLedger", span: 2, group: "tape", tier: "table",
     title: "Session by session",
     question: "What did this name close, score and clear on each of the last sessions?" },
-  /* SPAN 2 BECAUSE THE COLUMN THAT PAYS IS THE LAST ONE. Nine columns in a
-     span-1 host (456px at a 1216px viewport) push `Net aggr` outside the
-     scroll wrapper's visible width, so the panel's whole answer — which lines
-     were LIFTED — is off-screen until a reader thinks to scroll a table they
-     have no reason to think scrolls. The wrapper still scrolls at phone
-     widths, where nothing can fit nine columns. */
+
   { key: "topContracts", id: "ftTop", span: 2, group: "tape", tier: "table",
     title: "The day’s most-traded contracts",
     question: "Which single lines carried the volume?" },
-  /* TWO OF THE THREE WAVE-2 STOCK PANELS, published by shared/flows-stock.js
-     since the per-name deep feeds shipped. Both are tape — reported equity
-     executions and the clearing snapshots that follow them — so they sit with
-     the tape rather than in an "added later" block of their own. The third,
-     volContext, is a volatility reading and sits with volatility.
-     All are span 1: none carries a table or a grid wide enough to earn both
-     columns, and the landscape pass slots them as single cells. */
+
   { key: "darkpool", id: "ftDark", span: 1, group: "tape", tier: "table",
     title: "Off-exchange prints",
     question: "Which off-exchange prints carried the size in this name?" },
   { key: "oiDeltas", id: "ftOi", span: 1, group: "tape", tier: "table",
     title: "Open-interest changes",
     question: "Where did open interest move between clearing snapshots?" },
-  /* ---------- CONTEXT: who else is in the name's year, and the year -
-     The cross-section leads: where this name places against every other name,
-     then what has been disclosed about it, then the name's own year as the
-     closing reading. The lead moved here from `context` — see the note on
-     that entry at the end of the station for the measurement and the
-     decision. */
-  /* THE CROSS-SECTION THE PER-NAME FEEDS CANNOT CARRY, off two market-wide
-     reads this run already makes once for the market pulse.
 
-     It sits in CONTEXT rather than in TAPE, and the two feeds it joins are
-     tape feeds, so the placement is an argument. What this panel reports is
-     not what traded — the darkpool and oiDeltas panels above already report
-     that for this name, from per-name requests — it is whether the name
-     PLACED against every other name, which is the same kind of question as
-     "where does today sit in this name's own year". A rank has no meaning
-     without the population beside it, and the population here is the market.
-
-     span 1 STILL, and at 320px it must not carry a row of columns that can
-     only be reached by scrolling sideways — it is two short readings and
-     their prose, not a table and not a drawing.
-
-     tier "lead" NOW, WHICH IS THE ONE EDITORIAL CHANGE IN THE HEIGHT PASS.
-     It was "reading". This panel opens the station because the alternative
-     was a 515px stretch on `context` that no reordering could route around
-     while `context` held the lead — the full argument is on that entry, at
-     the end of this station. A "reading"-shaped panel wearing the lead's
-     chrome is not a contradiction: `tier` is the panel's SHAPE and the lead
-     is a POSITION, and the file's own ladder says the two are separate. */
   { key: "marketRank", id: "ftCross", span: 1, group: "context", tier: "lead",
     title: "Market-wide standing",
     question: "Does this name place in the market’s own two lists, and from which session?" },
@@ -430,81 +80,12 @@ export const TICKER_PANELS = Object.freeze([
     title: "Disclosed congressional transactions",
     question: "Has anyone in Congress disclosed a trade in this name?" },
 
-  /* THE STATION'S CLOSING READING, AND THE PANEL THAT GAVE UP THE LEAD.
-     "Where does today sit in this name's own year" and "does this name place
-     against every other name" are one question asked at two scales, and they
-     are still adjacent — the order of the asking is what moved.
-
-     WHY IT MOVED, AND IT IS THE ONLY EDITORIAL DECISION THE HEIGHT PASS MADE.
-     This panel led the station, so it came first, and `marketRank` sat
-     directly under it. Measured, that is 350px beside 865px: a 515px stretch,
-     the last one left on the page and the only one the matching could not
-     route around, because both rules pinning it are argued in this file and
-     `congress` is the only other member. Every ordering that fixed the height
-     broke one of them, so the choice went to the owner rather than to a
-     measurement, and the lead is what they chose to move.
-
-     WHAT IT COSTS IS A CLAIM ABOUT THE STATION. It opens on the cross-section
-     and closes on the name's own year, rather than the reverse. WHAT IT BUYS
-     is `marketRank`|`congress` at Δ233px and this panel alone at the end,
-     with nothing stretched — and the 515px exemption that used to sit in
-     flows-ticker-contract.mjs deleted rather than carried.
-
-     tier "chart" NOW, NOT "lead": it draws a sparkline sized from its host,
-     which is exactly what that tier names, and the lead's heavier chrome
-     belongs to the panel that opens the station. */
   { key: "context", id: "ftCtx", span: 1, group: "context", tier: "chart",
     title: "Price context",
     question: "Where does today sit in the name’s own year?" },]);
 
-/**
- * The keys that name no `card.panels` entry at all.
- *
- * NOT PANEL KEYS, AND SPELLED SO THEY CAN NEVER COLLIDE WITH ONE. `__score`
- * is drawn from the card's TOP-LEVEL fields (score, fam, weights, conv,
- * quality); `__stats` is drawn from the OTHER PANELS, gathering one figure
- * each out of several of them. Both mount and both draw, and neither is a key
- * the pipeline publishes.
- *
- * THE THIRD IS `__sessions`, the ledger: one row a session, every cell read
- * out of the score-overlay and net-premium panels already on the card. The
- * set's whole argument is why it is a set — adding it is one line here and
- * nothing anywhere else, where a `!== SCORE_KEY` shape would have needed
- * finding in every exclusion in the repository, correctly, or leaked.
- *
- * A SET AND NOT A CONSTANT, BECAUSE ONE OF THEM WAS ABOUT TO LEAK. While
- * there was exactly one sentinel it was a string, `SCORE_KEY`, and every
- * exclusion in the repo was written `!== SCORE_KEY` — a shape that silently
- * admits the second sentinel the moment it exists. Two things go wrong then
- * and neither loudly: TICKER_PANEL_KEYS starts demanding a
- * `card.panels.__stats` on every card, and the pipeline's shed ladder becomes
- * free to name a key it can never drop, "shedding" a panel nobody publishes
- * to save nothing. Both are asserted against this set in
- * tests/flows-ticker-contract.mjs, in the direction that fails.
- */
 export const SENTINEL_KEYS = new Set(["__score", "__stats", "__sessions"]);
 
-/**
- * The five stations, in the order the page reads them.
- *
- * `blurb` IS THE GROUP'S OWN SENTENCE and it is here rather than in the
- * controller for the same reason every `question` is: it is prose about the
- * payload, and prose about the payload is what the vocabulary suites scan.
- * The controller no longer keeps a copy of any of it — the worker emits the
- * label and the blurb into each station's own <h2> from this array, so the
- * five sentences exist once instead of twice.
- *
- * `hash` IS PART OF THE CONTRACT, not a slug computed at render time. A
- * colleague pastes `…/flows/ticker/?t=NVDA#ftg-convexity` into a message and
- * it has to survive a rename of the label above it.
- *
- * `key` IS ALSO THE STATION'S ADDRESS — the `?s=` value every board row, deck
- * tile and watch row already links here with (`…&s=signal&from=long`). That
- * is why the first label reads "Overview" over a group keyed "signal": the
- * LABEL is what a reader sees, and it changed when the group stopped being a
- * heading and became the station a reader lands ON; the KEY is in links that
- * were sent before this change and must still open after it.
- */
 export const TICKER_GROUPS = Object.freeze([
   { key: "signal", label: "Overview", hash: "ftg-signal",
     blurb: "The published score, what it has done since the last session that " +
@@ -524,23 +105,11 @@ export const TICKER_GROUPS = Object.freeze([
       "against the rest of the market, and who has disclosed a trade in it." },
 ]);
 
-/** The legal `tier` values. A tier with no stylesheet rule is a box with no chrome. */
 export const PANEL_TIERS = Object.freeze(["lead", "chart", "table", "reading"]);
 
-/** Every registry key that names a `card.panels` entry. */
 export const TICKER_PANEL_KEYS = Object.freeze(
   TICKER_PANELS.filter((p) => !SENTINEL_KEYS.has(p.key)).map((p) => p.key));
 
-/**
- * How many panels each station holds, keyed by its `?s=` address.
- *
- * ONE NUMBER, MORE THAN ONE READER. The tab in the bar prints it, the station
- * that tab opens holds exactly that many, and the controller that will hide
- * four of the five has to say how many panels a reader is not looking at.
- * COUNTED FROM TICKER_PANELS rather than written down: a hand-typed 8 beside
- * a nine-panel station is not wrong about any panel, only about how many
- * there are, which is the one error a per-panel assertion cannot see.
- */
 export const STATION_SIDE_COUNTS = Object.freeze(
   Object.fromEntries(TICKER_GROUPS.map((g) =>
     [g.key, TICKER_PANELS.filter((p) => p.group === g.key).length])));

@@ -1,10 +1,3 @@
-/* =============================================================
-   auth.js — account, synchronization, and reset coordination.
-
-   All server mutations share one serialized lane and carry a mutation epoch.
-   Reset invalidates queued work, waits for an in-flight mutation to finish,
-   deletes server state, and only then clears the matching local owner scope.
-   ============================================================= */
 (() => {
   "use strict";
   let user = null, backend = false;
@@ -12,10 +5,7 @@
   let mutationEpoch = 0, mutationTail = Promise.resolve();
   let resetting = false, resetPromise = null;
   const store = window.IEWTStorage;
-  // Snapshot the anonymous profile before later deferred scripts can record a
-  // course interaction. If the initial account probe resolves to a returning account, only the
-  // post-snapshot delta is transferred; pre-existing anonymous work remains an
-  // isolated device profile.
+
   const bootAnonymousProgress = store.progress();
   const bootAnonymousGamify = store.gamify();
   const bootAnonymousStableProgress = store.stableProgress();
@@ -55,7 +45,7 @@
     let value = null;
     if (contentType.includes("application/json")) {
       try { value = await response.json(); }
-      catch { /* handled by the response validation below */ }
+      catch {   }
     }
     if (!response.ok || value == null) {
       const error = new Error("request-failed");
@@ -117,8 +107,7 @@
 
   function enqueue(operation) {
     const result = mutationTail.catch(() => undefined).then(operation);
-    // Keep the lane usable after one request fails while still returning the
-    // original result/rejection to the caller that owns that operation.
+
     mutationTail = result.catch(() => undefined);
     return result;
   }
@@ -218,9 +207,7 @@
   function localDay() {
     const date = new Date();
     const local = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-    // The server rejects any activity day beyond UTC-tomorrow (a local calendar
-    // can sit one day ahead of UTC near midnight). Clamp a fast clock to that
-    // ceiling so we never queue an attempt the server will permanently 400.
+
     const max = new Date(Date.now() + 86400000);
     const utcMax = `${max.getUTCFullYear()}-${String(max.getUTCMonth() + 1).padStart(2, "0")}-${String(max.getUTCDate()).padStart(2, "0")}`;
     return local <= utcMax ? local : utcMax;
@@ -263,11 +250,6 @@
     return saved[skillId];
   }
 
-  // A 4xx that is not a generation/reset conflict (e.g. a validation reject on a
-  // malformed day or an item dropped by payload regeneration) will never
-  // succeed on retry. Draining must drop it and move on, or one poison event
-  // blocks every attempt queued behind it forever. Missing/5xx status ⇒ network
-  // or server transient ⇒ keep and retry later.
   function isPoison(error) {
     if (!error || typeof error.status !== "number" || error.status < 400 || error.status >= 500) return false;
     return error.code !== "reset_required" && error.code !== "invalid_generation" && error.code !== "stale_generation";
@@ -451,9 +433,7 @@
 
       try {
         if (!current(owner, epoch)) return false;
-        // The bootstrap snapshot precedes any local progress uploads made just
-        // above. Refresh stats only in that merge case so derived points match
-        // the newly unioned D1 progress; the usual hydration remains one read.
+
         const payload = bootstrapPayload && !progressUploaded ? bootstrapPayload : await getJSON("/api/stats", {
           headers: ownerHeaders(owner, { Accept: "application/json" }),
         });
@@ -467,8 +447,7 @@
           const local = window.Gamify.get();
           const remoteLast = store.normalizeDay(remote.last);
           const remoteStreak = Number.isSafeInteger(Number(remote.streak)) ? Number(remote.streak) : 0;
-          // Streak writes are needed only when this device contributed newer
-          // activity. Points are always derived by the Worker from progress.
+
           if (local.last !== remoteLast || local.streak !== remoteStreak) {
             const saved = await putJSON("/api/stats", { streak: local.streak || 0, last: local.last || null }, owner, generation);
             if (!current(owner, epoch)) return false;
@@ -553,9 +532,7 @@
     emit("iewt:reset-state", { state: "starting", signedIn });
 
     const operation = enqueue(async () => {
-      // A signed-in reset is server-first. A failed DELETE preserves local
-      // state; a successful DELETE always clears the owner captured above,
-      // even if another account becomes active while the request is pending.
+
       if (signedIn) {
         if (!backend || !current(owner, epoch, true)) throw new Error("account-changed");
         const payload = await deleteProgress(owner);
@@ -858,9 +835,7 @@
       }
     },
     async pushProgress(model, done) {
-      // A course interaction can land during the initial account request. Wait
-      // for owner binding, then merge that exact interaction into the verified
-      // account scope instead of leaking the whole anonymous/device profile.
+
       const waitedForOwner = authStatus === "checking" || authStatus === "syncing";
       if (waitedForOwner && !resetting) await ready;
       if (!backend || !user || resetting) return false;
@@ -957,9 +932,7 @@
         academy: true,
       };
     } catch (error) {
-      // During a rolling deploy, an older Worker can serve a newly cached
-      // client. Only a route-level absence falls back; real backend failures
-      // remain visible instead of being masked by a second request sequence.
+
       if (!error || (error.status !== 404 && error.status !== 405)) throw error;
       try {
         return {
@@ -1001,8 +974,7 @@
     } catch (error) {
       backend = false;
       user = null;
-      // A network failure does not prove that another tab signed out, so do
-      // not overwrite the cross-tab owner marker. This page stays anonymous.
+
       store.bindOwner(null, { claimAnonymous: false, announce: false });
       setStatus("offline", error && error.message ? error.message : "offline");
     } finally {
@@ -1014,9 +986,7 @@
   document.addEventListener("iewt:owner-external", (event) => {
     const observed = event.detail && event.detail.owner;
     if (!user || observed === user.id) return;
-    // Another tab verified a different account (or signed out). Stop using the
-    // stale cookie/account association immediately; a navigation will perform
-    // a fresh account check before this tab can sync again.
+
     mutationEpoch++;
     user = null;
     store.bindOwner(null, { claimAnonymous: false, announce: false });

@@ -1,4 +1,3 @@
--- Academy 2.0 additive learning schema.
 CREATE TABLE IF NOT EXISTS progress_v3 (
   user_id TEXT NOT NULL,
   course_id TEXT NOT NULL,

@@ -1,121 +1,13 @@
-/* =============================================================
-   flows-scores.js — the per-name daily score, archived and traced.
-
-   WHAT THIS IS. Every morning the pipeline scores its enriched pool
-   and publishes two fifty-row slices of it. The slices are the
-   product; the DISTRIBUTION is the evidence — and until this module,
-   the middle of the distribution died with the run. A name sitting at
-   +19 the session before it breaks out was archived only if it made a
-   board, so the question "what did we say about this name every day"
-   had an answer for at most a hundred names and silence for the rest.
-
-   Two quantities, two keys:
-
-     scores:YYYY-MM-DD — one session's whole scored pool, immutably.
-       {t, s} per name, nothing else: the score is the subject here,
-       and every other column already lives on the boards this key
-       sits beside in the archive.
-
-     scoretrack — the pooled trace: each name's score, session by
-       session, over a stated window. Built by reading the dated keys
-       back, exactly as the track record is, and REBUILT from scratch
-       each run — it is a view of the archive, not a second store
-       that could drift from it.
-
-   AND THE CHANGE, WHICH IS THE PART THIS MODULE WAS MISSING.
-
-   This product measured a LEVEL every morning and published it
-   eleven ways. It measured CHANGE exactly once, in ten lines of
-   browser arithmetic inside a renderer, and it published that number
-   without its denominator:
-
-       const measured = name.s.map(isNum).filter(v => v !== null);
-       const delta = measured.at(-1) - measured.at(-2);
-
-   Filtering the nulls out before subtracting is the defect. A gap in
-   the series means the name WAS NOT SCORED that session, so the two
-   surviving neighbours can be one session apart or twenty — and the
-   subtraction produces the same integer either way. "+38" is the
-   headline of the session when it happened overnight and is noise
-   when it happened across three weeks the name spent off the board.
-   The renderer had no way to tell those apart, because the number it
-   printed had thrown away the only thing that distinguished them.
-
-   So the change is derived HERE, once, beside the series it is
-   derived from, and it travels WITH ITS DENOMINATOR:
-
-     d1.v    the move, in score units
-     d1.gap  how many sessions it took — 1 is overnight, and anything
-             larger is a name that was absent in between
-     d1.qv   the same move in RESIDUAL units, when both observations
-             carried one
-
-   `qv` is there because `s` saturates. The score is 100·tanh(residual
-   / scale), so two names at +94 and +97 can be very far apart in the
-   quantity that was actually ranked, and a move from +94 to +97 is a
-   much larger event than a move from +4 to +7. In score units those
-   are +3 and +3. The residual does not compress, so a reader with
-   both numbers can see which kind of move they are looking at.
-
-   WHAT A GAP MEANS, because it is the easiest thing here to misread:
-   a null in a series says the name WAS NOT SCORED that session — it
-   fell out of the screener, failed the liquidity floor, sat inside
-   the earnings gate, or the pool simply chose differently. It never
-   means zero. Zero is a score this pipeline can and does assign, and
-   the two must not share a pixel.
-   ============================================================= */
-
-/* Number(null) is 0 — a CONFIDENT ZERO materialised out of an absent
-   measurement, which on this page of all pages is the one defect that
-   cannot exist. Absent in, absent out. The suite constructs exactly this
-   row and caught exactly this coercion on its first run. */
 const num = (v, d = null) => {
   if (v === null || v === undefined || v === "") return d;
   const n = Number(v);
   return Number.isFinite(n) ? n : d;
 };
 
-/* THE WINDOW IS A CHOICE AND IT IS PUBLISHED AS ONE. Forty-two sessions is
-   the board's own sparkline window — two months — chosen so the two surfaces
-   describe the same span of history rather than two arbitrary ones. Nothing
-   in the data picks it; `windowSessions` rides on the payload so a reader
-   can see the cut. The archive retains 126 days, so widening this later is
-   a constant, not a migration. */
 export const TRACK_SESSIONS = 42;
 
-/* A ceiling on the names the pooled payload carries, against the ingest
-   route's 128KB cap. In practice a window of 42 sessions unions to two or
-   three hundred names; five hundred is headroom, not a target. When it
-   binds, the names shed are the LEAST OBSERVED (smallest n, ties to the
-   larger |last| kept) and the payload says how many went. */
 export const TRACK_MAX_NAMES = 500;
 
-/* AND THE CEILING THAT IS ACTUALLY BINDING, IN THE UNIT THAT BINDS.
-
-   The constraint is BYTES — the ingest route rejects a payload over
-   FLOWS_MAX_PAYLOAD_BYTES with a 413 — and TRACK_MAX_NAMES is a guess at a
-   byte count expressed as a name count. That guess was made when a name row
-   was `{t, s, n, last}`; the row has since grown a change layer, a run length
-   and a pair of window extremes, and the guess did not move with it.
-
-   The arithmetic, measured on the emitted corpus: a name row costs about 243
-   bytes at 23 sessions, of which the series is roughly 5 bytes a session and
-   the scalars are a fixed ~80. At the published 42-session window and the
-   two-to-three-hundred names a real union produces, that projects past 128KB
-   — so the name cap would not have bound, the ROUTE would have, and the
-   failure mode is a 413 in a log at 05:20 with the whole track key missing
-   for the day rather than a stated shed on a payload that published.
-
-   So the shed is driven by the measurement instead of by the guess. Both
-   ceilings stand: whichever binds first, binds. The name cap keeps its job as
-   a cheap upper bound; this one is the honest one, and it self-corrects the
-   next time a field is added to the row.
-
-   96KB against the route's 128KB: the envelope this body is wrapped in
-   (`v`, `generatedAt`, `sessionDate`, the archive block) costs a few hundred
-   bytes, `sessions` costs about 60 a session, and the notes are prose. A
-   quarter of the cap is room for all of that plus the next field somebody
-   adds without reading this comment. */
 export const TRACK_MAX_BYTES = 96 * 1024;
 
 export const SCORES_NOTES = Object.freeze({
@@ -172,14 +64,6 @@ export const SCORES_NOTES = Object.freeze({
     "given in residual units, which do not compress.",
 });
 
-/**
- * One session's publishable score rows, from the partitioned pool.
- *
- * The WHOLE pool: long, short, and the dead-band middle. Sorted by ticker so
- * the archived bytes are deterministic — two runs on the same session write
- * identical rows, which is what makes a re-run idempotent rather than a
- * mutation.
- */
 export function scoresRows(sides) {
   const pool = [
     ...(sides && Array.isArray(sides.long) ? sides.long : []),
@@ -193,51 +77,9 @@ export function scoresRows(sides) {
     const s = num(r && r.score);
     if (!t || s === null || seen.has(t)) continue;
     seen.add(t);
-    /* `q` IS THE QUANTITY THAT WAS ACTUALLY RANKED, and it is archived
-       because `s` is a lossy view of it.
 
-       partitionSides orders on the FULL-PRECISION residual and says so
-       explicitly — "score is for display; residual decides" — and then the
-       archive kept only the display copy. That was survivable while the
-       archive answered "what did we say", and stops being survivable the
-       moment it has to answer "how much did that change": 100·tanh saturates,
-       so at the ends of the distribution the score stops moving long before
-       the residual does. A name grinding from 2.1 to 3.4 residual sigma is a
-       large event that the score reports as +96 to +98.
-
-       Scaled by 1e4 and rounded to an integer: residuals live around ±0.02
-       and the band edge sits near 0.0055, so four decimal places resolve the
-       band edge to about a fifteenth of its own width, and an integer is
-       shorter on the wire than the decimal it replaces. Null rather than 0
-       when the row carried no residual — a backfilled day has none, and a
-       zero residual is a real reading that means "exactly at the pool
-       median". */
     const q = num(r && r.residual);
-    /* `p` IS THE SESSION'S NET PREMIUM, SIDE-SIGNED, AND IT IS HERE BECAUSE
-       THE ARCHIVE IS THE ONLY PLACE IT CAN LIVE.
 
-       Net premium is published on every board row for TODAY and dies with the
-       run, exactly as the score distribution used to: the session path panel
-       can draw it minute by minute inside one session, and nothing anywhere
-       could answer "what has this name's net premium done across sessions".
-       That is the question a reader asks of a flow signal first.
-
-       IN THIS KEY RATHER THAN A NEW ONE. A parallel `premium:<date>` lane
-       would need its own write, its own archive walk, its own prune and its
-       own read-back — four mechanisms for one number per name per session,
-       when this key is already written once a session, already swept, and
-       already walked. One field on a row that is already there costs a walk
-       nobody has to write.
-
-       WHOLE DOLLARS, NOT THOUSANDS. The saving would be three characters a
-       name and the cost would be a unit this file has to state and every
-       reader has to honour — the exact trap this codebase keeps finding in
-       its own columns. `q` is scaled because a residual has no natural unit
-       and four decimals is a resolution choice; dollars have one.
-
-       NULL, NOT ZERO, when the screener quoted neither leg: a name nobody
-       priced and a name that priced flat are different sessions, and a zero
-       here would make them the same forever. */
     const prem = (() => {
       if (!r) return null;
       const direct = num(r.netPrem);
@@ -256,15 +98,6 @@ export function scoresRows(sides) {
   return rows;
 }
 
-/**
- * The pooled trace, from whatever the archive walk found.
- *
- * @param {Array<{d: string, rows: Array<{t, s}>, source: "scores"|"boards"}>} days
- *   One entry per session the walk could reconstruct, either from the dated
- *   scores key (source "scores": the whole pool) or from the two archived
- *   boards (source "boards": only the names that made a board). Order free.
- * @returns the scoretrack payload body (no envelope fields).
- */
 export function buildScoreTrack(days, {
   windowSessions = TRACK_SESSIONS,
   maxNames = TRACK_MAX_NAMES,
@@ -275,9 +108,7 @@ export function buildScoreTrack(days, {
   const byDate = new Map();
   for (const day of days || []) {
     if (!day || typeof day.d !== "string" || !Array.isArray(day.rows)) continue;
-    /* A scores day beats a boards day for the same date — it is a superset
-       by construction. Two entries of the SAME source for one date should
-       not happen; last write wins and the count below would show it. */
+
     const have = byDate.get(day.d);
     if (have && have.source === "scores" && day.source !== "scores") continue;
     byDate.set(day.d, { rows: day.rows, source: day.source === "scores" ? "scores" : "boards" });
@@ -295,30 +126,9 @@ export function buildScoreTrack(days, {
     };
   });
 
-  /* One pass per session, aligned series per name. The residual rides in a
-     PARALLEL map rather than in the published series: it is needed for exactly
-     one subtraction per name, and forty-two of them per name would roughly
-     double a payload that already sits against a 128KB cap. */
   const series = new Map();
   const resid = new Map();
-  /* NET PREMIUM RIDES IN A THIRD PARALLEL MAP, and unlike the other two it
-     never reaches the published payload at all — see the `premium` key on
-     the return, which the pipeline destructures away before publishing.
 
-     The arithmetic above settles it: a name row costs ~243 bytes, of which
-     the 42-session series is ~5 bytes a session. A premium series is not 5
-     bytes a session — it is eight-to-ten digits — so at two-to-three hundred
-     names it would roughly TRIPLE the body against a 96KB ceiling that is
-     already the binding one. The byte cap would absorb that by shedding a
-     third of the names, which is the wrong trade: the track page is about
-     scores, and it would pay for a field it does not draw.
-
-     The names that DO draw it are the card loop's fifty-odd, one card at a
-     time, where 42 numbers is nothing. So the series is built once here — in
-     the pass that already walks these rows, against the calendar `sessions`
-     is aligned to — and handed out per name. Rebuilding it beside the track
-     from the same days would produce a second calendar, and two calendars is
-     how an index-aligned pair drifts. */
   const premium = new Map();
   dates.forEach((d, i) => {
     for (const row of byDate.get(d).rows) {
@@ -332,10 +142,7 @@ export function buildScoreTrack(days, {
         if (!resid.has(t)) resid.set(t, new Array(dates.length).fill(null));
         resid.get(t)[i] = q;
       }
-      /* ABSENT STAYS ABSENT. `p` is omitted by scoresRows when neither leg
-         was quoted and written as 0 when both were quoted flat, so a null
-         here means "not priced that session" and a 0 means "priced flat" —
-         the distinction the archive was extended to keep. */
+
       const pv = num(row && row.p);
       if (pv !== null) {
         if (!premium.has(t)) premium.set(t, new Array(dates.length).fill(null));
@@ -347,20 +154,6 @@ export function buildScoreTrack(days, {
   const lastIndex = dates.length - 1;
   const priorIndex = dates.length - 2;
 
-  /* THE CHANGE LAYER. Derived here, from the series, in the same pass that
-     already walks it — and travelling with the two facts that decide whether
-     it means anything: how many sessions it spans, and where it ends.
-
-     WHY THE LAST TWO *SCORED* SESSIONS AND NOT THE LAST TWO SESSIONS. A name
-     absent from yesterday's pool has no yesterday to subtract. The choice is
-     between "no change" (which is a lie: it moved, we just were not watching)
-     and "the move since we last looked, with how long ago that was" — and only
-     the second is a statement a reader can act on or discard on its own terms.
-     `gap` is what makes it discardable: a consumer wanting strictly overnight
-     moves filters on gap === 1, and a consumer wanting "what has happened
-     since we last had an opinion" takes them all. Neither can be recovered
-     from a bare delta, which is why the renderer that computed one was
-     publishing a number nobody could interpret. */
   let names = [...series.entries()].map(([t, s]) => {
     let n = 0, last = null, lastAt = -1, prev = null, prevAt = -1;
     for (let i = 0; i < s.length; i++) {
@@ -370,48 +163,13 @@ export function buildScoreTrack(days, {
       last = s[i]; lastAt = i;
     }
 
-    /* GUARDED ON THE INDEX, NOT ON THE VALUE. `prev === null` is the sentinel
-       and it is also a legal reading — a score of 0 sits at the centre of the
-       dead band and this pipeline assigns it. An index of -1 cannot be
-       anything but "there was no earlier observation". */
     let d1 = null;
     if (prevAt >= 0) {
       d1 = { v: last - prev, gap: lastAt - prevAt };
       const qs = resid.get(t);
-      /* Both ends or neither. A residual differenced against an absent one is
-         not a smaller number, it is a different quantity. Board-only backfill
-         days carry no residual at all, so this is null across most of the
-         archive's older half and says so by being absent. */
+
       if (qs && qs[lastAt] !== null && qs[prevAt] !== null) d1.qv = qs[lastAt] - qs[prevAt];
 
-      /* THE CROSSING — the one move on this page that is an EVENT rather than
-         a drift, and it was one comparison away from a number already here.
-
-         Everything else the change layer publishes is a magnitude, and a
-         magnitude is a matter of degree: +88 to +91 is the same kind of thing
-         as +4 to +7, only larger. The dead band is the one threshold this
-         product actually acts on — inside it a name is published as
-         watch-only and reaches no board, outside it the name is ranked and
-         gets a card — so a name crossing it did not merely move, it changed
-         category. That is the sentence an early-warning surface exists to
-         print, and until now nothing computed it: `deadBand` rode on this
-         payload and was used only to draw a shaded strip behind a sparkline.
-
-         THREE TRANSITIONS, and they are mutually exclusive by construction:
-
-           cleared — was inside the band, is now outside it. The name became
-                     actionable this session. Sign says which side.
-           faded   — was outside, is now inside. The name stopped being
-                     actionable, which is the exit signal and is exactly as
-                     load-bearing as the entry.
-           flipped — outside the band at both ends, opposite signs. The name
-                     did not weaken and re-strengthen; it changed its mind,
-                     and it did so without ever resting in the middle.
-
-         A NULL BAND MEANS NO CLASSIFICATION, not a band of zero. num() would
-         answer 0 for an absent deadBand and every name would then read as
-         permanently outside a zero-width band — the confident zero, on the
-         one field whose whole job is to be a threshold. */
       const band = num(deadBand);
       if (band !== null && band >= 0) {
         const wasIn = Math.abs(prev) <= band;
@@ -422,39 +180,13 @@ export function buildScoreTrack(days, {
       }
     }
 
-    /* THE RUN AND THE EXTREMES — two more facts the matrix already contains
-       and nobody was deriving from it.
-
-       This payload shipped a 42-by-N matrix with four scalars beside it, and
-       the three orderings the track page offers are all snapshots of the
-       newest column: strongest last score, last score, most sessions
-       measured. A forty-two-session history page on which a reader cannot ask
-       which name MOVED is a table of levels wearing a chart's clothes.
-
-       `run` is how many consecutive measured sessions the name has held its
-       current sign — the answer to "is this a new opinion or an old one",
-       which is the question that separates a name worth opening from a name
-       that has been shouting the same thing for a month. Counted over
-       MEASURED sessions only: a gap is not evidence of a side change, and
-       breaking the run on one would make a name that fell out of the screener
-       for a day look like it had just turned.
-
-       `ext` is the window's own high and low with the sessions they happened
-       on, which turns "highest score in forty-two sessions" from something a
-       reader has to eyeball off a sparkline into a stated event with a date.
-
-       BOTH ARE FREE IN THE SAME PASS and neither needs a vendor call. A name
-       at its window high on the first session of a new side is the strongest
-       thing this archive can say, and until now it could not say it. */
     let run = 0, hi = null, hiAt = -1, lo = null, loAt = -1;
     for (let i = 0; i < s.length; i++) {
       const v = s[i];
       if (v === null) continue;
       if (hi === null || v > hi) { hi = v; hiAt = i; }
       if (lo === null || v < lo) { lo = v; loAt = i; }
-      /* Math.sign(0) is 0, and a score of zero is a real reading at the
-         centre of the dead band — it belongs to neither side, so it ends
-         whatever run was going rather than extending or flipping it. */
+
       run = (last !== null && v !== 0 && Math.sign(v) === Math.sign(last)) ? run + 1 : 0;
     }
 
@@ -464,10 +196,6 @@ export function buildScoreTrack(days, {
     };
   });
 
-  /* WHAT THE CHANGE IS A CHANGE *OF*, counted over the whole pool rather than
-     over the handful of rows a page happens to draw. A reader shown "eight
-     names moved" needs to know whether eight is out of twelve or out of four
-     hundred, and a renderer counting its own visible rows cannot tell them. */
   const change = (() => {
     if (dates.length < 2) {
       return {
@@ -498,23 +226,14 @@ export function buildScoreTrack(days, {
     return {
       session: dates[lastIndex], prior: dates[priorIndex],
       comparable, consecutive, moved, held, current, entered, left,
-      /* THE BAND ITSELF, beside the counts it produced. A crossing count with
-         no threshold attached cannot be checked, and this payload is read by
-         a renderer that would otherwise restate the constant in its own prose
-         — a second copy of a number that has already moved once. */
+
       band: num(deadBand),
       crossings,
-      /* THREE OUTCOMES, THREE WORDS, and they are not the same absence.
-         "cold" — nothing has two observations, so no change exists to report.
-         "flat" — everything was compared and nothing moved, which is a
-         reading about the session rather than about the archive.
-         "ok"   — something moved. */
+
       status: !comparable ? "cold" : (moved ? "ok" : "flat"),
     };
   })();
 
-  /* Most-observed first, then the stronger |last|, then the ticker — a
-     total order, so the shed below and the payload bytes are deterministic. */
   names.sort((a, b) =>
     b.n - a.n
     || Math.abs(b.last) - Math.abs(a.last)
@@ -523,18 +242,6 @@ export function buildScoreTrack(days, {
   const namesSeen = names.length;
   if (names.length > maxNames) names = names.slice(0, maxNames);
 
-  /* THE BYTE SHED. Measured rather than modelled: a row's cost depends on the
-     window length, on how many of its sessions are gaps (`null` is four
-     characters and a score is one to four), and on whether it carries a
-     residual change — none of which a per-row constant can know.
-
-     Cumulative and forward, so the sort order above decides who survives and
-     the result is deterministic: the same archive builds the same bytes, which
-     is the property the once-per-session immutability contract rests on. The
-     `+ 1` is the comma JSON.stringify would put between rows, and `[]` is the
-     two brackets; a budget that ignored them would be a budget that is wrong
-     by the number of names, which is exactly the size of the thing being
-     budgeted. */
   let used = 2;
   let fits = names.length;
   for (let i = 0; i < names.length; i++) {
@@ -544,9 +251,6 @@ export function buildScoreTrack(days, {
   }
   if (fits < names.length) names = names.slice(0, fits);
 
-  /* COUNTED AGAINST WHAT WAS SEEN, not against either cap, so the number a
-     reader is shown is "how many names exist that you are not being shown"
-     rather than "how many the second of two ceilings removed". */
   const shed = Math.max(0, namesSeen - names.length);
 
   return {
@@ -557,18 +261,10 @@ export function buildScoreTrack(days, {
     names,
     namesSeen,
     namesShed: shed,
-    /* WHICH CEILING BOUND, because "40 names shed" invites two different
-       reactions and only one of them is right: a name cap that bound is a
-       constant somebody chose and can raise, and a byte cap that bound is the
-       row shape having outgrown the route. */
+
     shedBy: !shed ? null : (namesSeen > maxNames && names.length === maxNames ? "names" : "bytes"),
     namesBytes: used,
-    /* COUNTED BEFORE THE SIZE CAP SHEDS, and that is deliberate: `change`
-       describes the SESSION, and a name dropped for payload budget was still
-       scored. Counting after the shed would make the published totals a
-       function of TRACK_MAX_NAMES, which is a wire constraint and not a fact
-       about the market. `namesShed` beside it says how many rows a reader is
-       not being shown. */
+
     change,
     sources: {
       full: sessions.filter((x) => x.source === "scores").length,
@@ -576,22 +272,11 @@ export function buildScoreTrack(days, {
     },
     status: names.length ? "ok" : "empty",
     notes: SCORES_NOTES,
-    /* HELD, NOT PUBLISHED — a Map keyed by ticker, each value index-aligned
-       to `sessions` exactly as `names[].s` is.
 
-       A MAP RATHER THAN AN OBJECT, deliberately: the publish site spreads
-       this return into a payload body, and JSON.stringify of a Map is `{}`.
-       So the destructure that removes it is the contract, and a future
-       caller who forgets it ships sixteen bytes rather than sixty kilobytes
-       and a 413 at 05:20. */
     premium,
   };
 }
 
-/**
- * Board rows folded into a backfill day: the two archived slices of one
- * session, deduplicated. `s` is the same field the board row carries.
- */
 export function boardsToScoreRows(boardRowsBySide) {
   const seen = new Set();
   const rows = [];
@@ -601,23 +286,7 @@ export function boardsToScoreRows(boardRowsBySide) {
       const s = num(r && r.s);
       if (!t || s === null || seen.has(t)) continue;
       seen.add(t);
-      /* `netPrem` HAS BEEN ON EVERY ARCHIVED BOARD ROW ALL ALONG, and this
-         fold was dropping it.
 
-         That is worth more than it looks. The dated scores key only began
-         carrying premium the day that field shipped, so a history read from
-         it alone starts empty and lengthens by one session a day — a panel
-         that says nothing for a month. The board archive already holds the
-         same figure for every session it covers, so reading it here backfills
-         the whole window at once, today.
-
-         WHAT THE BACKFILL IS AND IS NOT. A board day carries only the names
-         that MADE a board, so its premium coverage is exactly as sparse in
-         names as its score coverage, and sparse in the same way — which is
-         the sparseness the payload already marks board-only and the notes
-         already explain. It is not sparser in DATES, and it is not a
-         different measurement: it is the same `netPrem` the pipeline
-         published that morning, read out of the row it published it on. */
       const p = num(r && r.netPrem);
       const out = { t, s };
       if (p !== null) out.p = Math.round(p);

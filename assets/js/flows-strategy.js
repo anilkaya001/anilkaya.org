@@ -1,48 +1,3 @@
-/* =============================================================
-   flows-strategy.js — the options strategy tester.
-
-   Pick a name, build a position out of contracts that are actually
-   listed, and see what it pays. Everything here is one of exactly
-   three things, and the page never lets two of them wear the same
-   typeface:
-
-     MEASURED — the mid, the net debit or credit, the maximum profit
-       and maximum loss at expiry, the breakevens, the payoff line
-       itself, and the position's greeks as sums of the vendor's
-       per-contract ones. All arithmetic on quoted numbers.
-
-     A STATED CONVENTION — the projected curve (a Taylor expansion in
-       those same greeks), monthly decay (thirty times a one-day
-       derivative of a convex function), and the fixed bump sizes.
-       Each is labelled where it is printed, the way
-       `annualizedIsConvention` labels the premium desk's yield.
-
-     REFUSED — buying power reduction and conditional value at risk,
-       named on the page with the reason rather than quietly absent.
-
-   THE ENGINE IS TAYLOR, NOT BLACK-SCHOLES, AND THAT WAS THE DECISION.
-   Black-Scholes would draw a smoother curve and would need a
-   risk-free rate and a dividend yield — the two free parameters
-   shared/flows-chain.js and shared/flows-premium.js refuse by name,
-   and the refusal is why this section has never shipped an
-   assignment probability. A Taylor expansion needs nothing that is
-   not on the wire. Its cost is that it is LOCAL: least accurate near
-   a strike and near expiry, degrading with the horizon. That cost is
-   printed beside the curve and the slider stops at the nearest leg's
-   expiry rather than extrapolating through it.
-
-   THE ABSENT GREEK IS A PER-ROW FACT. The vendor marks all five
-   nullable and its own spec example carries a contract with none of
-   them. So a null greek renders an em dash on its row AND WITHHOLDS
-   the position total it belongs to — a sum that silently skips a leg
-   is a confident number about a position nobody holds. The legs it
-   is missing from are named.
-
-   THE THREE SILENCES ARE THREE SENTENCES. Nothing has been asked
-   for yet; the request did not come back; the read succeeded and
-   there was nothing there. Only the third is a fact about the
-   market, and only it may be phrased as one.
-   ============================================================= */
 (() => {
   "use strict";
 
@@ -69,24 +24,9 @@
   const panel = (id) => document.getElementById(id);
   const show = (id, on) => { const n = panel(id); if (n) n.hidden = !on; };
 
-  /* One contract is 100 shares. Named for the reason flows-premium.js names
-     it: a bare 100 in a premium formula reads like a percentage and has been
-     mistaken for one. */
   const MULT = 100;
 
-  /* The vol bump the scenario panel offers by default, in POINTS of implied
-     volatility. A visible input rather than a constant — see setScene(). */
   const DEFAULT_VOL_BUMP = 0;
-
-  /* =============================================================
-     FORMATTERS
-
-     FlowsUI.fmtMoney rounds to a scale ("$2K"), which is right for a
-     premium total and wrong for a maximum loss: a reader comparing
-     $1,950 against $2,050 cannot do it in thousands. These print
-     exact dollars and cents, with the same U+2212 and the same em
-     dash for an absence that every other Flows surface uses.
-     ============================================================= */
 
   const fmtUSD = (v, signed) => {
     const n = isNum(v);
@@ -96,8 +36,6 @@
     return (n < 0 ? MINUS : signed && n > 0 ? "+" : "") + body;
   };
 
-  /* A strike or an underlying price: two decimals only when it has them, so a
-     $180 strike does not read as $180.00 beside a $182.50 one. */
   const fmtPx = (v) => {
     const n = isNum(v);
     if (n === null) return DASH;
@@ -105,9 +43,6 @@
     return s.replace(/\.00$/, "");
   };
 
-  /* A quoted premium, always two decimals: options are quoted in cents and a
-     $1.90 bid that printed as $1.9 would be the only price on the page not in
-     the form the market states it in. */
   const fmtQuote = (v) => {
     const n = isNum(v);
     return n === null ? DASH : "$" + n.toFixed(2);
@@ -119,30 +54,11 @@
     return (n < 0 ? MINUS : n > 0 ? "+" : "") + Math.abs(n).toFixed(dp === undefined ? 2 : dp);
   };
 
-  /* Unsigned, for a quantity or a count. */
   const fmtPlain = (v, dp) => {
     const n = isNum(v);
     return n === null ? DASH : n.toFixed(dp === undefined ? 2 : dp);
   };
 
-  /* =============================================================
-     THE OPTION SYMBOL
-
-     Mirrors shared/flows-premium.js's regex and, crucially, its
-     STRIKE DIVISOR: the eight digits carry three implied decimals,
-     so they are divided by 1000 rather than multiplied. That file
-     settles the ambiguity in the vendor's own spec with an example —
-     UVIX240920C00025000 is a $25.00 strike on an ETF that trades in
-     the teens, not a $25,000 one.
-
-     A SECOND COPY EXISTS ONLY BECAUSE THE BROWSER HAS NO MODULE
-     LOADER HERE: every Flows page is a plain deferred script and
-     shared/ is Worker-side. It is used for exactly one thing — the
-     legs restored from a shared link, whose expiry and type must be
-     known BEFORE the book that would otherwise supply them can be
-     fetched. Every other read of a strike or a type on this page
-     comes from the payload, not from here.
-     ============================================================= */
   const SYMBOL_RE = /^([A-Z0-9]+)(\d{2})(\d{2})(\d{2})([PC])(\d{8})$/;
   function parseSymbol(symbol) {
     if (typeof symbol !== "string") return null;
@@ -159,9 +75,6 @@
     };
   }
 
-  /** Whole CALENDAR days between two ISO days. Calendar rather than trading,
-   *  for the reason flows-premium.js gives: premium decays over weekends too,
-   *  and every convention on this page is stated in calendar days. */
   const daysBetween = (fromDay, toDay) => {
     const a = Date.parse(String(fromDay).slice(0, 10) + "T00:00:00Z");
     const b = Date.parse(String(toDay).slice(0, 10) + "T00:00:00Z");
@@ -169,30 +82,8 @@
     return Math.round((b - a) / 86400000);
   };
 
-  /* =============================================================
-     THE ENGINE
-
-     Pure functions over resolved legs. A resolved leg is
-       { sym, expiry, type: "call"|"put", k, qty, side, price,
-         bid, ask, mid, iv, dl, gm, th, vg, rh }
-     with `price` set by the chosen basis and every greek either a
-     finite number or null.
-     ============================================================= */
-
   const signOf = (leg) => (leg.side === "long" ? 1 : -1);
 
-  /**
-   * The entry price per share for one leg under the chosen basis.
-   *
-   * THE MID NEEDS BOTH SIDES. `(bid + ask) / 2` with an absent ask is not a
-   * mid at all, and Number(null) would have made it half the bid — a price
-   * nobody quoted, on a page whose whole claim is that every number is
-   * recoverable from something somebody did quote.
-   *
-   * The marketable basis is what crossing the spread actually costs: you buy
-   * at the ask and you sell at the bid. It is the pessimistic reading and it
-   * is the only one that is observable end to end.
-   */
   function priceLeg(row, side, basis) {
     const bid = isNum(row.bid), ask = isNum(row.ask);
     if (basis === "marketable") return side === "long" ? ask : bid;
@@ -205,9 +96,6 @@
     return bid === null || ask === null ? null : (bid + ask) / 2;
   };
 
-  /** Net cash at open, in dollars. POSITIVE IS A DEBIT PAID, negative a credit
-   *  received. Null when any leg could not be priced — a position missing one
-   *  leg's price has an unknown cost, not a smaller one. */
   function netCost(legs) {
     let sum = 0;
     for (const l of legs) {
@@ -217,7 +105,6 @@
     return sum;
   }
 
-  /** The position's value at today's mids. Null if any mid is absent. */
   function markValue(legs) {
     let sum = 0;
     for (const l of legs) {
@@ -229,29 +116,12 @@
 
   const intrinsic = (type, k, S) => (type === "call" ? Math.max(0, S - k) : Math.max(0, k - S));
 
-  /**
-   * PROFIT AND LOSS AT EXPIRY, and this is the model-free line.
-   *
-   * At expiry an option is worth its intrinsic value and nothing else. No
-   * volatility, no rate, no dividend, no distribution enters here — which is
-   * why this is the one curve on the diagram that is exact rather than
-   * approximate, and why the maximum profit, the maximum loss and the
-   * breakevens read off it are exact too.
-   */
   function payoffAt(legs, cost, S) {
     let v = 0;
     for (const l of legs) v += signOf(l) * l.qty * MULT * intrinsic(l.type, l.k, S);
     return v - cost;
   }
 
-  /**
-   * The slope of the expiry payoff above the highest strike, in dollars of
-   * P&L per dollar of underlying.
-   *
-   * Only calls contribute: above every strike, every put is worthless and
-   * stays worthless. A non-zero slope here is the ONLY way this page's payoff
-   * can be unbounded, because the underlying is bounded below by zero.
-   */
   function rightSlope(legs) {
     let s = 0;
     for (const l of legs) if (l.type === "call") s += signOf(l) * l.qty * MULT;
@@ -264,22 +134,6 @@
     return [...seen].sort((a, b) => a - b);
   };
 
-  /**
-   * Maximum profit and maximum loss at expiry.
-   *
-   * THE PAYOFF IS PIECEWISE LINEAR, so its extremes can only sit at a
-   * breakpoint or at an end of the domain. The breakpoints are the strikes;
-   * the left end is S = 0 and the right end is infinity. Sampling a grid
-   * would find approximately the same numbers and would occasionally miss a
-   * peak entirely; evaluating the breakpoints finds them exactly.
-   *
-   * DOWNSIDE IS NEVER UNBOUNDED AND SAYING OTHERWISE IS THE COMMON ERROR. A
-   * naked short put is routinely described as having unlimited risk. It does
-   * not: a share cannot trade below zero, so the loss is exactly the strike
-   * less the credit, and this returns that number with the price it occurs
-   * at. Only a short call is genuinely unbounded, and that is reported as
-   * unbounded rather than as a large number, because there is no number.
-   */
   function extremes(legs, cost) {
     const rs = rightSlope(legs);
     const cands = [{ S: 0, p: payoffAt(legs, cost, 0) }];
@@ -289,32 +143,12 @@
       if (c.p > best) best = c.p;
       if (c.p < worst) worst = c.p;
     }
-    /* WHERE, AS A SET RATHER THAN A POINT. A long call loses its whole premium
-       at EVERY price at or below its strike, and reporting one endpoint of that
-       range as "the" maximum-loss price is a fact about which candidate the
-       loop happened to visit first. Ties are collected and the caller says
-       "anywhere from A to B" when they are adjacent breakpoints — which, the
-       payoff being linear between them, is exactly when the whole segment is
-       flat at that value. */
+
     const at = (target) => cands
       .map((c, i) => ({ ...c, i }))
       .filter((c) => Math.abs(c.p - target) < 1e-9);
     const spread = (list) => list.length > 1 && list[list.length - 1].i - list[0].i === list.length - 1;
-    /* THE TIE SET AS MAXIMAL CONTIGUOUS RUNS, because `spread` is all-or-
-       nothing and an iron condor is neither.
 
-       Its maximum loss is attained on TWO regions — the flat stretch below
-       the lower strikes and the ray above the upper one — so the whole list
-       is not contiguous, `spread` answers false, and the sentence fell back
-       to naming each breakpoint: "at $0.00 and at $85.00 and at $120.00".
-       Every price in that sentence is true and the sentence is still wrong,
-       because everything BETWEEN $0 and $85 is also a maximum loss and a
-       reader is told three points where there is a segment.
-
-       Runs of adjacent candidate indices are exactly the flat segments —
-       the payoff being linear between breakpoints, a tie at both ends of an
-       interval means the whole interval is at that value, which is the same
-       argument `spread` already makes for the single-run case. */
     const runs = (list) => {
       const out = [];
       for (const c of list) {
@@ -325,31 +159,7 @@
       return out.map((r) => ({ from: r[0].S, to: r[r.length - 1].S, flat: r.length > 1 }));
     };
     const bestAt = at(best), worstAt = at(worst);
-    /* THE RAY THIS FUNCTION COULD NOT SEE, AND THE FALSE SENTENCE IT PRINTED.
 
-       The candidate set is zero plus the strikes, so nothing above the
-       highest strike is ever sampled. When the right-hand slope is zero the
-       payoff is CONSTANT from that strike upward — and every extreme attained
-       there is attained on a ray to infinity, not at a price. The page said
-       otherwise, on the most ordinary structures this tool exists to build:
-
-         a 100/110 bull call spread printed "Max profit +$700.00 ... Reached
-         at an underlying of $110 at expiry", and the payoff at $160 is also
-         700;
-         a short $100 put printed "Reached at an underlying of $100", and the
-         payoff at $150 is also 500.
-
-       The DOLLARS were right in every case — the arithmetic was re-checked
-       against six hand-worked structures and matched. What was wrong was the
-       "where", which is the half a reader uses to decide whether the number
-       is reachable.
-
-       NO FAKE CANDIDATE IS ADDED TO FIX IT. Pushing some large finite price
-       into `cands` would invent a number the position never names and shift
-       every index `spread()` depends on. The ray is a PROPERTY, derived from
-       two things already known — the slope is flat, and the tie set reaches
-       the highest strike — and carried out as its own flag for the sentence
-       to read. */
     const topK = cands[cands.length - 1].S;
     const toRight = (list) => rs === 0 && list.some((c) => c.S === topK);
     return {
@@ -369,28 +179,11 @@
     };
   }
 
-  /**
-   * Where an extreme is reached: one run, several runs, and the ray.
-   *
-   * "at an underlying of $100 at expiry"
-   * "anywhere from $0 to $100 at expiry, where the payoff is flat"
-   * "anywhere from $0 to $85, and at $120 and at every price above it"
-   *
-   * EACH RUN IS A SEGMENT OR A POINT, never a list of points standing in for
-   * a segment, and the ray is appended to the LAST run rather than replacing
-   * it — both halves are true and a reader needs both. A condor's maximum
-   * loss really is attained on the flat stretch below the lower strikes AND
-   * on every price above the upper one; naming only one drops a region.
-   */
   function whereText(runs, toRight) {
     if (!runs || !runs.length) return "";
     const ray = toRight
       ? " and at every price above " + fmtPx(runs[runs.length - 1].to) : "";
-    /* THE ONE-RUN WORDING IS UNCHANGED, TO THE CHARACTER. It is what
-       tests/flows-strategy.mjs asserts and what every single-region
-       structure — a long call's flat loss, a straddle's point loss, a short
-       put's zero — has always printed. Only the several-regions case is new,
-       because only it was being said as a list of points. */
+
     if (runs.length === 1) {
       const r = runs[0];
       return (r.flat
@@ -398,18 +191,13 @@
           " at expiry, where the payoff is flat"
         : "at an underlying of " + fmtPx(r.from) + " at expiry") + ray;
     }
-    /* "at expiry" MOVES TO THE FRONT once there is more than one region, so
-       it qualifies the whole sentence rather than trailing the last clause
-       and reading as though only that region were at expiry. The flatness
-       note goes in brackets for the same reason: inline it collided with the
-       next "and" and produced "flat and at $120.00". */
+
     return "at expiry " + runs.map((r) => (r.flat
       ? "anywhere from " + fmtPx(r.from) + " to " + fmtPx(r.to) +
         " (where the payoff is flat)"
       : "at " + fmtPx(r.from))).join(", ") + ray;
   }
 
-  /** Every underlying price at which the expiry payoff is exactly zero. */
   function breakevens(legs, cost) {
     const pts = [0, ...strikesOf(legs)];
     const out = [];
@@ -423,9 +211,7 @@
       const pa = payoffAt(legs, cost, a), pb = payoffAt(legs, cost, b);
       if (pa === 0) push(a);
       if (pb === 0) push(b);
-      /* A SIGN CHANGE, not a small value. A segment whose ends are both
-         negative can dip no lower and rise no higher than its ends — the
-         function is linear on it — so there is nothing between them to find. */
+
       if (pa * pb < 0) push(a + (b - a) * (-pa) / (pb - pa));
     }
     const last = pts[pts.length - 1];
@@ -440,14 +226,6 @@
     return out;
   }
 
-  /**
-   * A position greek: the signed, quantity-weighted, contract-multiplied sum.
-   *
-   * WITHHELD RATHER THAN PARTIAL. If any leg is missing this greek the total
-   * is null and the legs that are missing it are named. Summing the rest
-   * would publish a number for a position that is not the one on the page —
-   * the exact shape of "Number(null) is 0", one abstraction up.
-   */
   function greekTotal(legs, key) {
     let sum = 0;
     const missing = [];
@@ -459,31 +237,8 @@
     return missing.length ? { value: null, missing } : { value: sum, missing: [] };
   }
 
-  /* The four greeks the projection needs. Rho is deliberately not among them:
-     it moves the price with the interest rate, and this page has no rate to
-     move — that is the parameter it declined to invent. It is still printed
-     as a position total, because the vendor quoted it. */
   const TAYLOR_GREEKS = ["dl", "gm", "th", "vg"];
 
-  /**
-   * THE PROJECTION. A second-order expansion in the underlying, first order
-   * in time and in implied volatility, using the vendor's own quoted greeks:
-   *
-   *   dV ≈ Σ_legs sign · qty · 100 · [ δ·dS + ½·Γ·dS² + Θ·dDays + V·dVolPts ]
-   *
-   * IT IS A CONVENTION AND NOT A MEASUREMENT, in three separate places, and
-   * each is stated on the page rather than only here:
-   *   — theta is taken as a one-day derivative, which is the vendor's own
-   *     convention for the field;
-   *   — vega is taken as the price change for a ONE-POINT move in implied
-   *     volatility, likewise;
-   *   — and the expansion itself is local, so it degrades with dS and with
-   *     dDays and is worst exactly at a strike, where gamma is largest and a
-   *     second-order term is least sufficient.
-   *
-   * Null when any leg is missing any of the four. There is no partial answer
-   * here: an expansion missing one leg's delta describes a different position.
-   */
   function taylor(legs, { dS, dDays, dVol }) {
     let sum = 0;
     for (const l of legs) {
@@ -494,43 +249,23 @@
     return sum;
   }
 
-  /* =============================================================
-     STATE
-
-     THE POSITION LIVES IN THE URL, like the premium desk's
-     watchlist and for the same reasons: assets/js/storage.js is the
-     sanctioned owner of browser storage on this site and a second
-     owner is how two of them disagree, and a link is the only form
-     of a position that survives a reload and can be sent to someone.
-
-     Legs carry no PRICES in the URL. A quote is a fact about a
-     moment; a link opened tomorrow that restored yesterday's mid
-     would draw a diagram that was never true. The link carries the
-     contracts, and the page re-reads what they are worth now.
-     ============================================================= */
   const state = {
     ticker: "",
     context: null,
-    contextAt: null,     // Date.now() when the context payload was received
-    contextAge: null,    // X-Chain-Age at that instant, in seconds, or null
+    contextAt: null,
+    contextAge: null,
     contextError: null,
     expiry: "",
-    books: new Map(),    // expiry -> the expiry payload
+    books: new Map(),
     bookError: new Map(),
-    /* IN FLIGHT, NOT MERELY UNLOADED. Restoring a shared link asks for the
-       displayed expiry and then for every leg's expiry, which are usually the
-       same one — and `books.has()` is still false while the first request is
-       in the air, so both would fire. Two concurrent misses are two calls on a
-       shared vendor quota for one answer. */
+
     bookPending: new Set(),
     loading: 0,
-    legs: [],            // { sym, expiry, type, k, qty, side }
+    legs: [],
     basis: "mid",
     window: 0.25,
     scene: { px: null, days: 0, vol: DEFAULT_VOL_BUMP },
-    /* WHICH (expiry, window) PAIR THE CHAIN HAS ALREADY BEEN CENTRED FOR, so
-       the scroller is placed at the money once when a book opens and never
-       again while a reader is using it. */
+
     centred: null,
     seq: 0,
   };
@@ -552,9 +287,7 @@
       const sym = raw.slice(0, at).toUpperCase();
       const qty = Number(raw.slice(at + 1));
       const parsed = parseSymbol(sym);
-      /* A LEG THAT DOES NOT PARSE IS DROPPED, NOT GUESSED AT. A hand-edited
-         link with a mangled strike would otherwise draw a diagram of a
-         contract that does not exist, and every number on it would render. */
+
       if (!parsed || !Number.isFinite(qty) || qty === 0) continue;
       const n = Math.min(999, Math.abs(Math.round(qty)));
       if (!n) continue;
@@ -580,26 +313,13 @@
     }
   }
 
-  /* =============================================================
-     THE FETCHES
-     ============================================================= */
-
-  /**
-   * ONE HELPER FOR BOTH READS, and the age header is the reason it is worth
-   * one. `headers.get` answers null for a header that was not sent, Number(null)
-   * is 0 and Number.isFinite(0) is true — so a naive read publishes an ABSENT
-   * age as an age of nought, "just now", for a body of unknown vintage. The
-   * route also sends a real `X-Chain-Age: 0` on a cache miss and means
-   * measured-fresh by it. isNum() keeps those two apart; nothing else does.
-   */
   async function readStrategy(params) {
     const response = await fetch("/api/flows/strategy?" + params.toString(), {
       credentials: "same-origin",
       headers: { Accept: "application/json" },
     });
     if (response.status === 401) {
-      /* The session expired underneath us. The sign-in page is the honest
-         destination, not an error on a page that cannot work. */
+
       location.replace("/flows/");
       return { gone: true };
     }
@@ -609,9 +329,7 @@
       const code = body && body.error && body.error.code;
       return { error: messageFor(response.status, code) };
     }
-    /* A 200 THAT DID NOT PARSE IS NOT A PAYLOAD. Letting it through as `ok`
-       with a null body is how the premium desk once counted a symbol among
-       those it had priced while holding no table for it. */
+
     if (!body || typeof body !== "object") return { error: "the response could not be read" };
     return { body, age, at: Date.now() };
   }
@@ -640,10 +358,7 @@
     catch { out = { error: "the request did not reach the server" }; }
     state.loading--;
     if (out.gone) return;
-    /* A SUPERSEDED RESPONSE IS DROPPED. Typing a second symbol before the
-       first returns leaves two requests in the air, and they do not come back
-       in the order they were sent. The stale one is not bad data — it is the
-       answer to a question the reader has already moved on from. */
+
     if (seq !== state.seq) return;
     if (out.error) {
       state.contextError = out.error;
@@ -662,9 +377,7 @@
     }
     render();
     if (state.expiry) loadExpiry(state.expiry);
-    /* THE RESTORED LEGS' OWN EXPIRIES, not only the one on screen. A shared
-       four-leg calendar spans two expiries and the position cannot be priced
-       until both books are in hand. */
+
     for (const exp of new Set(state.legs.map((l) => l.expiry))) loadExpiry(exp);
   }
 
@@ -685,24 +398,13 @@
     state.loading--;
     state.bookPending.delete(expiry);
     if (out.gone) return;
-    /* Keyed on the SYMBOL as well as the expiry: switching names mid-flight
-       must not file NVDA's October book under AMD. */
+
     if (ticker !== state.ticker) return;
     if (out.error) state.bookError.set(expiry, out.error);
     else state.books.set(expiry, out.body);
     render();
   }
 
-  /* =============================================================
-     RESOLVING LEGS
-
-     A leg in `state.legs` is an identity. A leg the engine can use
-     is that identity joined to the quote and the greeks the book
-     currently holds, which is a JOIN AT RENDER TIME rather than a
-     copy taken when the leg was added — so a re-price moves every
-     leg at once and the diagram cannot be drawn from a mixture of
-     two reads.
-     ============================================================= */
   function resolveLegs() {
     const resolved = [], unresolved = [];
     for (const leg of state.legs) {
@@ -712,8 +414,7 @@
       if (!row) {
         unresolved.push({
           leg,
-          /* THE THREE SILENCES, PER LEG. Which one it is decides what the
-             reader should do, and they may not share a sentence. */
+
           why: state.bookError.has(leg.expiry) ? "unreadable"
             : book ? "gone" : "pending",
         });
@@ -732,10 +433,6 @@
     }
     return { resolved, unresolved };
   }
-
-  /* =============================================================
-     RENDER
-     ============================================================= */
 
   function render() {
     renderStatus();
@@ -780,10 +477,7 @@
     }
     const parts = [state.ticker + " " + MID + " " + ex.length + " listed " +
       (ex.length === 1 ? "expiry" : "expiries")];
-    /* THE LIST'S SOURCE, WHEN IT IS NOT THE SESSION'S. The worker falls back
-       to the open-interest aggregate when the per-session breakdown answers
-       with nothing (pre-open, and observed on a prior session too); that list
-       carries no contract counts, which is why the picker below shows none. */
+
     if (state.context.expirySource === "exposure") {
       parts.push("listed from open interest rather than the session's activity, " +
         "so no expiry above carries its contract count");
@@ -793,8 +487,6 @@
       : "no legs yet — use Buy or Sell on a row below");
     statusEl.textContent = parts.join(" " + MID + " ");
   }
-
-  /* ---------- the context strip ---------------------------------- */
 
   function renderContext() {
     const host = document.getElementById("sgContext");
@@ -808,13 +500,7 @@
     if (!c) return;
 
     const dl = el("dl", "sg-facts");
-    /* EACH PAIR IS ONE CELL, which is the whole of the fix for a strip that
-       read as nonsense. The dt and dd were separate grid items in an auto-fit
-       track, so the flow put SPOT's label in one column and its value in the
-       next, then wrapped — landing a session date under the word SPOT and the
-       label SESSION at the end of the row above it. Every figure on this strip
-       sat beside a term it did not belong to. A div grouping a dt with its dd
-       inside a dl is exactly what HTML5 added that wrapper for. */
+
     const add = (term, value, hint) => {
       const cell = el("div", "sg-fact");
       const dt = el("dt", null, term);
@@ -823,9 +509,6 @@
       dl.append(cell);
     };
 
-    /* WHICH PRICE, AND HOW OLD, both ship — the premium desk's rule, and it
-       matters more here: every strike's moneyness, the diagram's whole x-axis
-       and the beta weighting are measured from this one number. */
     add("Spot", fmtPx(c.spot) + " " + MID + " " +
       (c.spotSource === "stock-state" ? "live print" : "prior daily close"),
       "The price every reading on this page is measured from.");
@@ -835,14 +518,6 @@
 
     add("Session", c.asOf || DASH, "The trading session the days-to-expiry count is measured from.");
 
-    /* BETA IS PRINTED EVEN WHEN THE BETA-WEIGHTED DELTA CANNOT BE. They are
-       different absences: a name with no beta and a name whose index quote
-       failed produce the same blank in the readings, and only this line can
-       tell them apart. */
-    /* THE VALUE HANDED BACK, NOT THE RAW FIELD. isNum RETURNS the reading, so
-       the idiom is to bind it and format the binding — asking `isNum(x)` and
-       then printing `x` is how a string that happened to parse gets printed as
-       a string, and how a field that did not gets printed at all. */
     const beta0 = isNum(c.beta);
     add("Beta", beta0 === null ? DASH : fmtPlain(beta0, 2),
       "The vendor's beta for this name. An em dash means the vendor has none — " +
@@ -875,11 +550,7 @@
   }
 
   function contextAgeText() {
-    /* THE AGE IS A FUNCTION OF NOW, not a number frozen at fetch. The premium
-       desk shipped the frozen version: a page priced at 09:31 and left open
-       still said "just now" at 10:11. The header states the age AT THE INSTANT
-       OF THE RESPONSE; everything after it is wall clock, so the two are added
-       here and the whole strip is re-rendered on a slow tick. */
+
     if (state.contextAge === null || state.contextAt === null) {
       return {
         text: "age unknown",
@@ -898,8 +569,6 @@
     };
   }
 
-  /* ---------- the chain ------------------------------------------ */
-
   function renderChain() {
     const c = state.context;
     show("sgChainPanel", !!(c && (c.expiries || []).length));
@@ -913,11 +582,7 @@
       for (const e of expiries) {
         const days = daysBetween(c.asOf, e.expiry);
         const chains = isNum(e.chains);
-        /* THE SIZE OF THE EXPIRY IS IN THE PICKER, BEFORE IT IS READ. The
-           vendor caps a page at 500 contracts and its own spec example shows
-           single expiries carrying 12,223 — so an expiry that cannot fit in
-           the two pages this page fetches is knowable in advance, and warning
-           before the read beats confessing after it. */
+
         const label = e.expiry +
           (days === null ? "" : "  " + MID + "  " + days + "d") +
           (chains === null ? "" : "  " + MID + "  " + chains + " listed");
@@ -961,11 +626,7 @@
     const width = state.window;
     const inWindow = (k) => !width || spot === null || Math.abs(k / spot - 1) <= width;
     const shown = rows.filter((r) => inWindow(r.k));
-    /* A FALLBACK THAT SAYS NOTHING IS A CONTROL THAT LIES. A ±10% window on a
-       chain whose nearest strike is 30% away leaves nothing to draw, and
-       quietly showing every strike instead would answer a question the reader
-       did not ask under a control that claims otherwise. The rows are shown
-       and the note below says the window caught nothing. */
+
     const windowEmpty = width > 0 && shown.length === 0 && rows.length > 0;
     const use = shown.length ? shown : rows;
 
@@ -973,26 +634,12 @@
     for (const r of use) chainBody.append(strikeRow(r, spot, atm));
     if (chainWrap) chainWrap.hidden = false;
 
-    /* THE BOOK OPENS AT THE MONEY. A chain is sorted by strike and a scroller
-       starts at the top, so the page opened on the lowest strike it holds —
-       the deepest in-the-money calls, the furthest out-of-the-money puts,
-       which is the one part of the book almost nobody wants first. Every
-       reader then scrolled to the middle before doing anything at all.
-
-       CENTRED RATHER THAN SCROLLED-TO, because scrollIntoView() puts the row
-       at an edge and the rows either side of the money are half the reason to
-       look. Done once per (expiry, window) pair: re-centring after every
-       render would yank the list out from under a reader who had scrolled
-       somewhere deliberately, which is worse than opening in the wrong place.
-       The key carries the window because changing it rebuilds the list. */
     const anchor = state.expiry + "/" + width;
     if (chainWrap && atm !== null && state.centred !== anchor) {
       state.centred = anchor;
       const row = chainBody.querySelector("tr.is-atm");
       if (row) {
-        /* MEASURED FROM THE SCROLLER, NOT FROM THE VIEWPORT: offsetTop is
-           relative to the nearest positioned ancestor, and the table's rows
-           sit inside the wrapper that actually scrolls. */
+
         const mid = row.offsetTop - (chainWrap.clientHeight / 2) + (row.offsetHeight / 2);
         chainWrap.scrollTop = Math.max(0, mid);
       }
@@ -1001,11 +648,7 @@
     if (note) {
       note.textContent = "";
       const bits = [];
-      /* A LIST THAT TRUNCATES WITHOUT SAYING SO READS AS A POPULATION, and on
-         a calculator the consequence is sharper than on a ranked table: the
-         reader's strike is simply not there and nothing says a strike is
-         missing. Both cuts are stated — the one this page made, and the one
-         the vendor's page limit made. */
+
       if (windowEmpty) {
         bits.push("No listed strike falls within " + Math.round(width * 100) +
           "% of spot, so every one of the " + rows.length + " strikes is shown instead — " +
@@ -1030,12 +673,7 @@
           "projected curve — the vendor marks all five greeks nullable and its own " +
           "example carries a contract with none of them.");
       }
-      /* THE FILTER STOPPED BEING HONOURED. Zero on every ordinary read, so
-         this sentence never appears — but if the provider ever stops applying
-         `expiry` or `option_type`, the rows it sent for other expiries are
-         dropped here and a table that looks complete would be a table missing
-         whatever the drop took with it. Saying so is the difference between a
-         quiet gap and a reported one. */
+
       const off = isNum(book.offExpiry);
       if (off !== null && off > 0) {
         bits.push(off + " row" + (off === 1 ? "" : "s") + " the provider returned " +
@@ -1048,7 +686,6 @@
     }
   }
 
-  /** One row per strike, both sides joined — the shape a chain is read in. */
   function mergeStrikes(book) {
     const byStrike = new Map();
     const put = (row, side) => {
@@ -1062,7 +699,6 @@
     return [...byStrike.values()].sort((a, b) => a.k - b.k);
   }
 
-  /** The listed strike nearest spot, which is the row a chain is read from. */
   function atmStrike(rows, spot) {
     if (spot === null) return null;
     let best = null, gap = Infinity;
@@ -1075,31 +711,9 @@
 
   function strikeRow(entryRow, spot, atm) {
     const tr = el("tr");
-    /* THE MARK IS THE NEAREST LISTED STRIKE, NOT A STRIKE WITHIN HALF A
-       PERCENT. On a $221 name the strikes are $2.50 apart, so 0.5% is a
-       $1.10 band that catches a strike on some days and none on others —
-       and a chain with no marked row at all is the state a reader meets
-       most mornings. "Nearest" always exists once a strike does, which is
-       what makes it a landmark rather than a coincidence. */
+
     if (atm !== null && entryRow.k === atm) tr.className = "is-atm";
 
-    /* THE PRICE IS THE CONTROL, WHICH IS BOTH THE DENSER LAYOUT AND THE ONE
-       EVERY OPTIONS PLATFORM ALREADY TEACHES: you buy at the ask and you
-       sell at the bid, so the ask cell adds a long leg and the bid cell adds
-       a short one. It replaces a pair of Buy/Sell buttons per side that cost
-       230 of this table's 881 pixels — the difference between a chain that
-       fits beside the diagram and one that scrolls sideways with the put
-       side out of sight.
-
-       IT IS A BUTTON, NOT A CLICKABLE CELL. A div with a handler is
-       unreachable by keyboard and invisible to a screen reader; a button
-       carries a label that says the whole action, which is more than the two
-       it replaced said ("Buy the 2026-09-18 $220 call" never named a price).
-
-       A QUOTE THAT IS NOT THERE IS NOT A CONTROL. An unquoted side renders as
-       the em dash it always did, with no button: there is nothing to price a
-       leg at, and offering the action anyway would add a leg this page could
-       not value. */
     const quoteCells = (row, side) => {
       const cells = [];
       const num = (text) => el("td", "c-num", text);
@@ -1161,8 +775,6 @@
     });
     render();
   }
-
-  /* ---------- the position, the readings, the diagram ------------ */
 
   function renderPosition() {
     const has = state.legs.length > 0;
@@ -1275,8 +887,7 @@
           state.basis === "mid" ? "The mid of the two-sided quote"
             : r.side === "long" ? "The ask — what buying it costs"
               : "The bid — what selling it pays"));
-        /* EACH GREEK ASKED FOR SEPARATELY. A contract with a delta and no vega
-           keeps its delta: absence is per field, not per row. */
+
         tr.append(cell(fmtNum(r.dl, 3), "Delta, per share, as quoted"));
         tr.append(cell(fmtNum(r.gm, 4), "Gamma, per share per dollar, as quoted"));
         tr.append(cell(fmtNum(r.th, 3), "Theta, taken as a one-day derivative"));
@@ -1309,14 +920,10 @@
     }
   }
 
-  /* ---------- readings ------------------------------------------- */
-
   function renderReadings(host, note, legs, cost, ext, bes) {
     if (!host) return;
     const dl = el("dl", "sg-facts");
-    /* ONE CELL PER PAIR, for the reason renderContext() gives: loose dt and dd
-       in an auto-fit grid flow independently and a wrap lands a figure beside
-       a term that is not its own. */
+
     const add = (term, value, hint, cls) => {
       const cell = el("div", "sg-fact");
       const dt = el("dt", null, term);
@@ -1325,9 +932,6 @@
       dl.append(cell);
     };
 
-    /* UNITS TRAVEL WITH NUMBERS. Every term below names what the number is
-       counted in, because a ratio and a dollar sum must never share a name and
-       "delta" alone is three different quantities depending on who says it. */
     add(cost >= 0 ? "Net debit" : "Net credit", fmtUSD(Math.abs(cost)),
       "What opening the whole position costs (a debit) or pays (a credit), " +
       "priced at " + (state.basis === "mid" ? "the mid of each leg" : "the marketable side of each leg") + ".");
@@ -1351,11 +955,6 @@
         : "Reached " + whereText(ext.maxProfitRuns, ext.maxProfitToRight) + ".",
       ext.profitUnbounded ? "is-unbounded" : null);
 
-    /* THE BOUNDED SHORT PUT, SAID OUT LOUD. A naked short put is routinely
-       described as having unlimited risk and it does not: a share cannot trade
-       below zero, so the loss is exactly the strike less the credit. The note
-       is attached only when zero is the SOLE price the worst case is reached
-       at, which is precisely the shape that gets mis-described. */
     const zeroOnly = !ext.lossUnbounded && ext.maxLossAt.length === 1 && ext.maxLossAt[0] === 0;
     add("Max loss",
       ext.lossUnbounded ? "unbounded" : fmtUSD(ext.maxLoss, true),
@@ -1377,7 +976,6 @@
         : "The payoff never crosses zero: this position is either profitable everywhere " +
           "at expiry or loss-making everywhere.");
 
-    /* ---- the greeks, each with its own unit and its own absence ---- */
     const dlt = greekTotal(legs, "dl");
     const gmt = greekTotal(legs, "gm");
     const tht = greekTotal(legs, "th");
@@ -1392,11 +990,6 @@
       dlt.value === null ? withheld(dlt)
         : "The shares of the underlying this position currently behaves like.");
 
-    /* BETA-WEIGHTED DELTA, DONE PROPERLY OR NOT AT ALL. It is not delta times
-       beta. The relation is stated in full here and the two inputs it needs
-       beyond delta — this name's beta and the reference index's live price —
-       are both printed in the context strip above, so nothing in it is a
-       parameter the reader cannot see. */
     const c = state.context || {};
     const beta = isNum(c.beta);
     const idxSpot = c.index ? isNum(c.index.spot) : null;
@@ -1428,11 +1021,6 @@
         : "The provider's theta, taken as a one-day derivative of each contract's price. " +
           "That reading of the field is the vendor's convention, restated because it is one.");
 
-    /* THE MONTHLY FIGURE IS A CONVENTION AND WEARS THE LABEL, exactly the way
-       the premium desk's annualised yield carries `annualizedIsConvention`.
-       Theta is convex in time: thirty days of decay is not thirty of today's,
-       and the number is offered because it is the scale a reader compares
-       against a position's cost — not because anybody collects it. */
     add("Decay, thirty days",
       tht.value === null ? DASH : fmtUSD(tht.value * 30, true) + " — a convention",
       tht.value === null ? withheld(tht)
@@ -1465,30 +1053,12 @@
     }
   }
 
-  /* ---------- the diagram ---------------------------------------- */
-
-  /* 260 -> 300. The diagram moved out of a full-width band and into the work
-     column beside the book, so it is no longer a 1,240x260 letterbox: at
-     roughly 600px wide, 300 tall is a shape a payoff curve reads in, and the
-     extra 40px is where the y-axis gained a labelled midpoint. */
   const PLOT_H = 300;
   const PAD = { top: 18, right: 16, bottom: 34, left: 62 };
 
   function renderPlot(host, note, legs, cost, ext, bes) {
     if (!host) return;
-    /* MEASURED FROM A VISIBLE HOST. A hidden element reports clientWidth 0,
-       and FlowsUI's own contract is that one viewBox unit is one CSS pixel —
-       so a width taken while the panel was still hidden would stretch every
-       unit and the whole drawing with it. The panel is unhidden by
-       renderPosition() before this runs.
 
-       300 IS THE FLOOR THIS FILE ALREADY USES, stated at .fc-panel in
-       flows.css: below it a chart is clamped up and letterboxed rather than
-       drawn at a scale where 10px axis type renders at 7. The panel gives its
-       side padding back to the chart under 30rem for exactly this reason, so
-       the clamp almost never fires; when it does, `max-width: 100%` keeps the
-       drawing inside its box at the cost of the pixel contract, which is the
-       trade every other chart in this section already makes. */
     const width = Math.max(300, host.clientWidth || 0);
 
     const spot = isNum((state.context || {}).spot);
@@ -1499,16 +1069,10 @@
     let hi = Math.max(...marks) * 1.2;
     if (!(hi > lo)) { lo = Math.max(0, (marks[0] || 1) * 0.5); hi = (marks[0] || 1) * 1.5; }
 
-    /* THE EXPIRY LINE IS SAMPLED AT ITS BREAKPOINTS, NOT ON A GRID. It is
-       piecewise linear, so its vertices ARE the strikes and the two ends; a
-       grid would round every corner off by half a cell and would occasionally
-       draw a peak that is not where the peak is. */
     const xs = [lo, ...strikes.filter((k) => k > lo && k < hi), hi];
     xs.sort((a, b) => a - b);
     const expiryPts = xs.map((S) => ({ x: S, y: payoffAt(legs, cost, S) }));
 
-    /* The projected curve, only when every leg carries every greek it needs,
-       and only inside the nearest expiry — see the slider's own bound. */
     const days = state.scene.days;
     const vol = state.scene.vol;
     let projPts = null;
@@ -1543,10 +1107,7 @@
       viewBox: `0 0 ${width} ${PLOT_H}`,
       role: "img",
     });
-    /* THE DRAWING IS NOT THE ONLY CHANNEL. The readings above carry every
-       number in this picture as text, and the table below carries the payoff
-       at each turning point — so a reader who cannot see the line is not
-       missing a reading, only a shape. The label says the shape. */
+
     const caption = svgEl("title", {});
     caption.textContent =
       "Profit and loss at expiry against the underlying price, from " + fmtPx(lo) +
@@ -1556,10 +1117,6 @@
       (bes.length ? ", breakeven at " + bes.map(fmtPx).join(" and ") : ", no breakeven") + ".";
     svg.append(caption);
 
-    /* THE ZERO RULE IS THE SIGN CHANNEL. Profit is above this line and loss is
-       below it, which is a POSITION and survives greyscale, a monochrome
-       printout and every form of colour blindness. Nothing on this diagram
-       carries its sign in a hue. */
     const zeroY = Y(0);
     svg.append(svgEl("line", {
       class: "sg-zero", x1: PAD.left, y1: zeroY.toFixed(2),
@@ -1579,13 +1136,7 @@
       t.textContent = fmtUSD(v, true);
       svg.append(t);
     }
-    /* TWO MORE LABELLED LEVELS, ONE EACH SIDE OF ZERO, and they are the
-       halfway points of the two REGIONS rather than of the whole range: a
-       diagram whose axis carries only a top, a bottom and a zero can be read
-       for its shape and not for its size, and the halves of the profit and
-       the loss bands are the two numbers a reader estimates against. Skipped
-       when a band is too thin to hold a label without colliding with the zero
-       rule, which is the case a straddle at full range produces. */
+
     for (const v of [yHi / 2, yLo / 2]) {
       if (!Number.isFinite(v) || Math.abs(Y(v) - zeroY) < 16) continue;
       if (Math.abs(Y(v) - Y(v > 0 ? yHi : yLo)) < 14) continue;
@@ -1677,15 +1228,6 @@
     }
   }
 
-  /**
-   * THE PAYOFF AT EVERY TURNING POINT, AS TEXT.
-   *
-   * A diagram cannot be read to the dollar, and this is the page's central
-   * claim — so the numbers the line is drawn from are printed beside it rather
-   * than left to a reader's eye against an axis. It is also the reading a
-   * screen reader gets, and it is the only form of the payoff that can be
-   * quoted, copied or checked.
-   */
   function payoffTable(legs, cost, bes, spot) {
     const wrap = el("div", "flows-tablewrap sg-payoffwrap");
     wrap.tabIndex = 0;
@@ -1733,18 +1275,11 @@
     return wrap;
   }
 
-  /* ---------- the scenario --------------------------------------- */
-
   function renderScene(host, note, legs, cost) {
     if (!host) return;
     const c = state.context || {};
     const spot = isNum(c.spot);
 
-    /* THE SLIDER STOPS AT THE NEAREST EXPIRY, and that is the whole design
-       decision made visible. A Taylor expansion around today's greeks says
-       nothing about a world in which one of the legs has already settled, and
-       a slider that ran past it would return a confident number for a
-       position that no longer exists in the form it was expanded around. */
     let minDTE = null;
     for (const l of legs) {
       const d = daysBetween(c.asOf, l.expiry);
@@ -1816,15 +1351,6 @@
     }
   }
 
-  /* =============================================================
-     THE VOLATILITY INPUT
-
-     Built here rather than in the document because it belongs to
-     the scenario controls and would otherwise be a fourth id the
-     page shell and this file both have to agree about. Its value is
-     a POINT of implied volatility — the same unit the vega reading
-     is quoted in, said in both places.
-     ============================================================= */
   const volField = (() => {
     const scene = document.querySelector("#sgScenePanel .sg-controls");
     if (!scene) return null;
@@ -1842,10 +1368,6 @@
     scene.append(span);
     return input;
   })();
-
-  /* =============================================================
-     WIRING
-     ============================================================= */
 
   entry.addEventListener("submit", (e) => {
     e.preventDefault();
@@ -1865,10 +1387,7 @@
     state.books.clear();
     state.bookError.clear();
     state.bookPending.clear();
-    /* THE LEGS DO NOT SURVIVE A CHANGE OF NAME. A position built on NVDA
-       contracts is not a position on AMD, and carrying the legs across would
-       leave rows nothing in the new book can price — silently unresolvable,
-       and indistinguishable from a book that failed to load. */
+
     state.legs = [];
     state.scene.px = null;
     loadContext(false);
@@ -1901,10 +1420,7 @@
   if (scenePx) scenePx.addEventListener("input", () => {
     const raw = String(scenePx.value || "").replace(/[$,\s]/g, "");
     const n = raw === "" ? null : Number(raw);
-    /* TESTED FOR ABSENCE BEFORE COERCION, in the one place on this page where
-       a reader can type an empty string: Number("") is 0 and 0 is a real
-       underlying price, so the naive read would answer "what does this pay if
-       the stock goes to zero" every time the field is cleared. */
+
     state.scene.px = raw === "" || !Number.isFinite(n) || n < 0 ? null : n;
     renderPosition();
   });
@@ -1922,15 +1438,8 @@
     renderPosition();
   });
 
-  /* THE AGE TICKS, NOTHING ELSE DOES. Only the context strip depends on wall
-     clock; re-rendering the whole page on a timer would fight a reader typing
-     in the scenario field. Thirty seconds because the age is printed in
-     minutes and nothing here is a live quote. */
   setInterval(() => { if (state.context) renderContext(); }, 30000);
 
-  /* Redraw on resize because the SVG is sized in CSS pixels rather than in
-     percentages — one viewBox unit is one pixel, which is FlowsUI's contract
-     and the reason its charts do not stretch. */
   let resizeTimer = null;
   window.addEventListener("resize", () => {
     clearTimeout(resizeTimer);

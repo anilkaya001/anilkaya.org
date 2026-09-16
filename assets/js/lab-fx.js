@@ -1,10 +1,3 @@
-/* =============================================================
-   lab-fx.js — the delight layer. Tasteful, GPU-composited motion
-   that makes correct answers feel great and wrong ones feel kind.
-   Vanilla, dependency-free, and fully reduced-motion aware.
-   Exposes window.FX = { confetti, correct, wrong, floatPoints,
-   moduleDone, celebrate }.
-   ============================================================= */
 (() => {
   "use strict";
 
@@ -12,7 +5,6 @@
   const reduce = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const rectOf = (el) => (el && el.getBoundingClientRect ? el.getBoundingClientRect() : { left: innerWidth / 2, top: innerHeight / 2, width: 0, height: 0 });
 
-  // ---- shared confetti canvas (one element, reused) -----------
   let cv, cx, parts = [], raf = 0;
   function ensureCanvas() {
     if (cv) return;
@@ -36,7 +28,7 @@
     for (const p of parts) {
       if (p.life <= 0) continue;
       alive++;
-      p.vy += 0.12;                 // gravity
+      p.vy += 0.12;
       p.vx *= 0.99;
       p.x += p.vx; p.y += p.vy;
       p.rot += p.vr;
@@ -76,7 +68,6 @@
     burst(r.left + r.width / 2, r.top + r.height / 2, opts.count || 70, opts.spread || 1.5, opts.power || 9);
   }
 
-  // ---- success / error on an element ---------------------------
   function ring(el, cls) {
     if (!el) return;
     const r = rectOf(el);
@@ -102,7 +93,6 @@
     ring(el, "fx-ring--err");
   }
 
-  // ---- floating "+N points" near the badge --------------------
   function floatPoints(n, anchorEl) {
     if (!n) return;
     if (anchorEl) {
@@ -121,14 +111,13 @@
     setTimeout(() => f.remove(), 1300);
   }
 
-  // ---- module / topic completion ------------------------------
   function moduleDone(el) {
     if (el) { el.classList.add("fx-glow"); setTimeout(() => el.classList.remove("fx-glow"), 1400); }
     if (el) confetti(el, { count: 36, power: 7, spread: 2 });
   }
 
   function celebrate(msg) {
-    // big banner + a couple of confetti volleys from the top
+
     const b = document.createElement("div");
     b.className = "fx-banner";
     b.innerHTML = '<span class="fx-banner__check" aria-hidden="true">✓</span><span>' +
@@ -143,9 +132,6 @@
     setTimeout(() => { b.classList.remove("in"); setTimeout(() => b.remove(), 400); }, 1500);
   }
 
-  // ---- significance ignite: the regression table's hero moment -
-  // significant p-values flare gold->green; their rows get a brief
-  // underline sweep, staggered top-down so the table "resolves".
   function ignite(container) {
     if (!container || reduce()) return;
     container.querySelectorAll(".sig").forEach((el, i) => {
@@ -160,7 +146,6 @@
     });
   }
 
-  // ---- a freshly-estimated figure "develops" (first arrival) ---
   function reveal(img, opts = {}) {
     if (!img) return;
     if (reduce()) { img.style.clipPath = "none"; img.style.opacity = "1"; img.style.transform = "none"; return; }
@@ -172,12 +157,11 @@
     }, { once: true });
   }
 
-  // ---- interactive before/after crossfade (slider re-runs) -----
   function swap(container, img) {
     if (!container) return;
     if (reduce()) { container.innerHTML = ""; container.appendChild(img); return; }
     const olds = Array.from(container.children);
-    for (let i = 0; i < olds.length - 1; i++) olds[i].remove(); // cap stack at 2
+    for (let i = 0; i < olds.length - 1; i++) olds[i].remove();
     const prev = container.lastElementChild;
     container.style.position = "relative";
     img.style.opacity = "0";
@@ -193,7 +177,6 @@
     }));
   }
 
-  // ---- Run button: charge/release + honest meniscus ------------
   function runState(btn, state) {
     if (!btn) return;
     if (state === "busy") { btn.classList.add("fx-busy"); btn.setAttribute("aria-busy", "true"); }
@@ -203,7 +186,6 @@
     }
   }
 
-  // ---- result handoff: bloom + nudge-scroll only if off-screen -
   function landed(el, opts = {}) {
     if (!el) return;
     if (!reduce()) { el.classList.remove("fx-bloom"); void el.offsetWidth; el.classList.add("fx-bloom"); setTimeout(() => el.classList.remove("fx-bloom"), 560); }
@@ -214,14 +196,13 @@
     }
   }
 
-  // ---- points fly as a coin arc into the badge ----------------
   function coin(originEl, badgeEl, amount) {
     if (!badgeEl || !amount) return;
     if (reduce() || !originEl) { floatPoints(amount, badgeEl); return; }
     const o = rectOf(originEl), b = rectOf(badgeEl);
     const x0 = o.left + o.width / 2, y0 = o.top + o.height / 2;
     const x1 = b.left + b.width / 2, y1 = b.top + b.height / 2;
-    const midX = (x0 + x1) / 2, midY = Math.min(y0, y1) - 64;     // arc apex above the path
+    const midX = (x0 + x1) / 2, midY = Math.min(y0, y1) - 64;
     const c = document.createElement("span");
     c.className = "fx-coin"; c.textContent = "+" + amount; c.setAttribute("aria-hidden", "true");
     document.body.appendChild(c);
@@ -239,7 +220,6 @@
     anim.onfinish = land; setTimeout(land, 720);
   }
 
-  // ---- streak flame: breathing when lit, flare on increment ---
   function streakUp(el) {
     if (!el || reduce()) return;
     el.classList.remove("fx-flare"); void el.offsetWidth; el.classList.add("fx-flare");
@@ -250,7 +230,6 @@
     el.classList.toggle("fx-lit", state === "lit" && !reduce());
   }
 
-  // ---- directional page-turn between stages (guide+work) ------
   function pageTurn(el, dir, swapFn) {
     if (!el) return;
     if (reduce()) { swapFn(); return; }

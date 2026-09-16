@@ -1,7 +1,3 @@
-/* Shared, stateless session helpers for the Cloudflare Worker.
-   A session is a signed (HMAC-SHA256) token: base64url(json).base64url(sig).
-   No server store needed — verification is pure crypto. */
-
 const enc = new TextEncoder();
 
 function b64url(buf) {
@@ -46,9 +42,7 @@ const cookiePatternCache = new Map();
 function cookiePattern(name) {
   let pattern = cookiePatternCache.get(name);
   if (!pattern) {
-    // Escape the name (callers pass fixed literals, but this keeps a metacharacter
-    // from ever being interpreted) and cache the compiled matcher per name — the
-    // request path only ever asks for a couple of fixed cookies.
+
     pattern = new RegExp("(?:^|; )" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "=([^;]+)");
     cookiePatternCache.set(name, pattern);
   }

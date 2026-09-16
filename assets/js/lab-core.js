@@ -1,12 +1,3 @@
-/* =============================================================
-   lab-core.js — the real compute engine + code editor.
-   - Loads Pyodide + numpy/pandas/scipy/statsmodels/matplotlib.
-   - makeCell(): an editable cell with Python syntax highlighting
-     (overlay technique, no CDN) and Run.
-   - run(): executes real Python, streams stdout, colours p-values
-     green (<0.05) / red, and renders matplotlib figures beneath.
-   Exposes window.Lab: { run, makeCell, ready, highlight, colorize }.
-   ============================================================= */
 (() => {
   "use strict";
 
@@ -53,7 +44,6 @@ def _grab_figs():
 
   let pyodide = null, booting = null;
 
-  // ---- HTML escape + Python highlighter (no dependencies) -----
   const escHtml = (s) => s.replace(/[&<>]/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[m]));
 
   const KW = new Set("False None True and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield match case".split(" "));
@@ -91,17 +81,16 @@ def _grab_figs():
     return out;
   }
 
-  // ---- Colour p-values green (<0.05) / red in console output ---
   function sig(v) { return parseFloat(v) < 0.05 ? "sig" : "insig"; }
   function colorize(text) {
     return escHtml(text).split("\n").map((line) => {
-      // statsmodels coefficient row: label + 6 floats; the 4th is P>|t|
+
       const m = line.match(/^(\s*\S.*?\s+)(-?\d+\.\d+)(\s+)(-?\d+\.\d+)(\s+)(-?\d+\.\d+)(\s+)(\d+\.\d+)(\s+)(-?\d+\.\d+)(\s+)(-?\d+\.\d+)(\s*)$/);
       if (m) {
         const cls = sig(m[8]);
         const row = m[1] + m[2] + m[3] + m[4] + m[5] + m[6] + m[7] +
           '<span class="' + cls + '">' + m[8] + "</span>" + m[9] + m[10] + m[11] + m[12] + m[13];
-        // wrap significant rows so FX.ignite can sweep them
+
         return cls === "sig" ? '<span class="sigrow">' + row + "</span>" : row;
       }
       return line
@@ -110,12 +99,11 @@ def _grab_figs():
     }).join("\n");
   }
 
-  // ---- Boot indicator -----------------------------------------
   function bootEl() {
     let b = document.getElementById("labBoot");
     if (!b) {
       b = document.createElement("div"); b.id = "labBoot"; b.className = "boot";
-      b.setAttribute("role", "status");   // polite live region: boot progress + failures reach screen readers
+      b.setAttribute("role", "status");
       b.innerHTML = '<span class="boot__spin" aria-hidden="true"></span><span class="boot__txt"></span>';
       document.body.appendChild(b);
     }
@@ -160,8 +148,8 @@ def _grab_figs():
     py.setStdout({ batched: write }); py.setStderr({ batched: write });
     try {
       await py.runPythonAsync(code);
-      stream.innerHTML = colorize(buf);                 // colour p-values once complete
-      if (window.FX && window.FX.ignite) window.FX.ignite(stream);   // significant rows "resolve"
+      stream.innerHTML = colorize(buf);
+      if (window.FX && window.FX.ignite) window.FX.ignite(stream);
       if (figs) {
         const proxy = await py.runPythonAsync("_grab_figs()");
         const arr = proxy.toJs(); proxy.destroy();
@@ -176,8 +164,6 @@ def _grab_figs():
     } finally { py.setStdout(); py.setStderr(); }
   }
 
-  // Render matplotlib PNGs: live (slider) figures crossfade so the
-  // before/after delta is visible; first-arrival figures "develop".
   function renderFigs(figs, arr) {
     const mk = (b64) => { const img = document.createElement("img"); img.loading = "lazy"; img.alt = "Model output figure"; img.src = "data:image/png;base64," + b64; return img; };
     const live = figs.classList && figs.classList.contains("stage__figs--live");
@@ -191,7 +177,6 @@ def _grab_figs():
     });
   }
 
-  // ---- Editable, highlighted, runnable code cell --------------
   function makeCell({ code = "", title = "python", onRun, onResult, prepareCode, figsEl = null } = {}) {
     const cell = document.createElement("div"); cell.className = "cell";
     const bar = document.createElement("div"); bar.className = "cell__bar";
@@ -213,8 +198,7 @@ def _grab_figs():
     wrap.append(pre, editor);
 
     const out = document.createElement("div"); out.className = "cell__out";
-    // Figures can render into an external target (e.g. the left guide column)
-    // so a tall code cell doesn't push the chart far down the page.
+
     const figs = figsEl || document.createElement("div");
     if (figsEl) { cell.append(bar, wrap, out); }
     else { figs.className = "cell__figs"; cell.append(bar, wrap, out, figs); }
@@ -222,7 +206,7 @@ def _grab_figs():
     const runBtn = bar.querySelector(".cell__run");
     const resetBtn = bar.querySelector(".cell__reset");
     async function doRun() {
-      if (runBtn.disabled) return;    // Ctrl+Enter bypasses the disabled button; guard re-entry
+      if (runBtn.disabled) return;
       runBtn.disabled = true; const label = runBtn.textContent; runBtn.textContent = "Running…";
       if (window.FX && window.FX.runState) window.FX.runState(runBtn, "busy");
       const submitted = editor.value;
@@ -239,7 +223,7 @@ def _grab_figs():
     runBtn.addEventListener("click", doRun);
     resetBtn.addEventListener("click", () => { editor.value = initial; paint(); out.textContent = ""; figs.innerHTML = ""; });
     editor.addEventListener("keydown", (e) => {
-      // Tab indents; Shift+Tab falls through to native backward focus (no keyboard trap)
+
       if (e.key === "Tab" && !e.shiftKey) { e.preventDefault(); const s = editor.selectionStart, en = editor.selectionEnd; editor.value = editor.value.slice(0, s) + "    " + editor.value.slice(en); editor.selectionStart = editor.selectionEnd = s + 4; paint(); }
       else if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); doRun(); }
     });

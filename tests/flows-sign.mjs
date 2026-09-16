@@ -1,53 +1,3 @@
-/* =============================================================
-   flows-sign.mjs — zero is a measurement, and it gets its own arm.
-
-   THE RULE IS STATED IN assets/js/flows-ui.js AND WAS ENFORCED
-   NOWHERE. Its formatter carries the comment "ZERO PRINTS UNSIGNED
-   AND UNDIMINISHED — it is a measurement, not a blank", and it obeys
-   itself. Seventeen sign decisions in six other renderers did not.
-
-   The clearest was on the ticker page's score badge, which is the
-   most prominent number in the product. Two adjacent lines:
-
-     badge.textContent = score > 0 ? "+" : score < 0 ? MINUS : "";
-     badge.className   = score < 0 ? "is-neg" : "is-pos";
-
-   The text prints an unsigned zero, correctly. The class directly
-   beneath it tints the same zero green. The two disagreed about the
-   same number, on the same row, one line apart, and nothing could
-   see it because both are individually reasonable.
-
-   WHY A SCANNER AND NOT A REVIEW. This defect has no runtime
-   signature. It throws nothing, overflows nothing, and renders a
-   plausible page; it is wrong only for one value of one input, and
-   only a reader who knew the score was exactly zero would ever
-   notice. It also regenerates: every new chart needs a polarity
-   decision and the two-armed form is the one that comes to mind
-   first. A rule that lives in a comment is a rule that holds until
-   the next person writes a ternary.
-
-   WHAT COUNTS AS A VIOLATION. A ternary whose test compares against
-   zero, and whose branches choose between a POSITIVE marker and a
-   NEGATIVE marker, with no third arm. Comments are stripped first, so
-   a file DESCRIBING the defect is not accused of it — flows-market.js
-   quotes the bad form verbatim in the comment recording its own fix.
-
-   WHAT DOES NOT COUNT. The three-armed form, which tests zero on both
-   sides. Every correct site in this codebase already has that shape,
-   so the scanner is a filter on structure rather than a list of
-   blessed lines: there is no allow-list here and there must not be
-   one, because the moment a line can be excused by name the next
-   defect is one entry away from invisible.
-
-   AND THE OTHER HALF: A NEUTRAL CLASS WITH NO RULE IS NOT NEUTRAL,
-   IT IS INVISIBLE. Several of these families set `fill: none` or no
-   stroke on the base class and carry their colour entirely on the
-   polarity modifier. Emitting `is-flat` on one of those without a
-   stylesheet rule would draw nothing at all — a strictly worse
-   outcome than the wrong tint it replaced. So every polarity class
-   these renderers emit is checked against the stylesheet, and a later
-   consolidation that drops one fails here rather than in a chart.
-   ============================================================= */
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 
@@ -64,10 +14,6 @@ const ZCMP = /(?:<=?|>=?|===|!==)\s*0(?![.\d])/g;
 const ZERO_TEST = /(?:<=?|>=?)\s*0\s*\?/g;
 const FLAT = /is-zero|is-flat|is-neutral/;
 
-/* Comments out, string bodies left alone. A blunt state machine rather than a
-   parser: it only has to be right about where a comment starts and ends, and
-   getting that wrong in the safe direction (treating code as a comment) would
-   HIDE violations, so it is written to never do that. */
 function stripComments(src) {
   let out = "", i = 0;
   while (i < src.length) {
@@ -87,7 +33,6 @@ function stripComments(src) {
   return out;
 }
 
-/** The expression a ternary's `?` opens, to the end of its own statement. */
 function windowFrom(src, at) {
   let depth = 0, i = at;
   while (i < src.length && i - at < 260) {
@@ -106,8 +51,7 @@ function violationsIn(src) {
   for (const m of clean.matchAll(ZERO_TEST)) {
     const win = windowFrom(clean, m.index + m[0].length);
     if (!(POS.test(win) && NEG.test(win))) continue;
-    /* SAFE when zero is tested from BOTH sides — the three-armed form — or
-       when the expression names a flat arm outright. */
+
     const whole = clean.slice(m.index, m.index + m[0].length + win.length);
     if ((whole.match(ZCMP) || []).length >= 2) continue;
     if (FLAT.test(win)) continue;
@@ -124,10 +68,6 @@ ok(files.length >= 10,
    `the sweep covers every Flows renderer it can find (${files.length}) rather than a list ` +
    "that goes stale when a route is added");
 
-/* ---------- 1. the scanner works, proven on both forms ------------
-   A scanner asserted only against a codebase that passes is a scanner that
-   might be matching nothing at all. These two strings are the defect and its
-   fix, and the suite fails if it cannot tell them apart. */
 {
   const bad = [
     'x.className = v < 0 ? "is-neg" : "is-pos";',
@@ -148,16 +88,13 @@ ok(files.length >= 10,
     eq(violationsIn(src).length, 0,
        `and clears the three-armed form: ${src.slice(0, 52)}`);
   }
-  /* THE COMMENT THAT QUOTES THE DEFECT IS NOT THE DEFECT. flows-market.js
-     records its own fix by quoting the bad form verbatim, and an earlier
-     draft of this scanner accused it. */
+
   eq(violationsIn('/* used to test `n >= 0 ? "+" : MINUS`, which was wrong */').length, 0,
      "a comment describing the defect is not accused of it");
   eq(violationsIn('// x = v >= 0 ? "is-pos" : "is-neg"').length, 0,
      "in either comment form");
 }
 
-/* ---------- 2. no renderer decides a sign in two arms ------------- */
 {
   const all = [];
   for (const f of files) {
@@ -175,11 +112,6 @@ ok(files.length >= 10,
      "  moment a line can be excused by name, the next defect is one entry from invisible.");
 }
 
-/* ---------- 3. every polarity class emitted has a rule ------------
-   A neutral class with no rule is not neutral, it is invisible — several of
-   these families set `fill: none` or no stroke at all and carry their colour
-   entirely on the modifier. This is the assertion that stops a stylesheet
-   consolidation from silently deleting a chart. */
 {
   const EMITTED = /["'\s](\.?)((?:fc-score|gp-cum|fp-line|fp-line-end|rc-dot|mk-bar|gs-cell)(?:\s|["'])?)/;
   const FAMILIES = ["fc-score", "gp-cum", "fp-line", "fp-line-end", "rc-dot"];
@@ -200,8 +132,6 @@ ok(files.length >= 10,
      "SIDE, which matters because .is-pos also sets `left: 50%` and a future minimum width " +
      "would have grown it in a direction the reading does not have");
 
-  /* THE NEUTRAL IS INK, NOT A THIRD HUE. Green, red and amber would read as
-     three sides; grey reads as no side, which is what the measurement says. */
   const flatRules = CSS.match(/\.[\w-]+(?:\s+\w+)?\.is-flat\s*\{[^}]*\}/g) || [];
   ok(flatRules.length >= 5, `the neutral rules exist as a family (${flatRules.length} of them)`);
   for (const r of flatRules) {
@@ -210,7 +140,6 @@ ok(files.length >= 10,
   }
 }
 
-/* ---------- 4. the shared helper exists and is three-way ---------- */
 {
   const panels = readFileSync(new URL("flows-panels.js", JS_DIR), "utf8");
   ok(/const polarity = /.test(panels),

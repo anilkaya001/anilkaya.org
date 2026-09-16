@@ -1,12 +1,3 @@
-/* Contracts for shared/flows-freshness.js — the gate that decides which
-   cron firings spend vendor calls.
-
-   The instants below are fixed UTC moments chosen to sit on BOTH sides of
-   the daylight-saving boundary, because the DST seam is where this
-   repository's last clock gate silently skipped runs for half a year: a
-   gate tested only in the offset its author's summer happened to be in is
-   a gate tested once. */
-
 import assert from "node:assert/strict";
 import { easternClock, isRefreshWindow, REFRESH_CADENCE_MINUTES, easternDay, lastCompletedSession }
   from "../shared/flows-freshness.js";
@@ -15,13 +6,12 @@ let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
-/* ---------- the clock itself ----------------------------------- */
 {
-  const summer = easternClock(new Date("2026-07-08T13:31:00Z")); // EDT = UTC-4
+  const summer = easternClock(new Date("2026-07-08T13:31:00Z"));
   eq(summer.weekday, "Wed", "a July instant lands on the right Eastern weekday");
   eq(summer.minutes, 9 * 60 + 31, "and 13:31Z is 09:31 Eastern under daylight time");
 
-  const winter = easternClock(new Date("2026-01-14T13:31:00Z")); // EST = UTC-5
+  const winter = easternClock(new Date("2026-01-14T13:31:00Z"));
   eq(winter.minutes, 8 * 60 + 31,
     "the SAME UTC wall-clock is 08:31 Eastern in January — the hour the gate " +
     "must not treat as equal to July's");
@@ -29,7 +19,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(easternClock("not a date"), null, "an unreadable instant is null, not NaN minutes");
 }
 
-/* ---------- the window, on both sides of the DST seam ----------- */
 {
   ok(isRefreshWindow(new Date("2026-07-08T13:31:00Z")), "summer 09:31 ET is inside");
   ok(!isRefreshWindow(new Date("2026-07-08T13:14:00Z")), "summer 09:14 ET is before the window");
@@ -45,27 +34,12 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(!isRefreshWindow(new Date("2026-01-14T21:16:00Z")), "winter 16:16 ET is not");
 }
 
-/* ---------- weekends and junk ----------------------------------- */
 {
   ok(!isRefreshWindow(new Date("2026-07-11T14:00:00Z")), "a Saturday refreshes nothing");
   ok(!isRefreshWindow(new Date("2026-07-12T14:00:00Z")), "nor a Sunday");
   ok(!isRefreshWindow(new Date("garbage")), "an invalid date refuses rather than throwing");
 }
 
-/* ---------- an instant's Eastern DAY, which is not its ISO prefix ----
-
-   A DATE AND AN INSTANT ARE DIFFERENT KINDS. Off-exchange prints are
-   reported to 20:00 ET, so a print executed at 19:10 ET on a winter evening
-   carries an `executed_at` whose UTC date is the NEXT day. Slicing ten
-   characters off that stamp dates the print to a session that had not begun,
-   and comparing the result against a sessionDate resolved in America/New_York
-   then reports a feed as belonging to another session when every row is
-   inside this one.
-
-   This is the third time this repository has paid for the same confusion —
-   daysToEarnings carries the warning, a dry-run fixture measured from
-   Date.now() against a gate counting from an Eastern date, and the
-   cross-section join dated its whole dark-pool feed to tomorrow. */
 {
   eq(easternDay("2026-01-06T00:10:00Z"), "2026-01-05",
     "19:10 ET on 2026-01-05 under EST is the FIFTH's session, though its UTC stamp " +
@@ -79,9 +53,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(easternDay(new Date("2026-01-06T00:10:00Z")), "2026-01-05",
     "a Date object answers the same as its ISO string");
 
-  /* ABSENCE REFUSED BEFORE COERCION. `new Date(null)` is not an invalid date,
-     it is the EPOCH — so a row with no timestamp would be dated 1969-12-31
-     and published as a session. The NaN check alone does not catch it. */
   for (const v of [null, undefined, 0, "", "   ", false, "Thursday", "2026-09", NaN]) {
     eq(easternDay(v), null,
       `an unusable instant (${JSON.stringify(v)}) is null, never a coerced day — ` +
@@ -89,14 +60,12 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   }
 }
 
-/* ---------- the published cadence ------------------------------- */
 {
   eq(REFRESH_CADENCE_MINUTES, 15,
     "the cadence pages quote matches the wrangler.toml cron — a page promising " +
     "15-minute freshness against a 30-minute cron would be lying politely");
 }
 
-/* ---------- the last session that has closed ------------------- */
 {
   eq(lastCompletedSession(new Date("2026-07-08T21:00:00Z")), "2026-07-08",
     "Wednesday 17:00 ET: today's session has closed and settled, so today");

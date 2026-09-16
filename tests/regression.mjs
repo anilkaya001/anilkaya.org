@@ -1,4 +1,3 @@
-/* End-to-end browser regression suite against the real local Worker runtime. */
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { startWorker } from "./worker-server.mjs";
@@ -34,8 +33,7 @@ function watch(page, ignored = () => false) {
   });
   page.on("requestfailed", (request) => {
     const reason = request.failure()?.errorText || "unknown";
-    // Page-initiated fetches (auth probes, the market ticker) can still be in
-    // flight when the suite navigates to the next page; that abort is expected.
+
     const navigationAborted = reason === "net::ERR_ABORTED" &&
       ["/api/v2/bootstrap", "/api/bootstrap", "/api/me", "/api/markets"].includes(new URL(request.url()).pathname);
     const detail = `request failed: ${request.url()} (${reason})`;
@@ -156,11 +154,7 @@ async function solve(route, answer, expectedPoints, repeat) {
 
 try {
   browser = await chromium.launch();
-  // Layout and console integrity at all supported viewports.
-  /* 481 and 640 are here because the band between 481px and 793px had no
-     coverage at all, and that is exactly where a fourth nav tab broke the
-     topbar on every page — 207px clipped at 481px with the Flows tab entirely
-     off-screen. The gap between 390 and 768 was the bug's hiding place. */
+
   for (const [width, height, mobile] of [[320, 720, true], [390, 844, true], [481, 900, true], [640, 900, true], [768, 1024, true], [1024, 768, true], [1280, 720, false], [1440, 900, false], [2048, 1152, false]]) {
     const context = await browser.newContext({ viewport: { width, height }, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: mobile ? 2 : 1 });
     const page = await context.newPage();
@@ -177,13 +171,6 @@ try {
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       assert(overflow <= 1, `[${width}px] horizontal overflow on ${route}: ${overflow}px`);
 
-      /* THE TOPBAR, measured directly.
-
-         scrollWidth cannot see a clipped topbar: body{overflow-x:hidden} cuts
-         it off silently, so the assertion above stayed green through two
-         separate regressions while half the navigation was invisible. The
-         only honest test is the real geometry of the fixed bar's own children
-         against the viewport. */
       const nav = await page.evaluate(() => {
         const pill = document.querySelector(".pill");
         if (!pill) return null;
@@ -216,13 +203,7 @@ try {
         const session = await page.locator(".session-control").boundingBox();
         const resumeCard = await page.locator(".dashboard-resume").boundingBox();
         const resumeAction = await page.locator(".dashboard-resume .btn").boundingBox();
-        /* WAIT FOR IT, THEN MEASURE. #labGrid is filled asynchronously, and
-           boundingBox() returns NULL for an element that is not laid out yet
-           — so under a loaded machine this raced, and the assertion below
-           then printed `Math.round(undefined || 0)` as "begins too late at
-           0px": a position it never measured, reported as though it had.
-           A missing element and an element in the wrong place are different
-           failures with different fixes, and this told you the wrong one. */
+
         const firstCourseEl = page.locator("#labGrid .model-card").first();
         await firstCourseEl.waitFor({ state: "visible", timeout: 10000 }).catch(() => {});
         const firstCourse = await firstCourseEl.boundingBox();
@@ -235,8 +216,7 @@ try {
             `[${width}px] personalized next-action card falls below the fold at ${Math.round((resumeCard?.y || 0) + (resumeCard?.height || 0))}px`);
         }
         if ([390, 1024, 1280, 1440, 2048].includes(width)) {
-          /* The two failures said apart, so the message names the one that
-             happened rather than inventing a coordinate for the other. */
+
           assert(firstCourse,
             `[${width}px] no course card was laid out in #labGrid within 10s — the grid ` +
             "is filled asynchronously, so this is an absent element, not a misplaced one");
@@ -254,8 +234,6 @@ try {
 
   }
 
-  // The initial HTML remains useful without JavaScript: the primary action is
-  // a canonical course link and the crawlable course catalogue stays present.
   {
     const context = await browser.newContext({ javaScriptEnabled: false });
     const page = await context.newPage();
@@ -267,9 +245,6 @@ try {
     await context.close();
   }
 
-  // Academy-native interactions remain instant until a learner explicitly
-  // runs Python. Concept labs, cases, and matching complete through keyboard-
-  // accessible controls; code challenges call the lazy runtime once.
   {
     const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
     await context.addInitScript(() => {
@@ -289,12 +264,7 @@ try {
     const clean = watch(page);
     await page.goto(BASE + stageRoute("foundations", 1, "native-formats"), { waitUntil: "load" });
     await waitForCourse(page, "2 / 32");
-    // The concept lab is now a runnable interactive Python stage (sliders + a
-    // lazy "Launch" that boots Python only on click), not the old static SVG.
-    // Verify it renders with accessible sliders and does not eagerly load
-    // Python. It is intentionally NOT launched here: the interactive/makeCell
-    // run-then-load path is asserted on the code challenge below, and leaving
-    // Python unloaded keeps that stage's one-lazy-runtime accounting exact.
+
     assert(await page.locator(".cell--interactive .control__range").count() >= 1, "interactive lab has no sliders");
     const labSlider = page.locator(".cell--interactive .control__range").first();
     assert(await labSlider.evaluate((el) => !!(el.closest("label") && el.closest("label").textContent.trim())), "interactive lab slider has no accessible label");
@@ -331,7 +301,6 @@ try {
     await context.close();
   }
 
-  // Capstones persist only task/mode state and export portable local artifacts.
   {
     const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, acceptDownloads: true });
     const page = await context.newPage();
@@ -365,9 +334,6 @@ try {
     await context.close();
   }
 
-  // Mastery challenges use two deterministic variants for each of the three
-  // weakest skills; course challenges cover every course skill and award the
-  // documented badge at an 80% threshold.
   {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const page = await context.newPage();
@@ -389,20 +355,12 @@ try {
     const courseContext = await browser.newContext();
     const coursePage = await courseContext.newPage();
     await coursePage.goto(BASE + "/lab/challenge/?course=ols", { waitUntil: "load" });
-    // The bank is static, so it is fetched once rather than seven times.
+
     const olsItems = await coursePage.evaluate(async () => {
       const payload = await (await fetch(`/assets/data/challenge-bank.json?v=${document.documentElement.dataset.assetVersion}`)).json();
       return payload.items.filter((item) => item.courseId === "ols").map((item) => ({ prompt: item.prompt, answer: item.answer }));
     });
-    // THE PROMPT IS WAITED FOR, NOT READ. challenge.js rebuilds the whole
-    // question article through innerHTML when the reader advances, so the
-    // instant after the advance click the old prompt is torn down and the new
-    // one is not yet attached. A plain evaluate() in that window found no
-    // element, matched nothing, and failed the assertion below on a slow CI
-    // runner while passing on every fast machine — a race that shipped green
-    // for months and went red on a PR that never touched the Lab. The wait
-    // resolves only once a prompt is attached, is not the one just answered,
-    // and matches a fixture, which is the state the loop body assumes.
+
     let previousPrompt = null;
     for (let index = 0; index < 7; index++) {
       const handle = await coursePage.waitForFunction(({ items, previous }) => {
@@ -424,7 +382,6 @@ try {
     await courseContext.close();
   }
 
-  // The faintest text token remains WCAG-AA on the base surface.
   {
     const page = await browser.newPage();
     await page.goto(BASE + "/lab/", { waitUntil: "load" });
@@ -433,7 +390,6 @@ try {
     await page.close();
   }
 
-  // The academy dashboard, paths, and course discovery controls reflect real learner state.
   {
     const context = await browser.newContext();
     await context.addInitScript(() => {
@@ -497,8 +453,6 @@ try {
     await context.close();
   }
 
-  // Daily Mastery Review grades every supported assessment type without
-  // loading Pyodide, persists local mastery, and never changes course points.
   {
     const reviewItems = [
       {
@@ -599,7 +553,6 @@ try {
     await context.close();
   }
 
-  // Anonymous reset clears learning data, preserves layout preference, and returns focus to the dashboard.
   {
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -638,8 +591,6 @@ try {
     await context.close();
   }
 
-  // A completed placement checkpoint changes the no-progress starting route,
-  // survives reload, and is included in the same anonymous full-reset closure.
   {
     const context = await browser.newContext();
     await context.addInitScript(() => {
@@ -676,7 +627,6 @@ try {
     await context.close();
   }
 
-  // Signed-in reset is server-first and carries the verified owner binding.
   {
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -701,7 +651,6 @@ try {
     await context.close();
   }
 
-  // A failed signed-in deletion leaves both owner-scoped progress and points intact.
   {
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -735,9 +684,6 @@ try {
     await context.close();
   }
 
-  // Reset completion is bound to the account captured at confirmation time.
-  // Switching owners mid-request preserves the new scope, and a later sign-in
-  // cannot reupload state from before the server's reset generation.
   {
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -829,7 +775,6 @@ try {
     await context.close();
   }
 
-  // Signed-in sign-out uses a same-owner POST, then reloads into an anonymous device scope.
   {
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -878,8 +823,6 @@ try {
     await context.close();
   }
 
-  // The course shell exposes a real loading state and downloads only the
-  // selected module payload, retaining the aggregate file only as fallback.
   {
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -910,7 +853,6 @@ try {
     await context.close();
   }
 
-  // Read lessons require an explicit completion action; stage arrows require Alt.
   {
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -943,7 +885,6 @@ try {
     await context.close();
   }
 
-  // Choice questions expose their answer set through fieldset/legend semantics.
   {
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -958,7 +899,6 @@ try {
     await context.close();
   }
 
-  // Pill tabs are equal and the indicator only translates.
   {
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
     const page = await context.newPage();
@@ -978,7 +918,6 @@ try {
     await context.close();
   }
 
-  // Coarse-pointer inputs avoid iOS zoom and primary targets are at least 44×44.
   {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
     const page = await context.newPage();
@@ -1022,7 +961,6 @@ try {
     await wideTouch.close();
   }
 
-  // Rapid navigation advances from the target index, not a stale rendered index.
   {
     const page = await browser.newPage();
     await page.goto(BASE + courseRoute("ols"), { waitUntil: "load" });
@@ -1039,7 +977,6 @@ try {
     await page.close();
   }
 
-  // Background account synchronization repaints progress without destroying unsaved work.
   {
     const page = await browser.newPage();
     await page.goto(BASE + stageRoute("ols", 13), { waitUntil: "load" });
@@ -1059,7 +996,6 @@ try {
     await page.close();
   }
 
-  // Every rendered stage has a non-skipping heading outline.
   {
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -1078,7 +1014,6 @@ try {
     await context.close();
   }
 
-  // Legacy splitter state migrates; keyboard controls persist without stage navigation.
   {
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
     await context.addInitScript(() => localStorage.setItem("iewt:splitW", "61.4"));
@@ -1104,7 +1039,6 @@ try {
     await context.close();
   }
 
-  // Blocked and malformed storage never prevent the course from rendering.
   {
     const blocked = await browser.newContext();
     await blocked.addInitScript(() => {
@@ -1169,7 +1103,6 @@ try {
     await legacyScore.close();
   }
 
-  // Boot progress is announced without downloading Pyodide during the test.
   {
     const context = await browser.newContext();
     await context.addInitScript(() => { window.loadPyodide = () => new Promise(() => {}); });
@@ -1186,7 +1119,6 @@ try {
     await context.close();
   }
 
-  // When progress sync fails, verified remote points remain a temporary floor.
   {
     const context = await browser.newContext();
     await context.addInitScript(() => {
@@ -1220,7 +1152,6 @@ try {
     await context.close();
   }
 
-  // Authored rewards and deterministic grading for every question family.
   await solve(stageRoute("ols", 4), (page) => page.check('input[value="false"]'), 10, true);
   await solve(stageRoute("ols", 3), (page) => page.check('input[value="2"]'), 15, false);
   await solve(stageRoute("ols", 13), (page) => page.fill(".q-num", "36"), 20, false);

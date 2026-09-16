@@ -1,4 +1,3 @@
-/* Six-item conceptual-skill and course mastery challenges. */
 (() => {
   "use strict";
   const app = document.getElementById("challengeApp");

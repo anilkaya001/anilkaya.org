@@ -63,15 +63,11 @@ try {
   assert.match(rootHtml, /id="marketTicker"/, "landing page must carry the price-ticker mount point");
   assert.match(rootHtml, new RegExp(`market-ticker\\.js\\?v=${assetVersion}`), "market-ticker script must be versioned to the asset version");
 
-  // The market-data disclaimer is a legal notice: it must ship in the static
-  // HTML (no JavaScript required to reach it) and keep its liability wording.
   assert.match(rootHtml, /id="marketDisclaimer"/, "landing page must carry the data disclaimer");
   assert.match(rootHtml, /information and educational purposes only/i, "disclaimer must state informational purpose");
   assert.match(rootHtml, /investment, financial, legal, or tax advice/i, "disclaimer must decline to give advice");
   assert.match(rootHtml, /accept no liability/i, "disclaimer must waive liability");
 
-  // Public market data: valid JSON shape, browser-cacheable (not no-store), no
-  // upstream dependency in the sandbox (quotes may be empty — client degrades).
   const markets = await fetch(base + "/api/markets");
   assert.equal(markets.status, 200, "/api/markets must be reachable");
   assert.match(markets.headers.get("content-type") || "", /^application\/json\b/, "/api/markets must be JSON");
@@ -124,7 +120,7 @@ try {
   const sitemapResponse = await fetch(base + "/sitemap.xml");
   assert.equal(sitemapResponse.status, 200);
   assert.match(sitemapResponse.headers.get("content-type") || "", /xml/i);
-  // A ?v on a non-/assets/ path must NOT pin an immutable year-long copy.
+
   const sitemapVersioned = await fetch(base + "/sitemap.xml?v=9");
   assert.notEqual(sitemapVersioned.headers.get("cache-control"), "public, max-age=31536000, immutable", "only /assets/ paths may be cached immutably");
   const sitemap = await sitemapResponse.text();
@@ -208,8 +204,7 @@ try {
     assert.equal(attr(html, 'property="og:image"'), SITE_ORIGIN + topic.image, `${topic.id}: image`);
     assert.equal(attr(html, 'name="twitter:image"'), SITE_ORIGIN + topic.image, `${topic.id}: Twitter image`);
     assert.match(html, new RegExp(`<h1>${topic.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/&/g, "&amp;")}</h1>`), `${topic.id}: raw HTML H1`);
-    // The manifest preload must carry the exact fetch URL (matching ?v) and CORS
-    // mode, or the browser double-fetches instead of reusing it.
+
     assert.match(html, new RegExp(`<link[^>]+rel="preload"[^>]+crossorigin="anonymous"[^>]+href="/assets/data/courses/${topic.id}/manifest\\.json\\?v=${assetVersion}"`), `${topic.id}: manifest preload missing, mis-versioned, or not CORS-matched`);
     for (const module of topic.modules) assert(pageText.includes(module.title), `${topic.id}: missing crawlable module ${module.title}`);
     for (const related of COURSE_TOPICS.filter((item) => item.id !== topic.id)) {
@@ -313,8 +308,6 @@ try {
   assert.deepEqual(await json(logout, 200), { ok: true });
   assert.match(logout.headers.get("set-cookie") || "", /session=;.*Max-Age=0/, "sign-out must clear the session cookie");
 
-  // Deployed databases created before the generation barrier do not have this
-  // tables. The first authenticated bootstrap must migrate them lazily.
   await server.d1("DROP TABLE learning_sync");
   await server.d1("DROP TABLE mastery_attempts");
   await server.d1("DROP TABLE mastery");
@@ -575,9 +568,6 @@ try {
   assert.deepEqual(concurrentPayloads.map((payload) => payload.duplicate).sort(), [false, true], "concurrent retry was applied more than once");
   assert(concurrentPayloads.every((payload) => payload.record.attempts === 1), "concurrent retry incremented mastery twice");
 
-  // Academy v2 state is stable-id based, idempotent, owner scoped, and kept
-  // separate from code/output data. Completing a stage already present in the
-  // legacy snapshot proves the compatibility union without changing points.
   const academyPut = (apiPath, body, headers = auth) => fetch(base + apiPath, {
     method: "PUT", headers, body: JSON.stringify(body),
   });
@@ -608,9 +598,6 @@ try {
   const skillWrong = await learningJSON(await skillAttempt("skill-wrong", false, false, "2026-07-15"), 200, 0);
   assert.deepEqual({ level: skillWrong.record.level, dueDay: skillWrong.record.dueDay }, { level: 0, dueDay: "2026-07-16" });
 
-  // Attempt-ordering guard: a late-flushed stale attempt (offline cross-device
-  // flush) still records its counters but must not rewind the item's review
-  // level or due day. Build an in-order streak, then replay an older attempt.
   const orderSteps = [
     { day: "2026-03-01", correct: true, hinted: false },
     { day: "2026-03-02", correct: true, hinted: false },

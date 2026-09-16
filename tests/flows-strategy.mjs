@@ -1,35 +1,3 @@
-/* =============================================================
-   flows-strategy.mjs — the options strategy tester, end to end.
-
-   /flows/strategy/ is the first page in this section that draws a
-   FUNCTION rather than a ranking, and everything that can go wrong
-   with it goes wrong quietly. A payoff diagram renders perfectly
-   whether or not the arithmetic behind it is right; "unbounded"
-   and "$9,500" occupy the same slot and only one of them is ever
-   correct; a greek the vendor did not send is a null that
-   Number() turns into a confident zero, and a position total built
-   from one is a number about a position nobody holds.
-
-   SO THE PAYOFFS ARE HAND-COMPUTED HERE AND WRITTEN OUT IN FULL.
-   Every expected figure below is derived in a comment from the
-   fixture's own quotes before it is asserted, so a reader can check
-   the test rather than trusting it, and so a test that computed its
-   expectations with the code under test — which asserts only that
-   the code equals itself — is structurally impossible here.
-
-   THE FIXTURE IS INLINE. Nothing is read from tests/.shots-* or any
-   other dotted scratch directory: those are gitignored, absent on
-   CI, and a suite that depends on one passes locally and fails in
-   the runner with a message about a missing file rather than about
-   the thing it was testing.
-
-   AND NOTHING HERE WAITS ON A TIMER. Every leg is added by a click
-   whose handler runs synchronously inside the dispatch, and every
-   fetch is awaited through a selector that only exists once the
-   payload has landed. A fixture that depends on one timeout
-   outrunning another fails under load and teaches the next reader
-   to re-run rather than to look.
-   ============================================================= */
 import assert from "node:assert/strict";
 import http from "node:http";
 import { chromium } from "playwright";
@@ -40,61 +8,37 @@ let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
-const MINUS = "−";   // U+2212, the real minus this site prints
-const DASH = "—";    // U+2014, the one and only "not measured"
+const MINUS = "−";
+const DASH = "—";
 
-/* EVERY TEXT READ GOES THROUGH THIS. The page's prose is indented source, so
-   textContent carries the newlines and the leading spaces of the file it was
-   written in: "intrinsic\n      value" is one phrase to a reader and two words
-   with six spaces between them to a regex. Collapsing runs of whitespace makes
-   an assertion about a SENTENCE rather than about how the markup was wrapped —
-   which is the difference between a test that survives a re-indent and one
-   that has to be edited every time a paragraph is reflowed. */
 const flat = (s) => String(s == null ? "" : s).replace(/\s+/g, " ").trim();
 
-/* =============================================================
-   THE FIXTURE
-
-   SPOT IS 102 AND NO STRIKE SITS ON IT. A spot equal to a strike
-   collapses two rows of the payoff table into one and makes
-   "the payoff at spot" and "the payoff at the strike" the same
-   assertion, which would hide a renderer that confused them.
-
-   THE QUOTES STRADDLE ROUND MIDS ON PURPOSE: 4.90 / 5.10 is a mid
-   of exactly 5.00, so every hand computation below is exact and a
-   reader can redo it without a calculator. The marketable basis is
-   then a different number by exactly the half-spread, which is what
-   makes the basis switch assertable at all.
-   ============================================================= */
-
 const SESSION_DAY = "2026-09-04";
-const NEAR = "2026-10-16";   // 42 calendar days out
-const FAR = "2026-12-18";    // the expiry that overflows the vendor's page
-const BROKEN = "2026-11-20"; // the expiry whose read fails
+const NEAR = "2026-10-16";
+const FAR = "2026-12-18";
+const BROKEN = "2026-11-20";
 
 const greeks = (d, g, t, v, r) => ({
   delta: String(d), gamma: String(g), theta: String(t), vega: String(v), rho: String(r),
 });
 
 const NEAR_CALLS = [
-  /* $100 call: mid 5.00. delta 0.55 -> a one-contract long is 55 share-equivalents. */
+
   { option_symbol: "AAA261016C00100000", nbbo_bid: "4.90", nbbo_ask: "5.10",
     implied_volatility: "0.30", volume: "100", open_interest: "500",
     ...greeks(0.55, 0.03, -0.05, 0.12, 0.04) },
-  /* $110 call: mid 2.00. */
+
   { option_symbol: "AAA261016C00110000", nbbo_bid: "1.90", nbbo_ask: "2.10",
     implied_volatility: "0.28", volume: "80", open_interest: "400",
     ...greeks(0.30, 0.02, -0.04, 0.10, 0.02) },
-  /* $120 call: mid 0.50, AND NOT ONE GREEK. The vendor marks all five nullable
-     and its own spec example carries a row exactly like this. Everything this
-     suite asserts about withheld totals hangs off this single contract. */
+
   { option_symbol: "AAA261016C00120000", nbbo_bid: "0.45", nbbo_ask: "0.55",
     implied_volatility: null, volume: "5", open_interest: "20",
     delta: null, gamma: null, theta: null, vega: null, rho: null },
 ];
 
 const NEAR_PUTS = [
-  /* $100 put: mid 5.00. */
+
   { option_symbol: "AAA261016P00100000", nbbo_bid: "4.90", nbbo_ask: "5.10",
     implied_volatility: "0.31", volume: "60", open_interest: "300",
     ...greeks(-0.45, 0.03, -0.05, 0.12, -0.03) },
@@ -103,12 +47,6 @@ const NEAR_PUTS = [
     ...greeks(-0.20, 0.02, -0.03, 0.08, -0.01) },
 ];
 
-/* THE OVERFLOWING EXPIRY. The vendor documents `limit` as maximum=500 and its
-   own example shows single expiries carrying 12,223 contracts, so a full page
-   is the only evidence a caller has that there is another one. Two full pages
-   of calls prove the route reports the CUT rather than implying it saw the
-   book; three puts prove the report is per side, because a truncated call
-   side says nothing at all about the put side. */
 const farCall = (strike) => ({
   option_symbol: "AAA261218C" + String(strike * 1000).padStart(8, "0"),
   nbbo_bid: "1.00", nbbo_ask: "1.20", implied_volatility: "0.30",
@@ -148,9 +86,7 @@ const upstream = http.createServer((req, res) => {
   }
 
   if (url.pathname.endsWith("/info")) {
-    /* BETA IS ON THIS ENDPOINT AND WAS BEING DISCARDED. The beta-weighted
-       delta below is the reading that could not previously be published for
-       want of an observable rather than for want of a parameter. */
+
     return send(200, { data: {
       next_earnings_date: "2026-11-05", announce_time: "postmarket",
       issue_type: "Common Stock", beta: "1.50",
@@ -158,8 +94,8 @@ const upstream = http.createServer((req, res) => {
   }
 
   if (url.pathname.endsWith("/expiry-breakdown")) {
-    if (ticker === "ZZZ") return send(200, { data: [] });   // read, and empty
-    if (ticker === "YYY") return send(500, {});             // did not come back
+    if (ticker === "ZZZ") return send(200, { data: [] });
+    if (ticker === "YYY") return send(500, {});
     return send(200, { data: [
       { expiry: NEAR, chains: 5, open_interest: 1320, volume: 250 },
       { expiry: BROKEN, chains: 10, open_interest: 400, volume: 5 },
@@ -204,9 +140,6 @@ try {
   const pageErrors = [];
   page.on("pageerror", (e) => pageErrors.push(String(e)));
 
-  /* Every reading, as {term: {value, hint, cls}}. The hint is the dt's title,
-     which is where this page keeps the sentence that says WHY a number is
-     what it is — including every "withheld" explanation. */
   const readings = () => page.$$eval("#sgReadings dt", (dts) => {
     const out = {};
     for (const dt of dts) {
@@ -233,19 +166,12 @@ try {
     return row ? row.pnl : null;
   };
 
-  /* THE QUOTE IS THE CONTROL. The chain used to carry a Buy and a Sell button
-     per side; it now opens a long leg from the ASK and a short one from the
-     BID, which is where those two prices are actually dealt and is what every
-     options platform already teaches. The label names the price as well as the
-     contract, so these selectors are more specific than the pair they replace
-     rather than less. */
   const buy = (expiry, strike, kind) =>
     page.click(`[aria-label^="Buy the ${expiry} ${strike} ${kind} at the ask"]`);
   const sell = (expiry, strike, kind) =>
     page.click(`[aria-label^="Sell the ${expiry} ${strike} ${kind} at the bid"]`);
   const clearPosition = () => page.click("#sgClear");
 
-  /* ---------- 1. the page, before anything is asked of it -------- */
   {
     await page.goto(server.baseURL + "/flows/strategy/", { waitUntil: "domcontentloaded" });
     eq(await page.locator("#sgRefusePanel").count(), 1,
@@ -253,9 +179,7 @@ try {
        "before any fetch and it is true if every fetch fails");
 
     const refuse = flat(await page.locator("#sgRefusePanel").textContent());
-    /* THE REFUSED READINGS ARE NAMED AS REFUSED. A calculator that silently
-       lacks a reading its competitors show reads as an oversight; one that
-       says which it will not invent, and why, is making an argument. */
+
     ok(/Buying power reduction/i.test(refuse) && /Refused/.test(refuse),
        "buying power reduction is named and marked Refused");
     ok(/broker/i.test(refuse) && /28,755/.test(refuse),
@@ -268,8 +192,7 @@ try {
        "and beta-weighted delta is corrected rather than quietly offered as delta x beta");
 
     const foot = flat(await page.locator(".flows-foot").textContent());
-    /* THE STATED CONVENTION IS ON THE PAGE, not only in a comment in the
-       module. This is the sentence the whole date-slider decision rests on. */
+
     ok(/Taylor expansion/i.test(foot),
        "the foot names the engine behind the projected curve: a Taylor expansion in the " +
        "vendor's own greeks");
@@ -291,7 +214,6 @@ try {
        "and the status invites one");
   }
 
-  /* ---------- 2. the context read ------------------------------- */
   {
     await page.fill("#sgTicker", "aaa");
     await page.click(".sg-load");
@@ -319,12 +241,6 @@ try {
        "and the earnings date rides along, because a contract that outlives a report is a " +
        "different trade at the same premium");
 
-    /* THE UNIVERSE IS DIFFERENT FROM THE DESK'S, AND THAT IS THE WHOLE REASON
-       this route exists rather than a parameter on the chain one. The desk
-       sends maybe_otm_only and exclude_zero_oi_chains because it screens for
-       what can be SOLD; a long in-the-money call is unexpressible in that
-       universe, filtered out upstream before any gate here could let it back
-       in. Asserted against the requests the stub actually received. */
     const contractCalls = upstreamCalls.filter((u) => u.includes("/option-contracts"));
     ok(contractCalls.length > 0, "the expiry read reached the provider");
     ok(contractCalls.every((u) => /expiry=2026-10-16/.test(u)),
@@ -350,7 +266,6 @@ try {
        "and each option carries its days to expiry, counted in calendar days from the session");
   }
 
-  /* ---------- 3. the chain, and the contract with no greeks ------ */
   {
     await page.waitForSelector("#sgChainWrap:not([hidden])");
     const rows = await page.$$eval("#sgChainBody tr", (trs) => trs.map((tr) => ({
@@ -358,16 +273,9 @@ try {
     })));
     eq(rows.length, 4, "four strikes across the two sides of this expiry");
 
-    /* THE $120 CALL CARRIES NO GREEKS AT ALL. Its delta cell must be an em
-       dash: Number(null) is 0 and 0 is a real delta — a contract genuinely
-       quoted at zero delta is a deep out-of-the-money contract, which is a
-       reading, and it must not be indistinguishable from a field the vendor
-       did not send. */
     const row120 = rows.find((r) => r.cells.includes("$120"));
     ok(row120, "the $120 strike renders");
-    /* THE CALL SIDE READS OUTWARD-IN — delta, implied volatility, bid, ask —
-       so the two quotes sit against the strike column they are compared
-       across. The indices below are that order and the header states it. */
+
     eq(row120.cells[0], DASH,
        "the delta of a contract the vendor sent no greeks for is an EM DASH, not 0.000 — " +
        "an absent reading and a measured zero are different facts and this page's whole " +
@@ -386,16 +294,6 @@ try {
        "without saying so reads as a population");
   }
 
-  /* ---------- 4. A LONG CALL. Hand-computed. --------------------
-     One $100 call bought at the mid of 4.90/5.10 = 5.00.
-       cost      = +1 x 1 x 100 x 5.00           = $500 debit
-       P&L(S)    = 100 x max(0, S - 100) - 500
-       P&L(0)    = -500        P&L(100) = -500
-       P&L(102)  = 200 - 500   = -300
-       P&L(105)  = 500 - 500   =    0   -> the breakeven
-       max loss  = -500, flat everywhere at or below the strike
-       max profit= unbounded: the right-hand slope is +100 per dollar
-     ------------------------------------------------------------- */
   {
     await buy(NEAR, "$100", "call");
     await page.waitForSelector("#sgReadings dt");
@@ -426,9 +324,6 @@ try {
        "payoff at the breakeven is a MEASURED zero and prints as one — this page's one " +
        "legitimate $0.00, and it must never be an em dash");
 
-    /* THE POSITION GREEKS, AND THE BETA WEIGHTING DONE PROPERLY.
-         delta        = +1 x 1 x 100 x 0.55                     =  55.0 shares
-         beta-weighted = 55.0 x 1.50 x (102 / 600)              =  14.025 */
     eq(r["Position delta"].value, "+55.0 share-equivalents",
        "the position delta is signed, multiplied by the hundred shares a contract carries, " +
        "and carries its UNIT — a delta and a dollar sum may not share a name");
@@ -447,12 +342,8 @@ try {
        "vega carries the unit its convention is stated in");
   }
 
-  /* ---------- 5. THE PROJECTION, and the slider's bound ---------- */
   {
-    /* At the spot price, one day out, with no volatility shift, the Taylor
-       expansion collapses to theta alone:
-         dV = 1 x 1 x 100 x (0.55 x 0 + 0 + (-0.05) x 1 + 0.12 x 0) = -5
-         P&L = mark + dV - cost = 500 - 5 - 500 = -5 */
+
     await page.$eval("#sgSceneDays", (n) => {
       n.value = "1";
       n.dispatchEvent(new Event("input", { bubbles: true }));
@@ -502,16 +393,6 @@ try {
     });
   }
 
-  /* ---------- 6. A VERTICAL SPREAD. Hand-computed. --------------
-     Long the $100 call at 5.00, short the $110 call at 2.00.
-       cost      = 500 - 200 = $300 debit
-       P&L(S)    = 100 x max(0,S-100) - 100 x max(0,S-110) - 300
-       P&L(0)    = -300        P&L(100) = -300
-       P&L(102)  = 200 - 300   = -100
-       P&L(103)  = 300 - 300   =    0   -> the breakeven
-       P&L(110)  = 1000 - 300  = +700   -> and flat above it
-       right-hand slope = +100 - 100 = 0, so BOTH ends are bounded
-     ------------------------------------------------------------- */
   {
     await sell(NEAR, "$110", "call");
     const r = await readings();
@@ -528,9 +409,6 @@ try {
     eq(await pnlAt("$102"), MINUS + "$100.00", "payoff at spot");
     eq(await pnlAt("$103"), "$0.00", "and the breakeven row is a measured zero");
 
-    /* THE BASIS SWITCH MOVES EVERY NUMBER, which is the honest way to show
-       what a spread costs. Marketable: pay the 5.10 ask, receive the 1.90 bid.
-         cost = 510 - 190 = $320, and the spread crossed is 320 - 300 = $20. */
     await page.selectOption("#sgBasis", "marketable");
     const m = await readings();
     eq(m["Net debit"].value, "$320.00",
@@ -542,14 +420,6 @@ try {
     await page.selectOption("#sgBasis", "mid");
   }
 
-  /* ---------- 7. A NAKED SHORT CALL: unbounded, not a number ----
-     Short one $100 call at 5.00.
-       cost      = -500  (a credit)
-       P&L(0)    = +500        P&L(100) = +500
-       P&L(102)  = -200 + 500  = +300
-       P&L(105)  = -500 + 500  =    0   -> the breakeven
-       right-hand slope = -100 -> the LOSS has no bound
-     ------------------------------------------------------------- */
   {
     await clearPosition();
     await sell(NEAR, "$100", "call");
@@ -571,14 +441,6 @@ try {
     eq(await pnlAt("$105"), "$0.00", "and zero at the breakeven");
   }
 
-  /* ---------- 8. A NAKED SHORT PUT: bounded, and that is the point
-     Short one $100 put at 5.00.
-       cost      = -500  (a credit)
-       P&L(0)    = -100 x 100 + 500 = -9500   <- FINITE
-       P&L(95)   = -500 + 500       =     0   -> the breakeven
-       P&L(100)  =    0 + 500       =  +500
-       right-hand slope = 0, so nothing here is unbounded at all
-     ------------------------------------------------------------- */
   {
     await clearPosition();
     await sell(NEAR, "$100", "put");
@@ -594,11 +456,6 @@ try {
     eq(await pnlAt("$0"), MINUS + "$9,500.00", "the payoff table carries the same figure");
   }
 
-  /* ---------- 9. A NULL-GREEK LEG MUST NOT POISON A TOTAL -------
-     Long the $100 call (greeks in full) plus the $120 call (none).
-       cost = 500 + 50 = $550 debit — unaffected, because the expiry
-       payoff needs no greek at all.
-     ------------------------------------------------------------- */
   {
     await clearPosition();
     await buy(NEAR, "$100", "call");
@@ -610,9 +467,6 @@ try {
        "everything read off it need no greek at all");
     eq(r["Max loss"].value, MINUS + "$550.00", "and the maximum loss still renders as a number");
 
-    /* THE POISONED ANSWER WOULD HAVE BEEN +55.0 — the sum of the legs that DO
-       carry a delta, with the null silently counted as zero. That number would
-       render perfectly and describe a position nobody holds. */
     eq(r["Position delta"].value, DASH,
        "the position delta is WITHHELD, not summed over the legs that happen to have one. " +
        "The poisoned answer here is +55.0, which renders perfectly and is a confident " +
@@ -633,8 +487,6 @@ try {
        "and says explicitly which readings survive, so a reader does not conclude the " +
        "whole page is broken");
 
-    /* AND NO PROJECTED CURVE, rather than a curve drawn from the legs that
-       have greeks — which would be a picture of a different position. */
     await page.$eval("#sgSceneDays", (n) => {
       n.value = "5";
       n.dispatchEvent(new Event("input", { bubbles: true }));
@@ -652,15 +504,9 @@ try {
     await clearPosition();
   }
 
-  /* ---------- 10. TRUNCATION IS DISCLOSED, AND PER SIDE ---------- */
   {
     await page.selectOption("#sgExpiry", FAR);
-    /* WAIT ON THE ARRIVAL, NOT ON THE ANSWER. The condition below is that the
-       far expiry's book has rendered at all — its window holds tens of strikes
-       against the near expiry's four — which is true whether or not the
-       truncation is disclosed. Waiting for the word "CUT OFF" instead would
-       turn a missing disclosure into a twenty-second timeout carrying no
-       message about what was actually wrong. */
+
     await page.waitForFunction(
       () => document.querySelectorAll("#sgChainBody tr").length > 10,
       null, { timeout: 30000 });
@@ -683,9 +529,8 @@ try {
        "and that cut is stated with both counts and with the control that undoes it");
   }
 
-  /* ---------- 11. THE THREE SILENCES, THREE SENTENCES ------------ */
   {
-    /* (a) THE READ THAT DID NOT COME BACK. */
+
     await page.selectOption("#sgExpiry", BROKEN);
     await page.waitForSelector('#sgChainNote .flows-empty[data-empty="unreadable"]',
       { timeout: 20000 });
@@ -696,7 +541,6 @@ try {
        `and says in words that this is not the same as the expiry being empty ` +
        `(${broken.slice(0, 140)}…) — the two silences may not share a sentence`);
 
-    /* (b) THE READ THAT SUCCEEDED AND FOUND NOTHING. */
     await page.fill("#sgTicker", "ZZZ");
     await page.click(".sg-load");
     await page.waitForSelector('#sgStatus[data-empty="quiet"]', { timeout: 20000 });
@@ -705,7 +549,6 @@ try {
        `a symbol that was read and lists nothing is reported as a READING about the name ` +
        `(${quiet}) — the only one of the three silences that is a fact about the market`);
 
-    /* (c) THE LIST THAT DID NOT COME BACK, with the price that did. */
     await page.fill("#sgTicker", "YYY");
     await page.click(".sg-load");
     await page.waitForSelector('#sgStatus[data-empty="unreadable"]', { timeout: 20000 });
@@ -719,7 +562,6 @@ try {
        "the context panel stays, because a spot that was read is still a reading");
   }
 
-  /* ---------- 12. THE POSITION SURVIVES A LINK ------------------- */
   {
     await page.fill("#sgTicker", "AAA");
     await page.click(".sg-load");
@@ -727,10 +569,7 @@ try {
     await buy(NEAR, "$100", "call");
     await sell(NEAR, "$110", "call");
     const url = page.url();
-    /* READ THROUGH URLSearchParams RATHER THAN OFF THE RAW STRING. The browser
-       percent-encodes the @ and the comma this encoding uses, so a regex over
-       the address bar would be asserting about escaping rather than about the
-       position — and would pass or fail on which characters happen to need it. */
+
     const legs = new URL(url).searchParams.get("legs");
     eq(legs, "AAA261016C00100000@1,AAA261016C00110000@-1",
        "the position lives in the URL, one contract per entry with the SIGN carrying the " +
@@ -749,12 +588,8 @@ try {
     eq(r["Max profit"].value, "+$700.00", "with the same bounded maximum");
   }
 
-  /* ---------- 13. it fits a phone -------------------------------- */
   {
-    /* THE 320px ZERO-OVERFLOW INVARIANT this section holds everywhere. Two
-       eleven-column tables and an SVG sized in CSS pixels are exactly the
-       three things that break it, and each of them has to scroll inside its
-       own box rather than pushing the document sideways. */
+
     for (const width of [320, 390, 768]) {
       await page.setViewportSize({ width, height: 900 });
       const over = await page.evaluate(
@@ -770,7 +605,6 @@ try {
     await page.setViewportSize({ width: 1280, height: 1000 });
   }
 
-  /* ---------- 14. no page errors anywhere above ------------------ */
   eq(pageErrors.length, 0,
      `no uncaught browser error across every branch above (${pageErrors.join(" | ")})`);
 

@@ -1,15 +1,11 @@
-/* =============================================================
-   home.css — landing hero (animated field + headline)
-   ============================================================= */
-
 .home {
-  height: 100vh;          /* fallback for browsers without small-viewport units */
+  height: 100vh;
   height: 100svh;
   min-height: 100vh;
   min-height: 100svh;
   overflow: hidden;
   position: relative;
-  isolation: isolate;     /* .grain blends against the canvas, not the page */
+  isolation: isolate;
   display: grid;
   place-items: center;
   background:
@@ -19,28 +15,12 @@
     radial-gradient(140% 120% at 50% 120%,
       color-mix(in srgb, var(--gold-harvest) 10%, transparent) 0%,
       transparent 60%),
-    /* THE SITE'S GROUND, COMPOSED UNDER THIS HERO'S OWN TWO WASHES.
 
-       index.html is <body class="home">, so this rule and base.css's `body`
-       rule select the SAME element — and a class beats a type selector, so
-       this shorthand replaces the shared ground outright rather than layering
-       over it. The first attempt at fixing that ended this list with
-       `transparent`, which removed the ground from Home altogether: the probe
-       came back with body background-color rgba(0,0,0,0) and nothing but the
-       gold behind it. Naming --site-ground as the final layers is what
-       actually composes the two, and it is the same token base.css paints, so
-       Home cannot drift from the other three. */
     var(--site-ground);
-  /* AFTER THE SHORTHAND, FOR THE REASON base.css STATES ABOUT ITS OWN: a
-     `background` shorthand resets background-color to transparent, and this
-     rule outranks the body rule that declares it — so Home was the one
-     section with no bottom fallback colour under the composite. Measured, not
-     assumed: the computed body background-color came back rgba(0, 0, 0, 0)
-     here while Articles and the Lab both returned rgb(10, 10, 8). */
+
   background-color: var(--bg);
 }
 
-/* Simulation canvas — bottom layer, receives pointer input */
 .field {
   position: fixed;
   inset: 0;
@@ -49,15 +29,14 @@
   width: 100vw;
   height: 100vh;
   height: 100dvh;
-  max-width: none;             /* override the global `canvas { max-width:100% }` */
+  max-width: none;
   z-index: 0;
   cursor: crosshair;
   touch-action: none;
-  transform: translateZ(0);    /* promote to its own compositor layer (iOS) */
+  transform: translateZ(0);
   backface-visibility: hidden;
 }
 
-/* Cinematic film grain — kept light so it can never crush the field */
 .grain {
   position: fixed;
   inset: 0;
@@ -71,8 +50,6 @@
   .grain { mix-blend-mode: normal; opacity: 0.12; }
 }
 
-/* Edge-dark vignette — frames the headline without sitting on the bright
-   core of the projected web (which read as "nothing" on dim phone screens) */
 .home::after {
   content: "";
   position: fixed;
@@ -110,8 +87,7 @@
 .hero__title {
   font-family: var(--font-ui);
   font-weight: 700;
-  /* Sized so the longest word ("Econometrics") fits even narrow phones,
-     accounting for the wider Latin Modern bold that swaps in. */
+
   font-size: clamp(2.1rem, 0.6rem + 6.7vw, 7.5rem);
   max-width: 100%;
   line-height: 1.04;
@@ -125,7 +101,7 @@
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  /* drop-shadow works on the rendered (clipped) glyphs where text-shadow can't */
+
   filter:
     drop-shadow(0 2px 16px rgba(0, 0, 0, 0.85))
     drop-shadow(0 0 34px color-mix(in srgb, var(--gold-harvest) 32%, transparent));
@@ -147,7 +123,7 @@
 }
 
 .hero__cta {
-  pointer-events: auto; /* hero is click-through; the button is not */
+  pointer-events: auto;
   max-width: 100%;
   text-align: center;
   animation: rise 1s var(--ease) 0.12s both;
@@ -160,7 +136,7 @@
   letter-spacing: clamp(0.12em, 0.06em + 0.6vw, 0.32em);
   text-transform: uppercase;
   color: var(--ink-dim);
-  /* the tight layer occludes bright field streaks behind the small glyphs */
+
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9), 0 2px 14px rgba(0, 0, 0, 0.85);
   text-wrap: balance;
   font-variant-numeric: tabular-nums;
@@ -172,7 +148,6 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* Phones: tighten the CTA so it never runs off the edge */
 @media (max-width: 560px) {
   .hero__cta { font-size: 0.86rem; padding: 0.65rem 1.05rem; gap: 0.35rem; }
 }
@@ -181,13 +156,11 @@
   .hero__eyebrow, .hero__title, .hero__lede, .hero__cta, .hero__hint { animation: none; }
 }
 
-/* ---- Byline footer: quiet attribution + section links at the bottom ---- */
 .home-foot {
   position: fixed;
   left: 0; right: 0;
   bottom: calc(env(safe-area-inset-bottom, 0px) + 2rem);
-  /* Above the hero (10), board and tape: the disclaimer panel opens upward out
-     of this element and would otherwise be painted over by the hero copy. */
+
   z-index: 11;
   display: flex;
   flex-wrap: wrap;
@@ -210,8 +183,6 @@
 .home-foot a:hover { color: var(--gold-celadon); }
 @media (prefers-reduced-motion: reduce) { .home-foot { animation: none; } }
 
-/* ---- Market data disclaimer: <details> so it needs no JS and stays in the
-   DOM (and in the crawlable HTML) whether or not it is expanded ---- */
 .disclaimer { position: relative; }
 .disclaimer__summary {
   list-style: none;
@@ -249,7 +220,7 @@
   -webkit-backdrop-filter: blur(10px) saturate(1.1);
   backdrop-filter: blur(10px) saturate(1.1);
   box-shadow: 0 16px 44px rgba(0, 0, 0, 0.62);
-  /* The footer sets uppercase/tracking for the byline; prose must reset it. */
+
   text-transform: none;
   letter-spacing: normal;
   text-align: left;
@@ -268,7 +239,6 @@
 .disclaimer__body p + p { margin-top: 0.5rem; }
 .disclaimer__body strong { color: var(--ink); font-weight: 700; }
 
-/* ---- World market board: live open-time countdowns, İstanbul perspective ---- */
 .market-board {
   position: fixed;
   left: 50%;
@@ -290,8 +260,7 @@
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scrollbar-width: none;
-  /* Dedicated keyframe: the shared `rise` sets transform: translateY(0), which
-     would clobber the translateX(-50%) centering. This one keeps both. */
+
   animation: market-rise 1s var(--ease) 0.34s both;
 }
 .market-board::-webkit-scrollbar { display: none; }
@@ -375,11 +344,8 @@
   50% { opacity: 0.45; }
 }
 
-/* Give the bottom stack room; on short screens the field + headline take
-   priority, so the countdown board (then the byline) drop out first. */
 @media (max-height: 720px) { .market-board { display: none; } }
-/* Short viewports drop the byline for headline room, but the data disclaimer
-   stays reachable for as long as any market data is on screen. */
+
 @media (max-height: 600px) { .home-foot__byline { display: none; } }
 @media (max-height: 480px) { .home-foot { display: none; } }
 @media (prefers-reduced-motion: reduce) {
@@ -387,7 +353,6 @@
   .market[data-open="true"] .market__dot { animation: none; }
 }
 
-/* ---- Flowing price ticker: full-width tape pinned to the bottom edge ---- */
 .market-ticker {
   --up: #4ec98a;
   --down: #e5736b;
@@ -401,7 +366,7 @@
   background: color-mix(in srgb, var(--bg-deep) 86%, transparent);
   -webkit-backdrop-filter: blur(9px) saturate(1.1);
   backdrop-filter: blur(9px) saturate(1.1);
-  /* Fade the tape into the page edges instead of a hard cut. */
+
   -webkit-mask-image: linear-gradient(90deg, transparent, #000 2.5%, #000 97.5%, transparent);
   mask-image: linear-gradient(90deg, transparent, #000 2.5%, #000 97.5%, transparent);
   animation: rise 1s var(--ease) 0.4s both;
@@ -444,10 +409,6 @@
 .tk[data-dir="down"] .tk__chg { color: var(--down); }
 .tk[data-dir="flat"] .tk__chg { color: var(--ink-faint); }
 
-/* Timestamp + standing caveat that closes each pass of the tape. Deliberately
-   not italic: it is the only italic text on the landing page, and asking for it
-   pulls a whole extra 34KB Latin Modern face for one caption. Colour, size and
-   tracking already set it apart from the quotes. */
 .tk--note {
   color: var(--ink-faint);
   font-size: 0.64rem;

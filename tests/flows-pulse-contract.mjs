@@ -1,25 +1,3 @@
-/* =============================================================
-   flows-pulse-contract.mjs — seven market-wide feeds, one key.
-
-   WHAT IS WORTH ASSERTING. The pulse pools seven vendor feeds whose
-   shapes come from a spec that marks half its own fields "ToBeDone",
-   so the expensive defects are the quiet ones this repo keeps
-   meeting:
-
-     - Number(null) === 0 minting confident zeros out of absent fields;
-     - one failed feed sinking six healthy neighbours;
-     - a capped list read as the population because the shed went
-       uncounted;
-     - a vendor ranking re-sorted into an ordering claim the payload
-       cannot state;
-     - prose drifting into intent/identity claims no feed supports.
-
-   The envelope test matters doubly here because TWO writers share
-   this schema: the nightly pipeline publishes the whole pulse and
-   the worker cron re-publishes the tide intraday, and both go
-   through these same shapers.
-   ============================================================= */
-
 import assert from "node:assert/strict";
 import {
   shapeTide, shapeTotals, shapeOiChange, shapeNetImpact, shapeInsiders,
@@ -34,7 +12,6 @@ const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
-/* ---------- §1 the envelope is ambiguous and both shapes are read */
 {
   const bare = shapeNetImpact([{ ticker: "AAA", net_premium: 5 }]);
   const wrapped = shapeNetImpact({ data: [{ ticker: "AAA", net_premium: 5 }] });
@@ -45,7 +22,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   deep(unwrapRows({ data: "nope" }), [], "as is an envelope holding no array");
 }
 
-/* ---------- §2 absent is absent, measured zero is a measurement -- */
 {
   const tide = shapeTide([
     { timestamp: "2026-08-24T13:30:00Z", net_call_premium: "1000", net_put_premium: null, net_volume: 5 },
@@ -65,7 +41,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "a point measuring nothing is dropped, and a feed of only such points is quiet");
 }
 
-/* ---------- §3 caps shed with the shed counted ------------------- */
 {
   const many = Array.from({ length: PULSE_CAPS.netImpact + 9 }, (_, i) => ({
     ticker: "T" + i, net_premium: 1000 - i,
@@ -79,7 +54,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "would claim an ordering rule this payload cannot state");
 }
 
-/* ---------- §4 a series sheds its OLDEST buckets ----------------- */
 {
   const pts = Array.from({ length: PULSE_CAPS.tide + 5 }, (_, i) => ({
     timestamp: "T" + String(i).padStart(4, "0"), net_volume: i,
@@ -92,7 +66,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(tide.shed, 5, "with the shed counted");
 }
 
-/* ---------- §5 orderings that ARE this payload's to claim -------- */
 {
   const season = shapeSeasonality([{ month: 9, avg_change: 1 }, { month: 2, avg_change: 2 }]);
   deep(season.rows.map((r) => r.month), [2, 9],
@@ -105,14 +78,8 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(ins.rows[0].date, "2026-08-04", "filing days sort newest first");
 }
 
-/* ---------- §6 the contract column derives from the symbol ------- */
 {
-  /* THE FIXTURE USED TO WRITE oi_change: "250" AS THOUGH IT WERE A COUNT,
-     which is the misreading the shaper had and the reason no suite here
-     caught it: a test built on the same wrong model cannot see the defect.
-     The numbers below are the vendor's own example (docs/uw-openapi.yaml),
-     where oi_change is (curr-last)/last and the contract difference rides
-     separately as oi_diff_plain. */
+
   const oi = shapeOiChange([{
     option_symbol: "AAPL260918C00150000",
     oi_change: "15.6149126946672959", oi_diff_plain: 33088,
@@ -127,9 +94,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(!("change" in oi.rows[0]),
      "and the name that meant both things is gone rather than kept as an alias, because " +
      "an alias is how a renderer keeps reading the wrong one");
-  /* NEITHER READING IS DERIVED FROM THE OTHER. curr-last would give the same
-     number, but one field carrying two provenances is the confusion being
-     fixed, so an absent count stays absent. */
+
   const noDiff = shapeOiChange([{
     option_symbol: "AAPL260918C00150000", oi_change: "0.5", curr_oi: 30, last_oi: 20,
   }]);
@@ -151,12 +116,11 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "a row with no derivable underlying is dropped, not published as a dash-ticker");
 }
 
-/* ---------- §7 one failed feed cannot sink six neighbours -------- */
 {
   const pulse = buildPulse({
     tide: [{ timestamp: "2026-08-24T13:30:00Z", net_volume: 3 }],
     totals: { __failed: "HTTP 500 from the vendor" },
-    /* oiChange deliberately not supplied at all */
+
     netImpact: [{ ticker: "AAA", net_premium: 9 }],
     insiders: "not even an object",
     darkpool: { data: [] },
@@ -174,7 +138,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   for (const f of PULSE_FEEDS) ok(pulse[f], `every declared feed (${f}) is present in the composite`);
 }
 
-/* ---------- §8 determinism: one response, identical bytes -------- */
 {
   const raws = {
     tide: [{ timestamp: "a", net_volume: 1 }],
@@ -189,12 +152,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "two builds over one response publish identical bytes");
 }
 
-/* ---------- §9 the vocabulary holds, with ONE argued exception ---
-   The dark pool rows are reported equity executions, so "trade" and
-   "print" are accurate THERE and only there. Everywhere else the
-   feeds are aggregates and vendor selections, and the flow-alerts
-   precedent applies unweakened. Identity and intent words are banned
-   everywhere including the dark pool. */
 {
   const IDENTITY = /\b(whale|smart money|institutional|bought|sold|buyer|seller|paid)\b/gi;
   const EXECUTION = /\b(trade|trades|print|prints)\b/gi;
@@ -215,23 +172,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "and the two series feeds refuse the forecast reading in words");
 }
 
-
-/* ---------- the cadence rides on the payload ----------------------
-
-   assets/js/flows-market.js decides whether this feed's stamp is still worth
-   believing — one cadence plus one cadence of slack, because a cron that fired
-   late is not yet a cron that stopped firing — and to do that it needs the
-   number the Worker's cron is actually configured for. It could not import the
-   shared module, because shared/ is not served to the browser, so it declared
-   its own copy under a comment naming the problem and the fix: "this constant
-   mirrors it and this comment is the only link between them. The right end
-   state is the pulse payload carrying its own cadence."
-
-   A constant duplicated across a boundary with a comment for a link is a
-   constant that will eventually disagree with itself, and this one fails in
-   the worst direction: raise the cron to thirty minutes and the page goes on
-   calling a twenty-five-minute-old read stale, which trains a reader to ignore
-   the one banner that says the data stopped moving. */
 {
   const built = buildPulse({});
   eq(built.cadenceMinutes, REFRESH_CADENCE_MINUTES,
@@ -242,8 +182,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
      "and it is a usable number even on a build where every feed failed — the cadence is a " +
      "fact about the CRON, not about any feed, so it must not go missing when the vendor does");
 
-  /* ONE SOURCE, ASSERTED AS ONE. If this ever stops being the same object the
-     freshness module exports, the two have already diverged. */
   const src = readFileSync(new URL("../shared/flows-pulse.js", import.meta.url), "utf8");
   ok(/import \{ REFRESH_CADENCE_MINUTES \} from "\.\/flows-freshness\.js"/.test(src),
      "imported from the module that owns it rather than restated here — this file is not " +

@@ -1,4 +1,3 @@
-/* Academy 2.0 conceptual-skill scheduler. */
 export const LEVEL_MIN = 0;
 export const LEVEL_MAX = 5;
 export const INTERVAL_DAYS = Object.freeze([1, 3, 7, 21, 60]);

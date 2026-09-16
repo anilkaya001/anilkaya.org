@@ -1,12 +1,3 @@
-/* =============================================================
-   market-ticker.js — flowing tape of index prices + 1-day change.
-
-   Reads the server-cached snapshot from same-origin /api/markets (no external
-   calls, no keys) and renders a seamless horizontal marquee: latest close in
-   the domestic currency and the 1-day % move, green up / red down. Degrades to
-   hidden if there is no data, and to a static scrollable strip under
-   prefers-reduced-motion.
-   ============================================================= */
 (() => {
   "use strict";
   const mount = document.getElementById("marketTicker");
@@ -22,8 +13,7 @@
 
   function itemHTML(q) {
     const pct = Number(q.changePct);
-    // Anything that rounds to 0.00% is shown neutral, so the arrow/colour never
-    // disagrees with the printed figure at the flat boundary.
+
     const flat = Math.abs(pct) < 0.005;
     const dir = flat ? "flat" : pct > 0 ? "up" : "down";
     const arrow = flat ? "•" : pct > 0 ? "▲" : "▼";
@@ -41,9 +31,6 @@
     timeZone: "Europe/Istanbul", hour: "2-digit", minute: "2-digit", hour12: false,
   });
 
-  // Closing item of every set: when the snapshot was taken and the standing
-  // caveat, so the disclaimer travels with the numbers instead of living only in
-  // the footer panel. Both loop past the viewer on each pass.
   function noteHTML(updatedAt) {
     const stamp = Number(updatedAt);
     const asOf = Number.isFinite(stamp) && stamp > 0 ? "As of " + stampFmt.format(stamp) + " İst · " : "";
@@ -54,15 +41,12 @@
     const valid = (quotes || []).filter((q) => q && Number.isFinite(Number(q.price)) && Number.isFinite(Number(q.changePct)));
     if (!valid.length) { mount.hidden = true; return; }
     const set = valid.map(itemHTML).join("") + noteHTML(updatedAt);
-    // Two identical sets: animating the row to translateX(-50%) lands exactly on
-    // the start of the second set, so the loop is seamless. The copy is hidden
-    // from assistive tech to avoid double-reading.
+
     row.innerHTML =
       '<span class="market-ticker__set">' + set + "</span>" +
       '<span class="market-ticker__set" aria-hidden="true">' + set + "</span>";
     mount.hidden = false;
-    // Keep a constant scroll speed regardless of how many indices report: scale
-    // the duration to one set's rendered width (~55px/s).
+
     requestAnimationFrame(() => {
       const first = row.querySelector(".market-ticker__set");
       const width = first ? first.getBoundingClientRect().width : 0;
@@ -70,8 +54,6 @@
     });
   }
 
-  // The tape is display:none under this height media query; don't poll for a
-  // widget the layout has removed (kept in sync with home.css).
   const hiddenByViewport = () => typeof matchMedia === "function" && matchMedia("(max-height: 480px)").matches;
 
   let inFlight = false;
@@ -84,14 +66,13 @@
       const data = await resp.json();
       render(Array.isArray(data.quotes) ? data.quotes : [], data.updatedAt);
     } catch {
-      // Leave any prior render in place; hide only if nothing has rendered yet.
+
       if (!row.childElementCount) mount.hidden = true;
     } finally {
       inFlight = false;
     }
   }
 
-  // Refresh on the edge-cache cadence; pause polling while the tab is hidden.
   let timer = null;
   function start() {
     load();
@@ -103,9 +84,6 @@
   document.addEventListener("visibilitychange", () => (document.hidden ? stop() : start()));
   start();
 
-  // The market-data disclaimer is a plain <details>, so it already opens and
-  // closes with no JavaScript. Where JS runs, give the panel the dismissal an
-  // overlay is expected to have: Escape, or a click outside it.
   const disclaimer = document.getElementById("marketDisclaimer");
   if (disclaimer) {
     const close = () => disclaimer.removeAttribute("open");

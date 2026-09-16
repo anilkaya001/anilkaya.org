@@ -1,23 +1,3 @@
-/* =============================================================
-   flows-ticker-contract.mjs — /flows/ticker/, in a real browser.
-
-   THE PANEL THIS PAGE EXISTS FOR HAD NEVER BEEN DRAWN. Four chain
-   panels have been published in every card since the chain leg
-   shipped and no renderer touched them, which is a defect no test
-   could have caught: every payload assertion passed, every byte was
-   on the wire, and the product simply did not show them. The
-   registry assertions below are the ones that would have.
-
-   ON FIXTURES. Every card here starts as one the pipeline's OWN
-   emitter produced — the rule tests/flows-sections-contract.mjs
-   states as "the fixture crosses the wire boundary". Where a state
-   does not occur in any emitted card, the fixture is an emitted card
-   with ONE NAMED FIELD MUTATED, and the mutation is the point of the
-   test. A fixture written from the same assumption as the code
-   proves only that the assumption is self-consistent; this repo has
-   paid for that five times.
-   ============================================================= */
-
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -37,12 +17,6 @@ let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
-/* ---------- fixtures: real emitted cards ------------------------- */
-
-/* The emitter writes one file per card. Running it here rather than
-   committing a fixture is what keeps "the fixture crosses the wire boundary"
-   true as the payload evolves — a committed card would freeze the schema of
-   the day it was captured. */
 const EMIT_DIR = path.join(ROOT, "tests", ".ticker-emit");
 fs.rmSync(EMIT_DIR, { recursive: true, force: true });
 fs.mkdirSync(EMIT_DIR, { recursive: true });
@@ -56,14 +30,6 @@ const cards = fs.readdirSync(EMIT_DIR)
   .map((f) => JSON.parse(fs.readFileSync(path.join(EMIT_DIR, f), "utf8")));
 ok(cards.length >= 5, `the emitter produced ${cards.length} cards to test against`);
 
-/* CHECKED HERE BECAUSE THE FILTER BELOW LEANS ON IT: it demands every
-   TICKER_PANEL_KEYS key on a card, so a leaked sentinel matches no card and
-   the suite dies on "0 do", a sentence about the chain leg.
-
-   AND IT IS A TAUTOLOGY FOR ONE DRIFT, A REAL CHECK FOR THE OTHER: since
-   TICKER_PANEL_KEYS is DERIVED by filtering on SENTINEL_KEYS, shrinking that
-   set cannot fire it. It catches the registry gaining a __key nobody added to
-   SENTINEL_KEYS — which is the drift that actually happens. */
 for (const k of SENTINEL_KEYS) {
   ok(!TICKER_PANEL_KEYS.includes(k), `the sentinel "${k}" is not a card.panels key`);
 }
@@ -79,15 +45,8 @@ const truncated = cards.filter((c) =>
   c.panels && c.panels.ivSurface && c.panels.ivSurface.coverage &&
   c.panels.ivSurface.coverage.truncated === true);
 
-/* ---------- 1. registry integrity, before any browser ------------- */
 {
-  /* THE DRAW TABLE AND THE REGISTRY MUST NAME THE SAME PANELS, in both
-     directions. A drawer with no registry entry never mounts and is dead code
-     nobody notices; a registry entry with no drawer is a panel that renders a
-     visible "no renderer is registered" notice, which is survivable but is a
-     bug. Parsed from the source because DRAW lives inside the controller's
-     IIFE — the invariant is a source-level one, and reading it out of a
-     running page would only prove the page ran. */
+
   const src = fs.readFileSync(path.join(ROOT, "assets/js/flows-ticker.js"), "utf8");
   const block = src.slice(src.indexOf("const DRAW = {"));
   const drawBody = block.slice(0, block.indexOf("\n  };"));
@@ -103,11 +62,6 @@ const truncated = cards.filter((c) =>
   }
   eq(drawKeys.size, regKeys.size, "the two panel lists are the same size");
 
-  /* AND THE CHROME TABLE, THE SAME WAY AND FOR A NEWER REASON. PANEL_CHROME
-     used to WRITE data-group and data-tier, so the rendered DOM WAS the table.
-     The worker emits both now and the table only CHECKS — so the DOM
-     comparison further down would pass with this table wrong, the only symptom
-     a console error nothing reads. Read out of the source instead. */
   const chromeBlock = src.slice(src.indexOf("const PANEL_CHROME = {"));
   const chromeBody = chromeBlock.slice(0, chromeBlock.indexOf("\n  };"));
   const chrome = new Map(
@@ -131,36 +85,13 @@ const truncated = cards.filter((c) =>
        `is not on the page makes mountChrome report a disagreement on every paint`);
   }
 
-  /* ---------- the pairing, checked without a browser -----------------
-     A GRID ROW IS AS TALL AS ITS TALLEST MEMBER, so two panels sharing a row
-     share a height whether or not they have that much to say. Which panels
-     are adjacent in this registry therefore decides how much blank ground the
-     page opens, and that made the order a matching problem rather than a
-     preference. Measured intrinsic heights (six names x four widths, mounted
-     with the stretch removed) put today's worst row mismatch at 704px; the
-     order this file now carries measures 233px.
-
-     THE HEIGHTS ARE CHECKED IN, AND THAT IS THE COMPROMISE THIS ASSERTION
-     MAKES. They are a property of what each panel draws, so they can drift
-     from the table below without anything here noticing — a renderer that
-     grows a panel by 300px would not fail this check. What it does catch is
-     the thing that actually happens: somebody reorders the registry for an
-     editorial reason and silently reintroduces a mismatch nobody measured.
-     Re-derive the table with tests/_rows.mjs when a drawer changes shape.
-
-     NO BROWSER, DELIBERATELY. This is arithmetic over a list, so it runs in
-     milliseconds and fails with the two panel names in the message — which is
-     what makes it usable while somebody is editing the order. */
   const PANEL_H = {
     __stats: 330, levels: 313, displacement: 360, context: 350,
     deltaExposure: 416, charm: 435, vanna: 435, congress: 632, calendar: 520,
     aggressor: 550, pricedMove: 584, surface: 668, ivSurface: 640, oiDeltas: 661,
     marketRank: 865, path: 712, darkpool: 688, gamma: 795, skewTerm: 829,
     volContext: 756, topContracts: 1044, __score: 1034,
-    /* MEASURED THE SAME WAY AS THE TWENTY-TWO ABOVE — rendered at 1440 with
-       the real Latin Modern, panel content height off getBoundingClientRect,
-       both span-2 and so both 763px wide. `__sessions` is the tallest panel in the registry and that is
-       what it is: twenty rows, five columns, three stats and a qualifier. */
+
     premiumTrack: 460, __sessions: 996,
   };
   eq(Object.keys(PANEL_H).length, TICKER_PANELS.length,
@@ -170,91 +101,14 @@ const truncated = cards.filter((c) =>
   for (const p of TICKER_PANELS) {
     ok(Object.hasOwn(PANEL_H, p.key), `the height table knows "${p.key}"`);
   }
-  /* THE LIMIT IS 250, AND IT WENT UP WHEN THE EXEMPTION WENT AWAY.
-     It was 200 while `context` carried a named 515px exemption, because every
-     pairing the limit actually governed measured 172px or less. Folding that
-     station back under the general rule brings `marketRank`|`congress` — Δ233,
-     the closest pair that station allows — inside it, so 250 is the honest
-     number: the worst pairing this registry can now reach, plus a little room
-     for a drawer to grow without a false failure.
 
-     RAISING A LIMIT TO ADMIT A PAIR IS THE MOVE THIS FILE IS MOST SUSPICIOUS
-     OF, so the direction matters. 200-with-a-515-exemption admitted a 515px
-     stretch; 250-with-none admits 233. The number went up and the check got
-     stricter, because what it now refuses is everything above 233 rather than
-     everything above 200 except one station where anything went.
-
-     THERE IS NO EXEMPTION ANY MORE, AND THAT IS THE POINT. `context` carried
-     one at 515px: it was its station's lead so it came first, `marketRank` had
-     to sit directly under it, and `congress` was the only other member — three
-     rules argued in shared/flows-panels.js, and together they forced a 350px
-     panel to be an 865px panel's row-mate. The number was recorded here rather
-     than swallowed by a limit loose enough to hide it, because closing it
-     needed an editorial decision and a test is not entitled to make one.
-
-     The owner made it: `marketRank` leads the station now. So the exemption is
-     DELETED rather than kept at a smaller number — a limit with no exceptions
-     is a stronger check than a limit with a well-argued one, and leaving the
-     machinery in place "in case" would be leaving a hole shaped like the
-     defect it was built for. */
-  /* AND THEN THE THING IT WAS MEASURING WAS REMOVED, so the pair limit is
-     gone and the defect is measured directly, live, further down this file.
-
-     EVERY SENTENCE ABOVE IS TRUE OF THE GRID IT WAS WRITTEN FOR. A grid item
-     stretches to its row by default, so a 506px panel beside a 1034px one was
-     DRAWN 1034px tall with 528px of nothing inside its own border. That void
-     is what the limit existed to bound, and comparing two recorded CONTENT
-     heights was the available proxy: contents differing by more than 250px
-     means the shorter card carries more than 250px of void.
-
-     `.ft-station` now sets `align-items: start`. Nothing is stretched, so a
-     height difference between row-mates is no longer a void — it is a ragged
-     bottom edge, the ordinary shape of a card wall. Keeping the limit would
-     fail this grid for a defect it cannot have; RAISING it would be the move
-     this file says it is most suspicious of. Deleting it and measuring the
-     void itself is the third option, and it is strictly stronger: it admits
-     no void at any size, in any pairing, at any column count, and it cannot
-     be satisfied by reordering a station — which is what the old message had
-     to suggest, and which never removed a void, only moved it.
-
-     THE TABLE ABOVE STAYS. It is the record of what each panel's content
-     measured, it still proves the registry and the height table have not
-     drifted apart, and the live check below needs no fixture to compare
-     against.
-
-     AND THE RULE THIS BLOCK USED TO END ON GOES WITH IT. "The odd one out
-     must be the shortest" was dropped earlier as a finding rather than a
-     concession — it follows from the UNCONSTRAINED matching optimum, and this
-     registry is pinned by three argued adjacency contracts and the
-     lead-is-first rule. Both it and the pair limit were about WHICH PANEL
-     SITS NEXT TO WHICH, and with no stretch that question no longer has a
-     defect attached to it: a card wall does not care what its neighbour
-     measures. The adjacency contracts in shared/flows-panels.js still hold,
-     for their own reasons, and are still asserted there. */
-
-  /* Every registry key other than the score sentinel names a real payload
-     panel. This is the assertion that would have caught four published,
-     served, undrawn panels. */
   for (const card of withChain) {
     for (const k of TICKER_PANEL_KEYS) {
       ok(Object.hasOwn(card.panels, k),
          `${card.ticker}: the emitted card carries panel "${k}"`);
     }
   }
-  /* NEITHER SENTINEL LEAKS INTO THE PAYLOAD-KEY LIST, asserted over the SET
-     rather than one string because the exclusion used to read `!== SCORE_KEY`
-     — a shape that admits the second sentinel silently. The failure that
-     produces is the misleading part, and it was measured: with `__stats` in
-     TICKER_PANEL_KEYS the fixture filter finds no usable card and the suite
-     dies at "all four chain panels (0 do)", about the chain leg on a run where
-     it is fine. Hence the same exclusion above that filter, where it fails
-     first; the rest of the contract is here. */
-  /* THREE NOW: the score derivation, the key statistics and the session
-     ledger. The count is asserted rather than the names, and it is asserted
-     at all because the SET is what stops a sentinel leaking — a count that
-     drifts without anyone noticing is a sentinel added to the registry and
-     not to the set, which is the failure the comment above measures. Raising
-     it is a decision and it looks like one here. */
+
   eq(SENTINEL_KEYS.size, 3,
      "the registry declares all three sentinels — the score derivation, the key " +
      "statistics and the session ledger");
@@ -267,22 +121,6 @@ const truncated = cards.filter((c) =>
        `that does not carry it is not a card that is missing anything`);
   }
 
-  /* ---------- AND THE OTHER DIRECTION, which is the one that was missing.
-
-     The assertion above catches a registry entry with no payload behind it.
-     It does NOT catch the reverse — a panel the pipeline publishes on every
-     card that no registry entry mounts — and that is the failure this file's
-     own header describes: four chain panels shipped for weeks, on the wire,
-     costing vendor calls, and simply not drawn.
-
-     It happened again while this suite was passing. `vanna`, `charm` and
-     `deltaExposure` were added to buildCard, published on every emitted card,
-     and reached no page. Nothing failed, because nothing looked this way.
-
-     A panel may be published and undrawn only by being named below, with a
-     reason. That keeps the omission an argued decision rather than the silent
-     default it was. One entry today, and it is read rather than merely
-     published: see the reason beside it. */
   const DELIBERATELY_UNDRAWN = new Map([
     ["scoreOverlay",
       "published and READ but not drawn: the score-over-price series was dropped from the " +
@@ -306,8 +144,6 @@ const truncated = cards.filter((c) =>
        `that has stopped being true`);
   }
 
-  /* Ids are unique, or getElementById silently returns the first and one
-     panel draws into another's box. */
   const ids = TICKER_PANELS.map((p) => p.id);
   eq(new Set(ids).size, ids.length, "every registry id is unique");
   for (const p of TICKER_PANELS) {
@@ -316,55 +152,29 @@ const truncated = cards.filter((c) =>
     ok(p.span === 1 || p.span === 2, `panel "${p.key}" has a legal span`);
   }
 
-  /* THE ALIGNMENT REQUIREMENT AND THE LAYOUT MUST NOT MAKE EACH OTHER
-     IMPOSSIBLE. The term line's j-th bar centre has to coincide with the
-     surface's j-th column centre, which can only hold if the two panels mount
-     at the SAME host width — so both must be span 2 and adjacent. At span 1
-     and span 2 the hosts are 424px and 896px at a 1216px viewport and no
-     amount of arithmetic in either drawer could align them. */
   const iIvs = TICKER_PANELS.findIndex((p) => p.key === "ivSurface");
   const iTerm = TICKER_PANELS.findIndex((p) => p.key === "skewTerm");
   eq(TICKER_PANELS[iIvs].span, 2, "the IV surface spans both columns");
   eq(TICKER_PANELS[iTerm].span, 2, "and so does the term line, or they can never align");
   eq(iTerm, iIvs + 1, "and they are adjacent, so they mount at the same width");
 
-  /* THE THREE WAVE-2 STOCK PANELS ARE SINGLE-COLUMN BY CONTRACT: the
-     landscape tiers (two columns at 76rem, three at 110rem) slot them as
-     single cells, and a span-2 entry here would silently re-argue that
-     layout from the registry. */
   for (const key of ["darkpool", "oiDeltas", "volContext"]) {
     const p = TICKER_PANELS.find((x) => x.key === key);
     ok(p, `the registry mounts the ${key} panel`);
     eq(p.span, 1, `${key} is a single-column panel at every landscape tier`);
   }
 
-  /* The pipeline's shed ladder drops panels by key when a card is over the
-     100KB self-check. A key it can shed that the registry does not mount
-     would be shed into a panel nobody draws. */
   const pipe = fs.readFileSync(path.join(ROOT, "scripts/flows-pipeline.mjs"), "utf8");
-  /* THE SLICE IS THE LADDER'S OWN DECLARATION, AND IT USED NOT TO BE — this
-     block read `pipe.slice(indexOf("dropped to fit the payload cap") - 400,
-     indexOf("shed ") + 200)`, which looks like a window around the ladder and
-     is not: "shed " matches inside "publi_shed under_" 431KB EARLIER, so the
-     end index came out below the start and slice returned "". Every assertion
-     here was made zero times. Anchored on the code now, and COUNTED below. */
+
   const shedFrom = pipe.indexOf("const shed = [");
   ok(shedFrom > 0, "the pipeline still declares its shed ladder as `const shed = [`");
   const shedBlock = pipe.slice(shedFrom, pipe.indexOf("\n      ];", shedFrom));
-  /* THE KEY PATTERN ADMITS AN UNDERSCORE ON PURPOSE. It was [a-zA-Z]+, which
-     cannot match `__stats` at all — so a sentinel added to the ladder would
-     not have failed this assertion, it would have been INVISIBLE to it, and
-     the ladder would have gone on naming a key it can never drop. A guard
-     whose pattern excludes the shape it is guarding against is not a guard. */
+
   let shedNamed = 0;
   for (const m of shedBlock.matchAll(/\[\s*"([A-Za-z_][A-Za-z0-9_]*)",\s*"dropped to fit/g)) {
     shedNamed++;
     ok(regKeys.has(m[1]), `the pipeline's shed ladder only names registry panels ("${m[1]}")`);
-    /* AND NEVER A SENTINEL. Shedding is `card.panels[key] = {status:
-       "unavailable", …}` on a card over the 100KB cap; a sentinel has no
-       card.panels entry, so the ladder would INVENT one — an unavailability
-       for a panel the pipeline does not publish, saving no bytes, telling
-       every reader a panel drawn from the top level was dropped to fit. */
+
     ok(!SENTINEL_KEYS.has(m[1]),
        `and never a sentinel ("${m[1]}") — there is no card.panels entry for it to shed, ` +
        `so a drop would fabricate an unavailability and save nothing`);
@@ -374,30 +184,12 @@ const truncated = cards.filter((c) =>
      `matching passes this block by making none of it`);
 }
 
-/* ---------- the browser ------------------------------------------ */
-
 const pageHTML = FLOWS_PAGES.tickerPage({ username: "test" })
   .replace(/<script[^>]*><\/script>/g, "");
 const panelsSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-panels.js"), "utf8");
 const drawersSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-drawers.js"), "utf8");
 const tickerSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-ticker.js"), "utf8");
 
-/* ---------- ONE FOLD, ONE LEAD, ONE FILE --------------------------
-
-   THE DISCLOSURE AND THE PROMOTED READING WERE BORN HERE, in flows-ticker.js,
-   because /flows/ticker/ was the only page that had them. They now live in
-   flows-panels.js, which this route and three others load and which the card
-   dialog draws from — so the twelve renderers that led with their method can
-   fold it, and a panel cannot fold on the page while staying unfolded in the
-   dialog that draws the same function.
-
-   THIS IS A SOURCE-LEVEL ASSERTION ON PURPOSE, and it is the one thing the
-   runtime cannot show. A second `<details class="ft-how">` built in this file
-   would draw an identical panel and pass every rendering assertion below it,
-   and would then be a second answer to "how long is a wall" — the failure
-   flows-panels.js's own header was written against when 2,040 lines were
-   nearly copied rather than moved. A duplicate a test compares is a
-   projection; a duplicate a test cannot see is a drift. */
 {
   ok(/class="ft-how"|"ft-how"/.test(panelsSrc),
      "flows-panels.js builds the disclosure — it is the module both the ticker grid and the " +
@@ -412,10 +204,7 @@ const tickerSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-ticker.js"), 
   }
   ok(/appendMethod, leadReading,\n  \} = P;/.test(tickerSrc),
      "and flows-ticker.js reads both back out of the module rather than restating them");
-  /* THE ADAPTER IS ALLOWED AND THE COPY IS NOT. appendNotes stays here because
-     the eight drawers below own plain prose; it holds no threshold and no
-     <details> of its own, which is exactly what the two assertions above
-     measure. */
+
   ok(/function appendNotes\(host, notes, summary\) \{\n\s*appendMethod\(/.test(tickerSrc),
      "the string-shaped appendNotes that stayed is a four-line adapter over the moved " +
      "appendMethod, not a second implementation of the fold");
@@ -424,13 +213,6 @@ const tickerSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-ticker.js"), 
      "\"how long is too long\" is two answers a reader would have to reconcile");
 }
 
-/* ---------- THE STRUCTURE IS IN THE SERVED BYTES ------------------
-
-   READ OFF THE STRING, BEFORE A BROWSER EXISTS, because that is the claim.
-   Everything below used to be built by assets/js/flows-ticker.js on first
-   paint — headings, index, every panel's group and tier — so a reader with a
-   slow card got 23 identical boxes in no sections. A browser assertion cannot
-   tell "served" from "built in the first frame"; this runs no script. */
 {
   const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -450,9 +232,7 @@ const tickerSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-ticker.js"), 
   }
 
   for (const p of TICKER_PANELS) {
-    /* THE QUESTION, VISIBLE, IN THE DOCUMENT. It was already a data-question
-       attribute, which no reader can see, and drawn by the renderer after the
-       card landed. Both still are; this is the only copy before the fetch. */
+
     ok(served.includes(`<p class="ft-panel-q">${esc(p.question)}</p>`),
        `panel ${p.key}'s question is served as visible prose, not only as an attribute`);
     ok(served.includes(`data-question="${esc(p.question)}"`),
@@ -473,21 +253,14 @@ const tickerSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-ticker.js"), 
        `reader their card "predates" a panel no payload has ever carried`);
   }
 
-  /* `.fc-q` is what a RENDERER emits; one in the served bytes would mean a
-     pre-drawn panel, and the visible question above a duplicate. */
   ok(!served.includes('class="fc-q"'),
      "no renderer's own question is in the served bytes — the served copy stands alone " +
      "until a card lands");
 
-  /* THE BAND: SEVEN SLOTS, EACH ONCE, EACH EMPTY, EACH HIDDEN. Emitted now so
-     PR 4 fills slots rather than inventing them; it costs no height until
-     then, and .ft-band carries no margin either. */
   for (const id of ["ftFrom", "ftSector", "ftAtr", "ftRankNav", "ftFind", "ftPrem", "ftEarn"]) {
     eq((served.match(new RegExp(`id="${id}"`, "g")) || []).length, 1,
        `the band slot ${id} is served exactly once`);
-    /* The element's own attribute list, id to end of start tag — never a
-       fixed character window, which is how the first draft of this assertion
-       read a `hidden` belonging to the NEXT element. */
+
     const at = served.indexOf(`id="${id}"`);
     const close = served.indexOf(">", at);
     const attrs = served.slice(at, close);
@@ -495,8 +268,7 @@ const tickerSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-ticker.js"), 
        `and ${id} is served hidden — a VISIBLE empty slot claims a measurement was taken ` +
        `and came back with nothing, a different fact from "not yet painted"`);
     ok(!/\bvalue=/.test(attrs), `and carries no value of its own (${id})`);
-    /* AND IT IS EMPTY. `ftFind` is an <input>, which is void and has no
-       content to be empty of — its emptiness is the missing `value` above. */
+
     if (id !== "ftFind") {
       eq(served.slice(close + 1, close + 3), "</",
          `and ${id} is served with nothing inside it`);
@@ -508,32 +280,17 @@ const tickerSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-ticker.js"), 
      "the sticky bar and its tablist are served rather than built on first paint");
 }
 
-/**
- * Mount the real page markup, stub the two fetches, and let the real
- * controller paint a real card.
- *
- * THE FETCH IS STUBBED, NOT THE CONTROLLER. Feeding a card straight into a
- * private paint() hook would skip readTicker, the 401 branch, the pending
- * discrimination and the header wiring — every part of this file that decides
- * WHICH state the reader gets. The stub answers the two real endpoints.
- */
 async function mount(page, card,
                      { ticker = null, boards = null, hash = "", events = null,
                        html = null, station = "all" } = {}) {
-  // Install after navigation: multiple addInitScript callbacks have no defined order.
-  // Reusing a page must not let an earlier fixture replace this mount’s payload.
+
   const installFetch = ({ card, boards, events }) => {
     window.__requested = [];
     window.fetch = (url) => {
       window.__requested.push(String(url));
-      /* THE TWO SIDES ARE DIFFERENT REQUESTS, and answering both with the
-         same payload double-counts every name in the picker — which is a
-         defect in this stub, not in the page. `boards` stands for the LONG
-         side; the short side answers empty unless a test says otherwise. */
+
       const u = String(url);
-      /* THE FUNNEL IS ITS OWN ENDPOINT and must be answered as one: it carries
-         no "side", so without this arm it fell through to the short board and
-         answered every gated-name question with an empty board payload. */
+
       const body = u.includes("/api/flows/card")
         ? card
         : u.includes("/api/flows/events")
@@ -547,51 +304,17 @@ async function mount(page, card,
       });
     };
   };
-  /* THE HASH IS PART OF THE URL THE READER WAS SENT, so it has to be on the
-     goto rather than assigned afterwards: the controller reads it once the
-     card has painted, and a hash set after load would test a different code
-     path from the one a pasted link exercises. */
-  /* ?s= IS PART OF THAT URL TOO. The stations switch, so which one is open is
-     an address a reader can be sent, and a test that set it after load would
-     exercise the tab handler rather than the arriving-reader path.
 
-     IT DEFAULTS TO `all`, AND THAT IS NOT A CONVENIENCE. Every check in this
-     file older than the switcher was written against a page holding all 23
-     panels in one document: they click a zoom button on `gamma`, measure a
-     chart in `tape`, read a silence in `context`. `?s=all` IS that page — the
-     same markup, the same widths, the same draw — so defaulting to it leaves
-     53 mounts asserting exactly what they asserted before, rather than 53
-     rewrites each of which could quietly weaken one.
-
-     WHAT THAT LEAVES UNCOVERED IS THE PAGE A READER ACTUALLY ARRIVES ON, so
-     section 2b passes `station: null` to get the default address and asserts
-     there: one station open, the right one, its charts at one-to-one, and the
-     deep link, Back and unknown-?s= paths. A reader's first screen is checked
-     in exactly one place, deliberately, rather than assumed in fifty-three. */
   const query = [
     ticker ? "t=" + encodeURIComponent(ticker) : null,
     station ? "s=" + encodeURIComponent(station) : null,
   ].filter(Boolean).join("&");
   const url = "https://example.test/flows/ticker/" +
     (query ? "?" + query : "") + (hash ? "#" + hash : "");
-  /* `html` IS FOR ONE THING ONLY: serving DELIBERATELY WRONG markup, so a
-     check that exists to notice it can be proven to. Everyone else gets the
-     page the worker emits. */
-  /* THE DEFERRED LIBRARY IS SERVED, BECAUSE IN PRODUCTION IT IS. The catch-all
-     below answers every request with the page's own HTML, which is right for a
-     harness that has no server — but flows-panels.js now FETCHES
-     assets/js/flows-drawers.js when a station needs it, and an HTML body
-     parses as script, throws, and fires onload. That is a real failure mode
-     and the loader is asserted against it elsewhere; here it would only mean
-     the harness never draws nine of the panels. This route goes first so the
-     one asset the page really asks for comes back as itself. */
+
   await page.route("**/*",
     (route) => route.fulfill({ contentType: "text/html", body: html || pageHTML }));
-  /* REGISTERED AFTER THE CATCH-ALL ON PURPOSE: Playwright gives precedence to
-     the MOST RECENTLY added route, so a specific pattern registered first is
-     shadowed by a later catch-all and never runs. Written down because the
-     natural reading — specific before general, as in a router — is backwards
-     here, and the symptom is the harness silently serving HTML for a script. */
+
   await page.route("**/assets/js/flows-drawers.js*",
     (route) => route.fulfill({ contentType: "text/javascript", body: drawersSrc }));
   await page.goto(url);
@@ -602,21 +325,16 @@ async function mount(page, card,
   await page.addScriptTag({ content: tickerSrc });
   await page.waitForFunction(() => {
     const g = document.getElementById("ftGrid");
-    // The grid is unhidden before lazy drawers finish. The final status is written after them.
+
     return g && document.getElementById("ftStatus").textContent !== "Loading the name…";
   }, null, { timeout: 5000 });
 }
 
-/** Every panel's rendered state, read out of the DOM rather than from source. */
 function sweepPanels() {
   const out = [];
   for (const section of document.querySelectorAll(".ft-panel[data-panel]")) {
     const host = section.querySelector("div");
-    /* DECORATIVE SVGs ARE EXCLUDED, and the exclusion is the aria-hidden
-       attribute the markup already sets rather than a size heuristic. The
-       path panel's legend swatches are 26x10 marks that mean nothing on
-       their own and are correctly hidden from the accessibility tree; an
-       aria-label on one would make a screen reader announce a colour chip. */
+
     const svgs = [...host.querySelectorAll("svg")]
       .filter((s) => s.getAttribute("aria-hidden") !== "true");
     const decorative = [...host.querySelectorAll('svg[aria-hidden="true"]')];
@@ -627,46 +345,29 @@ function sweepPanels() {
         const r = t.getBoundingClientRect();
         if (r.width === 0) continue;
         if (r.height > 0) minText = Math.min(minText, r.height);
-        /* TWO PIXELS, not zero. Text metrics carry sub-pixel rounding and a
-           glyph's ink box is not its advance box, so a strict edge test
-           reports overhang on captions that are visually flush. */
+
         if (r.left < box.left - 2 || r.right > box.right + 2) clipped = true;
       }
     }
     out.push({
       key: section.dataset.panel,
       question: section.dataset.question || "",
-      /* THE QUESTION THE DRAWER PRINTED, not the one the markup carries. The
-         two are different facts and only the second was ever read here: a
-         drawer handed the CARD where it expected the question stringifies it
-         into its own heading and the attribute stays perfect. */
+
       drawnQ: host.querySelector(".fc-q") ? host.querySelector(".fc-q").textContent : "",
       dead: !!host.querySelector(".fc-dead"),
       empty: host.childElementCount === 0,
       wide: section.classList.contains("is-wide"),
       boxW: Math.round(section.getBoundingClientRect().width),
-      /* THE HOST'S OWN WIDTH, REPORTED SO A FAILURE NAMES ITS CAUSE.
-         Every drawing is sized from this number (panelWidth reads the host's
-         box), so when the 1:1 scale assertion below breaks, the question is
-         always "did the host change width?" — and until this was carried out
-         of the page, answering it meant re-running the sweep by hand. It is
-         the measurement the .fc-panel flex-column rule is checked against.
-         Floored, not rounded, because panelWidth() floors: rounding here
-         would report a 282.6px host as 283 and disagree with the drawing by
-         a pixel that is only in this file. */
+
       hostW: Math.floor(host.getBoundingClientRect().width),
-      /* Is the panel's table bounded, and did bounding it lose a row? Both
-         halves are needed: a scroller that fits everything proves nothing,
-         and a bound that truncated would look identical from the outside. */
+
       wrapBound: [...host.querySelectorAll(".fc-tablewrap")].map((w) => [
         Math.round(w.scrollHeight), Math.round(w.clientHeight),
         w.querySelectorAll("tbody tr").length,
       ]),
       minText: minText === Infinity ? null : Math.round(minText * 10) / 10,
       clipped,
-      /* UNROUNDED. The assertion downstream is "within a pixel", so rounding
-         here would hand it a number already a half-pixel off and turn its own
-         tolerance into a second one. */
+
       scales: svgs.map((s) => {
         const vb = (s.getAttribute("viewBox") || "").split(/\s+/);
         return [Number(vb[2]), s.getBoundingClientRect().width,
@@ -675,8 +376,7 @@ function sweepPanels() {
       labelled: svgs.every((s) => !!s.getAttribute("aria-label") && s.getAttribute("role") === "img"),
       unlabelled: svgs.filter((s) => !s.getAttribute("aria-label")).length,
       svgCount: svgs.length,
-      /* A decorative mark must carry NEITHER a role nor a label, or it is
-         announced twice — once as itself and once as part of its caption. */
+
       decorativeClean: decorative.every(
         (s) => !s.getAttribute("aria-label") && s.getAttribute("role") !== "img"),
     });
@@ -686,25 +386,13 @@ function sweepPanels() {
 
 const browser = await chromium.launch();
 try {
-  /* ---------- 2. every panel renders, at all three widths ---------- */
-  /* 1840px is past the 110rem tier, where the grid opens its third column;
-     every assertion in this loop — no clipped type, no sideways scroll, one
-     viewBox unit one CSS pixel — must hold there too. */
+
   for (const width of [320, 1280, 1840]) {
     const page = await browser.newPage({ viewport: { width, height: 1400 } });
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     const card = withChain[0];
-    /* EVERY STATION IN FLOW, BECAUSE THE INVARIANT IS ABOUT EVERY PANEL. The
-       stations switch now, so on the default address four of the five are
-       `hidden` and a hidden element measures a zero-width box — which is what
-       this sweep saw the first time it ran against the switcher: "320px gamma:
-       drawn 282, rendered 0.00". That is not a chart at the wrong scale, it is
-       a chart with no box, and asserting one-to-one against it would be
-       asserting nothing. `?s=all` is the address that puts all five back, and
-       it is the same layout the page had before a station could hide, so what
-       this loop measures is unchanged. The switcher's own effect on scale is
-       asserted separately, below, on the station that IS open. */
+
     await mount(page, card, { ticker: card.ticker, station: "all" });
 
     eq(errors.length, 0, `${width}px: the ticker page paints a real card without throwing (${errors.join("; ")})`);
@@ -713,21 +401,10 @@ try {
     eq(swept.length, TICKER_PANELS.length, `${width}px: every registry panel is mounted`);
 
     for (const p of swept) {
-      /* NO PANEL IS SILENTLY BLANK. An empty host is neither a chart nor an
-         explanation — it is the one state a reader cannot tell from a broken
-         page, and it is exactly what an unhandled tagged-union branch makes. */
+
       ok(!p.empty, `${width}px ${p.key}: renders content or an explicit unavailable notice`);
       ok(p.question.length > 0, `${width}px ${p.key}: its question reached the DOM`);
 
-      /* NO PANEL HEADS ITSELF WITH A STRINGIFIED OBJECT.
-
-         DRAW calls every drawer as (host, panel, card, question, mount) on the
-         argument that "the widest signature is safe for all of them", which
-         holds only while every drawer DECLARES that order. renderOverlay was
-         declared (host, join, questionIn), so the CARD landed in the question
-         slot and "Score over price" printed "[object Object]" as its question
-         on every ticker page, for every name. The attribute was perfect
-         throughout, which is why the assertion above could not see it. */
       ok(!p.drawnQ.includes("[object"),
          `${width}px ${p.key}: the question it DREW is a sentence, not a stringified ` +
          `object ("${p.drawnQ.slice(0, 56)}")`);
@@ -751,59 +428,19 @@ try {
       ok(p.decorativeClean,
          `${width}px ${p.key}: decorative marks stay out of the accessibility tree`);
 
-      /* ONE VIEWBOX UNIT IS ONE CSS PIXEL. A viewBox fixed in absolute units
-         under width:100% scales the type down with the drawing — 9px axis
-         type became 4.6 CSS px on the card panels, silently, because nothing
-         overflows when everything shrinks together.
-
-         WITHIN A PIXEL, NOT WITHIN 15%. The old band let both known failures
-         through: the card dialog's 1.023 stretch, and a 0.940 SQUEEZE this
-         band was written over — panelWidth floored every drawing at 300 units
-         and a 320px viewport gives this page a 282px host, so all twelve
-         charts were shrunk by base.css's `svg { max-width: 100% }` and the
-         suite called it one-to-one. A tolerance wide enough to hold a defect
-         is not a measurement of the invariant it names. Subpixel either way
-         is layout rounding; anything more is a drawing at the wrong scale. */
       for (const [vb, rendered, transform] of p.scales) {
         ok(vb > 0, `${width}px ${p.key}: the chart declares a viewBox width`);
         ok(Math.abs(rendered - vb) < 1,
            `${width}px ${p.key}: one viewBox unit is one CSS pixel — drawn ${vb}, ` +
            `rendered ${rendered.toFixed(2)} (${(rendered / vb).toFixed(4)})`);
         eq(transform, "none", `${width}px ${p.key}: the chart is drawn, never CSS-scaled`);
-        /* AND THE DRAWING NEVER OUTGREW THE HOST IT SITS IN.
-           NOT `vb === hostW`. That was this assertion's first form and the
-           suite refused it inside a minute: volContext draws a 220-unit strip
-           into a 454px host on purpose, and several panels size a mark to its
-           content rather than to the box. Drawing at full host width is a
-           choice a renderer makes, not an invariant — so asserting it would
-           have pinned a preference and called it a contract.
 
-           What IS an invariant is the direction. base.css gives every svg
-           `max-width: 100%`, so a drawing WIDER than its host is not clipped
-           and does not overflow: it is silently scaled down, and one viewBox
-           unit stops being one CSS pixel with nothing on the page to show it.
-           The scale check above cannot see it either — viewBox and rendered
-           width still agree, because the shrink moves both.
-
-           This is the assertion the .fc-panel flex-column rule is checked
-           against. A column flex item's cross size is the container's content
-           box, the same used width a block child had; if that ever stops
-           being true the host narrows under a drawing already measured
-           against the old number, and this is the line that says so. */
         ok(vb <= p.hostW + 1,
            `${width}px ${p.key}: the drawing is never wider than its host, or ` +
            `max-width:100% shrinks it and one unit stops being one pixel — ` +
            `viewBox ${vb}, host ${p.hostW}`);
       }
 
-      /* A TABLE THAT SHARES A ROW IS BOUNDED, AND BOUNDING IT LOST NOTHING.
-         Both halves, because either alone passes on a defect: a scroller that
-         happens to fit everything proves no bound exists, and a bound that
-         had truncated its list would look identical from outside the box.
-         `congress` is why the rule exists — 464px to 1371px across ten names,
-         a 2.95x swing on a span-1 panel whose row-mates are `context` (350px)
-         and `marketRank`. Span-2 panels are exempt in the stylesheet and so
-         are exempt here: they own their row, so their length costs no one. */
       if (!p.wide) {
         for (const [scrollH, clientH, rows] of p.wrapBound) {
           ok(clientH <= 417,
@@ -822,8 +459,6 @@ try {
       () => document.documentElement.scrollWidth - window.innerWidth);
     ok(overflow <= 1, `${width}px: the page itself never scrolls sideways (${overflow}px over)`);
 
-    /* THE WIDE PANELS REALLY SPAN, above the breakpoint. Below it every panel
-       is one column and the comparison is meaningless. */
     if (width >= 1280) {
       const wide = swept.filter((p) => p.wide);
       const narrow = swept.filter((p) => !p.wide);
@@ -833,31 +468,12 @@ try {
         ok(p.boxW > narrowW * 1.8,
            `1280px ${p.key}: is-wide really spans both columns (${p.boxW} vs ${narrowW})`);
       }
-      /* The alignment precondition, measured rather than assumed. */
+
       const ivs = swept.find((p) => p.key === "ivSurface");
       const term = swept.find((p) => p.key === "skewTerm");
       ok(Math.abs(ivs.boxW - term.boxW) <= 1,
          `1280px: the surface and the term line mount at the same width (${ivs.boxW} vs ${term.boxW})`);
 
-      /* THE COLUMNS THEMSELVES LINE UP — and the assertion is written the way
-         it is because the obvious form of it is ILL-FORMED on the case this
-         page was built for.
-
-         The spec claimed skewTerm.points IS ivSurface.expiries in the same
-         order, citing shared/flows-chain.js, where it is true. The PIPELINE
-         then splices two different calls together: on a truncated chain it
-         keeps the broad-call ivSurface and replaces skewTerm wholesale with a
-         second single-expiry read (flows-pipeline.mjs, the recovery leg). The
-         two panels stop sharing a column list at exactly that point —
-         measured, freshly emitted: 8 surface expiries against 1 term point.
-         A per-index sweep of both arrays is then comparing different things,
-         not failing.
-
-         So the term drawer borrows the surface's column POSITIONS by matching
-         expiry, never its levels, and what is asserted here is what a reader
-         can actually see: every term column centre sits on a surface column
-         centre. On the spliced card that is one marker under the right
-         column; on a clean card it is all of them. */
       const align = await page.evaluate(() => {
         const xs = (sel, attr) => [...document.querySelectorAll(sel)]
           .map((n) => Number(n.getAttribute(attr)))
@@ -878,24 +494,8 @@ try {
       }
     }
 
-    /* THE 110rem TIER. The shell caps content at 78rem, so the third column
-       buys DENSITY rather than width: three tracks inside the same content
-       box, every span-1 host still above the 300 chart floor, and .is-wide
-       still `1 / -1` across all three — the same span rule, not a new one. */
     if (width >= 1840) {
-      /* READ OFF #ftGrid, AND THAT IS THE SECOND TIME THIS MOVED. It was
-         here originally, went down a level when the five <section>s became
-         the grids, and has come back up now that they are display:contents
-         and the panels are items of ONE grid again. The page draws a single
-         continuous wall of cards, which is what the target draws, so there
-         is one track list to read rather than five to agree with each other.
 
-         THE TIER IS UNCHANGED AND THAT IS THE POINT. Every column rule moved
-         from .ft-station to .ft-grid verbatim rather than being rewritten —
-         76rem/110rem/108rem/132rem, in that cascade order, where the later
-         108rem block is what holds this at three tracks past 110rem. A first
-         attempt DID rewrite them, mirroring only two of the four, and 1840px
-         opened a fourth column; this assertion is what caught it. */
       const tracks = await page.evaluate(() =>
         getComputedStyle(document.getElementById("ftGrid")).gridTemplateColumns
           .split(" ").filter((t) => parseFloat(t) > 0).length);
@@ -905,21 +505,6 @@ try {
     await page.close();
   }
 
-  /* ---------- 2b. the stations SWITCH -------------------------------
-
-     THE READER THIS REPLACED WAS 11,468px OF SCROLL at 1440 and 19,978px at
-     390 — 23 panels stacked, and a tab row that anchored into them rather
-     than switching between them, so choosing Convexity moved the reader four
-     thousand pixels and left the other four stations underneath. These
-     assertions are about the switch itself; section 2 above measures the
-     drawing, which is why it asks for ?s=all.
-
-     THE ONE THING THAT COULD GO WRONG SILENTLY is scale. A panel drawn while
-     its station is hidden measures a zero-width host, and base.css's
-     `svg { max-width: 100% }` would then paint it at whatever size it landed
-     at without overflowing anything. So the last assertion here is the same
-     one-to-one rule section 2 applies, taken on the station that is actually
-     open on the DEFAULT address, where four stations are hidden. */
   {
     const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
     const errors = [];
@@ -941,24 +526,6 @@ try {
       return out;
     });
 
-    /* THE DEFAULT IS ALL FIVE, AND THAT IS A DECISION, NOT A RELAXATION.
-
-       This asserted exactly ONE station on arrival, and the reason was
-       measured: 23 panels in a one- and two-column grid ran 11,468px at 1440
-       and 19,978px at 390, and a tab click moved the reader four thousand
-       pixels with the other four stations still stacked underneath.
-
-       The COLUMN COUNT is what has changed. `.ft-station` is three columns at
-       76rem, four at 110 and five at 132, no panel spans a full row at any
-       width, and nothing is stretched. Twenty-three cards across three-to-five
-       columns is eight rows, not twenty-three — so the height that justified
-       hiding four fifths of the name is not the height the page now has.
-
-       WHAT IS STILL ASSERTED, below and unchanged: a tab click narrows to one
-       station and writes ?s=, Back undoes it, an address no station answers to
-       is ignored rather than obeyed, and ?s=all shows all five. The last of
-       those is now also what a reader who asks for nothing gets, which is why
-       this block reads the default and the explicit address the same way. */
     const first = await shown();
     eq(first.open.length, 5,
        `on arrival every station is in the document (${first.open.join(", ") || "none"})`);
@@ -968,8 +535,6 @@ try {
        `and the default writes no s= into the address, because it is what the page ` +
        `does without one (${first.url || "empty"})`);
 
-    /* A CLICK SWITCHES, AND DOES NOT SCROLL TO SOMETHING FOUR THOUSAND PIXELS
-       DOWN — the station it names is the only one left in the flow. */
     await page.click('.ft-tab[data-side="convexity"]');
     const after = await shown();
     eq(after.open.join(","), "convexity",
@@ -977,25 +542,14 @@ try {
     ok(after.url.includes("s=convexity"),
        `and the URL says which station a reader is looking at (${after.url})`);
 
-    /* BACK IS AN UNDO, because a click is an act. The scroll observer replaces
-       its entry instead, or Back would walk a reader through every station
-       they merely scrolled past. */
     await page.goBack();
-    /* WAITS FOR THE VIEW TO COME BACK, NOT FOR convexity TO HIDE. The old
-       condition was "convexity is hidden again", which held when Back
-       restored a single OTHER station. Back now restores the all-five
-       default, in which convexity is one of the five still on the page — so
-       that condition can never become true and the wait could only time out.
-       The state being waited for is "no station is hidden", which is what the
-       default is. */
+
     await page.waitForFunction(() => [...document.querySelectorAll(
       '.ft-station[data-group]')].every((s) => !s.hidden), null, { timeout: 4000 });
     const back = await shown();
     eq(back.open.length, 5,
        `Back returns to the view the reader came from, which is all five (${back.open.join(", ")})`);
 
-    /* ?s=all IS THE WAY BACK TO ONE PAGE, and it is what keeps find-in-page and
-       printing from silently losing four fifths of the name. */
     const allPage = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
     await mount(allPage, card, { ticker: card.ticker, station: "all" });
     const every = await allPage.evaluate(() =>
@@ -1003,25 +557,17 @@ try {
     eq(every, 5, `s=all puts every station back in the document (${every} of 5)`);
     await allPage.close();
 
-    /* AN ADDRESS NO STATION ANSWERS TO IS NOT OBEYED. Hiding all five because a
-       reader mistyped the query is the one outcome worse than ignoring them. */
     const badPage = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
     await mount(badPage, card, { ticker: card.ticker, station: "not-a-station" });
     const bad = await badPage.evaluate(() =>
       [...document.querySelectorAll(".ft-station[data-group]")].filter((s) => !s.hidden)
         .map((s) => s.dataset.group));
-    /* THE PROPERTY IS "NOT OBEYED", AND IT IS UNCHANGED. A mistyped ?s= falls
-       back to the DEFAULT, and the outcome this guards against — all five
-       hidden because a reader fat-fingered the query — is still refused. What
-       the default is has changed; that a bad address gets it has not. */
+
     eq(bad.length, 5,
        `an unknown ?s= falls back to the default view rather than hiding everything ` +
        `(${bad.join(", ") || "none"})`);
     await badPage.close();
 
-    /* A DEEP LINK OPENS THE STATION THAT HOLDS THE PANEL. Scrolling to an
-       element inside a hidden station scrolls to something with no box, which
-       is how a link to panel 14 becomes a link to the top of the page. */
     const deepPage = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
     await mount(deepPage, card, { ticker: card.ticker, hash: "panel-gamma", station: null });
     const deep = await deepPage.evaluate(() => {
@@ -1033,25 +579,11 @@ try {
        `a deep link to a panel opens the station that holds it (${deep.group})`);
     await deepPage.close();
 
-    /* WHICH ADDRESS WINS, ON ALL SIX COMBINATIONS. Two things can name a
-       station — `?s=` and the hash — and nothing asserted which of them ranked
-       higher, so the answer was free to be wrong: `?s=all#ftg-convexity` opened
-       ONE station, because honourHash ran while the selection was still null,
-       its guard passed, and it chose before the query had been read. The reader
-       asked for five and got one. The rule is: an explicit ?s= wins, a hash
-       decides when ?s= is silent, and a hash naming a PANEL wins over ?s= —
-       otherwise a link someone was sent lands on a station that does not hold
-       it. This table is the only thing that keeps those three straight. */
     for (const [query, want] of [
       ["&s=all#ftg-convexity", "signal,convexity,volatility,tape,context"],
       ["&s=all", "signal,convexity,volatility,tape,context"],
       ["#ftg-convexity", "convexity"],
-      /* THE TWO ROWS THAT NAME NOTHING NOW GET THE ALL-FIVE DEFAULT. The
-         RANKING this table exists to pin is untouched: an explicit ?s= still
-         wins, a hash still decides when ?s= is silent, and a hash naming a
-         PANEL still wins over ?s= — the four rows that exercise those three
-         rules are unchanged. These two exercise the FALLBACK, and what the
-         fallback is has changed by decision. */
+
       ["", "signal,convexity,volatility,tape,context"],
       ["&s=volatility#panel-gamma", "convexity"],
       ["&s=bogus", "signal,convexity,volatility,tape,context"],
@@ -1070,7 +602,6 @@ try {
       await p.close();
     }
 
-    /* THE SCALE RULE, ON THE STATION THAT IS OPEN WHILE FOUR ARE HIDDEN. */
     const scales = await page.evaluate(() => {
       const out = [];
       for (const s of document.querySelectorAll(".ft-station[data-group]")) {
@@ -1092,23 +623,6 @@ try {
     await page.close();
   }
 
-  /* ---------- 2c. key statistics, gathered and not re-derived ---------
-
-     THE FIXTURE CORPUS CANNOT FAIL THIS ONE, which is why the payloads below
-     are built here. All 50 emitted cards carry the same latest ivRank —
-     52.15 on 2026-08-28, every one — so a keyStats that read a shared object,
-     or the wrong card entirely, would render exactly what a correct one does
-     and this check would pass while proving nothing. Distinct values are the
-     only thing that can tell those apart.
-
-     AND THE ROW ORDER IS THE TRAP. ivRank.rows arrives NEWEST-first while the
-     score-over-price panel's own note says its series "both run oldest first",
-     so the ordering a reader of this repo would assume is the opposite of the
-     one this payload uses. `rows[rows.length - 1]` would publish a rank
-     measured 60 sessions ago as today's — a number that is wrong by two
-     months and looks entirely reasonable. The rows below are deliberately
-     shuffled so that neither the first nor the last is the newest: only a
-     scan by date gets this right. */
   {
     const base = JSON.parse(JSON.stringify(withChain[0]));
     base.atr = 2.5;
@@ -1170,10 +684,6 @@ try {
        `newest of three deliberately shuffled rows; 11.1 would mean rows[0] and ` +
        `44.4 would mean the last row (${r["IV rank"].text})`);
 
-    /* THE FLIP IS ABSENT ON 31 OF THE 50 CARDS A DRY RUN EMITS, so this is the
-       common path and not an edge. It takes the gamma panel's OWN sentence:
-       one fact explained two ways is the same defect as two facts sharing one
-       explanation, read from the other end. */
     const noFlip = JSON.parse(JSON.stringify(base));
     noFlip.gammaFlip = null;
     const q = await read(noFlip);
@@ -1183,7 +693,6 @@ try {
     ok(/does not change sign/.test(q["Gamma flip"].why),
        `and gives the gamma panel's own reason for it (${q["Gamma flip"].why})`);
 
-    /* A PANEL THAT COULD NOT BE READ IS NOT A MARKET WITH NOTHING TO SAY. */
     const dead = JSON.parse(JSON.stringify(base));
     dead.panels.volContext = { status: "unavailable", reason: "The vendor returned no volatility history." };
     const d = await read(dead);
@@ -1194,26 +703,6 @@ try {
        `(spot: ${JSON.stringify(d.Spot)})`);
   }
 
-  /* ---------- 2d. a long table is bounded, and bounding it lost nothing --
-     THE PAYLOAD IS BUILT HERE BECAUSE THE CORPUS CANNOT REACH THE CASE. The
-     richest emitted card carries twelve congressional trades, which draw to
-     roughly 360px — under the 26rem bound, so the width sweep's own check of
-     this rule never takes its scrolling branch. An assertion that cannot fire
-     on any fixture the suite owns is not a check, and this file has been
-     bitten by that shape before. Forty rows is past the bound on any width.
-
-     WHY THIS PANEL. `congress` is the reason the stylesheet rule exists: it
-     measures 464px to 1371px across ten names, a 2.95x swing, and it is a
-     span-1 panel whose row-mates are `context` (350px) and `marketRank`. A
-     grid row is as tall as its tallest member, so before the bound one
-     vendor's filing count set the height of two panels that have nothing to
-     do with disclosure — 1,003px of blank ground opened under both.
-
-     BOUNDED IS NOT TRUNCATED, AND BOTH HALVES ARE ASSERTED. Either alone
-     passes on a defect: a scroller that happens to fit everything proves no
-     bound exists, and a bound that had dropped rows would look identical from
-     outside the box. So the box is measured AND every member name is looked
-     for in the text. */
   {
     const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
     const errors = [];
@@ -1242,7 +731,7 @@ try {
         scrollH: wrap ? Math.round(wrap.scrollHeight) : null,
         rows: wrap ? wrap.querySelectorAll("tbody tr").length : 0,
         text: panel ? panel.textContent : "",
-        /* The panel's own box, which is what a row-mate is stretched to. */
+
         panelH: panel ? Math.round(panel.getBoundingClientRect().height) : null,
         focusable: wrap ? wrap.tabIndex : null,
         region: wrap ? wrap.getAttribute("role") : null,
@@ -1262,9 +751,7 @@ try {
     eq(missing.length, 0,
        `and every member is still findable by find-in-page, including the ones ` +
        `below the fold (${missing.slice(0, 3).join(", ")})`);
-    /* A SCROLLER A KEYBOARD CANNOT REACH IS A TRAP, and bounding the box is
-       what creates one. Both attributes are set by the renderer already; this
-       asserts the bound did not arrive without them. */
+
     eq(seen.focusable, 0, `the bounded region is reachable by keyboard (tabIndex ${seen.focusable})`);
     eq(seen.region, "region", `and announces itself as a region (${seen.region})`);
     ok(seen.panelH < 900,
@@ -1273,26 +760,6 @@ try {
     await page.close();
   }
 
-  /* ---------- 2e. the sparkline says what window it is drawn over ------
-     THE PUBLISHER COMPUTED A WARNING AND THE RENDERER THREW IT AWAY.
-     buildContext publishes `sessions`, `datedSessions`, `dropped` and
-     `closeDates`, and its own comment on `dropped` reads: "Non-zero means
-     index is NOT time in the arrays above, which is precisely when a reader
-     needs the dates." renderContext placed every close by INDEX and read none
-     of the four, so on a name with a dropped session the line was drawn
-     straight across the gap at the same slope as a real move.
-
-     ALL THREE PAYLOADS ARE BUILT HERE BECAUSE THE CORPUS CANNOT REACH TWO OF
-     THEM. Every emitted card carries `dropped: 0`, so the gap branch — the
-     one the whole fix exists for — would never run against a fixture, and the
-     legacy branch cannot exist in a corpus emitted by today's publisher at
-     all. An assertion that cannot fire is not a check, and this file has been
-     bitten by that shape twice already.
-
-     THE THIRD CASE IS THE ONE WORTH THE MOST. A card built before these
-     fields existed must say NOTHING about gaps rather than printing "none
-     dropped" — `dropped` absent and `dropped === 0` are different claims, and
-     collapsing them is exactly the confident zero this codebase refuses. */
   {
     const errors = [];
     const base = withChain[0];
@@ -1301,15 +768,7 @@ try {
       card.panels.context = { ...card.panels.context, ...patch };
       return card;
     };
-    /* A FRESH PAGE PER CASE, AND THAT IS NOT TIDINESS.
-       mount() calls page.addInitScript and page.route, and both ACCUMULATE on
-       a page: three mounts leave three fetch stubs and three route handlers,
-       and which card the page actually receives stops being this test's to
-       decide. Written the other way — one page, three mounts — this block
-       passed against a renderer deliberately broken to report gaps as "none
-       dropped", which is the whole defect it exists to catch. An assertion
-       that survives its own mutation is not a check, so the page is new every
-       time and the mutation fails it. */
+
     const readCtx = async (card) => {
       const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
       page.on("pageerror", (e) => errors.push(String(e)));
@@ -1336,9 +795,6 @@ try {
        "and warns that the axis is order rather than time, which is what makes a " +
        "segment spanning a gap indistinguishable from one spanning a session");
 
-    /* A CARD FROM BEFORE THE FIELDS EXISTED. delete, not set-to-null: null is
-       a measurement of nothing and absent is no measurement, and the renderer
-       must tell them apart. */
     const legacyCard = JSON.parse(JSON.stringify(base));
     delete legacyCard.panels.context.dropped;
     delete legacyCard.panels.context.sessions;
@@ -1355,32 +811,6 @@ try {
     eq(errors.length, 0, `none of the three windows throws (${errors.join("; ")})`);
   }
 
-  /* ---------- 2f. the five station lines, written at last -------------
-
-     `.ft-station-lead` is served on all five stations, styled, guarded with
-     `:empty{display:none}`, asserted above to arrive EMPTY — and nothing had
-     ever written to it. Same for `.ft-panel-one` on all 23 panels. Twenty-
-     eight slots the design reserved and never filled.
-
-     THE PANEL SLOTS ARE NOT FILLED HERE, AND THE REASON IS THIS SUITE. The
-     obvious implementation lifts each panel's `.fc-reading.is-lead` into its
-     slot, and two assertions in this file refused it: skewTerm leads on TWO
-     readings kept separate on purpose, and ivSurface is asserted to lead "on
-     exactly one reading" in its DRAWING. Read together they say the slot sits
-     immediately above the drawing, so moving a sentence up by one element
-     changes nothing a reader sees while breaking rules about where a finding
-     lives. The nineteen panels that do NOT lead in their drawing are the ones
-     the slot is for, and each needs a one-line answer authored from its own
-     payload. That is the next change.
-
-     WHAT A STATION LINE SAYS IS WHAT NO PANEL CAN: what is missing here,
-     before a reader scrolls six boxes to find out. It is counted off the DOM
-     the renderers actually emitted rather than off the payload, so a panel
-     that draws nothing is counted as silent however it came to be silent —
-     and the four silences are NOT collapsed: `unavailable` (the source did not
-     return) and `quiet` (it answered and measured nothing) are counted and
-     named separately, because a reader deciding whether to trust a thin
-     station needs to know which it is. */
   {
     const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
     const errors = [];
@@ -1393,9 +823,7 @@ try {
         group: st.dataset.group,
         text: String((st.querySelector(":scope > .ft-station-lead") || {}).textContent || "").trim(),
         panels: st.querySelectorAll(":scope > .ft-panel[data-panel]").length,
-        /* THE READING BELONGS TO THE STATION, NOT TO THE GRID. Read as a
-           direct child so a line written into the wrong station — or once,
-           into the first — fails here rather than looking right. */
+
         own: st.querySelectorAll(":scope > .ft-station-lead").length,
       })));
 
@@ -1434,9 +862,6 @@ try {
       }
     }
 
-    /* AND THE LINE IS REWRITTEN PER CARD, not accumulated. drawAll runs again
-       on every name the picker loads, and a coverage line that appended rather
-       than replaced would read as a station twice its own size. */
     const other = withChain.find((c) => c.ticker !== card.ticker) || fixtures[0];
     await mount(page, other, { ticker: other.ticker, station: "all" });
     const again = await page.evaluate(() =>
@@ -1454,13 +879,6 @@ try {
          `${st.group}: and says "drawn" exactly once, so nothing accumulated`);
     }
 
-    /* THE PANEL SLOTS, NOW THAT TWO PANELS PUBLISH A LEAD.
-
-       THE FIXTURES ARE REAL EMITTED CARDS AND PREDATE THE FIELD, so the leads
-       are built in-test by calling the publisher's OWN builders — never by
-       writing a sentence here, which would test this file against itself. Same
-       reason section 2e builds its three context payloads rather than hunting
-       for them in a corpus that cannot contain them. */
     const led = JSON.parse(JSON.stringify(card));
     led.panels.levels = buildLevels({
       spot: 180, atr: 4.2, gammaFlip: 182.5, maxPain: 175, callWall: 195, putWall: 165,
@@ -1473,30 +891,18 @@ try {
       { strike: 180, call_gamma_oi: 1e6, put_gamma_oi: 0, call_gamma_vol: 0, put_gamma_vol: 0 },
       { strike: 186, call_gamma_oi: 0, put_gamma_oi: 0, call_gamma_vol: 1e6, put_gamma_vol: 0 },
     ], { atr: 4, spot: 183 });
-    /* A NET DELTA LARGE ENOUGH TO BE GROUPED, deliberately. The first version
-       of buildPath's lead printed toLocaleString, so 1,250,000 reached the
-       prose as three unpinned figures — and every fixture in its branch check
-       happened to produce 870, which needs no separator. A corpus that cannot
-       reach a branch is a corpus that cannot test it. */
+
     led.panels.path = buildPath(Array.from({ length: 5 }, (_, i) => ({
       tape_time: new Date(Date.UTC(2026, 7, 24, 13, 31 + i)).toISOString(),
       net_delta: 250000, net_call_premium: 2500000, net_put_premium: 0,
     })), { sessionDate: "2026-08-24" });
-    /* THE ROLL-OFF, WITH A HALF-LIFE THAT IS NOT THE FIRST OR THE LAST EXPIRY.
-       Three expiries weighted 150/100/50 put the cumulative-share crossing on
-       the SECOND, so the sentence is exercised against a median it had to walk
-       to rather than one it would have found by taking either end. */
+
     led.panels.calendar = buildCalendar([
       { expiry: "2026-08-28", call_gamma: 100, put_gamma: 50 },
       { expiry: "2026-09-04", call_gamma: 60, put_gamma: 40 },
       { expiry: "2026-10-16", call_gamma: 30, put_gamma: 20 },
     ], { asOf: "2026-08-24" });
-    /* THE PRICED MOVE, WITH BOTH BANDS AND THE VENDOR QUOTE PRESENT, so the
-       lead is exercised on the branch that has to CHOOSE between them: the
-       fixed horizon is comparable across the board and the vendor's quote
-       runs to its own undated expiry, and a lead that led on the second when
-       the first exists would be putting an incomparable figure at the top of
-       a panel a reader reaches from a ranked list. */
+
     led.panels.pricedMove = buildPricedMove({
       spot: 180, iv30: 0.32, rv30: 0.21, impliedMovePerc: 0.025, vrp: 0.11,
     });
@@ -1510,13 +916,6 @@ try {
         }))
         .filter((p) => p.one));
 
-    /* PINNED AS A SET, NOT A COUNT, and as a STANDING FACT rather than a
-       target: the day a panel gains a lead this line fails and is rewritten
-       deliberately, which is the only way a slot cannot quietly stop being
-       filled. Six became ten when congress, marketRank, scoreOverlay and
-       surface gained leads (scoreOverlay has since left the page); the four that arrived with them each answer their
-       panel's own question out of a field the payload already carried, and
-       none of them is a sentence lifted from a drawing. */
     assert.deepEqual(ones.map((p) => p.key).sort(),
       ["aggressor", "calendar", "charm", "congress", "context", "darkpool",
         "deltaExposure", "displacement", "levels", "marketRank", "oiDeltas",
@@ -1530,18 +929,7 @@ try {
       eq(p.one, published.say,
          `${p.key}: the slot prints the publisher's sentence VERBATIM — a renderer that ` +
          `composed or edited it would be a second author for one reading`);
-      /* EVERY NUMERAL IN THE SENTENCE IS PINNED IN `n` — the rule
-         shared/flows-brief.js states for its facts, and the reason a figure can
-         be set large, or re-read, without a regex over the prose.
 
-/* NUMBERS AND STRINGS ARE MASKED DIFFERENTLY, and conflating them is a
-         defect this panel's own data exposed. The mask exists for STRING
-         values — a ticker like SYN046 carries digits inside a symbol that is
-         itself pinned, and a naive digit scan accuses the module of an
-         unpinned "046". But a NUMBER stringified is still a string, so a
-         single set masks "182.5" out of the prose's "182.50" and leaves a bare
-         "0" behind, which is then reported as unpinned. The two sets are kept
-         apart: only string values mask, and numbers are matched by value. */
       const quotedNums = new Set();
       const quotedText = new Set();
       for (const v of Object.values(published.n)) {
@@ -1557,8 +945,6 @@ try {
       }
     }
 
-    /* AND NO SLOT HOLDS WHITESPACE, which would defeat `:empty{display:none}`
-       and leave a reader a blank line where a reading would be. */
     const blank = await page.evaluate(() =>
       [...document.querySelectorAll("#ftGrid .ft-panel-one")]
         .filter((n) => n.textContent !== "" && !String(n.textContent).trim()).length);
@@ -1568,24 +954,14 @@ try {
     await page.close();
   }
 
-  /* ---------- 3. the minus sign, on numbers only ------------------ */
   {
     const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
     const card = withChain[0];
     await mount(page, card, { ticker: card.ticker });
-    /* SCOPED TO NUMERIC STRINGS. A page-wide "contains no U+002D" assertion is
-       UNSATISFIABLE here: every expiry is an ISO date and the surface prints
-       `expiry.slice(5)` = "08-31", so 57 of 115 strings in a real card carry
-       an ASCII hyphen legitimately. A guaranteed-red assertion gets deleted,
-       not fixed. */
+
     const bad = await page.evaluate(() => {
       const out = [];
-      /* THE UNIT ALTERNATION IS WIDENED, NOT LEFT TO ROT. This read
-         `[%σd]?` — one optional character — and the ATR-normalised
-         distances it was written to cover now print "2.00 ATR" rather
-         than "2.00σ". A stale pattern here does not fail: the strings
-         simply stop matching, `continue` skips them, and the hyphen
-         check quietly covers fewer cells than its name claims. */
+
       const numeric = /^[−+-]?[\d.,]+\s*(?:%|d|ATR|SD)?$/;
       const nodes = [...document.querySelectorAll(".ft-panel .c-num, .ft-panel .fc-reading"),
                      ...document.querySelectorAll(".ft-panel svg text")];
@@ -1600,7 +976,6 @@ try {
     await page.close();
   }
 
-  /* ---------- 4. the enlarge dialog redraws, and never shrinks ----- */
   for (const width of [1280, 1600]) {
     const page = await browser.newPage({ viewport: { width, height: 1400 } });
     const errors = [];
@@ -1608,20 +983,6 @@ try {
     const card = withChain[0];
     await mount(page, card, { ticker: card.ticker });
 
-    /* EVERY REGISTRY KEY, NOT A HAND-PICKED FOUR, and the four are why.
-
-       This list read ["aggressor", "ivSurface"] and could not see the defect
-       it was written for: `gamma` and `path` each carried their own inlined
-       `Math.min(760, …)` — the retired dialog's ceiling — so at 1280px, where
-       a span-1 host is ~456 units, the enlarged copy capped at 760 against the
-       912 the assertion below asks for. Adding those two keys fixed the list
-       for the two panels somebody had already found.
-
-       A HAND-WRITTEN LIST OF PANELS IS THE DEFECT shared/flows-panels.js WAS
-       CREATED TO CLOSE, one level up: a panel not named here is one whose
-       enlarge nobody checks, and reading the list cannot tell you that. It is
-       derived from the registry now, and a panel with no chart is skipped by
-       MEASUREMENT — `gridW` is 0 — rather than by omission. */
     for (const key of TICKER_PANELS.map((p) => p.key)) {
       const section = TICKER_PANELS.find((p) => p.key === key);
       const gridW = await page.evaluate((k) => {
@@ -1640,10 +1001,6 @@ try {
                  transform: getComputedStyle(s).transform };
       });
 
-      /* SPAN-AWARE, because a flat 2x threshold FAILS BY CONSTRUCTION on
-         exactly the two panels the button matters most for: an is-wide grid
-         panel is already 896px and the dialog host is ~1113px, a 1.24x gain
-         that is real and is not two. */
       if (section.span === 1) {
         ok(zoomed.vb >= gridW * 2,
            `${width}px ${key}: a span-1 panel at least doubles when enlarged (${gridW} to ${zoomed.vb})`);
@@ -1651,32 +1008,17 @@ try {
         ok(zoomed.vb > gridW,
            `${width}px ${key}: a span-2 panel still grows when enlarged (${gridW} to ${zoomed.vb})`);
       }
-      /* ENLARGE MUST NEVER SHRINK. With width:min(74rem,96vw) the dialog host
-         is 1129.6px while an is-wide grid panel at >=1328px is 1136px — the
-         button would have made the two widest panels SMALLER. */
+
       ok(zoomed.vb >= gridW,
          `${width}px ${key}: enlarging never shrinks the drawing (${gridW} to ${zoomed.vb})`);
-      /* showModal() on a display:none element gives clientWidth 0 in the same
-         tick, so a drawer called without the rAF falls back to the
-         unmeasurable-host 560 and the enlarged panel is drawn at a width the
-         dialog does not have. */
-      ok(zoomed.vb > 600, `${width}px ${key}: the zoom draw measured a real host`);
-      /* THE SPAN-INDEPENDENT ANTI-transform:scale() TEST. A scaled
-         implementation gives a ratio near 2.6 and a non-none transform, and
-         passes every other assertion in this suite.
 
-         WITHIN A PIXEL, for the reason the grid sweep is: a 15% band holds
-         both known failures — the dialog's own 1.023 stretch, and the 0.999
-         squeeze a 2px staleness BORDER put on every panel after they had
-         been measured. */
+      ok(zoomed.vb > 600, `${width}px ${key}: the zoom draw measured a real host`);
+
       ok(Math.abs(zoomed.rendered - zoomed.vb) < 1,
          `${width}px ${key}: the enlarged chart is redrawn at its host's width, not ` +
          `scaled — drawn ${zoomed.vb}, rendered ${zoomed.rendered.toFixed(2)}`);
       eq(zoomed.transform, "none", `${width}px ${key}: no CSS transform on the enlarged chart`);
 
-      /* EVERY <defs> ID IS UNIQUE WHILE BOTH COPIES EXIST. url(#id) resolves
-         to the first match in document order, so a duplicated pattern id
-         silently gives the zoomed drawing the grid drawing's tile. */
       const dup = await page.evaluate(() => {
         const ids = [...document.querySelectorAll("[id]")].map((n) => n.id);
         const seen = new Set(), dupes = [];
@@ -1694,19 +1036,10 @@ try {
     await page.close();
   }
 
-  /* ---------- 5. the three page-level states --------------------- */
   {
-    /* NO NAME IS THE INDEX, NOT AN ERROR — and it must not fetch a card. */
+
     const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
-    /* THE FIXTURE IS THE SHAPE THE PIPELINE ACTUALLY WRITES, and the previous
-       one was not. It carried `dp: 0` on the row with no card — a value this
-       payload has never held. flows-pipeline.mjs stamps `row.dp = 1` on the
-       deep set and writes NOTHING on the rest, and publishes the count as
-       `deep` beside `deepRule`. Written the old way, the fixture agreed with
-       the controller's `row.dp === 0` test and both were wrong about the wire:
-       on a live board 21 of 44 rows were listed as openable and were not.
-       A fixture written from the same assumption as the code proves only that
-       the assumption is self-consistent. */
+
     await mount(page, withChain[0], {
       ticker: null,
       boards: { deep: 1, rows: [{ t: "AAA", r: 1, s: 42, dp: 1 }, { t: "BBB", r: 2, s: 30 }] },
@@ -1725,15 +1058,12 @@ try {
     ok(!state.status.toLowerCase().includes("error"), "and calls it a choice, not an error");
     eq(state.requested.filter((u) => u.includes("/api/flows/card")).length, 0,
        "and spends no card read at all");
-    /* A NAME WITH NO CARD GETS NO ROW. A link that usually leads to "no card
-       for this name" is worse than no link. */
+
     eq(state.rows, 1,
        "only the names the board stamped with a card are listed — a row the run went " +
        "deep on carries dp:1 and one it did not carries no dp at all");
     eq(state.names.join(","), "AAA", "and it is the stamped one that is listed");
-    /* AND THE NOTE IS TRUE OF THE LIST UNDER IT. It used to promise "every
-       name today's board went deep enough on to build a card for" above a list
-       that was every row on the board. */
+
     ok(/ranks 2 names/.test(state.note) && /card for 1 of them/.test(state.note),
        `the note counts the list against the board it came from (${state.note})`);
     ok(/not listed/.test(state.note),
@@ -1742,13 +1072,7 @@ try {
     await page.close();
   }
   {
-    /* AN OLD BOARD HAS NO `dp` ON ANY ROW, and absent-on-every-row is not
-       false-on-every-row. Assets deploy the moment main moves and the pipeline
-       runs the next morning, so there is always a day when this JavaScript
-       reads a board written before the flag existed — and treating that as
-       "no name has a card" would empty the index of a section whose whole
-       purpose is opening those cards. The test is the published `deep` count,
-       not the row. */
+
     const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
     await mount(page, withChain[0], {
       ticker: null,
@@ -1767,14 +1091,7 @@ try {
     await page.close();
   }
   {
-    /* THE THREE PENDING STATES ARE DIFFERENT FACTS and must read differently.
 
-       THE THIRD ONE USED TO BE TOLD AS THE FIRST. A name the board RANKS but
-       built no card for is not a card lagging its row: the run never intended
-       to build one, because a card costs two vendor calls it spends only on
-       the names furthest from neutral. "Its card has not landed yet" invited a
-       reload that will never produce one, and on a live board that was 21 of
-       44 names on the long side. */
     const pendingCases = [
       [{ deep: 1, rows: [{ t: "ZZZ", r: 1, s: 5, dp: 1 }] }, "has not landed",
        "a card that really is lagging its row"],
@@ -1792,8 +1109,7 @@ try {
       await page.close();
     }
     {
-      /* AND THE THIRD ONE NAMES THE RANK INSIDE THE SIDE'S OWN POPULATION,
-         never inside the count of rows this page kept. */
+
       const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
       await mount(page, { status: "pending", ticker: "ZZZ" }, {
         ticker: "ZZZ",
@@ -1815,9 +1131,7 @@ try {
     }
   }
   {
-    /* ?t=nvda IS THE NVDA PAGE. The Worker uppercases before testing its own
-       ticker pattern; routing lowercase to "choose a name" would break every
-       hand-typed URL and contradict the deep link the dialog already ships. */
+
     const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
     const card = withChain[0];
     await mount(page, card, { ticker: String(card.ticker).toLowerCase() });
@@ -1827,7 +1141,7 @@ try {
     await page.close();
   }
   {
-    /* A HOSTILE ?t= NEVER REACHES A FETCH. */
+
     for (const bad of ["../etc", "", "!!!"]) {
       const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
       await mount(page, withChain[0], { ticker: bad, boards: { rows: [] } });
@@ -1838,12 +1152,8 @@ try {
     }
   }
 
-  /* ---------- 6. legacy and unavailable payloads ------------------ */
   {
-    /* A CARD FROM BEFORE THE CHAIN LEG carries no ivSurface KEY AT ALL —
-       `undefined`, not {status:"unavailable"} — and the two must not be
-       conflated: one is a card built before the panel existed, the other is
-       this run declining to publish and carrying its own reason. */
+
     const legacy = JSON.parse(JSON.stringify(withChain[0]));
     delete legacy.panels.ivSurface;
     legacy.panels.aggressor = { status: "unavailable", reason: "the vendor reported no aggressor split." };
@@ -1863,12 +1173,8 @@ try {
     await page.close();
   }
 
-  /* ---------- 6b. the three stock panels: readings ----------------- */
   {
-    /* THE FIXTURE IS AN EMITTED CARD WITH NAMED FIELDS MUTATED, and each
-       mutation is the point of its own test. The emitted corpus carries no
-       cancelled print, no null oiUpDays beside real counters on row 0, and
-       no pinned rank value — those states are staged by name. */
+
     const base = withChain.find((c) =>
       c.panels.darkpool.status === "ok" &&
       c.panels.oiDeltas.status === "ok" &&
@@ -1877,10 +1183,10 @@ try {
       c.panels.volContext.ivRank.status === "ok");
     ok(base, "an emitted card carries all three stock panels with data");
     const card = JSON.parse(JSON.stringify(base));
-    card.panels.darkpool.rows[0].canceled = true;          // the tape's cancel flag, staged
-    card.panels.oiDeltas.rows[0].oiUpDays = null;          // an unpublished counter, staged
-    card.panels.volContext.ivRank.rows[0].rank1y = 57.5;   // a pinned headline the drawer must not rescale
-    card.panels.volContext.ivRank.rows[5].rank1y = null;   // a guaranteed gap for the strip
+    card.panels.darkpool.rows[0].canceled = true;
+    card.panels.oiDeltas.rows[0].oiUpDays = null;
+    card.panels.volContext.ivRank.rows[0].rank1y = 57.5;
+    card.panels.volContext.ivRank.rows[5].rank1y = null;
 
     const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
     const errors = [];
@@ -1890,10 +1196,7 @@ try {
     const dp = card.panels.darkpool;
     const oi = card.panels.oiDeltas;
     const vc = card.panels.volContext;
-    /* The strip's segment count, computed from the payload the way the
-       drawer must draw it: oldest first, a segment only between ADJACENT
-       measured sessions. The staged null guarantees the count is strictly
-       below n − 1, so a drawer that bridges gaps (or zeroes them) fails. */
+
     const series = vc.ivRank.rows.slice().reverse()
       .map((r) => (typeof r.rank1y === "number" && Number.isFinite(r.rank1y) ? r.rank1y : null));
     let wantSegments = 0;
@@ -1913,14 +1216,13 @@ try {
       const dpHost = panelOf("darkpool");
       const oiHost = panelOf("oiDeltas");
       const vcHost = panelOf("volContext");
-      /* Everything a panel SAYS, tooltips included, for the vocabulary sweep. */
+
       const saidBy = (root) => root.textContent + " " +
         [...root.querySelectorAll("[title]")].map((n) => n.getAttribute("title")).join(" ");
       return {
         dpRows: dpHost.querySelectorAll(".fdp-table tbody tr").length,
         dpTags: [...dpHost.querySelectorAll(".fdp-tag")].map((n) => n.textContent),
-        /* The first TEXT node only: a cancelled row's cell is "HH:MM" plus its
-           tag element, and the clock claim is about the clock. */
+
         dpTimes: [...dpHost.querySelectorAll(".fdp-time")]
           .map((n) => (n.firstChild ? n.firstChild.textContent : "")),
         dpQuotes: [...dpHost.querySelectorAll(".fdp-quote")].map((n) => n.textContent),
@@ -1950,13 +1252,10 @@ try {
       };
     });
 
-    /* --- darkpool: the table is the payload, row for row -------------- */
     eq(got.dpRows, dp.rows.length, "darkpool draws one row per published print");
     ok(got.dpTimes.every((t) => /^\d{2}:\d{2}$/.test(t) || t === "—"),
        `every time cell is HH:MM off the tape's own timestamp (${got.dpTimes[0]})`);
-    /* THE CANCEL FLAG HAS ONE HONEST RENDERING: a tag on true, NOTHING on
-       false and on null — a "live" badge on the false rows would turn the
-       null rows' bare absence into a claim. */
+
     const wantTags = dp.rows.filter((r) => r.canceled === true).length;
     eq(got.dpTags.length, wantTags, "exactly the cancelled prints carry the tag");
     ok(got.dpTags.every((t) => t === "cancelled"), "and the tag says what the flag says");
@@ -1970,8 +1269,7 @@ try {
       eq(got.dpQuotes[iNone], "—",
          "a print missing either side of the quote shows the dash, never half a spread");
     }
-    /* The capped-list line, in the shaper's own numbers. Every emitted card
-       sheds and counts out today, so both clauses are exercised. */
+
     if (dp.shed > 0) {
       ok(got.dpCount && got.dpCount.includes(dp.rows.length + " kept of " + dp.seen),
          `the caption states ${dp.rows.length} kept of ${dp.seen}`);
@@ -1983,18 +1281,10 @@ try {
     ok(got.dpNotes.includes(dp.note.slice(0, 60)),
        "the payload's own darkpool note is rendered, not paraphrased");
 
-    /* --- oiDeltas: signed changes, vendor counters, vendor prose ------- */
     eq(got.oiContracts.length, oi.rows.length, "oiDeltas draws one row per published change");
     ok(/^[CP] [\d.]+ · \d{2}-\d{2}$/.test(got.oiContracts[0]),
        `the contract cell is built from cp, strike and expiry ("${got.oiContracts[0]}")`);
-    /* THESE READ `r.diff` NOW, AND THE BLOCK ASSERTS IT FOUND SOMETHING.
-       They used to read `r.change`, the field that carried the vendor's
-       oi_change — a RATIO drawn as a contract count. Renaming it to `diff`
-       and `ratio` left these two findIndex calls looking for a key nothing
-       has, so both returned -1 and both `if` bodies silently stopped running:
-       the suite kept passing while testing nothing, which is the same shape
-       as the six [message, condition] assertions fixed in flows-legacy-payload
-       tonight. A guarded assertion needs a guard on the guard. */
+
     const iNeg = oi.rows.findIndex((r) => typeof r.diff === "number" && r.diff < 0);
     const iPos = oi.rows.findIndex((r) => typeof r.diff === "number" && r.diff > 0);
     ok(iNeg !== -1 || iPos !== -1,
@@ -2008,15 +1298,11 @@ try {
       ok(got.oiChanges[iPos].startsWith("+"),
          `a positive difference leads with its sign ("${got.oiChanges[iPos]}")`);
     }
-    /* AND THE RATIO IS A RATIO ON THE PAGE. Every drawn growth cell either is
-       the em dash or carries a percent sign — the one mark that stops this
-       column being read as the contract count next to it. */
+
     ok(got.oiGrowth.length === oi.rows.length &&
        got.oiGrowth.every((t) => t === "\u2014" || /%$/.test(t)),
        `every growth cell carries its unit or says nothing (${got.oiGrowth.join(" ")})`);
-    /* Row 0's oiUpDays was staged to null: its ↑OI half is the dash, and its
-       V>OI half still renders — a missing counter is not a streak of zero
-       and must not take its neighbour down with it. */
+
     eq(got.oiStreaks[0][0], "—", "a null counter is the dash, never a zero");
     ok(/^\d+d V>OI$/.test(got.oiStreaks[0][1]),
        `while the sibling counter still renders ("${got.oiStreaks[0][1]}")`);
@@ -2035,7 +1321,6 @@ try {
     ok(got.oiNotes.includes(oi.note.slice(0, 60)),
        "and it is the note verbatim, not a paraphrase");
 
-    /* --- volContext: the rank is NEVER rescaled ------------------------ */
     eq(got.rankN, "57.5",
        "the pinned rank renders as its own number — 0.6 or 5750 here is the rescale " +
        "this vendor's rank fields have already burned once");
@@ -2050,9 +1335,7 @@ try {
        "the mini-table holds the first four expiries");
     ok(got.miniIvs.every((t) => /^\d+\.\d%$/.test(t) || t === "—"),
        `mini-table volatilities are percents to one decimal (${got.miniIvs[0]})`);
-    /* THE STRIP'S GAPS ARE GAPS. Segment count is computed from the payload
-       the way the drawer must draw it; a drawer that bridges a null (or
-       draws it at zero) lands on n − 1 and fails by count. */
+
     eq(got.segments, wantSegments,
        `the rank strip draws a segment only between adjacent measured sessions ` +
        `(${got.segments} of a bridged ${series.length - 1})`);
@@ -2060,11 +1343,6 @@ try {
     ok(got.vcNotes.includes(vc.note.slice(0, 60)),
        "the volContext note is rendered from the payload");
 
-    /* --- vocabulary: the darkpool words stay in the darkpool panel ----- */
-    /* "print"/"trade" are accurate for reported equity executions and are
-       allowed THERE; the other two panels describe clearing snapshots and
-       quotes, and may not borrow them. The side-attribution words are banned
-       in all three by the same refusals the payload's notes state. */
     for (const [key, said] of [["oiDeltas", got.oiSaid], ["volContext", got.vcSaid]]) {
       ok(!/print|trade|bought|sold|buyer|seller|whale|institutional|smart money/i.test(said),
          `${key} never borrows the tape's vocabulary or attributes a side`);
@@ -2073,14 +1351,8 @@ try {
     await page.close();
   }
 
-  /* ---------- 6c. the three stock panels: silences ----------------- */
   {
-    /* THE THREE SILENCES, one per panel, same construction as section 6:
-       an emitted card with one named mutation each. `undefined` predates
-       the deep feeds — a DIFFERENT wave from the chain four, and the
-       sentence must date the absence by its own wave. "unavailable"
-       carries the builder's reason verbatim. "quiet" is an ordinary
-       reading and must not wear the Unavailable banner. */
+
     const legacy = JSON.parse(JSON.stringify(withChain[0]));
     delete legacy.panels.darkpool;
     legacy.panels.oiDeltas = {
@@ -2119,9 +1391,7 @@ try {
     await page.close();
   }
   {
-    /* EACH HALF OF volContext SURVIVES THE OTHER'S ABSENCE — the payload's
-       own design ("a name with a curve but no rank history is half a panel,
-       not an unavailable one"), asserted from the reader's side. */
+
     const half = JSON.parse(JSON.stringify(withChain.find((c) =>
       c.panels.volContext.status === "ok" && c.panels.volContext.ivRank.status === "ok")));
     half.panels.volContext.term = { status: "quiet", rows: [], seen: 0, cap: 16, shed: 0 };
@@ -2144,27 +1414,6 @@ try {
     await page.close();
   }
 
-
-  /* ---------- 6c'. the market-wide standing: three arms, one date ------
-
-     THE PANEL THIS SUITE CARES MOST ABOUT GETTING WRONG. Every other panel
-     on the page reports a measurement of ONE name; this one reports where
-     that name sits among all the others, and there are exactly three ways to
-     turn that into a lie a reader would act on:
-
-       reading an absence as a silence — the two feeds are SELECTIONS, and a
-       name outside one still had open interest and still had prints;
-
-       reading yesterday's cross-section as today's — the vendor updates its
-       market-wide open-interest feed at about 06:45 ET and this pipeline
-       runs at 05:15, so the ranking is normally the PREVIOUS session's;
-
-       reading a rank without its population — "14th" is not a reading, "14th
-       of 40" is.
-
-     Each has an assertion below, taken off the rendered DOM rather than off
-     the payload, because the payload has been right and the page wrong
-     before. */
   {
     const base = withChain.find((c) =>
       c.panels.marketRank &&
@@ -2173,9 +1422,7 @@ try {
       c.panels.marketRank.feeds.darkpool.status === "ok");
     ok(base, "an emitted card places in both market-wide feeds");
     const card = JSON.parse(JSON.stringify(base));
-    /* A NEGATIVE OPEN-INTEREST CHANGE, STAGED. The emitted corpus ranks
-       descending, so its top rows are positive and the sign glyph on the
-       negative side would never be drawn by a card that ranks at all. */
+
     card.panels.marketRank.feeds.oiChange.value = -4200;
 
     const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
@@ -2196,9 +1443,7 @@ try {
         when: blocks.map((b) => textOf(b.querySelector(".fmr-when"))),
         cut: blocks.map((b) => textOf(b.querySelector(".fmr-cut"))),
         cover: blocks.map((b) => textOf(b.querySelector(".fmr-cover"))),
-        /* EVERYTHING A BLOCK SAYS, tooltips included, for the vocabulary
-           sweep — the same `saidBy` shape the stock panels use, because a
-           claim hidden in a title attribute is still a claim. */
+
         blockText: blocks.map((b) => b.textContent + " " +
           [...b.querySelectorAll("[title]")].map((n) => n.getAttribute("title")).join(" ")),
         empties: [...host.querySelectorAll("[data-empty]")].map((n) => n.getAttribute("data-empty")),
@@ -2212,14 +1457,12 @@ try {
     ok(/Open-interest/.test(got.heads[0]) && /Off-exchange/.test(got.heads[1]),
        "each under its own heading");
 
-    /* A RANK IS NEVER PRINTED ALONE. */
     for (let i = 0; i < 2; i++) {
       ok(/\d+ of \d+/.test(got.ranks[i] || ""),
          `${got.heads[i]}: the rank is printed with the population it sits inside ` +
          `("${got.ranks[i]}") — a bare ordinal is a number a reader cannot size`);
     }
 
-    /* SIGN IN THE GLYPH, and the tone class only decorates it. */
     ok(got.vals[0].startsWith("−"),
        `a negative open-interest change leads with U+2212 ("${got.vals[0]}"), so the reading ` +
        "survives greyscale and a printout");
@@ -2228,46 +1471,29 @@ try {
     ok(/contract/.test(got.vals[0]),
        `and the unit travels with the number ("${got.vals[0]}")`);
 
-    /* THE SESSION THE RANKING IS FROM. The emitted corpus reproduces the
-       05:15-against-06:45 gap, so this is the branch a live run takes. */
     ok(/NOT the session this card describes/.test(got.when[0]),
        `the panel says outright that the ranking is from another session ("${got.when[0]}")`);
     ok(new RegExp(card.panels.marketRank.feeds.oiChange.asOf).test(got.when[0]),
        "naming the feed's own date rather than the card's");
 
-    /* THE CUT, IN THE UNITS EACH FEED EARNS: a value for the ranked-by-size
-       feed and a TIME for the ranked-by-recency one. */
     ok(/last place in the feed held/.test(got.cut[0]),
        `the open-interest block quotes the value at the last place ("${got.cut[0]}")`);
     ok(/reaches back to/.test(got.cut[1]),
        `and the print block quotes the time the window reaches back to, which is the fact ` +
        `that decides whether a name could have been in a recency list ("${got.cut[1]}")`);
 
-    /* THE COVERAGE OF THE JOIN, ON THE CARD. */
     for (let i = 0; i < 2; i++) {
       ok(/\d+ of \d+ names? carrying a card/.test(got.cover[i] || ""),
          `${got.heads[i]}: the panel states how much of the board this join reached ` +
          `("${got.cover[i]}")`);
     }
 
-    /* NO TONE ON A READING WITH NO DIRECTION. A print's dollar size is a
-       magnitude the tape attributes to nobody, so the money cell carries no
-       polarity class at all — the signed open-interest cell above does, and
-       its sign is in the glyph before the class touches it. */
     ok(/is-up|is-down|is-flat|is-unknown/.test(got.valClasses[0]),
        "the signed open-interest reading carries a tone class");
     ok(!/is-up|is-down|is-flat|is-unknown/.test(got.valClasses[1]),
        `and the print's dollar size carries none ("${got.valClasses[1]}") — the tape ` +
        "attributes no side, so a tint would invent one");
 
-    /* NO CLAIM THIS PANEL CANNOT MAKE.
-
-       IDENTITY AND INTENT ARE BANNED THROUGHOUT, exactly as they are in the
-       payload notes these feeds already ship (shared/flows-pulse.js). And
-       the tape's own vocabulary is allowed ONLY where the rows really are
-       reported executions: the open-interest half is two clearing snapshots
-       and may not borrow "print" or "trade" from its neighbour, which is the
-       same boundary the three stock panels hold one section down. */
     const IDENTITY = /\b(whale|smart money|institutional|bought|sold|buyer|seller|paid|bullish|bearish)\b/i;
     const idHit = IDENTITY.exec(got.all);
     ok(!idHit,
@@ -2282,11 +1508,7 @@ try {
   }
 
   {
-    /* THE OTHER TWO ARMS, STAGED BY NAME. A measured absence is `quiet` and
-       must not wear the Unavailable banner; a feed that could not be read is
-       `unavailable` and must; a card from before the join shipped carries no
-       key at all and gets ITS OWN wave's sentence rather than the deep
-       feeds'. Three silences, three sentences, three tags. */
+
     const card = JSON.parse(JSON.stringify(withChain[0]));
     const quiet = withChain
       .map((c) => c.panels.marketRank && c.panels.marketRank.feeds.oiChange)
@@ -2316,25 +1538,12 @@ try {
           return n ? n.getAttribute("data-empty") : null;
         }),
         texts: blocks.map((b) => b.textContent),
-        /* The silence paragraph on its own, so an assertion about how the
-           SENTENCE opens is not reading the block's heading first. */
+
         said: blocks.map((b) => {
           const n = b.querySelector("[data-empty]");
           return n ? n.textContent.trim() : null;
         }),
-        /* THE PANEL MUST NOT TAKE THE PAGE SIDEWAYS AT 320px, and this
-           panel is the one at risk: it is the only reading on the page whose
-           values are prose-length strings — a unit phrase, a UTC stamp, a
-           whole absence sentence — rather than a table inside a scrolling
-           wrapper.
 
-           MEASURED AS A SPILL, NOT AS scrollWidth. Every .ft-panel on this
-           page reports the same 15px of scrollWidth over clientWidth from
-           its own chrome, so a scrollWidth test would fail identically on all
-           twenty-two and would be measuring the box rather than the content.
-           What matters is whether any descendant's right edge passes the
-           panel's own — and, one level up, whether the DOCUMENT scrolls
-           sideways at all. */
         spill: (() => {
           const s = document.querySelector('.ft-panel[data-panel="marketRank"]');
           const right = s.getBoundingClientRect().right;
@@ -2356,16 +1565,7 @@ try {
     eq(got.tags[0], "quiet",
        "a name the feed was READ without finding is tagged quiet — the request succeeded and " +
        "the market answered, and only the third silence is a fact about the market");
-    /* THE WORD, NOT THE PUNCTUATION AFTER IT. This read /Unavailable\./ and so
-       stopped catching anything the moment the lead-ins took an em dash — a
-       negative check that matches a stale spelling passes by seeing nothing.
 
-       AND NO BOUNDARY IN FRONT OF IT. The first attempt at this fix wrote
-       /\bUnavailable\b/, which is WEAKER here, not stronger: textContent
-       concatenates the block's heading straight onto the paragraph, so the
-       real string is "Off-exchange printsUnavailable — ..." and there is no
-       word boundary between the s and the U. A leading \b would let the
-       banner through exactly where this assertion is meant to catch it. */
     ok(!/Unavailable\b/.test(got.texts[0]),
        "and it never wears the Unavailable banner");
     ok(/^Not in this feed\b/.test(got.said[0]),
@@ -2406,24 +1606,6 @@ try {
     await page2.close();
   }
 
-  /* ---------- 6d. the open-interest basis note --------------------
-
-     THE CAPTION USED TO MAKE A CLAIM THE PAYLOAD HAD ALREADY REFUTED.
-     It read "ΔOI is open_interest − prev_oi: what stuck overnight, as
-     against what churned", which asserts two things the vendor never
-     states: that the two open-interest counts bracket the same span as
-     the volume, and that the span is one night. describeOiBasis exists
-     to test the first, and on a live run it found four of eight
-     contracts whose open interest moved further than their own volume —
-     which cannot happen across one settlement. The measurement was
-     logged and thrown away while the page kept asserting the opposite.
-
-     All three verdicts are staged here because the ASYMMETRY is the
-     whole reading: exceeding rows falsify the pairing, while zero
-     exceeding rows prove nothing at all. A note that phrased the second
-     as reassurance would be the confident inference this panel exists
-     to avoid, and it would read as the more natural sentence — which is
-     exactly why it needs a test and not a comment. */
   {
     const base = withChain.find((c) => c.panels.topContracts.oiBasis);
     ok(base, "an emitted card carries the basis check on its top-contracts panel");
@@ -2452,8 +1634,7 @@ try {
           cls: note ? note.className : null,
           empty: note ? note.getAttribute("data-empty") : null,
           caption: basis ? basis.textContent : "",
-          /* Everything the ΔOI column says in its tooltips, which is where
-             the overnight claim survived longest. */
+
           doiTitles: [...host.querySelectorAll(".ftt-doi[title]")]
             .map((n) => n.getAttribute("title")).join(" "),
         };
@@ -2485,13 +1666,6 @@ try {
     ok(/could not be checked/i.test(nodata.note),
        "saying which of the silences it is");
 
-    /* THE CONTRADICTORY PAYLOAD, which is where the first draft of this
-       renderer was wrong. A "falsified" verdict whose count is absent fell
-       through to the branch that says "none of 105 exceeded" — a confident
-       claim about every contract on the chain, built from a number nobody
-       read, and the FRIENDLIER of the two available sentences. That is the
-       house defect exactly, and it appeared in the code written to fix an
-       instance of it, so it is pinned in both directions. */
     const noCount = await read(staged("falsified", 105, null));
     ok(!/none of/i.test(noCount.note),
        "a verdict with no count never falls through to claiming none exceeded");
@@ -2504,9 +1678,6 @@ try {
        "of its own contradiction");
     eq(contradictory.empty, "unavailable", "that too is a publisher fault");
 
-    /* THE CAPTION ITSELF. The claim is gone from the prose and from every
-       tooltip on the column — a note that contradicts the sentence above it
-       would leave the reader to pick, and they would pick the shorter one. */
     for (const got of [falsified, inconclusive, nodata, noCount, contradictory]) {
       ok(!/stuck overnight/i.test(got.caption),
          "the caption no longer claims ΔOI is what stuck overnight against what churned");
@@ -2520,20 +1691,6 @@ try {
     await page.close();
   }
 
-  /* ---------- 6e. the conviction arithmetic ------------------------
-
-     THE PANEL SHOWED THE PARTS AND NEVER THE SUM. Conviction is a weighted
-     blend of agreement, source coverage and persistence; this list published
-     two of those three terms and the weights lived only in
-     shared/flows-features.js, so a reader could see 67%, 5-of-5 and a
-     conviction of 76 with no way to connect them — and the missing third
-     term could move the composite eleven points with nothing on the card
-     accounting for it.
-
-     The line is drawn ONLY when the terms reconstruct the published number.
-     An identity that does not close is worse than no identity, because it
-     invites trust in a derivation the numbers do not support — so the
-     broken cases below must render nothing rather than something wrong. */
   {
     const base = withChain.find((c) => c.conv && c.conv.weights &&
       isFinite(c.conviction) && c.conv.persistence !== null);
@@ -2556,10 +1713,7 @@ try {
     ok(good.math, "the arithmetic is stated beside the terms it uses");
     ok(good.math.includes("Conviction " + base.conviction),
        "naming the published composite, so the reader knows which number is being explained");
-    /* THE WEIGHTS COME FROM THE PAYLOAD. A renderer restating 0.45/0.35/0.20
-       in its own prose is a second copy of a constant that has already moved
-       once, and on the day it moves again the page describes arithmetic the
-       pipeline did not do — the sector-momentum defect, in prose. */
+
     for (const [k, w] of Object.entries(base.conv.weights)) {
       ok(good.math.includes(Math.round(w * 100) + "%"),
          `the ${k} weight is the payload's own (${Math.round(w * 100)}%), not a copy in the renderer`);
@@ -2570,7 +1724,6 @@ try {
        "the note says agreement is a count that steps, which is why two nearby " +
        "convictions can differ by a whole axis");
 
-    /* THREE WAYS FOR IT NOT TO CLOSE, and none may draw a line. */
     const mutate = (fn) => { const c = JSON.parse(JSON.stringify(base)); fn(c); return c; };
     const broken = await readMath(mutate((c) => { c.conviction = c.conviction + 7; }));
     ok(!broken.math,
@@ -2586,25 +1739,6 @@ try {
     await page.close();
   }
 
-  /* ---------- 6f. (the score-over-price series left the page) ----------
-     Its join is still tested in tests/flows-overlay-contract.mjs and still
-     published, because "what changed" is derived from it; the drawing was
-     dropped by the reader's own verdict. */
-
-  /* ---------- 6g. the second-order Greeks -------------------------
-
-     PAID FOR, PUBLISHED, AND INVISIBLE until now. These three come off a
-     vendor call the pipeline was already making, and they sat on every card
-     with no renderer — the same failure the four chain panels had, repeated
-     while this suite was green, because nothing asserted the payload→registry
-     direction. That assertion now exists in §1; this section checks the
-     drawing.
-
-     THE SIGN CONVENTION IS THE THING TO GET RIGHT. The payload says the
-     vendor's put leg is dealer-signed against its call leg for gamma and
-     charm and is NOT for vanna — on the same endpoint. So the two legs must
-     never be netted, and this proves the renderer does not net them by
-     counting the bars. */
   {
     const base = withChain.find((c) =>
       ["vanna", "charm", "deltaExposure"].every((k) =>
@@ -2639,9 +1773,7 @@ try {
       }, key);
 
       ok(got, `panel ${key} has a drawing host`);
-      /* ONE BAR PER PRESENT LEG, NEVER ONE PER EXPIRY. If the renderer ever
-         nets the two legs this count halves, which is the cheapest possible
-         detector for the defect the sign convention warns about. */
+
       let legs = 0;
       for (const r of panel.rows) {
         if (typeof r.call === "number") legs++;
@@ -2657,9 +1789,7 @@ try {
          `so it survives greyscale and a printout`);
       eq(got.par, "xMidYMid meet",
          `${key}: one viewBox unit is one CSS pixel`);
-      /* THE UNIT IS THE PAYLOAD'S OWN, not a copy in the renderer: three
-         panels share one drawer and only the unit distinguishes a per-day
-         figure from a per-vol-point one. */
+
       ok(got.said.includes(panel.unit),
          `${key}: the panel's own published unit is on the page verbatim`);
       ok(got.said.includes(panel.signConvention),
@@ -2668,8 +1798,6 @@ try {
          `${key}: the total is labelled a SIZE — with two un-nettable legs it cannot be a direction`);
     }
 
-    /* A MEASURED ZERO IS NOT AN ABSENCE, and on this panel the difference is
-       a hairline bar versus no bar at all. */
     const zeroed = JSON.parse(JSON.stringify(base));
     zeroed.panels.charm.rows[0].call = 0;
     zeroed.panels.charm.rows[0].put = null;
@@ -2692,16 +1820,6 @@ try {
     await page.close();
   }
 
-  /* ---------- 6h. the page was a dead end -------------------------
-
-     The index renders only when `?t=` is absent, so a reader who had arrived
-     on a name could not reach another one without editing the URL — on a
-     section whose whole purpose is comparing names against each other.
-
-     THE BOARDS MUST NOT BE FETCHED UNLESS THE CONTROL IS USED. Two requests
-     on every ticker page view would be paid by every reader to serve the few
-     who switch, and the card is what this page is. That is asserted first,
-     because it is the property a later "simplification" would quietly lose. */
   {
     const card = withChain[0];
     const boards = { rows: [{ t: "AAA", r: 1, s: 40, dp: 1 }, { t: "BBB", r: 2, s: 30, dp: 1 }] };
@@ -2743,8 +1861,6 @@ try {
        `and names it (${after.backText.trim()}), so the reader knows what they are returning to`);
     ok(after.note.includes(card.ticker), "the note says which name they are on");
 
-    /* CLICKING AGAIN MUST NOT RE-FETCH. Opening the switcher twice is not two
-       different questions. */
     await page.click("#ftBackTo");
     await page.click("#ftSwitch");
     await page.waitForSelector("#ftPickerBody tr");
@@ -2752,7 +1868,6 @@ try {
       window.__requested.filter((u) => u.includes("/api/flows/board")).length);
     eq(twice, after.fetched, "re-opening the switcher re-uses what it already fetched");
 
-    /* AND THE WAY BACK ACTUALLY RESTORES THE PAGE. */
     await page.click("#ftBackTo");
     const restored = await page.evaluate(() => ({
       pickerHidden: document.getElementById("ftPicker").hidden,
@@ -2767,19 +1882,6 @@ try {
     await page.close();
   }
 
-  /* ---------- 6i. the overview station opens on the series -------------
-
-     THE LEAD HAS MOVED TWICE AND BOTH MOVES ARE THE SAME ARGUMENT. The score
-     derivation used to be entry 21 of 21, below a twenty-panel scroll; it was
-     promoted to first because a reader arrives from a board row carrying a
-     score. It is second now, under the score-over-price series, because a
-     station is what a reader LANDS on and the series is the only panel that
-     can say a reading is NEW — the derivation explains a number that has not
-     changed since publication, the overlay says what it DID.
-
-     Asserted on the REGISTRY and on the rendered DOM, because the page is
-     generated from the registry and a test that only read the registry would
-     pass on a page that never mounted it. */
   {
     eq(TICKER_PANELS[0].key, "__score",
        "the derivation is the first panel the registry mounts: a reader arrives from a " +
@@ -2796,11 +1898,6 @@ try {
     ok(!order.includes("scoreOverlay"), "the score-over-price series is mounted nowhere");
     await page.close();
 
-    /* THE OTHER THREE MOVES, PINNED AS ADJACENCIES rather than as indices. An
-       index is wrong the moment a panel is added above it and would then be
-       "fixed" by renumbering, which is not the claim. The claim is that these
-       pairs answer one question at two resolutions and belong beside each
-       other. */
     const at = (key) => TICKER_PANELS.findIndex((p) => p.key === key);
     eq(at("displacement"), at("levels") + 1,
        "where the book is MOVING sits directly under the walls it is moving relative to, " +
@@ -2809,13 +1906,7 @@ try {
     eq(at("path"), at("aggressor") + 1,
        "the session path sits directly under the lifted strikes: the same executions once " +
        "by strike and once by clock, with the fifty-row contract table out from between them");
-    /* INVERTED, NOT DROPPED. The claim was always that these two answer one
-       question at two scales and belong beside each other; which of them is
-       asked FIRST is a different claim, and it is the one that moved. The
-       station now opens on where the name places against the market and
-       closes on where today sits in its own year, because `context` holding
-       the lead forced it to be `marketRank`'s row-mate — 350px beside 865px,
-       the last 515px stretch on the page. The adjacency itself is untouched. */
+
     eq(at("context"), at("congress") + 1,
        "the name's own year closes the station, one place under the disclosures — still " +
        "adjacent to the market-wide standing at one remove, and no longer stretched 515px " +
@@ -2830,20 +1921,6 @@ try {
        "since the card dialog was retired");
   }
 
-  /* ---------- 6j. the registry's chrome reaches the page --------------
-
-     TWENTY-ONE PANELS IN ONE FLAT SCROLL, no index, no group boundaries and
-     no way to link a colleague to one of them. The registry now carries a
-     `group` and a `tier` for every panel — but `shared/` is never served, so
-     the browser cannot import it and the controller keeps a PANEL_CHROME
-     projection of the same two fields.
-
-     A PROJECTION IS ONLY SAFE IF SOMETHING COMPARES IT. This is that
-     comparison, and it is made against the RENDERED DOM rather than against
-     the controller's source: reading the table out of the file would prove
-     the two literals match and nothing about whether either reached a panel.
-     Both directions, because one direction is how four published panels went
-     undrawn for weeks. */
   {
     const page = await browser.newPage({ viewport: { width: 1280, height: 1200 } });
     const errors = [];
@@ -2859,15 +1936,12 @@ try {
     for (let i = 0; i < TICKER_PANELS.length; i++) {
       const want = TICKER_PANELS[i];
       eq(dom[i].key, want.key, `panel ${i} of the DOM is the registry's ${want.key}`);
-      /* REGISTRY → DOM. A group or tier that never reaches an element is a
-         field the emitter and the controller disagree about. */
+
       eq(dom[i].group, want.group,
          `${want.key} is mounted in its registry group (${want.group})`);
       eq(dom[i].tier, want.tier,
          `${want.key} wears its registry chrome tier (${want.tier})`);
-      /* DOM → REGISTRY. A panel the controller had no chrome entry for would
-         mount with no group and no tier at all, and would look like an
-         ordinary chart rather than like the omission it is. */
+
       ok(dom[i].group && dom[i].tier,
          `${want.key} carries BOTH a group and a tier — a panel the controller's ` +
          `chrome table has never heard of mounts with neither`);
@@ -2875,19 +1949,12 @@ try {
          `${want.key} has its own fragment id, so it can be linked to`);
     }
 
-    /* THE VALUES ARE LEGAL, not merely present. A tier with no stylesheet
-       rule is a box with no chrome and a group with no heading is a panel
-       that never appears in the index. */
     const groupKeys = TICKER_GROUPS.map((g) => g.key);
     for (const p of TICKER_PANELS) {
       ok(groupKeys.includes(p.group), `panel "${p.key}" names a declared group`);
       ok(PANEL_TIERS.includes(p.tier), `panel "${p.key}" names a declared tier`);
     }
 
-    /* THE GROUPS ARE CONTIGUOUS AND IN THE DECLARED ORDER. Non-contiguous
-       groups would make the heading meaningless — a "Tape" heading followed
-       by two tape panels, a volatility panel and another tape panel is worse
-       than no heading, because it says the boundary is real. */
     const runs = [];
     for (const p of TICKER_PANELS) {
       if (!runs.length || runs[runs.length - 1] !== p.group) runs.push(p.group);
@@ -2897,10 +1964,6 @@ try {
     eq(runs.join(","), groupKeys.join(","),
        "and the runs come in the order the group list declares");
 
-    /* EXACTLY ONE LEAD PER GROUP, AND IT IS FIRST. With 21 boxes of identical
-       chrome the eye has no way to find the primary reading of a section, so
-       the lead wears heavier chrome — which is only true if there is exactly
-       one of it and it is the panel the reader meets first. */
     for (const g of TICKER_GROUPS) {
       const members = TICKER_PANELS.filter((p) => p.group === g.key);
       ok(members.length > 0, `group "${g.key}" has panels in it`);
@@ -2912,12 +1975,6 @@ try {
     eq(TICKER_PANELS[0].key, "__score",
        "and the very first lead is the score derivation");
 
-    /* THE GRID IS FIVE STATIONS AND NOTHING ELSE, each opening with its own
-       heading. The headings used to be siblings of the panels, inserted
-       between them by the controller; inside the section they name, they let
-       a later change hide a group by hiding ONE element rather than a heading
-       and then panels counted until the next one. DOM order is still reading
-       order and still tab order. */
     const flow = await page.evaluate(() =>
       [...document.getElementById("ftGrid").children].map((n) => ({
         tag: n.tagName, cls: n.className, group: n.dataset.group, side: n.dataset.side,
@@ -2939,8 +1996,7 @@ try {
       const st = flow[i];
       eq(st.cls, "ft-station", `station ${i} is a station`);
       eq(st.group, g.key, `and it is ${g.key}'s, in the order the registry declares`);
-      /* THE `?s=` ADDRESS IS ON THE SECTION, not derived at read time. Every
-         board row, deck tile and watch row already links here with one. */
+
       eq(st.side, g.key, `and carries its own ?s= address (${g.key})`);
       eq(st.role, "tabpanel",
          "and is served as a tabpanel — the structure is in the document, not added to it " +
@@ -2953,12 +2009,7 @@ try {
          `at render time would break every link the moment a label was reworded`);
       eq(st.head.group, g.key, "and names its own group, which is what the tab row matches on");
       ok(st.head.text.includes(g.label), `and its label (${g.label})`);
-      /* THE WHOLE SENTENCE, NOT ITS FIRST FORTY CHARACTERS. This guarded a
-         second copy of all five sentences kept in the controller; that copy
-         is gone — the worker emits them straight from the registry — and the
-         assertion stays, because what it pins now is that the blurb REACHES
-         the page intact rather than truncated or escaped into something else
-         on the way. */
+
       eq(st.head.text, g.label + g.blurb,
          `and the group's own published sentence in full, verbatim (${g.key})`);
       eq(st.keys.join(","),
@@ -2971,9 +2022,6 @@ try {
        "and between them the five stations hold every panel — a panel in no station is a " +
        "panel no tab can ever reach");
 
-    /* THE TAB ROW. Five served tabs, each naming a station and how many
-       panels it holds, plus the one link out of the five. Every href
-       resolves: a tab pointing at a renamed heading silently does nothing. */
     const nav = await page.evaluate(() => {
       const tabs = [...document.querySelectorAll(".ft-tabs .ft-tab")].map((a) => ({
         href: a.getAttribute("href"), group: a.dataset.group, side: a.dataset.side,
@@ -3017,9 +2065,7 @@ try {
       eq(tab.role, "tab", `the ${g.key} tab is a tab`);
       eq(tab.side, g.key, `and carries the ?s= address it will set (${g.key})`);
       eq(tab.controls, "ftst-" + g.key, `and controls its own station (${g.key})`);
-      /* NOTHING IS SELECTED WHILE EVERYTHING IS SHOWN. Every station is
-         visible in this change, so a tab claiming selection would be a claim
-         about the page that is not true of it. */
+
       eq(tab.selected, "false",
          `and is not selected (${g.key}) — all five stations are open, so none of them is ` +
          `the one a tab has chosen`);
@@ -3043,17 +2089,6 @@ try {
     eq(errors.length, 0, `the workspace chrome throws nothing (${errors.join("; ")})`);
     await page.close();
 
-    /* THE JUMP CHIPS ARE A REAL TOUCH TARGET, MEASURED BY HIT-TESTING.
-
-       They are 25px boxes carrying a 44px transparent pseudo-element, which
-       is the pattern .ft-zoom-open already uses — and it silently did not
-       work here: a box with overflow-x auto has its overflow-y COMPUTED to
-       auto, so the strip is a scroll container in BOTH axes and clipped the
-       extension back to the chip. Nothing looked wrong; the control simply
-       claimed a target it did not have. A geometry assertion on the
-       pseudo-element's declared height would have passed on the broken
-       version, so this walks the viewport with elementFromPoint and counts
-       the rows of pixels that actually hit the anchor. */
     const touch = await browser.newPage({ viewport: { width: 320, height: 900 } });
     await mount(touch, withChain[0], { ticker: withChain[0].ticker });
     const hit = await touch.evaluate(() => {
@@ -3072,32 +2107,6 @@ try {
     await touch.close();
   }
 
-  /* ---------- 6j. the chrome's rules ship in the stylesheet ----------
-
-     THEY USED TO BE INJECTED. assets/js/flows-ticker.js carried a 236-line
-     CSS template literal and appended it to document.head on first paint,
-     which is integration debt with three costs a test can state:
-
-       - AN INJECTED SHEET IS NEVER FETCHED, so no ?v= reaches it. A reader
-         holding a cached bundle got old rules under new markup, and one
-         holding a cached flows.css got the reverse. (That the pages ask for
-         the stylesheet WITH a version at all is asserted in
-         tests/flows-features.mjs; this is the other half — that the rules are
-         in the file being versioned.)
-       - NO CSS SUITE COULD READ IT. tests/flows-sign.mjs asserts that every
-         polarity class a renderer emits resolves to a rule in flows.css; the
-         change block's four states were exempt purely by living somewhere
-         that suite does not read. A neutral class with no rule is not
-         neutral, it is invisible.
-       - IT WAS JAVASCRIPT BYTES on the route tests/flows-weight.mjs weighs.
-
-     ASSERTED IN BOTH DIRECTIONS, because either half alone lets the debt
-     regenerate: the controller must inject nothing, AND every class the
-     chrome actually emits must resolve to a rule in the file the page links.
-
-     THE CLASS LIST IS READ OFF THE BUILT DOM, never typed here. A list would
-     go stale the moment a chip was added, and it would go stale silently —
-     which is the exact failure mode the injected sheet had. */
   {
     const page = await browser.newPage({ viewport: { width: 1280, height: 1200 } });
     await mount(page, withChain[0], { ticker: withChain[0].ticker });
@@ -3105,9 +2114,7 @@ try {
     const sheets = await page.evaluate(() => ({
       styles: document.querySelectorAll("style").length,
       injected: !!document.getElementById("ftWorkspaceCSS"),
-      /* Every class on the bar, the change block and the group headings —
-         the three regions that exist ONLY because this controller built
-         them, and therefore the three whose rules had no other home. */
+
       classes: (() => {
         const set = new Set();
         const roots = [document.querySelector(".ft-bar"),
@@ -3139,11 +2146,6 @@ try {
        "nor reaches the CSSOM by the other two doors — adoptedStyleSheets and insertRule are " +
        "the same debt written differently, and both are equally invisible to a CSS suite");
 
-    /* A rule, not merely a mention: the class has to appear as a SELECTOR.
-       `\.name` followed by anything that is not a class-name character is
-       what distinguishes `.ft-chg-v` the selector from `ft-chg-value` the
-       word in a comment — comments are stripped first for the same reason
-       tests/flows-sign.mjs strips them. */
     const CSS_TEXT = fs.readFileSync(path.join(ROOT, "assets/css/flows.css"), "utf8")
       .replace(/\/\*[\s\S]*?\*\//g, "");
     ok(sheets.classes.length >= 20,
@@ -3158,18 +2160,6 @@ try {
     await page.close();
   }
 
-  /* ---------- 6k. the page leads on CHANGE ----------------------------
-
-     THE PRODUCT IS READ AS AN EARLY WARNING AND THE PAGE OPENED ON A
-     SNAPSHOT. Twenty-one panels described one session in enormous detail and
-     nothing said what the number had done: no move against the previous
-     scored session, no run, no dead-band crossing, no notice that the newest
-     reading was three sessions old.
-
-     EVERY FIXTURE BELOW IS AN EMITTED CARD WITH NAMED SCORES MUTATED, and the
-     mutation is the branch. A crossing, a multi-session gap and a stale
-     reading do not all occur in one dry run, and a fixture that cannot reach
-     the branch it certifies is this repository's most repeated mistake. */
   {
     const base = withChain.find((c) =>
       c.panels.scoreOverlay && c.panels.scoreOverlay.status === "ok" &&
@@ -3182,15 +2172,11 @@ try {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
 
-    /** An emitted card whose last two scored sessions are set by name. */
     const staged = (fn) => {
       const c = JSON.parse(JSON.stringify(base));
       fn(c.panels.scoreOverlay, c.panels.scoreOverlay.rows);
       const ovl = c.panels.scoreOverlay;
-      /* The counters are kept honest with the rows the mutation left behind,
-         so the overlay panel below the block does not contradict it. A
-         mutation that removes `rows` outright is one of the two silences and
-         has no counters to keep. */
+
       if (Array.isArray(ovl.rows)) {
         ovl.scored = ovl.rows.filter((r) => typeof r.score === "number").length;
         ovl.gaps = ovl.rows.length - ovl.scored;
@@ -3232,15 +2218,9 @@ try {
       });
     };
 
-    /* THE ORDINARY CASE: the newest scored session and the one before it. */
     const rows = base.panels.scoreOverlay.rows;
     const last = rows[rows.length - 1], prev = rows[rows.length - 2];
-    /* THE GUARD IS AN ASSERTION, NOT AN `if`. It used to be a bare condition
-       around five assertions, so an emitted card whose last two sessions were
-       not both scored would have skipped them in silence — the block would
-       still print a passing suite while certifying nothing. The fixture
-       requirement is now stated, and a run that cannot meet it fails here
-       instead of quietly shrinking. */
+
     ok(typeof last.score === "number" && typeof prev.score === "number",
        `the emitted card's last two sessions are both scored (${prev.d}, ${last.d}), so ` +
        "the ordinary-case assertions below actually run");
@@ -3258,23 +2238,6 @@ try {
       ok(got.d1 && /session/.test(got.d1.text),
          `the sticky header carries the move and its gap too (${got.d1 && got.d1.text})`);
 
-      /* THE DISTANCE TO THE GAMMA FLIP, IN THE HEADER.
-
-         It is the most forward-looking number the card carries, and it used to
-         sit at panel 4 of 22 in the de-emphasised `reading` tier while the
-         header held a hidden <span id="ftQuote"> that no JavaScript ever wrote
-         to. The span is gone; these assertions are what stop the chip going
-         the same way — an element nothing tests can be deleted by omission,
-         which is exactly how the board's filter died.
-
-         THE FLIP IS STAGED, NOT BORROWED FROM THE CORPUS. The first draft
-         asserted against whatever `base` happened to carry and its own
-         guard-on-the-guard caught it: the card selected for its overlay
-         resolves NO gamma flip, so every assertion here would have passed by
-         never running. That is the failure this file names as its most
-         repeated mistake, and it fired on the commit that introduced it.
-         Staged numbers also let the exact string be asserted rather than a
-         pattern that would match a wrong magnitude. */
       const flipCard = JSON.parse(JSON.stringify(base));
       flipCard.panels.levels = {
         status: "ok", spot: 100, atr: 2,
@@ -3304,9 +2267,6 @@ try {
       ok(fg.flip && /gamma flip at \$104\.00/i.test(fg.flip.title),
          "the title states the level itself, so the percent has a price behind it");
 
-      /* SPOT SITTING ON THE FLIP IS A MEASUREMENT, and the one the page most
-         needs to state plainly. The class may round it to the brighter grey —
-         emphasis costs nothing — but the WORD must not call it "above spot". */
       const onFlip = JSON.parse(JSON.stringify(flipCard));
       onFlip.panels.levels.levels[0] = { kind: "gamma_flip", label: "Gamma flip",
                                          px: 100, distPct: 0, distAtr: 0 };
@@ -3318,16 +2278,6 @@ try {
          "the reading matters most");
     }
 
-    /* NO FLIP RESOLVED IS NOT A DISTANCE OF ZERO. 0% in this slot reads as
-       "spot is sitting exactly on the flip", which is the single most
-       actionable state the page can report — the precise opposite of a ladder
-       that resolved nothing. This is the confident zero in the one slot where
-       it would be most expensive, so the branch gets a fixture. */
-    /* TWO WAYS TO HAVE NO FLIP, AND THEY ARE NOT THE SAME SENTENCE. A ladder
-       that was read and produced no sign change is a MEASUREMENT about this
-       name's book; a levels panel that never answered is an absence of one.
-       The first draft staged only the second and asserted the first's wording,
-       which is how a renderer ends up with one apology for two conditions. */
     {
       const ladderRead = JSON.parse(JSON.stringify(base));
       ladderRead.panels.levels = {
@@ -3360,9 +2310,6 @@ try {
          "statement about the name made from a panel that did not run");
     }
 
-    /* A MOVE OF EXACTLY ZERO IS A MEASUREMENT. It must read as "unchanged",
-       never as an absence and never as a missing reading — the two are one
-       keystroke apart in every renderer this repository has shipped. */
     const flat = await read(staged((o, r) => { r[r.length - 1].score = r[r.length - 2].score; }));
     ok(/unchanged/i.test(flat.lead),
        `an identical score reads as unchanged (${flat.lead.slice(0, 90)})`);
@@ -3372,8 +2319,6 @@ try {
        "and is NOT reported as an absence — a measured zero and an unmeasured session " +
        "are different facts");
 
-    /* THE FOUR DEAD-BAND VERDICTS. The band is the board's own membership
-       rule, so crossing it is the event and everything else is drift. */
     const cleared = await read(staged((o, r) => {
       r[r.length - 2].score = 0;
       r[r.length - 1].score = BAND + 40;
@@ -3406,8 +2351,6 @@ try {
     ok(held.empties.includes("quiet"),
        "tagged as the MEASURED silence: both ends were scored and neither crossed");
 
-    /* THE BAND ITSELF CAN BE ABSENT, and then the crossing is UNKNOWN rather
-       than absent — the friendlier of the two sentences is the wrong one. */
     const noBand = await read(staged((o) => { o.deadBand = null; }));
     ok(/cannot be stated/i.test(noBand.event),
        `an unpublished dead band makes the crossing unknowable, and says so (${noBand.event})`);
@@ -3417,8 +2360,6 @@ try {
        "it never reports 'no crossing' from a band nobody published — that is a " +
        "confident answer built out of a missing input");
 
-    /* A GAP IS NOT AN OVERNIGHT MOVE. Null the previous session and the same
-       delta now spans two sessions with the name unscored in between. */
     const gapped = await read(staged((o, r) => {
       r[r.length - 2].score = null;
       r[r.length - 1].score = BAND + 40;
@@ -3428,7 +2369,6 @@ try {
     ok(/not an overnight one/i.test(gapped.lead),
        "and the sentence refuses the overnight reading a bare delta would invite");
 
-    /* A STALE READING SAYS SO BEFORE IT SAYS ANYTHING ELSE. */
     const stale = await read(staged((o, r) => { r[r.length - 1].score = null; }));
     ok(/1 session old/.test(stale.stale),
        `a newest session with no score for this name is announced as stale (${stale.stale.slice(0, 110)})`);
@@ -3437,7 +2377,6 @@ try {
        "and the staleness line comes BEFORE the move, so no reader takes the move for " +
        "this morning's");
 
-    /* THE RUN, AND THE GAP IT REFUSES TO STEP OVER. */
     const broken = await read(staged((o, r) => {
       for (let i = 0; i < r.length; i++) r[i].score = BAND + 10;
       r[r.length - 4].score = null;
@@ -3448,15 +2387,12 @@ try {
        "and says it stopped at an unscored session rather than counting through it — " +
        "continuity nobody measured is not continuity");
 
-    /* A NEWEST SCORE OF EXACTLY ZERO IS THE CENTRE OF THE BAND, not a run of
-       zero on some side. */
     const atZero = await read(staged((o, r) => { r[r.length - 1].score = 0; }));
     ok(/exactly zero/i.test(atZero.text),
        "a newest score of zero is named as the centre of the dead band");
     ok(!/on the bullish side|on the bearish side/i.test(atZero.text.split("Derived from")[0]),
        "and is not assigned a side it does not hold");
 
-    /* ONE SCORED SESSION IS NOT A MOVE OF ZERO. */
     const lone = await read(staged((o, r) => {
       for (let i = 0; i < r.length - 1; i++) r[i].score = null;
       r[r.length - 1].score = BAND + 5;
@@ -3467,7 +2403,6 @@ try {
        "in the words that rule out the substitution");
     ok(!lone.d1, "and the header carries no move chip at all rather than a zero");
 
-    /* THE THREE SILENCES, one sentence and one tag each. */
     const unavailable = await read(staged((o) => {
       o.status = "unavailable";
       o.reason = "the score track was not assembled this run";
@@ -3495,19 +2430,11 @@ try {
        `a card from before the overlay dates its own absence (${predates.text.slice(0, 110)})`);
     ok(predates.empties.includes("unavailable"), "and tags it as an absence, not a silence");
 
-    /* THE IDENTITY STRIP. Price, side and score, from the card's own panels —
-       and each absence named rather than dashed. */
     const idOk = await read(base);
     ok(/^\$\d/.test(idOk.price.text.trim()),
        `the strip carries the spot the card was measured at (${idOk.price.text})`);
     ok(idOk.side.text.trim().length > 0, `and the side (${idOk.side.text})`);
 
-    /* THE SIDE IS THE CARD'S PUBLISHED SCORE READ AGAINST THE PUBLISHED BAND,
-       so the fixture stages the score itself — mutating the overlay's newest
-       row would test a different number. A score of +1 with a band of ±1 is
-       not a bullish name; it is a name the board declined to rank, and the
-       header calling it bullish is exactly the confident reading this product
-       exists to refuse. */
     const inside = JSON.parse(JSON.stringify(base));
     inside.score = BAND;
     const inBand = await read(inside);
@@ -3530,11 +2457,6 @@ try {
     await page.close();
   }
 
-  /* ---------- 6l. the shaper itself, on payloads no run produces -------
-
-     changeFrom is the arithmetic the header and the block both read, so it is
-     exercised directly as well as through the DOM: a renderer assertion can
-     pass on a shaper that returns the right SHAPE and the wrong number. */
   {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     await mount(page, withChain[0], { ticker: withChain[0].ticker });
@@ -3546,27 +2468,27 @@ try {
           close: 100 + i, score: s })),
       });
       return {
-        /* Six sessions, the last two scored one apart. */
+
         plain: f(mk([5, 6, 7, 8, 9, 12], 1)),
-        /* The name is unscored for two sessions before the newest. */
+
         gapped: f(mk([5, 6, 7, null, null, 12], 1)),
-        /* The newest session carries no score: the reading is three old. */
+
         stale: f(mk([5, 6, 40, null, null, null], 1)),
-        /* Inside the band, then outside it. */
+
         cleared: f(mk([0, 0, 0, 0, 0, 40], 1)),
-        /* Outside, then inside. */
+
         faded: f(mk([40, 40, 40, 40, 40, 0], 1)),
-        /* Outside on both ends, opposite signs. */
+
         flipped: f(mk([40, 40, 40, 40, 40, -40], 1)),
-        /* A run broken by an unscored session rather than by a sign change. */
+
         broken: f(mk([9, 9, null, 9, 9, 9], 1)),
-        /* Zero is a reading, not an absence. */
+
         zero: f(mk([9, 9, 9, 9, 9, 0], 1)),
-        /* No band published. */
+
         bandless: f(mk([0, 0, 0, 0, 0, 40], null)),
-        /* Nothing scored at all. */
+
         empty: f(mk([null, null, null], 1)),
-        /* The three non-ok inputs. */
+
         absent: f(undefined),
         dead: f({ status: "unavailable", reason: "the track was not assembled" }),
         disjoint: f({ status: "quiet", reason: "no shared session" }),
@@ -3629,35 +2551,12 @@ try {
     await page.close();
   }
 
-  /* ---------- 6m. deep links, both directions -------------------------
-
-     `location.hash` was read in NO file in this product, so there was no way
-     to send a colleague panel 14 — the URL got them the name and a sentence
-     told them to scroll. The grid is `hidden` while the card is in flight, so
-     the browser's own fragment scroll on load lands on an element with no box
-     and does nothing; the controller has to re-run the jump after paint, and
-     that is what is asserted here.
-
-     ONE PAGE PER HASH, and the reason is not tidiness. Two goto()s to the
-     same path differing only in fragment are a SAME-DOCUMENT navigation:
-     Playwright does not reload, mount() injects the two controllers a second
-     time into a document that already has them, and the page ends up with two
-     of everything. A fresh page per hash is what a reader following a link
-     actually gets. */
   {
     const card = withChain[0];
     const target = TICKER_PANELS[TICKER_PANELS.length - 2].key;
 
-    /* THE SCROLL HAS TO SETTLE BEFORE IT IS MEASURED. base.css sets
-       `html { scroll-behavior: smooth }`, so a position test that fires the
-       moment the target enters the viewport is measuring a page in motion —
-       which is how the first draft of this section read a heading at 23px
-       against a sticky bar that had not reached its offset yet. Two
-       consecutive animation frames at the same offset is settled. */
     const settled = (page) => page.waitForFunction(() => {
-      /* THE SHELL SCROLLS #ftScroll AT THIS WIDTH, NOT THE WINDOW: the page
-         is pinned to the viewport and the reading scrolls inside that box,
-         so the settled position is the sum of the two, one of which is 0. */
+
       const sc = document.getElementById("ftScroll");
       const y = Math.round(window.scrollY + (sc ? sc.scrollTop : 0));
       const same = window.__lastY === y;
@@ -3676,13 +2575,7 @@ try {
     {
       const { page, errors } = await open("panel-" + target);
       await settled(page);
-      /* NO CARD IS DRAWN TALLER THAN WHAT IS IN IT.
 
-         The direct measurement of the void the deleted pair limit bounded by
-         proxy. A stretched grid item reports the row's height from its border
-         box and its own content height from scrollHeight, so the difference
-         IS the empty space inside the card — no fixture, no recorded table,
-         and true at whatever column count the viewport produces. */
       const stretched = await page.evaluate(() => Array.from(
         document.querySelectorAll(".ft-station:not([hidden]) .ft-panel"), (el) => ({
           key: el.dataset.panel,
@@ -3701,7 +2594,7 @@ try {
         const r = s.getBoundingClientRect();
         return {
           top: r.top, focused: document.activeElement === s, scrolled: window.scrollY + (document.getElementById("ftScroll") || { scrollTop: 0 }).scrollTop,
-          /* The sticky bar must not be sitting ON the panel the link named. */
+
           barBottom: document.querySelector(".ft-bar").getBoundingClientRect().bottom,
         };
       }, target);
@@ -3717,7 +2610,6 @@ try {
       await page.close();
     }
 
-    /* A GROUP ANCHOR IS THE OTHER HALF OF THE INDEX. */
     {
       const g = TICKER_GROUPS[3];
       const { page, errors } = await open(g.hash);
@@ -3728,10 +2620,7 @@ try {
           .map((a) => a.getAttribute("href")),
         headTop: document.getElementById(h).getBoundingClientRect().top,
         barBottom: document.querySelector(".ft-bar").getBoundingClientRect().bottom,
-        /* AND THE NUMBER EVERY scroll-margin-top IS BUILT FROM, against the
-           bar it claims to be: the identity row wraps at a different count
-           under the fallback face, so before the controller re-measured on
-           document.fonts.ready this read 147 against a 189px bar. */
+
         said: parseFloat(getComputedStyle(document.getElementById("ftGrid"))
           .getPropertyValue("--ft-bar-h")),
         barIs: document.querySelector(".ft-bar").getBoundingClientRect().height,
@@ -3743,10 +2632,7 @@ try {
       ok(Math.abs(grp.said - grp.barIs) <= 1,
          `and --ft-bar-h is the bar's real height once the webfont has landed ` +
          `(${grp.said} written, ${Math.round(grp.barIs)} measured)`);
-      /* AND THE OBSERVER SAYS WHERE YOU ARE. watchGroups() moved from 23 panels
-         to 5 stations and nothing bit on it — `current` was collected here and
-         never read. Asserted on the BEHAVIOUR, so it survives a rewrite of how
-         the observer finds its rows and fails if the marking stops. */
+
       eq(grp.current.length, 1,
          `exactly one station tab is marked current (${grp.current.join(", ") || "none"})`);
       ok(grp.current[0] && grp.current[0].endsWith("#" + g.hash),
@@ -3755,10 +2641,6 @@ try {
       await page.close();
     }
 
-    /* A HOSTILE HASH REACHES getElementById AND NOTHING ELSE. querySelector
-       ('#' + hash) throws on anything that is not an identifier, and a throw
-       here would take the whole paint down AFTER the card had arrived — the
-       worst possible moment, because every panel is already on the page. */
     for (const bad of ["../etc", "panel-<script>", "%%%", "a b c"]) {
       const { page, errors } = await open(encodeURIComponent(bad));
       const alive = await page.evaluate(() =>
@@ -3768,9 +2650,6 @@ try {
       await page.close();
     }
 
-    /* THE OPEN PANEL IS REFLECTED INTO THE URL, and closing puts back what was
-       there. replaceState rather than an assignment to location.hash, so
-       twenty enlarges do not become twenty back-button steps. */
     {
       const { page, errors } = await open(TICKER_GROUPS[1].hash);
       const before = await page.evaluate(() => location.hash);
@@ -3782,33 +2661,7 @@ try {
          "enlarging a panel puts that panel in the URL, so a reader can send the chart " +
          "they are looking at");
       await page.keyboard.press("Escape");
-      /* WAIT FOR THE HANDLER, NOT FOR ANYTHING THE BROWSER DOES ON ITS OWN.
 
-         `dialog.open` is set to false SYNCHRONOUSLY inside close(); the
-         `close` EVENT is queued and fires a task later, and it is that
-         handler (assets/js/flows-ticker.js, the "close" listener) which
-         restores the hash. So a wait on `.open` alone reads location.hash one
-         task too early.
-
-         AND FOCUS IS NOT THE FIX, WHICH IS WHAT THE PREVIOUS VERSION OF THIS
-         WAIT GOT WRONG. It waited on `.open === false` AND focus being back
-         on the opener, on the reasoning that focus is "a different effect of
-         the same handler". It is not: closing a modal dialog runs the
-         browser's own focus-restoring steps, SYNCHRONOUSLY, inside close().
-         The handler's `zoomOpener.focus()` is belt-and-braces over something
-         that has already happened. Measured, sampling in the same microtask
-         that close() returns in:
-
-           open false | focused true | hash "#panel-gamma" | host 6 children
-
-         — both conditions of the old wait already true, the hash not yet
-         restored. That wait asserted nothing, and main went red on it.
-
-         THE HOST EMPTYING IS THE SIGNAL, because nothing but the handler
-         empties it, and it happens AFTER the writeHash inside the same
-         handler. `hostChildren === 0` therefore proves the hash has already
-         been written. Arm B below pins the browser behaviour that made the
-         old wait wrong, so it cannot be reintroduced as a simplification. */
       await page.waitForFunction(
         () => !document.getElementById("ftZoom").open &&
           document.getElementById("ftZoomHost").childElementCount === 0,
@@ -3816,22 +2669,13 @@ try {
       const closed = await page.evaluate(() => location.hash);
       eq(closed, before,
          "and closing restores the hash the reader arrived on rather than clearing it");
-      /* AND THE WAIT ABOVE IS ITSELF WORTH ASSERTING. Returning focus to the
-         button that opened the dialog is what keeps a keyboard reader's place
-         in a 23-panel grid; nothing in this file said so until the race made
-         it necessary to look. */
+
       const refocused = await page.evaluate(() => document.activeElement &&
         document.activeElement.closest(".ft-panel[data-panel]").dataset.panel);
       eq(refocused, "gamma",
          "and returns focus to the button that opened it, so a keyboard reader " +
          "keeps their place in the grid");
 
-      /* ARM B: THE RACE ITSELF, PINNED. Reopen and call close() from inside
-         the page, sampling in the SAME synchronous turn it returns in. This
-         is not a test of the product — it is a test of the assumption the
-         wait above depends on, written down so the shorter wait cannot come
-         back. If a future browser (or a future handler) makes focus restore
-         late, this arm fails and says the wait may be simplified. */
       await page.click('.ft-panel[data-panel="gamma"] .ft-zoom-open');
       await page.waitForFunction(
         () => document.querySelectorAll("#ftZoomHost svg").length > 0, null, { timeout: 3000 });
@@ -3866,16 +2710,6 @@ try {
     }
   }
 
-  /* ---------- 6n. a gated name lands on a page that used to deny -----
-
-     EVERY TICKER ON /flows/events/ LINKS HERE, and 57 of the 60 rows on a
-     typical funnel payload are gated — so the sentence a reader met most
-     often was this one, and both halves of it were wrong for exactly those
-     names: "Cards are built only for the names the board publishes, so there
-     is nothing to show for this name today — it may be on the watch list."
-     A gated name is absent because the board was FORBIDDEN to score it, and
-     it cannot be on the watch list, which holds only names that WERE scored
-     and landed inside the dead band. */
   {
     const say = async (events) => {
       const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
@@ -3928,12 +2762,6 @@ try {
     ok(!/BEFORE the composite ran/.test(stalled.text),
        "and never borrows the gated sentence");
 
-    /* THE SILENCE HAS TWO CAUSES AND ONLY THE ONE THAT OPERATED IS NAMED.
-       The sentence used to say "that calendar is capped" whatever the payload
-       said, and on the emitted funnel the cap did not bind at all — a
-       confident wrong cause dressed as caution. The calendar's WINDOW is the
-       cause that always applies and it is published, so it is what is stated;
-       the cap is added only when `capBound` says it bound. */
     const missing = await say({
       gateOrigin: "2026-09-03", gateDays: 12, windowDays: 21, capBound: false, rows: [],
     });
@@ -3963,24 +2791,6 @@ try {
        "while still stating the one thing that IS known: the name is not on the board");
   }
 
-  /* ---------- 6o. the station lays nothing out, the question is
-                   served, and the second sentinel says PENDING ---------
-
-     THE TRAP THIS SECTION EXISTS FOR. Wrapping 23 panels in five <section>s
-     changes every panel host's containing block, and every chart here is drawn
-     at its host's MEASURED width with one viewBox unit held to one CSS pixel.
-     A border, a padding or an inline margin on the wrapper is a wrong drawing,
-     and the symptom is not overflow: base.css gives every svg `max-width:
-     100%`, so an over-wide drawing SHRINKS and 9px axis type renders at 8.
-
-     SO THE BOX IS MEASURED DIRECTLY, because nothing else here CAN see this.
-     Section 2 cannot: a uniform inset narrows every host, each drawer
-     re-measures its own host and draws at the narrowed width, so one viewBox
-     unit is still one CSS pixel; and the surface/term alignment is between two
-     hosts in the SAME station, which a station-level inset moves together.
-     Measured — `padding-left: 4px` on .ft-station passes every section before
-     this one, the 320/1280/1840 sweep included, and fails only here. The fix
-     is the stylesheet, never a wider tolerance. */
   {
     const page = await browser.newPage({ viewport: { width: 1280, height: 1200 } });
     const errors = [];
@@ -3995,8 +2805,7 @@ try {
       return {
         gridDisplay: getComputedStyle(grid).display,
         gridWidth: gridBox.width,
-        /* THE BAR CARRIES NO DEAD STRIP: every band slot is hidden, so a
-           margin under a 0px row is a blank strip, not a reserved height. */
+
         bandH: document.getElementById("ftBand").getBoundingClientRect().height,
         bandM: getComputedStyle(document.getElementById("ftBand")).marginBottom,
         allM: getComputedStyle(document.getElementById("ftAll")).marginBottom,
@@ -4011,46 +2820,21 @@ try {
             inset: r.left - gridBox.left, width: r.width,
           };
         }),
-        /* span-2 panels in three DIFFERENT stations: if a wrapper laid
-           anything out they would stop agreeing. */
+
         wide: ["surface", "ivSurface", "skewTerm", "topContracts"].map((k) => {
           const host = document.querySelector(`#panel-${k} > div`);
           return [k, host ? Math.round(host.clientWidth * 100) / 100 : null];
         }),
       };
     });
-    /* THE GRID LAYS THE PANELS OUT AGAIN, AND THE STATIONS LAY OUT NOTHING.
-       This asserted "block" while the five <section>s were the grids — the
-       wrapper-between-a-grid-and-its-items problem, stated in its own
-       sentence. The wrapper is still there and still carries every station's
-       data-group, id and role="tabpanel"; what changed is display:contents,
-       which stops it generating a box at all. So the panels are items of ONE
-       grid and the wall runs continuously, which is the shape the target
-       draws — and the same rule that made a wrapper dangerous is what makes
-       this safe: a station that lays nothing out cannot un-grid anything. */
+
     eq(boxes.gridDisplay, "grid",
        "the grid lays the panels out, as one continuous wall rather than five");
     eq(boxes.bandH, 0, "the served band measures nothing — every one of its slots is hidden");
     eq(boxes.bandM, "0px", "so it carries no margin under it either, until PR 4 paints it");
     eq(boxes.allM, "0px",
        "and the all-panels link declares no vertical margin, which an inline anchor discards");
-    /* THE STATION GENERATES NO BOX, WHICH IS THE STRONGER FORM OF WHAT THIS
-       BLOCK USED TO MEASURE.
 
-       It used to assert that each station WAS a grid and then check, four
-       ways, that its box inset nothing: no inline padding, no border, no
-       margin, starting where the grid starts and exactly as wide. Every one
-       of those was guarding the same hazard — a wrapper between a grid and
-       its items narrows every panel inside it and nothing else, which is a
-       chart drawn at a width its viewBox was not measured for.
-
-       display:contents removes the box rather than zeroing it, so there is
-       no padding, border, margin, inset or width left to get wrong. Asserting
-       the four zeros now would be measuring a box that does not exist; this
-       asserts the property that replaced them. The width proof below is
-       unchanged and is the one that actually matters: span-2 panels in three
-       different stations still mount at the same width, which they could not
-       do if any wrapper were in the layout. */
     for (const st of boxes.stations) {
       eq(st.display, "contents",
          `the ${st.group} station lays nothing out — one grid holds every panel`);
@@ -4064,9 +2848,6 @@ try {
          `across three stations — which is what proves the wrapper is not in the layout`);
     }
 
-    /* THE QUESTION IS SERVED AND THE DRAWN COPY IS HIDDEN, NOT DELETED. The
-       renderer still emits it — section 2 reads that copy and the enlarge
-       dialog has no other — but one sentence must not appear twice in a box. */
     const q = await page.evaluate(() => {
       const s = document.getElementById("panel-gamma");
       const served = s.querySelector(".ft-panel-q");
@@ -4080,18 +2861,7 @@ try {
     });
     eq(q.servedText, TICKER_PANELS.find((p) => p.key === "gamma").question,
        "the served question is the registry's, verbatim");
-    /* AND A READER DOES NOT SEE IT IN THE GRID — deliberately, since v149.
-       Twenty-three panels each carrying a sentence that restates its own
-       title is 243 words of DEFINITION on every ticker (flows-overview.js:325,
-       and the same cut the Market route took in 851741e). `.ft-panel-q` is
-       clipped to a 1px box rather than display:none, so it stays in the
-       accessibility tree and a screen reader still hears the question before
-       the drawing.
 
-       MEASURED ON THE BOX, NOT ON getClientRects(). A clipped 1px element
-       still HAS client rects, so the old check would now pass while the
-       sentence is invisible — an assertion that survives the change it was
-       meant to police is worse than one that fails. */
     const qBox = await page.evaluate(() => {
       const el = document.querySelector("#panel-gamma .ft-panel-q");
       if (!el) return null;
@@ -4109,15 +2879,6 @@ try {
        "and the drawn copy is hidden inside the grid, so the reader is asked the question " +
        "once rather than twice in one box");
 
-    /* THE SECOND SENTINEL DRAWS ITS FIGURES NOW. This block asserted a PENDING
-       line while the panel was a placeholder; the placeholder is gone, so the
-       assertion that pinned it is replaced rather than relaxed. What has to
-       stay true is the part that was never about pending: a sentinel has no
-       card.panels entry on ANY card, so it must never fall into the "your card
-       predates this panel" branch, and it must never render an empty host.
-       What the rows themselves say is asserted in section 2c, against payloads
-       built there because the emitted corpus carries one constant IV rank
-       across all 50 cards and so cannot fail that check. */
     const stats = await page.evaluate(() => {
       const s = document.getElementById("panel-__stats");
       const host = s.querySelector("div");
@@ -4153,9 +2914,6 @@ try {
     eq(stats.drawnQ, TICKER_PANELS.find((p) => p.key === "__stats").question,
        "and it heads itself with the registry's question like every other panel");
 
-    /* THE ENLARGE DIALOG KEEPS THE ONLY QUESTION IT HAS, which is why the hide
-       rule is scoped to .ft-grid: the dialog carries no served chrome, so a
-       global rule would strip the copy a reader looks hardest at. */
     await page.click('#panel-gamma .ft-zoom-open');
     await page.waitForFunction(
       () => document.querySelectorAll("#ftZoomHost svg").length > 0, null, { timeout: 3000 });
@@ -4172,15 +2930,6 @@ try {
        `(${said.join(" | ").slice(0, 140)})`);
     await page.close();
 
-    /* ---- AND THE CHROME CHECK ACTUALLY FIRES -------------------------
-
-       PANEL_CHROME stopped writing data-group and data-tier here and became a
-       second opinion held against the served ones. A second opinion nobody
-       consults is dead weight, and the source comparison further up proves
-       only that the two AGREE — the case in which the reporting path never
-       runs. So one panel is served in the wrong group and the console is
-       read. The MARKUP is mutated, not the table: mutating the table would
-       fail that comparison first and never reach this. */
     {
       const badHTML = pageHTML.replace('data-group="tape" data-tier="chart"',
                                        'data-group="context" data-tier="chart"');
@@ -4198,7 +2947,6 @@ try {
     }
   }
 
-  /* ---------- 7. motion, in both states and both halves ----------- */
   {
     const page = await browser.newPage({
       viewport: { width: 1280, height: 1000 }, reducedMotion: "reduce" });
@@ -4228,18 +2976,12 @@ try {
     await mount(page, card, { ticker: card.ticker });
     const box = await page.evaluate(() => {
       const p = document.querySelector(".ft-panel");
-      /* SCROLLED INTO VIEW FIRST, and `instant` because base.css sets
-         `html { scroll-behavior: smooth }` — a rect read in the same tick as a
-         smooth scroll is the rect from before it. The sticky bar and the
-         change block now sit above the grid, so the first panel starts below
-         the fold at this viewport and a mouse.move to a point outside the
-         viewport lands on nothing at all. That is a property of the page, not
-         of the spotlight this section is about. */
+
       p.scrollIntoView({ block: "center", behavior: "instant" });
       const r = p.getBoundingClientRect();
       return { x: r.left, y: r.top, w: r.width, h: r.height };
     });
-    /* 70%/60% of the panel, so a hard-coded 50/50 fails. */
+
     await page.mouse.move(box.x + box.w * 0.7, box.y + box.h * 0.6);
     await page.waitForFunction(
       () => document.querySelector(".ft-panel").style.getPropertyValue("--mx") !== "",
@@ -4254,15 +2996,11 @@ try {
     await page.close();
   }
   {
-    /* THE ENLARGE BUTTON IS A 44px TARGET without being a 44px box. */
+
     const page = await browser.newPage({ viewport: { width: 320, height: 900 } });
     const card = withChain[0];
     await mount(page, card, { ticker: card.ticker });
-    /* THE HIT AREA IS MEASURED, NOT RECONSTRUCTED. Deriving it as
-       `glyph + 2 * inset` requires knowing the glyph's advance, which is a
-       property of the font file and silently different under a fallback —
-       and it reads a `top` that is now a percentage. The pseudo-element
-       declares its own size; read that. */
+
     const hit = await page.evaluate(() => {
       const b = document.querySelector(".ft-zoom-open");
       const cs = getComputedStyle(b, "::after");
@@ -4275,16 +3013,6 @@ try {
     ok(hit.h >= 44, `the enlarge control is at least 44px tall including its hit extension (${hit.h})`);
     ok(hit.w >= 44, `and at least 44px wide (${hit.w})`);
 
-    /* ZERO HORIZONTAL OVERFLOW AT 320px, ON THE WHOLE PAGE.
-    
-       tests/regression.mjs holds this invariant for the public routes and
-       cannot hold it here: /flows/ is credential-gated and is not in its PAGES
-       list. So the page that grew a sticky identity strip, a jump strip, a
-       collapsed index of every panel, five group headings and a change block —
-       all of them built at runtime by the controller, none of them served —
-       had no assertion anywhere that it does not take a phone sideways. The
-       strips scroll INSIDE themselves at this width; that is the mechanism,
-       and this is the measurement that says it works. */
     const spill = await page.evaluate(() => ({
       doc: document.documentElement.scrollWidth - window.innerWidth,
       body: document.body.scrollWidth - window.innerWidth,
@@ -4295,36 +3023,8 @@ try {
     await page.close();
   }
 
-  /* ---------- 7. the reading leads, and the method is still there -----
-
-     THE SURVEY THAT PROMPTED THIS SECTION counted 101,768 characters of
-     user-facing prose across the fourteen Flows renderers, 42,151 of them on
-     this route, and found `.fc-note` — the METHOD paragraph — emitted 87
-     times against 4 emissions of `.fc-reading`, the FINDING. The product led
-     with its methodology and buried the number a reader came for.
-
-     THE FIX IS AN ORDERING, NOT A DELETION, AND THIS SECTION IS WHAT KEEPS
-     IT ONE. Every assertion below is written in a pair: the finding is
-     FIRST, and the method is STILL PRESENT AND STILL REACHABLE. A suite that
-     asserted only the first half would pass on a renderer that fixed the
-     ordering by throwing the caveats away, which is the one outcome this
-     product cannot survive — the honesty discipline is the whole value.
-
-     AND THE SPLIT IS ASSERTED IN BOTH DIRECTIONS TOO. A note that could
-     change WHAT THE READING MEANS is on the page with nothing to open; a
-     note explaining HOW THE READING WAS MADE is behind a disclosure. Both
-     halves are checked on the same panel, because a rule with only the first
-     half hides caveats and a rule with only the second is just a wall with a
-     lid on it.
-
-     MEASURED OFF THE RENDERED PAGE, never off the source: DOM order by
-     compareDocumentPosition, size by getComputedStyle, and "reachable" by
-     the text being in `textContent` while its <details> is shut — which is
-     the same thing a find-in-page reads. */
   {
-    /* One evaluator, reused by every arm below. Returns the shape of one
-       panel: what leads it, what qualifies it, what is folded behind the
-       disclosure, and the two type sizes that carry the visual hierarchy. */
+
     const READ = (key) => `(() => {
       const host = document.querySelector('.ft-panel[data-panel="${key}"] > div');
       if (!host) return { missing: true };
@@ -4342,7 +3042,6 @@ try {
         leads: leads.map(txt),
         leadSize: size(leads[0]),
         noteSize: size(notes[0]),
-        /* 4 === DOCUMENT_POSITION_FOLLOWING: the lead comes BEFORE it. */
         leadBeforeChart: !!(leads[0] && firstSvg &&
           (leads[0].compareDocumentPosition(firstSvg) & 4) === 4),
         leadBeforeStats: !!(leads[0] && firstStats &&
@@ -4354,7 +3053,6 @@ try {
         notes: notes.map((n) => ({ text: txt(n), ...folded(n) })),
         howSummaries: [...host.querySelectorAll("details.ft-how > summary")].map(txt),
         openByDefault: [...host.querySelectorAll("details.ft-how")].map((d) => d.open),
-        /* What a find-in-page sees, disclosures shut and all. */
         all: host.textContent.replace(/\\s+/g, " "),
         marked: [...host.querySelectorAll(".fc-why")].length,
         titled: [...host.querySelectorAll("[title]")]
@@ -4370,14 +3068,9 @@ try {
             summary: txt(box.querySelector("summary")),
             terms: [...box.querySelectorAll(".ft-why-t")].map(txt),
             whys: [...box.querySelectorAll(".ft-why-d")].map(txt),
-            /* A <summary> is focusable with no tabindex at all — that is the
-               point of using one, and it is asserted rather than assumed. */
             summaryTab: box.querySelector("summary").tabIndex,
           };
         })(),
-        /* NOBODY GAINED A TAB STOP. 145 new stops between one panel and the
-           next is the fix this design refused; if it ever lands, it lands
-           here. */
         addedTabStops: [...host.querySelectorAll("[title][tabindex]")].length,
         decoration: (() => {
           const n = host.querySelector(".fc-why:not(.fc-stat)");
@@ -4389,7 +3082,6 @@ try {
       };
     })()`;
 
-    /* --- 7a. the chain's two vol panels, on a card that publishes both -- */
     {
       const card = withChain[0];
       const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
@@ -4400,10 +3092,6 @@ try {
       const st = await page.evaluate(READ("skewTerm"));
       const iv = await page.evaluate(READ("ivSurface"));
 
-      /* THE SKEW AND THE TERM ARE THE PANEL'S FINDING and are now the first
-         two things in it. Two lead elements, not one joined paragraph: the
-         suite scopes "draws no skew number" to the FIRST .fc-reading, and a
-         withheld skew beside a published term has to stay digit-free. */
       eq(st.leads.length, 2,
          `skewTerm leads on its two scalars, each in its own element (${st.leads.length})`);
       ok(/^Skew /.test(st.leads[0]),
@@ -4418,15 +3106,10 @@ try {
          "and before the first method paragraph, which is the ordering this section exists " +
          "for: 87 method paragraphs against 4 readings was the ratio that named the defect");
 
-      /* THE LARGEST TYPE ON THE PANEL, MEASURED. A reading that leads in DOM
-         order but is drawn at note size has changed nothing a reader sees. */
       ok(st.leadSize > st.noteSize,
          `the reading is set larger than the method under it (${st.leadSize}px against ` +
          `${st.noteSize}px) — DOM order alone is invisible to someone scanning a page`);
 
-      /* THE METHOD IS STILL THERE, WORD FOR WORD, ONE CLICK AWAY. The axis
-         policy is the paragraph that says why the origin is zero and what
-         that costs; it may be folded and it may not be deleted. */
       const axis = st.notes.find((n) => /The origin is ZERO/.test(n.text));
       ok(axis, "the axis policy is still on the panel, in full");
       ok(axis && axis.inDetails,
@@ -4441,17 +3124,16 @@ try {
          `the disclosure names what is under it (${JSON.stringify(st.howSummaries)}) — ` +
          "a summary that says nothing is a click a reader will not spend");
 
-      /* --- ivSurface: a panel that used to state no finding at all ------ */
       eq(iv.leads.length, 1, "the surface leads on exactly one reading");
       ok(iv.leadBeforeChart && iv.leadBeforeStats,
          "before its grid and before its stat list — the steepest cell used to be the " +
          "fourth cell of that list, below the fold on a phone");
       ok(/volatility points (above|below)/.test(iv.leads[0]),
          `and it states the steepest cell with its direction in words ("${iv.leads[0]}")`);
-      /* THE SIGN IS IN THE GLYPH BEFORE ANY WORD CARRIES IT. */
+
       ok(/[−+]\d+\.\d volatility points/.test(iv.leads[0]),
          `carrying the sign as a glyph, U+2212 for a negative ("${iv.leads[0]}")`);
-      /* ONE MEASUREMENT, TWO PLACES ON SCREEN, AND THEY MUST AGREE. */
+
       const pts = /([−+]\d+\.\d) volatility points/.exec(iv.leads[0]);
       ok(pts && iv.all.includes(pts[1] + " pts"),
          `the lead and the "Steepest cell" statistic are the same number (${pts && pts[1]}) ` +
@@ -4462,13 +3144,6 @@ try {
       await page.close();
     }
 
-    /* --- 7b. a measured zero is a reading, and an absence is not -------
-
-       THE HOUSE RULE, ON THE ONE SENTENCE THIS WAVE ADDED. `Number(null)` is
-       0, so a surface with no measured skew anywhere and a surface measured
-       FLAT are one line of code apart and read identically to a reader. They
-       get different sentences and this proves it, in both directions, off
-       fixtures mutated by name. */
     {
       const flat = JSON.parse(JSON.stringify(withChain[0]));
       let zeroed = 0;
@@ -4510,13 +3185,6 @@ try {
       await page2.close();
     }
 
-    /* --- 7c. the qualifiers stay in the open ---------------------------
-
-       THE HALF THAT MAKES THIS AN ORDERING AND NOT A DELETION. A sentence
-       that changes WHAT THE READING MEANS may be moved and may not be
-       folded: on a card whose chain the vendor truncated the surface is an
-       arbitrary page of the book, and on a card whose skew was withheld the
-       reason is the reading. Neither may end up behind a click. */
     if (truncated.length) {
       const card = truncated[0];
       const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
@@ -4540,12 +3208,6 @@ try {
       await page.close();
     }
 
-    /* A WITHHELD SCALAR, PREFERRED FROM THE CORPUS AND STAGED BY NAME WHEN
-       THE RUN DID NOT PRODUCE ONE. The dry run's names mostly quote both
-       wings, so the branch that matters most here — a withheld number that
-       must still LEAD its panel and must still carry no digit — cannot be
-       left to whichever cards happened to build. One named field is mutated
-       and the mutation is the point of the test. */
     {
       const found = cards.find((c) => c.panels && c.panels.skewTerm &&
         c.panels.skewTerm.status === "ok" && c.panels.skewTerm.skew === null &&
@@ -4585,26 +3247,6 @@ try {
       await page.close();
     }
 
-    /* --- 7c-ii. A WITHHELD FIGURE IN THE STAT BLOCK NAMES ITS SILENCE ----
-
-       The two scalars above lead the panel in prose. The three figures under
-       the chart do not: they are an em dash in a definition list, and an em
-       dash on its own is the one absence this product refuses — it reads the
-       same whether the card never carried the field, carried it empty, or
-       carried bytes this page could not read as a number.
-
-       THE THREE KINDS ARE STAGED ONTO ONE CARD, because the renderer decides
-       between them from the SHAPE of the field and nothing else, and a suite
-       that exercised one arm would pass on a renderer that hardcoded that
-       arm's word. The at-the-money level is nulled with its reason (a chain
-       that was measured and levelled nothing — `quiet`), the moneyness band
-       is deleted outright (`unavailable`), and then a second page is drawn
-       with the level as a string the chain would never publish
-       (`unreadable`).
-
-       MEASURED OFF THE RENDERED PAGE, mark included: `content` on ::after is
-       read through getComputedStyle, so a kind whose word ships without a
-       CSS rule fails here rather than shipping as faint ink alone. */
     {
       const STATS = `(() => {
         const host = document.querySelector('.ft-panel[data-panel="skewTerm"] > div');
@@ -4670,8 +3312,6 @@ try {
       eq(errors.length, 0, "the withheld-figure card draws without throwing");
       await page.close();
 
-      /* AND THE THIRD KIND, which is not the same fact as either of the two
-         above: the field IS on the card, and what is on it is not a number. */
       const odd = JSON.parse(JSON.stringify(base));
       odd.panels.skewTerm.atmIv = "n/a";
       odd.panels.skewTerm.atmReason = null;
@@ -4695,7 +3335,6 @@ try {
       await p2.close();
     }
 
-    /* --- 7d. the market-wide standing leads on where it places ---------- */
     {
       const base = withChain.find((c) =>
         c.panels.marketRank && c.panels.marketRank.status === "ok" &&
@@ -4711,13 +3350,7 @@ try {
       const got = await page.evaluate(() => {
         const host = document.querySelector('.ft-panel[data-panel="marketRank"] > div');
         const txt = (n) => (n ? n.textContent.replace(/\s+/g, " ").trim() : null);
-        /* THE CLASS IS THE BRANCH; THE <details> IS ONLY ITS USUAL EFFECT.
-           appendMethod leaves a short method set open — a one-line decoder
-           behind a click is a click for nothing — so "is it inside a
-           <details>" passes by accident whenever the folded set happens to
-           be under the 420-character wall. `is-qualifier` is applied to
-           exactly the nodes the renderer put on the OPEN side, so asserting
-           on it pins the decision itself rather than one of its outcomes. */
+
         const folded = (n) => {
           const d = n && n.closest("details");
           return {
@@ -4753,9 +3386,6 @@ try {
       ok(/contract|%|\$/.test(oi.lead || ""),
          `and the unit travels with the value in the sentence ("${oi.lead}")`);
 
-      /* THE SESSION IS THE ONE PIECE OF PROVENANCE THAT CAN INVERT THE
-         READING, and the emitted corpus reproduces the 05:15-against-06:45
-         gap, so this is the branch a live run takes. */
       ok(/NOT the session this card describes/.test(oi.when.text || ""),
          `the ranking still says outright that it is from another session ("${
            (oi.when.text || "").slice(0, 70)}")`);
@@ -4764,33 +3394,10 @@ try {
          "\"ranks 14th across the market today\" and \"ranked 14th yesterday, joined onto " +
          "today's card\", which is the whole reason the line exists");
 
-      /* AND THE PIECE THAT CANNOT. The name is IN the list, so how the list " +
-         was cut is method. */
       ok(!oi.cut.qualifier,
          `the cut is NOT a qualifier on a name that placed ("${(oi.cut.text || "").slice(0, 55)}") ` +
          "— the name is in the list, so how the list was cut is method");
-      /* THE FOLD IS AN OUTCOME, NOT THE BRANCH — which is what the comment
-         beside `folded()` above already says, and this assertion was the one
-         line in the block that ignored it. It read
-         `oi.cut.inDetails && !oi.cut.open`, and that is exactly the
-         "passes by accident whenever the folded set happens to be under the
-         420-character wall" it warns about. It passed for a year because the
-         folded set on this fixture happened to clear the wall.
 
-         WHAT MOVED IT: the marketRank coverage population. It was the
-         board's fifty; it is now every name that gets a card, because the
-         panel is drawn on all of them and a denominator that excluded the
-         name being read would describe a different population than the card
-         it is written on. At 19 of 50 the coverage line was folded; at 19 of
-         100 `in * 5 < of` is true, so the renderer moves it into the open —
-         which is the branch fmrCoverageLine's own note is written for, since
-         "most cards will say they are not in it" is a sentence a reader must
-         meet unopened. The folded set then falls under the wall and
-         appendMethod appends in place rather than building a disclosure.
-
-         So the property is asserted as the branch plus the one thing that
-         must never happen: the cut may be inlined, but it must never be
-         raised as a qualifier, and any disclosure holding it must be shut. */
       ok(!oi.cut.qualifier && (!oi.cut.inDetails || !oi.cut.open),
          "and it is method either way — inlined when the method set is short, never " +
          "raised as a qualifier, and never behind a disclosure left open");
@@ -4807,26 +3414,6 @@ try {
       eq(errors.length, 0, "the panel draws without throwing");
       await page.close();
 
-      /* THE OTHER SIDE OF covThin, WHICH THE CORPUS CAN NO LONGER REACH.
-
-         The renderer sends the coverage line to the OPEN side when
-         `in * 5 < of` and to the folded side otherwise. Every emitted card
-         now takes the open branch — measured: 19 of 19 eligible cards, where
-         before the coverage population widened from the board's fifty to
-         every carded name it was 0 of 19. So the folded branch, and with it
-         the disclosure `appendMethod` builds once the method set clears its
-         420-character wall, runs in production with nothing exercising it.
-
-         A FIXTURE IS SYNTHESISED RATHER THAN HUNTED FOR, because there is
-         nothing to hunt: `in` is raised to `of` on a deep clone, which is the
-         one field the branch reads. Nothing else about the card moves, so a
-         failure here is about the fold and not about the card.
-
-         THE BRANCH IS ASSERTED BEFORE ITS CONSEQUENCE. Whether the line is a
-         qualifier is the decision the renderer makes and is independent of
-         any length; whether a <details> exists follows from that decision
-         plus the wall. Asserting only the second is the mistake this block
-         already made once — see the note on the cut above. */
       {
         const fat = JSON.parse(JSON.stringify(base));
         const cov = fat.panels.marketRank.coverage.oiChange;
@@ -4858,9 +3445,7 @@ try {
            "and a join this wide is NOT a qualifier — the renderer only raises the coverage " +
            "line into the open when most cards would say they are not in the feed, which is " +
            "the sentence a reader has to meet unopened");
-        /* The wall is 420 in flows-panels.js; the message carries the measured
-           count so a future failure says whether the fold was wrong or the
-           method set merely got shorter. */
+
         ok(fatGot && fatGot.methodChars > 420,
            `and the method set clears the 420-character wall (${fatGot && fatGot.methodChars}), ` +
            "so the disclosure below is the branch under test rather than a short set left inline");
@@ -4872,12 +3457,6 @@ try {
       }
     }
 
-    /* --- 7e. the cut is the reading when the name is NOT in the list ----
-
-       THE SAME LINE, THE OTHER SIDE OF THE SPLIT. A name that missed the
-       last place by a hair and a name nowhere near it are different
-       findings, and on the quiet arm the cut is the only thing on the block
-       that tells them apart. It may not be folded there. */
     {
       const card = JSON.parse(JSON.stringify(withChain[0]));
       const quiet = withChain
@@ -4885,11 +3464,7 @@ try {
         .find((f) => f && f.status === "quiet");
       ok(quiet, "the emitted corpus contains a name that is in no market-wide list");
       card.panels.marketRank.feeds.oiChange = JSON.parse(JSON.stringify(quiet));
-      /* AND A FEED THAT AGREES WITH THE CARD'S SESSION, staged by name: the
-         one branch on which the session line qualifies nothing and folds.
-         The dry run does not produce it — the vendor's market-wide feed is a
-         session behind by construction — and a fixture that cannot reach the
-         branch it certifies is this repository's most repeated mistake. */
+
       card.panels.marketRank.feeds.darkpool.sameSession = true;
       card.panels.marketRank.feeds.darkpool.asOfStated = true;
       card.panels.marketRank.feeds.darkpool.asOf = card.sessionDate;
@@ -4941,16 +3516,6 @@ try {
       await page.close();
     }
 
-    /* --- 7f. an explained element looks explained ----------------------
-
-       ~145 `[title]` TOOLTIPS ACROSS THESE RENDERERS HAD NO VISIBLE
-       AFFORDANCE. A reader could not tell an explained cell from an
-       unexplained one, so the explanation was reachable only by a mouse that
-       happened to rest on the right four characters — and `title` is shown
-       on keyboard focus by no browser and has no gesture at all on a touch
-       screen. Three assertions: the mark is visible, the mark is on
-       everything that has an explanation, and the explanation has a door
-       that is not a hover. */
     {
       const card = withChain[0];
       const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
@@ -5012,9 +3577,6 @@ try {
       eq(swept.mark && swept.mark.cursor, "help",
          "with the pointer saying the same thing a second way");
 
-      /* text-decoration PAINTS ACROSS DESCENDANTS AND A CHILD CANNOT TAKE IT
-         BACK, so a .fc-stat wrapper carrying the tooltip must never receive
-         the rule: it would underline the figure as well as its label. */
       if (swept.statMark) {
         ok(!/underline/.test(swept.statMark.self),
            "a stat wrapper that carries the tooltip is NOT itself underlined — the rule " +
@@ -5023,9 +3585,6 @@ try {
            "the mark goes on its label, which is the term the explanation is about");
       }
 
-      /* THE DOOR. One <summary> per panel, natively focusable with no
-         tabindex, and every marked term listed under it with its explanation
-         in full — so a keyboard or a thumb reaches what a hover reached. */
       const withList = swept.panels.filter((p) => p.terms);
       ok(withList.length >= 3,
          `${withList.length} panels publish a decoder for their marked terms`);
@@ -5051,11 +3610,6 @@ try {
     }
   }
 
-  /* ---------- 12. units that travel, and one that must not be guessed ----
-
-     TWO FIGURES AND ONE FRACTION, each measured against the payload that
-     produced it. Both are honesty defects rather than layout defects, so both
-     are read out of the rendered text rather than out of the source. */
   {
     const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
     const errors = [];
@@ -5064,13 +3618,6 @@ try {
       withChain[0];
     await mount(page, card, { ticker: card.ticker });
 
-    /* THE SESSION PATH'S TWO TOTALS ARE A CONTRACT COUNT AND A DOLLAR SUM IN
-       ONE STAT BLOCK. buildPath published both with no unit anywhere on the
-       panel — shared/flows-ask.js refuses to quote netDelta for exactly that
-       reason, in those words — so a reader taking "Net delta 39.0K" for
-       dollars misread the panel by three orders of magnitude. The units are
-       the PAYLOAD'S and the renderer prints them; this asserts the published
-       strings reach the page, not that a sentence of some kind is there. */
     const pathPanel = card.panels.path;
     if (pathPanel && pathPanel.status === "ok") {
       ok(typeof pathPanel.netDeltaUnit === "string" && pathPanel.netDeltaUnit.length > 0,
@@ -5100,15 +3647,6 @@ try {
     await page.close();
   }
 
-  /* ---------- 13. an IV rank in the wrong unit is withheld, not printed ---
-
-     THE FIXTURE IS AN EMITTED CARD WITH ONE NAMED FIELD MUTATED, and the
-     mutation is the point: pricedMove.ivRank is published as a 0-1 fraction
-     by ivRankFraction, which itself divides by 100 whenever the vendor answers
-     above 1 — a defence written after a rank arrived at 1352. The renderer
-     trusted that convention silently and multiplied by 100, so a rank reaching
-     it in the OTHER unit this card carries (volContext.ivRank publishes 0-100
-     and says so in a rankUnit field) prints "5215% of its year". */
   {
     const base = withChain.find((c) => c.panels.pricedMove &&
       c.panels.pricedMove.status === "ok" && typeof c.panels.pricedMove.ivRank === "number");
@@ -5128,8 +3666,6 @@ try {
       return null;
     });
 
-    /* THE FRACTION ARM: the unit and the population are in the label, and the
-       figure is stated out of the 100 it is a percentile of. */
     const ok1 = JSON.parse(JSON.stringify(base));
     ok1.panels.pricedMove.ivRank = 0.5215;
     await mount(page, ok1, { ticker: ok1.ticker });
@@ -5141,9 +3677,6 @@ try {
     eq(good.value, "52 of 100", "and the figure is stated out of the 100 it is a percentile of");
     eq(good.empty, null, "a reading in the unit this line reads is not marked as a silence");
 
-    /* THE OTHER-UNIT ARM: 52.15 is not a fraction. It must be WITHHELD with
-       the cross the taxonomy gives "published bytes this page could not
-       parse", never multiplied into a percentage no year can hold. */
     const bad = JSON.parse(JSON.stringify(base));
     bad.panels.pricedMove.ivRank = 52.15;
     await mount(page, bad, { ticker: bad.ticker });
@@ -5159,7 +3692,6 @@ try {
     ok(wrong.why.length > 20 && /unit/.test(wrong.why),
        `with the sentence that says which silence it is ("${wrong.why.slice(0, 60)}")`);
 
-    /* AND THE ABSENT ARM IS THE OTHER SILENCE, so the two cannot collapse. */
     const gone = JSON.parse(JSON.stringify(base));
     delete gone.panels.pricedMove.ivRank;
     await mount(page, gone, { ticker: gone.ticker });
@@ -5173,48 +3705,12 @@ try {
     await page.close();
   }
 
-  /* ---------- 14. a strip that scrolls says so, and says it in the right
-     direction ------------------------------------------------------------
-
-     THREE CHROME STRIPS SCROLL HORIZONTALLY ON A PHONE and each hides real
-     readings behind the cut: at 320px the identity row hides 648px (the
-     conviction, the gamma regime, both session dates), `.flows-rail` 249px
-     (the later sections) and the tab strip 142px (a whole station). Nothing
-     told anyone to swipe, so assets/css/flows.css now paints a CSS-only edge:
-     two background layers per side, one attached `local` painting the page
-     ground and one attached `scroll` painting the light edge, so the edge
-     appears exactly when there IS something past it.
-
-     THIS IS ASSERTED IN PIXELS, NOT IN CSS TEXT, because the bug it exists to
-     catch is invisible to a text check. The technique as published paints a
-     BLACK shadow, which assumes a light page; on `--bg: #0a0a08` the first
-     draft of this rule was structurally perfect and measured 7.07 against a
-     10.92 ground — a four-count drop out of 255, and a text assertion that
-     the four layers exist would have passed on it happily. So the page is
-     screenshotted at both scroll extremes and the columns are read.
-
-     `.flows-rail` IS THE STRIP THAT CARRIES THE MEASUREMENT, and the choice
-     is forced rather than convenient: its first item clears the strip's own
-     padding, so the leftmost columns are page ground and the edge is readable
-     there. The identity row and the tab strip put a chip border in column 2,
-     which is content and would be measured as an edge. Their right edges are
-     covered by the coverage assertion below, which is the general fact; this
-     is the mechanism, and it only needs one strip to prove.
-
-     FOUR ROWS, AND THE FLAT TWO ARE THE POINT. A static fade can light an
-     edge; only the local/scroll pairing can put the edge away when there is
-     nothing past it. An assertion that checked only the lit rows would pass
-     on a permanent fade sitting over the last chip, telling a reader to swipe
-     at the end of the strip. */
   {
     const page = await browser.newPage({ viewport: { width: 320, height: 900 } });
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await mount(page, withChain[0], { ticker: withChain[0].ticker });
 
-    /* THE GROUND IS DERIVED, NOT TYPED: --bg's own resolved value put through
-       the same coefficients as the samples, so a token change moves the
-       baseline with it instead of stranding this test on a stale constant. */
     const ground = await page.evaluate(() => {
       const raw = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
       const hex = raw.replace("#", "");
@@ -5226,8 +3722,6 @@ try {
        `--bg resolves to a dark ground (${ground.toFixed(2)} of 255) — the whole ` +
        "polarity argument below assumes it, so it is checked rather than assumed");
 
-    /* Decoded in the browser under test: this box has no image library, and
-       the page already has a canvas. */
     const columns = async (shot) => page.evaluate(async (b64) => {
       const bin = atob(b64), u8 = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
@@ -5268,31 +3762,11 @@ try {
 
     const W = atStart.length;
     eq(atEnd.length, W, "both screenshots are the same width, so the columns line up");
-    /* The bands are the edge treatment's own footprint: 0.9rem is 14px at this
-       root size, and the last column is the strip's own border rather than the
-       gradient. */
+
     const band = (cols, side) => Math.max(...(side === "left"
       ? cols.slice(0, 14) : cols.slice(W - 14, W - 1)));
     const LIT = 15, FLAT = 3;
 
-    /* THE BASELINE IS THE STRIP'S OWN MIDDLE, NOT --bg.
-
-       `ground` above is --bg put through the same coefficients, and it was a
-       fair stand-in for as long as the page behind this strip was one flat
-       colour. It is not any more: the ground is an atmosphere image, so the
-       luminance under the rail depends on where the rail sits in it. CI
-       measured the left edge at 13.11 against a --bg of 9.86 and failed a
-       FLAT limit of 3 — reporting a shadow that is not there, because the
-       comparison had drifted off the thing it was comparing to.
-
-       The interior columns of the SAME screenshot are the honest baseline,
-       and were always the better one: this strip has its own translucent
-       background over the page, so what an edge must stand off is the strip's
-       middle, not the document's colour token. Taking it per-screenshot also
-       means the two scroll positions are each judged against themselves.
-
-       --bg's own check above stays. It asserts the ground is dark, which is
-       the premise of the polarity argument and is still worth measuring. */
     const middle = (cols) => {
       const inner = cols.slice(14, W - 14).slice().sort((a, b) => a - b);
       return inner.length ? inner[inner.length >> 1] : ground;
@@ -5316,15 +3790,8 @@ try {
        `${endBase.toFixed(2)}) — a static fade cannot do this, and would sit here ` +
        "telling a reader to swipe past the last item in the strip");
 
-    /* COVERAGE, so the next scrolling strip cannot ship without an edge. This
-       reads the DOM rather than a list: anything in the ticker's chrome that
-       overflows horizontally at 320px is in scope by construction. */
     const strips = await page.evaluate(() => {
-      /* SPLIT ON DEPTH, NOT ON A REGEX. The computed value is
-         `linear-gradient(to right, rgb(10, 10, 8) 30%, rgba(0, 0, 0, 0)), ...`
-         — commas nested two deep. A lookahead that steps over one level of
-         parens counts twelve layers where there are four, which is how the
-         first draft of this assertion failed against correct CSS. */
+
       const layersOf = (value) => {
         if (!value || value === "none") return 0;
         let depth = 0, n = 1;

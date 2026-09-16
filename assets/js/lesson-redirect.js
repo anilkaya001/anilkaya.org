@@ -1,4 +1,3 @@
-/* Static-preview fallback; production uses a permanent Worker redirect. */
 const legacyCourseSlugs = {
   ols: "ordinary-least-squares",
   iv2sls: "instrumental-variables-2sls",

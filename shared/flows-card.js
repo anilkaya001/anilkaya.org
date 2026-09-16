@@ -1,64 +1,5 @@
-/* =============================================================
-   flows-card.js — assembly of one ticker's detail card.
-
-   Pure functions over already-fetched vendor arrays. No network, no
-   clock: every input is passed in, so the whole surface is testable
-   and the --dry-run harness exercises it before any live quota is
-   spent.
-
-   THREE RULES, each written because the alternative has already
-   shipped a bug in this repository.
-
-   1. A MISSING VALUE IS null, NEVER 0.
-      num() defaults to 0, which is correct for a cross-sectional
-      ranking — one name's zero sits in the middle of a winsorized
-      column. A card has no cross-section. Here a fallback zero
-      renders as the most extreme reading the panel can produce:
-      "distance to max pain: -100%", "spot is exactly at the gamma
-      flip", "IV at the 0th percentile", "0 congressional buyers".
-      Absence degrades to maximum conviction, not to neutral. So card
-      assembly uses numOrNull and every panel is a tagged union with
-      an explicit status.
-
-   2. EVERY PANEL CARRIES THE SESSION IT DESCRIBES.
-      The pipeline runs 05:15 ET, before the open. Endpoints called
-      with no `date` return the most recent COMPLETED session, which
-      is yesterday's. A panel headed with today's date would be
-      mislabelled on day one, before any failure occurs. sessionDate
-      and asOf are therefore not optional decoration.
-
-   3. POLARITY IS A PROPERTY OF THE FIELD, NOT OF THE NUMBER.
-      net_put_premium positive means put BUYING, which is bearish. A
-      generic "positive is green" renderer paints it backwards. The
-      POLARITY table below is the single place that mapping lives,
-      and the renderer must look a field up by key rather than by
-      sign.
-   ============================================================= */
-
-/**
- * THE CARD'S SCHEMA VERSION, and the one rule for bumping it.
- *
- * Bump when a field's MEANING changes, not when a field is added — a renderer
- * can ignore a field it does not know, but it cannot detect that a number it
- * already reads now means something else.
- *
- * 1 -> 2: fam.V and fam.O were SIGNED family votes in [-100, 100]. They are now
- * UNSIGNED gauges in [0, 100] — V the volatility regime, O the quality
- * multiplier — because neither carries a direction and adding an unsigned
- * magnitude to a signed sum is what made the board rank against its own flow.
- * The live board carried `"O": 53` under the old meaning and `"O": -22` on
- * another name; drawn by a v2 renderer those become a 53%-full gauge and a
- * negative-width bar under the number -22. Cards published before this change
- * therefore render V and O as absent rather than as numbers whose meaning
- * silently moved. F, P and D are unchanged and keep rendering.
- */
 export const CARD_SCHEMA_VERSION = 2;
 
-/* Every import here is pure, and each is shared rather than copied for the
-   same reason: the square-root-of-time scaling and the horizon it is stated in
-   belong to the scorer too, and the expiry-gamma leg names have already been
-   wrong once in two places at once. Two copies of a convention are two chances
-   to disagree about it. */
 import {
   horizonMove, HORIZON_SESSIONS, callGammaLeg, putGammaLeg, pathSignature,
   greekTermStructure, callVannaLeg, putVannaLeg, callCharmLeg, putCharmLeg,
@@ -67,90 +8,32 @@ import {
 import {
   shapeStockDarkpool, shapeStockOiChange, buildVolContext, STOCK_NOTES,
 } from "./flows-stock.js";
-/* The volume floor the basis check applies, imported rather than repeated:
-   a copy here would silently stop matching the check the moment that number
-   moves, and the card publishes it as the population the counts describe. */
+
 import { UA_MIN_VOLUME } from "./flows-unusual.js";
 import { joinScoreToPrice } from "./flows-overlay.js";
-/* The vendor's envelope is ambiguous in its own specification — some routes
-   answer with a bare array and others nest it under `data` — and the market
-   pulse already owns the one reading of that ambiguity. A second copy here
-   would be a second place for the envelope rule to be corrected. */
+
 import { unwrapRows } from "./flows-pulse.js";
 import { easternDay } from "./flows-freshness.js";
-/* Read for the same reason shapeOiChange reads it: the market-wide
-   open-interest rows are keyed on the CONTRACT, and `underlying_symbol` is
-   documented but has been absent on live rows before, so the option symbol is
-   the fallback the ticker is recovered from. */
+
 import { parseOptionSymbol } from "./flows-premium.js";
 export { HORIZON_SESSIONS };
 
-/** Parse to a finite number, or null. The counterpart to num()'s zero. */
 export function numOrNull(value) {
   if (value === null || value === undefined || value === "") return null;
   const n = typeof value === "number" ? value : Number(value);
   return Number.isFinite(n) ? n : null;
 }
 
-/** A panel that has its data. */
 export function ok(values, asOf) {
   return { status: "ok", asOf: asOf || null, ...values };
 }
 
-/**
- * A panel's ONE-LINE ANSWER, and the numbers it is made of.
- *
- * WHY THE SENTENCE IS BUILT HERE AND NOT IN THE RENDERER. `.ft-panel-one` is
- * served on all 23 ticker panels, styled, guarded with `:empty{display:none}`,
- * and was written to by nothing for the life of the markup. The obvious fix —
- * have each renderer compose its own one-liner — puts twenty-three sentences
- * and their formatting on the one route this repository weighs, on the reader's
- * own CPU, to say things the publisher already measured. This module runs where
- * CPU is free, the same argument shared/flows-brief.js makes for the briefing,
- * and `shared/` is in .assetsignore so none of it is ever served.
- *
- * `n` IS THE SENTENCE'S ARITHMETIC, CARRIED SEPARATELY, and the rule is the one
- * flows-brief.js states for its facts: a figure in prose that is not also in `n`
- * is unpinned, and a rephrasing could change it silently. The contract suite
- * scans every numeral in `say` against `n` — masking out string values first,
- * because a ticker like SYN046 carries digits inside a symbol that is itself
- * pinned, and a naive digit scan accuses the module of an unpinned "046".
- *
- * NO THOUSANDS SEPARATORS IN `say`, AND THE REASON IS THE SCAN. A grouped
- * "1,250,000" reads to the numeral scan as three figures — 1, 250 and 000 —
- * none of which matches the pinned 1250000, so the sentence fails a check it
- * has not actually broken. Where a magnitude wants shortening, STATE A ROUNDED
- * FIGURE AND PIN THE ROUNDED FIGURE ("1.25M" beside `shown: 1.25`), carrying
- * the exact value in its own key. buildPath does this and the comment there
- * records how it was found: every fixture in the branch check happened to
- * produce a number too small to be grouped.
- *
- * A LEAD IS NEVER A PLACE TO PUT A NUMBER THIS FILE DOES NOT HAVE. Where a
- * reading is absent the sentence says so or the lead is omitted entirely; the
- * slot is `:empty`-hidden, so an omitted lead costs a reader nothing, while an
- * invented one costs them the thing this whole codebase is built to protect.
- */
 export function panelLead(say, n) {
   const sentence = String(say === null || say === undefined ? "" : say).trim();
   if (!sentence) return null;
   return { say: sentence, n: n && typeof n === "object" ? { ...n } : {} };
 }
 
-/**
- * A magnitude a sentence can say, and the exact value it was rounded from.
- *
- * WRITTEN ONCE BECAUSE IT WAS ALREADY WRITTEN TWICE. buildPath and the
- * aggressor lead each carried their own copy of this ladder, and the comment
- * on the first records the defect that produced it: a grouped "1,250,000"
- * reads to the contract's numeral scan as three figures, so a lead that wants
- * a readable magnitude has to STATE A ROUNDED FIGURE AND PIN THE ROUNDED
- * FIGURE. Two copies of that rule are two places for the thresholds to drift
- * apart, and a third was about to be written.
- *
- * Returns `{ shown, suffix, exact }` — `shown` and `suffix` are what the
- * sentence says, `exact` is the magnitude they came from, and the sign is the
- * caller's to state in words, never in the number.
- */
 export function saidMagnitude(value) {
   const mag = Math.abs(value);
   return {
@@ -162,117 +45,60 @@ export function saidMagnitude(value) {
   };
 }
 
-/** A panel whose source did not arrive. Never carries numbers. */
 export function unavailable(reason) {
   return { status: "unavailable", reason: reason || "no data", asOf: null };
 }
 
-/**
- * A panel whose source ARRIVED AND MEASURED NOTHING. Never carries numbers.
- *
- * THE THIRD SILENCE, AND THE CARD IS THE LAST SURFACE TO GET IT. Every other
- * section in this product tells three empties apart — the key was never
- * published, the request did not come back, the pipeline read and found
- * nothing — because only the last of those is a fact about the market. The
- * card boundary had exactly two states, so a measured emptiness had to
- * borrow `unavailable`, and the live product printed
- *
- *     "Unavailable. no disclosed transactions"
- *
- * which is both silences in one sentence: an unavailability status carrying a
- * measured-emptiness reason. A reader cannot tell whether nobody in Congress
- * traded this name or whether the request failed, and those are opposite
- * facts about the same blank space.
- *
- * Widening the union is deliberate and is done for EVERY panel at once. The
- * source-ablation sweep asserts the union over every panel on every ablation
- * precisely so that this cannot be widened by accident for one new panel;
- * doing it here, with the renderer taught the third arm in the same change,
- * is what that assertion was protecting.
- */
 export function quiet(reason) {
   return { status: "quiet", reason: reason || "measured nothing", asOf: null };
 }
 
-/**
- * Directional polarity per card field.
- *   +1  a larger number is more bullish
- *   -1  a larger number is more bearish
- *    0  no directional meaning; must never be coloured
- */
 export const POLARITY = Object.freeze({
   netCallPremium: +1,
-  // Positive net PUT premium is put BUYING. Bearish. This is the entry the
-  // whole table exists for.
+
   netPutPremium: -1,
   netPremium: +1,
   dirDelta: +1,
   pathNet: +1,
-  netGamma: 0,          // a regime, not a direction
-  flipDistPct: 0,       // meaningful only together with the regime
-  purity: 0,            // a confidence, not a direction
+  netGamma: 0,
+  flipDistPct: 0,
+  purity: 0,
   otmShare: 0,
   vegaTilt: 0,
   atr: 0,
   distPct: 0,
   distAtr: 0,
   changePct: +1,
-  // risk_reversal is IV(put) - IV(call): negative means calls are bid, bullish.
+
   riskReversal: -1,
   ivRank: 0,
   disclosureLagDays: 0,
-  /* The volatility block. NONE of it is directional, and that is the point:
-     there is no identified relation turning "implied vol is rich" into "this
-     name goes up". A renderer that green-tints a high VRP is inventing a
-     forecast the data does not support. */
+
   iv30: 0,
   rv30: 0,
   vrp: 0,
   ivMomentum: 0,
   impliedMovePerc: 0,
-  // Where new dealer gamma is building relative to the standing book: signed,
-  // positive means above.
+
   displacement: +1,
-  // Cumulative dealer gamma at spot as a share of the ladder's peak. A regime,
-  // not a direction: negative amplifies whatever the flow is pushing.
+
   spotGammaShare: 0,
   gammaFrontLoad: 0,
   gammaMeanLifeDays: 0,
   week52Pos: 0,
-  /* The chain block, added when /flows/ticker/ gave the four chain panels a
-     renderer for the first time.
 
-     NAMED AFTER THE FIELDS THAT EXIST, which is the whole discipline of this
-     table and is easy to get wrong here. The ticker spec first proposed an
-     entry called `netAggr`. No payload field is called netAggr — the fields
-     are `aggressor.bars[].net` and `topContracts.rows[].aggr`. polarityOf()
-     returns 0 for a key it does not know, so that entry would have been a
-     silent NEUTRAL on the one panel where the flow pair is genuinely correct,
-     and the sign colour would simply have vanished with nothing failing. */
-  skew: -1,     // put iv - call iv, the SAME construction as riskReversal:
-                // a larger number is the put wing bid over the call wing,
-                // which is bearish. If these two ever disagree, one is wrong.
-  term: 0,      // far atm iv - near atm iv: a SHAPE, not a direction
-  atmIv: 0,     // a level
-  net: +1,      // aggressor.bars[].net - calls lifted +, puts lifted -
-  aggr: +1,     // topContracts.rows[].aggr = ask_volume - bid_volume
+  skew: -1,
+
+  term: 0,
+  atmIv: 0,
+  net: +1,
+  aggr: +1,
 });
 
-/** Look up a field's polarity. Unknown fields are neutral, never guessed. */
 export function polarityOf(key) {
   return Object.hasOwn(POLARITY, key) ? POLARITY[key] : 0;
 }
 
-/* ---------- levels ---------------------------------------------- */
-
-/**
- * The key-level ladder, each level measured against spot in BOTH percent
- * and ATR units.
- *
- * ATR is what makes the two comparable across names: 3% is a routine day in
- * one name and a three-sigma move in another, and a trader placing a stop
- * needs the second number, not the first.
- */
 export function buildLevels({ spot, atr, gammaFlip, maxPain, callWall, putWall }) {
   const s = numOrNull(spot);
   const a = numOrNull(atr);
@@ -286,8 +112,7 @@ export function buildLevels({ spot, atr, gammaFlip, maxPain, callWall, putWall }
       label,
       px,
       distPct: (px - s) / s,
-      // null rather than Infinity when ATR is unavailable: a distance in
-      // sigma units with no sigma is not a small number, it is no number.
+
       distAtr: a !== null && a > 0 ? (px - s) / a : null,
     };
   };
@@ -300,19 +125,9 @@ export function buildLevels({ spot, atr, gammaFlip, maxPain, callWall, putWall }
   ].filter(Boolean);
 
   if (!levels.length) return unavailable("no levels resolved");
-  // Nearest first: the level a move reaches next is the one that matters.
+
   levels.sort((x, y) => Math.abs(x.distPct) - Math.abs(y.distPct));
 
-  /* THE PANEL'S ONE-LINE ANSWER IS THE NEAREST LEVEL, and the sort above is
-     what makes "nearest" a fact rather than a claim — it is the first element
-     by construction. The table has said this since the panel shipped and has
-     never said it in words, so a reader met four rows and had to work out
-     which one a move reaches next.
-
-     THE ATR DISTANCE IS THE ONE A TRADER SIZES WITH, and it is omitted rather
-     than defaulted when ATR is absent: a distance in sigma units with no sigma
-     is no number, not a small one — the same sentence buildLevels' own
-     `measure` uses for the field. */
   const near = levels[0];
   const above = near.distPct >= 0;
   const pct = Math.abs(near.distPct * 100);
@@ -331,40 +146,14 @@ export function buildLevels({ spot, atr, gammaFlip, maxPain, callWall, putWall }
   return ok({ spot: s, atr: a, levels, lead });
 }
 
-/**
- * The gamma profile: net dealer gamma per strike, reduced to a drawable
- * ladder, plus the walls.
- *
- * put_gamma arrives ALREADY dealer-signed, so total exposure per strike is a
- * SUM. Subtracting double-negates and inverts every regime call — the
- * convention flows-features.js calls load-bearing, restated here because this
- * is a second consumer of the same fields.
- */
 export function buildGammaProfile(strikeRows, { spot, maxBars = 60 } = {}) {
-  /* THE AGGRESSOR-SPLIT FIELDS, matching aggressorGamma() exactly.
 
-     /spot-exposures/strike returns call_gamma_ask, call_gamma_bid,
-     call_gamma_oi and call_gamma_vol — and the put equivalents. It does NOT
-     return an unsplit call or put leg; the whole-expiry aggregate belongs to
-     /greek-exposure/expiry, a different endpoint with a different shape, which
-     names its legs call_gex and put_gex (see callGammaLeg in flows-features).
-
-     Reading the wrong names cost nothing loudly and everything quietly: every
-     strike summed to exactly 0, so the published cards carried 54 correctly
-     priced bars of zero gamma, both walls came out null, and the panel drew an
-     empty plot beside a flip line the pipeline had computed correctly from the
-     same rows. The ablation test did not catch it because its fixture used the
-     field names this function was guessing at — it validated the guess against
-     itself. That fixture now carries the real names.
-
-     put_gamma_* arrives ALREADY dealer-signed, so all four legs are SUMMED. */
   const rows = (strikeRows || []).map((r) => {
     const legs = [r.call_gamma_ask, r.call_gamma_bid, r.put_gamma_ask, r.put_gamma_bid];
     const present = legs.some((v) => numOrNull(v) !== null);
     return {
       strike: numOrNull(r.strike ?? r.price),
-      // null, not 0, when the row carries no gamma at all: a strike whose
-      // exposure is unknown must not be drawn as a measured zero.
+
       gamma: present ? legs.reduce((a, v) => a + (numOrNull(v) ?? 0), 0) : null,
     };
   }).filter((r) => r.strike !== null && r.gamma !== null);
@@ -372,8 +161,6 @@ export function buildGammaProfile(strikeRows, { spot, maxBars = 60 } = {}) {
   if (!rows.length) return unavailable("no strike ladder");
   rows.sort((a, b) => a.strike - b.strike);
 
-  // Reduce to at most maxBars buckets so the SVG stays readable and the
-  // payload stays inside the ingest cap. An unbanded ladder is ~600 KB.
   const step = Math.max(1, Math.ceil(rows.length / maxBars));
   const bars = [];
   for (let i = 0; i < rows.length; i += step) {
@@ -393,34 +180,12 @@ export function buildGammaProfile(strikeRows, { spot, maxBars = 60 } = {}) {
     spot: numOrNull(spot),
     strikes: rows.length,
     bucketed: step > 1,
-    /* THE BAND IS PART OF THE READING, not an implementation detail.
 
-       The ladder is fetched over spot*[0.7, 1.3], so every cumulative on it is
-       the true cumulative minus a constant — the book below the floor. The
-       panel used to present the result as "net gamma" without qualification
-       and the flip as an unconditional level. Publishing the bounds lets the
-       card say "net dealer gamma between $X and $Y", which is what was
-       actually measured. */
     bandMin: rows[0].strike,
     bandMax: rows[rows.length - 1].strike,
   });
 }
 
-/* ---------- gamma expiry calendar --------------------------------- */
-
-/**
- * The roll-off staircase: what share of this name's dealer gamma expires
- * when.
- *
- * Gamma exposure is almost always published as a scalar. It has a term
- * structure, and the term structure is the difference between "it's pinned"
- * and "it's pinned until Friday, and then it isn't". These rows are already
- * fetched for the score and were thrown away at the card boundary.
- *
- * put_gamma arrives ALREADY dealer-signed, so the GROSS roll-off sums the
- * magnitudes: a front week of 1e9 call against -999e6 put is 2.0e9 of gamma
- * about to expire, not the 1e6 residual their signed sum leaves behind.
- */
 export function buildCalendar(expiryRows, { asOf = null, maxRows = 10 } = {}) {
   const rows = (expiryRows || []).map((r) => {
     const c = numOrNull(callGammaLeg(r));
@@ -458,23 +223,6 @@ export function buildCalendar(expiryRows, { asOf = null, maxRows = 10 } = {}) {
     };
   });
 
-  /* THE PANEL ASKS "how much of the book expires, and when?" AND THEN DREW A
-     LADDER. Both halves of the answer are already computed here — the median
-     expiry under the gamma measure, and the identified mean life — so the
-     sentence states them and the ladder becomes the working.
-
-     THE HALF-LIFE IS THE MEDIAN, NOT THE MEAN, and the sentence says "half"
-     rather than "average" because that is what the cumulative-share walk
-     above finds: the first expiry at which cumShare crosses 0.5. Mean life is
-     carried second and named separately, since a book with one far-dated
-     cluster has a mean well past its median and calling either "when it
-     expires" would be wrong about the other.
-
-     DAYS ARE OMITTED RATHER THAN DEFAULTED WHEN `asOf` IS ABSENT. daysTo()
-     returns null with no session date, and a horizon of "0 days" is a claim
-     that the book expires today — the confident zero this file exists to
-     refuse. The expiry DATE is still known in that case, so the sentence
-     keeps it and drops only the count. */
   const lead = (() => {
     if (halfLifeExpiry === null) return null;
     const when = halfLifeDays === null
@@ -488,10 +236,7 @@ export function buildCalendar(expiryRows, { asOf = null, maxRows = 10 } = {}) {
       `expir${schedule.length === 1 ? "y" : "ies"}` +
       (meanLife === null ? "." : ` — mean life ${meanLife} days.`),
       {
-        /* PINNED AS A STRING SO THE SCAN MASKS IT. "2026-09-11" is three
-           numerals to a naive digit walk and none of them is a figure this
-           sentence is claiming — the same reason the contract above pins a
-           ticker like SYN046. */
+
         halfLifeExpiry,
         halfLifeDays,
         expiries: schedule.length,
@@ -500,17 +245,13 @@ export function buildCalendar(expiryRows, { asOf = null, maxRows = 10 } = {}) {
   })();
 
   return ok({
-    // The first `maxRows` expiries carry the decision; the tail is a footnote.
+
     schedule: schedule.slice(0, maxRows),
     expiries: schedule.length,
     lead,
     halfLifeExpiry,
     halfLifeDays,
-    /* frontLoad is PARTITION-DEPENDENT — it is the first LISTED expiry's
-       share, so a weekly chain and a monthly chain are not comparable and
-       adding an expiry changes it without the book changing. The gamma-
-       weighted mean life is identified: E[days to expiry] under the gross-
-       gamma measure, in days, invariant to how the chain is cut. */
+
     frontLoad: schedule.length ? schedule[0].share : null,
     meanLifeDays: total > 0 && Number.isFinite(base)
       ? Number((lifeWeighted / total).toFixed(1))
@@ -518,17 +259,6 @@ export function buildCalendar(expiryRows, { asOf = null, maxRows = 10 } = {}) {
   }, asOf);
 }
 
-/* ---------- book displacement ------------------------------------- */
-
-/**
- * Where today's flow is building gamma, against where the book already is.
- *
- * *_oi is the standing book; *_vol is what traded today. Compared as
- * DISTRIBUTIONS rather than totals — the gap between their gamma centroids,
- * in ATR units. Conventional GEX describes the regime you are in; this says
- * the regime is moving, and which way. Same rows as the gamma panel, so it
- * costs nothing.
- */
 export function buildDisplacement(strikeRows, { atr, spot } = {}) {
   const a = numOrNull(atr);
   const centroid = (call, put) => {
@@ -552,22 +282,6 @@ export function buildDisplacement(strikeRows, { atr, spot } = {}) {
   const gapPx = Number((vol.c - oi.c).toFixed(2));
   const gapAtr = a !== null && a > 0 ? Number(((vol.c - oi.c) / a).toFixed(3)) : null;
 
-  /* THE PANEL SAYS WHICH WAY THE REGIME IS MOVING, WHICH IT HAS NEVER SAID IN
-     WORDS. This function's own header draws the distinction — "Conventional GEX
-     describes the regime you are in; this says the regime is moving, and which
-     way" — and then published two centroids and a gap, leaving a reader to work
-     the direction out of a chart.
-
-     THE SIGN IS THE READING, NOT THE MAGNITUDE. Today's flow building gamma
-     ABOVE where the book already sits is a different statement from below it,
-     and it is the whole point of comparing the two as distributions. So the
-     sentence leads on the direction and carries the size second.
-
-     ATR UNITS WHERE THERE IS AN ATR, PRICE WHERE THERE IS NOT — never a sigma
-     figure with no sigma behind it, the rule `gapAtr` is already null for. A
-     gap of zero is a MEASURED zero and says so: the two distributions sit on
-     top of each other, which is a finding about the book rather than a missing
-     reading. */
   const dir = gapPx > 0 ? "above" : gapPx < 0 ? "below" : "on top of";
   const size = gapAtr === null
     ? `${Math.abs(gapPx).toFixed(2)} in price`
@@ -591,51 +305,11 @@ export function buildDisplacement(strikeRows, { atr, spot } = {}) {
     volCentroid: Number(vol.c.toFixed(2)),
     spot: numOrNull(spot),
     gapPx,
-    // null, not Infinity, when there is no sigma: a distance in sigma units
-    // with no sigma is not a small number, it is no number.
+
     gapAtr,
   });
 }
 
-/* ---------- the priced move ---------------------------------------- */
-
-/**
- * The band the option market has already quoted, and whether it is rich.
- *
- * This is a PRICE, not a prediction. implied_move_perc is the move the ATM
- * contracts imply to a quoted expiry; it is a risk-neutral quantity, so it is
- * what someone would have to pay to be long that move, not what the stock is
- * expected to do. Two consequences the panel is built around:
- *
- *  - The horizon is the EXPIRY THE VENDOR QUOTED, never "ten days". Relabelling
- *    a quoted-expiry number as a fixed horizon silently rescales it by the
- *    ratio of the two maturities, differently for every name.
- *  - No point target, no direction, no probability. The variance risk premium
- *    beside it is the only observable that says whether the band is expensive
- *    against what this stock has actually been delivering.
- *
- * THE VENDOR'S QUOTE IS NOT DATED, because its date cannot be observed. The
- * schema behind implied_move says: "If no expiry date is included, then the
- * implied move is for the nearest end of the week expiration (the nearest
- * monthly expiration if there are no weekly contracts)" — and the screener
- * accepts no expiry parameter, so that default always applies. This panel used
- * to name that horizon from the max-pain chain's nearest expiry, which is the
- * same date only when the nearest listed expiry happens to be the coming
- * Friday; any intra-week expiry breaks it. The quote is therefore labelled by
- * the RULE the vendor states rather than by a date this code inferred.
- *
- * TWO BANDS, and only one of them is a cross-section.
- *
- * The vendor's implied_move_perc is quoted to each name's own next listed
- * expiry, so it is a different horizon for every name — a name expiring
- * tomorrow and one expiring in a month print bands that cannot be compared, and
- * setting them side by side on a board is a category error. The FIXED-HORIZON
- * band scales 30-day implied volatility to a stated number of trading sessions
- * by the square-root-of-time rule, which is the same horizon for every name.
- * The realized band does the same to the volatility the stock has actually been
- * delivering, so the gap between them is the variance risk premium expressed in
- * the units a reader sizes in.
- */
 export function buildPricedMove({
   spot, impliedMovePerc, vrp, iv30, rv30, ivRank, ivMomentum, atmVol, ivStrip, asOf,
   sessions = HORIZON_SESSIONS,
@@ -644,42 +318,12 @@ export function buildPricedMove({
   const m = numOrNull(impliedMovePerc);
   const impliedH = horizonMove(numOrNull(iv30), { sessions });
   const realizedH = horizonMove(numOrNull(rv30), { sessions });
-  // Either band alone is worth publishing; only both missing is unavailable.
+
   if (s === null || !(s > 0)) return unavailable("no spot price");
   if ((m === null || !(m > 0)) && impliedH === null) return unavailable("no implied volatility");
 
   const quoted = m !== null && m > 0;
 
-  /* THE PANEL ASKS WHAT MOVE IS PRICED AND THEN DREW A BAND. Both readings
-     are here; neither was ever stated.
-
-     IT LEADS ON THE FIXED HORIZON WHEN THERE IS ONE, and that ordering is the
-     distinction this function is built around rather than a preference. The
-     vendor's own quote is real but runs to ITS OWN undated horizon — "the
-     nearest end-of-week expiry" — so it is neither comparable across names
-     nor datable from anything this pipeline sees. The horizon-scaled band is
-     comparable across the whole board, which is what a reader coming off a
-     ranked list needs.
-
-     THE VENDOR QUOTE IS STILL A READING, so when the fixed horizon is absent
-     the sentence states the quote and NAMES ITS RULE VERBATIM out of
-     `horizonRule`. Saying nothing there would withhold the only measurement
-     the panel has; inventing a date for it would be worse.
-
-     REALIZED IS STATED ONLY WHEN IT EXISTS, and the two are the same scaling
-     of iv30 and rv30, so "against N% realized" is the richness comparison in
-     the horizon's own units rather than a second, differently-scaled claim
-     beside it.
-
-     AND THE ZERO CASE DOES NOT BEHAVE THE WAY THIS COMMENT FIRST CLAIMED. I
-     wrote that a realized move of exactly 0 is a measured zero and prints;
-     it does not. horizonMove() returns null for any annualVol <= 0, so a
-     zero 30-day realized vol reaches this lead as ABSENT and takes the
-     no-comparison clause. That is an upstream decision and a defensible one
-     — an annualised volatility of zero says a name did not move for thirty
-     sessions, which in practice is a missing value rather than a reading —
-     but it is the one place the measured-zero rule bends, and a lead must
-     not claim otherwise. The offline branch scan is what caught it. */
   const pct = (x) => Number((x * 100).toFixed(1));
   const lead = (() => {
     if (impliedH !== null) {
@@ -704,11 +348,7 @@ export function buildPricedMove({
     const hi = Number((s * (1 + m)).toFixed(2));
     return panelLead(
       `Options price a \u00b1${pct(m)}% move to the nearest end-of-week expiry ` +
-      /* "interpolated" RATHER THAN "30-day", and not for brevity: a bare 30
-         in the prose is a numeral the scan cannot match against `n`, and it
-         is not a figure this sentence claims — it names a field. iv30 IS the
-         vendor's interpolation, which this file says a few lines down, so the
-         word is accurate as well as scannable. */
+
       `\u2014 ${lo.toFixed(2)} to ${hi.toFixed(2)}. No interpolated implied ` +
       `volatility, so no fixed-horizon band to compare across names.`,
       { quotedPct: pct(m), low: lo, high: hi });
@@ -716,16 +356,13 @@ export function buildPricedMove({
 
   return ok({
     lead,
-    /* --- the vendor's quote, to ITS OWN undated horizon: real, but neither
-       comparable across names nor datable from anything this pipeline sees. --- */
+
     movePerc: quoted ? Number(m.toFixed(5)) : null,
     low: quoted ? Number((s * (1 - m)).toFixed(2)) : null,
     high: quoted ? Number((s * (1 + m)).toFixed(2)) : null,
-    // The vendor's stated rule, carried verbatim so the renderer states it
-    // rather than inventing a date for it.
+
     horizonRule: quoted ? "the nearest end-of-week expiry" : null,
 
-    // --- the fixed horizon, which IS comparable across the board ---
     sessions,
     impliedMove: impliedH === null ? null : Number(impliedH.toFixed(5)),
     impliedLow: impliedH === null ? null : Number((s * (1 - impliedH)).toFixed(2)),
@@ -738,62 +375,25 @@ export function buildPricedMove({
     vrp: numOrNull(vrp),
     iv30: numOrNull(iv30),
     rv30: numOrNull(rv30),
-    /* Where this name's implied vol sits in its own year, and whether it is
-       rising. Neither is directional — a rich, rising option market says
-       buyers are paying up, not that the stock goes up — so both live beside
-       the band as context and are summarised by the unsigned V gauge on the
-       score panel. They used to sit in a separate `vol` panel that was built,
-       serialised and published on every card, and that no renderer drew. */
+
     ivRank: numOrNull(ivRank),
     ivMomentum: numOrNull(ivMomentum),
-    /* THE VENDOR'S OWN AT-THE-MONEY VOLATILITY, parsed since the first
-       screener call and dropped at this boundary every session since. It is a
-       different measurement from iv30 — the vendor's `volatility` field rather
-       than its 30-day interpolation — and publishing both lets a reader see
-       them disagree instead of trusting one silently. */
+
     atmVol: numOrNull(atmVol),
-    /* THIS NAME'S OWN 30-DAY IMPLIED VOL, four points, zero extra calls: the
-       screener has carried iv30d_1d and iv30d_1m alongside iv30d and iv30d_1w
-       from the beginning and nothing has ever read the first two. Ordered
-       oldest to newest so a renderer draws it left to right without deciding
-       an order of its own. A point the vendor did not send is null, never
-       carried forward from its neighbour. */
+
     ivStrip: Array.isArray(ivStrip)
       ? ivStrip.map((p) => ({ h: p.h, v: numOrNull(p.v) }))
       : null,
-    // The one comparative statement the data supports, as a tag rather than
-    // prose so the renderer cannot embellish it.
+
     richness: numOrNull(vrp) === null ? null : (vrp > 0 ? "rich" : "cheap"),
   }, asOf);
 }
 
-/* ---------- price context ------------------------------------------ */
-
-/** Where the name has been: period returns and its position in a year's range. */
 export function buildContext(
   { closes, closeDates, r5, r21, r42, week52Pos, changePct, candles, garch },
   { asOf = null } = {},
 ) {
-  /* FILTERED IN LOCKSTEP, WHICH IS THE WHOLE POINT.
 
-     This function drops any close that is null or non-positive, which is
-     correct — an unreadable candle is not a price. What it could not do was
-     say WHEN the survivors happened, so `closes` was a positional array and
-     every reader had to treat index as time. That holds only while nothing
-     is missing, and this filter is what makes things missing: drop one
-     session out of the middle and two non-adjacent days become neighbours,
-     silently, with the sparkline drawing a smooth step across a gap.
-
-     It is also why nothing in this product could put the daily-close score on
-     the same axis as price — the payload carried no key to join on. Both
-     halves have been published and rendered for weeks, on separate pages, in
-     incompatible shapes.
-
-     Zipping the two arrays BEFORE the filter is what keeps them parallel. A
-     dates array bolted on afterwards and filtered separately — or not
-     filtered at all — is misaligned by exactly the number of dropped
-     sessions, which is the defect this comment exists to prevent someone
-     reintroducing while "adding dates". */
   const rawCloses = Array.isArray(closes) ? closes : [];
   const rawDates = Array.isArray(closeDates) ? closeDates : [];
   const kept = [];
@@ -815,18 +415,6 @@ export function buildContext(
   }
   const dated = dates.filter(Boolean).length;
 
-  /* THE ONE-LINE ANSWER IS WHERE TODAY SITS IN ITS OWN YEAR, which is the
-     question this station closes on and the one the sparkline draws without
-     ever stating. `week52Pos` is a fraction of the 52-week range, so it is
-     multiplied once, here, and never again by a renderer — the "1352% of its
-     year" scar is what a second rescaling looks like.
-
-     THE 21-SESSION RETURN RIDES ALONG BECAUSE POSITION ALONE IS AMBIGUOUS: a
-     name at 90% of its year that has fallen for a month is a different
-     sentence from one that has climbed there, and the position is identical in
-     both. Either reading absent, the sentence says only what it has; both
-     absent, there is no lead and the slot stays empty rather than carrying a
-     sentence with no number in it. */
   const posPct = fields.week52Pos === null ? null : fields.week52Pos * 100;
   const r21Pct = fields.r21 === null ? null : fields.r21 * 100;
   const where = posPct === null ? null
@@ -842,11 +430,7 @@ export function buildContext(
       week52Pos: posPct === null ? null : Number(posPct.toFixed(0)),
       r21: r21Pct === null ? null : Number(Math.abs(r21Pct).toFixed(1)),
       sessions: 21,
-      /* THE WINDOW LENGTH IS PINNED TOO, and the scan is what asked for it: 52
-         is a numeral in the prose, so it is a figure a rephrasing could change.
-         It is also a real parameter of the reading — week52Pos is a fraction OF
-         a 52-week range — and pinning it is where a vendor quietly redefining
-         that field would be caught. */
+
       weeks: 52,
     });
 
@@ -854,34 +438,23 @@ export function buildContext(
     ...(lead ? { lead } : {}),
     ...fields,
     closes: series.map((c) => Number(c.toFixed(4))),
-    /* Same length as `closes` by construction, with null where the candle
-       carried no readable date. Absent entirely when the publisher sent no
-       dates at all — a card from before this field existed says so by not
-       having it, rather than by carrying a row of nulls that looks like a
-       measurement of nothing. */
+
     ...(dated ? { closeDates: dates } : {}),
     sessions: series.length,
-    /* How many of the retained closes can actually be placed on a time axis.
-       A chart that joins on date must know this is not always `sessions`. */
+
     datedSessions: dated,
-    /* Sessions the filter removed. Non-zero means index is NOT time in the
-       arrays above, which is precisely when a reader needs the dates. */
+
     dropped: rawCloses.length - series.length,
     ...candleFields(candles),
-    /* The volatility model, carried as the pipeline fitted it. Absent on a
-       card built before the fit existed; `unavailable` with its reason when
-       the year was too short to fit. */
+
     ...(garch && typeof garch === "object" ? { garch } : {}),
   }, asOf);
 }
 
-/** Up to 252 sessions of candles for the chart, with a 50-session close average. */
 export const SMA_SESSIONS = 50;
 function candleFields(candles) {
   if (!Array.isArray(candles)) return {};
-  /* THE SAME FILTER `closes` GETS, ON THE SAME RULE: a candle whose close is
-     null or non-positive is not a price and is dropped whole, so the two
-     arrays disagree only by the sessions this one reaches further back. */
+
   const rows = [];
   for (const c of candles) {
     if (!Array.isArray(c) || c.length < 6) continue;
@@ -894,9 +467,7 @@ function candleFields(candles) {
       vol === null || vol < 0 ? null : Math.round(vol)]);
   }
   if (rows.length < 2) return {};
-  /* THE AVERAGE IS DERIVED ONCE, HERE, so the page draws it rather than
-     computing it. Null until fifty closes exist behind a session — an
-     average of fewer is a different quantity wearing the label. */
+
   const sma = new Array(rows.length).fill(null);
   let run = 0;
   for (let i = 0; i < rows.length; i++) {
@@ -907,19 +478,6 @@ function candleFields(candles) {
   return { candles: rows, candleKeys: ["date", "open", "high", "low", "close", "volume"], sma50: sma };
 }
 
-/* ---------- intraday path ---------------------------------------- */
-
-/**
- * The tick tape, downsampled and CUMULATED.
- *
- * Raw is ~390 one-minute rows of 13 fields, about 130 KB — every liquid
- * name's card would exceed the 128 KB ingest cap on its own. 78 five-minute
- * buckets of three numbers is about 2 KB.
- *
- * Each row is that tick's OWN value, not a running total, so the series a
- * trader wants is the cumulative sum. Rendering the raw per-minute values
- * would show noise around zero rather than the shape of the accumulation.
- */
 export function buildPath(tickRows, { buckets = 78, sessionDate = null } = {}) {
   const rows = (tickRows || [])
     .map((r) => ({
@@ -941,105 +499,28 @@ export function buildPath(tickRows, { buckets = 78, sessionDate = null } = {}) {
   let cumD = 0, cumP = 0;
   for (const r of rows) {
     cumD += r.d;
-    // Net premium as a directional quantity: call buying minus put buying.
+
     cumP += r.cp - r.pp;
     const b = span > 0 ? Math.min(buckets - 1, Math.floor((r.t - first) / width)) : 0;
     acc[b] = { d: cumD, p: cumP };
   }
-  // Carry the running total forward through quiet buckets; a gap is not a
-  // return to zero.
+
   let last = { d: 0, p: 0 };
   const series = acc.map((v) => {
     if (v) last = v;
     return [Math.round(last.d), Math.round(last.p)];
   });
 
-  /* THE SHAPE OF THE ACCUMULATION, PUBLISHED AS NUMBERS AND NOT ONLY AS A CURVE.
-     
-     pathSignature's own docstring says why the panel exists: "two names with
-     the same end-of-day net delta and different paths mean opposite things",
-     steady accumulation against the tape versus one spike already in the
-     price. Those three numbers ARE that distinction, they drive the D axis of
-     the score and the persistence term of conviction — and the card published
-     none of them, so the panel could show the reader a curve and three
-     end-of-day totals and could not state the one thing it is for. This is the
-     same failure as the `vol` block that was built, serialised and shipped on
-     every card with no renderer: computed, paid for, unreadable.
-
-     RECOMPUTED FROM THE SAME ROWS rather than plumbed through from the
-     scorer's feature object, for the reason the import block already gives:
-     two copies of a convention are two chances to disagree about it. The
-     scorer reads pathSignature on these very ticks, so recomputing costs one
-     pass over an array already in memory and guarantees the number on the card
-     is the number in the score.
-
-     NULL WHEN THE TAPE DID NOT MOVE. pathSignature falls back to
-     persistence 0, concentration 0 and centroid 0.5 on a tape it cannot
-     measure, which is correct for a cross-sectional column and is exactly the
-     manufactured extreme this file's first rule forbids on a card: 0.5 is
-     "the day's weight sat precisely at midday", a real and unusual reading,
-     and 0 concentration is the flattest session possible. A tape whose every
-     minute is zero has no direction to persist in and no busiest minute, so
-     all three are withheld. */
   const moved = rows.reduce((a, r) => a + Math.abs(r.d), 0);
   const sig = moved > 0 ? pathSignature(tickRows) : null;
 
-  /* THE TWO FIGURES THIS PANEL LEADS ON WERE PUBLISHED WITH NO UNIT.
-
-     Every other quantity the card ships beside a number ships the number's
-     unit with it: shared/flows-features.js's GREEK_UNITS gives vanna, charm
-     and dealer delta a sentence apiece, buildVolContext publishes rankUnit
-     because "this vendor's rank fields have burned a '1352% of its year'
-     once already". These two did not, and they are a CONTRACT COUNT and a
-     DOLLAR SUM sharing one stat block — the exact pair house rule 3 names.
-     The assistant index already refuses to quote netDelta for this reason
-     (shared/flows-ask.js: "the payload publishes no unit for it and a number
-     without a unit is not a reading this index will state").
-
-     NAMED FROM THE ARITHMETIC ABOVE, not from what the field sounds like.
-     `cumD` is the running sum of each tick's `net_delta`, which the vendor
-     reports per tick as the ask side less the bid side, delta-weighted — so
-     it is contracts weighted by delta and signed by which side lifted, and
-     the panel's own legend has said "contracts" since it was drawn. `cumP`
-     is the running sum of `net_call_premium - net_put_premium`: dollars,
-     with put buying entering negative, which is why it is side-signed too
-     and not a gross spend. */
-  /* THE SESSION'S NET DIRECTION, AND WHETHER THE TAPE MEANT IT.
-
-     THE UNIT TRAVELS WITH THE NUMBER, always: netDelta is delta-weighted
-     contracts SIDE-SIGNED, not a contract count, and the two published
-     `*Unit` strings exist because reading it as either would be wrong in a
-     different direction. The sentence names the unit rather than assuming a
-     reader has read the legend.
-
-     PERSISTENCE IS READ AGAINST 0.5, NOT AGAINST ZERO. It is the share of
-     minutes moving WITH the day's net direction, so a directionless tape is
-     0.5 and not 0 — quoting it bare invites a reader to treat 0.55 as weak
-     when it is a majority. It rides along only when it is present, and the
-     sentence stands without it.
-
-     A MEASURED ZERO IS A FINDING. A session that ends flat on net delta is a
-     tape that bought and sold in balance, which is worth a sentence; it is
-     `netDelta === 0`, distinct from a session that produced no readable
-     minutes at all — that returns before this point. */
   const nd = Math.round(cumD);
   const mins = rows.length;
   const pers = sig && sig.persistence !== null && sig.persistence !== undefined
     ? Number(sig.persistence) : null;
   const held = pers === null ? ""
     : ` — ${Math.round(pers * 100)}% of minutes ran with it, against 50% for a directionless tape`;
-  /* NO THOUSANDS SEPARATORS, AND THIS WAS CAUGHT BY THE SCAN RATHER THAN BY
-     READING. The first version printed toLocaleString("en-US"), so a net delta
-     of 1,250,000 reached the prose as "1,250,000" and the numeral scan read it
-     as THREE unpinned figures — 1, 250, 000 — none of which matches 1250000.
-     Every fixture in the branch check happened to produce 870, which needs no
-     separator, so all three branches passed and the defect would have surfaced
-     on the first real card with a large tape.
 
-     A ROUNDED FIGURE IS STATED AND THE ROUNDED FIGURE IS PINNED. `shown` is
-     what the sentence says and what `n` carries; `netDelta` travels beside it
-     exact, so a reader gets a readable magnitude and a machine gets the value
-     the rounding came from. */
   const mag = Math.abs(nd);
   const shown = mag >= 1e6 ? Number((mag / 1e6).toFixed(2))
     : mag >= 1e3 ? Number((mag / 1e3).toFixed(1))
@@ -1067,47 +548,17 @@ export function buildPath(tickRows, { buckets = 78, sessionDate = null } = {}) {
     netPremiumUnit: "US dollars, net premium, side-signed",
     minutes: rows.length,
     startedAt: new Date(first).toISOString(),
-    // Share of minutes moving WITH the day's net direction. 0.5 is a
-    // directionless tape; 1 is a buyer who never let up.
+
     persistence: sig ? sig.persistence : null,
-    // Share of absolute movement contributed by the busiest 5% of minutes.
-    // 0.05 is a perfectly uniform session, so the reading is read against
-    // that baseline rather than against zero.
+
     concentration: sig ? sig.concentration : null,
-    // Movement-weighted mean minute, 0 at the open and 1 at the close.
+
     centroid: sig ? sig.centroid : null,
   }, sessionDate);
 }
 
-/* ---------- congress ---------------------------------------------- */
-
 const AMOUNT_RANGE = /\$?([\d,]+)\s*[-–]\s*\$?([\d,]+)/;
 
-/**
- * Disclosed congressional transactions in this name.
- *
- * Deliberately NOT "congressional buyers", and deliberately without a member
- * track record or an average return.
- *
- * ONE OF THE TWO ORIGINAL REASONS HAS EXPIRED, AND SAYING SO IS THE POINT.
- * This comment used to argue that /api/congress/congress-trader "accepts only
- * limit, date, ticker and name — no page and no offset", so a member's
- * history could not be walked. The specification now documents `page`
- * (1-indexed), `date_from` and `date` on that route, and the political
- * section walks exactly that ladder. A refusal resting on a vendor
- * limitation has to be re-read when the vendor changes, or it becomes
- * folklore that outlives its own reason.
- *
- * The reason that has not expired is the one that never could:
- *
- *  - A disclosure reports an OPENING with no paired closing print, so any
- *    "return" attributed to it is invented. No amount of pagination supplies
- *    the closing print, so no budget makes a track record computable here.
- *
- * What IS informative, and free: the disclosure lag. The STOCK Act allows 45
- * days and late filers routinely exceed 100, so a trade surfacing today may
- * be three days old or eighty. That number belongs in the row, not a footnote.
- */
 export function buildCongress(tradeRows, { asOf = null, limit = 12 } = {}) {
   const rows = (tradeRows || []).map((r) => {
     const txn = r.transaction_date ? Date.parse(r.transaction_date + "T00:00:00Z") : NaN;
@@ -1119,21 +570,16 @@ export function buildCongress(tradeRows, { asOf = null, limit = 12 } = {}) {
     return {
       member: String(r.name || r.reporter || "").trim() || null,
       chamber: r.member_type || null,
-      // A large share of filings are a spouse's or a dependent's. Attributing
-      // those to a member's judgement is the classic error, so the issuer is
-      // shown rather than collapsed away.
+
       issuer: r.issuer || null,
-      // The vendor writes "Sale" and "Purchase", not "sell" and "buy", so the
-      // obvious /sell/ test matches neither and silently returns null for
-      // every row. Both spellings are accepted.
+
       side: /sale|sell|sold/i.test(r.txn_type || "") ? "sell"
         : /purchase|buy|bought/i.test(r.txn_type || "") ? "buy"
         : null,
       txnDate: r.transaction_date || null,
       filedDate: r.filed_at_date || null,
       disclosureLagDays: lag,
-      // The bracket verbatim. Any dollar figure derived from a midpoint is
-      // fabricated precision.
+
       amountRange: typeof r.amounts === "string" ? r.amounts.trim() : null,
       amountLow: m ? Number(m[1].replace(/,/g, "")) : null,
       amountHigh: m ? Number(m[2].replace(/,/g, "")) : null,
@@ -1142,17 +588,7 @@ export function buildCongress(tradeRows, { asOf = null, limit = 12 } = {}) {
   }).filter((r) => r.member);
 
   if (!rows.length) {
-    /* WHICH EMPTY THIS IS, decided by what the caller handed over.
 
-       `null` means the congress read did not happen for this name — the
-       market-wide fetch threw, or the deadline cut the per-name fallback
-       short. `[]` means it DID happen and this ticker appeared in none of
-       the filings. Those are opposite facts, and until now both produced
-       "Unavailable. no disclosed transactions": an unavailability status
-       carrying a measured-emptiness reason, printed on every card.
-
-       Cards published before the pipeline learned this distinction hand over
-       `undefined`, which is honestly unknown and reads as unavailable. */
     if (tradeRows === null || tradeRows === undefined) {
       return unavailable("the disclosure tape was not read for this name in this run");
     }
@@ -1165,19 +601,6 @@ export function buildCongress(tradeRows, { asOf = null, limit = 12 } = {}) {
   const buys = kept.filter((r) => r.side === "buy").length;
   const sells = kept.filter((r) => r.side === "sell").length;
 
-  /* THE LEAD COUNTS OVER `kept`, AND SAYS SO WHENEVER THAT IS NOT ALL OF THEM.
-     `total` is every disclosed row; `buys` and `sells` are counted over the
-     `limit` rows the panel actually draws, because that is the population the
-     table below the sentence shows. Stating a split of the drawn rows against
-     a total of all rows would be two populations in one line — the mistake
-     this file's own truncation notes exist to prevent — so the scope clause
-     names the count the split is over the moment the two differ.
-
-     LATE IS COUNTED, NEVER IMPUTED. A row whose lag is null (either date
-     missing) is not late and is not on-time: it is unmeasured, and it is
-     excluded from both the numerator and the denominator, with the
-     denominator stated so a reader can see how many rows were datable. The
-     45-day window is the STOCK Act's, named in the panel's own note. */
   const dated = kept.filter((r) => r.disclosureLagDays !== null);
   const late = dated.filter((r) => r.disclosureLagDays > 45).length;
   const scope = rows.length === kept.length
@@ -1214,35 +637,6 @@ export function buildCongress(tradeRows, { asOf = null, limit = 12 } = {}) {
   }, asOf);
 }
 
-/* ---------- assembly ---------------------------------------------- */
-
-/**
- * One card. Every panel is independent: a dead congress feed still ships a
- * live gamma panel, and no panel failure can remove the name from the board.
- */
-/**
- * This name's net premium, session by session, signed.
- *
- * THE QUESTION THE INTRADAY PATH CANNOT ANSWER. `path` draws cumulative
- * signed premium inside ONE session, minute by minute, and it dies with the
- * run — so "is today's bid unusual for this name" had no surface at all. This
- * is that surface, and it is a DIFFERENT MEASUREMENT rather than a wider
- * window on the same one: the unit of the x-axis is a session, not a minute,
- * and the two are never offered from one picker.
- *
- * FIVE STATES, kept apart for the same reason the overlay keeps its four:
- *   - the track was never read this run      → unavailable, pipeline-side
- *   - the track was read, this name absent   → quiet, a fact about the name
- *   - the name is in the track, nothing priced → quiet, and says WHY it is
- *     the ordinary state for a young archive rather than a defect
- *   - one priced session                     → quiet: a single bar is a
- *     reading, but "over time" needs two
- *   - two or more                            → ok
- *
- * The series is handed out index-aligned to `sessions` and stays that way:
- * the dates travel WITH the values, so a renderer never has to assume the
- * calendar and a gap keeps its date.
- */
 function premiumTrackPanel(history) {
   if (!history || !Array.isArray(history.sessions)) {
     return {
@@ -1277,9 +671,6 @@ function premiumTrackPanel(history) {
     };
   }
 
-  /* SIDE-SIGNED, AND THE SIGN IS THE READING. Calls minus puts in whole
-     dollars, exactly as the archive holds it — no rescaling here, because a
-     unit converted in a renderer is a unit two readers disagree about. */
   const rows = history.sessions.map((x, i) => ({
     d: x && x.d,
     source: x && x.source,
@@ -1300,35 +691,15 @@ function premiumTrackPanel(history) {
     rows,
     sessions: rows.length,
     priced: priced.length,
-    /* GAPS ARE COUNTED, NOT DRAWN AS ZERO. A session with no archived premium
-       is a session nobody priced this name in, which is not the same shape as
-       a session that priced it flat — and `flat` below is the count that
-       proves the two are being told apart. */
+
     gaps: rows.length - priced.length,
     up, down, flat,
     net,
-    /* THE WINDOW'S OWN EXTREME, so a renderer scales to what it drew rather
-       than to a constant nobody measured. */
+
     peak: priced.reduce((m, v) => (Math.abs(v) > m ? Math.abs(v) : m), 0),
   };
 }
 
-/**
- * The score history laid over the dated price window, or a stated absence.
- *
- * A THIN WRAPPER ON PURPOSE. The join itself lives in shared/flows-overlay.js
- * where it is tested against hand-checkable inputs; this only maps the two
- * ways the INPUTS can be missing onto the sentences a card reader needs, and
- * keeps them apart from the two ways the JOIN can come back empty.
- *
- * Four states reach the page and they are four different facts:
- *   - the track was never read this run          → unavailable, pipeline-side
- *   - the track was read and this name is absent → quiet, a fact about the name
- *   - the card has no dated price window         → unavailable, from the join
- *   - both windows read, no shared session       → quiet, from the join
- * Collapsing any two of them into "no data" is how a reader loses the ability
- * to tell a skipped leg from a name that was never on a board.
- */
 function scoreOverlayPanel(history, contextPanel) {
   if (!history || !Array.isArray(history.sessions)) {
     return {
@@ -1355,27 +726,6 @@ function scoreOverlayPanel(history, contextPanel) {
   });
   if (join.status !== "ok") return join;
 
-  /* THE LEAD IS THE COMPARISON THE PANEL EXISTS TO MAKE, and it is written
-     from the SCORED rows only.
-  
-     The join's `rows` are ordered by the price side's days and a row inside the
-     overlap can still carry a null score — `gaps` counts exactly those. Taking
-     the first and last ROW would therefore compare a score that may not exist
-     against a price that does, so the two ends are the first and last row whose
-     score is a reading. Where fewer than two rows are scored there is no move
-     to state and the lead is omitted: the slot is `:empty`-hidden, and an
-     omitted lead costs a reader nothing while an invented one costs them the
-     thing the panel is for.
-  
-     "AGREE" IS A STATEMENT ABOUT TWO SIGNS AND NOTHING MORE. It does not claim
-     the score predicted the move, or that either caused the other; the panel's
-     own notes carry that, and the sentence deliberately stops at the sign so it
-     cannot be read as a track record. Where either side is unchanged over the
-     window the sentence says so rather than picking a direction for it.
-  
-     THE DEAD BAND IS NOT APPLIED HERE. It is the drawing's threshold for what
-     counts as a move worth colouring; re-deriving a second one in prose would
-     be two definitions of "moved" on one panel. */
   const scoredRows = join.rows.filter((r) => r.score !== null);
   if (scoredRows.length < 2) return join;
   const a = scoredRows[0], z = scoredRows[scoredRows.length - 1];
@@ -1408,22 +758,6 @@ function scoreOverlayPanel(history, contextPanel) {
   return join;
 }
 
-/**
- * The open-interest basis check, in the shape a card publishes.
- *
- * THE LOG LINE DOES NOT SHIP. describeOiBasis returns a `line` written for a
- * pipeline job log — it carries a "[dry-run]" tag, it addresses a maintainer,
- * and it names other pages of this product. A card is read by someone holding
- * a table, so the payload carries the three counts and the verdict and the
- * renderer composes the sentence beside the column. That also keeps this
- * prose inside the files the vocabulary suites scan.
- *
- * `minVolume` TRAVELS WITH THE COUNTS because the check is not run over every
- * row in the table. shared/flows-unusual.js applies it only to contracts
- * trading at least UA_MIN_VOLUME lots, so `seen` is a subset of the rows on
- * screen and a reader told "3 of 8" without the threshold would look for
- * eight rows and count something else.
- */
 function oiBasisReading(basis) {
   if (!basis || typeof basis !== "object") return null;
   const seen = numOrNull(basis.seen);
@@ -1432,22 +766,12 @@ function oiBasisReading(basis) {
     seen,
     exceeded: numOrNull(basis.exceeded),
     exceedShare: numOrNull(basis.exceedShare),
-    /* "no-data" | "falsified" | "inconclusive" — and the renderer switches on
-       it rather than re-deriving the verdict from the counts, so the two can
-       never drift into disagreeing about the same rows. */
+
     verdict: typeof basis.verdict === "string" ? basis.verdict : null,
     minVolume: UA_MIN_VOLUME,
   };
 }
 
-/**
- * One chain panel, or a stated absence.
- *
- * The chain leg is the last vendor spend of the run and the first thing a slow
- * morning drops, so "this card has no chain" is an ORDINARY state rather than
- * an error — and it has to arrive as a reason a reader can see, never as an
- * empty panel or a zero.
- */
 function chainPanel(chain, key) {
   if (!chain) {
     return {
@@ -1457,45 +781,17 @@ function chainPanel(chain, key) {
     };
   }
   const panel = chain[key] || { status: "unavailable", reason: "this panel was not built from the chain" };
-  /* HOW MUCH OF THE BOOK THIS WAS BUILT FROM, on every panel that was built.
 
-     The vendor's page ceiling is 500 contracts and a wide name has more than
-     that, so a surface can be complete-looking and drawn from a slice. A panel
-     that does not carry its own coverage lets a reader mistake "these are the
-     strikes that fit on one page" for "these are the strikes". The filter is
-     stated for the same reason: the leg excludes zero-open-interest chains,
-     which is a selection rather than a fact about the market. */
   if (panel.status !== "ok") return panel;
   return {
     ...panel,
-    /* THE OPEN-INTEREST BASIS CHECK TRAVELS WITH THE TABLE THAT PRINTS THE
-       COLUMN IT JUDGES, and only with that table.
 
-       shared/flows-chain.js runs this on every chain because it is arithmetic
-       over rows already in memory, and until now the pipeline logged one of
-       them and published none. That left the reader holding a caption which
-       claimed the open-interest change and the volume span the same interval,
-       on a page that had already measured names where they cannot — an
-       open-interest change larger than the contract's own volume is not
-       possible across one settlement, so any such row falsifies the pairing.
-       Publishing the measurement is what lets the caption say what was found
-       for THIS name instead of asserting a general alignment nothing checked.
-
-       Three panels do not carry it: only `topContracts` prints the column.
-       Publishing a field the other three never read would be shape noise the
-       payload/renderer contract would have to carry forever. */
     ...(key === "topContracts" && chain.oiBasis
       ? { oiBasis: oiBasisReading(chain.oiBasis) }
       : {}),
     coverage: {
       truncated: chain.truncated === true,
-      /* THREE COUNTS, NOT ONE, because they are three different populations
-         and a renderer holding only the middle one cannot explain itself.
-         `rowsReturned` is what the vendor sent and is what `truncated` is
-         decided on; `rowsSeen` is what survived the adjusted-series filter;
-         `pricedRows` is what carried a live bid and reached the surface. A
-         card publishing "a full page of 500 contracts" beside rowsSeen 499
-         looks like a contradiction until the first of these is present. */
+
       rowsReturned: numOrNull(chain.rowsReturned),
       rowsSeen: numOrNull(chain.rowsSeen),
       pricedRows: numOrNull(chain.pricedRows),
@@ -1504,61 +800,12 @@ function chainPanel(chain, key) {
   };
 }
 
-/**
- * One second-order Greek term structure, in the card's own status vocabulary.
- *
- * THE CARD BOUNDARY HAS EXACTLY TWO STATES, and this maps onto them rather
- * than widening them. Every panel here is `ok` or `unavailable` — an
- * invariant the source-ablation sweep asserts over every panel on every
- * ablation, because the renderer switches on status before it touches a
- * number. greekTermStructure distinguishes three silences internally (the
- * vendor sent no such leg / the leg was there but nothing was readable /
- * rows survived), which is the right resolution AT THE SHAPER. Emitting that
- * third state here would have failed a test that exists for a good reason,
- * and the correct response to that is to map, not to widen the test so the
- * new code passes.
- *
- * NO INFORMATION IS LOST IN THE MAPPING: the two dead states carry different
- * REASON strings, which is how every other dead panel on this card already
- * tells its story. What is missing is a machine-readable tag distinguishing
- * them, and that is a real gap — the card's shared renderer hardcodes
- * "Unavailable." for every non-ok status and sets no data-empty attribute, so
- * no suite can tell these two apart without matching on prose. That is one
- * defect, in one place, and it belongs to the renderer rather than here;
- * fixing it widens this union deliberately and for every panel at once.
- */
 const GREEK_SUBJECT = Object.freeze({
   vanna: "Vol sensitivity",
   charm: "Time decay",
   delta: "Dealer delta",
 });
 
-/**
- * One greek ladder's lead: WHERE it is concentrated, and nothing else.
- *
- * THE MAGNITUDE IS DELIBERATELY NOT SAID, and this is the correction an
- * adversarial pass over the design produced. greekTermPanel
- * (assets/js/flows-panels.js) already prints the peak leg and the gross size
- * in its stat list, through `compact()` — which rounds to ONE decimal, while
- * saidMagnitude() rounds to two. A lead stating the same figure would put
- * "1.42M" directly above a stat list reading "1.4M": two authors for one
- * number, disagreeing on the same card. The share is the reading that exists
- * nowhere else on the panel, so the share is what the sentence carries.
- *
- * THE UNIT AND THE SIGN CONVENTION ARE NOT REPEATED EITHER. The drawer
- * appends `panel.unit` and `panel.signConvention` as their own notes, and the
- * convention's own closing clause already says the legs are never netted. A
- * lead restating it would be a third copy of a sentence the payload publishes
- * verbatim.
- *
- * THE SHARE IS OF THE LADDER DRAWN, and says so when rows were shed. `shed`
- * is the count the builder cut at its cap, so a concentration measured over
- * ten expiries of forty is a concentration in a window, not in the book.
- *
- * A SINGLE EXPIRY IS NOT A CONCENTRATION. One row is trivially 100% of
- * itself, which is arithmetic rather than a finding, so that branch states
- * the ladder's extent instead and leaves the share unsaid.
- */
 function greekLead(name, built) {
   const subject = GREEK_SUBJECT[name];
   const rows = built.rows || [];
@@ -1576,15 +823,7 @@ function greekLead(name, built) {
   let top = rows[0];
   for (const r of rows) if (gross(r) > gross(top)) top = r;
   const share = Math.round((gross(top) / built.grossAbs) * 100);
-  /* WHICH LEG CARRIES IT, by magnitude, and never netted — the two legs'
-     conventions differ by greek on this endpoint, which is why the builder
-     publishes them apart.
 
-     EQUAL LEGS ARE NOT A WINNER. A `>=` tie-break picks "call" and the
-     sentence would then say the expiry is carried MOSTLY by a leg that is
-     not larger than the other — a claim of dominance over a measured
-     balance. The balanced case gets its own clause and "mostly" is said only
-     where one magnitude is strictly greater. */
   const c = Math.abs(top.call ?? 0), pu = Math.abs(top.put ?? 0);
   const leg = c === pu ? null : c > pu ? "call" : "put";
   return panelLead(
@@ -1613,63 +852,12 @@ function greekPanel(name, expiries, callLeg, putLeg, sessionDate) {
   return {
     status: "unavailable",
     reason: built.reason || `no ${name} exposure was readable on this response`,
-    /* The unit rides even on a dead panel: a reader who sees the heading
-       still learns what the number would have been measured in. */
+
     unit: built.unit,
     rows: [], legs: built.legs,
   };
 }
 
-/**
- * THE COHORT THIS NAME WAS COMPARED AGAINST — named, sized, and ranked.
- *
- * A 21-PANEL WORKSPACE THAT COULD NOT SAY WHO THE NAME WAS MEASURED AGAINST.
- * `grep -c "peer\|sector" shared/flows-card.js` returned zero. The published
- * score is a cross-sectional residual with sector and log-capitalisation
- * neutralised out before ranking — that sentence appears on four surfaces —
- * and the page a reader opens to understand one name could not tell them
- * which cohort the "cross-section" was, how many names were in it, or whether
- * this name's sector had so few members that it was pooled into the reference
- * bucket rather than given a level of its own.
- *
- * THE QUESTION THIS ANSWERS, and it is the obvious follow-up to every strong
- * reading on the page: is my top long simply the strongest name in a sector
- * that is being bought wholesale? A reader told "+71, sector neutralised"
- * cannot ask it. A reader told "+71, rank 1 of 9 in Technology, whose median
- * is +3" has the answer in the same glance — and a reader told "+71, rank 1
- * of 9, whose median is +58" has a very different answer and needs it more.
- *
- * WHAT THE SCORES HERE ARE, because getting this wrong would make the panel
- * worse than nothing: they are the PUBLISHED, POST-NEUTRALISATION scores —
- * the same numbers every other surface prints. Neutralisation removes the
- * cohort's LINEAR mean, so a cohort median near zero is the ordinary outcome
- * and is not a finding. A median far from zero is: it means the adjustment
- * did not absorb the cohort's tilt, which happens when the level was pooled
- * for being under `minGroup`, when the cohort is small enough that its mean
- * is noise, or when the tilt is not linear in the terms that were removed.
- * That is a fact about the SCORE rather than about the sector, and the panel
- * says so rather than inviting the reader to read a sector call out of it.
- *
- * POOLED IS NOT MISSING. A name whose sector had fewer than `minGroup`
- * members was not left un-neutralised; it was folded in with every other
- * small level into one reference bucket, so it WAS adjusted — against a
- * cohort that is not its sector. Rendering that as "no cohort" would be a
- * lie in the reassuring direction, and it is the case a reader most needs
- * flagged, because the name's score carries an adjustment estimated off names
- * it has nothing to do with.
- *
- * @param {object}   input
- * @param {string}   input.ticker    The name this card is for.
- * @param {string}   input.sector    Its sector label, as the scorer saw it.
- * @param {Array}    input.peers     [{t, s}] for every name in the same
- *                                   neutralisation level, this name included.
- * @param {number}   input.minGroup  The pooling floor the scorer used.
- * @param {boolean}  input.pooled    Whether this level was pooled into the
- *                                   reference bucket. Passed rather than
- *                                   re-derived: the scorer's own rule decides
- *                                   it, and a second implementation of that
- *                                   rule here is a second thing to drift.
- */
 export function buildCohort({
   ticker, sector = null, peers = null, minGroup = 3, pooled = null,
 } = {}) {
@@ -1689,10 +877,7 @@ export function buildCohort({
   for (const p of peers) {
     const t = p && p.t;
     const s = numOrNull(p && p.s);
-    /* A PEER WITH NO SCORE IS NOT A PEER WITH A SCORE OF ZERO. Zero sits at
-       the centre of the dead band and is a reading this pipeline assigns, so
-       coercing an absent one would move the cohort's median toward a value
-       nobody measured — and the median is the number this panel is read for. */
+
     if (!t || s === null) continue;
     rows.push({ t: String(t).toUpperCase(), s });
   }
@@ -1707,30 +892,20 @@ export function buildCohort({
 
   const at = rows.findIndex((r) => r.t === want);
   if (at < 0) {
-    /* MEASURED, AND THIS NAME IS NOT IN IT. Not an error and not an absence:
-       a card can be built for a name the scorer dropped after the cohort was
-       assembled, and the honest reading is the cohort's own shape with this
-       name stated as absent from it rather than a rank invented for it. */
+
     return quiet(
       "this name is not in the scored cohort that was carried in, so it has no " +
       "rank within it. The cohort held " + rows.length +
       (rows.length === 1 ? " name" : " names") + " and this was not one of them");
   }
 
-  /* The median of an even-length list is the mean of the two middle values —
-     written out rather than reached for, because the off-by-one is the whole
-     of it and a list of two would otherwise report its larger member. */
   const mid = rows.length >> 1;
   const median = rows.length % 2
     ? rows[mid].s
     : (rows[mid - 1].s + rows[mid].s) / 2;
 
   const self = rows[at].s;
-  /* HOW MUCH OF THE COHORT AGREES WITH THIS NAME, which is the wholesale
-     question stated as a count. Names at exactly zero belong to neither side
-     and are counted apart rather than assigned to one: zero is the centre of
-     the dead band and is a reading, so folding it into "agrees" or
-     "disagrees" would invent a position it does not hold. */
+
   let sameSide = 0, otherSide = 0, neutral = 0;
   for (const r of rows) {
     if (r.s === 0 || self === 0) { if (r.s === 0) neutral++; continue; }
@@ -1739,31 +914,24 @@ export function buildCohort({
 
   return ok({
     sector: sector === null || sector === undefined || sector === "" ? null : String(sector),
-    /* NULL, NOT FALSE, when the caller did not say. "This level was not
-       pooled" and "nobody told this panel whether it was" are different
-       facts, and the second must not render as the first — pooling is the
-       case a reader most needs flagged. */
+
     pooled: pooled === null || pooled === undefined ? null : !!pooled,
     minGroup: numOrNull(minGroup),
     n: rows.length,
-    /* One-based, to match every other rank this product prints. */
+
     rank: at + 1,
     score: self,
     median,
     best: rows[0].s,
     worst: rows[rows.length - 1].s,
     sameSide, otherSide, neutral,
-    /* THE COHORT ITSELF, CAPPED AND SAID TO BE CAPPED. A reader who cannot
-       see the nine names that made the median has been given a number to
-       trust rather than a comparison to check. Twelve is the card's own
-       convention for a peer list and the payload states the cut. */
+
     rows: rows.slice(0, COHORT_ROWS),
     shown: Math.min(rows.length, COHORT_ROWS),
     notes: COHORT_NOTES,
   });
 }
 
-/** How many peers a cohort panel carries. A cut, stated on the payload. */
 export const COHORT_ROWS = 12;
 
 export const COHORT_NOTES = Object.freeze({
@@ -1787,79 +955,8 @@ export const COHORT_NOTES = Object.freeze({
     "to neither side, so they are counted apart rather than assigned to one.",
 });
 
-
-/* =============================================================
-   THE MARKET-WIDE JOIN — two feeds this run ALREADY PAYS FOR,
-   placed against one name.
-
-   WHAT IT ADDS THAT THE PER-NAME CALLS CANNOT. The card already
-   spends /api/darkpool/{ticker} and /api/stock/{ticker}/oi-change
-   on every deep name, and those two panels answer "did open
-   interest move in this name" and "did size print off-exchange in
-   this name". Neither can answer "compared with what": a per-name
-   response has no cross-section in it. The pulse leg fetches
-   /api/market/oi-change and /api/darkpool/recent ONCE for the
-   whole run, and those two responses are exactly the missing
-   cross-section. "This name's open-interest change ranks 14th
-   across the market today" is a different and stronger statement
-   than "this name's open interest changed", and it costs zero
-   additional vendor calls.
-
-   A SELECTION IS NOT A SUPERSET, AND THIS IS THE WHOLE DANGER.
-   The market-wide feeds are the vendor's top hundred and the
-   market's hundred most recent prints. A name that is absent from
-   them is NOT a name with no open-interest change and no
-   off-exchange activity — it is a name that did not make a
-   market-wide hundred. Reading absence as silence would turn "not
-   extreme today" into "nothing happened", which is the error the
-   capped-list rule exists to prevent, so the per-name calls stay
-   and the absence reading below names the cut it missed.
-
-   THE ABSENCE IS MEASURED, SO IT IS `quiet`. A name that is not
-   in a feed this run READ is a fact about the market, not a
-   failure: it gets the quiet arm and a sentence carrying the
-   value the last place actually held, so a reader can tell "just
-   missed" from "nowhere near". Only a feed that was never carried
-   in, or came back unreadable, is `unavailable`.
-
-   THE TIMING TRAP, WHICH IS NOT HYPOTHETICAL. The vendor's own
-   specification says /api/market/oi-change "updates once on
-   trading days at around 6:45am EST in the premarket". This
-   pipeline's cron fires at 05:15 ET. So at the moment of this
-   join the market-wide ranking is very likely to be the PREVIOUS
-   session's while the per-name legs carry today's — and a card
-   that printed a cross-sectional rank without its date would be
-   claiming yesterday's cross-section as today's. Every feed
-   therefore publishes the session IT describes, taken from its
-   own rows, beside the session the CARD describes. When the feed
-   states no date of its own, that is published as an unstated
-   date rather than assumed to be today: `sameSession` is null,
-   never a confident false.
-
-   NOTHING HERE IS ASSUMED FROM THE SPECIFICATION. This repository
-   has caught the vendor's documentation wrong five times, and the
-   OI-change schema is one of the places it is thinnest — half its
-   fields are marked "ToBeDone" and its example shows `oi_change`
-   carrying a RATIO ((curr-last)/last = 15.61) beside an
-   `oi_diff_plain` carrying the contract difference (33088), while
-   this repository's own fixture has always generated it as a
-   plain count. So the unit is MEASURED per run, against the two
-   snapshots the same rows publish, and the ordering is MEASURED
-   as well rather than taken from the sentence "default:
-   descending". A cut-off value is only a threshold if the list is
-   actually ordered, and that is checkable.
-   ============================================================= */
-
-/** How many rows of the feed's head a name's entry may cite. A cut, stated. */
 export const CROSS_ROWS = 3;
 
-/**
- * The two feeds, and what each one is.
- *
- * `label` is prose the panel prints, so it lives beside the shaper rather
- * than in a renderer: shared/ is never served to the browser, and a constant
- * a renderer needs has to reach it on the payload.
- */
 export const CROSS_FEEDS = Object.freeze(["oiChange", "darkpool"]);
 
 const CROSS_LABEL = Object.freeze({
@@ -1867,29 +964,11 @@ const CROSS_LABEL = Object.freeze({
   darkpool: "the market-wide off-exchange print feed",
 });
 
-/**
- * Is a list of numbers ordered, and which way?
- *
- * MEASURED RATHER THAN ASSERTED, because the whole value of a cut-off
- * depends on it. The vendor documents /market/oi-change as "highest OI
- * change (default: descending)"; if that is true, the last row's value is a
- * threshold and a reader can tell a near miss from a name nowhere near it.
- * If it is NOT true — the vendor changes a default, a caller passes
- * `order`, or the documentation is wrong a sixth time — then the last row's
- * value is just a number from the bottom of a list and calling it a cut-off
- * would be an invented fact. Null is the honest answer for an unordered
- * list, and the prose below says so instead of ranking against nothing.
- *
- * Ties do not break an ordering: a run of equal values is both
- * non-increasing and non-decreasing, and a feed of identical values is
- * reported as unordered rather than as descending, which is the reading
- * that claims least.
- */
 export function measureOrder(values) {
   const nums = [];
   for (const v of values) {
     const n = numOrNull(v);
-    if (n === null) return null;   // a gap makes the sequence unjudgeable
+    if (n === null) return null;
     nums.push(n);
   }
   if (nums.length < 2) return null;
@@ -1903,23 +982,6 @@ export function measureOrder(values) {
   return down ? "descending" : up ? "ascending" : null;
 }
 
-/**
- * What `oi_change` actually is on THIS run's rows.
- *
- * The vendor's example carries oi_change = 15.6149 with curr_oi 35207 and
- * last_oi 2119, which is (35207 − 2119) / 2119 — a RATIO — while
- * oi_diff_plain carries 33088, the difference in contracts. Rendering a
- * ratio as "3 contracts" or a contract count as "+342%" are both confident
- * wrong readings of a number that is right, and rule three of this file is
- * that units travel with numbers. So the basis is reconciled against the
- * two snapshots the same row publishes, on every row that carries all
- * three, and a run where neither form reconciles publishes no unit at all
- * rather than the more plausible-looking of two guesses.
- *
- * The tolerance is relative and loose (2%) because the vendor rounds and
- * quotes several of these fields as strings; it is not a test of the
- * vendor's arithmetic, it is a test of which quantity is in the field.
- */
 export function measureOiBasis(rows) {
   let ratio = 0, plain = 0, checked = 0;
   for (const r of rows) {
@@ -1933,28 +995,17 @@ export function measureOiBasis(rows) {
     if (last !== 0 && Math.abs(change - diff / last) <= Math.max(1e-6, Math.abs(diff / last) * 0.02)) ratio++;
   }
   if (!checked) return { basis: null, checked: 0, agreed: 0 };
-  /* Whichever form reconciles on a clear majority wins; a run where both do
-     (every row's last_oi being 1, say) or neither does resolves to null. */
+
   if (plain > checked / 2 && plain > ratio) return { basis: "contracts", checked, agreed: plain };
   if (ratio > checked / 2 && ratio > plain) return { basis: "ratio", checked, agreed: ratio };
   return { basis: null, checked, agreed: Math.max(plain, ratio) };
 }
 
-/** The date half of an ISO stamp, or null. Never a coerced today. */
 const isoDay = (v) => {
   const m = /^(\d{4}-\d{2}-\d{2})/.exec(typeof v === "string" ? v : "");
   return m ? m[1] : null;
 };
 
-/**
- * A feed's own session, from its own rows.
- *
- * ONE DATE OR A REFUSAL. If every dated row agrees, that is the session the
- * feed describes. If they disagree — the recent-print feed spans a midnight,
- * a clearing feed mixes two snapshots — the newest is published WITH the
- * count of distinct dates, so the panel can say the feed spans more than one
- * session rather than picking one and calling it the answer.
- */
 function feedSession(days) {
   const seen = new Set();
   for (const d of days) if (d) seen.add(d);
@@ -1963,29 +1014,11 @@ function feedSession(days) {
   return { day: sorted[sorted.length - 1], days: sorted.length };
 }
 
-/* An index feed that could not be measured at all. Carries no numbers, by
-   the same rule unavailable() holds everywhere else on this card. */
 const crossDark = (feed, reason) => ({
   status: "unavailable", feed, label: CROSS_LABEL[feed], reason,
   entries: null, coverage: null,
 });
 
-/**
- * Index one market-wide feed by ticker, once per run.
- *
- * @param {string} feed         "oiChange" or "darkpool".
- * @param {*}      raw          The vendor's response, `{__failed}` for a
- *                              fetch that threw, or null/undefined for a
- *                              feed that was never carried into this leg.
- * @param {object} options
- * @param {number} options.limit       The row limit this run ASKED for. A
- *                                     population below it is a fact about
- *                                     the feed, not about the request.
- * @param {Array}  options.tickers     The deep names being carded, so the
- *                                     coverage of the join is measured
- *                                     against the population it is for.
- * @param {string} options.sessionDate The session the CARDS describe.
- */
 export function indexCrossFeed(feed, raw, { limit = null, tickers = [], sessionDate = null } = {}) {
   if (!CROSS_FEEDS.includes(feed)) {
     return crossDark(feed, "no such market-wide feed is indexed by this build");
@@ -2017,19 +1050,9 @@ export function indexCrossFeed(feed, raw, { limit = null, tickers = [], sessionD
       const t = typeof r.ticker === "string" && r.ticker ? r.ticker : null;
       const value = numOrNull(r.premium);
       const at = typeof r.executed_at === "string" && r.executed_at ? r.executed_at : null;
-      /* A print with neither a dollar size nor a timestamp cannot be ranked
-         on either statistic this index measures, so it is counted out of the
-         population rather than carried as a row with nothing in it. */
+
       if (!t || (value === null && at === null)) continue;
-      /* THE PRINT'S EASTERN DAY, NOT THE FIRST TEN CHARACTERS OF ITS STAMP.
-         `executed_at` is an INSTANT and `sessionDate` is a calendar day
-         resolved in America/New_York, so slicing the ISO date out of the
-         instant compares two different kinds. Off-exchange prints are
-         reported to 20:00 ET; under EST every print after 19:00 ET carries a
-         UTC date one day AHEAD of its own Eastern session — and a 05:15 run
-         asking /darkpool/recent for the newest hundred prints gets exactly
-         those rows. It dated the whole feed to tomorrow and told every card
-         "this ranking is from another session" about prints from its own. */
+
       shaped.push({ t: String(t).toUpperCase(), value, at, day: easternDay(at), raw: r });
     }
   }
@@ -2037,9 +1060,7 @@ export function indexCrossFeed(feed, raw, { limit = null, tickers = [], sessionD
   const wanted = new Set((tickers || []).map((t) => String(t || "").toUpperCase()).filter(Boolean));
 
   if (!shaped.length) {
-    /* MEASURED AND EMPTY. The feed answered; nothing in it could be placed.
-       That is the quiet arm, and every name gets the same sentence — none of
-       them "missed a cut", because there was no cut. */
+
     return {
       status: "quiet", feed, label: CROSS_LABEL[feed],
       reason: CROSS_LABEL[feed] + " was read this run and carried no row that could be " +
@@ -2050,32 +1071,11 @@ export function indexCrossFeed(feed, raw, { limit = null, tickers = [], sessionD
     };
   }
 
-  /* THE ORDERING, MEASURED ON WHAT THE FEED ACTUALLY RETURNED. For the
-     open-interest feed the candidate statistic is the value itself; for the
-     print feed it is the execution time, because "recent" is what that
-     endpoint is documented to return and a recency rank has a completely
-     different cut-off — a TIME the window reaches back to, not a size. Both
-     are tried, and the one that holds is published under its own name. */
   const byValue = measureOrder(shaped.map((s) => s.value));
   const byTime = feed === "darkpool"
     ? measureOrder(shaped.map((s) => (s.at ? Date.parse(s.at) : null)))
     : null;
 
-  /* THE CUT IS THE LAST ROW ONLY WHEN THE FEED RUNS DOWNWARDS.
-     measureOrder tells ascending from descending precisely so a threshold is
-     claimed only where one exists, and both branches then took
-     shaped[length-1] regardless. On an ascending feed the last row is the
-     MAXIMUM: /api/market/oi-change takes an `order` parameter, so a hundred
-     rows returned 100..199 ascending would publish cut = 199 and the panel
-     would say the hundredth place held 199 — the largest value in the feed
-     announced as the floor everything else cleared. Same for a print feed
-     sorted oldest-first, where the newest stamp would be published as the
-     time the window reaches back to.
-
-     A cut-off is the LAST-INCLUDED value in ranked order, so it is the end of
-     the array when descending and the start of it when ascending. When
-     measureOrder finds no order at all, both stay null: there is no threshold
-     to publish, and a number from an arbitrary position is not one. */
   const edgeOf = (dir, pick) =>
     pick(dir === "descending" ? shaped[shaped.length - 1] : shaped[0]);
 
@@ -2093,13 +1093,7 @@ export function indexCrossFeed(feed, raw, { limit = null, tickers = [], sessionD
   }
 
   const oi = feed === "oiChange" ? measureOiBasis(rows) : { basis: null, checked: 0, agreed: 0 };
-  /* THE UNIT, IN THREE PARTS, because a renderer needs a short one and a
-     reader needs the whole sentence. `unit`/`unitOne` are what goes beside
-     the number and must agree in number with it; `unitOf` is the rest of the
-     phrase, which is too long to sit in a 320px-wide reading and too
-     important to drop. A unit of null is a number this run could not name a
-     unit for, and the panel says that in words rather than printing a bare
-     figure that looks like contracts. */
+
   const unit = feed === "darkpool"
     ? { unit: "dollars", unitOne: "dollar", unitOf: null, kind: "money" }
     : oi.basis === "contracts"
@@ -2109,11 +1103,6 @@ export function indexCrossFeed(feed, raw, { limit = null, tickers = [], sessionD
             unitOf: "of the previous session's open interest", kind: "ratio" }
         : { unit: null, unitOne: null, unitOf: null, kind: null };
 
-  /* HEAD-OF-FEED ENTRIES, BY TICKER. The BEST rank a name holds is the one
-     that answers the question — a name with three contracts in the top
-     hundred ranks where its strongest one does — and the count of its rows
-     is published beside it so "one line got there" and "the whole book did"
-     are not the same reading. */
   const entries = {};
   for (let i = 0; i < shaped.length; i++) {
     const s = shaped[i];
@@ -2130,15 +1119,6 @@ export function indexCrossFeed(feed, raw, { limit = null, tickers = [], sessionD
   let present = 0;
   for (const t of wanted) if (entries[t]) present++;
 
-  /* DID OUR OWN REQUEST DO THE CUTTING, OR DID THE VENDOR RUN OUT?
-  
-     A feed that answers 40 rows to a request for 100 was not truncated by
-     this run at all — it handed back everything it had, and a name missing
-     from it did not "miss a top hundred", it failed the vendor's own
-     inclusion rule for the list. Saying "did not make the cut" of a list
-     that never cut anything would be a stated threshold that does not
-     exist, which is the same defect as an unstated one pointing the other
-     way. The flag is published so the sentence can be right either way. */
   const lim = numOrNull(limit);
   const capped = lim !== null && shaped.length >= lim;
 
@@ -2153,27 +1133,17 @@ export function indexCrossFeed(feed, raw, { limit = null, tickers = [], sessionD
     ...unit,
     oiBasis: feed === "oiChange" ? oi.basis : null,
     oiBasisChecked: feed === "oiChange" ? oi.checked : null,
-    /* THE SESSION THE FEED DESCRIBES, from the feed's own rows, beside the
-       session the card describes. Never inferred from the clock. */
+
     asOf: session.day,
     asOfStated: session.day !== null,
     asOfSessions: session.days,
-    /* NULL, NOT FALSE, WHEN THE FEED STATED NO DATE. "This ranking is from
-       another session" and "nobody said which session this ranking is from"
-       are different facts and the second must never render as the first. */
+
     sameSession: session.day === null || !sessionDate ? null : session.day === sessionDate,
     entries,
     coverage: { of: wanted.size, in: present },
   };
 }
 
-/**
- * Index both feeds once, for a whole run.
- *
- * Returned as plain data rather than a closure so a contract test can build
- * one by hand and so the pipeline can log the coverage before it spends a
- * single card build on it.
- */
 export function indexMarketCross({
   oiChange, darkpool, limits = {}, tickers = [], sessionDate = null,
 } = {}) {
@@ -2186,9 +1156,6 @@ export function indexMarketCross({
   };
 }
 
-/* The fields a per-name reading carries whether or not the name is in the
-   feed. A reader who missed the cut still needs the population, the cut and
-   the feed's own session, or the absence is a shrug rather than a reading. */
 function crossFrame(f) {
   return {
     feed: f.feed, label: f.label,
@@ -2202,26 +1169,10 @@ function crossFrame(f) {
     asOf: f.asOf || null, asOfStated: !!f.asOfStated,
     asOfSessions: numOrNull(f.asOfSessions), sameSession:
       f.sameSession === null || f.sameSession === undefined ? null : !!f.sameSession,
-    /* COVERAGE IS NOT ON THE PER-NAME READING, and that is deliberate. How
-       many of the board's names placed in a feed is a fact about the JOIN,
-       identical on all fifty cards, and copying it onto every feed reading as
-       well as onto the panel would be the same number in two places on one
-       payload — which is how two numbers that must agree eventually stop
-       agreeing. The panel carries it once, under `coverage`, and the drawer
-       reads it there. */
+
   };
 }
 
-/**
- * One name's reading out of one indexed feed.
- *
- * THREE ARMS AND THEY ARE NOT INTERCHANGEABLE:
- *   unavailable — the feed was never carried in, or did not come back.
- *   quiet       — the feed was READ and this name is not in it. A measured
- *                 absence, carrying the cut it did not clear.
- *   ok          — the name is in it, with its rank, the population that rank
- *                 is inside, the value it ranked on and that value's unit.
- */
 export function readCrossFeed(indexed, ticker) {
   if (!indexed || typeof indexed !== "object") {
     return { status: "unavailable", present: null,
@@ -2240,11 +1191,7 @@ export function readCrossFeed(indexed, ticker) {
   if (!e) {
     return {
       status: "quiet", present: false, ...frame,
-      /* THE SENTENCE THAT SEPARATES A NEAR MISS FROM NOWHERE NEAR, and it
-         changes shape with whether anything was actually cut. The population
-         and the cut are both in the frame above; this reason states which
-         kind of absence it is, and the renderer prints the numbers beside
-         it. */
+
       reason: "this name is not in " + indexed.label + " this run. The feed was read " +
         "and held " + indexed.population +
         (indexed.population === 1 ? " row" : " rows") + " covering " + indexed.names +
@@ -2271,13 +1218,6 @@ export function readCrossFeed(indexed, ticker) {
   };
 }
 
-/**
- * The market-wide join, as one card panel.
- *
- * The panel is `unavailable` only when NEITHER feed could be measured — the
- * same rule volContext holds for its two volatility feeds. One feed down and
- * one read is an ordinary run and the reader gets the half that exists.
- */
 export function buildMarketCross(index, ticker, { asOf = null } = {}) {
   if (!index || typeof index !== "object") {
     return {
@@ -2297,43 +1237,14 @@ export function buildMarketCross(index, ticker, { asOf = null } = {}) {
       notes: CROSS_NOTES,
     };
   }
-  /* THE COVERAGE OF THE JOIN, ON EVERY CARD THAT CARRIES IT.
-  
-     A join that reaches two of fifty names is telling a reader almost
-     nothing, and forty-eight cards each saying "did not make the cut" would
-     read as forty-eight findings rather than as one thin join. The panel
-     therefore carries the run-level count, so the sentence a card prints can
-     be sized by how much of the board the feed reached. */
+
   const coverage = {};
   for (const feed of CROSS_FEEDS) {
-    /* TAKEN FROM THE INDEX, NOT FROM THIS NAME'S READING. The per-name
-       reading deliberately does not carry it — coverage is a fact about the
-       join and is the same on every card — so this is the one place it is
-       written onto a card. */
+
     const f = index[feed];
     coverage[feed] = f && f.coverage ? f.coverage : null;
   }
-  /* THE LEAD IS ABOUT MEMBERSHIP, WHICH IS THIS PANEL'S WHOLE READING, and it
-     never lets an unread feed pass as a name's absence from it. The four
-     states below are the four different facts a reader can be in:
 
-       both feeds read, name in both      → two ranks, each with its population
-       both read, name in one             → the rank, and the other named as a
-                                            list this name is NOT in
-       one read, the other unavailable    → the rank, and the plain statement
-                                            that only one list was checked
-       both read, name in neither         → the populations, so "not in" is
-                                            sized rather than left absolute
-
-     A FEED THAT WAS NOT READ IS NEVER COUNTED AS A LIST THIS NAME MISSED.
-     That is the collapse CROSS_NOTES.absence exists to refuse, and a lead
-     saying "in neither list" over one feed that failed would reinstate it in
-     the one sentence a reader is most likely to read.
-
-     NO RANK IS PRESENTED AS TODAY'S. `sameSession` is the feed's own answer to
-     whether its rows describe the session this card describes, and where it is
-     false or unknown the lead carries the feed's date instead of implying the
-     card's. CROSS_NOTES.timing is the argument; this is it applied. */
   const rankLead = (() => {
     const placed = CROSS_FEEDS.filter((f) => feeds[f].status === "ok"
       && feeds[f].rank !== null && feeds[f].population !== null);
@@ -2351,11 +1262,7 @@ export function buildMarketCross(index, ticker, { asOf = null } = {}) {
       const r = feeds[f];
       pins[f + "Rank"] = r.status === "ok" ? r.rank : null;
       pins[f + "Population"] = r.population === undefined ? null : r.population;
-      /* PINNED AS A STRING SO THE SCAN MASKS IT, the same reason buildCalendar
-         pins its half-life expiry that way: "2026-08-21" is three numerals to
-         a naive digit walk and none of them is a figure this sentence claims.
-         It is pinned at all because the sentence PRINTS it whenever the feed
-         is not describing the card's own session. */
+
       pins[f + "AsOf"] = r.asOf || null;
     }
     if (placed.length === CROSS_FEEDS.length) {
@@ -2364,9 +1271,7 @@ export function buildMarketCross(index, ticker, { asOf = null } = {}) {
     }
     if (placed.length === 1) {
       const other = CROSS_FEEDS.filter((f) => f !== placed[0])[0];
-      /* NOT "Places in ...": said() already opens with the rank, so the
-         preposition belongs only to the both-lists branch, where it governs
-         "both market-wide lists" rather than the rank itself. */
+
       return panelLead(`Places ${said(placed[0])}` +
         (dark.indexOf(other) !== -1
           ? `; ${feeds[other].label} was not read this run, so only one list was checked.`
@@ -2429,45 +1334,13 @@ export const CROSS_NOTES = Object.freeze({
 export function buildCard({
   ticker, row, features, strikes, ticks, expiries, maxPain, congress, surface,
   chain, generatedAt, sessionDate, weights,
-  /* The wave-2 per-name raws. `null` means the fetch itself failed and the
-     panel says unavailable-with-reason; `[]` means the vendor answered with
-     nothing and the panel says quiet — the three-silences rule at the card
-     boundary. Cards from before these existed simply lack the keys, which
-     is the same transitional story the chain panels told. */
+
   darkpool = null, oiDeltas = null, termStructure = null, ivRank = null,
-  /* THIS NAME'S SCORE HISTORY, out of the scoretrack payload the pipeline has
-     already built by the time it reaches the card loop. `{ sessions, scores,
-     deadBand }` — sessions is the track's own dated calendar and scores is
-     index-aligned to it, exactly as the track publishes them.
 
-     null means the track was not read this run, which is an ORDINARY state:
-     the track leg walks the dated archive and can be skipped or fail without
-     costing any other panel. */
   scoreHistory = null,
-  /* THE RUN'S MARKET-WIDE INDEX, built once by indexMarketCross out of the
-     two pulse feeds and shared by every card in the loop.
 
-     Passed in already indexed rather than built here, for the same reason
-     `chain` is: the two vendor responses are market-wide, one per RUN, and
-     re-indexing a hundred rows fifty times would make fifty chances for the
-     same cross-section to be measured fifty slightly different ways. null
-     means the pulse leg did not reach the card build, which the panel
-     reports as an unavailability rather than as an absence of activity. */
   marketCross = null,
-  /* WHY A PANEL'S RAW IS NULL, WHEN THE RUN KNOWS AND THE DEFAULT SENTENCE
-     WOULD GUESS WRONG.
 
-     Every `null` raw above reaches its panel as "unavailable", and each of
-     those panels has a default reason phrased as a read that was attempted
-     and failed. That is right for the case it was written for. It is wrong
-     for a card built out of the cross-section the run ALREADY paid for,
-     where the per-name legs were never dispatched — there the reader needs
-     to know that no request was made and that reloading changes nothing.
-
-     `null` keeps every existing sentence exactly as it was. A string
-     replaces the reason on precisely the panels whose raw is missing, and
-     on no others: a panel that was fetched and answered is untouched by
-     this, so a partial card cannot be relabelled wholesale. */
   unfetched = null,
 }) {
   const f = features || {};
@@ -2477,10 +1350,6 @@ export function buildCard({
   const prev = numOrNull(row && row.prev_close);
   const close = numOrNull(row && row.close);
 
-  /* BUILT BEFORE THE RETURN because two panels need it: `context` publishes
-     it, and `scoreOverlay` joins the score history onto its dated closes. A
-     second call would build it twice and, worse, let the two drift if either
-     ever took an argument the other did not. */
   const contextPanel = buildContext({
     closes: f.closes,
     closeDates: f.closeDates,
@@ -2494,74 +1363,21 @@ export function buildCard({
   return {
     v: CARD_SCHEMA_VERSION,
     ticker,
-    /* WHICH OF THE TWO KINDS OF CARD THIS IS, said once at the top rather
-       than inferred by counting how many panels came back unavailable.
 
-       A BOARD card is built for one of the names the run went deep on: the
-       per-name legs were fetched, so every panel is a measurement or a
-       stated silence about a measurement that was attempted. A CROSS-SECTION
-       card is built for a name the run enriched but did not take deep — the
-       price, the candles, the volatility fit and the score are all real and
-       all of this session, and the seven panels that need their own vendor
-       calls were never requested.
-
-       IT IS DERIVED FROM `unfetched` RATHER THAN PASSED SEPARATELY, so there
-       is one source of truth for "were the per-name legs spent". Two flags
-       that could disagree is how a card comes to claim one depth and read as
-       the other. */
     depth: unfetched ? "cross-section" : "board",
-    /* WHO THIS IS AND WHAT IT DOES, ~30 BYTES, AND IT REMOVES A REQUEST.
 
-       Both fields are on the board row this card was built from and neither
-       was carried across, so the ticker page — which fetches the card and
-       nothing else — could print a symbol and no company name. Its header
-       had a served `ftSector` slot that no code ever filled, for exactly this
-       reason: the value was one join away and the join was a second fetch.
-
-       The alternative was for that page to read a board on load, which its
-       own comment rejects in the right terms: two requests on every ticker
-       view, paid by every reader, to serve the few who switch names. Thirty
-       bytes on a forty-kilobyte card is the cheaper side of that trade by
-       three orders of magnitude.
-
-       NULL WHERE THE VENDOR SENT NOTHING, never the ticker repeated back: a
-       name that equals its own symbol is what an absent name looks like after
-       a fallback, and the renderer cannot tell those apart afterwards. */
     nm: (row && typeof row.nm === "string" && row.nm.trim()) ? row.nm.trim() : null,
     sector: (row && typeof row.sector === "string" && row.sector.trim())
       ? row.sector.trim() : null,
     generatedAt: generatedAt || null,
-    // The trading session the DATA describes, which is not the day the job
-    // ran: a pre-open run reads the previous completed session.
+
     sessionDate: sessionDate || null,
     score: numOrNull(features && features.score),
     conviction: numOrNull(features && features.conviction),
     fam: f.fam || null,
-    /* THE WEIGHTS THE SCORE WAS BUILT FROM. Without them the family bars are
-       five numbers with no stated relationship to the headline, and a reader
-       cannot tell that one axis carried half the board and another a tenth. */
+
     weights: weights || null,
-    /* THE COMPOSITE'S OWN ARITHMETIC, complete enough to be re-done.
 
-       `conviction` above is 0.45·agreement + 0.35·coverage + 0.20·persistence
-       rounded to an integer, and this block used to publish two of those three
-       terms — so the number could be described but not checked, and the third
-       term could move a published 76 to a published 87 with nothing on the
-       card accounting for the difference.
-
-       THE WEIGHTS SHIP TOO. A renderer that restated 0.45/0.35/0.20 in its own
-       prose would be a second copy of a constant that has already moved once,
-       and when the two disagree the page describes arithmetic the pipeline did
-       not do. `coverage` here is the CLAMPED value the sum used, not the raw
-       measurement, for the same reason: a reconstruction has to close.
-
-       The shape matters as much as the terms. `agreement` is agree/present
-       over at most three signed families — a count over a count, which steps
-       rather than varying smoothly — and it carries the heaviest weight while
-       the other two are continuous. A reader given only the composite cannot
-       tell a step from a change of degree, which on the emitted corpus is the
-       difference between the 60-66, 75-82 and 90-96 clusters and the spread
-       inside each. */
     conv: {
       agreement: numOrNull(f.agreement),
       breadth: numOrNull(f.breadth),
@@ -2570,25 +1386,7 @@ export function buildCard({
       weights: CONVICTION_WEIGHTS,
       gate: numOrNull(f.gate),
     },
-    /* THE TWO REASONS THE GATE SUPPRESSED THIS NAME, as numbers rather than
-       as one digit under the O gauge.
-       
-       positioningQuality computes both, the scorer gates on both, and POLARITY
-       has carried an entry for each since before this line existed — a
-       reserved entry for a field the card never published, which is the shape
-       this repository's unrendered quantities keep taking. Folded into O they
-       are unrecoverable: a name whose flow is 95% out-of-the-money lottery
-       tickets and a name whose participant is trading vol rather than
-       direction reach the reader as the same middling gauge, and the two call
-       for opposite handling.
 
-       Both are unit-free ratios of gross sums with no free parameter:
-       otmShare is |otm directional delta| over |directional delta|, in [0,1]
-       by construction, and vegaTilt is gross vega flow per unit of gross delta
-       flow. numOrNull, not zero — positioningQuality returns null when there
-       is no directional flow to measure, and zero is the TOP of the otmShare
-       column once it is oriented, so imputing it rewards a name for having no
-       data. That exact substitution has already shipped here twice. */
     quality: {
       otmShare: numOrNull(f.otmShare),
       vegaTilt: numOrNull(f.vegaTilt),
@@ -2597,47 +1395,24 @@ export function buildCard({
       ? {
         netGamma: numOrNull(f.netGamma),
         label: f.gRegime || null,
-        /* WHICH SIDE OF THE FLIP DEALERS ARE SHORT ON, as data. The panel used
-           to assert "short below, long above" as a hardcoded sentence; whether
-           that holds depends on the sign of the cumulative at the crossing the
-           code actually picked, and on the live board it was frequently the
-           other way round. */
+
         flipSide: f.flipSide || null,
-        // Cumulative dealer gamma AT SPOT, as a share of the ladder's peak.
-        // Unit-free, so it is comparable across a $35 name and a $900 one.
+
         spotGammaShare: numOrNull(f.spotGammaShare),
-        // How many material crossings the ladder has. More than one means
-        // "the gamma flip" is a simplification, and the card should say so.
+
         crossings: numOrNull(f.flipCount),
-        /* How much book the published flip separates, as a share of the
-           ladder's peak cumulative. On the live INTC book the sign genuinely
-           changes 1.3% from spot, and the long-gamma side carries a tenth of
-           the exposure — a reader told only the level would size against a
-           boundary that is barely there. */
+
         flipSeparation: numOrNull(f.flipSeparation),
         bandMin: numOrNull(f.bandMin),
         bandMax: numOrNull(f.bandMax),
       }
       : null,
-    // The flip price is the flagship number on the whole card — the gamma
-    // panel draws its line from here — so it is a top-level field rather than
-    // something the renderer has to dig out of the level list.
+
     gammaFlip: numOrNull(features && features.gammaFlip),
     atr: numOrNull(features && features.atr),
     panels: {
       gamma,
-      /* The joint the profile and the calendar are both marginals of. It is
-         built from its own endpoint rather than derived: an outer product of
-         two marginals is a model of a surface, not a measurement of one, and
-         this project does not publish the difference silently. */
-      /* THE SAME null-MEANS-TWO-THINGS PROBLEM AS THE WAVE-2 PANELS, and it
-         bites harder here: buildSurface's own empty-input sentence is "no
-         expiry-strike gamma", which is a claim about the BOOK. Said over a
-         name whose surface was never requested, it tells a reader this
-         symbol has no gamma surface — the opposite of the truth for a
-         liquid name. The guard is before the builder, not inside it: the
-         builder is right about the inputs it is given, and what is wrong is
-         handing it an absence and letting it describe a market. */
+
       surface: unfetched && (surface === null || surface === undefined)
         ? { status: "unavailable", reason: unfetched }
         : buildSurface(surface, { spot, asOf: sessionDate }),
@@ -2645,38 +1420,14 @@ export function buildCard({
         spot,
         atr: features && features.atr,
         gammaFlip: features && features.gammaFlip,
-        // The SAME row the priced-move panel resolved — dated, so an expiry
-        // from the vendor's 120-day window that has already passed does not
-        // reach the rail as a live level.
+
         maxPain: painRow ? painRow.px : null,
         callWall: gamma.status === "ok" ? gamma.callWall : null,
         putWall: gamma.status === "ok" ? gamma.putWall : null,
       }),
-      /* THE OPTION CHAIN'S FOUR PANELS, built in shared/flows-chain.js from the
-         one /option-contracts call the chain leg spends per board name.
 
-         They are `unavailable` with a reason on any card the leg could not
-         reach — a name whose chain came back empty, a run that hit the
-         deadline before this name's turn, or any session before the leg
-         shipped. A renderer that has not been written yet simply has no host
-         for them, and a payload from before they existed carries the key not
-         at all, which is the same transitional story every other panel here
-         already tells. */
-      /* THE SCORE LAID OVER THE PRICE IT WAS SCORED AGAINST, joined by date.
-
-         `scoreHistory` is this name's row out of the scoretrack payload plus
-         that payload's session calendar — the pipeline holds both by the time
-         it builds cards, so the join is done once here rather than in a
-         browser. shared/flows-overlay.js states why the join is a named
-         operation: both series are about forty points and both run oldest
-         first, so an index zip draws a plausible chart out of two windows
-         that need not describe the same days. */
       scoreOverlay: scoreOverlayPanel(scoreHistory, contextPanel),
-      /* NET PREMIUM ACROSS SESSIONS — the archive's answer to a question the
-         intraday tape cannot reach. Same input as the overlay, different
-         column of it, and deliberately NOT joined to price: premium is a flow
-         reading and laying it over a close would invite a causal reading the
-         panel does not support. */
+
       premiumTrack: premiumTrackPanel(scoreHistory),
       ivSurface: chainPanel(chain, "ivSurface"),
       skewTerm: chainPanel(chain, "skewTerm"),
@@ -2684,25 +1435,7 @@ export function buildCard({
       aggressor: chainPanel(chain, "aggressor"),
       path: buildPath(ticks, { sessionDate }),
       calendar: buildCalendar(expiries, { asOf: sessionDate }),
-      /* THE FIVE LEGS THE GAMMA CALL ALREADY PAID FOR.
 
-         `expiries` is one /greek-exposure/expiry response carrying call/put
-         pairs for gex, delta, charm AND vanna. buildCalendar above reads the
-         gamma pair; until now the other six were parsed by JSON.parse and
-         dropped on the floor, once per name, every run.
-
-         Charm is why pinning accelerates into a Friday close — dollar-delta
-         bleeding out with time alone, spot unchanged. Vanna is why a vol
-         crush forces mechanical delta buying at unchanged spot. Neither is
-         visible in a gamma ladder, and both are named in this product's own
-         brief. They cost nothing here: no vendor call, no deadline, no
-         rate-limit budget, just a second read of a response already in hand.
-
-         Each is ABSENT rather than empty when the vendor sends no such leg,
-         so a response without vanna says so instead of drawing a flat line a
-         reader takes for a book with no vanna in it. And the two legs are
-         never netted: the put leg's sign convention differs BY GREEK on this
-         endpoint, so a single netting rule would invert one of them. */
       vanna: greekPanel("vanna", expiries, callVannaLeg, putVannaLeg, sessionDate),
       charm: greekPanel("charm", expiries, callCharmLeg, putCharmLeg, sessionDate),
       deltaExposure: greekPanel("delta", expiries, callDeltaLeg, putDeltaLeg, sessionDate),
@@ -2718,17 +1451,11 @@ export function buildCard({
         sessions: HORIZON_SESSIONS,
       }),
       context: contextPanel,
-      /* buildCongress maps `(tradeRows || [])`, so a null reaches it as an
-         empty tape and the panel reports "no disclosed transactions" — a
-         MEASURED EMPTINESS over a read that never happened. The pipeline's
-         own comment records this exact collapse being fixed once already for
-         the failed-read case; an unfetched card is the third way in. */
+
       congress: unfetched && (congress === null || congress === undefined)
         ? { status: "unavailable", reason: unfetched }
         : buildCongress(congress, { asOf: sessionDate }),
-      /* WHERE THIS NAME SITS IN THE MARKET'S OWN TWO LISTS, joined off feeds
-         the run already pays for. Zero marginal vendor calls: the pulse leg
-         fetches both once and this reads the same two responses. */
+
       marketRank: buildMarketCross(marketCross, ticker, { asOf: sessionDate }),
       darkpool: stockPanel(darkpool, shapeStockDarkpool, STOCK_NOTES.darkpool,
         darkpoolLead, unfetched),
@@ -2738,41 +1465,13 @@ export function buildCard({
         ? { status: "unavailable",
             reason: unfetched || "neither volatility feed could be read this run",
             note: STOCK_NOTES.volContext }
-        /* THE HALVES GO THROUGH AS READ. `|| []` here turned a half whose
-           read never landed into an empty list, and the shaper called it
-           quiet — "the feed answered with nothing" over a feed that did
-           not answer. Each shaper now tells null from a list itself. */
+
         : withVolLead({ ...buildVolContext(termStructure, ivRank),
             note: STOCK_NOTES.volContext }),
     },
   };
 }
 
-/**
- * The volatility-context panel's one line: which end of the term is bid, and
- * by how much.
- *
- * THE SPREAD IS THE ONLY FIGURE ON THIS PANEL THAT IS NEW, and everything
- * else a lead could say here is already drawn. Checked in the renderer rather
- * than assumed: assets/js/flows-ticker.js prints `.fvc-rank` as
- * "57.5 / 100 · <date>", so a rank clause would restate that number, that
- * scale and that date verbatim; the mini-table prints each listed expiry
- * beside its volatility for the first four rows, so the front level is
- * literally row one; and the chart's own aria-label already reads "N listed
- * expiries, from 34.2% ... out to 28.1%". A lead that repeats the drawing is
- * noise, and this panel's drawing states both levels and the rank but never
- * subtracts them.
- *
- * SO THE SENTENCE STATES THE DIFFERENCE AND WHICH END CARRIES IT, names the
- * two expiries because a spread without its ends is not a measurement, and
- * stops. The levels stay in `n` for a machine reader without being said.
- *
- * THE RANK HALF IS DELIBERATELY SILENT HERE. buildVolContext lets either half
- * survive the other's absence, and a name with a rank but no curve therefore
- * carries no lead — correctly: its one rank figure is already the panel's
- * headline, and repeating it in a slot directly above would put one claim
- * twice on one screen.
- */
 function withVolLead(panel) {
   if (panel.status !== "ok") return panel;
   const term = panel.term && panel.term.status === "ok" ? panel.term : null;
@@ -2781,9 +1480,6 @@ function withVolLead(panel) {
   const pct = (v) => Number((v * 100).toFixed(1));
   const listed = rows.length;
 
-  /* ONE LISTED EXPIRY IS NOT A CURVE, and saying its slope is zero would be
-     the confident zero this file refuses — there is no second point to have a
-     slope against. */
   if (listed === 1) {
     const lead = panelLead(
       `The chain lists one expiry, ${rows[0].expiry}, at ${pct(rows[0].vol)}% ` +
@@ -2803,17 +1499,11 @@ function withVolLead(panel) {
         `than at ${f.vol > b.vol ? b.expiry : f.expiry}, across ${listed} ` +
         `listed expiries`) + ".",
     {
-      /* PINNED UNSIGNED, WITH THE SIGN IN THE WORDS, which is buildPath's
-         pattern and is forced by the contract's numeral scan: a pin of -6.1
-         against prose carrying "6.1" matches neither `lit` nor
-         String(Number(lit)), so a signed pin under an absolute figure is an
-         UNPINNED figure by the scan's own rule. */
+
       spreadPts: spread,
       frontExpiry: f.expiry,
       backExpiry: b.expiry,
-      /* Carried for a machine reader and deliberately NOT said: both levels
-         are already on the panel — the mini-table prints the front row's
-         volatility and the chart's aria-label reads "from X% ... out to Y%". */
+
       frontPct: pct(f.vol),
       backPct: pct(b.vol),
       listed,
@@ -2821,35 +1511,15 @@ function withVolLead(panel) {
   return lead ? { ...panel, lead } : panel;
 }
 
-/* A raw of null is a failed READ; a raw of [] is a vendor answering nothing.
-   The panels keep those apart because the pages must say different
-   sentences for them. */
 const darkNull = (raw) => raw === null || raw === undefined;
 
 function stockPanel(raw, shaper, note, lead, unfetched) {
   if (darkNull(raw)) {
-    /* TWO DIFFERENT FACTS THAT BOTH ARRIVE AS `null`, AND THE DEFAULT WAS
-       TELLING THE WRONG ONE.
 
-       "The feed could not be read this run" is a claim that a request was
-       made and failed. On a card the run deliberately did not spend the
-       per-name legs on, no request was made at all — and a reader who is
-       told a feed failed reasonably concludes the vendor is down, reloads,
-       and gets the same sentence tomorrow. `unfetched` is the caller's
-       chance to say which of the two happened; the default is unchanged, so
-       every existing call site keeps the sentence it already had. */
     return { status: "unavailable", reason: unfetched || "the feed could not be read this run", note };
   }
   const panel = { ...shaper(raw), note };
-  /* THE LEAD IS BUILT HERE RATHER THAN IN THE SHAPER, and the reason is an
-     import cycle rather than taste: this module already imports the shapers
-     out of shared/flows-stock.js, so a shaper reaching back for panelLead
-     would close the loop. The shapers stay pure readings of a vendor body and
-     the sentence is written on this side, where panelLead already lives.
 
-     A LEAD BUILDER IS ONLY CALLED ON AN `ok` PANEL. Quiet and unreadable
-     carry their own reasons and no numbers, and a sentence over either would
-     be the confident zero this whole file refuses. */
   if (lead && panel.status === "ok") {
     const said = lead(panel);
     if (said) panel.lead = said;
@@ -2857,24 +1527,6 @@ function stockPanel(raw, shaper, note, lead, unfetched) {
   return panel;
 }
 
-/**
- * The off-exchange print panel's one line: the size, and how much of it is one
- * print.
- *
- * WHAT THE TABLE ALREADY SAYS IS NOT REPEATED. The rows below carry time,
- * price, size, dollars and the NBBO for each print, sorted by premium — so the
- * biggest single print is row one and naming it would be a caption. What no
- * cell states is the AGGREGATE and the CONCENTRATION: the ranked prints are
- * never summed, and nothing says whether the total is one block or forty.
- *
- * THE SUM IS OVER THE ROWS THAT ARE DRAWN, and the sentence says so the
- * moment the feed shed any. `shed` is exactly that count, `unpriced` is the
- * prints that arrived with no premium at all — dropped from the ranking
- * because they cannot be ranked, and named rather than silently absorbed.
- *
- * ZERO IS A READING HERE. A total of zero dollars across prints that were
- * measured is a measured zero, not a missing one, and it says so.
- */
 function darkpoolLead(panel) {
   const rows = panel.rows || [];
   if (!rows.length) return null;
@@ -2904,26 +1556,6 @@ function darkpoolLead(panel) {
       unpriced: panel.unpriced });
 }
 
-/**
- * The open-interest change panel's one line: the net, and which side it is on.
- *
- * THE TABLE IS IN VENDOR ORDER, WHICH IS NOT A RANKING. A reader wanting the
- * net would have to add ten signed integers in their head across two contract
- * types, so that is the finding: which way open interest moved, and by how
- * much, over the lines the vendor surfaced.
- *
- * `diff` AND NOT `ratio`. The shaper's own comment records why the two must
- * never be confused — `oi_change` reads like a difference and is a RATIO, and
- * publishing it as a contract count printed "+16" for a book that went 2,119
- * to 35,207. A line whose count the vendor omitted is EXCLUDED from the sum
- * rather than reconstructed from curr minus last, for the same reason the
- * shaper refuses to derive it: one field, one provenance.
- *
- * IT IS ONE CLEARING DAY LATE AND THE SENTENCE SAYS SO. Open interest is
- * published by the clearing house overnight, so this is never today's tape,
- * and a lead that let a reader take it for today would be the panel's worst
- * available failure.
- */
 function oiDeltasLead(panel) {
   const rows = (panel.rows || []).filter((r) => r.diff !== null);
   if (!rows.length) return null;
@@ -2949,34 +1581,17 @@ function oiDeltasLead(panel) {
     });
 }
 
-/**
- * The nearest expiry's max pain, with its expiry. The array is one row per
- * expiry.
- *
- * MAX PAIN IS A LEVEL, NOT A TARGET. It is the strike minimising aggregate
- * option-holder value against TODAY'S open interest — a statement about the
- * current book, recomputed every session, with no mechanism that moves price
- * toward it. The card ranks it beside the walls as another level, and never
- * as a forecast.
- */
 export function pickMaxPainRow(rows, { asOf = null } = {}) {
   const parsed = (rows || [])
     .map((r) => ({ expiry: r.expiry, px: numOrNull(r.max_pain) }))
     .filter((r) => r.expiry && r.px !== null)
     .sort((a, b) => String(a.expiry).localeCompare(String(b.expiry)));
   if (!parsed.length) return null;
-  /* THE NEAREST LIVE EXPIRY, not the first row.
 
-     The vendor documents /max-pain as returning "the max pain for all
-     expirations for the given ticker for the last 120 days", so the array can
-     carry expiries that have already passed. Sorting ascending and taking
-     rows[0] therefore took the OLDEST — up to four months stale — and drew it
-     on the levels rail beside spot as though it were a level that still
-     existed. No fixture supplied a past expiry, so nothing caught it. */
   if (asOf) {
     const live = parsed.filter((r) => String(r.expiry).slice(0, 10) >= String(asOf).slice(0, 10));
     if (live.length) return live[0];
-    // Every expiry on file has passed: there is no live max pain to report.
+
     return null;
   }
   return parsed[0];
@@ -2987,40 +1602,6 @@ export function pickMaxPain(rows, options) {
   return row ? row.px : null;
 }
 
-/* =============================================================
-   THE SPOT GAMMA SURFACE — strike x expiry
-
-   The gamma profile answers "where is the dealer book long or
-   short" and collapses the term structure to do it. The roll-off
-   calendar answers "when does that book expire" and collapses the
-   strikes. Both are marginals of the same joint distribution, and
-   the joint is the thing worth looking at: a put wall that
-   evaporates on Friday and one that runs to January are the same
-   number on the profile and completely different trades.
-
-   /spot-exposures/expiry-strike returns that joint in ONE call —
-   "Spot GEX exposures by strike & expiry", with expirations[] as an
-   array parameter, so the horizon is a choice rather than a call
-   count. Its legs carry the SAME names the strike ladder uses:
-   call_gamma_ask, call_gamma_bid, call_gamma_oi, call_gamma_vol and
-   the put equivalents. That is why this reuses buildGammaProfile's
-   summing convention exactly rather than inventing a second one —
-   the put legs arrive ALREADY dealer-signed, so all four are SUMMED,
-   and summing this surface across expiries has to reproduce the
-   profile. The tests assert that reconciliation, because two views
-   of one book that disagree are worse than one view.
-
-   THE COLOUR SCALE IS CAPPED, AND SAYS SO. A single ATM cell on the
-   front expiry routinely carries more gamma than the rest of the
-   grid combined; scaling to the maximum paints one red square on a
-   field of grey and hides the structure the panel exists to show.
-   The cap is a high quantile of the non-zero magnitudes, cells
-   beyond it are drawn at full saturation, and `scaleCap` and
-   `clipped` both ship so the renderer can mark them rather than
-   quietly flattening them.
-   ============================================================= */
-
-/** Rows per side of spot to keep. An odd total, so spot's own row is centred. */
 const SURFACE_STRIKES = 21;
 export const SURFACE_EXPIRIES = 8;
 
@@ -3032,13 +1613,9 @@ export function buildSurface(rows, {
   const s = numOrNull(spot);
   if (s === null || !(s > 0)) return unavailable("no spot");
 
-  /* THE SAME FOUR LEGS, SUMMED, as buildGammaProfile. A row with none of them
-     measured is dropped rather than counted as a zero cell: an unmeasured
-     strike-expiry pair and one carrying no gamma look identical once a
-     fallback zero is written into the grid, and only one of them is a fact. */
-  const cells = new Map();                 // expiry -> Map(strike -> gamma)
+  const cells = new Map();
   const strikeTotals = new Map();
-  const expirySeen = new Map();            // expiry -> gross magnitude, for ranking
+  const expirySeen = new Map();
 
   for (const r of list) {
     const strike = numOrNull(r.strike ?? r.price);
@@ -3056,16 +1633,8 @@ export function buildSurface(rows, {
   }
   if (!cells.size) return unavailable("no measured gamma legs");
 
-  /* EXPIRIES ARE TAKEN IN DATE ORDER, NOT BY SIZE. Keeping the eight largest
-     would produce a column axis with holes in it that still reads as
-     consecutive — a January LEAP drawn next to this Friday, with nothing
-     saying six weeks were skipped. The horizon is the near end of the term
-     structure, which is also where the hedging happens. */
   const expiries = Array.from(cells.keys()).sort().slice(0, maxExpiries);
 
-  /* STRIKES ARE TAKEN AROUND SPOT, not by size either, and for the same
-     reason: the grid's vertical axis is a price ladder and a ladder with
-     rungs missing is not a ladder. */
   const allStrikes = Array.from(strikeTotals.keys()).sort((a, b) => a - b);
   let nearest = 0;
   for (let i = 1; i < allStrikes.length; i++) {
@@ -3074,19 +1643,16 @@ export function buildSurface(rows, {
   const half = Math.floor(maxStrikes / 2);
   let from = Math.max(0, nearest - half);
   let to = Math.min(allStrikes.length, from + maxStrikes);
-  from = Math.max(0, to - maxStrikes);                 // refill when spot sits at an edge
+  from = Math.max(0, to - maxStrikes);
   const strikes = allStrikes.slice(from, to);
   if (!strikes.length || !expiries.length) return unavailable("no strikes in band");
 
   const grid = strikes.map((k) => expiries.map((e) => {
     const col = cells.get(e);
     const v = col ? col.get(k) : undefined;
-    return v === undefined ? null : v;     // null is "not measured", never 0
+    return v === undefined ? null : v;
   }));
 
-  /* The capped colour scale. Quantile over NON-ZERO magnitudes: a grid that is
-     mostly empty would otherwise put the quantile at zero and saturate every
-     cell that carries anything at all. */
   const mags = [];
   for (const row of grid) for (const v of row) if (v !== null && v !== 0) mags.push(Math.abs(v));
   mags.sort((a, b) => a - b);
@@ -3101,9 +1667,6 @@ export function buildSurface(rows, {
   let clipped = 0;
   for (const row of grid) for (const v of row) if (v !== null && Math.abs(v) > scaleCap) clipped++;
 
-  /* WALLS ARE READ OFF THE ROW MARGINAL, over the strikes actually drawn.
-     Taking them from the full ladder would name a call wall the grid does not
-     contain, which is a label pointing off the edge of its own picture. */
   let callWall = null, putWall = null;
   for (const k of strikes) {
     const total = strikeTotals.get(k) ?? 0;
@@ -3111,22 +1674,6 @@ export function buildSurface(rows, {
     if (total < 0 && (putWall === null || total < putWall.gamma)) putWall = { strike: k, gamma: total };
   }
 
-  /* THE LEAD READS THE COLUMN MARGINALS OF THE GRID THAT IS DRAWN, and says
-     which grid that is whenever it is a window rather than the book. Summing
-     the full `cells` map instead would put a sentence over a picture that
-     does not contain the strikes it is talking about — the same defect the
-     wall comment above records and refuses.
-
-     A null CELL IS NOT A ZERO in the sum, because it is not a zero anywhere
-     else in this function: `grid` writes null for a strike-expiry pair the
-     vendor returned nothing for, and adding it in as zero would let an
-     unmeasured column read as a measured balance.
-
-     THE SENTENCE IS ABOUT SIGN, WHICH IS THE PANEL'S SUBJECT. Where the front
-     expiry and the rest of the term carry gamma of opposite signs, that is
-     the reading — dealers long the front and short the back hedge in opposite
-     directions as the near expiry rolls off. Where they agree, the lead says
-     so plainly rather than manufacturing a flip. */
   const colNet = expiries.map((_, j) => {
     let sum = null;
     for (const row of grid) if (row[j] !== null) sum = (sum ?? 0) + row[j];
@@ -3188,9 +1735,7 @@ export function buildSurface(rows, {
     scaleCap,
     peak,
     clipped,
-    /* How much of the term structure is on screen. A surface showing 8 of 40
-       expiries is a window, and a window that does not say so reads as the
-       whole book. */
+
     expiriesShown: expiries.length,
     expiriesTotal: cells.size,
     strikesShown: strikes.length,

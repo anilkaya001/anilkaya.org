@@ -1,19 +1,9 @@
-/* =============================================================
-   particles.js — Data-Oriented gold particle field
-   Self-contained, dependency-free, GPU-composited 2D canvas.
-   Hardened for iOS Safari: alpha:true (screen-blend bug), a calm
-   twinkle under reduced-motion instead of a dead frame, bfcache/
-   focus resume hooks + watchdog, robust sizing, and a ?fxdebug
-   overlay. Toggles: ?srcover (force source-over), ?boost (2x).
-   ============================================================= */
 (() => {
   "use strict";
 
   const canvas = document.getElementById("field");
   if (!canvas) return;
-  // alpha:true — WebKit mishandles 'screen' compositing on an alpha-less
-  // backing store and renders the canvas black on iOS; a real alpha
-  // channel fixes it (the explicit trail fills still keep it dark).
+
   const ctx = canvas.getContext("2d", { alpha: true });
 
   const Q = location.search;
@@ -21,14 +11,9 @@
   const FORCE_SRC_OVER = /[?&]srcover/.test(Q);
   const BOOST = /[?&]boost/.test(Q) ? 2 : 1;
 
-  // Under reduced-motion we keep a CALM, non-translating twinkle. A single
-  // static frame is visually indistinguishable from "nothing rendered" on a
-  // real phone; steady in-place opacity respects WCAG 2.3.3 (which targets
-  // large-scale motion) while staying clearly alive.
   const REDUCE = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const calm = REDUCE;
 
-  // --- Tuning ---------------------------------------------------
   const area = window.innerWidth * window.innerHeight;
   const COUNT = Math.max(900, Math.min(3000, Math.round(area / 720)));
 
@@ -41,24 +26,10 @@
 
   const PALETTE = ["#af983f", "#da9100", "#c9c6ac", "#f1d27a", "#8a6f2e"];
   const LINK_COLOR = "#c9c6ac";
-/* THE TRAIL FADE ERASES; IT DOES NOT PAINT.
 
-   This was a translucent dark fill in source-over — rgba(8,7,4,0.40) across
-   the whole canvas every frame — which is a correct way to fade trails and a
-   fatal one for anything BEHIND the canvas: 0.40 per frame converges to
-   opaque in about a quarter of a second, so the page's shared ground (the
-   atmosphere gradient every other section shows) was painted out before a
-   reader could see it. The canvas is fixed and full-viewport, so what it hid
-   was the whole of Home's background.
-
-   `destination-out` fades by REMOVING alpha instead of adding ink: each
-   frame takes this fraction of what is already drawn, so the trail decays at
-   the same rate it always did and the untouched pixels stay transparent.
-   The ground shows through, and the trails are unchanged. */
   const TRAIL_FADE = 0.40;
   const TRAIL_FADE_OBSERVED = 0.60;
 
-  // --- DOD buffers ---------------------------------------------
   const pX = new Float32Array(COUNT), pY = new Float32Array(COUNT), pZ = new Float32Array(COUNT);
   const vX = new Float32Array(COUNT), vY = new Float32Array(COUNT), vZ = new Float32Array(COUNT);
   const pPhase = new Float32Array(COUNT);
@@ -85,9 +56,9 @@
     const vv = window.visualViewport;
     let w = r.width || (vv && vv.width) || window.innerWidth || document.documentElement.clientWidth;
     let h = r.height || (vv && vv.height) || window.innerHeight || document.documentElement.clientHeight;
-    if (!w || !h || w < 1 || h < 1) { requestAnimationFrame(resize); return; }  // retry until laid out
+    if (!w || !h || w < 1 || h < 1) { requestAnimationFrame(resize); return; }
     let dpr = Math.min(window.devicePixelRatio || 1, 2);
-    // keep the backing store inside WebKit's per-side (4096) / area (16.7M) caps
+
     while (dpr > 0.75 && (w * dpr > 4096 || h * dpr > 4096 || w * dpr * h * dpr > 16777216)) dpr -= 0.25;
     state.dpr = dpr; state.width = w; state.height = h;
     canvas.width = Math.round(w * dpr);
@@ -116,7 +87,7 @@
       } else if (i % 2 !== 0) {
         pEntangled[i] = i - 1;
       } else {
-        pEntangled[i] = i;   // odd COUNT: the last particle self-pairs instead of latching onto particle 0
+        pEntangled[i] = i;
       }
       pColor[i] = Math.random() * PALETTE.length | 0;
       const orbitSpeed = 6.0 / pEnergyLevel[i];
@@ -147,9 +118,8 @@
     const cosX = Math.cos(state.pitch), sinX = Math.sin(state.pitch);
 
     ctx.globalCompositeOperation = "destination-out";
-    ctx.globalAlpha = 1;   // a particle's depthAlpha leaks in from the prior frame and would dilute the trail clear
-    /* Only the ALPHA of this fill matters under destination-out; the colour
-       channels are ignored, and black is the conventional way to say so. */
+    ctx.globalAlpha = 1;
+
     ctx.fillStyle = "rgba(0, 0, 0, " +
       (state.isObserved ? TRAIL_FADE_OBSERVED : TRAIL_FADE) + ")";
     ctx.fillRect(0, 0, state.width, state.height);
@@ -176,7 +146,7 @@
       forceZ += (pX[i] * invDist) * orbitSpeed - vZ[i] * 0.05;
       forceY -= vY[i] * 0.1;
 
-      pPhase[i] += pEnergyLevel[i] * 0.05 * dtScale;     // keeps advancing -> twinkle
+      pPhase[i] += pEnergyLevel[i] * 0.05 * dtScale;
       if (!state.isObserved && !calm) {
         forceX += Math.sin(pPhase[i]) * 0.3 * pSpin[i];
         forceY += Math.cos(pPhase[i] * 2) * 0.15;
@@ -219,7 +189,6 @@
       }
     }
 
-    // Entanglement links
     ctx.lineWidth = 0.5;
     ctx.strokeStyle = LINK_COLOR;
     for (let i = 0; i < COUNT; i += 2) {
@@ -237,7 +206,6 @@
       }
     }
 
-    // Particles
     for (let i = 0; i < COUNT; i++) {
       if (!pVisible[i]) continue;
       const rs = sScale[i];
@@ -245,7 +213,7 @@
       ctx.fillStyle = PALETTE[pColor[i]];
       let jx = 0, jy = 0, a = depthAlpha;
       if (calm) {
-        a = depthAlpha * (0.4 + 0.45 * (0.5 + 0.5 * Math.sin(pPhase[i] * 0.6)));   // twinkle in place
+        a = depthAlpha * (0.4 + 0.45 * (0.5 + 0.5 * Math.sin(pPhase[i] * 0.6)));
       } else if (!state.isObserved) {
         const amt = Math.min(pUncertainty[i] * 0.3 * rs, 4.0);
         jx = (Math.random() - 0.5) * amt;
@@ -259,16 +227,6 @@
     }
   }
 
-  // One bad frame must never kill the field. Previously an exception anywhere
-  // in the body escaped before the rAF re-schedule below, so the loop died
-  // with state.running still true — start() then early-returned forever and
-  // the watchdog, which only tested that flag, could never revive it. The
-  // field stayed frozen for the rest of the page's life while rAF itself kept
-  // ticking. Catching here guarantees the chain is always rescheduled.
-  //
-  // The token orphans a superseded loop: if the watchdog ever restarts while
-  // an old chain is somehow still pending, the stale chain returns on its next
-  // callback instead of running a second physics pass over the same buffers.
   function frame(time, token) {
     if (token !== loopToken) return;
     frameCount++;
@@ -320,14 +278,12 @@
     window.addEventListener("orientationchange", () => setTimeout(resize, 250), { passive: true });
     window.addEventListener("load", resize);
     if (window.visualViewport) window.visualViewport.addEventListener("resize", onResize, { passive: true });
-    // settle iOS viewport / toolbar / bfcache geometry
+
     requestAnimationFrame(() => requestAnimationFrame(resize));
     setTimeout(resize, 400);
 
-    // Pointer "observe" (collapse the field) only makes sense when it moves.
     if (!calm) {
-      // Only the field itself "collapses" on press — taps on the topbar,
-      // links or the CTA must navigate cleanly without disturbing the field.
+
       const onUI = (e) => e.target && e.target.closest && e.target.closest(".topbar, a, button, input, label");
       window.addEventListener("pointerdown", (e) => { if (onUI(e)) return; state.isObserved = true; pointerMove(e); });
       window.addEventListener("pointermove", (e) => { if (state.isObserved) pointerMove(e); });
@@ -336,14 +292,10 @@
       canvas.addEventListener("touchstart", (e) => e.preventDefault(), { passive: false });
     }
 
-    // Resume hooks — visibilitychange misses iOS bfcache restores (pageshow).
     document.addEventListener("visibilitychange", () => { if (!document.hidden) start(); });
     window.addEventListener("focus", () => { if (!document.hidden) start(); });
     window.addEventListener("pageshow", () => { requestAnimationFrame(resize); if (!document.hidden) start(); });
-    // Liveness watchdog. Testing state.running alone was the bug: a loop that
-    // died mid-frame left the flag set, so this was a permanent no-op. Compare
-    // the painted-frame counter instead, and clear the stale flag so start()
-    // can actually revive the field.
+
     let seenFrames = -1;
     setInterval(() => {
       if (document.hidden) { seenFrames = frameCount; return; }

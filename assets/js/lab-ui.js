@@ -1,7 +1,3 @@
-/* =============================================================
-   lab-ui.js — learner dashboard, pathways, catalogue, and reset UI.
-   All learner state flows through IEWTStorage/Auth; no raw storage access.
-   ============================================================= */
 (() => {
   "use strict";
 
@@ -51,7 +47,7 @@
       }
       if (steps.length === 3) break;
     }
-    // A fully completed curriculum still offers a deterministic review plan.
+
     if (!steps.length && states[0]) {
       for (let index = 0; index < Math.min(3, states[0].topic.stages); index++) {
         steps.push({ state: states[0], index, review: true });
@@ -169,8 +165,7 @@
       if (review.eligible === 0) {
         reviewCount.textContent = "Start your mastery map";
         reviewSummary.textContent = "Complete a checkpoint, case, match, or code challenge to introduce a skill.";
-        // Accessible name must contain the visible "Mastery challenge" label
-        // and match the real /lab/challenge/ destination (WCAG 2.5.3).
+
         reviewCta.setAttribute("aria-label", "Mastery challenge: start your mastery map");
       } else {
         reviewCount.textContent = `${review.due} ${review.due === 1 ? "skill" : "skills"} due now`;
@@ -392,9 +387,6 @@
     }
   }
 
-  // This file is loaded with `defer`, so its DOM is parsed before execution.
-  // Initialize now even when a browser still reports `loading`: Safari can keep
-  // DOMContentLoaded pending behind an unrelated CSP-blocked deferred beacon.
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init, { once: true });
   }

@@ -1,34 +1,3 @@
-/* Does the card actually DRAW what the payload says?
-
-   Every other flows test asserts numbers. This one asserts pixels, because
-   this repository's chart bugs have not been arithmetic bugs — they have been
-   drawing bugs that left the arithmetic intact:
-
-     four panels fixed their viewBox at 560 units and emitted width="100%", so
-     a 9px axis label rendered at 4.6 CSS px on a phone. Nothing overflowed and
-     no number was wrong; the type was simply unreadable, silently;
-
-     a magnitude rail promised in its own comment to always mark the widest bar
-     and marked it on none of 109 emitted cards, because the mark landed
-     exactly on the edge its own filter discarded;
-
-     a gamma profile summed the wrong four field names, so every strike came to
-     exactly zero and the panel drew 54 correctly-priced bars of nothing;
-
-     a surface encoded magnitude in opacity and mapped every ordinary cell to
-     between 0.130 and 0.159 of it, and THIS FILE asserted that magnitude was
-     "encoded in opacity, not flattened" and passed — because it counted
-     distinct values instead of measuring their spread, against a fixture
-     whose cells all sat inside a 4x band. An assertion that cannot fail and a
-     fixture on which the naive answer is the right one are the same bug.
-
-   None of those is catchable without rendering. So this loads the REAL board
-   markup, the REAL stylesheet and a REAL emitted card, draws the surface at a
-   320px viewport, and counts what came out.
-
-   The surface is the panel under test because it is the newest and the densest
-   — 126 cells at 7px each is where a layout gives up first. */
-
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -42,9 +11,7 @@ import { FLOWS_PAGES } from "../shared/flows-pages.js";
 import { TICKER_PANELS } from "../shared/flows-panels.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-/* THE SUITE EMITS ITS OWN CARDS rather than depending on a directory some
-   earlier npm script may or may not have filled. A test whose fixture is a
-   side effect of another test passes locally and finds nothing in CI. */
+
 const SCRATCH = await mkdtemp(path.join(os.tmpdir(), "flows-render-"));
 execFileSync(process.execPath, [
   path.join(ROOT, "scripts/flows-pipeline.mjs"),
@@ -54,31 +21,16 @@ let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
-/* A surface with every feature the renderer has to handle: both signs, a hole
-   the vendor did not return, a pair it measured at exactly zero, and one cell
-   far past the colour cap.
-
-   THE MAGNITUDE FIELD IS HEAVY-TAILED, and that is the point of it. The
-   fixture this replaces put every ordinary cell in a 4x band — 1e6, 2e6, 3e6,
-   4e6 — which is not what a strike ladder looks like and, worse, is a shape
-   under which a magnitude encoding cannot be wrong in any way a test can see.
-   The renderer mapped all four of those to fill-opacities between 0.130 and
-   0.159 and the suite's own "magnitude is encoded in opacity" assertion
-   passed, because it counted distinct values rather than measuring their
-   spread. Real per-cell gamma decays like a gaussian out of the money and
-   again with time, so it spans two or three decades inside one grid; that is
-   the shape that separates a scale which earns its range from one that spends
-   it all on the top decade. */
 function fixture() {
   const rows = [];
   const expiries = ["2026-08-28", "2026-09-04", "2026-09-18", "2026-10-16"];
   for (let i = 0; i < 25; i++) {
     const k = 90 + i;
     for (const [j, e] of expiries.entries()) {
-      if (k === 97 && e === "2026-09-04") continue;          // the hole: never returned
+      if (k === 97 && e === "2026-09-04") continue;
       let g = 3e6 * Math.exp(-Math.pow((k - 100) / 4.5, 2)) / (1 + j * 0.8) * (k >= 100 ? 1 : -1);
-      if (k === 103 && j === 0) g = 9e9;                     // the one cell past the cap
-      if (k === 98 && e === "2026-09-18") g = 0;             // measured, and measured at nothing
+      if (k === 103 && j === 0) g = 9e9;
+      if (k === 98 && e === "2026-09-18") g = 0;
       rows.push({
         strike: String(k), expiry: e,
         call_gamma_ask: String(g * 0.6), call_gamma_bid: String(g * 0.4),
@@ -92,72 +44,31 @@ function fixture() {
 const panel = fixture();
 ok(panel.status === "ok", "the fixture builds a surface");
 
-/* ONE FILE NOW, AND THE PUBLIC SURFACE IS THE ONLY WAY IN.
-
-   There were two: the renderers in flows-panels.js, and flows-card.js's modal
-   that drew them over the board. This suite injected both and reached the
-   modal's private paint() through a hook added in memory. The modal is
-   retired, so flows-card.js is gone and the hook has nothing to hook.
-
-   What is left is the arrangement this suite already preferred — the drawers
-   reached through window.FlowsPanels, the same public surface the ticker page
-   uses, so an export that goes missing fails here rather than only on a page.
-   The module is an IIFE with no export, so it is injected as source; nothing
-   on disk is rewritten. */
 const panelsSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-panels.js"), "utf8");
 assert.ok(panelsSrc.lastIndexOf("})();") > 0, "flows-panels.js is still an IIFE");
-/* THE LIBRARY IS TWO FILES NOW, and this harness injects both because it is
-   testing the DRAWERS rather than the loader. Nine of the eleven live in
-   flows-drawers.js and reach the registry through FlowsPanels.need(), which
-   fetches over the network — something this page has no server for. Injecting
-   the second file is the same registration by a different route: __register
-   runs either way, and what this file asserts is what the drawers put on a
-   page, not how they got there. The loader itself is exercised by
-   tests/flows-ticker-contract.mjs against a real worker. */
+
 const drawersSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-drawers.js"), "utf8");
 assert.ok(/__register\(/.test(drawersSrc),
   "flows-drawers.js hands its drawers back through FlowsPanels.__register");
 
 const browser = await chromium.launch();
 try {
-  /* TWO VIEWPORTS. Every measurement here was written after a narrow-screen
-     bug, so 320 is the one that matters most — but the panels size their
-     viewBox from the host, which means a WIDE host is a different code path
-     and an untested one. A chart that clips at 320 and a chart that draws a
-     166px caption into a 900px canvas fail in opposite directions. */
+
   const page = await browser.newPage({ viewport: { width: 320, height: 900 } });
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
 
-  /* THE REAL MARKUP, /flows/ticker/'s now rather than the board's — the
-     board carried the dialog whose ten hand-written <section> blocks were the
-     containers these renderers target by id, and the ticker page emits the
-     same ids from shared/flows-panels.js. Still SHIPPED markup rather than a
-     stub, which is the property that matters: a stub would pass this suite
-     while the served page was missing a panel's own container. */
   const pageHTML = FLOWS_PAGES.tickerPage({ username: "test" })
     .replace(/<script[^>]*><\/script>/g, "")
     .replace("</body>", '<div id="h"></div></body>');
   await page.setContent(pageHTML);
   await page.addStyleTag({ path: path.join(ROOT, "assets/css/base.css") });
   await page.addStyleTag({ path: path.join(ROOT, "assets/css/flows.css") });
-  /* THE GRID SHIPS HIDDEN AND THE CONTROLLER UNHIDES IT WHEN A CARD LANDS. No
-     controller runs here, so without this line every .ft-panel host is
-     display:none and clientWidth is 0 — a measurement of nothing dressed as
-     one. Same trap a closed <dialog> set, which is why the sweeps below used
-     to open it first. */
+
   await page.evaluate(() => { document.getElementById("ftGrid").hidden = false; });
   await page.addScriptTag({ content: panelsSrc });
   await page.addScriptTag({ content: drawersSrc });
 
-  /* THE DRAWERS, DISPATCHED FROM THE REGISTRY RATHER THAN FROM A HOOK. The
-     sweep below called flows-card.js's private paint(), which chose which
-     panel got which slice of the card, and that file went with the dialog. Its
-     replacement is not a list of pairs typed here: it is the registry
-     INTERSECTED with what window.FlowsPanels exports, computed in the page, so
-     a renamed key or a dropped export moves the count and fails the assertion
-     below rather than quietly drawing one panel fewer. `__score` is the one
-     entry drawn from the card's TOP LEVEL rather than from panels[key]. */
   const DRAWN_HOSTS = await page.evaluate((all) => {
     const P = window.FlowsPanels;
     const pairs = all.filter(([, key]) =>
@@ -175,21 +86,12 @@ try {
     };
     return pairs;
   }, TICKER_PANELS.map((e) => [e.id, e.key]));
-  /* 13 -> 14: premiumTrack, the net-premium history panel this branch added.
-     Eleven panels with a drawer of their own, plus the three second-order
-     Greeks that share one.
 
-     AND THE REASON IT TOOK THIS LONG TO SAY SO. This suite runs after
-     flows-overview, which failed on the two commits before this one, so it
-     never executed against this branch at all until the overview went green —
-     the same ordering trap PR #91 hit, where a failure at suite 37 hid six
-     suites behind it. A count like this one breaks the moment the registry
-     grows and is silent until something ahead of it stops failing. */
   eq(DRAWN_HOSTS.length, 14,
      `fourteen registry panels are drawn by window.FlowsPanels — eleven with a drawer ` +
      `of their own plus the three second-order Greeks that share one (${
        DRAWN_HOSTS.length})`);
-  /* Through the module's own exported surface, not a private hook — see above. */
+
   await page.evaluate(() => {
     const P = window.FlowsPanels;
     window.__renderSurface = P.surface;
@@ -221,13 +123,10 @@ try {
       labelPx: label ? label.getBoundingClientRect().height : 0,
       cellW: cellRect.width, cellH: cellRect.height,
       pageOverflow: document.documentElement.scrollWidth > 320,
-      // Opacity must vary, or magnitude is not being encoded at all.
+
       opacities: new Set(Array.from(svg.querySelectorAll(".gs-cell:not(.is-zero)"))
         .map((n) => n.getAttribute("fill-opacity"))).size,
-      /* Shaded cells IN GRID ORDER. The renderer appends row-major and skips
-         nothing, so this list pairs one-to-one with the grid's non-null,
-         non-zero values and the magnitude behind each shade can be recovered
-         in the test rather than guessed at. */
+
       shades: Array.from(svg.querySelectorAll(".gs-cell:not(.is-zero)"))
         .map((n) => Number(n.getAttribute("fill-opacity"))),
       zeroCells: q(".gs-cell.is-zero"),
@@ -236,8 +135,7 @@ try {
       keySwatches: Array.from(svg.querySelectorAll(".gs-key-sw.is-pos"))
         .map((n) => Number(n.getAttribute("fill-opacity"))),
       keyLabels: Array.from(svg.querySelectorAll(".gs-key")).map((n) => n.textContent),
-      /* The key's sign swatch has to be the TEXTURE, drawn: a legend that
-         names a colour is a legend a greyscale reader cannot use. */
+
       keyHatched: Array.from(svg.querySelectorAll(".gs-key-sw.is-neg")).filter((sw) => {
         const b = sw.getBoundingClientRect();
         return Array.from(svg.querySelectorAll(".gs-hatch")).some((h) => {
@@ -247,8 +145,7 @@ try {
       }).length,
       aria: svg.getAttribute("aria-label") || "",
       priceTexts: Array.from(svg.querySelectorAll(".gs-price")).map((n) => n.textContent),
-      /* Every clip mark's own extent, so a mark on one cell can be shown to
-         stay on that cell. */
+
       clipBoxes: Array.from(svg.querySelectorAll(".gs-clip")).map((n) => [
         Math.abs(Number(n.getAttribute("x2")) - Number(n.getAttribute("x1"))),
         Math.abs(Number(n.getAttribute("y2")) - Number(n.getAttribute("y1"))),
@@ -258,9 +155,6 @@ try {
 
   ok(!r.error, "the surface renders an svg");
 
-  /* EVERY CELL IS ACCOUNTED FOR. Drawn cells plus explicit voids must equal
-     the grid — a renderer that silently skips a null leaves a hole that looks
-     exactly like a cell of zero gamma. */
   eq(r.cells + r.voids, panel.strikes.length * panel.expiries.length,
      "drawn cells plus voids reconcile against the grid");
   ok(r.voids >= 1, "the pair the vendor did not return is drawn as an explicit void");
@@ -268,26 +162,10 @@ try {
   eq(r.clips, panel.clipped, "every cell past the colour cap is marked, and only those");
   ok(r.opacities > 3, `magnitude is encoded in opacity, not flattened (${r.opacities} levels)`);
 
-  /* THE THIRD STATE. `is-pos` was assigned by `v < 0`, so a pair the vendor
-     measured at exactly zero was drawn as the palest LONG cell on the grid:
-     a sign the book does not have, at the one magnitude where sign has no
-     meaning, and at a shade that read as the smallest real cell rather than
-     as none. Not measured, measured at nothing, and measured at something are
-     three facts and the panel now draws three things. */
   eq(r.zeroCells, 1, "the pair the vendor measured at exactly zero is drawn as its own kind of cell");
   eq(r.zeroSigned, 0, "and carries NO sign class — zero is neither long nor short gamma");
   ok(r.zeroMarks >= 1, "with a mark of its own, so it cannot be mistaken for a void");
 
-  /* THE SCALE HAS TO EARN ITS RANGE.
-
-     Counting distinct fill-opacities cannot see the defect this panel had:
-     the shipped linear map put every ordinary cell of this grid between 0.130
-     and 0.159 — five "levels" spanning three hundredths of an opacity, all of
-     them indistinguishable from each other and nearly indistinguishable from
-     the 0.35 void. So measure the SPREAD, and measure it over the bulk rather
-     than over the outlier that a capped scale exists to contain: between the
-     first and ninth deciles of the drawn magnitudes, the shading must move
-     across most of the range it has. */
   {
     const mags = [];
     for (const row of panel.grid) for (const v of row) if (v !== null && v !== 0) mags.push(Math.abs(v));
@@ -299,19 +177,13 @@ try {
     ok(spread >= 0.4,
        `the shading spends its range on the cells rather than on the outlier ` +
        `(interdecile opacity spread ${spread.toFixed(3)} over ${bulk.length} cells)`);
-    /* AND IT IS MONOTONIC. A ramp that separates cells but ranks them wrongly
-       is worse than a flat one: it looks like a reading. */
+
     const pairs = mags.map((m, i) => [m, r.shades[i]]).sort((a, b) => a[0] - b[0]);
     let inversions = 0;
     for (let i = 1; i < pairs.length; i++) if (pairs[i][1] < pairs[i - 1][1] - 1e-9) inversions++;
     eq(inversions, 0, "and a bigger cell is never drawn paler than a smaller one");
   }
 
-  /* THE ENCODING NEEDS A DECODER. "Magnitude by opacity" with nothing on the
-     panel to read a shade against is not a quantity, it is a mood. The key
-     draws the steps themselves, and its two labels must be the same numbers
-     the note states — a key and a sentence that disagree are worse than
-     either alone. */
   eq(r.keySwatches.length, 5, "the shading key draws every step of the ramp");
   eq(new Set(r.keySwatches).size, 5, "each step at its own shade");
   ok(r.keySwatches.every((v, i, a) => i === 0 || v > a[i - 1]),
@@ -327,9 +199,6 @@ try {
      "drawing the texture itself as the swatch rather than naming a colour for it — " +
      "a legend whose sign key is a hue is a legend a greyscale reader cannot use");
 
-  /* role="img" AND NO LABEL is a picture a screen reader announces as
-     "image". 126 cells cannot be read out, so the label carries what the
-     legend carries. */
   ok(/strikes/.test(r.aria) && /expir/.test(r.aria),
      `the surface has an accessible label naming both of its axes (${r.aria.slice(0, 80)})`);
   ok(/hatched/.test(r.aria), "and says what the hatch means, since a screen reader cannot see it");
@@ -337,18 +206,6 @@ try {
   eq(r.expLabels, panel.expiries.length, "every expiry column is labelled");
   ok(r.priceLabels >= 3, "the price ladder is labelled");
 
-  /* THE LABELS MUST NOT OUTNUMBER THE READING.
-
-     The stride was "as many labels as fit without overlapping" — ceil(13 /
-     rowH) — and a 21-rung ladder at 15 units a rung fits twenty-one of them,
-     so the stride came out 1 and every strike on the grid carried a price.
-     Twenty near-identical numbers down the side, all at one weight, is not a
-     ladder; it is a second dataset competing with the cells. Legibility was
-     never the binding constraint. So: a budget, and separately a guarantee
-     that the levels which actually mean something are inside it. */
-  /* Nine is the design's own ceiling — a ruler budget of five, plus the three
-     levels that are guaranteed, plus a little slack for the two ends. The
-     shipped renderer draws seven here; the defect drew twenty-one. */
   ok(r.priceLabels <= 9,
      `the price rail is sparse rather than exhaustive ` +
      `(${r.priceLabels} labels for ${panel.strikes.length} strikes)`);
@@ -361,11 +218,6 @@ try {
        `(${r.priceTexts.join(" ")})`);
   }
 
-  /* A MARK ON A CELL STAYS ON ITS CELL. The clip slash was drawn corner to
-     corner, so its angle and its length were functions of the cell's aspect
-     ratio — and cells are 44 x 15 at a phone width and 240 x 15 on a desktop.
-     On a wide card the mark stopped being a mark on one cell and became a
-     long shallow rule running across the grid. */
   for (const [dx, dy] of r.clipBoxes) {
     ok(dx <= r.cellW + 0.5 && dy <= r.cellH + 0.5,
        `the off-scale mark stays inside its own cell (${dx.toFixed(1)}x${dy.toFixed(1)} ` +
@@ -377,28 +229,21 @@ try {
   eq(r.putWall, 1, "the put wall is marked");
   ok(r.stats >= 3, "the legend names spot and both walls");
   ok(/capped at/.test(r.note), "the note says the colour scale is capped");
-  /* Singular and plural must AGREE with the count, both branches. The fixture
-     clips exactly one cell, so this exercises the singular; the plural branch
-     is driven below. */
+
   eq(panel.clipped, 1, "the fixture clips exactly one cell");
   ok(/one cell runs past it/.test(r.note) && /and is marked/.test(r.note),
      "one clipped cell is described in the singular");
   ok(!/6 of 6|4 of 4/.test(r.note), "it does not report a window that windows nothing");
 
-  /* THE FOUR-PANEL BUG. A viewBox fixed in absolute units with width="100%"
-     scales the type down with the drawing: 9px became 4.6 CSS px at this
-     viewport, unreadably and silently, because nothing overflows. The panel
-     must size its viewBox from its host so one unit stays one CSS pixel. */
   eq(r.svgWidth, 320, "the surface fills the viewport width");
   ok(r.labelPx >= 8, `axis type renders at its intended size, not scaled down (${r.labelPx}px)`);
   ok(r.cellH >= 6.5, `cells stay tall enough to be cells (${r.cellH}px)`);
   ok(r.cellW >= 6.5, `and wide enough (${r.cellW}px)`);
   eq(r.pageOverflow, false, "and nothing overflows a 320px viewport");
 
-  /* THE PLURAL BRANCH, so neither half of the sentence can rot unseen. */
   const many = await page.evaluate(({ panel }) => {
     const host = document.getElementById("h");
-    // Two cells far past the cap rather than one.
+
     const p2 = JSON.parse(JSON.stringify(panel));
     p2.clipped = 2;
     p2.grid[0][0] = p2.scaleCap * 40;
@@ -413,14 +258,6 @@ try {
      "two clipped cells are described in the plural");
   ok(many.clips >= 2, "and both are actually marked on the grid");
 
-  /* A SURFACE PUBLISHED WITHOUT A COLOUR SCALE.
-
-     The shading ramp, the key and the off-scale marks all hang off scaleCap,
-     and the Worker serves new assets the moment code merges while the next
-     pipeline run is hours away — so a card that predates a field is a
-     certainty, not a hypothetical. The failure to avoid is not a crash: it is
-     a grid drawn at one flat weight with a key beside it, which reads as a
-     measurement of uniformity, and a cap sentence with an em dash in it. */
   {
     const none = await page.evaluate(({ panel }) => {
       const host = document.getElementById("h");
@@ -444,38 +281,10 @@ try {
        `with no em-dashed or NaN cap sentence left behind (${none.note.slice(0, 120)})`);
   }
 
-  /* ---------- EVERY PANEL, from a real emitted card -------------- */
-
-  /* The surface assertions above are specific. This sweep is general, and it
-     is the part that scales: ten renderers over five real cards, and the bugs
-     this repository has actually shipped — type scaled to 4.6 CSS px, a mark
-     that landed on none of 109 cards, 54 bars of zero — were all invisible to
-     every numeric test and all visible the moment something drew them.
-
-     A real emitted dry-run card is used rather than a hand-built one, so the
-     panels see the shapes the pipeline actually produces, including the ones
-     that come back "unavailable". */
   {
     const emitted = fs.readdirSync(SCRATCH).filter((f) => f.startsWith("dry-card-")).sort();
     ok(emitted.length > 0, `the dry run emitted cards to sweep (${SCRATCH})`);
 
-    /* ---- EVERY DRAWER ASKS THE REGISTRY'S QUESTION -------------------
-
-       Both surfaces drew the SAME ten renderers — that is the whole reason
-       flows-panels.js exists — and each renderer takes the question from its
-       caller with a hardcoded fallback. /flows/ticker/ passed the registry's;
-       the dialog passed nothing, so all ten fell back and the two surfaces
-       headed one drawing with two different sentences. The priced move is the
-       plainest of them: the page asked "What move is the option market pricing
-       over the stated horizon?" and the dialog asked "What move is priced over
-       a fixed horizon, and is that band rich against what this stock has
-       actually been delivering?".
-
-       CHECKED AGAINST THE REGISTRY, NOT AGAINST A LIST HERE. shared/ is never
-       served, so the question reaches the browser as a data-question attribute
-       and this reads what was DRAWN back out of the DOM — a second list of
-       ten strings in this file would be the drift the registry exists to
-       close, one level up. */
     {
       const card = JSON.parse(fs.readFileSync(path.join(SCRATCH, emitted[0]), "utf8"));
       const drawn = await page.evaluate(({ card, hosts }) => {
@@ -501,10 +310,6 @@ try {
       }
     }
 
-    /* SEVERAL CARDS, NOT ONE. Label length is a function of the DATA — the
-       clipped sentence this sweep first caught was 334px wide only because
-       that card's reading happened to be the long branch. A one-card sweep
-       measures one set of strings. */
     const sample = emitted.slice(0, 5);
     for (const file of sample) {
     const card = JSON.parse(fs.readFileSync(path.join(SCRATCH, file), "utf8"));
@@ -520,24 +325,20 @@ try {
         if (!host) { errors.push(id + ": no host element"); continue; }
         const dead = !!host.querySelector(".fc-dead");
         const svgs = Array.from(host.querySelectorAll("svg"));
-        // The smallest rendered text height anywhere in this panel.
+
         let minText = Infinity;
         for (const t of host.querySelectorAll("text")) {
           const h = t.getBoundingClientRect().height;
           if (h > 0 && h < minText) minText = h;
         }
-        // Does any svg draw outside its own box? SVG clips silently.
+
         let clipped = false;
         for (const svg of svgs) {
           const box = svg.getBoundingClientRect();
           for (const t of svg.querySelectorAll("text")) {
             const r = t.getBoundingClientRect();
             if (r.width === 0) continue;
-            /* TWO PIXELS, not zero. Text metrics carry sub-pixel rounding and
-               a glyph's ink box is not its advance box, so a strict edge test
-               reports overhang on captions that are visually flush. Two pixels
-               is below anything a reader can see and far below the 23px
-               overhang this sweep was written after. */
+
             if (r.left < box.left - 2 || r.right > box.right + 2) { clipped = true; break; }
           }
         }
@@ -547,26 +348,12 @@ try {
           minText: minText === Infinity ? null : Math.round(minText * 10) / 10,
           clipped,
           widths: svgs.map((s) => Math.round(s.getBoundingClientRect().width)),
-          /* [viewBox width, rendered CSS width] per svg. The invariant the
-             host-sizing fix exists to hold is that these are the SAME: one
-             viewBox unit is one CSS pixel. UNROUNDED, because the assertion
-             downstream is "within a pixel" and rounding would hand it a number
-             already half a pixel off — turning its tolerance into a second
-             one. A 282.5px host drawn at 282 units rounds to 283 and reads as
-             a whole pixel of error that is not there. */
+
           scales: svgs.map((s) => {
             const vb = (s.getAttribute("viewBox") || "").split(/\s+/);
             return [Number(vb[2]), s.getBoundingClientRect().width];
           }),
-          /* THE DIMENSION THE WIDTH CHECK STRUCTURALLY CANNOT SEE. A chart
-             carrying preserveAspectRatio="none" over width:100% and a fixed
-             height scales x and y INDEPENDENTLY — so it gets its width
-             exactly right, which is all `scales` above measures, while the
-             drawing inside it is stretched. A round marker becomes an
-             ellipse and a price line's slope, the only thing it
-             communicates, is distorted by whatever the ratio happens to be.
-             renderContext carried `none` while the five other SVGs in that
-             file carried `meet`. */
+
           par: svgs.map((s) => s.getAttribute("preserveAspectRatio") || "(default)"),
         });
       }
@@ -579,11 +366,7 @@ try {
        `${who}: every panel the renderer targets exists in the served markup (${(swept.errors || []).join("; ")})`);
 
     for (const p of swept.panels) {
-      /* NO CHART SCALES ITS AXES INDEPENDENTLY. `none` is the one value that
-         breaks the one-viewBox-unit-per-CSS-pixel invariant while leaving
-         every width assertion in this file passing, which is exactly why it
-         survived: the defect is invisible to the measurement that was
-         watching for it. */
+
       for (const par of p.par || []) {
         ok(par !== "none",
            `${who}/${p.id}: no chart stretches — preserveAspectRatio="none" scales ` +
@@ -591,43 +374,22 @@ try {
            "distorted, and every width-based assertion here would still pass");
       }
 
-      /* NO PANEL IS SILENTLY BLANK. A host with no children is neither a chart
-         nor an explanation — it is the state a reader cannot distinguish from
-         a broken page, and it is what an unhandled tagged-union branch
-         produces. Either it drew something or it said why it could not. */
       ok(!p.empty, `${who} ${p.id}: renders either content or an explicit unavailable notice`);
 
-      if (p.dead) continue;                    // an unavailable panel has no chart to measure
+      if (p.dead) continue;
 
-      /* THE FOUR-PANEL BUG, swept across all ten. A viewBox fixed in absolute
-         units with width="100%" scales the type down with the drawing: 9px
-         became 4.6 CSS px at this viewport, silently, because nothing
-         overflows. */
       if (p.minText !== null) {
         ok(p.minText >= 8,
            `${who} ${p.id}: axis type renders at its intended size, not scaled down (${p.minText}px)`);
       }
-      /* SVG CLIPPING IS SILENT. A label that runs off its own canvas simply
-         is not there, and the panel looks fine. */
+
       eq(p.clipped, false, `${who} ${p.id}: draws no text outside its own canvas`);
 
       for (const w of p.widths) {
         ok(w > 0 && w <= 320,
            `${who} ${p.id}: sizes its drawing to the viewport rather than past it (${w}px)`);
       }
-      /* ONE VIEWBOX UNIT IS ONE CSS PIXEL — the actual invariant the
-         host-sizing fix exists to hold, and the only one that catches this
-         defect in BOTH directions. preserveAspectRatio="xMidYMid meet" with a
-         fixed height attribute means a drawing can never be magnified, only
-         shrunk or letterboxed, so an assertion on rendered type size catches a
-         viewBox that is too WIDE (type shrinks) and is structurally incapable
-         of catching one that is too NARROW (the drawing is centred in empty
-         space at its intended size). Comparing the two widths catches both.
 
-         WITHIN A PIXEL, NOT WITHIN 15%. The band was 15% because panelWidth
-         clamped to [300, 760]; both clamps are gone, and a tolerance wide
-         enough to hold a defect is not a measurement of the invariant it
-         names. */
       for (const [vbW, cssW] of p.scales) {
         if (!(vbW > 0) || !(cssW > 0)) continue;
         ok(Math.abs(vbW - cssW) < 1,
@@ -642,11 +404,8 @@ try {
     }
   }
 
-  /* ---------- the same sweep at a DESKTOP width ------------------ */
   {
-    /* The panels size their viewBox from the host, so a wide host is a
-       genuinely different layout, not a scaled one — the whole point of that
-       fix. It has never been measured. */
+
     await page.setViewportSize({ width: 1280, height: 1000 });
     const emitted = fs.readdirSync(SCRATCH).filter((f) => f.startsWith("dry-card-")).sort();
     const card = JSON.parse(fs.readFileSync(path.join(SCRATCH, emitted[0]), "utf8"));
@@ -678,15 +437,7 @@ try {
             const vb = (s.getAttribute("viewBox") || "").split(/\s+/);
             return [Number(vb[2]), s.getBoundingClientRect().width];
           }),
-          /* THE DIMENSION THE WIDTH CHECK STRUCTURALLY CANNOT SEE. A chart
-             carrying preserveAspectRatio="none" over width:100% and a fixed
-             height scales x and y INDEPENDENTLY — so it gets its width
-             exactly right, which is all `scales` above measures, while the
-             drawing inside it is stretched. A round marker becomes an
-             ellipse and a price line's slope, the only thing it
-             communicates, is distorted by whatever the ratio happens to be.
-             renderContext carried `none` while the five other SVGs in that
-             file carried `meet`. */
+
           par: svgs.map((s) => s.getAttribute("preserveAspectRatio") || "(default)"),
         });
       }
@@ -700,9 +451,7 @@ try {
       if (p.minText !== null) {
         ok(p.minText >= 8, `wide ${p.id}: type is not scaled down (${p.minText}px)`);
       }
-      /* THE SAME INVARIANT AT A WIDE HOST, which is where it bites the other
-         way: a viewBox NARROWER than its host letterboxes, drawing at its
-         intended size inside empty margins, so no type measurement can see it. */
+
       for (const [vbW, cssW] of p.scales) {
         if (!(vbW > 0) || !(cssW > 0)) continue;
         ok(Math.abs(vbW - cssW) < 1,
@@ -714,19 +463,9 @@ try {
     await page.setViewportSize({ width: 320, height: 900 });
   }
 
-  /* ---------- THE SESSION PATH DRAWS BOTH LEGS ------------------
-     buildPath has always emitted [cumDelta, cumPremium] pairs and the renderer
-     read p[0], so about 78 premium points per card were serialised, shipped
-     and dropped. Nothing numeric could see that — the payload was correct and
-     the panel drew a perfectly good curve of half of it. Only a render test
-     can. */
   {
     const t0 = Date.parse("2026-08-24T13:30:00Z");
-    /* A SESSION WHERE THE TWO LEGS DISAGREE, which is the whole reason the
-       premium leg is worth its ink: delta is worked steadily all day while
-       premium reverses after lunch — money going into structure rather than
-       into a direction. A fixture where both legs are monotone and parallel
-       would let a renderer plot one series twice and still pass. */
+
     const ticks = Array.from({ length: 390 }, (_, i) => ({
       tape_time: new Date(t0 + i * 60000).toISOString(),
       net_delta: String(i > 260 ? 800 : 60),
@@ -750,11 +489,7 @@ try {
       for (const st of host.querySelectorAll(".fc-stat")) {
         stats[st.querySelector("dt").textContent] = st.querySelector("dd").textContent;
       }
-      /* The topmost point each leg reaches. Both legs' largest absolute
-         readings are POSITIVE in this fixture, so under the panel's stated
-         normalisation — each leg by its own extreme, sharing only the zero
-         rule — the two must peak at exactly the same height. Under one shared
-         axis they cannot. */
+
       const ys = (n) => (n.getAttribute("d").match(/ ([\d.]+)(?= |$)/g) || []).map((t) => Number(t));
       return {
         deltaTop: line ? Math.min(...ys(line)) : null,
@@ -777,28 +512,20 @@ try {
     }, { path });
 
     ok(!r.error, "the session path renders an svg");
-    /* THE DEFECT ITSELF: a second path element, with its own geometry. Identical
-       `d` strings would mean the same series was plotted twice. */
+
     ok(r.premD && r.premD.length > 20, "the cumulative-premium leg is drawn at all");
     ok(r.deltaD && r.deltaD !== r.premD,
        "and it is its OWN series — the two legs do not share a path");
 
-    /* IDENTITY WITHOUT HUE. This codebase hatches short-gamma cells because
-       colour is the last channel, not the first; two lines separated only by
-       stroke colour fail a greyscale print and a colour-blind reader. */
     ok(r.premDash && !r.deltaDash,
        `the premium leg is dashed and the delta leg is not, so the two survive greyscale ` +
        `(delta ${r.deltaDash}, premium ${r.premDash})`);
     eq(r.endDot, 1, "the delta leg ends in a filled disc");
     eq(r.endSquare, 1, "and the premium leg in a hollow square — a second non-colour channel");
-    /* A path with no stylesheet defaults to fill:black, stroke:none — a blob.
-       The renderer ships before its CSS does, every time. */
+
     eq(r.deltaFill, "none", "the delta leg sets fill:none as an attribute, not only in CSS");
     eq(r.premFill, "none", "and so does the premium leg");
 
-    /* BOTH SCALES ARE STATED. The legs are contracts of delta and dollars —
-       not comparable — so the panel may not draw them without saying what a
-       full deflection is worth in each. */
     ok(/contracts at full deflection/.test(r.legend),
        "the legend states the delta leg's scale");
     ok(/\$[\d.]+[KMB]? at full deflection/.test(r.legend),
@@ -806,19 +533,10 @@ try {
     ok(r.swatches >= 2,
        "and draws the strokes themselves as swatches rather than naming colours");
 
-    /* THE TWO SCALES ARE REALLY TWO. The legend claims each leg is normalised
-       by its own extreme; this is the geometry that claim commits to. Both
-       legs' largest absolute readings are positive here, so both must reach
-       the same top of the plot. Drawn on one shared axis the dollar leg would
-       dwarf or vanish against the delta leg and this fails — and a legend
-       stating a scale the drawing does not use is a worse lie than no legend. */
     ok(r.deltaTop !== null && r.premTop !== null && Math.abs(r.deltaTop - r.premTop) <= 0.5,
        `each leg is scaled by its own extreme and both reach full deflection ` +
        `(delta top ${r.deltaTop}, premium top ${r.premTop})`);
 
-    /* THE CENTROID IS DRAWN AT THE TIME IT MEASURES, not at a decorative
-       position: the rule must land where the movement-weighted mean minute
-       actually is. */
     const wantX = 10 + path.centroid * (r.vb - 20);
     ok(Math.abs(r.centroidX - wantX) <= 1,
        `the centroid rule is drawn at the minute it measures ` +
@@ -826,8 +544,6 @@ try {
     ok(path.centroid > 0.55,
        "and the fixture's centroid is late enough that a hardcoded mid-session rule would miss");
 
-    /* THE THREE NUMBERS THEMSELVES. Family D is these; the panel could not
-       state them at all. */
     eq(r.stats["Minutes with the direction"], Math.round(path.persistence * 100) + "%",
        "persistence is printed, not merely computed");
     eq(r.stats["Busiest 5% of minutes"], Math.round(path.concentration * 100) + "%",
@@ -841,9 +557,6 @@ try {
     ok(/premium/.test(r.aria), "the accessible label mentions both legs");
   }
 
-  /* A PREMIUM LEG OF ZEROS IS NOT A MEASUREMENT. A flat line along the axis
-     reads as a finding — "premium went nowhere all day" — when the truth may
-     be that nothing was recorded. */
   {
     const t0 = Date.parse("2026-08-24T13:30:00Z");
     const flatPrem = buildPath(Array.from({ length: 90 }, (_, i) => ({
@@ -868,9 +581,6 @@ try {
        "absent series is the same false measurement as the flat line itself");
   }
 
-  /* A REAL v1 CARD, published before any of this existed. The transitional
-     window is a certainty: the Worker serves new assets the moment code
-     merges and the next pipeline run is hours later. */
   {
     const v1 = JSON.parse(fs.readFileSync(path.join(ROOT, "tests/fixtures-flows-v1-card.json"), "utf8"));
     eq(v1.v, 1, "the legacy fixture is still a v1 card");
@@ -894,10 +604,6 @@ try {
       return out;
     }, { card: v1 });
 
-    /* NOT MEASURED, NEVER ZERO. A published 0 persistence is "not one minute
-       moved with the day" and a published 0.5 centroid is "the weight sat
-       exactly at midday" — both real, unusual readings, and both would be
-       manufactured entirely by the card's age. */
     eq(r.stats["Minutes with the direction"], "—",
        "a pre-signature card shows an em dash for persistence, not a zero");
     eq(r.stats["Busiest 5% of minutes"], "—", "nor a zero concentration");
@@ -905,53 +611,26 @@ try {
     eq(r.centroidRules, 0, "and draws no centroid rule at a position it does not know");
     ok(/built before the path signature was published/.test(r.pathText),
        "and says so, rather than leaving three em dashes unexplained");
-    /* The premium leg is v1 too and it was ALWAYS on the wire, so it must
-       still draw: only the fields whose meaning is unknown are withheld. */
+
     eq(r.stats["Net premium"] === "—", false,
        "while the premium total, which v1 did publish, still renders");
 
     ok(!r.scoreStats.includes("OTM share of directional flow"),
        "a card with no quality pair shows no quality stats");
-    /* SCOPED TO THE NOTES, AND NAMED. The original match — /not published on
-       this card/ over the whole panel's textContent — was satisfied by the
-       legacy gauge LABEL (renderScore appends exactly that phrase to every
-       unsigned axis on a v1 card), so deleting the explanatory note entirely
-       left it green: an assertion about an explanation that a decoration
-       could satisfy. On a v1 card the explanation is the legacy note, so
-       that note is what must exist. */
+
     ok(r.scoreNotes.some((t) => /built before the volatility and quality readings became/.test(t)),
        "and a NOTE explains the suppression reasons were not measured rather than printing zeros");
     ok(!/\b0%\b/.test(r.scoreText),
        "with no zero anywhere in that explanation — zero is the BEST reading of both");
   }
 
-  /* ---------- THE CONVEXITY AXIS IS A RULER ---------------------
-
-     The magnitude rail was built from the decades PLUS tau and vmax — the
-     60th percentile of this book's bars and its single widest one — so a live
-     card carried
-
-         −505K  −100K  −4K   4K   100K  505K
-
-     and a reader was left to work out what is special about four thousand.
-     Two of those three magnitudes are readings, not graduations, and the
-     third (10K) had been squeezed out by the smaller of them because the
-     acceptance pass ran from the bottom up.
-
-     The fixture is shaped to reproduce exactly that: a sharply peaked book
-     whose widest bar is 503,823 and whose 60th percentile is a few thousand,
-     so every number the old rail would print is unround. */
   {
     const ladder = (shortPeak) => {
       const rows = [];
       for (let i = 0; i <= 40; i++) {
         const k = 60 + i * 0.5;
         const bell = Math.exp(-Math.pow((k - 70.12) / 1.7, 2));
-        /* shortPeak === null is a book with no short strikes AT ALL. It is
-           not the same as a short peak of zero, which would draw twenty bars
-           of measured nothing and move the quantile the whole axis is built
-           on — the difference between "no short side" and "a short side of
-           zero" is exactly the kind of thing a fixture gets wrong quietly. */
+
         const g = shortPeak !== null && k < 70.12
           ? -(shortPeak * bell + shortPeak * 0.05)
           : 505432 * bell + 137;
@@ -962,13 +641,7 @@ try {
       }
       return buildGammaProfile(rows, { spot: 71.89 });
     };
-    /* THREE BOOKS, because the rail fails differently on each. A balanced one
-       exercises the ladder itself; one with no short strikes at all is where
-       the old guarantee printed a magnitude into an empty half-plot; and a
-       LOPSIDED one — the short side 0.04% of the long, which is the case the
-       zero rule's own 18/82 clamp exists for — is where it printed a
-       magnitude the short side cannot reach even though that side has bars.
-       Neither of the first two can see that third failure. */
+
     const twoSided = ladder(505432), allLong = ladder(null), lopsided = ladder(200);
     const vmax = Math.max(...twoSided.bars.map((b) => Math.abs(b.g)));
     const vmant = vmax / Math.pow(10, Math.floor(Math.log10(vmax)));
@@ -977,12 +650,7 @@ try {
        `built from this book's own numbers cannot accidentally print a round one`);
 
     const gr = await page.evaluate(({ twoSided, allLong, lopsided }) => {
-      /* THE REAL PANEL HOST, not the bare probe div. The rail is sized as a
-         fraction of the canvas and the canvas is sized from the host, so a
-         320px scratch div and the shipped panel's own column are different
-         layouts — and the narrower one is the one a phone gets. This is
-         .ft-panel's host on /flows/ticker/, which is where the panel is
-         actually read; it was the dialog's before the dialog was retired. */
+
       const host = document.getElementById("ftGamma");
       const draw = (gp) => {
         window.__renderGamma(host, gp, {
@@ -1011,14 +679,12 @@ try {
           plotTop: num(svg.querySelector(".gp-zero"), "y1"),
           plotBottom: num(svg.querySelector(".gp-zero"), "y2"),
           note: (host.querySelector(".fc-note") || {}).textContent || "",
-          /* THE PANEL'S SHAPE, not only its drawing. The reading, the notes
-             that qualify it, the method behind the disclosure and what a
-             find-in-page still sees with that disclosure shut. */
+
           leads: Array.from(host.querySelectorAll(".fc-reading.is-lead"))
             .map((n) => n.textContent.replace(/\s+/g, " ").trim()),
           leadBeforeChart: (() => {
             const lead = host.querySelector(".fc-reading.is-lead");
-            /* 4 === DOCUMENT_POSITION_FOLLOWING: the chart comes after it. */
+
             return !!(lead && (lead.compareDocumentPosition(svg) & 4) === 4);
           })(),
           notes: Array.from(host.querySelectorAll(".fc-note")).map((n) => ({
@@ -1028,11 +694,7 @@ try {
             open: n.closest("details") ? n.closest("details").open : true,
           })),
           howSummary: (host.querySelector("details.ft-how > summary") || {}).textContent || "",
-          /* READ OFF THE REAL flows.css, added at the top of this file,
-             rather than assumed. `.ft-how` uses bare selectors, and getting
-             that wrong fails silently: `list-style: none` with a ::before the
-             selector never reaches is a control that opens on click and shows
-             nothing saying it can be opened. */
+
           howChrome: (() => {
             const sm = host.querySelector("details.ft-how > summary");
             if (!sm) return null;
@@ -1041,9 +703,7 @@ try {
                      cursor: cs.cursor, tab: sm.tabIndex, size: parseFloat(cs.fontSize) };
           })(),
           all: host.textContent.replace(/\s+/g, " "),
-          /* How far the longest bar on each side of the zero rule reaches.
-             Position IS magnitude on this axis, so no graduation may be drawn
-             beyond it. */
+
           reach: Array.from(svg.querySelectorAll(".gp-bar")).reduce((acc, b) => {
             const x = num(b, "x"), w = num(b, "width");
             const z = num(svg.querySelector(".gp-zero"), "x1");
@@ -1056,9 +716,6 @@ try {
       return { two: draw(twoSided), long: draw(allLong), lop: draw(lopsided) };
     }, { twoSided, allLong, lopsided });
 
-    /* EVERY GRADUATION COMES OFF THE 1-2-5 LADDER. compact() rounds, so this
-       parses the printed string back: "500K" is 5e5 and passes, "505K" is
-       5.05e5 and does not. */
     const parseMark = (t) => {
       const m = /^(\d+(?:\.\d+)?)([KMB])?$/.exec(t.replace(/−/, ""));
       if (!m) return NaN;
@@ -1071,15 +728,7 @@ try {
       ok(Math.abs(mant - Math.round(mant * 10) / 10) < 1e-9 && [1, 2, 5].includes(Math.round(mant)),
          `"${t.label}" is a round graduation and not a reading off this book's own data`);
     }
-    /* THE GRADUATION NEAREST THE WIDEST BAR ALWAYS SURVIVES — on every book,
-       which is the only form of that promise worth making. The old rail kept
-       it with a special case and accepted marks from the SMALLEST up, so a
-       mark near the knee claimed its space first and blocked the decade above
-       it; on a narrow canvas that is how the top graduation disappeared
-       altogether. Taking the biggest first is what makes the promise
-       structural. Checked on all three books because the failure is a
-       function of how much room is left after the small marks have taken
-       theirs, which is different on each. */
+
     const topLadder = (bars) => {
       const v = Math.max(...bars.map((b) => Math.abs(b.g)));
       const dec = Math.pow(10, Math.floor(Math.log10(v)));
@@ -1095,23 +744,11 @@ try {
          `(wanted ${want}, got ${g.ticks.map((t) => t.label).join(" ") || "nothing"})`);
     }
 
-    /* POSITION IS MAGNITUDE ON THIS AXIS. On a book with no short strikes the
-       whole left of the zero rule is a region no bar can reach, and the old
-       rail clamped its guaranteed −vmax mark to the left edge and labelled it
-       — printing "−505K" at a place where −505K is not. */
     eq(gr.long.negBars, 0, "the all-long fixture really has no short strikes");
     eq(gr.long.ticks.filter((t) => t.label.startsWith("−")).length, 0,
        `and the axis names no negative magnitude on it ` +
        `(${gr.long.ticks.map((t) => t.label).join(" ")})`);
 
-    /* THE SAME DEFECT ON A SIDE THAT DOES HAVE BARS, which is the case
-       neither of the two above can see. The lopsided book's short side runs
-       to a few tens of thousands while the long side runs to half a million,
-       so the ladder produces marks the short side cannot reach — and the old
-       code clamped its guaranteed −vmax to plotL + 2 and labelled it there.
-       The invariant is the axis's own premise: distance from the zero rule IS
-       magnitude, so a graduation past the longest bar on its own side is a
-       magnitude drawn where that magnitude is not. */
     for (const [who, g] of [["lopsided", gr.lop], ["balanced", gr.two], ["all-long", gr.long]]) {
       for (const t of g.ticks) {
         const d = Math.abs(t.x - g.zeroX);
@@ -1121,18 +758,14 @@ try {
            `book (${d.toFixed(1)} against ${reach.toFixed(1)})`);
       }
     }
-    /* Measured on the DATA, not on the drawing: the whole point of a log axis
-       is that a 2500:1 spread in gamma is a small difference in pixels, so a
-       pixel-side non-vacuity check would be checking the wrong thing. */
+
     const shortest = Math.max(...lopsided.bars.filter((b) => b.g < 0).map((b) => -b.g), 0);
     const longest = Math.max(...lopsided.bars.map((b) => b.g));
     ok(shortest > 0 && longest > shortest * 100,
        `and the lopsided fixture really is lopsided, so that check is not vacuous ` +
        `(short side peaks at ${shortest.toFixed(0)}, long side at ${longest.toFixed(0)})`);
     ok(gr.lop.negBars > 0, "while still drawing short bars, which is what makes it the harder case");
-    /* And where both sides DO carry bars, a magnitude and its negation are the
-       same distance from the zero rule, which is what makes the rail readable
-       as a ruler at all. */
+
     for (const t of gr.two.ticks.filter((t) => t.label.startsWith("−"))) {
       const mirror = gr.two.ticks.find((o) => o.label === t.label.replace("−", ""));
       if (!mirror) continue;
@@ -1141,29 +774,13 @@ try {
          `(${(gr.two.zeroX - t.x).toFixed(1)} against ${(mirror.x - gr.two.zeroX).toFixed(1)})`);
     }
 
-    /* THE AXIS SAYS WHAT IT IS, ON THE AXIS. A reader who assumes a linear
-       scale misjudges every bar on the panel, always in the direction that
-       flatters the wings, and the only place that was stated was four
-       sentences into the note below the chart. */
     ok(/log/.test(gr.two.axis), `the axis caption names the scale (${gr.two.axis})`);
-    /* SCOPED TO THE METHOD, NOT TO THE FIRST PARAGRAPH. This read
-       `host.querySelector(".fc-note")` and passed while the axis instruction
-       was sentence four of one 1,400-character note. The panel now leads on
-       its finding and folds the decoder, so the first `.fc-note` is a
-       QUALIFIER — the band, or the crossing count — and the instruction is a
-       paragraph further down. What must hold is unchanged: the instruction is
-       on the panel, in the terms that say what to do about it. */
+
     const axisNote = gr.two.notes.find((n) => /LOGARITHMIC/.test(n.text));
     ok(axisNote, "the axis instruction is still on the panel, in full");
     ok(axisNote && /not off bar length|rank/.test(axisNote.text),
        "and it says what to do about it rather than only naming the scale");
 
-    /* SIGN SURVIVES GREYSCALE, AND SO DOES SIZE. A short bar was drawn as
-       `fill: url(#gpNeg)` with nothing underneath — 45% coverage of diagonal
-       lines against a long bar's 100% solid, so two bars carrying the same
-       number were drawn with half the ink on one side. The texture that
-       exists to carry the sign was setting the reader's impression of the
-       balance of the book. */
     ok(gr.two.negBars > 0, "the two-sided fixture draws short bars");
     eq(gr.two.hatches, gr.two.negBars,
        "every short bar carries the texture that encodes its sign without hue");
@@ -1171,10 +788,6 @@ try {
        `and the bar underneath is a solid fill, not the pattern itself, so both signs ` +
        `carry the same ink for the same number (${gr.two.negFill})`);
 
-    /* THE RAIL IS AN ANNOTATION COLUMN, NOT A TOOLTIP. Two labels in filled,
-       outlined plates took 132 units of a 300-unit canvas — wider than the
-       chart they annotated, and drawn over nothing, since the rail is empty
-       space. */
     eq(gr.two.plateRects, 0,
        "the level readouts are annotations in the rail, not plates floating over the plot");
     ok(gr.two.plotL !== null, "the price rail is measurable");
@@ -1182,23 +795,12 @@ try {
        `the annotation column is narrower than the chart it annotates ` +
        `(rail ${gr.two.vb - gr.two.plotR}, plot ${gr.two.plotR - gr.two.plotL})`);
 
-    /* AND IT DOES NOT SAY THE SAME NUMBER TWICE. Spot and the flip each had a
-       rule, a rail annotation carrying px2() of the level, AND an entry in
-       the price ladder on the left — the same price printed twice on one row,
-       with the left copy distinguished from its neighbours by colour alone. */
     for (const p of ["71.89", "70.12"]) {
       ok(!gr.two.prices.includes(p),
          `${p} is labelled once, in the rail, not again in the price ladder ` +
          `(${gr.two.prices.join(" ")})`);
     }
 
-    /* AND THE PRICE RAIL IS STILL A RAIL. Dropping spot and the flip from it
-       left an emitted card with four labels on a 490-unit column — the three
-       biggest strikes bunched around the peak, and the low end — so most of
-       the ladder had no price against it at all. The earned labels are still
-       earned; a round step fills the gaps behind them. The measurable form of
-       "it is a ruler" is that no stretch of the column goes unlabelled for
-       more than about a fifth of its height. */
     {
       const span = gr.two.plotBottom - gr.two.plotTop;
       const ys = [gr.two.plotTop, ...gr.two.priceYs, gr.two.plotBottom];
@@ -1208,9 +810,7 @@ try {
          `no stretch of the price rail runs unlabelled ` +
          `(worst gap ${worst.toFixed(0)} of ${span.toFixed(0)} units, ` +
          `${gr.two.prices.length} labels)`);
-      /* And filling the gaps must not stack two labels on one row. SVG will
-         happily draw one price on top of another and the result reads as a
-         smudge, not as an error. */
+
       let tightest = Infinity;
       for (let i = 1; i < gr.two.priceYs.length; i++) {
         tightest = Math.min(tightest, gr.two.priceYs[i] - gr.two.priceYs[i - 1]);
@@ -1219,20 +819,6 @@ try {
          `and no two prices are drawn on top of each other (closest pair ${tightest} units apart)`);
     }
 
-    /* ---------- THE READING LEADS, AND THE METHOD IS STILL THERE ------
-
-       THE SURVEY THAT PROMPTED THIS BLOCK counted 101,768 characters of prose
-       across the fourteen Flows renderers and found `.fc-note` — the METHOD
-       paragraph — emitted 87 times against 4 emissions of `.fc-reading`, the
-       FINDING. This panel was one of the twelve that stated no finding at all
-       above its chart: where the book flips and how hard dealers sit at spot
-       were sentences one and two of a 1,400-character paragraph underneath.
-
-       EVERY ASSERTION HERE IS A PAIR, and that is the point. The finding is
-       FIRST; the method is STILL PRESENT AND STILL REACHABLE. A suite that
-       asserted only the first half would pass on a renderer that fixed its
-       ordering by deleting its caveats, which is the one outcome this product
-       cannot survive — the honesty discipline is the whole value. */
     eq(gr.two.leads.length, 2,
        `the profile leads on its two findings, each in its own element (${gr.two.leads.length})`);
     ok(/^Dealers are (long|short) gamma immediately below/.test(gr.two.leads[0] || ""),
@@ -1245,9 +831,6 @@ try {
        "reading rather than its preamble, and a sentence under a 220-unit canvas is below " +
        "the fold on a phone");
 
-    /* THE METHOD, FOLDED AND WORD FOR WORD. The axis instruction is the
-       paragraph a reader who assumes a linear scale most needs; it may be one
-       click away and it may not be gone. */
     ok(axisNote.inDetails,
        "the axis instruction is behind the panel's own disclosure rather than in the open — " +
        "1,400 characters of how-the-bars-were-drawn is a wall a reader scrolls past");
@@ -1259,18 +842,10 @@ try {
     ok(/How this profile was drawn/.test(gr.two.howSummary),
        `the disclosure names what is under it ("${gr.two.howSummary.trim()}") — a summary ` +
        "that says nothing is a click a reader will not spend");
-    /* "Distances are in ATR(14)" was "σ is ATR(14)" until the section became
-       one typeface. Latin Modern does not draw σ, so the unit is spelled now
-       — see flows-panels.js's atrDist. The sentence still has to survive the
-       fold, which is what this asserts; only the wording it looks for moved. */
+
     ok(/normalised separately from the bars/.test(gr.two.all) && /Distances are in ATR\(14\)/.test(gr.two.all),
        "and the curve-scale and unit sentences survived the move too, in full");
 
-    /* A DOOR THAT LOOKS LIKE ONE. The marker, pointer and focus ring live in
-       flows.css under bare `.ft-how-s` selectors, so a panel inherits them
-       wherever it is mounted. The fold is built in one file and styled in
-       another, two that can drift apart in one commit, and the drift is
-       invisible — which is why it is asserted rather than assumed. */
     ok(gr.two.howChrome, "the fold has a summary to operate");
     ok(gr.two.howChrome && /\+/.test(gr.two.howChrome.marker),
        `and a visible closed-state marker on it (${gr.two.howChrome
@@ -1282,10 +857,6 @@ try {
        "and it is one tab stop for the whole method set, which a <summary> is for free — " +
        "the alternative this design refused was a tabindex on every explained element");
 
-    /* THE HALF THAT MAKES THIS AN ORDERING AND NOT A DELETION. A note that
-       changes WHAT THE READING MEANS may be moved and may not be folded: this
-       fixture is measured over strikes 60-80 only, so every number above it is
-       a statement about a band rather than about the book. */
     const bandNote = gr.two.notes.find((n) => /not the whole book/.test(n.text));
     ok(bandNote, "the band the profile was measured over is still stated");
     ok(bandNote && bandNote.qualifier && !bandNote.inDetails,
@@ -1298,11 +869,6 @@ try {
     }
   }
 
-  /* ---------- HOW SHORT, NOT MERELY SHORT -----------------------
-     regime.spotGammaShare is published on every card and was drawn nowhere:
-     only its SIGN reached the reader, through the header badge. Dealers at
-     0.9 of their peak short position at spot and dealers at 0.05 of it are
-     not the same board, and the card rendered them identically. */
   {
     const strikes = [
       { strike: "95", call_gamma_ask: "0.6e8", call_gamma_bid: "0.4e8",
@@ -1335,25 +901,17 @@ try {
       return { deep: draw(-0.93), shallow: draw(-0.05), absent: draw(null) };
     }, { gp });
 
-    /* THE ASSERTION THE AUDIT IS ABOUT. Two books that differ by a factor of
-       eighteen in how hard dealers are positioned at spot must not render the
-       same words. */
     ok(shot.deep.text !== shot.shallow.text,
        "a book 0.93 of peak short at spot and one 0.05 of peak short no longer render identically");
     ok(/0\.93 of/.test(shot.deep.plate),
        `the magnitude is on the spot rule itself (${shot.deep.plate})`);
     ok(/0\.05 of/.test(shot.shallow.plate), "for both readings");
-    /* IN THE LEAD NOW, NOT IN THE NOTE. This sentence was the second half of
-       the paragraph under the chart; it is the panel's finding and reads as
-       one. The share, not a dollar figure, is what makes it comparable across
-       names, and that clause is method and folds with the rest. */
+
     ok(/0\.93 of this ladder's peak/.test(shot.deep.leads[1] || ""),
        `the at-spot magnitude LEADS the panel ("${(shot.deep.leads[1] || "").slice(0, 60)}")`);
     ok(/share of this ladder's peak rather than a dollar figure/.test(shot.deep.text),
        "and what makes it comparable across names is still said, in the folded method");
-    /* The panel already says "short gamma immediately below the flip" on every
-       card, so a bare /short/ here would pass under any mutation. The sign must
-       be attached to THIS reading. */
+
     ok(/peak exposure and short/.test(shot.deep.text),
        "with the sign attached to that reading rather than to the flip sentence");
     ok(!/0\.00 of|NaN|undefined/.test(shot.absent.text),
@@ -1361,10 +919,6 @@ try {
     ok(/not published on this card/.test(shot.absent.text),
        "and says why the reading is missing");
 
-    /* AND THE ABSENCE LEADS EXACTLY AS A MEASURED READING DOES, with its
-       reason beside it rather than behind the disclosure. Demoting a withheld
-       reading to a footnote would make a silence cheaper to ship than a
-       number, which is the one incentive this product cannot afford. */
     ok(/^Where spot sits in the cumulative is not published/.test(shot.absent.leads[1] || ""),
        `the unmeasured at-spot share still LEADS ("${(shot.absent.leads[1] || "").slice(0, 52)}")`);
     ok(!/\d/.test(shot.absent.leads[1] || ""),
@@ -1376,7 +930,6 @@ try {
        "in the open, beside the absence it explains rather than behind a click");
   }
 
-  /* ---------- THE TWO SUPPRESSION REASONS ------------------------ */
   {
     const r = await page.evaluate(() => {
       const host = document.getElementById("h");
@@ -1415,8 +968,6 @@ try {
        "with the reason stated: a vanishing delta flow is no view, not infinite vol conviction");
   }
 
-  /* A CARD FROM BEFORE THIS PANEL EXISTED must degrade, not throw. Published
-     cards outlive the code that reads them. */
   const legacy = await page.evaluate(() => {
     const host = document.getElementById("h");
     try {
@@ -1428,24 +979,6 @@ try {
   eq(legacy.dead, true, "it reports the panel unavailable");
   eq(legacy.svg, false, "and draws no chart at all rather than an empty grid");
 
-  /* ---------- the price rules land on their own bars ----------------
-
-     A LIVE DEFECT, MEASURED. The gamma panel draws bars on a CATEGORICAL
-     ladder — one row per strike, evenly spaced — and drew the price rules
-     (spot, the gamma flip, the walls, the earned labels) by interpolating
-     LINEARLY across the price span. Those two agree only when the strikes are
-     uniformly spaced, and real chains are not: listed ladders tighten near the
-     money and widen in the wings, and this panel additionally DROPS any strike
-     whose gamma the vendor did not report, punching gaps into whatever
-     regularity survived.
-
-     On the ladder below the old mapping put the spot rule 4.8 bar rows away
-     from the bar it names. Nothing about that looks wrong on screen — it is a
-     line pointing confidently at the wrong strike.
-
-     THE FIXTURE IS DELIBERATELY NON-UNIFORM, and the first assertion proves
-     it, because on a uniform ladder both mappings agree and every assertion
-     below would pass against the defect. */
   {
     const ladder = [100, 110, 120, 130, 140, 145, 150, 155, 160, 162.5, 165,
                     167.5, 170, 172.5, 175, 180, 185, 190, 200, 210, 220, 240, 260, 270];
@@ -1482,10 +1015,6 @@ try {
 
     ok(placed && placed.rows > 0, `the panel drew ${placed ? placed.rows : 0} bars`);
 
-    /* THE ASSERTION. The flip is set to exactly 170, which IS a listed strike,
-       so its rule must land on that strike's own bar — not near it. Bars are
-       sorted top-to-bottom and the ladder is ascending, so strike 170 is at
-       index (length - 1 - position). */
     if (placed && placed.flipY !== null) {
       const idx = ladder.indexOf(170);
       const expected = placed.barYs[placed.barYs.length - 1 - idx];

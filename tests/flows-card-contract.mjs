@@ -1,18 +1,3 @@
-/* Contracts for card assembly.
-
-   The load-bearing test here is the ABLATION SWEEP: build a card with each
-   source knocked out in turn and assert that no numeric field comes back as
-   0 and the affected panel reports "unavailable".
-
-   That is not a hypothetical. This repository has already shipped the same
-   bug twice — a missing greek-flow scored BETTER than a present one because
-   otmShare fell back to 0, which was the top of a winsorized column; and a
-   missing family sub-score rendered as a short positive bar, which read as a
-   small bullish contribution. On a card it is worse still, because a card has
-   no cross-section to normalise against: a fallback zero renders as
-   "spot is exactly at the gamma flip", the single most actionable state the
-   panel can show, manufactured entirely by absence. */
-
 import assert from "node:assert/strict";
 import {
   buildCard, buildLevels, buildGammaProfile, buildPath, buildCongress,
@@ -31,7 +16,6 @@ const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} — got ${a}, want ${b}`); checks++; };
 
-/* ---------- numOrNull is the whole discipline ------------------- */
 {
   eq(numOrNull(undefined), null, "undefined is null, not zero");
   eq(numOrNull(null), null, "null is null");
@@ -44,7 +28,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(numOrNull("12.5"), 12.5, "a numeric string parses");
 }
 
-/* ---------- polarity is a property of the FIELD ------------------ */
 {
   eq(polarityOf("netPutPremium"), -1,
      "THE ENTRY THIS TABLE EXISTS FOR: positive net put premium is put buying, which is bearish");
@@ -60,7 +43,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "every polarity is exactly +1, -1 or 0");
 }
 
-/* ---------- levels: distance in percent AND in ATR --------------- */
 {
   const l = buildLevels({ spot: 100, atr: 4, gammaFlip: 96, maxPain: 105, callWall: 110, putWall: 90 });
   eq(l.status, "ok", "a complete level set resolves");
@@ -69,7 +51,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   ok(l.levels.every((x, i, arr) => i === 0 || Math.abs(x.distPct) >= Math.abs(arr[i - 1].distPct)),
      "levels are ordered nearest-first");
 
-  // A distance in sigma units with no sigma is NO number, not a huge one.
   const noAtr = buildLevels({ spot: 100, atr: 0, gammaFlip: 96 });
   eq(noAtr.levels[0].distAtr, null, "with no ATR the sigma distance is null, never Infinity");
   ok(Number.isFinite(noAtr.levels[0].distPct), "but the percent distance still resolves");
@@ -79,21 +60,15 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   ok(!("levels" in buildLevels({ spot: 0 })), "an unavailable panel carries no numbers at all");
 }
 
-/* ---------- gamma profile: the dealer-signed sum ----------------- */
 {
-  // put_gamma arrives already dealer-signed, so exposure per strike is a SUM.
-  /* THE REAL FIELD NAMES. /spot-exposures/strike splits every greek by
-     aggressor: call_gamma_ask, call_gamma_bid, put_gamma_ask, put_gamma_bid.
-     This fixture previously used call_gamma/put_gamma — the names the function
-     under test was guessing at — so the test validated the guess against
-     itself and passed while production published 54 bars of exactly zero. */
+
   const ladder = [
     { strike: "90", call_gamma_ask: "0.6e8", call_gamma_bid: "0.4e8",
-      put_gamma_ask: "-3e8", put_gamma_bid: "-2e8" },          // net short: put wall
+      put_gamma_ask: "-3e8", put_gamma_bid: "-2e8" },
     { strike: "100", call_gamma_ask: "1.2e8", call_gamma_bid: "0.8e8",
       put_gamma_ask: "-0.6e8", put_gamma_bid: "-0.4e8" },
     { strike: "110", call_gamma_ask: "5e8", call_gamma_bid: "4e8",
-      put_gamma_ask: "-0.6e8", put_gamma_bid: "-0.4e8" },      // net long: call wall
+      put_gamma_ask: "-0.6e8", put_gamma_bid: "-0.4e8" },
   ];
   const g = buildGammaProfile(ladder, { spot: 100 });
   eq(g.status, "ok", "a ladder resolves");
@@ -101,15 +76,12 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(g.putWall, 90, "the put wall is the most negative");
   near(g.bars[0].g, -4e8, 1, "all four aggressor legs are SUMMED, not differenced");
 
-  // The exact production failure: rows carrying only the WRONG names must not
-  // silently become a ladder of measured zeros.
   const wrongNames = buildGammaProfile(
     [{ strike: "100", call_gamma: "1e9", put_gamma: "-2e8" }], { spot: 100 },
   );
   ok(wrongNames.status === "unavailable" || wrongNames.bars.every((b) => b.g !== 0),
      "a row with no aggressor-split gamma is dropped, never drawn as zero gamma");
 
-  // Bucketing keeps a 500-strike ladder inside the ingest cap.
   const wide = Array.from({ length: 500 }, (_, i) => ({
     strike: String(50 + i), call_gamma_ask: "6e5", call_gamma_bid: "4e5",
     put_gamma_ask: "-1e5", put_gamma_bid: "-1e5",
@@ -123,7 +95,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(buildGammaProfile(null).status, "unavailable", "a null ladder is unavailable");
 }
 
-/* ---------- path: cumulated, downsampled, gap-carried ------------ */
 {
   const t0 = Date.parse("2026-08-24T13:30:00Z");
   const ticks = Array.from({ length: 390 }, (_, i) => ({
@@ -135,22 +106,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(p.series.length, 78, "390 minutes downsample to 78 buckets");
   eq(p.netDelta, 39000, "the series is CUMULATED, not the raw per-tick values");
 
-  /* THE TWO TOTALS SHIP THE UNITS THEY ARE IN.
-
-     They did not, and they are a CONTRACT COUNT and a DOLLAR SUM published
-     side by side on one panel — the pair house rule 3 names. Every other
-     quantity the card ships beside a number ships its unit: GREEK_UNITS gives
-     vanna, charm and dealer delta a sentence apiece, shapeIvRank publishes
-     rankUnit because a rank field "burned a '1352% of its year' once already".
-     shared/flows-ask.js records the cost of the omission in its own words —
-     "netDelta ... is NOT quoted, because the payload publishes no unit for it
-     and a number without a unit is not a reading this index will state".
-
-     THE STRINGS ARE ASSERTED VERBATIM because the renderer PRINTS them rather
-     than restating them, so a reworded unit is a reworded sentence on the
-     page, and both are named from the arithmetic above: cumD sums each tick's
-     ask-side-less-bid-side delta-weighted `net_delta`, cumP sums
-     `net_call_premium - net_put_premium` in dollars. */
   eq(p.netDeltaUnit, "delta-weighted contracts, side-signed",
      "netDelta ships the unit it is in, named from how it is summed");
   eq(p.netPremiumUnit, "US dollars, net premium, side-signed",
@@ -160,7 +115,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   ok(p.series[77][0] > p.series[0][0], "the cumulative curve rises across the session");
   eq(p.asOf, "2026-08-24", "the panel carries the session it describes");
 
-  // A quiet stretch is not a return to zero.
   const gappy = [
     { tape_time: new Date(t0).toISOString(), net_delta: "500", net_call_premium: "0", net_put_premium: "0" },
     { tape_time: new Date(t0 + 300 * 60000).toISOString(), net_delta: "0", net_call_premium: "0", net_put_premium: "0" },
@@ -170,12 +124,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   ok(gp.series.every(([d]) => d >= 500 - 1e-9),
      "the running total carries forward through quiet buckets rather than dropping to zero");
 
-  /* THE SECOND SERIES IS REAL, NOT PADDING.
-     Each row is [cumulative delta, cumulative premium]. The renderer read only
-     p[0] for months, so ~78 premium points per card were serialised, shipped
-     and dropped on the floor. Pinning the last bucket against the published
-     total is what makes that column load-bearing: a buildPath that stopped
-     emitting the pair, or emitted a constant beside it, fails here. */
   eq(p.series[77][1], p.netPremium,
      "the last bucket's premium IS the published session total — the premium leg " +
      "is a measured series, not a placeholder beside the delta one");
@@ -184,10 +132,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   ok(p.series[77][1] > p.series[0][1],
      "and the premium leg cumulates across the session in its own units");
 
-  /* ---- THE PATH SIGNATURE, which is the whole of family D and which the
-     card published none of. Two sessions with the SAME net delta and opposite
-     meanings are the fixture, because that is the distinction the panel's own
-     docstring says it exists to draw. */
   eq(p.persistence, 1,
      "a tape that moves the same way every minute has persistence 1, not an unpublished field");
   near(p.concentration, 20 / 390, 1e-9,
@@ -210,11 +154,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "and only one of its 390 minutes moved with the day's direction");
   ok(spike.centroid < 0.05, "an early spike reports an early centroid");
 
-  /* A TAPE THAT DID NOT MOVE HAS NO SHAPE, and pathSignature's own fallbacks —
-     persistence 0, concentration 0, centroid 0.5 — are the manufactured
-     extremes this file exists to prevent reaching a card: 0.5 is "the day's
-     weight sat exactly at midday" and 0 concentration is the flattest session
-     that can exist. Both must be withheld, not published. */
   const flat = buildPath(Array.from({ length: 30 }, (_, i) => ({
     tape_time: new Date(t0 + i * 60000).toISOString(),
     net_delta: "0", net_call_premium: "0", net_put_premium: "0",
@@ -233,7 +172,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "unparseable timestamps are unavailable, not an empty chart");
 }
 
-/* ---------- congress: honest, and only what is computable -------- */
 {
   const trades = [
     { name: "A Member", member_type: "house", issuer: "self", txn_type: "Purchase",
@@ -255,7 +193,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(c.trades[1].amountLow, 1001, "the bracket bounds are parsed for sorting, not for display");
   eq(c.trades[1].amountHigh, 15000, "both bounds are kept");
 
-  // No field may claim a return or a member track record.
   const asText = JSON.stringify(c);
   ok(!/"return"|"avgReturn"|"trackRecord"|"winRate"/.test(asText),
      "the panel claims no return, and for the ONE reason that cannot expire: a " +
@@ -266,7 +203,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "refusal resting on a vendor limitation has to be re-read when the vendor " +
      "changes, or it becomes folklore that outlives its own reason");
 
-  /* The unit-level split, matching the card-level one below. */
   eq(buildCongress([]).status, "quiet",
      "A TAPE THAT WAS READ AND NAMED NOBODY IS QUIET, not unavailable — still " +
      "never '0 congressional buyers', but a fact about the filings rather than " +
@@ -280,7 +216,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   ok(!("trades" in buildCongress([])), "and it carries no numbers");
 }
 
-/* ---------- max pain picks the NEAREST expiry -------------------- */
 {
   eq(pickMaxPain([{ expiry: "2026-09-18", max_pain: "210" },
                   { expiry: "2026-08-28", max_pain: "195" }]), 195,
@@ -289,10 +224,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(pickMaxPain([{ expiry: "2026-08-28", max_pain: "" }]), null, "an empty value is null");
 }
 
-/* ---------- THE ABLATION SWEEP ----------------------------------
-   Knock out one source at a time and assert the card never manufactures a
-   number. This is the only mechanism that actually prevents the failure; the
-   rest is discipline. */
 {
   const t0 = Date.parse("2026-08-24T13:30:00Z");
   const full = {
@@ -316,11 +247,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
       { expiry: "2026-09-18", call_gamma: "2e8", put_gamma: "-1e8" },
       { expiry: "2026-12-18", call_gamma: "5e7", put_gamma: "-5e7" },
     ],
-    /* All EIGHT gamma fields /spot-exposures/strike returns, not just the four
-       the gamma panel reads. A fixture that carries only the fields the code
-       under test happens to use cannot fail when a second consumer reads a
-       different set — which is how the aggressor-split field names shipped
-       inverted, and how the displacement panel would have shipped blank. */
+
     strikes: [{ strike: "95", call_gamma_ask: "0.6e8", call_gamma_bid: "0.4e8",
                 put_gamma_ask: "-2.4e8", put_gamma_bid: "-1.6e8",
                 call_gamma_oi: "1.2e8", put_gamma_oi: "-3.1e8",
@@ -343,12 +270,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
 
   const complete = buildCard(full);
   eq(complete.v, CARD_SCHEMA_VERSION, "the card carries its schema version");
-  /* THE VERSION IS A CONTRACT WITH THE RENDERER, not decoration. It moved to 2
-     when fam.V and fam.O stopped being signed votes and became unsigned gauges.
-     Pinning the literal here means a future change to those semantics cannot
-     ship without also moving the number the renderer switches on — which is the
-     only thing standing between a reader and a published 53 redrawn as a
-     53%-full gauge it never meant. */
+
   eq(CARD_SCHEMA_VERSION, 2,
      "schema version 2 is where V and O became unsigned gauges; bump it again " +
      "if any published field changes MEANING, and teach the renderer the new floor");
@@ -358,10 +280,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(complete.gammaFlip, 96,
      "the flip price is a top-level field — the gamma panel draws its line from it");
   eq(complete.atr, 4, "and ATR travels with it, so distances can be shown in sigma");
-  /* THE TWO SUPPRESSION REASONS ARE PUBLISHED, not folded away into the O digit.
-     POLARITY has reserved an entry for each of these since before buildCard
-     existed — a reserved slot for a field nothing published, which is the exact
-     shape the unrendered quantities in this repository keep taking. */
+
   ok(complete.quality,
      "the card publishes a quality block at all, rather than leaving the two gate " +
      "inputs computable but unpublished");
@@ -400,8 +319,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
     for (const empty of [[], null, undefined]) {
       const card = buildCard({ ...full, [source]: empty });
 
-      // 1. Every number that DOES survive is finite. A NaN or an Infinity
-      //    reaching the renderer is as bad as a manufactured zero.
       const walk = (node, path, out) => {
         if (node === null || node === undefined) return out;
         if (typeof node === "number") { out.push([path, node]); return out; }
@@ -415,22 +332,9 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
       ok(numbers.every(([, v]) => Number.isFinite(v)),
          `every surviving number is finite with ${source} missing`);
 
-      // 2. THE INVARIANT. The panel that depended on the missing source
-      //    reports unavailable and carries NO numeric field at all — not a
-      //    zero, not a count, nothing a renderer could paint as a reading.
-      //    A count of 0 on a LIVE panel is a true measurement and is fine;
-      //    a 0 on a dead panel is the manufactured extreme this guards.
       const panel = PANEL_OF[source];
       if (panel) {
-        /* AN EMPTY ARRAY IS NOT A MISSING SOURCE FOR EVERY PANEL.
-           This sweep ablates each source three ways — [], null, undefined —
-           and asserted all three produce "unavailable". For congress that
-           collapsed the very distinction the panel needs: [] is a tape that
-           WAS read and named nobody, which is a fact about the filings, while
-           null and undefined are reads that did not happen. The invariant
-           this sweep exists to protect is that a dead panel carries no
-           numbers, and that holds for both dead states; the status is
-           asserted precisely per source instead of uniformly. */
+
         const expected = (panel === "congress" && Array.isArray(empty))
           ? "quiet" : "unavailable";
         eq(card.panels[panel].status, expected,
@@ -442,8 +346,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
            `(found: ${stray.map(([k, v]) => `${k}=${v}`).join(", ") || "none"})`);
       }
 
-      // 3. Panels that did NOT depend on the missing source are untouched:
-      //    one dead feed never degrades another panel.
       for (const [other, p] of Object.entries(card.panels)) {
         if (other === panel) continue;
         if (p.status !== "ok") continue;
@@ -451,20 +353,8 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
            `panel ${other} still holds finite numbers with ${source} missing`);
       }
 
-      // 4. Every panel is always a tagged union — the renderer switches on
-      //    status before touching a number, so there is always a status.
       for (const p of Object.values(card.panels)) {
-        /* THREE STATES NOW, AND THE WIDENING IS THE POINT OF A WHOLE CHANGE
-           RATHER THAN A SIDE EFFECT OF ONE. This union was two states for as
-           long as the card had no way to say "the source answered and
-           measured nothing", which is why a measured emptiness had to borrow
-           `unavailable` and the live product printed both silences in one
-           sentence. An earlier wave added three panels that wanted the third
-           state and mapped onto the two instead, deliberately, rather than
-           widening this assertion to let new code pass — because widening it
-           without teaching the renderer the third arm would have produced
-           panels the reader sees as "Unavailable —" regardless. The renderer
-           has that arm now, so this widens once, for every panel. */
+
         ok(p.status === "ok" || p.status === "unavailable" || p.status === "quiet",
            `every panel is a tagged union with ${source} missing`);
         if (p.status !== "ok") {
@@ -474,25 +364,15 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
         }
       }
 
-      // 5. A dead panel never removes the card, and never touches the others.
       eq(card.ticker, "TEST", `the card survives ${source} being missing`);
     }
   }
 
-  // The specific manufactured readings that motivated all of the above.
   const noLevels = buildCard({ ...full, features: null, maxPain: null });
   ok(noLevels.panels.levels.status === "unavailable"
      || noLevels.panels.levels.levels.every((l) => l.kind !== "gamma_flip"),
      "with no features there is no gamma flip level — never 'spot is exactly at the flip'");
-  /* THE THREE SILENCES AT THE CONGRESS PANEL, AND THIS SUITE USED TO ENCODE
-     THE CONFLATION AS CORRECT. The one case it constructed was `congress: []`
-     — a read that HAPPENED and matched nothing — and it asserted that this
-     reports "unavailable". So the live product printed "Unavailable. no
-     disclosed transactions" on every card: an unavailability status carrying
-     a measured-emptiness reason, and no reader could tell a failed request
-     from a genuine absence of filings. The case that should legitimately
-     produce "unavailable" — `congress: null`, a read that did not happen —
-     was never constructed at all. */
+
   const emptyCongress = buildCard({ ...full, congress: [] });
   eq(emptyCongress.panels.congress.status, "quiet",
      "A READ THAT FOUND NOTHING IS QUIET. The tape was fetched and this ticker " +
@@ -518,22 +398,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "unavailable rather than claiming a measurement it never made");
 }
 
-/* ---------- price context: the join key that did not exist --------
-
-   The directive this product is built to has one explicit deliverable that
-   was nowhere in it: historical daily-close scores overlaid on price. Both
-   halves ship and both are drawn — on separate pages, in incompatible
-   shapes. The score series is keyed by session date; `closes` was a
-   POSITIONAL array with no dates, so nothing could align close[i] to
-   session[j].
-
-   The trap is not that dates were missing. It is that buildContext FILTERS —
-   dropping any close that is null or non-positive — so index stops being
-   time exactly when a session goes missing, and a dates array added
-   afterwards and filtered separately (or not filtered at all) is misaligned
-   by precisely the number of dropped sessions. Two independent designs for
-   this feature proposed exactly that. These assertions are what makes the
-   lockstep unreachable to get wrong. */
 {
   const ctx = buildContext({
     closes: [10, 11, 12, 13],
@@ -545,7 +409,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "and pair up in order when nothing is dropped"); checks++;
   eq(ctx.dropped, 0, "with nothing dropped");
 
-  /* THE ASSERTION THE WHOLE SECTION EXISTS FOR. */
   const gappy = buildContext({
     closes: [10, null, 12, 0, 14],
     closeDates: ["2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27", "2026-08-28"],
@@ -565,8 +428,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(gappy.closes.length, gappy.closeDates.length,
      "the two arrays stay the same length across the filter");
 
-  /* A publisher that sends no dates must not manufacture a row of nulls that
-     a renderer could read as a measurement. */
   const undated = buildContext({ closes: [10, 11, 12] }, { asOf: "2026-08-27" });
   ok(!("closeDates" in undated),
      "a card published before this field existed OMITS it rather than carrying " +
@@ -585,13 +446,8 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "would silently plot two points and label them three");
 }
 
-/* ---------- the panels added after the live board was read -------- */
 {
-  /* GAMMA ROLL-OFF. put_gamma arrives ALREADY dealer-signed, so gross roll-off
-     sums the magnitudes; a front week of 1e9 call against -999e6 put is 2.0e9
-     of gamma about to expire, not the 1e6 their signed sum leaves. Every
-     fixture in the older block passes put_gamma "0", which is precisely why
-     that convention shipped inverted once already. */
+
   const signed = buildCalendar([
     { expiry: "2026-08-28", call_gamma: "1e9", put_gamma: "-999000000" },
     { expiry: "2026-09-18", call_gamma: "5e6", put_gamma: "0" },
@@ -606,11 +462,10 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
     { expiry: "2026-08-28", call_gamma: "600", put_gamma: "0" },
     { expiry: "2026-09-25", call_gamma: "400", put_gamma: "0" },
   ], { asOf: "2026-08-24" });
-  // Mean life is gamma-weighted E[days]: 0.6*4 + 0.4*32 = 15.2.
+
   ok(Math.abs(cal.meanLifeDays - 15.2) < 0.05,
      `mean life is the gamma-weighted average horizon (got ${cal.meanLifeDays})`);
-  /* AND IT IS PARTITION-INVARIANT, which frontLoad is not. Splitting the front
-     expiry's gamma across two same-day rows must not move it. */
+
   const split = buildCalendar([
     { expiry: "2026-08-28", call_gamma: "300", put_gamma: "0" },
     { expiry: "2026-08-28", call_gamma: "300", put_gamma: "0" },
@@ -622,11 +477,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "while frontLoad does not — which is why it is not the comparable number");
 
   ok(buildCalendar([], { asOf: "2026-08-24" }).status === "unavailable", "an empty chain is unavailable");
-  /* THE WIRE NAMES, which is the whole reason this panel shipped empty.
-     buildCalendar read the documented call_gamma / put_gamma; /greek-exposure
-     /expiry sends call_gex / put_gex. Every fixture in this file used the
-     documented pair, so the contract passed and all twelve published cards
-     carried panels.calendar = "unavailable: no expiry gamma". */
+
   const wireCal = buildCalendar([
     { expiry: "2026-08-28", call_gex: "6e8", put_gex: "-2e8" },
     { expiry: "2026-09-18", call_gex: "2e8", put_gex: "-1e8" },
@@ -641,31 +492,20 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "the exact shape that made family V identically zero on all 34 live names");
   eq(buildCalendar(cal.schedule.length ? [] : []).asOf, null, "an unavailable calendar carries no date");
 
-  /* THE PRICED MOVE is a price, never a forecast, and its horizon is the
-     expiry the vendor quoted rather than a round number of days. */
   const pm = buildPricedMove({
     spot: 100, impliedMovePerc: 0.05, vrp: 0.11, iv30: 0.42, rv30: 0.31,
     asOf: "2026-08-24", sessions: 10,
   });
   eq(pm.low, 95, "the band's low is spot times one minus the implied move");
   eq(pm.high, 105, "and its high the mirror");
-  /* THE VENDOR'S QUOTE IS NOT DATED, because its date cannot be observed. The
-     schema behind implied_move says the figure is "for the nearest end of the
-     week expiration" when no expiry is supplied, and the screener accepts no
-     expiry parameter. This panel used to name that horizon from the max-pain
-     chain's nearest row — the same date only when the nearest listed expiry
-     happens to be the coming Friday. It is labelled by the RULE now. */
+
   eq(pm.horizonRule, "the nearest end-of-week expiry",
      "the quote is labelled by the vendor's stated rule, not by an inferred date");
   ok(!("horizonExpiry" in pm) && !("horizonDays" in pm),
      "and carries no date at all, so no renderer can print one");
 
-  /* THE FIXED HORIZON, which is the only one of the two bands that is a
-     cross-section. The vendor's implied_move_perc is quoted to each name's own
-     next listed expiry, so a column of those compares different horizons. */
   eq(pm.sessions, 10, "the horizon is published beside the numbers derived from it");
-  /* 0.42 * sqrt(10/252) = 0.0836662..., published rounded to five decimals, so
-     the tolerance is the rounding granularity and not tighter. */
+
   ok(Math.abs(pm.impliedMove - 0.42 * Math.sqrt(10 / 252)) < 1e-5,
      `the fixed-horizon move is the square-root-of-time scaling (got ${pm.impliedMove})`);
   ok(Math.abs(pm.realizedMove - 0.31 * Math.sqrt(10 / 252)) < 1e-5,
@@ -684,8 +524,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   ok(horizonMove(0.4, { sessions: 0 }) === null, "and neither does a zero horizon");
   ok(HORIZON_SESSIONS > 0, "the default horizon is a positive number of sessions");
 
-  /* THE TWO BANDS ARE INDEPENDENT. A name with no vendor quote still gets the
-     comparable band, and a name with no implied vol still gets the quote. */
   const noQuote = buildPricedMove({ spot: 100, impliedMovePerc: null, iv30: 0.42, rv30: 0.2, asOf: "2026-08-24" });
   eq(noQuote.status, "ok", "no vendor quote is not a dead panel when implied vol is present");
   eq(noQuote.movePerc, null, "the quoted band is withheld");
@@ -708,15 +546,10 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(buildPricedMove({ spot: 100, impliedMovePerc: null, iv30: 0.4, asOf: "2026-08-24" }).horizonRule, null,
      "with no vendor quote there is no rule to state either");
 
-  /* THE VOLATILITY SURFACE. Nothing in it is directional, and the polarity
-     table must say so — a renderer that green-tints a rich option market is
-     inventing a forecast the data does not support. */
   for (const k of ["iv30", "rv30", "vrp", "ivMomentum", "impliedMovePerc", "spotGammaShare"]) {
     eq(polarityOf(k), 0, `${k} carries no direction`);
   }
-  /* IT TRAVELS WITH THE BAND, not in a panel of its own. A separate `vol` panel
-     was built, serialised and published on every card, and no renderer drew it
-     — bytes on the read path that nothing could read. */
+
   const surf = buildPricedMove({
     spot: 100, impliedMovePerc: 0.05, iv30: 0.4, rv30: null, vrp: null,
     ivRank: 0.5, ivMomentum: 0.02, asOf: "2026-08-24",
@@ -725,7 +558,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(surf.ivRank, 0.5, "IV rank travels with the band it qualifies");
   eq(surf.ivMomentum, 0.02, "and so does the week's IV change");
 
-  /* BOOK DISPLACEMENT, in ATR units, and null rather than Infinity without one. */
   const disp = buildDisplacement([
     { strike: "90", call_gamma_oi: "100", put_gamma_oi: "-100", call_gamma_vol: "0", put_gamma_vol: "0" },
     { strike: "110", call_gamma_oi: "0", put_gamma_oi: "0", call_gamma_vol: "100", put_gamma_vol: "-100" },
@@ -740,16 +572,12 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "a distance in sigma units with no sigma is no number, not a small one");
   ok(buildDisplacement([], { atr: 4 }).status === "unavailable", "no ladder, no displacement");
 
-  /* PRICE CONTEXT is descriptive and says so; none of it enters the score. */
   const ctx = buildContext({ closes: [10, 11, 12], r5: 0.01, r21: null, r42: 0.2, week52Pos: 0.5, changePct: 0.02 });
   eq(ctx.r21, null, "a window too short to measure stays null");
   eq(ctx.closes.length, 3, "the closes travel for the card's own chart");
   ok(buildContext({ closes: [], r5: null, r21: null, r42: null, week52Pos: null, changePct: null })
      .status === "unavailable", "no history at all is unavailable");
 
-  /* MAX PAIN carries its expiry, because the priced move's horizon is read
-     from it — and it is a level computed from today's open interest, not a
-     target the price is pulled toward. */
   const mp = pickMaxPainRow([
     { expiry: "2026-09-18", max_pain: "120" },
     { expiry: "2026-08-28", max_pain: "102" },
@@ -760,12 +588,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(pickMaxPainRow([{ expiry: "2026-08-28", max_pain: null }]), null,
      "and a null level is dropped rather than parsed to zero");
 
-  /* THE NEAREST LIVE EXPIRY, not the first row. The vendor documents /max-pain
-     as returning "all expirations ... for the last 120 days", so the array can
-     carry expiries that have already passed; sorting ascending and taking
-     rows[0] took the OLDEST and drew it on the levels rail beside spot as
-     though it still existed. No fixture supplied a past expiry, which is why
-     nothing caught it. */
   const stale = [
     { expiry: "2026-05-15", max_pain: "70" },
     { expiry: "2026-08-28", max_pain: "102" },
@@ -793,12 +615,8 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "so a four-month-stale chain puts no max-pain level on the rail");
 }
 
-/* ---------- the strike x expiry gamma surface ------------------- */
 {
-  /* The profile and the calendar are both MARGINALS of this. The surface is
-     fetched from its own endpoint rather than derived, because an outer
-     product of two marginals is a model of a joint, not a measurement of one,
-     and the difference is the whole reason this panel exists. */
+
   const cell = (strike, expiry, call, put) => ({
     strike: String(strike), expiry,
     call_gamma_ask: String(call * 0.6), call_gamma_bid: String(call * 0.4),
@@ -816,21 +634,12 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   assert.deepEqual(surf.strikes, [90, 100, 110]); checks++;
   eq(surf.atSpot, 100, "the strike nearest spot is named");
 
-  /* THE RECONCILIATION. Summing the grid across expiries must reproduce the
-     row marginal — the same quantity the gamma profile draws. Two views of one
-     book that disagree are worse than one view. The put legs arrive ALREADY
-     dealer-signed, so all four legs are SUMMED here exactly as the profile
-     sums them; taking a difference anywhere would break this equality. */
   surf.strikes.forEach((k, i) => {
     const across = surf.grid[i].reduce((a, v) => a + (v ?? 0), 0);
     near(across, surf.rowTotals[i], Math.abs(surf.rowTotals[i]) * 1e-9 + 1,
          `strike ${k} reconciles across expiries`);
   });
 
-  /* THE SURFACE IS NOT SEPARABLE, and the fixture must not let it be. If the
-     joint were the outer product of its marginals, every 2x2 minor would have
-     zero determinant and the endpoint would be redundant with two cheaper
-     calls. This asserts the fixture actually exercises a joint. */
   const det = surf.grid[0][0] * surf.grid[2][1] - surf.grid[0][1] * surf.grid[2][0];
   ok(Math.abs(det) > 1e-6,
      "the fixture carries a genuine joint, not an outer product of two marginals");
@@ -845,11 +654,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
     call_gamma_ask: String(g), call_gamma_bid: "0", put_gamma_ask: "0", put_gamma_bid: "0",
   });
 
-  /* UNMEASURED IS NULL, NEVER ZERO. A strike-expiry pair the vendor did not
-     return and one carrying no gamma look identical the moment a fallback zero
-     is written into the grid, and only one of them is a fact. On a heatmap the
-     difference is a grey cell versus a cell that says "no gamma here", which
-     is a tradeable claim. */
   const sparse = buildSurface([
     cell(100, "2026-08-28", 5e6),
     cell(110, "2026-09-18", 3e6),
@@ -860,20 +664,16 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   ok(sparse.grid[at100][sep] === null,
      "a pair the vendor did not return is null, not a confident zero");
 
-  /* A row with no measured leg at all is DROPPED rather than entered as zero. */
   const noLegs = buildSurface([
     cell(100, "2026-08-28", 5e6),
     { strike: "105", expiry: "2026-08-28" },
   ], { spot: 100 });
   ok(!noLegs.strikes.includes(105), "a row carrying no gamma leg never reaches the grid");
 
-  /* EXPIRIES IN DATE ORDER, NOT BY SIZE. Keeping the largest columns would
-     draw a January LEAP beside this Friday with nothing saying six weeks were
-     skipped — a column axis with holes that still reads as consecutive. */
   const many = [];
   for (let j = 0; j < 12; j++) {
     const d = new Date(Date.UTC(2026, 7, 28) + j * 7 * 86400000).toISOString().slice(0, 10);
-    // The LAST expiry is by far the largest, so a size-ranked axis would keep it.
+
     many.push(cell(100, d, j === 11 ? 9e9 : 1e6));
   }
   const windowed = buildSurface(many, { spot: 100, maxExpiries: 4 });
@@ -883,8 +683,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(windowed.expiriesShown, 4, "and the window says how much it is showing");
   eq(windowed.expiriesTotal, 12, "out of how much there is");
 
-  /* STRIKES ARE CENTRED ON SPOT, and the window REFILLS when spot sits at an
-     edge rather than returning a half-empty grid. */
   const ladder = [];
   for (let i = 0; i < 30; i++) ladder.push(cell(80 + i, "2026-08-28", 1e6));
   const centred = buildSurface(ladder, { spot: 95, maxStrikes: 5 });
@@ -903,25 +701,18 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
     call_gamma_ask: String(g), call_gamma_bid: "0", put_gamma_ask: "0", put_gamma_bid: "0",
   });
 
-  /* THE COLOUR SCALE IS CAPPED AND SAYS SO. One ATM cell on the front expiry
-     routinely carries more gamma than the rest of the grid combined. Scaling
-     to the maximum paints one saturated square on a field of grey and hides
-     the structure the panel exists to show. */
   const rows = [];
   for (let i = 0; i < 21; i++) rows.push(cell(90 + i, "2026-08-28", 1e6));
-  rows.push(cell(100, "2026-09-18", 1e9));            // the dominant cell
+  rows.push(cell(100, "2026-09-18", 1e9));
   const capped = buildSurface(rows, { spot: 100 });
   ok(capped.scaleCap < capped.peak,
      `the scale caps below the peak (cap ${capped.scaleCap}, peak ${capped.peak})`);
   ok(capped.clipped >= 1, "and reports how many cells were clipped rather than flattening them");
   ok(capped.scaleCap > 0, "a capped scale is still a positive scale");
 
-  /* A grid of one value must not produce a zero scale — that would divide
-     every cell by nothing. */
   const flat = buildSurface([cell(100, "2026-08-28", 5e6)], { spot: 100 });
   ok(flat.scaleCap > 0, "a single-valued grid still has a usable scale");
 
-  /* Unavailable paths carry a reason and NO numbers. */
   for (const [args, why] of [
     [[[], { spot: 100 }], "an empty response"],
     [[null, { spot: 100 }], "a null response"],
@@ -934,12 +725,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   }
 }
 
-/* ---------- the wave-2 panels at the card boundary -----------------
-   Their internals live in flows-stock-contract.mjs; what the CARD owes
-   is the three-silences boundary: a null raw (the fetch failed) is
-   unavailable-with-reason, an empty raw (the vendor answered nothing)
-   is quiet, and a card from before these panels existed simply lacks
-   the keys — which older payloads already prove. */
 {
   const base = {
     ticker: "TEST", row: { close: "100" }, features: null,
@@ -962,10 +747,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "worth a different sentence on the page");
   eq(quiet.volContext.status, "quiet", "for the vol context too");
 
-  /* THE HALVES REACH THE SHAPER AS READ. The card coerced a null half to []
-     before buildVolContext saw it, so a term read that never landed beside
-     a rank that was read empty came out "quiet" — "the feed answered with
-     nothing" over a feed that did not answer. */
   const halfDead = buildCard({ ...base, darkpool: [], oiDeltas: [], termStructure: null, ivRank: [] }).panels.volContext;
   eq(halfDead.status, "unavailable",
      "a term half that never landed and a rank half read empty is NOT a quiet panel");
@@ -993,24 +774,12 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(live.volContext.ivRank.rows[0].rank1y, 44, "beside a rank whose unit the payload states");
 }
 
-
-/* ---------- the cohort: who this name was measured against ---------
-
-   A 21-PANEL WORKSPACE THAT COULD NOT NAME ITS OWN CROSS-SECTION. Four
-   surfaces print the sentence "sector and log-capitalisation neutralised out
-   before ranking", and the page a reader opens to understand ONE name could
-   not tell them which cohort that was, how many names were in it, or whether
-   this name's sector was so small it was pooled into the reference bucket.
-
-   The question the panel exists to answer is the obvious follow-up to every
-   strong reading on the page: is my top long simply the strongest name in a
-   sector being bought wholesale? */
 {
   const peers = [
     { t: "AAA", s: 71 }, { t: "BBB", s: 12 }, { t: "CCC", s: 3 },
-    { t: "DDD", s: 0 },                            // a REAL zero, not an absence
+    { t: "DDD", s: 0 },
     { t: "EEE", s: -8 }, { t: "GGG", s: -20 },
-    { t: "FFF", s: null },                         // absent — must not become a zero
+    { t: "FFF", s: null },
   ];
   const c = buildCohort({ ticker: "AAA", sector: "Technology", peers, pooled: false, minGroup: 3 });
 
@@ -1029,7 +798,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(c.best, 71, "the cohort's extremes are published");
   eq(c.worst, -20, "signed, so the short end is not folded onto the long");
 
-  /* THE WHOLESALE COUNT, AND THE ZERO THAT BELONGS TO NEITHER SIDE. */
   eq(c.sameSide, 3, "three peers share this name's sign");
   eq(c.otherSide, 2, "two oppose it");
   eq(c.neutral, 1,
@@ -1039,7 +807,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "the three counts partition the cohort exactly, so a reader can check the arithmetic " +
      "rather than take it");
 
-  /* THE MEDIAN'S OFF-BY-ONE, which is the whole of a median. */
   eq(buildCohort({ ticker: "AAA", peers: [{ t: "AAA", s: 10 }, { t: "BBB", s: 4 }] }).median, 7,
      "an even-length cohort takes the mean of its two middle values — a list of two must " +
      "not report its larger member as the median, which is what a naive middle index does");
@@ -1048,7 +815,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(buildCohort({ ticker: "AAA", peers: [{ t: "AAA", s: 5 }] }).n, 1,
      "with a size of one, which is itself the finding on that card");
 
-  /* POOLED IS NOT MISSING, AND NULL IS NOT FALSE. */
   eq(c.pooled, false, "a level with enough members is reported as not pooled");
   eq(buildCohort({ ticker: "AAA", peers, pooled: true }).pooled, true,
      "and a pooled level says so — the name WAS adjusted, against a cohort that is not " +
@@ -1060,7 +826,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(buildCohort({ ticker: "AAA", peers, sector: "" }).sector, null,
      "an empty sector label is null rather than an empty string a renderer would print");
 
-  /* THE PEER LIST IS CAPPED AND SAYS SO. */
   const many = Array.from({ length: 40 }, (_, i) => ({ t: "T" + i, s: 40 - i }));
   many.push({ t: "AAA", s: 100 });
   const big = buildCohort({ ticker: "AAA", peers: many });
@@ -1074,8 +839,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(big.rows[0].t, "AAA", "the rows are ordered strongest first");
   eq(big.rank, 1, "and the rank is over the WHOLE cohort, not over the shown slice");
 
-  /* DETERMINISTIC ORDER. Ties broken on the ticker so a re-run of the same
-     session builds the same card bytes. */
   const tied = buildCohort({ ticker: "BBB", peers: [
     { t: "CCC", s: 5 }, { t: "AAA", s: 5 }, { t: "BBB", s: 5 }] });
   assert.deepEqual(tied.rows.map((r) => r.t), ["AAA", "BBB", "CCC"],
@@ -1083,7 +846,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
     "bytes rather than whatever the input order happened to be"); checks++;
   eq(tied.rank, 2, "and this name's rank falls out of that same total order");
 
-  /* THE THREE SILENCES, ALL THREE REACHED. */
   const noPeers = buildCohort({ ticker: "AAA" });
   eq(noPeers.status, "unavailable",
      "no peer list at all is UNAVAILABLE — the pool was not carried into the build");
@@ -1109,8 +871,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
 
   eq(buildCohort({}).status, "unavailable", "no ticker is unavailable, not a throw");
 
-  /* THE NOTES ARE PUBLISHED, because the median's meaning is genuinely
-     counter-intuitive and a renderer restating it would be a second copy. */
   ok(COHORT_NOTES.median.length > 40 && /near zero is/.test(COHORT_NOTES.median),
      "the payload carries the note that a median near zero is the ORDINARY outcome of " +
      "neutralisation and not a finding — without it a reader draws a sector call out of " +
@@ -1121,29 +881,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(c.notes, COHORT_NOTES, "the notes ride on the panel rather than on the renderer");
 }
 
-
-/* ---------- the market-wide join: rank, cut, session, coverage ------
-
-   WHAT THIS PANEL IS FOR, and why the tests below are shaped the way they
-   are. The card already spends a per-name dark-pool call and a per-name
-   open-interest call on every deep name, and neither can answer "compared
-   with what" — a request for one name carries no other names in it. The
-   pulse leg fetches the two MARKET-WIDE feeds once a run for the market
-   page, and joining those onto the cards costs nothing and supplies exactly
-   the missing cross-section.
-
-   The three things that would make the panel worse than nothing, each with
-   its own block below:
-
-     an absence read as a silence — the feeds are SELECTIONS, and a name
-     that is not in one still had open interest and still had prints;
-
-     a rank read as today's — the vendor updates the market-wide
-     open-interest feed at about 06:45 ET and this pipeline runs at 05:15,
-     so the ranking is usually the PREVIOUS session's;
-
-     a cut-off asserted over a list that is not ordered, or over a list that
-     the request never truncated at all. */
 {
   const oiRow = (t, change, i) => ({
     option_symbol: `${t}260918C0015${i}000`,
@@ -1153,8 +890,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
     curr_oi: 40000 + change,
     curr_date: "2026-08-21", last_date: "2026-08-20",
   });
-  /* Descending, as the vendor documents this route to be, so the ordering
-     is measurable and the last row is a real threshold. */
+
   const oiRaw = { data: [
     oiRow("AAA", 9000, 1), oiRow("BBB", 5000, 2), oiRow("AAA", 4000, 3),
     oiRow("CCC", 1000, 4), oiRow("DDD", -2000, 5),
@@ -1171,7 +907,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
     tickers: names, sessionDate: "2026-08-24",
   });
 
-  /* ---- the ordering is MEASURED, never taken from the documentation ---- */
   eq(measureOrder([9, 5, 4, 1, -2]), "descending", "a falling list is descending");
   eq(measureOrder([1, 2, 3]), "ascending", "and a rising one ascending");
   eq(measureOrder([1, 3, 2]), null, "a list that turns is neither, and says so");
@@ -1183,14 +918,9 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "claim about rows nobody read");
   eq(measureOrder([7]), null, "one row is not an order");
 
-  /* ---- and so is the UNIT, against the vendor's own two snapshots ------ */
   eq(measureOiBasis([{ oi_change: "500", curr_oi: 1500, last_oi: 1000 }]).basis, "contracts",
      "a change that reconciles with curr_oi minus last_oi is a CONTRACT COUNT");
-  /* The vendor's own published example, verbatim from docs/uw-openapi.yaml:
-     oi_change 15.6149… beside curr_oi 35207 and last_oi 2119, which is
-     (35207 − 2119) / 2119 — a RATIO, not a count, and 33088 contracts is
-     carried separately as oi_diff_plain. Rendering that 15.61 as "+16
-     contracts" would be a confident wrong reading of a correct number. */
+
   eq(measureOiBasis([
     { oi_change: "15.6149126946672959", curr_oi: 35207, last_oi: 2119 },
     { oi_change: "0.21534300646906180330", curr_oi: 33253, last_oi: 27361 },
@@ -1203,7 +933,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(measureOiBasis([{ oi_change: "5" }]).checked, 0,
      "rows without both snapshots are not checked, and an unchecked row votes for nothing");
 
-  /* ---- the name that placed ------------------------------------------- */
   const a = readCrossFeed(idx.oiChange, "AAA");
   eq(a.status, "ok", "a name inside the feed reads ok");
   eq(a.present, true, "and says so as data");
@@ -1216,7 +945,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(a.unitOne, "contract", "and the singular that agrees with a value of one");
   eq(a.kind, "count", "and the kind a renderer needs to format it at all");
 
-  /* ---- the name that did not, which is a MEASURED absence ------------- */
   const f = readCrossFeed(idx.oiChange, "FFF");
   eq(f.status, "quiet",
      "a name the feed was READ without finding is QUIET, not unavailable: the request " +
@@ -1238,7 +966,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "a name outside the feed carries NO rank and NO value: a rank of zero or a value of " +
      "zero would be the confident-zero defect wearing a cross-section's clothes");
 
-  /* ---- a list nothing was cut from is not a cut ------------------------ */
   const loose = indexMarketCross({
     oiChange: oiRaw, darkpool: dpRaw,
     limits: { oiChange: 100, darkpool: 100 },
@@ -1250,7 +977,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "and the absence says so, because 'below the cut' would assert a threshold this run " +
      "never imposed");
 
-  /* ---- the recency feed's cut is a TIME, not a size ------------------- */
   const dp = readCrossFeed(idx.darkpool, "AAA");
   eq(dp.ordered, "descending", "the print feed came back newest first");
   eq(dp.orderedBy, "execution time, newest first",
@@ -1263,7 +989,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(dp.kind, "money", "the print's size is money");
   eq(dp.at, "2026-08-21T19:40:00Z", "and its own print carries the stamp it was ranked at");
 
-  /* ---- the timing trap, in all three of its states ------------------- */
   eq(idx.oiChange.asOf, "2026-08-21", "the feed publishes the session ITS OWN ROWS describe");
   eq(idx.oiChange.asOfStated, true, "and says that it stated one");
   eq(idx.oiChange.sameSession, false,
@@ -1288,18 +1013,9 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(readCrossFeed(undated.oiChange, "AAA").asOf, null,
      "the per-name reading carries the refusal too, rather than borrowing the card's date");
 
-  /* ---- A PRINT'S SESSION IS ITS EASTERN DAY, NOT ITS UTC ONE ---------
-
-     Off-exchange prints are reported to 20:00 ET. Under EST every print after
-     19:00 ET carries a UTC date one day AHEAD of its own Eastern session —
-     and /darkpool/recent at a 05:15 ET run returns exactly those newest rows.
-     This took isoDay(executed_at), the first ten characters of the instant,
-     and compared it against a sessionDate resolved in America/New_York: the
-     feed dated itself to TOMORROW and every card said "this ranking is from
-     another session" about prints from its own. */
   const lateEve = indexCrossFeed("darkpool", { data: [
-    { ticker: "AAA", premium: 900000, executed_at: "2026-01-06T00:10:00Z" },  // 19:10 ET Jan 5
-    { ticker: "BBB", premium: 800000, executed_at: "2026-01-06T00:45:00Z" },  // 19:45 ET Jan 5
+    { ticker: "AAA", premium: 900000, executed_at: "2026-01-06T00:10:00Z" },
+    { ticker: "BBB", premium: 800000, executed_at: "2026-01-06T00:45:00Z" },
   ] }, { limit: 2, tickers: ["AAA", "BBB"], sessionDate: "2026-01-05" });
   eq(lateEve.asOf, "2026-01-05",
      "a print executed 19:10 ET belongs to that evening's session, though its UTC stamp " +
@@ -1310,22 +1026,14 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(lateEve.asOfSessions, 1,
      "and they span ONE session, not two — the count that would have printed " +
      "'its rows span 2 sessions' over a feed inside a single evening");
-  /* The summer half, because a fixed offset would pass the winter case alone. */
+
   const summerEve = indexCrossFeed("darkpool", { data: [
-    { ticker: "AAA", premium: 900000, executed_at: "2026-07-07T00:10:00Z" },  // 20:10 ET Jul 6
+    { ticker: "AAA", premium: 900000, executed_at: "2026-07-07T00:10:00Z" },
   ] }, { limit: 1, tickers: ["AAA"], sessionDate: "2026-07-06" });
   eq(summerEve.asOf, "2026-07-06",
      "and the same holds under EDT, so the answer is read through the zone rather than " +
      "an offset that is right for half the year");
 
-  /* ---- THE CUT IS THE FLOOR IN BOTH DIRECTIONS ------------------------
-
-     measureOrder tells ascending from descending so a threshold is claimed
-     only where one exists, and both branches then took the LAST row of the
-     array regardless. On an ascending feed the last row is the MAXIMUM, so
-     the largest value in the feed was published as the floor everything else
-     cleared. /api/market/oi-change takes an `order` parameter, so this is a
-     shape the endpoint can actually return. */
   const mkOi = (v) => ({ underlying_symbol: "AAA", option_symbol: "AAA260918C00150000",
                          oi_change: String(v), oi_diff_plain: v, curr_oi: 100 + v,
                          last_oi: 100, curr_date: "2026-08-21" });
@@ -1348,7 +1056,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(noOrder.cut, null,
      "and publishes NO cut, because a value from an arbitrary position is not a threshold");
 
-  /* ---- the three silences, at the feed level -------------------------- */
   eq(indexCrossFeed("oiChange", undefined, { tickers: names }).status, "unavailable",
      "a feed the run never carried in is unavailable");
   eq(indexCrossFeed("oiChange", { __failed: "HTTP 500" }, { tickers: names }).status, "unavailable",
@@ -1366,7 +1073,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "and a name's reading against an empty feed says nobody made it and nobody missed it, " +
      "which is not the same sentence as missing a cut");
 
-  /* ---- never a confident zero at the row level ------------------------ */
   const gappy = indexCrossFeed("oiChange", { data: [
     { underlying_symbol: "AAA", oi_change: null, curr_oi: 10, last_oi: 5 },
     { underlying_symbol: "BBB", oi_change: "300", curr_oi: 305, last_oi: 5 },
@@ -1379,7 +1085,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "so the name with the unpublished change reads as not in the feed rather than as a " +
      "contract change of nothing");
 
-  /* ---- the panel, and its own three arms ------------------------------ */
   const panel = buildMarketCross(idx, "AAA", { asOf: "2026-08-24" });
   eq(panel.status, "ok", "the panel is ok when at least one feed was measured");
   eq(panel.asOf, "2026-08-24", "and carries the session the CARD describes");
@@ -1410,10 +1115,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "that exists rather than a blank panel");
   eq(halfDown.feeds.darkpool.status, "unavailable", "with the dead half saying which it is");
 
-  /* ---- and it is on the card the pipeline builds --------------------- */
-  /* The thinnest card that can be built: this block is about the panel
-     reaching card.panels at all, and every other input is already exercised
-     by the source-ablation sweep above. */
   const bare = { ticker: "AAA", row: { close: "100" }, features: {}, sessionDate: "2026-08-24" };
   eq(buildCard({ ...bare, marketCross: idx }).panels.marketRank.status, "ok",
      "buildCard mounts the join as a panel of its own");
@@ -1423,7 +1124,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "and a card built without the index says so rather than omitting the key, which is " +
      "what lets a renderer tell a failed run from a card that predates the join");
 
-  /* ---- the notes carry the refusals, in the payload's own words ------- */
   ok(/SELECTIONS/.test(CROSS_NOTES.absence),
      "the payload states in words that these lists are selections rather than the market");
   ok(/exchange-traded-fund/.test(CROSS_NOTES.absence),
@@ -1436,17 +1136,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "and says a rank is meaningless without the population beside it");
 }
 
-/* ---------------------------------------------------------------- *
- * THE THREE CLAIMS THAT OUTRAN THEIR MEASUREMENT                     *
- *                                                                    *
- * Each of these was shipped, read back off fifty live cards, and     *
- * called correct — and each asserted something the field underneath  *
- * it does not establish. They were caught by a reviewer rather than  *
- * by this file, and the fixes were first proven by a throwaway       *
- * script, which in this repository is not proof at all. So the       *
- * branches are pinned here, where they fail if the wording drifts    *
- * back toward the confident version.                                 *
- * ---------------------------------------------------------------- */
 {
   const greekLadder = (call, put) => [
     { expiry: "2026-09-18", call_vanna: call, put_vanna: put },
@@ -1461,10 +1150,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
     return lead ? lead.say : "";
   };
 
-  /* EQUAL LEGS ARE NOT A WINNER. The leg was picked with `>=`, so a tie
-     selected "call" and the sentence then claimed the expiry was carried
-     MOSTLY by a leg that is not larger than the other — a claim of dominance
-     over a measured balance. */
   ok(/split evenly between the call and put legs/.test(vannaSay(500, -500)),
      "a greek expiry whose call and put legs are equal in magnitude says they are " +
      "split evenly, never that one carries it"); checks++;
@@ -1475,24 +1160,15 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   ok(/carried mostly by the put leg/.test(vannaSay(100, -900)),
      "and so is a strictly larger put leg — the tie-break is not a default to calls"); checks++;
 
-  /* THE CUT CLAUSE NAMES THE SELECTION THAT HAPPENED. buildAggressor keeps
-     the strikes nearest spot ONLY when spot is positive; with no usable spot
-     it falls through to slice(0, maxStrikes), which keeps the LOWEST strikes.
-     Rows are built past the cap so the clause is exercised at all. */
   const aggrRows = [];
   for (let i = 0; i < 40; i++) {
     aggrRows.push({
-      /* OCC format: eight strike digits, thousandths. (100+i)*1000 padded to 8. */
+
       option_symbol: `T260918C${String((100 + i) * 1000).padStart(8, "0")}`,
       volume: 100, ask_volume: 60, bid_volume: 40,
     });
   }
-  /* NO `if (status === "ok")` GUARD. The first draft of this block wrapped
-     every assertion in one, and the symbols it built did not parse — so five
-     checks reported nothing and the suite still went green. A guard that can
-     skip an assertion silently is the defect this file exists to catch,
-     turned on the file itself. A panel that comes back anything but ok here
-     is a broken fixture and must FAIL. */
+
   const noSpot = buildAggressor(aggrRows, { spot: 0 });
   eq(noSpot.status, "ok", "the no-spot aggressor fixture builds a live ladder"); checks++;
   ok(noSpot.lead, "and carries a lead to assert against"); checks++;
@@ -1510,20 +1186,6 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
        "and with a usable spot the low-strike wording is not used instead"); checks++;
   }
 
-  /* A ZERO NET IS NOT EVIDENCE OF EQUAL LIFTING. `net` is Σ (ask − bid)
-     signed by what the buyer is long, so a call at ask 100 / bid 0 against a
-     put at ask 0 / bid 100 nets to zero with only the call ever lifted at the
-     offer. The sentence may say the two cancel; it may not say they were
-     lifted in the same size. */
-  /* THE FIXTURE IS THE COUNTER-EXAMPLE, and deriving it corrected the
-     reviewer who found the defect. Their example — a call at ask 100 / bid 0
-     against a put at ask 0 / bid 100 — does NOT net to zero here: `signed` is
-     (ask − bid) × (put ? −1 : +1), so both legs come to +100 and the ladder
-     nets +200. The CONCLUSION was right anyway, and this is a case that
-     actually shows it: the call is lifted 100 at the offer (+100) and the put
-     150 at the offer ((150 − 50) × −1 = −100), so the ladder nets exactly
-     zero while 100 calls and 150 puts were taken at the offer. "Lifted in the
-     same size" would have been flatly false on this strike. */
   const cancelling = [
     { option_symbol: "T260918C00100000", volume: 100, ask_volume: 100, bid_volume: 0 },
     { option_symbol: "T260918P00100000", volume: 200, ask_volume: 150, bid_volume: 50 },

@@ -1,4 +1,3 @@
-/* Guided/unguided capstone runner with local notebook and HTML export. */
 (async () => {
   "use strict";
   const root = document.getElementById("projectApp"), id = document.body.dataset.projectId;

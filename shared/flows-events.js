@@ -1,43 +1,3 @@
-/* =============================================================
-   flows-events.js — what the universe reports next, and what the
-   option market is charging into it.
-
-   THE PART NO OTHER PAGE CAN SAY. The pipeline's earnings gate
-   removes every name reporting inside a short window before the
-   board is scored, for a good reason: the composite is a
-   PREDICTIVE ranking and a name with a scheduled binary event is
-   not being priced by the same process as one without. But those
-   names are, by construction, the MOST EVENT-EXPOSED in the
-   universe — and until now the product discarded them into a single
-   number in a log line. This page is where they go.
-
-   ZERO VENDOR CALLS. Every field is on the wire already:
-   screenerTilt() is computed for every eligible name and then
-   thrown away for all but the enriched, and next_earnings_date is
-   read once to filter and never published.
-
-   ============================================================
-   THE TWO CLOCKS, WHICH IS THE CORRECTION THAT MATTERS MOST.
-
-   sessionDate and the earnings gate DO NOT SHARE AN ORIGIN.
-
-     - daysToEarnings() is called with Date.now() — the RUN's wall
-       clock, about 05:15 America/New_York.
-     - sessionDate is the last COMPLETED session, which at 05:15 is
-       always the previous trading day: yesterday on a normal
-       morning, Friday on a Monday.
-
-   So a page that counts days from sessionDate draws the gate window
-   ONE TO THREE DAYS EARLY and classifies every name against a gate
-   that is not the one that ran. Worse, it does so invisibly: a
-   fixture built from sessionDate agrees with the code perfectly,
-   and only the live drawing is wrong.
-
-   Both are published, and which quantity uses which is stated:
-   every PRICE describes sessionDate, every DAY COUNT uses
-   gateOrigin.
-   ============================================================= */
-
 import { horizonMove } from "./flows-features.js";
 
 const numOrNull = (v) => {
@@ -48,91 +8,10 @@ const numOrNull = (v) => {
 const round = (v, d) => (v === null ? null : Number(v.toFixed(d)));
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
-/**
- * How many rows the table publishes.
- *
- * RAISED FROM 60, AND THE OLD NUMBER WAS A SILENT TRUNCATION WAITING FOR
- * EARNINGS SEASON.
- *
- * buildEvents sorts by date and then slices, so the cap always cuts the
- * FARTHEST reporters — never an arbitrary subset, always the right-hand end of
- * the calendar. Against a universe of about 420 names and a 21-day window that
- * is harmless in an ordinary week, where roughly 60 names qualify. In the last
- * week of January or April a large fraction of the universe reports inside
- * three weeks: `inWindow` runs into the hundreds, `shown` pins at the cap, and
- * the chart's right half empties out for a reason that has nothing to do with
- * the window it draws.
- *
- * The old note blamed the window for that emptiness, which is the part that
- * made it a defect rather than a limit. The cap now publishes `capBound` and
- * `lastShownDate` so a page can say which of the two bound it.
- *
- * WHY 200 AND NOT MORE, WITH THE ARITHMETIC MEASURED RATHER THAN GUESSED. The
- * published key is budgeted at 128KB (worker.js, FLOWS_MAX_PAYLOAD_BYTES =
- * 131072 bytes). Rows were 229 bytes each BEFORE the flow group below; with
- * it they measure 304 bytes on a screener-only name — no realized vol, no IV
- * strip — and 323 on the worst case, every field populated with four-decimal
- * values and a long sector string. Serialised whole, with the header, the
- * announce block and the ~4.9KB of notes on top:
- *
- *     200 seats, screener-only rows   67.4KB   51% of the key
- *     200 seats, worst-case rows      71.2KB   54% of the key
- *
- * The earlier revision of this comment did the sum with the pre-flow-group
- * row and concluded "both inside half the ceiling", which was wrong in the
- * same pass that made it wrong: the fields that broke the arithmetic were
- * added twenty lines below it. The honest reading is that 200 seats spends
- * slightly over half the key and leaves ~60KB of headroom.
- *
- * 250 seats would be ~85KB, two thirds of the budget, and a per-key budget
- * spent two thirds of the way down on one table is how the NEXT field added
- * here becomes a truncation nobody predicted. Anything added to a row from
- * here costs 200x its own bytes; re-measure before adding one.
- */
 export const EVENT_ROWS = 200;
 
-/**
- * The window, in CALENDAR DAYS — and the unit in the name is load-bearing.
- *
- * TWO HORIZONS LIVE ON THIS PAGE AND THEY ARE NOT THE SAME QUANTITY.
- *
- *   dte  — CALENDAR days to the report. This is what the earnings gate
- *          counts (daysToEarnings is a plain millisecond subtraction), so it
- *          is the only unit in which "inside the gate" is a true statement,
- *          and the only one the window and the chart's axis may use.
- *   sdte — trading SESSIONS to the report, weekdays only. This is what the
- *          priced move needs, because horizonMove scales by sqrt(sessions /
- *          trading year) and feeding it calendar days overstates every move
- *          that crosses a weekend by sqrt(7/5) — about 18%.
- *
- * The first draft of this file filtered `sdte > EVENT_WINDOW_DAYS`: sessions
- * compared against a constant named days. It also would have had the chart
- * hatch a gate band measured in calendar days across marks placed in
- * sessions, so a name gated at 12 calendar days would have been drawn at 8
- * and appeared to sit OUTSIDE the band that removed it. Both numbers were
- * individually correct and the comparison between them was not, which is why
- * the unit is in the name now.
- */
 export const EVENT_WINDOW_DAYS = 21;
 
-/**
- * Trading sessions between two dates, counting weekdays only.
- *
- * A CONVENTION, AND A LABELLED ONE. The alternative — calendar days — is
- * what the vendor's own horizon fields use, and mixing the two is how a
- * five-calendar-day horizon becomes a three-session one without anybody
- * noticing. `ev` below scales an annualised volatility by sqrt(sessions /
- * trading year), so the unit of `sessions` has to be a SESSION or the move
- * is wrong by sqrt(7/5) at every weekend it crosses.
- *
- * MARKET HOLIDAYS ARE NOT REMOVED, and that is stated rather than fixed:
- * this file holds no holiday calendar, and inventing one would be a free
- * parameter. A count that is right to within one session per quarter is
- * honest; a count that silently assumes a calendar nobody published is not.
- *
- * Returns null rather than 0 for an unparseable or absent date — "reports
- * today" and "no date on the wire" are different facts.
- */
 export function calendarDaysTo(earningsDate, origin) {
   if (!ISO.test(String(earningsDate || "")) || !ISO.test(String(origin || ""))) return null;
   const end = Date.parse(earningsDate + "T00:00:00Z");
@@ -148,7 +27,7 @@ export function sessionsToEarnings(earningsDate, origin) {
   const start = Date.parse(origin + "T00:00:00Z");
   if (!Number.isFinite(end) || !Number.isFinite(start)) return null;
   const days = Math.round((end - start) / 86400000);
-  if (days < 0) return null;                 // already reported; not this page's row
+  if (days < 0) return null;
   let sessions = 0;
   for (let i = 1; i <= days; i++) {
     const dow = new Date(start + i * 86400000).getUTCDay();
@@ -157,22 +36,6 @@ export function sessionsToEarnings(earningsDate, origin) {
   return sessions;
 }
 
-/**
- * The four-point implied-volatility path, reconstructed exactly as the card
- * reconstructs it.
- *
- * THE −1w POINT IS NOT ON THE WIRE. screenerTilt exposes `ivMomentum`, which
- * is `iv30 − iv30d_1w`, and never `iv30d_1w` itself. So the point is
- * `iv30 − ivMomentum`, and only when BOTH are finite. A fixture that invents
- * a `tilt.iv30d_1w` passes every test in this file while every live value
- * comes back null — which is why this is written once, here, rather than
- * inline at a call site.
- *
- * Oldest first, and the labels are stated ONCE in the payload header rather
- * than repeated on every row: four `{h,v}` pairs cost ~300 bytes a row, and
- * sixty rows of them is a fifth of the payload spent on the same four
- * strings.
- */
 export const IV_PATH_LABELS = Object.freeze(["−1m", "−1w", "−1d", "now"]);
 
 export function ivPathOf(tilt) {
@@ -187,72 +50,17 @@ export function ivPathOf(tilt) {
   ];
 }
 
-/**
- * One name's row.
- *
- * `ev` IS A PRICE, NOT A FORECAST, and it is the only derived quantity here.
- * horizonMove scales an annualised volatility to a horizon by the square
- * root of time — no rate, no dividend, no distribution, no free parameter.
- * It says what the option market is CHARGING for the sessions between now
- * and the report, which is a different claim from what the stock will do,
- * and the payload's prose says so in those words.
- *
- * `im` is the VENDOR's own implied move to its own next expiry, passed
- * through and labelled as the vendor's. The two are deliberately both
- * published and deliberately not reconciled: they are quoted to different
- * horizons, and averaging them would produce a number quoted to neither.
- */
 export function eventRow(row, tilt, {
   gateOrigin, features = null, score = null, stage = null,
 } = {}) {
   const t = tilt || {};
   const d = ISO.test(String(row && row.next_earnings_date || "")) ? row.next_earnings_date : null;
   const sdte = sessionsToEarnings(d, gateOrigin);
-  /* THE GATE'S OWN NUMBER WHEN THE CALLER HAS IT, and a local computation
-     only as a fallback.
 
-     daysToEarnings() rounds `(earnings_at_midnight − Date.now()) / a day`, so
-     its answer depends on the TIME OF DAY the run happens: late in the day it
-     shaves most of a day off. calendarDaysTo() measures from midnight of the
-     Eastern date. The two agree at some hours and differ by one at others —
-     and when they differ, a row can be labelled `gated` while the `dte` beside
-     it reads 13 against a stated gate of 12, which is a contradiction a reader
-     is entitled to take as a bug in the gate rather than in the arithmetic.
-     Measured on a 20:52 UTC dry run: exactly that, on the boundary rows.
-
-     There is no right answer to "which rounding is correct" — there is only
-     "which number did the gate actually use", and this is how the page gets
-     that one instead of a second opinion about it. */
-  /* ONE ORIGIN, ONE COMPUTATION, AND NO PASSTHROUGH.
-
-     This briefly took the gate's own count as a parameter, because
-     daysToEarnings rounded against Date.now() while this counted from
-     midnight — two origins about 21 hours apart, which published a row
-     labelled `gated` beside a dte of 13 against a stated gate of 12 and,
-     worse, let the WEEKDAY count overtake the CALENDAR count containing it on
-     8 of 60 rows. A subset cannot be larger than its superset; the contract
-     suite refused to pass and was right to.
-
-     The passthrough was the wrong fix for the right problem. It made this
-     page's number agree with the gate's by TRUSTING the caller, which left
-     the guard in buildEvents resting on a convention nothing enforced — an
-     undated name with a supplied count was seated on the calendar and counted
-     as undated at the same time. The root cause was upstream: the gate was a
-     function of the minute the runner fired rather than of the date.
-
-     daysToEarnings measures from an ISO date now, and from THIS date. So the
-     gate's count and this one are the same arithmetic against the same
-     origin, the passthrough is redundant, and the whole class of defect goes
-     with it. A reader holding the payload can now reproduce every dte from
-     the gateOrigin it publishes, which was never true before. */
   const dte = calendarDaysTo(d, gateOrigin);
   const iv = numOrNull(t.iv30);
   const close = numOrNull(row && row.close);
 
-  /* THE BENCHMARK, COMPUTED ONCE. `evp` below is a ratio against this exact
-     number, and recomputing horizonMove inside the ratio would be a second
-     answer to a question already answered — the failure mode this repository
-     names on every derived quantity it has ever published twice. */
   const ev = iv !== null && sdte !== null && sdte > 0
     ? round(horizonMove(iv, { sessions: sdte }), 4) : null;
   const vendorMove = round(numOrNull(t.impliedMovePerc), 4);
@@ -260,59 +68,24 @@ export function eventRow(row, tilt, {
   return {
     t: String((row && row.ticker) || ""),
     d,
-    /* BOTH HORIZONS, because they answer different questions and one of them
-       is the gate's. See EVENT_WINDOW_DAYS. */
+
     dte,
     sdte,
-    /* THE ANNOUNCE TIME IS NOT ON THE SCREENER, and this page does not spend
-       44 calls to find it. Null with a published reason beats a column
-       populated for the first fortnight and blank after, which invites
-       exactly the wrong inference about the names in the blank half. */
+
     when: null,
     px: close !== null && close > 0 ? round(close, 2) : null,
     ev,
     im: vendorMove,
     iv: round(iv, 4),
-    /* REALIZED VOLATILITY IS ENRICHED-ONLY, so most rows withhold it. That
-       is a coverage fact, not a measurement, and the header counts how many
-       rows carry one so the column can say what it is missing. */
+
     rv: round(numOrNull(features && features.rv30), 4),
     ivr: round(numOrNull(t.ivRank), 4),
     ivPath: ivPathOf(t),
     rvol: round(numOrNull(t.relVolume), 2),
-    /* THE EVENT PREMIUM: what the vendor's own quote charges OVER the
-       no-event benchmark beside it, as a multiple.
 
-       `ev` scales a 30-day implied volatility by the square root of time,
-       which assumes variance accrues evenly per session — and a scheduled
-       report is the textbook case where it does not. `im` is the vendor's
-       quote to its own next expiry, which brackets the event. The ratio of
-       the two is therefore the one number on this row that is ABOUT the
-       event rather than about the name's ambient volatility, and it is a
-       RATIO of two published quantities, not an average of two horizons
-       quoted to neither — which is what EVENTS_NOTES.vendorMove refuses.
-
-       Null unless both are measured and the benchmark is strictly positive:
-       dividing by a zero or absent benchmark would publish an infinity or a
-       confident 1.0 where there is nothing to compare. */
     evp: vendorMove === null || ev === null || !(ev > 0)
       ? null : round(vendorMove / ev, 2),
-    /* ---- the flow group ----------------------------------------------
-       A FLOW PRODUCT'S EVENT CALENDAR PUBLISHED NO FLOW. Every one of these
-       is already computed by screenerTilt for every eligible name and was
-       thrown away for all but the enriched — the module header above says so
-       in those words about the volatility fields, and it was equally true of
-       the tilts. The one flow reading that did survive, rvol, reached the
-       page only inside a title attribute.
 
-       Short keys because the rest of this row is short-keyed and 200 rows of
-       "premiumTilt" is a fifth of a kilobyte of repeated spelling; the names
-       are stated ONCE in the payload header under `flow.labels`, exactly as
-       the four ivPath labels are.
-
-       Every one is a SHARE or a LOG RATIO and therefore unit-free and
-       comparable across names — which is why they can sit in one column
-       group at all, and is stated in the notes rather than assumed. */
     pt: round(numOrNull(t.premiumTilt), 4),
     nt: round(numOrNull(t.netTilt), 4),
     vt: round(numOrNull(t.volTilt), 4),
@@ -320,23 +93,12 @@ export function eventRow(row, tilt, {
     ot: round(numOrNull(t.oiTilt), 4),
     pcr: round(numOrNull(t.putCallRatio), 2),
     sector: (row && row.sector) || null,
-    /* WHERE THIS NAME STOPPED IN THE FUNNEL, which is the column this page
-       exists for. "gated" means the board was FORBIDDEN from holding an
-       opinion on it — not that it had none. */
+
     st: stage || null,
     s: numOrNull(score),
   };
 }
 
-/**
- * The published surface: every name reporting inside the window, nearest
- * first, with the funnel stage each one reached.
- *
- * SORTED BY DATE AND THEN BY TICKER, never by `ev`. Ranking by the priced
- * move would make this a leaderboard of expensive options, which is a
- * different page and a claim this one does not make: the question is what
- * reports next, and a calendar sorted by anything but time stops being one.
- */
 export function buildEvents(withTilt, {
   gateOrigin,
   sessionDate = null,
@@ -358,12 +120,7 @@ export function buildEvents(withTilt, {
     });
     if (!row.t) continue;
     if (row.d) dated++;
-    /* A NAME WITH NO EARNINGS DATE IS NOT A NAME REPORTING FAR AWAY. It is
-       counted in `undated` and left out entirely; seating it at the end of a
-       calendar would put a name nobody has scheduled after one scheduled in
-       three weeks, which reads as an ordering. `dte` is what is tested
-       because `dte` is what the window MEANS — and eventRow guarantees it is
-       null whenever the date is, rather than that guarantee living here. */
+
     if (row.dte === null) continue;
     if (row.dte > windowDays) continue;
     rows.push(row);
@@ -376,25 +133,16 @@ export function buildEvents(withTilt, {
     const k = r.st || "unclassified";
     byStage[k] = (byStage[k] || 0) + 1;
   }
-  /* WHICH LIMIT ACTUALLY BOUND, published rather than left to be inferred.
 
-     The rows are sorted by date and the cap slices the tail, so a bound cap
-     does not thin the table — it ENDS it, at a date earlier than the window.
-     A chart drawn from these rows is then blind past that date, and the page
-     used to attribute the empty right-hand half to the 21-day window, which is
-     the wrong cause and the more reassuring one. Both facts are on the wire
-     now: whether the cap bound, and the last date the drawing can speak for. */
   const capBound = rows.length > shown.length;
   return {
     rows: shown,
     shown: shown.length,
     inWindow: rows.length,
     capBound,
-    /* The newest date any drawn row carries. Null on an empty table — "the
-       drawing ends here" is not a statement an empty table can make. */
+
     lastShownDate: shown.length ? shown[shown.length - 1].d : null,
-    /* How many names inside the window the table does NOT show. Zero when the
-       cap did not bind, which is a measured zero and not an absence. */
+
     beyondCap: rows.length - shown.length,
     dated,
     undated: (Array.isArray(withTilt) ? withTilt.length : 0) - dated,
@@ -407,15 +155,7 @@ export function buildEvents(withTilt, {
     rvMeasured: shown.filter((r) => r.rv !== null).length,
     evMeasured: shown.filter((r) => r.ev !== null).length,
     ivPath: { labels: [...IV_PATH_LABELS], sameAs: "the card's ivStrip, same quantity and order" },
-    /* THE FLOW GROUP'S LEGEND, STATED ONCE. The row keys are short because 200
-       rows of "premiumTilt" is a fifth of a kilobyte of repeated spelling; the
-       cost of short keys is that a reader holding the payload cannot tell what
-       they are, and this is what pays it. Same discipline as ivPath.labels.
 
-       EVERY ONE IS UNIT-FREE, which is the only reason they may share a column
-       group: five of them are shares of a name's own gross, and one is a log
-       ratio of two surprise multiples. A dollar column among them would rank
-       market capitalisation with a flow-shaped wobble on top. */
     flow: {
       labels: {
         pt: "premium tilt — bullish minus bearish premium over their gross, a share",
@@ -434,8 +174,6 @@ export function buildEvents(withTilt, {
     },
   };
 }
-
-/* ---------- the prose, published verbatim ---------------------- */
 
 export const EVENTS_NOTES = Object.freeze({
   purpose: "Which names in the screened universe report next, what the option " +

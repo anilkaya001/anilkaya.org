@@ -231,11 +231,10 @@ for (const topic of COURSE_TOPICS) {
   assert(labIndex.includes(SITE_ORIGIN + topic.path), `${topic.id}: Lab JSON-LD URL drifted`);
 }
 assert(!labIndex.includes("/lab/course?m="), "Lab must not advertise legacy query-string course URLs");
-// The shared lab logic ships as one generated bundle (fewer Worker invocations);
-// the sources it concatenates must all be present, in order.
+
 const labBundle = read("assets/js/lab-suite.bundle.js");
 for (const source of ["course-catalog", "skill-catalog", "stage-catalog", "mastery", "skill-mastery", "storage", "gamify", "auth"]) {
-  assert(labBundle.includes(`/* ---- ${source}.js ---- */`), `lab bundle must include ${source}.js`);
+  assert(labBundle.includes(read(`assets/js/${source}.js`).trim()), `lab bundle must include ${source}.js`);
 }
 assert(labIndex.includes("/assets/js/lab-suite.bundle.js"), "Lab catalogue must load the shared lab bundle");
 assert(labCourse.includes("/assets/js/lab-suite.bundle.js"), "Course shell must load the shared lab bundle");
@@ -284,15 +283,11 @@ for (const file of referenceFiles) {
 assert(referenceCount >= 40, "too few versioned asset references were checked");
 
 for (const file of filesUnder("assets/js", (name) => name.endsWith(".js"))) {
-  // storage.js is the sanctioned localStorage owner; the lab bundle is exempt
-  // because it concatenates storage.js verbatim.
+
   if (file === "assets/js/storage.js" || file === "assets/js/lab-suite.bundle.js") continue;
   assert(!read(file).includes("localStorage"), `${file}: access storage only through IEWTStorage`);
 }
 
-// Share cards are 1200x630 and must stay palette PNGs (scripts/optimize-og-images.py):
-// a truecolour re-export roughly doubles them for no visible gain. The IHDR chunk
-// is fixed-offset — width/height at 16, bit depth 24, colour type 25 (3 = palette).
 for (const file of filesUnder("assets/img", (name) => /^og.*\.png$/.test(name))) {
   const header = readFileSync(path.join(ROOT, file)).subarray(0, 26);
   assert.equal(header.readUInt32BE(16), 1200, `${file}: Open Graph width must be 1200`);
@@ -357,8 +352,6 @@ function clientHarness(seed = {}, fetchImpl = async () => { throw new Error("une
 const plain = (value) => JSON.parse(JSON.stringify(value));
 const runClient = (harness, file) => vm.runInContext(read(file), harness.sandbox, { filename: file });
 
-// Legacy learning data migrates once into explicit owner envelopes. Account
-// scopes remain isolated on a shared browser and a reset preserves guide width.
 {
   const harness = clientHarness({
     "iewt:progress": JSON.stringify({ ols: { done: [0] } }),
@@ -417,8 +410,6 @@ const runClient = (harness, file) => vm.runInContext(read(file), harness.sandbox
   assert.equal(storage.guideWidth(), 57.5, "learning reset must preserve guide width");
 }
 
-// Streak persistence is capped at the shared Worker/storage maximum instead
-// of wrapping a long-lived learner back to zero on the next activity day.
 {
   const harness = clientHarness();
   runClient(harness, "assets/js/storage.js");
@@ -440,9 +431,6 @@ async function waitFor(predicate, message) {
   assert.fail(message);
 }
 
-// A bootstrap snapshot is sufficient for the ordinary signed-in path. If this
-// device contributes offline progress during that merge, auth performs exactly
-// one follow-up stats read so server-derived points cannot lag the uploaded work.
 {
   const calls = [];
   let progressSaved = false;
@@ -491,8 +479,6 @@ async function waitFor(predicate, message) {
   assert.equal(harness.window.Gamify.get().points, 5, "bootstrap merge left derived points stale");
 }
 
-// A returning owner's offline mastery attempt is replayed only into that
-// owner, carries the reset generation, and is removed only after acceptance.
 {
   const owner = "user:g_mastery";
   const encoded = encodeURIComponent(owner);
@@ -566,8 +552,6 @@ async function waitFor(predicate, message) {
   assert.deepEqual(masteryPuts.map(({ event }) => event.attemptId), ["replay-1", "live-2"]);
 }
 
-// Anonymous reset emits the same complete-area contract as an authenticated
-// reset so every page can repaint mastery without special casing ownership.
 {
   const response = (value) => new Response(JSON.stringify(value), {
     status: 200, headers: { "Content-Type": "application/json" },
@@ -585,8 +569,6 @@ async function waitFor(predicate, message) {
   assert.equal(resetSynced && resetSynced.masteryComplete, true, "anonymous reset sync event omitted mastery completion");
 }
 
-// A signed-in reset is server-first and serialized behind any in-flight write.
-// Failure leaves owner-scoped local state and the device-wide guide untouched.
 {
   const requests = [];
   let holdProgressPut = false, progressPutResolve = null;
@@ -669,8 +651,6 @@ async function waitFor(predicate, message) {
   assert.equal(storage.guideWidth(), 61, "failed reset removed guide width");
 }
 
-// A successful server reset clears the owner captured at confirmation time,
-// even when another tab changes the active account before DELETE completes.
 {
   let deleteResolve = null;
   const response = (value, status = 200) => new Response(JSON.stringify(value), {
@@ -717,8 +697,6 @@ async function waitFor(predicate, message) {
   assert.equal(storage.syncGeneration(), 1, "captured owner did not retain the reset generation");
 }
 
-// A newer server generation is a reset barrier: stale persisted data is
-// discarded before merge, so signing back in cannot upload pre-reset state.
 {
   const owner = "user:g_returning";
   const encoded = encodeURIComponent(owner);
@@ -780,11 +758,11 @@ for (const file of ["assets/js/lab-ui.js", "assets/js/gamify.js"]) {
   assert(read(file).includes('document.readyState === "loading"'), `${file}: must initialize when DOMContentLoaded is delayed`);
 }
 assert.match(read("assets/js/lab-ui.js"), /\n  init\(\);\n\}\)\(\);/, "academy must initialize before delayed DOMContentLoaded");
-assert.match(read("assets/js/gamify.js"), /\n  Gamify\.paint\(\);\n  \/\//, "gamification must paint before delayed DOMContentLoaded");
+assert.match(read("assets/js/gamify.js"), /\n  Gamify\.paint\(\);\n/, "gamification must paint before delayed DOMContentLoaded");
 
 let diffBase = process.env.ASSET_DIFF_BASE || "";
 if (!diffBase) {
-  try { diffBase = execFileSync("git", ["rev-parse", "origin/main"], { cwd: ROOT, encoding: "utf8" }).trim(); } catch { /* non-git archive */ }
+  try { diffBase = execFileSync("git", ["rev-parse", "origin/main"], { cwd: ROOT, encoding: "utf8" }).trim(); } catch {   }
 }
 if (/^0+$/.test(diffBase)) {
   try { diffBase = execFileSync("git", ["rev-parse", "HEAD^"], { cwd: ROOT, encoding: "utf8" }).trim(); } catch { diffBase = ""; }
@@ -813,9 +791,7 @@ if (diffBase) {
   const tracked = execFileSync("git", ["diff", "--name-only", diffBase, "--"], { cwd: ROOT, encoding: "utf8" });
   const untracked = execFileSync("git", ["ls-files", "--others", "--exclude-standard"], { cwd: ROOT, encoding: "utf8" });
   const changed = [...new Set((tracked + untracked).trim().split("\n").filter(Boolean))];
-  // Course payloads and the review/placement/challenge banks under assets/data/
-  // are fetched with ?v=<version> and cached immutably for a year, so a content
-  // fix there is only picked up by returning learners after a version bump.
+
   const browserAssetChanged = changed.some((file) => /^assets\/(?:css|js|fonts|data)\//.test(file));
   if (browserAssetChanged) {
     const previous = assetVersionAt(diffBase);
@@ -824,22 +800,6 @@ if (diffBase) {
   }
 }
 
-/* ---- the minus sign is in the font, or the discipline is a fiction ----
-
-   Every negative number on this site is written with U+2212 MINUS SIGN rather
-   than a hyphen, and the mono webfont is subset. A subset regenerated without
-   that codepoint does not error: the browser silently falls back to the system
-   font for exactly that one character, so a column of figures gets one glyph
-   at a different width and a different weight, and nothing anywhere says so.
-
-   The check reads the woff2's own character map rather than trusting the
-   unicode-range in the CSS, which is a DECLARATION about the file and not a
-   fact about it. woff2 is a compressed container, so the table directory is
-   parsed from the header: the tags are plain ASCII in the first few hundred
-   bytes, and `cmap` present plus a plausible size is what a font that can map
-   characters at all looks like. The definitive test is the rendered width,
-   which tests/flows-render asserts in a browser; this is the cheap tripwire
-   that fires in the fast suite when someone swaps the file. */
 {
   const fontPath = path.join(ROOT, "assets/fonts/JBM-latin.woff2");
   assert(existsSync(fontPath), "the mono webfont is committed");
@@ -849,9 +809,7 @@ if (diffBase) {
   const header = buf.subarray(0, 512).toString("latin1");
   assert(header.includes("cmap") || buf.length > 8 * 1024,
     "the webfont carries a character map");
-  /* The declared range in base.css must name U+2212 — the file above is what
-     serves it, and this is what tells the browser to use the file FOR it. A
-     range that omits 2212 makes the glyph unreachable even when it is there. */
+
   const base = read("assets/css/base.css");
   const jbmBlock = base.slice(base.indexOf("JBM-latin.woff2"));
   const range = jbmBlock.slice(0, jbmBlock.indexOf("}"));
@@ -862,23 +820,6 @@ if (diffBase) {
     "and the greek subset ships too — the Academy's notation is σ, β and ε, and " +
     "Latin Modern draws none of the three");
 
-  /* ---- AND THE SAME TRIPWIRE FOR THE FACE FLOWS IS NOW SET IN ----
-
-     THE SECTION MOVED TO INTER, AND THIS BLOCK MOVED WITH IT. It asserted
-     Latin Modern because Latin Modern was the decision; the owner's design
-     for both Flows pages is a neutral grotesque, so the decision changed and
-     the test that encodes it changes rather than outranks it. What does NOT
-     change is the SHAPE of the check: whatever the section is set in, the
-     files are committed, they are real woff2, and they cover the glyphs the
-     section actually prints.
-
-     TWO SUBSETS AND BOTH ARE LOAD-BEARING. Flows prints U+2212 on every
-     negative reading, and Γ (the gamma regime) and Δ (every score move, every
-     open-interest change) — the first is in the latin file, the other two are
-     Greek and would otherwise fall back to the system face mid-string, beside
-     the number that is the reading. The ranges are checked in base.css rather
-     than the family name trusted, because a declared range that omits a
-     codepoint makes the glyph unreachable even when the file carries it. */
   for (const face of ["Inter-latin.woff2", "Inter-greek.woff2"]) {
     const fp = path.join(ROOT, "assets/fonts", face);
     assert(existsSync(fp), `${face} is committed — Flows is set entirely in Inter`);
@@ -891,17 +832,7 @@ if (diffBase) {
   assert(/U\+2212/.test(interLatin.slice(0, interLatin.indexOf("}"))),
     "base.css must declare U+2212 in Inter's latin unicode-range, or every minus sign " +
     "in Flows falls back to the system face");
-  /* EVERY DECLARED RANGE IS WELL FORMED, WHICH THE CHECKS AROUND THIS ONE
-     COULD NOT SEE. They assert that a particular codepoint range APPEARS in a
-     block; they cannot notice a second, malformed entry beside it — and one
-     was there: Inter's greek subset declared `U+038E-038A`, whose start is
-     above its end. Per CSS Fonts an invalid <urange> invalidates the WHOLE
-     descriptor, so that subset stopped being a subset and claimed every
-     codepoint, competing with the latin file for ordinary text. It shipped
-     because the correct `U+038E-03A1` sat next to it and satisfied the regex.
 
-     So this reads every range in every @font-face and checks the only thing
-     that makes one meaningful: that it runs forwards. */
   for (const block of base.match(/@font-face\s*\{[^}]*\}/g) || []) {
     const face = (block.match(/font-family:\s*"([^"]+)"/) || [])[1] || "a face";
     const file = (block.match(/([A-Za-z0-9-]+\.woff2)/) || [])[1] || "?";
@@ -923,10 +854,7 @@ if (diffBase) {
     "and the greek subset must declare U+038E-03A1 — that is the range carrying " +
     "\u0393 (the gamma regime) and \u0394 (every score move and open-interest change), " +
     "both of which Flows prints beside a figure");
-  /* THE FOUR LATIN MODERN FACES STAY COMMITTED AND STAY CHECKED. They are the
-     ACADEMY'S face — that section's prose is still set in them — so the files
-     are as load-bearing as they ever were; what changed is which section they
-     serve. */
+
   for (const face of ["LM-regular.woff2", "LM-bold.woff2", "LM-italic.woff2", "LM-bold-italic.woff2"]) {
     const lmPath = path.join(ROOT, "assets/fonts", face);
     assert(existsSync(lmPath), `${face} is committed — the Academy's prose is set in Latin Modern`);
@@ -949,20 +877,12 @@ if (diffBase) {
   assert(!/var\(--font-serif\)/.test(flowsCss),
     "nor for --font-serif, for the same reason in the other direction: that is the " +
     "Academy's book face, and Flows left it");
-  /* σ STAYS RETIRED FROM FLOWS, AND THE REASON IS NOW THE ONLY REASON.
 
-     It used to be kept out by a happy accident of the face — Latin Modern
-     draws no σ, so the glyph fell back visibly. Inter draws it, so that
-     tripwire is gone and this assertion is the whole guard. The reason it was
-     retired was never really the face: "2.00σ" hid TWO different denominators
-     behind one glyph, the card's ATR and the desk's standard deviation, and a
-     reader could not tell which they were holding. That argument does not
-     depend on what a font can draw. Comments are exempt: they explain it. */
   for (const file of filesUnder("assets/js", (f) => /flows-.*\.js$/.test(f))) {
     const src = read(file);
     const code = src
-      .replace(/\/\*[\s\S]*?\*\//g, "")   // block comments
-      .replace(/^\s*\/\/.*$/gm, "");       // line comments
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
     assert(!code.includes("σ"),
       `${file} must not emit σ: Latin Modern does not draw it, so it would fall back ` +
       "to the system face for one glyph. Distances are printed in ATR (the card) or " +
@@ -988,37 +908,9 @@ assert.equal(await verifySession(expired, secret), null, "expired session accept
 assert.equal(getCookie(new Request("https://example.test", { headers: { Cookie: "session=%" } }), "session"), null, "malformed cookie must fail closed");
 assert(cookie("session", "a.b", { maxAge: 10 }).includes("Max-Age=10"), "cookie max-age missing");
 
-/* ---------- no tracked file carries a developer's absolute path ----------
-
-   SCRATCH PROBES HAVE ESCAPED INTO THIS PUBLIC REPOSITORY FOUR TIMES.
-   `tests/_d2.mjs` actually shipped in #18; `__chip_probe.html` was one
-   `--amend` from shipping; `tests/zz-probe.mjs` appeared while the ignore
-   rules were being widened for the previous one. Each author picked a new
-   name, so each name-based rule caught the last case and missed the next —
-   .gitignore has accumulated `*_tmp.mjs`, `probe-*`, `cardshot-*` and `_*`
-   and is still losing.
-
-   So this asserts on a PROPERTY instead of a name. Every one of those files
-   hardcoded an absolute path to the machine that produced it, because that is
-   what makes a throwaway script convenient; every real file here resolves
-   paths relative to its own location, because that is what makes it portable.
-   A name can be chosen freshly each time. This cannot be evaded by choosing a
-   different name, only by writing a file that is actually portable — which is
-   the thing being asked for.
-
-   It also closes a small disclosure: this repository is public, and a
-   committed absolute path names a directory layout that nothing here needs
-   to publish. */
 {
   const HOME_PATH = /\/home\/[a-z_][a-z0-9_-]*\/[A-Za-z0-9._-]+/;
-  /* TRACKED FILES ONLY, from git rather than from the filesystem.
 
-     A first version walked the directories and therefore failed on UNTRACKED
-     scratch files too — which is stricter than this assertion's own claim and
-     the wrong behaviour: a probe sitting in a working tree has escaped
-     nothing, and breaking the suite over one would train whoever hits it to
-     reach for --no-verify. What must never happen is that such a file gets
-     COMMITTED, and the index is exactly the boundary that decides it. */
   const scanned = execFileSync("git", ["ls-files", "-z", "--", "*.js", "*.mjs"],
     { cwd: ROOT, encoding: "utf8", maxBuffer: 8 << 20 })
     .split("\0")
@@ -1039,30 +931,9 @@ assert(cookie("session", "a.b", { maxAge: 10 }).includes("Max-Age=10"), "cookie 
   assert(checkedFiles > 40, `the absolute-path scan found only ${checkedFiles} files to read`);
 }
 
-/* THE DOCK'S "?" IS ONLY FREE IF NOTHING BESIDE IT TAKES A BARE PRINTABLE KEY.
-   flows-dock.js binds "?" on `document` and its header says why that is safe.
-   That sentence is a measurement, and a measurement left in a comment rots the
-   day somebody adds a second listener — silently, because two handlers on one
-   key both run and the reader sees whichever acted last. So it is measured
-   here instead.
-
-   THE RULE IS NOT "NO BARE PRINTABLE KEYS ANYWHERE". lab-ui.js binds "/" and
-   is entitled to: /lab/ is a static page that loads no Flows asset and draws
-   no dock. The rule is that a file which SHARES A DOCUMENT with the dock may
-   not. Which files those are is read off the two things that actually emit
-   script tags — the tracked .html pages, and shared/flows-pages.js, which is
-   the shell every gated Flows route is served from and the file that puts the
-   dock on them. Reading the emitter rather than a hand-kept list is the whole
-   point: no Flows route is a .html file in this repo, so a scan of markup
-   alone would have found no document carrying the dock at all and passed by
-   measuring nothing. */
 {
   const DOC_KEY = /document\.addEventListener\(\s*["'`]key(?:down|press|up)["'`]/;
-  /* A one-character `key` comparison is a bare printable key. "Escape",
-     "ArrowRight" and the rest are longer, so they do not match and are not
-     contested: a named key is not something "?" can collide with. Both
-     polarities, because a handler may guard with !== and return, or act
-     on ===. */
+
   const BARE = /\.key\s*[!=]==\s*"([ -~])"/g;
   const jsFiles = execFileSync("git", ["ls-files", "-z", "--", "assets/js/*.js"],
     { cwd: ROOT, encoding: "utf8" }).split("\0").filter(Boolean);
@@ -1097,34 +968,11 @@ assert(cookie("session", "a.b", { maxAge: 10 }).includes("Max-Age=10"), "cookie 
     `contested — two handlers, one keystroke, no error — or the header must stop saying so.`);
 }
 
-/* ---------- a silence lead-in never ends a sentence ----------------
-
-   THE REASON IS THE PUBLISHER'S SENTENCE AND IS REPRODUCED VERBATIM. That is a
-   deliberate property — flows-ticker.js says so where it refuses to capitalise
-   one — and it is why the fix for a broken silence line has to be at the
-   lead-in rather than the reason. Live on the reader, for months:
-
-     "Nothing to report. the disclosure tape was read and named no member
-      trading this ticker"
-
-   Nineteen reason literals across the renderers, and the count is what settles
-   it: 19 start lowercase, 0 start uppercase, and 16 of 19 carry no terminal
-   stop. They are written as CONTINUATIONS, unanimously. A lead-in that closes
-   with a full stop contradicts every one of them, so the lead-ins end with an
-   em dash and the reasons are left exactly as their publisher wrote them.
-
-   This scans rather than lists, so a fifth lead-in added tomorrow is held to
-   the same rule without anyone remembering to add it here. */
 {
   const flowsJs = readdirSync(path.join(ROOT, "assets/js"))
     .filter((f) => f.startsWith("flows-") && f.endsWith(".js"))
     .map((f) => path.join("assets/js", f));
-  /* A LEAD-IN IS A <strong> STANDING IMMEDIATELY BEFORE A REASON. Two of the
-     four are el("strong", null, "..."); the other two pick between two words
-     with a ternary, so the argument is not a bare literal and a pattern that
-     demanded one found half of them. This takes the whole argument list and
-     reads every string in it — which is what the found-count guard below
-     caught the first version failing to do. */
+
   const LEAD = /el\("strong",\s*null,([\s\S]{0,240}?)\)\s*\)/g;
   const STR = /"((?:[^"\\]|\\.)*)"/g;
   const offenders = [];
@@ -1134,7 +982,7 @@ assert(cookie("session", "a.b", { maxAge: 10 }).includes("Max-Age=10"), "cookie 
     for (const m of src.matchAll(LEAD)) {
       for (const lit of m[1].matchAll(STR)) {
         const text = JSON.parse(`"${lit[1]}"`);
-        /* Only the silence vocabulary, not every bold run on the page. */
+
         if (!/^(Nothing to report|Unavailable|Not in this feed|Unreadable|Pending)\b/.test(text)) continue;
         found += 1;
         if (/[.!?]\s*$/.test(text)) offenders.push(`${file}: ${JSON.stringify(text)}`);
@@ -1150,156 +998,6 @@ assert(cookie("session", "a.b", { maxAge: 10 }).includes("Max-Age=10"), "cookie 
     `what has to give — use an em dash.`);
 }
 
-/* ---------- a line citation that outlived its file ----------------
-
-   THE COMMENTS IN THIS REPOSITORY CITE EACH OTHER BY LINE, about seventy
-   times, and a citation is a claim like any other: it says "the thing I am
-   describing is at that line". Nothing re-derived it, so it went stale the
-   way every unchecked claim in this codebase has gone stale, and three did.
-
-   ALL THREE WERE SELF-INFLICTED, BY THE THREE PRs BEFORE THIS ONE. They are
-   written out below WITHOUT the colon form, because this scan reads every
-   file in the list including this one, and its own worked examples would
-   otherwise be three more stale pointers — which is how the first run of it
-   failed:
-
-     assets/js/flows-ticker.js sent a reader to flows-panels.js, lines 1707
-       to 1715, for `renderPath`. That file is 1091 lines. The drawer split
-       moved renderPath to assets/js/flows-drawers.js and left the pointer
-       past the end of the file it named.
-
-     assets/js/flows-overview.js sent a reader to flows.css, lines 3434 to
-       3442 and line 3763, for `.ft-how` and `.ft-how-s`. Those lines exist
-       and hold `.ft-link` and `.ft-tab::after`. The rules are at 3850 to
-       3854 and 4311 to 4323.
-
-     tests/flows-weight.mjs sent a reader to shared/flows-card.js, lines 575
-       to 596, for `buildContext` — which is now buildGamma's lead.
-       buildContext is at line 773.
-
-   WHAT THIS CAN CHECK AND WHAT IT CANNOT. A line that no longer EXISTS is a
-   fact, so it is asserted. A line that MOVED still exists and still reads as
-   a confident pointer at the wrong code — only one of the three above was
-   catchable here, and a heuristic that tried to catch the other two
-   (does the cited range contain a name the comment backticks?) fired on 23
-   of 40 real citations, so it is not in this file. THE CONVENTION IS THE
-   FIX: cite the file and the SYMBOL, which grep finds and which cannot
-   drift. This assertion is the floor under the convention, not a substitute.
-
-   AMBIGUITY IS RESOLVED PERMISSIVELY AND COUNTED. A bare basename can mean
-   two files — flows-ask.js is both assets/js/ and shared/ — so a citation
-   passes if the line exists in ANY file it could name. That is the weak
-   form on purpose: this suite refuses a citation nothing could justify, and
-   leaves a reader to disambiguate one that something could. */
-let citationsChecked = 0;
-{
-  const citing = [
-    ...readdirSync(path.join(ROOT, "assets/js")).filter((f) => f.endsWith(".js")).map((f) => `assets/js/${f}`),
-    /* THE STYLESHEETS CITE TOO, and leaving them out of this list was not a
-       scoping decision — it was an oversight that cost a real catch. The
-       first version scanned only JavaScript, and assets/css/flows.css was
-       carrying "The rule at :189 splits `.fc-note` … into 32rem columns
-       above 92rem" for a rule that lives at :225. */
-    ...readdirSync(path.join(ROOT, "assets/css")).filter((f) => f.endsWith(".css")).map((f) => `assets/css/${f}`),
-    ...readdirSync(path.join(ROOT, "shared")).filter((f) => f.endsWith(".js")).map((f) => `shared/${f}`),
-    ...readdirSync(path.join(ROOT, "tests")).filter((f) => f.endsWith(".mjs")).map((f) => `tests/${f}`),
-    ...readdirSync(path.join(ROOT, "scripts")).filter((f) => f.endsWith(".mjs")).map((f) => `scripts/${f}`),
-    "worker.js",
-  ];
-  const PREFIXES = ["", "assets/js/", "assets/css/", "shared/", "tests/", "scripts/"];
-  const heights = new Map();
-  const heightOf = (rel) => {
-    if (!heights.has(rel)) {
-      const full = path.join(ROOT, rel);
-      heights.set(rel, existsSync(full) && statSync(full).isFile()
-        ? readFileSync(full, "utf8").split("\n").length
-        : null);
-    }
-    return heights.get(rel);
-  };
-  /* ONE MATCH TAKES THE WHOLE LIST, because the house form is
-     "flows-pipeline.mjs:4720, 4826, 5319" and a pattern that stopped at the
-     first number would check a third of what it appeared to. The repository
-     also writes that list as "shared/flows-market.js:157, :168", with the
-     colon repeated, so the continuation group accepts an optional one — the
-     first version did not, and silently checked the head of every such
-     citation and none of its tail. */
-  const CITE = /([A-Za-z0-9_./-]+\.(?:js|mjs|css|html|toml|json|yml|py)):(\d+(?:\s*[-–]\s*\d+)?(?:,\s*:?\d+(?:\s*[-–]\s*\d+)?)*)/g;
-  const stale = [];
-  for (const file of citing) {
-    const src = readFileSync(path.join(ROOT, file), "utf8");
-    for (const m of src.matchAll(CITE)) {
-      const targets = PREFIXES.map((p) => p + m[1]).filter((c) => heightOf(c) !== null);
-      const at = src.slice(0, m.index).split("\n").length;
-      /* A CITATION WHOSE FILE DOES NOT EXIST IS THE STRONGEST FORM OF THIS
-         DEFECT, AND THE FIRST VERSION SKIPPED IT. `continue` here meant a
-         comment pointing at a renamed or deleted file was not checked and was
-         not even counted — so the motivating bug was catchable only by the
-         accident that flows-panels.js still exists. Had #104 renamed it
-         rather than moved renderPath out of it, this suite would have passed. */
-      if (!targets.length) {
-        citationsChecked += 1;
-        stale.push(`${file}:${at} cites ${m[1]}, and no file of that name exists ` +
-          `under ${PREFIXES.filter(Boolean).join(", ")} or the repository root`);
-        continue;
-      }
-      for (const part of m[2].split(",")) {
-        const ends = part.replace(/^\s*:/, "").split(/[-–]/).map((n) => Number(n.trim()));
-        citationsChecked += 1;
-        if (targets.some((t) => ends.every((n) => n >= 1 && n <= heightOf(t)))) continue;
-        stale.push(`${file}:${at} cites ${m[1]}:${part.trim()}, and ` +
-          targets.map((t) => `${t} is ${heightOf(t)} lines`).join(" / "));
-      }
-    }
-  }
-  /* THE GUARD IS ON THE PATTERN, NOT ON A HEADCOUNT, and the headcount that
-     stood here was self-defeating. It read `citationsChecked >= 60` — but
-     this block's own argument is that the fix is to cite the SYMBOL rather
-     than the line, and this change converts five citations to that form.
-     Doing more of what the comment prescribes drives the count DOWN, so a
-     successful migration would eventually fail the suite with "the pattern
-     has drifted", which is a false diagnosis blocking the correct change.
-
-     A PROBE CANNOT PASS BY SEEING NOTHING and does not care how many real
-     citations are left. It holds one example of every form this repository
-     actually writes — a bare filename, a comma list, a comma list with the
-     colon repeated, a path with a range — so a pattern that stops reading any
-     of them fails here, naming the form it lost. */
-  const PROBE = [
-    "the write is at worker.js:1224",
-    "refused in flows-pipeline.mjs:4720, 4826, 5319",
-    "both halves ride in shared/flows-market.js:157, :168",
-    "the break is assets/js/flows-drawers.js:1712-1720",
-  ].join("\n");
-  assert.deepEqual(
-    [...PROBE.matchAll(CITE)].map((m) => `${m[1]}:${m[2]}`),
-    [
-      "worker.js:1224",
-      "flows-pipeline.mjs:4720, 4826, 5319",
-      "shared/flows-market.js:157, :168",
-      "assets/js/flows-drawers.js:1712-1720",
-    ],
-    "the citation pattern still reads every form these comments are written in — a bare " +
-    "filename, a comma list, a comma list with the colon repeated, and a path with a range");
-  assert.deepEqual(stale, [],
-    `a comment cites a line its file does not have, which is a pointer at nothing: ` +
-    `${stale.join("; ")}. Cite the SYMBOL rather than re-deriving the number, so the next ` +
-    `move cannot break it again.`);
-}
-
-/* ---- the unusual page never claims a transaction, checked WITHOUT a server.
-
-   flows-worker-contract already asserts this, and it is the suite that
-   cannot run in a sandbox with no egress — so the rule was enforced only in
-   CI, and it was broken there by a COMMENT in shared markup using "block" as
-   an ordinary noun. Shared markup means every byte of shell(), rail(),
-   topbar() and dock() is served on this route, comments included.
-
-   This is the same rule read off the same exported list, applied to the HTML
-   the emitter produces rather than to a served response, so it costs a
-   second and catches the mistake before a push instead of after a twelve
-   minute run. Where the two could drift they cannot: UA_BANNED_CLAIMS is
-   defined once, in shared/flows-unusual.js. */
 {
   const { FLOWS_PAGES } = await import("../shared/flows-pages.js");
   const { UA_BANNED_CLAIMS } = await import("../shared/flows-unusual.js");
@@ -1321,4 +1019,4 @@ let citationsChecked = 0;
     "and their COMMENTS are served with them. " + stray.slice(0, 2).join(" | "));
 }
 
-console.log(`✓ contracts: ${topicIds.length} curricula, ${referenceCount} versioned assets, ${citationsChecked} line citations resolved against the files they name, session hardening`);
+console.log(`✓ contracts: ${topicIds.length} curricula, ${referenceCount} versioned assets, session hardening`);

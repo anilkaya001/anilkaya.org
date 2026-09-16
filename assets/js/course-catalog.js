@@ -1,8 +1,3 @@
-/* =============================================================
-   course-catalog.js — lightweight academy metadata.
-   Loaded by the catalogue and course shell; detailed course stages live in
-   one generated JSON payload per topic under /assets/data/courses/.
-   ============================================================= */
 (() => {
   "use strict";
 
@@ -93,11 +88,6 @@
     },
   ].map((topic) => Object.freeze({ ...topic, tags: Object.freeze(topic.tags), prerequisites: Object.freeze(topic.prerequisites), outcomes: Object.freeze(topic.outcomes) }));
 
-  // Per-stage point weights are authored in the curriculum and emitted to
-  // window.COURSE_STAGE_POINTS by the generated stage-catalog.js (the same
-  // source shared/course-points.js scores against server-side). This file used
-  // to carry a hand-maintained copy that silently disagreed with the authored
-  // weights for the five academy courses; it now defers to the single source.
   window.TOPIC_META = Object.freeze(topics);
   window.TOPIC_BY_ID = Object.freeze(Object.fromEntries(topics.map((topic) => [topic.id, topic])));
   window.LEARNING_PATHS = Object.freeze([

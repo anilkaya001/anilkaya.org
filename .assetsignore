@@ -1,4 +1,3 @@
-# Keep server code, config, and repo metadata out of the public static bundle.
 .*
 .git/
 .github/

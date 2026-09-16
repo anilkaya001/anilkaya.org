@@ -1,16 +1,3 @@
-/* =============================================================
-   flows-stock-contract.mjs — the wave-2 per-name feeds, shaped.
-
-   Shapes were established by live probe (2026-08-31 15:35 UTC run,
-   first-row key dumps), not by the vendor's spec, and these
-   contracts pin the reading discipline that history demands:
-   absent is absent (never a confident zero), rankings are claimed
-   only where every ranked row carries the ranking key, vendor
-   selections stay in vendor order, the rank unit travels with the
-   number (the "1352% of its year" scar), and one dead feed cannot
-   take its neighbour panel down.
-   ============================================================= */
-
 import assert from "node:assert/strict";
 import {
   shapeStockDarkpool, shapeStockOiChange, shapeTermStructure, shapeIvRank,
@@ -22,13 +9,12 @@ const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
-/* ---------- §1 prints ranked by a key every kept row carries ----- */
 {
   const dp = shapeStockDarkpool({ data: [
     { executed_at: "2026-08-28T14:00:00Z", price: "10", size: 100, premium: "1000" },
     { executed_at: "2026-08-28T15:00:00Z", price: "10", size: 900, premium: "9000" },
-    { executed_at: "2026-08-28T13:00:00Z", price: "10", size: 500 },        // unpriced
-    { executed_at: "2026-08-28T12:00:00Z" },                                 // measures nothing
+    { executed_at: "2026-08-28T13:00:00Z", price: "10", size: 500 },
+    { executed_at: "2026-08-28T12:00:00Z" },
   ] });
   deep(dp.rows.map((r) => r.prem), [9000, 1000],
     "prints rank by their own dollar size, descending — an ordering this payload " +
@@ -47,11 +33,8 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "ties break on time then size — total, so one response shapes to one byte string");
 }
 
-/* ---------- §2 OI deltas: vendor order, contract from one parser - */
 {
-  /* oi_change IS A RATIO AND oi_diff_plain IS THE COUNT — the fixture wrote
-     the ratio as though it were a count, which is the shaper's own former
-     misreading reproduced in the test that was supposed to catch it. */
+
   const oi = shapeStockOiChange([
     { option_symbol: "AAPL260918C00150000",
       oi_change: "0.21534300646906180330", oi_diff_plain: 5892,
@@ -60,7 +43,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     { option_symbol: "AAPL260918P00140000",
       oi_change: "-0.3", oi_diff_plain: -900, curr_oi: 99, last_oi: 999 },
     { option_symbol: "unparseable", oi_change: "5", oi_diff_plain: 5 },
-    { option_symbol: "AAPL261218C00160000" },              // neither reading sent
+    { option_symbol: "AAPL261218C00160000" },
   ]);
   deep(oi.rows.map((r) => r.diff), [5892, -900],
     "VENDOR ORDER PRESERVED — the selection is the vendor's, and re-sorting by " +
@@ -77,7 +60,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(oi.seen, 2, "rows without a parseable contract or a change are dropped, not dashed");
 }
 
-/* ---------- §3 the volatility context ---------------------------- */
 {
   const term = shapeTermStructure([
     { expiry: "2026-10-16", dte: 46, volatility: "0.31", implied_move: "12.5", implied_move_perc: "0.055" },
@@ -105,7 +87,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(buildVolContext([], []).status, "quiet", "and both empty is a quiet panel");
 }
 
-/* ---------- §4 caps shed with the shed counted ------------------- */
 {
   const many = Array.from({ length: STOCK_CAPS.oiDeltas + 6 }, (_, i) => ({
     option_symbol: `AAPL260918C${String((100 + i) * 1000).padStart(8, "0")}`,
@@ -117,16 +98,11 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(built.cap, STOCK_CAPS.oiDeltas, "and the cap itself published");
 }
 
-/* ---------- §5 determinism and junk ------------------------------ */
 {
   const raws = [{ executed_at: "T", price: 2, size: 3, premium: 6 }];
   eq(JSON.stringify(shapeStockDarkpool(raws)), JSON.stringify(shapeStockDarkpool(raws)),
     "two shapes over one response are byte-identical");
-  /* THREE ANSWERS FOR THREE FACTS, none of them a throw. This suite once
-     asserted that a null read and a malformed envelope were both "quiet",
-     which put the measured emptiness — the strongest claim a panel makes —
-     on a feed that never answered and on one whose answer this file could
-     not read. */
+
   eq(shapeStockDarkpool(null).status, "unavailable",
     "a read that never landed is unavailable, the card's word for it, never quiet");
   const malformed = shapeIvRank({ data: "nope" });
@@ -154,7 +130,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(halfLive.ivRank.status, "unavailable", "whose other half says unavailable for itself, not quiet");
 }
 
-/* ---------- §6 the vocabulary holds ------------------------------ */
 {
   const IDENTITY = /\b(whale|smart money|institutional|bought|sold|buyer|seller|paid)\b/gi;
   const EXECUTION = /\b(trade|trades|print|prints)\b/gi;

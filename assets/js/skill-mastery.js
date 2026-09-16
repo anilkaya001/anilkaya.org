@@ -1,4 +1,3 @@
-/* Browser build of the Academy 2.0 conceptual-skill scheduler. */
 (() => {
   "use strict";
   const LEVEL_MIN=0, LEVEL_MAX=5, INTERVAL_DAYS=Object.freeze([1,3,7,21,60]);
