@@ -551,8 +551,9 @@ function oneCard(t, card, at, st) {
   return out;
 }
 
-export function cardFacts(store) {
+export function cardFacts(store, options) {
   const s = store && typeof store === "object" ? store : {};
+  const thin = options !== null && typeof options === "object" && options.includeThin === true;
   const standing = boardStanding(s);
   const entries = [];
   for (const key of Object.keys(s)) {
@@ -562,7 +563,7 @@ export function cardFacts(store) {
 
     if (card === null || typeof card !== "object" || card.status === "pending") continue;
 
-    if (card.depth === "cross-section") continue;
+    if (card.depth === "cross-section" && !thin) continue;
     const t = typeof card.ticker === "string" && card.ticker ? card.ticker : m[1];
     entries.push({ t, card, at: atOf(card), st: standing.get(t) || null });
   }
@@ -1212,12 +1213,20 @@ export function promptFor(picked, question, meta) {
   return { system, user };
 }
 
-export function promptForSummary(picked, meta) {
+export function promptForSummary(picked, meta, options) {
   const facts = Array.isArray(picked) ? picked : [];
+  const o = options !== null && typeof options === "object" ? options : {};
+  const subject = typeof o.subject === "string" && /^[A-Z][A-Z0-9.\-]{0,9}$/.test(o.subject)
+    ? o.subject : null;
   const system = [
-    "You write a short standing summary of a stock options briefing using ONLY the " +
-      "facts supplied in the next message. You are the prose; the numbers are already " +
-      "decided. Nobody asked a question: you are summarising what was measured.",
+    subject === null
+      ? "You write a short standing summary of a stock options briefing using ONLY the " +
+        "facts supplied in the next message. You are the prose; the numbers are already " +
+        "decided. Nobody asked a question: you are summarising what was measured."
+      : "You write a short standing summary of ONE name, " + subject + ", from a stock " +
+        "options briefing, using ONLY the facts supplied in the next message. You are the " +
+        "prose; the numbers are already decided. Nobody asked a question: you are " +
+        "summarising what was measured for " + subject + " and nothing else.",
     "",
     "1. NEVER write a number that does not already appear, character for character, in " +
       "one of the supplied facts. Do not add, subtract, total, average, rank, round, " +
@@ -1245,12 +1254,19 @@ export function promptForSummary(picked, meta) {
     "7. Name the symbol a reading belongs to. A market-wide figure is not a reading for " +
       "one name, and attaching it to one is the same as inventing it.",
     "",
-    "Write three or four plain sentences. No lists, no headings, no markdown, no " +
-      "preamble such as \"here is a summary\", and do not refer to the facts by number " +
-      "or position.",
+    subject === null
+      ? "Write three or four plain sentences. No lists, no headings, no markdown, no " +
+        "preamble such as \"here is a summary\", and do not refer to the facts by number " +
+        "or position."
+      : "Write two or three plain sentences about " + subject + " only, naming it in the " +
+        "first sentence. No lists, no headings, no markdown, no preamble such as \"here " +
+        "is a summary\", and do not refer to the facts by number or position.",
   ].join("\n");
 
-  const user = factsHeader(meta) + "\n\nFacts measured for this session:\n" +
+  const user = factsHeader(meta) +
+    (subject === null
+      ? "\n\nFacts measured for this session:\n"
+      : "\n\nFacts measured for " + subject + " this session:\n") +
     facts.map((f) => "- " + f.say).join("\n");
 
   return { system, user };

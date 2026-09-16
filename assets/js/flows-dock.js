@@ -45,6 +45,7 @@
 
   function setOpen(open, focus) {
     dock.classList.toggle("is-open", open);
+    document.body.classList.toggle("has-dock-open", open);
     tab.setAttribute("aria-expanded", open ? "true" : "false");
     panel.hidden = !open;
     if (!open) return;

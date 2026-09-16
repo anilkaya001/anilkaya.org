@@ -2,7 +2,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "213";
+export const ASSET_VERSION = "214";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -175,7 +175,7 @@ function neuronWords(text) {
     `<span class="ak-w" style="--d:${Math.min(i, NEURON_CLAMP)}">${escapeHTML(word)}</span>`).join(" ");
 }
 
-function neuronProvenance(summary) {
+export function neuronProvenance(summary) {
   if (summary.llm) {
     return "Wording by " + escapeHTML(summary.model || "a language model") + "; figures measured by the pipeline.";
   }
@@ -999,6 +999,7 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
       <span class="ft-hero-stack">
         <span class="ft-hero-v" id="ftHeroPx"></span>
         <span class="ft-hero-chg" id="ftHeroChg" hidden></span>
+        <span class="ft-hero-live" id="ftHeroLive" role="status" hidden></span>
       </span>
     </div>
 
@@ -1074,6 +1075,14 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
       <span class="ft-brief-hn">Brief</span>
       <span class="ft-brief-beta">Beta</span>
     </h2>
+    <div class="ak-neuron ft-neuron is-pending" id="ftNeuron" hidden>
+      ${neuronMark("t", false)}
+      <div class="ak-neuron-body">
+        <p class="ak-neuron-h" id="ftNeuronH">Neuron</p>
+        <p class="ak-neuron-say" id="ftNeuronSay"></p>
+        <p class="ak-neuron-src" id="ftNeuronSrc"></p>
+      </div>
+    </div>
     <ol class="ft-brief-l" id="ftBriefL"></ol>
     <p class="ft-brief-s" id="ftBriefS"></p>
 

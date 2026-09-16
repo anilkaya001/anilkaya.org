@@ -4,7 +4,7 @@ import {
   parseCredentials, verifyCredential, signFlowsSession, verifyFlowsSession,
   isLearnAudience, isLocked, nextFailureState, sessionEpoch,
 } from "./shared/flows-auth.js";
-import { FLOWS_PAGES } from "./shared/flows-pages.js";
+import { FLOWS_PAGES, neuronProvenance } from "./shared/flows-pages.js";
 import * as FLOWS_ASK from "./shared/flows-ask.js";
 import { COURSE_STAGE_POINTS } from "./shared/course-points.js";
 import { COURSE_BY_ID, COURSE_BY_SLUG, COURSE_TOPICS, SITE_ORIGIN } from "./shared/course-seo.js";
@@ -1206,7 +1206,7 @@ async function readFlowsSummary(env, scope) {
   if (!env.DB) return null;
   try {
     const row = await env.DB.prepare(
-      "SELECT text, llm, model, guard, generated_at FROM flows_ai_summary WHERE scope = ?",
+      "SELECT text, llm, model, guard, fingerprint, generated_at FROM flows_ai_summary WHERE scope = ?",
     ).bind(scope || "board").first();
     if (!row) return null;
     return {
@@ -1215,9 +1215,157 @@ async function readFlowsSummary(env, scope) {
       llm: row.llm === 1,
       model: typeof row.model === "string" ? row.model : null,
       guard: typeof row.guard === "string" ? row.guard : null,
+      fingerprint: typeof row.fingerprint === "string" ? row.fingerprint : null,
       generatedAt: typeof row.generated_at === "string" ? row.generated_at : null,
     };
   } catch { return null; }
+}
+
+const TICKER_SUMMARY_GENERATING_MS = 90 * 1000;
+const TICKER_SUMMARY_RETRY_MS = 5 * 60 * 1000;
+
+function summaryShape(status, scope, summary, extra) {
+  const s = summary && typeof summary === "object" ? summary : null;
+  return {
+    status, scope,
+    summary: s !== null && s.text ? s.text : null,
+    llm: s !== null ? s.llm === true : false,
+    model: s !== null ? s.model : null,
+    guard: s !== null ? s.guard : null,
+    generatedAt: s !== null ? s.generatedAt : null,
+    provenance: s !== null && s.text ? neuronProvenance(s) : null,
+    ...(extra || {}),
+  };
+}
+
+async function writeFlowsSummary(env, scope, text, llm, model, fingerprint, guard) {
+  return env.DB.prepare(
+    "INSERT INTO flows_ai_summary (scope, text, llm, model, fingerprint, guard, generated_at) " +
+    "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(scope) DO UPDATE SET " +
+    "text=excluded.text, llm=excluded.llm, model=excluded.model, " +
+    "fingerprint=excluded.fingerprint, guard=excluded.guard, generated_at=excluded.generated_at",
+  ).bind(scope, text, llm ? 1 : 0, model, fingerprint, guard, new Date().toISOString()).run();
+}
+
+function tickerFacts(ticker, card) {
+  const built = FLOWS_ASK.cardFacts({ ["card:" + ticker]: card }, { includeThin: true });
+  return Array.isArray(built.facts) ? built.facts : [];
+}
+
+async function generateTickerSummary(env, ticker, facts, fingerprint) {
+  const scope = "ticker:" + ticker;
+  const model = askModel(env);
+  const plain = tickerPlain(facts);
+  if (!env.AI || model === null) {
+    await writeFlowsSummary(env, scope, plain, false, null, fingerprint, null).catch(() => {});
+    return;
+  }
+  const meta = { sessionDate: factsSession(facts) };
+  const { system, user } = FLOWS_ASK.promptForSummary(facts, meta, { subject: ticker });
+  let refused = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let generated = null;
+    try {
+      const out = await env.AI.run(model, {
+        messages: [{ role: "system", content: system }, { role: "user", content: user }],
+        max_tokens: 512,
+        temperature: attempt === 0 ? 0.2 : 0.05,
+      });
+      generated = aiText(out);
+      await askRecordSpend(env, out && out.usage);
+    } catch (error) {
+      const failed = askFailure(error);
+      await writeFlowsSummary(env, scope, plain, false, model, fingerprint,
+        "unreachable:" + failed.why).catch(() => {});
+      return;
+    }
+    if (!generated) {
+      await writeFlowsSummary(env, scope, plain, false, model, fingerprint,
+        "unreachable:empty").catch(() => {});
+      return;
+    }
+    const verdict = FLOWS_ASK.guardAnswer(generated, facts, { smallIntegers: false });
+    if (verdict.ok) {
+      await writeFlowsSummary(env, scope, generated, true, model, fingerprint, null).catch(() => {});
+      return;
+    }
+    refused = verdict.invented ? "invented" : "forecast";
+  }
+  await writeFlowsSummary(env, scope, plain, false, model, fingerprint, refused).catch(() => {});
+}
+
+function tickerPlain(facts) {
+  const said = facts.slice(0, 3)
+    .map((f) => (f && typeof f.say === "string" ? f.say.trim() : ""))
+    .filter(Boolean);
+  return said.length ? said.join(" ") : FLOWS_ASK.renderSummaryPlain([]);
+}
+
+function factsSession(facts) {
+  for (const f of facts) {
+    if (f && typeof f.at === "string" && f.at) return f.at.slice(0, 10);
+  }
+  return null;
+}
+
+async function tickerSummary(env, ctx, ticker) {
+  const scope = "ticker:" + ticker;
+  if (!env.DB) {
+    return json(summaryShape("unavailable", ticker, null,
+      { note: "No store is bound to this route, so no summary can be read or written." }));
+  }
+  const stored = await readFlowsPayload(env, "card:" + ticker);
+  if (stored === null) {
+    return json(summaryShape("pending", ticker, null,
+      { note: "No card has been published for " + ticker + " this session, so there is " +
+        "nothing to summarise yet." }));
+  }
+  let card;
+  try { card = JSON.parse(stored.payload); } catch {
+    return json(summaryShape("unreadable", ticker, null,
+      { note: "The card for " + ticker + " was published and could not be read, which is " +
+        "a fault on this side rather than a fact about the name." }));
+  }
+  if (!card || typeof card !== "object" || card.status === "pending" || !card.panels) {
+    return json(summaryShape("pending", ticker, null,
+      { note: "The card for " + ticker + " has not landed yet." }));
+  }
+  const facts = tickerFacts(ticker, card);
+  if (!facts.length) {
+    return json(summaryShape("quiet", ticker, null,
+      { note: "The card for " + ticker + " publishes no reading a summary could be " +
+        "written over: its panels carry no findings this session, which is a fact about " +
+        "the card and not about the name." }));
+  }
+  const fingerprint = FLOWS_ASK.summaryFingerprint(facts);
+  const prior = await readFlowsSummary(env, scope);
+  const now = Date.now();
+  const priorAge = prior && prior.generatedAt ? now - Date.parse(prior.generatedAt) : Infinity;
+
+  if (prior && prior.fingerprint === fingerprint) {
+    if (prior.guard === "generating") {
+      if (priorAge < TICKER_SUMMARY_GENERATING_MS) {
+        return json(summaryShape("pending", ticker, null,
+          { note: "Neuron is writing this name's summary now.", facts: facts.length }));
+      }
+    } else if (prior.text) {
+      const retryable = typeof prior.guard === "string" && prior.guard.startsWith("unreachable")
+        && prior.guard !== "unreachable:empty" && priorAge > TICKER_SUMMARY_RETRY_MS;
+      if (!retryable) {
+        return json(summaryShape("ok", ticker, prior, { facts: facts.length }));
+      }
+    }
+  }
+
+  await writeFlowsSummary(env, scope, "", false, askModel(env), fingerprint, "generating")
+    .catch(() => {});
+  const work = generateTickerSummary(env, ticker, facts, fingerprint).catch((error) => {
+    console.error(JSON.stringify({ message: "ticker summary failed", ticker,
+      error: error instanceof Error ? error.message : String(error) }));
+  });
+  if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(work); else await work;
+  return json(summaryShape("pending", ticker, null,
+    { note: "Neuron is writing this name's summary now.", facts: facts.length }));
 }
 
 function askSubject(body) {
@@ -1391,7 +1539,37 @@ async function cachedTickerInfo(env, ctx, ticker) {
   return out;
 }
 
-async function serveCachedVendorRead({ ctx, cacheKey, wantsRefresh, build }) {
+const LIVE_TTL_SECONDS = 5;
+
+async function buildLivePayload(env, ticker) {
+  const t = encodeURIComponent(ticker);
+  const raw = await uwFetch(env, `/api/stock/${t}/stock-state`, {});
+  const d = raw && !Array.isArray(raw) && raw.data ? raw.data : raw;
+  const live = d && typeof d === "object" && !Array.isArray(d) ? d : null;
+  const readAt = new Date().toISOString();
+  if (live === null) {
+    return { ticker, status: "unreadable", readAt, price: null, prevClose: null,
+      changePct: null, open: null, high: null, low: null, volume: null,
+      marketTime: null, tapeTime: null };
+  }
+  const price = numOrNull(live.close);
+  const prevClose = numOrNull(live.prev_close);
+  const changePct = price !== null && prevClose !== null && prevClose > 0
+    ? (price / prevClose - 1) * 100 : null;
+  return {
+    ticker,
+    status: price !== null && price > 0 ? "ok" : "quiet",
+    readAt,
+    price, prevClose, changePct,
+    open: numOrNull(live.open), high: numOrNull(live.high), low: numOrNull(live.low),
+    volume: numOrNull(live.volume ?? live.total_volume),
+    marketTime: live.market_time ? String(live.market_time) : null,
+    tapeTime: live.tape_time ? String(live.tape_time) : null,
+  };
+}
+
+async function serveCachedVendorRead({ ctx, cacheKey, wantsRefresh, build, ttlSeconds }) {
+  const ttl = Number.isFinite(ttlSeconds) && ttlSeconds > 0 ? ttlSeconds : CHAIN_TTL_SECONDS;
   const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
 
   const hit = cache ? await cache.match(cacheKey) : null;
@@ -1415,7 +1593,7 @@ async function serveCachedVendorRead({ ctx, cacheKey, wantsRefresh, build }) {
     const store = new Response(body, {
       headers: {
         "Content-Type": "application/json; charset=utf-8",
-        "Cache-Control": `max-age=${CHAIN_TTL_SECONDS}`,
+        "Cache-Control": `max-age=${ttl}`,
         "X-Chain-Stored": String(Math.floor(Date.now() / 1000)),
       },
     });
@@ -2777,17 +2955,39 @@ async function route(request, env, url, ctx) {
     }
 
     if (path === "/api/flows/summary") {
+      const subject = String(url.searchParams.get("t") || "").trim().toUpperCase();
+      if (subject !== "") {
+        if (!FLOWS_TICKER_RE.test(subject)) {
+          throw new HttpError(400, "invalid_ticker", "Unknown ticker");
+        }
+        return tickerSummary(env, ctx, subject);
+      }
 
       const summary = await readFlowsSummary(env, "board");
       if (summary === null) {
-        return json({ status: "pending", summary: null, llm: false, model: null,
-          guard: null, generatedAt: null,
+        return json({ status: "pending", scope: "board", summary: null, llm: false, model: null,
+          guard: null, generatedAt: null, provenance: null,
           note: "No summary has been generated for this session yet. Nothing is claimed " +
             "about the market by that — it says the briefing has not been published, " +
             "not that the session was quiet." });
       }
-      return json({ status: "ok", summary: summary.text, llm: summary.llm,
-        model: summary.model, guard: summary.guard, generatedAt: summary.generatedAt });
+      return json({ status: "ok", scope: "board", summary: summary.text, llm: summary.llm,
+        model: summary.model, guard: summary.guard, generatedAt: summary.generatedAt,
+        provenance: neuronProvenance(summary) });
+    }
+
+    if (path === "/api/flows/live") {
+      const ticker = String(url.searchParams.get("t") || "").trim().toUpperCase();
+      if (!FLOWS_TICKER_RE.test(ticker)) {
+        throw new HttpError(400, "invalid_ticker", "Unknown ticker");
+      }
+      return serveCachedVendorRead({
+        ctx,
+        cacheKey: new Request(`https://flows-live.internal/${ticker}`, { method: "GET" }),
+        wantsRefresh: false,
+        ttlSeconds: LIVE_TTL_SECONDS,
+        build: () => buildLivePayload(env, ticker),
+      });
     }
 
     if (path === "/api/flows/brief") {

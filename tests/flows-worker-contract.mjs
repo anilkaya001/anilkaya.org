@@ -532,6 +532,27 @@ try {
          "the value comes off a query string a reader can type into, and it is bounded here, " +
          "again in the module, and never trusted by either alone");
 
+      eq((await get("/api/flows/summary?t=AAPL")).status, 401,
+         "a name's Neuron summary is behind the same gate as the board's");
+      const perName = await get("/api/flows/summary?t=AAPL", { headers: auth });
+      eq(perName.status, 200, "and an authenticated reader is served it on a GET");
+      const perNameBody = await perName.json();
+      eq(perNameBody.status, "pending",
+         "with no card published for the name the answer is PENDING, never quiet: nothing " +
+         "has been measured, so nothing is claimed");
+      eq(perNameBody.scope, "AAPL", "and the payload names the scope it was asked for");
+      eq(perNameBody.summary, null, "carrying no text a page could mistake for a reading");
+      eq((await get("/api/flows/summary?t=not-a-symbol", { headers: auth })).status, 400,
+         "a subject that is not shaped like a symbol is refused before the store is read");
+      eq((await get("/api/flows/live?t=AAPL")).status, 401,
+         "the live quote is behind the gate too");
+      const live = await get("/api/flows/live?t=AAPL", { headers: auth });
+      eq(live.status, 503,
+         "and with no vendor key configured in this harness it says so with a 503 rather " +
+         "than serving a price it did not read");
+      eq((await live.json()).error.code, "chain_unconfigured",
+         "naming the configuration fault in the project error envelope");
+
       eq((await get("/api/flows/ai-usage")).status, 401,
          "the meter is behind the same gate as everything else here: what this site spends " +
          "is not a fact for an anonymous reader");

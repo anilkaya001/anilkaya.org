@@ -2210,4 +2210,11 @@
   }).catch(() => {
     statusEl.textContent = "The session could not be loaded. Refresh to try again.";
   });
+
+  const ccScroll = document.getElementById("ccScroll");
+  if (ccScroll) {
+    const edge = () => ccScroll.classList.toggle("is-scrolled", ccScroll.scrollTop > 2);
+    ccScroll.addEventListener("scroll", edge, { passive: true });
+    edge();
+  }
 })();
