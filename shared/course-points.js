@@ -1,4 +1,3 @@
-/* Generated server-side scoring manifest. */
 export const COURSE_STAGE_POINTS = Object.freeze({
   "ols": Object.freeze([5,10,10,15,10,5,10,15,15,5,10,10,15,20,20,5,10,15,10,20]),
   "iv2sls": Object.freeze([5,5,10,10,15,15,5,5,10,10,15,15,10,20,5,5,10,10,15,15,15,10,5,5,10,10,10,15,15,20,15]),

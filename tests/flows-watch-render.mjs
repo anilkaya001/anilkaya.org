@@ -1,42 +1,3 @@
-/* =============================================================
-   flows-watch-render.mjs — the dead band, and which way its names
-   are walking.
-
-   /flows/watch/ is this product's own account of itself as an early
-   warning: its caption says a row near the edge "is one session from
-   appearing on a board." It could say how FAR each name was from the
-   edge and could not say whether the name was moving toward it, and
-   two rows at the same distance are not the same row — one closed
-   half the gap last night and the other opened it.
-
-   THE ABSENCE WAS STRUCTURAL, NOT AN OVERSIGHT. Distance here is
-   measured on the residual, because at a band of ±1 every row inside
-   it scores 0 and the score cannot separate them; and the residual
-   was computed every morning, used to rank, and never archived. There
-   was no yesterday to subtract. It is archived now, and the pooled
-   trace publishes each name's residual CHANGE since the session it
-   was last scored.
-
-   WHAT THIS FILE PINS is everything the arithmetic cannot reach.
-   Every defect below is silent — none of them throws, and each would
-   ship a page that looks entirely correct:
-
-     - a projection presented on a rate averaged over five sessions,
-       which dresses one number as a trend;
-     - an approach differenced against an absent residual, which is a
-       different quantity rather than a smaller one;
-     - a direction carried by hue alone, invisible in greyscale;
-     - a rate printed without the gap it was divided by, which is the
-       exact defect the change layer was built to end;
-     - a trace that failed to load rendering as "nothing is moving"
-       rather than as "we could not tell";
-     - a status line quoting a threshold the code stopped using.
-
-   THE FIXTURE IS BUILT SO EVERY ONE OF THOSE BRANCHES EXECUTES. A
-   fixture that cannot reach the branch it certifies is this
-   repository's most repeated mistake, so each name below exists to
-   take exactly one path and the assertions name which.
-   ============================================================= */
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { signSession } from "../shared/session.js";
@@ -57,29 +18,20 @@ const put = (key, bodyObj) => fetch(url("/api/flows/ingest?key=" + encodeURIComp
   body: JSON.stringify(bodyObj),
 });
 
-/* THE SAME CLOSED FORM THE PAGE AND THE SCORER BOTH USE. Written out here
-   rather than imported so the fixture's arithmetic is independent of the
-   code under test: a test that computes its expectations with the function
-   it is testing asserts only that the function equals itself. */
 const SCORE_SCALE = Math.atanh(0.80) / 2.0;
 const scoreOf = (resid) => 100 * Math.tanh(resid / SCORE_SCALE);
 const BAND = 1;
 const distOf = (resid) => Math.max(0, BAND - Math.abs(scoreOf(resid)));
 
-/* Residuals chosen so every name below sits INSIDE a ±1 band. The band edge
-   is at |resid| where 100*tanh(resid/SCALE) === 1, about 0.0055. */
 const R = {
-  CLOSE: 0.0040,     // 0.73 score points, walking in
-  WIDEN: 0.0040,     // the SAME distance, walking out — the pair that matters
-  SLOW: 0.0045,      // approaching, but the rate was measured over five sessions
-  NOQV: 0.0030,      // no residual change published: no approach at all
-  FADED: 0.0020,     // came back through the edge
-  BARE: 0.0010,      // no trace entry at all
+  CLOSE: 0.0040,
+  WIDEN: 0.0040,
+  SLOW: 0.0045,
+  NOQV: 0.0030,
+  FADED: 0.0020,
+  BARE: 0.0010,
 };
 
-/* The move, in residual units, that each name made since it was last scored.
-   CLOSE moved toward the edge overnight; WIDEN moved away by the same amount,
-   so the two are a controlled pair differing only in sign. */
 const D = { CLOSE: +0.0008, WIDEN: -0.0008, SLOW: +0.0005, FADED: -0.0090 };
 
 const watchRow = (t, resid) => ({
@@ -91,9 +43,7 @@ const WATCH = {
   v: 1, generatedAt: new Date().toISOString(), sessionDate: "2026-08-24",
   status: "ok", deadBand: BAND, scored: 120, neutral: 6,
   rows: [
-    /* Deliberately NOT in the order the page should render them, so a passing
-       sort assertion proves a sort happened rather than proving the fixture
-       was already sorted. */
+
     watchRow("BARE", R.BARE),
     watchRow("WIDEN", R.WIDEN),
     watchRow("NOQV", R.NOQV),
@@ -128,12 +78,10 @@ const TRACK = {
     trackName("WIDEN", R.WIDEN, D.WIDEN, 1),
     trackName("SLOW", R.SLOW, D.SLOW, 5),
     trackName("FADED", R.FADED, D.FADED, 1, "faded"),
-    /* NOQV has a change but NO residual change — the exact "both ends or
-       neither" case: the earlier observation came from a board-only backfill
-       day that carried no residual. */
+
     { t: "NOQV", s: [3, 0], n: 2, last: 0, lastAt: 1, run: 0,
       ext: { hi: 3, hiAt: 0, lo: 0, loAt: 1 }, d1: { v: -3, gap: 1 } },
-    /* BARE is absent from the trace entirely. */
+
   ],
   notes: { change: "x", crossing: "x", saturation: "x", run: "x", gaps: "x" },
 };
@@ -146,7 +94,7 @@ const open = async (viewport = { width: 1400, height: 1000 }) => {
 };
 
 try {
-  /* ---------- 1. the full page, trace present ---------------------- */
+
   await put("board:watch", WATCH);
   await put("scoretrack", TRACK);
 
@@ -157,17 +105,6 @@ try {
   const order = await page.$$eval("#watchBody tr th a", (a) => a.map((x) => x.textContent.trim()));
   eq(order.length, 6, "every fixture row rendered");
 
-  /* THE NAME LEADS TO THE READER, AND THE HREF SAYS WHICH ONE.
-
-     This link read `?t=SYM` — this page's own address — because the retired
-     card dialog was mounted here and read that parameter to open a modal over
-     the table. Nothing on this route reads `?t=` now, so the same href would
-     be a link that reloads the watch list and does nothing visible: the
-     quietest kind of dead control, since the page it lands on looks correct.
-     Asserted per row, because a loop that mints one right address and stale
-     ones after it is what a sampled assertion cannot see. `from=watch` is what
-     lets the reader offer a way back HERE rather than to a board these names —
-     inside the dead band, on neither side — are not on. */
   const readerHrefs = await page.$$eval("#watchBody tr th a",
     (as) => as.map((a) => [a.textContent.trim(), a.getAttribute("href")]));
   for (const [name, href] of readerHrefs) {
@@ -175,10 +112,6 @@ try {
        `${name}: the watched name links to its own reader (${href})`);
   }
 
-  /* THE CONTROLLED PAIR. CLOSE and WIDEN sit at IDENTICAL distances and moved
-     by the same amount in opposite directions. A distance sort cannot order
-     them at all — it falls through to input order, which the fixture put the
-     wrong way round on purpose. */
   eq(distOf(R.CLOSE).toFixed(6), distOf(R.WIDEN).toFixed(6),
      "the fixture's two headline names are exactly the same distance from the edge, so " +
      "distance alone cannot order them and any ordering that appears is doing something else");
@@ -187,7 +120,6 @@ try {
      "the edge is the more urgent row, which is the whole of this page's former blind spot. " +
      "The fixture listed WIDEN first, so this cannot pass on input order");
 
-  /* THE RATE IS PRINTED, AND IT IS SIGNED IN TEXT. */
   const closeCell = await page.$eval("#watchBody tr:has(th a:text-is('CLOSE')) .c-toband",
     (el) => ({ text: el.textContent, html: el.innerHTML, title: (el.querySelector(".c-approach") || {}).title || "" }));
   ok(/▸/.test(closeCell.text),
@@ -203,7 +135,6 @@ try {
      "and a retreating row points the other way and carries a minus — the two rows differ " +
      "in glyph and in sign, not merely in colour");
 
-  /* THE GAP TRAVELS WITH THE RATE. */
   ok(/1 session/.test(closeCell.title),
      "the overnight row names the single session its rate was measured across");
   const slowTitle = await page.$eval("#watchBody tr:has(th a:text-is('SLOW')) .c-approach",
@@ -212,7 +143,6 @@ try {
      "and a rate measured across five sessions says so AND says it was divided by five — " +
      "the same number without its denominator is the exact defect the change layer replaced");
 
-  /* THE PROJECTION IS WITHHELD WHERE IT WOULD BE DRESSING ONE OBSERVATION. */
   ok(/≈/.test(closeCell.text),
      "the overnight approach carries a projection, marked as approximate");
   const slowText = await page.$eval("#watchBody tr:has(th a:text-is('SLOW')) .c-toband",
@@ -229,7 +159,6 @@ try {
      (el) => el.textContent.replace(/◂/, ""))),
      "and the retreating row carries exactly one direction marker, not two");
 
-  /* BOTH ENDS OR NEITHER. */
   const noqvText = await page.$eval("#watchBody tr:has(th a:text-is('NOQV')) .c-toband",
     (el) => el.textContent);
   ok(!/▸|◂|≈/.test(noqvText),
@@ -244,7 +173,6 @@ try {
   ok(!/▸|◂|≈/.test(bareText),
      "and a name absent from the trace entirely renders its distance and nothing more");
 
-  /* THE FADED CROSSING. */
   const fadedMark = await page.$$eval("#watchBody .c-faded", (els) => els.length);
   eq(fadedMark, 1, "exactly the one name that came back through the edge is marked");
   const fadedRow = await page.$eval("#watchBody tr:has(.c-faded) th a", (el) => el.textContent.trim());
@@ -252,7 +180,6 @@ try {
      "and it is the right one — this row is here BECAUSE it fell in, which a reader " +
      "scanning for what is about to leave should not have to work out");
 
-  /* THE STATUS LINE. */
   const status = await page.$eval("#watchStatus", (el) => el.textContent);
   ok(!/within three/.test(status),
      "the status line no longer claims a threshold of three. That was three SCORE units " +
@@ -268,11 +195,8 @@ try {
      "and the faded crossing is counted in words as well as marked on its row");
   await page.close();
 
-  /* ---------- 2. the trace fails to load --------------------------- */
   {
-    /* THE SILENCE THAT MUST NOT READ AS A READING. With no trace, "nothing is
-       moving toward the edge" and "we could not tell" are the same pixels
-       unless the page says which it means. */
+
     const p2 = await open();
     await p2.route("**/api/flows/scoretrack", (route) => route.abort());
     await p2.goto(url("/flows/watch/"), { waitUntil: "networkidle" });
@@ -291,26 +215,12 @@ try {
     ok(!/measurable/.test(s2),
        "so it claims no denominator it does not have");
 
-    /* THE FALLBACK ORDERING IS THE ONE THAT SHIPPED BEFORE. */
-    /* THE FALLBACK ORDER, ASSERTED WHOLE AND COMPUTED FROM THE FIXTURE'S OWN
-       ARITHMETIC rather than typed out. A first draft of this line named a
-       ticker from memory and named the wrong one — the code was right and the
-       expectation was invented — which is exactly the class of error an
-       assertion derived from the inputs cannot make. */
     const feed = WATCH.rows.map((r) => r.t);
     const byDistance = feed.slice().sort((a, b) => distOf(R[a]) - distOf(R[b]));
     assert.deepEqual(rows, byDistance,
       "and the ordering falls back to pure distance — the ordering that shipped before this " +
       "column existed — rather than to nothing at all"); checks++;
 
-    /* AND THE TIEBREAK IS THE POINT, NOT AN ARTEFACT. CLOSE and WIDEN are at
-       an identical distance, so the distance comparator returns 0 for that
-       pair and Array.prototype.sort leaves them in the order they arrived —
-       which the fixture set to WIDEN first. So the fallback ordering puts the
-       RETREATING name above the approaching one, and it is not wrong to do
-       so: it has no key that could tell them apart. That is precisely the
-       blind spot the approach sort exists to close, and §1 asserts the
-       opposite order on the same two rows with the trace present. */
     ok(rows.indexOf("WIDEN") < rows.indexOf("CLOSE"),
        "with the two equidistant names left in the order they arrived — the distance " +
        "comparator returns zero for that pair, so the retreating name sits above the " +
@@ -320,7 +230,6 @@ try {
     await p2.close();
   }
 
-  /* ---------- 3. no trace names at all, but the key loads ---------- */
   {
     await put("scoretrack", { ...TRACK, names: [], change: { ...TRACK.change, comparable: 0, status: "cold" } });
     const p3 = await open();
@@ -336,7 +245,6 @@ try {
     await put("scoretrack", TRACK);
   }
 
-  /* ---------- 4. 320px ---------------------------------------------- */
   {
     const p4 = await open({ width: 320, height: 900 });
     await p4.goto(url("/flows/watch/"), { waitUntil: "networkidle" });
@@ -349,7 +257,6 @@ try {
     await p4.close();
   }
 
-  /* ---------- 5. the column count still matches the head ----------- */
   {
     const p5 = await open();
     await p5.goto(url("/flows/watch/"), { waitUntil: "networkidle" });

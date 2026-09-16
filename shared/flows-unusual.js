@@ -1,51 +1,3 @@
-/* =============================================================
-   flows-unusual.js — the unusual-activity feed.
-
-   WHAT THIS IS NOT, FIRST, BECAUSE IT DECIDES EVERYTHING ELSE.
-
-   The recognisable Unusual Whales surface is a PER-TRADE feed:
-   individual prints with a size, a timestamp, an execution price
-   and a sweep flag. Its source is /api/option-trades/flow-alerts,
-   and this repo's pipeline asserts that endpoint is not reachable
-   on the key it holds — an assertion with no status code, no probe
-   and no provenance behind it. The probe in the pipeline exists to
-   settle that; this file is what can honestly be built meanwhile.
-
-   The affordable source is the option chain the pipeline already
-   buys for every board name. Those rows are CONTRACT AGGREGATES:
-   one row per listed strike, carrying a volume counter, an open
-   interest, a previous open interest, a two-sided quote and an
-   aggressor split. There is no size, no timestamp, no execution
-   price and no sweep flag anywhere in them.
-
-   TWO REFUSALS FOLLOW, AND THEY ARE THE SPINE OF THIS FILE.
-
-   REFUSAL 1 — THE UNIT. `volume` is every contract that changed
-   hands at that strike, summed. It is not a trade. So nothing built
-   here may ever say print, trade, block, sweep, order, bought, sold
-   or paid, and the vocabulary is enforced by a test rather than by
-   good intentions.
-
-   REFUSAL 2 — THE DATE, and it is the load-bearing one.
-   /option-contracts sends no date and accepts none. The pipeline
-   runs at 05:15 America/New_York, four and a quarter hours before
-   the opening bell, so AT READ TIME TODAY HAS NOT HAPPENED. The
-   counter's span is therefore unobserved: it may be yesterday's
-   session, it may be a running total, it may be something else. The
-   pipeline already carries this doubt in writing beside the chain
-   leg. So nothing here may say "today", "this session" or "the
-   day's". What is published is `readAt` — when the chain was read —
-   and an explicit `volumeAsOf: null` with the reason beside it.
-   Attaching sessionDate to the counter would be choosing a date,
-   which is a free parameter on the single most important quantity
-   on the page.
-
-   THE ONE PLACE sessionDate IS LEGAL is `dte`, and it is published
-   as `dteAnchor: "sessionDate"` so a reader can see that the
-   horizon is measured from the last completed session rather than
-   from the counter's own unknown date or from now.
-   ============================================================= */
-
 import { parseOptionSymbol, daysToExpiry, SHARES_PER_CONTRACT } from "./flows-premium.js";
 
 const numOrNull = (v) => {
@@ -55,29 +7,6 @@ const numOrNull = (v) => {
 };
 const round = (v, d) => (v === null ? null : Number(v.toFixed(d)));
 
-/* ---------- the labelled choices ------------------------------- */
-
-/**
- * The floors, and why each exists.
- *
- * Both are CHOICES and are published as such. Neither is a threshold on a
- * measurement — they are the boundary of the population being ranked, which
- * is a different kind of decision and has to be visible to be argued with.
- */
-/* THE PER-TRANSACTION VOCABULARY THIS PAGE MAY NOT CLAIM IN.
-
-   The source is one row per listed strike with a volume total — no size, no
-   timestamp, no execution price — so naming any of these outside the prose
-   whose job is to REFUSE them is the page asserting something the data
-   cannot support. The list lives here, beside the builder that shapes those
-   rows, because two tests read it now: flows-worker-contract sweeps the
-   served page, and contracts.mjs sweeps the same markup without a server.
-
-   IT IS HERE RATHER THAN IN A TEST because the server-bound suite cannot run
-   in every sandbox, and a rule only one un-runnable suite knows is a rule
-   that gets broken and found in CI. "order" is deliberately absent: it
-   occurs in ordinary prose ("in no documented order"); these are the words
-   that carry a per-transaction claim. */
 export const UA_BANNED_CLAIMS =
   /\b(print|trade|block|sweep|bought|sold|paid|whale|smart money|institutional)\b/ig;
 
@@ -88,68 +17,17 @@ export const UA_NAMES = 40;
 export const UA_PER_NAME_MIN = 2;
 export const UA_PER_NAME_MAX = 8;
 
-/**
- * How many contracts one name may contribute.
- *
- * DERIVED FROM THE BOARD SIZE, NOT FIXED, and both halves are published.
- * A fixed cap of four is unreachable at a small board — eleven names times
- * four is forty-four, against a fifty-row feed — so the page would show a
- * "shown: 50" it could never produce. Worse, the reader could not tell which
- * limit actually bit: the row cap or the per-name cap. Deriving it makes the
- * binding constraint a fact the payload states rather than one a reader has
- * to infer from two numbers that happen to be equal.
- */
 export function perNameCap(namesSeen, { rows = UA_ROWS, min = UA_PER_NAME_MIN, max = UA_PER_NAME_MAX } = {}) {
   const n = Math.max(1, Math.floor(namesSeen) || 0);
   return Math.min(max, Math.max(min, Math.ceil(rows / n)));
 }
 
-/* ---------- the contract feed ---------------------------------- */
-
-/**
- * One chain's contribution to the feed.
- *
- * CALLED FROM INSIDE buildChainPanels, and that placement is the whole
- * design rather than a convenience. Three things it needs exist only there:
- *
- *   - `ivDivisor`, decided ONCE PER CHAIN from that chain's own median. It is
- *     a local in buildChainPanels and is not on the returned object, so any
- *     caller outside would have to re-derive it — which is exactly the
- *     "second answer to the same question" this codebase keeps paying for.
- *   - the ROOT-FILTERED rows. buildChainPanels drops adjusted series (an
- *     AAPL1 beside an AAPL, deliverable on something other than 100 shares)
- *     into a local it never returns. The notional bracket below multiplies by
- *     SHARES_PER_CONTRACT, which is only legal after that filter. Computing
- *     here is what makes "reused, not reimplemented" literally true.
- *   - `truncated`, which marks a chain the vendor returned a full page for.
- *
- * @param {Array} rows — root-filtered chain rows
- * @param {object} opts — { ticker, spot, ivDivisor, sessionDate, truncated }
- */
 export function buildUnusualRows(rows, {
   ticker = null, spot = null, ivDivisor = 1, sessionDate = null, truncated = false,
   minVolume = UA_MIN_VOLUME, minOi = UA_MIN_OI,
-  /* WHERE THIS NAME STOPPED IN THE BOARD'S OWN FUNNEL, when the caller knows.
-     "long" | "short" | "watch" | "gated" | null.
 
-     THE ALERTS TABLE BESIDE THIS FEED HAS ALWAYS CARRIED IT and this one never
-     did, so the counter feed's Name column was a bare link: a 40x volume over
-     open interest on a name the board ranks LONG and the same ratio on a name
-     the board scored into the dead band are different facts, and the page
-     could not tell them apart. Every name in this feed is a board name by
-     construction — the pipeline reads chains only for board names — so the
-     stage is knowable for all of them.
-
-     Null means "the caller did not supply one", and the key is then OMITTED
-     rather than published as null: sixty rows of `"st":null` is bytes spent
-     saying nothing, and a renderer testing for the key can tell a payload
-     built before this shipped from a name with no stage. */
   stage = null,
-  /* ALREADY-PARSED {p, row} TUPLES from buildChainPanels, which has walked
-     this same chain to build them. The feed used to re-run the option-symbol
-     regex over every contract a fourth time; the tuple carries the parse with
-     its own row so there is no index to misalign. Absent, this parses for
-     itself, which is what every direct caller and every fixture does. */
+
   parsed = null,
 } = {}) {
   const out = [];
@@ -169,18 +47,10 @@ export function buildUnusualRows(rows, {
 
     const vol = numOrNull(raw.volume);
     const oi = numOrNull(raw.open_interest);
-    /* BOTH FLOORS ARE MEMBERSHIP TESTS, NOT MEASUREMENTS. A contract with no
-       volume field is not a quiet contract — it is a contract the vendor did
-       not report on, and the two must not share a fate. Below the floors the
-       row is simply not in the population; it is counted in `eligible` and
-       nothing is claimed about it. */
+
     if (vol === null || oi === null) continue;
     if (vol < minVolume || oi < minOi) continue;
 
-    /* THE RANKING KEY, and it is finite BY CONSTRUCTION rather than by a
-       guard bolted on afterwards: minOi is what makes the denominator
-       positive, so vor can never be Infinity and never needs a special case
-       that a reader would have to trust. */
     const vor = vol / oi;
 
     const prevOi = numOrNull(raw.prev_oi);
@@ -190,12 +60,6 @@ export function buildUnusualRows(rows, {
     const bidVol = numOrNull(raw.bid_volume);
     const rawIv = numOrNull(raw.implied_volatility);
 
-    /* THE AGGRESSOR SHARE, over what was REPORTED and said so. The two legs
-       need not sum to `volume` — the vendor reports a split for the contracts
-       it classified and a total for all of them — so this is a share of the
-       classified subset. Null when either leg is absent or the pair sums to
-       zero, never 0.5, because "balanced" and "unreported" are different
-       facts and only one of them is a reading. */
     const legs = askVol !== null && bidVol !== null ? askVol + bidVol : null;
     const lift = legs !== null && legs > 0 ? askVol / legs : null;
 
@@ -206,32 +70,21 @@ export function buildUnusualRows(rows, {
       cp: sym.type === "put" || sym.type === "P" ? "P" : "C",
       vol,
       oi,
-      /* One settlement's change. Positive means contracts stuck between two
-         settlements; it does NOT say on which side, and the page says so. */
+
       doi: prevOi === null ? null : oi - prevOi,
       vor: round(vor, 3),
       bidPx: round(bidPx, 2),
       askPx: round(askPx, 2),
-      /* A BRACKET, NOT A PREMIUM AND NOT A BOUND. This endpoint holds no
-         execution price, so vol x mid x 100 would invent one. Both ends are
-         null together when either side of the quote is missing — half a
-         bracket is not a narrower bracket, it is an unbounded one. */
+
       nlo: bidPx === null || askPx === null ? null : Math.round(vol * bidPx * SHARES_PER_CONTRACT),
       nhi: bidPx === null || askPx === null ? null : Math.round(vol * askPx * SHARES_PER_CONTRACT),
       aggr: askVol === null || bidVol === null ? null : askVol - bidVol,
       lift: round(lift, 3),
-      /* PER-ROW, WITH ITS CHAIN'S CONVENTION REACHABLE IN `coverage`. This
-         feed sorts contracts from many chains into one column and the divisor
-         is a per-chain decision, so this number reads DOWN a name and not
-         ACROSS the table. It is never a ranking key and never a chart
-         channel, for exactly that reason. */
+
       iv: rawIv === null ? null : round(rawIv / div, 4),
       m: s !== null && s > 0 && sym.strike > 0 ? round(Math.log(sym.strike / s), 4) : null,
       dte: daysToExpiry(sym.expiry, sessionDate),
-      /* This name's chain filled the vendor's page, so its contribution is an
-         arbitrary subset of its own book. Carried per row because the feed
-         mixes names and a page-level flag could not say which rows it applied
-         to. */
+
       p: truncated ? 1 : 0,
     };
     if (st !== null) row.st = st;
@@ -240,15 +93,6 @@ export function buildUnusualRows(rows, {
   return out;
 }
 
-/**
- * Rank the pooled feed and apply both caps.
- *
- * TIES BROKEN BY VOLUME, AND THE PRIMARY KEY IS A CHOICE. Ranking by the
- * notional bracket ranks by contract price and puts deep in-the-money lines
- * on top; ranking by raw volume ranks by how big the name is. Both are
- * defensible and neither is THE answer, so the key is published with
- * `choice: true` beside its relation.
- */
 export function rankUnusual(rows, { namesSeen = 0, cap = UA_ROWS } = {}) {
   const all = (Array.isArray(rows) ? rows : []).slice();
   const perName = perNameCap(namesSeen, { rows: cap });
@@ -267,10 +111,6 @@ export function rankUnusual(rows, { namesSeen = 0, cap = UA_ROWS } = {}) {
     if (kept.length >= cap) break;
   }
 
-  /* WHICH CAP ACTUALLY BIT, published rather than inferable. At a small board
-     the row cap is unreachable and the per-name cap is doing all the work; at
-     a large one it is the reverse. A reader looking at "shown: 44" against
-     "cap: 50" cannot tell which without this. */
   return {
     rows: kept,
     shown: kept.length,
@@ -278,36 +118,12 @@ export function rankUnusual(rows, { namesSeen = 0, cap = UA_ROWS } = {}) {
     cap,
     perName,
     capBound: kept.length >= cap ? "rows" : (perNameBit ? "perName" : "eligible"),
-    /* WHAT `eligible` COUNTS, said here because the number is easy to misread
-       on the page. It is the population AFTER the volume and open-interest
-       floors — the contracts that could have been shown — not every contract
-       the vendor sent. So "50 of 5,953" sits beside a coverage list whose row
-       counts sum to far more than 5,953, and the two are not in conflict: the
-       difference is contracts the floors excluded, about which nothing is
-       claimed. A page printing both had better say so. */
+
     aggressorReported: kept.filter((r) => r.aggr !== null).length,
     notionalReported: kept.filter((r) => r.nlo !== null).length,
   };
 }
 
-/* ---------- the name-level surprise ---------------------------- */
-
-/**
- * One name's volume against its own thirty-day average.
- *
- * THIS PANEL SEES THE WHOLE ELIGIBLE UNIVERSE, not the board. The contract
- * feed above can only cover names whose chain was bought — a few dozen — and
- * that is the honest ceiling of a design that spends no vendor call. This
- * panel is built from the screener rows the pipeline already holds for every
- * eligible name, which is an order of magnitude more coverage for the same
- * zero calls. It is the reason the page is not simply the board again.
- *
- * `callSurprise` and `putSurprise` come from screenerTilt, which computes
- * them with the null-on-absent-average guard. `st` is new arithmetic and is
- * labelled as such: it is null when EITHER average is missing, because the
- * numerator counts both sides and a zero on one side would inflate the ratio
- * without saying so.
- */
 export function unusualNameRow(row, tilt) {
   const t = tilt || {};
   const callAvg = numOrNull(row && row.avg_30_day_call_volume);
@@ -323,10 +139,7 @@ export function unusualNameRow(row, tilt) {
   return {
     t: String((row && row.ticker) || ""),
     px: close !== null && close > 0 ? round(close, 2) : null,
-    /* A FRACTION of the prior close, spelled exactly as moverRow and boardRow
-       spell it — 0.0412 is +4.12%. No prior close means the move is UNKNOWN,
-       not zero. This is the third surface to publish this quantity and all
-       three had better agree on both the name and the units. */
+
     chg: prev !== null && prev > 0 && close !== null && close > 0
       ? round((close - prev) / prev, 5) : null,
     sc: round(numOrNull(t.callSurprise), 3),
@@ -337,7 +150,6 @@ export function unusualNameRow(row, tilt) {
   };
 }
 
-/** Rank names by combined surprise, refusing to rank a name that has none. */
 export function rankUnusualNames(withTilt, { cap = UA_NAMES } = {}) {
   const rows = [];
   for (const entry of Array.isArray(withTilt) ? withTilt : []) {
@@ -346,9 +158,7 @@ export function rankUnusualNames(withTilt, { cap = UA_NAMES } = {}) {
     if (!r.t) continue;
     rows.push(r);
   }
-  /* A NAME WITH NO MEASURED SURPRISE IS NOT A NAME WITH A SURPRISE OF ZERO,
-     and it must not be ranked as one. It is counted in `unranked` and left
-     out of the ordering — the same discipline the watch list applies. */
+
   const ranked = rows.filter((r) => r.st !== null);
   ranked.sort((a, b) => (b.st - a.st) || (a.t < b.t ? -1 : a.t > b.t ? 1 : 0));
   return {
@@ -361,18 +171,6 @@ export function rankUnusualNames(withTilt, { cap = UA_NAMES } = {}) {
   };
 }
 
-/* ---------- the two diagnostics -------------------------------- */
-
-/**
- * What the flow-alerts endpoint actually answered.
- *
- * TWELVE OUTCOMES, AND THE COUNT IS THE POINT. This probe exists to
- * write a permanent answer into a comment that has asserted for months, with
- * no evidence, that the endpoint is unreachable on this key. An answer that
- * collapses "throttled" into "refused" would write the wrong permanent
- * answer, which is worse than having none — the assertion would then have
- * provenance and still be wrong.
- */
 export function describeFlowAlerts(result) {
   const r = result || {};
   if (r.dryRun) {
@@ -448,21 +246,6 @@ export function describeFlowAlerts(result) {
     line: "flow-alerts: 200 with a body that is neither an array nor an object." };
 }
 
-/**
- * Whether open interest and volume can be describing the same span.
- *
- * THE ZERO BRANCH IS INCONCLUSIVE AND SAYS SO, which is the whole reason this
- * function is worth writing carefully. Open interest cannot move further
- * across one settlement than the volume traded between those settlements. So
- * finding any contract where it did FALSIFIES the hypothesis that the pair
- * and the counter are aligned in time. Finding none proves nothing: it is
- * equally consistent with an intraday-updated denominator, with an aligned
- * same-session pair, and with an ordinary quiet stretch.
- *
- * Writing the zero branch as evidence would be a confident inference from a
- * measurement that does not entail it — the exact failure mode the rest of
- * this file exists to prevent.
- */
 export function describeOiBasis(rows, { minVolume = UA_MIN_VOLUME, dryRun = false } = {}) {
   let seen = 0, exceeded = 0;
   for (const raw of Array.isArray(rows) ? rows : []) {
@@ -499,12 +282,6 @@ export function describeOiBasis(rows, { minVolume = UA_MIN_VOLUME, dryRun = fals
       "stretch. It is not evidence either way." };
 }
 
-/* ---------- the prose, published verbatim ---------------------- */
-
-/**
- * Every methodological choice this file makes, as prose, published with the
- * numbers rather than living in a comment only a maintainer reads.
- */
 export const UNUSUAL_NOTES = Object.freeze({
   unit: "A contract counter, not a trade. The vendor reports one row per listed " +
     "strike with a volume total, an open interest and a quote — no size, no " +
@@ -535,12 +312,7 @@ export const UNUSUAL_NOTES = Object.freeze({
     "it does not say on which side.",
   zeroOi: "The chain request excludes strikes with no open interest, so a strike " +
     "opened between settlements never arrives and is invisible here.",
-  /* "READ", NOT "BOUGHT". The word meant bought FROM THE VENDOR, and in any
-     other file it would be unambiguous — but it sits two lines from a volume
-     column on a page whose first refusal is that a counter is not a purchase.
-     A reader scanning this sentence beside that column has every reason to
-     take it the other way, which is the exact misreading the refusal exists
-     to prevent. */
+
   names: "The contract feed can only cover names whose option chain was read — " +
     "a few dozen. The name panel is built from the screener rows held for every " +
     "eligible name, which is why it exists: ten times that coverage or more, " +

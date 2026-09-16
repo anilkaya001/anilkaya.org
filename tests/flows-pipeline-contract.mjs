@@ -1,13 +1,3 @@
-/* Contracts for the pipeline stage — the code between the vendor's response
-   and the published board.
-
-   The unit tests in flows-features.mjs cover the mathematics. These cover the
-   plumbing around it, which is where an adversarial audit found the defects
-   that mattered most: a name enriched twice and ranked on both boards, an ATR
-   computed backwards through time because the vendor's candle order is not
-   documented, and unsigned magnitudes added to a signed composite so that
-   "this flow is high quality" read as "this name is bullish". */
-
 import assert from "node:assert/strict";
 import { ARCHIVE_REFUSALS } from "../shared/flows-archive.js";
 import { readFileSync } from "node:fs";
@@ -42,9 +32,8 @@ const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} — got ${a}, want ${b}`); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
-/* ---------- candle ordering is not assumed ---------------------- */
 {
-  // 40 sessions, a calm stretch then a volatile one, so order is detectable.
+
   const mk = (i) => {
     const wide = i >= 30;
     const base = 100 + i * 0.1;
@@ -68,7 +57,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   near(d, a, 1e-9, "THE FIX: ATR is identical whichever order the vendor returns");
   ok(a > 1, `the recent volatile stretch dominates the ATR (${a.toFixed(2)})`);
 
-  // Without sorting, a reversed series would have weighted the calm bars.
   const naive = (() => {
     const rows = descending.slice(-40).map((c) => ({ h: +c.high, l: +c.low, c: +c.close }));
     let atr = 0;
@@ -86,11 +74,25 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(candlesAscending(undated).length === 1,
      "candles with no parseable timestamp keep their given order rather than vanishing");
 
+  const revised = [
+    { start_time: "2026-05-04T13:30:00Z", close: "230.49", volume: 6361 },
+    { start_time: "2026-05-04T13:30:00Z", close: "226.02", volume: 442349 },
+    { start_time: "2026-05-04T13:30:00Z", close: "226.02", volume: 2341823 },
+    { start_time: "2026-05-05T13:30:00Z", close: "227", volume: 543208 },
+    { start_time: "2026-05-05T13:30:00Z", close: "227.42", volume: 1677636 },
+  ];
+  const one = candlesAscending(revised);
+  ok(one.length === 2,
+     `three revisions of one session collapse to one bar (${one.length} bars from 5 rows)`);
+  ok(one[0].volume === 2341823 && one[1].volume === 1677636,
+     "and the bar kept is the fullest revision, not the first or the last by position");
+  ok(candlesAscending(revised.slice().reverse())[0].volume === 2341823,
+     "whichever order the vendor returned the revisions in");
+
   ok(atr14([]) === 0, "no candles yields no ATR");
   ok(atr14(ascending.slice(0, 5)) === 0, "too few candles yields no ATR rather than a guess");
 }
 
-/* ---------- the extremes are deduplicated by ticker -------------- */
 {
   const ranked = (n) => Array.from({ length: n }, (_, i) => ({ row: { ticker: "T" + i }, rough: -i }));
 
@@ -102,18 +104,15 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     ok(picks.length <= Math.min(size, 60), `pool ${size} yields at most min(size, 2n) picks`);
   }
 
-  // The overlap was real, not hypothetical: at 55 the naive form duplicated 5.
   const naive = [...ranked(55).slice(0, 30), ...ranked(55).slice(-30)];
   ok(naive.length - new Set(naive.map((p) => p.row.ticker)).size === 5,
      "the naive head/tail slice duplicated five names at 55 survivors");
 
-  // Both ends are still represented.
   const wide = selectExtremes(ranked(200), 30).map((p) => p.row.ticker);
   ok(wide.includes("T0") && wide.includes("T199"), "both extremes are still selected");
   ok(wide.length === 60, "a wide pool yields the full 2n");
 }
 
-/* ---------- boards are disjoint at every pool size --------------- */
 {
   for (const size of [60, 55, 50, 48, 40, 21, 20, 4, 2, 1, 0]) {
     const scored = Array.from({ length: size }, (_, i) => ({ ticker: "T" + i, score: 100 - i * 3 }));
@@ -123,24 +122,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   }
 }
 
-/* ---------- MODIFIERS MULTIPLY, THEY DO NOT VOTE ------------------
-   The composite means long when positive and short when negative, so every
-   ADDED column must carry a direction of its own. A magnitude — how clean the
-   positioning is, how durable the regime is — has none.
-
-   The first version of this test caught the first version of the bug: two
-   names with identical bearish flow separated by 3.8 z on positioning quality
-   alone, sending the CLEAN one to the long board. The fix at the time signed
-   each magnitude by sign(dirDelta) so it could stay in the additive sum, and
-   that reintroduced the same inversion one level down. Measured on the
-   pipeline's own cross-section afterwards: three of ten scoring columns were
-   ~95% sign(dirDelta) by correlation, they carried the NEGATIVE sign and a
-   quarter of the total weight, and the finished composite came out at
-   corr(blend, dirDelta) = -0.07 — the long board ranking AGAINST its own
-   directional flow signal.
-
-   So the contract is now structural, not cosmetic: unsigned quantities leave
-   the additive sum entirely and become a bounded multiplier. */
 {
   const base = (i) => ({
     ticker: "N" + i,
@@ -166,7 +147,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   });
   const features = Array.from({ length: 46 }, (_, i) => base(i + 2));
 
-  // Both are strongly BEARISH. A is clean near-money; B is OTM lottery on vega.
   const clean = { ...base(0), ticker: "CLEAN", dirDelta: -1000, dirShare: -0.8,
                   purity: 0.9, otmShare: 0.10, vegaTilt: 0.05, pathNet: -1000 };
   const lotto = { ...base(1), ticker: "LOTTO", dirDelta: -1000, dirShare: -0.8,
@@ -185,9 +165,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   const c = byTicker.get("CLEAN");
   const l = byTicker.get("LOTTO");
 
-  /* O IS A GAUGE, NOT A VOTE. It reports the multiplier the name earned, on a
-     0..100 scale with no sign, so the card must never draw it on the same
-     centre-origin axis as F, P and D. */
   ok(scored.every((r) => r.fam.O >= 0 && r.fam.O <= 100), "the quality gauge is unsigned, 0..100");
   const meanO = scored.reduce((a, r) => a + r.fam.O, 0) / scored.length;
   ok(Math.abs(meanO - 50) < 6, `the gate averages one across the board (gauge mean ${meanO.toFixed(1)})`);
@@ -201,20 +178,11 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(Math.sign(c.gate) === 1 && Math.sign(l.gate) === 1,
      "no gate is ever negative, so no modifier can flip a sign");
 
-  /* THE MEASUREMENT THAT CAUGHT THE SECOND VERSION. Before the fix this came
-     out at -0.07 on the pipeline's own cross-section: the long board was
-     ranking AGAINST its own directional flow signal. */
   const r = pearson(scored.map((x) => x.residual), scored.map((x) => x.dirShare));
   ok(r > 0.2, `the composite is LONG its own directional flow signal (corr = ${r.toFixed(3)})`);
   const rF = pearson(scored.map((x) => x.fam.F), scored.map((x) => x.dirShare));
   ok(rF > 0.8, `and the flow axis itself tracks flow (corr = ${rF.toFixed(3)})`);
 
-  /* THE SHARPER TEST, because a correlation is only as strong as the fixture's
-     other columns. Take one name, reverse ONLY its direction, and rescore the
-     same cross-section: the residual must follow. This is the exact property
-     that failed — a name whose flow turned bullish got pushed DOWN, because
-     three unsigned magnitudes signed by sign(dirDelta) outweighed the signed
-     column they were modifying. */
   const flipped = all.map((f) => (f.ticker !== "CLEAN" ? f : {
     ...f, dirDelta: +1000, dirShare: +0.8, pathNet: +1000, displacement: +0.6,
   }));
@@ -232,9 +200,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      `while the quality gauge, which has no direction, stays put ` +
      `(${c.fam.O} -> ${after.fam.O})`);
 
-  /* The gamma regime must reach the score, and it now does so through the
-     gate: dealers short gamma at spot amplify whatever the flow is pushing.
-     Measured at spot, not summed over the whole band. */
   const shortAtSpot = scored.filter((x) => x.spotGammaShare < -0.2);
   const longAtSpot = scored.filter((x) => x.spotGammaShare > 0.2);
   ok(shortAtSpot.length && longAtSpot.length, "the fixture covers both gamma regimes");
@@ -243,7 +208,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      `THE FIX: short gamma at spot amplifies, long gamma damps ` +
      `(${meanGate(shortAtSpot).toFixed(3)} vs ${meanGate(longAtSpot).toFixed(3)})`);
 
-  // Signed axes are signed; gauges are gauges; absent is null, never zero.
   for (const k of ["F", "P", "D"]) {
     ok(scored.every((x) => x.fam[k] === null || (x.fam[k] >= -100 && x.fam[k] <= 100)),
        `signed axis ${k} is a bounded score or explicitly absent`);
@@ -251,8 +215,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(scored.every((x) => x.fam.V === null || (x.fam.V >= 0 && x.fam.V <= 100)),
      "the vol gauge is unsigned, 0..100, or explicitly absent");
 
-  /* A DEAD SOURCE MUST NOT DRAW WEIGHT. Family V was identically zero on all
-     34 live names and still counted as a fifth of the board. */
   const noPath = all.map((f) => ({ ...f, pathNet: 0, persistence: 0, pathBars: 0 }));
   const withoutD = scoreBoard(noPath, tilts, sectors, caps);
   ok(withoutD.every((x) => x.fam.D === null),
@@ -262,9 +224,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(scored.every((x) => x.score >= -100 && x.score <= 100), "scores stay inside the band");
   ok(scored.every((x) => x.conviction >= 0 && x.conviction <= 100), "conviction stays inside the band");
 
-  /* THE SCORE'S UNIT. Under the old rank ladder a 34-name board always printed
-     84 77 71 65 ... whatever the data; scores must now move with dispersion
-     and must NOT move with pool size at fixed rank. */
   const half = scoreBoard(all.slice(0, 24), tilts.slice(0, 24), sectors.slice(0, 24), caps.slice(0, 24));
   const ladder = (rows) => rows.map((x) => x.score).sort((a, b) => b - a);
   ok(JSON.stringify(ladder(scored).slice(0, 8)) !== JSON.stringify(ladder(half).slice(0, 8)),
@@ -274,25 +233,18 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "a fixed unit lets names tie, which a rank relabeling could never do");
 }
 
-/* ---------- liquidity and gating -------------------------------- */
 {
-  // Median, not mean: one halt-and-resume spike must not lift an illiquid name.
-  const quiet = Array.from({ length: 40 }, () => ({ close: "10", volume: 100_000 }));   // $1M/day
-  quiet[20] = { close: "10", volume: 500_000_000 };                                      // one $5B day
+
+  const quiet = Array.from({ length: 40 }, () => ({ close: "10", volume: 100_000 }));
+  quiet[20] = { close: "10", volume: 500_000_000 };
   ok(medianDollarVolume(quiet) < 5e7, "a single volume spike cannot clear the floor");
   ok(medianDollarVolume([]) === 0, "no candles reports no volume rather than a guess");
 
-  /* THE RECENT WINDOW, not the whole series. The candle request went from two
-     months to a year — for the sparkline, the 52-week range and the realized-vol
-     baseline, all free in the same call — and silently took the liquidity floor
-     with it. A year-old median is more robust statistically and less true
-     operationally: the floor exists to say whether a name can be traded at these
-     costs TODAY. */
   const day = (i, volume) => ({
     start_time: new Date(Date.UTC(2026, 0, 1) + i * 86400000).toISOString(),
     close: "10", volume,
   });
-  // $100M a day for most of the year, collapsed to $1M a quarter ago.
+
   const faded = [
     ...Array.from({ length: 190 }, (_, i) => day(i, 10_000_000)),
     ...Array.from({ length: 62 }, (_, i) => day(190 + i, 100_000)),
@@ -302,7 +254,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      `(got $${(medianDollarVolume(faded) / 1e6).toFixed(1)}M)`);
   ok(medianDollarVolume(faded, { window: 1e9 }) > 5e7,
      "while the whole-series median would still wave it through, which is the bug");
-  // Order must not matter: the window is the last N SESSIONS, not the last N rows.
+
   ok(medianDollarVolume(faded.slice().reverse()) === medianDollarVolume(faded),
      "and the window is taken by date, so a newest-first response reads the same");
 
@@ -319,26 +271,12 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
                  total_open_interest: 20000, is_index: true }),
      "an index is excluded");
 
-  /* MEASURED FROM A DATE, NOT AN INSTANT, and the change is the assertion.
-
-     This took Date.now() and rounded a fractional day, which made the gate a
-     function of THE MINUTE THE JOB FIRED: the same name and the same earnings
-     date could land on either side of the twelve-day boundary depending on
-     whether the runner started at 05:15 or 05:47. Nobody chose that.
-
-     It also made two published counts arithmetically impossible.
-     /flows/events/ publishes this number beside a weekday count over the same
-     span, and with one measured against an instant and the other against
-     midnight the WEEKDAY count overtook the CALENDAR count containing it on 8
-     of 60 rows. A subset cannot be larger than its superset. */
   const today = "2026-08-25";
   ok(daysToEarnings({ next_earnings_date: "2026-08-30" }, today) === 5, "earnings distance is in days");
   ok(daysToEarnings({}, today) === null, "an absent earnings date is null, not zero");
   ok(daysToEarnings({ next_earnings_date: "2026-08-30" }, "not-a-date") === null,
      "and an origin that is not a date is null rather than NaN days");
-  /* THE PROPERTY THE FIX BOUGHT: two runs on the same calendar day agree,
-     whatever hour each fired. Asserted through the ISO date because that is
-     now the only thing the function can see. */
+
   ok(daysToEarnings({ next_earnings_date: "2026-09-06" }, "2026-08-25") ===
      daysToEarnings({ next_earnings_date: "2026-09-06" }, "2026-08-25"),
      "the gate is a function of the session's calendar day, not of the firing minute");
@@ -346,14 +284,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "a date already past is negative, which the gate reads as `let it through`");
 }
 
-/* ---------- THE LIVE PUBLISH PATH -------------------------------
-   --dry-run returns before the live branch, so the harness that gates every
-   deploy could not see this code at all. It diverged: the dry-run branch knew
-   that cards and meta carry no `rows` while the live branch still read
-   payload.rows.length, so a green dry run certified a path that would throw on
-   the first real card, fail all fifty inside their per-card catch, and then
-   take the whole job down on the uncaught meta publish — AFTER the boards had
-   already been committed. These tests drive the live branch against a stub. */
 {
   const http = await import("node:http");
   const received = [];
@@ -375,27 +305,23 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   process.env.FLOWS_INGEST_TOKEN = "test-token";
 
   try {
-    // A board payload: the shape the old code assumed was the only shape.
+
     await publish("board:long", { side: "long", rows: [{ t: "A" }, { t: "B" }] });
     eq(received.length, 1, "a board publishes over the live path");
     ok(received[0].url.includes("key=board%3Along"), "the key is url-encoded into the query");
     eq(received[0].auth, "Bearer test-token", "and carries the bearer");
 
-    // THE REGRESSION: a card has no rows at all.
     await publish("card:AAPL", { v: 1, ticker: "AAPL", panels: {} });
     eq(received.length, 2, "a CARD publishes over the live path without throwing");
 
-    // And so does meta.
     await publish("meta", { generatedAt: "x", cardsBuilt: 3 });
     eq(received.length, 3, "meta publishes over the live path without throwing");
 
-    // A non-2xx must still throw, so a real ingest failure is not swallowed.
     let threw = null;
     try { await publish("card:FAILME", { ticker: "FAILME" }); }
     catch (error) { threw = error; }
     ok(threw && /HTTP 500/.test(threw.message), "a failed ingest throws with its status");
 
-    // Both branches describe a payload the same way, by construction.
     eq(summarize({ rows: [1, 2, 3] }), "3 rows", "a board is described by its row count");
     eq(summarize({ ticker: "AAPL" }), "no rows", "a card is described honestly, not by a crash");
     eq(summarize({ rows: null }), "no rows", "a null rows field is not a length lookup");
@@ -408,13 +334,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   }
 }
 
-/* ---------- one row per ISSUER, not per listing ------------------
-   GOOG entered fourth on the live long board while GOOGL — the same company —
-   sat on the short side of the median. Nothing in the pipeline knew they were
-   one issuer: the screener union, the earnings gate, the liquidity floor and
-   the scorer all key on the raw ticker string, and neutralize() cannot help,
-   because an OLS projection on sector and log-cap PRESERVES in full exactly
-   the idiosyncratic difference that split them. */
 {
   const candles = (seed, n = 40) => {
     let px = 100, out = [];
@@ -426,7 +345,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     return out;
   };
   const shared = candles(0);
-  // The B line: same returns plus a whisper of its own liquidity noise.
+
   const bLine = shared.map((c, i) => ({ ...c, close: (Number(c.close) * (1 + (i % 5) * 1e-4)).toFixed(4) }));
 
   const rec = (ticker, cap, sector, dv, ohlc) => ({
@@ -437,7 +356,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     rec("GOOG", 2.1e12, "Communication Services", 9e9, shared),
     rec("GOOGL", 2.1e12, "Communication Services", 4e9, bLine),
     rec("MSFT", 3.0e12, "Technology", 8e9, candles(11)),
-    rec("NVDA", 3.0e12, "Technology", 3e10, candles(23)),   // same cap band, different issuer
+    rec("NVDA", 3.0e12, "Technology", 3e10, candles(23)),
   ];
 
   const { kept, dropped } = collapseShareClasses(records);
@@ -448,9 +367,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "and the collapse is reported, not silent");
   ok(dropped[0].corr >= 0.97, `on a measured return correlation (${dropped[0].corr.toFixed(4)})`);
 
-  /* BOTH CONDITIONS MUST HOLD. Two unrelated companies can share a sector and
-     round to the same market cap; only the return correlation separates them
-     from a share-class pair. */
   ok(tickers.includes("MSFT") && tickers.includes("NVDA"),
      "same sector and same cap is NOT enough to collapse two real issuers");
 
@@ -462,14 +378,12 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "too few overlapping dates reports NaN rather than a confident number");
 }
 
-/* ---------- the deck's sparkline costs 84 bytes ------------------ */
 {
   const closes = Array.from({ length: 60 }, (_, i) => 100 + Math.sin(i / 4) * 8);
   const packed = packSpark(closes);
   ok(packed.length === 84, `42 sessions at two characters each (got ${packed.length})`);
   ok(/^[A-Za-z0-9+/]+$/.test(packed), "and it is plain base-64 alphabet, safe in JSON");
 
-  // The shape must survive the round trip: decode and check monotone segments.
   const decode = (str) => {
     const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     const out = [];
@@ -493,7 +407,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(flatPack !== null && decode(flatPack).every((v) => v === 2048),
      "a flat series draws down the middle rather than dividing by zero");
 
-  // Period returns, from the full series rather than the retained window.
   const rising = Array.from({ length: 60 }, (_, i) => 100 * 1.01 ** i);
   ok(Math.abs(ret(rising, 5) - (1.01 ** 5 - 1)) < 1e-9, "the 5-session return is exact");
   ok(ret(rising, 42) !== null, "a 42-session return resolves when the series is long enough");
@@ -501,14 +414,8 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "and reports null rather than a wrong number when it is not");
 }
 
-/* ---------- the board's forecast column is a CROSS-SECTION -------- */
 {
-  /* THE DEFECT THIS GUARDS. The deck's footer sets one name's priced move
-     beside another's. The vendor's implied_move_perc is quoted to each name's
-     NEXT LISTED EXPIRY, so a name expiring tomorrow and one expiring in a month
-     print bands measured over different horizons — on the pipeline's own
-     cross-section, one name quoted 7.1% to a four-day expiry while its
-     ten-session move was 13.0%. A column of those is not a cross-section. */
+
   const iv = 0.42;
   const h10 = horizonMove(iv);
   const h40 = horizonMove(iv, { sessions: 40 });
@@ -516,27 +423,13 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(Math.abs(h40 / h10 - 2) < 1e-9,
      "and exactly twice as wide at four times the horizon — square root of time");
 
-  // Two names with IDENTICAL volatility must publish the SAME comparable band,
-  // whatever their expiry calendars look like.
   ok(horizonMove(iv) === horizonMove(iv),
      "the fixed-horizon band depends on volatility alone, not on the expiry chain");
   ok(HORIZON_SESSIONS === 10, "the published horizon is ten trading sessions");
 }
 
-/* ---------- iv_rank is a percentile, not a fraction --------------- */
 {
-  /* THE VENDOR'S OWN SCHEMA IS WRONG HERE, and the generated reference inherits
-     the error: iv_rank is declared `$ref: 'Stock IV 30d 1M'`, so every doc
-     shows iv30d_1m's description ("The 30 day implied volatility from 1 month
-     ago") and iv30d_1m's example (0.2136...). The screener's EXAMPLE OBJECT is
-     the only place the truth appears, and it is unambiguous:
-     `iv_rank: '13.52369891956068210400'` sitting beside `iv30d: '0.2038...'`
-     in the same response.
 
-     Read as a fraction, 13.52 would have printed "1352% of its year" on the
-     card. The scoring was unharmed either way — percentileRank is
-     scale-invariant — which is exactly why only the display would have shown
-     it, and why the fixture had to carry the real scale to catch it. */
   const tilt = (v) => screenerTilt({
     ticker: "T", close: "100", prev_close: "100", iv_rank: v,
     bullish_premium: "1", bearish_premium: "1", call_premium: "1", put_premium: "1",
@@ -547,20 +440,12 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(Math.abs(tilt("88.9").ivRank - 0.889) < 1e-12, "and so does a high percentile");
   ok(tilt("100").ivRank === 1, "the top of the range is exactly one");
   ok(tilt("0").ivRank === 0, "and the bottom exactly zero");
-  /* A value at or below 1 is ambiguous between the two conventions; treating it
-     as already-a-fraction is the reading that cannot produce a nonsense
-     number. */
+
   ok(tilt("0.5").ivRank === 0.5, "an ambiguous 0.5 is left as a fraction");
   ok(Number.isNaN(tilt(null).ivRank), "a missing rank is not a zero percentile");
   ok(Number.isNaN(tilt("-3").ivRank), "and neither is a negative one");
 }
 
-/* ---------- the re-publish writes DATED FIRST, or not at all -----
-
-   The ordering is the whole design of step 7f, and it is the kind of invariant
-   that lives inside a 3000-line main() and is asserted by nothing. A dry-run
-   emit cannot see it — both files end up on disk either way — so the function
-   takes its publisher as a parameter and this block hands it a recorder. */
 {
   const board = (side, tickers) => ({
     side, sessionDate: "2026-08-24",
@@ -574,7 +459,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     const payloads = { long: board("long", ["AAA", "BBB"]), short: board("short", ["CCC"]) };
     const chains = new Map([
       ["AAA", chain(0.04, -0.02, 0.31, 25)],
-      ["BBB", chain(null, null, null, null)],  // measured nothing: still merged, as nulls
+      ["BBB", chain(null, null, null, null)],
       ["CCC", chain(0.06, 0.01, 0.28, 32)],
     ]);
     await republishWithChain(payloads, chains, "2026-08-24", async (key) => { seen.push(key); });
@@ -591,8 +476,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "a name whose chain measured nothing carries null, not the previous row's reading");
   }
 
-  /* THE FAILURE PATH IS THE POINT. When the archive write fails, the live
-     board must be left as the store already had it. */
   {
     const seen = [];
     const payloads = { long: board("long", ["AAA"]), short: board("short", ["CCC"]) };
@@ -605,12 +488,11 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        `a failed archive write does NOT go on to publish the live board (${seen.join(", ")})`);
     ok(lines.some((l) => /keeps the pre-chain board/.test(l)),
        "and it says which copy the reader is left holding");
-    /* The OTHER side is independent: one failure must not cost both boards. */
+
     ok(seen.includes("board:short:2026-08-24") && seen.includes("board:short"),
        "while the other side re-publishes normally — sides fail independently");
   }
 
-  /* No chain at all is a skip, not an empty write. */
   {
     const seen = [];
     const payloads = { long: board("long", ["AAA"]), short: board("short", ["CCC"]) };
@@ -621,24 +503,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     eq(lines.length, 0, "and says nothing it did not do");
   }
 
-  /* An unresolved session date must not mint an unpruneable key — AND MUST
-     NOT PUBLISH THE LIVE BOARD EITHER, WHICH THIS BLOCK USED TO ASSERT THE
-     OPPOSITE OF.
-
-     The second assertion here read "though the live boards still gain the
-     columns", and it passed, and it was wrong. Twenty lines above the code it
-     tests, republishWithChain's own comment states the rule:
-
-       "THE DATED COPY GOES FIRST, and that order is the whole design ... The
-        reverse order would publish a live board the history can never
-        reproduce, which is the one state the archive exists to prevent."
-
-     `if (key) await publishFn(key, payload)` reads as a guard and behaves as a
-     skip: with no session date the archive write is stepped over and the live
-     board is published anyway — producing exactly the state that sentence
-     forbids, and this test held it in place. A check that pins the defect is
-     worse than no check, because it answers the question before anyone asks
-     it. Both writes are refused now, and the run says which and why. */
   {
     const seen = [];
     const payloads = { long: board("long", ["AAA"]), short: board("short", ["CCC"]) };
@@ -656,19 +520,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "one line per side, so a log reader can see it was not one board that was skipped");
   }
 
-  /* THE DATED KEY IS WRITTEN ONCE PER RUN, AND IT USED TO BE WRITTEN TWICE.
-
-     Step 7b wrote the dated copy before the chain leg; the chain leg then wrote
-     the same key with the columns merged in. The archive is immutable, so the
-     second write was refused 409 EVERY RUN — measured in production on
-     2026-09-04, both sides — and because the leg catches that throw, the LIVE
-     board never gained the columns either. `skew`, `term`, `atmIv` and
-     `skewDays` were reaching neither board on any session.
-
-     There is one writer per branch now and the branches are exclusive:
-     republishWithChain writes dated-then-live when the chain leg produced
-     something, archiveDatedBoards writes the dated copy alone when it did not.
-     Both are exercised here, because "written once" is a claim about both. */
   {
     const seen = [];
     const payloads = { long: board("long", ["AAA"]), short: board("short", ["CCC"]) };
@@ -694,9 +545,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   }
 
   {
-    /* A 409 IS A FINDING, NOT A FAILURE, and with one writer per run it can only
-       mean an earlier run wrote this session. The leg must keep going: the short
-       side's archive is not the long side's to abandon. */
+
     const seen = [];
     const payloads = { long: board("long", ["AAA"]), short: board("short", ["CCC"]) };
     const lines = await archiveDatedBoards(payloads, "2026-08-24", async (key) => {
@@ -715,9 +564,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   }
 
   {
-    /* ANY OTHER FAILURE IS REPORTED WITH ITS OWN MESSAGE rather than as a 409's
-       sentence — a store that is unwell and a day that is already written are
-       different facts, and the Worker now returns different statuses for them. */
+
     const payloads = { long: board("long", ["AAA"]), short: board("short", ["CCC"]) };
     const lines = await archiveDatedBoards(payloads, "2026-08-24", async () => {
       const error = new Error("the store did not answer");
@@ -730,17 +577,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        `(${lines[0]})`);
   }
 
-  /* THE TWO ARCHIVE REFUSALS FALL ON OPPOSITE SIDES OF THIS FILE'S RETRY SET,
-     AND UNTIL NOW NOTHING CHECKED THAT THE TWO FILES AGREED.
-
-     worker.js chose 503 for a dated key it could not READ and 409 for a dated
-     key that is already written and says something else. Those are not
-     stylistic choices: 503 is in PUBLISH_RETRYABLE, so a run that meets a sick
-     store comes back and the session's board still lands; 409 is not, so a run
-     that meets a written day stops instead of hammering a permanent refusal.
-     A status picked without reading this set would either abandon a retryable
-     failure or retry a final one, and both look fine in the file where the
-     number is typed. */
   {
     ok(PUBLISH_RETRYABLE.has(ARCHIVE_REFUSALS.refuse_unreadable.status),
        `an unreadable archive is retryable (${ARCHIVE_REFUSALS.refuse_unreadable.status}) — ` +
@@ -756,9 +592,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        `question again`);
   }
 
-  /* AND THE ORDINARY PATH IS PINNED BESIDE IT, so the refusal above cannot be
-     satisfied by a function that has stopped publishing anything at all —
-     which is the failure mode every "and nothing happened" assertion invites. */
   {
     const seen = [];
     const payloads = { long: board("long", ["AAA"]), short: board("short", ["CCC"]) };
@@ -772,12 +605,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   }
 }
 
-/* ---------- the tick probe runs before it matters ----------------
-
-   A diagnostic that has never executed throws on the first live run, which is
-   exactly the moment it exists for. The dry run substitutes fakeEnrichment and
-   never calls enrich(), so this probe would otherwise reach production
-   untested — the same shape of blindness that let call_gex ship wrong. */
 {
   const lines = describeTickFields("AAPL", {
     tape_time: "2026-08-24T13:31:00Z", net_delta: "12",
@@ -792,22 +619,17 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     ok(!lines[1].includes(known + "="), `${known} is already read, so the probe does not repeat it`);
   }
 
-  /* BOUNDED. A tick row is vendor data of unknown width and a log line is not
-     a payload: an unbounded dump on a wide row floods the Actions log, which
-     is the one place a live diagnostic gets read. */
   const wide = { tape_time: "x" };
   for (let i = 0; i < 40; i++) wide["f" + i] = "y".repeat(500);
   const bounded = describeTickFields("WIDE", wide);
   ok(bounded[1].length < 900, `a forty-field row logs ${bounded[1].length} chars, not thousands`);
   ok(/\+28 more/.test(bounded[1]), `with the remainder counted rather than dropped (${bounded[1].slice(-20)})`);
 
-  /* An empty row is a fact about the vendor, said out loud. */
   const none = describeTickFields("EMPTY", {});
   eq(none.length, 1, "an empty row logs one line");
   ok(/no keys at all/.test(none[0]), `saying what came back (${none[0]})`);
 }
 
-/* ---------- a missing volume norm is unmeasured, not average ------ */
 {
   const base = {
     ticker: "T", close: "100", prev_close: "100",
@@ -817,26 +639,15 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   const both = screenerTilt({ ...base, avg_30_day_call_volume: 3000, avg_30_day_put_volume: 3000 });
   ok(Math.abs(both.surpriseTilt - Math.log(3.1 / 2.1)) < 1e-12,
      "with both norms on the wire, surpriseTilt is the log ratio of the two surprises");
-  /* THE CONFIDENT ZERO. The old fallback answered 1 — "an average day" — for
-     a side the vendor never averaged, so a name with no norm at all published
-     surpriseTilt 0, which is a real reading of this field ("exactly as much
-     call as put surprise") and rendered as such on the watch list. */
+
   eq(screenerTilt(base).surpriseTilt, null,
      "a name with NO 30-day volume norm publishes null, never a balanced zero");
   eq(screenerTilt({ ...base, avg_30_day_call_volume: 3000 }).surpriseTilt, null,
      "and one norm alone cannot measure a ratio of two surprises");
 }
 
-/* ---------- a probe that learns nothing must not act -------------- */
 {
-  /* THE MISFIRE, from the first live run on main. verifyDating drops `date`
-     when the dated call comes back unusable — and the first version did that
-     even when the UNDATED call was unusable too, which is precisely the case
-     where the probe has distinguished nothing. Both calls returned no usable
-     gamma, so the guard concluded `date` was at fault and reverted the entire
-     run to the undated behaviour it exists to replace.
 
-     The decision is a two-input truth table and only one row may drop it. */
   const keepDate = (datedUsable, undatedUsable) => datedUsable || !undatedUsable;
 
   ok(keepDate(true, true), "both usable: keep the dated call, it is correct by construction");
@@ -847,36 +658,25 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "neither works: the probe learned nothing, so it must not change behaviour");
 }
 
-/* ---------- the session is resolved, not inferred ---------------- */
 {
-  // 09:00 New York on a summer weekday is 13:00 UTC (EDT, UTC-4).
+
   const morning = easternNow(new Date("2026-08-25T13:00:00Z"));
   ok(morning.date === "2026-08-25", `the Eastern calendar date (got ${morning.date})`);
   ok(morning.minutes === 9 * 60, `and the minute of the Eastern day (got ${morning.minutes})`);
   ok(morning.minutes < 16 * 60, "before the close, so today's candle is a partial session");
 
-  const evening = easternNow(new Date("2026-08-25T21:30:00Z"));   // 17:30 EDT
+  const evening = easternNow(new Date("2026-08-25T21:30:00Z"));
   ok(evening.minutes >= 16 * 60, "after the close, so today's candle is complete");
 
-  // Winter is EST, UTC-5: the same UTC instant is an hour earlier locally.
   const winter = easternNow(new Date("2026-01-15T13:00:00Z"));
   ok(winter.minutes === 8 * 60, `daylight saving is handled by the zone, not by arithmetic (got ${winter.minutes})`);
 
-  // Midnight must never render as minute 1440.
   const midnight = easternNow(new Date("2026-08-25T04:00:00Z"));
   ok(midnight.minutes === 0, `midnight is minute zero, not 1440 (got ${midnight.minutes})`);
 
   ok(DEAD_BAND > 0 && DEAD_BAND < 100, "the dead band is a publishable threshold");
 }
 
-/* ---------- the dead band is a LIST as well as a count ------------
-   ~48 of 60 fully scored names land inside +-20 on a normal session. They were
-   counted at the payload boundary and discarded, so the payload could say "48
-   neutral" and could not say WHICH — a name at 19, one session from breaking
-   out, was indistinguishable from one at 1. The list is what the watch board
-   publishes, and these are the two ways publishing it can go wrong: the count
-   and the list disagreeing, or the count changing TYPE under a renderer that
-   already reads it. */
 {
   const scored = Array.from({ length: 60 }, (_, i) => ({
     ticker: "T" + i, score: 90 - i * 3, residual: (90 - i * 3) / 100,
@@ -903,21 +703,10 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(partitionSides([]).neutral, 0, "an empty pool reports no neutral names, not a crash");
 }
 
-/* ---------- the dated archive key --------------------------------
-   flows_payload is keyed `id TEXT PRIMARY KEY` and the ingest upserts, so
-   every morning's board:long destroyed yesterday's. The dated key is the
-   record; the prune is what stops the record from being unbounded. Both are
-   pure functions of the session date precisely so they can be tested here
-   rather than discovered in a table nobody can query cheaply. */
 {
   eq(datedKey("long", "2026-08-26"), "board:long:2026-08-26", "a dated board key is side and session");
   eq(datedKey("short", "2026-08-26"), "board:short:2026-08-26", "and both sides are dated");
 
-  /* THE UNPRUNABLE ROW. sessionDate is legitimately null in this pipeline —
-     resolveSessionDate falls back to undated vendor calls and says so — and
-     "board:long:null" would be a key pruneKeys can never name, i.e. a row that
-     lives forever in a table whose whole retention story is that every dated
-     key is recomputable from a date. */
   eq(datedKey("long", null), null, "no session date yields NO key rather than an unprunable one");
   eq(datedKey("long", undefined), null, "and neither does an undefined one");
   eq(datedKey("long", ""), null, "nor an empty string");
@@ -925,11 +714,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(datedKey("long", "not-a-date"), null, "and so is anything else");
 }
 
-/* ---------- the prune is BOUNDED and it is PREDICTABLE ------------
-   There is no `DELETE ... WHERE id LIKE 'board:%:%'` in this design and there
-   must not be: the pipeline holds a route-scoped bearer rather than an
-   account-scoped Cloudflare token, and a pattern delete is the operation whose
-   row count nobody can state before it runs. The sweep names its keys. */
 {
   const session = "2026-08-26";
   const keys = pruneKeys(session);
@@ -947,10 +731,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "the sweep stops at the far edge too, rather than walking back to the epoch");
 
   for (const k of keys) {
-    /* The sweep names exactly the dated archive: the two board sides and the
-       scores pool. Anything else in this list is the off-by-one that could
-       name a live key, which is the blast radius the worker's DELETE gate
-       and this pin both exist to contain. */
+
     const m = /^(?:board:(?:long|short)|scores):(\d{4}-\d{2}-\d{2})$/.exec(k);
     ok(m, `every swept key is a dated archive key and nothing else (${k})`);
     ok(Date.parse(m[1] + "T00:00:00Z") < Date.parse(session + "T00:00:00Z") - ARCHIVE_RETENTION_DAYS * 86400000,
@@ -960,14 +741,11 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "and the dated scores pool IS in the sweep — an archive key the prune " +
      "does not name grows forever");
 
-  /* THE BOUND, asserted after the shape checks so that a sweep which walks the
-     wrong WAY is reported as a wrong boundary rather than as a wrong count. */
   eq(keys.length, 3 * ARCHIVE_PRUNE_LOOKBACK_DAYS,
      "THE BOUND: one run deletes at most three archive keys x the lookback " +
      "(two board sides and the scores pool), and that number is knowable before it runs");
   eq(new Set(keys).size, keys.length, "and never names the same row twice");
 
-  // A key this pipeline never wrote must never be nameable by the sweep.
   ok(!keys.some((k) => k.startsWith("card:") || k === "meta" || k === "board:watch" ||
                        k === "board:long" || k === "board:short"),
      "the sweep cannot name a live key, a card or the meta row");
@@ -975,32 +753,18 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(pruneKeys(null).length, 0, "no session date means no sweep rather than a sweep of garbage keys");
   eq(pruneKeys("2026-8-6").length, 0, "and neither does a malformed one");
 
-  // The retention window is stated in calendar days because the KEYS are.
   ok(ARCHIVE_RETENTION_DAYS >= 120 && ARCHIVE_RETENTION_DAYS <= 135,
      "126 calendar days is 90 trading sessions at 5/7 — nine times the ten-session forecast horizon");
   ok(ARCHIVE_RETENTION_DAYS / 7 * 5 >= 9 * HORIZON_SESSIONS,
      "the window holds many multiples of the horizon, so the archive is a record and not a buffer");
 }
 
-/* ---------- a route that refuses does not get asked sixty times ----
-   The sweep is sixty named DELETEs. If the ingest route does not accept the
-   method at all — which is the state of the world the day this ships, since
-   the route is declared GET and POST — then every one of those sixty fails
-   identically, and the pipeline spends nine seconds a day and sixty log lines
-   discovering the same fact. A 404 is different in kind: it is the ORDINARY
-   answer for a day this pipeline never published, and treating it as a refusal
-   would abandon the sweep on the first gap in the archive and leak every
-   expired key behind it. */
 {
   const http = await import("node:http");
   const prevUrl = process.env.FLOWS_INGEST_URL;
   const prevTok = process.env.FLOWS_INGEST_TOKEN;
   process.env.FLOWS_INGEST_TOKEN = "test-token";
 
-  /* A SHORT SKIRT here on purpose: the property under test is the breaker and
-     the 404 rule, and driving the production 60 through a 150ms publish spacing
-     would put nineteen seconds into the suite to re-prove arithmetic pruneKeys
-     already proves above. */
   const LOOKBACK = 6;
   const run = async (status) => {
     const seen = [];
@@ -1044,13 +808,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   }
 }
 
-/* ---------- the watch board ---------------------------------------
-   The names inside the dead band, ranked by how close they are to leaving it,
-   carrying the three screener observables the pipeline has always computed and
-   never displayed. surpriseTilt in particular — the log ratio of call-side to
-   put-side volume surprise, each against the name's OWN 30-day norm — is the
-   most conventional unusual-activity measure in the product and was used once
-   as a pre-enrichment sort key and dropped. */
 {
   const mk = (ticker, score, extra = {}) => ({
     ticker, score, residual: score / 100,
@@ -1066,15 +823,10 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   const screener = new Map([["A", { close: "101", prev_close: "100" }]]);
   const tilts = new Map([
     ["A", { surpriseTilt: 1.23456, relVolume: 2.718, putCallRatio: 0.87654 }],
-    /* B's 30-day volume norm is missing, which the vendor reports as no field
-       at all. screenerTilt now answers null for that; NaN is kept here because
-       the row builder must flatten EITHER unmeasured shape to null on the
-       wire, and NaN is the one JSON would otherwise mangle. */
+
     ["B", { surpriseTilt: NaN, relVolume: NaN, putCallRatio: NaN }],
   ]);
 
-  // Deliberately unsorted, and mixing signs: the ranking must come from the
-  // magnitude, not from the input order and not from the sign.
   const pool = [mk("C", 3), mk("A", -19), mk("B", 12), mk("D", -7)];
   const rows = toWatchRows(pool, screener, tilts);
 
@@ -1082,34 +834,17 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "THE RANKING: the name CLOSEST to leaving the band is first, whichever side it is closest on");
   eq(rows.map((r) => r.r).join(","), "1,2,3,4", "and the published rank agrees with the order");
 
-  /* ONE VOCABULARY. A watch row is a board row plus three columns. A second
-     name for `px` or for `s` on this surface would mean a downstream scorer has
-     to know which of two surfaces it is holding before it can read a close. */
   const board = toRows([mk("A", -19)], screener, []);
   eq(board.length, 1, "the board builder still produces a row");
   for (const key of Object.keys(board[0])) {
     ok(key in rows[0], `a watch row carries the board's own \`${key}\`, not a synonym for it`);
   }
 
-  // Problem 3: w52, vrp and ivr are emitted on every board row and no renderer
-  // has ever drawn them. Confirm they are there, on BOTH surfaces, unrenamed.
   for (const key of ["w52", "vrp", "ivr"]) {
     ok(board[0][key] !== undefined, `the board row still emits \`${key}\``);
     ok(rows[0][key] !== undefined, `and the watch row carries \`${key}\` too`);
   }
-  /* THE TWO BUILDERS AGREE ON THE DEGENERATE CASE TOO.
 
-     boardRow published `netPrem: 0` for a name the vendor quoted neither
-     premium leg for, because num() answers 0 for an absent column. The board
-     renders that column with fmtMoney and a tone class, so the reader was
-     shown an explicit "$0" and a neutral tint where the truth was "not
-     quoted" — a confident zero on the board's own table.
-
-     It survived on the argument that a ranking of extremes never sees a zero.
-     True, and beside the point: this is a DISPLAYED column. moverRow had
-     already reached the opposite conclusion on the same two fields, and two
-     builders disagreeing about one quantity is how a renderer ends up needing
-     to know which surface produced its row. */
   {
     const base = screener.get("A");
     const withScreener = (extra) => new Map([["A", { ...base, ...extra }]]);
@@ -1118,19 +853,12 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     eq(row(withScreener({ net_call_premium: "900000", net_put_premium: "400000" })).netPrem,
        500000, "a quoted name publishes call premium minus put premium");
 
-    /* NEITHER LEG ON THE WIRE. `base` carries no premium columns at all, which
-       is exactly the shape the vendor sends for a name it did not quote. */
     eq(row(withScreener({})).netPrem, null,
        "and a name the vendor quoted NEITHER leg for publishes null, never a balanced zero");
 
-    /* ZERO IS STILL A REAL READING when both legs are on the wire and cancel.
-       A fix that turned every zero into null would trade one lie for another. */
     eq(row(withScreener({ net_call_premium: "250000", net_put_premium: "250000" })).netPrem, 0,
        "while two legs that genuinely cancel still publish zero, which is a measurement");
 
-    /* ONE LEG IS ENOUGH TO BE A MEASUREMENT. A name with call premium quoted
-       and no put premium has a real, signed net — treating it as unquoted
-       would discard a reading the vendor actually sent. */
     eq(row(withScreener({ net_call_premium: "700000" })).netPrem, 700000,
        "and one quoted leg alone is a measurement, not an absence");
   }
@@ -1138,27 +866,18 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(board[0].w52, 0.42, "w52 is the 52-week position from the candles, unchanged in name and unit");
   eq(rows[0].w52, 0.42, "and the watch row publishes the SAME 52-week position, not a second one");
 
-  // The three new columns, at the precision their source actually has.
   eq(rows[0].surpriseTilt, 1.235, "surpriseTilt is finally published, rounded to a thousandth");
   eq(rows[0].relVolume, 2.72, "relative volume at the two decimals the vendor quotes");
   eq(rows[0].putCallRatio, 0.877, "and the put/call ratio at three");
 
-  /* A MISSING READING IS NULL, NEVER ZERO. Zero is a real value of
-     surpriseTilt — it means call and put surprise are equal — so rendering an
-     absent 30-day norm as 0 would publish "perfectly balanced unusual
-     activity" for a name the vendor said nothing about. */
   const b = rows.find((r) => r.t === "B");
   eq(b.surpriseTilt, null, "a name with no 30-day volume norm reports null, not a balanced zero");
   eq(b.relVolume, null, "an absent relative volume is null, not a flat 0x");
   eq(b.putCallRatio, null, "an absent put/call ratio is null, not a call-only 0");
 
-  // A name the screener tilt map has no entry for at all must not throw.
   const orphan = toWatchRows([mk("Z", 5)], screener, tilts);
   eq(orphan[0].surpriseTilt, null, "a name with no tilt row at all is null across the three columns");
 
-  /* THE CAP. The band holds ~48 names on a normal session; the list is capped
-     and truncates from the QUIET end, so what falls off is the names furthest
-     from ever leaving the band. */
   const wide = toWatchRows(
     Array.from({ length: 90 }, (_, i) => mk("W" + i, 19 - (i % 19))), screener, new Map());
   eq(wide.length, WATCH_ROWS, `the watch list is capped at ${WATCH_ROWS} rows however wide the band is`);
@@ -1167,9 +886,8 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(toWatchRows([], screener, tilts).length, 0, "an empty band publishes an empty list, not a crash");
 }
 
-/* ---------- sector TRIX: the mathematics ------------------------- */
 {
-  /** A constant log drift of `driftBp` per session, oldest first. */
+
   const ramp = (n, driftBp, p0 = 100) => {
     const out = [];
     let logPx = Math.log(p0);
@@ -1178,19 +896,10 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   };
   const last = (xs) => xs[xs.length - 1];
 
-  /* THE RELATION HAS NO FREE PARAMETER IN IT. Under a constant log drift d the
-     triple EMA converges on the same ramp and its first difference is exactly
-     d, so a 200 bp/session ramp must read 200.00 bp and not 200-ish. */
   const up = trixSeriesBp(ramp(200, 200));
   near(last(up), 200, 1e-6,
        "TRIX of a constant 200 bp/session log ramp settles at exactly 200 bp");
 
-  /* THE LOG IS LOAD-BEARING, and this is the assertion that proves it rather
-     than asserting it. A difference of logs is exactly antisymmetric: a ramp
-     down reads the negative of the same ramp up, to machine precision. The
-     textbook percentage form (e3[t] - e3[t-1]) / e3[t-1] is NOT — it reads
-     +202.0 against -198.0 on this pair, because a 2% gain and a 2% loss are
-     not the same size in percent. */
   const down = trixSeriesBp(ramp(200, -200));
   near(last(up), -last(down), 1e-6,
        "THE LOG: a ramp down reads exactly the negative of the same ramp up");
@@ -1198,8 +907,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   const flatSeries = trixSeriesBp(new Array(200).fill(100));
   eq(last(flatSeries), 0, "a price that never moves reads exactly 0 bp, not epsilon");
 
-  /* THE PUBLISHED SCALING, applied by hand rather than by calling the code it
-     is meant to check. */
   eq(scaleTrix(0), 50, "zero momentum is the midpoint of the scale, not the bottom");
   eq(scaleTrix(TRIX_FULL_SCALE_BP), 100, "the positive rail is the full-scale band");
   eq(scaleTrix(-TRIX_FULL_SCALE_BP), 0, "and the negative rail its mirror");
@@ -1209,7 +916,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "and inside the rails it is strictly monotone in the raw reading");
 }
 
-/* ---------- sector TRIX: the scaling rule is the product --------- */
 {
   const ramp = (n, driftBp, p0 = 100) => {
     const out = [];
@@ -1222,7 +928,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     close: c.toPrecision(15),
     high: String(c * 1.005), low: String(c * 0.995), volume: 5e6,
   }));
-  /** One session's eleven sectors, each on its own constant drift. */
+
   const day = (driftsBp, { sessions = 200 } = {}) => new Map(
     SECTOR_ETFS.map((s, i) => [s.etf, candles(ramp(sessions, driftsBp[i]))]));
   const spread = (rows) => {
@@ -1235,13 +941,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "XLB XLC XLE XLF XLI XLK XLP XLRE XLU XLV XLY",
      "the standard SPDR sector ETFs, in one named constant");
 
-  /* THE TEST THE BRIEF ASKS FOR, AND THE REASON MIN-MAX WAS REJECTED.
-
-     A session in which every sector sat within half a basis point of flat, and
-     a session in which the sectors ran from -40 bp to +45 bp, must not render
-     the same. Under a cross-sectional min-max they render IDENTICALLY: both
-     span exactly 0 to 100, because min-max always emits exactly one 0 and
-     exactly one 100 whatever the inputs were. */
   const flat = sectorTrix(day([0, 0.4, -0.3, 0.2, 0, -0.1, 0.3, 0, -0.2, 0.1, 0]));
   const rotating = sectorTrix(day([-40, -30, -20, -10, 0, 8, 15, 22, 30, 38, 45]));
 
@@ -1259,16 +958,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        `${r.etf} sat near the neutral midpoint on a flat day, not at a rail (${r.trix})`);
   }
 
-  /* THE IDENTIFICATION BAR, checked on the payload itself: every scaled
-     reading is the PUBLISHED relation applied to the PUBLISHED raw reading,
-     with no third input. The arithmetic is written out here rather than
-     borrowed from scaleTrix, so this is a statement about the payload and not
-     a tautology about the function.
-
-     This is also what rules out the second rejected scaling. A percentile of
-     each sector's own history is not a function of that sector's trixBp alone
-     — two sectors on the same raw reading would scale differently — so it
-     cannot satisfy this assertion at all. */
   for (const r of [...flat, ...rotating]) {
     const want = Number(
       (50 + 50 * Math.max(-1, Math.min(1, r.trixBp / TRIX_FULL_SCALE_BP))).toFixed(1));
@@ -1276,21 +965,12 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        `${r.etf}: the scaled reading is exactly the published relation applied to the published raw bp`);
   }
 
-  /* THE AXIS DOES NOT MOVE WITH THE COMPANY IT KEEPS. The same sector on the
-     same drift must read the same number whether its ten neighbours were
-     asleep or on fire — which is the property that makes yesterday's 62 and
-     today's 62 the same basis points, and therefore the property that makes
-     the published trend line mean anything. */
   const quiet = sectorTrix(day([20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
   const wild = sectorTrix(day([20, -90, 80, -70, 60, -50, 90, -80, 70, -60, 95]));
   eq(quiet[0].trix, wild[0].trix,
      "XLB on a 20 bp drift reads the same beside ten flat sectors as beside ten extreme ones");
   near(quiet[0].trix, 70, 0.2, "and that reading is the fixed relation's answer, 70");
 
-  /* SATURATION ANNOUNCES ITSELF. Past the rail the scale stops
-     distinguishing, so a reading that is sitting on one has to say so —
-     otherwise a historic trend and an unprecedented one both print 100 and
-     nothing in the payload separates them. */
   const extreme = sectorTrix(day([200, 10, -200, -10, 0, 0, 0, 0, 0, 0, 0]));
   eq(extreme[0].trix, 100, "a 200 bp sector prints the top of the scale");
   eq(extreme[0].clamped, true, "and declares itself clamped");
@@ -1300,15 +980,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(extreme[1].clamped, false, "a 10 bp sector is nowhere near a rail");
   eq(extreme[1].clampedPoints, 0, "and none of its line is pinned");
 
-  /* THE PUBLISHED LINE IS A TREND LINE AND IT IS THE RECENT ONE.
-
-     Every fixture above runs on a constant drift, and a constant drift makes a
-     constant TRIX — thirty identical numbers — which cannot detect either of
-     the two ways this series goes wrong: publishing the OLDEST window instead
-     of the newest, or publishing the scalar thirty times. So this sector is
-     genuinely flat for 195 sessions and then turns up at 40 bp, which puts the
-     turn inside the published window and nowhere else. An oldest-first slice
-     of the same data would be thirty readings of exactly 50. */
   const bend = (n, driftAt, p0 = 100) => {
     const out = [];
     let logPx = Math.log(p0);
@@ -1326,8 +997,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "and it rises monotonically, tracking the turn in the underlying rather than wobbling");
   eq(line[line.length - 1], turning.trix, "ending on the scalar published beside it");
 
-  /* THE SERIES IS DRAWABLE. Long enough for a shape, on the same 0-100 axis
-     as the scalar, and ending on it. */
   for (const r of rotating) {
     eq(r.series.length, TRIX_SERIES, `${r.etf} publishes ${TRIX_SERIES} sessions of history`);
     ok(r.series.every((v) => Number.isFinite(v) && v >= 0 && v <= 100),
@@ -1337,7 +1006,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   function last_(xs) { return xs[xs.length - 1]; }
 }
 
-/* ---------- sector TRIX: unmeasured is null, never zero ---------- */
 {
   const ramp = (n, driftBp, p0 = 100) => {
     const out = [];
@@ -1352,9 +1020,9 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   }));
 
   const rows = sectorTrix(new Map([
-    ["XLB", candles(ramp(200, 20))],                 // healthy
-    ["XLC", []],                                      // the endpoint answered nothing
-    ["XLE", candles(ramp(46, 30))],                   // enough to compute, not enough to settle
+    ["XLB", candles(ramp(200, 20))],
+    ["XLC", []],
+    ["XLE", candles(ramp(46, 30))],
     ["XLF", candles(ramp(200, 20)).map((c, i) => (i === 197 ? { ...c, close: "0" } : c))],
     ["XLI", candles(ramp(230, 20)).map((c, i) => (i === 5 ? { ...c, close: "0" } : c))],
   ]));
@@ -1370,9 +1038,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   for (const etf of ["XLC", "XLE", "XLF", "XLU"]) {
     const r = by.get(etf);
     eq(r.trix, null, `${etf} is null when it cannot be measured`);
-    /* NEVER A CONFIDENT ZERO. On this scale 0 is the bottom rail — a maximal
-       DOWNTREND — and 50 is "no momentum". Either would be a confident, wrong,
-       readable claim about a sector nobody measured. */
+
     ok(r.trix !== 0 && r.trix !== 50, `${etf} is not rendered as a confident reading`);
     eq(r.trixBp, null, `${etf} publishes no raw reading either`);
     eq(r.series, null, `${etf} publishes no trend line`);
@@ -1383,16 +1049,11 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(by.get("XLB").reason, null, "and a measured sector carries no reason");
 
   ok(/no candles/.test(by.get("XLC").reason), "an empty response says so");
-  /* The reason text is tied to the EXPORTED constant rather than to a literal,
-     so a change to the warm-up cannot leave the published sentence claiming a
-     minimum the code no longer enforces. */
+
   ok(new RegExp(`^46 usable XLE closes of 46 returned; ${TRIX_MIN_CANDLES} are needed`)
        .test(by.get("XLE").reason),
      `a short series names both what it had and what it needed: "${by.get("XLE").reason}"`);
 
-  /* THE WARM-UP GATE IS SUBSTANTIVE, not a formality. 46 candles is plenty to
-     run the arithmetic — it just runs it on a smoother that is still
-     remembering its seed, and the answer is materially wrong. */
   const unsettled = trixSeriesBp(ramp(46, 30));
   ok(Math.abs(unsettled[unsettled.length - 1] - 30) > 1.5,
      `and the unsettled reading really was different (${unsettled[unsettled.length - 1].toFixed(2)} bp against a true 30.00)`);
@@ -1400,9 +1061,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   near(settled[settled.length - 1], 30, 0.1,
        "while at the published minimum the same ramp reads its true drift");
 
-  /* THE CLEAN TAIL. A bad candle inside the published window takes the sector
-     out; a bad patch from a year earlier does not, because the reading is
-     computed on the longest run of good closes ENDING AT THE LAST BAR. */
   ok(/^2 usable XLF closes of 200 returned/.test(by.get("XLF").reason),
      `a zero close three sessions ago takes the sector out: "${by.get("XLF").reason}"`);
   ok(by.get("XLI").trix !== null,
@@ -1411,7 +1069,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "and that tail reads its true drift, so the bad bar left nothing behind in the smoother");
 }
 
-/* ---------- movers and premium: zero API calls ------------------- */
 {
   const mk = (ticker, opts = {}) => ({
     ticker,
@@ -1421,10 +1078,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     net_call_premium: String(opts.nc === undefined ? 0 : opts.nc),
     net_put_premium: String(opts.np === undefined ? 0 : opts.np),
   });
-  /* Columns are removed by DELETING them, not by setting them to 0 or "".
-     Every one of these tests is about the difference between "the vendor sent
-     zero" and "the vendor sent nothing", so a helper that conflated the two
-     would test the opposite of what it claims. */
+
   const strip = (row, ...keys) => {
     const out = { ...row };
     for (const k of keys) delete out[k];
@@ -1432,17 +1086,10 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   };
   const tilt = (relVolume, surpriseTilt) => ({ relVolume, surpriseTilt });
 
-  /* THE ZERO-CALL GUARANTEE, made structural. A synchronous function cannot
-     await a fetch, so this surface cannot quietly acquire an API cost later
-     without the change being obvious in the diff. The whole justification for
-     the movers band is that the screener rows were already paid for. */
   const probe = buildMovers([{ row: mk("A", { close: 101 }), tilt: {} }]);
   ok(!(probe instanceof Promise),
      "THE BUDGET: buildMovers is synchronous — a surface that cannot await cannot make an API call");
 
-  /* A day with a clear top and bottom, plus the two things that must not be
-     fabricated: a name the vendor quoted no prior close for, and a name it
-     quoted no premium for at all. */
   const rows = [
     { row: mk("UP1", { close: 110, prev_close: 100, nc: 9e6, np: -1e6 }), tilt: tilt(3.2, 0.51) },
     { row: mk("UP2", { close: 104, prev_close: 100, nc: 4e6, np: 1e6 }), tilt: tilt(1.1, 0.02) },
@@ -1455,7 +1102,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ];
   const m = buildMovers(rows);
 
-  /* BOTH DIRECTIONS, CLEARLY SEPARATED, AND EACH LEADING WITH ITS LARGEST. */
   eq(m.risers.map((r) => r.t).join(","), "NOPREM,UP1,UP2",
      "the risers lead with the largest gain and descend");
   eq(m.fallers.map((r) => r.t).join(","), "DN1,DN2",
@@ -1468,14 +1114,9 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(!m.risers.some((r) => r.t === "FLAT") && !m.fallers.some((r) => r.t === "FLAT"),
      "and an unchanged name is on neither list, because flat is not a move");
 
-  /* THE UNIT. chg is a FRACTION of the prior close, exactly as boardRow
-     publishes it: 0.1 is +10%, not 10 and not 0.001. */
   eq(m.risers.find((r) => r.t === "UP1").chg, 0.1, "chg is a fraction of the prior close");
   eq(m.fallers.find((r) => r.t === "DN1").chg, -0.1, "signed, with the same unit in both directions");
 
-  /* A MISSING PRIOR CLOSE IS NOT A ZERO MOVE. The name is excluded from the
-     ranking and COUNTED, so that if the vendor ever stops sending prev_close
-     the payload reports "nothing could be ranked" instead of "nothing moved". */
   eq(moverRow(strip(mk("X"), "prev_close"), {}).chg, null,
      "a name with no prior close reports a null move, never 0");
   eq(m.unrankedChange, 1, "and is counted as unranked rather than silently dropped");
@@ -1483,16 +1124,11 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(!m.risers.some((r) => r.t === "NOPREV") && !m.fallers.some((r) => r.t === "NOPREV"),
      "it appears on neither list");
 
-  /* LARGEST NET PREMIUM, BY NAME, IN EACH DIRECTION. */
   eq(m.premium.basis, "byName",
      "the premium lists say they are BY NAME — per-contract needs a flow-alerts endpoint this key cannot reach");
   eq(m.premium.bullish.map((r) => r.t).join(","), "UP1,NOPREV,UP2",
      "the bullish list leads with the largest net call-over-put premium");
-  /* THE TWO RANKINGS ARE INDEPENDENT. NOPREV cannot be ranked on change at all
-     and still carries the second-largest premium of the day, which is the
-     whole reason the unranked counts are per-question rather than one number:
-     a name is missing from a list because THAT column was missing, not because
-     the name was unusable. */
+
   ok(m.premium.bullish.some((r) => r.t === "NOPREV"),
      "a name with no prior close is still ranked on premium — the two lists gate independently");
   eq(m.premium.bearish.map((r) => r.t).join(","), "DN1,DN2",
@@ -1503,15 +1139,11 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(!m.premium.bullish.some((r) => r.t === "FLAT") && !m.premium.bearish.some((r) => r.t === "FLAT"),
      "a name whose two premium legs cancel is on neither list");
 
-  /* AN UNQUOTED PREMIUM IS NOT A BALANCED ONE. num() answers 0 for a column
-     the vendor never sent, and on a surface whose whole subject is premium
-     that 0 would be a published claim of perfect balance. */
   eq(m.risers.find((r) => r.t === "NOPREM").netPrem, null,
      "a name the screener quoted no premium for reports null, never a balanced zero");
   eq(m.unrankedPremium, 1, "and is counted out of the premium population");
   eq(m.priced, rows.length - 1, "which is published too");
 
-  /* THE COLUMNS THE BRIEF ASKS FOR, at the precision their source has. */
   const up1 = m.risers.find((r) => r.t === "UP1");
   eq(up1.relVolume, 3.2, "relative volume rides along at the two decimals the vendor quotes");
   eq(up1.surpriseTilt, 0.51, "so does surpriseTilt, at three");
@@ -1521,7 +1153,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(moverRow(mk("Y"), null).surpriseTilt, null, "and does not throw when there is no tilt at all");
 }
 
-/* ---------- movers: one vocabulary, and the thin-side rule ------- */
 {
   const screenerRow = {
     ticker: "T", close: "110", prev_close: "100",
@@ -1536,9 +1167,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   const b = boardRow(scored, screenerRow, 1);
   const mrow = moverRow(screenerRow, { relVolume: 2, surpriseTilt: 0.3 });
 
-  /* ONE ROW VOCABULARY ACROSS SURFACES. This file already carries the scar
-     from inventing a `px` on one surface and a `close` on another; a renderer
-     then has to know which surface it is holding. */
   for (const k of ["t", "px", "chg", "netPrem"]) {
     ok(k in mrow, `the mover row uses the board's name for \`${k}\``);
     eq(mrow[k], k === "netPrem" ? Math.round(b[k]) : b[k],
@@ -1548,9 +1176,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     ok(k in mrow, `and the watch list's name for \`${k}\``);
   }
 
-  /* A THIN SIDE IS INFORMATION. On a day the whole market rose, the fallers
-     list is EMPTY — not filled with the fifteen names that rose least under a
-     heading that says they fell. */
   const allUp = Array.from({ length: 40 }, (_, i) => ({
     row: { ticker: "U" + i, close: String(100 + i), prev_close: "100",
            net_call_premium: String(1000 * (i + 1)), net_put_premium: "0" },
@@ -1568,50 +1193,19 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(nothing.unrankedChange, 0, "and no phantom unranked names");
 }
 
-/* ---------- the two new payloads, as the pipeline actually emits them ------
-
-   The blocks above test the builders. This one tests the WIRING, which is a
-   different thing and is where the interesting mistake lives: buildMovers is
-   correct for whatever population it is handed, so a unit test cannot tell
-   `withTilt` (the whole eligible universe) from `tilted` (the earnings-gated
-   subset the board is selected from). Handing it the wrong one would publish
-   "the day's biggest movers, among the names that do not report soon" under a
-   heading that claims otherwise, and every pure test would still pass.
-
-   The payload catches it because it publishes its own population: `universe`
-   is the board's count, and `ranked + unrankedChange` has to add up to it. */
 {
   const prefix = fs.mkdtempSync(path.join(os.tmpdir(), "flows-emit-")) + "/e";
-  /* BOTH STREAMS. The probe reports through console.log and every refusal
-     through console.warn, so a capture of stdout alone reads "one probe, zero
-     truncations" — which is exactly the shape this assertion exists to rule
-     out, and it would have passed. */
+
   const run = spawnSync(process.execPath,
                ["../scripts/flows-pipeline.mjs", "--dry-run", "--emit", prefix],
                { cwd: import.meta.dirname, encoding: "utf8" });
   eq(run.status, 0, "the dry run exits clean");
   const runLog = run.stdout + run.stderr;
 
-  /* THE PROBE IS SPENT ONCE PER RUN, NOT ONCE PER TRUNCATED NAME.
-
-     This is a cost assertion, and it needs the whole run to make it: the
-     fixture truncates two names precisely so that "once" and "once per
-     truncated name" are different numbers here. On the live board of
-     2026-08-26 they differed by nine vendor calls — spent, at the very end of
-     the run, on re-asking a question whose answer cannot vary by ticker. */
   const probeLines = runLog.split("\n").filter((l) => l.includes("chain probe"));
   eq(probeLines.length, 1,
      "exactly one truncation probe is spent per run, however many names truncate");
-  /* EVIDENCE THAT MORE THAN ONE NAME TRUNCATED, taken from the recovery count
-     rather than from the refusal messages.
 
-     It used to count "no skew — the vendor returned a full page" lines, which
-     was the right evidence right up until truncation stopped implying a
-     refusal. Once the single-expiry read landed, a truncated name recovers its
-     scalars and prints no refusal at all — so the old assertion read zero and
-     failed, correctly, on a change that made the product better. The count
-     that still measures truncation is the one that counts what truncation now
-     COSTS: a second vendor call. */
   const recovered = /(\d+) of them recovered by a second single-expiry call/.exec(runLog);
   ok(recovered && Number(recovered[1]) >= 2,
      `and the fixture really does truncate more than one name (${recovered ? recovered[1] : 0} ` +
@@ -1622,18 +1216,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   const movers = read("movers");
   const trix = read("sector-trix");
 
-  /* THE EXPENSIVE LEGS SPEND ONLY ON THE NAMES THE BOARD SAYS THEY DID.
-
-     The board is free to widen — it is built from data already fetched — so it
-     is ~93 rows. A chain is one vendor call and a card is two, so those legs
-     are capped at DEEP_NAMES and the rows that got one are stamped `dp`.
-
-     Nothing about a card built for a 94th name looks wrong: it renders
-     perfectly, it is correct, and it costs three calls that the deadline
-     budget did not allocate. So the assertion is an EQUALITY between two
-     independently-derived sets — the cards actually emitted, and the rows that
-     claim to have one — rather than a bound on either alone. A cap enforced in
-     the chain leg but not the card leg would satisfy any looser check. */
   {
     const emitted = new Set(fs.readdirSync(path.dirname(prefix))
       .map((f) => /-card-(.+)\.json$/.exec(f))
@@ -1644,15 +1226,37 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
       for (const r of b.rows) if (r.dp) claimed.add(r.t);
     }
     ok(emitted.size > 0, `the dry run emitted ${emitted.size} cards`);
-    ok(emitted.size <= DEEP_NAMES,
-       `and no more than the ${DEEP_NAMES}-name deep budget (${emitted.size}), however wide the board got`);
-    assert.deepEqual([...emitted].sort(), [...claimed].sort(),
-      "the cards that exist are EXACTLY the rows that advertise one — a row promising a card " +
-      "the pipeline never wrote opens a 404, and a card nobody links to is three calls burned"); checks++;
+
+    const depthOf = (t) => {
+      const c = JSON.parse(fs.readFileSync(`${prefix}-card-${t}.json`, "utf8"));
+      return c.depth;
+    };
+    const byDepth = { board: new Set(), "cross-section": new Set(), other: new Set() };
+    for (const t of emitted) {
+      const d = depthOf(t);
+      (byDepth[d] || byDepth.other).add(t);
+    }
+    eq(byDepth.other.size, 0,
+       "every emitted card declares a depth this contract knows — an unrecognised one is a third " +
+       "kind of card nobody has priced");
+    ok(byDepth.board.size <= DEEP_NAMES,
+       `the deep lane stayed inside its ${DEEP_NAMES}-name budget (${byDepth.board.size} board-depth ` +
+       "cards), however wide the board or the cross-section got");
+    assert.deepEqual([...byDepth.board].sort(), [...claimed].sort(),
+      "the BOARD-depth cards are EXACTLY the rows that advertise one — a row promising a card " +
+      "the pipeline never wrote opens a 404, and a deep card nobody links to is three calls burned"); checks++;
+    ok(byDepth["cross-section"].size > 0,
+       `and the cross-section lane ran (${byDepth["cross-section"].size} cards), so the split above is ` +
+       "a measurement rather than a tautology over a run where every card is a board card");
+    for (const t of byDepth["cross-section"]) {
+      ok(!claimed.has(t),
+         `${t} is a cross-section card and no board row advertises it — the two sets are disjoint by ` +
+         "construction, and an overlap would mean a name got both lanes and paid the deep calls twice");
+    }
 
     const total = long.rows.length + short.rows.length;
-    ok(total > emitted.size,
-       `the board (${total} rows) is genuinely wider than the deep set (${emitted.size}), so this ` +
+    ok(total > byDepth.board.size,
+       `the board (${total} rows) is genuinely wider than the deep set (${byDepth.board.size}), so this ` +
        "equality is a measurement rather than a tautology over a board where every row is deep");
     eq(long.deep, long.rows.filter((r) => r.dp).length,
        "the published `deep` count agrees with the rows it counts");
@@ -1660,20 +1264,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "and the rule that chose them is published in words, not left to be inferred from which rows are clickable");
   }
 
-  /* ---------- the market-wide join: coverage that is a MEASUREMENT ------
-
-     The two feeds this joins are market-wide reads the pulse leg already
-     makes once a run, so the join costs no vendor call. What it can cost a
-     reader is a wrong impression, and the wrong impression has a shape: a
-     join that reaches three of fifty names leaves forty-seven cards each
-     saying "not in this feed", which reads as forty-seven findings and is
-     one thin join.
-
-     THE COVERAGE COUNT IS THEREFORE CHECKED AGAINST THE CARDS THEMSELVES —
-     two independently-derived numbers, the way the deep-set equality above
-     is. A coverage number computed from a different population than the one
-     the cards were built for would be a plausible integer on every card and
-     nothing would look wrong. */
   {
     const cardFiles = fs.readdirSync(path.dirname(prefix))
       .filter((f) => /-card-.+\.json$/.test(f))
@@ -1695,16 +1285,12 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
          `and the count it publishes (${published.in}) is the number of cards that really ` +
          `place in that feed (${placed}) — a coverage figure computed over a different ` +
          "population would be a plausible integer on every card with nothing looking wrong");
-      /* THE PANEL MUST BE ABLE TO SAY BOTH THINGS, or half of it is untested
-         wiring: at least one card in the feed and at least one outside it. */
+
       ok(placed > 0 && placed < cardFiles.length,
          `and the corpus exercises both arms: ${placed} of ${cardFiles.length} names place ` +
          "in this feed, so neither the reading nor the measured absence is checked against " +
          "an empty set");
-      /* Every card agrees about the cross-section, because there is exactly
-         one: the index is built once for the run. Fifty cards each indexing
-         a hundred rows could disagree about the ordering or the unit and no
-         single card would look wrong. */
+
       for (const c of withPanel) {
         const f = c.panels.marketRank.feeds[feed];
         eq(c.panels.marketRank.coverage[feed].in, published.in,
@@ -1717,9 +1303,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
       }
     }
 
-    /* THE RANK IS FROM ANOTHER SESSION, AND THE RUN SAYS SO OUT LOUD. The
-       vendor updates /market/oi-change at about 06:45 ET and the cron fires
-       at 05:15 ET, so this is the ordinary case rather than an edge one. */
     ok(/cross oiChange: \d+ of \d+ deep name/.test(runLog),
        "the run reports the join's own reach once, rather than leaving it to be counted " +
        "off fifty cards");
@@ -1728,8 +1311,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "the per-name data it joined it onto — the log line that makes the timing trap " +
        "visible in a job log rather than only on a card");
 
-    /* THE REQUESTED LIMIT IS THE PUBLISHED ONE. A card that says "14 of 100"
-       while the run asked for 40 is a fabricated denominator. */
     const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
     for (const route of ["/api/market/oi-change", "/api/darkpool/recent"]) {
       ok(new RegExp(route.replace(/\//g, "\\/") + '", \\{ limit: MARKET_CROSS_LIMIT').test(src),
@@ -1741,20 +1322,11 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "and the card publishes that constant rather than restating it");
   }
 
-
-  /* THE POPULATION INVARIANT. Every name the movers band was handed is either
-     ranked or explicitly counted as unrankable, and the total is the same
-     universe the board reports. */
   eq(movers.universe, board.universe,
      "THE MOVERS ARE RANKED OVER THE BOARD'S OWN UNIVERSE, not over the earnings-gated subset");
   eq(movers.ranked + movers.unrankedChange, movers.universe,
      "and every one of those names is either ranked or counted as unrankable — none quietly vanish");
-  /* THE INVARIANT ONLY BITES IF THE TWO NUMBERS CAN DIFFER. The synthetic
-     screener withholds prev_close on five rows in 420 precisely so that
-     `universe` and `ranked` are not the same integer here — otherwise an
-     implementation that published the ranked count as the universe would
-     satisfy the line above trivially, which is how a fixture passes while
-     proving nothing. */
+
   ok(movers.unrankedChange > 0,
      `the dry run really does contain names that cannot be ranked (${movers.unrankedChange} of ${movers.universe})`);
   ok(movers.universe > movers.ranked,
@@ -1770,10 +1342,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     ok(trix[key] !== undefined, `and so does sector:trix`);
   }
 
-  /* THE CHOICE IS DECLARED IN THE PAYLOAD, which is the whole of this
-     project's identification bar for a quantity that is not recoverable from
-     observables alone. A reader holding this blob and nothing else can
-     reproduce every scaled reading, and undo it if they disagree. */
   eq(trix.scaling.choice, true, "the 0-100 scaling is LABELLED A CHOICE in the payload");
   eq(trix.scaling.rule, "fixed-clamp", "and named, so a renderer cannot misdescribe it");
   eq(trix.scaling.neutral, 50, "with the neutral point stated");
@@ -1796,9 +1364,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     eq(s.trix, want, `${s.etf}: the emitted reading is the emitted relation applied to the emitted raw bp`);
   }
 
-  /* THE UNMEASURED PATH RUNS ON EVERY DRY RUN, on purpose. A fixture in which
-     all eleven sectors succeed never executes the branch this project has been
-     burned by most. */
   const missing = trix.sectors.filter((s) => s.trix === null);
   ok(missing.length >= 1, "the dry run exercises the unmeasured path rather than stepping around it");
   for (const s of missing) {
@@ -1810,18 +1375,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(trix.sectors.some((s) => s.clamped === true),
      "and a saturated one, so the rail is exercised too");
 
-  /* ---------- the record, as the dry run emits it ----------
-
-     A dry run has no store to read, so the record leg replays the current
-     boards at prior candle dates — synthetic sessions over synthetic closes.
-     What can be asserted here is the WIRING and the payload's own coherence:
-     the pinned renderer shape, the horizons ladder, the honesty strings
-     carried verbatim, and the exclusions that keep the IC table from ranking
-     share prices. */
-  /* THE PUBLISH ITSELF IS THE ASSERTION. `record` was an accepted, served
-     and rendered key that NOTHING EVER WROTE — the page promised a record
-     the pipeline could not fill. A missing emit file must fail by name
-     here, not as an ENOENT stack trace fifty lines down. */
   ok(fs.existsSync(`${prefix}-record.json`),
      "THE PIPELINE PUBLISHES A RECORD: the key is written, not merely accepted and rendered");
   const record = read("record");
@@ -1872,29 +1425,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   }
   ok(/not side-signed/.test(feat.method), "and the method names the return convention");
 
-  /* ---------- the corpus must be able to reach the change layer ------
-
-     THE FIXTURE THAT COULD NOT EXECUTE THE BRANCH IT CERTIFIED — caught by
-     reading an emitted payload rather than by any assertion, which is exactly
-     why these lines exist.
-
-     collectDatedBoards' dry-run arm pushed the CURRENT board once per prior
-     day, the same object twenty-two times, so every name carried an identical
-     score across the whole window. Against the backfill path that was a
-     perfectly good fixture: the walk, the dedup and the window cut were all
-     exercised, and the comment above it said as much.
-
-     What a constant series cannot exercise is any question about CHANGE.
-     Measured on the corpus the moment the change layer shipped: 94 names
-     comparable, ZERO moved, 94 held, every run length exactly 23, zero
-     crossings of any kind, and not one name carrying a residual difference.
-     Four branches certified by a corpus that could not reach one of them —
-     and every suite over that corpus passed, because a suite cannot see the
-     absence of a case it was never handed.
-
-     So the branches are asserted as REACHED, not merely as correct. The unit
-     fixtures in flows-scores-contract prove the arithmetic; these prove the
-     corpus every other suite runs over can get to it. */
   {
     const track = read("scoretrack");
     const ch = track.change;
@@ -1947,11 +1477,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "the window length, which is what a constant history produces and what makes 'a run of " +
        "one is a new opinion' a distinction with no instances");
 
-    /* THE BOARD'S EARNINGS COLUMN, on the same principle. The screener
-       generated a date for 15% of rows inside a 0-19 day window, three
-       quarters of which the twelve-day gate then removed — so the emitted
-       corpus carried ONE board row in 96 with an earnings date: a branch that
-       technically executed and proved nothing. */
     let withEarnings = 0, nearEarnings = 0;
     for (const side of ["board-long", "board-short"]) {
       for (const r of read(side).rows) {
@@ -1969,14 +1494,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "for, and it is the case a sparse fixture never produces");
   }
 
-
-  /* ---------- the chain leg, as the dry run emits it ----------
-
-     The leg is fifty vendor calls the dry run does not make, so what is
-     asserted here is the WIRING: that the three scalars reached the board row
-     in the right place, that the dated copy carries them too (which is the
-     whole point — a skew percentile exists only from the first session that
-     archived a skew), and that the four panels reached the card. */
   const boardShort = read("board-short");
   const chainCols = ["skew", "term", "atmIv", "skewDays"];
   for (const [side, b] of [["long", board], ["short", boardShort]]) {
@@ -1985,9 +1502,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     for (const col of chainCols) {
       ok(keys.includes(col), `${side} rows carry \`${col}\``);
     }
-    /* APPENDED, NEVER INSERTED. The board table binds columns positionally, so
-       a field added anywhere but the end shifts every column after it under a
-       heading that no longer describes it. */
+
     eq(keys.slice(-4).join(","), chainCols.join(","),
        `and they are the LAST four keys on a ${side} row, in order — the table binds positionally`);
     ok(b.rows.some((r) => r.skew !== null),
@@ -2000,28 +1515,16 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     }
   }
 
-  /* THE DATED COPY IS THE ARCHIVE, and it must carry what the live board
-     carries or the history the scalars exist for never accumulates. Byte
-     identity is the invariant: the re-publish writes the SAME object twice. */
   const datedLong = JSON.parse(fs.readFileSync(`${prefix}-board-long:${board.sessionDate}.json`, "utf8"));
   assert.deepEqual(datedLong, board,
     "THE DATED BOARD IS BYTE-IDENTICAL TO THE LIVE ONE at final state, chain columns included — " +
     "the re-publish writes one object to two keys rather than reconstructing it"); checks++;
 
-  /* The card's four chain panels. */
   const cardFile = fs.readdirSync(path.dirname(prefix))
     .find((f) => /-card-[A-Z0-9]+\.json$/.test(f));
   ok(cardFile, "the dry run emitted a card");
   const card = JSON.parse(fs.readFileSync(path.join(path.dirname(prefix), cardFile), "utf8"));
-  /* THE SCHEMA VERSION DOES NOT MOVE FOR AN ADDITION. It is a contract with
-     the renderer about MEANING: it went to 2 when fam.V and fam.O stopped
-     being signed votes and became unsigned gauges, so a renderer switching on
-     it could refuse to redraw a published 53 as a 53%-full gauge it never
-     meant. Four new panels change nothing that already existed — an older
-     renderer simply has no host for them and an older payload simply lacks
-     the keys, which is the transitional story every panel here already tells.
-     Bumping the number for an addition would spend the one signal that means
-     "a field you already draw now means something else". */
+
   eq(card.v, 2, "the schema version is unmoved: these panels are additions, not redefinitions");
   for (const key of ["ivSurface", "skewTerm", "topContracts", "aggressor"]) {
     const panel = card.panels[key];
@@ -2029,8 +1532,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     ok(panel.status === "ok" || (panel.status === "unavailable" && panel.reason),
        `and it is either built or unavailable WITH a reason (${key}: ${panel.status})`);
   }
-  /* The surface is parallel arrays, and every matrix is the same shape — a
-     renderer reads them by index, so a ragged one would draw a lie. */
+
   const surf = card.panels.ivSurface;
   if (surf.status === "ok") {
     for (const key of ["iv", "skew", "traded", "strike"]) {
@@ -2040,16 +1542,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     }
   }
 
-  /* THE EMITTED BOARDS, LOADED ONCE AND ASSERTED TO EXIST.
-
-     A FILE THAT IS NOT THERE MUST FAIL, NOT SKIP. The first version of the
-     agreement-count block below built its path as `-board-long.json` when the
-     emitter writes `e-board-long.json`, then guarded the read with
-     `if (!fs.existsSync(full)) continue;`. Every assertion in it was skipped
-     silently — the suite reported its total and none of those checks had run.
-     A test that passes by not executing is worse than a missing test, because
-     it reads as coverage. So the path is built from the emitter's own prefix
-     and the file's absence is an assertion, not a branch. */
   const boardFile = (side) => prefix + `-board-${side}.json`;
   const readBoard = (side) => {
     const full = boardFile(side);
@@ -2057,24 +1549,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     return JSON.parse(fs.readFileSync(full, "utf8"));
   };
 
-  /* ---------- every scored name reaches a surface, or is counted -----
-
-     THE PRODUCT'S RULE IS THAT THE DEAD BAND DECIDES: a name outside it is a
-     signal and goes on a board, a name inside it goes on the watch list. The
-     rule was not quite true. `boardSize` truncates each side, and the
-     overflow reached NEITHER surface — the watch list holds only the names
-     inside the band, so a name that cleared the threshold and ranked 51st on
-     its side simply vanished.
-
-     Measured on the emitted corpus before the fix: 100 scored, 3 inside the
-     band, 97 therefore cleared it, 93 published. Four names fully scored,
-     past the threshold this product names as the threshold, on no surface at
-     all — and no published number from which a reader could work out that
-     they existed.
-
-     This is the assertion that closes the arithmetic, and it is written as a
-     conservation law rather than as four separate counts, because that is the
-     property that actually matters: nothing scored may go missing unrecorded. */
   {
     const boards = {
       long: readBoard("long"), short: readBoard("short"), watch: readBoard("watch"),
@@ -2091,10 +1565,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
       ok(b.rows.length <= b.cleared, `board:${side}: and never claims more than it had`);
     }
 
-    /* THE CONSERVATION LAW. Every scored name is inside the band or outside
-       it; the ones outside are on a board or counted as shed. If this ever
-       fails, some name was scored and went missing with nothing saying so —
-       which is the whole defect, restated as arithmetic. */
     const scored = boards.long.scored;
     const neutral = boards.long.neutral;
     eq(boards.long.cleared + boards.short.cleared, scored - neutral,
@@ -2106,17 +1576,10 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        `and every one of them is either on a board or counted as shed — nothing scored ` +
        `goes missing unrecorded (${shown} shown + ${shed} shed vs ${scored - neutral} cleared)`);
 
-    /* AND THE FIXTURE ACTUALLY EXERCISES THE SHEDDING BRANCH. A corpus where
-       nothing is ever shed would pass every assertion above while proving
-       nothing about the case they exist for. */
     ok(shed > 0,
        `the emitted corpus really does shed names (${shed}), so these assertions are ` +
        `about a branch that runs rather than one that never fires`);
 
-    /* THE WATCH LIST IS THE OTHER HALF, and it is not where shed names go.
-       Asserting this is what stops a future "fix" that quietly dumps the
-       overflow onto the watch list, where it would read as "inside the band"
-       — a wrong reading rather than a missing one. */
     if (boards.watch) {
       const banded = new Set(boards.watch.rows.map((r) => r.t));
       for (const r of [...boards.long.rows, ...boards.short.rows]) {
@@ -2127,20 +1590,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     }
   }
 
-  /* ---------- the board says what its own sort key is made of --------
-
-     THE BOARD RANKS ON A COMPOSITE AND PUBLISHED ONLY THE COMPOSITE.
-     Conviction is 0.45·agreement + 0.35·coverage + 0.20·persistence, and the
-     heaviest term is a COUNT of how many signed axes point the same way — so
-     the largest single input to the sort key stepped, invisibly, and two
-     names ten points apart might differ by a whole axis or by nothing at all.
-     On this corpus the values cluster at 60-66, 75-82 and 90-96, one cluster
-     per agreement level.
-
-     Counts, not the ratio: agree/present is a fraction of two small integers
-     that no decimal holds, so a board rounding it to three places publishes
-     0.667 for two-of-three and any consumer multiplying back is doing
-     arithmetic on a rounding error. */
   for (const side of ["long", "short"]) {
     const board = readBoard(side);
     const rows = board.rows || [];
@@ -2159,12 +1608,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        `every board:${side} row carries the count behind its own conviction (${withCounts}/${rows.length})`);
   }
 
-  /* ---------- the composite can be re-done from the card -------------
-
-     A PUBLISHED BLEND WHOSE TERMS DO NOT RECONSTRUCT IT IS A LIE, and until
-     this assertion existed nothing checked. The card published two of the
-     three terms and none of the weights, so the number could be described
-     and not verified. */
   {
     const conv = card.conv || {};
     const w = conv.weights;
@@ -2179,27 +1622,12 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
       (w.agreement * conv.agreement + w.coverage * conv.coverage + w.persistence * conv.persistence));
     eq(recon, card.conviction,
        "and the three terms with those weights reconstruct the published conviction exactly");
-    /* THE CLAMPED COVERAGE, not the raw measurement: a name whose coverage
-       came in above 1 would close the identity in the pipeline and fail it
-       here if the wrong one of the two shipped. */
+
     ok(conv.coverage >= 0 && conv.coverage <= 1,
        "the published coverage is the clamped value the arithmetic used");
     ok(conv.persistence >= 0 && conv.persistence <= 1, "and likewise persistence");
   }
 
-  /* ---------- the basis check reaches the reader ---------------------
-
-     THE MEASUREMENT EXISTED AND WAS THROWN AWAY. describeOiBasis has run on
-     every chain since it was written — arithmetic over rows already in memory
-     — and the pipeline logged one of them and published none. Meanwhile the
-     top-contracts caption told readers ΔOI was "what stuck overnight, as
-     against what churned", which asserts the open-interest pair and the
-     volume span the same interval. The check exists precisely to test that,
-     and on live rows it has refuted it. A maintainer reading a job log knew;
-     a reader holding the table did not.
-
-     So this pins the plumbing: the counts must arrive on the panel that
-     prints the column they judge, and on no other. */
   const tc = card.panels.topContracts;
   if (tc.status === "ok") {
     const basis = tc.oiBasis;
@@ -2209,10 +1637,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "carrying how many contracts could be checked at all");
     ok(["no-data", "falsified", "inconclusive"].includes(basis.verdict),
        `and one of the three verdicts, never a bare number (got ${basis.verdict})`);
-    /* THE FLOOR TRAVELS OR THE COUNT IS UNREADABLE. The check runs only over
-       contracts clearing UA_MIN_VOLUME, so `seen` is a subset of the rows on
-       screen; "2 of 105" beside a ten-row table is not a contradiction, but
-       only if the reader is told what the 105 were drawn from. */
+
     ok(Number.isFinite(basis.minVolume) && basis.minVolume > 0,
        "and the volume floor that defines the population those counts describe");
     ok(!("line" in basis),
@@ -2228,15 +1653,12 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
       eq(basis.exceeded, 0, "an inconclusive verdict found none, and says so as a measured zero");
     }
   }
-  /* AND ON NO OTHER PANEL. Three of the four chain panels do not print ΔOI;
-     publishing the check on them would be a field no renderer reads, which
-     the payload/renderer contract would then have to carry forever. */
+
   for (const key of ["ivSurface", "skewTerm", "aggressor"]) {
     ok(!("oiBasis" in card.panels[key]),
        `panels.${key} does not carry the basis check — it prints no open-interest change to judge`);
   }
 
-  /* The two free screener readings that were parsed and dropped for months. */
   const pm = card.panels.pricedMove;
   ok("atmVol" in pm, "the priced-move panel finally publishes the vendor's own at-the-money vol");
   ok(Array.isArray(pm.ivStrip) && pm.ivStrip.length === 4,
@@ -2244,23 +1666,8 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   assert.deepEqual(pm.ivStrip.map((p) => p.h), ["−1m", "−1w", "−1d", "now"],
     "ordered oldest to newest, so a renderer draws it left to right without inventing an order"); checks++;
 
-  /* ---------- the rate limiter's floor -------------------------------
-
-     THE DEFECT THIS PINS WAS SHIPPED AND MEASURED. From the first version of
-     this pipeline until 2026-08-26, the 429 branch carried the comment "raise
-     the floor permanently" over code that raised only the current delay; the
-     decay on a clean response clamped to an immutable RATE.minDelayMs, so six
-     clean responses walked it back to the 60ms that had earned the 429 in the
-     first place. The live run of that morning: 408 calls, 43 rate-limited, and
-     a final inter-call delay of exactly 60ms — a controller that observed 43
-     refusals and concluded nothing.
-
-     The lesson is about WHERE the assertion goes. Every piece was individually
-     reasonable; the bug lived in the wiring between them, so the fix moved the
-     wiring into a pure function and these assertions hold the invariant over
-     the thing that actually runs. */
   {
-    // The floor rises and never falls, no matter how long the quiet spell.
+
     let s = { delayMs: RATE.startDelayMs, floorMs: RATE.minDelayMs };
     s = stepRateController(s, "limited");
     const afterLimit = s.floorMs;
@@ -2271,13 +1678,9 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        `the delay decays to the raised floor and stops there (${Math.round(s.delayMs)}ms ` +
        `>= ${Math.round(afterLimit)}ms) — the exact assertion the shipped code failed`);
 
-    /* THE MUTATION THIS KILLS: clamping the decay to RATE.minDelayMs instead
-       of to floorMs. That is not a hypothetical mutation — it is the code that
-       ran in production, and under it this next line reads 60. */
     ok(s.delayMs > RATE.minDelayMs,
        "and it does NOT settle back at RATE.minDelayMs, which is what the defect did");
 
-    // Repeated 429s converge on the ceiling rather than running away to maxDelayMs.
     let t = { delayMs: RATE.startDelayMs, floorMs: RATE.minDelayMs };
     for (let i = 0; i < 50; i++) t = stepRateController(t, "limited");
     eq(t.floorMs, RATE.floorCeilingMs,
@@ -2286,17 +1689,10 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "and the floor's ceiling is strictly below the per-call backoff ceiling: a single " +
        "call may sleep 5s, but every call may not");
 
-    /* A 500 IS NOT A RATE LIMIT. Raising the floor on a transport failure
-       would slow the whole run for a reason that has nothing to do with the
-       key's tier — and 5xx storms are exactly when the run can least afford
-       it. */
     const before = { delayMs: 300, floorMs: 240 };
     eq(stepRateController(before, "error").floorMs, 240,
        "a 5xx or a transport failure backs off WITHOUT teaching the floor anything");
 
-    /* THE DEADLINE HAS TO SURVIVE THE FLOOR. A floor that fits the budget but
-       eats the card window has only changed which surface goes missing, so the
-       reserve is subtracted. */
     ok(rateFloorSurvivesBudget({
       floorCeilingMs: RATE.floorCeilingMs, callBudget: CALL_BUDGET,
       deadlineMs: DEADLINE_MS, reserveMs: CHAIN_RESERVE_MS,
@@ -2312,26 +1708,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "the first step is a real step: 1.5x of 60ms is below anything a limiter notices, " +
        "so the opening raise is floored at a meaningful delay instead");
 
-    /* ---- the ingest lane, stated as the incident rather than as a number ----
-
-       THE ONE RATE THE EDGE HAS EVER REFUSED is 37 POSTs inside eleven
-       seconds, and publish()'s comment concludes the challenge was "purely a
-       function of burst rate". It cost two payloads silently — `sector:trix`
-       never landed and `board:long` kept its pre-chain copy.
-
-       THE LANE MAKES DEPARTURES EVEN, which is why this is expressible as an
-       invariant at all: with one departure every PUBLISH_SPACING_MS, the most
-       POSTs that can enter any eleven-second window is exactly
-       11000/PUBLISH_SPACING_MS, no matter how many workers are producing. That
-       number must stay under the 37 that was refused.
-
-       ASSERTED AS THE WINDOW, NOT AS THE CONSTANT, because a test that pins
-       150 or 400 only tells the next reader what the number is. This one tells
-       them what it is FOR, and it fails for the right reason: the lane was set
-       to 150ms, which admits 73 POSTs in eleven seconds — twice the refused
-       shape — and the comment above it claimed that was "comfortably under".
-       Nothing in this suite disagreed, which is how an inverted comparison
-       survived in a file this careful. */
     const REFUSED_POSTS = 37, REFUSED_WINDOW_MS = 11000;
     const admits = REFUSED_WINDOW_MS / PUBLISH_SPACING_MS;
     ok(admits < REFUSED_POSTS,
@@ -2340,10 +1716,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        `${admits.toFixed(1)}, against the ${REFUSED_POSTS} that drew a Cloudflare challenge ` +
        "and lost two payloads on the first wide-board run");
 
-    /* AND THE CARDS LEG IS THE STRETCH THAT SATURATES IT. Fifty card writes
-       queue back to back since the leg was pooled; every other write on this
-       route trickles. If the lane ever admits them faster than the refused
-       shape, it is this leg that will draw the challenge. */
     const CARD_WRITES = 50, INGEST_WRITES_PER_RUN = 162;
     const cardsSeconds = (CARD_WRITES * PUBLISH_SPACING_MS) / 1000;
     ok(cardsSeconds > (CARD_WRITES / REFUSED_POSTS) * (REFUSED_WINDOW_MS / 1000),
@@ -2352,9 +1724,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        `${REFUSED_WINDOW_MS / 1000}s — so the one stretch that saturates this lane is slower ` +
        "than the burst that drew the challenge, not faster");
 
-    /* THE COST IS AN ASSERTION TOO, so raising the spacing can never be a free
-       decision made quietly. This is the whole run's ingest traffic against
-       the 1502s the last measured run took under a 2700s job kill. */
     const laneSeconds = (INGEST_WRITES_PER_RUN * PUBLISH_SPACING_MS) / 1000;
     ok(laneSeconds < 120,
        `and the whole run's ${INGEST_WRITES_PER_RUN} ingest writes cost ` +
@@ -2363,20 +1732,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "constant that can drift upward one incident at a time");
   }
 
-  /* ---------- the publish retry, bounded twice ------------------------
-
-     THE FIRST WIDE-BOARD RUN LOST TWO PAYLOADS TO THE EDGE. Publishing fifty
-     cards instead of eleven earned a Cloudflare 403 on `sector:trix` and on
-     the re-publish of `board:long`, so one page went a day stale and one board
-     shipped without four columns — both silent to a reader.
-
-     Retrying is right, and retrying without a global bound is a different bug
-     with the same shape. Three retries is 1 + 4 + 9 = fourteen seconds per
-     failing key; a run publishes upwards of sixty keys, and a burst-rate
-     challenge is by nature systemic rather than per-key. Unbounded, the policy
-     would spend fourteen minutes of a thirty-minute deadline asleep and then
-     drop the cards at the back of the queue to pay for the retries at the
-     front — trading twenty silent losses for two. */
   {
     eq(publishRetryDelay(0), 1000, "the first retry waits a second");
     eq(publishRetryDelay(1), 4000, "the second, four");
@@ -2385,10 +1740,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     eq(publishRetryDelay(3), null, "and there is no fourth: three RETRIES, four attempts");
     eq(publishRetryDelay(-1), null, "a nonsense attempt index retries nothing");
 
-    /* THE GLOBAL BUDGET IS PART OF THE ANSWER, not a check somewhere near it.
-       The only retry defect this repository has shipped twice is a policy
-       whose comment and code disagreed, so the arithmetic lives in one
-       function a test can call. */
     eq(publishRetryDelay(0, { spentMs: 89_500 }), null,
        "a wait that would exceed the run's remaining retry budget is refused outright, " +
        "rather than truncated to fit — a shortened wait is the one length that neither " +
@@ -2396,9 +1747,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     eq(publishRetryDelay(0, { spentMs: 89_000 }), 1000,
        "a wait that fits is granted in full");
 
-    /* THE BUDGET BINDS BEFORE THE DEADLINE DOES. Whatever the per-key policy
-       costs, a whole run of failures must not consume the window the cards
-       need — this is the relation, asserted rather than described. */
     const worstPerKey = [0, 1, 2].reduce((sum, a) => sum + (publishRetryDelay(a) || 0), 0);
     eq(worstPerKey, 14_000, "one key that fails every retry costs fourteen seconds");
     let spent = 0, keys = 0;
@@ -2418,19 +1766,11 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "which is comfortably inside the window the cards still need after it");
   }
 
-  /* ---------- the truncated-chain probe ------------------------------
-
-     Ten of eleven board names filled the vendor's 500-row page on the first
-     live morning, so the truncation refusal — designed for the largest names —
-     is the common case. The probe spends one call asking whether the endpoint
-     can be narrowed to a single expiry. These assertions are about the probe
-     REPORTING HONESTLY, because a diagnostic that misreads its own answer is
-     worse than none: it would send the next release down the wrong design. */
   {
     const expiries = [
-      { expiry: "2026-08-27" },              // inside the 7-day floor
+      { expiry: "2026-08-27" },
       { expiry: "2026-09-04" }, { expiry: "2026-09-18" },
-      { expiry: "2026-08-20" },              // already past
+      { expiry: "2026-08-20" },
       { expiry: null }, { expiry: "not-a-date" },
     ];
     eq(nearestProbeExpiry(expiries, { asOf: "2026-08-26", minDays: 7 }), "2026-09-04",
@@ -2459,15 +1799,10 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     ok(!ignored.includes("FILTER WORKS"),
        "with no chance of a reader skimming the wrong verdict out of the same line");
 
-    /* THE THIRD OUTCOME, which is neither of the other two and must not be
-       collapsed into either. An accepted-and-empty filter looks like success
-       to a row counter and like failure to a naive reader. */
     const empty = describeChainProbe("AAPL", "2026-09-04", []).join(" ");
     ok(!empty.includes("FILTER WORKS") && !empty.includes("FILTER IGNORED"),
        "an empty response is reported as its own outcome, not as either verdict");
 
-    /* A single expiry that STILL fills the page is not a solved problem: the
-       strike set is then itself an arbitrary subset. */
     const full = Array.from({ length: 500 }, (_, i) =>
       ({ option_symbol: sym("2026-09-04", "C", 100 + i) }));
     const stillFull = describeChainProbe("AAPL", "2026-09-04", full).join(" ");
@@ -2475,21 +1810,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "and a filtered response that itself hits the cap says so rather than declaring victory");
   }
 
-  /* ---------- the fixture's own honesty -------------------------------
-
-     THE FIXTURE IS THE THING THAT HAS BEEN WRONG MOST OFTEN IN THIS
-     REPOSITORY. Three times a dry run passed because the fixture agreed with
-     the code's guess instead of with the vendor: call_gamma against the wire's
-     call_gex, the aggressor split, and one option type per strike hiding the
-     put/call collision. A fourth was live for a release — the narrow book fit
-     the vendor's page, so the truncation branch that fires on ten names of
-     eleven never executed in any dry run.
-
-     So the fixture's claims get assertions of their own. The shuffle in
-     particular: a page cut from an already-sorted book leaves the front
-     expiries whole, which is exactly the convenience the vendor does not
-     promise and the refusal exists to survive. Without this assertion, dropping
-     the shuffle changes nothing any other test can see. */
   {
     const wide = fakeChain("AAPL", 200, 4242, { wide: true });
     eq(wide.length, 500, "the wide fixture is cut at the vendor's page size, not merely large");
@@ -2512,8 +1832,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "BOTH the truncated refusal and the path that publishes scalars, in one session");
   }
 
-  /* BOTH PAYLOADS FIT. The ingest route refuses anything over 128KB, and it
-     refuses it as a 413 from the Worker rather than here. */
   const cardBytes = JSON.stringify(card).length;
   ok(cardBytes < 100 * 1024,
      `a card with all four chain panels is ${(cardBytes / 1024).toFixed(1)}KB, inside the ` +
@@ -2527,26 +1845,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   fs.rmSync(path.dirname(prefix), { recursive: true, force: true });
 }
 
-/* ---------- every ingest request looks like the same client ----------
-
-   THE READ PATH WAS ANONYMOUS AND THE EDGE DROPPED IT.
-
-   publish() and retire() each carried their own copy of a User-Agent header,
-   and publish()'s comment said exactly why it was needed: Node's fetch sends
-   none, and an anonymous request from a datacenter address is the shape edge
-   bot heuristics drop. fetchStoredPayload() never got a copy — so writes and
-   deletes reached the Worker and every READ was refused by Cloudflare with
-   403. Measured on 2026-08-27: 8 of 8, with a retry recovering none, because a
-   bot heuristic is deterministic rather than a rate limit.
-
-   It surfaced as the track record reporting "0 retained session(s) of 180
-   dated key(s) probed" while the page called that the ordinary first state of
-   a cold archive. It had also been silently disabling board hysteresis, which
-   reads through the same function, since the day hysteresis was wired up.
-
-   Two copies of a string that three call sites must agree on is what allowed
-   one to be missing. This asserts there is one builder and that every request
-   to the ingest route goes through it. */
 {
   const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
 
@@ -2558,9 +1856,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(/function ingestHeaders\(/.test(src),
      "and it is reached through a single builder every call site shares");
 
-  /* Every fetch to the ingest route must take its headers from that builder.
-     Checked by locating each call and reading forward to its options — a
-     bare `Authorization:` literal at one of these sites is the defect. */
   const sites = [...src.matchAll(/ingestURL\(\) \+ "\?key="/g)];
   eq(sites.length, 3,
      `three call sites reach the ingest route — read, write and delete (found ${sites.length}). ` +
@@ -2576,39 +1871,8 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   }
 }
 
-/* ---------- the bounded worker pool, and the run's veto over it ----
-
-   THE DRY RUN CANNOT REACH ANY OF THIS. It makes zero vendor calls, so
-   poolWidth() answers "not evidence" and every leg runs one wide — the pooled
-   path and the serial path emit identical bytes there, which is the property
-   the corpus block below asserts and is exactly why the corpus can say
-   nothing about what happens when the pool is actually wide. These are the
-   assertions that do. */
 {
-  /* ---- ORDER SURVIVES OUT-OF-ORDER COMPLETION ----
 
-     The whole reason this is safe to put in front of the scorer. Item 0 is
-     made the SLOWEST so that with any width above one it finishes last; if
-     results were collected in completion order the array would come back
-     rotated and every percentile tie downstream would move. */
-  /* OUT-OF-ORDER COMPLETION IS FORCED, NOT TIMED. This read
-     `delays = [40, 5, 5, 5, 5, 5, 5, 5]` and trusted a 40ms timer to outlast
-     seven 5ms ones. That is a race, and on 2026-09-04 it lost: on a machine
-     busy with parallel work the short timers fired late enough that item 0
-     was not last, and the guard-on-the-guard below failed a suite that had
-     passed minutes earlier and twice on CI. A test that fails on a loaded
-     machine teaches the next reader to re-run rather than to look, which is
-     how a real defect eventually gets waved through.
-
-     Item 0 now holds a gate that only the LAST of the other seven opens, so
-     it finishes last by construction at any width above one. Nothing here
-     depends on how fast a timer fires — the 1ms sleep exists only to yield
-     the microtask queue so the pool can actually overlap, and no assertion
-     rests on its duration.
-
-     THIS DEPENDS ON width > 1, which the call below fixes at 4. At width 1
-     item 0 would hold the only slot and the gate would never open — worth
-     knowing before anyone parameterises this block. */
   const items = Array.from({ length: 8 }, (_, i) => ({ i }));
   const seen = [];
   let live = 0, peak = 0, finishedOthers = 0, openGate = null;
@@ -2637,11 +1901,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      `the pool genuinely overlapped work (peak ${peak}) and never exceeded its width — a pool ` +
      "that peaked at 1 would certify nothing, and one that exceeded 4 would be a burst");
 
-  /* ---- WIDTH 1 IS THE SERIAL LOOP, EXACTLY ----
-
-     Every leg falls back to this whenever the run is being refused, so "width
-     1 never overlaps" is the property that makes the fallback a real fallback
-     rather than a smaller burst. */
   let serialLive = 0, serialPeak = 0;
   await runPooled(items, async (item) => {
     serialLive++; if (serialLive > serialPeak) serialPeak = serialLive;
@@ -2650,24 +1909,12 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   }, { width: 1 });
   eq(serialPeak, 1, "width 1 never has two items in flight — it is the serial loop it replaced");
 
-  /* ---- `attempted` IS NOT DERIVED FROM `results` ----
-
-     A caller counting skipped names off `results[i] === undefined` would count
-     every name whose worker legitimately returned nothing. This is the same
-     confident-zero confusion the payloads refuse everywhere else, and here it
-     would misreport the chain leg's own deadline accounting. */
   const quiet = await runPooled([1, 2, 3], async () => undefined, { width: 2 });
   assert.deepEqual(quiet.attempted, [true, true, true],
     "an item whose work returned undefined is still ATTEMPTED — undefined is a result, not a skip");
   checks++;
   eq(quiet.done, 3, "and `done` counts attempts rather than truthy results");
 
-  /* ---- stopEarly IS CONSULTED PER ITEM, NOT ONCE AT DISPATCH ----
-
-     This is the chain leg's card reserve. A deadline tested only when the pool
-     starts would let a leg that began in time run for as long as its longest
-     queue — spending the window the cards were guaranteed. The stop here fires
-     only after two items, so a pool that checked once would finish all six. */
   let started = 0;
   const stopped = await runPooled([0, 1, 2, 3, 4, 5], async () => {
     started++;
@@ -2679,21 +1926,12 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     "and the tail is marked NOT ATTEMPTED, which is what the chain leg counts as skipped");
   checks++;
 
-  /* ---- degenerate shapes ---- */
   const empty = await runPooled([], async () => 1, { width: 4 });
   eq(empty.done, 0, "an empty list is a no-op rather than a hang");
   const narrow = await runPooled([7], async (x) => x, { width: 9 });
   assert.deepEqual(narrow.results, [7], "a width wider than the list is clamped to the list");
   checks++;
 
-  /* ---- THE RUN'S VETO, AT EVERY RUNG ----
-
-     poolWidth() takes its meter as a parameter precisely so this can be
-     asserted. The rung that matters most is the first: on the shape the
-     2026-08-26 run actually had — 170 refusals in 1022 calls — the pool must
-     REFUSE to widen, because concurrency at a 17% refusal rate raises the
-     refusal rate. A test suite that only ever exercised the healthy branch
-     would certify the opposite of the property this gate exists for. */
   const cold = poolWidth(POOL_MAX_WIDTH, { calls: POOL_EVIDENCE_MIN - 1, rateLimited: 0 });
   eq(cold.width, 1, "with too few calls to be evidence, the pool stays one wide");
   eq(cold.rate, null,
@@ -2715,22 +1953,11 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(poolWidth(2, { calls: 1000, rateLimited: 10 }).width, 2,
      "a leg that asks for a narrower maximum gets it — the gate never widens past the caller");
 
-  /* THE BOUNDARY IS EXCLUSIVE ON BOTH RUNGS, asserted rather than assumed: a
-     rate exactly at a rung takes the FASTER side, and the next person to move
-     a constant should find out here rather than in a live 429 regime. */
   eq(poolWidth(POOL_MAX_WIDTH, { calls: 1000, rateLimited: 1000 * POOL_REFUSAL_HALT }).width, 2,
      "a rate exactly at the halt rung is not halted");
   eq(poolWidth(POOL_MAX_WIDTH, { calls: 1000, rateLimited: 1000 * POOL_REFUSAL_EASE }).width,
      POOL_MAX_WIDTH, "and a rate exactly at the ease rung takes full width");
 
-  /* ---- A METER WITH NO REFUSAL COUNTER IS NOT A CLEAN RUN ----
-
-     `Number(undefined) || 0` stood in this divisor and turned a counter that
-     had gone missing into a measured 0% refusal rate — which took the widest
-     branch and leaned HARDER on a vendor nobody was metering. It is the same
-     confident zero the payloads refuse, sitting in a control decision instead
-     of a display, and absence must take the conservative branch rather than
-     the optimistic one. */
   const unmetered = poolWidth(POOL_MAX_WIDTH, { calls: 1000 });
   eq(unmetered.width, 1,
      "a meter that counted calls but carries no refusal counter runs ONE wide — an unmeasured " +
@@ -2742,37 +1969,11 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "guard above distinguishes absence from measurement rather than banning zero");
 }
 
-/* ---------- the cards leg's own shape, at a width the dry run never reaches --
-
-   THE CARDS LEG IS THE LAST SERIAL STRETCH AND THE ONE A READER PAYS FOR: six
-   calls a name over up to fifty names, running after every other payload has
-   committed, so the names it does not reach before the deadline are a morning
-   with fewer cards. Pooling it is worth nothing if the leg then MISCOUNTS what
-   it did, and the dry run cannot notice: DRY_RUN makes zero vendor calls, so
-   poolWidth() answers "not evidence", the leg runs one wide, nothing overlaps
-   and the fold is exercised on a list that could not have been folded wrong.
-
-   So the coverage is here, against runPooled directly, at a width above one
-   and with a fixture that COMPLETES OUT OF ORDER — which is the only shape in
-   which "folds in input order" and "counts off `attempted`" can fail. */
 {
-  /* The board, in the order the cards leg would publish it. Name 0 is made the
-     slowest so that at any width above one it lands LAST: a fold that
-     collected in completion order would return its gamma profile at the end
-     rather than the front. */
+
   const board = ["AAA", "BBB", "CCC", "DDD", "EEE", "FFF"];
   const slow = { AAA: 40 };
-  /* Four outcomes. Three are what the live worker returns:
-       AAA, CCC, FFF — built, each carrying a gamma profile;
-       BBB          — threw inside the worker, caught, returned "failed";
-       DDD          — on the board with no enrichment row to build from.
-     EEE is the fourth and it is deliberately one the worker does NOT produce
-     today: a worker that returned nothing at all. `undefined` is a legal
-     result — runPooled's own doc says so — and the card worker returns a
-     tagged object on every path only because it is written that way this
-     morning. The fold must not read that discipline as a guarantee, because
-     the day one path stops returning is the day a built card would start
-     being reported as a name the deadline took. */
+
   const outcome = {
     AAA: { status: "built", gamma: ["AAA-bars"] },
     BBB: { status: "failed" },
@@ -2810,24 +2011,11 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "the published skip count is the two skips together — the deadline's and the missing " +
      "row's — which is what `meta` has always carried");
 
-  /* ---- THE COUNTERS EQUAL WHAT `attempted` SAYS ----
-
-     The invariant, stated as arithmetic rather than as four separate numbers:
-     every name the pool attempted is accounted for by exactly one of built,
-     failed and unenriched, and every name it did not attempt is a deadline
-     skip. If that ever stops holding, some name is being counted twice or not
-     at all, whatever the individual numbers look like. */
   eq(fold.built + fold.failed + fold.unenriched, run.done,
      "built + failed + unenriched is exactly what the pool ATTEMPTED");
   eq(fold.deadlineSkipped, board.length - run.done,
      "and the deadline skips are exactly what it did not attempt");
 
-  /* ---- THE SAME FIXTURE, COUNTED OFF TRUTHINESS, IS WRONG ----
-
-     This is the bug the fold exists to refuse, run side by side with it so a
-     reader can see the size of the lie rather than take the comment's word.
-     EEE returned `undefined`; a fold reading `results[i] === undefined` as
-     "never reached" reports it as a name the deadline took. */
   const naive = board.filter((_, i) => run.results[i] === undefined).length;
   eq(naive, 1,
      "counted off a missing result, this run reports a name skipped past the deadline");
@@ -2835,11 +2023,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "counted off `attempted`, it reports none — the pool ran to the end of the board. The " +
      "two disagree, and only one of them can be printed under the deadline's name");
 
-  /* ---- AND THE DEADLINE, WHICH IS THE COUNT THAT MATTERS ON A SLOW MORNING --
-
-     stopEarly fires after two names, so four are never claimed. This is the
-     shape a real slow morning has, and the one whose count reaches both the
-     operator's log line and the published `meta` key. */
   let started = 0;
   const cut = await runPooled(board, async (ticker) => {
     started++;
@@ -2855,18 +2038,12 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "and only the names actually built contribute a gamma profile");
   checks++;
 
-  /* ---- DEGENERATE INPUTS, because this fold reads a foreign object ---- */
   const nothing = foldCardOutcomes([], { results: [], attempted: [] });
   eq(nothing.built + nothing.failed + nothing.skipped, 0, "an empty board folds to zeros");
   eq(foldCardOutcomes(["AAA"], {}).deadlineSkipped, 1,
      "and a run object carrying no arrays at all reports the name as NOT ATTEMPTED rather " +
      "than throwing or claiming it was built");
 
-  /* ---- main() USES THIS FOLD RATHER THAN COUNTING INLINE ----
-
-     The extraction is the whole reason the assertions above reach anything. A
-     copy of this arithmetic written back into the card loop would be a copy
-     the dry run certifies at width 1 and nothing certifies at width 2. */
   const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
   ok(/foldCardOutcomes\(cardTickers, cardsRun\)/.test(src),
      "the cards leg folds its pooled run through foldCardOutcomes");
@@ -2875,23 +2052,12 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "rather than once at dispatch");
 }
 
-/* ---------- the floor verdict, at every rung it can reach ----------
-
-   RATE.floorCeilingMs's own comment is an open question — "a higher floor
-   trades a certain per-call tax against an uncertain saving, and the run has
-   never been instrumented to say which is larger. Do not raise it on
-   intuition; measure the 429 wait first." The meter is that measurement and
-   this describer is the sentence that reads it. The branch that matters most
-   is the one that says DO NOT RAISE IT, which by construction only a refused
-   run produces — so it is asserted here rather than left to the first bad
-   morning. */
 {
   eq(describeFloorVerdict({ calls: 0, rateLimited: 0, permitWaitMs: 0, rateLimitWaitMs: 0 }), null,
      "a run that made no calls says NOTHING about the floor — an empty meter is not a " +
      "measured 0% refusal rate, and printing one would be a confident zero about the one " +
      "constant this file refuses to change on intuition");
 
-  /* The 2026-08-26 shape, from RATE.floorCeilingMs's own comment. */
   const refused = describeFloorVerdict({
     calls: 1022, rateLimited: 170, permitWaitMs: 807_000, rateLimitWaitMs: 510_000 });
   ok(/CEILING IS DOING ITS JOB/.test(refused),
@@ -2918,13 +2084,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(/nothing queued/.test(unqueued),
      "a run that never waited for a turn says so rather than publishing a ratio over zero");
 
-  /* ---- AND NO VERDICT AT ALL OFF A METER THAT LOST ITS REFUSAL COUNT ----
-
-     This describer's output is a written recommendation about a published
-     constant. Read as `Number(undefined) || 0` it said "0.0% refused, the
-     floor is CONSERVATIVE, it can come down" about a run whose refusals were
-     never counted — the confident zero, aimed at the one number this file
-     refuses to move on intuition. */
   eq(describeFloorVerdict({ calls: 1000, permitWaitMs: 700_000, rateLimitWaitMs: 0 }), null,
      "a meter with calls but NO refusal counter produces no verdict at all, rather than the " +
      "cheerful one that reads an absence as zero refusals");
@@ -2938,21 +2097,11 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "the rate it CAN read still reaches its rung — an unread wait meter withholds the split, " +
      "not the verdict");
 
-  /* THE VERDICT AND THE THROTTLE READ THE SAME RUNGS. Two constants would be
-     two opinions about what "being refused" means, and they would diverge on
-     the first morning somebody tuned one of them. */
   eq(poolWidth(POOL_MAX_WIDTH, { calls: 1022, rateLimited: 170 }).width, 1,
      "the same meter that produces the DO-NOT-RAISE verdict also holds every pooled leg at " +
      "width 1 — the sentence and the throttle cannot disagree");
 }
 
-/* ---------- the counter feed's first-appearance marker -------------
-
-   THE THREE SILENCES, ON A FEED WHOSE SUBJECT IS WHAT CHANGED. `nw` is the
-   only field on this page that makes a claim about a prior session, so it is
-   the only field that can lie about one. The emitted corpus reaches exactly
-   one of its three answers — see the corpus block below — and these reach the
-   other two, which are the ones that must not become a confident sweep. */
 {
   const row = (t, k, expiry, cp) => ({ t, k, expiry, cp, vol: 10, oi: 10 });
 
@@ -2971,13 +2120,9 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
   const priorBody = (rows, readAt = "2026-08-21T09:20:00.000Z", sessionDate = "2026-08-21") =>
     ({ readAt, sessionDate, contracts: { rows } });
-  /* THE SESSION THE RUN IS PUBLISHING, later than every priorBody above, and
-     passed at every call below. It is the third argument because this key
-     holds whatever the LAST run wrote rather than whatever YESTERDAY's run
-     wrote — see the same-session block at the end. */
+
   const RUN = "2026-08-24";
 
-  /* ---- the ordinary comparison ---- */
   {
     const today = [
       row("AAPL", 200, "2026-09-18", "C"),
@@ -2998,13 +2143,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     eq(mark.sessionDate, "2026-08-21", "and so does the session it was published for");
   }
 
-  /* ---- THE FAILURE CASE THIS FIELD EXISTS TO AVOID ----
-
-     A prior payload that could not be read must not make every line today
-     look new. Number(null) is 0 and an empty Set answers `has` with false for
-     everything — both are the same defect wearing different syntax, and this
-     one would publish fifty confident firsts on a morning the store was
-     down. */
   {
     const today = [row("AAPL", 200, "2026-09-18", "C"), row("MSFT", 400, "2026-09-18", "P")];
     const mark = markNewContracts(today, null, RUN);
@@ -3015,7 +2153,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     eq(mark.fresh, null, "and so is the fresh count: zero would be a measurement");
   }
 
-  /* ---- a prior that was read and named nothing is a THIRD answer ---- */
   {
     const today = [row("AAPL", 200, "2026-09-18", "C")];
     const mark = markNewContracts(today, priorBody([]), RUN);
@@ -3026,12 +2163,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     eq(mark.fresh, null, "while fresh stays null, because no comparison was made");
   }
 
-  /* ---- a prior whose rows carry no identifiable key ----
-
-     What a payload written before this field shipped would look like if the
-     row shape ever moved underneath it. Fifty rows in, zero keys out — and
-     marking everything new off that is the same sweep as the unavailable
-     case, arrived at by a different road. */
   {
     const today = [row("AAPL", 200, "2026-09-18", "C")];
     const mark = markNewContracts(today, priorBody([{ symbol: "AAPL260918C00200000" }]), RUN);
@@ -3040,7 +2171,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     eq(today[0].nw, null, "so no row claims to be new off it");
   }
 
-  /* ---- a row TODAY that cannot be identified ---- */
   {
     const today = [row("AAPL", 200, "2026-09-18", "C"), { t: "MSFT", cp: "P" }];
     markNewContracts(today, priorBody([row("AAPL", 200, "2026-09-18", "C")]), RUN);
@@ -3050,32 +2180,15 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "is not \"you are new\"");
   }
 
-  /* ---- the empty feed ---- */
   {
     const mark = markNewContracts([], priorBody([row("AAPL", 200, "2026-09-18", "C")]), RUN);
     eq(mark.status, "ok", "an empty feed still records that the comparison was possible");
     eq(mark.fresh, 0, "and reports zero new contracts, which here is a measurement");
   }
 
-  /* ---- THE RE-RUN, WHICH IS THE OTHER WAY THIS FIELD CAN LIE ----
-
-     The `unusual` key holds whatever the LAST run wrote, not what YESTERDAY's
-     run wrote. On a market holiday, an early close, a manual re-run or a cron
-     that fires twice, the second run reads its own output: every contract is
-     trivially its own incumbent, every `nw` comes back 0, and the page whose
-     entire subject is what is new publishes "nothing is" as though it had
-     been measured. The board's memory has carried this guard since the
-     holiday that produced it; the counter feed shipped without one.
-
-     THE FAILURE IS THE MIRROR OF THE UNAVAILABLE CASE. That one marks
-     everything new off a comparison against nothing; this one marks nothing
-     new off a comparison against itself. Both are confident readings with no
-     yesterday behind them. */
   {
     const today = [row("AAPL", 200, "2026-09-18", "C"), row("MSFT", 400, "2026-09-18", "P")];
-    /* The prior feed carries a DIFFERENT contract from today's, so a run that
-       skipped the guard would mark both rows new — the assertion below cannot
-       pass by the rows happening to match. */
+
     const mark = markNewContracts(today, priorBody([row("NVDA", 900, "2026-09-18", "C")], undefined, RUN), RUN);
     eq(mark.status, "same-session",
        "a stored feed stamped with the session this run is publishing is this run's own " +
@@ -3088,7 +2201,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "while still saying how many the stored feed named: 1 named and nothing claimed is " +
        "legible as a refusal, where a bare null would look like an unreadable store");
 
-    /* AND FROM AHEAD OF THIS RUN, which is a re-run against a stale tape. */
     const ahead = markNewContracts(
       [row("AAPL", 200, "2026-09-18", "C")],
       priorBody([row("NVDA", 900, "2026-09-18", "C")], undefined, "2026-08-25"), RUN);
@@ -3099,12 +2211,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "re-run from a stale tape");
   }
 
-  /* ---- AN UNSTAMPED FEED IS NOT A MATCHING ONE ----
-
-     The opposite mistake, and this file has shipped it too: discarding a real
-     earlier session over a missing stamp reports a cold feed on a morning that
-     had a good yesterday. The comparison is made and the payload says it could
-     not be checked, which is exactly what readBoardMemory does with this gap. */
   {
     const today = [row("AAPL", 200, "2026-09-18", "C"), row("MSFT", 400, "2026-09-18", "P")];
     const mark = markNewContracts(today, priorBody([row("AAPL", 200, "2026-09-18", "C")], undefined, null), RUN);
@@ -3120,14 +2226,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "other side — the check needs both stamps");
   }
 
-  /* ---- THE SENTENCE, WHICH IS THE PART THE PAGE ACTUALLY SHOWS ----
-
-     The four refusals leave the identical mark on the rows — `nw` null
-     everywhere — and `undated` marks the rows while being unable to prove what
-     it compared against. If any two shared a sentence the payload would be
-     publishing one silence where there are several, which is the defect the
-     three-silences rule exists to stop. shared/ is not served to the browser,
-     so the sentence travels on the payload or it does not travel at all. */
   {
     const cases = ["ok", "undated", "same-session", "ahead", "quiet", "unavailable"];
     const notes = cases.map((status) => priorNote(
@@ -3145,35 +2243,17 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     ok(!/\b0 contracts?\b/.test(notes[5]) && /none has ever been published/.test(notes[5]),
        "and the unreadable case names its two causes without printing a count of 0, which " +
        "would be a measurement of a store that answered nothing");
-    /* REFUSAL 1 REACHES THIS PROSE TOO. The vocabulary ban in
-       flows-unusual-contract.mjs scans basis and the coverage strings; this
-       sentence is new and is held to the same words. */
+
     ok(!/\b(print|trade|block|sweep|order|bought|sold|paid|whale)\b/i.test(notes.join(" ")),
        "and none of the six says a word Refusal 1 bans on a page whose subject is a counter");
   }
 }
 
-/* ---------- the board's memory, and whose session it came from ----
-
-   THE DEFECT: the memory is one read of the LIVE `board:<side>` key, which
-   holds whatever the last run wrote. Run the pipeline twice against one
-   session — a market holiday, an early close, a manual re-run, a cron that
-   fires twice — and the second run reads ITS OWN OUTPUT as yesterday. Every
-   name is then trivially its own incumbent, hysteresis holds the board in
-   place, and the run reports `held` for names that were never tested against a
-   prior session. The page then shows a stability manufactured by the re-read,
-   on the one surface whose whole promise is what changed since yesterday.
-
-   Four inputs and four different answers, and the differences ARE the fix: a
-   matching session date must not be treated as a memory, an earlier one must,
-   an unstamped prior board is neither, and a prior board that could not be
-   read has to keep behaving exactly as it did before this shipped. */
 {
   const board = (sessionDate, rows) => ({ v: 4, side: "long", sessionDate, rows });
   const yesterdayRows = [{ t: "AAA", r: 1 }, { t: "BBB", r: 2 }, { t: "CCC", r: 3 }];
   const TODAY = "2026-08-25";
 
-  /* ---- 1. THE RE-RUN: a prior board stamped for the session being published ---- */
   const same = readBoardMemory({ payload: board(TODAY, yesterdayRows) }, TODAY);
   eq(same.status, "same-session",
      "a published board stamped with the session this run is about to write is this run's own " +
@@ -3191,7 +2271,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "and says the board is a cold start and why, which is a fact about the reading and not a " +
      "glitch a reader should discount");
 
-  /* ---- 2. THE ORDINARY MORNING: a prior board from an earlier session ---- */
   const warm = readBoardMemory({ payload: board("2026-08-22", yesterdayRows) }, TODAY);
   eq(warm.status, "ok", "a board stamped for an earlier session IS the memory");
   eq(warm.incumbents, 3, "all three names reach hysteresis");
@@ -3201,12 +2280,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(warm.sessionDate, "2026-08-22",
      "the payload names the session the comparison was made against, so \"new\" has a denominator");
 
-  /* ---- 3. AN OLDER PAYLOAD, CARRYING NO SESSION DATE AT ALL ----
-
-     Not the same as a date that matches, and it must not be coerced into one.
-     Discarding a real membership over a missing stamp would report a cold
-     start on a session that had a perfectly good yesterday — the confident
-     zero, in prose. The memory is used and the payload says it is unverified. */
   const undated = readBoardMemory({ payload: board(undefined, yesterdayRows) }, TODAY);
   eq(undated.status, "undated",
      "a prior board with NO session date is distinguished from one whose date matches");
@@ -3218,15 +2291,11 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(/could not check/.test(undated.note) && /unverified/.test(undated.note),
      "with a sentence that says the check could not be made rather than implying one was");
 
-  /* A STAMP THAT IS NOT A DATE IS NOT A DATE. String(x || "") would have made
-     "" of it, and "" sorts below every real date — reported as an earlier
-     session, which is the answer that keeps the memory. */
   eq(readBoardMemory({ payload: board("yesterday", yesterdayRows) }, TODAY).status, "undated",
      "a sessionDate that is not an ISO date is unusable rather than quietly earlier than today");
   eq(readBoardMemory({ payload: board("", yesterdayRows) }, TODAY).sessionDate, null,
      "and an empty stamp is published as no stamp, never as a session");
 
-  /* ---- 4. NO PRIOR BOARD AT ALL — the path that must not change ---- */
   const absent = readBoardMemory({ payload: null, absent: true, status: 200 }, TODAY);
   eq(absent.status, "unavailable", "a key that was never published leaves the board cold, as it always did");
   eq(absent.rows.length, 0, "with no incumbents");
@@ -3245,39 +2314,23 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      `and the failed read names what the store answered (${failed.note.slice(-60)}), which is the ` +
      "half an operator can act on");
 
-  /* THE THIRD SILENCE: read, and empty. */
   const quiet = readBoardMemory({ payload: board("2026-08-22", []) }, TODAY);
   eq(quiet.status, "quiet", "a board that was read and named no rows is quiet, not unavailable");
   eq(quiet.named, 0, "and its emptiness is a measured 0 where an unreadable board is a null");
   ok(quiet.note !== absent.note && quiet.note !== failed.note,
      "with its own sentence: a session that ranked nothing is not a store that answered nothing");
 
-  /* A PRIOR BOARD FROM A LATER SESSION IS NOT THIS RUN'S YESTERDAY EITHER. It
-     is what a re-run against a stale tape looks like from here, and holding
-     today's names against a board from ahead of them is the same manufactured
-     stability running backwards. */
   const ahead = readBoardMemory({ payload: board("2026-08-26", yesterdayRows) }, TODAY);
   eq(ahead.status, "ahead", "a board stamped for a LATER session is refused and named");
   eq(ahead.incumbents, 0, "its membership does not reach hysteresis");
   ok(ahead.note !== same.note, "and it says which of the two refusals happened");
 
-  /* THIS RUN WITHOUT A SESSION DATE. resolveSessionDate answers null when the
-     vendor sends no usable candle, and the board still publishes. The check
-     cannot be made, so it is reported as not made rather than as passed. */
   const unstamped = readBoardMemory({ payload: board("2026-08-22", yesterdayRows) }, null);
   eq(unstamped.status, "undated", "a run that could not resolve its own session cannot run the check");
   eq(unstamped.incumbents, 3, "so it keeps the memory rather than manufacturing a cold start");
   ok(/This run could not resolve a session date/.test(unstamped.note),
      "and the sentence names which side of the comparison was missing");
 
-  /* ---- IT IS A COMPARISON OF DATES, NOT OF INSTANTS ----
-
-     daysToEarnings carries this lesson in capitals: MEASURED FROM A DATE, NOT
-     FROM AN INSTANT. A fixture that read Date.now() while the gate counted
-     from easternNow().date changed every result across midnight, silently.
-     The guard therefore reads no clock at all — it compares the stamp on the
-     prior payload with the stamp this run is about to write, which is the same
-     origin by construction. */
   {
     const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
     const start = src.indexOf("export function readBoardMemory");
@@ -3291,11 +2344,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "not against easternNow().date — which at 05:15 Eastern is one to three days later");
   }
 
-  /* ---- AND THE EMPTY LIST TRAVELS: the refusal reaches the rows ----
-
-     A guard that stops at the memory object would be decoration. These build
-     the same board twice from one pool: once against a real prior session and
-     once against that session's own output. */
   const mk = (ticker, score) => ({
     ticker, score, residual: score / 100,
     conviction: 50, spot: 100, purity: 0.5, gRegime: "long", flipDist: 0.1,
@@ -3309,20 +2357,12 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   const ORIGIN = "2026-08-25";
   const pool = Array.from({ length: 60 }, (_, i) => mk("W" + String(i).padStart(2, "0"), 100 - i));
 
-  /* The board a first run of this session publishes: no memory anywhere. */
   const first = toRows(pool, screener, [], ORIGIN);
   ok(first.length < pool.length,
      `the fixture pool (${pool.length}) is wider than the board's entry rank (${first.length}), so ` +
      "the hysteresis band is reachable — if the board ever grows past this pool the fixture must " +
      "grow with it or these assertions stop measuring anything");
 
-  /* What that first run published, read back the way the second run reads it:
-     its own rows, its own ranks, and FIVE names that have since slipped just
-     past the entry rank — the ordinary drift hysteresis exists to absorb. Two
-     of today's top names are withheld from it so the warm board still has
-     arrivals to mark; a prior that is a superset of today marks nothing new
-     and would make the nulls below indistinguishable from a builder that never
-     marks anything. */
   const held = 5;
   const arrivals = ["W01", "W02"];
   const priorRows = pool.slice(0, first.length + held)
@@ -3350,12 +2390,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "while the real comparison still answers both ways, which is what makes the null above a " +
      "refusal rather than a builder that never marks anything");
 
-  /* A PRIOR ROW WITH NO RANK IS NOT A ROW AT RANK ZERO. num()'s fallback is 0,
-     so a prior row carrying no `r` — an older payload, an archive row written
-     before ranks were published — came back as rank 0, passed the `!== null`
-     guard written to stop exactly that, and published dr = 0 - rank: a name at
-     rank 1 reported as having fallen one place from a position no board ever
-     put it in. */
   {
     const rankless = toRows(pool.slice(0, 3), screener, [{ t: "W00" }, { t: "W01", r: 9 }], ORIGIN);
     const noRank = rankless.find((r) => r.t === "W00");
@@ -3365,9 +2399,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     eq(rankless.find((r) => r.t === "W01").dr, 7, "and a row that DID publish a rank still moves by it");
   }
 
-  /* THE DRY-RUN FIXTURE'S INTENT, PINNED. The emitted corpus below can only
-     prove the refusal because one side of it is stamped for the run's own
-     session on purpose. */
   eq(fakePriorBoard("short", pool, "2026-08-24").sessionDate, "2026-08-24",
      "the fixture stamps the SHORT side with the run's own session — that is the market-holiday " +
      "re-run, and it is deliberate");
@@ -3376,13 +2407,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "refused one side by side");
 }
 
-/* ---------- the emitted corpus, on the fields this pass added ------
-
-   ITS OWN DRY RUN, in its own directory, and every path built from the
-   emitter's own prefix. The block above this file's summary line already
-   proved why: a path guessed rather than derived, guarded by
-   `if (!fs.existsSync(...)) continue`, is how a whole section of this suite
-   once passed without executing. */
 {
   const prefix = fs.mkdtempSync(path.join(os.tmpdir(), "flows-warn-")) + "/w";
   const run = spawnSync(process.execPath,
@@ -3391,10 +2415,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(run.status, 0, "the dry run exits clean");
   const runLog = run.stdout + run.stderr;
 
-  /* THE EMITTER REPLACES THE FIRST COLON IN A KEY WITH A DASH, so the file
-     name is derived from the listing rather than from a guessed pattern —
-     `board:long:2026-08-24` and `board:long` differ only past that first
-     colon and a naive pattern would read the archive copy for the live one. */
   const dir = path.dirname(prefix);
   const base = path.basename(prefix);
   const emitted = fs.readdirSync(dir);
@@ -3406,14 +2426,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   };
   const read = (key) => JSON.parse(fs.readFileSync(fileFor(key), "utf8"));
 
-  /* ---- the board publishes the clock its own day counts are measured from ----
-
-     `edte` is a count of CALENDAR days from the gate's origin, and `sessionDate`
-     is the last COMPLETED session — one to three days earlier at the hour this
-     job runs. A renderer counting from `sessionDate` would draw the earnings
-     window early and disagree with the gate that spared the row, silently,
-     because both numbers look like day counts. /flows/events/ carries this
-     pair for exactly this reason. */
   for (const side of ["long", "short"]) {
     const board = read("board:" + side);
     ok(/^\d{4}-\d{2}-\d{2}$/.test(String(board.gateOrigin || "")),
@@ -3425,9 +2437,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        `(gateOrigin ${board.gateOrigin}, sessionDate ${board.sessionDate}) — if they were equal ` +
        "the distinction would be untested and a renderer could use either");
 
-    /* THE COUNT IS THE GATE'S OWN ARITHMETIC AGAINST THE PUBLISHED ORIGIN,
-       reproduced here rather than trusted. A published count nobody can
-       recompute is a caption. */
     const dated = board.rows.filter((r) => r.ed !== null);
     ok(dated.length > 0,
        `board:${side} carries earnings dates on ${dated.length} of ${board.rows.length} rows, so ` +
@@ -3440,24 +2449,12 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     ok(board.rows.every((r) => (r.ed === null) === (r.edte === null)),
        `and ${side} publishes the date and the count as a pair — a count with no date is ` +
        "not checkable, which is the lesson /flows/events/ already paid for");
-    /* THE INTERESTING CASE, and evidence that the corpus reaches it: a name
-       that cleared the twelve-day gate and reports inside the ten-session
-       horizon it is ranked over. */
+
     ok(dated.some((r) => r.edte !== null && r.edte > 12 && r.edte <= 21),
        `board:${side} holds at least one name reporting just past the gate — the row this ` +
        "column exists for, and proof the branch is reachable");
   }
 
-  /* ---- the board's memory, and the session it was checked against ----
-
-     THE COLD BRANCH RUNS IN THIS CORPUS RATHER THAN BEING ASSERTED AROUND.
-     readStored answers every dry-run read as absent, so before fakePriorBoard
-     both sides came back "unavailable", every row carried `nw: null`, and a
-     suite over this corpus could certify the no-prior sentence and nothing
-     else. The fixture now stamps `long` with the previous weekday and `short`
-     with THIS run's own session, so one emitted payload carries a memory that
-     was used and the other carries one that was read and REFUSED — and these
-     assertions are over the difference between two real payloads. */
   {
     const long = read("board:long");
     const short = read("board:short");
@@ -3490,9 +2487,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "and no row is held on incumbency, which is exactly what the unguarded re-read was " +
        "manufacturing");
 
-    /* THE PAYLOAD SAYS WHY, because the renderer cannot work it out: all four
-       fields are null in four different situations and shared/ is not served
-       to the browser, so the sentence travels on the payload or not at all. */
     ok(typeof short.memory.note === "string" && short.memory.note.length > 120,
        "the payload carries the reason as a sentence rather than leaving `same-session` to be " +
        "decoded by a renderer that has never seen this file");
@@ -3504,9 +2498,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "the memory travels as a status, two counts and a sentence — never as yesterday's rows, " +
        "which would put a second board inside every board against a 128KB ingest cap");
 
-    /* IN THE LOG TOO. An operator reading a job log has no payload in front of
-       them, and "no comparison" every morning is how a store that has been
-       failing for a week goes unnoticed. */
     ok(/board:long memory: ok — \d+ new, \d+ held on incumbency, of \d+ \(\d+ incumbents? from \d{4}-\d{2}-\d{2}\)/.test(runLog),
        "the warm side reports its counts, its incumbent count and the session they came from");
     const coldLine = /board:short memory: same-session — (.+)/.exec(runLog);
@@ -3518,7 +2509,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "start disagreeing about what happened");
   }
 
-  /* ---- the counter feed's memory ---- */
   {
     const u = read("unusual");
     eq(u.prior.status, "ok",
@@ -3543,12 +2533,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "and the field travels with prose saying what the comparison was");
   }
 
-  /* ---- the pool did not change what a run publishes ----
-
-     At zero vendor calls poolWidth answers "not evidence" and all three
-     pooled legs run one wide, so this asserts the fallback IS the serial loop
-     rather than the pool's behaviour. Reported in the log so the width a live
-     run chose is readable there rather than inferred. */
   ok(/enrichment: 1 name\(s\) in flight/.test(runLog),
      "the enrichment leg reports the width it chose, and on a call-free run that width is 1");
   ok(/chains: \d+ name\(s\), 1 in flight/.test(runLog),
@@ -3560,32 +2544,11 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "and all three name the reason — a run with no calls has measured no refusal rate, which " +
      "is not the same as having measured zero");
 
-  /* ---- the two Worker-only legs still complete when detached ----
-
-     They are started before the vendor stretch and awaited after it, so the
-     one way this change could have gone wrong is a run that exits with the
-     sweep half-issued. The prune's own line is the evidence that it finished. */
   ok(/prune: \d+ dated keys past \d+ days named/.test(runLog),
      "the detached prune completed and reported its sweep before the run ended");
   ok(/record: \d+ retained session\(s\) of \d+ dated key\(s\) probed/.test(runLog),
      "and the detached archive walk was awaited in time for the record to score it");
 
-  /* ---- nothing this pass added pushed a payload at the ingest cap ---- */
-  /* THE BRIEF HAS ITS OWN CEILING, AND RAISING IT WAS A DECISION. The
-     100KB below is the card shedder's target, applied to every payload
-     as a regression guard. The brief now carries five readings for each
-     of the fifty carded names — 430 bytes a fact, 121KB for the whole
-     key on this corpus — and holding it to 100KB would shed nine names
-     every ordinary morning, the bottom of the short board, for a margin
-     the key does not need: its publish is guarded by a shed that
-     measures the exact serialized body against 120KB, so the 128KB
-     ingest cap is unreachable at any morning's card size, and the
-     Worker's parse of it on every question is ~1.7ms + 1ms per 108KB,
-     which 120KB moves by a fifth of a millisecond. Two assertions
-     replace the one: the ceiling, and a tripwire on the run log that
-     fires the first morning the shed drops a name from this corpus, so
-     a card that grows shows up as lost COVERAGE rather than as a byte
-     count nobody reads. */
   for (const name of emitted) {
     const bytes = fs.statSync(path.join(dir, name)).size;
     if (name === "w-brief.json") {
@@ -3614,13 +2577,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   }
 }
 
-/* ---------- the sector OPTIONS lean, unit by unit ----------------
-
-   A DIFFERENT QUANTITY FROM sectorTrix ABOVE, AND THE TESTS SAY SO. That
-   function measures TRIX on daily closes and contains no option data; this
-   one turns two dollar sums into a lean. They cover the same eleven baskets
-   and are published under two keys precisely so a momentum reading and a
-   premium lean can never share a field name. */
 {
   const row = (etf, over) => ({
     ticker: etf, full_name: "Whatever the vendor calls it",
@@ -3632,7 +2588,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   const all = (over = {}) => SECTOR_ETFS.map(({ etf }) => row(etf, over));
   const find = (rows, etf) => sectorLean(rows).find((s) => s.etf === etf);
 
-  /* ---- the derivation, and both units, on one measured row ---- */
   {
     const r = find(all({ bullish_premium: "300", bearish_premium: "100" }), "XLK");
     eq(r.read, "ok", "a sector with both premium sums reads ok");
@@ -3645,12 +2600,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "never share a field name, so both are published and neither is called `lean`");
   }
 
-  /* ---- THE RATIO IS COMPARABLE ACROSS BASKETS AND THE DOLLARS ARE NOT ----
-
-     This is the whole argument for ranking on leanRatio, expressed as an
-     assertion rather than as a comment: a tiny sector leaning hard and a huge
-     sector leaning barely at all. Rank the two on dollars and the huge one
-     wins on size; rank on the ratio and the conviction wins. */
   {
     const rows = all();
     rows[0] = row("XLB", { bullish_premium: "38000", bearish_premium: "2000" });
@@ -3664,9 +2613,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "which is why the payload ranks on leanRatio and publishes the dollars as its SIZE");
   }
 
-  /* ---- THE MEASURED ZERO. Both sums present and both zero is a reading: a
-     sector where nothing traded. It is not the same as a sector we could not
-     read, and the two may not share a sentence. ---- */
   {
     const r = find(all({ bullish_premium: "0", bearish_premium: "0" }), "XLU");
     eq(r.read, "quiet", "both sums zero is QUIET — measured and empty");
@@ -3681,7 +2627,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     ok(/measured and empty/.test(r.reason), "and the row says which silence this is");
   }
 
-  /* ---- ONE SIDE ABSENT IS UNREADABLE, NOT A LEAN OF THE OTHER SIDE ---- */
   {
     const noBear = find(all({ bearish_premium: undefined }), "XLE");
     eq(noBear.read, "unreadable", "a sector missing one premium sum is unreadable");
@@ -3697,15 +2642,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "with a DIFFERENT reason from the one-sided case — two silences, two sentences");
   }
 
-  /* ---- THE VENDOR SENDS QUOTED STRINGS, AND ONE OF THEM IS BLANK ----
-
-     Every premium, price and market-cap column in this schema is typed
-     `string` (docs/uw-openapi.yaml), so the coercion is the normal path, not
-     the edge case. The edge case is a string with nothing in it but spaces:
-     Number("   ") is 0 and finite, so the house num() helper would have
-     manufactured a bullish premium of exactly zero dollars out of a field the
-     vendor left blank, and the row would have published as a confident lean
-     against a bearish sum that was real. vendorNum() trims first. */
   {
     eq(vendorNum("  42 "), 42, "a padded number still reads as a number");
     eq(vendorNum("   "), null,
@@ -3723,7 +2659,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     eq(blank.bullishPremiumUsd, null, "with the blank side null rather than 0");
   }
 
-  /* ---- MATCHED BY TICKER, NOT BY POSITION, AND ALL ELEVEN ALWAYS RETURN ---- */
   {
     const partial = sectorLean({ data: [row("XLK"), row("SPY"), row("XLV")] });
     eq(partial.length, SECTOR_ETFS.length,
@@ -3742,7 +2677,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "attributed the last basket's premium to the first sector");
   }
 
-  /* ---- THE CONTEXT COLUMNS CARRY THEIR UNITS AND REFUSE A FAKE ZERO ---- */
   {
     const r = find(all({ last: "110", prev_close: "100" }), "XLF");
     eq(r.changeRatio, 0.1, "changeRatio is a RATIO, named so, not a percentage or a dollar move");
@@ -3755,7 +2689,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     eq(zeroPrev.prevCloseUsd, 0, "while the measured zero itself is still published");
   }
 
-  /* ---- AND THE TWO SECTOR SHAPERS SHARE NO QUANTITY ---- */
   {
     const lean = Object.keys(find(all(), "XLK"));
     const trix = Object.keys(sectorTrix(new Map())[0]);
@@ -3767,12 +2700,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   }
 }
 
-/* ---------- the news tape: the cap, the clock, and the order -----
-
-   THE CAP AND THE CLOCK ARE THE TWO THINGS A READER CANNOT RECOVER FROM THE
-   ROWS THEMSELVES. A truncated list looks exactly like a short one, and a
-   stale headline looks exactly like a fresh one, so both have to be facts on
-   the payload rather than properties of it. */
 {
   const wire = (n, over = () => ({})) => ({ data: Array.from({ length: n }, (_, i) => ({
     created_at: new Date(Date.UTC(2026, 7, 21, 20, 0, 0) - i * 60000).toISOString(),
@@ -3781,7 +2708,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     ...over(i),
   })) });
 
-  /* ---- A LIST THAT TRUNCATES WITHOUT SAYING SO READS AS A POPULATION ---- */
   {
     const s = shapeNews(wire(100), { cap: 60, requested: 100 });
     eq(s.kept, 60, "the cap binds");
@@ -3802,19 +2728,8 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "rather than of the request");
   }
 
-  /* ---- THE ORDER IS OURS, SO THE CAP KEEPS THE NEWEST AND NOT THE FIRST ----
-
-     The vendor documents this route as "the latest news headlines" and the
-     ordering it applies is its own. A cap applied to an order nobody verified
-     is a cap that can drop the newest rows, so the rows are sorted here and
-     the payload states that they were. */
   {
-    /* OLDEST FIRST ON THE WIRE, deliberately and exactly. `wire()` walks
-       backwards from a fixed instant, so reversing it puts the OLDEST row at
-       index 0 — and a cap applied before the sort would then keep the thirty
-       oldest headlines and publish them as the newest thirty. Nothing here is
-       shuffled at random: a comparator that returns a constant leaves an
-       order the engine chooses, which is not a fixture. */
+
     const oldestFirst = wire(90).data.slice().reverse();
     const s = shapeNews({ data: oldestFirst }, { cap: 30, requested: 100 });
     const ms = s.rows.map((r) => r.createdAtMs);
@@ -3832,7 +2747,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     eq(s.orderedDesc, true, "and the direction");
   }
 
-  /* ---- THE VENDOR'S STAMP IS CARRIED VERBATIM; OURS IS LABELLED AS OURS ---- */
   {
     const s = shapeNews(wire(3), { cap: 60, requested: 100 });
     eq(s.rows[0].createdAt, "2026-08-21T20:00:00.000Z",
@@ -3844,13 +2758,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     eq(s.oldest, "2026-08-21T19:58:00.000Z", "at both ends");
   }
 
-  /* ---- AN UNDATED ROW IS NOT A ROW DATED NOW ----
-
-     created_at is `required` in the vendor's schema and this repository has
-     found that specification wrong six times. A row that cannot say when it
-     happened cannot be placed on a time axis: it sorts last, it is counted,
-     and it is never given a manufactured timestamp. Date.parse("") is NaN and
-     new Date(null) is the EPOCH — both are ways this has been got wrong. */
   {
     const s = shapeNews(wire(4, (i) => (i === 1 ? { created_at: null }
       : i === 2 ? { created_at: "not a timestamp" } : {})), { cap: 60, requested: 100 });
@@ -3865,17 +2772,12 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     eq(s.newest, "2026-08-21T20:00:00.000Z",
        "the window bounds are computed from the datable rows only");
 
-    /* THE TWO COUNTS ANSWER TWO QUESTIONS AND ONE NUMBER CANNOT. Undated rows
-       sort last, so a binding cap sheds them first: `undatedSeen` can be 2
-       while every published row is dated. A single `undated: 2` beside
-       `kept: 60` would read as "2 of the 60 you are holding". */
     const capped = shapeNews(wire(20, (i) => (i > 17 ? { created_at: null } : {})),
       { cap: 10, requested: 100 });
     eq(capped.undatedSeen, 2, "the wire carried two undated rows");
     eq(capped.undatedKept, 0, "and the cap shed both, so none of the published rows is undated");
   }
 
-  /* ---- A ROW WITH NO HEADLINE IS NOT A ROW, AND SAYS SO SEPARATELY ---- */
   {
     const s = shapeNews({ data: [
       { created_at: "2026-08-21T20:00:00.000Z", headline: "Real", source: "Reuters" },
@@ -3888,7 +2790,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     eq(s.status, "ok", "a feed with one good row is ok");
   }
 
-  /* ---- THE THREE SILENCES, WHICH MAY NOT SHARE A SENTENCE ---- */
   {
     const quiet = shapeNews({ data: [] }, { cap: 60, requested: 100 });
     eq(quiet.status, "quiet",
@@ -3904,15 +2805,11 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "the one that means our field names are wrong rather than the market being quiet");
     ok(/none carried a headline/.test(unreadable.reason), "and names what was missing");
 
-    /* The third silence, "pending", is the Worker's to say for a key this
-       pipeline has not written yet — worker.js answers {status:"pending"} on
-       /api/flows/news. It is deliberately not a status this shaper can emit. */
     ok(!["pending"].includes(quiet.status) && !["pending"].includes(unreadable.status),
        "and the shaper never claims `pending`, which is the Worker's word for a key that has " +
        "not been published rather than a fact about the feed");
   }
 
-  /* ---- THE JOIN KEY THAT KEEPS THIS LEG AT ONE CALL ---- */
   {
     const s = shapeNews(wire(3, () => ({ tickers: ["aapl", "AAPL", " msft "] })),
       { cap: 60, requested: 100 });
@@ -3926,7 +2823,6 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
       "tickers rather than a failure to read the field"); checks++;
   }
 
-  /* ---- A FLAG THE VENDOR DID NOT SEND IS NOT FALSE ---- */
   {
     const s = shapeNews(wire(3, (i) => (i === 1 ? { is_major: undefined } : {})),
       { cap: 60, requested: 100 });

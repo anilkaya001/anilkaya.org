@@ -1,13 +1,3 @@
-/* =============================================================
-   markets.js — index list + Yahoo-chart parsing for the live ticker.
-
-   Pure, side-effect-free helpers shared by the Worker (which does the
-   fetching/caching) and the test suite. The browser never imports this; it
-   only ever reads the cached snapshot from same-origin /api/markets.
-   ============================================================= */
-
-// One entry per exchange shown on the landing page. `yahoo` is the chart-API
-// symbol; `currency` is the domestic-currency fallback if the payload omits it.
 export const MARKET_INDICES = Object.freeze([
   { key: "bist100", label: "BIST 100",   city: "İstanbul",  yahoo: "XU100.IS",  currency: "TRY" },
   { key: "ftse100", label: "FTSE 100",   city: "London",    yahoo: "^FTSE",     currency: "GBP" },
@@ -21,10 +11,6 @@ export const MARKET_INDICES = Object.freeze([
 
 const num = (value) => (typeof value === "number" && Number.isFinite(value) ? value : NaN);
 
-// Normalize one Yahoo /v8/finance/chart/<symbol> payload into a compact quote,
-// or null if the shape is missing/unusable. Prefers meta.regularMarketPrice and
-// meta.chartPreviousClose, falling back to the last two valid daily closes so a
-// partial payload still yields a 1-day change.
 export function parseIndexQuote(index, data) {
   const result = data && data.chart && Array.isArray(data.chart.result) ? data.chart.result[0] : null;
   const meta = result && result.meta ? result.meta : null;
@@ -51,8 +37,6 @@ export function parseIndexQuote(index, data) {
   };
 }
 
-// Assemble the snapshot the client consumes. Quotes are ordered to match
-// MARKET_INDICES regardless of fetch-completion order.
 export function buildSnapshot(quotes, now) {
   const byKey = new Map(quotes.filter(Boolean).map((q) => [q.key, q]));
   const ordered = MARKET_INDICES.map((index) => byKey.get(index.key)).filter(Boolean);

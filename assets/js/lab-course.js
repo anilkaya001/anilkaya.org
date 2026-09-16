@@ -1,9 +1,3 @@
-/* =============================================================
-   lab-course.js — staged, horizontal course player.
-   Resolves the course slug, flattens modules→stages, and shows ONE
-   stage at a time: a left module navigator, instructions on the
-   left, the live workspace on the right, Prev/Next (+ arrow keys).
-   ============================================================= */
 (async () => {
   "use strict";
 
@@ -12,8 +6,7 @@
   const slug = location.pathname.split("/").filter(Boolean).pop();
   const queryId = new URLSearchParams(location.search).get("m");
   const meta = (window.TOPIC_META || []).find((item) => item.slug === slug || item.id === queryId);
-  // Query fallback keeps the backing template usable in a plain static preview;
-  // production permanently redirects every legacy ?m= URL to a clean slug.
+
   const topicId = meta && meta.id;
   if (!topicId) {
     root.innerHTML =
@@ -53,7 +46,6 @@
   root.setAttribute("aria-busy", "false");
   document.title = topic.title + " — Econometrics Lab";
 
-  // ---- Flatten modules → stages -------------------------------
   const stages = [];
   topic.modules.forEach((m, mi) => m.stages.forEach((s, si) =>
     stages.push({ ...s, mi, si, mTitle: m.title, mId: m.id, first: si === 0 })));
@@ -78,7 +70,6 @@
     finally { modulePromises.delete(mi); }
   }
 
-  // ---- Progress (on-device) -----------------------------------
   const store = window.IEWTStorage;
   const DEFAULT_POINTS = Object.freeze({
     read: 5, code: 10, interactive: 10, conceptlab: 10, codechallenge: 20, case: 15, match: 15, quiz: 15,
@@ -103,7 +94,7 @@
     else if (window.FX) window.FX.floatPoints(pts, badge);
     if (window.Auth && typeof window.Auth.pushProgress === "function") void window.Auth.pushProgress(topic.id, [...d]);
     if (stages[i].id && window.Auth && typeof window.Auth.pushStableProgress === "function") void window.Auth.pushStableProgress(topic.id, stages[i].id);
-    // Module finished? quiet cheer. Whole topic? big one (also handled at Finish).
+
     const mi = stages[i].mi;
     const modIdxs = stages.map((s, k) => (s.mi === mi ? k : -1)).filter((k) => k >= 0);
     if (window.FX && modIdxs.every((k) => d.has(k))) window.FX.moduleDone(root.querySelector(".course-nav__mod.is-current"));
@@ -120,7 +111,6 @@
   const outcomesHTML = (meta.outcomes || []).map((outcome) => "<li>" + esc(outcome) + "</li>").join("");
   const outlineHTML = topic.modules.map((module) => "<li><b>" + esc(module.title) + "</b><span>" + esc(module.summary || "") + "</span></li>").join("");
 
-  // ---- Shell --------------------------------------------------
   root.innerHTML =
     '<aside class="course-nav" id="cNav"></aside>' +
     '<section class="course-main">' +
@@ -154,7 +144,7 @@
     root.querySelector("#cBar").style.width = percent + "%";
     root.querySelector("#cPctL").textContent = percent + "%";
     root.querySelector("#cProgress").setAttribute("aria-valuenow", String(percent));
-    // refresh nav checkmarks
+
     const done = doneSet();
     navEl.querySelectorAll(".course-nav__mod").forEach((node) => {
       const mi = +node.dataset.mi;
@@ -183,16 +173,14 @@
     paintProgress();
   }
 
-  // ---- Stage renderers ----------------------------------------
   const QUESTION = { quiz: 1, truefalse: 1, multi: 1, numeric: 1, fillblank: 1 };
-  // Each stage's title is an <h2> so the page has a real h1(topic) → h2(stage)
-  // outline that screen-reader users can navigate by heading.
+
   function guideHTML(st) {
     if (st.type === "read") {
       const html = st.html || "";
       return /<h2\b/i.test(html) ? html : '<h2 class="stage__h2">' + esc(st.title || "Lesson") + "</h2>" + html;
     }
-    // prompt-in-guide question types (the blank/expression lives in the work column for fillblank)
+
     if (st.type === "quiz" || st.type === "truefalse" || st.type === "multi" || st.type === "numeric")
       return '<h2 class="stage__h2">' + esc(st.title || "Question") + '</h2><p class="quiz__prompt">' + st.prompt + "</p>";
     if (st.type === "fillblank")
@@ -328,7 +316,7 @@
     let launched = false, running = false, pending = false;
     const render = () => st.template.replace(/\{\{(\w+)\}\}/g, (_, k) => params[k]);
     async function exec() {
-      clearTimeout(schedule._t);   // cancel any pending scheduled run so it can't double-fire
+      clearTimeout(schedule._t);
       running = true;
       const ok = await window.Lab.run(render(), { out, figs });
       running = false;
@@ -340,12 +328,9 @@
     return cell;
   }
 
-  // Normalize a free-text answer the same way for the input and the accept list.
   const normTxt = (s) => String(s).trim().toLowerCase().replace(/\s+/g, " ")
     .replace(/^[\s"'(]+|[\s"'.,;:!?)]+$/g, "").replace(/^the\s+/, "");
 
-  // Parse the entire answer instead of accepting a numeric prefix ("36abc").
-  // A single decimal comma is accepted for learners using that locale.
   function parseNumeric(value) {
     let text = String(value).trim().replace(/\u2212/g, "-").replace(/\s+/g, "");
     if (!text) return null;
@@ -357,7 +342,6 @@
     return Number.isFinite(number) ? number : null;
   }
 
-  // Deterministic grading for every question type. Returns {ok} or {empty:true}.
   function grade(st, root, name) {
     if (st.type === "numeric") {
       const raw = root.querySelector(".q-num").value || "";
@@ -366,8 +350,7 @@
       if (value == null) return { invalid: true };
       const absolute = Number.isFinite(st.tol) && st.tol >= 0 ? st.tol : 0;
       const relative = Number.isFinite(st.rtol) && st.rtol >= 0 ? st.rtol : 0;
-      // Match the daily-review grader: always allow a few float-epsilons so an
-      // exact-but-for-binary-rounding answer isn't marked wrong when tol/rtol=0.
+
       const tolerance = Math.max(absolute, relative * Math.abs(st.answer), Number.EPSILON * Math.max(1, Math.abs(st.answer)) * 8);
       return { ok: Number.isFinite(st.answer) && Math.abs(value - st.answer) <= tolerance };
     }
@@ -382,7 +365,7 @@
       const ans = [...(st.answers || [])].sort((a, b) => a - b);
       return { ok: picked.length === ans.length && picked.every((v, k) => v === ans[k]) };
     }
-    const sel = root.querySelector('input[name="' + name + '"]:checked');   // quiz / truefalse
+    const sel = root.querySelector('input[name="' + name + '"]:checked');
     if (!sel) return { empty: true };
     if (st.type === "truefalse") return { ok: (sel.value === "true") === !!st.answer, sel };
     return { ok: +sel.value === st.answer, sel };
@@ -450,7 +433,6 @@
     return q;
   }
 
-  // ---- Draggable horizontal splitter (persisted, keyboard-operable) ----
   function wireResize(splitEl, handle) {
     const saved = store.guideWidth();
     let lastP = (saved >= 25 && saved <= 72) ? saved : 38;
@@ -472,7 +454,7 @@
       const act = { ArrowLeft: () => set(lastP - 3), ArrowRight: () => set(lastP + 3), Home: () => set(25), End: () => set(72) }[e.key];
       if (!act) return;
       e.preventDefault();
-      e.stopPropagation();   // keep arrows from ALSO triggering stage navigation
+      e.stopPropagation();
       act(); persist();
     });
     let dragging = false, raf = 0, lastX = 0;
@@ -486,23 +468,20 @@
     handle.addEventListener("pointermove", move);
     const endDrag = (e) => {
       dragging = false; handle.classList.remove("drag");
-      persist();   // persist once, not per move
+      persist();
       try { handle.releasePointerCapture(e.pointerId); } catch {}
     };
     handle.addEventListener("pointerup", endDrag);
-    // pointercancel (scroll/gesture takeover) would otherwise leave dragging=true,
-    // so the panel keeps resizing on later moves with no button held.
+
     handle.addEventListener("pointercancel", endDrag);
   }
 
-  // ---- Render one stage ---------------------------------------
   let cur = 0;
   async function render(i) {
     await ensureModule(stages[i].mi);
     cur = i;
     const st = stages[i];
-    // Charts render in the LEFT guide column (under the prompt) so a tall code
-    // cell doesn't push them far down the page.
+
     const figsEl = st.type === "code" ? el("div", "stage__figs")
       : st.type === "interactive" ? el("div", "stage__figs stage__figs--live") : null;
     const work = (st.type !== "read") ? buildWork(st, i, figsEl) : null;
@@ -552,15 +531,15 @@
       return;
     }
     const dir = i >= cur ? 1 : -1;
-    cur = i;   // set NOW — render() runs after the page-turn delay, and rapid
-               // Next/arrow presses must step from the target, not a stale index
+    cur = i;
+
     history.replaceState(null, "", "#s" + i);
     const swap = async () => {
       try { await render(i); }
       catch { if (window.toast) window.toast("This module could not load. Your progress is safe."); return; }
       stageEl.scrollIntoView({ block: "start", behavior: "auto" });
       const h = stageEl.querySelector(".stage__guide h2, .stage__guide h1, .stage__kicker");
-      if (h) { h.setAttribute("tabindex", "-1"); h.focus({ preventScroll: true }); }   // focus follows the turn
+      if (h) { h.setAttribute("tabindex", "-1"); h.focus({ preventScroll: true }); }
     };
     if (window.FX && window.FX.pageTurn) window.FX.pageTurn(stageEl, dir, swap);
     else swap();

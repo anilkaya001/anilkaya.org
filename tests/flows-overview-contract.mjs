@@ -1,78 +1,3 @@
-/* =============================================================
-   flows-overview-contract.mjs — the Session Overview, in a browser.
-
-   THIS IS THE PAGE THE SECTION OPENS ON, and it is now a command center:
-   nine regions drawn from nine endpoints that already existed. The
-   version it replaced fetched both FULL board payloads and rendered six
-   tiles from them — three a side — discarding every other ranked name, and
-   left the level, the flagged windows, the calendar, the watch board and
-   the score moves each on its own route.
-
-   SO THE FIXTURE IS BUILT TO BREAK A TRUNCATED RENDER. The two sides are
-   given FIVE and FOUR names against regions that show ten, so a renderer
-   that quietly caps at three fails here rather than passing with a shorter
-   page. That property is inherited from the version of this file that
-   guarded the three-tile poles, and it is the only reason "the region
-   shows the whole side" means anything.
-
-   THE FIXTURE IS ALSO A QUIET SESSION, which is the ordinary one: 15 of 24
-   scored names land inside the ±20 band and are published on neither side.
-   A reader who cannot see that band reads a short page as a broken page,
-   so the band is drawn — and here, measured.
-
-   AND THE PAGE NOW LEADS ON CHANGE. It answered "what is the LEVEL" — both
-   tails ranked, the band drawn — which is the right page at 16:00 and the
-   wrong one at 09:15, when the reader already knows GOOG is +71 because it
-   was +71 yesterday. So "What changed" is the first region under the verdict
-   bar, spans the whole grid, and ranks CROSSINGS of the dead band above
-   magnitude: a name that left the band became actionable this session and a
-   name that fell back into it stopped being so, and neither is a bigger
-   version of a drift. Every number in it arrives DERIVED, from the change
-   layer on the payload, and this file's fixture is built by the same shaper
-   that publishes it so the two cannot drift apart.
-
-   THREE SILENCES, THREE SENTENCES, and this file asserts all three at once
-   rather than trusting the prose. `events` is never published, so that
-   region is PENDING; `scoretrack` is failed at the network for one load,
-   so "what changed" is UNREADABLE; the short board is emptied at the end,
-   so that region is EMPTY. Only the last of the three is a claim about the
-   market, and the page must not word them alike.
-
-   THE TWO SIDES ARE TWO FETCHES, which is the defect the original file
-   existed for: a pipeline that failed between them puts yesterday's bulls
-   beside today's bears, and both halves render perfectly. Nothing in the
-   payload forces them to agree, so the page has to check.
-
-   AND THE LAST TWO REGIONS EXIST BECAUSE THE DATA DID AND THE PAGE DID NOT
-   ASK. worker.js has served /api/flows/sector-premium and /api/flows/news
-   since the wave that published them, and this page's fetch list — the only
-   place the landing page asks for anything — asked for neither: eleven
-   sector premium leans and sixty headlines, live, paid for and invisible.
-   The sector fixture below is built so the two candidate orderings DISAGREE
-   (a 62% lean on $62K against a 2% lean on $400M), because "ranked on the
-   ratio" is unprovable against a fixture where ranking on dollars produces
-   the same list. The news fixture is built from OFFSETS against the clock
-   rather than from fixed stamps, because a fixed stamp ages with the
-   repository and the age this region exists to state would drift out from
-   under the assertion that reads it.
-
-   AND A BOARD IS NOW FAILED THE WAY A REGION ALREADY WAS. loadBoard threw
-   on any status that was neither 401 nor OK and had no catch for a network
-   failure, so one 500 on one pole rejected the Promise.all and skipped the
-   whole render: seven labelled shells, five of them holding payloads that
-   had come back fine and were parsed and thrown away. Every board this file
-   had ever routed was fulfilled with a valid payload, so the suite passed
-   against the defect and against the fix alike, which is how it arrived.
-
-   THE FIXTURE ALSO BREAKS A CAPPED LIST NOW. The poles were deliberately
-   given five and four names so a renderer that quietly caps at three fails
-   here; the narrow regions were given two watch rows and three alerts, both
-   under the cap of eight, so no phase could reach the truncation at all —
-   and the watch anchor read "all 12" over eight names, which is a false
-   statement in a link to the one route where a reader could count. Twelve
-   watch rows, ten flagged windows, ten calendar rows and fourteen movers
-   are served here for exactly that reason.
-   ============================================================= */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { chromium } from "playwright";
@@ -95,26 +20,6 @@ const post = (key, body) => fetch(url("/api/flows/ingest?key=" + encodeURICompon
 
 const SESSION = "2026-08-24";
 
-/* THE SCORES ARE CHOSEN SO EVERY ORDERING QUESTION HAS ONE ANSWER.
-
-   Bullish  KLA 41, ORCL 88, ADBE 33, DE 57, CAT 26  -> 88, 57, 41, 33, 26
-   Bearish  MU -35, PFE -91, XOM -28, BAC -62        -> -91, -62, -35, -28
-
-   Neither list arrives sorted, and neither is sorted by the SIGNED number
-   in the same direction: the bear side wants the most negative first, so a
-   descending sort — the obvious one, and the one that works on the bull
-   side — puts the LEAST bearish name at the top of the bearish region. That
-   is the mistake this fixture is built to catch, and a fixture already in
-   rank order could not catch it.
-
-   `r` IS THE PUBLISHED RANK and the renderer is required to use it rather
-   than re-derive an order the pipeline already settled. It is stamped here
-   in the correct order on both sides, so a renderer that re-derives with a
-   signed descending sort still fails on the bear side.
-
-   `deep`/`dp` MARK WHICH ROWS HAVE A DETAIL CARD. The board publishes four
-   of the five bulls with one, so CAT is the row that proves a name with no
-   card is not minted into an opener that opens nothing. */
 const bullRows = [
   { t: "KLA", r: 3, s: 41, cnv: 62, px: 812.40, chg: 0.0071, netPrem: 21400000, dp: 1,
     fam: { F: 44, P: 12, D: 30, V: 51, O: 40 } },
@@ -124,7 +29,7 @@ const bullRows = [
     fam: { F: 29, P: 18, D: 21, V: 40, O: 33 } },
   { t: "DE", r: 2, s: 57, cnv: 70, px: 498.02, chg: -0.0035, netPrem: 4100000, dp: 1,
     fam: { F: 33, P: 20, D: 61, V: 44, O: 35 } },
-  /* No `dp`: scored and ranked from the same five sources, no card built. */
+
   { t: "CAT", r: 5, s: 26, cnv: 51, px: 415.88, chg: 0.0012, netPrem: 862000,
     fam: { F: 24, P: 9, D: 14, V: 36, O: 28 } },
 ];
@@ -147,44 +52,6 @@ const board = (side, rows, sessionDate = SESSION, extra = {}) => ({
   ...extra,
 });
 
-/* THE TRACE IS BUILT BY THE SHAPER THAT PUBLISHES IT.
-
-   A hand-written scoretrack was the right fixture while the renderer did its
-   own subtraction. It is the wrong one now: the payload carries the change
-   layer, and a hand-written `d1` is this file's OPINION about what
-   buildScoreTrack emits rather than what it emits. So the fixture states the
-   thing the archive actually holds — sessions of scores — and
-   shared/flows-scores.js derives d1, lastAt, run, ext and change from them.
-   A change to that derivation now reaches this suite instead of passing it.
-
-   THE SESSIONS ARE CHOSEN SO EVERY BRANCH OF THE CHANGE LAYER FIRES ONCE,
-   against the board's ±20 dead band:
-
-     CAT   -30 ->  26  FLIPPED: outside the band at both ends, opposite
-                       signs. The largest move on the page — and the one name
-                       the run built NO detail card for, so a crossing must
-                       still render as plain text rather than be minted into
-                       an opener that opens nothing.
-     NKE    45 ->  18  FADED: out of the band and into it. NKE is the watch
-                       board's first row at 18, so the two payloads agree
-                       about where it ended up.
-     MU    -18 -> -35  CLEARED, ACROSS A GAP of two sessions: the name was
-                       not scored on 2026-08-21 at all, and a renderer that
-                       filters the nulls out before subtracting cannot tell.
-     PFE   -60 -> -91  the largest DRIFT, and larger than two of the three
-                       crossings — so a renderer still ranking on |delta|
-                       heads the region with it and fails here.
-     ORCL   80 ->  88  a small overnight drift, and the only pair carrying a
-                       residual at both ends, so it is the only row that can
-                       print an unsaturated move.
-     DE / ADBE         measured twice, moved zero. Held, which is not moved.
-     BAC   -55 -> -62  moved, and its newest score is on the PRIOR session:
-                       the reading is real and it is not about today.
-     AVGO   62 ->  40  stale AND spanning the board-only backfill session,
-                       which is sparser rather than quieter.
-     KLA    41         one session only: nothing to subtract from.
-     XOM               absent from the trace entirely, which its strip must
-                       say with an em dash rather than a flat line at zero. */
 const TRACK_DAYS = [
   { d: "2026-08-18", source: "boards", rows: [
     { t: "ORCL", s: 74 }, { t: "PFE", s: -55 }, { t: "NKE", s: 50 },
@@ -206,16 +73,11 @@ const TRACK_DAYS = [
   ] },
 ];
 
-/* EVERY NAME COMPARED, NOT ONE OF THEM MOVED. A reading about the session,
-   and the one silence on this region that is a claim about the market. */
 const FLAT_DAYS = ["2026-08-21", SESSION].map((d) => ({
   d, source: "scores",
   rows: [...bullRows, ...bearRows].map((r) => ({ t: r.t, s: r.s })),
 }));
 
-/* TWO SESSIONS THAT SHARE NO NAME. Nothing has two observations, so no
-   change EXISTS to report — which is a fact about the archive and not about
-   a market that stood still, and the two may not share a sentence. */
 const COLD_DAYS = [
   { d: "2026-08-21", source: "scores", rows: [{ t: "ORCL", s: 80 }] },
   { d: SESSION, source: "scores", rows: [{ t: "PFE", s: -91 }] },
@@ -236,23 +98,7 @@ const market = {
 const alerts = {
   v: 2, status: "ok", sessionDate: SESSION, generatedAt: new Date().toISOString(),
   readAt: "2026-08-25T10:28:20.000Z", refreshed: "nightly", seen: 7, cap: 60,
-  /* THE SPAN AND THE SIDE SPLIT, WHICH THE SHAPER HAS ALWAYS PUBLISHED AND
-     THIS FIXTURE DID NOT CARRY. shared/flows-alerts.js writes `spanStart`,
-     `spanEnd`, `askPrem` and `bidPrem` on every row; the table now draws the
-     first two as an Eastern clock and the last two as the vendor's ask/bid
-     attribution. Without them here the two new columns would be asserted as
-     em dashes forever — a column exercised only in its absent state is a
-     column no test has actually read.
 
-     THE OFFSET IS EXPLICIT (-04:00) so the Eastern clock is deterministic:
-     an instant written as UTC would print a different hour depending on
-     where the suite runs, and the whole point of that column is that it
-     names its zone.
-
-     THE THIRD ROW KEEPS ITS SILENCES ON PURPOSE. KLA carries no span and no
-     split, so the table must print the em dash for both on that row while
-     the two above it print figures — which is what proves the columns
-     distinguish an absent reading from a measured one. */
   rows: [
     { t: "ORCL", cp: "C", k: 250, exp: "2026-09-18", prem: 2980960, rule: "RepeatedHits",
       spanStart: "2026-08-24T13:47:00-04:00", spanEnd: "2026-08-24T13:52:00-04:00",
@@ -264,9 +110,6 @@ const alerts = {
   ],
 };
 
-/* The dead-band residents. NONE of them has a detail card — by the deep
-   rule they are the names CLOSEST to neutral — so this region may not mint
-   an opener for any of them. */
 const watch = {
   v: 2, side: "watch", status: "ok", sessionDate: SESSION,
   generatedAt: new Date().toISOString(), deadBand: 20, scored: 24, neutral: 15,
@@ -276,46 +119,16 @@ const watch = {
   ],
 };
 
-/* THE CALENDAR, held rather than written inline at its one call site: a
-   later phase caps it deliberately and has to be able to put this back. It
-   stays UNPUBLISHED until the earnings-join phase posts it, so the regions
-   above still get their live example of the pending silence. */
 const eventsPayload = {
   v: 2, status: "ok", sessionDate: SESSION, generatedAt: new Date().toISOString(),
   windowDays: 21, inWindow: 2, gateOrigin: SESSION,
   rows: [
     { t: "ORCL", d: "2026-08-27", dte: 3, sdte: 3, im: 0.0642, s: 88, st: "ranked" },
-    /* A GATED NAME REACHED THE CALENDAR WITH NO SCORE AT ALL. The board was
-       forbidden from holding an opinion on it, which is not the same as
-       holding a neutral one — so this row must print an em dash and never a
-       confident 0. */
+
     { t: "PFE", d: "2026-09-04", dte: 11, sdte: 8, im: 0.0310, s: null, st: "gated" },
   ],
 };
 
-/* THE MARKET PULSE, AND WHY IT IS PUBLISHED HERE AS OF THIS CHANGE.
-
-   The verdict strip used to read four keys and now reads five: the Premium
-   tile and the Flow bias sparkline are drawn from `pulse.totals`, and the
-   daily flow chart under them draws the same rows. This file called its
-   store "a fully published session" and asserted that no tile wears a
-   silence mark — while never publishing the key two of those readings come
-   from. So the strip was correctly marking an ABSENT key, and the assertion
-   was correctly failing; what was wrong was the fixture's claim to be
-   complete. The renderer is not the thing that changed here.
-
-   SHAPED LIKE THE PUBLISHER'S OUTPUT, FIELD FOR FIELD, because a fixture
-   that invents a shape tests the renderer against a payload nobody serves.
-   `totals` rows are NEWEST FIRST and carry GROSS, non-negative premium;
-   `tide` points are oldest-first and carry NET, signed premium
-   (shared/flows-pulse.js, shapeTotals and shapeTide) — two different
-   quantities under field names that read alike, which is the exact
-   confusion the renderer's own comments were written against, so the
-   fixture keeps both shapes honest rather than reusing one.
-
-   THE NUMBERS ARE DELIBERATE: three sessions, each clearing more call than
-   put premium, so the Flow bias sub-line and the Premium tile both have
-   something to say, and the newest session is the one the tile prints. */
 const pulsePayload = {
   v: 2, status: "ok", sessionDate: SESSION, generatedAt: new Date().toISOString(),
   readAt: new Date().toISOString(), cadenceMinutes: 15,
@@ -347,50 +160,7 @@ await post("board:watch", watch);
 await post("market", market);
 await post("flowalerts", alerts);
 await post("scoretrack", scoretrack(TRACK_DAYS));
-/* `events` IS DELIBERATELY NEVER PUBLISHED. The worker answers an
-   unpublished key with {status:"pending"}, which is the silence this file
-   needs a live example of — an endpoint that has not spoken is not an
-   endpoint that measured nothing. */
 
-/* ---------- one shape for a verdict tile, because four had drifted ----
-
-   THIS FILE READ THE VERDICT STRIP IN FOUR PLACES, and each place listed
-   the fields it happened to need on the day it was written. Three were
-   object-shaped and nearly identical, so every slot the strip grew had to
-   be added to each of them by hand — and was not. That cost three separate
-   CI failures in one wave, each with the same signature: a projection that
-   could not see a slot, failing against a page that was drawing that slot
-   correctly. A contract which reports a working page as broken is the most
-   expensive kind of wrong one can be, because the next move it provokes is
-   an edit to the page.
-
-   SO THE SHAPE IS DEFINED ONCE, HERE, AND SHIPPED INTO THE PAGE AS SOURCE.
-   `page.evaluate` cannot take a function as an argument, so this crosses as
-   its own `toString()`, pasted into the expression each reader evaluates. It
-   closes over nothing from this module, which is what makes that legal — and
-   if it ever does, the page throws a ReferenceError on the first call rather
-   than quietly handing back an object one field short.
-
-   IT COLLECTS EVERY SLOT THE TILE HAS, not the union of what today's
-   readers ask for. A projection sized to its callers is precisely the thing
-   that drifted; one sized to the ELEMENT cannot, because the next slot is
-   added here and every reader has it the same hour. Two consequences worth
-   stating: `.cc-tile-q` is a reading MOVED into another tile's sub-line —
-   the equal-weight tilt lives there since the strip went to five — and it
-   carries its own silence and its own sign, because the demotion cost that
-   tilt its tile and was not allowed to cost it either of those. And it is
-   its own element, never the tile's silence span: reading both off one
-   selector is how the two get conflated, and on a failed key both are
-   present.
-
-   THE COMPUTED STYLE IS READ FOR EVERY TILE, not only in the block that
-   asserts the silence marks. Five tiles, once per load, against a field
-   that cannot then be missing from a reader that needs it.
-
-   WHAT THIS DOES NOT REPLACE: the four single-tile reads further down that
-   `.find` one label and take `v` and `s` off it. Those name the two fields
-   they want, so a slot that vanishes throws there instead of arriving as
-   `undefined` — a loud failure, and a different defect from the one above. */
 function tileShape(t) {
   const val = t.querySelector(".cc-tile-v");
   const sub = t.querySelector(".cc-tile-s");
@@ -405,27 +175,13 @@ function tileShape(t) {
     q: q ? q.textContent.trim() : "",
     subKind: q ? q.dataset.empty || null : null,
     subCls: q ? q.className : "",
-    /* SHAPE AND GLYPH, NEVER HUE. The four silences are told apart by the
-       border and the ::before glyph, so a reader who cannot see colour tells
-       them apart too — and that is what the mark assertions compare. */
+
     mark: cs.borderLeftStyle + " " + cs.borderLeftWidth + " " +
       (sub ? getComputedStyle(sub, "::before").content : "none"),
   };
 }
 const TILE_SHAPE = tileShape.toString();
 
-/* THE TWO READINGS OF THE STRIP every block below takes: a list in drawing
-   order, and the same objects keyed by their label. Both are built from the
-   one shape above, so neither can know a field the other does not.
-
-   THE SHAPE IS PASTED INTO AN EXPRESSION, NOT REBUILT BY `new Function`.
-   Both get the source across; only one of them runs eval INSIDE the page,
-   where the served Content-Security-Policy decides whether that is allowed.
-   It is today — worker.js lists `unsafe-eval` in script-src — but a contract
-   that fails the moment someone tightens that header is a contract holding
-   the header hostage, and it would fail as a page defect rather than as what
-   it is. A string handed to `page.evaluate` is evaluated by the driver
-   instead, so this file asserts nothing about the CSP by accident. */
 const tileList = (pg) => pg.evaluate(
   `Array.from(document.querySelectorAll("#ccVerdict .cc-tile"), ${TILE_SHAPE})`);
 
@@ -438,9 +194,7 @@ const browser = await chromium.launch();
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
   const errors = [];
-  /* One phase below fails an endpoint on purpose, and Chromium logs a
-     failed fetch to the console as an error. That message is the POINT of
-     that phase, so it is ignored only while the flag is up. */
+
   let allowFetchFailure = false;
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => {
@@ -459,20 +213,13 @@ try {
   ]);
   await page.waitForSelector(".cc-bull tbody tr", { timeout: 15000 });
 
-  // Progressive disclosure preserves the population while reducing the first read.
   ok(await page.locator(".cc-change-summary").isVisible(), "change counts are visible");
   eq(await page.locator(".cc-change-detail").getAttribute("open"), null, "audit detail starts folded");
   await page.locator(".cc-change-detail summary").click();
   ok(await page.locator(".cc-lede").isVisible(), "scope opens with a native keyboard-accessible disclosure");
   await page.locator(".cc-change-detail summary").click();
   eq(await page.locator(".cc-score-scale").count(), 9, "each measured candidate score has a signed scale");
-  /* EVERY JUMP LINK RESOLVES, WHICH IS THE PROPERTY — not that there are six
-     of them. The count was restated here and went stale the moment the page
-     grew a region: it failed at 8 !== 6 on a change that ADDED two working
-     links, which is the shape of failure this repository keeps finding in its
-     own comments. What can actually break is a heading id renamed out from
-     under an anchor, leaving a jump that scrolls nowhere, and a count has
-     never been able to catch that. */
+
   {
     const jumps = await page.$$eval(".cc-jump a", (as) => as.map((a) => a.getAttribute("href")));
     ok(jumps.length >= 6,
@@ -483,20 +230,10 @@ try {
        `and every jump resolves to a section on the page (dead: ${dead.join(", ")})`);
   }
 
-  /* ---------- the verdict bar ------------------------------------ */
   {
-    /* FIVE READINGS ACROSS FOUR PAYLOADS, on one line, before anything else.
-       The page it replaced could not state the session's level at all: the
-       board score is a cross-sectional residual, so whether the tape was
-       bought or sold had been neutralised out of every number on it. */
-    const tiles = await tileList(page);
-    /* FIVE, AND THE TWO THAT LEFT WERE NOT READINGS.
 
-       This strip's only use is comparing one tile to the next, and `Session`
-       is a date while `Screened` is a population — neither could be compared
-       to anything on it. Both are drawn above the strip now, by paintMeta,
-       where a reader looks to answer "is this today" before reading a figure;
-       they are asserted there, below, rather than dropped. */
+    const tiles = await tileList(page);
+
     eq(tiles.length, 5, "the verdict bar states five readings");
     const by = Object.fromEntries(tiles.map((t) => [t.k, t]));
 
@@ -508,99 +245,44 @@ try {
     ok((await page.locator("#ccMetaScreened").textContent()).includes("264"),
        "and how many names were screened, from the market payload");
 
-    /* TWO TILTS, BECAUSE THE PAYLOAD PUBLISHES TWO AND REFUSES TO CHOOSE
-       BETWEEN THEM. breadth.tilt counts names and premium.tilt weights
-       dollars; shared/flows-market.js says publishing both is what removes
-       the weighting choice instead of burying it. This bar used to print ONE
-       of them under the bare label "Tilt", so on a day the two part company
-       the landing page showed the opposite sign to /flows/market/ over the
-       same payload — and it printed a bounded ratio to four decimals with no
-       unit at all. U+2212, not a hyphen, in both. */
-    /* THE STRIP IS FIVE TILES NOW, ON AN EXPLICIT DESIGN DIRECTIVE, and the
-       dollar tilt is the one that keeps a tile. The equal-weight tilt is
-       still printed — demoted to that tile's sub-line, not deleted — so both
-       weightings still reach the reader on one screen. */
     eq(by["Flow bias"]?.v, "−2.1%",
        "the dollar-weight tilt is a share of premium, with its unit");
     ok(/−1\.4%/.test(by["Flow bias"]?.q || ""),
        `and the equal-weight tilt is printed beneath it rather than dropped (${by["Flow bias"]?.q})`);
-    /* AND NO TILE GLOSSES ITSELF WHILE ITS NUMBER IS REAL.
 
-       Five tiles each carrying a line of definition underneath is a
-       paragraph wearing a strip's clothes, and the strip is the one element
-       on this page meant to be taken in at a glance. The denominators those
-       two lines stated are not lost: breadth.tilt's and premium.tilt's are
-       stated where /flows/market/ draws them, which is where a reader is
-       standing when the difference between the two weightings can change a
-       reading. Asserted over EVERY tile, not just the two that prompted it,
-       so a definition cannot creep back one tile at a time. */
-    /* THE RULE IS ABOUT DEFINITIONS, AND IT STANDS. What it forbade was a
-       tile GLOSSING itself — a line of prose under a live number, five of
-       which turn a strip meant to be read at a glance into a paragraph. What
-       sits under these tiles now is not a gloss: it is a second READING, with
-       its own figure, its own sign and its own silence. So the assertion
-       narrows from "no sub-line" to "no sub-line that is prose": every sub
-       under a live value must carry a digit. */
     const glosses = tiles.filter((t) => t.q && !/\d/.test(t.q));
     eq(glosses.length, 0,
        `no tile explains itself in prose while its value is a measurement (${
          glosses.map((t) => t.k + ": " + t.q).join(" | ")})`);
-    /* BOTH STILL CARRY THEIR OWN SIGN, one on the value and one on the sub —
-       the demotion cost the equal-weight tilt its tile, and it was not
-       allowed to cost it its tone. */
+
     ok(/is-neg/.test(by["Flow bias"]?.cls || "") &&
        /is-neg/.test(by["Flow bias"]?.subCls || ""),
        `and a sold tape is toned as one on both (${by["Flow bias"]?.cls} / ${by["Flow bias"]?.subCls})`);
-    /* AND THE VALUE READS IN ONE DIRECTION. "9 / 12" needed a line
-       underneath saying "bull / bear" and could be divided the wrong way
-       round by anyone who did not read it; the words are inside the value
-       now, which is both shorter on the page and impossible to misorder. */
+
     eq(by.Breadth?.v, "9 bull / 12 bear",
        "breadth names its two sides inside the value, so it needs nothing underneath");
-    /* THE POOL, NOT THE ROWS. Neither fixture board publishes `cleared`, so
-       here the pool IS the row count and the two readings agree; the pooled
-       phase below is where they part and the tile has to follow the rail. */
+
     eq(by.Cleared?.v, "5 bull / 4 bear",
        "and both boards are counted whole, not to the region cap");
     ok(!("Both sides" in by), "and the old row-count tile is gone rather than kept beside it");
     eq(by["Flagged windows"]?.v, "7", "the vendor's flagged-window count");
-    /* WHEN IT WAS READ IS NOW ON THE REGION SUBTITLE, not under the tile —
-       asserted on #ccAlertsSub in the ceiling block below, beside the rows it
-       is about. The number still means nothing without it; it is simply said
-       once, where a reader is standing when it matters. */
-    /* A TILE WITH A READING CARRIES NO SILENCE MARK. The four kinds are
-       asserted one by one further down; here every tile holds a number. */
+
     eq(await page.locator("#ccVerdict .cc-tile[data-empty]").count(), 0,
        "and no tile on a fully published session wears a silence mark");
   }
 
-  /* ---------- both sides, whole ---------------------------------- */
   {
-    /* The board used to hide half the session behind a LONG/SHORT toggle,
-       and then behind a three-tile cap. A session leans in two directions
-       and a reader comparing them should not have to remember the other. */
-    /* THE NAME NODE, NOT THE WHOLE CELL. The cell now also carries the
-       crossing tag and the earnings marker, which are facts ABOUT the name
-       and not part of it — reading the cell whole would make this assertion
-       fail the moment either one fires, which is exactly what it did. */
+
     const bull = (await page.locator(".cc-bull tbody .cc-t > :first-child").allTextContents()).map((s) => s.trim());
     const bear = (await page.locator(".cc-bear tbody .cc-t > :first-child").allTextContents()).map((s) => s.trim());
     ok(bull.length > 0 && bear.length > 0, "both sides are populated from one page load");
 
-    /* FIVE AND FOUR. The regions show ten; a renderer truncated to three
-       would still satisfy "both sides render", so the counts are the
-       assertion that has teeth. */
     deep(bull, ["ORCL", "DE", "KLA", "ADBE", "CAT"],
       "the bullish region shows the whole side in the payload's published rank order");
-    /* THE ASYMMETRY. A descending sort on the signed score gets the bull
-       side right and the bear side exactly backwards: -35 > -91, so MU
-       would head a region labelled Bearish while being the least bearish
-       name on it. */
+
     deep(bear, ["PFE", "BAC", "MU", "XOM"],
       "and the bearish region leads with the most bearish name, not the largest number");
 
-    /* A BEAR LEAN READS BEARISH. The score column is the ranked signal and
-       carries its own sign in the glyph before any hue is applied. */
     const bearScores = await page.evaluate(() => Array.from(
       document.querySelectorAll(".cc-bear tbody .cc-score"),
       (c) => ({ text: c.textContent.trim(), neg: c.classList.contains("is-neg") })));
@@ -611,7 +293,6 @@ try {
     ok(bullScores.every((s) => s.trim().startsWith("+")),
        "while every bull row reads bullish");
 
-    /* The other columns are the ones the six tiles had no room for. */
     const orcl = await page.evaluate(() => {
       const rows = Array.from(document.querySelectorAll(".cc-bull tbody tr"));
       const row = rows.find((r) => r.querySelector(".cc-t > :first-child")?.textContent.trim() === "ORCL");
@@ -621,16 +302,8 @@ try {
       "a row carries rank, score, conviction, session change and net premium");
   }
 
-  /* ---------- two changes, twelve pixels apart, two units -------- */
   {
-    /* THE COLLISION IS NEW AND IT ARRIVED WITH THE REDESIGN. This table's
-       change column is a session PRICE return — close over the prior close —
-       and the region now seated directly above it carries a column of SCORE
-       moves, in score points. The ranked header was the bare word "Chg" with
-       no unit and no title, on a page whose whole argument is that a delta
-       means nothing without them. headRow's own contract says a column
-       header carries the UNIT of a numeric column; this one carried
-       neither. */
+
     const heads = await page.evaluate(() => Array.from(
       document.querySelectorAll(".cc-bull table thead th"),
       (th) => ({ text: th.textContent.trim(), title: th.getAttribute("title") })));
@@ -643,21 +316,14 @@ try {
     ok(/score/i.test(px.title || ""),
        `and naming the other change on the same screen, so the two cannot be read as one (${px.title})`);
 
-    /* THE OTHER ONE, FOR CONTRAST. It was already spelled in full and its
-       title is the publisher's own prose rather than a caption written in
-       the renderer. */
     const chg = await page.evaluate(() => Array.from(
       document.querySelectorAll("#ccChg table thead th"), (th) => th.textContent.trim()));
     ok(chg.includes("\u0394 score"),
        `the lead region's move column is in score points and says so (${chg.join(" | ")})`);
   }
 
-  /* ---------- the ticker is a link to the reader ------------------ */
   {
-    /* THE ROUND TRIP, AND WHY IT ENDS HERE. Every name was <a href="?t=SYM">,
-       an address that reloaded this whole page to draw a modal over it; it
-       became a <button data-t> that flows-card.js turned into that modal in
-       place, giving up the address. The modal is retired. */
+
     const shape = await page.evaluate(() => {
       const el = document.querySelector(".cc-bull tbody .cc-t > *");
       return { tag: el.tagName, type: el.getAttribute("type"), t: el.dataset.t,
@@ -672,28 +338,15 @@ try {
     eq(shape.pop, null,
        "nor aria-haspopup=dialog, which would announce a modal that no longer exists");
 
-    /* THE DIALOG IS NOT ON THE PAGE AT ALL: the anchor assertion alone would
-       pass on a page still emitting it and 166 KiB of library beside it. */
     eq(await page.locator("#flowsCard").count(), 0,
        "and the card dialog is gone from the document rather than merely unreachable");
 
-    /* A ROW WITH NO CARD IS NOT AN OPENER. The card costs vendor calls the
-       run spends only on the names furthest from neutral, and this board
-       publishes `deep` with `dp` on four rows of five. What keeps the fifth
-       from being followable is now the ELEMENT: it is a <span>, so there is
-       no href to follow and nothing to delegate to either — the click
-       delegation that `data-t` used to feed went with assets/js/flows-card.js
-       in this same change. */
     const cat = await page.evaluate(() => {
       const rows = Array.from(document.querySelectorAll(".cc-bull tbody tr"));
       const row = rows.find((r) => r.querySelector(".cc-t > :first-child")?.textContent.trim() === "CAT");
       const el = row.querySelector(".cc-t > *");
       return { tag: el.tagName, t: el.dataset.t || null,
-               /* READ, so the sentence below is checked rather than asserted.
-                  This probe used to return no href at all while its assertion
-                  said "and no href either" — an instrument that agrees with
-                  every outcome, which is the defect flows-legacy-payload.mjs
-                  spends a paragraph on. */
+
                href: el.getAttribute("href"), title: el.getAttribute("title") };
     });
     eq(cat.tag, "SPAN", "a row the run built no card for renders as plain text");
@@ -701,13 +354,10 @@ try {
     eq(cat.href, null, "and no href either — there is nothing to open");
     ok(/No detail card/.test(cat.title || ""),
        `and it says why rather than looking broken (${cat.title})`);
-    /* SCOPED TO THE TWO RANKED REGIONS. The lead region mints openers for
-       the same rule over its own rows, so a page-wide count would be
-       counting two regions and asserting about one. */
+
     eq(await page.locator(".cc-bull .cc-open, .cc-bear .cc-open").count(), 8,
        "so eight of the nine published names link to a reader and the ninth says why");
-    /* EVERY ONE: a sampled href cannot see a loop that mints one right
-       address and stale ones after it. */
+
     const hrefs = await page.evaluate(() => Array.from(
       document.querySelectorAll(".cc-bull .cc-open, .cc-bear .cc-open"),
       (a) => [a.textContent.trim(), a.getAttribute("href")]));
@@ -716,10 +366,6 @@ try {
          `${name}: links to its own name on the reader (${href})`);
     }
 
-    /* AND IT REALLY NAVIGATES: a window marker survives a modal and does not
-       survive a document load, which is the difference this change is about.
-       Back returns to the board, the gesture that used to close the dialog
-       doing what it was standing in for. */
     await page.evaluate(() => { window.__noReload = true; });
     await Promise.all([
       page.waitForNavigation({ timeout: 10000 }),
@@ -733,10 +379,8 @@ try {
     await page.waitForSelector(".cc-bull tbody .cc-open", { timeout: 10000 });
   }
 
-  /* ---------- a score strip per row ------------------------------ */
   {
-    /* THE ONE THING SIX TILES COULD NEVER SHOW: whether a name arrived at
-       this score this morning or has been sitting on it for a month. */
+
     const strips = await page.evaluate(() => {
       const read = (sel) => Array.from(document.querySelectorAll(sel), (td) => {
         const svg = td.querySelector("svg");
@@ -755,19 +399,11 @@ try {
       ok(s.drawn, `${s.t} draws its trace beside its score`);
       ok(s.zero, `and against an always-drawn zero rule (${s.t})`);
     }
-    /* AN ABSENCE IS AN EM DASH, NOT A FLAT LINE AT ZERO. XOM is in the
-       board and not in the trace, and a strip drawn at zero for it would
-       be a measurement this page never made. */
+
     const xom = strips.bear.find((s) => s.t === "XOM");
     ok(xom && !xom.drawn && xom.text === "—",
        `a name with no trace says so with an em dash (${xom && xom.text})`);
 
-    /* ONE SHARED DOMAIN ACROSS BOTH SIDES. Left to itself every strip
-       rescales to its own extremes and a name drifting ±2 draws the same
-       picture as one swinging ±40, so a bull strip and a bear strip could
-       not be read against each other at all. ORCL rises 80->88 and PFE
-       falls -60->-91 on the same scale: PFE's whole trace must therefore
-       sit BELOW ORCL's, which no per-series scale would produce. */
     const ends = await page.evaluate(() => {
       const y = (side, name) => {
         const row = Array.from(document.querySelectorAll(`${side} tbody tr`))
@@ -783,14 +419,8 @@ try {
        `ORCL ${ends.orcl.max.toFixed(1)}; y grows downward)`);
   }
 
-  /* ---------- the lead region: what changed ---------------------- */
   {
-    /* THE PAGE NOW LEADS ON CHANGE. Every surface in this section reports a
-       LEVEL; at 09:15 the reader already knows GOOG is +71 because it was
-       +71 yesterday. What they do not know is which four names crossed. So
-       this region is first under the verdict bar and spans the whole grid,
-       rather than being two of twelve columns holding a three-item list
-       BELOW both ranked tables. */
+
     const seat = await page.evaluate(() => {
       const region = document.getElementById("ccChg").closest(".cc-region");
       const grid = region.parentNode;
@@ -808,11 +438,6 @@ try {
     ok(Math.abs(seat.width - seat.gridWidth) <= 2,
        `and spans the whole twelve-column grid (${seat.width} of ${seat.gridWidth})`);
 
-    /* THE DENOMINATOR IS PUBLISHED WITH THE MOVES. "Eight names moved" is
-       not a reading: eight of twelve is a session that turned and eight of
-       four hundred is a Tuesday. The change layer counts the whole pool
-       BEFORE the payload's size cap sheds rows, so this paragraph states a
-       population no renderer counting its own visible rows could reach. */
     const lede = (await page.locator("#ccChg .cc-lede").textContent()).trim();
     ok(/7 of 9 names/.test(lede),
        `the region states how many moved out of how many were comparable (${lede})`);
@@ -828,12 +453,6 @@ try {
       document.querySelectorAll("#ccChg tbody tr"),
       (tr) => Array.from(tr.children, (td) => td.textContent.trim())));
 
-    /* CROSSINGS OUTRANK MAGNITUDE. PFE's −31 is larger than two of the three
-       crossings and it still sorts below all of them, because a change of
-       CATEGORY is not a bigger version of a change of degree: inside the
-       band a name reaches no board at all. A renderer ranking on |delta| —
-       which is what this file used to assert — heads the list with PFE and
-       fails here. */
     deep(rows.map((r) => r[1]), ["CAT", "NKE", "MU", "PFE", "ORCL", "AVGO", "BAC"],
       "crossings lead, then fresh drift by size, then the readings that are not about today");
 
@@ -841,15 +460,6 @@ try {
                    "this session"],
       "each row names the event, the move, the span it took, where it landed and how old the opinion is");
 
-    /* THE GAP TRAVELS WITH THE DELTA, ALWAYS. MU was not scored on
-       2026-08-21 at all: its −17 spans two sessions and PFE's −31 spans one,
-       and the integers alone cannot be told apart. Filtering the nulls out
-       before subtracting — which is what this page used to do — discards
-       exactly this. */
-    /* AND THE COLUMN HEADERS SAY WHICH SESSION EACH NUMBER IS ABOUT. The
-       score column used to be headed "Now", which on the rows this region
-       deliberately keeps — readings that are real and are not about today —
-       contradicted the "As of" cell two columns along. */
     const heads = await page.evaluate(() => Array.from(
       document.querySelectorAll("#ccChg thead th"), (th) => th.textContent.trim()));
     deep(heads, ["Event", "Name", "Δ score", "Over", "Ended at", "Δ resid ×10⁴",
@@ -864,24 +474,12 @@ try {
     eq(by.NKE[0], "faded · window low",
        "and the exit signal is worded as its own event, not as a smaller entry");
 
-    /* A BOARD-ONLY SESSION IS SPARSER, NOT QUIETER: those columns were
-       reconstructed from archived boards, which hold only the names that
-       made a board that day. A comparison that spans one is not a
-       comparison across a full pool and says so. */
     eq(by.AVGO[3], "2 sessions · board-only",
        "a comparison spanning the backfill is marked rather than presented as adjacency");
 
-    /* THE SCORE SATURATES AND THE RESIDUAL DOES NOT. Only ORCL carried a
-       residual at both ends, so it is the only row that can print the move
-       in units that do not compress — and an absent residual is an em dash,
-       never a zero. */
     eq(by.ORCL[5], "+630", "a move is also given in residual units where both ends carried one");
     eq(by.PFE[5], "—", "and absent where either end did not, which is not a zero");
 
-    /* STALE MEANS REAL, BUT NOT ABOUT TODAY. BAC's newest score is on the
-       PRIOR session, so its −7 happened before this morning. A page that
-       leads on change owes that before it owes the magnitude, and both such
-       rows sort below every reading that is about this session. */
     eq(by.BAC[7], "2026-08-21 · 1 session back",
        "a name not scored in the newest session says which session it was last scored on");
     eq(by.ORCL[7], "this session", "and one that was says so");
@@ -893,10 +491,6 @@ try {
     ok(!rows.some((r) => r[1] === "KLA"),
        "and a name with one scored session has nothing to subtract from");
 
-    /* THE NAMES LINK. These are the same deep board rows that are rendered
-       as links in the ranked region twelve lines below, and this region used
-       to emit a plain <span> for every one of them — so the region leading
-       the page was the only dead text on it. */
     const cells = await page.evaluate(() => {
       const out = {};
       for (const tr of document.querySelectorAll("#ccChg tbody tr")) {
@@ -911,22 +505,14 @@ try {
     eq(cells.ORCL?.tag, "A", "a changed name with a card links to its reader");
     eq(cells.ORCL?.href, "/flows/ticker/?t=ORCL&s=signal&from=overview",
        `at the address the ranked region uses for the same name (${cells.ORCL?.href})`);
-    /* CAT crossed the band AND has no detail card. A crossing does not mint
-       a link to a reader with nothing to read. */
+
     eq(cells.CAT?.tag, "SPAN", "a crossing with no card is still plain text");
     eq(cells.CAT?.href, null, "with no href, so there is nothing to follow");
     ok(/No detail card/.test(cells.CAT?.title || ""),
        `and it says why rather than looking broken (${cells.CAT?.title})`);
-    /* AVGO is in the trace and on neither board, so no card exists for it
-       and none is claimed. */
+
     eq(cells.AVGO?.tag, "SPAN", "and a name on no board opens nothing either");
 
-    /* THE CROSSING IS ALSO ON THE RANKED ROW, which is where a reader
-       working down the list actually is. Without it the ten ranked opinions
-       are indistinguishable in age: a name that cleared the band this
-       morning and one that has sat outside it for a month print the same
-       row. The tag is a WORD, so it survives greyscale, and it carries the
-       payload's own prose as its title. */
     const tags = await page.evaluate(() => {
       const out = {};
       for (const td of document.querySelectorAll(".cc-bull tbody .cc-t, .cc-bear tbody .cc-t")) {
@@ -941,8 +527,6 @@ try {
     eq(tags.PFE, null, "while the largest drift on the page carries no crossing tag");
     eq(tags.DE, null, "and neither does a name that has not moved at all");
 
-    /* AND IT REALLY GOES SOMEWHERE, which is the proof these names are live
-       rather than merely link-shaped. */
     await Promise.all([
       page.waitForNavigation({ timeout: 10000 }),
       page.locator("#ccChg .cc-open").filter({ hasText: "MU" }).first().click(),
@@ -953,13 +537,8 @@ try {
     await page.waitForSelector("#ccChg .cc-open", { timeout: 10000 });
   }
 
-  /* ---------- the three silences, side by side ------------------- */
   {
-    /* An unpublished key, a request that failed, and a measured emptiness
-       are three different facts, and only the third says anything about
-       the market. This is the whole reason FlowsUI.emptyState takes a
-       `kind`: a test can tell them apart without parsing prose, and the
-       page still owes the distinction in words. */
+
     const pending = await page.evaluate(() => {
       const p = document.querySelector("#ccEvents [data-empty]");
       return p && { kind: p.dataset.empty, text: p.textContent.trim() };
@@ -971,28 +550,16 @@ try {
     ok(!/No name/.test(pending.text),
        "and it makes no claim about what the calendar holds, because it has not seen it");
 
-    /* Populated regions, for contrast: neither of these is a silence. */
     eq(await page.locator("#ccAlerts tbody tr").count(), 3,
        "the flagged-window region draws the vendor's rows");
     const alert = await page.locator("#ccAlerts tbody tr").first()
       .locator("td").allTextContents();
-    /* SIX COLUMNS NOW, AND THE TWO NEW ONES ARE THE POINT OF THE CHANGE. A
-       reader could see that $3.0M was flagged on ORCL and not WHEN inside the
-       session nor which side of the quote the vendor attributed it to — both
-       of which every row has carried since the feed shipped.
 
-       13:47 IS EASTERN, WHICH IS WHY THE FIXTURE WRITES ITS OFFSET. "ask 75%"
-       is 2,235,720 of 2,980,960 — the vendor's attribution as a share of the
-       two sides, which is the only reading either figure supports alone. */
     deep(alert.map((s) => s.trim()),
       ["13:47", "ORCL", "C 250 09-18", "$3.0M", "ask 75%", "RepeatedHits"],
       "each flagged window names when it opened, the contract, the premium, which side " +
       "of the quote the vendor attributed it to, and the rule that fired");
 
-    /* AND A ROW WITH NEITHER PRINTS NEITHER. KLA carries no span and no
-       split, so both columns are the em dash on that row while the row above
-       prints figures — an absent reading and a measured one are told apart in
-       the same column. */
     const quietAlert = await page.locator("#ccAlerts tbody tr").nth(2)
       .locator("td").allTextContents();
     deep([quietAlert[0].trim(), quietAlert[4].trim()], ["\u2014", "\u2014"],
@@ -1001,36 +568,10 @@ try {
 
     eq(await page.locator("#ccWatch .cc-moves li").count(), 2,
        "and the dead band's residents are listed rather than counted");
-    /* NO OPENERS HERE. These are the names closest to neutral, so by the
-       deep rule none of them has a card, and a link that opens nothing is
-       worse than no link. */
+
     eq(await page.locator("#ccWatch .cc-open").count(), 0,
        "the watch region mints no opener, because no watched name has a card");
 
-    /* ---- three regions that drew a table and said nothing about it ----
-
-       EACH OF THESE LEADS NOW, and the lead is the one sentence the drawing
-       cannot carry: how concentrated the alerts list's premium is (the table
-       prints each premium and never the share, so eight windows of $1M and
-       one of $8M beside seven of $30k are the same eight rows), how
-       many names on the calendar the board holds any opinion about (a gated
-       name arrives with no score and prints an em dash a reader would have
-       to count down the column), and which side of the zero rule the dead
-       band is holding (the rows are ordered on the SIZE of the residual, so
-       the signs are scattered).
-
-       A LEAD WITH NO NUMBER IN IT IS PROSE, NOT A READING, so that is
-       asserted for both at once rather than trusted per sentence — the same
-       rule the ticker's station slots are held to. And FIRST is checked
-       structurally: a finding under the marks it describes is a caption.
-
-       NOT #ccEvents HERE, AND THE FIRST RUN OF THIS FILE SAID SO. In this
-       scenario the calendar is a PENDING silence — the block above asserts
-       its [data-empty] mark, and the comment beside the two counts calls
-       only the other two regions populated. A silent region draws no lead,
-       which is the rule rather than a gap; the events lead is asserted
-       further down, in the phase that publishes a calendar and waits for
-       its rows. */
     for (const [region, pattern] of [
       ["#ccAlerts", /largest flagged window/i],
       ["#ccWatch", /zero rule|unsided/],
@@ -1050,36 +591,12 @@ try {
          "it is about is a caption, whatever class it carries");
     }
 
-    /* ---- AND THE ORDERING CLAIM IS PINNED TO WHAT IS ON SCREEN ----
-
-       THIS REGION SAID THE OPPOSITE OF ITS PAYLOAD FOR ITS WHOLE LIFE. The
-       heading read "Freshest flagged windows", tableWrap's aria-label read
-       "freshest first", and the first version of the lead said "These 8 are
-       the FRESHEST flags rather than the largest". The rows are ordered by
-       PREMIUM, descending — shared/flows-alerts.js sorts `byPremium` when it
-       shapes a read and again when the intraday merge unions two, and there
-       is no time-ordered sort anywhere in that file.
-
-       ASSERTED OFF THE RENDERED COLUMN rather than off the fixture, because
-       the fixture is written by the same hand as the claim. usd() is the only
-       thing between the payload's number and this string, so parsing it back
-       is reading exactly what a reader sees. */
     const asUsd = (text) => {
       const m = /^\$([\d.]+)([BMK]?)$/.exec(text.trim());
       if (!m) return null;
       return Number(m[1]) * ({ B: 1e9, M: 1e6, K: 1e3 }[m[2]] || 1);
     };
-    /* THE COLUMN IS FOUND BY ITS HEADER, NOT BY ITS POSITION, and that is a
-       fix rather than a flourish. This read `td:nth-child(3)` — correct when
-       the table was Name, Contract, Premium, Rule, and silently wrong the
-       moment the table grew a Time column in front: the third cell became the
-       CONTRACT, every parse returned null, and the check failed. It could
-       just as easily have found another dollar column and passed while
-       measuring the wrong thing.
 
-       So the index is derived from the rendered header row. A table that
-       renames or drops its premium column now fails with "no Premium column",
-       which is a sentence about the page rather than a puzzle. */
     const alertHeads = (await page.locator("#ccAlerts thead th").allTextContents())
       .map((h) => h.trim());
     const premAt = alertHeads.findIndex((h) => /^premium$/i.test(h));
@@ -1097,7 +614,6 @@ try {
     }
   }
 
-  /* ---------- a failed request is not a quiet market ------------- */
   {
     allowFetchFailure = true;
     await page.route("**/api/flows/scoretrack*", (route) =>
@@ -1113,16 +629,13 @@ try {
        `and says the fault is this page's (${failed.text})`);
     ok(/not a fact about the session/.test(failed.text) || !/No name/.test(failed.text),
        "and refuses to report it as a session in which nothing moved");
-    /* The other six regions are untouched: one endpoint that does not
-       answer must not blank the regions that did. */
+
     ok(await page.locator(".cc-bull tbody tr").count() === 5,
        "and the regions that did answer are unaffected");
-    /* A row whose trace could not be read shows the em dash, not a zero. */
+
     eq(await page.locator(".cc-bull tbody .cc-trk svg").count(), 0,
        "with no strip drawn from a payload that never arrived");
-    /* AND THE HEADER OVER IT COUNTS NOTHING IT WAS NEVER GIVEN. The
-       region's subtitle is a slot now, and a payload that never arrived
-       fills it with the sentence the shell ships rather than a count. */
+
     eq((await page.locator("#ccChgSub").textContent()).trim(),
        "since each name's prior scored session",
        "and the region header states no count out of a payload it never read");
@@ -1130,22 +643,8 @@ try {
     allowFetchFailure = false;
   }
 
-  /* ---------- a board that does not answer is ONE silence -------- */
   {
-    /* THE HIGHEST-SEVERITY FAILURE THIS PAGE HAD, and the only one that
-       produced a page of empty labelled shells. loadBoard THREW on any
-       status that was neither 401 nor OK, and had no catch at all for a
-       network failure — so one 500 on one pole rejected the Promise.all and
-       skipped the entire render. The five region payloads that HAD come back
-       were parsed and thrown away, and seven regions came up blank with not
-       one of the four silences in any of them: the fetch-then-discard
-       pattern this page exists to end, surviving in the failure path.
 
-       The page's own doctrine forbids exactly this — "an events calendar
-       that does not answer must not blank the five regions that did" — and
-       the two boards were never exempt from it. The suite could not see it:
-       the phase above 500s a REGION, and every board this file ever routed
-       was fulfilled with a valid payload. */
     allowFetchFailure = true;
     await page.route("**/api/flows/board?side=long", (route) =>
       route.fulfill({ status: 500, contentType: "application/json", body: "{}" }));
@@ -1162,9 +661,6 @@ try {
     ok(!/No name leaned/.test(bull.text),
        "in words that are not the empty-side reading, which is a claim about the market");
 
-    /* THE SIX REGIONS THAT ANSWERED ARE STILL DRAWN. Every one of these
-       counts is zero against the loadBoard this phase exists to delete,
-       because on that version none of them was painted at all. */
     eq(await page.locator("#ccVerdict .cc-tile").count(), 5,
        "the verdict bar still states its five readings");
     eq(await page.locator(".cc-bear tbody tr").count(), 4,
@@ -1179,25 +675,14 @@ try {
        "and the never-published calendar still says which silence IT is in");
     eq(await page.locator("#spinePlot svg").count(), 1, "the spine is still drawn");
 
-    /* AN EM DASH, NEVER A 0 — and the session date comes off the half that
-       answered, because neither half is the page's session: they are two
-       writes of one, and the mismatch warning already fires when they
-       disagree. */
     const tiles = await tilesByKey(page);
     eq(tiles.Cleared?.v, "\u2014 bull / 4 bear",
        "the unreadable side is an em dash, never a 0 — and each side keeps its own word, " +
        "so a half-silent tile cannot be read as a ratio");
-    /* THE SESSION IS THE CAPTION'S NOW, and this is the case it was written
-       for: one board answered 500 and the other did not, and neither half is
-       the page's session — they are two writes of one. The caption reads it
-       off whichever half came back. */
+
     eq(await page.locator("#ccMetaDate").textContent(), SESSION,
        "and the session is taken off the half that answered");
 
-    /* AND THE PAGE SAYS SO ON THE ONE LINE THAT REPORTS ON THIS PAGE. The
-       em dash above is the right glyph for "not known" and it is the same
-       glyph five other absences print, so on its own it cannot tell a
-       reader that a fetch failed. */
     const status = await page.evaluate(
       () => document.getElementById("flowsStatus").textContent.trim());
     ok(/bullish board could not be read/.test(status),
@@ -1208,10 +693,6 @@ try {
        "and the rail badges nothing for it rather than badging 0");
     await page.unroute("**/api/flows/board?side=long");
 
-    /* A NETWORK FAILURE IS THE SECOND WAY IN. fetch REJECTS here rather than
-       resolving with a status, which the old function had no catch for at
-       all — offline, DNS, TLS — so it reached the same blank page by a
-       different door. */
     await page.route("**/api/flows/board?side=short", (route) => route.abort("failed"));
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccBear [data-empty]", { timeout: 15000 });
@@ -1232,12 +713,6 @@ try {
        `named on the status line by side (${netStatus})`);
     await page.unroute("**/api/flows/board?side=short");
 
-    /* AND BOTH POLES AT ONCE, which is the case the render guard used to
-       swallow. That guard tested `!lng && !sht` — two nulls — and a 401
-       returns null too, so containing a failed board made "two boards that
-       could not be read" indistinguishable from "the session is gone and we
-       are already navigating to the gate". Only the redirect may stop the
-       render: five regions still have something true to say. */
     for (const side of ["long", "short"]) {
       await page.route("**/api/flows/board?side=" + side, (route) =>
         route.fulfill({ status: 503, contentType: "application/json", body: "{}" }));
@@ -1269,14 +744,8 @@ try {
     allowFetchFailure = false;
   }
 
-  /* ---------- a pending board is not a board with nothing on it -- */
   {
-    /* THE WORKER'S PENDING ENVELOPE CARRIES AN EMPTY ROWS ARRAY —
-       {status:"pending", rows: []} — so every naive rows.length on this page
-       reads a key that was never published as a session in which no name
-       leaned. That number then reaches the reader as a rail badge and a
-       verdict tile, which are the two places on the page nobody thinks to
-       doubt. Served here exactly as the Worker serves it. */
+
     await page.route("**/api/flows/board?side=watch", (route) => route.fulfill({
       status: 200, contentType: "application/json",
       body: JSON.stringify({ side: "watch", rows: [], generatedAt: null, status: "pending" }),
@@ -1297,21 +766,8 @@ try {
     await page.unroute("**/api/flows/board?side=watch");
   }
 
-  /* ---------- a capped list says that it is capped --------------- */
   {
-    /* A LIST THAT TRUNCATES WITHOUT SAYING SO READS AS A POPULATION, and
-       the watch anchor did worse than that. `rowCount` is the WHOLE
-       published board — the publisher caps it at eighty — and this region
-       lists eight of it, so twelve rows on the wire produced the words
-       "all 12" over eight names. Not an omission: a false statement, in a
-       link to /flows/watch/, which is the one route where a reader would
-       have gone to count.
 
-       THE SUITE WAS STRUCTURALLY BLIND TO IT. Its own header says the poles
-       were deliberately given five and four names "so a renderer that
-       quietly caps at three fails here"; the narrow regions were given two
-       watch rows and three alerts, both under the cap of eight, so no phase
-       could reach the truncation at all. */
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccWatch .cc-moves li", { timeout: 15000 });
     eq((await page.locator("#ccWatchSub").textContent()).trim(), "all 2",
@@ -1320,10 +776,7 @@ try {
     const watchMany = Array.from({ length: 12 }, (_, i) => ({
       t: "W" + String(i + 1).padStart(2, "0"), r: i + 1, s: 18 - i,
       cnv: 40, px: 10 + i,
-      /* SIGNED, ALTERNATING, SO THE FIRST ROW IS BELOW ZERO. The list
-         printed the residual through toFixed, which writes a hyphen-minus,
-         while every other signed number on the page carries U+2212 — and a
-         fixture of positive residuals could never see the glyph. */
+
       resid: (i % 2 ? 1 : -1) * (0.0200 - i * 0.0011),
     }));
     await post("board:watch", { ...watch, rows: watchMany });
@@ -1333,11 +786,7 @@ try {
        "twelve published rows are listed eight deep");
     eq((await page.locator("#ccWatchSub").textContent()).trim(), "8 of 12",
        "and the anchor says eight of twelve rather than \"all 12\" over eight names");
-    /* THE SIGN IS THE PAGE'S GLYPH AND THE UNIT IS ON THE ROW. "-0.0080"
-       sat here beside "conv 60": a hyphen-minus twelve pixels from a ranked
-       score in U+2212, and a four-decimal number whose quantity — the
-       cross-sectional residual — was named only in a title a mouse can
-       reach. */
+
     const band = await page.evaluate(() => Array.from(
       document.querySelectorAll("#ccWatch .cc-moves li"), (li) => ({
         text: li.textContent, num: li.children[1].textContent.trim() })));
@@ -1352,9 +801,6 @@ try {
        "while the rail still badges the whole board, which is what its link opens");
     await post("board:watch", watch);
 
-    /* THE FLAGGED WINDOWS PUBLISH THEIR OWN POPULATION and the verdict tile
-       beside this region already prints it, so "Flagged windows 44" sat
-       above eight rows with nothing anywhere saying eight. */
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccAlerts tbody tr", { timeout: 15000 });
     const stamp = (await page.locator("#ccAlertsSub").textContent()).trim();
@@ -1366,12 +812,6 @@ try {
     ok(/read \d{2}:\d{2} \S/.test(stamp),
        `on a 24-hour clock that names the zone it is in (${stamp})`);
 
-    /* THE ZONE, PROVEN BY MOVING THE READER. A bare toLocaleTimeString
-       renders the viewer's own wall clock, follows their 12/24-hour locale
-       and names no zone at all — on a subtitle whose entire subject is WHEN
-       the read was taken. Its own browser context, because a timezone is a
-       context-level fact; its own cookie jar, because the gate is the
-       product. */
     const tzCtx = await browser.newContext({
       viewport: { width: 1280, height: 1000 }, timezoneId: "America/New_York" });
     const tzPage = await tzCtx.newPage();
@@ -1385,9 +825,7 @@ try {
     ]);
     await tzPage.waitForSelector("#ccAlerts tbody tr", { timeout: 15000 });
     const tzSaid = (await tzPage.locator("#ccAlertsSub").textContent()).trim();
-    /* 10:28:20Z is 06:28 in New York, and the hour is the assertion: a
-       stamp that ignored the reader's zone would print 10:28 here, and one
-       that named no zone would leave 06:28 meaning nothing in particular. */
+
     ok(/read 06:28 \S/.test(tzSaid),
        `the instant is the reader's own wall clock with its zone stated beside it (${tzSaid})`);
     ok(!/10:28/.test(tzSaid), `rather than another zone's hour under no label (${tzSaid})`);
@@ -1403,11 +841,7 @@ try {
     eq(await page.locator("#ccAlerts tbody tr").count(), 8,
        "a feed longer than the cap is listed eight deep");
     const capped = (await page.locator("#ccAlertsSub").textContent()).trim();
-    /* AND THE CADENCE IS ON THIS LINE, asserted rather than assumed. It used
-       to sit under the Flagged tile; it was removed with the strip's prose on
-       the claim that this subtitle carried it, and this subtitle carried only
-       the INSTANT. The regex now pins the cadence WORD in front of "read", so
-       the same deletion cannot be made again by anyone reading these tests. */
+
     ok(/^8 of 44 · nightly read /.test(capped),
        `and the subtitle states the read's whole population, its cadence and its instant ` +
        `beside the eight rows it drew (${capped})`);
@@ -1420,15 +854,6 @@ try {
     eq(flagged.v, "44",
        "which is the same number the verdict tile has always printed twelve pixels away");
 
-    /* THE CEILING IS NOT A CENSUS. shared/flows-alerts.js publishes
-       `vendorTruncated` beside `seen` when the read came back at the vendor's
-       documented maximum; the 2026-08-24 payload carries seen 200,
-       vendorLimit 200, vendorTruncated true, and this tile printed "200" over
-       a subtitle reading "8 of 200" — the ceiling printed as the population.
-       The true count is unknown and at least that large, which is what ≥
-       says; and it is said in words too, in the open, because a withholding
-       never folds. The bare count on a read published as not truncated is
-       asserted right after, on the same fixture. */
     await post("flowalerts", { ...alerts, seen: 44, rows: alertMany,
       vendorLimit: 44, vendorTruncated: true });
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
@@ -1442,16 +867,7 @@ try {
     });
     eq(ceiling.v, "≥44",
        "a read that hit the vendor's ceiling prints the count as a floor, never as a census");
-    /* THE ≥ IS THE STATEMENT, AND THE REGION SAYS IT IN WORDS.
 
-       The tile used to carry "vendor ceiling hit, population unknown ·
-       nightly read" underneath, which is the withholding said twice on one
-       screen — the glyph in front of the number already refuses to fold the
-       unknown into a census, and #ccAlertsSub twelve pixels down carries the
-       same floor AND the cadence, beside the rows it describes. A
-       withholding never folds; it does not have to be printed twice to stay
-       unfolded. So the tile's gloss is gone and the region's is asserted
-       harder: the floor and the read's provenance are both read off it. */
     eq(ceiling.s, "", "and the tile prints the floor without a sentence under it");
     ok(/^8 of ≥44 · nightly read /.test(ceiling.sub),
        `the region subtitle carries the same floor, so the two cannot disagree (${ceiling.sub})`);
@@ -1470,19 +886,12 @@ try {
     ok(/^8 of 44 · nightly read /.test(under.sub),
        `on the tile and in the subtitle alike (${under.sub})`);
 
-    /* AND A PAYLOAD THAT NAMES NO CADENCE GETS THE THIRD SENTENCE. Both
-       current writers set `refreshed`; the else-branch printed "nightly
-       read" for everything that was not explicitly intraday, so a payload
-       predating the field asserted a provenance nobody published — the
-       confident default wearing a ternary. */
     const noCadence = { ...alerts };
     delete noCadence.refreshed;
     await post("flowalerts", noCadence);
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccAlerts tbody tr", { timeout: 15000 });
-    /* READ OFF THE REGION SUBTITLE, which is where the cadence now lives —
-       the defect this guards is the confident default, and it is the same
-       defect wherever the sentence is printed. */
+
     const said = await page.evaluate(
       () => document.getElementById("ccAlertsSub").textContent.trim());
     ok(!/nightly/.test(said),
@@ -1492,9 +901,6 @@ try {
        `and names the field that is missing instead (${said})`);
     await post("flowalerts", alerts);
 
-    /* THE LEAD REGION CAPS AT TWELVE and its subtitle was a static span
-       with no slot in it, so a session in which thirty-four names moved
-       showed twelve rows under a sentence naming no count at all. */
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccChg tbody tr", { timeout: 15000 });
     eq((await page.locator("#ccChgSub").textContent()).trim(),
@@ -1516,10 +922,8 @@ try {
     await post("scoretrack", scoretrack(TRACK_DAYS));
   }
 
-  /* ---------- a measured emptiness IS a reading ------------------ */
   {
-    /* Every name compared, every one unchanged. That is a fact about the
-       session and it is allowed to be said — unlike the silences below it. */
+
     await post("scoretrack", scoretrack(FLAT_DAYS));
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccChg [data-empty]", { timeout: 15000 });
@@ -1538,18 +942,13 @@ try {
        "without explaining itself in terms of how the data was made");
     ok(/\b9\b/.test(still.text),
        `and says how many names it compared, so the claim has a population (${still.text})`);
-    /* THE STRIPS STILL DRAW. A flat trace is a trace. */
+
     ok(await page.locator(".cc-bull tbody .cc-trk svg").count() === 5,
        "and the strips still draw, because a flat line is a measurement");
   }
 
-  /* ---------- an archive too thin to answer is NOT a quiet market - */
   {
-    /* THE FOURTH SENTENCE. Two sessions that share no name: nothing has two
-       observations, so no change EXISTS to report. That is the shape of the
-       archive, and wording it like the block above would publish "nothing
-       moved" — a claim about the market — out of a page that could not
-       measure movement at all. */
+
     await post("scoretrack", scoretrack(COLD_DAYS));
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccChg [data-empty]", { timeout: 15000 });
@@ -1568,11 +967,8 @@ try {
     await post("scoretrack", scoretrack(TRACK_DAYS));
   }
 
-  /* ---------- the dead band is DRAWN, not inferred --------------- */
   {
-    /* 15 of 24 names scored inside ±20 and are published on neither side.
-       That is why this page is short, and a reader who cannot see it reads
-       a nine-name page as a broken one. */
+
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#spinePlot svg", { timeout: 15000 });
     const spine = await page.evaluate(() => {
@@ -1587,9 +983,7 @@ try {
         t: d.getAttribute("data-t"),
         title: (d.querySelector("title") || {}).textContent,
       }));
-      /* The axis declares its own reference points. Reading the two end ticks
-         out of the DOM lets the mapping be checked without this test knowing
-         the renderer's padding or plot width. */
+
       const tickX = {};
       const labels = Array.from(svg.querySelectorAll(".sp-ticklabel"));
       const lines = Array.from(svg.querySelectorAll(".sp-tick"));
@@ -1607,12 +1001,10 @@ try {
       };
     });
     ok(spine, "the spine is drawn");
-    /* RE-SEATED, NOT REPLACED. The regions above are an index of the
-       distribution; this is the only view of the whole of it. */
+
     ok(spine.inRegion, "and it kept its place, inside a region of the command center");
     ok(spine.hasBand, "and it carries the dead band");
-    /* HATCHED, NOT TINTED. A flat fill reads as one more band of the axis,
-       and disappears entirely in a greyscale render. */
+
     ok(spine.hasPattern && /url\(#/.test(spine.bandFill || ""),
        `the band is hatched so it survives greyscale (${spine.bandFill})`);
     ok(/15 of 24/.test(spine.bandLabel || ""),
@@ -1621,32 +1013,9 @@ try {
     ok(/dead band/.test(spine.ariaLabel || "") || /inside the plus or minus/.test(spine.ariaLabel || ""),
        `a screen reader is told the same thing the picture says (${spine.ariaLabel})`);
 
-    /* THE AXIS IS FIXED AT ±100, not scaled to the day. A data-scaled axis
-       makes a quiet session look like a violent one: the widest name of a
-       flat day would touch the same edge as a limit move, and two sessions
-       would stop being comparable at a glance — which is the only thing an
-       axis with a real unit is for. */
     deep(spine.ticks, ["−100", "−50", "0", "+50", "+100"],
       "the axis is labelled -100..+100");
 
-    /* THE LABELS ARE NOT THE SCALE. A first version of this block checked
-       only the tick text, which is a hardcoded list and stays correct under
-       any mapping: rescaling the axis to ±50 left every label right, every
-       mark in the wrong place, and the block passing.
-
-       The second version anchored on the -100 and +100 ticks and checked
-       each mark against a linear interpolation between them — which is a
-       TAUTOLOGY, because the ticks are drawn by the same function as the
-       marks. Under ANY affine mapping the ticks move with the dots and the
-       relation holds exactly. It survived the same mutation.
-
-       What a rescale actually breaks is that ±100 are the ENDS OF THE DRAWN
-       AXIS. Under a ±50 mapping the -100 tick sits at a negative x — off the
-       canvas entirely — while the axis line still spans the same box. So the
-       tick positions are checked against the LINE, which is drawn from the
-       padding and not from the scale, and the interpolation check is kept
-       for what it does prove: that the marks are linear in the score and in
-       the right order. */
     ok(spine.axis, "the spine draws an axis line");
     const x0 = spine.tickX["−100"], x1 = spine.tickX["+100"];
     ok(Number.isFinite(x0) && Number.isFinite(x1) && x1 > x0,
@@ -1667,10 +1036,6 @@ try {
          `and ${d.t} is drawn on the axis rather than past its end (${d.x.toFixed(1)})`);
     }
 
-    /* EVERY PUBLISHED NAME HAS A MARK. Five bulls and four bears against
-       regions capped at ten is what keeps this honest at this size; the cap
-       is what makes it matter on a real session, where the tail runs past
-       forty a side and the spine is the only place the rest of it exists. */
     eq(spine.dots.length, 9, "the spine marks every published name");
     const bulls = spine.dots.filter((d) => d.bull).map((d) => d.x);
     const bears = spine.dots.filter((d) => !d.bull).map((d) => d.x);
@@ -1679,20 +1044,13 @@ try {
     ok(Math.max(...bears) < Math.min(...bulls),
        "every bearish mark sits left of every bullish one");
 
-    /* A MARK WITH NO NAME IS A DOT. On a real session most of these belong
-       to names past the region cap, so each carries its own accessible name
-       rather than being an anonymous smudge on an axis. */
     const orclDot = spine.dots.find((d) => d.t === "ORCL");
     ok(orclDot && /ORCL/.test(orclDot.title || "") && /\+88/.test(orclDot.title || ""),
        `each mark names itself and its score (${orclDot && orclDot.title})`);
   }
 
-  /* ---------- the rail counts what is actually there -------------- */
   {
-    /* The slots are server-rendered EMPTY and hidden: filling them in the
-       Worker would cost a D1 row read per page view for a number this page
-       fetches anyway. A badge reading 0 while the fetch is in flight is a
-       claim about the session, not a loading state. */
+
     const counts = await page.evaluate(() => {
       const out = {};
       for (const el of document.querySelectorAll("[data-rail-count]")) {
@@ -1705,22 +1063,6 @@ try {
     eq(counts.watch?.text, "2", "and the dead band's, which this page also has in hand");
     eq(counts.long?.hidden, false, "and reveals them once there is a real number");
 
-    /* THE SLOT THAT WAS NEVER RENDERED, AND THEN NEVER FILLED FROM HERE.
-       flows-events.js has filled [data-rail-count="events"] since the
-       calendar shipped, and the rail emitted the slot for three keys and not
-       that one — so the query matched nothing and the badge could never
-       appear, silently. The slot exists now, and this page held the events
-       payload while filling three of the four badges it had in hand: the
-       count appeared on /flows/events/ and vanished on /flows/, which a
-       reader takes for "nothing reports this week" rather than "this page
-       did not say".
-
-       THIS PHASE IS THE WITHHOLDING ARM, and it is a different fact from
-       either of those. The calendar key is deliberately unpublished until
-       the earnings join below, so the page holds a pending envelope — not a
-       measurement — and a pending envelope has no population to badge. The
-       filled arm is asserted twice below, once on a calendar the region
-       shows whole and once on one it caps. */
     ok("events" in counts, "the events slot exists to be filled at all");
     eq(counts.events?.hidden, true,
        "and withholds while the calendar key is unpublished — a pending envelope is not a " +
@@ -1731,12 +1073,6 @@ try {
     eq(await page.locator("#ccBullSub").getAttribute("href"), "/flows/long/",
        "and is the way to the full side, which is a page rather than a state");
 
-    /* THE FIVE AND THE FOUR ABOVE ARE ALSO THE FALLBACK ARM. Neither fixture
-       board publishes `cleared`, so those badges came from `rowCount` — which
-       is the right answer for a board written before that field existed and
-       the WRONG one for every board since. Only a payload whose pool exceeds
-       its published rows can tell the two sources apart, and this file had
-       none. */
     await post("board:long", board("long", bullRows, SESSION,
       { deep: 4, cleared: 12, shed: 7 }));
     await post("board:short", board("short", bearRows, SESSION,
@@ -1766,24 +1102,12 @@ try {
        "slot from its own rows.length, so moving this one alone would open the split the two " +
        "board badges just closed");
 
-    /* ONE POPULATION, ONE NUMBER, IN EVERY PLACE THIS PAGE PRINTS IT. The
-       badge was moved to the pool and the verdict tile, the status line and
-       the pole subtitle were left on the rows, so the 2026-08-24 screen read
-       "Bearish 53" in the rail, "44 / 50" in the tile, "50 bearish" on the
-       status line and "top 10 of 50" over the region — four prints of one
-       side, two numbers, and no clause relating them. The numerators are
-       read off the tile and compared to the badge rather than to a literal,
-       so the two cannot drift apart under one label again. */
     const onePop = await page.evaluate(() => {
       const tile = Array.from(document.querySelectorAll("#ccVerdict .cc-tile")).find(
         (t) => t.querySelector(".cc-tile-k")?.textContent.trim() === "Cleared");
       return {
         v: tile.querySelector(".cc-tile-v").textContent.trim(),
-        /* OPTIONAL, BECAUSE A MEASURED TILE NO LONGER HAS ONE. The three
-           other reads of .cc-tile-s in this file were guarded when the subs
-           were removed and this one was not, so it threw a TypeError rather
-           than failing an assertion — which is worse, because the run dies
-           before the assertions after it are reached. */
+
         s: tile.querySelector(".cc-tile-s")?.textContent.trim() || "",
         status: document.getElementById("flowsStatus").textContent.trim(),
         bullSub: document.getElementById("ccBullSub").textContent.trim(),
@@ -1795,10 +1119,7 @@ try {
        "read back against the badge rather than a literal: one bearish population, one number");
     eq(onePop.v.replace(/[^0-9 ]/g, "").trim().split(/\s+/)[0], pooled.long,
        "and the same on the bullish side");
-    /* WHAT THE CAP TOOK IS STATED BY THE STATUS LINE AND BY EACH POLE'S OWN
-       SUBTITLE, asserted immediately below, so dropping it from the tile
-       drops a third print of one fact rather than the fact. The tile is the
-       glance; the reconciliation belongs beside the rows it is about. */
+
     eq(onePop.s, "", "and the tile itself carries no gloss under a measured value");
     ok(/5 of 12 bullish carried · 4 of 9 bearish carried/.test(onePop.status),
        `the status line reconciles the rows it drew against the same pool (${onePop.status})`);
@@ -1806,13 +1127,6 @@ try {
        "and the pole subtitle counts against the pool its link opens, not the excerpt on the wire");
     eq(onePop.bearSub, "top 4 of 9", "on both sides");
 
-    /* THE ASSERTION THE WHOLE FIX IS FOR: ONE SLOT, TWO ROUTES, ONE NUMBER.
-       Each half of this pair passed on its own while the two disagreed — the
-       overview badged 5 and /flows/long/ badged 5 out of a pool of 12, and a
-       reader moving between them saw one badge change under one label. The
-       cross-route reading is the only one that can fail when they drift, so
-       the number is carried from this page to that one rather than compared
-       to a literal in each file. */
     await page.goto(url("/flows/long/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".fd-card", { timeout: 15000 });
     const onBoard = await page.evaluate(() => {
@@ -1836,18 +1150,11 @@ try {
     await page.waitForSelector(".cc-bull tbody tr", { timeout: 15000 });
   }
 
-  /* ---------- nothing overflows a phone -------------------------- */
   {
-    /* THE STRIPS ARE DRAWN AT A FIXED 150px — one viewBox unit is one CSS
-       pixel — so a seven-column row has a hard minimum width no reflow can
-       get under. It has to scroll inside its own box; the page may not. */
+
     for (const width of [320, 390]) {
       await page.setViewportSize({ width, height: 900 });
-      /* LONGER THAN THE SPINE'S RESIZE DEBOUNCE. The spine is redrawn at the
-         new width rather than scaled to it — one viewBox unit is one CSS
-         pixel — and it repaints 150ms after the last resize event. Measuring
-         the document's scrollWidth before that repaint measures the old
-         width, which is a transient this assertion is not about. */
+
       await page.waitForTimeout(450);
       const overflow = await page.evaluate(
         () => document.documentElement.scrollWidth > window.innerWidth + 1);
@@ -1860,8 +1167,6 @@ try {
     ok(scrolls.scrollable, "the ranked table scrolls inside its own box instead");
     ok(scrolls.focusable, "and that scroll is reachable from a keyboard");
 
-    /* The rail is a DRAWER at this width, not a column — but it is still a
-       nav, and every destination has to survive the collapse. */
     for (const dest of ["/flows/", "/flows/long/", "/flows/short/", "/flows/desk/"]) {
       ok(await page.locator(`.flows-rail a[href="${dest}"]`).isVisible(),
          `${dest} is still reachable at 390px`);
@@ -1869,12 +1174,8 @@ try {
     await page.setViewportSize({ width: 1280, height: 1000 });
   }
 
-  /* ---------- two sides, two sessions, and the page says so ------ */
   {
-    /* THE DEFECT THIS FILE EXISTS FOR. The halves are two fetches of two
-       rows. A pipeline that published long and then failed leaves the
-       previous session's bulls in D1 beside today's bears — and both halves
-       render perfectly, with no field anywhere that disagrees. */
+
     await post("board:short", board("short", bearRows, "2026-08-21", { deep: 4 }));
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#flowsStale:not([hidden])", { timeout: 15000 });
@@ -1882,13 +1183,11 @@ try {
     ok(/different sessions/.test(warn), `mismatched halves are called out (${warn})`);
     ok(/2026-08-24/.test(warn) && /2026-08-21/.test(warn),
        `and both dates are named, so the reader knows which half is stale (${warn})`);
-    /* The names still render: a stale half is still a reading, and blanking
-       the page would throw away the half that IS current. */
+
     ok(await page.locator(".cc-bull tbody tr").count() > 0,
        "and the current half is still shown rather than blanked");
   }
 
-  /* ---------- an empty side is a reading, not a failure ---------- */
   {
     await post("board:short", board("short", [], SESSION, { deep: 0 }));
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
@@ -1897,10 +1196,7 @@ try {
       const p = document.querySelector(".cc-bear [data-empty]");
       return { kind: p.dataset.empty, text: p.textContent.trim() };
     });
-    /* THIRD SILENCE, AND THE ONLY ONE THAT IS A CLAIM ABOUT THE MARKET.
-       The dead band can legitimately leave a side with nothing, so this is
-       the ordinary case — and it must not share a sentence with the two
-       above, which are claims about this page. */
+
     eq(empty.kind, "empty", "an empty side is a measured emptiness");
     ok(/No name leaned bearish/.test(empty.text),
        `and says what happened, not "error" (${empty.text})`);
@@ -1914,21 +1210,8 @@ try {
        "and the region header counts the nothing rather than promising ten");
   }
 
-  /* ---------- the earnings join, in both directions -------------- */
   {
-    /* THE MOST EXPENSIVE MISTAKE THIS SURFACE CAN LET A READER MAKE is
-       carrying a long signal into a print. Both boards and the events
-       calendar were already fetched in the same Promise.all and were never
-       joined: the page ranked ORCL #1 bullish in one region while another
-       region three hundred pixels below said ORCL reports in three sessions,
-       and neither region knew about the other.
 
-       TWO SOURCES AND TWO UNITS. The board row carries `edte` in CALENDAR
-       DAYS (the gate's own arithmetic on the row it spared) and the events
-       payload carries `sdte` in TRADING SESSIONS. "3" means different things
-       in each, so the marker prints the unit and the fixture gives ORCL both
-       — the events count must win, because it is the count the gate itself
-       measured. */
     await post("board:long", board("long", bullRows.map((r) =>
       r.t === "ORCL" ? { ...r, ed: "2026-08-27", edte: 3 }
       : r.t === "CAT" ? { ...r, ed: "2026-09-08", edte: 15 } : r), SESSION, { deep: 4 }));
@@ -1953,18 +1236,13 @@ try {
        `and the date in the title, because a count with no origin is not checkable (${marks.ORCL.title})`);
     ok(/3 sessions/.test(marks.ORCL.title || ""),
        `spelled out rather than abbreviated (${marks.ORCL.title})`);
-    /* CAT is on no calendar row, so the marker falls back to the board's own
-       edte — a different quantity in a different unit, and it says so. */
+
     eq(marks.CAT?.text, "⚠15d",
        "a board row with no calendar row falls back to the board's calendar-day count");
     ok(/15 calendar days/.test(marks.CAT?.title || ""),
        `and never prints one unit's number under the other's name (${marks.CAT?.title})`);
     eq(marks.DE, null, "and a name that reports outside the window carries no marker at all");
 
-    /* THE RECIPROCAL. The event row already carried the funnel stage and the
-       score, and this region printed neither — so "Reporting soon" was a
-       calendar sitting on the same page as a ranking with no thread between
-       them. */
     const evRows = await page.evaluate(() => Array.from(
       document.querySelectorAll("#ccEvents tbody tr"),
       (tr) => Array.from(tr.children, (td) => td.textContent.trim())));
@@ -1974,15 +1252,6 @@ try {
        "a gated name has no score, and an em dash is not a zero");
     eq(evRows[1][5], "gated", "and the stage says the board was forbidden, not neutral");
 
-    /* AND THE REGION LEADS WITH THAT COUNT, which is the one thing the table
-       cannot show: the em dash in the Score column is a mark a reader has to
-       find by scanning down it. This fixture is exactly one scored row and
-       one gated one, so the sentence is checked against both halves rather
-       than against a shape.
-
-       COUNTED OVER WHAT DREW. The denominator is the rows a reader can see,
-       not `payload.rows` and not `inWindow` — the subtitle beside it carries
-       the published population and is a different claim. */
     const evLead = (await page.locator("#ccEvents .fc-reading.is-lead").textContent()).trim();
     eq(evLead,
        "1 of the 2 names drawn carries a score and 1 reached this calendar with none, " +
@@ -1995,12 +1264,6 @@ try {
     ok(evFirst !== null && /\bis-lead\b/.test(evFirst),
        `and it is the FIRST thing in the region (${evFirst})`);
 
-    /* AND THE FOURTH BADGE FILLS, NOW THAT THERE IS A CALENDAR TO BADGE.
-       This is the arm the phase above could not reach: the same page, the
-       same payload, one publish later. The quantity is `inWindow` — the
-       names reporting — which is the quantity flows-events.js writes into
-       this identical slot on /flows/events/, so a reader crossing between
-       the two routes reads one number rather than two. */
     const evBadge = await page.evaluate(() => {
       const el = document.querySelector('[data-rail-count="events"]');
       return { text: el.textContent.trim(), hidden: el.hidden };
@@ -2010,12 +1273,8 @@ try {
        `with the ${eventsPayload.inWindow} names the payload says report inside the window`);
   }
 
-  /* ---------- the calendar names its numerator too --------------- */
   {
-    /* `inWindow` NAMED THE DENOMINATOR AND NOTHING NAMED THE NUMERATOR.
-       "24 in the window" over eight rows is the watch anchor's omission one
-       clause shorter, and shared/flows-events.js says the window "runs into
-       the hundreds". */
+
     eq((await page.locator("#ccEventsSub").textContent()).trim(), "all 2 in the window",
        "a calendar shorter than the cap is stated whole");
 
@@ -2030,15 +1289,7 @@ try {
        "a calendar longer than the cap is listed eight deep");
     eq((await page.locator("#ccEventsSub").textContent()).trim(), "8 of 30 in the window",
        "and the subtitle names the eight it drew as well as the thirty it did not");
-    /* THE BADGE IS THE POPULATION, AND THIS IS THE FIXTURE THAT PROVES IT.
-       Three integers are in reach here — thirty reporting, ten rows on the
-       wire, eight drawn in the region — and only one of them is the number
-       the rail's link opens onto. `rowCount`, which fills the three badges
-       beside it, would have published the ten; the region's own cap would
-       have published the eight. Either would have put a different number
-       under the same word on /flows/ than /flows/events/ prints from the
-       same payload, which is a reader discovering two quantities where the
-       pipeline measured one. */
+
     eq(await page.evaluate(
        () => document.querySelector('[data-rail-count="events"]').textContent.trim()), "30",
        "the rail badges the thirty names reporting, not the ten rows published or the " +
@@ -2046,14 +1297,8 @@ try {
     await post("events", eventsPayload);
   }
 
-  /* ---------- the two tilts, when they disagree ------------------ */
   {
-    /* THE DISAGREEMENT IS THE READING. breadth.tilt counts names and
-       premium.tilt weights dollars; when they part company the session was a
-       lot of small buying against a little large selling, or the reverse,
-       and no single number can say that. The bar used to print one of them
-       under the bare label "Tilt", so on this session the landing page
-       showed the opposite sign to /flows/market/ over the same payload. */
+
     await post("market", { ...market,
       breadth: { ...market.breadth, tilt: 0.0500 },
       premium: { ...market.premium, tilt: -0.0300 } });
@@ -2066,64 +1311,21 @@ try {
     ok(/is-neg/.test(tiles["Flow bias"]?.cls || "") &&
        /is-pos/.test(tiles["Flow bias"]?.subCls || ""),
        "and each carries its own sign in the glyph before any hue is applied");
-    /* THE DISAGREEMENT IS SHOWN, NOT ANNOUNCED — and the shape it used to be
-       announced in was wrong twice over.
 
-       It printed "the two weightings disagree in sign" under EACH tile,
-       which states one observation as if it were two independent ones: a
-       disagreement is a property of the pair, and there is exactly one of
-       it. And it printed that warning INSTEAD of each tile's definition, so
-       on precisely the session where the two numbers part company a reader
-       lost both denominators — the one thing that explains how the same
-       ratio can carry two signs.
-
-       What actually communicates it is the thing asserted two lines up: one
-       −3.0% and one +5.0% on the same tile, each carrying its own sign in
-       the glyph before any hue. A reader who can see both cannot miss that
-       they differ; a sentence saying so is the page narrating its own
-       screenshot. So the assertion is that the tile grows no SENTENCE about
-       the disagreement, on the one session that used to produce two.
-
-       AND THIS PARAGRAPH USED TO ARGUE FOR TWO SIBLING TILES, which is worth
-       recording rather than quietly rewriting. Its case was that peers side
-       by side are what make a disagreement unmissable, and that case was
-       sound. It was overridden by an explicit design directive for a
-       five-tile strip — not by a better argument — and what the override had
-       to preserve was carried across deliberately: both figures still on one
-       screen, each still signed, each still carrying its own silence. What
-       it did cost is the peerage, and that is a real cost, stated here so
-       the next reader knows it was paid rather than overlooked. */
     ok(!/disagree/i.test(tiles["Flow bias"]?.q || ""),
        "the tilt does not narrate the disagreement its own two glyphs already show");
     await post("market", market);
   }
 
-  /* ---------- four silences, four tiles, four marks ---------------- */
   {
-    /* BOTH TILT TILES SAID "not measured this session" FOR THREE FAULTS OF
-       THIS PAGE AND ONE READING. /api/flows/market failing to read, the key
-       being unpublished, the payload predating `breadth.tilt`, and a session
-       in which no name leaned all printed the same words — words shaped as a
-       claim about the session, which only the last of them is. The Session
-       tile did the same with a bare em dash and no sub at all. Each tile now
-       carries the kind on data-empty, and the stylesheet draws the mark the
-       region silences wear, so the four are told apart without prose and
-       without colour: the mark is read here as shape and glyph only. */
+
     const readTiles = () => tilesByKey(page);
     const marks = new Map();
-    /* ONE TILE AND ONE SUB-LINE, AND BOTH ARE CHECKED HERE.
 
-       The strip is five tiles now, so the equal-weight tilt lives under the
-       dollar tilt rather than beside it. That demotion is exactly the kind of
-       move that loses silences — the first draft of it rendered the sub only
-       when the value was non-null, which turned four distinct facts into one
-       absent line — so this phase asserts the sub's OWN kind and its OWN
-       wording on every one of the four, not just the tile's. */
     const TILTS = ["Flow bias"];
     const subKindOf = (t) => t["Flow bias"]?.subKind || null;
     const subTextOf = (t) => t["Flow bias"]?.q || "";
 
-    /* 1. UNREADABLE: the request did not come back. This page's fault. */
     allowFetchFailure = true;
     await page.route("**/api/flows/market", (route) =>
       route.fulfill({ status: 500, contentType: "application/json", body: "{}" }));
@@ -2137,18 +1339,12 @@ try {
       ok(/could not be read/.test(tiles[k]?.s) && !/not measured/.test(tiles[k]?.s),
          `worded as the fetch silence, never as a reading about the session (${tiles[k]?.s})`);
     }
-    /* AND THE DEMOTED TILT CARRIES THE SAME SILENCE ON ITS OWN SLOT. */
+
     eq(subKindOf(tiles), "unreadable",
        "the equal-weight tilt is marked unreadable on its own sub-line, not merely absent");
     ok(/could not be read/.test(subTextOf(tiles)),
        `and worded as the fetch silence there too (${subTextOf(tiles)})`);
-    /* THE SCREENED POPULATION LEFT THE STRIP FOR THE CAPTION AND KEPT ALL
-       FOUR SILENCES, which is the only reason it is allowed to leave. It
-       reads the same keySilence() the three tiles above do, so a market key
-       that failed to read and one nobody has published stay two facts on the
-       caption exactly as they were on the tile. A caption that simply hid the
-       slot would have made them one — the collapse this whole phase exists to
-       catch, one element further up the page. */
+
     const metaScreened = await page.evaluate(() => {
       const el = document.getElementById("ccMetaScreened");
       return { text: el.textContent.trim(), kind: el.dataset.empty || null, hidden: el.hidden };
@@ -2162,8 +1358,6 @@ try {
     await page.unroute("**/api/flows/market");
     allowFetchFailure = false;
 
-    /* 2. PENDING: the key has never been published, served as the Worker
-       serves it — a truthy envelope with nothing in it. */
     await page.route("**/api/flows/market", (route) => route.fulfill({
       status: 200, contentType: "application/json",
       body: JSON.stringify({ status: "pending", rows: [] }) }));
@@ -2182,9 +1376,6 @@ try {
     marks.set("pending", tiles[TILTS[0]].mark);
     await page.unroute("**/api/flows/market");
 
-    /* 3. UNAVAILABLE: published, and neither tilt is on it — a payload that
-       predates the field. Breadth and Screened still read, because their
-       fields are there, and they carry no mark. */
     await post("market", { ...market,
       breadth: { bull: 9, bear: 12, flat: 0, unpriced: 3 }, premium: { net: -18400000 } });
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
@@ -2205,10 +1396,6 @@ try {
     eq(tiles.Breadth?.kind, null, "with no mark on a tile that has its reading");
     marks.set("unavailable", tiles[TILTS[0]].mark);
 
-    /* 4. QUIET: measured, and nothing leaned. The shaper publishes tilt as
-       null when bull + bear is 0 and when the gross premium is 0
-       (shared/flows-market.js:157, :168); both denominators are on the
-       payload as measured zeros, so this — and only this — is a reading. */
     await post("market", { ...market,
       breadth: { bull: 0, bear: 0, flat: 264, unpriced: 0, tilt: null },
       premium: { netPositive: 0, netNegative: 0, net: 0, priced: 0, oneLegged: 0,
@@ -2216,11 +1403,7 @@ try {
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".cc-bull tbody tr", { timeout: 15000 });
     tiles = await readTiles();
-    /* THE ONE SILENCE THAT IS A READING, AND BOTH WEIGHTINGS STILL CARRY IT
-       SEPARATELY — the tile for the dollar denominator, the sub for the name
-       denominator, each in its own denominator's words. Collapsing these two
-       into one sentence would say a session measured nothing when in fact two
-       different quantities each measured zero. */
+
     eq(tiles["Flow bias"]?.kind, "empty", "the dollar weighting over a zero gross is measured-empty");
     ok(/no net premium was priced/.test(tiles["Flow bias"]?.s || ""),
        "in its own denominator's words");
@@ -2232,18 +1415,11 @@ try {
     marks.set("empty", tiles[TILTS[0]].mark);
     await post("market", market);
 
-    /* FOUR KINDS, FOUR MARKS, AND NONE OF THEM IS A HUE. Border style, border
-       width and the leading glyph are the channels a monochrome printout
-       keeps; two marks that differed by colour alone would be one mark here. */
     eq(marks.size, 4, "the four silences were each seen once");
     eq(new Set(marks.values()).size, 4,
        `and draw four different marks by shape and glyph alone (${[...marks].map(
          ([k, m]) => k + ": " + m).join(" | ")})`);
 
-    /* THE SESSION TILE, THE SAME WAY. The two boards are two writes of one
-       session, so the tile is a silence only when neither half named it —
-       unreadable if either fetch failed, pending if both are unpublished,
-       unavailable if a half answered without the field. */
     allowFetchFailure = true;
     for (const side of ["long", "short"]) {
       await page.route("**/api/flows/board?side=" + side, (route) =>
@@ -2252,12 +1428,7 @@ try {
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccChg tbody tr", { timeout: 15000 });
     tiles = await readTiles();
-    /* THE SESSION MOVED TO THE CAPTION AND ITS FOUR SILENCES MOVED WITH IT.
-       This is the phase that proves it: the line above the strip reads the
-       SAME boardsRead() the Cleared tile below does, so a session that could
-       not be read and a session nobody has published yet stay two facts —
-       which is what a caption printing one sentence for both would have
-       destroyed, silently, in a layout change. */
+
     const metaSession = await page.evaluate(() => {
       const el = document.getElementById("ccMetaDate");
       return { text: el.textContent.trim(), kind: el.dataset.empty || null };
@@ -2287,8 +1458,6 @@ try {
     eq(tiles.Cleared?.kind, "pending", "and so is the pool");
     for (const side of ["long", "short"]) await page.unroute("**/api/flows/board?side=" + side);
 
-    /* A half that answered without a date, beside a half that has not
-       published: the page has a board and no session to name. */
     await page.route("**/api/flows/board?side=long", (route) => route.fulfill({
       status: 200, contentType: "application/json",
       body: JSON.stringify({ ...board("long", bullRows, SESSION, { deep: 4 }),
@@ -2314,18 +1483,8 @@ try {
     for (const side of ["long", "short"]) await page.unroute("**/api/flows/board?side=" + side);
   }
 
-  /* ---------- a pending pole does not hide a published one ------- */
   {
-    /* THE WORKER'S UNPUBLISHED ANSWER IS A TRUTHY OBJECT —
-       {status:"pending", rows: []} — and the spine took its metadata from
-       `lng || sht`, so an unpublished long board was chosen over a live
-       short one. The axis then labelled itself "no dead band published for
-       this session" while the payload three lines away in the same closure
-       carried the band, the scored count and the neutral count; the status
-       line lost its session date and its band clause the same way.
-       Degrading toward silence is the right direction — discarding a
-       published number to get there is not, and this file's own pending
-       phase pends only board:watch, never a pole. */
+
     await page.route("**/api/flows/board?side=long", (route) => route.fulfill({
       status: 200, contentType: "application/json",
       body: JSON.stringify({ side: "long", rows: [], generatedAt: null, status: "pending" }),
@@ -2352,20 +1511,7 @@ try {
 
     const status = await page.evaluate(
       () => document.getElementById("flowsStatus").textContent.trim());
-    /* THE SESSION MOVED TWICE AND THIS ASSERTION FOLLOWED IT BOTH TIMES,
-       which is the only reason it is still worth anything. It began on the
-       status line, moved to a Session TILE in the verdict strip, and now sits
-       in the strip's caption — and each move it was rewritten to read the new
-       element rather than deleted. THE CLAIM NEVER CHANGED: the page must
-       name the session every figure on it is of.
 
-       THIS PHASE IS WHY THE CLAIM EXISTS. One pole is unpublished and the
-       other is live, and boardsRead takes the date off whichever half
-       ANSWERED — so the caption must print the short board's session, not
-       inherit the pending long board's silence. The kind is asserted beside
-       the text because a caption reading the date correctly while still
-       carrying a silence mark would be the same bug wearing the right
-       number. */
     const metaLive = await page.evaluate(() => {
       const el = document.getElementById("ccMetaDate");
       return { text: el.textContent.trim(), kind: el.dataset.empty || null };
@@ -2384,15 +1530,8 @@ try {
     await page.unroute("**/api/flows/board?side=long");
   }
 
-  /* ---------- one viewBox unit is one CSS pixel ------------------ */
   {
-    /* THE INVARIANT flows-ui.js:20-27 STATES VERBATIM, which this chart was
-       the only one on the site to break. renderSpine measured the host, then
-       clamped the width to 900 and emitted width:"100%" — so at the 132rem
-       canvas tier, where this region spans all twelve columns, a 900-unit
-       viewBox was stretched across ~1700 CSS pixels: every dot rendered near
-       radius 10 instead of 4.5, the 6-unit hatch became ~11px and the 9px
-       tick labels rendered near 17px. */
+
     await page.setViewportSize({ width: 2000, height: 1000 });
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#spinePlot svg", { timeout: 15000 });
@@ -2415,14 +1554,6 @@ try {
        `and the drawing is the measured host width, not a 900-unit clamp (${wide.host})`);
     eq(wide.par, "xMidYMid meet", "with the aspect rule the invariant names");
 
-    /* AND THE SAME INVARIANT ON EVERY RANKED ROW'S STRIP. scoreStrip draws
-       150 units wide with width="150", and the cell it sat in was 156px —
-       laid out as a border box, so after the table's 0.52rem left pad and
-       the cell's 0.6rem right pad the content box was ~138px and base.css's
-       `svg { max-width: 100% }` rendered the drawing at 139.375px: 0.93 CSS
-       px per unit on every row, the rescale the cell's own comment says it
-       exists to prevent. Measured on every strip, at the canvas width where
-       nothing else could be squeezing the table. */
     const strips = await page.evaluate(() => Array.from(
       document.querySelectorAll(".cc-trk svg"), (s) => ({
         attr: Number(s.getAttribute("width")), rendered: s.getBoundingClientRect().width })));
@@ -2433,9 +1564,6 @@ try {
          `(${s.attr} units drawn at ${s.rendered}px)`);
     }
 
-    /* REDRAWN AT THE NEW WIDTH, NEVER SCALED TO IT. Without the debounced
-       repaint the first drag of a window edge reintroduces the same defect
-       the clamp did, and nothing on the page corrects it. */
     await page.setViewportSize({ width: 1100, height: 1000 });
     await page.waitForTimeout(450);
     const narrow = await page.evaluate(() => {
@@ -2449,25 +1577,13 @@ try {
     ok(Math.abs(narrow.rendered - narrow.vbW) <= 1 && Math.abs(narrow.rendered - narrow.host) <= 1,
        `and the invariant survives it (${narrow.rendered} css for ${narrow.vbW} units)`);
 
-    /* THE TRAIL IS THE CHANGE, ON THE LEVEL AXIS. Each mark trails back to
-       the score the name held at its previous scored session, so the
-       distribution of MOVEMENT is readable on the same fixed axis as the
-       distribution of level — and a trail spanning more than one session is
-       DASHED rather than tinted, so the difference survives a monochrome
-       printout. */
     const trails = await page.evaluate(() => Array.from(
       document.querySelectorAll("#spinePlot .sp-move"), (l) => ({
         t: (l.querySelector("title") || {}).textContent || "",
         dashed: !!l.getAttribute("stroke-dasharray"),
         x1: Number(l.getAttribute("x1")), x2: Number(l.getAttribute("x2")),
       })));
-    /* FOUR OF THE NINE MARKS, AND THE COUNT IS THE ASSERTION. ORCL, CAT, PFE
-       and MU moved and their track reading is this board row. DE and ADBE
-       held their score, KLA and XOM have nothing to subtract from, and BAC's
-       newest reading is on the PRIOR session — the trail is a claim about
-       this session's movement and BAC's move is not one, so it may not be
-       drawn. `>= 5` was the assertion here, which passed while BAC was
-       trailed from an origin neither payload contains. */
+
     eq(trails.length, 4,
        `only the names whose track reading IS this board row trail their move (${trails.length})`);
     deep(trails.map((l) => l.t.split(" ")[0]).sort(), ["CAT", "MU", "ORCL", "PFE"],
@@ -2480,23 +1596,14 @@ try {
     const mu = trails.find((l) => /^MU/.test(l.t));
     ok(mu && mu.dashed && /over 2 sessions/.test(mu.t),
        `and a move across a gap is dashed rather than tinted (${mu && mu.t})`);
-    /* A CROSSING IS RINGED, which is a shape and not a hue — and only TWO of
-       the session's three crossings can be ringed here, because the spine
-       marks PUBLISHED names and a name that faded is by definition back
-       inside the band and on neither board. That is the whole argument for
-       leading the page with the change region rather than with this chart:
-       the exit signal is invisible on a picture of the published
-       distribution, and it is the reading a holder needs most. */
+
     eq(await page.locator("#spinePlot .sp-cross").count(), 2,
        "the names that cleared and flipped are ringed on the axis");
     const ringed = await page.evaluate(() => Array.from(
       document.querySelectorAll("#spinePlot .sp-cross"), (c) => c.getAttribute("class")));
     deep(ringed.map((c) => c.replace("sp-cross ", "")).sort(), ["is-cleared", "is-flipped"],
       "each ring says which category change it marks");
-    /* AND IT SAYS IT IN A WORD TOO. The ring is a shape, so THAT a crossing
-       happened survives greyscale; WHICH one was carried by the class alone,
-       which is a hue to a sighted reader and nothing at all to a screen
-       reader. The mark's accessible name carries the word. */
+
     const muDot = await page.evaluate(() => (document.querySelector(
       '#spinePlot .sp-dot[data-t="MU"] title') || {}).textContent || "");
     ok(/· cleared$/.test(muDot), `a ringed mark names its crossing in words (${muDot})`);
@@ -2507,13 +1614,6 @@ try {
     eq(await page.locator('#spinePlot .sp-dot[data-t="NKE"]').count(), 0,
        "and the faded name is on no board, so the spine cannot show it at all");
 
-    /* THE MARK WHOSE MOVE IS NOT ABOUT TODAY. BAC is on the bear board at
-       −62 and its newest track reading is 2026-08-21, so the −7 it carries
-       happened before this session. The dot is drawn — the LEVEL is today's,
-       from the board — but nothing is trailed from it, because the origin
-       would be the board's score minus a move measured on another session:
-       a third number, neither payload's, drawn as a measurement. Its title
-       says when it was last scored instead. */
     const bac = await page.evaluate(() => {
       const dot = document.querySelector('#spinePlot .sp-dot[data-t="BAC"]');
       return dot && {
@@ -2531,25 +1631,8 @@ try {
     await page.setViewportSize({ width: 1280, height: 1000 });
   }
 
-  /* ---------- a track whose newest session is not the board's ----- */
   {
-    /* THE ORDINARY OUTAGE ON A PAGE THAT LEADS ON CHANGE. The board and the
-       score track are two keys written by two legs of one run, and nothing
-       forces the track's newest column to be the session the board is
-       publishing: the archive can lag by a session, and a name can be out of
-       the screener for a day and carry a real move measured last week.
 
-       Every change reading on the page has to survive that, and before this
-       phase two of them did not. The ranked row stamped "flipped" onto CAT
-       from a reading a session old, and the spine trailed each mark from
-       `board score − published move` — which is the previous observation
-       only when the two payloads agree about where the name is NOW, and is
-       otherwise a third number that neither of them contains.
-
-       Served here by publishing one more session that holds only ORCL, at a
-       score the board does not carry: every other name's newest reading is
-       now a session behind, and ORCL's is current but at 92 against the
-       board's 88. */
     await post("scoretrack", scoretrack(TRACK_DAYS.concat([{
       d: "2026-08-25", source: "scores", rows: [{ t: "ORCL", s: 92, q: 2600 }],
     }])));
@@ -2562,9 +1645,7 @@ try {
       rings: document.querySelectorAll("#spinePlot .sp-cross").length,
       dots: document.querySelectorAll("#spinePlot .sp-dot").length,
       orcl: (document.querySelector('#spinePlot .sp-dot[data-t="ORCL"] title') || {}).textContent || "",
-      /* THE NAME NODE, NOT THE CELL: by this point in the file the name cell
-         also carries the earnings marker, and reading the cell whole keys
-         this map on "ORCL⚠3s". */
+
       asOf: Array.from(document.querySelectorAll("#ccChg tbody tr"),
         (tr) => [tr.children[1].querySelector(".cc-open, .cc-flat").textContent.trim(),
                  tr.children[7].textContent.trim()]),
@@ -2581,9 +1662,6 @@ try {
     ok(!/trail the move/.test(stale.aria),
        "and the accessible description does not promise trails that are not drawn");
 
-    /* The change region still reports every one of those moves — dated. The
-       reading is real; it is simply not about today, and that distinction is
-       this region's whole job. */
     const byName = Object.fromEntries(stale.asOf);
     eq(byName.ORCL, "this session", "the one name scored in the newest session says so");
     ok(/2026-08-24 · 1 session back/.test(byName.CAT || ""),
@@ -2592,13 +1670,8 @@ try {
     await post("scoretrack", scoretrack(TRACK_DAYS));
   }
 
-  /* ---------- the fourth change sentence, and the missing layer --- */
   {
-    /* FOUR STATUSES, FOUR SENTENCES was the claim; three of them had a
-       fixture. "single-session" is the archive on its first day: one column,
-       nothing to compare it against, and a page that worded it like "cold"
-       would tell a reader the pool held nothing comparable when the truth is
-       that there is only one session to compare. */
+
     await post("scoretrack", scoretrack([{
       d: SESSION, source: "scores",
       rows: [...bullRows, ...bearRows].map((r) => ({ t: r.t, s: r.s })),
@@ -2618,11 +1691,6 @@ try {
     ok(!/held its score/.test(one.text) && !/No name in the pool/.test(one.text),
        "in words that are neither of the other two absences");
 
-    /* AND THE PAYLOAD THAT PREDATES THE LAYER ENTIRELY: readable, populated,
-       and carrying no d1 and no change block. This is the branch that
-       refuses to fall back to subtracting two scores in the browser — the
-       arithmetic this region was rebuilt to delete — because a difference
-       with no session span attached is not a reading. */
     await post("scoretrack", {
       v: 2, status: "ok", sessionDate: SESSION, generatedAt: new Date().toISOString(),
       windowSessions: 2, deadBand: 20,
@@ -2644,33 +1712,21 @@ try {
        `it names the field that is missing (${old.text})`);
     ok(/will not subtract two scores itself/.test(old.text),
        `and refuses the arithmetic that has no span attached (${old.text})`);
-    /* The strips still draw from the same series: the SERIES is published,
-       only the derived layer is not, and the two are different absences. */
+
     ok(await page.locator(".cc-bull tbody .cc-trk svg").count() > 0,
        "while the series it does carry is still drawn");
 
     await post("scoretrack", scoretrack(TRACK_DAYS));
   }
 
-  /* ---------- the count with no rows behind it -------------------- */
   {
-    /* THE FOURTH WAY THIS REGION CAN HAVE NOTHING TO TABULATE, and the one
-       that must not be worded as a quiet market: the pool moved, the change
-       block counts it, and the payload's row ceiling shed every name that
-       did. Saying "nothing moved" here would contradict the sentence printed
-       directly above it.
 
-       Hand-written rather than built by the shaper, because the shaper caps
-       at 500 names and this state needs a shed that took every mover — a
-       payload shape the wire can carry and this fixture cannot otherwise
-       reach. */
     await post("scoretrack", {
       v: 2, status: "ok", sessionDate: SESSION, generatedAt: new Date().toISOString(),
       windowSessions: 2, deadBand: 20, namesShed: 40, shedBy: "names", namesSeen: 41,
       sessions: [{ d: "2026-08-21", source: "scores", names: 41, preEpoch: false },
                  { d: SESSION, source: "scores", names: 41, preEpoch: false }],
-      /* One surviving row, and it has no prior observation — so it carries no
-         d1 and there is nothing for the table to draw. */
+
       names: [{ t: "KLA", s: [null, 41], n: 1, last: 41, lastAt: 1, d1: null, run: 1 }],
       change: {
         session: SESSION, prior: "2026-08-21", comparable: 40, consecutive: 38,
@@ -2697,14 +1753,8 @@ try {
     await post("scoretrack", scoretrack(TRACK_DAYS));
   }
 
-  /* ---------- a comparison across the selection epoch ------------- */
   {
-    /* THE OTHER SPARSE-COLUMN CAVEAT, which had a renderer branch and no
-       fixture that could reach it: the suite's epoch sat after every session
-       in the window, so `preEpoch` was true on both ends of every comparison
-       and the marking could never fire. Scores either side of the epoch come
-       from different pools under different selection rules, which is two
-       experiments wearing one line. */
+
     await post("scoretrack", { ...scoretrack(TRACK_DAYS),
       ...buildScoreTrack(TRACK_DAYS, { deadBand: 20, epoch: "2026-08-20" }) });
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
@@ -2723,19 +1773,8 @@ try {
     await post("scoretrack", scoretrack(TRACK_DAYS));
   }
 
-  /* ---------- the staleness guard -------------------------------- */
   {
-    /* THIS WAS THE ONLY FLOWS ROUTE WITHOUT ONE, and it is the route the
-       section opens on. loadBoard read r.json() and dropped the
-       X-Payload-Updated header the Worker stamps on every payload, so during
-       a pipeline outage /flows/long/ warned and /flows/ rendered Tuesday's
-       board on Friday with a session date in its caption and no warning
-       anywhere on the page.
 
-       TWO INDEPENDENT FAILURES. A dead pipeline has an old WRITE time and a
-       current session date; a frozen upstream has a fresh write time and an
-       old session. They are served here as two separate fixtures because a
-       guard that only ever reads one of the two would pass on the other. */
     const today = new Date().toISOString().slice(0, 10);
     const serve = async (sessionDate, updatedAt) => {
       for (const [side, rows] of [["long", bullRows], ["short", bearRows]]) {
@@ -2757,7 +1796,6 @@ try {
       body: document.body.classList.contains("is-stale"),
     }));
 
-    // A session written minutes ago, describing today. Nothing to warn about.
     await serve(today, Date.now() - 5 * 60 * 1000);
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".cc-bull tbody tr", { timeout: 15000 });
@@ -2767,27 +1805,17 @@ try {
     eq(s.text, "", "with no sentence left behind in the slot");
     await stop();
 
-    /* ---- the two ways this function used to CLAIM freshness it had not
-       measured, asked of the function itself rather than through a page.
-
-       Both were "unknown" wearing "fresh". A `fresh` verdict marks nothing and
-       says nothing, so on either of these the reader saw a clean page — which
-       is the same pixels a genuinely current session produces, and the one
-       outcome a staleness guard exists to prevent. */
     const verdicts = await page.evaluate(() => {
       const S = window.FlowsUI.staleness;
       const now = Date.parse("2026-09-04T12:00:00Z");
       return {
-        /* A stamp of 0 is the epoch, which is 56 years stale — so it is
-           refused as a stamp. Refusing it must not then be read as passing. */
+
         zeroStamp: S({ __updatedAt: 0 }, now).kind,
         negStamp: S({ __updatedAt: -1 }, now).kind,
-        /* Date.parse("2026-09" + "T21:00:00Z") is FINITE in V8. A number that
-           parses is not a date that was measured. */
+
         truncated: S({ sessionDate: "2026-09" }, now).kind,
         prose: S({ sessionDate: "Thursday" }, now).kind,
-        /* And the readable ones still answer, or the fix would have bought
-           its honesty by refusing to measure anything. */
+
         realFresh: S({ __updatedAt: now - 60000, sessionDate: "2026-09-04" }, now).kind,
         realStaleSession: S({ __updatedAt: now - 60000, sessionDate: "2026-08-01" }, now).kind,
         nothing: S({}, now).kind,
@@ -2806,9 +1834,6 @@ try {
        "and one whose session is five weeks old still raises the session warning");
     eq(verdicts.nothing, "unknown", "and a payload with nothing datable claims nothing");
 
-    /* THE WRITE-TIME BRANCH, REACHABLE ONLY BY READING THE HEADER. The
-       session date is today's, so a page that checked only the payload body
-       would see nothing wrong here. */
     await serve(today, Date.now() - 5 * 24 * 60 * 60 * 1000);
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#flowsStale:not([hidden])", { timeout: 15000 });
@@ -2820,9 +1845,6 @@ try {
        "in words that are not the mismatched-halves sentence");
     await stop();
 
-    /* THE SESSION-AGE BRANCH, off the real fixture: the write is minutes old
-       and the session it describes is the fixed 2026-08-24 of this file,
-       which every run after 2026-08-28 is more than four days past. */
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#flowsStale:not([hidden])", { timeout: 15000 });
     s = await read();
@@ -2831,21 +1853,8 @@ try {
        `naming the session the numbers actually describe (${s.text})`);
   }
 
-  /* ---------- the freshness check that could not run -------------- */
   {
-    /* THE GUARD'S OWN ABSENCE IS A SENTENCE, NOT A SILENCE. This page used
-       to carry a private copy of the two staleness tests with its own two
-       constants and its own wording, behind a comment saying the shared one
-       did not exist yet — so one outage was worded two ways on two routes of
-       one product, and the thresholds could be tuned in one place and not
-       the other. The copy is gone and flows-ui.js's `staleness` is the only
-       test. What must NOT follow is a page that silently stops checking when
-       an older module is served from a cache: a freshness check that quietly
-       stops running looks exactly like a pipeline that is fine.
 
-       Served by intercepting the library assignment in a page of its own, so
-       the module really is missing the function rather than the test merely
-       asserting that it would be handled. */
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
     const shadow = await ctx.newPage();
     shadow.on("pageerror", (e) => errors.push("shadow: " + e.message));
@@ -2862,7 +1871,7 @@ try {
       });
     });
     await shadow.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
-    /* Its own context, so its own cookie jar: the gate is the product. */
+
     await shadow.fill("#u", FLOWS_TEST_USER);
     await shadow.fill("#p", FLOWS_PASSWORD);
     await Promise.all([
@@ -2887,19 +1896,6 @@ try {
     await ctx.close();
   }
 
-
-  /* ---------- the two keys that were published and drawn nowhere ----
-
-     worker.js:2721 has served /api/flows/sector-premium and :2738
-     /api/flows/news since the wave that added them, and the overview's
-     fetch list did not ask for either: the data was live, paid for, and
-     invisible. Everything below is about the two regions that now ask.
-
-     BOTH ARE UNPUBLISHED UNTIL THIS BLOCK POSTS THEM, which is what makes
-     the first assertion a live example rather than a mock: the worker
-     answers an unpublished key with {status:"pending"}, and a region that
-     wrote "nothing leaned" over that would be asserting a fact about the
-     market out of a key the pipeline has never written. */
   {
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccLean .cc-quiet", { timeout: 15000 });
@@ -2921,25 +1917,8 @@ try {
     }
   }
 
-  /* ---------- eleven sectors, ranked on the RATIO ------------------
-
-     THE FIXTURE IS BUILT SO THE TWO CANDIDATE ORDERINGS DISAGREE, which is
-     the only way "ranked on leanRatio" means anything. XLK carries $400M of
-     net premium on a 2% lean and XLB carries $62K on a 62% lean, so a
-     renderer ranking on the DOLLAR difference heads the panel with XLK and
-     one ranking on the ratio heads it with XLB. That is exactly the choice
-     flows-pipeline.mjs:3722 argues and publishes as `lean.rank`, and a
-     panel that quietly re-decided it would look entirely reasonable.
-
-     AND IT CARRIES ALL FOUR ROW STATES AT ONCE, because they are four
-     different sentences and a fixture holding one of them can only prove
-     one: a measured lean, a MEASURED ZERO lean (XLC: gross traded, net came
-     out exactly 0), a quiet basket (XLU: both sums measured at zero, so the
-     ratio is 0/0 and undefined), and two unreadable ones. */
   const SECTORS = [
-    /* Deliberately NOT in render order, and not in the payload's own
-       SECTOR_ETFS order either: array order is not a contract and a renderer
-       that takes the rows as they arrive must fail here. */
+
     { sector: "Energy", etf: "XLE", read: "ok", leanRatio: -0.55,
       netPremiumUsd: -5500000, grossPremiumUsd: 10000000,
       bullishPremiumUsd: 2250000, bearishPremiumUsd: 7750000, reason: null },
@@ -2978,10 +1957,6 @@ try {
       bullishPremiumUsd: 7800000, bearishPremiumUsd: 12200000, reason: null },
   ];
 
-  /* THE ENVELOPE IS THE PUBLISHER'S, FIELD FOR FIELD. `lean.rejected` and
-     `notSameAs` are long sentences the pipeline writes precisely so a page
-     can carry them instead of paraphrasing, and this fixture proves the
-     page carries THOSE rather than a copy that would drift from them. */
   const sectorLean = (extra = {}) => ({
     v: 2, status: "ok", sessionDate: SESSION, generatedAt: new Date().toISOString(),
     readAt: "2026-08-25T09:20:00.000Z", refreshed: "nightly", vendorDated: false,
@@ -3007,9 +1982,7 @@ try {
     const rows = await page.evaluate(() => Array.from(
       document.querySelectorAll("#ccLean tbody tr"), (tr) => ({
         read: tr.dataset.read,
-        /* The fund ticker rides inside the sector cell rather than in a
-           column of its own, so it is read from the span that holds it —
-           slicing the cell's text would take the sector label with it. */
+
         etf: tr.querySelector(".cc-etf").textContent.trim(),
         cells: Array.from(tr.children, (td) => td.textContent.trim()),
         bar: !!tr.querySelector(".cc-ln-bar"),
@@ -3022,9 +1995,6 @@ try {
       })));
 
     eq(rows.length, 11, "all eleven baskets are drawn, including the ones that said nothing");
-    /* A PANEL THAT QUIETLY SHRINKS FROM ELEVEN TO EIGHT is how a vendor
-       outage goes unnoticed for a week, which is why the publisher returns
-       every basket whatever happens and why this count is asserted first. */
 
     const order = rows.map((r) => r.etf);
     deep(order, ["XLB", "XLY", "XLI", "XLK", "XLC", "XLV", "XLF", "XLE", "XLU", "XLRE", "XLP"],
@@ -3033,10 +2003,6 @@ try {
     ok(order[0] === "XLB" && order.indexOf("XLK") === 3,
        `the 62% lean on $62K outranks the 2% lean on $400M (${order.join(" ")})`);
 
-    /* THE TAIL IS NOT SORTED AS ZERO. A basket with no ratio cannot be
-       placed on this ordering at all: seating XLU between XLK and XLV — the
-       two rows either side of 0.0 — is the confident zero wearing a
-       comparator, and it is what an `?? 0` in the sort would do. */
     ok(order.indexOf("XLU") > order.indexOf("XLE"),
        `the quiet basket sorts past every measured lean rather than into the middle at 0 ` +
        `(${order.join(" ")})`);
@@ -3046,7 +2012,6 @@ try {
 
     const by = Object.fromEntries(rows.map((r) => [r.etf, r]));
 
-    /* ---- the three numbers, each with its own unit ---- */
     deep(by.XLB.cells.slice(2), ["+62.0%", "$62K", "$100K"],
       "a measured basket prints its share of premium, its signed dollars and its gross");
     deep(by.XLE.cells.slice(2), ["−55.0%", "−$5.5M", "$10.0M"],
@@ -3055,13 +2020,6 @@ try {
       "the dollars are shown beside the ratio, because a ratio cannot say whether a lean " +
       "is $62K or $400M");
 
-    /* ---- A MEASURED ZERO IS NOT AN ABSENCE, AND THERE ARE TWO OF THEM ----
-
-       XLC traded $50M of premium and came out EXACTLY even: the ratio is a
-       measured 0.0% and the net is a measured $0, and both must be visible.
-       XLU traded nothing at all: its net and gross are measured zeros and
-       its ratio is 0/0, which is undefined rather than neutral. The two are
-       different facts and neither is the em dash. */
     deep(by.XLC.cells.slice(2), ["0.0%", "$0", "$50.0M"],
       "an exactly-even basket prints an unsigned measured zero on both, never an em dash");
     ok(by.XLC.bar && by.XLC.width === "0%",
@@ -3082,21 +2040,15 @@ try {
     ok(by.XLRE.none && !by.XLRE.flat && !by.XLRE.bar,
        "with the em dash in the lean column too, so it cannot be mistaken for the quiet row");
 
-    /* THE TWO SILENCES ARE DISTINGUISHABLE WITHOUT READING THE PROSE, which
-       is the whole assertion: a reader glancing down the Net column sees $0
-       against XLU and — against XLRE. A renderer that printed usd(null) as
-       "$0" would make one row of these two. */
     ok(by.XLU.cells[3] !== by.XLRE.cells[3],
        `a measured zero and an absent reading are not the same glyph ` +
        `(${by.XLU.cells[3]} vs ${by.XLRE.cells[3]})`);
 
-    /* ---- sign by POSITION, and the axis is fixed ---- */
     eq(by.XLB.left, "50%", "a bullish lean starts at the centre rule and runs right");
     eq(by.XLB.width, "31%", "its width is its share of the fixed ±100% axis, not of the day");
     eq(by.XLE.left, "22.5%", "a bearish lean is drawn LEFT of the rule — position carries it");
     eq(by.XLE.width, "27.5%", "and the same fixed axis scales it");
 
-    /* ---- the units are in the headers, and none of them is bp ---- */
     const heads = await page.evaluate(() => Array.from(
       document.querySelectorAll("#ccLean thead th"), (th) => th.textContent.trim()));
     deep(heads, ["Sector", "Lean", "Lean · % of premium", "Net · $", "Gross · $"],
@@ -3108,15 +2060,6 @@ try {
        "and the word `bp` appears nowhere in this region — that is the OTHER sector panel's " +
        "unit, and the two quantities must not be confusable");
 
-    /* ---- and it says outright which of the two sector panels it is ----
-
-       THE REGION'S PROSE IS TWO PARAGRAPHS NOW, so this collects both. Nine
-       sentences used to go behind one disclosure and only two of them were
-       method; the other seven — the horizon, what the table is ordered on,
-       that a ratio carries no size, the quiet baskets, the unreadable ones,
-       the basis, and which of the site's two sector panels this is — sit in
-       the open. Reading only the first would have left this file certifying
-       whichever half it happened to match. */
     const noteParts = await page.locator("#ccLean .cc-ln-note").allTextContents();
     const note = noteParts.join(" ").trim();
     ok(noteParts.length >= 1,
@@ -3129,11 +2072,7 @@ try {
        "one they are looking at rather than left to infer it");
     ok(/option/i.test(note) && /premium/i.test(note),
        "while naming the quantity this one is made of");
-    /* THE DERIVATION IS THE PAYLOAD'S, printed in the open rather than in a
-       column title only a mouse can reach. `lean.relation` is the publisher's
-       exact statement of how the three numbers are made of the two raw sums,
-       so a reader who disagrees with either derivation can redo it — and a
-       hand-written tooltip saying the same thing could drift from it. */
+
     ok(/Derived: netPremiumUsd = bullishPremiumUsd - bearishPremiumUsd/.test(note),
        `the note carries the publisher's own relation between the three numbers ` +
        `(${note.slice(0, 120)}…)`);
@@ -3145,33 +2084,6 @@ try {
     ok(/POSITION/.test(note),
        "and that the sign is carried by position, which is what survives greyscale");
 
-    /* ---- and NOTHING THAT WITHHOLDS IS BEHIND THE DISCLOSURE ----------
-
-       THE ASYMMETRY IS THE WHOLE RULE and it was being broken here. Fold the
-       reassurance, never the withholding: a reassurance unread costs a
-       reader nothing, and a caveat unread is a caveat deleted. This panel
-       folded nine sentences of which four were withholdings — the quiet
-       baskets, the unreadable ones, what the table is ordered on (which
-       otherwise lives only in an aria-label), and that a ratio carries no
-       size.
-
-       ASSERTED POSITIVELY, INTO THE OPEN PARAGRAPH, because the negative form
-       alone can pass by matching nothing. This fixture's method group is 204
-       characters — a 63-character relation plus a 141-character sign decoder,
-       joined by one space — which
-       is UNDER the 420-character wall, so appendMethod writes a plain
-       paragraph and creates no <details> at all. Every "not inside the fold"
-       check would then be comparing against an empty string and passing for
-       the wrong reason, in the file whose header is about exactly that. So
-       each sentence is required to be IN the qualifier paragraph, which no
-       absence can satisfy; the fold check is kept beside it for the payload
-       whose method DOES pass the wall. */
-    /* THE CLASS, NOT THE TAG, which is what this assertion's own message
-       already says: "the class is what draws the rule down the left". It was
-       written as `p.is-qualifier` and the caveats are a <ul> now — seven
-       claims joined into one paragraph rendered as a block a reader skips,
-       and a skipped qualifier does not qualify. The count and every sentence
-       check below are unchanged; only the element is. */
     const openQual = await page.locator("#ccLean .is-qualifier").count();
     eq(openQual, 1,
        "the caveats are exactly one block marked as qualifiers — the class is what draws " +
@@ -3196,10 +2108,6 @@ try {
        "while the publisher's own relation — how the three numbers are made, and nothing " +
        "about what they mean — is the method, and is not in the qualifier paragraph");
 
-    /* THE WALL IS ONE NUMBER IN TWO FILES, so it is compared rather than
-       trusted. flows-overview.js cannot import flows-panels.js — that file is
-       on the ticker route alone and is 54k — so the constant is copied, and a
-       copy nothing checks is a copy that drifts. */
     const wallOf = (file) => {
       const m = readFileSync(new URL(`../${file}`, import.meta.url), "utf8")
         .match(/NOTE_WALL_CHARS\s*=\s*(\d+)/);
@@ -3215,25 +2123,11 @@ try {
        "because it cannot import it, and a threshold that drifts means two pages disagree " +
        "about how long a wall of prose is");
 
-    /* THE FINDING NAMES ITS SUBJECTS. The lead sentence read `hi.t`, the
-       board row's key, on rows keyed `etf`/`sector` — so it printed
-       "undefined leans most bullish at +27.8% of its own premium; undefined
-       most bearish at −22.1%." on every live session, and this file asserted
-       the table under it without ever reading it. Built through the same
-       pct() the cells use, from the two rows the ordering put at the ends,
-       so lead and column cannot disagree. */
     const finding = (await page.locator("#ccLean .fc-reading").textContent()).trim();
-    /* The note legitimately says "0/0 is undefined" about the quiet basket,
-       so the word is checked where the defect printed it: as a subject. */
+
     ok(!/undefined (leans|most|is)/.test(region),
        `no sentence in the region has "undefined" for a subject (${finding})`);
-    /* BY NAME, NOT BY TICKER, and the string is still pinned whole. This read
-       "XLB leans most bullish … XLE most bearish", because the renderer led
-       with the fund code; a sentence is the one place the abbreviation costs
-       more than it saves, since expanding it mid-clause is work the reader
-       should not be doing. The assertion stays an exact-string equality
-       rather than relaxing to a regex: the wording of the lead reading IS the
-       product here, and a looser check would have let the ticker come back. */
+
     eq(finding,
        "Materials leans most bullish at +62.0% of its own premium; Energy most bearish at −55.0%.",
        "the finding names the top and bottom basket by its sector name, at the percentages " +
@@ -3243,14 +2137,6 @@ try {
        "the subtitle counts the baskets that produced a lean against the eleven asked about");
   }
 
-  /* ---------- the whole key, silent in two different ways ----------
-
-     THE PUBLISHER RETURNS ELEVEN ROWS WHATEVER HAPPENS, so a leg-level
-     failure arrives as eleven rows all reading "unreadable" — and drawing
-     them would present ONE outage as eleven separate sector findings. The
-     status on the envelope is the only thing that can tell those apart, and
-     `quiet` (the vendor answered with nothing) and `unreadable` (rows
-     arrived and none of them shaped) are not the same failure either. */
   {
     const blind = SECTORS.map((s) => ({
       ...s, read: "unreadable", leanRatio: null,
@@ -3293,13 +2179,6 @@ try {
     await post("sector:premium", sectorLean());
   }
 
-  /* ---------- the headline tape, and its age -----------------------
-
-     A NEWS REGION THAT LOOKS LIVE AND IS SIX HOURS OLD IS WORSE THAN NO
-     NEWS REGION. The pipeline reads this feed once on a weekday-morning
-     cron, so every fixture below is built from an OFFSET against the clock
-     the page will read — a hard-coded ISO stamp would age with the
-     repository and the suite would assert a freshness that drifts. */
   const H = 3600000, M = 60000;
   const now = Date.now();
   const NEWS_ROWS_FIXTURE = [
@@ -3307,32 +2186,24 @@ try {
       source: "Reuters", createdAt: new Date(now - (6 * H + 30 * M)).toISOString(),
       createdAtMs: now - (6 * H + 30 * M), major: true, sentiment: "neutral",
       tickers: ["ORCL", "CAT", "SNAP", "MU", "PFE"], tags: ["federal-reserve"] },
-    /* A HEADLINE IS FREE TEXT FROM AN EXTERNAL SOURCE. This one carries
-       markup because the only way to prove a renderer builds nodes and sets
-       textContent — rather than assembling a string — is to hand it a
-       string that would become elements if it did not. */
+
     { headline: "Sirius XM <b>surges</b> on <script>alert(1)</script> upgrade",
       source: "BusinessWire", createdAt: new Date(now - (2 * H + 15 * M)).toISOString(),
       createdAtMs: now - (2 * H + 15 * M), major: false, sentiment: "positive",
       tickers: ["SIRI"], tags: ["upgrade"] },
-    /* THE VENDOR SENT NO FLAG AT ALL, which is not the same sentence as
-       "not flagged major" — so this row gets no mark and is counted in the
-       note instead. */
+
     { headline: "Oil steadies after inventory draw", source: "MarketNews",
       createdAt: new Date(now - (45 * M)).toISOString(), createdAtMs: now - (45 * M),
       major: null, sentiment: "negative", tickers: ["XOM"], tags: ["energy"] },
     { headline: "Chip orders slip in the September survey", source: "MarketNews",
       createdAt: new Date(now - (7 * H)).toISOString(), createdAtMs: now - (7 * H),
       major: false, sentiment: null, tickers: [], tags: [] },
-    /* UNDATED, AND IT SORTS LAST RATHER THAN BEING DATED TO NOW. */
+
     { headline: "An item the vendor sent with no timestamp", source: null,
       createdAt: null, createdAtMs: null, major: null, sentiment: null,
       tickers: [], tags: [] },
   ];
-  /* THREE FILLERS, NOT FOUR, AND THE COUNT IS LOAD-BEARING. The region lists
-     eight, and the undated row sorts LAST by the shaper's own rule — so a
-     ninth row would push the one branch that proves an undated row is not
-     dated to now off the bottom of the list this file can see. */
+
   for (let i = 0; i < 3; i += 1) {
     NEWS_ROWS_FIXTURE.splice(4, 0, {
       headline: "Filler headline " + (i + 1), source: "Wire",
@@ -3361,7 +2232,6 @@ try {
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccNews .cc-nw-row", { timeout: 15000 });
 
-    /* ---- THE AGE IS STATED, AND IT IS STATED FIRST ---- */
     const seat = await page.evaluate(() => {
       const body = document.getElementById("ccNews");
       return {
@@ -3392,7 +2262,6 @@ try {
     ok(/^all 8 · fetched 3h \d+m ago$/.test(seat.sub),
        `and the heading says how many it holds and how old the read is (${seat.sub})`);
 
-    /* ---- EVERY ROW CARRIES ITS OWN AGE, FROM THE VENDOR'S STAMP ---- */
     const rows = await page.evaluate(() => Array.from(
       document.querySelectorAll("#ccNews .cc-nw-row"), (li) => ({
         headline: li.querySelector(".cc-nw-h").textContent,
@@ -3428,7 +2297,6 @@ try {
        "and it says so rather than being dated to now, which would be the confident zero in " +
        "the one dimension where it is invisible");
 
-    /* ---- THE HEADLINE IS TEXT, AND IT STAYS TEXT ---- */
     const marked = rows.find((r) => /Sirius/.test(r.headline));
     eq(marked.headline, "Sirius XM <b>surges</b> on <script>alert(1)</script> upgrade",
        "a headline carrying markup is printed as the characters the vendor sent");
@@ -3438,7 +2306,6 @@ try {
     ok(!/<b>/.test(marked.html) && /&lt;b&gt;/.test(marked.html),
        `the angle brackets are escaped in the DOM rather than parsed (${marked.html.slice(0, 40)}…)`);
 
-    /* ---- A TICKER LINKS ONLY WHERE THERE IS SOMETHING BEHIND IT ---- */
     deep(rows[0].opens, ["ORCL", "MU"],
       "only the names this session built a detail card for are minted as links");
     deep(rows[0].openHrefs,
@@ -3456,7 +2323,6 @@ try {
        "and a headline naming more tickers than the row shows says how many, because a list " +
        "that truncates in silence reads as a population");
 
-    /* ---- THE VENDOR'S LABEL IS CARRIED, NOT SCORED ---- */
     eq(marked.sent.text, "positive", "the vendor's sentiment word is carried verbatim");
     ok(!/is-pos|is-neg/.test(marked.sent.cls),
        `and is NOT tinted with this page's own polarity classes (${marked.sent.cls}) — green ` +
@@ -3471,14 +2337,6 @@ try {
        `and their number is stated once in the note instead (${seat.note.slice(-120)})`);
   }
 
-  /* ---------- two ceilings, two sentences --------------------------
-
-     `atVendorLimit` AND `capped` ARE NOT THE SAME FACT AND MAY NOT SHARE A
-     WORD. The first says the VENDOR'S own ceiling was hit, so the true
-     population is unknown and at least that large. The second says OUR cap
-     dropped rows we did see, so their number is known exactly. A region
-     that said "truncated" for both would leave a reader unable to tell an
-     unknown population from a known one. */
   {
     await post("news", newsPayload({
       kept: 60, capped: true, shed: 38, atVendorLimit: true, returned: 100 }));
@@ -3497,10 +2355,6 @@ try {
     eq((await page.locator("#ccNewsSub").textContent()).trim().split(" · ")[0], "8 of 60",
        "and the subtitle counts against the payload's own kept, not the rows in hand");
 
-    /* OUR CAP WITHOUT THE VENDOR'S. The two travel together on a full
-       vendor page and separately on a short one, so a renderer that printed
-       the vendor sentence whenever it printed the cap sentence would pass a
-       fixture where both are true and lie on every other session. */
     await post("news", newsPayload({
       kept: 60, capped: true, shed: 12, atVendorLimit: false, returned: 72 }));
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
@@ -3514,7 +2368,6 @@ try {
     await post("news", newsPayload());
   }
 
-  /* ---------- the news key, silent in three ways -------------------- */
   {
     await post("news", newsPayload({ status: "quiet", rows: [], kept: 0, returned: 0,
       reason: "the headlines feed was read and returned no rows" }));
@@ -3541,7 +2394,6 @@ try {
        `and the sentence refuses the reading the other silence would have given (${broke.text})`);
     ok(broke.text !== empty.text, "the three silences are three sentences, still");
 
-    /* AND THE ONE BRANCH THAT MUST NOT GUESS: no read stamp at all. */
     const undatedRead = newsPayload();
     delete undatedRead.readAt;
     await post("news", undatedRead);
@@ -3561,20 +2413,6 @@ try {
     await post("news", newsPayload());
   }
 
-  /* ---------- every class these two regions emit has a rule ---------
-
-     A CLASS WITH NO RULE IS NOT NEUTRAL, IT IS INVISIBLE — and on these two
-     regions the risk is specific rather than theoretical: `.cc-ln-fill`
-     carries the bar's entire visible body, and `.cc-nw-note` is the
-     freshness warning that the whole news region exists to make
-     unmissable. Either one silently unstyled leaves a page that renders,
-     throws nothing and says less than it claims to.
-
-     THE CLASS LIST IS READ OFF THE BUILT DOM, never typed here, for the
-     reason tests/flows-ticker-contract.mjs gives at the same assertion: a
-     typed list goes stale the moment a cell is added, and it goes stale
-     silently. Scoped to the two new regions because the rest of this page
-     predates the sweep and carries classes of its own. */
   {
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccLean tbody tr", { timeout: 15000 });
@@ -3590,10 +2428,6 @@ try {
       return [...set].sort();
     });
 
-    /* Comments stripped first, for the same reason flows-sign.mjs strips
-       them: a file DESCRIBING a class must not be mistaken for a file
-       styling it, and both of these regions are documented in prose that
-       names their own selectors. */
     const CSS_TEXT = readFileSync(new URL("../assets/css/flows.css", import.meta.url), "utf8")
       .replace(/\/\*[\s\S]*?\*\//g, "");
     ok(classes.length >= 14,
@@ -3606,11 +2440,6 @@ try {
          "neutral one, it is an invisible one");
     }
 
-    /* AND THE TWO INLINE TAGS ON A RANKED NAME STAND APART FROM IT. .cc-cross
-       and .cc-ern follow the ticker inside one cell with no text node
-       between, and neither had a rule at all — so the page printed
-       "SYN132cleared" and "SYN182⚠38d" as one token, a number and its unit
-       glued to a name, at a measured gap of 0px. */
     const tagGap = await page.evaluate(() => ["cc-cross", "cc-ern"].map((c) => {
       const tag = document.querySelector(".cc-bull ." + c + ", .cc-bear ." + c);
       if (!tag) return { c, present: false };
@@ -3625,10 +2454,6 @@ try {
          `.${t.c} stands apart from the ticker it follows (margin ${t.margin}px, gap ${t.gap}px)`);
     }
 
-    /* AND THE PAGE STILL DOES NOT WIDEN. Two regions were added to a
-       twelve-column grid; the one thing that can go wrong at 320px is the
-       document itself scrolling sideways, which no overflow container
-       catches. */
     for (const width of [320, 768, 1440]) {
       await page.setViewportSize({ width, height: 1000 });
       const over = await page.evaluate(() =>

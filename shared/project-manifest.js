@@ -1,4 +1,3 @@
-/* Answer-free Worker allowlist for portfolio project state. */
 export const PROJECT_BY_ID = Object.freeze({
   "macro-forecasting-desk": Object.freeze({
     id: "macro-forecasting-desk",

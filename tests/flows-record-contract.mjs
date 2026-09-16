@@ -1,12 +1,3 @@
-/* =============================================================
-   flows-record-contract.mjs — the track-record scorer.
-
-   Every fixture here is built so the CORRECT answer differs from the
-   NAIVE one — a scorer that zero-fills attrition, walks calendar
-   days instead of trading sessions, or publishes a Pearson where it
-   claims a Spearman must fail a named assertion, not drift by a
-   rounding.
-   ============================================================= */
 import assert from "node:assert/strict";
 import {
   tradingCalendar, forwardClose, scoreSessionAt, scoreSessions,
@@ -29,24 +20,18 @@ const closesOf = (spec) => {
   return m;
 };
 const idx = (cal) => new Map(cal.map((d, i) => [d, i]));
-/* A measured zero must survive the read that checks it: `x || 0` would turn a
-   null into the same 0 this assertion is trying to tell apart. */
+
 const one0 = (v) => (v === null || v === undefined ? NaN : v);
 
-/* ---------- the calendar is observed, not assumed ----------------- */
 {
   const cal = tradingCalendar([
-    ["2026-08-07", "2026-08-06", "2026-08-06"],           // unordered, duplicated
-    ["2026-08-10", "not-a-date", "2026-8-9"],             // malformed entries drop
-    null,                                                  // a missing set is not an error
+    ["2026-08-07", "2026-08-06", "2026-08-06"],
+    ["2026-08-10", "not-a-date", "2026-8-9"],
+    null,
   ]);
   assert.deepEqual(cal, ["2026-08-06", "2026-08-07", "2026-08-10"],
     "the calendar is the sorted union of well-formed observed dates"); checks++;
 
-  /* THE HOLIDAY GAP IS THE POINT. From Friday the 7th, one session later is
-     Monday the 10th. Naive calendar-day arithmetic answers the 8th — a
-     Saturday with no close — and a scorer built on it either loses every
-     Friday session or, worse, scores it against the wrong day. */
   const closes = closesOf({ T: { "2026-08-10": 110 } });
   const fc = forwardClose(closes, cal, idx(cal), "T", "2026-08-07", 1);
   eq(fc.state, "ok", "one session after a Friday is the next OBSERVED date");
@@ -61,7 +46,6 @@ const one0 = (v) => (v === null || v === undefined ? NaN : v);
      "while a missing close on an existing exit date is attrition");
 }
 
-/* ---------- attrition is excluded, never zero-filled -------------- */
 {
   const cal = ["2026-08-03", "2026-08-04"];
   const rowsBySide = {
@@ -69,12 +53,10 @@ const one0 = (v) => (v === null || v === undefined ? NaN : v);
     short: [{ t: "C", px: 200 }],
   };
   const closes = closesOf({
-    A: { "2026-08-04": 104 },      // +4%
-    B: { "2026-08-04": 51 },       // +2%
-    C: { "2026-08-04": 196 },      // -2%
-    /* GONE has no close on the exit date. Zero-filling it would report a
-       long leg of (4 + 2 + 0) / 3 = 2%; the survivors' truth is 3%. The
-       one-point gap IS the assertion. */
+    A: { "2026-08-04": 104 },
+    B: { "2026-08-04": 51 },
+    C: { "2026-08-04": 196 },
+
   });
   const s = scoreSessionAt(rowsBySide, closes, cal, idx(cal), "2026-08-03", 1);
   eq(s.state, "ok", "the session scores");
@@ -83,11 +65,10 @@ const one0 = (v) => (v === null || v === undefined ? NaN : v);
   close(s.ls, 0.05, "and the spread is long minus short");
   eq(s.lost, 1, "while the departed name is COUNTED — attrition is data quality, not noise");
   eq(s.names, 4, "over the full published name count");
-  /* hit: A rose (+), B rose (+), C fell while shorted (+) => 3 of 3 measured. */
+
   close(s.hit, 1, "the hit rate is over measured names only");
 }
 
-/* ---------- a flat close is a miss, not a half-hit ---------------- */
 {
   const cal = ["2026-08-03", "2026-08-04"];
   const closes = closesOf({ A: { "2026-08-04": 100 }, C: { "2026-08-04": 190 } });
@@ -97,7 +78,6 @@ const one0 = (v) => (v === null || v === undefined ? NaN : v);
   close(s.hit, 0.5, "a name that closed exactly flat is a MISS: the board leaned and the price did not follow");
 }
 
-/* ---------- a one-legged spread is withheld ----------------------- */
 {
   const cal = ["2026-08-03", "2026-08-04"];
   const closes = closesOf({ A: { "2026-08-04": 105 } });
@@ -112,13 +92,8 @@ const one0 = (v) => (v === null || v === undefined ? NaN : v);
   close(s.hit, 1, "while hit still reports over the one measured name — a withheld spread does not withhold the tape");
 }
 
-/* ---------- scoreSessions: horizons count SESSIONS ---------------- */
 {
-  /* Calendar of six sessions; boards on the first three. At k=1 all three
-     have closed; at k=5 ONLY the first has — the sixth calendar session is
-     exactly five from it and beyond the other two. n must say so — a
-     scorer that counts rows, or counts unclosed sessions, reports evidence
-     it does not have. */
+
   const cal = ["d1", "d2", "d3", "d4", "d5", "d6"].map((_, i) => `2026-08-0${i + 1}`);
   const px = { A: 100, C: 200 };
   const mkBoards = (d) => ([
@@ -138,34 +113,22 @@ const one0 = (v) => (v === null || v === undefined ? NaN : v);
   const h5 = rec.horizons.find((h) => h.k === 5);
   eq(h1.n, 3, "at one session every board has closed");
   eq(h5.n, 1, "at five sessions only the FIRST board has closed — n counts closed sessions");
-  /* First board at k=5: A 100→110 (+10%), C 200→190 (−5%) → spread +15%. */
+
   close(h5.ls, 0.15, "and its mean is that one session's own spread, not diluted by unclosed ones", 1e-4);
   eq(rec.sessions.length, 3, "the table lists the sessions closed at the stated horizon");
   eq(rec.sessions[0].d, "2026-08-03", "newest first");
-  /* A board published at d=2026-08-01: A 100->102 (+2%), C 200->198 (-1%). */
+
   close(rec.sessions[2].ls, 0.03, "and each row's spread is the arithmetic of its own closes", 1e-4);
 }
 
-/* ---------- the selection epoch: two experiments, never one mean --- */
 {
-  /* THE DEFECT THIS PINS IS A CONSEQUENCE OF WIDENING THE BOARD.
 
-     A session's long-minus-short return is the return of whatever names that
-     board published, and which names it published is decided by a selection
-     rule. On 2026-08-26 that rule changed — from the extremes of a rough tilt
-     composite to a stated market-cap cohort — so boards on either side of the
-     date score two different populations. Same headings, same units, and a
-     mean across them that is finite, plausible, and answers no question.
-
-     The scorer reports them separately. That is the entire mitigation, and it
-     is worth more than a schema bump would be: bumping the version would zero
-     126 days of retained archive to say a sentence that fits in a footnote. */
   const cal = Array.from({ length: 8 }, (_, i) => `2026-08-0${i + 1}`);
   const mk = (d, aPx) => ([
     { d, side: "long", rows: [{ t: "A", px: aPx }] },
     { d, side: "short", rows: [{ t: "C", px: 200 }] },
   ]);
-  // Two sessions before the epoch, two on or after it.
+
   const boards = [
     ...mk("2026-08-01", 100), ...mk("2026-08-02", 100),
     ...mk("2026-08-05", 100), ...mk("2026-08-06", 100),
@@ -188,16 +151,11 @@ const one0 = (v) => (v === null || v === undefined ? NaN : v);
   eq(h.n, 2, "the headline mean counts ONLY sessions under the current rule");
   eq(h.priorN, 2, "the earlier sessions are reported beside it, under their own count");
 
-  /* The two halves were built to differ by an order of magnitude: +10% before
-     the epoch, +1% after. A pooled mean would land near +5.5% — a number
-     belonging to neither population and visibly wrong here by construction. */
   close(h.ls, 0.01, "the current mean is the current population's, undiluted", 1e-9);
   close(h.prior, 0.10, "and the prior mean is the prior population's", 1e-9);
   ok(Math.abs(h.ls - 0.055) > 0.01,
      "neither is the pooled average of the two — which is the number this partition exists to never publish");
 
-  /* NO EPOCH, NO SECOND SERIES. A `prior` key that is always present but
-     usually null invites a renderer to draw an empty second line forever. */
   const flat = scoreSessions(boards, closes, cal, { horizons: [1], statedK: 1 });
   ok(!("prior" in flat.horizons[0]) && !("priorN" in flat.horizons[0]),
      "with no epoch the horizon row carries no prior keys at all");
@@ -213,13 +171,8 @@ const one0 = (v) => (v === null || v === undefined ? NaN : v);
      "and the reason is published in words beside the numbers");
 }
 
-/* ---------- a mean without its dispersion is not a reading -------- */
 {
-  /* THREE SESSIONS BUILT SO THE SPREAD IS THE ASSERTION. The means below are
-     +2%, +4% and +9%: a mean of +5% that a page could print as "+500bp over 3
-     scored sessions" and, until this layer, print with nothing beside it. The
-     sample sd of those three is 3.61pp — most of the mean — and that is the
-     number that decides whether the mean is a finding or a coin. */
+
   const cal = Array.from({ length: 5 }, (_, i) => `2026-08-0${i + 1}`);
   const mk = (d) => ([
     { d, side: "long", rows: [{ t: "A", px: 100 }] },
@@ -235,18 +188,13 @@ const one0 = (v) => (v === null || v === undefined ? NaN : v);
   eq(h.n, 3, "three sessions in the mean");
   close(h.ls, 0.05, "whose mean spread is +5%", 1e-9);
   close(h.sd, 0.0361, "and whose SAMPLE standard deviation is published beside it", 1e-4);
-  /* THE DIVISOR IS n-1 AND THE FIXTURE CAN TELL. The population form (÷n)
-     answers 0.0294 on these same three numbers, so a scorer that used it
-     fails this assertion by 0.0067 rather than drifting by a rounding. */
+
   ok(Math.abs(h.sd - 0.0294) > 0.005,
      "computed with the sample divisor, not the population one — the two differ here by " +
      "more than a rounding, which is what makes the choice testable");
   close(h.se, 0.0208, "and the standard error is sd over the root of the session count", 1e-4);
   ok(h.se < h.sd, "the standard error of a mean is narrower than the spread it came from");
 
-  /* ONE SESSION HAS NO MEASURED DISPERSION, and it reports none. A published
-     0 here would read as a mean known exactly — the confident zero this
-     repository is named for, wearing a statistic's clothes. */
   const one = scoreSessions(mk("2026-08-01"), closes, cal, { horizons: [1], statedK: 1 });
   eq(one.horizons[0].n, 1, "one scored session");
   eq(one.horizons[0].sd, null, "A SINGLE SESSION HAS NO SAMPLE DISPERSION: null, never 0");
@@ -254,14 +202,8 @@ const one0 = (v) => (v === null || v === undefined ? NaN : v);
   ok(one.horizons[0].ls !== null, "while the mean itself is still published");
 }
 
-/* ---------- the pooled hit rate, over names and not sessions ------ */
 {
-  /* THE NUMBER THE PRODUCT IS NAMED FOR, AND THE UNIT ERROR BESIDE IT.
 
-     Two sessions of very different width: one measured 2 names and got both,
-     one measured 5 and got 2. The mean of the two RATES is 70%. The rate over
-     the names is 4 of 7, 57.1%. Only the second is a hit rate; the first is a
-     mean of ratios, and it flatters whichever session happened to be thin. */
   const cal = ["2026-08-01", "2026-08-02", "2026-08-03"];
   const boards = [
     { d: "2026-08-01", side: "long", rows: [{ t: "A", px: 100 }] },
@@ -287,10 +229,6 @@ const one0 = (v) => (v === null || v === undefined ? NaN : v);
   eq(h.n, 2, "while n counts SESSIONS, and the two denominators are different quantities");
   ok(h.hitN !== h.n, "which this fixture makes visible rather than leaving to a reader");
 
-  /* A WITHHELD SPREAD DOES NOT WITHHOLD THE NAMES. One leg fully attrited, so
-     the session has no long-minus-short at all — but a name that was measured
-     was measured, and dropping it would turn the hit rate into a statement
-     about board completeness. */
   const oneLegged = scoreSessions([
     { d: "2026-08-01", side: "long", rows: [{ t: "A", px: 100 }] },
     { d: "2026-08-01", side: "short", rows: [{ t: "GONE", px: 50 }] },
@@ -304,20 +242,16 @@ const one0 = (v) => (v === null || v === undefined ? NaN : v);
   eq(g.hitN, 1, "with its own denominator");
 }
 
-/* ---------- two populations, two hit rates, never their average --- */
 {
-  /* THE SPECIFIC MISTAKE THIS PARTITION EXISTS TO NEVER MAKE. The prior
-     population hit everything and the current one hit nothing. Pooling them
-     answers 50% — a figure belonging to neither experiment, and precisely the
-     kind of number the product asserted for months without measuring. */
+
   const cal = Array.from({ length: 8 }, (_, i) => `2026-08-0${i + 1}`);
   const mk = (d) => ([
     { d, side: "long", rows: [{ t: "A", px: 100 }] },
     { d, side: "short", rows: [{ t: "C", px: 200 }] },
   ]);
   const boards = [
-    ...mk("2026-08-01"), ...mk("2026-08-02"),      // prior
-    ...mk("2026-08-05"), ...mk("2026-08-06"),      // current
+    ...mk("2026-08-01"), ...mk("2026-08-02"),
+    ...mk("2026-08-05"), ...mk("2026-08-06"),
   ];
   const closes = closesOf({
     A: { "2026-08-02": 110, "2026-08-03": 110, "2026-08-06": 90, "2026-08-07": 90 },
@@ -336,13 +270,10 @@ const one0 = (v) => (v === null || v === undefined ? NaN : v);
          `no key on the horizon row publishes the pooled 0.5 (${key})`);
     }
   }
-  /* A MEASURED ZERO DISPERSION IS NOT AN ABSENT ONE. Both current sessions
-     span exactly −15%, so their sd really is 0 — and it is published as 0,
-     which is the opposite branch from the single-session null above. */
+
   eq(h.sd, 0, "two identical session spreads have a MEASURED dispersion of zero");
   ok(one0(h.se) === 0, "and a standard error of zero, which is a reading and not an absence");
 
-  /* WHICH EXPERIMENT EACH DRAWN ROW BELONGS TO. */
   eq(rec.sessions.length, 4, "all four sessions scored");
   eq(rec.sessions.filter((r) => r.pre === true).length, 2, "two of them are pre-epoch");
   eq(rec.sessions.filter((r) => r.pre === false).length, 2, "and two are not");
@@ -350,40 +281,28 @@ const one0 = (v) => (v === null || v === undefined ? NaN : v);
   eq(rec.sessions[0].measured + rec.sessions[0].lost, rec.sessions[0].names,
      "every row's measured and lost partition its own published names");
 
-  /* THE CAP IS WHY preShown EXISTS. Newest-first and capped at two, the drawn
-     table is entirely post-epoch: the prior experiment then lives in the
-     horizon means and nowhere a reader can see it, which is the state the
-     page has to be able to describe. */
   const capped = scoreSessions(boards, closes, cal,
     { horizons: [1], statedK: 1, epoch, maxSessions: 2 });
   eq(capped.sessions.length, 2, "two rows drawn");
   eq(capped.preShown, 0, "none of them from the prior population");
   eq(capped.horizons[0].priorN, 2, "while its mean is still reported, over its own sessions");
 
-  /* NO EPOCH, NO FLAG. `pre: false` on every row of an unpartitioned archive
-     would assert a partition nobody stated. */
   const flat = scoreSessions(boards, closes, cal, { horizons: [1], statedK: 1 });
   ok(flat.sessions.every((r) => !("pre" in r)),
      "with no epoch no session row carries a pre flag at all");
   eq(flat.preShown, null, "and the count is null rather than 0 — nothing was partitioned");
 }
 
-/* ---------- the IC table splits at the epoch too ------------------ */
 {
-  /* THE MIRROR OF THE RETURN SCORER'S EPOCH CASE, against the evidence table.
 
-     The feature ranks the names exactly backwards before the epoch and exactly
-     forwards after it. Partitioned, that is −1 and +1: two experiments, both
-     legible. Pooled, it is approximately nothing, and a reader would drop the
-     strongest feature on the page as noise. */
   const cal = Array.from({ length: 6 }, (_, i) => `2026-08-0${i + 1}`);
   const closesSpec = {};
   const preRows = [], curRows = [];
   for (let i = 0; i < 6; i++) {
     preRows.push({ t: "P" + i, px: 100, s: i });
     curRows.push({ t: "Q" + i, px: 100, s: i });
-    closesSpec["P" + i] = { "2026-08-02": 100 * (1 + (5 - i) * 0.01) };   // s up, return down
-    closesSpec["Q" + i] = { "2026-08-05": 100 * (1 + i * 0.01) };         // s up, return up
+    closesSpec["P" + i] = { "2026-08-02": 100 * (1 + (5 - i) * 0.01) };
+    closesSpec["Q" + i] = { "2026-08-05": 100 * (1 + i * 0.01) };
   }
   const boards = [
     { d: "2026-08-01", side: "long", rows: preRows },
@@ -408,36 +327,25 @@ const one0 = (v) => (v === null || v === undefined ? NaN : v);
   eq(sPooled.n, 12, "because it measured both experiments as one");
   ok(!("priorIc" in sPooled), "and with no epoch no prior column is drawn at all");
 
-  /* AN EPOCH WITH NOTHING BEFORE IT DRAWS NO SECOND COLUMN, under the same
-     rule the horizon rows keep. */
   const allAfter = icTable(boards, closes, cal, { ...opts, epoch: "2020-01-01" });
   const sAfter = allAfter.cols.find((c) => c.key === "s");
   ok(!("priorIc" in sAfter),
      "the prior column appears only when the prior population has something in it");
 }
 
-/* ---------- IC across horizons, and ordered by evidence ----------- */
 {
-  /* THE DECAY CURVE, over two features built to disagree about horizon.
 
-       aligned — tracks the ONE-session move exactly and is merely good at two.
-       lagging — is merely good at one session and perfect at two.
-
-     The stated horizon is one session, so `lagging` is the weaker column there
-     and its peak is somewhere else. A peak that simply echoed `k` would be
-     undetectable on a fixture where the two coincide; this one is built so
-     they do not. */
   const cal = ["2026-08-01", "2026-08-02", "2026-08-03"];
   const closesSpec = {};
   const rows = [];
-  const oneDay = [1, 2, 4, 3, 5, 6];        // one adjacent swap against the index
-  const twoDay = [1, 2, 3, 4, 5, 6];        // monotone in the index
+  const oneDay = [1, 2, 4, 3, 5, 6];
+  const twoDay = [1, 2, 3, 4, 5, 6];
   for (let i = 0; i < 6; i++) {
     rows.push({
       t: "T" + i, px: 100,
-      lagging: i,                                    // ranks 1..6
-      aligned: [10, 20, 40, 30, 50, 60][i],          // ranks 1,2,4,3,5,6
-      flat: 0.5,                                     // no variation to rank
+      lagging: i,
+      aligned: [10, 20, 40, 30, 50, 60][i],
+      flat: 0.5,
     });
     closesSpec["T" + i] = {
       "2026-08-02": 100 * (1 + oneDay[i] / 100),
@@ -464,19 +372,12 @@ const one0 = (v) => (v === null || v === undefined ? NaN : v);
   close(aligned.ic, 1, "the other column peaks at the stated horizon instead", 1e-9);
   eq(aligned.icPeakK, 1, "and says so");
 
-  /* ORDERED BY |IC|, WITH THE UNMEASURED LAST. Alphabetically these are
-     aligned, flat, lagging — so an alphabetical table seats the one column
-     that has nothing to say in the middle of the two that do, and the reader
-     scanning from the top meets it before the weaker measurement. */
   const keys = table.cols.map((c) => c.key);
   deep(keys, ["aligned", "lagging", "flat"],
     "ordered by the strength of the evidence, not by the spelling of the key");
   eq(table.cols[2].ic, null, "and the unmeasured column sorts last rather than being dropped");
   ok(/no variation/.test(table.cols[2].reason), "still carrying its reason");
 
-  /* THE SIGN IS THE RELATION AND THE MAGNITUDE IS THE EVIDENCE. A column that
-     predicts reliably downward must outrank a weak positive, or the table
-     hides every short-side finding it has. */
   const flipped = rows.map((r, i) => ({ ...r, bear: -[10, 20, 40, 30, 50, 60][i], meek: [1, 6, 2, 5, 3, 4][i] }));
   const signed = icTable([{ d: "2026-08-01", side: "long", rows: flipped }],
     closesOf(closesSpec), cal, { k: 1, minN: 5, pearson, percentileRank });
@@ -485,8 +386,6 @@ const one0 = (v) => (v === null || v === undefined ? NaN : v);
      "a strong negative coefficient outranks a weak positive one — the table ranks by " +
      "|IC| because a feature that predicts downward is evidence, not the absence of it");
 
-  /* ONE HORIZON, NO CURVE. A curve of one point is not a curve, and a key
-     that is always present teaches a renderer to draw an empty sparkline. */
   const single = icTable([{ d: "2026-08-01", side: "long", rows }], closesOf(closesSpec), cal,
     { k: 1, minN: 5, pearson, percentileRank });
   ok(!("curve" in single.cols[0]) && !("icPeak" in single.cols[0]),
@@ -494,7 +393,6 @@ const one0 = (v) => (v === null || v === undefined ? NaN : v);
   ok(!("horizons" in single), "nor a horizon set");
 }
 
-/* ---------- featureColumnsOf: schema-driven, with two exclusions -- */
 {
   const cols = featureColumnsOf({
     t: "A", r: 3, px: 101.5, s: 42, cnv: 70, chg: 0.01,
@@ -513,27 +411,14 @@ const one0 = (v) => (v === null || v === undefined ? NaN : v);
   eq(cols["pr.1"], undefined, "with nulls dropped");
   eq(cols.gRegime, undefined, "strings have no number to contribute");
 
-  /* THE CHAIN SCALARS ARE ARCHIVED BUT NOT POOLED, and the reason is the one
-     boardRow already states for `im`: each is read at that name's own nearest
-     listed expiry past a floor, which is eight days out on SPY and ninety on a
-     thin name. Pooled across names the coefficient would be a correlation
-     between tenors as much as between skews.
-
-     A name against its OWN history is like-for-like, which is what they are on
-     the board row for. Only the cross-section is refused. */
   for (const key of ["skew", "term", "atmIv", "skewDays"]) {
     eq(cols[key], undefined,
        `${key} is excluded from the cross-sectional table: it is a per-name-horizon quantity`);
   }
 }
 
-/* ---------- icTable: Spearman by construction --------------------- */
 {
-  /* Ten boards on one date each; feature x ranks the names 1..10 and the
-     forward return agrees in RANK on every name — but one name's return is
-     a 40% takeover print. Raw Pearson on these pairs is dominated by that
-     outlier (it reads ~0.62); the rank correlation is exactly 1. The gap
-     between those two numbers is what this fixture exists to measure. */
+
   const cal = ["2026-08-03", "2026-08-04"];
   const rows = [];
   const closesSpec = {};
@@ -555,11 +440,10 @@ const one0 = (v) => (v === null || v === undefined ? NaN : v);
      "so swapping the rank step for raw correlation cannot survive the exact-1 assertion");
 }
 
-/* ---------- icTable: null with a reason, never zero --------------- */
 {
   const cal = ["2026-08-03", "2026-08-04"];
   const rows = Array.from({ length: 8 }, (_, i) => ({
-    t: "T" + i, px: 100, s: i, purity: 0.5,             // purity CONSTANT across the pool
+    t: "T" + i, px: 100, s: i, purity: 0.5,
   }));
   const closesSpec = {};
   rows.forEach((r, i) => { closesSpec[r.t] = { "2026-08-04": 100 + i }; });
@@ -578,7 +462,6 @@ const one0 = (v) => (v === null || v === undefined ? NaN : v);
   ok(/fewer than 20/.test(sCol.reason), "and the floor named");
 }
 
-/* ---------- attrition rows drop out of the IC pool ---------------- */
 {
   const cal = ["2026-08-03", "2026-08-04"];
   const rows = [
@@ -595,7 +478,6 @@ const one0 = (v) => (v === null || v === undefined ? NaN : v);
   close(sCol.ic, 1, "and the measured pairs alone carry the coefficient");
 }
 
-/* ---------- the notes are pinned ---------------------------------- */
 {
   ok(/spearman = pearson\(percentileRank/.test(RECORD_NOTES.method),
      "the method statement names the construction");

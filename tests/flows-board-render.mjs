@@ -1,44 +1,3 @@
-/* =============================================================
-   flows-board-render.mjs — the board's control bar, which did not
-   exist.
-
-   THIS SUITE IS WRITTEN BECAUSE ITS ABSENCE IS WHAT KILLED THE
-   FEATURE. assets/js/flows-board.js carries ~130 lines building a
-   ticker filter, an eight-way order select and a "8 of 63 names
-   match" denominator — commented, argued, and correct. None of it
-   ever entered the DOM on /flows/long/ or /flows/short/, because
-   shared/flows-pages.js served flows-board.js WITHOUT serving
-   flows-ui.js, and buildControls() opens:
-
-       if (!host || !UI || typeof UI.searchBox !== "function" …) return;
-
-   The guard is right. A page that cannot build its controls must not
-   throw. But a correct guard over an absent dependency is SILENCE,
-   and silence is indistinguishable from a page that was never meant
-   to have controls. Nothing failed, nothing logged, and the route
-   looked finished — because the part that was missing was the part
-   that would have drawn itself.
-
-   Grep the suites as they stood: `fb-controls`, `fbQ`, `fbSort` and
-   `fb-count` appeared in NONE of them. The board had a render test
-   for its rows and none for its chrome, so the chrome could be
-   deleted by omission and every suite stayed green.
-
-   SO THE FIRST ASSERTION HERE IS THE DEPENDENCY ITSELF, not a
-   symptom of it. `window.FlowsUI` being undefined on this route is
-   the cause; a missing `#fbQ` is one of several possible effects, and
-   a suite that only tests the effect reports a broken control bar
-   when what broke was a script tag. Both are pinned, in that order,
-   so the failure names the thing to fix.
-
-   THE TWO BOARDS DIFFER IN ONE PROPERTY ON PURPOSE. `board:long`
-   carries `dr` and `nw` on its rows; `board:short` carries neither —
-   the cold-memory state of any morning after a store reset. The
-   select's own comment says an order the payload cannot produce is
-   not offered, "because an option that silently leaves the board in
-   the published order is a control that lies about having done
-   something". That is a branch, so it gets a board that reaches it.
-   ============================================================= */
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { signSession } from "../shared/session.js";
@@ -59,10 +18,6 @@ const put = (key, bodyObj) => fetch(url("/api/flows/ingest?key=" + encodeURIComp
   body: JSON.stringify(bodyObj),
 });
 
-/* EIGHT NAMES, AND THE FILTER TEST TURNS ON TWO OF THEM. "NVDA" and
-   "NVAX" both begin NV and nothing else does, so typing NV must leave
-   exactly two — a filter that matched one name could be passed by an
-   implementation that only ever shows the first hit. */
 const TICKERS = ["NVDA", "NVAX", "AAPL", "AMD", "MSFT", "GOOG", "INTC", "TSLA"];
 
 const boardRow = (t, i, warm) => ({
@@ -71,18 +26,9 @@ const boardRow = (t, i, warm) => ({
   gRegime: i % 2 ? "short" : "long", gFlipDist: -0.1 - i / 100,
   netPrem: (i % 2 ? -1 : 1) * (1e7 - i * 1e5),
   fam: { F: 10, P: 20, D: 30, V: 40, O: 50 },
-  /* edte IS ON BOTH BOARDS. Days to earnings comes from the vendor's
-     calendar, not from the previous session's board, so a cold memory
-     does not remove it — and putting it only on the warm rows made the
-     two boards differ in THREE properties while the assertion below
-     reasoned about two. The first run caught that: 3 !== 2. A fixture
-     whose control differs in more ways than the test names cannot say
-     which difference produced the result. */
+
   edte: 20 + i,
-  /* THE ONE DIFFERENCE BETWEEN THE TWO BOARDS. Warm rows remember the
-     previous session; cold ones have no memory to compare against, so
-     `dr` and `nw` are absent rather than 0 and false — an unmeasured
-     climb is not a climb of zero places. */
+
   ...(warm ? { dr: 5 - i, nw: i === 0 } : {}),
 });
 
@@ -103,8 +49,6 @@ page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + 
 await page.context().addCookies([
   { name: "flows_session", value: token, url: server.baseURL }]);
 
-/* ---- 1. the dependency, before anything that depends on it ---------- */
-
 await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
 await page.waitForSelector(".fd-card");
 
@@ -123,8 +67,6 @@ eq(uiShape && uiShape.searchBox, "function",
 eq(uiShape && uiShape.sortSelect, "function",
    "FlowsUI.sortSelect is callable — the second half of the same guard");
 
-/* ---- 2. the controls themselves ------------------------------------ */
-
 const controls = await page.evaluate(() => {
   const wrap = document.querySelector(".fb-controls");
   if (!wrap) return null;
@@ -134,10 +76,7 @@ const controls = await page.evaluate(() => {
   return {
     wrap: true,
     q: !!q, s: !!s, c: !!c,
-    /* A SIBLING OF .flows-controls, NOT A CHILD — the file's own comment
-       records that as a child it grew a horizontal scrollbar at 352px
-       against a 320px viewport, because a flex item's min-width is auto
-       and a native select's min-content is its widest option. */
+
     isSibling: !!(wrap.parentNode && wrap.previousElementSibling &&
                   wrap.previousElementSibling.classList.contains("flows-controls")),
     countHidden: c ? c.hidden : null,
@@ -157,16 +96,12 @@ ok(controls.isSibling,
    "flex item whose min-width is auto, which for a box holding a native <select> is that " +
    "select's widest option in 16px mono, and the page grew a horizontal scrollbar at 352px");
 
-/* ---- 3. the denominator is silent until it has something to say ----- */
-
 eq(controls.countHidden, true,
    "with no filter typed the count is HIDDEN rather than reading “8 of 8” — a count of " +
    "everything against everything teaches the eye to skip the line on the session it matters");
 eq(controls.countRole, "status",
    "the count carries role=status, so a filter that narrows to nothing is announced: that is " +
    "the case where no rows remain on screen to notice");
-
-/* ---- 4. the filter narrows, and states what it narrowed FROM -------- */
 
 await page.fill("#fbQ", "NV");
 await page.waitForFunction(() => document.querySelectorAll(".fd-card").length === 2);
@@ -184,8 +119,6 @@ ok(/\b2 of 8 names match\b/.test(filtered.count),
    "truncates without saying so reads as a population");
 ok(filtered.count.includes("“NV”"),
    "the count echoes what was typed, in quotes, so the reader can see the filter that produced it");
-
-/* ---- 5. a filter matching nothing is not an empty board ------------- */
 
 await page.fill("#fbQ", "ZZZZ");
 await page.waitForFunction(() => document.querySelectorAll(".fd-card").length === 0);
@@ -205,8 +138,6 @@ ok(/still loaded|clear the field/i.test(none.body),
    "the page says the rows are still loaded and the field can be cleared, so a typed filter is " +
    "not read as an outage");
 
-/* ---- 6. clearing restores, with no refetch -------------------------- */
-
 const requestsBefore = [];
 page.on("request", (r) => { if (/\/api\/flows\//.test(r.url())) requestsBefore.push(r.url()); });
 await page.fill("#fbQ", "");
@@ -220,8 +151,6 @@ eq(restored.hidden, true, "and the count goes silent again with no filter set");
 eq(requestsBefore.length, 0,
    "clearing the filter spends NO network call — the rows never left currentRows, and a filter " +
    "that refetches is a filter that costs the reader a round trip per keystroke");
-
-/* ---- 7. an order the payload cannot produce is not offered ---------- */
 
 const warmOptions = controls.options;
 ok(warmOptions.includes("dr:desc"),
@@ -252,8 +181,6 @@ eq(warmOptions.length - coldOptions.length, 2,
    "exactly two orders are withheld on a cold memory, so a future column that quietly stops " +
    "being offered fails here rather than disappearing");
 
-/* ---- 8. the select actually reorders ------------------------------- */
-
 await page.selectOption("#fbSort", "t:asc");
 await page.waitForFunction(() =>
   document.querySelector(".fd-card") &&
@@ -266,8 +193,6 @@ eq(ordered[0], alphabetical[0],
    "choosing “ticker, A to Z” actually reorders the deck — the select is wired to " +
    "applySortValue and not merely rendered");
 
-/* ---- 9. the invariant the control bar was shaped around ------------- */
-
 await page.setViewportSize({ width: 320, height: 800 });
 await page.waitForTimeout(120);
 const overflow = await page.evaluate(() =>
@@ -277,20 +202,8 @@ ok(overflow <= 1,
    "the measurement the sibling placement and the .st-field min-width:0 both exist for, and it " +
    "is the one that regressed to 352px when the wrap was a flex child");
 
-/* ---- 10. the rail badge states only what this side MEASURED --------- */
-
-/* Back to the width at which the rail is a column. Section 9 left the page at
-   320px, where the rail is a horizontal drawer; the readings below take the
-   slot's own `hidden` property rather than its computed visibility, so the
-   width cannot change the answer — but a badge certified only at a width where
-   the rail is a different component is a badge nobody has checked. */
 await page.setViewportSize({ width: 1280, height: 1000 });
 
-/* IT FILLS AT ALL, FIRST. Everything after this asserts the badge staying
-   silent or printing a zero, and all of that passes against a slot nothing
-   ever writes — including on a page whose fetch died. Read while the store
-   still holds the eight-name board, so the two silences below are known to be
-   choices rather than the absence of a fill. */
 await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
 await page.waitForSelector(".fd-card");
 const railFull = await page.evaluate(() => {
@@ -306,16 +219,9 @@ eq(railFull.text, "8",
    "proves the field is preferred when it is there");
 eq(railFull.hidden, false, "and the slot is shown once it has a measurement in it");
 
-/* THE PENDING CASE IS WRITTEN, NOT ARRANGED BY DELETION. This is the exact
-   envelope the Worker answers with for a board row that is ABSENT (worker.js,
-   the board route). A D1 read that THREW answers the same shape with
-   `reason: "read-failed"` on it, and section 12 feeds that one separately —
-   the two used to be byte-identical, which is why this page once hedged one
-   sentence across both causes. */
 await put("board:long", { side: "long", rows: [], generatedAt: null, status: "pending" });
 await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
-/* Waited for by CLASS, asserted by KIND: a wait keyed to the right kind would
-   report a collapsed silence as a timeout rather than as the assertion below. */
+
 await page.waitForFunction(() => !!document.querySelector("p.fb-empty[data-empty]"));
 const railPending = await page.evaluate(() => {
   const el = document.querySelector('[data-rail-count="long"]');
@@ -342,12 +248,6 @@ eq(railPending.text, "",
    "and the slot holds no text at all: a hidden element carrying “0” prints that zero the moment " +
    "anything — a stylesheet, a reading tool, a future rail — disagrees about `hidden`");
 
-/* THE OTHER HALF OF THE SAME RULE, and why the guard here is not the
-   `if (slot && rows.length)` flows-watch.js:434 uses. On a board a zero can be
-   a MEASUREMENT — names were scored and none of them cleared the dead band —
-   and suppressing it would report a working quiet session as an outage. The
-   fixture is the cold board with its rows taken away and a scored count added,
-   so `scored` is the only thing separating it from the payload above. */
 await put("board:short", {
   ...board("short", false), rows: [], deadBand: 1, scored: 130, neutral: 124,
 });
@@ -358,8 +258,7 @@ const railQuiet = await page.evaluate(() => {
   return {
     text: el ? el.textContent : null,
     hidden: el ? el.hidden : null,
-    /* THE PARAGRAPH, NOT THE FIRST MARKED ELEMENT. The status line above the
-       deck now carries the same data-empty, and it comes first in the DOM. */
+
     msg: document.querySelector('p.fb-empty[data-empty="quiet"]').textContent,
   };
 });
@@ -374,23 +273,6 @@ eq(railQuiet.hidden, false,
    "and that zero is VISIBLE: a rail that hides a measured emptiness collapses a quiet session " +
    "into an outage, the same error as the pending case with its sign reversed");
 
-/* ---- 10-bis. the badge counts the POPULATION, not the page ---------- */
-
-/* THE DEFECT THIS SECTION EXISTS FOR, and it survived every fixture above.
-   The publisher derives two counts from one list — `cleared`, the side's whole
-   pool past the dead band, and `shed`, what the board's length cap could not
-   hold (flows-pipeline.mjs:5687) — and the status line has printed "4 more
-   cleared the band and did not fit (93 of 97 shown)" since those fields
-   shipped. The badge filled from rows.length, so the rail read 93 directly
-   above a sentence saying 97 of them existed. One page, one quantity, two
-   numbers, and the smaller one in the element a reader uses to decide whether
-   the section is worth opening at all.
-
-   ONLY A BOARD WHOSE `cleared` STRICTLY EXCEEDS ITS ROWS CAN CATCH IT. On
-   every other fixture in this file the two are equal — the eight-name board
-   publishes no cleared at all — so each of them passes against the defect and
-   against the fix alike, which is exactly how the defect reached the line the
-   previous commit rewrote. Eight rows out of a pool of twelve, four shed. */
 await put("board:long", {
   ...board("long", true), deadBand: 20, scored: 130, neutral: 118,
   cleared: 12, shed: 4,
@@ -416,11 +298,6 @@ eq(capped.text, "12",
    "truncation defect one element wide");
 eq(capped.hidden, false, "shown, because there is a measured population behind it");
 
-/* THE TWO NUMBERS ARE READ OFF THE PAGE AND COMPARED WITH EACH OTHER, not
-   each with a literal this file picked. A later change that moves one of them
-   moves either the badge or the sentence, and this is the assertion that
-   notices they have stopped agreeing — which is the whole subject of the fix
-   and the one part a pair of hard-coded 12s would not defend. */
 const said = /\((\d+) of (\d+) shown\)/.exec(capped.status);
 ok(said, `the status line states the pool it is an excerpt of at all (${capped.status})`);
 eq(said && said[2], capped.text,
@@ -432,19 +309,6 @@ eq(said && said[1], String(capped.cards),
    "while the numerator in that sentence is the rows actually drawn, so the clause reconciles " +
    "the page against the pool instead of restating either of them twice");
 
-/* THE PRODUCTION SHAPE OF THE MEASURED-QUIET SIDE, which the arm above is
-   not: the pipeline publishes `cleared: sides[side].length` on every board, so
-   a real quiet side carries a 0 rather than omitting the field, and the arm
-   above — written before the field was read here — omits it and therefore only
-   ever exercised the fallback.
-
-   THIS ARM IS A SHAPE ARM AND IT DISCRIMINATES NOTHING BY ITSELF, which is
-   said here rather than left to be discovered. `cleared` is a length and can
-   never be below the rows it produced, so on a quiet side both sources are 0
-   and every plausible fill prints the same "0": it passed against the defect
-   too. What it holds is the GUARD — keyed on `scored`, not on `cleared` — so a
-   later rewrite that keys the guard on the field this commit introduced hides
-   the zero and fails here as well as one arm above. */
 await put("board:short", {
   ...board("short", false), rows: [], deadBand: 1, scored: 130, neutral: 130,
   cleared: 0, shed: 0,
@@ -461,31 +325,6 @@ eq(railZero.text, "0",
    "absence of it");
 eq(railZero.hidden, false, "and it is visible, for the reason the fallback arm already gives");
 
-/* ---- 12. the deck's silences are four, not one ---------------------- */
-
-/* WHAT THIS SECTION MEASURES. showMessage() has stamped data-empty on
-   p.fb-empty since the deck view existed, and flows.css scoped every silence
-   mark to :is(.flows-empty, .cc-quiet, .ft-quiet) — a list the board's own
-   paragraph was never in. Measured on the emitted corpus: a short side that
-   scored 100 names and placed none (quiet, a reading about the market) and a
-   long side the store had never held (pending) were one centred grey
-   sentence, told apart only by reading it. And the Worker answered a
-   never-published key and a D1 read that THREW with byte-identical
-   envelopes, so the page could not have told THOSE apart even had it tried;
-   it tagged both "unavailable", a word the taxonomy reserves for "published,
-   and this field is not on it". The Worker now stamps `reason: "read-failed"`
-   on the failed read. This suite feeds that envelope by ingesting it — a
-   local D1 cannot be made to throw from a browser test — and
-   tests/flows-worker-contract.mjs proves the Worker writes it.
-
-   THE ASSERTION IS DISTINCTNESS ON THE MONOCHROME CHANNELS, as in
-   flows-motion.mjs: border style and width carry no hue, so four silences
-   separable on those two alone survive a greyscale printout. The glyph is
-   read as well, because it is the channel a screen magnifier keeps. Each
-   fixture is also checked against the taxonomy's own shape — pending dotted,
-   unavailable dashed, unreadable a wide solid, quiet a hairline — so a
-   future stylesheet that made them four DIFFERENT wrong shapes fails here
-   rather than passing a distinctness test. */
 const readSilence = () => page.evaluate(() => {
   const p = document.querySelector("p.fb-empty");
   if (!p) return null;
@@ -506,48 +345,34 @@ const readSilence = () => page.evaluate(() => {
 });
 const silences = {};
 
-/* Every wait below is keyed to the CLASS and every kind is asserted after,
-   so a silence that collapses into its neighbour fails on a sentence naming
-   the collapse rather than on a thirty-second timeout. */
 const waitMessage = () => page.waitForFunction(() => !!document.querySelector("p.fb-empty[data-empty]"));
 
-/* quiet: board:short still holds the scored-130, cleared-0 fixture above. */
 await page.goto(url("/flows/short/"), { waitUntil: "networkidle" });
 await waitMessage();
 silences.quiet = await readSilence();
 
-/* pending: the absent-row envelope, verbatim. */
 await put("board:long", { side: "long", rows: [], generatedAt: null, status: "pending" });
 await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
 await waitMessage();
 silences.pending = await readSilence();
 
-/* unreadable, from the Worker: the same envelope with the catch path's reason. */
 await put("board:long", { side: "long", rows: [], generatedAt: null, status: "pending", reason: "read-failed" });
 await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
 await waitMessage();
 silences.unreadable = await readSilence();
 
-/* unavailable: a PUBLISHED board with no rows and no scored population — the
-   one case of the three where "not on this payload" is the true sentence. */
 await put("board:long", { side: "long", generatedAt: new Date().toISOString(),
   sessionDate: "2026-09-03", status: "ok", rows: [] });
 await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
 await waitMessage();
 silences.unavailable = await readSilence();
 
-/* unreadable, from the page: the fetch itself did not come back. Aborted at
-   the route so the catch in render() runs against a real failed request. */
 await page.route("**/api/flows/board*", (r) => r.abort());
 await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
 await waitMessage();
 silences.failed = await readSilence();
 await page.unroute("**/api/flows/board*");
-/* THE ONE FAILURE THIS SUITE CAUSED ON PURPOSE. Chromium logs the aborted
-   request as a console error, and section 11 counts every console error as a
-   defect — so the abort is claimed here, exactly once, and removed from the
-   ledger. A count of zero would mean the route never aborted and the
-   "failed" fixture above measured a page that loaded normally. */
+
 const abortedAt = errors.findIndex((e) => /net::ERR_FAILED/.test(e));
 ok(abortedAt >= 0, "the aborted board fetch was recorded as the request failure it is");
 errors.splice(abortedAt, 1);
@@ -595,7 +420,6 @@ eq(shape("failed"), shape("unreadable"),
    "that means “published, and this field is not on it”, which is the opposite of what happened");
 eq(silences.failed.statusKind, "unreadable", "and the status line says so too on the failed fetch");
 
-/* THE SENTENCES SAY WHICH, in the taxonomy's own words, and no longer hedge. */
 ok(/has been published for this side yet/.test(silences.pending.text),
    `pending says the board is not published yet, without guessing at a store fault (${silences.pending.text})`);
 ok(/could not be read/.test(silences.unreadable.text),
@@ -607,8 +431,6 @@ for (const kind of ["pending", "unreadable", "unavailable"]) {
      `the ${kind} sentence no longer hedges across two causes or sends the reader to a CI tab`);
 }
 
-/* A FILTER THAT MATCHES NOTHING IS NOT A SILENCE and gets no edge: the rows
-   are here, the reader hid them. Same paragraph, same class, no mark. */
 await put("board:long", board("long", true));
 await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
 await page.waitForSelector(".fd-card");
@@ -619,15 +441,6 @@ eq(filteredMsg.style, "none", "the filtered paragraph carries no edge — it is 
 eq(filteredMsg.glyph, "none", "and no glyph");
 eq(filteredMsg.statusKind, null, "and the status line above it carries no silence either");
 
-/* ---- 13. the tile foot prints its absence, and hue claims no side ------ */
-
-/* ONE ROW WITH NO PRICED MOVE, beside seven that have one. On the emitted
-   long board this was SYN168 — `hm` null because the run had no usable
-   30-day implied volatility to scale — and its tile showed an EMPTY foot
-   slot: the same appearance as a board published before the field existed.
-   The em dash is the mark every other absence on this tile wears. The
-   fixture also carries a dispersion and alternates the gamma regime, so the
-   two other readings on this line are measured on the same page. */
 await put("board:long", {
   ...board("long", true), dispersion: 0.7076, horizonSessions: 10,
   rows: TICKERS.map((t, i) => ({ ...boardRow(t, i, true), hm: i === 0 ? null : 0.0931, hr: 0.0368 })),
@@ -635,8 +448,7 @@ await put("board:long", {
 await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
 await page.waitForSelector(".fd-card");
 const foot = await page.evaluate(() => {
-  /* By ticker, not by position: section 8 chose an order, and a fixture read
-     at an index pins whichever order happens to be current. */
+
   const cardOf = (t) => Array.from(document.querySelectorAll(".fd-card"))
     .find((c) => c.querySelector(".fd-tk").textContent === t);
   const rowOf = (t) => Array.from(document.querySelectorAll("#flowsBody tr"))
@@ -689,11 +501,6 @@ ok(/1 new to this side since the previously published board/.test(foot.status),
    "the warm board's memory clause is unchanged: one name new, against the row count this same line opens with");
 eq(foot.statusKind, null, "a board with rows carries no silence mark on its status line");
 
-/* THE COLD CLAUSE IS GONE. On a board with no memory the status line used to
-   add “no comparison with a previously published board” — 200px above the
-   note setMemoryNote() draws from the publisher's own sentence. The same
-   silence worded twice, and two wordings of one outage is how a reader
-   concludes there are two outages. The note is the single statement. */
 await put("board:short", board("short", false));
 await page.goto(url("/flows/short/"), { waitUntil: "networkidle" });
 await page.waitForSelector(".fd-card");
@@ -709,13 +516,6 @@ ok(cold.note && cold.note.memory === "pre-memory",
 ok(!/no comparison/i.test(cold.status),
    `and the status line does not restate it in a second wording (${cold.status})`);
 
-/* ---- 14. the quiet sentence states counts and passes no verdict --------- */
-
-/* "which is what a quiet session looks like" was a template, printed
-   whatever the numbers were: with the emitted corpus's 3 neutral of 100
-   scored it would have called a session with 97 names past the band on the
-   other side quiet. And an absent `neutral` printed "all of them landed
-   inside the band" — a confident census from a field that was not there. */
 await put("board:short", { ...board("short", false), rows: [], deadBand: 1, scored: 100, neutral: 3 });
 await page.goto(url("/flows/short/"), { waitUntil: "networkidle" });
 await page.waitForFunction(() => !!document.querySelector('p.fb-empty[data-empty="quiet"]'));
@@ -735,19 +535,11 @@ ok(/cleared the dead band this session\. 100 names were scored; the other side m
 ok(!/all of them|inside the band|±/.test(quietBare),
    "and never fills the neutral count with “all” — an absent field is a silence, not a census");
 
-/* ---- 11. EVERY OPENER ON BOTH VIEWS IS A LINK TO THE READER ---------
-   Both were <button data-t> that a delegated handler in the retired
-   flows-card.js turned into a modal. BOTH VIEWS IN ONE PLACE, because the deck
-   and the table are two renderers over one payload — the kind of fact that
-   gets fixed in one of them. The table cell also carried a SECOND control, a
-   small arrow anchor for the reader who wanted the page instead, and the
-   anchor count below is what proves it gone. */
 {
   await put("board:long", board("long", true));
   await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
   await page.waitForSelector(".fd-card");
-  /* The toggle hides a view, it does not unbuild it, so the table's rows are
-     waited on as ATTACHED rather than visible. */
+
   await page.waitForSelector("#flowsBody tr .fb-open", { state: "attached" });
   const shapes = await page.evaluate(() => {
     const read = (el, t, anchors) => ({
@@ -779,8 +571,6 @@ ok(!/all of them|inside the band|±/.test(quietBare),
        "modal-opening button has nothing left to be an alternative to");
   }
 }
-
-/* ---- 12. nothing threw along the way -------------------------------- */
 
 eq(errors.length, 0,
    "no page error and no console error across both board routes: " + errors.join(" | "));

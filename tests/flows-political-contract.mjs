@@ -1,23 +1,3 @@
-/* =============================================================
-   flows-political-contract.mjs — disclosed political filings.
-
-   WHAT IS WORTH ASSERTING. This surface ranks people by money, from
-   data that states neither an amount nor a current date. The
-   expensive defects are all quiet overclaims:
-
-     - an open-ended band ("Over $50,000,000") given an invented
-       midpoint and then summed into a ranking;
-     - a "Receive" — a gift or transfer — counted as a purchase;
-     - a seller topping a list captioned about buying;
-     - a missing owner read as "self", which is the exact error the
-       card's congress panel already names;
-     - a lag left in a footnote, so an 80-day-old ranking reads as
-       today's.
-
-   The fixture below is built so each of those, if reintroduced,
-   changes an assertion rather than passing silently.
-   ============================================================= */
-
 import assert from "node:assert/strict";
 import {
   parseBand, valueBand, sideOf, filingRow, rankBuyers, rankAssets, rankClusters,
@@ -30,7 +10,6 @@ const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
-/* ---------- §1 the band, including the one with no top ----------- */
 {
   const b = parseBand("$1,000 - $15,000");
   eq(b.lo, 1000, "the low bound parses through the comma");
@@ -51,7 +30,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(parseBand("unknown").lo, null, "including unparseable prose");
 }
 
-/* ---------- §2 the vendor's vocabulary, including the gift ------- */
 {
   eq(sideOf("Purchase"), "buy", "Purchase is a buy");
   eq(sideOf("Buy"), "buy", "and so is Buy");
@@ -64,7 +42,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(sideOf(undefined), null, "and an absent type classifies as nothing");
 }
 
-/* ---------- §3 one filing, shaped -------------------------------- */
 {
   const r = filingRow({
     name: "A Member", politician_id: "pid-1", ticker: "AAA", asset: "Aaa Inc",
@@ -80,11 +57,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(filingRow({}), null, "a filing with neither a filer nor a ticker is dropped");
   eq(filingRow({ ticker: "BBB" }).who, null, "a ticker-only row survives with no filer");
 
-  /* THE SECOND WIRE SPELLING. The unusual-trades family sends the same fact
-     as `transaction_type` plus a numeric triple, with the issuer under
-     `asset`. Reading only the congress spelling would not throw on this row
-     — it would classify the side as null and the band as unparseable, and
-     the ranking would come back confidently empty. */
   const alt = filingRow({
     name: "B Member", ticker: "BBB", asset: "Bbb Corporation - Common Stock",
     transaction_type: "Buy", low_value: "1000001", high_value: "5000000",
@@ -98,26 +70,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(alt.asset, "Bbb Corporation - Common Stock",
      "the SECURITY is read from `asset`, which is the field that names the security");
 
-  /* ---- `issuer` IS NOT THE COMPANY, and this suite used to say it was ----
-
-     The line above asserted `alt.issuer === "Bbb Corporation - Common Stock"`,
-     encoding the same misreading the shaper had: that `issuer` and `asset`
-     were two spellings of one field. The vendor's spec says otherwise —
-
-       Insider Trades Issuer: "The person who executed the transaction."
-                              example: spouse      (docs/uw-openapi.yaml:6042)
-       Politician Trades:     asset: NVIDIA Corporation - Common Stock
-                              ticker: NVDA         (docs/uw-openapi.yaml:9573)
-
-     — and `issuer` does not appear on the /congress/recent-trades schema at
-     all. On every live row that carried it, the page printed "joint" or
-     "not-disclosed" where a company name belongs.
-
-     THE CORRECT READING WAS ALREADY IN THIS REPOSITORY. shared/flows-card.js
-     has read it right since the congress panel shipped, and says why: "A large
-     share of filings are a spouse's or a dependent's. Attributing those to a
-     member's judgement is the classic error." Two files, one field, two
-     readings, and the newer one was wrong. */
   const spousal = filingRow({
     name: "C Member", ticker: "CCC", asset: "Ccc Holdings - Common Stock",
     issuer: "spouse", txn_type: "Purchase", amounts: "$1,001 - $15,000",
@@ -133,9 +85,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(spousal.asset !== spousal.executedBy,
      "the two are never the same string, which is the whole defect stated as an assertion");
 
-  /* ABSENT IS NOT "not-disclosed". /recent-trades omits the field entirely;
-     a member declining to say is a different fact from a schema that never
-     carried it, and only one of those is a disclosure choice. */
   eq(alt.executedBy, null,
      "a row with no `issuer` publishes null, not a guess and not 'not-disclosed'");
   eq(filingRow({ name: "D", ticker: "DDD", issuer: "not-disclosed",
@@ -152,7 +101,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "while a stated midpoint with no bounds at all is the only number there is");
 }
 
-/* ---------- §4 the ranking is of PURCHASES ----------------------- */
 {
   const rows = [
     { who: "Big Seller", id: "s1", t: "AAA", side: "sell", mid: 5000000, lo: 1, hi: 2, lagDays: 10 },
@@ -178,14 +126,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(built.basis === SIZE_BASIS && /midpoint/.test(built.basis),
     "and the ranking convention rides on the payload rather than living in a caption");
 
-  /* THE TRIPLE DESCRIBES ONE POPULATION. A synthetic run produced a filer
-     whose summed LOW ($55,067,012) exceeded both their midpoint total
-     ($13,623,506) and their summed HIGH ($22,180,000) — an impossible row
-     that every other check passed. The cause: an open-ended band contributes
-     a floor and no ceiling, so summing its floor into the low while it
-     supplies neither of the other two breaks lo <= mid <= hi. Such a
-     purchase now sits out the triple entirely and reports its floor
-     separately, and the invariant is asserted rather than assumed. */
   const withOpen = rankBuyers([
     { who: "Open", id: "o1", t: "AAA", side: "buy", mid: 8000, lo: 1000, hi: 15000, lagDays: 3 },
     { who: "Open", id: "o1", t: "BBB", side: "buy", mid: null, lo: 50000000, hi: null,
@@ -216,7 +156,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(openAsset.openFloor, 9e6, "and publishes the same held-back floor");
 }
 
-/* ---------- §5 the same discipline by asset ---------------------- */
 {
   const built = rankAssets([
     { who: "X", id: "x", t: "AAA", side: "buy", mid: 100, lo: 50, hi: 150 },
@@ -231,14 +170,8 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(built.rows[0].sells, 1, "and the sales are carried beside, not folded in");
 }
 
-/* ---------- §5b untickered size, and the confident zero ---------- */
 {
-  /* THE LIVE DEFECT, REBUILT. Ten of twenty-five buyer rows on the published
-     payload read "$2.05M across 0 names", because a filing that names no
-     listed security — a Treasury bill, a fund, a partnership interest — had
-     its midpoint summed into the total while the ticker set it could not join
-     stayed empty. The assets panel beside it requires a ticker, so the same
-     money was silently absent there and nothing said the two disagreed. */
+
   const rows = [
     { who: "Bond Buyer", id: "b1", t: null, side: "buy", mid: 375000, lo: 250000, hi: 500000,
       lagDays: 20, filedDate: "2026-08-01", executedBy: null },
@@ -274,8 +207,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(mixed.buysListed + mixed.buysOther, mixed.buys,
     "and the filing counts partition the same way");
 
-  /* THE TWO PANELS NOW RECONCILE, which they could not before: everything the
-     assets ranking can see is exactly the listed half of the buyer totals. */
   const assets = rankAssets(rows, { latestFiled: "2026-08-02" });
   const assetTotal = assets.rows.reduce((a, r) => a + r.bought, 0);
   const listedTotal = ranked.rows.reduce((a, r) => a + r.boughtListed, 0);
@@ -283,8 +214,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "THE ASSETS PANEL'S TOTAL IS THE BUYERS PANEL'S LISTED HALF, exactly — which is " +
     "the reconciliation the untickered rows used to break in silence");
 
-  /* THE SELF-FILED SHARE, which POLITICAL_NOTES.attribution has promised since
-     this module shipped and only the holders block delivered. */
   eq(mixed.ownerKnown, 2, "both of this filer's filings state an executing account");
   eq(mixed.selfFiled, 1, "one of which is the filer's own");
   eq(bond.ownerKnown, 0, "the other filer's state none");
@@ -296,7 +225,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(/no name count rather than a count of/.test(POLITICAL_NOTES.listed),
     "with the listed/other split published in prose beside the arithmetic");
 
-  /* FRESHNESS IS A DATE FROM THE TAPE, NOT "TODAY". */
   eq(newestFiled(rows), "2026-08-02", "the newest filing date is the one the window holds");
   eq(newestFiled([]), null, "an empty window has no newest date rather than a default one");
   eq(newestFiled([{ who: "X", filedDate: null }]), null,
@@ -306,20 +234,11 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "and one who did not reports a MEASURED zero — the date itself is published, so " +
     "zero here means 'nothing that day' rather than 'not asked'");
 
-  /* AND WITH NO DATE TO MEASURE AGAINST, THE COUNTER IS NULL AND NOT ZERO.
-
-     Every row's freshBuys used to come back 0 on a window whose filings
-     carried no filing date, and on any caller that did not state one — the
-     same 0 the assertion above certifies as a measurement, meaning "nothing
-     that day" on one payload and "no day was compared" on the next. A reader
-     cannot tell those apart and neither could the renderer. */
   const undatedWindow = rows.map((r) => ({ ...r, filedDate: null }));
   eq(newestFiled(undatedWindow), null, "a window whose filings carry no date has no newest");
   const undatedBuyers = rankBuyers(undatedWindow, { latestFiled: newestFiled(undatedWindow) });
   const undatedAssets = rankAssets(undatedWindow, { latestFiled: null });
-  /* THE LOOPS BELOW MUST HAVE SOMETHING TO WALK. A `for` over an empty array
-     is a test block that prints its success line having asserted nothing,
-     which is this repository's most repeated instrument failure. */
+
   ok(undatedBuyers.rows.length > 0 && undatedAssets.rows.length > 0,
     "both rankings returned rows, so the assertions below are over a population");
   for (const row of undatedBuyers.rows) {
@@ -337,8 +256,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "while the measured zero is still reachable — the two branches are both live, which " +
     "is what makes the distinction testable rather than decorative");
 
-  /* THE WHOLE PAYLOAD ANSWERS THE SAME WAY, through buildPolitical's own
-     wiring rather than through a hand-passed option. */
   const undatedPayload = buildPolitical({
     trades: { data: undatedWindow.map((r) => ({
       name: r.who, politician_id: r.id, ticker: r.t, txn_type: "Purchase",
@@ -351,12 +268,8 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "and every ranked row's fresh counter is null all the way through the build");
 }
 
-/* ---------- §5c breadth, which size buries ----------------------- */
 {
-  /* THE CASE THE SIZE ORDERING GETS WRONG, AND IT IS THE LIVE ONE. One
-     account's $3.75M in a single name tops the published ranking on two
-     filings by one filer, while five separate filers converging on another
-     name sit third because that name is smaller in dollars. */
+
   const rows = [
     { who: "Solo", id: "s1", t: "BIG", side: "buy", mid: 3750000, lo: 3000000,
       hi: 4500000, lagDays: 60, filedDate: "2026-08-01", executedBy: "spouse" },
@@ -393,8 +306,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "the two-filer name does not clear the floor, and the floor is not relaxed to " +
     "fill the panel");
 
-  /* THE ORDERING IS TIEBREAKS, NOT A WEIGHTING. Equal filers, so the fresher
-     median lag decides — and nothing blends the two into a composite. */
   const tied = [];
   for (let i = 0; i < 3; i++) {
     tied.push({ who: "S" + i, id: "s" + i, t: "STALE", side: "buy", mid: 900000,
@@ -407,9 +318,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "at equal breadth the fresher median lag leads, though it is ninety times smaller " +
     "in dollars — each key breaks ties in the one before it and none is weighted");
 
-  /* AN UNKNOWN LAG DOES NOT WIN A RECENCY TIEBREAK. Letting null sort first
-     is the same confident-absence defect as ranking an unmeasured name at
-     zero, one column over. */
   const undated = [];
   for (let i = 0; i < 3; i++) {
     undated.push({ who: "U" + i, id: "u" + i, t: "UNDATED", side: "buy", mid: 10000,
@@ -428,7 +336,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(/DISTINCT filers/.test(quiet.basis), "and the ordering named even when it ordered nothing");
 }
 
-/* ---------- §6 holders: the vendor's own numbers ----------------- */
 {
   const h = shapeHolders({ data: [
     { full_name: "Alpha", id: "a", owner: "self", min_amount: 1, mid_amount: 76, max_amount: 143 },
@@ -461,7 +368,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(noOwner.ownerKnown, 0, "with the count of known owners published beside it");
 }
 
-/* ---------- §7 recency is by FILING date ------------------------- */
 {
   const built = shapeRecent([
     { who: "A", t: "AAA", filedDate: "2026-08-01", txnDate: "2026-07-30", mid: 1 },
@@ -472,7 +378,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "changed today, and B's much older trade is the newer news");
 }
 
-/* ---------- §8 caps, shed, determinism, isolation ---------------- */
 {
   const many = Array.from({ length: POLITICAL_CAPS.buyers + 5 }, (_, i) => ({
     who: "P" + String(i).padStart(3, "0"), id: "p" + i, t: "T" + i,
@@ -492,10 +397,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   deep(unwrapRows(null), [], "a non-response is an empty read, not a throw");
 }
 
-/* ---------- §9 the refusals hold in the payload's own prose ------
-   Ranking people by money invites exactly the claims this data cannot
-   support. The scan runs with NO allow-list: the prose was written to
-   need no exception. */
 {
   const BAN = /\b(return|returns|outperform|beat the market|track record|skill|profit|profits|gains|alpha|insider|tipped|front-?run)\b/gi;
   for (const [k, text] of Object.entries(POLITICAL_NOTES)) {

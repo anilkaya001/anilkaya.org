@@ -1,8 +1,3 @@
-/* =============================================================
-   placement.css — Econometrics Placement Diagnostic.
-   Compact first-screen orientation, native controls, no framework.
-   ============================================================= */
-
 .placement-skip {
   position: fixed;
   top: 0.65rem;
@@ -329,7 +324,6 @@
 .placement-bands h3 { font-size: 1rem; line-height: 1.25; }
 .placement-bands p { margin-top: 0.3rem; color: var(--ink-dim); font-size: 0.84rem; }
 
-/* ---- Live question workspace -------------------------------- */
 .placement-question-shell {
   display: grid;
   grid-template-columns: 13.5rem minmax(0, 1fr);
@@ -531,7 +525,6 @@
   cursor: not-allowed;
 }
 
-/* ---- Results ------------------------------------------------- */
 .placement-results { padding: clamp(1.25rem, 4vw, 2.8rem); }
 
 .placement-results__hero {

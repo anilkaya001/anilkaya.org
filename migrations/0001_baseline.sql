@@ -1,11 +1,5 @@
--- Baseline schema: the account + classic-progress + review tables that predate
--- Academy 2.0's additive 0002_learning_v3 migration. Kept byte-identical to the
--- matching block in schema.sql and fully CREATE ... IF NOT EXISTS, so applying
--- migrations to a fresh D1 yields the complete schema (0001 base, then 0002
--- academy) and re-applying to an existing database is a safe no-op.
-
 CREATE TABLE IF NOT EXISTS users (
-  id         TEXT PRIMARY KEY,   -- "g_<google-sub>"
+  id         TEXT PRIMARY KEY,
   email      TEXT,
   name       TEXT,
   created_at INTEGER
@@ -13,7 +7,7 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE TABLE IF NOT EXISTS progress (
   user_id    TEXT NOT NULL,
-  model_id   TEXT NOT NULL,      -- e.g. "ols", "iv2sls"
+  model_id   TEXT NOT NULL,
   done_json  TEXT NOT NULL DEFAULT '[]',
   updated_at INTEGER,
   PRIMARY KEY (user_id, model_id)
@@ -27,16 +21,12 @@ CREATE TABLE IF NOT EXISTS stats (
   updated_at INTEGER
 );
 
--- Monotonic reset barrier. Browser writes are accepted only when their
--- generation matches this row; reset increments it before clearing state.
 CREATE TABLE IF NOT EXISTS learning_sync (
   user_id    TEXT PRIMARY KEY,
   generation INTEGER NOT NULL DEFAULT 0
              CHECK (generation BETWEEN 0 AND 9007199254740991)
 );
 
--- Per-assessment spaced-repetition state. Item ids are generator-stable stage
--- ids from shared/review-manifest.js; the Worker computes every transition.
 CREATE TABLE IF NOT EXISTS mastery (
   user_id        TEXT NOT NULL,
   item_id        TEXT NOT NULL,
@@ -52,8 +42,6 @@ CREATE TABLE IF NOT EXISTS mastery (
 
 CREATE INDEX IF NOT EXISTS mastery_due_by_user ON mastery (user_id, due_day, item_id);
 
--- The short attempt ledger makes PUT /api/mastery idempotent even if a client
--- retries after losing the response. It is cleared by the learning reset.
 CREATE TABLE IF NOT EXISTS mastery_attempts (
   user_id     TEXT NOT NULL,
   attempt_id  TEXT NOT NULL,
@@ -66,8 +54,6 @@ CREATE TABLE IF NOT EXISTS mastery_attempts (
   PRIMARY KEY (user_id, attempt_id)
 );
 
--- Minimal placement result used to route a learner into the right starting
--- course. Individual answers are deliberately never stored server-side.
 CREATE TABLE IF NOT EXISTS placement (
   user_id           TEXT PRIMARY KEY,
   band              TEXT NOT NULL CHECK (band IN ('foundation', 'applied', 'advanced')),

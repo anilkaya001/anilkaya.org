@@ -1,40 +1,4 @@
 #!/usr/bin/env node
-/* Generate the FLOWS_CREDENTIALS secret for the Flows credential gate.
- *
- * TWO MODES, and in both of them secrets stay off argv.
- *
- * An earlier version took secrets as command-line arguments while its own
- * banner claimed nothing was left behind. That was false: argv is visible to
- * every process on the machine via ps, and the shell appends the whole
- * invocation — plaintext password and pepper — to its history file. Both then
- * sit on disk indefinitely, which is exactly what the pepper exists to
- * prevent. So: the only argument this script accepts is the mode flag
- * `--mint`, which is not a secret; every secret is read from stdin or minted
- * in-process, and nothing is ever written to disk.
- *
- * MINT MODE — the normal way to provision or rotate the whole set:
- *
- *   node scripts/generate-flows-credentials.mjs --mint
- *
- * Mints a fresh crypto-random password PER USER (xxxx-xxxx-xxxx-xxxx, from an
- * unambiguous charset, ~79 bits each) and a fresh pepper, derives the hash
- * map, and prints all of it ONCE to the terminal: the username→password table
- * to distribute out-of-band, the pepper for `wrangler secret put FLOWS_PEPPER`,
- * and the JSON for `wrangler secret put FLOWS_CREDENTIALS`. To reuse an
- * existing pepper instead of minting one, pipe it in as the single stdin line:
- *
- *   printf '%s\n' "$PEPPER" | node scripts/generate-flows-credentials.mjs --mint
- *
- * LEGACY SHARED-PASSWORD MODE — kept for compatibility; every account gets
- * the same password (hashes still differ per user because the username is the
- * salt). Reads two stdin lines: the password, then the pepper.
- *
- *   node scripts/generate-flows-credentials.mjs
- *   printf '%s\n%s\n' "$PASSWORD" "$PEPPER" | node scripts/generate-flows-credentials.mjs
- *
- * Generate a pepper by hand if you need one outside --mint:
- *   openssl rand -base64 48
- */
 
 import { createInterface } from "node:readline";
 import { webcrypto } from "node:crypto";
@@ -58,10 +22,6 @@ function die(message) {
   process.exit(1);
 }
 
-/* Lowercase+digit charset with the lookalikes removed (no i/l/o/0/1) so a
-   password read over the phone or off paper cannot be mis-copied. 31 symbols
-   is ~4.95 bits each; 16 of them is ~79 bits per password. Rejection sampling
-   keeps the draw uniform — a plain modulo would bias the low symbols. */
 const CHARSET = "abcdefghjkmnpqrstuvwxyz23456789";
 
 function mintPassword() {
@@ -86,9 +46,6 @@ function mintPepper() {
   return Buffer.from(b).toString("base64");
 }
 
-/* --mint on an interactive terminal must not sit waiting for input nobody
-   was asked for, so it skips a TTY stdin; legacy mode reads it either way,
-   which is how interactive entry has always worked. */
 async function readStdinLines(max, { skipTTY = false } = {}) {
   if (skipTTY && process.stdin.isTTY) return [];
   const rl = createInterface({ input: process.stdin, terminal: false });

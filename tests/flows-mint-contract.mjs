@@ -1,15 +1,3 @@
-/* Contract for the generator's --mint mode, exercised as a child process —
-   the same way an operator runs it — with a FIXTURE pepper on stdin so the
-   assertions are about behavior, not about any real secret. Nothing here is
-   a credential: every value is minted inside this test run and discarded.
-
-   What is worth pinning: that a mint covers the WHOLE roster (a rotation
-   that silently skips a user locks that person out with no error anywhere),
-   that the printed JSON is the exact shape parseCredentials accepts, and
-   that a minted password actually round-trips through verifyCredential —
-   the one end-to-end fact the operator cannot check until a human tries to
-   sign in. */
-
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
@@ -28,7 +16,6 @@ const out = execFileSync(process.execPath,
 
 const lines = out.split("\n");
 
-/* ---------- the password table -------------------------------- */
 const passwords = Object.create(null);
 for (const line of lines) {
   const m = /^([a-z]+)\s+([a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4})$/.exec(line);
@@ -43,7 +30,6 @@ ok(new Set(Object.values(passwords)).size === FLOWS_USERNAMES.length,
 ok(Object.values(passwords).every((p) => !/[ilo01]/.test(p)),
   "no lookalike characters (i/l/o/0/1) — passwords get read off paper");
 
-/* ---------- the pepper and the JSON ---------------------------- */
 const pepperIdx = lines.findIndex((l) => l.startsWith("# FLOWS_PEPPER"));
 eq(lines[pepperIdx + 1], FIXTURE_PEPPER,
   "a pepper supplied on stdin is used verbatim, not silently replaced");
@@ -55,7 +41,6 @@ ok(creds, "the printed JSON is exactly what parseCredentials accepts");
 eq(Object.keys(creds).length, FLOWS_USERNAMES.length,
   "and it carries a hash for every roster account");
 
-/* ---------- the end-to-end fact -------------------------------- */
 const who = FLOWS_USERNAMES[FLOWS_USERNAMES.length - 1];
 eq(await verifyCredential(who, passwords[who], creds, FIXTURE_PEPPER), who,
   "a minted password round-trips through verifyCredential — the one fact an " +
@@ -63,7 +48,6 @@ eq(await verifyCredential(who, passwords[who], creds, FIXTURE_PEPPER), who,
 eq(await verifyCredential(who, passwords[FLOWS_USERNAMES[0]], creds, FIXTURE_PEPPER), null,
   "and another user's minted password does not open the account");
 
-/* ---------- fresh-pepper mint ---------------------------------- */
 {
   const out2 = execFileSync(process.execPath,
     ["../scripts/generate-flows-credentials.mjs", "--mint"],
@@ -75,7 +59,6 @@ eq(await verifyCredential(who, passwords[FLOWS_USERNAMES[0]], creds, FIXTURE_PEP
   function lines2(s) { return s.split("\n"); }
 }
 
-/* ---------- a short supplied pepper is refused ----------------- */
 {
   let failed = false;
   try {

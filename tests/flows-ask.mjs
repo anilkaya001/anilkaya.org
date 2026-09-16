@@ -1,32 +1,3 @@
-/* =============================================================
-   flows-ask.mjs — the textbot's retrieval and safety core.
-
-   A briefing a reader can check is one thing; a bot that answers in
-   sentences is another, because prose invites trust that a table
-   does not. Everything this suite pins exists to make that trust
-   earned rather than assumed:
-
-     - a measured 0 is a reading and is carried into the answer,
-       while an absent field drops its whole sentence instead of
-       printing a zero it never received;
-     - the three silences arrive as three, so "not published yet"
-       can never be served as "nothing happened";
-     - an answer carrying a figure nobody published is REFUSED, and
-       so is one that claims the future;
-     - and the deterministic answer that ships when the guard fires
-       passes the same guard, because a fallback that violates its
-       own rule is not a fallback at all.
-
-   INLINE FIXTURES, AND THAT IS NOT A PREFERENCE. tests/.shots-emit
-   holds real emitted payloads on a developer's disk and nowhere
-   else — .gitignore drops every dotted directory under tests/ — so
-   a suite that read one would report green from the one machine
-   that was never going to catch anything. The shapes below were
-   read off the publisher (scripts/flows-pipeline.mjs) and the
-   shapers it spreads; publisher/renderer agreement is
-   tests/flows-payload-shape.mjs's job and not this file's.
-   ============================================================= */
-
 import assert from "node:assert/strict";
 import { buildFactIndex, selectFacts, numeralsIn, guardAnswer, renderFactsPlain, promptFor,
          tickerCoverage, shedCardFacts, emptySilences, fileSilence, SILENCE_KINDS,
@@ -39,19 +10,9 @@ const ok = (c, m) => { assert.ok(c, m); checks++; };
 const eq = (a, b, m) => { assert.equal(a, b, m); checks++; };
 const same = (a, b, m) => { assert.deepEqual(a, b, m); checks++; };
 
-/* ---------- the corpus ------------------------------------------- */
-
 const STAMP = "2026-09-04T08:10:00.000Z";
 const NEWEST = "2026-09-04T09:31:00.000Z";
 
-/* The two boards are here for what they feed the BRIEFING, which
-   this index imports rather than restating. `cleared` (44 and 53)
-   deliberately exceeds rows.length on both sides — the population
-   against the page — and `dr` agrees with `r0` and `r` on every row,
-   so the yesterday section's counts and its two extremes describe
-   the same session rather than a fixture that was tidied. Tickers
-   are five characters because a symbol is what a question names, and
-   the selection reads a bare uppercase token of one to five. */
 const LONG = {
   status: "ok", side: "long", sessionDate: "2026-09-04", generatedAt: STAMP,
   gateOrigin: "2026-09-04", gateDays: 7,
@@ -76,10 +37,6 @@ const SHORT = {
   ],
 };
 
-/* Every watch row scores 0 because the dead band is ±1 and `s` is an
-   integer, which is why the briefing reads `resid` and the payload's
-   own rank instead. Kept here so the index carries a fact built on
-   that reading rather than on the score with no resolution. */
 const WATCH = {
   status: "ok", side: "watch", sessionDate: "2026-09-04", generatedAt: STAMP,
   scored: 118, neutral: 3, deadBand: 1,
@@ -92,9 +49,6 @@ const EVENTS = {
   rows: [{ t: "SYN15", d: "2026-09-04", dte: 0 }],
 };
 
-/* The published sector-premium shape: eleven baskets under `sectors`
-   with `leanRatio`, never `rows` with `lean`. XLU is measured and
-   empty, which is a reading and not a gap. */
 const SECTOR_PREMIUM = {
   status: "ok", generatedAt: STAMP, returned: 4, measured: 3, quiet: 1, unreadable: 0,
   units: { leanRatio: "ratio", netPremiumUsd: "usd" },
@@ -106,10 +60,6 @@ const SECTOR_PREMIUM = {
   ],
 };
 
-/* `flat: 0` and `cardsFailed: 0` further down are the fixture's
-   whole point in one place: Number(null) is 0, so a module that
-   coerced before testing for absence would publish these two
-   measured zeros and an absent field in exactly the same words. */
 const MARKET = {
   status: "ok", generatedAt: STAMP, sessionDate: "2026-09-04",
   n: 118, screened: 140,
@@ -133,9 +83,6 @@ const MOVERS = {
     bearish: [{ t: "SYN30", netPrem: -18000000 }] },
 };
 
-/* `eligible` (5953) is the population after the volume and open
-   interest floors, and `shown` is what the two caps left. A list
-   that printed only `shown` would read as a market. */
 const UNUSUAL = {
   status: "ok", generatedAt: STAMP, sessionDate: "2026-09-04",
   namesSeen: 34, namesTruncated: 2, namesComplete: 32,
@@ -144,9 +91,6 @@ const UNUSUAL = {
   names: { rows: [], shown: 25, ranked: 96, universe: 140, unranked: 44, cap: 25 },
 };
 
-/* `atVendorLimit: true` is the fact that separates "we capped it"
-   from "they capped it": our cap leaves the population known, theirs
-   leaves it unknown and at least as large as what arrived. */
 const NEWS = {
   status: "ok", generatedAt: NEWEST, sessionDate: "2026-09-04",
   rows: [{ headline: "SYN46 files an 8-K" }],
@@ -189,9 +133,6 @@ const SCORETRACK = {
   namesSeen: 130, namesShed: 128, shedBy: "bytes", namesBytes: 24000,
 };
 
-/* Four blocks carrying a status, two of them silent in two different
-   ways — the census counts what answered, the silences name what did
-   not, and neither number is allowed to stand for the other. */
 const POLITICAL = {
   generatedAt: STAMP, readAt: "2026-09-04T07:02:00.000Z",
   window: { from: "2026-06-06", to: "2026-09-04", days: 90 },
@@ -229,7 +170,6 @@ const STORE = {
 const INDEX = buildFactIndex(STORE);
 const byId = (id) => INDEX.facts.find((f) => f.id === id);
 
-/* ---------- 1. the numeral scanner ------------------------------- */
 {
   same(numeralsIn("1,234 contracts changed hands"), ["1,234"],
      "a grouped figure is one token, kept exactly as written — 1,234 and 1234 are two " +
@@ -246,9 +186,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "and a non-string is absent rather than coerced — the house rule the whole file " +
      "is organised around");
 
-  /* A SEPARATOR SITS BETWEEN DIGITS; A COMMA AFTER A NUMBER IS
-     PUNCTUATION. The two used to scan alike, so a sentence naming a
-     figure and then pausing yielded a token no fact could ever carry. */
   same(numeralsIn("Of 118, 61 leaned bullish"), ["118", "61"],
      "a comma that ends a clause is punctuation and stays OUT of the token: '118,' " +
      "matches nothing in a fact that wrote 118 with a space after it, so the guard " +
@@ -257,8 +194,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "while a separator BETWEEN digits is still part of the number, on one group and " +
      "on three — that distinction is the reason the token keeps commas at all");
 
-  /* EVERY STAMP THIS PIPELINE PUBLISHES IS ISO, so the scanner meets
-     dates constantly and used to read their hyphens as minus signs. */
   same(numeralsIn("The session dated 2026-09-04"), ["2026", "09", "04"],
      "a hyphen between digits is a date, not a sign: this used to scan as 2026, -09 " +
      "and -04, and a caller reading the refusal was told the model had written two " +
@@ -268,7 +203,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "movers' change ratios depend on");
 }
 
-/* ---------- 2. a measured zero is a reading ---------------------- */
 {
   const breadth = byId("market/breadth");
   ok(breadth, "the market-wide breadth reading reaches the index");
@@ -284,9 +218,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "the same on the run summary — 0 cards failed is the good outcome and is stated " +
      "rather than suppressed as uninteresting");
 
-  /* THE OTHER HALF OF THE RULE. An absent reading drops the whole
-     sentence rather than printing a zero it never received, and the
-     surface's other sentences are unaffected. */
   const thin = buildFactIndex({ market: { ...MARKET,
     premium: { ...MARKET.premium, net: null } } });
   ok(!thin.facts.find((f) => f.id === "market/premium"),
@@ -300,21 +231,8 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
   }
 }
 
-/* ---------- 3. the three silences arrive as three ---------------- */
 {
-  /* Three failures of three different kinds in one store: a key the
-     reader does not have, a key published and measured empty, and a
-     key that arrived in a shape nothing can read.
 
-     THE FIRST ONE IS ABSENT, NOT NULL, AND THE DIFFERENCE IS REAL.
-     This fixture used to write `political: null` under a comment
-     calling it "a key the reader does not have" — but null is what
-     readFlowsPayload returns when the READ ITSELF failed, which is a
-     fault on our side, while an absent key was simply never written.
-     Collapsing them merges two of the three silences at the one place
-     they enter this module, and the merged answer is the wrong one in
-     both directions: it would tell a reader a job had not run when a
-     read had failed. Both are asserted below, separately. */
   const tornStore = {
     ...STORE,
     news: { status: "quiet", generatedAt: STAMP, rows: [], returned: 0, kept: 0 },
@@ -337,11 +255,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "an absent key is never reported as unreadable: 'could not be read' says a fault " +
      "happened here, and nothing failed when a key was simply never written");
 
-  /* AND THE OTHER HALF OF THE SPLIT. An explicit null is what
-     readFlowsPayload returns when the read FAILED — the key may well
-     have been published. Reporting that as "not published yet" would
-     blame the pipeline for a fault on the serving side, and a reader
-     told a job has not run waits for it rather than reloading. */
   const nulledRead = buildFactIndex({ ...STORE, political: null });
   ok(nulledRead.silences.unreadable.some((q) => q.source === "political"),
      "a key whose read returned null is UNREADABLE — published or not, what failed was " +
@@ -362,19 +275,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
     }
   }
 
-  /* THE SPLIT HOLDS ON BOTH HALVES OF THE INDEX, and that is the
-     assertion, not the classification of any one key. The briefing's
-     six surfaces are filled in by their own module and everything else
-     by this one, so a store carrying one null of each kind is answered
-     twice — and a reader should not have to know which half they are
-     reading to know whether a board that is not there is a fault or a
-     job that has not run.
-
-     It read both ways once. A null board was called "not published for
-     this session yet" while a null market on the same store was called
-     a fault on this page: one store, one index, two opposite
-     diagnoses, and the sentence a reader got decided whether they
-     waited for the pipeline or went looking for the breakage. */
   const nulled = buildFactIndex({ "board:long": null, "board:short": null, market: null });
   ok(nulled.silences.unreadable.some((q) => q.what === "bullish board"),
      "a board whose read returned null is UNREADABLE — null is what readFlowsPayload " +
@@ -385,10 +285,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
   ok(nulled.silences.unreadable.some((q) => q.source === "market"),
      "and the other half of the index says the same thing about the same kind of null");
 
-  /* AND undefined IS THE OTHER DIRECTION, on both halves too. A store
-     built by spreading a parse writes every key it did not find as
-     undefined, and there is nothing in that a page could have failed
-     to read. */
   const blank = buildFactIndex({ "board:long": undefined, market: undefined });
   ok(blank.silences.pending.some((q) => q.what === "bullish board"),
      "a board key written as undefined is PENDING — nothing was measured and nothing " +
@@ -400,12 +296,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "with no fault claimed anywhere on that store: an absent key is not a failed read " +
      "on either half of this index");
 
-  /* A STORE WITH NOTHING IN IT is the ordinary state before the
-     morning run, and NONE of it is a fault. Two of the briefing's
-     silences are decided from the absence of rows rather than from
-     the state of the key — "neither board could be read" and a next
-     session called "a measured emptiness" — and both of those are
-     wrong about a key that was never written. */
   const cold = buildFactIndex({});
   eq(cold.facts.length, 0, "an empty store yields no facts, which is not the same as no news");
   eq(cold.silences.unreadable.length, 0,
@@ -420,12 +310,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
   ok(cold.silences.pending.some((q) => /neither board has been published/i.test(q.say)),
      "including the comparison against yesterday, which is unavailable rather than broken");
 
-  /* A HALF-PUBLISHED STORE IS WHAT THE TWO RE-FILINGS ARE FOR, and
-     each of them asked the wrong question about it. Both tested
-     whether EVERY input was missing before refusing to let the
-     briefing's own sentence stand — so one surface arriving was enough
-     to put the strongest claim back on the page, which is the wrong
-     way round: a claim needs all of its evidence, not any of it. */
   const calendarOnly = buildFactIndex({
     events: { status: "ok", generatedAt: STAMP, rows: [] } });
   ok(!calendarOnly.silences.quiet.some((q) => q.what === "the next session"),
@@ -453,9 +337,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "while the board that DID arrive carrying no rows keeps its own fault beside it: " +
      "one silence of each kind, still told apart");
 
-  /* AND THE OTHER DIRECTION, which the pending re-filing must not
-     swallow. Four failed reads are a fault here; a reader told a job
-     has not run waits, and the fault stays exactly where it was. */
   const nextBroken = buildFactIndex({
     "board:long": null, "board:short": null, "board:watch": null, events: null });
   ok(nextBroken.silences.unreadable.some((q) => q.what === "the next session"),
@@ -464,9 +345,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
   ok(!nextBroken.silences.quiet.some((q) => q.what === "the next session"),
      "and never quiet, which would be this page reporting a calendar it never read");
 
-  /* The feeds inside a compound key own their own silence: one dead
-     block does not make the key dead, and the census counts only
-     what answered. */
   const feeds = INDEX.silences.quiet.filter((q) => q.source === "pulse");
   const dead = INDEX.silences.unreadable.filter((q) => q.source === "pulse");
   eq(feeds.length, 1, "a pulse feed that was measured and empty is one quiet silence");
@@ -479,7 +357,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "silences above are not folded into it");
 }
 
-/* ---------- 4. the numeral guard -------------------------------- */
 {
   const { picked } = selectFacts(INDEX, "how did the tape lean on premium");
   const breadth = byId("market/breadth");
@@ -522,10 +399,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "this product refuses to let anything except a measurement produce");
   ok(zero.rejected.includes("0"), "and it is named as the reason");
 
-  /* AND THE SPELLED-OUT ZERO IS THE SAME FIGURE. The scan reads
-     numerals, so the line above was caught and this one was not —
-     while the word is how a model actually writes a count, which left
-     the one integer this file refuses reachable by spelling it. */
   const worded = guardAnswer("Nothing cleared: zero names.",
     [{ id: "x", say: "Two names cleared the band.", n: {} }]);
   eq(worded.ok, false,
@@ -536,20 +409,12 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "and it is filed as an invented figure rather than as a claim about the future, " +
      "because a caller branches on which of the two failures it was");
 
-  /* THE OTHER HALF OF THAT RULE, AND IT IS WHY THE TEST IS THE WORD
-     RATHER THAN A BAN. market/vol says the IV rank is on a
-     "zero-to-one scale" and carries no bare 0, so a model restating
-     it writes the word from the text it was handed. */
   const scale = guardAnswer("The median IV rank sits on a zero-to-one scale.",
     [byId("market/vol")]);
   ok(scale.ok,
      "a zero the facts themselves put in front of the model passes, because the guard " +
      "asks whether a figure was handed over and not whether it is a zero");
 
-  /* THE GUARD FIRING ON A CORRECT ANSWER IS THE ONE FAILURE THIS FILE
-     CANNOT AFFORD, because it is the guard somebody eventually switches
-     off. Both of these are verbatim quotes that the scanner used to
-     tokenise differently from the fact they were quoting. */
   const paused = guardAnswer("Of 118, 61 leaned bullish and 57 leaned bearish.", [breadth]);
   ok(paused.ok,
      "a figure quoted exactly and then followed by a comma is ACCEPTED — the fact wrote " +
@@ -572,7 +437,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
   ok(!/\d/.test(empty.reason), "and that reason is figure-free as well");
 }
 
-/* ---------- 5. the forecast scan -------------------------------- */
 {
   const picked = [byId("market/breadth")];
   const willed = guardAnswer("The board will lean bullish tomorrow.", picked);
@@ -588,9 +452,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
   eq(guardAnswer("It is likely to continue.", picked).ok, false, "and 'likely'");
   eq(guardAnswer("The tape is going to turn.", picked).ok, false, "and 'going to'");
 
-  /* THE INVARIANT THAT MAKES THE FALLBACK POSSIBLE. If any fact in
-     the index carried one of these verbs, the deterministic answer
-     built from that fact would fail the guard it exists to satisfy. */
   const FORECAST = /\b(will|should|expect(?:ed)?|likely|going to|forecast|predict)\b/i;
   for (const f of INDEX.facts) {
     ok(!FORECAST.test(f.say),
@@ -598,7 +459,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
   }
 }
 
-/* ---------- 6. selection is deterministic and truthful ---------- */
 {
   const capped = selectFacts(INDEX, "", { max: 3 });
   eq(capped.picked.length, 3, "the cap is obeyed");
@@ -607,12 +467,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "with the POPULATION stated: the cap here is ours, so the total is exactly " +
      "reportable and a list that truncates silently would read as the whole index");
 
-  /* AND IT IS THE POPULATION THE CAP WAS APPLIED TO. The cap cuts the
-     facts that MATCHED, so reporting the index total told a reader
-     every fact left out had been cut when nearly all of them had
-     simply not matched the question — the same defect as a silent
-     truncation, one step quieter, because the number is there and it
-     is the wrong number. */
   const pooled = { facts: [] };
   for (let k = 0; k < 40; k++) {
     pooled.facts.push({ id: "p" + k, topic: k < 9 ? ["premium"] : ["zzz"],
@@ -624,12 +478,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "and the sentence counts the nine that matched, not the forty in the index: the " +
      "cap dropped six, and 'of 40' would say it dropped thirty-seven");
 
-  /* AND EVERY OTHER COUNT IN THAT SENTENCE DESCRIBES THE LIST THE
-     READER IS HOLDING. The ticker tally was counted over everything
-     that matched while the sentence around it opened by naming what was
-     picked, so a reader served three facts was told five of them had
-     matched a ticker — the same population defect as above, one clause
-     later, inside the sentence that says it was fixed. */
   const many = { facts: [] };
   for (let k = 0; k < 5; k++) {
     many.facts.push({ id: "sym" + k, topic: ["syn46"], say: "A.", n: {},
@@ -655,13 +503,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "while a genuine remainder is still named, with its own count over its own " +
      "population, because that clause is a reading when the facts behind it exist");
 
-  /* THE ORDER THE SENTENCE CLAIMS IS THE ORDER THE SELECTION USES.
-     Recency lived inside the score, where it was the only term that
-     varied among facts that matched nothing — so the unmatched fallback
-     ranked by whichever key was republished last while telling the
-     reader these were the headline readings in the briefing's order.
-     The news tape carries the fixture's newest stamp for exactly this
-     reason: the Worker's intraday cron really does republish it. */
   const unmatched = selectFacts(INDEX, "zqx wibble frobnicate");
   eq(unmatched.picked[0].source, "brief",
      "an unmatched question leads with the briefing, which is what its sentence says " +
@@ -670,9 +511,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
   ok(/in the order the briefing states them/.test(unmatched.why),
      "and the sentence making that claim is the one being held to it");
 
-  /* Read over the whole index rather than the default fourteen, because
-     the briefing alone fills that cap and the two surfaces whose stamps
-     disagree sit behind it. */
   const order = selectFacts(INDEX, "zqx wibble frobnicate",
     { max: INDEX.facts.length }).picked.map((f) => f.source);
   ok(order.indexOf("market") !== -1 && order.indexOf("market") < order.indexOf("news"),
@@ -700,9 +538,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
   eq(empty.picked.length, 0, "an empty index selects nothing");
   eq(empty.capped, false, "and does not claim to have capped anything");
 
-  /* A SHOUTED QUESTION IS NOT A LIST OF TICKERS. "IS SYN46 A MARKET
-     NAME" has four bare uppercase tokens and one ticker; without the
-     lowercase test every word in it would be weighted as a symbol. */
   const two = { facts: [
     { id: "a", topic: ["market", "breadth"], say: "A.", n: {}, source: "market", at: null },
     { id: "b", topic: ["syn46", "movers"], say: "B.", n: {}, source: "movers", at: null },
@@ -714,15 +549,8 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "tie falls to the fixed source order rather than to whichever fact was indexed first");
 }
 
-/* ---------- 6b. THE LEAD IS A CLAIM ABOUT COVERAGE ---------------- */
 {
-  /* THE DEFECT THE OWNER SAW ON THE LIVE SITE. "what is new for NVDA
-     Calls", asked on the bullish board where NVDA sat at rank 30, came
-     back with a market-wide put/call ratio under "These are the
-     published readings that bear on what you asked." NVDA had matched
-     nothing; "calls" had matched the ratio's topic; one boolean covered
-     both cases, and a reader was told a ratio over 668 names bore on
-     the one name they typed. */
+
   const q = "what is the premium doing on PLTR";
   const blind = selectFacts(INDEX, q);
   const plainBlind = renderFactsPlain(blind.picked, q);
@@ -741,8 +569,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "board and hold a card) and not \"this index holds no reading\" (it is handed the picked " +
      "facts, never the index) — the diagnosis belongs to a roster that can make it");
 
-  /* THE CONTROL, without which the assertions above pass against a
-     renderer that deleted the confident sentence outright. */
   const qc = "what is going on with SYN46";
   const covered = renderFactsPlain(selectFacts(INDEX, qc).picked, qc);
   ok(/bear on what you asked/.test(covered),
@@ -755,16 +581,12 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "a question with no symbol in it, matched on a topic word, is answered by readings " +
      "that genuinely bear on it");
 
-  /* THE MIXED QUESTION: one name covered, one not. */
   const qm = "SYN46 versus PLTR premium";
   const mixed = renderFactsPlain(selectFacts(INDEX, qm).picked, qm);
   ok(/bear on SYN46\./.test(mixed) && /None of the readings below is about PLTR\./.test(mixed),
      "a question naming one covered and one uncovered symbol says which is which, rather " +
      "than claiming both or withholding both");
 
-  /* A NAME WITH A DIGIT IS REFERRED TO, NOT PRINTED. The plain reading
-     must pass the guard, and the guard scans numerals: SYN99 printed into
-     the lead would put a 99 on the page that no fact carries. */
   const qd = "what about SYN99 premium";
   const digits = selectFacts(INDEX, qd);
   const plainDigits = renderFactsPlain(digits.picked, qd);
@@ -774,11 +596,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
   ok(guardAnswer(plainDigits, digits.picked).ok,
      "and the plain reading for it passes the guard, which is the reason for the rule");
 
-  /* THE MODEL IS TOLD. Rule 6 asks it to say when the facts do not
-     answer, but it cannot know PLTR matched nothing: "for PLTR, the
-     put/call ratio is 0.55" passes the guard because the figure IS in a
-     fact. A market-wide figure attached to one name is the one
-     fabrication the numeral scan cannot see. */
   const told = promptFor(blind.picked, q);
   ok(/COVERAGE: the question names PLTR/.test(told.user),
      "the model's user turn carries a COVERAGE line naming the uncovered symbol");
@@ -792,7 +609,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "while a question whose symbol IS covered carries no coverage line — a withholding " +
      "stated where nothing is withheld is noise a model learns to ignore");
 
-  /* THE HELPER ITSELF. */
   const cov = tickerCoverage(selectFacts(INDEX, "PLTR SYN46 premium").picked,
     "PLTR SYN46 premium");
   ok(cov.miss.includes("pltr") && cov.hit.includes("syn46") && cov.wordHit === true,
@@ -801,13 +617,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
   ok(dig.miss.length === 1 && dig.missSaid.length === 0,
      "and a name with a digit is in `miss` but not in `missSaid`, the printable subset");
 
-  /* "I" AND "A" ARE PRONOUN AND ARTICLE BEFORE THEY ARE SYMBOLS. The
-     ticker pattern matches them, and before this rule "Should I buy
-     SYN46" led with "None of the readings below is about I" — a
-     withholding about a pronoun, printed ahead of the readings that
-     answered the question. An uncovered one is dropped from `miss`; a
-     covered one is a hit; every other single letter keeps its honest
-     withholding, because F and X are names. */
   const pronoun = "Should I buy SYN46";
   const pc = tickerCoverage(selectFacts(INDEX, pronoun).picked, pronoun);
   ok(pc.hit.includes("syn46") && pc.miss.length === 0,
@@ -831,13 +640,8 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "a question naming nothing but I names nothing");
 }
 
-/* ---------- 7. THE FALLBACK PASSES ITS OWN GUARD ---------------- */
 {
-  /* THIS IS THE ASSERTION THAT MATTERS MOST. renderFactsPlain is
-     what ships when the guard fires, when the day's free model
-     allowance is spent, and when no model was reachable. If it
-     carried a figure or a verb the guard refuses, the product's
-     last honest answer would be one the product itself rejects. */
+
   for (const question of ["what happened today", "SYN46", "zqx", ""]) {
     const { picked } = selectFacts(INDEX, question);
     const plain = renderFactsPlain(picked, question);
@@ -847,8 +651,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
        (verdict.ok ? "" : " — refused: " + verdict.rejected.join(", ")));
   }
 
-  /* Fact by fact, so a single sentence that broke the rule cannot
-     hide inside a long answer that happens to pass. */
   for (const f of INDEX.facts) {
     const verdict = guardAnswer(renderFactsPlain([f], "x"), [f]);
     ok(verdict.ok, `and one fact alone renders to an answer that passes: "${f.id}"` +
@@ -863,14 +665,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "and it reads as an answer rather than as a breakage: the facts were always " +
      "deterministic, so a reader who lands here has lost the phrasing and nothing else");
 
-  /* AND IT MAY NOT NAME WHICH SILENCE IT IS, because it is handed
-     facts and never the store. An empty list looks the same from here
-     on the morning before the run, on a morning when every payload
-     arrived and none of it could be read, and on a session that really
-     was measured and empty — so the sentence names all three and
-     asserts none. It used to assert one: "Nothing has been published",
-     which on the second of those mornings told a reader the pipeline
-     had not run while every key sat in the store unreadable. */
   ok(!/^Nothing has been published/.test(nothing),
      "the empty answer does not open by declaring the pipeline silent, which is one of " +
      "three possibilities and the only one it cannot see from here");
@@ -881,7 +675,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
        "so a reader is told what is unknown rather than told the wrong one of them");
   }
 
-  /* THE MORNING THE OLD WORDING WAS WRONG ABOUT, run end to end. */
   const readFailed = {};
   for (const key of Object.keys(STORE)) {
     readFailed[key] = { status: "unreadable", generatedAt: STAMP, reason: "read failed" };
@@ -901,12 +694,8 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "into an answer that is supposed to contain only published ones");
 }
 
-/* ---------- 8. every figure in a fact is pinned in `n` ---------- */
 {
-  /* The same scan tests/flows-brief.mjs runs, over the whole index.
-     `n` is not the guard's input — the guard reads the prose — but
-     it is the anti-tamper record that lets a reader confirm each
-     sentence was BUILT from measured fields rather than composed. */
+
   let scanned = 0;
   for (const f of INDEX.facts) {
     const quoted = new Set();
@@ -915,10 +704,7 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
       else if (typeof v === "string") quoted.add(v);
       else if (Array.isArray(v)) for (const x of v) quoted.add(String(x));
     }
-    /* String values are masked out before the digits are read: a
-       ticker like SYN46 carries digits inside a symbol that is
-       itself pinned, and a naive scan would accuse the module of an
-       unpinned "046". */
+
     let stripped = f.say;
     for (const v of quoted) {
       if (typeof v === "string" && /\D/.test(v)) stripped = stripped.split(v).join(" ");
@@ -933,7 +719,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      `the scan inspected real numbers (${scanned}) rather than passing over empty prose`);
 }
 
-/* ---------- 9. the index composes rather than duplicates -------- */
 {
   const brief = INDEX.facts.filter((f) => f.source === "brief");
   ok(brief.length >= 3,
@@ -958,8 +743,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
        `travel with the value: ${f.id}`);
   }
 
-  /* Two surfaces the briefing reads and this index deliberately does
-     not restate, against one it owns outright. */
   ok(!INDEX.facts.some((f) => f.source === "sector:premium"),
      "the sector premium lean belongs to the briefing, which already reads that key");
   ok(byId("sector:trix/coverage"),
@@ -967,7 +750,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "lean, and the two may disagree for weeks with neither being wrong");
 }
 
-/* ---------- 10. the prompt states the rules it is held to ------- */
 {
   const { picked } = selectFacts(INDEX, "how did the market lean", { max: 4 });
   const { system, user } = promptFor(picked, "how did the market lean");
@@ -993,16 +775,8 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "prompt handed it");
 }
 
-/* ---------- 11. a ceiling, a cap and a count that cannot exist --- */
 {
-  /* WHOSE CEILING, AND WHETHER ONE WAS HIT AT ALL. `atVendorLimit` is
-     set at publish time as wire >= the limit the fetch sent, and the
-     publisher's own comment says a later edit to that fetch would turn
-     the claim into a lie rather than into a failure. This index reads
-     both counts, so it can refuse to repeat the lie — and it must,
-     because repeating it takes a population that is known EXACTLY and
-     republishes it as unknown. shared/flows-warnings.js:484 refuses the
-     same pair for the same reason. */
+
   const short = buildFactIndex({ news: { ...NEWS, requested: 100, returned: 63,
     atVendorLimit: true } });
   ok(!short.facts.some((f) => f.id === "news/ceiling"),
@@ -1018,11 +792,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "and a response that really did fill the request keeps the ceiling sentence, " +
      "because that is the fact that separates a population we bounded from one they did");
 
-  /* A COUNT IN PROSE THAT NO FIELD CAN CARRY. The five is
-     flows-market.js's slice and nothing beside `topShare` publishes it,
-     so a run that priced fewer than five names had the sentence naming
-     five movements over three — and topShare is 1 by construction
-     there, because every priced name is inside the top five. */
   const thinTape = buildFactIndex({ market: { ...MARKET,
     premium: { ...MARKET.premium, priced: 3, topShare: 1 } } });
   ok(!thinTape.facts.some((f) => f.id === "market/concentration"),
@@ -1036,10 +805,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "while a tape that priced 112 names keeps it, because there are five names there " +
      "to be the largest of");
 
-  /* THE ROWS THAT NEVER BECAME ALERTS. `seen` counts the SHAPED rows,
-     so a sentence built from it alone reported a page holding every
-     alert the vendor sent on a read where five arrived unreadable —
-     the unreadable silence in miniature, swallowed by a clean count. */
   const junked = buildFactIndex({ flowalerts: { ...ALERTS, unusable: 5 } });
   const alerts = junked.facts.find((f) => f.id === "flowalerts/coverage");
   ok(/5 rows the vendor sent that this page could not read/.test(alerts.say),
@@ -1062,27 +827,6 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "and pins no figure it does not have");
 }
 
-/* =============================================================
-   THE RENDERER, DRIVEN THROUGH ITS OWN TWO FETCHES.
-
-   Everything above pins shared/flows-ask.js, which the Worker
-   imports. assets/js/flows-ask.js is the other half of the same
-   contract and had no suite at all: it is the file that decides
-   which of the three silences a reader is shown, whether a refused
-   answer announces itself, and whether the route's stated reason
-   for a missing model survives the trip to the page. Every defect
-   these assertions pin was a wrong SENTENCE rather than a thrown
-   error, so nothing here would have gone red on its own.
-
-   NO BROWSER, AND THAT IS AFFORDABLE HERE. The renderer touches
-   `document`, `fetch` and `location` and nothing else — no
-   window, no timers, no storage — so it runs under a fifty-line
-   node stub, in-process, in milliseconds. tests/flows-board-render
-   .mjs stands a real Worker behind Playwright because it is testing
-   a SCRIPT TAG that was never served; what is under test here is
-   the wording this file chooses over a payload, which is the same
-   question whether or not a browser laid it out.
-   ============================================================= */
 import { readFile } from "node:fs/promises";
 {
   const SRC = await readFile(new URL("../assets/js/flows-ask.js", import.meta.url), "utf8");
@@ -1100,10 +844,7 @@ import { readFile } from "node:fs/promises";
     setAttribute(k, v) { this.attrs.set(k, String(v)); }
     getAttribute(k) { return this.attrs.has(k) ? this.attrs.get(k) : null; }
     removeAttribute(k) { this.attrs.delete(k); }
-    /* THE LISTENER IS REMEMBERED ON THE NODE AS WELL AS IN THE FLAT LIST.
-       The box now carries buttons — three examples and, on a page about a
-       name, one that inserts the symbol — and a flat list cannot say which
-       button a click belongs to. */
+
     addEventListener(type, fn) {
       submits.push({ type, fn });
       (this.on || (this.on = [])).push({ type, fn });
@@ -1122,17 +863,12 @@ import { readFile } from "node:fs/promises";
     createTextNode: (s) => new TextNode(s),
     getElementById: (id) => byId.get(id) || null,
   };
-  /* THE STUBBED LOCATION CARRIES AN href NOW, because the renderer reads
-     the page's own `?t=` off it to learn which name the page under the
-     docked rail is about. `replace` stays: a 401 navigates. */
+
   const loc = { href: "https://x.test/flows/side/", replace() {} };
 
   let briefBody = null;
   let askBody = null;
-  /* WHAT WAS ACTUALLY SENT, kept so the suite can assert on the request
-     rather than only on the answer. The page's own name travels as a
-     `subject` field beside the question, and a page that stopped sending
-     it would still render every sentence below correctly. */
+
   let sentBody = null;
   const fetchStub = (path, init) => {
     if (init && init.method === "POST") sentBody = JSON.parse(init.body);
@@ -1157,11 +893,6 @@ import { readFile } from "node:fs/promises";
   const marks = (root) => walk(root)
     .map((n) => n.getAttribute("data-empty")).filter((v) => v !== null);
 
-  /* THE TEXT A READER SEES WITHOUT OPENING ANYTHING. A <details> is shut
-     until it is clicked, so text inside one is not on the page in the sense
-     the fold rule means — and every assertion about a withholding has to be
-     made against this rather than against textContent, which reads the
-     folded audit trail as though it were on screen. */
   const openText = (node) => {
     let out = node.own || "";
     for (const c of node.children || []) {
@@ -1173,9 +904,6 @@ import { readFile } from "node:fs/promises";
     return out;
   };
 
-  /* THE FIRST THING A READER MEETS, as the class of the element carrying
-     it. Used to assert what the rail opens ONTO, which is a claim about
-     order and cannot be made from a substring test over the whole panel. */
   const firstSaying = (root) => walk(root)
     .find((n) => String(n.own || "").trim() !== "" && n.tagName !== "details");
 
@@ -1189,18 +917,10 @@ import { readFile } from "node:fs/promises";
     return app;
   };
 
-  /* The submit handler is invoked directly rather than through a
-     synthesised event: what is under test is the wording paintAnswer
-     chooses, and a stub that also had to model event dispatch would be
-     a second thing that could be wrong. */
   const ask = async (app, payload, question) => {
     askBody = payload;
     byClass(app, "ak-ask-in").value = question;
-    /* THE SUBMIT HANDLER BY ITS TYPE, not by being the last listener
-       registered. The example buttons above the field register clicks of
-       their own, and one of them is rebuilt after an answer arrives — so
-       "the last thing that called addEventListener" stopped being the form
-       the moment the box gained a control that is used after a question. */
+
     submits.filter((s) => s.type === "submit").pop().fn({ preventDefault() {} });
     await tick(); await tick();
     return byClass(app, "ak-answer");
@@ -1208,15 +928,6 @@ import { readFile } from "node:fs/promises";
 
   const STAMP2 = "2026-09-04T08:10:00.000Z";
 
-  /* ---------- pending is not a fault on this page ------------------
-
-     THE EXACT ENVELOPE worker.js RETURNS when `brief` has not been
-     published for the session. It is the ordinary state every morning
-     before the first pipeline run, and it reached a branch that called
-     it a fault on this page's side of the wire — twice — over a
-     provenance line claiming a reading had been assembled from
-     published facts that do not exist yet. Three sentences, none of
-     them true, for the most common state this route has. */
   {
     const app = mount(); await tick();
     const host = await ask(app, {
@@ -1241,12 +952,6 @@ import { readFile } from "node:fs/promises";
        "envelope there are none: facts is empty and answer is null");
   }
 
-  /* ---------- the guard's verdict is `ok`, not the length of a list -
-
-     shared/flows-ask.js refuses an empty generation with
-     {ok:false, rejected:[]} — a real refusal that names no token,
-     because there was no text to find one in. Counting the list first
-     read that empty array as a clean pass. */
   {
     const app = mount(); await tick();
     const host = await ask(app, {
@@ -1269,7 +974,6 @@ import { readFile } from "node:fs/promises";
        "refused, which is the same empty list read as a pass one paragraph lower");
   }
 
-  /* ---------- llm:false does not mean no model was asked ----------- */
   {
     const app = mount(); await tick();
     const host = await ask(app, {
@@ -1296,13 +1000,6 @@ import { readFile } from "node:fs/promises";
        "by naming a JSON field — right for a developer and wrong for a page");
   }
 
-  /* ---------- the reason the route stated is the reason printed ----
-
-     askFailure() words four outcomes onto `note` and names the cause
-     on `llmFailure`. This block read `llmReason` and `llmCode`, which
-     nothing has ever sent, so all four arrived as absent fields and
-     left as "the route did not state why" — the brief's THIRD honest
-     answer, printed over a reason that had been named. */
   {
     const app = mount(); await tick();
     const noModel = {
@@ -1310,8 +1007,6 @@ import { readFile } from "node:fs/promises";
       facts: [], silences: null, why: "", model: "@cf/zai-org/glm-4.7-flash", note: null,
     };
 
-    /* THE SHAPE askFailure() ACTUALLY RETURNS: the sentence on `note` and
-       the cause on `llmFailure`, together. */
     const spent = await ask(app, { ...noModel, llmFailure: "allowance",
       note: "The free daily allowance for the model is spent for today. It resets at " +
         "00:00 UTC. The readings below were measured by the pipeline and are unaffected.",
@@ -1323,10 +1018,6 @@ import { readFile } from "node:fs/promises";
        "and never as the unreachable-for-an-unstated-reason answer, which is a different " +
        "fact: one says come back tomorrow, the other says nobody knows");
 
-    /* AND THE TWO HALVES ARE PINNED APART, because together they hid each
-       other: with both read, deleting either one still left the other to
-       word the sentence, and a test that cannot fail on half a fix is not
-       holding that half. */
     const unconfigured = await ask(app, { ...noModel,
       note: "No model is configured for this site, so the reading below is the " +
         "pipeline's own wording. Every figure in it was measured.",
@@ -1351,7 +1042,6 @@ import { readFile } from "node:fs/promises";
        "that was unreachable for a reason nobody can read");
   }
 
-  /* ---------- a fact that arrived without its sentence ------------- */
   {
     const app = mount(); await tick();
     const host = await ask(app, {
@@ -1372,7 +1062,6 @@ import { readFile } from "node:fs/promises";
        "that lost its wording, and a reading is not owed less");
   }
 
-  /* ---------- a silence is the list it was filed under ------------- */
   {
     const app = mount(); await tick();
     const host = await ask(app, {
@@ -1388,7 +1077,6 @@ import { readFile } from "node:fs/promises";
        "field let a measured, empty market wear the mark of a job that never ran");
   }
 
-  /* ---------- the warnings box ------------------------------------- */
   {
     briefBody = {
       generatedAt: STAMP2, sessionDate: "2026-09-04", warningsChecked: 9,
@@ -1417,14 +1105,6 @@ import { readFile } from "node:fs/promises";
        "warning that arrived");
   }
 
-  /* ---------- the answer is not the fact list twice ----------------
-
-     THE DEFECT: on every fallback branch — a fired guard, a spent
-     allowance, no model configured — the served answer IS
-     renderFactsPlain, whose body is one dash-prefixed line per fact.
-     The block below it then drew the same facts again with the same
-     sentences, so a reader met every reading on the page twice, once as
-     an answer and once as evidence for it. */
   {
     const app = mount(); await tick();
     const facts = [
@@ -1469,7 +1149,6 @@ import { readFile } from "node:fs/promises";
        "no fact draws a sentence on this branch, because the sentence is above it");
   }
 
-  /* ---------- the model's prose is NOT the fact list ---------------- */
   {
     const app = mount(); await tick();
     const facts = [
@@ -1503,9 +1182,6 @@ import { readFile } from "node:fs/promises";
     ok(/market/.test(allClass(host, "ak-fact-src")[0].textContent),
        "and it is the one from the other key");
 
-    /* THE TWO HALVES ARE DECIDED SEPARATELY, and a 2-and-1 split is what
-       proves it: one plural verb and one singular in the same sentence. A
-       single count driving both would have to be wrong on one of them. */
     const mixed = await ask(app, {
       answer: "The session leans long.",
       llm: true, capped: false, silences: null, why: "", model: "m", note: null,
@@ -1526,14 +1202,6 @@ import { readFile } from "node:fs/promises";
        "counts rather than with each other");
   }
 
-  /* ---------- a withholding never folds ----------------------------
-
-     `why` carries an accounting AND, when there is one, a withholding.
-     The whole string is printed inside the method disclosure. On the
-     branch where a model wrote the prose that left "nothing indexed is
-     about the name you asked about" as the only statement of its kind
-     on the page, one click away, under a summary reading "How this
-     answer was assembled". */
   {
     const app = mount(); await tick();
     const facts = [{ id: "a", say: "The long board cleared 44 names.", n: {}, topic: [],
@@ -1554,9 +1222,6 @@ import { readFile } from "node:fs/promises";
        "and the audit trail still holds `why` entire, because a record with a hole cut in " +
        "it is worse than a sentence read twice");
 
-    /* THE CONTROL. On the fallback branch renderFactsPlain's own lead is a
-       coverage claim in the open already, so lifting this one too would
-       state the same withholding twice in eight lines. */
     const plain = await ask(app, {
       answer: "None of the readings below is about ZZZ. Nothing else in the question " +
         "matched a topic the published payloads carry, so these are the session's " +
@@ -1573,7 +1238,6 @@ import { readFile } from "node:fs/promises";
        "stopped saying it: the coverage claim is there, in the answer's own words");
   }
 
-  /* ---------- the docked mount is worded for the mount it is on ---- */
   {
     const app = mount("dock"); await tick();
     const host = byClass(app, "ak-answer");
@@ -1595,12 +1259,6 @@ import { readFile } from "node:fs/promises";
        "the control that stops the fix from being 'delete the reference everywhere'");
   }
 
-  /* ---------- what the rail opens onto -----------------------------
-
-     THE DEFECT: opened, the dock presented 335 characters of guarantee
-     and then the credit meter — 469 characters of chrome — above an
-     empty field. Every word survives; the guarantee is reassurance and
-     the fold rule allows reassurance to fold. */
   {
     const app = mount("dock"); await tick();
     const first = firstSaying(app);
@@ -1634,13 +1292,6 @@ import { readFile } from "node:fs/promises";
        "out of the allowance the meter above it exists to show a reader before they decide");
   }
 
-  /* ---------- the rail knows the name of the page it is docked to --
-
-     THE NAME HERE IS SIX CHARACTERS ON PURPOSE. Every card the pipeline
-     emits is SYN0## — 93 of them in the dry-run corpus, not one of them
-     five characters — so a bound of /^[A-Z][A-Z0-9]{0,4}$/ passes a suite
-     written around "SYN46" and drops every name the site actually
-     publishes. The shape asserted below is readTicker()'s own. */
   {
     const app = mount("dock", "https://x.test/flows/ticker/?t=syn046"); await tick();
     ok(/Asking about SYN046 — the name on this page/.test(app.textContent),
@@ -1679,7 +1330,6 @@ import { readFile } from "node:fs/promises";
        "index holds readings for, rather than from a list written into the renderer");
   }
 
-  /* ---------- and it reads the share-class symbols the vendor quotes -- */
   {
     const dotted = mount("dock", "https://x.test/flows/ticker/?t=brk.b"); await tick();
     ok(/Asking about BRK\.B — the name on this page/.test(dotted.textContent),
@@ -1701,7 +1351,6 @@ import { readFile } from "node:fs/promises";
        "anybody can type into");
   }
 
-  /* ---------- on the page, the examples come out of the briefing --- */
   {
     briefBody = {
       generatedAt: STAMP2, sessionDate: "2026-09-04", warningsChecked: 4,
@@ -1725,7 +1374,6 @@ import { readFile } from "node:fs/promises";
     briefBody = null;
   }
 
-  /* ---------- and a page with no name in its URL claims none ------- */
   {
     const app = mount("dock", "https://x.test/flows/side/?side=long"); await tick();
     ok(!byClass(app, "ak-onpage"),
@@ -1737,21 +1385,6 @@ import { readFile } from "node:fs/promises";
   }
 }
 
-/* ---------- 12. the per-name readings, from the cards ------------ */
-
-/* THE DEFECT: asked about NVDA on a board where NVDA sat at rank 30,
-   the assistant answered with a market-wide put/call ratio, because the
-   index read six market-wide surfaces and no card. These assertions
-   are built on a store of their own rather than on STORE, so the
-   counts sections 1–11 assert on do not move.
-
-   THE DISTINCTION THE GAMMA FACT CARRIES IS THE ONE WORTH THE MOST
-   ASSERTIONS. Thirty-one of fifty emitted cards publish no flip level
-   because net gamma never changed sign inside the band — crossings is
-   a measured 0, and that is a finding about the book. A card whose
-   crossings is null was not measured, and gets no clause at all,
-   because "no flip level" over an unmeasured ladder is the confident
-   zero wearing prose. Three cards below hold the three states. */
 {
   const CARD = (t, over) => ({
     v: "2", ticker: t, generatedAt: STAMP, sessionDate: "2026-09-04",
@@ -1778,18 +1411,17 @@ import { readFile } from "node:fs/promises";
       rows: [{ t: "SYN46", r: 1, s: 59 }, { t: "SYN47", r: 2, s: 41 }] },
     "board:short": { generatedAt: STAMP, status: "ok", rows: [{ t: "SYN90", r: 1, s: -50 }] },
     "card:SYN46": CARD("SYN46"),
-    /* a measured flip level, with its side */
+
     "card:SYN47": CARD("SYN47", { gammaFlip: 412.5,
       regime: { label: "long", crossings: 1, flipSide: "short_below" } }),
-    /* an UNMEASURED ladder, a put wall that did not build, and a
-       persistence four decimals would round to nothing */
+
     "card:SYN90": withPanels("SYN90",
       { gamma: { putWall: null }, path: { persistence: 0.00003 } },
       { regime: { label: "short", crossings: null, flipSide: null } }),
-    /* a card no board holds, whose IV rank is published as a fraction */
+
     "card:ZZZ": withPanels("ZZZ",
       { volContext: { ivRank: { status: "ok", rankUnit: "fraction 0-1", rows: [{ date: "2026-09-03", rank1y: 0.52 }] } } }),
-    /* a read that FAILED — null, which typeof calls an object */
+
     "card:NUL": null,
     market: MARKET,
   };
@@ -1808,7 +1440,6 @@ import { readFile } from "node:fs/promises";
   ok(of("SYN46").every((f) => f.at === STAMP && f.source === "card:SYN46"),
      "and each is stamped with the card's own run and sourced to the card's own key");
 
-  /* standing */
   const st46 = one("SYN46", "standing"), stZ = one("ZZZ", "standing");
   ok(/rank 1 of 2 on the long board/.test(st46.say) && st46.n.boardRank === 1 && st46.n.boardRows === 2,
      "a boarded name's standing names its rank WITH the side's row count, in the sentence and in n");
@@ -1817,7 +1448,6 @@ import { readFile } from "node:fs/promises";
   ok(/conviction 96 of 100/.test(st46.say) && st46.n.convictionOf100 === 96,
      "conviction is printed over its 100, never bare");
 
-  /* gamma: measured zero, measured level, unmeasured */
   const g46 = one("SYN46", "gamma"), g47 = one("SYN47", "gamma"), g90 = one("SYN90", "gamma");
   ok(/no flip level is published \(0 crossings\)/.test(g46.say) && g46.n.crossings === 0 && !("gammaFlipPx" in g46.n),
      "crossings 0 with no flip is said as the finding it is — net gamma never changed sign — " +
@@ -1831,7 +1461,7 @@ import { readFile } from "node:fs/promises";
   ok(of("SYN90").length === 4 && one("SYN90", "standing") && one("SYN90", "move") && one("SYN90", "flow"),
      "four of five survive the missing wall");
   {
-    /* the unmeasured ladder, on a card whose gamma DID build */
+
     const unm = buildFactIndex({ "card:UNM": withPanels("UNM", {}, { regime: { label: "short", crossings: null, flipSide: null } }) });
     const gu = unm.facts.find((f) => f.id === "card:UNM/gamma");
     ok(gu && !/flip/.test(gu.say) && !("crossings" in gu.n) && !("gammaFlipPx" in gu.n),
@@ -1839,7 +1469,6 @@ import { readFile } from "node:fs/promises";
        "'no level', which over an unmeasured ladder is the confident zero in prose");
   }
 
-  /* rounding: four decimals, never to zero, integers as published */
   const mv = one("SYN46", "move"), fl = one("SYN46", "flow"), fl90 = one("SYN90", "flow");
   ok(/is 0\.0928 of spot as a fraction/.test(mv.say) && mv.n.impliedMoveFraction === 0.0928 && !/0\.0928123/.test(mv.say),
      "a full-precision fraction is rounded to four decimals ONCE, and the sentence and n agree " +
@@ -1852,7 +1481,6 @@ import { readFile } from "node:fs/promises";
   ok(/the horizon is the nearest end-of-week expiry\.$/.test(mv.say),
      "the priced move names its horizon rule from the payload rather than asserting one");
 
-  /* IV rank is gated on the unit the payload publishes */
   const iv46 = one("SYN46", "ivrank"), ivZ = one("ZZZ", "ivrank");
   ok(iv46 && /52\.15 percent on 2026-09-03/.test(iv46.say) && iv46.n.ivRank1yPct === 52.15,
      "an IV rank whose unit is published as a percent is quoted as one, dated");
@@ -1860,7 +1488,6 @@ import { readFile } from "node:fs/promises";
      "and one published as a fraction is NOT quoted — a card carries two IV ranks in two units, " +
      "and this reads only the one whose unit travels with it");
 
-  /* selection: the NVDA question, answered */
   const sel = selectFacts(idx, "what is new for SYN46 calls");
   const srcs = sel.picked.map((f) => f.source);
   eq(srcs.filter((s) => s === "card:SYN46").length, 5,
@@ -1880,7 +1507,6 @@ import { readFile } from "node:fs/promises";
      "a market-wide question still leads with the market fact: a card's flow fact matches the " +
      "topic word too, and on a tie the source order decides, with cards last");
 
-  /* the shed: whole names, from the tail, counted with a denominator */
   const all = idx.facts.filter((f) => f.source.startsWith("card:"));
   const shed = shedCardFacts(all, idx.cardNames, (facts) => facts.length - 12);
   assert.deepEqual(shed.namesIndexed, { of: 4, indexed: 2, shed: 2 },
@@ -1895,12 +1521,6 @@ import { readFile } from "node:fs/promises";
   ok(none.facts.length === all.length && none.namesIndexed.shed === 0 && none.namesIndexed.indexed === 4,
      "and under budget nothing is shed and the count says all four are indexed");
 
-  /* THE SAME PINNING SCAN SECTION 8 RUNS, OVER THE NEW CLASS OF FACT.
-     Section 8 walks INDEX, which holds no card, so without this the
-     anti-tamper record would be asserted for every fact except the
-     ones most likely to carry a stray figure — a scale, a horizon, a
-     date — and "conviction 96 of 100" was exactly that stray until the
-     100 was pinned as the unit it is. */
   let scanned = 0;
   for (const f of all) {
     const quoted = new Set();
@@ -1919,17 +1539,6 @@ import { readFile } from "node:fs/promises";
   ok(scanned >= 30, `the per-name scan inspected real numbers (${scanned})`);
 }
 
-/* ---------- 13. selection honesty: the leak, the flood, the deal ---- */
-
-/* TWO DEFECTS MEASURED ON THE EMITTED INDEX, after the per-name facts
-   landed. (1) THE LEAK: a standing fact pins the regime label and the
-   board side beside its figures, and every letter-initial string in n
-   became a topic — so a name on the LONG board carried "short" as a
-   topic and "which names are on the short board" was answered with
-   eleven long-board names. (2) THE FLOOD: on a topic word a card fact
-   scored the same as a market-wide one and only lost the tie, so
-   "where is dealer gamma short" picked fourteen names' gamma facts and
-   no market-wide reading at all. */
 {
   const CARD = (t, over) => ({
     v: "2", ticker: t, generatedAt: STAMP, sessionDate: "2026-09-04",
@@ -1950,7 +1559,7 @@ import { readFile } from "node:fs/promises";
     "board:long": { generatedAt: STAMP, status: "ok",
       rows: [{ t: "SYN46", r: 1, s: 59 }, { t: "SYN47", r: 2, s: 41 }] },
     "board:short": { generatedAt: STAMP, status: "ok", rows: [{ t: "SYN90", r: 1, s: -50 }] },
-    /* on the LONG board, in a SHORT gamma regime — the leak's exact shape */
+
     "card:SYN46": CARD("SYN46"),
     "card:SYN47": CARD("SYN47", { regime: { label: "long", crossings: 1, flipSide: "short_below" }, gammaFlip: 412.5 }),
     "card:SYN90": CARD("SYN90"),
@@ -1973,8 +1582,6 @@ import { readFile } from "node:fs/promises";
   ok(!shortBoard.picked.some((f) => f.source === "card:SYN46" || f.source === "card:SYN47"),
      "and serves no long-board name's card fact on the word 'short'");
 
-  /* THE FLOOD, on an index built for it: two market-wide gamma facts
-     and seven card facts over six names, one name holding two. */
   const flood = { facts: [
     ...[1, 2].map((k) => ({ id: "market/g" + k, topic: ["gamma", "dealer"], say: "M.", n: {}, source: "market", at: null })),
     ...["A1", "A2", "A3", "A4", "A5", "A6", "A1"].map((t, k) => ({ id: "card:" + t + "/gamma" + k,
@@ -1995,7 +1602,6 @@ import { readFile } from "node:fs/promises";
   ok(named.picked[0].source === "card:A5",
      "while a name that is TYPED is not a word-only match: A5's fact leads on the name");
 
-  /* THE DEAL: two names, ten facts each, a cap of fourteen. */
   const pair = { facts: [] };
   for (let k = 0; k < 10; k++) {
     pair.facts.push({ id: "a" + k, topic: ["aaa"], say: "A.", n: {}, source: "movers", at: null });
@@ -2011,23 +1617,10 @@ import { readFile } from "node:fs/promises";
   ok(/7 of the 10 facts about AAA and 7 of the 10 facts about BBB, cut at the cap of 14\./.test(dealt.why),
      "and the sentence names both — " + dealt.why);
 
-  /* A NAME THAT MATCHED NOTHING IS NAMED AS SUCH, up front. */
   const miss = selectFacts(idx, "what is new for XYZ calls");
   ok(/^Nothing indexed is about XYZ\. Picked /.test(miss.why),
      "a typed name with no fact opens the sentence, before the counts — " + miss.why);
 
-  /* AND IT IS PUBLISHED AS ITS OWN FIELD, BECAUSE ONE OF THESE TWO
-     SENTENCES FOLDS AND THE OTHER MAY NOT. `why` is the audit trail: how
-     many of what matched were served, and out of how many. That belongs
-     behind a disclosure. The clause in front of it is a WITHHOLDING —
-     nothing indexed is about the name you asked about — and the fold rule
-     is asymmetric: reassurance may fold, a withholding never may. The page
-     printed the whole string in the method box, so on the branch where a
-     model wrote the prose the withholding was the only sentence of its
-     kind on the page and it was one click away. Splitting it in the module
-     rather than letting the page find it inside `why` by matching on
-     wording is what stops the lift from silently ending the first time
-     either sentence is rephrased. */
   ok(/^Nothing indexed is about XYZ, so no reading below is about it\.$/.test(miss.withheld),
      "the withholding travels as its own field, whole, and claims only what this module " +
      "can see — the index, which is what it holds — " + miss.withheld);
@@ -2045,16 +1638,6 @@ import { readFile } from "node:fs/promises";
      "served is the session's headline readings — says in the open that it is not an " +
      "answer to the question, which is the whole of what a reader needs to know about it");
 
-  /* IT RESTATES `why`, IT IS NOT CUT OUT OF IT — pinned here because the
-     wire said the opposite in prose for a wave. worker.js described this
-     field as "a substring of `why`", which is false on BOTH branches the
-     module can take, and a page written to that description would go
-     looking for the caveat inside the audit trail and find nothing. The
-     duplication is the design: `why` is the record and folds whole, this is
-     the caveat and does not, and each is worded for the place it is read
-     in. Asserting NOT-a-substring is what keeps the two free to be worded
-     separately — the moment one is derived from the other by slicing, this
-     fails and the fold rule has a hidden coupling in it. */
   ok(!miss.why.includes(miss.withheld),
      "the withholding is not a substring of the audit trail it duplicates: `why` says " +
      "\"Nothing indexed is about XYZ. Picked …\" and the field says \"Nothing indexed is " +
@@ -2065,7 +1648,6 @@ import { readFile } from "node:fs/promises";
      "served out of what exists and the field says these are headline readings rather than " +
      "an answer — why: " + nothingMatched.why + " | withheld: " + nothingMatched.withheld);
 
-  /* THE PAGE'S OWN NAME. */
   const onPage = selectFacts(idx, "what is new for calls", { subject: { tickers: ["SYN46"] } });
   eq(onPage.subjectApplied, true, "with no name typed, the page's name is applied");
   ok(onPage.picked[0].topic.includes("syn46") &&
@@ -2086,7 +1668,6 @@ import { readFile } from "node:fs/promises";
   ok(junkSubject.subjectApplied === true && !/undefined/.test(junkSubject.why),
      "a malformed subject is filtered, never thrown on and never printed");
 
-  /* THE FOURTH SILENCE HAS A LIST, AND A FIFTH IS AN ERROR. */
   same(Object.keys(buildFactIndex({}).silences), [...SILENCE_KINDS],
      "the index files four kinds of silence, in the stylesheet's order");
   ok(SILENCE_KINDS.includes("unavailable"), "and unavailable is the fourth");
@@ -2097,19 +1678,16 @@ import { readFile } from "node:fs/promises";
     "and a kind this product has not named throws rather than vanishing");
   checks++;
 
-  /* THE LEAD TRAVELS FROM THE BRIEFING TO THE INDEX. */
   ok(INDEX.facts.some((f) => f.source === "brief" && f.lead && Array.isArray(f.lead.keys) && f.lead.keys.length > 0),
      "a briefing fact that names which figure leads its sentence keeps that spec in the index");
   ok(INDEX.facts.every((f) => f.source !== "brief" ? f.lead === undefined : true),
      "and no other surface invents one");
 
-  /* THE MODEL IS TOLD THERE ARE FOUR. */
   const told = promptFor(onPage.picked, "what is new for calls").system;
   ok(/3\. FOUR KINDS OF SILENCE ARE FOUR DIFFERENT FACTS/.test(told) && /UNAVAILABLE means/.test(told),
      "rule 3 names four silences, unavailable among them");
 }
 
-/* ---------- the intraday refresh of the index ------------------- */
 {
   const index = { ...INDEX, sessionDate: "2026-09-04" };
   const before = index.facts.filter((f) => f.source === "flowalerts");
@@ -2147,7 +1725,6 @@ import { readFile } from "node:fs/promises";
      "with nothing to read from, no refresh stamp is invented");
 }
 
-/* ---------- how old the facts are ------------------------------- */
 {
   const idx = { sessionDate: "2026-09-10", generatedAt: "2026-09-10T22:00:00Z", facts: [] };
   const current = briefAge(idx, new Date("2026-09-11T14:00:00Z"));
@@ -2201,12 +1778,6 @@ console.log(`✓ flows-ask: ${checks} assertions — an index whose every figure
   `examples built from names a payload named rather than onto a folded guarantee, and ` +
   `reads the name of the page it is docked to off that page's own URL`);
 
-/* ---------- the standing summary ---------------------------------
-
-   The question box answers what a reader typed. This lane answers the
-   question nobody types, on the cron, with no reader present — so every
-   protection the question lane gets from having been ASKED something has to
-   be re-established here from nothing. */
 {
   const FACTS = [
     { id: "a", say: "NVDA net gamma is +847,213 contracts for the 2026-09-11 session." },
@@ -2214,10 +1785,6 @@ console.log(`✓ flows-ask: ${checks} assertions — an index whose every figure
     { id: "c", say: "The dark-pool surface was quiet: it was measured and holds nothing." },
   ];
 
-  /* THE EXISTING PAIR CANNOT BE REUSED, and this is why there is a second
-     pair at all rather than a default argument. Handed no question they do
-     not degrade — they assert something false about a question nobody
-     asked. */
   ok(/question/i.test(renderFactsPlain([], "")),
      "renderFactsPlain with no question still talks about the question, which is why " +
      "the summary lane needs its own fallback rather than an empty string");
@@ -2228,20 +1795,12 @@ console.log(`✓ flows-ask: ${checks} assertions — an index whose every figure
   ok(promptForSummary(FACTS).user.includes("+847,213"),
      "and it hands the model the facts verbatim, which is what the guard checks against");
 
-  /* THE FALLBACK PASSES ITS OWN GUARD, the invariant the question lane holds
-     and the one a fallback that violates its own rule would break. Checked on
-     both branches, and with smallIntegers off, which is how the lane calls
-     it. */
   for (const [label, picked] of [["with nothing in hand", []], ["with facts in hand", FACTS]]) {
     const verdict = guardAnswer(renderSummaryPlain(picked), picked, { smallIntegers: false });
     ok(verdict.ok, `the plain summary ${label} passes the guard the model's wording must ` +
        `pass (refused: ${verdict.rejected.join(", ")})`);
   }
 
-  /* SPELLED-OUT COUNTS ARE THE HOLE THIS LANE OPENED. numeralsIn is a digit
-     regex, so a summary over dozens of facts could write a count in words and
-     the scan would never see it — the one shape of invented figure that is
-     likelier in a summary than in a two-sentence answer. */
   const spelled = guardAnswer("Three of the surfaces answered this session.", FACTS,
                               { smallIntegers: false });
   ok(!spelled.ok && spelled.rejected.includes("three"),
@@ -2261,26 +1820,15 @@ console.log(`✓ flows-ask: ${checks} assertions — an index whose every figure
      "fact and `twenty` in the prose are one claim, and refusing that would be pedantry " +
      "rather than honesty");
 
-  /* "ONE" IS DELIBERATELY NOT SCANNED. It is the only number word that is
-     usually not a number in English, so scanning it would refuse honest prose
-     far more often than it would catch an invented count — and a false
-     refusal throws away a good answer. */
   ok(guardAnswer("The one reading that matters is NVDA's.", FACTS, { smallIntegers: false }).ok,
      "`one` is not scanned, because it is a pronoun at least as often as it is a count");
 
-  /* THE SMALL-INTEGER WHITELIST IS OFF FOR THIS LANE, and the default proves
-     it had to be: 1..12 pass unquoted by default, which is precisely the
-     range a summary's invented counts live in. */
   ok(guardAnswer("There are 3 surfaces.", FACTS).ok,
      "the default whitelist lets a bare small integer through");
   ok(!guardAnswer("There are 3 surfaces.", FACTS, { smallIntegers: false }).ok,
      "and the summary lane turns it off, because an unsupported small count in a summary " +
      "reads as authoritative");
 
-  /* THE FINGERPRINT IS WHAT MAKES THE LANE CHEAP. The cron fires 96 times a
-     day and the facts change once; a summary keyed on the clock would spend
-     ninety-six times what it needs and hand two readers of the same board two
-     different sentences about it. */
   eq(summaryFingerprint(FACTS), summaryFingerprint(FACTS.slice()),
      "the same facts fingerprint the same, so a firing that changed nothing spends nothing");
   ok(summaryFingerprint(FACTS) !== summaryFingerprint(FACTS.slice(0, 2)),
@@ -2290,9 +1838,7 @@ console.log(`✓ flows-ask: ${checks} assertions — an index whose every figure
      "and so does a figure changing inside one, which is the case the clock would miss");
   ok(summaryFingerprint([]) !== summaryFingerprint(FACTS),
      "an empty session is not the same fingerprint as a full one");
-  /* ORDER IS PART OF THE IDENTITY: the facts reach the model as an ordered
-     list and the lead sentence is chosen from the top of it, so two orderings
-     are two different prompts. */
+
   ok(summaryFingerprint(FACTS) !== summaryFingerprint([FACTS[2], FACTS[1], FACTS[0]]),
      "and re-ordering the same facts is a different prompt, so it is a different fingerprint");
 }

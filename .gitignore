@@ -1,24 +1,9 @@
-# Cloudflare / local secrets
 .dev.vars*
 .env*
 .wrangler/
-# Node
 node_modules/
-# OS
 .DS_Store
 
-# Scratch probes. Rendering checks and viewport measurements get written into
-# tests/ so they can resolve playwright from tests/node_modules, and `git add -A`
-# has swept them into a PUBLIC repository three times now. They carry absolute
-# paths and no assertions; anything worth keeping becomes a real contract test.
-#
-# ENUMERATING NAMES IS A LOSING GAME, and the list below is the evidence: it
-# caught probe-* and cardshot-* and missed _d2.mjs, which shipped in #18, and
-# __chip_probe.html, which was one `--amend` from shipping here. What every one
-# of them actually shares is a leading underscore, so that is what is ignored —
-# a convention a future probe will follow without this file being updated.
-#
-# articles/_template/ is the one real leading-underscore path in the tree.
 _*
 !articles/_template/
 !articles/_template/**
@@ -27,21 +12,4 @@ tests/.tmp-*
 tests/probe-*.mjs
 tests/cardshot-*.mjs
 
-# Scratch directories under tests/. Several suites run the pipeline's own
-# emitter into tests/ and clean up in a `finally` — which does not run when a
-# suite is killed mid-assertion, and leaves a directory of JSON that `git add
-# -A` then offers to commit. The design shots are megabytes of PNG that
-# regenerate in two minutes and are pictures of states the payloads already
-# describe, so committing them stores a stale copy of something reproducible.
-#
-# THIS WAS THREE ENUMERATED PATTERNS AND IT MISSED THE FOURTH NAME. `-emit/`,
-# `-probe/` and `.shots-*/` did not match `.scratch-track/`, a directory of
-# five ad-hoc probe scripts that `git add -A` was ready to commit to a PUBLIC
-# repository — which is precisely the failure the underscore rule above was
-# written about, recurring one section later in the same file.
-#
-# So this ignores the SHAPE: a dot-prefixed directory under tests/. No tracked
-# path in the repository is one (`git ls-files 'tests/.*'` is empty), the
-# suites that create them already use the dot prefix by convention, and a
-# future probe directory is caught without this file being updated again.
 tests/.*/

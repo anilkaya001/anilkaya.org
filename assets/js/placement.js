@@ -1,10 +1,3 @@
-/* =============================================================
-   placement.js — lightweight Econometrics Placement Diagnostic.
-
-   Persistence contract: only the five-field placement summary is passed to
-   IEWTStorage/Auth. Individual responses never leave this in-memory session,
-   and this feature never reads or mutates progress, mastery, or points.
-   ============================================================= */
 (() => {
   "use strict";
 
@@ -222,8 +215,6 @@
     normalizeResult,
   });
 
-  // The VM contract suite runs the pure engine without a browser. No test
-  // global is installed in production because a real document exists there.
   if (typeof document === "undefined") {
     globalThis.__IEWTPlacementTest = TEST_API;
     return;
@@ -277,8 +268,7 @@
           synced: !!placement && saved.synced === true,
         };
       } catch {
-        // Auth owns owner/generation coordination when it is available. Do
-        // not bypass a reset or account-change failure with a direct write.
+
         return { saved: false, synced: false };
       }
     }
@@ -396,8 +386,7 @@
     const start = el("button", "btn btn--gold placement-primary", saved ? "Retake diagnostic" : "Start 15-question diagnostic");
     start.type = "button";
     start.addEventListener("click", () => {
-      // Preserve the last completed checkpoint throughout a retake. It is
-      // overwritten only when all 15 new responses have been graded.
+
       void startDiagnostic(start);
     });
     actions.append(start);
@@ -754,8 +743,7 @@
     const retake = el("button", "btn btn--ghost", "Retake diagnostic");
     retake.type = "button";
     retake.addEventListener("click", () => {
-      // A partial or abandoned retake must not erase the learner's last result.
-      // Completing the new attempt atomically replaces that checkpoint.
+
       void startDiagnostic(retake);
     });
     const clear = el("button", "btn btn--ghost", "Clear saved result");
@@ -781,9 +769,7 @@
   }
 
   function init() {
-    // Initial hydration must not steal focus from browser chrome, navigation,
-    // or an assistive-technology reading position. User-triggered transitions
-    // still focus their new question/result heading.
+
     renderIntro("", { focus: false });
     document.addEventListener("iewt:auth-ready", () => {
       if (!session) renderIntro(introMessage, { focus: false });

@@ -1,4 +1,3 @@
-/* Browser-side portfolio catalogue; project code and output never enter D1. */
 (() => {
   "use strict";
   const projects = [

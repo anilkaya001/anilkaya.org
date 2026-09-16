@@ -1,10 +1,3 @@
-/* =============================================================
-   curriculum-academy.js — canonical Academy 2.0 authoring source.
-
-   Five 32-stage courses are built from a shared pedagogical sequence while
-   keeping every explanation, diagnostic, skill link, and Python task explicit.
-   This file is authoring-only and is excluded from the public static bundle.
-   ============================================================= */
 (() => {
   "use strict";
 
@@ -144,8 +137,6 @@ print("grader: factor alpha and beta are correct")`,
     },
   };
 
-  // Runnable interactive concept labs (slider-driven live Python), keyed by
-  // stage id. Authored + verified to replace the former static conceptlab SVGs.
   const conceptLabs = {
     "foundations-probability-lab": {
       "note": "Set the mixing weight and separation: the two-component model defines one normalized density, and the simulated draws fall exactly under it.",
@@ -709,7 +700,7 @@ print("grader: factor alpha and beta are correct")`,
         html: `<h2>${title}</h2><p class="lead">${summary}</p><p>${lesson}</p><div class="callout"><b>Workflow.</b> ${primary.practice}</div><p><b>Diagnostic:</b> Inspect ${primary.diagnostic}. The main failure to avoid is ${primary.risk}.</p>`,
       }),
       (() => {
-        // Runnable, slider-driven live-Python lab (was a static conceptlab SVG).
+
         const lab = conceptLabs[`${base}-lab`];
         if (!lab) throw new Error(`Missing runnable concept lab for ${base}-lab`);
         return stageMeta("interactive", `${base}-lab`, [primaryId], 6, difficulty, {

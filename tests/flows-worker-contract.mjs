@@ -1,14 +1,3 @@
-/* End-to-end contracts for the gated Flows section, against a real local
-   Worker. These are the tests that prove the gate actually holds, as opposed
-   to the unit tests in flows-auth-contract.mjs which prove the primitives.
-
-   The bypass cases matter most. route() ends with env.ASSETS.fetch(request),
-   so anything a path check fails to match is handed to the static bundle.
-   A prefix test is evadable — /%66lows/index.html, //flows/index.html and
-   /FLOWS/index.html all slip past startsWith("/flows/"). The defence here is
-   structural rather than filtered: the gated HTML lives in shared/flows-pages.js
-   and never enters the bundle, so a missed path has nothing to leak. */
-
 import assert from "node:assert/strict";
 import { signSession } from "../shared/session.js";
 import { TICKER_PANELS } from "../shared/flows-panels.js";
@@ -27,16 +16,10 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 const url = (p) => server.baseURL + p;
 const get = (p, init) => fetch(url(p), { redirect: "manual", ...init });
 
-/* A marker that appears only in an AUTHENTICATED page, never in the login
-   page. It must be on the page each assertion actually requests: /flows/ is
-   now the Overview, which has no results table at all, so the old
-   id="flowsBody" marker would have passed every leak test for the wrong
-   reason — absent when signed in as much as when signed out. The rail is on
-   every gated page and on none of the public ones. */
 const BOARD_MARKER = 'class="flows-rail"';
 
 try {
-  /* ---------- the login page is public, the board is not ---------- */
+
   {
     const res = await get("/flows/");
     eq(res.status, 200, "GET /flows/ serves a page to an anonymous visitor");
@@ -49,14 +32,12 @@ try {
        "gated documents are no-store, not merely no-cache");
   }
 
-  /* ---------- canonical path ------------------------------------- */
   {
     const res = await get("/flows");
     eq(res.status, 308, "GET /flows redirects to the canonical trailing slash");
     ok((res.headers.get("location") || "").endsWith("/flows/"), "redirect target is /flows/");
   }
 
-  /* ---------- method discipline ---------------------------------- */
   {
     const res = await get("/flows/login");
     eq(res.status, 405, "GET /flows/login is refused");
@@ -66,7 +47,6 @@ try {
     eq(out.status, 405, "GET /flows/logout is refused (no CSRF sign-out)");
   }
 
-  /* ---------- the JSON surface ----------------------------------- */
   {
     const res = await get("/api/flows/board");
     eq(res.status, 401, "anonymous board access is refused");
@@ -76,15 +56,14 @@ try {
        "the project error envelope is used");
   }
 
-  /* ---------- BYPASS: the gate must be structural ------------------ */
   {
     for (const path of [
-      "/%66lows/index.html",   // percent-encoded 'f'
-      "//flows/index.html",    // protocol-relative style double slash
-      "/FLOWS/index.html",     // case variation
-      "/flows/index.html",     // the file a bundled page would have had
-      "/flows/board",          // a plausible guess
-      "/flows/../flows/",      // traversal that normalises back
+      "/%66lows/index.html",
+      "//flows/index.html",
+      "/FLOWS/index.html",
+      "/flows/index.html",
+      "/flows/board",
+      "/flows/../flows/",
     ]) {
       const res = await get(path);
       const body = res.status === 200 ? await res.text() : "";
@@ -95,10 +74,8 @@ try {
     }
   }
 
-  /* ---------- wrong-audience tokens ------------------------------- */
   {
-    // A learning session, correctly signed with the SAME secret, must not
-    // unlock flows. This is the isolation boundary, tested through HTTP.
+
     const learn = await signSession(
       { sub: "g_test", aud: "learn", exp: Date.now() + 60000 }, SESSION_SECRET,
     );
@@ -108,7 +85,6 @@ try {
     const page = await get("/flows/", { headers: { Cookie: "flows_session=" + learn } });
     ok(!(await page.text()).includes(BOARD_MARKER), "a learning token does not render the board");
 
-    // And the reverse: a flows token must not be accepted as a learner.
     const flows = await signSession(
       { sub: FLOWS_TEST_USER, aud: "flows", exp: Date.now() + 60000 }, SESSION_SECRET,
     );
@@ -117,10 +93,8 @@ try {
     ok(meBody.user === null, "a flows token is not accepted as a learning session");
   }
 
-  /* ---------- legacy learning sessions still work ------------------ */
   {
-    // Tokens minted before audiences existed carry none. They must keep
-    // working, or this deployment logs out every current learner.
+
     const legacy = await signSession(
       { sub: "g_legacy", email: "l@example.com", name: "Legacy", exp: Date.now() + 60000 },
       SESSION_SECRET,
@@ -131,7 +105,6 @@ try {
        "a legacy audience-less learning session is still honoured");
   }
 
-  /* ---------- failed sign-in is uniform ---------------------------- */
   {
     const post = (params) => fetch(url("/flows/login"), {
       method: "POST",
@@ -156,7 +129,6 @@ try {
     ok(!a.includes(BOARD_MARKER), "a failed sign-in never renders the board");
   }
 
-  /* ---------- cross-origin sign-in is refused ---------------------- */
   {
     const res = await fetch(url("/flows/login"), {
       method: "POST",
@@ -171,7 +143,6 @@ try {
     eq(res.status, 403, "a cross-origin sign-in attempt is refused");
   }
 
-  /* ---------- the happy path -------------------------------------- */
   {
     const res = await fetch(url("/flows/login"), {
       method: "POST",
@@ -203,10 +174,6 @@ try {
     ok(html.includes("/assets/js/flows-overview.js"),
        "the overview loads its own controller");
 
-    /* THE SIDES ARE ROUTES NOW, not a toggle. A toggle has no address: a
-       reader could not link to the bearish side, bookmark it or send it, and
-       half the session sat behind a click. Each side is a page, so each is
-       asserted as one. */
     for (const route of ["/flows/long/", "/flows/short/"]) {
       const side = await get(route, { headers: { Cookie: "flows_session=" + token } });
       eq(side.status, 200, `${route} renders for an authenticated session`);
@@ -227,11 +194,6 @@ try {
       eq(bare.status, 308, `${route} without its trailing slash redirects`);
     }
 
-    /* THE TICKER PAGE — a route with a query parameter, which is the one
-       shape the rest of this section does not use. Its own block rather than
-       another entry in the loop above, because the ?t= handling is the part
-       that can go wrong and the loop asserts board markup this page does not
-       carry. */
     {
       const tick = await get("/flows/ticker/", { headers: { Cookie: "flows_session=" + token } });
       eq(tick.status, 200, "/flows/ticker/ renders for an authenticated session");
@@ -244,18 +206,13 @@ try {
       ok(tickHtml.includes('id="ftGrid"'), "the ticker page carries the panel grid");
       ok(tickHtml.includes('id="ftZoom"'), "and the enlarge dialog");
 
-      /* EVERY REGISTRY PANEL REACHES THE MARKUP, with its question. A panel
-         whose host is missing is a chart that silently never draws, which is
-         the exact failure the shared registry exists to make impossible. */
       for (const p of TICKER_PANELS) {
         const idCount = tickHtml.split(`id="${p.id}"`).length - 1;
         eq(idCount, 1, `the ticker page emits ${p.id} exactly once`);
         ok(tickHtml.includes(`data-panel="${p.key}"`), `and mounts panel ${p.key}`);
       }
       ok(tickHtml.includes("data-question="), "each panel carries its question as an attribute");
-      /* shared/ is in .assetsignore and is never served, so the browser cannot
-         import the registry. If the question did not reach the DOM the drawers
-         would print an empty question with nothing failing. */
+
       for (const p of TICKER_PANELS) {
         ok(tickHtml.includes(p.question.replace(/&/g, "&amp;").replace(/</g, "&lt;")
              .replace(/>/g, "&gt;").replace(/"/g, "&quot;")),
@@ -273,20 +230,10 @@ try {
       const bareTick = await get("/flows/ticker");
       eq(bareTick.status, 308, "/flows/ticker without its trailing slash redirects");
 
-      /* THE HOLE THIS FOUND. /flows/market shipped with the slashed route in
-         the dispatch table and NOTHING in the trailing-slash list, so the bare
-         path fell through to the static bundle and 404ed. Nothing failed: the
-         rail always writes the slash, so only a hand-typed URL ever found it. */
       const bareMarket = await get("/flows/market");
       eq(bareMarket.status, 308, "/flows/market without its trailing slash redirects too");
     }
 
-    /* ---------- THE FOUR BOARD ROUTES' OWN ?t= ADDRESSES ------------
-       The retired dialog pushed one into history on every open, so they are in
-       histories, bookmarks and links people sent each other, naming a
-       parameter no page reads. Asserted per route AND per `from`: a table
-       mapping three routes to one origin would name a page the reader was
-       never on. */
     for (const [route, from] of [["/flows/", "overview"], ["/flows/long/", "long"],
                                  ["/flows/short/", "short"], ["/flows/watch/", "watch"]]) {
       const fwd = await get(route + "?t=NVDA", { headers: { Cookie: "flows_session=" + token } });
@@ -298,12 +245,9 @@ try {
          "/flows/ticker/?t=NVDA&s=signal&from=" + from,
          `${route}?t=NVDA lands on that name's reader carrying from=${from}`);
 
-      /* THE BARE ROUTE IS UNTOUCHED: a forward firing without a `t` would
-         make the board unreachable. */
       const bare = await get(route, { headers: { Cookie: "flows_session=" + token } });
       eq(bare.status, 200, `${route} with no ?t= still renders its own page`);
 
-      /* AND SO IS AN EMPTY OR BLANK ONE: `?t=` and `?t=%20` are not names. */
       for (const empty of ["?t=", "?t=%20%20"]) {
         eq((await get(route + empty,
              { headers: { Cookie: "flows_session=" + token } })).status, 200,
@@ -311,18 +255,12 @@ try {
       }
     }
 
-    /* IT READS NO PAYLOAD AND NO SESSION, which is what makes it free and
-       keeps it from leaking: a forward that first checked whether the name was
-       published would be a KV read on every stale bookmark AND an oracle for
-       whether a ticker is on the board. */
     {
       const anonFwd = await get("/flows/long/?t=NVDA");
       eq(anonFwd.status, 302, "an anonymous visitor is forwarded like any other");
       eq(new URL(anonFwd.headers.get("location"), url("/")).search,
          "?t=NVDA&s=signal&from=long", "to the same address, decided without a session");
 
-      /* RE-ENCODED, NEVER PASTED: whatever arrives lands as ONE query value
-         and cannot open a second parameter, a fragment or a path segment. */
       const hostile = await get("/flows/long/?t=" + encodeURIComponent("A&s=evil#x/../"));
       const loc = new URL(hostile.headers.get("location"), url("/"));
       eq(loc.pathname, "/flows/ticker/",
@@ -334,8 +272,6 @@ try {
       eq(loc.hash, "", "with no fragment smuggled onto the end");
     }
 
-    /* AND THE DIALOG IS OFF THE ROUTES THAT CARRIED IT: the forward above would
-       pass on a page still shipping it and 166 KiB of library beside it. */
     for (const route of ["/flows/", "/flows/long/", "/flows/short/", "/flows/watch/"]) {
       const html = await (await get(route,
         { headers: { Cookie: "flows_session=" + token } })).text();
@@ -345,10 +281,6 @@ try {
       }
     }
 
-    /* THE UNUSUAL-ACTIVITY FEED. Its own block because the thing that can go
-       wrong here is not routing but VOCABULARY: the page is built on a
-       contract aggregate and may never call it a trade, and may never date a
-       counter the endpoint refuses to date. */
     {
       const ua = await get("/flows/unusual/", { headers: { Cookie: "flows_session=" + token } });
       eq(ua.status, 200, "/flows/unusual/ renders for an authenticated session");
@@ -359,28 +291,6 @@ try {
       ok(uaHtml.includes('id="uaNameBody"'), "and the name panel's");
       ok(uaHtml.includes('id="uaBasis"'), "and the basis panel, which is the page's honesty");
 
-      /* THE BAN, AND IT IS A BAN ON THE CLAIM RATHER THAN ON THE WORD.
-
-         The source is one row per listed strike with a volume total — no
-         size, no timestamp, no execution price — so calling it a print or a
-         trade asserts something the data cannot support. But a page whose
-         entire design is that refusal has to be ALLOWED TO NAME WHAT IT
-         REFUSES: its lede says "A counter, not a trade", which is the most
-         important sentence on the page and would fail a blanket sweep.
-
-         So the assertion is two-sided and stronger than "never appears":
-         every occurrence must sit inside the prose whose job is to state the
-         refusals — the lede and the basis panel. One anywhere else, in a
-         table header, a caption or a status strip, is the page claiming it.
-
-         THE VOCABULARY ITSELF MOVED TO shared/flows-unusual.js, beside the
-         builder that shapes these rows, so this suite and contracts.mjs read
-         one list. This suite needs a dev server and cannot run in every
-         sandbox; a rule only an un-runnable suite knows is a rule that gets
-         broken locally and found in CI, which is exactly how it was broken
-         by a COMMENT in shared markup. contracts.mjs now sweeps the same
-         markup with no server, so the round trip is caught before a push.
-         ("order" is deliberately absent from the list; see its comment.) */
       const banned = new RegExp(UA_BANNED_CLAIMS.source, "ig");
       const refusalProse = [
         ...uaHtml.matchAll(/<p class="flows-lede">[\s\S]*?<\/p>/g),
@@ -396,9 +306,7 @@ try {
          `(${strayClaims.slice(0, 2).join(" | ")})`);
       ok(/not a trade/i.test(uaHtml),
          "and the lede states that refusal in so many words, rather than leaving it implied");
-      /* AND IT NEVER DATES THE COUNTER. The endpoint accepts no date and the
-         pipeline reads it four hours before the bell, so "today" would be a
-         free parameter on the page's most load-bearing quantity. */
+
       const dated = /\b(today|this session|the day's|the day\u2019s)\b/i;
       const d = uaHtml.match(dated);
       ok(!d, `the unusual page never dates an undated counter (found "${d && d[0]}")`);
@@ -411,12 +319,6 @@ try {
       const bareUa = await get("/flows/unusual");
       eq(bareUa.status, 308, "/flows/unusual without its trailing slash redirects");
 
-      /* The API answers honestly before the pipeline has ever written the key. */
-      /* THE ALERTS PANEL rides on the same page under its own payload. The
-         markup half asserted here: the panel exists, its flags column warns
-         that an em dash is not "off", and the lede's new sentence carries
-         the vendor-flag vocabulary INSIDE the refusal prose — the two-sided
-         ban above already proved no banned word escaped it. */
       ok(uaHtml.includes('id="uaAlertsBody"'), "the vendor-alerts panel's table body ships");
       ok(uaHtml.includes('id="uaAlertsNote"'), "with its own note host");
       ok(/not the same fact as the flag being off/i.test(uaHtml),
@@ -440,13 +342,6 @@ try {
          "the pulse refuses an anonymous reader — behind it is a metered vendor " +
          "relationship, exactly like every other flows key");
 
-      /* THE SECTOR OPTIONS LEAN GETS ITS OWN ROUTE, and that is the point of
-         the assertion below rather than an accident of layout. /api/flows/
-         sectors serves `sector:trix` — TRIX on daily closes, no option data
-         in it anywhere. This serves today's bullish-minus-bearish premium per
-         sector. The two can disagree for weeks without either being wrong, so
-         a reader who asked for one must never be handed the other, which is
-         what a single route with a `kind` parameter would eventually do. */
       const leanApi = await get("/api/flows/sector-premium",
         { headers: { Cookie: "flows_session=" + token } });
       eq(leanApi.status, 200, "an authenticated sector-premium request succeeds");
@@ -465,12 +360,6 @@ try {
       ok(sectorsApi.url !== leanApi.url,
          "and it is genuinely a different route — two quantities, two keys, two paths");
 
-      /* THE NEWS TAPE, AND THE ROUTE SHAPE THAT MUST NOT EXIST. The vendor
-         has no per-ticker news endpoint: `ticker` is a query filter on the
-         same market-wide path. A `?t=` parameter here would look reasonable
-         and would either spend a vendor call per name behind an authenticated
-         route or filter a blob the caller could filter itself, so the route
-         ignores it entirely and every stored row carries its own `tickers`. */
       const newsApi = await get("/api/flows/news", { headers: { Cookie: "flows_session=" + token } });
       eq(newsApi.status, 200, "an authenticated news request succeeds");
       const newsPayload = await newsApi.json();
@@ -489,18 +378,6 @@ try {
         "believe a per-ticker news route exists here"); checks++;
       eq((await get("/api/flows/news")).status, 401, "the tape refuses an anonymous reader");
 
-      /* THE QUESTION BOX. It is the one route under /api/flows that PARSES
-         what it serves, so it is also the one whose input had to be made
-         small: the pipeline publishes a fact index of about sixteen
-         kilobytes and this reads that, never the seventeen surfaces it was
-         built from.
-
-         THE SUITE RUNS WITH NO MODEL, ON PURPOSE. Local Wrangler inference
-         bills the same account-wide free allowance as production, so a
-         suite that reached one would spend a shared budget on every CI run
-         and would make its own result depend on a quota. Empty is a
-         supported configuration, so what is exercised here is a branch a
-         reader can really land in and not a stub. */
       const askGet = await get("/api/flows/brief", { headers: { Cookie: "flows_session=" + token } });
       eq(askGet.status, 200, "the briefing is served from its own key, at the path every other " +
          "key here is served from, and streamed rather than parsed");
@@ -531,11 +408,6 @@ try {
       eq(beforePublish.status, "pending",
          "which is named rather than left to be inferred from a null answer");
 
-      /* PUBLISHED THROUGH THE REAL DOOR. `brief` has to be in the ingest
-         allowlist or this 400s — which is exactly how the key was found
-         missing from it, and the pipeline's publish is non-fatal by design,
-         so a live run would have swallowed the failure into one warning
-         line and served a briefing that never arrived. */
       const briefIngest = await fetch(url("/api/flows/ingest?key=brief"), {
         method: "POST", redirect: "manual",
         headers: { Authorization: "Bearer " + INGEST_TOKEN, "Content-Type": "application/json" },
@@ -577,26 +449,6 @@ try {
         { method: "DELETE", redirect: "manual", headers: auth });
       eq(methodDenied.status, 405, "and only POST is allowed");
 
-      /* THE NAME THE PAGE THE READER IS ON IS ABOUT, POSTED BESIDE THE
-         QUESTION. The assistant is docked on every gated route, including
-         /flows/ticker/?t=SYN046, and until this field existed it answered a
-         reader who typed "what changed" over one name with market-wide
-         readings — nothing they typed named a ticker, and nothing else told
-         the selection which name they meant.
-
-         THE NAME BELOW IS SIX CHARACTERS AND THAT IS NOT INCIDENTAL. Every
-         card the pipeline emits is SYN0## — 93 of them in the dry-run
-         corpus, none of them five — so a bound of /^[A-Z][A-Z0-9]{0,4}$/
-         passes a suite written around "SYN46" while dropping every name
-         this route is ever posted. The shape here is the one readTicker()
-         serves and subjectTickers() accepts: /^[A-Z][A-Z0-9.-]{0,9}$/.
-
-         THE ROUTE DOES NOT DECIDE WHETHER TO USE IT, AND THAT IS THE POINT.
-         shared/flows-ask.js consults `subject` only when the question names
-         no ticker of its own, so a reader who does name one is never
-         answered about the page instead. Deciding it here, or in the
-         browser, would be a second copy of that rule in a file that does not
-         own it — and the two would disagree the first time either moved. */
       const briefWithName = await fetch(url("/api/flows/ingest?key=brief"), {
         method: "POST", redirect: "manual",
         headers: { Authorization: "Bearer " + INGEST_TOKEN, "Content-Type": "application/json" },
@@ -680,14 +532,6 @@ try {
          "the value comes off a query string a reader can type into, and it is bounded here, " +
          "again in the module, and never trusted by either alone");
 
-      /* THE MODEL BUDGET, ON ITS OWN GET ROUTE. It is not a published key
-         and so it is not under the passthrough convention every other path
-         here follows — it is computed from D1 and named for what it
-         reports, so a reader of worker.js is not sent looking for an
-         `ai-usage` payload the pipeline never publishes. It exists at all
-         because the answer route is a POST that costs a model call to
-         reach, and a budget a reader can only see AFTER spending from it
-         is a receipt rather than a budget. */
       eq((await get("/api/flows/ai-usage")).status, 401,
          "the meter is behind the same gate as everything else here: what this site spends " +
          "is not a fact for an anonymous reader");
@@ -704,24 +548,7 @@ try {
          "null instead, so the two never collapse");
       eq(spend.allowanceNeurons, 10000,
          "the allowance is stated, so the figure beside it has a denominator");
-      /* A MEASURED ZERO, AND IT IS ONLY MEASURED BECAUSE THE RATE IS
-         CONFIGURED. This worker reads the real wrangler.toml, where
-         FLOWS_ASK_NEURONS sits beside FLOWS_ASK_MODEL — so the arithmetic
-         is available and 0 tokens really do cost 0 credits, leaving the
-         allowance whole. That is a reading rather than a gap, and this
-         asserts the derivable path end to end: the rate reaches the Worker
-         from configuration, and the subtraction runs.
 
-         THE OTHER BRANCH — no rate, so the spend is UNKNOWN and `remaining`
-         must be null rather than 10000 — is the dangerous one, because
-         Number(null) === 0 reaching the subtraction would render a full
-         allowance on a day this route may have emptied it. It cannot be
-         reached from here without a second Worker on a different
-         configuration, so it is asserted in tests/flows-ask-render.mjs
-         against the shape this route sends, where its CONTROL sits beside
-         it: the fresh-morning case below, which must still print 10,000 of
-         10,000. Asserting only the withholding would pass just as well
-         against a renderer that never printed an allowance at all. */
       eq(spend.neurons, 0,
          "the spend is a measured zero — no question has been asked, so no tokens were " +
          "billed, and the rate configured beside the model id is what makes that derivable " +
@@ -754,13 +581,6 @@ try {
       eq(anonApi.status, 401, "and refuses an anonymous reader");
     }
 
-    /* THE EVENTS CALENDAR. The thing that can go wrong here is the two
-       clocks: a page that counts days from sessionDate rather than from the
-       run's own Eastern date draws its window one to three days early and
-       classifies every name against a gate that never ran. The markup cannot
-       assert the arithmetic — that is the module suite's job — but it can
-       assert the page SAYS which clock governs what, because a page that does
-       not say it cannot be checked by a reader either. */
     {
       const ev = await get("/flows/events/", { headers: { Cookie: "flows_session=" + token } });
       eq(ev.status, 200, "/flows/events/ renders for an authenticated session");
@@ -769,9 +589,7 @@ try {
       ok(evHtml.includes('id="evBody"'), "and carries the calendar's table body");
       ok(evHtml.includes('id="evWindow"'), "and the window chart's host");
       ok(evHtml.includes('id="evBasis"'), "and the basis panel");
-      /* `gated` is the column the page exists for, and its meaning is the one
-         thing a reader will get wrong by default: it means the board was
-         FORBIDDEN from scoring the name, not that it scored badly. */
+
       ok(/FORBIDDEN/i.test(evHtml),
          "the Stage column states that a gated name was forbidden from being scored, " +
          "rather than leaving it to read as a low score");
@@ -794,11 +612,6 @@ try {
       eq(anonEvApi.status, 401, "and refuses an anonymous reader");
     }
 
-    /* THE SCORE TRACK. What can go wrong here is a page that treats a gap as
-       a zero — but the markup cannot assert that; the module and render
-       suites do. What the markup CAN assert is that the page ships its own
-       honesty scaffolding: the basis host for the pipeline's notes, and the
-       UI module loaded BEFORE the controller that destructures from it. */
     {
       const st = await get("/flows/track/", { headers: { Cookie: "flows_session=" + token } });
       eq(st.status, 200, "/flows/track/ renders for an authenticated session");
@@ -831,34 +644,12 @@ try {
       eq(anonStApi.status, 401, "and refuses an anonymous reader");
     }
 
-    /* Every gated page carries the rail, and the rail carries every
-       destination it offers — a nav that omits a route it means to offer is a
-       route nobody finds. */
     for (const dest of ["/flows/", "/flows/long/", "/flows/short/", "/flows/watch/",
                         "/flows/market/", "/flows/unusual/", "/flows/events/",
                         "/flows/ticker/", "/flows/desk/"]) {
       ok(html.includes(`href="${dest}"`), `the rail links to ${dest}`);
     }
 
-    /* AND TWO ROUTES ARE DELIBERATELY NOT IN IT. The track record and the
-       score track came off the rail by the owner's decision — twelve
-       destinations was more than the nav could ask a reader to choose
-       between. This is the half of that change a test has to hold, because
-       the other half is invisible: the ROUTES STILL ANSWER. Nothing was
-       deleted from the worker or the pipeline, so a link already sent still
-       opens and every payload still publishes.
-
-       Asserted in BOTH directions on purpose. A route quietly deleted and a
-       route deliberately unlisted look identical from the rail alone, and
-       only one of them is what was asked for. */
-    /* SCOPED TO THE RAIL, and the first run of this assertion is why. Tested
-       against the whole page it failed on /flows/history/, and the link it
-       found was the right one to find: the board's own footer says "whether
-       this board has been right is measured rather than asserted, session by
-       session, on the TRACK RECORD" and links it there. That is a refusal
-       pointing at its own evidence, and it is more useful now that the route
-       is not in the nav, not less. What was asked for was a shorter rail, not
-       a buried route. */
     const rail = (/<nav class="flows-rail"[\s\S]*?<\/nav>/.exec(html) || [""])[0];
     ok(rail.includes("flows-rail"), "the rail markup is found before it is read");
     for (const gone of ["/flows/history/", "/flows/track/"]) {
@@ -870,7 +661,6 @@ try {
          "sent has to keep working");
     }
 
-    // The API answers, and answers honestly before the pipeline has run.
     const api = await get("/api/flows/board?side=long", {
       headers: { Cookie: "flows_session=" + token },
     });
@@ -883,13 +673,6 @@ try {
        "and a key the pipeline has never written carries NO reason: the SELECT ran and found no " +
        "row, and “read-failed” on it would report a fault the store did not have");
 
-    /* THE OTHER NULL. readFlowsPayload answers null for an absent row AND for
-       a SELECT that threw, and the board route used to hand both to the reader
-       as the same bytes — so /flows/long/ said “either never published or the
-       store could not be read” and could never say which. The read is made to
-       throw here by hiding the column it selects; the table, its rows and the
-       Worker's schema flag are untouched, and the column is put back before
-       anything else reads, so no block after this one sees a difference. */
     await server.d1("ALTER TABLE flows_payload RENAME COLUMN payload TO payload_hidden");
     const broken = await get("/api/flows/board?side=long", {
       headers: { Cookie: "flows_session=" + token },
@@ -910,7 +693,6 @@ try {
     eq(healed.status, "pending", "with the column back the same key answers pending again");
     ok(!("reason" in healed), "and with no reason, because this time the read ran and found nothing");
 
-    // Sign-out clears the cookie.
     const out = await fetch(url("/flows/logout"), {
       method: "POST",
       redirect: "manual",
@@ -921,7 +703,6 @@ try {
        "sign-out clears the session cookie");
   }
 
-  /* ---------- the ingest endpoint ---------------------------------- */
   {
     const post = (key, body, token) => fetch(url("/api/flows/ingest?key=" + encodeURIComponent(key)), {
       method: "POST",
@@ -949,9 +730,6 @@ try {
     eq((await post("board:long", "not json at all", INGEST_TOKEN)).status, 400,
        "ingest rejects malformed JSON at the door, so the read path never serves it");
 
-    /* The score archive's two keys pass the same door. The dated pool is the
-       immutable per-session distribution; scoretrack is the live trace the
-       pipeline rebuilds from it. */
     eq((await post("scores:2026-01-02", JSON.stringify({ rows: [{ t: "TEST", s: 0 }] }),
         INGEST_TOKEN)).status, 200, "a dated scores pool is an accepted key");
     eq((await post("scoretrack", JSON.stringify({ names: [], sessions: [] }),
@@ -961,14 +739,6 @@ try {
     eq((await post("pulse", JSON.stringify({ tide: { points: [] } }), INGEST_TOKEN)).status, 200,
        "and so is the market pulse");
 
-    /* THE TWO MARKET-WIDE KEYS THIS WAVE ADDED. `sector:premium` is a SECOND
-       sector key beside `sector:trix`, not a widening of it: one is TRIX on
-       daily closes and the other is today's option premium lean, and they are
-       published separately so a momentum reading and a premium lean can never
-       end up sharing a field. The door has to accept both names, and it has
-       to keep refusing anything that merely looks like them — this key
-       becomes a primary key, and the read path rebuilds it from a literal, so
-       a shape the two sides could disagree about is a row nothing can read. */
     eq((await post("sector:premium", JSON.stringify({ sectors: [] }), INGEST_TOKEN)).status, 200,
        "the sector option lean is an accepted key");
     eq((await post("sector:trix", JSON.stringify({ sectors: [] }), INGEST_TOKEN)).status, 200,
@@ -991,10 +761,6 @@ try {
     const receipt = await good.json();
     ok(receipt.ok === true && receipt.key === "board:long", "ingest returns a receipt");
 
-    /* GET on the ingest route reads back what is stored, under the same
-       bearer. The pipeline needs it for hysteresis — holding a name on the
-       board until it falls out of the exit band requires yesterday's ticker
-       list, and previousIds was a hardcoded empty array. */
     eq((await get("/api/flows/ingest?key=board:long")).status, 401,
        "ingest GET still requires the bearer");
     eq((await fetch(url("/api/flows/ingest?key=board:long"), {
@@ -1013,56 +779,15 @@ try {
     eq(absent.status, 200, "an unwritten key is not an error");
     eq((await absent.json()).status, "pending", "it reports pending");
 
-    /* DELETE IS AN ALLOWED VERB NOW, and this assertion used to prove it was
-       not. It exists so the pipeline can prune the dated boards it retains for
-       the track record; an archive with no prune is a table that grows forever
-       against a write budget shared with a live learning app.
-
-       Being allowed is not being open. Unauthenticated it is refused like
-       every other verb here, and the narrowing to dated-board keys is asserted
-       in flows-sections-contract.mjs, which owns that behaviour. */
     eq((await fetch(url("/api/flows/ingest?key=board:long:2026-01-02"), { method: "DELETE" })).status, 401,
        "DELETE without the bearer is refused like every other verb");
 
-    /* ---------- the dated archive is immutable, and was not ----------
-
-       IT SAID SO IN THREE COMMENTS AND NOTHING ENFORCED IT. Every key was
-       written with ON CONFLICT DO UPDATE, dated ones included, so a second
-       run on the same day silently replaced an archived board with a
-       different one. Measured before it was fixed: two POSTs to
-       board:long:2026-08-24 with contradictory rows both returned 200 and the
-       archive then reported the second.
-
-       That is not cosmetic. shared/flows-record.js reads exactly these keys
-       to compute the accuracy the deck publishes, and the crons fire twice
-       for the two US timezones and have been observed running hours late — so
-       a same-day second run is ordinary, not rare. A record that can be
-       quietly rewritten is not a record.
-
-       All five behaviours are pinned, because four of them are ways to get
-       this wrong: refusing the first write, refusing an identical retry
-       (which would turn the pipeline's own retry into an outage), freezing
-       the LIVE board, and leaving no way to correct a genuinely bad day. */
     const ARCH = "board:long:2026-08-24";
     const boardA = JSON.stringify({ v: 2, rows: [{ t: "AAA", s: 90 }] });
     const boardZ = JSON.stringify({ v: 2, rows: [{ t: "ZZZ", s: -90 }] });
     const archGet = () => fetch(url("/api/flows/ingest?key=" + encodeURIComponent(ARCH)),
       { headers: { Authorization: "Bearer " + INGEST_TOKEN } });
 
-    /* THE FOUR STATES, INCLUDING THE ONE NO HTTP CLIENT CAN REACH.
-
-       Every assertion below this block drives the route, and the route can
-       only be driven into three of the guard's four states: a read that
-       ANSWERED absent, answered same, answered different. The fourth — a read
-       that did not answer at all — is what a thrown SELECT produces, and
-       nothing holding a fetch() can cause one. That is exactly why the branch
-       was wrong for the whole life of the guard: `readFlowsPayload(env, key)`
-       was called with no trace, so an unreadable row arrived at the guard
-       spelled identically to an absent one, fell through, and the
-       unconditional upsert below REWROTE an archived board.
-
-       The decision is a pure function now, so the unreachable branch is an
-       ordinary argument. */
     eq(archiveWriteAction({ readable: true, exists: false, same: false }), "write",
        "a dated key the store says is ABSENT is written — this is the first publish of a " +
        "session and the ordinary path");
@@ -1084,9 +809,6 @@ try {
        "called with nothing at all it still refuses: the default for `did the store " +
        "answer` is no, so a caller that forgets to pass the trace fails closed");
 
-    /* THE TWO REFUSALS ARE DIFFERENT FACTS AND CARRY DIFFERENT STATUSES, because
-       a caller that cannot tell them apart retries the wrong one — giving up on
-       a transient store failure, or hammering a permanent conflict. */
     eq(ARCHIVE_REFUSALS.refuse_immutable.status, 409,
        "a revision is 409 and final — the correction path is the deliberate two-step DELETE");
     eq(ARCHIVE_REFUSALS.refuse_unreadable.status, 503,
@@ -1125,16 +847,6 @@ try {
        "and says it stored nothing, so a run reporting `unchanged` on a key it thought it " +
        "was publishing is visible in the log as the retry it is");
 
-    /* THE UNDATED KEYS ARE VIEWS AND MUST STAY WRITABLE. Freezing board:long
-       would take the product down every morning after the first.
-
-       CHECKED ON KEYS NOTHING ELSE IN THIS FILE READS. The first draft of
-       this block proved the point on `board:long` and left BoardZ sitting
-       there, so an assertion two hundred lines further down — that the
-       ingested board round-trips as TEST — failed on a payload this block had
-       written. A test that mutates shared state its neighbours depend on is a
-       worse defect than the one it is testing, because it fails somewhere
-       else. */
     for (const view of ["pulse", "market", "flowalerts", "scoretrack"]) {
       eq((await post(view, boardA, INGEST_TOKEN)).status, 200,
          `${view} is a view of today and stays writable`);
@@ -1143,9 +855,6 @@ try {
          `today and rewriting it every morning is the product working`);
     }
 
-    /* THE ESCAPE HATCH, and it is deliberately two steps. Immutability with
-       no way out is permanence by accident; a silent overwrite is a draft
-       pretending to be a record. Delete-then-write is neither. */
     eq((await fetch(url("/api/flows/ingest?key=" + encodeURIComponent(ARCH)), {
       method: "DELETE", headers: { Authorization: "Bearer " + INGEST_TOKEN },
     })).status, 200, "a dated key can still be deleted");
@@ -1155,33 +864,22 @@ try {
     assert.deepEqual(JSON.parse(await (await archGet()).text()).rows, [{ t: "ZZZ", s: -90 }],
       "the correction landed"); checks++;
 
-    /* A DATED SCORES POOL IS THE SAME KIND OF RECORD and the same rule
-       applies — the DELETE branch and the write guard read one pattern, so
-       they cannot disagree about which keys are history. */
     const POOL = "scores:2026-08-24";
     eq((await post(POOL, boardA, INGEST_TOKEN)).status, 200, "a dated scores pool writes once");
     eq((await post(POOL, boardZ, INGEST_TOKEN)).status, 409,
        "and is immutable too: the write guard and the delete branch share one pattern");
 
-    /* THE VERBS THAT ARE STILL NOT VERBS HERE. A route that quietly grew a
-       third method could grow a fourth, so the closed set is asserted rather
-       than assumed. */
     for (const method of ["PUT", "PATCH"]) {
       eq((await fetch(url("/api/flows/ingest?key=board:long"), {
         method, headers: { Authorization: "Bearer " + INGEST_TOKEN },
       })).status, 405, `${method} is still refused`);
     }
 
-    /* X-Payload-Updated is how a reader detects a stale card. Once a card has
-       been written, a later pipeline failure leaves the old row in place and
-       the route answers 200 with old numbers — the Worker cannot notice,
-       because not parsing is the architecture. The write timestamp can. */
     const stamp = readBack.headers.get("x-payload-updated");
     ok(stamp && Number(stamp) > 0, `the read carries its write timestamp (${stamp})`);
     ok(Math.abs(Date.now() - Number(stamp)) < 5 * 60 * 1000,
        "and the timestamp is the real write time, not a placeholder");
 
-    // Round trip: what was ingested is what an authenticated reader gets.
     const login = await fetch(url("/flows/login"), {
       method: "POST", redirect: "manual",
       headers: {
@@ -1200,24 +898,9 @@ try {
     eq(board.rows[0].t, "TEST", "the payload round-trips unchanged");
     eq(read.headers.get("cache-control"), "no-store", "board data is never cached");
 
-    // And it is still gated.
     eq((await get("/api/flows/board?side=long")).status, 401,
        "the ingested board is still refused to anonymous callers");
 
-    /* ---- THE TWO SECTOR KEYS, ROUND-TRIPPED SIDE BY SIDE ----
-
-       The route assertions earlier in this file check that two paths exist
-       and that each answers. That is not the same as checking they serve
-       DIFFERENT things: with both keys unpublished both answer the pending
-       envelope, and a route wired to the wrong key would pass. So both are
-       ingested here with payloads that can only have come from one of them,
-       and each route is required to hand back its own.
-
-       This is the assertion that fails if someone ever "simplifies" the two
-       routes into one, or points /api/flows/sector-premium at `sector:trix`:
-       a reader asking for today's option premium lean would be served a
-       triple-smoothed price oscillator, and both are eleven numbers between
-       plausible bounds, so nothing on the page would look wrong. */
     eq((await post("sector:premium",
       JSON.stringify({ sectors: [{ etf: "XLK", leanRatio: 0.5, netPremiumUsd: 200 }] }),
       INGEST_TOKEN)).status, 200, "the option lean ingests");
@@ -1246,12 +929,6 @@ try {
     eq(tape.rows[0].headline, "TEST", "and reads back through its own route unchanged");
   }
 
-  /* ---------- BODY BOUNDS: Content-Length is not a bound ----------
-     readFlowsForm checked the declared Content-Length and then read the
-     whole body anyway. A chunked request declares no length at all, so the
-     check was skipped entirely and an unauthenticated caller could stream
-     an unbounded body into the Worker before the KDF ever ran. The bound
-     now lives in the read loop, where it cannot be declared away. */
   {
     const big = "x".repeat(64 * 1024);
     const stream = new ReadableStream({
@@ -1274,20 +951,13 @@ try {
     eq(res.status, 413, "a chunked oversize login body is refused on its actual size, not its declared one");
     ok(!(await res.text()).includes(BOARD_MARKER), "and it certainly does not render the board");
 
-    // Harness detail, not a product behaviour: responding before the client
-    // has finished streaming leaves wrangler dev's proxy holding a half-written
-    // upload, and it closes that connection. undici then reuses the dead socket
-    // and reports the reset as a 503. Two throwaway requests retire it so the
-    // next assertion measures the Worker rather than the pool.
     const settle = async () => {
       for (let i = 0; i < 2; i++) {
-        try { await (await get("/flows/")).text(); } catch { /* the dead socket */ }
+        try { await (await get("/flows/")).text(); } catch {   }
       }
     };
     await settle();
 
-    // The same body WITH an honest Content-Length is refused too, so the
-    // fix did not trade one path for the other.
     const declared = await fetch(url("/flows/login"), {
       method: "POST",
       redirect: "manual",
@@ -1302,12 +972,6 @@ try {
     await settle();
   }
 
-  /* ---------- THROTTLE SCOPE: lockout must not be a weapon ---------
-     The roster is hardcoded in a PUBLIC repository, so all eleven usernames
-     are readable by anyone. Keying the failure counter on the username alone
-     meant eight deliberate wrong passwords locked a real person out of the
-     section for fifteen minutes, repeatable forever. The key is now scoped to
-     the caller as well, so an attacker can only lock out themselves. */
   {
     const ATTACKER = "203.0.113.10";
     const VICTIM = "198.51.100.20";
@@ -1325,7 +989,6 @@ try {
       body: new URLSearchParams({ username, password }).toString(),
     });
 
-    // Burn through the lockout threshold from one address.
     let lastBody = "";
     for (let i = 0; i < 9; i++) {
       const res = await attempt(TARGET, "wrong-" + i, ATTACKER);
@@ -1334,18 +997,12 @@ try {
     }
     ok(/Too many attempts/i.test(lastBody), "the attacker's own address is locked out");
 
-    // THE FIX: the real account holder, from their own address, is unaffected.
     const victim = await attempt(TARGET, FLOWS_PASSWORD, VICTIM);
     eq(victim.status, 303, "THE FIX: the account holder still signs in while an attacker is locked out");
     ok((victim.headers.get("set-cookie") || "").includes("flows_session="),
        "and receives a working session");
   }
 
-  /* ---------- THROTTLE STORAGE: off-roster costs no rows -----------
-     The submitted string was used verbatim as a D1 primary key, so an
-     unauthenticated caller could mint unbounded rows in a database whose
-     free-tier write budget is shared with the live learning app. An
-     off-roster attempt can never succeed, so there is nothing to count. */
   {
     const junkPost = (username) => fetch(url("/flows/login"), {
       method: "POST",
@@ -1372,21 +1029,13 @@ try {
        "a genuine failure is still counted, and the key is scoped to the caller");
   }
 
-  /* ---------- the section is not in the static bundle -------------- */
   {
-    // shared/ and flows/ are both in .assetsignore. If the board HTML were
-    // ever bundled, this would start returning it.
+
     const res = await get("/shared/flows-pages.js");
     ok(res.status === 404 || !(await res.text()).includes("boardPage"),
        "the page source is not publicly served");
   }
 
-  /* ---------- CARDS: per-ticker detail, one D1 row each ------------
-     The storage shape is settled by measurement, not preference. The read path
-     costs about 1 ms of CPU per 106 KB served (measured against local workerd,
-     calibrated with PBKDF2-10k as a ruler), so one blob holding all 50 cards
-     would be ~1 MB and blow the 10 ms Workers Free budget. One row per ticker
-     keeps each read near 0.3 ms. */
   {
     const login = await fetch(url("/flows/login"), {
       method: "POST", redirect: "manual",
@@ -1420,17 +1069,13 @@ try {
     eq(got.gamma.flip, 212.5, "nested structure survives the byte passthrough");
     eq(read.headers.get("cache-control"), "no-store", "card data is never cached");
 
-    // Case folding: the read builds the key the ingest wrote.
     eq((await get("/api/flows/card?t=aapl", { headers: cookie })).status, 200,
        "a lowercase ticker resolves to the same card");
 
-    // A valid ticker with no card is "not built", not an error — the board and
-    // the cards are published by separate POSTs and a card may legitimately lag.
     const missing = await get("/api/flows/card?t=ZZZZ", { headers: cookie });
     eq(missing.status, 200, "an unbuilt card is not an error");
     eq((await missing.json()).status, "pending", "it reports pending honestly");
 
-    // The ticker pattern is shared with the ingest key check, in both directions.
     for (const bad of ["", "../../etc/passwd", "A B", "TOOLONGTICKER", "1ABC", "%2e%2e"]) {
       const res = await get("/api/flows/card?t=" + encodeURIComponent(bad), { headers: cookie });
       eq(res.status, 400, `card read refuses the ticker ${JSON.stringify(bad)}`);
@@ -1439,15 +1084,10 @@ try {
       eq((await putCard(bad, card)).status, 400, `ingest refuses the key ${JSON.stringify(bad)}`);
     }
 
-    // Cards are gated exactly like the board.
     eq((await get("/api/flows/card?t=AAPL")).status, 401,
        "an anonymous caller cannot read a card");
   }
 
-  /* ---------- the payload cap IS the read-path CPU guarantee --------
-     Nothing larger than the cap can be stored, so nothing larger can be
-     served, so no read can exceed roughly 2.4 ms of the 10 ms budget. The cap
-     was 2 MB, which accepted payloads the read path could not serve. */
   {
     const big = JSON.stringify({ side: "long", rows: [], pad: "x".repeat(200 * 1024) });
     const res = await fetch(url("/api/flows/ingest?key=board:long"), {
@@ -1467,10 +1107,6 @@ try {
     eq(ok200.status, 200, "a payload inside the bound still ingests");
   }
 
-  /* ---------- the login page escapes what it renders --------------
-     The error string is interpolated into the login markup. Today every
-     caller passes a fixed literal, but "no untrusted value reaches it yet"
-     is a property of the callers, not of the page, and callers change. */
   {
     const { loginPage } = await import("../shared/flows-pages.js");
     const html = loginPage({ error: '<img src=x onerror=alert(1)>"&' });
@@ -1480,13 +1116,6 @@ try {
     ok(loginPage().includes('action="/flows/login"'), "the ordinary page is unaffected");
   }
 
-  /* ---------- a misconfigured deploy fails LOUDLY -----------------
-     A missing credential map or pepper is a configuration fault and must not
-     masquerade as a wrong password. Without this check a deploy that forgot
-     either secret rejects all eleven accounts with "those credentials were not
-     recognised", which is indistinguishable from a typo — so the operator
-     retries the password instead of checking the secret store. This runs on
-     its own Worker because it needs a deliberately broken environment. */
   {
     const broken = await startWorker({ extraVars: ["FLOWS_CREDENTIALS:not-valid-json"] });
     try {
@@ -1505,7 +1134,6 @@ try {
       ok(!/not recognised/i.test(JSON.stringify(body)),
          "it never blames the credentials the operator typed correctly");
 
-      // The login PAGE must still render, so the operator can see the section exists.
       const page = await fetch(broken.baseURL + "/flows/", { redirect: "manual" });
       eq(page.status, 200, "the login page still renders on a misconfigured deploy");
       ok(!(await page.text()).includes(BOARD_MARKER), "and still leaks no board");

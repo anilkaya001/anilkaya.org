@@ -1,76 +1,9 @@
-/* THE MARKET LEVEL.
- *
- * Renders /api/flows/market, plus `movers` (free — cut from the screener
- * rows the run already holds) and `sector:trix` (eleven candle calls a
- * run), and joins the published boards against the session's premium
- * extremes in "Against the tape" — the board score is a residual with sector
- * and size divided out, and this page is the level that removal threw away.
- *
- * THE VOCABULARY RULE THAT GOVERNS EVERY STRING IN THIS FILE: the population
- * is the SCREENED UNIVERSE, never "the market". The vendor's screener caps
- * each band at about fifty rows, so what is measured is whatever this run's
- * ladder returned and the gate admitted; every heading says so.
- *
- * THE THREE KINDS OF SENTENCE, AND WHERE EACH GOES. Four panels here each
- * wrote ONE paragraph holding all three kinds, so a reader met the finding,
- * the caveat and the decoder as one undifferentiated block under a drawing.
- * They are sorted now, by the rule assets/js/flows-panels.js states over
- * `appendMethod` — which this file follows rather than restates:
- *
- *   the FINDING leads, ABOVE the drawing, as `.fc-reading.is-lead`;
- *   a QUALIFIER — anything that changes what a drawn mark MEANS: a
- *     population, a cap, an axis that compares one session only, a withheld
- *     input — sits under the drawing as `.fc-note.is-qualifier`, with the
- *     rule down its left;
- *   the METHOD — how the reading was built — is last, a plain `.fc-note`.
- *
- * NOT ONE SENTENCE WAS DELETED. What changed is which of them a reader meets
- * first and whether the kind is legible without reading it.
- *
- * AND NOTHING ON THIS ROUTE FOLDS, WHICH IS THAT RULE RATHER THAN A
- * SHORTFALL. Two independent reasons, and the second is the one that
- * matters.
- *
- * THE LENGTHS. flows-panels.js puts a method group behind a disclosure past
- * 420 characters, because "a one-line decoder behind a click is a click for
- * nothing". Measured after the sort, the method groups left on this page are
- * 322, 230, 119, 105 and 81 characters. Every one is under that wall.
- *
- * THAT LIST READ "322, 230, 143, 119 AND 81" FOR ONE COMMIT, and the 143 was
- * a group that no longer existed. It was measured honestly, then an
- * adversarial pass moved the not-comparable verdict out of the half-zero
- * branch's method and into its lead, which cut that group to 105 — and the
- * figure was not re-derived after the edit it describes. Recorded here
- * because it is the exact failure this file's own header is about, committed
- * inside the change that argues against it.
- *
- * THE STRUCTURE, WHICH WOULD RULE IT OUT EVEN IF THEY WERE LONG. Eleven
- * sentences on this page read as foldable derivation. Every one of them
- * turned out to be the second half of a SILENCE rather than a note beside
- * one. Seven are the `cost` argument of pendingLine(what, cost), which
- * concatenates both halves into a single <p data-empty="pending">; one is
- * the tail of feedSilence's single "unavailable" text node; one is a clause
- * after a colon inside a sentence that also carries the visible rank. There
- * is no separate paragraph under any of them to fold, and manufacturing one
- * would move half of a silence OUT of the [data-empty] mark that is how
- * every test and every reader finds it. A silence cannot be split, so on
- * this page the fold has nothing to act on and the sort is the whole change.
- */
 (function () {
   "use strict";
 
-  var MINUS = "−";           // U+2212, not a hyphen
+  var MINUS = "−";
   var DASH = "—";
 
-  /* A NUMBER, OR THE VENDOR'S QUOTED NUMBER, AND NOTHING ELSE. `typeof v ===
-     "number"` alone rejected the quoted fields the vendor really sends;
-     widening to `v !== ""` let Number() invent — Number(" "), Number(false)
-     and Number([]) are all 0, so a blank rendered "$0".
-
-     IT RETURNS THE READING, so `!isNum(x)` and `isNum(x) ?` are bugs, not
-     idioms — a measured 0 is falsy. Ask `=== null`; format what comes back.
-     Aligned with flows-ui.js:65 rather than importing it: that module is 24k
-     and would put this route over its weight ceiling. */
   function isNum(v) {
     if (typeof v === "number") return Number.isFinite(v) ? v : null;
     if (typeof v !== "string") return null;
@@ -84,17 +17,11 @@
     if (text !== undefined && text !== null) n.textContent = String(text);
     return n;
   }
-  /* ZERO PRINTS UNSIGNED, BECAUSE IT IS A MEASUREMENT AND NOT A LEAN. The
-     signed formatters here tested `n >= 0 ? "+" : MINUS`, stamping a plus on
-     a reading that came back exactly level, so "balanced" and "a hair
-     positive" rendered identically — the measured-zero defect one step past
-     Number(null) === 0. flows-ui.js states the rule; the three signed
-     formatters and the bar classes here obey it. */
+
   function signGlyph(n) {
     return n < 0 ? MINUS : (n > 0 ? "+" : "");
   }
-  /* The same three-way applied to a tone class: a zero-width bar carrying
-     `is-pos` is a lie in the DOM even when nothing paints. */
+
   function barClass(n) {
     return n < 0 ? "is-neg" : (n > 0 ? "is-pos" : "is-flat");
   }
@@ -108,7 +35,7 @@
     if (n === null) return DASH;
     return (n * 100).toFixed(dp === undefined ? 1 : dp) + "%";
   }
-  /* Money, in the units a nine-figure sum is actually read in. */
+
   function usd(v) {
     var n = isNum(v);
     if (n === null) return DASH;
@@ -124,45 +51,18 @@
     if (n === null) return "";
     return n > 0 ? "fb-pos" : (n < 0 ? "fb-neg" : "");
   }
-  /* A POPULATION COUNT, or the em dash. A count is the one place a zero and
-     an absence look most alike in prose, and this page publishes several. */
+
   function count(v) {
     var n = isNum(v);
     return n === null ? DASH : String(n);
   }
 
-  /* ---------- the silences, told apart in the DOM as well as in prose ----
-
-     FOUR SILENCES, FOUR SENTENCES, FOUR data-empty TAGS, each with its own
-     mark in flows.css: "pending" dotted with an ellipsis, a key not written
-     yet; "unavailable" dashed with a dagger, a payload published without
-     this field; "unreadable" a 3px bar with a cross, a request that never
-     came back or bytes this page could not use; "quiet" a hairline, a
-     reading taken and found empty — a fact about the market. The tags make
-     the distinction machine-checkable; the sentences make it useful.
-
-     Two of the four wore the dagger for months: unreadableLine() and
-     pendingLine() both emitted "unavailable", so "reload" and "come back
-     after the next run" were the same mark as "not on the payload" — three
-     facts, one glyph, and no telling them apart in greyscale or in a test. */
   function emptyLine(kind, text) {
     var p = el("p", "flows-empty", text);
     p.setAttribute("data-empty", kind);
     return p;
   }
 
-  /* A REQUEST THAT NEVER CAME BACK IS NOT A KEY THAT WAS NEVER PUBLISHED.
-
-     The optional feeds were fetched with `.catch(() => null)`, and null is
-     what the worker's {status:"pending"} envelope reduces to at the first
-     branch of every painter — so an HTTP 500 printed "The pipeline has not
-     published this key yet", a confident claim about the pipeline made by a
-     request that never arrived, and movers and pulse hid their whole
-     section behind it. The sentinel keeps the fetch outcome distinguishable
-     from the payload state all the way to the painter. Its fields are
-     prefixed so the payload-shape scan cannot mistake them for publisher
-     fields, and no painter reads them off the payload directly —
-     `unreadable()` and `unreadableLine()` do. */
   function optional(path) {
     return get(path).catch(function (error) {
       return {
@@ -188,8 +88,6 @@
       "The pipeline has not published " + what + " yet. " + cost);
   }
 
-  /* Plain-English age, for a stamp that has to say how far out of date it is
-     without making the reader subtract two timestamps. */
   function ageWords(minutes) {
     var m = Math.max(0, Math.round(minutes));
     if (m < 90) return m + (m === 1 ? " minute" : " minutes");
@@ -199,57 +97,23 @@
     return d + (d === 1 ? " day" : " days");
   }
 
-  /* ---------- freshness --------------------------------------------------
-
-     shared/flows-pages.js emitted `<p class="flows-stale" id="mktStale">`
-     from the day the page shipped and nothing wrote to it — on the one
-     surface whose whole subject is a single session's tape, where a reader
-     cannot tell yesterday's copy from today's without being told.
-
-     THE TEST IS NOT THIS FILE'S TO WRITE. assets/js/flows-ui.js `staleness()`
-     owns it, lifted out of flows-board.js because six routes had grown six
-     copies of two constants and six wordings of the same two outages. This
-     route is served nav.js and this file and no UI module, so
-     `window.FlowsUI` does not exist here: what follows is a MIRROR, not a
-     second opinion — the same constants, branches, sentences and four-way
-     {kind, message} contract, including the "unknown" a bare null cannot
-     express. The wording lives in flows-ui.js:185 and changes there first;
-     when marketPage() is served flows-ui.js this block becomes one call.
-
-     TWO FAILURES, TWO REMEDIES. A dead pipeline has an old WRITE time —
-     GitHub disables scheduled workflows after 60 days of inactivity and the
-     only symptom is a date that stops advancing. A frozen upstream has a
-     recent write time and an old SESSION. */
   var staleEl = document.getElementById("mktStale");
 
-  // Mirrored from assets/js/flows-ui.js:143-145. One publish cadence plus
-  // slack; one weekend plus one public holiday. Weekends fall to the session
-  // check: the pipeline does not run at all on a Saturday.
   var STALE_WRITE_MS = 30 * 60 * 60 * 1000;
   var STALE_SESSION_MS = 4 * 24 * 60 * 60 * 1000;
-  // Mirrored from flows-ui.js:147 — the shape the publisher validates on the
-  // way out, and the gate the parse below sits behind.
+
   var ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
   function assessAge(payload) {
     var now = Date.now();
     if (!payload || typeof payload !== "object") return { kind: "unknown", message: null };
 
-    /* THE MISSING-VALUE TEST BEFORE THE COERCION: Number(null) is 0, 0 is a
-       finite millisecond stamp — the epoch — and a payload with no write
-       header would be reported as fifty-six years stale. A NON-POSITIVE
-       STAMP IS AN ABSENT ONE, made one here once rather than tested at each
-       use: with the `> 0` inside the stale branch a stamp of 0 skipped it as
-       "not old" and fell through to "fresh" (flows-ui.js:203). */
     var stamped = isNum(payload.__updatedAt);
     var written = stamped !== null && stamped > 0 ? stamped : null;
     if (written !== null && now - written > STALE_WRITE_MS) {
       var hours = Math.floor((now - written) / 3600000);
       var days = Math.floor(hours / 24);
-      /* The hour branch cannot fire while the threshold is 30 hours — every
-         age past it is at least one day. It is here so that lowering the
-         threshold can never start printing "0 days", which is a confident
-         zero wearing a unit. */
+
       var age = days >= 1
         ? days + (days === 1 ? " day" : " days")
         : hours + (hours === 1 ? " hour" : " hours");
@@ -260,13 +124,6 @@
       };
     }
 
-    /* 21:00Z is after every US close, so a session is aged from the end of
-       its own day. THE SHAPE IS CHECKED BEFORE THE PARSE: Date.parse is
-       lenient enough that "2026-09" + "T21:00:00Z" comes back FINITE in V8
-       and dates a session to a day nobody published. AND THE PARSE RESULT IS
-       KEPT, not just tested: asking `!payload.sessionDate` — the presence of
-       the key — let "Thursday" report "fresh". Both are flows-ui.js:229-249
-       reaching the mirror that claimed to hold them. */
     var session = null;
     if (ISO_DAY.test(String(payload.sessionDate || ""))) {
       var parsed = Date.parse(String(payload.sessionDate) + "T21:00:00Z");
@@ -281,16 +138,10 @@
       };
     }
 
-    /* NOTHING DATABLE AT ALL IS NOT A PASS. "unknown" says no claim was made;
-       "fresh" says a claim was made and it held. Only a payload that carried
-       at least one READABLE date gets the second. */
     if (written === null && session === null) return { kind: "unknown", message: null };
     return { kind: "fresh", message: null };
   }
 
-  /* THE KIND IS STAMPED AS WELL AS THE SENTENCE — flows-board.js's shape.
-     "The pipeline stopped" and "the data stopped" want different chrome, and
-     a test should not have to parse prose to tell which one is on screen. */
   function setStale(verdict) {
     if (!staleEl) return;
     var message = (verdict && verdict.message) || "";
@@ -301,18 +152,6 @@
     document.body.classList.toggle("is-stale", Boolean(message));
   }
 
-  /**
-   * A signed bar on a fixed [-1, +1] axis.
-   *
-   * POSITION CARRIES THE SIGN, hue is decoration. The bar grows from a centre
-   * rule: left of it is negative and right of it is positive, and that remains
-   * legible with the colours removed, printed in greyscale, or read by someone
-   * who cannot distinguish the two.
-   *
-   * The axis is FIXED rather than scaled to the data. A tilt of +0.03 drawn to
-   * fill the panel would read as a decisive session; on a fixed axis it reads
-   * as what it is, which is nearly nothing.
-   */
   function tiltRow(label, value, note) {
     var wrap = el("div", "mk-tilt");
     var head = el("div", "mk-tilt-h");
@@ -326,10 +165,7 @@
     var n = isNum(value);
     if (n !== null) {
       var bar = el("i", "mk-bar " + barClass(n));
-      // Half-width axis each side of the centre rule. A measured zero draws a
-      // zero-width bar AT the rule and is classed neither way — the centre
-      // rule is the mark for "level", and tinting it positive was the same
-      // confident-zero defect the sign glyphs above just lost.
+
       bar.style.width = (Math.min(Math.abs(n), 1) * 50) + "%";
       bar.style.left = n >= 0 ? "50%" : (50 - Math.min(Math.abs(n), 1) * 50) + "%";
       track.append(bar);
@@ -348,10 +184,6 @@
     var breadth = m.breadth || {};
     var premium = m.premium || {};
 
-    /* NEVER A CONFIDENT ZERO IN A POPULATION. This read `isNum(breadth.bull)
-       || 0`: a count the payload never published printed as "0 bought", and a
-       session in which nothing WAS bought became indistinguishable from a
-       field never written. count() prints the em dash for exactly that. */
     host.append(tiltRow(
       "Breadth tilt — counting names",
       breadth.tilt,
@@ -365,49 +197,22 @@
       usd(premium.netPositive) + " of net call premium against " +
       usd(premium.netNegative) + " of net put premium."));
 
-    /* THE DISAGREEMENT IS THE READING, and it is the reason both are drawn.
-       They are the same ratio under two weightings; when they part company the
-       session was a lot of small buying against a little large selling, or the
-       reverse, and no single number can say that.
-
-       IT NOW LEADS, WHICH CHANGES WHAT THE SENTENCE HAS TO SAY. The finding
-       used to sit under the two rows as `.fc-note`, where "more names leaned
-       one way while the dollars leaned the other" was decodable: the rows
-       were above it, with their signs. Above the rows it is not. A lead is
-       read BEFORE the drawing, so it cannot lean on marks the reader has not
-       reached yet — both branches now NAME the direction they are talking
-       about, which is one clause longer and the only version that stands
-       alone. */
     var lead = document.getElementById("mktTiltLead");
     var note = document.getElementById("mktTiltNote");
     var b = isNum(breadth.tilt), p = isNum(premium.tilt);
     var said = "";
     var how = "";
     if (b === null || p === null) {
-      /* AN ABSENCE LEADS TOO. Demoting a withheld comparison below the rows
-         would make a silence cheaper to publish than a reading. */
+
       said = "One of the two weightings could not be measured this session, " +
         "so they cannot be compared.";
     } else if (b === 0 || p === 0) {
-      /* A MEASURED ZERO IS A THIRD ANSWER, not a quiet member of the
-         majority. The disagreement test guarded itself with `b !== 0 &&
-         p !== 0` — correctly, because a zero has no sign to disagree with —
-         and then fell through to "Both weightings agree in sign", which is
-         a confident claim about a reading that has no sign at all. A
-         session where the dollars came back exactly level while the names
-         leaned is neither agreement nor disagreement, and it is the third
-         sentence rather than the wrong one of two. */
+
       if (b === 0 && p === 0) {
         said = "Both weightings came back exactly level: the names split evenly and so did " +
           "the dollars. There is no lean to agree or disagree about.";
       } else {
-        /* THE VERDICT TRAVELS WITH THE LEAD, in this branch as in the other
-           three. "so they neither agree nor disagree" is the panel's answer
-           to its own question — a NOT-COMPARABLE verdict, the sibling of
-           "DISAGREE in sign" and "agree in sign" — and it read as method only
-           because it happened to sit in the same sentence as the reason both
-           bars are drawn. That reason is the method, and it is what stays
-           below. */
+
         said = (b === 0
           ? "Counting names, the session was exactly level while the dollars leaned " +
             (p > 0 ? "positive" : "negative")
@@ -421,14 +226,7 @@
       said = "The two weightings DISAGREE in sign: more names leaned " +
         (b > 0 ? "positive" : "negative") + " while the dollars leaned " +
         (p > 0 ? "positive" : "negative") + " — breadth without size, or size without breadth.";
-      /* THE SENTENCE THAT EXPLAINED WHY TWO BARS EXIST IS GONE. It read
-         "That disagreement is the session's most informative reading, and it
-         is why both are drawn rather than one being chosen" — a
-         justification for this section's own construction, under a heading
-         that already says "Bought or sold, TWO WAYS", above two labelled
-         rows a reader can see disagree. Method, by the rule; and the lead
-         directly above still states the disagreement itself, which is the
-         reading rather than the argument for it. */
+
       how = "";
     } else {
       said = "Both weightings agree in sign: names and dollars both leaned " +
@@ -448,13 +246,6 @@
     var b = m.breadth || {}, p = m.premium || {};
     var bull = isNum(b.bull), bear = isNum(b.bear), flat = isNum(b.flat);
 
-    /* A PART-TO-WHOLE BAR NEEDS THE WHOLE, AND THE WHOLE HAS TO HAVE BEEN
-       MEASURED. Each count used to be coerced with `isNum(x) || 0`, so a
-       count the payload never wrote became a zero-width segment AND a zero
-       in the denominator: the two parts that arrived drew as 100% of a total
-       never measured, and the aria-label said "0 names net bought". If any
-       leg is missing there is no whole, and the honest drawing is none. The
-       tilt above is published as a ratio and is unaffected. */
     var splitDrew = false;
     if (bull === null || bear === null || flat === null) {
       var absent = [];
@@ -466,9 +257,7 @@
         absent.join(", ") + ", so its three parts do not add to a whole and drawing the " +
         "rest would publish a total that was never measured."));
     } else if (bull + bear + flat === 0) {
-      /* MEASURED AND EMPTY IS THE OTHER SILENCE. All three counts arrived and
-         all three are zero, so no screened name quoted both legs — a fact
-         about the session, and not the same fact as a missing count. */
+
       host.append(emptyLine("quiet",
         "No screened name quoted both a call and a put leg this session, so there is no " +
         "priced population to split. The three counts were published and all three are zero."));
@@ -501,27 +290,11 @@
       host.append(legend);
     }
 
-    /* CONCENTRATION, BESIDE THE TOTAL IT QUALIFIES. A market-wide sum is a
-       number one takeover print can own; without this, "the universe bought
-       calls" and "one name bought calls" are the same sentence.
-
-       THREE SENTENCES, THREE KINDS, AND THEY USED TO BE ONE PARAGRAPH. The
-       share leads. "More than half the total is five names" changes what
-       every total above it means, and the names excluded for quoting no
-       usable premium are a population, so both qualify. What is left — that
-       the total is spread rather than owned — is the reassuring branch. */
     var share = isNum(p.topShare);
     var lead = document.getElementById("mktBreadthLead");
     var qual = document.getElementById("mktBreadthQual");
     var note = document.getElementById("mktBreadthNote");
-    /* THE CONCENTRATION LEADS ONLY WHEN THE SPLIT DREW. It is a breadth
-       reading — concentration is what breadth is the opposite of — but it is
-       measured over the PREMIUM totals, while the drawing under it is a count
-       of NAMES. When that count could not be drawn, this panel's answer is
-       the silence saying so, and a figure at lead size above it reads as
-       though the panel were whole. The figure is still true and still said:
-       it becomes the first caveat, which is where a reading that is not the
-       panel's own finding belongs. */
+
     var caveats = [];
     var concentration = share === null ? null
       : "The five largest names account for " + pct(share) + " of all net premium moved.";
@@ -531,7 +304,7 @@
       caveats.push("More than half the total is five names: read the aggregate as those " +
         "names, not as the universe.");
     }
-    // A zero one-legged count drops the clause on purpose: it adds nothing.
+
     var unpriced = isNum(b.unpriced), oneLeg = isNum(p.oneLegged);
     if (unpriced !== null) {
       caveats.push(unpriced + " of " + count(m.n) + " screened names quoted no usable " +
@@ -554,12 +327,7 @@
     body.textContent = "";
 
     var p = m.premium || {}, pcr = m.pcr || {}, ag = m.aggressor || {}, vol = m.vol || {};
-    /* THE COERCED VALUE IS THE ONE THAT GETS FORMATTED. Formatting the RAW
-       field was harmless while isNum rejected strings and a CRASH once it was
-       widened: a quoted ratio passes the test and calls .toFixed on a String;
-       the list is built before any row is appended, so the whole table is
-       lost, panel.hidden is never cleared, and the TypeError escapes as a
-       rejection window.onerror never sees. */
+
     var pcrVol = isNum(pcr.volume), pcrPrem = isNum(pcr.premium);
     var rows = [
       ["Net premium, signed", usd(p.net), p.priced, toneClass(p.net)],
@@ -575,40 +343,13 @@
       tr.append(el("th", null, r[0]));
       var td = el("td", "c-num " + r[3], r[1]);
       tr.append(td);
-      /* NEVER A CONFIDENT ZERO IN THE POPULATION COLUMN EITHER: a reading no
-         name quoted shows an em dash, not "0 names", which would read as a
-         measured emptiness rather than an absent field. */
+
       tr.append(el("td", "c-num", isNum(r[2]) === null ? DASH : String(r[2])));
       body.append(tr);
     });
     panel.hidden = false;
   }
 
-  /* ---------- sector momentum ---------------------------------------
-
-     THE READING IS `trixBp`. `trix` IS ITS PRESENTATION, AND DRAWING THE
-     PRESENTATION AS IF IT WERE SIGNED WAS THIS PANEL'S SECOND FATAL BUG.
-
-     The publisher writes the raw oscillator in basis points and a 0..100
-     clamp score derived from it by the relation the payload states:
-
-         trix = 50 + 50 * clamp(trixBp / fullScaleBp, -1, +1)
-
-     50 is no momentum, 0 and 100 the rails, and nothing in it is ever
-     negative — yet this function branched on `r.trix >= 0`, true of every
-     sector ever published: every bar grew right from the centre rule and
-     XLF at −23.65 bp printed "+26.4" in the positive tone under a caption
-     saying "basis points". Rank order survived (the relation is monotone);
-     the sign did not, and here the sign lives in position.
-
-     The bar, the label and the sort key are the raw signed reading. The axis
-     is the published full-scale band, the same every session, so a bar reads
-     against another sector and against this sector last week; the old
-     session-scaled axis needed a "never with another day" caveat, retired
-     rather than reworded. */
-
-  /* The raw reading, or null. Never `r.trix`: a clamp score cannot carry a
-     sign and cannot be compared with another day's. */
   function sectorBp(r) {
     return isNum(r && r.trixBp);
   }
@@ -621,32 +362,13 @@
     var qual = document.getElementById("mktSectorQual");
     if (!host || !panel) return;
     host.textContent = "";
-    /* ALL THREE SLOTS CLEAR TOGETHER. Every branch below returns early on a
-       silence, and a lead left over from the previous paint would sit above
-       an "unreadable" line claiming a coverage this run never measured. */
+
     if (note) note.textContent = "";
     if (lead) lead.textContent = "";
     if (qual) qual.textContent = "";
 
-    /* THE FIELD THE PIPELINE ACTUALLY WRITES. This read `sectors.rows` for as
-       long as the panel existed; the payload has never carried `rows` — the
-       eleven readings go out under `sectors`, as the publisher's log said on
-       every run, and the suite's fixture was written from this function's
-       assumption rather than from the pipeline. There is deliberately NO
-       `rows` fallback: a fallback lets the payload and this renderer drift
-       apart again in silence, which is the only reason the bug survived a
-       live run that measured all eleven. */
     var entries = (sectors && Array.isArray(sectors.sectors)) ? sectors.sectors.slice() : [];
 
-    /* FOUR DIFFERENT SILENCES, AND THEY MAY NOT SHARE A SENTENCE.
-
-       Before, every one of these printed "No sector carried enough history",
-       which is a claim ABOUT THE DATA — a measured emptiness. Three of the
-       four are nothing of the kind: one is a request that failed, one is an
-       unpublished key and one is a payload this page could not read. Saying
-       the strongest of the four in all four cases is exactly the confident
-       zero this project refuses everywhere else, and it is what made a
-       working measurement look like a dead one. */
     if (unreadable(sectors)) {
       host.append(unreadableLine(sectors, "sector momentum (/api/flows/sectors)"));
       panel.hidden = false;
@@ -668,19 +390,13 @@
     }
 
     var measured = entries.filter(function (r) { return sectorBp(r) !== null; });
-    /* A ROW WITH A SCORE BUT NO RAW READING is a payload regression, not a
-       sector. The publisher writes `trix` and `trixBp` together or writes
-       both null, so this count should always be zero — it is reported rather
-       than swallowed because a silently shrinking panel is how the last two
-       defects on this surface stayed invisible for weeks. */
+
     var scoreOnly = entries.filter(function (r) {
       return sectorBp(r) === null && isNum(r && r.trix) !== null;
     }).length;
 
     if (!measured.length) {
-      /* NOW the sentence is earned: readings were published and none settled,
-         and the payload says per sector why. This is the one branch of the
-         four that is a statement about the market. */
+
       var why = entries.filter(function (r) { return r && r.reason; })
         .map(function (r) { return r.reason; })[0];
       host.append(emptyLine("quiet",
@@ -690,12 +406,6 @@
       return;
     }
 
-    /* THE AXIS IS PUBLISHED, NOT INVENTED HERE. `scaling.fullScaleBp` is the
-       band the publisher declares as its free parameter, and reading it means
-       the drawing and the payload cannot disagree about what a full bar is.
-       If a payload ever arrives without it the panel falls back to the
-       session's own widest reading and SAYS so in the caption, because a
-       session-scaled axis genuinely cannot be set beside another day's. */
     var scaling = (sectors && sectors.scaling) || {};
     var published = isNum(scaling.fullScaleBp);
     var fixedAxis = published !== null && published > 0;
@@ -703,16 +413,11 @@
       ? published
       : (measured.reduce(function (a, r) { return Math.max(a, Math.abs(sectorBp(r))); }, 0) || 1);
 
-    // Sorted on the raw reading. Sorting on `trix` ties every saturated
-    // sector at 100 and then orders them arbitrarily.
     measured.sort(function (a, b) { return sectorBp(b) - sectorBp(a); });
 
     var railed = 0;
     var list = el("ul", "mk-sectors");
-    /* THE LABEL CARRIES ITS UNIT. Every row is a tradeable ETF and not the
-       GICS index its name suggests, and "Basis: SPDR Select Sector ETFs"
-       printed five rows below the list was the unit stated away from the
-       label. The ticker sits on the row; the basis line stays as its gloss. */
+
     var sectorKey = function (r) {
       var name = r.sector || r.etf || DASH;
       var k = el("span", "mk-sector-k", name);
@@ -736,8 +441,7 @@
 
       var track = el("span", "mk-track mk-track-sm");
       track.setAttribute("role", "img");
-      /* The whole reading in one string for a screen reader, because the bar
-         carries the sign in a position a reader who cannot see it loses. */
+
       track.setAttribute("aria-label",
         spoken(r) + " " + signed(bp, 2) + " basis points per session, " +
         (bp < 0 ? "left of" : bp > 0 ? "right of" : "at") + " the zero rule.");
@@ -749,19 +453,10 @@
       track.append(bar);
       li.append(track);
 
-      /* UNITS TRAVEL WITH THE NUMBER. "+26.4" was a bare figure on an axis
-         the caption misnamed; "−23.65 bp" is a reading. */
       li.append(el("span", "mk-sector-v " + toneClass(bp), signed(bp, 2) + " bp"));
       list.append(li);
     });
-    /* THE WITHHELD SECTOR IS NAMED, IN ITS PLACE IN THE LIST. "1 sector had
-       too little history to settle and is omitted" left a reader counting
-       ten bars with no way to say which of eleven was gone, while the payload
-       carried the name, the ticker and the reason ("20 usable XLRE closes of
-       20 returned; 106 are needed…"). The row is drawn with no bar and no
-       number, the reason verbatim, under the mark for a published field that
-       is not on the payload. A clamp score with no raw reading is a publisher
-       defect, counted in the note rather than seated here as a sector. */
+
     entries.forEach(function (r) {
       if (!r || sectorBp(r) !== null || isNum(r.trix) !== null) return;
       var li = el("li", "mk-sector is-unsettled");
@@ -774,15 +469,6 @@
 
     var unmeasured = entries.length - measured.length - scoreOnly;
 
-    /* ONE PARAGRAPH OF NINE SENTENCES, SORTED INTO THE THREE KINDS IT ALWAYS
-       HELD. The coverage count leads: it is the one figure that says whether
-       the eleven bars below are the sector map or a third of it. What the
-       axis compares, what a railed bar is not, the basis, and which sectors
-       are listed without a bar all change what a drawn bar MEANS, so they
-       qualify. Only the two decoder sentences are METHOD.
-
-       Only the two decoder sentences are METHOD, and at 322 characters they
-       are the longest group left on the route. */
     if (lead) {
       lead.textContent = measured.length + " of " + entries.length + " sector" +
         (entries.length === 1 ? "" : "s") + " settled a reading.";
@@ -829,11 +515,6 @@
     panel.hidden = false;
   }
 
-  /* THE COLUMN'S OWN TWO SILENCES. "Nothing ranked." was one untagged
-     sentence for a ranking never published and a ranking taken and found
-     empty, in the one panel where that difference decides whether the
-     session was quiet or the feed was — and, untagged, the one silence a
-     test could not see. */
   function moverList(title, rows, key) {
     var box = el("div", "mk-movers-col");
     var head = el("h3", "mk-movers-h", title);
@@ -850,11 +531,7 @@
         "in it — a fact about the session."));
       return box;
     }
-    /* THE COLUMN STATES ITS OWN CUT. Eight names were printed of a ranking
-       the payload publishes fifteen deep, and nothing on the page said so:
-       "8 of 15" beside the title is the count and its denominator in the
-       place a reader looks first. The 15 is this list's length, never the
-       cap — a session with four fallers prints "4 of 4". */
+
     var shown = rows.slice(0, 8);
     head.append(el("span", "mk-movers-n", " · " + shown.length + " of " + rows.length));
     var ul = el("ul", "mk-movers");
@@ -878,11 +555,7 @@
     if (!host || !panel) return;
     host.textContent = "";
     if (band) band.textContent = "";
-    /* THE PANEL IS NEVER HIDDEN FOR A REASON THE READER CANNOT SEE. Both
-       branches below were one `panel.hidden = true`, so a failed request and
-       an unpublished key both deleted the section, and a reader could not
-       tell a feed that was down from a pipeline that had not run from a
-       session with no movers — three facts collapsed into an absence. */
+
     if (unreadable(movers)) {
       host.append(unreadableLine(movers, "the session's extremes (/api/flows/movers)"));
       panel.hidden = false;
@@ -903,9 +576,7 @@
       ["Most net call premium", prem.bullish, "netPrem"],
       ["Most net put premium", prem.bearish, "netPrem"],
     ];
-    /* MEASURED AND EMPTY IS THE THIRD SILENCE and it gets the third tag. Four
-       empty rankings out of a payload that published successfully is a fact
-       about the session, not about the plumbing. */
+
     if (!lists.some(function (spec) { return spec[1] && spec[1].length; })) {
       host.append(emptyLine("quiet",
         "This payload ranked no name on any of the four extremes. The screener answered " +
@@ -919,13 +590,6 @@
     lists.forEach(function (spec) { grid.append(moverList(spec[0], spec[1], spec[2])); });
     host.append(grid);
 
-    /* ONE POPULATION, STATED ONCE, UNDER THE FOUR COLUMNS CUT FROM IT. The
-       publisher writes universe (the screened names), ranked (those quoting
-       a change), priced (those quoting a net premium) and the two
-       complements, and none of the five reached the page: the one panel
-       whose whole content is counts printed no denominator. A payload
-       without them is a published payload missing a field, and says so
-       under the dagger rather than with an em dash or nothing. */
     var universe = isNum(movers.universe), ranked = isNum(movers.ranked);
     var priced = isNum(movers.priced);
     var noChange = isNum(movers.unrankedChange), noPrem = isNum(movers.unrankedPremium);
@@ -943,18 +607,12 @@
         "its first 8 names."));
     }
 
-    /* THE PER-CONTRACT BAND, cut by the pipeline from the vendor's own flow
-       alerts. ABSENT WHOLE when the alerts leg failed on a run — a plain
-       truthiness check, and absence renders as nothing rather than as an
-       error, because the movers above published first and stand alone. */
     if (band && movers.premium && movers.premium.byContract) {
       moverBand(band, movers.premium.byContract);
     }
     panel.hidden = false;
   }
 
-  /* The band's FEED object arrives under its own name so the payload-shape
-     scan sees only real `movers.` reads inside paintMovers above. */
   function moverBand(host, feed) {
     var rows = Array.isArray(feed.rows) ? feed.rows : [];
     if (!rows.length) return;
@@ -979,24 +637,12 @@
       "premium within that selection — not the whole tape."));
   }
 
-  /* One spelling of a contract for the band and the pulse's OI-change table:
-     "TICKER C150 09-18". When the parsed legs are absent the vendor's own
-     option symbol is shown as sent, or the ticker with an em dash. */
   function contractLabel(r) {
     if (r.cp && isNum(r.k) !== null && r.exp) {
       return (r.t || DASH) + " " + r.cp + String(r.k) + " " + String(r.exp).slice(5);
     }
     return r.oc || ((r.t || DASH) + " " + DASH);
   }
-
-  /* ---------- the market pulse ------------------------------------
-     Seven market-wide vendor feeds pooled under one key. Each feed carries
-     its own status and fails alone, so each card answers its own silences —
-     an UNAVAILABLE feed names its reason, a QUIET feed says the vendor
-     answered with nothing, ordinary for a pre-open read — and the KEY's own
-     two are answered by the section, which used to hide itself for both:
-     seven feeds and a chart gone without a sentence, a 500 on the request
-     indistinguishable from a key never written. Neither is "quiet". */
 
   function paintPulse(pulse) {
     var panel = document.getElementById("mkPulsePanel");
@@ -1009,8 +655,7 @@
       grid.textContent = "";
       if (stampEl) stampEl.textContent = "";
       if (foot) foot.textContent = "";
-      /* The chart handle is cleared with the panel it lived in, or a resize
-         would repaint a tide from a payload this page no longer holds. */
+
       tideChart = null;
       totalsChart = null;
       grid.append(unreadable(pulse)
@@ -1024,10 +669,7 @@
 
     var notes = pulse.notes || {};
     grid.textContent = "";
-    /* THE CADENCE COMES OFF THE PAYLOAD, read here with the rest of the
-       root fields so the payload-shape scan can see the claim being made.
-       Handed on raw: pulseStamp owns what counts as a usable cadence and
-       what it says when there is none. */
+
     if (stampEl) {
       stampEl.textContent = pulseStamp(pulse.readAt, pulse.refreshed, pulse.cadenceMinutes);
     }
@@ -1042,73 +684,37 @@
 
     if (foot) foot.textContent = notes.refusals || "";
 
-    /* REVEALED BEFORE THE TIDE IS MEASURED. A hidden element reports
-       clientWidth 0 and the chart would silently draw at a fallback
-       width — the flows-track precedent, unhide first, then measure. */
     panel.hidden = false;
     drawCharts();
   }
-
-  /* Sub-panel helpers take the FEED objects under their own names, so the
-     payload-shape scan sees only real payload reads inside paintPulse. */
 
   var PULSE_QUIET = "The feed answered this read with nothing — ordinary " +
     "for a pre-open read of a series that fills during market hours.";
   var MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-  /**
-   * When the pulse was read, and whether that claim is still worth making.
-   *
-   * THIS STAMP USED TO LIE TWICE: a bare HH:MM with no date, so yesterday's
-   * 15:45 read as "Read 15:45" today; and "(refreshes about every 15 minutes
-   * during market hours)" appended unconditionally, so the same stale copy
-   * announced itself as a live feed. A freshness stamp that cannot go stale
-   * turns an absence of information into a confident assurance.
-   *
-   * THE CADENCE IS THE PAYLOAD'S, NOT THIS FILE'S. A local mirror of
-   * shared/flows-freshness.js was the only link between the two;
-   * shared/flows-pulse.js publishes `cadenceMinutes` for exactly this
-   * reader, so a cron moved to thirty minutes is followed here rather than
-   * calling a twenty-five-minute-old read stale.
-   *
-   * @param {number|null|undefined} cadenceMinutes absent on a payload written
-   *   before the field existed. ABSENT IS NOT ZERO: Number(null) would make
-   *   every read stale and print "every 0 minutes", and a fallback of 15 is a
-   *   number nobody published. A missing cadence withholds the verdict and
-   *   says why; the age is still measured, since that needs no cadence.
-   */
   function pulseStamp(readAt, refreshed, cadenceMinutes) {
     if (typeof readAt !== "string") return "";
     var t = new Date(readAt);
     if (isNaN(t.getTime())) return "";
     var now = new Date();
     var hm = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-    /* Today in the VIEWER's zone, which is the zone the clock beside it is
-       already rendered in. */
+
     var sameDay = t.getFullYear() === now.getFullYear() &&
       t.getMonth() === now.getMonth() && t.getDate() === now.getDate();
     var when = sameDay ? hm : t.toLocaleDateString() + " " + hm;
     var ageMin = (now.getTime() - t.getTime()) / 60000;
     var build = refreshed === "nightly" ? " with the nightly build" : "";
 
-    /* ABSENCE TESTED BEFORE THE ARITHMETIC, and a non-positive cadence is an
-       absent one: a refresh every zero minutes is not a schedule, and a
-       negative one is a corrupt field, not a fast cron. */
     var minutes = isNum(cadenceMinutes);
     var cadence = (minutes !== null && minutes > 0) ? minutes : null;
     if (cadence === null) {
-      /* The AGE is a subtraction of two stamps and needs no cadence, so it is
-         still reported; only the JUDGEMENT of it is withheld. Under a minute
-         it is left off rather than rounded to "0 minutes ago", which reads as
-         a measurement of nothing beside a sentence about a missing field. */
+
       var since = Math.round(ageMin) >= 1 ? ", " + ageWords(ageMin) + " ago" : "";
       return "Read " + when + build + since + ". This payload did not publish the refresh " +
         "cadence, so this page cannot say whether that read is still current.";
     }
 
-    // One cadence plus one cadence of slack: a cron that fired late is not
-    // yet a cron that stopped firing.
     var live = ageMin < cadence * 2;
     var stale = ", read " + ageWords(ageMin) + " ago — the intraday refresh is not " +
       "keeping it current, so every number below is as of that stamp.";
@@ -1133,11 +739,6 @@
     return card;
   }
 
-  /* TWO OF THE THREE SILENCES, told apart in words and in the DOM. The third
-     — the whole KEY failing to arrive — belongs to the section rather than to
-     any one feed, and paintPulse answers it above. Both tags come from
-     emptyLine so the per-feed and per-section silences cannot drift into two
-     vocabularies for the same distinction. */
   function feedSilence(feed, quietText) {
     if (!feed || feed.status === "unavailable") {
       return emptyLine("unavailable",
@@ -1148,8 +749,6 @@
     return emptyLine("quiet", quietText || PULSE_QUIET);
   }
 
-  /* THE CAPPED-LIST RULE: a shortened list must say what it is short of,
-     so it can never be read as the population. */
   function capLine(feed, shown, noun) {
     var seen = isNum(feed.seen);
     var shed = isNum(feed.shed);
@@ -1188,8 +787,7 @@
   function signedGrouped(v) {
     var n = isNum(v);
     if (n === null) return DASH;
-    /* Rounded FIRST, then signed off the rounded value: a change of -0.4
-       contracts rounds to 0 and must not print "−0". */
+
     var r = Math.round(n);
     return signGlyph(r) + Math.abs(r).toLocaleString("en-US");
   }
@@ -1197,8 +795,7 @@
     var n = isNum(v);
     return n === null ? DASH : "$" + n.toFixed(2);
   }
-  /* The vendor's percent-ish columns, rendered in the vendor's own units —
-     the seasonality caption says so beside them. */
+
   function vendorPct(v) {
     var n = isNum(v);
     return n === null ? DASH : n.toFixed(2) + "%";
@@ -1208,12 +805,7 @@
     if (n === null) return DASH;
     return signGlyph(n) + Math.abs(n).toFixed(2) + "%";
   }
-  /* THE VENDOR'S OI RATIO, MULTIPLIED, BECAUSE IT ARRIVES AS A FRACTION.
-     oi_change is (curr-last)/last: 0.2153 is a 21.5% rise and 15.6149 is a
-     1561% one. Printed raw it reads as a small integer beside a contract
-     count it is not, which is exactly how it came to be drawn as one.
-     Rounded FIRST and signed off the rounded value, so a rise too small to
-     show does not print "−0". */
+
   function signedGrowthPct(v) {
     var n = isNum(v);
     if (n === null) return DASH;
@@ -1225,17 +817,8 @@
     return (typeof iso === "string" && iso.length >= 16) ? iso.slice(11, 16) : DASH;
   }
 
-  /* ---------- 1. the tide, and the 20-session totals line ----------
-
-     TWO CHARTS, ONE DRAWING FUNCTION. They differ only in what an x step is
-     (a five-minute bucket, a session) and in how a tick is labelled; every
-     rule below — one viewBox unit is one CSS pixel, a null is a gap and never
-     a zero, hue is the last channel — has to hold identically on both, and
-     the way to guarantee that is to have one implementation of it rather than
-     two that agree today. */
-
-  var tideChart = null;     // {points, host} once the card is built
-  var totalsChart = null;   // the same, for the sessions line
+  var tideChart = null;
+  var totalsChart = null;
 
   function tideCard(feed, note) {
     var card = pulseCard("Market tide", true);
@@ -1264,44 +847,16 @@
     return n;
   }
 
-  /**
-   * A dual line on a measured axis.
-   *
-   * THE CHART INVARIANT: one viewBox unit is one CSS pixel. The width comes
-   * from the host's CURRENT clientWidth — which is why every caller unhides
-   * its panel BEFORE drawing, a hidden element reporting clientWidth 0 —
-   * an explicit width attribute is emitted, and the whole thing is repainted
-   * rather than scaled on resize.
-   *
-   * spec: { host, points, series:[{key, cls, label}], xLabel(point), yFormat,
-   *         aria, height }
-   */
   function drawLines(spec) {
     var host = spec.host;
     if (!host) return;
     var points = spec.points;
     host.textContent = "";
 
-    /* THE MEASUREMENT IS FLOORED, NOT ROUNDED, and the drawing is never
-       wider than the box it was measured from. `Math.round(clientWidth)`
-       rounds a host of 282.81px UP to 283, and the stylesheet's
-       `.mk-tide-svg { width: 100% }` then squeezes 283 viewBox units into
-       282.81 CSS pixels — one viewBox unit stops being one CSS pixel by a
-       fraction of a percent, silently, which is the same failure the
-       .cc-strip comment in flows.css warns about in so many words. Flooring
-       the real box width and pinning that width INLINE (an inline width
-       beats the class rule, and is by construction never wider than the
-       host, so it cannot push a 320px viewport sideways) makes the identity
-       exact rather than approximate.
-
-       The old lower clamp of 240 was the other half of the problem: on a
-       host narrower than 240 it would have made the drawing wider than its
-       container. The gutters shrink with the box instead. */
     var box = host.getBoundingClientRect ? host.getBoundingClientRect().width : 0;
     var measured = Math.floor(isNum(box) === null ? 0 : box);
     if (!measured) measured = Math.floor(host.clientWidth) || 0;
-    // A host that measures nothing is a hidden host; 320 is the narrowest
-    // viewport this product supports and is the honest fallback.
+
     var W = measured > 0 ? Math.min(1600, measured) : 320;
     var H = spec.height || 180;
     var padL = Math.min(54, Math.round(W * 0.19));
@@ -1318,7 +873,7 @@
         if (v > hi) hi = v;
       });
     });
-    if (lo === hi) hi = 1;   // a flat all-zero read still gets an axis
+    if (lo === hi) hi = 1;
 
     var x = function (i) {
       return padL + (n < 2 ? 0 : (i / (n - 1)) * (W - padL - padR));
@@ -1332,20 +887,15 @@
       width: W, height: H, preserveAspectRatio: "xMidYMid meet",
       role: "img", "aria-label": spec.aria,
     });
-    /* The attribute states the size; the inline style DEFENDS it. See above:
-       the stylesheet's width:100% would otherwise override the attribute and
-       rescale every unit in the drawing. */
+
     svg.style.width = W + "px";
     svg.style.height = H + "px";
 
-    // The zero rule, before the lines so they draw over it.
     svg.append(svgNode("line", {
       class: "mk-tide-zero", x1: padL, x2: W - padR,
       y1: y(0).toFixed(1), y2: y(0).toFixed(1),
     }));
 
-    /* One path per series, pen up over null buckets: an absent reading is a
-       GAP in the line, never a point at zero — 0 is a real published sum. */
     var seriesD = function (key) {
       var vals = points.map(function (p) { return isNum(p[key]); });
       var d = "", i = 0;
@@ -1354,12 +904,7 @@
         var j = i;
         while (j + 1 < n && vals[j + 1] !== null) j++;
         if (j === i) {
-          /* A ONE-SAMPLE RUN. A lone "M x y" is a path that moves and never
-             draws, so a bucket whose two neighbours both came back null
-             RENDERED NOTHING: the gap rule, which exists so a reading nobody
-             took is never invented, was making a reading somebody DID take
-             disappear. It is drawn as a four-unit tick centred on the sample
-             in the series' own stroke, too short to read as a segment. */
+
           d += "M" + (x(i) - 2).toFixed(1) + " " + y(vals[i]).toFixed(1) +
                "L" + (x(i) + 2).toFixed(1) + " " + y(vals[i]).toFixed(1);
         } else {
@@ -1383,9 +928,6 @@
       if (d) svg.append(svgNode("path", { class: ser.cls, d: d }));
     });
 
-    /* End-of-line words, so hue is never the only channel separating two
-       overlaid series. The stylesheet dashes one of the two strokes for the
-       same reason; between them the pair survives greyscale. */
     spec.series.forEach(function (ser) {
       var i = lastIdx(ser.key);
       if (i < 0) return;
@@ -1397,7 +939,6 @@
       svg.append(t);
     });
 
-    // The y-axis in the units the numbers are read in: at min, 0, max.
     [hi, 0, lo].filter(function (v, i, arr) { return arr.indexOf(v) === i; })
       .forEach(function (v) {
         var t = svgNode("text", {
@@ -1408,17 +949,11 @@
         svg.append(t);
       });
 
-    // Three or four x ticks, labelled from the payload's own stamps.
     var step = Math.max(1, Math.round((n - 1) / 3) || 1);
     var ticks = [];
     for (var i = 0; i < n; i += step) ticks.push(i);
     if (ticks[ticks.length - 1] !== n - 1) {
-      /* THE NEWEST STAMP ALWAYS PRINTS, AND THE ONE CROWDING IT DOES NOT.
-         Twenty sessions make the step 6, the loop ends on 18 and 19 is
-         pushed one bucket after it — 34px at 740 wide, under two five-glyph
-         mono labels, which overprinted as "07-2307-24". A pushed tick within
-         40px of its neighbour evicts the neighbour, never itself, and never
-         the first. */
+
       if (ticks.length > 1 && x(n - 1) - x(ticks[ticks.length - 1]) < 40) ticks.pop();
       ticks.push(n - 1);
     }
@@ -1434,7 +969,6 @@
     host.append(svg);
   }
 
-  /** Both charts at their hosts' current widths. */
   function drawCharts() {
     if (tideChart) {
       drawLines({
@@ -1456,10 +990,7 @@
           { key: "callPrem", cls: "mk-tide-call", label: "calls" },
           { key: "putPrem", cls: "mk-tide-put", label: "puts" },
         ],
-        /* "2026-09-03" → "09-03". A session with no date is the em dash:
-           `String(DASH).slice(5)` was the empty string, so an undated point
-           got a BLANK tick — an absence rendered as nothing at all rather
-           than as this file's mark for one. */
+
         xLabel: function (p) {
           var d = (p && typeof p.date === "string") ? p.date : "";
           return d.length >= 8 ? d.slice(5) : DASH;
@@ -1471,24 +1002,6 @@
     }
   }
 
-  /* ---------- 2..7, the tabular cards ------------------------------ */
-
-  /**
-   * WHERE THE NEWEST SESSION SITS IN THE SESSIONS BESIDE IT.
-   *
-   * Nothing else on this page carries any history: seven tape levels, two
-   * tilts and eleven sector readings, each a single session with no
-   * reference distribution. A page with no distribution cannot call anything
-   * unusual, and this feed — up to twenty sessions of market-wide call and
-   * put totals — is the one distribution the page already held and used to
-   * spend on ten rows of a table.
-   *
-   * A RANK, NOT A Z-SCORE. Twenty points cannot support a standard deviation
-   * of a series that is neither stationary nor symmetric; "the highest of the
-   * 20 sessions" is a claim the data supports exactly. Rank is taken over
-   * the rows that MEASURED the quantity, so the denominator is the comparable
-   * population and never the row count.
-   */
   function rankOf(rows, valueOf) {
     var measured = [];
     rows.forEach(function (r) {
@@ -1503,21 +1016,10 @@
       if (v > newest) above++;
       else if (v === newest) level++;
     });
-    /* `of` IS THE COMPARABLE POPULATION AND NOT THE ROW COUNT — a session
-       that never quoted both legs cannot be ranked against and must not sit
-       in the denominator, and the caller's sentence has to say so: "of the
-       20 sessions this feed returned" over a denominator of 17 is the right
-       number under the wrong noun. `tied` because a superlative is a claim
-       about uniqueness: two sessions at the same share both come back rank 1
-       and neither is "the most put-leaning session in the window". */
+
     return { rank: above + 1, of: measured.length, value: newest, tied: level > 1 };
   }
 
-  /* Put premium as a share of the session's own two-sided total. A SHARE is
-     the comparable quantity across twenty sessions; the raw sums are not,
-     because a quiet week and a busy one differ in level before they differ in
-     lean. Null unless BOTH legs were quoted and the total is positive — a
-     denominator of zero is not a balanced session. */
   function putShare(r) {
     var c = isNum(r && r.callPrem), q = isNum(r && r.putPrem);
     if (c === null || q === null) return null;
@@ -1540,35 +1042,23 @@
     var card = pulseCard("Volume and premium per session", true);
     var rows = feed && Array.isArray(feed.rows) ? feed.rows : [];
     if (feed && feed.status === "ok" && rows.length) {
-      /* THE WHOLE RETURNED WINDOW, DRAWN. The table below still shows ten
-         rows because a table of twenty is a wall; the line shows every
-         session the feed returned, which is what makes the rank sentence
-         under it checkable by eye. Oldest at the left, so time runs the way
-         it does on every other chart in this product — the payload arrives
-         newest-first and is reversed here rather than read backwards. */
+
       var chart = el("div", "mk-tide");
       card.append(chart);
       totalsChart = { points: rows.slice().reverse(), host: chart };
 
-      /* THE READING, IN WORDS, ABOVE THE TABLE. */
       var share = rankOf(rows, putShare);
       var size = rankOf(rows, twoSidedTotal);
       var newest = rows[0] || {};
       var said = [];
-      /* THE DENOMINATOR IS THE COMPARABLE POPULATION AND IS NAMED AS SUCH.
-         This sentence used to say "of the N sessions this feed returned"
-         while N was the count of sessions that could be RANKED; the two are
-         the same number only while every session quotes both legs, and the
-         moment one does not the reader is handed a smaller number under the
-         larger noun. The rows that could not be ranked are counted out loud
-         beside it rather than quietly deducted. */
+
       var unrankable = function (r) {
         return r.of < rows.length
           ? " (" + rows.length + " sessions were returned; " + (rows.length - r.of) +
             " quoted only one leg and cannot be ranked)"
           : "";
       };
-      /* A SUPERLATIVE IS A CLAIM ABOUT UNIQUENESS, so a tie does not get one. */
+
       var extreme = function (r, top, bottom) {
         if (r.rank === 1) return r.tied ? " — tied for the " + top + " in the window." : " — the " + top + " session in the window.";
         if (r.rank === r.of) return r.tied ? " — tied for the " + bottom + " in the window." : " — the " + bottom + " session in the window.";
@@ -1581,28 +1071,19 @@
           " in this window that quoted both legs" + unrankable(share) +
           extreme(share, "most put-leaning", "most call-leaning"));
       } else {
-        /* NOT A ZERO AND NOT A MIDDLE. A window in which no session quoted
-           both legs supports no rank at all, and saying so is the reading. */
+
         said.push("No session in this window quoted both a call and a put premium, so the " +
           "newest session cannot be ranked against the others.");
       }
       if (size) {
-        /* THE COUNT KEEPS ITS NOUN. "the 3rd largest of 20" is a bare figure:
-           twenty what, and measured how? And it is terminated: without the
-           full stop it ran into the caveat after it and two claims fused on
-           screen — "…quoted both legs A rank over 20 sessions is an ordinal
-           claim". */
+
         said.push("Total premium of " + usd(size.value) + " was the " + ordinal(size.rank) +
           " largest of the " + size.of + " session" + (size.of === 1 ? "" : "s") +
           " that quoted both legs" + unrankable(size) + ".");
       }
-      /* THE CAVEAT BELONGS TO A RANK THAT WAS ACTUALLY PUBLISHED. It used to
-         print unconditionally, so the window in which nothing could be
-         ranked still ended on "a rank over 3 sessions is an ordinal claim" —
-         a disclaimer for a number the card had just refused to give. */
+
       if (share || size) {
-        // Not named `window`: shadowing the global inside a renderer is how a
-        // later edit in this function loses its addEventListener.
+
         var span = (share || size).of;
         said.push("A rank over " + span + " session" + (span === 1 ? "" : "s") +
           " is an ordinal claim and nothing more: this window is far too short to support a " +
@@ -1629,8 +1110,7 @@
         t.body.append(tr);
       });
       card.append(t.wrap);
-      /* The TABLE is short of the window, not the window short of the feed:
-         two different truncations and the reader is told both. */
+
       if (rows.length > shown.length) {
         card.append(el("p", "fc-note mk-pulse-kept",
           "The table lists the newest " + shown.length + " of the " + rows.length +
@@ -1650,12 +1130,7 @@
     var card = pulseCard("Open-interest change");
     var rows = feed && Array.isArray(feed.rows) ? feed.rows : [];
     if (feed && feed.status === "ok" && rows.length) {
-      /* TWO COLUMNS BECAUSE THE VENDOR SENDS TWO READINGS, AND THIS DREW ONE
-         OF THEM UNDER THE OTHER'S NAME. `oi_change` is a ratio and
-         `oi_diff_plain` is the difference in contracts; this table rendered
-         the ratio through signedGrouped() under a contracts header, so a line
-         that went 2,119 to 35,207 printed "+16" and one that grew 21.5%
-         printed "+0". Each reading now has its own column and its own unit. */
+
       var t = pulseTable([
         { label: "Contract" },
         { label: "Change", num: true }, { label: "Growth", num: true },
@@ -1687,10 +1162,7 @@
     var card = pulseCard("Net premium impact");
     var rows = feed && Array.isArray(feed.rows) ? feed.rows : [];
     if (feed && feed.status === "ok" && rows.length) {
-      /* VENDOR ORDER PRESERVED: the rows arrive under the vendor's own
-         unpublished ranking, so the split slices positives and negatives in
-         the order given rather than re-sorting inside a rule this payload
-         cannot state. */
+
       var pos = [], neg = [];
       rows.forEach(function (r) {
         var v = isNum(r.netPrem);
@@ -1742,8 +1214,6 @@
     return card;
   }
 
-  /* The ONE panel whose rows are reported equity executions, so "prints"
-     is accurate here — and only here. */
   function darkpoolCard(feed, note) {
     var card = pulseCard("Dark pool prints");
     var rows = feed && Array.isArray(feed.rows) ? feed.rows : [];
@@ -1809,24 +1279,6 @@
     return card;
   }
 
-  /* ---------- against the tape ------------------------------------------
-
-     THE ONE CROSSING POINT THIS PRODUCT DID NOT HAVE. The board score is a
-     RESIDUAL — sector and log-capitalisation divided out before the ranking
-     — and this page measures the LEVEL the board threw away. Until now the
-     two never met: a name the composite ranked third long could sit in the
-     session's largest net PUT premium and nothing on the site would say so.
-     The overlap costs no vendor call, no pipeline change and no new key. It
-     is a CONTRADICTION, not a verdict — the residual and the level are
-     different quantities and may disagree — but a name where they disagree
-     is worth reading twice before the close.
-
-     WHAT IS DELIBERATELY MISSING: "how many board names sit in the bottom
-     TRIX quartile". The board row carries no sector string, though the
-     screener row it was cut from does; that is a publisher change, and
-     inventing a sector on this side would be a fabricated join. */
-
-  /* One column of the join: a heading, and whatever the side has to say. */
   function againstColumn(title, body) {
     var box = el("div", "mk-movers-col");
     box.append(el("h3", "mk-movers-h", title));
@@ -1838,10 +1290,7 @@
     var ul = el("ul", "mk-movers");
     rows.forEach(function (r) {
       var li = el("li");
-      /* The board rank rides with the ticker: a contradiction on the name
-         ranked first is not the same news as one on the name ranked
-         twenty-fifth. A row whose rank the board did not publish says that
-         in words — "#—" is a rank-shaped thing that is not a rank. */
+
       li.append(el("span", "mk-mv-t",
         r.rank === null ? r.t + " (board rank not published)" : r.t + " #" + r.rank));
       li.append(el("span", "mk-mv-v " + toneClass(r.netPrem), usd(r.netPrem)));
@@ -1850,9 +1299,6 @@
     return ul;
   }
 
-  /* Names on one board that appear in the opposite premium extreme. Rank is
-     the board's own `r`; when a row carries none the name still counts, and
-     the renderer says so rather than inventing a position. */
   function crossBoard(boardRows, moverRows) {
     var out = [];
     var byTicker = {};
@@ -1867,9 +1313,7 @@
         netPrem: isNum(byTicker[r.t].netPrem),
       });
     });
-    /* Ordered by the board's own ranking, because that is the axis the reader
-       came from — not by premium, which would put the loudest name first and
-       bury a contradiction on the top-ranked one. */
+
     out.sort(function (a, b) {
       if (a.rank === null) return 1;
       if (b.rank === null) return -1;
@@ -1886,27 +1330,13 @@
     var againstQual = document.getElementById("mktAgainstQual");
     if (!host || !panel) return;
     host.textContent = "";
-    /* ALL THREE SLOTS CLEAR TOGETHER, the same as paintSectors and for the
-       same reason: there are four early returns below and every one of them
-       is a silence. Clearing only the note left the PREVIOUS paint's "7 of
-       214 published board names appear in the opposite premium extreme this
-       session" standing at lead size above "the boards this panel is joined
-       against did not come back", with the capped-extremes qualifier still
-       under it — a finding, a caveat about it, and a silence saying neither
-       was measured, all in one panel. Latent while the route paints once per
-       load; a refresh or an intraday poll makes it live. */
+
     if (note) note.textContent = "";
     if (againstLead) againstLead.textContent = "";
     if (againstQual) againstQual.textContent = "";
 
-    /* Named `boardLong`/`boardShort` rather than `long`/`short`: both bare
-       words are ES3 future reserved words and this file is plain ES5 served
-       to whatever the reader is running. */
     var boardLong = boards[0], boardShort = boards[1];
 
-    /* THE JOIN NEEDS BOTH SIDES, so it has to say which side was missing. A
-       panel that silently draws nothing when one of two inputs failed is the
-       defect the rest of this file just finished removing. */
     if (unreadable(boardLong) || unreadable(boardShort)) {
       host.append(unreadableLine(unreadable(boardLong) ? boardLong : boardShort,
         "the boards this panel is joined against (/api/flows/board)"));
@@ -1930,14 +1360,7 @@
     }
 
     var prem = movers.premium || {};
-    /* EACH SIDE ANSWERS FOR ITS OWN LIST. This guard once required BOTH
-       premium lists to be missing, so a payload carrying one of the two drew
-       the other column as "No long-board name appears in…" — a measured-
-       emptiness sentence manufactured by an input never published, the
-       confident zero one level up from the arithmetic. A side whose ranking
-       never arrived is UNAVAILABLE, gets no quiet sentence, and its board
-       names stay out of the denominator: a population never joined cannot be
-       part of "N of M appear". */
+
     var sides = [
       {
         title: "Long board, in the largest net PUT premium",
@@ -1976,10 +1399,7 @@
         return;
       }
       if (!boardRows.length) {
-        /* AN EMPTY BOARD IS NOT AN EMPTY OVERLAP EITHER. "No long-board name
-           appears in the largest net put premium" is true of a board with no
-           names on it and says nothing, and its board contributes nothing to
-           the denominator — a side with no population cannot be part of one. */
+
         grid.append(againstColumn(side.title, emptyLine("quiet",
           "The " + side.side + " board ranked no name this session, so there is nothing on " +
           "this side to read against the tape. That is a fact about the board rather than " +
@@ -1995,20 +1415,9 @@
     });
     host.append(grid);
 
-    /* THE DENOMINATOR TRAVELS WITH THE COUNT, and so does the reason a
-       zero here is weak evidence: the mover lists are capped extremes, not
-       the universe, so a name can disagree with the tape and simply not be
-       extreme enough to appear in either of them.
-
-       THE COUNT LEADS AND THE CAP QUALIFIES IT. Those two sentences were
-       adjacent in one paragraph and are opposite kinds: the first is the
-       finding, the second is the reason the finding is weaker than it looks.
-       The residual sentence between them is the only method here. */
     if (againstLead) {
       againstLead.textContent = !population
-        /* NO POPULATION, NO RATIO. "0 of 0 published board names appear" is a
-           fraction over an empty set: it looks like a measurement of
-           agreement and is a statement that nothing was compared. */
+
         ? "No board name was joined against the tape this session, so there is no " +
           "population to state a count against."
         : hits + " of " + population + " published board names (" +
@@ -2030,10 +1439,6 @@
     panel.hidden = false;
   }
 
-  /* The panel is built here rather than in shared/flows-pages.js because this
-     renderer owns it end to end; the markup file carries no element only this
-     file writes. Inserted before the footer so the page still ends on the
-     payload's own published prose. */
   function mountAgainst() {
     if (document.getElementById("mktAgainstPanel")) return;
     var foot = document.getElementById("mktFoot");
@@ -2042,9 +1447,7 @@
     section.id = "mktAgainstPanel";
     section.hidden = true;
     section.append(el("h2", "fc-panel-h", "Against the tape"));
-    /* THE SAME THREE SLOTS THE MARKUP GIVES THE OTHER PANELS, built here
-       because this panel is built here. The lead is ABOVE the grid and the
-       two notes below it, which is the order the reader meets them in. */
+
     var readingP = el("p", "fc-reading is-lead");
     readingP.id = "mktAgainstLead";
     section.append(readingP);
@@ -2060,7 +1463,6 @@
     foot.parentNode.insertBefore(section, foot);
   }
 
-  /* Repainted whole at the new width, never scaled — the flows-track rule. */
   var chartResizeTimer = 0;
   window.addEventListener("resize", function () {
     if (!tideChart && !totalsChart) return;
@@ -2068,11 +1470,6 @@
     chartResizeTimer = setTimeout(drawCharts, 150);
   });
 
-  /* The market key's own write time, captured off the response header on the
-     way past. It answers a question the payload cannot: whether the PIPELINE
-     ran, as distinct from whether the DATA moved. A frozen vendor feed
-     republished on schedule has a fresh write time and a stale session; a
-     dead pipeline has the reverse, and #mktStale names which one. */
   var marketUpdatedAt = null;
 
   function get(path) {
@@ -2081,11 +1478,7 @@
         if (r.status === 401) { location.replace("/flows/"); return null; }
         if (!r.ok) throw new Error("HTTP " + r.status);
         if (path === "/api/flows/market") {
-          /* ABSENCE TESTED BEFORE THE COERCION. `Number(header) || null`
-             manufactures 0 out of a missing header and then leans on `||` to
-             catch the zero it has just made; flows-ui.js names that exact
-             shape as the reason the staleness test was lifted out of the
-             renderers. A non-positive stamp is an absent one. */
+
           var stamp = r.headers.get("X-Payload-Updated");
           var ms = (stamp === null || stamp === "") ? null : Number(stamp);
           marketUpdatedAt = (ms !== null && isFinite(ms) && ms > 0) ? ms : null;
@@ -2096,11 +1489,6 @@
 
   var status = document.getElementById("mktStatus");
 
-  /* THE MARKET KEY'S OWN SILENCE, IN THE THREE REGIONS IT FEEDS. One node
-     per host — a clone each, since a node appended twice moves rather than
-     copies — and the tape's sits inside its own table as a row spanning the
-     three columns, because a tbody cannot hold a paragraph and a header over
-     no rows is a table of nothing. */
   function marketSilence(line) {
     [["mktTiltPanel", "mktTilt"], ["mktBreadthPanel", "mktBreadth"]].forEach(function (ids) {
       var panel = document.getElementById(ids[0]), host = document.getElementById(ids[1]);
@@ -2121,15 +1509,6 @@
     panel.hidden = false;
   }
 
-  /* THE MARKET KEY FEEDS THREE OF THE SEVEN REGIONS, NOT THE PAGE. It kept
-     the bare get(): a rejection fell to the catch, which wrote "could not be
-     loaded: HTTP 500" into the status line with no data-empty and stopped,
-     and an unpublished key stopped one branch earlier with an untagged
-     sentence of its own. Either way sectors, the extremes, the pulse and the
-     join — four regions that never read this key — vanished behind one line
-     about a key they do not need. Every fetch is optional() now: this key's
-     failure or pending state paints as its own marked line in the three
-     regions it feeds, and the other four paint from their own values. */
   Promise.all([
     optional("/api/flows/market"),
     optional("/api/flows/sectors"),
@@ -2139,13 +1518,10 @@
     optional("/api/flows/board?side=short"),
   ]).then(function (all) {
     var m = all[0], sectors = all[1], movers = all[2];
-    if (!m) return;   // a 401 already redirected; there is nothing to paint
+    if (!m) return;
 
-    /* THE WRITE TIME, stamped from the response header onto the payload —
-       a client-side annotation, not a claim the pipeline publishes it. */
     if (typeof m === "object") m.__updatedAt = marketUpdatedAt;
 
-    // `!isNum(m.n)` sent an ok payload with `n: 0` down the pending branch.
     var n = unreadable(m) ? null : isNum(m.n);
     var level = unreadable(m) ? "unreadable"
       : (m.status === "pending" || n === null) ? "pending" : "ok";
@@ -2157,9 +1533,7 @@
           "It is built from the same screener response the board is drawn from, so it " +
           "appears with the first pipeline run after it shipped."));
       if (status) {
-        /* THE ORDINARY STATE BEFORE THE FIRST RUN, stated as a fact about
-           the store rather than as an error — under the same mark as the
-           regions, so the state line reads in greyscale too. */
+
         status.textContent = level === "unreadable"
           ? "The market level did not come back: " + m.__reason + "."
           : "No session has been measured yet.";
@@ -2173,7 +1547,7 @@
       paintTape(m);
 
       if (status) {
-        // `isNum(m.screened) ?` lost the denominator on a ladder that returned 0.
+
         var screened = isNum(m.screened);
         status.textContent = n + " screened names" +
           (screened === null ? "" : " of " + screened + " returned by the ladder") +
@@ -2184,9 +1558,7 @@
       var foot = document.getElementById("mktFoot");
       var notes = m.notes || {};
       if (foot) {
-        /* THE PROSE TRAVELS WITH THE NUMBERS. These strings are published in
-           the payload beside the arithmetic that produced them, so a renderer
-           cannot reword a caption into a claim the numbers do not support. */
+
         foot.textContent = [notes.population, notes.presence, notes.weighting, notes.refused]
           .filter(Boolean).join(" ");
       }
@@ -2198,9 +1570,7 @@
     paintAgainst([all[4], all[5]], movers);
     paintPulse(all[3]);
   }).catch(function (error) {
-    /* A painter that threw, not a fetch that failed — those are sentinels
-       now and never reach here. The one sentence left says which, and wears
-       the cross. */
+
     if (status) {
       status.textContent = "This page failed while drawing: " + error.message;
       status.setAttribute("data-empty", "unreadable");

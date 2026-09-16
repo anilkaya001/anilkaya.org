@@ -1,9 +1,3 @@
-/* =============================================================
-   gamify.js — points + daily streak.
-   Points accrue per completed stage; the streak counts consecutive
-   days with activity. Stored on-device, and synced to the backend
-   (when signed in) via window.Auth.pushStats.
-   ============================================================= */
 (() => {
   "use strict";
   const store = window.IEWTStorage;
@@ -64,8 +58,7 @@
       if (window.Auth && typeof window.Auth.pushStats === "function") void window.Auth.pushStats(s);
       return s;
     },
-    // Count a completed mastery-review session as learning activity without
-    // minting repeatable course points.
+
     touch() {
       const s = read();
       const today = day(new Date());
@@ -82,7 +75,7 @@
       if (window.Auth && typeof window.Auth.pushStats === "function") void window.Auth.pushStats(s);
       return s;
     },
-    // Merge the server-derived total and the newest activity date.
+
     merge(s, options = {}) {
       const c = read();
       const remote = s && typeof s === "object" ? s : {};
@@ -102,9 +95,7 @@
       });
       this.paint();
     },
-    // Reset both persisted stats and the in-memory server-point floor. The
-    // authenticated reset flow clears storage only after DELETE /api/progress
-    // succeeds and therefore passes { storageAlreadyCleared: true } here.
+
     reset(options = {}) {
       remotePointFloor = 0;
       if (options.storageAlreadyCleared !== true) {
@@ -133,12 +124,9 @@
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => Gamify.paint(), { once: true });
   }
-  // Like the academy UI, gamify.js is deferred and can safely paint before a
-  // CSP-blocked third-party defer allows DOMContentLoaded to fire in Safari.
+
   Gamify.paint();
-  // A server-derived floor is meaningful only for the account that supplied
-  // it. Never carry that closure state into an anonymous or different account
-  // scope on a shared browser.
+
   document.addEventListener("iewt:owner-changed", () => {
     remotePointFloor = 0;
     Gamify.paint();

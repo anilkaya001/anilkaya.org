@@ -1,10 +1,3 @@
-/* =============================================================
-   curriculum.js — canonical OLS course authoring.
-   Production course pages consume generated per-topic JSON payloads; this
-   source remains human-editable and is validated by the contract suite.
-   Interactive `template` uses {{param}} tokens replaced with slider values.
-   ============================================================= */
-
 window.CURRICULUM = {
   ols: {
     id: "ols",

@@ -1,42 +1,3 @@
-/* =============================================================
-   flows-warnings.mjs — the warnings that read the payloads.
-
-   A warning engine is the one surface in this product that is
-   allowed to interrupt a reader, so it has to be right about two
-   opposite things at once. It must fire when two published
-   surfaces genuinely contradict each other, and it must stay
-   ENTIRELY silent when a payload is merely absent — because a
-   warning invented out of a missing key trains a reader to dismiss
-   the ones that were measured, and a dismissed warning is worse
-   than no warning at all.
-
-   So every check below is exercised three ways: a crafted store
-   where it must fire, a crafted store where it must not, and a
-   store with nothing in it where it must neither fire nor throw.
-   On top of that this suite pins the guarantees that make the
-   sentences safe to print:
-
-     - `checked` counts questions the store could ANSWER, so
-       "nothing is wrong" is distinguishable from "nothing was
-       asked";
-     - a measured 0 is a reading and an absent count is not, and
-       the two produce different `checked`;
-     - every numeral in a warning's sentence is pinned in its own
-       `n`, scanned across every warning the suite produces rather
-       than per check;
-     - severity is ordered blocking, caution, note, so the thing a
-       reader must not act on is the first thing they meet.
-
-   INLINE FIXTURES, LIKE tests/flows-brief.mjs AND FOR THE REASON
-   THAT FILE RECORDS. Its first version read tests/.shots-emit/ and
-   died with ENOENT in CI, because .gitignore hides dotted
-   directories under tests/: a suite that cannot run reports green
-   from the one machine that was never going to catch anything. The
-   shapes below were read off the publisher — scripts/flows-pipeline.mjs
-   and the shared/ builders it spreads — and publisher/renderer
-   agreement remains tests/flows-payload-shape.mjs's job.
-   ============================================================= */
-
 import assert from "node:assert/strict";
 import { assess, THRESHOLDS } from "../shared/flows-warnings.js";
 
@@ -44,11 +5,6 @@ let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
 const eq = (a, b, m) => { assert.equal(a, b, m); checks++; };
 
-/* EVERY WARNING THIS SUITE EVER PRODUCES IS KEPT, because the two
-   scans at the end — the numeral pinning and the forecast verbs —
-   are properties of the module and not of any one check. Running
-   them per case would leave a future check exempt from both simply
-   by being written after them. */
 const PRODUCED = [];
 const run = (store) => {
   const out = assess(store);
@@ -58,22 +14,6 @@ const run = (store) => {
 const ids = (out) => out.warnings.map((w) => w.id).slice().sort();
 const byId = (out, id) => out.warnings.find((w) => w.id === id) || null;
 
-/* ---------- the corpus, inline and self-consistent ---------------
-
-   ONE COHERENT SESSION, from which every positive case below is a
-   single deliberate mutation. That is the shape a warning suite has
-   to have: a check that fires on a store assembled specially for it
-   has proved only that it fires on something, while a check that
-   fires on the clean corpus with ONE field changed has proved which
-   field it reads.
-
-   The numbers hold together the way partitionSides makes them hold
-   together on a live run: 44 cleared bullish, 53 cleared bearish and
-   3 inside the +-1 dead band is exactly the 100 that were scored.
-   `sessionDate` is the last COMPLETED session and `gateOrigin` is
-   the day the gate ran, which is why they differ by one — the
-   board publishes both clocks for that reason and a check that
-   confused them would fire on every healthy morning. */
 const STAMP = "2026-09-04T09:15:02.000Z";
 const SESSION = "2026-09-03";
 const ORIGIN = "2026-09-04";
@@ -84,9 +24,7 @@ const CLEAN = {
     status: "ok", side: "long", generatedAt: STAMP, sessionDate: SESSION,
     gateOrigin: ORIGIN, gateDays: 7,
     scored: 100, neutral: 3, deadBand: 1, cleared: 44, shed: 0,
-    /* `named` is the PRIOR board's row count and is compared against
-       rows.length, never against `cleared` — the population/page
-       distinction the rail badge shipped without. */
+
     memory: { status: "ok", sessionDate: PRIOR, named: 3, incumbents: 1 },
     rows: [{ t: "SYN046" }, { t: "SYN351" }, { t: "SYN037" }],
   },
@@ -109,9 +47,7 @@ const CLEAN = {
     gateOrigin: ORIGIN, gateDays: 7, inWindow: 87, shown: 8, cap: 200,
     rows: [{ t: "SYN151", d: ORIGIN, dte: 0 }],
   },
-  /* The one key that fills DURING a session: `record.date` is the
-     Eastern day the Worker's cron accumulated into, and on the clean
-     corpus it names the same session the boards rank. */
+
   alerts: {
     status: "ok", generatedAt: STAMP, sessionDate: SESSION,
     readAt: "2026-09-04T12:31:00.000Z", refreshed: "intraday",
@@ -124,8 +60,7 @@ const CLEAN = {
     measured: 11, returned: 11, rows: [{ t: "XLK", lean: 0.12 }],
   },
   market: { status: "ok", generatedAt: STAMP, sessionDate: SESSION, screened: 412 },
-  /* `premium.byContract` is cut from the shaped flow alerts by the
-     re-publish, which is why a ceiling on that read reaches here. */
+
   movers: {
     status: "ok", generatedAt: STAMP, sessionDate: SESSION,
     premium: {
@@ -143,17 +78,10 @@ const CLEAN = {
   },
 };
 
-/* Every case mutates its own copy. Sharing one object between cases
-   is how a suite ends up asserting the order it happens to run in. */
 const clean = () => structuredClone(CLEAN);
 
-/* The number of checks the clean corpus can answer, pinned rather
-   than bounded. A new check that cannot run against a complete,
-   healthy store is a check whose inputs nothing publishes, and the
-   author should find that out here rather than in production. */
 const CHECKS_ON_CLEAN = 13;
 
-/* ---------- 1. the clean corpus warns about nothing --------------- */
 {
   const out = run(clean());
   eq(out.warnings.length, 0,
@@ -165,13 +93,7 @@ const CHECKS_ON_CLEAN = 13;
 }
 
 {
-  /* A NUMERATOR PRINTED ALONE READS AS THE WHOLE SET. Nothing in a bare
-     `checked: 7` says whether seven is every question the module carries
-     or seven of thirteen, so a store holding two keys would render the
-     same clean bill of health as a complete one — the truncation that
-     does not say it truncated, in the one place whose whole job is to say
-     so. A caller keeping its own copy of the total is the drift this
-     codebase keeps consolidating, so the module states it. */
+
   const full = run(clean());
   eq(full.questions, CHECKS_ON_CLEAN,
      "the module says how many questions it carries, not only how many it could ask");
@@ -185,7 +107,6 @@ const CHECKS_ON_CLEAN = 13;
      "with nothing to read it against");
 }
 
-/* ---------- 2. absence is a silence, never a contradiction -------- */
 {
   for (const [label, store] of [
     ["nothing at all", undefined],
@@ -204,9 +125,7 @@ const CHECKS_ON_CLEAN = 13;
   }
 }
 {
-  /* THE THREE SILENCES, EACH ON ITS OWN. Pending is not published
-     yet, null could not be read, and rows: [] was measured and holds
-     nothing. None of the three is two surfaces disagreeing. */
+
   const slots = Object.keys(CLEAN);
   for (const [label, make] of [
     ["pending", () => ({ status: "pending", rows: [] })],
@@ -224,7 +143,6 @@ const CHECKS_ON_CLEAN = 13;
   }
 }
 
-/* ---------- 3. a silent stamp, which is worse than a stale one ---- */
 {
   for (const [label, value] of [["absent", undefined], ["unparseable", "yesterday"],
                                 ["a bare month", "2026-09"], ["the epoch as a null", null]]) {
@@ -242,9 +160,7 @@ const CHECKS_ON_CLEAN = 13;
   }
 }
 {
-  /* `new Date(null)` is the epoch rather than an invalid date, so a
-     module that parsed before it checked the shape would report this
-     key as fifty-seven years stale instead of as unstamped. */
+
   const s = clean();
   s.market.generatedAt = null;
   const out = run(s);
@@ -259,7 +175,6 @@ const CHECKS_ON_CLEAN = 13;
   eq(out.checked, 0, "and the check reports that it could not run");
 }
 
-/* ---------- 4. two surfaces written by different runs ------------- */
 {
   const cases = [
     ["2026-09-03T06:02:00.000Z", "blocking", 27,
@@ -285,14 +200,7 @@ const CHECKS_ON_CLEAN = 13;
   }
 }
 {
-  /* THE PRINTED INTERVAL AND THE SEVERITY MUST NAME THE SAME THRESHOLD.
-     Twenty-three and a half hours is half an hour short of the boundary
-     this module defines as a session having closed since, and a rounded
-     interval printed it as the 24 that boundary IS — a sentence telling a
-     reader the two keys are a whole session apart under a badge telling
-     them they are not, with the module's own exported threshold as the
-     thing they would check it against. Flooring is what stops a figure
-     crossing a line the gap did not cross. */
+
   const s = clean();
   s.market.generatedAt = "2026-09-03T09:45:02.000Z";
   const w = byId(run(s), "stamp:drift");
@@ -322,7 +230,6 @@ const CHECKS_ON_CLEAN = 13;
      "and does not count itself, because a comparison needs two payloads to compare");
 }
 
-/* ---------- 5. two surfaces naming two sessions ------------------- */
 {
   const s = clean();
   s.events.sessionDate = "2026-09-02";
@@ -338,9 +245,7 @@ const CHECKS_ON_CLEAN = 13;
   eq(w.n.later, SESSION, "and the later one, so the pair is checkable");
 }
 {
-  /* THE SPLIT IS NOT THE DRIFT RESTATED, and this is the store that
-     shows it: the stamp is unreadable, so the drift check skips the
-     key entirely, and the session it names is still wrong. */
+
   const s = clean();
   s.events.generatedAt = "no stamp at all";
   s.events.sessionDate = "2026-09-02";
@@ -352,7 +257,6 @@ const CHECKS_ON_CLEAN = 13;
      "while the drift check, which reads the write, has nothing to say about it");
 }
 
-/* ---------- 6. the day boundary ----------------------------------- */
 {
   const s = clean();
   s.alerts.record.date = "2026-09-04";
@@ -385,13 +289,7 @@ const CHECKS_ON_CLEAN = 13;
      "and the check does not count itself, because it had nothing to compare");
 }
 {
-  /* A BOARD PUBLISHED AND SILENT ABOUT THE DAY MUST NOT SUPPRESS THE ONE
-     BESIDE IT. Taking whichever side answered first and then reading the
-     session off it drops the session the other side is still publishing,
-     and the loss is invisible from outside: the same store with the quiet
-     board REMOVED reports the contradiction. A finding that appears when a
-     payload is deleted is a finding that depends on how much of the store
-     the engine was handed rather than on what the payloads say. */
+
   const s = clean();
   s.long = { status: "ok", generatedAt: STAMP, rows: [] };
   s.alerts.record.date = "2026-09-01";
@@ -405,7 +303,6 @@ const CHECKS_ON_CLEAN = 13;
   checks++;
 }
 
-/* ---------- 7. a population that shrank --------------------------- */
 {
   const s = clean();
   s.long.memory.named = 40;
@@ -421,15 +318,6 @@ const CHECKS_ON_CLEAN = 13;
   eq(w.n.prior, 80, "against the rows the prior boards held, both counted as ROWS");
   eq(w.n.fellPct, 94, "and the fall stated as a percentage rather than left to the reader");
 
-  /* THE MEMORY MUST BE A PREVIOUS SESSION, AND IT IS NOT ALWAYS ONE.
-     A board re-run on the same day reads back its own earlier write and
-     stamps the memory `same-session` — flows-pipeline.mjs says so in as
-     many words: "it is this run's own output". Counting against that
-     compares the run to itself and reports a collapse that is an
-     artefact of having run twice, which is the confusion the
-     pipeline's own memory guard exists to prevent, reintroduced one
-     layer up. `named` survives on a refused memory (only `rows` is
-     emptied), so nothing else here would have stopped it. */
   for (const status of ["same-session", "ahead", "undated", "quiet", "unavailable"]) {
     const t = clean();
     t.long.memory.named = 40; t.short.memory.named = 40;
@@ -438,10 +326,6 @@ const CHECKS_ON_CLEAN = 13;
        `a memory stamped ${status} is not a previous board, so no fall is claimed against it`);
   }
 
-  /* AND THE ONE-SIDED CASE. A memory refused on one side only must not
-     silently halve the comparand on the other: the side that still has
-     a clean memory is compared, the refused side contributes neither a
-     prior nor a held count, and the sentence names the side it read. */
   const oneSided = clean();
   oneSided.long.memory.named = 40;
   oneSided.short.memory.status = "same-session";
@@ -457,12 +341,7 @@ const CHECKS_ON_CLEAN = 13;
   checks++;
 }
 {
-  /* TWO PRIORS FROM TWO SESSIONS, AND THE SENTENCE NAMES NEITHER. `prior`
-     is a sum across the sides, so a date taken from the first side that
-     stated one is printed as the day the whole sum came from — and the
-     store where the two sides disagree is the one this module exists for,
-     because a leg that failed and left an older copy standing carries an
-     older memory with it. */
+
   const s = clean();
   s.long.memory.named = 60;
   s.short.memory.named = 20;
@@ -509,12 +388,7 @@ const CHECKS_ON_CLEAN = 13;
 }
 
 {
-  /* THE FALL IS MEASURED AND ITS CAUSE IS NOT. Both sides publish
-     `cleared` — 44 and 53 of the 100 scored got PAST the dead band and the
-     earnings gate on this store — and `shed`, which says our own row cap
-     is what emptied the page. A sentence naming the band or the gate
-     sends a reader to widen a threshold that removed nothing, which is a
-     warning doing the exact damage it was written to undo. */
+
   const s = clean();
   s.long.memory.named = 40; s.short.memory.named = 40;
   s.long.rows = []; s.short.rows = [];
@@ -529,13 +403,8 @@ const CHECKS_ON_CLEAN = 13;
      "what the check's own doc comment already said and the sentence had stopped saying");
 }
 
-/* ---------- 8. a measured zero is not an absent count ------------- */
 {
-  /* THE WHOLE HOUSE RULE IN ONE PAIR OF STORES. `named: 0` is a prior
-     board that was read and held nothing; `named: null` is a prior
-     board that could not be read at all. Number(null) is 0, so a
-     module that coerced before it tested would treat the second as
-     the first — and then divide by it. */
+
   const zero = clean();
   zero.long.memory.named = 0;
   zero.short.memory.named = 0;
@@ -556,9 +425,7 @@ const CHECKS_ON_CLEAN = 13;
      "which is the only place the difference between a zero and an absence can show");
 }
 {
-  /* AND A WHOLE SESSION MEASURED AT ZERO WARNS ABOUT NOTHING. Every
-     count below was taken and every one of them came back empty, which
-     is a reading of an unusually quiet session and not a fault. */
+
   const q = clean();
   for (const side of ["long", "short"]) {
     q[side].rows = [];
@@ -585,7 +452,6 @@ const CHECKS_ON_CLEAN = 13;
      "and every check ran, because a zero is something to check rather than something missing");
 }
 
-/* ---------- 9. a truncated list read as a population -------------- */
 {
   const s = clean();
   s.alerts.vendorTruncated = true;
@@ -607,11 +473,7 @@ const CHECKS_ON_CLEAN = 13;
      "is the page/population confusion this warning exists to name, running backwards");
 }
 {
-  /* THE CEILING IS STATED BY TWO FIELDS AND THE ROWS ARE NOT ONE OF THEM.
-     Requiring a third field let an unreadable rows array take a fully
-     measured claim down with it, while the inherited check — which reads
-     the SAME flag — went on warning about the surface cut from it: the
-     page then carried the derived caveat and not the one it derives from. */
+
   const s = clean();
   s.alerts.vendorTruncated = true;
   delete s.alerts.rows;
@@ -705,7 +567,6 @@ const CHECKS_ON_CLEAN = 13;
      "contributed — stops the check instead of reading as zero");
 }
 
-/* ---------- 10. surfaces that measure one thing and disagree ------ */
 {
   const s = clean();
   s.watch.scored = 87;
@@ -765,11 +626,7 @@ const CHECKS_ON_CLEAN = 13;
      "reach no surface a reader can open — a different sentence from the surplus above");
 }
 {
-  /* `??` AND NOT `||`, AND THIS STORE IS THE DIFFERENCE. The bullish
-     board publishes a measured 0 inside the band and the bearish one
-     publishes 7; a module that fell through the zero would read 7,
-     total 107 against 100 scored, and report a contradiction that
-     does not exist. */
+
   const s = clean();
   s.long.neutral = 0;
   s.short.neutral = 7;
@@ -792,7 +649,6 @@ const CHECKS_ON_CLEAN = 13;
      "nobody published");
 }
 
-/* ---------- 11. the gate the board applied, and the calendar's ---- */
 {
   const s = clean();
   s.events.gateDays = 10;
@@ -830,11 +686,7 @@ const CHECKS_ON_CLEAN = 13;
      "and a calendar publishing neither clock stops the check rather than agreeing by default");
 }
 {
-  /* AND THE GATE IS RESOLVED THE SAME WAY THE DAY IS. A thin board:long
-     standing in front of a board:short that still publishes both clocks
-     must not cost the calendar its comparison — the contradiction is
-     between what a board applied and what events published, and either
-     board can be the one that says what was applied. */
+
   const s = clean();
   s.long = { status: "ok", generatedAt: STAMP, rows: [] };
   s.events.gateDays = 10;
@@ -856,12 +708,11 @@ const CHECKS_ON_CLEAN = 13;
      "much of the store the engine was handed");
 }
 
-/* ---------- 12. severity is earned, and ordered ------------------- */
 {
   const s = clean();
-  s.watch.scored = 87;              // blocking
-  s.unusual.namesTruncated = 12;    // caution
-  s.alerts.record.date = "2026-09-04";  // note
+  s.watch.scored = 87;
+  s.unusual.namesTruncated = 12;
+  s.alerts.record.date = "2026-09-04";
   const out = run(s);
   eq(out.warnings.length, 3, "three findings of three severities");
   assert.deepEqual(out.warnings.map((w) => w.severity), ["blocking", "caution", "note"],
@@ -874,7 +725,6 @@ const CHECKS_ON_CLEAN = 13;
   checks++;
 }
 
-/* ---------- 13. the shape of every warning this suite produced ---- */
 {
   const KEYS = new Set(["board:long", "board:short", "board:watch", "events", "flowalerts",
                         "sector:premium", "market", "movers", "news", "unusual"]);
@@ -901,12 +751,8 @@ const CHECKS_ON_CLEAN = 13;
   }
 }
 
-/* ---------- 14. no warning states what a session will do ---------- */
 {
-  /* THE SCAN IS THE POINT, and it is the same one tests/flows-brief.mjs
-     runs over the briefing. A warning that started explaining what a
-     truncated feed means for tomorrow would read naturally and pass
-     every other assertion here; this one fails on the verb. */
+
   const FORECAST = /\b(will|should|expect(?:ed)?|likely|going to|forecast|predict)\b/i;
   for (const w of PRODUCED) {
     ok(!FORECAST.test(w.say),
@@ -915,20 +761,8 @@ const CHECKS_ON_CLEAN = 13;
   }
 }
 
-/* ---------- 15. every numeral in a warning is pinned in its n ----- */
 {
-  /* THE ANTI-TAMPER PROPERTY, SCANNED ACROSS EVERY WARNING THE SUITE
-     PRODUCED rather than inside each case. Written per check, a new
-     check added below this line would be exempt from it simply by
-     being written later — and the whole reason `n` exists is that a
-     rephrasing of `say` must be unable to change a figure.
 
-     THE STRING VALUES ARE MASKED OUT BEFORE THE DIGITS ARE READ, for
-     the reason tests/flows-brief.mjs records: a date or an ISO stamp
-     carries digits inside a value that is itself pinned, and a naive
-     digit scan would accuse the module of an unpinned "2026". Every
-     string already quoted in `n` is removed first, and what remains
-     is the sentence's own arithmetic. */
   let scanned = 0;
   for (const w of PRODUCED) {
     const quoted = new Set();

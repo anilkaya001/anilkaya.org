@@ -1,30 +1,9 @@
 name: flows-pipeline
 
-# Builds the daily Flows board and POSTs it to the Worker.
-#
-# Why this runs here and not on Cloudflare: the Workers free plan allows 10 ms
-# of CPU per invocation INCLUDING cron handlers, and this job makes roughly 400
-# Unusual Whales calls (1 screener + 5 per enriched name x 60 + 2 per board name
-# x 50 + 2 board reads for hysteresis). Chaining that through a 1-minute-minimum
-# cron would take hours and wedge on any stall. GitHub Actions has no such
-# limits and is unlimited for public repositories.
-#
-# TIMEZONE: cron here is UTC, the market opens 09:30 America/New_York, and the
-# US observes DST — so a single fixed UTC time drifts by an hour twice a year.
-# Rather than pick one and be wrong for half the year, both candidate times
-# fire and the job itself checks the actual Eastern hour and exits early unless
-# it is the intended one. 09:15 UTC is 05:15 EDT (summer); 10:15 UTC is 05:15
-# EST (winter). Either way the run starts 4h15m before the open.
-#
-# KNOWN FAILURE MODE: GitHub disables scheduled workflows after 60 days of
-# repository inactivity, and a workflow run does not itself count as activity.
-# This is the most likely way the board silently goes stale. If `generatedAt`
-# on the board stops advancing, check the Actions tab first.
-
 on:
   schedule:
-    - cron: "15 9 * * 1-5"    # 05:15 America/New_York during EDT
-    - cron: "15 10 * * 1-5"   # 05:15 America/New_York during EST
+    - cron: "15 9 * * 1-5"
+    - cron: "15 10 * * 1-5"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -50,26 +29,6 @@ jobs:
         with:
           node-version: 22
 
-      # Two schedules fire, so one of them is always an hour wrong. Resolve it
-      # by asking which OFFSET is currently in effect and matching that against
-      # which cron actually fired.
-      #
-      # Not by reading the wall-clock hour at execution time. GitHub delays
-      # scheduled workflows under load, and the previous version accepted only
-      # Eastern hour "05" — a 45-minute tolerance. A firing queued past the top
-      # of the hour made BOTH schedules evaluate to false: no board, no error,
-      # a green check, and the only symptom a generatedAt that stops advancing.
-      # That is the same silent symptom as the 60-day schedule disable below,
-      # which makes it exactly the kind of failure this job cannot afford.
-      #
-      # github.event.schedule is the cron expression that fired, so comparing
-      # it against date +%Z is delay-proof: a run that starts three hours late
-      # still knows which firing it was.
-      #
-      # This sets an OUTPUT rather than exiting. GitHub Actions dropped the
-      # neutral exit code when it moved off HCL: `exit 78` was neutral in v1
-      # but is now an ordinary failure like any non-zero code, so exiting here
-      # would paint the repository red every day for half the year.
       - name: Resolve whether this firing is the intended one
         id: gate
         run: |
@@ -91,25 +50,14 @@ jobs:
           fi
 
       - name: Verify the pipeline runs against fixtures
-        # Exercise the full code path with no network first. A syntax error or
-        # a broken feature contract fails here, before the live run has spent
-        # any API quota.
         if: steps.gate.outputs.run == 'true'
         run: node scripts/flows-pipeline.mjs --dry-run
 
       - name: Build and publish the board
         if: steps.gate.outputs.run == 'true' && (github.event_name != 'workflow_dispatch' || inputs.dry_run != true)
         env:
-          # Never echoed, never interpolated into a log line. Actions logs are
-          # PUBLIC on a public repository.
           UW_API_KEY: ${{ secrets.UW_API_KEY }}
           FLOWS_INGEST_TOKEN: ${{ secrets.FLOWS_INGEST_TOKEN }}
-          # Optional. The endpoint is public — the bearer token protects it —
-          # so the pipeline defaults to production and this only needs setting
-          # to aim a run at a staging Worker.
           FLOWS_INGEST_URL: ${{ secrets.FLOWS_INGEST_URL }}
         run: node scripts/flows-pipeline.mjs
 
-      # Deliberately NO actions/upload-artifact. On a public repository,
-      # workflow artifacts are downloadable by any GitHub account, which would
-      # publish the board to everyone the credential gate exists to exclude.

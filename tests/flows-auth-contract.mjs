@@ -1,14 +1,3 @@
-/* Contracts for shared/flows-auth.js.
-
-   The case that matters most is session isolation. Review of the
-   original design found that verifySession() checks only the HMAC,
-   a non-empty sub and a future exp — so a token minted for one part
-   of the site verifies fine against another. Cookie NAME is not a
-   boundary, because a caller chooses which cookie to put a token in.
-   These tests pin the audience claim that IS the boundary, in both
-   directions, and pin the legacy allowance that keeps currently
-   signed-in learners from being logged out. */
-
 import assert from "node:assert/strict";
 import { signSession, verifySession } from "../shared/session.js";
 import {
@@ -25,7 +14,6 @@ const SECRET = "test-session-secret-not-production";
 const PEPPER = "test-pepper-value";
 const PASSWORD = "Ankara06**--";
 
-/* ---------- roster --------------------------------------------- */
 {
   ok(FLOWS_USERNAMES.length === 12, "twelve accounts are provisioned");
   ok(new Set(FLOWS_USERNAMES).size === 12, "usernames are unique");
@@ -38,7 +26,6 @@ const PASSWORD = "Ankara06**--";
   }
 }
 
-/* ---------- derivation ----------------------------------------- */
 {
   ok(PBKDF2_ITERATIONS === 10000, "iteration count is the measured maximum for a 10 ms cap");
 
@@ -60,7 +47,6 @@ const PASSWORD = "Ankara06**--";
   ok(a !== wrongPw, "a wrong password cannot reproduce the hash");
 }
 
-/* ---------- timing-safe comparison ------------------------------ */
 {
   ok(timingSafeEqual("abc", "abc"), "equal strings match");
   ok(!timingSafeEqual("abc", "abd"), "differing content fails");
@@ -71,7 +57,6 @@ const PASSWORD = "Ankara06**--";
   ok(timingSafeEqual(undefined, ""), "undefined coerces to empty");
 }
 
-/* ---------- credential map -------------------------------------- */
 {
   ok(parseCredentials(null) === null, "missing secret yields no credentials");
   ok(parseCredentials("not json") === null, "malformed secret yields no credentials");
@@ -85,7 +70,6 @@ const PASSWORD = "Ankara06**--";
   ok(Object.getPrototypeOf(parsed) === null, "the map has a null prototype (no __proto__ tricks)");
 }
 
-/* ---------- verification ---------------------------------------- */
 {
   const creds = Object.create(null);
   for (const u of FLOWS_USERNAMES) creds[u] = await deriveHash(u, PASSWORD, PEPPER);
@@ -107,27 +91,23 @@ const PASSWORD = "Ankara06**--";
   ok(await verifyCredential("anilkaya", PASSWORD, null, PEPPER) === null,
      "a missing credential map rejects rather than admits");
 
-  // Every roster member authenticates with the shared password.
   for (const u of FLOWS_USERNAMES) {
     ok(await verifyCredential(u, PASSWORD, creds, PEPPER) === u, `${u} authenticates`);
   }
 }
 
-/* ---------- SESSION ISOLATION: the boundary --------------------- */
 {
   const flowsToken = await signFlowsSession("anilkaya", SECRET);
 
   const good = await verifyFlowsSession(flowsToken, SECRET);
   ok(good && good.username === "anilkaya", "a flows session verifies for flows");
 
-  // 1. A flows token must NOT pass as a learning session.
   const asPayload = await verifySession(flowsToken, SECRET);
   ok(asPayload !== null, "the token is cryptographically valid (same secret)");
   ok(asPayload.aud === FLOWS_AUDIENCE, "and it carries the flows audience");
   ok(!isLearnAudience(asPayload),
      "THE BOUNDARY: a flows token is refused by the learning audience check");
 
-  // 2. A learning token must NOT pass as a flows session.
   const learnToken = await signSession(
     { sub: "g_12345", aud: LEARN_AUDIENCE, exp: Date.now() + 60000 }, SECRET,
   );
@@ -136,19 +116,16 @@ const PASSWORD = "Ankara06**--";
   ok(isLearnAudience(await verifySession(learnToken, SECRET)),
      "and it still works for learning");
 
-  // 3. Legacy learning tokens carry no audience at all and must keep working.
   const legacy = await signSession({ sub: "g_legacy", exp: Date.now() + 60000 }, SECRET);
   ok(isLearnAudience(await verifySession(legacy, SECRET)),
      "a legacy audience-less token is still accepted for learning (nobody is logged out)");
   ok(await verifyFlowsSession(legacy, SECRET) === null,
      "but a legacy token cannot reach flows");
 
-  // 4. An unknown audience is refused by both.
   const alien = await signSession({ sub: "x", aud: "admin", exp: Date.now() + 60000 }, SECRET);
   ok(!isLearnAudience(await verifySession(alien, SECRET)), "an unknown audience fails learning");
   ok(await verifyFlowsSession(alien, SECRET) === null, "an unknown audience fails flows");
 
-  // 5. Ordinary token hygiene.
   ok(await verifyFlowsSession(flowsToken, "wrong-secret") === null, "a wrong secret fails");
   ok(await verifyFlowsSession("garbage", SECRET) === null, "a malformed token fails");
   ok(await verifyFlowsSession("", SECRET) === null, "an empty token fails");
@@ -157,8 +134,6 @@ const PASSWORD = "Ankara06**--";
   const expired = await signFlowsSession("anilkaya", SECRET, -1);
   ok(await verifyFlowsSession(expired, SECRET) === null, "an expired token fails");
 
-  // 6. A token whose subject is not on the roster is refused even if
-  //    correctly signed — a removed account cannot ride an old token.
   const ghost = await signSession(
     { sub: "removed-user", aud: FLOWS_AUDIENCE, exp: Date.now() + 60000 }, SECRET,
   );
@@ -167,7 +142,6 @@ const PASSWORD = "Ankara06**--";
   ok(FLOWS_COOKIE !== "session", "the flows cookie name differs from the learning one");
 }
 
-/* ---------- lockout --------------------------------------------- */
 {
   const now = Date.UTC(2026, 7, 24, 12, 0, 0);
   ok(!isLocked(null, now), "no record means not locked");
@@ -189,12 +163,6 @@ const PASSWORD = "Ankara06**--";
   ok(rolled.failures === 1, "a stale window resets the count");
 }
 
-/* ---------- session revocation ----------------------------------
-   Sign-out only clears the cookie; a copied cookie value kept working
-   for the full 14-day TTL, and DEPLOY.md documented a pepper rotation
-   as the way to force sign-out. It is not: the pepper is used for
-   credential derivation and never touches session verification. The
-   epoch is the actual revocation lever. */
 {
   ok(DEFAULT_SESSION_EPOCH === "1", "an unset epoch binding is a stable default, not undefined");
   ok(sessionEpoch({}) === "1", "a missing binding falls back to the default");
@@ -208,14 +176,12 @@ const PASSWORD = "Ankara06**--";
   ok(await verifyFlowsSession(t1, SECRET, "2") === null,
      "THE REVOCATION LEVER: bumping the epoch invalidates an outstanding session");
 
-  // A token minted before epochs existed carries none at all.
   const epochless = await signSession(
     { sub: "anilkaya", aud: FLOWS_AUDIENCE, exp: Date.now() + 60000 }, SECRET,
   );
   ok(await verifyFlowsSession(epochless, SECRET, "1") === null,
      "a token predating epochs is refused rather than silently accepted");
 
-  // The epoch must not become a way to smuggle a wrong audience through.
   const wrongAud = await signSession(
     { sub: "anilkaya", aud: "learn", epoch: "1", exp: Date.now() + 60000 }, SECRET,
   );

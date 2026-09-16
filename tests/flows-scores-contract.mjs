@@ -1,29 +1,3 @@
-/* =============================================================
-   flows-scores-contract.mjs — the dated score pool and its trace.
-
-   WHAT IS WORTH ASSERTING HERE. The score track is a VIEW of the
-   dated archive, rebuilt each run, and every expensive defect it can
-   ship is a quiet confusion between four things that all render as
-   "no number":
-
-     a GAP        — the name was not scored that session,
-     a ZERO       — the name was scored and the score was zero,
-     a THIN DAY   — a session reconstructed from the boards alone,
-     a SHED NAME  — a name dropped for the payload size cap.
-
-   The zero/gap distinction is the page's whole honesty: zero is a
-   score this pipeline assigns, and a fixture that never contains a
-   zero would let a renderer collapse the two without any test
-   noticing. So the fixtures here contain zeros ON PURPOSE, adjacent
-   to gaps, and the assertions check them apart.
-
-   Determinism is load-bearing, not cosmetic: the dated key is
-   written once per session under an immutability contract, and
-   "written once" only means anything if a re-run produces identical
-   bytes. Every builder is therefore asserted to sort totally and to
-   produce byte-identical output on a second call.
-   ============================================================= */
-
 import assert from "node:assert/strict";
 import {
   scoresRows, buildScoreTrack, boardsToScoreRows,
@@ -35,16 +9,15 @@ const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
-/* ---------- §1 the session pool ---------------------------------- */
 {
   const sides = {
     long: [{ ticker: "BBB", score: 12 }, { ticker: "AAA", score: 3 }],
     short: [{ ticker: "ZZZ", score: -8 }],
     neutralRows: [
-      { ticker: "MMM", score: 0 },              // a REAL zero — must survive
-      { ticker: "AAA", score: 99 },             // duplicate ticker — first wins
-      { ticker: "NNN", score: null },           // unscored — dropped
-      { ticker: "", score: 4 },                 // nameless — dropped
+      { ticker: "MMM", score: 0 },
+      { ticker: "AAA", score: 99 },
+      { ticker: "NNN", score: null },
+      { ticker: "", score: 4 },
     ],
   };
   const rows = scoresRows(sides);
@@ -63,13 +36,8 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "a second call produces identical bytes — the immutable dated key depends on it");
 }
 
-/* ---------- §1b the archived net premium -------------------------- */
 {
-  /* The same four-way confusion as the score, one column over. A name
-     nobody priced and a name priced flat both render as "no premium"
-     unless the archive keeps them apart, and this is the only place
-     that distinction can be made: the board row that carried the two
-     legs is gone by the next run. */
+
   const rows = scoresRows({
     long: [
       { ticker: "DIR", score: 9, netPrem: 13072372.4 },
@@ -104,7 +72,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "size cap and a null does not");
 }
 
-/* ---------- §2 boards folded into a backfill day ------------------ */
 {
   const rows = boardsToScoreRows([
     [{ t: "CCC", s: -4 }, { t: "AAA", s: 7 }],
@@ -114,12 +81,8 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "the two archived board slices merge, deduplicate, sort, and drop the scoreless");
 }
 
-/* ---------- §3 the trace ------------------------------------------ */
 {
-  /* Three sessions, constructed so every distinction has a witness:
-       d1 (boards, pre-epoch): AAA=5,           CCC=0
-       d2 (scores):            AAA=6, BBB=-2,   CCC absent  <- gap after a zero
-       d3 (scores):            AAA=7, BBB=-3 */
+
   const days = [
     { d: "2026-01-03", source: "scores", rows: [{ t: "AAA", s: 7 }, { t: "BBB", s: -3 }] },
     { d: "2026-01-01", source: "boards", rows: [{ t: "AAA", s: 5 }, { t: "CCC", s: 0 }] },
@@ -157,7 +120,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(track.notes, SCORES_NOTES, "the pipeline's own prose rides on the payload");
 }
 
-/* ---------- §4 source precedence ---------------------------------- */
 {
   const track = buildScoreTrack([
     { d: "2026-01-01", source: "scores", rows: [{ t: "AAA", s: 1 }, { t: "BBB", s: 2 }] },
@@ -171,11 +133,10 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(track.names.some((n) => n.t === "BBB"), "and the names only it carries");
 }
 
-/* ---------- §5 the window ----------------------------------------- */
 {
   const many = [];
   for (let i = 1; i <= TRACK_SESSIONS + 8; i++) {
-    const d = "2026-03-" + String(100 + i).slice(1);   // fake but ordered dates
+    const d = "2026-03-" + String(100 + i).slice(1);
     many.push({ d, source: "scores", rows: [{ t: "AAA", s: i }] });
   }
   const track = buildScoreTrack(many);
@@ -187,7 +148,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "with the choice published on the payload, as the identification bar requires");
 }
 
-/* ---------- §6 ordering and the shed ------------------------------ */
 {
   const days = [
     { d: "2026-01-01", source: "scores",
@@ -210,7 +170,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "the real cap leaves headroom over the realistic union of names in a window");
 }
 
-/* ---------- §7 empties are stated, not implied -------------------- */
 {
   const track = buildScoreTrack([]);
   eq(track.status, "empty", "an empty archive reports itself as empty in words");
@@ -222,23 +181,8 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(thin.status, "empty", "but contributes no names, so the trace is still empty");
 }
 
-
-/* ---------- §7 the change layer, and its denominator --------------
-
-   THE DEFECT THIS REPLACES was ten lines in a renderer:
-
-       const measured = name.s.map(isNum).filter(v => v !== null);
-       const delta = measured.at(-1) - measured.at(-2);
-
-   Filtering the nulls out before subtracting throws away the only thing that
-   distinguishes an overnight move from three weeks of drift, and both come
-   out of that expression as the same integer. Every assertion in this section
-   exists to make that expression un-writable again. */
 {
-  /* Six sessions. AAA is scored every one of them. BBB is absent for four in
-     the middle, so its move looks identical to AAA's in score units and took
-     five times as long. CCC holds. DDD arrives today with no history. EEE was
-     scored yesterday and is not scored today. */
+
   const days = [
     { d: "2026-06-01", source: "scores", rows: [
       { t: "AAA", s: 10, q: 100 }, { t: "BBB", s: 5, q: 55 },
@@ -255,8 +199,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   const track = buildScoreTrack(days);
   const by = new Map(track.names.map((n) => [n.t, n]));
 
-  /* THE HEADLINE ASSERTION. Two names moved by exactly the same amount in
-     score units and one of them did it overnight. */
   eq(by.get("AAA").d1.v, 2, "AAA moved two points");
   eq(by.get("AAA").d1.gap, 1, "and it moved them overnight — the gap is one session");
   eq(by.get("BBB").d1.v, 15, "BBB moved fifteen points");
@@ -265,32 +207,18 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
      "replaces would have printed +15 for BBB and +2 for AAA and ranked BBB first, which " +
      "is a ranking of how long a name was absent");
 
-  /* THE ZERO THAT IS A MEASUREMENT. CCC was scored 0 on four sessions. Its
-     change is 0 and it is COMPARABLE — which is a completely different fact
-     from DDD, whose change does not exist. */
   eq(by.get("CCC").d1.v, 0, "a name that held its score has a change of zero");
   eq(by.get("CCC").d1.gap, 1, "measured across one session, so the zero is about last night");
   eq(by.get("DDD").d1, null,
      "while a name with no earlier observation has NO change — null, not zero. These are " +
      "the two readings this whole module exists to keep apart");
-  /* THE FIXTURE ACTUALLY CONTAINS THE CASE IT CLAIMS TO. CCC's series is
-     [0, 0, null, null, 0, 0] — every measured value is a real zero and two
-     sessions are genuine gaps, sitting side by side. A fixture of all zeros
-     would not have proved the guard below; a fixture with no zeros would not
-     have exercised it at all. */
+
   deep(by.get("CCC").s, [0, 0, null, null, 0, 0],
      "the held name's measured values are all real zeros and its gaps are real gaps, " +
      "adjacent to each other, which is the whole confusion this module exists to prevent");
 
-  /* THE GUARD IS ON THE INDEX, NOT THE VALUE. CCC's earlier observation is
-     the number 0, and `prev === null` would have been false for it — but a
-     first draft guarding on the VALUE would have worked here and failed on a
-     name whose first score was 0 and whose second was not. */
   eq(by.get("CCC").n, 4, "CCC was scored four times, every one of them zero");
 
-  /* SATURATION. AAA moved 2 score points on 25 residual units; BBB moved 15
-     score points on 195. The score compresses and the residual does not, and
-     a reader given only the score cannot tell. */
   eq(by.get("AAA").d1.qv, 25, "the residual move rides alongside, unscaled by tanh");
   eq(by.get("BBB").d1.qv, 195, "for both names");
   ok(by.get("AAA").d1.qv / by.get("AAA").d1.v > 12,
@@ -298,8 +226,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(by.get("BBB").d1.qv / by.get("BBB").d1.v < 14,
      "and the two ratios differ, which is the whole reason qv is published");
 
-  /* BOTH ENDS OR NEITHER. A residual differenced against an absent one is a
-     different quantity, not a smaller number. */
   const mixed = buildScoreTrack([
     { d: "2026-07-01", source: "boards", rows: [{ t: "FFF", s: 4 }] },
     { d: "2026-07-02", source: "scores", rows: [{ t: "FFF", s: 9, q: 90 }] },
@@ -311,9 +237,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
      "but NO residual change: the backfilled day carries no residual, and differencing " +
      "against an absent one would publish a number that is not the quantity it names");
 
-  /* THE DENOMINATOR, PUBLISHED. A reader told "two names moved" needs to know
-     whether two is out of three or out of four hundred, and a renderer
-     counting its own visible rows cannot tell them. */
   eq(track.change.session, "2026-06-06", "the change is INTO the latest session, named");
   eq(track.change.prior, "2026-06-05", "against the one before it, also named");
   eq(track.change.comparable, 4, "AAA, BBB, CCC and EEE each have two observations");
@@ -329,8 +252,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(track.change.left, 1, "and one name scored yesterday was not scored today (EEE)");
   eq(track.change.status, "ok", "something moved, so the layer has something to say");
 
-  /* lastAt lets a consumer ask "was this name scored TODAY" without walking
-     42 nulls per name, and is what separates a fresh move from a stale one. */
   eq(by.get("AAA").lastAt, 5, "AAA's last observation is the newest session");
   eq(by.get("EEE").lastAt, 4,
      "EEE's is yesterday's — so EEE HAS a change and it is not a change about today, " +
@@ -338,10 +259,8 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(track.sessions.length, 6, "and the index is into `sessions`, whose length is published");
 }
 
-/* ---------- §8 the three states of the change layer --------------- */
 {
-  /* COLD. One session: nothing has anything to subtract from. This is not
-     "nothing moved" and must not render as it. */
+
   const cold = buildScoreTrack([
     { d: "2026-08-03", source: "scores", rows: [{ t: "AAA", s: 5 }, { t: "BBB", s: -5 }] },
   ]);
@@ -353,8 +272,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(cold.change.session, "2026-08-03", "though the session itself is still named");
   for (const n of cold.names) eq(n.d1, null, `${n.t} has no change on a single-session archive`);
 
-  /* FLAT. Two sessions, everything compared, nothing moved. This IS a reading
-     about the market and gets its own word. */
   const flat = buildScoreTrack([
     { d: "2026-08-03", source: "scores", rows: [{ t: "AAA", s: 5 }, { t: "BBB", s: 0 }] },
     { d: "2026-08-04", source: "scores", rows: [{ t: "AAA", s: 5 }, { t: "BBB", s: 0 }] },
@@ -366,8 +283,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(flat.change.moved, 0, "and neither moved");
   eq(flat.change.held, 2, "so both held");
 
-  /* COLD-BUT-DEEP. Two sessions with no overlapping names: every name is
-     either arriving or leaving and nothing is comparable. */
   const disjoint = buildScoreTrack([
     { d: "2026-08-03", source: "scores", rows: [{ t: "AAA", s: 5 }] },
     { d: "2026-08-04", source: "scores", rows: [{ t: "BBB", s: 7 }] },
@@ -380,10 +295,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(disjoint.change.left, 1, "one departure");
 }
 
-/* ---------- §9 the change is counted before the size cap sheds ----
-   `change` describes the SESSION. Counting it after the shed would make the
-   published totals a function of TRACK_MAX_NAMES, which is a wire constraint
-   and not a fact about the market. */
 {
   const rowsFor = (n, base) => Array.from({ length: n }, (_, i) => ({ t: "T" + i, s: base + i % 7 }));
   const capped = buildScoreTrack([
@@ -401,11 +312,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(capped.change.current, 60, "and all sixty were scored in the latest session");
 }
 
-/* ---------- §10 determinism survives the change layer -------------
-   The dated key is written once per session under an immutability contract,
-   and "written once" only means anything if a re-run produces identical
-   bytes. A change layer computed with any iteration-order dependence would
-   break that silently. */
 {
   const days = [
     { d: "2026-08-03", source: "scores", rows: [{ t: "BBB", s: 3, q: 30 }, { t: "AAA", s: 1, q: 10 }] },
@@ -423,14 +329,13 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
      "a real state, and publishing only the score would call it stillness");
 }
 
-/* ---------- §11 the residual on the archived session row ---------- */
 {
   const rows = scoresRows({
     long: [{ ticker: "AAA", score: 92, residual: 0.0221 }],
     short: [{ ticker: "ZZZ", score: -80, residual: -0.0184 }],
     neutralRows: [
-      { ticker: "MMM", score: 0, residual: 0 },      // a real zero residual
-      { ticker: "NNN", score: 4 },                   // no residual at all
+      { ticker: "MMM", score: 0, residual: 0 },
+      { ticker: "NNN", score: 4 },
     ],
   });
   const by = new Map(rows.map((r) => [r.t, r]));
@@ -446,20 +351,11 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(by.get("NNN").s, 4, "and it keeps its score, which was never in doubt");
 }
 
-
-/* ---------- §12 the crossing: the one move that is an event -------
-
-   Everything else the change layer reports is a magnitude, and a magnitude is
-   a matter of degree. The dead band is the one threshold this product acts
-   on: inside it a name is watch-only and reaches no board, outside it the
-   name is ranked and gets a card. A name that crosses it did not move, it
-   changed category — and until this layer existed, `deadBand` rode on the
-   payload and was used only to shade a strip behind a sparkline. */
 {
   const t = buildScoreTrack([
     { d: "2026-05-01", source: "scores", rows: [
-      { t: "CLR", s: 0 },      // dead centre
-      { t: "EDGE", s: 1 },     // exactly ON the band edge — inside
+      { t: "CLR", s: 0 },
+      { t: "EDGE", s: 1 },
       { t: "FAD", s: 40 },
       { t: "FLP", s: 20 },
       { t: "DRIFT", s: 50 },
@@ -467,7 +363,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     { d: "2026-05-02", source: "scores", rows: [
       { t: "CLR", s: 30 },
       { t: "EDGE", s: 4 },
-      { t: "FAD", s: 1 },      // back to exactly the edge — inside
+      { t: "FAD", s: 1 },
       { t: "FLP", s: -25 },
       { t: "DRIFT", s: 70 },
       { t: "STAY", s: 1 }] },
@@ -492,10 +388,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(by.get("STAY").d1.cross, undefined,
      "and a name that moved from 0 to 1 stayed inside, so nothing happened");
 
-  /* THE EDGE IS INSIDE. `|s| <= band` is the test, matching the pipeline's
-     own partition — a name sitting exactly on the edge is published as
-     watch-only, so treating it as outside here would report a crossing on a
-     name that never changed which surface it appears on. */
   eq(by.get("EDGE").d1.cross, "cleared",
      "a name sitting exactly ON the band edge is INSIDE it, so moving off the edge is a " +
      "crossing — the comparison is |s| <= band, matching the partition that decides " +
@@ -513,10 +405,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(total <= t.change.comparable,
      "no name can cross twice — the three classes are mutually exclusive by construction");
 
-  /* A NULL BAND MEANS NO CLASSIFICATION, NOT A BAND OF ZERO. num() answers 0
-     for an absent field, and a zero-width band would report every name as
-     permanently outside it — the confident zero, landing on the one field
-     whose entire job is to be a threshold. */
   const noBand = buildScoreTrack([
     { d: "2026-05-01", source: "scores", rows: [{ t: "AAA", s: 0 }] },
     { d: "2026-05-02", source: "scores", rows: [{ t: "AAA", s: 9 }] },
@@ -528,8 +416,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(noBand.change.band, null, "and the payload says the band was absent rather than zero");
   eq(noBand.change.crossings.cleared, 0, "so the counts are honestly empty");
 
-  /* A GAPPED CROSSING IS STILL A CROSSING, and still carries its gap. The
-     category changed; it just took a while, and the reader is told. */
   const slow = buildScoreTrack([
     { d: "2026-05-01", source: "scores", rows: [{ t: "SLOW", s: 0 }] },
     { d: "2026-05-02", source: "scores", rows: [] },
@@ -542,13 +428,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
      "weeks are the same event with very different urgency, and only the gap separates them");
 }
 
-
-/* ---------- §13 the run and the window's own extremes -------------
-
-   The payload shipped a 42-by-N matrix with four scalars beside it, and the
-   track page's three orderings were all snapshots of the newest column. A
-   forty-two-session history on which a reader cannot ask which name MOVED is
-   a table of levels wearing a chart's clothes. */
 {
   const mk = (d, rows) => ({ d, source: "scores", rows });
   const t = buildScoreTrack([
@@ -571,9 +450,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
      "centre of the dead band and belongs to neither side, so it ends a run rather " +
      "than extending one. Math.sign(0) is 0 and would have silently agreed with itself");
 
-  /* THE GAP DOES NOT BREAK THE RUN. ZERO was unscored on the second session.
-     A day out of the screener is not evidence of a change of side, and
-     breaking a run on one would make an absent name look like it had turned. */
   const gapped = buildScoreTrack([
     mk("2026-04-01", [{ t: "GAP", s: 8 }]),
     mk("2026-04-02", []),
@@ -585,8 +461,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
      "as a reversal");
   deep(gapped.names[0].s, [8, null, 9], "and the gap is genuinely there in the series");
 
-  /* THE EXTREMES, WITH THEIR SESSIONS. "Highest score in forty-two sessions"
-     stops being something a reader has to eyeball off a sparkline. */
   deep(by.get("HELD").ext, { hi: 12, hiAt: 3, lo: 5, loAt: 0 },
     "the window's high and low come with the session INDEX each happened on, so a " +
     "renderer can name the date from `sessions` rather than inventing one");
@@ -598,20 +472,12 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(by.get("ZERO").ext.lo, 0,
      "and a low of exactly zero is a reading, published as zero rather than dropped");
 
-  /* A NAME WITH NO MEASURED SESSION CANNOT HAVE EXTREMES. It also cannot
-     reach `names` at all, so this asserts the guard rather than the case —
-     which is worth doing because `hiAt < 0` is the only thing standing
-     between an absent extreme and `{hi: null, hiAt: -1}` rendering as a
-     session that never happened. */
   for (const n of t.names) {
     ok(n.ext !== null && n.ext.hiAt >= 0 && n.ext.loAt >= 0,
        `${n.t} reached the payload, so it has at least one measurement and real extremes`);
     ok(n.ext.hi >= n.ext.lo, `${n.t}'s high is not below its low`);
   }
 
-  /* THE RUN AND THE CHANGE ARE DIFFERENT QUESTIONS and a page leading on one
-     must not be able to confuse it with the other. FLIP moved +2 last night
-     on a run of 2; HELD moved +3 on a run of 4. */
   eq(by.get("FLIP").d1.v, 2, "FLIP moved two points overnight");
   eq(by.get("HELD").d1.v, 3, "HELD moved three, so it moved MORE");
   ok(by.get("FLIP").run < by.get("HELD").run,
@@ -619,18 +485,8 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
      "why both are published rather than one standing in for the other");
 }
 
-
-/* ---------- §14 the ceiling that actually binds -------------------
-
-   TRACK_MAX_NAMES is a guess at a byte count expressed as a name count, and
-   the guess was made when a name row was {t, s, n, last}. The row has since
-   grown a change layer, a run length and a pair of window extremes. At the
-   published 42-session window and the two-to-three-hundred names a real union
-   produces, the name cap stopped binding first and the INGEST ROUTE started
-   to — and that failure is a 413 in a log at 05:20 with the whole key missing
-   for the day, not a stated shed on a payload that published. */
 {
-  const FLOWS_MAX_PAYLOAD_BYTES = 128 * 1024;   // the route's own cap
+  const FLOWS_MAX_PAYLOAD_BYTES = 128 * 1024;
   ok(TRACK_MAX_BYTES < FLOWS_MAX_PAYLOAD_BYTES,
      "the body budget sits below the route's cap with room for the envelope, the sessions " +
      "array and the notes, none of which the names block knows about");
@@ -659,22 +515,17 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
      "the shed is counted against what was SEEN, so a reader is told how many names exist " +
      "that they are not being shown rather than which of two ceilings removed them");
 
-  /* THE NAME CAP STILL BINDS WHEN IT IS THE SMALLER ONE. Both ceilings stand;
-     whichever binds first, binds. */
   const capped = buildScoreTrack(days.slice(0, 3), { deadBand: 1, maxNames: 10 });
   eq(capped.names.length, 10, "a name cap below the byte budget still binds");
   eq(capped.shedBy, "names", "and says so, so the reader knows a constant is the constraint");
   eq(capped.namesShed, 390, "with the full shed counted");
 
-  /* AND NEITHER BINDS ON A SMALL ARCHIVE. */
   const easy = buildScoreTrack(days.slice(0, 2), { deadBand: 1 });
   eq(easy.namesShed, 0, "a small archive sheds nothing");
   eq(easy.shedBy, null,
      "and names no ceiling — null rather than a word, because 'nothing was shed' and " +
      "'something was shed by the name cap' must not share a rendering");
 
-  /* THE SHED IS DETERMINISTIC, which is what the once-per-session
-     immutability contract rests on. */
   eq(JSON.stringify(buildScoreTrack(days, { deadBand: 1 })), JSON.stringify(big),
      "the same archive builds byte-identical bytes through the byte shed too — a cumulative " +
      "measurement over a totally ordered list, so a re-run writes what the first run wrote");

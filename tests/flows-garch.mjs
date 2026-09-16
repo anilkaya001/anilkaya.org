@@ -1,5 +1,3 @@
-/* GARCH(1,1)-GED: the fit recovers what generated the series, the density is
-   a density, and the silences are the ones the module promises. */
 import assert from "node:assert/strict";
 import { fitGarch, gedDensity, gedLambda, lnGamma, GARCH_MIN_RETURNS } from "../shared/flows-garch.js";
 
@@ -7,7 +5,6 @@ let n = 0;
 const ok = (c, m) => { assert.ok(c, m); n++; };
 const near = (a, b, tol, m) => { assert.ok(Math.abs(a - b) <= tol, `${m}: ${a} vs ${b} (tol ${tol})`); n++; };
 
-/* ---- the pieces ---- */
 near(lnGamma(5), Math.log(24), 1e-10, "lnGamma(5) = ln 4!");
 near(lnGamma(0.5), Math.log(Math.sqrt(Math.PI)), 1e-10, "lnGamma(1/2) = ln sqrt(pi), through the reflection");
 for (const nu of [0.8, 1.3, 2, 3.5]) {
@@ -19,7 +16,6 @@ for (const nu of [0.8, 1.3, 2, 3.5]) {
 near(gedDensity(0, 2), 1 / Math.sqrt(2 * Math.PI), 1e-9, "GED(2) at zero is the standard normal at zero");
 ok(gedDensity(3, 1.2) > gedDensity(3, 2), "a shape under 2 puts more mass three sd out: heavier tails");
 
-/* ---- recovery on a simulated series with known parameters ---- */
 let seed = 11;
 const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
 const gammaDraw = (a) => {
@@ -58,7 +54,6 @@ near(meanVol, Math.sqrt(TRUE.omega / (1 - TRUE.alpha - TRUE.beta)) * Math.sqrt(2
      "the path's mean is near the true unconditional vol, annualised");
 ok(!("z" in fit) && !("forecast" in fit), "no standardised residuals and no forecast are published");
 
-/* ---- the silences ---- */
 const short = fitGarch(px.slice(0, GARCH_MIN_RETURNS), dates.slice(0, GARCH_MIN_RETURNS));
 ok(short.status === "unavailable" && /needs at least 60/.test(short.reason), "fewer than sixty returns is unavailable with the count");
 const flat = fitGarch(Array(200).fill(50));

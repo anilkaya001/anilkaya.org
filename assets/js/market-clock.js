@@ -1,22 +1,8 @@
-/* =============================================================
-   market-clock.js — live countdown to major stock-market opens.
-
-   Every duration is timezone-independent (a countdown is the same number
-   of minutes anywhere), and each open time is also shown converted to
-   İstanbul (Europe/Istanbul) so a Turkish reader sees exactly when in
-   their own day each market rings the bell. All math is local — Intl time
-   zones, no network, no library — so it costs nothing to run.
-
-   Sessions are treated as one continuous open→close block Mon–Fri; midday
-   breaks (Tokyo, Hong Kong, Shanghai) and market holidays are not modelled,
-   so "Open" is an at-a-glance signal, not a trading feed.
-   ============================================================= */
 (() => {
   "use strict";
   const board = document.getElementById("marketBoard");
   if (!board) return;
 
-  // Bail cleanly if the engine can't resolve IANA zones (very old browsers).
   try {
     new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Istanbul" }).format(0);
   } catch {
@@ -38,7 +24,6 @@
   const TRADING = new Set(["Mon", "Tue", "Wed", "Thu", "Fri"]);
   const DAY_MS = 86400000;
 
-  // Cache one formatter per zone; formatToParts is the hot path.
   const partsFmt = new Map();
   function tzParts(tz, ms) {
     let fmt = partsFmt.get(tz);
@@ -55,14 +40,11 @@
     return o;
   }
 
-  // Offset (ms) of `tz` at instant `ms`: localWallAsUTC − ms.
   function tzOffset(tz, ms) {
     const o = tzParts(tz, ms);
     return Date.UTC(+o.year, +o.month - 1, +o.day, +o.hour, +o.minute, +o.second) - ms;
   }
 
-  // The UTC instant of a wall-clock time (y, mo, d, h, mi) in `tz`. Two passes
-  // settle the fixed point t = wall − offset(t) across DST boundaries.
   function zonedToUtc(tz, y, mo, d, h, mi) {
     const wall = Date.UTC(y, mo - 1, d, h, mi, 0);
     let t = wall - tzOffset(tz, wall);
@@ -73,8 +55,6 @@
   const istHM = new Intl.DateTimeFormat("en-GB", { timeZone: IST, hour: "2-digit", minute: "2-digit", hour12: false });
   const istWeekday = new Intl.DateTimeFormat("en-GB", { timeZone: IST, weekday: "short" });
 
-  // The next open→close block for a market that has not yet ended, scanning
-  // forward over trading days (skips weekends).
   function nextSession(m, nowMs) {
     for (let i = 0; i < 8; i++) {
       const local = tzParts(m.tz, nowMs + i * DAY_MS);
@@ -132,8 +112,6 @@
     }
   }
 
-  // Minute precision, so a 30s cadence keeps every countdown fresh. Pause while
-  // the tab is hidden and resync (with an immediate render) on return.
   let timer = null;
   function start() {
     render();

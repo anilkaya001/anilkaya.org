@@ -1,39 +1,6 @@
-/* =============================================================
-   flows-pulse.js — the market-wide pulse: seven cheap vendor
-   feeds, shaped into one pooled payload.
-
-   WHY ONE KEY. Each feed here is a single market-wide call — the
-   whole panel costs seven vendor calls a run, against a deadline
-   budget measured in hundreds — and every feed is small once
-   capped. Pooling them keeps the worker's key registry flat and
-   gives the page one fetch. The price of pooling is that one
-   feed's failure must not sink the six others, so every feed is
-   shaped independently and carries its own status; the pipeline
-   wraps a fetch failure as {status:"unavailable", reason} without
-   touching its neighbours.
-
-   FIELD PROVENANCE. Shapes follow docs/uw-openapi.yaml (the
-   vendor's own spec, supplied 2026-08-31) — but this repository
-   has caught the documentation wrong five times, and this very
-   spec marks half the OI-change fields "ToBeDone". So every read
-   is defensive (absent-in-absent-out), every feed carries a
-   first-row key dump diagnostic in the pipeline, and nothing
-   below trusts a documented field enough to invent a value where
-   the wire is silent.
-
-   VOCABULARY, PER FEED. The dark pool rows are reported EQUITY
-   TRADES — executions, unlike the option feeds' aggregates — so
-   "trade" is accurate there and the notes say so. What no feed
-   here supports is intent or identity: nothing says who was
-   active, which side initiated, or why, and the notes refuse
-   those claims in words.
-   ============================================================= */
-
 import { parseOptionSymbol } from "./flows-premium.js";
 import { REFRESH_CADENCE_MINUTES } from "./flows-freshness.js";
 
-/* Absent in, absent out — Number(null) is 0 and a confident zero is
-   the house defect. Same idiom as flows-scores.js and flows-alerts.js. */
 const num = (v, d = null) => {
   if (v === null || v === undefined || v === "") return d;
   const n = Number(v);
@@ -42,53 +9,24 @@ const num = (v, d = null) => {
 
 const str = (v) => (typeof v === "string" && v ? v : null);
 
-/* A flag the vendor did not send is NOT false — flows-alerts.js says why. */
 const flag = (v) => (v === null || v === undefined ? null : Boolean(v));
 
-/* The vendor's envelope is ambiguous in its own spec: some routes return a
-   bare array, others nest it under `data`. Both are accepted; anything else
-   is an empty read, not a throw. */
 export const unwrapRows = (raw) => {
   if (Array.isArray(raw)) return raw;
   if (raw && Array.isArray(raw.data)) return raw.data;
   return [];
 };
 
-/* Row caps. Choices, published as `cap` on each feed so a capped list can
-   never be read as the population. */
 export const PULSE_CAPS = Object.freeze({
-  tide: 480,        // a 1-minute session is ~390 points; 5-minute is ~78
-  totals: 20,       // sessions of market-wide volume context
+  tide: 480,
+  totals: 20,
   oiChange: 20,
   netImpact: 20,
-  insiders: 12,     // filing days
+  insiders: 12,
   darkpool: 30,
-  seasonality: 12,  // months — the natural population, capped only in form
+  seasonality: 12,
 });
 
-/* WHAT SURVIVED A CUT, AND THE RULE THAT DECIDED IT.
-
-   These notes ran 38 to 62 words each and the pulse drew seven of them on
-   one screen, under tables that already carry their own column headers.
-   Rendered, the page read as an essay with figures in it. The ask was a
-   clean, dense page; the constraint is flows-overview.js:325, which says a
-   population, a horizon, a unit, a truncation or a NOT-CLAIMED may never be
-   folded away — "folding a withholding is how a caveat unread becomes a
-   caveat deleted".
-
-   Both hold at once, because the length was never the withholding. Each
-   note was two things welded together: a DEFINITION of what the card shows,
-   which its own headers and title already say, and a REFUSAL of what it
-   does not support, which nothing else says anywhere. The definition is
-   gone. Every refusal is here, in fewer words and earlier in the sentence,
-   where a reader who skims still meets it.
-
-   Nothing was moved behind a disclosure and nothing was softened. Checked
-   clause by clause against the originals: the tide's "never a forecast",
-   totals' "who initiated", oiChange's unpublished vendor rule AND its
-   day-late horizon, netImpact's irreproducible definition, insiders'
-   filing-day-not-trading-day, darkpool's reporting-facility-not-a-venue,
-   seasonality's no-claim-about-the-month-ahead, and the whole of refusals. */
 export const PULSE_NOTES = Object.freeze({
   tide:
     "The vendor's own net premium series, carried without cumulation, " +
@@ -121,8 +59,6 @@ export const PULSE_NOTES = Object.freeze({
     "evidence of quiet.",
 });
 
-/* ---------- per-feed shapers ------------------------------------ */
-
 export function shapeTide(raw, { cap = PULSE_CAPS.tide } = {}) {
   const rows = unwrapRows(raw);
   const points = [];
@@ -136,7 +72,7 @@ export function shapeTide(raw, { cap = PULSE_CAPS.tide } = {}) {
     points.push({ t, callPrem, putPrem, vol });
   }
   const seen = points.length;
-  const kept = points.slice(-cap); // a series sheds its OLDEST buckets
+  const kept = points.slice(-cap);
   return {
     status: kept.length ? "ok" : "quiet",
     points: kept, seen, cap, shed: Math.max(0, seen - kept.length),
@@ -171,26 +107,7 @@ export function shapeOiChange(raw, { cap = PULSE_CAPS.oiChange } = {}) {
     const oc = str(r.option_symbol);
     const parsed = oc ? parseOptionSymbol(oc) : null;
     const t = str(r.underlying_symbol) || (parsed ? parsed.ticker : null);
-    /* TWO READINGS, TWO NAMES, BECAUSE THE VENDOR'S ONE NAME IS NOT WHAT IT
-       LOOKS LIKE. `oi_change` reads like a difference and is a RATIO. The
-       vendor's own example settles it twice over (docs/uw-openapi.yaml):
 
-         curr_oi 35207, last_oi 2119  -> oi_change 15.6149..., oi_diff_plain 33088
-         curr_oi 33253, last_oi 27361 -> oi_change  0.2153..., oi_diff_plain  5892
-
-       (35207-2119)/2119 = 15.6149 and (33253-27361)/27361 = 0.2153, so
-       oi_change is (curr-last)/last and oi_diff_plain is the difference in
-       contracts.
-
-       This shaper published oi_change as `change`, and both renderers drew it
-       as a signed integer under a contracts header. A contract whose open
-       interest went 2119 to 35207 printed "+16"; one that grew 21.5% printed
-       "+0" — a measured rise rendered as no change at all.
-
-       THE COUNT IS NOT DERIVED WHEN THE VENDOR OMITS IT. curr-last would give
-       the same number, but then one field would carry two provenances, which
-       is exactly the confusion being fixed. Absent stays absent and the column
-       says so. */
     const ratio = num(r.oi_change);
     const diff = num(r.oi_diff_plain);
     if (!t || (ratio === null && diff === null)) continue;
@@ -203,14 +120,11 @@ export function shapeOiChange(raw, { cap = PULSE_CAPS.oiChange } = {}) {
       currOi: num(r.curr_oi), prevOi: num(r.last_oi),
       vol: num(r.volume), trades: num(r.trades),
       avgPx: num(r.avg_price),
-      /* The vendor's own share-of-total, carried under the vendor's name —
-         recomputing it here would need a total the response does not state. */
+
       pctOfTotal: num(r.percentage_of_total),
     });
   }
-  /* VENDOR ORDER PRESERVED: the ranking is the vendor's selection, exactly
-     as the flow-alerts precedent — re-sorting would claim an ordering rule
-     this payload cannot state. */
+
   const seen = rows.length;
   const kept = rows.slice(0, cap);
   return { status: kept.length ? "ok" : "quiet", rows: kept, seen, cap, shed: seen - kept.length };
@@ -266,7 +180,7 @@ export function shapeDarkpool(raw, { cap = PULSE_CAPS.darkpool } = {}) {
       prem: num(r.premium),
       vol: num(r.volume),
       bid: num(r.nbbo_bid), ask: num(r.nbbo_ask),
-      /* Cancelled is three-state on purpose: an absent field is not a "no". */
+
       canceled: flag(r.canceled),
     });
   }
@@ -289,15 +203,12 @@ export function shapeSeasonality(raw, { cap = PULSE_CAPS.seasonality } = {}) {
       years: num(r.years),
     });
   }
-  /* Months sort onto the calendar — the one list here with a natural total
-     order this payload can state. */
+
   rows.sort((a, b) => a.month - b.month);
   const seen = rows.length;
   const kept = rows.slice(0, cap);
   return { status: kept.length ? "ok" : "quiet", rows: kept, seen, cap, shed: seen - kept.length };
 }
-
-/* ---------- the composite --------------------------------------- */
 
 export const PULSE_FEEDS = Object.freeze([
   "tide", "totals", "oiChange", "netImpact", "insiders", "darkpool", "seasonality",
@@ -309,36 +220,8 @@ const SHAPERS = {
   darkpool: shapeDarkpool, seasonality: shapeSeasonality,
 };
 
-/**
- * Assemble the pooled payload from per-feed raw responses. `raws[feed]`
- * is either the vendor's response or {__failed: "<reason>"} — the caller
- * (pipeline or worker cron) decides what a failure is; this module only
- * makes sure a failed feed publishes a reason instead of vanishing, and
- * that its neighbours are untouched by it.
- */
 export function buildPulse(raws = {}) {
-  /* THE CADENCE RIDES ON THE PAYLOAD, so the browser stops keeping its own copy
-     of it.
 
-     assets/js/flows-market.js decides whether this feed's stamp is still worth
-     believing — "one cadence plus one cadence of slack: a cron that fired late
-     is not yet a cron that stopped firing" — and to do that it needs the number
-     the Worker's cron is actually configured for. It could not import
-     shared/flows-freshness.js, because shared/ is not served to the browser, so
-     it declared its own `var REFRESH_CADENCE_MINUTES = 15` under a comment
-     naming the problem: "this constant mirrors it and this comment is the only
-     link between them. The right end state is the pulse payload carrying its
-     own cadence, which would make this constant deletable."
-
-     This is that end state. A constant duplicated across a boundary with a
-     comment for a link is a constant that will eventually disagree with itself,
-     and the failure is silent in the worst direction: raise the cron to thirty
-     minutes and the page goes on calling a twenty-five-minute-old read stale,
-     which trains a reader to ignore the one banner that tells them the data
-     stopped moving.
-
-     Imported rather than restated here for exactly the same reason — this file
-     is not allowed to be the third copy. */
   const out = { notes: PULSE_NOTES, cadenceMinutes: REFRESH_CADENCE_MINUTES };
   for (const feed of PULSE_FEEDS) {
     const raw = raws[feed];

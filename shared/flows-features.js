@@ -1,45 +1,3 @@
-/* =============================================================
-   flows-features.js — feature engineering and calibration for the
-   Flows options-flow board.
-
-   Pure functions, no I/O, no dependencies. The same module runs in
-   the GitHub Actions pipeline (which does all the real compute) and
-   in Node under tests/flows-features.mjs. It never runs on the
-   request path: the Worker streams a precomputed payload and does
-   no arithmetic at all.
-
-   Two conventions from the Unusual Whales schema are load-bearing
-   and easy to get backwards. Both are asserted by the tests:
-
-     1. put_gamma is reported ALREADY dealer-signed (negative against
-        a positive call_gamma). Total exposure is a SUM, never the
-        textbook difference. Subtracting double-negates and inverts
-        every regime call.
-     2. risk_reversal is IV(put) - IV(call). NEGATIVE is bullish,
-        the opposite of the usual "call IV minus put IV" convention.
-
-   Calibration note. An earlier draft of this system set conviction
-   thresholds as absolute constants and they turned out to be
-   unreachable — every name scored "no view" forever. Everything
-   here is calibrated FROM the observed cross-section instead, so a
-   band is reachable by construction rather than by luck.
-   ============================================================= */
-
-/* ---------- numeric hygiene ------------------------------------ */
-
-/**
- * UW returns numbers as JSON strings. Parse defensively; never NaN out.
- *
- * A BLANK STRING IS AN ABSENT READING, NOT A ZERO. `Number(" ")` is 0,
- * so a whitespace-only field — the vendor's way of writing "no value"
- * on some rows — used to reach every caller as a measured 0 and the
- * empty test above it caught only the zero-length spelling. Trimming
- * before that test sends blanks to `fallback`, which is 0 for the
- * callers that always wanted a number and NaN for the ones that ask
- * for NaN precisely so an absent reading stays absent: an IV rank of
- * "" published as 0 read as the cheapest vol of the year. `Number()`
- * trims on its own, so "  5 " still parses to 5.
- */
 export function num(value, fallback = 0) {
   if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
   if (typeof value !== "string" || value.trim() === "") return fallback;
@@ -48,8 +6,6 @@ export function num(value, fallback = 0) {
 }
 
 const finite = (xs) => xs.filter((x) => Number.isFinite(x));
-
-/* ---------- robust statistics ---------------------------------- */
 
 export function median(values) {
   const xs = finite(values).slice().sort((a, b) => a - b);
@@ -68,12 +24,6 @@ export function quantile(values, p) {
   return xs[lo] + (h - lo) * (xs[hi] - xs[lo]);
 }
 
-/**
- * Median absolute deviation, scaled to be a consistent estimator of
- * sigma for Gaussian data (1 / Phi^-1(0.75) = 1.4826).
- * Options data is fat-tailed enough that mean/stdev is dominated by
- * whichever name printed the largest sweep that session.
- */
 export function mad(values, center) {
   const xs = finite(values);
   if (!xs.length) return NaN;
@@ -81,7 +31,6 @@ export function mad(values, center) {
   return 1.4826 * median(xs.map((x) => Math.abs(x - m)));
 }
 
-/** Clip to the [p, 1-p] quantile band. Clips, never drops. */
 export function winsorize(values, p = 0.01) {
   const lo = quantile(values, p);
   const hi = quantile(values, 1 - p);
@@ -89,46 +38,13 @@ export function winsorize(values, p = 0.01) {
   return values.map((x) => (Number.isFinite(x) ? Math.min(Math.max(x, lo), hi) : x));
 }
 
-/**
- * Robust z via median/MAD. Falls back to a mean/stdev z when the MAD
- * collapses to zero — which happens whenever more than half the
- * cross-section shares one value (a sparse signal where most names
- * are legitimately 0). Without the fallback those signals silently
- * produce Infinity for the few names that do fire.
- */
 export function robustZ(values, { clamp = 3 } = {}) {
   const xs = values.map((v) => (Number.isFinite(v) ? v : NaN));
   const ok = finite(xs);
   if (ok.length < 2) return xs.map(() => 0);
 
   const m = median(ok);
-  /* TWO ROBUST SCALE ESTIMATORS, and the LARGER of them.
-     
-     The MAD collapses on a column that is BIMODAL BY SIGN — which is exactly
-     what a signed-magnitude column is. Once more than half the names share one
-     sign, median(|x - median|) is taken over a set whose own median sits inside
-     the majority cluster, so the estimate measures the spread WITHIN that
-     cluster and not the distance BETWEEN the two. Measured on a column of
-     +-0.5 split 18/6: MAD = 0.0222 against a true spread near 1.0, so every
-     minority name z-scored past the clamp and eleven of twenty-four names on
-     the emitted board printed exactly 93 for family D.
 
-     The interquartile range straddles both clusters and does not collapse.
-     Both are consistent estimators of sigma for Gaussian data — MAD scaled by
-     1.4826, the IQR by 1.349 — so on a well-behaved column they agree and the
-     max changes nothing. On a bimodal one the IQR is the estimate that is
-     still measuring the right thing. Taking the larger can only SHRINK a z,
-     never inflate one, which is the conservative direction.
-
-     The interquartile range straddles both clusters and does not collapse —
-     until the minority falls below a quarter of the board, at which point the
-     quartiles themselves sit inside the majority and it collapses too. An 80/20
-     split still clamped every minority name. So a third, wider span is taken as
-     well: the 10-to-90 range, which straddles any split down to a tenth. All
-     three are consistent estimators of sigma for Gaussian data (MAD scaled by
-     1.4826, the IQR by 1.349, the 10-90 range by 2.563), so on a well-behaved
-     column they agree and the max changes nothing. The extreme tenth on each
-     side is already handled by winsorize before this is called. */
   const span = (lo, hi, c) => {
     const v = (quantile(ok, hi) - quantile(ok, lo)) / c;
     return Number.isFinite(v) ? v : 0;
@@ -150,72 +66,9 @@ function clampTo(x, c) {
   return Math.min(Math.max(x, -c), c);
 }
 
-/**
- * robustZFused — the composed winsorize-then-robust-z, done in two sorts.
- *
- * CONTRACT: for every input, robustZFused(col, { winsor: p, clamp: c }) is
- * elementwise IDENTICAL to robustZ(winsorize(col, p), { clamp: c }). Not
- * "approximately" and not "up to the estimator": the absolute difference is
- * EXACTLY ZERO, down to the last ulp of every quotient. tests/flows-features.mjs
- * asserts that agreement over the degenerate cases as well as the ordinary
- * ones, because a faster answer that is a different answer is not an
- * optimisation, it is a second spelling of the score.
- *
- * THAT CONTRACT HAS ALREADY BEEN BROKEN ONCE, by this function, and the way it
- * broke is the reason to distrust every "obviously equivalent" step below. The
- * first version did not filter non-finite deviations out of the MAD, because
- * the argument "a median only sees the multiset, so order cannot matter" is
- * true and answers the wrong question: median() filters as well as sorts, so
- * the two paths were taking a median of two different POPULATIONS. It published
- * exactly half the right z on the column named in the MAD comment below, and
- * every fixture in the suite agreed anyway. Equivalence here is a measurement,
- * never a reading.
- *
- * THE ONE MEASURED EXCEPTION, stated rather than glossed: the SIGN OF A ZERO.
- * A typed sort orders -0 ahead of +0 while a comparator sort leaves equal
- * values where it found them, so an even-length median can come out -0 here and
- * +0 there, and a name sitting exactly on the centre then reads -0 instead of
- * +0. On a fuzz built to provoke it — 150,510 elements over columns packed with
- * both zeros and heavy ties — 4,463 elements differed that way and NOT ONE
- * differed numerically. -0 === 0 in JavaScript, and every consumer of a z-score
- * compares it, scales it or renders it, so none can tell the two apart. If a
- * caller ever needs Object.is or 1/z on a score, this note is where to start.
- *
- * WHY IT EXISTS. The composed form is expensive in a way that is invisible at
- * the call site. winsorize sorts the column twice, once per quantile. robustZ
- * then sorts it four more times — once for the median, twice for the 0.25/0.75
- * span, twice for the 0.10/0.90 span, sharing nothing — and once more for the
- * MAD's deviation array. Instrumented, exactly EIGHT full sorts and about
- * twenty-three intermediate arrays for ONE column. scoreBoard asks for seven
- * columns per board.
- *
- * WHY NOT THE OBVIOUS SHORTCUT. It is tempting to argue that winsorizing at
- * p = 0.02 only rewrites the extreme ends of the sorted column, that every
- * order statistic robustZ then reads (0.10 through 0.90) sits strictly inside
- * those ends, and therefore that the clip can be skipped for everything except
- * the MAD. That is true at n = 128 and FALSE at small n: at n = 5 the 0.02
- * quantile interpolates between the first two sorted entries and the 0.10
- * quantile reads those same two entries, so the clip moves the 10th percentile
- * and the shortcut would silently produce a different z on any short column —
- * a per-sector regression, a thin session, a test fixture. This clips the
- * sorted buffer in place and reads every quantile back out of the CLIPPED
- * buffer, which is correct at every n and costs one linear pass.
- *
- * The arithmetic below deliberately restates median() and quantile()'s formulas
- * instead of calling them. That duplication is the price of bit-identity: the
- * two are not the same expression at even lengths — median averages the middle
- * pair, quantile interpolates between them — and they disagree in the last ulp.
- * If either of those functions changes, this must change with it, and the
- * agreement assertion in the suite is what will say so.
- */
 export function robustZFused(values, { clamp = 3, winsor = 0.02 } = {}) {
   const N = values.length;
 
-  /* One pass, finite entries only, in ORIGINAL order. The order is not
-     incidental: the mean/stdev fallback below folds left over exactly this
-     sequence, and floating-point addition is not associative, so accumulating
-     over the sorted copy instead would disagree with robustZ in the last bit
-     on precisely the degenerate columns that reach the fallback. */
   const buf = new Float64Array(N);
   let n = 0;
   for (let i = 0; i < N; i++) {
@@ -223,28 +76,11 @@ export function robustZFused(values, { clamp = 3, winsor = 0.02 } = {}) {
     if (Number.isFinite(v)) buf[n++] = v;
   }
 
-  /* Fewer than two measured entries is not a thin cross-section, it is no
-     cross-section: robustZ refuses to invent a scale from one point and emits
-     the neutral vote for every name. This is also the path winsorize takes when
-     it cannot form a quantile at all (zero finite entries), so both of robustZ's
-     early exits collapse into this one.
-
-     Honest about what this line is: a FAST PATH and a statement of intent, not
-     a correctness gate. A single point has no spread, so the arithmetic below
-     would collapse every estimator, fall through the mean/stdev branch with a
-     variance of zero, and return the same all-zeros array by a longer road.
-     Mutating the bound to `n < 1` was checked and the suite stayed green,
-     because the two really are the same answer. It stays because "one name is
-     not a cross-section" is a claim worth making where a reader can see it. */
   if (n < 2) return new Array(N).fill(0);
 
   const sorted = buf.slice(0, n);
-  sorted.sort();   // Float64Array sorts numerically by default; no comparator, no boxing.
+  sorted.sort();
 
-  /* Index-interpolating quantile over the sorted buffer — quantile()'s own
-     formula, reading a typed array instead of re-filtering and re-sorting.
-     Every call is now O(1). n >= 2 here, so quantile's single-element branch
-     cannot be reached. */
   const qs = (p) => {
     const h = (n - 1) * Math.min(Math.max(p, 0), 1);
     const lo = Math.floor(h);
@@ -254,78 +90,17 @@ export function robustZFused(values, { clamp = 3, winsor = 0.02 } = {}) {
 
   const wlo = qs(winsor);
   const whi = qs(1 - winsor);
-  /* winsorize returns the column UNCLIPPED when either bound is non-finite,
-     which an interpolation between two enormous opposite-signed entries can
-     genuinely produce. Reproduce that rather than clipping to Infinity.
 
-     THIS GUARD IS BEHAVIOURAL, and an earlier comment here claimed the
-     opposite — that a bound can only go non-finite on a column that also
-     overflows the MAD and the stdev, so both paths return the neutral vote
-     either way and the guard is mere symmetry with winsorize. That was wrong,
-     and it was wrong in the direction that gets a guard deleted. A bound goes
-     non-finite when two ADJACENT sorted entries differ by more than MAX_VALUE,
-     which says nothing about the OTHER end of the column: on
-     [-MAX_VALUE, -1.7e308, 1e308] the lower bound is finite and the upper one
-     overflows, so winsorize refuses the clip entirely while a guard-less
-     version clips the bottom entry up to a finite floor and scores it
-     differently. Replacing the test with a constant `true` was measured against
-     the composed form over every column of length 2, 3 and 4 drawable from
-     twelve extreme magnitudes at four winsor levels: 92 of 7,228 diverge. The
-     suite carries one of them. */
   const clipping = Number.isFinite(wlo) && Number.isFinite(whi);
   if (clipping) {
-    /* Math.min(Math.max(x, lo), hi), not a two-armed comparison: when a caller
-       passes winsor > 0.5 the bounds invert and those two expressions differ
-       (the composed form collapses the column onto hi). Bit-identity means
-       reproducing the odd case too, not only the sensible one. Clamping is
-       monotone, so the sorted buffer stays sorted. */
+
     for (let i = 0; i < n; i++) sorted[i] = Math.min(Math.max(sorted[i], wlo), whi);
     for (let i = 0; i < n; i++) buf[i] = Math.min(Math.max(buf[i], wlo), whi);
   }
 
-  /* median(), verbatim: the middle entry at odd length, the average of the
-     middle pair at even length. NOT qs(0.5) — see the note above. */
   const mid = n >> 1;
   const m = n % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 
-  /* The MAD's deviations are taken over the clipped values. Their ORDER is
-     irrelevant — a median only sees the multiset — so they are read out of
-     buf and sorted once. Their POPULATION is not irrelevant, and reading only
-     the sentence above is how this function shipped wrong; the next paragraph
-     is the part that matters.
-
-     THE NON-FINITE DEVIATIONS ARE DROPPED, and that line is the whole reason
-     this block is not two lines shorter. mad() hands its deviation array to
-     median(), and median() opens with finite() — it FILTERS before it sorts.
-     A deviation is non-finite only by overflow (|x - m| above MAX_VALUE on a
-     column whose entries straddle zero at ~1e308), but when one does overflow
-     the composed form takes the median of the SURVIVORS while a version that
-     kept the Infinities takes the median of a larger population, at a
-     different index. That is not an ulp and not the sign of a zero: on
-     [-1.797e308, -1.7e308, 1e307] the deviations are [9.7e306, 0, Infinity],
-     the composed MAD is the mean of the two finite ones (4.85e306) and the
-     unfiltered one is the middle of three (9.7e306) — exactly double, so the
-     published z came out exactly HALF (-0.674 against -1.349).
-
-     The first version of this function did not filter. Every fixture in the
-     suite agreed anyway, including the three written specifically for
-     overflow, because they all overflow the winsor BOUND — which makes the
-     clip refuse and lands both paths on the neutral vote — and none of them
-     produced a finite bound with an overflowing deviation underneath it. The
-     suite now carries that column. `dn` is the survivor count and it is what
-     the median indexes; when nothing survives it is 0, madScale is NaN, and
-     Math.max propagates the NaN into the mean/stdev fallback, which is
-     precisely what median([]) === NaN does to mad() in the composed form.
-
-     THE `dn === 0` ARM IS AN EQUIVALENT MUTANT and is written down as one
-     rather than defended: an out-of-range read on a typed array is `undefined`,
-     so `(undefined + undefined) / 2` is already NaN and deleting the arm keeps
-     every answer. It stays because "no deviation survived" is a state worth
-     naming where a reader can see it, not because a fixture can tell. The
-     column that reaches it — two entries of 1.7e308, whose even-length median
-     overflows before it is halved, so the centre is Infinity and nothing is a
-     finite distance from it — is in the suite regardless, because the STATE has
-     to be reachable even where the branch is not observable. */
   const devs = new Float64Array(n);
   let dn = 0;
   for (let i = 0; i < n; i++) {
@@ -343,10 +118,7 @@ export function robustZFused(values, { clamp = 3, winsor = 0.02 } = {}) {
     const v = (qs(hi) - qs(lo)) / c;
     return Number.isFinite(v) ? v : 0;
   };
-  /* The same three-estimator maximum robustZ documents at length: the MAD
-     collapses on a column that is bimodal by sign, the IQR collapses once the
-     minority falls below a quarter, the 10-90 range survives down to a tenth.
-     Taking the largest can only shrink a z. */
+
   let scale = Math.max(madScale, span(0.25, 0.75, 1.349), span(0.10, 0.90, 2.563));
   let center = m;
 
@@ -361,9 +133,6 @@ export function robustZFused(values, { clamp = 3, winsor = 0.02 } = {}) {
     center = mean;
   }
 
-  /* A plain Array, not the typed buffer: robustZ returns one and callers
-     .map/.filter over the result. Handing back a Float64Array would change the
-     type of every downstream derivation for a saving of nothing. */
   const out = new Array(N);
   for (let i = 0; i < N; i++) {
     const v = values[i];
@@ -374,12 +143,6 @@ export function robustZFused(values, { clamp = 3, winsor = 0.02 } = {}) {
   return out;
 }
 
-/* ---------- rank → inverse normal ------------------------------ */
-
-/**
- * Acklam's rational approximation of the standard normal quantile.
- * Absolute relative error < 1.15e-9 across (0,1).
- */
 export function invNorm(p) {
   if (!(p > 0 && p < 1)) return NaN;
   const a = [-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02,
@@ -407,12 +170,6 @@ export function invNorm(p) {
          (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1);
 }
 
-/**
- * Van der Waerden transform: rank, then map to the normal quantile.
- * Makes heterogeneous families commensurable without assuming any of
- * them is remotely Gaussian. Ties take their average rank so that a
- * block of identical values cannot be ordered by array position.
- */
 export function vanDerWaerden(values) {
   const n = values.length;
   if (!n) return [];
@@ -427,7 +184,7 @@ export function vanDerWaerden(values) {
   while (i < m) {
     let j = i;
     while (j + 1 < m && idx[j + 1][0] === idx[i][0]) j++;
-    const avgRank = (i + j) / 2 + 1;            // 1-based, ties averaged
+    const avgRank = (i + j) / 2 + 1;
     const z = invNorm(avgRank / (m + 1));
     for (let k = i; k <= j; k++) out[idx[k][1]] = z;
     i = j + 1;
@@ -435,19 +192,6 @@ export function vanDerWaerden(values) {
   return out;
 }
 
-/* ---------- cross-sectional neutralization --------------------- */
-
-/**
- * Residualize y against an intercept, a set of numeric controls, and
- * sector dummies, by ordinary least squares solved with Gaussian
- * elimination on the normal equations. Deliberately lowers raw IC:
- * it removes a genuine but untradeable sector-momentum effect so the
- * board ranks names against their own peer group rather than
- * rediscovering "semis were strong today" eleven times.
- *
- * Ridge term keeps a rank-deficient design (a sector with one member,
- * a constant control) from blowing up.
- */
 export function neutralize(y, { numeric = [], groups = [], ridge = 1e-8, minGroup = 3 } = {}) {
   const n = y.length;
   if (!n) return [];
@@ -458,34 +202,20 @@ export function neutralize(y, { numeric = [], groups = [], ridge = 1e-8, minGrou
     cols.push(c.map((v) => (Number.isFinite(v) ? v : 0)));
   }
   if (groups.length === n) {
-    /* Levels below minGroup members are pooled into the reference bucket
-       rather than given their own dummy.
 
-       Drop-first coding hands a single-member level an indicator that is
-       nonzero for exactly one observation, and OLS then has a free coefficient
-       affecting only that row -- so it drives that row's residual to zero and
-       deletes the name's entire signal, whatever it was. The ridge does not
-       restrain this: for a singleton column the XtX diagonal is 1, which is
-       eight orders of magnitude above a 1e-8 ridge. Measured before the fix: a
-       lone-sector name carrying the strongest raw signal on a 48-name board
-       (y = 5.0 against everyone else inside [-1, 1]) came out with a residual
-       of 5e-8 while the rest reached 0.85, and ranked 22nd of 48.
-
-       Pooling is the conservative choice: a name in a thin sector is compared
-       against the board's baseline instead of against itself. */
     const counts = new Map();
     for (const g of groups) {
       if (g == null || g === "") continue;
       counts.set(g, (counts.get(g) || 0) + 1);
     }
     const levels = [...counts.keys()].filter((lv) => counts.get(lv) >= minGroup).sort();
-    // drop-first coding: the intercept absorbs the reference level
+
     for (const lv of levels.slice(1)) cols.push(groups.map((g) => (g === lv ? 1 : 0)));
   }
 
   const p = cols.length;
   const target = y.map((v) => (Number.isFinite(v) ? v : 0));
-  if (p >= n) return target.slice();          // nothing left to estimate
+  if (p >= n) return target.slice();
 
   const XtX = Array.from({ length: p }, () => new Array(p).fill(0));
   const Xty = new Array(p).fill(0);
@@ -531,78 +261,8 @@ function solveSymmetric(A, b) {
   return M.map((row) => row[n]);
 }
 
-/* =============================================================
-   The six measures. Each takes raw UW response shapes and returns
-   a plain number (or a small record), with no cross-sectional
-   context — normalization happens later, over the whole universe.
-   ============================================================= */
-
-/**
- * greekFlowTotals — every accumulator the greek-flow tape yields, in ONE pass.
- *
- * WHAT WAS WRONG BEFORE. flowPurity walked the rows summing dirNet, dirAbs and
- * a local it called `tot`; positioningQuality walked the SAME rows summing
- * dirNet, dirAbs, otmAbs, vega and a local it called `delta`. `tot` and `delta`
- * were the same quantity — Sigma|total_delta_flow| — under two names, in two
- * loops, in one file whose header opens by saying its conventions are
- * "load-bearing and easy to get backwards". Two independently maintained
- * spellings of one number is the shape a drift takes before it is a bug: change
- * the guard on one (a floor, an absolute, a null instead of a zero) and the
- * other keeps the old meaning silently, and the two ratios stop sharing a
- * denominator without anything failing. The pipeline calls both functions back
- * to back on the same array, so the second pass was also pure waste.
- *
- * Every field is a GROSS sum except dirNet, which is the one deliberately
- * signed accumulator (it answers "which way", not "how much"). Units are
- * vendor dollars of delta/vega flow throughout; `rows` is a count, not a ratio,
- * and is here so a caller can say "measured over N rows" rather than implying a
- * measurement it did not make.
- *
- * `rows === 0` IS NOT A SILENCE ON ITS OWN, and an earlier version of this
- * comment said it was ("absence at the TOTAL level is rows === 0"). It is two
- * different silences wearing one number: a tape that was published and had no
- * prints in it, and a tape that was never published or came back unreadable.
- * This file's house rule gives those separate prose and separate data-empty
- * tags, so the record carries `silence` beside the count:
- *
- *     null          — prints were measured; rows is that count
- *     "quiet"       — an array arrived and it was empty
- *     "unavailable" — no array arrived at all (null, undefined, a bad shape)
- *
- * A caller that renders a totals record can map that field straight onto
- * data-empty and write the sentence that names which payload was missing. It
- * exists BEFORE a consumer needs it precisely so the first consumer does not
- * have to invent a generic "no data" out of a zero.
- *
- * num() floors an unparseable field at 0 rather than NaN, which is correct
- * here and only here: this is a SUM over a tape, and one unreadable row must
- * not poison the total. Absence at the ROW level is the vendor's silence about
- * one print; both callers test their denominator before dividing rather than
- * trusting a zero.
- *
- * PASS THE RECORD IN WHEN YOU CALL BOTH, and the reason is arithmetic rather
- * than a benchmark. flowPurity needs three of these five sums and
- * positioningQuality needs all five. Before this function there were two loops
- * costing 3 + 5 accumulator updates per row; a caller that lets each function
- * build its own record now pays 5 + 5, which is SLOWER than what it replaced;
- * a caller that builds the record once and hands it to both pays 5. Those
- * counts are the durable claim. A benchmark over 400 rows on one machine
- * reproduced the direction — unshared about a quarter slower than the old pair,
- * shared about forty per cent faster — but an earlier draft of this comment
- * quoted the absolute milliseconds too, and they were six times the figure the
- * same benchmark gives on other hardware. Ratios of accumulator counts travel;
- * millisecond readings do not, so they are not written down here.
- *
- * Both entry points therefore take a precomputed `totals`. The correctness
- * argument above stands either way; this note is here so the cheap call is also
- * the obvious one. In absolute terms every one of these numbers is noise
- * against a pipeline run measured in hundreds of seconds — the point is that
- * the unshared spelling is the wrong DIRECTION, not that it is expensive.
- */
 export function greekFlowTotals(greekFlowRows) {
-  /* Tested BEFORE the loop, not inferred from the count after it: `|| []`
-     below makes a missing tape and an empty one iterate identically, which is
-     the whole reason the count alone cannot tell them apart. */
+
   const published = Array.isArray(greekFlowRows);
   let dirNet = 0, dirAbs = 0, otmAbs = 0, vegaAbs = 0, totalAbs = 0, rows = 0;
   for (const r of published ? greekFlowRows : []) {
@@ -620,92 +280,33 @@ export function greekFlowTotals(greekFlowRows) {
   };
 }
 
-/**
- * The one place that decides whether a caller's `totals` argument is a totals
- * record. Both measures below take one, and both must refuse the same things.
- *
- * WHY THIS IS NOT `totals || greekFlowTotals(rows)`. That form tests
- * TRUTHINESS, and every object is truthy — including the option bag
- * positioningQuality takes. `flowPurity(rows, { totals: t })` is exactly the
- * mistake a reader makes after seeing `positioningQuality(rows, { totals: t })`
- * on the line below it, and under a truthiness test it does not throw and does
- * not warn: `t.totalAbs` is undefined, `undefined <= 0` is false, the guard
- * falls through, and every ratio comes out NaN. NaN serialises to null, so the
- * page would then print "unmeasured" over a tape it had measured perfectly —
- * this repository's oldest defect (absence coerced instead of tested) reappearing
- * one level up, in a function argument instead of a vendor field.
- *
- * So the field the callers actually divide by is tested for presence FIRST, the
- * sibling's option-bag spelling is accepted as well, and anything else is
- * recomputed from the rows. Recomputing is always the right answer and only
- * ever costs one pass; a NaN would have been the wrong answer forever.
- */
 function resolveTotals(greekFlowRows, given) {
   if (given && Number.isFinite(given.totalAbs)) return given;
   if (given && given.totals && Number.isFinite(given.totals.totalAbs)) return given.totals;
   return greekFlowTotals(greekFlowRows);
 }
 
-/**
- * Pi — Flow Purity.  |dir_delta_flow| / |total_delta_flow|
- *
- * The single hardest problem in options flow is that most large
- * prints are spreads, collars and delta-hedged packages wearing a
- * directional costume. The conventional fix clusters same-millisecond
- * prints and guesses at the structure. UW already separates the
- * directional component, so this measures what others estimate.
- *
- * 1 = clean directional conviction. 0 = the premium headline is hedging.
- */
 export function flowPurity(greekFlowRows, totals = null) {
-  /* `totals` accepts the record itself or its sibling's `{ totals }` bag — see
-     resolveTotals for why a bare truthiness test was not safe here. */
+
   const t = resolveTotals(greekFlowRows, totals);
   if (t.totalAbs <= 0) {
     return { purity: null, dirDelta: 0, dirAbs: 0, dirShare: null, totalAbs: 0 };
   }
-  /* GROSS over GROSS. The old form was |SUM dir| / SUM |total|: a net divided
-     by a gross, so two different cancellations fought each other and the
-     result measured sign-persistence as much as directionality. On the live
-     board that produced 0.003-0.008 on names whose flow was overwhelmingly
-     directional — the numerator had cancelled, not the signal.
 
-     |dir_delta_flow| <= |total_delta_flow| holds row by row, so SUM|dir| /
-     SUM|total| is bounded in [0,1] BY CONSTRUCTION and Math.min is a guard
-     against float error rather than the operative clamp. Sign-persistence is
-     measured separately and honestly by pathSignature. */
   return {
     purity: Math.min(1, t.dirAbs / t.totalAbs),
     dirDelta: t.dirNet,
     dirAbs: t.dirAbs,
-    // Signed, unit-free directional share. This — not the raw dollar delta —
-    // is what a cross-section can compare: the raw figure scales with the
-    // name's size, so z-scoring it ranks market caps.
+
     dirShare: Math.max(-1, Math.min(1, t.dirNet / t.totalAbs)),
     totalAbs: t.totalAbs,
   };
 }
 
-/**
- * Gamma_a — Aggressor-Conditioned Dealer Gamma, per strike.
- *
- * Public GEX assumes a fixed customer posture (long calls, short puts)
- * and infers dealer positioning from open interest. The *_ask/*_bid
- * fields are dealer-signed AND split by who initiated, so this
- * measures the posture instead of assuming it.
- *
- * Returns the strike ladder with cumulative dealer gamma, plus the
- * interpolated zero crossing: a measured gamma flip.
- */
 export function aggressorGamma(strikeRows, { spot = null, materiality = 0.02 } = {}) {
   const ladder = (strikeRows || [])
     .map((r) => {
-      /* A ROW WITH NO MEASURED LEGS IS NOT A MEASURED ZERO. num() defaults to
-         0, so a strike carrying none of the four aggressor fields used to enter
-         the ladder as a rung of exactly zero gamma — and the card's
-         buildGammaProfile, which applies this same present-legs test, dropped
-         it. One card therefore carried two different bands: the chart's, and
-         the sentence underneath it quoting the features'. */
+
       const legs = [r.call_gamma_ask, r.call_gamma_bid, r.put_gamma_ask, r.put_gamma_bid];
       const present = legs.some((v) => v !== null && v !== undefined && v !== "");
       return {
@@ -732,69 +333,17 @@ export function aggressorGamma(strikeRows, { spot = null, materiality = 0.02 } =
     peak,
     crossings,
     flip: chosen ? chosen.strike : null,
-    /* Which side of the flip the dealers are SHORT on, read from the DOMINANT
-       BOOK below the crossing rather than from the sign of the one rung beside
-       it. The card renders this as a statement about everything below the
-       level — "dealers are short gamma below X" — and on the pipeline's own
-       emitted ladders the adjacent rung disagreed with the book it stood in
-       front of on two of the published crossings. */
+
     flipSide: chosen ? chosen.side : null,
-    /* HOW MUCH BOOK THE CHOSEN CROSSING ACTUALLY SEPARATES, as a share of the
-       ladder's peak |cumulative|. This is the number that says whether a flip
-       is a regime boundary or a technicality: on the live INTC ladder the sign
-       genuinely changes at 86.10, but the long-gamma side carries under 5% of
-       the book, and a reader told only "the flip is 86.10" would size against a
-       boundary that is barely there. Published so the card can qualify it. */
+
     flipSeparation: chosen ? chosen.separation : null,
-    /* Dealer gamma AT SPOT as a share of the ladder's largest |cumulative|.
-       Unit-free, so it is comparable across a $35 name and a $900 one, and it
-       answers the question the flip was being used as a proxy for: are dealers
-       short gamma where the stock is actually trading? Negative = short =
-       hedging amplifies moves. */
+
     spotGammaShare: spotGammaShare(ladder, spot, peak),
     bandMin: ladder.length ? ladder[0].strike : null,
     bandMax: ladder.length ? ladder[ladder.length - 1].strike : null,
   };
 }
 
-/**
- * EVERY zero crossing of the cumulative dealer gamma that separates a material
- * book of EACH SIGN, scored by how much book it separates.
- *
- * Four things made the naive "first sign change scanning up from the bottom"
- * wrong, and the first three were live on the published board:
- *
- *   1. `cum` opens at the first rung's OWN gamma, so a rung with no measured
- *      aggressor gamma has cum === 0 exactly, and an `if (a.cum === 0) return
- *      a.strike` short-circuit published the bottom of the band — roughly
- *      -30% from spot — as a measured gamma flip.
- *   2. Scanning upward and returning the FIRST crossing is biased by
- *      construction: |cum| starts near zero and ends at |netGamma|, so a sign
- *      change is nearly free at the bottom of the ladder and costs a whole
- *      book at the top. Twelve of thirty-four live names sat within 4% of the
- *      band floor.
- *   3. A crossing between two rungs that each carry a negligible share of the
- *      book is float noise, not a regime boundary.
- *   4. And the fix for (3) has its own trap. Asserting materiality on the two
- *      rungs ADJACENT to the crossing is exactly backwards — a clean crossing
- *      passes through zero, so its immediate shoulders are small by definition
- *      — but asserting it on running maxima that still INCLUDE those shoulders
- *      is not the documented rule either, and on the real INTC ladder the sole
- *      surviving crossing cleared a 10% floor on the strength of its own
- *      shoulder while the book it separated carried 4.8%.
- *
- * So the windows are STRICTLY outside the crossing, and the test is not on
- * magnitude alone: the dominant book below and the dominant book above must
- * carry OPPOSITE SIGNS, which is what "the regime changes here" means. A
- * crossing between two same-signed books is a wobble, however large the
- * numbers on either side of it.
- *
- * `separation` is min(|dominant below|, |dominant above|) over peak: the
- * thinner of the two regimes the crossing divides. `materiality` is a NOISE
- * FLOOR on that quantity and nothing more — the strength of a boundary is
- * reported rather than thresholded, because a 5% side is a real but weak
- * boundary and a binary gate would either hide it or dress it up.
- */
 export function gammaCrossings(ladder, { materiality = 0.02 } = {}) {
   const rows = ladder || [];
   const n = rows.length;
@@ -803,28 +352,12 @@ export function gammaCrossings(ladder, { materiality = 0.02 } = {}) {
   for (const r of rows) peak = Math.max(peak, Math.abs(r.cum));
   if (!(peak > 0)) return [];
 
-  /* THE LADDER IS A SEQUENCE OF RUNS — maximal stretches over which the
-     cumulative holds one sign — and a crossing is the boundary between two
-     adjacent runs. That framing is what makes "how much book does this
-     crossing separate" a LOCAL question with a different answer per crossing.
-     A running maximum over everything below and everything above is global, so
-     it hands every crossing in one book the same score and cannot tell a
-     regime boundary from a wobble sitting between two large books.
-
-     Measured on the case that motivated this: a cumulative of
-     -100, -60, -2, +1, -2, -50, +100, +120 (millions) has three crossings. All
-     three score identically under global windows. Under runs, the two around
-     the +1 blip score 0.8% and the real boundary between -50 and +100 scores
-     41.7%. With spot inside the blip, the global version published the blip —
-     and inverted the regime sentence with it, because the blip's sides are the
-     opposite way round from the book's. */
   const runs = [];
   let sign = 0, extreme = 0, startIdx = 0;
   for (let i = 0; i < n; i++) {
     const c = rows[i].cum;
     const sgn = Math.sign(c);
-    // A cumulative that touches exactly zero and returns to its own sign is
-    // not a crossing; a zero rung belongs to whatever run surrounds it.
+
     if (sgn === 0) { extreme = Math.abs(c) > Math.abs(extreme) ? c : extreme; continue; }
     if (sign === 0) { sign = sgn; extreme = c; startIdx = i; continue; }
     if (sgn === sign) { if (Math.abs(c) > Math.abs(extreme)) extreme = c; continue; }
@@ -838,16 +371,10 @@ export function gammaCrossings(ladder, { materiality = 0.02 } = {}) {
   const out = [];
   for (let k = 1; k < runs.length; k++) {
     const lo = runs[k - 1], hi = runs[k];
-    /* `separation` is the THINNER of the two regimes the crossing divides.
-       materiality is a NOISE FLOOR on it and nothing more: the strength of a
-       boundary is reported rather than thresholded, because a 5% side is a
-       real but weak boundary — the live INTC book is exactly that — and a
-       binary gate would either hide it or dress it up as a strong one. */
+
     const separation = Math.min(Math.abs(lo.extreme), Math.abs(hi.extreme));
     if (!(separation >= floor)) continue;
 
-    // The crossing sits between the last rung of the low run and the first of
-    // the high run; interpolate across whatever lies between them.
     const a = rows[lo.to], b = rows[hi.from];
     const span = Math.abs(a.cum) + Math.abs(b.cum);
     const strike = span > 0
@@ -855,8 +382,7 @@ export function gammaCrossings(ladder, { materiality = 0.02 } = {}) {
       : a.strike;
     out.push({
       strike,
-      // The side is a statement about the RUN below, which is what the card's
-      // sentence is about — not about the sign of the single rung beside it.
+
       side: lo.sign < 0 ? "short_below" : "long_below",
       separation: separation / peak,
     });
@@ -864,16 +390,6 @@ export function gammaCrossings(ladder, { materiality = 0.02 } = {}) {
   return out;
 }
 
-/**
- * The crossing that separates the most book — that is the gamma flip.
- *
- * Distance to spot only breaks ties. Ranking by proximity instead was its own
- * failure: because the windows are non-local, a sign change inside a near-zero
- * region between two large books passes the materiality test, and when spot
- * sits inside that region the published flip is the wobble rather than the
- * boundary four points away — with the regime sentence inverted, because the
- * wobble's sides are the opposite way round from the book's.
- */
 function pickCrossing(crossings, spot) {
   if (!crossings || !crossings.length) return null;
   let best = crossings[0];
@@ -885,15 +401,6 @@ function pickCrossing(crossings, spot) {
   return best;
 }
 
-/**
- * Cumulative dealer gamma interpolated at spot, as a share of peak |cum|.
- *
- * null — never an edge value — when spot lies outside the measured band or the
- * ladder is too short to interpolate across. Clamping to the edge rung returned
- * a confident +-1 for a stock trading nowhere near the strikes on file, and the
- * SIGN of that number is what the card prints as its "short Γ" / "long Γ" badge
- * and what the quality gate reads as the amplification axis.
- */
 function spotGammaShare(ladder, spot, peak) {
   if (ladder.length < 3 || !(spot > 0) || !(peak > 0)) return null;
   const first = ladder[0], last = ladder[ladder.length - 1];
@@ -909,28 +416,11 @@ function spotGammaShare(ladder, spot, peak) {
   return last.cum / peak;
 }
 
-/**
- * Backwards-compatible single-value flip. Prefer aggressorGamma(), which
- * returns the crossing set, the side, the separation and the spot-relative
- * regime together.
- */
 export function gammaFlip(ladder, { spot = null, ...opts } = {}) {
   const chosen = pickCrossing(gammaCrossings(ladder, opts), spot);
   return chosen ? chosen.strike : null;
 }
 
-/**
- * D — Dealer Book Displacement.
- *
- * *_oi is the standing book; *_vol is what traded today. Compared as
- * DISTRIBUTIONS rather than totals: the gap between their gamma
- * centroids, in ATR units. Large |D| means today's flow is building
- * gamma where the book is not, so the hedging profile is about to
- * change shape. Conventional GEX describes the regime you are in;
- * this says the regime is moving, and which way.
- *
- * Sign: positive = new gamma is accumulating ABOVE the standing book.
- */
 export function bookDisplacement(strikeRows, atr) {
   const centroid = (pick) => {
     let wsum = 0, wx = 0;
@@ -951,23 +441,10 @@ export function bookDisplacement(strikeRows, atr) {
     displacement: (vol.c - oi.c) / atr,
     oiCentroid: oi.c,
     volCentroid: vol.c,
-    weight: vol.w,                 // gate on this: a thin tape makes the centroid a one-print artefact
+    weight: vol.w,
   };
 }
 
-/**
- * Psi — Intraday Delta Path Signature, from net-prem-ticks minute bars.
- *
- * Two names with the same end-of-day net delta and different paths
- * mean opposite things. Steady accumulation against the tape is
- * someone working a large order; one spike is a news reaction already
- * in the price. Most feeds publish only the daily total, so the shape
- * is unused information.
- *
- *   persistence   share of minutes moving with the day's net direction
- *   concentration share of absolute movement from the busiest 5% of minutes
- *   centroid      volume-weighted mean minute, 0..1 across the session
- */
 export function pathSignature(tickRows) {
   const rows = (tickRows || [])
     .map((r) => ({ t: Date.parse(r.tape_time), d: num(r.net_delta) }))
@@ -975,17 +452,6 @@ export function pathSignature(tickRows) {
     .sort((a, b) => a.t - b.t);
   if (rows.length < 3) return { persistence: 0, concentration: 0, centroid: 0.5, net: 0, bars: rows.length };
 
-  /* Each row of /net-prem-ticks is that TICK's own value, not a running total.
-     The vendor defines every sibling field per-tick — net_call_premium is
-     "(call premium ask side) - (call premium bid side)" for the tick, and
-     tape_time is "the start time of the tick" — so net_delta is the minute's
-     net delta, and the increments ARE the rows.
-
-     Differencing them, as this did, measured the second difference of the true
-     signal. A buyer working a steady order at +900 per minute for 390 minutes
-     has net +351,000 and persistence 1.0; differencing gave net = (last minute
-     - first minute) ~ 0, so the direction was a coin flip and every downstream
-     path measure was noise. */
   const steps = rows.map((r) => r.d);
   const net = steps.reduce((a, b) => a + b, 0);
   const dir = Math.sign(net) || 1;
@@ -1011,55 +477,12 @@ export function pathSignature(tickRows) {
   return { persistence, concentration, centroid, net, bars: rows.length };
 }
 
-/* THE EXPIRY GAMMA LEGS ARE NAMED `call_gex` / `put_gex` ON THE WIRE.
- *
- * The vendor's field list for /greek-exposure/expiry documents `call_gamma`
- * and `put_gamma`. A dated probe against AAPL returned neither -- it returned
- * 23 rows carrying `call_gex=175414.5369  put_gex=-83920.3551`. Every card
- * shipped with the gamma roll-off panel reading "unavailable: no expiry gamma"
- * because the readers asked for the documented names and got undefined.
- *
- * Both are accepted, wire name first: the live response is evidence and the
- * field list is a claim, but a vendor that renamed once can rename back, and
- * falling back costs one `??`.
- *
- * The put leg arrives ALREADY dealer-signed under either name -- put_gex is
- * negative against a positive call_gex above -- so callers still SUM the
- * magnitudes for a gross figure. */
 export function callGammaLeg(row) {
   return row ? (row.call_gex ?? row.call_gamma) : undefined;
 }
 export function putGammaLeg(row) {
   return row ? (row.put_gex ?? row.put_gamma) : undefined;
 }
-
-/* ---------- the second-order legs on the same response ----------
- *
- * ONE VENDOR CALL ALREADY BUYS SIX MORE LEGS THAN THIS PRODUCT READ.
- * /greek-exposure/expiry returns call/put legs for gex, delta, charm AND
- * vanna per expiry. Until now only the gamma pair was read; delta, charm and
- * vanna were parsed by JSON and dropped on the floor, once per name, every
- * run. The directive names Vanna and Charm explicitly, and they are the two
- * that explain what a gamma ladder cannot: charm is why pinning accelerates
- * into a Friday close, vanna is why a vol crush forces mechanical delta
- * buying at unchanged spot.
- *
- * WIRE NAME FIRST, same discipline the gamma pair earned the hard way, and
- * for the same reason: the schema block that documents these four is the one
- * that also says `call_gex` — the name a different part of the same document
- * got wrong and which cost this product every gamma roll-off panel for weeks.
- * That block is therefore evidence rather than a claim, but a `??` fallback
- * costs nothing and a rename costs a panel.
- *
- * THE SIGN CONVENTION IS NOT SHARED ACROSS LEGS, AND THAT IS THE TRAP.
- * In the vendor's own example rows: put_gex is NEGATIVE against a positive
- * call_gex, put_charm is NEGATIVE against a positive call_charm — both
- * dealer-signed — but put_vanna is POSITIVE against a positive call_vanna.
- * A reader that assumed one convention and netted call+put would report a
- * vanna book of the wrong magnitude and, on a put-heavy name, the wrong
- * direction entirely. So nothing here nets the two legs. Each is published
- * beside the other with the vendor's sign untouched, and the convention is
- * published as a field rather than assumed in a comment nobody reads. */
 
 export function callVannaLeg(row) { return row ? (row.call_vanna ?? row.call_vex) : undefined; }
 export function putVannaLeg(row)  { return row ? (row.put_vanna  ?? row.put_vex)  : undefined; }
@@ -1068,14 +491,6 @@ export function putCharmLeg(row)  { return row ? (row.put_charm  ?? row.put_cex)
 export function callDeltaLeg(row) { return row ? (row.call_delta ?? row.call_dex) : undefined; }
 export function putDeltaLeg(row)  { return row ? (row.put_delta  ?? row.put_dex)  : undefined; }
 
-/**
- * The units, published beside every number that carries them.
- *
- * This repository has one scar named after a missing unit ("1352% of its
- * year"), and exposure Greeks are the easiest place in the product to repeat
- * it: three of these are dollar quantities differing only by what they are
- * per, and read without their unit they are interchangeable large numbers.
- */
 export const GREEK_UNITS = Object.freeze({
   gamma: "dollar-gamma: the change in dealer dollar-delta per 1% move in spot",
   delta: "dollar-delta: the signed directional exposure dealers are carrying",
@@ -1083,15 +498,6 @@ export const GREEK_UNITS = Object.freeze({
   vanna: "dollar-delta per VOL POINT: how much that exposure moves on a 1-point change in implied volatility, spot unchanged",
 });
 
-/**
- * Is a leg actually on the wire, or merely absent?
- *
- * ABSENT IS NOT ZERO. A vendor that stopped publishing a leg, and a book that
- * genuinely measures zero at every expiry, produce the same sum. This tests
- * PRESENCE across the rows before any arithmetic runs, so a panel can say
- * "the vendor published no vanna leg on this response" rather than drawing a
- * flat line at zero and letting a reader conclude the name has no vanna.
- */
 export function legPresent(rows, reader) {
   for (const r of (rows || [])) {
     const v = reader(r);
@@ -1100,19 +506,6 @@ export function legPresent(rows, reader) {
   return false;
 }
 
-/**
- * A dated term structure for ONE Greek, both legs, unnetted.
- *
- * Shares gammaDecayCalendar's grammar — sorted onto the calendar, dated, with
- * a share of the book at each expiry — so a reader who has learned to read the
- * gamma roll-off can read these without learning a second vocabulary. What it
- * does NOT share is the netting: gammaDecayCalendar sums magnitudes because
- * the gamma legs arrive dealer-signed, and that assumption is false for vanna.
- *
- * Returns status "absent" when the vendor sent no such leg, "quiet" when the
- * leg was present but nothing survived shaping, and "ok" otherwise — the three
- * silences, kept apart at the point where they are still distinguishable.
- */
 export function greekTermStructure(expiryRows, { name, callLeg, putLeg, asOf = null, cap = 12 } = {}) {
   const src = Array.isArray(expiryRows) ? expiryRows : [];
   const hasCall = legPresent(src, callLeg);
@@ -1127,13 +520,7 @@ export function greekTermStructure(expiryRows, { name, callLeg, putLeg, asOf = n
   }
 
   const base = asOf ? Date.parse(String(asOf).slice(0, 10) + "T00:00:00Z") : NaN;
-  /* ABSENT-TESTED BEFORE COERCION, and the first draft of this function was
-     not. It read each leg through num(), whose contract is a NUMBER — so an
-     expiry the vendor sent no vanna for came back 0 and published `call: 0,
-     put: 0, dte: 0`: a confident zero, in the function written to abolish
-     them, telling a reader the book measured empty at that expiry when the
-     vendor had simply said nothing. The dry-run fixture's one deliberately
-     half-present expiry is what surfaced it. */
+
   const numOrNull = (v) => {
     if (v === null || v === undefined || v === "") return null;
     const n = Number(v);
@@ -1144,10 +531,7 @@ export function greekTermStructure(expiryRows, { name, callLeg, putLeg, asOf = n
     if (!r || !r.expiry) continue;
     const c = hasCall ? numOrNull(callLeg(r)) : null;
     const p = hasPut ? numOrNull(putLeg(r)) : null;
-    /* A row where BOTH legs are unreadable measured nothing and is dropped.
-       A row where one leg is readable keeps it and nulls the other — half a
-       reading is still a reading, and zeroing the missing half would invent
-       a book that is not there. */
+
     if (c === null && p === null) continue;
     const ms = Date.parse(String(r.expiry).slice(0, 10) + "T00:00:00Z");
     const sentDte = numOrNull(r.dte);
@@ -1155,10 +539,7 @@ export function greekTermStructure(expiryRows, { name, callLeg, putLeg, asOf = n
       expiry: String(r.expiry).slice(0, 10),
       call: c,
       put: p,
-      /* The vendor's own dte where it sent one, ours where it did not, and
-         null rather than a guess when we have no asOf to measure from. Read
-         through numOrNull for the same reason as the legs: num() turned an
-         unsent dte into "expires today". */
+
       dte: sentDte !== null ? sentDte
         : (Number.isFinite(base) && Number.isFinite(ms) ? Math.round((ms - base) / 86400000) : null),
     });
@@ -1166,18 +547,13 @@ export function greekTermStructure(expiryRows, { name, callLeg, putLeg, asOf = n
   rows.sort((a, b) => (a.expiry < b.expiry ? -1 : a.expiry > b.expiry ? 1 : 0));
   const kept = rows.slice(0, cap);
 
-  /* GROSS, NOT NET, and the field name says so. Summing |call| + |put| is a
-     size, never a direction: it answers "how much of this Greek is on the
-     book" without asserting which way it points, which is the only question
-     the sign conventions above let this function answer for every leg. */
   const gross = kept.reduce((a, r) => a + Math.abs(r.call ?? 0) + Math.abs(r.put ?? 0), 0);
 
   return {
     status: kept.length ? "ok" : "quiet",
     reason: kept.length ? null : `the ${name} leg was present but no expiry carried a readable value`,
     unit: GREEK_UNITS[name] || null,
-    /* Published rather than assumed: a reader (or a later renderer) must be
-       able to see that the two legs were NOT combined and why. */
+
     signConvention:
       "the vendor's own sign on each leg, untouched. The put leg's convention " +
       "differs BY GREEK on this endpoint — put gamma and put charm arrive " +
@@ -1191,28 +567,11 @@ export function greekTermStructure(expiryRows, { name, callLeg, putLeg, asOf = n
   };
 }
 
-/**
- * TGamma — Gamma Expiry Decay Calendar, from greek-exposure/expiry.
- *
- * Gamma exposure is almost always reported as a scalar. It has a term
- * structure. "62% of this name's dealer gamma expires Friday" turns a
- * vague "it's pinned" into a dated statement with a regime change on
- * the other side of it.
- *
- * halfLifeExpiry is the first expiry at which cumulative roll-off
- * passes 50% of the total book.
- */
 export function gammaDecayCalendar(expiryRows, { asOf = null } = {}) {
   const rows = (expiryRows || [])
     .map((r) => ({
       expiry: r.expiry,
-      /* GROSS gamma rolling off, so magnitudes are summed rather than the sum
-         taken in magnitude. The put leg arrives ALREADY dealer-signed (negative
-         against a positive call leg), the convention this module's header
-         calls load-bearing, so |call + put| cancels the two legs and reports
-         the net residual. A front-week book of 1e9 call against -999e6 put --
-         2.0e9 of gross gamma about to expire -- reported as 1e6 and lost the
-         roll-off schedule entirely. */
+
       gamma: Math.abs(num(callGammaLeg(r))) + Math.abs(num(putGammaLeg(r))),
     }))
     .filter((r) => r.expiry && r.gamma > 0)
@@ -1248,13 +607,6 @@ export function gammaDecayCalendar(expiryRows, { asOf = null } = {}) {
     return { expiry: r.expiry, share, cumShare, days };
   });
 
-  /* frontLoad — schedule[0].share — is PARTITION-DEPENDENT: it measures the
-     first listed expiry's share, so a name with weeklies and a name with
-     monthlies are not comparable, and adding one expiry to the chain changes
-     it without anything about the book changing. The gamma-weighted mean life
-     IS identified: it is E[days to expiry] under the gross-gamma measure, a
-     quantity with a unit (days) that survives any repartition of the chain.
-     frontLoad is kept for the card, which shows the schedule beside it. */
   return {
     schedule,
     halfLifeExpiry,
@@ -1264,66 +616,19 @@ export function gammaDecayCalendar(expiryRows, { asOf = null } = {}) {
   };
 }
 
-/**
- * Omega — Positioning Quality pair, from greek-flow.
- *
- *   otmShare  OTM share of DIRECTIONAL delta flow. High = lottery
- *             tickets; low = considered near-money conviction.
- *   vegaTilt  vega flow per unit of delta flow. High means the
- *             participant is trading volatility, not direction —
- *             the cleanest possible reason to SUPPRESS a directional
- *             read rather than misinterpret it as a view.
- *
- * Both denominators are bounded away from zero: a vanishing delta
- * flow is "no directional view", never infinite vol conviction.
- */
 export function positioningQuality(greekFlowRows, { floor = 1e-6, totals = null } = {}) {
   const t = resolveTotals(greekFlowRows, totals);
-  /* GROSS over GROSS, for the same reason as flowPurity. The old form divided
-     SUM(otm_dir) by |SUM(dir)| — two different cancellations — so the ratio
-     had no bounded distribution and Math.min(1, ...) was the operative clamp
-     rather than a guard: the column was censored at 1 on exactly the names
-     where the denominator had cancelled hardest. |otm_dir| <= |dir| holds row
-     by row, so the gross ratio lives in [0,1] by construction.
 
-     null, not 0, when there is nothing to measure. Zero is the TOP of this
-     column once it is oriented, so imputing it rewarded a name for having no
-     data — the same failure the enrich() docstring already argues against. */
   return {
-    /* `t.totalAbs` is the denominator flowPurity calls `totalAbs` too. It used
-       to be a local named `delta` here and a local named `tot` there — one
-       quantity, Sigma|total_delta_flow|, maintained twice. Nothing had gone
-       wrong yet; the point is that nothing could tell you if it had. */
+
     otmShare: t.dirAbs > floor ? Math.min(1, t.otmAbs / t.dirAbs) : null,
     vegaTilt: t.totalAbs > floor ? t.vegaAbs / t.totalAbs : null,
     hasDirectionalView: Math.abs(t.dirNet) > floor,
   };
 }
 
-/* =============================================================
-   Composite and calibration
-   ============================================================= */
-
-/**
- * Correlation-clustered family weighting.
- *
- * Naive equal weighting silently overweights whichever family has the
- * most members: seven restatements of the same ask-minus-bid tape
- * outvote one genuinely independent measure. Weight each family by
- * its effective number of independent signals rather than its raw
- * count, using the average pairwise |correlation| within the family.
- *
- *   n_eff = n / (1 + (n - 1) * rhoBar)
- */
 export function effectiveBreadth(columns) {
-  /* A column with no cross-sectional dispersion carries no information and
-     must not be paid for. The old form never looked at the values: a single
-     all-zero column hit `if (n <= 1) return n` and was awarded a full unit of
-     weight, which is exactly how a dead family V drew the same weight as a
-     live one on the published board. Two or more dead columns were worse —
-     pearson returns NaN when a column has zero variance, so rhoBar fell to 0
-     and the family was awarded its FULL raw count as if perfectly
-     independent. */
+
   const live = (columns || []).filter(isLiveColumn);
   const n = live.length;
   if (n === 0) return 0;
@@ -1339,7 +644,6 @@ export function effectiveBreadth(columns) {
   return n / (1 + (n - 1) * rhoBar);
 }
 
-/** A column is live when at least two finite entries differ. */
 export function isLiveColumn(column) {
   const xs = (column || []).filter(Number.isFinite);
   if (xs.length < 2) return false;
@@ -1347,15 +651,6 @@ export function isLiveColumn(column) {
   return xs.some((v) => v !== first);
 }
 
-/**
- * The same n_eff algebra applied one level up: how much of a family is
- * already said by the OTHER families.
- *
- * effectiveBreadth was only ever called with one family's own columns, so it
- * could see redundancy INSIDE a family and was structurally incapable of
- * seeing it BETWEEN them — which is where the most redundant pair on the
- * board actually lived. Returns a divisor >= 1 per key.
- */
 export function crossFamilyRedundancy(familyColumns) {
   const keys = Object.keys(familyColumns);
   const k = keys.length;
@@ -1395,17 +690,6 @@ export function pearson(a, b) {
   return num_ / Math.sqrt(da * db);
 }
 
-/**
- * Map a composite z to a bounded [-100, 100] score.
- *
- * The scale is calibrated FROM THE CROSS-SECTION, not hardcoded: it
- * is chosen so the given reference quantile of |z| lands on
- * `refScore`. That is the fix for the failure mode where absolute
- * thresholds made the top band mathematically unreachable and every
- * name displayed "no view" forever. With this, the reference
- * quantile always maps to refScore by construction, whatever the
- * day's dispersion.
- */
 export function calibrateScoreScale(zs, { refQuantile = 0.95, refScore = 80 } = {}) {
   const ref = quantile(zs.map(Math.abs), refQuantile);
   const target = Math.min(Math.max(refScore, 1), 99) / 100;
@@ -1413,37 +697,8 @@ export function calibrateScoreScale(zs, { refQuantile = 0.95, refScore = 80 } = 
   return Math.atanh(target) / ref;
 }
 
-/**
- * THE PUBLISHED SCORE'S UNIT, fixed once and for all.
- *
- * The score used to be `boundedScore(vanDerWaerden(residual)[i], scale)` with
- * `scale` calibrated from that same rank ladder. Both halves of that discard
- * magnitude: van der Waerden maps rank -> normal quantile by construction, and
- * calibrateScoreScale then normalised by the 0.95 quantile of |those rank
- * scores|. The composition is therefore a deterministic function of RANK and
- * POOL SIZE only. Measured: a 34-name board always printed exactly
- * 84 77 71 65 60 55 50 45 40 35 30 26 21 16 12 7 2 and its mirror, whatever
- * the data — residuals scaled by 1e-9 and by 1e9 produced byte-identical
- * ladders — and a name's score moved by 15 points when the pool grew from 30
- * names to 48 with its own data held fixed.
- *
- * A FIXED scale makes the number mean something: a residual two robust sigma
- * from the cross-sectional median scores 80, on every session and at every
- * pool size. A flat day then prints flat scores, which is the information the
- * rank ladder was destroying. Ordering is unaffected — tanh is monotone — so
- * this changes what the magnitude claims, not who is ranked where.
- */
 export const SCORE_SCALE = Math.atanh(0.80) / 2.0;
 
-/**
- * Cross-sectional percentile in (0,1), ties averaged.
- *
- * The same avgRank / (m + 1) plotting position van der Waerden uses, without
- * the normal quantile step: bounded, unit-free, and with a mean of exactly
- * 1/2 by construction, which is what makes a product of them a gate with a
- * mean of one. Non-finite entries are returned as null and simply do not
- * participate — an unmeasured axis casts no vote instead of the worst one.
- */
 export function percentileRank(values) {
   const xs = values || [];
   const idx = [];
@@ -1458,51 +713,16 @@ export function percentileRank(values) {
   while (i < m) {
     let j = i;
     while (j + 1 < m && xs[idx[j + 1]] === xs[idx[i]]) j++;
-    const avgRank = (i + j) / 2 + 1;          // 1-based, ties averaged
+    const avgRank = (i + j) / 2 + 1;
     for (let k = i; k <= j; k++) out[idx[k]] = avgRank / (m + 1);
     i = j + 1;
   }
   return out;
 }
 
-/**
- * THE QUALITY GATE — a multiplier, never a vote.
- *
- * A magnitude that carries no direction of its own cannot be ADDED to a
- * signed composite: doing so turns "this name's flow is high quality" into
- * "this name is bullish". The previous fix for that signed each magnitude by
- * sign(dirDelta) and kept it additive, which reintroduced the same inversion
- * one level down — three of the ten scoring columns became restatements of
- * sign(dirDelta), they carried the NEGATIVE sign and a quarter of the weight,
- * and the measured result was corr(composite, dirDelta) = -0.07: the board was
- * net SHORT its own directional flow signal.
- *
- * Modifiers multiply. Each axis is reduced to its cross-sectional percentile,
- * so no axis needs a unit or a hand-set coefficient and a near-constant axis
- * contributes almost nothing; the mean of the percentiles is then doubled, so
- * the gate is bounded in (0,2) with a cross-sectional mean of one by
- * construction. A near-constant modifier therefore does nothing, and no
- * modifier can flip the sign of the signal it modifies.
- *
- * `axes` is an array of equal-length columns, each ORIENTED so that larger is
- * more trustworthy. Returns one multiplier per name.
- */
 export function qualityGate(axes, { floor = 0.2 } = {}) {
   const cols = axes || [];
-  /* THE CROSS-SECTION'S SIZE COMES FROM THE INPUT, never from the survivors.
-     Deriving it from the live columns meant that when EVERY axis was dead there
-     was nothing left to measure the length against, so this returned a
-     zero-length array — and the caller's `blended.map((b, i) => b * gate[i])`
-     then multiplied by undefined and produced NaN for every name on the board.
-     boundedScore's own guard turns each NaN into 0, so the symptom is not a
-     visible NaN but a board where every score is zero, every name falls inside
-     the dead band, and the run refuses to publish anything at all.
 
-     Every axis dead is reachable: gammaFrontLoad was null on all thirty-four
-     live names for exactly one such reason, and a thin cross-section can make
-     the rest constant. A neutral gate of one is the right answer there — the
-     composite passes through unmodified — but only if it has one entry per
-     name. */
   const n = cols.reduce((m, c) => Math.max(m, (c || []).length), 0);
   const live = cols.filter(isLiveColumn);
   if (!live.length) return new Array(n).fill(1);
@@ -1520,11 +740,6 @@ export function qualityGate(axes, { floor = 0.2 } = {}) {
   return out;
 }
 
-/**
- * Annualized close-to-close realized volatility over the last `window`
- * returns. The denominator of the variance risk premium, computed from
- * candles this pipeline has already paid for.
- */
 export function realizedVol(closes, { window = 30, periodsPerYear = 252 } = {}) {
   const xs = (closes || []).filter((c) => Number.isFinite(c) && c > 0);
   if (xs.length < 3) return null;
@@ -1538,42 +753,9 @@ export function realizedVol(closes, { window = 30, periodsPerYear = 252 } = {}) 
   return Math.sqrt(Math.max(varr, 0) * periodsPerYear);
 }
 
-/**
- * THE FORECAST HORIZON, in trading sessions, and the year it is scaled against.
- *
- * Ten sessions is two calendar weeks of trading. It is a CHOICE — the data does
- * not pick it — so it is named once here and published beside every number
- * derived from it, rather than left implicit in an arithmetic constant.
- */
 export const HORIZON_SESSIONS = 10;
 export const TRADING_YEAR = 252;
 
-/**
- * A one-sigma move over `sessions`, from an ANNUALIZED volatility.
- *
- * sigma_h = sigma_annual * sqrt(h / 252)
- *
- * This is the square-root-of-time rule. It is exact under exactly one
- * assumption, and it is worth stating the WEAKEST one that suffices rather than
- * the familiar stronger one: variance must accumulate linearly in time, which
- * needs only UNCORRELATED increments. Independent and identically distributed
- * returns give that, but are far more than is required — returns may be
- * heteroskedastic and non-normal and the rule still holds, provided successive
- * increments are uncorrelated.
- *
- * The assumption is still false in detail: volatility clusters, and a term
- * structure in implied vol is the option market saying so in its own prices.
- * But it introduces no fitted parameter, every input is observable, and the
- * alternative — reading a vol off a different maturity for each name — is the
- * incomparability this function exists to remove.
- *
- * WHY THIS EXISTS BESIDE THE VENDOR'S OWN implied_move_perc. That figure is
- * quoted to each name's NEXT LISTED EXPIRY, which is a different horizon for
- * every name: a name expiring tomorrow and one expiring in a month print bands
- * that are not comparable, and putting them side by side on a board is a
- * category error. A fixed horizon is what makes a cross-section a cross-section.
- * Both are published; only this one is comparable.
- */
 export function horizonMove(annualVol, { sessions = HORIZON_SESSIONS, periodsPerYear = TRADING_YEAR } = {}) {
   if (!Number.isFinite(annualVol) || annualVol <= 0) return null;
   if (!(sessions > 0) || !(periodsPerYear > 0)) return null;
@@ -1585,23 +767,6 @@ export function boundedScore(z, scale) {
   return Math.round(100 * Math.tanh(z * (Number.isFinite(scale) && scale > 0 ? scale : 1)));
 }
 
-/**
- * Conviction separates signal STRENGTH from signal AGREEMENT.
- *
- * A name where every family agrees weakly deserves to outrank one
- * where a single family screams while three disagree. Every term is
- * a ratio in [0,1], so the whole range is reachable by construction —
- * no absolute threshold can strand it at zero.
- */
-/**
- * What the composite is made of, as data rather than as three literals.
- *
- * PUBLISHED WITH THE NUMBER SO THE READER CAN CHECK IT. The alternative is a
- * renderer that restates 0.45/0.35/0.20 in its own prose, which is a second
- * copy of a constant that has already moved once — and when the two disagree
- * the page says the arithmetic is something it is not. The card ships these,
- * so a published conviction can be reconstructed from its own payload.
- */
 export const CONVICTION_WEIGHTS = Object.freeze({
   agreement: 0.45,
   coverage: 0.35,
@@ -1609,13 +774,7 @@ export const CONVICTION_WEIGHTS = Object.freeze({
 });
 
 export function conviction({ familyScores = [], coverage = 1, persistence = 0 }) {
-  /* `s !== 0` used to do double duty: it dropped a genuinely ABSENT family
-     from the agreement denominator, which is right, and it also dropped a
-     family that was measured and landed neutral, which is wrong — and the
-     coverage term went on paying full price for the absent one either way, so
-     losing a family RAISED conviction. Absent is now null at the source, so
-     presence is a null test and a measured 0 counts as a family that agrees
-     with nothing. */
+
   const present = familyScores.filter((s) => Number.isFinite(s));
   if (!present.length) {
     return { conviction: 0, agreement: 0, agree: 0, breadth: 0, coverage: 0, persistence: 0 };
@@ -1631,38 +790,10 @@ export function conviction({ familyScores = [], coverage = 1, persistence = 0 })
     CONVICTION_WEIGHTS.coverage * cov +
     CONVICTION_WEIGHTS.persistence * per;
 
-  /* ALL THREE TERMS COME BACK, not just the one that was already here.
-
-     A composite whose inputs are not published cannot be checked, and this
-     one has a shape that makes checking matter: `agreement` is agree/present
-     over at most three signed families — a COUNT over a count, stepping
-     rather than varying smoothly — and it carries the largest weight, while
-     the other two terms are continuous. A published 76 is therefore mostly a
-     step and partly a measurement, and a reader given only the 76 cannot tell
-     which of the two moved when it changes. On the emitted corpus this shows
-     up as a trimodal spread: 22 distinct values across 96 rows, clustered at
-     60-66, 75-82 and 90-96, one cluster per agreement level (13 rows at one
-     of three axes agreeing, 64 at two, 19 at all three).
-
-     Note what the count can and cannot be. With three families all measured
-     and non-zero, the majority always shares the sign of their sum, so
-     one-of-three is unreachable that way — it arrives only when a family is
-     measured NEUTRAL or the signed sum is exactly zero. The reachable set is
-     0..breadth, which is breadth+1 values and not breadth; a first draft of
-     the test here asserted three and failed, correctly.
-
-     `coverage` and `persistence` are returned AS CLAMPED, not as passed, so
-     a consumer reconstructing the identity gets the numbers the arithmetic
-     actually used rather than the ones handed in. */
   return {
     conviction: Math.round(100 * Math.min(Math.max(value, 0), 1)),
     agreement,
-    /* THE COUNT AS WELL AS THE RATIO. `agreement` is agree/present, a
-       fraction of two small integers that no decimal holds exactly — a board
-       rounding it to three places publishes 0.667 for two-of-three, and any
-       consumer multiplying back to recover the count is doing arithmetic on
-       a rounding error. The two integers are exact, smaller on the wire, and
-       are what a reader actually wants to be told. */
+
     agree,
     breadth: present.length,
     coverage: cov,
@@ -1670,69 +801,19 @@ export function conviction({ familyScores = [], coverage = 1, persistence = 0 })
   };
 }
 
-/**
- * Rank hysteresis. A board that churns completely every session is unusable
- * and expensive, so a name already on it is given room to slip before it goes.
- *
- * THE RULE, and it took two wrong versions to get here:
- *
- *   - Every name in today's top `entryRank` is on the board. Unconditionally.
- *   - An incumbent still inside `exitRank` is ALSO kept.
- *   - The board is the union, in today's rank order, so it runs between
- *     `entryRank` and `exitRank` rows.
- *
- * The first version placed incumbents last, which made the whole thing a
- * provable no-op — identical to slice(0, entryRank) for every input. Placing
- * them first fixed that and overcorrected into something worse: incumbency
- * came to beat rank absolutely. With 25 incumbents sitting at ranks 5 to 29,
- * the emitted board was exactly those 25 and the session's four strongest
- * names were not on it at all.
- *
- * A variable-length board is the price, and it is the right price: the
- * alternative is a fixed length that can only be held by excluding the very
- * names the board exists to surface. The dead band already makes length vary.
- *
- * IT ALSO RETURNS THE BOARD'S MEMORY, and that is the reason this function
- * changed shape.
- *
- * The rule above already knows three things about every name it emits: that
- * the name is new to the board, that it was here yesterday, and — separately —
- * that it is here ONLY because it was here yesterday. It knew all three and
- * returned a flat list of tickers, so a board that had just decided which
- * names were new published a page on which nothing was new. A reader opening
- * it at 09:15 could not answer "what is different from yesterday" without
- * having kept yesterday's page open, which nobody does.
- *
- * The third fact is the one that cannot be reconstructed downstream. "New"
- * and "returning" are a set difference anyone holding both lists can take.
- * "Held" is a statement about WHY this name is on the board — it did not earn
- * a top-`entryRank` place today and is here on incumbency — and that
- * distinction exists only inside this loop. Published, it is the difference
- * between a board of twenty-eight names and a board of twenty-five names plus
- * three that are on their way out.
- *
- * @returns {{ids: string[], entered: string[], held: string[], returning: string[]}}
- *   `ids` is what the old signature returned, unchanged, in today's rank
- *   order. The other three are subsets of it, in the same order.
- */
 export function applyHysteresis(todayRanked, yesterdayIds, { entryRank = 25, exitRank = 35 } = {}) {
   const ranked = todayRanked || [];
   const incumbent = new Set(yesterdayIds || []);
   const taken = new Set();
   const keep = [];
-  /* Membership by RULE, not by rank: a name can sit at rank 3 and still be
-     new, and a name can sit at rank 30 because it is old. */
+
   const byHysteresis = new Set();
 
-  // Today's top `entryRank`, always. Nothing outranks being one of the best
-  // names in the session.
   for (let i = 0; i < ranked.length && keep.length < entryRank; i++) {
     keep.push(ranked[i]);
     taken.add(ranked[i]);
   }
 
-  // Then incumbents that have slipped past entryRank but are still inside the
-  // exit band. This is the hysteresis, and it can only ADD.
   for (let i = entryRank; i < ranked.length && i < exitRank; i++) {
     const id = ranked[i];
     if (incumbent.has(id) && !taken.has(id)) {
@@ -1743,13 +824,6 @@ export function applyHysteresis(todayRanked, yesterdayIds, { entryRank = 25, exi
   const rankOf = new Map(ranked.map((id, i) => [id, i]));
   const ids = keep.sort((a, b) => rankOf.get(a) - rankOf.get(b));
 
-  /* THE EMPTY INCUMBENT LIST IS NOT AN EMPTY MEMORY, and the two must not
-     render alike. A cold start — no board published yesterday, or a store
-     read that failed, which this pipeline treats identically and non-fatally
-     — makes EVERY name look new, and a page announcing fifty-three arrivals
-     on a morning when nothing arrived is worse than a page that says nothing.
-     So the caller is told the memory was empty, and it is the caller's job to
-     say "no yesterday to compare against" rather than "everything is new". */
   const cold = incumbent.size === 0;
 
   return {

@@ -24,15 +24,14 @@
 
   <link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="/site.webmanifest">
-  <link rel="preload" href="/assets/fonts/Inter-latin.woff2?v=202" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/assets/css/base.css?v=202">
-  <link rel="stylesheet" href="/assets/css/lab.css?v=202">
-  <script src="/assets/js/nav.js?v=202" defer></script>
-  <script src="/assets/js/lab-suite.bundle.js?v=202" defer></script>
-  <script src="/assets/js/review-catalog.js?v=202" defer></script>
-  <script src="/assets/js/lab-ui.js?v=202" defer></script>
+  <link rel="preload" href="/assets/fonts/Inter-latin.woff2?v=213" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/css/base.css?v=213">
+  <link rel="stylesheet" href="/assets/css/lab.css?v=213">
+  <script src="/assets/js/nav.js?v=213" defer></script>
+  <script src="/assets/js/lab-suite.bundle.js?v=213" defer></script>
+  <script src="/assets/js/review-catalog.js?v=213" defer></script>
+  <script src="/assets/js/lab-ui.js?v=213" defer></script>
 
-  <!-- Structured data: the course catalogue, for search engines. -->
   <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -288,8 +287,6 @@
         <label><span>Status</span><select id="statusFilter"><option value="all">Any status</option><option value="not-started">Not started</option><option value="in-progress">In progress</option><option value="completed">Completed</option></select></label>
       </div>
 
-    <!-- Real links and course summaries ship in the initial HTML. JavaScript
-         enhances these cards with saved progress; crawling never depends on it. -->
     <div class="lab-grid" id="labGrid">
       <a class="model-card" href="/lab/ordinary-least-squares/">
         <div class="model-card__top"><span class="model-card__badge">Beginner</span><span class="model-card__num">01</span></div>

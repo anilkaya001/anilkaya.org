@@ -411,6 +411,22 @@ Put local-only OAuth values in `.dev.vars` (git-ignored). A plain
 implement canonical extensionless routing, Worker headers, auth, API, D1, or
 HTML rewriting and is therefore not a complete test environment.
 
+## Commentary
+
+Source files carry no comments: JavaScript, CSS, HTML, SQL, YAML, TOML,
+Python and the ignore files are code only. The reasoning behind a threshold, a
+ceiling or a rule lives in the commit that set it (`git log -p` on the line)
+and in `docs/`, never inline. Do not add comments, banners or doc blocks;
+write the argument in the commit message. Generated files
+(`assets/js/lab-suite.bundle.js`, `assets/js/review-catalog.js`,
+`assets/js/stage-catalog.js`, `shared/review-manifest.js`,
+`shared/stage-manifest.js`, `shared/skill-manifest.js`,
+`shared/course-points.js`, `shared/course-seo.js`) are written by
+`scripts/generate-course-payloads.mjs` without banners; edit the generator,
+not its output. `scripts/strip-comments.mjs` is now a no-op on this tree and
+stays only because a Workers Builds build command may still invoke it; it can
+be retired once that dashboard field is confirmed clear.
+
 ## Design and accessibility invariants
 
 - JavaScript remains IIFE-based and framework-free; production globals are

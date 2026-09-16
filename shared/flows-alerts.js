@@ -1,51 +1,13 @@
-/* =============================================================
-   flows-alerts.js — the vendor's flow alerts, shaped and ranked.
-
-   WHAT A ROW IS, precisely, because everything else here follows
-   from it: one row is one ALERT — a window of activity in ONE
-   contract that one of the vendor's own rules flagged. The vendor
-   states the window (start_time..end_time), a trade count, a total
-   size, a total premium and its ask-side/bid-side split, and a set
-   of flags (sweep, floor, single-leg, all-opening). That is more
-   than the chain counter has ever carried — a size, a span, a side
-   — and it is still NOT the tape: a row aggregates trade_count
-   executions, so it is never "a trade", and the page built on it
-   may not call it one.
-
-   THE SELECTION IS THE VENDOR'S, AND THAT IS THE HEADLINE CAVEAT.
-   These rows exist because a rule named in `alert_rule` fired, and
-   the rules' definitions are the vendor's own — not published, not
-   observable, not reproducible from this payload. The population is
-   therefore "what the vendor chose to flag", not "the most unusual
-   activity in the market", and the notes say so in those words.
-   Ranking INSIDE that population by its own published premium adds
-   no new assumption; treating the population as complete would.
-
-   FIELD PROVENANCE: the field set below was not taken from the
-   vendor's documentation — documentation has been wrong five times
-   in this repo — but from the probe's first-row key dumps on three
-   separate live runs (2026-08-27 twice, 2026-08-28). Fields the
-   probe saw only sometimes (strike, price, iv_start/iv_end,
-   total_size, option_chain) are treated as optional everywhere.
-   ============================================================= */
-
 import { parseOptionSymbol } from "./flows-premium.js";
 
-/* Absent in, absent out — Number(null) is 0 and a confident zero is the
-   house defect. Same idiom as flows-scores.js, for the same reason. */
 const num = (v, d = null) => {
   if (v === null || v === undefined || v === "") return d;
   const n = Number(v);
   return Number.isFinite(n) ? n : d;
 };
 
-/* A flag the vendor did not send is NOT false. `has_sweep: false` says the
-   vendor looked and found none; an absent key says nothing was asked. The
-   two must stay distinguishable all the way to the page, where null renders
-   as an em dash and false as a plain "no". */
 const flag = (v) => (v === null || v === undefined ? null : Boolean(v));
 
-/** Rows the pooled payload carries. A choice, published as `cap`. */
 export const ALERT_ROWS = 60;
 
 export const ALERTS_NOTES = Object.freeze({
@@ -93,15 +55,6 @@ export const ALERTS_NOTES = Object.freeze({
     "so no number here is an execution price either.",
 });
 
-/**
- * One vendor alert row, shaped for publication. Null on an unusable row
- * (no ticker, or nothing measurable on it at all).
- *
- * `stageComplete` declares whether `stageOf` was built from the WHOLE screened
- * universe. It defaults true because the nightly pipeline's map is; the
- * Worker's intraday map is not, and that difference decides whether a miss is
- * a fact about the name or a fact about the map. See `st` below.
- */
 export function alertRow(raw, { stageOf, stageComplete = true } = {}) {
   if (!raw || typeof raw !== "object") return null;
   const t = typeof raw.ticker === "string" && raw.ticker ? raw.ticker : null;
@@ -114,16 +67,13 @@ export function alertRow(raw, { stageOf, stageComplete = true } = {}) {
   const prem = num(raw.total_premium);
   const size = num(raw.total_size);
   const trades = num(raw.trade_count);
-  /* A row with no premium, no size and no count measures nothing this
-     surface publishes; shaping it would print a row of dashes. */
+
   if (prem === null && size === null && trades === null) return null;
 
   return {
     t,
     oc,
-    /* Derived from the option symbol by the same parser the premium desk
-       uses — one spelling of one relation. Null when the vendor sent no
-       symbol or an unparseable one, and the coverage counts say how often. */
+
     cp: parsed ? parsed.type : null,
     k: parsed ? parsed.strike : num(raw.strike),
     exp: parsed ? parsed.expiry : (typeof raw.expiry === "string" ? raw.expiry.slice(0, 10) : null),
@@ -135,9 +85,7 @@ export function alertRow(raw, { stageOf, stageComplete = true } = {}) {
     single: flag(raw.has_singleleg),
     opening: flag(raw.all_opening_trades),
     oi: num(raw.open_interest),
-    /* The vendor's own ratio, carried under the vendor's name. Recomputing
-       it from oi here would create a second spelling of a quantity whose
-       denominator's as-of the vendor does not state. */
+
     voi: num(raw.volume_oi_ratio),
     ivStart: num(raw.iv_start),
     ivEnd: num(raw.iv_end),
@@ -145,44 +93,15 @@ export function alertRow(raw, { stageOf, stageComplete = true } = {}) {
     spanStart: typeof raw.start_time === "string" ? raw.start_time : null,
     spanEnd: typeof raw.end_time === "string" ? raw.end_time : null,
     rule: typeof raw.alert_rule === "string" && raw.alert_rule ? raw.alert_rule : null,
-    /* Where the name stood in the board's own funnel, so a reader can see
-       at a glance whether the flagged name is one the board scores at all.
 
-       "foreign" IS A POSITIVE CLAIM AND IT WAS BEING MANUFACTURED OUT OF
-       ABSENCE. The page renders it as "the screener never returned this name,
-       so the board holds no view of it" — true when the caller's map covers
-       the whole screened universe, which the nightly pipeline's does. The
-       Worker's intraday map does NOT: it is rebuilt on each read from the
-       stages the STORED payload already carried, so a name flagged at 09:31
-       that was not among last night's sixty alert rows misses that map for a
-       reason that has nothing to do with the screener. It was stamped
-       "foreign" anyway — and once the record began carrying rows across reads
-       the stamp stuck for the rest of the session, because the next read reads
-       the stage back out of the row it wrote. A caller whose map is partial
-       says so and gets null instead: "this read cannot place the name", which
-       is a different silence and which the page already draws as a dash. */
     st: typeof stageOf === "function"
       ? (stageOf(t) || (stageComplete ? "foreign" : null))
       : null,
   };
 }
 
-/** Rows the movers band carries. A choice, published as `cap` beside it. */
 export const ALERT_BAND_ROWS = 8;
 
-/**
- * The per-contract band for the movers panel, cut from ALREADY-SHAPED alert
- * rows (buildFlowAlerts().rows — premium-ranked with a total tie-break, so
- * this function adds no ordering of its own and stays deterministic for free).
- *
- * WHY THIS EXISTS: the movers premium lists are `byName` because the screener
- * reports whole-symbol net premium, and for months a comment said contract-
- * level ranking "needs a flow-alerts endpoint this key does not reach". The
- * feed has since been proven reachable and is fetched every run — this band
- * is that stale sentence retired. It stays the VENDOR'S selection: the band
- * ranks inside what the alert rules flagged, never the whole tape, and the
- * basis string on the payload says so.
- */
 export function alertBand(shapedRows, { cap = ALERT_BAND_ROWS } = {}) {
   const usable = (Array.isArray(shapedRows) ? shapedRows : [])
     .filter((r) => r && r.prem !== null && typeof r.t === "string");
@@ -199,20 +118,6 @@ export function alertBand(shapedRows, { cap = ALERT_BAND_ROWS } = {}) {
   };
 }
 
-/* THE ROW ORDERING, in ONE place because this feed now has two rankers.
-   The nightly build ranks a single vendor read; the intraday record re-ranks
-   a union of reads after every merge. Two spellings of "which row is first"
-   would let the same rows publish in two different orders depending on which
-   process wrote last, and the list would reshuffle at 09:15 for a reason no
-   reader could name.
-
-   Premium descending. Rows the vendor sent WITHOUT a premium rank after every
-   row that has one — they are still alerts, they just cannot be ranked by a
-   number they lack — ordered among themselves by size then name. The `?? -1`
-   below is not a confident zero: a measured size of 0 must still sort above a
-   size the vendor never sent, and -1 is the only sentinel that keeps those two
-   apart. Ties break totally so two runs over one response publish identical
-   bytes. */
 const byName = (a, b) => (a.t < b.t ? -1 : a.t > b.t ? 1 : 0)
   || ((a.oc || "") < (b.oc || "") ? -1 : (a.oc || "") > (b.oc || "") ? 1 : 0);
 
@@ -225,10 +130,6 @@ function byPremium(a, b) {
   return (b.prem - a.prem) || byName(a, b);
 }
 
-/* Coverage counted over the rows ACTUALLY PUBLISHED, because the page prints
-   it as "N of <rows.length> carried a parseable contract symbol". Shared by
-   both writers for the same reason the comparator is: the record's coverage
-   after a merge has to be counted the same way the nightly's was. */
 function coverageOf(rows) {
   const count = (f) => rows.filter(f).length;
   return {
@@ -242,26 +143,6 @@ function coverageOf(rows) {
   };
 }
 
-/**
- * The published feed: shaped, ranked by the vendor's own premium inside the
- * vendor's own selection, capped with the shed counted.
- *
- * THE SHAPER OWNS THE ENVELOPE, AND IT LEARNED THAT THE EXPENSIVE WAY.
- * This function accepted only a bare array, so the two writers of the
- * `flowalerts` key had to agree, out of band, on who unwrapped. They did not.
- * The nightly pipeline's uw() returns `body.data` already unwrapped; the
- * worker's uwFetch() returns the parsed body verbatim. Handed
- * `{data:[...60 rows...]}`, the `Array.isArray` guard below iterated NOTHING
- * and returned a well-formed, entirely empty feed — and the cron's unguarded
- * spread wrote that over sixty real rows, every fifteen minutes, all session.
- * The Overview then reported "FLAGGED WINDOWS 0" over 569 screened names: a
- * confident claim about the market manufactured by a type check.
- *
- * The guard is now an UNWRAP rather than a filter, so a caller cannot get the
- * envelope wrong. Putting it here rather than at the two call sites is the
- * point: the shaper is the only place that knows what a row is, and one
- * spelling in one function removes the class of bug instead of this instance.
- */
 export function buildFlowAlerts(rawRows, { stageOf, stageComplete = true, cap = ALERT_ROWS } = {}) {
   const shaped = [];
   let unusable = 0;
@@ -293,98 +174,21 @@ export function buildFlowAlerts(rawRows, { stageOf, stageComplete = true, cap = 
   };
 }
 
-/* =============================================================
-   THE SESSION'S RECORD — the union of a day's reads.
-
-   WHAT WAS WRONG BEFORE, precisely, because the shape below is
-   built out of that defect. The Worker's fifteen-minute cron
-   wrote `{...prev, ...buildFlowAlerts(read)}`. The spread
-   replaces `rows` wholesale, and the vendor's list is a ROLLING
-   window of its newest flags — so a name flagged at 09:31 was
-   gone from the page at 09:46, and every morning's flags were
-   erased by lunch. The page then showed "what the vendor's rules
-   flagged in the last few minutes" under a heading a reader takes
-   to mean "what the vendor's rules flagged today".
-
-   For an early-warning surface the useful fact is not the newest
-   window; it is "this name was flagged at 09:31 and again at
-   11:04", and no single read can say that. Only a union across
-   the session's reads can, and only if it keeps FIRST-seen as
-   well as last.
-   ============================================================= */
-
-/**
- * The identity of one alert ACROSS reads.
- *
- * (name, contract, window start) is that identity. The vendor restates an
- * open window with a moving end_time, premium, size and count; only its start
- * holds still. Keying on the whole row would make every restatement a new
- * alert and the record would fill with copies of one window. Keying on
- * (name, contract) alone would fuse two genuinely separate windows on one
- * contract into one and lose the earlier one's first-seen time — the fact
- * this record exists to keep.
- *
- * A row the vendor sent with NO start_time has nothing left to be identified
- * by, so those collapse per (name, contract, rule). Under-counting an
- * unidentifiable window is the safe error here: the alternative is a row that
- * can never be recognised again and therefore re-enters the record on every
- * read, all session, until the ceiling sheds the rows that are real.
- *
- * Null on a row with no ticker — such a row cannot be held or found again.
- */
 export function alertKey(row) {
   if (!row || typeof row !== "object") return null;
   const t = typeof row.t === "string" && row.t ? row.t : null;
   if (!t) return null;
   const oc = typeof row.oc === "string" ? row.oc : "";
-  /* NUL separates the parts because it is not legal in a ticker, an option
-     symbol or a vendor rule name, so no pair of different rows can spell one
-     another's key by accident. A "|" could: rule names are the vendor's. */
+
   const SEP = "\u0000";
   return typeof row.spanStart === "string" && row.spanStart
     ? "w" + SEP + t + SEP + oc + SEP + row.spanStart
     : "u" + SEP + t + SEP + oc + SEP + (typeof row.rule === "string" ? row.rule : "");
 }
 
-/**
- * The record's ceilings, and why these two numbers.
- *
- * The stored payload is served WHOLE to a browser on every page load, and
- * 128KB is the size the other writer of this key is held to: the pipeline
- * posts through an ingest route that refuses a larger body
- * (FLOWS_MAX_PAYLOAD_BYTES in worker.js). The cron writes to D1 directly and
- * so is held to it by nothing except these two constants — which is exactly
- * why they have to exist. One key with two writers may not have two sizes,
- * and a union that grew with the session would leave the smaller one behind:
- * 28 reads of up to 60 windows is 1680 distinct windows on a busy day.
- *
- * THE ARITHMETIC, MEASURED RATHER THAN GUESSED. A maximally populated row of
- * this shape — every vendor field present, a long rule name, a board stage
- * and the record's own two ISO instants — serialises to 533 bytes. 180 of
- * those is 95.9KB, a whisker under the byte ceiling, which is the split
- * between the two: rows is the ceiling that bites on a busy session, bytes is
- * the hard bound that bites first if the row shape ever grows a field. At
- * both ceilings at once the whole stored payload — rows, envelope, coverage
- * counts and notes — measures about 99KB, and the contract suite pins that
- * against worker.js's own 128KB constant, because a ceiling justified only in
- * a comment is a ceiling nobody re-derives when the row grows.
- *
- * Rows is the ceiling that normally bites; bytes is the backstop for a day of
- * unusually fat rows, and `record.shedBy` names which one did. Both are
- * published beside the shed count, because a capped list that does not say it
- * is capped invites reading the cap as the population — the same argument
- * ALERT_ROWS carries one level up.
- */
 export const MERGED_ALERT_ROWS = 180;
 export const MERGED_ALERT_BYTES = 96 * 1024;
 
-/* A row read back out of the STORED payload rather than shaped from the wire.
-   Rows written by an earlier build may lack keys this one reads, and
-   `undefined !== null` is true — so an absent premium would sail straight
-   past the comparator's null test and land in `b.prem - a.prem` as NaN, which
-   silently randomises the whole ranking. Normalising absence to null on the
-   way in keeps "absent in, absent out" true across a round trip through JSON
-   and across a schema that changed under a running session. */
 function carriedRow(row) {
   const n = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
   const s = (v) => (typeof v === "string" && v ? v : null);
@@ -392,47 +196,11 @@ function carriedRow(row) {
     ...row,
     prem: n(row.prem), size: n(row.size), trades: n(row.trades),
     cp: s(row.cp), spanStart: s(row.spanStart), spanEnd: s(row.spanEnd),
-    /* The record's own three fields are normalised on the way in too, so
-       every published row carries all three KEYS even when a half-written
-       payload carried none: an absent key and a null are different silences,
-       and only the null one can be rendered as "not known". A row held
-       without a sighting count is treated as one prior sighting when it is
-       next seen — the minimum that is certainly true, since being in the
-       record at all means some read put it there. */
+
     firstAt: s(row.firstAt), lastAt: s(row.lastAt), reads: n(row.reads),
   };
 }
 
-/**
- * Merge one vendor read into the day's record and re-rank the union.
- *
- * PER ROW it publishes `firstAt` (the read that first held this window),
- * `lastAt` (the most recent read that carried it) and `reads` (how many
- * carried it). firstAt never advances; that is the entire point of it.
- * "Flagged at 09:31 and again at 11:04" and "flagged at 11:04" are different
- * facts, and the first is the one an early-warning page is for.
- *
- * IT STARTS OVER AT THE SESSION BOUNDARY AND NOWHERE ELSE. The record names
- * the Eastern trading date it covers, and a read from a different date starts
- * a new record instead of adding to yesterday's. An age-based expiry was the
- * obvious alternative and is wrong: it would leave a record that is part
- * today and part yesterday with no way to say which rows are which. Carrying
- * yesterday's flags into today under today's readAt is the same class of
- * claim as a confident zero — a fact the day did not produce, wearing the
- * day's timestamp. When the caller cannot NAME the date (`sessionDate` null)
- * the record also starts over, because a record whose day is unknown cannot
- * be compared with the next read's day at all.
- *
- * IT DOES NOT DECIDE WHETHER TO WRITE. That guard stays at the call site,
- * where a quiet or unreadable vendor read must leave the stored copy exactly
- * as it stands. Merging makes an empty read less destructive than the old
- * spread did; it does not make writing one honest, because the envelope's
- * readAt would then claim a freshness the rows do not have.
- *
- * @param prev  the STORED payload (or null) — its `rows` and its `record`.
- * @param next  the fresh buildFlowAlerts() result for this read.
- * @param at    ISO instant of this read; `sessionDate` is its Eastern date.
- */
 export function mergeAlerts(prev, next, {
   at = null,
   sessionDate = null,
@@ -446,22 +214,6 @@ export function mergeAlerts(prev, next, {
   const heldRecord = held && held.record && typeof held.record === "object" ? held.record : null;
   const heldRows = held && Array.isArray(held.rows) ? held.rows : [];
 
-  /* WHICH DAY THE STORED ROWS BELONG TO — the one question that decides
-     whether they carry at all. Three answers, named separately because they
-     are three different facts about the stored copy:
-       "cold"             — no record on it: the nightly build published this
-                            key, or a build older than this record shape did.
-                            Either way those rows describe a closed session.
-       "undated"          — a day could not be named on ONE SIDE of the
-                            comparison: either this read cannot name its own,
-                            or the stored record never named its. The two are
-                            the same fact about the comparison, and neither is
-                            a boundary. Reporting a dateless record as
-                            "session-boundary" — which this did — names a
-                            boundary nothing crossed, and the reset reason is
-                            published prose a page reads out loud.
-       "session-boundary" — both days are known and they differ: the record is
-                            real and belongs to another session. */
   const heldDate = heldRecord && typeof heldRecord.date === "string" && heldRecord.date
     ? heldRecord.date : null;
   let reset = null;
@@ -485,28 +237,16 @@ export function mergeAlerts(prev, next, {
   for (const row of fresh) {
     const k = alertKey(row);
     if (!k) continue;
-    /* One read that lists the same window twice is ONE sighting. Counting it
-       twice would turn `reads` into a claim about the vendor's response shape
-       rather than about the session. The first copy wins because the read
-       arrives premium-ranked, so the survivor is the larger statement. */
+
     if (thisRead.has(k)) continue;
     thisRead.add(k);
     const prior = byKey.get(k);
     if (prior) {
       again++;
       byKey.set(k, {
-        /* The vendor's own numbers come from the LATEST read — an open window
-           restates its end, its premium, its size and its count — but the
-           record's own three fields do not. firstAt is the fact being kept,
-           so it is read off what was already held and never off `row`. */
+
         ...row,
-        /* AND WHEN THE HELD ROW LOST ITS OWN firstAt, THIS READ'S INSTANT IS
-           NOT AN ANSWER. `prior` is always a row carried out of the store, so
-           some earlier read put it there; stamping now would publish "first
-           flagged 11:00" on a window the record has been holding since 09:31,
-           which is the one fact this whole layer exists to keep. Null says
-           "held before this, instant unknown" — the same choice the record's
-           own firstReadAt makes below, for the same reason. */
+
         firstAt: typeof prior.firstAt === "string" && prior.firstAt ? prior.firstAt : null,
         lastAt: readAt,
         reads: (Number.isFinite(prior.reads) ? prior.reads : 1) + 1,
@@ -519,19 +259,12 @@ export function mergeAlerts(prev, next, {
 
   const union = Array.from(byKey.values()).sort(byPremium);
 
-  /* THE CEILING, AND WHICH ONE BIT. The shed is counted and the ordering it
-     shed by is named: "180 windows" printed beside an unstated 412 is a
-     ceiling being read as a population, which is the defect `cap` and `shed`
-     exist to prevent everywhere else in this codebase. */
   const rows = [];
   let bytes = 0;
   let shedBy = null;
   for (const row of union) {
     if (rows.length >= cap) { shedBy = "rows"; break; }
-    /* Code units, not bytes: every string a row carries is ASCII — a ticker,
-       an option symbol, a vendor rule name, two ISO instants — so the two
-       agree, and the ceiling's headroom absorbs a multibyte rule name if the
-       vendor ever sends one. The +1 is the comma this row costs in the array. */
+
     const width = JSON.stringify(row).length + 1;
     if (bytes + width > byteCap) { shedBy = "bytes"; break; }
     rows.push(row);
@@ -540,27 +273,11 @@ export function mergeAlerts(prev, next, {
 
   const shed = union.length - rows.length;
 
-  /* THE HELD RECORD'S OWN COUNTERS, AND WHAT TO DO WHEN IT LOST ONE.
-     These are written by this function and by nothing else, so a stored
-     record that carries ROWS but not the count describing them is a payload
-     half-written, or one written by a build older than the counter — real for
-     exactly as long as a deploy takes, and this key is rewritten every
-     fifteen minutes while that is true. Rebuilding the missing count as 0 is
-     the confident zero in its purest form: it publishes "this is the first
-     read of the day" and "nothing has entered the record today" over rows
-     that plainly arrived earlier. Each falls back instead to the minimum that
-     is CERTAINLY true given the rows in hand — the same argument carriedRow()
-     already makes for a single row's `reads`.
-
-     `carriedIn` is 0 whenever `reset` is set, so both fallbacks collapse to 0
-     on a record that is genuinely starting, which is a measured zero. */
   const priorReads = !reset && heldRecord && Number.isFinite(heldRecord.reads)
     ? heldRecord.reads
-    /* Rows are in the record, so at least one read put them there. */
+
     : (carriedIn ? 1 : 0);
-  /* And `everEntered` may never fall below `union`, or the two stop being the
-     pair of bounds they are published as: every row the record still holds
-     entered it once, so the rows in hand are a floor under the day's count. */
+
   const priorEver = Math.max(
     !reset && heldRecord && Number.isFinite(heldRecord.everEntered)
       ? heldRecord.everEntered : 0,
@@ -568,19 +285,9 @@ export function mergeAlerts(prev, next, {
 
   return {
     rows,
-    /* `seen` is the whole union, so the page's "N of SEEN flagged windows"
-       counts the SESSION's windows rather than this read's sixty. */
-    seen: union.length,
-    /* Unusable stays a fact about THIS read — rows the vendor sent that could
-       not be shaped. Accumulating it would be meaningless: an unusable row
-       has no identity, so the same one arriving twice cannot be recognised
-       and a running total would count the vendor's repetition as ours.
 
-       NULL, NOT ZERO, when the read carried no count of its own. A published
-       0 must mean "counted, and there were none"; handed junk instead of a
-       shaped read this function counted nothing, and saying so costs one
-       null. Number(null) === 0 is this repository's oldest scar and it does
-       not stop being one inside a fallback. */
+    seen: union.length,
+
     unusable: next && Number.isFinite(next.unusable) ? next.unusable : null,
     shed,
     cap,
@@ -590,13 +297,7 @@ export function mergeAlerts(prev, next, {
     record: {
       date,
       reads: priorReads + 1,
-      /* WHEN THIS READ STARTS THE RECORD its own instant IS the record's
-         first read, and that is a measurement. When it continues a record
-         that lost the field, it is not: the rows carried in were flagged
-         before now, so stamping this read's instant would publish "N reads
-         since 11:00" over a row whose own firstAt reads 09:31. Null is the
-         only honest answer there — an instant nothing measured is the same
-         defect as a count nothing counted. */
+
       firstReadAt: reset
         ? readAt
         : (heldRecord && typeof heldRecord.firstReadAt === "string" && heldRecord.firstReadAt
@@ -604,28 +305,11 @@ export function mergeAlerts(prev, next, {
       lastReadAt: readAt,
       union: union.length,
       kept: rows.length,
-      /* The three ways a row relates to THIS read, kept apart because they
-         answer different questions: `entered` is new flags (the early-warning
-         number), `again` is repetition, and `carried` is what the vendor's
-         rolling window has already dropped while this record still holds it —
-         exactly the rows the old wholesale spread destroyed. */
+
       entered,
       again,
       carried: carriedIn - again,
-      /* THE DENOMINATOR THAT KEEPS MOVING AFTER THE CEILING BITES, and it is
-         needed because the ceiling COMPOUNDS: each read merges into the rows
-         the last one KEPT, so once the record is full `union` can never
-         exceed cap + one read again. A reader watching `union` would see the
-         session's population stop growing at exactly the moment it started
-         overflowing — a ceiling read as a population, which is the defect
-         `cap` and `shed` exist to prevent everywhere else here.
 
-         `everEntered` counts how many times a window has entered this record
-         today. That equals the distinct windows the session flagged unless
-         the ceiling shed one that the vendor then flagged again, which counts
-         it twice — so it is an UPPER bound on the day's distinct windows, and
-         `union` is the lower one: what the record still holds. Two honest
-         bounds beat one number that is quietly neither. */
       everEntered: priorEver + entered,
       shed,
       shedBy,

@@ -230,9 +230,6 @@ try {
   assert.deepEqual([...new Set(browserErrors)], [], "placement emitted browser errors");
   await context.close();
 
-  // A reset in another tab can advance the server generation while a save or
-  // clear is in flight. The result must be discarded and the UI must never
-  // report the pre-reset summary as saved on this device.
   const conflictContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const conflictPage = await conflictContext.newPage();
   const conflictRequests = [];

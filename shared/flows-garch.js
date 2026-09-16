@@ -1,53 +1,7 @@
-/* =============================================================
-   flows-garch.js — a GARCH(1,1) with generalised-error innovations,
-   fitted once, in the pipeline, from the year of closes the card
-   already paid for.
-
-   WHY THE FIT LIVES HERE AND NOT IN A RENDERER.
-
-   The ticker page draws a conditional-volatility path and a fitted
-   return distribution beside the price chart. A renderer that fitted
-   the model itself would be deriving a reading on the client — four
-   parameters and a 252-point path — from a series another panel owns,
-   and two derivations of one series is how a header and the panel
-   under it come to disagree. The pipeline fits it once, publishes the
-   parameters and the path, and the page DRAWS what was published.
-
-   WHAT IS FITTED. Daily log returns in percent, demeaned once, and
-
-       s2[t] = omega + alpha * e[t-1]^2 + beta * s2[t-1]
-
-   with e[t] / s[t] distributed GED(nu). The likelihood is maximised by
-   Nelder-Mead over an unconstrained reparameterisation, so omega stays
-   positive, alpha and beta stay non-negative with alpha + beta < 1, and
-   nu stays in (0.5, 6). The GED collapses to the normal at nu = 2 and is
-   heavier-tailed below it, which is the point of fitting the shape
-   rather than assuming it: a nu near 1.3 is an ordinary equity, and the
-   histogram the page draws over the fitted density is what lets a reader
-   see whether the tails are the model's or the name's.
-
-   WHAT IS PUBLISHED AND WHAT IS NOT. Parameters, the persistence
-   alpha + beta, the unconditional volatility they imply, the
-   conditional-volatility path (annualised, percent) with its dates, and
-   the returns it was fitted to. Standardised residuals are NOT published
-   — they are the returns divided by the path, which the page can do
-   while binning a histogram; publishing them would be the same number
-   twice. No forecast is published either: a one-step-ahead figure is a
-   claim about tomorrow, and this module is a description of the year.
-
-   THE SILENCES. Fewer than sixty usable returns is `unavailable` with
-   the count in the reason — a fit on a month of data says whatever the
-   optimiser wants. A fit that fails to converge or lands on the edge of
-   the parameter space is published with `converged: false` and the
-   reason, because a drawn path from an unconverged fit is still the
-   path the likelihood found; the page says so under it. */
-
-/** log Gamma by the Lanczos approximation, good to ~1e-13 for x > 0. */
 export function lnGamma(x) {
   if (!(x > 0)) return NaN;
   if (x < 0.5) {
-    // Reflection, so small nu (whose 1/nu and 3/nu are large) stays exact
-    // and arguments under a half do not lose digits.
+
     return Math.log(Math.PI / Math.sin(Math.PI * x)) - lnGamma(1 - x);
   }
   const g = 7;
@@ -63,28 +17,24 @@ export function lnGamma(x) {
   return 0.5 * Math.log(2 * Math.PI) + (x + 0.5) * Math.log(t) - t + Math.log(a);
 }
 
-/** The GED scale lambda for shape nu, so that the density has unit variance. */
 export function gedLambda(nu) {
   return Math.sqrt(Math.pow(2, -2 / nu) * Math.exp(lnGamma(1 / nu) - lnGamma(3 / nu)));
 }
 
-/** Unit-variance GED density at z, shape nu. nu = 2 is the standard normal. */
 export function gedDensity(z, nu) {
   const lam = gedLambda(nu);
   const logC = Math.log(nu) - Math.log(lam) - (1 + 1 / nu) * Math.LN2 - lnGamma(1 / nu);
   return Math.exp(logC - 0.5 * Math.pow(Math.abs(z / lam), nu));
 }
 
-/* Unconstrained -> model space. The optimiser walks R^4; this is the map
-   that keeps every point it visits a legal GARCH. */
 function unpack(p) {
   const sig = (v) => 1 / (1 + Math.exp(-v));
   const omega = Math.exp(p[0]);
-  const persist = sig(p[1]) * 0.9999;      // alpha + beta, strictly under one
-  const share = sig(p[2]);                 // alpha's share of the persistence
+  const persist = sig(p[1]) * 0.9999;
+  const share = sig(p[2]);
   const alpha = persist * share;
   const beta = persist - alpha;
-  const nu = 0.5 + 5.5 * sig(p[3]);        // (0.5, 6)
+  const nu = 0.5 + 5.5 * sig(p[3]);
   return { omega, alpha, beta, nu };
 }
 
@@ -102,8 +52,6 @@ function negLogLik(p, e, s2init) {
   return -ll;
 }
 
-/* Nelder-Mead, plain. Four parameters and ~250 observations is small
-   enough that a few hundred simplex steps cost less than one vendor call. */
 function nelderMead(f, x0, { iters = 900, step = 0.5, tol = 1e-8 } = {}) {
   const n = x0.length;
   let simplex = [x0.slice()];
@@ -147,13 +95,6 @@ function nelderMead(f, x0, { iters = 900, step = 0.5, tol = 1e-8 } = {}) {
 export const GARCH_MIN_RETURNS = 60;
 export const GARCH_ANNUALISE = Math.sqrt(252);
 
-/**
- * Fit GARCH(1,1)-GED to a dated series of closes.
- *
- * `closes` and `dates` are parallel, oldest first; a null or non-positive
- * close ends one return and starts the next at the following usable
- * close, and the returned `dates` name the session each return ENDS on.
- */
 export function fitGarch(closes, dates = [], { minReturns = GARCH_MIN_RETURNS } = {}) {
   const px = [], when = [];
   for (let i = 0; i < (closes || []).length; i++) {
@@ -176,8 +117,7 @@ export function fitGarch(closes, dates = [], { minReturns = GARCH_MIN_RETURNS } 
   if (!(v0 > 0)) {
     return { status: "unavailable", reason: "every return in the window is identical, so there is no variance to model" };
   }
-  /* Started at the textbook equity fit — alpha 0.08, beta 0.9, nu 1.5 —
-     with omega sized so the unconditional variance equals the sample's. */
+
   const p0 = [Math.log(v0 * 0.02), Math.log(0.98 / 0.02), Math.log(0.08 / 0.90), Math.log((1.5 - 0.5) / (6 - 1.5))];
   const fit = nelderMead((p) => negLogLik(p, e, v0), p0);
   const { omega, alpha, beta, nu } = unpack(fit.x);
@@ -196,7 +136,7 @@ export function fitGarch(closes, dates = [], { minReturns = GARCH_MIN_RETURNS } 
     beta: Number(beta.toFixed(4)),
     nu: Number(nu.toFixed(3)),
     persistence: Number(persistence.toFixed(4)),
-    /* Annualised percent, like condVol, so the two are one unit. */
+
     longRunVol: persistence < 1
       ? Number((Math.sqrt(omega / (1 - persistence)) * GARCH_ANNUALISE).toFixed(2)) : null,
     logLik: Number((-fit.f).toFixed(2)),

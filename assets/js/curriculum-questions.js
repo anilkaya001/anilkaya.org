@@ -1,9 +1,3 @@
-/* =============================================================
-   curriculum-questions.js — AUTHORED, VERIFIED assessment items.
-   Appended non-destructively to each topic's modules after
-   curriculum.js + curriculum-data.js load. Generated; edit the
-   authoring workflow, not this file by hand.
-   ============================================================= */
 (function () {
   "use strict";
   var C = window.CURRICULUM; if (!C) return;

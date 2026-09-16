@@ -1,9 +1,3 @@
-/* =============================================================
-   skill-catalog.js — answer-free Academy 2.0 skill taxonomy.
-
-   Every course owns seven durable conceptual skills. Assessment answers live
-   in generated banks, never in this lightweight catalogue.
-   ============================================================= */
 (() => {
   "use strict";
 

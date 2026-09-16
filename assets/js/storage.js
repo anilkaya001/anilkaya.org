@@ -1,18 +1,10 @@
-/* =============================================================
-   storage.js — validated, owner-scoped, failure-safe persistence.
-
-   Learning state is stored separately for the anonymous learner and for
-   every verified account. The legacy keys remain an anonymous-only mirror
-   during migration so existing learners keep their progress. Guide width is
-   deliberately device-wide and is never part of a learning-data reset.
-   ============================================================= */
 (() => {
   "use strict";
 
   const ANONYMOUS = "anonymous";
   const FORMAT_VERSION = 2;
   const KEYS = Object.freeze({
-    // Legacy keys. These are read and mirrored only for the anonymous scope.
+
     progress: "iewt:progress",
     gamify: "iewt:gamify",
     progressPrefix: "iewt:progress:v2:",
@@ -31,9 +23,7 @@
     legacyGuideWidth: "iewt:splitW",
   });
   const memory = new Map();
-  // A failed write/removal makes memory authoritative until a later write
-  // succeeds. Otherwise readable but stale localStorage can undo this tab's
-  // current state after QuotaExceededError or another write-only failure.
+
   const dirty = new Set();
   let activeOwner = ANONYMOUS;
 
@@ -60,13 +50,13 @@
     const text = String(value);
     memory.set(key, text);
     try { localStorage.setItem(key, text); dirty.delete(key); }
-    catch { dirty.add(key); /* In-memory fallback remains authoritative. */ }
+    catch { dirty.add(key);   }
   }
 
   function removeRaw(key) {
     memory.delete(key);
     try { localStorage.removeItem(key); dirty.delete(key); }
-    catch { dirty.add(key); /* Treat the in-memory tombstone as authoritative. */ }
+    catch { dirty.add(key);   }
   }
 
   function parseRaw(key) {
@@ -79,8 +69,7 @@
   function normalizeOwner(value) {
     if (value == null || value === "" || value === ANONYMOUS) return ANONYMOUS;
     const id = String(value).trim();
-    // Account ids come from the verified session endpoint. Bound their size so
-    // corrupt or unexpected responses cannot create unbounded storage keys.
+
     if (!id || id.length > 256 || !/^[A-Za-z0-9._:@-]+$/.test(id)) {
       throw new TypeError("Invalid learning-state owner");
     }
@@ -137,10 +126,7 @@
     const curricula = window.CURRICULUM || {};
     const course = Object.hasOwn(curricula, id) ? curricula[id] : null;
     if (course) return course.modules.reduce((total, module) => total + module.stages.length, 0);
-    // Scripts are deferred in dependency order, but persistence must still be
-    // non-destructive if catalogue metadata is delayed or unavailable. Apply a
-    // conservative temporary bound; the next read with metadata loaded will
-    // enforce the exact per-course limit and discard unknown ids.
+
     return !topics.length && !Object.keys(curricula).length && /^[a-z0-9_-]{1,64}$/.test(id) ? 10000 : 0;
   }
 
@@ -315,8 +301,6 @@
       return cleanFor(kind, envelope.value);
     }
 
-    // Pre-v2 values have no owner identity. They are therefore eligible only
-    // for the anonymous scope and are immediately migrated into an envelope.
     const legacy = owner === ANONYMOUS && (kind === "progress" || kind === "gamify") ? parseRaw(KEYS[kind]) : null;
     const value = cleanFor(kind, legacy ?? emptyFor(kind));
     writeScoped(kind, value, owner);
@@ -330,8 +314,7 @@
       owner,
       value: clean,
     }));
-    // Keep old anonymous-only integrations working during the migration. An
-    // authenticated scope is never copied into these unscoped legacy keys.
+
     if (owner === ANONYMOUS && (kind === "progress" || kind === "gamify")) writeRaw(KEYS[kind], JSON.stringify(clean));
     return clean;
   }
@@ -368,9 +351,6 @@
     const previous = activeOwner;
     const claimAnonymous = options.claimAnonymous !== false;
 
-    // A first-time account can claim work completed before sign-in. Existing
-    // account scopes never absorb anonymous/device data, which prevents one
-    // known account from contaminating another on a shared browser.
     if (next !== ANONYMOUS && next !== previous && claimAnonymous && !hasScopedState(next)) {
       const anonymousProgress = readScoped("progress", ANONYMOUS);
       const anonymousGamify = readScoped("gamify", ANONYMOUS);
@@ -578,8 +558,7 @@
     removeScoped("skillMastery", owner);
     removeScoped("skillOutbox", owner);
     removeScoped("projects", owner);
-    // Materialize clean owner-bound state immediately so subsequent reads and
-    // other same-page components cannot observe a removed legacy value.
+
     const cleanProgress = writeScoped("progress", {}, owner);
     const cleanGamify = writeScoped("gamify", emptyFor("gamify"), owner);
     const cleanMastery = writeScoped("mastery", {}, owner);
@@ -644,9 +623,7 @@
   if (typeof window.addEventListener === "function") {
     window.addEventListener("storage", (event) => {
       if (event.key !== KEYS.activeOwner || event.newValue === activeOwner) return;
-      // Storage events do not fire in the writing tab. In this receiving tab,
-      // refresh the in-memory cache before notifying Auth so an external
-      // removal or account switch cannot be masked by a stale cached marker.
+
       if (event.newValue == null) memory.delete(KEYS.activeOwner);
       else memory.set(KEYS.activeOwner, event.newValue);
       dirty.delete(KEYS.activeOwner);

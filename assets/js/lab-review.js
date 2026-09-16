@@ -1,10 +1,3 @@
-/* =============================================================
-   lab-review.js — up-to-five-question Daily Mastery Review.
-
-   This page intentionally does not load Pyodide and never awards course
-   points. Auth.recordMasteryAttempt owns local-first, owner-scoped storage and
-   optional server synchronization; stable attempt ids make a save retry safe.
-   ============================================================= */
 (() => {
   "use strict";
 
@@ -513,12 +506,10 @@
 
   function finishSession() {
     if (!state || state.solved !== state.items.length) return;
-    // Credit the streak for any fully-solved session, not only a full five —
-    // selectSession() returns up to five, so a diligent learner with a small
-    // due queue was previously denied credit for clearing it.
+
     if (state.items.length >= 1 && window.Gamify && typeof window.Gamify.touch === "function") {
       try { void window.Gamify.touch(); }
-      catch { /* Mastery is already saved; streak activity is non-critical. */ }
+      catch {   }
     }
 
     const wrap = el("div", "review-summary");
@@ -621,7 +612,6 @@
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init, { once: true });
   }
-  // Deferred scripts execute after their markup is parsed. Starting here also
-  // avoids waiting behind an unrelated third-party deferred script in Safari.
+
   init();
 })();

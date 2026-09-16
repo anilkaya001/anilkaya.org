@@ -1,7 +1,3 @@
-/* =============================================================
-   mastery.js — pure browser-side mastery scheduling.
-   No DOM or storage access; callers own persistence and rendering.
-   ============================================================= */
 (() => {
   "use strict";
 
