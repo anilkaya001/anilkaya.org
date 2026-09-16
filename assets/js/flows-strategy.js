@@ -780,6 +780,14 @@
     }
     const parts = [state.ticker + " " + MID + " " + ex.length + " listed " +
       (ex.length === 1 ? "expiry" : "expiries")];
+    /* THE LIST'S SOURCE, WHEN IT IS NOT THE SESSION'S. The worker falls back
+       to the open-interest aggregate when the per-session breakdown answers
+       with nothing (pre-open, and observed on a prior session too); that list
+       carries no contract counts, which is why the picker below shows none. */
+    if (state.context.expirySource === "exposure") {
+      parts.push("listed from open interest rather than the session's activity, " +
+        "so no expiry above carries its contract count");
+    }
     parts.push(state.legs.length
       ? state.legs.length + (state.legs.length === 1 ? " leg" : " legs")
       : "no legs yet — use Buy or Sell on a row below");

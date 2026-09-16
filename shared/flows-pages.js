@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "209";
+export const ASSET_VERSION = "210";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -2544,6 +2544,7 @@ export function politicalPage({ username = "" } = {}) {
   return `${head("Flows — Political", lede)}
 ${shell("Political Disclosures", "Options-flow intelligence", "political", username, `
   <div class="flows-status" id="plStatus" role="status">Loading the disclosure window…</div>
+  <p class="flows-stale" id="plStale" role="status" hidden></p>
   <p class="flows-stale" id="plSource" role="status" hidden></p>
 
   <div class="flows-controls">

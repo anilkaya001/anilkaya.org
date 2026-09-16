@@ -2598,6 +2598,34 @@ async function buildStrategyContext(env, ctx, ticker) {
     }
   }
 
+  /* THE LISTING, WHEN THE SESSION'S ACTIVITY IS SILENT. Both reads above ask
+     an ACTIVITY endpoint what is LISTED: expiry-breakdown is volume and open
+     interest per expiry for one trading day, so it is empty for any day that
+     has not traded and — observed on NVDA on 2026-09-16, session 2026-09-15,
+     with the dated retry already in place — can be empty for the prior
+     session too. The page then told a reader that the most-traded option
+     name in the market "lists no option expiries" as a fact about the name.
+
+     /greek-exposure/expiry is the end-of-day open-interest aggregate the
+     pipeline already reads for every enriched name, one row per expiry that
+     carries open interest — a LISTING, which exists at every hour. It does not
+     report contract counts, so `chains`, `oi` and `volume` are null here and
+     the picker withholds its size warning rather than inventing one; the
+     payload names the source so the page can say which list it is showing.
+     Sequential, after the four-wide read above, so the connection ceiling is
+     untouched; spent only when both breakdown reads answered with nothing. */
+  let expirySource = "breakdown";
+  if (breakdown !== null && !expiries.length && asOf) {
+    const exposure = await uwFetch(env, `/api/stock/${t}/greek-exposure/expiry`, {})
+      .catch(() => null);
+    if (exposure !== null) {
+      const listed = readExpiries(exposure)
+        .filter((e) => e.expiry >= asOf)
+        .map((e) => ({ expiry: e.expiry, chains: null, oi: null, volume: null }));
+      if (listed.length) { expiries = listed; expirySource = "exposure"; }
+    }
+  }
+
   const index = await cachedIndexSpot(env, ctx);
 
   return {
@@ -2620,6 +2648,10 @@ async function buildStrategyContext(env, ctx, ticker) {
        session, and the picker says so rather than implying the vendor
        volunteered it. */
     expiryDate,
+    /* WHICH ENDPOINT THE LIST IS FROM. "breakdown" is the session's activity
+       per expiry, with sizes; "exposure" is the open-interest aggregate,
+       without them. A reader is told when it is the second. */
+    expirySource,
     /* Beta is `undefined` on an /info entry cached before beta was read, and
        null when the vendor has none. Both are absences and both must render as
        one; neither is a beta of zero. */

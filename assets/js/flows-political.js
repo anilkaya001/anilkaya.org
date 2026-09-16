@@ -963,11 +963,39 @@
       .then(function (r) {
         if (r.status === 401) { location.replace("/flows/"); return null; }
         if (!r.ok) throw new Error("HTTP " + r.status);
-        return r.json();
+        /* THE WRITE TIME RIDES ON THE PAYLOAD, as on every other route. This
+           was the one Flows page that dropped X-Payload-Updated, so a
+           political window the pipeline had stopped rewriting read as
+           current for as long as the store held it. "0" is what the Worker
+           sends for a key it never wrote and is not a time. */
+        var at = Number(r.headers.get("X-Payload-Updated"));
+        return r.json().then(function (body) {
+          if (body && typeof body === "object") body.__updatedAt = at > 0 ? at : null;
+          return body;
+        });
       });
   }
 
   var status = document.getElementById("plStatus");
+
+  /* THE SAME STALENESS RULE THE BOARD, THE WATCH LIST AND THE CALENDAR USE:
+     a payload written more than thirty hours ago has missed a nightly run.
+     It matters on this page in a particular way — every row here is weeks
+     old by law, so a stale window does not LOOK stale; it looks like a quiet
+     fortnight. The band names the age and the body class dims the tables,
+     exactly as the other routes do. */
+  function renderStale(updatedAt) {
+    var band = document.getElementById("plStale");
+    if (!band || !updatedAt) return;
+    var ageHours = (Date.now() - updatedAt) / 3600000;
+    if (ageHours <= 30) return;
+    var days = Math.round(ageHours / 24);
+    band.hidden = false;
+    band.textContent = "This disclosure window was last written " + days + " " +
+      (days === 1 ? "day" : "days") + " ago. The pipeline has not published since, so " +
+      "the newest filing here is the newest as of that run, not as of today.";
+    document.body.classList.add("is-stale");
+  }
 
   get("/api/flows/political").then(function (p) {
     if (!p) return;
@@ -980,6 +1008,7 @@
       return;
     }
 
+    renderStale(p.__updatedAt);
     paintBuyers(p);
     paintAssets(p);
     paintRecent(p);

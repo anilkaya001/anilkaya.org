@@ -1663,12 +1663,41 @@ function candlesAscending(candles) {
   const rows = (candles || []).map((c) => ({
     c,
     t: Date.parse(c.start_time || c.end_time || c.date || ""),
+    day: String((c && (c.start_time || c.end_time || c.date)) || "").slice(0, 10),
   }));
   // If no candle carries a parseable timestamp there is nothing to sort by;
   // fall back to the given order rather than discarding the whole series.
   if (!rows.some((r) => Number.isFinite(r.t))) return candles || [];
-  return rows
-    .filter((r) => Number.isFinite(r.t))
+  /* ONE BAR PER SESSION, OR NOTHING DOWNSTREAM MEANS WHAT IT SAYS.
+
+     The vendor's /ohlc/1d does not return one row per session. Read out of
+     the live store on 2026-09-13, every one of the 50 carded names carried
+     between 2.377 and 3.000 rows per calendar date (mean 2.917), and the
+     duplicates are not repeats: ROST's 2026-08-20 holds closes 230.33 /
+     248.75 / 228.99 against volumes 6,900 / 2.6M / 6.3M — progressive
+     revisions of the same daily bar, the last one the settled session.
+
+     Every consumer of this function counts ELEMENTS and calls them sessions:
+     atr14 takes the last 40, realizedVol the last `window`, the sparkline
+     the last 42, the ticker's candles the last 252 and labels them a year.
+     On that series the 21-"session" realized vol spanned nine sessions and
+     annualised sub-daily returns by root-252 — ROST read 12.23% where the
+     de-duplicated series reads 28.62% — and the year of candles held 84 to
+     106 sessions. Two readers taking different revisions of one date is also
+     how the ticker page and the desk printed two spots for one name.
+
+     The bar kept is the one with the MOST volume, which on every date
+     inspected is the last revision and the only one whose volume is a
+     session's. `>=` so a tie keeps the later row. Rows without a parseable
+     timestamp are dropped here as they always were. */
+  const bySession = new Map();
+  for (const r of rows) {
+    if (!Number.isFinite(r.t)) continue;
+    const key = r.day.length === 10 ? r.day : String(r.t);
+    const held = bySession.get(key);
+    if (!held || num(r.c.volume, -1) >= num(held.c.volume, -1)) bySession.set(key, r);
+  }
+  return [...bySession.values()]
     .sort((a, b) => a.t - b.t)
     .map((r) => r.c);
 }
@@ -1783,12 +1812,20 @@ function computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, oh
     // --- volatility, entirely from data already fetched ---
     iv30,
     rv30,
-    /* THE VARIANCE RISK PREMIUM. iv30d is the 30-day implied vol the screener
-       already returns; rv30 is close-to-close realized vol over the same 30
-       sessions, from the candles fetched for ATR. Both are annualized vols of
-       the same underlying over the same horizon, so the difference is
-       identified with no free parameter and no extra API call: positive means
-       the option market is charging more than the stock has been delivering. */
+    /* iv30d is the 30-day implied vol the screener already returns; rv30 is
+       close-to-close realized vol over the last 21 SESSIONS (thirty calendar
+       days of trading, see the window note above), from the candles fetched
+       for ATR — one bar per session since candlesAscending collapsed the
+       vendor's intraday revisions, which is what makes "21 sessions" true
+       rather than 21 rows. Both are annualized vols of the same underlying
+       over the same calendar horizon, so the difference is identified with no
+       free parameter and no extra API call: positive means the option market
+       is charging more than the stock has been delivering.
+
+       IT IS A VOL-POINT SPREAD, NOT A VARIANCE RISK PREMIUM. A variance risk
+       premium is IV² − RV²; this field is IV − RV in vol points. The name
+       stays until the renderers that read it are renamed with it (that is a
+       field a page reads), and the reading beside it says "vol points". */
     vrp: iv30 !== null && rv30 !== null ? iv30 - rv30 : null,
     ivMomentum: tilt && tilt.ivMomentum !== null ? tilt.ivMomentum : null,
     ivRank: tilt && Number.isFinite(tilt.ivRank) ? tilt.ivRank : null,

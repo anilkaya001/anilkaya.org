@@ -86,6 +86,26 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(candlesAscending(undated).length === 1,
      "candles with no parseable timestamp keep their given order rather than vanishing");
 
+  /* ONE BAR PER SESSION. The live store on 2026-09-13 held 2.4 to 3.0 rows
+     per calendar date on every carded name: the vendor returns intraday
+     revisions of the daily bar, and each revision carries the volume seen so
+     far. These are ROST's own 2026-05-04 and 05-05 rows. The bar that
+     survives is the fullest revision, which is the settled session. */
+  const revised = [
+    { start_time: "2026-05-04T13:30:00Z", close: "230.49", volume: 6361 },
+    { start_time: "2026-05-04T13:30:00Z", close: "226.02", volume: 442349 },
+    { start_time: "2026-05-04T13:30:00Z", close: "226.02", volume: 2341823 },
+    { start_time: "2026-05-05T13:30:00Z", close: "227", volume: 543208 },
+    { start_time: "2026-05-05T13:30:00Z", close: "227.42", volume: 1677636 },
+  ];
+  const one = candlesAscending(revised);
+  ok(one.length === 2,
+     `three revisions of one session collapse to one bar (${one.length} bars from 5 rows)`);
+  ok(one[0].volume === 2341823 && one[1].volume === 1677636,
+     "and the bar kept is the fullest revision, not the first or the last by position");
+  ok(candlesAscending(revised.slice().reverse())[0].volume === 2341823,
+     "whichever order the vendor returned the revisions in");
+
   ok(atr14([]) === 0, "no candles yields no ATR");
   ok(atr14(ascending.slice(0, 5)) === 0, "too few candles yields no ATR rather than a guess");
 }
