@@ -375,11 +375,18 @@ try {
          on <html>: a plain scrollTo animates, and a measurement taken a frame
          later reads the start of the animation rather than its end. */
       const measure = async () => {
-        window.scrollTo({ top: 900, behavior: "instant" });
+        /* THE SHELL SCROLLS #ftScroll AT THIS WIDTH, NOT THE WINDOW: the page
+           is pinned to the viewport and the reading scrolls inside that box,
+           so the 900px of travel goes to whichever of the two can move. Read
+           per call, because the grid is given its 3000px only after this
+           function is defined. */
+        const sc = document.getElementById("ftScroll");
+        const scrollBox = sc && sc.scrollHeight > sc.clientHeight ? sc : window;
+        scrollBox.scrollTo({ top: 900, behavior: "instant" });
         await new Promise((r) => setTimeout(r, 250));
         const nav = document.querySelector(".topbar").getBoundingClientRect();
         const box = el.getBoundingClientRect();
-        window.scrollTo({ top: 0, behavior: "instant" });
+        scrollBox.scrollTo({ top: 0, behavior: "instant" });
         await new Promise((r) => setTimeout(r, 250));
         return { headTop: box.top, height: box.height, navBottom: nav.bottom };
       };

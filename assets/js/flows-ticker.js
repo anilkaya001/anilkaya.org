@@ -55,6 +55,12 @@
 
   const grid = document.getElementById("ftGrid");
   if (!grid) return;
+  /* THE BOX THAT SCROLLS. At desktop widths the shell pins the page to the
+     viewport and #ftScroll carries the reading, so "where the page is" is
+     that box's scrollTop; on a phone the shell is off and it is the window's.
+     One expression reads both shapes, because exactly one term is non-zero. */
+  const scroller = document.getElementById("ftScroll");
+  const scrollPos = () => Math.round(window.scrollY + (scroller ? scroller.scrollTop : 0));
 
   const P = window.FlowsPanels;
   if (!P) {
@@ -6111,9 +6117,9 @@
     const { target, y } = jumped;
     jumped = null;
     if (!target.isConnected) return;
-    if (Math.abs(Math.round(window.scrollY) - y) > 1) return;
+    if (Math.abs(scrollPos() - y) > 1) return;
     target.scrollIntoView({ block: "start" });
-    jumped = { target, y: Math.round(window.scrollY) };
+    jumped = { target, y: scrollPos() };
   }
 
   function honourHash() {
@@ -6130,7 +6136,7 @@
     target.scrollIntoView({ block: "start" });
     /* WHERE THE JUMP PUT US, so a later re-measure can tell a bar that grew
        under a settled reader from a reader who has scrolled away. */
-    jumped = { target, y: Math.round(window.scrollY) };
+    jumped = { target, y: scrollPos() };
     /* FOCUS FOLLOWS THE JUMP, or a keyboard reader lands visually on panel 14
        and carries on tabbing from panel 1. */
     if (!target.hasAttribute("tabindex")) target.tabIndex = -1;
@@ -6438,6 +6444,7 @@
     }, { rootMargin: "-25% 0px -60% 0px" });
     for (const station of grid.querySelectorAll(".ft-station[data-group]")) io.observe(station);
     addEventListener("scroll", schedule, { passive: true });
+    if (scroller) scroller.addEventListener("scroll", schedule, { passive: true });
   }
 
   /* history.replaceState rather than `location.hash = …`: assigning to the

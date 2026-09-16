@@ -21,7 +21,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "210";
+export const ASSET_VERSION = "211";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -1827,6 +1827,13 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
        same value the strip and the panels use; the difference is presentation
        only. A hero that re-derived a score would be a header that can
        disagree with the panel under it. -->
+  <!-- THE BOX THAT SCROLLS. At desktop widths the shell (flows.css, "THE
+       TICKER SHELL") pins the page to the viewport: the rail, the topbar and
+       the status band stay put, and everything a reader scrolls -- the hero,
+       the sticky bar, the rows and the panel grid -- scrolls inside this one
+       element. On a phone the shell is off and this is an ordinary div. The
+       controller reads its scrollTop where it used to read window.scrollY. -->
+  <div class="ft-scroll" id="ftScroll">
   <section class="ft-hero" id="ftHero" hidden aria-label="This name at a glance">
     <!-- THE IDENTITY IS THE SYMBOL AND WHAT IDENTIFIES IT, stacked, which is
          where the design puts the company name and where a "Sector" column of
@@ -2374,6 +2381,7 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
   </div>
 
   <p class="flows-foot" id="ftFoot"></p>
+  </div>
 `)}
 <dialog id="ftZoom" class="ft-zoom" aria-labelledby="ftZoomH">
   <div class="ft-zoom-inner">

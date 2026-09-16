@@ -3655,7 +3655,11 @@ try {
        against a sticky bar that had not reached its offset yet. Two
        consecutive animation frames at the same offset is settled. */
     const settled = (page) => page.waitForFunction(() => {
-      const y = Math.round(window.scrollY);
+      /* THE SHELL SCROLLS #ftScroll AT THIS WIDTH, NOT THE WINDOW: the page
+         is pinned to the viewport and the reading scrolls inside that box,
+         so the settled position is the sum of the two, one of which is 0. */
+      const sc = document.getElementById("ftScroll");
+      const y = Math.round(window.scrollY + (sc ? sc.scrollTop : 0));
       const same = window.__lastY === y;
       window.__lastY = y;
       return same && y > 100;
@@ -3696,7 +3700,7 @@ try {
         const s = document.getElementById("panel-" + k);
         const r = s.getBoundingClientRect();
         return {
-          top: r.top, focused: document.activeElement === s, scrolled: window.scrollY,
+          top: r.top, focused: document.activeElement === s, scrolled: window.scrollY + (document.getElementById("ftScroll") || { scrollTop: 0 }).scrollTop,
           /* The sticky bar must not be sitting ON the panel the link named. */
           barBottom: document.querySelector(".ft-bar").getBoundingClientRect().bottom,
         };
@@ -3719,7 +3723,7 @@ try {
       const { page, errors } = await open(g.hash);
       await settled(page);
       const grp = await page.evaluate((h) => ({
-        scrolled: window.scrollY,
+        scrolled: window.scrollY + (document.getElementById("ftScroll") || { scrollTop: 0 }).scrollTop,
         current: [...document.querySelectorAll(".ft-tab[aria-current='true']")]
           .map((a) => a.getAttribute("href")),
         headTop: document.getElementById(h).getBoundingClientRect().top,

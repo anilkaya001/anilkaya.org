@@ -11680,3 +11680,71 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
 .flows-body .desk-add,
 .flows-body .btn--gold,
 .flows-body .pill a.is-current { color: #08101f; }
+
+/* =====================================================================
+   THE TICKER SHELL: THE PAGE DOES NOT SCROLL, THE READING DOES.
+
+   Measured before this block existed: the ticker page ran to eight
+   viewports at 1440x900 and the overview to five, and the one element
+   naming the stock survived that only by being sticky. A terminal is not
+   a document. At desktop widths the body is now exactly the viewport and
+   never scrolls; the rail, the topbar and the status bands are fixed
+   chrome, and everything a reader actually reads -- the hero, the bar,
+   the rows and the panel grid -- lives in #ftScroll, the ONE box that
+   scrolls. The bar sticks to the top of that box rather than to the
+   topbar, and every anchor's clearance is measured from the bar alone,
+   because the topbar is no longer over the box the anchor scrolls in.
+
+   BELOW 60rem THE SHELL IS OFF, deliberately: the rail is a strip there,
+   the bar is measured against a phone budget, and a page that scrolls is
+   what a thumb expects. The breakpoint is the rail's own, so the two
+   layouts change together.
+
+   WHAT DOES NOT CHANGE: no panel, reading, silence or width. The stations
+   still narrow with the tabs and ?s= still names one; ?s=all still puts
+   every card in the box. The enlarge dialog is position:fixed and sits
+   outside main, so it is untouched.
+
+   The controller reads #ftScroll's scrollTop where it read window.scrollY
+   (flows-ticker.js, scrollPos), and both browser suites scroll the box. */
+@media (min-width: 60rem) {
+  .flows-body[data-flows-page="ticker"] {
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .flows-body[data-flows-page="ticker"] > .flows-main {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    padding-bottom: 0;
+  }
+  /* The status and stale bands are chrome: they never shrink and never
+     scroll away, which for a warning band is the point. */
+  .flows-body[data-flows-page="ticker"] > .flows-main > * { flex: 0 0 auto; }
+  .flows-body[data-flows-page="ticker"] > .flows-main > .ft-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    /* The gutter is reserved whether or not the box overflows, so a
+       station that fits does not draw a hair wider than one that does. */
+    scrollbar-gutter: stable;
+    scroll-behavior: smooth;
+    padding-bottom: var(--space-3);
+  }
+  /* The bar sticks to the top of the box it scrolls in. 4.4rem was the
+     topbar's clearance, and the topbar is not over this box. The served
+     shape's own sticky header (before the controller builds the bar) is
+     given the same offset for the same reason. */
+  .ft-scroll > .ft-bar, .ft-scroll > .ft-head { top: 0; }
+  .ft-scroll .ft-grid .ft-panel, .ft-scroll .ft-grid .ft-group {
+    scroll-margin-top: calc(var(--ft-bar-h) + 0.6rem);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ft-scroll { scroll-behavior: auto; }
+}
