@@ -1071,7 +1071,7 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
   <aside class="ft-brief" id="ftBrief" hidden aria-labelledby="ftBriefH">
     <h2 class="ft-brief-h" id="ftBriefH">
       <span class="ft-brief-ic" aria-hidden="true">${icon("sun")}</span>
-      <span class="ft-brief-hn">AI Summary</span>
+      <span class="ft-brief-hn">Brief</span>
       <span class="ft-brief-beta">Beta</span>
     </h2>
     <ol class="ft-brief-l" id="ftBriefL"></ol>

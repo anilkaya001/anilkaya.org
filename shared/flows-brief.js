@@ -330,5 +330,17 @@ export function buildBrief(store) {
     today: briefToday(store),
     yesterday: briefYesterday(store),
     next: briefNext(store),
+    notes: {
+      measured: "Every figure above was measured by the nightly pipeline at the close of the " +
+        "session it names and is quoted here unchanged; nothing on this page is computed " +
+        "live or forecast.",
+      scope: "Scores rank attention on one session. A high score is a reason to look, not a " +
+        "direction, a horizon or a return.",
+      silence: "Where a fact is absent the brief says which of three things happened: not " +
+        "published, not readable, or measured and found empty. It never fills the gap with " +
+        "a neutral value.",
+      filings: "Congressional and insider rows are statutory disclosures filed days to weeks " +
+        "after the trade. They describe what was disclosed, not what is being done now.",
+    },
   };
 }
