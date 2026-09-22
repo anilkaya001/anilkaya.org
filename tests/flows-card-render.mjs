@@ -48,6 +48,19 @@ const panelsSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-panels.js"), 
 assert.ok(panelsSrc.lastIndexOf("})();") > 0, "flows-panels.js is still an IIFE");
 
 const drawersSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-drawers.js"), "utf8");
+
+{
+  const tickerSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-ticker.js"), "utf8");
+  const glued = [...tickerSrc.matchAll(/"([^"\n]*)" \+ P\.polarity\(/g)]
+    .filter((m) => m[1] !== "" && !/ $/.test(m[1]))
+    .map((m) => m[0]);
+  eq(glued.length, 0,
+     `every class string joined to P.polarity() ends in a space (${glued.join(" | ") || "none glued"}) ` +
+     `— polarity() returns "is-pos" with no leading space, so "ft-hero-v" + "is-pos" is the one ` +
+     `class ft-hero-vis-pos, which matches no rule: the hero score rendered at 16px white beside ` +
+     `four 30px coloured neighbours, the day-change chips lost their colour and the session ` +
+     `table's score cells lost their right alignment, seven sites at once`);
+}
 assert.ok(/__register\(/.test(drawersSrc),
   "flows-drawers.js hands its drawers back through FlowsPanels.__register");
 

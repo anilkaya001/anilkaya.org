@@ -65,7 +65,7 @@
     note.setAttribute("data-empty", "unavailable");
     note.append(el("strong", null, "Unavailable \u2014 "));
     note.append(document.createTextNode(
-      reason || "This panel's data source did not return.",
+      String(reason || "This panel's data source did not return").replace(/\.+$/, "") + ".",
     ));
     host.append(note);
   }

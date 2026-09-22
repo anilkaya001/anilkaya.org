@@ -5738,7 +5738,7 @@
     let flipNode;
     if (flipPct === null) {
 
-      flipNode = idChip("ftFlip", "", DASH, {
+      flipNode = idChip("ftFlip", "flip", DASH, {
         empty: "unavailable",
         title: levelsPanel && levelsPanel.status === "ok"
           ? "No gamma flip resolved on this name's ladder, so there is no distance to " +
@@ -6264,6 +6264,8 @@
         ? r.provenance
         : (r.llm ? "Wording by a language model; figures measured by the pipeline."
           : "Deterministic reading. No model was asked.");
+      if (r.llm && typeof r.model === "string" && r.model) src.title = r.model;
+      else src.removeAttribute("title");
       neuronState = "ok:" + text + ideasKey;
       return;
     }

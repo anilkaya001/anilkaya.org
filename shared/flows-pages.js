@@ -175,9 +175,17 @@ function neuronWords(text) {
     `<span class="ak-w" style="--d:${Math.min(i, NEURON_CLAMP)}">${escapeHTML(word)}</span>`).join(" ");
 }
 
+export function modelName(id) {
+  if (typeof id !== "string" || !id) return "a language model";
+  if (!id.startsWith("@cf/")) return id;
+  const words = id.split("/").pop().split("-")
+    .filter((w) => !/^(fp8|fp16|int8|int4|awq|fast|instruct|it|chat|hf)$/i.test(w));
+  return words.map((w) => (/^\d/.test(w) || /^(gpt|oss)$/i.test(w) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1))).join(" ");
+}
+
 export function neuronProvenance(summary) {
   if (summary.llm) {
-    return "Wording by " + escapeHTML(summary.model || "a language model") + "; figures measured by the pipeline.";
+    return "Wording by " + escapeHTML(modelName(summary.model)) + "; figures measured by the pipeline.";
   }
   const guard = typeof summary.guard === "string" ? summary.guard : "";
 
@@ -223,7 +231,7 @@ function neuronDock(summary, { scope = "this session" } = {}) {
     <div class="ak-neuron-body">
       <p class="ak-neuron-h" id="akNeuronH">Neuron ${when}</p>
       <p class="ak-neuron-say">${words}<span class="ak-caret" style="--d:${caretAt}" aria-hidden="true"></span></p>
-      <p class="ak-neuron-src">${neuronProvenance(summary)}</p>
+      <p class="ak-neuron-src"${summary.llm && summary.model ? ` title="${escapeHTML(summary.model)}"` : ""}>${neuronProvenance(summary)}</p>
     </div>
   </section>`;
 }

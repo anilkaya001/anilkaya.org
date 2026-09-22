@@ -257,8 +257,8 @@ function directionVotes(card) {
       if (g !== null) {
         const decisive = Math.abs(g) >= T.DISPLACEMENT_ATR;
         add("displacement", decisive ? Math.sign(g) : 0, r,
-          "today\u2019s flow builds gamma " + Math.abs(g).toFixed(2) + "\u03c3 " + (g > 0 ? "above" : "below") + " the standing book" +
-          (decisive ? "" : " (inside " + T.DISPLACEMENT_ATR + "\u03c3, so no vote)"));
+          "today\u2019s flow builds gamma " + Math.abs(g).toFixed(2) + " ATR " + (g > 0 ? "above" : "below") + " the standing book" +
+          (decisive ? "" : " (inside " + T.DISPLACEMENT_ATR + " ATR, so no vote)"));
       }
     }
   }
