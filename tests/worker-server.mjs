@@ -151,6 +151,7 @@ export async function startWorker({ extraVars = [] } = {}) {
     "--var", "FLOWS_SESSION_EPOCH:1",
 
     "--var", "FLOWS_ASK_MODEL:",
+    "--var", "FLOWS_ASK_FALLBACK_MODEL:",
     ...extraVars.flatMap((v) => ["--var", v]),
     "--log-level", "error", "--show-interactive-dev-session=false",
   ], {

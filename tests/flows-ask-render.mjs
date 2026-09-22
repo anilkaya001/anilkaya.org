@@ -286,8 +286,9 @@ ok(!/10,000/.test(norate.open),
 ok(/7 times today/.test(norate.open),
    "the call count is still printed, because it was still measured — withholding the derived " +
    "figure is not a reason to withhold the measurement it was derived from");
-ok(/rate for the configured model is not set/i.test(norate.open),
-   "and the reason is named, so a reader can tell a missing rate from a spent allowance");
+ok(/rate for a model this site asked is not set/i.test(norate.open),
+   "and the reason is named, so a reader can tell a missing rate from a spent allowance — " +
+   "worded for the two configured models, since the fallback is billed at its own rate");
 
 const fresh = await meterOf(SPEND({ calls: 0, tokensIn: 0, tokensOut: 0,
   neurons: 0, remaining: 10000 }));

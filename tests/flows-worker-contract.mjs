@@ -583,6 +583,10 @@ try {
          "and the condition travels WITH the number rather than beside it, because the " +
          "allowance is the account's: a remaining balance separated from the fact that it " +
          "counts only this site's own calls is the confident unmeasured figure again");
+      ok(Array.isArray(spend.byModel) && spend.byModel.length === 0,
+         "the meter publishes its per-model split, empty on a day with no call: the fallback " +
+         "model is billed at about five times the primary's rate, so a day total at one rate " +
+         "would understate the spend exactly when the fallback is doing the writing");
       eq((await fetch(url("/api/flows/ai-usage"),
         { method: "POST", redirect: "manual", headers: auth })).status, 405,
          "and it is a read: only the question route takes a POST under /api/flows");

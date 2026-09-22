@@ -196,12 +196,13 @@ export function neuronProvenance(summary) {
   if (guard === "summary:empty") return "Deterministic reading: the model returned ideas without a summary.";
   if (guard.startsWith("unreachable:")) {
     const why = guard.slice("unreachable:".length);
-    const said = why === "3036"
+    const said = why === "allowance" || why === "3036"
       ? "the day\u2019s free model allowance is spent, resetting 00:00 UTC"
-      : why === "3040" ? "the model had no capacity, and nothing was spent"
-        : why === "5035" ? "the configured model is not available on this plan"
+      : why === "capacity" || why === "3040" ? "the model had no capacity, and nothing was spent"
+        : why === "plan" || why === "5035" ? "the configured model is not available on this plan"
           : why === "empty" ? "the model answered with nothing"
-            : "the model did not answer";
+            : why === "length" ? "the model spent its whole answer budget before writing any text"
+              : "the model did not answer";
     return "Deterministic reading: " + said + ".";
   }
   return "Deterministic reading. No model was asked.";

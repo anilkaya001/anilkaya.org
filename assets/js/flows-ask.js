@@ -73,9 +73,9 @@
         (calls === 1 ? "" : "s") + " today" + (tokIn !== null && tokOut !== null
           ? ", for " + meterFigure(tokIn) + " tokens in and " + meterFigure(tokOut) +
             " tokens out. Tokens are what the model itself reported; the credit figure is " +
-            "arithmetic over them at the published rate for the configured model, done when " +
-            "this page was drawn rather than stored, so a corrected rate repairs the whole " +
-            "history rather than leaving it stamped at yesterday's."
+            "arithmetic over them at the published rate for the model that answered each " +
+            "call, done when this page was drawn rather than stored, so a corrected rate " +
+            "repairs the whole history rather than leaving it stamped at yesterday's."
           : "."));
     }
     how.push("Cloudflare is the authority on the allowance and this meter is not. It can " +
@@ -90,7 +90,7 @@
         : "This site has asked the model " + meterFigure(calls) + " time" +
           (calls === 1 ? "" : "s") + " today.";
       box.append(el("p", "ak-meter-say", said + " The credits that cost is not shown: the " +
-        "per-token rate for the configured model is not set here, and deriving one would " +
+        "per-token rate for a model this site asked is not set here, and deriving one would " +
         "put a plausible wrong number where a measurement belongs."));
       box.append(howBox("How this is counted", how));
       return box;

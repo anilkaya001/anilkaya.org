@@ -7,6 +7,7 @@ import {
 import { FLOWS_PAGES, modelName, neuronProvenance } from "./shared/flows-pages.js";
 import * as FLOWS_ASK from "./shared/flows-ask.js";
 import * as FLOWS_NEURON from "./shared/flows-neuron.js";
+import { aiChain, aiCallSignature, askModels, fallbackNote, retryableGuard, spendShape } from "./shared/flows-ai.js";
 import { COURSE_STAGE_POINTS } from "./shared/course-points.js";
 import { COURSE_BY_ID, COURSE_BY_SLUG, COURSE_TOPICS, SITE_ORIGIN } from "./shared/course-seo.js";
 import { REVIEW_ITEM_BY_ID } from "./shared/review-manifest.js";
@@ -120,6 +121,7 @@ const FLOWS_SCHEMA_SQL = [
   "CREATE TABLE IF NOT EXISTS flows_login_failures (username TEXT PRIMARY KEY, failures INTEGER NOT NULL DEFAULT 0 CHECK (failures BETWEEN 0 AND 1000000), first_at INTEGER NOT NULL CHECK (first_at > 0))",
 
   "CREATE TABLE IF NOT EXISTS flows_ai_usage (day TEXT PRIMARY KEY, calls INTEGER NOT NULL DEFAULT 0 CHECK (calls >= 0), tokens_in INTEGER NOT NULL DEFAULT 0 CHECK (tokens_in >= 0), tokens_out INTEGER NOT NULL DEFAULT 0 CHECK (tokens_out >= 0))",
+  "CREATE TABLE IF NOT EXISTS flows_ai_usage_model (day TEXT NOT NULL, model TEXT NOT NULL, calls INTEGER NOT NULL DEFAULT 0 CHECK (calls >= 0), tokens_in INTEGER NOT NULL DEFAULT 0 CHECK (tokens_in >= 0), tokens_out INTEGER NOT NULL DEFAULT 0 CHECK (tokens_out >= 0), PRIMARY KEY (day, model))",
 
   "CREATE TABLE IF NOT EXISTS flows_ai_summary (scope TEXT PRIMARY KEY, text TEXT NOT NULL, llm INTEGER NOT NULL DEFAULT 0 CHECK (llm IN (0, 1)), model TEXT, fingerprint TEXT NOT NULL, guard TEXT, generated_at TEXT NOT NULL)",
   "CREATE TABLE IF NOT EXISTS flows_neuron (scope TEXT PRIMARY KEY, version INTEGER NOT NULL, fingerprint TEXT NOT NULL, summary TEXT NOT NULL, ideas TEXT NOT NULL, llm INTEGER NOT NULL DEFAULT 0 CHECK (llm IN (0, 1)), model TEXT, guard TEXT, generated_at TEXT NOT NULL)",
@@ -1036,59 +1038,12 @@ function passthrough(stored) {
   });
 }
 
-const askModel = (env) => {
-  const m = env && typeof env.FLOWS_ASK_MODEL === "string" ? env.FLOWS_ASK_MODEL.trim() : "";
-  return m === "" ? null : m;
-};
+const askModel = (env) => aiChain(env)[0] || null;
 
 const ASK_QUESTION_MAX = 400;
 
-function askFailure(error) {
-  const text = error && error.message ? String(error.message) : "";
-  const code = /\b(3036|3040|5035|5006)\b/.exec(text);
-  switch (code && code[1]) {
-    case "3036": return { why: "allowance",
-      say: "The free daily allowance for the model is spent for today. It resets at " +
-        "00:00 UTC. The readings below were measured by the pipeline and are unaffected." };
-    case "3040": return { why: "capacity",
-      say: "The model had no capacity for this question just now — nothing was spent, " +
-        "and asking again shortly may work. The readings below are unaffected." };
-    case "5035": return { why: "plan",
-      say: "The model this site uses is no longer available on its plan, which is a " +
-        "configuration fault here rather than a limit you reached. The readings below " +
-        "were measured by the pipeline and are unaffected." };
-    default: return { why: "unreachable",
-      say: "The model could not be reached, and it did not say why. The readings below " +
-        "were measured by the pipeline and are unaffected." };
-  }
-}
-
-const AI_DAILY_NEURONS = 10000;
-
-function neuronRates(env) {
-  const raw = env && typeof env.FLOWS_ASK_NEURONS === "string" ? env.FLOWS_ASK_NEURONS : "";
-  const parts = raw.split(",").map((x) => Number(x.trim()));
-  if (parts.length !== 2 || !parts.every((x) => Number.isFinite(x) && x >= 0)) return null;
-  return { inPerM: parts[0], outPerM: parts[1] };
-}
-
 function aiDay() {
   return new Date().toISOString().slice(0, 10);
-}
-
-function spendShape(env, day, calls, tokensIn, tokensOut) {
-  const rates = neuronRates(env);
-
-  const neurons = rates === null ? null
-    : Math.ceil((tokensIn * rates.inPerM + tokensOut * rates.outPerM) / 1e6);
-  return {
-    day, calls, tokensIn, tokensOut,
-    allowanceNeurons: AI_DAILY_NEURONS,
-    neurons,
-
-    remaining: neurons === null ? null : Math.max(0, AI_DAILY_NEURONS - neurons),
-    assumesSoleSpender: true,
-  };
 }
 
 async function askSpend(env) {
@@ -1098,29 +1053,42 @@ async function askSpend(env) {
   const row = await env.DB.prepare(
     "SELECT calls, tokens_in, tokens_out FROM flows_ai_usage WHERE day = ?"
   ).bind(day).first().catch(() => null);
+  const split = await env.DB.prepare(
+    "SELECT model, calls, tokens_in, tokens_out FROM flows_ai_usage_model WHERE day = ? ORDER BY model"
+  ).bind(day).all().catch(() => null);
 
   const calls = row ? Number(row.calls) || 0 : 0;
   const tokensIn = row ? Number(row.tokens_in) || 0 : 0;
   const tokensOut = row ? Number(row.tokens_out) || 0 : 0;
-  return spendShape(env, day, calls, tokensIn, tokensOut);
+  const byModel = split && Array.isArray(split.results)
+    ? split.results.map((r) => ({ model: String(r.model), calls: Number(r.calls) || 0,
+        tokensIn: Number(r.tokens_in) || 0, tokensOut: Number(r.tokens_out) || 0 }))
+    : null;
+  return spendShape(env, day, calls, tokensIn, tokensOut, byModel);
 }
 
-async function askRecordSpend(env, usage) {
+async function askRecordSpend(env, usage, model) {
   if (!env.DB || !usage) return null;
   const day = aiDay();
 
   const inTok = Math.max(0, Math.round(Number(usage.prompt_tokens) || 0));
   const outTok = Math.max(0, Math.round(Number(usage.completion_tokens) || 0));
+  const billed = typeof model === "string" && model ? model : "unknown";
   try {
-    const row = await env.DB.prepare(
-      "INSERT INTO flows_ai_usage (day, calls, tokens_in, tokens_out) VALUES (?, 1, ?, ?) " +
-      "ON CONFLICT(day) DO UPDATE SET calls = calls + 1, " +
-      "tokens_in = tokens_in + excluded.tokens_in, tokens_out = tokens_out + excluded.tokens_out " +
-      "RETURNING calls, tokens_in, tokens_out"
-    ).bind(day, inTok, outTok).first();
-    if (!row) return null;
-    return spendShape(env, day,
-      Number(row.calls) || 0, Number(row.tokens_in) || 0, Number(row.tokens_out) || 0);
+    await ensureFlowsTables(env);
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO flows_ai_usage (day, calls, tokens_in, tokens_out) VALUES (?, 1, ?, ?) " +
+        "ON CONFLICT(day) DO UPDATE SET calls = calls + 1, " +
+        "tokens_in = tokens_in + excluded.tokens_in, tokens_out = tokens_out + excluded.tokens_out"
+      ).bind(day, inTok, outTok),
+      env.DB.prepare(
+        "INSERT INTO flows_ai_usage_model (day, model, calls, tokens_in, tokens_out) VALUES (?, ?, 1, ?, ?) " +
+        "ON CONFLICT(day, model) DO UPDATE SET calls = calls + 1, " +
+        "tokens_in = tokens_in + excluded.tokens_in, tokens_out = tokens_out + excluded.tokens_out"
+      ).bind(day, billed, inTok, outTok),
+    ]);
+    return await askSpend(env);
   } catch { return null;   }
 }
 
@@ -1137,16 +1105,15 @@ async function refreshFlowsSummary(env) {
   const facts = Array.isArray(index && index.facts) ? index.facts : [];
   if (!facts.length) return;
 
-  const fingerprint = FLOWS_ASK.summaryFingerprint(facts);
+  const fingerprint = FLOWS_ASK.summaryFingerprint(facts) + "|" + aiCallSignature(env);
   const prior = await env.DB.prepare(
     "SELECT fingerprint, llm, guard, generated_at FROM flows_ai_summary WHERE scope = ?",
   ).bind("board").first().catch(() => null);
 
   if (prior && prior.fingerprint === fingerprint) {
-    const retryable = typeof prior.guard === "string"
-      && prior.guard.startsWith("unreachable")
-      && prior.guard !== "unreachable:empty";
-    if (!retryable) return;
+    const priorAge = typeof prior.generated_at === "string"
+      ? Date.now() - Date.parse(prior.generated_at) : Infinity;
+    if (!retryableGuard(prior.guard, priorAge)) return;
   }
 
   const intradayOnly = typeof index.refreshedAt === "string" && index.refreshedAt !== "";
@@ -1164,55 +1131,30 @@ async function refreshFlowsSummary(env) {
     "fingerprint=excluded.fingerprint, guard=excluded.guard, generated_at=excluded.generated_at",
   ).bind("board", text, llm ? 1 : 0, model, fingerprint, guard, new Date().toISOString()).run();
 
-  const model = askModel(env);
+  const chain = aiChain(env);
 
-  if (!env.AI || model === null) {
+  if (!env.AI || !chain.length) {
     await write(plain, false, null, null).catch(() => {});
     return;
   }
 
-  let generated = null;
-  try {
-    const { system, user } = FLOWS_ASK.promptForSummary(facts, age);
-    const out = await env.AI.run(model, {
-      messages: [{ role: "system", content: system }, { role: "user", content: user }],
+  const { system, user } = FLOWS_ASK.promptForSummary(facts, age);
+  const said = await askModels(env.AI, chain,
+    [{ role: "system", content: system }, { role: "user", content: user }],
+    { maxTokens: 1024, temperature: 0.2 },
+    (billed, usage) => askRecordSpend(env, usage, billed));
 
-      max_tokens: 1024,
-      temperature: 0.2,
-    });
-    generated = aiText(out);
-
-    await askRecordSpend(env, out && out.usage);
-  } catch (error) {
-
-    const failed = askFailure(error);
-    await write(plain, false, model, "unreachable:" + failed.why).catch(() => {});
+  if (!said.text) {
+    await write(plain, false, said.model, said.guard).catch(() => {});
     return;
   }
 
-  if (!generated) {
-    await write(plain, false, model, "unreachable:empty").catch(() => {});
-    return;
-  }
-
-  const verdict = FLOWS_ASK.guardAnswer(generated, facts, { smallIntegers: false });
+  const verdict = FLOWS_ASK.guardAnswer(said.text, facts, { smallIntegers: false });
   if (!verdict.ok) {
-    await write(plain, false, model, verdict.invented ? "invented" : "forecast").catch(() => {});
+    await write(plain, false, said.model, verdict.invented ? "invented" : "forecast").catch(() => {});
     return;
   }
-  await write(generated, true, model, null).catch(() => {});
-}
-
-function aiText(out) {
-  if (!out || typeof out !== "object") return null;
-  const take = (v) => (typeof v === "string" && v.trim() ? v.trim() : null);
-  const direct = take(out.response);
-  if (direct) return direct;
-
-  const choice = Array.isArray(out.choices) && out.choices.length ? out.choices[0] : null;
-  const message = choice && choice.message ? take(choice.message.content) : null;
-  if (message) return message;
-  return take(choice && choice.text);
+  await write(said.text, true, said.model, null).catch(() => {});
 }
 
 async function readFlowsSummary(env, scope) {
@@ -1323,39 +1265,32 @@ function neuronContextFor(card) {
 
 async function generateNeuron(env, ticker, ctx, fingerprint) {
   const scope = "ticker:" + ticker;
-  const model = askModel(env);
+  const chain = aiChain(env);
   const plain = FLOWS_NEURON.deterministicSummary(ctx);
   const stateIdea = FLOWS_NEURON.stateIdea(ctx);
   const own = FLOWS_NEURON.vetIdeas(stateIdea ? [stateIdea] : [], ctx).ideas;
-  if (!env.AI || model === null) {
+  if (!env.AI || !chain.length) {
     await writeNeuron(env, scope, fingerprint, plain, own, false, null, null).catch(() => {});
     return;
   }
   const { system, user } = FLOWS_NEURON.promptForNeuron(ctx);
   const facts = FLOWS_NEURON.guardFacts(ctx);
+  const messages = [{ role: "system", content: system }, { role: "user", content: user }];
   let parsed = null;
   let lastText = null;
+  let model = chain[0];
   for (let attempt = 0; attempt < 2 && (parsed === null || parsed.summary === null); attempt++) {
-    let text = null;
-    try {
-      const out = await env.AI.run(model, {
-        messages: [{ role: "system", content: system }, { role: "user", content: user }],
-        max_tokens: 1400,
-        temperature: attempt === 0 ? 0.2 : 0.05,
-      });
-      text = aiText(out);
-      await askRecordSpend(env, out && out.usage);
-    } catch (error) {
-      const failed = askFailure(error);
-      await writeNeuron(env, scope, fingerprint, plain, own, false, model, "unreachable:" + failed.why).catch(() => {});
+    const said = await askModels(env.AI, attempt === 0 ? chain : [model], messages,
+      { maxTokens: 1400, temperature: attempt === 0 ? 0.2 : 0.05 },
+      (billed, usage) => askRecordSpend(env, usage, billed));
+    if (!said.text) {
+      if (attempt > 0) break;
+      await writeNeuron(env, scope, fingerprint, plain, own, false, said.model, said.guard).catch(() => {});
       return;
     }
-    if (!text) {
-      await writeNeuron(env, scope, fingerprint, plain, own, false, model, "unreachable:empty").catch(() => {});
-      return;
-    }
-    lastText = text;
-    parsed = FLOWS_NEURON.parseNeuronOutput(text);
+    model = said.model;
+    lastText = said.text;
+    parsed = FLOWS_NEURON.parseNeuronOutput(said.text);
   }
   if (parsed === null) {
     const prose = typeof lastText === "string" && !/[{}[\]]|"summary"|"ideas"/.test(lastText);
@@ -1407,7 +1342,7 @@ async function tickerNeuron(env, ctx, ticker) {
       { note: "The card for " + ticker + " publishes no feature with a reading this session, " +
         "which is a fact about the card and not about the name." }));
   }
-  const fingerprint = FLOWS_NEURON.contextFingerprint(context);
+  const fingerprint = FLOWS_NEURON.contextFingerprint(context) + "|" + aiCallSignature(env);
   const prior = await readNeuron(env, scope);
   const now = Date.now();
   const priorAge = prior && prior.generatedAt ? now - Date.parse(prior.generatedAt) : Infinity;
@@ -1419,8 +1354,7 @@ async function tickerNeuron(env, ctx, ticker) {
           { note: "Neuron is reading this card now." }));
       }
     } else if (prior.summary) {
-      const retryable = typeof prior.guard === "string" && prior.guard.startsWith("unreachable")
-        && prior.guard !== "unreachable:empty" && priorAge > NEURON_RETRY_MS;
+      const retryable = retryableGuard(prior.guard, priorAge) && priorAge > NEURON_RETRY_MS;
       if (!retryable) return json(neuronShape("ok", ticker, context, prior));
     }
   }
@@ -1499,29 +1433,24 @@ async function askAnswer(question, env, index, updatedAt, subject) {
     session: age,
   };
 
-  const model = askModel(env);
-  if (!env.AI || model === null) {
+  const chain = aiChain(env);
+  if (!env.AI || !chain.length) {
     return json({ ...base,
       note: "No model is configured for this site, so this reading is the " +
         "pipeline's own wording. Every figure in it was measured." });
   }
 
   const { system, user } = FLOWS_ASK.promptFor(picked, framed, age);
-  let generated = null;
-
   let afterCall = null;
-  try {
-    const out = await env.AI.run(model, {
-      messages: [{ role: "system", content: system }, { role: "user", content: user }],
+  const said = await askModels(env.AI, chain,
+    [{ role: "system", content: system }, { role: "user", content: user }],
+    { maxTokens: 1024, temperature: 0.2 },
+    async (billed, usage) => { afterCall = (await askRecordSpend(env, usage, billed)) || afterCall; });
+  const model = said.model;
+  const fallback = fallbackNote(said);
 
-      max_tokens: 1024,
-      temperature: 0.2,
-    });
-    generated = aiText(out);
-
-    afterCall = await askRecordSpend(env, out && out.usage);
-  } catch (error) {
-    const failed = askFailure(error);
+  if (said.failure) {
+    const failed = said.failure;
 
     const disagrees = failed.why === "allowance"
       && spend !== null && typeof spend.remaining === "number" && spend.remaining > 0;
@@ -1531,20 +1460,25 @@ async function askAnswer(question, env, index, updatedAt, subject) {
         "other than this site drew on the same account today. Cloudflare is the " +
         "authority and the meter is not: it can only ever see this site's own calls."
       : failed.say;
-    return json({ ...base, note: say, model, llmFailure: failed.why,
+    return json({ ...base, spend: afterCall || base.spend, note: say, model, llmFailure: failed.why,
       spendDisagrees: disagrees });
   }
 
+  const generated = said.text;
   if (!generated) {
+    const asked = said.attempts.length;
     return json({ ...base, spend: afterCall || base.spend, model,
-      note: "The model answered with no text, so this reading is the pipeline's " +
-        "own wording. Every figure in it was measured." });
+      note: (said.guard === "unreachable:length"
+        ? "The model spent its whole answer budget before writing any text"
+        : "The model answered with no text") +
+        (asked > 1 ? ", and so did the fallback model asked after it" : "") +
+        ", so this reading is the pipeline's own wording. Every figure in it was measured." });
   }
 
   const guard = FLOWS_ASK.guardAnswer(generated, picked);
   if (!guard.ok) {
 
-    return json({ ...base, spend: afterCall || base.spend, model, guard,
+    return json({ ...base, spend: afterCall || base.spend, model, fallback, guard,
 
       note: "The generated wording was discarded: " +
         (guard.forecast
@@ -1555,7 +1489,7 @@ async function askAnswer(question, env, index, updatedAt, subject) {
         " What follows is the pipeline's own wording, and every figure in it was measured." });
   }
   return json({ ...base, spend: afterCall || base.spend,
-    answer: generated, llm: true, model, guard });
+    answer: generated, llm: true, model, fallback, guard });
 }
 
 const UW_BASE_DEFAULT = "https://api.unusualwhales.com";

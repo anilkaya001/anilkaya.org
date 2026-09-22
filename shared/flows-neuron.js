@@ -4,6 +4,9 @@ import { VARIATION_VOTES, VARIATION_LINES } from "./flows-variation.js";
 
 export const NEURON_CONTEXT_VERSION = 2;
 export const NEURON_MAX_IDEAS = 3;
+
+const article = (noun, capital) => (/^[aeiou]/i.test(noun) ? (capital ? "An " : "an ") : (capital ? "A " : "a ")) + noun;
+
 export const NEURON_STRUCTURES = Object.freeze([
   "long call", "long put", "call debit spread", "put debit spread", "call credit spread",
   "put credit spread", "iron condor", "long straddle", "long strangle", "calendar spread",
@@ -660,9 +663,11 @@ export function stateIdea(context) {
   const payoff = structure === "no position"
     ? " The flow features do not agree on a side, so no position is the reading until spot closes beyond " + level + "."
     : volLong
-      ? " A " + structure + " pays if spot closes " + (range ? "outside " + range : "beyond " + level + " in either direction") +
+      ? " " + article(structure, true) + " pays if spot closes " + (range ? "outside " + range : "beyond " + level + " in either direction") +
         "; it loses if spot holds " + (range ? "inside it" : "at " + level) + " through the horizon."
-      : " A " + structure + " pays if spot " + (direction === "bullish" ? "holds above " : direction === "bearish" ? "holds below " : "stays inside the priced range against ") + level + ".";
+      : " " + article(structure, true) + " pays if spot " + (direction === "bullish" ? "holds above " + level
+        : direction === "bearish" ? "holds below " + level
+          : "stays inside the priced range, with " + level + " as the line that ends the state") + ".";
   return {
     title: STATE_WORD[s.state] + " " + structure,
     structure, direction,
@@ -995,9 +1000,9 @@ export function vetIdeas(rawIdeas, context) {
     if (!title || !thesis || !structure || !invalidation || !horizon) { refused.push((title || "idea") + ": a field is missing"); continue; }
     if (!NEURON_STRUCTURES.includes(structure)) { refused.push(title + ": structure not in the list"); continue; }
     if (!["bullish", "bearish", "neutral"].includes(direction)) { refused.push(title + ": direction not bullish, bearish or neutral"); continue; }
-    if (!(IDEA_SIDES[structure] || []).includes(direction)) { refused.push(title + ": a " + structure + " is not " + direction); continue; }
+    if (!(IDEA_SIDES[structure] || []).includes(direction)) { refused.push(title + ": " + article(structure) + " is not " + direction); continue; }
     if (st && Array.isArray(st.avoid) && st.avoid.includes(structure)) {
-      refused.push(title + ": a " + structure + " is on the implied state\u2019s avoid list (" + st.chip + ")"); continue;
+      refused.push(title + ": " + article(structure) + " is on the implied state\u2019s avoid list (" + st.chip + ")"); continue;
     }
     const feats = rests.map((k) => byKey.get(k)).filter(Boolean);
     if (feats.length < 2 || feats.length !== rests.length) { refused.push(title + ": rests on fewer than two known features"); continue; }

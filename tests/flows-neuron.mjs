@@ -9,10 +9,14 @@ import { modelName, neuronProvenance } from "../shared/flows-pages.js";
 import { variation, cardVariationInput } from "../shared/flows-variation.js";
 import { gammaReading } from "../shared/flows-neuron.js";
 import fs from "node:fs";
+import { aiText, modelInput, askModels, aiChain, aiCallSignature, retryableGuard, modelRates,
+         spendShape, fallbackNote, AI_LENGTH_RETRY_MS } from "../shared/flows-ai.js";
+import { readFileSync } from "node:fs";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
 const eq = (a, b, m) => { assert.equal(a, b, m); checks++; };
+const same = (a, b, m) => { assert.deepEqual(a, b, m); checks++; };
 
 const CARD = {
   ticker: "SYN1", nm: "Synthetic One", sector: "Energy", sessionDate: "2026-09-15",
@@ -492,6 +496,135 @@ const CARD = {
      "a Workers AI id is printed as the model's name, not as the vendor path a reader cannot parse");
   eq(modelName("@cf/qwen/qwen2.5-coder-32b-instruct"), "Qwen2.5 Coder 32B", "the humanised name keeps the size and drops the serving flags");
   eq(modelName(null), "a language model", "and no id at all is a language model");
+  eq(prov("unreachable:allowance"), "Deterministic reading: the day’s free model allowance is spent, resetting 00:00 UTC.",
+     "the writers store askFailure().why, so a spent allowance is named by that word and not only by the numeric code nothing writes");
+  eq(prov("unreachable:capacity"), "Deterministic reading: the model had no capacity, and nothing was spent.",
+     "a capacity refusal is named as one");
+  eq(prov("unreachable:plan"), "Deterministic reading: the configured model is not available on this plan.",
+     "and a plan fault as a configuration fault");
+  ok(/allowance is spent/.test(prov("unreachable:3036")), "the numeric codes stay as aliases for rows written before the words");
+  eq(prov("unreachable:length"), "Deterministic reading: the model spent its whole answer budget before writing any text.",
+     "a reply cut off at the token cap with no content is told apart from a model that answered with nothing");
+  eq(prov("unreachable:unreachable"), "Deterministic reading: the model did not answer.", "and an unstated failure keeps the plain wording");
+}
+
+{
+  const pinned = JSON.parse(JSON.stringify(CARD));
+  pinned.regime = { label: "long", crossings: 1, spotGammaShare: 0.6 };
+  pinned.panels.levels.levels = [
+    { kind: "max_pain", label: "Max pain", px: 70.5, distAtr: 0.19 },
+    { kind: "gamma_flip", label: "Gamma flip", px: 66.1, distAtr: -2.78 },
+    { kind: "call_wall", label: "Call wall", px: 72, distAtr: 1.2 },
+  ];
+  pinned.panels.calendar = { status: "ok", schedule: [{ expiry: "2026-09-18", days: 3, share: 0.4 }], frontLoad: 0.4, halfLifeExpiry: "2026-10-16", halfLifeDays: 31 };
+  const pctx = buildContext(pinned, { expectedSession: "2026-09-15" });
+  const pidea = stateIdea(pctx);
+  eq(pidea.structure, "iron condor", "a pinned card's own idea is the first range structure, an iron condor");
+  ok(/ An iron condor pays if spot stays inside the priced range, with the gamma flip at 66\.10 as the line that ends the state\.$/.test(pidea.thesis),
+     `the article agrees with the structure and the neutral payoff names the flip as the line that ends the state (${pidea.thesis.slice(-110)})`);
+  ok(!/ A iron condor|range against the/.test(pidea.thesis), "never 'A iron condor', never 'inside the priced range against the gamma flip'");
+  eq(vetIdeas([pidea], pctx).ideas.length, 1, "and the reworded idea still passes the same vetting");
+}
+
+{
+  const glm = "@cf/zai-org/glm-4.7-flash";
+  const llama = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+  const env = { FLOWS_ASK_MODEL: glm, FLOWS_ASK_FALLBACK_MODEL: llama,
+    FLOWS_ASK_NEURONS: "5500,36400", FLOWS_ASK_FALLBACK_NEURONS: "26668,204805" };
+  const msgs = [{ role: "user", content: "x" }];
+
+  const gIn = modelInput(glm, msgs, { maxTokens: 1024, temperature: 0.2 });
+  same(gIn.chat_template_kwargs, { enable_thinking: false },
+    "the reasoning model is asked NOT to think: on 09-22 every call spent the whole cap (29 of 31 at exactly 1024 tokens) inside its reasoning");
+  ok(gIn.max_completion_tokens === 1024 && !("max_tokens" in gIn),
+    "and its cap is max_completion_tokens, the field its schema documents, not the deprecated max_tokens");
+  const lIn = modelInput(llama, msgs, { maxTokens: 1400, temperature: 0.05 });
+  ok(lIn.max_tokens === 1400 && !("chat_template_kwargs" in lIn) && !("max_completion_tokens" in lIn),
+    "the instruct fallback gets the classic text-generation input its own schema lists, and nothing it does not");
+
+  const reasoningOnly = { choices: [{ finish_reason: "length", message: { content: null, reasoning_content: "Let me think about 42..." } }],
+    usage: { prompt_tokens: 12500, completion_tokens: 1024 } };
+  same(aiText(reasoningOnly), { text: null, finish: "length", reasoned: true },
+    "a reply that is all reasoning and stopped at the cap is no text, with the stop and the reasoning named");
+  eq(aiText({ choices: [{ finish_reason: "stop", message: { content: "Answer.", reasoning_content: "thought" } }] }).text, "Answer.",
+    "content is the answer when there is some");
+  same(aiText({ choices: [{ finish_reason: "length", message: { content: "<think>still going" } }] }),
+    { text: null, finish: "length", reasoned: true }, "an unclosed inline think block is reasoning, never the answer");
+  eq(aiText({ choices: [{ finish_reason: "stop", message: { content: "<think>a</think> Said." } }] }).text, "Said.",
+    "and a closed one is cut off the answer");
+  eq(aiText({ response: "Plain." }).text, "Plain.", "the classic `response` field still reads");
+  eq(aiText(null).text, null, "and a missing reply is no text");
+
+  const fake = (script) => {
+    const calls = [];
+    return { calls, run: async (model, input) => {
+      calls.push({ model, input });
+      const step = script[calls.length - 1];
+      if (step instanceof Error) throw step;
+      return step;
+    } };
+  };
+  const billed = [];
+  const onUsage = async (model, usage) => { billed.push([model, usage && usage.completion_tokens]); };
+
+  const rescued = fake([reasoningOnly, { response: "Fallback wording.", usage: { prompt_tokens: 12500, completion_tokens: 40 } }]);
+  const r1 = await askModels(rescued, aiChain(env), msgs, { maxTokens: 1024, temperature: 0.2 }, onUsage);
+  eq(r1.text, "Fallback wording.", "an empty primary is retried once on the instruct fallback, whose text is served");
+  eq(r1.model, llama, "and the row records the model that WROTE it, so the provenance names Llama 3.3 70B, not GLM");
+  eq(modelName(r1.model), "Llama 3.3 70B", "which is how modelName() prints it");
+  eq(r1.guard, null, "a rescued call carries no failure guard");
+  same(billed, [[glm, 1024], [llama, 40]], "and BOTH calls are billed to the model that consumed them");
+  same(rescued.calls.map((c) => c.model), [glm, llama], "in that order, the fallback exactly once");
+  same(fallbackNote(r1), { from: glm, stop: "length", reasoned: true }, "the answer can say which model came back empty and why");
+
+  const bothEmpty = fake([reasoningOnly, { response: "   " }]);
+  eq((await askModels(bothEmpty, aiChain(env), msgs, {})).guard, "unreachable:length",
+    "when neither writes text and one stopped at the cap the guard is unreachable:length, not unreachable:empty");
+  const plainEmpty = fake([{ choices: [{ finish_reason: "stop", message: { content: "" } }] }, { response: "" }]);
+  eq((await askModels(plainEmpty, aiChain(env), msgs, {})).guard, "unreachable:empty", "and an honest empty stays unreachable:empty");
+
+  const spent = fake([new Error("AiError: 3036: account limit")]);
+  const r2 = await askModels(spent, aiChain(env), msgs, {});
+  ok(r2.guard === "unreachable:allowance" && r2.failure.why === "allowance" && spent.calls.length === 1,
+    "a spent allowance is account-wide, so it is reported and the fallback is NOT asked to fail the same way");
+  const busy = fake([reasoningOnly, new Error("AiError: 3040: capacity")]);
+  eq((await askModels(busy, aiChain(env), msgs, {})).guard, "unreachable:capacity",
+    "a fallback that fails after an empty primary reports its own failure");
+
+  ok(retryableGuard("unreachable:allowance", 0) && retryableGuard("unreachable:capacity", 0),
+    "a failure that genuinely returns is retried");
+  ok(!retryableGuard("unreachable:empty", Infinity), "an empty on the same facts and configuration is not");
+  ok(!retryableGuard("unreachable:length", AI_LENGTH_RETRY_MS - 1) && retryableGuard("unreachable:length", AI_LENGTH_RETRY_MS),
+    "a length stop is retried, never frozen, but only after an hour so a model that keeps thinking cannot spend the day's allowance every tick");
+  ok(!retryableGuard(null, Infinity) && !retryableGuard("invented", Infinity), "and a guard refusal is final");
+
+  same(aiChain({ FLOWS_ASK_MODEL: "", FLOWS_ASK_FALLBACK_MODEL: llama }), [],
+    "no configured primary means no model at all: the fallback is a retry, not a replacement");
+  same(aiChain({ FLOWS_ASK_MODEL: llama, FLOWS_ASK_FALLBACK_MODEL: llama }), [llama], "and a fallback equal to the primary is not asked twice");
+  ok(aiCallSignature(env) !== aiCallSignature({ FLOWS_ASK_MODEL: glm }) && /^ai2\./.test(aiCallSignature(env)),
+    "the call signature moves with the configuration, so an unreachable:empty stored under the old one is regenerated once, not frozen forever");
+
+  ok(modelRates(env, glm).outPerM === 36400 && modelRates(env, llama).outPerM === 204805 && modelRates(env, "@cf/x/y") === null,
+    "each model is billed at its own published rate, and an unconfigured one at none");
+  const s1 = spendShape(env, "2026-09-22", 33, 413240, 32536,
+    [{ model: glm, calls: 1, tokensIn: 12500, tokensOut: 20 }, { model: llama, calls: 1, tokensIn: 12500, tokensOut: 20 }]);
+  eq(s1.neurons, Math.ceil(((413240 - 25000) * 5500 + (32536 - 40) * 36400 + 12500 * 5500 + 20 * 36400 + 12500 * 26668 + 20 * 204805) / 1e6),
+    "the day's neurons are each model's tokens at its own rate, with calls recorded before the split billed at the primary's, the only model called then");
+  eq(s1.byModel[1].neurons, Math.ceil((12500 * 26668 + 20 * 204805) / 1e6), "and the split is published per model");
+  eq(spendShape(env, "d", 1, 10, 10, [{ model: "@cf/old/model", calls: 1, tokensIn: 10, tokensOut: 10 }]).neurons, null,
+    "a model with no configured rate makes the day's spend unknown rather than a guess");
+  eq(spendShape(env, "d", 0, 0, 0, null).neurons, null, "and so does a split that could not be read");
+  eq(spendShape(env, "d", 0, 0, 0, []).neurons, 0, "while a day with no calls is a measured zero");
+
+  const toml = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
+  ok(/FLOWS_ASK_FALLBACK_MODEL = "@cf\/meta\/llama-3\.3-70b-instruct-fp8-fast"/.test(toml) &&
+     /FLOWS_ASK_FALLBACK_NEURONS = "26668,204805"/.test(toml),
+    "the fallback is a non-reasoning instruct model configured beside its published neuron rate");
+  const worker = readFileSync(new URL("../worker.js", import.meta.url), "utf8");
+  eq((worker.match(/env\.AI\.run\(/g) || []).length, 0,
+    "no call site reaches the binding directly: all three go through askModels, so none can drop the thinking switch or the fallback");
+  eq((worker.match(/askModels\(env\.AI/g) || []).length, 3, "and all three lanes (summary, Neuron, Ask) use it");
+  ok(!/max_tokens/.test(worker), "the worker no longer carries a max_tokens literal of its own");
 }
 
 console.log(`✓ flows-neuron: ${checks} assertions — a context that carries every registry panel plus the ` +
