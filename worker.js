@@ -1248,6 +1248,24 @@ async function readNeuron(env, scope) {
   } catch { return null; }
 }
 
+async function markNeuronGenerating(env, scope, fingerprint, model) {
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - NEURON_GENERATING_MS).toISOString();
+  try {
+    const res = await env.DB.prepare(
+      "INSERT INTO flows_neuron (scope, version, fingerprint, summary, ideas, llm, model, guard, generated_at) " +
+      "VALUES (?, ?, ?, '', '[]', 0, ?, 'generating', ?) ON CONFLICT(scope) DO UPDATE SET " +
+      "version=excluded.version, fingerprint=excluded.fingerprint, summary='', ideas='[]', llm=0, " +
+      "model=excluded.model, guard='generating', generated_at=excluded.generated_at " +
+      "WHERE flows_neuron.guard IS NOT 'generating' OR flows_neuron.fingerprint != excluded.fingerprint " +
+      "OR flows_neuron.generated_at < ?",
+    ).bind(scope, FLOWS_NEURON.NEURON_CONTEXT_VERSION, fingerprint, model, now.toISOString(), cutoff).run();
+    return !(res && res.meta && typeof res.meta.changes === "number") || res.meta.changes > 0;
+  } catch {
+    return true;
+  }
+}
+
 async function writeNeuron(env, scope, fingerprint, summary, ideas, llm, model, guard) {
   return env.DB.prepare(
     "INSERT INTO flows_neuron (scope, version, fingerprint, summary, ideas, llm, model, guard, generated_at) " +
@@ -1271,8 +1289,12 @@ function neuronShape(status, ticker, ctx, row, extra) {
     model: r !== null ? r.model : null,
     guard: r !== null ? r.guard : null,
     generatedAt: r !== null ? r.generatedAt : null,
-    provenance: text ? neuronProvenance({ text, llm: r.llm === true, model: r.model,
-      guard: r.guard && r.guard.startsWith("ideas:") ? null : r.guard }) : null,
+    provenance: text
+      ? neuronProvenance({ text, llm: r.llm === true, model: r.model,
+          guard: r.guard && /^ideas:\d+ refused$/.test(r.guard) ? null : r.guard }) +
+        (r.llm !== true && Array.isArray(r.ideas) && r.ideas.length && r.model
+          ? " The ideas were written by " + r.model + " and vetted one by one." : "")
+      : null,
     ...(extra || {}),
   };
 }
@@ -1291,10 +1313,10 @@ async function generateNeuron(env, ticker, ctx, fingerprint) {
     return;
   }
   const { system, user } = FLOWS_NEURON.promptForNeuron(ctx);
-  const facts = FLOWS_NEURON.contextLines(ctx).map((say) => ({ say }));
+  const facts = FLOWS_NEURON.guardFacts(ctx);
   let parsed = null;
   let lastText = null;
-  for (let attempt = 0; attempt < 2 && parsed === null; attempt++) {
+  for (let attempt = 0; attempt < 2 && (parsed === null || parsed.summary === null); attempt++) {
     let text = null;
     try {
       const out = await env.AI.run(model, {
@@ -1317,9 +1339,10 @@ async function generateNeuron(env, ticker, ctx, fingerprint) {
     parsed = FLOWS_NEURON.parseNeuronOutput(text);
   }
   if (parsed === null) {
-    const verdict = FLOWS_ASK.guardAnswer(lastText, facts, { smallIntegers: false });
+    const prose = typeof lastText === "string" && !/[{}[\]]|"summary"|"ideas"/.test(lastText);
+    const verdict = prose ? FLOWS_ASK.guardAnswer(lastText, facts, { smallIntegers: false }) : { ok: false };
     await writeNeuron(env, scope, fingerprint, verdict.ok ? lastText : plain, [], verdict.ok, model,
-      verdict.ok ? "ideas:unparsable" : (verdict.invented ? "invented" : "forecast")).catch(() => {});
+      "ideas:unparsable").catch(() => {});
     return;
   }
   let summary = plain;
@@ -1330,7 +1353,7 @@ async function generateNeuron(env, ticker, ctx, fingerprint) {
     if (verdict.ok) { summary = parsed.summary; llm = true; }
     else guard = verdict.invented ? "invented" : "forecast";
   } else {
-    guard = "unreachable:empty";
+    guard = "summary:empty";
   }
   const vetted = FLOWS_NEURON.vetIdeas(parsed.ideas, ctx);
   if (guard === null && vetted.refused.length) guard = "ideas:" + vetted.refused.length + " refused";
@@ -1383,7 +1406,10 @@ async function tickerNeuron(env, ctx, ticker) {
     }
   }
 
-  await writeNeuron(env, scope, fingerprint, "", [], false, askModel(env), "generating").catch(() => {});
+  const mine = await markNeuronGenerating(env, scope, fingerprint, askModel(env));
+  if (!mine) {
+    return json(neuronShape("pending", ticker, context, null, { note: "Neuron is reading this card now." }));
+  }
   const work = generateNeuron(env, ticker, context, fingerprint).catch((error) => {
     console.error(JSON.stringify({ message: "neuron failed", ticker,
       error: error instanceof Error ? error.message : String(error) }));

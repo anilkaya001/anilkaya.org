@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { buildContext, contextLines, contextFacts, promptForNeuron, parseNeuronOutput, vetIdeas,
-         deterministicSummary, contextFingerprint, publicContext, NEURON_CONTEXT_VERSION,
-         NEURON_MAX_IDEAS, NEURON_STRUCTURES } from "../shared/flows-neuron.js";
+         deterministicSummary, contextFingerprint, publicContext, guardFacts, numeralsOf,
+         NEURON_CONTEXT_VERSION, NEURON_MAX_IDEAS, NEURON_STRUCTURES } from "../shared/flows-neuron.js";
 import { TICKER_PANELS, SENTINEL_KEYS } from "../shared/flows-panels.js";
 import { guardAnswer, selectFacts, buildFactIndex } from "../shared/flows-ask.js";
 
@@ -21,6 +21,9 @@ const CARD = {
     gamma: { status: "ok", spot: 70.22, callWall: 67, putWall: 70, strikes: 40,
       lead: { say: "Dealer gamma for SYN1 is short at spot 70.22; the call wall is at 67.00 and the put wall at 70.00." } },
     levels: { status: "ok", spot: 70.22, atr: 1.48,
+      levels: [{ kind: "put_wall", label: "Put wall", px: 70, distPct: -0.003, distAtr: 0.15 },
+        { kind: "max_pain", label: "Max pain", px: 72.5, distPct: 0.032, distAtr: 1.54 },
+        { kind: "call_wall", label: "Call wall", px: 67, distPct: -0.046, distAtr: 2.18 }],
       lead: { say: "Nearest: put wall at 70.00, 0.3% below spot 70.22 — 0.15σ." } },
     pricedMove: { status: "ok", impliedMove: 0.043, impliedLow: 67.2, impliedHigh: 73.24, sessions: 10,
       lead: { say: "Options price a ±4.3% move over 10 sessions — 67.20 to 73.24." } },
@@ -47,6 +50,16 @@ const CARD = {
   eq(ctx.stale, false, "the card describes the last closed session, so it is not stale");
   const by = new Map(ctx.features.map((f) => [f.key, f]));
   eq(by.get("standing").robustness, 3, "conviction 92 with the gate cleared and full coverage is robust");
+  {
+    const gated = JSON.parse(JSON.stringify(CARD));
+    gated.conv.gate = 0.4;
+    const st = buildContext(gated, { expectedSession: "2026-09-15" }).features.find((f) => f.key === "standing");
+    ok(st.robustness === 2 && /quality gate/.test(st.why),
+       `a failed gate drops the standing to fair and the reason names the gate, not a conviction band (${st.why})`);
+  }
+  ok(by.get("levels").figures.maxPain === "72.50" && by.get("levels").figures.callWall === "67.00",
+     "every level on the card is a quotable figure, printed as the page prints it, so an invalidation at max pain can pass the guard");
+  ok(numeralsOf(ctx).has("72.50"), "and the max-pain level is in the numerals a model may quote");
   eq(by.get("gamma").robustness, 3, "a gamma profile over 40 strikes is robust");
   eq(by.get("ivSurface").robustness, 2, "a surface with 30 of 50 fresh quotes is fair, because a fifth or more are stale");
   eq(by.get("path").robustness, 3, "a full session with a one-sided persistence is robust");
@@ -152,8 +165,24 @@ const CARD = {
   ok(v.refused.length >= 6 && v.refused.every((r) => typeof r === "string" && r.includes(":")),
      "every refusal names the idea and the reason");
   ok(v.ideas.every((i) => guardAnswer([i.title, i.thesis, i.invalidation, i.horizon].join(" "),
-       contextLines(ctx).map((say) => ({ say })), { smallIntegers: false }).ok),
+       guardFacts(ctx), { smallIntegers: false }).ok),
      "every surviving idea passes the same guard the summary passes");
+  ok(!guardFacts(ctx).some((f) => /robustness \d of 3|r21|week52Pos/.test(f.say)),
+     "and the guard's fact set carries readings and figure values only, never the grade head or a digit-bearing key name");
+  {
+    const bracketed = vetIdeas([{ ...good, rests_on: ["[gamma]", " [Levels] "] }], ctx);
+    ok(bracketed.ideas.length === 1 && bracketed.ideas[0].restsOn.join(",") === "gamma,levels",
+       "keys written with the brackets the context shows, or in another case, still resolve to the features");
+    const doubled = vetIdeas([{ ...good, rests_on: ["gamma", "gamma"] }], ctx);
+    ok(doubled.ideas.length === 0 && /fewer than two/.test(doubled.refused[0]), "the same key twice is one feature");
+    const twice = vetIdeas([good, { ...good, title: "Put wall credit again" }], ctx);
+    eq(twice.ideas.length, 1, "an idea that repeats a kept one in structure, direction and invalidation is dropped");
+    const crossed = vetIdeas([{ ...good, structure: "long put", direction: "bullish" }], ctx);
+    ok(crossed.ideas.length === 0 && /long put is not bullish/.test(crossed.refused[0]),
+       "a structure whose payoff contradicts its stated direction is refused with the contradiction named");
+    const painful = vetIdeas([{ ...good, invalidation: "a close above max pain at 72.50" }], ctx);
+    eq(painful.ideas.length, 1, "an invalidation at max pain, quoted as the card prints it, passes");
+  }
 
   eq(parseNeuronOutput("not json at all"), null, "prose instead of JSON parses to null");
   eq(parseNeuronOutput(""), null, "and so does an empty answer");
@@ -161,9 +190,14 @@ const CARD = {
   ok(loose !== null && loose.summary === "x" && loose.ideas.length === 0, "a JSON object wrapped in chatter is still found");
 
   const plain = deterministicSummary(ctx);
-  ok(guardAnswer(plain, contextLines(ctx).map((say) => ({ say })), { smallIntegers: false }).ok,
+  ok(guardAnswer(plain, guardFacts(ctx), { smallIntegers: false }).ok,
      "the deterministic summary passes the guard by construction");
   ok(plain.includes("Dealer gamma for SYN1"), "and is built from the most robust features' own sentences");
+  const staleCtx = buildContext(CARD, { expectedSession: "2026-09-16" });
+  const stalePlain = deterministicSummary(staleCtx);
+  ok(/capped at weak/.test(stalePlain) && stalePlain.includes("Dealer gamma for SYN1"),
+     "a stale card's fallback names the cap and still quotes the readings, instead of claiming the card publishes none");
+  ok(guardAnswer(stalePlain, guardFacts(staleCtx), { smallIntegers: false }).ok, "and passes the guard too");
 }
 
 console.log(`✓ flows-neuron: ${checks} assertions — a context that carries every registry panel plus the ` +

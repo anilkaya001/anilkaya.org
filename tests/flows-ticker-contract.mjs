@@ -3862,7 +3862,6 @@ try {
     await page.close();
   }
 
-} finally {
   {
     const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
     const errors = [];
@@ -4030,6 +4029,7 @@ try {
     await page.close();
   }
 
+} finally {
   await browser.close();
   fs.rmSync(EMIT_DIR, { recursive: true, force: true });
 }

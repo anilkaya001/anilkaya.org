@@ -7,7 +7,8 @@ const ok = (c, m) => { assert.ok(c, m); n++; };
 const near = (a, b, tol, m) => { assert.ok(Math.abs(a - b) <= tol, `${m}: ${a} vs ${b} (tol ${tol})`); n++; };
 
 near(lnGamma(5), Math.log(24), 1e-10, "lnGamma(5) = ln 4!");
-near(lnGamma(0.5), Math.log(Math.sqrt(Math.PI)), 1e-10, "lnGamma(1/2) = ln sqrt(pi), through the reflection");
+near(lnGamma(0.5), Math.log(Math.sqrt(Math.PI)), 1e-10, "lnGamma(1/2) = ln sqrt(pi)");
+near(lnGamma(0.25), Math.log(3.6256099082219083), 1e-10, "lnGamma(1/4), through the reflection");
 
 for (const [nu, lambda] of [[3, 0], [4.5, -0.3], [6, 0.25], [12, -0.6], [30, 0]]) {
   let mass = 0, m1 = 0, m2 = 0;
@@ -126,6 +127,34 @@ const flat = fitGarch(Array(200).fill(50));
 ok(flat.status === "unavailable" && /identical/.test(flat.reason), "a flat series has no variance to model and says so");
 const gappy = fitGarch([100, null, 0, 101, -3, 102, ...px.slice(0, 300)]);
 ok(gappy.status === "ok" && gappy.n === 302, "null, zero and negative closes are skipped, not bridged into returns");
+{
+  let windows = 0, unidentified = 0;
+  for (let w = 0; w + 251 <= px.length; w += 251) {
+    const year = fitGarch(px.slice(w, w + 251), dates.slice(w, w + 251));
+    windows++;
+    ok(year.status === "ok" && year.dist === "skewt", `a one-year window fits (${w})`);
+    const pinned = year.persistence > 0.998 || year.alpha < 1e-3;
+    if (pinned) unidentified++;
+    ok(!(pinned && year.converged),
+       `a window whose persistence reached its cap or whose alpha fell to zero is never published as converged (${w})`);
+    ok((year.longRunVol === null) === pinned,
+       `and its long-run level is withheld exactly then, because omega over one minus persistence means nothing there (${w})`);
+    if (pinned) ok(/cap|not identified/.test(year.reason), `with the edge named in the reason (${year.reason})`);
+  }
+  ok(windows >= 10, `${windows} one-year windows were checked, ${unidentified} of them at an edge`);
+}
+{
+  const flatPx = [100];
+  for (let t = 0; t < 250; t++) flatPx.push(flatPx[flatPx.length - 1] * Math.exp(1.2 * skewtDraw(5, -0.2) / 100));
+  const flat = fitGarch(flatPx);
+  ok(flat.status === "ok", "a constant-variance year still fits");
+  if (flat.alpha < 1e-3) {
+    ok(flat.converged === false && /not identified/.test(flat.reason) && flat.longRunVol === null,
+       "and when the optimiser finds no ARCH effect the fit is published unsettled with beta and the long run withheld");
+  } else {
+    ok(flat.alpha >= 1e-3, `or it found a small ARCH effect (alpha ${flat.alpha}) and stands on its own`);
+  }
+}
 const uniform = fitGarch(Array.from({ length: 300 }, (_, i) => 100 + (i % 2)));
 ok(uniform.status === "ok" && uniform.converged === false && typeof uniform.reason === "string",
    "a series the model cannot describe is published with converged:false and a reason, not hidden");

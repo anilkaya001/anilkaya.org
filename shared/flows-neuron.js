@@ -54,6 +54,16 @@ const FIGURE_KEYS = {
   volContext: [],
 };
 
+function levelFigures(p) {
+  const out = {};
+  for (const lv of Array.isArray(p && p.levels) ? p.levels : []) {
+    const kind = str(lv && lv.kind), px = num(lv && lv.px);
+    if (!kind || px === null) continue;
+    out[kind.replace(/_([a-z])/g, (_, c) => c.toUpperCase())] = px.toFixed(2);
+  }
+  return out;
+}
+
 function panelRobustness(key, group, p, card) {
   if (!p || typeof p !== "object") return { r: 0, why: "not published on this card" };
   if (p.status !== "ok") {
@@ -63,10 +73,16 @@ function panelRobustness(key, group, p, card) {
   }
   const conv = card.conv && typeof card.conv === "object" ? card.conv : {};
   switch (key) {
-    case "gamma": case "levels":
-      return num(p.strikes) !== null && num(p.strikes) < 20 || (num(card.regime && card.regime.crossings) === null && key === "gamma" && false)
+    case "gamma":
+      return num(p.strikes) !== null && num(p.strikes) < 20
         ? { r: 2, why: "the gamma profile rests on fewer than 20 strikes" }
         : { r: 3, why: "standing open interest across the book, settled at the clearing snapshot" };
+    case "levels": {
+      const g = card.panels && card.panels.gamma && card.panels.gamma.status === "ok" ? card.panels.gamma : null;
+      return g && num(g.strikes) !== null && num(g.strikes) < 20
+        ? { r: 2, why: "the walls come from a gamma profile of fewer than 20 strikes" }
+        : { r: 3, why: "walls, flip and max pain read off the same clearing snapshot as the gamma profile" };
+    }
     case "surface":
       return num(p.clipped) > 0
         ? { r: 2, why: "the surface was clipped to its scale cap on some cells" }
@@ -120,11 +136,16 @@ export function buildContext(card, extras) {
   const push = (f) => { features.push(f); return f; };
 
   {
+    const gate = num(conv.gate), cover = num(conv.coverage);
     let r = 1, why = "conviction below 50 of 100";
-    if (conviction !== null && conviction >= 75 && num(conv.gate) !== null && conv.gate >= 1
-        && num(conv.coverage) !== null && conv.coverage >= 0.8) {
+    if (conviction === null) {
+      why = "conviction unpublished";
+    } else if (conviction >= 75 && gate !== null && gate >= 1 && cover !== null && cover >= 0.8) {
       r = 3; why = "conviction at or above 75 with the quality gate cleared and coverage above 0.8";
-    } else if (conviction !== null && conviction >= 50) {
+    } else if (conviction >= 75) {
+      r = 2; why = gate === null || gate < 1 ? "conviction at or above 75 but the quality gate is below one"
+        : "conviction at or above 75 but coverage is below 0.8";
+    } else if (conviction >= 50) {
       r = 2; why = "conviction between 50 and 75";
     }
     if (score === null) { r = 0; why = "no score was published"; }
@@ -158,7 +179,7 @@ export function buildContext(card, extras) {
       status: p && typeof p === "object" ? silence(p.status) === p.status || p.status === "ok" ? p.status : "unavailable" : "unavailable",
       robustness: r, why,
       say: ok && p.lead && str(p.lead.say) ? p.lead.say.trim() : null,
-      figures: ok ? scalarFigures(p, FIGURE_KEYS[spec.key] || []) : {},
+      figures: ok ? { ...scalarFigures(p, FIGURE_KEYS[spec.key] || []), ...(spec.key === "levels" ? levelFigures(p) : {}) } : {},
       reason: !ok && p && str(p.reason) ? p.reason.trim() : null,
     });
   }
@@ -289,12 +310,13 @@ export function promptForNeuron(context) {
     "3. FOUR KINDS OF SILENCE ARE FOUR DIFFERENT FACTS: PENDING is not yet published, UNREADABLE " +
       "was published and could not be read, QUIET was measured and holds nothing, UNAVAILABLE was " +
       "published without this reading. Never call a name quiet because a feature is withheld.",
-    "4. Every idea rests on at least two features, named by their bracketed keys, and its rank is " +
+    "4. Every idea rests on at least two distinct features, named by the keys written between " +
+      "the brackets (for example gamma, levels, pricedMove — without the brackets), and its rank is " +
       "no higher than the lowest robustness among them. Prefer ideas that rest on robustness 3. " +
       "Never rest an idea on a feature with robustness 0.",
     "5. Every idea names an invalidation level that appears in the context (a wall, the gamma " +
-      "flip, max pain, the priced range) and a horizon that appears in the context (an expiry, " +
-      "the half-life, the priced-move sessions).",
+      "flip, max pain or an end of the priced range, quoted exactly as the context prints it) and " +
+      "a horizon that appears in the context (an expiry, the half-life, the priced-move sessions).",
     "6. The structure is one of: " + NEURON_STRUCTURES.join(", ") + ". 'no position' is a valid " +
       "idea when the features disagree; say which ones disagree.",
     "7. Units travel with numbers, in the context's own words. A capped list is not a population.",
@@ -330,33 +352,61 @@ export function parseNeuronOutput(text) {
   return { summary, ideas };
 }
 
+export function guardFacts(context) {
+  const ctx = context && typeof context === "object" ? context : { features: [] };
+  const out = [];
+  for (const f of ctx.features || []) {
+    if (!f.say) continue;
+    const values = Object.values(f.figures || {})
+      .filter((v) => v !== null && v !== undefined && typeof v !== "boolean")
+      .map((v) => String(v));
+    out.push({ say: f.say + (values.length ? " " + values.join(", ") : "") });
+  }
+  return out;
+}
+
 export function deterministicSummary(context) {
   const ctx = context && typeof context === "object" ? context : { features: [] };
+  const stale = ctx.stale === true;
   const said = (ctx.features || [])
-    .filter((f) => f.say && f.robustness >= 2)
+    .filter((f) => f.say && f.robustness >= (stale ? 1 : 2))
     .sort((a, b) => b.robustness - a.robustness)
     .slice(0, 3)
     .map((f) => f.say);
-  if (said.length) return said.join(" ");
+  if (said.length) {
+    return (stale ? "This card describes an earlier session than the last closed one, so every grade is capped at weak. " : "") +
+      said.join(" ");
+  }
   return "The card for " + (ctx.ticker || "this name") + " publishes no feature with a reading to lean on this session.";
 }
 
+const IDEA_SIDES = {
+  "long call": ["bullish"], "call debit spread": ["bullish"], "put credit spread": ["bullish"],
+  "long put": ["bearish"], "put debit spread": ["bearish"], "call credit spread": ["bearish"],
+  "covered call": ["bullish", "neutral"], "collar": ["bullish", "neutral"],
+  "iron condor": ["neutral"], "long straddle": ["neutral"], "long strangle": ["neutral"],
+  "calendar spread": ["neutral", "bullish", "bearish"], "no position": ["neutral"],
+};
+
 export function vetIdeas(rawIdeas, context) {
   const ctx = context && typeof context === "object" ? context : { features: [] };
-  const byKey = new Map((ctx.features || []).map((f) => [f.key, f]));
-  const facts = contextLines(ctx).map((say) => ({ say }));
+  const byKey = new Map((ctx.features || []).map((f) => [f.key.toLowerCase(), f]));
+  const facts = guardFacts(ctx);
   const kept = [];
   const refused = [];
+  const seen = new Set();
   for (const idea of Array.isArray(rawIdeas) ? rawIdeas : []) {
     if (!idea || typeof idea !== "object") { refused.push("not an object"); continue; }
     const title = str(idea.title), thesis = str(idea.thesis);
     const structure = str(idea.structure) ? idea.structure.trim().toLowerCase() : null;
     const direction = str(idea.direction) ? idea.direction.trim().toLowerCase() : null;
     const invalidation = str(idea.invalidation), horizon = str(idea.horizon);
-    const rests = Array.isArray(idea.rests_on) ? idea.rests_on.map((k) => String(k).trim()).filter(Boolean) : [];
+    const rests = [...new Set((Array.isArray(idea.rests_on) ? idea.rests_on : [])
+      .map((k) => String(k).replace(/^\s*\[|\]\s*$/g, "").trim().toLowerCase()).filter(Boolean))];
     if (!title || !thesis || !structure || !invalidation || !horizon) { refused.push((title || "idea") + ": a field is missing"); continue; }
     if (!NEURON_STRUCTURES.includes(structure)) { refused.push(title + ": structure not in the list"); continue; }
     if (!["bullish", "bearish", "neutral"].includes(direction)) { refused.push(title + ": direction not bullish, bearish or neutral"); continue; }
+    if (!(IDEA_SIDES[structure] || []).includes(direction)) { refused.push(title + ": a " + structure + " is not " + direction); continue; }
     const feats = rests.map((k) => byKey.get(k)).filter(Boolean);
     if (feats.length < 2 || feats.length !== rests.length) { refused.push(title + ": rests on fewer than two known features"); continue; }
     const robustness = Math.min(...feats.map((f) => f.robustness));
@@ -364,7 +414,10 @@ export function vetIdeas(rawIdeas, context) {
     const text = [title, thesis, invalidation, horizon].join(" ");
     const verdict = guardAnswer(text, facts, { smallIntegers: false });
     if (!verdict.ok) { refused.push(title + ": " + (verdict.forecast ? "claims what happens next" : "names a figure the card does not carry")); continue; }
-    kept.push({ title, structure, direction, thesis, invalidation, horizon, restsOn: rests, robustness,
+    const signature = [structure, direction, invalidation.toLowerCase()].join("|");
+    if (seen.has(signature) || seen.has(title.toLowerCase())) { refused.push(title + ": repeats an idea already kept"); continue; }
+    seen.add(signature); seen.add(title.toLowerCase());
+    kept.push({ title, structure, direction, thesis, invalidation, horizon, restsOn: feats.map((f) => f.key), robustness,
       robustnessWord: ROBUSTNESS_WORD[robustness] });
   }
   kept.sort((a, b) => b.robustness - a.robustness);

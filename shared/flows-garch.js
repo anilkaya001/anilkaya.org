@@ -144,7 +144,16 @@ export function fitGarch(closes, dates = [], { minReturns = GARCH_MIN_RETURNS } 
   for (let t = 1; t < e.length; t++) s2[t] = omega + alpha * e[t - 1] * e[t - 1] + beta * s2[t - 1];
   const condVol = s2.map((v) => Number((Math.sqrt(v) * GARCH_ANNUALISE).toFixed(2)));
   const nextS2 = omega + alpha * e[e.length - 1] * e[e.length - 1] + beta * s2[e.length - 1];
-  const edge = persistence > 0.998 || nu < SKEWT_NU_MIN + 0.05 || Math.abs(lambda) > SKEWT_LAMBDA_MAX - 0.02;
+  const edges = [];
+  if (persistence > 0.998) {
+    edges.push("persistence reached its cap, which a year of returns does for a fair share of stationary " +
+      "series; the path reads as near-integrated");
+  }
+  if (alpha < 1e-3) edges.push("no ARCH effect was found in the window, so beta and persistence are not identified");
+  if (nu < SKEWT_NU_MIN + 0.05) edges.push("the tail shape hit its floor");
+  if (Math.abs(lambda) > SKEWT_LAMBDA_MAX - 0.02) edges.push("the skew hit its cap");
+  const edge = edges.length > 0;
+  const identified = persistence <= 0.998 && alpha >= 1e-3;
   return {
     status: "ok",
     dist: "skewt",
@@ -157,7 +166,7 @@ export function fitGarch(closes, dates = [], { minReturns = GARCH_MIN_RETURNS } 
     lambda: Number(lambda.toFixed(3)),
     persistence: Number(persistence.toFixed(4)),
 
-    longRunVol: persistence < 1
+    longRunVol: identified
       ? Number((Math.sqrt(omega / (1 - persistence)) * GARCH_ANNUALISE).toFixed(2)) : null,
     lastVol: condVol[condVol.length - 1],
     nextVol: Number((Math.sqrt(nextS2) * GARCH_ANNUALISE).toFixed(2)),
@@ -166,8 +175,7 @@ export function fitGarch(closes, dates = [], { minReturns = GARCH_MIN_RETURNS } 
     ...(fit.converged && !edge ? {} : {
       reason: !fit.converged
         ? "the optimiser hit its step limit before the likelihood settled"
-        : "the fit sits on the edge of the parameter space, which is what a series with a " +
-          "structural break or too few extreme days looks like to this model",
+        : edges.join("; "),
     }),
     returns: e.map((v) => Number(v.toFixed(3))),
     dates: rd,
