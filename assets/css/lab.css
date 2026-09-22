@@ -1559,7 +1559,7 @@
   .project-export .btn { flex: 1 1 8rem; }
 }
 
-@media (min-width: 1150px) {
+@media (min-width: 901px) {
   .today + .course-explorer {
     display: grid;
     grid-template-columns: minmax(20rem, 0.8fr) minmax(34rem, 1.2fr);
@@ -1571,7 +1571,8 @@
   .course-explorer .course-tools { margin-bottom: 0; }
   .course-explorer .academy-section__head h2 { font-size: clamp(1.35rem, 1.05rem + 1vw, 1.8rem); }
   .course-explorer .academy-section__head > output { align-self: center; }
-  .course-explorer .course-tools { grid-template-columns: minmax(10rem, 1fr) auto auto; padding: 0.25rem; }
+  .course-explorer .course-tools { grid-template-columns: minmax(8rem, 1fr) auto auto; gap: 0.5rem; padding: 0.25rem; }
+  .course-explorer .course-tools select { min-width: 9.2rem; }
   .course-explorer .course-tools select,
   .course-explorer .course-search { min-height: 2.75rem; }
   .course-explorer .lab-grid,
