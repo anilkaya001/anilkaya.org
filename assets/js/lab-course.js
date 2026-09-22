@@ -83,6 +83,7 @@
     d.add(i); a[topic.id] = { done: [...d].sort((x, y) => x - y) };
     store.setProgress(a);
     paintProgress();
+    paintNext();
     const manifest = window.COURSE_STAGE_POINTS && window.COURSE_STAGE_POINTS[topic.id];
     const canonical = manifest && manifest[i];
     const authored = stages[i].points;
@@ -378,8 +379,8 @@
   function wrongMsg(st, r) {
     if (r.invalid) return "Enter a valid number using digits and an optional decimal point or comma.";
     if (st.why && r.sel && st.why[+r.sel.value]) return esc(st.why[+r.sel.value]);
-    if (st.type === "multi") return "Close — some right, some wrong. Try again, or tap Hint.";
-    return "Not quite — try again, or tap Hint.";
+    if (st.type === "multi") return "Close — some right, some wrong. Try again, or use the hint.";
+    return "Not quite — try again, or use the hint.";
   }
   function markCorrect(st, root, name) {
     const tag = (v) => { const c = root.querySelector('input[name="' + name + '"][value="' + v + '"]'); if (c && c.closest(".quiz__choice")) c.closest(".quiz__choice").classList.add("is-correct"); };
@@ -477,6 +478,17 @@
   }
 
   let cur = 0;
+  function paintNext() {
+    const st = stages[cur];
+    if (!st) return;
+    const readPending = st.type === "read" && !doneSet().has(cur);
+    const remaining = N - doneSet().size - (readPending ? 1 : 0);
+    nextBtn.textContent = cur === N - 1
+      ? (remaining > 0
+        ? (readPending ? "Complete & next unfinished →" : "Next unfinished · " + remaining + " left →")
+        : (readPending ? "Complete & finish ✓" : "Finish ✓"))
+      : (readPending ? "Complete & next →" : "Next →");
+  }
   async function render(i) {
     await ensureModule(stages[i].mi);
     cur = i;
@@ -487,7 +499,7 @@
     const work = (st.type !== "read") ? buildWork(st, i, figsEl) : null;
 
     stageEl.innerHTML = "";
-    const kicker = el("div", "stage__kicker", esc(st.mTitle) + " &middot; step " + (st.si + 1));
+    const kicker = el("div", "stage__kicker", esc(st.mTitle) + " &middot; lesson " + (st.si + 1) + " of " + stages.filter((stage) => stage.mi === st.mi).length);
     stageEl.appendChild(kicker);
 
     const body = el("div", work ? "stage__split" : "stage__solo");
@@ -506,10 +518,7 @@
     stageEl.appendChild(body);
 
     prevBtn.disabled = i === 0;
-    const complete = doneSet().has(i);
-    nextBtn.textContent = i === N - 1
-      ? (st.type === "read" && !complete ? "Complete & finish ✓" : "Finish ✓")
-      : (st.type === "read" && !complete ? "Complete & next →" : "Next →");
+    paintNext();
     root.querySelector("#cPos").textContent = (i + 1) + " / " + N;
     renderNav(i);
   }

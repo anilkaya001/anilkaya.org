@@ -129,14 +129,18 @@
       ? states.find((state) => state.topic.id === placement.recommendedTopic)
       : null;
     const placementGuided = completedLessons === 0 && placedState && placedState.status !== "completed";
+    const activePath = PATHS.find((path) => path.id === store().preferences().activePathId) || PATHS[0];
+    const pathState = activePath
+      ? activePath.courses.map((id) => states.find((state) => state.topic.id === id)).find((state) => state && state.status !== "completed")
+      : null;
     const active = states.find((state) => state.status === "in-progress") ||
-      (placementGuided ? placedState : null) || states.find((state) => state.status === "not-started") || states[0];
+      (placementGuided ? placedState : null) || pathState || states.find((state) => state.status === "not-started") || states[0];
     const overall = totalLessons ? Math.round((100 * completedLessons) / totalLessons) : 0;
     const gamify = window.Gamify ? window.Gamify.get() : { points: 0, streak: 0 };
     const review = skillQueue();
     const resumeLabel = placementGuided
       ? `${placement.band.charAt(0).toUpperCase() + placement.band.slice(1)} diagnostic route`
-      : active.status === "not-started" ? "Start the foundations" : active.status === "completed" ? "Review any course" : "Resume where you stopped";
+      : active.status === "not-started" ? (active.topic.id === "foundations" ? "Start the foundations" : "Next on your path") : active.status === "completed" ? "Review any course" : "Resume where you stopped";
     const activeHref = hrefFor(active.topic, active.firstOpen);
     const activeVerb = active.status === "completed" ? "Review" : active.status === "not-started" ? "Start" : "Continue";
 
@@ -177,8 +181,8 @@
     }
 
     grid.innerHTML =
-      '<article class="dashboard-resume"><div><p class="academy-kicker">' + resumeLabel + '</p><h2>' + esc(active.topic.title) + '</h2><p>' + active.done.length + " / " + active.topic.stages + " complete · next stage " + (active.firstOpen + 1) + '</p></div><a class="btn btn--gold" href="' + activeHref + '">' + (active.status === "not-started" ? "Begin" : active.status === "completed" ? "Review" : "Continue") + " &rarr;</a></article>" +
-      '<div class="dashboard-metrics"><article><span class="dashboard-metric__value">' + overall + '%</span><span class="dashboard-metric__label">Academy progress</span><small>' + completedLessons + ' / ' + totalLessons + ' stages</small></article><article><span class="dashboard-metric__value">' + Number(gamify.points || 0).toLocaleString() + '</span><span class="dashboard-metric__label">Knowledge points</span><small>' + Number(gamify.streak || 0) + ' day streak · ' + completeCourses + ' courses</small></article></div>';
+      '<article class="dashboard-resume"><div><p class="academy-kicker">' + resumeLabel + '</p><h2>' + esc(active.topic.title) + '</h2><p>' + active.done.length + " / " + active.topic.stages + " complete · next lesson " + (active.firstOpen + 1) + '</p></div><a class="btn btn--gold" href="' + activeHref + '">' + (active.status === "not-started" ? "Begin" : active.status === "completed" ? "Review" : "Continue") + " &rarr;</a></article>" +
+      '<div class="dashboard-metrics"><article><span class="dashboard-metric__value">' + overall + '%</span><span class="dashboard-metric__label">Academy progress</span><small>' + completedLessons + ' / ' + totalLessons + ' lessons</small></article><article><span class="dashboard-metric__value">' + Number(gamify.points || 0).toLocaleString() + '</span><span class="dashboard-metric__label">Knowledge points</span><small>' + Number(gamify.streak || 0) + ' day streak · ' + completeCourses + (completeCourses === 1 ? ' course' : ' courses') + '</small></article></div>';
 
     const steps = focusSteps(states, active);
     focus.innerHTML = '<div class="dashboard-focus__head"><p class="academy-kicker">Focus plan</p><h2 id="focusPlanTitle">Your next three steps</h2></div>' +
@@ -190,7 +194,7 @@
       ? `${completedLessons} lessons completed across ${states.filter((state) => state.done.length).length} courses.`
       : placementGuided
         ? `Your ${placement.band} diagnostic result recommends ${active.topic.shortTitle || active.topic.title} first.`
-        : "Begin with OLS, or choose a path aligned to your goal.";
+        : `Begin with ${active.topic.shortTitle || active.topic.title}, or choose a path aligned to your goal.`;
   }
 
   function renderSkillMap() {
@@ -199,15 +203,20 @@
     const mastery = store().skillMastery();
     const query = (document.getElementById("globalSearch")?.value || "").trim().toLowerCase();
     const levels = ["Not started", "Introduced", "Developing", "Practicing", "Proficient", "Mastered"];
+    let matched = 0;
     root.innerHTML = META.map((topic, courseIndex) => {
       const skills = SKILLS.filter((skill) => skill.courseId === topic.id && (!query || [skill.title, skill.practice, skill.diagnostic, topic.title].join(" ").toLowerCase().includes(query)));
       if (!skills.length) return "";
+      matched += skills.length;
       const mastered = skills.filter((skill) => (mastery[skill.id]?.level || 0) >= 5).length;
       return '<details class="skill-course"' + (courseIndex < 2 || query ? " open" : "") + '><summary><span><b>' + esc(topic.shortTitle || topic.title) + '</b><small>' + mastered + " / " + skills.length + ' mastered</small></span><span aria-hidden="true">+</span></summary><div class="skill-course__items">' + skills.map((skill) => {
         const level = mastery[skill.id]?.level || 0;
         return '<article class="skill-chip" data-level="' + level + '"><span class="skill-chip__level">' + esc(levels[level] || levels[0]) + '</span><h3>' + esc(skill.title) + '</h3><p>' + esc(skill.practice) + '</p><div class="skill-chip__meter" aria-label="' + esc(skill.title) + " mastery " + level + ' of 5"><i style="--level:' + level + '"></i></div></article>';
       }).join("") + "</div></details>";
     }).join("");
+    if (query && !matched) root.innerHTML = '<p class="course-empty-state">No skills match \u201c' + esc(query) + '\u201d.</p>';
+    const title = document.getElementById("skillsTitle");
+    if (title) title.textContent = query ? `${matched} of ${SKILLS.length} capabilities match` : `${SKILLS.length} connected capabilities`;
   }
 
   function renderProjects() {
@@ -363,7 +372,6 @@
     document.getElementById("levelFilter")?.addEventListener("change", renderGrid);
     document.getElementById("statusFilter")?.addEventListener("change", renderGrid);
     document.getElementById("resetConfirm")?.addEventListener("click", confirmReset);
-    document.getElementById("settingsResetBtn")?.addEventListener("click", openResetDialog);
     document.getElementById("sessionMinutes")?.addEventListener("change", (event) => {
       const preferences = { ...store().preferences(), sessionMinutes: Number(event.currentTarget.value) };
       if (window.Auth?.savePreferences) void window.Auth.savePreferences(preferences);

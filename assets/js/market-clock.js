@@ -112,9 +112,18 @@
     }
   }
 
+  function paintOverflow() {
+    const more = board.scrollWidth - board.clientWidth > 1;
+    board.classList.toggle("market-board--more-left", more && board.scrollLeft > 1);
+    board.classList.toggle("market-board--more-right", more && board.scrollLeft + board.clientWidth < board.scrollWidth - 1);
+  }
+  board.addEventListener("scroll", paintOverflow, { passive: true });
+  addEventListener("resize", paintOverflow);
+
   let timer = null;
   function start() {
     render();
+    paintOverflow();
     if (timer === null) timer = setInterval(render, 30000);
   }
   function stop() {

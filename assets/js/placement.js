@@ -236,6 +236,13 @@
     status.textContent = message || "";
   }
 
+  function revealApp() {
+    const app = byId("placementApp");
+    if (!app) return;
+    const top = app.getBoundingClientRect().top;
+    if (top < 0 || top > window.innerHeight * 0.5) app.scrollIntoView({ block: "start" });
+  }
+
   function focusHeading(heading) {
     if (!heading) return;
     heading.tabIndex = -1;
@@ -362,7 +369,7 @@
     heading.id = "placementAppTitle";
     wrap.append(heading);
     const description = el("p", "", saved ?
-      `Completed ${formatCompletedDay(saved.completedDay)}. Retake whenever your course work has moved the frontier.` :
+      `Completed ${formatCompletedDay(saved.completedDay)}. Retake whenever your coursework has moved on.` :
       "Move through one concise question at a time. The mix covers interpretation, identification, calculation, and model choice from foundation through advanced practice.");
     description.id = "placementAppDescription";
     wrap.append(description);
@@ -605,7 +612,8 @@
     card.append(form);
     shell.append(card);
     live.replaceChildren(shell);
-    announce(`Question ${session.index + 1} of ${session.questions.length}. ${question.topicTitle}.`);
+    announce(`Question ${session.index + 1} of ${session.questions.length}. ${question.topicTitle}.`, "quiet");
+    revealApp();
     focusHeading(heading);
   }
 
@@ -695,6 +703,23 @@
     else announce("Placement complete. Your result is saved on this device.", "success");
   }
 
+  function coverageSentence(outcome) {
+    if (outcome.band === "foundation") return "OLS is the prerequisite base for every route. Build it first, then connect it to nonlinear outcomes and causal design.";
+    const rate = (topic) => (outcome.topicStats[topic].total ? outcome.topicStats[topic].correct / outcome.topicStats[topic].total : 1);
+    const lowest = Math.min(...TOPIC_ORDER.map(rate));
+    if (lowest === 1) return "Every method scored full marks, so the route starts at the most advanced course and moves toward synthesis.";
+    if (outcome.recommendedTopic !== outcome.weakestTopic) {
+      return `${COURSES[outcome.weakestTopic].short} showed your lowest coverage; ${COURSES[outcome.recommendedTopic].short} is its prerequisite, so it comes first.`;
+    }
+    const tied = TOPIC_ORDER.filter((topic) => rate(topic) === lowest).map((topic) => COURSES[topic].short);
+    if (tied.length > 1) {
+      const others = tied.slice(1);
+      const list = others.length > 1 ? `${others.slice(0, -1).join(", ")} and ${others[others.length - 1]}` : others[0];
+      return `Your lowest coverage is shared with ${list}; the route starts with the earliest of them in the curriculum.`;
+    }
+    return "Your lowest relative coverage points here. Follow it with the two connected methods in your route.";
+  }
+
   function renderResults(outcome, result) {
     const live = byId("placementLive");
     const app = byId("placementApp");
@@ -728,9 +753,7 @@
     const routeCopy = el("div", "placement-recommendation__copy");
     routeCopy.append(el("p", "placement-eyebrow", "Recommended first course"));
     const courseHeading = el("h2", "", course.title);
-    routeCopy.append(courseHeading, el("p", "", outcome.band === "foundation" ?
-      "OLS is the prerequisite base for every route. Build it first, then connect it to nonlinear outcomes and causal design." :
-      "Your lowest relative coverage points here. Follow it with the two connected methods in your route."));
+    routeCopy.append(courseHeading, el("p", "", coverageSentence(outcome)));
     const start = el("a", "btn btn--gold placement-primary", "Start this course →");
     start.href = course.href;
     routeCopy.append(start);
@@ -765,6 +788,7 @@
     wrap.append(actions, el("p", "placement-results__no-points", "Diagnostic results do not award points, complete lessons, or change the Daily Mastery queue."), renderExplanations(outcome));
 
     live.replaceChildren(wrap);
+    revealApp();
     focusHeading(heading);
   }
 

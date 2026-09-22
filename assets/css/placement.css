@@ -45,7 +45,7 @@
   display: grid;
   grid-template-columns: minmax(17rem, 0.72fr) minmax(0, 1.28fr);
   gap: clamp(1rem, 3vw, 2.2rem);
-  align-items: stretch;
+  align-items: start;
 }
 
 .placement-hero {
@@ -119,6 +119,7 @@
     linear-gradient(150deg, color-mix(in srgb, var(--bg-elev) 94%, var(--gold-mystic)), var(--bg-elev));
   box-shadow: 0 28px 85px rgba(0, 0, 0, 0.34);
   overflow: hidden;
+  scroll-margin-top: 4.4rem;
 }
 
 .placement-app[aria-busy="true"] { cursor: progress; }
@@ -206,6 +207,7 @@
 }
 
 .placement-status:empty { display: none; }
+.placement-status--quiet { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
 .placement-status--success { color: #c4d9a3; }
 .placement-status--error { color: #ffb08a; }
 
@@ -410,6 +412,8 @@
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
+
+.placement-question h2:focus { outline: 0; }
 
 .placement-question__prompt {
   max-width: 50rem;

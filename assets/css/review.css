@@ -235,6 +235,8 @@
   text-wrap: balance;
 }
 
+.review-question h2:focus { outline: 0; }
+
 .review-question__prompt {
   margin-top: 0.85rem;
   color: var(--ink);
@@ -507,6 +509,10 @@
 
 @media (max-width: 560px) {
   .review-page { padding-bottom: 3.5rem; }
+  .review-page:has(#reviewLive:not([hidden])) .review-hero { margin-bottom: 1.1rem; }
+  .review-page:has(#reviewLive:not([hidden])) .review-hero h1 { font-size: clamp(1.9rem, 1.2rem + 4vw, 2.65rem); }
+  .review-page:has(#reviewLive:not([hidden])) .review-hero__copy > p:last-child,
+  .review-page:has(#reviewLive:not([hidden])) .review-brief { display: none; }
   .review-brief { grid-template-columns: 1fr; }
   .review-brief p + p { border-inline-start: 0; border-top: 1px solid var(--hairline); }
   .review-session__head { grid-template-columns: 1fr; }
