@@ -2544,10 +2544,7 @@ body.is-stale .flows-tablewrap {
   .mk-sector-v { flex-basis: 3.6rem; }
 }
 
-.ft-grid {
-
-  --ft-bar-h: 5.5rem;
-}
+.flows-body { --ft-bar-h: 5.5rem; }
 
 .ft-hero {
   display: grid;
@@ -7105,7 +7102,7 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
     padding-bottom: var(--space-3);
   }
 
-  .ft-scroll > .ft-bar, .ft-scroll > .ft-head { top: 0; }
+  .ft-scroll > .ft-bar, .ft-scroll > .ft-head, .ft-scroll .ft-bar .ft-head { top: 0; }
   .ft-scroll .ft-grid .ft-panel, .ft-scroll .ft-grid .ft-group {
     scroll-margin-top: calc(var(--ft-bar-h) + 0.6rem);
   }

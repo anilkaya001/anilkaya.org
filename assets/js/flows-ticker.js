@@ -3714,6 +3714,13 @@
     const edge = () => scroller.classList.toggle("is-scrolled", scroller.scrollTop > 2);
     scroller.addEventListener("scroll", edge, { passive: true });
     edge();
+    const bar = document.getElementById("ftBar");
+    const barSize = () => {
+      if (!bar || bar.hidden || !bar.offsetHeight) return;
+      scroller.style.setProperty("--ft-bar-h", bar.offsetHeight + "px");
+    };
+    if (bar && typeof ResizeObserver === "function") new ResizeObserver(barSize).observe(bar);
+    barSize();
   }
 
   function writeHash(value) {
