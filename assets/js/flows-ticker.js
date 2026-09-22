@@ -3435,11 +3435,20 @@
     changeEl.hidden = true;
     changeEl.setAttribute("aria-labelledby", "ftChangeH");
 
-    const band4 = document.querySelector(".ft-band4");
-    if (band4) band4.insertBefore(changeEl, band4.firstChild);
+    const row1 = $("ftRow1");
+    if (row1) row1.append(changeEl);
     else {
-      const after = document.querySelector(".ft-top") || $("ftCards") || barEl;
+      const after = document.querySelector(".ft-band3") || document.querySelector(".ft-top") || $("ftCards") || barEl;
       after.parentNode.insertBefore(changeEl, after.nextSibling);
+    }
+  }
+
+  function evenBand3() {
+    const band = document.querySelector(".ft-band3");
+    if (!band) return;
+    const shown = [...band.children].filter((n) => !n.hidden && !n.classList.contains("ft-chain"));
+    for (const n of band.children) {
+      n.classList.toggle("is-wide", !n.hidden && shown.length % 2 === 1 && n === shown[shown.length - 1]);
     }
   }
 
@@ -3721,6 +3730,11 @@
     };
     if (bar && typeof ResizeObserver === "function") new ResizeObserver(barSize).observe(bar);
     barSize();
+    const band3 = document.querySelector(".ft-band3");
+    if (band3 && typeof MutationObserver === "function") {
+      new MutationObserver(evenBand3).observe(band3, { attributes: true, attributeFilter: ["hidden"], subtree: true });
+    }
+    evenBand3();
   }
 
   function writeHash(value) {
@@ -4776,105 +4790,61 @@
       el("span", "ft-garch-lg is-ret", "Daily return"));
     body.append(legend);
 
-    const wrap = el("div", "ft-garch-dist");
-    const distH = el("h3", "ft-garch-h3", "Return distribution (GED)");
-    wrap.append(distH);
-    const row = el("div", "ft-garch-row");
-    const DW = 360, DH = 120, dl = 8, dr = 8, dt = 8, db = 16;
-    const dplotW = DW - dl - dr, dplotH = DH - dt - db;
-    const Z = 4, BINS = 32;
-    const counts = new Array(BINS).fill(0);
-    let zn = 0;
-    for (let i = 0; i < all.length; i++) {
-      const v = all[i].v, r = all[i].r;
-      if (v === null || r === null || !(v > 0)) continue;
-      const z = r / (v / Math.sqrt(252));
-      const b = Math.floor(((z + Z) / (2 * Z)) * BINS);
-      if (b < 0 || b >= BINS) { zn++; continue; }
-      counts[b]++; zn++;
-    }
-    const binW = (2 * Z) / BINS;
-    const dens = counts.map((k) => (zn ? k / (zn * binW) : 0));
-    const nu = isNum(g.nu);
-    const ged = (z) => {
-      if (nu === null) return 0;
-      const lg = (t) => {
-        if (t < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * t)) - lg(1 - t);
-        const cc = [0.99999999999980993, 676.5203681218851, -1259.1392167224028,
-          771.32342877765313, -176.61502916214059, 12.507343278686905,
-          -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7];
-        t -= 1;
-        let a = cc[0];
-        const tt = t + 7.5;
-        for (let i = 1; i < 9; i++) a += cc[i] / (t + i);
-        return 0.5 * Math.log(2 * Math.PI) + (t + 0.5) * Math.log(tt) - tt + Math.log(a);
-      };
-      const lam = Math.sqrt(Math.pow(2, -2 / nu) * Math.exp(lg(1 / nu) - lg(3 / nu)));
-      const logC = Math.log(nu) - Math.log(lam) - (1 + 1 / nu) * Math.LN2 - lg(1 / nu);
-      return Math.exp(logC - 0.5 * Math.pow(Math.abs(z / lam), nu));
-    };
-    let dmax = 0;
-    for (const v of dens) if (v > dmax) dmax = v;
-    for (let z = -Z; z <= Z; z += 0.05) { const v = ged(z); if (v > dmax) dmax = v; }
-    if (!(dmax > 0)) dmax = 1;
-    const dx = (z) => dl + ((z + Z) / (2 * Z)) * dplotW;
-    const dy = (v) => dt + dplotH - (v / dmax) * dplotH;
-    const dsvg = svgEl("svg", { class: "ft-chart-svg ft-garch-dsvg", viewBox: "0 0 " + DW + " " + DH,
-      role: "img", "aria-label": "Histogram of " + zn + " standardised returns under the fitted GED density" });
-    for (let b = 0; b < BINS; b++) {
-      if (!counts[b]) continue;
-      const z0 = -Z + b * binW;
-      dsvg.append(svgEl("rect", { class: "ft-garch-bin", x: dx(z0) + 0.5, width: Math.max(0.5, (dplotW / BINS) - 1),
-        y: dy(dens[b]), height: Math.max(0.5, dt + dplotH - dy(dens[b])) }));
-    }
-    if (nu !== null) {
-      let dd = "";
-      for (let z = -Z, k = 0; z <= Z + 1e-9; z += 0.05, k++) {
-        dd += (k ? "L" : "M") + dx(z).toFixed(2) + " " + dy(ged(z)).toFixed(2) + " ";
-      }
-      dsvg.append(svgEl("path", { class: "ft-garch-ged", d: dd.trim(), fill: "none" }));
-    }
-    for (const z of [-4, -2, 0, 2, 4]) {
-      const t = svgEl("text", { class: "ft-chart-ax", x: dx(z), y: DH - 4, "text-anchor": "middle" });
-      t.textContent = z === 0 ? "0" : (z > 0 ? "+" : "−") + Math.abs(z) + " sd";
-      dsvg.append(t);
-    }
-    row.append(dsvg);
-    const table = el("dl", "ft-garch-params");
-    const put = (k, v, title) => {
-      const dk = el("dt", "", k);
-      if (title) dk.title = title;
-      table.append(dk, el("dd", "", v));
-    };
+    const skewt = g.dist === "skewt";
+    const nu = skewt ? isNum(g.nu) : null, lam = skewt ? isNum(g.lambda) : null;
+    const lastVol = isNum(g.lastVol) !== null ? isNum(g.lastVol)
+      : (all.length && all[all.length - 1].v !== null ? all[all.length - 1].v : null);
+    const nextVol = isNum(g.nextVol), longRun = isNum(g.longRunVol);
+    const pct = (v) => (v === null ? DASH : v.toFixed(1) + "%");
     const f4 = (v) => (v === null ? DASH : v.toFixed(v < 0.01 ? 6 : 4));
-    put("shape (nu)", nu === null ? DASH : nu.toFixed(2),
-      "The GED shape: 2 is the normal, below it the tails are heavier.");
-    put("omega", f4(isNum(g.omega)), "The constant in the variance recursion, in squared daily percent.");
-    put("alpha", f4(isNum(g.alpha)), "How much yesterday's squared shock feeds today's variance.");
-    put("beta", f4(isNum(g.beta)), "How much yesterday's variance carries into today's.");
-    put("alpha + beta", isNum(g.persistence) === null ? DASH : g.persistence.toFixed(3),
+    const table = el("dl", "ft-garch-params");
+    const put = (k, v, title, cls) => {
+      const cell = el("div", "ft-garch-p" + (cls ? " " + cls : ""));
+      const dk = el("dt", "", k);
+      if (title) cell.title = title;
+      cell.append(dk, el("dd", "", v));
+      table.append(cell);
+    };
+    put("LAST SESSION", pct(lastVol),
+      "The conditional volatility on the last fitted session, annualised.", "is-lead");
+    put("NEXT SESSION", pct(nextVol),
+      "One step of the variance recursion off the last shock, annualised: the model\u2019s own " +
+      "next-session level, not a claim about the return.", "is-lead");
+    put("LONG-RUN", pct(longRun),
+      "The unconditional volatility the parameters imply, annualised.", "is-lead");
+    if (skewt) {
+      put("TAIL SHAPE \u03bd", nu === null ? DASH : nu.toFixed(1),
+        "Degrees of freedom of the skewed t: lower is heavier-tailed; near 30 the tails are the normal\u2019s.");
+      put("SKEW \u03bb", lam === null ? DASH : (lam > 0 ? "+" : lam < 0 ? "\u2212" : "") + Math.abs(lam).toFixed(2),
+        "Skew of the innovations: negative puts the heavier tail on the downside, positive on the upside. " +
+        "A year of returns pins it to about one decimal, so two are shown.");
+    }
+    put("\u03b1 + \u03b2", isNum(g.persistence) === null ? DASH : g.persistence.toFixed(3),
       "Persistence: how slowly a shock decays. Close to 1 is slow.");
-    put("long-run vol", isNum(g.longRunVol) === null ? DASH : g.longRunVol.toFixed(1) + "%",
-      "The unconditional volatility the parameters imply, annualised.");
-    row.append(table);
-    wrap.append(row);
-    body.append(wrap);
+    put("\u03b1", f4(isNum(g.alpha)), "How much yesterday\u2019s squared shock feeds today\u2019s variance.");
+    put("\u03b2", f4(isNum(g.beta)), "How much yesterday\u2019s variance carries into today\u2019s.");
+    put("\u03c9", f4(isNum(g.omega)), "The constant in the variance recursion, in squared daily percent.");
+    body.append(table);
 
     if (sub) {
       const nn = isNum(g.n);
       const d0 = Array.isArray(g.dates) && g.dates.length ? g.dates[0] : null;
       const d1 = Array.isArray(g.dates) && g.dates.length ? g.dates[g.dates.length - 1] : null;
+      const tails = nu === null ? "" : nu < 5 ? "heavy tails" : nu < 15 ? "moderately heavy tails" : "tails close to the normal\u2019s";
+      const side = lam === null ? "" : lam < -0.05 ? "the heavier tail on the downside"
+        : lam > 0.05 ? "the heavier tail on the upside" : "no material skew";
       sub.textContent = "Fitted by maximum likelihood on " + (nn === null ? "the" : nn) +
-        " daily log returns" + (d0 && d1 ? ", " + d0 + " to " + d1 : "") +
-        ", demeaned once. The path is the model's conditional standard deviation, annualised; " +
-        "the histogram bins each return divided by that day's path, " + zn + " of them, " +
-        "under the density the fitted shape implies" +
-        (nu === null ? "" : " (2 would be normal; " + nu.toFixed(2) + " is " +
-          (nu < 2 ? "heavier-tailed" : nu > 2 ? "thinner-tailed" : "normal") + ")") +
-        ". Windowed to " + garchPeriod + "." +
+        " daily log returns" + (d0 && d1 ? ", " + d0 + " to " + d1 : "") + ", demeaned once" +
+        (skewt
+          ? "; the innovations are Hansen\u2019s skewed t" +
+            (tails || side ? " (" + [tails, side].filter(Boolean).join(", ") + ")" : "") + "."
+          : "; this card\u2019s fit predates the skewed-t innovations and is refitted at the next nightly run.") +
+        " The path is the model\u2019s conditional standard deviation, annualised, windowed to " +
+        garchPeriod + "." +
         (g.converged === false ? " The fit did not settle: " + String(g.reason || "") +
-          " — the path is what the likelihood found and no more." : "") +
-        " No forecast is drawn: this describes the year, not tomorrow.";
+          " \u2014 the path is what the likelihood found and no more." : "") +
+        " The next-session cell is the recursion\u2019s own next state, fixed by the last shock and " +
+        "the last variance; it carries no claim about the return\u2019s sign or size.";
     }
     host.hidden = false;
   }
@@ -4938,8 +4908,10 @@
           rows: pt.v === null ? [{ k: "Implied vol", v: "not published" }] : pt.rows })),
       });
     }
-    if (sub) sub.textContent = "Implied volatility — " + spec.unit + ". " +
-      spec.clock.charAt(0).toUpperCase() + spec.clock.slice(1) + ".";
+    if (sub) {
+      sub.textContent = spec.unit.charAt(0).toUpperCase() + spec.unit.slice(1) + " by expiry. " +
+        spec.clock.charAt(0).toUpperCase() + spec.clock.slice(1) + ".";
+    }
     host.hidden = false;
   }
 
@@ -5249,7 +5221,7 @@
       const atr = isNum(lv.distAtr);
       dist.textContent = d === null ? DASH
         : neg((d * 100).toFixed(1)) + "%" + (atr === null ? "" : " · " +
-          neg(Math.abs(atr).toFixed(2)) + " ATR");
+          (d < 0 ? MINUS : d > 0 ? "+" : "") + Math.abs(atr).toFixed(2) + " ATR");
       li.append(dist);
 
       li.title = (lv.label || lv.kind || "This level") +
@@ -5816,7 +5788,8 @@
     if (footEl) {
       footEl.textContent =
         "Every number here is read off the card payload the pipeline published " +
-        "for " + fmtDate(card.sessionDate) + ". No vendor call is made by this page.";
+        "for " + fmtDate(card.sessionDate) + "; only the last price and its day change are " +
+        "re-read live every five seconds.";
     }
   }
 
@@ -5857,17 +5830,75 @@
   const NEURON_CLAMP = 32;
   let neuronState = null;
 
+  function paintNeuronIdeas(list, ideas, byKey) {
+    list.replaceChildren();
+    const rows = Array.isArray(ideas) ? ideas : [];
+    list.hidden = !rows.length;
+    rows.forEach((idea, i) => {
+      if (!idea || typeof idea !== "object") return;
+      const li = el("li", "ft-idea");
+      const top = el("div", "ft-idea-top");
+      const rank = el("span", "ft-idea-rank r" + (isNum(idea.robustness) === null ? 0 : idea.robustness));
+      for (let k = 1; k <= 3; k++) rank.append(el("i", k <= (isNum(idea.robustness) || 0) ? "is-on" : ""));
+      rank.title = "Robustness " + (isNum(idea.robustness) === null ? "unpublished" : idea.robustness + " of 3") +
+        ": the lowest grade among the features this idea rests on.";
+      rank.setAttribute("aria-label", "robustness " + (isNum(idea.robustness) || 0) + " of 3");
+      top.append(rank, el("span", "ft-idea-t", String(i + 1) + ". " + String(idea.title || "")));
+      li.append(top);
+      const chips = el("div", "ft-idea-chips");
+      if (idea.structure) chips.append(el("span", "ft-idea-chip", String(idea.structure)));
+      if (idea.direction) {
+        chips.append(el("span", "ft-idea-chip" + (idea.direction === "bullish" ? " is-pos"
+          : idea.direction === "bearish" ? " is-neg" : ""), String(idea.direction)));
+      }
+      if (typeof idea.robustnessWord === "string") chips.append(el("span", "ft-idea-chip is-grade", idea.robustnessWord));
+      li.append(chips);
+      if (idea.thesis) li.append(el("p", "ft-idea-p", String(idea.thesis)));
+      const meta = el("dl", "ft-idea-m");
+      const put = (k, v) => { if (!v) return; meta.append(el("dt", "", k), el("dd", "", v)); };
+      put("Invalidated", idea.invalidation ? String(idea.invalidation) : null);
+      put("Horizon", idea.horizon ? String(idea.horizon) : null);
+      const rests = Array.isArray(idea.restsOn) ? idea.restsOn.map((k) => (byKey.get(k) || {}).title || k) : [];
+      put("Rests on", rests.length ? rests.join(" \u00b7 ") : null);
+      if (meta.childElementCount) li.append(meta);
+      list.append(li);
+    });
+  }
+
+  function paintNeuronCoverage(cov, ctx) {
+    if (!cov) return;
+    const c = ctx && ctx.coverage ? ctx.coverage : null;
+    if (!c) { cov.hidden = true; cov.textContent = ""; return; }
+    const parts = [];
+    if (c.robust) parts.push(c.robust + " robust");
+    if (c.fair) parts.push(c.fair + " fair");
+    if (c.weak) parts.push(c.weak + " weak");
+    if (c.withheld) parts.push(c.withheld + " withheld");
+    cov.textContent = "Neuron read " + c.read + " of " + c.features + " features" +
+      (c.quiet ? ", " + c.quiet + " quiet" : "") +
+      (parts.length ? " \u2014 " + parts.join(" \u00b7 ") : "") +
+      (ctx.stale === true ? ". Every grade is capped at weak: the card describes " + ctx.sessionDate +
+        " and " + ctx.expectedSession + " has closed since." : ".") +
+      " Ideas are readings of this card, ranked by the weakest feature each rests on; nothing here is advice.";
+    cov.hidden = false;
+  }
+
   function paintNeuron(res) {
     const host = $("ftNeuron"), head = $("ftNeuronH"), say = $("ftNeuronSay"), src = $("ftNeuronSrc");
+    const list = $("ftNeuronIdeas"), cov = $("ftNeuronCov");
     if (!host || !head || !say || !src) return;
     const r = res && typeof res === "object" ? res : null;
     const status = r && typeof r.status === "string" ? r.status : "unavailable";
     const text = r && typeof r.summary === "string" && r.summary.trim() ? r.summary.trim() : "";
     const mark = host.querySelector(".ak-nn");
+    const ctx = r && r.context && typeof r.context === "object" ? r.context : null;
+    const byKey = new Map(ctx && Array.isArray(ctx.features) ? ctx.features.map((f) => [f.key, f]) : []);
     host.hidden = false;
     host.classList.toggle("is-pending", status !== "ok");
     host.classList.toggle("is-llm", status === "ok" && r.llm === true);
     if (mark) mark.classList.toggle("is-live", status === "pending" || (status === "ok" && r.llm === true));
+    if (list && status !== "ok") { list.replaceChildren(); list.hidden = true; }
+    paintNeuronCoverage(cov, ctx);
 
     head.replaceChildren(document.createTextNode("Neuron"));
     if (status === "ok" && typeof r.generatedAt === "string" && r.generatedAt.length >= 16) {
@@ -5881,7 +5912,9 @@
     }
 
     if (status === "ok" && text) {
-      if (neuronState === "ok:" + text) return;
+      const ideasKey = JSON.stringify(r.ideas || []);
+      if (neuronState === "ok:" + text + ideasKey) return;
+      if (list) paintNeuronIdeas(list, r.ideas, byKey);
       say.replaceChildren();
       say.removeAttribute("data-empty");
       const words = text.split(/\s+/).filter(Boolean);
@@ -5900,13 +5933,13 @@
         ? r.provenance
         : (r.llm ? "Wording by a language model; figures measured by the pipeline."
           : "Deterministic reading. No model was asked.");
-      neuronState = "ok:" + text;
+      neuronState = "ok:" + text + ideasKey;
       return;
     }
 
     const note = r && typeof r.note === "string" && r.note ? r.note : null;
     const said = status === "pending"
-      ? (note || "Neuron is writing this name\u2019s summary now.")
+      ? (note || "Neuron is reading this card now.")
       : status === "quiet"
         ? (note || "This card carries no reading a summary could be written over.")
         : status === "unreadable"

@@ -1,10 +1,10 @@
 export const TICKER_PANELS = Object.freeze([
 
-  { key: "__score", id: "ftWhy", span: 1, group: "signal", tier: "lead",
+  { key: "__score", id: "ftWhy", span: 3, group: "signal", tier: "lead",
     title: "Score derivation",
     question: "Which components produced this score, and how heavily?" },
 
-  { key: "__stats", id: "ftStats", span: 2, group: "signal", tier: "table",
+  { key: "__stats", id: "ftStats", span: 3, group: "signal", tier: "table",
     title: "Key statistics",
     question: "What are this name’s headline figures, gathered from the panels that publish them?" },
 

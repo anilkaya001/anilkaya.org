@@ -149,7 +149,7 @@ const truncated = cards.filter((c) =>
   for (const p of TICKER_PANELS) {
     ok(p.question && p.question.trim().length > 8, `panel "${p.key}" states a real question`);
     ok(p.title && p.title.trim().length > 2, `panel "${p.key}" has a title`);
-    ok(p.span === 1 || p.span === 2, `panel "${p.key}" has a legal span`);
+    ok(p.span === 1 || p.span === 2 || p.span === 3, `panel "${p.key}" has a legal span`);
   }
 
   const iIvs = TICKER_PANELS.findIndex((p) => p.key === "ivSurface");
@@ -357,6 +357,7 @@ function sweepPanels() {
       dead: !!host.querySelector(".fc-dead"),
       empty: host.childElementCount === 0,
       wide: section.classList.contains("is-wide"),
+      full: section.classList.contains("is-full"),
       boxW: Math.round(section.getBoundingClientRect().width),
 
       hostW: Math.floor(host.getBoundingClientRect().width),
@@ -461,7 +462,11 @@ try {
 
     if (width >= 1280) {
       const wide = swept.filter((p) => p.wide);
-      const narrow = swept.filter((p) => !p.wide);
+      const narrow = swept.filter((p) => !p.wide && !p.full);
+      for (const p of swept.filter((x) => x.full)) {
+        ok(p.boxW > Math.max(...wide.map((w) => w.boxW)) * 1.3,
+           `1280px ${p.key}: is-full spans every column (${p.boxW})`);
+      }
       ok(wide.length > 0 && narrow.length > 0, "1280px: the grid mixes wide and narrow panels");
       const narrowW = Math.max(...narrow.map((p) => p.boxW));
       for (const p of wide) {
@@ -1887,14 +1892,39 @@ try {
        "the derivation is the first panel the registry mounts: a reader arrives from a " +
        "board row carrying a score, and the first thing the page owes them is where it came " +
        "from (the score-over-price series that used to lead was dropped from the page)");
-    eq(TICKER_PANELS[0].span, 1,
-       "at its own width — five gauges and their weights set their own width, and a span-2 " +
-       "host spends the difference on void, not on arc");
+    eq(TICKER_PANELS[0].span, 3,
+       "across the whole grid — at span 1 it was a 1,034px column beside a 330px table, the " +
+       "widest void on the page, because a grid row is as tall as its tallest cell; a span-2 " +
+       "host spent the width on void because the gauge and its families set their own width, " +
+       "so the derivation now lays its gauge, its readings and its method out in three " +
+       "columns of its own and becomes a band");
     const page = await browser.newPage({ viewport: { width: 1280, height: 1200 } });
     await mount(page, withChain[0], { ticker: withChain[0].ticker });
     const order = await page.evaluate(() =>
       [...document.querySelectorAll(".ft-panel[data-panel]")].map((s) => s.dataset.panel));
     eq(order[0], "__score", "and it is first in the document too");
+    const band = await page.evaluate(() => {
+      const box = (n) => n.getBoundingClientRect();
+      const grid = document.getElementById("ftGrid");
+      const score = document.querySelector('.ft-panel[data-panel="__score"]');
+      const stats = document.querySelector('.ft-panel[data-panel="__stats"]');
+      const cols = score.querySelector(".fc-score-cols");
+      return {
+        gridW: Math.round(box(grid).width), scoreW: Math.round(box(score).width), scoreH: Math.round(box(score).height),
+        statsW: Math.round(box(stats).width),
+        tracks: getComputedStyle(cols).gridTemplateColumns.split(" ").length,
+        colH: [...cols.children].map((c) => Math.round(box(c).height)),
+      };
+    });
+    ok(Math.abs(band.scoreW - band.gridW) <= 1,
+       `1280px: the derivation spans the whole grid (${band.scoreW} of ${band.gridW})`);
+    eq(band.tracks, 3, "and lays itself out in three columns");
+    ok(band.colH.every((h) => h > 0), `each of which holds something (${band.colH.join(", ")})`);
+    ok(band.scoreH < 760,
+       `so the panel stands under 760px (${band.scoreH}) where the column stood at 1,034`);
+    ok(Math.abs(band.statsW - band.gridW) <= 1,
+       `and the key statistics beneath it span the grid too (${band.statsW} of ${band.gridW}), ` +
+       "so the signal station is two bands rather than a column and a stub");
     ok(!order.includes("scoreOverlay"), "the score-over-price series is mounted nowhere");
     await page.close();
 
@@ -3833,6 +3863,173 @@ try {
   }
 
 } finally {
+  {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    const { fitGarch } = await import("../shared/flows-garch.js");
+    let seed = 0x9E3779B9 ^ 3;
+    const rnd = () => {
+      seed = (seed + 0x6D2B79F5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const px = [100], dates = ["2020-01-01"];
+    let s2 = 1;
+    for (let i = 1; i <= 1500; i++) {
+      const u1 = rnd() || 1e-9, u2 = rnd();
+      const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2) * (rnd() < 0.08 ? 3 : 1) / Math.sqrt(0.92 + 0.08 * 9);
+      const e = Math.sqrt(s2) * z;
+      px.push(px[px.length - 1] * Math.exp(e / 100));
+      s2 = 0.05 + 0.1 * e * e + 0.85 * s2;
+      dates.push(new Date(Date.UTC(2020, 0, 1 + i)).toISOString().slice(0, 10));
+    }
+    const fitted = JSON.parse(JSON.stringify(withChain[0]));
+    fitted.panels.context = { ...(fitted.panels.context || {}), status: "ok", garch: fitGarch(px, dates) };
+    const g0 = fitted.panels.context.garch;
+    ok(g0.status === "ok" && g0.dist === "skewt" && g0.converged === true,
+       `the fixture carries a converged skewed-t fit (${g0.status}, ${g0.dist}, ${g0.reason || "settled"})`);
+    await mount(page, fitted, { ticker: fitted.ticker, station: "all" });
+    const garch = await page.evaluate(() => {
+      const host = document.getElementById("ftGarch");
+      return {
+        hidden: host.hidden,
+        heading: document.getElementById("ftGarchH").textContent,
+        cells: [...host.querySelectorAll(".ft-garch-p")].map((c) =>
+          [c.querySelector("dt").textContent, c.querySelector("dd").textContent]),
+        note: document.getElementById("ftGarchS").textContent,
+        leftovers: host.querySelectorAll(".ft-garch-bin, .ft-garch-dist, .ft-garch-ged, .ft-garch-dsvg").length,
+        path: host.querySelectorAll(".ft-garch-line").length,
+      };
+    });
+    ok(!garch.hidden, "a fitted name shows the volatility card");
+    ok(/skewed t/.test(garch.heading) && !/GED/.test(garch.heading), `the heading names the density (${garch.heading})`);
+    assert.deepEqual(garch.cells.map((c) => c[0]),
+      ["LAST SESSION", "NEXT SESSION", "LONG-RUN", "TAIL SHAPE ν", "SKEW λ", "α + β", "α", "β", "ω"],
+      "nine cells in a fixed order: the three levels lead, then the two shape parameters, then the recursion's own"); checks++;
+    ok(garch.cells.every((c) => /\d/.test(c[1])), `every cell carries a figure (${garch.cells.map((c) => c[1]).join(" | ")})`);
+    eq(garch.cells[3][1], g0.nu.toFixed(1), "the tail shape prints to one decimal");
+    eq(garch.cells[4][1], (g0.lambda > 0 ? "+" : g0.lambda < 0 ? "−" : "") + Math.abs(g0.lambda).toFixed(2),
+       "the skew prints to two decimals with a real minus sign, because a year of returns pins it to about one");
+    ok(/Hansen/.test(garch.note) && /skewed t/.test(garch.note), "the note names whose density was fitted");
+    ok(!/No forecast/.test(garch.note) && /next-session cell/.test(garch.note),
+       "and explains the next-session cell as the recursion's own state rather than denying a forecast beside one");
+    eq(garch.leftovers, 0, "no histogram, density or GED block survives");
+    eq(garch.path, 1, "the conditional-volatility path is drawn once");
+    ok(!/GED/.test(garch.note), "the note carries no trace of the GED");
+
+    const older = JSON.parse(JSON.stringify(fitted));
+    delete older.panels.context.garch.dist;
+    delete older.panels.context.garch.lambda;
+    older.panels.context.garch.nu = 1.3;
+    await mount(page, older, { ticker: older.ticker, station: "all" });
+    const pre = await page.evaluate(() => ({
+      labels: [...document.querySelectorAll("#ftGarch .ft-garch-p dt")].map((d) => d.textContent),
+      note: document.getElementById("ftGarchS").textContent,
+    }));
+    ok(!pre.labels.some((l) => /TAIL SHAPE|SKEW/.test(l)),
+       `a card fitted before the skewed t shows no shape or skew cell (${pre.labels.join(", ")})`);
+    ok(/predates the skewed-t/.test(pre.note) && !/Hansen/.test(pre.note),
+       "and its note says the fit predates the density instead of reading a GED shape as a Student-t one");
+
+    await mount(page, fitted, { ticker: fitted.ticker, station: "all" });
+    const shell = await page.evaluate(() => ({
+      cols: document.querySelectorAll(".ft-col, .ft-band4").length,
+      change: !!document.querySelector("#ftRow1 > #ftChange"),
+    }));
+    eq(shell.cols, 0, "the second row has no column wrappers left to hold a void where a hidden card was");
+    ok(shell.change, "and what changed sits in its own full-width row beneath the small cards");
+    await page.waitForFunction(() => !document.getElementById("ftFlow").hidden, null, { timeout: 8000 });
+    const band = await page.evaluate(() => {
+      const kids = [...document.querySelector(".ft-band3").children].filter((n) => !n.hidden);
+      const rows = new Map();
+      for (const n of kids) {
+        const key = n.offsetTop;
+        if (!rows.has(key)) rows.set(key, []);
+        rows.get(key).push({ id: n.id, w: n.offsetWidth, h: n.offsetHeight, wide: n.classList.contains("is-wide") });
+      }
+      return [...rows.values()];
+    });
+    ok(band.length > 0, "the second row draws at least one card on a full card");
+    for (const row of band) {
+      const hs = new Set(row.map((c) => c.h));
+      eq(hs.size, 1, `cards sharing a row share a height (${row.map((c) => c.id + ":" + c.h).join(", ")})`);
+      const ws = new Set(row.map((c) => c.w));
+      eq(ws.size, 1, `and a width (${row.map((c) => c.id + ":" + c.w).join(", ")})`);
+    }
+    const bandW = await page.evaluate(() => document.querySelector(".ft-band3").offsetWidth);
+    for (const row of band) {
+      if (row.length === 1) {
+        ok(Math.abs(row[0].w - bandW) <= 1,
+           `a card alone on its row spans the whole row (${row[0].id}: ${row[0].w} of ${bandW})`);
+      }
+    }
+
+    await page.evaluate(() => {
+      const inner = window.fetch;
+      window.fetch = (url) => {
+        const u = String(url);
+        if (!u.includes("/api/flows/summary")) return inner(url);
+        const body = {
+          status: "ok", scope: "X", llm: true, model: "m", generatedAt: "2026-09-22T09:41:00.000Z",
+          summary: "A summary sentence without figures.",
+          provenance: "Wording by m; figures measured by the pipeline.",
+          ideas: [
+            { title: "Put wall credit", structure: "put credit spread", direction: "bullish", thesis: "Thesis one.",
+              invalidation: "a close below the put wall", horizon: "ten sessions", restsOn: ["gamma", "levels"],
+              robustness: 3, robustnessWord: "robust" },
+            { title: "Front straddle", structure: "long straddle", direction: "neutral", thesis: "Thesis two.",
+              invalidation: "the range holding", horizon: "the front expiry", restsOn: ["volContext", "calendar"],
+              robustness: 2, robustnessWord: "fair" },
+          ],
+          context: { version: 1, sessionDate: "2026-09-21", expectedSession: "2026-09-21", stale: false,
+            coverage: { features: 24, read: 20, quiet: 1, withheld: 3, robust: 8, fair: 10, weak: 3 },
+            features: [{ key: "gamma", title: "Gamma convexity" }, { key: "levels", title: "Key levels & distance to spot" },
+              { key: "volContext", title: "Volatility context" }, { key: "calendar", title: "Gamma roll-off" }] },
+        };
+        return Promise.resolve({ ok: true, status: 200, headers: { get: () => String(Date.now()) },
+          json: () => Promise.resolve(JSON.parse(JSON.stringify(body))) });
+      };
+    });
+    await page.waitForFunction(() => {
+      const l = document.getElementById("ftNeuronIdeas");
+      return l && !l.hidden && l.children.length === 2;
+    }, null, { timeout: 15000 });
+    const neuron = await page.evaluate(() => {
+      const ideas = [...document.querySelectorAll("#ftNeuronIdeas > .ft-idea")].map((li) => ({
+        title: li.querySelector(".ft-idea-t").textContent,
+        rank: li.querySelector(".ft-idea-rank").className,
+        on: li.querySelectorAll(".ft-idea-rank i.is-on").length,
+        dots: li.querySelectorAll(".ft-idea-rank i").length,
+        lit: [...li.querySelectorAll(".ft-idea-rank i.is-on")].every((i) => {
+          const bg = getComputedStyle(i).backgroundColor;
+          return bg && bg !== "rgba(0, 0, 0, 0)" && bg !== "transparent";
+        }),
+        chips: [...li.querySelectorAll(".ft-idea-chip")].map((c) => c.textContent),
+        rests: [...li.querySelectorAll(".ft-idea-m dd")].map((d) => d.textContent),
+      }));
+      return { ideas, cov: document.getElementById("ftNeuronCov").textContent, covHidden: document.getElementById("ftNeuronCov").hidden };
+    });
+    eq(neuron.ideas.length, 2, "both vetted ideas are drawn");
+    eq(neuron.ideas[0].title, "1. Put wall credit", "numbered in the order the server ranked them");
+    ok(/\br3\b/.test(neuron.ideas[0].rank) && neuron.ideas[0].on === 3 && neuron.ideas[0].dots === 3,
+       "a robust idea lights all three dots");
+    ok(/\br2\b/.test(neuron.ideas[1].rank) && neuron.ideas[1].on === 2 && neuron.ideas[1].dots === 3,
+       "a fair idea lights two of three");
+    ok(neuron.ideas.every((i) => i.lit),
+       "and every lit dot has a painted background, so the grade is visible and not a token that never resolved");
+    assert.deepEqual(neuron.ideas[0].chips, ["put credit spread", "bullish", "robust"],
+      "the chips carry the structure, the direction and the grade word"); checks++;
+    ok(neuron.ideas[0].rests.some((d) => d === "Gamma convexity · Key levels & distance to spot"),
+       "the features an idea rests on are named by their titles, joined by a middle dot");
+    ok(!neuron.covHidden && /Neuron read 20 of 24 features/.test(neuron.cov) && /nothing here is advice/.test(neuron.cov),
+       `the coverage line states what was read and disclaims advice (${neuron.cov.slice(0, 80)})`);
+    ok(/8 robust · 10 fair · 3 weak · 3 withheld/.test(neuron.cov), "and counts each grade");
+    eq(errors.length, 0, `the volatility, second-row and Neuron paints throw nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
   await browser.close();
   fs.rmSync(EMIT_DIR, { recursive: true, force: true });
 }

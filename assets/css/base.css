@@ -4,7 +4,7 @@
 
   font-weight: 400 700;
   font-display: swap;
-  src: url("/assets/fonts/Inter-latin.woff2?v=215") format("woff2");
+  src: url("/assets/fonts/Inter-latin.woff2?v=216") format("woff2");
 
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
     U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
@@ -15,7 +15,7 @@
   font-style: normal;
   font-weight: 400 700;
   font-display: swap;
-  src: url("/assets/fonts/Inter-greek.woff2?v=215") format("woff2");
+  src: url("/assets/fonts/Inter-greek.woff2?v=216") format("woff2");
 
   unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C,
     U+038E-03A1, U+03A3-03FF;
@@ -26,28 +26,28 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("/assets/fonts/LM-regular.woff2?v=215") format("woff2");
+  src: url("/assets/fonts/LM-regular.woff2?v=216") format("woff2");
 }
 @font-face {
   font-family: "Latin Modern";
   font-style: italic;
   font-weight: 400;
   font-display: swap;
-  src: url("/assets/fonts/LM-italic.woff2?v=215") format("woff2");
+  src: url("/assets/fonts/LM-italic.woff2?v=216") format("woff2");
 }
 @font-face {
   font-family: "Latin Modern";
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url("/assets/fonts/LM-bold.woff2?v=215") format("woff2");
+  src: url("/assets/fonts/LM-bold.woff2?v=216") format("woff2");
 }
 @font-face {
   font-family: "Latin Modern";
   font-style: italic;
   font-weight: 700;
   font-display: swap;
-  src: url("/assets/fonts/LM-bold-italic.woff2?v=215") format("woff2");
+  src: url("/assets/fonts/LM-bold-italic.woff2?v=216") format("woff2");
 }
 
 @font-face {
@@ -55,7 +55,7 @@
   font-style: normal;
   font-weight: 100 800;
   font-display: swap;
-  src: url("/assets/fonts/JBM-latin.woff2?v=215") format("woff2");
+  src: url("/assets/fonts/JBM-latin.woff2?v=216") format("woff2");
 
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
     U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
@@ -66,7 +66,7 @@
   font-style: normal;
   font-weight: 100 800;
   font-display: swap;
-  src: url("/assets/fonts/JBM-greek.woff2?v=215") format("woff2");
+  src: url("/assets/fonts/JBM-greek.woff2?v=216") format("woff2");
   unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1,
     U+03A3-03FF;
 }
@@ -120,7 +120,7 @@
       rgba(9, 8, 7, 0.88) 68%,
       rgba(9, 8, 7, 0.94) 100%),
     radial-gradient(62% 48% at 8% 0%, rgba(122, 170, 214, 0.07), transparent 70%),
-    url("/assets/img/atmosphere.svg?v=215") center / cover no-repeat,
+    url("/assets/img/atmosphere.svg?v=216") center / cover no-repeat,
     linear-gradient(180deg, #0a1020 0%, #101c33 34%, #2a2416 56%, #100e0b 100%);
 
   --fs-micro: 0.64rem;
