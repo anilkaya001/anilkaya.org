@@ -171,6 +171,10 @@
       track.append(bar);
     }
     wrap.append(track);
+    var scale = el("div", "mk-scale");
+    scale.setAttribute("aria-hidden", "true");
+    [MINUS + "1", "0", "+1"].forEach(function (s) { scale.append(el("span", null, s)); });
+    wrap.append(scale);
     if (note) wrap.append(el("p", "mk-tilt-n", note));
     return wrap;
   }
@@ -341,10 +345,11 @@
     rows.forEach(function (r) {
       var tr = document.createElement("tr");
       tr.append(el("th", null, r[0]));
-      var td = el("td", "c-num " + r[3], r[1]);
-      tr.append(td);
+      var pop = isNum(r[2]);
+      var empty = pop === 0;
+      tr.append(el("td", "c-num " + (empty ? "" : r[3]), empty ? DASH : r[1]));
 
-      tr.append(el("td", "c-num", isNum(r[2]) === null ? DASH : String(r[2])));
+      tr.append(el("td", "c-num", pop === null ? DASH : String(r[2])));
       body.append(tr);
     });
     panel.hidden = false;
@@ -400,8 +405,8 @@
       var why = entries.filter(function (r) { return r && r.reason; })
         .map(function (r) { return r.reason; })[0];
       host.append(emptyLine("quiet",
-        "No sector carried enough history to settle a TRIX reading this session." +
-        (why ? " " + why : "")));
+        "No sector carried enough history to settle a TRIX reading this session" +
+        (why ? " (" + why + ")." : ".")));
       panel.hidden = false;
       return;
     }
@@ -622,7 +627,7 @@
       var li = el("li");
       li.append(el("span", "mk-mv-t", contractLabel(r)));
       var v = usd(r.prem) + (r.sweep === true ? " · sweep" : "");
-      li.append(el("span", "mk-mv-v " + toneClass(r.prem), v));
+      li.append(el("span", "mk-mv-v", v));
       ul.append(li);
     });
     host.append(ul);
@@ -693,16 +698,18 @@
   var MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+  function utcStamp(t, withDay) {
+    var iso = t.toISOString();
+    return (withDay ? iso.slice(0, 16).replace("T", " ") : iso.slice(11, 16)) + " UTC";
+  }
+
   function pulseStamp(readAt, refreshed, cadenceMinutes) {
     if (typeof readAt !== "string") return "";
     var t = new Date(readAt);
     if (isNaN(t.getTime())) return "";
     var now = new Date();
-    var hm = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-
-    var sameDay = t.getFullYear() === now.getFullYear() &&
-      t.getMonth() === now.getMonth() && t.getDate() === now.getDate();
-    var when = sameDay ? hm : t.toLocaleDateString() + " " + hm;
+    var sameDay = utcStamp(t, true).slice(0, 10) === utcStamp(now, true).slice(0, 10);
+    var when = utcStamp(t, !sameDay);
     var ageMin = (now.getTime() - t.getTime()) / 60000;
     var build = refreshed === "nightly" ? " with the nightly build" : "";
 
@@ -716,7 +723,7 @@
     }
 
     var live = ageMin < cadence * 2;
-    var stale = ", read " + ageWords(ageMin) + " ago — the intraday refresh is not " +
+    var stale = ", last read " + ageWords(ageMin) + " ago — the intraday refresh is not " +
       "keeping it current, so every number below is as of that stamp.";
 
     if (refreshed === "intraday") {
@@ -1039,7 +1046,7 @@
   }
 
   function totalsCard(feed, note) {
-    var card = pulseCard("Volume and premium per session", true);
+    var card = pulseCard("Volume and premium per session");
     var rows = feed && Array.isArray(feed.rows) ? feed.rows : [];
     if (feed && feed.status === "ok" && rows.length) {
 
@@ -1142,8 +1149,8 @@
         var th = el("th", null, contractLabel(r));
         th.scope = "row";
         tr.append(th);
-        tr.append(el("td", "c-num " + toneClass(r.diff), signedGrouped(r.diff)));
-        tr.append(el("td", "c-num " + toneClass(r.ratio), signedGrowthPct(r.ratio)));
+        tr.append(el("td", "c-num", signedGrouped(r.diff)));
+        tr.append(el("td", "c-num", signedGrowthPct(r.ratio)));
         tr.append(el("td", "c-num", grouped(r.currOi)));
         tr.append(el("td", "c-num", grouped(r.vol)));
         t.body.append(tr);
@@ -1170,6 +1177,9 @@
         if (v > 0) pos.push(r);
         else if (v < 0) neg.push(r);
       });
+      var byNet = function (a, b) { return Math.abs(b.netPrem) - Math.abs(a.netPrem); };
+      pos.sort(byNet);
+      neg.sort(byNet);
       var cols = el("div", "mk-movers-grid mk-pulse-cols");
       cols.append(moverList("Positive net premium", pos, "netPrem"));
       cols.append(moverList("Negative net premium", neg, "netPrem"));
@@ -1215,7 +1225,7 @@
   }
 
   function darkpoolCard(feed, note) {
-    var card = pulseCard("Dark pool prints");
+    var card = pulseCard("Dark pool prints", true);
     var rows = feed && Array.isArray(feed.rows) ? feed.rows : [];
     if (feed && feed.status === "ok" && rows.length) {
       var t = pulseTable([
@@ -1552,7 +1562,8 @@
         status.textContent = n + " screened names" +
           (screened === null ? "" : " of " + screened + " returned by the ladder") +
           " · session " + (m.sessionDate || "unknown") +
-          (m.generatedAt ? " · built " + new Date(m.generatedAt).toLocaleString() : "");
+          (isFinite(Date.parse(m.generatedAt))
+            ? " · built " + utcStamp(new Date(m.generatedAt), true) : "");
       }
 
       var foot = document.getElementById("mktFoot");

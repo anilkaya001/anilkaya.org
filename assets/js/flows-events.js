@@ -932,6 +932,18 @@
       "each name is nearer to its report than this page says.";
   }
 
+  function renderLag(payload) {
+    if (!staleEl || !staleEl.hidden) return;
+    const day = (v) => Date.parse(String(v || "") + "T00:00:00Z");
+    const lag = Math.round((day(payload.gateOrigin) - day(payload.sessionDate)) / 86400000);
+    if (!Number.isFinite(lag) || lag <= 4) return;
+    staleEl.hidden = false;
+    staleEl.textContent = "The prices here are the " + payload.sessionDate +
+      " session's closes, but the run that measured them is dated " + payload.gateOrigin +
+      " — " + lag + " days later. The pipeline is running but its price data is not " +
+      "advancing; every day count below is still measured from the run's own date.";
+  }
+
   const trouble = (kind, message) => {
     const e = new Error(message);
     e.evKind = kind;
@@ -977,6 +989,7 @@
     }
 
     renderStale(payload.__updatedAt);
+    renderLag(payload);
 
     const rows = Array.isArray(payload.rows) ? payload.rows : [];
     if (!rows.length) {

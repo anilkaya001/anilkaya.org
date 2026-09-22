@@ -71,7 +71,7 @@ const topbar = (active, username) => `
       ${icon("search")}
       <input class="flows-find-i" id="flowsFind" name="t" type="search"
              autocomplete="off" spellcheck="false" maxlength="10"
-             pattern="[A-Za-z][A-Za-z0-9.\\-]{0,9}" placeholder="Search a ticker"
+             pattern="[A-Za-z][A-Za-z0-9.\\-]{0,9}" placeholder="Ticker"
              title="A ticker symbol: a letter, then up to nine letters, digits, dots or dashes.">
     </form>
 
