@@ -534,11 +534,15 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   ok(noIv.movePerc > 0, "and the quote published");
   ok(buildPricedMove({ spot: 100, impliedMovePerc: null, iv30: null }).status === "unavailable",
      "neither band means no panel");
-  eq(pm.richness, "rich", "a positive variance risk premium is a rich band");
-  eq(buildPricedMove({ spot: 100, impliedMovePerc: 0.05, vrp: -0.04, asOf: "2026-08-24" }).richness,
-     "cheap", "and a negative one a cheap band");
+  eq(pm.richness, "rich", "a variance risk premium a tenth or more of realised is a rich band");
+  eq(buildPricedMove({ spot: 100, impliedMovePerc: 0.05, vrp: -0.04, rv30: 0.3, asOf: "2026-08-24" }).richness,
+     "cheap", "and one a tenth or more below it a cheap band");
+  eq(buildPricedMove({ spot: 100, impliedMovePerc: 0.05, vrp: 0.02, rv30: 0.3, asOf: "2026-08-24" }).richness,
+     "fair", "while a premium inside a tenth of realised either way is fair, the same line the implied state reads, so the page never says cheap beside a state that says fair");
   eq(buildPricedMove({ spot: 100, impliedMovePerc: 0.05, vrp: null, asOf: "2026-08-24" }).richness,
      null, "with no realized-vol baseline there is no richness claim, not a default one");
+  eq(buildPricedMove({ spot: 100, impliedMovePerc: 0.05, vrp: 0.05, asOf: "2026-08-24" }).richness,
+     null, "and a premium without the realised level it is measured against is not a band either");
   ok(buildPricedMove({ spot: 100, impliedMovePerc: null }).status === "unavailable",
      "no quoted move means no band — never a zero-width one at spot");
   ok(buildPricedMove({ spot: 0, impliedMovePerc: 0.05 }).status === "unavailable",

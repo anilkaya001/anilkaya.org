@@ -4686,7 +4686,7 @@
   }
 
   const GARCH_PERIODS = [{ key: "1M", n: 21 }, { key: "3M", n: 63 }, { key: "6M", n: 126 },
-    { key: "1Y", n: 252 }];
+    { key: "1Y", n: 250 }];
   let garchPeriod = "3M";
 
   function paintGarch(card) {
