@@ -3388,11 +3388,13 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
   eq(IV_RANK_PARAMS.timespan, "3m", "the implied-volatility history is asked for by timespan, the parameter the vendor documents");
   ok(!/iv-rank`,\s*\{\s*limit/.test(src), "and never with the `limit` the vendor ignores");
-  ok(/iv-rank`, IV_RANK_PARAMS\)/.test(src), "the live call and the fixture read one parameter object");
+  ok(/iv-rank`, \{ \.\.\.IV_RANK_PARAMS, \.\.\.onSession \}\)/.test(src),
+     "the live call reads the fixture's parameter object, with the session date added so no row past the session is asked for");
   eq(fakeIvRank("ABC", 50).length, 5,
      "the fixture answers an undated, unparameterised call the way the vendor does: five rows");
   ok(fakeIvRank("ABC", 50, IV_RANK_PARAMS).length >= 60, "and a three-month timespan with a quarter's sessions");
-  ok(/volatility\/term-structure`,\s*\n?\s*sessionDate \? \{ date: sessionDate \}/.test(src),
+  ok(/volatility\/term-structure`, \{ \.\.\.onSession \}\)/.test(src) &&
+     /const onSession = ARCHIVE_DATE_RE\.test\(String\(sessionDate \|\| ""\)\) \? \{ date: sessionDate \} : \{\}/.test(src),
      "the term structure is dated at the session, so its days to expiry agree with the greeks on the same card");
   ok(/d > sessionDate/.test(src) && !/d >= sessionDate/.test(src),
      "an expiry dated on the session expired at its close and is never asked for on the surface");
