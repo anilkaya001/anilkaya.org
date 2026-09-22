@@ -2247,7 +2247,7 @@ try {
        "headline it is a footnote, and a reader who reaches a headline without having read " +
        "the age reads it as news");
     ok(/Fetched 3h \d+m ago.*Morning snapshot/.test(seat.summary), "visible summary preserves age and snapshot status");
-    ok(/^Fetched at \d\d:\d\d \S+, 3h \d+m ago\./.test(seat.note),
+    ok(/^Fetched at (\d{4}-\d{2}-\d{2} )?\d\d:\d\d \S+, 3h \d+m ago\./.test(seat.note),
        `it states when the feed was fetched AND how long ago, on a 24-hour clock that names ` +
        `its zone (${seat.note.slice(0, 60)}…)`);
     ok(/once per weekday morning at 05:15 America\/New_York/.test(seat.note),
