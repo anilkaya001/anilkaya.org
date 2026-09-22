@@ -2,7 +2,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "214";
+export const ASSET_VERSION = "215";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -1067,36 +1067,6 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
   <div class="ft-cards" id="ftCards" hidden aria-label="This session's flow"></div>
   <div class="ft-flags" id="ftFlags" hidden></div>
     </div>
-    <div class="ft-row0-r">
-
-  <aside class="ft-brief" id="ftBrief" hidden aria-labelledby="ftBriefH">
-    <h2 class="ft-brief-h" id="ftBriefH">
-      <span class="ft-brief-ic" aria-hidden="true">${icon("sun")}</span>
-      <span class="ft-brief-hn">Brief</span>
-      <span class="ft-brief-beta">Beta</span>
-    </h2>
-    <div class="ak-neuron ft-neuron is-pending" id="ftNeuron" hidden>
-      ${neuronMark("t", false)}
-      <div class="ak-neuron-body">
-        <p class="ak-neuron-h" id="ftNeuronH">Neuron</p>
-        <p class="ak-neuron-say" id="ftNeuronSay"></p>
-        <p class="ak-neuron-src" id="ftNeuronSrc"></p>
-      </div>
-    </div>
-    <ol class="ft-brief-l" id="ftBriefL"></ol>
-    <p class="ft-brief-s" id="ftBriefS"></p>
-
-    <form class="ft-brief-ask" id="ftBriefAsk" hidden>
-      <label class="ft-brief-ask-l" for="ftBriefQ" id="ftBriefQL">Ask about this name</label>
-      <span class="ft-brief-ask-row">
-        <input class="ft-brief-ask-i" id="ftBriefQ" type="text" autocomplete="off"
-               aria-describedby="ftBriefQL">
-        <button class="ft-brief-ask-b" type="submit">${icon("ask")}<span
-          class="ft-brief-ask-bt">Ask</span></button>
-      </span>
-    </form>
-  </aside>
-    </div>
   </div>
 
   <div class="ft-top">
@@ -1173,6 +1143,35 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
     <p class="ft-chart-s" id="ftIvtS"></p>
   </section>
   </div>
+    </div>
+    <div class="ft-split-side">
+  <aside class="ft-brief" id="ftBrief" hidden aria-labelledby="ftBriefH">
+    <h2 class="ft-brief-h" id="ftBriefH">
+      <span class="ft-brief-ic" aria-hidden="true">${icon("sun")}</span>
+      <span class="ft-brief-hn">Brief</span>
+      <span class="ft-brief-beta">Beta</span>
+    </h2>
+    <div class="ak-neuron ft-neuron is-pending" id="ftNeuron" hidden>
+      ${neuronMark("t", false)}
+      <div class="ak-neuron-body">
+        <p class="ak-neuron-h" id="ftNeuronH">Neuron</p>
+        <p class="ak-neuron-say" id="ftNeuronSay"></p>
+        <p class="ak-neuron-src" id="ftNeuronSrc"></p>
+      </div>
+    </div>
+    <ol class="ft-brief-l" id="ftBriefL"></ol>
+    <p class="ft-brief-s" id="ftBriefS"></p>
+
+    <form class="ft-brief-ask" id="ftBriefAsk" hidden>
+      <label class="ft-brief-ask-l" for="ftBriefQ" id="ftBriefQL">Ask about this name</label>
+      <span class="ft-brief-ask-row">
+        <input class="ft-brief-ask-i" id="ftBriefQ" type="text" autocomplete="off"
+               aria-describedby="ftBriefQL">
+        <button class="ft-brief-ask-b" type="submit">${icon("ask")}<span
+          class="ft-brief-ask-bt">Ask</span></button>
+      </span>
+    </form>
+  </aside>
     </div>
   </div>
 
