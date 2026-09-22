@@ -310,6 +310,8 @@ export function buildDisplacement(strikeRows, { atr, spot } = {}) {
   });
 }
 
+export const RICHNESS_LINE = 0.1;
+
 export function buildPricedMove({
   spot, impliedMovePerc, vrp, iv30, rv30, ivRank, ivMomentum, atmVol, ivStrip, asOf,
   sessions = HORIZON_SESSIONS,
@@ -385,7 +387,8 @@ export function buildPricedMove({
       ? ivStrip.map((p) => ({ h: p.h, v: numOrNull(p.v) }))
       : null,
 
-    richness: numOrNull(vrp) === null ? null : (vrp > 0 ? "rich" : "cheap"),
+    richness: numOrNull(vrp) === null || numOrNull(rv30) === null || !(rv30 > 0) ? null
+      : vrp / rv30 >= RICHNESS_LINE ? "rich" : vrp / rv30 <= -RICHNESS_LINE ? "cheap" : "fair",
   }, asOf);
 }
 
