@@ -1158,7 +1158,7 @@
     if (payload.status === "pending") {
 
       const msg = "The pipeline has not published this key yet. The track is " +
-        "rebuilt by each morning run from the dated score archive the pipeline " +
+        "rebuilt by each after-close run from the dated score archive the pipeline " +
         "already holds — it costs no vendor call — and it appears with the first " +
         "run after this page shipped.";
       statusEl.textContent = msg;

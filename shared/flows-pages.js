@@ -839,10 +839,10 @@ ${shell("Events", "Options-flow intelligence", "events", username, `
 }
 
 export function trackPage({ username = "" } = {}) {
-  const lede = "The same score the board prints each morning, traced name by " +
+  const lede = "The same score the board prints after each close, traced name by " +
     "name across sessions. The boards show a ranking's two tails; this page " +
     "keeps the whole distribution, so a name drifting toward a board is " +
-    "visible before the morning it arrives. A gap means the name was not " +
+    "visible before the session it arrives. A gap means the name was not " +
     "scored that session — never zero.";
   return `${head("Flows — Score track", "Each name's daily score, traced across sessions.")}
 ${shell("Score track", "Options-flow intelligence", "track", username, `
@@ -980,7 +980,7 @@ export function tickerPage({ username = "" } = {}) {
     "and what flips it, what the chain is charging across strikes and " +
     "expiries, which contracts carry the volume, and how far the price is " +
     "from every level that matters — all of it read off the card the pipeline " +
-    "published this morning, with only the last price re-read live every five seconds.";
+    "published after the last close, with only the last price re-read live every five seconds.";
 
   const panelMarkup = (p) => `
     <section class="fc-panel ft-panel${p.span === 2 ? " is-wide" : p.span === 3 ? " is-full" : ""}"

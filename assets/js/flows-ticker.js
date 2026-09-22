@@ -2629,9 +2629,9 @@
         "newest of them rather than the whole feed's.";
     }
     const p = el("p", "fc-note fmr-when", text);
-    p.title = "This pipeline runs at 05:15 Eastern and the vendor states its market-wide " +
-      "open-interest feed updates at about 06:45 Eastern, so a market-wide ranking read " +
-      "here is usually the previous session's.";
+    p.title = "This pipeline runs after the close, at 17:30 Eastern (16:30 in winter), and " +
+      "the vendor states its market-wide open-interest feed updates at about 06:45 Eastern, " +
+      "so a market-wide ranking read here is usually the one published that morning.";
     return p;
   }
 
@@ -2874,7 +2874,7 @@
         "below: the span is in each cell's own title."],
       ["Net premium", "c-num",
         "Call premium minus put premium for that session, in dollars, as the board " +
-        "published it that morning. The sign is the reading."],
+        "published it for that session. The sign is the reading."],
     ]) {
       const th = el("th", cls, label);
       th.scope = "col";

@@ -247,7 +247,7 @@
       showMessage(
         payload.status === "pending"
           ? "No watch list has been published yet. This list is built by the " +
-            "pipeline, which runs on weekday mornings — it will appear after " +
+            "pipeline, which runs after the close on weekdays — it will appear after " +
             "the first run following this deploy."
           : "No name was scored inside the band this session, which is unusual " +
             "enough to be worth treating as a publishing fault rather than a reading.",

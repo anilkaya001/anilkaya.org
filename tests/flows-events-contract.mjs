@@ -11,7 +11,7 @@ import {
 } from "../shared/flows-events.js";
 import { eventsPage } from "../shared/flows-pages.js";
 import { horizonMove, TRADING_YEAR } from "../shared/flows-features.js";
-import { EARNINGS_GATE_DAYS, daysToEarnings, screenerTilt } from "../scripts/flows-pipeline.mjs";
+import { EARNINGS_GATE_DAYS, daysToEarnings, screenerTilt, nextWeekday } from "../scripts/flows-pipeline.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 let checks = 0;
@@ -64,8 +64,11 @@ const gateDteFrom = (origin) => (date) =>
      `gateOrigin is published as an ISO date (${PAYLOAD.gateOrigin})`);
 
   ok(PAYLOAD.gateOrigin > PAYLOAD.sessionDate,
-     `the run's Eastern date (${PAYLOAD.gateOrigin}) is strictly later than the last ` +
+     `the gate's origin (${PAYLOAD.gateOrigin}), the next session, is strictly later than the last ` +
      `completed session (${PAYLOAD.sessionDate}) — the corpus can tell the two clocks apart`);
+  eq(PAYLOAD.gateOrigin, nextWeekday(PAYLOAD.sessionDate),
+     "and it is the first weekday after the session, not the wall-clock date the run happened " +
+     "to fire on — after the close that would be the session itself, a day early");
   eq(PAYLOAD.sessionDate, SESSION_DATE,
      "and the dry run's sessionDate is the anchor every hand count below is written against");
   eq(PAYLOAD.gateDays, EARNINGS_GATE_DAYS,
@@ -713,8 +716,9 @@ const gateDteFrom = (origin) => (date) =>
   ok(/do not share an origin/i.test(EVENTS_NOTES.clocks), "and that they do not share an origin");
   ok(/last completed session/i.test(EVENTS_NOTES.clocks),
      "it names the first origin — the last completed session, which every PRICE describes");
-  ok(/Eastern date/i.test(EVENTS_NOTES.clocks),
-     "and the second — the run's own Eastern date, which every DAY COUNT uses");
+  ok(/next session after it/i.test(EVENTS_NOTES.clocks) && !/05:15/.test(EVENTS_NOTES.clocks),
+     "and the second — the next session after it, which every DAY COUNT uses, and not the " +
+     "run's own wall-clock date, which after the close is the session itself");
   ok(/gate/i.test(EVENTS_NOTES.clocks),
      "tying the second to the gate that actually ran, which is why it is the one that counts");
 
@@ -1168,8 +1172,8 @@ const gateDteFrom = (origin) => (date) =>
   }
 }
 
-console.log(`✓ flows-events: ${checks} assertions — a session count measured from the run's ` +
-  `own Eastern date and never from the last completed session, with the wrong integer ` +
+console.log(`✓ flows-events: ${checks} assertions — a session count measured from the ` +
+  `next session and never from the last completed session, with the wrong integer ` +
   `written down beside every right one, a window bound tested in the unit its name carries ` +
   `over a span constructed to straddle it, a weekend that is one session and not three, a ` +
   `past date that is null and not zero on both horizons, a −1w point reconstructed from a ` +

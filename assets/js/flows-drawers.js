@@ -1739,7 +1739,7 @@
 
     host.append(el("p", "fc-note is-qualifier",
       "Each bar is one session's net premium — call premium minus put premium, in " +
-      "dollars, as the board published it that morning. The sign is the reading; " +
+      "dollars, as the board published it for that session. The sign is the reading; " +
       "the bars are drawn against a common scale so the two sides are comparable " +
       "by height." +
       (gaps
@@ -1752,7 +1752,7 @@
     appendMethod(host, [
       "The history is read out of the dated archive: the session's own score key where " +
       "one was written, and the archived boards for every session before that. Both " +
-      "carry the same figure the board published that morning, so this window is as " +
+      "carry the same figure the board published for that session, so this window is as " +
       "long as the archive is, not as long as the field is old.",
       "A session reconstructed from the boards alone covers only the names that MADE a " +
       "board that day, so a gap in the older half of a window is more often a name " +

@@ -15,8 +15,8 @@ export const SCORES_NOTES = Object.freeze({
     "The score is the board's own composite, unchanged: a cross-sectional " +
     "residual in fixed units, sign pointing long, with sector and " +
     "log-capitalisation neutralised out before ranking. This page adds no " +
-    "arithmetic to it — it is the same number the board printed that " +
-    "morning, traced.",
+    "arithmetic to it — it is the same number the board printed for that " +
+    "session, traced.",
   gaps:
     "A gap means the name was not scored that session — out of the " +
     "screener, under the liquidity floor, inside the earnings gate, or not " +

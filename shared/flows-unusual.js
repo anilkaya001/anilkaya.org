@@ -288,7 +288,7 @@ export const UNUSUAL_NOTES = Object.freeze({
     "timestamp, no execution price, no sweep flag. Nothing here says who traded, " +
     "or why.",
   date: "This endpoint accepts no date parameter and returns no as-of stamp, and " +
-    "the pipeline reads it roughly four hours before the opening bell. The " +
+    "the pipeline reads it after the close, at 17:30 Eastern (16:30 in winter). The " +
     "counter's span is therefore unobserved. readAt is when it was read; it is " +
     "not a claim about what it counts.",
   rank: "vor = volume / open_interest. A ratio of two counts, finite by " +

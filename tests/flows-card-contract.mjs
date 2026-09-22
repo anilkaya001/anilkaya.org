@@ -997,7 +997,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(idx.oiChange.asOfStated, true, "and says that it stated one");
   eq(idx.oiChange.sameSession, false,
      "which is NOT the session the cards describe — the vendor updates this feed at about " +
-     "06:45 ET and this pipeline runs at 05:15, so a live join is normally a prior " +
+     "06:45 ET and this pipeline runs after the close, so a live join is normally a prior " +
      "session's cross-section laid onto today's per-name data");
   const sameDay = indexMarketCross({
     oiChange: oiRaw, darkpool: dpRaw, limits: { oiChange: 5 },
@@ -1134,8 +1134,10 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "and names the exclusion the vendor documents — the open-interest list carries no index " +
      "or fund contracts, so a fund's absence from it is a fact about the list's construction " +
      "and not a reading of the fund");
-  ok(/06:45/.test(CROSS_NOTES.timing) && /05:15/.test(CROSS_NOTES.timing),
-     "and names both clocks, which is the whole of the timing trap");
+  ok(/06:45/.test(CROSS_NOTES.timing) && /17:30 Eastern/.test(CROSS_NOTES.timing) &&
+     !/05:15/.test(CROSS_NOTES.timing),
+     "and names both clocks, which is the whole of the timing trap — the pipeline's being " +
+     "the post-close schedule it now fires on, not the 05:15 one it never kept");
   ok(/population/.test(CROSS_NOTES.rank),
      "and says a rank is meaningless without the population beside it");
 }

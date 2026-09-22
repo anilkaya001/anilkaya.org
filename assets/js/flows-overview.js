@@ -1650,7 +1650,7 @@
       said.push("This feed is fetched " + payload.cadence +
         (typeof payload.staleBy === "string" && payload.staleBy
           ? " and is stale by " + payload.staleBy : "") +
-        ", so it is a morning read and never a live tape.");
+        ", so it is a once-a-day read and never a live tape.");
     }
 
     const kept = isNum(payload.kept);
@@ -1702,8 +1702,9 @@
         (unflagged === 1 ? " stored row carried" : " of the stored rows carried") +
         " no major/minor flag at all, which is not the same as having been flagged not-major.");
     }
-    const cadence = typeof payload.cadence === "string" && /morning/i.test(payload.cadence)
-      ? "Morning snapshot" : "Snapshot; cadence not specified";
+    const cadence = typeof payload.cadence !== "string" ? "Snapshot; cadence not specified"
+      : /after the close/i.test(payload.cadence) ? "After-close snapshot"
+        : /morning/i.test(payload.cadence) ? "Morning snapshot" : "Snapshot; cadence not specified";
     const coverage = [readAge ? "Fetched " + readAge : "Fetch age unknown", cadence];
     if (payload.atVendorLimit === true) coverage.push("Vendor ceiling reached; total unknown");
     if (payload.capped === true && shed > 0) coverage.push(shed + " received rows omitted");

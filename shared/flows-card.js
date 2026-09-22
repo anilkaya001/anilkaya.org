@@ -1324,8 +1324,10 @@ export const CROSS_NOTES = Object.freeze({
     "about it.",
   timing:
     "The vendor states that its market-wide open-interest feed updates once a " +
-    "trading day at about 06:45 Eastern, and this pipeline runs at 05:15 " +
-    "Eastern. The session each feed describes is therefore published from the " +
+    "trading day at about 06:45 Eastern, and this pipeline runs after the close, " +
+    "at 17:30 Eastern (16:30 in winter), so a run reads the update published that " +
+    "morning rather than one describing the session just closed. The session each " +
+    "feed describes is therefore published from the " +
     "feed's own rows, beside the session this card describes. Where a feed " +
     "states no date of its own, that is said rather than assumed, and a rank " +
     "from another session is never presented as today's.",

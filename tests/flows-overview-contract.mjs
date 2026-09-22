@@ -2217,7 +2217,8 @@ try {
   const newsPayload = (extra = {}) => ({
     v: 2, status: "ok", sessionDate: SESSION, generatedAt: new Date().toISOString(),
     readAt: new Date(now - (3 * H + 20 * M)).toISOString(), refreshed: "nightly",
-    cadence: "once per weekday morning at 05:15 America/New_York", staleBy: "the close",
+    cadence: "once per weekday after the close, at 21:30 UTC — 17:30 America/New_York in " +
+      "summer, 16:30 in winter", staleBy: "the next weekday's close",
     scope: "market-wide", rows: NEWS_ROWS_FIXTURE,
     requested: 100, returned: 10, kept: 8, cap: 60, capped: false, shed: 0,
     atVendorLimit: false, unusable: 2, undatedKept: 1, undatedSeen: 1,
@@ -2246,13 +2247,14 @@ try {
        `the age note is the FIRST node in the region (${seat.first}) — under the last ` +
        "headline it is a footnote, and a reader who reaches a headline without having read " +
        "the age reads it as news");
-    ok(/Fetched 3h \d+m ago.*Morning snapshot/.test(seat.summary), "visible summary preserves age and snapshot status");
+    ok(/Fetched 3h \d+m ago.*After-close snapshot/.test(seat.summary),
+       "visible summary preserves age and names the post-close snapshot the pipeline now publishes");
     ok(/^Fetched at (\d{4}-\d{2}-\d{2} )?\d\d:\d\d \S+, 3h \d+m ago\./.test(seat.note),
        `it states when the feed was fetched AND how long ago, on a 24-hour clock that names ` +
        `its zone (${seat.note.slice(0, 60)}…)`);
-    ok(/once per weekday morning at 05:15 America\/New_York/.test(seat.note),
+    ok(/once per weekday after the close, at 21:30 UTC/.test(seat.note),
        "and the cadence the payload publishes, so the age is not read as bad luck");
-    ok(/stale by the close/.test(seat.note),
+    ok(/stale by the next weekday's close/.test(seat.note),
        "and how stale it is allowed to get, stated rather than implied");
     ok(/never a live tape/.test(seat.note),
        `so nothing here implies a stream (${seat.note.slice(0, 40)}…)`);

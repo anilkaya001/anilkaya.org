@@ -235,7 +235,7 @@
         cls: "fb-earn", glyph: "earnings in " + dte + "d",
         say: "reports in " + dte + (dte === 1 ? " day" : " days") +
           (row.ed ? ", on " + row.ed : "") + ". Every name here cleared the earnings gate " +
-          "this morning; this one clears it by days, so it is about to leave the board for " +
+          "for this session; this one clears it by days, so it is about to leave the board for " +
           "a calendar reason rather than a signal one",
       });
     }

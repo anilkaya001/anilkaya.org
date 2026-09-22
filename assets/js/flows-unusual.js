@@ -1146,8 +1146,8 @@
     if (!rows.length) {
       emptyRow(alertsBody, ALERT_COLUMNS,
         "The vendor's rules flagged nothing in this read. The read is stamped " +
-        "below — a pre-open read of a feed that fills intraday is expected to " +
-        "be thin — and absence from the vendor's selection is not evidence of " +
+        "below — a read taken before the open, of a feed that fills intraday, is " +
+        "expected to be thin — and absence from the vendor's selection is not evidence of " +
         "a quiet market.", "quiet");
     } else {
       alertsSorter.wire();

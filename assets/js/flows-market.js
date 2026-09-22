@@ -694,7 +694,8 @@
   }
 
   var PULSE_QUIET = "The feed answered this read with nothing — ordinary " +
-    "for a pre-open read of a series that fills during market hours.";
+    "before the open for a series that fills during market hours, and a vendor " +
+    "silence rather than a quiet market when the read is stamped after the close.";
   var MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
