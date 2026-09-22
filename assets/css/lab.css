@@ -1581,10 +1581,10 @@
 @media (max-width: 760px) {
   .course-explorer { display: flex; flex-direction: column; }
   .course-explorer .academy-section__head { order: 0; }
-  .course-explorer .course-tools { order: 1; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0 0 0.8rem; }
+  .course-explorer .lab-grid { order: 1; }
+  .course-explorer .course-tools { order: 2; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0.8rem 0 0; }
   .course-explorer .course-search { grid-column: 1 / -1; }
   .course-explorer .course-tools select { min-width: 0; flex: 1 1 0; }
-  .course-explorer .lab-grid { order: 2; }
   .course-explorer .course-empty-state { order: 3; }
   .course-explorer .academy-section__head h2 { font-size: clamp(1.35rem, 1.05rem + 4vw, 1.7rem); }
   .course-explorer .model-card { min-height: 15rem; }
