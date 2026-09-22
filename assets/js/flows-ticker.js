@@ -4705,6 +4705,7 @@
       host.hidden = false;
       return;
     }
+    host.hidden = false;
     const ewmaAll = Array.isArray(g.ewma) ? g.ewma : [];
     const all = g.condVol.map((v, i) => ({
       v: isNum(v), r: isNum(g.returns[i]), w: isNum(ewmaAll[i]),
@@ -4734,8 +4735,10 @@
     const pts = per && per.n < have ? all.slice(have - per.n) : all;
     const n = pts.length;
 
-    const W = 620, H = 230, padL = 34, padR = 10, padT = 14, padB = 20;
-    const retH = 54, gap = 10;
+    const hostW = body.clientWidth || (host.clientWidth ? host.clientWidth - 30 : 0);
+    const W = Math.max(320, Math.min(720, Math.round(hostW) || 620));
+    const H = Math.max(210, Math.round(W * 0.37)), padL = 36, padR = 10, padT = 14, padB = 20;
+    const retH = Math.max(48, Math.round(H * 0.24)), gap = 10;
     const plotL = padL, plotW = W - padL - padR;
     const plotT = padT, plotH = H - padT - padB - retH - gap;
     let vhi = 0, rmax = 0;
