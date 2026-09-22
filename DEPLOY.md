@@ -568,8 +568,10 @@ It is now a generated geometric ladder of 32 bands at ratio 1.3, with equal
 ratio rather than equal width because listed companies are roughly log-uniform
 in market cap — equal ratio spreads the cap's pressure evenly instead of
 saturating the bottom and wasting the top. **Bands that return a full page are
-now counted and reported as `CAP`**; that line is the only evidence of
-truncation there has ever been.
+now split and read again**: a full page is cut at the geometric midpoint of
+its band and both halves re-queried, at most two levels deep, and only a leaf
+still full after that is reported as `CAP` and counted in
+`meta.schedule.screenerTruncatedBands`.
 
 **The enrichment pool, which is the subtler one.** Enrichment costs five calls
 a name, so the pool was 60 — thirty per side of a rough composite of the very
@@ -900,9 +902,10 @@ correctness requirement:
    rendered DOM.
 
 2. **The date, and this is the load-bearing one.** The endpoint accepts no date
-   parameter and returns no as-of stamp, and the pipeline runs at 05:15
-   America/New_York — **four and a quarter hours before the opening bell**, so
-   at read time today has not happened. The counter's span is unobserved. The
+   parameter and returns no as-of stamp. The pipeline runs after the close
+   (§10.5h), so the counter it reads is normally the session just closed — but
+   nothing on the wire says so, and a delayed or manual run reads whatever the
+   vendor holds at that minute. The counter's span is unobserved. The
    payload publishes `readAt` and an explicit `volumeAsOf: null` with the
    reason beside it, and the page may never say "today", "this session" or
    "the day's". Attaching `sessionDate` to the counter would make a free
@@ -967,12 +970,14 @@ them draws a window that is silently one to three days early.
 | Quantity | Origin | Why |
 |---|---|---|
 | every **price** (`px`) | `sessionDate` | the last COMPLETED session |
-| every **day count** (`sdte`, day 0, the gate band) | `gateOrigin` | `easternNow().date` — the run's own Eastern date, which is what `daysToEarnings(row, Date.now())` counted from |
+| every **day count** (`sdte`, day 0, the gate band) | `gateOrigin` | `nextWeekday(sessionDate)` — the first session after the one priced, which is what the earnings gate counts from |
 
-`resolveSessionDate()` returns the last session that has closed; at 05:15
-America/New_York that is always the previous trading day — yesterday on a
-normal morning, **Friday on a Monday**. In the dry-run payload the two are
-`2026-08-24` and `2026-08-26`, two days apart.
+`resolveSessionDate()` returns the last session that has closed; after the
+close that is the same day, and `gateOrigin` is the next weekday — **Monday on
+a Friday**. The gate used to count from the run's wall-clock date, which was
+the next session only because the run fired the next morning; once the run
+moved after the close that anchor would have been a session early. In the
+dry-run payload the two are `2026-08-24` and `2026-08-25`.
 
 A page that counted `sdte` from `sessionDate` would classify every name
 against a gate that never ran — and, worse, **a fixture built the same way
@@ -1098,4 +1103,46 @@ wrong the sixth time — the dumped first-row keys are the fix. The six `probe`
 lines scout wave B (per-stock dark pool, OI change, short volume, IV rank,
 vol term structure, per-ticker flow alerts): their observed shapes land in
 `meta.probes`, and the sections they scout must be built from THOSE dumps,
-not from the spec. The probes retire when wave B lands.
+not from the spec. Wave B has landed and the probes are retired; the last one,
+`/api/shorts/AAPL/volume-and-ratio`, returned zero rows on every run and is gone.
+
+### 10.5h The schedule, and the session each run reads
+
+The workflow fires once, at `30 21 * * 1-5` — 17:30 EDT or 16:30 EST, after the
+close under either zone. It used to fire at 05:15 Eastern, and GitHub delivered
+that firing 4.5 to 6.6 hours late every weekday from 2026-08-27 on: every run
+read the session in progress and published it under the previous session's
+date. A post-close firing delayed by as much as twelve hours still lands before
+the next open, so lateness no longer changes which tape is read.
+
+Four guards sit behind the schedule, all in `scripts/flows-pipeline.mjs`:
+
+- **The intraday refusal.** After `resolveSessionDate()`, a run whose Eastern
+  clock is inside 09:30–16:00 on a weekday throws before any read. The
+  `allow_intraday` dispatch input (`FLOWS_ALLOW_INTRADAY=1`) overrides it and
+  the log says what that publishes.
+- **The same-session gate.** If `scores:<sessionDate>` is already archived, the
+  run is a second run against one session: it refreshes only `pulse`,
+  `sector:premium` and `news` and leaves boards, scores, score track, record,
+  brief, cards and meta as the first run published them. The
+  `republish_session` input (`FLOWS_REPUBLISH_SESSION=1`) instead deletes the
+  session's three archive keys through the ingest DELETE and rewrites them with
+  everything else. A market holiday lands here too: SPY has no bar for the day,
+  so the session resolves to the one already archived.
+- **The candle cut.** Every daily series is cut at `sessionDate` before any
+  feature reads it (`sessionCandles`), because the vendor does not honour
+  `end_date`: on 2026-09-21 all 166 cards carried a partial 2026-09-22 bar.
+  `verifyDating` now reports whether `end_date` was honoured instead of
+  deciding with it. Card and board prices are the session's daily close; the
+  screener's last price travels as `card.readPx` with its read time.
+- **The archive check.** Store reads retry on 0/403/408/429/5xx within the
+  run's retry budget, board memory falls back to the newest archived
+  `board:<side>:<date>` when the live key is unreadable or is this session's
+  own, and the end of every run re-reads the session's three archive keys and
+  writes any that are missing. `ARCHIVE LOST` in the log is the one line that
+  means the record has no copy of a published session.
+
+Feeds read without a date (`news`, `pulse`, `flowalerts`, `sector:premium`)
+carry `readDay`, the Eastern day of their own `readAt`, beside `sessionDate`;
+the Worker's intraday refresh stamps the same field when it rewrites
+`flowalerts` and `pulse`.

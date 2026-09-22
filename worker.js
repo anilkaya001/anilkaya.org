@@ -938,6 +938,7 @@ async function refreshFlowsIntraday(env) {
         written.flowalerts = {
           ...prev, ...merged,
           readAt: readAt.toISOString(),
+          readDay: easternSessionDate(readAt),
           refreshed: "intraday",
         };
         await upsert("flowalerts", written.flowalerts);
@@ -974,9 +975,11 @@ async function refreshFlowsIntraday(env) {
       const tide = shapeTide(raw);
 
       if (tide.status === "ok") {
+        const readAt = new Date();
         written.pulse = {
           ...prev, tide,
-          readAt: new Date().toISOString(),
+          readAt: readAt.toISOString(),
+          readDay: easternSessionDate(readAt),
           refreshed: "intraday",
         };
         await upsert("pulse", written.pulse);

@@ -295,8 +295,9 @@ assert.deepEqual(missingReport, [],
   ok(okFeed.asOfStated === true && typeof okFeed.asOf === "string",
      "the market-wide feed publishes the session IT describes, from its own rows");
   eq(okFeed.sameSession, false,
-     "and the corpus really exercises the timing trap: a 05:15 run joins the PREVIOUS " +
-     "session's cross-section onto today's card, and the payload says so rather than " +
+     "and the corpus really exercises the timing trap: a run joins the vendor's morning " +
+     "update, which here describes the PREVIOUS " +
+     "session's cross-section, onto today's card, and the payload says so rather than " +
      "letting the card imply the ranking is today's");
   ok(okFeed.asOf < okCard.sessionDate,
      `the feed's session (${okFeed.asOf}) is genuinely earlier than the card's ` +
@@ -419,8 +420,10 @@ assert.deepEqual(missingReport, [],
   eq(n.refreshed, "nightly",
      "and says it is NOT intraday-refreshed, so a renderer states the age rather than " +
      "implying the headline just arrived");
-  ok(typeof n.cadence === "string" && /05:15/.test(n.cadence),
-     "and names the cadence behind that word");
+  ok(typeof n.cadence === "string" && /after the close/.test(n.cadence) &&
+     /21:30 UTC/.test(n.cadence) && !/05:15/.test(n.cadence),
+     "and names the cadence behind that word — the post-close schedule the workflow " +
+     "actually fires on, not the 05:15 one that fired 4.5 to 6.6 hours late every weekday");
   ok(typeof n.newest === "string" && typeof n.oldest === "string" && n.oldest <= n.newest,
      `the window the published rows cover is bounded from their own stamps ` +
      `(${n.oldest} .. ${n.newest})`);

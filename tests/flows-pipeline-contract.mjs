@@ -20,9 +20,16 @@ import {
   SECTOR_ETFS, TRIX_SERIES, TRIX_MIN_CANDLES, TRIX_FULL_SCALE_BP,
   trixSeriesBp, scaleTrix, sectorTrix, MOVER_ROWS, moverRow, buildMovers,
   vendorNum, sectorLean, shapeNews, NEWS_ROWS, NEWS_VENDOR_LIMIT,
+  ensureArchived, sessionCandles, candleCut, judgeEndDate, verifyDating, computeFeatures,
+  sessionReference, sessionRow, readPxOf, intradayRefusal, nextWeekday, priorWeekdays,
+  closedPriceWindow, buildRecordCloses, recordCalendar, resolveBoardMemory, sameSessionGate,
+  retireSession, sessionArchiveKeys, sweepScreenerBand, SCREENER_SPLIT_DEPTH, SCREENER_PAGE_ROWS,
+  judgeScreenerDate, sessionRows, readDayOf, PIPELINE_CADENCE, SESSION_OPEN_MINUTES,
+  SESSION_CLOSE_MINUTES, MEMORY_ARCHIVE_SESSIONS, READ_RETRIES, readStored, holdersRefusal,
+  HOLDERS_RETRY_DAYS,
 } from "../scripts/flows-pipeline.mjs";
-import { pearson, horizonMove, HORIZON_SESSIONS } from "../shared/flows-features.js";
-import { execFileSync, spawnSync } from "node:child_process";
+import { pearson, horizonMove, HORIZON_SESSIONS, realizedVol } from "../shared/flows-features.js";
+import { execFileSync, spawnSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -484,13 +491,68 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
       seen.push(key);
       if (key === "board:long:2026-08-24") throw new Error("archive write refused");
     });
-    ok(!seen.includes("board:long"),
-       `a failed archive write does NOT go on to publish the live board (${seen.join(", ")})`);
-    ok(lines.some((l) => /keeps the pre-chain board/.test(l)),
-       "and it says which copy the reader is left holding");
+    ok(seen.includes("board:long"),
+       `THE SPLIT: a failed archive write no longer takes the live board down with it ` +
+       `(${seen.join(", ")}) — sharing one try is how run 56 lost board:long:2026-09-15 AND ` +
+       "left readers on the pre-chain board; the end-of-run archive check rewrites the dated " +
+       "key from this same payload");
+    ok(lines.some((l) => /archive board:long:2026-08-24: NOT WRITTEN/.test(l) &&
+       /end-of-run check/.test(l)),
+       `and it says the archive was not written and what will write it (${lines[0]})`);
 
     ok(seen.includes("board:short:2026-08-24") && seen.includes("board:short"),
        "while the other side re-publishes normally — sides fail independently");
+  }
+
+  {
+    const seen = [];
+    const payloads = { long: board("long", ["AAA"]), short: board("short", ["CCC"]) };
+    const chains = new Map([["AAA", chain(0.04, -0.02, 0.31, 25)], ["CCC", chain(0.06, 0.01, 0.28, 32)]]);
+    const lines = await republishWithChain(payloads, chains, "2026-08-24", async (key) => {
+      seen.push(key);
+      if (key.endsWith(":2026-08-24")) {
+        const error = new Error("ingest board -> HTTP 409 archive_immutable");
+        error.status = 409;
+        throw error;
+      }
+    });
+    ok(seen.includes("board:long") && seen.includes("board:short"),
+       `THE UW-4 CASE: a 409 on the dated key still publishes the live board with its chain ` +
+       `columns (${seen.join(", ")}) — run 66 left 0 of 50 live rows with atmIv while the ` +
+       "archive held 25");
+    ok(lines.filter((l) => /ALREADY HOLDS this session \(409\)/.test(l)).length === 2 &&
+       lines.every((l) => !/NOT WRITTEN/.test(l)),
+       "and the 409 is reported as the archive already holding the session, not as a loss");
+  }
+
+  {
+    const store = new Map([["board:short:2026-08-24", { rows: [{ t: "EARLIER" }] }]]);
+    const written = [];
+    const report = await ensureArchived({
+      "scores:2026-08-24": { rows: [] },
+      "board:long:2026-08-24": { rows: [{ t: "AAA" }] },
+      "board:short:2026-08-24": { rows: [{ t: "CCC" }] },
+    }, {
+      landed: new Set(["scores:2026-08-24"]),
+      reader: async (key) => (store.has(key)
+        ? { payload: store.get(key), status: 200 } : { payload: null, absent: true, status: 200 }),
+      write: async (key) => { written.push(key); },
+    });
+    assert.deepEqual(report.map((r) => `${r.key}=${r.state}`),
+      ["scores:2026-08-24=written", "board:long:2026-08-24=repaired", "board:short:2026-08-24=held"],
+      "THE END-OF-RUN CHECK: a key this run wrote stands, a key the store lacks is written " +
+      "again from the run's payload, and a key an earlier run holds is left alone"); checks++;
+    assert.deepEqual(written, ["board:long:2026-08-24"],
+      "and only the missing key is written — the check never overwrites an archived session"); checks++;
+
+    const lost = await ensureArchived({ "board:long:2026-08-24": { rows: [] } }, {
+      landed: new Set(),
+      reader: async () => ({ payload: null, failed: true, status: 403 }),
+      write: async () => { const e = new Error("HTTP 403"); e.status = 403; throw e; },
+    });
+    eq(lost[0].state, "lost",
+       "and a key that can be neither read nor written is reported LOST, which main() prints " +
+       "as a loud warning rather than letting the run end green in silence");
   }
 
   {
@@ -2453,6 +2515,38 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     ok(dated.some((r) => r.edte !== null && r.edte > 12 && r.edte <= 21),
        `board:${side} holds at least one name reporting just past the gate — the row this ` +
        "column exists for, and proof the branch is reachable");
+    eq(board.gateOrigin, nextWeekday(board.sessionDate),
+       `board:${side}'s gate counts from the next session (${board.gateOrigin}), not the ` +
+       "machine's date — which made the dry corpus a different corpus every day it ran");
+  }
+
+  {
+    const cardFiles = emitted.filter((n) => n.startsWith(base + "-card-"));
+    ok(cardFiles.length >= 50, `the dry run emitted ${cardFiles.length} cards to check`);
+    let boardCards = 0;
+    for (const name of cardFiles) {
+      const card = JSON.parse(fs.readFileSync(path.join(dir, name), "utf8"));
+      const cx = card.panels && card.panels.context;
+      if (!cx || cx.status !== "ok") continue;
+      ok(cx.closeDates[cx.closeDates.length - 1] <= card.sessionDate &&
+         cx.candles.every((c) => c[0] <= card.sessionDate) &&
+         (!cx.garch || !Array.isArray(cx.garch.dates) || cx.garch.dates.every((d) => d <= card.sessionDate)),
+         `${card.ticker}: closeDates, candles and GARCH dates never run past ${card.sessionDate}`);
+      ok(card.readPx && card.readPx.source === "screener" && typeof card.readPx.readAt === "string",
+         `${card.ticker}: the screener price travels as a labelled readPx with its read time`);
+      if (card.depth !== "board") continue;
+      boardCards++;
+      const rank = card.panels.volContext && card.panels.volContext.ivRank;
+      ok(!rank || !Array.isArray(rank.rows) || rank.rows.every((r) => r.date <= card.sessionDate),
+         `${card.ticker}: no IV-rank row is dated after the session`);
+      eq(card.panels.levels.spot, cx.candles[cx.candles.length - 1][4],
+         `${card.ticker}: the levels are measured from the session's own close`);
+    }
+    ok(boardCards >= 25, `and ${boardCards} of them are board cards carrying the per-name feeds`);
+    ok(/per-name feeds: \d+ card\(s\) carried rows from outside/.test(runLog),
+       "the fixture's IV-rank history runs past the session, so the cut is exercised and logged");
+    ok(/archive check: scores, board:long and board:short are all written/.test(runLog),
+       "and the end-of-run archive check runs and finds the session whole");
   }
 
   {
@@ -2830,6 +2924,453 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     eq(s.rows[1].major, null,
        "and a flag the vendor omitted is NULL — \"this was not flagged major\" and \"we do not " +
        "know whether it was\" are different sentences");
+  }
+}
+
+{
+  const SESSION = "2026-09-21";
+  const WFC = [86.31, 87.27, 86.87, 83.87, 85.43, 86.45, 87.89, 88.39, 89.17, 87.59, 87.25,
+    87.52, 87.45, 88.93, 88.11, 88.82, 87.54, 87.4, 85.94, 83.7, 83.84, 84.72, 84.79, 85.23,
+    84.97, 86.69, 86.39, 87.04, 89.27, 89.19, 89.97, 87.96, 89.67, 89.45, 90.29, 88.71, 89.72,
+    87.05, 86.89, 86.12, 86.54, 83.385];
+  const days = [];
+  for (let t = Date.parse("2026-09-22T12:00:00Z"); days.length < WFC.length; t -= 86400000) {
+    const d = new Date(t).toISOString().slice(0, 10);
+    const dow = new Date(t).getUTCDay();
+    if (dow !== 0 && dow !== 6) days.unshift(d);
+  }
+  const vendor = WFC.map((c, i) => ({
+    start_time: `${days[i]}T13:30:00Z`, open: String(c), high: String(c * 1.01),
+    low: String(c * 0.99), close: String(c), volume: i === WFC.length - 1 ? 8890788 : 21000000,
+  })).reverse();
+
+  eq(days[days.length - 1], "2026-09-22", "the fixture ends on the partial 2026-09-22 bar the live cards carried");
+  eq(days[days.length - 2], SESSION, "and its previous bar is the 2026-09-21 session the cards were stamped with");
+
+  const cut = sessionCandles(vendor, SESSION);
+  eq(cut.length, vendor.length - 1, "THE CUT: a vendor that ignores end_date loses exactly the bar past the session");
+  ok(cut.every((c) => c.start_time.slice(0, 10) <= SESSION), "and nothing dated after the session survives it");
+  eq(sessionCandles(vendor, null).length, vendor.length,
+     "with no session date there is nothing to cut against, so nothing is invented");
+  assert.deepEqual(candleCut(vendor, SESSION), { past: 1, latest: "2026-09-22" },
+    "the cut reports what it removed, so the run can log how often the vendor ignored end_date"); checks++;
+
+  const judged = judgeEndDate(vendor, SESSION);
+  eq(judged.honoured, false, "A FAKE VENDOR THAT IGNORES end_date IS CAUGHT: max(candleDate) > sessionDate");
+  eq(judged.latest, "2026-09-22", "and the offending date is named");
+  eq(judged.send, true, "while the parameter is still sent — dropping it would only remove the request, not the bar");
+  eq(judgeEndDate(cut, SESSION).honoured, true, "a vendor that honours it is reported as honouring it");
+  eq(judgeEndDate([], SESSION).send, false, "an empty answer drops the parameter, as before");
+
+  const calls = [];
+  const fakeUw = async (p, params = {}) => {
+    calls.push([p, params]);
+    if (p.includes("/ohlc/1d")) return vendor;
+    if (p === "/api/screener/stocks") {
+      return params.date
+        ? [{ ticker: "AAPL", close: "230", marketcap: "3e12", call_volume: 1, put_volume: 1 }]
+        : [{ ticker: "AAPL", close: "231", marketcap: "3e12", call_volume: 1, put_volume: 1 }];
+    }
+    return [];
+  };
+  const dating = await verifyDating(SESSION, { read: fakeUw });
+  eq(dating.endDateHonoured, false,
+     "verifyDating REPORTS the vendor ignoring end_date rather than deciding with it — " +
+     "the 17:17 run printed end_date=true while every card carried 2026-09-22");
+  eq(dating.endDateLatest, "2026-09-22", "and says which bar gave it away");
+  eq(dating.endDate, true, "and keeps sending the parameter");
+  eq(dating.screenerDate, true, "a dated screener that answers with readable rows keeps its date");
+  ok(calls.some(([p, q]) => p === "/api/screener/stocks" && q.date === SESSION),
+     "and the probe really asked the screener for the session");
+  const blind = await verifyDating(SESSION, {
+    read: async (p, params = {}) => (p === "/api/screener/stocks" && params.date ? [{ ticker: "X" }]
+      : p === "/api/screener/stocks" ? [{ ticker: "X", close: 1, marketcap: 1, call_volume: 1, put_volume: 1 }]
+        : p.includes("/ohlc/1d") ? cut : []),
+  });
+  eq(blind.screenerDate, false,
+     "a dated screener whose rows lack the fields the universe filter reads is dropped for the run");
+  eq(blind.endDateHonoured, true, "and an honoured end_date is reported as honoured");
+  eq(judgeScreenerDate([], []).date, true,
+     "two empty probes teach nothing, so the dated read — correct by construction — is kept");
+
+  const f = computeFeatures({
+    ticker: "WFC", spot: 83.385, greekFlow: [], ticks: [], strikes: [], expiries: [],
+    ohlc: vendor, sessionDate: SESSION, tilt: null,
+  });
+  eq(f.closeDates[f.closeDates.length - 1], SESSION,
+     "closeDates NEVER RUN PAST sessionDate — on 2026-09-21 all 166 live cards ended on 2026-09-22");
+  ok(f.candles.every((c) => c[0] <= SESSION), "nor do the published candles");
+  ok(!f.garch || !Array.isArray(f.garch.dates) || f.garch.dates.every((d) => d <= SESSION),
+     "nor the GARCH fit's dates");
+  const without = realizedVol(WFC.slice(0, -1), { window: 21 });
+  const withPartial = realizedVol(WFC, { window: 21 });
+  near(f.rv30, without, 1e-12,
+       `rv30 is the session's own (${(without * 100).toFixed(2)}%), not the ` +
+       `${(withPartial * 100).toFixed(2)}% the partial -3.71% bar produced`);
+  ok(Math.abs(withPartial - without) > 0.03, "and the fixture really separates the two readings by over three vol points");
+  eq(f.spot, 86.54, "THE REFERENCE SPOT is the session close, not the 83.385 read at 13:17 the next day");
+  eq(f.spotBasis, "session-close", "and says so");
+  eq(f.readPx, 83.385, "the read price travels beside it, labelled");
+  eq(f.prevClose, 86.12, "and the previous close is the bar before the session's");
+
+  const noBar = sessionReference(vendor.filter((c) => !c.start_time.startsWith(SESSION)), SESSION, 83.385);
+  eq(noBar.basis, "read", "a series with no bar for the session falls back to the read price and says so");
+  eq(noBar.spot, 83.385, "and uses it");
+
+  const row = { ticker: "WFC", close: "83.385", prev_close: "86.54", sector: "Financials" };
+  const card = sessionRow(row, f);
+  eq(card.close, 86.54, "the card and board row carry the session close");
+  near((card.close - card.prev_close) / card.prev_close, 86.54 / 86.12 - 1, 1e-12,
+       "and the session's own change, not the next day's intraday move");
+  eq(sessionRow(row, { spotBasis: "read", spot: 83.385 }), row,
+     "a row whose features fell back to the read price is left exactly as the screener sent it");
+  const read = readPxOf({ row, features: f }, "2026-09-22T17:18:00Z");
+  eq(read.px, 83.385, "card.readPx keeps the screener's price");
+  eq(read.readAt, "2026-09-22T17:18:00Z", "with the minute it was read");
+  ok(/session's daily close/.test(read.note), "and a sentence saying which one the levels use");
+
+  const iv = sessionRows([{ date: "2026-09-22" }, { date: "2026-09-21" }, { date: "2026-09-18" }],
+    (r) => r.date, SESSION, { through: true });
+  eq(iv.cut, 1, "iv-rank rows dated after the session are cut");
+  const dp = sessionRows({ data: [{ executed_at: "2026-09-22T13:40:00Z" }, { executed_at: "2026-09-21T19:59:00Z" }] },
+    (r) => readDayOf(r.executed_at), SESSION);
+  eq(dp.cut, 1, "and dark-pool prints not on the session's Eastern day are cut from the wrapped body");
+  eq(dp.raw.data.length, 1, "keeping the envelope the shaper reads");
+  eq(readDayOf("2026-09-23T02:00:00Z"), "2026-09-22",
+     "a read at 22:00 Eastern is that Eastern day's, whatever the UTC date says");
+}
+
+{
+  const at = (iso) => intradayRefusal("2026-09-21", { at: new Date(iso) });
+  const tuesday = at("2026-09-22T14:01:13Z");
+  ok(tuesday.inside && tuesday.refuse,
+     "THE INTRADAY GUARD REFUSES the 14:01Z firing that published 2026-09-21 from 09-22's tape");
+  ok(/refusing to publish session 2026-09-21 from an in-progress tape/.test(tuesday.message),
+     `with a message naming the session and the clock (${tuesday.message.slice(0, 90)}…)`);
+  const allowed = intradayRefusal("2026-09-21", { at: new Date("2026-09-22T17:17:00Z"), allow: true });
+  ok(allowed.inside && allowed.allowed && !allowed.refuse,
+     "allow_intraday lets a manual run through, and the result says it was allowed");
+  ok(/PUBLISHING FROM AN IN-PROGRESS TAPE/.test(allowed.message), "and the log says what that means");
+  ok(!at("2026-09-22T21:30:00Z").inside, "21:30Z in summer is 17:30 EDT — after the close");
+  ok(!at("2026-12-15T21:30:00Z").inside, "21:30Z in winter is 16:30 EST — after the close");
+  ok(at("2026-12-15T20:30:00Z").inside,
+     "while the 20:30Z first proposed is 15:30 EST — mid-session in winter, which is why it was rejected");
+  ok(!at("2026-09-23T09:30:00Z").inside && !at("2026-12-16T09:30:00Z").inside,
+     "a 21:30Z firing delayed twelve hours still lands before the next open under either zone");
+  ok(!at("2026-09-19T15:00:00Z").inside, "a Saturday is never inside a session");
+  ok(at("2026-09-22T13:30:00Z").inside && !at("2026-09-22T13:29:00Z").inside,
+     "the open is 09:30 exactly");
+  ok(!at("2026-09-22T20:00:00Z").inside && at("2026-09-22T19:59:00Z").inside,
+     "and the close is 16:00 exactly");
+  eq(SESSION_OPEN_MINUTES, 570, "09:30 in minutes");
+  eq(SESSION_CLOSE_MINUTES, 960, "16:00 in minutes");
+
+  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  const main = src.slice(src.indexOf("async function main()"));
+  const resolved = main.indexOf("await resolveSessionDate()");
+  const guard = main.indexOf("intradayRefusal(sessionDate");
+  const thrown = main.indexOf("if (intraday && intraday.refuse) throw new Error(intraday.message)");
+  const firstRead = main.indexOf("verifyDating(sessionDate");
+  ok(resolved !== -1 && guard > resolved && thrown > guard && firstRead > thrown,
+     "main() resolves the session, then consults the guard and THROWS on a refusal, before a " +
+     "single vendor read beyond the session probe");
+  ok(/allow: process\.env\.FLOWS_ALLOW_INTRADAY === "1"/.test(main),
+     "and the override is the FLOWS_ALLOW_INTRADAY=1 the workflow plumbs from allow_intraday");
+
+  const wf = readFileSync(new URL("../.github/workflows/flows-pipeline.yml", import.meta.url), "utf8");
+  const crons = [...wf.matchAll(/cron:\s*"([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(crons, ["30 21 * * 1-5"],
+    "THE SCHEDULE is one post-close cron — the '15 9'/'15 10' pair fired 4.5-6.6h late every weekday"); checks++;
+  ok(wf.includes('elif [ "$FIRED" = "30 21 * * 1-5" ]'), "and the gate step admits exactly that cron");
+  ok(!/15 9|15 10/.test(wf), "and no trace of the 05:15 pair remains to be admitted");
+  ok(/allow_intraday:[\s\S]*?type: boolean/.test(wf) && /republish_session:[\s\S]*?type: boolean/.test(wf),
+     "workflow_dispatch offers allow_intraday and republish_session");
+  ok(/FLOWS_ALLOW_INTRADAY: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.allow_intraday && '1' \|\| '' \}\}/.test(wf),
+     "and plumbs allow_intraday as FLOWS_ALLOW_INTRADAY=1, on a dispatch only");
+  ok(/FLOWS_REPUBLISH_SESSION: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.republish_session && '1' \|\| '' \}\}/.test(wf),
+     "and republish_session as FLOWS_REPUBLISH_SESSION=1, on a dispatch only");
+  for (const file of ["flows-pipeline.yml", "regression.yml"]) {
+    const text = readFileSync(new URL(`../.github/workflows/${file}`, import.meta.url), "utf8");
+    ok(/actions\/checkout@v5/.test(text) && /actions\/setup-node@v5/.test(text) && !/@v4/.test(text),
+       `${file} runs the Node-24 majors of checkout and setup-node`);
+  }
+  ok(/after the close/.test(PIPELINE_CADENCE) && /21:30 UTC/.test(PIPELINE_CADENCE),
+     `the cadence the payloads print is the schedule that fires (${PIPELINE_CADENCE})`);
+  ok(!/05:15/.test(src), "and the pipeline no longer names 05:15 anywhere");
+  ok(!/shorts\/AAPL\/volume-and-ratio/.test(src) && !/probes:/.test(src),
+     "the shorts probe that returned zero rows every run is gone, and so is meta.probes");
+}
+
+{
+  eq(nextWeekday("2026-09-18"), "2026-09-21", "the gate origin after a Friday is Monday");
+  eq(nextWeekday("2026-09-21"), "2026-09-22", "and after a Monday, Tuesday");
+  eq(nextWeekday("garbage"), null, "an unparseable session has no next session");
+  assert.deepEqual(priorWeekdays("2026-09-22", 3), ["2026-09-21", "2026-09-18", "2026-09-17"],
+    "the archive walk back skips the weekend"); checks++;
+  ok(daysToEarnings({ next_earnings_date: "2026-10-03" }, nextWeekday("2026-09-21")) === 11,
+     "UW-21: a report on 10-03 is 11 days from the NEXT session after 09-21 — the anchor a " +
+     "post-close run must use, where its own wall-clock date would say 12");
+
+  ok(closedPriceWindow("2026-09-21T21:40:00Z", "2026-09-21"),
+     "an archive written at 17:40 EDT on its own session holds that session's close");
+  ok(!closedPriceWindow("2026-09-21T19:30:00Z", "2026-09-21"), "one written at 15:30 does not");
+  ok(!closedPriceWindow("2026-09-21T15:54:00Z", "2026-09-18"),
+     "and board:*:2026-09-18, written Monday 11:54 ET, holds a MONDAY price: refused as a close");
+  ok(closedPriceWindow("2026-09-19T15:00:00Z", "2026-09-18"), "a Saturday write still holds Friday's close");
+  ok(closedPriceWindow("2026-09-21T13:29:00Z", "2026-09-18") && !closedPriceWindow("2026-09-21T13:31:00Z", "2026-09-18"),
+     "and the window closes at the next open, to the minute");
+  ok(!closedPriceWindow(null, "2026-09-18"), "an unstamped archive is never trusted as a close");
+
+  const bars = (dates, close) => dates.map((d) => ({ start_time: `${d}T13:30:00Z`, close: String(close) }));
+  const enriched = [{ row: { ticker: "AAA" }, raw: { ohlc: bars(["2026-09-17", "2026-09-18", "2026-09-21", "2026-09-22"], 10) } }];
+  const datedBoards = [
+    { d: "2026-09-18", side: "long", rows: [{ t: "BBB", px: 50 }], generatedAt: "2026-09-21T15:54:00Z" },
+    { d: "2026-09-17", side: "long", rows: [{ t: "CCC", px: 70 }], generatedAt: "2026-09-17T21:35:00Z" },
+  ];
+  const closes = buildRecordCloses(enriched, datedBoards, "2026-09-21");
+  ok(![...closes.values()].some((m) => [...m.keys()].some((d) => d > "2026-09-21")),
+     "RECORD CLOSES NEVER RUN PAST sessionDate — the partial 09-22 bar is not an exit price");
+  eq(closes.get("AAA").size, 3, "the enriched name keeps its three closed sessions");
+  ok(!closes.has("BBB"), "a dated-board px read the next session is NOT used as a close");
+  eq(closes.get("CCC").get("2026-09-17"), 70, "one written between the close and the next open is");
+  assert.deepEqual(closes.sources, { boardPx: 1, boardPxRefused: 1 },
+    "and the run can say how many it used and refused"); checks++;
+  const calendar = recordCalendar(enriched, datedBoards, "2026-09-21");
+  eq(calendar[calendar.length - 1], "2026-09-21",
+     "the record's calendar ends at the session, so k=5 and k=10 are never scored to an intraday bar");
+
+  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  ok(!/put\(row\.ticker, sessionDate, row\.close\)/.test(src),
+     "and the universe row.close — a screener price read at run time — is no longer written as a close");
+}
+
+{
+  const archived = { payload: { generatedAt: "2026-09-22T14:02:18.489Z", rows: [{ t: "B" }] }, status: 200 };
+  const gate = sameSessionGate({ sessionDate: "2026-09-21", archived });
+  ok(gate.skip && gate.mode === "archived",
+     "A SAME-SESSION RUN SKIPS THE RANKED LEG when scores:<sessionDate> is archived");
+  ok(/boards, scores, score track, record, brief and cards/.test(gate.note), "and names what it skips");
+  const again = sameSessionGate({ sessionDate: "2026-09-21", archived, republish: true });
+  ok(!again.skip && again.mode === "republish", "republish_session runs it, as a rewrite");
+  const unread = sameSessionGate({ sessionDate: "2026-09-21", archived: { payload: null, failed: true, status: 403 } });
+  ok(!unread.skip && unread.mode === "unverified" && /403/.test(unread.note),
+     "an unreadable archive does not skip a session that may never have been published");
+  eq(sameSessionGate({ sessionDate: "2026-09-21", archived: { payload: null, absent: true } }).mode, "fresh",
+     "an absent one is a first run");
+  assert.deepEqual(sessionArchiveKeys("2026-09-21"),
+    ["scores:2026-09-21", "board:long:2026-09-21", "board:short:2026-09-21"],
+    "the three keys a republish deletes and rewrites together"); checks++;
+  const removed = [];
+  const retired = await retireSession("2026-09-21", {
+    remove: async (key) => { removed.push(key); return key.startsWith("scores") ? { ok: true, status: 200 } : { ok: false, status: 404 }; },
+  });
+  eq(removed.length, 3, "a republish asks for all three");
+  ok(retired.refused.length === 0 && retired.absent.length === 2,
+     "and an absent key is not a refusal — only a store that says no stops the rewrite");
+  const refused = await retireSession("2026-09-21", { remove: async () => ({ ok: false, status: 403 }) });
+  eq(refused.refused.length, 3, "a refusal is reported per key, which main() turns into a throw before any ranked write");
+}
+
+{
+  const store = new Map();
+  const reads = [];
+  const reader = async (key) => {
+    reads.push(key);
+    if (key === "board:long") return { payload: null, failed: true, status: 403 };
+    if (store.has(key)) return { payload: store.get(key), status: 200 };
+    return { payload: null, absent: true, status: 200 };
+  };
+  store.set("board:long:2026-09-18", { sessionDate: "2026-09-18", rows: [{ t: "A", r: 1 }, { t: "B", r: 2 }] });
+  const memory = await resolveBoardMemory("long", "2026-09-21", { reader });
+  eq(memory.status, "ok",
+     "THE 403 NO LONGER COLD-STARTS THE LONG BOARD: 11 of 11 dated long boards were 'unavailable'");
+  eq(memory.source, "archive", "the memory came from the archive");
+  eq(memory.key, "board:long:2026-09-18", "from the newest earlier session it holds");
+  eq(memory.incumbents, 2, "and its names reach hysteresis");
+  ok(/read from the dated archive \(board:long:2026-09-18\) because the live board:long could not be read \(the store answered 403\)/.test(memory.note),
+     `and the note says where it came from and why (${memory.note.slice(-120)})`);
+
+  store.set("board:short", { sessionDate: "2026-09-21", rows: [{ t: "X", r: 1 }] });
+  store.set("board:short:2026-09-18", { sessionDate: "2026-09-18", rows: [{ t: "Y", r: 1 }] });
+  const same = await resolveBoardMemory("short", "2026-09-21", { reader });
+  ok(same.status === "ok" && same.key === "board:short:2026-09-18" && /this session's own earlier output/.test(same.note),
+     "a same-session live board reads yesterday's archive instead of cold-starting — the 53 " +
+     "names discarded at 17:17 were a board a re-run could have held against");
+
+  const cold = await resolveBoardMemory("short", "2026-09-21", {
+    reader: async (key) => (key === "board:short" ? { payload: { sessionDate: "2026-09-21", rows: [{ t: "X" }] } }
+      : { payload: null, absent: true }),
+  });
+  ok(cold.status === "same-session" && /searched back 10 weekdays/.test(cold.note) && /held none/.test(cold.note),
+     "with no archive either, the refusal stands and says the archive was searched");
+  eq(MEMORY_ARCHIVE_SESSIONS, 10, "ten weekdays back — two weeks of archive");
+
+  const ok0 = await resolveBoardMemory("long", "2026-09-21", {
+    reader: async (key) => (key === "board:long" ? { payload: { sessionDate: "2026-09-18", rows: [{ t: "Z" }] } }
+      : { payload: null, absent: true }),
+  });
+  eq(ok0.source, "live", "a readable earlier live board is used as before, with no archive read");
+}
+
+{
+  const http = await import("node:http");
+  let answers = [403, 503, 200];
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    const status = answers.length ? answers.shift() : 200;
+    seen.push(status);
+    res.writeHead(status, { "Content-Type": "application/json" });
+    res.end(status === 200 ? '{"sessionDate":"2026-09-18","rows":[{"t":"A"}]}' : "{}");
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const prevUrl = process.env.FLOWS_INGEST_URL;
+  const prevTok = process.env.FLOWS_INGEST_TOKEN;
+  process.env.FLOWS_INGEST_URL = `http://127.0.0.1:${server.address().port}/api/flows/ingest`;
+  process.env.FLOWS_INGEST_TOKEN = "test-token";
+  try {
+    const waits = [];
+    const read = await readStored("board:long", { pause: async (ms) => { waits.push(ms); } });
+    assert.deepEqual(seen, [403, 503, 200],
+      "READSTORED RETRIES: a 403 then a 503 are read again, and the third read lands"); checks++;
+    ok(read.payload && read.payload.rows.length === 1 && read.recovered === 2,
+       "and the payload comes back, marked as recovered on the second retry");
+    assert.deepEqual(waits, [1000, 4000], "on the publish path's own backoff"); checks++;
+    eq(READ_RETRIES, 2, "two retries — bounded, and charged to the run's retry budget");
+
+    answers = [404];
+    seen.length = 0;
+    const gone = await readStored("board:long", { pause: async () => {} });
+    ok(gone.failed && gone.status === 404 && seen.length === 1,
+       "a 404 is an answer, not a transient, and is not retried");
+
+    answers = [403, 403, 403];
+    seen.length = 0;
+    const refused = await readStored("board:long", { pause: async () => {} });
+    ok(refused.failed && refused.status === 403 && seen.length === 3,
+       "and a store that keeps refusing is asked three times, then reported as failed");
+  } finally {
+    process.env.FLOWS_INGEST_URL = prevUrl;
+    process.env.FLOWS_INGEST_TOKEN = prevTok;
+    if (prevUrl === undefined) delete process.env.FLOWS_INGEST_URL;
+    if (prevTok === undefined) delete process.env.FLOWS_INGEST_TOKEN;
+    await new Promise((r) => server.close(r));
+  }
+}
+
+{
+  const population = (n, lo, hi) => Array.from({ length: n }, (_, i) =>
+    ({ ticker: "N" + i, marketcap: lo * Math.pow(hi / lo, (i + 0.5) / n) }));
+  const bandReader = (names) => async (min, max) => names
+    .filter((r) => r.marketcap >= min && (max === null || r.marketcap < max))
+    .slice(0, SCREENER_PAGE_ROWS);
+
+  const small = await sweepScreenerBand([1e9, 1.3e9], bandReader(population(30, 1e9, 1.3e9)));
+  ok(small.reads === 1 && !small.split && small.rows.length === 30, "a band under the page size is read once");
+
+  const hundredTwenty = population(120, 66.5e9, 86.5e9);
+  const split = await sweepScreenerBand([66.5e9, 86.5e9], bandReader(hundredTwenty));
+  eq(split.rows.length, 120,
+     "A TRUNCATED BAND IS RE-READ: the $66.5-86.5B band that capped at 50 in run 66 recovers all 120");
+  eq(split.truncated, 0, "with no leaf still full");
+  eq(split.reads, 7, "at 1 + 2 + 4 reads, which is the whole bound");
+  ok(split.leaves.every((l) => l.level === SCREENER_SPLIT_DEPTH), "splitting at the geometric midpoint, twice");
+
+  const dense = await sweepScreenerBand([1e9, 1.3e9], bandReader(population(400, 1e9, 1.3e9)));
+  eq(dense.reads, 7, "a band too dense to finish still stops at two levels");
+  eq(dense.truncated, 4, "and every still-full leaf stays marked TRUNCATED rather than passed off as whole");
+}
+
+{
+  const prior = (reason, sessionDate) => ({ sessionDate, holders: { status: "unavailable", reason } });
+  const refused = holdersRefusal(prior("/api/politician-portfolios/holders/B -> HTTP 422", "2026-09-21"), "2026-09-22");
+  ok(refused && refused.status === 422 && refused.since === "2026-09-21",
+     "UW-19: a 422 on the holders route last run is not bought again the next night");
+  const carried = holdersRefusal(prior(refused.reason, "2026-09-22"), "2026-09-25");
+  ok(carried && carried.since === "2026-09-21", "the refusal date is carried forward by the skipped run's own reason");
+  eq(holdersRefusal(prior(refused.reason, "2026-09-25"), "2026-09-28"), null,
+     "and after seven days the route is asked again, so a plan change is noticed within a week");
+  eq(holdersRefusal(prior("/api/politician-portfolios/holders/B -> HTTP 503", "2026-09-21"), "2026-09-22"), null,
+     "a 5xx is the vendor's weather, not the plan, and is retried every run");
+  eq(HOLDERS_RETRY_DAYS, 7, "one week");
+}
+
+{
+  const http = await import("node:http");
+  const today = easternNow().date;
+  const days = priorWeekdays(today, 8).reverse();
+  const SESSION = days[days.length - 1];
+  const vendorCalls = [];
+  const uwServer = http.createServer((req, res) => {
+    const url = new URL(req.url, "http://x");
+    vendorCalls.push(url.pathname + (url.searchParams.get("date") ? "?date" : ""));
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(url.pathname === "/api/stock/SPY/ohlc/1d"
+      ? { data: days.map((d) => ({ start_time: `${d}T13:30:00Z`, close: "500", volume: 1 })) }
+      : { data: [] }));
+  });
+  const writes = [];
+  const ingest = http.createServer((req, res) => {
+    const key = new URL(req.url, "http://x").searchParams.get("key");
+    req.resume();
+    req.on("end", () => {
+      writes.push({ method: req.method, key });
+      res.writeHead(req.method === "DELETE" ? 404 : 200, { "Content-Type": "application/json" });
+      if (req.method === "GET" && key === `scores:${SESSION}`) {
+        res.end(JSON.stringify({ generatedAt: `${SESSION}T21:45:00.000Z`, sessionDate: SESSION, rows: [{ t: "A", s: 40 }] }));
+      } else if (req.method === "GET") {
+        res.end(JSON.stringify({ key, status: "pending" }));
+      } else {
+        res.end('{"ok":true}');
+      }
+    });
+  });
+  await new Promise((r) => uwServer.listen(0, "127.0.0.1", r));
+  await new Promise((r) => ingest.listen(0, "127.0.0.1", r));
+  const run = (extra) => new Promise((resolve) => {
+    const child = spawn(process.execPath, ["../scripts/flows-pipeline.mjs"], {
+      cwd: import.meta.dirname,
+      env: {
+        ...process.env,
+        UW_API_KEY: "test", FLOWS_INGEST_TOKEN: "test",
+        FLOWS_INGEST_URL: `http://127.0.0.1:${ingest.address().port}/api/flows/ingest`,
+        FLOWS_UW_BASE_URL: `http://127.0.0.1:${uwServer.address().port}`,
+        FLOWS_ALLOW_INTRADAY: "1",
+        ...extra,
+      },
+    });
+    let out = "";
+    child.stdout.on("data", (c) => { out += c; });
+    child.stderr.on("data", (c) => { out += c; });
+    child.on("close", (status) => resolve({ status, out }));
+  });
+  try {
+    const skipped = await run({});
+    eq(skipped.status, 0, `the same-session run exits clean (${skipped.out.slice(-300)})`);
+    ok(new RegExp(`session date: ${SESSION}`).test(skipped.out), `and resolved ${SESSION} from the vendor's SPY bars`);
+    ok(/session gate: archived — scores:\S+ is already archived/.test(skipped.out),
+       "it found the session archived and said so before spending a vendor call on the universe");
+    const posted = writes.filter((w) => w.method === "POST").map((w) => w.key).sort();
+    assert.deepEqual(posted, ["news", "pulse", "sector:premium"],
+      "A SAME-SESSION RUN SKIPS THE RANKED LEG END TO END: it wrote news, pulse and " +
+      `sector:premium and nothing else — no board, scores, record, scoretrack, card, brief or meta (${posted.join(", ")})`); checks++;
+    eq(writes.filter((w) => w.method === "DELETE").length, 0, "and deleted nothing");
+    ok(!vendorCalls.some((p) => p.startsWith("/api/screener") || p.startsWith("/api/stock/AAPL")),
+       "no screener band and no dating probe was bought for a session it would not rank");
+
+    writes.length = 0;
+    vendorCalls.length = 0;
+    const rewrite = await run({ FLOWS_REPUBLISH_SESSION: "1" });
+    ok(/session gate: republish/.test(rewrite.out), "republish_session proceeds past the gate as a rewrite");
+    ok(vendorCalls.some((p) => p === "/api/screener/stocks?date"),
+       "and screens the session by date, since the dated probe answered");
+    eq(rewrite.status, 1, "an empty universe still refuses to publish");
+    eq(writes.filter((w) => w.method === "DELETE").length, 0,
+       "and a republish that cannot rank deletes NOTHING — the archive keys are removed only " +
+       "after a ranking exists to replace them");
+    eq(writes.filter((w) => w.method === "POST").length, 0, "nor writes anything");
+  } finally {
+    await new Promise((r) => uwServer.close(r));
+    await new Promise((r) => ingest.close(r));
   }
 }
 
