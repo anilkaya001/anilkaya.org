@@ -135,8 +135,8 @@ export function buildLevels({ spot, atr, gammaFlip, maxPain, callWall, putWall }
     `Nearest: ${near.label.toLowerCase()} at ${near.px.toFixed(2)}, ` +
     `${pct.toFixed(1)}% ${above ? "above" : "below"} spot ${s.toFixed(2)}` +
     (near.distAtr === null
-      ? " (ATR unavailable, so no sigma distance)."
-      : ` — ${Math.abs(near.distAtr).toFixed(2)}\u03c3.`),
+      ? " (ATR unavailable, so no distance in ATR)."
+      : ` — ${Math.abs(near.distAtr).toFixed(2)} ATR.`),
     {
       px: Number(near.px.toFixed(2)),
       spot: Number(s.toFixed(2)),
@@ -285,7 +285,7 @@ export function buildDisplacement(strikeRows, { atr, spot } = {}) {
   const dir = gapPx > 0 ? "above" : gapPx < 0 ? "below" : "on top of";
   const size = gapAtr === null
     ? `${Math.abs(gapPx).toFixed(2)} in price`
-    : `${Math.abs(gapAtr).toFixed(2)}\u03c3`;
+    : `${Math.abs(gapAtr).toFixed(2)} ATR`;
   const lead = panelLead(
     gapPx === 0
       ? `Today's flow is building gamma exactly where the book already sits — ` +

@@ -2691,6 +2691,7 @@
     panelHead(host, q);
 
     const feeds = panel.feeds || {};
+    const whenSaid = new Set();
     for (const [key, heading, blurb] of FMR_FEEDS) {
       const f = feeds[key];
       const block = el("section", "fmr-block");
@@ -2782,6 +2783,8 @@
       const quiet = !(f.status === "ok");
       const cut = fmrCutLine(f);
       const when = fmrSessionLine(f, card && card.sessionDate);
+      const whenDup = whenSaid.has(when.textContent);
+      whenSaid.add(when.textContent);
       const cov = fmrCoverageLine((panel.coverage || {})[key]);
       const covData = (panel.coverage || {})[key];
 
@@ -2789,7 +2792,7 @@
         typeof covData.in === "number" && covData.of && covData.in * 5 < covData.of);
 
       const open = [], folded = [];
-      (f.sameSession === true ? folded : open).push(when);
+      if (!whenDup) (f.sameSession === true ? folded : open).push(when);
       (quiet ? open : folded).push(cut);
       if (cov) (covThin ? open : folded).push(cov);
       if (said) folded.push(said);
@@ -2882,7 +2885,7 @@
     table.append(thead);
 
     const body = el("tbody");
-    let drawn = 0;
+    let drawn = 0, blank = 0;
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
       const tr = el("tr");
@@ -2896,7 +2899,7 @@
       }
       tr.append(d);
       tr.append(el("td", "c-num", r.close === null ? DASH : px2(r.close)));
-      tr.append(el("td", "c-num" + P.polarity(r.score),
+      tr.append(el("td", "c-num " + P.polarity(r.score),
         r.score === null ? DASH : signed(r.score, (a) => String(a))));
 
       const iAll = all.indexOf(r);
@@ -2905,7 +2908,7 @@
       if (r.score !== null && pj !== null && all[pj].score !== null) {
         const mv = r.score - all[pj].score;
         const gap = pj - iAll;
-        dCell.className = "c-num" + P.polarity(mv);
+        dCell.className = "c-num " + P.polarity(mv);
         dCell.textContent = signed(mv, (a) => String(a));
         dCell.title = mv + " score points since " + all[pj].d + ", " +
           gap + (gap === 1 ? " session" : " sessions") + " earlier.";
@@ -2917,15 +2920,40 @@
       }
       tr.append(dCell);
 
-      const pCell = el("td", "c-num" + P.polarity(r.p));
+      const pCell = el("td", "c-num " + P.polarity(r.p));
       pCell.textContent = r.p === null ? DASH : money(r.p);
       if (r.p === null) {
         pCell.title = "No archived net premium for this name on this session — which is " +
           "not the same as a session it was priced flat in.";
       }
       tr.append(pCell);
+      if (r.score === null && r.p === null) {
+        tr.classList.add("ft-ledger-blank");
+        tr.hidden = true;
+        blank++;
+      }
       body.append(tr);
       drawn++;
+    }
+    if (blank) {
+      const sum = el("tr", "ft-ledger-sum");
+      const td = el("td");
+      td.colSpan = 5;
+      const more = el("button", "ft-ledger-more");
+      more.type = "button";
+      const wording = (open) => (open ? "Hide the " : "Show the ") + SESSIONS(blank) +
+        " with neither a score nor a premium";
+      more.textContent = wording(false);
+      more.setAttribute("aria-expanded", "false");
+      more.addEventListener("click", () => {
+        const open = more.getAttribute("aria-expanded") !== "true";
+        for (const tr of body.querySelectorAll(".ft-ledger-blank")) tr.hidden = !open;
+        more.setAttribute("aria-expanded", String(open));
+        more.textContent = wording(open);
+      });
+      td.append(more);
+      sum.append(td);
+      body.append(sum);
     }
     table.append(body);
     wrap.append(table);
@@ -2944,6 +2972,8 @@
       "One row a session, newest first, over the window this card's price history and " +
       "the score archive between them cover" +
       (capped ? " — the newest " + drawn + " of " + all.length + " are drawn" : "") +
+      (blank ? "; the " + SESSIONS(blank) + " with neither a score nor a premium " +
+        (blank === 1 ? "is" : "are") + " folded behind one row" : "") +
       ". Close and score come from the score-over-price panel and net premium from the " +
       "net-premium panel; the two are joined on the DATE, not by position, because the " +
       "two windows need not be the same length or start on the same day. A dash is a " +
@@ -3014,12 +3044,22 @@
     }
 
     const pm = panels.pricedMove;
-    const move = pm ? isNum(pm.movePerc) : null;
-    if (move === null) {
+    const fixed = pm ? isNum(pm.impliedMove) : null;
+    const quoted = pm ? isNum(pm.movePerc) : null;
+    const sessions = pm ? isNum(pm.sessions) : null;
+    if (fixed === null && quoted === null) {
       const [k, why] = silence(pm, "priced move");
       pairs.push(["Priced move", DASH, null, k, why]);
+    } else if (fixed !== null) {
+      pairs.push(["Priced move", "±" + pct1(fixed), null, null,
+        "Over " + (sessions === null ? "the panel’s fixed horizon" : sessions + " sessions") +
+        ", from the 30-day implied volatility: the figure the priced-move panel’s lead and " +
+        "range are built on."]);
     } else {
-      pairs.push(["Priced move", "±" + pct1(move)]);
+      pairs.push(["Priced move", "±" + pct1(quoted), null, null,
+        "To " + (typeof pm.horizonRule === "string" && pm.horizonRule
+          ? pm.horizonRule : "the nearest quoted expiry") +
+        ", the vendor’s own quote; no fixed-horizon figure was published for this name."]);
     }
 
     const vc = panels.volContext;
@@ -3117,6 +3157,7 @@
     for (const section of grid.querySelectorAll(".ft-panel[data-panel] > div")) {
       markExplained(section);
     }
+    for (const wrap of grid.querySelectorAll(".fc-tablewrap")) cutWatch(wrap);
     writePanelLeads(card);
     writeStationLeads();
     if (missing.length) {
@@ -3393,6 +3434,13 @@
     return Number.isFinite(d.getTime()) ? d.toISOString().slice(0, 10) : String(iso);
   }
 
+  function pricesTo(card) {
+    const ctx = card && card.panels && card.panels.context;
+    const dates = ctx && ctx.status === "ok" && Array.isArray(ctx.closeDates) ? ctx.closeDates : [];
+    const last = dates.length ? String(dates[dates.length - 1] || "") : "";
+    return ISO_DAY.test(last) && last > String(card.sessionDate || "") ? last : null;
+  }
+
   const PANEL_CHROME = {
     __score: { group: "signal", tier: "lead" },
     __stats: { group: "signal", tier: "table" },
@@ -3477,8 +3525,65 @@
     }
   }
 
+  const topbarEl = document.querySelector(".topbar");
+  function syncTopbar() {
+    if (!topbarEl) return;
+    const h = Math.round(topbarEl.getBoundingClientRect().height);
+    if (h > 0) document.body.style.setProperty("--topbar-h", h + "px");
+  }
+
+  let heroWatch = null, heroRoot = null;
+  function watchHero() {
+    const hero = $("ftHero");
+    if (!hero || !barEl || typeof IntersectionObserver !== "function") return;
+    const root = scroller && getComputedStyle(scroller).overflowY !== "visible" ? scroller : null;
+    if (heroWatch && heroRoot === root) return;
+    if (heroWatch) heroWatch.disconnect();
+    heroRoot = root;
+    const tb = root || !topbarEl ? 0 : Math.round(topbarEl.getBoundingClientRect().height);
+    heroWatch = new IntersectionObserver((entries) => {
+      const e = entries[entries.length - 1];
+      const shown = e.isIntersecting && e.intersectionRatio >= 0.35;
+      if (shown === barEl.classList.contains("is-hero-shown")) return;
+      barEl.classList.toggle("is-hero-shown", shown);
+      syncBarHeight();
+      reHonourJump();
+    }, { root, rootMargin: "-" + tb + "px 0px 0px 0px", threshold: [0, 0.35, 1] });
+    heroWatch.observe(hero);
+  }
+
+  const cutHost = new WeakMap();
+  let cutRO = null;
+  function cutMark(n) {
+    const x = n.scrollWidth - n.clientWidth > 4, y = n.scrollHeight - n.clientHeight > 4;
+    n.classList.toggle("is-cut-end",
+      (x && n.scrollLeft + n.clientWidth < n.scrollWidth - 1) ||
+      (y && n.scrollTop + n.clientHeight < n.scrollHeight - 1));
+    n.classList.toggle("is-cut-start", (x && n.scrollLeft > 1) || (y && n.scrollTop > 1));
+  }
+  function cutWatch(n) {
+    if (!n || cutHost.has(n)) return;
+    cutHost.set(n, n);
+    n.addEventListener("scroll", () => cutMark(n), { passive: true });
+    if (!cutRO && typeof ResizeObserver === "function") {
+      cutRO = new ResizeObserver((entries) => {
+        for (const e of entries) cutMark(cutHost.get(e.target) || e.target);
+      });
+    }
+    if (cutRO) {
+      cutRO.observe(n);
+      for (const kid of n.children) {
+        cutHost.set(kid, n);
+        cutRO.observe(kid);
+      }
+    }
+    cutMark(n);
+  }
+
   let fontsArmed = !!(document.fonts && document.fonts.ready);
   function syncBarHeight() {
+    syncTopbar();
+    watchHero();
     if (!barEl || barEl.hidden) return;
     const h = Math.round(barEl.getBoundingClientRect().height);
     if (h > 0) grid.style.setProperty("--ft-bar-h", h + "px");
@@ -3494,6 +3599,7 @@
       reHonourJump();
     });
     if (barEl) settle.observe(barEl);
+    if (topbarEl) settle.observe(topbarEl);
 
     if (grid) settle.observe(grid);
   }
@@ -3821,7 +3927,7 @@
     const chgEl = $("ftHeroChg");
     if (chgEl) {
       chgEl.textContent = chgPct === null ? "" : P.pct1(chgPct);
-      chgEl.className = "ft-hero-chg" + P.polarity(chgPct);
+      chgEl.className = "ft-hero-chg " + P.polarity(chgPct);
       chgEl.hidden = chgPct === null;
       chgEl.title = "Change against the previous close, from the price context panel.";
     }
@@ -3830,7 +3936,7 @@
     const sEl = $("ftHeroScore");
     if (sEl) {
       sEl.textContent = score === null ? DASH : P.signed(score, (a) => String(a));
-      sEl.className = "ft-hero-v" + P.polarity(score);
+      sEl.className = "ft-hero-v " + P.polarity(score);
       if (score === null) sEl.setAttribute("data-empty", "unavailable");
       else sEl.removeAttribute("data-empty");
     }
@@ -3880,8 +3986,6 @@
     const pmOk = pm && pm.status === "ok";
     const atmVol = pmOk ? isNum(pm.atmVol) : null;
     const ivRank = pmOk ? isNum(pm.ivRank) : null;
-    const horizon = pmOk && typeof pm.horizonRule === "string" && pm.horizonRule
-      ? pm.horizonRule : null;
 
     const ivB = $("ftHeroIvB"), ivEl = $("ftHeroIv"), ivSub = $("ftHeroIvSub");
     if (ivB && ivEl) {
@@ -3889,13 +3993,14 @@
       if (atmVol === null) ivEl.setAttribute("data-empty", "unavailable");
       else ivEl.removeAttribute("data-empty");
       if (ivSub) {
-        ivSub.textContent = horizon ? "at " + horizon : "";
-        ivSub.hidden = !horizon;
+        ivSub.textContent = atmVol === null ? "" : "vendor headline";
+        ivSub.hidden = atmVol === null;
       }
       ivB.title = atmVol === null
         ? "The priced-move panel published no at-the-money volatility for this name."
-        : "At-the-money implied volatility, over " + (horizon || "the panel's own horizon") +
-          ", as the priced-move panel measured it.";
+        : "The vendor’s headline at-the-money implied volatility for the name as a whole, " +
+          "not one expiry’s: each expiry’s own level differs and is on the surface and " +
+          "term panels.";
 
       ivB.hidden = !pmOk;
     }
@@ -3927,8 +4032,17 @@
       ? card.sector.trim() : null;
 
     const secEl = $("ftHeroSector"), whenEl = $("ftHeroWhen");
-    const when = card.sessionDate ? "session " + fmtDate(card.sessionDate) : null;
-    if (whenEl) whenEl.textContent = when || "";
+    const later = pricesTo(card);
+    const when = card.sessionDate
+      ? "session " + fmtDate(card.sessionDate) + (later ? " · prices to " + fmtDate(later) : "")
+      : null;
+    if (whenEl) {
+      whenEl.textContent = when || "";
+      whenEl.title = later
+        ? "The score, the flow and the greeks are the session’s; the price history, the " +
+          "volatility fit on it and the IV rank run one session further, to " + fmtDate(later) + "."
+        : "";
+    }
     if (secEl) secEl.textContent = sector || "";
 
     hero.hidden = false;
@@ -4276,7 +4390,7 @@
           const dte = isNum(r.dte);
           const mv = isNum(r.impliedMovePerc);
           return {
-            v: isNum(r.vol),
+            v: isNum(r.vol), dte,
             label: String(r.expiry || DASH) + (dte === null ? "" : " · " + dte + "d out"),
             rows: [
               { k: "Implied vol", v: isNum(r.vol) === null ? "not published" : vol1(r.vol) },
@@ -4453,7 +4567,11 @@
     }
 
     const hasVol = spec.kind === "candles" && spec.points.some((pt) => pt.vol !== null);
-    const W = 620, H = hasVol ? 320 : 260, padL = 8, padR = 46, padT = 12, padB = 22;
+    host.hidden = false;
+    const hostW = body.clientWidth || (host.clientWidth ? host.clientWidth - 30 : 0);
+    const W = Math.max(300, Math.min(760, Math.round(hostW) || 620));
+    const H = Math.max(hasVol ? 200 : 170, Math.round(W * (hasVol ? 0.5 : 0.42)));
+    const padL = 8, padR = 46, padT = 12, padB = 22;
     const volH = hasVol ? 56 : 0, volGap = hasVol ? 10 : 0;
     const plotL = padL, plotW = W - padL - padR;
     const plotT = padT, plotH = H - padT - padB - volH - volGap;
@@ -4736,7 +4854,7 @@
     const n = pts.length;
 
     const hostW = body.clientWidth || (host.clientWidth ? host.clientWidth - 30 : 0);
-    const W = Math.max(320, Math.min(720, Math.round(hostW) || 620));
+    const W = Math.max(300, Math.min(720, Math.round(hostW) || 620));
     const H = Math.max(210, Math.round(W * 0.37)), padL = 36, padR = 10, padT = 14, padB = 20;
     const retH = Math.max(48, Math.round(H * 0.24)), gap = 10;
     const plotL = padL, plotW = W - padL - padR;
@@ -4845,14 +4963,19 @@
     const nuCeiling = nu !== null && nu >= 29.95;
     const heading = $("ftGarchH");
     if (heading) {
-      heading.replaceChildren(document.createTextNode("GARCH(1,1) \u2014 "),
-        el("span", "ft-chart-h-q", skewt ? "skewed t" : "fitted before the skewed t"));
+      const q = el("span", "ft-chart-h-q", skewt ? "skewed t" : "fitted before the skewed t");
+      q.title = skewt
+        ? "The innovations are Hansen\u2019s skewed t; the tail shape and skew are in the cells below."
+        : "This card\u2019s fit predates the skewed-t innovations and is refitted at the next nightly run.";
+      heading.replaceChildren(document.createTextNode("GARCH(1,1) "), q);
     }
     const lastVol = isNum(g.lastVol) !== null ? isNum(g.lastVol)
       : (all.length && all[all.length - 1].v !== null ? all[all.length - 1].v : null);
     const nextVol = isNum(g.nextVol), longRun = isNum(g.longRunVol);
     const pct = (v) => (v === null ? DASH : v.toFixed(1) + "%");
-    const f4 = (v) => (v === null ? DASH : v.toFixed(v < 0.01 ? 6 : 4));
+    const f4 = (v) => (v === null ? DASH : v.toFixed(4));
+    const alpha = isNum(g.alpha);
+    const alphaFloor = alpha !== null && alpha <= 1e-6;
     const table = el("dl", "ft-garch-params");
     const put = (k, v, title, cls) => {
       const cell = el("div", "ft-garch-p" + (cls ? " " + cls : ""));
@@ -4882,7 +5005,10 @@
     }
     put("\u03b1 + \u03b2", isNum(g.persistence) === null ? DASH : g.persistence.toFixed(3),
       "Persistence: how slowly a shock decays. Close to 1 is slow.");
-    put("\u03b1", f4(isNum(g.alpha)), "How much yesterday\u2019s squared shock feeds today\u2019s variance.");
+    put("\u03b1", alphaFloor ? "0 (floor)" : f4(alpha), alphaFloor
+      ? "\u03b1 reached its floor: the variance never responds to a shock, so this path is a decay " +
+        "to the long-run level, not a measured volatility path."
+      : "How much yesterday\u2019s squared shock feeds today\u2019s variance.");
     put("\u03b2", f4(isNum(g.beta)), "How much yesterday\u2019s variance carries into today\u2019s.");
     put("\u03c9", f4(isNum(g.omega)), "The constant in the variance recursion, in squared daily percent.");
     body.append(table);
@@ -4923,8 +5049,11 @@
         (robust && lastCapped ? " The last session\u2019s return exceeded the cap, so the next-session cell is recursed off the capped shock of " +
           isNum(g.cap).toFixed(2) + "%, not the bar drawn." : "") +
         (brk ? " The vendor" + brk.slice("; the vendor".length) + "." : "") +
-        " The next-session cell is the recursion\u2019s own next state, fixed by the last shock and " +
-        "the last variance; it carries no claim about the return\u2019s sign or size.";
+        (alphaFloor ? " \u03b1 sits at its floor, so the drawn path is a decay towards the long-run " +
+          "level rather than a measured response to the returns beneath it." : "") +
+        (nextVol === null ? ""
+          : " The next-session cell is the recursion\u2019s own next state, fixed by the last shock and " +
+            "the last variance; it carries no claim about the return\u2019s sign or size.");
     }
     host.hidden = false;
   }
@@ -4976,7 +5105,8 @@
       if (i !== 0 && i !== n - 1 && (i % every !== 0 || n - 1 - i < every)) continue;
       const t = svgEl("text", { class: "ft-chart-ax", x: x(i), y: H - 6,
         "text-anchor": i === 0 ? "start" : i === n - 1 ? "end" : "middle" });
-      t.textContent = String(pt.label || "").split(" · ")[0].slice(5);
+      t.textContent = isNum(pt.dte) === null
+        ? String(pt.label || "").split(" · ")[0].slice(5) : pt.dte + "d";
       svg.append(t);
     }
     body.append(svg);
@@ -4990,7 +5120,9 @@
     }
     if (sub) {
       sub.textContent = spec.unit.charAt(0).toUpperCase() + spec.unit.slice(1) + " by expiry. " +
-        spec.clock.charAt(0).toUpperCase() + spec.clock.slice(1) + ".";
+        spec.clock.charAt(0).toUpperCase() + spec.clock.slice(1) + "." +
+        (spec.points.some((pt) => isNum(pt.dte) !== null)
+          ? " The ticks count days to each expiry, so a second year reads in order." : "");
     }
     host.hidden = false;
   }
@@ -5056,8 +5188,14 @@
       return ak - bk;
     });
 
+    const sessionMs = Date.parse(String(card.sessionDate || "") + "T00:00:00Z");
+    const daysOut = (expiry) => {
+      const t = Date.parse(String(expiry || "") + "T00:00:00Z");
+      return Number.isFinite(t) && Number.isFinite(sessionMs) ? Math.round((t - sessionMs) / 86400000) : null;
+    };
     const COLS = [
       { k: "k", label: "Strike", cls: "c-num ftc-k" },
+      { k: "expiry", label: "Expiry", cls: "c-num ftc-exp" },
       { k: "bidPx", label: "Bid", cls: "c-num ftc-bid" },
       { k: "askPx", label: "Ask", cls: "c-num ftc-ask" },
       { k: "vol", label: "Vol", cls: "c-num ftc-vol" },
@@ -5067,6 +5205,11 @@
 
     const cellText = (r, key) => {
       if (key === "k" || key === "bidPx" || key === "askPx") return px2(r[key]);
+      if (key === "expiry") {
+        if (!r.expiry) return DASH;
+        const d = daysOut(r.expiry);
+        return String(r.expiry).slice(5) + (d === null ? "" : " · " + d + "d");
+      }
       if (key === "vol" || key === "oi") return compact(r[key]);
 
       return isNum(r.iv) === null ? DASH : vol1(r.iv);
@@ -5114,7 +5257,11 @@
         }
         for (const c of COLS) {
           const td = el("td", c.cls, cellText(r, c.k));
-          if (c.k === "k" && r.expiry) td.title = "Expires " + r.expiry;
+          if (c.k === "expiry" && r.expiry) {
+            const d = daysOut(r.expiry);
+            td.title = "Expires " + r.expiry +
+              (d === null ? "" : ", " + d + " calendar day" + (d === 1 ? "" : "s") + " after the session") + ".";
+          }
           tr.append(td);
         }
         if (r === near) {
@@ -5368,9 +5515,9 @@
       if (!iso) return DASH;
       const t = Date.parse(iso);
       if (!Number.isFinite(t)) return DASH;
-      try {
-        return new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-      } catch (_) { return DASH; }
+      const d = new Date(t);
+      const two = (n) => String(n).padStart(2, "0");
+      return two(d.getUTCHours()) + ":" + two(d.getUTCMinutes());
     };
 
     for (const r of shown) {
@@ -5512,7 +5659,7 @@
 
     const sd = sideOf(card, chg);
     if (sd.word && score !== null) {
-      marks.push([sd.word === "bullish" ? "Bullish flow" : "Bearish flow",
+      marks.push([sd.word === "bullish" ? "Bullish score" : "Bearish score",
         sd.word === "bullish" ? "is-pos" : "is-neg", sd.title]);
     }
 
@@ -5591,7 +5738,7 @@
     let flipNode;
     if (flipPct === null) {
 
-      flipNode = idChip("ftFlip", "", DASH, {
+      flipNode = idChip("ftFlip", "flip", DASH, {
         empty: "unavailable",
         title: levelsPanel && levelsPanel.status === "ok"
           ? "No gamma flip resolved on this name's ladder, so there is no distance to " +
@@ -5769,13 +5916,13 @@
     }
     changeEl.append(lead);
 
-    changeEl.append(P.statList([
-      ["Move", chg.d1 === null ? DASH
-        : P.signed(chg.d1.v, (a) => String(a)) + POINTS(chg.d1.v),
-      chg.d1 === null ? "is-null" : P.polarity(chg.d1.v)],
-      ["Sessions apart", chg.d1 === null ? DASH : String(chg.d1.gap)],
-      ["Now", P.signed(chg.at.score, (a) => String(a)) + POINTS(chg.at.score),
-        P.polarity(chg.at.score)],
+    const nowRow = ["Now", P.signed(chg.at.score, (a) => String(a)) + POINTS(chg.at.score),
+      P.polarity(chg.at.score)];
+    const bandRow = ["Dead band", chg.band === null ? DASH : "±" + chg.band + POINTS(chg.band)];
+    changeEl.append(P.statList(chg.d1 === null ? [nowRow, bandRow] : [
+      ["Move", P.signed(chg.d1.v, (a) => String(a)) + POINTS(chg.d1.v), P.polarity(chg.d1.v)],
+      ["Sessions apart", String(chg.d1.gap)],
+      nowRow,
       ["Run", chg.run === 0 ? "0 — at neutral"
         : (chg.runCapped ? "≥ " : "") + SESSIONS(chg.run)],
 
@@ -5783,7 +5930,7 @@
         " on " + chg.ext.hiAt, P.polarity(chg.ext.hi)],
       ["Window low", P.signed(chg.ext.lo, (a) => String(a)) + POINTS(chg.ext.lo) +
         " on " + chg.ext.loAt, P.polarity(chg.ext.lo)],
-      ["Dead band", chg.band === null ? DASH : "±" + chg.band + POINTS(chg.band)],
+      bandRow,
     ]));
 
     let runText;
@@ -5829,6 +5976,7 @@
     if (barEl) barEl.hidden = false;
     grid.hidden = false;
     if (picker) picker.hidden = true;
+    for (const n of [$("ftBrief"), $("ftChainBody")]) cutWatch(n);
 
     $("ftTicker").textContent = card.ticker || DASH;
     const score = isNum(card.score);
@@ -5866,10 +6014,12 @@
 
     statusEl.textContent = "";
     if (footEl) {
+      const later = pricesTo(card);
       footEl.textContent =
         "Every number here is read off the card payload the pipeline published " +
-        "for " + fmtDate(card.sessionDate) + "; only the last price and its day change are " +
-        "re-read live every five seconds.";
+        "for " + fmtDate(card.sessionDate) +
+        (later ? ", whose price history runs to " + fmtDate(later) : "") +
+        "; only the last price and its day change are re-read live every five seconds.";
     }
   }
 
@@ -6114,6 +6264,8 @@
         ? r.provenance
         : (r.llm ? "Wording by a language model; figures measured by the pipeline."
           : "Deterministic reading. No model was asked.");
+      if (r.llm && typeof r.model === "string" && r.model) src.title = r.model;
+      else src.removeAttribute("title");
       neuronState = "ok:" + text + ideasKey;
       return;
     }
@@ -6193,7 +6345,7 @@
     }
     if (chgEl) {
       chgEl.textContent = pct === null ? "" : P.pct1(pct);
-      chgEl.className = "ft-hero-chg" + P.polarity(pct);
+      chgEl.className = "ft-hero-chg " + P.polarity(pct);
       chgEl.hidden = pct === null;
       chgEl.title = pct === null
         ? "The live quote carried no previous close, so no day change is stated."
@@ -6208,7 +6360,7 @@
     if (barChg && pct !== null) {
       const b = barChg.querySelector("b");
       if (b) b.textContent = P.pct1(pct);
-      barChg.className = "fc-meta ft-id" + P.polarity(pct);
+      barChg.className = "fc-meta ft-id " + P.polarity(pct);
       barChg.removeAttribute("data-empty");
       barChg.title = "Change against the previous close carried by the live quote.";
     }

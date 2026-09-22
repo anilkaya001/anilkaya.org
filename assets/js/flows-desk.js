@@ -545,7 +545,19 @@
       (best.ticker || "?") + " " + fmt2(best.strike) + " " + side + " expiring " +
       (best.expiry || "?") + " collects " + fmtMoney(z.collectible) + ", deploying " +
       fmtMoney(z.deployed) + " and leaving " + fmtMoney(z.idle) + " idle (" +
-      fmtPct(z.yieldOnDeployed, 2) + " on capital committed).";
+      fmtPct(z.yieldOnDeployed, 2) + " on capital committed). Best means the largest " +
+      "gross premium one line collects — not annualised and not risk-adjusted, so it " +
+      "favours the longest tenor" +
+      (intrinsicOf(best) > 0
+        ? " and, here, an in-the-money strike whose premium is partly intrinsic value" : "") +
+      "; the table ranks by " + rankWord(rankSel ? rankSel.value : "annualized") + ".";
+  }
+
+  function intrinsicOf(r) {
+    const spot = isNum(r.__spot), k = isNum(r.strike);
+    if (spot === null || k === null) return 0;
+    const per = r.strategy === "csp" ? k - spot : r.strategy === "cc" ? spot - k : 0;
+    return Math.max(0, per) * 100;
   }
 
   const numOr = isNum;
@@ -1044,6 +1056,7 @@
       case "premium": return "premium received";
       case "yieldOnCollateral": return "yield on collateral";
       case "cushionSigmas": return "cushion";
+      case "collectible": return "premium collectible";
 
       case null: case undefined: return "an ordering the payload did not name";
       default: return String(key);
@@ -1187,11 +1200,23 @@
       tr.append(td);
     }
 
-    tr.append(yieldCell(r));
+    const yld = yieldCell(r);
+    tr.append(yld);
 
     const ann = cell(fmtPct(r.annualized, 0), "c-num c-ann");
     if (r.annualizedIsConvention) {
       ann.title = "Simple 365/days scaling, for comparing tenors. Not a return anyone earns.";
+    }
+    const intrinsic = intrinsicOf(r);
+    if (intrinsic > 0) {
+      const prem = isNum(r.premium);
+      const split = "Includes " + fmtMoney(intrinsic) + " of intrinsic value, which " +
+        "assignment returns rather than keeps" + (prem === null ? "."
+          : "; the time value is " + fmtMoney(Math.max(0, prem - intrinsic)) + ".");
+      for (const c of [yld, ann]) {
+        c.classList.add("is-itm");
+        c.title = (c.title ? c.title + " " : "") + split;
+      }
     }
     tr.append(ann);
 
@@ -1251,8 +1276,8 @@
       : "";
 
     const staleQuotes = oldestAge !== null && oldestAge > QUOTE_STALE_SECONDS
-      ? " — older than this desk will call a price, so treat the table as a record " +
-        "of the market rather than one you can trade; Refresh requotes it"
+      ? "Quotes are older than this desk will call a price, so treat the table as a " +
+        "record of the market rather than one you can trade; Refresh requotes it."
       : "";
 
     const sessions = new Set();
@@ -1286,13 +1311,17 @@
         earnBits.push(sym + " reports " + String(e.date).slice(5) + " — no line expires after it");
       }
     }
-    const earnNote = earnBits.length ? " · " + earnBits.join("; ") : "";
-
-    statusEl.textContent = (failed.length
+    const lines = [(failed.length
       ? chosen.length - failed.length + " of " + chosen.length + " symbols priced · " +
         failed.join(", ") + " unavailable"
       : chosen.length + " symbol" + (chosen.length === 1 ? "" : "s") + " priced") +
-      session + age + staleQuotes + unagedNote + staleNote + earnNote;
+      session + age + unagedNote + staleNote, staleQuotes, earnBits.join(" · ")];
+    statusEl.replaceChildren(...lines.filter(Boolean).map((text) => {
+      const line = document.createElement("span");
+      line.className = "flows-status-l";
+      line.textContent = text;
+      return line;
+    }));
   }
 
   function showEmpty(text) {
@@ -1330,9 +1359,11 @@
       return parent ? Math.max(MIN_W, parent.clientWidth) : MIN_W;
     }
     function maxH() {
-
-      const top = pane.getBoundingClientRect().top;
-      return Math.max(MIN_H, Math.round(window.innerHeight - top - 24));
+      const chrome = [".topbar", ".desk-controls"].reduce((sum, sel) => {
+        const el = document.querySelector(sel);
+        return sum + (el ? el.getBoundingClientRect().height : 0);
+      }, 0);
+      return Math.max(MIN_H, Math.round(window.innerHeight - chrome - 24));
     }
 
     const clamp = (v, lo, hi) => Math.round(Math.min(hi, Math.max(lo, v)));
@@ -1450,6 +1481,11 @@
 
     const controls = document.querySelector(".desk-controls");
     const wide = window.matchMedia("(min-width: 40.001rem)");
+    let barH = 0;
+    function stuck() {
+      if (!controls || !wide.matches) return;
+      controls.classList.toggle("is-stuck", controls.getBoundingClientRect().top <= barH + 1);
+    }
     function applyControls() {
       if (!controls) return;
       if (!wide.matches) {
@@ -1459,20 +1495,29 @@
         controls.style.background = "";
         controls.style.paddingBottom = "";
         controls.style.borderBottom = "";
+        controls.classList.remove("is-stuck");
         return;
       }
+      barH = barHeight();
       controls.style.position = "sticky";
-      controls.style.top = barHeight() + "px";
+      controls.style.top = barH + "px";
+      controls.style.setProperty("--desk-bar-h", barH + "px");
 
       controls.style.zIndex = "20";
       controls.style.background = "var(--bg)";
       controls.style.paddingBottom = "0.7rem";
       controls.style.borderBottom = "1px solid var(--hairline)";
+      stuck();
     }
     applyControls();
 
     window.addEventListener("resize", applyControls);
+    window.addEventListener("scroll", stuck, { passive: true });
     if (typeof wide.addEventListener === "function") wide.addEventListener("change", applyControls);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(applyControls);
+    if (topbar && typeof ResizeObserver === "function") {
+      new ResizeObserver(applyControls).observe(topbar);
+    }
   })();
 
   function add(symbols) {

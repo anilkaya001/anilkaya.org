@@ -5,7 +5,7 @@ import { buildContext, contextLines, contextFacts, promptForNeuron, parseNeuronO
          NEURON_CONTEXT_VERSION, NEURON_MAX_IDEAS, NEURON_STRUCTURES } from "../shared/flows-neuron.js";
 import { TICKER_PANELS, SENTINEL_KEYS } from "../shared/flows-panels.js";
 import { guardAnswer, selectFacts, buildFactIndex } from "../shared/flows-ask.js";
-import { neuronProvenance } from "../shared/flows-pages.js";
+import { modelName, neuronProvenance } from "../shared/flows-pages.js";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
@@ -391,6 +391,11 @@ const CARD = {
   ok(/answered with nothing/.test(prov("unreachable:empty")), "which stays the wording for an empty transport reply");
   ok(/^Wording by m;/.test(prov("ideas:2 refused", true)),
      "and a model summary that survived the guard is attributed to the model whatever happened to its ideas");
+  eq(neuronProvenance({ text: "x", llm: true, model: "@cf/meta/llama-3.3-70b-instruct-fp8-fast" }),
+     "Wording by Llama 3.3 70B; figures measured by the pipeline.",
+     "a Workers AI id is printed as the model's name, not as the vendor path a reader cannot parse");
+  eq(modelName("@cf/qwen/qwen2.5-coder-32b-instruct"), "Qwen2.5 Coder 32B", "the humanised name keeps the size and drops the serving flags");
+  eq(modelName(null), "a language model", "and no id at all is a language model");
 }
 
 console.log(`✓ flows-neuron: ${checks} assertions — a context that carries every registry panel plus the ` +

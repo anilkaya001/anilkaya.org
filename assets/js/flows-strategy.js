@@ -28,12 +28,14 @@
 
   const DEFAULT_VOL_BUMP = 0;
 
-  const fmtUSD = (v, signed) => {
+  const fmtUSD = (v, signed, dp) => {
     const n = isNum(v);
     if (n === null) return DASH;
-    const body = "$" + Math.abs(n).toLocaleString("en-US",
-      { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    return (n < 0 ? MINUS : signed && n > 0 ? "+" : "") + body;
+    const d = dp === undefined ? 2 : dp;
+    const c = Math.round(n * 10 ** d) / 10 ** d;
+    const body = "$" + Math.abs(c).toLocaleString("en-US",
+      { minimumFractionDigits: d, maximumFractionDigits: d });
+    return (c < 0 ? MINUS : signed && c > 0 ? "+" : "") + body;
   };
 
   const fmtPx = (v) => {
@@ -51,7 +53,9 @@
   const fmtNum = (v, dp) => {
     const n = isNum(v);
     if (n === null) return DASH;
-    return (n < 0 ? MINUS : n > 0 ? "+" : "") + Math.abs(n).toFixed(dp === undefined ? 2 : dp);
+    const d = dp === undefined ? 2 : dp;
+    const c = Math.round(n * 10 ** d) / 10 ** d;
+    return (c < 0 ? MINUS : c > 0 ? "+" : "") + Math.abs(c).toFixed(d);
   };
 
   const fmtPlain = (v, dp) => {
@@ -681,7 +685,7 @@
           "This table asked for one expiry and one type at a time, so what came back " +
           "is not what was asked for — treat the strike list here as incomplete.");
       }
-      if (book.ivBasis) bits.push("Implied volatility read as a fraction: " + book.ivBasis + ".");
+      if (book.ivBasis) bits.push("Implied volatility units, resolved once for the whole expiry: " + book.ivBasis + ".");
       note.textContent = bits.join(" ");
     }
   }
@@ -939,12 +943,13 @@
     const mark = markValue(legs);
     if (mark !== null) {
       const spread = cost - mark;
-      add("Spread crossed", fmtUSD(spread),
+      add("Spread crossed", state.basis === "mid" ? "zero by construction" : fmtUSD(spread),
         state.basis === "mid"
           ? "Zero by construction under the mid basis: the mid assumes you trade at it. " +
             "Switch the basis above to see what crossing actually costs."
           : "What the position is down the instant it is opened, purely from paying the " +
-            "ask and receiving the bid on every leg.");
+            "ask and receiving the bid on every leg.",
+        state.basis === "mid" ? "is-unbounded" : null);
     }
 
     add("Max profit",
@@ -1055,6 +1060,7 @@
 
   const PLOT_H = 300;
   const PAD = { top: 18, right: 16, bottom: 34, left: 62 };
+  const PROJ_BAND = 0.15;
   let zoneSeq = 0;
 
   function renderPlot(host, note, legs, cost, ext, bes) {
@@ -1079,16 +1085,20 @@
     let projPts = null;
     if (days > 0 || vol !== 0) {
       const mark = markValue(legs);
-      if (mark !== null) {
+      if (mark !== null && spot !== null) {
         const pts = [];
         let ok = true;
+        const b0 = Math.max(lo, spot * (1 - PROJ_BAND)), b1 = Math.min(hi, spot * (1 + PROJ_BAND));
         for (let i = 0; i <= 72; i++) {
-          const S = lo + (hi - lo) * (i / 72);
-          const t = taylor(legs, { dS: spot === null ? 0 : S - spot, dDays: days, dVol: vol });
+          const S = b0 + (b1 - b0) * (i / 72);
+          const t = taylor(legs, { dS: S - spot, dDays: days, dVol: vol });
           if (t === null) { ok = false; break; }
-          pts.push({ x: S, y: mark + t - cost });
+          let y = mark + t - cost;
+          if (!ext.profitUnbounded) y = Math.min(y, ext.maxProfit);
+          if (!ext.lossUnbounded) y = Math.max(y, ext.maxLoss);
+          pts.push({ x: S, y });
         }
-        if (ok && spot !== null) projPts = pts;
+        if (ok) projPts = pts;
       }
     }
 
@@ -1145,26 +1155,13 @@
     zlab.textContent = "$0";
     svg.append(zlab);
 
-    for (const [v, anchor] of [[yHi, "end"], [yLo, "end"]]) {
-      const t = svgEl("text", {
-        class: "sg-axis", x: PAD.left - 6,
-        y: (Y(v) + (v === yHi ? 8 : 0)).toFixed(2), "text-anchor": anchor,
-      });
-      t.textContent = fmtUSD(v, true);
-      svg.append(t);
-    }
-
-    for (const v of [yHi / 2, yLo / 2]) {
-      if (!Number.isFinite(v) || Math.abs(Y(v) - zeroY) < 16) continue;
-      if (Math.abs(Y(v) - Y(v > 0 ? yHi : yLo)) < 14) continue;
-      svg.append(svgEl("line", {
-        class: "sg-grid", x1: PAD.left, y1: Y(v).toFixed(2),
-        x2: width - PAD.right, y2: Y(v).toFixed(2),
-      }));
+    const eys = expiryPts.map((p) => p.y);
+    for (const v of [Math.max(...eys), Math.min(...eys)]) {
+      if (Math.abs(Y(v) - zeroY) < 14) continue;
       const t = svgEl("text", {
         class: "sg-axis", x: PAD.left - 6, y: (Y(v) + 3).toFixed(2), "text-anchor": "end",
       });
-      t.textContent = fmtUSD(v, true);
+      t.textContent = fmtUSD(v, true, 0);
       svg.append(t);
     }
 
@@ -1233,7 +1230,9 @@
           (vol ? " with implied volatility " + fmtNum(vol, 1) + " point" +
             (Math.abs(vol) === 1 ? "" : "s") + " higher on every leg" : "") +
           ". It is a LOCAL approximation and is least accurate exactly where you are " +
-          "looking hardest: near a strike, where gamma is largest, and near expiry.");
+          "looking hardest: near a strike, where gamma is largest, and near expiry. It is " +
+          "drawn within 15% of spot only, and clipped to the position's maximum profit " +
+          "and loss, which no value before expiry can cross.");
       } else if (days > 0 || vol !== 0) {
         bits.push("No projected line: it needs delta, gamma, theta and vega for every leg, " +
           "and at least one leg is missing one of them. A curve drawn from the legs that " +

@@ -4,7 +4,7 @@ import {
   parseCredentials, verifyCredential, signFlowsSession, verifyFlowsSession,
   isLearnAudience, isLocked, nextFailureState, sessionEpoch,
 } from "./shared/flows-auth.js";
-import { FLOWS_PAGES, neuronProvenance } from "./shared/flows-pages.js";
+import { FLOWS_PAGES, modelName, neuronProvenance } from "./shared/flows-pages.js";
 import * as FLOWS_ASK from "./shared/flows-ask.js";
 import * as FLOWS_NEURON from "./shared/flows-neuron.js";
 import { COURSE_STAGE_POINTS } from "./shared/course-points.js";
@@ -1284,7 +1284,7 @@ function ideaProvenance(r) {
   if (!ideas.length) return "";
   if (model === 0) return " The idea is the implied state\u2019s own, computed from the card; no model wrote it.";
   return (own ? " The first idea is the implied state\u2019s own, computed from the card." : "") +
-    (r.llm !== true && r.model ? (own ? " The other ideas" : " The ideas") + " were written by " + r.model + " and vetted one by one." : "");
+    (r.llm !== true && r.model ? (own ? " The other ideas" : " The ideas") + " were written by " + modelName(r.model) + " and vetted one by one." : "");
 }
 
 function neuronShape(status, ticker, ctx, row, extra) {

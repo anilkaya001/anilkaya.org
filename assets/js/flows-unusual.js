@@ -158,7 +158,7 @@
     }
 
     return cell((r > 0 ? "+" : r < 0 ? MINUS : "") + body,
-      "c-num " + (r > 0 ? "fb-pos" : "fb-neg"),
+      "c-num",
       (r > 0
         ? body + " more contracts were open at this strike at the later settlement."
         : body + " fewer contracts were open at this strike at the later settlement.") +
@@ -390,7 +390,8 @@
   }
 
   function buildControls() {
-    const host = document.querySelector(".flows-controls");
+    const heading = document.getElementById("uaAlertsH");
+    const host = heading ? heading.parentNode : document.querySelector(".flows-controls");
     if (!host || document.getElementById("uaFilters")) return;
     const group = el("div", "flows-views");
     group.id = "uaFilters";
@@ -433,11 +434,11 @@
       repaint();
     });
     group.append(both);
-    host.append(group);
 
     const note = el("p", "fc-note");
     note.id = "uaFilterNote";
-    host.append(note);
+    if (heading) heading.after(group, note);
+    else host.append(group, note);
     syncFilterNote();
   }
 
@@ -465,6 +466,7 @@
 
     const tally = (state, rows, expiryKey, plural) => {
       if (state === "pending") return "the " + plural + " have not been read yet";
+      if (state === "unpublished") return "the pipeline has not published the " + plural;
       if (state === "failed") return "the " + plural + " could not be read";
 
       if (state === "absent") return "the " + plural + " are not on this payload";
@@ -493,8 +495,11 @@
           : (alertsState === "failed" || feedState === "failed"
             ? "contracts in both feeds — which cannot be resolved at all, because one of " +
               "the two payloads could not be read"
-            : "contracts in both feeds, which cannot be resolved until both payloads " +
-              "have loaded")));
+            : (alertsState === "unpublished" || feedState === "unpublished"
+              ? "contracts in both feeds — which cannot be resolved, because the pipeline " +
+                "has not published one of the two"
+              : "contracts in both feeds, which cannot be resolved until both payloads " +
+                "have loaded"))));
     }
     note.textContent = "Filtered to " + bits.join(" and ") + ": " +
       tally(alertsState, alertRows, "exp", "flagged windows") + " and " +
@@ -1102,13 +1107,14 @@
     if (!alertsPanel || !alertsBody) return;
 
     if (alerts.status === "pending") {
-
+      alertsState = "unpublished";
       emptyRow(alertsBody, ALERT_COLUMNS,
         "The pipeline has not published this key yet. The alerts feed costs one " +
         "market-wide call a run and appears with the first pipeline run after it " +
         "shipped.", "pending");
       if (alertsCap) alertsCap.textContent = "Nothing has been published under this key.";
       alertsPanel.hidden = false;
+      syncFilterNote();
       return;
     }
 
@@ -1190,12 +1196,8 @@
     if (!stampEl) {
       stampEl = el("p", "fc-note");
       stampEl.id = "uaAlertsStamp";
-      const heading = document.getElementById("uaAlertsH");
-      if (heading && heading.parentNode === alertsPanel) {
-        alertsPanel.insertBefore(stampEl, heading.nextSibling);
-      } else {
-        alertsPanel.insertBefore(stampEl, alertsPanel.firstChild);
-      }
+      const wrap = alertsPanel.querySelector(".flows-tablewrap");
+      alertsPanel.insertBefore(stampEl, wrap || alertsPanel.firstChild);
     }
     stampEl.textContent = alertsStamp(alerts.readAt, alerts.refreshed);
 
@@ -1243,9 +1245,11 @@
     if (!payload) return;
 
     if (payload.status === "pending") {
+      feedState = "unpublished";
       say("The pipeline has not published this key yet. This feed is " +
         "built from the option chains the run already reads for each board name, so it " +
         "appears with the first pipeline run after it shipped.", "pending");
+      syncFilterNote();
       return;
     }
 
@@ -1254,10 +1258,21 @@
     if (staleEl && payload.__updatedAt) {
       const ageHours = (Date.now() - payload.__updatedAt) / 3600000;
       if (ageHours > 30) {
+        const days = Math.round(ageHours / 24);
         staleEl.hidden = false;
-        staleEl.textContent = "This feed was last written " +
-          Math.round(ageHours / 24) + " day(s) ago. The pipeline has not published " +
+        staleEl.textContent = "This feed was last written " + days +
+          (days === 1 ? " day" : " days") + " ago. The pipeline has not published " +
           "since, so these counters are from that read and not from a later one.";
+      }
+    }
+    if (staleEl && staleEl.hidden && /^\d{4}-\d{2}-\d{2}$/.test(String(payload.sessionDate))) {
+      const read = Date.parse(payload.readAt || payload.generatedAt || "");
+      const lag = (read - Date.parse(payload.sessionDate + "T21:00:00Z")) / 86400000;
+      if (Number.isFinite(lag) && lag > 4) {
+        staleEl.hidden = false;
+        staleEl.textContent = "This feed describes the " + payload.sessionDate +
+          " session, but the chains were read " + Math.floor(lag) + " days after that " +
+          "session closed. The pipeline is running but its data is not advancing.";
       }
     }
   }).catch((error) => {

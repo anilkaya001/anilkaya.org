@@ -73,7 +73,7 @@
     return false;
   }
   function tagged(tag, cls, kind, text) {
-    var n = el(tag, cls, text);
+    var n = el(tag, "flows-empty " + cls, text);
     n.setAttribute("data-empty", kind);
     return n;
   }
@@ -428,6 +428,7 @@
         freshNote(p, rows.filter(function (r) { return isNum(r.freshBuys); }).length,
           "carrying a purchase disclosed on"),
       ].filter(Boolean).join(" ");
+      host.append(note);
     }
 
     paintClusters(p, host, carded);
@@ -513,14 +514,20 @@
     box.append(wrap);
 
     var shownFloor = isNum(feed.minFilers);
+    var cleared = isNum(feed.seen), pool = isNum(feed.namesSeen);
     box.append(el("p", "fc-note",
-      countedNote(feed, "name", "drew fewer filers") + " " +
+      (isNum(feed.shed) || pool === null || cleared === null
+        ? countedNote(feed, "name", "drew fewer filers")
+        : cleared + " of the " + pool + " names in the window clear" +
+          (cleared === 1 ? "s" : "") + " the floor.") + " " +
       (shownFloor === null
         ? "This payload does not state the floor these rows cleared, so the ordering is " +
           "drawn without it. "
-        : "The floor is " + shownFloor + " separate filers, stated rather than tuned: " +
-          "two is the smallest number that could be called convergence at all, and on a " +
-          "market-wide window a great many names collect two by coincidence. ") +
+        : "The floor is " + shownFloor + " separate filers, stated rather than tuned" +
+          (shownFloor === 2
+            ? ": two is the smallest number that could be called convergence at all, and " +
+              "on a market-wide window a great many names collect two by coincidence. "
+            : ", above the two that coincidence alone supplies on a market-wide window. ")) +
       "Nothing here blends breadth with size into a single figure — each key breaks ties " +
       "in the one before it, so the order can be checked by eye against the columns."));
     host.append(box);
@@ -737,6 +744,7 @@
       if (status) {
         status.textContent = "No disclosure window has been read yet. This page " +
           "appears with the first pipeline run after it shipped.";
+        status.dataset.empty = "pending";
       }
       return;
     }

@@ -2,7 +2,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "219";
+export const ASSET_VERSION = "220";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -71,7 +71,7 @@ const topbar = (active, username) => `
       ${icon("search")}
       <input class="flows-find-i" id="flowsFind" name="t" type="search"
              autocomplete="off" spellcheck="false" maxlength="10"
-             pattern="[A-Za-z][A-Za-z0-9.\\-]{0,9}" placeholder="Search a ticker"
+             pattern="[A-Za-z][A-Za-z0-9.\\-]{0,9}" placeholder="Ticker"
              title="A ticker symbol: a letter, then up to nine letters, digits, dots or dashes.">
     </form>
 
@@ -175,9 +175,17 @@ function neuronWords(text) {
     `<span class="ak-w" style="--d:${Math.min(i, NEURON_CLAMP)}">${escapeHTML(word)}</span>`).join(" ");
 }
 
+export function modelName(id) {
+  if (typeof id !== "string" || !id) return "a language model";
+  if (!id.startsWith("@cf/")) return id;
+  const words = id.split("/").pop().split("-")
+    .filter((w) => !/^(fp8|fp16|int8|int4|awq|fast|instruct|it|chat|hf)$/i.test(w));
+  return words.map((w) => (/^\d/.test(w) || /^(gpt|oss)$/i.test(w) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1))).join(" ");
+}
+
 export function neuronProvenance(summary) {
   if (summary.llm) {
-    return "Wording by " + escapeHTML(summary.model || "a language model") + "; figures measured by the pipeline.";
+    return "Wording by " + escapeHTML(modelName(summary.model)) + "; figures measured by the pipeline.";
   }
   const guard = typeof summary.guard === "string" ? summary.guard : "";
 
@@ -223,7 +231,7 @@ function neuronDock(summary, { scope = "this session" } = {}) {
     <div class="ak-neuron-body">
       <p class="ak-neuron-h" id="akNeuronH">Neuron ${when}</p>
       <p class="ak-neuron-say">${words}<span class="ak-caret" style="--d:${caretAt}" aria-hidden="true"></span></p>
-      <p class="ak-neuron-src">${neuronProvenance(summary)}</p>
+      <p class="ak-neuron-src"${summary.llm && summary.model ? ` title="${escapeHTML(summary.model)}"` : ""}>${neuronProvenance(summary)}</p>
     </div>
   </section>`;
 }
@@ -502,6 +510,8 @@ ${shell("Premium Desk", "Options-flow intelligence", "desk", username, `
 
   <div class="desk-list" id="deskList" role="group" aria-label="Watchlist"></div>
 
+  <div class="flows-status" id="deskStatus" role="status">Add a symbol to begin.</div>
+
   <div class="desk-controls">
     <div class="desk-bulk">
       <label class="desk-check">
@@ -552,8 +562,6 @@ ${shell("Premium Desk", "Options-flow intelligence", "desk", username, `
 
   <p class="desk-plan" id="deskPlan" role="status" hidden></p>
 
-  <div class="flows-status" id="deskStatus" role="status">Add a symbol to begin.</div>
-
   <div class="desk-pane" id="deskPane" hidden>
     <div class="flows-tablewrap desk-tablewrap" id="deskTableWrap" tabindex="0" role="region"
          aria-label="Sellable contracts">
@@ -561,6 +569,8 @@ ${shell("Premium Desk", "Options-flow intelligence", "desk", username, `
         <caption class="flows-caption">
         Every quoted contract that clears the liquidity gates, ranked across all selected
         symbols. Premium is what the bid pays today; the mid is not a price anyone must trade at.
+        Where a strike is in the money, part of that premium is intrinsic value that assignment
+        returns rather than keeps: its Yield and Ann. are greyed and carry the split.
       </caption>
       <thead>
         <tr>
@@ -1125,7 +1135,7 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
   </aside>
 
   <aside class="ft-flow" id="ftFlow" hidden aria-labelledby="ftFlowH">
-    <h2 class="ft-flow-h" id="ftFlowH">Recent flow</h2>
+    <h2 class="ft-flow-h" id="ftFlowH">Recent flow <span class="ft-flow-hz">times in UTC</span></h2>
     <ol class="ft-flow-l" id="ftFlowL"></ol>
     <p class="ft-flow-s" id="ftFlowS"></p>
   </aside>
@@ -1455,6 +1465,36 @@ ${shell("Strategy Tester", "Options-flow intelligence", "strategy", username, `
   </section>
 
   <div class="sg-desk">
+  <div class="sg-desk__work">
+
+  <section class="fc-panel sg-panel" id="sgPlotPanel" hidden aria-labelledby="sgPlotH">
+    <h2 class="fc-panel-h" id="sgPlotH">Payoff at expiry</h2>
+    <div id="sgPlot"></div>
+    <p class="fc-note" id="sgPlotNote"></p>
+  </section>
+
+  <section class="fc-panel sg-panel" id="sgReadPanel" hidden aria-labelledby="sgReadH">
+    <h2 class="fc-panel-h" id="sgReadH">What it costs, what it can pay, what it is exposed to</h2>
+    <div id="sgReadings"></div>
+    <p class="fc-note" id="sgReadNote"></p>
+  </section>
+
+  <section class="fc-panel sg-panel" id="sgScenePanel" hidden aria-labelledby="sgSceneH">
+    <h2 class="fc-panel-h" id="sgSceneH">One scenario, priced two ways</h2>
+    <div class="sg-controls">
+      <span class="sg-field">
+        <label for="sgScenePx">Underlying at</label>
+        <input id="sgScenePx" type="text" inputmode="decimal" autocomplete="off" spellcheck="false">
+      </span>
+      <span class="sg-field">
+        <label for="sgSceneDays">Days from now</label>
+        <input id="sgSceneDays" type="range" min="0" max="0" step="1" value="0">
+      </span>
+    </div>
+    <div id="sgScene"></div>
+    <p class="fc-note" id="sgSceneNote"></p>
+  </section>
+  </div>
   <div class="sg-desk__book">
   <section class="fc-panel sg-panel" id="sgChainPanel" hidden aria-labelledby="sgChainH">
     <h2 class="fc-panel-h" id="sgChainH">The book, one expiry at a time</h2>
@@ -1543,7 +1583,7 @@ ${shell("Strategy Tester", "Options-flow intelligence", "strategy", username, `
             <th scope="col" class="c-num"><abbr title="Delta as quoted, per share">&#916;</abbr></th>
             <th scope="col" class="c-num"><abbr title="Gamma as quoted: the change in delta per one dollar of underlying">&#915;</abbr></th>
             <th scope="col" class="c-num"><abbr title="Theta as quoted, taken as a one-day derivative of the contract's price">&#920;</abbr></th>
-            <th scope="col" class="c-num"><abbr title="Vega as quoted, taken as the change in the contract's price for a one-point move in implied volatility">V</abbr></th>
+            <th scope="col" class="c-num"><abbr title="Vega as quoted, taken as the change in the contract's price for a one-point move in implied volatility">&nu;</abbr></th>
             <th scope="col"></th>
           </tr>
         </thead>
@@ -1553,36 +1593,6 @@ ${shell("Strategy Tester", "Options-flow intelligence", "strategy", username, `
     <div class="fc-note" id="sgLegsNote"></div>
   </section>
 
-  </div>
-  <div class="sg-desk__work">
-
-  <section class="fc-panel sg-panel" id="sgPlotPanel" hidden aria-labelledby="sgPlotH">
-    <h2 class="fc-panel-h" id="sgPlotH">Payoff at expiry</h2>
-    <div id="sgPlot"></div>
-    <p class="fc-note" id="sgPlotNote"></p>
-  </section>
-
-  <section class="fc-panel sg-panel" id="sgReadPanel" hidden aria-labelledby="sgReadH">
-    <h2 class="fc-panel-h" id="sgReadH">What it costs, what it can pay, what it is exposed to</h2>
-    <div id="sgReadings"></div>
-    <p class="fc-note" id="sgReadNote"></p>
-  </section>
-
-  <section class="fc-panel sg-panel" id="sgScenePanel" hidden aria-labelledby="sgSceneH">
-    <h2 class="fc-panel-h" id="sgSceneH">One scenario, priced two ways</h2>
-    <div class="sg-controls">
-      <span class="sg-field">
-        <label for="sgScenePx">Underlying at</label>
-        <input id="sgScenePx" type="text" inputmode="decimal" autocomplete="off" spellcheck="false">
-      </span>
-      <span class="sg-field">
-        <label for="sgSceneDays">Days from now</label>
-        <input id="sgSceneDays" type="range" min="0" max="0" step="1" value="0">
-      </span>
-    </div>
-    <div id="sgScene"></div>
-    <p class="fc-note" id="sgSceneNote"></p>
-  </section>
   </div>
   </div>
 

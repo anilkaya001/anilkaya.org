@@ -48,7 +48,19 @@
     }
   }
 
-  function init() { document.querySelectorAll(".pill").forEach(setup); }
+  function railFocus() {
+    const on = document.querySelector(".flows-rail a.is-on");
+    const rail = on && on.closest(".flows-rail");
+    if (!rail || rail.scrollWidth <= rail.clientWidth) return;
+    rail.scrollLeft += on.getBoundingClientRect().left - rail.getBoundingClientRect().left -
+      (rail.clientWidth - on.offsetWidth) / 2;
+  }
+
+  function init() {
+    document.querySelectorAll(".pill").forEach(setup);
+    railFocus();
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(railFocus);
+  }
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init, { once: true });
   } else { init(); }
