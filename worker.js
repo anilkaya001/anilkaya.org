@@ -1277,6 +1277,16 @@ async function writeNeuron(env, scope, fingerprint, summary, ideas, llm, model, 
     llm ? 1 : 0, model, guard, new Date().toISOString()).run();
 }
 
+function ideaProvenance(r) {
+  const ideas = Array.isArray(r.ideas) ? r.ideas : [];
+  const own = ideas.filter((i) => i && i.fromState === true).length;
+  const model = ideas.length - own;
+  if (!ideas.length) return "";
+  if (model === 0) return " The idea is the implied state\u2019s own, computed from the card; no model wrote it.";
+  return (own ? " The first idea is the implied state\u2019s own, computed from the card." : "") +
+    (r.llm !== true && r.model ? (own ? " The other ideas" : " The ideas") + " were written by " + r.model + " and vetted one by one." : "");
+}
+
 function neuronShape(status, ticker, ctx, row, extra) {
   const r = row && typeof row === "object" ? row : null;
   const text = r !== null && r.summary ? r.summary : null;
@@ -1289,12 +1299,8 @@ function neuronShape(status, ticker, ctx, row, extra) {
     model: r !== null ? r.model : null,
     guard: r !== null ? r.guard : null,
     generatedAt: r !== null ? r.generatedAt : null,
-    provenance: text
-      ? neuronProvenance({ text, llm: r.llm === true, model: r.model,
-          guard: r.guard && /^ideas:\d+ refused$/.test(r.guard) ? null : r.guard }) +
-        (r.llm !== true && Array.isArray(r.ideas) && r.ideas.length && r.model
-          ? " The ideas were written by " + r.model + " and vetted one by one." : "")
-      : null,
+    provenance: text ? neuronProvenance({ text, llm: r.llm === true, model: r.model,
+      guard: r.guard && /^ideas:\d+ refused$/.test(r.guard) ? null : r.guard }) + ideaProvenance(r) : null,
     ...(extra || {}),
   };
 }
@@ -1308,8 +1314,10 @@ async function generateNeuron(env, ticker, ctx, fingerprint) {
   const scope = "ticker:" + ticker;
   const model = askModel(env);
   const plain = FLOWS_NEURON.deterministicSummary(ctx);
+  const stateIdea = FLOWS_NEURON.stateIdea(ctx);
+  const own = FLOWS_NEURON.vetIdeas(stateIdea ? [stateIdea] : [], ctx).ideas;
   if (!env.AI || model === null) {
-    await writeNeuron(env, scope, fingerprint, plain, [], false, null, null).catch(() => {});
+    await writeNeuron(env, scope, fingerprint, plain, own, false, null, null).catch(() => {});
     return;
   }
   const { system, user } = FLOWS_NEURON.promptForNeuron(ctx);
@@ -1328,11 +1336,11 @@ async function generateNeuron(env, ticker, ctx, fingerprint) {
       await askRecordSpend(env, out && out.usage);
     } catch (error) {
       const failed = askFailure(error);
-      await writeNeuron(env, scope, fingerprint, plain, [], false, model, "unreachable:" + failed.why).catch(() => {});
+      await writeNeuron(env, scope, fingerprint, plain, own, false, model, "unreachable:" + failed.why).catch(() => {});
       return;
     }
     if (!text) {
-      await writeNeuron(env, scope, fingerprint, plain, [], false, model, "unreachable:empty").catch(() => {});
+      await writeNeuron(env, scope, fingerprint, plain, own, false, model, "unreachable:empty").catch(() => {});
       return;
     }
     lastText = text;
@@ -1341,7 +1349,7 @@ async function generateNeuron(env, ticker, ctx, fingerprint) {
   if (parsed === null) {
     const prose = typeof lastText === "string" && !/[{}[\]]|"summary"|"ideas"/.test(lastText);
     const verdict = prose ? FLOWS_ASK.guardAnswer(lastText, facts, { smallIntegers: false }) : { ok: false };
-    await writeNeuron(env, scope, fingerprint, verdict.ok ? lastText : plain, [], verdict.ok, model,
+    await writeNeuron(env, scope, fingerprint, verdict.ok ? lastText : plain, own, verdict.ok, model,
       "ideas:unparsable").catch(() => {});
     return;
   }
@@ -1355,7 +1363,7 @@ async function generateNeuron(env, ticker, ctx, fingerprint) {
   } else {
     guard = "summary:empty";
   }
-  const vetted = FLOWS_NEURON.vetIdeas(parsed.ideas, ctx);
+  const vetted = FLOWS_NEURON.vetIdeas((stateIdea ? [stateIdea] : []).concat(parsed.ideas), ctx);
   if (guard === null && vetted.refused.length) guard = "ideas:" + vetted.refused.length + " refused";
   await writeNeuron(env, scope, fingerprint, summary, vetted.ideas, llm, model, guard).catch(() => {});
 }

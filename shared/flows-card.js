@@ -390,7 +390,7 @@ export function buildPricedMove({
 }
 
 export function buildContext(
-  { closes, closeDates, r5, r21, r42, week52Pos, changePct, candles, garch },
+  { closes, closeDates, r5, r21, r42, week52Pos, changePct, candles, garch, breaks },
   { asOf = null } = {},
 ) {
 
@@ -448,6 +448,10 @@ export function buildContext(
     ...candleFields(candles),
 
     ...(garch && typeof garch === "object" ? { garch } : {}),
+    ...(Array.isArray(breaks) && breaks.length ? { breaks: breaks.map((b) => ({
+      date: typeof b.date === "string" ? b.date.slice(0, 10) : null,
+      ratio: numOrNull(b.ratio), before: numOrNull(b.before),
+    })) } : {}),
   }, asOf);
 }
 
@@ -1358,6 +1362,7 @@ export function buildCard({
     changePct: prev !== null && prev > 0 && close !== null ? (close - prev) / prev : null,
     candles: f.candles,
     garch: f.garch,
+    breaks: f.priceBreaks,
   }, { asOf: sessionDate });
 
   return {

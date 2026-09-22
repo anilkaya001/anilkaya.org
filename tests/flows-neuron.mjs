@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { buildContext, contextLines, contextFacts, promptForNeuron, parseNeuronOutput, vetIdeas,
          deterministicSummary, contextFingerprint, publicContext, guardFacts, numeralsOf,
+         regimeState, stateIdea, stateSentence, stateChip, STATES, STATE_STRUCTURES, STATE_LINES, STATE_WORD,
          NEURON_CONTEXT_VERSION, NEURON_MAX_IDEAS, NEURON_STRUCTURES } from "../shared/flows-neuron.js";
 import { TICKER_PANELS, SENTINEL_KEYS } from "../shared/flows-panels.js";
 import { guardAnswer, selectFacts, buildFactIndex } from "../shared/flows-ask.js";
@@ -45,8 +46,9 @@ const CARD = {
   const ctx = buildContext(CARD, { expectedSession: "2026-09-15" });
   const panelKeys = TICKER_PANELS.filter((p) => !SENTINEL_KEYS.has(p.key)).map((p) => p.key);
   eq(ctx.version, NEURON_CONTEXT_VERSION, "the context carries its protocol version");
-  eq(ctx.features.length, panelKeys.length + 2,
-     "one feature per registry panel plus the standing and the volatility model, so nothing on the card is outside Neuron's view");
+  eq(ctx.features.length, panelKeys.length + 3,
+     "one feature per registry panel plus the standing, the volatility model and the implied state, so nothing on the card is outside Neuron's view");
+  eq(ctx.features[ctx.features.length - 1].key, "state", "and the implied state is the last line, read after every feature it is computed from");
   for (const k of panelKeys) ok(ctx.features.some((f) => f.key === k), `feature ${k} is present whatever its status`);
   eq(ctx.stale, false, "the card describes the last closed session, so it is not stale");
   const by = new Map(ctx.features.map((f) => [f.key, f]));
@@ -102,7 +104,7 @@ const CARD = {
   ok(stale.features.find((f) => f.key === "gamma").why.includes("capped"), "with the cap named in the reason");
 
   const fp = contextFingerprint(ctx);
-  ok(/^n1\./.test(fp), "the fingerprint carries the protocol version");
+  ok(/^n2\./.test(fp), "the fingerprint carries the protocol version, now 2 for the state line");
   ok(fp !== contextFingerprint(stale), "and moves when the cap changes the grades");
   ok(fp === contextFingerprint(buildContext(JSON.parse(JSON.stringify(CARD)), { expectedSession: "2026-09-15" })),
      "and is stable across a deep copy of the same card");
@@ -134,9 +136,9 @@ const CARD = {
 {
   const ctx = buildContext(CARD, { expectedSession: "2026-09-15" });
   const good = {
-    title: "Put wall credit", structure: "put credit spread", direction: "bullish",
+    title: "Put wall break", structure: "put debit spread", direction: "bearish",
     thesis: "The put wall at 70.00 sits 0.3% below spot 70.22 and dealer gamma is short.",
-    rests_on: ["gamma", "levels"], invalidation: "a close below 70.00", horizon: "10 sessions",
+    rests_on: ["gamma", "levels"], invalidation: "a close above 70.00", horizon: "10 sessions",
   };
   const parsed = parseNeuronOutput("```json\n" + JSON.stringify({ summary: "SYN1 scored 58 with conviction 92 of 100.", ideas: [
     good,
@@ -148,11 +150,14 @@ const CARD = {
     { ...good, title: "Odd", structure: "naked call" },
     { ...good, title: "Weak", rests_on: ["congress", "gamma"] },
     { ...good, title: "Quiet leg", rests_on: ["aggressor", "gamma"] },
+    { ...good, title: "Against the state", structure: "put credit spread", direction: "bullish", invalidation: "a close below 70.00" },
   ] }) + "\n```");
   ok(parsed !== null && parsed.summary.startsWith("SYN1 scored"), "a fenced JSON answer is parsed");
   const v = vetIdeas(parsed.ideas, ctx);
   const titles = v.ideas.map((i) => i.title);
-  ok(titles.includes("Put wall credit"), "the idea that rests on two robust features is kept");
+  ok(titles.includes("Put wall break"), "the idea that rests on two robust features is kept");
+  ok(!titles.includes("Against the state") && v.refused.some((r) => /avoid list/.test(r)),
+     "an idea whose structure the implied state rules out is refused with the state named");
   ok(!titles.includes("Prophecy"), "an idea that claims what happens next is refused");
   ok(!titles.includes("Invented"), "an idea naming a figure the card does not carry is refused");
   ok(!titles.includes("Thin"), "an idea resting on one feature is refused");
@@ -160,7 +165,7 @@ const CARD = {
   ok(!titles.includes("Unknown"), "an idea resting on a feature the card does not have is refused");
   ok(!titles.includes("Odd"), "a structure outside the list is refused");
   ok(v.ideas.length <= NEURON_MAX_IDEAS, "at most three ideas survive");
-  eq(v.ideas[0].title, "Put wall credit", "and the most robust idea ranks first");
+  eq(v.ideas[0].title, "Put wall break", "and the most robust idea ranks first");
   const weak = v.ideas.find((i) => i.title === "Weak");
   ok(weak === undefined || weak.robustness === 1, "an idea resting on the congress feature is graded by that weakest leg");
   ok(v.refused.length >= 6 && v.refused.every((r) => typeof r === "string" && r.includes(":")),
@@ -176,10 +181,10 @@ const CARD = {
        "keys written with the brackets the context shows, or in another case, still resolve to the features");
     const doubled = vetIdeas([{ ...good, rests_on: ["gamma", "gamma"] }], ctx);
     ok(doubled.ideas.length === 0 && /fewer than two/.test(doubled.refused[0]), "the same key twice is one feature");
-    const twice = vetIdeas([good, { ...good, title: "Put wall credit again" }], ctx);
+    const twice = vetIdeas([good, { ...good, title: "Put wall break again" }], ctx);
     eq(twice.ideas.length, 1, "an idea that repeats a kept one in structure, direction and invalidation is dropped");
-    const crossed = vetIdeas([{ ...good, structure: "long put", direction: "bullish" }], ctx);
-    ok(crossed.ideas.length === 0 && /long put is not bullish/.test(crossed.refused[0]),
+    const crossed = vetIdeas([{ ...good, structure: "long call", direction: "bearish" }], ctx);
+    ok(crossed.ideas.length === 0 && /long call is not bearish/.test(crossed.refused[0]),
        "a structure whose payoff contradicts its stated direction is refused with the contradiction named");
     const painful = vetIdeas([{ ...good, invalidation: "a close above max pain at 72.50" }], ctx);
     eq(painful.ideas.length, 1, "an invalidation at max pain, quoted as the card prints it, passes");
@@ -193,12 +198,116 @@ const CARD = {
   const plain = deterministicSummary(ctx);
   ok(guardAnswer(plain, guardFacts(ctx), { smallIntegers: false }).ok,
      "the deterministic summary passes the guard by construction");
-  ok(plain.includes("Dealer gamma for SYN1"), "and is built from the most robust features' own sentences");
+  ok(/^The greeks imply an amplifying state for SYN1 with flow bearish/.test(plain),
+     "and leads with the implied state, then the most robust features' own sentences");
+  ok(plain.includes("Dealer gamma for SYN1"), "which follow it");
   const staleCtx = buildContext(CARD, { expectedSession: "2026-09-16" });
   const stalePlain = deterministicSummary(staleCtx);
   ok(/capped at weak/.test(stalePlain) && stalePlain.includes("Dealer gamma for SYN1"),
      "a stale card's fallback names the cap and still quotes the readings, instead of claiming the card publishes none");
   ok(guardAnswer(stalePlain, guardFacts(staleCtx), { smallIntegers: false }).ok, "and passes the guard too");
+}
+
+{
+  const ctx = buildContext(CARD, { expectedSession: "2026-09-15" });
+  const st = ctx.state;
+  ok(STATES.includes(st.state) && st.state === "amplifying" && st.direction === "bearish" && st.flow === "bearish",
+     `short gamma at spot with a one-sided selling tape and no wall ahead is an amplifying state with flow bearish (${st.chip})`);
+  eq(st.confidence, 2, "confidence starts at the positioning grade and loses one because the spot share of the ladder is unpublished");
+  ok(st.invalidation && st.invalidation.kind === "put_wall" && st.invalidation.px === 70,
+     "the state ends past the nearest level on the other side of the flow");
+  ok(st.horizon && st.horizon.kind === "priced_sessions" && st.horizon.value === 10, "and runs over the priced-move window");
+  assert.deepEqual(st.preferred, STATE_STRUCTURES.bear.fair.preferred, "a bearish amplifying state with unreadable premium prefers the fair bear structures"); checks++;
+  ok(st.avoid.includes("put credit spread") && st.avoid.includes("iron condor"), "and rules out the structures that pay against it");
+  ok(st.drivers.some((d) => d.key === "path" && d.vote === -1) && st.drivers.some((d) => d.key === "standing" && d.weight === 1),
+     "the tape votes with its full grade and the card's own score is a tie-breaker of weight one, since it is built from the same tape");
+  const feat = ctx.features.find((f) => f.key === "state");
+  ok(feat && feat.status === "ok" && feat.robustness === 2 && /read from gamma, path, standing/.test(feat.why),
+     "the state is a feature graded by its confidence, its reason naming the drivers");
+  ok(/^IMPLIED STATE for SYN1: amplifying, flow bearish \(confidence 2 of 3\)\./.test(feat.say) && /Avoid: iron condor/.test(feat.say),
+     "its reading opens with the state and closes with the structures it prefers and rules out");
+  eq(feat.say, stateSentence(st, "SYN1"), "and is the state sentence itself");
+  eq(st.chip, stateChip(st), "the chip is derived from the same object");
+  ok(guardAnswer(feat.say, guardFacts(ctx), { smallIntegers: false }).ok, "the state sentence passes the guard by construction");
+  const idea = stateIdea(ctx);
+  ok(idea && idea.fromState === true && idea.structure === st.preferred[0] && idea.direction === "bearish",
+     "the state writes its own idea in the first preferred structure with the state's direction");
+  ok(idea.rests_on[0] === "state" && idea.rests_on.includes("gamma") && idea.rests_on.includes("path") && !idea.rests_on.includes("standing"),
+     "resting on the state, its positioning and the tape that voted, never on the tie-breaker when the tape voted");
+  const own = vetIdeas([idea], ctx);
+  ok(own.ideas.length === 1 && own.refused.length === 0 && own.ideas[0].robustness === 2 && own.ideas[0].fromState === true,
+     "and that idea passes the same vetting the model's ideas pass, graded by its weakest leg");
+  ok(/pays if spot holds below the put wall at 70\.00/.test(idea.thesis) && /^a close above the put wall at 70\.00$/.test(idea.invalidation),
+     "with a conditional payoff and an invalidation at the level the state ends at");
+  const v = vetIdeas([idea, { ...idea, title: "Model twin", fromState: false }], ctx);
+  ok(v.ideas.length === 1 && v.ideas[0].fromState === true, "the state's idea outranks a model idea it ties with");
+  const pub = publicContext(ctx);
+  ok(pub.state && pub.state.state === "amplifying" && pub.state.chip === st.chip && pub.state.word === STATE_WORD.amplifying &&
+     Array.isArray(pub.state.drivers) && pub.state.drivers.every((d) => typeof d.reading === "string"),
+     "the public context carries the state, its chip, its word and its drivers' readings for the page");
+  ok(/8\. The line \[state\]/.test(promptForNeuron(ctx).system), "the prompt tells the model the state line is authoritative");
+
+  const pinned = JSON.parse(JSON.stringify(CARD));
+  pinned.regime = { label: "long", crossings: 1, spotGammaShare: 0.6 };
+  pinned.panels.levels.levels = [
+    { kind: "max_pain", label: "Max pain", px: 70.5, distAtr: 0.19 },
+    { kind: "gamma_flip", label: "Gamma flip", px: 66.1, distAtr: -2.78 },
+    { kind: "call_wall", label: "Call wall", px: 72, distAtr: 1.2 },
+  ];
+  pinned.panels.calendar = { status: "ok", schedule: [{ expiry: "2026-09-18", days: 3, share: 0.4 }], frontLoad: 0.4, halfLifeExpiry: "2026-10-16", halfLifeDays: 31 };
+  const ps = regimeState(pinned, { expectedSession: "2026-09-15" });
+  ok(ps.state === "pinned" && ps.direction === null && ps.flow === "bearish" && ps.target && ps.target.kind === "max_pain",
+     `long gamma at spot with max pain inside half an ATR is pinned, with no side of its own but the flow still named (${ps.chip})`);
+  eq(ps.confidence, 3, "a strong share and a far flip cost nothing");
+  ok(ps.horizon.kind === "expiry" && ps.horizon.value === "2026-09-18", "the horizon is the front expiry when it carries a quarter of the book's gamma");
+  ok(ps.invalidation.kind === "gamma_flip" && /Pinned · long gamma at spot, max pain 70\.50, flow bearish/.test(ps.chip), "the pin ends at the flip");
+  assert.deepEqual(ps.preferred, STATE_STRUCTURES.pinned.fair.preferred, "and prefers the range structures"); checks++;
+
+  const squeeze = JSON.parse(JSON.stringify(CARD));
+  squeeze.regime = { label: "short", crossings: 1, spotGammaShare: -0.5 };
+  squeeze.panels.path.netDelta = 90000;
+  squeeze.panels.path.netPremium = 12000000;
+  squeeze.panels.levels.levels = [
+    { kind: "call_wall", label: "Call wall", px: 72, distAtr: 1.2 },
+    { kind: "put_wall", label: "Put wall", px: 68, distAtr: -1.5 },
+    { kind: "gamma_flip", label: "Gamma flip", px: 66.1, distAtr: -2.78 },
+  ];
+  const sq = regimeState(squeeze, { expectedSession: "2026-09-15" });
+  ok(sq.state === "squeeze" && sq.direction === "bullish" && sq.target && sq.target.kind === "call_wall" && sq.target.px === 72,
+     `short gamma with a one-sided buying tape and the call wall inside 1.5 ATR ahead, no flip between, is a squeeze toward that wall (${sq.chip})`);
+  ok(sq.invalidation.kind === "put_wall", "invalidated past the put wall behind it");
+  assert.deepEqual(sq.preferred, STATE_STRUCTURES.bull.fair.preferred, "and prefers the bull structures"); checks++;
+  const between = JSON.parse(JSON.stringify(squeeze));
+  between.panels.levels.levels[2] = { kind: "gamma_flip", label: "Gamma flip", px: 71, distAtr: 0.53 };
+  const bt = regimeState(between, { expectedSession: "2026-09-15" });
+  ok(bt.state === "amplifying" && bt.bound && bt.bound.px === 71 && /to the flip 71\.00/.test(bt.chip),
+     "with the flip between spot and the wall the short-gamma zone ends at the flip, so it is amplifying bounded there, not a squeeze");
+  const onFlip = JSON.parse(JSON.stringify(between));
+  onFlip.panels.levels.levels[2].distAtr = 0.2;
+  const tf = regimeState(onFlip, { expectedSession: "2026-09-15" });
+  ok(tf.state === "transitional" && tf.invalidation.kind === "gamma_flip" && tf.preferred.includes("call debit spread"),
+     "spot inside half an ATR of the flip is transitional, leaning the way the flow votes");
+
+  const blind = JSON.parse(JSON.stringify(CARD));
+  blind.panels.gamma = { status: "unavailable", reason: "no ladder" };
+  const un = regimeState(blind, { expectedSession: "2026-09-15" });
+  ok(un.state === "undetermined" && un.confidence === 0 && /gamma positioning is unavailable and premium is unreadable/.test(un.notes[0]),
+     "no gamma and no readable premium implies no state, and the note says which silence it is");
+  ok(stateIdea(buildContext(blind, { expectedSession: "2026-09-15" })) === null, "and an undetermined state writes no idea");
+  blind.panels.pricedMove = { ...blind.panels.pricedMove, iv30: 0.5, rv30: 0.36, vrp: 0.14, ivRank: 0.8 };
+  const rich = regimeState(blind, { expectedSession: "2026-09-15" });
+  ok(rich.state === "premium-rich" && rich.premium === "rich" && rich.confidence >= 1 && /positioning withheld/.test(rich.chip),
+     "readable rich premium without positioning is a premium-rich state that says positioning is withheld");
+  assert.deepEqual(rich.preferred, STATE_STRUCTURES["premium-rich"].preferred, "and prefers short-premium structures"); checks++;
+  eq(rich.invalidation.kind, "priced_low", "invalidated at the priced range end on the side the flow leans");
+
+  const staleSt = regimeState(CARD, { expectedSession: "2026-09-16" });
+  ok(staleSt.stale === true && staleSt.confidence <= 1 && /capped/.test(stateSentence(staleSt, "SYN1")),
+     "a card behind the last closed session caps the state's confidence at weak and says so");
+  ok(contextFingerprint(ctx) !== contextFingerprint(buildContext(squeeze, { expectedSession: "2026-09-15" })),
+     "the fingerprint moves when the state moves, so a changed state is re-read");
+  ok(STATE_LINES.FLIP_ON_ATR === 0.5 && STATE_LINES.WALL_NEAR_ATR === 1.5 && STATE_LINES.VRP_RELATIVE === 0.1,
+     "the lines the states are cut at are published constants, not literals in the branches");
 }
 
 {
@@ -218,4 +327,6 @@ console.log(`✓ flows-neuron: ${checks} assertions — a context that carries e
   "is told what it cannot lean on; a prompt that keeps the guard's two rules and names the verbs it " +
   "refuses; ideas parsed from JSON and vetted one by one — two known features at least, none withheld, " +
   "a listed structure, every figure quoted, no claim about what happens next — and ranked by their " +
-  "weakest leg; the assistant's selector reaching the same facts for the page's own name");
+  "weakest leg; a greeks-implied state (pinned, amplifying, squeeze, on the flip, premium rich or cheap, " +
+  "undetermined) read from positioning, flow votes and premium, with the structures it prefers and rules out, " +
+  "its own vetted idea first, and the assistant's selector reaching the same facts for the page's own name");

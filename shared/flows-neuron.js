@@ -1,7 +1,7 @@
 import { TICKER_PANELS, SENTINEL_KEYS } from "./flows-panels.js";
 import { guardAnswer, numeralsIn } from "./flows-ask.js";
 
-export const NEURON_CONTEXT_VERSION = 1;
+export const NEURON_CONTEXT_VERSION = 2;
 export const NEURON_MAX_IDEAS = 3;
 export const NEURON_STRUCTURES = Object.freeze([
   "long call", "long put", "call debit spread", "put debit spread", "call credit spread",
@@ -9,6 +9,47 @@ export const NEURON_STRUCTURES = Object.freeze([
   "covered call", "collar", "no position",
 ]);
 export const ROBUSTNESS_WORD = Object.freeze({ 0: "withheld", 1: "weak", 2: "fair", 3: "robust" });
+export const STATE_VERSION = 1;
+export const STATES = Object.freeze([
+  "pinned", "amplifying", "squeeze", "transitional", "premium-rich", "premium-cheap", "undetermined",
+]);
+export const STATE_WORD = Object.freeze({
+  pinned: "Pinned", amplifying: "Amplifying", squeeze: "Squeeze", transitional: "On the flip",
+  "premium-rich": "Premium rich", "premium-cheap": "Premium cheap", undetermined: "Undetermined",
+});
+export const STATE_LINES = Object.freeze({
+  SHARE_MARGINAL: 0.2, FLIP_ON_ATR: 0.5, FLIP_NEAR_ATR: 1.5, WALL_NEAR_ATR: 1.5, PAIN_NEAR_ATR: 0.5,
+  PATH_ONE_SIDED: 0.65, AGGRESSOR_SHARE: 0.25, OI_SIDE_RATIO: 2, DISPLACEMENT_ATR: 0.5,
+  SCORE_DEAD_BAND: 1, CONVICTION_FAIR: 50, SPLIT_MINORITY: 1 / 3,
+  VRP_RELATIVE: 0.1, IV_RANK_HIGH: 0.7, IV_RANK_LOW: 0.2, IV_MOMENTUM_PTS: 0.03,
+  TERM_FRONT_BID_PTS: 0.03, GARCH_GAP_PTS: 5, FRONT_LOAD: 0.25,
+});
+const BY_PREMIUM = (rich, cheap, fair) => Object.freeze({ rich, cheap, fair });
+export const STATE_STRUCTURES = Object.freeze({
+  pinned: BY_PREMIUM(
+    { preferred: ["iron condor", "call credit spread", "put credit spread", "covered call"], avoid: ["long straddle", "long strangle", "long call", "long put"] },
+    { preferred: ["calendar spread", "covered call", "collar"], avoid: ["long straddle", "long strangle", "long call", "long put"] },
+    { preferred: ["iron condor", "covered call", "call credit spread", "put credit spread"], avoid: ["long straddle", "long strangle", "long call", "long put"] }),
+  bull: BY_PREMIUM(
+    { preferred: ["put credit spread", "call debit spread"], avoid: ["iron condor", "call credit spread", "covered call", "long put", "put debit spread"] },
+    { preferred: ["long call", "call debit spread", "put credit spread"], avoid: ["iron condor", "call credit spread", "covered call", "long put", "put debit spread"] },
+    { preferred: ["call debit spread", "put credit spread"], avoid: ["iron condor", "call credit spread", "covered call", "long put", "put debit spread"] }),
+  bear: BY_PREMIUM(
+    { preferred: ["call credit spread", "put debit spread"], avoid: ["iron condor", "put credit spread", "long call", "call debit spread", "covered call"] },
+    { preferred: ["long put", "put debit spread", "call credit spread"], avoid: ["iron condor", "put credit spread", "long call", "call debit spread", "covered call"] },
+    { preferred: ["put debit spread", "call credit spread"], avoid: ["iron condor", "put credit spread", "long call", "call debit spread", "covered call"] }),
+  shortNoSide: BY_PREMIUM(
+    { preferred: ["no position", "long strangle"], avoid: ["iron condor", "covered call"] },
+    { preferred: ["long straddle", "long strangle"], avoid: ["iron condor", "covered call"] },
+    { preferred: ["long strangle", "no position"], avoid: ["iron condor", "covered call"] }),
+  transitional: BY_PREMIUM(
+    { preferred: ["calendar spread", "no position"], avoid: ["iron condor"] },
+    { preferred: ["long straddle", "long strangle"], avoid: ["iron condor"] },
+    { preferred: ["long strangle", "calendar spread", "no position"], avoid: ["iron condor"] }),
+  "premium-rich": { preferred: ["iron condor", "call credit spread", "put credit spread", "covered call"], avoid: ["long straddle", "long strangle"] },
+  "premium-cheap": { preferred: ["long straddle", "long strangle", "calendar spread"], avoid: ["iron condor"] },
+  undetermined: { preferred: ["no position"], avoid: [] },
+});
 
 const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const str = (v) => (typeof v === "string" && v.trim() ? v.trim() : null);
@@ -120,6 +161,424 @@ function panelRobustness(key, group, p, card) {
   }
 }
 
+const f2 = (v) => (v === null ? null : v.toFixed(2));
+const pct1 = (v) => (v === null ? null : (v * 100).toFixed(1));
+const okPanel = (p) => p && typeof p === "object" && p.status === "ok";
+const SIDE_WORD = { 1: "bullish", "-1": "bearish", 0: null };
+const WALL_FOR = { 1: "call_wall", "-1": "put_wall" };
+
+function magnitude(v) {
+  const mag = Math.abs(v);
+  return mag >= 1e6 ? (mag / 1e6).toFixed(2) + "M" : mag >= 1e3 ? (mag / 1e3).toFixed(1) + "k" : String(Math.round(mag));
+}
+
+function levelsOf(card) {
+  const p = card.panels && card.panels.levels;
+  if (!okPanel(p) || !Array.isArray(p.levels)) return { spot: null, atr: null, by: {}, list: [] };
+  const by = {}, list = [];
+  for (const lv of p.levels) {
+    const kind = str(lv && lv.kind), px = num(lv && lv.px), distAtr = num(lv && lv.distAtr);
+    if (!kind || px === null) continue;
+    const row = { kind, label: str(lv.label) || kind, px, distAtr };
+    by[kind] = row;
+    list.push(row);
+  }
+  return { spot: num(p.spot), atr: num(p.atr), by, list };
+}
+
+function nearestLevel(list, side) {
+  const cands = list.filter((l) => l.distAtr !== null && (side > 0 ? l.distAtr > 0 : l.distAtr < 0));
+  cands.sort((a, b) => Math.abs(a.distAtr) - Math.abs(b.distAtr));
+  return cands[0] || null;
+}
+
+function directionVotes(card) {
+  const P = card.panels || {};
+  const T = STATE_LINES;
+  const votes = [];
+  const add = (key, vote, weight, reading) => votes.push({ key, vote, weight, robustness: weight, reading, axis: "flow" });
+  {
+    const p = P.path;
+    if (okPanel(p)) {
+      const r = panelRobustness("path", "tape", p, card).r;
+      const nd = num(p.netDelta), np = num(p.netPremium), pers = num(p.persistence), mins = num(p.minutes);
+      const lead = nd !== null && nd !== 0 ? nd : np;
+      if (nd !== null && np !== null && nd !== 0 && np !== 0 && Math.sign(nd) !== Math.sign(np)) {
+        add("path", 0, r, "net delta " + (nd < 0 ? "\u2212" : "+") + magnitude(nd) + " and net premium " +
+          (np < 0 ? "\u2212$" : "+$") + magnitude(np) + " carry opposite signs over " + mins + " minutes, so the session path casts no vote");
+      } else if (lead !== null && lead !== 0 && pers !== null) {
+        const oneSided = pers >= T.PATH_ONE_SIDED;
+        add("path", oneSided ? Math.sign(lead) : 0, r,
+          "net " + (lead > 0 ? "buying" : "selling") + " over " + mins + " minutes, " + Math.round(pers * 100) + "% of minutes with it" +
+          (oneSided ? "" : " (under the " + Math.round(T.PATH_ONE_SIDED * 100) + "% one-sided line, so the path casts no vote)"));
+      }
+    }
+  }
+  {
+    const p = P.aggressor;
+    if (okPanel(p) && Array.isArray(p.bars)) {
+      const r = panelRobustness("aggressor", "tape", p, card).r;
+      const n = p.lead && p.lead.n ? num(p.lead.n.ladderNetExact) : null;
+      const gross = p.bars.reduce((a, b) => a + Math.abs(num(b && b.net) || 0), 0);
+      if (n !== null && gross > 0) {
+        const share = Math.abs(n) / gross;
+        const decisive = share >= T.AGGRESSOR_SHARE;
+        add("aggressor", decisive ? Math.sign(n) : 0, r,
+          "the aggressor ladder nets " + magnitude(n) + " contracts to the " + (n > 0 ? "call" : "put") + " side across " +
+          p.bars.length + " strikes, " + Math.round(share * 100) + "% of its gross imbalance" +
+          (decisive ? "" : " (under the " + Math.round(T.AGGRESSOR_SHARE * 100) + "% line, so no vote)"));
+      }
+    }
+  }
+  {
+    const p = P.oiDeltas;
+    if (okPanel(p) && Array.isArray(p.rows)) {
+      const r = panelRobustness("oiDeltas", "tape", p, card).r;
+      let c = 0, pu = 0, cl = 0, pl = 0;
+      for (const row of p.rows) {
+        const d = num(row && row.diff); if (d === null) continue;
+        if (row.cp === "C") { c += d; cl++; } else if (row.cp === "P") { pu += d; pl++; }
+      }
+      if (cl + pl > 0 && (c !== 0 || pu !== 0)) {
+        const callSide = c > 0 && (pu <= 0 || c >= T.OI_SIDE_RATIO * pu);
+        const putSide = pu > 0 && (c <= 0 || pu >= T.OI_SIDE_RATIO * c);
+        add("oiDeltas", callSide ? 1 : putSide ? -1 : 0, r,
+          "open interest " + (c >= 0 ? "grew +" : "fell \u2212") + magnitude(c) + " across " + cl + " call lines against " +
+          (pu >= 0 ? "+" : "\u2212") + magnitude(pu) + " across " + pl + " put lines, one clearing day late" +
+          (callSide || putSide ? "" : " (neither side twice the other, so no vote)"));
+      }
+    }
+  }
+  {
+    const p = P.displacement;
+    if (okPanel(p)) {
+      const r = panelRobustness("displacement", "convexity", p, card).r;
+      const g = num(p.gapAtr);
+      if (g !== null) {
+        const decisive = Math.abs(g) >= T.DISPLACEMENT_ATR;
+        add("displacement", decisive ? Math.sign(g) : 0, r,
+          "today\u2019s flow builds gamma " + Math.abs(g).toFixed(2) + "\u03c3 " + (g > 0 ? "above" : "below") + " the standing book" +
+          (decisive ? "" : " (inside " + T.DISPLACEMENT_ATR + "\u03c3, so no vote)"));
+      }
+    }
+  }
+  {
+    const p = P.premiumTrack;
+    if (okPanel(p)) {
+      const r = panelRobustness("premiumTrack", "tape", p, card).r;
+      const up = num(p.up), down = num(p.down), net = num(p.net);
+      if (up !== null && down !== null && net !== null && net !== 0 && up + down >= 3) {
+        const oneWay = up === 0 || down === 0;
+        add("premiumTrack", oneWay ? Math.sign(net) : 0, r,
+          "net premium ran " + (net < 0 ? "\u2212$" : "+$") + magnitude(net) + " over " + (up + down) + " priced sessions, " + up + " up and " + down + " down" +
+          (oneWay ? "" : " (both signs present, so no vote)"));
+      }
+    }
+  }
+  {
+    const s = num(card.score), conviction = num(card.conviction);
+    if (s !== null && conviction !== null) {
+      const decisive = Math.abs(s) > T.SCORE_DEAD_BAND && conviction >= T.CONVICTION_FAIR;
+      add("standing", decisive ? Math.sign(s) : 0, 1,
+        "the card scores " + (s < 0 ? "\u2212" : "+") + Math.abs(s) + " with conviction " + conviction + " of 100, a tie-breaker of weight 1" +
+        (decisive ? "" : " (conviction under " + T.CONVICTION_FAIR + " or inside the dead band, so no vote)"));
+    }
+  }
+  const cast = votes.filter((v) => v.vote !== 0 && v.weight > 0);
+  const total = cast.reduce((a, v) => a + v.weight, 0);
+  const sum = cast.reduce((a, v) => a + v.vote * v.weight, 0);
+  const direction = total === 0 ? 0 : Math.sign(sum);
+  const minority = total === 0 ? 0 : cast.filter((v) => v.vote !== direction).reduce((a, v) => a + v.weight, 0) / total;
+  return { votes, direction, split: total > 0 && minority >= T.SPLIT_MINORITY, minority };
+}
+
+function premiumAxis(card) {
+  const P = card.panels || {};
+  const T = STATE_LINES;
+  const drivers = [];
+  let reading = null, base = 0;
+  const pm = P.pricedMove;
+  if (okPanel(pm)) {
+    const r = panelRobustness("pricedMove", "volatility", pm, card).r;
+    const iv = num(pm.iv30), rv = num(pm.rv30), vrp = num(pm.vrp);
+    if (iv !== null && rv !== null && rv > 0 && vrp !== null) {
+      const rel = vrp / rv;
+      reading = rel >= T.VRP_RELATIVE ? "rich" : rel <= -T.VRP_RELATIVE ? "cheap" : "fair";
+      base = r;
+      drivers.push({ key: "pricedMove", robustness: r, weight: r, axis: "premium", vote: reading === "rich" ? 1 : reading === "cheap" ? -1 : 0,
+        reading: pct1(iv) + "% implied against " + pct1(rv) + "% realised over 30 sessions, a premium of " +
+          (vrp >= 0 ? "+" : "\u2212") + Math.abs(vrp * 100).toFixed(1) + " points (" + (rel >= 0 ? "+" : "\u2212") + Math.abs(rel * 100).toFixed(0) +
+          "% of realised; the line is \u00b1" + Math.round(T.VRP_RELATIVE * 100) + "%)" });
+      const rank = num(pm.ivRank);
+      if (rank !== null) {
+        const v = rank >= T.IV_RANK_HIGH ? 1 : rank <= T.IV_RANK_LOW ? -1 : 0;
+        drivers.push({ key: "pricedMove", sub: "ivRank", robustness: r, weight: v === 0 ? 0 : 1, axis: "premium", vote: v,
+          reading: "IV rank " + Math.round(rank * 100) + "% of its own year" + (v > 0 ? ", in the top band" : v < 0 ? ", in the bottom band" : ", mid-range") });
+      }
+      const mom = num(pm.ivMomentum);
+      if (mom !== null && Math.abs(mom) >= T.IV_MOMENTUM_PTS) {
+        drivers.push({ key: "pricedMove", sub: "ivMomentum", robustness: r, weight: 1, axis: "premium", vote: mom > 0 ? 1 : -1,
+          reading: "implied volatility " + (mom > 0 ? "rose" : "fell") + " " + Math.abs(mom * 100).toFixed(1) + " points over the month" });
+      }
+    }
+  }
+  const vc = P.volContext;
+  if (okPanel(vc) && vc.term && vc.term.status === "ok" && Array.isArray(vc.term.rows)) {
+    const rows = vc.term.rows.filter((x) => x && num(x.vol) !== null && str(x.expiry));
+    if (rows.length >= 2) {
+      const f = rows[0], b = rows[rows.length - 1];
+      const d = f.vol - b.vol;
+      if (Math.abs(d) >= T.TERM_FRONT_BID_PTS) {
+        drivers.push({ key: "volContext", robustness: panelRobustness("volContext", "volatility", vc, card).r, weight: 1, axis: "premium", vote: d > 0 ? 1 : 0,
+          reading: (d > 0 ? "the front is bid: " : "the back is bid: ") + pct1(f.vol) + "% at " + f.expiry + " against " + pct1(b.vol) + "% at " + b.expiry });
+      }
+    }
+  }
+  const ctx = P.context;
+  const g = okPanel(ctx) && ctx.garch && typeof ctx.garch === "object" && ctx.garch.status === "ok" ? ctx.garch : null;
+  if (g && okPanel(pm) && num(pm.iv30) !== null) {
+    const last = num(g.lastVol) !== null ? num(g.lastVol)
+      : Array.isArray(g.condVol) && g.condVol.length ? num(g.condVol[g.condVol.length - 1]) : null;
+    const model = num(g.nextVol) !== null ? num(g.nextVol) : last;
+    if (model !== null) {
+      const gap = num(pm.iv30) * 100 - model;
+      const wide = Math.abs(gap) >= T.GARCH_GAP_PTS;
+      drivers.push({ key: "garch", robustness: g.converged === false ? 1 : g.dist === "skewt" ? 3 : 2, weight: wide ? 1 : 0, axis: "premium",
+        vote: wide ? Math.sign(gap) : 0,
+        reading: "the GARCH conditional level is " + model.toFixed(1) + "% against " + pct1(num(pm.iv30)) + "% implied" +
+          (g.dist === "skewt" ? "" : " (fitted before the skewed t)") });
+    }
+  }
+  return { reading, robustness: base, drivers };
+}
+
+function stateBrief(s, ticker) {
+  const t = ticker || "this name";
+  if (s.state === "undetermined") return "The greeks imply no state for " + t + ": " + (s.notes[0] || "no reading") + ".";
+  const pos = s.drivers.filter((d) => d.axis === "positioning" && !d.sub).map((d) => d.reading);
+  const head = "The greeks imply " + (s.state === "transitional" ? "a transitional state on the flip" : "a" + (/^[aeiou]/.test(s.state) ? "n " : " ") + s.state.replace("-", " ") + " state") +
+    " for " + t + (s.flow ? " with flow " + s.flow : "") + " (confidence " + s.confidence + " of 3)";
+  return head + (pos.length ? ": " + pos.join("; ") : "") + ". Preferred structures: " + s.preferred.join(", ") +
+    (s.invalidation ? "; the state ends past the " + s.invalidation.label.toLowerCase() + " at " + f2(s.invalidation.px) : "") + ".";
+}
+
+export function stateSentence(s, ticker) {
+  const t = ticker || "this name";
+  if (s.state === "undetermined") return "IMPLIED STATE for " + t + ": undetermined (" + (s.notes[0] || "no reading") + "). Preferred structures: no position.";
+  const parts = [];
+  const pick = (axis, test) => s.drivers.filter((d) => d.axis === axis && (!test || test(d))).map((d) => d.reading);
+  const pos = pick("positioning"), dir = pick("flow", (d) => d.vote !== 0), abst = pick("flow", (d) => d.vote === 0);
+  const prem = pick("premium", (d) => d.weight > 0), hz = pick("horizon");
+  parts.push("IMPLIED STATE for " + t + ": " + STATE_WORD[s.state].toLowerCase() + (s.flow ? ", flow " + s.flow : "") +
+    " (confidence " + s.confidence + " of 3" + (s.stale ? ", capped: the card is behind the last closed session" : "") + ").");
+  if (pos.length) parts.push("Positioning: " + pos.join("; ") + ".");
+  if (dir.length) parts.push("Flow: " + dir.join("; ") + ".");
+  if (abst.length) parts.push("Abstaining: " + abst.join("; ") + ".");
+  parts.push("Premium is " + (s.premium || "unreadable") + (prem.length ? ": " + prem.join("; ") : "") + ".");
+  if (hz.length) parts.push("Calendar: " + hz.join("; ") + ".");
+  if (s.notes.length) parts.push("Note: " + s.notes.join("; ") + ".");
+  if (s.invalidation) parts.push("The state ends past the " + s.invalidation.label.toLowerCase() + " at " + f2(s.invalidation.px) + ".");
+  if (s.horizon) {
+    parts.push("Horizon: " + (s.horizon.kind === "priced_sessions"
+      ? s.horizon.value + " sessions, the priced-move window" + (s.horizon.low !== null && s.horizon.high !== null ? " " + f2(s.horizon.low) + " to " + f2(s.horizon.high) : "")
+      : s.horizon.value + (s.horizon.days !== null ? ", " + s.horizon.days + " days out" : "") +
+        (s.horizon.kind === "half_life_expiry" ? ", where half the book\u2019s gamma has expired" : "")) + ".");
+  }
+  parts.push("Preferred structures: " + s.preferred.join(", ") + "." + (s.avoid.length ? " Avoid: " + s.avoid.join(", ") + "." : ""));
+  return parts.join(" ");
+}
+
+export function stateChip(s) {
+  const T = STATE_LINES;
+  const flow = s.flow ? ", flow " + s.flow : "";
+  if (s.state === "pinned") return STATE_WORD.pinned + " \u00b7 long gamma at spot" + (s.target ? ", max pain " + f2(s.target.px) : "") + flow;
+  if (s.state === "squeeze") return STATE_WORD.squeeze + " \u00b7 short gamma, flow " + s.direction + " toward the " + s.target.label.toLowerCase() + " " + f2(s.target.px);
+  if (s.state === "amplifying") return STATE_WORD.amplifying + " \u00b7 short gamma" + (s.direction ? ", flow " + s.direction : ", flow undecided") + (s.bound ? ", to the flip " + f2(s.bound.px) : "");
+  if (s.state === "transitional") return STATE_WORD.transitional + " \u00b7 " + (s.invalidation ? f2(s.invalidation.px) + " " : "") + "inside " + T.FLIP_ON_ATR + " ATR" + flow;
+  if (s.state === "premium-rich" || s.state === "premium-cheap") return STATE_WORD[s.state] + " \u00b7 positioning withheld" + flow;
+  return STATE_WORD.undetermined + " \u00b7 " + (s.notes[0] || "no reading");
+}
+
+export function regimeState(card, extras) {
+  const c = card && typeof card === "object" ? card : {};
+  const x = extras && typeof extras === "object" ? extras : {};
+  const P = c.panels && typeof c.panels === "object" ? c.panels : {};
+  const T = STATE_LINES;
+  const session = str(c.sessionDate), expected = str(x.expectedSession);
+  const stale = session !== null && expected !== null ? session < expected : false;
+  const drivers = [];
+  const notes = [];
+  const gammaR = panelRobustness("gamma", "convexity", P.gamma, c);
+  const levelsR = panelRobustness("levels", "convexity", P.levels, c);
+  const regime = c.regime && typeof c.regime === "object" ? c.regime : {};
+  const L = levelsOf(c);
+  const flip = L.by.gamma_flip || null;
+  const votes = directionVotes(c);
+  const premium = premiumAxis(c);
+  const prem = premium.reading || "fair";
+  const flow = SIDE_WORD[String(votes.direction)];
+  const silenceOf = (p) => (p && typeof p === "object" ? silence(p.status) : "unavailable");
+  let state = "undetermined", direction = null, confidence = 0, invalidation = null, horizon = null, target = null, bound = null;
+  const label = str(regime.label);
+  const share = num(regime.spotGammaShare);
+  const gammaOk = okPanel(P.gamma) && gammaR.r > 0 && (label === "long" || label === "short");
+  const levelsOk = okPanel(P.levels) && levelsR.r > 0;
+  const cal = okPanel(P.calendar) ? P.calendar : null;
+  const front = cal && Array.isArray(cal.schedule) && cal.schedule[0] && str(cal.schedule[0].expiry) ? cal.schedule[0] : null;
+  const pm = okPanel(P.pricedMove) ? P.pricedMove : null;
+  const pricedHorizon = pm && num(pm.sessions) !== null
+    ? { kind: "priced_sessions", value: num(pm.sessions), low: num(pm.impliedLow), high: num(pm.impliedHigh), days: null } : null;
+
+  if (gammaOk) {
+    const strong = share !== null && Math.abs(share) >= T.SHARE_MARGINAL;
+    const flipAtr = flip ? flip.distAtr : null;
+    const onFlip = flipAtr !== null && Math.abs(flipAtr) < T.FLIP_ON_ATR;
+    const nearFlip = flipAtr !== null && Math.abs(flipAtr) >= T.FLIP_ON_ATR && Math.abs(flipAtr) < T.FLIP_NEAR_ATR;
+    drivers.push({ key: "gamma", robustness: gammaR.r, weight: gammaR.r, axis: "positioning",
+      reading: "dealer gamma at spot is " + label + (share === null ? "" : ", the cumulative ladder at spot sits at " +
+        Math.round(Math.abs(share) * 100) + "% of its peak" + (strong ? "" : " (under the " + Math.round(T.SHARE_MARGINAL * 100) + "% line, marginal)")) +
+        (num(regime.crossings) === null ? "" : regime.crossings === 0 ? "; the ladder does not change sign across the window"
+          : "; the ladder changes sign " + regime.crossings + " time" + (regime.crossings === 1 ? "" : "s")) });
+    if (levelsOk && flip && flipAtr !== null) {
+      drivers.push({ key: "levels", robustness: levelsR.r, weight: levelsR.r, axis: "positioning",
+        reading: "net gamma flips sign at " + f2(flip.px) + ", " + Math.abs(flipAtr).toFixed(2) + " ATR " + (flipAtr >= 0 ? "above" : "below") + " spot " + f2(L.spot) +
+          (onFlip ? " (inside " + T.FLIP_ON_ATR + " ATR: spot sits on the flip)" : nearFlip ? " (inside " + T.FLIP_NEAR_ATR + " ATR)" : "") });
+    } else if (levelsOk && num(regime.bandMin) !== null && num(regime.bandMax) !== null) {
+      drivers.push({ key: "levels", robustness: levelsR.r, weight: levelsR.r, axis: "positioning",
+        reading: "no sign change resolved on the ladder read over " + f2(num(regime.bandMin)) + " to " + f2(num(regime.bandMax)) + ", so the " + label + " side holds across the window" });
+    }
+    const base = levelsOk ? Math.min(gammaR.r, levelsR.r) : Math.min(gammaR.r, 2);
+    if (onFlip) {
+      state = "transitional";
+      direction = flow;
+      confidence = base;
+      invalidation = { kind: "gamma_flip", px: flip.px, label: "Gamma flip" };
+      horizon = front ? { kind: "expiry", value: front.expiry, days: num(front.days) } : pricedHorizon;
+    } else if (label === "long") {
+      state = "pinned";
+      direction = null;
+      confidence = base - (strong ? 0 : 1) - (nearFlip ? 1 : 0);
+      const pain = L.by.max_pain || null;
+      target = pain && pain.distAtr !== null && Math.abs(pain.distAtr) <= T.PAIN_NEAR_ATR ? { kind: "max_pain", px: pain.px, label: "Max pain", distAtr: pain.distAtr } : null;
+      const wall = L.list.filter((l) => l.kind === "call_wall" || l.kind === "put_wall").sort((a, b) => Math.abs(a.distAtr) - Math.abs(b.distAtr))[0] || null;
+      invalidation = flip ? { kind: "gamma_flip", px: flip.px, label: "Gamma flip" } : wall ? { kind: wall.kind, px: wall.px, label: wall.label } : null;
+      horizon = cal && num(cal.frontLoad) !== null && cal.frontLoad >= T.FRONT_LOAD && front
+        ? { kind: "expiry", value: front.expiry, days: num(front.days) }
+        : cal && str(cal.halfLifeExpiry) ? { kind: "half_life_expiry", value: cal.halfLifeExpiry, days: num(cal.halfLifeDays) } : pricedHorizon;
+      if (target) {
+        drivers.push({ key: "levels", sub: "max_pain", robustness: levelsR.r, weight: levelsR.r, axis: "positioning",
+          reading: "max pain at " + f2(pain.px) + " sits " + Math.abs(pain.distAtr).toFixed(2) + " ATR " + (pain.distAtr >= 0 ? "above" : "below") + " spot, inside the " + T.PAIN_NEAR_ATR + " ATR pin band" });
+      }
+    } else {
+      const d = votes.direction;
+      direction = flow;
+      const wall = d === 0 ? null : L.by[WALL_FOR[String(d)]] || null;
+      const wallAhead = wall && wall.distAtr !== null && Math.sign(wall.distAtr) === d && Math.abs(wall.distAtr) <= T.WALL_NEAR_ATR;
+      const flipBetween = flip && flipAtr !== null && Math.sign(flipAtr) === d && wall && Math.abs(flipAtr) < Math.abs(wall.distAtr);
+      if (d !== 0 && wallAhead && !flipBetween) {
+        state = "squeeze";
+        target = { kind: wall.kind, px: wall.px, label: wall.label, distAtr: wall.distAtr };
+        drivers.push({ key: "levels", sub: wall.kind, robustness: levelsR.r, weight: levelsR.r, axis: "positioning",
+          reading: "the " + wall.label.toLowerCase() + " at " + f2(wall.px) + " sits " + Math.abs(wall.distAtr).toFixed(2) + " ATR " + (wall.distAtr > 0 ? "above" : "below") +
+            " spot, in the direction the flow leans, with no sign change between" });
+      } else {
+        state = "amplifying";
+        if (flipBetween) {
+          bound = { kind: "gamma_flip", px: flip.px, label: "Gamma flip", distAtr: flipAtr };
+          notes.push("the flip at " + f2(flip.px) + " lies between spot and the " + wall.label.toLowerCase() + " at " + f2(wall.px) + ", so the short-gamma zone ends before the wall");
+        }
+      }
+      const opp = d === 0 ? null : nearestLevel(L.list, -d);
+      invalidation = opp ? { kind: opp.kind, px: opp.px, label: opp.label, distAtr: opp.distAtr }
+        : flip ? { kind: "gamma_flip", px: flip.px, label: "Gamma flip" } : null;
+      horizon = pricedHorizon || (front ? { kind: "expiry", value: front.expiry, days: num(front.days) } : null);
+      confidence = base - (strong ? 0 : 1) - (nearFlip ? 1 : 0) - (d !== 0 && votes.split ? 1 : 0);
+      if (d === 0) confidence = Math.min(confidence, 1);
+    }
+    if (cal && front && num(cal.frontLoad) !== null) {
+      drivers.push({ key: "calendar", robustness: panelRobustness("calendar", "convexity", cal, c).r, weight: 1, axis: "horizon",
+        reading: Math.round(cal.frontLoad * 100) + "% of the book\u2019s gamma expires at " + front.expiry + (num(front.days) !== null ? ", " + front.days + " days out" : "") +
+          (str(cal.halfLifeExpiry) ? "; half of it by " + cal.halfLifeExpiry : "") });
+    }
+    for (const v of votes.votes) drivers.push(v);
+  } else if (premium.reading === "rich" || premium.reading === "cheap") {
+    state = "premium-" + premium.reading;
+    direction = flow;
+    const against = premium.reading === "rich" ? 1 : -1;
+    confidence = premium.robustness - (premium.drivers.some((d) => d.weight > 0 && d.vote !== 0 && d.vote !== against) ? 1 : 0);
+    const end = votes.direction < 0 ? { kind: "priced_low", px: num(pm.impliedLow) } : { kind: "priced_high", px: num(pm.impliedHigh) };
+    invalidation = end.px === null ? null : { ...end, label: "Priced range end" };
+    horizon = premium.reading === "rich" && cal && str(cal.halfLifeExpiry)
+      ? { kind: "half_life_expiry", value: cal.halfLifeExpiry, days: num(cal.halfLifeDays) } : pricedHorizon;
+    for (const v of votes.votes) drivers.push(v);
+    notes.push("gamma positioning is " + silenceOf(P.gamma) + ", so the state is read from premium alone");
+  } else {
+    notes.push("gamma positioning is " + silenceOf(P.gamma) + " and premium is " + (premium.reading || "unreadable") + ", so no state is implied");
+  }
+  for (const d of premium.drivers) drivers.push(d);
+  for (const [key, what, when] of [["vanna", "vol sensitivity", "a where, not a which way"], ["charm", "time decay", "a when, not a drift direction"]]) {
+    const n = okPanel(P[key]) && P[key].lead && P[key].lead.n ? P[key].lead.n : null;
+    if (n && str(n.expiry)) {
+      drivers.push({ key, robustness: panelRobustness(key, "convexity", P[key], c).r, weight: 0, axis: "horizon",
+        reading: what + " concentrates at " + n.expiry + (num(n.dte) !== null ? ", " + n.dte + " days out" : "") +
+          (num(n.sharePct) !== null ? " (" + n.sharePct + "% of the drawn ladder)" : "") + "; the legs are not netted on this card, so " + key + " gives " + when });
+    }
+  }
+  if (stale) confidence = Math.min(confidence, 1);
+  confidence = Math.max(0, Math.min(3, confidence));
+  if (state === "undetermined") confidence = 0;
+  const table = state === "pinned" ? STATE_STRUCTURES.pinned[prem]
+    : state === "squeeze" || state === "amplifying"
+      ? (direction === "bullish" ? STATE_STRUCTURES.bull[prem] : direction === "bearish" ? STATE_STRUCTURES.bear[prem] : STATE_STRUCTURES.shortNoSide[prem])
+      : state === "transitional" ? STATE_STRUCTURES.transitional[prem] : STATE_STRUCTURES[state];
+  const preferred = [...table.preferred];
+  if (state === "transitional" && direction) preferred.push(direction === "bullish" ? "call debit spread" : "put debit spread");
+  const out = {
+    version: STATE_VERSION, state, direction, flow, confidence, premium: premium.reading,
+    drivers: drivers.filter((d) => d.robustness > 0), invalidation, horizon, target, bound,
+    preferred, avoid: [...table.avoid], stale, notes,
+  };
+  out.chip = stateChip(out);
+  out.brief = stateBrief(out, str(c.ticker));
+  return out;
+}
+
+export function stateIdea(context) {
+  const ctx = context && typeof context === "object" ? context : {};
+  const s = ctx.state && typeof ctx.state === "object" ? ctx.state : null;
+  if (!s || s.state === "undetermined" || s.confidence < 1 || !s.invalidation || !s.horizon) return null;
+  const voting = s.drivers.filter((d) => d.robustness >= 1 && d.axis === "flow" && d.vote !== 0);
+  const flowKeys = voting.filter((d) => d.key !== "standing" || voting.length === 1).map((d) => d.key);
+  const rests = ["state", ...new Set([
+    ...s.drivers.filter((d) => d.robustness >= 1 && d.axis === "positioning").map((d) => d.key),
+    ...flowKeys,
+    ...s.drivers.filter((d) => d.robustness >= 1 && d.axis === "premium" && d.key === "pricedMove" && d.weight > 0).map((d) => d.key),
+  ])].slice(0, 6);
+  if (rests.length < 2) return null;
+  const structure = s.preferred[0];
+  const sides = IDEA_SIDES[structure] || ["neutral"];
+  const direction = s.direction && sides.includes(s.direction) ? s.direction : sides[0];
+  const pick = (axis, test, cap) => s.drivers.filter((d) => d.axis === axis && (!test || test(d))).slice(0, cap).map((d) => d.reading);
+  const pos = pick("positioning", (d) => !d.sub, 2);
+  const dir = pick("flow", (d) => d.vote !== 0 && flowKeys.includes(d.key), 2);
+  const prem = s.drivers.find((d) => d.axis === "premium" && d.key === "pricedMove" && !d.sub);
+  const level = "the " + s.invalidation.label.toLowerCase() + " at " + f2(s.invalidation.px);
+  const word = STATE_WORD[s.state].toLowerCase();
+  const read = pos.join("; ") + (dir.length ? "; " + dir.join("; ") : "") + (prem ? "; premium is " + s.premium + ", " + prem.reading : "");
+  const payoff = structure === "no position"
+    ? " The flow features do not agree on a side, so no position is the reading until spot closes beyond " + level + "."
+    : " A " + structure + " pays if spot " + (direction === "bullish" ? "holds above " : direction === "bearish" ? "holds below " : "stays inside the priced range against ") + level + ".";
+  return {
+    title: STATE_WORD[s.state] + " " + structure,
+    structure, direction,
+    thesis: "The greeks imply " + word + (s.flow ? " with flow " + s.flow : "") + ": " + read + "." + payoff,
+    rests_on: rests,
+    invalidation: "a close " + (direction === "bullish" ? "below " : direction === "bearish" ? "above " : "beyond ") + level,
+    horizon: s.horizon.kind === "priced_sessions" ? s.horizon.value + " sessions" : String(s.horizon.value),
+    fromState: true,
+  };
+}
+
 export function buildContext(card, extras) {
   const c = card && typeof card === "object" ? card : {};
   const x = extras && typeof extras === "object" ? extras : {};
@@ -218,6 +677,27 @@ export function buildContext(card, extras) {
     });
   }
 
+  const state = regimeState(c, { expectedSession: expected });
+  {
+    const named = state.drivers.filter((d) => d.robustness > 0 && (d.axis === "positioning" || (d.axis === "flow" && d.vote !== 0))).map((d) => d.key);
+    const on = state.state !== "undetermined";
+    push({
+      key: "state", title: "Implied state", group: "signal",
+      status: on ? "ok" : "unavailable", robustness: state.confidence,
+      why: !on ? (state.notes[0] || "no state is implied")
+        : "confidence " + state.confidence + " of 3, read from " + [...new Set(named)].join(", ") +
+          (state.stale ? ", capped: the card is behind the last closed session" : ""),
+      say: on ? stateSentence(state, str(c.ticker)) : null,
+      figures: on ? {
+        state: state.state, direction: state.direction, flow: state.flow, confidence: state.confidence, premium: state.premium,
+        invalidation: state.invalidation ? f2(state.invalidation.px) : null,
+        target: state.target ? f2(state.target.px) : null,
+        horizon: state.horizon ? String(state.horizon.value) : null,
+      } : {},
+      reason: on ? null : (state.notes[0] || null),
+    });
+  }
+
   if (stale === true) {
     for (const f of features) {
       if (f.robustness > 1) { f.robustness = 1; f.why = "capped: the card describes " + session + " and " + expected + " has closed since"; }
@@ -246,6 +726,7 @@ export function buildContext(card, extras) {
     generatedAt: str(c.generatedAt),
     features,
     coverage,
+    state,
   };
 }
 
@@ -320,6 +801,11 @@ export function promptForNeuron(context) {
     "6. The structure is one of: " + NEURON_STRUCTURES.join(", ") + ". 'no position' is a valid " +
       "idea when the features disagree; say which ones disagree.",
     "7. Units travel with numbers, in the context's own words. A capped list is not a population.",
+    "8. The line [state] is the state the greeks imply, computed from the positioning, flow and " +
+      "premium features above, with the structures it prefers and the ones it rules out. The first " +
+      "idea uses one of the preferred structures. No idea uses a structure on the avoid list; an " +
+      "idea that does is refused. If the features disagree with the state, say so in the summary " +
+      "rather than proposing against it.",
     "",
     "Answer with ONE JSON object and nothing else, no code fence, in this shape: " +
       "{\"summary\": \"two or three plain sentences about " + t + "\", \"ideas\": [{\"title\": " +
@@ -368,11 +854,13 @@ export function guardFacts(context) {
 export function deterministicSummary(context) {
   const ctx = context && typeof context === "object" ? context : { features: [] };
   const stale = ctx.stale === true;
+  const st = ctx.state && typeof ctx.state === "object" && ctx.state.state !== "undetermined" && ctx.state.confidence >= 1 ? ctx.state : null;
   const said = (ctx.features || [])
-    .filter((f) => f.say && f.robustness >= (stale ? 1 : 2))
+    .filter((f) => f.say && f.key !== "state" && f.robustness >= (stale ? 1 : 2))
     .sort((a, b) => b.robustness - a.robustness)
-    .slice(0, 3)
+    .slice(0, st ? 2 : 3)
     .map((f) => f.say);
+  if (st) said.unshift(st.brief);
   if (said.length) {
     return (stale ? "This card describes an earlier session than the last closed one, so every grade is capped at weak. " : "") +
       said.join(" ");
@@ -392,6 +880,7 @@ export function vetIdeas(rawIdeas, context) {
   const ctx = context && typeof context === "object" ? context : { features: [] };
   const byKey = new Map((ctx.features || []).map((f) => [f.key.toLowerCase(), f]));
   const facts = guardFacts(ctx);
+  const st = ctx.state && typeof ctx.state === "object" && ctx.state.state !== "undetermined" ? ctx.state : null;
   const kept = [];
   const refused = [];
   const seen = new Set();
@@ -407,6 +896,9 @@ export function vetIdeas(rawIdeas, context) {
     if (!NEURON_STRUCTURES.includes(structure)) { refused.push(title + ": structure not in the list"); continue; }
     if (!["bullish", "bearish", "neutral"].includes(direction)) { refused.push(title + ": direction not bullish, bearish or neutral"); continue; }
     if (!(IDEA_SIDES[structure] || []).includes(direction)) { refused.push(title + ": a " + structure + " is not " + direction); continue; }
+    if (st && Array.isArray(st.avoid) && st.avoid.includes(structure)) {
+      refused.push(title + ": a " + structure + " is on the implied state\u2019s avoid list (" + st.chip + ")"); continue;
+    }
     const feats = rests.map((k) => byKey.get(k)).filter(Boolean);
     if (feats.length < 2 || feats.length !== rests.length) { refused.push(title + ": rests on fewer than two known features"); continue; }
     const robustness = Math.min(...feats.map((f) => f.robustness));
@@ -418,9 +910,9 @@ export function vetIdeas(rawIdeas, context) {
     if (seen.has(signature) || seen.has(title.toLowerCase())) { refused.push(title + ": repeats an idea already kept"); continue; }
     seen.add(signature); seen.add(title.toLowerCase());
     kept.push({ title, structure, direction, thesis, invalidation, horizon, restsOn: feats.map((f) => f.key), robustness,
-      robustnessWord: ROBUSTNESS_WORD[robustness] });
+      robustnessWord: ROBUSTNESS_WORD[robustness], fromState: idea.fromState === true });
   }
-  kept.sort((a, b) => b.robustness - a.robustness);
+  kept.sort((a, b) => (b.robustness - a.robustness) || ((b.fromState ? 1 : 0) - (a.fromState ? 1 : 0)));
   return { ideas: kept.slice(0, NEURON_MAX_IDEAS), refused };
 }
 
@@ -436,6 +928,15 @@ export function publicContext(context) {
   return {
     version: ctx.version, ticker: ctx.ticker, sessionDate: ctx.sessionDate, expectedSession: ctx.expectedSession,
     stale: ctx.stale, depth: ctx.depth, coverage: ctx.coverage,
+    state: ctx.state && typeof ctx.state === "object" ? {
+      version: ctx.state.version, state: ctx.state.state, word: STATE_WORD[ctx.state.state] || ctx.state.state,
+      direction: ctx.state.direction, flow: ctx.state.flow, confidence: ctx.state.confidence, premium: ctx.state.premium,
+      chip: ctx.state.chip, brief: ctx.state.brief, preferred: ctx.state.preferred, avoid: ctx.state.avoid,
+      invalidation: ctx.state.invalidation, target: ctx.state.target, bound: ctx.state.bound, horizon: ctx.state.horizon,
+      stale: ctx.state.stale, notes: ctx.state.notes,
+      drivers: (ctx.state.drivers || []).map((d) => ({ key: d.key, sub: d.sub || null, axis: d.axis, robustness: d.robustness,
+        vote: typeof d.vote === "number" ? d.vote : null, reading: d.reading })),
+    } : null,
     features: (ctx.features || []).map((f) => ({
       key: f.key, title: f.title, group: f.group, status: f.status, robustness: f.robustness,
       robustnessWord: ROBUSTNESS_WORD[f.robustness], why: f.why,

@@ -2,7 +2,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "217";
+export const ASSET_VERSION = "218";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -1037,6 +1037,13 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
         <span class="ft-hero-seg" id="ftHeroIvrSeg" aria-hidden="true"></span>
       </span>
     </div>
+    <div class="ft-hero-state" id="ftHeroStateB" hidden>
+      <span class="ft-hero-k">Implied state</span>
+      <span class="ft-hero-v ft-hero-v--word" id="ftHeroState"></span>
+      <span class="ft-hero-pill" id="ftHeroStateSide" hidden></span>
+      <span class="ft-hero-seg ft-hero-seg--3" id="ftHeroStateSeg" aria-hidden="true"></span>
+      <span class="ft-hero-state-chip" id="ftHeroStateChip"></span>
+    </div>
 
   </section>
 
@@ -1154,6 +1161,14 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
       ${neuronMark("t", false)}
       <div class="ak-neuron-body">
         <p class="ak-neuron-h" id="ftNeuronH">Neuron</p>
+        <div class="ft-state" id="ftNeuronState" hidden>
+          <div class="ft-state-top">
+            <span class="ft-state-w" id="ftStateWord"></span>
+            <span class="ft-state-conf" id="ftStateConf" aria-hidden="true"></span>
+          </div>
+          <p class="ft-state-chip" id="ftStateChip"></p>
+          <dl class="ft-state-m" id="ftStateMeta"></dl>
+        </div>
         <p class="ak-neuron-say" id="ftNeuronSay"></p>
         <ol class="ft-ideas" id="ftNeuronIdeas" hidden aria-label="Trade ideas, ranked by robustness"></ol>
         <button class="ft-ideas-more" id="ftNeuronMore" type="button" hidden aria-expanded="false"

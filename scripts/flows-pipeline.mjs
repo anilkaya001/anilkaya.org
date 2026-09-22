@@ -744,7 +744,25 @@ function atr14(candles) {
   return atr;
 }
 
-function computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, ohlc, sessionDate, tilt }) {
+const CANDLE_BREAK_LOG = 0.4;
+
+function repairCandles(candles) {
+  const rows = candlesAscending(candles);
+  const breaks = [];
+  let cut = 0;
+  for (let i = 1; i < rows.length; i++) {
+    const a = num(rows[i - 1].close), b = num(rows[i].close);
+    if (!(a > 0) || !(b > 0)) continue;
+    if (Math.abs(Math.log(b / a)) > CANDLE_BREAK_LOG) {
+      breaks.push({ date: candleDate(rows[i]), ratio: Number((b / a).toPrecision(4)), before: i });
+      cut = i;
+    }
+  }
+  return { candles: cut ? rows.slice(cut) : rows, breaks };
+}
+
+function computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, ohlc: rawOhlc, sessionDate, tilt }) {
+  const { candles: ohlc, breaks } = repairCandles(rawOhlc);
   const purity = flowPurity(greekFlow);
   const quality = positioningQuality(greekFlow);
   const gamma = aggressorGamma(strikes, { spot });
@@ -841,6 +859,7 @@ function computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, oh
     ]),
 
     garch: fitGarch(closes, candlesAscending(ohlc).map(candleDate)),
+    priceBreaks: breaks,
 
     r5: ret(closes, 5),
     r21: ret(closes, 21),
@@ -853,7 +872,8 @@ function computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, oh
       ticks: path.bars,
       strikes: gamma.ladder.length,
       expiries: calendar.schedule.length,
-      candles: ohlc.length,
+      candles: (rawOhlc || []).length,
+      candlesKept: ohlc.length,
     },
   };
 }
@@ -4676,7 +4696,7 @@ async function main() {
 
 export {
   partitionSides, screenerTilt, eligible, atr14, daysToEarnings, medianDollarVolume,
-  candlesAscending, selectExtremes, scoreBoard, publish, summarize,
+  candlesAscending, repairCandles, CANDLE_BREAK_LOG, selectExtremes, scoreBoard, publish, summarize,
   collapseShareClasses, returnCorrelation, packSpark, ret, easternNow,
   computeFeatures, DEAD_BAND, BOARD_SCHEMA_VERSION,
   boardRow, toRows, toWatchRows, datedKey, pruneKeys, pruneArchive,

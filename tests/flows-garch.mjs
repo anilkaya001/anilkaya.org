@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
-import { fitGarch, skewtDensity, skewtConstants, lnGamma, GARCH_MIN_RETURNS, SKEWT_NU_MIN, SKEWT_NU_MAX }
+import { fitGarch, skewtDensity, skewtConstants, lnGamma, GARCH_MIN_RETURNS, SKEWT_NU_MIN, SKEWT_NU_MAX,
+         GARCH_WINSOR_K, GARCH_PERSIST_CAP, GARCH_EWMA_LAMBDA }
   from "../shared/flows-garch.js";
+import { repairCandles, CANDLE_BREAK_LOG } from "../scripts/flows-pipeline.mjs";
 
 let n = 0;
 const ok = (c, m) => { assert.ok(c, m); n++; };
@@ -158,6 +160,51 @@ ok(gappy.status === "ok" && gappy.n === 302, "null, zero and negative closes are
 const uniform = fitGarch(Array.from({ length: 300 }, (_, i) => 100 + (i % 2)));
 ok(uniform.status === "ok" && uniform.converged === false && typeof uniform.reason === "string",
    "a series the model cannot describe is published with converged:false and a reason, not hidden");
+{
+  ok(/variance targeting/.test(fit.method) && fit.capped <= fit.n * 0.005,
+     `a clean series names the method and caps at most one return in two hundred (${fit.capped} of ${fit.n}: ` +
+     "a t with six degrees of freedom does reach six robust sd now and then)");
+  near(fit.longRunVol, Math.sqrt(fit.returns.reduce((a, b) => a + b * b, 0) / fit.n) * Math.sqrt(252), 0.5,
+       "under variance targeting the long-run level is the window's own sample volatility, annualised");
+  ok(fit.ewma.length === fit.n && fit.ewma.every((v) => v > 0),
+     "the EWMA reference path is one per return and positive");
+  const last = fit.ewma[fit.ewma.length - 1];
+  ok(last > fit.lastVol / 2 && last < fit.lastVol * 2,
+     `the reference and the fitted path close the window within a factor of two of each other (${last} vs ${fit.lastVol})`);
+  near(fit.cap, GARCH_WINSOR_K * fit.robustSd, 0.002, "the cap is six robust standard deviations");
+  ok(fit.persistence <= GARCH_PERSIST_CAP, "persistence never exceeds the cap the parameterisation imposes");
+  ok(GARCH_EWMA_LAMBDA === 0.94, "the reference decay is RiskMetrics' 0.94, the one every desk recognises");
+}
+{
+  const jumpPx = px.slice(0, 261).map((v, i) => (i >= 130 ? v * 4 : v));
+  const jf = fitGarch(jumpPx, dates.slice(0, 261));
+  ok(jf.status === "ok" && jf.capped === 1 && jf.converged === true,
+     `one 300% session inside a year is capped for the fit and the fit still settles (capped ${jf.capped}, ${jf.reason || "settled"})`);
+  ok(Math.max(...jf.returns.map(Math.abs)) > jf.cap,
+     "while the published returns keep the jump as it happened, so the chart draws the bar the fit refused");
+  ok(jf.condVol.every((v) => v < 400), "and the conditional path is not blown out by the jump");
+  ok(jf.alpha >= 1e-3 && jf.persistence <= 0.998 && jf.longRunVol !== null,
+     `and the fit is identified with its long run published (alpha ${jf.alpha}, persistence ${jf.persistence})`);
+}
+{
+  const day = (i) => new Date(Date.UTC(2025, 0, 1 + i)).toISOString();
+  const rows = Array.from({ length: 300 }, (_, i) => ({
+    start_time: day(i), open: 1, high: 1, low: 1, volume: 1000,
+    close: i < 120 ? 1000 + i : 40 + i * 0.1,
+  }));
+  const rep = repairCandles(rows);
+  ok(rep.breaks.length === 1 && rep.breaks[0].before === 120 && rep.breaks[0].date === day(120).slice(0, 10),
+     `an unadjusted history break is found once, dated by the first session after it, with the sessions before it counted (${JSON.stringify(rep.breaks)})`);
+  near(rep.breaks[0].ratio, 52 / 1119, 1e-3, "and the break carries the close-to-close ratio");
+  ok(rep.candles.length === 180 && rep.candles[0].close === 52,
+     "the repaired series starts at the session after the break, so no price-derived figure spans it");
+  const clean = repairCandles(rows.slice(120));
+  ok(clean.breaks.length === 0 && clean.candles.length === 180, "a continuous series is returned whole with no break");
+  ok(CANDLE_BREAK_LOG === 0.4, "the break line is a 0.4 log return, beyond any one-session move a split-free equity makes but inside a split");
+  const twice = repairCandles(rows.map((r, i) => ({ ...r, close: i < 60 ? 5000 : r.close })));
+  ok(twice.breaks.length === 2 && twice.candles.length === 180,
+     "two breaks are both reported and the series is cut at the last one");
+}
 
 console.log(`✓ flows-garch: ${n} assertions — Hansen's skewed t is a zero-mean unit-variance density that ` +
   "collapses to the Student t at zero skew, the simulator draws from it, the fit recovers simulated " +
