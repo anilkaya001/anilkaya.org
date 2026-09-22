@@ -4506,6 +4506,7 @@ async function main() {
 
   const chainByTicker = new Map();
   const vannaSamples = [];
+  const chainMiss = new Map();
   try {
 
   const deep = deepNames({ long: payloads.long.rows, short: payloads.short.rows });
@@ -4663,7 +4664,13 @@ async function main() {
     boardTickers.forEach((ticker, i) => {
       if (!chainRun.attempted[i]) { chainSkipped++; return; }
       const panels = chainRun.results[i];
-      if (!panels) { chainFailed++; return; }
+      if (!panels) {
+        chainFailed++;
+        chainMiss.set(ticker, "the option-chain read for this name failed this session, so " +
+          "no contract-level panel could be built from it — the failure is named in the run " +
+          "log, and the next run reads the chain again");
+        return;
+      }
       chainByTicker.set(ticker, panels);
       if (panels.status === "ok") chainOk++; else chainFailed++;
     });
@@ -5134,6 +5141,10 @@ async function main() {
   const byTicker = new Map(liquid.map((e) => [e.features.ticker, e]));
   const scoredByTicker = new Map(scored.map((r) => [r.ticker, r]));
 
+  const crossSectionTickers = [...byTicker.keys()].filter((t) => !onBoard.has(t));
+  const cardedTickers = [...onBoard.keys()].concat(crossSectionTickers);
+  const carded = new Set(cardedTickers);
+
   const congressByTicker = new Map();
 
   let congressRead = "not attempted";
@@ -5142,7 +5153,8 @@ async function main() {
     try {
 
       const recent = DRY_RUN
-        ? [...onBoard.keys()].flatMap((t) => fakeCongress(t))
+        ? [...onBoard.keys(), ...crossSectionTickers.filter((_, i) => i % 2 === 0)]
+          .flatMap((t) => fakeCongress(t))
         : await uw("/api/congress/recent-trades", { limit: 100 });
 
       const identity = (r) => `${(r && r.politician_id) || (r && r.name) || ""}|` +
@@ -5161,10 +5173,11 @@ async function main() {
       congressRead = "ok";
       for (const row of merged) {
         const t = row && (row.ticker || row.symbol);
-        if (!t || !onBoard.has(t)) continue;
+        if (!t || !carded.has(t)) continue;
         if (!congressByTicker.has(t)) congressByTicker.set(t, []);
         congressByTicker.get(t).push(row);
       }
+      const boardMatched = [...congressByTicker.keys()].filter((t) => onBoard.has(t)).length;
       console.log(
         `  congress: ${merged.length} disclosure(s) market-wide ` +
         `(${recent.length} from this leg's own page` +
@@ -5172,7 +5185,11 @@ async function main() {
           ? `, ${politicalFilings.length} joined from the political leg's ${POLITICAL_WINDOW_DAYS}-day ladder ` +
             `— the two windows are now one, so a card can no longer deny what /flows/political/ ranks`
           : `; the political ladder read nothing to join, so this card window is the shallow one`) +
-        `), ${congressByTicker.size} of ${onBoard.size} board name(s) matched`);
+        `), ${boardMatched} of ${onBoard.size} board name(s) matched` +
+        (crossSectionTickers.length
+          ? `, and ${congressByTicker.size - boardMatched} of ${crossSectionTickers.length} ` +
+            "cross-section name(s) from the same tape, at no further call"
+          : ""));
     } catch (error) {
       congressRead = "failed";
       console.warn(`  congress: market-wide read failed — ${error.message}`);
@@ -5192,9 +5209,6 @@ async function main() {
         `which costs more than the calls do.`);
     }
   }
-
-  const crossSectionTickers = [...byTicker.keys()].filter((t) => !onBoard.has(t));
-  const cardedTickers = [...onBoard.keys()].concat(crossSectionTickers);
 
   const marketCross = indexMarketCross({
     oiChange: crossRaws ? crossRaws.oiChange : null,
@@ -5317,6 +5331,7 @@ async function main() {
         expiries: e.raw.expiries,
         surface,
         chain: chainByTicker.get(ticker) || null,
+        chainMissing: chainMiss.get(ticker) || null,
 
         scoreHistory: scoreTrack
           ? {
@@ -5464,7 +5479,9 @@ async function main() {
             ticks: e.raw.ticks,
             expiries: e.raw.expiries,
 
-            surface: null, chain: null, maxPain: null, congress: null,
+            surface: null, chain: null, maxPain: null,
+
+            congress: congressByTicker.get(ticker) || (congressRead === "ok" ? [] : null),
             darkpool: null, oiDeltas: null, termStructure: null, ivRank: null,
             scoreHistory: scoreTrack
               ? {

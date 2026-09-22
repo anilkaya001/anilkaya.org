@@ -399,6 +399,21 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(preFieldCongress.panels.congress.status, "unavailable",
      "and a card from before the pipeline learned the distinction reads as " +
      "unavailable rather than claiming a measurement it never made");
+
+  const never = "this name was measured in the run's cross-section but is not on today's board";
+  const crossCard = buildCard({ ...full, chain: null, congress: [], unfetched: never });
+  for (const key of ["aggressor", "ivSurface", "skewTerm", "topContracts"]) {
+    eq(crossCard.panels[key].reason, never,
+       `a cross-section card's ${key} gives the reason its chain was never requested, the same ` +
+       "sentence its other withheld panels give — not a slow morning that never happened");
+  }
+  eq(crossCard.panels.congress.status, "quiet",
+     "and a cross-section card handed the market-wide tape reads it: quiet, not unfetched");
+  const failed = "the option-chain read for this name failed this session";
+  eq(buildCard({ ...full, chain: null, chainMissing: failed }).panels.topContracts.reason, failed,
+     "a deep name whose chain read failed says it failed");
+  ok(/slow morning/.test(buildCard({ ...full, chain: null }).panels.topContracts.reason),
+     "while a deep name the chain lane never reached keeps the deadline sentence");
 }
 
 {

@@ -792,12 +792,13 @@ function oiBasisReading(basis) {
   };
 }
 
-function chainPanel(chain, key) {
+function chainPanel(chain, key, missing = null) {
   if (!chain) {
     return {
       status: "unavailable",
-      reason: "no option chain was fetched for this name this session — the chain leg " +
-        "is the last call the pipeline spends and the first it gives up on a slow morning",
+      reason: typeof missing === "string" && missing ? missing
+        : "no option chain was fetched for this name this session — the chain leg " +
+          "is the last call the pipeline spends and the first it gives up on a slow morning",
     };
   }
   const panel = chain[key] || { status: "unavailable", reason: "this panel was not built from the chain" };
@@ -1366,6 +1367,7 @@ export function buildCard({
   unfetched = null,
 
   variation: variationOpts = null,
+  chainMissing = null,
 }) {
   const f = features || {};
   const spot = numOrNull(row && row.close) ?? numOrNull(features && features.spot);
@@ -1459,10 +1461,10 @@ export function buildCard({
       scoreOverlay: scoreOverlayPanel(scoreHistory, contextPanel),
 
       premiumTrack: premiumTrackPanel(scoreHistory),
-      ivSurface: chainPanel(chain, "ivSurface"),
-      skewTerm: chainPanel(chain, "skewTerm"),
-      topContracts: chainPanel(chain, "topContracts"),
-      aggressor: chainPanel(chain, "aggressor"),
+      ivSurface: chainPanel(chain, "ivSurface", unfetched || chainMissing),
+      skewTerm: chainPanel(chain, "skewTerm", unfetched || chainMissing),
+      topContracts: chainPanel(chain, "topContracts", unfetched || chainMissing),
+      aggressor: chainPanel(chain, "aggressor", unfetched || chainMissing),
       path: buildPath(ticks, { sessionDate }),
       calendar: buildCalendar(expiries, { asOf: sessionDate }),
 

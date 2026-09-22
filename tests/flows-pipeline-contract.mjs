@@ -1326,6 +1326,27 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
          "construction, and an overlap would mean a name got both lanes and paid the deep calls twice");
     }
 
+    {
+      const congressOf = { ok: 0, quiet: 0, unavailable: 0 };
+      for (const t of byDepth["cross-section"]) {
+        const card = JSON.parse(fs.readFileSync(`${prefix}-card-${t}.json`, "utf8"));
+        congressOf[card.panels.congress.status] = (congressOf[card.panels.congress.status] || 0) + 1;
+        for (const key of ["aggressor", "ivSurface", "skewTerm", "topContracts"]) {
+          const p = card.panels[key];
+          ok(p.status === "unavailable" && /not on today's board/.test(p.reason) &&
+             !/slow morning/.test(p.reason),
+             `${t} ${key}: a chain never requested for a cross-section name says so, not that ` +
+             `a slow morning gave it up (${String(p.reason).slice(0, 60)})`);
+        }
+      }
+      eq(congressOf.unavailable, 0,
+         "no cross-section card calls congress unavailable when the market-wide tape was read — " +
+         "the card was denying what /flows/political/ ranks from the same tape");
+      ok(congressOf.ok > 0 && congressOf.quiet > 0,
+         `and the tape's own answer reaches them: ${congressOf.ok} with disclosures, ` +
+         `${congressOf.quiet} read and quiet`);
+    }
+
     const total = long.rows.length + short.rows.length;
     ok(total > byDepth.board.size,
        `the board (${total} rows) is genuinely wider than the deep set (${byDepth.board.size}), so this ` +
