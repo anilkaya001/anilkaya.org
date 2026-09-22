@@ -4792,6 +4792,9 @@
 
     const skewt = g.dist === "skewt";
     const nu = skewt ? isNum(g.nu) : null, lam = skewt ? isNum(g.lambda) : null;
+    const nuCeiling = nu !== null && nu >= 29.95;
+    const heading = $("ftGarchH");
+    if (heading) heading.textContent = "GARCH(1,1) \u2014 " + (skewt ? "skewed t" : "fitted before the skewed t");
     const lastVol = isNum(g.lastVol) !== null ? isNum(g.lastVol)
       : (all.length && all[all.length - 1].v !== null ? all[all.length - 1].v : null);
     const nextVol = isNum(g.nextVol), longRun = isNum(g.longRunVol);
@@ -4807,14 +4810,19 @@
     };
     put("LAST SESSION", pct(lastVol),
       "The conditional volatility on the last fitted session, annualised.", "is-lead");
-    put("NEXT SESSION", pct(nextVol),
-      "One step of the variance recursion off the last shock, annualised: the model\u2019s own " +
-      "next-session level, not a claim about the return.", "is-lead");
+    if (nextVol !== null) {
+      put("NEXT SESSION", pct(nextVol),
+        "One step of the variance recursion off the last shock, annualised: the model\u2019s own " +
+        "next-session level, not a claim about the return.", "is-lead");
+    }
     put("LONG-RUN", pct(longRun),
       "The unconditional volatility the parameters imply, annualised.", "is-lead");
     if (skewt) {
-      put("TAIL SHAPE \u03bd", nu === null ? DASH : nu.toFixed(1),
-        "Degrees of freedom of the skewed t: lower is heavier-tailed; near 30 the tails are the normal\u2019s.");
+      put("TAIL SHAPE \u03bd", nu === null ? DASH : nuCeiling ? "\u2265 30" : nu.toFixed(1),
+        nuCeiling
+          ? "The shape reached its ceiling of 30: the likelihood found no tail heavier than the normal\u2019s, " +
+            "so this is a bound, not a measurement."
+          : "Degrees of freedom of the skewed t: lower is heavier-tailed; near 30 the tails are the normal\u2019s.");
       put("SKEW \u03bb", lam === null ? DASH : (lam > 0 ? "+" : lam < 0 ? "\u2212" : "") + Math.abs(lam).toFixed(2),
         "Skew of the innovations: negative puts the heavier tail on the downside, positive on the upside. " +
         "A year of returns pins it to about one decimal, so two are shown.");
@@ -4830,7 +4838,8 @@
       const nn = isNum(g.n);
       const d0 = Array.isArray(g.dates) && g.dates.length ? g.dates[0] : null;
       const d1 = Array.isArray(g.dates) && g.dates.length ? g.dates[g.dates.length - 1] : null;
-      const tails = nu === null ? "" : nu < 5 ? "heavy tails" : nu < 15 ? "moderately heavy tails" : "tails close to the normal\u2019s";
+      const tails = nu === null ? "" : nuCeiling ? "no tail heavier than the normal\u2019s was found, \u03bd at its ceiling"
+        : nu < 5 ? "heavy tails" : nu < 15 ? "moderately heavy tails" : "tails close to the normal\u2019s";
       const side = lam === null ? "" : lam < -0.05 ? "the heavier tail on the downside"
         : lam > 0.05 ? "the heavier tail on the upside" : "no material skew";
       sub.textContent = "Fitted by maximum likelihood on " + (nn === null ? "the" : nn) +
@@ -5677,7 +5686,7 @@
         (chg.d1.gap === 1
           ? ". "
           : " — this name carries no score for the " + SESSIONS(chg.d1.gap - 1) +
-            " in between, so the move is not an overnight one. ") +
+            " in between, so whether the move came in one night or two is not known. ") +
         "It stands at " + P.signed(chg.at.score, (a) => String(a)) + " on " + chg.at.d + "."));
     } else {
       lead.append(el("span", "ft-chg-v " + P.polarity(chg.at.score),
@@ -5830,10 +5839,27 @@
   const NEURON_CLAMP = 32;
   let neuronState = null;
 
+  let ideasOpen = false;
+
+  function foldIdeas(list, more) {
+    const items = [...list.children];
+    items.forEach((li, i) => { li.hidden = i > 0 && !ideasOpen; });
+    if (!more) return;
+    const extra = Math.max(0, items.length - 1);
+    more.hidden = extra === 0;
+    more.setAttribute("aria-expanded", ideasOpen ? "true" : "false");
+    more.textContent = ideasOpen ? "Show fewer ideas" : "Show " + extra + " more idea" + (extra === 1 ? "" : "s");
+  }
+
   function paintNeuronIdeas(list, ideas, byKey) {
     list.replaceChildren();
     const rows = Array.isArray(ideas) ? ideas : [];
     list.hidden = !rows.length;
+    const more = $("ftNeuronMore");
+    if (more && !more.dataset.bound) {
+      more.dataset.bound = "1";
+      more.addEventListener("click", () => { ideasOpen = !ideasOpen; foldIdeas(list, more); });
+    }
     rows.forEach((idea, i) => {
       if (!idea || typeof idea !== "object") return;
       const li = el("li", "ft-idea");
@@ -5863,6 +5889,7 @@
       if (meta.childElementCount) li.append(meta);
       list.append(li);
     });
+    foldIdeas(list, more);
   }
 
   function paintNeuronCoverage(cov, ctx) {

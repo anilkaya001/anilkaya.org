@@ -1898,7 +1898,7 @@ try {
        "host spent the width on void because the gauge and its families set their own width, " +
        "so the derivation now lays its gauge, its readings and its method out in three " +
        "columns of its own and becomes a band");
-    const page = await browser.newPage({ viewport: { width: 1280, height: 1200 } });
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1200 } });
     await mount(page, withChain[0], { ticker: withChain[0].ticker });
     const order = await page.evaluate(() =>
       [...document.querySelectorAll(".ft-panel[data-panel]")].map((s) => s.dataset.panel));
@@ -1917,14 +1917,29 @@ try {
       };
     });
     ok(Math.abs(band.scoreW - band.gridW) <= 1,
-       `1280px: the derivation spans the whole grid (${band.scoreW} of ${band.gridW})`);
-    eq(band.tracks, 3, "and lays itself out in three columns");
+       `1440px: the derivation spans the whole grid (${band.scoreW} of ${band.gridW})`);
+    eq(band.tracks, 3, "and lays itself out in three columns when the panel is at least 46rem wide");
     ok(band.colH.every((h) => h > 0), `each of which holds something (${band.colH.join(", ")})`);
     ok(band.scoreH < 760,
        `so the panel stands under 760px (${band.scoreH}) where the column stood at 1,034`);
     ok(Math.abs(band.statsW - band.gridW) <= 1,
        `and the key statistics beneath it span the grid too (${band.statsW} of ${band.gridW}), ` +
        "so the signal station is two bands rather than a column and a stub");
+    await page.setViewportSize({ width: 1024, height: 900 });
+    await page.waitForTimeout(250);
+    const narrow = await page.evaluate(() => {
+      const score = document.querySelector('.ft-panel[data-panel="__score"]');
+      const cols = score.querySelector(".fc-score-cols");
+      const label = score.querySelector(".fc-fam-l");
+      return { w: Math.round(score.getBoundingClientRect().width),
+        tracks: getComputedStyle(cols).gridTemplateColumns.split(" ").length,
+        colW: Math.round(cols.children[0].getBoundingClientRect().width),
+        labelLines: label ? Math.round(label.getBoundingClientRect().height / parseFloat(getComputedStyle(label).lineHeight)) : 0 };
+    });
+    ok(narrow.tracks === 2 && narrow.colW >= 300,
+       `1024px: a ${narrow.w}px panel keeps two columns of ${narrow.colW}px rather than three of 218 that wrapped ` +
+       "the family labels one word per line — the split follows the panel's own width, not the viewport's");
+    ok(narrow.labelLines <= 2, `and a family label sits on at most two lines (${narrow.labelLines})`);
     ok(!order.includes("scoreOverlay"), "the score-over-price series is mounted nowhere");
     await page.close();
 
@@ -2396,8 +2411,10 @@ try {
     }));
     ok(/2 sessions earlier/.test(gapped.lead),
        `the gap is counted and printed (${gapped.lead.slice(0, 120)})`);
-    ok(/not an overnight one/i.test(gapped.lead),
-       "and the sentence refuses the overnight reading a bare delta would invite");
+    ok(/one night or two is not known/i.test(gapped.lead),
+       "and the sentence refuses the overnight reading a bare delta would invite, without claiming " +
+       "the opposite: an unscored session in between leaves the timing unknown, which is what the " +
+       "run paragraph below says of the same gap");
 
     const stale = await read(staged((o, r) => { r[r.length - 1].score = null; }));
     ok(/1 session old/.test(stale.stale),
@@ -3921,14 +3938,19 @@ try {
     const older = JSON.parse(JSON.stringify(fitted));
     delete older.panels.context.garch.dist;
     delete older.panels.context.garch.lambda;
+    delete older.panels.context.garch.nextVol;
     older.panels.context.garch.nu = 1.3;
     await mount(page, older, { ticker: older.ticker, station: "all" });
     const pre = await page.evaluate(() => ({
+      heading: document.getElementById("ftGarchH").textContent,
       labels: [...document.querySelectorAll("#ftGarch .ft-garch-p dt")].map((d) => d.textContent),
       note: document.getElementById("ftGarchS").textContent,
     }));
-    ok(!pre.labels.some((l) => /TAIL SHAPE|SKEW/.test(l)),
-       `a card fitted before the skewed t shows no shape or skew cell (${pre.labels.join(", ")})`);
+    ok(!pre.labels.some((l) => /TAIL SHAPE|SKEW|NEXT SESSION/.test(l)),
+       `a card fitted before the skewed t shows no shape, skew or next-session cell (${pre.labels.join(", ")})`);
+    eq(pre.labels.length, 6, "so its strip is two full rows of three rather than a lone cell on a third");
+    ok(/fitted before the skewed t/.test(pre.heading),
+       `and the heading says so instead of naming a density that was not fitted (${pre.heading})`);
     ok(/predates the skewed-t/.test(pre.note) && !/Hansen/.test(pre.note),
        "and its note says the fit predates the density instead of reading a GED shape as a Student-t one");
 
@@ -3995,6 +4017,22 @@ try {
       const l = document.getElementById("ftNeuronIdeas");
       return l && !l.hidden && l.children.length === 2;
     }, null, { timeout: 15000 });
+    const folded = await page.evaluate(() => ({
+      second: document.querySelectorAll("#ftNeuronIdeas > .ft-idea")[1].hidden,
+      more: document.getElementById("ftNeuronMore").textContent,
+      moreHidden: document.getElementById("ftNeuronMore").hidden,
+      expanded: document.getElementById("ftNeuronMore").getAttribute("aria-expanded"),
+    }));
+    ok(folded.second && !folded.moreHidden && folded.more === "Show 1 more idea" && folded.expanded === "false",
+       `only the first idea is open by default, the rest wait behind a disclosure that counts them (${folded.more})`);
+    await page.click("#ftNeuronMore");
+    const unfolded = await page.evaluate(() => ({
+      second: document.querySelectorAll("#ftNeuronIdeas > .ft-idea")[1].hidden,
+      more: document.getElementById("ftNeuronMore").textContent,
+      expanded: document.getElementById("ftNeuronMore").getAttribute("aria-expanded"),
+    }));
+    ok(!unfolded.second && unfolded.more === "Show fewer ideas" && unfolded.expanded === "true",
+       "and one click opens them all with the control saying how to fold them back");
     const neuron = await page.evaluate(() => {
       const ideas = [...document.querySelectorAll("#ftNeuronIdeas > .ft-idea")].map((li) => ({
         title: li.querySelector(".ft-idea-t").textContent,

@@ -2,7 +2,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "216";
+export const ASSET_VERSION = "217";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -1156,6 +1156,8 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
         <p class="ak-neuron-h" id="ftNeuronH">Neuron</p>
         <p class="ak-neuron-say" id="ftNeuronSay"></p>
         <ol class="ft-ideas" id="ftNeuronIdeas" hidden aria-label="Trade ideas, ranked by robustness"></ol>
+        <button class="ft-ideas-more" id="ftNeuronMore" type="button" hidden aria-expanded="false"
+                aria-controls="ftNeuronIdeas"></button>
         <p class="ak-neuron-src" id="ftNeuronSrc"></p>
         <p class="ak-neuron-cov" id="ftNeuronCov" hidden></p>
       </div>

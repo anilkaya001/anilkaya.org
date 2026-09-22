@@ -4,6 +4,7 @@ import { buildContext, contextLines, contextFacts, promptForNeuron, parseNeuronO
          NEURON_CONTEXT_VERSION, NEURON_MAX_IDEAS, NEURON_STRUCTURES } from "../shared/flows-neuron.js";
 import { TICKER_PANELS, SENTINEL_KEYS } from "../shared/flows-panels.js";
 import { guardAnswer, selectFacts, buildFactIndex } from "../shared/flows-ask.js";
+import { neuronProvenance } from "../shared/flows-pages.js";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
@@ -198,6 +199,17 @@ const CARD = {
   ok(/capped at weak/.test(stalePlain) && stalePlain.includes("Dealer gamma for SYN1"),
      "a stale card's fallback names the cap and still quotes the readings, instead of claiming the card publishes none");
   ok(guardAnswer(stalePlain, guardFacts(staleCtx), { smallIntegers: false }).ok, "and passes the guard too");
+}
+
+{
+  const prov = (guard, llm = false) => neuronProvenance({ text: "x", llm, model: "m", guard });
+  ok(/could not be parsed/.test(prov("ideas:unparsable")),
+     "a reply the parser could not read is named as such in the provenance, never served as the model's wording");
+  ok(/ideas without a summary/.test(prov("summary:empty")),
+     "a parsed reply that lacked a summary is named as such, not as a model that answered with nothing");
+  ok(/answered with nothing/.test(prov("unreachable:empty")), "which stays the wording for an empty transport reply");
+  ok(/^Wording by m;/.test(prov("ideas:2 refused", true)),
+     "and a model summary that survived the guard is attributed to the model whatever happened to its ideas");
 }
 
 console.log(`✓ flows-neuron: ${checks} assertions — a context that carries every registry panel plus the ` +
