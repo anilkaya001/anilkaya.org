@@ -100,21 +100,31 @@ export function polarityOf(key) {
   return Object.hasOwn(POLARITY, key) ? POLARITY[key] : 0;
 }
 
-export function buildLevels({ spot, atr, gammaFlip, maxPain, callWall, putWall }) {
+export const WALL_EDGE_NOTE = "this wall is the last strike of the ladder the run read, so the " +
+  "strike window ends here: the largest gamma may sit beyond it, and this is where the " +
+  "window stops rather than where the book peaks";
+
+export function buildLevels({ spot, atr, gammaFlip, maxPain, callWall, putWall, band = null }) {
   const s = numOrNull(spot);
   const a = numOrNull(atr);
   if (s === null || !(s > 0)) return unavailable("no spot price");
 
+  const lo = band ? numOrNull(band.min) : null;
+  const hi = band ? numOrNull(band.max) : null;
+  const atEdge = (px) => (lo !== null && Math.abs(px - lo) < 1e-9) || (hi !== null && Math.abs(px - hi) < 1e-9);
+
   const measure = (kind, label, raw) => {
     const px = numOrNull(raw);
     if (px === null || !(px > 0)) return null;
+    const edge = (kind === "call_wall" || kind === "put_wall") && atEdge(px);
     return {
       kind,
-      label,
+      label: edge ? label + " (window edge)" : label,
       px,
       distPct: (px - s) / s,
 
       distAtr: a !== null && a > 0 ? (px - s) / a : null,
+      ...(edge ? { edge: "window", note: WALL_EDGE_NOTE } : {}),
     };
   };
 
@@ -138,7 +148,8 @@ export function buildLevels({ spot, atr, gammaFlip, maxPain, callWall, putWall }
     `${pct.toFixed(1)}% ${above ? "above" : "below"} spot ${s.toFixed(2)}` +
     (near.distAtr === null
       ? " (ATR unavailable, so no distance in ATR)."
-      : ` — ${Math.abs(near.distAtr).toFixed(2)} ATR.`),
+      : ` — ${Math.abs(near.distAtr).toFixed(2)} ATR.`) +
+    (near.edge ? " It is the last strike the run read, so the wall may sit beyond it." : ""),
     {
       px: Number(near.px.toFixed(2)),
       spot: Number(s.toFixed(2)),
@@ -1559,6 +1570,7 @@ export function buildCard({
         maxPain: painRow ? painRow.px : null,
         callWall: gamma.status === "ok" ? gamma.callWall : null,
         putWall: gamma.status === "ok" ? gamma.putWall : null,
+        band: gamma.status === "ok" ? { min: gamma.bandMin, max: gamma.bandMax } : null,
       }),
 
       scoreOverlay: scoreOverlayPanel(scoreHistory, contextPanel),

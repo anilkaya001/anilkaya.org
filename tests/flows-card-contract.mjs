@@ -61,6 +61,24 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(buildLevels({ spot: 0 }).status, "unavailable", "no spot means no levels");
   eq(buildLevels({ spot: 100, atr: 4 }).status, "unavailable", "no levels at all is unavailable");
   ok(!("levels" in buildLevels({ spot: 0 })), "an unavailable panel carries no numbers at all");
+
+  const csx = buildLevels({ spot: 46.305, atr: 0.9519, gammaFlip: 45.5, callWall: 60, putWall: 44,
+    band: { min: 32, max: 60 } });
+  const cw = csx.levels.find((x) => x.kind === "call_wall");
+  eq(cw.edge, "window",
+     "a call wall on the last strike of the ladder (CSX 2026-09-21: 60 = bandMax, 14 ATR out) is " +
+     "marked as the window's edge, not read as where the book peaks");
+  eq(cw.label, "Call wall (window edge)", "in the label every reader prints");
+  ok(/last strike of the ladder/.test(cw.note), "with the reason beside it");
+  const pw = csx.levels.find((x) => x.kind === "put_wall");
+  ok(!("edge" in pw) && pw.label === "Put wall", "while a wall inside the window is unmarked");
+  ok(!("edge" in csx.levels.find((x) => x.kind === "gamma_flip")),
+     "and only a wall can sit on the edge: a flip there is still a sign change");
+  const edgeNear = buildLevels({ spot: 100, atr: 4, putWall: 98, band: { min: 98, max: 130 } });
+  ok(/may sit beyond it/.test(edgeNear.lead.say),
+     `a nearest level on the edge says so in the lead (${edgeNear.lead.say})`);
+  ok(!("edge" in buildLevels({ spot: 100, atr: 4, callWall: 110 }).levels[0]),
+     "and with no window stated nothing is marked");
 }
 
 {
