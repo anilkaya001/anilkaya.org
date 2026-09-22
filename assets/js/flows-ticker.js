@@ -4398,9 +4398,20 @@
 
     const live = spec.points.filter((pt) => pt.v !== null);
     if (live.length < 2) {
+      const have = spec.points.length;
       body.append(el("p", "ft-chart-dead",
-        "Fewer than two of the " + spec.points.length + " points in this series carry a " +
-        "value, so there is no shape to draw."));
+        have === 0
+          ? "This series carries no points, so there is no shape to draw."
+          : live.length === 0
+            ? (have === 1
+              ? "The one point in this series carries no value, so there is no shape to draw."
+              : "None of the " + have + " points in this series carries a value, so there is " +
+                "no shape to draw.")
+            : (have === 1
+              ? "This series holds one point. One reading is a level rather than a shape, so " +
+                "nothing is drawn."
+              : "Only one of the " + have + " points in this series carries a value. One " +
+                "reading is a level rather than a shape, so nothing is drawn.")));
       if (sub) sub.textContent = "";
       host.hidden = false;
       return;
@@ -4435,7 +4446,8 @@
     const svg = svgEl("svg", {
       class: "ft-chart-svg", viewBox: "0 0 " + W + " " + H,
       role: "img", tabindex: "0",
-      "aria-label": CHART_LABEL[chartTab] + ", " + spec.points.length + " points",
+      "aria-label": CHART_LABEL[chartTab] + ", " + spec.points.length +
+        ftsPlural(spec.points.length, " point", " points"),
     });
 
     for (const frac of [0, 0.5, 1]) {

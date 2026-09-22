@@ -386,6 +386,16 @@ try {
        "and the projected line is drawn beside it");
     eq(await page.locator("#sgPlot line.sg-zero").count(), 1,
        "with the zero rule, which is the axis the sign is read against and is always drawn");
+    eq(await page.locator("#sgPlot polygon.sg-zone--profit").count(), 1,
+       "the profit zone is one polygon, the area between the expiry line and the zero rule");
+    eq(await page.locator("#sgPlot polygon.sg-zone--loss").count(), 1,
+       "and the loss zone is its twin, clipped to the other side of the rule");
+    const zoneClips = await page.$$eval("#sgPlot polygon.sg-zone", (ps) =>
+      ps.map((p) => p.getAttribute("clip-path")));
+    ok(zoneClips.every((c) => /^url\(#sgZone\d+[pl]\)$/.test(c)),
+       `each zone is clipped to its own side of the zero rule, never drawn whole (${zoneClips})`);
+    ok(/tinted green and the loss zone red/.test(plotNote),
+       "and the note says the tint is a reading aid that carries no figure");
 
     await page.$eval("#sgSceneDays", (n) => {
       n.value = "0";

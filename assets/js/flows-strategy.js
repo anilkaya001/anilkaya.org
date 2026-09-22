@@ -1055,6 +1055,7 @@
 
   const PLOT_H = 300;
   const PAD = { top: 18, right: 16, bottom: 34, left: 62 };
+  let zoneSeq = 0;
 
   function renderPlot(host, note, legs, cost, ext, bes) {
     if (!host) return;
@@ -1118,6 +1119,22 @@
     svg.append(caption);
 
     const zeroY = Y(0);
+    const zoneId = "sgZone" + (++zoneSeq);
+    const defs = svgEl("defs", {});
+    const clipUp = svgEl("clipPath", { id: zoneId + "p" });
+    clipUp.append(svgEl("rect", { x: 0, y: 0, width, height: Math.max(0, zeroY).toFixed(2) }));
+    const clipDn = svgEl("clipPath", { id: zoneId + "l" });
+    clipDn.append(svgEl("rect", { x: 0, y: zeroY.toFixed(2), width,
+      height: Math.max(0, PLOT_H - zeroY).toFixed(2) }));
+    defs.append(clipUp, clipDn);
+    svg.append(defs);
+    const area = [X(lo).toFixed(2) + "," + zeroY.toFixed(2)]
+      .concat(expiryPts.map((p) => X(p.x).toFixed(2) + "," + Y(p.y).toFixed(2)))
+      .concat([X(hi).toFixed(2) + "," + zeroY.toFixed(2)]).join(" ");
+    svg.append(svgEl("polygon", { class: "sg-zone sg-zone--profit", points: area,
+      "clip-path": "url(#" + zoneId + "p)" }));
+    svg.append(svgEl("polygon", { class: "sg-zone sg-zone--loss", points: area,
+      "clip-path": "url(#" + zoneId + "l)" }));
     svg.append(svgEl("line", {
       class: "sg-zero", x1: PAD.left, y1: zeroY.toFixed(2),
       x2: width - PAD.right, y2: zeroY.toFixed(2),
@@ -1207,7 +1224,8 @@
         "The SOLID line is the payoff at expiry and it is exact: at expiry an option is " +
         "worth its intrinsic value, so nothing here needs a volatility, a rate or a " +
         "distribution. Profit is above the $0 rule and loss is below it — the sign is " +
-        "carried by position, never by colour.",
+        "carried by position, never by colour alone; the profit zone is tinted green and " +
+        "the loss zone red so the side reads at a glance, and the tint carries no figure.",
       ];
       if (projPts) {
         bits.push("The DASHED line is a Taylor expansion in the provider's own greeks at " +
