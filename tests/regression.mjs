@@ -586,7 +586,7 @@ try {
       owner: null,
       dashboardFocused: true,
     });
-    assert.match(await page.locator(".dashboard-resume").textContent(), /0 \/ 20 complete/);
+    assert.match(await page.locator(".dashboard-resume").textContent(), /Statistical Foundations[\s\S]*0 \/ 32 complete · next lesson 1/);
     clean();
     await context.close();
   }
