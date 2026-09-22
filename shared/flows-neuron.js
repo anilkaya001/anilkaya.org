@@ -534,7 +534,7 @@ export function regimeState(card, extras) {
     : state === "squeeze" || state === "amplifying"
       ? (direction === "bullish" ? STATE_STRUCTURES.bull[prem] : direction === "bearish" ? STATE_STRUCTURES.bear[prem] : STATE_STRUCTURES.shortNoSide[prem])
       : state === "transitional" ? STATE_STRUCTURES.transitional[prem] : STATE_STRUCTURES[state];
-  const preferred = [...table.preferred];
+  const preferred = table.preferred.filter((x) => !(direction && state === "transitional" && x === "no position"));
   if (state === "transitional" && direction) preferred.push(direction === "bullish" ? "call debit spread" : "put debit spread");
   const out = {
     version: STATE_VERSION, state, direction, flow, confidence, premium: premium.reading,

@@ -4795,18 +4795,20 @@
       penW = true;
     }
     if (dw) svg.append(svgEl("path", { class: "ft-garch-ewma", d: dw.trim(), fill: "none" }));
+    const levelLabels = [];
     const levelLine = (lv, cls, label, below) => {
       if (lv === null) return;
       const yy = y(lv);
       svg.append(svgEl("line", { class: "ft-garch-lvl " + cls, x1: plotL, x2: plotL + plotW, y1: yy, y2: yy }));
-      const t = svgEl("text", { class: "ft-garch-lvl-t " + cls, x: plotL + plotW - 2, y: below ? yy + 10 : yy - 3, "text-anchor": "end" });
+      const t = svgEl("text", { class: "ft-garch-lvl-t " + cls, x: plotL + 3, y: below ? yy + 10 : yy - 3 });
       t.textContent = label + " " + lv.toFixed(1) + "%";
-      svg.append(t);
+      levelLabels.push(t);
     };
     const ivAbove = ivLevel === null || rvLevel === null || ivLevel >= rvLevel;
     levelLine(rvLevel, "is-rv", "RV 30d", ivAbove);
     levelLine(ivLevel, "is-iv", "IV ATM", !ivAbove);
     svg.append(svgEl("path", { class: "ft-chart-line ft-garch-line", d: d.trim(), fill: "none" }));
+    for (const t of levelLabels) svg.append(t);
     const e0 = svgEl("text", { class: "ft-chart-ax", x: plotL, y: H - 6 });
     e0.textContent = pts[0].label;
     svg.append(e0);

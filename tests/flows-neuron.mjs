@@ -357,8 +357,8 @@ const CARD = {
   const onFlip = JSON.parse(JSON.stringify(between));
   onFlip.panels.levels.levels[2].distAtr = 0.2;
   const tf = regimeState(onFlip, { expectedSession: "2026-09-15" });
-  ok(tf.state === "transitional" && tf.invalidation.kind === "gamma_flip" && tf.preferred.includes("call debit spread"),
-     "spot inside half an ATR of the flip is transitional, leaning the way the flow votes");
+  ok(tf.state === "transitional" && tf.invalidation.kind === "gamma_flip" && tf.preferred.includes("call debit spread") && !tf.preferred.includes("no position"),
+       "spot inside half an ATR of the flip is transitional, leaning the way the flow votes, and a resolved lean drops the no-position placeholder that would contradict it");
 
   const blind = JSON.parse(JSON.stringify(CARD));
   blind.panels.gamma = { status: "unavailable", reason: "no ladder" };

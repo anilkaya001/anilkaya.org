@@ -2660,7 +2660,7 @@ body.is-stale .flows-tablewrap {
   text-transform: uppercase;
   line-height: 1.15;
 }
-.ft-hero-seg--3 > i { width: 0.55rem; height: 0.55rem; border-radius: 50%; }
+.ft-hero-seg.ft-hero-seg--3 > i { width: 0.55rem; height: 0.55rem; border-radius: 50%; }
 .ft-hero > .ft-hero-state {
   grid-column: 1 / -1;
   grid-row: auto;
@@ -6468,9 +6468,9 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
 .ft-top > * { min-width: 0; }
 @media (min-width: 60rem) {
 
-  .ft-top { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); align-items: stretch; }
+  .ft-top { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); align-items: start; }
   .ft-chart, .ft-garch { display: flex; flex-direction: column; }
-  .ft-chart-body { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+  .ft-chart-body { display: flex; flex-direction: column; }
 }
 
 .ft-row1 { display: grid; gap: var(--space-3); margin-top: var(--space-3); min-width: 0; }
@@ -6504,7 +6504,8 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
 .ft-garch-lvl { stroke-width: 1; stroke-dasharray: 2 3; opacity: 0.9; }
 .ft-garch-lvl.is-iv { stroke: var(--gold-celadon); }
 .ft-garch-lvl.is-rv { stroke: var(--ink-dim); }
-.ft-garch-lvl-t { font-family: var(--font-figure); font-size: 9px; font-variant-numeric: tabular-nums; }
+.ft-garch-lvl-t { font-family: var(--font-figure); font-size: 9px; font-variant-numeric: tabular-nums;
+  paint-order: stroke; stroke: var(--bg-elev); stroke-width: 3px; stroke-linejoin: round; }
 .ft-garch-lvl-t.is-iv { fill: var(--gold-celadon); }
 .ft-garch-lvl-t.is-rv { fill: var(--ink-dim); }
 .ft-garch-ret { opacity: 0.55; }
