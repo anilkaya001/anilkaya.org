@@ -3,11 +3,12 @@ export const CARD_SCHEMA_VERSION = 2;
 import {
   horizonMove, HORIZON_SESSIONS, callGammaLeg, putGammaLeg, pathSignature,
   greekTermStructure, callVannaLeg, putVannaLeg, callCharmLeg, putCharmLeg,
-  callDeltaLeg, putDeltaLeg, CONVICTION_WEIGHTS,
+  callDeltaLeg, putDeltaLeg, CONVICTION_WEIGHTS, liveExpiry,
 } from "./flows-features.js";
 import {
   shapeStockDarkpool, shapeStockOiChange, buildVolContext, STOCK_NOTES,
 } from "./flows-stock.js";
+import { variation, cardVariationInput } from "./flows-variation.js";
 
 import { UA_MIN_VOLUME } from "./flows-unusual.js";
 import { joinScoreToPrice } from "./flows-overlay.js";
@@ -117,11 +118,12 @@ export function buildLevels({ spot, atr, gammaFlip, maxPain, callWall, putWall }
     };
   };
 
+  const cw = numOrNull(callWall), pw = numOrNull(putWall);
   const levels = [
     measure("gamma_flip", "Gamma flip", gammaFlip),
     measure("max_pain", "Max pain", maxPain),
-    measure("call_wall", "Call wall", callWall),
-    measure("put_wall", "Put wall", putWall),
+    measure("call_wall", cw !== null && cw < s ? "Largest long-gamma strike" : "Call wall", callWall),
+    measure("put_wall", pw !== null && pw > s ? "Largest short-gamma strike" : "Put wall", putWall),
   ].filter(Boolean);
 
   if (!levels.length) return unavailable("no levels resolved");
@@ -183,11 +185,18 @@ export function buildGammaProfile(strikeRows, { spot, maxBars = 60 } = {}) {
 
     bandMin: rows[0].strike,
     bandMax: rows[rows.length - 1].strike,
+    reads: GAMMA_FLOW_READS,
   });
 }
 
+export const GAMMA_FLOW_READS =
+  "Gamma dealers added today: the vendor's directionalized volume by strike (ask and bid legs " +
+  "summed, each signed by its aggressor), not the standing open-interest book. The strike " +
+  "ladder aggregates every expiry the vendor carries at the session, including any that " +
+  "expired at its close. The open-interest book's net is on the hedging panel.";
+
 export function buildCalendar(expiryRows, { asOf = null, maxRows = 10 } = {}) {
-  const rows = (expiryRows || []).map((r) => {
+  const rows = (expiryRows || []).filter((r) => r && liveExpiry(r.expiry, asOf)).map((r) => {
     const c = numOrNull(callGammaLeg(r));
     const p = numOrNull(putGammaLeg(r));
     if (c === null && p === null) return null;
@@ -814,7 +823,7 @@ function chainPanel(chain, key) {
 const GREEK_SUBJECT = Object.freeze({
   vanna: "Vol sensitivity",
   charm: "Time decay",
-  delta: "Dealer delta",
+  delta: "Open-interest delta",
 });
 
 function greekLead(name, built) {
@@ -1355,6 +1364,8 @@ export function buildCard({
   marketCross = null,
 
   unfetched = null,
+
+  variation: variationOpts = null,
 }) {
   const f = features || {};
   const spot = numOrNull(row && row.close) ?? numOrNull(features && features.spot);
@@ -1375,7 +1386,7 @@ export function buildCard({
     rangeSessions: f.rangeSessions,
   }, { asOf: sessionDate });
 
-  return {
+  const card = {
     v: CARD_SCHEMA_VERSION,
     ticker,
 
@@ -1409,7 +1420,11 @@ export function buildCard({
     regime: f.netGamma !== undefined
       ? {
         netGamma: numOrNull(f.netGamma),
+        flowGamma: numOrNull(f.netGamma),
         label: f.gRegime || null,
+        labelFrom: f.gRegimeFrom || null,
+        bookGammaRaw: numOrNull(f.gammaBookRaw),
+        bookShare: numOrNull(f.gammaBookShare),
 
         flipSide: f.flipSide || null,
 
@@ -1481,10 +1496,24 @@ export function buildCard({
             reason: unfetched || "neither volatility feed could be read this run",
             note: STOCK_NOTES.volContext }
 
-        : withVolLead({ ...buildVolContext(termStructure, ivRank),
+        : withVolLead({ ...buildVolContext(termStructure, ivRank, { sessionDate }),
             note: STOCK_NOTES.volContext }),
     },
   };
+  card.panels.variation = buildVariation(card, { expiries, options: variationOpts });
+  if (card.regime && card.panels.variation.inputs) {
+    card.regime.bookGamma = numOrNull(card.panels.variation.inputs.gammaBook);
+  }
+  return card;
+}
+
+export function buildVariation(card, { expiries = null, options = null } = {}) {
+  try {
+    return variation(cardVariationInput(card, { expiries }), options || {});
+  } catch (error) {
+    return { status: "unavailable",
+      reason: "the hedging model failed on this card: " + String(error && error.message || error) };
+  }
 }
 
 function withVolLead(panel) {

@@ -3084,6 +3084,7 @@
   }
 
   const DRAW = {
+    variation: "variation",
     gamma: "gamma",
     aggressor: drawAggressor,
     ivSurface: drawIvSurface,
@@ -3445,7 +3446,8 @@
     __score: { group: "signal", tier: "lead" },
     __stats: { group: "signal", tier: "table" },
     __sessions: { group: "tape", tier: "table" },
-    gamma: { group: "convexity", tier: "lead" },
+    variation: { group: "convexity", tier: "lead" },
+    gamma: { group: "convexity", tier: "chart" },
     levels: { group: "convexity", tier: "reading" },
     displacement: { group: "convexity", tier: "reading" },
     surface: { group: "convexity", tier: "chart" },

@@ -492,11 +492,32 @@ export function callDeltaLeg(row) { return row ? (row.call_delta ?? row.call_dex
 export function putDeltaLeg(row)  { return row ? (row.put_delta  ?? row.put_dex)  : undefined; }
 
 export const GREEK_UNITS = Object.freeze({
-  gamma: "dollar-gamma: the change in dealer dollar-delta per 1% move in spot",
-  delta: "dollar-delta: the signed directional exposure dealers are carrying",
-  charm: "dollar-delta per DAY: how fast that exposure decays with time alone, spot unchanged",
-  vanna: "dollar-delta per VOL POINT: how much that exposure moves on a 1-point change in implied volatility, spot unchanged",
+  gamma: "share-gamma: gamma × open interest × 100 shares (vendor definition); put gamma arrives dealer-signed, so the dealer book is call + put",
+  delta: "share-delta: delta × open interest × 100 shares (vendor definition), holder-signed (calls +, puts −); dealer view = call − put",
+  charm: "charm × open interest × 100 shares (vendor definition), put leg holder-signed; no time unit is claimed here, because the per-day scale is measured across the run and applied on the hedging panel",
+  vanna: "vanna × open interest × 100 shares (vendor definition), put leg holder-signed; per 1.00 of volatility, checked against the option chain on the hedging panel before any dollar figure is drawn",
 });
+
+export const GREEK_DEALER_SIGN = Object.freeze({ gamma: 1, delta: -1, vanna: -1, charm: -1 });
+
+export const SIGN_CONVENTION =
+  "Put gamma arrives dealer-signed (negated); put delta, vanna and charm arrive with the " +
+  "holder's sign. Under the vendor's convention that dealers are long every call and short " +
+  "every put, dealer net = call + put for gamma and call − put for delta, vanna and charm. " +
+  "The two legs are drawn here as the vendor signed them, and each expiry's dealer net is " +
+  "published beside them.";
+
+export function expiryDays(expiry, asOf) {
+  const e = Date.parse(String(expiry || "").slice(0, 10) + "T00:00:00Z");
+  const a = Date.parse(String(asOf || "").slice(0, 10) + "T00:00:00Z");
+  return Number.isFinite(e) && Number.isFinite(a) ? Math.round((e - a) / 86400000) : null;
+}
+
+export function liveExpiry(expiry, asOf) {
+  if (!asOf) return true;
+  const d = expiryDays(expiry, asOf);
+  return d === null ? true : d > 0;
+}
 
 export function legPresent(rows, reader) {
   for (const r of (rows || [])) {
@@ -519,29 +540,29 @@ export function greekTermStructure(expiryRows, { name, callLeg, putLeg, asOf = n
     };
   }
 
-  const base = asOf ? Date.parse(String(asOf).slice(0, 10) + "T00:00:00Z") : NaN;
-
   const numOrNull = (v) => {
     if (v === null || v === undefined || v === "") return null;
     const n = Number(v);
     return Number.isFinite(n) ? n : null;
   };
+  const sign = Object.hasOwn(GREEK_DEALER_SIGN, name) ? GREEK_DEALER_SIGN[name] : null;
   const rows = [];
+  let expired = 0;
   for (const r of src) {
     if (!r || !r.expiry) continue;
     const c = hasCall ? numOrNull(callLeg(r)) : null;
     const p = hasPut ? numOrNull(putLeg(r)) : null;
 
     if (c === null && p === null) continue;
-    const ms = Date.parse(String(r.expiry).slice(0, 10) + "T00:00:00Z");
-    const sentDte = numOrNull(r.dte);
+    if (!liveExpiry(r.expiry, asOf)) { expired++; continue; }
+    const counted = asOf ? expiryDays(r.expiry, asOf) : null;
     rows.push({
       expiry: String(r.expiry).slice(0, 10),
       call: c,
       put: p,
+      dealer: sign === null || c === null || p === null ? null : c + sign * p,
 
-      dte: sentDte !== null ? sentDte
-        : (Number.isFinite(base) && Number.isFinite(ms) ? Math.round((ms - base) / 86400000) : null),
+      dte: counted !== null ? counted : numOrNull(r.dte),
     });
   }
   rows.sort((a, b) => (a.expiry < b.expiry ? -1 : a.expiry > b.expiry ? 1 : 0));
@@ -554,21 +575,19 @@ export function greekTermStructure(expiryRows, { name, callLeg, putLeg, asOf = n
     reason: kept.length ? null : `the ${name} leg was present but no expiry carried a readable value`,
     unit: GREEK_UNITS[name] || null,
 
-    signConvention:
-      "the vendor's own sign on each leg, untouched. The put leg's convention " +
-      "differs BY GREEK on this endpoint — put gamma and put charm arrive " +
-      "dealer-signed against their call legs while put vanna does not — so the " +
-      "two legs are never netted here and the total below is a gross size, not " +
-      "a direction.",
+    signConvention: SIGN_CONVENTION,
+    dealerRule: sign === null ? null : sign > 0 ? "call + put" : "call − put",
     rows: kept,
     grossAbs: gross,
     legs: { call: hasCall, put: hasPut },
     seen: rows.length, cap, shed: Math.max(0, rows.length - kept.length),
+    ...(expired ? { expired } : {}),
   };
 }
 
 export function gammaDecayCalendar(expiryRows, { asOf = null } = {}) {
   const rows = (expiryRows || [])
+    .filter((r) => r && liveExpiry(r.expiry, asOf))
     .map((r) => ({
       expiry: r.expiry,
 
@@ -613,6 +632,47 @@ export function gammaDecayCalendar(expiryRows, { asOf = null } = {}) {
     halfLifeDays,
     meanLifeDays: lifeWeight > 0 ? lifeWeighted / lifeWeight : null,
     frontLoad: schedule.length ? schedule[0].share : null,
+  };
+}
+
+export function openInterestGammaBook(expiryRows, { asOf = null } = {}) {
+  let net = 0, gross = 0, n = 0;
+  const read = (v) => (v === null || v === undefined || v === "" ? null : num(v, NaN));
+  for (const r of expiryRows || []) {
+    if (!r || !r.expiry || !liveExpiry(r.expiry, asOf)) continue;
+    const c = read(callGammaLeg(r)), p = read(putGammaLeg(r));
+    const cOk = c !== null && Number.isFinite(c), pOk = p !== null && Number.isFinite(p);
+    if (!cOk && !pOk) continue;
+    net += (cOk ? c : 0) + GREEK_DEALER_SIGN.gamma * (pOk ? p : 0);
+    gross += Math.abs(cOk ? c : 0) + Math.abs(pOk ? p : 0);
+    n++;
+  }
+  return {
+    net: n ? net : null,
+    gross: n ? gross : null,
+    share: n && gross > 0 ? net / gross : null,
+    expiries: n,
+  };
+}
+
+export function strikeBookPutSign(strikeRowsByName, { line = 0.95 } = {}) {
+  let neg = 0, pos = 0;
+  for (const rows of strikeRowsByName || []) {
+    for (const r of rows || []) {
+      const v = r ? r.put_gamma_oi : null;
+      if (v === null || v === undefined || v === "") continue;
+      const x = num(v, NaN);
+      if (!Number.isFinite(x) || x === 0) continue;
+      if (x < 0) neg++; else pos++;
+    }
+  }
+  const n = neg + pos;
+  const sign = n && neg / n >= line ? 1 : n && pos / n >= line ? -1 : null;
+  return {
+    sign, rows: n, negativeShare: n ? Number((neg / n).toFixed(4)) : null, line,
+    reading: sign === 1 ? "put_gamma_oi arrives dealer-signed (negative), so the strike book is call + put"
+      : sign === -1 ? "put_gamma_oi arrives holder-signed (positive), so the strike book is call − put"
+      : "put_gamma_oi carries both signs, so no strike-level book is built this run",
   };
 }
 

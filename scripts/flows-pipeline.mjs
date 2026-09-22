@@ -7,7 +7,13 @@ import {
   crossFamilyRedundancy, qualityGate, percentileRank, realizedVol,
   isLiveColumn, pearson, SCORE_SCALE, horizonMove, HORIZON_SESSIONS,
   boundedScore, conviction, applyHysteresis, callGammaLeg, putGammaLeg,
+  openInterestGammaBook, strikeBookPutSign,
 } from "../shared/flows-features.js";
+import {
+  conventionProbe, estimateKc, unitFamily, vannaScale, chainCallVanna, nextSessionAfter,
+  blackScholesGreeks, variation, variationSummary, scoreVarianceShares, VARIATION_LINES,
+  VARIATION_CODES,
+} from "../shared/flows-variation.js";
 import {
   buildCard, SURFACE_EXPIRIES, indexMarketCross, CROSS_FEEDS,
 } from "../shared/flows-card.js";
@@ -993,6 +999,9 @@ function computeFeatures({ ticker, spot: readSpot, greekFlow, ticks, strikes, ex
   const displacement = bookDisplacement(strikes, atr);
   const path = pathSignature(ticks);
   const calendar = gammaDecayCalendar(expiries, { asOf: sessionDate });
+  const book = openInterestGammaBook(expiries, { asOf: sessionDate });
+  const regimeFrom = book.net !== null ? "book" : "flow";
+  const regimeNet = book.net !== null ? book.net : gamma.netGamma;
 
   const dollarVolume = medianDollarVolume(ohlc);
 
@@ -1041,9 +1050,12 @@ function computeFeatures({ ticker, spot: readSpot, greekFlow, ticks, strikes, ex
     flipDist,
     flipDistAtr: gamma.flip && atr > 0 ? (gamma.flip - spot) / atr : null,
 
-    gRegime: gamma.spotGammaShare === null
-      ? (gamma.netGamma >= 0 ? "long" : "short")
-      : (gamma.spotGammaShare >= 0 ? "long" : "short"),
+    gRegime: regimeNet >= 0 ? "long" : "short",
+    gRegimeFrom: regimeFrom,
+    gammaBookRaw: book.net,
+    gammaBookGrossRaw: book.gross,
+    gammaBookShare: book.share,
+    gammaBookExpiries: book.expiries,
     displacement: displacement.displacement,
     displacementWeight: displacement.weight,
 
@@ -1105,6 +1117,111 @@ function computeFeatures({ ticker, spot: readSpot, greekFlow, ticks, strikes, ex
   };
 }
 
+export function measureVariationProbes(enriched, sessionDate) {
+  const list = (enriched || []).filter((e) => e && e.raw);
+  const names = list.map((e) => ({
+    rows: e.raw.expiries || [],
+    iv30: e.tilt && Number.isFinite(e.tilt.iv30) ? e.tilt.iv30 : null,
+  }));
+  const probe = conventionProbe(names, { asOf: sessionDate });
+  const kc = estimateKc(names, { asOf: sessionDate });
+  const unit = unitFamily(list.map((e) => {
+    let oi = 0, gex = 0;
+    for (const r of e.raw.strikes || []) {
+      const v = num(r && r.call_gamma_oi, NaN);
+      if (Number.isFinite(v)) oi += v;
+    }
+    for (const r of e.raw.expiries || []) {
+      const v = num(callGammaLeg(r), NaN);
+      if (Number.isFinite(v)) gex += v;
+    }
+    return { spot: e.features ? e.features.spot : null, callGammaOi: oi, callGex: gex };
+  }));
+  const strikeSign = strikeBookPutSign(list.map((e) => e.raw.strikes || []));
+  const next = nextSessionAfter(sessionDate) ||
+    { date: null, h: 1, rule: "one calendar day; the run carries no session date" };
+  const pctOf = (v) => (v === null || v === undefined ? "n/a" : (v * 100).toFixed(1) + "%");
+  const lines = [
+    `  variation: put convention call ${probe.call}, put ${probe.put} — |charm|-weighted opposite-sign share ` +
+      `${pctOf(probe.oppositeShare.call)} call / ${pctOf(probe.oppositeShare.put)} put over ` +
+      `${probe.rows.call}/${probe.rows.put} expiry rows at ${VARIATION_LINES.PROBE_DTE_MAX} days or less ` +
+      `(counted by row: ${pctOf(probe.countShare.put)} put)`,
+    `  variation: charm scale K_c ${kc.value === null ? "n/a" : kc.value} over ${kc.n} expiry reading(s)` +
+      (kc.iqrRatio === null ? "" : `, IQR ${(kc.iqrRatio * 100).toFixed(0)}% of the median`) +
+      ` — ${kc.status}${kc.reason ? ": " + kc.reason : ""}`,
+    `  variation: unit family ${unit.family} (${unit.share} share, ${unit.pct} dollars-per-1% of ` +
+      `${unit.n} names priced at ${VARIATION_LINES.UNIT_MIN_SPOT} or more); used: ${unit.used}`,
+    `  variation: strike book ${strikeSign.reading} (${strikeSign.rows} rows)`,
+    `  variation: next session ${next.date || "unknown"}, ${next.h} calendar day(s) ahead`,
+  ];
+  return {
+    probe, kc, unit, strikeSign, next,
+    vannaScale: { status: "unmeasured", ratio: null, n: 0,
+      reason: "the chain leg has not run yet" },
+    lines,
+  };
+}
+
+export function vannaProbeSample(ticker, { rows, expiry, sessionDate, expiries, spot }) {
+  const exp = expiry || nearestProbeExpiry(expiries, { asOf: sessionDate, minDays: SKEW_MIN_DAYS });
+  if (!exp || !sessionDate) return null;
+  const chainRows = DRY_RUN
+    ? (fakeLadders.has(ticker) ? fakeLadderChain(fakeLadders.get(ticker), exp) : null)
+    : rows;
+  if (!Array.isArray(chainRows) || !chainRows.length) return null;
+  const vendorRow = (expiries || []).find((r) => r && String(r.expiry || "").slice(0, 10) === exp);
+  const vendor = vendorRow ? num(vendorRow.call_vanna ?? vendorRow.call_vex, NaN) : NaN;
+  if (!Number.isFinite(vendor)) return null;
+  const parsed = [];
+  for (const r of chainRows) {
+    const p = r ? parseOptionSymbol(r.option_symbol) : null;
+    if (!p) continue;
+    parsed.push({ type: p.type, strike: p.strike, expiry: p.expiry,
+      iv: num(r.implied_volatility, NaN), oi: num(r.open_interest, NaN) });
+  }
+  const model = chainCallVanna(parsed, { spot, asOf: sessionDate, expiry: exp });
+  if (!model) return null;
+  return { ticker, expiry: exp, vendor, model: model.value, contracts: model.contracts };
+}
+
+export function boardVariationMeta(run) {
+  if (!run) return null;
+  return {
+    fields: "variation on each row: gammaPerSigmaPctAdv, charmPctAdv and vannaPerPointPctAdv are " +
+      "fractions of a typical day's dollar volume; driftInSd is the session's charm drift over the " +
+      "standard deviation of the random part; a null carries a code in why, spelled out in codes",
+    codes: VARIATION_CODES,
+    kc: { value: run.kc.value, n: run.kc.n, status: run.kc.status },
+    unit: { family: run.unit.family, used: run.unit.used },
+    probe: { call: run.probe.call, put: run.probe.put },
+    vannaScale: { status: run.vannaScale.status, ratio: run.vannaScale.ratio, n: run.vannaScale.n },
+    next: { date: run.next.date, h: run.next.h },
+  };
+}
+
+export function featuresVariationInput(e, sessionDate) {
+  const f = (e && e.features) || {};
+  return {
+    ticker: f.ticker || null,
+    sessionDate: sessionDate || f.sessionDate || null,
+    spot: f.spot,
+    iv30: f.iv30,
+    gammaFlow: f.netGamma,
+    gammaBookRaw: f.gammaBookRaw,
+    candles: f.candles || null,
+    closes: f.closes || null,
+    closeDates: f.closeDates || null,
+    garch: f.garch || null,
+    ivRankRows: null,
+    expiries: (e && e.raw && e.raw.expiries) || null,
+  };
+}
+
+export function variationOptions(run) {
+  if (!run) return null;
+  return { kc: run.kc, unit: run.unit, probe: run.probe, next: run.next, vannaScale: run.vannaScale };
+}
+
 const FAMILIES = {
   F: "flow",
   P: "positioning",
@@ -1142,7 +1259,7 @@ function scoreBoard(features, tilts, sectors, caps) {
 
   const familyCols = {
     F: [fDelta, fTilt, fNet, fOi, fVol],
-    P: [pDisp],
+    P: [],
     D: [dPath],
   };
 
@@ -1177,7 +1294,7 @@ function scoreBoard(features, tilts, sectors, caps) {
     raw((f) => (f.vegaTilt === null ? null : -f.vegaTilt)),
     raw((f) => (f.gammaFrontLoad === null ? null : -f.gammaFrontLoad)),
 
-    raw((f) => (f.spotGammaShare === null ? null : -f.spotGammaShare)),
+    raw((f) => (f.gammaBookShare === null || f.gammaBookShare === undefined ? null : -f.gammaBookShare)),
   ];
   const gate = qualityGate(gateAxes);
 
@@ -1185,6 +1302,19 @@ function scoreBoard(features, tilts, sectors, caps) {
 
   const logCap = caps.map((c) => (c > 0 ? Math.log(c) : 0));
   const residual = neutralize(composite, { numeric: [logCap], groups: sectors });
+
+  const scoreVariance = scoreVarianceShares(
+    { fDelta, fTilt, fNet, fOi, fVol, pDisp, dPath },
+    Object.fromEntries(liveKeys.map((k) => [k, weights[k]])),
+    gate, residual,
+    { families: { fDelta: "F", fTilt: "F", fNet: "F", fOi: "F", fVol: "F", pDisp: "P", dPath: "D" } });
+  if (scoreVariance) {
+    scoreVariance.horizonOnly = {
+      pDisp: "displacement is sign-agnostic (buying and selling at the same strikes move it alike), " +
+        "so it sits on the horizon axis with no weight until it is signed by initiator and its " +
+        "per-session IC is measured",
+    };
+  }
 
   const volAxes = [
     raw((f) => f.vrp),
@@ -1224,6 +1354,7 @@ function scoreBoard(features, tilts, sectors, caps) {
       convPersistence: conv.persistence,
       dispersion,
       weights,
+      scoreVariance,
     };
   });
 }
@@ -1868,13 +1999,14 @@ async function archiveDatedBoards(payloads, sessionDate, publishFn) {
   return lines;
 }
 
-async function republishWithChain(payloads, chainByTicker, sessionDate, publishFn) {
+async function republishWithChain(payloads, chainByTicker, sessionDate, publishFn, refresh = null) {
   const lines = [];
   for (const side of ["long", "short"]) {
     const payload = payloads[side];
     if (!payload || !Array.isArray(payload.rows)) continue;
     let merged = 0;
     for (const row of payload.rows) {
+      if (typeof refresh === "function") refresh(row);
       const c = chainByTicker.get(row.t);
       if (!c) continue;
 
@@ -2951,14 +3083,17 @@ function fakeStockOiChange(ticker, spot) {
   });
 }
 
-function fakeTermStructure(ticker, spot) {
+function fakeTermStructure(ticker, spot, params = {}) {
   const rnd = mulberry(ticker.length * 3167);
+  const anchor = params && typeof params.date === "string" ? params.date : "2026-08-28";
+  const base = Date.parse(anchor + "T00:00:00Z");
   return Array.from({ length: 12 }, (_, i) => {
-    const dte = 3 + i * 12;
+    const expiryMs = Date.UTC(2026, 7, 28) + (3 + i * 12) * 86400000;
+    const dte = Math.round((expiryMs - base) / 86400000);
     const vol = 0.2 + rnd() * 0.3 + (i < 2 ? rnd() * 0.15 : 0);
     return {
-      ticker, date: "2026-08-28",
-      expiry: new Date(Date.UTC(2026, 7, 28) + dte * 86400000).toISOString().slice(0, 10),
+      ticker, date: anchor,
+      expiry: new Date(expiryMs).toISOString().slice(0, 10),
       dte, volatility: vol.toFixed(4),
       implied_move: (spot * vol * Math.sqrt(dte / 365)).toFixed(2),
       implied_move_perc: (vol * Math.sqrt(dte / 365)).toFixed(4),
@@ -2966,14 +3101,26 @@ function fakeTermStructure(ticker, spot) {
   });
 }
 
-function fakeIvRank(ticker, spot) {
+export const IV_RANK_PARAMS = Object.freeze({ timespan: "3m" });
+const IV_RANK_VENDOR_DEFAULT_ROWS = 5;
+
+export function fakeIvRank(ticker, spot, params = {}) {
   const rnd = mulberry(ticker.length * 4271);
-  return Array.from({ length: 70 }, (_, i) => {
+  const count = params && params.timespan === "3m" ? 64 : IV_RANK_VENDOR_DEFAULT_ROWS;
+  const days = tradingDaysEndingAt("2026-08-28", count);
+  let vol = 0.2 + rnd() * 0.3, px = spot * (0.9 + rnd() * 0.2);
+  const rows = days.map((t) => {
+    const shock = rnd() + rnd() + rnd() - 1.5;
+    vol = Math.max(0.05, vol + shock * 0.012);
+    px = px * Math.exp(-shock * 0.02 + (rnd() - 0.5) * 0.01);
+    return { t, vol, px };
+  });
+  return rows.reverse().map((r, i) => {
     const row = {
-      date: new Date(Date.UTC(2026, 7, 28) - i * 86400000).toISOString().slice(0, 10),
+      date: new Date(r.t).toISOString().slice(0, 10),
       updated_at: "2026-08-28T20:00:00Z",
-      volatility: (0.18 + rnd() * 0.4).toFixed(4),
-      close: (spot * (0.9 + rnd() * 0.2)).toFixed(2),
+      volatility: r.vol.toFixed(4),
+      close: r.px.toFixed(2),
     };
 
     if (i % 8 !== 7) row.iv_rank_1y = (rnd() * 100).toFixed(2);
@@ -3250,8 +3397,90 @@ function tradingDaysEndingAt(endDate, count) {
   return out.reverse();
 }
 
-function fakeEnrichment(ticker, spot, seed) {
+const FAKE_CHARM_SCALE = 50;
+const FAKE_RATE = 0.04;
+const fakeLadders = new Map();
+
+function tickerSeed(ticker) {
+  let h = 2166136261;
+  for (const ch of String(ticker)) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
+  return h;
+}
+
+export function fakeOiLadder(ticker, spot, iv) {
+  const rnd = mulberry(tickerSeed(ticker));
+  const vol = Number.isFinite(iv) && iv > 0.02 ? iv : 0.3;
+  const strikes = Array.from({ length: 41 }, (_, j) => spot * (0.7 + j * 0.015));
+  const expiries = Array.from({ length: 6 }, (_, i) => ({
+    expiry: new Date(Date.UTC(2026, 7, 28) + i * 7 * 86400000).toISOString().slice(0, 10),
+    days: i * 7 + 4,
+  }));
+  const oiCall = [], oiPut = [];
+  for (let i = 0; i < expiries.length; i++) {
+    const depth = 1 / (1 + i * 0.35);
+    oiCall.push(strikes.map((k) => {
+      const w = Math.exp(-Math.pow((k - spot * 1.05) / (spot * 0.12), 2));
+      return Math.round(4000 * depth * w * (0.4 + rnd()));
+    }));
+    oiPut.push(strikes.map((k) => {
+      const w = Math.exp(-Math.pow((k - spot * 0.94) / (spot * 0.12), 2));
+      return Math.round(3500 * depth * w * (0.4 + rnd()));
+    }));
+  }
+  const ladder = { ticker, spot, vol, strikes, expiries, oiCall, oiPut };
+  fakeLadders.set(ticker, ladder);
+  return ladder;
+}
+
+export function fakeLadderGreeks(ladder) {
+  const { spot, vol, strikes, expiries, oiCall, oiPut } = ladder;
+  const rows = expiries.map((e, i) => {
+    const out = { expiry: e.expiry, dte: e.days, gc: 0, gp: 0, dc: 0, dp: 0, vc: 0, vp: 0, cc: 0, cp: 0 };
+    strikes.forEach((k, j) => {
+      const c = blackScholesGreeks({ spot, strike: k, days: e.days, vol, rate: FAKE_RATE, type: "C" });
+      const p = blackScholesGreeks({ spot, strike: k, days: e.days, vol, rate: FAKE_RATE, type: "P" });
+      const nc = oiCall[i][j] * 100, np = oiPut[i][j] * 100;
+      out.gc += c.gamma * nc; out.gp += p.gamma * np;
+      out.dc += c.delta * nc; out.dp += p.delta * np;
+      out.vc += c.vanna * nc; out.vp += p.vanna * np;
+      out.cc += FAKE_CHARM_SCALE * c.charmPerDay * nc; out.cp += FAKE_CHARM_SCALE * p.charmPerDay * np;
+    });
+    return out;
+  });
+  const byStrike = strikes.map((k, j) => {
+    let gc = 0, gp = 0;
+    expiries.forEach((e, i) => {
+      const g = blackScholesGreeks({ spot, strike: k, days: e.days, vol, rate: FAKE_RATE, type: "C" }).gamma;
+      gc += g * oiCall[i][j] * 100;
+      gp += g * oiPut[i][j] * 100;
+    });
+    return { gc: gc * spot * spot / 100, gp: gp * spot * spot / 100 };
+  });
+  return { rows, byStrike };
+}
+
+export function fakeLadderChain(ladder, expiry) {
+  const i = ladder.expiries.findIndex((e) => e.expiry === expiry);
+  if (i < 0) return [];
+  const yymmdd = expiry.slice(2, 4) + expiry.slice(5, 7) + expiry.slice(8, 10);
+  const out = [];
+  ladder.strikes.forEach((k, j) => {
+    for (const [cp, oi] of [["C", ladder.oiCall[i][j]], ["P", ladder.oiPut[i][j]]]) {
+      if (!(oi > 0)) continue;
+      out.push({
+        option_symbol: `${ladder.ticker}${yymmdd}${cp}${String(Math.round(k * 1000)).padStart(8, "0")}`,
+        implied_volatility: ladder.vol.toFixed(4),
+        open_interest: oi,
+      });
+    }
+  });
+  return out;
+}
+
+function fakeEnrichment(ticker, spot, seed, iv = null) {
   const rnd = mulberry(seed);
+  const ladder = fakeOiLadder(ticker, spot, iv);
+  const book = fakeLadderGreeks(ladder);
   const bias = rnd() - 0.5;
 
   const greekFlow = Array.from({ length: 60 }, () => {
@@ -3293,29 +3522,38 @@ function fakeEnrichment(ticker, spot, seed) {
       call_gamma_bid: String(callLeg * (0.3 + rnd() * 0.3)),
       put_gamma_ask: String(putLeg * (0.4 + rnd() * 0.3)),
       put_gamma_bid: String(putLeg * (0.3 + rnd() * 0.3)),
-      call_gamma_oi: String(Math.abs(callLeg) * 2 + scale * 0.2),
-      put_gamma_oi: String(-Math.abs(putLeg) * 1.6 - scale * 0.2),
+      call_gamma_oi: String(book.byStrike[i].gc),
+      put_gamma_oi: String(-book.byStrike[i].gp),
       call_gamma_vol: String(Math.abs(callLeg) * rnd() * 2),
       put_gamma_vol: String(-Math.abs(putLeg) * rnd() * 1.4),
     };
   });
 
-  const expiries = Array.from({ length: 6 }, (_, i) => {
+  const expiries = book.rows.map((b, i) => {
+    for (let draw = 0; draw < (i !== 4 ? 8 : 6); draw++) rnd();
     const row = {
-      expiry: new Date(Date.UTC(2026, 7, 28) + i * 7 * 86400000).toISOString().slice(0, 10),
-      dte: i * 7 + 4,
-      call_gex: String(9e6 / (i + 1) * (0.6 + rnd())),
-      put_gex: String(-7e6 / (i + 1) * (0.6 + rnd())),
-      call_delta: String(2.2e8 / (i + 1) * (0.6 + rnd())),
-      put_delta: String(-1.9e8 / (i + 1) * (0.6 + rnd())),
-      call_charm: String(1.0e8 / (i + 1) * (0.6 + rnd())),
-      put_charm: String(-9.4e8 / (i + 1) * (0.6 + rnd())),
+      expiry: b.expiry,
+      dte: b.dte,
+      call_gex: String(b.gc),
+      put_gex: String(-b.gp),
+      call_delta: String(b.dc),
+      put_delta: String(b.dp),
+      call_charm: String(b.cc),
+      put_charm: String(b.cp),
     };
     if (i !== 4) {
-      row.call_vanna = String(1.5e11 / (i + 1) * (0.6 + rnd()));
-      row.put_vanna = String(4.8e11 / (i + 1) * (0.6 + rnd()));
+      row.call_vanna = String(b.vc);
+      row.put_vanna = String(b.vp);
     }
     return row;
+  });
+  const lapsed = book.rows[0];
+  expiries.unshift({
+    expiry: DRY_SESSION_DATE, dte: 0,
+    call_gex: String(lapsed.gc * 0.5), put_gex: String(-lapsed.gp * 0.5),
+    call_delta: String(lapsed.dc * 0.5), put_delta: String(lapsed.dp * 0.5),
+    call_charm: String(lapsed.cc * 0.5), put_charm: String(lapsed.cp * 0.5),
+    call_vanna: String(lapsed.vc * 0.5), put_vanna: String(lapsed.vp * 0.5),
   });
 
   let px = spot;
@@ -3683,7 +3921,7 @@ async function main() {
       try {
         let raw;
         if (DRY_RUN) {
-          const fake = fakeEnrichment(ticker, spot, 1000 + i);
+          const fake = fakeEnrichment(ticker, spot, 1000 + i, pick.tilt ? pick.tilt.iv30 : null);
           const past = candleCut(fake.ohlc, sessionDate);
           raw = { ...fake, ohlc: sessionCandles(fake.ohlc, sessionDate) };
           if (past.past) { pastNames++; pastBars += past.past; }
@@ -3742,6 +3980,9 @@ async function main() {
       `rather than a board of names that cannot be traded at these costs`,
     );
   }
+
+  const variationRun = measureVariationProbes(enriched, sessionDate);
+  for (const line of variationRun.lines) console.log(line);
 
   const { kept: unique, dropped: shareClasses } = collapseShareClasses(liquid);
   for (const d of shareClasses) {
@@ -3823,9 +4064,22 @@ async function main() {
   }
 
   const deepSet = new Set(deepNames(published).map((d) => d.t));
+  const uniqueByTicker = new Map(unique.map((e) => [e.features.ticker, e]));
+  const boardVariation = (ticker) => {
+    const e = uniqueByTicker.get(ticker);
+    if (!e) return null;
+    try {
+      return variationSummary(variation(featuresVariationInput(e, sessionDate),
+        variationOptions(variationRun)));
+    } catch (error) {
+      console.warn(`  variation ${ticker}: ${error.message}`);
+      return null;
+    }
+  };
   for (const side of ["long", "short"]) {
     for (const row of published[side]) {
       if (deepSet.has(row.t)) row.dp = 1;
+      row.variation = boardVariation(row.t);
 
       row.skew = null;
       row.term = null;
@@ -3864,6 +4118,8 @@ async function main() {
 
       horizonSessions: HORIZON_SESSIONS,
       weights: first.weights || null,
+      scoreVariance: first.scoreVariance || null,
+      variation: boardVariationMeta(variationRun),
       shareClasses,
 
       deep: rows.filter((r) => r.dp).length,
@@ -4223,6 +4479,7 @@ async function main() {
   }
 
   const chainByTicker = new Map();
+  const vannaSamples = [];
   try {
 
   const deep = deepNames({ long: payloads.long.rows, short: payloads.short.rows });
@@ -4239,6 +4496,7 @@ async function main() {
 
   let chainProbed = false;
   const expiriesByTicker = new Map(liquid.map((e) => [e.features.ticker, e.raw.expiries || []]));
+  const spotOfLiquid = new Map(liquid.map((e) => [e.features.ticker, e.features.spot]));
 
   if (Date.now() > stats.startedAt + DEADLINE_MS) {
     console.warn(
@@ -4281,6 +4539,8 @@ async function main() {
           asOf: sessionDate,
           ticker,
         });
+        let vannaRows = panels.status === "ok" && !panels.truncated ? rows : null;
+        let vannaExpiry = null;
 
         if (panels.status === "ok" && panels.truncated && Date.now() < chainDeadline) {
           const near = nearestProbeExpiry(expiriesByTicker.get(ticker), {
@@ -4297,6 +4557,10 @@ async function main() {
                   exclude_zero_oi_chains: "true",
                   limit: CHAIN_PAGE_SIZE,
                 });
+              if (Array.isArray(narrow) && narrow.length && narrow.length < CHAIN_PAGE_SIZE) {
+                vannaRows = narrow;
+                vannaExpiry = near;
+              }
               const narrowPanels = buildChainPanels(narrow, {
                 spot: spotByTicker.get(ticker) || null,
                 asOf: sessionDate,
@@ -4347,6 +4611,16 @@ async function main() {
         }
         } catch (error) {
           console.warn(`  chain probe (${ticker}): ${error.message} — the chain itself stands`);
+        }
+        try {
+          const sample = vannaProbeSample(ticker, {
+            rows: vannaRows, expiry: vannaExpiry, sessionDate,
+            expiries: expiriesByTicker.get(ticker),
+            spot: spotOfLiquid.get(ticker) || spotByTicker.get(ticker) || null,
+          });
+          if (sample) vannaSamples.push(sample);
+        } catch (error) {
+          console.warn(`  vanna check (${ticker}): ${error.message}`);
         }
         return panels;
       } catch (error) {
@@ -4425,8 +4699,24 @@ async function main() {
     }
   }
 
+  variationRun.vannaScale = vannaScale(vannaSamples);
+  console.log(`  variation: vanna scale ${variationRun.vannaScale.status}` +
+    (variationRun.vannaScale.ratio === null ? "" : `, vendor over Black-Scholes ${variationRun.vannaScale.ratio}`) +
+    ` across ${variationRun.vannaScale.n} name(s) with a complete single-expiry chain` +
+    (variationRun.vannaScale.reason ? ` — ${variationRun.vannaScale.reason}` : ""));
+  for (const side of ["long", "short"]) {
+    if (payloads[side]) payloads[side].variation = boardVariationMeta(variationRun);
+  }
+  const refreshVariation = variationRun.vannaScale.status === "unmeasured" ? null : (row) => {
+    const next = boardVariation(row.t);
+    if (!next) return false;
+    row.variation = next;
+    return true;
+  };
+
   if (chainByTicker.size) {
-    for (const line of await republishWithChain(payloads, chainByTicker, sessionDate, publish)) {
+    for (const line of await republishWithChain(payloads, chainByTicker, sessionDate, publish,
+      refreshVariation)) {
       console.log(line);
     }
   } else {
@@ -4913,7 +5203,7 @@ async function main() {
 
       const surfaceExpiries = (e.raw.expiries || [])
         .map((r) => (r && r.expiry ? String(r.expiry).slice(0, 10) : null))
-        .filter((d) => d && (!sessionDate || d >= sessionDate))
+        .filter((d) => d && (!sessionDate || d > sessionDate))
         .sort()
         .slice(0, SURFACE_EXPIRIES);
 
@@ -4924,7 +5214,8 @@ async function main() {
       const [maxPain, surface, dpRaw, oiRaw, termRaw, rankRaw] = DRY_RUN
         ? [fakeMaxPain(ticker, spotPx), fakeSurface(ticker, spotPx, surfaceExpiries),
            fakeStockDarkpool(ticker, spotPx), fakeStockOiChange(ticker, spotPx),
-           fakeTermStructure(ticker, spotPx), fakeIvRank(ticker, spotPx)]
+           fakeTermStructure(ticker, spotPx, sessionDate ? { date: sessionDate } : {}),
+           fakeIvRank(ticker, spotPx, IV_RANK_PARAMS)]
         : await Promise.all([
 
           uw(`/api/stock/${ticker}/max-pain`, sessionDate ? { date: sessionDate } : {}).catch(() => []),
@@ -4944,7 +5235,7 @@ async function main() {
           uw(`/api/darkpool/${ticker}`, { limit: 60, ...onSession }).catch(() => null),
           uw(`/api/stock/${ticker}/oi-change`, { limit: 30, ...onSession }).catch(() => null),
           uw(`/api/stock/${ticker}/volatility/term-structure`, { ...onSession }).catch(() => null),
-          uw(`/api/stock/${ticker}/iv-rank`, { limit: 70, ...onSession }).catch(() => null),
+          uw(`/api/stock/${ticker}/iv-rank`, { ...IV_RANK_PARAMS, ...onSession }).catch(() => null),
         ]);
       const darkpoolCut = sessionRows(dpRaw, (r) => easternDayOf(r && r.executed_at), sessionDate);
       const rankCut = sessionRows(rankRaw, (r) => easternDayOf(r && r.date), sessionDate,
@@ -5000,6 +5291,7 @@ async function main() {
         darkpool: darkpoolCut.raw, oiDeltas: oiRaw, termStructure: termRaw, ivRank: rankCut.raw,
 
         marketCross,
+        variation: variationOptions(variationRun),
       });
       card.readPx = readPxOf(e, screenerReadAt);
 
@@ -5145,6 +5437,7 @@ async function main() {
             generatedAt, sessionDate,
             marketCross,
             unfetched,
+            variation: variationOptions(variationRun),
           });
           card.readPx = readPxOf(e, screenerReadAt);
           const body = JSON.stringify(card);
@@ -5232,6 +5525,15 @@ async function main() {
         screenerReadAt,
         screenerTruncatedBands: screenerTruncated,
         endDateHonoured: dating.endDateHonoured,
+      },
+      variation: {
+        convention: variationRun.probe,
+        kc: variationRun.kc,
+        unit: variationRun.unit,
+        vannaScale: variationRun.vannaScale,
+        strikeBook: variationRun.strikeSign,
+        next: variationRun.next,
+        votes: false,
       },
     });
   } catch (error) {

@@ -6,6 +6,9 @@ import { buildContext, contextLines, contextFacts, promptForNeuron, parseNeuronO
 import { TICKER_PANELS, SENTINEL_KEYS } from "../shared/flows-panels.js";
 import { guardAnswer, selectFacts, buildFactIndex } from "../shared/flows-ask.js";
 import { modelName, neuronProvenance } from "../shared/flows-pages.js";
+import { variation, cardVariationInput } from "../shared/flows-variation.js";
+import { gammaReading } from "../shared/flows-neuron.js";
+import fs from "node:fs";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
@@ -17,7 +20,8 @@ const CARD = {
   score: 58, conviction: 92,
   conv: { agreement: 1, breadth: 3, coverage: 1, persistence: 0.58, gate: 1.43 },
   quality: { otmShare: 0.6, vegaTilt: 0.24 },
-  regime: { label: "short", crossings: 0 }, gammaFlip: 68.32, atr: 1.48,
+  regime: { label: "short", labelFrom: "book", crossings: 0, netGamma: -2.1e6, flowGamma: -2.1e6,
+    bookGammaRaw: -3.4e5, bookShare: -0.42 }, gammaFlip: 68.32, atr: 1.48,
   fam: { F: 59, P: 32, D: 58, V: 51, O: 71 },
   panels: {
     gamma: { status: "ok", spot: 70.22, callWall: 67, putWall: 70, strikes: 40,
@@ -63,7 +67,11 @@ const CARD = {
   ok(by.get("levels").figures.maxPain === "72.50" && by.get("levels").figures.callWall === "67.00",
      "every level on the card is a quotable figure, printed as the page prints it, so an invalidation at max pain can pass the guard");
   ok(numeralsOf(ctx).has("72.50"), "and the max-pain level is in the numerals a model may quote");
-  eq(by.get("gamma").robustness, 3, "a gamma profile over 40 strikes is robust");
+  eq(by.get("gamma").robustness, 2,
+     "a gamma ladder over 40 strikes is fair, not robust: it is one session's directionalized volume, " +
+     "the gamma dealers added today, and no longer described as the standing book");
+  ok(/added today/.test(by.get("gamma").why) && !/clearing snapshot/.test(by.get("gamma").why),
+     `and its reason names what it reads (${by.get("gamma").why})`);
   eq(by.get("ivSurface").robustness, 2, "a surface with 30 of 50 fresh quotes is fair, because a fifth or more are stale");
   eq(by.get("path").robustness, 3, "a full session with a one-sided persistence is robust");
   eq(by.get("aggressor").robustness, 1, "a quiet panel is weak: measured, but nothing to lean on");
@@ -200,7 +208,9 @@ const CARD = {
      "the deterministic summary passes the guard by construction");
   ok(/^The greeks imply a squeeze state for SYN1 with flow bearish/.test(plain),
      "and leads with the implied state, then the most robust features' own sentences");
-  ok(plain.includes("Dealer gamma for SYN1"), "which follow it");
+  ok(plain.includes("Net selling over 390 minutes") && !plain.includes("Dealer gamma for SYN1"),
+     "which follow it — the tape's sentence now, since the strike ladder is graded fair as the gamma " +
+     "dealers added today and no longer outranks the robust readings");
   const staleCtx = buildContext(CARD, { expectedSession: "2026-09-16" });
   const stalePlain = deterministicSummary(staleCtx);
   ok(/capped at weak/.test(stalePlain) && stalePlain.includes("Dealer gamma for SYN1"),
@@ -214,7 +224,9 @@ const CARD = {
   ok(STATES.includes(st.state) && st.state === "squeeze" && st.direction === "bearish" && st.flow === "bearish",
      `short gamma at spot with a one-sided selling tape and the put wall 0.15 ATR below, no flip between, is a squeeze toward that wall (${st.chip})`);
   ok(st.target && st.target.kind === "put_wall" && st.target.px === 70, "the wall the flow leans toward is the target");
-  eq(st.confidence, 2, "confidence starts at the positioning grade and loses one because the spot share of the ladder is unpublished");
+  eq(st.confidence, 2,
+     "confidence starts at the positioning grade — fair, because the walls read off today's flow ladder — and " +
+     "keeps it, the book's net sitting at 42% of its gross, over the 20% marginal line");
   ok(st.invalidation && st.invalidation.kind === "max_pain" && st.invalidation.px === 72.5,
      "the state ends past the nearest level on the other side of the flow");
   ok(st.horizon && st.horizon.kind === "priced_sessions" && st.horizon.value === 10, "and runs over the priced-move window");
@@ -244,7 +256,7 @@ const CARD = {
   ok(v.ideas.length === 1 && v.ideas[0].fromState === true, "the state's idea outranks a model idea it ties with");
   {
     const strong = { title: "Wall break", structure: "put debit spread", direction: "bearish", thesis: "Dealer gamma is short at spot 70.22.",
-      rests_on: ["gamma", "levels"], invalidation: "a close above 72.50", horizon: "10 sessions" };
+      rests_on: ["path", "standing"], invalidation: "a close above 72.50", horizon: "10 sessions" };
     const led = vetIdeas([strong, idea], ctx);
     ok(led.ideas.length === 2 && led.ideas[0].fromState === true && led.ideas[1].robustness === 3,
        "the state's idea leads the list even when a model idea outgrades it, so the provenance line that names the first idea as the state's own is true");
@@ -252,14 +264,20 @@ const CARD = {
   {
     const tied = JSON.parse(JSON.stringify(CARD));
     tied.panels.displacement = { status: "ok", gapAtr: 1.2, oiCentroid: 69, volCentroid: 70.8, spot: 70.22 };
+    tied.panels.oiDeltas = { status: "ok", rows: [{ cp: "C", diff: 900 }, { cp: "P", diff: 100 }] };
     tied.panels.path.persistence = 0.7;
     tied.panels.path.minutes = 200;
     const ts = regimeState(tied, { expectedSession: "2026-09-15" });
     const votes = ts.drivers.filter((d) => d.axis === "flow" && d.vote !== 0).map((d) => d.key + ":" + d.vote);
-    ok(votes.includes("path:-1") && votes.includes("displacement:1") && votes.includes("standing:1") && ts.flow === "bullish" && !ts.drivers.some((d) => d.key === "path" && d.split),
+    ok(votes.includes("path:-1") && votes.includes("oiDeltas:1") && votes.includes("standing:1") && ts.flow === "bullish" && !ts.drivers.some((d) => d.key === "path" && d.split),
        `when the tape's votes tie the card's score breaks the tie (${votes.join(", ")} -> ${ts.flow})`);
+    ok(!votes.some((v) => v.startsWith("displacement")),
+       "and displacement casts no vote: its centroid gap weighs calls and puts by magnitude, so buying and selling move it alike");
+    const disp = ts.drivers.find((d) => d.key === "displacement");
+    ok(disp && disp.axis === "horizon" && disp.weight === 0 && /casts no vote/.test(disp.reading),
+       `it is read on the horizon axis at weight 0 instead (${disp && disp.reading})`);
     const decided = JSON.parse(JSON.stringify(tied));
-    decided.panels.displacement.gapAtr = -1.2;
+    decided.panels.oiDeltas.rows = [{ cp: "C", diff: 100 }, { cp: "P", diff: 900 }];
     const ds = regimeState(decided, { expectedSession: "2026-09-15" });
     ok(ds.flow === "bearish" && ds.confidence === 2,
        "and when they agree the score is not counted, so a tie-breaker cannot turn a decided vote into a split");
@@ -320,7 +338,7 @@ const CARD = {
   ok(/8\. The line \[state\]/.test(promptForNeuron(ctx).system), "the prompt tells the model the state line is authoritative");
 
   const pinned = JSON.parse(JSON.stringify(CARD));
-  pinned.regime = { label: "long", crossings: 1, spotGammaShare: 0.6 };
+  pinned.regime = { label: "long", labelFrom: "book", crossings: 1, spotGammaShare: 0.6, bookGammaRaw: 4.1e5, bookShare: 0.6 };
   pinned.panels.levels.levels = [
     { kind: "max_pain", label: "Max pain", px: 70.5, distAtr: 0.19 },
     { kind: "gamma_flip", label: "Gamma flip", px: 66.1, distAtr: -2.78 },
@@ -330,7 +348,9 @@ const CARD = {
   const ps = regimeState(pinned, { expectedSession: "2026-09-15" });
   ok(ps.state === "pinned" && ps.direction === null && ps.flow === "bearish" && ps.target && ps.target.kind === "max_pain",
      `long gamma at spot with max pain inside half an ATR is pinned, with no side of its own but the flow still named (${ps.chip})`);
-  eq(ps.confidence, 3, "a strong share and a far flip cost nothing");
+  eq(ps.confidence, 2,
+     "a strong book and a far flip cost nothing, and the grade tops out at fair: the walls and the ladder's " +
+     "zero-crossing read off today's flow ladder, not the standing book, so a state resting on them is never robust");
   ok(ps.horizon.kind === "expiry" && ps.horizon.value === "2026-09-18", "the horizon is the front expiry when it carries a quarter of the book's gamma");
   ok(ps.invalidation.kind === "gamma_flip" && /Pinned · long gamma at spot, max pain 70\.50, flow bearish/.test(ps.chip), "the pin ends at the flip");
   assert.deepEqual(ps.preferred, STATE_STRUCTURES.pinned.fair.preferred, "and prefers the range structures"); checks++;
@@ -360,8 +380,14 @@ const CARD = {
   ok(tf.state === "transitional" && tf.invalidation.kind === "gamma_flip" && tf.preferred.includes("call debit spread") && !tf.preferred.includes("no position"),
        "spot inside half an ATR of the flip is transitional, leaning the way the flow votes, and a resolved lean drops the no-position placeholder that would contradict it");
 
+  const bookOnly = JSON.parse(JSON.stringify(CARD));
+  bookOnly.panels.gamma = { status: "unavailable", reason: "no ladder" };
+  const bo = regimeState(bookOnly, { expectedSession: "2026-09-15" });
+  ok(bo.state !== "undetermined" && bo.drivers.some((d) => d.key === "gamma" && /open-interest book is short/.test(d.reading)),
+     "with the flow ladder unavailable the open-interest book alone still reads a state");
   const blind = JSON.parse(JSON.stringify(CARD));
   blind.panels.gamma = { status: "unavailable", reason: "no ladder" };
+  blind.regime = { label: "short", crossings: 0 };
   const un = regimeState(blind, { expectedSession: "2026-09-15" });
   ok(un.state === "undetermined" && un.confidence === 0 && /gamma positioning is unavailable and premium is unreadable/.test(un.notes[0]),
      "no gamma and no readable premium implies no state, and the note says which silence it is");
@@ -380,6 +406,76 @@ const CARD = {
      "the fingerprint moves when the state moves, so a changed state is re-read");
   ok(STATE_LINES.FLIP_ON_ATR === 0.5 && STATE_LINES.WALL_NEAR_ATR === 1.5 && STATE_LINES.VRP_RELATIVE === 0.1,
      "the lines the states are cut at are published constants, not literals in the branches");
+}
+
+{
+  const fixtures = JSON.parse(fs.readFileSync(new URL("./fixtures-variation-cards.json", import.meta.url), "utf8"));
+  const B = fixtures.B;
+  eq(B.regime.label, "short", "the live B card was published short, from the running sum below spot");
+  ok(B.regime.netGamma > 0, `while the gamma it carries nets long (${B.regime.netGamma})`);
+  const read = gammaReading(B);
+  eq(read.label, "long", "read from the net, B is long");
+  eq(read.from, "flow", "from the gamma added today, since the snapshot carries no open-interest book");
+  const bs = regimeState(B, { expectedSession: B.sessionDate });
+  eq(bs.state, "pinned", `so B reads Pinned, not Amplifying (${bs.chip})`);
+  const g = bs.drivers.find((d) => d.key === "gamma");
+  ok(g && g.robustness === 1 && /not on this card/.test(g.reading),
+     `and the gamma driver is graded weak and says the book is missing (${g && g.reading})`);
+  ok(/running sum below spot sits at \u221252%/.test(g.reading),
+     "the running sum below spot is still published, as where the ladder sits rather than as the label");
+
+  const opts = { probe: { call: "raw", put: "raw" }, kc: { status: "ok", value: 50, n: 326, iqrRatio: 0.22 },
+    unit: { family: "share", used: "share" }, vannaScale: { status: "agree", ratio: 1, n: 5 } };
+  const withVar = JSON.parse(JSON.stringify(B));
+  withVar.panels.variation = variation(cardVariationInput(withVar), opts);
+  const ctx = buildContext(withVar, { expectedSession: B.sessionDate });
+  const f = ctx.features.find((x) => x.key === "variation");
+  ok(f && f.status === "ok", "the Neuron context carries the hedging panel");
+  eq(f.robustness, 1, "graded weak when only the gamma added today is on the card");
+  ok(f.figures.gammaPerSigma === withVar.panels.variation.gammaPerSigma && f.figures.sigmaSource === "realized",
+     "with its figures quotable");
+  const hedge = ctx.state.drivers.filter((d) => d.axis === "hedge");
+  ok(hedge.length >= 2 && hedge.every((d) => d.weight === 0), "the hedge drivers ride along at weight 0");
+  ok(hedge.some((d) => d.key === "vanna" && /call \u2212 put/.test(d.reading)) && hedge.some((d) => d.key === "charm"),
+     "vanna and charm are read netted, call \u2212 put");
+  ok(!ctx.state.drivers.some((d) => /not netted/.test(d.reading)),
+     "and the old 'not netted on this card' readings are gone");
+  const sentence = stateSentence(ctx.state, "B");
+  ok(/Hedging: time alone moves dealer hedges to buy \$2\.00M over the session/.test(sentence),
+     `the state sentence gains a Hedging clause (${sentence.slice(sentence.indexOf("Hedging"), sentence.indexOf("Hedging") + 90)})`);
+
+  const grade = (mutate) => {
+    const c = JSON.parse(JSON.stringify(withVar));
+    mutate(c);
+    return buildContext(c, { expectedSession: B.sessionDate }).features.find((x) => x.key === "variation").robustness;
+  };
+  eq(grade((c) => { c.panels.variation.robustness = { r: 3, why: "all present" }; }), 3,
+     "a panel with the book, a converged skewed t, a vol-of-vol and a charm scale grades robust");
+  eq(grade((c) => { c.panels.variation = { status: "unavailable", reason: "no gamma" }; }), 0,
+     "a silent panel is withheld");
+
+  const vol = JSON.parse(JSON.stringify(CARD));
+  vol.panels.pricedMove = { ...vol.panels.pricedMove, iv30: 0.576, rv30: 0.55, vrp: 0.026, ivMomentum: 0.071 };
+  const momentum = regimeState(vol, { expectedSession: "2026-09-15" }).drivers.find((d) => d.sub === "ivMomentum");
+  ok(momentum && /rose 7\.1 points over the week/.test(momentum.reading) && !/month/.test(momentum.reading),
+     `the one-week change is called a week (${momentum && momentum.reading})`);
+  const hiVol = JSON.parse(JSON.stringify(vol));
+  hiVol.panels.pricedMove.ivMomentum = 0.04;
+  ok(!regimeState(hiVol, { expectedSession: "2026-09-15" }).drivers.some((d) => d.sub === "ivMomentum"),
+     "four points on a 58-vol name is 7% of its level and does not fire");
+  const loVol = JSON.parse(JSON.stringify(vol));
+  loVol.panels.pricedMove = { ...loVol.panels.pricedMove, iv30: 0.2, rv30: 0.19, vrp: 0.01, ivMomentum: 0.04 };
+  ok(regimeState(loVol, { expectedSession: "2026-09-15" }).drivers.some((d) => d.sub === "ivMomentum"),
+     "the same four points on a 20-vol name is 20% of its level and does: the line scales with the name");
+  ok(STATE_LINES.IV_MOMENTUM_REL === 0.1 && STATE_LINES.TERM_FRONT_BID_REL === 0.08 && STATE_LINES.GARCH_GAP_REL === 0.12,
+     "the three volatility lines are relative to the name's own level");
+
+  const avg = JSON.parse(JSON.stringify(CARD));
+  avg.panels.pricedMove = { ...avg.panels.pricedMove, iv30: 0.30, rv30: 0.25, vrp: 0.05 };
+  avg.panels.context.garch = { ...avg.panels.context.garch, nextVol: 29, avg21Vol: 25 };
+  const gd = regimeState(avg, { expectedSession: "2026-09-15" }).drivers.find((d) => d.key === "garch");
+  ok(gd && /average over the next 21 sessions is 25\.0%/.test(gd.reading) && gd.vote === 1,
+     `30-day implied volatility is compared with the GARCH average over the same horizon, not the one-step level (${gd && gd.reading})`);
 }
 
 {

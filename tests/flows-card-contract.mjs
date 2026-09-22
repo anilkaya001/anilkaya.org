@@ -9,6 +9,7 @@ import {
   HORIZON_SESSIONS,
 } from "../shared/flows-card.js";
 import { horizonMove } from "../shared/flows-features.js";
+import { blackScholesGreeks } from "../shared/flows-variation.js";
 import { buildAggressor } from "../shared/flows-chain.js";
 
 let checks = 0;
@@ -1206,6 +1207,87 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
        "and never that calls and puts were lifted in the same size, which a zero " +
        "signed net does not establish"); checks++;
   }
+}
+
+{
+  const session = "2026-08-24";
+  const day = (n) => new Date(Date.parse(session + "T00:00:00Z") + n * 86400000).toISOString().slice(0, 10);
+  const candles = [];
+  let px = 100;
+  for (let i = 45; i >= 0; i--) {
+    const d = new Date(Date.parse(session + "T00:00:00Z") - i * 86400000);
+    if (d.getUTCDay() === 0 || d.getUTCDay() === 6) continue;
+    px *= Math.exp((i % 2 ? 1 : -1) * 0.012);
+    candles.push([d.toISOString().slice(0, 10), px, px * 1.01, px * 0.99, px, 2e6 + i * 1e4]);
+  }
+  candles.push([day(1), 140, 150, 130, 145, 9e8]);
+  const row = (dte) => {
+    let gc = 0, gp = 0, dc = 0, dp = 0, vc = 0, vp = 0, cc = 0, cp = 0;
+    for (const k of [85, 95, 100, 105, 115]) {
+      const c = blackScholesGreeks({ spot: 100, strike: k, days: dte, vol: 0.4, rate: 0.04, type: "C" });
+      const p = blackScholesGreeks({ spot: 100, strike: k, days: dte, vol: 0.4, rate: 0.04, type: "P" });
+      gc += c.gamma * 4e5; gp += p.gamma * 2e5; dc += c.delta * 4e5; dp += p.delta * 2e5;
+      vc += c.vanna * 4e5; vp += p.vanna * 2e5; cc += 50 * c.charmPerDay * 4e5; cp += 50 * p.charmPerDay * 2e5;
+    }
+    return { expiry: day(dte), call_gex: gc, put_gex: -gp, call_delta: dc, put_delta: dp,
+      call_vanna: vc, put_vanna: vp, call_charm: cc, put_charm: cp };
+  };
+  const expiries = [{ ...row(4), expiry: day(0) }, row(4), row(11), row(32)];
+  const input = {
+    ticker: "VAR", row: { close: "100" },
+    features: { spot: 100, atr: 2, netGamma: 5e5, gRegime: "long", gRegimeFrom: "book", gammaBookRaw: 1234,
+      gammaBookShare: 0.3, iv30: 0.4, candles, closes: candles.map((c) => c[4]), closeDates: candles.map((c) => c[0]) },
+    strikes: [], ticks: [], expiries, generatedAt: "2026-08-25T09:00:00Z", sessionDate: session,
+    ivRank: [], termStructure: [],
+    variation: { probe: { call: "raw", put: "raw" }, kc: { status: "ok", value: 50, n: 200, iqrRatio: 0.2 },
+      unit: { family: "share", used: "share" }, vannaScale: { status: "agree", ratio: 1, n: 5 } },
+  };
+  const card = buildCard(input);
+  const v = card.panels.variation;
+  eq(v.status, "ok", "every card carries the hedging panel, built from the expiry ladder the card already reads");
+  eq(v.gammaSource, "book", "its gamma channel is the open-interest book");
+  eq(v.inputs.expiries.live, 3, "the expiry that lapsed at the session's close is not in the book");
+  ok(v.inputs.rollOff && v.inputs.rollOff.expiries === 1 && /context, not a flow/.test(v.inputs.rollOff.what),
+     "and its delta is published as context with no flow sign");
+  ok(v.inputs.adv > 1e8 && v.inputs.adv < 3e8, `the candle dated after the session does not reach the typical day (${v.inputs.adv})`);
+  eq(card.regime.bookGamma, v.inputs.gammaBook, "the regime carries the book's net in dollars per 1% beside the flow's");
+  eq(card.regime.labelFrom, "book", "and says the label was read from the book");
+  eq(card.panels.calendar.schedule[0].expiry, day(4), "the roll-off starts at the first live expiry");
+  ok(card.panels.vanna.rows.every((r) => r.expiry > session), "and so does every greek ladder");
+
+  const noVanna = buildCard({ ...input, expiries: expiries.map((r) => ({ ...r, call_vanna: null, put_vanna: null })) });
+  const nv = noVanna.panels.variation;
+  eq(nv.status, "ok", "ablating the vanna rows leaves the panel standing");
+  eq(nv.channels.vanna, null, "with vanna silent");
+  ok(nv.silences.some((q) => q.channel === "vanna"), "and saying so");
+  ok(nv.channels.gamma && nv.channels.charm, "while gamma and charm keep their readings");
+  eq(nv.channels.gamma.perSigma, v.channels.gamma.perSigma, "unchanged");
+  eq(nv.channels.charm.perSession, v.channels.charm.perSession, "both of them");
+
+  const cross = buildCard({ ...input, ivRank: null, termStructure: null, unfetched: "never requested" });
+  eq(cross.panels.variation.status, "ok", "a cross-section card builds the panel too, from the enrichment already in hand");
+  ok(cross.panels.variation.silences.some((q) => q.channel === "vannaSize" && /0 daily implied-volatility changes/.test(q.reason)),
+     "with the vol size silent, since the implied-volatility history is a deep-card read");
+
+  const bare = buildCard({ ...input, variation: undefined });
+  ok(bare.panels.variation.silences.some((q) => q.code === "kc-unmeasured") &&
+     bare.panels.variation.silences.some((q) => q.code === "vanna-unchecked"),
+     "with no run-level probes the charm and vanna dollars stay silent rather than borrowing a default");
+
+  const inverted = buildLevels({ spot: 100, atr: 2, callWall: 95, putWall: 104 });
+  const lab = Object.fromEntries(inverted.levels.map((l) => [l.kind, l.label]));
+  eq(lab.call_wall, "Largest long-gamma strike", "a call wall below spot is not called a call wall");
+  eq(lab.put_wall, "Largest short-gamma strike", "nor a put wall above spot a put wall");
+  const usual = buildLevels({ spot: 100, atr: 2, callWall: 104, putWall: 95 });
+  eq(Object.fromEntries(usual.levels.map((l) => [l.kind, l.label])).call_wall, "Call wall",
+     "while one on the conventional side keeps its name");
+
+  const vc = buildCard({ ...input, termStructure: [{ expiry: day(4), dte: 3, volatility: 0.4 }, { expiry: session, dte: 0, volatility: 0.9 }],
+    ivRank: [{ date: day(1), volatility: 0.5, close: 101 }, { date: session, volatility: 0.4, close: 100 }] }).panels.volContext;
+  eq(vc.term.rows.length, 1, "the term structure drops the expiry that lapsed at the session's close");
+  eq(vc.term.rows[0].dte, 4, "and counts days from the session, as the greeks on the same card do, not the vendor's 3");
+  ok(vc.ivRank.rows.every((r) => r.date <= session) && vc.ivRank.afterSession === 1,
+     "the implied-volatility history drops the row dated after the session and counts it");
 }
 
 console.log(`✓ flows-card: ${checks} assertions — numOrNull discipline, field polarity, ATR-normalised levels, dealer-signed gamma, cumulated path, dated gross roll-off, a priced band that is never a forecast, a full source-ablation sweep, wave-2 panels holding the three-silences boundary, a cohort panel that finally names the cross-section the score was neutralised against, and a market-wide join whose ordering and unit are MEASURED rather than assumed, whose absences are quiet with the cut they missed, and whose rank never claims the session it was not read in`);

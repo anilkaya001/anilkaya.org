@@ -27,7 +27,10 @@ import {
   judgeScreenerDate, sessionRows, readDayOf, PIPELINE_CADENCE, SESSION_OPEN_MINUTES,
   SESSION_CLOSE_MINUTES, MEMORY_ARCHIVE_SESSIONS, READ_RETRIES, readStored, holdersRefusal,
   HOLDERS_RETRY_DAYS,
+  IV_RANK_PARAMS, fakeIvRank, measureVariationProbes, fakeOiLadder, fakeLadderGreeks,
+  fakeLadderChain, vannaProbeSample, featuresVariationInput, boardVariationMeta,
 } from "../scripts/flows-pipeline.mjs";
+import { VARIATION_CODES } from "../shared/flows-variation.js";
 import { pearson, horizonMove, HORIZON_SESSIONS, realizedVol } from "../shared/flows-features.js";
 import { execFileSync, spawnSync, spawn } from "node:child_process";
 import fs from "node:fs";
@@ -139,6 +142,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     vegaTilt: (i % 5) * 0.6,
     netGamma: (i % 3 - 1) * 1e9,
     spotGammaShare: ((i % 7) - 3) / 4,
+    gammaBookShare: ((i % 7) - 3) / 4,
     flipDist: (i % 11 - 5) / 100,
     displacement: (i % 2 ? 1 : -1) * 0.6 + (i % 9 - 4) / 6,
     displacementWeight: 1,
@@ -164,7 +168,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     premiumTilt: f.dirShare * 0.5, netTilt: f.dirShare * 0.3,
     volTilt: f.dirShare * 0.4, oiTilt: f.dirShare * 0.2, surpriseTilt: 0,
   }));
-  const sectors = all.map((_, i) => ["tech", "energy", "health", "fins"][i % 4]);
+  const sectors = all.map((f, i) => (f.ticker === "LOTTO" ? "tech" : ["tech", "energy", "health", "fins"][i % 4]));
   const caps = all.map(() => 5e9);
 
   const scored = scoreBoard(all, tilts, sectors, caps);
@@ -207,13 +211,19 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      `while the quality gauge, which has no direction, stays put ` +
      `(${c.fam.O} -> ${after.fam.O})`);
 
-  const shortAtSpot = scored.filter((x) => x.spotGammaShare < -0.2);
-  const longAtSpot = scored.filter((x) => x.spotGammaShare > 0.2);
+  const shortAtSpot = scored.filter((x) => x.gammaBookShare < -0.2);
+  const longAtSpot = scored.filter((x) => x.gammaBookShare > 0.2);
   ok(shortAtSpot.length && longAtSpot.length, "the fixture covers both gamma regimes");
   const meanGate = (rows) => rows.reduce((a, x) => a + x.gate, 0) / rows.length;
   ok(meanGate(shortAtSpot) > meanGate(longAtSpot),
-     `THE FIX: short gamma at spot amplifies, long gamma damps ` +
+     `THE FIX: a short open-interest book amplifies, a long one damps — the gate reads the book's ` +
+     `net share of its gross, not the flow ladder's running sum below spot ` +
      `(${meanGate(shortAtSpot).toFixed(3)} vs ${meanGate(longAtSpot).toFixed(3)})`);
+  const noBook = scoreBoard(all.map((f) => ({ ...f, gammaBookShare: null, spotGammaShare: -f.spotGammaShare })),
+    tilts, sectors, caps);
+  ok(noBook.every((x, i) => Math.abs(x.gate - scoreBoard(all.map((f) => ({ ...f, gammaBookShare: null })),
+    tilts, sectors, caps)[i].gate) < 1e-12),
+     "and the running sum below spot no longer moves the gate at all: flipping it leaves every gate where it was");
 
   for (const k of ["F", "P", "D"]) {
     ok(scored.every((x) => x.fam[k] === null || (x.fam[k] >= -100 && x.fam[k] <= 100)),
@@ -3372,6 +3382,99 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     await new Promise((r) => uwServer.close(r));
     await new Promise((r) => ingest.close(r));
   }
+}
+
+{
+  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  eq(IV_RANK_PARAMS.timespan, "3m", "the implied-volatility history is asked for by timespan, the parameter the vendor documents");
+  ok(!/iv-rank`,\s*\{\s*limit/.test(src), "and never with the `limit` the vendor ignores");
+  ok(/iv-rank`, IV_RANK_PARAMS\)/.test(src), "the live call and the fixture read one parameter object");
+  eq(fakeIvRank("ABC", 50).length, 5,
+     "the fixture answers an undated, unparameterised call the way the vendor does: five rows");
+  ok(fakeIvRank("ABC", 50, IV_RANK_PARAMS).length >= 60, "and a three-month timespan with a quarter's sessions");
+  ok(/volatility\/term-structure`,\s*\n?\s*sessionDate \? \{ date: sessionDate \}/.test(src),
+     "the term structure is dated at the session, so its days to expiry agree with the greeks on the same card");
+  ok(/d > sessionDate/.test(src) && !/d >= sessionDate/.test(src),
+     "an expiry dated on the session expired at its close and is never asked for on the surface");
+
+  const enriched = ["AAA", "BBB", "CCC", "DDD", "EEE", "FFF", "GGG", "HHH", "III", "JJJ", "KKK", "LLL"].map((t, i) => {
+    const spot = 45 + i * 20;
+    const ladder = fakeOiLadder(t, spot, 0.3 + i * 0.02);
+    const book = fakeLadderGreeks(ladder);
+    const expiries = book.rows.map((b) => ({ expiry: b.expiry, call_gex: b.gc, put_gex: -b.gp, call_delta: b.dc,
+      put_delta: b.dp, call_vanna: b.vc, put_vanna: b.vp, call_charm: b.cc, put_charm: b.cp }));
+    const strikes = ladder.strikes.map((k, j) => ({ strike: k, call_gamma_oi: book.byStrike[j].gc, put_gamma_oi: -book.byStrike[j].gp }));
+    return { features: { ticker: t, spot }, tilt: { iv30: 0.3 + i * 0.02 }, raw: { expiries, strikes } };
+  });
+  const run = measureVariationProbes(enriched, "2026-08-24");
+  eq(run.probe.call, "raw", "the pooled convention probe reads Black-Scholes call legs as raw");
+  eq(run.probe.put, "raw", "and holder-signed put legs as raw");
+  eq(run.unit.family, "share", "the unit probe recovers the share family from call_gamma_oi over call_gex");
+  eq(run.strikeSign.sign, 1, "the strike book probe reads put_gamma_oi as dealer-signed");
+  eq(run.next.h, 1, "a Monday session is one calendar day from the next");
+  ok(run.lines.every((l) => /^  variation: /.test(l)), "and every probe prints one tagged log line");
+  const sample = vannaProbeSample("AAA", { rows: [], expiry: null, sessionDate: "2026-08-24",
+    expiries: enriched[0].raw.expiries, spot: 45 });
+  ok(sample === null || (sample.vendor > 0 && sample.model > 0),
+     "the vanna check returns a vendor-against-model pair or nothing at all");
+  const live = vannaProbeSample("AAA", { rows: fakeLadderChain(fakeOiLadder("AAA", 45, 0.3), "2026-09-04"),
+    expiry: "2026-09-04", sessionDate: "2026-08-24", expiries: enriched[0].raw.expiries, spot: 45 });
+  ok(live && Math.abs(live.vendor / live.model - 1) < 1e-9,
+     `a chain built from the same open-interest ladder reproduces the vendor's call vanna (${live && (live.vendor / live.model)})`);
+  const meta = boardVariationMeta({ ...run, vannaScale: { status: "agree", ratio: 1, n: 5 } });
+  ok(meta.codes === VARIATION_CODES && meta.kc.n === run.kc.n, "the board's variation block carries the code table and the run's probes");
+  const input = featuresVariationInput({ features: { ticker: "X", spot: 50, netGamma: 1, gammaBookRaw: 2, candles: [], iv30: 0.3 },
+    raw: { expiries: [] } }, "2026-08-24");
+  eq(input.ivRankRows, null, "a board row's variation carries no vol-of-vol: the implied-volatility history is a deep-card read");
+}
+
+{
+  const prefix = fs.mkdtempSync(path.join(os.tmpdir(), "flows-var-")) + "/e";
+  const run = spawnSync(process.execPath, ["../scripts/flows-pipeline.mjs", "--dry-run", "--emit", prefix],
+    { cwd: import.meta.dirname, encoding: "utf8" });
+  eq(run.status, 0, "the dry run exits clean with the variation leg in it");
+  const log = run.stdout + run.stderr;
+  ok(/variation: put convention call raw, put raw/.test(log), "the run logs the pooled convention probe");
+  ok(/variation: charm scale K_c [\d.]+ over \d+ expiry reading\(s\).* — ok/.test(log), "and the charm scale it measured");
+  ok(/variation: vanna scale agree/.test(log), "and the vanna scale checked against the fixture's chains");
+  const read = (key) => JSON.parse(fs.readFileSync(`${prefix}-${key}.json`, "utf8"));
+  const meta = read("meta");
+  ok(meta.variation && meta.variation.kc.status === "ok" && meta.variation.unit.family === "share" && meta.variation.votes === false,
+     "meta publishes the run's probes, with the hedge vote off");
+  const long = read("board-long");
+  const sv = long.scoreVariance;
+  ok(sv && /residual/.test(sv.basis) && /blended/.test(sv.blended.basis),
+     "the board publishes the score's variance decomposition and says which variance each set of shares divides");
+  const total = Object.values(sv.columns).reduce((a, v) => a + v, 0);
+  ok(Math.abs(total - 1) < 1e-4, `and the residual shares sum to one (${total})`);
+  eq(sv.columns.pDisp, 0, "displacement is off the blend, so it explains none of the score");
+  ok(long.rows.every((r) => r.fam.P === null), "and no row carries a positioning family score");
+  ok(long.rows.every((r) => r.variation && "gammaPerSigmaPctAdv" in r.variation && "charmPctAdv" in r.variation &&
+     "vannaPerPointPctAdv" in r.variation && "driftInSd" in r.variation),
+     "every board row carries the compact variation summary the overview's universe map will draw");
+  ok(long.rows.every((r) => Object.values((r.variation && r.variation.why) || {}).every((code) => Object.hasOwn(long.variation.codes, code))),
+     "and every null on it carries a code the board spells out");
+  ok(long.rows.some((r) => r.variation.driftInSd !== null), "with at least one drift reading on the fixture");
+  const cards = fs.readdirSync(path.dirname(prefix)).filter((f) => /-card-/.test(f))
+    .map((f) => JSON.parse(fs.readFileSync(path.join(path.dirname(prefix), f), "utf8")));
+  ok(cards.every((c) => c.panels.variation && typeof c.panels.variation.status === "string"),
+     "every card, deep or cross-section, carries the hedging panel");
+  const deep = cards.filter((c) => c.depth === "board");
+  ok(deep.every((c) => c.panels.volContext.status !== "ok" || c.panels.volContext.ivRank.seen >= 40),
+     `a deep card's implied-volatility history now carries a quarter of sessions (${deep.map((c) => c.panels.volContext.ivRank && c.panels.volContext.ivRank.seen).slice(0, 4).join(", ")})`);
+  ok(deep.every((c) => (c.panels.volContext.ivRank.rows || []).every((r) => r.date <= c.sessionDate)),
+     "with no row dated after the session");
+  ok(deep.some((c) => c.panels.variation.status === "ok" && c.panels.variation.inputs.ivChanges >= 20),
+     "so the vol-of-vol is measured on deep cards");
+  ok(cards.every((c) => !c.panels.calendar.schedule || c.panels.calendar.schedule.every((r) => r.expiry > c.sessionDate)),
+     "no card's roll-off is led by the expiry that lapsed at the session's close");
+  ok(cards.every((c) => ["vanna", "charm", "deltaExposure"].every((k) => c.panels[k].status !== "ok" ||
+     c.panels[k].rows.every((r) => r.expiry > c.sessionDate))), "nor any greek ladder");
+  ok(cards.every((c) => c.regime && (c.regime.labelFrom === "book" || c.regime.labelFrom === "flow")),
+     "every card says where its gamma label came from");
+  ok(cards.filter((c) => c.regime.labelFrom === "book").every((c) =>
+     c.regime.label === (c.regime.bookGammaRaw >= 0 ? "long" : "short")),
+     "and a book-read label is the sign of the book's net");
 }
 
 console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, the dated archive key and its bounded prune, the watch board's ranking and vocabulary, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor, sector TRIX and the fixed-clamp scaling that keeps a flat day flat, the movers band's zero-call guarantee and its unranked counts, the rate limiter's floor actually being a floor, the truncated-chain probe's three distinct verdicts, the board's memory refusing a prior board that turns out to be this run's own session, a corpus proven to REACH the change layer's branches rather than merely to satisfy assertions written around them, and a market-wide join whose published coverage is checked against the cards it was measured over rather than against itself, the sector OPTIONS lean proven to be a different quantity from the sector momentum beside it — its ratio comparable across baskets three orders of magnitude apart where the dollar difference is not, its measured zero visible in dollars and undefined as a ratio, a blank vendor string refused before it can become a confident zero, and its row vocabulary disjoint from TRIX's — and the news tape's four counts, its own ordering applied before the cap so the rows kept are the newest and not the first, and an undated row published, counted on both sides of the cap, and never given a manufactured timestamp`);

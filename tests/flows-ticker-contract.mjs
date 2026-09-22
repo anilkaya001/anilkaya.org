@@ -93,6 +93,8 @@ const truncated = cards.filter((c) =>
     volContext: 756, topContracts: 1044, __score: 1034,
 
     premiumTrack: 460, __sessions: 996,
+
+    variation: 994,
   };
   eq(Object.keys(PANEL_H).length, TICKER_PANELS.length,
      `the measured-height table covers every registry panel (${Object.keys(PANEL_H).length} ` +
@@ -1027,7 +1029,7 @@ try {
       ["aggressor", "calendar", "charm", "congress", "context", "darkpool",
         "deltaExposure", "displacement", "levels", "marketRank", "oiDeltas",
         "path", "pricedMove", "surface", "topContracts",
-        "vanna", "volContext"],
+        "vanna", "variation", "volContext"],
       `exactly the panels that publish a lead have a filled slot ` +
       `(${ones.map((p) => p.key).join(", ") || "none"})`); checks++;
 
@@ -1887,8 +1889,8 @@ try {
         if (typeof r.put === "number") legs++;
       }
       eq(got.bars, legs,
-         `${key}: one bar per PRESENT leg (${legs}), never one per expiry — the two legs ` +
-         `are never netted, because the vendor's put convention differs by Greek`);
+         `${key}: one bar per PRESENT leg (${legs}), never one per expiry — each leg is drawn ` +
+         `as the vendor signed it, and the dealer net is a separate figure beside them`);
       ok(got.calls > 0 && got.puts > 0,
          `${key}: both legs are drawn and told apart by class`);
       ok(got.negBelow,
@@ -1902,7 +1904,9 @@ try {
       ok(got.said.includes(panel.signConvention),
          `${key}: and its sign convention, which is why nothing here is a direction`);
       ok(/[Gg]ross size/.test(got.said),
-         `${key}: the total is labelled a SIZE — with two un-nettable legs it cannot be a direction`);
+         `${key}: the gross total is labelled a SIZE, never a direction`);
+      ok(/Dealer net, drawn \(call (\u2212|\+) put\)/.test(got.said),
+         `${key}: and the dealer net across the drawn expiries is printed with the rule that made it`);
     }
 
     const zeroed = JSON.parse(JSON.stringify(base));
@@ -2308,11 +2312,14 @@ try {
   }
 
   {
+    const lastTwoScored = (rows) => rows.length >= 2 &&
+      typeof rows[rows.length - 1].score === "number" && typeof rows[rows.length - 2].score === "number";
     const base = withChain.find((c) =>
       c.panels.scoreOverlay && c.panels.scoreOverlay.status === "ok" &&
       c.panels.scoreOverlay.rows.length >= 6 &&
-      typeof c.panels.scoreOverlay.deadBand === "number");
-    ok(base, "an emitted card carries a joined overlay with a published dead band");
+      typeof c.panels.scoreOverlay.deadBand === "number" &&
+      lastTwoScored(c.panels.scoreOverlay.rows));
+    ok(base, "an emitted card carries a joined overlay with a published dead band and two scored sessions at its end");
     const BAND = base.panels.scoreOverlay.deadBand;
 
     const page = await browser.newPage({ viewport: { width: 1280, height: 1200 } });
@@ -3613,6 +3620,11 @@ try {
         .find((f) => f && f.status === "quiet");
       ok(quiet, "the emitted corpus contains a name that is in no market-wide list");
       card.panels.marketRank.feeds.oiChange = JSON.parse(JSON.stringify(quiet));
+      const placed = withChain
+        .map((c) => c.panels.marketRank && c.panels.marketRank.feeds.darkpool)
+        .find((f) => f && f.status === "ok");
+      ok(placed, "and one that places in the dark-pool list, so the folded arm is the one under test");
+      card.panels.marketRank.feeds.darkpool = JSON.parse(JSON.stringify(placed));
 
       card.panels.marketRank.feeds.darkpool.sameSession = true;
       card.panels.marketRank.feeds.darkpool.asOfStated = true;
@@ -4246,6 +4258,106 @@ try {
     ok(/8 robust · 10 fair · 3 weak · 3 withheld/.test(neuron.cov), "and counts each grade");
     eq(errors.length, 0, `the volatility, second-row and Neuron paints throw nothing (${errors.join("; ")})`);
     await page.close();
+  }
+
+  {
+    const card = JSON.parse(JSON.stringify(withChain.find((c) => c.panels.variation &&
+      c.panels.variation.status === "ok" && c.panels.variation.grid)));
+    ok(card, "an emitted card carries a hedging panel with its scenario grid");
+    const V = card.panels.variation;
+    for (const width of [320, 1280]) {
+      const page = await browser.newPage({ viewport: { width, height: 1400 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, card, { ticker: card.ticker, station: "convexity" });
+      const got = await page.evaluate(() => {
+        const s = document.querySelector('.ft-panel[data-panel="variation"]');
+        const host = s && s.querySelector(":scope > div");
+        const table = host && host.querySelector("table.fv-grid");
+        const right = s ? s.getBoundingClientRect().right : 0;
+        let worst = 0;
+        if (s) {
+          const walk = (n) => {
+            for (const c of n.children) {
+              if (c.closest(".fc-tablewrap") && c !== c.closest(".fc-tablewrap")) continue;
+              worst = Math.max(worst, c.getBoundingClientRect().right - right);
+              walk(c);
+            }
+          };
+          walk(s);
+        }
+        return {
+          there: !!host,
+          first: s ? s.parentElement.querySelector(".ft-panel[data-panel]") === s : false,
+          tier: s ? s.dataset.tier : null,
+          bars: host ? host.querySelectorAll("rect.fv-bar").length : 0,
+          caption: table && table.caption ? table.caption.textContent : null,
+          colHeads: table ? [...table.querySelectorAll("thead th[scope=col]")].length : 0,
+          rowHeads: table ? [...table.querySelectorAll("tbody th[scope=row]")].length : 0,
+          cells: table ? table.querySelectorAll("tbody td").length : 0,
+          silentCells: table ? table.querySelectorAll("tbody td[data-empty]").length : 0,
+          text: host ? host.textContent : "",
+          how: host ? !!host.querySelector("details.ft-how") : false,
+          spill: Math.round(worst),
+          sideways: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          height: s ? Math.round(s.getBoundingClientRect().height) : 0,
+          one: s ? (s.querySelector(":scope > .ft-panel-one") || {}).textContent : null,
+        };
+      });
+      ok(got.there, `${width}px: the hedging panel mounts`);
+      ok(got.first && got.tier === "lead", `${width}px: it leads the Convexity station`);
+      ok(got.bars >= 1 && got.bars <= 3, `${width}px: one bar per channel with a reading (${got.bars})`);
+      ok(/hedge flow over the next session/.test(got.caption || ""),
+         `${width}px: the scenario grid is a real table with a caption ("${got.caption}")`);
+      eq(got.colHeads, 4, `${width}px: a corner header and three vol columns, each scope=col`);
+      eq(got.rowHeads, 5, `${width}px: five price rows, each a scope=row header`);
+      eq(got.cells, 15, `${width}px: fifteen cells`);
+      eq(got.silentCells, V.grid.cells.flat().filter((c) => c === null).length,
+         `${width}px: a silent cell is drawn as a silence, not as zero`);
+      ok(got.how, `${width}px: the conventions sit behind one disclosure`);
+      ok(/dealer-signed under the vendor's convention/.test(got.text),
+         `${width}px: which states the dealer assumption every figure rests on`);
+      eq(got.one, V.lead.say, `${width}px: the panel's one-line lead is the publisher's sentence verbatim`);
+      ok(got.spill <= 1, `${width}px: nothing in the panel spills past its right edge (${got.spill}px)`);
+      eq(got.sideways, 0, `${width}px: and the page does not scroll sideways`);
+      if (width === 1280) {
+        ok(Math.abs(got.height - 994) <= 150,
+           `the measured height (${got.height}px) is within reach of the table's figure, so the height ` +
+           "table stays a measurement rather than a guess");
+      }
+      eq(errors.length, 0, `${width}px: the hedging panel draws without throwing (${errors.join("; ")})`);
+      await page.close();
+    }
+
+    const silent = JSON.parse(JSON.stringify(card));
+    silent.panels.variation.silences = [
+      { channel: "book", kind: "unavailable", code: "no-book", reason: "the open-interest book is not on this card" },
+      { channel: "vannaSize", kind: "quiet", code: "few-iv-changes", reason: "3 daily implied-volatility changes on the card; a vol-of-vol needs 20" },
+      { channel: "charm", kind: "pending", code: "kc-unmeasured", reason: "the charm scale is not yet published" },
+      { channel: "vanna", kind: "unreadable", code: "vanna-absent", reason: "the vanna leg could not be read" },
+    ];
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+    await mount(page, silent, { ticker: silent.ticker, station: "convexity" });
+    const words = await page.evaluate(() =>
+      [...document.querySelectorAll('.ft-panel[data-panel="variation"] .fv-silences li')]
+        .map((li) => ({ kind: li.getAttribute("data-empty"), text: li.textContent })));
+    assert.deepEqual(words.map((w) => w.kind), ["unavailable", "quiet", "pending", "unreadable"],
+      "each silence keeps its own kind — the product's four silences, never collapsed into one"); checks++;
+    ok(/^Unavailable — /.test(words[0].text) && /^Quiet — /.test(words[1].text) &&
+       /^Pending — /.test(words[2].text) && /^Unreadable — /.test(words[3].text),
+       "and says which one it is in words");
+    ok(/3 daily implied-volatility changes/.test(words[1].text), "with the publisher's reason verbatim");
+    await page.close();
+
+    const dead = JSON.parse(JSON.stringify(card));
+    dead.panels.variation = { status: "unavailable", reason: "neither the open-interest gamma book nor the day's flow ladder is on this card" };
+    const page2 = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+    await mount(page2, dead, { ticker: dead.ticker, station: "convexity" });
+    const deadText = await page2.evaluate(() =>
+      document.querySelector('.ft-panel[data-panel="variation"] [data-empty]').textContent);
+    ok(/^Unavailable — neither the open-interest gamma book/.test(deadText),
+       `a silent model draws its reason and no number (${deadText.slice(0, 70)})`);
+    await page2.close();
   }
 
 } finally {

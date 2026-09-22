@@ -8,9 +8,12 @@ export const TICKER_PANELS = Object.freeze([
     title: "Key statistics",
     question: "What are this name’s headline figures, gathered from the panels that publish them?" },
 
-  { key: "gamma", id: "ftGamma", span: 2, group: "convexity", tier: "lead",
+  { key: "variation", id: "ftVar", span: 2, group: "convexity", tier: "lead",
+    title: "Where hedging flow comes from",
+    question: "Over the next session, how much stock would dealers trade to stay hedged, and how much comes from spot, volatility and time?" },
+  { key: "gamma", id: "ftGamma", span: 2, group: "convexity", tier: "chart",
     title: "Gamma convexity",
-    question: "Where is the dealer book long and short gamma?" },
+    question: "Where did today’s trading add long and short dealer gamma, by strike?" },
   { key: "levels", id: "ftLevels", span: 1, group: "convexity", tier: "reading",
     title: "Key levels & distance to spot",
     question: "Where are the walls, and how far is spot from each in ATR?" },
@@ -19,7 +22,7 @@ export const TICKER_PANELS = Object.freeze([
     question: "Is new gamma building above or below the standing book?" },
   { key: "surface", id: "ftSurface", span: 2, group: "convexity", tier: "chart",
     title: "Gamma surface — strike × expiry",
-    question: "Which expiries carry the standing gamma, and at which strikes?" },
+    question: "Which expiries and strikes carried today’s gamma flow?" },
   { key: "calendar", id: "ftCal", span: 1, group: "convexity", tier: "chart",
     title: "Gamma roll-off",
     question: "How much of the book expires, and when?" },
@@ -28,11 +31,11 @@ export const TICKER_PANELS = Object.freeze([
     question: "How fast is that exposure decaying with time alone, spot unchanged?" },
 
   { key: "deltaExposure", id: "ftDelta", span: 1, group: "convexity", tier: "chart",
-    title: "Dealer delta by expiry",
-    question: "How much directional exposure are dealers carrying, and where along the term?" },
+    title: "Open-interest delta by expiry",
+    question: "How much delta does open interest carry along the term, each leg as the vendor signs it?" },
   { key: "vanna", id: "ftVanna", span: 1, group: "convexity", tier: "chart",
     title: "Vanna by expiry",
-    question: "How much would that exposure move on a one-point change in implied volatility?" },
+    question: "How does that delta move with implied volatility, expiry by expiry?" },
 
   { key: "ivSurface", id: "ftIvs", span: 2, group: "volatility", tier: "lead",
     title: "Implied volatility — moneyness × expiry",
@@ -92,8 +95,9 @@ export const TICKER_GROUPS = Object.freeze([
       "scored this name, what it is made of, and the figures the rest of this " +
       "page derives." },
   { key: "convexity", label: "Convexity", hash: "ftg-convexity",
-    blurb: "The dealer book: where gamma sits along the strike ladder and the " +
-      "term, and how it is moving." },
+    blurb: "What moves dealers’ hedges: the open-interest book’s gamma, vanna and " +
+      "charm netted into one next-session reading, then the gamma today’s trading " +
+      "added, by strike and by expiry." },
   { key: "volatility", label: "Volatility", hash: "ftg-volatility",
     blurb: "What the option chain charges — the smile, the term structure, and " +
       "the move those two imply." },

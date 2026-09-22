@@ -780,6 +780,41 @@ p.fb-empty:is([data-empty="quiet"], [data-empty="pending"],
 
 .gts-unit, .gts-sign, .gts-shed, .fp-unit { max-width: var(--measure); }
 
+.fv-bars { display: block; width: 100%; }
+.fv-bar.is-hatched { fill-opacity: 0.45; stroke: currentColor; stroke-width: 1; stroke-dasharray: 3 2; }
+.fv-bar.is-flat { fill: var(--ink-faint); }
+.fv-strip {
+  display: flex;
+  height: 0.6rem;
+  margin: 0.5rem 0 0.25rem;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--hairline);
+}
+.fv-seg { display: block; min-width: 2px; }
+.fv-seg.is-gamma { background: var(--gold-harvest); }
+.fv-seg.is-vanna { background: var(--gold-celadon); }
+.fv-seg.is-cross { background: var(--ink-faint); }
+.fv-grid caption {
+  caption-side: top;
+  text-align: left;
+  color: var(--ink-dim);
+  font-size: var(--fs-note);
+  padding-bottom: 0.25rem;
+}
+.fv-grid td.is-pos { color: var(--flow-up); }
+.fv-grid td.is-neg { color: var(--flow-down); }
+.fv-silences {
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+  font-size: var(--fs-note);
+  color: var(--ink-dim);
+  max-width: var(--measure);
+}
+.fv-silences li + li { margin-top: 0.25rem; }
+.fv-drift, .fv-rolloff { max-width: var(--measure); }
+
 .ovl { display: block; width: 100%; }
 
 .ovl-band { fill: var(--ink); opacity: 0.06; }

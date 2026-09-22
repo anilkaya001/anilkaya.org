@@ -362,7 +362,7 @@ flows-events-contract  flows-mint-contract     flows-permits-contract
 flows-political-contract  flows-record-contract  flows-universe-contract
 flows-garch            flows-neuron
 flows-chain-panels     flows-auth-contract     mastery-contract
-academy-contract
+academy-contract       flows-variation
 ```
 
 Confirmed to need one: `flows-overview-contract`, `flows-board-render`,
