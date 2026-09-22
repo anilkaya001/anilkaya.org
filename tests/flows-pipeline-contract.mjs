@@ -2778,6 +2778,37 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     eq(vendorNum(undefined), null, "so is undefined");
     eq(vendorNum("n/a"), null, "and so is a string that is not a number at all");
 
+    const base = {
+      call_volume: 1000, put_volume: 800, call_premium: 5e6, put_premium: 4e6,
+      call_open_interest: 60000, put_open_interest: 40000, total_open_interest: 100000,
+      avg_30_day_call_volume: 900, avg_30_day_put_volume: 700,
+    };
+    const oneSided = screenerTilt({ ...base, bearish_premium: 2e6 });
+    eq(oneSided.premiumTilt, null,
+       "a bearish premium with no bullish side on the wire is no tilt — it was -1, a full bearish " +
+       "vote built from a field the vendor did not send");
+    eq(screenerTilt({ ...base, bullish_premium: 3e6, bearish_premium: 2e6 }).premiumTilt, 0.2,
+       "while both sides present still measure (3 - 2) / 5");
+    eq(screenerTilt({ ...base, bullish_premium: "   ", bearish_premium: 2e6 }).premiumTilt, null,
+       "and a blank side is absent, not zero");
+    eq(oneSided.oiTilt, null,
+       "with no previous open interest there is no open-interest CHANGE — it was 0.2, the " +
+       "book's call/put composition dressed as a day's positioning");
+    eq(screenerTilt({ ...base, prev_call_oi: 60000, prev_put_oi: 40000 }).oiTilt, 0,
+       "while an unchanged book is a measured zero");
+    eq(screenerTilt({ ...base, prev_call_oi: 60000 }).oiTilt, null, "half a pair is no change");
+    eq(oneSided.netTilt, null, "absent net premiums are no net tilt, not a balanced zero");
+    eq(screenerTilt({ ...base, net_call_premium: 1e6 }).netTilt, null, "nor is one leg of them");
+    near(screenerTilt({ ...base, net_call_premium: 1e6, net_put_premium: -5e5 }).netTilt, 1.5e6 / 9e6, 1e-12,
+      "both legs measure against the gross premium");
+    eq(screenerTilt({ ...base, call_volume_ask_side: 600, call_volume_bid_side: 300 }).volTilt, null,
+       "an aggressor split on the calls alone is no volume tilt — it was 0.167, half a subtraction");
+    near(screenerTilt({ ...base, call_volume_ask_side: 600, call_volume_bid_side: 300,
+      put_volume_ask_side: 200, put_volume_bid_side: 500 }).volTilt, 600 / 1800, 1e-12,
+      "all four legs measure");
+    eq(screenerTilt({ ...base, call_volume: null }).surpriseTilt, null,
+       "and a call volume off the wire is no volume surprise");
+
     const blank = find(all({ bullish_premium: "   " }), "XLRE");
     eq(blank.read, "unreadable",
        "so a blank premium string makes the row unreadable rather than a zero-dollar lean");

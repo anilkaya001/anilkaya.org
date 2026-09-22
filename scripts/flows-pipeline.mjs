@@ -503,33 +503,42 @@ function eligible(row) {
 }
 
 function screenerTilt(row) {
-  const bull = num(row.bullish_premium);
-  const bear = num(row.bearish_premium);
-  const netCall = num(row.net_call_premium);
-  const netPut = num(row.net_put_premium);
+  const both = (a, b) => a !== null && b !== null;
+  const bull = vendorNum(row.bullish_premium);
+  const bear = vendorNum(row.bearish_premium);
+  const netCall = vendorNum(row.net_call_premium);
+  const netPut = vendorNum(row.net_put_premium);
 
-  const gross = Math.abs(bull) + Math.abs(bear);
+  const gross = both(bull, bear) ? Math.abs(bull) + Math.abs(bear) : 0;
   const premiumTilt = gross > 0 ? (bull - bear) / gross : null;
 
-  const grossPremium = Math.abs(num(row.call_premium)) + Math.abs(num(row.put_premium));
-  const netTilt = grossPremium > 0 ? (netCall - netPut) / grossPremium : null;
+  const callPrem = vendorNum(row.call_premium);
+  const putPrem = vendorNum(row.put_premium);
+  const grossPremium = both(callPrem, putPrem) ? Math.abs(callPrem) + Math.abs(putPrem) : 0;
+  const netTilt = both(netCall, netPut) && grossPremium > 0
+    ? (netCall - netPut) / grossPremium : null;
 
-  const callSurprise = num(row.avg_30_day_call_volume) > 0
-    ? num(row.call_volume) / num(row.avg_30_day_call_volume) : null;
-  const putSurprise = num(row.avg_30_day_put_volume) > 0
-    ? num(row.put_volume) / num(row.avg_30_day_put_volume) : null;
+  const callVol = vendorNum(row.call_volume);
+  const putVol = vendorNum(row.put_volume);
+  const callAvg = vendorNum(row.avg_30_day_call_volume);
+  const putAvg = vendorNum(row.avg_30_day_put_volume);
+  const callSurprise = callVol !== null && callAvg > 0 ? callVol / callAvg : null;
+  const putSurprise = putVol !== null && putAvg > 0 ? putVol / putAvg : null;
 
-  const callOiChange = num(row.call_open_interest) - num(row.prev_call_oi);
-  const putOiChange = num(row.put_open_interest) - num(row.prev_put_oi);
-  const oiBase = num(row.total_open_interest) ||
-    (num(row.call_open_interest) + num(row.put_open_interest));
+  const callOi = vendorNum(row.call_open_interest);
+  const putOi = vendorNum(row.put_open_interest);
+  const prevCallOi = vendorNum(row.prev_call_oi);
+  const prevPutOi = vendorNum(row.prev_put_oi);
+  const oiBase = vendorNum(row.total_open_interest) ||
+    (both(callOi, putOi) ? callOi + putOi : 0);
+  const oiTilt = both(callOi, prevCallOi) && both(putOi, prevPutOi) && oiBase > 0
+    ? ((callOi - prevCallOi) - (putOi - prevPutOi)) / oiBase : null;
 
-  const callVol = num(row.call_volume);
-  const putVol = num(row.put_volume);
-  const volBase = callVol + putVol;
-  const volTilt = volBase > 0
-    ? ((num(row.call_volume_ask_side) - num(row.call_volume_bid_side)) -
-       (num(row.put_volume_ask_side) - num(row.put_volume_bid_side))) / volBase
+  const legs = [row.call_volume_ask_side, row.call_volume_bid_side,
+    row.put_volume_ask_side, row.put_volume_bid_side].map(vendorNum);
+  const volBase = both(callVol, putVol) ? callVol + putVol : 0;
+  const volTilt = legs.every((v) => v !== null) && volBase > 0
+    ? ((legs[0] - legs[1]) - (legs[2] - legs[3])) / volBase
     : null;
 
   const iv30 = num(row.iv30d, NaN);
@@ -539,7 +548,7 @@ function screenerTilt(row) {
     volTilt,
     surpriseTilt: (callSurprise === null || putSurprise === null)
       ? null : Math.log((callSurprise + 0.1) / (putSurprise + 0.1)),
-    oiTilt: oiBase > 0 ? (callOiChange - putOiChange) / oiBase : null,
+    oiTilt,
 
     iv30: Number.isFinite(iv30) ? iv30 : null,
     ivMomentum: Number.isFinite(iv30) ? iv30 - num(row.iv30d_1w, NaN) : null,
