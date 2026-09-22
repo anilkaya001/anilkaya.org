@@ -902,6 +902,8 @@ function easternSessionDate(at) {
     ? `${parts.year}-${parts.month}-${parts.day}` : null;
 }
 
+const ALERT_READ_LIMIT = 60;
+
 async function refreshFlowsIntraday(env) {
   if (!env.DB || !env.UW_API_KEY) return;
   if (!isRefreshWindow(new Date())) return;
@@ -918,7 +920,7 @@ async function refreshFlowsIntraday(env) {
     const stored = await readFlowsPayload(env, "flowalerts");
     if (stored) {
       const prev = JSON.parse(stored.payload);
-      const raw = await uwFetch(env, "/api/option-trades/flow-alerts", { limit: 60 });
+      const raw = await uwFetch(env, "/api/option-trades/flow-alerts", { limit: ALERT_READ_LIMIT });
 
       const lastStage = new Map((prev.rows || []).map((r) => [r.t, r.st]));
       const alerts = buildFlowAlerts(raw, {
@@ -940,6 +942,10 @@ async function refreshFlowsIntraday(env) {
           readAt: readAt.toISOString(),
           readDay: easternSessionDate(readAt),
           refreshed: "intraday",
+          vendorLimit: null,
+          vendorTruncated: null,
+          readLimit: ALERT_READ_LIMIT,
+          readTruncated: alerts.seen + alerts.unusable >= ALERT_READ_LIMIT,
         };
         await upsert("flowalerts", written.flowalerts);
 

@@ -687,7 +687,7 @@
     const bears = poolCount(short);
 
     const seen = isNum(alerts && alerts.seen);
-    const atLimit = Boolean(alerts) && alerts.vendorTruncated === true;
+    const atLimit = Boolean(alerts) && (alerts.vendorTruncated === true || alerts.readTruncated === true);
 
     const bt = isNum(breadth.tilt);
     const pt = isNum(premium.tilt);
@@ -2109,7 +2109,8 @@
         const shown = Math.min(alrRows.length, LIST_MAX);
         const of = seen === null ? alrRows.length : seen;
 
-        said.push(alerts.vendorTruncated === true ? shown + " of ≥" + of : capSaid(shown, of));
+        said.push(alerts.vendorTruncated === true || alerts.readTruncated === true
+          ? shown + " of ≥" + of : capSaid(shown, of));
       }
 
       const cadence = alerts && alerts.status !== "pending"

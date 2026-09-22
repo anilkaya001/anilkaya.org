@@ -360,6 +360,8 @@
 
   let alertVendorLimit = null;
   let alertVendorTruncated = null;
+  let alertReadLimit = null;
+  let alertReadTruncated = null;
 
   let feedState = "pending";
 
@@ -450,6 +452,17 @@
         ", so how many it withheld above that line is unknown — this count is a " +
         "ceiling rather than a market, and comparing it with another session's " +
         "compares two ceilings.";
+    }
+    if (alertVendorTruncated === null && alertReadTruncated === true) {
+      return " The latest intraday read came back full at this site's own cap" +
+        (alertReadLimit === null ? "" : " of " + count(alertReadLimit) + " rows") +
+        ", so windows flagged since the read before it may be missing and this count is " +
+        "at least what the day's record holds rather than a market.";
+    }
+    if (alertVendorTruncated === null && alertReadTruncated === false) {
+      return " The latest intraday read came in under this site's own per-read cap" +
+        (alertReadLimit === null ? "" : " of " + count(alertReadLimit) + " rows") +
+        ", so it saw every window the vendor's rolling list still held.";
     }
     if (alertVendorTruncated === null) {
 
@@ -1051,6 +1064,11 @@
     if (!r.spanStart || !r.spanEnd) return cell(DASH, null,
       "The vendor stated no span for this window.");
     const hm = (iso) => String(iso).slice(11, 16);
+    if (r.spanFrom === "created_at") {
+      return cell(hm(r.spanStart), null,
+        "The vendor stated no span for this window; this is when it created the alert: " +
+        r.spanStart + ".");
+    }
     return cell(hm(r.spanStart) + "\u2013" + hm(r.spanEnd), null,
       "The vendor's stated span: " + r.spanStart + " to " + r.spanEnd + ".");
   }
@@ -1134,6 +1152,10 @@
     alertVendorTruncated = typeof alerts.vendorTruncated === "boolean"
       ? alerts.vendorTruncated
       : null;
+    alertReadLimit = isNum(alerts.readLimit);
+    alertReadTruncated = typeof alerts.readTruncated === "boolean"
+      ? alerts.readTruncated
+      : null;
 
     alertsBody.textContent = "";
     alertRows = rows.map((r, i) => ({ r, i }));
@@ -1171,7 +1193,7 @@
 
       alertsCap.textContent = count(rows.length) +
         (seen === null ? " windows" : " of " +
-          (alertVendorTruncated === true ? "at least " : "") + count(seen) +
+          (alertVendorTruncated === true || alertReadTruncated === true ? "at least " : "") + count(seen) +
           " flagged windows") +
         shedSaid +
         " \u00b7 ranked by the vendor's own premium, inside the vendor's own selection.";

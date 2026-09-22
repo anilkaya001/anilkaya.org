@@ -3230,8 +3230,12 @@ function fakeFlowAlerts(tickers) {
       open_interest: Math.floor(rnd() * 20000),
       volume_oi_ratio: Number((rnd() * 8).toFixed(3)),
       underlying_price: Number((30 + rnd() * 400).toFixed(2)),
-      start_time: "2026-08-24T14:" + String(10 + (i % 45)).padStart(2, "0") + ":00Z",
-      end_time: "2026-08-24T14:" + String(12 + (i % 45)).padStart(2, "0") + ":30Z",
+      start_time: i % 2 === 0
+        ? Date.UTC(2026, 7, 24, 14, 10 + (i % 45))
+        : "2026-08-24T14:" + String(10 + (i % 45)).padStart(2, "0") + ":00Z",
+      end_time: i % 2 === 0
+        ? Date.UTC(2026, 7, 24, 14, 12 + (i % 45), 30)
+        : "2026-08-24T14:" + String(12 + (i % 45)).padStart(2, "0") + ":30Z",
       expiry: "2026-09-18",
       sector: "Technology",
       marketcap: 1e10,
@@ -4865,7 +4869,8 @@ async function main() {
         : await uw("/api/option-trades/flow-alerts", { limit: ALERT_VENDOR_LIMIT });
       const alertsReadAt = new Date().toISOString();
 
-      const alertRowCount = unwrapVendorRows(raw).length;
+      const vendorRows = unwrapVendorRows(raw);
+      const alertRowCount = vendorRows.length;
 
       const survivors = new Set((tilted || []).map((x) => x.row && x.row.ticker));
       const stage = new Map();
@@ -4891,6 +4896,8 @@ async function main() {
 
         vendorLimit: ALERT_VENDOR_LIMIT,
         vendorTruncated: alertRowCount >= ALERT_VENDOR_LIMIT,
+        readLimit: null,
+        readTruncated: null,
       });
       console.log(
         `  flow-alerts: ${alerts.rows.length} alert(s) kept of ${alerts.seen}` +
@@ -4903,6 +4910,18 @@ async function main() {
         (alerts.unusable ? `, ${alerts.unusable} unusable` : "") +
         `; ${alerts.coverage.sweeps} sweep-flagged, ${alerts.coverage.opening} all-opening, ` +
         `${alerts.coverage.calls}C/${alerts.coverage.puts}P of ${alerts.coverage.withContract} with a parsed contract`);
+      const first = vendorRows.find((r) => r && typeof r === "object") || null;
+      console.log(`  flow-alerts: time fields on the first row — start_time ${first ? typeof first.start_time : "absent"}, ` +
+        `end_time ${first ? typeof first.end_time : "absent"}, created_at ${first ? typeof first.created_at : "absent"}; ` +
+        `${alerts.coverage.withSpan} of ${alerts.rows.length} kept rows carry a window` +
+        (alerts.coverage.spanFromCreated ? `, ${alerts.coverage.spanFromCreated} of them dated only by created_at` : ""));
+      if (alerts.rows.length && alerts.coverage.withSpan < alerts.rows.length / 2) {
+        console.warn(`  flow-alerts: NOTE only ${alerts.coverage.withSpan} of ${alerts.rows.length} kept rows carry a ` +
+          "time window, so the Window column is mostly a dash and repeated windows on one contract " +
+          "collapse into one row of the day's record — first-row sample: " +
+          JSON.stringify(first ? { start_time: first.start_time ?? null, end_time: first.end_time ?? null,
+            created_at: first.created_at ?? null } : null));
+      }
 
       if (moversPayload) {
         try {

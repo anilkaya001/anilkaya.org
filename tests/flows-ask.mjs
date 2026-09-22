@@ -4,6 +4,7 @@ import { buildFactIndex, selectFacts, numeralsIn, guardAnswer, renderFactsPlain,
          promptForSummary, renderSummaryPlain, summaryFingerprint, cardFacts,
          refreshIntradayFacts, briefAge, INTRADAY_SOURCES }
   from "../shared/flows-ask.js";
+import { buildBrief, briefStoreFrom } from "../shared/flows-brief.js";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
@@ -1723,6 +1724,40 @@ import { readFile } from "node:fs/promises";
        "a pending feed replaces nothing either");
   eq(refreshIntradayFacts(index, {}).refreshedAt, null,
      "with nothing to read from, no refresh stamp is invented");
+
+  const briefAlerts = (x) => x.facts.find((f) => f.id === "brief:today/alerts");
+  ok(/^2 flagged windows on the tape, read 2026-09-04 08:33 UTC\.$/.test(briefAlerts(index).say),
+     "the nightly index carries the brief's own count of the alert feed");
+  eq(briefAlerts(next).say, "4 flagged windows on the tape, read 2026-09-04 18:00 UTC.",
+     "AND THE REFRESH REBUILDS IT from the feed it just wrote. Production served '60 flagged windows " +
+     "on the tape, read 17:20' beside 'holds 180 of the 226 alerts read' at 20:15, because only facts " +
+     "whose source is the feed were replaced and this one's source is the brief");
+  eq(briefAlerts(next).at, "2026-09-04T18:00:00.000Z", "stamped with the read it quotes");
+  eq(next.facts.findIndex((f) => f.id === "brief:today/alerts"), index.facts.findIndex((f) => f.id === "brief:today/alerts"),
+     "in the slot it held, so selection order is unchanged");
+  eq(next.replaced.brief, 1, "and the rebuilt brief fact is counted, so the cron writes the index back");
+  eq(quiet.facts.find((f) => f.id === "brief:today/alerts").say, briefAlerts(index).say,
+     "a quiet read leaves the brief's count alone, the same rule as the feed's own facts");
+
+  const withToday = { ...index, today: buildBrief(briefStoreFrom(STORE)).today };
+  const told = refreshIntradayFacts(withToday, { flowalerts: fresh });
+  eq(told.today.facts.find((f) => f.id === "alerts").say, briefAlerts(next).say,
+     "the Where-the-session-stands list the ask page draws from brief.today says the same sentence");
+  eq(withToday.today.facts.find((f) => f.id === "alerts").say, briefAlerts(index).say,
+     "without mutating the stored brief it was handed");
+
+  const intraday = refreshIntradayFacts(index, { flowalerts: { ...fresh,
+    vendorLimit: null, vendorTruncated: null, readLimit: 60, readTruncated: true } });
+  ok(!intraday.facts.some((f) => f.id === "flowalerts/ceiling"),
+     "the vendor-ceiling fact is gone once the merge stops carrying the nightly read's vendorTruncated");
+  const ceiling = intraday.facts.find((f) => f.id === "flowalerts/read-ceiling");
+  ok(ceiling && /this site's own cap of 60 rows per read/.test(ceiling.say) && !/vendor's maximum/.test(ceiling.say),
+     "an intraday read that came back full names THIS SITE's 60-row cap, never 'the vendor's maximum of " +
+     "200 rows' the nightly read measured and the intraday merge used to carry forward");
+  eq(ceiling.n.readLimitRows, 60, "with the cap pinned for the guard");
+  ok(!refreshIntradayFacts(index, { flowalerts: { ...fresh, vendorLimit: null, vendorTruncated: null,
+    readLimit: 60, readTruncated: false } }).facts.some((f) => /^flowalerts\/(read-)?ceiling$/.test(f.id)),
+     "and a read that fitted under it states no ceiling");
 }
 
 {

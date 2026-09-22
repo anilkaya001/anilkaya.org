@@ -1,4 +1,4 @@
-import { buildBrief, briefStoreFrom, silenceOf, num } from "./flows-brief.js";
+import { buildBrief, briefStoreFrom, briefAlertsFact, silenceOf, num } from "./flows-brief.js";
 import { lastCompletedSession } from "./flows-freshness.js";
 
 function served(store, key) {
@@ -273,6 +273,14 @@ function alertFacts(p, at) {
       " rows, so today's count is a ceiling rather than a measurement and the true " +
       "population is unknown and at least that large.",
       { vendorLimitRows: limit }));
+  }
+  const readLimit = num(p.readLimit);
+  if (p.readTruncated === true && readLimit !== null) {
+    out.push(f("flowalerts/read-ceiling", ["alerts", "ceiling", "limit", "truncated", "population"],
+      "The latest intraday alert read came back full at this site's own cap of " + readLimit +
+      " rows per read, so alerts flagged since the read before it may be missing from the " +
+      "record and the true population is at least what it holds.",
+      { readLimitRows: readLimit }));
   }
   return out;
 }
@@ -614,6 +622,25 @@ export function fileSilence(silences, kind, what, say, source, reason) {
     reason: typeof reason === "string" && reason ? reason : null });
 }
 
+const BRIEF_SECTION_TOPICS = Object.freeze({
+  today: ["today", "session", "now"],
+  yesterday: ["yesterday", "changed", "moved", "prior"],
+  next: ["next", "tomorrow", "scheduled", "calendar", "threshold"],
+});
+
+const SIDE_WORDS = Object.freeze({ bullish: ["long"], bearish: ["short"] });
+
+function sideWords(id) {
+  const out = [];
+  for (const part of id.split(":")) for (const w of SIDE_WORDS[part] || []) out.push(w);
+  return out;
+}
+
+function briefSectionFact(name, item, at) {
+  return maker("brief", at)("brief:" + name + "/" + item.id,
+    BRIEF_SECTION_TOPICS[name].concat(item.id.split(":"), sideWords(item.id)), item.say, item.n, item.lead);
+}
+
 export function buildFactIndex(store) {
   const s = store && typeof store === "object" ? store : {};
   const facts = [];
@@ -644,23 +671,13 @@ export function buildFactIndex(store) {
   const nextUnmeasured = NEXT_SLOTS.filter(unmeasuredSlot);
 
   const SECTIONS = [
-    ["today", brief.today, ["today", "session", "now"]],
-    ["yesterday", brief.yesterday, ["yesterday", "changed", "moved", "prior"]],
-    ["next", brief.next, ["next", "tomorrow", "scheduled", "calendar", "threshold"]],
+    ["today", brief.today],
+    ["yesterday", brief.yesterday],
+    ["next", brief.next],
   ];
 
-  const SIDE_WORDS = { bullish: ["long"], bearish: ["short"] };
-  const sideWords = (id) => {
-    const out = [];
-    for (const part of id.split(":")) for (const w of SIDE_WORDS[part] || []) out.push(w);
-    return out;
-  };
-  for (const [name, section, topics] of SECTIONS) {
-    const f = maker("brief", briefAt);
-    for (const item of section.facts) {
-      facts.push(f("brief:" + name + "/" + item.id,
-        topics.concat(item.id.split(":"), sideWords(item.id)), item.say, item.n, item.lead));
-    }
+  for (const [name, section] of SECTIONS) {
+    for (const item of section.facts) facts.push(briefSectionFact(name, item, briefAt));
     for (const q of section.silences) {
 
       if (name === "yesterday" && q.what === "both boards" &&
@@ -756,6 +773,7 @@ export function refreshIntradayFacts(index, feeds) {
   const facts = index && Array.isArray(index.facts) ? index.facts.slice() : [];
   const replaced = {};
   let refreshedAt = index && typeof index.refreshedAt === "string" ? index.refreshedAt : null;
+  let today = index && index.today && typeof index.today === "object" ? index.today : null;
   for (const key of INTRADAY_SOURCES) {
     const p = feeds && Object.hasOwn(feeds, key) ? feeds[key] : undefined;
     const published = answered(p);
@@ -776,8 +794,29 @@ export function refreshIntradayFacts(index, feeds) {
     facts.length = 0; for (const f of kept) facts.push(f);
     replaced[key] = built.length;
     if (at && (refreshedAt === null || Date.parse(at) > Date.parse(refreshedAt))) refreshedAt = at;
+    if (key === "flowalerts") today = refreshBriefAlerts(facts, today, published, at, replaced);
   }
-  return { ...(index || {}), facts, refreshedAt, replaced };
+  return { ...(index || {}), ...(today ? { today } : {}), facts, refreshedAt, replaced };
+}
+
+function refreshBriefAlerts(facts, today, published, at, replaced) {
+  const item = briefAlertsFact(published);
+  if (!item) return today;
+  const id = "brief:today/" + item.id;
+  const fresh = briefSectionFact("today", item, at);
+  const held = facts.findIndex((f) => f && f.id === id);
+  if (held !== -1) facts[held] = fresh;
+  else {
+    let last = -1;
+    facts.forEach((f, i) => { if (f && typeof f.id === "string" && f.id.startsWith("brief:today/")) last = i; });
+    facts.splice(last + 1, 0, fresh);
+  }
+  replaced.brief = (replaced.brief || 0) + 1;
+  if (!today || typeof today !== "object" || !Array.isArray(today.facts)) return today;
+  const list = today.facts.slice();
+  const slot = list.findIndex((f) => f && f.id === item.id);
+  if (slot === -1) list.push(item); else list[slot] = item;
+  return { ...today, facts: list };
 }
 
 export function briefAge(index, now) {

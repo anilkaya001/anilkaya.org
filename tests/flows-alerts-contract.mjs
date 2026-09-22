@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import {
   alertRow, buildFlowAlerts, ALERT_ROWS, ALERTS_NOTES,
   alertBand, ALERT_BAND_ROWS,
-  alertKey, mergeAlerts, MERGED_ALERT_ROWS, MERGED_ALERT_BYTES,
+  alertKey, mergeAlerts, MERGED_ALERT_ROWS, MERGED_ALERT_BYTES, alertStamp,
 } from "../shared/flows-alerts.js";
 
 let checks = 0;
@@ -199,6 +199,56 @@ const stageOf = (t) => (t === "AAA" ? "deep" : t === "BBB" ? "gated" : null);
   ok(buildFlowAlerts({ data: [] }, { stageOf: () => null }).rows.length === 0,
     "an empty read publishes no rows, which is the condition the cron's write " +
     "guard tests — better a stale feed with an honest readAt than an empty fresh one");
+}
+
+{
+  const base = { ticker: "DIA", option_chain: "DIA241018C00415000", total_premium: 36466,
+    total_size: 50, trade_count: 3, alert_rule: "RepeatedHitsDescendingFill" };
+  const early = { ...base, start_time: 1726670212648, end_time: 1726670212748 };
+  const late = { ...base, start_time: 1726673812648, end_time: 1726673812748, total_premium: 50000 };
+  const epoch = buildFlowAlerts([early, late]);
+  eq(epoch.coverage.withSpan, 2,
+    "THE VENDOR SENDS START_TIME AND END_TIME AS EPOCH MILLISECONDS (docs/uw-openapi.yaml, Flow " +
+    "Alert Detail: start_time 1773242266346). Only strings were read, so production's 180 rows " +
+    "had withSpan 0, a dash in every Window cell, and no clock on the ticker's recent flow");
+  eq(epoch.rows.find((r) => r.prem === 36466).spanStart, "2024-09-18T14:36:52.648Z",
+    "the number becomes the ISO instant the renderers already parse, in UTC as the page says");
+  eq(epoch.rows.find((r) => r.prem === 36466).spanEnd, "2024-09-18T14:36:52.748Z", "and so does its end");
+  ok(alertKey(epoch.rows[0]) !== alertKey(epoch.rows[1]) && alertKey(epoch.rows[0]).startsWith("w"),
+    "so two windows on one contract under one rule are two identities again, not one row the " +
+    "record counted 'again' twelve times across a session");
+  eq(alertStamp(1726670212), "2024-09-18T14:36:52.000Z", "epoch seconds read as seconds, not as 1970");
+  eq(alertStamp("1726670212648"), "2024-09-18T14:36:52.648Z", "and a numeric string reads like the number");
+  eq(alertStamp("2026-08-24T13:47:00-04:00"), "2026-08-24T13:47:00-04:00", "an ISO string is carried as sent");
+  eq(alertStamp("soon"), null, "and text that is no instant is no span");
+  eq(alertStamp(0), null, "nor is a zero epoch");
+
+  const createdOnly = alertRow({ ...base, created_at: "2023-12-12T16:35:52.168490Z" });
+  eq(createdOnly.spanStart, "2023-12-12T16:35:52.168490Z",
+    "THE REST FLOW ALERT SCHEMA DOCUMENTS created_at AND NO start_time, so a row that carries only " +
+    "created_at is dated by it rather than left undated");
+  eq(createdOnly.spanEnd, createdOnly.spanStart, "with its end at the same instant, not a window it never stated");
+  eq(createdOnly.spanFrom, "created_at", "and it says where the instant came from, so the page does not call it the vendor's span");
+  eq(alertRow({ ...base, start_time: 1726670212648, created_at: "2023-12-12T16:35:52Z" }).spanFrom, undefined,
+    "a row with a real window never carries the created_at marker");
+  const cov = buildFlowAlerts([early, { ...base, created_at: "2023-12-12T16:35:52Z" }, base]).coverage;
+  deep([cov.withSpan, cov.spanFromCreated], [2, 1],
+    "coverage counts rows with any instant and, separately, the ones dated only by created_at");
+  eq(alertRow(base).spanStart, null, "and a row with no time field at all stays undated");
+
+  const heldUnspanned = {
+    record: { date: "2026-08-28", reads: 4, firstReadAt: "2026-08-28T13:31:00.000Z", everEntered: 1 },
+    rows: [{ ...alertRow(base), spanStart: null, spanEnd: null, firstAt: "2026-08-28T13:31:00.000Z",
+      lastAt: "2026-08-28T14:01:00.000Z", reads: 4 }],
+  };
+  const upgraded = mergeAlerts(heldUnspanned, buildFlowAlerts([early]),
+    { at: "2026-08-28T14:16:00.000Z", sessionDate: "2026-08-28" });
+  eq(upgraded.rows.length, 1,
+    "ON THE DEPLOY DAY a record written before the fix holds the contract without a span; the first " +
+    "spanned read of it takes that row over instead of entering a duplicate beside it");
+  eq(upgraded.rows[0].firstAt, "2026-08-28T13:31:00.000Z", "so the early fact survives the upgrade");
+  eq(upgraded.rows[0].reads, 5, "and so does the count of reads that carried it");
+  deep([upgraded.record.again, upgraded.record.entered], [1, 0], "counted as seen again, not as new");
 }
 
 const T1 = "2026-08-28T13:31:00.000Z";
@@ -609,8 +659,9 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
       "different ceilings rather than one wearing two names");
 
     const envelope = (m) => JSON.stringify({
-      v: 1, generatedAt: T1, sessionDate: D28, vendorLimit: 60, vendorTruncated: false,
-      ...m, readAt: T1, refreshed: "intraday",
+      v: 1, generatedAt: T1, sessionDate: D28,
+      ...m, readAt: T1, readDay: D28, refreshed: "intraday",
+      vendorLimit: null, vendorTruncated: null, readLimit: 60, readTruncated: true,
     }).length;
     const cap = Number(/FLOWS_MAX_PAYLOAD_BYTES = (\d+) \* 1024/.exec(worker)[1]) * 1024;
     eq(cap, 128 * 1024, "worker.js still holds this key's other writer to 128KB");
