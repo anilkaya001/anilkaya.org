@@ -43,25 +43,30 @@
     try { target.focus(); } catch (e) {   }
   }
 
+  var scrim = dock.querySelector(".ak-dock-scrim");
+
   function setOpen(open, focus) {
-    dock.classList.toggle("is-open", open);
     document.body.classList.toggle("has-dock-open", open);
     tab.setAttribute("aria-expanded", open ? "true" : "false");
     panel.hidden = !open;
+    if (scrim) scrim.hidden = !open;
+    if (open) void panel.offsetWidth;
+    dock.classList.toggle("is-open", open);
     if (!open) return;
     ensureRenderer();
     if (focus) focusField();
   }
 
+  function dismiss() {
+    setOpen(false, false);
+    try { tab.focus(); } catch (e) {   }
+  }
+
   tab.addEventListener("click", function () {
     setOpen(!dock.classList.contains("is-open"), true);
   });
-  if (closeBtn) {
-    closeBtn.addEventListener("click", function () {
-      setOpen(false, false);
-      try { tab.focus(); } catch (e) {   }
-    });
-  }
+  if (closeBtn) closeBtn.addEventListener("click", dismiss);
+  if (scrim) scrim.addEventListener("click", dismiss);
 
   function typingIn(node) {
     if (!node) return false;
@@ -80,8 +85,7 @@
   document.addEventListener("keydown", function (e) {
     if (e.key !== "Escape" || !dock.classList.contains("is-open")) return;
     if (!dock.contains(document.activeElement)) return;
-    setOpen(false, false);
-    try { tab.focus(); } catch (err) {   }
+    dismiss();
   });
 
   setOpen(false, false);

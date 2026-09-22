@@ -2,7 +2,7 @@
   "use strict";
 
   var MARK_MODEL = "∗";
-  var MARK_PLAIN = "•";
+  var MARK_PLAIN = "◦";
 
   function isNum(v) {
     if (typeof v === "number") return Number.isFinite(v) ? v : null;
@@ -138,7 +138,8 @@
     if (typeof at !== "string" || at.trim() === "") return null;
     var ms = Date.parse(at);
     if (!isFinite(ms)) return at;
-    return new Date(ms).toLocaleString();
+    var iso = new Date(ms).toISOString();
+    return iso.slice(0, 10) + " " + iso.slice(11, 16) + " UTC";
   }
 
   function leadFigure(fact) {
@@ -201,9 +202,19 @@
     return li;
   }
 
-  function factList(facts, source, at) {
+  function factList(facts, source, at, echoes) {
     var ul = el("ul", "ak-facts");
-    for (var i = 0; i < facts.length; i++) ul.append(factItem(facts[i], source, at, i === 0));
+    for (var i = 0; i < facts.length; i++) {
+      if (echoes && echoes[i]) {
+        var line = provLine(facts[i], source, at);
+        if (line === null) continue;
+        var li = el("li", "ak-fact is-echoed");
+        li.append(line);
+        ul.append(li);
+        continue;
+      }
+      ul.append(factItem(facts[i], source, at, i === 0));
+    }
     return ul;
   }
 
@@ -238,19 +249,19 @@
     return best;
   }
 
-  function answerEchoes(said, facts) {
-    if (typeof said !== "string" || said === "" || !facts.length) return false;
-    var lines = said.split("\n");
-    var bullets = [];
-    for (var i = 0; i < lines.length; i++) {
-      var line = lines[i].trim();
-      if (/^-\s+/.test(line)) bullets.push(line.replace(/^-\s*/, ""));
+  function normalSaid(s) {
+    return String(s).replace(/−/g, "-").replace(/\s+/g, " ").replace(/\.\s*$/, "")
+      .trim().toLowerCase();
+  }
+
+  function echoedFacts(said, facts) {
+    var hay = typeof said === "string" ? normalSaid(said) : "";
+    var out = [];
+    for (var i = 0; i < facts.length; i++) {
+      var say = facts[i] && typeof facts[i].say === "string" ? normalSaid(facts[i].say) : "";
+      out.push(hay !== "" && say !== "" && hay.indexOf(say) !== -1);
     }
-    for (var j = 0; j < facts.length; j++) {
-      var say = facts[j] && typeof facts[j].say === "string" ? facts[j].say.trim() : "";
-      if (say === "" || bullets.indexOf(say) === -1) return false;
-    }
-    return true;
+    return out;
   }
 
   var SILENCE_ORDER = ["pending", "unreadable", "quiet"];
@@ -380,9 +391,9 @@
         said.push(origin === null
           ? "No origin date was published for this region, so the day counts above are not " +
             "anchored and cannot be read as distances from any particular session."
-          : "Every day count above is measured from the " + origin + " session, not from the " +
-            "clock on this device — a briefing opened on a Saturday about the next session " +
-            "is a briefing about Monday.");
+          : "Every day count above is measured from " + origin + ", the day this briefing " +
+            "was built, not from the clock on this device — a briefing opened on a Saturday " +
+            "about the next session is a briefing about Monday.");
         if (gate !== null) {
           said.push("The gate carries a name for " + gate + " calendar day" +
             (gate === 1 ? "" : "s") + " from that origin, and the calendar entries above are " +
@@ -457,8 +468,8 @@
         "rather than a fact about the session."));
     }
 
-    section.append(howBox(cfg.asks || "How this region was derived",
-      (regionMeta ? [regionMeta] : []).concat(folded).concat(cfg.how)));
+    section.append(howBox("How this region was derived",
+      (cfg.asks ? [cfg.asks] : []).concat(regionMeta ? [regionMeta] : []).concat(folded).concat(cfg.how)));
     return section;
   }
 
@@ -508,6 +519,7 @@
 
   function llmLine(block, fired, guard) {
     var line = el("p", "ak-prov");
+    line.append(el("span", "ak-prov-l", "Provenance"));
 
     if (fired) {
       line.append(el("span", "ak-prov-mark", MARK_PLAIN));
@@ -919,6 +931,15 @@
         session === null ? "Briefing published without a session date" : "Session " + session,
         built === null ? "no build stamp on this key" : "built " + built,
       ].concat(reread === null ? [] : ["alerts and pulse re-read " + reread]).join(" \u00b7 ");
+
+      var was = status.nextElementSibling;
+      if (was && was.classList.contains("flows-stale")) was.remove();
+      var age = brief.session && typeof brief.session === "object" ? brief.session : null;
+      if (age && age.stale === true && typeof age.say === "string" && age.say.trim() !== "") {
+        var band = el("p", "flows-stale", age.say.trim());
+        band.setAttribute("role", "status");
+        status.insertAdjacentElement("afterend", band);
+      }
     }
 
     if (foot && brief.notes && typeof brief.notes === "object") {
@@ -1054,7 +1075,10 @@
       var keySaid = origin.source === null
         ? "no source key at all" : "the " + origin.source + " key";
       var builtSaid = originAt === null ? "which published no build stamp" : "built " + originAt;
-      var echoed = answerEchoes(said, facts);
+      var echoes = echoedFacts(said, facts);
+      var nEchoed = 0;
+      for (var e = 0; e < echoes.length; e++) if (echoes[e]) nEchoed++;
+      var echoed = nEchoed === facts.length;
       var counted = facts.length === 1
         ? "1 fact was handed to the answer above."
         : facts.length + " facts were handed to the answer above.";
@@ -1068,10 +1092,13 @@
             : " name their own key and stamp under themselves.");
       answerHost.append(el("p", "ak-sub fc-note", counted + whence + (echoed
         ? " Their sentences are the lines in the answer above, and are not repeated here."
-        : "")));
+        : nEchoed
+          ? " " + nEchoed + " of them " + (nEchoed === 1 ? "is" : "are") + " restated in the " +
+            "answer above and " + (nEchoed === 1 ? "is" : "are") + " not repeated here."
+          : "")));
       var drawn = echoed
         ? provList(facts, origin.source, origin.at)
-        : factList(facts, origin.source, origin.at);
+        : factList(facts, origin.source, origin.at, echoes);
       if (drawn) answerHost.append(drawn);
     }
 

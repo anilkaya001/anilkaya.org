@@ -102,7 +102,7 @@ const rail = (active) => {
 <nav class="flows-rail" aria-label="Flows">
 
   <div class="rail-items rail-items--lead" role="group" aria-label="Ask">
-    ${item("/flows/ask/", "Ask the data", "ask")}
+    ${item("/flows/ask/", "Ask", "ask")}
   </div>
   <p class="rail-group" id="railSession">Options flow</p>
   <div class="rail-items" role="group" aria-labelledby="railSession">
@@ -134,6 +134,7 @@ const dock = (active) => (active === "ask" ? "" : `
   <span class="ak-dock-tab-k" aria-hidden="true">?</span>
 </button>
 <aside class="ak-dock" id="askDock" data-src="${v("/assets/js/flows-ask.js")}">
+  <div class="ak-dock-scrim" hidden></div>
   <div class="ak-dock-panel" id="askDockPanel" role="complementary"
        aria-label="Ask about the published readings" hidden tabindex="-1">
     <div class="ak-dock-head">
@@ -1261,7 +1262,7 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
 export function historyPage({ username = "" } = {}) {
   const lede = "What the board said, and what happened next.";
   return `${head("Flows \u2014 Track record", lede)}
-${shell("Track Record", "Options-flow intelligence", "history", username, `
+${shell("Track record", "Options-flow intelligence", "history", username, `
   <div class="flows-status" id="recStatus" role="status">Loading the record\u2026</div>
 
   <div class="flows-controls">
@@ -1421,7 +1422,7 @@ ${shell("Ask", "Options-flow intelligence", "ask", username, `
   </div>
 
   <div id="askApp"></div>
-  <div id="askFoot"></div>
+  <div id="askFoot" class="flows-foot"></div>
 `)}
 <script src="${v("/assets/js/nav.js")}" defer></script>
 <script src="${v("/assets/js/flows-ask.js")}" defer></script>

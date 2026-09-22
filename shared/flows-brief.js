@@ -53,6 +53,9 @@ const fact = (id, say, n, lead) => {
 
 const plural = (k, one, many) => (k === 1 ? one : many);
 
+const stampSaid = (iso) => (typeof iso === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(iso)
+  ? iso.slice(0, 10) + " " + iso.slice(11, 16) + " UTC" : iso);
+
 export const BRIEF_SLOTS = Object.freeze({
   long: "board:long",
   short: "board:short",
@@ -109,9 +112,10 @@ export function briefToday(store) {
     const sc = num(top.s), cnv = num(top.cnv);
     facts.push(fact("top:" + side,
       "The " + side + " side is led by " + top.t +
-      (sc === null ? "" : " at " + (sc > 0 ? "+" : "") + sc) +
+      (sc === null ? "" : " at " + (sc < 0 ? "−" + Math.abs(sc) : (sc > 0 ? "+" : "") + sc)) +
       (cnv === null ? "" : ", conviction " + cnv) + ".",
-      { ticker: String(top.t), score: sc, conviction: cnv, side }));
+      { ticker: String(top.t), score: sc, magnitude: sc === null ? null : Math.abs(sc),
+        conviction: cnv, side }));
   }
 
   const sec = answered(s.sectorPremium);
@@ -151,8 +155,9 @@ export function briefToday(store) {
   if (al && ar && ar.length) {
     facts.push(fact("alerts",
       ar.length + " flagged " + plural(ar.length, "window", "windows") + " on the tape" +
-      (al.readAt ? ", read " + al.readAt : "") + ".",
-      { flagged: ar.length, readAt: al.readAt || null }));
+      (al.readAt ? ", read " + stampSaid(al.readAt) : "") + ".",
+      { flagged: ar.length, readAt: al.readAt || null,
+        readSaid: al.readAt ? stampSaid(al.readAt) : null }));
   }
 
   return { session, facts, silences };
@@ -311,9 +316,11 @@ export function briefNext(store, options) {
     .sort((a, b) => Math.abs(a.d) - Math.abs(b.d));
   if (flips.length) {
     const f = flips[0];
+    const pctSaid = (Math.abs(f.d) * 100).toFixed(1);
+    const away = pctSaid + "% " + (f.d > 0 ? "above" : "below") + " spot";
     facts.push(fact("flip",
-      f.t + " sits closest to its gamma flip, " + (f.d > 0 ? "+" : "") + f.d + " away.",
-      { ticker: f.t, distance: f.d }));
+      f.t + " sits closest to its gamma flip, which is " + (f.d === 0 ? "at spot" : away) + ".",
+      { ticker: f.t, distance: f.d, distancePct: Number(pctSaid) }));
   }
 
   if (!facts.length) {

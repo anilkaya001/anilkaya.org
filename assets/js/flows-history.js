@@ -76,12 +76,30 @@
         n: isNum(h && h.n),
         prior: isNum(h && h.prior),
         priorN: isNum(h && h.priorN),
+        hit: isNum(h && h.hit),
+        hitS: isNum(h && h.hitSessions),
+        hitN: isNum(h && h.hitN),
+        priorHit: isNum(h && h.priorHit),
+        priorHitS: isNum(h && h.priorHitSessions),
+        priorHitN: isNum(h && h.priorHitN),
       }))
       .filter((h) => h.k !== null);
 
     const plottable = (v, n) => v !== null && n !== null && n >= MIN_SESSIONS;
-    const cur = rows.filter((h) => plottable(h.ls, h.n));
-    const pri = rows.filter((h) => plottable(h.prior, h.priorN));
+    const LS = { cur: (h) => h.ls, curN: (h) => h.n, pri: (h) => h.prior, priN: (h) => h.priorN,
+      names: () => null, ref: 0, what: "long minus short", fmt: pct };
+    const HIT = { cur: (h) => h.hit, curN: (h) => h.hitS, pri: (h) => h.priorHit,
+      priN: (h) => h.priorHitS, names: (h, p) => (p ? h.priorHitN : h.hitN), ref: 0.5,
+      what: "hit rate",
+      fmt: (v, d) => (isNum(v) === null ? DASH : (v * 100).toFixed(d === undefined ? 0 : d) + "%") };
+    let mode = LS;
+    let cur = rows.filter((h) => plottable(LS.cur(h), LS.curN(h)));
+    let pri = rows.filter((h) => plottable(LS.pri(h), LS.priN(h)));
+    if (!cur.length && !pri.length) {
+      mode = HIT;
+      cur = rows.filter((h) => plottable(HIT.cur(h), HIT.curN(h)));
+      pri = rows.filter((h) => plottable(HIT.pri(h), HIT.priN(h)));
+    }
 
     if (!cur.length && !pri.length) {
       const p = document.createElement("p");
@@ -89,10 +107,11 @@
 
       let best = null;
       for (const h of rows) {
-        for (const n of [h.n, h.priorN]) {
+        for (const n of [h.n, h.priorN, h.hitS, h.priorHitS]) {
           if (n !== null && (best === null || n > best)) best = n;
         }
       }
+      p.dataset.empty = best !== null && best > 0 ? "quiet" : "pending";
       p.textContent = best !== null && best > 0
         ? "No horizon has reached " + MIN_SESSIONS + " scored sessions yet — the " +
           "longest has " + best + ". Nothing is plotted, because a mean of " +
@@ -114,9 +133,9 @@
     const padL = 54, padR = 18, padT = 18, padB = pri.length ? 54 : 40;
     const plotW = W - padL - padR, plotH = H - padT - padB;
 
-    const values = [...cur.map((h) => h.ls), ...pri.map((h) => h.prior)];
+    const values = [...cur.map(mode.cur), ...pri.map(mode.pri)];
 
-    const lo = Math.min(0, ...values), hi = Math.max(0, ...values);
+    const lo = Math.min(mode.ref, ...values), hi = Math.max(mode.ref, ...values);
     const span = Math.max(hi - lo, 1e-4);
     const pad = span * 0.15;
     const yLo = lo - pad, yHi = hi + pad;
@@ -136,16 +155,16 @@
     });
 
     svg.append(svgEl("line", {
-      class: "rc-zero", x1: padL, x2: W - padR, y1: yOf(0), y2: yOf(0),
+      class: "rc-zero", x1: padL, x2: W - padR, y1: yOf(mode.ref), y2: yOf(mode.ref),
     }));
 
-    for (const v of [yHi, 0, yLo]) {
+    for (const v of [yHi, mode.ref, yLo]) {
       const y = yOf(v);
       const t = svgEl("text", {
-        class: v === 0 ? "rc-axislabel is-zero" : "rc-axislabel",
+        class: v === mode.ref ? "rc-axislabel is-zero" : "rc-axislabel",
         x: padL - 8, y: y + 4, "text-anchor": "end",
       });
-      t.textContent = v === 0 ? "0" : pct(v, 1);
+      t.textContent = v === 0 ? "0" : v === mode.ref ? mode.fmt(v) : mode.fmt(v, 1);
       svg.append(t);
     }
 
@@ -163,13 +182,20 @@
 
     if (pri.length) {
       svg.append(svgEl("path", {
-        class: "rc-line is-prior", d: pathFor(pri, (h) => h.prior),
+        class: "rc-line is-prior", d: pathFor(pri, mode.pri),
         "stroke-dasharray": "6 4",
       }));
     }
     if (cur.length) {
-      svg.append(svgEl("path", { class: "rc-line", d: pathFor(cur, (h) => h.ls) }));
+      svg.append(svgEl("path", { class: "rc-line", d: pathFor(cur, mode.cur) }));
     }
+
+    const overSaid = (h, p) => {
+      const n = p ? mode.priN(h) : mode.curN(h);
+      const names = mode.names(h, p);
+      return "over " + n + " scored session" + (n === 1 ? "" : "s") +
+        (names === null ? "" : " and " + names + " names");
+    };
 
     const byK = new Map();
     for (const h of cur) byK.set(h.k, { ...(byK.get(h.k) || {}), cur: h });
@@ -182,25 +208,25 @@
       if (at.pri) {
 
         const dot = svgEl("circle", {
-          class: "rc-dot is-prior", cx: x, cy: yOf(at.pri.prior), r: 4,
+          class: "rc-dot is-prior", cx: x, cy: yOf(mode.pri(at.pri)), r: 4,
           fill: "none", stroke: "currentColor", "stroke-width": 1.4,
         });
         const title = svgEl("title");
         title.textContent = kSaid(k) + " under the PRIOR selection rule: " +
-          pct(at.pri.prior) + " long minus short, over " + at.pri.priorN +
-          " scored session" + (at.pri.priorN === 1 ? "" : "s");
+          mode.fmt(mode.pri(at.pri)) + " " + mode.what + ", " + overSaid(at.pri, true);
         dot.append(title);
         svg.append(dot);
       }
 
       if (at.cur) {
+        const v = mode.cur(at.cur);
         const dot = svgEl("circle", {
-          class: "rc-dot " + (at.cur.ls < 0 ? "is-neg" : at.cur.ls > 0 ? "is-pos" : "is-flat"),
-          cx: x, cy: yOf(at.cur.ls), r: 4.5,
+          class: "rc-dot " + (v < mode.ref ? "is-neg" : v > mode.ref ? "is-pos" : "is-flat"),
+          cx: x, cy: yOf(v), r: 4.5,
         });
         const title = svgEl("title");
-        title.textContent = kSaid(k) + ": " + pct(at.cur.ls) + " long minus short, over " +
-          at.cur.n + " scored session" + (at.cur.n === 1 ? "" : "s");
+        title.textContent = kSaid(k) + ": " + mode.fmt(v) + " " + mode.what + ", " +
+          overSaid(at.cur, false);
         dot.append(title);
         svg.append(dot);
       }
@@ -211,12 +237,12 @@
 
       if (at.cur) {
         const nl = svgEl("text", { class: "rc-nlabel", x, y: H - padB + 33, "text-anchor": "middle" });
-        nl.textContent = "n=" + at.cur.n;
+        nl.textContent = "n=" + mode.curN(at.cur);
         svg.append(nl);
       }
       if (at.pri) {
         const nl = svgEl("text", { class: "rc-nlabel is-prior", x, y: H - padB + (at.cur ? 44 : 33), "text-anchor": "middle" });
-        nl.textContent = "prior n=" + at.pri.priorN;
+        nl.textContent = "prior n=" + mode.priN(at.pri);
         svg.append(nl);
       }
     }
@@ -224,31 +250,38 @@
     const said = [];
     if (cur.length) {
       said.push("Current selection rule: " +
-        cur.map((h) => kSaid(h.k) + ", " + pct(h.ls) + " over " + h.n +
-          (h.n === 1 ? " session" : " sessions")).join("; "));
+        cur.map((h) => kSaid(h.k) + ", " + mode.fmt(mode.cur(h)) + " " + overSaid(h, false))
+          .join("; "));
     }
     if (pri.length) {
       said.push("Prior selection rule" + (drawnMeta.epoch ? " (before " + drawnMeta.epoch + ")" : "") +
         ", drawn dashed: " +
-        pri.map((h) => kSaid(h.k) + ", " + pct(h.prior) + " over " + h.priorN +
-          (h.priorN === 1 ? " session" : " sessions")).join("; "));
+        pri.map((h) => kSaid(h.k) + ", " + mode.fmt(mode.pri(h)) + " " + overSaid(h, true))
+          .join("; "));
     }
     svg.setAttribute("aria-label",
-      "Long-minus-short price return by holding horizon. " + said.join(". ") + ".");
+      (mode === LS ? "Long-minus-short price return" : "Hit rate") +
+      " by holding horizon. " + said.join(". ") + ".");
     curveHost.append(svg);
 
     const plotState = (v, n) => (v === null || n === null ? "unstated"
       : n >= MIN_SESSIONS ? "plot" : "thin");
     let thin = 0, unstated = 0;
     for (const h of rows) {
-      const a = plotState(h.ls, h.n), b = plotState(h.prior, h.priorN);
+      const a = plotState(mode.cur(h), mode.curN(h)), b = plotState(mode.pri(h), mode.priN(h));
       if (a === "plot" || b === "plot") continue;
       if (a === "thin" || b === "thin") thin++;
       else unstated++;
     }
     if (curveNote) {
-      const note = ["Equal-weighted price return of the published long names minus the " +
-        "short names, measured from the close each board was published at."];
+      const note = [mode === LS
+        ? "Equal-weighted price return of the published long names minus the " +
+          "short names, measured from the close each board was published at."
+        : "The share of published names whose price moved the way their board leaned, " +
+          "pooled over names and measured from the close each board was published at. " +
+          "Long minus short is not drawn: no horizon has " + MIN_SESSIONS + " scored " +
+          "sessions with both legs measured, so the spread cannot be plotted, and the " +
+          "hit rate is the record that exists."];
       if (pri.length) {
         note.push("The dashed line with hollow dots is the record under the PRIOR " +
           "selection rule" + (drawnMeta.epoch ? ", before " + drawnMeta.epoch : "") +
@@ -258,7 +291,9 @@
             "solid line has nothing to draw — that is the shape of the archive, not a " +
             "record of zero."));
 
-        if (drawnMeta.epochNote) note.push(drawnMeta.epochNote + ".");
+        if (drawnMeta.epochNote) {
+          note.push(drawnMeta.epochNote.charAt(0).toUpperCase() + drawnMeta.epochNote.slice(1) + ".");
+        }
       }
       if (thin > 0) {
         note.push(thin + " horizon" + (thin === 1 ? " has" : "s have") +
@@ -276,13 +311,16 @@
     }
   }
 
-  function renderSessions(sessions) {
+  function renderSessions(sessions, meta) {
     body.textContent = "";
+    const preNote = document.getElementById("recPreNote");
+    if (preNote) preNote.remove();
     if (!sessions.length) {
       const tr = document.createElement("tr");
       const td = document.createElement("td");
       td.colSpan = COLUMNS;
       td.className = "flows-empty";
+      td.dataset.empty = "pending";
       td.textContent = "No session has closed a horizon yet.";
       tr.append(td);
       body.append(tr);
@@ -290,6 +328,7 @@
       return;
     }
 
+    let oneLegged = 0, oneLeggedPre = 0;
     const frag = document.createDocumentFragment();
     for (const s of sessions) {
       const tr = document.createElement("tr");
@@ -298,11 +337,29 @@
       th.scope = "row";
       th.className = "fb-tk";
       th.textContent = String(s.d || DASH);
+      if (s.pre === true) {
+        tr.className = "is-pre";
+        const mark = document.createElement("span");
+        mark.className = "rec-pre";
+        mark.textContent = "pre-epoch";
+        mark.title = "Published before the selection epoch" +
+          (meta && meta.epoch ? " of " + meta.epoch : "") + ", under the prior selection rule.";
+        th.append(mark);
+      }
       tr.append(th);
 
+      const shortCell = cell(pct(s.short), "c-num c-leg");
+      const lsCell = cell(pct(s.ls), "c-num" + signClass(s.ls));
+      if (isNum(s.long) !== null && isNum(s.short) === null) {
+        oneLegged++;
+        if (s.pre === true) oneLeggedPre++;
+        shortCell.title = lsCell.title = "No short leg was measured for this session, so " +
+          "L−S cannot be formed. That is a leg the archive does not hold, not a " +
+          "scoring failure.";
+      }
       tr.append(cell(pct(s.long), "c-num c-leg"));
-      tr.append(cell(pct(s.short), "c-num c-leg"));
-      tr.append(cell(pct(s.ls), "c-num" + signClass(s.ls)));
+      tr.append(shortCell);
+      tr.append(lsCell);
 
       const hit = isNum(s.hit);
       tr.append(cell(hit === null ? DASH : (hit * 100).toFixed(0) + "%", "c-num"));
@@ -325,6 +382,19 @@
     }
     body.append(frag);
     wrap.hidden = false;
+
+    if (oneLegged) {
+      const p = document.createElement("p");
+      p.id = "recPreNote";
+      p.className = "rec-note";
+      p.textContent = oneLegged + " of the " + sessions.length + " sessions listed " +
+        (oneLegged === 1 ? "carries" : "carry") + " a long leg and no measured short leg" +
+        (meta && meta.epoch && oneLeggedPre === oneLegged
+          ? " — every one of them predates the " + meta.epoch + " selection epoch"
+          : "") + ", so Short and L−S cannot be formed there. " +
+        "Those dashes are a leg the archive does not hold, not a scoring failure.";
+      wrap.insertAdjacentElement("afterend", p);
+    }
   }
 
   const HYPOTHESES = {
@@ -348,7 +418,15 @@
     "pr.0": "trailing 5-session return: momentum at the fastest speed the board keeps",
     "pr.1": "trailing 21-session return: one-month momentum",
     "pr.2": "trailing 42-session return: two-month momentum",
+    "dr": "rank change against the prior board: places climbed or fell, as the run itself compared them",
+    "r0": "rank on the prior board: where the name stood the session before",
+    "agr": "agreement: how many signed flow families point the composite's way",
+    "bth": "breadth: how many signed flow families carried a reading at all",
+    "edte": "days to the next earnings date on the vendor's calendar",
+    "dp": "a flag on names that also carry a deep section; it is 1 wherever it is present",
   };
+
+  const NOTE_LABELS = { method: "Method", selection: "Selection", overlap: "Overlap", calendar: "Calendar" };
 
   function renderFeatures(features) {
     const wrap = document.getElementById("recFeatWrap");
@@ -359,6 +437,7 @@
     if (!features || !Array.isArray(features.cols) || !features.cols.length) {
       const p = document.createElement("p");
       p.className = "rec-empty";
+      p.dataset.empty = "pending";
       p.textContent = "The evidence table has not been measured yet. It is " +
         "computed from the retained sessions on each pipeline run, so it " +
         "appears with the first run after this page shipped.";
@@ -376,7 +455,12 @@
       th.className = "fb-tk rec-feat-key";
       th.textContent = String(col.key);
       const hyp = HYPOTHESES[col.key];
-      if (hyp) th.title = hyp;
+      if (hyp) {
+        const gloss = document.createElement("span");
+        gloss.className = "rec-feat-gloss";
+        gloss.textContent = hyp;
+        th.append(gloss);
+      }
       tr.append(th);
 
       const ic = isNum(col.ic);
@@ -384,7 +468,12 @@
         ic === null ? DASH : (ic < 0 ? MINUS : ic > 0 ? "+" : "") + Math.abs(ic).toFixed(3),
         "c-num");
 
-      if (ic === null && col.reason) icCell.title = String(col.reason);
+      if (ic === null && col.reason) {
+        const why = document.createElement("span");
+        why.className = "rec-ic-why";
+        why.textContent = String(col.reason);
+        icCell.append(why);
+      }
       tr.append(icCell);
 
       tr.append(cell(isNum(col.n) === null ? DASH : String(col.n), "c-num"));
@@ -402,10 +491,15 @@
       " \u00b7 floor: " + (minN === null ? DASH : minN + " pairs") + ".";
     notes.append(meta);
     for (const key of ["method", "selection", "overlap", "calendar"]) {
-      if (typeof features[key] !== "string" || !features[key]) continue;
+      if (typeof features[key] !== "string" || !features[key].trim()) continue;
+      const said = features[key].trim();
       const p = document.createElement("p");
       p.className = "rec-note";
-      p.textContent = features[key];
+      const label = document.createElement("span");
+      label.className = "rec-note-l";
+      label.textContent = NOTE_LABELS[key];
+      p.append(label, " " + said.charAt(0).toUpperCase() + said.slice(1) +
+        (/[.!?]$/.test(said) ? "" : "."));
       notes.append(p);
     }
   }
@@ -478,11 +572,12 @@
     const retained = isNum(payload.retained);
 
     renderStale(payload);
-    renderCurve(horizons, {
+    const meta = {
       epoch: typeof payload.epoch === "string" ? payload.epoch : null,
       epochNote: typeof payload.epochNote === "string" ? payload.epochNote : null,
-    });
-    renderSessions(sessions);
+    };
+    renderCurve(horizons, meta);
+    renderSessions(sessions, meta);
     renderFeatures(payload.features);
 
     if (payload.status === "pending" || (!horizons.length && !sessions.length)) {

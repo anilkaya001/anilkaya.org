@@ -147,6 +147,8 @@ const json = (value, status = 200, headers) => {
   return new Response(JSON.stringify(value), { status, headers: out });
 };
 
+const grouped = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
 const apiError = (status, code, message, headers, details) =>
   json({ error: { code, message }, ...(details || {}) }, status, headers);
 
@@ -1491,7 +1493,7 @@ async function askAnswer(question, env, index, updatedAt, subject) {
   const model = askModel(env);
   if (!env.AI || model === null) {
     return json({ ...base,
-      note: "No model is configured for this site, so the reading below is the " +
+      note: "No model is configured for this site, so this reading is the " +
         "pipeline's own wording. Every figure in it was measured." });
   }
 
@@ -1515,8 +1517,8 @@ async function askAnswer(question, env, index, updatedAt, subject) {
     const disagrees = failed.why === "allowance"
       && spend !== null && typeof spend.remaining === "number" && spend.remaining > 0;
     const say = disagrees
-      ? failed.say + " The meter on this page still showed " + spend.remaining +
-        " of " + spend.allowanceNeurons + " neurons unspent, which means something " +
+      ? failed.say + " The meter on this page still showed " + grouped(spend.remaining) +
+        " of " + grouped(spend.allowanceNeurons) + " model credits unspent, which means something " +
         "other than this site drew on the same account today. Cloudflare is the " +
         "authority and the meter is not: it can only ever see this site's own calls."
       : failed.say;
@@ -1526,7 +1528,7 @@ async function askAnswer(question, env, index, updatedAt, subject) {
 
   if (!generated) {
     return json({ ...base, spend: afterCall || base.spend, model,
-      note: "The model answered with no text, so the reading below is the pipeline's " +
+      note: "The model answered with no text, so this reading is the pipeline's " +
         "own wording. Every figure in it was measured." });
   }
 
@@ -3081,7 +3083,11 @@ async function route(request, env, url, ctx) {
         return json({ status: "pending", today: null, yesterday: null, next: null,
           facts: [], silences: { pending: [], unreadable: [], quiet: [], unavailable: [] } });
       }
-      return passthrough(stored);
+      let index = null;
+      try { index = JSON.parse(stored.payload); } catch { index = null; }
+      if (!index || typeof index !== "object" || Array.isArray(index)) return passthrough(stored);
+      return json({ ...index, session: FLOWS_ASK.briefAge(index, new Date()) }, 200,
+        { "X-Payload-Updated": String(stored.updatedAt || 0) });
     }
 
     if (path === "/api/flows/ask") {

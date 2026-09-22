@@ -2141,9 +2141,8 @@ body.is-stale .flows-tablewrap {
 
 .rc-nlabel {
   font-family: var(--font-figure);
-  font-size: 9px;
+  font-size: 10px;
   fill: var(--ink-faint);
-  opacity: 0.75;
 }
 
 .rec-table td.is-attrition {
@@ -2155,18 +2154,62 @@ body.is-stale .flows-tablewrap {
   font-family: var(--font-figure);
   font-size: var(--fs-data);
   color: var(--ink-dim);
+}
+
+.flows-table.rec-feat { min-width: 0; max-width: 60rem; }
+.rec-feat th, .rec-feat td { vertical-align: top; }
+
+.rec-feat-gloss {
+  display: block;
+  white-space: normal;
+  margin-top: 0.15rem;
+  font-family: var(--font-ui);
+  font-size: var(--fs-note);
+  line-height: 1.45;
+  color: var(--ink-faint);
+  max-width: 44ch;
+}
+
+.rec-ic-why {
+  display: block;
+  font-size: var(--fs-micro);
+  line-height: 1.4;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.rec-pre {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0 0.35rem;
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gold-harvest);
+  border: 1px solid color-mix(in srgb, var(--gold-harvest) 45%, transparent);
+  border-radius: 999px;
   cursor: help;
 }
 
+.rec-table td.c-leg[title] { cursor: help; }
+
 .rec-notes { margin-top: 0.75rem; }
 .rec-notes .rec-note { margin-bottom: 0.5rem; font-size: var(--fs-data); }
+.rec-note-l {
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
 
 .rec-feat td.c-num { cursor: default; }
-.rec-feat td.c-num[title] { color: var(--ink-faint); cursor: help; }
 
 @media (max-width: 40rem) {
   .rec-block h2 { font-size: var(--fs-label); }
   .rec-feat-key { font-size: var(--fs-fine); }
+  .rec-ic-why { white-space: normal; }
 }
 
 .gs-cell.is-pos { fill: var(--flow-up); }
@@ -2388,6 +2431,7 @@ body.is-stale .flows-tablewrap {
   min-height: 0;
   padding: 0.34rem 0.7rem;
   font-size: var(--fs-micro);
+  white-space: nowrap;
   border-color: var(--panel-border);
   white-space: nowrap;
 }
@@ -2403,6 +2447,11 @@ body.is-stale .flows-tablewrap {
 }
 @media (pointer: coarse) {
   .topbar__out .flows-signout { padding: 0.6rem 0.8rem; }
+  .flows-find-i { font-size: max(1rem, 16px); min-height: 44px; }
+}
+@media (max-width: 72rem) {
+  .flows-body .lab-full { display: none; }
+  .flows-body .lab-short { display: inline; }
 }
 @media (max-width: 46rem) {
 
@@ -3148,7 +3197,7 @@ body.is-stale .flows-tablewrap {
   .ft-chg-v { font-size: 1.25rem; }
 }
 
-.flows-tablewrap {
+.flows-tablewrap, .st-scroll {
   background-image:
     linear-gradient(to right, var(--bg-elev) 30%, rgba(0, 0, 0, 0)),
     linear-gradient(to left,  var(--bg-elev) 30%, rgba(0, 0, 0, 0)),
@@ -3725,6 +3774,12 @@ body.is-stale .flows-tablewrap {
   border: 1px solid var(--hairline);
   border-radius: 4px;
   background: var(--bg-elev);
+  container-type: inline-size;
+}
+
+.st-scroll .flows-caption {
+  width: 100cqw;
+  box-sizing: border-box;
 }
 
 .st-table {
@@ -3771,7 +3826,7 @@ body.is-stale .flows-tablewrap {
 .st-c-n { width: 2.8rem; }
 
 @media (max-width: 40rem) {
-  .st-c-name { width: 4.2rem; }
+  .st-c-name { width: 5rem; }
   .st-c-last { width: 3.3rem; }
   .st-c-n { width: 2.3rem; }
 }
@@ -5412,8 +5467,27 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   font-weight: 600;
 }
 
-.ak-prov { margin: 0.75rem 0 0; font-size: var(--fs-note); color: var(--ink-dim); display: flex; gap: 0.5rem; }
-.ak-prov-mark { flex: 0 0 1em; font-family: var(--font-figure); }
+.ak-prov {
+  margin: 0.9rem 0 0;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--hairline);
+  font-size: var(--fs-note);
+  color: var(--ink-dim);
+  display: grid;
+  grid-template-columns: 1em minmax(0, 1fr);
+  gap: 0.2rem 0.5rem;
+}
+.ak-prov-l {
+  grid-column: 1 / -1;
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.ak-prov-mark { font-family: var(--font-figure); }
+.ak-facts .ak-fact.is-echoed { padding: 0; border-left: 0; }
+.ak-facts .ak-fact.is-echoed .ak-fact-src { margin: 0; }
 
 @media (max-width: 59.99rem) {
   .ak-facts { grid-template-columns: 1fr; }
@@ -5493,7 +5567,19 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   .flows-body.has-rail > .flows-main { padding-bottom: 6.5rem; }
 }
 
-.ak-dock { position: fixed; inset: 0 0 0 auto; z-index: 101; pointer-events: none; }
+.ak-dock { position: fixed; inset: 4rem 0 0 auto; z-index: 99; pointer-events: none; }
+.ak-dock-scrim {
+  display: none;
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  background: rgb(0 0 0 / 0.45);
+}
+@media (max-width: 59.99rem) {
+  .ak-dock.is-open { left: 0; }
+  .ak-dock.is-open .ak-dock-scrim:not([hidden]) { display: block; }
+  .ak-dock-panel { position: relative; margin-left: auto; }
+}
 .ak-dock-panel {
   pointer-events: auto;
   width: min(30rem, 92vw);
@@ -5510,12 +5596,21 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
   font: inherit;
   font-size: var(--fs-lead);
   line-height: 1;
-  padding: 0.2rem 0.5rem;
+  display: inline-grid;
+  place-items: center;
+  min-width: 44px;
+  min-height: 44px;
+  margin: -0.6rem -0.6rem 0 0;
+  padding: 0;
   color: var(--ink-dim);
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--radius-1);
   cursor: pointer;
+}
+.ak-dock .ft-how-s { min-height: 44px; align-content: center; }
+@media (pointer: coarse) {
+  .ak-example, .ak-onpage-go { min-height: 44px; }
 }
 .ak-dock-close:hover, .ak-dock-close:focus-visible { color: var(--ink); border-color: var(--panel-border); }
 
@@ -5562,7 +5657,7 @@ a.cc-h-s:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset:
 
 @media (min-width: 76rem) {
 
-  .ak-brief { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ak-brief { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
   .ak-brief .ak-warns { grid-column: 1 / -1; }
   .ak-region .ak-facts { grid-template-columns: 1fr; }
 
