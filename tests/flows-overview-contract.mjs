@@ -826,9 +826,10 @@ try {
     await tzPage.waitForSelector("#ccAlerts tbody tr", { timeout: 15000 });
     const tzSaid = (await tzPage.locator("#ccAlertsSub").textContent()).trim();
 
-    ok(/read 06:28 \S/.test(tzSaid),
-       `the instant is the reader's own wall clock with its zone stated beside it (${tzSaid})`);
-    ok(!/10:28/.test(tzSaid), `rather than another zone's hour under no label (${tzSaid})`);
+    ok(/read (\d{4}-\d{2}-\d{2} )?10:28 UTC/.test(tzSaid),
+       `a reader in another zone sees the same instant under the same label, UTC, the one clock ` +
+       `every stamp on the site now keeps (${tzSaid})`);
+    ok(!/06:28/.test(tzSaid), `never silently converted to the reader's own zone (${tzSaid})`);
     await tzCtx.close();
 
     const alertMany = Array.from({ length: 10 }, (_, i) => ({
