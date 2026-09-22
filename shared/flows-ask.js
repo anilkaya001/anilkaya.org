@@ -23,7 +23,7 @@ const NUMERAL_SOURCE = "(?<![\\d.])-?\\d+(?:,\\d+)*(?:\\.\\d+)?";
 
 export function numeralsIn(text) {
   if (typeof text !== "string" || text === "") return [];
-  return text.match(new RegExp(NUMERAL_SOURCE, "g")) || [];
+  return text.replace(/−/g, "-").match(new RegExp(NUMERAL_SOURCE, "g")) || [];
 }
 
 const FORECAST = /\b(will|should|expect(?:ed)?|likely|going to|forecast|predict)\b/i;

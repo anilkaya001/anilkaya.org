@@ -809,8 +809,8 @@ try {
        `and names the cadence before the instant (${stamp})`);
     ok(!/\d{2}:\d{2}:\d{2}/.test(stamp),
        `with no seconds field, which this feed cannot support (${stamp})`);
-    ok(/read \d{2}:\d{2} \S/.test(stamp),
-       `on a 24-hour clock that names the zone it is in (${stamp})`);
+    ok(/read (\d{4}-\d{2}-\d{2} )?\d{2}:\d{2} \S/.test(stamp),
+       `on a 24-hour clock that names the zone it is in, dated when the read is not today's (${stamp})`);
 
     const tzCtx = await browser.newContext({
       viewport: { width: 1280, height: 1000 }, timezoneId: "America/New_York" });
@@ -826,9 +826,10 @@ try {
     await tzPage.waitForSelector("#ccAlerts tbody tr", { timeout: 15000 });
     const tzSaid = (await tzPage.locator("#ccAlertsSub").textContent()).trim();
 
-    ok(/read 06:28 \S/.test(tzSaid),
-       `the instant is the reader's own wall clock with its zone stated beside it (${tzSaid})`);
-    ok(!/10:28/.test(tzSaid), `rather than another zone's hour under no label (${tzSaid})`);
+    ok(/read (\d{4}-\d{2}-\d{2} )?10:28 UTC/.test(tzSaid),
+       `a reader in another zone sees the same instant under the same label, UTC, the one clock ` +
+       `every stamp on the site now keeps (${tzSaid})`);
+    ok(!/06:28/.test(tzSaid), `never silently converted to the reader's own zone (${tzSaid})`);
     await tzCtx.close();
 
     const alertMany = Array.from({ length: 10 }, (_, i) => ({
@@ -2246,7 +2247,7 @@ try {
        "headline it is a footnote, and a reader who reaches a headline without having read " +
        "the age reads it as news");
     ok(/Fetched 3h \d+m ago.*Morning snapshot/.test(seat.summary), "visible summary preserves age and snapshot status");
-    ok(/^Fetched at \d\d:\d\d \S+, 3h \d+m ago\./.test(seat.note),
+    ok(/^Fetched at (\d{4}-\d{2}-\d{2} )?\d\d:\d\d \S+, 3h \d+m ago\./.test(seat.note),
        `it states when the feed was fetched AND how long ago, on a 24-hour clock that names ` +
        `its zone (${seat.note.slice(0, 60)}…)`);
     ok(/once per weekday morning at 05:15 America\/New_York/.test(seat.note),

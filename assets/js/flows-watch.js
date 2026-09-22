@@ -11,6 +11,16 @@
   const MINUS = "−";
   const DASH = "—";
 
+  for (const node of [wrap, document.querySelector(".flows-rail")]) {
+    if (!node) continue;
+    const edge = () => {
+      node.classList.toggle("has-more", node.scrollLeft + node.clientWidth < node.scrollWidth - 1);
+    };
+    node.addEventListener("scroll", edge, { passive: true });
+    if (window.ResizeObserver) new ResizeObserver(edge).observe(node);
+    edge();
+  }
+
   const isNum = (v) => {
     if (v === null || v === undefined || v === "") return null;
     const n = typeof v === "number" ? v : Number(v);
@@ -110,7 +120,7 @@
     tr.append(cell(fixed(row.px, 2), "c-num"));
 
     const s = isNum(row.s);
-    tr.append(cell(signed(s, 0), "c-num " + (s === null ? "" : s < 0 ? "fb-neg" : "fb-pos")));
+    tr.append(cell(signed(s, 0), "c-num " + (s === null || s === 0 ? "" : s < 0 ? "fb-neg" : "fb-pos")));
 
     const d = distanceToBand(row, band);
 

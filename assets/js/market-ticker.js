@@ -22,7 +22,7 @@
         '<span class="tk__name">' + esc(q.label) + "</span>" +
         '<span class="tk__price">' + priceFmt.format(Number(q.price)) + "</span>" +
         '<span class="tk__cur">' + esc(q.currency) + "</span>" +
-        '<span class="tk__chg">' + arrow + " " + pctFmt.format(pct) + "%</span>" +
+        '<span class="tk__chg">' + arrow + " " + pctFmt.format(pct).replace("-", "\u2212") + "%</span>" +
       "</span>"
     );
   }

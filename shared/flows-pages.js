@@ -2,7 +2,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "220";
+export const ASSET_VERSION = "221";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -102,7 +102,7 @@ const rail = (active) => {
 <nav class="flows-rail" aria-label="Flows">
 
   <div class="rail-items rail-items--lead" role="group" aria-label="Ask">
-    ${item("/flows/ask/", "Ask the data", "ask")}
+    ${item("/flows/ask/", "Ask", "ask")}
   </div>
   <p class="rail-group" id="railSession">Options flow</p>
   <div class="rail-items" role="group" aria-labelledby="railSession">
@@ -134,6 +134,7 @@ const dock = (active) => (active === "ask" ? "" : `
   <span class="ak-dock-tab-k" aria-hidden="true">?</span>
 </button>
 <aside class="ak-dock" id="askDock" data-src="${v("/assets/js/flows-ask.js")}">
+  <div class="ak-dock-scrim" hidden></div>
   <div class="ak-dock-panel" id="askDockPanel" role="complementary"
        aria-label="Ask about the published readings" hidden tabindex="-1">
     <div class="ak-dock-head">
@@ -220,7 +221,7 @@ function neuronDock(summary, { scope = "this session" } = {}) {
   </section>`;
   }
   const when = typeof summary.generatedAt === "string" && summary.generatedAt
-    ? `<span class="ak-neuron-when">&middot; written <time datetime="${escapeHTML(summary.generatedAt)}">${escapeHTML(summary.generatedAt.slice(11, 16))} UTC</time></span>`
+    ? `<span class="ak-neuron-when">&middot; written <time datetime="${escapeHTML(summary.generatedAt)}">${escapeHTML(summary.generatedAt.slice(0, 10))} ${escapeHTML(summary.generatedAt.slice(11, 16))} UTC</time></span>`
     : "";
   const words = neuronWords(summary.text);
   const caretAt = Math.min(String(summary.text).split(/\s+/).filter(Boolean).length, NEURON_CLAMP) + 1;
@@ -236,13 +237,7 @@ function neuronDock(summary, { scope = "this session" } = {}) {
   </section>`;
 }
 
-const shell = (title, kicker, active, username, body) => `
-<body class="flows-body has-rail" data-flows-page="${active}">
-<a class="flows-skip" href="#flowsMain">Skip to content</a>
-${topbar(true, username)}
-${rail(active)}
-<main class="flows-main" id="flowsMain" tabindex="-1">
-
+const pageHead = (title, kicker, active) => `
   <nav class="flows-crumbs" aria-label="Breadcrumb">
     <a href="/flows/">Flows</a>
     <span class="flows-crumbs-sep" aria-hidden="true">/</span>
@@ -254,7 +249,15 @@ ${rail(active)}
       <p class="flows-kicker">${kicker}</p>
       <h1>${title}</h1>
     </div>
-  </header>
+  </header>`;
+
+const shell = (title, kicker, active, username, body, { chrome = true } = {}) => `
+<body class="flows-body has-rail" data-flows-page="${active}">
+<a class="flows-skip" href="#flowsMain">Skip to content</a>
+${topbar(true, username)}
+${rail(active)}
+<main class="flows-main" id="flowsMain" tabindex="-1">
+${chrome ? pageHead(title, kicker, active) : ""}
 ${body}
 </main>
 ${dock(active)}`;
@@ -288,20 +291,35 @@ ${topbar(true)}
 </html>`;
 }
 
+const OVERVIEW_SECTIONS = [
+  ["ccChgH", "What changed"],
+  ["ccTideH", "Daily flow"],
+  ["ccBullH", "Bullish"],
+  ["ccBearH", "Bearish"],
+  ["ccAlertsH", "Largest flagged windows"],
+  ["ccEventsH", "Reporting soon"],
+  ["ccWatchH", "Nearly in"],
+  ["ccLeanH", "Sector lean · options premium"],
+  ["ccSplitH", "Flow distribution"],
+  ["ccNewsH", "Headlines"],
+  ["ccSpineH", "The whole distribution"],
+];
+
+const ccHeading = (id) =>
+  `<h2 class="cc-h-t" id="${id}">${OVERVIEW_SECTIONS.find((s) => s[0] === id)[1]}</h2>`;
+
 export function overviewPage({ username = "", summary = null } = {}) {
   return `${head("Flows — Overview", "The whole session on one screen: both tails, the level, what moved, and what reports next.")}
 ${shell("Session Overview", "Options-flow intelligence", "overview", username, `
+  <div class="flows-scroll" id="ccScroll">
+${pageHead("Session Overview", "Options-flow intelligence", "overview")}
   <div class="flows-status" id="flowsStatus" role="status">Loading the latest session…</div>
   <p class="flows-stale" id="flowsStale" role="status" hidden></p>
 
-  <div class="flows-scroll" id="ccScroll">
 ${neuronDock(summary)}
 
   <nav class="cc-jump" aria-label="Overview sections">
-    <a href="#ccChgH">Changes</a><a href="#ccBullH">Candidates</a>
-    <a href="#ccAlertsH">Activity</a><a href="#ccEventsH">Catalysts</a>
-    <a href="#ccTideH">Daily flow</a><a href="#ccLeanH">Sectors</a>
-    <a href="#ccSplitH">Split</a><a href="#ccSpineH">Distribution</a>
+    ${OVERVIEW_SECTIONS.map(([id, label]) => `<a href="#${id}">${label}</a>`).join("")}
   </nav>
   <div class="cc">
 
@@ -313,9 +331,18 @@ ${neuronDock(summary)}
 
     <section class="cc-verdict" id="ccVerdict" aria-label="Session verdict"></section>
 
+    <section class="cc-region cc-chg" aria-labelledby="ccChgH">
+      <div class="cc-h">
+        ${ccHeading("ccChgH")}
+
+        <span class="cc-h-s" id="ccChgSub">since each name&#39;s prior scored session</span>
+      </div>
+      <div class="cc-body" id="ccChg"></div>
+    </section>
+
     <section class="cc-region cc-tide" aria-labelledby="ccTideH">
       <div class="cc-h">
-        <h2 class="cc-h-t" id="ccTideH">Daily flow</h2>
+        ${ccHeading("ccTideH")}
         <div class="cc-seg" id="ccTideSeg" role="group" aria-label="How many sessions this flow is drawn over"></div>
       </div>
       <div class="cc-body" id="ccTide"></div>
@@ -323,7 +350,7 @@ ${neuronDock(summary)}
 
     <section class="cc-region cc-bull" aria-labelledby="ccBullH">
       <div class="cc-h">
-        <h2 class="cc-h-t" id="ccBullH">Bullish</h2>
+        ${ccHeading("ccBullH")}
 
         <a class="cc-h-s" href="/flows/long/" id="ccBullSub" hidden></a>
       </div>
@@ -332,34 +359,25 @@ ${neuronDock(summary)}
 
     <section class="cc-region cc-bear" aria-labelledby="ccBearH">
       <div class="cc-h">
-        <h2 class="cc-h-t" id="ccBearH">Bearish</h2>
+        ${ccHeading("ccBearH")}
         <a class="cc-h-s" href="/flows/short/" id="ccBearSub" hidden></a>
       </div>
       <div class="cc-body" id="ccBear"></div>
     </section>
 
-    <section class="cc-region cc-chg" aria-labelledby="ccChgH">
-      <div class="cc-h">
-        <h2 class="cc-h-t" id="ccChgH">What changed</h2>
-
-        <span class="cc-h-s" id="ccChgSub">since each name&#39;s prior scored session</span>
-      </div>
-      <div class="cc-body" id="ccChg"></div>
-    </section>
-
     <section class="cc-region cc-alerts" aria-labelledby="ccAlertsH">
       <div class="cc-h">
-        <h2 class="cc-h-t" id="ccAlertsH">Largest flagged windows</h2>
+        ${ccHeading("ccAlertsH")}
         <span class="cc-h-s" id="ccAlertsSub"></span>
 
-        <a class="cc-h-s cc-h-all" href="/flows/unusual/">All flagged windows \u2192</a>
+        <a class="cc-h-s cc-h-all" href="/flows/unusual/">All flagged windows →</a>
       </div>
       <div class="cc-body" id="ccAlerts"></div>
     </section>
 
     <section class="cc-region cc-ev" aria-labelledby="ccEventsH">
       <div class="cc-h">
-        <h2 class="cc-h-t" id="ccEventsH">Reporting soon</h2>
+        ${ccHeading("ccEventsH")}
         <span class="cc-h-s" id="ccEventsSub"></span>
       </div>
       <div class="cc-body" id="ccEvents"></div>
@@ -367,7 +385,7 @@ ${neuronDock(summary)}
 
     <section class="cc-region cc-watch" aria-labelledby="ccWatchH">
       <div class="cc-h">
-        <h2 class="cc-h-t" id="ccWatchH">Nearly in</h2>
+        ${ccHeading("ccWatchH")}
         <a class="cc-h-s" href="/flows/watch/" id="ccWatchSub">inside the dead band</a>
       </div>
       <div class="cc-body" id="ccWatch"></div>
@@ -375,7 +393,7 @@ ${neuronDock(summary)}
 
     <section class="cc-region cc-lean" aria-labelledby="ccLeanH">
       <div class="cc-h">
-        <h2 class="cc-h-t" id="ccLeanH">Sector lean · options premium</h2>
+        ${ccHeading("ccLeanH")}
 
         <span class="cc-h-s" id="ccLeanSub">options premium, not price momentum</span>
 
@@ -387,7 +405,7 @@ ${neuronDock(summary)}
 
     <section class="cc-region cc-split" aria-labelledby="ccSplitH">
       <div class="cc-h">
-        <h2 class="cc-h-t" id="ccSplitH">Flow distribution</h2>
+        ${ccHeading("ccSplitH")}
         <span class="cc-h-s" id="ccSplitSub"></span>
       </div>
       <div class="cc-body" id="ccSplit"></div>
@@ -395,7 +413,7 @@ ${neuronDock(summary)}
 
     <section class="cc-region cc-news" aria-labelledby="ccNewsH">
       <div class="cc-h">
-        <h2 class="cc-h-t" id="ccNewsH">Headlines</h2>
+        ${ccHeading("ccNewsH")}
         <span class="cc-h-s" id="ccNewsSub"></span>
       </div>
       <div class="cc-body" id="ccNews"></div>
@@ -403,7 +421,7 @@ ${neuronDock(summary)}
 
     <section class="cc-region cc-spine" aria-labelledby="ccSpineH">
       <div class="cc-h">
-        <h2 class="cc-h-t" id="ccSpineH">The whole distribution</h2>
+        ${ccHeading("ccSpineH")}
         <span class="cc-h-s">every published name on a fixed axis</span>
       </div>
       <section class="spine" aria-labelledby="spineH">
@@ -422,7 +440,7 @@ ${neuronDock(summary)}
     <a href="/flows/history/">track record</a>.</span>
   </p>
   </div>
-`)}
+`, { chrome: false })}
 <script src="${v("/assets/js/nav.js")}" defer></script>
 
 <script src="${v("/assets/js/flows-cursor.js")}" defer></script>
@@ -645,6 +663,11 @@ ${shell("Watch List", "Options-flow intelligence", "watch", username, `
         name&#39;s own thirty-day norm &#8212; the most conventional reading of
         &#8220;unusual activity&#8221; there is, signed by which side is doing
         the surprising, and one this product computed and never showed.
+        <span class="watch-key">Under a distance, &#9656; is a name that moved
+        toward the edge since its prior scored session and &#9666; one that
+        moved away, at the signed rate beside it per session; &#8776;<i>n</i>s
+        is the sessions to the edge at that rate. &#9662; after a ticker marks
+        a name that came back inside through the edge.</span>
       </caption>
       <thead>
         <tr>
@@ -1261,7 +1284,7 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
 export function historyPage({ username = "" } = {}) {
   const lede = "What the board said, and what happened next.";
   return `${head("Flows \u2014 Track record", lede)}
-${shell("Track Record", "Options-flow intelligence", "history", username, `
+${shell("Track record", "Options-flow intelligence", "history", username, `
   <div class="flows-status" id="recStatus" role="status">Loading the record\u2026</div>
 
   <div class="flows-controls">
@@ -1421,7 +1444,7 @@ ${shell("Ask", "Options-flow intelligence", "ask", username, `
   </div>
 
   <div id="askApp"></div>
-  <div id="askFoot"></div>
+  <div id="askFoot" class="flows-foot"></div>
 `)}
 <script src="${v("/assets/js/nav.js")}" defer></script>
 <script src="${v("/assets/js/flows-ask.js")}" defer></script>

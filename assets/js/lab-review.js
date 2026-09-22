@@ -349,7 +349,7 @@
     const course = courseMeta(item);
     const courseLink = el("a", "review-question__course", course.title);
     courseLink.href = course.href;
-    const moduleName = hasText(item.moduleTitle) ? item.moduleTitle.trim() : `Stage ${item.stageIndex + 1}`;
+    const moduleName = hasText(item.moduleTitle) ? item.moduleTitle.trim() : `Lesson ${item.stageIndex + 1}`;
     meta.append(courseLink, el("span", "", moduleName), el("span", "", TYPE_LABELS[item.type]));
 
     const title = el("h2", "", item.title);
@@ -456,7 +456,9 @@
           }, { once: true });
           actions.append(next);
         } else {
-          setFeedback(feedback, "wrong", "Not yet — adjust your answer and try again.", explanationFor(item), resultSaveText(result));
+          const chosen = Number(savedPending.answer);
+          const nudge = Array.isArray(item.why) && Number.isInteger(chosen) && hasText(item.why[chosen]) ? [item.why[chosen].trim()] : [];
+          setFeedback(feedback, "wrong", "Not yet — adjust your answer and try again.", itemAttempts >= 2 ? [...nudge, ...explanationFor(item)] : nudge, resultSaveText(result));
           disableInputs(false);
           submit.disabled = false;
           submit.textContent = "Try again";
@@ -486,6 +488,7 @@
       }
       pending = {
         correct: isCorrect(item, response.value),
+        answer: response.value,
         hinted,
         attemptId: attemptId(),
       };

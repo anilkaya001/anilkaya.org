@@ -13,7 +13,8 @@
     }
     return;
   }
-  const { isNum, el, svgEl, DASH, MINUS, fmtSigned, scoreStrip, emptyState } = UI;
+  const { isNum, el, svgEl, DASH, MINUS, fmtSigned, fmtStamp, scrollHint, scoreStrip,
+    emptyState } = UI;
 
   const host = (id) => document.getElementById(id);
   const verdictHost = host("ccVerdict");
@@ -143,16 +144,17 @@
     mark.title = "Reports " + (date || "inside the events window") +
       (said ? " · " + said : "") +
       ". A signal carried into a print stops being the signal that was ranked.";
+    mark.setAttribute("aria-label", mark.title);
     return mark;
   }
 
   const NOTE_WALL_CHARS = 420;
 
-  function appendMethod(host, lines, summary) {
+  function appendMethod(host, lines, summary, fold) {
     const list = (lines || []).filter((one) => typeof one === "string" && one.trim());
     if (!list.length) return;
     const chars = list.reduce((n, one) => n + one.length, 0);
-    if (chars <= NOTE_WALL_CHARS) {
+    if (chars <= NOTE_WALL_CHARS && !fold) {
       host.append(el("p", "cc-quiet cc-ln-note", list.join(" ")));
       return;
     }
@@ -167,6 +169,7 @@
     wrap.tabIndex = 0;
     wrap.setAttribute("role", "region");
     wrap.setAttribute("aria-label", label);
+    scrollHint(wrap);
     return wrap;
   }
 
@@ -612,7 +615,7 @@
             "opinion; a run of thirty is an old one.";
       tr.append(runCell);
 
-      const asOf = el("td", "cc-dim");
+      const asOf = el("td", "cc-dim cc-date");
       if (!dated || mv.at === null) {
         asOf.textContent = DASH;
         asOf.title = "This payload published no session index for the name, so " +
@@ -652,15 +655,12 @@
       const tot = pulse && pulse.totals;
       if (!tot || tot.status !== "ok" || !Array.isArray(tot.rows)) return null;
       const rows = tot.rows.slice().reverse().slice(-21);
-      const lean = [], gross = [];
-      for (const r of rows) {
+      const gross = rows.map((r) => {
         const c = isNum(r && r.callPrem), pu = isNum(r && r.putPrem);
-        if (c === null || pu === null) { lean.push(null); gross.push(null); continue; }
-        const g = Math.abs(c) + Math.abs(pu);
-        lean.push(g > 0 ? (c - pu) / g : null);
-        gross.push(g);
-      }
-      return { lean, gross };
+        return c === null || pu === null ? null : Math.abs(c) + Math.abs(pu);
+      });
+      const to = tot.rows[0] && typeof tot.rows[0].date === "string" ? tot.rows[0].date : null;
+      return { gross, to };
     })();
 
     const shareOf = (a, b) => {
@@ -718,17 +718,19 @@
         null, boardsSilence(bulls !== null || bears !== null), ["split", bulls, bears],
         shareOf(bulls, bears)],
 
-      ["Flow bias", pct(pt, 1), tone(pt), ptSilence,
-        daily && daily.lean ? ["spark", daily.lean] : ["signed", pt],
+      ["Flow bias", pct(pt, 1), tone(pt), ptSilence, ["signed", pt],
         bt !== null
           ? [pct(bt, 1) + " weighting names equally", null, tone(bt)]
           : (btSilence ? ["Names equally weighted: " + btSilence[1], btSilence[0], null] : null)],
 
       ["Premium", grossNow === null ? DASH : usd(grossNow), null,
         tileSilence(pulse, grossNow !== null, null),
-        daily && daily.gross ? ["spark", daily.gross] : null],
+        daily && daily.gross ? ["spark", daily.gross, true] : null,
+        daily && daily.to && sessionDate && daily.to !== sessionDate
+          ? ["vendor daily totals to " + daily.to + ", not this session", null, null] : null],
       ["Flagged windows", seen === null ? DASH : (atLimit ? "\u2265" : "") + seen, null,
-        tileSilence(alerts, seen !== null, null), flagSpread],
+        tileSilence(alerts, seen !== null, null), flagSpread,
+        flagSpread ? [flagSpread[1].length + " largest by premium", null, null] : null],
     ];
 
     const viz = (spec) => {
@@ -776,7 +778,7 @@
         }
         const last = seen[seen.length - 1];
         svg.append(svgEl("polyline", {
-          class: "cc-viz-s" + (last < 0 ? " is-neg" : last > 0 ? " is-pos" : ""),
+          class: "cc-viz-s" + (spec[2] ? "" : last < 0 ? " is-neg" : last > 0 ? " is-pos" : ""),
           points: pts.join(" "), fill: "none",
         }));
         return svg;
@@ -803,7 +805,11 @@
       const tile = el("div", "cc-tile");
       if (silence) tile.dataset.empty = silence[0];
       tile.append(el("span", "cc-tile-k", key));
-      tile.append(el("span", "cc-tile-v" + (cls || ""), String(value)));
+      const shown = el("span", "cc-tile-v" + (cls || ""));
+      const halves = String(value).split(" / ");
+      if (halves.length === 2) shown.append(el("span", null, halves[0]), " / ", el("span", null, halves[1]));
+      else shown.textContent = String(value);
+      tile.append(shown);
       const bar = silence ? null : viz(spec);
       if (bar) tile.append(bar);
 
@@ -1125,7 +1131,8 @@
       ["Side", "c-num", "The vendor's ATTRIBUTION of this window's premium to the ask or the " +
         "bid, as a share of the two. A print at the ask is not proof of a buyer, so this " +
         "column names the side of the quote and never an intent."],
-      ["Rule", null],
+      ["Rule", null, "The vendor's own name for the screen that flagged the window, printed as " +
+        "published; this page does not restate its definition."],
     ]));
     const body = el("tbody");
     for (const row of drawn) {
@@ -1142,7 +1149,7 @@
       tr.append(when);
 
       tr.append(el("td", "cc-t", row.t || DASH));
-      tr.append(el("td", null,
+      tr.append(el("td", "cc-date",
         (row.cp || DASH) + " " + (isNum(row.k) === null ? DASH : row.k) +
         (row.exp ? " " + String(row.exp).slice(5) : "")));
       tr.append(el("td", "c-num", usd(row.prem)));
@@ -1157,7 +1164,13 @@
           : (askShare > 0.5 ? "ask " : "bid ") +
             ((askShare > 0.5 ? askShare : 1 - askShare) * 100).toFixed(0) + "%"));
 
-      tr.append(el("td", "cc-dim", row.rule || DASH));
+      const rule = el("td", "cc-dim", row.rule || DASH);
+      if (row.rule) {
+        rule.title = "Flagged by the vendor's " +
+          String(row.rule).replace(/([a-z\d])([A-Z])/g, "$1 $2").toLowerCase() +
+          " rule, under the vendor's own name for it.";
+      }
+      tr.append(rule);
       body.append(tr);
     }
     table.append(body);
@@ -1197,7 +1210,7 @@
     for (const row of drawn) {
       const tr = el("tr");
       tr.append(el("td", "cc-t", row.t || DASH));
-      tr.append(el("td", null, row.d || DASH));
+      tr.append(el("td", "cc-date", row.d || DASH));
 
       tr.append(el("td", "c-num", isNum(row.sdte) === null ? DASH : row.sdte + "s"));
       const im = isNum(row.im);
@@ -1363,7 +1376,8 @@
       "today only.");
 
     if (lean && typeof lean.relation === "string" && lean.relation) {
-      method.push("Derived: " + lean.relation + ".");
+      method.push("Derived: " + lean.relation + " — in words, net is bullish minus bearish " +
+        "premium, gross is their sum, and the lean is net over gross.");
     }
     caveats.push("Ordered on the RATIO — the share of each basket's own two-sided premium " +
       "that leaned one way — because that is what the publisher ranks on" +
@@ -1374,7 +1388,7 @@
     caveats.push("The dollars ride beside it because a ratio carries no size: +90% on $30k of " +
       "premium and +90% on $300M are not the same fact.");
     method.push("Sign is carried by POSITION — left of the centre rule is bearish premium — " +
-      "and by the glyph on every number, so the panel survives greyscale.");
+      "and by the glyph on every number.");
     if (quietN) {
       caveats.push(quietN + (quietN === 1 ? " basket was" : " baskets were") +
         " read with both premium sums at zero: measured and empty, printed as the $0 they " +
@@ -1495,6 +1509,7 @@
         const chip = el("div", "cc-chip" +
           (v === null ? " is-null" : v > 0 ? " is-pos" : v < 0 ? " is-neg" : ""));
         chip.setAttribute("role", "listitem");
+        if (r.etf) chip.append(el("span", "cc-chip-e", r.etf));
         chip.append(el("span", "cc-chip-n", basket(r)));
         chip.append(el("span", "cc-chip-v", v === null ? DASH : M.fmt(v)));
 
@@ -1569,7 +1584,7 @@
       for (const c of caveats) box.append(el("li", null, c));
       into.append(box);
     }
-    appendMethod(into, method, "How this lean was derived");
+    appendMethod(into, method, "How this lean was derived", true);
   }
 
   function agoSaid(fromMs, now) {
@@ -1585,10 +1600,6 @@
     const days = Math.floor(hours / 24);
     return days + (days === 1 ? " day ago" : " days ago");
   }
-
-  const clockSaid = (ms) => new Date(ms).toLocaleTimeString([], {
-    hour: "2-digit", minute: "2-digit", hour12: false, timeZoneName: "short",
-  });
 
   const NEWS_TICKERS = 4;
 
@@ -1630,7 +1641,7 @@
         "fetched cannot be said. Treat every row below as being of unknown age rather " +
         "than as something that just happened.");
     } else {
-      said.push("Fetched at " + clockSaid(readMs) +
+      said.push("Fetched at " + (fmtStamp(payload.readAt) || DASH) +
         (readAge === null
           ? ", which is ahead of this browser's clock, so no age can be stated"
           : ", " + readAge) + ".");
@@ -1978,15 +1989,6 @@
     slot.hidden = false;
   }
 
-  function promoteChange() {
-    const body = host("ccChg");
-    const region = body && body.closest ? body.closest(".cc-region") : null;
-    if (!region || !region.parentNode || region.parentNode !== verdictHost.parentNode) return;
-    region.style.gridColumn = "1 / -1";
-    verdictHost.insertAdjacentElement("afterend", region);
-  }
-  promoteChange();
-
   function stampUpdated(response, body) {
     const at = isNum(response.headers.get("X-Payload-Updated"));
     if (body && typeof body === "object") body.__updatedAt = at !== null && at > 0 ? at : null;
@@ -2115,7 +2117,7 @@
         : null;
       const read = alerts && typeof alerts.readAt === "string" ? Date.parse(alerts.readAt) : NaN;
       if (Number.isFinite(read)) {
-        said.push((cadence ? cadence + " read " : "read ") + clockSaid(read)
+        said.push((cadence ? cadence + " read " : "read ") + (fmtStamp(alerts.readAt) || DASH)
           + (alrRows && !cadence ? ", cadence not published" : ""));
       } else if (alrRows) {
         said.push(cadence ? cadence + " read" : "cadence not published");
@@ -2174,6 +2176,18 @@
     }
     setStale(notes);
 
+    const wrote = document.querySelector(".ak-neuron time");
+    const built = Date.parse((lng && lng.generatedAt) || (sht && sht.generatedAt) || "");
+    if (wrote && Number.isFinite(built) && Date.parse(wrote.dateTime) < built) {
+      const box = wrote.closest(".ak-neuron");
+      box.classList.add("is-old");
+      const src = box.querySelector(".ak-neuron-src");
+      if (src) {
+        src.append(" Written before the boards were rebuilt at " + fmtStamp(new Date(built).toISOString()) +
+          ", so it reads an earlier publication.");
+      }
+    }
+
     const scored = isNum(meta.scored), neutral = isNum(meta.neutral);
 
     const sideSaid = (rows, pool, word) => rows === null ? DASH + " " + word
@@ -2211,6 +2225,7 @@
     statusEl.textContent = "The session could not be loaded. Refresh to try again.";
   });
 
+  scrollHint(document.querySelector(".flows-rail"));
   const ccScroll = document.getElementById("ccScroll");
   if (ccScroll) {
     const edge = () => ccScroll.classList.toggle("is-scrolled", ccScroll.scrollTop > 2);

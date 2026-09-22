@@ -52,6 +52,10 @@
   if (!body || !statusEl) return;
 
   const UI = window.FlowsUI || null;
+  if (UI) {
+    UI.scrollHint(tableWrap);
+    UI.scrollHint(document.querySelector(".flows-rail"));
+  }
 
   const table = document.getElementById("flowsTable");
   const headCells = table
@@ -1190,9 +1194,7 @@
       paintRows();
       painted = which;
 
-      const when = payload.generatedAt
-        ? new Date(payload.generatedAt).toLocaleString()
-        : "an unknown time";
+      const when = (UI && UI.fmtStamp(payload.generatedAt)) || "an unknown time";
 
       const parts = [
         rows.length + " " + which + " candidate" + (rows.length === 1 ? "" : "s"),

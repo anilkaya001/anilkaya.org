@@ -290,12 +290,29 @@
     return svg;
   }
 
+  const fmtStamp = (iso) => {
+    const ms = typeof iso === "string" && /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(iso.trim())
+      ? Date.parse(iso.trim()) : NaN;
+    if (!Number.isFinite(ms)) return null;
+    return new Date(ms).toISOString().slice(0, 16).replace("T", " ") + " UTC";
+  };
+
+  function scrollHint(node) {
+    if (!node) return;
+    const edge = () => {
+      node.classList.toggle("has-more", node.scrollLeft + node.clientWidth < node.scrollWidth - 1);
+    };
+    node.addEventListener("scroll", edge, { passive: true });
+    if (window.ResizeObserver) new ResizeObserver(edge).observe(node);
+    edge();
+  }
+
   window.FlowsUI = Object.freeze({
     MINUS, DASH, MID,
     isNum, el, svgEl,
-    fmtSigned, fmtInt, fmtMoney,
+    fmtSigned, fmtInt, fmtMoney, fmtStamp,
     emptyState, searchBox, sortSelect,
-    staleness,
+    staleness, scrollHint,
     stripGeometry, scoreStrip,
   });
 })();

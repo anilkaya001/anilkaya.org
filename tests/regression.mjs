@@ -403,7 +403,7 @@ try {
 
     assert.equal(await page.locator("#learningPaths .path-card").count(), 5, "learning paths did not render");
     assert.equal(await page.locator("#labGrid .model-card").count(), 12, "course catalogue did not render");
-    assert.match(await page.locator(".dashboard-resume").textContent(), /2 \/ 20 complete · next stage 3/);
+    assert.match(await page.locator(".dashboard-resume").textContent(), /2 \/ 20 complete · next lesson 3/);
     assert((await page.locator(".dashboard-resume a").getAttribute("href")).endsWith("#s2"), "resume link did not target the first unfinished lesson");
     assert.match(await page.locator("#heroPrimaryCta").textContent(), /Continue OLS · lesson 3/);
     assert((await page.locator("#heroPrimaryCta").getAttribute("href")).endsWith("#s2"), "hero action did not personalize to the next lesson");
@@ -586,7 +586,7 @@ try {
       owner: null,
       dashboardFocused: true,
     });
-    assert.match(await page.locator(".dashboard-resume").textContent(), /0 \/ 20 complete/);
+    assert.match(await page.locator(".dashboard-resume").textContent(), /Statistical Foundations[\s\S]*0 \/ 32 complete · next lesson 1/);
     clean();
     await context.close();
   }
@@ -621,7 +621,7 @@ try {
     assert.match(await page.locator("#resetDescription").textContent(), /placement/);
     await page.click("#resetConfirm");
     await page.waitForFunction(() => window.IEWTStorage.placement() === null && !document.querySelector("#resetDialog").open);
-    assert.match(await page.locator("#heroPrimaryCta").textContent(), /Start OLS · lesson 1/);
+    assert.match(await page.locator("#heroPrimaryCta").textContent(), /Start Foundations · lesson 1/);
     assert.equal((await page.locator(".lab-hero__diagnostic").textContent()).trim(), "Find your level");
     clean();
     await context.close();

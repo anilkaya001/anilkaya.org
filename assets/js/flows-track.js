@@ -251,7 +251,8 @@
   function buildScaffold() {
     if (built) return;
     built = true;
-    colSet = { move: ctx.has.move, run: ctx.has.run, asOf: ctx.has.now };
+    colSet = { move: ctx.has.move, run: ctx.has.run,
+      asOf: ctx.has.now && ctx.rows.some((r) => r.staleBy !== 0) };
 
     const controls = el("div", "st-controls");
     const search = UI.searchBox({
@@ -339,7 +340,8 @@
 
     lastAbbr.title = "The most recent score published for this name anywhere in " +
       "the window, signed — the same composite the board printed on the session " +
-      "the As-of column names, which is not necessarily the latest one.";
+      "it was last scored in, which the As-of column names whenever any name " +
+      "lags the latest session.";
     hLast.append(lastAbbr);
     hr.append(hLast);
 
@@ -461,14 +463,6 @@
       svg.append(svgEl("line", {
         class: "st-ax-pre", x1: x1.toFixed(2), x2: x2.toFixed(2), y1: 4, y2: 4,
       }));
-      if (x2 - x1 > 84) {
-        const lab = svgEl("text", {
-          class: "st-ax-prelab", x: (x1 + 2).toFixed(2), y: 8,
-          "font-size": "7.5px", "text-anchor": "start",
-        });
-        lab.textContent = "PRE-EPOCH";
-        svg.append(lab);
-      }
     }
     if (ctx.boundary !== null) {
       const x = g.xEdge(ctx.boundary).toFixed(2);
@@ -491,7 +485,7 @@
       const t = svgEl("text", {
         class: "st-ax-lab",
         x: Math.min(Math.max(x, 15), W - 15).toFixed(2), y: H - 2,
-        "font-size": "9px", "text-anchor": "middle",
+        "font-size": "10px", "text-anchor": "middle",
       });
 
       t.textContent = ctx.sessions[i].d ? ctx.sessions[i].d.slice(5) : "?";
@@ -756,6 +750,10 @@
         " no session index, so how old " + plural(unknown, "its reading is", "their readings are") +
         " cannot be stated.");
     }
+    if (!old && !unknown) {
+      said.push("Every carried name was scored in the latest session, so no As-of " +
+        "column is drawn: each Last is that session's reading.");
+    }
     return said.length ? said.join(" ") : null;
   }
 
@@ -937,7 +935,8 @@
         (ctx.epoch ? " (" + ctx.epoch + ")" : "") + ": scores on either side of it " +
         "come from different pools under different selection rules — a trace that " +
         "crosses it is two experiments wearing one line, and the rule is drawn " +
-        "rather than smoothed over.");
+        "rather than smoothed over. The dotted lane over the axis marks the " +
+        "sessions before it.");
     } else if (ctx.allPre && ctx.epoch) {
       parts.push("Every session in this window predates the selection epoch the " +
         "payload names (" + ctx.epoch + "), so no trace here crosses it; the dotted " +
@@ -1088,8 +1087,9 @@
       if (payload.sessionDate) foot.push("Session " + payload.sessionDate);
       if (payload.generatedAt) {
         const t = Date.parse(payload.generatedAt);
-        foot.push("Built " + (Number.isFinite(t)
-          ? new Date(t).toLocaleString() : String(payload.generatedAt)));
+        const iso = Number.isFinite(t) ? new Date(t).toISOString() : null;
+        foot.push("Built " + (iso
+          ? iso.slice(0, 10) + " " + iso.slice(11, 16) + " UTC" : String(payload.generatedAt)));
       }
       const v = isNum(payload.v);
       if (v !== null) foot.push("payload v" + v);
@@ -1131,7 +1131,7 @@
 
   function failEverywhere(what) {
     statusEl.textContent = what;
-    showOnly("failed", what);
+    showOnly("unreadable", what);
     if (basisHost) {
       basisHost.replaceChildren(el("p", "fc-note",
         "The basis travels inside the same payload as the numbers, so it could not " +
@@ -1192,7 +1192,7 @@
         plural(count, "session", "sessions") + " the archive walk reconstructed. " +
         "That is a measured emptiness — the walk read every archived session in " +
         "the window and found no scored name — and not a missing publish.";
-      showOnly("empty", msg);
+      showOnly("quiet", msg);
       renderBasis(payload);
       return;
     }
