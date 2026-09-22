@@ -2,7 +2,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "215";
+export const ASSET_VERSION = "217";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -183,6 +183,8 @@ export function neuronProvenance(summary) {
 
   if (guard === "invented") return "Deterministic reading. A model\u2019s wording named an unsupported figure and was refused.";
   if (guard === "forecast") return "Deterministic reading. A model\u2019s wording claimed what happens next and was refused.";
+  if (guard === "ideas:unparsable") return "Deterministic reading: the model\u2019s reply could not be parsed.";
+  if (guard === "summary:empty") return "Deterministic reading: the model returned ideas without a summary.";
   if (guard.startsWith("unreachable:")) {
     const why = guard.slice("unreachable:".length);
     const said = why === "3036"
@@ -945,10 +947,10 @@ export function tickerPage({ username = "" } = {}) {
     "and what flips it, what the chain is charging across strikes and " +
     "expiries, which contracts carry the volume, and how far the price is " +
     "from every level that matters — all of it read off the card the pipeline " +
-    "published this morning, with no vendor call made by this page.";
+    "published this morning, with only the last price re-read live every five seconds.";
 
   const panelMarkup = (p) => `
-    <section class="fc-panel ft-panel${p.span === 2 ? " is-wide" : ""}"
+    <section class="fc-panel ft-panel${p.span === 2 ? " is-wide" : p.span === 3 ? " is-full" : ""}"
              id="panel-${escapeHTML(p.key)}" data-panel="${escapeHTML(p.key)}"
              data-group="${escapeHTML(p.group)}" data-tier="${escapeHTML(p.tier)}"${
       SENTINEL_KEYS.has(p.key) ? " data-sentinel" : ""}
@@ -1069,6 +1071,8 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
     </div>
   </div>
 
+  <div class="ft-row1" id="ftRow1"></div>
+
   <div class="ft-top">
 
   <section class="ft-chart" id="ftChart" hidden aria-labelledby="ftChartH">
@@ -1086,7 +1090,7 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
 
   <section class="ft-garch" id="ftGarch" hidden aria-labelledby="ftGarchH">
     <div class="ft-chart-top">
-      <h2 class="ft-chart-h" id="ftGarchH">GARCH(1,1) — GED</h2>
+      <h2 class="ft-chart-h" id="ftGarchH">GARCH(1,1) — skewed t</h2>
       <div class="ft-period" id="ftGarchTabs" role="group"
            aria-label="Window the volatility path"></div>
     </div>
@@ -1106,20 +1110,6 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
     <div class="ft-chain-body" id="ftChainBody"></div>
     <p class="ft-chain-s" id="ftChainS"></p>
   </section>
-    <div class="ft-col">
-    <section class="ft-mix" id="ftMix" hidden aria-labelledby="ftMixH">
-      <h2 class="ft-mix-h" id="ftMixH">Volume by type</h2>
-      <div class="ft-mix-body" id="ftMixBody"></div>
-      <p class="ft-mix-s" id="ftMixS"></p>
-    </section>
-
-  <aside class="ft-flow" id="ftFlow" hidden aria-labelledby="ftFlowH">
-    <h2 class="ft-flow-h" id="ftFlowH">Recent flow</h2>
-    <ol class="ft-flow-l" id="ftFlowL"></ol>
-    <p class="ft-flow-s" id="ftFlowS"></p>
-  </aside>
-    </div>
-    <div class="ft-col">
 
   <aside class="ft-lv" id="ftLv" hidden aria-labelledby="ftLvH">
     <h2 class="ft-lv-h" id="ftLvH">Key levels</h2>
@@ -1127,22 +1117,31 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
     <p class="ft-lv-s" id="ftLvS"></p>
   </aside>
 
-  <aside class="ft-rel" id="ftRel" hidden aria-labelledby="ftRelH">
-    <h2 class="ft-rel-h" id="ftRelH">Others in this sector</h2>
-    <div class="ft-rel-l" id="ftRelL"></div>
-    <p class="ft-rel-s" id="ftRelS"></p>
+  <aside class="ft-flow" id="ftFlow" hidden aria-labelledby="ftFlowH">
+    <h2 class="ft-flow-h" id="ftFlowH">Recent flow</h2>
+    <ol class="ft-flow-l" id="ftFlowL"></ol>
+    <p class="ft-flow-s" id="ftFlowS"></p>
   </aside>
-    </div>
-  </div>
-
-  <div class="ft-band4">
 
   <section class="ft-ivt" id="ftIvt" hidden aria-labelledby="ftIvtH">
     <h2 class="ft-chart-h ft-ivt-h" id="ftIvtH">Implied volatility term structure</h2>
     <div class="ft-chart-body" id="ftIvtBody"></div>
     <p class="ft-chart-s" id="ftIvtS"></p>
   </section>
+
+  <section class="ft-mix" id="ftMix" hidden aria-labelledby="ftMixH">
+    <h2 class="ft-mix-h" id="ftMixH">Volume by type</h2>
+    <div class="ft-mix-body" id="ftMixBody"></div>
+    <p class="ft-mix-s" id="ftMixS"></p>
+  </section>
+
+  <aside class="ft-rel" id="ftRel" hidden aria-labelledby="ftRelH">
+    <h2 class="ft-rel-h" id="ftRelH">Others in this sector</h2>
+    <div class="ft-rel-l" id="ftRelL"></div>
+    <p class="ft-rel-s" id="ftRelS"></p>
+  </aside>
   </div>
+
     </div>
     <div class="ft-split-side">
   <aside class="ft-brief" id="ftBrief" hidden aria-labelledby="ftBriefH">
@@ -1156,7 +1155,11 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
       <div class="ak-neuron-body">
         <p class="ak-neuron-h" id="ftNeuronH">Neuron</p>
         <p class="ak-neuron-say" id="ftNeuronSay"></p>
+        <ol class="ft-ideas" id="ftNeuronIdeas" hidden aria-label="Trade ideas, ranked by robustness"></ol>
+        <button class="ft-ideas-more" id="ftNeuronMore" type="button" hidden aria-expanded="false"
+                aria-controls="ftNeuronIdeas"></button>
         <p class="ak-neuron-src" id="ftNeuronSrc"></p>
+        <p class="ak-neuron-cov" id="ftNeuronCov" hidden></p>
       </div>
     </div>
     <ol class="ft-brief-l" id="ftBriefL"></ol>

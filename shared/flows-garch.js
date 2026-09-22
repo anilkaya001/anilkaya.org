@@ -17,14 +17,27 @@ export function lnGamma(x) {
   return 0.5 * Math.log(2 * Math.PI) + (x + 0.5) * Math.log(t) - t + Math.log(a);
 }
 
-export function gedLambda(nu) {
-  return Math.sqrt(Math.pow(2, -2 / nu) * Math.exp(lnGamma(1 / nu) - lnGamma(3 / nu)));
+export const SKEWT_NU_MIN = 2.05;
+export const SKEWT_NU_MAX = 30;
+export const SKEWT_LAMBDA_MAX = 0.95;
+
+export function skewtConstants(nu, lambda) {
+  const logC = lnGamma((nu + 1) / 2) - lnGamma(nu / 2) - 0.5 * Math.log(Math.PI * (nu - 2));
+  const c = Math.exp(logC);
+  const a = 4 * lambda * c * (nu - 2) / (nu - 1);
+  const b = Math.sqrt(1 + 3 * lambda * lambda - a * a);
+  return { a, b, c, logC };
 }
 
-export function gedDensity(z, nu) {
-  const lam = gedLambda(nu);
-  const logC = Math.log(nu) - Math.log(lam) - (1 + 1 / nu) * Math.LN2 - lnGamma(1 / nu);
-  return Math.exp(logC - 0.5 * Math.pow(Math.abs(z / lam), nu));
+export function skewtLogDensity(z, nu, lambda, k) {
+  const { a, b, logC } = k || skewtConstants(nu, lambda);
+  const side = z < -a / b ? 1 - lambda : 1 + lambda;
+  const u = (b * z + a) / side;
+  return Math.log(b) + logC - ((nu + 1) / 2) * Math.log(1 + (u * u) / (nu - 2));
+}
+
+export function skewtDensity(z, nu, lambda) {
+  return Math.exp(skewtLogDensity(z, nu, lambda));
 }
 
 function unpack(p) {
@@ -34,25 +47,26 @@ function unpack(p) {
   const share = sig(p[2]);
   const alpha = persist * share;
   const beta = persist - alpha;
-  const nu = 0.5 + 5.5 * sig(p[3]);
-  return { omega, alpha, beta, nu };
+  const nu = SKEWT_NU_MIN + (SKEWT_NU_MAX - SKEWT_NU_MIN) * sig(p[3]);
+  const lambda = SKEWT_LAMBDA_MAX * Math.tanh(p[4]);
+  return { omega, alpha, beta, nu, lambda };
 }
 
 function negLogLik(p, e, s2init) {
-  const { omega, alpha, beta, nu } = unpack(p);
-  const lam = gedLambda(nu);
-  const logC = Math.log(nu) - Math.log(lam) - (1 + 1 / nu) * Math.LN2 - lnGamma(1 / nu);
+  const { omega, alpha, beta, nu, lambda } = unpack(p);
+  const k = skewtConstants(nu, lambda);
+  if (!(k.b > 0) || !Number.isFinite(k.logC)) return Infinity;
   let s2 = s2init, ll = 0;
   for (let t = 0; t < e.length; t++) {
     if (t > 0) s2 = omega + alpha * e[t - 1] * e[t - 1] + beta * s2;
     if (!(s2 > 0) || !Number.isFinite(s2)) return Infinity;
     const s = Math.sqrt(s2);
-    ll += logC - 0.5 * Math.pow(Math.abs(e[t] / (s * lam)), nu) - Math.log(s);
+    ll += skewtLogDensity(e[t] / s, nu, lambda, k) - Math.log(s);
   }
   return -ll;
 }
 
-function nelderMead(f, x0, { iters = 900, step = 0.5, tol = 1e-8 } = {}) {
+function nelderMead(f, x0, { iters = 1400, step = 0.5, tol = 1e-8 } = {}) {
   const n = x0.length;
   let simplex = [x0.slice()];
   for (let i = 0; i < n; i++) { const x = x0.slice(); x[i] += step; simplex.push(x); }
@@ -108,7 +122,7 @@ export function fitGarch(closes, dates = [], { minReturns = GARCH_MIN_RETURNS } 
     return {
       status: "unavailable",
       reason: `${r.length} usable daily returns, and a GARCH fit needs at least ${minReturns} — ` +
-        "four parameters on fewer say whatever the optimiser wants",
+        "five parameters on fewer say whatever the optimiser wants",
     };
   }
   const mean = r.reduce((a, b) => a + b, 0) / r.length;
@@ -118,34 +132,50 @@ export function fitGarch(closes, dates = [], { minReturns = GARCH_MIN_RETURNS } 
     return { status: "unavailable", reason: "every return in the window is identical, so there is no variance to model" };
   }
 
-  const p0 = [Math.log(v0 * 0.02), Math.log(0.98 / 0.02), Math.log(0.08 / 0.90), Math.log((1.5 - 0.5) / (6 - 1.5))];
+  const p0 = [
+    Math.log(v0 * 0.02), Math.log(0.98 / 0.02), Math.log(0.08 / 0.90),
+    Math.log((6 - SKEWT_NU_MIN) / (SKEWT_NU_MAX - 6)), 0,
+  ];
   const fit = nelderMead((p) => negLogLik(p, e, v0), p0);
-  const { omega, alpha, beta, nu } = unpack(fit.x);
+  const { omega, alpha, beta, nu, lambda } = unpack(fit.x);
   const persistence = alpha + beta;
   const s2 = new Array(e.length);
   s2[0] = v0;
   for (let t = 1; t < e.length; t++) s2[t] = omega + alpha * e[t - 1] * e[t - 1] + beta * s2[t - 1];
   const condVol = s2.map((v) => Number((Math.sqrt(v) * GARCH_ANNUALISE).toFixed(2)));
-  const edge = persistence > 0.998 || nu < 0.55 || nu > 5.9;
+  const nextS2 = omega + alpha * e[e.length - 1] * e[e.length - 1] + beta * s2[e.length - 1];
+  const edges = [];
+  if (persistence > 0.998) {
+    edges.push("persistence reached its cap, which a year of returns does for a fair share of stationary " +
+      "series; the path reads as near-integrated");
+  }
+  if (alpha < 1e-3) edges.push("no ARCH effect was found in the window, so beta and persistence are not identified");
+  if (nu < SKEWT_NU_MIN + 0.05) edges.push("the tail shape hit its floor");
+  if (Math.abs(lambda) > SKEWT_LAMBDA_MAX - 0.02) edges.push("the skew hit its cap");
+  const edge = edges.length > 0;
+  const identified = persistence <= 0.998 && alpha >= 1e-3;
   return {
     status: "ok",
+    dist: "skewt",
     n: e.length,
     mean: Number(mean.toFixed(4)),
     omega: Number(omega.toPrecision(4)),
     alpha: Number(alpha.toFixed(4)),
     beta: Number(beta.toFixed(4)),
     nu: Number(nu.toFixed(3)),
+    lambda: Number(lambda.toFixed(3)),
     persistence: Number(persistence.toFixed(4)),
 
-    longRunVol: persistence < 1
+    longRunVol: identified
       ? Number((Math.sqrt(omega / (1 - persistence)) * GARCH_ANNUALISE).toFixed(2)) : null,
+    lastVol: condVol[condVol.length - 1],
+    nextVol: Number((Math.sqrt(nextS2) * GARCH_ANNUALISE).toFixed(2)),
     logLik: Number((-fit.f).toFixed(2)),
     converged: fit.converged && !edge,
     ...(fit.converged && !edge ? {} : {
       reason: !fit.converged
         ? "the optimiser hit its step limit before the likelihood settled"
-        : "the fit sits on the edge of the parameter space, which is what a series with a " +
-          "structural break or too few extreme days looks like to this model",
+        : edges.join("; "),
     }),
     returns: e.map((v) => Number(v.toFixed(3))),
     dates: rd,

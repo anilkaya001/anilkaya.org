@@ -328,7 +328,7 @@ export function foldCardOutcomes(tickers, run) {
     built: 0, failed: 0, unenriched: 0, deadlineSkipped: 0, skipped: 0, gammaProfiles: [],
 
     garchConverged: 0, garchUnconverged: 0, garchUnavailable: 0,
-    garchNu: [], garchPersistence: [],
+    garchNu: [], garchLambda: [], garchPersistence: [],
   };
   list.forEach((ticker, i) => {
     if (!attempted[i]) { out.deadlineSkipped++; out.skipped++; return; }
@@ -347,6 +347,7 @@ export function foldCardOutcomes(tickers, run) {
       else {
         out.garchConverged++;
         if (Number.isFinite(g.nu)) out.garchNu.push(g.nu);
+        if (Number.isFinite(g.lambda)) out.garchLambda.push(g.lambda);
         if (Number.isFinite(g.persistence)) out.garchPersistence.push(g.persistence);
       }
     }
@@ -4454,6 +4455,7 @@ async function main() {
   const fitTotal = cards.garchConverged + cards.garchUnconverged + cards.garchUnavailable;
   if (fitTotal > 0) {
     const nu = midOf(cards.garchNu);
+    const lam = midOf(cards.garchLambda);
     const per = midOf(cards.garchPersistence);
     console.log(
       "  " + (DRY_RUN ? "[dry-run] " : "") +
@@ -4462,8 +4464,10 @@ async function main() {
         ? `, ${cards.garchUnconverged} ran and did not settle` : "") +
       (cards.garchUnavailable
         ? `, ${cards.garchUnavailable} had too short a history to fit` : "") +
-      (nu === null ? "" : `; median shape nu ${nu.toFixed(2)}` +
-        ` (2 is the normal, equities sit below it)`) +
+      (nu === null ? "" : `; median tail shape nu ${nu.toFixed(2)}` +
+        ` (lower is heavier-tailed; near 30 the tails are the normal's)`) +
+      (lam === null ? "" : `, median skew lambda ${lam.toFixed(3)}` +
+        ` (negative is a heavier left tail, which is where equities sit)`) +
       (per === null ? "" : `, median persistence ${per.toFixed(3)}`) +
 
       (cards.garchConverged === 0 && fitTotal > 0

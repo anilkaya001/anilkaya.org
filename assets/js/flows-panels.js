@@ -529,7 +529,12 @@
     if (!card.fam) return deadPanel(host, question, "no decomposition was published");
     panelHead(host, question);
 
-    scoreGauge(host, card);
+    const cols = el("div", "fc-score-cols");
+    const colA = el("div", "fc-score-col"), colB = el("div", "fc-score-col"), colC = el("div", "fc-score-col");
+    cols.append(colA, colB, colC);
+    host.append(cols);
+
+    scoreGauge(colA, card);
 
     const weights = card.weights || {};
     const wTotal = Object.values(weights).reduce((a, w) => a + (isNum(w) || 0), 0);
@@ -569,10 +574,10 @@
       li.append(lab);
       list.append(li);
     }
-    host.append(list);
+    colA.append(list);
 
     const conv = card.conv || {};
-    host.append(statList([
+    colB.append(statList([
       ["Score", fmtOr(card.score, (n) => signed(n, (a) => String(a)))],
       ["Conviction", fmtOr(card.conviction, (n) => String(n))],
       ["Agreement", fmtOr(conv.agreement, (n) => Math.round(n * 100) + "%")],
@@ -583,11 +588,11 @@
       ["Quality gate", fmtOr(conv.gate, (n) => "\u00d7" + n.toFixed(2))],
     ]));
 
-    convictionArithmetic(host, card, conv);
+    convictionArithmetic(colB, card, conv);
 
     const quality = card.quality;
     if (!quality) {
-      if (!legacy) host.append(el("p", "fc-note",
+      if (!legacy) colC.append(el("p", "fc-note",
         "The two quality readings behind the O gauge — the out-of-the-money share of " +
         "directional flow and the vega tilt — are not published on this card. It was " +
         "built before they were, so they are shown as unmeasured rather than as zeros: " +
@@ -597,11 +602,11 @@
     } else {
       const otm = isNum(quality.otmShare);
       const tilt = isNum(quality.vegaTilt);
-      host.append(statList([
+      colC.append(statList([
         ["OTM share of directional flow", otm === null ? DASH : Math.round(otm * 100) + "%"],
         ["Vega flow per unit delta", tilt === null ? DASH : neg(tilt.toFixed(2))],
       ]));
-      host.append(el("p", "fc-note",
+      colC.append(el("p", "fc-note",
         (otm === null && tilt === null
           ? "Neither quality reading is measurable on this name: there was no directional " +
             "delta flow to divide by, which is \"no directional view\", never infinite " +
@@ -625,13 +630,13 @@
     }
 
     if (legacy) {
-      host.append(el("p", "fc-note",
+      colC.append(el("p", "fc-note",
         "This card was built before the volatility and quality readings became " +
         "gauges, so those two are shown as unavailable rather than redrawn under " +
         "a meaning they did not have. They return on the next published session."));
     }
 
-    appendMethod(host, [el("p", "fc-note",
+    appendMethod(colC, [el("p", "fc-note",
       "The three signed axes are blended by EFFECTIVE breadth — a family of five " +
       "columns that all restate the same tape counts as one signal, not five — and " +
       "the blend is then multiplied by the quality gate, which is bounded above by " +

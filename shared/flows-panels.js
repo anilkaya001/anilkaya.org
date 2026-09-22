@@ -1,25 +1,25 @@
 export const TICKER_PANELS = Object.freeze([
 
-  { key: "__score", id: "ftWhy", span: 1, group: "signal", tier: "lead",
+  { key: "__score", id: "ftWhy", span: 3, group: "signal", tier: "lead",
     title: "Score derivation",
     question: "Which components produced this score, and how heavily?" },
 
-  { key: "__stats", id: "ftStats", span: 2, group: "signal", tier: "table",
+  { key: "__stats", id: "ftStats", span: 3, group: "signal", tier: "table",
     title: "Key statistics",
     question: "What are this name’s headline figures, gathered from the panels that publish them?" },
 
   { key: "gamma", id: "ftGamma", span: 2, group: "convexity", tier: "lead",
     title: "Gamma convexity",
     question: "Where is the dealer book long and short gamma?" },
-  { key: "surface", id: "ftSurface", span: 2, group: "convexity", tier: "chart",
-    title: "Gamma surface — strike × expiry",
-    question: "Which expiries carry the standing gamma, and at which strikes?" },
   { key: "levels", id: "ftLevels", span: 1, group: "convexity", tier: "reading",
     title: "Key levels & distance to spot",
     question: "Where are the walls, and how far is spot from each in ATR?" },
   { key: "displacement", id: "ftDisp", span: 1, group: "convexity", tier: "reading",
     title: "Where the book is moving",
     question: "Is new gamma building above or below the standing book?" },
+  { key: "surface", id: "ftSurface", span: 2, group: "convexity", tier: "chart",
+    title: "Gamma surface — strike × expiry",
+    question: "Which expiries carry the standing gamma, and at which strikes?" },
   { key: "calendar", id: "ftCal", span: 1, group: "convexity", tier: "chart",
     title: "Gamma roll-off",
     question: "How much of the book expires, and when?" },
@@ -58,20 +58,20 @@ export const TICKER_PANELS = Object.freeze([
     title: "Net premium by session",
     question: "How has this name’s net premium moved across sessions?" },
 
+  { key: "darkpool", id: "ftDark", span: 1, group: "tape", tier: "table",
+    title: "Off-exchange prints",
+    question: "Which off-exchange prints carried the size in this name?" },
   { key: "__sessions", id: "ftLedger", span: 2, group: "tape", tier: "table",
     title: "Session by session",
     question: "What did this name close, score and clear on each of the last sessions?" },
 
-  { key: "topContracts", id: "ftTop", span: 2, group: "tape", tier: "table",
-    title: "The day’s most-traded contracts",
-    question: "Which single lines carried the volume?" },
-
-  { key: "darkpool", id: "ftDark", span: 1, group: "tape", tier: "table",
-    title: "Off-exchange prints",
-    question: "Which off-exchange prints carried the size in this name?" },
   { key: "oiDeltas", id: "ftOi", span: 1, group: "tape", tier: "table",
     title: "Open-interest changes",
     question: "Where did open interest move between clearing snapshots?" },
+
+  { key: "topContracts", id: "ftTop", span: 2, group: "tape", tier: "table",
+    title: "The day’s most-traded contracts",
+    question: "Which single lines carried the volume?" },
 
   { key: "marketRank", id: "ftCross", span: 1, group: "context", tier: "lead",
     title: "Market-wide standing",

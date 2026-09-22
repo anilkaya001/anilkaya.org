@@ -6,6 +6,7 @@ import {
 } from "./shared/flows-auth.js";
 import { FLOWS_PAGES, neuronProvenance } from "./shared/flows-pages.js";
 import * as FLOWS_ASK from "./shared/flows-ask.js";
+import * as FLOWS_NEURON from "./shared/flows-neuron.js";
 import { COURSE_STAGE_POINTS } from "./shared/course-points.js";
 import { COURSE_BY_ID, COURSE_BY_SLUG, COURSE_TOPICS, SITE_ORIGIN } from "./shared/course-seo.js";
 import { REVIEW_ITEM_BY_ID } from "./shared/review-manifest.js";
@@ -121,6 +122,7 @@ const FLOWS_SCHEMA_SQL = [
   "CREATE TABLE IF NOT EXISTS flows_ai_usage (day TEXT PRIMARY KEY, calls INTEGER NOT NULL DEFAULT 0 CHECK (calls >= 0), tokens_in INTEGER NOT NULL DEFAULT 0 CHECK (tokens_in >= 0), tokens_out INTEGER NOT NULL DEFAULT 0 CHECK (tokens_out >= 0))",
 
   "CREATE TABLE IF NOT EXISTS flows_ai_summary (scope TEXT PRIMARY KEY, text TEXT NOT NULL, llm INTEGER NOT NULL DEFAULT 0 CHECK (llm IN (0, 1)), model TEXT, fingerprint TEXT NOT NULL, guard TEXT, generated_at TEXT NOT NULL)",
+  "CREATE TABLE IF NOT EXISTS flows_neuron (scope TEXT PRIMARY KEY, version INTEGER NOT NULL, fingerprint TEXT NOT NULL, summary TEXT NOT NULL, ideas TEXT NOT NULL, llm INTEGER NOT NULL DEFAULT 0 CHECK (llm IN (0, 1)), model TEXT, guard TEXT, generated_at TEXT NOT NULL)",
 ];
 
 const MARKET_STALE_MS = 45 * 60 * 1000;
@@ -1221,151 +1223,200 @@ async function readFlowsSummary(env, scope) {
   } catch { return null; }
 }
 
-const TICKER_SUMMARY_GENERATING_MS = 90 * 1000;
-const TICKER_SUMMARY_RETRY_MS = 5 * 60 * 1000;
+const NEURON_GENERATING_MS = 90 * 1000;
+const NEURON_RETRY_MS = 5 * 60 * 1000;
 
-function summaryShape(status, scope, summary, extra) {
-  const s = summary && typeof summary === "object" ? summary : null;
+async function readNeuron(env, scope) {
+  if (!env.DB) return null;
+  try {
+    const row = await env.DB.prepare(
+      "SELECT version, fingerprint, summary, ideas, llm, model, guard, generated_at FROM flows_neuron WHERE scope = ?",
+    ).bind(scope).first();
+    if (!row) return null;
+    let ideas = [];
+    try { ideas = JSON.parse(typeof row.ideas === "string" ? row.ideas : "[]"); } catch { ideas = []; }
+    return {
+      version: Number(row.version) || 0,
+      fingerprint: typeof row.fingerprint === "string" ? row.fingerprint : null,
+      summary: typeof row.summary === "string" ? row.summary : "",
+      ideas: Array.isArray(ideas) ? ideas : [],
+      llm: row.llm === 1,
+      model: typeof row.model === "string" ? row.model : null,
+      guard: typeof row.guard === "string" ? row.guard : null,
+      generatedAt: typeof row.generated_at === "string" ? row.generated_at : null,
+    };
+  } catch { return null; }
+}
+
+async function markNeuronGenerating(env, scope, fingerprint, model) {
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - NEURON_GENERATING_MS).toISOString();
+  try {
+    const res = await env.DB.prepare(
+      "INSERT INTO flows_neuron (scope, version, fingerprint, summary, ideas, llm, model, guard, generated_at) " +
+      "VALUES (?, ?, ?, '', '[]', 0, ?, 'generating', ?) ON CONFLICT(scope) DO UPDATE SET " +
+      "version=excluded.version, fingerprint=excluded.fingerprint, summary='', ideas='[]', llm=0, " +
+      "model=excluded.model, guard='generating', generated_at=excluded.generated_at " +
+      "WHERE flows_neuron.guard IS NOT 'generating' OR flows_neuron.fingerprint != excluded.fingerprint " +
+      "OR flows_neuron.generated_at < ?",
+    ).bind(scope, FLOWS_NEURON.NEURON_CONTEXT_VERSION, fingerprint, model, now.toISOString(), cutoff).run();
+    return !(res && res.meta && typeof res.meta.changes === "number") || res.meta.changes > 0;
+  } catch {
+    return true;
+  }
+}
+
+async function writeNeuron(env, scope, fingerprint, summary, ideas, llm, model, guard) {
+  return env.DB.prepare(
+    "INSERT INTO flows_neuron (scope, version, fingerprint, summary, ideas, llm, model, guard, generated_at) " +
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(scope) DO UPDATE SET " +
+    "version=excluded.version, fingerprint=excluded.fingerprint, summary=excluded.summary, " +
+    "ideas=excluded.ideas, llm=excluded.llm, model=excluded.model, guard=excluded.guard, " +
+    "generated_at=excluded.generated_at",
+  ).bind(scope, FLOWS_NEURON.NEURON_CONTEXT_VERSION, fingerprint, summary, JSON.stringify(ideas || []),
+    llm ? 1 : 0, model, guard, new Date().toISOString()).run();
+}
+
+function neuronShape(status, ticker, ctx, row, extra) {
+  const r = row && typeof row === "object" ? row : null;
+  const text = r !== null && r.summary ? r.summary : null;
   return {
-    status, scope,
-    summary: s !== null && s.text ? s.text : null,
-    llm: s !== null ? s.llm === true : false,
-    model: s !== null ? s.model : null,
-    guard: s !== null ? s.guard : null,
-    generatedAt: s !== null ? s.generatedAt : null,
-    provenance: s !== null && s.text ? neuronProvenance(s) : null,
+    status, scope: ticker,
+    summary: text,
+    ideas: r !== null && Array.isArray(r.ideas) ? r.ideas : [],
+    context: ctx ? FLOWS_NEURON.publicContext(ctx) : null,
+    llm: r !== null ? r.llm === true : false,
+    model: r !== null ? r.model : null,
+    guard: r !== null ? r.guard : null,
+    generatedAt: r !== null ? r.generatedAt : null,
+    provenance: text
+      ? neuronProvenance({ text, llm: r.llm === true, model: r.model,
+          guard: r.guard && /^ideas:\d+ refused$/.test(r.guard) ? null : r.guard }) +
+        (r.llm !== true && Array.isArray(r.ideas) && r.ideas.length && r.model
+          ? " The ideas were written by " + r.model + " and vetted one by one." : "")
+      : null,
     ...(extra || {}),
   };
 }
 
-async function writeFlowsSummary(env, scope, text, llm, model, fingerprint, guard) {
-  return env.DB.prepare(
-    "INSERT INTO flows_ai_summary (scope, text, llm, model, fingerprint, guard, generated_at) " +
-    "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(scope) DO UPDATE SET " +
-    "text=excluded.text, llm=excluded.llm, model=excluded.model, " +
-    "fingerprint=excluded.fingerprint, guard=excluded.guard, generated_at=excluded.generated_at",
-  ).bind(scope, text, llm ? 1 : 0, model, fingerprint, guard, new Date().toISOString()).run();
+function neuronContextFor(card) {
+  const age = FLOWS_ASK.briefAge({ sessionDate: card.sessionDate }, new Date());
+  return FLOWS_NEURON.buildContext(card, { expectedSession: age.expected });
 }
 
-function tickerFacts(ticker, card) {
-  const built = FLOWS_ASK.cardFacts({ ["card:" + ticker]: card }, { includeThin: true });
-  return Array.isArray(built.facts) ? built.facts : [];
-}
-
-async function generateTickerSummary(env, ticker, facts, fingerprint) {
+async function generateNeuron(env, ticker, ctx, fingerprint) {
   const scope = "ticker:" + ticker;
   const model = askModel(env);
-  const plain = tickerPlain(facts);
+  const plain = FLOWS_NEURON.deterministicSummary(ctx);
   if (!env.AI || model === null) {
-    await writeFlowsSummary(env, scope, plain, false, null, fingerprint, null).catch(() => {});
+    await writeNeuron(env, scope, fingerprint, plain, [], false, null, null).catch(() => {});
     return;
   }
-  const meta = { sessionDate: factsSession(facts) };
-  const { system, user } = FLOWS_ASK.promptForSummary(facts, meta, { subject: ticker });
-  let refused = null;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    let generated = null;
+  const { system, user } = FLOWS_NEURON.promptForNeuron(ctx);
+  const facts = FLOWS_NEURON.guardFacts(ctx);
+  let parsed = null;
+  let lastText = null;
+  for (let attempt = 0; attempt < 2 && (parsed === null || parsed.summary === null); attempt++) {
+    let text = null;
     try {
       const out = await env.AI.run(model, {
         messages: [{ role: "system", content: system }, { role: "user", content: user }],
-        max_tokens: 512,
+        max_tokens: 1400,
         temperature: attempt === 0 ? 0.2 : 0.05,
       });
-      generated = aiText(out);
+      text = aiText(out);
       await askRecordSpend(env, out && out.usage);
     } catch (error) {
       const failed = askFailure(error);
-      await writeFlowsSummary(env, scope, plain, false, model, fingerprint,
-        "unreachable:" + failed.why).catch(() => {});
+      await writeNeuron(env, scope, fingerprint, plain, [], false, model, "unreachable:" + failed.why).catch(() => {});
       return;
     }
-    if (!generated) {
-      await writeFlowsSummary(env, scope, plain, false, model, fingerprint,
-        "unreachable:empty").catch(() => {});
+    if (!text) {
+      await writeNeuron(env, scope, fingerprint, plain, [], false, model, "unreachable:empty").catch(() => {});
       return;
     }
-    const verdict = FLOWS_ASK.guardAnswer(generated, facts, { smallIntegers: false });
-    if (verdict.ok) {
-      await writeFlowsSummary(env, scope, generated, true, model, fingerprint, null).catch(() => {});
-      return;
-    }
-    refused = verdict.invented ? "invented" : "forecast";
+    lastText = text;
+    parsed = FLOWS_NEURON.parseNeuronOutput(text);
   }
-  await writeFlowsSummary(env, scope, plain, false, model, fingerprint, refused).catch(() => {});
-}
-
-function tickerPlain(facts) {
-  const said = facts.slice(0, 3)
-    .map((f) => (f && typeof f.say === "string" ? f.say.trim() : ""))
-    .filter(Boolean);
-  return said.length ? said.join(" ") : FLOWS_ASK.renderSummaryPlain([]);
-}
-
-function factsSession(facts) {
-  for (const f of facts) {
-    if (f && typeof f.at === "string" && f.at) return f.at.slice(0, 10);
+  if (parsed === null) {
+    const prose = typeof lastText === "string" && !/[{}[\]]|"summary"|"ideas"/.test(lastText);
+    const verdict = prose ? FLOWS_ASK.guardAnswer(lastText, facts, { smallIntegers: false }) : { ok: false };
+    await writeNeuron(env, scope, fingerprint, verdict.ok ? lastText : plain, [], verdict.ok, model,
+      "ideas:unparsable").catch(() => {});
+    return;
   }
-  return null;
+  let summary = plain;
+  let llm = false;
+  let guard = null;
+  if (parsed.summary) {
+    const verdict = FLOWS_ASK.guardAnswer(parsed.summary, facts, { smallIntegers: false });
+    if (verdict.ok) { summary = parsed.summary; llm = true; }
+    else guard = verdict.invented ? "invented" : "forecast";
+  } else {
+    guard = "summary:empty";
+  }
+  const vetted = FLOWS_NEURON.vetIdeas(parsed.ideas, ctx);
+  if (guard === null && vetted.refused.length) guard = "ideas:" + vetted.refused.length + " refused";
+  await writeNeuron(env, scope, fingerprint, summary, vetted.ideas, llm, model, guard).catch(() => {});
 }
 
-async function tickerSummary(env, ctx, ticker) {
+async function tickerNeuron(env, ctx, ticker) {
   const scope = "ticker:" + ticker;
   if (!env.DB) {
-    return json(summaryShape("unavailable", ticker, null,
-      { note: "No store is bound to this route, so no summary can be read or written." }));
+    return json(neuronShape("unavailable", ticker, null, null,
+      { note: "No store is bound to this route, so no reading can be read or written." }));
   }
   const stored = await readFlowsPayload(env, "card:" + ticker);
   if (stored === null) {
-    return json(summaryShape("pending", ticker, null,
+    return json(neuronShape("pending", ticker, null, null,
       { note: "No card has been published for " + ticker + " this session, so there is " +
-        "nothing to summarise yet." }));
+        "nothing to read yet." }));
   }
   let card;
   try { card = JSON.parse(stored.payload); } catch {
-    return json(summaryShape("unreadable", ticker, null,
+    return json(neuronShape("unreadable", ticker, null, null,
       { note: "The card for " + ticker + " was published and could not be read, which is " +
         "a fault on this side rather than a fact about the name." }));
   }
   if (!card || typeof card !== "object" || card.status === "pending" || !card.panels) {
-    return json(summaryShape("pending", ticker, null,
+    return json(neuronShape("pending", ticker, null, null,
       { note: "The card for " + ticker + " has not landed yet." }));
   }
-  const facts = tickerFacts(ticker, card);
-  if (!facts.length) {
-    return json(summaryShape("quiet", ticker, null,
-      { note: "The card for " + ticker + " publishes no reading a summary could be " +
-        "written over: its panels carry no findings this session, which is a fact about " +
-        "the card and not about the name." }));
+  const context = neuronContextFor(card);
+  if (!context.coverage.read) {
+    return json(neuronShape("quiet", ticker, context, null,
+      { note: "The card for " + ticker + " publishes no feature with a reading this session, " +
+        "which is a fact about the card and not about the name." }));
   }
-  const fingerprint = FLOWS_ASK.summaryFingerprint(facts);
-  const prior = await readFlowsSummary(env, scope);
+  const fingerprint = FLOWS_NEURON.contextFingerprint(context);
+  const prior = await readNeuron(env, scope);
   const now = Date.now();
   const priorAge = prior && prior.generatedAt ? now - Date.parse(prior.generatedAt) : Infinity;
 
-  if (prior && prior.fingerprint === fingerprint) {
+  if (prior && prior.fingerprint === fingerprint && prior.version === FLOWS_NEURON.NEURON_CONTEXT_VERSION) {
     if (prior.guard === "generating") {
-      if (priorAge < TICKER_SUMMARY_GENERATING_MS) {
-        return json(summaryShape("pending", ticker, null,
-          { note: "Neuron is writing this name's summary now.", facts: facts.length }));
+      if (priorAge < NEURON_GENERATING_MS) {
+        return json(neuronShape("pending", ticker, context, null,
+          { note: "Neuron is reading this card now." }));
       }
-    } else if (prior.text) {
+    } else if (prior.summary) {
       const retryable = typeof prior.guard === "string" && prior.guard.startsWith("unreachable")
-        && prior.guard !== "unreachable:empty" && priorAge > TICKER_SUMMARY_RETRY_MS;
-      if (!retryable) {
-        return json(summaryShape("ok", ticker, prior, { facts: facts.length }));
-      }
+        && prior.guard !== "unreachable:empty" && priorAge > NEURON_RETRY_MS;
+      if (!retryable) return json(neuronShape("ok", ticker, context, prior));
     }
   }
 
-  await writeFlowsSummary(env, scope, "", false, askModel(env), fingerprint, "generating")
-    .catch(() => {});
-  const work = generateTickerSummary(env, ticker, facts, fingerprint).catch((error) => {
-    console.error(JSON.stringify({ message: "ticker summary failed", ticker,
+  const mine = await markNeuronGenerating(env, scope, fingerprint, askModel(env));
+  if (!mine) {
+    return json(neuronShape("pending", ticker, context, null, { note: "Neuron is reading this card now." }));
+  }
+  const work = generateNeuron(env, ticker, context, fingerprint).catch((error) => {
+    console.error(JSON.stringify({ message: "neuron failed", ticker,
       error: error instanceof Error ? error.message : String(error) }));
   });
   if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(work); else await work;
-  return json(summaryShape("pending", ticker, null,
-    { note: "Neuron is writing this name's summary now.", facts: facts.length }));
+  return json(neuronShape("pending", ticker, context, null,
+    { note: "Neuron is reading this card now." }));
 }
 
 function askSubject(body) {
@@ -1389,7 +1440,23 @@ async function askQuestion(request) {
 
 async function askAnswer(question, env, index, updatedAt, subject) {
 
-  const sel = FLOWS_ASK.selectFacts(index, question,
+  let pool = index;
+  let neuronFacts = 0;
+  if (subject !== null) {
+    const stored = await readFlowsPayload(env, "card:" + subject);
+    if (stored !== null) {
+      let card = null;
+      try { card = JSON.parse(stored.payload); } catch { card = null; }
+      if (card && typeof card === "object" && card.panels) {
+        const extra = FLOWS_NEURON.contextFacts(neuronContextFor(card));
+        if (extra.length) {
+          pool = { ...index, facts: (Array.isArray(index.facts) ? index.facts : []).concat(extra) };
+          neuronFacts = extra.length;
+        }
+      }
+    }
+  }
+  const sel = FLOWS_ASK.selectFacts(pool, question,
     subject === null ? undefined : { subject: { tickers: [subject] } });
   const { picked, why, withheld, capped } = sel;
 
@@ -1407,6 +1474,7 @@ async function askAnswer(question, env, index, updatedAt, subject) {
 
     subject: sel.subjectApplied && subject ? subject : null,
     subjectApplied: sel.subjectApplied === true,
+    neuronFacts,
     facts: picked, silences: index.silences || null,
     briefUpdatedAt: updatedAt || null, model: null, note: null, spend,
     session: age,
@@ -1555,7 +1623,7 @@ async function buildLivePayload(env, ticker) {
   const price = numOrNull(live.close);
   const prevClose = numOrNull(live.prev_close);
   const changePct = price !== null && prevClose !== null && prevClose > 0
-    ? (price / prevClose - 1) * 100 : null;
+    ? price / prevClose - 1 : null;
   return {
     ticker,
     status: price !== null && price > 0 ? "ok" : "quiet",
@@ -2960,7 +3028,7 @@ async function route(request, env, url, ctx) {
         if (!FLOWS_TICKER_RE.test(subject)) {
           throw new HttpError(400, "invalid_ticker", "Unknown ticker");
         }
-        return tickerSummary(env, ctx, subject);
+        return tickerNeuron(env, ctx, subject);
       }
 
       const summary = await readFlowsSummary(env, "board");
