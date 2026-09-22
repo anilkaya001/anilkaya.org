@@ -1359,9 +1359,11 @@
       return parent ? Math.max(MIN_W, parent.clientWidth) : MIN_W;
     }
     function maxH() {
-
-      const top = pane.getBoundingClientRect().top;
-      return Math.max(MIN_H, Math.round(window.innerHeight - top - 24));
+      const chrome = [".topbar", ".desk-controls"].reduce((sum, sel) => {
+        const el = document.querySelector(sel);
+        return sum + (el ? el.getBoundingClientRect().height : 0);
+      }, 0);
+      return Math.max(MIN_H, Math.round(window.innerHeight - chrome - 24));
     }
 
     const clamp = (v, lo, hi) => Math.round(Math.min(hi, Math.max(lo, v)));
