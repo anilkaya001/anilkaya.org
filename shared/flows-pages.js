@@ -1125,7 +1125,7 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
   </aside>
 
   <aside class="ft-flow" id="ftFlow" hidden aria-labelledby="ftFlowH">
-    <h2 class="ft-flow-h" id="ftFlowH">Recent flow</h2>
+    <h2 class="ft-flow-h" id="ftFlowH">Recent flow <span class="ft-flow-hz">times in UTC</span></h2>
     <ol class="ft-flow-l" id="ftFlowL"></ol>
     <p class="ft-flow-s" id="ftFlowS"></p>
   </aside>

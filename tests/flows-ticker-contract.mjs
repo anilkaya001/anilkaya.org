@@ -633,6 +633,104 @@ try {
   }
 
   {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    const card = JSON.parse(JSON.stringify(withChain[0]));
+    card.score = 71;
+    await mount(page, card, { ticker: card.ticker, station: "all" });
+    const got = await page.evaluate(() => {
+      const px = (n) => parseFloat(getComputedStyle(n).fontSize);
+      const score = document.getElementById("ftHeroScore"), conv = document.getElementById("ftHeroConv");
+      const chartPx = (id) => {
+        const svg = document.querySelector("#" + id + " svg");
+        const t = svg && svg.querySelector("text.ft-chart-ax");
+        return t ? +(px(t) * (svg.getBoundingClientRect().width / svg.viewBox.baseVal.width)).toFixed(2) : null;
+      };
+      const sess = document.querySelector("#panel-__sessions tbody tr:first-child td:nth-child(3)");
+      return {
+        heroValues: document.querySelectorAll(".ft-hero-v").length,
+        scoreCls: score.className, scorePx: px(score), convPx: px(conv),
+        chgCls: document.getElementById("ftHeroChg").className,
+        sessCls: sess ? sess.className : null, sessAlign: sess ? getComputedStyle(sess).textAlign : null,
+        seriesPx: chartPx("ftChartBody"), garchPx: chartPx("ftGarchBody"),
+        chainHead: [...document.querySelectorAll("#ftChain thead th")].map((t) => t.textContent),
+        chainExp: [...document.querySelectorAll("#ftChain td.ftc-exp")].map((t) => t.textContent),
+        flags: [...document.querySelectorAll(".ft-flag")].map((f) => f.textContent),
+        stations: [...document.querySelectorAll("h2.ft-group")].map((h) => h.getBoundingClientRect().height),
+        leads: [...document.querySelectorAll(".ft-station-lead")].map((p) => p.getBoundingClientRect().height),
+        topbarVar: document.body.style.getPropertyValue("--topbar-h"),
+        topbarH: Math.round(document.querySelector(".topbar").getBoundingClientRect().height),
+        barTop: getComputedStyle(document.getElementById("ftBar")).top,
+        headHidden: getComputedStyle(document.getElementById("ftTicker")).display,
+        switchShown: getComputedStyle(document.getElementById("ftSwitch")).display,
+        heroShown: document.getElementById("ftBar").classList.contains("is-hero-shown"),
+        ivt: [...document.querySelectorAll("#ftIvtBody svg text.ft-chart-ax")].map((t) => t.textContent),
+      };
+    });
+    ok(/^ft-hero-v is-(pos|neg|flat)$/.test(got.scoreCls),
+       `the hero score keeps its base class beside its polarity (${got.scoreCls})`);
+    eq(got.scorePx, got.convPx,
+       `so it is set at the same size as its neighbours (${got.scorePx} vs ${got.convPx})`);
+    ok(/^ft-hero-chg is-(pos|neg|flat|null)$/.test(got.chgCls), `and the day change likewise (${got.chgCls})`);
+    ok(got.sessCls && /^c-num is-/.test(got.sessCls) && got.sessAlign === "right",
+       `the ledger's score cell keeps its numeric class and stays right-aligned (${got.sessCls}, ${got.sessAlign})`);
+    ok(got.seriesPx !== null && got.seriesPx >= 10 && got.garchPx !== null && got.garchPx >= 10,
+       `the Series and volatility axis text renders at ten CSS pixels or more (${got.seriesPx}, ${got.garchPx})`);
+    eq(got.chainHead.slice(1, 3).join(","), "Strike,Expiry",
+       `the chain names the expiry beside the strike, so two lines at one strike are distinguishable (${got.chainHead.join(",")})`);
+    ok(got.chainExp.length > 0 && got.chainExp.every((t) => /^\d{2}-\d{2}( · -?\d+d)?$|^—$/.test(t)),
+       `and every expiry cell is a month-day with its days out (${got.chainExp.slice(0, 3).join(" | ")})`);
+    ok(got.flags.every((f) => !/ flow$/.test(f)),
+       `no flag claims a direction of flow from the score's side (${got.flags.join(", ")})`);
+    ok(got.stations.length === TICKER_GROUPS.length && got.stations.every((h) => h > 10) && got.leads.every((h) => h > 10),
+       `every station heading and lead is visible, not clipped to a pixel (${got.stations.join(",")})`);
+    ok(got.topbarVar === got.topbarH + "px",
+       `the page publishes the measured topbar height (${got.topbarVar} for ${got.topbarH}px)`);
+    ok(got.heroShown && got.headHidden === "none" && got.switchShown !== "none",
+       "at scroll zero the hero is in view, so the bar does not repeat its identity while the name switcher stays reachable");
+    ok(got.ivt.length >= 2 && got.ivt.slice(3).every((t) => /^\d+d$/.test(t)),
+       `the term-structure ticks count days to expiry (${got.ivt.join(",")})`);
+    await page.evaluate(() => {
+      const s = document.getElementById("ftScroll");
+      if (s && getComputedStyle(s).overflowY !== "visible") s.scrollTo({ top: 900, behavior: "instant" });
+      else window.scrollTo({ top: 900, behavior: "instant" });
+    });
+    await page.waitForFunction(() => !document.getElementById("ftBar").classList.contains("is-hero-shown"), null, { timeout: 3000 });
+    const after = await page.evaluate(() => ({
+      headDisplay: getComputedStyle(document.getElementById("ftTicker")).display,
+      headH: document.getElementById("ftHead").getBoundingClientRect().height,
+    }));
+    ok(after.headDisplay !== "none" && after.headH > 20,
+       `once the hero has scrolled away the identity row takes its place in the bar (${after.headH}px)`);
+    await page.close();
+
+    const phone = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    await mount(phone, card, { ticker: card.ticker, station: "all" });
+    await phone.evaluate(() => window.scrollTo({ top: 1200, behavior: "instant" }));
+    await phone.waitForTimeout(300);
+    const narrow = await phone.evaluate(() => {
+      const bar = document.getElementById("ftBar"), tb = document.querySelector(".topbar");
+      const tab = document.getElementById("askDockTab");
+      const tabBox = tab ? tab.getBoundingClientRect() : null;
+      return {
+        scroller: getComputedStyle(document.getElementById("ftScroll")).overflowY,
+        gap: Math.round(bar.getBoundingClientRect().top - tb.getBoundingClientRect().bottom),
+        barTop: getComputedStyle(bar).top, topbarH: Math.round(tb.getBoundingClientRect().height),
+        dock: tabBox ? { bottom: Math.round(innerHeight - tabBox.bottom), h: Math.round(tabBox.height), mode: getComputedStyle(tab).writingMode } : null,
+        chainCut: document.getElementById("ftChainBody").classList.contains("is-cut-end"),
+        chainOver: document.getElementById("ftChainBody").scrollWidth - document.getElementById("ftChainBody").clientWidth,
+      };
+    });
+    eq(narrow.scroller, "visible", "at phone width the window is the scroller, under a fixed topbar");
+    ok(narrow.gap === 0 && narrow.barTop === narrow.topbarH + "px",
+       `so the sticky bar sits flush under the topbar rather than a fixed 4.4rem down (gap ${narrow.gap}px, top ${narrow.barTop} for ${narrow.topbarH}px)`);
+    ok(narrow.dock && narrow.dock.mode === "horizontal-tb" && narrow.dock.bottom < 40 && narrow.dock.h >= 44,
+       `the Ask tab is a bottom-right pill of at least 44px, not a vertical tab over the reading column (${JSON.stringify(narrow.dock)})`);
+    ok(narrow.chainOver <= 4 || narrow.chainCut,
+       `and a chain wider than its host is marked cut, so its fade says there is more (${narrow.chainOver}px over, cut ${narrow.chainCut})`);
+    await phone.close();
+  }
+
+  {
     const base = JSON.parse(JSON.stringify(withChain[0]));
     base.atr = 2.5;
     base.gammaFlip = 101.25;

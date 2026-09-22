@@ -77,7 +77,7 @@
     note.setAttribute("data-empty", "quiet");
     note.append(el("strong", null, "Nothing to report \u2014 "));
     note.append(document.createTextNode(
-      reason || "This panel's source answered and measured nothing.",
+      String(reason || "This panel's source answered and measured nothing").replace(/\.+$/, "") + ".",
     ));
     host.append(note);
   }
