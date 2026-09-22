@@ -1559,10 +1559,10 @@
   .project-export .btn { flex: 1 1 8rem; }
 }
 
-@media (min-width: 901px) {
+@media (min-width: 960px) {
   .today + .course-explorer {
     display: grid;
-    grid-template-columns: minmax(20rem, 0.8fr) minmax(34rem, 1.2fr);
+    grid-template-columns: minmax(19rem, auto) minmax(34rem, 1fr);
     align-items: end;
     gap: 0.3rem 1rem;
     margin-top: 0.35rem;
