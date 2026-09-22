@@ -328,6 +328,10 @@ async function mount(page, card,
 
     return g && document.getElementById("ftStatus").textContent !== "Loading the name…";
   }, null, { timeout: 5000 });
+  await page.waitForFunction(() => {
+    const flow = document.getElementById("ftFlow");
+    return !flow || !flow.hidden;
+  }, null, { timeout: 4000 }).catch(() => {});
 }
 
 function sweepPanels() {
