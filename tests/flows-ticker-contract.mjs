@@ -3863,6 +3863,32 @@ try {
        "unit are two different facts about the payload");
 
     eq(errors.length, 0, `the IV rank arms throw nothing (${errors.join("; ")})`);
+
+    const readBand = () => page.evaluate(() => {
+      const host = document.querySelector('.ft-panel[data-panel="pricedMove"] > div');
+      for (const stat of host.querySelectorAll(".fc-stat")) {
+        const dt = stat.querySelector("dt"), dd = stat.querySelector("dd");
+        if (dt.textContent.trim() === "Band") return dd.textContent.trim();
+      }
+      return null;
+    });
+    const band = async (over) => {
+      const c = JSON.parse(JSON.stringify(base));
+      Object.assign(c.panels.pricedMove, over);
+      await mount(page, c, { ticker: c.ticker });
+      return readBand();
+    };
+    eq(await band({ richness: "rich", vrp: 0.03087, rv30: 0.49813 }), "fair",
+       "A CARD BUILT BEFORE THE THREE-WAY BAND still stores 'rich' for AMAT's +6% of realised; the drawer " +
+       "derives the band from vrp/rv30 at the shared line, so it agrees with the Neuron row beside it");
+    eq(await band({ richness: "cheap", vrp: 0.1, rv30: 0.5 }), "rich", "the derivation wins in either direction");
+    eq(await band({ richness: "fair", vrp: -0.05, rv30: 0.5 }), "cheap", "and exactly at the line the band is cheap, as the card builder rules it");
+    eq(await band({ richness: "rich", vrp: null, rv30: 0.5 }), "rich",
+       "with no premium to divide the stored band is shown, not a guess");
+    eq(await band({ richness: "event-pinned", vrp: 0.1, rv30: 0.5 }), "event-pinned",
+       "a withheld verdict the builder published is never overwritten by the arithmetic it withheld");
+    eq(await band({ richness: null, vrp: null, rv30: null }), "—", "and no band at all is an em dash");
+    eq(errors.length, 0, `the band arms throw nothing (${errors.join("; ")})`);
     await page.close();
   }
 

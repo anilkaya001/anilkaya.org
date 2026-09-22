@@ -6,8 +6,10 @@ import {
   indexMarketCross, indexCrossFeed, readCrossFeed, buildMarketCross,
   measureOrder, measureOiBasis, CROSS_NOTES,
   numOrNull, polarityOf, POLARITY, pickMaxPain, pickMaxPainRow, CARD_SCHEMA_VERSION,
-  HORIZON_SESSIONS,
+  HORIZON_SESSIONS, RICHNESS_LINE,
 } from "../shared/flows-card.js";
+import { STATE_LINES } from "../shared/flows-neuron.js";
+import { readFileSync } from "node:fs";
 import { horizonMove } from "../shared/flows-features.js";
 import { blackScholesGreeks } from "../shared/flows-variation.js";
 import { buildAggressor } from "../shared/flows-chain.js";
@@ -542,6 +544,16 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "fair", "while a premium inside a tenth of realised either way is fair, the same line the implied state reads, so the page never says cheap beside a state that says fair");
   eq(buildPricedMove({ spot: 100, impliedMovePerc: 0.05, vrp: null, asOf: "2026-08-24" }).richness,
      null, "with no realized-vol baseline there is no richness claim, not a default one");
+  {
+    const drawers = readFileSync(new URL("../assets/js/flows-drawers.js", import.meta.url), "utf8");
+    const line = /const RICHNESS_LINE = ([\d.]+);/.exec(drawers);
+    ok(line && Number(line[1]) === RICHNESS_LINE && RICHNESS_LINE === STATE_LINES.VRP_RELATIVE,
+       "the drawer derives the band at the SAME line the card and the implied state use — it is an IIFE " +
+       "and cannot import the constant, so the copy is pinned here. Production served AMAT's band as " +
+       "'rich' from a card built before #121 while Neuron read the same vrp/rv30 of 6% as fair");
+    ok(/\["Band", richnessBand\(panel\)/.test(drawers),
+       "and the Band row prints the derived band, not the stored field a stale card carries");
+  }
   eq(buildPricedMove({ spot: 100, impliedMovePerc: 0.05, vrp: 0.05, asOf: "2026-08-24" }).richness,
      null, "and a premium without the realised level it is measured against is not a band either");
   ok(buildPricedMove({ spot: 100, impliedMovePerc: null }).status === "unavailable",

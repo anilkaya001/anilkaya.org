@@ -897,6 +897,18 @@
 
   const IV_RANK_TERM = "IV rank, percentile of its own year";
 
+  const RICHNESS_LINE = 0.1;
+
+  function richnessBand(panel) {
+    const stored = typeof panel.richness === "string" && panel.richness ? panel.richness : null;
+    if (stored !== null && stored !== "rich" && stored !== "cheap" && stored !== "fair") return stored;
+    const vrp = isNum(panel.vrp);
+    const rv = isNum(panel.rv30);
+    if (vrp === null || rv === null || !(rv > 0)) return stored;
+    const rel = vrp / rv;
+    return rel >= RICHNESS_LINE ? "rich" : rel <= -RICHNESS_LINE ? "cheap" : "fair";
+  }
+
   function ivRankStat(panel) {
     const n = isNum(panel.ivRank);
     if (n === null) {
@@ -1021,7 +1033,7 @@
       ["Realized vol, 21 sessions", vol1(panel.rv30)],
       ["Variance risk premium",
         fmtOr(panel.vrp, (n) => signed(n, (a) => (a * 100).toFixed(1) + " vol pts"))],
-      ["Band", panel.richness === null ? DASH : panel.richness],
+      ["Band", richnessBand(panel) || DASH],
       ivRankStat(panel),
       ["IV, past week",
         fmtOr(panel.ivMomentum, (n) => signed(n, (a) => (a * 100).toFixed(1) + " vol pts"))],
