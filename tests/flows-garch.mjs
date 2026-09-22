@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { fitGarch, skewtDensity, skewtConstants, lnGamma, GARCH_MIN_RETURNS, SKEWT_NU_MIN, SKEWT_NU_MAX,
          GARCH_WINSOR_K, GARCH_PERSIST_CAP, GARCH_EWMA_LAMBDA }
   from "../shared/flows-garch.js";
-import { repairCandles, CANDLE_BREAK_LOG } from "../scripts/flows-pipeline.mjs";
+import { repairCandles, CANDLE_BREAK_LOG, CANDLE_BREAK_VOLUME } from "../scripts/flows-pipeline.mjs";
 
 let n = 0;
 const ok = (c, m) => { assert.ok(c, m); n++; };
@@ -139,8 +139,8 @@ ok(gappy.status === "ok" && gappy.n === 302, "null, zero and negative closes are
     if (pinned) unidentified++;
     ok(!(pinned && year.converged),
        `a window whose persistence reached its cap or whose alpha fell to zero is never published as converged (${w})`);
-    ok((year.longRunVol === null) === pinned,
-       `and its long-run level is withheld exactly then, because omega over one minus persistence means nothing there (${w})`);
+    ok(year.longRunVol > 0,
+       `and its long-run level is still published, because under variance targeting it is the window's own sample volatility and not a ratio of two edge values (${w})`);
     if (pinned) ok(/cap|not identified/.test(year.reason), `with the edge named in the reason (${year.reason})`);
   }
   ok(windows >= 10, `${windows} one-year windows were checked, ${unidentified} of them at an edge`);
@@ -151,8 +151,8 @@ ok(gappy.status === "ok" && gappy.n === 302, "null, zero and negative closes are
   const flat = fitGarch(flatPx);
   ok(flat.status === "ok", "a constant-variance year still fits");
   if (flat.alpha < 1e-3) {
-    ok(flat.converged === false && /not identified/.test(flat.reason) && flat.longRunVol === null,
-       "and when the optimiser finds no ARCH effect the fit is published unsettled with beta and the long run withheld");
+    ok(flat.converged === false && /not identified/.test(flat.reason) && flat.longRunVol > 0,
+       "and when the optimiser finds no ARCH effect the fit is published unsettled with beta unidentified, the long run still the sample volatility");
   } else {
     ok(flat.alpha >= 1e-3, `or it found a small ARCH effect (alpha ${flat.alpha}) and stands on its own`);
   }
@@ -182,28 +182,72 @@ ok(uniform.status === "ok" && uniform.converged === false && typeof uniform.reas
      `one 300% session inside a year is capped for the fit and the fit still settles (capped ${jf.capped}, ${jf.reason || "settled"})`);
   ok(Math.max(...jf.returns.map(Math.abs)) > jf.cap,
      "while the published returns keep the jump as it happened, so the chart draws the bar the fit refused");
-  ok(jf.condVol.every((v) => v < 400), "and the conditional path is not blown out by the jump");
+  const cf = fitGarch(px.slice(0, 261), dates.slice(0, 261));
+  {
+    let worst = 0;
+    for (let t = 0; t < jf.condVol.length; t++) {
+      if (t >= 128 && t < 161) continue;
+      worst = Math.max(worst, Math.abs(jf.condVol[t] / cf.condVol[t] - 1));
+    }
+    ok(worst < 0.15, `outside the thirty sessions after the jump the path is within 15% of the same window's clean fit (worst ${(worst * 100).toFixed(1)}%)`);
+    ok(Math.sign(jf.lambda) === Math.sign(cf.lambda),
+       `and the skew keeps the clean fit's sign, because the returns are centred on the median before the cap and on the capped mean after it (${jf.lambda} vs ${cf.lambda})`);
+    near(jf.longRunVol, cf.longRunVol, cf.longRunVol * 0.12, "and the long run is within an eighth of the clean fit's");
+    ok(jf.ewma[131] > cf.ewma[131] * 3,
+       `while the EWMA reference, fed the returns as they happened, does spike after the bar the fit refused (${jf.ewma[131]} vs ${cf.ewma[131]})`);
+  }
   ok(jf.alpha >= 1e-3 && jf.persistence <= 0.998 && jf.longRunVol !== null,
      `and the fit is identified with its long run published (alpha ${jf.alpha}, persistence ${jf.persistence})`);
+  {
+    const stale = [100];
+    let k = 0;
+    for (let t = 0; t < 300; t++) {
+      k = (k * 1103515245 + 12345) % 2147483648;
+      const move = t % 3 === 2 ? 2 * ((k / 2147483648) - 0.5) * 3.4 : 0;
+      stale.push(stale[stale.length - 1] * Math.exp(move / 100));
+    }
+    const sf = fitGarch(stale);
+    ok(sf.status === "ok" && sf.capped < sf.n * 0.1,
+       `a name flat two sessions in three does not have its every real move capped: the robust scale is floored at half the ninetieth-percentile scale, which one outlier cannot inflate (${sf.capped} of ${sf.n} capped, cap ${sf.cap})`);
+  }
 }
 {
   const day = (i) => new Date(Date.UTC(2025, 0, 1 + i)).toISOString();
   const rows = Array.from({ length: 300 }, (_, i) => ({
-    start_time: day(i), open: 1, high: 1, low: 1, volume: 1000,
+    start_time: day(i), open: 1, high: 1, low: 1, volume: i < 120 ? 1000 : 21000,
     close: i < 120 ? 1000 + i : 40 + i * 0.1,
   }));
   const rep = repairCandles(rows);
   ok(rep.breaks.length === 1 && rep.breaks[0].before === 120 && rep.breaks[0].date === day(120).slice(0, 10),
-     `an unadjusted history break is found once, dated by the first session after it, with the sessions before it counted (${JSON.stringify(rep.breaks)})`);
+     `an unadjusted split is found once, dated by the first session after it, with the sessions before it counted (${JSON.stringify(rep.breaks)})`);
   near(rep.breaks[0].ratio, 52 / 1119, 1e-3, "and the break carries the close-to-close ratio");
+  ok(rep.breaks[0].shape === "split" && rep.breaks[0].volumeRatio === 21,
+     "with the volume scaling inversely to the price, which is what names it a split rather than a move");
   ok(rep.candles.length === 180 && rep.candles[0].close === 52,
      "the repaired series starts at the session after the break, so no price-derived figure spans it");
   const clean = repairCandles(rows.slice(120));
   ok(clean.breaks.length === 0 && clean.candles.length === 180, "a continuous series is returned whole with no break");
-  ok(CANDLE_BREAK_LOG === 0.4, "the break line is a 0.4 log return, beyond any one-session move a split-free equity makes but inside a split");
-  const twice = repairCandles(rows.map((r, i) => ({ ...r, close: i < 60 ? 5000 : r.close })));
+  ok(CANDLE_BREAK_LOG === 0.4 && CANDLE_BREAK_VOLUME === 4,
+     "the lines are a 0.4 log step in price and a fourfold step in volume; a price step alone is not a break");
+  const twice = repairCandles(rows.map((r, i) => ({ ...r, close: i < 60 ? 5000 : r.close, volume: i < 60 ? 200 : r.volume })));
   ok(twice.breaks.length === 2 && twice.candles.length === 180,
      "two breaks are both reported and the series is cut at the last one");
+  const move = rows.slice(120).map((r, i) => ({ ...r, close: i >= 90 ? r.close * 1.55 : r.close, volume: i >= 90 && i < 100 ? 40000 : 21000 }));
+  const kept = repairCandles(move);
+  ok(kept.breaks.length === 0 && kept.candles.length === 180,
+     "a genuine 55% session on twice the volume is a move, not a split, and the history before it is kept for the fit to winsorise");
+  const remap = rows.slice(120).map((r, i) => ({ ...r, close: i >= 90 ? r.close * 13.6 : r.close, volume: i >= 90 ? 21000 * 72 : 21000 }));
+  const rm = repairCandles(remap);
+  ok(rm.breaks.length === 1 && rm.breaks[0].shape === "regime" && rm.candles.length === 90,
+     `a series that steps thirteenfold in price and seventyfold in volume is a re-listed instrument, cut as a regime break (${JSON.stringify(rm.breaks)})`);
+  const holed = rows.map((r, i) => (i === 120 ? { ...r, close: null } : r));
+  const hd = repairCandles(holed);
+  ok(hd.breaks.length === 1 && hd.breaks[0].before === 121 && hd.candles[0].close > 0,
+     "a null close on the split session does not hide the split: the step is read against the last positive close");
+  const blind = rows.map((r) => ({ ...r, volume: null }));
+  const bd = repairCandles(blind);
+  ok(bd.breaks.length === 1 && bd.breaks[0].shape === "unverified" && bd.breaks[0].volumeRatio === null,
+     "without volume the price step alone is still cut, and the break says the volume could not be read");
 }
 
 console.log(`✓ flows-garch: ${n} assertions — Hansen's skewed t is a zero-mean unit-variance density that ` +

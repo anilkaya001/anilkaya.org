@@ -23,9 +23,9 @@ const CARD = {
     gamma: { status: "ok", spot: 70.22, callWall: 67, putWall: 70, strikes: 40,
       lead: { say: "Dealer gamma for SYN1 is short at spot 70.22; the call wall is at 67.00 and the put wall at 70.00." } },
     levels: { status: "ok", spot: 70.22, atr: 1.48,
-      levels: [{ kind: "put_wall", label: "Put wall", px: 70, distPct: -0.003, distAtr: 0.15 },
+      levels: [{ kind: "put_wall", label: "Put wall", px: 70, distPct: -0.003, distAtr: -0.15 },
         { kind: "max_pain", label: "Max pain", px: 72.5, distPct: 0.032, distAtr: 1.54 },
-        { kind: "call_wall", label: "Call wall", px: 67, distPct: -0.046, distAtr: 2.18 }],
+        { kind: "call_wall", label: "Call wall", px: 67, distPct: -0.046, distAtr: -2.18 }],
       lead: { say: "Nearest: put wall at 70.00, 0.3% below spot 70.22 — 0.15σ." } },
     pricedMove: { status: "ok", impliedMove: 0.043, impliedLow: 67.2, impliedHigh: 73.24, sessions: 10,
       lead: { say: "Options price a ±4.3% move over 10 sessions — 67.20 to 73.24." } },
@@ -198,7 +198,7 @@ const CARD = {
   const plain = deterministicSummary(ctx);
   ok(guardAnswer(plain, guardFacts(ctx), { smallIntegers: false }).ok,
      "the deterministic summary passes the guard by construction");
-  ok(/^The greeks imply an amplifying state for SYN1 with flow bearish/.test(plain),
+  ok(/^The greeks imply a squeeze state for SYN1 with flow bearish/.test(plain),
      "and leads with the implied state, then the most robust features' own sentences");
   ok(plain.includes("Dealer gamma for SYN1"), "which follow it");
   const staleCtx = buildContext(CARD, { expectedSession: "2026-09-16" });
@@ -211,20 +211,21 @@ const CARD = {
 {
   const ctx = buildContext(CARD, { expectedSession: "2026-09-15" });
   const st = ctx.state;
-  ok(STATES.includes(st.state) && st.state === "amplifying" && st.direction === "bearish" && st.flow === "bearish",
-     `short gamma at spot with a one-sided selling tape and no wall ahead is an amplifying state with flow bearish (${st.chip})`);
+  ok(STATES.includes(st.state) && st.state === "squeeze" && st.direction === "bearish" && st.flow === "bearish",
+     `short gamma at spot with a one-sided selling tape and the put wall 0.15 ATR below, no flip between, is a squeeze toward that wall (${st.chip})`);
+  ok(st.target && st.target.kind === "put_wall" && st.target.px === 70, "the wall the flow leans toward is the target");
   eq(st.confidence, 2, "confidence starts at the positioning grade and loses one because the spot share of the ladder is unpublished");
-  ok(st.invalidation && st.invalidation.kind === "put_wall" && st.invalidation.px === 70,
+  ok(st.invalidation && st.invalidation.kind === "max_pain" && st.invalidation.px === 72.5,
      "the state ends past the nearest level on the other side of the flow");
   ok(st.horizon && st.horizon.kind === "priced_sessions" && st.horizon.value === 10, "and runs over the priced-move window");
-  assert.deepEqual(st.preferred, STATE_STRUCTURES.bear.fair.preferred, "a bearish amplifying state with unreadable premium prefers the fair bear structures"); checks++;
+  assert.deepEqual(st.preferred, STATE_STRUCTURES.bear.fair.preferred, "a bearish squeeze with unreadable premium prefers the fair bear structures"); checks++;
   ok(st.avoid.includes("put credit spread") && st.avoid.includes("iron condor"), "and rules out the structures that pay against it");
   ok(st.drivers.some((d) => d.key === "path" && d.vote === -1) && st.drivers.some((d) => d.key === "standing" && d.weight === 1),
      "the tape votes with its full grade and the card's own score is a tie-breaker of weight one, since it is built from the same tape");
   const feat = ctx.features.find((f) => f.key === "state");
-  ok(feat && feat.status === "ok" && feat.robustness === 2 && /read from gamma, path, standing/.test(feat.why),
+  ok(feat && feat.status === "ok" && feat.robustness === 2 && /read from gamma, levels, path, standing/.test(feat.why),
      "the state is a feature graded by its confidence, its reason naming the drivers");
-  ok(/^IMPLIED STATE for SYN1: amplifying, flow bearish \(confidence 2 of 3\)\./.test(feat.say) && /Avoid: iron condor/.test(feat.say),
+  ok(/^IMPLIED STATE for SYN1: squeeze, flow bearish \(confidence 2 of 3\)\./.test(feat.say) && /Avoid: iron condor/.test(feat.say),
      "its reading opens with the state and closes with the structures it prefers and rules out");
   eq(feat.say, stateSentence(st, "SYN1"), "and is the state sentence itself");
   eq(st.chip, stateChip(st), "the chip is derived from the same object");
@@ -232,17 +233,88 @@ const CARD = {
   const idea = stateIdea(ctx);
   ok(idea && idea.fromState === true && idea.structure === st.preferred[0] && idea.direction === "bearish",
      "the state writes its own idea in the first preferred structure with the state's direction");
-  ok(idea.rests_on[0] === "state" && idea.rests_on.includes("gamma") && idea.rests_on.includes("path") && !idea.rests_on.includes("standing"),
+  ok(idea.rests_on[0] === "state" && idea.rests_on.includes("gamma") && idea.rests_on.includes("levels") && idea.rests_on.includes("path") && !idea.rests_on.includes("standing"),
      "resting on the state, its positioning and the tape that voted, never on the tie-breaker when the tape voted");
   const own = vetIdeas([idea], ctx);
   ok(own.ideas.length === 1 && own.refused.length === 0 && own.ideas[0].robustness === 2 && own.ideas[0].fromState === true,
      "and that idea passes the same vetting the model's ideas pass, graded by its weakest leg");
-  ok(/pays if spot holds below the put wall at 70\.00/.test(idea.thesis) && /^a close above the put wall at 70\.00$/.test(idea.invalidation),
+  ok(/pays if spot holds below the max pain at 72\.50/.test(idea.thesis) && /^a close above the max pain at 72\.50$/.test(idea.invalidation),
      "with a conditional payoff and an invalidation at the level the state ends at");
   const v = vetIdeas([idea, { ...idea, title: "Model twin", fromState: false }], ctx);
   ok(v.ideas.length === 1 && v.ideas[0].fromState === true, "the state's idea outranks a model idea it ties with");
+  {
+    const strong = { title: "Wall break", structure: "put debit spread", direction: "bearish", thesis: "Dealer gamma is short at spot 70.22.",
+      rests_on: ["gamma", "levels"], invalidation: "a close above 72.50", horizon: "10 sessions" };
+    const led = vetIdeas([strong, idea], ctx);
+    ok(led.ideas.length === 2 && led.ideas[0].fromState === true && led.ideas[1].robustness === 3,
+       "the state's idea leads the list even when a model idea outgrades it, so the provenance line that names the first idea as the state's own is true");
+  }
+  {
+    const tied = JSON.parse(JSON.stringify(CARD));
+    tied.panels.displacement = { status: "ok", gapAtr: 1.2, oiCentroid: 69, volCentroid: 70.8, spot: 70.22 };
+    tied.panels.path.persistence = 0.7;
+    tied.panels.path.minutes = 200;
+    const ts = regimeState(tied, { expectedSession: "2026-09-15" });
+    const votes = ts.drivers.filter((d) => d.axis === "flow" && d.vote !== 0).map((d) => d.key + ":" + d.vote);
+    ok(votes.includes("path:-1") && votes.includes("displacement:1") && votes.includes("standing:1") && ts.flow === "bullish" && !ts.drivers.some((d) => d.key === "path" && d.split),
+       `when the tape's votes tie the card's score breaks the tie (${votes.join(", ")} -> ${ts.flow})`);
+    const decided = JSON.parse(JSON.stringify(tied));
+    decided.panels.displacement.gapAtr = -1.2;
+    const ds = regimeState(decided, { expectedSession: "2026-09-15" });
+    ok(ds.flow === "bearish" && ds.confidence === 2,
+       "and when they agree the score is not counted, so a tie-breaker cannot turn a decided vote into a split");
+    const onlyScore = JSON.parse(JSON.stringify(CARD));
+    onlyScore.panels.path.persistence = 0.5;
+    const os = regimeState(onlyScore, { expectedSession: "2026-09-15" });
+    ok(os.flow === "bullish", "with no tape vote at all the score alone gives the flow its side");
+  }
+  {
+    const puts = JSON.parse(JSON.stringify(CARD));
+    puts.panels.aggressor = { status: "ok", reported: 100, unreported: 0, bars: [{ k: 68, net: -300 }, { k: 70, net: -226 }, { k: 72, net: 40 }],
+      lead: { say: "Puts were taken at the offer.", n: { ladderNetExact: 486 } } };
+    const as = regimeState(puts, { expectedSession: "2026-09-15" });
+    const ag = as.drivers.find((d) => d.key === "aggressor");
+    ok(ag && ag.vote === -1 && /nets 486 contracts to the put side/.test(ag.reading),
+       `a ladder netting to the put side votes bearish and says so, signed from the bars rather than from the lead's absolute figure (${ag && ag.reading})`);
+  }
+  {
+    const weak = JSON.parse(JSON.stringify(CARD));
+    weak.panels.gamma.strikes = 12;
+    weak.regime = { label: "long", crossings: 1, spotGammaShare: 0.1 };
+    weak.panels.levels.levels = [{ kind: "gamma_flip", label: "Gamma flip", px: 71.6, distAtr: 0.97 }, { kind: "max_pain", label: "Max pain", px: 72.5, distAtr: 1.54 }];
+    const wctx = buildContext(weak, { expectedSession: "2026-09-15" });
+    eq(wctx.state.confidence, 0, "a marginal ladder near the flip on a thin profile is a state at confidence 0");
+    const call = vetIdeas([{ title: "Upside", structure: "long call", direction: "bullish", thesis: "Dealer gamma is long at spot 70.22.",
+      rests_on: ["gamma", "levels"], invalidation: "a close below 71.60", horizon: "10 sessions" }], wctx);
+    ok(call.ideas.length === 1, "and a state the summary does not stand on does not refuse the model's structures either");
+  }
+  {
+    const behind = JSON.parse(JSON.stringify(CARD));
+    behind.panels.path.netPremium = 19251664;
+    behind.panels.levels.levels = [
+      { kind: "call_wall", label: "Call wall", px: 67, distAtr: -2.18 },
+      { kind: "gamma_flip", label: "Gamma flip", px: 71.6, distAtr: 0.97 },
+      { kind: "put_wall", label: "Put wall", px: 66, distAtr: -2.85 },
+    ];
+    const bs = regimeState(behind, { expectedSession: "2026-09-15" });
+    ok(bs.state === "amplifying" && bs.flow === "bullish" && bs.bound === null && !bs.notes.some((n) => /lies between/.test(n)),
+       "a wall behind spot is never 'between' spot and the flip, so the zone is unbounded rather than bounded at a flip the wall does not face");
+  }
+  {
+    const vol = JSON.parse(JSON.stringify(CARD));
+    vol.panels.levels.levels.push({ kind: "gamma_flip", label: "Gamma flip", px: 70.4, distAtr: 0.12 });
+    vol.panels.path.persistence = 0.5;
+    const vctx = buildContext(vol, { expectedSession: "2026-09-15" });
+    const vi = stateIdea(vctx);
+    ok(vctx.state.state === "transitional" && vi && vi.structure === "long strangle",
+       `spot on the flip with no side prefers a long strangle (${vctx.state.state}, ${vi && vi.structure})`);
+    ok(/pays if spot closes outside the priced range 67\.20 to 73\.24; it loses if spot holds inside it through the horizon/.test(vi.thesis) &&
+       /^spot held inside the priced range 67\.20 to 73\.24 through the horizon$/.test(vi.invalidation),
+       "and a long-volatility structure pays when spot leaves the range, never when it stays, with the invalidation written the same way round");
+    ok(vetIdeas([vi], vctx).ideas.length === 1, "and that idea passes the guard, the range ends being figures the state sentence carries");
+  }
   const pub = publicContext(ctx);
-  ok(pub.state && pub.state.state === "amplifying" && pub.state.chip === st.chip && pub.state.word === STATE_WORD.amplifying &&
+  ok(pub.state && pub.state.state === "squeeze" && pub.state.chip === st.chip && pub.state.word === STATE_WORD.squeeze &&
      Array.isArray(pub.state.drivers) && pub.state.drivers.every((d) => typeof d.reading === "string"),
      "the public context carries the state, its chip, its word and its drivers' readings for the page");
   ok(/8\. The line \[state\]/.test(promptForNeuron(ctx).system), "the prompt tells the model the state line is authoritative");

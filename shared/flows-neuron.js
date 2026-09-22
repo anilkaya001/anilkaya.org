@@ -218,9 +218,9 @@ function directionVotes(card) {
     const p = P.aggressor;
     if (okPanel(p) && Array.isArray(p.bars)) {
       const r = panelRobustness("aggressor", "tape", p, card).r;
-      const n = p.lead && p.lead.n ? num(p.lead.n.ladderNetExact) : null;
+      const n = p.bars.reduce((a, b) => a + (num(b && b.net) || 0), 0);
       const gross = p.bars.reduce((a, b) => a + Math.abs(num(b && b.net) || 0), 0);
-      if (n !== null && gross > 0) {
+      if (n !== 0 && gross > 0) {
         const share = Math.abs(n) / gross;
         const decisive = share >= T.AGGRESSOR_SHARE;
         add("aggressor", decisive ? Math.sign(n) : 0, r,
@@ -284,7 +284,9 @@ function directionVotes(card) {
         (decisive ? "" : " (conviction under " + T.CONVICTION_FAIR + " or inside the dead band, so no vote)"));
     }
   }
-  const cast = votes.filter((v) => v.vote !== 0 && v.weight > 0);
+  const primary = votes.filter((v) => v.vote !== 0 && v.weight > 0 && v.key !== "standing");
+  const tied = primary.reduce((a, v) => a + v.vote * v.weight, 0) === 0;
+  const cast = tied ? votes.filter((v) => v.vote !== 0 && v.weight > 0) : primary;
   const total = cast.reduce((a, v) => a + v.weight, 0);
   const sum = cast.reduce((a, v) => a + v.vote * v.weight, 0);
   const direction = total === 0 ? 0 : Math.sign(sum);
@@ -474,7 +476,8 @@ export function regimeState(card, extras) {
       direction = flow;
       const wall = d === 0 ? null : L.by[WALL_FOR[String(d)]] || null;
       const wallAhead = wall && wall.distAtr !== null && Math.sign(wall.distAtr) === d && Math.abs(wall.distAtr) <= T.WALL_NEAR_ATR;
-      const flipBetween = flip && flipAtr !== null && Math.sign(flipAtr) === d && wall && Math.abs(flipAtr) < Math.abs(wall.distAtr);
+      const flipBetween = flip && flipAtr !== null && Math.sign(flipAtr) === d && wall && wall.distAtr !== null &&
+        Math.sign(wall.distAtr) === d && Math.abs(flipAtr) < Math.abs(wall.distAtr);
       if (d !== 0 && wallAhead && !flipBetween) {
         state = "squeeze";
         target = { kind: wall.kind, px: wall.px, label: wall.label, distAtr: wall.distAtr };
@@ -565,15 +568,23 @@ export function stateIdea(context) {
   const level = "the " + s.invalidation.label.toLowerCase() + " at " + f2(s.invalidation.px);
   const word = STATE_WORD[s.state].toLowerCase();
   const read = pos.join("; ") + (dir.length ? "; " + dir.join("; ") : "") + (prem ? "; premium is " + s.premium + ", " + prem.reading : "");
+  const volLong = structure === "long straddle" || structure === "long strangle";
+  const range = s.horizon.kind === "priced_sessions" && s.horizon.low !== null && s.horizon.high !== null
+    ? "the priced range " + f2(s.horizon.low) + " to " + f2(s.horizon.high) : null;
   const payoff = structure === "no position"
     ? " The flow features do not agree on a side, so no position is the reading until spot closes beyond " + level + "."
-    : " A " + structure + " pays if spot " + (direction === "bullish" ? "holds above " : direction === "bearish" ? "holds below " : "stays inside the priced range against ") + level + ".";
+    : volLong
+      ? " A " + structure + " pays if spot closes " + (range ? "outside " + range : "beyond " + level + " in either direction") +
+        "; it loses if spot holds " + (range ? "inside it" : "at " + level) + " through the horizon."
+      : " A " + structure + " pays if spot " + (direction === "bullish" ? "holds above " : direction === "bearish" ? "holds below " : "stays inside the priced range against ") + level + ".";
   return {
     title: STATE_WORD[s.state] + " " + structure,
     structure, direction,
     thesis: "The greeks imply " + word + (s.flow ? " with flow " + s.flow : "") + ": " + read + "." + payoff,
     rests_on: rests,
-    invalidation: "a close " + (direction === "bullish" ? "below " : direction === "bearish" ? "above " : "beyond ") + level,
+    invalidation: volLong
+      ? (range ? "spot held inside " + range + " through the horizon" : "spot held at " + level + " through the horizon")
+      : "a close " + (direction === "bullish" ? "below " : direction === "bearish" ? "above " : "beyond ") + level,
     horizon: s.horizon.kind === "priced_sessions" ? s.horizon.value + " sessions" : String(s.horizon.value),
     fromState: true,
   };
@@ -880,7 +891,7 @@ export function vetIdeas(rawIdeas, context) {
   const ctx = context && typeof context === "object" ? context : { features: [] };
   const byKey = new Map((ctx.features || []).map((f) => [f.key.toLowerCase(), f]));
   const facts = guardFacts(ctx);
-  const st = ctx.state && typeof ctx.state === "object" && ctx.state.state !== "undetermined" ? ctx.state : null;
+  const st = ctx.state && typeof ctx.state === "object" && ctx.state.state !== "undetermined" && ctx.state.confidence >= 1 ? ctx.state : null;
   const kept = [];
   const refused = [];
   const seen = new Set();
@@ -912,7 +923,7 @@ export function vetIdeas(rawIdeas, context) {
     kept.push({ title, structure, direction, thesis, invalidation, horizon, restsOn: feats.map((f) => f.key), robustness,
       robustnessWord: ROBUSTNESS_WORD[robustness], fromState: idea.fromState === true });
   }
-  kept.sort((a, b) => (b.robustness - a.robustness) || ((b.fromState ? 1 : 0) - (a.fromState ? 1 : 0)));
+  kept.sort((a, b) => ((b.fromState ? 1 : 0) - (a.fromState ? 1 : 0)) || (b.robustness - a.robustness));
   return { ideas: kept.slice(0, NEURON_MAX_IDEAS), refused };
 }
 

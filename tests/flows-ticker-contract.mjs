@@ -3962,15 +3962,15 @@ try {
     eq(garch.qualifier, "nowrap", "the heading's qualifier is one unbreakable phrase, so it never wraps mid-sentence");
     {
       const broken = JSON.parse(JSON.stringify(fitted));
-      broken.panels.context.breaks = [{ date: "2026-04-06", ratio: 0.0426, before: 117 }];
+      broken.panels.context.breaks = [{ date: "2026-04-06", ratio: 0.0426, before: 117, volumeRatio: 20.5, shape: "split" }];
       await mount(page, broken, { ticker: broken.ticker, station: "all" });
       const notes = await page.evaluate(() => ({
         garch: document.getElementById("ftGarchS").textContent,
         price: document.getElementById("ftChartS").textContent,
       }));
-      ok(/The vendor\u2019s unadjusted history breaks on 2026-04-06 \(close \u00d70\.0426 against the session before\), so the 117 sessions before it are cut/.test(notes.garch),
-         `a history break is named on the volatility card with its date, ratio and the sessions cut (${notes.garch.slice(-260)})`);
-      ok(/history breaks on 2026-04-06/.test(notes.price), "and on the price chart, which reads the same sessions");
+      ok(/The vendor\u2019s history steps on 2026-04-06 \(close \u00d70\.0426, volume \u00d721 against the sessions before, the shape of an unadjusted split\), so the 117 sessions before it are cut/.test(notes.garch),
+         `a history break is named on the volatility card with its date, the price and volume steps, what shape that is and the sessions cut (${notes.garch.slice(-300)})`);
+      ok(/history steps on 2026-04-06/.test(notes.price), "and on the price chart, which reads the same sessions");
     }
 
     const older = JSON.parse(JSON.stringify(fitted));

@@ -4193,9 +4193,12 @@
     const breaks = c && Array.isArray(c.breaks) ? c.breaks.filter((b) => b && typeof b === "object") : [];
     if (!breaks.length) return "";
     const last = breaks[breaks.length - 1];
-    const ratio = isNum(last.ratio), before = isNum(last.before);
-    return "; the vendor\u2019s unadjusted history breaks on " + String(last.date || "an undated session") +
-      (ratio === null ? "" : " (close \u00d7" + (ratio >= 1 ? ratio.toFixed(2) : ratio.toFixed(4)) + " against the session before)") +
+    const ratio = isNum(last.ratio), before = isNum(last.before), vr = isNum(last.volumeRatio);
+    const shape = last.shape === "split" ? "the shape of an unadjusted split"
+      : last.shape === "regime" ? "a step no continuous series makes" : "a step the volume could not be read against";
+    return "; the vendor\u2019s history steps on " + String(last.date || "an undated session") +
+      (ratio === null ? "" : " (close \u00d7" + (ratio >= 1 ? ratio.toFixed(2) : ratio.toFixed(4)) +
+        (vr === null ? "" : ", volume \u00d7" + (vr >= 10 ? vr.toFixed(0) : vr.toFixed(2))) + " against the sessions before, " + shape + ")") +
       ", so the " + (before === null ? "sessions" : before + " session" + (before === 1 ? "" : "s")) +
       " before it are cut and every price figure on this card reads the sessions since";
   }
@@ -4888,6 +4891,8 @@
       const side = lam === null ? "" : lam < -0.05 ? "the heavier tail on the downside"
         : lam > 0.05 ? "the heavier tail on the upside" : "no material skew";
       const capped = isNum(g.capped);
+      const lastRet = Array.isArray(g.returns) && g.returns.length ? isNum(g.returns[g.returns.length - 1]) : null;
+      const lastCapped = lastRet !== null && isNum(g.cap) !== null && Math.abs(lastRet) > g.cap;
       const brk = breakNote(c);
       const robust = typeof g.method === "string" && /variance targeting/.test(g.method);
       sub.textContent = "Fitted by " + (robust ? "penalised maximum likelihood with variance targeting" : "maximum likelihood") +
@@ -4901,13 +4906,17 @@
             (tails || side ? " (" + [tails, side].filter(Boolean).join(", ") + ")" : "") + "."
           : "; this card\u2019s fit predates the skewed-t innovations and is refitted at the next nightly run.") +
         " The path is the model\u2019s conditional standard deviation, annualised, windowed to " +
-        garchPeriod + (dw ? ", beside the RiskMetrics EWMA at 0.94 as a model-free reference" : "") +
+        garchPeriod + (dw ? ", beside the RiskMetrics EWMA at 0.94 on the returns as they happened, a model-free reference" : "") +
         (ivLevel !== null || rvLevel !== null ? "; the flat rules are " +
           [ivLevel !== null ? "the at-the-money implied volatility" : null, rvLevel !== null ? "the realised volatility over 30 sessions" : null]
             .filter(Boolean).join(" and ") + " from the priced-move panel" : "") + "." +
         (g.converged === false ? " The fit did not settle: " + String(g.reason || "") +
           " \u2014 the path is what the likelihood found and no more." : "") +
-        (robust ? " Variance targeting fixes the long run at the window\u2019s own sample variance, so the long-run cell is a measurement and not a ratio of two edge values." : "") +
+        (robust ? " Variance targeting fixes the long run at the sample variance of the returns as the fit saw them" +
+          (capped ? ", " + capped + " session" + (capped === 1 ? "" : "s") + " capped" : "") +
+          ", so the long-run cell is a measurement and not a ratio of two edge values." : "") +
+        (robust && lastCapped ? " The last session\u2019s return exceeded the cap, so the next-session cell is recursed off the capped shock of " +
+          isNum(g.cap).toFixed(2) + "%, not the bar drawn." : "") +
         (brk ? " The vendor" + brk.slice("; the vendor".length) + "." : "") +
         " The next-session cell is the recursion\u2019s own next state, fixed by the last shock and " +
         "the last variance; it carries no claim about the return\u2019s sign or size.";
@@ -5980,8 +5989,11 @@
       host.className = "ft-state is-" + st.state + sideCls;
       word.textContent = label;
       stateDots(conf, st.confidence);
-      conf.title = "Confidence " + (isNum(st.confidence) === null ? "unpublished" : st.confidence + " of 3") +
-        ": the positioning grade less one for a marginal ladder, a flip inside 1.5 ATR or a split flow vote.";
+      conf.title = "Confidence " + (isNum(st.confidence) === null ? "unpublished" : st.confidence + " of 3") + ": " +
+        (st.stale === true ? "capped at 1 because the card is behind the last closed session."
+          : st.state === "premium-rich" || st.state === "premium-cheap"
+            ? "the priced-move grade, less one when an implied-volatility driver disagrees with it."
+            : "the positioning grade less one for a marginal ladder, a flip inside 1.5 ATR or a split flow vote.");
       chip.textContent = typeof st.chip === "string" ? st.chip : "";
       meta.replaceChildren();
       const put = (k, v, cls) => {

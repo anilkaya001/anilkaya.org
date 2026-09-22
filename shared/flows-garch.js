@@ -138,16 +138,23 @@ export function fitGarch(closes, dates = [], { minReturns = GARCH_MIN_RETURNS } 
         "four parameters on fewer say whatever the optimiser wants",
     };
   }
-  const mean = r.reduce((a, b) => a + b, 0) / r.length;
-  const raw = r.map((v) => v - mean);
-  const absSorted = raw.map(Math.abs).sort((a, b) => a - b);
-  const robustSd = absSorted[Math.floor(absSorted.length / 2)] * 1.4826;
+  const sorted = r.slice().sort((a, b) => a - b);
+  const med = sorted.length % 2 ? sorted[(sorted.length - 1) / 2] : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
+  const dev = r.map((v) => v - med);
+  const absSorted = dev.map(Math.abs).sort((a, b) => a - b);
+  const mad = absSorted[Math.floor(absSorted.length / 2)] * 1.4826;
+  const q90 = absSorted[Math.min(absSorted.length - 1, Math.floor(absSorted.length * 0.9))] / 1.645;
+  const robustSd = Math.max(mad, q90 / 2);
   if (!(robustSd > 0)) {
     return { status: "unavailable", reason: "every return in the window is identical, so there is no variance to model" };
   }
   const cap = GARCH_WINSOR_K * robustSd;
   let capped = 0;
-  const e = raw.map((v) => { if (Math.abs(v) > cap) { capped++; return Math.sign(v) * cap; } return v; });
+  const clipped = dev.map((v) => { if (Math.abs(v) > cap) { capped++; return Math.sign(v) * cap; } return v; });
+  const shift = clipped.reduce((a, b) => a + b, 0) / clipped.length;
+  const mean = med + shift;
+  const e = clipped.map((v) => v - shift);
+  const raw = r.map((v) => v - mean);
   const v0 = e.reduce((a, b) => a + b * b, 0) / e.length;
   if (!(v0 > 0)) {
     return { status: "unavailable", reason: "every return in the window is identical, so there is no variance to model" };
@@ -173,21 +180,20 @@ export function fitGarch(closes, dates = [], { minReturns = GARCH_MIN_RETURNS } 
   const condVol = s2.map((v) => Number((Math.sqrt(v) * GARCH_ANNUALISE).toFixed(2)));
   const ewma = new Array(e.length);
   let w = v0;
-  for (let t = 0; t < e.length; t++) {
-    if (t > 0) w = GARCH_EWMA_LAMBDA * w + (1 - GARCH_EWMA_LAMBDA) * e[t - 1] * e[t - 1];
+  for (let t = 0; t < raw.length; t++) {
+    if (t > 0) w = GARCH_EWMA_LAMBDA * w + (1 - GARCH_EWMA_LAMBDA) * raw[t - 1] * raw[t - 1];
     ewma[t] = Number((Math.sqrt(w) * GARCH_ANNUALISE).toFixed(2));
   }
   const nextS2 = omega + alpha * e[e.length - 1] * e[e.length - 1] + beta * s2[e.length - 1];
   const edges = [];
   if (persistence > 0.998) {
-    edges.push("persistence reached its cap, which a year of returns does for a fair share of stationary " +
-      "series; the path reads as near-integrated");
+    edges.push("persistence reached its cap despite a prior pulling it toward " + GARCH_PRIOR.persistence +
+      "; the path reads as near-integrated");
   }
   if (alpha < 1e-3) edges.push("no ARCH effect was found in the window, so beta and persistence are not identified");
   if (nu < SKEWT_NU_MIN + 0.05) edges.push("the tail shape hit its floor");
   if (Math.abs(lambda) > SKEWT_LAMBDA_MAX - 0.02) edges.push("the skew hit its cap");
   const edge = edges.length > 0;
-  const identified = persistence <= 0.998 && alpha >= 1e-3;
   return {
     status: "ok",
     dist: "skewt",
@@ -203,9 +209,7 @@ export function fitGarch(closes, dates = [], { minReturns = GARCH_MIN_RETURNS } 
     nu: Number(nu.toFixed(3)),
     lambda: Number(lambda.toFixed(3)),
     persistence: Number(persistence.toFixed(4)),
-
-    longRunVol: identified
-      ? Number((Math.sqrt(omega / (1 - persistence)) * GARCH_ANNUALISE).toFixed(2)) : null,
+    longRunVol: Number((Math.sqrt(v0) * GARCH_ANNUALISE).toFixed(2)),
     lastVol: condVol[condVol.length - 1],
     nextVol: Number((Math.sqrt(nextS2) * GARCH_ANNUALISE).toFixed(2)),
     logLik: Number(logLik.toFixed(2)),
