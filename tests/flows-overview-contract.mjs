@@ -809,8 +809,8 @@ try {
        `and names the cadence before the instant (${stamp})`);
     ok(!/\d{2}:\d{2}:\d{2}/.test(stamp),
        `with no seconds field, which this feed cannot support (${stamp})`);
-    ok(/read \d{2}:\d{2} \S/.test(stamp),
-       `on a 24-hour clock that names the zone it is in (${stamp})`);
+    ok(/read (\d{4}-\d{2}-\d{2} )?\d{2}:\d{2} \S/.test(stamp),
+       `on a 24-hour clock that names the zone it is in, dated when the read is not today's (${stamp})`);
 
     const tzCtx = await browser.newContext({
       viewport: { width: 1280, height: 1000 }, timezoneId: "America/New_York" });
