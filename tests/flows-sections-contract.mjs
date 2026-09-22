@@ -494,13 +494,21 @@ try {
          `and the extremes carry a magnitude (${axis.join(", ")})`);
 
       const feat = await page.evaluate(() => {
-        const rows = Array.from(document.querySelectorAll("#recFeatBody tr")).map((tr) => ({
-          key: tr.querySelector("th").textContent.trim(),
-          hyp: tr.querySelector("th").getAttribute("title"),
-          ic: tr.querySelectorAll("td")[0].textContent.trim(),
-          icTitle: tr.querySelectorAll("td")[0].getAttribute("title"),
-          n: tr.querySelectorAll("td")[1].textContent.trim(),
-        }));
+        const own = (node) => Array.from(node.childNodes)
+          .filter((c) => c.nodeType === Node.TEXT_NODE).map((c) => c.textContent).join("").trim();
+        const rows = Array.from(document.querySelectorAll("#recFeatBody tr")).map((tr) => {
+          const th = tr.querySelector("th");
+          const gloss = th.querySelector(".rec-feat-gloss");
+          const icCell = tr.querySelectorAll("td")[0];
+          const why = icCell.querySelector(".rec-ic-why");
+          return {
+            key: own(th),
+            hyp: gloss ? gloss.textContent.trim() : null,
+            ic: own(icCell),
+            icTitle: why ? why.textContent.trim() : null,
+            n: tr.querySelectorAll("td")[1].textContent.trim(),
+          };
+        });
         return {
           rows,
           hidden: document.getElementById("recFeatWrap").hidden,
@@ -523,7 +531,7 @@ try {
          `with the floor named rather than the variance (${byKey.vrp.icTitle})`);
 
       ok(/composite|claim/.test(byKey.s.hyp || ""),
-         `the score's row states what it is testing (${byKey.s.hyp})`);
+         `the score's row states what it is testing, in text a reader can see rather than a hover (${byKey.s.hyp})`);
       ok(/agreement|conviction/.test(byKey.cnv.hyp || ""),
          `and so does conviction's (${byKey.cnv.hyp})`);
 
