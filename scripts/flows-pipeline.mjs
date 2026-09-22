@@ -4324,6 +4324,8 @@ async function main() {
     const features = icTable(datedBoards, recordCloses, calendar, {
       k: HORIZON_SESSIONS, minN: RECORD_IC_MIN_N, pearson, percentileRank,
       breaks: recordBreaks,
+      through: sessionDate,
+      hrSessions: HORIZON_SESSIONS,
     });
     await publish("record", {
       v: BOARD_SCHEMA_VERSION,
@@ -4350,7 +4352,13 @@ async function main() {
       features: {
         k: features.k,
         minN: features.minN,
+        sessionMinN: features.sessionMinN,
+        rankedFrom: features.rankedFrom,
+        ranked: features.ranked,
+        through: features.through || null,
         method: RECORD_NOTES.method,
+        perSession: RECORD_NOTES.perSession,
+        ranking: RECORD_NOTES.ranking,
         selection: RECORD_NOTES.selection,
         overlap: RECORD_NOTES.overlap,
         calendar: RECORD_NOTES.calendar,
@@ -4358,12 +4366,17 @@ async function main() {
       },
     });
     const measuredCols = features.cols.filter((c) => c.ic !== null).length;
+    const sessionCols = features.cols.filter((c) => c.icMean !== null);
     console.log(
       `  record: ${rec.retained} retained session(s) of ${archiveProbed} dated key(s) probed` +
       (archiveFailed ? ` (${archiveFailed} READ FAILED, so "retained" is a floor` +
         `${archiveAbandoned ? " and the walk was abandoned" : ""})` : "") + ", " +
       `${rec.sessions.length} scored at k=${HORIZON_SESSIONS}; ` +
-      `features ${measuredCols}/${features.cols.length} measured`);
+      `features ${measuredCols}/${features.cols.length} measured pooled, ` +
+      `${sessionCols.length} per session over ` +
+      `${sessionCols.length ? Math.max(...sessionCols.map((c) => c.icSessions)) : 0} session(s), ` +
+      `${features.ranked} ranked (a rank needs ${features.rankedFrom} sessions)` +
+      (features.unscaled ? `; ${features.unscaled} row(s) had no entry volatility to scale by` : ""));
 
     if (rec.horizons && rec.horizons.length) {
       const leg = (ls, n) => ls === null || !n

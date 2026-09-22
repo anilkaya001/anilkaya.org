@@ -1491,11 +1491,32 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
       ok(c.n >= feat.minN, `${c.key}: measured only at or above the stated floor`);
     }
   }
-  for (const key of ["method", "selection", "overlap", "calendar"]) {
+  for (const key of ["method", "perSession", "ranking", "selection", "overlap", "calendar"]) {
     ok(typeof feat[key] === "string" && feat[key].length > 20,
        `the ${key} statement rides the payload`);
   }
   ok(/not side-signed/.test(feat.method), "and the method names the return convention");
+  eq(feat.rankedFrom, 3 * HORIZON_SESSIONS,
+     "a feature is ranked only from three horizons' worth of overlapping sessions");
+  eq(feat.through, record.sessionDate,
+     "and no exit after the session being published is scored as a close");
+  const perSession = feat.cols.filter((c) => c.icMean !== null);
+  ok(perSession.length >= 15,
+     `the replay measures the board's vocabulary per session too (${perSession.length} columns)`);
+  for (const c of feat.cols) {
+    if (c.icMean === null) {
+      ok(typeof c.icReason === "string" && c.icReason.length > 5,
+         `${c.key}: a column with no session mean says why`);
+      continue;
+    }
+    ok(Math.abs(c.icMean) <= 1 && c.icSessions >= 1, `${c.key}: a session mean is a mean of correlations`);
+    ok(c.icPos >= 0 && c.icPos <= 1, `${c.key}: the positive share is a share`);
+    eq(c.ranked, c.icSessions >= feat.rankedFrom, `${c.key}: ranked exactly when the sessions reach the floor`);
+    ok(c.ranked || c.icT === null, `${c.key}: an unranked column publishes no t`);
+  }
+  const order = feat.cols.map((c) => (c.ranked ? 0 : c.icMean !== null ? 1 : 2));
+  ok(order.every((v, i) => i === 0 || v >= order[i - 1]),
+     "ranked columns lead, unranked session means follow, and columns with none close the table");
 
   {
     const track = read("scoretrack");

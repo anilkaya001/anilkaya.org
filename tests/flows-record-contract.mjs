@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import {
   tradingCalendar, forwardClose, scoreSessionAt, scoreSessions,
-  featureColumnsOf, icTable, RECORD_NOTES,
+  featureColumnsOf, icTable, entryVol, RECORD_NOTES,
 } from "../shared/flows-record.js";
 import { pearson, percentileRank } from "../shared/flows-features.js";
 
@@ -513,6 +513,142 @@ const one0 = (v) => (v === null || v === undefined ? NaN : v);
      "and says why the two populations are not averaged into one figure");
 }
 
+{
+  const N = 24;
+  const moves = [0.05, 0.04, 0.03, -0.005, 0.02, 0.01];
+  const cal = Array.from({ length: moves.length + 1 }, (_, i) => `2026-08-${String(i + 3).padStart(2, "0")}`);
+  const boards = [];
+  const closesSpec = {};
+  moves.forEach((m, s) => {
+    const rows = [];
+    for (let i = 0; i < N; i++) {
+      const beta = 1 + i / 8;
+      const alpha = (i * 7 + s * 5) % N;
+      const t = "N" + i + "S" + s;
+      rows.push({ t, px: 100, hv: beta, alpha, hr: 0.01 * beta * Math.sqrt(10) });
+      const r = m * beta + 0.0005 * beta * (alpha - (N - 1) / 2) / ((N - 1) / 2);
+      closesSpec[t] = { [cal[s + 1]]: 100 * (1 + r) };
+    }
+    boards.push({ d: cal[s], side: "long", rows });
+  });
+  const table = icTable(boards, closesOf(closesSpec), cal,
+    { k: 1, minN: 20, pearson, percentileRank, hrSessions: 10 });
+  const hv = table.cols.find((c) => c.key === "hv");
+  const alpha = table.cols.find((c) => c.key === "alpha");
+  ok(hv.ic > 0.3 && Math.abs(alpha.ic) < 0.1,
+     `POOLED, the volatility column reads as the stronger signal (hv ${hv.ic}, alpha ${alpha.ic}) — ` +
+     "because the window's market rose, and the volatile names rose most");
+  close(alpha.icMean, 1,
+     "PER SESSION on the volatility-scaled return, the idiosyncratic column is the perfect one", 1e-9);
+  ok(Math.abs(hv.icMean) < 0.5,
+     `and the volatility column's session mean is small (${hv.icMean}) — its pooled figure was the market`);
+  eq(table.cols[0].key, "alpha", "so the table ranks the idiosyncratic column first, by its session mean");
+  eq(alpha.icSessions, 6, "over the six sessions that each held the floor of names");
+  eq(alpha.icPos, 1, "positive in every one of them");
+  eq(alpha.ranked, true, "and at a one-session horizon six sessions clear the 3k floor");
+  eq(alpha.icSd, 0, "a column that is right the same way every session has a measured spread of zero");
+  eq(alpha.icT, null, "and no t-statistic, because a zero spread has no ratio to form");
+  ok(!("rankReason" in alpha), "a ranked column carries no unranked reason");
+  eq(table.rankedFrom, 3, "the ranking floor rides the table");
+  eq(table.sessionMinN, 20, "as does the per-session floor");
+  eq(table.unscaled, 0, "and every row carried an entry volatility to scale by");
+}
+
+{
+  const N = 24;
+  const moves = [0.05, 0.04, -0.01, 0.03, 0.02, -0.005];
+  const cal = Array.from({ length: moves.length + 2 }, (_, i) => `2026-08-${String(i + 3).padStart(2, "0")}`);
+  const boards = [];
+  const closesSpec = {};
+  moves.forEach((m, s) => {
+    const rows = [];
+    for (let i = 0; i < N; i++) {
+      const beta = 1 + i / 8;
+      const t = "B" + i + "S" + s;
+      rows.push({ t, px: 100, beta, hr: 0.02 * Math.sqrt(10) });
+      closesSpec[t] = {
+        [cal[s + 1]]: 100 * (1 + m * beta),
+        [cal[s + 2]]: 100 * (1 + m * beta),
+      };
+    }
+    boards.push({ d: cal[s], side: "long", rows });
+  });
+  const table = icTable(boards, closesOf(closesSpec), cal,
+    { k: 1, minN: 20, pearson, percentileRank, horizons: [2] });
+  const beta = table.cols.find((c) => c.key === "beta");
+  deep([beta.icSessions, beta.icPos], [6, 0.667],
+    "a beta column's session coefficient is +1 on every up session and −1 on every down one");
+  close(beta.icMean, 1 / 3, "so its mean is the up share minus the down share", 1e-3);
+  ok(beta.icMkt > 0.7,
+     `and its coefficient tracks the session's mean return (${beta.icMkt}): the column is a bet on direction`);
+  close(beta.icSd, Math.sqrt((4 * (2 / 3) ** 2 + 2 * (4 / 3) ** 2) / 5), "with the sample spread of the six", 1e-3);
+  close(beta.icT, (1 / 3) / (beta.icSd / Math.sqrt(6)),
+    "and t = mean / (sd / √(sessions / k)), which at k = 1 is the plain standard error", 1e-2);
+
+  const two = beta.curve.find((p) => p.k === 2);
+  eq(two.icSessions, 6, "the two-session point is measured over the same six sessions");
+
+  const stated2 = icTable(boards, closesOf(closesSpec), cal,
+    { k: 2, minN: 20, pearson, percentileRank, through: cal[6] });
+  const b2 = stated2.cols.find((c) => c.key === "beta");
+  eq(b2.icSessions, 5, "at a two-session horizon cut at the seventh date, five sessions have an exit");
+  eq(b2.rankedFrom, 6, "the ranking floor is three horizons' worth of sessions");
+  eq(b2.ranked, false, "so five overlapping two-session windows do not rank a column");
+  eq(b2.icT, null, "and an unranked column computes no t");
+  ok(/5 scored sessions against the 6/.test(b2.rankReason || ""), `and says why (${b2.rankReason})`);
+  ok(b2.icMean !== null, "while its mean is still printed, unranked");
+
+  const cut = icTable(boards, closesOf(closesSpec), cal,
+    { k: 1, minN: 20, pearson, percentileRank, through: cal[cal.length - 3] });
+  eq(cut.cols.find((c) => c.key === "beta").icSessions, 5,
+    "an exit dated after the last completed session is not a close, so that session is not scored");
+  eq(cut.through, cal[cal.length - 3], "and the cut rides the table");
+  ok(!("through" in table), "while an uncut table carries no cut at all");
+}
+
+{
+  const cal = Array.from({ length: 16 }, (_, i) => `2026-07-${String(i + 1).padStart(2, "0")}`);
+  const closes = closesOf({
+    CALM: Object.fromEntries(cal.map((d, i) => [d, 100 * (1 + (i % 2 ? 0.001 : -0.001))])),
+    WILD: Object.fromEntries(cal.map((d, i) => [d, 100 * (1 + (i % 2 ? 0.05 : -0.05))])),
+    THIN: { [cal[14]]: 100 },
+  });
+  const idxs = new Map(cal.map((d, i) => [d, i]));
+  const calm = entryVol({ t: "CALM" }, closes, cal, idxs, cal[14]);
+  const wild = entryVol({ t: "WILD" }, closes, cal, idxs, cal[14]);
+  ok(calm > 0 && wild > 40 * calm,
+     `with no published hr the entry volatility is read from the trailing closes (${calm}, ${wild})`);
+  eq(entryVol({ t: "THIN" }, closes, cal, idxs, cal[14]), null,
+    "and a name with fewer than ten trailing returns has none, rather than a guess");
+  close(entryVol({ t: "THIN", hr: 0.02 * Math.sqrt(10) }, closes, cal, idxs, cal[14], { hrSessions: 10 }),
+    0.02, "a published hr is preferred, converted from its horizon back to one session", 1e-12);
+  ok(entryVol({ t: "WILD" }, closes, cal, idxs, cal[14], { breaks: new Map([["WILD", cal.slice(4, 14)]]) }) === null,
+    "and a step across a vendor price break is not a return");
+}
+
+{
+  const cal = ["2026-08-03", "2026-08-04"];
+  const rows = Array.from({ length: 12 }, (_, i) => ({ t: "T" + i, px: 100, s: i, hr: 0.03 }));
+  const closesSpec = {};
+  rows.forEach((r, i) => { closesSpec[r.t] = { "2026-08-04": 100 + i }; });
+  const table = icTable([{ d: "2026-08-03", side: "long", rows }], closesOf(closesSpec), cal,
+    { k: 1, minN: 5, pearson, percentileRank });
+  const sCol = table.cols.find((c) => c.key === "s");
+  close(sCol.ic, 1, "a twelve-name session still carries its pooled coefficient", 1e-9);
+  eq(sCol.icMean, null, "but no session mean: twelve names are under the per-session floor");
+  ok(/no session reached 20/.test(sCol.icReason || ""), `and it says so (${sCol.icReason})`);
+  eq(sCol.ranked, false, "an unmeasured column is not ranked");
+}
+
+{
+  ok(/WITHIN each session/.test(RECORD_NOTES.method) && /secondary/.test(RECORD_NOTES.method),
+     "the method names the per-session construction and labels the pooled figure secondary");
+  ok(/which way the market went/.test(RECORD_NOTES.perSession),
+     "the per-session note says what pooling measures instead");
+  ok(/sd \/ √\(N\/k\)/.test(RECORD_NOTES.ranking) && /3k/.test(RECORD_NOTES.ranking),
+     "and the ranking note states the t construction and its floor");
+}
+
 console.log(`✓ flows-record: ${checks} assertions — a calendar that skips what was never open, ` +
   `attrition excluded from every mean and counted beside it, a spread that refuses one leg, ` +
   `horizons that count sessions rather than rows, and an IC that is Spearman by construction ` +
@@ -522,4 +658,6 @@ console.log(`✓ flows-record: ${checks} assertions — a calendar that skips wh
   `sample dispersion whose divisor the fixture can tell apart from the population one and which ` +
   `is null at n=1 and a measured 0 at n=2, a hit rate pooled over names rather than averaged ` +
   `over session rates, and an IC measured across a horizon set and ordered by evidence ` +
-  `rather than by the alphabet`);
+  `rather than by the alphabet — measured per session on the volatility-scaled return, so a ` +
+  `column that only bet on the market's direction is shown tracking it rather than ranked ` +
+  `first, and ranked at all only from 3k overlapping sessions`);

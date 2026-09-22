@@ -188,6 +188,36 @@ export function featureColumnsOf(row) {
   return out;
 }
 
+export const IC_SESSION_MIN_N = 20;
+
+export const IC_RANK_OVERLAPS = 3;
+
+export const IC_VOL_WINDOW = 21;
+export const IC_VOL_MIN_RETURNS = 10;
+
+export function entryVol(row, closesByTicker, calendar, calendarIdx, d, {
+  hrSessions = 10, window = IC_VOL_WINDOW, minReturns = IC_VOL_MIN_RETURNS, breaks = null,
+} = {}) {
+  const hr = fin(row && row.hr);
+  if (hr !== null && hr > 0 && hrSessions > 0) return hr / Math.sqrt(hrSessions);
+  const i = calendarIdx.get(d);
+  const series = closesByTicker && row ? closesByTicker.get(row.t) : null;
+  if (i === undefined || !series) return null;
+  const cuts = breaks instanceof Map ? breaks.get(row.t) : null;
+  const rets = [];
+  for (let j = i; j > Math.max(0, i - window); j--) {
+    const from = calendar[j - 1], to = calendar[j];
+    if (Array.isArray(cuts) && cuts.some((b) => b > from && b <= to)) continue;
+    const a = fin(series.get(from)), b = fin(series.get(to));
+    if (a === null || b === null || a <= 0 || b <= 0) continue;
+    rets.push(Math.log(b / a));
+  }
+  if (rets.length < minReturns) return null;
+  const m = rets.reduce((x, y) => x + y, 0) / rets.length;
+  const v = rets.reduce((x, y) => x + (y - m) * (y - m), 0) / (rets.length - 1);
+  return v > 0 ? Math.sqrt(v) : null;
+}
+
 export function icTable(datedBoards, closesByTicker, calendar, {
   k = 10,
   minN = 20,
@@ -198,11 +228,18 @@ export function icTable(datedBoards, closesByTicker, calendar, {
 
   horizons = null,
   breaks = null,
+
+  sessionMinN = IC_SESSION_MIN_N,
+  rankOverlaps = IC_RANK_OVERLAPS,
+  through = null,
+  hrSessions = 10,
 } = {}) {
   if (typeof pearson !== "function" || typeof percentileRank !== "function") {
     throw new Error("icTable needs the pearson and percentileRank helpers");
   }
-  const calendarIdx = new Map(calendar.map((d, i) => [d, i]));
+  const cal = typeof through === "string" && through
+    ? calendar.filter((d) => d <= through) : calendar;
+  const calendarIdx = new Map(cal.map((d, i) => [d, i]));
 
   const ks = [k, ...(Array.isArray(horizons) ? horizons : [])]
     .filter((h) => Number.isInteger(h) && h > 0);
@@ -213,9 +250,15 @@ export function icTable(datedBoards, closesByTicker, calendar, {
     let byH = pairsByKey.get(key);
     if (!byH) { byH = new Map(); pairsByKey.set(key, byH); }
     let cell = byH.get(h);
-    if (!cell) { cell = { cur: { xs: [], ys: [] }, pre: { xs: [], ys: [] } }; byH.set(h, cell); }
-    return pre ? cell.pre : cell.cur;
+    if (!cell) {
+      cell = { cur: { xs: [], ys: [] }, pre: { xs: [], ys: [] }, sessions: new Map() };
+      byH.set(h, cell);
+    }
+    return cell;
   };
+
+  const seenInSession = new Set();
+  let unscaled = 0;
 
   for (const b of datedBoards || []) {
     if (!b || typeof b.d !== "string") continue;
@@ -226,13 +269,26 @@ export function icTable(datedBoards, closesByTicker, calendar, {
       const cols = featureColumnsOf(row);
       const keys = Object.keys(cols);
       if (!keys.length) continue;
+
+      const once = !pre && !seenInSession.has(b.d + "|" + row.t);
+      if (once) seenInSession.add(b.d + "|" + row.t);
+      let sigma;
       for (const h of kSet) {
-        const fc = forwardClose(closesByTicker, calendar, calendarIdx, row.t, b.d, h, breaks);
+        const fc = forwardClose(closesByTicker, cal, calendarIdx, row.t, b.d, h, breaks);
         if (fc.state !== "ok") continue;
         const y = fc.exit / entry - 1;
+        if (once && sigma === undefined) {
+          sigma = entryVol(row, closesByTicker, cal, calendarIdx, b.d, { hrSessions, breaks });
+          if (sigma === null) unscaled++;
+        }
         for (const key of keys) {
-          const p = bucketFor(key, h, pre);
+          const cell = bucketFor(key, h, pre);
+          const p = pre ? cell.pre : cell.cur;
           p.xs.push(cols[key]); p.ys.push(y);
+          if (!once || sigma === null) continue;
+          let s = cell.sessions.get(b.d);
+          if (!s) { s = { xs: [], zs: [], rs: [] }; cell.sessions.set(b.d, s); }
+          s.xs.push(cols[key]); s.zs.push(y / (sigma * Math.sqrt(h))); s.rs.push(y);
         }
       }
     }
@@ -246,11 +302,59 @@ export function icTable(datedBoards, closesByTicker, calendar, {
     return { ic: round(rho, 3), n };
   };
 
+  const perSession = (cell, h) => {
+    const rankedFrom = rankOverlaps * h;
+    const dates = cell ? [...cell.sessions.keys()].sort() : [];
+    const ics = [], mkts = [];
+    let deep = 0;
+    for (const d of dates) {
+      const s = cell.sessions.get(d);
+      if (s.xs.length < sessionMinN) continue;
+      deep++;
+      const rho = pearson(percentileRank(s.xs), percentileRank(s.zs));
+      if (!Number.isFinite(rho)) continue;
+      ics.push(rho);
+      mkts.push(s.rs.reduce((a, v) => a + v, 0) / s.rs.length);
+    }
+    const n = ics.length;
+    if (!n) {
+      return {
+        icMean: null, icSd: null, icSessions: 0, icPos: null, icMkt: null, icT: null,
+        ranked: false, rankedFrom,
+        icReason: deep
+          ? "no variation to rank in any session"
+          : `no session reached ${sessionMinN} measured names`,
+      };
+    }
+    const mean = ics.reduce((a, v) => a + v, 0) / n;
+    const sd = n > 1
+      ? Math.sqrt(ics.reduce((a, v) => a + (v - mean) * (v - mean), 0) / (n - 1)) : null;
+    const mkt = n >= 3 ? pearson(ics, mkts) : NaN;
+    const ranked = n >= rankedFrom;
+    const t = ranked && sd !== null && sd > 0 ? mean / (sd / Math.sqrt(n / h)) : null;
+    const out = {
+      icMean: round(mean, 3),
+      icSd: sd === null ? null : round(sd, 3),
+      icSessions: n,
+      icPos: round(ics.filter((v) => v > 0).length / n, 3),
+      icMkt: Number.isFinite(mkt) ? round(mkt, 3) : null,
+      icT: t === null ? null : round(t, 2),
+      ranked,
+      rankedFrom,
+    };
+    if (!ranked) {
+      out.rankReason = `${n} scored session${n === 1 ? "" : "s"} against the ${rankedFrom} ` +
+        `a ${h}-session horizon needs before a mean is ranked`;
+    }
+    return out;
+  };
+
   const cols = [...pairsByKey.keys()].map((key) => {
     const byH = pairsByKey.get(key);
     const stated = coefficient(byH.get(k) && byH.get(k).cur);
     const out = { key, ic: stated.ic, n: stated.n };
     if (stated.reason) out.reason = stated.reason;
+    Object.assign(out, perSession(byH.get(k), k));
 
     if (epoch) {
       const before = byH.get(k) && byH.get(k).pre;
@@ -265,7 +369,8 @@ export function icTable(datedBoards, closesByTicker, calendar, {
     if (kSet.length > 1) {
       const curve = kSet.slice().sort((a, b) => a - b).map((h) => {
         const c = coefficient(byH.get(h) && byH.get(h).cur);
-        return { k: h, ic: c.ic, n: c.n };
+        const s = perSession(byH.get(h), h);
+        return { k: h, ic: c.ic, n: c.n, icMean: s.icMean, icSessions: s.icSessions };
       });
       out.curve = curve;
       let peak = null;
@@ -280,13 +385,19 @@ export function icTable(datedBoards, closesByTicker, calendar, {
     return out;
   });
 
-  cols.sort((a, b) => {
-    const av = a.ic === null ? -1 : Math.abs(a.ic);
-    const bv = b.ic === null ? -1 : Math.abs(b.ic);
-    return (bv - av) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
-  });
+  const tier = (c) => (c.ranked ? 0 : c.icMean !== null ? 1 : 2);
+  const strength = (c) => (tier(c) < 2 ? Math.abs(c.icMean) : c.ic === null ? -1 : Math.abs(c.ic));
+  cols.sort((a, b) => (tier(a) - tier(b)) || (strength(b) - strength(a)) ||
+    (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
 
-  const table = { k, minN, cols };
+  const table = {
+    k, minN, cols,
+    sessionMinN,
+    rankedFrom: rankOverlaps * k,
+    ranked: cols.filter((c) => c.ranked).length,
+    unscaled,
+  };
+  if (cal !== calendar) table.through = through;
 
   if (epoch) table.epoch = epoch;
   if (kSet.length > 1) table.horizons = kSet.slice().sort((a, b) => a - b);
@@ -294,8 +405,24 @@ export function icTable(datedBoards, closesByTicker, calendar, {
 }
 
 export const RECORD_NOTES = {
-  method: "spearman = pearson(percentileRank(feature), percentileRank(forward return)); " +
-    "returns are close-to-close price returns from each row's published px, raw, not side-signed",
+  method: "spearman = pearson(percentileRank(feature), percentileRank(forward return)), " +
+    "measured WITHIN each session on the return scaled by the name's own daily volatility " +
+    "at entry, r / (σ·√k), and averaged across sessions; the pooled coefficient beside it " +
+    "ranks every session's raw pairs together and is secondary. Returns are close-to-close " +
+    "price returns from each row's published px, raw, not side-signed",
+  perSession: "one rank correlation pooled across sessions scores a volatility feature on " +
+    "which way the market went: in a session that rose, the volatile names sit at the top " +
+    "of the return ranking, and in one that fell, at the bottom. Each session is therefore " +
+    `ranked on its own, once it holds ${IC_SESSION_MIN_N} measured names, and the table ` +
+    "reports the mean of those session coefficients, their standard deviation, the share " +
+    "that were positive, and the correlation between each session's coefficient and that " +
+    "session's mean forward return. A feature whose session coefficient tracks the " +
+    "market's return is a bet on direction, not a ranking signal, whatever its mean",
+  ranking: "k-session windows that start on consecutive sessions overlap, so N scored " +
+    "sessions hold about N/k independent readings. A feature is ranked, and carries a " +
+    "t-statistic of mean / (sd / √(N/k)), only from " + IC_RANK_OVERLAPS + "k scored " +
+    "sessions; below that its mean is printed unranked and no t is computed. An exit " +
+    "dated after the last completed session is not scored: a bar still trading is not a close",
   selection: "archived rows are the published extremes only, so these are ICs conditional " +
     "on selection, not universe ICs",
   overlap: "consecutive sessions share most of a multi-session window, so n counts rows, " +

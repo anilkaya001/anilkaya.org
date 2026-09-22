@@ -1332,16 +1332,24 @@ ${shell("Track record", "Options-flow intelligence", "history", username, `
       <table class="flows-table rec-table rec-feat">
         <caption class="flows-caption">
           The rank correlation of each archived board column with the forward
-          price return, pooled across every retained session and both sides.
-          This is the research loop, in public: the features the score is
-          built from, measured against what happened next, with the sample
+          return, measured inside each session on the return scaled by the
+          name’s own volatility, then averaged across sessions. A single
+          correlation pooled across sessions scores a volatility column on
+          which way the market went; it is kept, labelled, as the secondary
+          figure. This is the research loop, in public: the features the score
+          is built from, measured against what happened next, with the sample
           they were measured on. An IC near zero is a finding too.
         </caption>
         <thead>
           <tr>
             <th scope="col">Feature</th>
-            <th scope="col" class="c-num"><abbr title="Spearman information coefficient: rank correlation with the forward price return at the stated horizon">IC</abbr></th>
-            <th scope="col" class="c-num"><abbr title="Measured feature-return pairs. Consecutive sessions overlap, so the effective sample is far smaller">n</abbr></th>
+            <th scope="col" class="c-num"><abbr title="Mean of the per-session Spearman coefficients with the volatility-scaled forward return at the stated horizon">Mean IC</abbr></th>
+            <th scope="col" class="c-num"><abbr title="Standard deviation of the per-session coefficients">SD</abbr></th>
+            <th scope="col" class="c-num"><abbr title="Sessions whose coefficient was positive, of the sessions scored">Positive</abbr></th>
+            <th scope="col" class="c-num"><abbr title="Mean over its standard error with the effective sample of sessions divided by the horizon; computed only once a feature is ranked">t</abbr></th>
+            <th scope="col" class="c-num"><abbr title="Correlation of each session’s coefficient with that session’s mean forward return: near one means the feature is a bet on market direction">Market</abbr></th>
+            <th scope="col" class="c-num"><abbr title="Secondary: one Spearman coefficient over every session’s raw pairs pooled together">Pooled IC</abbr></th>
+            <th scope="col" class="c-num"><abbr title="Measured feature-return pairs behind the pooled figure. Consecutive sessions overlap, so the effective sample is far smaller">Pairs</abbr></th>
           </tr>
         </thead>
         <tbody id="recFeatBody"></tbody>

@@ -426,7 +426,23 @@
     "dp": "a flag on names that also carry a deep section; it is 1 wherever it is present",
   };
 
-  const NOTE_LABELS = { method: "Method", selection: "Selection", overlap: "Overlap", calendar: "Calendar" };
+  const NOTE_LABELS = {
+    method: "Method", perSession: "Per session", ranking: "Ranking",
+    selection: "Selection", overlap: "Overlap", calendar: "Calendar",
+  };
+
+  const signed = (v, d) => {
+    const n = isNum(v);
+    return n === null ? DASH : (n < 0 ? MINUS : n > 0 ? "+" : "") + Math.abs(n).toFixed(d);
+  };
+
+  function why(td, text, title) {
+    const span = document.createElement("span");
+    span.className = "rec-ic-why";
+    span.textContent = String(text);
+    if (title) td.title = String(title);
+    td.append(span);
+  }
 
   function renderFeatures(features) {
     const wrap = document.getElementById("recFeatWrap");
@@ -446,6 +462,7 @@
       return;
     }
 
+    const rankedFrom = isNum(features.rankedFrom);
     body.textContent = "";
     const frag = document.createDocumentFragment();
     for (const col of features.cols) {
@@ -463,20 +480,34 @@
       }
       tr.append(th);
 
-      const ic = isNum(col.ic);
-      const icCell = cell(
-        ic === null ? DASH : (ic < 0 ? MINUS : ic > 0 ? "+" : "") + Math.abs(ic).toFixed(3),
-        "c-num");
-
-      if (ic === null && col.reason) {
-        const why = document.createElement("span");
-        why.className = "rec-ic-why";
-        why.textContent = String(col.reason);
-        icCell.append(why);
+      const mean = isNum(col.icMean);
+      const sessions = isNum(col.icSessions);
+      const meanCell = cell(signed(mean, 3), "c-num c-icm");
+      if (mean === null) {
+        if (col.icReason) why(meanCell, col.icReason);
+      } else if (col.ranked !== true) {
+        const need = isNum(col.rankedFrom) ?? rankedFrom;
+        why(meanCell, "unranked \u00b7 " + (sessions === null ? DASH : sessions) +
+          (need === null ? "" : " of " + need) + " sessions", col.rankReason);
       }
+      tr.append(meanCell);
+
+      const sd = isNum(col.icSd);
+      tr.append(cell(sd === null ? DASH : sd.toFixed(3), "c-num c-icsd"));
+
+      const pos = isNum(col.icPos);
+      tr.append(cell(pos === null || sessions === null ? DASH
+        : Math.round(pos * sessions) + " of " + sessions, "c-num c-icpos"));
+
+      tr.append(cell(signed(col.icT, 2), "c-num c-ict"));
+      tr.append(cell(signed(col.icMkt, 2), "c-num c-icmkt"));
+
+      const ic = isNum(col.ic);
+      const icCell = cell(signed(ic, 3), "c-num c-icp");
+      if (ic === null && col.reason) why(icCell, col.reason);
       tr.append(icCell);
 
-      tr.append(cell(isNum(col.n) === null ? DASH : String(col.n), "c-num"));
+      tr.append(cell(isNum(col.n) === null ? DASH : String(col.n), "c-num c-pairs"));
       frag.append(tr);
     }
     body.append(frag);
@@ -487,10 +518,15 @@
     meta.className = "rec-note";
     const k = isNum(features.k);
     const minN = isNum(features.minN);
+    const sessionMinN = isNum(features.sessionMinN);
     meta.textContent = "Horizon: " + (k === null ? DASH : k + " sessions") +
-      " \u00b7 floor: " + (minN === null ? DASH : minN + " pairs") + ".";
+      " \u00b7 floor: " + (minN === null ? DASH : minN + " pairs") +
+      (sessionMinN === null ? "" : " pooled, " + sessionMinN + " names a session") +
+      (rankedFrom === null ? "" : " \u00b7 ranked from " + rankedFrom + " scored sessions") +
+      (typeof features.through === "string" && ISO_DAY.test(features.through)
+        ? " \u00b7 exits scored through " + features.through : "") + ".";
     notes.append(meta);
-    for (const key of ["method", "selection", "overlap", "calendar"]) {
+    for (const key of Object.keys(NOTE_LABELS)) {
       if (typeof features[key] !== "string" || !features[key].trim()) continue;
       const said = features[key].trim();
       const p = document.createElement("p");
