@@ -403,6 +403,25 @@ const CARD = {
   assert.deepEqual(rich.preferred, STATE_STRUCTURES["premium-rich"].preferred, "and prefers short-premium structures"); checks++;
   eq(rich.invalidation.kind, "priced_low", "invalidated at the priced range end on the side the flow leans");
 
+  const pinnedCard = JSON.parse(JSON.stringify(CARD));
+  pinnedCard.panels.pricedMove = { ...pinnedCard.panels.pricedMove, iv30: 0.033, rv30: 0.3727, vrp: -0.3397,
+    ivRank: 0, ivMomentum: -0.249, richness: "event-pinned",
+    pin: { signals: ["collapse", "floor", "ratio"], moveRatio: 0.089, weekAgoIv: 0.282, lastRange: 0.0021, rangeRatio: 0.09 } };
+  const cheapCard = JSON.parse(JSON.stringify(pinnedCard));
+  cheapCard.panels.pricedMove.richness = "cheap";
+  delete cheapCard.panels.pricedMove.pin;
+  const cheapSt = regimeState(cheapCard, { expectedSession: "2026-09-15" });
+  const pinnedSt = regimeState(pinnedCard, { expectedSession: "2026-09-15" });
+  eq(cheapSt.premium, "cheap", "unflagged, a 3.3% implied against 37.3% realised reads as cheap premium");
+  eq(pinnedSt.premium, "pinned",
+     "flagged as pinned by an event (WBD 2026-09-21), the same numbers read as a pin, not as cheap premium");
+  ok(pinnedSt.drivers.filter((d) => d.axis === "premium").every((d) => d.vote === 0 && d.weight === 0),
+     "and no premium driver votes — realised volatility that holds the deal's jump is not the yardstick");
+  ok(!pinnedSt.preferred.includes("long straddle") && !pinnedSt.preferred.includes("long strangle") &&
+     pinnedSt.avoid.includes("long straddle") && pinnedSt.avoid.includes("long strangle"),
+     `a pinned name never prefers a long straddle or strangle, and rules both out (${pinnedSt.preferred.join(", ")})`);
+  ok(pinnedSt.preferred.length > 0, "while still naming what it does prefer");
+
   const staleSt = regimeState(CARD, { expectedSession: "2026-09-16" });
   ok(staleSt.stale === true && staleSt.confidence <= 1 && /capped/.test(stateSentence(staleSt, "SYN1")),
      "a card behind the last closed session caps the state's confidence at weak and says so");

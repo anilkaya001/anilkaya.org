@@ -372,6 +372,16 @@ function premiumAxis(card) {
   const drivers = [];
   let reading = null, base = 0;
   const pm = P.pricedMove;
+  if (okPanel(pm) && pm.richness === "event-pinned") {
+    const r = panelRobustness("pricedMove", "volatility", pm, card).r;
+    const pin = pm.pin && typeof pm.pin === "object" ? pm.pin : {};
+    drivers.push({ key: "pricedMove", robustness: r, weight: 0, axis: "premium", vote: 0,
+      reading: pct1(num(pm.iv30)) + "% implied against " + pct1(num(pm.rv30)) + "% realised" +
+        (num(pin.weekAgoIv) !== null ? ", down from " + pct1(num(pin.weekAgoIv)) + "% a week ago" : "") +
+        (num(pin.lastRange) !== null ? ", on a last session that traded a " + (num(pin.lastRange) * 100).toFixed(2) + "% range" : "") +
+        ": the price is pinned by an event, so realised volatility is not the yardstick and premium is read as neither rich nor cheap" });
+    return { reading: "fair", robustness: r, drivers, pinned: true };
+  }
   if (okPanel(pm)) {
     const r = panelRobustness("pricedMove", "volatility", pm, card).r;
     const iv = num(pm.iv30), rv = num(pm.rv30), vrp = num(pm.vrp);
@@ -623,12 +633,15 @@ export function regimeState(card, extras) {
     : state === "squeeze" || state === "amplifying"
       ? (direction === "bullish" ? STATE_STRUCTURES.bull[prem] : direction === "bearish" ? STATE_STRUCTURES.bear[prem] : STATE_STRUCTURES.shortNoSide[prem])
       : state === "transitional" ? STATE_STRUCTURES.transitional[prem] : STATE_STRUCTURES[state];
-  const preferred = table.preferred.filter((x) => !(direction && state === "transitional" && x === "no position"));
+  const pinnedOut = premium.pinned ? ["long straddle", "long strangle"] : [];
+  const preferred = table.preferred.filter((x) => !(direction && state === "transitional" && x === "no position") && !pinnedOut.includes(x));
   if (state === "transitional" && direction) preferred.push(direction === "bullish" ? "call debit spread" : "put debit spread");
+  if (!preferred.length) preferred.push("no position");
+  if (premium.pinned) notes.push("the priced move reads as pinned by an event, so no long-volatility structure is preferred");
   const out = {
-    version: STATE_VERSION, state, direction, flow, confidence, premium: premium.reading,
+    version: STATE_VERSION, state, direction, flow, confidence, premium: premium.pinned ? "pinned" : premium.reading,
     drivers: drivers.filter((d) => d.robustness > 0), invalidation, horizon, target, bound,
-    preferred, avoid: [...table.avoid], stale, notes,
+    preferred, avoid: [...new Set([...table.avoid, ...pinnedOut])], stale, notes,
   };
   out.chip = stateChip(out);
   out.brief = stateBrief(out, str(c.ticker));

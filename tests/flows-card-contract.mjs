@@ -530,8 +530,60 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "and the realized band uses the same rule, so the two are comparable");
   ok(pm.impliedMove > pm.realizedMove,
      "a positive variance risk premium means the priced band is wider than the delivered one");
-  ok(Math.abs((pm.impliedHigh - pm.impliedLow) / 2 / 100 - pm.impliedMove) < 1e-4,
-     "the published prices agree with the published fraction");
+  ok(Math.abs(Math.log(pm.impliedHigh / 100) - pm.impliedMove) < 1e-4 &&
+     Math.abs(Math.log(100 / pm.impliedLow) - pm.impliedMove) < 1e-4,
+     "the published prices agree with the published fraction, as log-normal ends");
+  ok(100 - pm.impliedLow < pm.impliedHigh - 100,
+     `so the band is not symmetric in price: the down end sits closer to spot (${pm.impliedLow}, ${pm.impliedHigh})`);
+  eq(pm.band, "lognormal", "and it says which band it is");
+  ok(/Log-normal band/.test(pm.bandNote) && /no skew reading/.test(pm.bandNote),
+     "with a note naming the construction and why no skew was applied");
+  ok(Math.abs(Math.log(pm.realizedHigh / 100) - pm.realizedMove) < 1e-4,
+     "the realized band is built the same way, so the two stay comparable");
+
+  const wing = (putTraded, callTraded, k = 0.06) => ({
+    status: "ok", skew: k,
+    skewBasis: { expiry: "2026-09-04", days: 11, putTraded, callTraded, putIv: 0.45, callIv: 0.39 },
+  });
+  const skewed = buildPricedMove({ spot: 100, iv30: 0.42, rv30: 0.31, vrp: 0.11, sessions: 10,
+    skew: wing(1, 1) });
+  eq(skewed.band, "skew", "with both wings traded the band leans on the card's skew");
+  near(Math.log(100 / skewed.impliedLow), 0.45 * Math.sqrt(10 / 252), 1e-4,
+    "its down end at iv30 plus half the put-minus-call skew");
+  near(Math.log(skewed.impliedHigh / 100), 0.39 * Math.sqrt(10 / 252), 1e-4,
+    "and its up end at iv30 minus half");
+  ok(skewed.impliedLow < pm.impliedLow && skewed.impliedHigh < pm.impliedHigh,
+     "so a put-bid skew moves both ends down, which is the invalidation level the state reads");
+  eq(skewed.impliedMove, pm.impliedMove, "while the published move stays the at-the-money figure");
+  ok(/Skew-adjusted/.test(skewed.bandNote) && /11-day/.test(skewed.bandNote),
+     `and the note names the wing tenor it borrowed (${skewed.bandNote.slice(0, 80)})`);
+  assert.deepEqual([skewed.bandSkew.skew, skewed.bandSkew.days], [0.06, 11], "the skew it used rides the panel"); checks++;
+  ok(/leaning down on the wing skew/.test(skewed.lead.say), `the lead says which way it leans (${skewed.lead.say})`);
+  eq(buildPricedMove({ spot: 100, iv30: 0.42, rv30: 0.31, sessions: 10, skew: wing(1, 0) }).band, "lognormal",
+     "a skew resting on a wing that did not trade today is not applied");
+  ok(/did not trade today/.test(buildPricedMove({ spot: 100, iv30: 0.42, rv30: 0.31, sessions: 10,
+    skew: wing(0, 1) }).bandNote), "and the note says so");
+  eq(buildPricedMove({ spot: 100, iv30: 0.05, rv30: 0.31, sessions: 10, skew: wing(1, 1, 0.2) }).band,
+     "lognormal", "nor is a skew wider than twice the level, which would put a wing below zero");
+
+  const wbd = {
+    spot: 30.8, impliedMovePerc: 0.007, iv30: 0.033, rv30: 0.3727, vrp: 0.033 - 0.3727,
+    ivRank: 0, ivMomentum: 0.033 - 0.282, sessions: 10,
+  };
+  const pinned = buildPricedMove({ ...wbd, lastRange: { range: 0.0021, date: "2026-09-22" } });
+  eq(pinned.richness, "event-pinned",
+     "a deal-pinned name (WBD 2026-09-21: iv30 3.3% after 28.2% a week earlier, rank 0, a 0.21% " +
+     "range the session after a +10.8% jump) is not read as cheap premium");
+  assert.deepEqual(pinned.pin.signals, ["collapse", "floor", "ratio"], "every implied-volatility signal fired"); checks++;
+  ok(pinned.pin.rangeRatio < 0.35, `and the price's own range confirms the pin (${pinned.pin.rangeRatio})`);
+  ok(/pinned by an event/.test(pinned.lead.say) && /no rich-or-cheap verdict/.test(pinned.lead.say),
+     `the lead says so rather than calling it cheap (${pinned.lead.say})`);
+  eq(buildPricedMove({ ...wbd, lastRange: { range: 0.03, date: "2026-09-22" } }).richness, "cheap",
+     "while the same implied collapse on a name still trading a normal range stays a cheap verdict");
+  eq(buildPricedMove({ ...wbd, lastRange: null }).richness, "event-pinned",
+     "with no range to read, an implied move under a quarter of realized is pin enough");
+  eq(buildPricedMove({ ...wbd, ivMomentum: 0, ivRank: 0.5, iv30: 0.3, vrp: -0.07, lastRange: null }).richness,
+     "cheap", "and an ordinary cheap name fires no pin signal at all");
 
   ok(Math.abs(horizonMove(0.42, { sessions: 252 }) - 0.42) < 1e-12,
      "a full year of sessions returns the annual figure unchanged");

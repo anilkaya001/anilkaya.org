@@ -321,13 +321,71 @@ export function buildDisplacement(strikeRows, { atr, spot } = {}) {
 
 export const RICHNESS_LINE = 0.1;
 
+export const PIN_LINES = Object.freeze({
+  moveRatio: 0.25,
+  ivFloor: 0.10,
+  ivRankFloor: 0.02,
+  weekCollapse: 0.5,
+  rangeRatio: 0.35,
+});
+
+export function lastRangeOf(candles) {
+  if (!Array.isArray(candles) || !candles.length) return null;
+  const c = candles[candles.length - 1];
+  if (!Array.isArray(c) || c.length < 5) return null;
+  const hi = numOrNull(c[2]), lo = numOrNull(c[3]), close = numOrNull(c[4]);
+  if (hi === null || lo === null || close === null || !(close > 0) || hi < lo) return null;
+  return { range: (hi - lo) / close, date: typeof c[0] === "string" ? c[0].slice(0, 10) : null };
+}
+
+export function pinReading({ iv30, rv30, ivRank, ivMomentum, impliedH, realizedH, lastRange }) {
+  const iv = numOrNull(iv30), rv = numOrNull(rv30);
+  if (iv === null || !(iv > 0)) return null;
+  const weekAgo = numOrNull(ivMomentum) === null ? null : iv - ivMomentum;
+  const signals = [];
+  if (weekAgo !== null && weekAgo > 0 && iv < PIN_LINES.weekCollapse * weekAgo) signals.push("collapse");
+  const rank = numOrNull(ivRank);
+  if (iv < PIN_LINES.ivFloor && rank !== null && rank <= PIN_LINES.ivRankFloor) signals.push("floor");
+  const moveRatio = impliedH !== null && realizedH !== null && realizedH > 0 ? impliedH / realizedH : null;
+  if (moveRatio !== null && moveRatio < PIN_LINES.moveRatio) signals.push("ratio");
+  if (!signals.length) return null;
+  const daily = rv !== null && rv > 0 ? rv / Math.sqrt(252) : null;
+  const range = lastRange && numOrNull(lastRange.range) !== null ? lastRange.range : null;
+  const rangeRatio = range !== null && daily !== null ? range / daily : null;
+  const pinned = rangeRatio !== null ? rangeRatio < PIN_LINES.rangeRatio : signals.includes("ratio");
+  if (!pinned) return null;
+  return {
+    signals,
+    moveRatio: moveRatio === null ? null : Number(moveRatio.toFixed(3)),
+    weekAgoIv: weekAgo === null ? null : Number(weekAgo.toFixed(4)),
+    lastRange: range === null ? null : Number(range.toFixed(5)),
+    lastRangeDate: lastRange && lastRange.date ? lastRange.date : null,
+    rangeRatio: rangeRatio === null ? null : Number(rangeRatio.toFixed(3)),
+  };
+}
+
+function skewWings(skew, iv) {
+  if (!skew || typeof skew !== "object" || iv === null) return null;
+  const k = numOrNull(skew.skew);
+  const b = skew.skewBasis && typeof skew.skewBasis === "object" ? skew.skewBasis : null;
+  if (k === null || !b) return null;
+  if (b.putTraded !== 1 || b.callTraded !== 1) return null;
+  const down = iv + k / 2, up = iv - k / 2;
+  if (!(down > 0) || !(up > 0)) return null;
+  return { skew: k, down, up, days: numOrNull(b.days), expiry: typeof b.expiry === "string" ? b.expiry : null };
+}
+
 export function buildPricedMove({
   spot, impliedMovePerc, vrp, iv30, rv30, ivRank, ivMomentum, atmVol, ivStrip, asOf,
   sessions = HORIZON_SESSIONS,
+
+  skew = null,
+  lastRange = null,
 }) {
   const s = numOrNull(spot);
   const m = numOrNull(impliedMovePerc);
-  const impliedH = horizonMove(numOrNull(iv30), { sessions });
+  const iv = numOrNull(iv30);
+  const impliedH = horizonMove(iv, { sessions });
   const realizedH = horizonMove(numOrNull(rv30), { sessions });
 
   if (s === null || !(s > 0)) return unavailable("no spot price");
@@ -335,35 +393,73 @@ export function buildPricedMove({
 
   const quoted = m !== null && m > 0;
 
+  const wings = impliedH === null ? null : skewWings(skew, iv);
+  const scale = Math.sqrt(sessions / 252);
+  const downH = impliedH === null ? null : wings ? wings.down * scale : impliedH;
+  const upH = impliedH === null ? null : wings ? wings.up * scale : impliedH;
+  const impliedLow = downH === null ? null : Number((s * Math.exp(-downH)).toFixed(2));
+  const impliedHigh = upH === null ? null : Number((s * Math.exp(upH)).toFixed(2));
+
+  const pin = pinReading({ iv30: iv, rv30, ivRank, ivMomentum, impliedH, realizedH, lastRange });
+
   const pct = (x) => Number((x * 100).toFixed(1));
+  const bandNote = impliedH === null ? null
+    : wings
+      ? `Skew-adjusted log-normal band: the down end is priced at 30-day implied volatility plus ` +
+        `half the ${wings.days === null ? "" : wings.days + "-day "}put-minus-call wing skew ` +
+        `(${pct(wings.skew)} points), the up end at it minus half, each as ` +
+        `spot × exp(±σ√(${sessions}/252)). Both wings traded today, so the skew is used; the ` +
+        `band's centre stays on 30-day implied volatility and only its lean comes from the wings.`
+      : `Log-normal band: spot × exp(±σ√(${sessions}/252)) at 30-day implied volatility, so the ` +
+        `down end sits closer to spot than the up end. No skew is applied: ` +
+        (skew && numOrNull(skew.skew) !== null
+          ? "the card's skew reading rests on a wing that did not trade today."
+          : "the card carries no skew reading.");
+
   const lead = (() => {
     if (impliedH !== null) {
-      const lo = Number((s * (1 - impliedH)).toFixed(2));
-      const hi = Number((s * (1 + impliedH)).toFixed(2));
+      const downPct = pct(1 - impliedLow / s), upPct = pct(impliedHigh / s - 1);
+      const said = wings
+        ? `Options price ${sessions} session${sessions === 1 ? "" : "s"} from −${downPct}% ` +
+          `to +${upPct}% — ${impliedLow.toFixed(2)} to ${impliedHigh.toFixed(2)}, leaning ` +
+          `${wings.skew > 0 ? "down" : wings.skew < 0 ? "up" : "neither way"} on the wing skew`
+        : `Options price a ±${pct(impliedH)}% move over ${sessions} session` +
+          `${sessions === 1 ? "" : "s"} — ${impliedLow.toFixed(2)} to ${impliedHigh.toFixed(2)}`;
+      const pinSaid = pin
+        ? ` That is ${pct(impliedH)}% against ${pct(realizedH ?? 0)}% realized, with implied ` +
+          `volatility at ${pct(iv)}%: the price reads as pinned by an event, so no ` +
+          `rich-or-cheap verdict is drawn.`
+        : "";
       return panelLead(
-        `Options price a \u00b1${pct(impliedH)}% move over ${sessions} session` +
-        `${sessions === 1 ? "" : "s"} \u2014 ${lo.toFixed(2)} to ${hi.toFixed(2)}` +
-        (realizedH === null
-          ? ", with no realized volatility to compare it against."
-          : `, against ${pct(realizedH)}% realized.`),
+        said +
+        (pin ? "." + pinSaid
+          : realizedH === null
+            ? ", with no realized volatility to compare it against."
+            : `, against ${pct(realizedH)}% realized.`),
         {
           impliedPct: pct(impliedH),
           sessions,
-          low: lo,
-          high: hi,
+          low: impliedLow,
+          high: impliedHigh,
+          downPct,
+          upPct,
           realizedPct: realizedH === null ? null : pct(realizedH),
+          ivPct: pin ? pct(iv) : null,
         });
     }
     if (!quoted) return null;
     const lo = Number((s * (1 - m)).toFixed(2));
     const hi = Number((s * (1 + m)).toFixed(2));
     return panelLead(
-      `Options price a \u00b1${pct(m)}% move to the nearest end-of-week expiry ` +
+      `Options price a ±${pct(m)}% move to the nearest end-of-week expiry ` +
 
-      `\u2014 ${lo.toFixed(2)} to ${hi.toFixed(2)}. No interpolated implied ` +
+      `— ${lo.toFixed(2)} to ${hi.toFixed(2)}. No interpolated implied ` +
       `volatility, so no fixed-horizon band to compare across names.`,
       { quotedPct: pct(m), low: lo, high: hi });
   })();
+
+  const verdict = numOrNull(vrp) === null || numOrNull(rv30) === null || !(rv30 > 0) ? null
+    : vrp / rv30 >= RICHNESS_LINE ? "rich" : vrp / rv30 <= -RICHNESS_LINE ? "cheap" : "fair";
 
   return ok({
     lead,
@@ -376,15 +472,22 @@ export function buildPricedMove({
 
     sessions,
     impliedMove: impliedH === null ? null : Number(impliedH.toFixed(5)),
-    impliedLow: impliedH === null ? null : Number((s * (1 - impliedH)).toFixed(2)),
-    impliedHigh: impliedH === null ? null : Number((s * (1 + impliedH)).toFixed(2)),
+    impliedLow,
+    impliedHigh,
     realizedMove: realizedH === null ? null : Number(realizedH.toFixed(5)),
-    realizedLow: realizedH === null ? null : Number((s * (1 - realizedH)).toFixed(2)),
-    realizedHigh: realizedH === null ? null : Number((s * (1 + realizedH)).toFixed(2)),
+    realizedLow: realizedH === null ? null : Number((s * Math.exp(-realizedH)).toFixed(2)),
+    realizedHigh: realizedH === null ? null : Number((s * Math.exp(realizedH)).toFixed(2)),
+
+    band: impliedH === null ? null : wings ? "skew" : "lognormal",
+    bandNote,
+    bandSkew: wings
+      ? { skew: Number(wings.skew.toFixed(4)), days: wings.days, expiry: wings.expiry,
+          downVol: Number(wings.down.toFixed(4)), upVol: Number(wings.up.toFixed(4)) }
+      : null,
 
     spot: s,
     vrp: numOrNull(vrp),
-    iv30: numOrNull(iv30),
+    iv30: iv,
     rv30: numOrNull(rv30),
 
     ivRank: numOrNull(ivRank),
@@ -396,8 +499,8 @@ export function buildPricedMove({
       ? ivStrip.map((p) => ({ h: p.h, v: numOrNull(p.v) }))
       : null,
 
-    richness: numOrNull(vrp) === null || numOrNull(rv30) === null || !(rv30 > 0) ? null
-      : vrp / rv30 >= RICHNESS_LINE ? "rich" : vrp / rv30 <= -RICHNESS_LINE ? "cheap" : "fair",
+    richness: pin && verdict !== null ? "event-pinned" : verdict,
+    pin: pin || null,
   }, asOf);
 }
 
@@ -1481,6 +1584,8 @@ export function buildCard({
         ivStrip: f.ivStrip,
         asOf: sessionDate,
         sessions: HORIZON_SESSIONS,
+        skew: chain && chain.skewTerm && chain.skewTerm.status === "ok" ? chain.skewTerm : null,
+        lastRange: lastRangeOf(f.candles),
       }),
       context: contextPanel,
 

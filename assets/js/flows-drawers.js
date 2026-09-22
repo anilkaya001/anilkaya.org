@@ -941,7 +941,10 @@
     const quoted = isNum(panel.movePerc);
     const sessions = isNum(panel.sessions) ?? 10;
 
-    const widest = Math.max(imp ?? 0, real ?? 0, quoted ?? 0);
+    const lowPx = isNum(panel.impliedLow), highPx = isNum(panel.impliedHigh);
+    const downLog = imp !== null && lowPx !== null && lowPx > 0 && spot > 0 ? Math.log(spot / lowPx) : imp;
+    const upLog = imp !== null && highPx !== null && spot > 0 ? Math.log(highPx / spot) : imp;
+    const widest = Math.max(imp ?? 0, downLog ?? 0, upLog ?? 0, real ?? 0, quoted ?? 0);
     if (!(widest > 0) || spot === null) {
       return quietPanel(host, question, "no band could be measured");
     }
@@ -958,9 +961,9 @@
     });
 
     if (imp !== null) {
-      const h = halfOf(imp);
-      svg.append(svgEl("rect", { class: "pm-band is-implied", x: mid - h, y: 34, width: h * 2, height: 30, rx: 3 }));
-      for (const [x, txt] of [[mid - h, px2(panel.impliedLow)], [mid + h, px2(panel.impliedHigh)]]) {
+      const hL = halfOf(downLog), hH = halfOf(upLog);
+      svg.append(svgEl("rect", { class: "pm-band is-implied", x: mid - hL, y: 34, width: hL + hH, height: 30, rx: 3 }));
+      for (const [x, txt] of [[mid - hL, px2(panel.impliedLow)], [mid + hH, px2(panel.impliedHigh)]]) {
         const t = svgEl("text", { class: "pm-lab", x, y: 26, "text-anchor": "middle" });
         t.textContent = txt;
         svg.append(t);
@@ -1040,7 +1043,9 @@
     ]));
 
     host.append(qualifier("THIS IS A PRICE, NOT A FORECAST."));
-    appendMethod(host, [el("p", "fc-note",
+    appendMethod(host, [
+      ...(typeof panel.bandNote === "string" && panel.bandNote ? [el("p", "fc-note", panel.bandNote)] : []),
+      el("p", "fc-note",
       `The wide band is 30-day implied volatility ` +
       `scaled to ${sessions} trading sessions by the square-root-of-time rule, which ` +
       `is exact whenever successive returns are uncorrelated — no fitted parameter, ` +
