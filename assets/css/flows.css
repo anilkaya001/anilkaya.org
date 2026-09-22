@@ -230,10 +230,6 @@
   color: var(--ink-dim);
 }
 
-@media (max-width: 71.99rem) {
-  .flows-body .lab-full { display: none; }
-  .flows-body .lab-short { display: inline; }
-}
 .flows-signout {
   min-height: 44px;
   padding: 0 0.9rem;
@@ -2450,10 +2446,6 @@ body.is-stale .flows-tablewrap {
 @media (pointer: coarse) {
   .topbar__out .flows-signout { padding: 0.6rem 0.8rem; }
   .flows-find-i { font-size: max(1rem, 16px); min-height: 44px; }
-}
-@media (max-width: 72rem) {
-  .flows-body .lab-full { display: none; }
-  .flows-body .lab-short { display: inline; }
 }
 @media (max-width: 46rem) {
 
