@@ -4189,6 +4189,20 @@
   };
   let chartTab = "price";
 
+  function breakNote(c) {
+    const breaks = c && Array.isArray(c.breaks) ? c.breaks.filter((b) => b && typeof b === "object") : [];
+    if (!breaks.length) return "";
+    const last = breaks[breaks.length - 1];
+    const ratio = isNum(last.ratio), before = isNum(last.before), vr = isNum(last.volumeRatio);
+    const shape = last.shape === "split" ? "the shape of an unadjusted split"
+      : last.shape === "regime" ? "a step no continuous series makes" : "a step the volume could not be read against";
+    return "; the vendor\u2019s history steps on " + String(last.date || "an undated session") +
+      (ratio === null ? "" : " (close \u00d7" + (ratio >= 1 ? ratio.toFixed(2) : ratio.toFixed(4)) +
+        (vr === null ? "" : ", volume \u00d7" + (vr >= 10 ? vr.toFixed(0) : vr.toFixed(2))) + " against the sessions before, " + shape + ")") +
+      ", so the " + (before === null ? "sessions" : before + " session" + (before === 1 ? "" : "s")) +
+      " before it are cut and every price figure on this card reads the sessions since";
+  }
+
   function chartSeries(key, card) {
     const panels = (card && card.panels) || {};
     const ok = (k) => { const p = panels[k]; return p && p.status === "ok" ? p : null; };
@@ -4206,7 +4220,7 @@
           clock: "one " + (chartStyle === "line" ? "mark" : "candle") + " a session, " +
             candles.length + " of them, " + candles[0][0] + " to " +
             candles[candles.length - 1][0] + " — a session the vendor could not price " +
-            "is absent rather than bridged",
+            "is absent rather than bridged" + breakNote(c),
           sma: showSma && sma.some((v) => isNum(v) !== null),
           points: candles.map((r, i) => {
             const o = isNum(r[1]), h = isNum(r[2]), l = isNum(r[3]), v = isNum(r[4]);
@@ -4691,10 +4705,16 @@
       host.hidden = false;
       return;
     }
+    host.hidden = false;
+    const ewmaAll = Array.isArray(g.ewma) ? g.ewma : [];
     const all = g.condVol.map((v, i) => ({
-      v: isNum(v), r: isNum(g.returns[i]),
+      v: isNum(v), r: isNum(g.returns[i]), w: isNum(ewmaAll[i]),
       label: Array.isArray(g.dates) && g.dates[i] ? String(g.dates[i]) : "Session " + (i + 1),
     }));
+    const pm = (card.panels || {}).pricedMove;
+    const pmOk = pm && pm.status === "ok" ? pm : null;
+    const ivLevel = pmOk ? (isNum(pmOk.atmVol) !== null ? pmOk.atmVol * 100 : isNum(pmOk.iv30) !== null ? pmOk.iv30 * 100 : null) : null;
+    const rvLevel = pmOk && isNum(pmOk.rv30) !== null ? pmOk.rv30 * 100 : null;
     const have = all.length;
     for (const pd of GARCH_PERIODS) {
       const b = el("button", "ft-period-b" + (garchPeriod === pd.key ? " is-on" : ""), pd.key);
@@ -4715,16 +4735,21 @@
     const pts = per && per.n < have ? all.slice(have - per.n) : all;
     const n = pts.length;
 
-    const W = 620, H = 230, padL = 34, padR = 10, padT = 14, padB = 20;
-    const retH = 54, gap = 10;
+    const hostW = body.clientWidth || (host.clientWidth ? host.clientWidth - 30 : 0);
+    const W = Math.max(320, Math.min(720, Math.round(hostW) || 620));
+    const H = Math.max(210, Math.round(W * 0.37)), padL = 36, padR = 10, padT = 14, padB = 20;
+    const retH = Math.max(48, Math.round(H * 0.24)), gap = 10;
     const plotL = padL, plotW = W - padL - padR;
     const plotT = padT, plotH = H - padT - padB - retH - gap;
     let vhi = 0, rmax = 0;
     for (const pt of pts) {
       if (pt.v !== null && pt.v > vhi) vhi = pt.v;
+      if (pt.w !== null && pt.w > vhi) vhi = pt.w;
       if (pt.r !== null && Math.abs(pt.r) > rmax) rmax = Math.abs(pt.r);
     }
+    for (const lv of [ivLevel, rvLevel]) if (lv !== null && lv > vhi) vhi = lv;
     if (!(vhi > 0)) vhi = 1;
+    vhi *= 1.08;
     if (!(rmax > 0)) rmax = 1;
     const x = (i) => plotL + (n === 1 ? plotW / 2 : (i / (n - 1)) * plotW);
     const y = (v) => plotT + plotH - (v / vhi) * plotH;
@@ -4762,7 +4787,28 @@
       d += (pen ? "L" : "M") + x(i).toFixed(2) + " " + y(v).toFixed(2) + " ";
       pen = true;
     }
+    let dw = "", penW = false;
+    for (let i = 0; i < n; i++) {
+      const w = pts[i].w;
+      if (w === null) { penW = false; continue; }
+      dw += (penW ? "L" : "M") + x(i).toFixed(2) + " " + y(w).toFixed(2) + " ";
+      penW = true;
+    }
+    if (dw) svg.append(svgEl("path", { class: "ft-garch-ewma", d: dw.trim(), fill: "none" }));
+    const levelLabels = [];
+    const levelLine = (lv, cls, label, below) => {
+      if (lv === null) return;
+      const yy = y(lv);
+      svg.append(svgEl("line", { class: "ft-garch-lvl " + cls, x1: plotL, x2: plotL + plotW, y1: yy, y2: yy }));
+      const t = svgEl("text", { class: "ft-garch-lvl-t " + cls, x: plotL + 3, y: below ? yy + 10 : yy - 3 });
+      t.textContent = label + " " + lv.toFixed(1) + "%";
+      levelLabels.push(t);
+    };
+    const ivAbove = ivLevel === null || rvLevel === null || ivLevel >= rvLevel;
+    levelLine(rvLevel, "is-rv", "RV 30d", ivAbove);
+    levelLine(ivLevel, "is-iv", "IV ATM", !ivAbove);
     svg.append(svgEl("path", { class: "ft-chart-line ft-garch-line", d: d.trim(), fill: "none" }));
+    for (const t of levelLabels) svg.append(t);
     const e0 = svgEl("text", { class: "ft-chart-ax", x: plotL, y: H - 6 });
     e0.textContent = pts[0].label;
     svg.append(e0);
@@ -4778,6 +4824,7 @@
           x: x(i), label: pt.label,
           rows: [
             { k: "Conditional vol", v: pt.v === null ? "not published" : pt.v.toFixed(1) + "% annualised" },
+            { k: "EWMA 0.94", v: pt.w === null ? "not published" : pt.w.toFixed(1) + "% annualised" },
             { k: "Daily return", v: pt.r === null ? "not published"
               : (pt.r > 0 ? "+" : pt.r < 0 ? "−" : "") + Math.abs(pt.r).toFixed(2) + "%",
               cls: pt.r === null ? "" : pt.r > 0 ? "is-pos" : pt.r < 0 ? "is-neg" : "" },
@@ -4786,15 +4833,21 @@
       });
     }
     const legend = el("div", "ft-garch-legend");
-    legend.append(el("span", "ft-garch-lg is-vol", "Conditional volatility, annualised"),
-      el("span", "ft-garch-lg is-ret", "Daily return"));
+    legend.append(el("span", "ft-garch-lg is-vol", "GARCH conditional volatility, annualised"));
+    if (dw) legend.append(el("span", "ft-garch-lg is-ewma", "EWMA(0.94) reference"));
+    if (ivLevel !== null) legend.append(el("span", "ft-garch-lg is-iv", "Implied ATM"));
+    if (rvLevel !== null) legend.append(el("span", "ft-garch-lg is-rv", "Realised 30d"));
+    legend.append(el("span", "ft-garch-lg is-ret", "Daily return"));
     body.append(legend);
 
     const skewt = g.dist === "skewt";
     const nu = skewt ? isNum(g.nu) : null, lam = skewt ? isNum(g.lambda) : null;
     const nuCeiling = nu !== null && nu >= 29.95;
     const heading = $("ftGarchH");
-    if (heading) heading.textContent = "GARCH(1,1) \u2014 " + (skewt ? "skewed t" : "fitted before the skewed t");
+    if (heading) {
+      heading.replaceChildren(document.createTextNode("GARCH(1,1) \u2014 "),
+        el("span", "ft-chart-h-q", skewt ? "skewed t" : "fitted before the skewed t"));
+    }
     const lastVol = isNum(g.lastVol) !== null ? isNum(g.lastVol)
       : (all.length && all[all.length - 1].v !== null ? all[all.length - 1].v : null);
     const nextVol = isNum(g.nextVol), longRun = isNum(g.longRunVol);
@@ -4842,16 +4895,34 @@
         : nu < 5 ? "heavy tails" : nu < 15 ? "moderately heavy tails" : "tails close to the normal\u2019s";
       const side = lam === null ? "" : lam < -0.05 ? "the heavier tail on the downside"
         : lam > 0.05 ? "the heavier tail on the upside" : "no material skew";
-      sub.textContent = "Fitted by maximum likelihood on " + (nn === null ? "the" : nn) +
-        " daily log returns" + (d0 && d1 ? ", " + d0 + " to " + d1 : "") + ", demeaned once" +
+      const capped = isNum(g.capped);
+      const lastRet = Array.isArray(g.returns) && g.returns.length ? isNum(g.returns[g.returns.length - 1]) : null;
+      const lastCapped = lastRet !== null && isNum(g.cap) !== null && Math.abs(lastRet) > g.cap;
+      const brk = breakNote(c);
+      const robust = typeof g.method === "string" && /variance targeting/.test(g.method);
+      sub.textContent = "Fitted by " + (robust ? "penalised maximum likelihood with variance targeting" : "maximum likelihood") +
+        " on " + (nn === null ? "the" : nn) + " daily log returns" + (d0 && d1 ? ", " + d0 + " to " + d1 : "") +
+        ", demeaned once" +
+        (robust ? " and winsorised at six robust standard deviations" +
+          (capped === null ? "" : capped === 0 ? " (no session reached the cap)"
+            : " (" + capped + " session" + (capped === 1 ? "" : "s") + " capped for the fit, drawn as they happened)") : "") +
         (skewt
           ? "; the innovations are Hansen\u2019s skewed t" +
             (tails || side ? " (" + [tails, side].filter(Boolean).join(", ") + ")" : "") + "."
           : "; this card\u2019s fit predates the skewed-t innovations and is refitted at the next nightly run.") +
         " The path is the model\u2019s conditional standard deviation, annualised, windowed to " +
-        garchPeriod + "." +
+        garchPeriod + (dw ? ", beside the RiskMetrics EWMA at 0.94 on the returns as they happened, a model-free reference" : "") +
+        (ivLevel !== null || rvLevel !== null ? "; the flat rules are " +
+          [ivLevel !== null ? "the at-the-money implied volatility" : null, rvLevel !== null ? "the realised volatility over 30 sessions" : null]
+            .filter(Boolean).join(" and ") + " from the priced-move panel" : "") + "." +
         (g.converged === false ? " The fit did not settle: " + String(g.reason || "") +
           " \u2014 the path is what the likelihood found and no more." : "") +
+        (robust ? " Variance targeting fixes the long run at the sample variance of the returns as the fit saw them" +
+          (capped ? ", " + capped + " session" + (capped === 1 ? "" : "s") + " capped" : "") +
+          ", so the long-run cell is a measurement and not a ratio of two edge values." : "") +
+        (robust && lastCapped ? " The last session\u2019s return exceeded the cap, so the next-session cell is recursed off the capped shock of " +
+          isNum(g.cap).toFixed(2) + "%, not the bar drawn." : "") +
+        (brk ? " The vendor" + brk.slice("; the vendor".length) + "." : "") +
         " The next-session cell is the recursion\u2019s own next state, fixed by the last shock and " +
         "the last variance; it carries no claim about the return\u2019s sign or size.";
     }
@@ -5878,6 +5949,12 @@
           : idea.direction === "bearish" ? " is-neg" : ""), String(idea.direction)));
       }
       if (typeof idea.robustnessWord === "string") chips.append(el("span", "ft-idea-chip is-grade", idea.robustnessWord));
+      if (idea.fromState === true) {
+        const own = el("span", "ft-idea-chip is-state", "implied state");
+        own.title = "Computed from the implied state; no model wrote it.";
+        chips.append(own);
+        li.classList.add("is-state");
+      }
       li.append(chips);
       if (idea.thesis) li.append(el("p", "ft-idea-p", String(idea.thesis)));
       const meta = el("dl", "ft-idea-m");
@@ -5890,6 +5967,82 @@
       list.append(li);
     });
     foldIdeas(list, more);
+  }
+
+  function stateDots(host, confidence) {
+    host.replaceChildren();
+    const c = isNum(confidence) === null ? 0 : confidence;
+    host.className = host.className.replace(/\br[0-3]\b/g, "").trim() + " r" + c;
+    for (let k = 1; k <= 3; k++) host.append(el("i", k <= c ? "is-on" : ""));
+  }
+
+  function paintState(ctx) {
+    const host = $("ftNeuronState"), word = $("ftStateWord"), conf = $("ftStateConf");
+    const chip = $("ftStateChip"), meta = $("ftStateMeta");
+    const hb = $("ftHeroStateB"), hv = $("ftHeroState"), hs = $("ftHeroStateSide"), hseg = $("ftHeroStateSeg");
+    const st = ctx && ctx.state && typeof ctx.state === "object" && typeof ctx.state.state === "string" ? ctx.state : null;
+    if (!st) {
+      if (host) host.hidden = true;
+      if (hb) hb.hidden = true;
+      return;
+    }
+    const side = st.direction || st.flow || null;
+    const sideCls = side === "bullish" ? " is-pos" : side === "bearish" ? " is-neg" : "";
+    const undetermined = st.state === "undetermined";
+    const label = typeof st.word === "string" ? st.word : st.state;
+    if (host && word && conf && chip && meta) {
+      host.className = "ft-state is-" + st.state + sideCls;
+      word.textContent = label;
+      stateDots(conf, st.confidence);
+      conf.title = "Confidence " + (isNum(st.confidence) === null ? "unpublished" : st.confidence + " of 3") + ": " +
+        (st.stale === true ? "capped at 1 because the card is behind the last closed session."
+          : st.state === "premium-rich" || st.state === "premium-cheap"
+            ? "the priced-move grade, less one when an implied-volatility driver disagrees with it."
+            : "the positioning grade less one for a marginal ladder, a flip inside 1.5 ATR or a split flow vote.");
+      chip.textContent = typeof st.chip === "string" ? st.chip : "";
+      meta.replaceChildren();
+      const put = (k, v, cls) => {
+        if (!v) return;
+        const dd = el("dd", cls || "", v);
+        meta.append(el("dt", "", k), dd);
+      };
+      if (!undetermined) {
+        put("Flow", st.flow ? st.flow : "no side resolved", st.flow === "bullish" ? "is-pos" : st.flow === "bearish" ? "is-neg" : "");
+        put("Premium", typeof st.premium === "string" ? st.premium : "unreadable");
+        put("Prefer", Array.isArray(st.preferred) && st.preferred.length ? st.preferred.join(" \u00b7 ") : null);
+        put("Avoid", Array.isArray(st.avoid) && st.avoid.length ? st.avoid.join(" \u00b7 ") : null);
+        const inv = st.invalidation && typeof st.invalidation === "object" ? st.invalidation : null;
+        put("Ends past", inv && isNum(inv.px) !== null ? String(inv.label || inv.kind || "level").toLowerCase() + " " + inv.px.toFixed(2) : null);
+        const hz = st.horizon && typeof st.horizon === "object" ? st.horizon : null;
+        put("Horizon", hz ? (hz.kind === "priced_sessions" ? hz.value + " sessions" : String(hz.value) +
+          (isNum(hz.days) !== null ? " (" + hz.days + "d)" : "")) : null);
+      }
+      meta.hidden = !meta.childElementCount;
+      host.hidden = false;
+    }
+    if (hb && hv) {
+      hv.textContent = label;
+      hv.className = "ft-hero-v ft-hero-v--word" + (undetermined ? "" : sideCls);
+      if (undetermined) hv.setAttribute("data-empty", "unavailable"); else hv.removeAttribute("data-empty");
+      hb.title = typeof st.brief === "string" ? st.brief : (typeof st.chip === "string" ? st.chip : "");
+      const hc = $("ftHeroStateChip");
+      if (hc) {
+        const tail = typeof st.chip === "string" ? st.chip.replace(/^[^\u00b7]*\u00b7\s*/, "") : "";
+        hc.textContent = tail + (!undetermined && Array.isArray(st.preferred) && st.preferred.length
+          ? " \u2014 prefer " + st.preferred.slice(0, 2).join(" or ") : "");
+      }
+      if (hs) {
+        hs.textContent = side ? side.toUpperCase() : "";
+        hs.className = "ft-hero-pill" + sideCls;
+        hs.hidden = !side || undetermined;
+      }
+      if (hseg) {
+        stateDots(hseg, undetermined ? 0 : st.confidence);
+        hseg.className = "ft-hero-seg ft-hero-seg--3";
+        hseg.hidden = undetermined;
+      }
+      hb.hidden = false;
+    }
   }
 
   function paintNeuronCoverage(cov, ctx) {
@@ -5920,6 +6073,7 @@
     const mark = host.querySelector(".ak-nn");
     const ctx = r && r.context && typeof r.context === "object" ? r.context : null;
     const byKey = new Map(ctx && Array.isArray(ctx.features) ? ctx.features.map((f) => [f.key, f]) : []);
+    paintState(ctx);
     host.hidden = false;
     host.classList.toggle("is-pending", status !== "ok");
     host.classList.toggle("is-llm", status === "ok" && r.llm === true);

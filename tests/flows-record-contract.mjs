@@ -44,6 +44,21 @@ const one0 = (v) => (v === null || v === undefined ? NaN : v);
   const gone = forwardClose(closes, cal, idx(cal), "T", "2026-08-06", 1);
   eq(gone.state, "lost",
      "while a missing close on an existing exit date is attrition");
+  const breaks = new Map([["T", ["2026-08-10"]]]);
+  eq(forwardClose(closes, cal, idx(cal), "T", "2026-08-07", 1, breaks).state, "lost",
+     "a vendor history break between entry and exit is attrition too: the entry price and the exit close are not the same series");
+  eq(forwardClose(closes, cal, idx(cal), "T", "2026-08-10", 0, breaks).state, "ok",
+     "a break on the entry date itself does not sit between entry and exit");
+  eq(forwardClose(closes, cal, idx(cal), "U", "2026-08-07", 1, new Map([["U", ["2026-08-10"]]])).state, "lost",
+     "and the break is looked up by the name, never bleeding onto another");
+  {
+    const rows = { long: [{ t: "T", px: 1100 }], short: [] };
+    const split = closesOf({ T: { "2026-08-10": 55 } });
+    const across = scoreSessionAt(rows, split, cal, idx(cal), "2026-08-07", 1);
+    const held = scoreSessionAt(rows, split, cal, idx(cal), "2026-08-07", 1, breaks);
+    ok(across.state === "ok" && across.long < -0.9 && held.state === "ok" && held.long === null && held.lost === 1,
+       `without the breaks a 20:1 split scores as a 95% loss; with them the session is lost, not scored (${across.long} vs ${held.long})`);
+  }
 }
 
 {

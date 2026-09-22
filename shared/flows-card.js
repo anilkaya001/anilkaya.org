@@ -390,7 +390,7 @@ export function buildPricedMove({
 }
 
 export function buildContext(
-  { closes, closeDates, r5, r21, r42, week52Pos, changePct, candles, garch },
+  { closes, closeDates, r5, r21, r42, week52Pos, changePct, candles, garch, breaks, rangeSessions },
   { asOf = null } = {},
 ) {
 
@@ -417,8 +417,10 @@ export function buildContext(
 
   const posPct = fields.week52Pos === null ? null : fields.week52Pos * 100;
   const r21Pct = fields.r21 === null ? null : fields.r21 * 100;
+  const span = numOrNull(rangeSessions);
+  const fullYear = span === null || span >= 252;
   const where = posPct === null ? null
-    : `Sitting at ${posPct.toFixed(0)}% of its 52-week range`;
+    : `Sitting at ${posPct.toFixed(0)}% of its ${fullYear ? "52-week" : `${span}-session`} range`;
   const moved = r21Pct === null ? null
     : `${r21Pct >= 0 ? "up" : "down"} ${Math.abs(r21Pct).toFixed(1)}% over 21 sessions`;
   const lead = panelLead(
@@ -430,8 +432,7 @@ export function buildContext(
       week52Pos: posPct === null ? null : Number(posPct.toFixed(0)),
       r21: r21Pct === null ? null : Number(Math.abs(r21Pct).toFixed(1)),
       sessions: 21,
-
-      weeks: 52,
+      ...(fullYear ? { weeks: 52 } : { rangeSessions: span }),
     });
 
   return ok({
@@ -448,6 +449,13 @@ export function buildContext(
     ...candleFields(candles),
 
     ...(garch && typeof garch === "object" ? { garch } : {}),
+    ...(span !== null && !fullYear ? { rangeSessions: span } : {}),
+    ...(Array.isArray(breaks) && breaks.length ? { breaks: breaks.map((b) => ({
+      date: typeof b.date === "string" ? b.date.slice(0, 10) : null,
+      ratio: numOrNull(b.ratio), before: numOrNull(b.before),
+      volumeRatio: numOrNull(b.volumeRatio),
+      shape: typeof b.shape === "string" ? b.shape : null,
+    })) } : {}),
   }, asOf);
 }
 
@@ -1358,6 +1366,8 @@ export function buildCard({
     changePct: prev !== null && prev > 0 && close !== null ? (close - prev) / prev : null,
     candles: f.candles,
     garch: f.garch,
+    breaks: f.priceBreaks,
+    rangeSessions: f.rangeSessions,
   }, { asOf: sessionDate });
 
   return {

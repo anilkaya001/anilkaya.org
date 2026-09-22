@@ -3921,6 +3921,10 @@ try {
         note: document.getElementById("ftGarchS").textContent,
         leftovers: host.querySelectorAll(".ft-garch-bin, .ft-garch-dist, .ft-garch-ged, .ft-garch-dsvg").length,
         path: host.querySelectorAll(".ft-garch-line").length,
+        ewma: host.querySelectorAll(".ft-garch-ewma").length,
+        levels: [...host.querySelectorAll(".ft-garch-lvl-t")].map((t) => t.textContent),
+        legend: [...host.querySelectorAll(".ft-garch-lg")].map((t) => t.textContent),
+        qualifier: host.querySelector("#ftGarchH .ft-chart-h-q") ? getComputedStyle(host.querySelector("#ftGarchH .ft-chart-h-q")).whiteSpace : null,
       };
     });
     ok(!garch.hidden, "a fitted name shows the volatility card");
@@ -3938,6 +3942,36 @@ try {
     eq(garch.leftovers, 0, "no histogram, density or GED block survives");
     eq(garch.path, 1, "the conditional-volatility path is drawn once");
     ok(!/GED/.test(garch.note), "the note carries no trace of the GED");
+    eq(garch.ewma, 1, "the EWMA reference path is drawn beside it");
+    {
+      const pmv = fitted.panels.pricedMove;
+      const want = [];
+      if (pmv && pmv.status === "ok" && typeof pmv.rv30 === "number") want.push("RV 30d " + (pmv.rv30 * 100).toFixed(1) + "%");
+      if (pmv && pmv.status === "ok" && (typeof pmv.atmVol === "number" || typeof pmv.iv30 === "number")) {
+        want.push("IV ATM " + ((typeof pmv.atmVol === "number" ? pmv.atmVol : pmv.iv30) * 100).toFixed(1) + "%");
+      }
+      assert.deepEqual(garch.levels, want,
+        "the realised and implied levels are ruled across the path with their figures, exactly when the priced-move panel carries them"); checks++;
+      ok(garch.legend[0].startsWith("GARCH") && garch.legend.includes("EWMA(0.94) reference") && garch.legend[garch.legend.length - 1] === "Daily return",
+         `the legend names the model path first, the reference and the levels, and the returns last (${garch.legend.join(" | ")})`);
+    }
+    ok(/penalised maximum likelihood with variance targeting/.test(garch.note) && /winsorised at six robust standard deviations/.test(garch.note),
+       "the note names the method and the winsorising");
+    ok(/RiskMetrics EWMA at 0.94/.test(garch.note) && /long-run cell is a measurement/.test(garch.note),
+       "and explains the reference path and why the long-run cell can now be trusted");
+    eq(garch.qualifier, "nowrap", "the heading's qualifier is one unbreakable phrase, so it never wraps mid-sentence");
+    {
+      const broken = JSON.parse(JSON.stringify(fitted));
+      broken.panels.context.breaks = [{ date: "2026-04-06", ratio: 0.0426, before: 117, volumeRatio: 20.5, shape: "split" }];
+      await mount(page, broken, { ticker: broken.ticker, station: "all" });
+      const notes = await page.evaluate(() => ({
+        garch: document.getElementById("ftGarchS").textContent,
+        price: document.getElementById("ftChartS").textContent,
+      }));
+      ok(/The vendor\u2019s history steps on 2026-04-06 \(close \u00d70\.0426, volume \u00d721 against the sessions before, the shape of an unadjusted split\), so the 117 sessions before it are cut/.test(notes.garch),
+         `a history break is named on the volatility card with its date, the price and volume steps, what shape that is and the sessions cut (${notes.garch.slice(-300)})`);
+      ok(/history steps on 2026-04-06/.test(notes.price), "and on the price chart, which reads the same sessions");
+    }
 
     const older = JSON.parse(JSON.stringify(fitted));
     delete older.panels.context.garch.dist;
@@ -4003,13 +4037,20 @@ try {
           ideas: [
             { title: "Put wall credit", structure: "put credit spread", direction: "bullish", thesis: "Thesis one.",
               invalidation: "a close below the put wall", horizon: "ten sessions", restsOn: ["gamma", "levels"],
-              robustness: 3, robustnessWord: "robust" },
+              robustness: 3, robustnessWord: "robust", fromState: true },
             { title: "Front straddle", structure: "long straddle", direction: "neutral", thesis: "Thesis two.",
               invalidation: "the range holding", horizon: "the front expiry", restsOn: ["volContext", "calendar"],
               robustness: 2, robustnessWord: "fair" },
           ],
-          context: { version: 1, sessionDate: "2026-09-21", expectedSession: "2026-09-21", stale: false,
+          context: { version: 2, sessionDate: "2026-09-21", expectedSession: "2026-09-21", stale: false,
             coverage: { features: 24, read: 20, quiet: 1, withheld: 3, robust: 8, fair: 10, weak: 3 },
+            state: { version: 1, state: "amplifying", word: "Amplifying", direction: "bullish", flow: "bullish", confidence: 2,
+              premium: "rich", chip: "Amplifying \u00b7 short gamma, flow bullish, to the flip 44.59",
+              brief: "The greeks imply an amplifying state for X with flow bullish (confidence 2 of 3).",
+              preferred: ["put credit spread", "call debit spread"], avoid: ["iron condor", "call credit spread"],
+              invalidation: { kind: "max_pain", px: 42.5, label: "Max pain" }, target: null,
+              bound: { kind: "gamma_flip", px: 44.59, label: "Gamma flip" },
+              horizon: { kind: "priced_sessions", value: 10, low: 39.63, high: 46.83, days: null }, stale: false, notes: [], drivers: [] },
             features: [{ key: "gamma", title: "Gamma convexity" }, { key: "levels", title: "Key levels & distance to spot" },
               { key: "volContext", title: "Volatility context" }, { key: "calendar", title: "Gamma roll-off" }] },
         };
@@ -4060,8 +4101,46 @@ try {
        "a fair idea lights two of three");
     ok(neuron.ideas.every((i) => i.lit),
        "and every lit dot has a painted background, so the grade is visible and not a token that never resolved");
-    assert.deepEqual(neuron.ideas[0].chips, ["put credit spread", "bullish", "robust"],
-      "the chips carry the structure, the direction and the grade word"); checks++;
+    assert.deepEqual(neuron.ideas[0].chips, ["put credit spread", "bullish", "robust", "implied state"],
+      "the chips carry the structure, the direction, the grade word and, on the state's own idea, its origin"); checks++;
+    const stateUi = await page.evaluate(() => {
+      const host = document.getElementById("ftNeuronState");
+      const hero = document.getElementById("ftHeroStateB");
+      const meta = [...host.querySelectorAll("#ftStateMeta dt")].map((d, i) => [d.textContent, host.querySelectorAll("#ftStateMeta dd")[i].textContent]);
+      return {
+        hidden: host.hidden, cls: host.className,
+        word: document.getElementById("ftStateWord").textContent,
+        dots: host.querySelectorAll("#ftStateConf i.is-on").length,
+        chip: document.getElementById("ftStateChip").textContent,
+        meta,
+        heroHidden: hero.hidden,
+        heroWord: document.getElementById("ftHeroState").textContent,
+        heroSide: document.getElementById("ftHeroStateSide").textContent,
+        heroSideCls: document.getElementById("ftHeroStateSide").className,
+        heroDots: hero.querySelectorAll("#ftHeroStateSeg i.is-on").length,
+        heroInk: getComputedStyle(document.getElementById("ftHeroState")).color,
+        stripInk: getComputedStyle(document.getElementById("ftStateWord")).color,
+        heroTop: hero.offsetTop, heroLeft: hero.offsetLeft, heroRight: hero.offsetLeft + hero.offsetWidth,
+        heroChip: document.getElementById("ftHeroStateChip").textContent,
+        ivrBottom: document.getElementById("ftHeroIvrB").offsetTop + document.getElementById("ftHeroIvrB").offsetHeight,
+        ivrRight: document.getElementById("ftHeroIvrB").offsetLeft + document.getElementById("ftHeroIvrB").offsetWidth,
+        idLeft: document.querySelector(".ft-hero-id").offsetLeft,
+      };
+    });
+    ok(!stateUi.hidden && /is-amplifying/.test(stateUi.cls) && /is-pos/.test(stateUi.cls) && stateUi.word === "Amplifying" && stateUi.dots === 2,
+       `the implied state strip names the state, its side and its confidence (${stateUi.cls}, ${stateUi.dots} dots)`);
+    ok(stateUi.chip === "Amplifying \u00b7 short gamma, flow bullish, to the flip 44.59", "and quotes the chip the server wrote");
+    assert.deepEqual(stateUi.meta, [["Flow", "bullish"], ["Premium", "rich"], ["Prefer", "put credit spread \u00b7 call debit spread"],
+      ["Avoid", "iron condor \u00b7 call credit spread"], ["Ends past", "max pain 42.50"], ["Horizon", "10 sessions"]],
+      "with the flow, the premium, the structures it prefers and rules out, where it ends and how long it runs"); checks++;
+    ok(!stateUi.heroHidden && stateUi.heroWord === "Amplifying" && stateUi.heroSide === "BULLISH" && /is-pos/.test(stateUi.heroSideCls) && stateUi.heroDots === 2,
+       "the hero carries the same state as a sixth block with its side pill and confidence dots");
+    ok(stateUi.heroInk !== "rgba(0, 0, 0, 0)" && stateUi.stripInk !== "rgba(0, 0, 0, 0)", "in inks that resolved");
+    ok(stateUi.heroTop >= stateUi.ivrBottom && Math.abs(stateUi.heroLeft - stateUi.idLeft) <= 1 && stateUi.heroRight >= stateUi.ivrRight - 1,
+       `as a band beneath the blocks from the name's left edge to the last block's right edge, never an orphan tile beside a void (layout geometry, since the hero's children scale in with a delay) ` +
+       `(${stateUi.heroLeft}..${stateUi.heroRight} against ${stateUi.idLeft}..${stateUi.ivrRight}, top ${stateUi.heroTop} vs ${stateUi.ivrBottom})`);
+    ok(stateUi.heroChip === "short gamma, flow bullish, to the flip 44.59 \u2014 prefer put credit spread or call debit spread",
+       `the band carries the chip's reading and the first two preferred structures (${stateUi.heroChip})`);
     ok(neuron.ideas[0].rests.some((d) => d === "Gamma convexity · Key levels & distance to spot"),
        "the features an idea rests on are named by their titles, joined by a middle dot");
     ok(!neuron.covHidden && /Neuron read 20 of 24 features/.test(neuron.cov) && /nothing here is advice/.test(neuron.cov),

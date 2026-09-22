@@ -744,7 +744,45 @@ function atr14(candles) {
   return atr;
 }
 
-function computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, ohlc, sessionDate, tilt }) {
+const CANDLE_BREAK_LOG = 0.4;
+const CANDLE_BREAK_VOLUME = 4;
+
+function medianVolume(rows) {
+  const xs = rows.map((c) => num(c.volume)).filter((v) => v > 0).sort((a, b) => a - b);
+  return xs.length ? xs[xs.length >> 1] : null;
+}
+
+function repairCandles(candles) {
+  const rows = candlesAscending(candles);
+  const breaks = [];
+  let cut = 0;
+  let prev = null;
+  for (let i = 0; i < rows.length; i++) {
+    const b = num(rows[i].close);
+    if (!(b > 0)) continue;
+    if (prev !== null && Math.abs(Math.log(b / prev)) > CANDLE_BREAK_LOG) {
+      const ratio = b / prev;
+      const before = medianVolume(rows.slice(Math.max(0, i - 10), i));
+      const after = medianVolume(rows.slice(i, i + 10));
+      const volumeRatio = before !== null && after !== null ? after / before : null;
+      const scaled = volumeRatio !== null && Math.abs(Math.log(volumeRatio * ratio)) <= Math.log(2);
+      const regime = volumeRatio !== null && (volumeRatio >= CANDLE_BREAK_VOLUME || volumeRatio <= 1 / CANDLE_BREAK_VOLUME);
+      if (volumeRatio === null || scaled || regime) {
+        breaks.push({
+          date: candleDate(rows[i]), ratio: Number(ratio.toPrecision(4)), before: i,
+          volumeRatio: volumeRatio === null ? null : Number(volumeRatio.toPrecision(3)),
+          shape: scaled ? "split" : regime ? "regime" : "unverified",
+        });
+        cut = i;
+      }
+    }
+    prev = b;
+  }
+  return { candles: cut ? rows.slice(cut) : rows, breaks };
+}
+
+function computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, ohlc: rawOhlc, sessionDate, tilt }) {
+  const { candles: ohlc, breaks } = repairCandles(rawOhlc);
   const purity = flowPurity(greekFlow);
   const quality = positioningQuality(greekFlow);
   const gamma = aggressorGamma(strikes, { spot });
@@ -841,11 +879,13 @@ function computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, oh
     ]),
 
     garch: fitGarch(closes, candlesAscending(ohlc).map(candleDate)),
+    priceBreaks: breaks,
 
     r5: ret(closes, 5),
     r21: ret(closes, 21),
     r42: ret(closes, 42),
     week52Pos: week52Position(closes),
+    rangeSessions: Math.min(252, closes.filter((c) => Number.isFinite(c) && c > 0).length),
 
     coverage: usable.filter(Boolean).length / usable.length,
     sources: {
@@ -853,7 +893,8 @@ function computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, oh
       ticks: path.bars,
       strikes: gamma.ladder.length,
       expiries: calendar.schedule.length,
-      candles: ohlc.length,
+      candles: (rawOhlc || []).length,
+      candlesKept: ohlc.length,
     },
   };
 }
@@ -1017,7 +1058,7 @@ function collapseShareClasses(records, { minCorr = 0.97 } = {}) {
       .sort((a, b) => b.features.dollarVolume - a.features.dollarVolume);
     const keeper = ranked[0];
     for (const other of ranked.slice(1)) {
-      const r = returnCorrelation(keeper.raw.ohlc, other.raw.ohlc);
+      const r = returnCorrelation(repairCandles(keeper.raw.ohlc).candles, repairCandles(other.raw.ohlc).candles);
       if (Number.isFinite(r) && r >= minCorr) {
         remove.add(other.features.ticker);
         dropped.push({ kept: keeper.features.ticker, dropped: other.features.ticker, corr: r });
@@ -1368,6 +1409,16 @@ function buildRecordCloses(enriched, universe, datedBoards, sessionDate) {
     for (const c of e.raw.ohlc || []) put(e.row.ticker, candleDate(c), c.close);
   }
   return closes;
+}
+
+function buildRecordBreaks(enriched) {
+  const breaks = new Map();
+  for (const e of enriched) {
+    const dates = ((e.features && e.features.priceBreaks) || [])
+      .map((b) => b && b.date).filter((d) => typeof d === "string" && d.length === 10);
+    if (dates.length) breaks.set(e.row.ticker, dates);
+  }
+  return breaks;
 }
 
 function selectExtremes(ranked, n) {
@@ -3289,6 +3340,7 @@ async function main() {
       absent: archiveAbsent = 0, recovered: archiveRecovered = 0,
       statuses: archiveStatuses = [], abandoned: archiveAbandoned = false } = archiveWalk;
     const recordCloses = buildRecordCloses(enriched, universe, datedBoards, sessionDate);
+    const recordBreaks = buildRecordBreaks(enriched);
     const recordCalendar = tradingCalendar([
       ...enriched.map((e) => (e.raw.ohlc || []).map(candleDate)),
       datedBoards.map((b) => b.d),
@@ -3300,9 +3352,11 @@ async function main() {
       maxSessions: RECORD_MAX_SESSIONS,
 
       epoch: SELECTION_EPOCH,
+      breaks: recordBreaks,
     });
     const features = icTable(datedBoards, recordCloses, recordCalendar, {
       k: HORIZON_SESSIONS, minN: RECORD_IC_MIN_N, pearson, percentileRank,
+      breaks: recordBreaks,
     });
     await publish("record", {
       v: BOARD_SCHEMA_VERSION,
@@ -4676,7 +4730,7 @@ async function main() {
 
 export {
   partitionSides, screenerTilt, eligible, atr14, daysToEarnings, medianDollarVolume,
-  candlesAscending, selectExtremes, scoreBoard, publish, summarize,
+  candlesAscending, repairCandles, CANDLE_BREAK_LOG, CANDLE_BREAK_VOLUME, selectExtremes, scoreBoard, publish, summarize,
   collapseShareClasses, returnCorrelation, packSpark, ret, easternNow,
   computeFeatures, DEAD_BAND, BOARD_SCHEMA_VERSION,
   boardRow, toRows, toWatchRows, datedKey, pruneKeys, pruneArchive,

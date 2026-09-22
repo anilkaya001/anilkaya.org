@@ -11,17 +11,19 @@ export function tradingCalendar(dateSets) {
   return [...all].sort();
 }
 
-export function forwardClose(closesByTicker, calendar, calendarIdx, ticker, d, k) {
+export function forwardClose(closesByTicker, calendar, calendarIdx, ticker, d, k, breaks = null) {
   const i = calendarIdx.get(d);
   if (i === undefined) return { state: "lost" };
   const j = i + k;
   if (j >= calendar.length) return { state: "unclosed" };
   const date = calendar[j];
+  const cuts = breaks instanceof Map ? breaks.get(ticker) : null;
+  if (Array.isArray(cuts) && cuts.some((b) => typeof b === "string" && b > d && b <= date)) return { state: "lost" };
   const exit = fin(closesByTicker.get(ticker)?.get(date));
   return exit === null ? { state: "lost" } : { state: "ok", exit, date };
 }
 
-export function scoreSessionAt(rowsBySide, closesByTicker, calendar, calendarIdx, d, k) {
+export function scoreSessionAt(rowsBySide, closesByTicker, calendar, calendarIdx, d, k, breaks = null) {
   let names = 0, lost = 0, hits = 0, measured = 0;
   let unclosed = false;
   const legs = {};
@@ -32,7 +34,7 @@ export function scoreSessionAt(rowsBySide, closesByTicker, calendar, calendarIdx
       names++;
       const entry = fin(row && row.px);
       if (entry === null || entry <= 0) { lost++; continue; }
-      const fc = forwardClose(closesByTicker, calendar, calendarIdx, row.t, d, k);
+      const fc = forwardClose(closesByTicker, calendar, calendarIdx, row.t, d, k, breaks);
       if (fc.state === "unclosed") { unclosed = true; continue; }
       if (fc.state === "lost") { lost++; continue; }
       const r = fc.exit / entry - 1;
@@ -62,6 +64,7 @@ export function scoreSessions(datedBoards, closesByTicker, calendar, {
   statedK = 10,
   maxSessions = 30,
   epoch = null,
+  breaks = null,
 } = {}) {
   const calendarIdx = new Map(calendar.map((d, i) => [d, i]));
 
@@ -81,7 +84,7 @@ export function scoreSessions(datedBoards, closesByTicker, calendar, {
     const spreads = [];
     let hits = 0, measured = 0, hitSessions = 0;
     for (const d of subset) {
-      const s = scoreSessionAt(byDate.get(d), closesByTicker, calendar, calendarIdx, d, k);
+      const s = scoreSessionAt(byDate.get(d), closesByTicker, calendar, calendarIdx, d, k, breaks);
       if (s.state !== "ok") continue;
       if (s.ls !== null) spreads.push(s.ls);
       if (s.measured > 0) {
@@ -130,7 +133,7 @@ export function scoreSessions(datedBoards, closesByTicker, calendar, {
 
   const sessions = [];
   for (const d of [...dates].reverse()) {
-    const s = scoreSessionAt(byDate.get(d), closesByTicker, calendar, calendarIdx, d, statedK);
+    const s = scoreSessionAt(byDate.get(d), closesByTicker, calendar, calendarIdx, d, statedK, breaks);
     if (s.state !== "ok") continue;
     const row = {
       d,
@@ -194,6 +197,7 @@ export function icTable(datedBoards, closesByTicker, calendar, {
   epoch = null,
 
   horizons = null,
+  breaks = null,
 } = {}) {
   if (typeof pearson !== "function" || typeof percentileRank !== "function") {
     throw new Error("icTable needs the pearson and percentileRank helpers");
@@ -223,7 +227,7 @@ export function icTable(datedBoards, closesByTicker, calendar, {
       const keys = Object.keys(cols);
       if (!keys.length) continue;
       for (const h of kSet) {
-        const fc = forwardClose(closesByTicker, calendar, calendarIdx, row.t, b.d, h);
+        const fc = forwardClose(closesByTicker, calendar, calendarIdx, row.t, b.d, h, breaks);
         if (fc.state !== "ok") continue;
         const y = fc.exit / entry - 1;
         for (const key of keys) {
@@ -299,8 +303,9 @@ export const RECORD_NOTES = {
     "roughly n/10",
   calendar: "the trading calendar is the union of observed close dates; a k-session " +
     "horizon walks that calendar, never calendar days",
-  attrition: "a name with no close at the exit date is counted in `lost` and excluded " +
-    "from every mean — never scored as zero",
+  attrition: "a name with no close at the exit date, or whose vendor price history breaks " +
+    "between entry and exit (an unadjusted split or a re-listed series), is counted in `lost` " +
+    "and excluded from every mean — never scored as zero and never scored across the break",
   epoch: "the selection rule that decides which names a board publishes changed on the " +
     "stated date; sessions before it were drawn from a different pool, so their mean is " +
     "reported separately rather than averaged into the current one — same headings, " +

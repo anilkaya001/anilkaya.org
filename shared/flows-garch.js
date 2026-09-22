@@ -40,28 +40,41 @@ export function skewtDensity(z, nu, lambda) {
   return Math.exp(skewtLogDensity(z, nu, lambda));
 }
 
-function unpack(p) {
+export const GARCH_PERSIST_CAP = 0.999;
+export const GARCH_PRIOR = Object.freeze({
+  persistence: 0.95, persistenceSd: 1.0, share: 0.1, shareSd: 0.7,
+});
+export const GARCH_WINSOR_K = 6;
+export const GARCH_EWMA_LAMBDA = 0.94;
+
+const logit = (q) => Math.log(q / (1 - q));
+
+function unpack(p, v0) {
   const sig = (v) => 1 / (1 + Math.exp(-v));
-  const omega = Math.exp(p[0]);
-  const persist = sig(p[1]) * 0.9999;
-  const share = sig(p[2]);
+  const persist = sig(p[0]) * GARCH_PERSIST_CAP;
+  const share = sig(p[1]);
   const alpha = persist * share;
   const beta = persist - alpha;
-  const nu = SKEWT_NU_MIN + (SKEWT_NU_MAX - SKEWT_NU_MIN) * sig(p[3]);
-  const lambda = SKEWT_LAMBDA_MAX * Math.tanh(p[4]);
+  const omega = v0 * (1 - persist);
+  const nu = SKEWT_NU_MIN + (SKEWT_NU_MAX - SKEWT_NU_MIN) * sig(p[2]);
+  const lambda = SKEWT_LAMBDA_MAX * Math.tanh(p[3]);
   return { omega, alpha, beta, nu, lambda };
 }
 
-function negLogLik(p, e, s2init) {
-  const { omega, alpha, beta, nu, lambda } = unpack(p);
+function negLogLik(p, e, v0, penalised) {
+  const { omega, alpha, beta, nu, lambda } = unpack(p, v0);
   const k = skewtConstants(nu, lambda);
   if (!(k.b > 0) || !Number.isFinite(k.logC)) return Infinity;
-  let s2 = s2init, ll = 0;
+  let s2 = v0, ll = 0;
   for (let t = 0; t < e.length; t++) {
     if (t > 0) s2 = omega + alpha * e[t - 1] * e[t - 1] + beta * s2;
     if (!(s2 > 0) || !Number.isFinite(s2)) return Infinity;
     const s = Math.sqrt(s2);
     ll += skewtLogDensity(e[t] / s, nu, lambda, k) - Math.log(s);
+  }
+  if (penalised) {
+    ll -= 0.5 * ((p[0] - logit(GARCH_PRIOR.persistence)) / GARCH_PRIOR.persistenceSd) ** 2;
+    ll -= 0.5 * ((p[1] - logit(GARCH_PRIOR.share)) / GARCH_PRIOR.shareSd) ** 2;
   }
   return -ll;
 }
@@ -122,63 +135,93 @@ export function fitGarch(closes, dates = [], { minReturns = GARCH_MIN_RETURNS } 
     return {
       status: "unavailable",
       reason: `${r.length} usable daily returns, and a GARCH fit needs at least ${minReturns} — ` +
-        "five parameters on fewer say whatever the optimiser wants",
+        "four parameters on fewer say whatever the optimiser wants",
     };
   }
-  const mean = r.reduce((a, b) => a + b, 0) / r.length;
-  const e = r.map((v) => v - mean);
+  const sorted = r.slice().sort((a, b) => a - b);
+  const med = sorted.length % 2 ? sorted[(sorted.length - 1) / 2] : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
+  const dev = r.map((v) => v - med);
+  const absSorted = dev.map(Math.abs).sort((a, b) => a - b);
+  const mad = absSorted[Math.floor(absSorted.length / 2)] * 1.4826;
+  const q90 = absSorted[Math.min(absSorted.length - 1, Math.floor(absSorted.length * 0.9))] / 1.645;
+  const robustSd = Math.max(mad, q90 / 2);
+  if (!(robustSd > 0)) {
+    return { status: "unavailable", reason: "every return in the window is identical, so there is no variance to model" };
+  }
+  const cap = GARCH_WINSOR_K * robustSd;
+  let capped = 0;
+  const clipped = dev.map((v) => { if (Math.abs(v) > cap) { capped++; return Math.sign(v) * cap; } return v; });
+  const shift = clipped.reduce((a, b) => a + b, 0) / clipped.length;
+  const mean = med + shift;
+  const e = clipped.map((v) => v - shift);
+  const raw = r.map((v) => v - mean);
   const v0 = e.reduce((a, b) => a + b * b, 0) / e.length;
   if (!(v0 > 0)) {
     return { status: "unavailable", reason: "every return in the window is identical, so there is no variance to model" };
   }
 
-  const p0 = [
-    Math.log(v0 * 0.02), Math.log(0.98 / 0.02), Math.log(0.08 / 0.90),
-    Math.log((6 - SKEWT_NU_MIN) / (SKEWT_NU_MAX - 6)), 0,
+  const nu0 = Math.log((6 - SKEWT_NU_MIN) / (SKEWT_NU_MAX - 6));
+  const starts = [
+    [logit(0.95), logit(0.1), nu0, 0],
+    [logit(0.98), logit(0.05), nu0, 0],
+    [logit(0.85), logit(0.25), nu0, 0],
   ];
-  const fit = nelderMead((p) => negLogLik(p, e, v0), p0);
-  const { omega, alpha, beta, nu, lambda } = unpack(fit.x);
+  let fit = null;
+  for (const p0 of starts) {
+    const cand = nelderMead((p) => negLogLik(p, e, v0, true), p0);
+    if (fit === null || cand.f < fit.f) fit = cand;
+  }
+  const logLik = -negLogLik(fit.x, e, v0, false);
+  const { omega, alpha, beta, nu, lambda } = unpack(fit.x, v0);
   const persistence = alpha + beta;
   const s2 = new Array(e.length);
   s2[0] = v0;
   for (let t = 1; t < e.length; t++) s2[t] = omega + alpha * e[t - 1] * e[t - 1] + beta * s2[t - 1];
   const condVol = s2.map((v) => Number((Math.sqrt(v) * GARCH_ANNUALISE).toFixed(2)));
+  const ewma = new Array(e.length);
+  let w = v0;
+  for (let t = 0; t < raw.length; t++) {
+    if (t > 0) w = GARCH_EWMA_LAMBDA * w + (1 - GARCH_EWMA_LAMBDA) * raw[t - 1] * raw[t - 1];
+    ewma[t] = Number((Math.sqrt(w) * GARCH_ANNUALISE).toFixed(2));
+  }
   const nextS2 = omega + alpha * e[e.length - 1] * e[e.length - 1] + beta * s2[e.length - 1];
   const edges = [];
   if (persistence > 0.998) {
-    edges.push("persistence reached its cap, which a year of returns does for a fair share of stationary " +
-      "series; the path reads as near-integrated");
+    edges.push("persistence reached its cap despite a prior pulling it toward " + GARCH_PRIOR.persistence +
+      "; the path reads as near-integrated");
   }
   if (alpha < 1e-3) edges.push("no ARCH effect was found in the window, so beta and persistence are not identified");
   if (nu < SKEWT_NU_MIN + 0.05) edges.push("the tail shape hit its floor");
   if (Math.abs(lambda) > SKEWT_LAMBDA_MAX - 0.02) edges.push("the skew hit its cap");
   const edge = edges.length > 0;
-  const identified = persistence <= 0.998 && alpha >= 1e-3;
   return {
     status: "ok",
     dist: "skewt",
+    method: "penalised maximum likelihood with variance targeting",
     n: e.length,
     mean: Number(mean.toFixed(4)),
+    robustSd: Number(robustSd.toFixed(4)),
+    cap: Number(cap.toFixed(3)),
+    capped,
     omega: Number(omega.toPrecision(4)),
     alpha: Number(alpha.toFixed(4)),
     beta: Number(beta.toFixed(4)),
     nu: Number(nu.toFixed(3)),
     lambda: Number(lambda.toFixed(3)),
     persistence: Number(persistence.toFixed(4)),
-
-    longRunVol: identified
-      ? Number((Math.sqrt(omega / (1 - persistence)) * GARCH_ANNUALISE).toFixed(2)) : null,
+    longRunVol: Number((Math.sqrt(v0) * GARCH_ANNUALISE).toFixed(2)),
     lastVol: condVol[condVol.length - 1],
     nextVol: Number((Math.sqrt(nextS2) * GARCH_ANNUALISE).toFixed(2)),
-    logLik: Number((-fit.f).toFixed(2)),
+    logLik: Number(logLik.toFixed(2)),
     converged: fit.converged && !edge,
     ...(fit.converged && !edge ? {} : {
       reason: !fit.converged
         ? "the optimiser hit its step limit before the likelihood settled"
         : edges.join("; "),
     }),
-    returns: e.map((v) => Number(v.toFixed(3))),
+    returns: raw.map((v) => Number(v.toFixed(3))),
     dates: rd,
     condVol,
+    ewma,
   };
 }
