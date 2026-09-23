@@ -1869,6 +1869,7 @@
     const get = (u) => (nativeFetch ? nativeFetch(u, { credentials: "same-origin" }).then((r) => (r.ok ? r.json() : null)).catch(() => null) : Promise.resolve(null));
     PAL.loading = Promise.all([get("/api/flows/board?side=long"), get("/api/flows/board?side=short"), get("/api/flows/board?side=watch"), get("/api/flows/scoretrack")])
       .then(([L, S, W, T]) => {
+        if (!L && !S && !W && !T) { PAL.loading = null; return []; }
         const by = new Map();
         const add = (r, side, session) => {
           if (!r || typeof r.t !== "string") return;
@@ -1919,7 +1920,7 @@
         opt.addEventListener("pointermove", () => { if (sel !== i) { sel = i; paintSel(); } });
         return opt;
       }));
-      if (!shown.length) L.append(h("li", { class: "ui-pal-empty", role: "presentation" }, rows.length ? "No match" : "Loading names"));
+      if (!shown.length) L.append(h("li", { class: "ui-pal-empty", role: "presentation" }, rows.length ? "No match" : loaded ? "No names" : "Loading names"));
       paintSel();
     };
     const paintSel = () => {
@@ -1928,7 +1929,7 @@
       const n = document.getElementById("fxPo" + sel);
       if (n) n.scrollIntoView({ block: "nearest" });
     };
-    let rows = [];
+    let rows = [], loaded = false;
     q.oninput = () => { sel = 0; render(rows); };
     q.onkeydown = (e) => {
       if (e.key === "ArrowDown") { e.preventDefault(); sel = Math.min(shown.length - 1, sel + 1); paintSel(); }
@@ -1940,7 +1941,7 @@
     render(rows);
     if (!d.open) d.showModal();
     q.focus();
-    Promise.resolve(paletteSource ? paletteSource() : paletteRows()).then((r) => { rows = Array.isArray(r) ? r : []; if (d.open) render(rows); }).catch(() => {});
+    Promise.resolve(paletteSource ? paletteSource() : paletteRows()).catch(() => []).then((r) => { rows = Array.isArray(r) ? r : []; loaded = true; if (d.open) render(rows); });
   }
   function initShell() {
     const body = document.body;

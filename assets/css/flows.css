@@ -7988,6 +7988,7 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
 }
 .ui-fresh:hover { color: var(--label-1); background: var(--fill-4); }
 .ui-fresh .ui-g { font-size: 15px; }
+.ui-fresh .fx-fresh-l { min-width: 3.9em; text-align: start; }
 .ui-fresh[data-state="live"] .ui-g { color: var(--up); }
 .ui-fresh[data-state="stale"] .ui-g { color: var(--warn); }
 .ui-fresh[data-state="pending"] .ui-g { color: var(--label-3); animation: ui-spin 6s linear infinite; }
