@@ -13,7 +13,7 @@ export const SHORT_LOOKBACK_DAYS = 45;
 
 export const SHORT_LIMIT = 500;
 
-export const INSIDER_BATCH = 50;
+export const INSIDER_BATCH = 25;
 
 export const INSIDER_LOOKBACK_DAYS = 92;
 

@@ -111,9 +111,11 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   const s3 = Math.sqrt(3 * (1 / 9) * 0.04 + 0.3 * 6 * (1 / 9) * 0.04);
   near(impliedCorrelation(s3, [{ w: 1 / 3, vol: 0.2 }, { w: 1 / 3, vol: 0.2 }, { w: 1 / 3, vol: 0.2 }]).rho, 0.3, 1e-12,
     "and three equal names at rho 0.3");
-  near(impliedCorrelation(sI, [{ w: 0.25, vol: 0.2 }, { w: 0.25, vol: 0.3 }, { w: 0.05, vol: null }]).rho,
+  near(impliedCorrelation(sI, [{ w: 0.45, vol: 0.2 }, { w: 0.45, vol: 0.3 }, { w: 0.1, vol: null }]).rho,
     impliedCorrelation(sI, [{ w: 0.5, vol: 0.2 }, { w: 0.5, vol: 0.3 }]).rho, 1e-12,
     "weights are renormalised over the covered members");
+  eq(impliedCorrelation(sI, [{ w: 0.3, vol: 0.2 }, { w: 0.3, vol: 0.3 }]).reason, SILENCE.coverage,
+    "a holdings list that lists only 60% of the fund is silenced, even though every listed name has an IV");
   eq(impliedCorrelation(sI, [{ w: 0.3, vol: 0.2 }, { w: 0.7, vol: null }]).reason, SILENCE.few,
     "one covered member cannot carry a correlation");
   eq(impliedCorrelation(sI, [{ w: 0.3, vol: 0.2 }, { w: 0.3, vol: 0.2 }, { w: 0.4, vol: null }]).reason, SILENCE.coverage,

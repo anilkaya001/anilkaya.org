@@ -290,7 +290,7 @@ export function impliedCorrelation(indexVol, members, { minCoverage = IMPLIED_CO
   const coverage = usable.reduce((a, m) => a + m.w, 0);
   const base = {
     rho: null, indexVol: sI, members: usable.length, listed: list.length,
-    coverage: listedWeight > 0 ? coverage / listedWeight : null,
+    coverage: listedWeight > 0 ? coverage / Math.max(1, listedWeight) : null,
     weightSum: listedWeight, avgVol: null, dispersion: null, reason: null,
   };
   if (sI === null || !(sI > 0)) return { ...base, reason: SILENCE.absent };
