@@ -410,7 +410,9 @@ flows-quant-card
 itself once more, as a fresh process, to time the Worker path of the options
 engine (one 400-quote expiry fitted and 24 structures priced) in a clean heap,
 which is what a Worker isolate sees; that child is part of the 5 s.
-`flows-quant-card` was measured the same day: under 2 s with no server.
+`flows-quant-card` was measured the same day: under 2 s with no server. It
+rebuilds the `FlowsQuant` bundle in memory and fails when the committed file
+differs, then runs the bundle in a bare `vm` context against the modules.
 
 Confirmed to need one: `flows-overview-contract`, `flows-board-render`,
 `flows-watch-render`, `flows-political-render`, `flows-ask-render`,
@@ -471,16 +473,20 @@ write the argument in the commit message. Generated files
 `shared/stage-manifest.js`, `shared/skill-manifest.js`,
 `shared/course-points.js`, `shared/course-seo.js`) are written by
 `scripts/generate-course-payloads.mjs` without banners; edit the generator,
-not its output. `scripts/strip-comments.mjs` is now a no-op on this tree and
-stays only because a Workers Builds build command may still invoke it; it can
-be retired once that dashboard field is confirmed clear.
+not its output. `assets/js/flows-quant.bundle.js` is generated the same way by
+`scripts/build-flows-quant-bundle.mjs` (esbuild from the pinned
+`tests/node_modules`, tree-shaken from `shared/flows-quant-browser.js`); run it
+after any change to a `shared/flows-quant-*` module the browser reaches, and
+never edit the bundle by hand. `scripts/strip-comments.mjs` is now a no-op on
+this tree and stays only because a Workers Builds build command may still
+invoke it; it can be retired once that dashboard field is confirmed clear.
 
 ## Design and accessibility invariants
 
 - JavaScript remains IIFE-based and framework-free; production globals are
   deliberate: `Lab`, `Auth`, `Gamify`, `FX`, `IEWTStorage`, `MasteryScheduler`,
   `REVIEW_ITEMS`, `TOPIC_META`, `TOPIC_BY_ID`, `COURSE_STAGE_POINTS`,
-  `LEARNING_PATHS`, `toast`, `FlowsPanels`, and `FlowsUI`.
+  `LEARNING_PATHS`, `toast`, `FlowsPanels`, `FlowsUI`, and `FlowsQuant`.
   (`flowsCardPrefetch` was on this list and went with the card dialog: it
   warmed a card on hover so a modal would open instantly, and a board row is a
   link to `/flows/ticker/?t=` now.)
@@ -496,6 +502,14 @@ be retired once that dashboard field is confirmed clear.
   2,003 of that file's 2,325 lines and fixing every future chart bug twice.
   The ticker page is the only caller now, and that extraction is what made
   deleting the modal a routing change rather than a rewrite of every chart.
+  `FlowsQuant` is the options engine's browser face: the generated bundle
+  of the same `shared/flows-quant-*` modules the pipeline and the Worker run,
+  exposing what `/flows/strategy/` needs to reprice a leg the reader edits:
+  `repriceStructure`, the smile and law readers it stands on, and the
+  Black-76 primitives beneath them. It is a global because the strategy page
+  is an IIFE with no module loader, and it is generated rather than written
+  so a smile or a probability can never be computed one way on the server
+  and another in the page.
   `CURRICULUM` is an authoring/generator input, not a production course-page
   payload.
 - Design tokens live in `base.css`; typography is self-hosted subset Latin

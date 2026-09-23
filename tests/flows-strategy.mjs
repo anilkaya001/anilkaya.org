@@ -345,6 +345,15 @@ try {
        `derivative of a convex function is an extrapolation, and nobody pays it`);
     eq(r["Vega exposure"].value, "+$12.00 per volatility point",
        "vega carries the unit its convention is stated in");
+
+    ok(r["On the smile"] && /^[+\u2212]\$\d/.test(r["On the smile"].value) && /NBBO/.test(r["On the smile"].hint),
+       `beside the vendor's greeks, the engine's reading: the leg re-priced on this expiry's smile fitted to the NBBO ` +
+       `(${r["On the smile"] && r["On the smile"].value}), computed in the page by FlowsQuant rather than fetched`);
+    ok(r["Chance of profit"] && /^\d+(\.\d)?%/.test(r["Chance of profit"].value),
+       `and a chance of profit at expiry under the smile's own density (${r["Chance of profit"] && r["Chance of profit"].value})`);
+    ok(r["Expected P&L, real world"], "with the real-world expectation named as such, a dash while no law was published for the name");
+    const quant = await page.evaluate(() => typeof window.FlowsQuant === "object" && typeof window.FlowsQuant.repriceStructure === "function");
+    ok(quant, "the generated FlowsQuant bundle is the page's only engine global");
   }
 
   {

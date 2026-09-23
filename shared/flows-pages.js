@@ -1784,6 +1784,7 @@ ${shell("Strategy", "strategy", username, `
   </p>
 `)}
 ${UI_SCRIPT}
+<script src="${v("/assets/js/flows-quant.bundle.js")}" defer></script>
 <script src="${v("/assets/js/flows-strategy.js")}" defer></script>
 </body>
 </html>`;

@@ -287,6 +287,33 @@ const FACT_INPUT = () => ({
   ok(!fits.split && fits.card.engine === block, "while one that fits carries it inline");
 }
 
+{
+  const { buildQuantBundle, BUNDLE_OUT } = await import("../scripts/build-flows-quant-bundle.mjs");
+  const fs = await import("node:fs");
+  const vm = await import("node:vm");
+  const path = await import("node:path");
+  const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+  const fresh = await buildQuantBundle();
+  const committed = fs.readFileSync(path.join(root, BUNDLE_OUT), "utf8");
+  eq(committed, fresh, `${BUNDLE_OUT} is exactly what the generator builds from the shared modules today; regenerate it, never edit it`);
+  ok(!/^\s*\/[/*]/m.test(committed) && committed.startsWith("var FlowsQuant="), "the bundle is emitted without a banner and starts with the global it defines");
+  const sandbox = { window: {} };
+  vm.runInNewContext(committed + "\nwindow.FlowsQuant = FlowsQuant;", sandbox);
+  const FQ = sandbox.window.FlowsQuant;
+  ok(FQ && typeof FQ.repriceStructure === "function" && typeof FQ.black76 === "function", "the bundle defines FlowsQuant with the re-pricer and Black-76");
+  const facts = QC.engineFacts(FACT_INPUT());
+  const law = QP.garchLaw({ garch: GARCH, ticker: "SYN", sessionDate: SESSION, closes: CLOSES, rate: R, paths: 2048 });
+  const block = QC.runCardEngine({ ticker: "SYN", asOfMs: AS_OF_MS, spot: SPOT, rate: RATE, expiries: slices.input, facts,
+    state: { state: "pinned", direction: null, confidence: 2, ...STATE_STRUCTURES.pinned.rich }, pLaw: law,
+    levels: { callWall: 105, putWall: 95, magnet: 100, flip: 99, maxPain: 100, atr: 2 }, atr: 2 });
+  const plain = JSON.parse(JSON.stringify(block));
+  const legs = [{ type: "P", K: 95, side: -1, qty: 1 }, { type: "P", K: 90, side: 1, qty: 1 }];
+  const a = QC.repriceStructure({ engine: plain, legs, expiry: "2026-10-23" });
+  const b = FQ.repriceStructure({ engine: plain, legs, expiry: "2026-10-23" });
+  eq(JSON.stringify(b), JSON.stringify(a), "and the browser build re-prices a put spread exactly as the shared module does");
+  near(FQ.black76(100, 0.99, 105, 0.3, 0.25, "C"), BS.black76(100, 0.99, 105, 0.3, 0.25, "C"), 0, "down to Black-76 itself");
+}
+
 console.log(`✓ flows-quant-card: ${n} assertions — vendor chain rows read once, in fractions and by the ticker's own series; ` +
   "quote IVs within a vol point of the smile that priced them, minimum-tick wings refused; the book's walls on their own " +
   "side of spot whatever the put sign; a zero-gamma level that brute force confirms; SPX parity and the bill as rate " +
