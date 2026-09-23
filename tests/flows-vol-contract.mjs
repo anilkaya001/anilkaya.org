@@ -164,6 +164,14 @@ const S = FX.session;
   eq(term.expiries[0].pct, null, `and under the ${TERM_MIN_SAMPLES}-sample floor its percentile is withheld`);
   eq(term.expiries[0].pctRaw, 0.7273, "while the raw vendor value stays on the row for the disclosure");
   eq(term.silent["expiry.2026-09-23.pct"], "few-samples", "with its silence named");
+  const odd = buildTermPanel({ data: [{ ...p["term-structure-dist:AAPL"].row, expiry: "2026-10-16", samples: 120, percentile: "72.7" }] },
+    { sessionDate: S });
+  eq(odd.expiries[0].pct, null, "a well-sampled expiry whose percentile is outside 0-1 is not published");
+  eq(odd.silent["expiry.2026-10-16.pct"], "implausible", "and is silent as implausible, not as few-samples");
+  eq(odd.pctOutOfRange, 1, "and counted");
+  const unsampled = buildTermPanel({ data: [{ ...p["term-structure-dist:AAPL"].row, expiry: "2026-10-16", samples: null }] },
+    { sessionDate: S });
+  eq(unsampled.silent["expiry.2026-10-16.pct"], "input-absent", "an expiry with no sample count is an absent input");
   eq(term.eventMove.sd, null, "no event move from one expiry");
 
   const rr25 = { data: [p["rr-skew-25:AAPL"].row] };
@@ -304,6 +312,13 @@ function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
   const odd = buildConePanel({ data: [tenor(30, 55)] }, { sessionDate: S });
   eq(odd.tenors[0].pct, null, "a percentile outside 0-1 on a 0-1 route is refused, not rescaled by guess");
   eq(odd.pctOutOfRange, 1, "and counted");
+  eq(odd.silent["tenor.30.pct"], "implausible", "and its silence names the out-of-range value, not a missing one");
+  ok(!("pctOutOfRange" in odd.tenors[0]), "the per-row flag is internal and not published");
+  const noBox = buildConePanel({ data: [{ ...tenor(30, 0.5), q1: null, max: "0.2" }] }, { sessionDate: S });
+  eq(noBox.silent["tenor.30.iqrPos"], "input-absent", "an IQR position with no q1 is an absent input");
+  eq(noBox.silent["tenor.30.rangePos"], "degenerate", "a range whose max equals its min is degenerate");
+  const flatBox = buildConePanel({ data: [{ ...tenor(30, 0.5), q1: "0.3", q3: "0.3" }] }, { sessionDate: S });
+  eq(flatBox.silent["tenor.30.iqrPos"], "degenerate", "while a zero IQR is degenerate");
   const implausible = buildConePanel({ data: [tenor(30, 0.5, 9.14)] }, { sessionDate: S });
   eq(implausible.status, "quiet", "an implausible iv (9.14) is dropped rather than published");
 }

@@ -456,6 +456,7 @@ export function buildConePanel(body, { sessionDate = null, rolling = null } = {}
       rangePos: min !== null && max !== null && max > min ? round((iv - min) / (max - min), 4) : null,
       lowSample: samples === null ? null : samples < CONE_MIN_SAMPLES,
       rvWindow: null, rvPct: null,
+      pctOutOfRange: p.outOfRange,
     };
     const win = Object.keys(RV_IV_TENOR).map(Number).find((n) => RV_IV_TENOR[n] === days);
     if (win) {
@@ -487,8 +488,11 @@ export function buildConePanel(body, { sessionDate = null, rolling = null } = {}
   if (slope === null) silent.slope30_90 = "input-absent";
   if (front === null) silent.front7_30 = "input-absent";
   for (const t of tenors) {
-    if (t.iqrPos === null) silent["tenor." + t.days + ".iqrPos"] = "degenerate";
+    if (t.iqrPos === null) silent["tenor." + t.days + ".iqrPos"] = t.q1 === null || t.q3 === null ? "input-absent" : "degenerate";
+    if (t.rangePos === null) silent["tenor." + t.days + ".rangePos"] = t.min === null || t.max === null ? "input-absent" : "degenerate";
+    if (t.pct === null) silent["tenor." + t.days + ".pct"] = t.pctOutOfRange ? "implausible" : "input-absent";
     if (t.rvWindow && t.rvPct === null) silent["tenor." + t.days + ".rvPct"] = "short-history";
+    delete t.pctOutOfRange;
   }
   return {
     status: "ok",
@@ -542,7 +546,7 @@ export function buildTermPanel(body, { sessionDate = null, earnings = null } = {
   const silentBody = bodyPanel(body);
   if (silentBody) return silentBody;
   const rows = [];
-  let expired = 0, cutAfter = 0, dropped = 0;
+  let expired = 0, cutAfter = 0, dropped = 0, outOfRange = 0;
   let asOf = null;
   for (const r of rowsOf(body)) {
     if (!r || typeof r !== "object") continue;
@@ -559,8 +563,9 @@ export function buildTermPanel(body, { sessionDate = null, earnings = null } = {
     const q1 = vnum(r.q1), q3 = vnum(r.q3), med = vnum(r.median);
     const samples = vnum(r.samples);
     const p = parsePct(r.percentile);
+    if (p.outOfRange) outOfRange++;
     rows.push({
-      expiry, dte, T: dte / CALENDAR_YEAR, iv,
+      expiry, dte, T: dte / CALENDAR_YEAR, iv, pctOutOfRange: p.outOfRange,
       min: vnum(r.min), q1, median: med, q3, max: vnum(r.max),
       pct: p.pct, samples, firstDate: isoDay(r.first_date),
       pctOk: samples !== null && samples >= TERM_MIN_SAMPLES,
@@ -588,7 +593,10 @@ export function buildTermPanel(body, { sessionDate = null, earnings = null } = {
       const nb = [prev, next].filter(Boolean).map((x) => x.pct);
       premium = nb.length ? row.pct - median(nb) : null;
       if (premium === null) silent["expiry." + row.expiry + ".premium"] = "no-neighbours";
-    } else silent["expiry." + row.expiry + ".pct"] = "few-samples";
+    } else {
+      silent["expiry." + row.expiry + ".pct"] = row.samples === null ? "input-absent"
+        : !row.pctOk ? "few-samples" : row.pctOutOfRange ? "implausible" : "input-absent";
+    }
     if (i > 0 && fwd.vol === null) silent["expiry." + row.expiry + ".fwd"] = fwd.code;
     const kink = premium !== null && premium > EVENT_KINK;
     return {
@@ -626,6 +634,7 @@ export function buildTermPanel(body, { sessionDate = null, earnings = null } = {
     ...(expired ? { expired } : {}),
     ...(cutAfter ? { cutAfter } : {}),
     ...(dropped ? { dropped } : {}),
+    ...(outOfRange ? { pctOutOfRange: outOfRange } : {}),
     units: { iv: "annualised decimal", pct: "fraction 0-1 over the expiry's own listed life, null under the sample floor",
       fwd: "annualised decimal from the previous expiry", premium: "pct minus the median of neighbouring pcts",
       eventMove: "fraction of spot, one sd (sd) and mean absolute (meanAbs)", dte: "calendar days from the session" },
