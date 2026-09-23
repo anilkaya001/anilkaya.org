@@ -640,15 +640,16 @@ export function gammaDecayCalendar(expiryRows, { asOf = null } = {}) {
 }
 
 export function openInterestGammaBook(expiryRows, { asOf = null } = {}) {
-  let net = 0, gross = 0, n = 0;
+  let net = 0, gross = 0, n = 0, halfLegs = 0;
   const read = (v) => (v === null || v === undefined || v === "" ? null : num(v, NaN));
   for (const r of expiryRows || []) {
     if (!r || !r.expiry || !liveExpiry(r.expiry, asOf)) continue;
     const c = read(callGammaLeg(r)), p = read(putGammaLeg(r));
     const cOk = c !== null && Number.isFinite(c), pOk = p !== null && Number.isFinite(p);
     if (!cOk && !pOk) continue;
-    net += (cOk ? c : 0) + GREEK_DEALER_SIGN.gamma * (pOk ? p : 0);
-    gross += Math.abs(cOk ? c : 0) + Math.abs(pOk ? p : 0);
+    if (!cOk || !pOk) { halfLegs++; continue; }
+    net += c + GREEK_DEALER_SIGN.gamma * p;
+    gross += Math.abs(c) + Math.abs(p);
     n++;
   }
   return {
@@ -656,6 +657,7 @@ export function openInterestGammaBook(expiryRows, { asOf = null } = {}) {
     gross: n ? gross : null,
     share: n && gross > 0 ? net / gross : null,
     expiries: n,
+    halfLegs,
   };
 }
 

@@ -360,10 +360,10 @@ export function dealerNets(expiryRows, { asOf = null, h = 1, multipliers = PUT_T
     seen++;
     if (dte < h) {
       const d = vendorLegs(row, "delta");
-      if (d.call !== null || d.put !== null) {
+      if (d.call !== null && d.put !== null) {
         rollOff.expiries++;
-        rollOff.call += d.call ?? 0;
-        rollOff.put += d.put ?? 0;
+        rollOff.call += d.call;
+        rollOff.put += d.put;
       }
       continue;
     }
@@ -371,18 +371,18 @@ export function dealerNets(expiryRows, { asOf = null, h = 1, multipliers = PUT_T
     for (const greek of ["gamma", "delta", "vanna", "charm"]) {
       const g = vendorLegs(row, greek);
       if (g.call === null && g.put === null) continue;
+      if (g.call === null || g.put === null) { acc[greek].halfLegs++; continue; }
       if (greek === "charm" && dte <= front) {
         charmFront.expiries++;
-        charmFront.call += g.call ?? 0;
-        charmFront.put += g.put ?? 0;
+        charmFront.call += g.call;
+        charmFront.put += g.put;
         continue;
       }
       const a = acc[greek];
-      a.call += g.call ?? 0;
-      a.put += g.put ?? 0;
+      a.call += g.call;
+      a.put += g.put;
       a.rows++;
-      if (g.call === null || g.put === null) a.halfLegs++;
-      if (greek === "gamma") gross.gamma += Math.abs(g.call ?? 0) + Math.abs(g.put ?? 0);
+      if (greek === "gamma") gross.gamma += Math.abs(g.call) + Math.abs(g.put);
     }
   }
   const net = (greek) => {
@@ -610,6 +610,12 @@ export function variation(input, opts = {}) {
     netsSource = "no expiry ladder";
   }
 
+  const half = (greek) => (nets.legs && nets.legs[greek] ? nets.legs[greek].halfLegs || 0 : 0);
+  const halfWhy = (greek) => {
+    const n = half(greek);
+    return `${n} expir${n === 1 ? "y" : "ies"} carried one ${greek} leg only, so ${n === 1 ? "it is" : "they are"} left out of the dealer net rather than netted against zero`;
+  };
+
   const family = unit.used === "pct$" ? "pct$" : "share";
   const toDollars = (v) => (v === null || S === null ? null : family === "pct$" ? v * 100 : v * S);
   const gammaPerPct = (g) => (g === null || S === null ? null : family === "pct$" ? g : g * S * S / 100);
@@ -680,7 +686,8 @@ export function variation(input, opts = {}) {
   if (gammaSource === null) {
     const why = "neither the open-interest gamma book nor the day's flow ladder is on this card";
     return { status: "unavailable", reason: why, asOf: sessionDate, inputs, conventions,
-      silences: [{ channel: "gamma", kind: "unavailable", code: "no-gamma", reason: why }] };
+      silences: [{ channel: "gamma", kind: "unavailable", code: "no-gamma", reason: why },
+        ...(half("gamma") ? [{ channel: "bookLegs", kind: "unreadable", code: "book-half-leg", reason: halfWhy("gamma") }] : [])] };
   }
 
   const a = gUsed * 100 * sigma.daily;
@@ -692,6 +699,7 @@ export function variation(input, opts = {}) {
   let v = null;
   if (nets.vanna === null) {
     if (mult.vanna === null) silent("vanna", "unavailable", "vanna-unnetted", "the put leg's sign convention could not be settled this run, so vanna is not netted");
+    else if (half("vanna")) silent("vanna", "unreadable", "vanna-half-leg", halfWhy("vanna"));
     else silent("vanna", "unavailable", "vanna-absent", "no vanna leg on the expiry ladder");
   } else if (scale.status !== "agree") {
     if (scale.status === "disagree") silent("vanna", "unavailable", "vanna-disagree", scale.reason);
@@ -709,6 +717,7 @@ export function variation(input, opts = {}) {
   let c = null;
   if (nets.charm === null) {
     if (mult.charm === null) silent("charm", "unavailable", "charm-unnetted", "the put leg's charm convention could not be settled this run, so charm is not netted");
+    else if (half("charm")) silent("charm", "unreadable", "charm-half-leg", halfWhy("charm"));
     else silent("charm", "unavailable", "charm-absent", "no charm leg on the expiries that outlive the next session");
   } else if (!kc || kc.status !== "ok" || !(kc.value > 0)) {
     silent("charm", "unavailable", "kc-unmeasured", "the charm scale was not measured this run" + (kc && kc.reason ? ": " + kc.reason : ""));
@@ -719,6 +728,10 @@ export function variation(input, opts = {}) {
     c = toDollars(nets.charm) / kc.value * h;
   }
   if (A === null) silent("adv", "unavailable", "adv-short", adv.reason);
+  if (half("gamma")) silent("bookLegs", "unreadable", "book-half-leg", halfWhy("gamma"));
+  if (half("delta")) silent("deltaLegs", "unreadable", "delta-half-leg", halfWhy("delta"));
+  if (v !== null && half("vanna")) silent("vannaLegs", "unreadable", "vanna-half-leg", halfWhy("vanna"));
+  if (c !== null && half("charm")) silent("charmLegs", "unreadable", "charm-half-leg", halfWhy("charm"));
 
   const book = gammaSource === "book";
   const rho = vov.rho;
@@ -772,7 +785,8 @@ export function variation(input, opts = {}) {
   };
 
   const lead = variationLead({ ticker: x.ticker, S, sigma, a, aFlow, v, b, c, vov, variance, A, book });
-  const robustness = variationRobustness({ book, flow: gFlow !== null, sigma, b, c, v, kc });
+  const robustness = variationRobustness({ book, flow: gFlow !== null, sigma, b, c, v, kc,
+    halfLegs: half("gamma") + (v === null ? 0 : half("vanna")) + (c === null ? 0 : half("charm")) });
 
   return {
     status: "ok",
@@ -793,7 +807,7 @@ export function variation(input, opts = {}) {
   };
 }
 
-function variationRobustness({ book, flow, sigma, b, c, v }) {
+function variationRobustness({ book, flow, sigma, b, c, v, halfLegs = 0 }) {
   if (!book && !flow) return { r: 0, why: "no gamma on the card" };
   if (!book) return { r: 1, why: "only the gamma dealers added today; the open-interest book is not on this card" };
   const gaps = [];
@@ -802,6 +816,7 @@ function variationRobustness({ book, flow, sigma, b, c, v }) {
   else if (b === null) gaps.push("the size of a typical vol move is silent");
   if (c === null) gaps.push("charm is silent");
   if (!flow) gaps.push("the day's flow ladder is missing");
+  if (halfLegs > 0) gaps.push("some expiries carried one leg only and are left out of the nets");
   return gaps.length
     ? { r: 2, why: gaps.join("; ") }
     : { r: 3, why: "the book and the day's flow, a converged skewed-t sigma, a measured vol-of-vol and a measured charm scale" };
@@ -894,6 +909,10 @@ export const VARIATION_CODES = Object.freeze({
   "charm-unnetted": "the put leg's charm convention could not be settled this run, so charm is not netted",
   "charm-absent": "no charm leg on the expiries that outlive the next session",
   "kc-unmeasured": "the charm scale was not measured this run",
+  "book-half-leg": "some expiries carried one gamma leg only and are left out of the open-interest book rather than netted against zero",
+  "delta-half-leg": "some expiries carried one delta leg only and are left out of the dealer delta rather than netted against zero",
+  "vanna-half-leg": "some expiries carried one vanna leg only and are left out of the dealer vanna rather than netted against zero",
+  "charm-half-leg": "some expiries carried one charm leg only and are left out of the dealer charm rather than netted against zero",
   "charm-scale-unchecked": "the charm scale is measured against the vendor's vanna, whose scale was not checked against an option chain this run",
   "charm-scale-disagree": "the charm scale is measured against the vendor's vanna, which disagrees with the Black-Scholes vanna of the same chain by more than a quarter",
   "adv-short": "too few dated sessions with volume to name a typical day",

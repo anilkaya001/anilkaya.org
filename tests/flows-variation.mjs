@@ -492,9 +492,50 @@ function ivRows(end, n, { rho = 0 } = {}) {
   const front = dealerNets([{ ...rows[1], expiry: addDays(SESSION, 1) }], { asOf: SESSION, h: 1 });
   eq(front.charm, null, "an expiry that closes at the next session is held out of the charm drift");
   eq(front.charmFront.expiries, 1, "and reported beside it, since charm is far from linear in an option's last day");
+  const pair = [{ expiry: addDays(SESSION, 5), call_gex: 500, put_gex: -900 }, { expiry: addDays(SESSION, 9), call_gex: 600, put_gex: -300 }];
+  eq(openInterestGammaBook(pair, { asOf: SESSION }).net, -100, "two complete expiries net short");
+  const halfBook = openInterestGammaBook([pair[0], { ...pair[1], put_gex: null }], { asOf: SESSION });
+  eq(halfBook.net, -400, "an expiry quoting its call gamma alone is left out of the book, so the label cannot flip long on calls alone");
+  eq(halfBook.halfLegs, 1, "and it is counted, not netted against zero");
+  eq(openInterestGammaBook([{ ...pair[1], put_gex: null }], { asOf: SESSION }).net, null,
+     "a book whose every expiry carries one leg is absent, so the label falls back to the flow ladder");
   eq(strikeBookPutSign([[{ put_gamma_oi: -3 }, { put_gamma_oi: -1 }, { put_gamma_oi: 0 }]]).sign, 1,
      "put_gamma_oi below zero on every non-zero row reads as dealer-signed");
   eq(strikeBookPutSign([[{ put_gamma_oi: -3 }, { put_gamma_oi: 4 }]]).sign, null, "and a mix builds no strike book");
+}
+
+{
+  const full = { expiry: addDays(SESSION, 9), call_gex: 1000, put_gex: -800, call_vanna: 50, put_vanna: 40,
+    call_charm: -5, put_charm: -4, call_delta: 3000, put_delta: -2000 };
+  const second = { ...full, expiry: addDays(SESSION, 16) };
+  const opts = { probe: { call: "raw", put: "raw" }, kc: { status: "ok", value: 50 },
+    vannaScale: { status: "agree", ratio: 1, n: 5 }, unit: { family: "share", used: "share" } };
+  const input = (expiries) => ({ ticker: "T", sessionDate: SESSION, spot: 100, iv30: 0.3, gammaFlow: 1e4,
+    candles: candlesFor(SESSION, 60), expiries });
+  const both = variation(input([full, second]), opts);
+  const onePut = variation(input([full, { ...second, put_gex: null, put_vanna: null, put_charm: null, put_delta: null }]), opts);
+  eq(onePut.inputs.vannaNet, both.inputs.vannaNet / 2, "an expiry missing its put leg adds nothing to the vanna net: the complete expiry alone");
+  eq(onePut.inputs.charmNet, both.inputs.charmNet / 2, "nor to the charm net");
+  eq(onePut.inputs.deltaNet, both.inputs.deltaNet / 2, "nor to the delta net");
+  eq(onePut.inputs.gammaBook, both.inputs.gammaBook / 2, "nor to the gamma book, which would otherwise read five times the complete expiry's net");
+  for (const [channel, code] of [["bookLegs", "book-half-leg"], ["deltaLegs", "delta-half-leg"], ["vannaLegs", "vanna-half-leg"], ["charmLegs", "charm-half-leg"]]) {
+    ok(onePut.silences.some((s) => s.channel === channel && s.code === code && s.kind === "unreadable" && /1 expiry carried one/.test(s.reason)),
+       `the left-out expiry is named: ${code}`);
+    ok(Object.hasOwn(VARIATION_CODES, code), `and ${code} is in the published code table`);
+  }
+  ok(!both.silences.some((s) => /half-leg/.test(s.code)), "a complete ladder carries no half-leg silence");
+  ok(onePut.robustness.r < 3 && /one leg only/.test(onePut.robustness.why), `and the grade says so (${onePut.robustness.why})`);
+  const allHalf = variation(input([{ ...full, put_gex: null, put_vanna: null, put_charm: null, put_delta: null }]), opts);
+  eq(allHalf.inputs.gammaBook, null, "a ladder whose every expiry carries calls alone has no book, not a call-only one");
+  eq(allHalf.gammaSource, "flow", "so the gamma channel falls back to today's flow");
+  eq(allHalf.channels.vanna, null, "vanna is silent");
+  eq(allHalf.channels.charm, null, "and so is charm");
+  ok(allHalf.silences.some((s) => s.channel === "vanna" && s.code === "vanna-half-leg") &&
+     allHalf.silences.some((s) => s.channel === "charm" && s.code === "charm-half-leg"),
+     "each named for the missing leg rather than read as absent");
+  const summary = variationSummary(allHalf);
+  eq(summary.why.vannaPerPointPctAdv, "vanna-half-leg", "and a board row carries the same code for vanna");
+  eq(summary.why.charmPctAdv, "charm-half-leg", "and for charm");
 }
 
 console.log(`✓ flows-variation: ${checks} assertions — Black-Scholes vendor rows netted call + put for gamma and call − put for delta, vanna and charm to nine digits, a |charm|-weighted convention probe that reads a live-like book raw and a half-and-half one as nothing, a charm scale recovered where the rate term allows, a unit probe that refuses to classify cheap stocks, a vanna scale checked against the chain, a variance whose shares sum to one and fall silent as null rather than zero, a 15-cell grid with the right signs, candles and implied-volatility rows after the session ignored, golden B and CHTR readings from their own cut series, and a score decomposition that accounts for the residual whole`);
