@@ -1772,8 +1772,8 @@ body.is-stale .flows-tablewrap {
 .desk-controls.is-stuck::before {
   content: "";
   position: absolute;
-  left: calc(var(--pad) * -1);
-  right: calc(var(--pad) * -1);
+  left: calc(max(var(--gutter), var(--safe-l)) * -1);
+  right: calc(max(var(--gutter), var(--safe-r)) * -1);
   bottom: 100%;
   height: var(--desk-bar-h, 0px);
   background: var(--bar-glass);
@@ -7379,7 +7379,7 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
 }
 
 @media (min-width: 60rem) {
-  .flows-body.has-dock-open > .flows-main { padding-right: calc(min(30rem, 92vw) + var(--pad)); }
+  .flows-body.has-dock-open > .flows-main { padding-right: calc(min(30rem, 92vw) + max(var(--gutter), var(--safe-r))); }
   .flows-scroll { border-top: 1px solid transparent; }
   .flows-scroll.is-scrolled {
     border-top-color: var(--hairline);
