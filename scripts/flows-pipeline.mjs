@@ -4051,6 +4051,7 @@ async function main() {
     screenerReadAt = new Date().toISOString();
   } else {
     const byTicker = new Map();
+    const sweepStartedAt = new Date().toISOString();
     let saturated = 0, split = 0, sweepReads = 0;
     const readBand = (min, max) => uw("/api/screener/stocks", {
       min_underlying_price: UNIVERSE.minPrice,
@@ -4085,6 +4086,7 @@ async function main() {
     universeSource = {
       rows: screener, calls: sweepReads, pages: sweepReads, limit: SCREENER_PAGE_ROWS,
       truncated: saturated > 0, repeated: false, errors: [], dated: !!screenerDate, source: "sweep",
+      readAt: sweepStartedAt,
     };
     if (saturated) {
       console.warn(

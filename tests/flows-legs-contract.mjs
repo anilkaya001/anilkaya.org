@@ -566,6 +566,14 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     eligible: () => true, cardedTickers: [], deepTickers: [], windowTickers: [],
   });
   eq(screenerReads.length, 0, "a universe handed the pipeline's own read never harvests the screener a second time");
+  const early = "2026-09-22T21:31:02.000Z";
+  const stamped = await runMarketLegs({
+    uw: vendor, sessionDate: S, screenerDate: S, generatedAt: "t",
+    harvest: { rows: vendor.augmented, calls: 2, pages: 2, limit: 500, errors: [], dated: true, readAt: early },
+    eligible: () => true, cardedTickers: [], deepTickers: [], windowTickers: [],
+  });
+  deep([stamped.universe.fresh.readAt, stamped.regime.fresh.readAt], [early, early],
+    "the market keys are stamped with the screener read they are built on, the oldest read inside them (freshness 3.8)");
   deep([swept.universe.harvest.source, swept.universe.harvest.complete, swept.universe.n], ["sweep", false, 60],
     "and says it came from the cap-band sweep, whose truncated leaf makes it incomplete");
   ok(legs.universe.bytes <= UNIVERSE_BUDGET_BYTES, "inside its budget");

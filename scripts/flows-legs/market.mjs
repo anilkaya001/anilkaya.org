@@ -29,11 +29,11 @@ export async function runMarketLegs({
   deadline = null, pool = null, width = 1, stats = null, log = () => {},
 } = {}) {
   const meter = makeCallMeter(stats);
-  const readAt = new Date().toISOString();
   const lines = [];
   const say = (line) => { lines.push(line); log(line); };
 
   const h = harvest || await harvestScreener(uw, { filters, date: screenerDate });
+  const readAt = h.readAt || new Date().toISOString();
   const harvested = h.rows || [];
   const eligibleRows = harvested.filter((r) => { try { return eligible(r); } catch { return false; } });
   const screenerByTicker = new Map(harvested.map((r) => [r.ticker, r]));

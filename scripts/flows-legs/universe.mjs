@@ -26,6 +26,7 @@ export async function harvestScreener(uw, {
 } = {}) {
   const byTicker = new Map();
   const errors = [];
+  const readAt = new Date().toISOString();
   let pages = 0, calls = 0, truncated = false, repeated = false;
   for (let page = 0; page < maxPages; page++) {
     const res = await read(uw, "/api/screener/stocks", {
@@ -51,7 +52,7 @@ export async function harvestScreener(uw, {
   }
   return {
     rows: [...byTicker.values()],
-    pages, calls, truncated, repeated, errors, limit,
+    pages, calls, truncated, repeated, errors, limit, readAt,
     dated: !!date,
     offset: "page index (probe 2026-09-23: offset=1 returned the next page, not row 2)",
   };
