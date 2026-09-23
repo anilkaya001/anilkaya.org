@@ -1704,7 +1704,13 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(cardFile, "the dry run emitted a card");
   const card = JSON.parse(fs.readFileSync(path.join(path.dirname(prefix), cardFile), "utf8"));
 
-  eq(card.v, 2, "the schema version is unmoved: these panels are additions, not redefinitions");
+  eq(card.v, 3, "the schema version is 3, where walls, flow peaks, the crossing, zero gamma and the VRP were renamed; these chain panels are additions to it, not redefinitions");
+  ok(card.engine && Array.isArray(card.engine.facts) && Array.isArray(card.engine.structures) && card.engine.engine === "q1",
+     "a deep dry-run card carries the engine block, built from Black-Scholes fixture quotes");
+  ok(card.engine.pLaw && card.engine.pLaw.knots.length === 6 && card.engine.pLaw.knots.every((k) => k.edges.length === 65 && k.means.length === 64),
+     "with a 64-bin real-world law at six horizons");
+  ok(card.engine.ideas.every((id) => card.engine.structures.some((st) => st.id === id)), "and every ranked idea resolves to a published structure");
+  ok(card.engine.expiries.every((e) => e.forward && e.smile && e.smile.method), "and every fitted expiry names its forward and its smile method");
   for (const key of ["ivSurface", "skewTerm", "topContracts", "aggressor"]) {
     const panel = card.panels[key];
     ok(panel, `the card carries panels.${key}`);
@@ -2767,6 +2773,18 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
       ok(bytes <= 120 * 1024,
          `${name} is ${(bytes / 1024).toFixed(1)}KB, inside the brief's own 120KB ceiling ` +
          "(the ingest route accepts 128KB; the shed in the pipeline measures against 120KB)");
+      continue;
+    }
+    if (/^w-card-/.test(name)) {
+      ok(bytes <= 128 * 1024,
+         `${name} is ${(bytes / 1024).toFixed(1)}KB, inside the 128KB the ingest route accepts, engine block included`);
+      const stored = JSON.parse(fs.readFileSync(path.join(dir, name), "utf8"));
+      if (stored && stored.engine && stored.engine.status !== "split") {
+        const { engine, ...body } = stored;
+        ok(JSON.stringify(body).length <= 100 * 1024,
+           `${name} without its engine block is inside the 100KB the card shedder targets; the engine is measured ` +
+           "separately against the ingest cap and splits to card-x rather than shedding a panel");
+      }
       continue;
     }
     ok(bytes <= 100 * 1024,

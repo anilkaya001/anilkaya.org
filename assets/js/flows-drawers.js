@@ -47,7 +47,8 @@
     bars.sort((a, b) => a.k - b.k);
 
     const spot = isNum(panel.spot);
-    const flip = isNum(card.gammaFlip);
+    const flip = isNum(card.strikeSumCrossing) !== null ? isNum(card.strikeSumCrossing) : isNum(card.gammaFlip);
+    const crossingLevel = (lv) => lv.kind === "strike_sum_crossing" || lv.kind === "gamma_flip";
 
     let run = 0;
     const cum = bars.map((b) => (run += b.g));
@@ -57,7 +58,7 @@
 
     const atSpotW = isNum((card.regime || {}).spotGammaShare);
     const lvW = (card.panels && card.panels.levels && card.panels.levels.status === "ok"
-      ? card.panels.levels.levels.find((l) => l.kind === "gamma_flip") : null);
+      ? card.panels.levels.levels.find(crossingLevel) : null);
     const subLines = [
       atSpotW === null ? "" : "\u0393 " + Math.abs(atSpotW).toFixed(2) + " of peak",
       lvW ? pct(lvW.distPct) + " \u00b7 " + atrDist(lvW.distAtr) : "",
@@ -234,8 +235,8 @@
       const y = yOfPrice(flip);
       svg.append(svgEl("line", { class: "gp-flip", x1: plotL, x2: plotR, y1: y, y2: y }));
       const lv = (card.panels.levels && card.panels.levels.status === "ok"
-        ? card.panels.levels.levels.find((l) => l.kind === "gamma_flip") : null);
-      svg.append(plate(y, "Γ₀", px2(flip),
+        ? card.panels.levels.levels.find(crossingLevel) : null);
+      svg.append(plate(y, "ΣΓ₀", px2(flip),
         lv ? pct(lv.distPct) + " · " + atrDist(lv.distAtr) : null, "is-flip"));
     }
 
@@ -281,17 +282,18 @@
     svg.setAttribute("aria-label",
       `Gamma dealers added today, by strike, for ${card.ticker}. ` +
       (spot !== null ? `Spot ${px2(spot)}. ` : "") +
-      (flip !== null ? `Gamma flip ${px2(flip)}. ` : "No gamma flip inside the drawn band. ") +
+      (flip !== null ? `Strike-sum crossing ${px2(flip)}. ` : "No strike-sum crossing inside the drawn band. ") +
       `${panel.strikes} strikes drawn as ${bars.length} bars.`);
 
     const regime = card.regime || {};
-    const knowsSide = regime.flipSide === "long_below" || regime.flipSide === "short_below";
-    const below = regime.flipSide === "long_below" ? "long" : "short";
+    const crossingSide = regime.crossingSide || regime.flipSide || null;
+    const knowsSide = crossingSide === "long_below" || crossingSide === "short_below";
+    const below = crossingSide === "long_below" ? "long" : "short";
     const above = below === "long" ? "short" : "long";
     const amplifies = (side) => (side === "short"
       ? "hedging amplifies moves there"
       : "hedging damps them there");
-    const sep = isNum(regime.flipSeparation);
+    const sep = isNum(regime.crossingSeparation) !== null ? isNum(regime.crossingSeparation) : isNum(regime.flipSeparation);
 
     leadReading(host,
       (flip !== null && !knowsSide
@@ -501,7 +503,9 @@
     }
     panelHead(host, question);
 
-    const { grid, strikes, expiries, scaleCap, spot, atSpot, callWall, putWall } = panel;
+    const { grid, strikes, expiries, scaleCap, spot, atSpot } = panel;
+    const peakLong = panel.flowPeakLong || panel.callWall || null;
+    const peakShort = panel.flowPeakShort || panel.putWall || null;
     const W = panelWidth(host);
 
     const labelW = 54, padT = 30, padB = 42, padR = 10;
@@ -592,8 +596,8 @@
       return best;
     };
     const spotRow = idxOf(atSpot);
-    const callRow = callWall ? idxOf(callWall.strike) : -1;
-    const putRow = putWall ? idxOf(putWall.strike) : -1;
+    const callRow = peakLong ? idxOf(peakLong.strike) : -1;
+    const putRow = peakShort ? idxOf(peakShort.strike) : -1;
 
     const LEVEL_SEP = 12, RULER_SEP = 24;
     const LABEL_BUDGET = 5;
@@ -693,8 +697,8 @@
       `${strikes.length} strikes from ${px2(lo)} to ${px2(hi)} across ${expiries.length} expiries ` +
       `from ${expiries[0]} to ${expiries[expiries.length - 1]}. ` +
       (s !== null ? `Spot ${px2(s)}. ` : "") +
-      (callWall ? `Call wall ${px2(callWall.strike)}. ` : "") +
-      (putWall ? `Put wall ${px2(putWall.strike)}. ` : "") +
+      (peakLong ? `Flow long peak ${px2(peakLong.strike)}. ` : "") +
+      (peakShort ? `Flow short peak ${px2(peakShort.strike)}. ` : "") +
       `Darker cells carry more gamma; hatched cells are short gamma.`);
 
     host.append(svg);
@@ -753,8 +757,8 @@
 
     const pairs = [];
     if (s !== null) pairs.push(["Spot", px2(s)]);
-    if (callWall) pairs.push(["Call wall", px2(callWall.strike)]);
-    if (putWall) pairs.push(["Put wall", px2(putWall.strike)]);
+    if (peakLong) pairs.push(["Flow long peak", px2(peakLong.strike)]);
+    if (peakShort) pairs.push(["Flow short peak", px2(peakShort.strike)]);
 
     let peakAt = null;
     for (let i = 0; i < strikes.length; i++) {
@@ -903,13 +907,20 @@
 
   const RICHNESS_LINE = 0.1;
 
+  function richnessRel(panel) {
+    const iv = isNum(panel.iv30), rf = isNum(panel.rvForward);
+    if (panel.richnessFrom === "forward" && iv !== null && rf !== null && rf > 0) return (iv - rf) / rf;
+    const trailing = isNum(panel.vrpTrailing) !== null ? isNum(panel.vrpTrailing) : isNum(panel.vrp);
+    const rv = isNum(panel.rv30);
+    if (trailing === null || rv === null || !(rv > 0)) return null;
+    return trailing / rv;
+  }
+
   function richnessBand(panel) {
     const stored = typeof panel.richness === "string" && panel.richness ? panel.richness : null;
     if (stored !== null && stored !== "rich" && stored !== "cheap" && stored !== "fair") return stored;
-    const vrp = isNum(panel.vrp);
-    const rv = isNum(panel.rv30);
-    if (vrp === null || rv === null || !(rv > 0)) return stored;
-    const rel = vrp / rv;
+    const rel = richnessRel(panel);
+    if (rel === null) return stored;
     return rel >= RICHNESS_LINE ? "rich" : rel <= -RICHNESS_LINE ? "cheap" : "fair";
   }
 
@@ -1037,9 +1048,14 @@
     host.append(statList([
       ["Implied 30d vol", vol1(panel.iv30)],
 
-      ["Realized vol, 21 sessions", vol1(panel.rv30)],
-      ["Variance risk premium",
-        fmtOr(panel.vrp, (n) => signed(n, (a) => (a * 100).toFixed(1) + " vol pts"))],
+      ["Realized vol, trailing 21 sessions", vol1(panel.rv30)],
+      ["GARCH forecast, next 21 sessions", vol1(panel.rvForward)],
+      ["Forward premium, variance",
+        fmtOr(panel.vrpForwardVar, (n) => signed(n, (a) => a.toFixed(4)))],
+      ["Forward premium",
+        fmtOr(panel.vrpForward, (n) => signed(n, (a) => (a * 100).toFixed(1) + " vol pts"))],
+      ["Trailing premium",
+        fmtOr(isNum(panel.vrpTrailing) !== null ? panel.vrpTrailing : panel.vrp, (n) => signed(n, (a) => (a * 100).toFixed(1) + " vol pts"))],
       ["Band", richnessBand(panel) || DASH],
       ivRankStat(panel),
       ["IV, past week",

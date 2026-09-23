@@ -27,11 +27,11 @@ const CARD = {
   score: 58, conviction: 92,
   conv: { agreement: 1, breadth: 3, coverage: 1, persistence: 0.58, gate: 1.43 },
   quality: { otmShare: 0.6, vegaTilt: 0.24 },
-  regime: { label: "short", labelFrom: "book", crossings: 0, netGamma: -2.1e6, flowGamma: -2.1e6,
-    bookGammaRaw: -3.4e5, bookShare: -0.42 }, gammaFlip: 68.32, atr: 1.48,
+  regime: { label: "short", labelFrom: "book", labelValue: -3.4e5, crossings: 0, flowGamma: -2.1e6, flowLabel: "short",
+    bookGammaRaw: -3.4e5, bookShare: -0.42 }, strikeSumCrossing: 68.32, atr: 1.48,
   fam: { F: 59, P: 32, D: 58, V: 51, O: 71 },
   panels: {
-    gamma: { status: "ok", spot: 70.22, callWall: 67, putWall: 70, strikes: 40,
+    gamma: { status: "ok", spot: 70.22, flowPeakLong: 67, flowPeakShort: 70, strikes: 40,
       lead: { say: "Dealer gamma for SYN1 is short at spot 70.22; the call wall is at 67.00 and the put wall at 70.00." } },
     levels: { status: "ok", spot: 70.22, atr: 1.48,
       levels: [{ kind: "put_wall", label: "Put wall", px: 70, distPct: -0.003, distAtr: -0.15 },
@@ -306,7 +306,7 @@ const CARD = {
     const weak = JSON.parse(JSON.stringify(CARD));
     weak.panels.gamma.strikes = 12;
     weak.regime = { label: "long", crossings: 1, spotGammaShare: 0.1 };
-    weak.panels.levels.levels = [{ kind: "gamma_flip", label: "Gamma flip", px: 71.6, distAtr: 0.97 }, { kind: "max_pain", label: "Max pain", px: 72.5, distAtr: 1.54 }];
+    weak.panels.levels.levels = [{ kind: "zero_gamma", label: "Zero-gamma level", px: 71.6, distAtr: 0.97 }, { kind: "max_pain", label: "Max pain", px: 72.5, distAtr: 1.54 }];
     const wctx = buildContext(weak, { expectedSession: "2026-09-15" });
     eq(wctx.state.confidence, 0, "a marginal ladder near the flip on a thin profile is a state at confidence 0");
     const call = vetIdeas([{ title: "Upside", structure: "long call", direction: "bullish", thesis: "Dealer gamma is long at spot 70.22.",
@@ -318,7 +318,7 @@ const CARD = {
     behind.panels.path.netPremium = 19251664;
     behind.panels.levels.levels = [
       { kind: "call_wall", label: "Call wall", px: 67, distAtr: -2.18 },
-      { kind: "gamma_flip", label: "Gamma flip", px: 71.6, distAtr: 0.97 },
+      { kind: "zero_gamma", label: "Zero-gamma level", px: 71.6, distAtr: 0.97 },
       { kind: "put_wall", label: "Put wall", px: 66, distAtr: -2.85 },
     ];
     const bs = regimeState(behind, { expectedSession: "2026-09-15" });
@@ -327,7 +327,7 @@ const CARD = {
   }
   {
     const vol = JSON.parse(JSON.stringify(CARD));
-    vol.panels.levels.levels.push({ kind: "gamma_flip", label: "Gamma flip", px: 70.4, distAtr: 0.12 });
+    vol.panels.levels.levels.push({ kind: "zero_gamma", label: "Zero-gamma level", px: 70.4, distAtr: 0.12 });
     vol.panels.path.persistence = 0.5;
     const vctx = buildContext(vol, { expectedSession: "2026-09-15" });
     const vi = stateIdea(vctx);
@@ -348,7 +348,7 @@ const CARD = {
   pinned.regime = { label: "long", labelFrom: "book", crossings: 1, spotGammaShare: 0.6, bookGammaRaw: 4.1e5, bookShare: 0.6 };
   pinned.panels.levels.levels = [
     { kind: "max_pain", label: "Max pain", px: 70.5, distAtr: 0.19 },
-    { kind: "gamma_flip", label: "Gamma flip", px: 66.1, distAtr: -2.78 },
+    { kind: "zero_gamma", label: "Zero-gamma level", px: 66.1, distAtr: -2.78 },
     { kind: "call_wall", label: "Call wall", px: 72, distAtr: 1.2 },
   ];
   pinned.panels.calendar = { status: "ok", schedule: [{ expiry: "2026-09-18", days: 3, share: 0.4 }], frontLoad: 0.4, halfLifeExpiry: "2026-10-16", halfLifeDays: 31 };
@@ -359,7 +359,7 @@ const CARD = {
      "a strong book and a far flip cost nothing, and the grade tops out at fair: the walls and the ladder's " +
      "zero-crossing read off today's flow ladder, not the standing book, so a state resting on them is never robust");
   ok(ps.horizon.kind === "expiry" && ps.horizon.value === "2026-09-18", "the horizon is the front expiry when it carries a quarter of the book's gamma");
-  ok(ps.invalidation.kind === "gamma_flip" && /Pinned · long gamma at spot, max pain 70\.50, flow bearish/.test(ps.chip), "the pin ends at the flip");
+  ok(ps.invalidation.kind === "zero_gamma" && /Pinned · long gamma in the book, max pain 70\.50, flow bearish/.test(ps.chip), "the pin ends at the flip");
   assert.deepEqual(ps.preferred, STATE_STRUCTURES.pinned.fair.preferred, "and prefers the range structures"); checks++;
 
   const squeeze = JSON.parse(JSON.stringify(CARD));
@@ -369,7 +369,7 @@ const CARD = {
   squeeze.panels.levels.levels = [
     { kind: "call_wall", label: "Call wall", px: 72, distAtr: 1.2 },
     { kind: "put_wall", label: "Put wall", px: 68, distAtr: -1.5 },
-    { kind: "gamma_flip", label: "Gamma flip", px: 66.1, distAtr: -2.78 },
+    { kind: "zero_gamma", label: "Zero-gamma level", px: 66.1, distAtr: -2.78 },
   ];
   const sq = regimeState(squeeze, { expectedSession: "2026-09-15" });
   ok(sq.state === "squeeze" && sq.direction === "bullish" && sq.target && sq.target.kind === "call_wall" && sq.target.px === 72,
@@ -377,14 +377,14 @@ const CARD = {
   ok(sq.invalidation.kind === "put_wall", "invalidated past the put wall behind it");
   assert.deepEqual(sq.preferred, STATE_STRUCTURES.bull.fair.preferred, "and prefers the bull structures"); checks++;
   const between = JSON.parse(JSON.stringify(squeeze));
-  between.panels.levels.levels[2] = { kind: "gamma_flip", label: "Gamma flip", px: 71, distAtr: 0.53 };
+  between.panels.levels.levels[2] = { kind: "zero_gamma", label: "Zero-gamma level", px: 71, distAtr: 0.53 };
   const bt = regimeState(between, { expectedSession: "2026-09-15" });
   ok(bt.state === "amplifying" && bt.bound && bt.bound.px === 71 && /to the flip 71\.00/.test(bt.chip),
      "with the flip between spot and the wall the short-gamma zone ends at the flip, so it is amplifying bounded there, not a squeeze");
   const onFlip = JSON.parse(JSON.stringify(between));
   onFlip.panels.levels.levels[2].distAtr = 0.2;
   const tf = regimeState(onFlip, { expectedSession: "2026-09-15" });
-  ok(tf.state === "transitional" && tf.invalidation.kind === "gamma_flip" && tf.preferred.includes("call debit spread") && !tf.preferred.includes("no position"),
+  ok(tf.state === "transitional" && tf.invalidation.kind === "zero_gamma" && tf.preferred.includes("call debit spread") && !tf.preferred.includes("no position"),
        "spot inside half an ATR of the flip is transitional, leaning the way the flow votes, and a resolved lean drops the no-position placeholder that would contradict it");
 
   const bookOnly = JSON.parse(JSON.stringify(CARD));
@@ -399,7 +399,7 @@ const CARD = {
   ok(un.state === "undetermined" && un.confidence === 0 && /gamma positioning is unavailable and premium is unreadable/.test(un.notes[0]),
      "no gamma and no readable premium implies no state, and the note says which silence it is");
   ok(stateIdea(buildContext(blind, { expectedSession: "2026-09-15" })) === null, "and an undetermined state writes no idea");
-  blind.panels.pricedMove = { ...blind.panels.pricedMove, iv30: 0.5, rv30: 0.36, vrp: 0.14, ivRank: 0.8 };
+  blind.panels.pricedMove = { ...blind.panels.pricedMove, iv30: 0.5, rv30: 0.36, rvForward: 0.36, rvForwardGrade: 3, richnessFrom: "forward", vrpTrailing: 0.14, ivRank: 0.8 };
   const rich = regimeState(blind, { expectedSession: "2026-09-15" });
   ok(rich.state === "premium-rich" && rich.premium === "rich" && rich.confidence >= 1 && /positioning withheld/.test(rich.chip),
      "readable rich premium without positioning is a premium-rich state that says positioning is withheld");
@@ -407,7 +407,7 @@ const CARD = {
   eq(rich.invalidation.kind, "priced_low", "invalidated at the priced range end on the side the flow leans");
 
   const pinnedCard = JSON.parse(JSON.stringify(CARD));
-  pinnedCard.panels.pricedMove = { ...pinnedCard.panels.pricedMove, iv30: 0.033, rv30: 0.3727, vrp: -0.3397,
+  pinnedCard.panels.pricedMove = { ...pinnedCard.panels.pricedMove, iv30: 0.033, rv30: 0.3727, rvForward: 0.3727, rvForwardGrade: 3, richnessFrom: "forward", vrpTrailing: -0.3397,
     ivRank: 0, ivMomentum: -0.249, richness: "event-pinned",
     pin: { signals: ["collapse", "floor", "ratio"], moveRatio: 0.089, weekAgoIv: 0.282, lastRange: 0.0021, rangeRatio: 0.09 } };
   const cheapCard = JSON.parse(JSON.stringify(pinnedCard));
@@ -440,13 +440,15 @@ const CARD = {
   eq(B.regime.label, "short", "the live B card was published short, from the running sum below spot");
   ok(B.regime.netGamma > 0, `while the gamma it carries nets long (${B.regime.netGamma})`);
   const read = gammaReading(B);
-  eq(read.label, "long", "read from the net, B is long");
-  eq(read.from, "flow", "from the gamma added today, since the snapshot carries no open-interest book");
+  eq(read.label, "short", "the Neuron reads B's regime as the card labels it, short, and never swaps in the flow's sign (defect 5)");
+  eq(read.from, "label", "attributed to the card's label, because this legacy card carries no number for it");
+  ok(/which is flow and is not read as the book/.test(read.sentence), `while the flow's +161.6k is named as flow (${read.sentence})`);
   const bs = regimeState(B, { expectedSession: B.sessionDate });
-  eq(bs.state, "pinned", `so B reads Pinned, not Amplifying (${bs.chip})`);
+  ok(bs.state !== "pinned" && !/long gamma/.test(bs.chip), `so B no longer reads Pinned, long gamma beside a card that says short (${bs.chip})`);
+  eq(bs.gammaLabel, "short", "the state carries the label it read");
   const g = bs.drivers.find((d) => d.key === "gamma");
-  ok(g && g.robustness === 1 && /not on this card/.test(g.reading),
-     `and the gamma driver is graded weak and says the book is missing (${g && g.reading})`);
+  ok(g && g.robustness === 1 && /without the number/.test(g.reading),
+     `and the gamma driver is graded weak and says the number is missing (${g && g.reading})`);
   ok(/running sum below spot sits at \u221252%/.test(g.reading),
      "the running sum below spot is still published, as where the ladder sits rather than as the label");
 
@@ -513,7 +515,7 @@ const CARD = {
      "a silent panel is withheld");
 
   const vol = JSON.parse(JSON.stringify(CARD));
-  vol.panels.pricedMove = { ...vol.panels.pricedMove, iv30: 0.576, rv30: 0.55, vrp: 0.026, ivMomentum: 0.071 };
+  vol.panels.pricedMove = { ...vol.panels.pricedMove, iv30: 0.576, rv30: 0.55, rvForward: 0.55, rvForwardGrade: 3, richnessFrom: "forward", vrpTrailing: 0.026, ivMomentum: 0.071 };
   const momentum = regimeState(vol, { expectedSession: "2026-09-15" }).drivers.find((d) => d.sub === "ivMomentum");
   ok(momentum && /rose 7\.1 points over the week/.test(momentum.reading) && !/month/.test(momentum.reading),
      `the one-week change is called a week (${momentum && momentum.reading})`);
@@ -522,14 +524,14 @@ const CARD = {
   ok(!regimeState(hiVol, { expectedSession: "2026-09-15" }).drivers.some((d) => d.sub === "ivMomentum"),
      "four points on a 58-vol name is 7% of its level and does not fire");
   const loVol = JSON.parse(JSON.stringify(vol));
-  loVol.panels.pricedMove = { ...loVol.panels.pricedMove, iv30: 0.2, rv30: 0.19, vrp: 0.01, ivMomentum: 0.04 };
+  loVol.panels.pricedMove = { ...loVol.panels.pricedMove, iv30: 0.2, rv30: 0.19, rvForward: 0.19, rvForwardGrade: 3, richnessFrom: "forward", vrpTrailing: 0.01, ivMomentum: 0.04 };
   ok(regimeState(loVol, { expectedSession: "2026-09-15" }).drivers.some((d) => d.sub === "ivMomentum"),
      "the same four points on a 20-vol name is 20% of its level and does: the line scales with the name");
   ok(STATE_LINES.IV_MOMENTUM_REL === 0.1 && STATE_LINES.TERM_FRONT_BID_REL === 0.08 && STATE_LINES.GARCH_GAP_REL === 0.12,
      "the three volatility lines are relative to the name's own level");
 
   const avg = JSON.parse(JSON.stringify(CARD));
-  avg.panels.pricedMove = { ...avg.panels.pricedMove, iv30: 0.30, rv30: 0.25, vrp: 0.05 };
+  avg.panels.pricedMove = { ...avg.panels.pricedMove, iv30: 0.30, rv30: 0.25, rvForward: 0.25, rvForwardGrade: 3, richnessFrom: "forward", vrpTrailing: 0.05 };
   avg.panels.context.garch = { ...avg.panels.context.garch, nextVol: 29, avg21Vol: 25 };
   const gd = regimeState(avg, { expectedSession: "2026-09-15" }).drivers.find((d) => d.key === "garch");
   ok(gd && /average over the next 21 sessions is 25\.0%/.test(gd.reading) && gd.vote === 1,
@@ -575,14 +577,14 @@ const CARD = {
   pinned.regime = { label: "long", crossings: 1, spotGammaShare: 0.6, labelFrom: "book", bookGamma: 1.2e8, bookShare: 0.6 };
   pinned.panels.levels.levels = [
     { kind: "max_pain", label: "Max pain", px: 70.5, distAtr: 0.19 },
-    { kind: "gamma_flip", label: "Gamma flip", px: 66.1, distAtr: -2.78 },
+    { kind: "zero_gamma", label: "Zero-gamma level", px: 66.1, distAtr: -2.78 },
     { kind: "call_wall", label: "Call wall", px: 72, distAtr: 1.2 },
   ];
   pinned.panels.calendar = { status: "ok", schedule: [{ expiry: "2026-09-18", days: 3, share: 0.4 }], frontLoad: 0.4, halfLifeExpiry: "2026-10-16", halfLifeDays: 31 };
   const pctx = buildContext(pinned, { expectedSession: "2026-09-15" });
   const pidea = stateIdea(pctx);
   eq(pidea.structure, "iron condor", "a pinned card's own idea is the first range structure, an iron condor");
-  ok(/ An iron condor pays if spot stays inside the priced range, with the gamma flip at 66\.10 as the line that ends the state\.$/.test(pidea.thesis),
+  ok(/ An iron condor pays if spot stays inside the priced range, with the zero-gamma level at 66\.10 as the line that ends the state\.$/.test(pidea.thesis),
      `the article agrees with the structure and the neutral payoff names the flip as the line that ends the state (${pidea.thesis.slice(-110)})`);
   ok(!/ A iron condor|range against the/.test(pidea.thesis), "never 'A iron condor', never 'inside the priced range against the gamma flip'");
   eq(vetIdeas([pidea], pctx).ideas.length, 1, "and the reworded idea still passes the same vetting");

@@ -913,6 +913,28 @@ function nightlyFreshHeaders(stored) {
   return freshHeaders(stored.fresh, Date.now(), FLOWS_LIVE.memoizedClock()).headers;
 }
 
+const SPLIT_ENGINE_MARK = '"engine":{"status":"split"';
+
+async function readCardWithEngine(env, ticker) {
+  const stored = await readFlowsPayload(env, "card:" + ticker);
+  if (stored === null) return { stored: null, card: null, unreadable: false };
+  let card;
+  try { card = JSON.parse(stored.payload); } catch { return { stored, card: null, unreadable: true }; }
+  if (card && card.engine && card.engine.status === "split" && typeof card.engine.key === "string" &&
+      card.engine.key === "card-x:" + ticker) {
+    const extra = await readFlowsPayload(env, card.engine.key);
+    let block = null;
+    if (extra) {
+      try {
+        const x = JSON.parse(extra.payload);
+        block = x && x.sessionDate === card.sessionDate && x.engine && typeof x.engine === "object" ? x.engine : null;
+      } catch { block = null; }
+    }
+    card.engine = block || { status: "unreadable", key: card.engine.key };
+  }
+  return { stored, card, unreadable: false };
+}
+
 function passthrough(stored) {
   return new Response(stored.payload, {
     status: 200,
@@ -1246,14 +1268,14 @@ async function tickerNeuron(env, ctx, ticker) {
     return json(neuronShape("unavailable", ticker, null, null,
       { note: "No store is bound to this route, so no reading can be read or written." }));
   }
-  const stored = await readFlowsPayload(env, "card:" + ticker);
-  if (stored === null) {
+  const read = await readCardWithEngine(env, ticker);
+  if (read.stored === null) {
     return json(neuronShape("pending", ticker, null, null,
       { note: "No card has been published for " + ticker + " this session, so there is " +
         "nothing to read yet." }));
   }
-  let card;
-  try { card = JSON.parse(stored.payload); } catch {
+  const card = read.card;
+  if (read.unreadable) {
     return json(neuronShape("unreadable", ticker, null, null,
       { note: "The card for " + ticker + " was published and could not be read, which is " +
         "a fault on this side rather than a fact about the name." }));
@@ -3062,7 +3084,10 @@ async function route(request, env, url, ctx) {
 
         return json({ ticker, status: "pending" });
       }
-      return passthrough(stored);
+      if (!stored.payload.includes(SPLIT_ENGINE_MARK)) return passthrough(stored);
+      const merged = await readCardWithEngine(env, ticker);
+      if (!merged.card) return passthrough(stored);
+      return json(merged.card, 200, { "X-Payload-Updated": String(stored.updatedAt || 0) });
     }
 
     if (path === "/api/flows/chain") {

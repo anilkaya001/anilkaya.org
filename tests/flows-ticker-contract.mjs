@@ -829,7 +829,8 @@ try {
   {
     const base = JSON.parse(JSON.stringify(withChain[0]));
     base.atr = 2.5;
-    base.gammaFlip = 101.25;
+    base.strikeSumCrossing = 101.25;
+    base.zeroGamma = 99.5;
     base.panels.levels = {
       status: "ok", spot: 100, atr: 2.5,
       levels: [
@@ -880,7 +881,9 @@ try {
        `across names where a percentage does not (${r["Max pain"].text})`);
     eq(r["Put wall"].text, "$90.00 · \u22124.00 ATR",
        `and a wall below spot is signed (${r["Put wall"].text})`);
-    eq(r["Gamma flip"].text, "$101.25", `the flip when it is published (${r["Gamma flip"].text})`);
+    eq(r["Strike-sum crossing"].text, "$101.25", `the strike-sum crossing under its own name (${r["Strike-sum crossing"].text})`);
+    eq(r["Zero-gamma level"].text, "$99.50", `and the zero-gamma level beside it, never merged with it (${r["Zero-gamma level"].text})`);
+    ok(!("Gamma flip" in r), "no row is labelled with the ambiguous 'Gamma flip' any more");
     eq(r["Priced move"].text, "\u00b17.3%", `the priced move (${r["Priced move"].text})`);
     eq(r["IV rank"].text, "73.4% · 2026-08-28",
        `THE RANK IS PICKED BY DATE, NOT BY INDEX — 73.4 on 2026-08-28 is the ` +
@@ -898,13 +901,15 @@ try {
        `statistics too, with the reason on hover, not printed as where the book peaks (${edgeRow ? edgeRow.why : "absent"})`);
 
     const noFlip = JSON.parse(JSON.stringify(base));
-    noFlip.gammaFlip = null;
+    noFlip.strikeSumCrossing = null;
+    noFlip.zeroGamma = null;
     const q = await read(noFlip);
-    eq(q["Gamma flip"].empty, "quiet",
-       `a card with no published flip says so under the quiet mark rather than ` +
-       `printing a bare dash (${q["Gamma flip"].empty})`);
-    ok(/does not change sign/.test(q["Gamma flip"].why),
-       `and gives the gamma panel's own reason for it (${q["Gamma flip"].why})`);
+    eq(q["Strike-sum crossing"].empty, "quiet",
+       `a card with no published crossing says so under the quiet mark rather than ` +
+       `printing a bare dash (${q["Strike-sum crossing"].empty})`);
+    ok(/does not change sign/.test(q["Strike-sum crossing"].why),
+       `and gives the gamma panel's own reason for it (${q["Strike-sum crossing"].why})`);
+    eq(q["Zero-gamma level"].empty, "unavailable", "a card with no chain profile marks the zero-gamma level unavailable, with its reason");
 
     const dead = JSON.parse(JSON.stringify(base));
     dead.panels.volContext = { status: "unavailable", reason: "The vendor returned no volatility history." };
@@ -1094,7 +1099,7 @@ try {
 
     const led = JSON.parse(JSON.stringify(card));
     led.panels.levels = buildLevels({
-      spot: 180, atr: 4.2, gammaFlip: 182.5, maxPain: 175, callWall: 195, putWall: 165,
+      spot: 180, atr: 4.2, zeroGamma: 182.5, strikeSumCrossing: 181, maxPain: 175, callWall: 195, putWall: 165,
     });
     led.panels.context = buildContext({
       closes: Array.from({ length: 40 }, (_, i) => 150 + i * 0.8),
@@ -1117,7 +1122,7 @@ try {
     ], { asOf: "2026-08-24" });
 
     led.panels.pricedMove = buildPricedMove({
-      spot: 180, iv30: 0.32, rv30: 0.21, impliedMovePerc: 0.025, vrp: 0.11,
+      spot: 180, iv30: 0.32, rv30: 0.21, impliedMovePerc: 0.025,
     });
     await mount(page, led, { ticker: led.ticker, station: "all" });
 
@@ -2544,7 +2549,7 @@ try {
       const flipCard = JSON.parse(JSON.stringify(base));
       flipCard.panels.levels = {
         status: "ok", spot: 100, atr: 2,
-        levels: [{ kind: "gamma_flip", label: "Gamma flip", px: 104,
+        levels: [{ kind: "zero_gamma", label: "Zero-gamma level", px: 104,
                    distPct: 0.04, distAtr: 2 }],
       };
       const fg = await read(flipCard);
@@ -2567,11 +2572,11 @@ try {
       ok(fg.flip && !/is-pos|is-neg/.test(fg.flip.cls),
          "and specifically NOT is-pos/is-neg, which would tint a distance with the " +
          "bull/bear hues and turn a measurement into an opinion");
-      ok(fg.flip && /gamma flip at \$104\.00/i.test(fg.flip.title),
+      ok(fg.flip && /zero-gamma level at \$104\.00/i.test(fg.flip.title),
          "the title states the level itself, so the percent has a price behind it");
 
       const onFlip = JSON.parse(JSON.stringify(flipCard));
-      onFlip.panels.levels.levels[0] = { kind: "gamma_flip", label: "Gamma flip",
+      onFlip.panels.levels.levels[0] = { kind: "zero_gamma", label: "Zero-gamma level",
                                          px: 100, distPct: 0, distAtr: 0 };
       const og = await read(onFlip);
       ok(og.flip && /exactly at spot/i.test(og.flip.title),
@@ -4021,8 +4026,11 @@ try {
       }
       return null;
     });
+    const SCHEMA3_VRP = ["vrpTrailing", "vrpTrailingVar", "rvForward", "rvForwardGrade", "vrpForward",
+      "vrpForwardVar", "vrpForwardRel", "richnessFrom", "richnessRel"];
     const band = async (over) => {
       const c = JSON.parse(JSON.stringify(base));
+      for (const k of SCHEMA3_VRP) delete c.panels.pricedMove[k];
       Object.assign(c.panels.pricedMove, over);
       await mount(page, c, { ticker: c.ticker });
       return readBand();
@@ -4034,6 +4042,10 @@ try {
     eq(await band({ richness: "fair", vrp: -0.05, rv30: 0.5 }), "cheap", "and exactly at the line the band is cheap, as the card builder rules it");
     eq(await band({ richness: "rich", vrp: null, rv30: 0.5 }), "rich",
        "with no premium to divide the stored band is shown, not a guess");
+    eq(await band({ richness: "rich", richnessFrom: "forward", iv30: 0.419, rv30: 0.356, rvForward: 0.46,
+      vrpTrailing: 0.063, vrpForward: -0.041 }), "fair",
+       "a schema-3 card derives the band from the forward premium, implied against the GARCH forecast, " +
+       "so card B's trailing 'rich' reads fair beside the Neuron that reads the same forward number (defect 7)");
     eq(await band({ richness: "event-pinned", vrp: 0.1, rv30: 0.5 }), "event-pinned",
        "a withheld verdict the builder published is never overwritten by the arithmetic it withheld");
     eq(await band({ richness: null, vrp: null, rv30: null }), "—", "and no band at all is an em dash");

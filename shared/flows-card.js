@@ -1,4 +1,4 @@
-export const CARD_SCHEMA_VERSION = 2;
+export const CARD_SCHEMA_VERSION = 3;
 
 import {
   horizonMove, HORIZON_SESSIONS, callGammaLeg, putGammaLeg, pathSignature,
@@ -17,6 +17,7 @@ import { unwrapRows } from "./flows-pulse.js";
 import { easternDay } from "./flows-freshness.js";
 
 import { parseOptionSymbol } from "./flows-premium.js";
+import { bookLevels } from "./flows-quant-card.js";
 export { HORIZON_SESSIONS };
 
 export function numOrNull(value) {
@@ -78,6 +79,12 @@ export const POLARITY = Object.freeze({
   iv30: 0,
   rv30: 0,
   vrp: 0,
+  vrpTrailing: 0,
+  vrpTrailingVar: 0,
+  vrpForward: 0,
+  vrpForwardVar: 0,
+  vrpForwardRel: 0,
+  rvForward: 0,
   ivMomentum: 0,
   impliedMovePerc: 0,
 
@@ -100,11 +107,16 @@ export function polarityOf(key) {
   return Object.hasOwn(POLARITY, key) ? POLARITY[key] : 0;
 }
 
-export const WALL_EDGE_NOTE = "this wall is the last strike of the ladder the run read, so the " +
+export const WALL_EDGE_NOTE = "this wall is the last strike of the open-interest book the run read, so the " +
   "strike window ends here: the largest gamma may sit beyond it, and this is where the " +
   "window stops rather than where the book peaks";
 
-export function buildLevels({ spot, atr, gammaFlip, maxPain, callWall, putWall, band = null }) {
+export const LEVEL_KINDS = Object.freeze({
+  zero_gamma: "Zero-gamma level", strike_sum_crossing: "Strike-sum crossing", max_pain: "Max pain",
+  call_wall: "Call wall", put_wall: "Put wall",
+});
+
+export function buildLevels({ spot, atr, zeroGamma = null, strikeSumCrossing = null, maxPain, callWall, putWall, band = null }) {
   const s = numOrNull(spot);
   const a = numOrNull(atr);
   if (s === null || !(s > 0)) return unavailable("no spot price");
@@ -130,10 +142,11 @@ export function buildLevels({ spot, atr, gammaFlip, maxPain, callWall, putWall, 
 
   const cw = numOrNull(callWall), pw = numOrNull(putWall);
   const levels = [
-    measure("gamma_flip", "Gamma flip", gammaFlip),
-    measure("max_pain", "Max pain", maxPain),
-    measure("call_wall", cw !== null && cw < s ? "Largest long-gamma strike" : "Call wall", callWall),
-    measure("put_wall", pw !== null && pw > s ? "Largest short-gamma strike" : "Put wall", putWall),
+    measure("zero_gamma", LEVEL_KINDS.zero_gamma, zeroGamma),
+    measure("strike_sum_crossing", LEVEL_KINDS.strike_sum_crossing, strikeSumCrossing),
+    measure("max_pain", LEVEL_KINDS.max_pain, maxPain),
+    measure("call_wall", LEVEL_KINDS.call_wall, cw !== null && cw >= s ? callWall : null),
+    measure("put_wall", LEVEL_KINDS.put_wall, pw !== null && pw <= s ? putWall : null),
   ].filter(Boolean);
 
   if (!levels.length) return unavailable("no levels resolved");
@@ -183,13 +196,13 @@ export function buildGammaProfile(strikeRows, { spot, maxBars = 60 } = {}) {
     bars.push({ k: Number(strike.toFixed(2)), g: gamma });
   }
 
-  const callWall = rows.reduce((best, r) => (r.gamma > (best?.gamma ?? -Infinity) ? r : best), null);
-  const putWall = rows.reduce((best, r) => (r.gamma < (best?.gamma ?? Infinity) ? r : best), null);
+  const longPeak = rows.reduce((best, r) => (r.gamma > (best?.gamma ?? -Infinity) ? r : best), null);
+  const shortPeak = rows.reduce((best, r) => (r.gamma < (best?.gamma ?? Infinity) ? r : best), null);
 
   return ok({
     bars,
-    callWall: callWall && callWall.gamma > 0 ? callWall.strike : null,
-    putWall: putWall && putWall.gamma < 0 ? putWall.strike : null,
+    flowPeakLong: longPeak && longPeak.gamma > 0 ? longPeak.strike : null,
+    flowPeakShort: shortPeak && shortPeak.gamma < 0 ? shortPeak.strike : null,
     spot: numOrNull(spot),
     strikes: rows.length,
     bucketed: step > 1,
@@ -394,8 +407,30 @@ function skewWings(skew, iv) {
   return { skew: k, down, up, days: numOrNull(b.days), expiry: typeof b.expiry === "string" ? b.expiry : null };
 }
 
+export function varianceRiskPremium({ iv30, rv30, rvForward = null, rvForwardGrade = null }) {
+  const iv = numOrNull(iv30), rv = numOrNull(rv30), rf = numOrNull(rvForward);
+  const r6 = (v) => (v === null ? null : Number(v.toFixed(6)));
+  const trailing = iv !== null && rv !== null ? iv - rv : null;
+  const forward = iv !== null && rf !== null && rf > 0 ? iv - rf : null;
+  const fg = numOrNull(rvForwardGrade);
+  const forwardUsable = forward !== null && (fg === null || fg >= 2);
+  const rel = forwardUsable ? forward / rf : trailing !== null && rv > 0 ? trailing / rv : null;
+  return {
+    vrpTrailing: r6(trailing),
+    vrpTrailingVar: iv !== null && rv !== null ? r6(iv * iv - rv * rv) : null,
+    rvForward: rf === null ? null : r6(rf),
+    rvForwardGrade: fg,
+    vrpForward: r6(forward),
+    vrpForwardVar: forward === null ? null : r6(iv * iv - rf * rf),
+    vrpForwardRel: forward === null ? null : r6(forward / rf),
+    richnessFrom: forwardUsable ? "forward" : rel !== null ? "trailing" : null,
+    richnessRel: r6(rel),
+  };
+}
+
 export function buildPricedMove({
-  spot, impliedMovePerc, vrp, iv30, rv30, ivRank, ivMomentum, atmVol, ivStrip, asOf,
+  spot, impliedMovePerc, iv30, rv30, ivRank, ivMomentum, atmVol, ivStrip, asOf,
+  rvForward = null, rvForwardGrade = null,
   sessions = HORIZON_SESSIONS,
 
   skew = null,
@@ -477,8 +512,9 @@ export function buildPricedMove({
       { quotedPct: pct(m), low: lo, high: hi });
   })();
 
-  const verdict = numOrNull(vrp) === null || numOrNull(rv30) === null || !(rv30 > 0) ? null
-    : vrp / rv30 >= RICHNESS_LINE ? "rich" : vrp / rv30 <= -RICHNESS_LINE ? "cheap" : "fair";
+  const vrp = varianceRiskPremium({ iv30: iv, rv30, rvForward, rvForwardGrade });
+  const verdict = vrp.richnessRel === null ? null
+    : vrp.richnessRel >= RICHNESS_LINE ? "rich" : vrp.richnessRel <= -RICHNESS_LINE ? "cheap" : "fair";
 
   return ok({
     lead,
@@ -505,7 +541,7 @@ export function buildPricedMove({
       : null,
 
     spot: s,
-    vrp: numOrNull(vrp),
+    ...vrp,
     iv30: iv,
     rv30: numOrNull(rv30),
 
@@ -1491,11 +1527,16 @@ export function buildCard({
 
   variation: variationOpts = null,
   chainMissing = null,
+
+  quant = null,
 }) {
   const f = features || {};
   const putSigns = putMultipliers(variationOpts && variationOpts.probe ? variationOpts.probe : null);
   const spot = numOrNull(row && row.close) ?? numOrNull(features && features.spot);
   const gamma = buildGammaProfile(strikes, { spot });
+  const book = bookLevels(strikes, { spot });
+  const zero = quant && quant.zeroGamma && numOrNull(quant.zeroGamma.px) !== null ? quant.zeroGamma : null;
+  const regimeRead = regimeLabel(f);
   const painRow = pickMaxPainRow(maxPain, { asOf: sessionDate });
   const prev = numOrNull(row && row.prev_close);
   const close = numOrNull(row && row.close);
@@ -1543,29 +1584,31 @@ export function buildCard({
       otmShare: numOrNull(f.otmShare),
       vegaTilt: numOrNull(f.vegaTilt),
     },
-    regime: f.netGamma !== undefined
+    regime: f.netGamma !== undefined || f.gammaBookRaw !== undefined
       ? {
-        netGamma: numOrNull(f.netGamma),
+        label: regimeRead.label,
+        labelFrom: regimeRead.from,
+        labelValue: regimeRead.value,
         flowGamma: numOrNull(f.netGamma),
         flowGross: numOrNull(f.gammaGross),
-        label: f.gRegime || null,
-        labelFrom: f.gRegimeFrom || null,
+        flowLabel: numOrNull(f.netGamma) === null ? null : f.netGamma >= 0 ? "long" : "short",
         bookGammaRaw: numOrNull(f.gammaBookRaw),
         bookShare: numOrNull(f.gammaBookShare),
 
-        flipSide: f.flipSide || null,
+        crossingSide: f.flipSide || null,
 
         spotGammaShare: numOrNull(f.spotGammaShare),
 
         crossings: numOrNull(f.flipCount),
 
-        flipSeparation: numOrNull(f.flipSeparation),
+        crossingSeparation: numOrNull(f.flipSeparation),
         bandMin: numOrNull(f.bandMin),
         bandMax: numOrNull(f.bandMax),
       }
       : null,
 
-    gammaFlip: numOrNull(features && features.gammaFlip),
+    strikeSumCrossing: numOrNull(features && features.gammaFlip),
+    zeroGamma: zero ? numOrNull(zero.px) : null,
     atr: numOrNull(features && features.atr),
     panels: {
       gamma,
@@ -1576,12 +1619,13 @@ export function buildCard({
       levels: buildLevels({
         spot,
         atr: features && features.atr,
-        gammaFlip: features && features.gammaFlip,
+        zeroGamma: zero ? zero.px : null,
+        strikeSumCrossing: features && features.gammaFlip,
 
         maxPain: painRow ? painRow.px : null,
-        callWall: gamma.status === "ok" ? gamma.callWall : null,
-        putWall: gamma.status === "ok" ? gamma.putWall : null,
-        band: gamma.status === "ok" ? { min: gamma.bandMin, max: gamma.bandMax } : null,
+        callWall: book ? book.callWall : null,
+        putWall: book ? book.putWall : null,
+        band: book ? { min: book.bandMin, max: book.bandMax } : null,
       }),
 
       scoreOverlay: scoreOverlayPanel(scoreHistory, contextPanel),
@@ -1601,7 +1645,9 @@ export function buildCard({
       pricedMove: buildPricedMove({
         spot,
         impliedMovePerc: f.impliedMovePerc,
-        vrp: f.vrp, iv30: f.iv30, rv30: f.rv30,
+        iv30: f.iv30, rv30: f.rv30,
+        rvForward: f.garch && f.garch.status === "ok" && numOrNull(f.garch.avg21Vol) !== null ? f.garch.avg21Vol / 100 : null,
+        rvForwardGrade: f.garch && f.garch.status === "ok" ? (numOrNull(f.garch.grade) ?? (f.garch.converged === false ? 1 : 2)) : null,
         ivRank: f.ivRank, ivMomentum: f.ivMomentum,
         atmVol: f.atmVol,
         ivStrip: f.ivStrip,
@@ -1634,7 +1680,26 @@ export function buildCard({
   if (card.regime && card.panels.variation.inputs) {
     card.regime.bookGamma = numOrNull(card.panels.variation.inputs.gammaBook);
   }
+  if (zero && card.panels.levels.status === "ok") {
+    card.panels.levels.zeroGamma = {
+      px: numOrNull(zero.px), count: numOrNull(zero.count), nearby: Array.isArray(zero.nearby) ? zero.nearby : [],
+      coverage: numOrNull(zero.coverage), g: numOrNull(zero.g), why: zero.why || null,
+      profile: zero.profile && Array.isArray(zero.profile.x) ? zero.profile : null,
+    };
+  }
+  if (book && card.panels.levels.status === "ok") {
+    card.panels.levels.book = { callWall: book.callWall, putWall: book.putWall, magnet: book.magnet,
+      putSign: book.putSign, strikes: book.strikes };
+  }
   return card;
+}
+
+export function regimeLabel(f) {
+  const book = numOrNull(f && f.gammaBookRaw);
+  if (book !== null) return { label: book >= 0 ? "long" : "short", from: "book", value: book };
+  const flow = numOrNull(f && f.netGamma);
+  if (flow !== null) return { label: flow >= 0 ? "long" : "short", from: "flow", value: flow };
+  return { label: null, from: null, value: null };
 }
 
 export function buildVariation(card, { expiries = null, options = null } = {}) {
@@ -1841,11 +1906,11 @@ export function buildSurface(rows, {
   let clipped = 0;
   for (const row of grid) for (const v of row) if (v !== null && Math.abs(v) > scaleCap) clipped++;
 
-  let callWall = null, putWall = null;
+  let flowPeakLong = null, flowPeakShort = null;
   for (const k of strikes) {
     const total = strikeTotals.get(k) ?? 0;
-    if (total > 0 && (callWall === null || total > callWall.gamma)) callWall = { strike: k, gamma: total };
-    if (total < 0 && (putWall === null || total < putWall.gamma)) putWall = { strike: k, gamma: total };
+    if (total > 0 && (flowPeakLong === null || total > flowPeakLong.gamma)) flowPeakLong = { strike: k, gamma: total };
+    if (total < 0 && (flowPeakShort === null || total < flowPeakShort.gamma)) flowPeakShort = { strike: k, gamma: total };
   }
 
   const colNet = expiries.map((_, j) => {
@@ -1904,8 +1969,8 @@ export function buildSurface(rows, {
     grid,
     rowTotals: strikes.map((k) => strikeTotals.get(k) ?? 0),
     atSpot: allStrikes[nearest],
-    callWall,
-    putWall,
+    flowPeakLong,
+    flowPeakShort,
     scaleCap,
     peak,
     clipped,

@@ -3033,19 +3033,26 @@
       }
     }
 
-    const flip = isNum(card && card.gammaFlip);
-    if (flip === null) {
+    const zero = isNum(card && card.zeroGamma);
+    if (zero === null) {
+      pairs.push(["Zero-gamma level", DASH, null, "unavailable",
+        "No zero-gamma level: it needs the chain's open interest re-priced on the fitted smiles, and this card has none."]);
+    } else {
+      pairs.push(["Zero-gamma level", money(zero)]);
+    }
+    const cross = isNum(card && card.strikeSumCrossing) !== null ? isNum(card.strikeSumCrossing) : isNum(card && card.gammaFlip);
+    if (cross === null) {
       const gm = panels.gamma;
       if (gm && gm.status && gm.status !== "ok") {
         const [k, why] = silence(gm, "gamma");
-        pairs.push(["Gamma flip", DASH, null, k, why]);
+        pairs.push(["Strike-sum crossing", DASH, null, k, why]);
       } else {
-        pairs.push(["Gamma flip", DASH, null, "quiet",
-          "Net gamma does not change sign materially inside the drawn band, so " +
-          "no flip level is published for this name."]);
+        pairs.push(["Strike-sum crossing", DASH, null, "quiet",
+          "The flow ladder's running sum does not change sign inside the drawn band."]);
       }
     } else {
-      pairs.push(["Gamma flip", money(flip)]);
+      pairs.push(["Strike-sum crossing", money(cross), null, null,
+        "Where the flow ladder's running sum changes sign; not the zero-gamma level."]);
     }
 
     const pm = panels.pricedMove;
@@ -5879,17 +5886,10 @@
     const levelsPanel = card.panels && card.panels.levels;
     const flipLevel = levelsPanel && levelsPanel.status === "ok" &&
       Array.isArray(levelsPanel.levels)
-      ? levelsPanel.levels.find((l) => l && l.kind === "gamma_flip") || null
+      ? levelsPanel.levels.find((l) => l && l.kind === "zero_gamma") || null
       : null;
     const flipPct = flipLevel ? isNum(flipLevel.distPct) : null;
     const flipAtr = flipLevel ? isNum(flipLevel.distAtr) : null;
-    const regime = card.regime || null;
-    const bandLo = regime ? isNum(regime.bandMin) : null;
-    const bandHi = regime ? isNum(regime.bandMax) : null;
-    const bandSaid = bandLo !== null && bandHi !== null
-      ? " The ladder was read over $" + bandLo.toFixed(2) + " to $" + bandHi.toFixed(2) +
-        ", so this is the nearest sign change inside that window rather than in the whole book."
-      : "";
 
     let flipNode;
     if (flipPct === null) {
@@ -5897,11 +5897,9 @@
       flipNode = idChip("ftFlip", "flip", DASH, {
         empty: "unavailable",
         title: levelsPanel && levelsPanel.status === "ok"
-          ? "No gamma flip resolved on this name's ladder, so there is no distance to " +
-            "one. That is not a distance of zero — a book with no sign change over the " +
-            "strikes read has no flip to be near." + bandSaid
+          ? "No zero-gamma level resolved, so no distance: not a distance of zero."
           : "The levels panel is unavailable for this name today, so the distance to the " +
-            "gamma flip was not measured." + bandSaid,
+            "zero-gamma level was not measured.",
       });
     } else {
 
@@ -5914,13 +5912,12 @@
         : "exactly at spot — the name is sitting on its flip";
       flipNode = idChip("ftFlip", "", P.pct1(flipPct) + " to flip" + atrSaid, {
         cls: flipPct >= 0 ? "is-above" : "is-below",
-        title: "Gamma flip at $" + flipLevel.px.toFixed(2) + ", " + whereSaid +
-          ". Past it the sign of dealer " +
+        title: "Zero-gamma level at $" + flipLevel.px.toFixed(2) + ", " + whereSaid +
+          ": total dealer gamma, re-priced at hypothetical spots, changes sign there. Past it the sign of dealer " +
           "hedging reverses: the flow that has been damping moves starts amplifying " +
           "them." + (flipAtr === null
             ? " No ATR was published for this name, so the distance is stated in percent only."
-            : " The second figure is that distance in this name's own average true range.") +
-          bandSaid,
+            : " The second figure is that distance in this name's own average true range."),
       });
     }
 

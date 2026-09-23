@@ -38,6 +38,9 @@ import {
   buildPolitical, POLITICAL_FEEDS, unwrapRows as unwrapVendorRows,
 } from "../shared/flows-political.js";
 import { parseOptionSymbol } from "../shared/flows-premium.js";
+import { black76 } from "../shared/flows-quant-bs.js";
+import { regimeState } from "../shared/flows-neuron.js";
+import * as QP from "./flows-quant-pipeline.mjs";
 import { marketAggregate, MARKET_NOTES } from "../shared/flows-market.js";
 import {
   capBands, selectCoverage, NDX_100, NDX_AS_OF, SELECTION_EPOCH, UNIVERSE_NOTES,
@@ -3058,20 +3061,25 @@ export function fakeChain(ticker, spot, seed, { wide = false, expiry = null, pag
 
       for (const cp of ["P", "C"]) {
         const isPut = cp === "P";
-        const iv = level + 0.55 * m * m - 0.22 * m + (isPut ? 0.012 : -0.012);
-        const intrinsic = isPut ? Math.max(0, strike - spot) : Math.max(0, spot - strike);
-        const bid = intrinsic + spot * iv * Math.sqrt(dte / 365) * 0.4 * Math.exp(-2 * m * m);
+        const smileVol = level + 0.55 * m * m - 0.22 * m;
+        const iv = smileVol + (isPut ? 0.012 : -0.012);
+        const T = dte / 365;
+        const F = spot * Math.exp(FAKE_RATE * T), D = Math.exp(-FAKE_RATE * T);
+        const price = black76(F, D, strike, smileVol, T, cp);
+        const half = Math.max(0.01, 0.015 * price);
+        const bid = Math.max(0.01, Math.round((price - half) * 100) / 100);
+        const ask = Math.max(bid + 0.01, Math.round((price + half) * 100) / 100);
 
         const traded = rnd() > 0.08;
         const volume = traded ? Math.round(80 + 3000 * Math.exp(-7 * m * m) * rnd()) : 0;
         const row = {
           option_symbol: `${ticker}${code}${cp}${String(Math.round(strike * 1000)).padStart(8, "0")}`,
 
-          nbbo_bid: (i === halfWidth && !isPut ? 0 : Math.max(0.05, bid)).toFixed(2),
-          nbbo_ask: (Math.max(0.05, bid) * 1.02 + 0.03).toFixed(2),
+          nbbo_bid: (i === halfWidth && !isPut ? 0 : bid).toFixed(2),
+          nbbo_ask: ask.toFixed(2),
           implied_volatility: iv.toFixed(6),
-          open_interest: String(400 + Math.round(6000 * Math.exp(-6 * m * m))),
-          prev_oi: String(380 + Math.round(5700 * Math.exp(-6 * m * m))),
+          open_interest: String(400 + Math.round(6000 * Math.exp(-6 * m * m) * (isPut ? (m < 0 ? 1.5 : 0.5) : (m > 0 ? 1.5 : 0.5)))),
+          prev_oi: String(380 + Math.round(5700 * Math.exp(-6 * m * m) * (isPut ? (m < 0 ? 1.5 : 0.5) : (m > 0 ? 1.5 : 0.5)))),
         };
 
         if (rnd() > 0.07) row.volume = String(volume);
@@ -3099,6 +3107,27 @@ export function fakeChain(ticker, spot, seed, { wide = false, expiry = null, pag
     [rows[i], rows[j]] = [rows[j], rows[i]];
   }
   return rows.slice(page * CHAIN_PAGE_SIZE, (page + 1) * CHAIN_PAGE_SIZE);
+}
+
+function fakeTreasury(sessionDate) {
+  return { data: { data: [{ value: 4.17, date: sessionDate || "2026-08-24" }, { value: 4.2, date: "2026-08-21" }], name: "3month", unit: "percent" } };
+}
+
+export function fakeEarnings(ticker, sessionDate) {
+  const rnd = mulberry(ticker.length * 977 + ticker.charCodeAt(0));
+  const rows = [];
+  const base = Date.parse((sessionDate || "2026-08-24") + "T00:00:00Z");
+  const upcoming = new Date(base + (20 + Math.floor(rnd() * 70)) * 86400000).toISOString().slice(0, 10);
+  rows.push({ source: "estimation", report_date: upcoming, report_time: "unknown", expected_move_perc: null, post_earnings_move_1d: null });
+  for (let q = 1; q <= 10; q++) {
+    const d = new Date(base - (q * 91 - 30) * 86400000);
+    while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() + 1);
+    const expected = 0.04 + 0.05 * rnd();
+    const move = (rnd() > 0.5 ? 1 : -1) * expected * (0.4 + 1.2 * rnd());
+    rows.push({ source: "company", report_date: d.toISOString().slice(0, 10), report_time: rnd() > 0.5 ? "postmarket" : "premarket",
+      expected_move_perc: expected.toFixed(6), post_earnings_move_1d: move.toFixed(6) });
+  }
+  return { data: rows };
 }
 
 function fakeSurface(ticker, spot, expiries) {
@@ -4781,6 +4810,9 @@ async function main() {
   }
 
   const chainByTicker = new Map();
+  const quantRows = new Map();
+  let quantPass = { preps: new Map(), crossSection: new Map() };
+  let quantRate = null;
   const vannaSamples = [];
   const chainMiss = new Map();
   try {
@@ -4847,6 +4879,7 @@ async function main() {
         }
         const merged = mergeChainPages(pages);
         const rows = merged.rows;
+        quantRows.set(ticker, rows.slice());
         if (nextPage > 1) {
           paging.names++;
           paging.extra += nextPage - 1;
@@ -4898,6 +4931,7 @@ async function main() {
                 vannaRows = narrow;
                 vannaExpiry = near;
               }
+              if (Array.isArray(narrow) && narrow.length) quantRows.set(ticker, narrow.concat(quantRows.get(ticker) || []));
               const narrowPanels = buildChainPanels(narrow, {
                 spot: spotByTicker.get(ticker) || null,
                 asOf: sessionDate,
@@ -5054,6 +5088,26 @@ async function main() {
         "contract that traded today, so this reads as `volume` being absent or zero " +
         "chain-wide at this hour rather than as a quiet session.");
     }
+  }
+
+  try {
+    const atrOfLiquid = new Map(liquid.map((e) => [e.features.ticker, e.features.atr]));
+    const spotOfQuant = (t) => spotOfLiquid.get(t) || spotByTicker.get(t) || null;
+    const needTreasury = !QP.PARITY_SYMBOLS.some((sym) => quantRows.has(sym) && spotOfQuant(sym) > 0);
+    const treasuryRaw = !needTreasury ? null : DRY_RUN ? fakeTreasury(sessionDate)
+      : await uw("/api/economy/treasury-yield", { interval: "daily", maturity: "3month" }).catch(() => null);
+    quantRate = QP.rateFromRuns({ rowsByTicker: quantRows, spotOf: spotOfQuant, sessionDate, treasuryRaw });
+    const t0 = Date.now();
+    quantPass = QP.preparePass({
+      rowsByTicker: quantRows, sessionDate, rate: quantRate, spotOf: spotOfQuant,
+      atrOf: (t) => atrOfLiquid.get(t) || null, expiriesOf: (t) => expiriesByTicker.get(t) || [],
+    });
+    const zeros = [...quantPass.preps.values()].filter((p) => p.zero && p.zero.px !== null).length;
+    const slices = [...quantPass.preps.values()].reduce((a, p) => a + p.built.length, 0);
+    console.log(`  quant: rate ${quantRate.r} (${quantRate.method}); ${quantPass.preps.size} name(s) fitted from NBBO quotes, ` +
+      `${slices} expiry smile(s), ${zeros} with a zero-gamma level, in ${Date.now() - t0}ms`);
+  } catch (error) {
+    console.warn(`  quant: the smile pre-pass failed — ${error.message}; cards publish without an engine block`);
   }
 
   variationRun.vannaScale = vannaScale(vannaSamples, { prior: variationRun.unit.used });
@@ -5618,6 +5672,7 @@ async function main() {
   const perNameCut = { names: 0, darkpool: 0, ivRank: 0 };
   const deadline = stats.startedAt + DEADLINE_MS;
   const cardTickers = [...onBoard.keys()];
+  const quantStats = { built: 0, withIdeas: 0, split: 0, failed: 0, bytes: [] };
   const cardLane = poolWidth(2);
   console.log(`  cards: ${cardTickers.length} name(s), ${cardLane.width} in flight — ${cardLane.why}`);
   const cardsRun = await runPooled(cardTickers, async (ticker, index) => {
@@ -5635,11 +5690,12 @@ async function main() {
       const spotPx = num(e.features.spot) || num(e.row.close);
 
       const congress = congressRows(ticker, congressState);
-      const [maxPain, surface, dpRaw, oiRaw, termRaw, rankRaw] = DRY_RUN
+      const quantPrep = quantPass.preps.get(ticker) || null;
+      const [maxPain, surface, dpRaw, oiRaw, termRaw, rankRaw, earnRaw] = DRY_RUN
         ? [fakeMaxPain(ticker, spotPx), fakeSurface(ticker, spotPx, surfaceExpiries),
            fakeStockDarkpool(ticker, spotPx), fakeStockOiChange(ticker, spotPx),
            fakeTermStructure(ticker, spotPx, sessionDate ? { date: sessionDate } : {}),
-           fakeIvRank(ticker, spotPx, IV_RANK_PARAMS)]
+           fakeIvRank(ticker, spotPx, IV_RANK_PARAMS), quantPrep ? fakeEarnings(ticker, sessionDate) : null]
         : await Promise.all([
 
           uw(`/api/stock/${ticker}/max-pain`, sessionDate ? { date: sessionDate } : {}).catch(() => []),
@@ -5661,6 +5717,8 @@ async function main() {
           uw(`/api/stock/${ticker}/oi-change`, { limit: 30, ...onSession }).catch(() => null),
           uw(`/api/stock/${ticker}/volatility/term-structure`, { ...onSession }).catch(() => null),
           uw(`/api/stock/${ticker}/iv-rank`, { ...IV_RANK_PARAMS, ...onSession }).catch(() => null),
+
+          quantPrep ? uw(`/api/earnings/${ticker}`, {}).catch(() => null) : Promise.resolve(null),
         ]);
       const darkpoolCut = sessionRows(dpRaw, (r) => easternDayOf(r && r.executed_at), sessionDate);
       const darkpoolRth = sessionPrints(dpRaw, sessionDate, { limit: 500 });
@@ -5692,12 +5750,15 @@ async function main() {
         }
       }
 
+      const earnings = quantPrep ? QP.earningsFromVendor(earnRaw, { sessionDate }) : null;
+      const garch = earnings ? QP.refitGarch(e.features, earnings.mask) : e.features.garch;
       const card = buildCard({
         ticker,
         row: sessionRow(e.row, e.features),
-        features: { ...e.features, ...(scoredByTicker.get(ticker) || {}) },
+        features: { ...e.features, ...(scoredByTicker.get(ticker) || {}), garch },
         strikes: e.raw.strikes,
         ticks: e.raw.ticks,
+        quant: quantPrep ? { zeroGamma: quantPrep.zero } : null,
 
         expiries: e.raw.expiries,
         surface,
@@ -5755,7 +5816,29 @@ async function main() {
         throw new Error(`card is ${(body.length / 1024).toFixed(0)}KB after shedding ` +
           `${dropped.length} panel(s), still over the ingest cap`);
       }
-      await publish("card:" + ticker, card);
+      let engineOut = { card, extra: null, split: false };
+      if (quantPrep) {
+        try {
+          const closes = Array.isArray(e.features.candles) ? e.features.candles.map((c) => c && c[4]) : e.features.closes;
+          const law = QP.garchLaw({ garch, ticker, sessionDate, closes, rate: quantRate ? quantRate.r : undefined });
+          const state = regimeState(card, {});
+          const block = QP.engineBlock({
+            ticker, sessionDate, spot: spotPx, atr: e.features.atr, card, prep: quantPrep, rate: quantRate,
+            garch, law, event: earnings ? earnings.next : null, state, strikes: e.raw.strikes,
+            crossSection: quantPass.crossSection.get(ticker) || null,
+          });
+          engineOut = QP.attachEngine(card, block);
+          quantStats.built++;
+          if (block && block.ideas.length) quantStats.withIdeas++;
+          if (engineOut.split) quantStats.split++;
+          quantStats.bytes.push(engineOut.bytes);
+        } catch (error) {
+          quantStats.failed++;
+          console.warn(`  engine ${ticker}: ${error.message} — the card publishes without it`);
+        }
+      }
+      if (engineOut.extra) await publish("card-x:" + ticker, engineOut.extra);
+      await publish("card:" + ticker, engineOut.card);
 
       return {
         status: "built",
@@ -5780,6 +5863,12 @@ async function main() {
   });
 
   const cards = foldCardOutcomes(cardTickers, cardsRun);
+  if (quantStats.built || quantStats.failed) {
+    const big = quantStats.bytes.length ? Math.max(...quantStats.bytes) : 0;
+    console.log(`  engine: ${quantStats.built} card(s) carry an engine block, ${quantStats.withIdeas} with ranked ideas, ` +
+      `${quantStats.split} split to card-x for the ${QP.QUANT_PIPELINE_LINES.INGEST_CAP / 1024}KB ingest cap` +
+      (quantStats.failed ? `, ${quantStats.failed} failed` : "") + `; largest card ${(big / 1024).toFixed(1)}KB`);
+  }
   if (perNameCut.names) {
     console.log(`  per-name feeds: ${perNameCut.names} card(s) carried rows from outside ` +
       `${sessionDate} — ${perNameCut.darkpool} dark-pool print(s) not on the session and ` +

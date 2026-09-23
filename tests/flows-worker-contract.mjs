@@ -1201,6 +1201,59 @@ try {
   }
 
   {
+    const login = await fetch(url("/flows/login"), {
+      method: "POST", redirect: "manual",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: server.baseURL, "Sec-Fetch-Site": "same-origin",
+      },
+      body: new URLSearchParams({ username: FLOWS_TEST_USER, password: FLOWS_PASSWORD }).toString(),
+    });
+    const token = /flows_session=([^;]+)/.exec(login.headers.get("set-cookie") || "")[1];
+    const cookie = { Cookie: "flows_session=" + token };
+    const put = (key, body) => fetch(url("/api/flows/ingest?key=" + encodeURIComponent(key)), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + INGEST_TOKEN },
+      body: JSON.stringify(body),
+    });
+    const sessionDate = "2026-09-22";
+    const at = new Date().toISOString();
+    const block = { v: 1, engine: "q1", asOf: "2026-09-22T20:00:00.000Z", spot: 420.5, atr: 8,
+      facts: [{ id: "iv.cm.30", v: 0.31, u: "vol", g: 3 }, { id: "iv.pct.30", v: 0.8, u: "frac", g: 2 },
+        { id: "vrp.rel.21", v: 0.2, u: "frac", g: 3 }],
+      state: { state: "premium-rich", direction: null, confidence: 2, preferred: ["put credit spread"], avoid: ["long straddle"] },
+      structures: [{ id: "S1", family: "put-credit-spread", risk: "defined", dir: "bull", expiry: "2026-10-16", dte: 24,
+        legs: [{ type: "P", k: 400, side: -1, qty: 1 }, { type: "P", k: 390, side: 1, qty: 1 }],
+        prob: { popQ: 0.7, popP: 0.76 }, ev: { q: -2, p: 14, edge: 16 }, maxProfit: 180, maxLoss: -820,
+        grade: 3, gradeWhy: [], rules: ["vrp.rich", "iv.high"] }],
+      ideas: ["S1"], noTrade: null };
+    const panels = { pricedMove: { status: "ok", impliedMove: 0.05, realizedMove: 0.04, sessions: 10, iv30: 0.31, rv30: 0.25 } };
+
+    eq((await put("card-x:MSFT", { ticker: "MSFT", sessionDate, generatedAt: at, engine: block })).status, 200,
+       "the engine's overflow key card-x:<T> ingests beside the card");
+    eq((await put("card:MSFT", { ticker: "MSFT", sessionDate, generatedAt: at, panels,
+      engine: { status: "split", key: "card-x:MSFT", bytes: 1234 } })).status, 200,
+       "and a card carrying only the split pointer ingests under its own key");
+    const merged = await (await get("/api/flows/card?t=MSFT", { headers: cookie })).json();
+    ok(merged.engine && Array.isArray(merged.engine.structures) && merged.engine.structures[0].id === "S1" &&
+       merged.engine.facts[0].v === 0.31 && merged.panels.pricedMove.status === "ok",
+       "a card read resolves the pointer: the page receives one card with its engine block in place, panels untouched");
+    eq((await put("card-x:1ABC", {})).status, 400, "the overflow key is validated like the card key it rides beside");
+
+    await put("card-x:NVDA", { ticker: "NVDA", sessionDate: "2026-09-19", generatedAt: at, engine: block });
+    await put("card:NVDA", { ticker: "NVDA", sessionDate, generatedAt: at, panels,
+      engine: { status: "split", key: "card-x:NVDA", bytes: 1 } });
+    const stale = await (await get("/api/flows/card?t=NVDA", { headers: cookie })).json();
+    eq(stale.engine && stale.engine.status, "unreadable",
+       "an overflow written for another session is never grafted onto today's card: the pointer reads unreadable");
+    await put("card:AMD", { ticker: "AMD", sessionDate, generatedAt: at, panels,
+      engine: { status: "split", key: "card-x:MSFT", bytes: 1 } });
+    const foreign = await (await get("/api/flows/card?t=AMD", { headers: cookie })).json();
+    eq(foreign.engine && foreign.engine.status, "split", "and a pointer naming another ticker's overflow is not followed");
+
+  }
+
+  {
     const big = JSON.stringify({ side: "long", rows: [], pad: "x".repeat(200 * 1024) });
     const res = await fetch(url("/api/flows/ingest?key=board:long"), {
       method: "POST",

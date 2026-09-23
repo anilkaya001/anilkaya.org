@@ -403,12 +403,14 @@ flows-vol-contract
 flows-positioning-contract
 flows-legs-contract
 flows-live-contract    flows-freshness-contract
+flows-quant-card
 ```
 
 `flows-quant` was measured on 2026-09-23: about 5 s with no server. It spawns
 itself once more, as a fresh process, to time the Worker path of the options
 engine (one 400-quote expiry fitted and 24 structures priced) in a clean heap,
 which is what a Worker isolate sees; that child is part of the 5 s.
+`flows-quant-card` was measured the same day: under 2 s with no server.
 
 Confirmed to need one: `flows-overview-contract`, `flows-board-render`,
 `flows-watch-render`, `flows-political-render`, `flows-ask-render`,

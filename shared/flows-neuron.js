@@ -75,7 +75,7 @@ function scalarFigures(panel, keys) {
 }
 
 const FIGURE_KEYS = {
-  gamma: ["spot", "callWall", "putWall", "strikes", "bandMin", "bandMax"],
+  gamma: ["spot", "flowPeakLong", "flowPeakShort", "strikes", "bandMin", "bandMax"],
   surface: ["asOf", "atSpot", "expiriesShown", "expiriesTotal", "strikesShown", "strikesTotal"],
   levels: ["spot", "atr"],
   scoreOverlay: ["overlap", "scored", "deadBand"],
@@ -90,7 +90,8 @@ const FIGURE_KEYS = {
   charm: ["seen", "cap", "shed"],
   deltaExposure: ["seen", "cap", "shed"],
   displacement: ["oiCentroid", "volCentroid", "spot", "gapPx", "gapAtr"],
-  pricedMove: ["impliedMove", "impliedLow", "impliedHigh", "realizedMove", "sessions", "asOf"],
+  pricedMove: ["impliedMove", "impliedLow", "impliedHigh", "realizedMove", "sessions", "asOf",
+    "vrpForward", "vrpForwardVar", "vrpForwardRel", "vrpTrailing", "rvForward", "richnessFrom"],
   context: ["r5", "r21", "r42", "week52Pos", "changePct"],
   congress: ["total", "buys", "sells", "medianLagDays"],
   marketRank: ["asOf"],
@@ -127,8 +128,8 @@ function panelRobustness(key, group, p, card) {
     case "levels": {
       const g = card.panels && card.panels.gamma && card.panels.gamma.status === "ok" ? card.panels.gamma : null;
       return g && num(g.strikes) !== null && num(g.strikes) < 20
-        ? { r: 1, why: "the walls come from a flow ladder of fewer than 20 strikes" }
-        : { r: 2, why: "the walls and the ladder's zero-crossing read off today's flow ladder; max pain off the open-interest snapshot" };
+        ? { r: 1, why: "the flow ladder beside the levels rests on fewer than 20 strikes" }
+        : { r: 2, why: "the walls read off the open-interest book on their own side of spot, zero gamma off total gamma re-evaluated at hypothetical spots, the strike-sum crossing off today's flow ladder, max pain off the open-interest snapshot" };
     }
     case "surface":
       return num(p.clipped) > 0
@@ -188,39 +189,50 @@ export function gammaReading(card) {
   const c = card && typeof card === "object" ? card : {};
   const regime = c.regime && typeof c.regime === "object" ? c.regime : {};
   const P = c.panels && typeof c.panels === "object" ? c.panels : {};
-  const V = okPanel(P.variation) ? P.variation : null;
-  const bookDollars = num(regime.bookGamma) !== null ? num(regime.bookGamma)
-    : V && V.inputs ? num(V.inputs.gammaBook) : null;
-  const bookNet = bookDollars !== null ? bookDollars : num(regime.bookGammaRaw);
   const flow = num(regime.flowGamma) !== null ? num(regime.flowGamma) : num(regime.netGamma);
-  if (bookNet !== null) {
-    const share = num(regime.bookShare);
-    const label = bookNet >= 0 ? "long" : "short";
-    return {
-      from: "book", label, strength: share === null ? null : Math.abs(share),
-      sentence: "net dealer gamma across the open-interest book is " + label +
-        (bookDollars !== null ? ", " + signedMoney(bookDollars) + " per 1% move" : "") +
-        (share === null ? "" : " (" + Math.round(Math.abs(share) * 100) + "% of its gross)") +
-        (flow !== null ? "; today\u2019s trading added " + signedMoney(flow) : ""),
-    };
-  }
-  if (flow !== null) {
+  const from = str(regime.labelFrom);
+  const value = num(regime.labelValue) !== null ? num(regime.labelValue)
+    : from === "book" ? (num(regime.bookGammaRaw) !== null ? num(regime.bookGammaRaw) : num(regime.bookGamma))
+      : from === "flow" ? flow : null;
+  const label = value === null ? str(regime.label) : value >= 0 ? "long" : "short";
+  if ((from === "book" || from === "flow") && value !== null) {
+    if (from === "book") {
+      const share = num(regime.bookShare);
+      return {
+        from: "book", label, value, strength: share === null ? null : Math.abs(share),
+        sentence: "net dealer gamma across the open-interest book is " + label + ", " + signedMoney(value) + " per 1% move" +
+          (share === null ? "" : " (" + Math.round(Math.abs(share) * 100) + "% of its gross)") +
+          (flow !== null ? "; today\u2019s trading added " + signedMoney(flow) + ", read as flow and never as the book" : ""),
+      };
+    }
     const bars = okPanel(P.gamma) && !P.gamma.bucketed && Array.isArray(P.gamma.bars) ? P.gamma.bars : [];
     const gross = num(regime.flowGross) !== null ? num(regime.flowGross)
       : bars.reduce((a, b) => a + Math.abs(num(b && b.g) || 0), 0);
-    const strength = gross > 0 ? Math.abs(flow) / gross : null;
-    const label = flow >= 0 ? "long" : "short";
+    const strength = gross > 0 ? Math.abs(value) / gross : null;
     return {
-      from: "flow", label, strength,
-      sentence: "the open-interest book is not on this card, so the label follows the gamma dealers added today, " +
-        signedMoney(flow) + " per 1% move, " + label +
+      from: "flow", label, value, strength,
+      sentence: "the open-interest book is not on this card, so the label is the flow\u2019s: dealers added " +
+        signedMoney(value) + " of gamma per 1% move today, " + label +
         (strength === null ? "" : " (" + Math.round(strength * 100) + "% of the ladder\u2019s gross)"),
     };
   }
-  const lab = str(regime.label);
-  return lab === "long" || lab === "short"
-    ? { from: "label", label: lab, strength: null, sentence: "dealer gamma is labelled " + lab + " on this card, with no net published beside it" }
-    : { from: null, label: null, strength: null, sentence: null };
+  if (label === "long" || label === "short") {
+    return { from: "label", label, value: null, strength: null,
+      sentence: "the card labels dealer gamma " + label + " without the number it was read from" +
+        (flow !== null ? "; today\u2019s trading added " + signedMoney(flow) + ", which is flow and is not read as the book" : "") };
+  }
+  const bookRaw = num(regime.bookGammaRaw);
+  if (bookRaw !== null) {
+    const lab = bookRaw >= 0 ? "long" : "short";
+    return { from: "book", label: lab, value: bookRaw, strength: num(regime.bookShare) === null ? null : Math.abs(num(regime.bookShare)),
+      sentence: "net dealer gamma across the open-interest book is " + lab + ", " + signedMoney(bookRaw) + " per 1% move" };
+  }
+  if (flow !== null) {
+    const lab = flow >= 0 ? "long" : "short";
+    return { from: "flow", label: lab, value: flow, strength: null,
+      sentence: "the open-interest book is not on this card, so the label is the flow\u2019s: dealers added " + signedMoney(flow) + " of gamma per 1% move today, " + lab };
+  }
+  return { from: null, label: null, value: null, strength: null, sentence: null };
 }
 
 function hedgeDrivers(card) {
@@ -385,15 +397,26 @@ function premiumAxis(card) {
   }
   if (okPanel(pm)) {
     const r = panelRobustness("pricedMove", "volatility", pm, card).r;
-    const iv = num(pm.iv30), rv = num(pm.rv30), vrp = num(pm.vrp);
-    if (iv !== null && rv !== null && rv > 0 && vrp !== null) {
-      const rel = vrp / rv;
+    const iv = num(pm.iv30), rv = num(pm.rv30), rf = num(pm.rvForward);
+    const fwdGrade = num(pm.rvForwardGrade);
+    const forward = pm.richnessFrom === "forward" && iv !== null && rf !== null && rf > 0;
+    const legacyVrp = num(pm.vrp);
+    const trailing = num(pm.vrpTrailing) !== null ? num(pm.vrpTrailing) : legacyVrp;
+    const base0 = forward ? rf : rv;
+    const gap = forward ? iv - rf : trailing;
+    if (iv !== null && base0 !== null && base0 > 0 && gap !== null) {
+      const rel = gap / base0;
       reading = rel >= T.VRP_RELATIVE ? "rich" : rel <= -T.VRP_RELATIVE ? "cheap" : "fair";
-      base = r;
-      drivers.push({ key: "pricedMove", robustness: r, weight: r, axis: "premium", vote: reading === "rich" ? 1 : reading === "cheap" ? -1 : 0,
-        reading: pct1(iv) + "% implied against " + pct1(rv) + "% realised over 30 sessions, a premium of " +
-          (vrp >= 0 ? "+" : "\u2212") + Math.abs(vrp * 100).toFixed(1) + " points (" + (rel >= 0 ? "+" : "\u2212") + Math.abs(rel * 100).toFixed(0) +
-          "% of realised; the line is \u00b1" + Math.round(T.VRP_RELATIVE * 100) + "%)" });
+      base = forward ? Math.min(r, fwdGrade === null ? r : fwdGrade) : Math.min(r, 1);
+      drivers.push({ key: "pricedMove", robustness: base, weight: base, axis: "premium", vote: reading === "rich" ? 1 : reading === "cheap" ? -1 : 0,
+        reading: forward
+          ? pct1(iv) + "% implied against a GARCH forecast of " + pct1(rf) + "% realised over the next 21 sessions, a forward premium of " +
+            (gap >= 0 ? "+" : "\u2212") + Math.abs(gap * 100).toFixed(1) + " points, " + (num(pm.vrpForwardVar) !== null ? (pm.vrpForwardVar >= 0 ? "+" : "\u2212") + Math.abs(pm.vrpForwardVar).toFixed(4) + " in variance, " : "") +
+            (rel >= 0 ? "+" : "\u2212") + Math.abs(rel * 100).toFixed(0) + "% of the forecast; the line is \u00b1" + Math.round(T.VRP_RELATIVE * 100) + "%" +
+            (trailing !== null && rv !== null ? " (against the trailing 21 sessions' " + pct1(rv) + "% the gap is " + (trailing >= 0 ? "+" : "\u2212") + Math.abs(trailing * 100).toFixed(1) + " points, shown and not voted)" : "")
+          : pct1(iv) + "% implied against " + pct1(rv) + "% realised over the trailing 21 sessions, a backward-looking premium of " +
+            (gap >= 0 ? "+" : "\u2212") + Math.abs(gap * 100).toFixed(1) + " points (" + (rel >= 0 ? "+" : "\u2212") + Math.abs(rel * 100).toFixed(0) +
+            "% of realised; the line is \u00b1" + Math.round(T.VRP_RELATIVE * 100) + "%): no graded forward forecast was available, so it votes weakly" });
       const rank = num(pm.ivRank);
       if (rank !== null) {
         const v = rank >= T.IV_RANK_HIGH ? 1 : rank <= T.IV_RANK_LOW ? -1 : 0;
@@ -486,7 +509,8 @@ export function stateSentence(s, ticker) {
 export function stateChip(s) {
   const T = STATE_LINES;
   const flow = s.flow ? ", flow " + s.flow : "";
-  if (s.state === "pinned") return STATE_WORD.pinned + " \u00b7 long gamma at spot" + (s.target ? ", max pain " + f2(s.target.px) : "") + flow;
+  if (s.state === "pinned") return STATE_WORD.pinned + " \u00b7 long gamma " + (s.gammaFrom === "flow" ? "in today\u2019s flow" : "in the book") + (s.target ? ", max pain " + f2(s.target.px) : "") + flow;
+  if ((s.state === "squeeze" || s.state === "amplifying") && s.gammaFrom === "flow") return STATE_WORD[s.state] + " \u00b7 short gamma in today\u2019s flow" + (s.direction ? ", flow " + s.direction : ", flow undecided");
   if (s.state === "squeeze") return STATE_WORD.squeeze + " \u00b7 short gamma, flow " + s.direction + " toward the " + s.target.label.toLowerCase() + " " + f2(s.target.px);
   if (s.state === "amplifying") return STATE_WORD.amplifying + " \u00b7 short gamma" + (s.direction ? ", flow " + s.direction : ", flow undecided") + (s.bound ? ", to the flip " + f2(s.bound.px) : "");
   if (s.state === "transitional") return STATE_WORD.transitional + " \u00b7 " + (s.invalidation ? f2(s.invalidation.px) + " " : "") + "inside " + T.FLIP_ON_ATR + " ATR" + flow;
@@ -507,7 +531,7 @@ export function regimeState(card, extras) {
   const levelsR = panelRobustness("levels", "convexity", P.levels, c);
   const regime = c.regime && typeof c.regime === "object" ? c.regime : {};
   const L = levelsOf(c);
-  const flip = L.by.gamma_flip || null;
+  const flip = L.by.zero_gamma || null;
   const votes = directionVotes(c);
   const premium = premiumAxis(c);
   const prem = premium.reading || "fair";
@@ -541,18 +565,19 @@ export function regimeState(card, extras) {
           : "; the ladder changes sign " + regime.crossings + " time" + (regime.crossings === 1 ? "" : "s")) });
     if (levelsOk && flip && flipAtr !== null) {
       drivers.push({ key: "levels", robustness: levelsR.r, weight: levelsR.r, axis: "positioning",
-        reading: "the strike ladder's running sum crosses zero at " + f2(flip.px) + ", " + Math.abs(flipAtr).toFixed(2) + " ATR " + (flipAtr >= 0 ? "above" : "below") + " spot " + f2(L.spot) +
+        reading: "total dealer gamma, re-evaluated at hypothetical spots, changes sign at " + f2(flip.px) + ", " + Math.abs(flipAtr).toFixed(2) + " ATR " + (flipAtr >= 0 ? "above" : "below") + " spot " + f2(L.spot) +
           (onFlip ? " (inside " + T.FLIP_ON_ATR + " ATR: spot sits on the crossing)" : nearFlip ? " (inside " + T.FLIP_NEAR_ATR + " ATR)" : "") });
     } else if (levelsOk && num(regime.bandMin) !== null && num(regime.bandMax) !== null) {
       drivers.push({ key: "levels", robustness: levelsR.r, weight: levelsR.r, axis: "positioning",
-        reading: "no sign change resolved on the ladder read over " + f2(num(regime.bandMin)) + " to " + f2(num(regime.bandMax)) + ", so the " + label + " side holds across the window" });
+        reading: "no zero-gamma level was resolved on this card; the flow ladder read over " + f2(num(regime.bandMin)) + " to " + f2(num(regime.bandMax)) +
+          (num(regime.crossings) === 0 ? " never changes sign" : " is not the book") + ", so the " + label + " side is read from the " + (read.from === "book" ? "book" : "flow") });
     }
     const base = levelsOk ? Math.min(gammaDriverR, levelsR.r) : Math.min(gammaDriverR, 2);
     if (onFlip) {
       state = "transitional";
       direction = flow;
       confidence = base;
-      invalidation = { kind: "gamma_flip", px: flip.px, label: "Gamma flip" };
+      invalidation = { kind: "zero_gamma", px: flip.px, label: "Zero-gamma level" };
       horizon = front ? { kind: "expiry", value: front.expiry, days: num(front.days) } : pricedHorizon;
     } else if (label === "long") {
       state = "pinned";
@@ -561,7 +586,7 @@ export function regimeState(card, extras) {
       const pain = L.by.max_pain || null;
       target = pain && pain.distAtr !== null && Math.abs(pain.distAtr) <= T.PAIN_NEAR_ATR ? { kind: "max_pain", px: pain.px, label: "Max pain", distAtr: pain.distAtr } : null;
       const wall = L.list.filter((l) => l.kind === "call_wall" || l.kind === "put_wall").sort((a, b) => Math.abs(a.distAtr) - Math.abs(b.distAtr))[0] || null;
-      invalidation = flip ? { kind: "gamma_flip", px: flip.px, label: "Gamma flip" } : wall ? { kind: wall.kind, px: wall.px, label: wall.label } : null;
+      invalidation = flip ? { kind: "zero_gamma", px: flip.px, label: "Zero-gamma level" } : wall ? { kind: wall.kind, px: wall.px, label: wall.label } : null;
       horizon = cal && num(cal.frontLoad) !== null && cal.frontLoad >= T.FRONT_LOAD && front
         ? { kind: "expiry", value: front.expiry, days: num(front.days) }
         : cal && str(cal.halfLifeExpiry) ? { kind: "half_life_expiry", value: cal.halfLifeExpiry, days: num(cal.halfLifeDays) } : pricedHorizon;
@@ -585,13 +610,13 @@ export function regimeState(card, extras) {
       } else {
         state = "amplifying";
         if (flipBetween) {
-          bound = { kind: "gamma_flip", px: flip.px, label: "Gamma flip", distAtr: flipAtr };
+          bound = { kind: "zero_gamma", px: flip.px, label: "Zero-gamma level", distAtr: flipAtr };
           notes.push("the flip at " + f2(flip.px) + " lies between spot and the " + wall.label.toLowerCase() + " at " + f2(wall.px) + ", so the short-gamma zone ends before the wall");
         }
       }
       const opp = d === 0 ? null : nearestLevel(L.list, -d);
       invalidation = opp ? { kind: opp.kind, px: opp.px, label: opp.label, distAtr: opp.distAtr }
-        : flip ? { kind: "gamma_flip", px: flip.px, label: "Gamma flip" } : null;
+        : flip ? { kind: "zero_gamma", px: flip.px, label: "Zero-gamma level" } : null;
       horizon = pricedHorizon || (front ? { kind: "expiry", value: front.expiry, days: num(front.days) } : null);
       confidence = base - (strong ? 0 : 1) - (nearFlip ? 1 : 0) - (d !== 0 && votes.split ? 1 : 0);
       if (d === 0) confidence = Math.min(confidence, 1);
@@ -641,6 +666,7 @@ export function regimeState(card, extras) {
   if (premium.pinned) notes.push("the priced move reads as pinned by an event, so no long-volatility structure is preferred");
   const out = {
     version: STATE_VERSION, state, direction, flow, confidence, premium: premium.pinned ? "pinned" : premium.reading,
+    gammaFrom: read.from, gammaLabel: read.label, gammaValue: num(read.value),
     drivers: drivers.filter((d) => d.robustness > 0), invalidation, horizon, target, bound,
     preferred, avoid: [...new Set([...table.avoid, ...pinnedOut])], stale, notes,
   };
@@ -734,10 +760,12 @@ export function buildContext(card, extras) {
           (conviction === null ? "unpublished" : conviction + " of 100") +
           (standingGamma.label ? (standingGamma.from === "book" ? "; dealer gamma across the open-interest book is "
             : standingGamma.from === "flow" ? "; the gamma dealers added today is " : "; dealer gamma is labelled ") + standingGamma.label : "") +
-          (num(c.gammaFlip) !== null ? "; the strike ladder's running sum crosses zero at " + r2(c.gammaFlip) : "") +
+          (num(c.zeroGamma) !== null ? "; total dealer gamma changes sign at " + r2(c.zeroGamma) : "") +
+          (num(c.strikeSumCrossing) !== null ? "; the flow ladder's strike-sum crossing is at " + r2(c.strikeSumCrossing) : "") +
           (num(c.atr) !== null ? "; one ATR is " + r2(c.atr) : "") + ".",
       figures: {
-        score, conviction, regime: standingGamma.label, gammaFlip: r2(num(c.gammaFlip)), atr: r2(num(c.atr)),
+        score, conviction, regime: standingGamma.label, regimeFrom: standingGamma.from,
+        zeroGamma: r2(num(c.zeroGamma)), strikeSumCrossing: r2(num(c.strikeSumCrossing)), atr: r2(num(c.atr)),
         agreement: r2(num(conv.agreement)), breadth: num(conv.breadth), coverage: r2(num(conv.coverage)),
         persistence: r2(num(conv.persistence)), gate: r2(num(conv.gate)),
         otmShare: r2(num(quality.otmShare)), vegaTilt: r2(num(quality.vegaTilt)),

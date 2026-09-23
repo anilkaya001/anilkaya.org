@@ -6,6 +6,7 @@ import {
 } from "../shared/flows-chain.js";
 import { ivConvention, priceSale, ivSurface } from "../shared/flows-premium.js";
 import { buildCard } from "../shared/flows-card.js";
+import { black76 } from "../shared/flows-quant-bs.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -77,7 +78,7 @@ function chain({
 }
 
 {
-  const built = buildChainPanels(chain(), { spot: SPOT, asOf: ASOF });
+  const built = buildChainPanels(chain(), { spot: SPOT, asOf: ASOF, ivSource: "vendor" });
   eq(built.status, "ok", "a well-formed chain builds");
   eq(built.truncated, false, "and is not reported as truncated below the page size");
   ok(built.pricedRows > 0 && built.pricedRows <= built.rowsSeen,
@@ -158,7 +159,7 @@ function chain({
   ok(agg.bars.every((b) => b.calls !== null && b.puts !== null),
      "every bar carries its two wings, not just their difference");
 
-  const bearish = buildChainPanels(chain({ bearish: true }), { spot: SPOT, asOf: ASOF });
+  const bearish = buildChainPanels(chain({ bearish: true }), { spot: SPOT, asOf: ASOF, ivSource: "vendor" });
   const bearNet = bearish.aggressor.bars.reduce((a, b) => a + b.net, 0);
   ok(bearNet < 0,
      `a tape that writes calls and lifts puts nets NEGATIVE (${bearNet}) against the ` +
@@ -192,7 +193,7 @@ function chain({
   ok(naive.length > 0 && naive.some((p) => p.iv > 0),
      "while a nearest-strike search finds a quote on that expiry regardless — the divergence is real");
 
-  const built = buildChainPanels(rows, { spot: SPOT, asOf: ASOF });
+  const built = buildChainPanels(rows, { spot: SPOT, asOf: ASOF, ivSource: "vendor" });
   const level = built.ivSurface.expiries.find((e) => e.expiry === built.skewTerm.atmExpiry);
   ok(level, "the scalar names the expiry its level came from");
   eq(built.scalars.atmIv, level.atmIv,
@@ -223,8 +224,8 @@ function chain({
     return rows;
   };
 
-  const fwd = buildChainPanels(flat("putsFirst"), { spot: SPOT, asOf: ASOF });
-  const rev = buildChainPanels(flat("callsFirst"), { spot: SPOT, asOf: ASOF });
+  const fwd = buildChainPanels(flat("putsFirst"), { spot: SPOT, asOf: ASOF, ivSource: "vendor" });
+  const rev = buildChainPanels(flat("callsFirst"), { spot: SPOT, asOf: ASOF, ivSource: "vendor" });
 
   eq(fwd.scalars.skew, rev.scalars.skew,
      `skew is order-independent (${fwd.scalars.skew} vs ${rev.scalars.skew})`);
@@ -272,7 +273,7 @@ function chain({
       });
     }
   }
-  const built = buildChainPanels(rows, { spot: SPOT, asOf: ASOF });
+  const built = buildChainPanels(rows, { spot: SPOT, asOf: ASOF, ivSource: "vendor" });
   eq(built.scalars.skew, null,
      "with no put listed at the lower wing, NO skew is published — a call standing in " +
      "for the put wing would publish a call-minus-call number under a put-versus-call label");
@@ -359,7 +360,7 @@ function chain({
       });
     }
   }
-  const built = buildChainPanels(rows, { spot: SPOT, asOf: ASOF });
+  const built = buildChainPanels(rows, { spot: SPOT, asOf: ASOF, ivSource: "vendor" });
   ok(/fraction/.test(String(built.ivBasis)),
      `the shared convention reads this chain as fractional (${built.ivBasis})`);
   eq(built.scalars.atmIv, null,
@@ -380,11 +381,11 @@ function chain({
     ask_volume: "90000", bid_volume: "9999",
   });
 
-  const unfiltered = buildChainPanels(rows, { spot: SPOT, asOf: ASOF });
+  const unfiltered = buildChainPanels(rows, { spot: SPOT, asOf: ASOF, ivSource: "vendor" });
   eq(unfiltered.topContracts.rows[0].vol, 99999,
      "without a ticker to check against, the adjusted series leads the tape");
 
-  const filtered = buildChainPanels(rows, { spot: SPOT, asOf: ASOF, ticker: "TST" });
+  const filtered = buildChainPanels(rows, { spot: SPOT, asOf: ASOF, ivSource: "vendor", ticker: "TST" });
   eq(filtered.foreignRows, 1, "given the ticker, the foreign root is dropped and COUNTED");
   ok(filtered.topContracts.rows.every((r) => r.vol !== 99999),
      "so it no longer leads the tape");
@@ -393,7 +394,7 @@ function chain({
 }
 
 {
-  const built = buildChainPanels(chain({ ivScale: 100 }), { spot: SPOT, asOf: ASOF });
+  const built = buildChainPanels(chain({ ivScale: 100 }), { spot: SPOT, asOf: ASOF, ivSource: "vendor" });
 
   eq(built.ivSurface.status, "ok", "a percent-quoted chain is normalised by the shared convention");
   ok(/percent/.test(String(built.ivBasis)), `and the basis says so (${built.ivBasis})`);
@@ -402,7 +403,7 @@ function chain({
 }
 
 {
-  const built = buildChainPanels(chain({ withAggressor: false }), { spot: SPOT, asOf: ASOF });
+  const built = buildChainPanels(chain({ withAggressor: false }), { spot: SPOT, asOf: ASOF, ivSource: "vendor" });
   eq(built.ivSurface.status, "ok", "the surface still builds without an aggressor split");
   eq(built.aggressor.status, "unavailable",
      "THE LADDER IS WITHHELD: summing absent splits as zero would draw a flat, confident " +
@@ -448,7 +449,7 @@ function chain({
 }
 
 {
-  const built = buildChainPanels(chain(), { spot: SPOT, asOf: ASOF });
+  const built = buildChainPanels(chain(), { spot: SPOT, asOf: ASOF, ivSource: "vendor" });
   const sc = built.skewTerm;
   const b30 = sc.skew30Basis;
   ok(b30 && b30.nearDays <= 30 && b30.farDays >= 30,
@@ -468,16 +469,16 @@ function chain({
      "and the relation says skews compare only at matching tenors");
 
   const oneExpiry = chain().filter((r) => /260918/.test(r.option_symbol));
-  const single = buildChainPanels(oneExpiry, { spot: SPOT, asOf: ASOF }).skewTerm;
+  const single = buildChainPanels(oneExpiry, { spot: SPOT, asOf: ASOF, ivSource: "vendor" }).skewTerm;
   eq(single.skew30, null, "one expiry cannot bracket a fixed tenor");
   ok(/bracketing 30 days/.test(single.skew30Reason || ""), `and says so (${single.skew30Reason})`);
 
-  const quiet = buildChainPanels(chain({ volumeAt: () => 0 }), { spot: SPOT, asOf: ASOF }).skewTerm;
+  const quiet = buildChainPanels(chain({ volumeAt: () => 0 }), { spot: SPOT, asOf: ASOF, ivSource: "vendor" }).skewTerm;
   eq(quiet.skew30, null, "and a chain where nothing traded publishes no fixed-tenor skew from stale quotes");
 }
 
 {
-  const emptyChain = buildChainPanels([], { spot: SPOT, asOf: ASOF });
+  const emptyChain = buildChainPanels([], { spot: SPOT, asOf: ASOF, ivSource: "vendor" });
   eq(emptyChain.status, "unavailable", "an empty chain is unavailable");
   for (const key of ["ivSurface", "skewTerm", "topContracts", "aggressor"]) {
     eq(emptyChain[key].status, "unavailable", `and every panel says so (${key})`);
@@ -502,7 +503,7 @@ function chain({
 {
 
   const rows = chain({ strikeStep: 0.07 });
-  const built = buildChainPanels(rows, { spot: SPOT, asOf: ASOF });
+  const built = buildChainPanels(rows, { spot: SPOT, asOf: ASOF, ivSource: "vendor" });
   const b = built.skewTerm.skewBasis;
   ok(b, "a coarse ladder still produces a reading");
   eq(b.putPlaced, "interpolated",
@@ -522,7 +523,7 @@ function chain({
   near(b.offset, Math.abs(b.callM - SKEW_MONEYNESS), "so the stated offset is the call wing's alone", 1e-4);
 
   const halfTraded = chain({ strikeStep: 0.07, volumeAt: (m) => (m < -0.12 ? 0 : 500) });
-  const hb = buildChainPanels(halfTraded, { spot: SPOT, asOf: ASOF }).skewTerm.skewBasis;
+  const hb = buildChainPanels(halfTraded, { spot: SPOT, asOf: ASOF, ivSource: "vendor" }).skewTerm.skewBasis;
   eq(hb.putPlaced, "nearest",
      "when the strike below the target did not trade, NO line is drawn between a traded and an " +
      "untraded quote — the wing falls back to the nearest traded strike");
@@ -535,7 +536,7 @@ function chain({
   ok(hb.offset > 0.01, `and the total offset from the targets is stated (${hb.offset})`);
 
   const sparse = chain({ strikeStep: 0.20 });
-  const far = buildChainPanels(sparse, { spot: SPOT, asOf: ASOF });
+  const far = buildChainPanels(sparse, { spot: SPOT, asOf: ASOF, ivSource: "vendor" });
   eq(far.scalars.skew, null,
      "a ladder with nothing inside the tolerance publishes NO skew rather than reaching further");
   ok(/within/.test(far.skewTerm.skewReason), `and says so (${far.skewTerm.skewReason})`);
@@ -544,7 +545,7 @@ function chain({
 {
   const rows = [];
   while (rows.length < CHAIN_PAGE_SIZE) rows.push(...chain());
-  const built = buildChainPanels(rows.slice(0, CHAIN_PAGE_SIZE), { spot: SPOT, asOf: ASOF });
+  const built = buildChainPanels(rows.slice(0, CHAIN_PAGE_SIZE), { spot: SPOT, asOf: ASOF, ivSource: "vendor" });
   eq(built.truncated, true,
      "a chain that filled the page is reported as truncated — partial coverage is stated, not hidden");
   eq(built.rowsSeen, CHAIN_PAGE_SIZE, "with the row count it actually saw");
@@ -604,7 +605,7 @@ function chain({
 }
 
 {
-  const built = buildChainPanels(chain(), { spot: SPOT, asOf: ASOF });
+  const built = buildChainPanels(chain(), { spot: SPOT, asOf: ASOF, ivSource: "vendor" });
   ok(built.scalars.skew !== null, "the fixture reads a skew");
   eq(built.scalars.skewDays, built.skewTerm.skewBasis.days,
      "and the board-bound scalar carries the tenor it was read at");
@@ -615,7 +616,7 @@ function chain({
 {
   const rows = [];
   while (rows.length < CHAIN_PAGE_SIZE) rows.push(...chain());
-  const built = buildChainPanels(rows.slice(0, CHAIN_PAGE_SIZE), { spot: SPOT, asOf: ASOF });
+  const built = buildChainPanels(rows.slice(0, CHAIN_PAGE_SIZE), { spot: SPOT, asOf: ASOF, ivSource: "vendor" });
   eq(built.truncated, true, "the builder knows it filled the page");
 
   const card = buildCard({
@@ -648,7 +649,7 @@ function chain({
 }
 
 {
-  const built = buildChainPanels(chain(), { spot: SPOT, asOf: ASOF });
+  const built = buildChainPanels(chain(), { spot: SPOT, asOf: ASOF, ivSource: "vendor" });
   const bytes = JSON.stringify({
     ivSurface: built.ivSurface, skewTerm: built.skewTerm,
     topContracts: built.topContracts, aggressor: built.aggressor,
@@ -715,7 +716,7 @@ function chain({
 
 {
 
-  const coarse = buildChainPanels(chain({ strikeStep: 0.15 }), { spot: SPOT, asOf: ASOF });
+  const coarse = buildChainPanels(chain({ strikeStep: 0.15 }), { spot: SPOT, asOf: ASOF, ivSource: "vendor" });
   eq(coarse.scalars.skew, null, "a ladder that steps past the window carries no skew");
   const miss = coarse.skewTerm.skewMiss;
   ok(miss, "and the miss is published as numbers, not only as prose");
@@ -741,7 +742,7 @@ function chain({
       ? { ...r, implied_volatility: null }
       : r;
   });
-  const unpriced = buildChainPanels(unpricedRows, { spot: SPOT, asOf: ASOF });
+  const unpriced = buildChainPanels(unpricedRows, { spot: SPOT, asOf: ASOF, ivSource: "vendor" });
 
   eq(unpriced.scalars.skew, null, "nulling the call wing's IV really does cost the skew");
   ok(unpriced.skewTerm.skewMiss, "and the staged case reaches the diagnostic");
@@ -755,7 +756,7 @@ function chain({
   }
 
   const noCalls = chain().filter((r) => !String(r.option_symbol).includes("C"));
-  const oneSided = buildChainPanels(noCalls, { spot: SPOT, asOf: ASOF });
+  const oneSided = buildChainPanels(noCalls, { spot: SPOT, asOf: ASOF, ivSource: "vendor" });
   eq(oneSided.scalars.skew, null, "a chain with no calls carries no skew");
   ok(oneSided.skewTerm.skewMiss, "and the one-sided chain reaches the diagnostic too");
   {
@@ -765,7 +766,7 @@ function chain({
        "named as such rather than as a distance");
   }
 
-  const fine = buildChainPanels(chain(), { spot: SPOT, asOf: ASOF });
+  const fine = buildChainPanels(chain(), { spot: SPOT, asOf: ASOF, ivSource: "vendor" });
   ok(fine.scalars.skew !== null, "the default fixture does carry a skew");
   eq(fine.skewTerm.skewMiss, null, "so it publishes no miss diagnostic");
   eq(fine.skewTerm.skewReason, null, "and no reason");
@@ -827,6 +828,50 @@ function chain({
   eq(none.outside, 0, "with no distances");
   eq(none.wouldCatch(0.9), 0, "and nothing for any window to catch");
   eq(summariseSkewMisses(null).names, 0, "and a null list is not a crash");
+}
+
+{
+  const T = (dte) => dte / 365;
+  const r = 0.04;
+  const smile = (m, dte) => 0.30 + 0.35 * m * m - 0.12 * m + 0.02 * Math.log(30 / dte);
+  const rows = [];
+  for (const [code, dte] of [["260911", 18], ["260918", 25], ["261016", 53]]) {
+    const F = SPOT * Math.exp(r * T(dte)), D = Math.exp(-r * T(dte));
+    for (let i = -8; i <= 8; i++) {
+      const strike = Math.round(SPOT * Math.exp(i * 0.025) * 100) / 100;
+      const m = Math.log(strike / F);
+      const vol = smile(m, dte);
+      for (const cp of ["P", "C"]) {
+        const price = black76(F, D, strike, vol, T(dte), cp);
+        const h = Math.max(0.01, 0.01 * price);
+        const wing = Math.abs(i) >= 8;
+        rows.push({
+          option_symbol: `TST${code}${cp}${String(Math.round(strike * 1000)).padStart(8, "0")}`,
+          nbbo_bid: wing ? "0.01" : (price - h).toFixed(6), nbbo_ask: wing ? "0.05" : (price + h).toFixed(6),
+          implied_volatility: (code === "260918" ? vol - 0.11 : wing ? 2.1495 : vol).toFixed(6),
+          open_interest: "2000", prev_oi: "1900", volume: "300", ask_volume: "160", bid_volume: "140",
+        });
+      }
+    }
+  }
+  const quotes = buildChainPanels(rows, { spot: SPOT, asOf: ASOF });
+  const vendor = buildChainPanels(rows, { spot: SPOT, asOf: ASOF, ivSource: "vendor" });
+  eq(quotes.ivSource, "quotes", "the chain's smile is read from the NBBO by default (defect 1)");
+  ok(/NBBO mid inverted on Black-76 against a put-call parity forward/.test(quotes.ivBasis), "and the surface says so in its basis");
+  const col = (built, expiry) => built.ivSurface.expiries.find((e) => e.expiry === expiry);
+  const q25 = col(quotes, "2026-09-18"), v25 = col(vendor, "2026-09-18");
+  const truth = smile(Math.log(q25.atmStrike / (SPOT * Math.exp(r * T(25)))), 25);
+  ok(q25.atmIv !== null && Math.abs(q25.atmIv - truth) <= 0.02,
+     `the quote ATM IV at 25 days (${q25.atmIv}) sits within two vol points of the smile that priced the quotes (${truth.toFixed(4)})`);
+  ok(v25.atmIv !== null && Math.abs(v25.atmIv - truth) > 0.1,
+     `while the vendor's last-trade IV at the same expiry reads ${v25.atmIv}, eleven points off, which is card B's 0.2924 against 0.4017`);
+  const atm = quotes.ivSurface.expiries.map((e) => e.atmIv).filter((v) => v !== null);
+  const maxCell = Math.max(...quotes.ivSurface.iv.flat().filter((v) => v !== null));
+  ok(maxCell <= 3 * Math.max(...atm),
+     `no surface cell exceeds three times an at-the-money level (max ${maxCell}): the minimum-tick wings never reach it (defect 2)`);
+  ok(quotes.quoteRejected > 0, `and the rejected quotes are counted (${quotes.quoteRejected})`);
+  ok(Math.max(...vendor.ivSurface.iv.flat().filter((v) => v !== null)) > 2,
+     "where the vendor path would have drawn the 2.1495 wing print");
 }
 
 console.log(`✓ flows-chain: ${checks} assertions — a smile whose skew is known in closed form, ` +
