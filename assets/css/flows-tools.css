@@ -632,6 +632,12 @@
 .dk-plan-v b { font: var(--t-title2); letter-spacing: var(--t-title2-track); font-variant-numeric: tabular-nums; }
 .dk-plan-v span { color: var(--label-2); font: var(--t-footnote); }
 .dk-hint { margin: 0; color: var(--label-3); font: var(--t-footnote); }
+.dk-alts { display: flex; flex-direction: column; margin-top: var(--sp-2); }
+.dk-alts-h { padding-bottom: var(--sp-1); color: var(--label-2); font: var(--t-footnote); }
+.dk-alt { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: baseline; gap: var(--sp-3); min-height: 36px; padding-top: 8px; border-top: 1px solid var(--sep); font: var(--t-footnote); font-variant-numeric: tabular-nums; }
+.dk-alt > span:first-child { overflow: hidden; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.dk-alt-d { color: var(--label-3); font: var(--t-caption); }
+.dk-alt b { color: var(--up); font-weight: 600; }
 .dk-hint:empty { display: none; }
 
 .tl .dk-select {

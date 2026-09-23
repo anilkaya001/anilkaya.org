@@ -414,6 +414,13 @@
         UI.metrics([UI.metric("Collects", fmtMoney(z.collectible), { tone: "up" }), UI.metric("Deploys", fmtMoney(z.deployed)), UI.metric("Idle", fmtMoney(z.idle))], { min: 76 }),
         UI.split([{ color: "--accent", value: z.deployed / buyingPower }, { color: "--fill-2", value: z.idle / buyingPower }], "Deploys " + fmtMoney(z.deployed) + " of " + fmtMoney(buyingPower) + ", " + fmtMoney(z.idle) + " idle"),
         h("p", { class: "dk-hint" }, affordable + " of " + rows.length + " lines affordable"));
+      const next = rows.filter((r) => r !== best && r.__sizing && r.__sizing.affordable).sort((a, b) => b.__sizing.collectible - a.__sizing.collectible).slice(0, 2);
+      if (next.length) {
+        mods.best.append(h("div", { class: "dk-alts", role: "list", "aria-label": "Next best deployments" }, h("span", { class: "dk-alts-h" }, "Next best"),
+          next.map((r) => h("div", { class: "dk-alt", role: "listitem" },
+            h("span", null, r.__sizing.contracts + "× " + r.ticker + " " + kf(r.strike) + (r.strategy === "cc" ? " call" : " put")),
+            h("span", { class: "dk-alt-d" }, F.day(r.expiry)), h("b", null, fmtMoney(r.__sizing.collectible))))));
+      }
     }
     plan.dataset.plan = sentence;
   }

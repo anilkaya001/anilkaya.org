@@ -544,6 +544,15 @@ try {
     ok(/Deploys \$9,400 of \$10,000, \$600 idle/.test(await page.locator("#deskPlan .ui-split").getAttribute("aria-label")),
        "the deployed-and-idle bar carries the same two numbers in words");
 
+    {
+      const dollars = (s) => Number(String(s).replace(/[^0-9.]/g, ""));
+      const best = dollars(await page.locator("#deskPlan .ui-metric").first().locator(".ui-metric-v").textContent());
+      const alts = (await page.$$eval("#dkSizingM .dk-alt b", (bs) => bs.map((b) => b.textContent))).map(dollars);
+      const affordable = rows.filter((r) => r.want.affordable).map((r) => Math.round(r.want.collectible)).sort((a, b) => b - a);
+      eq(best, affordable[0], "the best deployment's collect is the largest any affordable line collects");
+      assert.deepEqual(alts, affordable.slice(1, 3), "and the next two are the runners-up in order, so the plan is a ranking and not a single pick"); checks++;
+    }
+
     assert.deepEqual(await tickers(), ["AAA", "BBB", "AAA"], "before the switch the list is ranked by the default key"); checks++;
     await page.selectOption("#deskRank", "collectible");
     await page.waitForFunction(() => {

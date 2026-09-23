@@ -19,7 +19,7 @@
   const usd = (v, signed) => {
     if (num(v) === null) return DASH;
     const a = Math.abs(v), dp = a < 1000 ? 2 : 0;
-    const r = +a.toFixed(dp);
+    const r = +(a + 1e-9).toFixed(dp);
     return (v < 0 && r ? MINUS : signed && v > 0 && r ? "+" : "") + "$" + r.toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp });
   };
   const gusd = (v) => (num(v) === null ? DASH : Math.abs(v) < 10 ? usd(v, true) : sg(Math.round(v)) + "$" + Math.abs(Math.round(v)).toLocaleString("en-US"));
