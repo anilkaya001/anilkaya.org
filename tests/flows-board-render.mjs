@@ -212,6 +212,48 @@ ok(warmOptions.includes(""),
 }
 
 {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('#bdHead [data-col="siP"]')).display !== "none");
+  const align = await page.evaluate(() => {
+    const row = document.querySelector("#flowsBody .bd-row[data-flip]");
+    const head = (k) => {
+      const range = document.createRange();
+      range.selectNodeContents(document.querySelector(`#bdHead [data-col="${k}"] .bd-hs`).firstChild);
+      return range.getBoundingClientRect();
+    };
+    const cell = (k) => row.querySelector(`[data-col="${k}"]`).getBoundingClientRect();
+    const right = ["cnv", "px", "netPrem", "hm", "ivr", "vrpP", "siP"].map((k) => [k, Math.abs(head(k).right - cell(k).right)]);
+    const score = Math.abs(head("s").left - row.querySelector('[data-col="s"] .bd-v').getBoundingClientRect().left);
+    const g = [...document.querySelectorAll('#flowsBody [data-col="g"] .bd-g')];
+    const text = (regime) => [...new Set(g.filter((n) => n.dataset.regime === regime).map((n) => n.textContent))];
+    return { right, score, long: text("long"), short: text("short") };
+  });
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  eq(align.right.length, 7, "all seven right-aligned columns are on screen at a desk width to be measured");
+  for (const [k, off] of align.right) {
+    ok(off <= 1.5,
+       `the ${k} heading ends where its figures end (${off.toFixed(1)}px apart): a sort arrow that takes up room ` +
+       "beside a right-aligned heading pushes it off the column it names");
+  }
+  ok(align.score <= 1.5,
+     `and Score starts where its figures start (${align.score.toFixed(1)}px apart) rather than centring over a ` +
+     "left-aligned column");
+  ok(align.long.length === 1 && align.short.length === 1 && align.long[0] !== align.short[0],
+     `the gamma regimes differ in their glyph and not only in hue (long ${align.long}, short ${align.short}), ` +
+     "so a reader without colour still tells a damping book from an amplifying one");
+  ok(/^\+/.test(align.long[0]) && /^\u2212/.test(align.short[0]), "positive gamma for long, a real minus for short");
+
+  const stale = await page.evaluate(() => {
+    const b = document.getElementById("bdStale");
+    return b ? { kind: b.dataset.stale, inTitle: !!b.closest(".ui-mod-t"), state: b.dataset.state } : null;
+  });
+  ok(stale && stale.kind === "session" && stale.inTitle && stale.state === "stale",
+     `a board whose session is weeks old wears the stale glyph in its title, stamped with WHICH outage it is (${JSON.stringify(stale)})`);
+  const staleSaid = await readInfo("#bdStale");
+  ok(/2026-09-03 session/.test(staleSaid), `and the glyph opens the sentence naming the aged session (${staleSaid.slice(0, 160)})`);
+}
+
+{
   const sortState = () => page.evaluate(() => {
     const on = [...document.querySelectorAll("#bdHead [aria-sort]")]
       .filter((h) => h.getAttribute("aria-sort") !== "none").map((h) => h.dataset.col + ":" + h.getAttribute("aria-sort"));
@@ -559,6 +601,62 @@ eq(foot.statusKind, null, "a board with rows carries no silence mark on its stat
   ok(head.vrpCells.every((t) => t === "—"), "and their cells are em dashes, never zeros");
 }
 
+{
+  await put("scoretrack", { v: 2, status: "ok", sessionDate: "2026-09-03",
+    names: [{ t: "NVDA", s: [5, 20, null, 80, -40, 0] }, { t: "NVAX", s: [10, null, null, null, null, null] }] });
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForSelector('#flowsBody [data-col="strip"] svg');
+  const bars = await page.evaluate(() => {
+    const cell = (t) => [...document.querySelectorAll("#flowsBody .bd-row")].find((r) => r.querySelector(".bd-open").textContent === t)
+      .querySelector('[data-col="strip"]');
+    const marks = [...cell("NVDA").querySelectorAll("svg rect, svg circle")].map((m) => ({
+      tag: m.tagName, cls: m.getAttribute("class") || "", h: Number(m.getAttribute("height") || 0), y: Number(m.getAttribute("y") || m.getAttribute("cy")),
+    }));
+    return { marks, mid: Number(cell("NVDA").querySelector("line").getAttribute("y1")), label: cell("NVDA").querySelector("[role=img]").getAttribute("aria-label"),
+      nvax: cell("NVAX").textContent.trim(), nvaxSvg: !!cell("NVAX").querySelector("svg") };
+  });
+  const [a, gap, b, c, z] = bars.marks;
+  ok(a.tag === "rect" && /up/.test(a.cls) && b.tag === "rect" && /up/.test(b.cls), "two positive sessions are bars above the line");
+  ok(Math.abs(b.h / a.h - 4) < 0.05,
+     `and their heights keep the scores' own ratio, 80 to 20 is four to one (${(b.h / a.h).toFixed(2)}): a square-root ` +
+     "scale would draw it two to one and make a strong session look like a mild one");
+  eq(gap.tag, "circle", "a session the name was not scored is a dot on the line, never a zero-height bar");
+  ok(/down/.test(c.cls) && c.y >= bars.mid - 0.01, "a negative session hangs below the line");
+  ok(/zero/.test(z.cls) && !/up|down/.test(z.cls) && /last/.test(z.cls),
+     "and a measured zero is its own neutral mark, neither side's colour — zero belongs to neither side");
+  ok(/\+20, not scored, \+80, \u221240, 0/.test(bars.label), `the strip reads the five sessions in words (${bars.label})`);
+  ok(bars.nvax === "—" && !bars.nvaxSvg,
+     "a name whose last five sessions were all unscored gets an em dash, not a strip of five dots");
+  await put("scoretrack", { v: 2, status: "pending", names: [] });
+}
+
+{
+  await put("board:long", { ...board("long", true), rows: TICKERS.map((t, i) => ({ ...boardRow(t, i, true), hy: i < 3, edte: 3, t: i === 2 ? "GOOGL" : t })) });
+  const readFlags = () => page.evaluate(() => [...document.querySelectorAll("#flowsBody .bd-nm-1")].flatMap((line) => {
+    const box = line.getBoundingClientRect();
+    return [...line.querySelectorAll(".bd-flag")].map((f) => {
+      const r = f.getBoundingClientRect();
+      const inside = r.left >= box.left - 0.5 && r.right <= box.right + 0.5 && r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5;
+      const outside = r.top >= box.bottom - 0.5 || r.left >= box.right - 0.5;
+      return { kind: f.dataset.kind, inside, outside };
+    });
+  }));
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ width, height: 800 });
+    await page.reload({ waitUntil: "networkidle" });
+    await page.waitForSelector(ROWS);
+    const flags = await readFlags();
+    ok(flags.length > 0 && flags.every((f) => f.inside || f.outside),
+       `at ${width}px every flag beside a ticker is either whole or wrapped out of sight — never cut mid-word (` +
+       flags.filter((f) => !f.inside && !f.outside).map((f) => f.kind).join(",") + ")");
+    if (width === 390) ok(flags.some((f) => f.kind === "hold" && f.inside), "and the hold mark still fits on a phone, as its glyph");
+  }
+  await put("board:long", board("long", true));
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForSelector(ROWS);
+}
+
 await put("board:short", board("short", false));
 await page.goto(url("/flows/short/"), { waitUntil: "networkidle" });
 await page.waitForSelector(ROWS);
@@ -646,6 +744,13 @@ ok(!/all of them|inside the band|±/.test(quietBare),
   eq(Number(map.viewBox.split(" ")[2]), map.width,
      "the map's viewBox is its own pixel width, so a tile's area means the same thing at every size");
   eq(map.par, null, "and it never stretches with preserveAspectRatio");
+  eq(new Set(map.sectors).size, map.sectors.length,
+     `no two sector headers read the same (${map.sectors.join(", ")}): a header shortened to its first word turned ` +
+     "Consumer Cyclical and Consumer Defensive into two headers both reading Consumer");
+  const tips = (await page.$$eval(".bd-map-plot svg .against", (ps) => ps.map((p) => p.getAttribute("d").match(/-?[\d.]+/g).map(Number))))
+    .map((n) => Math.sign(n[5] - n[1]));
+  ok(tips.length === 4 && tips.every((d) => d === 1),
+     `on the bullish map the four names with premium against the board carry a triangle pointing DOWN, the way that premium leans (${tips})`);
 
   await page.focus(".bd-map-plot");
   await page.keyboard.press("Home");
@@ -670,6 +775,15 @@ ok(!/all of them|inside the band|±/.test(quietBare),
   await page.fill("#fbQ", "NV");
   await page.waitForFunction(() => document.querySelectorAll(".bd-map-plot svg .tile").length === 2);
   ok(true, "the filter narrows the map exactly as it narrows the list");
+
+  await put("board:short", board("short", false));
+  await page.goto(url("/flows/short/?view=map"), { waitUntil: "networkidle" });
+  await page.waitForSelector(".bd-map-plot svg .tile");
+  const bearTips = (await page.$$eval(".bd-map-plot svg .against", (ps) => ps.map((p) => p.getAttribute("d").match(/-?[\d.]+/g).map(Number))))
+    .map((n) => Math.sign(n[5] - n[1]));
+  ok(bearTips.length === 4 && bearTips.every((d) => d === -1),
+     `and on the bearish map the names carrying BOUGHT premium against it point UP (${bearTips}); one downward mark on ` +
+     "both boards read as selling on the board where it meant buying");
 }
 
 eq(errors.length, 0,
@@ -682,12 +796,15 @@ console.log(`✓ flows-board-render: ${checks} assertions — the control row ex
   `library it depends on is named before its symptoms, a denominator that stays silent until ` +
   `it has something to say, a measured zero match distinguished from an empty board with a Clear ` +
   `beside it, orders withheld exactly when the payload cannot produce them, headers that sort and ` +
-  `say so, a rail badge that is silent on a pending board, prints its measured zero on a quiet one ` +
+  `say so and sit on the edge of the figures they name, a gamma regime told apart without hue, a stale ` +
+  `glyph that names its session, a five-session strip drawn to a linear scale with gaps as dots and zero ` +
+  `as neither side, flags that are whole or out of sight on a phone, a rail badge that is silent on a pending board, prints its measured zero on a quiet one ` +
   `and its whole POOL on a board the length cap truncated — the same number the sentence and the ` +
   `summary track reconcile against — no overflow at 320px, four silences that are four glyphs in ` +
   `greyscale with their sentences one tap away and the Worker's failed read told apart from a ` +
   `never-published side, a priced move that prints its absence, a gamma regime no hue calls ` +
   `bearish, a dispersion that carries its unit, one statement of a cold memory, a quiet sentence ` +
   `that counts and passes no verdict, every row one anchor to that name's reader across its whole ` +
-  `width, and a map that tiles every name at its own pixel size, reads by keyboard in rank order ` +
+  `width, and a map that tiles every name at its own pixel size, never prints two sector headers alike, ` +
+  `points each against-the-board triangle the way its premium leans, reads by keyboard in rank order ` +
   `and follows the filter`);

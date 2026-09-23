@@ -12,8 +12,8 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 const CEILING_KIB = {
   tickerPage: 424,
   overviewPage: 204,
-  sidePage: 180,
-  watchPage: 180,
+  sidePage: 181,
+  watchPage: 181,
   deskPage: 168,
   askPage: 154,
   strategyPage: 186,

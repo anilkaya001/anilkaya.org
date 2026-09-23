@@ -159,6 +159,10 @@
     for (const [re, key] of SECTORS) if (re.test(k)) return key;
     return "none";
   }
+  const SECTOR_SHORT = {
+    tech: "Tech", health: "Health", fin: "Financial", disc: "Cyclical", staples: "Defensive", ind: "Industrials",
+    energy: "Energy", mat: "Materials", re: "Real estate", util: "Utilities", comm: "Communication",
+  };
   const sectorGlyph = (name) => h("span", {
     class: "bd-sg", "data-sec": sectorKey(name), role: "img", "aria-label": name || "No sector", title: name || "No sector",
   }, UI.glyph("sec-" + sectorKey(name)));
@@ -252,7 +256,7 @@
       h("span", { class: "bd-nm" },
         h("span", { class: "bd-nm-1" }, open, marks.map((x) => h("span", {
           class: "bd-flag" + (x.cls ? " " + x.cls : ""), "data-kind": x.kind, role: "img", "aria-label": x.say, title: cap(x.say),
-        }, x.g ? UI.glyph(x.g) : null, x.text || null))),
+        }, x.g ? UI.glyph(x.g) : null, x.text ? h("span", { class: "bd-flag-t" }, x.text) : null))),
         h("span", { class: "bd-sec" }, sector || DASH)),
     ];
   }
@@ -268,7 +272,9 @@
 
   function convCell(row) {
     const n = num(row.cnv);
-    return h("span", { class: "bd-n bd-conv", title: convictionTitle(row) || null }, n === null ? DASH : String(Math.round(n)));
+    return h("span", { class: "bd-n bd-conv", title: convictionTitle(row) || null },
+      n === null ? null : UI.ring(Math.max(0, Math.min(1, n / 100)), { size: 15, stroke: 3.4 }),
+      h("span", null, n === null ? DASH : String(Math.round(n))));
   }
 
   function priceCell(row) {
@@ -279,7 +285,7 @@
   }
 
   function stripSvg(vals) {
-    const W = 46, H = 28, n = vals.length, bw = 6;
+    const W = 52, H = 28, n = vals.length, bw = 7;
     const gap = (W - n * bw) / Math.max(1, n - 1);
     const mid = H / 2;
     const svg = s("svg", { class: "bd-strip", width: W, height: H, viewBox: `0 0 ${W} ${H}`, "aria-hidden": "true", focusable: "false" });
@@ -287,10 +293,11 @@
     vals.forEach((v, i) => {
       const x = i * (bw + gap);
       if (v === null) { s("circle", { cx: x + bw / 2, cy: mid, r: 1.4, class: "gap" }, svg); return; }
-      const hg = Math.max(1.5, Math.sqrt(Math.min(100, Math.abs(v)) / 100) * (mid - 1));
+      if (v === 0) { s("rect", { x: x.toFixed(2), y: (mid - 0.75).toFixed(2), width: bw, height: 1.5, rx: 0.75, class: "zero" + (i === n - 1 ? " last" : "") }, svg); return; }
+      const hg = Math.max(1.5, (Math.min(100, Math.abs(v)) / 100) * (mid - 1));
       s("rect", {
-        x: x.toFixed(2), y: (v >= 0 ? mid - hg : mid).toFixed(2), width: bw, height: hg.toFixed(2), rx: 1.5,
-        class: (v >= 0 ? "up" : "down") + (i === n - 1 ? " last" : ""), style: `--i:${i}`,
+        x: x.toFixed(2), y: (v > 0 ? mid - hg : mid).toFixed(2), width: bw, height: hg.toFixed(2), rx: 1.5,
+        class: (v > 0 ? "up" : "down") + (i === n - 1 ? " last" : ""), style: `--i:${i}`,
       }, svg);
     });
     return svg;
@@ -328,7 +335,7 @@
     const g = row.gRegime === "long" || row.gRegime === "short" ? row.gRegime : null;
     const say = g ? "Dealer " + g + " gamma: hedging " + (g === "long" ? "damps" : "amplifies") + " moves. A hedging state, not a direction." : "No gamma regime on this row.";
     return h("span", { class: "bd-g", "data-regime": g || "none", "data-tone": g || "silent", role: "img", "aria-label": say, title: say },
-      g ? "\u03b3" : DASH);
+      g ? (g === "long" ? "+" : UI.MINUS) + "\u03b3" : DASH);
   }
 
   function quietPct(v, title) {
@@ -448,7 +455,7 @@
   ];
 
   const SORT_CHOICES = WATCH ? [
-    { key: null, dir: "asc", label: "Nearest the edge" },
+    { key: null, dir: "asc", label: "Nearest edge" },
     { key: "s", dir: "desc", label: "Score" },
     { key: "cnv", dir: "desc", label: "Conviction" },
     { key: "sur", dir: "desc", label: "Surprise" },
@@ -579,7 +586,7 @@
     if (sortSel) return;
     searchEl = h("input", {
       class: "bd-q-in", id: "fbQ", type: "search", placeholder: "Search",
-      autocomplete: "off", spellcheck: "false", autocapitalize: "characters", "aria-label": "Filter by ticker",
+      autocomplete: "off", spellcheck: "false", autocapitalize: "characters", "aria-label": "Filter by ticker or sector",
     });
     searchEl.addEventListener("input", () => {
       st.q = String(searchEl.value || "").trim().toUpperCase();
@@ -657,11 +664,11 @@
     const hm = num(row.hm);
     const marks = [memoryMark(row), ...tenureMarks(row)].filter(Boolean);
     return `${row.t}, rank ${row.r != null ? row.r : index + 1}, score ${score === null ? "unavailable" : score}, ` +
-      `last ${fmtPrice(row.px)}, ${fmtPct(row.chg, 2)} today, conviction ${row.cnv}` +
+      `last ${fmtPrice(row.px)}, ${fmtPct(row.chg, 2)} today, conviction ${num(row.cnv) === null ? "unavailable" : Math.round(num(row.cnv))}` +
       (num(row.agr) === null || num(row.bth) === null ? ". " : `, with ${row.agr} of ${row.bth} signed axes agreeing. `) +
       (hm === null ? "Priced move unavailable. "
         : `The option market prices plus or minus ${(hm * 100).toFixed(1)} percent over ${st.horizon || 10} trading sessions. `) +
-      (marks.length ? marks.map((m) => m.say).join("; ") + ". " : "") +
+      (marks.length ? marks.map((m) => cap(m.say)).join(" ") + " " : "") +
       (num(row.netPrem) === null ? "Net premium unavailable. " : `Net premium ${fmtMoney(row.netPrem)}. `) +
       (deep ? `Open the full reader for ${row.t}.` : NO_CARD_SAID);
   }
@@ -791,7 +798,7 @@
     });
 
     const premChip = UI.gaugeChip({
-      diverging: gross ? (sum / gross) * 100 : null, value: prem.length ? F.money(sum, true) : DASH, label: "Net premium",
+      diverging: gross ? (sum / gross) * 100 : null, value: prem.length ? F.money(sum, true) : DASH, label: "Premium",
       tone: prem.length ? toneOf(sum) : null,
       info: () => ({
         title: "Net premium", asOf,
@@ -875,6 +882,7 @@
     "Rel vol: today's share volume against its own recent norm, as the vendor reports it. P/C: put contracts traded per call contract, a ratio of the tape and not a positioning estimate.",
     "52w: where the last price sits between the 52-week low and high.",
     "5d: the score over the last five scored sessions, oldest first; a dot is a session the name was not scored.",
+    "Back in: the name was outside the band when it was last scored and is inside it now; it came back through the edge.",
   ] : [
     "Score: the composite ranked across every scored name, +100 strongest bullish and −100 strongest bearish. Conv: how much of the evidence agrees; the count behind it is on the name's card.",
     "5d: the score over the last five scored sessions, oldest first; a dot is a session the name was not scored.",
@@ -932,7 +940,7 @@
       title: "Board map",
       lead: "Every name on the board, grouped by sector. A tile's area is its net premium and its color is its score, deeper for stronger.",
       notes: ["Names whose premium is under one percent of the board's gross are drawn at that floor so every name stays visible; the readout and the list carry the exact figure.",
-        "A tile marked with a triangle carries premium against the board's direction."],
+        "A tile marked with a triangle carries premium against the board's direction; the triangle points the way that premium leans."],
     };
   }
 
@@ -1017,7 +1025,7 @@
       host.append(h("div", { class: "bd-map-none" }, "No match"));
       return;
     }
-    const H = w < 600 ? Math.round(w * 1.3) : Math.round(Math.min(620, Math.max(400, w * 0.5)));
+    const H = w < 600 ? Math.round(w * 1.65) : Math.round(Math.min(620, Math.max(400, w * 0.5)));
     const prem = view.map(({ row }) => Math.abs(num(row.netPrem) || 0));
     const gross = prem.reduce((a, b) => a + b, 0);
     const floor = Math.max(gross * 0.01, 1);
@@ -1044,10 +1052,9 @@
       const head = gh > 54 && gw > 64 ? 18 : 0;
       const grp = s("g", { class: "grp" }, svg);
       if (head) {
-        const label = s("text", { x: gx + 4, y: gy + 12, class: "sec" }, grp);
-        label.textContent = g.name;
-        const fits = g.name.length * 6.2 + 8 < gw;
-        if (!fits) label.textContent = g.name.split(/\s+/)[0];
+        const short = SECTOR_SHORT[sectorKey(g.name)] || g.name;
+        const name = measure(g.name, 11, 600) + 8 < gw ? g.name : measure(short, 11, 600) + 8 < gw ? short : null;
+        if (name) s("text", { x: gx + 4, y: gy + 12, class: "sec" }, grp).textContent = name;
       }
       for (const k of squarify(g.kids, gx, gy + head, gw, gh - head)) {
         const tx = k.x + 1, ty = k.y + 1, tw = Math.max(0, k.w - 2), th = Math.max(0, k.h - 2);
@@ -1061,24 +1068,25 @@
           fill: against ? other : up, "fill-opacity": (0.26 + 0.66 * Math.pow(mag, 0.75)).toFixed(3), class: "tr",
         }, t);
         const tick = String(k.row.t || "");
+        const pad = tw < 48 ? 5 : 7;
         let fs = Math.max(11, Math.min(24, Math.round(Math.min(tw / 3.6, th / 2.6))));
-        while (fs > 10 && measure(tick, fs, 600) > tw - 12) fs--;
+        while (fs > 10 && measure(tick, fs, 600) > tw - pad * 2) fs--;
         if (fs >= 11 && th > fs + 10) {
-          const tk = s("text", { x: tx + 7, y: ty + 5 + fs * 0.9, class: "tk", style: `font-size:${fs}px` }, t);
+          const tk = s("text", { x: tx + pad, y: ty + 5 + fs * 0.9, class: "tk", style: `font-size:${fs}px` }, t);
           tk.textContent = tick;
           const sc2 = signedInt(k.row.s);
           const pm = fmtMoney(k.row.netPrem);
           const y2 = ty + 5 + fs * 0.9 + 15;
-          if (th > fs + 26 && measure(sc2, 11, 600) < tw - 12) {
-            const sub = s("text", { x: tx + 7, y: y2, class: "sub" }, t);
+          if (th > fs + 26 && measure(sc2, 11, 600) < tw - pad * 2) {
+            const sub = s("text", { x: tx + pad, y: y2, class: "sub" }, t);
             s("tspan", { class: "sub-s", text: sc2 }, sub);
-            if (measure(sc2 + "   " + pm, 11, 500) < tw - 12) s("tspan", { dx: 6, text: pm }, sub);
+            if (measure(sc2 + "   " + pm, 11, 500) < tw - pad * 2) s("tspan", { dx: 6, text: pm }, sub);
           }
         }
         const p = num(k.row.netPrem);
         if (p !== null && ((lean === "up" && p < 0) || (lean === "down" && p > 0)) && tw > 18 && th > 18) {
-          const cx = tx + tw - 9, cy = ty + th - 9;
-          s("path", { d: `M${cx - 4} ${cy - 2.5}L${cx + 4} ${cy - 2.5}L${cx} ${cy + 3.5}Z`, class: "against" }, t);
+          const cx = tx + tw - 9, cy = ty + th - 9, d = p < 0 ? 1 : -1;
+          s("path", { d: `M${cx - 4} ${cy - 2.5 * d}L${cx + 4} ${cy - 2.5 * d}L${cx} ${cy + 3.5 * d}Z`, class: "against" }, t);
         }
         tiles.push({ x: tx, y: ty, w: tw, h: th, row: k.row, index: k.index, g: t, rank: view.findIndex((v) => v.row === k.row) });
       }
@@ -1149,7 +1157,12 @@
       const b = sv.getBoundingClientRect();
       const x = (e.clientX - b.left) * (sv.viewBox.baseVal.width / b.width);
       const y = (e.clientY - b.top) * (sv.viewBox.baseVal.height / b.height);
-      return mapState.tiles.findIndex((t) => x >= t.x && x <= t.x + t.w && y >= t.y && y <= t.y + t.h);
+      let best = -1, near = 8;
+      mapState.tiles.forEach((t, i) => {
+        const d = Math.hypot(Math.max(t.x - x, 0, x - t.x - t.w), Math.max(t.y - y, 0, y - t.y - t.h));
+        if (d < near) { near = d; best = i; }
+      });
+      return best;
     };
     const open = (i) => {
       const t = mapState.tiles[i];
@@ -1184,6 +1197,7 @@
       const legend = UI.legend([
         h("span", { class: "ui-key bd-ramp" }, h("i", { "aria-hidden": "true" }), "Score"),
         h("span", { class: "ui-key" }, h("i", { class: "bd-areakey", "aria-hidden": "true" }), "Area net premium"),
+        h("span", { class: "ui-key" }, UI.glyph(lean === "down" ? "up" : "down", "bd-againstkey"), "Premium against"),
       ]);
       const plot = h("div", { class: "bd-map-plot" });
       mapHost.replaceChildren(plot, h("div", { class: "bd-map-foot" }, legend, UI.infoButton("the board map", mapInfo, { small: true })));
