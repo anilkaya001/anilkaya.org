@@ -4391,6 +4391,71 @@ try {
   }
 
   {
+    const card = JSON.parse(JSON.stringify(cards.find((c) => c.engine && Array.isArray(c.engine.structures) &&
+      c.engine.structures.length >= 2 && Array.isArray(c.engine.facts) && c.engine.facts.length >= 2)));
+    ok(card, "an emitted card carries an engine block with priced structures and numbered facts");
+    const st = card.engine.structures[0];
+    const facts = card.engine.facts.filter((f) => typeof f.v === "number" && f.g > 0).slice(0, 2);
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, card, { ticker: card.ticker, station: "all" });
+    await page.evaluate(({ sid, because }) => {
+      const inner = window.fetch;
+      window.fetch = (url) => {
+        const u = String(url);
+        if (!u.includes("/api/flows/summary")) return inner(url);
+        const body = {
+          status: "ok", scope: "X", llm: true, model: "m", generatedAt: "2026-09-22T09:41:00.000Z", engine: true,
+          verdict: "harvest-rich-premium", verdictWord: "Harvest rich premium", claims: [], refused: [],
+          summary: "A summary sentence without figures.",
+          provenance: "Figures, facts and structures computed by the engine; the summary is deterministic.",
+          ideas: [
+            { structure: sid, verdict: "harvest-rich-premium", word: "Harvest rich premium", because, grade: 2, from: "model" },
+            { structure: "S99", verdict: null, word: null, because, grade: 1, from: "engine" },
+          ],
+          context: { version: 3, sessionDate: "2026-09-21", expectedSession: "2026-09-21", stale: false,
+            coverage: { features: 24, read: 20, quiet: 1, withheld: 3, robust: 8, fair: 10, weak: 3 }, state: null, features: [] },
+        };
+        return Promise.resolve({ ok: true, status: 200, headers: { get: () => String(Date.now()) },
+          json: () => Promise.resolve(JSON.parse(JSON.stringify(body))) });
+      };
+    }, { sid: st.id, because: facts.map((f) => f.id) });
+    await page.waitForFunction(() => {
+      const l = document.getElementById("ftNeuronIdeas");
+      return l && !l.hidden && l.children.length === 2;
+    }, null, { timeout: 15000 });
+    const got = await page.evaluate(() => ({
+      head: document.getElementById("ftNeuronH").textContent,
+      ideas: [...document.querySelectorAll("#ftNeuronIdeas > .ft-idea")].map((li) => ({
+        title: li.querySelector(".ft-idea-t").textContent,
+        on: li.querySelectorAll(".ft-idea-rank i.is-on").length,
+        chips: [...li.querySelectorAll(".ft-idea-chip")].map((c) => c.textContent),
+        meta: [...li.querySelectorAll(".ft-idea-m dt")].map((d, i) => [d.textContent, li.querySelectorAll(".ft-idea-m dd")[i].textContent]),
+        text: li.textContent,
+      })),
+    }));
+    const pc = (v) => (v * 100).toFixed(0) + "%";
+    const usd = (v) => (v < 0 ? "\u2212$" : "$") + Math.abs(v).toFixed(0);
+    ok(/Harvest rich premium/.test(got.head), `the verdict word the server attached heads the Neuron column (${got.head})`);
+    eq(got.ideas[0].title, "1. Harvest rich premium", "an engine idea is titled by its verdict word, not by prose a model wrote");
+    eq(got.ideas[0].on, 2, "and lights the grade the server vetted");
+    const legs = st.legs.map((l) => (l.side > 0 ? "+" : "\u2212") + (l.qty > 1 ? l.qty : "") + l.type + (typeof l.k === "number" ? l.k : "")).join(" ");
+    assert.deepEqual(got.ideas[0].chips, [st.family.replace(/-/g, " "), legs, st.expiry + " \u00b7 " + st.dte + "d", st.risk + " risk", "model's pick"],
+      `its chips are the family, the legs, the expiry and the risk read off the card's own structure ${st.id}, and who picked it`); checks++;
+    const meta = Object.fromEntries(got.ideas[0].meta);
+    eq(meta["Chance of profit"], "Q " + pc(st.prob.popQ) + " \u00b7 P " + pc(st.prob.popP),
+       "the chance of profit on the smile and in the real world are the engine's own figures for that id");
+    eq(meta["Expected P&L"], usd(st.ev.p) + " real world \u00b7 " + usd(st.ev.q) + " on the smile", "so is the expected P&L");
+    eq(meta["Max loss"], st.lossUnbounded ? "unbounded" : usd(st.maxLoss), "and the max loss");
+    ok(facts.every((f) => meta["Rests on"].includes(f.id)), `and the facts it rests on are named by id with their values (${meta["Rests on"]})`);
+    ok(/not on the card this page holds/.test(got.ideas[1].text) && got.ideas[1].chips.includes("engine ranking"),
+       "an id the card no longer carries is said to be missing rather than drawn with figures from nowhere");
+    eq(errors.length, 0, `the engine ideas paint throws nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  {
     const card = JSON.parse(JSON.stringify(withChain.find((c) => c.panels.variation &&
       c.panels.variation.status === "ok" && c.panels.variation.grid)));
     ok(card, "an emitted card carries a hedging panel with its scenario grid");

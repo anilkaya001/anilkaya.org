@@ -173,6 +173,37 @@ assert.deepEqual(missingReport, [],
   missingReport.join("\n  ")); checks++;
 
 {
+  const cards = readdirSync(dir).filter((f) => /^p-card-[A-Z0-9.]+\.json$/.test(f))
+    .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")))
+    .filter((c) => c && c.engine && Array.isArray(c.engine.structures) && c.engine.structures.length);
+  ok(cards.length > 0, `the dry run publishes cards whose engine block carries priced structures (${cards.length})`);
+  const src = readFileSync(join(ROOT, "assets/js/flows-ticker.js"), "utf8");
+  const start = src.indexOf("function engineIdea(");
+  ok(start !== -1, "flows-ticker.js still defines engineIdea() — a rename silently stops this scan");
+  const scope = src.slice(start, src.indexOf("\n  function ", start + 1));
+  const reads = (v) => [...new Set([...scope.matchAll(new RegExp("\\b" + v + "\\.([A-Za-z_][A-Za-z0-9_]*)", "g"))]
+    .map((m) => m[1]).filter((k) => !["find", "map", "join", "replace", "filter", "slice"].includes(k)))];
+  const surfaces = [["eng", (c) => [c.engine]], ["st", (c) => c.engine.structures],
+    ["pr", (c) => c.engine.structures.map((x) => x.prob)], ["ev", (c) => c.engine.structures.map((x) => x.ev)],
+    ["l", (c) => c.engine.structures.flatMap((x) => x.legs)], ["f", (c) => c.engine.facts]];
+  const missing = [];
+  for (const [v, pick] of surfaces) {
+    const keys = reads(v);
+    ok(keys.length > 0, `engineIdea reads fields off \`${v}\` (${keys.join(", ")}) — zero reads would make this scan vacuous`);
+    for (const c of cards) {
+      for (const obj of pick(c)) {
+        for (const k of keys) {
+          if (obj && typeof obj === "object" && Object.prototype.hasOwnProperty.call(obj, k)) { checks++; continue; }
+          missing.push(`${c.ticker}: engineIdea reads \`${v}.${k}\` and the engine block has no such key`);
+        }
+      }
+    }
+  }
+  assert.deepEqual([...new Set(missing)], [],
+    "every engine field the ticker's idea renderer reads by id is one the pipeline publishes:\n  " + [...new Set(missing)].join("\n  ")); checks++;
+}
+
+{
   const p = emitted("sector:trix");
   ok(Array.isArray(p.sectors),
      "sector:trix publishes its readings under `sectors` — the name the renderer must read");

@@ -1251,6 +1251,24 @@ try {
     const foreign = await (await get("/api/flows/card?t=AMD", { headers: cookie })).json();
     eq(foreign.engine && foreign.engine.status, "split", "and a pointer naming another ticker's overflow is not followed");
 
+    const first = await (await get("/api/flows/summary?t=MSFT", { headers: cookie })).json();
+    ok(first.status === "pending" || first.status === "ok", `the Neuron route reads the merged card (${first.status})`);
+    let neuron = first;
+    for (let i = 0; i < 40 && neuron.status !== "ok"; i++) {
+      await new Promise((r) => setTimeout(r, 250));
+      neuron = await (await get("/api/flows/summary?t=MSFT", { headers: cookie })).json();
+    }
+    eq(neuron.status, "ok", "and writes a reading over it");
+    eq(neuron.engine, true, "over the engine protocol, because the card carries an engine block");
+    eq(neuron.ideas.length, 1, "with the engine's own ranked idea");
+    ok(neuron.ideas[0].structure === "S1" && neuron.ideas[0].from === "engine" && neuron.ideas[0].verdict === "harvest-rich-premium" &&
+       neuron.ideas[0].word === "Harvest rich premium" && neuron.ideas[0].because.length === 2,
+       `named by structure id, with a verdict code whose preconditions hold, its word, and two facts it rests on (${JSON.stringify(neuron.ideas[0])})`);
+    ok(!("popQ" in neuron.ideas[0]) && !("maxLoss" in neuron.ideas[0]),
+       "and no figure of its own: the page draws every number from the card's engine block by that id");
+    eq(neuron.verdictWord, "Harvest rich premium", "the reading's verdict travels with its word");
+    ok(/engine\u2019s own ranking: no model was asked/.test(neuron.provenance || ""),
+       `with no model configured, the provenance says the ideas are the engine's own ranking (${neuron.provenance})`);
   }
 
   {

@@ -1133,11 +1133,16 @@ async function readNeuron(env, scope) {
     if (!row) return null;
     let ideas = [];
     try { ideas = JSON.parse(typeof row.ideas === "string" ? row.ideas : "[]"); } catch { ideas = []; }
+    const engine = ideas && typeof ideas === "object" && !Array.isArray(ideas) && ideas.v === 3 ? ideas : null;
     return {
       version: Number(row.version) || 0,
       fingerprint: typeof row.fingerprint === "string" ? row.fingerprint : null,
       summary: typeof row.summary === "string" ? row.summary : "",
-      ideas: Array.isArray(ideas) ? ideas : [],
+      ideas: engine ? (Array.isArray(engine.ideas) ? engine.ideas : []) : Array.isArray(ideas) ? ideas : [],
+      engine: engine !== null,
+      verdict: engine && typeof engine.verdict === "string" ? engine.verdict : null,
+      claims: engine && Array.isArray(engine.claims) ? engine.claims : [],
+      refused: engine && Array.isArray(engine.refused) ? engine.refused : [],
       llm: row.llm === 1,
       model: typeof row.model === "string" ? row.model : null,
       guard: typeof row.guard === "string" ? row.guard : null,
@@ -1185,20 +1190,52 @@ function ideaProvenance(r) {
     (r.llm !== true && r.model ? (own ? " The other ideas" : " The ideas") + " were written by " + modelName(r.model) + " and vetted one by one." : "");
 }
 
+function engineProvenance(r) {
+  const ideas = Array.isArray(r.ideas) ? r.ideas : [];
+  const refused = Array.isArray(r.refused) ? r.refused : [];
+  const codes = [...new Set(refused.map((x) => x && x.code).filter((x) => typeof x === "string"))];
+  const refusedSaid = refused.length
+    ? refused.length + " of its answer" + (refused.length === 1 ? " was" : "s were") + " refused (" + codes.join(", ") + ")"
+    : "";
+  const head = "Figures, facts and structures computed by the engine; the summary is deterministic.";
+  if (!ideas.length && r.verdict !== "stand-aside") return head + " The engine ranked no structure worth showing.";
+  if (ideas.some((i) => i && i.from === "model")) {
+    return head + " " + modelName(r.model) + " chose the ideas as structure ids and verdict codes, each checked against " +
+      "the facts" + (refusedSaid ? "; " + refusedSaid : "") + ".";
+  }
+  const guard = typeof r.guard === "string" ? r.guard : "";
+  const why = guard === "engine:refused" ? "every answer the model gave was refused" + (codes.length ? " (" + codes.join(", ") + ")" : "")
+    : guard === "ideas:unparsable" ? "the model\u2019s reply could not be parsed"
+      : guard.startsWith("unreachable") ? neuronProvenance({ llm: false, guard }).replace(/^Deterministic reading: /, "").replace(/\.$/, "")
+        : "no model was asked";
+  return head + " The ideas are the engine\u2019s own ranking: " + why + ".";
+}
+
+function engineIdeaShape(idea) {
+  if (!idea || typeof idea !== "object") return idea;
+  return { ...idea, word: idea.verdict && FLOWS_NEURON.VERDICT_WORD[idea.verdict] ? FLOWS_NEURON.VERDICT_WORD[idea.verdict] : null };
+}
+
 function neuronShape(status, ticker, ctx, row, extra) {
   const r = row && typeof row === "object" ? row : null;
   const text = r !== null && r.summary ? r.summary : null;
+  const engine = r !== null && r.engine === true;
   return {
     status, scope: ticker,
     summary: text,
-    ideas: r !== null && Array.isArray(r.ideas) ? r.ideas : [],
+    ideas: r !== null && Array.isArray(r.ideas) ? (engine ? r.ideas.map(engineIdeaShape) : r.ideas) : [],
+    engine,
+    verdict: engine ? r.verdict : null,
+    verdictWord: engine && r.verdict && FLOWS_NEURON.VERDICT_WORD[r.verdict] ? FLOWS_NEURON.VERDICT_WORD[r.verdict] : null,
+    claims: engine ? r.claims : [],
+    refused: engine ? r.refused : [],
     context: ctx ? FLOWS_NEURON.publicContext(ctx) : null,
     llm: r !== null ? r.llm === true : false,
     model: r !== null ? r.model : null,
     guard: r !== null ? r.guard : null,
     generatedAt: r !== null ? r.generatedAt : null,
-    provenance: text ? neuronProvenance({ text, llm: r.llm === true, model: r.model,
-      guard: r.guard && /^ideas:\d+ refused$/.test(r.guard) ? null : r.guard }) + ideaProvenance(r) : null,
+    provenance: text ? (engine ? engineProvenance(r) : neuronProvenance({ text, llm: r.llm === true, model: r.model,
+      guard: r.guard && /^ideas:\d+ refused$/.test(r.guard) ? null : r.guard }) + ideaProvenance(r)) : null,
     ...(extra || {}),
   };
 }
@@ -1208,10 +1245,27 @@ function neuronContextFor(card) {
   return FLOWS_NEURON.buildContext(card, { expectedSession: age.expected });
 }
 
+async function generateEngineNeuron(env, scope, ctx, fingerprint, plain, chain) {
+  const fallback = FLOWS_NEURON.engineFallback(ctx);
+  const store = (res, llm, model, guard) => writeNeuron(env, scope, fingerprint, plain,
+    { v: 3, verdict: res.verdict, claims: res.claims, ideas: res.ideas, refused: res.refused }, llm, model, guard).catch(() => {});
+  if (!env.AI || !chain.length) { await store(fallback, false, null, null); return; }
+  const { system, user } = FLOWS_NEURON.promptForEngine(ctx);
+  const said = await askModels(env.AI, chain, [{ role: "system", content: system }, { role: "user", content: user }],
+    { maxTokens: 500, temperature: 0.1 }, (billed, usage) => askRecordSpend(env, usage, billed));
+  if (!said.text) { await store(fallback, false, said.model, said.guard); return; }
+  const parsed = FLOWS_NEURON.parseEngineOutput(said.text);
+  if (parsed === null) { await store(fallback, false, said.model, "ideas:unparsable"); return; }
+  const vet = FLOWS_NEURON.vetEngineReply(parsed, ctx);
+  if (!vet.ok) { await store({ ...fallback, refused: vet.refused }, false, said.model, "engine:refused"); return; }
+  await store(vet, true, said.model, vet.refused.length ? "ideas:" + vet.refused.length + " refused" : null);
+}
+
 async function generateNeuron(env, ticker, ctx, fingerprint) {
   const scope = "ticker:" + ticker;
   const chain = aiChain(env);
   const plain = FLOWS_NEURON.deterministicSummary(ctx);
+  if (ctx.engine) return generateEngineNeuron(env, scope, ctx, fingerprint, plain, chain);
   const stateIdea = FLOWS_NEURON.stateIdea(ctx);
   const own = FLOWS_NEURON.vetIdeas(stateIdea ? [stateIdea] : [], ctx).ideas;
   if (!env.AI || !chain.length) {

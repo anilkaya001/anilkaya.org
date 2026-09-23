@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { buildContext, contextLines, contextFacts, promptForNeuron, parseNeuronOutput, vetIdeas,
          deterministicSummary, contextFingerprint, publicContext, guardFacts, numeralsOf,
          regimeState, stateIdea, stateSentence, stateChip, STATES, STATE_STRUCTURES, STATE_LINES, STATE_WORD,
-         NEURON_CONTEXT_VERSION, NEURON_MAX_IDEAS, NEURON_STRUCTURES } from "../shared/flows-neuron.js";
+         NEURON_CONTEXT_VERSION, NEURON_MAX_IDEAS, NEURON_STRUCTURES,
+         engineContext, engineFallback, promptForEngine, parseEngineOutput, vetEngineReply, verdictHolds, claimHolds,
+         VERDICTS, VERDICT_WORD, CLAIM_RELS, VET_CODES } from "../shared/flows-neuron.js";
 import { TICKER_PANELS, SENTINEL_KEYS } from "../shared/flows-panels.js";
 import { guardAnswer, selectFacts, buildFactIndex } from "../shared/flows-ask.js";
 import { modelName, neuronProvenance } from "../shared/flows-pages.js";
@@ -119,7 +121,7 @@ const CARD = {
   ok(stale.features.find((f) => f.key === "gamma").why.includes("capped"), "with the cap named in the reason");
 
   const fp = contextFingerprint(ctx);
-  ok(/^n2\./.test(fp), "the fingerprint carries the protocol version, now 2 for the state line");
+  ok(/^n3\./.test(fp), "the fingerprint carries the protocol version, now 3 for the engine facts and structures");
   ok(fp !== contextFingerprint(stale), "and moves when the cap changes the grades");
   ok(fp === contextFingerprint(buildContext(JSON.parse(JSON.stringify(CARD)), { expectedSession: "2026-09-15" })),
      "and is stable across a deep copy of the same card");
@@ -727,7 +729,7 @@ const CARD = {
   const worker = readFileSync(new URL("../worker.js", import.meta.url), "utf8");
   eq((worker.match(/env\.AI\.run\(/g) || []).length, 0,
     "no call site reaches the binding directly: all three go through askModels, so none can drop the thinking switch or the fallback");
-  eq((worker.match(/askModels\(env\.AI/g) || []).length, 3, "and all three lanes (summary, Neuron, Ask) use it");
+  eq((worker.match(/askModels\(env\.AI/g) || []).length, 4, "and all four call sites (summary, Neuron, Neuron over the engine, Ask) use it");
   ok(!/max_tokens/.test(worker), "the worker no longer carries a max_tokens literal of its own");
   ok(/if \(attempt > 0\) \{\s*if \(said\.failure\) refused = "unreachable:reparse:" \+ said\.failure\.why;\s*break;/.test(worker) &&
      /verdict\.ok \? "ideas:unparsable" : refused \|\| "ideas:unparsable"/.test(worker) &&
@@ -751,6 +753,149 @@ const CARD = {
     "and a change of model configuration still regenerates on the next tick, throttle or not");
 }
 
+{
+  eq(NEURON_CONTEXT_VERSION, 3, "the context protocol is version 3: numbered engine facts and priced structures");
+  const leg = (type, k, side, qty = 1) => ({ type, k, side, qty });
+  const st = (id, family, risk, dir, legs, grade, rules, prob, ev, maxProfit, maxLoss) => ({
+    id, family, risk, dir, expiry: "2026-10-16", dte: 30, sessions: 22, legs, grade, gradeWhy: grade < 3 ? ["fit.in-spread"] : [],
+    rules, prob: { popQ: prob[0], popP: prob[1] }, ev: { q: ev[0], p: ev[1], edge: ev[1] - ev[0] }, maxProfit, maxLoss,
+    profitUnbounded: false, lossUnbounded: risk === "undefined", score: grade / 10,
+  });
+  const ENGINE = {
+    v: 1, engine: "q1", asOf: "2026-09-15T20:00:00.000Z", spot: 100, atr: 2.5,
+    facts: [
+      { id: "iv.cm.30", v: 0.32, u: "vol", g: 3 },
+      { id: "iv.cm.90", v: 0.29, u: "vol", g: 2 },
+      { id: "iv.pct.30", v: 0.82, u: "frac", g: 2 },
+      { id: "garch.avg.21", v: 0.27, u: "vol", g: 3 },
+      { id: "vrp.rel.21", v: 0.18, u: "frac", g: 3 },
+      { id: "vrp.var.21", v: 0.0295, u: "var", g: 3 },
+      { id: "skew.rr25.30.pct", v: 0.9, u: "frac", g: 2, x: true },
+      { id: "term.front.7_30", v: 0.02, u: "frac", g: 2 },
+      { id: "level.putWall", v: 95, u: "px", g: 3, atr: -2 },
+      { id: "level.callWall", v: 105, u: "px", g: 3, atr: 2 },
+      { id: "level.flip", v: 97, u: "px", g: 3, atr: -1.2 },
+      { id: "level.magnet", v: 100.5, u: "px", g: 2, atr: 0.2 },
+      { id: "level.maxPain", v: 104.9, u: "px", g: 2, atr: 1.96 },
+      { id: "gex.book", v: 1.2e6, u: "usdPer1pct", g: 3 },
+      { id: "move.event.ratio", v: null, u: "ratio", g: 0, why: "event.none" },
+      { id: "iv.mom.5", v: -0.012, u: "vol", g: 1 },
+    ],
+    state: { state: "pinned", direction: null, confidence: 2, premium: "rich",
+      preferred: ["iron condor", "call credit spread", "put credit spread"], avoid: ["long straddle", "long strangle", "long call", "long put"] },
+    levels: { callWall: 105, putWall: 95, magnet: 100.5, flip: 97, maxPain: 104.9 },
+    structures: [
+      st("S1", "put-credit-spread", "defined", "bull", [leg("P", 95, -1), leg("P", 90, 1)], 3, ["state.pinned", "vrp.rich", "iv.high"],
+        [0.72, 0.78], [-3, 21], 140, -360),
+      st("S2", "iron-condor", "defined", "neutral", [leg("P", 95, -1), leg("P", 90, 1), leg("C", 105, -1), leg("C", 110, 1)], 2,
+        ["state.pinned", "vrp.rich"], [0.55, 0.61], [-6, 18], 210, -290),
+      st("S3", "short-strangle", "undefined", "neutral", [leg("P", 92, -1), leg("C", 108, -1)], 3, ["vrp.rich", "iv.high"],
+        [0.8, 0.84], [-2, 30], 260, null),
+      st("S4", "long-straddle", "defined", "neutral", [leg("P", 100, 1), leg("C", 100, 1)], 1, ["vrp.rich−"],
+        [0.31, 0.28], [-8, -40], null, -780),
+      st("S5", "long-calendar", "defined", "neutral", [leg("C", 100, -1), leg("C", 100, 1)], 2, ["term.backwardation"],
+        [0.46, 0.5], [2, 9], 300, -250),
+    ],
+    ideas: ["S1", "S2", "S5"], noTrade: null, priced: 24, families: [],
+  };
+  const ecard = JSON.parse(JSON.stringify(CARD));
+  ecard.engine = ENGINE;
+  const ectx = buildContext(ecard, { expectedSession: "2026-09-15" });
+  ok(ectx.engine && ectx.engine.facts.length === ENGINE.facts.length && ectx.engine.structures.length === 5,
+     "a card with an engine block gives the context every numbered fact and the five published structures");
+  same(ectx.engine.ideas, ["S1", "S2", "S5"], "and the engine's own ranking, by id");
+  const eLines = contextLines(ectx);
+  ok(eLines.some((l) => /^\s+vrp\.rel\.21 = 0\.18 frac \(g 3\)$/.test(l)),
+     "each fact is one line as id = value unit (grade), so the model copies ids and never needs to compute");
+  ok(eLines.some((l) => /^\s+S1 put-credit-spread defined 2026-10-16 −P95 \+P90: popQ 0\.72, popP 0\.78/.test(l)),
+     "each structure is one line with its legs, both chances of profit and its grade");
+  ok(/\.e5$/.test(contextFingerprint(ectx)), "the fingerprint moves with the engine's structures");
+  ok(engineContext(CARD) === null && !/\.e\d+$/.test(contextFingerprint(buildContext(CARD, { expectedSession: "2026-09-15" }))),
+     "a card without an engine block has no engine context and keeps the plain fingerprint");
+  ok(engineContext({ ...CARD, engine: { status: "split", key: "card-x:SYN1", bytes: 40000 } }) === null,
+     "an unresolved card-x pointer is not an engine: the Worker merges it or the reader goes without");
+
+  const { system, user } = promptForEngine(ectx);
+  ok(/NO digits anywhere except inside the ids/.test(system) && VERDICTS.every((v) => system.includes(v)) &&
+     CLAIM_RELS.every((r) => system.includes(r)),
+     "the engine prompt allows digits only inside copied ids and names every verdict code and relation");
+  ok(user.includes("S1 put-credit-spread") && user.includes("vrp.rel.21 = 0.18"), "and hands the model the facts and structures");
+  same(parseEngineOutput("```json\n{\"verdict\":\"stand-aside\"}\n```"), { verdict: "stand-aside" }, "a fenced JSON reply parses");
+  eq(parseEngineOutput("no json here"), null, "and prose is not a reply");
+
+  const good = { verdict: "harvest-rich-premium",
+    claims: [{ a: "iv.cm.30", rel: "gt", b: "garch.avg.21" }, { a: "spot", rel: "between", b: "level.putWall", c: "level.callWall" },
+      { a: "vrp.rel.21", rel: "rich" }, { a: "level.magnet", rel: "near", b: "spot" }, { a: "iv.mom.5", rel: "falling" }],
+    ideas: [{ structure: "S2", verdict: "pin-at-level", because: ["level.magnet", "gex.book"] },
+      { structure: "S1", verdict: "harvest-rich-premium", because: ["vrp.rel.21", "iv.pct.30"] }] };
+  const v = vetEngineReply(good, ectx);
+  ok(v.ok && v.refused.length === 0, `a reply of ids, codes and true claims is accepted whole (${JSON.stringify(v.refused)})`);
+  same(v.ideas.map((i) => [i.structure, i.verdict, i.grade, i.from]), [["S2", "pin-at-level", 2, "model"], ["S1", "harvest-rich-premium", 2, "model"]],
+       "each idea keeps its structure and verdict, ranked no higher than its weakest fact or its own grade");
+  eq(v.claims.length, 5, "and every true claim is kept");
+  eq(v.verdict, "harvest-rich-premium", "with the overall verdict, because a kept structure satisfies it");
+
+  const code = (reply) => vetEngineReply(reply, ectx).refused.map((r) => r.code);
+  same(code({ ideas: [{ structure: "S1", verdict: "harvest-rich-premium", because: ["vrp.rel.21", "iv.pct.30"], note: "sells 95 puts" }] }),
+       ["digit"], "a digit outside a copied id refuses the whole reply: the model does not write numbers");
+  same(code({ verdict: "stand-aside", confidence: 3 }), ["digit"], "so does a bare number in any field");
+  same(code({ ideas: [{ structure: "S9", because: ["vrp.rel.21", "iv.pct.30"] }] }), ["unknown-id"],
+       "an unknown structure id is refused as unknown, not as a digit: digits are allowed inside id fields and checked there");
+  same(code({ ideas: [{ structure: "S1", because: ["vrp.rel.21", "vol.of.vol"] }] }), ["unknown-id"], "so is an unknown fact id in because");
+  same(code({ ideas: [{ structure: "S1", because: ["vrp.rel.21", "move.event.ratio"] }] }), ["withheld"],
+       "a because that leans on a withheld fact is refused as withheld");
+  same(code({ ideas: [{ structure: "S4", because: ["vrp.rel.21", "iv.pct.30"] }] }), ["avoid"],
+       "a structure whose family the state avoids is refused");
+  same(code({ ideas: [{ structure: "S3", because: ["vrp.rel.21", "iv.pct.30"] }] }), ["undefined-first"],
+       "an undefined-risk first idea is refused while a defined-risk structure is listed");
+  same(code({ ideas: [{ structure: "S5", verdict: "buy-cheap-convexity", because: ["vrp.rel.21", "term.front.7_30"] }] }),
+       ["verdict-false"], "a verdict whose preconditions fail on the facts is refused: premium is rich, not cheap");
+  same(code({ ideas: [{ structure: "S1", because: ["vrp.rel.21", "iv.pct.30"] }, { structure: "S1", because: ["vrp.rel.21", "iv.pct.30"] }] }),
+       ["dup"], "a repeated structure is refused");
+  same(code({ claims: [{ a: "iv.cm.30", rel: "lt", b: "garch.avg.21" }] }), ["claim-false"],
+       "a false comparison is refused after the server evaluates it on the facts");
+  same(code({ claims: [{ a: "iv.cm.30", rel: "gt", b: "level.flip" }] }), ["claim-false"], "so is a comparison across units");
+  same(code({ claims: [{ a: "level.maxPain", rel: "near", b: "spot" }] }), ["claim-false"],
+       "near is half an ATR for prices, so max pain 1.96 ATR away is not near");
+  same(code({ claims: [{ a: "iv.pct.30", rel: "cheap" }] }), ["claim-false"], "a percentile at 0.82 is not cheap");
+  same(code({ verdict: "event-overpriced" }), ["verdict-false"], "an event verdict with no event ratio is refused");
+  same(code({ verdict: "sell-fast" }), ["schema"], "an unknown verdict code is a schema refusal");
+  same(code({ ideas: "S1" }), ["schema"], "and a reply of the wrong shape is refused as schema");
+  ok(VET_CODES.every((c) => typeof c === "string") && ["schema", "digit", "unknown-id", "avoid", "verdict-false", "claim-false",
+    "withheld", "undefined-first", "dup"].every((c) => VET_CODES.includes(c)), "every refusal code is published");
+  ok(!vetEngineReply({ ideas: [{ structure: "S4", because: ["vrp.rel.21", "iv.pct.30"] }] }, ectx).ok,
+     "a reply whose every idea is refused is not ok, so the Worker falls back to the engine ranking");
+
+  ok(verdictHolds("pin-at-level", ENGINE.structures[1] && { ...ectx.engine.structures[1] }, ectx.engine),
+     "pin-at-level holds for the condor: the state is pinned and a short strike sits within half an ATR of the magnet");
+  ok(verdictHolds("fade-to-wall", ectx.engine.structures[0], ectx.engine),
+     "fade-to-wall holds for the put credit spread: its short 95 is at the put wall, between it and spot");
+  ok(!verdictHolds("fade-to-wall", ectx.engine.structures[1], ectx.engine), "and never for a family that is not a credit spread");
+  ok(verdictHolds("sell-skew", null, ectx.engine) === false, "a structure verdict needs its structure");
+  ok(claimHolds({ a: "spot", rel: "gt", b: "level.flip" }, ectx.engine).ok, "spot is a price fact for claims");
+
+  const fb = engineFallback(ectx);
+  same(fb.ideas.map((i) => i.structure), ENGINE.ideas.slice(0, 3),
+       "with no model, the deterministic path is exactly the engine's ranking");
+  ok(fb.ideas.every((i) => i.from === "engine" && i.because.length === 2 && i.grade <= 3), "each idea marked as the engine's, resting on two facts");
+  ok(fb.ideas.every((i) => i.verdict === null || verdictHolds(i.verdict, ectx.engine.structures.find((x) => x.id === i.structure), ectx.engine)),
+     "and every verdict it attaches is one whose preconditions hold");
+  eq(fb.ideas[0].verdict, "harvest-rich-premium", "the put credit spread reads as harvesting rich premium");
+  const asReply = { verdict: fb.verdict, ideas: fb.ideas.map(({ structure, verdict, because }) => ({ structure, verdict, because })) };
+  const fv = vetEngineReply(asReply, ectx);
+  ok(fv.ok && fv.refused.length === 0, `the fallback, written as a model would write it, passes the same vetting (${JSON.stringify(fv.refused)})`);
+  const aside = JSON.parse(JSON.stringify(ecard));
+  aside.engine.ideas = []; aside.engine.noTrade = { code: "no-edge", closest: "S2" };
+  const w = readFileSync(new URL("../worker.js", import.meta.url), "utf8");
+  ok(/if \(ctx\.engine\) return generateEngineNeuron\(/.test(w) && /FLOWS_NEURON\.engineFallback\(ctx\)/.test(w) &&
+     /FLOWS_NEURON\.vetEngineReply\(parsed, ctx\)/.test(w) && /\{ v: 3, verdict: res\.verdict, claims: res\.claims, ideas: res\.ideas, refused: res\.refused \}/.test(w),
+     "the Worker takes the engine path whenever the card carries an engine, vets the reply, and stores the protocol-3 object " +
+     "with the engine ranking whenever no model answers or every answer is refused");
+  const af = engineFallback(buildContext(aside, { expectedSession: "2026-09-15" }));
+  ok(af.verdict === "stand-aside" && af.ideas.length === 0, "an engine that stands aside falls back to stand-aside with no ideas");
+  ok(Object.keys(VERDICT_WORD).length === VERDICTS.length, "every verdict code has a word for the page");
+}
+
 console.log(`✓ flows-neuron: ${checks} assertions — a context that carries every registry panel plus the ` +
   "standing and the volatility model, each graded 0 to 3 from the card's own coverage and quality fields " +
   "and capped at weak when the card is behind the last closed session; one line per feature so the model " +
@@ -759,4 +904,7 @@ console.log(`✓ flows-neuron: ${checks} assertions — a context that carries e
   "a listed structure, every figure quoted, no claim about what happens next — and ranked by their " +
   "weakest leg; a greeks-implied state (pinned, amplifying, squeeze, on the flip, premium rich or cheap, " +
   "undetermined) read from positioning, flow votes and premium, with the structures it prefers and rules out, " +
-  "its own vetted idea first, and the assistant's selector reaching the same facts for the page's own name");
+  "its own vetted idea first, and the assistant's selector reaching the same facts for the page's own name; and protocol 3, " +
+  "where the engine's numbered facts and priced structures are the only numbers and the model returns ids, verdict codes and " +
+  "relation claims — digits, unknown ids, withheld facts, avoided families, false verdicts, false claims, an undefined-risk " +
+  "first idea and repeats each refused under their own code, and with no model the engine's own ranking");
