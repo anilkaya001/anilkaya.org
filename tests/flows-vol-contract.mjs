@@ -541,7 +541,9 @@ function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
   eq(e("LLL").panels.cone.slope30_90ExEvent, e("LLL").panels.cone.slope30_90,
     "and with none inside ninety days its ex-event slope is its slope");
   eq(e("SPY").panels.ivDyn.status, "ok", "an index name's IV dynamics come from the leg's own 1y read");
-  eq(e("BBB").panels.ivDyn.code, "not-read", "a deep name's wait for the card leg");
+  eq(e("BBB").panels.ivDyn.code, "input-absent",
+    "a deep name's IV dynamics wait for the card leg's rows, and until they arrive the input is absent (the read IS made at this depth)");
+  eq(e("LLL").panels.ivDyn.code, "not-read", "while a carded name's is genuinely not read");
   ok(e("AAA").panels.cone.xPct.richCheap !== undefined, "cross-sectional percentiles are attached");
   eq(e("SPY").panels.cone.xPct.richCheap, null, "and the index names are kept out of the equity cross-section");
   eq(e("AAA").readAt, "2026-09-22T21:40:00.000Z", "each name carries the instant it was read");
@@ -582,6 +584,21 @@ function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
   const outcome = await publishVol(leg, { publish: async (k, v) => { published.set(k, v); }, sessionDate: session, generatedAt: "g" });
   eq(outcome.published, names.length, "one dossier per name is published");
   ok(published.has("regime") && published.has("card-x:SPY") && published.has("card-x:LLL"), "under card-x:<T> and regime");
+
+  const brokenLeg = await runVolLeg({ uw: fake, names: names.slice(0, 3), sessionDate: session, radar: false,
+    repair: (rows) => { if (rows.some((r) => r && r.__boom)) throw new Error("boom"); return { candles: rows, breaks: [] }; } });
+  eq(brokenLeg.stats.broken.length, 0, "a repair that does not throw breaks nothing");
+  const boomNames = names.slice(0, 3).map((x, i) => (i === 1 ? { ...x, candles: [{ __boom: true, date: session, close: "1" }] } : x));
+  const boomLeg = await runVolLeg({ uw: fake, names: boomNames, sessionDate: session, radar: false,
+    repair: (rows) => { if (rows.some((r) => r && r.__boom)) throw new Error("boom"); return { candles: rows, breaks: [] }; } });
+  eq(boomLeg.byTicker.get(boomNames[1].ticker).panels.cone.status, "unreadable",
+    "a name whose shaping throws is published unreadable instead of aborting the leg (and the card leg behind it)");
+  eq(boomLeg.byTicker.get(boomNames[0].ticker).panels.cone.status, "ok", "and the names around it are untouched");
+  ok(boomLeg.stats.broken[0].includes("boom"), "with the failure named in the run log's stats");
+  const boomCard = { panels: {} };
+  attachVol(boomCard, leg, "GGG", { ivRank: { get data() { throw new Error("getter"); } } });
+  eq(e("GGG").panels.ivDyn.status, "unreadable", "an iv-rank body that throws while read is unreadable IV dynamics");
+  eq(boomCard.x.vol.v, 1, "and the card still carries its vol summary rather than failing the card");
 
   const stopped = await runVolLeg({ uw: fake, names: names.slice(0, 3), sessionDate: session, radar: false,
     pool: async (items, work) => ({ results: [await work(items[0])] }) });

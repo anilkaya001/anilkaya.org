@@ -162,7 +162,8 @@ async function readName(name, { call, sessionDate, repair, notes }) {
       sessionDate, iv30: cone.status === "ok" ? cone.iv30 : null, bars: rv.bars || null, garch: name.garch,
     })) : notRead();
   const ivDyn = kinds.includes("ivRank")
-    ? fromRead(reads.ivRank, (b) => buildIvDynamics(b, { sessionDate })) : notRead();
+    ? fromRead(reads.ivRank, (b) => buildIvDynamics(b, { sessionDate }))
+    : name.depth === "deep" ? silentPanel("unavailable", "input-absent") : notRead();
   const anomaly = kinds.includes("anomaly")
     ? fromRead(reads.anomaly, (b) => buildAnomalyPanel(b, { sessionDate, ours: cone.status === "ok" ? cone.view : null }))
     : notRead();
@@ -211,11 +212,17 @@ function deadlineEntry(name) {
   return { ticker: name.ticker, depth: name.depth, readAt: null, vendorAt: null, reads: {}, panels };
 }
 
+function brokenEntry(name) {
+  const panels = {};
+  for (const k of VOL_PANELS) panels[k] = silentPanel("unreadable", "unreadable-body");
+  return { ticker: name.ticker, depth: name.depth, readAt: null, vendorAt: null, reads: {}, panels };
+}
+
 export async function runVolLeg({
   uw, names = [], sessionDate = null, repair = null, pool = null,
   now = () => new Date().toISOString(), radar = true,
 } = {}) {
-  const stats = { names: names.length, calls: 0, failed: 0, byRead: {}, depth: {} };
+  const stats = { names: names.length, calls: 0, failed: 0, byRead: {}, depth: {}, broken: [] };
   const notes = {};
   const call = async (kind, req) => {
     stats.calls++;
@@ -235,7 +242,14 @@ export async function runVolLeg({
     for (let i = 0; i < items.length; i++) results.push(await work(items[i], i));
     return { results };
   });
-  const outcome = await run(names, (name) => readName(name, { call, sessionDate, repair, notes }));
+  const outcome = await run(names, async (name) => {
+    try {
+      return await readName(name, { call, sessionDate, repair, notes });
+    } catch (error) {
+      stats.broken.push(`${name.ticker}: ${String((error && error.message) || error).slice(0, 160)}`);
+      return brokenEntry(name);
+    }
+  });
   const results = (outcome && outcome.results) || [];
   const byTicker = new Map();
   names.forEach((name, i) => {
@@ -279,18 +293,29 @@ export function attachVol(card, leg, ticker, { ivRank = undefined } = {}) {
     card.x = { ...(card.x || {}), vol: { v: VOL_SCHEMA_VERSION, status: "unavailable", code: "not-read", reason: VOL_WHY["not-read"] } };
     return card;
   }
-  if (ivRank !== undefined && entry.depth !== "index") {
-    entry.panels.ivDyn = ivRank === null
-      ? silentPanel("unavailable", "read-failed")
-      : buildIvDynamics(ivRank, { sessionDate: leg.sessionDate });
-    const hl = entry.panels.ivDyn.status === "ok" ? entry.panels.ivDyn.halfLife : null;
-    entry.panels.character = characterVote(entry.panels.character, hl);
-    const cone = entry.panels.cone;
-    if (!leg.notes.ivSourceCheck && entry.panels.ivDyn.status === "ok" && cone && cone.status === "ok" && cone.iv30 !== null) {
-      leg.notes.ivSourceCheck = { ticker, cone30: cone.iv30, ivRank: entry.panels.ivDyn.iv, asOf: entry.panels.ivDyn.asOf };
+  try {
+    if (ivRank !== undefined && entry.depth !== "index") {
+      let dyn;
+      try {
+        dyn = ivRank === null
+          ? silentPanel("unavailable", "read-failed")
+          : buildIvDynamics(ivRank, { sessionDate: leg.sessionDate });
+      } catch {
+        dyn = silentPanel("unreadable", "unreadable-body");
+      }
+      entry.panels.ivDyn = dyn;
+      const hl = dyn.status === "ok" ? dyn.halfLife : null;
+      entry.panels.character = characterVote(entry.panels.character, hl);
+      const cone = entry.panels.cone;
+      if (!leg.notes.ivSourceCheck && dyn.status === "ok" && cone && cone.status === "ok" && cone.iv30 !== null) {
+        leg.notes.ivSourceCheck = { ticker, cone30: cone.iv30, ivRank: dyn.iv, asOf: dyn.asOf };
+      }
     }
+    card.x = { ...(card.x || {}), vol: volSummary(entry.panels, { asOf: leg.sessionDate }) };
+  } catch {
+    card.x = { ...(card.x || {}), vol: { v: VOL_SCHEMA_VERSION, status: "unreadable", code: "unreadable-body",
+      reason: VOL_WHY["unreadable-body"] } };
   }
-  card.x = { ...(card.x || {}), vol: volSummary(entry.panels, { asOf: leg.sessionDate }) };
   return card;
 }
 
@@ -357,6 +382,10 @@ export function describeVolLeg(leg) {
   ];
   const failing = Object.entries(leg.stats.byRead).filter(([, t]) => t.failed).map(([k, t]) => `${k} ${t.failed}/${t.ok + t.failed}`);
   if (failing.length) lines.push(`  vol: failed reads by route — ${failing.join(", ")}`);
+  const broken = leg.stats.broken || [];
+  if (broken.length) {
+    lines.push(`  vol: ${broken.length} name(s) could not be shaped and publish as unreadable — ${broken.slice(0, 5).join("; ")}`);
+  }
   if (leg.radar) {
     const r = leg.radar;
     lines.push(`  vol radar: ${r.status} — rich ${r.rich.seen}, cheap ${r.cheap.seen}, bullish ${r.bullish.seen}, ` +
