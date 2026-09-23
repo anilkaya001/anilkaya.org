@@ -10,6 +10,7 @@ export const FLOW_LEG = Object.freeze({
   ALERT_BATCH: 10,
   ALERT_LIMIT: 200,
   ALERT_MAX_PAGES: 8,
+  ALERT_CLOSE_SLACK_MS: 5 * 60 * 1000,
   MULTI_LIMIT: 500,
   MULTI_MAX_OFFSET: 500,
   LIFELINES: 3,
@@ -43,7 +44,8 @@ const bytes = (v) => JSON.stringify(v).length;
 
 export async function readAlertBatch(read, names, win, { limit = FLOW_LEG.ALERT_LIMIT, maxPages = FLOW_LEG.ALERT_MAX_PAGES } = {}) {
   const rows = [];
-  let pages = 0, olderThan = win.closeIso, complete = false, failed = null, coverFrom = null;
+  let pages = 0, complete = false, failed = null, coverFrom = null;
+  let olderThan = new Date(win.close + FLOW_LEG.ALERT_CLOSE_SLACK_MS).toISOString();
   while (pages < maxPages) {
     const body = await read("/api/option-trades/flow-alerts", {
       ticker_symbol: names.join(","), limit, newer_than: win.openIso, older_than: olderThan,
@@ -58,7 +60,8 @@ export async function readAlertBatch(read, names, win, { limit = FLOW_LEG.ALERT_
     let oldest = null;
     for (const r of got) {
       rows.push(r);
-      const t = toMs(r && r.start_time) ?? toMs(r && r.created_at);
+      const stamps = r ? [toMs(r.start_time), toMs(r.end_time), toMs(r.created_at)].filter((t) => t !== null) : [];
+      const t = stamps.length ? Math.max(...stamps) : null;
       if (t !== null && (oldest === null || t < oldest)) oldest = t;
     }
     if (oldest !== null) coverFrom = coverFrom === null ? oldest : Math.min(coverFrom, oldest);
@@ -241,6 +244,7 @@ export async function runFlowLeg(ctx) {
 
   const alertBatches = new Map();
   let alertPages = 0;
+  const alertsReadAt = now().toISOString();
   if (win) {
     const batches = chunk(deep, FLOW_LEG.ALERT_BATCH);
     const run = await runPooled(batches, async (names) => {
@@ -319,6 +323,7 @@ export async function runFlowLeg(ctx) {
       sessionDate, candle: sessionCandle(f.candles, sessionDate), prior: kept, priorFailed,
     });
     const batch = alertBatches.get(ticker) || { rows: undefined, complete: false, coverFromM: null };
+    const oldestRead = batch.rows !== undefined && alertsReadAt < readAt ? alertsReadAt : readAt;
     const sections = {
       gex: gex.section,
       volume: volume.section,
@@ -341,7 +346,7 @@ export async function runFlowLeg(ctx) {
     const nopeHistory = kept.slice();
     if (nope.close !== null && isDay(sessionDate)) nopeHistory.push({ d: sessionDate, v: nope.close });
     return emit(ticker, "deep", sections, {
-      readAt, gex: gex.series, volume: volume.series, nope: nopeHistory.slice(-FLOW_LEG.NOPE_KEEP),
+      readAt: oldestRead, gex: gex.series, volume: volume.series, nope: nopeHistory.slice(-FLOW_LEG.NOPE_KEEP),
       priorFailed, priorStatus: prior.status || null,
     });
   };

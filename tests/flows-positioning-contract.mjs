@@ -539,6 +539,22 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   const failed = await readAlertBatch(async () => failedRead("failed"), ["AAA"], WIN);
   eq(failed.rows.__failed, "failed", "a failed first page is a failure, not an empty tape");
 
+  const lagged = Array.from({ length: 1000 }, (_, i) => {
+    const s = WIN.close - 2000 - i * 20000;
+    return { id: "L" + i, ticker: "AAA", start_time: s, end_time: s + 145, created_at: new Date(s + 5000).toISOString() };
+  });
+  for (const key of ["created_at", "start_time"]) {
+    const stamp = (r) => (key === "created_at" ? toMs(r.created_at) : r.start_time);
+    const pager = async (path, params) => ({
+      data: lagged.filter((r) => stamp(r) < toMs(params.older_than) && stamp(r) >= toMs(params.newer_than))
+        .sort((a, b) => stamp(b) - stamp(a)).slice(0, params.limit),
+    });
+    const got = await readAlertBatch(pager, ["AAA"], WIN);
+    eq(new Set(got.rows.map((r) => r.id)).size, 1000,
+      `a vendor that pages on ${key} loses no alert between pages (created_at trails start_time by seconds live)`);
+    eq(got.complete, true, `and the ${key}-paged batch is complete only because it is`);
+  }
+
   let calls = 0;
   const mlRead = (sizes) => async (path, params) => {
     calls++;
@@ -650,7 +666,9 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   };
   const published = {};
   const lines = [];
+  let clock = Date.parse("2026-09-22T21:40:00Z");
   const summary = await runFlowLeg({
+    now: () => new Date((clock += 60000)),
     uw: makeFlowFakeVendor({ sessionDate: SESSION, spotOf: () => 150 }),
     readStored: (key) => answers[key](),
     publish: async (key, payload) => { published[key] = JSON.parse(JSON.stringify(payload)); },
@@ -681,6 +699,12 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   eq(published["hist:FRESH"].nope.x.filter((x) => x !== null).length, 1,
     "a name with no stored history yet starts one with today's close");
   eq(published["card-x:FRESH"].nope.gaps.z, "short-history", "and is honestly short of history");
+  for (const t of ["DOWN", "THROW", "GOOD", "FRESH"]) {
+    eq(published["card-x:" + t].fresh.readAt, "2026-09-22T21:41:00.000Z",
+      `card-x:${t} dates its reads from the alert batch, read before any name: readAt is the oldest read inside`);
+  }
+  ok(published["card-x:XDOWN"].fresh.readAt > "2026-09-22T21:41:00.000Z",
+    "a cross-section name carries no alert tape, so its readAt is its own");
 }
 
 const CODES = new Set(Object.keys(FLOW_CODES));
