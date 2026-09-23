@@ -394,6 +394,7 @@ flows-political-contract  flows-record-contract  flows-universe-contract
 flows-garch            flows-neuron
 flows-chain-panels     flows-auth-contract     mastery-contract
 academy-contract       flows-variation         flows-probe-contract
+flows-vol-contract
 ```
 
 Confirmed to need one: `flows-overview-contract`, `flows-board-render`,
