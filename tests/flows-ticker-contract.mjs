@@ -805,12 +805,13 @@ try {
     const narrow = await phone.evaluate(() => {
       const bar = document.getElementById("ftBar"), tb = document.querySelector(".topbar");
       const tab = document.getElementById("askDockTab");
-      const tabBox = tab ? tab.getBoundingClientRect() : null;
+      const ask = document.querySelector('.fx-tabs a[href="/flows/ask/"]');
+      const askBox = ask ? ask.getBoundingClientRect() : null;
       return {
         scroller: getComputedStyle(document.getElementById("ftScroll")).overflowY,
         gap: Math.round(bar.getBoundingClientRect().top - tb.getBoundingClientRect().bottom),
         barTop: getComputedStyle(bar).top, topbarH: Math.round(tb.getBoundingClientRect().height),
-        dock: tabBox ? { bottom: Math.round(innerHeight - tabBox.bottom), h: Math.round(tabBox.height), mode: getComputedStyle(tab).writingMode } : null,
+        dock: askBox ? { bottom: Math.round(innerHeight - askBox.bottom), h: Math.round(askBox.height), toolbarAsk: tab ? getComputedStyle(tab).display : null } : null,
         chainCut: document.getElementById("ftChainBody").classList.contains("is-cut-end"),
         chainOver: document.getElementById("ftChainBody").scrollWidth - document.getElementById("ftChainBody").clientWidth,
       };
@@ -818,8 +819,8 @@ try {
     eq(narrow.scroller, "visible", "at phone width the window is the scroller, under a fixed topbar");
     ok(narrow.gap === 0 && narrow.barTop === narrow.topbarH + "px",
        `so the sticky bar sits flush under the topbar rather than a fixed 4.4rem down (gap ${narrow.gap}px, top ${narrow.barTop} for ${narrow.topbarH}px)`);
-    ok(narrow.dock && narrow.dock.mode === "horizontal-tb" && narrow.dock.bottom < 40 && narrow.dock.h >= 44,
-       `the Ask tab is a bottom-right pill of at least 44px, not a vertical tab over the reading column (${JSON.stringify(narrow.dock)})`);
+    ok(narrow.dock && narrow.dock.bottom < 40 && narrow.dock.h >= 44 && narrow.dock.toolbarAsk === "none",
+       `at phone width Ask is a tab of at least 44px in the bottom bar, and the toolbar's Ask button stands down rather than floating over the reading column (${JSON.stringify(narrow.dock)})`);
     ok(narrow.chainOver <= 4 || narrow.chainCut,
        `and a chain wider than its host is marked cut, so its fade says there is more (${narrow.chainOver}px over, cut ${narrow.chainCut})`);
     await phone.close();
@@ -2188,9 +2189,10 @@ try {
         colW: Math.round(cols.children[0].getBoundingClientRect().width),
         labelLines: label ? Math.round(label.getBoundingClientRect().height / parseFloat(getComputedStyle(label).lineHeight)) : 0 };
     });
-    ok(narrow.tracks === 2 && narrow.colW >= 300,
-       `1024px: a ${narrow.w}px panel keeps two columns of ${narrow.colW}px rather than three of 218 that wrapped ` +
-       "the family labels one word per line — the split follows the panel's own width, not the viewport's");
+    ok(narrow.tracks >= 2 && narrow.colW >= 280,
+       `1024px: the sidebar folds into a drawer at this width, so a ${narrow.w}px panel splits into ` +
+       `${narrow.tracks} columns of ${narrow.colW}px rather than three of 218 that wrapped the family labels ` +
+       "one word per line — the split follows the panel's own width, not the viewport's");
     ok(narrow.labelLines <= 2, `and a family label sits on at most two lines (${narrow.labelLines})`);
     ok(!order.includes("scoreOverlay"), "the score-over-price series is mounted nowhere");
     await page.close();
@@ -4055,73 +4057,15 @@ try {
        `--bg resolves to a dark ground (${ground.toFixed(2)} of 255) — the whole ` +
        "polarity argument below assumes it, so it is checked rather than assumed");
 
-    const columns = async (shot) => page.evaluate(async (b64) => {
-      const bin = atob(b64), u8 = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
-      const bmp = await createImageBitmap(new Blob([u8], { type: "image/png" }));
-      const c = new OffscreenCanvas(bmp.width, bmp.height), x = c.getContext("2d");
-      x.drawImage(bmp, 0, 0);
-      const d = x.getImageData(0, 0, bmp.width, bmp.height).data;
-      const cols = [];
-      for (let px = 0; px < bmp.width; px++) {
-        let sum = 0;
-        for (let y = 0; y < bmp.height; y++) {
-          const i = (bmp.width * y + px) << 2;
-          sum += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
-        }
-        cols.push(sum / bmp.height);
-      }
-      return cols;
-    }, shot.toString("base64"));
-
-    const rail = await page.$(".flows-rail");
-    ok(rail, "the ticker page serves the section rail this measurement reads");
     const overflow = await page.evaluate(() => {
-      const el = document.querySelector(".flows-rail");
+      const el = document.querySelector(".ft-tabs");
       el.scrollLeft = 0;
       return el.scrollWidth - el.clientWidth;
     });
     ok(overflow > 40,
-       `and at 320px it actually scrolls, hiding ${overflow}px — an edge on a strip ` +
-       "with nothing past it would be a lie, so the premise is measured first");
-
-    const atStart = await columns(await rail.screenshot());
-    await page.evaluate(() => {
-      const el = document.querySelector(".flows-rail");
-      el.scrollLeft = el.scrollWidth;
-    });
-    await page.waitForTimeout(120);
-    const atEnd = await columns(await rail.screenshot());
-
-    const W = atStart.length;
-    eq(atEnd.length, W, "both screenshots are the same width, so the columns line up");
-
-    const band = (cols, side) => Math.max(...(side === "left"
-      ? cols.slice(0, 14) : cols.slice(W - 14, W - 1)));
-    const LIT = 15, FLAT = 3;
-
-    const middle = (cols) => {
-      const inner = cols.slice(14, W - 14).slice().sort((a, b) => a - b);
-      return inner.length ? inner[inner.length >> 1] : ground;
-    };
-    const startBase = middle(atStart), endBase = middle(atEnd);
-    const startRight = band(atStart, "right"), startLeft = band(atStart, "left");
-    const endRight = band(atEnd, "right"), endLeft = band(atEnd, "left");
-
-    ok(startRight - startBase >= LIT,
-       `scrolled to the start, the RIGHT edge stands off the ground ` +
-       `(${startRight.toFixed(2)} against ${startBase.toFixed(2)}) — this is the assertion ` +
-       "a black shadow on a black page fails, and did: it measured four counts");
-    ok(startLeft - startBase <= FLAT,
-       `and the LEFT edge is the strip itself (${startLeft.toFixed(2)} against ` +
-       `${startBase.toFixed(2)}) — nothing is hidden that way, so nothing may suggest it`);
-    ok(endLeft - endBase >= LIT,
-       `scrolled to the end, the LEFT edge stands off the ground ` +
-       `(${endLeft.toFixed(2)} against ${endBase.toFixed(2)})`);
-    ok(endRight - endBase <= FLAT,
-       `and the RIGHT edge has PUT ITSELF AWAY (${endRight.toFixed(2)} against ` +
-       `${endBase.toFixed(2)}) — a static fade cannot do this, and would sit here ` +
-       "telling a reader to swipe past the last item in the strip");
+       `at 320px the station tab strip scrolls, hiding ${overflow}px — the strip the fade rules below ` +
+       "govern. The section rail this block once photographed became a vertical sidebar that folds " +
+       "into a drawer, so there is no sideways rail left to measure an edge on");
 
     const strips = await page.evaluate(() => {
 
@@ -4136,7 +4080,7 @@ try {
         return n;
       };
       const out = [];
-      for (const el of document.querySelectorAll(".ft-bar .ft-head, .flows-rail, .ft-tabs, .ft-topline, .ft-chips")) {
+      for (const el of document.querySelectorAll(".ft-bar .ft-head, .ft-tabs, .ft-topline, .ft-chips")) {
         if (el.scrollWidth - el.clientWidth < 8) continue;
         const cs = getComputedStyle(el);
         out.push({
@@ -4148,9 +4092,10 @@ try {
       }
       return out;
     });
-    ok(strips.length >= 3,
+    ok(strips.length >= 2,
        `at 320px the chrome has ${strips.length} strips that scroll inside themselves ` +
-       "— the three this rule was written for, at least");
+       "— the station tabs and the pinned identity row; the section rail, the third this rule " +
+       "was written for, is now a vertical sidebar that folds into a drawer");
     for (const s of strips) {
       eq(s.layers, 4,
          `"${s.sel}" hides ${s.hides}px and carries four background layers — two ground, ` +

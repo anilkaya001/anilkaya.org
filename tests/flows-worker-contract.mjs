@@ -308,8 +308,13 @@ try {
          "and the lede states that refusal in so many words, rather than leaving it implied");
 
       const dated = /\b(today|this session|the day's|the day\u2019s)\b/i;
-      const d = uaHtml.match(dated);
-      ok(!d, `the unusual page never dates an undated counter (found "${d && d[0]}")`);
+      const ownWords = uaHtml.replace(/<aside class="fx-side"[\s\S]*?<\/aside>/, "");
+      ok(ownWords.length < uaHtml.length,
+         "the shared sidebar is found and set aside before the page's own words are read");
+      const d = ownWords.match(dated);
+      ok(!d, `the unusual page never dates an undated counter (found "${d && d[0]}") — the ` +
+         `sidebar's "Today" is the name of a navigation group, identical on every route, ` +
+         "not a claim about when this page's counts were counted");
 
       const anonUa = await get("/flows/unusual/");
       eq(anonUa.status, 200, "/flows/unusual/ serves a page to an anonymous visitor");
@@ -679,13 +684,12 @@ try {
 
     const rail = (/<nav class="flows-rail"[\s\S]*?<\/nav>/.exec(html) || [""])[0];
     ok(rail.includes("flows-rail"), "the rail markup is found before it is read");
-    for (const gone of ["/flows/history/", "/flows/track/"]) {
-      ok(!rail.includes(`href="${gone}"`),
-         `the RAIL does NOT link to ${gone} — it was taken off deliberately`);
-      const still = await get(gone, { headers: { Cookie: "flows_session=" + token } });
-      eq(still.status, 200,
-         `but ${gone} still answers: unlisted is not deleted, and a link already ` +
-         "sent has to keep working");
+    for (const back of ["/flows/history/", "/flows/track/"]) {
+      ok(rail.includes(`href="${back}"`),
+         `the RAIL links to ${back} again, under Record — it was taken off to keep a sideways ` +
+         "phone strip short, and the sidebar that replaced the strip is a grouped vertical list");
+      const still = await get(back, { headers: { Cookie: "flows_session=" + token } });
+      eq(still.status, 200, `and ${back} answers for a session`);
     }
 
     const api = await get("/api/flows/board?side=long", {

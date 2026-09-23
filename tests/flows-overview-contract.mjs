@@ -1168,10 +1168,28 @@ try {
     ok(scrolls.scrollable, "the ranked table scrolls inside its own box instead");
     ok(scrolls.focusable, "and that scroll is reachable from a keyboard");
 
+    const tabs = await page.evaluate(() => [...document.querySelectorAll(".fx-tabs a")]
+      .map((a) => a.getAttribute("href")));
+    assert.deepEqual(tabs, ["/flows/", "/flows/long/", "/flows/ticker/", "/flows/market/", "/flows/ask/"],
+      "at 390px the bottom tab bar carries Home, Boards, Search, Market and Ask"); checks++;
+    for (const dest of ["/flows/", "/flows/long/"]) {
+      ok(await page.locator(`.fx-tabs a[href="${dest}"]`).isVisible(),
+         `${dest} is one tap away in the tab bar at 390px`);
+    }
+    ok(!(await page.locator('.flows-rail a[href="/flows/desk/"]').isVisible()),
+       "the sidebar is collapsed at 390px, so the rail is not drawn over the reading column");
+    await page.click("#fxSideBtn");
+    await page.waitForTimeout(500);
     for (const dest of ["/flows/", "/flows/long/", "/flows/short/", "/flows/desk/"]) {
       ok(await page.locator(`.flows-rail a[href="${dest}"]`).isVisible(),
-         `${dest} is still reachable at 390px`);
+         `${dest} is still reachable at 390px, in the sidebar the toolbar button opens`);
     }
+    await page.keyboard.press("Escape");
+    const away = await page.locator('.flows-rail a[href="/flows/desk/"]')
+      .waitFor({ state: "hidden", timeout: 3000 }).then(() => true, () => false);
+    ok(away, "and Escape puts the sidebar away again, once its slide-out has finished");
+    eq(await page.evaluate(() => document.activeElement && document.activeElement.id), "fxSideBtn",
+       "and hands focus back to the button that opened it");
     await page.setViewportSize({ width: 1280, height: 1000 });
   }
 

@@ -8,7 +8,7 @@ let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
-const RAIL_OFF = new Set(["/flows/history/", "/flows/track/"]);
+const RAIL_OFF = new Set();
 const RAIL_LISTS = (route) => !RAIL_OFF.has(route);
 const TOKEN = "sections-token-aaaaaaaaaaaa";
 const server = await startWorker({ extraVars: [`FLOWS_INGEST_TOKEN:${TOKEN}`] });
