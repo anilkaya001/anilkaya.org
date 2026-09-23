@@ -3,6 +3,12 @@ import http from "node:http";
 import { chromium } from "playwright";
 import { signSession } from "../shared/session.js";
 import { startWorker, SESSION_SECRET, FLOWS_TEST_USER } from "./worker-server.mjs";
+import * as BS from "../shared/flows-quant-bs.js";
+import * as SMILE from "../shared/flows-quant-smile.js";
+import * as WORLD from "../shared/flows-quant-world.js";
+import * as QC from "../shared/flows-quant-card.js";
+import * as QP from "../scripts/flows-quant-pipeline.mjs";
+import { STATE_STRUCTURES } from "../shared/flows-neuron.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -45,6 +51,10 @@ const NEAR_PUTS = [
   { option_symbol: "AAA261016P00090000", nbbo_bid: "1.40", nbbo_ask: "1.60",
     implied_volatility: "0.35", volume: "10", open_interest: "120",
     ...greeks(-0.20, 0.02, -0.03, 0.08, -0.01) },
+
+  { option_symbol: "AAA261016P00080000", nbbo_bid: null, nbbo_ask: "0.10",
+    implied_volatility: "0.40", volume: "0", open_interest: "5",
+    ...greeks(-0.05, 0.01, -0.01, 0.02, -0.01) },
 ];
 
 const farCall = (strike) => ({
@@ -59,6 +69,30 @@ const FAR_PUTS = [90, 100, 110].map((k) => ({
   nbbo_bid: "2.00", nbbo_ask: "2.20", implied_volatility: "0.30",
   volume: "1", open_interest: "10", ...greeks(-0.4, 0.01, -0.01, 0.05, -0.01),
 }));
+
+const SVI = { a: 0.006, b: 0.06, rho: -0.55, m: 0.02, sigma: 0.12 };
+const BBB = (() => {
+  const T = 42 / 365, F = 102 * Math.exp(0.04 * T), D = Math.exp(-0.04 * T);
+  const rng = WORLD.xoshiro128ss("bbb");
+  const rows = { C: [], P: [] };
+  for (let K = 70; K <= 135 + 1e-9; K += 2.5) {
+    const vol = Math.sqrt(SMILE.sviW(SVI, Math.log(K / F)) / (32 / 365));
+    for (const type of ["C", "P"]) {
+      const price = BS.black76(F, D, K, vol, T, type);
+      const half = Math.max(0.01, 0.012 * price);
+      const mid = price + (rng.uniform() - 0.5) * half;
+      const otm = type === "C" ? K >= 102 : K <= 102;
+      const oi = Math.round((otm ? 5000 : 1800) * Math.exp(-Math.abs(Math.log(K / 102)) / 0.1)) + 300;
+      rows[type].push({
+        option_symbol: "BBB261016" + type + String(Math.round(K * 1000)).padStart(8, "0"),
+        nbbo_bid: String(Math.max(0.01, Math.round((mid - half) * 100) / 100)), nbbo_ask: String(Math.round((mid + half) * 100) / 100 + 0.01),
+        implied_volatility: String(vol), open_interest: String(oi), volume: String(Math.round(oi / 7)),
+        ...greeks(0.5, 0.01, -0.01, 0.05, 0.01),
+      });
+    }
+  }
+  return rows;
+})();
 
 const upstreamCalls = [];
 const upstream = http.createServer((req, res) => {
@@ -108,6 +142,7 @@ const upstream = http.createServer((req, res) => {
     const type = url.searchParams.get("option_type");
     const page = Number(url.searchParams.get("page") || "1");
     if (expiry === BROKEN) return send(500, {});
+    if (ticker === "BBB" && expiry === NEAR) return send(200, { data: type === "call" ? BBB.C : BBB.P });
     if (expiry === NEAR) {
       return send(200, { data: type === "call" ? NEAR_CALLS : NEAR_PUTS });
     }
@@ -123,11 +158,32 @@ const upstream = http.createServer((req, res) => {
 await new Promise((r) => upstream.listen(0, "127.0.0.1", r));
 const upstreamURL = `http://127.0.0.1:${upstream.address().port}`;
 
+const INGEST = "strategy-ingest-token";
 const server = await startWorker({
-  extraVars: ["UW_API_KEY:test-uw-key", `UW_BASE:${upstreamURL}`],
+  extraVars: ["UW_API_KEY:test-uw-key", `UW_BASE:${upstreamURL}`, `FLOWS_INGEST_TOKEN:${INGEST}`],
 });
 const token = await signSession(
   { sub: FLOWS_TEST_USER, aud: "flows", epoch: "1", exp: Date.now() + 600000 }, SESSION_SECRET);
+
+{
+  const GARCH = { status: "ok", omega: 0.045, alpha: 0.05, beta: 0.9, nu: 7, lambda: -0.1, avg21Vol: 24, nextVol: 23,
+    sigma2Next: Math.pow(0.23, 2) / 252, persistence: 0.95, grade: 3, why: [], converged: true };
+  const closes = (() => { const c = [100]; const rng = WORLD.xoshiro128ss("closes"); for (let i = 0; i < 260; i++) c.push(c[c.length - 1] * Math.exp(0.015 * WORLD.normalDraw(rng))); return c; })();
+  const pLaw = QC.compactLaw(QP.garchLaw({ garch: GARCH, ticker: "BBB", sessionDate: SESSION_DAY, closes, rate: 0.04, paths: 2048 }));
+  const card = {
+    ticker: "BBB", sessionDate: SESSION_DAY, generatedAt: new Date().toISOString(), panels: {},
+    engine: {
+      v: 1, engine: "q1", asOf: SESSION_DAY, spot: 101.5, atr: 2, rate: { r: 0.04, method: "constant", n: 0 },
+      facts: [], state: { state: "pinned", direction: null, confidence: 2, ...STATE_STRUCTURES.pinned.rich },
+      levels: { callWall: 105, putWall: 97.5, magnet: 102.5, flip: 100, maxPain: 102.5, atr: 2 }, event: null, pLaw,
+      structures: [], ideas: [], noTrade: null,
+    },
+  };
+  const put = await fetch(server.baseURL + "/api/flows/ingest?key=card%3ABBB", {
+    method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + INGEST }, body: JSON.stringify(card),
+  });
+  ok(put.ok, `a card with an engine block and a GARCH law is published for BBB (${put.status})`);
+}
 
 const browser = await chromium.launch();
 try {
@@ -140,219 +196,158 @@ try {
   const pageErrors = [];
   page.on("pageerror", (e) => pageErrors.push(String(e)));
 
-  const readings = () => page.$$eval("#sgReadings dt", (dts) => {
-    const out = {};
-    for (const dt of dts) {
-      const dd = dt.nextElementSibling;
-      out[dt.textContent.trim()] = {
-        value: dd ? dd.textContent.trim() : "",
-        hint: dt.getAttribute("title") || "",
-        cls: dd ? dd.className : "",
-      };
-    }
-    return out;
-  });
-
-  const payoffRows = () => page.$$eval("#sgPlot .sg-payoff-t tbody tr", (trs) =>
-    trs.map((tr) => ({
-      S: tr.children[0].textContent.trim(),
-      pnl: tr.children[1].textContent.trim(),
-      what: tr.children[2].textContent.trim(),
-    })));
-
-  const pnlAt = async (priceLabel) => {
-    const rows = await payoffRows();
-    const row = rows.find((r) => r.S === priceLabel);
-    return row ? row.pnl : null;
+  const go = async (q) => {
+    await page.goto(server.baseURL + "/flows/strategy/" + q, { waitUntil: "domcontentloaded" });
+    await ready();
   };
-
-  const buy = (expiry, strike, kind) =>
-    page.click(`[aria-label^="Buy the ${expiry} ${strike} ${kind} at the ask"]`);
-  const sell = (expiry, strike, kind) =>
-    page.click(`[aria-label^="Sell the ${expiry} ${strike} ${kind} at the bid"]`);
-  const clearPosition = () => page.click("#sgClear");
+  const ready = () => page.waitForFunction(() => {
+    const s = document.getElementById("sgStatus");
+    return !!document.querySelector("#sgPayoffM [data-slot='Max loss'] .ui-metric-v") && !document.querySelector("#sgGrid[data-busy]") && s && !/^Reading/.test(s.textContent);
+  }, null, { timeout: 30000 });
+  const slot = (name) => page.$eval(`[data-slot="${name}"]`, (n) => ({
+    label: n.querySelector(".ui-metric-l") ? n.querySelector(".ui-metric-l").textContent.trim() : "",
+    value: (() => { const v = n.querySelector(".ui-metric-v"); if (!v) return ""; const num = v.querySelector(".ui-metric-n"); return num ? (num.dataset.value || num.textContent).trim() : v.firstChild ? v.firstChild.textContent.trim() : ""; })(),
+    silent: !!n.querySelector('.ui-metric-v[data-tone="silent"]'),
+    word: n.classList.contains("is-word"),
+    state: n.querySelector(".ui-state") ? n.querySelector(".ui-state").dataset.state : null,
+  }));
+  const popText = async () => flat(await page.locator("#fxPop").textContent());
+  const openInfo = async (label) => {
+    await page.click(`[aria-label="${label}"]`);
+    await page.waitForSelector("#fxPop:popover-open");
+    return popText();
+  };
+  const closeInfo = async () => { await page.keyboard.press("Escape"); await page.waitForSelector("#fxPop:not(:popover-open)", { state: "attached" }); };
+  const turning = async () => {
+    await page.click('[aria-label="About payoff"]');
+    await page.waitForSelector("#fxPop:popover-open .tl-pts");
+    const rows = await page.$$eval("#fxPop .tl-pts tbody tr", (trs) => trs.map((tr) => ({
+      S: tr.children[0].textContent.trim(), pnl: tr.children[1].textContent.trim(), what: tr.children[2].textContent.trim(),
+    })));
+    const text = await popText();
+    await closeInfo();
+    return { rows, text, at: (label) => { const r = rows.find((x) => x.S === label); return r ? r.pnl : null; } };
+  };
 
   {
     await page.goto(server.baseURL + "/flows/strategy/", { waitUntil: "domcontentloaded" });
     eq(await page.locator("#sgRefusePanel").count(), 1,
-       "the refusals panel is in the DOCUMENT rather than in the renderer — it is true " +
-       "before any fetch and it is true if every fetch fails");
+       "the refusals are in the DOCUMENT rather than in the renderer — they are true before any fetch and true if every fetch fails");
+    ok(await page.locator("#sgRefusePanel").isHidden(), "and they are off the surface: the page paints nouns and numbers, the prose waits one tap away");
 
     const refuse = flat(await page.locator("#sgRefusePanel").textContent());
-
     ok(/Buying power reduction/i.test(refuse) && /Refused/.test(refuse),
        "buying power reduction is named and marked Refused");
     ok(/broker/i.test(refuse) && /28,755/.test(refuse),
-       "and the reason is given in full: it is a broker's number, and the vendor's " +
-       "specification does not contain the concept anywhere in its 28,755 lines");
-    ok(/Conditional value at risk/i.test(refuse) && /distribution/i.test(refuse),
-       "conditional value at risk is named and refused for needing a distribution " +
-       "nobody quoted");
+       "and the reason is given in full: it is a broker's number, and the vendor's specification does not contain the concept anywhere in its 28,755 lines");
+    ok(/Reg-T/.test(refuse) && /labelled as such/.test(refuse),
+       "and the capital figure the engine does publish is named for what it is, the Reg-T minimum or the maximum loss");
+    ok(/Conditional value at risk/i.test(refuse) && /distribution/i.test(refuse) && /real-world law/i.test(refuse),
+       "conditional value at risk is published only over the real-world law, and the page says it never takes a tail over the risk-neutral density");
     ok(/delta .{0,3} beta .{0,3} \(/i.test(refuse) || /not delta times beta/i.test(refuse),
        "and beta-weighted delta is corrected rather than quietly offered as delta x beta");
 
-    const foot = flat(await page.locator(".flows-foot").textContent());
+    ok(/model-free/i.test(refuse) && /intrinsic value/.test(refuse),
+       "the expiry line is identified as the one reading that needs nothing: intrinsic value, no volatility");
+    ok(/fitted smile/.test(refuse) && /Black-76/.test(refuse) && /parity/.test(refuse),
+       "the today line names its engine — Black-76 on the fitted smile against a parity forward — replacing the Taylor expansion in vendor greeks that the page used to draw");
+    ok(/dividend is implied by the book rather than assumed/.test(refuse) && /rate is the card/.test(refuse),
+       "and it names where the two parameters the old page refused to invent now come from: the dividend from put-call parity, the rate from the card");
+    ok(/least accurate/.test(refuse) && /extrapolated/.test(refuse),
+       "and states where it is worst — beyond the last quoted strike — rather than leaving a reader to find out");
+    ok(/not advice/.test(refuse) && /no upper bound/.test(refuse), "and it closes on the loss a short call can reach, and not advice");
 
-    ok(/Taylor expansion/i.test(foot),
-       "the foot names the engine behind the projected curve: a Taylor expansion in the " +
-       "vendor's own greeks");
-    ok(/risk-free rate/.test(foot) && /dividend yield/.test(foot),
-       "and names the alternative it refused, together with the two free parameters that " +
-       "refusing it avoids — the same two shared/flows-chain.js and shared/flows-premium.js " +
-       "refuse by name");
-    ok(/least accurate/.test(foot) && /near a strike/.test(foot),
-       "and states where the approximation is worst rather than leaving a reader to find out");
-    ok(/convention/.test(foot) && /convex/.test(foot),
-       "monthly decay is labelled a convention and the reason — theta is convex in time — " +
-       "is given, the way annualizedIsConvention labels the premium desk's yield");
-    ok(/intrinsic value/.test(foot) && /model-free|no volatility/i.test(foot),
-       "and the one line that needs nothing is identified as such");
-
-    eq(await page.locator("#sgContextPanel").isHidden(), true,
-       "no context panel before a symbol is asked for");
-    eq(flat(await page.locator("#sgStatus").textContent()), "Enter a symbol to begin.",
-       "and the status invites one");
+    eq(await page.locator("#sgPayoffM").count(), 0, "no priced module before a symbol is asked for");
+    eq(flat(await page.locator("#sgStatus").textContent()), "Enter a symbol to begin.", "and the status invites one");
+    const tiles = await page.$$eval(".tl-tile", (ts) => ts.map((t) => t.dataset.family));
+    eq(tiles.length, 22, "the whole catalogue is on the page before any symbol: twenty-two structures, the engine's 23 less 'no position'");
+    const about = await openInfo("About the strategy lab");
+    ok(/28,755/.test(about) && /same engine|exactly as the server/.test(about),
+       "and the About disclosure carries the refusals and says the page prices exactly as the server does");
+    await closeInfo();
   }
 
   {
     await page.fill("#sgTicker", "aaa");
     await page.click(".sg-load");
-    await page.waitForSelector("#sgContextPanel:not([hidden])");
+    await ready();
 
-    const facts = await page.$$eval("#sgContext dt", (dts) => {
-      const out = {};
-      for (const dt of dts) {
-        out[dt.textContent.trim()] = dt.nextElementSibling.textContent.trim();
-      }
-      return out;
-    });
-    ok(/\$102/.test(facts.Spot) && /live print/.test(facts.Spot),
-       `spot is the live print and says so (${facts.Spot}) — the desk's rule, and it matters ` +
-       `more here because the diagram's whole x-axis is measured from this number`);
-    eq(facts.Session, SESSION_DAY,
-       "the session date comes from the tape rather than from the wall clock");
-    eq(facts.Beta, "1.50",
-       "beta is published. It has been on /info since the desk started calling it and was " +
-       "read out of the response and dropped");
-    ok(/SPY/.test(facts["Reference index"]) && /\$600/.test(facts["Reference index"]),
-       `the reference index is NAMED and priced (${facts["Reference index"]}) — a ` +
-       `beta-weighted delta against an unnamed index is a number whose definition was withheld`);
-    ok(/2026-11-05/.test(facts["Next earnings"]),
-       "and the earnings date rides along, because a contract that outlives a report is a " +
-       "different trade at the same premium");
+    const spot = flat(await page.locator("#sgPx .tl-spot").textContent());
+    eq(spot, "102.00", "spot is the live print — the diagram's whole x-axis is measured from this number");
+    const ctx = await openInfo("Live print");
+    const facts = await page.$$eval("#fxPop dt", (dts) => Object.fromEntries(dts.map((dt) => [dt.textContent.trim(), dt.nextElementSibling.textContent.trim()])));
+    ok(/live print/.test(ctx) && /live print/.test(facts.Spot), `and the disclosure says it is the live print (${facts.Spot})`);
+    eq(facts.Session, "2026-09-04", "the session date comes from the tape rather than from the wall clock");
+    eq(facts.Beta, "1.50", "beta is published");
+    eq(facts["Reference index"], "SPY 600.00",
+       "the reference index is NAMED and priced — a beta-weighted delta against an unnamed index is a number whose definition was withheld");
+    ok(/2026-11-05/.test(facts["Next earnings"]), "and the earnings date rides along, because a contract that outlives a report is a different trade at the same premium");
+    await closeInfo();
 
     const contractCalls = upstreamCalls.filter((u) => u.includes("/option-contracts"));
     ok(contractCalls.length > 0, "the expiry read reached the provider");
     ok(contractCalls.every((u) => /expiry=2026-10-16/.test(u)),
-       "every contract request names ONE expiry — the vendor's own documented query " +
-       "parameter, and what makes a 12,000-contract book reachable a slice at a time");
-    ok(contractCalls.some((u) => /option_type=call/.test(u)) &&
-       contractCalls.some((u) => /option_type=put/.test(u)),
-       "and splits calls from puts, which halves the population each 500-row page has to " +
-       "hold and is what makes two pages enough for almost every listed name");
+       "every contract request names ONE expiry — the vendor's own documented query parameter, and what makes a 12,000-contract book reachable a slice at a time");
+    ok(contractCalls.some((u) => /option_type=call/.test(u)) && contractCalls.some((u) => /option_type=put/.test(u)),
+       "and splits calls from puts, which halves the population each 500-row page has to hold");
     ok(contractCalls.every((u) => !/maybe_otm_only|exclude_zero_oi_chains/.test(u)),
-       "and sends NEITHER of the premium desk's filters. They screen for what can be sold, " +
-       "and a long in-the-money call — the most ordinary position a calculator is asked " +
-       "about — does not survive them");
+       "and sends NEITHER of the premium desk's filters: a long in-the-money call does not survive them");
 
-    const opts = await page.$$eval("#sgExpiry option", (os) =>
-      os.map((o) => ({ value: o.value, label: o.textContent.trim() })));
-    eq(opts.length, 3, "every listed expiry is offered");
-    ok(/12223 listed/.test(opts[2].label),
-       `THE SIZE OF AN EXPIRY IS IN THE PICKER, BEFORE IT IS READ (${opts[2].label}). The ` +
-       `vendor caps a page at 500 and its own example shows single expiries at 12,223, so ` +
-       `warning before the read beats confessing after it`);
-    ok(/42d/.test(opts[0].label),
-       "and each option carries its days to expiry, counted in calendar days from the session");
+    const chips = await page.$$eval(".tl-chip", (cs) => cs.map((c) => ({ label: c.getAttribute("aria-label"), text: c.textContent, on: c.getAttribute("aria-checked") })));
+    eq(chips.length, 3, "every listed expiry is offered");
+    ok(/12223 listed/.test(chips[2].label),
+       `THE SIZE OF AN EXPIRY IS IN THE PICKER, BEFORE IT IS READ (${chips[2].label}); its bar is drawn to that count`);
+    ok(/42d/.test(chips[0].text) && /42 days/.test(chips[0].label),
+       "and each chip carries its days to expiry, counted in calendar days from the session");
+    eq(chips[0].on, "true", "the first read is the expiry nearest the structure's window, 42 days here");
     ok(!upstreamCalls.some((u) => /\/stock\/AAA\/expiry-breakdown\?.*date=/.test(u)) &&
        !upstreamCalls.some((u) => /\/stock\/AAA\/greek-exposure\/expiry/.test(u)),
-       "the breakdown is read under the vendor's live field name `expires` (probe 2026-09-23), " +
-       "so the list arrives on the first call and no dated retry or greek-exposure fallback " +
-       "is spent rediscovering it");
+       "the breakdown is read under the vendor's live field name `expires`, so no dated retry or fallback is spent");
+
+    const ex = await openInfo("About expiries");
+    ok(/5 of 6 contracts read at Oct 16 carry a two-sided quote/.test(ex),
+       `the book states what it holds OF WHAT — two-sided quotes among contracts read — because a strike handle can only land on one of those (${ex.slice(0, 160)}…)`);
+    await closeInfo();
   }
 
   {
-    await page.waitForSelector("#sgChainWrap:not([hidden])");
-    const rows = await page.$$eval("#sgChainBody tr", (trs) => trs.map((tr) => ({
-      cells: [...tr.children].map((c) => c.textContent.trim()),
-    })));
-    eq(rows.length, 4, "four strikes across the two sides of this expiry");
+    await go("?t=AAA&expiry=2026-10-16&basis=mid&legs=AAA261016C00100000@1");
+    const cost = await slot("Cost");
+    eq(cost.label, "Debit", "a long call is a debit, and the sign is in the NAME");
+    eq(cost.value, "$500.00", "the net debit is the mid times one hundred shares");
+    const mp = await slot("Max profit");
+    eq(mp.value, "Unbounded",
+       "a long call's maximum profit is UNBOUNDED and is reported as the word. There is no number there, so none is printed");
+    ok(mp.word, "and it is styled as a word rather than as a figure, so it cannot be scanned as one");
+    eq((await slot("Max loss")).value, MINUS + "$500.00", "the maximum loss is the whole premium, signed with U+2212");
+    eq((await slot("Breakeven")).value, "105", "the breakeven is the strike plus the premium");
 
-    const row120 = rows.find((r) => r.cells.includes("$120"));
-    ok(row120, "the $120 strike renders");
+    const t = await turning();
+    eq(t.at("$0"), MINUS + "$500.00", "payoff at zero: the premium, lost");
+    eq(t.at("$100"), MINUS + "$500.00", "payoff at the strike: the premium, lost");
+    eq(t.at("$102"), MINUS + "$300.00", "payoff at spot: $2 of intrinsic on a hundred shares, less the $500 paid");
+    eq(t.at("$105"), "$0.00", "payoff at the breakeven is a MEASURED zero and prints as one — never an em dash");
+    ok(/net long calls/.test(t.text) && /rises without limit/.test(t.text), "and the disclosure says why the profit has no number");
+    ok(/sign is carried by position, never by colour alone/.test(t.text),
+       "and states the sign channel: profit above the zero rule, loss below it");
 
-    eq(row120.cells[0], DASH,
-       "the delta of a contract the vendor sent no greeks for is an EM DASH, not 0.000 — " +
-       "an absent reading and a measured zero are different facts and this page's whole " +
-       "discipline is keeping them apart");
-    eq(row120.cells[1], DASH,
-       "and so is its implied volatility, which is absent on the same row");
-    eq(row120.cells[2], "$0.45",
-       "while the quote it DOES carry still renders: absence is per field, not per row");
+    await page.click('#sgBasis [role="tab"]:nth-of-type(2)');
+    await page.waitForFunction(() => /502\.50/.test(document.querySelector('[data-slot="Cost"] .ui-metric-n').dataset.value || ""));
+    eq((await slot("Cost")).value, "$502.50", "at the engine's fill the same call costs the mid plus a quarter of the spread");
+    eq(new URL(page.url()).searchParams.get("basis"), null, "and fill is the default the URL does not repeat");
 
-    const note = flat(await page.locator("#sgChainNote").textContent());
-    ok(/1 of these contracts carr/.test(note),
-       `the count of greek-less contracts is stated up front (${note.slice(0, 120)}…) rather ` +
-       `than left for a reader to discover one leg at a time`);
-    ok(/Showing 4 of 4 listed strikes/.test(note),
-       "and the strike list states what it is showing OF WHAT — a list that truncates " +
-       "without saying so reads as a population");
-  }
-
-  {
-    await buy(NEAR, "$100", "call");
-    await page.waitForSelector("#sgReadings dt");
-    const r = await readings();
-
-    eq(r["Net debit"].value, "$500.00", "the net debit is the mid times one hundred shares");
-    ok(!r["Net credit"], "and it is called a debit, not a credit — the sign is in the NAME");
-
-    eq(r["Max profit"].value, "unbounded",
-       "a long call's maximum profit is UNBOUNDED and is reported as the word. There is no " +
-       "number there, so none is printed — the vendor does exactly this for its own detected " +
-       "structures");
-    ok(/is-unbounded/.test(r["Max profit"].cls),
-       "and it is styled as a word rather than as a figure, so it cannot be scanned as one");
-    eq(r["Max loss"].value, MINUS + "$500.00",
-       "the maximum loss is the whole premium, signed with U+2212");
-    ok(/anywhere from \$0 to \$100/.test(r["Max loss"].hint),
-       `and it says WHERE as a range rather than a point (${r["Max loss"].hint}) — the loss ` +
-       `is flat everywhere at or below the strike, and naming one end of that would be a ` +
-       `fact about which candidate a loop visited first`);
-    eq(r.Breakeven.value, "$105", "the breakeven is the strike plus the premium");
-
-    eq(await pnlAt("$0"), MINUS + "$500.00", "payoff at zero: the premium, lost");
-    eq(await pnlAt("$100"), MINUS + "$500.00", "payoff at the strike: the premium, lost");
-    eq(await pnlAt("$102"), MINUS + "$300.00",
-       "payoff at spot: $2 of intrinsic on a hundred shares, less the $500 paid");
-    eq(await pnlAt("$105"), "$0.00",
-       "payoff at the breakeven is a MEASURED zero and prints as one — this page's one " +
-       "legitimate $0.00, and it must never be an em dash");
-
-    eq(r["Position delta"].value, "+55.0 share-equivalents",
-       "the position delta is signed, multiplied by the hundred shares a contract carries, " +
-       "and carries its UNIT — a delta and a dollar sum may not share a name");
-    eq(r["Beta-weighted delta"].value, "+14.0 SPY share-equivalents",
-       "beta-weighted delta is delta x beta x (this price / the index price) = " +
-       "55.0 x 1.50 x (102/600) = 14.025. It is NOT delta x beta, which would have been 82.5");
-    ok(/SPY/.test(r["Beta-weighted delta"].hint) && /÷/.test(r["Beta-weighted delta"].hint),
-       "and the relation and the index are both stated where the number is printed");
-    eq(r["Decay, one day"].value, MINUS + "$5.00 per day",
-       "one day of decay is theta times a hundred shares, in dollars per day");
-    ok(/convention/.test(r["Decay, thirty days"].value),
-       `the thirty-day figure is LABELLED A CONVENTION in the value itself ` +
-       `(${r["Decay, thirty days"].value}), not only in a tooltip — thirty times a one-day ` +
-       `derivative of a convex function is an extrapolation, and nobody pays it`);
-    eq(r["Vega exposure"].value, "+$12.00 per volatility point",
-       "vega carries the unit its convention is stated in");
-
-    ok(r["On the smile"] && /^[+\u2212]\$\d/.test(r["On the smile"].value) && /NBBO/.test(r["On the smile"].hint),
-       `beside the vendor's greeks, the engine's reading: the leg re-priced on this expiry's smile fitted to the NBBO ` +
-       `(${r["On the smile"] && r["On the smile"].value}), computed in the page by FlowsQuant rather than fetched`);
-    ok(r["Chance of profit"] && /^\d+(\.\d)?%/.test(r["Chance of profit"].value),
-       `and a chance of profit at expiry under the smile's own density (${r["Chance of profit"] && r["Chance of profit"].value})`);
-    ok(r["Expected P&L, real world"], "with the real-world expectation named as such, a dash while no law was published for the name");
-    const quant = await page.evaluate(() => typeof window.FlowsQuant === "object" && typeof window.FlowsQuant.repriceStructure === "function");
+    const d = await slot("Delta");
+    ok(!d.silent && /^[+−]\d/.test(d.value),
+       `the position delta comes from the smile, not from the vendor's per-contract greek (${d.value}); a contract the vendor sent no greeks for no longer silences it`);
+    const popQ = flat(await page.locator('.tl-pop-r[data-law="q"] .tl-pop-v').textContent());
+    ok(/^\d+%/.test(popQ), `and a chance of profit at expiry under the smile's own density (${popQ})`);
+    const evP = await slot("EV real world");
+    ok(evP.silent && evP.state === "unavailable",
+       "with the real-world expectation shown as an em dash and a glyph while no law was published for the name");
+    const odds = await openInfo("About odds");
+    ok(/no card with a GARCH law is published for AAA/.test(odds), "and the reason one tap away names what is missing");
+    await closeInfo();
+    const quant = await page.evaluate(() => typeof window.FlowsQuant === "object" && typeof window.FlowsQuant.priceStructure === "function" && typeof window.FlowsQuant.labSetup === "function");
     ok(quant, "the generated FlowsQuant bundle is the page's only engine global");
   }
 
@@ -365,6 +360,8 @@ try {
        `engine=1 runs the card engine on the expiry just read, priced against the live print (${e && e.status}, ${e && e.spotSource})`);
     ok(e && e.expiries.length === 1 && e.expiries[0].expiry === NEAR && e.expiries[0].smile && e.expiries[0].forward,
        "for that one expiry only, with its smile and its parity forward");
+    ok(e && Array.isArray(e.fits) && e.fits.length === 1 && e.fits[0].slice && e.fits[0].forward && Number.isFinite(e.asOfMs) && e.stale === false,
+       "and with the full-precision fit, the clock it priced at and the stale flag, which is everything the page needs to price as the Worker does");
     ok(e && Array.isArray(e.structures) && Array.isArray(e.facts) && "noTrade" in e,
        "in the same structure objects the card publishes, so the page reads one shape wherever it came from");
     ok(e && e.lawFrom === null && e.pLaw === null, "and with no card published for the name, no real-world law is invented for it");
@@ -373,287 +370,268 @@ try {
   }
 
   {
+    await go("?t=AAA&expiry=2026-10-16&basis=mid&legs=AAA261016C00100000@1,AAA261016C00110000@-1");
+    eq((await slot("Cost")).value, "$300.00", "the spread's debit is the difference of the two mids");
+    const mp = await slot("Max profit");
+    eq(mp.value, "+$700.00",
+       "a vertical's maximum profit is the width less the debit, and it is a NUMBER — the short call caps exactly the ray that made the outright unbounded");
+    ok(!mp.word, "so it is not styled as the word");
+    eq((await slot("Max loss")).value, MINUS + "$300.00", "and the maximum loss is the debit");
+    eq((await slot("Breakeven")).value, "103", "with one breakeven, at the long strike plus the debit");
+    const t = await turning();
+    eq(t.at("$110"), "+$700.00", "payoff at the short strike is the maximum");
+    eq(t.at("$102"), MINUS + "$100.00", "payoff at spot");
+    eq(t.at("$103"), "$0.00", "and the breakeven row is a measured zero");
 
-    await page.$eval("#sgSceneDays", (n) => {
-      n.value = "1";
-      n.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    const scene = await page.$$eval("#sgScene dt", (dts) => dts.map((dt) => ({
-      term: dt.textContent.trim(), value: dt.nextElementSibling.textContent.trim(),
-      hint: dt.getAttribute("title") || "",
-    })));
-    const exact = scene.find((s) => /At expiry/.test(s.term));
-    const proj = scene.find((s) => /^In 1 day/.test(s.term));
-    eq(exact.value, MINUS + "$300.00",
-       "the expiry number in the scenario panel agrees with the payoff table at spot — " +
-       "one arithmetic, quoted in two places");
-    ok(/no model at all/.test(exact.hint),
-       "and it says it contains no model, which is the one claim on this page that is free");
-    eq(proj.value, MINUS + "$5.00",
-       "one day of Taylor at an unchanged price is exactly theta: 100 x -0.05 = -$5.00");
-    ok(/convention/.test(proj.hint) && /least accurate/.test(proj.hint),
-       "and the projection names itself a convention and says where it is worst");
-
-    const max = await page.$eval("#sgSceneDays", (n) => n.max);
-    eq(max, "42",
-       "THE SLIDER STOPS AT THE NEAREST EXPIRY (42 calendar days here). Past it the " +
-       "expansion is around greeks for a contract that has already settled, so the exact " +
-       "line is the answer instead of a confident extrapolation through a settlement");
-    const sceneNote = flat(await page.locator("#sgSceneNote").textContent());
-    ok(/controls here rather than constants/.test(sceneNote),
-       "and the page says that both parameters the projection needs are visible inputs " +
-       "rather than constants buried in a module");
-
-    const plotNote = flat(await page.locator("#sgPlotNote").textContent());
-    ok(/SOLID line is the payoff at expiry and it is exact/.test(plotNote),
-       "the diagram's note separates the exact line from the approximate one");
-    ok(/DASHED line is a Taylor expansion/.test(plotNote),
-       "and names what the second line is once it is drawn");
-    ok(/sign is carried by position, never by colour/.test(plotNote),
-       "and states the sign channel: profit above the zero rule, loss below it");
-    eq(await page.locator("#sgPlot polyline.sg-payoff").count(), 1, "the expiry line is drawn");
-    eq(await page.locator("#sgPlot polyline.sg-proj").count(), 1,
-       "and the projected line is drawn beside it");
-    eq(await page.locator("#sgPlot line.sg-zero").count(), 1,
-       "with the zero rule, which is the axis the sign is read against and is always drawn");
-    eq(await page.locator("#sgPlot polygon.sg-zone--profit").count(), 1,
-       "the profit zone is one polygon, the area between the expiry line and the zero rule");
-    eq(await page.locator("#sgPlot polygon.sg-zone--loss").count(), 1,
-       "and the loss zone is its twin, clipped to the other side of the rule");
-    const zoneClips = await page.$$eval("#sgPlot polygon.sg-zone", (ps) =>
-      ps.map((p) => p.getAttribute("clip-path")));
-    ok(zoneClips.every((c) => /^url\(#sgZone\d+[pl]\)$/.test(c)),
-       `each zone is clipped to its own side of the zero rule, never drawn whole (${zoneClips})`);
-    ok(/tinted green and the loss zone red/.test(plotNote),
-       "and the note says the tint is a reading aid that carries no figure");
-
-    await page.$eval("#sgSceneDays", (n) => {
-      n.value = "0";
-      n.dispatchEvent(new Event("input", { bubbles: true }));
-    });
+    await page.click('#sgBasis [role="tab"]:nth-of-type(3)');
+    await page.waitForFunction(() => /320/.test(document.querySelector('[data-slot="Cost"] .ui-metric-n').dataset.value || ""));
+    eq((await slot("Cost")).value, "$320.00",
+       "priced natural the same spread costs the ask on the buy and pays the bid on the sell — twenty dollars more than the mid, a real cost the mid hides");
+    const px4 = await page.$$eval("#sgLegsM .tl-px4 > div", (ds) => Object.fromEntries(ds.map((d) => [d.firstChild.textContent, d.lastChild.textContent])));
+    ok(px4.Mid && px4.Natural && px4.Fill && px4.Model,
+       `and the crossing cost is published beside it rather than left to be inferred: mid ${px4.Mid}, natural ${px4.Natural}`);
+    eq((await slot("Max loss")).value, MINUS + "$320.00", "the whole payoff moves with the basis");
+    eq(new URL(page.url()).searchParams.get("basis"), "natural", "and the basis is held in the link");
   }
 
   {
-    await sell(NEAR, "$110", "call");
-    const r = await readings();
-    eq(r["Net debit"].value, "$300.00", "the spread's debit is the difference of the two mids");
-    eq(r["Max profit"].value, "+$700.00",
-       "a vertical's maximum profit is the width less the debit, and it is a NUMBER — the " +
-       "short call caps exactly the ray that made the outright unbounded");
-    ok(!/is-unbounded/.test(r["Max profit"].cls),
-       "so it is not styled as the word");
-    eq(r["Max loss"].value, MINUS + "$300.00", "and the maximum loss is the debit");
-    eq(r.Breakeven.value, "$103", "with one breakeven, at the long strike plus the debit");
-
-    eq(await pnlAt("$110"), "+$700.00", "payoff at the short strike is the maximum");
-    eq(await pnlAt("$102"), MINUS + "$100.00", "payoff at spot");
-    eq(await pnlAt("$103"), "$0.00", "and the breakeven row is a measured zero");
-
-    await page.selectOption("#sgBasis", "marketable");
-    const m = await readings();
-    eq(m["Net debit"].value, "$320.00",
-       "priced marketable the same spread costs the ask on the buy and pays the bid on the " +
-       "sell — twenty dollars more than the mid, which is a real cost the mid hides");
-    eq(m["Spread crossed"].value, "$20.00",
-       "and the difference is published as its own reading rather than left to be inferred");
-    eq(m["Max loss"].value, MINUS + "$320.00", "the whole payoff moves with the basis");
-    await page.selectOption("#sgBasis", "mid");
+    await go("?t=AAA&expiry=2026-10-16&basis=mid&legs=AAA261016C00100000@-1");
+    const cost = await slot("Cost");
+    eq(cost.label, "Credit", "a short position opens for a CREDIT and the reading is named for it");
+    eq(cost.value, "$500.00", "at the credit received");
+    const ml = await slot("Max loss");
+    eq(ml.value, "Unbounded",
+       "THE ASSERTION THIS WHOLE SUITE EXISTS FOR: a naked short call's maximum loss is unbounded and must be reported as the word, never as a number");
+    ok(ml.word, "and it is set as a word so it cannot be read as a figure");
+    const t = await turning();
+    ok(/net short calls/.test(t.text) && /no upper bound/.test(t.text),
+       "with the reason one tap away at the reading rather than in a footnote");
+    eq((await slot("Max profit")).value, "+$500.00", "the maximum profit is the credit received");
+    eq((await slot("Breakeven")).value, "105", "and the breakeven is the strike plus the credit");
+    eq(t.at("$102"), "+$300.00", "payoff at spot");
+    eq(t.at("$105"), "$0.00", "and zero at the breakeven");
+    eq(await page.$eval("#sgGreeksM [data-slot='Capital'] .ui-metric-s", (n) => n.textContent), "Reg-T proxy",
+       "and its capital is labelled as the Reg-T formula, never as a broker's buying power");
   }
 
   {
-    await clearPosition();
-    await sell(NEAR, "$100", "call");
-    const r = await readings();
-    eq(r["Net credit"].value, "$500.00",
-       "a short position opens for a CREDIT and the reading is named for it — a signed " +
-       "'net debit of -$500' would make the reader do the sign twice");
-    eq(r["Max loss"].value, "unbounded",
-       "THE ASSERTION THIS WHOLE SUITE EXISTS FOR: a naked short call's maximum loss is " +
-       "unbounded and must be reported as the word, never as a number. A share has no " +
-       "upper bound, so there is nothing to print");
-    ok(/is-unbounded/.test(r["Max loss"].cls),
-       "and it is set as a word so it cannot be read as a figure");
-    ok(/net short calls/.test(r["Max loss"].hint) && /no upper bound/.test(r["Max loss"].hint),
-       "with the reason attached to the reading rather than to a footnote");
-    eq(r["Max profit"].value, "+$500.00", "the maximum profit is the credit received");
-    eq(r.Breakeven.value, "$105", "and the breakeven is the strike plus the credit");
-    eq(await pnlAt("$102"), "+$300.00", "payoff at spot");
-    eq(await pnlAt("$105"), "$0.00", "and zero at the breakeven");
+    await go("?t=AAA&expiry=2026-10-16&basis=mid&legs=AAA261016P00100000@-1");
+    eq((await slot("Max loss")).value, MINUS + "$9,500",
+       "A NAKED SHORT PUT'S LOSS IS BOUNDED and this prints the number: a share cannot trade below zero, so the loss is exactly the strike less the credit");
+    const t = await turning();
+    ok(/cannot trade below zero/.test(t.text), "and the page says why, because the belief it corrects is widespread");
+    eq((await slot("Max profit")).value, "+$500.00", "the maximum profit is the credit");
+    eq((await slot("Breakeven")).value, "95", "and the breakeven is the strike less the credit");
+    eq(t.at("$0"), MINUS + "$9,500", "the turning-point table carries the same figure");
   }
 
   {
-    await clearPosition();
-    await sell(NEAR, "$100", "put");
-    const r = await readings();
-    eq(r["Max loss"].value, MINUS + "$9,500.00",
-       "A NAKED SHORT PUT'S LOSS IS BOUNDED and this prints the number. It is routinely " +
-       "described as unlimited risk and it is not: a share cannot trade below zero, so the " +
-       "loss is exactly the strike less the credit");
-    ok(/cannot trade below zero/.test(r["Max loss"].hint),
-       "and the page says why, at the reading, because the belief it corrects is widespread");
-    eq(r["Max profit"].value, "+$500.00", "the maximum profit is the credit");
-    eq(r.Breakeven.value, "$95", "and the breakeven is the strike less the credit");
-    eq(await pnlAt("$0"), MINUS + "$9,500.00", "the payoff table carries the same figure");
+    await go("?t=AAA&expiry=2026-10-16&basis=mid&legs=AAA261016C00100000@1,AAA261016C00120000@1");
+    eq((await slot("Cost")).value, "$550.00",
+       "the money arithmetic is unaffected by a contract the vendor sent no greeks or IV for: the expiry payoff needs no greek at all");
+    eq((await slot("Max loss")).value, MINUS + "$550.00", "and the maximum loss still renders as a number");
+    const legIv = await page.$$eval("#sgLegsM .tl-leg", (rows) => rows.map((r) => r.textContent));
+    ok(legIv.length === 2 && legIv.every((t) => /IV\s*\d/.test(t)),
+       "and both legs carry an implied volatility read off the fitted smile, so the one the vendor left blank is no longer a hole");
+
+    await go("?t=AAA&expiry=2026-10-16&basis=mid&legs=AAA261016C00100000@1,AAA261016P00080000@1");
+    for (const name of ["Cost", "Max loss", "Delta"]) {
+      const s0 = await slot(name);
+      ok(s0.silent && s0.value === DASH,
+         `${name} is WITHHELD — an em dash and a glyph — when one leg has no two-sided quote, never summed over the legs that happen to have one`);
+    }
+    const why = await page.$eval('[data-slot="Cost"] .ui-state', (b) => { b.click(); return true; });
+    ok(why, "the withheld slot is a button");
+    await page.waitForSelector("#fxPop:popover-open");
+    const reason = await popText();
+    ok(/Withheld/.test(reason) && /80 put/.test(reason) && /no two-sided quote/.test(reason) && /unknown cost, not a smaller one/.test(reason),
+       `and the leg responsible is NAMED (${reason.slice(0, 120)}…): "withheld" without a reason is indistinguishable from a bug`);
+    await closeInfo();
+
+    await go("?t=AAA&expiry=2026-10-16&basis=mid&legs=AAA261016C00100000@1,AAA261016C00130000@-1");
+    const gone = await slot("Cost");
+    ok(gone.silent && gone.state === "withheld", "a leg the book does not list is withheld too");
+    await page.click('[data-slot="Cost"] .ui-state');
+    await page.waitForSelector("#fxPop:popover-open");
+    ok(/no longer listed at that expiry/.test(await popText()), "and says the contract was read for and is not in the book");
+    await closeInfo();
   }
 
   {
-    await clearPosition();
-    await buy(NEAR, "$100", "call");
-    await buy(NEAR, "$120", "call");
-    const r = await readings();
-
-    eq(r["Net debit"].value, "$550.00",
-       "the money arithmetic is unaffected by a missing greek: the expiry payoff and " +
-       "everything read off it need no greek at all");
-    eq(r["Max loss"].value, MINUS + "$550.00", "and the maximum loss still renders as a number");
-
-    eq(r["Position delta"].value, DASH,
-       "the position delta is WITHHELD, not summed over the legs that happen to have one. " +
-       "The poisoned answer here is +55.0, which renders perfectly and is a confident " +
-       "number about a different position");
-    ok(/Withheld/.test(r["Position delta"].hint) && /\$120 call/.test(r["Position delta"].hint),
-       `and the leg responsible is NAMED (${r["Position delta"].hint.slice(0, 80)}…), because ` +
-       `"withheld" without a reason is indistinguishable from a bug`);
-    eq(r["Beta-weighted delta"].value, DASH,
-       "and everything downstream of the withheld delta is withheld too rather than being " +
-       "recomputed from a partial sum");
-    eq(r["Decay, one day"].value, DASH, "theta likewise");
-    eq(r["Vega exposure"].value, DASH, "and vega");
-
-    const legsNote = flat(await page.locator("#sgLegsNote").textContent());
-    ok(/no complete set of greeks/.test(legsNote) && /\$120 call/.test(legsNote),
-       "the legs panel names the contract the provider sent no greeks for");
-    ok(/expiry payoff is unaffected/.test(legsNote),
-       "and says explicitly which readings survive, so a reader does not conclude the " +
-       "whole page is broken");
-
-    await page.$eval("#sgSceneDays", (n) => {
-      n.value = "5";
-      n.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    eq(await page.locator("#sgPlot polyline.sg-proj").count(), 0,
-       "no projected line is drawn at all when a leg is missing a greek the expansion needs");
-    const plotNote = flat(await page.locator("#sgPlotNote").textContent());
-    ok(/No projected line/.test(plotNote) && /different position/.test(plotNote),
-       "and the note says so and says why, rather than leaving an absent curve to be read " +
-       "as a flat one");
-    await page.$eval("#sgSceneDays", (n) => {
-      n.value = "0";
-      n.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    await clearPosition();
+    await go("?t=AAA&expiry=2026-10-16&basis=mid&legs=AAA261016C00100000@1");
+    eq(await page.locator("#sgPayoff path.tl-exp").count(), 1, "the expiry line is drawn");
+    eq(await page.locator("#sgPayoff path.tl-today").count(), 1, "and the today line re-priced on the smile is drawn beside it");
+    eq(await page.locator("#sgPayoff line.base").count(), 1, "with the zero rule, the axis the sign is read against");
+    eq(await page.locator("#sgPayoff path.tl-wash-up").count(), 1, "the profit wash is one path");
+    eq(await page.locator("#sgPayoff path.tl-wash-dn").count(), 1, "and the loss wash its twin");
+    const clips = await page.$$eval("#sgPayoff path[class^='tl-wash']", (ps) => ps.map((p) => p.getAttribute("clip-path")));
+    ok(clips.every((c) => /^url\(#cp\d+\)$/.test(c)), `each wash is clipped to its own side of the zero rule, never drawn whole (${clips})`);
+    ok(await page.locator("#sgPayoff svg[viewBox]").evaluate((s) => s.getAttribute("preserveAspectRatio") === null),
+       "and the SVG's viewBox is its pixel box, never preserveAspectRatio=none");
+    const scen = await page.$$eval("#sgScenM tbody td", (tds) => tds.length);
+    ok(scen >= 28, `the scenario grid prices every spot row at four points in time (${scen} cells)`);
+    ok(await page.locator("#sgScenM td.is-now").count() === 1, "and rings the one cell that is today at spot");
   }
 
   {
-    await page.selectOption("#sgExpiry", FAR);
+    const cookie = { Cookie: "flows_session=" + token };
+    await go("?t=BBB");
+    const served = await (await fetch(server.baseURL + "/api/flows/strategy?t=BBB&expiry=" + NEAR + "&engine=1", { headers: cookie })).json();
+    const e = served.engine;
+    ok(e && e.status === "ok" && e.lawFrom === "card" && e.structures.length >= 2 && e.ideas.length >= 1,
+       `with a card and its law published, the Worker prices and ranks ${e && e.structures.length} structures on BBB`);
+    const idea = e.structures.find((s) => s.id === e.ideas[0]);
+    const tile = await page.$eval(".tl-tile.is-on", (t) => t.dataset.family);
+    eq(tile, idea.family, `the lab opens on the engine's first idea (${idea.family})`);
+    const handles = await page.$$eval(".tl-handle", (hs) => hs.map((x) => Number(x.getAttribute("aria-valuenow"))).sort((a, b) => a - b));
+    eq(JSON.stringify(handles), JSON.stringify(idea.legs.filter((l) => l.type !== "S").map((l) => l.k).sort((a, b) => a - b)),
+       "with exactly the engine's legs, one draggable handle per strike");
+    const fmt = (v) => (v === null ? "Unbounded" : (v < 0 ? MINUS : v > 0 ? "+" : "") + "$" + Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: Math.abs(v) < 1000 ? 2 : 0, maximumFractionDigits: Math.abs(v) < 1000 ? 2 : 0 }));
+    eq((await slot("Max profit")).value, fmt(idea.maxProfit), "the page's maximum profit is the Worker's, to the cent");
+    eq((await slot("Max loss")).value, fmt(idea.maxLoss), "and so is its maximum loss");
+    const rp = await page.$eval('.tl-pop-r[data-law="p"] .tl-pop-v', (n) => (n.querySelector("[data-value]") || n).dataset.value || n.textContent);
+    ok(/^\d+%$/.test(rp), `and the real-world chance of profit is drawn from the card's law (${rp})`);
 
-    await page.waitForFunction(
-      () => document.querySelectorAll("#sgChainBody tr").length > 10,
-      null, { timeout: 30000 });
-    const note = flat(await page.locator("#sgChainNote").textContent());
+    const same = await page.evaluate(async (exp) => {
+      const b = await (await fetch("/api/flows/strategy?t=BBB&expiry=" + exp + "&engine=1", { credentials: "same-origin" })).json();
+      const en = b.engine;
+      const Q = window.FlowsQuant;
+      const setup = Q.labSetup({ asOfMs: en.asOfMs, spot: en.spot, facts: en.facts, state: en.state, pLaw: en.pLaw, levels: en.levels, event: en.event, stale: en.stale,
+        books: [{ fit: en.fits[0], rows: Q.bookRows(b.calls, b.puts, "BBB") }] });
+      return en.structures.map((s) => {
+        const want = { ...s };
+        delete want.id;
+        const got = Q.priceStructure(setup, {
+          family: s.family, expiry: s.expiry, dir: s.dir, rules: s.rules,
+          legs: s.legs.map((l) => ({ type: l.type, K: l.k, side: l.side, qty: l.qty, expiry: l.expiry })),
+          snapped: s.legs.filter((l) => l.snapped).map((l) => ({ K: l.k, rule: l.snapped })),
+        }, { detail: !!s.grid });
+        return JSON.stringify(got) === JSON.stringify(want);
+      });
+    }, NEAR);
+    ok(same.length >= 2 && same.every(Boolean),
+       `BYTE FOR BYTE: in the browser, the generated bundle re-prices all ${same.length} structures the Worker published — prices, greeks, both probabilities, both expected values, grades and grids — from the fit alone`);
+
+    const h0 = page.locator(".tl-handle").first();
+    const k0 = Number(await h0.getAttribute("aria-valuenow"));
+    const before = (await slot("Max profit")).value;
+    await h0.focus();
+    await page.keyboard.press("ArrowLeft");
+    await page.waitForFunction((k) => Number(document.querySelector(".tl-handle").getAttribute("aria-valuenow")) !== k, k0);
+    const k1 = Number(await h0.getAttribute("aria-valuenow"));
+    ok(k1 < k0, `the arrow key moves the strike to the next listed one down (${k0} → ${k1})`);
+    const after = (await slot("Max profit")).value;
+    ok(after !== before, `and everything re-prices in the page (max profit ${before} → ${after})`);
+    const u = new URL(page.url());
+    ok(u.searchParams.get("s") === idea.family && new RegExp("BBB261016[CP]" + String(Math.round(k1 * 1000)).padStart(8, "0")).test(u.searchParams.get("legs") || ""),
+       "and the moved position is in the link, structure and contracts, so it survives a reload");
+
+    await h0.scrollIntoViewIfNeeded();
+    const box = await h0.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    for (let i = 1; i <= 12; i++) await page.mouse.move(box.x + box.width / 2 - i * 6, box.y + box.height / 2);
+    ok(await h0.evaluate((b) => b.classList.contains("is-drag")), "a pointer drag picks the handle up");
+    await page.mouse.up();
+    const k2 = Number(await h0.getAttribute("aria-valuenow"));
+    ok(k2 < k1 && !(await h0.evaluate((b) => b.classList.contains("is-drag"))),
+       `and drops it on a listed strike further down (${k1} → ${k2}), springing onto it`);
+  }
+
+  {
+    await go("?t=AAA&expiry=2026-10-16&basis=mid&legs=AAA261016C00100000@1,AAA261016C00110000@-1");
+    const legs = new URL(page.url()).searchParams.get("legs");
+    eq(legs, "AAA261016C00100000@1,AAA261016C00110000@-1",
+       "the position lives in the URL, one contract per entry with the SIGN carrying the side — a link is the only form of a position that can be sent to anyone");
+    ok(!/4\.90|5\.10|500/.test(legs), "and it carries no PRICES: a quote is a fact about a moment");
+    await page.click('#sgLegsM .tl-leg[data-leg="1"] .tl-bs');
+    await page.waitForFunction(() => /C00110000@1/.test(new URL(location.href).searchParams.get("legs") || ""));
+    eq(new URL(page.url()).searchParams.get("s"), "custom", "switching a leg's side makes the position custom and the link says so");
+    await page.click('#sgLegsM .tl-leg[data-leg="0"] [aria-label^="One more"]');
+    await page.waitForFunction(() => /C00100000@2/.test(new URL(location.href).searchParams.get("legs") || ""));
+    ok(true, "and a second contract is a signed quantity in the link");
+    const reload = page.url();
+    await go(reload.slice(reload.indexOf("?")));
+    eq((await slot("Cost")).value, "$1,200", "the restored link re-reads the book and prices the same position at today's quotes");
+  }
+
+  {
+    await go("?t=AAA");
+    await page.click(`.tl-chip[data-expiry="${FAR}"]`);
+    await page.waitForFunction(() => document.querySelector(".tl-chip.is-on") && document.querySelector(".tl-chip.is-on").dataset.expiry === "2026-12-18");
+    await ready();
+    const note = await openInfo("About expiries");
     ok(/The call side of this expiry is CUT OFF/.test(note),
-       "a truncated side is named as truncated. On a ranked table silent truncation is a " +
-       "population claim; on a calculator it is worse — the reader's strike is simply not " +
-       "there and nothing says a strike is missing");
+       "a truncated side is named as truncated: the reader's strike is simply not there and nothing else says a strike is missing");
     ok(/500 contracts/.test(note) && /reads 2 of them per side/.test(note),
-       `and the disclosure states the vendor's page limit and how many pages this route ` +
-       `reads, so the reader can tell how much is missing (${note.slice(0, 160)}…)`);
-    ok(!/Both sides/.test(note),
-       "and it is PER SIDE: three puts came back complete, and a truncated call side says " +
-       "nothing whatever about the put side");
-
-    const shown = await page.locator("#sgChainBody tr").count();
-    ok(shown > 0 && shown < 1000,
-       `the strike window cuts the rendered list (${shown} rows of a thousand-contract read)`);
-    ok(/Showing \d+ of \d+ listed strikes/.test(note) && /Widen the strike window/.test(note),
-       "and that cut is stated with both counts and with the control that undoes it");
+       "and the disclosure states the vendor's page limit and how many pages this route reads");
+    ok(!/Both sides/.test(note), "and it is PER SIDE: three puts came back complete");
+    await closeInfo();
   }
 
   {
-
-    await page.selectOption("#sgExpiry", BROKEN);
-    await page.waitForSelector('#sgChainNote .flows-empty[data-empty="unreadable"]',
-      { timeout: 20000 });
-    const broken = flat(await page.locator("#sgChainNote").textContent());
-    ok(/did not come back/.test(broken),
-       "an expiry whose read failed says the REQUEST failed");
+    await go("?t=AAA");
+    await page.click(`.tl-chip[data-expiry="${BROKEN}"]`);
+    await page.waitForSelector('#sgStatus[data-empty="unreadable"]', { timeout: 20000 });
+    const broken = flat(await page.locator("#sgStatus").textContent());
+    ok(/did not come back/.test(broken), "an expiry whose read failed says the REQUEST failed");
     ok(/not the same as/.test(broken) && /empty/.test(broken),
-       `and says in words that this is not the same as the expiry being empty ` +
-       `(${broken.slice(0, 140)}…) — the two silences may not share a sentence`);
+       `and says in words that this is not the same as the expiry being empty (${broken.slice(0, 140)}…)`);
+    eq(await page.locator('#sgGrid .ui-silent[data-state="unavailable"]').count(), 1, "and the surface draws the unavailable glyph in its place, with the reason one tap away");
 
     await page.fill("#sgTicker", "ZZZ");
     await page.click(".sg-load");
     await page.waitForSelector('#sgStatus[data-empty="quiet"]', { timeout: 20000 });
     const quiet = flat(await page.locator("#sgStatus").textContent());
     ok(/lists no option expiries/.test(quiet) && /reading about the name/.test(quiet),
-       `a symbol that was read and lists nothing is reported as a READING about the name ` +
-       `(${quiet}) — the only one of the three silences that is a fact about the market`);
+       `a symbol that was read and lists nothing is reported as a READING about the name (${quiet})`);
+    eq(await page.locator('#sgGrid .ui-silent[data-state="quiet"]').count(), 1, "drawn with the quiet glyph, not the failure one");
 
     await page.fill("#sgTicker", "YYY");
     await page.click(".sg-load");
     await page.waitForSelector('#sgStatus[data-empty="unreadable"]', { timeout: 20000 });
     const dead = flat(await page.locator("#sgStatus").textContent());
-    ok(/expiry list did not come back/.test(dead),
-       "an expiry list that failed says the LIST failed");
+    ok(/expiry list did not come back/.test(dead), "an expiry list that failed says the LIST failed");
     ok(/price above was read/.test(dead),
-       `and distinguishes itself from a whole-symbol failure by naming what DID arrive ` +
-       `(${dead}) — the price is on the page and the picker is not`);
-    eq(await page.locator("#sgContextPanel").isHidden(), false,
-       "the context panel stays, because a spot that was read is still a reading");
+       `and distinguishes itself from a whole-symbol failure by naming what DID arrive (${dead})`);
+    eq(flat(await page.locator("#sgPx .tl-spot").textContent()), "102.00", "the price stays, because a spot that was read is still a reading");
   }
 
   {
-    await page.fill("#sgTicker", "AAA");
-    await page.click(".sg-load");
-    await page.waitForSelector("#sgChainWrap:not([hidden])", { timeout: 20000 });
-    await buy(NEAR, "$100", "call");
-    await sell(NEAR, "$110", "call");
-    const url = page.url();
-
-    const legs = new URL(url).searchParams.get("legs");
-    eq(legs, "AAA261016C00100000@1,AAA261016C00110000@-1",
-       "the position lives in the URL, one contract per entry with the SIGN carrying the " +
-       "side — the site's storage owner is assets/js/storage.js and a second owner is how " +
-       "two of them disagree, and a link is the only form of a position that can be sent " +
-       "to anyone");
-    ok(!/4\.90|5\.10|500/.test(legs),
-       "and it carries no PRICES: a quote is a fact about a moment, and a link opened " +
-       "tomorrow that restored today's mid would draw a diagram that was never true");
-
-    await page.goto(url, { waitUntil: "domcontentloaded" });
-    await page.waitForSelector("#sgReadings dt", { timeout: 20000 });
-    const r = await readings();
-    eq(r["Net debit"].value, "$300.00",
-       "and the restored link re-reads the book and prices the same spread at today's quotes");
-    eq(r["Max profit"].value, "+$700.00", "with the same bounded maximum");
-  }
-
-  {
-
+    await go("?t=AAA&expiry=2026-10-16&legs=AAA261016C00100000@1,AAA261016C00110000@-1");
     for (const width of [320, 390, 768]) {
       await page.setViewportSize({ width, height: 900 });
-      const over = await page.evaluate(
-        () => document.documentElement.scrollWidth > window.innerWidth + 1);
-      eq(over, false, `the strategy tester overflows nothing at ${width}px`);
+      await page.waitForTimeout(200);
+      const over = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+      eq(over, false, `the strategy lab overflows nothing at ${width}px`);
     }
-    const scrolls = await page.evaluate(() => {
-      const wrap = document.getElementById("sgChainWrap");
-      return { scrollable: wrap.scrollWidth > wrap.clientWidth, focusable: wrap.tabIndex === 0 };
-    });
-    ok(scrolls.scrollable, "the chain scrolls inside its own box instead");
-    ok(scrolls.focusable, "and that scroll is reachable from a keyboard");
+    await page.setViewportSize({ width: 390, height: 900 });
+    const edges = async (x) => page.$eval(".tl-stripw", (w, to) => new Promise((res) => {
+      const s = w.firstChild;
+      s.scrollLeft = to === "end" ? s.scrollWidth : 0;
+      setTimeout(() => res({
+        scrollable: s.scrollWidth > s.clientWidth + 2,
+        left: getComputedStyle(w, "::before").opacity, right: getComputedStyle(w, "::after").opacity,
+      }), 350);
+    }), x);
+    const start = await edges("start");
+    ok(start.scrollable, "the structure strip scrolls inside its own box instead of the page");
+    ok(Number(start.left) < 0.05 && Number(start.right) > 0.5,
+       `at its start it fades only on the right, where structures are hidden (${start.left}/${start.right})`);
+    const end = await edges("end");
+    ok(Number(end.left) > 0.5 && Number(end.right) < 0.05,
+       `and at its end only on the left (${end.left}/${end.right}) — an edge fade is honest only where content is hidden`);
     await page.setViewportSize({ width: 1280, height: 1000 });
   }
 
   eq(pageErrors.length, 0,
      `no uncaught browser error across every branch above (${pageErrors.join(" | ")})`);
 
-  console.log(`✓ flows-strategy: ${checks} assertions — the payoff at expiry pinned against ` +
-    `hand-computed values for a long call, a vertical spread, a naked short call that reports ` +
-    `UNBOUNDED and a naked short put that reports a bounded number; a contract with no greeks ` +
-    `rendering em dashes and WITHHOLDING every position total it belongs to rather than being ` +
-    `summed as zero; the stated Taylor convention and the refused readings both on the page; ` +
-    `truncation disclosed per side; and the three silences kept in three sentences`);
+  console.log(`✓ flows-strategy: ${checks} assertions — the payoff at expiry pinned against hand-computed values for a long ` +
+    `call, a vertical, a naked short call that reports UNBOUNDED and a naked short put that reports a bounded number; ` +
+    `a leg with no two-sided quote WITHHOLDING every figure it belongs to and named in the reason; the fill, mid and ` +
+    `natural bases; the Worker's engine re-priced byte for byte in the browser; a strike moved by key and by drag; ` +
+    `the refusals in the document; truncation per side; and the three silences kept in three sentences and three glyphs`);
 } finally {
   await browser.close();
   await server.stop();

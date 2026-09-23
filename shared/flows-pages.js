@@ -1229,264 +1229,100 @@ ${UI_SCRIPT}
 }
 
 export function strategyPage({ username = "" } = {}) {
-  const lede = "Pick a name, build a position out of the contracts that are " +
-    "actually listed, and see what it pays at expiry. Every quote is the " +
-    "vendor's; every sum is arithmetic on those quotes; every extrapolation " +
-    "carries the name of the assumption it rests on.";
-  return `${head("Flows — Strategy tester", lede)}
-${shell("Strategy", "strategy", username, `
-  <div class="flows-status" id="sgStatus" role="status">Enter a symbol to begin.</div>
-
-  <div class="flows-controls">
-    <p class="flows-lede">${lede}</p>
+  return flowsDocument({
+    title: "Strategy",
+    description: "Price any listed option structure on the smile, with the same engine as the server.",
+    active: "strategy", username, chrome: false,
+    styles: ["/assets/css/flows-tools.css"],
+    scripts: ["/assets/js/flows-quant.bundle.js", "/assets/js/flows-strategy.js"],
+    body: `
+  <div class="tl" id="sgMain">
+    <header class="tl-hero" id="sgHero" data-fx-hero>
+      <div class="tl-id">
+        <h1 class="tl-t"><span id="sgTitle" data-fx-title>Strategy</span><span class="tl-sub" id="sgSub"></span></h1>
+        <div class="tl-px" id="sgPx"></div>
+      </div>
+      <form class="tl-find" id="sgEntry" role="search" autocomplete="off" action="/flows/strategy/" method="get">
+        <label class="visually-hidden" for="sgTicker">Symbol</label>
+        ${glyph("search")}
+        <input id="sgTicker" name="t" type="text" inputmode="latin" autocapitalize="characters" autocorrect="off"
+               spellcheck="false" placeholder="Symbol" enterkeyhint="go">
+        <button type="submit" class="sg-load">Load</button>
+      </form>
+    </header>
+    <p class="visually-hidden" id="sgStatus" role="status">Enter a symbol to begin.</p>
+    <section class="ui-card tl-build" id="sgPick" aria-labelledby="sgPickH" hidden>
+      <h2 class="visually-hidden" id="sgPickH">Structure and expiry</h2>
+    </section>
+    <div class="ui-grid tl-grid" id="sgGrid"></div>
   </div>
-
-  <form class="sg-entry" id="sgEntry" autocomplete="off">
-    <label for="sgTicker">Symbol</label>
-    <div class="sg-entry__row">
-      <input id="sgTicker" name="ticker" type="text" inputmode="latin"
-             autocapitalize="characters" autocorrect="off" spellcheck="false"
-             placeholder="NVDA" aria-describedby="sgEntryHelp">
-      <button type="submit" class="sg-load">Load</button>
-
-      <button type="button" class="sg-reprice" id="sgReprice" hidden>Re-price</button>
-    </div>
-    <p class="desk-help" id="sgEntryHelp">
-      One listed US symbol. The book is read one expiry at a time — that is the
-      read this page can afford against a metered vendor key on a request path.
-    </p>
-  </form>
-
-  <section class="fc-panel sg-panel" id="sgContextPanel" hidden aria-labelledby="sgContextH">
-    <h2 class="fc-panel-h" id="sgContextH">What this name is trading at</h2>
-    <div id="sgContext"></div>
-    <p class="fc-note" id="sgContextNote"></p>
-  </section>
-
-  <div class="sg-desk">
-  <div class="sg-desk__work">
-
-  <section class="fc-panel sg-panel" id="sgPlotPanel" hidden aria-labelledby="sgPlotH">
-    <h2 class="fc-panel-h" id="sgPlotH">Payoff at expiry</h2>
-    <div id="sgPlot"></div>
-    <p class="fc-note" id="sgPlotNote"></p>
-  </section>
-
-  <section class="fc-panel sg-panel" id="sgReadPanel" hidden aria-labelledby="sgReadH">
-    <h2 class="fc-panel-h" id="sgReadH">What it costs, what it can pay, what it is exposed to</h2>
-    <div id="sgReadings"></div>
-    <p class="fc-note" id="sgReadNote"></p>
-  </section>
-
-  <section class="fc-panel sg-panel" id="sgScenePanel" hidden aria-labelledby="sgSceneH">
-    <h2 class="fc-panel-h" id="sgSceneH">One scenario, priced two ways</h2>
-    <div class="sg-controls">
-      <span class="sg-field">
-        <label for="sgScenePx">Underlying at</label>
-        <input id="sgScenePx" type="text" inputmode="decimal" autocomplete="off" spellcheck="false">
-      </span>
-      <span class="sg-field">
-        <label for="sgSceneDays">Days from now</label>
-        <input id="sgSceneDays" type="range" min="0" max="0" step="1" value="0">
-      </span>
-    </div>
-    <div id="sgScene"></div>
-    <p class="fc-note" id="sgSceneNote"></p>
-  </section>
-  </div>
-  <div class="sg-desk__book">
-  <section class="fc-panel sg-panel" id="sgChainPanel" hidden aria-labelledby="sgChainH">
-    <h2 class="fc-panel-h" id="sgChainH">The book, one expiry at a time</h2>
-    <div class="sg-controls">
-      <span class="sg-field">
-        <label for="sgExpiry">Expiry</label>
-        <select id="sgExpiry"></select>
-      </span>
-      <span class="sg-field">
-        <label for="sgWindow">Strikes within</label>
-        <select id="sgWindow">
-          <option value="0.1">10% of spot</option>
-          <option value="0.25" selected>25% of spot</option>
-          <option value="0.5">50% of spot</option>
-          <option value="0">Every listed strike</option>
-        </select>
-      </span>
-    </div>
-
-    <div class="fc-note" id="sgChainNote"></div>
-    <div class="flows-tablewrap sg-chainwrap" id="sgChainWrap" tabindex="0" role="region"
-         aria-label="Listed contracts at the selected expiry" hidden>
-      <table class="flows-table sg-chain">
-        <caption class="flows-caption">
-          Every contract the vendor lists at this expiry, unfiltered. Click an
-          ASK to buy that contract and a BID to sell it — the side each price is
-          actually dealt on. The premium desk screens this same endpoint down to
-          what is sellable; this page does not, because a long in-the-money call
-          is a position a reader builds and the desk&#39;s universe cannot express
-          it. A greek the vendor did not send is an em dash — the vendor marks
-          all five nullable and its own example carries a row with none of them.
-        </caption>
-
-        <thead>
-          <tr>
-            <th scope="col" colspan="4" class="sg-side">Calls</th>
-
-            <th scope="col" class="c-num sg-k"><span class="visually-hidden">Strike</span></th>
-            <th scope="col" colspan="4" class="sg-side">Puts</th>
-          </tr>
-          <tr>
-            <th scope="col" class="c-num"><abbr title="Delta as quoted, per share">&#916;</abbr></th>
-            <th scope="col" class="c-num"><abbr title="The vendor's implied volatility for this contract, as a fraction. The percent-or-fraction convention is decided once from the whole expiry's median, never per contract">IV</abbr></th>
-            <th scope="col" class="c-num"><abbr title="The bid. Click it to SELL this contract — a short leg is opened at the bid, which is the price a seller is actually offered">Bid</abbr></th>
-            <th scope="col" class="c-num"><abbr title="The ask. Click it to BUY this contract — a long leg is opened at the ask, which is the price a buyer actually pays">Ask</abbr></th>
-            <th scope="col" class="c-num sg-k">Strike</th>
-            <th scope="col" class="c-num"><abbr title="The bid. Click it to SELL this contract">Bid</abbr></th>
-            <th scope="col" class="c-num"><abbr title="The ask. Click it to BUY this contract">Ask</abbr></th>
-            <th scope="col" class="c-num"><abbr title="The vendor's implied volatility for this contract, as a fraction">IV</abbr></th>
-            <th scope="col" class="c-num"><abbr title="Delta as quoted, per share">&#916;</abbr></th>
-          </tr>
-        </thead>
-        <tbody id="sgChainBody"></tbody>
-      </table>
-    </div>
-  </section>
-
-  <section class="fc-panel sg-panel" id="sgLegsPanel" hidden aria-labelledby="sgLegsH">
-    <h2 class="fc-panel-h" id="sgLegsH">The position</h2>
-    <div class="sg-controls">
-      <span class="sg-field">
-        <label for="sgBasis">Price legs at</label>
-        <select id="sgBasis">
-          <option value="mid">The mid</option>
-          <option value="marketable">Marketable — ask on buys, bid on sells</option>
-        </select>
-      </span>
-      <button type="button" class="sg-clear" id="sgClear">Clear position</button>
-    </div>
-    <div class="flows-tablewrap" id="sgLegsWrap" tabindex="0" role="region"
-         aria-label="Position legs" hidden>
-      <table class="flows-table sg-legs">
-        <caption class="flows-caption">
-          One row per leg. The mid is not a price anyone is obliged to trade at;
-          the marketable basis is what crossing the spread on every leg actually
-          costs. Switching between them moves the whole diagram, which is the
-          honest way to show what a spread is worth.
-        </caption>
-        <thead>
-          <tr>
-            <th scope="col">Leg</th>
-            <th scope="col" class="c-num">Qty</th>
-            <th scope="col" class="c-num">Bid</th>
-            <th scope="col" class="c-num">Ask</th>
-            <th scope="col" class="c-num">Priced at</th>
-            <th scope="col" class="c-num"><abbr title="Delta as quoted, per share">&#916;</abbr></th>
-            <th scope="col" class="c-num"><abbr title="Gamma as quoted: the change in delta per one dollar of underlying">&#915;</abbr></th>
-            <th scope="col" class="c-num"><abbr title="Theta as quoted, taken as a one-day derivative of the contract's price">&#920;</abbr></th>
-            <th scope="col" class="c-num"><abbr title="Vega as quoted, taken as the change in the contract's price for a one-point move in implied volatility">&nu;</abbr></th>
-            <th scope="col"></th>
-          </tr>
-        </thead>
-        <tbody id="sgLegsBody"></tbody>
-      </table>
-    </div>
-    <div class="fc-note" id="sgLegsNote"></div>
-  </section>
-
-  </div>
-  </div>
-
-  <section class="fc-panel sg-panel" id="sgRefusePanel" aria-labelledby="sgRefuseH">
-    <h2 class="fc-panel-h" id="sgRefuseH">What this page will not tell you</h2>
+  <section id="sgRefusePanel" hidden aria-labelledby="sgRefuseH">
+    <h2 id="sgRefuseH">What this page will not tell you</h2>
     <dl class="sg-refuse">
-      <div class="sg-refuse-i">
-        <dt>Buying power reduction</dt>
-        <dd>
-          <strong>Refused.</strong> It is a broker&#39;s number, not the market&#39;s:
-          the same short put reduces buying power by different amounts at two
-          brokers on the same afternoon, and by different amounts again in a
-          portfolio-margin account. Nothing in the vendor&#39;s specification
-          mentions buying power, margin or collateral anywhere in its 28,755
-          lines. Publishing one would be inventing a figure about your money.
-        </dd>
-      </div>
-      <div class="sg-refuse-i">
-        <dt>Conditional value at risk</dt>
-        <dd>
-          <strong>Refused.</strong> A tail expectation is an average over a
-          distribution, and no distribution is quoted anywhere on this page. It
-          would need a volatility surface, a drift and a horizon, none of which
-          the vendor supplies and all of which would be chosen here. The
-          distribution-free statement this page can make instead is the maximum
-          loss at expiry, which is below and is exact.
-        </dd>
-      </div>
-      <div class="sg-refuse-i">
-        <dt>Beta-weighted delta</dt>
-        <dd>
-          <strong>Published, with its terms stated.</strong> It is not delta
-          times beta. It is delta &#215; beta &#215; (this stock&#39;s price &#247; the
-          index&#39;s price), so it needs a reference index and that index&#39;s live
-          price, and it is a different number against a different index. Both
-          are named and printed in the readings above rather than assumed, and
-          when either is missing the reading is an em dash — never a zero.
-        </dd>
-      </div>
-      <div class="sg-refuse-i">
-        <dt>A share leg</dt>
-        <dd>
-          <strong>Not offered yet.</strong> A covered call or a collar cannot be
-          expressed here, because this page builds positions out of listed
-          contracts only. Said out loud rather than left for you to discover by
-          looking for a control that is not there.
-        </dd>
-      </div>
+      <dt>Buying power reduction</dt>
+      <dd>Refused. It is a broker&#39;s number, not the market&#39;s: the same short put reduces buying power by
+        different amounts at two brokers on the same afternoon, and by different amounts again in a
+        portfolio-margin account. Nothing in the vendor&#39;s specification mentions buying power, margin or
+        collateral anywhere in its 28,755 lines. The capital shown here is the maximum loss of a defined-risk
+        position, or the exchange&#39;s Reg-T minimum formula for an uncovered one, and it is labelled as such.</dd>
+      <dt>Conditional value at risk</dt>
+      <dd>Published only under the real-world law. A tail expectation is an average over a distribution; this page
+        takes it over the GARCH law the name&#39;s card publishes, at expiry, and prints nothing when no card
+        carries one. It never takes a tail over the risk-neutral density, which prices risk rather than
+        forecasting it.</dd>
+      <dt>Beta-weighted delta</dt>
+      <dd>Published, with its terms stated. It is not delta times beta. It is delta &#215; beta &#215; (this
+        stock&#39;s price &#247; the index&#39;s price), so it needs a reference index and that index&#39;s live
+        price, and it is a different number against a different index. When either is missing the reading is an
+        em dash, never a zero.</dd>
+      <dt>A share leg</dt>
+      <dd>Offered. A covered call and a collar carry 100 shares per lot, valued at spot, so their payoff and their
+        capital include the stock.</dd>
     </dl>
+    <p>The expiry line is model-free. At expiry an option is worth its intrinsic value, so the solid line is
+      arithmetic on the strikes, the premiums and the underlying: no volatility, no interest rate, no dividend
+      and no distribution. The maximum profit, the maximum loss and the breakevens are read off that line and are
+      exact to the quotes they were built from. A position with unbounded loss reports unbounded rather than a
+      large number, because there is no number there to report.</p>
+    <p>The today line re-prices every leg on this expiry&#39;s fitted smile with Black-76 against a put-call parity
+      forward, so the dividend is implied by the book rather than assumed, and the rate is the card&#39;s. It
+      holds the smile sticky in moneyness as spot moves. It is least accurate where the smile is extrapolated,
+      beyond the last quoted strike, and it is only as good as the fit grade beside it.</p>
+    <p>Options can lose their entire premium, and a short call&#39;s loss has no upper bound. This is a
+      calculator, not advice.</p>
   </section>
-
-  <p class="flows-foot">
-    <span class="flows-foot-p">
-      THE EXPIRY LINE IS MODEL-FREE. At expiry an option is worth its intrinsic
-      value, so the payoff diagram&#39;s solid line is arithmetic on the strikes,
-      the quoted premiums and the underlying &#8212; it contains no volatility,
-      no interest rate, no dividend and no distribution. The maximum profit,
-      the maximum loss and the breakevens are read off that same line and are
-      exact to the quotes they were built from. A leg with unbounded loss
-      reports <em>unbounded</em> rather than a large number, because there is
-      no number there to report.
-    </span>
-    <span class="flows-foot-p">
-      THE PROJECTED LINE IS A TAYLOR EXPANSION IN THE VENDOR&#39;S OWN GREEKS,
-      and that is a stated convention, not a measurement. Each leg is moved by
-      delta and gamma in the underlying, by theta in time and by vega in
-      implied volatility, all as quoted for that contract. It is a local
-      approximation: it is least accurate exactly where you will look hardest,
-      near a strike and near expiry, and it degrades as the horizon lengthens.
-      The slider therefore stops at the nearest leg&#39;s expiry, where an
-      expansion around today&#39;s greeks has stopped describing anything, and the
-      exact line takes over. The alternative &#8212; re-pricing every leg with
-      Black-Scholes &#8212; would need a risk-free rate and a dividend yield, the
-      two free parameters this codebase refuses everywhere else, so it was not
-      taken.
-    </span>
-    <span class="flows-foot-p">
-      MONTHLY DECAY IS THIRTY TIMES A ONE-DAY DERIVATIVE, which is a
-      convention in the same sense the premium desk&#39;s annualised yield is one:
-      theta is convex in time and thirty days of it is not thirty of today&#39;s.
-      It is offered because it is the number a reader is comparing against a
-      position&#39;s cost, and it is labelled because nobody earns it. Days are
-      calendar days, counted from the session the quotes were read on.
-    </span>
-    <span class="flows-foot-p">
-      Options can lose their entire premium, and a short call&#39;s loss has no
-      upper bound. This is a calculator, not advice.
-    </span>
-  </p>
-`)}
-${UI_SCRIPT}
-<script src="${v("/assets/js/flows-quant.bundle.js")}" defer></script>
-<script src="${v("/assets/js/flows-strategy.js")}" defer></script>
-</body>
-</html>`;
+  <div id="sgCopy" hidden>
+      <p data-k="ctx-dash">An em dash for beta means the vendor has none, never a beta of zero.</p>
+      <p data-k="ctx-earn">A contract that outlives an earnings report is a different trade at the same premium.</p>
+      <p data-k="about">Pick a name and a structure; the engine chooses each strike by delta on this expiry&#39;s fitted smile and prices the position exactly as the server does. Drag a strike and everything re-prices in the page.</p>
+      <p data-k="struct">Twenty-two structures from the engine&#39;s catalogue. Each chooses its expiry inside its own window of days to expiry and its strikes by forward delta on the fitted smile, snapped to a listed, two-sided strike.</p>
+      <p data-k="struct-risk">A tile marked with the slashed circle can lose more than any fixed amount: its capital is the Reg-T formula and its grade is capped at 2.</p>
+      <p data-k="struct-picks">Numbered tiles are the engine&#39;s own ranking on this expiry, by expected value under the real-world law per dollar of capital, among structures graded at least 1.</p>
+      <p data-k="struct-nopick">The engine ranked nothing on this expiry, so no tile is numbered.</p>
+      <p data-k="exp">Each chip is one listed expiry, with its calendar days to expiry from the session and a bar for how many contracts it lists. Chips inside the structure&#39;s window are underlined. The book is read one expiry at a time.</p>
+      <p data-k="exp-oi">The list came from open interest rather than the session&#39;s activity, so no expiry carries its contract count.</p>
+      <p data-k="payoff">Profit and loss per lot against the underlying. The white line is the payoff at expiry; the blue line is the position&#39;s value today on the fitted smile.</p>
+      <p data-k="payoff-exact">The expiry line is model-free and it is exact: at expiry an option is worth its intrinsic value, so nothing on that line needs a volatility, a rate or a distribution. Profit is above the zero rule and loss below it; the sign is carried by position, never by colour alone, and the green columns mark where the position ends in profit.</p>
+      <p data-k="payoff-today">The today line re-prices every leg on the fitted smile with Black-76 against a put-call parity forward, holding the smile sticky in moneyness as spot moves. It is least accurate where the smile is extrapolated, beyond the last quoted strike.</p>
+      <p data-k="payoff-pu">The position is net long calls, so its profit rises without limit as the underlying rises. There is no number there, so none is printed.</p>
+      <p data-k="payoff-lu">The position is net short calls. A share has no upper bound, so neither does this loss, which is why it is reported as unbounded and not as a large number.</p>
+      <p data-k="payoff-put">A share cannot trade below zero, so this loss is bounded: the &#39;unlimited downside&#39; often said of a naked short put is not what the arithmetic says.</p>
+      <p data-k="payoff-drag">Drag a strike handle, or focus it and use the arrow keys, to move a leg to the next listed strike with a two-sided quote. Everything on the page re-prices in the browser, with the same engine code the server runs.</p>
+      <p data-k="odds">The chance the position ends in profit at expiry, under the market&#39;s own risk-neutral density read off the smile (implied) and under the real-world law simulated from this name&#39;s GARCH model (real world). The gap between them is the edge the position carries if the model is right.</p>
+      <p data-k="odds-ev">Discounted expectation of the payoff under each law, less the position&#39;s cost at the chosen basis, per lot. Under the implied density a position bought at its model value is worth zero by construction, so a negative implied EV is the spread you pay to trade.</p>
+      <p data-k="odds-grade">The weakest of five parts: the smile fit, the legs&#39; liquidity, the real-world model, whether the edge keeps its sign under three laws, and how an earnings date inside the expiry is handled.</p>
+      <p data-k="greeks">Dollar greeks of the whole position per lot, from Black-Scholes at each leg&#39;s own smile volatility with the carry the parity forward implies. Theta and charm are per calendar day.</p>
+      <p data-k="greeks-bw">Withheld. It needs the position delta, this name&#39;s beta and a live price for the reference index, and at least one of those is absent. It is NOT delta times beta, so there is no cheaper version of it to print instead.</p>
+      <p data-k="greeks-ror">Expected value under the real-world law divided by the capital the position ties up: the engine&#39;s own ranking key.</p>
+      <p data-k="scen">Profit and loss per lot if spot moves by a multiple of the expiry&#39;s at-the-money sigma, at four points in time, with implied volatility shifted in parallel by the control above.</p>
+      <p data-k="scen-method">Every cell re-prices every leg on the fitted smile, sticky in moneyness, at the chosen basis. The ringed cell is today at spot with volatility unchanged, which equals the today line at spot.</p>
+      <p data-k="legs">One row per leg. Buy and Sell switch a leg&#39;s side, the stepper sets how many contracts, and editing any of these turns the structure into a custom position.</p>
+      <p data-k="legs-mid">Halfway between bid and ask; no one is obliged to trade there</p>
+      <p data-k="legs-fill">Mid plus a quarter of the spread, the engine&#39;s execution assumption</p>
+      <p data-k="legs-nat">The ask on every buy and the bid on every sell: what crossing the spread costs</p>
+      <p data-k="legs-link">A link to this page carries the legs as contracts with signed quantities and never their prices: a quote is a fact about a moment, and a link opened tomorrow re-reads the book.</p>
+  </div>`,
+  });
 }
 
 export const FLOWS_SPRITE = SPRITE;
