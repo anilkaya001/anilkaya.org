@@ -741,6 +741,49 @@ try {
     eq(face.interleaved, 0,
        "and no station reaches up beside the one before it — a panel fills its own station's " +
        "holes, never another's");
+    const moved = await page.evaluate(async () => {
+      const grid = document.getElementById("ftGrid");
+      const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const xs = () => new Map([...grid.querySelectorAll(".ft-panel[data-panel]")]
+        .filter((n) => n.getClientRects().length)
+        .map((n) => [n.dataset.panel, Math.round(n.getBoundingClientRect().left)]));
+      const out = [];
+      for (const how of grid.querySelectorAll(".ft-panel[data-panel] details.ft-how")) {
+        const before = xs();
+        how.open = true;
+        await frame(); await frame();
+        const after = xs();
+        for (const [k, x] of before) if (after.get(k) !== x) out.push(how.closest(".ft-panel").dataset.panel + " moved " + k);
+        how.open = false;
+        await frame(); await frame();
+      }
+      return { out, tried: grid.querySelectorAll(".ft-panel[data-panel] details.ft-how").length };
+    });
+    ok(moved.tried > 0 && moved.out.length === 0,
+       `opening any of ${moved.tried} "How to read this" disclosures moves no panel to another ` +
+       `column: the grid re-stacks under the reader rather than re-choosing columns (${moved.out.slice(0, 4).join("; ")})`);
+    await page.setViewportSize({ width: 2200, height: 900 });
+    await page.waitForFunction(() => {
+      const g = document.getElementById("ftGrid");
+      return g.classList.contains("is-packed") && getComputedStyle(g).gridTemplateColumns.split(" ").length === 5;
+    }, null, { timeout: 5000 }).catch(() => {});
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.waitForTimeout(700);
+    const shrunk = await page.evaluate(() => {
+      const g = document.getElementById("ftGrid");
+      const rects = [...g.querySelectorAll(".ft-station > *")].filter((n) => n.getClientRects().length)
+        .map((n) => n.getBoundingClientRect());
+      let overlaps = 0;
+      for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) {
+        const a = rects[i], b = rects[j];
+        if (a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1) overlaps++;
+      }
+      return { tracks: getComputedStyle(g).gridTemplateColumns.split(" ").length, overlaps };
+    });
+    eq(shrunk.tracks, 3,
+       `back at 1440px after the five-column tier the grid has its own three tracks, not five ` +
+       `kept alive as implicit columns by a stale placement (${shrunk.tracks})`);
+    eq(shrunk.overlaps, 0, "and nothing overlaps after the column count falls");
     await page.evaluate(() => {
       const s = document.getElementById("ftScroll");
       if (s && getComputedStyle(s).overflowY !== "visible") s.scrollTo({ top: 900, behavior: "instant" });

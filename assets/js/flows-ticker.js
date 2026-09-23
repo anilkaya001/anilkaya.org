@@ -3166,7 +3166,7 @@
     writePanelLeads(card);
     writeStationLeads();
     P.keepDates(scroller || grid);
-    schedulePack();
+    schedulePack(true);
     if (missing.length) {
       console.error("flows-ticker: no drawing host for panel(s): " + missing.join(", "));
     }
@@ -3806,6 +3806,8 @@
   const PACK_UNIT = 4;
   const packMq = typeof matchMedia === "function" ? matchMedia("(min-width: 76rem)") : null;
   let packQueued = false;
+  let packFresh = true;
+  let packLock = null;
 
   function packItems() {
     return grid ? grid.querySelectorAll(":scope > .ft-station > *") : [];
@@ -3814,8 +3816,13 @@
   function placeItem(n, row, span, col, width) {
     const r = row + 1 + " / span " + span;
     const c = col + 1 + " / span " + width;
-    if (n.style.gridRow !== r) n.style.gridRow = r;
-    if (n.style.gridColumn !== c) n.style.gridColumn = c;
+    if (n.style.getPropertyValue("--pack-row") !== r) n.style.setProperty("--pack-row", r);
+    if (n.style.getPropertyValue("--pack-col") !== c) n.style.setProperty("--pack-col", c);
+  }
+
+  function unplace(n) {
+    n.style.removeProperty("--pack-row");
+    n.style.removeProperty("--pack-col");
   }
 
   function packGrid() {
@@ -3825,12 +3832,14 @@
     if (!packMq || !packMq.matches || grid.hidden) {
       if (grid.classList.contains("is-packed")) {
         grid.classList.remove("is-packed");
-        for (const n of items) { n.style.gridRow = ""; n.style.gridColumn = ""; }
+        items.forEach(unplace);
       }
+      packLock = null;
       return;
     }
     const cs0 = getComputedStyle(grid);
-    const cols = cs0.gridTemplateColumns.split(" ").filter(Boolean).length || 1;
+    const cols = Math.max(1, parseInt(cs0.getPropertyValue("--ft-cols"), 10) ||
+      cs0.gridTemplateColumns.split(" ").filter(Boolean).length || 1);
     const gap = parseFloat(cs0.columnGap) || 0;
     const spans = items.map((n) => {
       if (n.hidden || n.getClientRects().length === 0) return null;
@@ -3840,24 +3849,34 @@
       return Math.max(1, Math.ceil((h + gap) / PACK_UNIT));
     });
     const stations = new Map();
+    const shape = [];
     items.forEach((n, i) => {
-      if (spans[i] === null) { n.style.gridRow = ""; n.style.gridColumn = ""; return; }
+      if (spans[i] === null) { unplace(n); return; }
       const width = n.classList.contains("ft-panel")
         ? (n.classList.contains("is-full") ? cols : n.classList.contains("is-wide") ? Math.min(2, cols) : 1)
         : cols;
+      shape.push(i + ":" + width);
       if (!stations.has(n.parentElement)) stations.set(n.parentElement, []);
       stations.get(n.parentElement).push({ n, span: spans[i], width });
     });
+    const key = cols + "|" + shape.join(",");
+    const keep = !packFresh && packLock && packLock.key === key ? packLock.col : null;
+    packFresh = false;
+    const col = new Map();
     let base = 0;
     for (const entries of stations.values()) {
-      const laid = layStation(entries, cols, base);
-      entries.forEach((e, i) => placeItem(e.n, laid.tops[i], e.span, laid.cols[i], e.width));
+      const laid = layStation(entries, cols, base, keep);
+      entries.forEach((e, i) => {
+        placeItem(e.n, laid.tops[i], e.span, laid.cols[i], e.width);
+        col.set(e.n, laid.cols[i]);
+      });
       base = laid.end;
     }
+    packLock = { key, col };
     grid.classList.add("is-packed");
   }
 
-  function layStation(entries, cols, base) {
+  function layStation(entries, cols, base, keep) {
     const heights = new Array(cols).fill(base);
     const pick = new Array(entries.length), tops = new Array(entries.length);
     let best = null;
@@ -3870,8 +3889,9 @@
         }
         return;
       }
-      const { span, width } = entries[i];
-      for (let c = 0; c + width <= cols; c++) {
+      const { n, span, width } = entries[i];
+      const only = keep && keep.has(n) ? Math.min(keep.get(n), cols - width) : -1;
+      for (let c = Math.max(only, 0); c + width <= cols && (only < 0 || c === only); c++) {
         const saved = heights.slice(c, c + width);
         const row = Math.max(...saved);
         for (let k = c; k < c + width; k++) heights[k] = row + span;
@@ -3885,7 +3905,8 @@
     return best;
   }
 
-  function schedulePack() {
+  function schedulePack(fresh) {
+    if (fresh === true) packFresh = true;
     if (packQueued) return;
     packQueued = true;
     requestAnimationFrame(packGrid);
@@ -3893,13 +3914,15 @@
 
   if (grid) {
     if (typeof ResizeObserver === "function") {
-      const ro = new ResizeObserver(schedulePack);
+      const ro = new ResizeObserver(() => schedulePack(false));
       for (const n of packItems()) ro.observe(n);
     }
     if (packMq) {
-      if (typeof packMq.addEventListener === "function") packMq.addEventListener("change", schedulePack);
-      else if (typeof packMq.addListener === "function") packMq.addListener(schedulePack);
+      const repack = () => schedulePack(true);
+      if (typeof packMq.addEventListener === "function") packMq.addEventListener("change", repack);
+      else if (typeof packMq.addListener === "function") packMq.addListener(repack);
     }
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => schedulePack(true), () => {});
   }
 
   function watchGroups() {
