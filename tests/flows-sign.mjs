@@ -124,26 +124,41 @@ ok(files.length >= 10,
        `.${family} is emitted by no Flows renderer any more — the ticker page that drew it was rebuilt on ` +
        "FlowsUI, and its stylesheet rules went with it — so no polarity modifier can land on it unstyled");
   }
+  const CSS_DIR = new URL("../assets/css/", import.meta.url);
+  const sheets = readdirSync(CSS_DIR).filter((f) => /^flows(-[\w-]+)?\.css$/.test(f)).sort();
+  ok(sheets.length > 5, `the polarity rules are read from the shared sheet and every Flows route sheet (${sheets.join(", ")})`);
+  const CSS_ALL = sheets.map((f) => readFileSync(new URL(f, CSS_DIR), "utf8")).join("\n");
   for (const family of FAMILIES.filter(emits)) {
+    const coloured = new RegExp(`\\.${family}\\s*\\{[^}]*\\b(?:fill|color|background)\\s*:`).test(CSS_ALL);
     for (const mod of MODIFIERS) {
-      const rule = new RegExp(`\\.${family}\\.${mod}\\b`);
-      ok(rule.test(CSS),
-         `.${family}.${mod} has a stylesheet rule. The base class deliberately sets no ` +
-         "colour, so a polarity modifier with no rule draws nothing at all — strictly worse " +
-         "than the wrong tint it replaced");
+      const rule = new RegExp(`\\.${family}(?:\\.[\\w-]+)*\\.${mod}\\b`).test(CSS_ALL);
+      ok(rule || (mod === "is-flat" && coloured),
+         `.${family}.${mod} is drawn. A direction needs a rule of its own, which may add a qualifier such as ` +
+         "is-clear when only a reading that clears its interval earns the hue; a flat reading may fall back " +
+         "to the family's base rule when that rule sets a colour. A polarity modifier on a colourless base " +
+         "with no rule draws nothing at all — strictly worse than the wrong tint it replaced");
     }
   }
-  ok(/\.fd-track i\.is-flat\b/.test(CSS),
-     "and the board's centre-origin bar has one too. A zero score already draws a " +
-     "zero-width bar, so the rule adds no ink — it exists so the element stops claiming a " +
-     "SIDE, which matters because .is-pos also sets `left: 50%` and a future minimum width " +
-     "would have grown it in a direction the reading does not have");
+  if (/["'\s]fd-track["'\s]/.test(JS_ALL)) {
+    ok(/\.fd-track i\.is-flat\b/.test(CSS_ALL),
+       "and the board's centre-origin bar has one too. A zero score already draws a " +
+       "zero-width bar, so the rule adds no ink — it exists so the element stops claiming a " +
+       "SIDE, which matters because .is-pos also sets `left: 50%` and a future minimum width " +
+       "would have grown it in a direction the reading does not have");
+  } else {
+    ok(!/\bfd-track\b/.test(JS_ALL),
+       "the deck's centre-origin bar is emitted by no renderer any more — the boards draw one ranked row per " +
+       "name — so its neutral rule has nothing left to guard");
+  }
 
-  const flatRules = CSS.match(/\.[\w-]+(?:\s+\w+)?\.is-flat\s*\{[^}]*\}/g) || [];
-  ok(flatRules.length >= 5, `the neutral rules exist as a family (${flatRules.length} of them)`);
+  const flatRules = [
+    ...(CSS_ALL.match(/\.[\w-]+(?:\s+\w+)?\.is-flat\s*\{[^}]*\}/g) || []),
+    ...(CSS_ALL.match(/[^{}]*\[data-tone="flat"\][^{}]*\{[^}]*\}/g) || []),
+  ];
+  ok(flatRules.length >= 5, `the neutral rules exist as a family, as .is-flat classes and as the Depth foundation's data-tone="flat" (${flatRules.length} of them)`);
   for (const r of flatRules) {
-    ok(!/--flow-up|--flow-down/.test(r),
-       `a neutral rule never reaches for a directional colour: ${r.slice(0, 70)}`);
+    ok(!/--flow-up|--flow-down|--up\b|--down\b|--up-mark|--down-mark/.test(r),
+       `a neutral rule never reaches for a directional colour: ${r.trim().slice(0, 70)}`);
   }
 }
 

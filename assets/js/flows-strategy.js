@@ -1280,7 +1280,7 @@
       }
       const l = o.l;
       const ks = strikesFor(l);
-      const txt = (l.side > 0 ? "+" : MINUS) + (l.qty > 1 ? l.qty : "") + l.type + " " + kf(l.K);
+      const txt = (l.side > 0 ? "+" : l.side < 0 ? MINUS : "") + (l.qty > 1 ? l.qty : "") + l.type + " " + kf(l.K);
       if (b.dataset.text !== txt) { b.dataset.text = txt; b.replaceChildren(h("span", null, txt)); }
       b.dataset.side = l.side > 0 ? "long" : "short";
       b.dataset.type = l.type;
