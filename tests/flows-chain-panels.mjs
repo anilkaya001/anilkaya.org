@@ -448,6 +448,35 @@ function chain({
 }
 
 {
+  const built = buildChainPanels(chain(), { spot: SPOT, asOf: ASOF });
+  const sc = built.skewTerm;
+  const b30 = sc.skew30Basis;
+  ok(b30 && b30.nearDays <= 30 && b30.farDays >= 30,
+     `the fixed-tenor skew is read between the two expiries bracketing 30 days (${b30 && b30.nearDays}d, ${b30 && b30.farDays}d)`);
+  const wing = (m, lift) => {
+    const v1 = ivOf(m, b30.nearDays) + lift, v2 = ivOf(m, b30.farDays) + lift;
+    const w1 = v1 * v1 * b30.nearDays, w2 = v2 * v2 * b30.farDays;
+    return Math.sqrt((w1 + (w2 - w1) * (30 - b30.nearDays) / (b30.farDays - b30.nearDays)) / 30);
+  };
+  near(sc.skew30, wing(-SKEW_MONEYNESS, PUT_LIFT / 2) - wing(SKEW_MONEYNESS, -PUT_LIFT / 2),
+       "and each wing is interpolated in TOTAL VARIANCE, sigma^2 T, not in vol", 2e-3);
+  near(sc.skew30, sc.skew,
+       "and on a smile whose wing difference is the same at every tenor it agrees with the " +
+       `nearest-expiry reading at ${sc.skewBasis.days} days, as it must`, 1e-3);
+  eq(sc.skewBasis.putPlaced, "exact", "a traded strike a cent-rounding away from the target is exact");
+  ok(/matching tenors/.test(sc.relation) && /total variance/.test(sc.relation),
+     "and the relation says skews compare only at matching tenors");
+
+  const oneExpiry = chain().filter((r) => /260918/.test(r.option_symbol));
+  const single = buildChainPanels(oneExpiry, { spot: SPOT, asOf: ASOF }).skewTerm;
+  eq(single.skew30, null, "one expiry cannot bracket a fixed tenor");
+  ok(/bracketing 30 days/.test(single.skew30Reason || ""), `and says so (${single.skew30Reason})`);
+
+  const quiet = buildChainPanels(chain({ volumeAt: () => 0 }), { spot: SPOT, asOf: ASOF }).skewTerm;
+  eq(quiet.skew30, null, "and a chain where nothing traded publishes no fixed-tenor skew from stale quotes");
+}
+
+{
   const emptyChain = buildChainPanels([], { spot: SPOT, asOf: ASOF });
   eq(emptyChain.status, "unavailable", "an empty chain is unavailable");
   for (const key of ["ivSurface", "skewTerm", "topContracts", "aggressor"]) {
@@ -476,13 +505,34 @@ function chain({
   const built = buildChainPanels(rows, { spot: SPOT, asOf: ASOF });
   const b = built.skewTerm.skewBasis;
   ok(b, "a coarse ladder still produces a reading");
-  ok(Math.abs(Math.abs(b.putM) - SKEW_MONEYNESS) > 1e-3,
-     `the put leg did NOT sit on the target (${b.putM}), which is the interesting case`);
-  ok(Math.abs(b.putM + SKEW_MONEYNESS) <= SKEW_TOLERANCE + 1e-9,
-     "but sat inside the stated tolerance");
+  eq(b.putPlaced, "interpolated",
+     "with both strikes around the target traded, the put wing is interpolated in ln(K/S)");
+  near(b.putM, -SKEW_MONEYNESS, "to exactly the target, so two names' wings sit at the same moneyness", 1e-9);
+  eq(b.putFrom.length, 2, "and the two strikes it was read between are published");
+  ok(b.putFrom[0] < SPOT * Math.exp(-SKEW_MONEYNESS) && b.putFrom[1] > SPOT * Math.exp(-SKEW_MONEYNESS),
+     `on either side of the target strike (${b.putFrom.join(", ")})`);
+  eq(b.putStrike, null, "with no single strike claimed for it");
+  const lo = Math.log(b.putFrom[0] / SPOT), hi = Math.log(b.putFrom[1] / SPOT);
+  const at = (m) => ivOf(m, b.days) + PUT_LIFT / 2;
+  near(b.putIv, Number((at(lo) + (at(hi) - at(lo)) * (-SKEW_MONEYNESS - lo) / (hi - lo)).toFixed(4)),
+       "the wing vol is the straight line between the two quoted vols", 2e-3);
+  eq(b.callPlaced, "nearest",
+     "while the call wing, whose upper strike sits a hair past the window after cent rounding, " +
+     "has no bracket to draw between and keeps the nearest strike");
+  near(b.offset, Math.abs(b.callM - SKEW_MONEYNESS), "so the stated offset is the call wing's alone", 1e-4);
 
-  near(b.putIv, Number((ivOf(b.putM, b.days) + PUT_LIFT / 2).toFixed(4)),
-       "and the published wing vol is the QUOTED vol at the strike used, not an interpolation", 2e-3);
+  const halfTraded = chain({ strikeStep: 0.07, volumeAt: (m) => (m < -0.12 ? 0 : 500) });
+  const hb = buildChainPanels(halfTraded, { spot: SPOT, asOf: ASOF }).skewTerm.skewBasis;
+  eq(hb.putPlaced, "nearest",
+     "when the strike below the target did not trade, NO line is drawn between a traded and an " +
+     "untraded quote — the wing falls back to the nearest traded strike");
+  ok(Math.abs(Math.abs(hb.putM) - SKEW_MONEYNESS) > 1e-3,
+     `so the put leg does NOT sit on the target (${hb.putM})`);
+  ok(Math.abs(hb.putM + SKEW_MONEYNESS) <= SKEW_TOLERANCE + 1e-9,
+     "but sits inside the stated tolerance");
+  near(hb.putIv, Number((ivOf(hb.putM, hb.days) + PUT_LIFT / 2).toFixed(4)),
+       "and the published wing vol is the QUOTED vol at the strike used", 2e-3);
+  ok(hb.offset > 0.01, `and the total offset from the targets is stated (${hb.offset})`);
 
   const sparse = chain({ strikeStep: 0.20 });
   const far = buildChainPanels(sparse, { spot: SPOT, asOf: ASOF });
@@ -737,7 +787,9 @@ function chain({
 }
 
 console.log(`✓ flows-chain: ${checks} assertions — a smile whose skew is known in closed form, ` +
-  `wings that are the nearest listed strike or nothing at all, one at-the-money answer shared ` +
+  `wings interpolated to the target between two traded strikes or read off the nearest listed ` +
+  `strike, never between a traded and an untraded quote, a fixed 30-day skew in total ` +
+  `variance, one at-the-money answer shared ` +
   `with the surface, an aggressor ladder signed by what the buyer is long and withheld rather ` +
   `than zeroed when the vendor did not report it, and a tape that keeps the no-bid contract ` +
   `the sale pricer must refuse`);

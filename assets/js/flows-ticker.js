@@ -906,9 +906,10 @@
 
     if (skew !== null && skewB) {
       host.append(statList([
-        ["Put wing", wingText(skewB.putM, skewB.putStrike, skewB.putIv, skewB.putTraded)],
-        ["Call wing", wingText(skewB.callM, skewB.callStrike, skewB.callIv, skewB.callTraded)],
-        ["Target", "ln(K/S) = " + MINUS + "0.10 and +0.10, nearest listed strike within 0.04"],
+        ["Put wing", wingText(skewB.putM, skewB.putStrike, skewB.putIv, skewB.putTraded, skewB.putFrom)],
+        ["Call wing", wingText(skewB.callM, skewB.callStrike, skewB.callIv, skewB.callTraded, skewB.callFrom)],
+        ["Target", "ln(K/S) = " + MINUS + "0.10 and +0.10: interpolated between the two traded " +
+          "strikes around each, else the nearest listed strike within 0.04"],
         ["Expiry floor", "7 days — measured on " + skewB.expiry +
           (skewB.days === null ? "" : " (" + skewB.days + "d)")],
       ]));
@@ -1012,12 +1013,14 @@
     return v === 0 ? "0.0" : signed(v * 100, (a) => a.toFixed(1));
   }
 
-  function wingText(m, strike, iv, traded) {
+  function wingText(m, strike, iv, traded, from) {
     const { isNum, DASH, signed, px2, vol1 } = window.FlowsPanels;
     const mm = isNum(m), kk = isNum(strike), vv = isNum(iv);
+    const span = Array.isArray(from) && from.length === 2 && isNum(from[0]) !== null &&
+      isNum(from[1]) !== null ? px2(from[0]) + "\u2013" + px2(from[1]) + " interpolated" : null;
     if (mm === null && kk === null && vv === null) return DASH;
     return "ln(K/S) " + (mm === null ? DASH : signed(mm, (a) => a.toFixed(4))) +
-      " · K " + (kk === null ? DASH : px2(kk)) +
+      " · K " + (span || (kk === null ? DASH : px2(kk))) +
       " · iv " + (vv === null ? DASH : vol1(vv)) +
       " · " + (traded === 1 ? "traded today"
         : traded === 0 ? "quoted, did not trade today"
