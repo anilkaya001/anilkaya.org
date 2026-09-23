@@ -1230,7 +1230,7 @@ try {
     await mount(page, fitted);
     const t = await modInfo(page, "m-vol");
     ok(/GARCH\(1,1\), Hansen skewed t/.test(t) && !/GED/.test(t), "the volatility disclosure names the density fitted, and carries no trace of the GED");
-    const cells = ["GARCH σ last session", "GARCH σ next session", "GARCH σ long run", "Tail shape ν", "Skew λ", "α + β", "α", "β", "ω"];
+    const cells = ["GARCH vol last session", "GARCH vol next session", "GARCH vol long run", "Tail shape ν", "Skew λ", "α + β", "α", "β", "ω"];
     let last = -1;
     for (const c of cells) { const at = t.indexOf("\n" + c + "\n"); ok(at > last, `the fit's cell "${c}" is stated, in the fixed order: levels, then shape, then the recursion's own`); last = at; }
     ok(t.includes("\nTail shape ν\n" + g0.nu.toFixed(1) + "\n"), "the tail shape prints to one decimal");
@@ -1239,7 +1239,7 @@ try {
     ok(/next-session cell is the recursion's own state/.test(t) && /RiskMetrics EWMA at 0\.94/.test(t) && /long-run cell is a measurement/.test(t), "and explains the next-session cell and the reference path");
     await pickView(page, "m-vol", "History");
     const hist = await page.evaluate(() => ({ dashed: document.querySelectorAll("#m-vol .ft-cbox path[stroke-dasharray]").length, legend: document.querySelector("#m-vol .ft-leg-row").innerText }));
-    ok(hist.dashed >= 1 && /EWMA\(0\.94\)/.test(hist.legend) && /GARCH σ/.test(hist.legend), `the history view draws the conditional-volatility path and its EWMA reference, dashed, and names both (${JSON.stringify(hist)})`);
+    ok(hist.dashed >= 1 && /EWMA\(0\.94\)/.test(hist.legend) && /GARCH vol/.test(hist.legend), `the history view draws the conditional-volatility path and its EWMA reference, dashed, and names both (${JSON.stringify(hist)})`);
     const broken = clone(fitted);
     broken.panels.context.breaks = [{ date: "2026-04-06", ratio: 0.0426, before: 117, volumeRatio: 20.5, shape: "split" }];
     await mount(page, broken);
@@ -1251,7 +1251,7 @@ try {
     older.panels.context.garch.nu = 1.3;
     await mount(page, older);
     const pre = await modInfo(page, "m-vol");
-    ok(!/\nTail shape ν\n|\nSkew λ\n|\nGARCH σ next session\n/.test(pre), "a card fitted before the skewed t shows no shape, skew or next-session figure");
+    ok(!/\nTail shape ν\n|\nSkew λ\n|\nGARCH vol next session\n/.test(pre), "a card fitted before the skewed t shows no shape, skew or next-session figure");
     ok(/fitted before the skewed t/.test(pre) && /predates the skewed-t/.test(pre) && !/Hansen/.test(pre), "and says so instead of naming a density that was not fitted");
     eq(errors.length, 0, `the GARCH readings throw nothing (${errors.join("; ")})`);
     await page.close();

@@ -1560,7 +1560,7 @@
     const G = V.grid;
     const table = h("table", null, h("caption", null, "Dealer hedge flow over the next session, by spot and volatility move"));
     const rowsSorted = G.rows.map((r, i) => ({ ...r, i })).sort((a, b) => b.kS - a.kS);
-    table.append(h("thead", null, h("tr", null, h("th", { scope: "col" }, "Spot"), G.cols.map((c) => h("th", { scope: "col" }, c.kV === 0 ? "IV " + F.pct(c.vol, 1) : sigmaStep(c.kV, "σ vol"))))));
+    table.append(h("thead", null, h("tr", null, h("th", { scope: "col" }, "Spot"), G.cols.map((c) => h("th", { scope: "col" }, c.kV === 0 ? "IV " + F.pct(c.vol, 1) : sigmaStep(c.kV, " SD vol"))))));
     table.append(h("tbody", null, rowsSorted.map((r) => h("tr", null, h("th", { scope: "row" }, F.px(r.price)), G.cols.map((c, j) => { const cell = G.cells[r.i] && G.cells[r.i][j]; return cell ? h("td", null, F.money(cell.flow, true)) : h("td", { "data-empty": "unavailable" }, DASH); })))));
     host.append(h("div", { class: "visually-hidden" }, table));
     const chart = h("div");
@@ -1576,13 +1576,13 @@
       const svg = C.svgRoot(el, w, H, animate, "Dealer hedging flow by spot and volatility move");
       G.cols.forEach((c, j) => {
         const xx = left + j * (cw + gap) + cw / 2;
-        s("text", { x: xx, y: 12, text: c.kV === 0 ? "IV " + F.pct(c.vol, 1) : sigmaStep(c.kV, "σ vol"), "text-anchor": "middle", class: c.kV === 0 ? "tx-1" : null }, svg);
+        s("text", { x: xx, y: 12, text: c.kV === 0 ? "IV " + F.pct(c.vol, 1) : sigmaStep(c.kV, " SD vol"), "text-anchor": "middle", class: c.kV === 0 ? "tx-1" : null }, svg);
         if (c.kV !== 0) s("text", { x: xx, y: 25, text: F.pct(c.vol, 1), "text-anchor": "middle", class: "tx-3" }, svg);
       });
       rowsSorted.forEach((r, ri) => {
         const yy = top + ri * (ch + gap);
         s("text", { x: 0, y: yy + ch / 2 - 2, text: F.px(r.price), class: r.kS === 0 ? "tx-1 tx-b" : "tx-1" }, svg);
-        s("text", { x: 0, y: yy + ch / 2 + 11, text: r.kS === 0 ? "spot" : sigmaStep(r.kS, "σ"), class: "tx-3" }, svg);
+        s("text", { x: 0, y: yy + ch / 2 + 11, text: r.kS === 0 ? "spot" : sigmaStep(r.kS, " SD"), class: "tx-3" }, svg);
         G.cols.forEach((c, j) => {
           const cell = G.cells[r.i] && G.cells[r.i][j];
           const xx = left + j * (cw + gap);
@@ -1649,15 +1649,15 @@
     mod({ id: "m-hedge", title: "Hedging", span: [12, 5], st: stV.state === "ok" ? st : stV, robustness: stV.state === "ok" && V.robustness ? V.robustness.r : null, seg: vw.seg, views: vw.views, index: 5, body: [
       mets([
         metric("Overnight", F.money(c1, true), { key: glyph("clock"), tone: tone(c1), sub: ch.charm && num(ch.charm.pctAdv) !== null ? F.pct(Math.abs(ch.charm.pctAdv), 1) + " of a day" : null, state: c1 === null ? silence("charm") : null }),
-        metric("Spot +1σ", F.money(g1, true), { key: glyph("gamma"), tone: tone(g1), sub: ch.gamma ? (ch.gamma.source === "book" ? "book" : "today only") : null, state: g1 === null ? silence("gamma") : null }),
-        metric("Vol +1σ", F.money(v1, true), { key: glyph("vega"), tone: tone(v1), sub: ch.vanna && num(ch.vanna.perPoint) !== null ? F.money(Math.abs(ch.vanna.perPoint)) + " per pt" : null, state: v1 === null ? silence("vanna") : null }),
+        metric("Spot +1 SD", F.money(g1, true), { key: glyph("gamma"), tone: tone(g1), sub: ch.gamma ? (ch.gamma.source === "book" ? "book" : "today only") : null, state: g1 === null ? silence("gamma") : null }),
+        metric("Vol +1 SD", F.money(v1, true), { key: glyph("vega"), tone: tone(v1), sub: ch.vanna && num(ch.vanna.perPoint) !== null ? F.money(Math.abs(ch.vanna.perPoint)) + " per pt" : null, state: v1 === null ? silence("vanna") : null }),
       ], { min: 96 }), vw.box, vw.leg, shares],
       info: () => {
         if (stV.state !== "ok") return { title: "Hedging", state: stV.state, lead: stV.reason };
         const I = V.inputs || {};
         return {
           title: "Dealer hedging flow", asOf: V.asOf || null, lead: leadOf(V),
-          facts: [["σ daily", F.pct(I.sigmaDaily, 2) + (I.sigmaSource ? " " + MID + " " + I.sigmaSource : "")], ["1σ in dollars", "$" + F.px(I.sigmaDollars)], ["Vol of vol", num(I.sigmaV) === null ? null : I.sigmaV.toFixed(2) + " pts"],
+          facts: [["Daily SD", F.pct(I.sigmaDaily, 2) + (I.sigmaSource ? " " + MID + " " + I.sigmaSource : "")], ["1 SD in dollars", "$" + F.px(I.sigmaDollars)], ["Vol of vol", num(I.sigmaV) === null ? null : I.sigmaV.toFixed(2) + " pts"],
             ["Spot–vol correlation", num(I.rho) === null ? null : I.rho.toFixed(2)], ["Typical day (ADV)", F.money(I.adv)], ["Book γ per 1%", F.money(I.gammaBook, true)], ["Robustness", V.robustness ? V.robustness.r + " of 3" : null],
             ["Variance shares", sh ? parts.map((p) => p[0] + " " + F.pct(p[1], 0, true)).join(" " + MID + " ") : null]],
           sections: [{ title: "Robustness", lines: [V.robustness && V.robustness.why] },
@@ -1804,7 +1804,7 @@
         if (em.size) series.push({ values: ivRows.map((r) => (em.has(r.date) ? em.get(r.date) : null)), color: "--s-gray", dash: true, label: "EWMA", format: (v) => F.pct(v) });
         const refs = [num(pm.rv30) !== null ? { y: pm.rv30, color: "--s-teal", dash: true } : null].filter(Boolean);
         return { handle: C.line(host, { x: ivRows.map((r) => r.date), series, refs, yFormat: (v) => F.pct(v, 0), height: [280, 300, 320], label: card.ticker + " implied volatility against the GARCH conditional volatility and its EWMA reference" }),
-          legend: [keyOf("--accent", "ln", "Implied 30d"), gm.size ? keyOf("--label-2", "ln", "GARCH σ") : null, em.size ? keyOf("--s-gray", "ln", "EWMA(0.94)") : null, refs.length ? keyOf("--s-teal", "ln", "RV 30d " + F.pct(pm.rv30)) : null] };
+          legend: [keyOf("--accent", "ln", "Implied 30d"), gm.size ? keyOf("--label-2", "ln", "GARCH vol") : null, em.size ? keyOf("--s-gray", "ln", "EWMA(0.94)") : null, refs.length ? keyOf("--s-teal", "ln", "RV 30d " + F.pct(pm.rv30)) : null] };
       } },
     ];
     const vw = viewer("Volatility view", views);
@@ -1856,7 +1856,7 @@
     const skewt = g.dist === "skewt";
     const pctv = (v) => (num(v) === null ? null : v.toFixed(1) + "%");
     const fixed = (v, dp) => (num(v) === null ? null : v.toFixed(dp));
-    return [["GARCH σ last session", pctv(g.lastVol)], ["GARCH σ next session", skewt ? pctv(g.nextVol) : null], ["GARCH σ long run", pctv(g.longRunVol)],
+    return [["GARCH vol last session", pctv(g.lastVol)], ["GARCH vol next session", skewt ? pctv(g.nextVol) : null], ["GARCH vol long run", pctv(g.longRunVol)],
       ["Tail shape ν", skewt ? fixed(g.nu, 1) : null], ["Skew λ", skewt && num(g.lambda) !== null ? F.signed(g.lambda, 2) : null],
       ["α + β", fixed(g.persistence, 3)], ["α", fixed(g.alpha, 3)], ["β", fixed(g.beta, 3)], ["ω", fixed(g.omega, 4)]];
   }
@@ -1992,7 +1992,7 @@
         title: "Flow", state: st.state === "ok" ? null : st.state, asOf: (path && path.asOf) || null, lead: leadOf(P.path) || reasonOf(panelSt(card, "path", "session flow")),
         facts: pathFacts(card).concat([["NOPE", nope ? F.pct(nope.close, 2, true) + " (fill " + F.pct(nope.fill, 1) + ", divergence " + nope.divergence + ")" : null],
           ["Tenor", fe ? "conviction " + fx(fe.convictionDte, 1) + " days, bucket " + fe.convictionBucket + ", OTM share " + F.pct(fe.otmShare, 0) : null],
-          ["Centroid", fs ? F.px(fs.centroid) + " (" + F.signed(fs.centroidSigma, 2) + " σ from spot)" : null], ["Wall share", fs ? F.pct(fs.wallShare, 1) + " of in-band flow at the walls" : null]]),
+          ["Centroid", fs ? F.px(fs.centroid) + " (" + F.signed(fs.centroidSigma, 2) + " SD from spot)" : null], ["Wall share", fs ? F.pct(fs.wallShare, 1) + " of in-band flow at the walls" : null]]),
         sections: [{ title: "Aggressor", lines: [leadOf(P.aggressor) || reasonOf(panelSt(card, "aggressor", "aggressor ladder")), P.aggressor && P.aggressor.relation] },
           { title: "Session", lines: [tp ? "Read from the live tape at " + F.time(tp.readAt) + "." : null].concat(pathNotes(card, legs)) },
           { title: "Days", lines: [npY ? "Net premium per session over the year from the vendor's options-volume history; a dot is a session with no reading, not a zero." : pt ? pt.unit : reasonOf(panelSt(card, "premiumTrack", "premium history"))] }],
