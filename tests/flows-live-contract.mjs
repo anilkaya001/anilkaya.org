@@ -759,6 +759,18 @@ const T = (iso) => Date.parse(iso);
   const UI = ctx.window.FlowsUI;
   ok(typeof UI.freshFrom === "function" && typeof UI.heartbeat === "function" && typeof UI.freshAggregate === "function",
     "the client helper attaches to FlowsUI and adds no global of its own");
+  {
+    const frozenCtx = { window: {}, document: ctx.document, Date, isFinite, Number, String, Math, setTimeout, clearTimeout };
+    vm.createContext(frozenCtx);
+    vm.runInContext("window.FlowsUI = Object.freeze({ F: Object.freeze({ px: 1 }), chart: Object.freeze({}) });", frozenCtx);
+    const before = frozenCtx.window.FlowsUI;
+    vm.runInContext('"use strict";\n' + src, frozenCtx);
+    const after = frozenCtx.window.FlowsUI;
+    ok(typeof after.heartbeat === "function" && typeof after.freshFrom === "function",
+      "on the real, frozen FlowsUI the helper still installs: flows-ui.js freezes its object, and assigning to it threw");
+    ok(after !== before && after.F === before.F && after.chart === before.chart && Object.isFrozen(after),
+      "by publishing a new frozen FlowsUI that keeps every primitive the page already had");
+  }
   const at = T("2026-09-23T14:00:00Z");
   const { headers } = freshHeaders({ readAt: at - 60000, cadenceS: 300, session: "2026-09-23" }, at);
   const h = new Headers(headers);

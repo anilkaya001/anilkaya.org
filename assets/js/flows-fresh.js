@@ -2,6 +2,7 @@
   "use strict";
   var UI = window.FlowsUI;
   if (!UI || UI.freshFrom) return;
+  var api = {};
 
   var STATES = ["live", "fresh", "closed", "stale", "pending"];
   var HEARTBEAT_MS = { ticker: 10000, other: 30000, extended: 60000 };
@@ -80,14 +81,14 @@
     return f;
   }
 
-  UI.freshFrom = function (src, extra) {
+  api.freshFrom = function (src, extra) {
     if (src && typeof src === "object" && typeof src.state === "string" && !src.headers && typeof src.get !== "function") {
       return wrap(fromEntry(src, extra && extra.serverNow, extra && extra.phase));
     }
     return wrap(fromHeaders(src));
   };
 
-  UI.freshAggregate = function (list, phase) {
+  api.freshAggregate = function (list, phase) {
     var states = (list || []).filter(Boolean).map(function (f) { return typeof f === "string" ? f : f.stateAt(); });
     if (!states.length) return "pending";
     if (states.indexOf("stale") >= 0) return "stale";
@@ -98,14 +99,14 @@
     return states.indexOf("fresh") >= 0 ? "fresh" : states[0];
   };
 
-  UI.heartbeatInterval = function (phase, page, hidden) {
+  api.heartbeatInterval = function (phase, page, hidden) {
     if (hidden) return null;
     if (phase === "rth") return page === "ticker" ? HEARTBEAT_MS.ticker : HEARTBEAT_MS.other;
     if (phase === "pre" || phase === "post") return HEARTBEAT_MS.extended;
     return null;
   };
 
-  UI.heartbeat = function (opts) {
+  api.heartbeat = function (opts) {
     var o = opts || {};
     var seen = null;
     var timer = null;
@@ -123,7 +124,7 @@
       if (stopped) return;
       clearTimeout(timer);
       timer = null;
-      var wait = UI.heartbeatInterval(phase, o.page, document.hidden);
+      var wait = api.heartbeatInterval(phase, o.page, document.hidden);
       if (backoff) wait = Math.min(BACKOFF_MAX_MS, Math.max(wait || HEARTBEAT_MS.other, backoff));
       if (wait === null && phaseEndsAt !== null && !document.hidden) wait = Math.max(1000, phaseEndsAt - Date.now());
       if (wait !== null) timer = setTimeout(beat, wait);
@@ -143,7 +144,7 @@
           if (first) seen = {};
           Object.keys(body.keys || {}).forEach(function (k) {
             var e = body.keys[k];
-            fresh[k] = UI.freshFrom(e, { serverNow: body.serverNow, phase: body.phase });
+            fresh[k] = api.freshFrom(e, { serverNow: body.serverNow, phase: body.phase });
             if (!first && seen[k] !== e.updatedAt) changed.push(k);
             seen[k] = e.updatedAt;
           });
@@ -151,7 +152,7 @@
           if (changed.length && typeof o.onChange === "function") o.onChange(changed, fresh, body);
           if (body.quote && typeof o.onQuote === "function") o.onQuote(body.quote);
         })
-        .catch(function () { backoff = backoff ? backoff * 2 : 2 * (UI.heartbeatInterval(phase, o.page, false) || HEARTBEAT_MS.other); })
+        .catch(function () { backoff = backoff ? backoff * 2 : 2 * (api.heartbeatInterval(phase, o.page, false) || HEARTBEAT_MS.other); })
         .then(schedule);
     }
 
@@ -166,4 +167,5 @@
       now: beat,
     };
   };
+  window.FlowsUI = Object.freeze(Object.assign({}, UI, api));
 })();
