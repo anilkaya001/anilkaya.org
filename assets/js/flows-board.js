@@ -35,7 +35,7 @@
 
   const st = {
     payload: null, rows: [], sortKey: null, sortDir: "desc", q: "", view: "list",
-    track: null, trackState: "loading", uni: null, uniIndex: null, uniState: { state: "pending", reason: "Reading the cross-section." },
+    trackState: "loading", uni: null, uniIndex: null, uniState: { state: "pending", reason: "Reading the cross-section." },
     horizon: null, knowsDeep: false, painted: false, mapChart: null, hasIdea: false,
   };
   const mem = { rows: "absent", status: null, note: null, prior: null };
@@ -232,10 +232,13 @@
 
   const cellText = (text, cls, attrs) => h("span", { class: cls || "bd-n", ...(attrs || {}) }, text);
 
+  const isDeep = (row) => !st.knowsDeep || row.dp === 1;
+  const labelOf = (row, index) => (WATCH ? watchAria : ariaFor)(row, index, isDeep(row));
+
   function nameCell(row, index) {
-    const deep = !st.knowsDeep || row.dp === 1;
+    const deep = isDeep(row);
     const t = String(row.t || DASH);
-    const label = WATCH ? watchAria(row, deep) : ariaFor(row, index, deep);
+    const label = labelOf(row, index);
     const open = deep
       ? h("a", { class: "bd-open", href: readerHref(row.t), "aria-label": label }, t)
       : h("span", { class: "bd-open is-flat", role: "link", "aria-disabled": "true", "aria-label": label, title: NO_CARD_SAID }, t);
@@ -594,10 +597,7 @@
       if (st.view === "map") redrawMap();
     });
     sortSel = h("select", { class: "bd-sort-sel", id: "fbSort", "aria-label": "Order" });
-    for (const c of SORT_CHOICES) {
-      if (c.key && !sortable(colByKey(c.key))) continue;
-      sortSel.append(h("option", { value: choiceValue(c.key, c.dir) }, c.label));
-    }
+    buildSortOptions();
     sortSel.addEventListener("change", () => {
       const [k, d] = String(sortSel.value || "").split(":");
       setSort(k || null, d);
@@ -608,7 +608,6 @@
       countEl,
       h("span", { class: "bd-tools-sp" }),
       h("label", { class: "bd-sort" }, sortSel, UI.glyph("chev")));
-    syncSortSelect();
   }
 
   function paintHead() {
@@ -634,8 +633,11 @@
         cell.append(h("span", { class: "bd-hl", title: c.title || null }, c.label));
       }
       if (c.uni && st.uniState.state !== "ok") cell.append(UI.stateButton(st.uniState, c.title || c.label));
-      if (c.key === "strip" && st.trackState === "failed") cell.append(UI.stateButton({ state: "unavailable", reason: "The score trace did not load, so no session history is drawn." }, "Five sessions"));
-      if (c.key === "strip" && st.trackState === "pending") cell.append(UI.stateButton({ state: "pending", reason: "The score trace publishes with the next pipeline run." }, "Five sessions"));
+      if (c.key === "strip" && (st.trackState === "failed" || st.trackState === "pending")) {
+        cell.append(UI.stateButton(st.trackState === "failed"
+          ? { state: "unavailable", reason: "The score trace did not load, so no session history is drawn." }
+          : { state: "pending", reason: "The score trace publishes with the next pipeline run." }, "Five sessions"));
+      }
       return cell;
     }));
   }
@@ -646,8 +648,7 @@
     const cached = rowCache.get(row);
     if (cached) return cached;
     const r = h("div", { class: "bd-row", role: "row", "data-flip": String(row.t || index) });
-    const deep = !st.knowsDeep || row.dp === 1;
-    if (!deep) r.classList.add("is-flat");
+    if (!isDeep(row)) r.classList.add("is-flat");
     for (const c of shownCols()) {
       const extra = c.attrs ? c.attrs(row) : null;
       r.append(h("div", {
@@ -673,7 +674,7 @@
       (deep ? `Open the full reader for ${row.t}.` : NO_CARD_SAID);
   }
 
-  function watchAria(row, deep) {
+  function watchAria(row, index, deep) {
     const d = distanceToBand(row, bandOf());
     return `${row.t}, score ${signedInt(row.s)}, ` +
       (d === null ? "distance to the band unavailable" : (d.exact !== null ? d.value.toFixed(2) : d.value.toFixed(0)) + " score points from the band edge") +
@@ -1166,7 +1167,7 @@
     };
     const open = (i) => {
       const t = mapState.tiles[i];
-      if (t && (!st.knowsDeep || t.row.dp === 1)) location.assign(readerHref(t.row.t));
+      if (t && isDeep(t.row)) location.assign(readerHref(t.row.t));
     };
     host.addEventListener("pointermove", (e) => { if (e.pointerType === "touch") return; const i = at(e); if (i >= 0 && i !== mapState.cur) mapShow(i); });
     host.addEventListener("pointerleave", (e) => { if (e.pointerType !== "touch") mapHide(); });
@@ -1329,24 +1330,25 @@
     trackBy.clear();
     if (track && typeof track === "object") {
       if (Array.isArray(track.names)) for (const n of track.names) if (n && n.t) trackBy.set(String(n.t).toUpperCase(), n);
-      st.track = track;
       st.trackState = track.status === "pending" && !trackBy.size ? "pending" : "ok";
     } else {
       st.trackState = "failed";
     }
   }
 
-  function refresh(keys) {
+  function refresh(keys, live) {
     const cols = shownCols().filter((c) => keys.includes(c.key));
     st.rows.forEach((row, index) => {
       const node = rowCache.get(row);
       if (!node) return;
       for (const c of cols) {
         const cell = node.querySelector(':scope > [data-col="' + c.key + '"]');
-        if (cell) cell.replaceChildren(...[].concat(c.cell(row, index)));
+        const open = live && c.key === "t" && cell && cell.querySelector(".bd-open");
+        if (open) open.setAttribute("aria-label", labelOf(row, index));
+        else if (cell) cell.replaceChildren(...[].concat(c.cell(row, index)));
       }
     });
-    paintHead();
+    if (!live) paintHead();
     if (st.view === "map") redrawMap();
   }
 
@@ -1381,6 +1383,15 @@
     syncSortSelect();
   }
 
+  let livePoll = 0;
+  function pollLive(ms) {
+    clearTimeout(livePoll);
+    livePoll = setTimeout(function go() {
+      if (document.hidden) { document.addEventListener("visibilitychange", go, { once: true }); return; }
+      getJson("/api/flows/lk?k=strips").then(takeLive, () => null);
+    }, ms);
+  }
+
   function takeLive(live) {
     const p = st.payload;
     if (!live || live.status !== "ok" || !Array.isArray(live.fields) || !live.rows || !p) return;
@@ -1400,9 +1411,10 @@
       hit++;
     }
     if (!hit) return;
+    pollLive(Math.max(60, num(live.fresh && live.fresh.cadenceS) || 300) * 1000);
     table.dataset.live = "1";
     if (live.fresh && typeof live.fresh.readAt === "string") UI.freshness({ readAt: live.fresh.readAt, live: true, source: "strips" });
-    refresh(["t", "px"]);
+    refresh(["t", "px"], true);
   }
 
   function render() {
