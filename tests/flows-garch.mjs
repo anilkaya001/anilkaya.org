@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { fitGarch, skewtDensity, skewtConstants, lnGamma, GARCH_MIN_RETURNS, SKEWT_NU_MIN, SKEWT_NU_MAX,
-         GARCH_WINSOR_K, GARCH_PERSIST_CAP, GARCH_EWMA_LAMBDA, GARCH_AVG_SESSIONS, garchAverageVariance }
+         GARCH_WINSOR_K, GARCH_PERSIST_CAP, GARCH_EWMA_LAMBDA, GARCH_AVG_SESSIONS, garchAverageVariance,
+         GARCH_ALPHA_DEGENERATE, ljungBoxSquared }
   from "../shared/flows-garch.js";
 import { repairCandles, CANDLE_BREAK_LOG, CANDLE_BREAK_VOLUME } from "../scripts/flows-pipeline.mjs";
 
@@ -142,10 +143,13 @@ ok(gappy.status === "ok" && gappy.n === 302, "null, zero and negative closes are
     const year = fitGarch(px.slice(w, w + 251), dates.slice(w, w + 251));
     windows++;
     ok(year.status === "ok" && year.dist === "skewt", `a one-year window fits (${w})`);
-    const pinned = year.persistence > 0.998 || year.alpha < 1e-3;
+    const pinned = year.persistence > 0.998 || year.alpha < GARCH_ALPHA_DEGENERATE;
     if (pinned) unidentified++;
     ok(!(pinned && year.converged),
-       `a window whose persistence reached its cap or whose alpha fell to zero is never published as converged (${w})`);
+       `a window whose persistence reached its cap or whose alpha fell under ${GARCH_ALPHA_DEGENERATE} is never published as converged (${w}, alpha ${year.alpha})`);
+    ok(!pinned || year.grade <= 2, `and grades at most 2 (${w}, grade ${year.grade})`);
+    ok(year.alpha >= GARCH_ALPHA_DEGENERATE || year.why.includes("garch.alpha-degenerate"),
+       `a degenerate alpha is named by its code (${w})`);
     ok(year.longRunVol > 0,
        `and its long-run level is still published, because under variance targeting it is the window's own sample volatility and not a ratio of two edge values (${w})`);
     if (pinned) ok(/cap|not identified/.test(year.reason), `with the edge named in the reason (${year.reason})`);
@@ -157,11 +161,11 @@ ok(gappy.status === "ok" && gappy.n === 302, "null, zero and negative closes are
   for (let t = 0; t < 250; t++) flatPx.push(flatPx[flatPx.length - 1] * Math.exp(1.2 * skewtDraw(5, -0.2) / 100));
   const flat = fitGarch(flatPx);
   ok(flat.status === "ok", "a constant-variance year still fits");
-  if (flat.alpha < 1e-3) {
+  if (flat.alpha < GARCH_ALPHA_DEGENERATE) {
     ok(flat.converged === false && /not identified/.test(flat.reason) && flat.longRunVol > 0,
        "and when the optimiser finds no ARCH effect the fit is published unsettled with beta unidentified, the long run still the sample volatility");
   } else {
-    ok(flat.alpha >= 1e-3, `or it found a small ARCH effect (alpha ${flat.alpha}) and stands on its own`);
+    ok(flat.alpha >= GARCH_ALPHA_DEGENERATE, `or it found an ARCH effect past the line (alpha ${flat.alpha}) and stands on its own`);
   }
 }
 const uniform = fitGarch(Array.from({ length: 300 }, (_, i) => 100 + (i % 2)));
@@ -203,7 +207,7 @@ ok(uniform.status === "ok" && uniform.converged === false && typeof uniform.reas
     ok(jf.ewma[131] > cf.ewma[131] * 3,
        `while the EWMA reference, fed the returns as they happened, does spike after the bar the fit refused (${jf.ewma[131]} vs ${cf.ewma[131]})`);
   }
-  ok(jf.alpha >= 1e-3 && jf.persistence <= 0.998 && jf.longRunVol !== null,
+  ok(jf.alpha >= GARCH_ALPHA_DEGENERATE && jf.persistence <= 0.998 && jf.longRunVol !== null,
      `and the fit is identified with its long run published (alpha ${jf.alpha}, persistence ${jf.persistence})`);
   {
     const stale = [100];
@@ -255,6 +259,30 @@ ok(uniform.status === "ok" && uniform.converged === false && typeof uniform.reas
   const bd = repairCandles(blind);
   ok(bd.breaks.length === 1 && bd.breaks[0].shape === "unverified" && bd.breaks[0].volumeRatio === null,
      "without volume the price step alone is still cut, and the break says the volume could not be read");
+}
+
+{
+  ok(GARCH_ALPHA_DEGENERATE === 0.01, "the degenerate line is the spec's alpha < 0.01, not the old 1e-3");
+  near(fit.sigma2Next * 1e4 * 252, (fit.nextVol / 100) ** 2 * 1e4, 1e-2 * fit.nextVol ** 2,
+    "sigma2Next is the next session's variance of the decimal return, the same number nextVol annualises");
+  ok(fit.grade === 3 && fit.why.length === 0 && fit.ljungBox && fit.ljungBox.p > 0.05,
+    `a clean simulated GARCH series grades 3 with its squared residuals white at ten lags (Ljung-Box p ${fit.ljungBox && fit.ljungBox.p})`);
+  const white = ljungBoxSquared(Array.from({ length: 500 }, (_, i) => Math.sin(i * 12.9898) * 43758.5453 % 1));
+  ok(white && white.lags === 10 && white.p >= 0 && white.p <= 1, "the Ljung-Box helper returns a probability");
+  const clustered = [];
+  for (let i = 0; i < 400; i++) clustered.push((Math.floor(i / 40) % 2 ? 3 : 0.3) * (i % 2 ? 1 : -1));
+  ok(ljungBoxSquared(clustered).p < 1e-6, "and rejects squared residuals that come in blocks");
+  const px2 = px.slice(0, 261), d2 = px2.map((_, i) => new Date(Date.UTC(2024, 0, 1 + i)).toISOString().slice(0, 10));
+  const spiked = px2.map((v, i) => (i >= 100 ? v * 1.35 : v));
+  const plain = fitGarch(spiked, d2);
+  const maskedFit = fitGarch(spiked, d2, { mask: [d2[100]] });
+  ok(maskedFit.masked === 1 && plain.masked === 0, "the mask drops exactly the earnings session it names");
+  const clean = fitGarch(px2, d2);
+  ok(Math.abs(maskedFit.longRunVol - clean.longRunVol) < Math.abs(plain.longRunVol - clean.longRunVol),
+    `masking the 35% event session keeps the diffusion level nearer the clean series (masked ${maskedFit.longRunVol}, unmasked ${plain.longRunVol}, clean ${clean.longRunVol})`);
+  ok(maskedFit.logLik > plain.logLik, "and the likelihood no longer pays for an event the diffusion never produced");
+  const byDate = fitGarch(spiked, d2, { mask: new Set([d2[100], "1999-01-01"]) });
+  ok(byDate.masked === 1, "a Set works as a mask and a date outside the window masks nothing");
 }
 
 console.log(`✓ flows-garch: ${n} assertions — Hansen's skewed t is a zero-mean unit-variance density that ` +

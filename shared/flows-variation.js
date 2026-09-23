@@ -1,3 +1,5 @@
+import { bsmGreeks, normCdf as codyCdf, normPdf as codyPdf } from "./flows-quant-bs.js";
+
 export const PUT_TO_DEALER = Object.freeze({ gamma: 1, delta: -1, vanna: -1, charm: -1 });
 
 export const VARIATION_LINES = Object.freeze({
@@ -108,33 +110,20 @@ function pearsonOf(a, b) {
   return da > 0 && db > 0 ? s / Math.sqrt(da * db) : null;
 }
 
-const SQRT2PI = Math.sqrt(2 * Math.PI);
-export function normPdf(x) { return Math.exp(-0.5 * x * x) / SQRT2PI; }
-export function normCdf(x) {
-  const z = Math.abs(x) / Math.SQRT2;
-  const t = 1 / (1 + 0.5 * z);
-  const erfc = t * Math.exp(-z * z - 1.26551223 + t * (1.00002368 + t * (0.37409196 +
-    t * (0.09678418 + t * (-0.18628806 + t * (0.27886807 + t * (-1.13520398 +
-    t * (1.48851587 + t * (-0.82215223 + t * 0.17087277)))))))));
-  return x >= 0 ? 1 - erfc / 2 : erfc / 2;
-}
+export function normPdf(x) { return codyPdf(x); }
+export function normCdf(x) { return codyCdf(x); }
 
-export function blackScholesGreeks({ spot, strike, days, vol, rate = 0, type = "C" }) {
-  const S = fin(spot), K = fin(strike), d = fin(days), s = fin(vol), r = fin(rate) ?? 0;
+export function blackScholesGreeks({ spot, strike, days, vol, rate = 0, dividend = 0, type = "C" }) {
+  const S = fin(spot), K = fin(strike), d = fin(days), s = fin(vol), r = fin(rate) ?? 0, q = fin(dividend) ?? 0;
   if (!(S > 0) || !(K > 0) || !(d > 0) || !(s > 0)) return null;
-  const tau = d / 365;
-  const sq = Math.sqrt(tau);
-  const d1 = (Math.log(S / K) + (r + 0.5 * s * s) * tau) / (s * sq);
-  const d2 = d1 - s * sq;
-  const pdf = normPdf(d1);
-  const call = type !== "P";
-  const charmYear = -pdf * (2 * r * tau - d2 * s * sq) / (2 * tau * s * sq);
+  const g = bsmGreeks({ S, K, r, q, sigma: s, T: d / 365, type: type === "P" ? "P" : "C" });
+  if (!g) return null;
   return {
-    delta: call ? normCdf(d1) : normCdf(d1) - 1,
-    gamma: pdf / (S * s * sq),
-    vanna: -pdf * d2 / s,
-    charmPerDay: charmYear / 365,
-    d1, d2,
+    delta: g.delta,
+    gamma: g.gamma,
+    vanna: g.vanna,
+    charmPerDay: g.charm / 365,
+    d1: g.d1, d2: g.d2,
   };
 }
 
@@ -303,7 +292,7 @@ export function unitFamily(pairs) {
   };
 }
 
-export function chainCallVanna(rows, { spot, asOf, expiry, rate = VARIATION_LINES.RATE } = {}) {
+export function chainCallVanna(rows, { spot, asOf, expiry, rate = VARIATION_LINES.RATE, dividend = 0 } = {}) {
   const S = fin(spot);
   const e = isoDay(expiry);
   if (!(S > 0) || !e || !asOf) return null;
@@ -316,7 +305,7 @@ export function chainCallVanna(rows, { spot, asOf, expiry, rate = VARIATION_LINE
     const oi = fin(r.oi), K = fin(r.strike);
     if (iv === null || oi === null || K === null || !(oi > 0) || !(iv > 0)) continue;
     if (iv > 3) iv /= 100;
-    const g = blackScholesGreeks({ spot: S, strike: K, days, vol: iv, rate, type: "C" });
+    const g = blackScholesGreeks({ spot: S, strike: K, days, vol: iv, rate, dividend, type: "C" });
     if (!g) continue;
     value += g.vanna * oi * 100;
     contracts++;
