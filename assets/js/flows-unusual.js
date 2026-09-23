@@ -512,7 +512,7 @@
       silence(host.urgency, { state: "quiet", reason: "No board name is among the flagged windows, and urgency is measured only for the board's deep names." }, "Urgency", 200);
       return;
     }
-    const session = typeof S.alerts.sessionDate === "string" ? S.alerts.sessionDate : S.alerts.record && S.alerts.record.date;
+    const session = typeof S.alerts.sessionDate === "string" ? S.alerts.sessionDate : null;
     const draw = () => {
       const got = board.map((g) => ({ g, u: S.urgency.get(g.t) }));
       const vals = got.map((x) => (x.u && x.u.tape ? n(x.u.tape.urgency) : null)).filter((v) => v !== null);

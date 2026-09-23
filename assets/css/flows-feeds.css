@@ -115,7 +115,7 @@
 a.fu-nrow:hover, a.fu-urow:hover, a.fu-crow:hover, a.fu-srow:hover { background: var(--fill-4); }
 .fu-list > :last-child { border-bottom: 0; }
 .fu-head { min-height: 24px; border-bottom: 1px solid var(--sep); color: var(--label-3); font: var(--t-caption); }
-.fu-urow.fu-head, .fu-srow.fu-head { min-height: 24px; }
+.fu-nrow.fu-head, .fu-urow.fu-head, .fu-srow.fu-head { min-height: 24px; }
 .fu-nrow { grid-template-columns: minmax(64px, 1fr) minmax(80px, 2.2fr) 60px 40px 46px 42px; }
 .fu-urow { grid-template-columns: minmax(128px, 1fr) minmax(60px, 1.5fr) 56px; }
 .fu-crow { grid-template-columns: 22px minmax(92px, 1.4fr) minmax(50px, 1.6fr) 48px 52px; }
@@ -131,7 +131,7 @@ a.fu-nrow:hover, a.fu-urow:hover, a.fu-crow:hover, a.fu-srow:hover { background:
 .fu-tk.is-2 { flex-direction: column; align-items: flex-start; gap: 1px; line-height: 1.2; }
 .fu-tk-l { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; }
 .fu-tk.is-2 > * { max-width: 100%; }
-.fu-urow, .fu-srow { min-height: 46px; }
+.fu-nrow, .fu-urow, .fu-srow { min-height: 46px; }
 .fu-side { flex: none; align-self: center; font-size: 9px; }
 .fu-side.is-up { color: var(--up); }
 .fu-side.is-down { color: var(--down); }
