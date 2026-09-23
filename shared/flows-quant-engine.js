@@ -350,6 +350,7 @@ export function fitGrade(slice, dependsOnWings) {
     if (fis !== null && fis >= ENGINE_LINES.FIT_FAIR_IN_SPREAD && !slice.why) return { g: 2, why: "fit.in-spread" };
     return { g: 1, why: slice.why || "fit.out-of-spread" };
   }
+  if (fis !== null && fis !== undefined && fis < ENGINE_LINES.FIT_FAIR_IN_SPREAD) return { g: 1, why: "fit.out-of-spread" };
   return { g: 2, why: "fit." + (slice.method === "svi-repaired" ? "repaired" : slice.method) };
 }
 

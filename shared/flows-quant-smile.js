@@ -21,6 +21,7 @@ export const SMILE_LINES = Object.freeze({
   SIGMA_FLOOR: 0.005,
   SSVI_ETA_BOUND: 2,
   SSVI_GAMMA_MAX: 0.5,
+  SSVI_RHO_MAX: 0.999,
   IN_SPREAD_PASSES: 6,
   IN_SPREAD_ITERATIONS: 60,
   IN_SPREAD_MARGIN: 0.1,
@@ -748,7 +749,7 @@ export function fitSsvi(input) {
     return { ...arr, theta: thetas[j] };
   });
   const unpack = (v) => {
-    const rho = Math.tanh(v[0]);
+    const rho = SMILE_LINES.SSVI_RHO_MAX * Math.tanh(v[0]);
     const gamma = SMILE_LINES.SSVI_GAMMA_MAX / (1 + Math.exp(-v[2]));
     const etaMax = SMILE_LINES.SSVI_ETA_BOUND / (1 + Math.abs(rho));
     const eta = etaMax / (1 + Math.exp(-v[1]));
@@ -905,8 +906,10 @@ export function fitSlice(input) {
     }
   }
   const ss = trySsvi();
-  if (ss) return ss;
-  if (candidate && candidate.checks.ok) {
+  const sviOk = !!(candidate && candidate.checks.ok);
+  const sviFis = sviOk ? candidate.svi.fitInSpread : null;
+  if (ss && (!sviOk || ss.fitInSpread === null || sviFis === null || ss.fitInSpread >= sviFis - 1e-12)) return ss;
+  if (sviOk) {
     return finish("svi", candidate.svi.params, candidate.svi, candidate.checks, { why: spansBoth ? "fit.out-of-spread" : "fit.one-sided" });
   }
   return flatSlice(F, D, T, points, "fit.unrepairable");

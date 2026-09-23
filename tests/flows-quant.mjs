@@ -689,6 +689,31 @@ const OUT = ENGINE.runEngine(BASE);
     const iv = SMILE.sliceVolK(mix.slice, k);
     return { k, iv, ivBid: iv - 0.004, ivAsk: iv + 0.004 };
   });
+  for (const [days, J] of [[25, 0.07], [36, 0.07], [60, 0.07], [25, 0.04]]) {
+    const T = days / 365;
+    const m = SMILE.mixturePrice({ F: 100, T, diffusiveVol: 0.3, J });
+    const pts = [];
+    for (let K = 60; K <= 140; K += 1) {
+      const iv = SMILE.sliceVol(m.slice, K), price = BS.black76(100, 1, K, iv, T, K >= 100 ? "C" : "P");
+      const hs = Math.max(0.02, 0.015 * price);
+      const ivOf = (p) => BS.black76ImpliedVol({ F: 100, D: 1, K, T, price: p, type: K >= 100 ? "C" : "P" });
+      const bid = Math.floor((price - hs) * 100) / 100, ask = Math.ceil((price + hs) * 100) / 100;
+      if (!(bid > 0.05)) continue;
+      pts.push({ k: Math.log(K / 100), iv, ivBid: ivOf(bid), ivAsk: ivOf(ask), weight: 1 / Math.pow(ivOf(ask) - ivOf(bid) + 0.005, 2) });
+    }
+    const chosen = SMILE.fitSlice({ F: 100, D: 1, T, points: pts });
+    const svi = SMILE.fitSvi({ T, points: pts, space: "iv", xtol: 1e-8 });
+    const sviIn = SMILE.sliceChecks(svi.params, T, pts[0].k, pts[pts.length - 1].k, null).ok;
+    const ss = SMILE.fitSsvi({ slices: [{ T, points: pts }] });
+    ok(Math.abs(ss.rho) <= SMILE.SMILE_LINES.SSVI_RHO_MAX, `a one-slice SSVI keeps |rho| off 1 (${ss.rho}), so its raw form keeps a positive sigma`);
+    const best = Math.max(sviIn ? svi.fitInSpread : 0, ss.check.ok ? ss.slices[0].fitInSpread : 0);
+    ok(chosen.fitInSpread >= best - 1e-12,
+      `an event frown ${days} days out: the ladder keeps the better of an in-bounds SVI (${svi.fitInSpread.toFixed(3)}) and SSVI ` +
+      `(${ss.slices[0].fitInSpread.toFixed(3)}), not SSVI by default (${chosen.method} ${chosen.fitInSpread.toFixed(3)})`);
+    const g = ENGINE.fitGrade(chosen, true);
+    ok(chosen.fitInSpread >= 0.6 ? g.g >= 2 : g.g === 1 && g.why === "fit.out-of-spread",
+      `and a slice with ${(100 * chosen.fitInSpread).toFixed(0)}% of its quotes in spread grades ${g.g}, whatever method drew it`);
+  }
   const evSlice = SMILE.fitSlice({ F: 100, D: 1, T: 10 / 365, points: frown, event: { firstAfter: true } });
   eq(evSlice.method, "mixture", "the first post-earnings expiry with an ATM frown falls back to the two-lognormal mixture");
   near(evSlice.params.J, Math.log(1.08 / Math.sqrt(1.08 * 0.92)), 0.01, "and recovers the jump that made the frown");

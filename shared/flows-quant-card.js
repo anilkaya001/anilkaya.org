@@ -233,6 +233,7 @@ export function constantMaturity(built, days) {
 function fitGradeOf(slice) {
   if (!slice) return 0;
   if (slice.method === "flat") return 1;
+  if (fin(slice.fitInSpread) && slice.fitInSpread < ENGINE_LINES.FIT_FAIR_IN_SPREAD) return 1;
   if (slice.method === "svi" && !slice.why && (slice.fitInSpread === null || slice.fitInSpread >= ENGINE_LINES.FIT_CLEAN_IN_SPREAD)) return 3;
   return 2;
 }
