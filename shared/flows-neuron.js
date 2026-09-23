@@ -1200,6 +1200,7 @@ export function vetEngineReply(reply, context) {
     const st = structureAt(eng, idea.structure);
     if (!st) { refuse("unknown-id", at); continue; }
     if (seen.has(st.id)) { refuse("dup", at); continue; }
+    if (!(num(st.grade) >= 1)) { refuse("withheld", at); continue; }
     const fam = STRUCTURE_BY_ID[st.family];
     if (fam && [fam.neuron, ...fam.kin].filter(Boolean).some((x) => avoid.includes(x))) { refuse("avoid", at); continue; }
     const because = [...new Set(idea.because.filter((x) => typeof x === "string"))];

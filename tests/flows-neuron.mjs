@@ -846,6 +846,13 @@ const CARD = {
        "a because that leans on a withheld fact is refused as withheld");
   same(code({ ideas: [{ structure: "S4", because: ["vrp.rel.21", "iv.pct.30"] }] }), ["avoid"],
        "a structure whose family the state avoids is refused");
+  {
+    const zero = JSON.parse(JSON.stringify(ecard));
+    zero.engine.structures[1].grade = 0;
+    const zctx = buildContext(zero, { expectedSession: "2026-09-15" });
+    same(vetEngineReply({ ideas: [{ structure: "S2", verdict: "pin-at-level", because: ["level.magnet", "gex.book"] }] }, zctx).refused.map((r) => r.code),
+      ["withheld"], "an idea on a structure the engine graded 0 (a leg failed the liquidity gate, or no model) is refused as withheld, not kept at grade 0");
+  }
   same(code({ ideas: [{ structure: "S3", because: ["vrp.rel.21", "iv.pct.30"] }] }), ["undefined-first"],
        "an undefined-risk first idea is refused while a defined-risk structure is listed");
   same(code({ ideas: [{ structure: "S5", verdict: "buy-cheap-convexity", because: ["vrp.rel.21", "term.front.7_30"] }] }),
