@@ -10,7 +10,7 @@ const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
 const CEILING_KIB = {
-  tickerPage: 424,
+  tickerPage: 352,
   overviewPage: 215,
   sidePage: 181,
   watchPage: 181,
