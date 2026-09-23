@@ -1,7 +1,7 @@
 import { TICKER_PANELS, SENTINEL_KEYS } from "./flows-panels.js";
 import { guardAnswer, numeralsIn } from "./flows-ask.js";
 import { VARIATION_VOTES, VARIATION_LINES } from "./flows-variation.js";
-import { STRUCTURE_BY_ID } from "./flows-quant-structures.js";
+import { STRUCTURE_BY_ID, AFFINITY } from "./flows-quant-structures.js";
 
 export const NEURON_CONTEXT_VERSION = 3;
 export const NEURON_MAX_IDEAS = 3;
@@ -1110,12 +1110,21 @@ function becauseOf(st, eng) {
   const m = factIndex(eng);
   const out = [];
   const add = (id) => { const f = m.get(id); if (f && f.v !== null && f.g > 0 && !out.includes(id)) out.push(id); };
-  for (const rule of st.rules) {
-    if (/−$/.test(rule)) continue;
-    const axis = rule.split(".")[0];
-    if (axis === "state") { add(eng.state && eng.state.state === "pinned" ? "level.magnet" : "level.flip"); add("gex.book"); continue; }
-    if (RULE_FACT[axis]) add(RULE_FACT[axis]);
-  }
+  const gradeOf = (id) => { const f = m.get(id); return f && f.v !== null ? f.g : 0; };
+  const aff = AFFINITY[st.family] || null;
+  const weighed = [];
+  st.rules.forEach((rule, i) => {
+    if (/−$/.test(rule)) return;
+    const [axis, bucket] = rule.split(".");
+    if (axis === "state") {
+      const conf = eng.state && num(eng.state.confidence) !== null ? Math.max(0, Math.min(3, eng.state.confidence)) : 0;
+      weighed.push({ c: 2 * conf / 3, i, ids: [eng.state && eng.state.state === "pinned" ? "level.magnet" : "level.flip", "gex.book"] });
+    } else if (RULE_FACT[axis] && aff && aff[axis] && num(aff[axis][bucket]) !== null) {
+      weighed.push({ c: aff[axis][bucket] * gradeOf(RULE_FACT[axis]) / 3, i, ids: [RULE_FACT[axis]] });
+    }
+  });
+  weighed.sort((a, b) => b.c - a.c || a.i - b.i);
+  for (const w of weighed) for (const id of w.ids) add(id);
   for (const id of ["vrp.rel.21", "iv.pct.30", "level.flip", "gex.book", "iv.cm.30"]) { if (out.length >= 2) break; add(id); }
   return out.slice(0, 2);
 }

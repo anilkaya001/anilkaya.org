@@ -888,6 +888,9 @@ const CARD = {
   ok(fb.ideas.every((i) => i.verdict === null || verdictHolds(i.verdict, ectx.engine.structures.find((x) => x.id === i.structure), ectx.engine)),
      "and every verdict it attaches is one whose preconditions hold");
   eq(fb.ideas[0].verdict, "harvest-rich-premium", "the put credit spread reads as harvesting rich premium");
+  same(fb.ideas[0].because, ["vrp.rel.21", "level.magnet"],
+       "and rests on the facts with the largest affinity contribution: rich VRP at grade 3 adds 2, the pinned state at " +
+       "confidence 2 adds 4/3 and comes before the IV percentile's equal 4/3 in rule order");
   const asReply = { verdict: fb.verdict, ideas: fb.ideas.map(({ structure, verdict, because }) => ({ structure, verdict, because })) };
   const fv = vetEngineReply(asReply, ectx);
   ok(fv.ok && fv.refused.length === 0, `the fallback, written as a model would write it, passes the same vetting (${JSON.stringify(fv.refused)})`);
