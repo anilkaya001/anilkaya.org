@@ -181,6 +181,19 @@ export async function askModels(ai, chain, messages, opts, onUsage) {
   };
 }
 
+const stopSaid = (a) => (a && a.finish === "length"
+  ? "spent its whole answer budget before writing any text"
+  : "answered with no text");
+
+export function emptyNote(attempts) {
+  const [first, second] = (Array.isArray(attempts) ? attempts : []).filter((a) => a && a.failed === null);
+  const head = "The model " + stopSaid(first);
+  if (!second) return head;
+  return head + (stopSaid(second) === stopSaid(first)
+    ? ", and so did the fallback model asked after it"
+    : ", and the fallback model asked after it " + stopSaid(second));
+}
+
 export function fallbackNote(result) {
   const a = result && Array.isArray(result.attempts) ? result.attempts : [];
   if (a.length < 2 || !result.text) return null;

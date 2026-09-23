@@ -7,7 +7,7 @@ import {
 import { FLOWS_PAGES, modelName, neuronProvenance } from "./shared/flows-pages.js";
 import * as FLOWS_ASK from "./shared/flows-ask.js";
 import * as FLOWS_NEURON from "./shared/flows-neuron.js";
-import { aiChain, aiCallSignature, askModels, fallbackNote, repliedGuard, retryableGuard, spendShape } from "./shared/flows-ai.js";
+import { aiChain, aiCallSignature, askModels, emptyNote, fallbackNote, repliedGuard, retryableGuard, spendShape } from "./shared/flows-ai.js";
 import { COURSE_STAGE_POINTS } from "./shared/course-points.js";
 import { COURSE_BY_ID, COURSE_BY_SLUG, COURSE_TOPICS, SITE_ORIGIN } from "./shared/course-seo.js";
 import { REVIEW_ITEM_BY_ID } from "./shared/review-manifest.js";
@@ -1464,9 +1464,7 @@ async function askAnswer(question, env, index, updatedAt, subject) {
     const first = said.attempts[0];
     const afterEmpty = said.attempts.length > 1 && first && first.failed === null;
     const told = afterEmpty
-      ? (first.finish === "length"
-        ? "The model spent its whole answer budget before writing any text"
-        : "The model answered with no text") +
+      ? emptyNote(said.attempts) +
         ", and the fallback model asked after it " + FALLBACK_FAILED[failed.why] +
         ", so this reading is the pipeline's own wording. Every figure in it was measured."
       : failed.say;
@@ -1485,12 +1483,8 @@ async function askAnswer(question, env, index, updatedAt, subject) {
 
   const generated = said.text;
   if (!generated) {
-    const asked = said.attempts.length;
     return json({ ...base, spend: afterCall || base.spend, model,
-      note: (said.guard === "unreachable:length"
-        ? "The model spent its whole answer budget before writing any text"
-        : "The model answered with no text") +
-        (asked > 1 ? ", and so did the fallback model asked after it" : "") +
+      note: emptyNote(said.attempts) +
         ", so this reading is the pipeline's own wording. Every figure in it was measured." });
   }
 

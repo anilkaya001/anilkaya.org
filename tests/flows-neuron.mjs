@@ -12,7 +12,7 @@ import { aggressorGamma } from "../shared/flows-features.js";
 import { buildCard } from "../shared/flows-card.js";
 import fs from "node:fs";
 import { aiText, modelInput, askModels, aiChain, aiCallSignature, retryableGuard, repliedGuard, modelRates,
-         spendShape, fallbackNote, AI_LENGTH_RETRY_MS } from "../shared/flows-ai.js";
+         spendShape, fallbackNote, emptyNote, AI_LENGTH_RETRY_MS } from "../shared/flows-ai.js";
 import { readFileSync } from "node:fs";
 
 let checks = 0;
@@ -657,6 +657,23 @@ const CARD = {
   const spentAfter = fake([reasoningOnly, new Error("AiError: 3036: account limit")]);
   eq((await askModels(spentAfter, aiChain(env), msgs, {})).guard, "unreachable:allowance",
     "while a spent allowance keeps its own name: every retry of it fails at the primary for free");
+  const honestEmpty = { choices: [{ finish_reason: "stop", message: { content: "" } }] };
+  const cappedEmpty = { response: "", finish_reason: "length", usage: { prompt_tokens: 12500, completion_tokens: 1024 } };
+  eq(emptyNote((await askModels(fake([reasoningOnly, { response: "" }]), aiChain(env), msgs, {})).attempts),
+    "The model spent its whole answer budget before writing any text, and the fallback model asked after it answered with no text",
+    "THE ASK NOTE NAMES EACH MODEL'S OWN STOP: a primary at the cap and a fallback that answered empty no longer read " +
+    "\"and so did the fallback\", which blamed the fallback for a budget it never reached");
+  eq(emptyNote((await askModels(fake([honestEmpty, cappedEmpty]), aiChain(env), msgs, {})).attempts),
+    "The model answered with no text, and the fallback model asked after it spent its whole answer budget before writing any text",
+    "and the reverse no longer blames the primary for the fallback's cap");
+  eq(emptyNote((await askModels(fake([reasoningOnly, cappedEmpty]), aiChain(env), msgs, {})).attempts),
+    "The model spent its whole answer budget before writing any text, and so did the fallback model asked after it",
+    "two models at the cap keep the shared sentence");
+  eq(emptyNote((await askModels(fake([honestEmpty, { response: "" }]), aiChain(env), msgs, {})).attempts),
+    "The model answered with no text, and so did the fallback model asked after it", "and so do two honest empties");
+  eq(emptyNote((await askModels(fake([reasoningOnly, new Error("AiError: 3040: capacity")]), aiChain(env), msgs, {})).attempts),
+    "The model spent its whole answer budget before writing any text",
+    "a fallback that failed to run is not described as a stop: the Ask note names its failure separately");
   ok(repliedGuard("invented") && repliedGuard("unreachable:length") && repliedGuard("unreachable:empty") &&
      !repliedGuard("unreachable:capacity") && !repliedGuard(null),
     "a guard written after a model replied (and was billed) is told apart from one written after a refusal to run");
@@ -695,6 +712,8 @@ const CARD = {
     "no call site reaches the binding directly: all three go through askModels, so none can drop the thinking switch or the fallback");
   eq((worker.match(/askModels\(env\.AI/g) || []).length, 3, "and all three lanes (summary, Neuron, Ask) use it");
   ok(!/max_tokens/.test(worker), "the worker no longer carries a max_tokens literal of its own");
+  ok((worker.match(/emptyNote\(said\.attempts\)/g) || []).length === 2 && !/so did the fallback model asked after it/.test(worker),
+    "both Ask notes about an empty reply are built from emptyNote over the attempts, not from the chain's combined guard");
   ok(/sameCall && \(prior\.llm \|\| repliedGuard\(prior\.guard\)\) && intradayOnly/.test(worker),
     "THE INTRADAY SUMMARY THROTTLE COVERS EVERY BILLED REPLY, not only an accepted one: with the fallback " +
     "writing, a refused summary on facts that move every tick cost 13,021 neurons over a 26-tick session in " +
