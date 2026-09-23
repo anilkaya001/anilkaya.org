@@ -7,7 +7,7 @@ import {
 import { FLOWS_PAGES, modelName, neuronProvenance } from "./shared/flows-pages.js";
 import * as FLOWS_ASK from "./shared/flows-ask.js";
 import * as FLOWS_NEURON from "./shared/flows-neuron.js";
-import { chainRowsByExpiry, runCardEngine, engineState, QUANT_CARD_VERSION } from "./shared/flows-quant-card.js";
+import { chainRowsByExpiry, runCardEngine, engineState, engineStale, QUANT_CARD_VERSION } from "./shared/flows-quant-card.js";
 import { aiChain, aiCallSignature, askModels, emptyNote, fallbackNote, intradayFloorMs, repliedGuard, retryableGuard, spendShape } from "./shared/flows-ai.js";
 import { COURSE_STAGE_POINTS } from "./shared/course-points.js";
 import { COURSE_BY_ID, COURSE_BY_SLUG, COURSE_TOPICS, SITE_ORIGIN } from "./shared/course-seo.js";
@@ -1878,7 +1878,10 @@ function strategyEngine({ ticker, expiry, rawRows, spot, card, nowMs }) {
     facts: block ? block.facts : [], state, pLaw: block ? block.pLaw : null,
     levels: block ? block.levels : null, event: block ? block.event : null,
     atr: block ? block.atr : null,
-    stale: !!(card && card.sessionDate && block && block.asOf && block.asOf < card.sessionDate),
+    stale: engineStale({
+      cardSession: card ? card.sessionDate : null, blockAsOf: block ? block.asOf : null,
+      expectedSession: card && card.sessionDate ? FLOWS_ASK.briefAge({ sessionDate: card.sessionDate }, new Date(nowMs)).expected : null,
+    }),
   });
   return {
     status: "ok", v: QUANT_CARD_VERSION, cardSession: card ? card.sessionDate || null : null,

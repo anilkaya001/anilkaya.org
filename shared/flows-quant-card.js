@@ -507,6 +507,13 @@ export function compactEngine(out, extra = {}) {
   };
 }
 
+export function engineStale({ cardSession = null, blockAsOf = null, expectedSession = null } = {}) {
+  const day = (v) => (typeof v === "string" && v.length >= 10 ? v.slice(0, 10) : null);
+  const card = day(cardSession), block = day(blockAsOf), expected = day(expectedSession);
+  if (card && expected && card < expected) return true;
+  return !!(card && block && block < card);
+}
+
 export function runCardEngine(input) {
   const asOfMs = fin(input.asOfMs) ? input.asOfMs : Date.parse(input.asOf);
   const out = runEngine({

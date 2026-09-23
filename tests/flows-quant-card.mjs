@@ -279,6 +279,14 @@ const FACT_INPUT = () => ({
     ok(moved && moved.model !== re.model, "and re-prices when a strike is dragged, with no round trip");
   }
 
+  ok(!QC.engineStale({ cardSession: "2026-09-21", blockAsOf: "2026-09-21", expectedSession: "2026-09-21" }) &&
+     QC.engineStale({ cardSession: "2026-09-18", blockAsOf: "2026-09-18", expectedSession: "2026-09-21" }) &&
+     QC.engineStale({ cardSession: "2026-09-21", blockAsOf: "2026-09-18", expectedSession: "2026-09-21" }) &&
+     !QC.engineStale({ cardSession: null, blockAsOf: null, expectedSession: "2026-09-21" }),
+     "the strategy route reads a card as stale when its session is behind the last one to close, or its engine block behind the card");
+  const staleBlock = QC.runCardEngine({ ...input, stale: true });
+  ok(staleBlock.structures.length > 0 && staleBlock.structures.every((s) => s.grade <= 1) && staleBlock.structures.some((s) => s.gradeWhy.includes("card.stale")),
+     "and pricing a live chain against a stale card's law caps every grade at 1 and says why");
   const fat = { ticker: "SYN", sessionDate: SESSION, generatedAt: "x", pad: "y".repeat(120 * 1024) };
   const split = QP.attachEngine(fat, block);
   ok(split.split && split.card.engine.status === "split" && split.card.engine.key === "card-x:SYN" && split.extra.engine === block,
