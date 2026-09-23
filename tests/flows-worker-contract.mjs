@@ -1154,6 +1154,27 @@ try {
     eq(regimeRead.status, 200, "and reads back to a signed-in page");
     eq((await regimeRead.json()).volRadar.rich.rows[0].t, "SOXS", "with the vol radar rows unchanged");
     eq((await get("/api/flows/regime")).status, 401, "an anonymous caller cannot read the regime");
+    for (const prefix of ["card-x", "hist"]) {
+      const body = JSON.stringify({ v: 1, ticker: "AAPL", sessionDate: "2026-09-22",
+        gex: { status: "ok", why: null, z: 1.25, gaps: {} } });
+      eq((await putCard(prefix + ":AAPL", body)).status, 200,
+         `a ${prefix} payload ingests under its ticker key`);
+      const got = await get(`/api/flows/${prefix}?t=aapl`, { headers: cookie });
+      eq(got.status, 200, `an authenticated ${prefix} read succeeds, lowercase ticker included`);
+      eq((await got.json()).gex.z, 1.25, `the ${prefix} payload round-trips through the byte passthrough`);
+      eq(got.headers.get("cache-control"), "no-store", `${prefix} data is never cached`);
+      const back = await fetch(url("/api/flows/ingest?key=" + prefix + ":AAPL"),
+        { headers: { Authorization: "Bearer " + INGEST_TOKEN } });
+      eq(back.status, 200, `the pipeline can read ${prefix} back through the ingest route it writes through`);
+      eq((await (await get(`/api/flows/${prefix}?t=ZZZZ`, { headers: cookie })).json()).status, "pending",
+         `an unbuilt ${prefix} key reports pending honestly`);
+      for (const bad of [prefix + ":", prefix + ":a b", prefix + ":1ABC", prefix + "x:AAPL"]) {
+        eq((await putCard(bad, body)).status, 400, `ingest refuses the key ${JSON.stringify(bad)}`);
+      }
+      eq((await get(`/api/flows/${prefix}?t=` + encodeURIComponent("../x"), { headers: cookie })).status, 400,
+         `${prefix} read refuses a malformed ticker`);
+      eq((await get(`/api/flows/${prefix}?t=AAPL`)).status, 401, `an anonymous caller cannot read ${prefix}`);
+    }
   }
 
   {
