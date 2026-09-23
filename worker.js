@@ -1289,12 +1289,16 @@ async function generateNeuron(env, ticker, ctx, fingerprint) {
   let parsed = null;
   let lastText = null;
   let model = chain[0];
+  let refused = null;
   for (let attempt = 0; attempt < 2 && (parsed === null || parsed.summary === null); attempt++) {
     const said = await askModels(env.AI, attempt === 0 ? chain : [model], messages,
       { maxTokens: 1400, temperature: attempt === 0 ? 0.2 : 0.05 },
       (billed, usage) => askRecordSpend(env, usage, billed));
     if (!said.text) {
-      if (attempt > 0) break;
+      if (attempt > 0) {
+        if (said.failure) refused = "unreachable:reparse:" + said.failure.why;
+        break;
+      }
       await writeNeuron(env, scope, fingerprint, plain, own, false, said.model, said.guard).catch(() => {});
       return;
     }
@@ -1306,7 +1310,7 @@ async function generateNeuron(env, ticker, ctx, fingerprint) {
     const prose = typeof lastText === "string" && !/[{}[\]]|"summary"|"ideas"/.test(lastText);
     const verdict = prose ? FLOWS_ASK.guardAnswer(lastText, facts, { smallIntegers: false }) : { ok: false };
     await writeNeuron(env, scope, fingerprint, verdict.ok ? lastText : plain, own, verdict.ok, model,
-      "ideas:unparsable").catch(() => {});
+      verdict.ok ? "ideas:unparsable" : refused || "ideas:unparsable").catch(() => {});
     return;
   }
   let summary = plain;
@@ -1317,7 +1321,7 @@ async function generateNeuron(env, ticker, ctx, fingerprint) {
     if (verdict.ok) { summary = parsed.summary; llm = true; }
     else guard = verdict.invented ? "invented" : "forecast";
   } else {
-    guard = "summary:empty";
+    guard = refused || "summary:empty";
   }
   const vetted = FLOWS_NEURON.vetIdeas((stateIdea ? [stateIdea] : []).concat(parsed.ideas), ctx);
   if (guard === null && vetted.refused.length) guard = "ideas:" + vetted.refused.length + " refused";

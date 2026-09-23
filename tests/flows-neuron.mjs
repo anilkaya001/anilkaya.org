@@ -560,6 +560,14 @@ const CARD = {
   eq(prov("unreachable:length"), "Deterministic reading: the model spent its whole answer budget before writing any text.",
      "a reply cut off at the token cap with no content is told apart from a model that answered with nothing");
   eq(prov("unreachable:unreachable"), "Deterministic reading: the model did not answer.", "and an unstated failure keeps the plain wording");
+  eq(prov("unreachable:reparse:capacity"),
+     "Deterministic reading: the model’s reply carried no usable summary, and asking it again found no capacity.",
+     "A REPARSE REFUSED FOR CAPACITY IS NAMED AS ONE, not frozen as the model's unparsable output: the first reply was billed, " +
+     "so it never reads \"nothing was spent\"");
+  ok(/allowance spent/.test(prov("unreachable:reparse:allowance")) && /asking it again failed\.$/.test(prov("unreachable:reparse:unreachable")),
+     "and every other refusal of the second request keeps its own words");
+  ok(retryableGuard("unreachable:reparse:capacity", 0) && retryableGuard("unreachable:reparse:unreachable", 0),
+     "so the Neuron route re-reads the card after NEURON_RETRY_MS instead of serving a transient refusal until the next card");
 }
 
 {
@@ -712,6 +720,11 @@ const CARD = {
     "no call site reaches the binding directly: all three go through askModels, so none can drop the thinking switch or the fallback");
   eq((worker.match(/askModels\(env\.AI/g) || []).length, 3, "and all three lanes (summary, Neuron, Ask) use it");
   ok(!/max_tokens/.test(worker), "the worker no longer carries a max_tokens literal of its own");
+  ok(/if \(attempt > 0\) \{\s*if \(said\.failure\) refused = "unreachable:reparse:" \+ said\.failure\.why;\s*break;/.test(worker) &&
+     /verdict\.ok \? "ideas:unparsable" : refused \|\| "ideas:unparsable"/.test(worker) &&
+     /guard = refused \|\| "summary:empty";/.test(worker),
+    "NEURON KEEPS A THROWN REPARSE AS A RETRYABLE GUARD: a capacity blip on the second request used to write ideas:unparsable " +
+    "or summary:empty, which the same card never retries, where origin/main retried the same failure after five minutes");
   ok((worker.match(/emptyNote\(said\.attempts\)/g) || []).length === 2 && !/so did the fallback model asked after it/.test(worker),
     "both Ask notes about an empty reply are built from emptyNote over the attempts, not from the chain's combined guard");
   ok(/sameCall && \(prior\.llm \|\| repliedGuard\(prior\.guard\)\) && intradayOnly/.test(worker),

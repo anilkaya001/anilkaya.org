@@ -194,6 +194,14 @@ export function neuronProvenance(summary) {
   if (guard === "forecast") return "Deterministic reading. A model\u2019s wording claimed what happens next and was refused.";
   if (guard === "ideas:unparsable") return "Deterministic reading: the model\u2019s reply could not be parsed.";
   if (guard === "summary:empty") return "Deterministic reading: the model returned ideas without a summary.";
+  if (guard.startsWith("unreachable:reparse:")) {
+    const why = guard.slice("unreachable:reparse:".length);
+    return "Deterministic reading: the model\u2019s reply carried no usable summary, and asking it again " +
+      (why === "allowance" ? "found the day\u2019s free model allowance spent, resetting 00:00 UTC"
+        : why === "capacity" ? "found no capacity"
+          : why === "plan" ? "found the configured model not available on this plan"
+            : "failed") + ".";
+  }
   if (guard.startsWith("unreachable:")) {
     const why = guard.slice("unreachable:".length);
     const said = why === "allowance" || why === "3036"
