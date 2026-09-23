@@ -378,7 +378,7 @@ export function structureMetrics(input) {
 
 function roundTo(v, dp) {
   if (v === null || v === undefined) return null;
-  if (!fin(v)) return v > 0 ? "inf" : v < 0 ? "-inf" : null;
+  if (!fin(v)) return null;
   const f = Math.pow(10, dp);
   const r = Math.round(v * f) / f;
   return Object.is(r, -0) ? 0 : r;

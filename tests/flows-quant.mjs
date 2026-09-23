@@ -610,7 +610,7 @@ const OUT = ENGINE.runEngine(BASE);
   const two = synthInput({ expiryList: ["2026-10-16", "2026-11-20"] });
   const twoRev = { ...two, expiries: two.expiries.slice().reverse() };
   eq(JSON.stringify(ENGINE.runEngine(two)), JSON.stringify(ENGINE.runEngine(twoRev)), "nor does the order the expiries arrive in");
-  ok(!/NaN|Infinity/.test(a), "no NaN or Infinity reaches the JSON");
+  ok(!/NaN|Infinity|"-?inf"/.test(a), "no NaN or Infinity reaches the JSON, as a number or as a string");
 }
 
 {
