@@ -582,7 +582,7 @@ ${marketModule("mkOiCard", "Open interest", "mkOi", { span: 6 })}
 ${marketModule("mkDarkCard", "Dark pool", "mkDark", { span: 6 })}
 ${marketModule("mkImpactCard", "Net impact", "mkImpact", { span: 6 })}
 ${marketModule("mkInsidersCard", "Insiders", "mkInsiders", { span: 6 })}
-${marketModule("mkSeasonCard", "Seasonality", "mkSeason")}
+${marketModule("mkSeasonCard", "Seasonality", "mkSeason", { seg: `<div class="mk-segc" id="mkSeasonSeg"></div>` })}
   </div>
   <p class="visually-hidden" id="mkPulseFoot"></p>
   <p class="visually-hidden" id="mktFoot"></p>

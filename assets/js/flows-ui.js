@@ -1395,8 +1395,11 @@
       }
       if (num(o.highlightRow) !== null) s("circle", { cx: left - 3, cy: top + o.highlightRow * ch + ch / 2, r: 2.5, fill: paint("--label-1") }, svg);
       const everyX = cw < 40 ? 2 : 1;
-      cols.forEach((c, i) => { if (i % everyX === 0) s("text", { x: left + i * cw + cw / 2, y: H - 6, text: cf(c), "text-anchor": "middle" }, svg); });
-      const hl = s("rect", { class: "cell-hl", x: -99, y: -99, width: Math.max(0, cw - 1), height: ch - 1, rx: 3 }, svg);
+      const hc = num(o.highlightCol);
+      if (hc !== null && hc >= 0 && hc < C) s("rect", { x: left + hc * cw + 0.5, y: top - 0.5, width: Math.max(0, cw - 1), height: R * ch + 1, rx: 3.5, fill: "none", stroke: paint("--accent"), "stroke-width": 1.25 }, svg);
+      const phase = hc !== null && hc >= 0 && hc < C ? hc % everyX : 0;
+      cols.forEach((c, i) => { if (i % everyX === phase) s("text", { x: left + i * cw + cw / 2, y: H - 6, text: cf(c), "text-anchor": "middle", class: i === hc ? "tx-1 tx-b" : null }, svg); });
+      const hl = s("rect", { class: "cell-hl", x: 0, y: 0, width: Math.max(0, cw - 1), height: ch - 1, rx: 3, visibility: "hidden" }, svg);
       const readout = h("div", { class: "ui-readout", "aria-hidden": "true" });
       el.append(readout);
       el.tabIndex = 0;
@@ -1411,6 +1414,7 @@
         const xx = left + c * cw, yy = top + r * ch;
         hl.setAttribute("x", xx + 0.5);
         hl.setAttribute("y", yy + 0.5);
+        hl.setAttribute("visibility", "visible");
         readout.replaceChildren(part(cf(cols[c]), "k"), h("b", null, rf(rows[r])), v === null ? part("no reading", "k") : part(fmt(v), null, v > 0 ? pal.posT : v < 0 ? pal.negT : null));
         readout.classList.add("is-on");
         const rw = readout.offsetWidth;
@@ -1419,7 +1423,7 @@
         if (speak) announce(spoken(readout));
       };
       let raf = 0, pt = null;
-      const hide = () => { if (raf) { cancelAnimationFrame(raf); raf = 0; } readout.classList.remove("is-on"); hl.setAttribute("x", -99); };
+      const hide = () => { if (raf) { cancelAnimationFrame(raf); raf = 0; } readout.classList.remove("is-on"); hl.setAttribute("visibility", "hidden"); };
       el.addEventListener("pointermove", (e) => {
         pt = [e.clientX, e.clientY];
         if (raf) return;

@@ -1477,6 +1477,67 @@ try {
     await put("pulse", pulsePayload());
   }
 
+  {
+    const FUNDS = ["SPY", "QQQ", "XLK"];
+    const rows = [];
+    for (const t of FUNDS) for (let m = 1; m <= 12; m++) rows.push({ t, month: m, avg: (m - 6) / 1000, positivePct: m / 13, years: 20 });
+    await put("pulse", pulsePayload({ seasonality: { status: "ok", seen: rows.length, cap: 156, shed: 0, rows } }));
+    const pg = await openMarket();
+    const read = () => pg.evaluate(() => {
+      const host = document.querySelector("#mkSeason");
+      const svg = host.querySelector("svg");
+      const rects = svg ? [...svg.querySelectorAll("rect")] : [];
+      return {
+        funds: host.dataset.funds || null,
+        silent: Boolean(host.querySelector("[data-empty]")),
+        calendar: host.querySelectorAll(".mk-sea-cell").length,
+        tinted: rects.filter((r) => r.classList.contains("fade")).length,
+        labels: svg ? [...svg.querySelectorAll("text")].map((t) => t.textContent) : [],
+        outlined: rects.filter((r) => r.getAttribute("fill") === "none" && r.getAttribute("stroke")).length,
+        bold: svg ? [...svg.querySelectorAll("text.tx-b")].map((t) => t.textContent) : [],
+        tabs: [...document.querySelectorAll("#mkSeasonSeg [role=tab]")].map((b) => b.textContent),
+        opacity: rects.filter((r) => r.classList.contains("fade")).map((r) => r.getAttribute("fill-opacity")).join(","),
+        escaped: svg ? rects.filter((r) => getComputedStyle(r).visibility !== "hidden").filter((r) => {
+          const b = r.getBoundingClientRect(), o = svg.getBoundingClientRect();
+          return b.left < o.left - 1 || b.top < o.top - 1 || b.right > o.right + 1 || b.bottom > o.bottom + 1;
+        }).length : -1,
+        framed: rects.filter((r) => r.classList.contains("cell-hl") && getComputedStyle(r).visibility !== "hidden").length,
+      };
+    });
+    const first = await read();
+    eq(first.funds, "3", "a seasonality payload that names its funds is drawn as one row per fund");
+    ok(!first.silent && first.calendar === 0, "as a grid, not the one-fund calendar and not a silence");
+    eq(first.tinted, 33,
+       "every fund month with a reading is tinted — 36 cells less the three exact zeros, which stay untinted rather than " +
+       "being painted as a direction");
+    ok(FUNDS.every((t) => first.labels.includes(t)), `each fund labels its row (${first.labels.join(" ")})`);
+    eq(first.outlined, 1, "one column is outlined: this calendar month, the one a reader opens the card to find");
+    const nowLabel = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][new Date().getMonth()];
+    ok(first.bold.includes(nowLabel), `and its label is the one set in bold, never skipped by label thinning (${first.bold.join(" ")})`);
+    eq(first.escaped, 0,
+       "nothing the grid draws sits outside its own canvas: the hover frame used to be parked at (-99, -99), and a chart " +
+       "svg lets overflow show, so it hung as a stray empty box above the first row until a pointer arrived");
+    eq(first.framed, 0, "and no cell is framed before a pointer or a key has picked one");
+    await pg.locator("#mkSeason svg").scrollIntoViewIfNeeded();
+    const box = await pg.locator("#mkSeason svg").boundingBox();
+    await pg.mouse.move(box.x + 60, box.y + 12);
+    await pg.waitForFunction(() => { const r = document.querySelector("#mkSeason .cell-hl"); return r && getComputedStyle(r).visibility !== "hidden"; },
+      null, { timeout: 3000 }).catch(() => null);
+    const hovered = await read();
+    eq(hovered.framed, 1, "a pointer over the first cell frames it");
+    eq(hovered.escaped, 0, "inside the canvas");
+    await pg.mouse.move(0, 0);
+    deep(first.tabs, ["Average", "Up months"], "two views of the same grid: the average change, and how often the month closed higher");
+    await pg.click("#mkSeasonSeg [role=tab]:nth-of-type(2)");
+    await pg.waitForFunction((prev) => [...document.querySelectorAll("#mkSeason svg rect.fade")]
+      .map((r) => r.getAttribute("fill-opacity")).join(",") !== prev, first.opacity, { timeout: 5000 }).catch(() => null);
+    const second = await read();
+    ok(second.opacity !== first.opacity, "and switching the view repaints the grid from the other field");
+    eq(second.funds, "3", "over the same funds");
+    await pg.close();
+    await put("pulse", pulsePayload());
+  }
+
   const tapeOf = (pg) => pg.evaluate(() => [...document.querySelectorAll("#mktTape .ui-metric")].map((m) => ({
     k: m.dataset.metric,
     v: m.querySelector(".ui-metric-v").textContent.trim(),

@@ -24,7 +24,7 @@ export const PULSE_CAPS = Object.freeze({
   netImpact: 20,
   insiders: 12,
   darkpool: 30,
-  seasonality: 12,
+  seasonality: 156,
 });
 
 export const PULSE_NOTES = Object.freeze({
@@ -194,11 +194,16 @@ export function shapeDarkpool(raw, { cap = PULSE_CAPS.darkpool } = {}) {
 
 export function shapeSeasonality(raw, { cap = PULSE_CAPS.seasonality } = {}) {
   const rows = [];
+  const order = new Map();
   for (const r of unwrapRows(raw)) {
     if (!r || typeof r !== "object") continue;
     const month = num(r.month);
     if (month === null || month < 1 || month > 12) continue;
+    const sym = typeof r.ticker === "string" ? r.ticker.trim().toUpperCase() : "";
+    const t = /^[A-Z][A-Z0-9.]{0,9}$/.test(sym) ? sym : null;
+    if (!order.has(t)) order.set(t, order.size);
     rows.push({
+      t,
       month,
       avg: num(r.avg_change), median: num(r.median_change),
       min: num(r.min_change), max: num(r.max_change),
@@ -207,7 +212,7 @@ export function shapeSeasonality(raw, { cap = PULSE_CAPS.seasonality } = {}) {
     });
   }
 
-  rows.sort((a, b) => a.month - b.month);
+  rows.sort((a, b) => (order.get(a.t) - order.get(b.t)) || (a.month - b.month));
   const seen = rows.length;
   const kept = rows.slice(0, cap);
   return { status: kept.length ? "ok" : "quiet", rows: kept, seen, cap, shed: seen - kept.length };

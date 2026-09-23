@@ -912,35 +912,62 @@
 
   function paintSeason(pulse) {
     const host = clear("mkSeason");
+    const seg = clear("mkSeasonSeg");
     if (!host) return;
     const feed = pulse.seasonality;
     const rows = feed && Array.isArray(feed.rows) ? feed.rows : [];
     if (!feed || feed.status !== "ok" || !rows.length) { host.append(feedSilence(feed, "seasonality")); return; }
-    const months = new Set(rows.map((r) => isNum(r.month)));
-    if (months.size < rows.length) {
-      host.append(emptyLine("unavailable", "The seasonality feed carried " + rows.length + " rows for " + months.size +
-        (months.size === 1 ? " month" : " distinct months") + ". The vendor sends one row per ticker per month, and this " +
+    const symOf = (r) => (typeof r.t === "string" && r.t ? r.t : null);
+    const syms = [];
+    for (const r of rows) if (!syms.includes(symOf(r))) syms.push(symOf(r));
+    const cells = new Map(rows.map((r) => [symOf(r) + ":" + isNum(r.month), r]));
+    if (cells.size < rows.length) {
+      host.append(emptyLine("unavailable", syms.some((t) => t) ?
+        "The seasonality feed carried " + rows.length + " rows for " + cells.size + " ticker months, so at least one ticker repeats a month. Nothing is drawn rather than a calendar that averages two readings it cannot tell apart." :
+        "The seasonality feed carried " + rows.length + " rows for " + new Set(rows.map((r) => isNum(r.month))).size + " distinct months. The vendor sends one row per ticker per month, and this " +
         "payload does not say which ticker a row is, so the rows cannot be told apart. Nothing is drawn rather than a " +
         "calendar that repeats a month.", "seasonality", 120));
       return;
     }
     const nowMonth = new Date().getMonth() + 1;
-    const peak = Math.max(1e-9, ...rows.map((r) => Math.abs(isNum(r.avg) || 0)));
-    host.append(h("div", { class: "mk-sea" }, rows.map((r) => {
-      const m = isNum(r.month), a = isNum(r.avg);
-      const tip = [];
-      if (isNum(r.median) !== null) tip.push("median " + signedVendorPct(r.median));
-      if (isNum(r.min) !== null && isNum(r.max) !== null) tip.push("range " + signedVendorPct(r.min) + " to " + signedVendorPct(r.max));
-      if (isNum(r.years) !== null) tip.push("over " + r.years + " years");
-      return h("div", { class: "mk-sea-cell" + (m === nowMonth ? " is-now" : ""), title: tip.join(" · ") || null,
-        "data-tone": toneOf(a), style: { "--a": a === null ? "0" : Math.sqrt(Math.abs(a) / peak).toFixed(3) } },
-      h("span", { class: "mk-sea-m" }, m !== null && m >= 1 && m <= 12 ? MONTHS[m - 1] : DASH),
-      h("span", { class: "mk-sea-v", "data-tone": toneOf(a) }, signedVendorPct(r.avg)),
-      h("span", { class: "mk-sea-p" }, vendorPct(r.positivePct)));
-    })));
+    if (syms.length > 1 || syms[0] !== null) {
+      const VIEWS = [
+        { label: "Average", of: (r) => isNum(r.avg), fmt: signedVendorPct, what: "Average change" },
+        { label: "Up months", of: (r) => { const p = isNum(r.positivePct); return p === null ? null : p - 0.5; }, fmt: (v) => vendorPct(v + 0.5) + " up", what: "Share of years the month closed higher, against even odds" },
+      ];
+      let view = 0;
+      const draw = () => {
+        const V = VIEWS[view];
+        const grid = syms.map((t) => MONTHS.map((_, i) => { const r = cells.get(t + ":" + (i + 1)); return r ? V.of(r) : null; }));
+        const gridHost = h("div", { class: "mk-sea-hm" });
+        host.replaceChildren(gridHost);
+        C.heatmap(gridHost, { rows: syms, cols: MONTHS, grid, palette: "direction", left: 52, cellH: 24, highlightCol: nowMonth - 1,
+          rowFormat: (t) => t || DASH, format: V.fmt, label: V.what + " by calendar month for " + syms.length + " index and sector funds" });
+      };
+      draw();
+      if (seg) seg.append(UI.segmented("Seasonality view", VIEWS.map((x) => ({ label: x.label })), (i) => { view = i; draw(); }, 0));
+      host.dataset.funds = String(syms.length);
+    } else {
+      const peak = Math.max(1e-9, ...rows.map((r) => Math.abs(isNum(r.avg) || 0)));
+      host.append(h("div", { class: "mk-sea" }, rows.map((r) => {
+        const m = isNum(r.month), a = isNum(r.avg);
+        const tip = [];
+        if (isNum(r.median) !== null) tip.push("median " + signedVendorPct(r.median));
+        if (isNum(r.min) !== null && isNum(r.max) !== null) tip.push("range " + signedVendorPct(r.min) + " to " + signedVendorPct(r.max));
+        if (isNum(r.years) !== null) tip.push("over " + r.years + " years");
+        return h("div", { class: "mk-sea-cell" + (m === nowMonth ? " is-now" : ""), title: tip.join(" · ") || null,
+          "data-tone": toneOf(a), style: { "--a": a === null ? "0" : Math.sqrt(Math.abs(a) / peak).toFixed(3) } },
+        h("span", { class: "mk-sea-m" }, m !== null && m >= 1 && m <= 12 ? MONTHS[m - 1] : DASH),
+        h("span", { class: "mk-sea-v", "data-tone": toneOf(a) }, signedVendorPct(r.avg)),
+        h("span", { class: "mk-sea-p" }, vendorPct(r.positivePct)));
+      })));
+    }
     const notes = pulse.notes || {};
-    infoInto("mkSeasonCard", "seasonality", () => ({ title: "Seasonality", lead: "Average change in each calendar month over the years the vendor holds, with the share of those months that closed higher beneath it.",
-      notes: [notes.seasonality, capLine(feed, rows.length, "months")] }));
+    const funds = syms.filter(Boolean);
+    infoInto("mkSeasonCard", "seasonality", () => ({ title: "Seasonality", lead: funds.length ?
+      "Average change in each calendar month for " + funds.join(", ") + ", over the years the vendor holds. Up months is the share of those years the month closed higher; the outlined column is this month." :
+      "Average change in each calendar month over the years the vendor holds, with the share of those months that closed higher beneath it.",
+      notes: [notes.seasonality, capLine(feed, rows.length, funds.length ? "fund months" : "months")] }));
   }
 
   function paintPulse(pulse) {
