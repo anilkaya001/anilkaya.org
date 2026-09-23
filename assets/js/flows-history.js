@@ -177,8 +177,8 @@
 
     const refY = yOf(mode.ref);
     for (const v of [yHi, mode.ref, yLo]) {
-      const y = v === mode.ref ? refY
-        : v > mode.ref ? Math.min(yOf(v), refY - 16) : Math.max(yOf(v), refY + 16);
+      const y = yOf(v);
+      if (v !== mode.ref && Math.abs(y - refY) < 24) continue;
       const t = svgEl("text", {
         class: v === mode.ref ? "rc-axislabel is-zero" : "rc-axislabel",
         x: padL - 8, y: y + 4, "text-anchor": "end",
