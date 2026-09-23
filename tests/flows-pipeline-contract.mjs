@@ -31,7 +31,7 @@ import {
   fakeLadderChain, vannaProbeSample, featuresVariationInput, boardVariationMeta, congressRows,
   plainRedispatchSaid,
 } from "../scripts/flows-pipeline.mjs";
-import { VARIATION_CODES } from "../shared/flows-variation.js";
+import { VARIATION_CODES, variationSummary } from "../shared/flows-variation.js";
 import { pinReading, buildCard } from "../shared/flows-card.js";
 import { pearson, horizonMove, HORIZON_SESSIONS, realizedVol } from "../shared/flows-features.js";
 import { execFileSync, spawnSync, spawn } from "node:child_process";
@@ -3708,6 +3708,9 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   const input = featuresVariationInput({ features: { ticker: "X", spot: 50, netGamma: 1, gammaBookRaw: 2, candles: [], iv30: 0.3 },
     raw: { expiries: [] } }, "2026-08-24");
   eq(input.ivRankRows, null, "a board row's variation carries no vol-of-vol: the implied-volatility history is a deep-card read");
+  ok(/sdBasis/.test(meta.fields) && /"gamma" is the spot channel alone, which is every board row/.test(meta.fields) &&
+     /"gamma\+vanna"/.test(meta.fields),
+     "so the block says a row's drift is over the spot channel alone, and that a deep card's panel can read a different one");
 }
 
 {
@@ -3737,6 +3740,22 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(long.rows.every((r) => Object.values((r.variation && r.variation.why) || {}).every((code) => Object.hasOwn(long.variation.codes, code))),
      "and every null on it carries a code the board spells out");
   ok(long.rows.some((r) => r.variation.driftInSd !== null), "with at least one drift reading on the fixture");
+  ok(long.rows.every((r) => (r.variation.driftInSd === null ? r.variation.sdBasis === null : r.variation.sdBasis === "gamma")),
+     "and every row's drift names its basis: the spot channel alone, the only one a row can measure");
+  {
+    const cardsBy = new Map(fs.readdirSync(path.dirname(prefix)).filter((f) => /-card-/.test(f))
+      .map((f) => JSON.parse(fs.readFileSync(path.join(path.dirname(prefix), f), "utf8"))).map((c) => [c.ticker, c]));
+    const rows = [];
+    for (const side of ["long", "short"]) {
+      for (const r of read("board-" + side).rows) {
+        const c = cardsBy.get(r.t);
+        const cv = c && c.panels.variation.status === "ok" ? variationSummary(c.panels.variation) : null;
+        if (r.variation.driftInSd !== null && cv && cv.driftInSd !== null && cv.driftInSd !== r.variation.driftInSd) rows.push([r, cv]);
+      }
+    }
+    ok(rows.length > 0 && rows.every(([r, cv]) => r.variation.sdBasis === "gamma" && cv.sdBasis === "gamma+vanna"),
+       `where a row's drift differs from its card's, the two carry different bases, so neither is presented as the other (${rows.length} names)`);
+  }
   {
     const cards0 = fs.readdirSync(path.dirname(prefix)).filter((f) => /-card-/.test(f))
       .map((f) => JSON.parse(fs.readFileSync(path.join(path.dirname(prefix), f), "utf8")));

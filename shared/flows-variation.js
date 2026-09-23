@@ -867,7 +867,7 @@ export function variationSummary(panel) {
   const p = panel && typeof panel === "object" ? panel : null;
   if (!p || p.status !== "ok") {
     const code = p && Array.isArray(p.silences) && p.silences[0] ? p.silences[0].code : "no-panel";
-    return { gammaPerSigmaPctAdv: null, charmPctAdv: null, vannaPerPointPctAdv: null, driftInSd: null,
+    return { gammaPerSigmaPctAdv: null, charmPctAdv: null, vannaPerPointPctAdv: null, driftInSd: null, sdBasis: null,
       gammaSource: null, why: { all: code } };
   }
   const ch = p.channels || {};
@@ -887,8 +887,10 @@ export function variationSummary(panel) {
   if (vv === null) why.vannaPerPointPctAdv = codeOf("vanna", "adv") || "adv-short";
   const d = p.variance && fin(p.variance.driftInSd) !== null ? p.variance.driftInSd : null;
   if (d === null) why.driftInSd = codeOf("variance", "charm") || "no-drift";
+  const sdBasis = d === null ? null
+    : p.variance.shares && fin(p.variance.shares.vanna) !== null ? "gamma+vanna" : "gamma";
   return {
-    gammaPerSigmaPctAdv: g, charmPctAdv: cc, vannaPerPointPctAdv: vv, driftInSd: d,
+    gammaPerSigmaPctAdv: g, charmPctAdv: cc, vannaPerPointPctAdv: vv, driftInSd: d, sdBasis,
     gammaSource: p.gammaSource || null,
     ...(Object.keys(why).length ? { why } : {}),
   };

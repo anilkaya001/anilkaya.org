@@ -1207,8 +1207,11 @@ export function boardVariationMeta(run) {
       "fractions of a typical day's dollar volume, each signed as the CHANGE IN DEALER DELTA (per " +
       "one-sigma rise, per session, per vol point), so dealers re-hedge the other way: a negative " +
       "figure means dealers buy stock; driftInSd is the session's charm drift over the standard " +
-      "deviation of the random part, signed the same way; a null carries a code in why, spelled out " +
-      "in codes",
+      "deviation of the random part, signed the same way, and sdBasis names what that deviation " +
+      "holds: \"gamma\" is the spot channel alone, which is every board row, since a row carries no " +
+      "implied-volatility history to size the vol channel or its co-movement with spot; a deep " +
+      "card's panel, whose sdBasis is \"gamma+vanna\", can therefore read a different drift for the " +
+      "same name; a null carries a code in why, spelled out in codes",
     codes: VARIATION_CODES,
     kc: { value: run.kc.value, n: run.kc.n, status: run.kc.status },
     unit: { family: run.unit.family, used: run.unit.used },

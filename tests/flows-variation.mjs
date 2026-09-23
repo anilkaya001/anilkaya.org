@@ -355,6 +355,13 @@ function candlesFor(end, n, { from = 100, step = 0.01, volume = 1e6, after = [] 
   const summary = variationSummary(out);
   near(summary.gammaPerSigmaPctAdv, out.channels.gamma.pctAdv, 0, "the board summary carries the gamma share of a day");
   eq(summary.driftInSd, out.variance.driftInSd, "and the drift in sd");
+  eq(summary.sdBasis, "gamma+vanna", "with the basis of that sd named: spot, vol and their co-movement");
+  const thinSummary = variationSummary(t);
+  ok(thinSummary.driftInSd !== null && thinSummary.sdBasis === "gamma",
+     "while a card with the vol size silent names a gamma-only sd, so the two drifts are never presented as one quantity");
+  ok(thinSummary.driftInSd !== summary.driftInSd,
+     `and they differ on the same book (${thinSummary.driftInSd} against ${summary.driftInSd})`);
+  eq(variationSummary(noBook).sdBasis, null, "a card with no drift names no basis");
   const flowSummary = variationSummary(noBook);
   eq(flowSummary.driftInSd, null, "a flow-only card has no drift");
   eq(flowSummary.why.driftInSd, "no-book", "and says why in a code");
