@@ -4898,7 +4898,7 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
   .ui-chip-v { font-size: 15px; letter-spacing: -0.01em; }
   .ui-chip-l { font-size: 11px; letter-spacing: -0.01em; }
 }
-.ui-ring-track { stroke: var(--fill-2); }
+.ui-ring-track { stroke: var(--ring-c, var(--label-1)); stroke-opacity: 0.2; }
 .ui-ring-v { transition: stroke-dasharray var(--dur-smooth) var(--spring-smooth); }
 .ui-iconchip { display: grid; place-items: center; border-radius: 8px; background: color-mix(in srgb, var(--c) 14%, transparent); color: var(--c); }
 .ui-iconchip .ui-g { font-size: 16px; }

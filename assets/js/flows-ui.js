@@ -661,7 +661,7 @@
   function ring(v01, o = {}) {
     const size = o.size || 20;
     const stroke = o.stroke || 3;
-    const n = s("svg", { width: size, height: size, viewBox: "0 0 26 26", class: "ui-gchip-g", "aria-hidden": "true" });
+    const n = s("svg", { width: size, height: size, viewBox: "0 0 26 26", class: "ui-gchip-g", "aria-hidden": "true", style: { "--ring-c": paint(o.color || "--label-1") } });
     s("circle", { cx: 13, cy: 13, r: 10.5, fill: "none", class: "ui-ring-track", "stroke-width": stroke }, n);
     if (num(v01) !== null) {
       s("circle", {
