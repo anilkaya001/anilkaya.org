@@ -257,6 +257,23 @@ function candlesFor(end, n, { from = 100, step = 0.01, volume = 1e6, after = [] 
   const splitRun = vannaScale([30, 45, 300, 400].map((S, i) => (i % 2 ? pctAt(S) : { vendor: 1, model: 1, spot: S })));
   eq(splitRun.status, "disagree", `names that split between the units settle nothing (${splitRun.reason})`);
 
+  const spots = [22, 28, 35, 41, 48, 55, 175, 190, 210, 235, 260, 290, 320, 340, 380, 420, 470, 520, 580, 640,
+    700, 780, 860, 950, 30, 45, 58, 200, 300, 450, 600, 750, 900];
+  const noisy = spots.map((S, i) => {
+    const half = Math.sqrt(S / 100);
+    const r = i < 21 ? [1, 0.93, 1.08, 1.12, 0.9][i % 5] : (S > 100 ? half * 1.1 : half / 1.1);
+    return { vendor: r, model: 1, spot: S };
+  });
+  const live = vannaScale(noisy);
+  eq(live.votes.share, 21, "the live 2026-09-22 shape: 21 names nearer the share unit");
+  eq(live.votes.pct, 12, "and 12 just past the midpoint toward dollars per 1%, which a two-thirds vote read as unsettled");
+  eq(live.family, "share", `the pooled fit settles shares all the same (log10 ratio ${live.evidence.log10Ratio}, errors ${live.evidence.errorShare} against ${live.evidence.errorPct})`);
+  ok(live.evidence.log10Ratio >= 2, "by at least the hundredfold likelihood ratio the rule asks for");
+  eq(live.status, "agree", "so vanna and charm are published on the vendor's share scale");
+  const oneAgainst = vannaScale([{ vendor: 2, model: 1, spot: 300 }, { vendor: 1, model: 1, spot: 110 }, { vendor: 1, model: 1, spot: 95 }]);
+  eq(oneAgainst.family, "unresolved", "one name leaning toward dollars per 1% on a twofold ratio is noise, not a contrary unit");
+  eq(oneAgainst.used, "share", "so the documented share unit stands");
+
   const nearPar = [80, 95, 120, 140].map(pctAt);
   const blind = vannaScale(nearPar, { prior: "pct$" });
   eq(blind.votes.share + blind.votes.pct, 0, "names all priced near $100 cannot tell the two units apart");

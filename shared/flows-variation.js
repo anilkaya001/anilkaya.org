@@ -16,6 +16,8 @@ export const VARIATION_LINES = Object.freeze({
   UNIT_MAJORITY: 2 / 3,
   VANNA_AGREE: 0.25,
   VANNA_MIN_NAMES: 3,
+  UNIT_EVIDENCE: 100,
+  UNIT_ERROR_FLOOR: 0.01,
   ADV_SESSIONS: 20,
   ADV_MIN: 10,
   RV_WINDOW: 21,
@@ -339,25 +341,35 @@ export function vannaScale(samples, { prior = "share" } = {}) {
     if (Math.abs(Math.log(x.r)) < Math.abs(Math.log(x.r * 100 / x.S))) share++; else pct++;
   }
   const votes = share + pct;
-  const against = fallback === "pct$" ? share : pct;
-  const family = votes < L.VANNA_MIN_NAMES ? (against > 0 ? "unsettled" : "unresolved")
-    : share / votes >= L.UNIT_MAJORITY ? "share"
-    : pct / votes >= L.UNIT_MAJORITY ? "pct$"
-    : "unsettled";
+  const voters = rows.filter((x) => x.S !== null && Math.abs(Math.log(x.S / 100)) > apart);
+  const meanAbs = (xs) => (xs.length ? xs.reduce((a, b) => a + Math.abs(b), 0) / xs.length : null);
+  const errShare = meanAbs(voters.map((x) => Math.log(x.r)));
+  const errPct = meanAbs(voters.map((x) => Math.log(x.r * 100 / x.S)));
+  const logLr = voters.length
+    ? voters.length * Math.log(Math.max(errPct, L.UNIT_ERROR_FLOOR) / Math.max(errShare, L.UNIT_ERROR_FLOOR))
+    : 0;
+  const decisive = Math.log(L.UNIT_EVIDENCE);
+  const favours = logLr >= decisive ? "share" : logLr <= -decisive ? "pct$" : null;
+  const family = votes < L.VANNA_MIN_NAMES ? (favours && favours !== fallback ? "unsettled" : "unresolved")
+    : favours || "unsettled";
   const used = family === "pct$" || family === "share" ? family : fallback;
   const priorSaid = fallback === "pct$" ? "the dollars-per-1% unit the gamma probe read" : "the documented share unit";
   const ratio = medianOf(used === "pct$"
     ? rows.filter((x) => x.S !== null).map((x) => x.r * 100 / x.S)
     : rows.map((x) => x.r));
-  const base = { ratio: round(ratio, 4), n, family, used, prior: fallback, votes: { share, pct } };
+  const evidence = { names: voters.length, errorShare: round(errShare, 4), errorPct: round(errPct, 4),
+    log10Ratio: round(logLr / Math.LN10, 2), needed: L.UNIT_EVIDENCE };
+  const base = { ratio: round(ratio, 4), n, family, used, prior: fallback, votes: { share, pct }, evidence };
   if (n < L.VANNA_MIN_NAMES) {
     return { status: "unmeasured", ...base,
       reason: `${n} name${n === 1 ? "" : "s"} carried a complete single-expiry chain to check the vendor's vanna against; the check needs ${L.VANNA_MIN_NAMES}` };
   }
   if (family === "unsettled") {
+    const fit = `a mean log error of ${round(errShare, 2)} read in shares against ${round(errPct, 2)} read in dollars per 1% move`;
     return { status: "disagree", ...base,
-      reason: `of the ${votes} name${votes === 1 ? "" : "s"} priced far enough from $100 to tell the units apart, ${share} read in shares and ${pct} in dollars per 1% move` +
-        (votes < L.VANNA_MIN_NAMES ? `, too few to overturn ${priorSaid} and too many to ignore` : ", with no two-thirds majority") +
+      reason: `the ${votes} name${votes === 1 ? "" : "s"} priced far enough from $100 to tell the units apart fit with ${fit}` +
+        (votes < L.VANNA_MIN_NAMES ? `, too few to overturn ${priorSaid} and too clear to ignore`
+          : `, a likelihood ratio of ${round(Math.exp(Math.abs(logLr)), 1)} where ${L.UNIT_EVIDENCE} is needed to settle either`) +
         ", so the vendor's vanna unit is not settled" };
   }
   const agree = Math.abs(ratio - 1) <= L.VANNA_AGREE;

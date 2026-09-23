@@ -4877,7 +4877,9 @@ async function main() {
     (variationRun.vannaScale.ratio === null ? "" : `, vendor over Black-Scholes ${variationRun.vannaScale.ratio}`) +
     ` across ${variationRun.vannaScale.n} name(s) with a complete single-expiry chain` +
     `, read in ${variationRun.vannaScale.used === "pct$" ? "dollars per 1% move" : "shares"} (unit ${variationRun.vannaScale.family}: ` +
-    `${variationRun.vannaScale.votes.share} share, ${variationRun.vannaScale.votes.pct} dollars-per-1% among names priced far enough from $100 to tell them apart)` +
+    `${variationRun.vannaScale.votes.share} share, ${variationRun.vannaScale.votes.pct} dollars-per-1% among names priced far enough from $100 to tell them apart; ` +
+    `mean log error ${variationRun.vannaScale.evidence.errorShare} in shares against ${variationRun.vannaScale.evidence.errorPct} in dollars per 1%, ` +
+    `log10 likelihood ratio ${variationRun.vannaScale.evidence.log10Ratio} with 2 needed)` +
     (variationRun.vannaScale.reason ? ` — ${variationRun.vannaScale.reason}` : ""));
   const refreshVariation = variationRun.vannaScale.status === "unmeasured" ? null : (row) => {
     const next = boardVariation(row.t);
