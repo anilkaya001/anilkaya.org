@@ -692,12 +692,12 @@
   }
   function gaugeChip(o) {
     const g = o.g || (o.ring !== undefined ? ring(o.ring, { color: o.color }) : o.diverging !== undefined ? divRing(o.diverging, { max: o.max }) : iconChip(o.icon || "info", o.color));
-    const attrs = { class: "ui-gchip", type: "button", role: "listitem", "aria-haspopup": "dialog", "aria-controls": "fxPop" };
+    const attrs = { class: "ui-gchip", type: "button", "aria-haspopup": "dialog", "aria-controls": "fxPop" };
     if (o.info) attrs["data-info"] = info(o.info);
     return h("button", attrs, g, h("span", { class: "ui-chip-v", "data-tone": o.tone || null }, o.value), h("span", { class: "ui-chip-l" }, o.label));
   }
-  function chips(list) {
-    return h("div", { class: "ui-chips-w" }, h("div", { class: "ui-chips", role: "list", style: { "--n": String(list.length) } }, list));
+  function chips(list, label) {
+    return h("div", { class: "ui-chips-w" }, h("div", { class: "ui-chips", role: "group", "aria-label": label || null, style: { "--n": String(list.length) } }, list));
   }
 
   function segmented(label, items, onPick, start = 0) {
@@ -790,7 +790,7 @@
   }
 
   function listRow(o) {
-    const attrs = { class: "ui-row", role: "listitem", style: o.cols ? { "--cols": o.cols } : null };
+    const attrs = { class: "ui-row", role: o.href ? null : "listitem", style: o.cols ? { "--cols": o.cols } : null };
     const tagName = o.href ? "a" : "div";
     if (o.href) attrs.href = o.href;
     const kids = [];
@@ -807,7 +807,8 @@
   }
   function list(rows, o = {}) {
     const shown = o.visible || 5;
-    const box = h("div", { class: "ui-list", role: "list", "aria-label": o.label || null });
+    const links = rows.some((r) => r.tagName === "A");
+    const box = h("div", { class: "ui-list", role: links ? "group" : "list", "aria-label": o.label || null });
     rows.forEach((r, i) => { if (i >= shown) r.hidden = true; box.append(r); });
     if (rows.length <= shown) return box;
     const b = h("button", { class: "ui-disclose", type: "button", "aria-expanded": "false" }, h("span", null, "All " + rows.length), glyph("chev"));
