@@ -1,488 +1,129 @@
 (() => {
   "use strict";
 
+  const UI = window.FlowsUI;
   const statusEl = document.getElementById("uaStatus");
-  const staleEl = document.getElementById("uaStale");
-  const feedPanel = document.getElementById("uaFeedPanel");
-  const feedTable = document.getElementById("uaFeed");
-  const feedCap = document.getElementById("uaFeedCap");
-  const feedBody = document.getElementById("uaFeedBody");
-  const feedNote = document.getElementById("uaFeedNote");
-  const namePanel = document.getElementById("uaNamePanel");
-  const nameCap = document.getElementById("uaNameCap");
-  const nameBody = document.getElementById("uaNameBody");
-  const nameNote = document.getElementById("uaNameNote");
-  const basisPanel = document.getElementById("uaBasisPanel");
-  const basisHost = document.getElementById("uaBasis");
-  const footEl = document.getElementById("uaFoot");
-  if (!statusEl || !feedBody || !nameBody || !basisHost) return;
+  if (!UI || !statusEl) return;
+  const { h, s, F, chart: C } = UI;
+  const DASH = UI.DASH, MID = UI.MID;
 
-  const FEED_COLUMNS = 10;
-  const NAME_COLUMNS = 7;
-  const MINUS = "−";
-  const DASH = "—";
-  const RANGE = "–";
-  const UP = "↑";
-  const DOWN = "↓";
-  const MARK = "*";
-  const PAYLOAD_URL = "/api/flows/unusual";
-
-  const isNum = (v) => {
-    if (v === null || v === undefined || v === "") return null;
-    const n = typeof v === "number" ? v : Number(v);
-    return Number.isFinite(n) ? n : null;
+  const host = {
+    meta: document.getElementById("uaMeta"),
+    about: document.getElementById("uaAboutSlot"),
+    chips: document.getElementById("uaChips"),
+    filters: document.getElementById("uaFilters"),
+    note: document.getElementById("uaFilterNote"),
+    timeline: document.getElementById("uaTimeline"),
+    names: document.getElementById("uaNames"),
+    urgency: document.getElementById("uaUrgency"),
+    feed: document.getElementById("uaFeed"),
+    surprise: document.getElementById("uaSurprise"),
   };
 
-  function dated(node, text) {
-    node.textContent = /\d{4}-\d{2}-\d{2}/.test(text) ? "" : text;
-    if (node.textContent) return node;
-    const re = /\d{4}-\d{2}-\d{2}/g;
-    let at = 0, m;
-    while ((m = re.exec(text))) {
-      if (m.index > at) node.append(document.createTextNode(text.slice(at, m.index)));
-      const d = document.createElement("span");
-      d.className = "flows-date";
-      d.textContent = m[0];
-      node.append(d);
-      at = m.index + m[0].length;
-    }
-    if (at < text.length) node.append(document.createTextNode(text.slice(at)));
-    return node;
-  }
-
-  function el(tag, cls, text) {
-    const node = document.createElement(tag);
-    if (cls) node.className = cls;
-    if (text !== undefined && text !== null) node.textContent = String(text);
-    return node;
-  }
-
-  function cell(text, cls, title) {
-    const td = el("td", cls, text);
-    if (title) td.title = title;
-    return td;
-  }
-
-  function count(v) {
-    const n = isNum(v);
-    return n === null ? DASH : Math.round(n).toLocaleString("en-US");
-  }
-
-  function fixed(v, d) {
-    const n = isNum(v);
-    return n === null ? DASH : n.toFixed(d);
-  }
-
-  function multiple(v) {
-    const n = isNum(v);
-    return n === null ? DASH : n.toFixed(2) + "×";
-  }
-
-  function ratio(v) {
-    const n = isNum(v);
-    if (n === null) return DASH;
-    const a = Math.abs(n);
-    if (a >= 100) return n.toFixed(0);
-    if (a >= 10) return n.toFixed(1);
-    return n.toFixed(3);
-  }
-
-  function money(v) {
-    const n = isNum(v);
-    if (n === null) return DASH;
-    const sign = n < 0 ? MINUS : "";
-    const a = Math.abs(n);
-    if (a >= 1e9) return sign + "$" + (a / 1e9).toFixed(2) + "B";
-    if (a >= 1e6) return sign + "$" + (a / 1e6).toFixed(2) + "M";
-    if (a >= 1e3) return sign + "$" + (a / 1e3).toFixed(0) + "K";
-    return sign + "$" + a.toFixed(0);
-  }
-
-  const ROW_TIME = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/;
-
-  function instant(iso) {
-    const m = ROW_TIME.exec(String(iso === null || iso === undefined ? "" : iso));
-    if (!m) return null;
-    return m[1] + " " + m[2] + " UTC";
-  }
-
-  const FEED_COLS = [
-    { key: "t", name: "Name", first: "asc", val: (r) => (r.t === null || r.t === undefined ? null : String(r.t)) },
-    { key: "k", name: "Strike", first: "asc", val: (r) => isNum(r.k) },
-    { key: "expiry", name: "Expiry", first: "asc", val: (r) => (r.expiry ? String(r.expiry) : null) },
-    { key: "cp", name: "Call or put", first: "asc", val: (r) => (r.cp ? String(r.cp) : null) },
-    { key: "vol", name: "Volume", first: "desc", val: (r) => isNum(r.vol) },
-    { key: "oi", name: "Open interest", first: "desc", val: (r) => isNum(r.oi) },
-    { key: "vor", name: "Volume over open interest", first: "desc", val: (r) => isNum(r.vor) },
-    { key: "doi", name: "Open-interest change", first: "desc", val: (r) => isNum(r.doi) },
-    { key: "lift", name: "Offer-side share", first: "desc", val: (r) => isNum(r.lift) },
-
-    { key: "nlo", name: "Notional bracket", first: "desc", val: (r) => isNum(r.nlo) },
-  ];
-
-  function compare(a, b, col, dir) {
-    const x = col.val(a.r), y = col.val(b.r);
-    if (x === null && y === null) return a.i - b.i;
-    if (x === null) return 1;
-    if (y === null) return -1;
-    let d;
-    if (typeof x === "string" || typeof y === "string") {
-      const sx = String(x), sy = String(y);
-      d = sx < sy ? -1 : sx > sy ? 1 : 0;
-    } else {
-      d = x - y;
-    }
-    if (d === 0) return a.i - b.i;
-    return dir === "asc" ? d : -d;
-  }
-
-  function liftCell(row) {
-    const n = isNum(row.lift);
-    const aggr = isNum(row.aggr);
-    if (n === null) {
-      return cell(DASH, "c-num ua-unreported",
-        "The vendor classified neither leg of this contract, so no share can be " +
-        "taken of it. That is not a balanced split — it is no report at all, and " +
-        "the two are different facts.");
-    }
-    const parts = [
-      (n * 100).toFixed(1) + "% of the contracts the vendor classified met the offer.",
-      "The classified legs need not sum to the volume counter, so this is a share " +
-      "of that subset and not of the whole.",
-    ];
-    if (aggr !== null) {
-      parts.push(aggr === 0
-        ? "Offer side and bid side were equal, at " + count(Math.abs(aggr)) + " contracts apart."
-        : "Offer side less bid side: " + (aggr > 0 ? "+" : aggr < 0 ? MINUS : "") + count(Math.abs(aggr)) +
-          " contracts.");
-    }
-
-    return cell((n * 100).toFixed(1) + "%", "c-num", parts.join(" "));
-  }
-
-  function doiCell(row) {
-    const n = isNum(row.doi);
-    if (n === null) {
-      return cell(DASH, "c-num ua-unreported",
-        "The vendor reported no previous open interest for this contract, so the " +
-        "change across the settlement is unknown. It is not an unchanged open interest.");
-    }
-    const r = Math.round(n);
-    const body = Math.abs(r).toLocaleString("en-US");
-    if (r === 0) {
-      return cell("0", "c-num ua-flat",
-        "Open interest was the same at both settlements. Measured, and it was zero.");
-    }
-
-    return cell((r > 0 ? "+" : r < 0 ? MINUS : "") + body,
-      "c-num",
-      (r > 0
-        ? body + " more contracts were open at this strike at the later settlement."
-        : body + " fewer contracts were open at this strike at the later settlement.") +
-      " It does not say which side anyone was on.");
-  }
-
-  function notionalCell(row) {
-    const lo = isNum(row.nlo), hi = isNum(row.nhi);
-    if (lo === null || hi === null) {
-      return cell(DASH, "c-num ua-unreported",
-        "One side of the quote was missing when the chain was read, so there is no " +
-        "bracket. Half a bracket would not be a narrower one.");
-    }
-    const td = cell("", "c-num");
-    td.append(el("span", "ua-range", money(lo) + " " + RANGE + " " + money(hi)));
-    td.title = "Between " + count(lo) + " and " + count(hi) + " US dollars: the volume " +
-      "counter times each side of the quote, times 100 shares. The quote is the one " +
-      "standing when the chain was read and the counter carries no date of its own, " +
-      "so this is a scale for the money involved and not a bound on it in either direction.";
-    return td;
-  }
-
-  function nameCell(row, covered, marked) {
-    const th = el("th", "fb-tk");
-    th.scope = "row";
-    const ticker = String(row.t === null || row.t === undefined ? "" : row.t);
-    if (ticker && covered) {
-      const link = el("a", null, ticker);
-      link.href = "/flows/ticker/?t=" + encodeURIComponent(ticker);
-      th.append(link);
-    } else {
-      const span = el("span", ticker ? "ua-unlinked" : "ua-unreported", ticker || DASH);
-      if (ticker) {
-        span.title = "This name's option chain is not among the ones read, so there is " +
-          "no name page for it.";
-      }
-      th.append(span);
-    }
-    if (marked) {
-      const sup = el("sup", "ua-mark", MARK);
-      sup.title = "The vendor filled its page limit on this name's chain, so what this " +
-        "feed sees of it is a subset of its own book — and nothing here says which " +
-        "subset, or how large the rest is.";
-      th.append(sup);
-    }
-
-    const stage = typeof row.st === "string" && row.st ? row.st : null;
-    if (stage) {
-      const badge = el("span", "ua-stage", stage);
-      badge.title = "Where the board's own funnel put this name this session: " + stage +
-        ". Every name in this feed is a board name — the pipeline reads a chain only " +
-        "for one — so this says which side of the board, not whether it is on it.";
-      th.append(badge);
-    }
-    return th;
-  }
-
-  function feedRow(row, ctx) {
-    const tr = document.createElement("tr");
-    const ticker = String(row.t === null || row.t === undefined ? "" : row.t);
-    const name = nameCell(row, ctx.covered.has(ticker), isNum(row.p) === 1);
-
-    const key = joinKey(row.t, row.cp, row.k, row.expiry);
-    if (key && alertKeys && alertKeys.has(key)) {
-      const a = alertKeys.get(key);
-      name.append(bothBadge(key,
-        "The vendor's rules also flagged a window on this exact contract" +
-        (a.rule ? ", under the rule \u201c" + a.rule + "\u201d" : "") +
-        (isNum(a.prem) === null ? "" : ", carrying " + money(a.prem) + " of premium") +
-        ". Two independent selections, the vendor's and this page's floors, on one line."));
-    }
-    tr.append(name);
-
-    tr.append(cell(fixed(row.k, 2), "c-num",
-      isNum(row.k) === null ? "The strike could not be read from the contract symbol." : ""));
-
-    const dte = isNum(row.dte);
-    const expiry = row.expiry ? String(row.expiry) : DASH;
-    const anchor = ctx.anchorDate
-      ? " counted from " + ctx.anchorDate + ", the last completed session, which is what " +
-        "dteAnchor names"
-      : "";
-    tr.append(cell(expiry, "", dte === null
-      ? "The horizon to expiry could not be measured."
-      : count(dte) + " calendar days to expiry" + anchor + "."));
-
-    const cp = String(row.cp || "");
-    tr.append(cell(cp || DASH, cp ? "ua-cp" : "ua-cp ua-unreported",
-      cp === "C" ? "Call." : cp === "P" ? "Put." :
-        "The contract symbol did not say whether this is a call or a put."));
-
-    tr.append(cell(count(row.vol), "c-num", ctx.volTitle));
-    tr.append(cell(count(row.oi), "c-num",
-      "Open interest as the vendor reported it on this response. Undated, like the counter."));
-
-    const vor = isNum(row.vor);
-    tr.append(cell(ratio(row.vor), "c-num ua-vor", vor === null
-      ? "The ranking key could not be formed for this contract."
-      : "The volume counter is " + ratio(row.vor) + " times the open interest beside it. " +
-        "A ratio of two counts, and the key this feed is ranked by."));
-
-    tr.append(doiCell(row));
-    tr.append(liftCell(row));
-    tr.append(notionalCell(row));
-
-    const iv = isNum(row.iv);
-    const m = isNum(row.m);
-    const cov = ctx.coverage.get(ticker);
-    const said = [];
-    if (iv !== null) {
-      said.push("Implied volatility " + (iv * 100).toFixed(1) + "%" +
-        (cov && cov.ivBasis ? ", on this name's own convention (" + cov.ivBasis + ")" : "") +
-        ", which reads down this name and not across the table.");
-    }
-    if (m !== null) {
-      said.push("Log-moneyness " + (m > 0 ? "+" : m < 0 ? MINUS : "") +
-        Math.abs(m).toFixed(4) + ": the strike is " +
-        (m > 0 ? "above" : m < 0 ? "below" : "level with") +
-        " the price this name's chain was read against.");
-    }
-    if (said.length) tr.title = said.join(" ");
-    return tr;
-  }
-
-  function sortableTable(table, cols, repaint) {
-    const sort = { key: null, dir: "desc" };
-    let heads = [];
-
-    function toggle(key) {
-      const col = cols.find((c) => c.key === key);
-      if (!col) return;
-      if (sort.key !== key) { sort.key = key; sort.dir = col.first; }
-      else if (sort.dir === col.first) { sort.dir = col.first === "desc" ? "asc" : "desc"; }
-      else { sort.key = null; sort.dir = "desc"; }
-      sync();
-      repaint();
-    }
-
-    function sync() {
-      heads.forEach((th, i) => {
-        const col = cols[i];
-        const button = th.querySelector(".fb-sort");
-        if (!col || !button) { th.removeAttribute("aria-sort"); return; }
-        const on = sort.key === col.key;
-        th.setAttribute("aria-sort",
-          on ? (sort.dir === "asc" ? "ascending" : "descending") : "none");
-        const ind = button.querySelector(".fb-sort-ind");
-        if (ind) ind.textContent = on ? (sort.dir === "asc" ? UP : DOWN) : "";
-
-        button.setAttribute("aria-label", col.name + ": " + (on
-          ? "ranked " + (sort.dir === "asc" ? "ascending" : "descending") +
-            ", activate to " + (sort.dir === col.first
-              ? "reverse" : "return to the published rank")
-          : "activate to rank by this column"));
-      });
-    }
-
-    function wire() {
-      if (!table) return;
-      heads = Array.from(table.querySelectorAll("thead th"));
-      if (heads.length !== cols.length) return;
-      heads.forEach((th, i) => {
-        const col = cols[i];
-
-        if (!col || th.querySelector(".fb-sort")) return;
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "fb-sort";
-        while (th.firstChild) button.append(th.firstChild);
-        const ind = el("span", "fb-sort-ind");
-        ind.setAttribute("aria-hidden", "true");
-        button.append(ind);
-        button.addEventListener("click", () => toggle(col.key));
-        th.append(button);
-      });
-      sync();
-    }
-
-    function view(rows) {
-      const col = sort.key ? cols.find((c) => c.key === sort.key) : null;
-      return col ? rows.slice().sort((a, b) => compare(a, b, col, sort.dir)) : rows;
-    }
-
-    return { sort, toggle, sync, wire, view };
-  }
-
-  function joinKey(t, cp, k, expiry) {
-    const strike = isNum(k);
+  const n = (v) => {
+    if (v === null || v === undefined) return null;
+    if (typeof v === "string" && !v.trim()) return null;
+    const x = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(x) ? x : null;
+  };
+  const count = (v) => (n(v) === null ? DASH : Math.round(n(v)).toLocaleString("en-US"));
+  const pct0 = (v) => (n(v) === null ? DASH : Math.round(n(v) * 100) + "%");
+  const plural = (k, one, many) => (k === 1 ? one : many);
+  const instant = (iso) => {
+    const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(String(iso || ""));
+    return m ? m[1] + " " + m[2] + " UTC" : null;
+  };
+  const ET = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+  const etOf = (iso) => {
+    const t = Date.parse(String(iso || ""));
+    if (!Number.isFinite(t)) return null;
+    const p = {};
+    for (const x of ET.formatToParts(new Date(t))) p[x.type] = x.value;
+    return { day: p.year + "-" + p.month + "-" + p.day, m: (+p.hour % 24) * 60 + +p.minute };
+  };
+  const clock = (m) => {
+    const hh = Math.floor(m / 60) % 24, mm = Math.round(m % 60);
+    return ((hh + 11) % 12 + 1) + ":" + String(mm).padStart(2, "0") + " " + (hh < 12 ? "AM" : "PM");
+  };
+  const hourLabel = (m) => { const hh = Math.round(m / 60) % 24; return ((hh + 11) % 12 + 1) + (hh < 12 ? " AM" : " PM"); };
+  const cardKey = (t) => String(t || "").toUpperCase().replace(/[^A-Z0-9.\-]/g, "");
+  const tickerHref = (t) => "/flows/ticker/?t=" + encodeURIComponent(cardKey(t));
+  const contractText = (r) => (r.cp === "C" || r.cp === "P" ? r.cp + " " + (n(r.k) === null ? "" : F.compact(n(r.k), n(r.k) % 1 ? 1 : 0)) : "") +
+    (r.exp || r.expiry ? " " + MID + " " + F.day(String(r.exp || r.expiry)) : "");
+  const joinKey = (t, cp, k, expiry) => {
+    const strike = n(k);
     if (!t || !cp || strike === null || !expiry) return null;
     return String(t) + "|" + String(cp) + "|" + strike + "|" + String(expiry);
-  }
+  };
 
-  let alertKeys = null;
-  let feedKeys = null;
+  const view = { side: "all", both: false };
+  const S = {
+    alerts: null, alertsState: { state: "pending", reason: "Reading the flagged windows." }, alertsKind: "pending",
+    payload: null, feedState: { state: "pending", reason: "Reading the counter feed." }, feedKind: "pending",
+    namesState: { state: "pending", reason: "Reading the counter feed." },
+    alertKeys: null, feedKeys: null, urgency: new Map(), urgencyAsked: false,
+  };
+  const charts = { timeline: null };
 
-  let alertRows = [];
-
-  let alertsState = "pending";
-
-  let alertVendorLimit = null;
-  let alertVendorTruncated = null;
-  let alertReadLimit = null;
-  let alertReadTruncated = null;
-
-  let feedState = "pending";
-
-  const filter = { side: "all", both: false };
-
-  function passesFilter(row, expiryKey) {
-    if (filter.side !== "all" && row.cp !== filter.side) return false;
-    if (filter.both) {
-      const key = joinKey(row.t, row.cp, row.k, row[expiryKey]);
-      if (!key) return false;
-
-      if (alertKeys === null || feedKeys === null) return false;
-      if (!alertKeys.has(key) || !feedKeys.has(key)) return false;
-    }
-    return true;
-  }
-
-  function bothBadge(key, title) {
-    if (!key) return null;
-    const sup = el("sup", "ua-both", "both");
-    sup.title = title;
-    return sup;
-  }
-
-  function joinResolved(side) {
-    if (side !== "feed" && alertKeys !== null && feedRows.length) paintFeedRows();
-    if (side !== "alerts" && feedKeys !== null && alertRows.length) paintAlertRows();
-  }
-
-  function buildControls() {
-    const heading = document.getElementById("uaAlertsH");
-    const host = heading ? heading.parentNode : document.querySelector(".flows-controls");
-    if (!host || document.getElementById("uaFilters")) return;
-    const group = el("div", "flows-views");
-    group.id = "uaFilters";
-    group.setAttribute("role", "group");
-    group.setAttribute("aria-label", "Narrow both tables");
-
-    group.style.flexWrap = "wrap";
-
-    const buttons = [];
-
-    function press(button, on) {
-      button.classList.toggle("is-on", on);
-      button.setAttribute("aria-pressed", on ? "true" : "false");
-    }
-    function repaint() {
-      paintFeedRows();
-      paintAlertRows();
-      syncFilterNote();
-    }
-    [["all", "All"], ["C", "Calls"], ["P", "Puts"]].forEach(([value, label]) => {
-      const b = el("button", "flows-view", label);
-      b.type = "button";
-      press(b, filter.side === value);
-      b.addEventListener("click", () => {
-        filter.side = value;
-        buttons.forEach(([bb, vv]) => press(bb, filter.side === vv));
-        repaint();
-      });
-      buttons.push([b, value]);
-      group.append(b);
-    });
-    const both = el("button", "flows-view", "Both feeds");
-    both.type = "button";
-    press(both, false);
-    both.title = "Contracts the vendor's rules flagged AND that cleared this page's own " +
-      "floors — the same name, side, strike and expiry in both tables.";
-    both.addEventListener("click", () => {
-      filter.both = !filter.both;
-      press(both, filter.both);
-      repaint();
-    });
-    group.append(both);
-
-    const note = el("p", "fc-note");
-    note.id = "uaFilterNote";
-    if (heading) heading.after(group, note);
-    else host.append(group, note);
-    syncFilterNote();
-  }
+  const setModuleState = (hostEl, st, label) => {
+    const card = hostEl && hostEl.closest(".fd-mod");
+    if (!card) return;
+    card.dataset.state = st.state;
+    const t = card.querySelector(".ui-mod-t");
+    const old = t.querySelector(".ui-state");
+    if (old) old.remove();
+    const b = UI.stateButton(st, label);
+    if (b) t.append(b);
+  };
+  const setModuleInfo = (hostEl, label, build) => {
+    const card = hostEl && hostEl.closest(".fd-mod");
+    if (!card) return;
+    const head = card.querySelector(".ui-mod-h");
+    const old = head.querySelector(":scope > .ui-info");
+    if (old) old.remove();
+    head.append(UI.infoButton(label, build));
+  };
+  const silence = (hostEl, st, label, height) => {
+    hostEl.replaceChildren(UI.silent(st, label, height));
+    setModuleState(hostEl, st, label);
+  };
+  const def = (st) => UI.STATES[st.state] || UI.STATES.unavailable;
+  const mark = (st) => h("span", { class: "ui-dash" }, DASH, h("span", { class: "ui-state", "data-state": st.state, title: def(st).word }, UI.glyph(def(st).g)));
+  const keep = (hostEl, paint) => {
+    const open = !!hostEl.querySelector('.ui-disclose[aria-expanded="true"]');
+    paint();
+    const b = open && hostEl.querySelector(".ui-disclose");
+    if (b) b.click();
+  };
 
   function vendorCeilingSaid() {
-    if (alertsState !== "ok") return "";
-    if (alertVendorTruncated === true) {
+    const a = S.alerts;
+    if (S.alertsKind !== "ok" || !a) return "";
+    const vLimit = n(a.vendorLimit), rLimit = n(a.readLimit);
+    const vTrunc = typeof a.vendorTruncated === "boolean" ? a.vendorTruncated : null;
+    const rTrunc = typeof a.readTruncated === "boolean" ? a.readTruncated : null;
+    if (vTrunc === true) {
       return " The flagged windows hit the vendor's own ceiling" +
-        (alertVendorLimit === null ? "" : " of " + count(alertVendorLimit) + " rows") +
+        (vLimit === null ? "" : " of " + count(vLimit) + " rows") +
         ", so how many it withheld above that line is unknown — this count is a " +
         "ceiling rather than a market, and comparing it with another session's " +
         "compares two ceilings.";
     }
-    if (alertReadTruncated === true) {
-      return " An intraday read this session came back full at this site's own cap" +
-        (alertReadLimit === null ? "" : " of " + count(alertReadLimit) + " rows") +
+    if (rTrunc === true) {
+      return " An intraday read came back full at this site's own cap" +
+        (rLimit === null ? "" : " of " + count(rLimit) + " rows") +
         ", so windows flagged between reads may be missing and this count is " +
-        "at least what the day's record holds rather than a market.";
+        "at least what the record holds rather than a market.";
     }
-    if (alertVendorTruncated === null && alertReadTruncated === false) {
-      return " Every intraday read this session came in under this site's own per-read cap" +
-        (alertReadLimit === null ? "" : " of " + count(alertReadLimit) + " rows") +
+    if (vTrunc === null && rTrunc === false) {
+      return " Every intraday read came in under this site's own per-read cap" +
+        (rLimit === null ? "" : " of " + count(rLimit) + " rows") +
         ", so each saw every window the vendor's rolling list still held.";
     }
-    if (alertVendorTruncated === null) {
-
+    if (vTrunc === null) {
       return " Whether the flagged windows hit the vendor's own ceiling was not " +
         "recorded on this payload, so this count may be a ceiling rather than a market.";
     }
@@ -490,835 +131,825 @@
       "the read rather than a limit.";
   }
 
-  function syncFilterNote() {
-    const note = document.getElementById("uaFilterNote");
-    if (!note) return;
+  const passes = (r, expiryKey) => {
+    if (view.side !== "all" && r.cp !== view.side) return false;
+    if (view.both) {
+      const key = joinKey(r.t, r.cp, r.k, r[expiryKey]);
+      if (!key || S.alertKeys === null || S.feedKeys === null) return false;
+      if (!S.alertKeys.has(key) || !S.feedKeys.has(key)) return false;
+    }
+    return true;
+  };
 
-    const tally = (state, rows, expiryKey, plural) => {
-      if (state === "pending") return "the " + plural + " have not been read yet";
-      if (state === "unpublished") return "the pipeline has not published the " + plural;
-      if (state === "failed") return "the " + plural + " could not be read";
-
-      if (state === "absent") return "the " + plural + " are not on this payload";
-      const shown = rows.filter((e) => passesFilter(e.r, expiryKey)).length;
-      return count(shown) + " of " + count(rows.length) + " " + plural + " are drawn";
+  function syncNote() {
+    const tally = (kind, rows, expiryKey, plural2) => {
+      if (kind === "pending") return "the " + plural2 + " have not been read yet";
+      if (kind === "unpublished") return "the pipeline has not published the " + plural2;
+      if (kind === "failed" || kind === "withheld") return "the " + plural2 + " could not be read";
+      if (kind === "absent") return "the " + plural2 + " are not on this payload";
+      const shown = rows.filter((r) => passes(r, expiryKey)).length;
+      return count(shown) + " of " + count(rows.length) + " " + plural2 + " are drawn";
     };
-    if (filter.side === "all" && !filter.both) {
-
-      note.textContent = (alertsState === "ok" && feedState === "ok"
+    const aRows = S.alertsKind === "ok" ? S.alerts.rows : [];
+    const fRows = S.feedKind === "ok" ? S.payload.contracts.rows : [];
+    const aT = tally(S.alertsKind, aRows, "exp", "flagged windows");
+    const fT = tally(S.feedKind, fRows, "expiry", "contracts");
+    let text;
+    if (view.side === "all" && !view.both) {
+      text = (S.alertsKind === "ok" && S.feedKind === "ok"
         ? "Both tables show every row published."
-        : "No filter is on: " + tally(alertsState, alertRows, "exp", "flagged windows") +
-          " and " + tally(feedState, feedRows, "expiry", "contracts") + ".") +
-        " Narrowing either is a filter on what is drawn and never a second read of the " +
-        "market." + vendorCeilingSaid();
-      return;
-    }
-    const bits = [];
-    if (filter.side !== "all") bits.push(filter.side === "C" ? "calls only" : "puts only");
-    if (filter.both) {
-
-      bits.push(alertsState === "ok" && feedState === "ok"
-        ? "contracts in both feeds"
-        : (feedState === "absent"
-          ? "contracts in both feeds — which cannot be resolved at all, because the " +
-            "contract rows are not on this payload"
-          : (alertsState === "failed" || feedState === "failed"
-            ? "contracts in both feeds — which cannot be resolved at all, because one of " +
-              "the two payloads could not be read"
-            : (alertsState === "unpublished" || feedState === "unpublished"
-              ? "contracts in both feeds — which cannot be resolved, because the pipeline " +
-                "has not published one of the two"
-              : "contracts in both feeds, which cannot be resolved until both payloads " +
-                "have loaded"))));
-    }
-    note.textContent = "Filtered to " + bits.join(" and ") + ": " +
-      tally(alertsState, alertRows, "exp", "flagged windows") + " and " +
-      tally(feedState, feedRows, "expiry", "contracts") + ". " +
-      "Anything hidden is published and hidden, not absent from the read." +
-      vendorCeilingSaid();
-  }
-
-  let feedRows = [];
-  let feedCtx = null;
-  const feedSorter = sortableTable(feedTable, FEED_COLS, () => paintFeedRows());
-
-  function paintFeedRows() {
-
-    if (!feedRows.length) return;
-    const view = feedSorter.view(feedRows).filter((e) => passesFilter(e.r, "expiry"));
-    feedBody.textContent = "";
-    if (!view.length && feedRows.length) {
-
-      emptyRow(feedBody, FEED_COLUMNS,
-        "No contract in this feed matches the filter above. " + count(feedRows.length) +
-        " rows are published; the filter is hiding all of them.");
-      return;
-    }
-    const frag = document.createDocumentFragment();
-    for (const entry of view) frag.append(feedRow(entry.r, feedCtx));
-    feedBody.append(frag);
-  }
-
-  function changeCell(v) {
-    const n = isNum(v);
-    if (n === null) {
-      return cell(DASH, "c-num ua-unreported",
-        "No prior close was reported for this name, so the move is unknown. It is not zero.");
-    }
-    const body = (Math.abs(n) * 100).toFixed(2) + "%";
-    if (n === 0) return cell("0.00%", "c-num ua-flat", "Measured, and the close was unchanged.");
-    return cell((n > 0 ? UP : DOWN) + body,
-      "c-num " + (n > 0 ? "fb-pos" : "fb-neg"),
-      (n > 0 ? "Up " : "Down ") + body + " on the prior close, as a fraction of it.");
-  }
-
-  function surpriseCell(v, what) {
-    const n = isNum(v);
-    if (n === null) {
-      return cell(DASH, "c-num ua-unreported",
-        "This name's thirty-day average " + what + " was missing, so the ratio is " +
-        "withheld. It is not an average day.");
-    }
-    return cell(multiple(n), "c-num",
-      n.toFixed(2) + " times this name's own thirty-day average " + what + ". It compares " +
-      "the name with itself, and with no other name.");
-  }
-
-  function nameRow(row, covered) {
-    const tr = document.createElement("tr");
-    tr.append(nameCell(row, covered.has(String(row.t || "")), false));
-    tr.append(cell(fixed(row.px, 2), "c-num",
-      isNum(row.px) === null ? "No close was reported for this name." : ""));
-    tr.append(changeCell(row.chg));
-    tr.append(surpriseCell(row.st, "call and put volume together"));
-    tr.append(surpriseCell(row.sc, "call volume"));
-    tr.append(surpriseCell(row.sp, "put volume"));
-    tr.append(cell(fixed(row.putCallRatio, 2), "c-num",
-      isNum(row.putCallRatio) === null
-        ? "The vendor reported no put/call ratio for this name."
-        : "The vendor's own put/call ratio, passed through."));
-    return tr;
-  }
-
-  const BASIS_LABELS = {
-    unit: "The unit",
-    date: "The date, and why there is not one",
-    rank: "The ranking key",
-    floors: "The floors",
-    aggr: "aggr — the two classified legs",
-    lift: "lift — the offer-side share",
-    notional: "notional — the bracket",
-    iv: "iv — implied volatility",
-    oi: "oi — open interest",
-    zeroOi: "Strikes that never arrive",
-    names: "Two panels, two populations",
-    refusals: "What this page will not compute",
-  };
-
-  const CHOICE_LABELS = {
-    key: "key",
-    relation: "relation",
-    minVolume: "minimum volume",
-    minOi: "minimum open interest",
-    perName: "most contracts from one name",
-  };
-
-  const BASIS_GROUPS = [
-    { keys: ["unit", "date"], open: true },
-    { keys: ["rank", "floors"], summary: "The choices this page makes" },
-    { keys: ["aggr", "lift", "notional", "iv", "oi", "zeroOi"], summary: "How each column is built" },
-    { keys: ["names", "refusals"], summary: "What is counted, and what is refused" },
-  ];
-
-  function basisItem(key, value) {
-    const text = String(value === null || value === undefined ? "" : value).trim();
-    if (!text) return null;
-    const box = el("div", "ua-b-item");
-    box.append(el("p", "ua-b-k", BASIS_LABELS[key] || key));
-    box.append(el("p", "ua-b-p", text));
-    return box;
-  }
-
-  function basisChoice(key, obj) {
-    const box = el("div", "ua-choice");
-    box.append(el("p", "ua-choice-tag", "A choice — " + (BASIS_LABELS[key] || key)));
-
-    const defs = el("dl", "ua-defs");
-    let any = false;
-    for (const field of Object.keys(obj)) {
-      if (field === "choice" || field === "reason") continue;
-      const v = obj[field];
-      if (v === null || v === undefined || typeof v === "object") continue;
-      defs.append(el("dt", null, CHOICE_LABELS[field] || field));
-      defs.append(el("dd", null, typeof v === "number" ? count(v) : String(v)));
-      any = true;
-    }
-    if (any) box.append(defs);
-
-    const reason = String(obj.reason === null || obj.reason === undefined ? "" : obj.reason).trim();
-    if (reason) box.append(el("p", "ua-b-p", reason));
-    return box;
-  }
-
-  function basisEntry(key, value) {
-    if (value && typeof value === "object" && value.choice === true) {
-      return basisChoice(key, value);
-    }
-    if (value && typeof value === "object") {
-
-      return basisItem(key, value.reason || value.line || JSON.stringify(value));
-    }
-    return basisItem(key, value);
-  }
-
-  function paintBasis(basis) {
-    basisHost.textContent = "";
-    if (!basis || typeof basis !== "object") {
-      basisHost.append(el("p", "fc-note",
-        "This payload carried no basis block, so the page cannot say how its own " +
-        "numbers were built. Treat everything above as unexplained."));
-      if (basisPanel) basisPanel.hidden = false;
-      return;
-    }
-
-    const drawn = new Set();
-    for (const group of BASIS_GROUPS) {
-      const items = [];
-      for (const key of group.keys) {
-        if (!Object.prototype.hasOwnProperty.call(basis, key)) continue;
-        const node = basisEntry(key, basis[key]);
-        drawn.add(key);
-        if (node) items.push(node);
-      }
-      if (!items.length) continue;
-      if (group.open) {
-        const open = el("div", "ua-spine");
-        for (const node of items) open.append(node);
-        basisHost.append(open);
-      } else {
-        const box = el("details", "ua-how");
-        box.append(el("summary", "ua-how-s", group.summary));
-        for (const node of items) box.append(node);
-        basisHost.append(box);
-      }
-    }
-
-    const extra = Object.keys(basis).filter((k) => !drawn.has(k));
-    if (extra.length) {
-      const box = el("details", "ua-how");
-      box.append(el("summary", "ua-how-s", "Also published in the basis"));
-      for (const key of extra) {
-        const node = basisEntry(key, basis[key]);
-        if (node) box.append(node);
-      }
-      basisHost.append(box);
-    }
-    if (basisPanel) basisPanel.hidden = false;
-  }
-
-  function emptyRow(body, columns, text, kind) {
-    body.textContent = "";
-    const tr = document.createElement("tr");
-    const td = el("td", "flows-empty", text);
-    if (kind) td.dataset.empty = kind;
-    td.colSpan = columns;
-    tr.append(td);
-    body.append(tr);
-  }
-
-  function say(text, kind) {
-    statusEl.textContent = text;
-    if (kind) statusEl.dataset.empty = kind;
-    else delete statusEl.dataset.empty;
-  }
-
-  function failEverywhere(what) {
-
-    say(what, "unreadable");
-    emptyRow(feedBody, FEED_COLUMNS, what, "unreadable");
-    emptyRow(nameBody, NAME_COLUMNS, what, "unreadable");
-    if (feedCap) feedCap.textContent = "No contract could be listed.";
-    if (nameCap) nameCap.textContent = "No name could be listed.";
-    if (feedNote) feedNote.textContent = "";
-    if (nameNote) nameNote.textContent = "";
-    basisHost.textContent = "";
-    const broken = el("p", "flows-empty", what);
-    broken.dataset.empty = "unreadable";
-    basisHost.append(broken);
-    if (feedPanel) feedPanel.hidden = false;
-    if (namePanel) namePanel.hidden = false;
-    if (basisPanel) basisPanel.hidden = false;
-    if (footEl) footEl.textContent = "";
-  }
-
-  function paint(payload) {
-
-    const contracts = payload.contracts && typeof payload.contracts === "object"
-      ? payload.contracts : null;
-    const names = payload.names && typeof payload.names === "object" ? payload.names : null;
-    const rows = contracts && Array.isArray(contracts.rows) ? contracts.rows : null;
-    const nameRows = names && Array.isArray(names.rows) ? names.rows : null;
-    const coverage = new Map();
-
-    let listed = null;
-    for (const c of Array.isArray(payload.coverage) ? payload.coverage : []) {
-      if (!c || !c.t) continue;
-      coverage.set(String(c.t), c);
-      const n = isNum(c.rows);
-      if (n !== null) listed = (listed === null ? 0 : listed) + n;
-    }
-
-    const readAt = instant(payload.readAt);
-    const reason = payload.volumeAsOfReason
-      ? String(payload.volumeAsOfReason)
-      : "the endpoint publishes no as-of stamp";
-    const anchorDate = payload.dteAnchor === "sessionDate" && payload.sessionDate
-      ? String(payload.sessionDate) : null;
-
-    feedCtx = {
-      coverage,
-      covered: new Set(coverage.keys()),
-      anchorDate,
-      volTitle: "The vendor's volume counter for this strike: every contract that " +
-        "changed hands there, summed. It carries no date — " + reason + ".",
-    };
-
-    if (rows === null) {
-      const gone = contracts === null;
-      const what = gone
-        ? "this payload carries no contracts block"
-        : "the contracts block on this payload carries no rows array, so it could not " +
-          "be read as a feed";
-      const kind = gone ? "unavailable" : "unreadable";
-      say("Published, but " + what + ", and no count of contracts, of names or of " +
-        "chains is taken from it. This is a gap in the payload and not a chain that " +
-        "cleared no floors.", kind);
-      if (feedCap) feedCap.textContent = "";
-      if (feedNote) feedNote.textContent = "";
-      emptyRow(feedBody, FEED_COLUMNS, "Published, but " + what + ".", kind);
-      feedRows = [];
-
-      feedKeys = null;
-
-      feedState = gone ? "absent" : "failed";
-      syncFilterNote();
-      if (feedPanel) feedPanel.hidden = false;
+        : "No filter is on: " + aT + " and " + fT + ".") +
+        " Narrowing either is a filter on what is drawn and never a second read of the market.";
     } else {
-
-      const shown = isNum(contracts.shown);
-      const eligible = isNum(contracts.eligible);
-      const cap = isNum(contracts.cap);
-      const perName = isNum(contracts.perName);
-      const distinct = new Set(rows.map((r) => String(r.t || ""))).size;
-      const namesSeen = isNum(payload.namesSeen);
-      const truncated = isNum(payload.namesTruncated);
-      const complete = isNum(payload.namesComplete);
-
-      let bound;
-      if (contracts.capBound === "rows") {
-        bound = "the " + (cap === null ? "row" : count(cap) + "-row") +
-          " cap is what bound this list" +
-          (perName === null ? "" : ", with at most " + count(perName) + " from any one name");
-      } else if (contracts.capBound === "perName") {
-        bound = "the per-name allowance of " + (perName === null ? "one" : count(perName)) +
-          " is what bound this list; the " + (cap === null ? "row cap" : count(cap) + "-row cap") +
-          " was never reached";
-      } else if (contracts.capBound === "eligible") {
-        bound = "neither cap bound this list: it is every contract that cleared the floors";
-      } else {
-        bound = "the payload did not say which cap bound this list";
-      }
-
-      const strip = [];
-      strip.push((shown === null ? count(rows.length) : count(shown)) + " contracts from " +
-        count(distinct) + (distinct === 1 ? " name" : " names") +
-        (eligible === null ? "" : ", of " + count(eligible) + " that cleared the floors"));
-      strip.push(bound);
-      if (namesSeen !== null) {
-        strip.push(count(namesSeen) + (namesSeen === 1 ? " chain read" : " chains read") +
-          (truncated === null ? "" : truncated === 0
-            ? ", all of them whole"
-            : ", " + count(truncated) + " of them cut short by the vendor"));
-      }
-      strip.push(readAt
-        ? "chain read " + readAt + ", and the counter carries no date of its own"
-        : "the payload published no read time, which is the one stamp this page has");
-
-      say(strip.join(" · ") + ".", rows.length ? null : "quiet");
-
-      const aggrReported = isNum(contracts.aggressorReported);
-      const notionalReported = isNum(contracts.notionalReported);
-      const floors = payload.basis && payload.basis.floors ? payload.basis.floors : {};
-      const minVolume = isNum(floors.minVolume);
-      const minOi = isNum(floors.minOi);
-      const conventions = isNum(payload.ivConventionsSeen);
-
-      const capParts = [];
-      capParts.push((shown === null ? count(rows.length) : count(shown)) +
-        (eligible === null ? " contracts" : " of " + count(eligible) + " contracts") +
-        " that cleared the floors" +
-        (minVolume === null || minOi === null ? "" :
-          " — a volume counter of at least " + count(minVolume) + " and an open interest of " +
-          "at least " + count(minOi) + ", both choices and both stated below") + ".");
-      if (namesSeen !== null) {
-        capParts.push("Drawn from " + count(namesSeen) +
-          (namesSeen === 1 ? " chain" : " chains") +
-          (complete === null || truncated === null ? "" :
-            ": " + count(complete) + " the vendor returned whole and " + count(truncated) +
-            " it cut short at its page limit") + ".");
-      }
-      if (listed !== null && eligible !== null && listed > eligible) {
-        capParts.push("Those chains listed " + count(listed) + " strikes between them; the " +
-          count(listed - eligible) + " that did not clear the floors are not in the " +
-          "population above and nothing is claimed about them.");
-      }
-      if (aggrReported !== null && shown !== null) {
-        capParts.push(count(aggrReported) + " of " + count(shown) +
-          " carry a classified offer-and-bid split" +
-          (notionalReported === null ? "" :
-            " and " + count(notionalReported) + " of " + count(shown) + " quoted both sides") + ".");
-      }
-
-      if (conventions !== null && conventions > 1) {
-        capParts.push(count(conventions) + " implied-volatility conventions appear across " +
-          "these chains, so that reading cannot be compared between names; each name's " +
-          "divisor is in the payload's coverage list.");
-      }
-      if (feedCap) feedCap.textContent = capParts.join(" ");
-
-      if (feedNote) {
-        feedNote.textContent =
-          MARK + " marks a contract from a chain the vendor cut short at its page limit: " +
-          "that name's contribution is a subset of its own book, and nothing here says " +
-          "which subset. An em dash is a value the vendor did not report and never a " +
-          "zero — a withheld offer-side share is not a balanced split, and a withheld " +
-          "open-interest change is not an unchanged open interest. Notional is a bracket " +
-          "between the volume counter times each side of the quote; both ends are " +
-          "present or neither is, and the column ranks on the low end. Vol/OI is shown " +
-          "as a number with no bar behind it: on a live chain it spans several powers of " +
-          "ten and any fixed scale would flatten most of the column into nothing. " +
-          "Ranking by a heading re-ranks the list; a third activation returns it to the " +
-          "rank the pipeline published. A row marked \u201cboth\u201d is a contract the " +
-          "vendor's rules also flagged a window on, matched on name, side, strike and " +
-          "expiry — two independent selections agreeing, and the only corroboration this " +
-          "page can offer. An unmarked row is not a contradiction: the two feeds are read " +
-          "at different times from different endpoints, and absence from one says nothing " +
-          "about the other.";
-      }
-
-      feedRows = rows.map((r, i) => ({ r, i }));
-
-      feedKeys = new Set();
-      for (const r of rows) {
-        const key = joinKey(r.t, r.cp, r.k, r.expiry);
-        if (key) feedKeys.add(key);
-      }
-      if (!rows.length) {
-
-        emptyRow(feedBody, FEED_COLUMNS,
-          payload.status === "quiet"
-            ? "No contract cleared both floors on the chains that were read. That is a " +
-              "statement about this run's chains, not about the market."
-            : "This payload carries a contracts block with no rows in it, and did not " +
-              "report the read as quiet.", "quiet");
-      } else {
-        feedSorter.wire();
-        paintFeedRows();
-      }
-      feedState = "ok";
-      joinResolved("feed");
-      syncFilterNote();
-      if (feedPanel) feedPanel.hidden = false;
-    }
-
-    if (nameRows === null) {
-      const goneNames = names === null;
-      if (nameCap) nameCap.textContent = "";
-      emptyRow(nameBody, NAME_COLUMNS, "Published, but the name panel " + (goneNames
-        ? "is not on this payload"
-        : "on this payload carries no rows array, so it could not be read as a ranking") +
-        ". No count of ranked or unranked names is taken from it.",
-        goneNames ? "unavailable" : "unreadable");
-    } else {
-      const ranked = isNum(names.ranked);
-      const universe = isNum(names.universe);
-      const unranked = isNum(names.unranked);
-      const gated = isNum(names.earningsGated);
-      const nShown = isNum(names.shown);
-
-      const nameParts = [];
-      nameParts.push((nShown === null ? count(nameRows.length) : count(nShown)) +
-        (ranked === null ? " names" : " of " + count(ranked) + " names") +
-        " ranked by call and put volume together against the sum of the same two " +
-        "thirty-day averages.");
-      if (universe !== null) {
-
-        nameParts.push("The population is every eligible name the screener returned — " +
-          count(universe) + " of them" +
-          (unranked === null ? "" : ", " + count(unranked) + " of which had no measurable " +
-            "ratio and " + (unranked === 1 ? "was" : "were") + " left unranked rather than " +
-            "ranked at zero") + ".");
-      }
-
-      if (gated !== null && gated > 0) {
-        nameParts.push(count(gated) + " of them report earnings inside the horizon the " +
-          "board's gate excludes. This panel keeps them, because it describes what was " +
-          "counted rather than predicting anything from it — but a ratio on one of those " +
-          "names is the least surprising number on the page.");
-      }
-      if (nameCap) nameCap.textContent = nameParts.join(" ");
-
-      if (nameNote) {
-        nameNote.textContent =
-          "Both, Calls and Puts are ratios against this name's own thirty-day averages: " +
-          "1.00× is that average and 2.00× is twice it. They compare a name with itself " +
-          "and with no other name, so the same 2.00× on a name that lists two hundred " +
-          "contracts and on the largest name in the universe are the same number and not " +
-          "the same event. Both is withheld when either average is missing, because a " +
-          "zero on one side would inflate the ratio without saying so. P/C is the " +
-          "vendor's own put/call ratio, passed through. These names are not the feed's: " +
-          "this panel sees every eligible name, the feed above only the ones whose chain " +
-          "was read, which is why a name here is usually not a link.";
-      }
-
-      if (!nameRows.length) {
-        emptyRow(nameBody, NAME_COLUMNS,
-          "No name carried both a call and a put thirty-day average, so none could be " +
-          "ranked.", "quiet");
-      } else {
-        const frag = document.createDocumentFragment();
-        for (const r of nameRows) frag.append(nameRow(r, feedCtx.covered));
-        nameBody.append(frag);
-      }
-    }
-    if (namePanel) namePanel.hidden = false;
-
-    paintBasis(payload.basis);
-
-    if (footEl) {
-      footEl.textContent = "";
-      const built = instant(payload.generatedAt);
       const bits = [];
-      bits.push(readAt ? "The chain was read at " + readAt + "." : "");
-      bits.push("volumeAsOf is null: " + reason + ", so the span the counter covers is " +
-        "unobserved and this page stamps only when it was read.");
-      if (anchorDate) {
-        bits.push("Days to expiry are counted from " + anchorDate + ", the last completed " +
-          "session, which is what dteAnchor names.");
+      if (view.side !== "all") bits.push(view.side === "C" ? "calls only" : "puts only");
+      if (view.both) {
+        const dead = S.feedKind === "absent" ? "the contract rows are not on this payload"
+          : ["failed", "withheld"].includes(S.alertsKind) || ["failed", "withheld"].includes(S.feedKind) ? "one of the two payloads could not be read" : null;
+        bits.push(S.alertsKind === "ok" && S.feedKind === "ok" ? "contracts in both feeds"
+          : dead ? "contracts in both feeds — which cannot be resolved at all, because " + dead
+            : S.alertsKind === "unpublished" || S.feedKind === "unpublished"
+              ? "contracts in both feeds — which cannot be resolved, because the pipeline has not published one of the two"
+              : "contracts in both feeds, which cannot be resolved until both payloads have loaded");
       }
-      if (built) bits.push("Built " + built + (isNum(payload.v) === null ? "" : ", payload v" + count(payload.v)) + ".");
-      footEl.append(dated(el("span"), bits.filter(Boolean).join(" ") + " "));
-      const link = el("a", null, "The whole payload, including the pipeline's own wording");
-      link.href = PAYLOAD_URL;
-      footEl.append(link);
-      footEl.append(document.createTextNode("."));
+      text = "Filtered to " + bits.join(" and ") + ": " + aT + " and " + fT + ". " +
+        "Anything hidden is published and hidden, not absent from the read.";
+    }
+    host.note.textContent = text + vendorCeilingSaid();
+    host.filters.inert = S.alertsKind !== "ok" && S.feedKind !== "ok";
+    const cnt = host.filters.querySelector(".fu-count");
+    if (cnt) {
+      const shown = aRows.filter((r) => passes(r, "exp")).length;
+      cnt.textContent = S.alertsKind !== "ok" ? "" : view.side === "all" && !view.both
+        ? count(aRows.length) + " shown" : count(shown) + " of " + count(aRows.length) + " shown";
     }
   }
 
-  const alertsPanel = document.getElementById("uaAlertsPanel");
-  const alertsTable = document.getElementById("uaAlerts");
-  const alertsBody = document.getElementById("uaAlertsBody");
-  const alertsCap = document.getElementById("uaAlertsCap");
-  const alertsNote = document.getElementById("uaAlertsNote");
-  const ALERT_COLUMNS = 10;
-
-  const ALERT_COLS = [
-    { key: "t", name: "Name", first: "asc",
-      val: (r) => (r.t === null || r.t === undefined ? null : String(r.t)) },
-
-    { key: "exp", name: "Contract, by expiry", first: "asc",
-      val: (r) => (r.exp ? String(r.exp) : null) },
-    { key: "prem", name: "Premium", first: "desc", val: (r) => isNum(r.prem) },
-    { key: "askPrem", name: "Ask-side premium", first: "desc", val: (r) => isNum(r.askPrem) },
-    { key: "bidPrem", name: "Bid-side premium", first: "desc", val: (r) => isNum(r.bidPrem) },
-    { key: "size", name: "Contracts in the window", first: "desc", val: (r) => isNum(r.size) },
-    { key: "trades", name: "Executions in the window", first: "desc", val: (r) => isNum(r.trades) },
-
-    { key: "flags", name: "Vendor flags set", first: "desc", val: (r) => {
-      const flags = [r.sweep, r.floor, r.single, r.opening];
-      if (!flags.some((v) => v === true || v === false)) return null;
-      return flags.filter((v) => v === true).length;
-    } },
-    { key: "spanStart", name: "Window start", first: "asc",
-      val: (r) => (r.spanStart ? String(r.spanStart) : null) },
-    { key: "st", name: "Stage in the board's funnel", first: "asc",
-      val: (r) => (r.st ? String(r.st) : null) },
-  ];
-  const alertsSorter = sortableTable(alertsTable, ALERT_COLS, () => paintAlertRows());
-
-  function paintAlertRows() {
-    if (!alertsBody || !alertRows.length) return;
-    const view = alertsSorter.view(alertRows).filter((e) => passesFilter(e.r, "exp"));
-    alertsBody.textContent = "";
-    if (!view.length && alertRows.length) {
-
-      emptyRow(alertsBody, ALERT_COLUMNS,
-        "No flagged window matches the filter above. " + count(alertRows.length) +
-        " are published; the filter is hiding all of them.");
-      return;
-    }
-    const frag = document.createDocumentFragment();
-    for (const entry of view) frag.append(alertRowEl(entry.r));
-    alertsBody.append(frag);
-  }
-
-  function flagWord(v, name) {
-    return name + " " + (v === true ? "yes" : v === false ? "no" : DASH);
-  }
-
-  function alertFlagsCell(r) {
-    const names = [["sweep", r.sweep], ["floor", r.floor],
-                   ["single-leg", r.single], ["all-opening", r.opening]];
-    const yes = names.filter(([, v]) => v === true).map(([n]) => n);
-    const known = names.some(([, v]) => v === true || v === false);
-    const text = yes.length ? yes.join(", ") : known ? "none" : DASH;
-    return cell(text, null,
-      names.map(([n, v]) => flagWord(v, n)).join(" · ") +
-      " — the vendor's flags, as sent; " + DASH + " means the flag was not carried.");
-  }
-
-  function alertWindowCell(r) {
-    if (!r.spanStart || !r.spanEnd) return cell(DASH, null,
-      "The vendor stated no span for this window.");
-    const hm = (iso) => String(iso).slice(11, 16);
-    if (r.spanFrom === "created_at") {
-      return cell(hm(r.spanStart), null,
-        "The vendor stated no span for this window; this is when it created the alert: " +
-        r.spanStart + ".");
-    }
-    return cell(hm(r.spanStart) + "\u2013" + hm(r.spanEnd), null,
-      "The vendor's stated span: " + r.spanStart + " to " + r.spanEnd + ".");
-  }
-
-  function alertRowEl(r) {
-    const tr = document.createElement("tr");
-    const name = el("th", "fb-tk");
-    name.scope = "row";
-    name.textContent = r.t || DASH;
-    if (r.rule) name.title = "Flagged by the vendor's rule \u201c" + r.rule + "\u201d.";
-
-    const key = joinKey(r.t, r.cp, r.k, r.exp);
-    if (key && feedKeys && feedKeys.has(key)) {
-      name.append(bothBadge(key,
-        "This exact contract also clears the counter feed's own volume and " +
-        "open-interest floors below — two independent selections on one line."));
-    }
-    tr.append(name);
-    tr.append(cell(
-      r.cp ? (r.cp === "C" ? "C " : "P ") + (isNum(r.k) === null ? "" : count(r.k)) +
-        (r.exp ? " \u00b7 " + r.exp : "")
-        : (r.oc || DASH),
-      null,
-      r.cp === null && r.oc
-        ? "The vendor's option symbol could not be parsed; shown as sent."
-        : null));
-    tr.append(cell(money(r.prem), "c-num"));
-    tr.append(cell(money(r.askPrem), "c-num"));
-    tr.append(cell(money(r.bidPrem), "c-num"));
-    tr.append(cell(count(r.size), "c-num"));
-    tr.append(cell(count(r.trades), "c-num"));
-    tr.append(alertFlagsCell(r));
-    tr.append(alertWindowCell(r));
-    tr.append(cell(r.st || DASH, r.st === "foreign" ? "ua-dim" : null,
-      r.st === "foreign"
-        ? "The screener never returned this name, so the board holds no view of it."
-        : null));
-    return tr;
-  }
-
-  function alertsStamp(readAt, refreshed) {
-    const at = instant(readAt);
-    if (!at) return "";
-    if (refreshed === "intraday") {
-      return "Read " + at + " (refreshes about every 15 minutes during market hours).";
-    }
-    if (refreshed === "nightly") {
-      return "Read " + at + " with the nightly build (refreshes intraday during market hours).";
-    }
-    return "Read " + at + ".";
-  }
-
-  function paintAlerts(alerts) {
-    if (!alertsPanel || !alertsBody) return;
-
-    if (alerts.status === "pending") {
-      alertsState = "unpublished";
-      emptyRow(alertsBody, ALERT_COLUMNS,
-        "The pipeline has not published this key yet. The alerts feed costs one " +
-        "market-wide call a run and appears with the first pipeline run after it " +
-        "shipped.", "pending");
-      if (alertsCap) alertsCap.textContent = "Nothing has been published under this key.";
-      alertsPanel.hidden = false;
-      syncFilterNote();
-      return;
-    }
-
-    const rows = Array.isArray(alerts.rows) ? alerts.rows : null;
-    if (!rows) {
-      emptyRow(alertsBody, ALERT_COLUMNS,
-        "This payload could not be read as an alerts feed: it carries no rows " +
-        "array. That is a gap in the payload, not a quiet market.", "unreadable");
-
-      alertsState = "failed";
-      syncFilterNote();
-      alertsPanel.hidden = false;
-      return;
-    }
-
-    alertVendorLimit = isNum(alerts.vendorLimit);
-    alertVendorTruncated = typeof alerts.vendorTruncated === "boolean"
-      ? alerts.vendorTruncated
-      : null;
-    alertReadLimit = isNum(alerts.readLimit);
-    alertReadTruncated = typeof alerts.readTruncated === "boolean"
-      ? alerts.readTruncated
-      : null;
-
-    alertsBody.textContent = "";
-    alertRows = rows.map((r, i) => ({ r, i }));
-
-    alertKeys = new Map();
-    for (const r of rows) {
-      const key = joinKey(r.t, r.cp, r.k, r.exp);
-      if (key) alertKeys.set(key, r);
-    }
-    if (!rows.length) {
-      emptyRow(alertsBody, ALERT_COLUMNS,
-        "The vendor's rules flagged nothing in this read. The read is stamped " +
-        "below — a read taken before the open, of a feed that fills intraday, is " +
-        "expected to be thin — and absence from the vendor's selection is not evidence of " +
-        "a quiet market.", "quiet");
-    } else {
-      alertsSorter.wire();
-      paintAlertRows();
-    }
-    alertsState = "ok";
-    joinResolved("alerts");
-    syncFilterNote();
-
-    const seen = isNum(alerts.seen);
-
-    const shed = isNum(alerts.shed);
-    const cov = alerts.coverage && typeof alerts.coverage === "object" ? alerts.coverage : {};
-    if (alertsCap) {
-      const shedSaid = shed === null
-        ? (seen !== null && seen > rows.length
-          ? ", and what the row cap shed was not recorded on this payload" : "")
-        : shed
-          ? ", the largest premiums kept and " + count(shed) + " shed by the row cap"
-          : "";
-
-      alertsCap.textContent = count(rows.length) +
-        (seen === null ? " windows" : " of " +
-          (alertVendorTruncated === true || alertReadTruncated === true ? "at least " : "") + count(seen) +
-          " flagged windows") +
-        shedSaid +
-        " \u00b7 ranked by the vendor's own premium, inside the vendor's own selection.";
-    }
-    if (alertsNote) {
-      const bits = [];
-      bits.push("The population is what the vendor's rules chose to flag — the rules " +
-        "are named per row, their definitions are the vendor's own, and absence from " +
-        "this list is not evidence of quiet.");
-      if (isNum(cov.withContract) !== null && rows.length) {
-        bits.push(count(cov.withContract) + " of " + count(rows.length) +
-          " carried a parseable contract symbol" +
-          (isNum(cov.calls) !== null && isNum(cov.puts) !== null
-            ? " (" + count(cov.calls) + " calls, " + count(cov.puts) + " puts)" : "") + ".");
-      }
-
-      bits.push("Each row carries the vendor's own stated span, in UTC.");
-      alertsNote.textContent = bits.join(" ");
-    }
-
-    let stampEl = document.getElementById("uaAlertsStamp");
-    if (!stampEl) {
-      stampEl = el("p", "fc-note");
-      stampEl.id = "uaAlertsStamp";
-      const wrap = alertsPanel.querySelector(".flows-tablewrap");
-      alertsPanel.insertBefore(stampEl, wrap || alertsPanel.firstChild);
-    }
-    stampEl.textContent = alertsStamp(alerts.readAt, alerts.refreshed);
-
-    alertsPanel.hidden = false;
-  }
-
-  buildControls();
-
-  fetch("/api/flows/flowalerts", {
-    credentials: "same-origin",
-    headers: { Accept: "application/json" },
-  }).then((response) => {
-    if (response.status === 401) { location.replace("/flows/"); return null; }
-    if (!response.ok) throw new Error("HTTP " + response.status);
-    return response.json();
-  }).then((alerts) => {
-    if (!alerts || typeof alerts !== "object") return;
-    paintAlerts(alerts);
-  }).catch((error) => {
-
-    alertsState = "failed";
-    syncFilterNote();
-    if (!alertsPanel || !alertsBody) return;
-    emptyRow(alertsBody, ALERT_COLUMNS,
-      "The alerts feed could not be loaded (" + (error && error.message
-        ? error.message : "no message") + "). The counter feed below is a separate " +
-      "payload and stands on its own.", "unreadable");
-    if (alertsCap) alertsCap.textContent = "No window could be listed.";
-    alertsPanel.hidden = false;
-  });
-
-  fetch(PAYLOAD_URL, {
-    credentials: "same-origin",
-    headers: { Accept: "application/json" },
-  }).then((response) => {
-
-    if (response.status === 401) { location.replace("/flows/"); return null; }
-    if (!response.ok) throw new Error("HTTP " + response.status);
-    const updatedAt = Number(response.headers.get("X-Payload-Updated")) || null;
-    return response.json().then((payload) => {
-      if (payload && typeof payload === "object") payload.__updatedAt = updatedAt;
-      return payload;
+  function buildFilters() {
+    const seg = UI.segmented("Side", [{ label: "All" }, { label: "Calls" }, { label: "Puts" }], (i) => {
+      view.side = ["all", "C", "P"][i];
+      repaint();
+    }, 0);
+    const both = h("button", {
+      class: "fu-toggle", type: "button", "aria-pressed": "false",
+      title: "Contracts the vendor's rules flagged and that also cleared this page's own floors",
+    }, UI.glyph("levels"), h("span", null, "Both feeds"));
+    both.addEventListener("click", () => {
+      view.both = !view.both;
+      both.setAttribute("aria-pressed", String(view.both));
+      repaint();
     });
-  }).then((payload) => {
-    if (!payload) return;
+    host.filters.replaceChildren(seg, both, h("span", { class: "fu-count", "aria-hidden": "true" }));
+  }
 
-    if (payload.status === "pending") {
-      feedState = "unpublished";
-      say("The pipeline has not published this key yet. This feed is " +
-        "built from the option chains the run already reads for each board name, so it " +
-        "appears with the first pipeline run after it shipped.", "pending");
-      syncFilterNote();
+  function repaint() {
+    paintTimeline(false);
+    paintNames();
+    paintFeed();
+    syncNote();
+  }
+
+  function timeOf(r, session) {
+    const span = etOf(r.spanStart);
+    if (span && (!session || span.day === session)) return { m: span.m, exact: true };
+    const first = etOf(r.firstAt);
+    if (first && (!session || first.day === session) && first.m >= 240 && first.m <= 1200) return { m: first.m, exact: false };
+    return null;
+  }
+
+  function points() {
+    const a = S.alerts;
+    const session = typeof a.sessionDate === "string" ? a.sessionDate : a.record && a.record.date;
+    const out = [];
+    let undated = 0;
+    a.rows.forEach((r, i) => {
+      const p = n(r.prem);
+      const at = timeOf(r, session);
+      if (p === null || p <= 0 || !at) { undated++; return; }
+      const ask = n(r.askPrem);
+      out.push({ r, i, p, m: at.m, exact: at.exact, cp: r.cp === "P" ? "P" : r.cp === "C" ? "C" : null, ask: ask === null ? null : Math.max(0, Math.min(1, ask / p)) });
+    });
+    return { pts: out, undated, session };
+  }
+
+  function drawTimeline(el, w, animate) {
+    const a = S.alerts;
+    const { pts } = points();
+    const phone = w < 600;
+    const H = phone ? 250 : w < 900 ? 290 : 330;
+    const left = 4, right = phone ? 46 : 54, top = 18, bot = 24;
+    if (!pts.length) {
+      el.append(UI.silent({ state: "quiet", reason: "No flagged window in this record carries a time inside the session." }, "Timeline", H));
       return;
     }
+    const rec = a.record && typeof a.record === "object" ? a.record : null;
+    const recStart = rec ? etOf(rec.firstReadAt) : null;
+    const lo = Math.min(...pts.map((p) => p.m), recStart ? recStart.m : Infinity);
+    const hi = Math.max(...pts.map((p) => p.m));
+    const x0 = Math.max(540, Math.floor(lo / 30) * 30 - 30);
+    const x1 = Math.max(x0 + 180, Math.ceil((hi + 10) / 30) * 30);
+    const xs = C.lin(x0, x1, left + 14, w - right - 14);
+    const mid = top + (H - top - bot) / 2;
+    const half = (H - top - bot) / 2;
+    const pMax = Math.max(...pts.map((p) => p.p));
+    const pMin = Math.min(...pts.map((p) => p.p));
+    const rMax = phone ? 9 : 13;
+    const rOf = (p) => Math.max(2.5, rMax * Math.sqrt(p / pMax));
+    const l0 = Math.log10(Math.min(pMin, 1e5)), l1 = Math.log10(Math.max(pMax, 1e6));
+    const dist = (p) => 5 + ((Math.log10(p) - l0) / ((l1 - l0) || 1)) * (half - 8 - rMax);
+    const yOf = (pt) => (pt.cp === "P" ? mid + dist(pt.p) : mid - dist(pt.p));
+    const svg = C.svgRoot(el, w, H, animate, "Flagged windows over the session: calls above the line, puts below, farther and larger is more premium");
+    const defs = s("defs", null, svg);
+    const pat = s("pattern", { id: "fuHatch", width: 6, height: 6, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" }, defs);
+    s("line", { x1: 0, y1: 0, x2: 0, y2: 6, class: "fu-hatch" }, pat);
+    if (recStart && recStart.m > x0 + 10 && (!pts.length || recStart.m <= x1)) {
+      const rx = Math.min(xs(recStart.m), w - right);
+      s("rect", { x: left, y: top, width: Math.max(0, rx - left), height: H - top - bot, fill: "url(#fuHatch)", class: "fu-unrec" }, svg);
+    }
+    const step = xs(x0 + 60) - xs(x0) >= 44 ? 60 : 120;
+    for (let m = Math.ceil(x0 / 60) * 60; m <= x1; m += step) {
+      const x = xs(m);
+      if (x < left + 16 || x > w - right - 8) continue;
+      s("text", { x, y: H - 6, text: hourLabel(m), "text-anchor": "middle" }, svg);
+    }
+    s("line", { x1: left, x2: w - right, y1: mid, y2: mid, class: "base" }, svg);
+    const tx = w - right + 8;
+    for (const v of [1e5, 1e6, 1e7]) {
+      const lv = Math.log10(v);
+      if (lv < l0 || lv > l1) continue;
+      const d = dist(v);
+      if (d > half - 4) continue;
+      s("line", { x1: left, x2: w - right, y1: mid - d, y2: mid - d, class: "hair" }, svg);
+      s("line", { x1: left, x2: w - right, y1: mid + d, y2: mid + d, class: "hair" }, svg);
+      s("text", { x: tx, y: mid - d + 3.8, text: F.money(v, false, 0), class: "tx-3" }, svg);
+      s("text", { x: tx, y: mid + d + 3.8, text: F.money(v, false, 0), class: "tx-3" }, svg);
+    }
+    s("text", { x: tx, y: top + 4, text: "Calls", class: "tx-1 tx-b" }, svg);
+    s("text", { x: tx, y: H - bot - 2, text: "Puts", class: "tx-1 tx-b" }, svg);
+    const order = pts.slice().sort((p, q) => q.p - p.p);
+    const g = s("g", { class: "fu-bubbles" }, svg);
+    const placed = order.map((pt, k) => {
+      const cx = xs(pt.m), cy = yOf(pt), r = rOf(pt.p);
+      const on = passes(pt.r, "exp");
+      const color = UI.cssVar(pt.cp === "P" ? "--down-mark" : pt.cp === "C" ? "--up-mark" : "--s-gray");
+      s("circle", {
+        cx, cy, r, fill: color, "fill-opacity": pt.ask === null ? 0 : (0.14 + 0.72 * pt.ask).toFixed(3),
+        stroke: color, "stroke-width": 1.25, "stroke-dasharray": pt.ask === null ? "2 2" : null,
+        class: "fu-b" + (on ? "" : " is-off"), style: { "--i": String(Math.min(k, 60)) },
+      }, g);
+      return { pt, cx, cy, r };
+    });
+    const ring = s("circle", { r: 0, class: "fu-ring", fill: "none", opacity: 0 }, svg);
+    wireBubbleScrub(el, svg, placed, ring, { top, bottom: H - bot });
+  }
 
-    paint(payload);
+  function wireBubbleScrub(el, svg, placed, ring, box) {
+    const readout = h("div", { class: "ui-readout", "aria-hidden": "true" });
+    el.append(readout);
+    const xh = s("line", { class: "xh", y1: box.top, y2: box.bottom, x1: -10, x2: -10, opacity: 0 }, svg);
+    const wired = !!el._fu;
+    el._fu = { list: placed.slice().sort((p, q) => p.cx - q.cx || q.pt.p - p.pt.p), svg, ring, xh, readout, idx: -1 };
+    if (wired) return;
+    el.tabIndex = 0;
+    el.setAttribute("role", "group");
+    el.setAttribute("aria-roledescription", "chart");
+    el.setAttribute("aria-label", "Flagged windows over the session. Use the arrow keys to read each window.");
+    const show = (i, speak) => {
+      const { list, ring, xh, readout } = el._fu;
+      if (i < 0 || i >= list.length) return;
+      el._fu.idx = i;
+      const b = list[i], r = b.pt.r;
+      ring.setAttribute("cx", b.cx); ring.setAttribute("cy", b.cy); ring.setAttribute("r", b.r + 3); ring.setAttribute("opacity", 1);
+      xh.setAttribute("x1", b.cx); xh.setAttribute("x2", b.cx); xh.setAttribute("opacity", 0.5);
+      const flags = [r.sweep === true ? "Sweep" : null, r.opening === true ? "Opening" : null, r.floor === true ? "Floor" : null].filter(Boolean);
+      readout.replaceChildren(
+        C.part(clock(b.pt.m) + (b.pt.exact ? "" : " first held"), "k"),
+        h("b", null, String(r.t || DASH)),
+        C.part(contractText(r).trim(), "k"),
+        h("b", { "data-tone": b.pt.cp === "P" ? "down" : "up" }, F.money(b.pt.p)),
+        C.part(b.pt.ask === null ? "ask —" : "ask " + pct0(b.pt.ask), "k"),
+        flags.length ? C.part(flags.join(" " + MID + " "), "k") : null);
+      readout.classList.add("is-on");
+      const w = el.clientWidth, rw = readout.offsetWidth;
+      readout.style.left = UI.clamp(b.cx - rw / 2, 0, Math.max(0, w - rw)) + "px";
+      readout.style.top = Math.max(0, b.cy - b.r - 40) + "px";
+      if (speak) UI.announce(readout.textContent);
+    };
+    const hide = () => { const f = el._fu; f.readout.classList.remove("is-on"); f.ring.setAttribute("opacity", 0); f.xh.setAttribute("opacity", 0); };
+    const at = (e) => {
+      const bb = el._fu.svg.getBoundingClientRect();
+      const k = el._fu.svg.viewBox.baseVal.width / bb.width;
+      return [(e.clientX - bb.left) * k, (e.clientY - bb.top) * k];
+    };
+    const nearest = (x, y) => {
+      let best = -1, bd = Infinity;
+      el._fu.list.forEach((b, i) => {
+        const d = Math.hypot(b.cx - x, (b.cy - y) * 0.6) - b.r * 0.5;
+        if (d < bd) { bd = d; best = i; }
+      });
+      return best;
+    };
+    let raf = 0, last = null;
+    el.addEventListener("pointermove", (e) => {
+      last = at(e);
+      if (!raf) raf = requestAnimationFrame(() => { raf = 0; show(nearest(last[0], last[1])); });
+    });
+    el.addEventListener("pointerdown", (e) => { const p = at(e); show(nearest(p[0], p[1])); });
+    el.addEventListener("pointerleave", (e) => { if (e.pointerType !== "touch") hide(); });
+    el.addEventListener("blur", hide);
+    el.addEventListener("keydown", (e) => {
+      const k = e.key, { list, idx } = el._fu;
+      if (k === "ArrowRight" || k === "ArrowLeft") {
+        e.preventDefault();
+        show(UI.clamp((idx < 0 ? (k === "ArrowRight" ? -1 : list.length) : idx) + (k === "ArrowRight" ? 1 : -1), 0, list.length - 1), true);
+      } else if (k === "Home") { e.preventDefault(); show(0, true); }
+      else if (k === "End") { e.preventDefault(); show(list.length - 1, true); }
+      else if (k === "Escape") hide();
+    });
+  }
 
-    if (staleEl && payload.__updatedAt) {
-      const ageHours = (Date.now() - payload.__updatedAt) / 3600000;
-      if (ageHours > 30) {
-        const days = Math.round(ageHours / 24);
-        staleEl.hidden = false;
-        staleEl.textContent = "This feed was last written " + days +
-          (days === 1 ? " day" : " days") + " ago. The pipeline has not published " +
-          "since, so these counters are from that read and not from a later one.";
+  function timelineInfo() {
+    const a = S.alerts || {};
+    const notes = a.notes && typeof a.notes === "object" ? a.notes : {};
+    const rows = Array.isArray(a.rows) ? a.rows : [];
+    const seen = n(a.seen), shed = n(a.shed);
+    const { undated } = S.alertsKind === "ok" ? points() : { undated: 0 };
+    const floor = a.vendorTruncated === true || a.readTruncated === true;
+    const cov = a.coverage && typeof a.coverage === "object" ? a.coverage : {};
+    const rec = a.record && typeof a.record === "object" ? a.record : {};
+    return {
+      title: "Flagged windows",
+      state: S.alertsState.state === "ok" ? null : S.alertsState.state,
+      asOf: typeof a.sessionDate === "string" ? a.sessionDate : null,
+      lead: "Each bubble is one window the vendor's rules flagged, placed at the vendor's stated start or, without one, at the read that first held it. Calls sit above the line and puts below; distance and size both grow with premium, and a solid fill means the vendor put most of the window's dollars at the ask.",
+      facts: [
+        ["Read", instant(a.readAt)],
+        ["Windows", rows.length ? count(rows.length) + (seen === null ? " windows" : " of " + (floor ? "at least " : "") + count(seen) + " flagged windows") : null],
+        ["Shed by the row cap", shed === null ? (seen !== null && seen > rows.length ? "not recorded on this payload" : null) : count(shed)],
+        ["Not placed", undated ? count(undated) + " without a time in the session" : null],
+        ["Reads", n(rec.reads) === null ? null : count(rec.reads)],
+        ["Entered the record", n(rec.everEntered) === null ? null : count(rec.everEntered)],
+        ["Calls / puts", n(cov.calls) === null ? null : count(cov.calls) + " / " + count(cov.puts)],
+      ],
+      sections: [
+        { title: "What a window is", lines: [notes.unit, notes.selection] },
+        { title: "Sides and flags", lines: [notes.sides, notes.flags, "Each row carries the vendor's own stated span, in UTC."] },
+        { title: "The record", lines: [notes.record] },
+        { title: "The ceiling", lines: [vendorCeilingSaid().trim()] },
+        { title: "Refused", lines: [notes.refusals] },
+      ],
+    };
+  }
+
+  function paintTimeline(animate) {
+    if (S.alertsKind !== "ok") return;
+    const rows = S.alerts.rows;
+    if (!rows.length) {
+      silence(host.timeline, S.alertsState, "Timeline", 250);
+      return;
+    }
+    if (charts.timeline && charts.timeline.el === host.timeline.querySelector(".fu-chart")) {
+      charts.timeline.set(drawTimeline, animate !== false);
+      return;
+    }
+    const chartHost = h("div", { class: "fu-chart" });
+    const legend = UI.legend([
+      ["--up-mark", "dot", "Call"], ["--down-mark", "dot", "Put"],
+      UI.key("--label-1", "dot", "At ask"), UI.key("--label-1", "ring", "Not at ask"),
+      rows.some((r) => n(r.askPrem) === null) ? h("span", { class: "ui-key" }, h("i", { class: "fu-key-open", "aria-hidden": "true" }), "Ask not stated") : null,
+      h("span", { class: "ui-key" }, h("i", { class: "fu-key-hatch", "aria-hidden": "true" }), "Not recorded"),
+    ].filter(Boolean));
+    host.timeline.replaceChildren(chartHost, legend);
+    charts.timeline = C.mount(chartHost, drawTimeline);
+  }
+
+  function aggregate(rows) {
+    const by = new Map();
+    for (const r of rows) {
+      const t = String(r.t || "");
+      const p = n(r.prem);
+      if (!t || p === null || p <= 0) continue;
+      if (!by.has(t)) by.set(t, { t, n: 0, prem: 0, call: 0, put: 0, askP: 0, askW: 0, swP: 0, swW: 0, opP: 0, opW: 0, st: r.st || null });
+      const g = by.get(t);
+      g.n++; g.prem += p;
+      if (r.cp === "C") g.call += p; else if (r.cp === "P") g.put += p;
+      const ask = n(r.askPrem);
+      if (ask !== null) { g.askP += ask; g.askW += p; }
+      if (typeof r.sweep === "boolean") { g.swW += p; if (r.sweep) g.swP += p; }
+      if (typeof r.opening === "boolean") { g.opW += p; if (r.opening) g.opP += p; }
+      if (!g.st && r.st) g.st = r.st;
+    }
+    return [...by.values()].map((g) => ({
+      ...g,
+      ask: g.askW ? g.askP / g.askW : null,
+      sweep: g.swW ? g.swP / g.swW : null,
+      open: g.opW ? g.opP / g.opW : null,
+    })).sort((a, b) => b.prem - a.prem);
+  }
+
+  const shareCell = (v, hot) => h("span", { class: "fu-v fu-share", "data-tone": v !== null && v >= hot ? "flat" : null, "data-hot": v !== null && v >= hot ? "1" : null }, pct0(v));
+  const sideGlyph = (st) => (st === "board:long" || st === "long" ? UI.glyph("up", "fu-side is-up") : st === "board:short" || st === "short" ? UI.glyph("down", "fu-side is-down") : null);
+  const linkable = (st) => !!st && st !== "foreign";
+
+  function paintNames() {
+    if (S.alertsKind !== "ok") return;
+    const rows = S.alerts.rows.filter((r) => passes(r, "exp"));
+    if (!S.alerts.rows.length) { silence(host.names, S.alertsState, "Names", 200); return; }
+    const groups = aggregate(rows);
+    setModuleState(host.names, { state: "ok" }, "Names");
+    if (!groups.length) {
+      host.names.replaceChildren(UI.silent({ state: "quiet", reason: "No flagged window matches the filter. Every window is still published; the filter hides them." }, "Names", 180));
+      return;
+    }
+    const max = groups[0].prem;
+    const head = h("div", { class: "fu-nrow fu-head", "aria-hidden": "true" },
+      h("span", null, "Name"), h("span", null, "Calls · puts"), h("span", { class: "fu-v" }, "Premium"),
+      h("span", { class: "fu-v" }, "Ask"), h("span", { class: "fu-v fu-wide" }, "Sweep"), h("span", { class: "fu-v fu-wide" }, "Open"));
+    const items = groups.map((g, i) => {
+      const tag = linkable(g.st) ? "a" : "div";
+      const scale = g.prem / max;
+      const cw = g.call + g.put ? (g.call / (g.call + g.put)) * scale * 100 : 0;
+      const pw = g.call + g.put ? (g.put / (g.call + g.put)) * scale * 100 : 0;
+      const row = h(tag, {
+        class: "fu-nrow", href: tag === "a" ? tickerHref(g.t) : null, role: tag === "a" ? null : "listitem",
+        title: g.t + " " + MID + " " + g.n + plural(g.n, " window", " windows") + " " + MID + " " + F.money(g.prem) +
+          " " + MID + " calls " + F.money(g.call) + ", puts " + F.money(g.put),
+      },
+      h("span", { class: "fu-tk is-2" }, h("span", { class: "fu-tk-l" }, h("b", null, g.t), sideGlyph(g.st)), h("small", null, g.n + plural(g.n, " window", " windows"))),
+      h("span", { class: "fu-split", "aria-hidden": "true" },
+        cw > 0 ? h("i", { class: "is-c", style: { width: cw.toFixed(2) + "%", "--i": String(i) } }) : null,
+        pw > 0 ? h("i", { class: "is-p", style: { width: pw.toFixed(2) + "%", "--i": String(i) } }) : null),
+      h("span", { class: "fu-v fu-strong" }, F.money(g.prem)),
+      shareCell(g.ask, 0.6),
+      h("span", { class: "fu-v fu-wide" }, pct0(g.sweep)),
+      h("span", { class: "fu-v fu-wide" }, pct0(g.open)));
+      return row;
+    });
+    keep(host.names, () => host.names.replaceChildren(head, listOf(items, 8, "Names ranked by flagged premium")));
+  }
+
+  function listOf(items, visible, label) {
+    const box = UI.list(items, { visible, label });
+    box.classList.add("fu-list");
+    return box;
+  }
+
+  function namesInfo() {
+    return {
+      title: "Names",
+      lead: "The flagged windows, summed by name and ranked by premium. The bar is the name's premium against the largest, split into calls and puts; Ask, Sweep and Open are premium-weighted shares of the windows that carry each vendor field.",
+      notes: [
+        "A share is taken only over windows where the vendor carried that field. A dash is a name with no window carrying it, not a zero.",
+        "These are shares of what the vendor's rules flagged, not of the name's whole session.",
+      ],
+    };
+  }
+
+  async function paintUrgency() {
+    if (S.alertsKind !== "ok") return;
+    const board = aggregate(S.alerts.rows).filter((g) => g.st === "board:long" || g.st === "board:short").slice(0, 6);
+    if (!board.length) {
+      silence(host.urgency, { state: "quiet", reason: "No board name is among the flagged windows, and urgency is measured only for the board's deep names." }, "Urgency", 200);
+      return;
+    }
+    const session = typeof S.alerts.sessionDate === "string" ? S.alerts.sessionDate : null;
+    const draw = () => {
+      const got = board.map((g) => ({ g, u: S.urgency.get(g.t) }));
+      const vals = got.map((x) => (x.u && x.u.tape ? n(x.u.tape.urgency) : null)).filter((v) => v !== null);
+      const max = vals.length ? Math.max(...vals, 1e-9) : 1;
+      const worstState = UI.worst(got.map((x) => (x.u ? (x.u.tape && session && typeof x.u.tape.asOf === "string" && x.u.tape.asOf < session
+        ? { state: "stale", reason: x.g.t + "'s alert tape is from " + x.u.tape.asOf + ", before this record's session of " + session + "." } : x.u.st) : { state: "pending", reason: "Reading this name's card." })));
+      setModuleState(host.urgency, worstState.state === "ok" ? { state: "ok" } : { state: vals.length ? "quiet" : worstState.state, reason: worstState.reason }, "Urgency");
+      const ranked = got.slice().sort((a, b) => (n(b.u && b.u.tape && b.u.tape.urgency) ?? -1) - (n(a.u && a.u.tape && a.u.tape.urgency) ?? -1));
+      const items = ranked.map((x, i) => {
+        const al = x.u && x.u.tape;
+        const u = al ? n(al.urgency) : null;
+        const st = x.u ? x.u.st : { state: "pending", reason: "Reading this name's card." };
+        const floor = !!al && al.complete === false;
+        const old = !!al && session && typeof al.asOf === "string" && al.asOf < session;
+        return h("a", { class: "fu-urow", href: tickerHref(x.g.t),
+          title: al ? x.g.t + " " + MID + " tape of " + (al.asOf || "an unstated session") + (floor ? ", cut short before the open, so a floor" : "") + (old ? ", older than this record's " + session : "") : null },
+          h("span", { class: "fu-tk is-2" }, h("span", { class: "fu-tk-l" }, h("b", null, x.g.t), sideGlyph(x.g.st)),
+            h("small", null, al && n(al.n) !== null ? count(al.n) + " alerts " + MID + " " + pct0(al.sweepShare) + " sweep" : st.state === "pending" ? "Pending" : DASH)),
+          h("span", { class: "fu-meter", "aria-hidden": "true" }, u === null ? null : h("i", { style: { width: ((u / max) * 100).toFixed(1) + "%", "--i": String(i) } })),
+          u === null ? mark(st.state === "ok" ? { state: "unavailable" } : st)
+            : h("span", { class: "fu-v fu-strong", "data-tone": old ? "silent" : null }, (floor ? "≥" : "") + F.pct(u, 2), old ? mark({ state: "stale" }).lastChild : null));
+      });
+      host.urgency.replaceChildren(
+        h("div", { class: "fu-urow fu-head", "aria-hidden": "true" }, h("span", null, "Name"), h("span", null, "Sweeps into new OI"), h("span", { class: "fu-v" }, "of ADV")),
+        h("div", { class: "ui-list fu-list", role: "group", "aria-label": "Board names ranked by urgency" }, items));
+    };
+    draw();
+    if (S.urgencyAsked) return;
+    S.urgencyAsked = true;
+    const queue = board.map((g) => g.t);
+    const one = async (t) => {
+      try {
+        const res = await fetch("/api/flows/card-x?t=" + encodeURIComponent(cardKey(t)), { credentials: "same-origin", headers: { Accept: "application/json" } });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const cx = await res.json();
+        const { alerts: tape } = cx || {};
+        if (!cx || cx.status === "pending") S.urgency.set(t, { st: { state: "pending", reason: "This name's card extension has not been published yet." } });
+        else if (!tape) S.urgency.set(t, { st: { state: "unavailable", reason: "This name's card carries no alert tape." } });
+        else if (tape.status !== "ok") S.urgency.set(t, { st: UI.stateOf({ status: tape.status === "unreadable" ? "withheld" : tape.status, reason: tape.why ? "Vendor code: " + tape.why + "." : null }, "alert tape"), tape: null });
+        else S.urgency.set(t, { st: { state: "ok" }, tape });
+      } catch (e) {
+        S.urgency.set(t, { st: { state: "unavailable", reason: "This name's card could not be loaded (" + (e && e.message ? e.message : "no message") + ")." } });
+      }
+      draw();
+    };
+    const lanes = [];
+    for (let k = 0; k < 3; k++) lanes.push((async () => { while (queue.length) await one(queue.shift()); })());
+    await Promise.all(lanes);
+  }
+
+  function urgencyInfo() {
+    return {
+      title: "Urgency",
+      lead: "For the board names among the flagged windows, the premium of sweeps into contracts whose volume exceeded their open interest, as a share of the name's average daily dollar volume, read from each name's own full-session alert tape.",
+      facts: [["Formula", "Σ premium · sweep · (volume > OI) ÷ ADV$"], ["Names", "up to six, by flagged premium"]],
+      notes: ["A name without a published card extension shows the pending ring; a card without an alert tape shows the unavailable mark."],
+    };
+  }
+
+  function feedRows() {
+    return S.feedKind === "ok" ? S.payload.contracts.rows : [];
+  }
+
+  function paintFeed() {
+    if (S.feedKind !== "ok") return;
+    const all = feedRows();
+    const shown = all.filter((r) => passes(r, "expiry"));
+    if (!all.length) { silence(host.feed, S.feedState, "Volume over OI", 220); return; }
+    setModuleState(host.feed, { state: "ok" }, "Volume over OI");
+    if (!shown.length) {
+      host.feed.replaceChildren(UI.silent({ state: "quiet", reason: "No contract in this feed matches the filter. " + count(all.length) + " rows are published; the filter is hiding all of them." }, "Volume over OI", 180));
+      return;
+    }
+    const vors = all.map((r) => n(r.vor)).filter((v) => v !== null && v > 0);
+    const lmax = Math.log10(Math.max(10, ...vors));
+    const items = shown.map((r, i) => {
+      const vor = n(r.vor);
+      const doi = n(r.doi);
+      const key = joinKey(r.t, r.cp, r.k, r.expiry);
+      const flagged = key && S.alertKeys && S.alertKeys.has(key) ? S.alertKeys.get(key) : null;
+      const lift = n(r.lift), lo = n(r.nlo), hi = n(r.nhi);
+      const title = [
+        String(r.t || DASH) + " " + contractText(r).trim(),
+        "volume " + count(r.vol) + ", open interest " + count(r.oi),
+        vor === null ? "ratio not formed" : vor.toFixed(1) + " times open interest",
+        doi === null ? "open-interest change not reported" : "open-interest change " + F.int(doi, true),
+        lift === null ? "offer share not reported" : pct0(lift) + " of classified volume met the offer",
+        lo === null || hi === null ? "no notional bracket" : "notional " + F.money(lo) + " to " + F.money(hi),
+      ];
+      if (flagged) title.push("also flagged by the vendor's rule " + (flagged.rule || "") + (n(flagged.prem) === null ? "" : ", carrying " + F.money(n(flagged.prem)) + " of premium"));
+      const covered = S.payload && Array.isArray(S.payload.coverage) && S.payload.coverage.some((c) => c && c.t === r.t);
+      return h(covered ? "a" : "div", {
+        class: "fu-crow", href: covered ? tickerHref(r.t) : null, role: covered ? null : "listitem", title: title.join(" " + MID + " "),
+        "data-t": String(r.t || ""), "data-both": flagged ? "1" : null, "data-stage": r.st || null,
+      },
+      h("span", { class: "ui-badge", "data-tone": r.cp === "P" ? "down" : "up", "aria-label": r.cp === "P" ? "Put" : "Call" }, r.cp === "P" ? "P" : "C"),
+      h("span", { class: "fu-tk" }, h("b", null, n(r.k) === null ? DASH : F.px(n(r.k), n(r.k) % 1 ? 1 : 0).replace(/\.0$/, "")),
+        h("small", null, String(r.t || DASH) + " " + MID + " " + F.day(String(r.expiry || ""))),
+        sideGlyph(r.st), flagged ? h("span", { class: "fu-both", title: "Also flagged by the vendor" }, UI.glyph("levels")) : null),
+      h("span", { class: "fu-meter", "aria-hidden": "true" }, vor === null ? null : h("i", { style: { width: ((Math.log10(Math.max(1, vor)) / lmax) * 100).toFixed(1) + "%", "--i": String(i) } })),
+      h("span", { class: "fu-v fu-strong" }, vor === null ? DASH : (vor >= 100 ? vor.toFixed(0) : vor.toFixed(1)) + "×"),
+      h("span", { class: "fu-v fu-wide", "data-tone": doi === null ? null : doi > 0 ? "up" : doi < 0 ? "down" : "flat" }, doi === null ? DASH : F.num(doi, true)));
+    });
+    keep(host.feed, () => host.feed.replaceChildren(
+      h("div", { class: "fu-crow fu-head", "aria-hidden": "true" }, h("span"), h("span", null, "Contract"), h("span", null, "Volume ÷ OI"), h("span", { class: "fu-v" }, "Ratio"), h("span", { class: "fu-v fu-wide" }, "ΔOI")),
+      listOf(items, 6, "Contracts ranked by volume over open interest")));
+  }
+
+  const BASIS_TITLES = {
+    unit: "The unit", date: "The date", rank: "The ranking key", floors: "The floors",
+    aggr: "The classified legs", lift: "The offer-side share", notional: "The bracket", iv: "Implied volatility",
+    oi: "Open interest", zeroOi: "Strikes that never arrive", names: "Two populations", refusals: "Refused",
+  };
+  const basisLines = (v) => {
+    if (v === null || v === undefined) return [];
+    if (typeof v !== "object") return [String(v)];
+    const out = [];
+    for (const [k, x] of Object.entries(v)) {
+      if (k === "choice") continue;
+      if (x === null || x === undefined || typeof x === "object") continue;
+      out.push(k === "reason" || k === "line" ? String(x) : k + ": " + (typeof x === "number" ? count(x) : String(x)));
+    }
+    return out;
+  };
+
+  function feedInfo() {
+    const payload = S.payload || {};
+    const c = payload.contracts && typeof payload.contracts === "object" ? payload.contracts : {};
+    const basis = payload.basis && typeof payload.basis === "object" ? payload.basis : null;
+    const rows = Array.isArray(c.rows) ? c.rows : [];
+    const bound = c.capBound === "rows" ? "the row cap bound this list"
+      : c.capBound === "perName" ? "the per-name allowance bound this list"
+        : c.capBound === "eligible" ? "neither cap bound this list: it is every contract that cleared the floors"
+          : "the payload did not say which cap bound this list";
+    return {
+      title: "Volume over open interest",
+      state: S.feedState.state === "ok" ? null : S.feedState.state,
+      lead: "Contracts whose volume counter stands far above the open interest beside it, ranked by that ratio. The bar is the ratio on a log scale; ΔOI is the change in open interest across the last settlement, which does not say on which side anyone was.",
+      facts: [
+        ["Read", instant(payload.readAt)],
+        ["Contracts", S.feedKind === "ok" ? count(n(c.shown) ?? rows.length) + (n(c.eligible) === null ? "" : " of " + count(c.eligible) + " that cleared the floors") : null],
+        ["Chains read", n(payload.namesSeen) === null ? null : count(payload.namesSeen) + (n(payload.namesTruncated) ? ", " + count(payload.namesTruncated) + " cut short by the vendor" : "")],
+        ["Cap", S.feedKind === "ok" ? bound : null],
+        ["Days to expiry from", payload.dteAnchor === "sessionDate" ? String(payload.sessionDate || "") : null],
+      ],
+      sections: basis
+        ? Object.keys(basis).map((k) => ({ title: BASIS_TITLES[k] || k, lines: basisLines(basis[k]) }))
+        : [{ title: "Method", lines: [S.feedKind === "ok" ? "This payload carried no basis block, so the page cannot say how its own numbers were built."
+          : S.feedKind === "failed" || S.feedKind === "withheld" ? "The basis travels inside the same payload as the numbers, so it could not be read either. Nothing in this module has been explained by the pipeline." : null] }],
+      notes: [
+        "volumeAsOf is null: " + (payload.volumeAsOfReason ? String(payload.volumeAsOfReason) : "the endpoint publishes no as-of stamp") + ", so the span the counter covers is unobserved and this page stamps only when it was read.",
+        "The accent mark beside a contract means the vendor's rules also flagged it, matched on name, side, strike and expiry: two independent selections agreeing.",
+      ],
+    };
+  }
+
+  function paintSurprise() {
+    const payload = S.payload;
+    if (!payload || S.feedKind === "pending" || S.feedKind === "unpublished" || S.feedKind === "failed") return;
+    const names = payload.names && typeof payload.names === "object" ? payload.names : null;
+    if (!names) {
+      S.namesState = { state: "unavailable", reason: "Published, but the name panel is not on this payload. No count of ranked or unranked names is taken from it." };
+      silence(host.surprise, S.namesState, "Surprise", 220);
+      return;
+    }
+    if (!Array.isArray(names.rows)) {
+      S.namesState = { state: "withheld", reason: "Published, but the name panel on this payload carries no rows array, so it could not be read as a ranking." };
+      silence(host.surprise, S.namesState, "Surprise", 220);
+      return;
+    }
+    if (!names.rows.length) {
+      S.namesState = { state: "quiet", reason: "No name carried both a call and a put thirty-day average, so none could be ranked." };
+      silence(host.surprise, S.namesState, "Surprise", 220);
+      return;
+    }
+    S.namesState = { state: "ok" };
+    setModuleState(host.surprise, S.namesState, "Surprise");
+    const vals = names.rows.flatMap((r) => [n(r.sc), n(r.sp), n(r.st)]).filter((v) => v !== null && v > 0);
+    const hiL = Math.log10(Math.max(10, ...vals)) + 0.05;
+    const loL = Math.log10(Math.min(0.5, ...vals));
+    const pos = (v) => (((Math.log10(Math.max(v, 1e-3)) - loL) / (hiL - loL)) * 100).toFixed(2) + "%";
+    const covered = new Set((Array.isArray(payload.coverage) ? payload.coverage : []).map((c) => c && c.t));
+    const ticks = [1, 10, 100].filter((v) => Math.log10(v) >= loL && Math.log10(v) <= hiL);
+    const items = names.rows.map((r) => {
+      const sc = n(r.sc), sp = n(r.sp), st = n(r.st), chg = n(r.chg);
+      const pair = [sc, sp].filter((v) => v !== null && v > 0);
+      const a = pair.length ? Math.min(...pair) : null, b = pair.length ? Math.max(...pair) : null;
+      const tag = covered.has(r.t) ? "a" : "div";
+      return h(tag, {
+        class: "fu-srow", href: tag === "a" ? tickerHref(r.t) : null, role: tag === "a" ? null : "listitem",
+        title: String(r.t) + " " + MID + " both " + (st === null ? "withheld" : st.toFixed(2) + "×") + " " + MID + " calls " + (sc === null ? DASH : sc.toFixed(2) + "×") +
+          " " + MID + " puts " + (sp === null ? DASH : sp.toFixed(2) + "×") + " " + MID + " put/call " + (n(r.putCallRatio) === null ? DASH : n(r.putCallRatio).toFixed(2)) +
+          " " + MID + " day change " + (chg === null ? DASH : F.pct(chg, 1, true)),
+      },
+      h("span", { class: "fu-tk is-2" }, h("b", null, String(r.t || DASH)), h("small", { "data-tone": chg === null ? null : chg > 0 ? "up" : chg < 0 ? "down" : null }, chg === null ? DASH : F.pct(chg, 1, true))),
+      h("span", { class: "fu-db", "aria-hidden": "true" },
+        ticks.map((v) => h("i", { class: "fu-db-t", style: { left: pos(v) } })),
+        a !== null && b !== null && pair.length === 2 ? h("i", { class: "fu-db-l", style: { left: pos(a), width: "calc(" + pos(b) + " - " + pos(a) + ")" } }) : null,
+        sc !== null && sc > 0 ? h("i", { class: "fu-db-d is-c", style: { left: pos(sc) } }) : null,
+        sp !== null && sp > 0 ? h("i", { class: "fu-db-d is-p", style: { left: pos(sp) } }) : null),
+      h("span", { class: "fu-v fu-strong" }, st === null ? DASH : (st >= 10 ? st.toFixed(0) : st.toFixed(1)) + "×"));
+    });
+    keep(host.surprise, () => host.surprise.replaceChildren(
+      h("div", { class: "fu-srow fu-head", "aria-hidden": "true" }, h("span", null, "Name"),
+        h("span", { class: "fu-db-axis" }, ticks.map((v) => h("span", { style: { left: pos(v) } }, v + "×"))), h("span", { class: "fu-v" }, "Both")),
+      listOf(items, 6, "Names ranked by option volume against their own average"),
+      UI.legend([["--up-mark", "dot", "Calls"], ["--down-mark", "", "Puts"]])));
+  }
+
+  function surpriseInfo() {
+    const payload = S.payload || {};
+    const names = payload.names && typeof payload.names === "object" ? payload.names : {};
+    const gated = n(names.earningsGated);
+    return {
+      title: "Volume surprise",
+      state: S.namesState.state === "ok" ? null : S.namesState.state,
+      lead: "Each name's call and put volume against its own thirty-day averages, on a log scale: 1× is the average and 10× is ten times it. The number is both sides together against the sum of both averages.",
+      facts: [
+        ["Ranked", n(names.ranked) === null ? null : count(names.shown ?? (names.rows || []).length) + " of " + count(names.ranked)],
+        ["Universe", n(names.universe) === null ? null : count(names.universe)],
+        ["Unranked", n(names.unranked) === null ? null : count(names.unranked)],
+        ["Report inside the gate", gated ? count(gated) : null],
+      ],
+      notes: [
+        "Both is withheld when either average is missing, because a zero on one side would inflate the ratio without saying so.",
+        "These ratios compare a name with itself and with no other name, so the same 2× on a thin name and on the largest name is the same number and not the same event.",
+        gated ? "Names reporting inside the board's earnings gate are kept, since this panel describes what was counted rather than predicting anything, but a ratio on one of them is the least surprising number here." : null,
+      ],
+    };
+  }
+
+  function paintChips() {
+    const a = S.alerts;
+    if (S.alertsKind !== "ok") {
+      const st = S.alertsState;
+      host.chips.replaceChildren(UI.chips(["Premium", "Windows", "Calls", "At ask", "Sweeps"].map((label) =>
+        UI.gaugeChip({ g: UI.iconChip(def(st).g, "--label-3"), value: DASH, label, info: { title: label, state: st.state, lead: st.reason } })), "Flagged windows"));
+      return;
+    }
+    const rows = a.rows;
+    let prem = 0, call = 0, cpW = 0, ask = 0, askW = 0, sw = 0, swW = 0;
+    for (const r of rows) {
+      const p = n(r.prem);
+      if (p === null || p <= 0) continue;
+      prem += p;
+      if (r.cp === "C" || r.cp === "P") { cpW += p; if (r.cp === "C") call += p; }
+      const aP = n(r.askPrem);
+      if (aP !== null) { ask += aP; askW += p; }
+      if (typeof r.sweep === "boolean") { swW += p; if (r.sweep) sw += p; }
+    }
+    const floor = a.vendorTruncated === true || a.readTruncated === true;
+    const seen = n(a.seen);
+    const share = (x, w) => (w ? x / w : null);
+    host.chips.replaceChildren(UI.chips([
+      UI.gaugeChip({ icon: "unusual", color: "--accent-ink", value: prem ? F.money(prem) : DASH, label: "Premium",
+        info: { title: "Flagged premium", lead: "The vendor's total premium across every flagged window in the record.", facts: [["Windows", count(rows.length)]] } }),
+      UI.gaugeChip({ icon: "list", color: "--label-2", value: (floor ? "≥" : "") + count(seen ?? rows.length), label: "Windows",
+        info: { title: "Windows", lead: floor ? "The read hit a ceiling, so this count is a floor." : "Flagged windows the record has held.", facts: [["Drawn", count(rows.length)], ["Seen", seen === null ? null : (floor ? "at least " : "") + count(seen)]] } }),
+      UI.gaugeChip({ ring: share(call, cpW), color: "--up-mark", value: pct0(share(call, cpW)), label: "Calls",
+        info: { title: "Call share", lead: "Call premium as a share of the premium on windows whose contract side could be read." } }),
+      UI.gaugeChip({ ring: share(ask, askW), color: "--label-1", value: pct0(share(ask, askW)), label: "At ask",
+        info: { title: "Ask-side share", lead: "The vendor's ask-side attribution as a share of premium. It adds no inference about who initiated." } }),
+      UI.gaugeChip({ ring: share(sw, swW), color: "--s-orange", value: pct0(share(sw, swW)), label: "Sweeps",
+        info: { title: "Sweep share", lead: "Premium on windows the vendor flagged as sweeps, over the windows that carry the flag at all." } }),
+    ], "Flagged windows"));
+  }
+
+  function paintMeta() {
+    const a = S.alerts, payload = S.payload;
+    const day = (a && typeof a.sessionDate === "string" && a.sessionDate) || (payload && typeof payload.sessionDate === "string" && payload.sessionDate) || null;
+    const bits = [];
+    if (day) bits.push(F.day(day));
+    if (S.alertsKind === "ok" && a.record && n(a.record.reads) !== null) bits.push(count(a.record.reads) + plural(n(a.record.reads), " read", " reads"));
+    if (S.feedKind === "ok" && n(payload.namesSeen) !== null) bits.push(count(payload.namesSeen) + " chains");
+    host.meta.textContent = bits.join(" " + MID + " ");
+  }
+
+  function paintStatus() {
+    const parts = [];
+    const kind = { ok: null, failed: "unreadable", withheld: "unreadable", absent: "unavailable", unpublished: "pending" }[S.feedKind] ?? S.feedKind;
+    if (S.feedKind === "ok") {
+      const c = S.payload.contracts;
+      const rows = c.rows;
+      const distinct = new Set(rows.map((r) => String(r.t || ""))).size;
+      parts.push(count(n(c.shown) ?? rows.length) + " contracts from " + count(distinct) + plural(distinct, " name", " names") +
+        (n(c.eligible) === null ? "" : ", of " + count(c.eligible) + " that cleared the floors"));
+      if (!rows.length) statusEl.dataset.empty = "quiet"; else delete statusEl.dataset.empty;
+    } else {
+      parts.push(S.feedState.reason || "");
+      if (kind) statusEl.dataset.empty = kind;
+    }
+    statusEl.textContent = parts.filter(Boolean).join(" " + MID + " ") + ".";
+  }
+
+  function wireInfos() {
+    if (host.about && !host.about.firstChild) {
+      const src = document.getElementById("uaAbout");
+      host.about.append(UI.infoButton("this page", () => ({
+        title: "Unusual activity",
+        node: src ? h("div", { class: "fd-about-pop" }, [...src.children].map((x) => x.cloneNode(true))) : null,
+      })));
+    }
+    setModuleInfo(host.timeline, "the timeline", timelineInfo);
+    setModuleInfo(host.names, "names", namesInfo);
+    setModuleInfo(host.urgency, "urgency", urgencyInfo);
+    setModuleInfo(host.feed, "volume over open interest", feedInfo);
+    setModuleInfo(host.surprise, "volume surprise", surpriseInfo);
+  }
+
+  function takeAlerts(alerts, kind, reason) {
+    S.alerts = alerts;
+    S.alertsKind = kind;
+    S.alertKeys = null;
+    if (kind === "ok") {
+      S.alertKeys = new Map();
+      for (const r of alerts.rows) { const key = joinKey(r.t, r.cp, r.k, r.exp); if (key) S.alertKeys.set(key, r); }
+      S.alertsState = alerts.rows.length ? { state: "ok" }
+        : { state: "quiet", reason: "The vendor's rules flagged nothing in this read. A read taken before the open, of a feed that fills intraday, is expected to be thin, and absence from the vendor's selection is not evidence of a quiet market." };
+    } else {
+      S.alertsState = {
+        state: kind === "unpublished" ? "pending" : kind === "failed" ? "unavailable" : "withheld",
+        reason,
+      };
+    }
+    if (kind !== "ok" || !alerts.rows.length) {
+      for (const el of [host.timeline, host.names, host.urgency]) silence(el, S.alertsState, el === host.timeline ? "Timeline" : el === host.names ? "Names" : "Urgency", el === host.timeline ? 250 : 200);
+    } else {
+      setModuleState(host.timeline, { state: "ok" }, "Timeline");
+      paintTimeline(true);
+      paintNames();
+      paintUrgency();
+    }
+    paintChips();
+    if (S.feedKind === "ok") paintFeed();
+    paintMeta();
+    paintStatus();
+    syncNote();
+  }
+
+  function takeFeed(payload, kind, reason) {
+    S.payload = payload;
+    S.feedKind = kind;
+    S.feedKeys = null;
+    if (kind === "ok") {
+      S.feedKeys = new Set();
+      for (const r of payload.contracts.rows) { const key = joinKey(r.t, r.cp, r.k, r.expiry); if (key) S.feedKeys.add(key); }
+      S.feedState = payload.contracts.rows.length ? { state: "ok" }
+        : { state: "quiet", reason: payload.status === "quiet"
+          ? "No contract cleared both floors on the chains that were read. That is a statement about this run's chains, not about the market."
+          : "This payload carries a contracts block with no rows in it, and did not report the read as quiet." };
+      paintFeed();
+      if (!payload.contracts.rows.length) silence(host.feed, S.feedState, "Volume over OI", 220);
+    } else {
+      S.feedState = { state: kind === "unpublished" ? "pending" : kind === "absent" ? "unavailable" : kind === "failed" ? "unavailable" : "withheld", reason };
+      silence(host.feed, S.feedState, "Volume over OI", 220);
+      if (kind === "failed" || kind === "unpublished") {
+        S.namesState = S.feedState;
+        silence(host.surprise, S.feedState, "Surprise", 220);
       }
     }
-    if (staleEl && staleEl.hidden && /^\d{4}-\d{2}-\d{2}$/.test(String(payload.sessionDate))) {
-      const read = Date.parse(payload.readAt || payload.generatedAt || "");
-      const lag = (read - Date.parse(payload.sessionDate + "T21:00:00Z")) / 86400000;
-      if (Number.isFinite(lag) && lag > 4) {
-        staleEl.hidden = false;
-        staleEl.textContent = "This feed describes the " + payload.sessionDate +
-          " session, but the chains were read " + Math.floor(lag) + " days after that " +
-          "session closed. The pipeline is running but its data is not advancing.";
-      }
-    }
-  }).catch((error) => {
-    feedState = "failed";
-    failEverywhere("The feed could not be loaded (" + (error && error.message
-      ? error.message : "no message") + "). Nothing on this page was measured; refresh " +
-      "to try again.");
-    syncFilterNote();
+    if (kind === "ok" || kind === "absent" || kind === "withheld") paintSurprise();
+    if (S.alertsKind === "ok") { paintTimeline(false); paintNames(); }
+    paintMeta();
+    paintStatus();
+    syncNote();
+  }
+
+  const get = (url) => fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" } });
+
+  function freshFrom(res, body, source) {
+    const upd = Number(res.headers.get("X-Payload-Updated")) || null;
+    const f = typeof UI.freshFrom === "function" ? UI.freshFrom(res) : null;
+    if (f && f.session) UI.freshness({ ...f.forFreshness(), updatedAt: upd, generatedAt: body && typeof body.generatedAt === "string" ? body.generatedAt : undefined });
+    else if (body && typeof body === "object") UI.freshness({ sessionDate: body.sessionDate, generatedAt: body.generatedAt, updatedAt: upd, source });
+  }
+
+  function loadAlerts() {
+    return get("/api/flows/flowalerts").then((res) => {
+      if (res.status === 401) { location.replace("/flows/"); return; }
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return res.json().then((alerts) => {
+        if (!alerts || typeof alerts !== "object") throw new Error("not a payload");
+        freshFrom(res, alerts, "flowalerts");
+        if (alerts.status === "pending") {
+          takeAlerts(alerts, "unpublished", "The pipeline has not published this key yet. The alerts feed costs one market-wide call a run and appears with the first pipeline run after it shipped.");
+          return;
+        }
+        if (!Array.isArray(alerts.rows)) {
+          takeAlerts(alerts, "withheld", "This payload could not be read as an alerts feed: it carries no rows array. That is a gap in the payload, not a quiet market.");
+          return;
+        }
+        takeAlerts(alerts, "ok", null);
+      });
+    }).catch((error) => {
+      takeAlerts(null, "failed", "The alerts feed could not be loaded (" + (error && error.message ? error.message : "no message") + "). The counter feed is a separate payload and stands on its own.");
+    });
+  }
+
+  function loadFeed() {
+    return get("/api/flows/unusual").then((res) => {
+      if (res.status === 401) { location.replace("/flows/"); return; }
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return res.json().then((payload) => {
+        if (!payload || typeof payload !== "object") throw new Error("not a payload");
+        freshFrom(res, payload, "unusual");
+        if (payload.status === "pending") {
+          takeFeed(payload, "unpublished", "The pipeline has not published this key yet. This feed is built from the option chains the run already reads for each board name, so it appears with the first pipeline run after it shipped.");
+          return;
+        }
+        const contracts = payload.contracts && typeof payload.contracts === "object" ? payload.contracts : null;
+        if (!contracts) {
+          takeFeed(payload, "absent", "Published, but this payload carries no contracts block, and no count of contracts, of names or of chains is taken from it. This is a gap in the payload and not a chain that cleared no floors.");
+          return;
+        }
+        if (!Array.isArray(contracts.rows)) {
+          takeFeed(payload, "withheld", "Published, but the contracts block on this payload carries no rows array, so it could not be read as a feed.");
+          return;
+        }
+        takeFeed(payload, "ok", null);
+      });
+    }).catch((error) => {
+      takeFeed(null, "failed", "The feed could not be loaded (" + (error && error.message ? error.message : "no message") + "). Nothing in it was measured; refresh to try again.");
+    });
+  }
+
+  buildFilters();
+  wireInfos();
+  syncNote();
+  Promise.all([loadAlerts(), loadFeed()]).then(() => {
+    wireInfos();
+    if (typeof UI.heartbeat !== "function") return;
+    UI.heartbeat({
+      keys: ["alerts"], nightly: ["flowalerts", "unusual"], page: "unusual",
+      onChange: (changed) => {
+        if (changed.some((k) => k === "live:alerts" || k === "flowalerts")) loadAlerts();
+        if (changed.indexOf("unusual") >= 0) loadFeed();
+      },
+    });
   });
 })();

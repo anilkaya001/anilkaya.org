@@ -403,7 +403,7 @@ flows-vol-contract
 flows-positioning-contract
 flows-legs-contract
 flows-live-contract    flows-freshness-contract
-flows-quant-card
+flows-quant-card       flows-track-render
 ```
 
 `flows-quant` was measured on 2026-09-23: about 5 s with no server (8 s at a
@@ -484,9 +484,12 @@ write the argument in the commit message. Generated files
 `scripts/generate-course-payloads.mjs` without banners; edit the generator,
 not its output. `assets/js/flows-quant.bundle.js` is generated the same way by
 `scripts/build-flows-quant-bundle.mjs` (esbuild from the pinned
-`tests/node_modules`, tree-shaken from `shared/flows-quant-browser.js`); run it
-after any change to a `shared/flows-quant-*` module the browser reaches, and
-never edit the bundle by hand. `scripts/strip-comments.mjs` is now a no-op on
+`tests/node_modules`, tree-shaken from `shared/flows-quant-browser.js`), and so
+is `assets/js/flows-quant-read.bundle.js`, tree-shaken from
+`shared/flows-quant-read.js`: the smile and law readers alone, for the ticker
+dossier, which draws what the Worker priced and re-prices nothing. Run the
+script after any change to a `shared/flows-quant-*` module the browser reaches;
+it writes both, and never edit either bundle by hand. `scripts/strip-comments.mjs` is now a no-op on
 this tree and stays only because a Workers Builds build command may still
 invoke it; it can be retired once that dashboard field is confirmed clear.
 
@@ -495,27 +498,27 @@ invoke it; it can be retired once that dashboard field is confirmed clear.
 - JavaScript remains IIFE-based and framework-free; production globals are
   deliberate: `Lab`, `Auth`, `Gamify`, `FX`, `IEWTStorage`, `MasteryScheduler`,
   `REVIEW_ITEMS`, `TOPIC_META`, `TOPIC_BY_ID`, `COURSE_STAGE_POINTS`,
-  `LEARNING_PATHS`, `toast`, `FlowsPanels`, `FlowsUI`, and `FlowsQuant`.
+  `LEARNING_PATHS`, `toast`, `FlowsUI`, and `FlowsQuant`.
   (`flowsCardPrefetch` was on this list and went with the card dialog: it
   warmed a card on hover so a modal would open instantly, and a board row is a
-  link to `/flows/ticker/?t=` now.)
+  link to `/flows/ticker/?t=` now. `FlowsPanels` went with the ticker rebuild:
+  the dossier's modules are drawn from `FlowsUI` inside `flows-ticker.js`, the
+  only page that ever called the panel library, and `flows-panels.js` and
+  `flows-drawers.js` are deleted.)
   This list is an ALLOWLIST: a global that is not on it is an undocumented
   one. `FlowsUI` is the shared Flows UI primitives (formatters that keep the
   minus U+2212 and the absent-value em dash, the labeled controls, and the
   score-strip chart whose gap-is-not-zero contract is enforced in the
   primitive rather than re-derived per page) — the seed of the component
   layer, introduced with `/flows/track/`.
-  `FlowsPanels` is the ten card-panel renderers plus their scaffolding,
-  extracted from the retired `assets/js/flows-card.js` so the card dialog and
-  `/flows/ticker/` would draw the SAME code — the alternative was duplicating
-  2,003 of that file's 2,325 lines and fixing every future chart bug twice.
-  The ticker page is the only caller now, and that extraction is what made
-  deleting the modal a routing change rather than a rewrite of every chart.
   `FlowsQuant` is the options engine's browser face: the generated bundle
   of the same `shared/flows-quant-*` modules the pipeline and the Worker run,
-  exposing what `/flows/strategy/` needs to reprice a leg the reader edits:
+  exposing what `/flows/strategy/` needs to reprice a leg the reader edits,
+  and the laws the ticker dossier's Two worlds module draws:
   `repriceStructure`, the smile and law readers it stands on, and the
-  Black-76 primitives beneath them. It is a global because the strategy page
+  Black-76 primitives beneath them. The ticker dossier loads the read build
+  instead, under the same global name: the six readers it calls and none of
+  the pricer. It is a global because the strategy page
   is an IIFE with no module loader, and it is generated rather than written
   so a smile or a probability can never be computed one way on the server
   and another in the page.

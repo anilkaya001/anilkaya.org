@@ -1,1041 +1,659 @@
 (() => {
   "use strict";
 
-  const MINUS = "−";
-  const DASH = "—";
-
-  const ZERO_HORIZON = "0s";
-  const NOT_ON_ROW = "†";
-  const MID = "·";
-  const UP = "↑";
-  const DOWN = "↓";
-  const SVG_NS = "http://www.w3.org/2000/svg";
-  const COLUMNS = 10;
-  const ISO = /^\d{4}-\d{2}-\d{2}$/;
-
+  const UI = window.FlowsUI;
   const statusEl = document.getElementById("evStatus");
-  const staleEl = document.getElementById("evStale");
-  const windowPanel = document.getElementById("evWindowPanel");
-  const windowHost = document.getElementById("evWindow");
-  const windowNote = document.getElementById("evWindowNote");
-  const tablePanel = document.getElementById("evTablePanel");
-  const capEl = document.getElementById("evCap");
-  const bodyEl = document.getElementById("evBody");
-  const tableNote = document.getElementById("evTableNote");
-  const basisPanel = document.getElementById("evBasisPanel");
-  const basisHost = document.getElementById("evBasis");
-  const footEl = document.getElementById("evFoot");
-  if (!statusEl || !bodyEl) return;
+  if (!UI || !statusEl) return;
+  const { h, F } = UI;
+  const DASH = UI.DASH, MID = UI.MID;
+  const ISO = /^\d{4}-\d{2}-\d{2}$/;
+  const V = { class: "fu-v" }, HIDE = { "aria-hidden": "true" };
 
-  const isNum = (v) => {
-    if (v === null || v === undefined || v === "") return null;
-    const n = typeof v === "number" ? v : Number(v);
-    return Number.isFinite(n) ? n : null;
+  const host = {
+    meta: document.getElementById("evMeta"),
+    about: document.getElementById("evAboutSlot"),
+    chips: document.getElementById("evChips"),
+    week: document.getElementById("evWeek"),
+    earn: document.getElementById("evEarn"),
+    macro: document.getElementById("evMacro"),
+    fda: document.getElementById("evFda"),
+    react: document.getElementById("evReact"),
   };
 
-  const el = (tag, cls, text) => {
-    const n = document.createElement(tag);
-    if (cls) n.className = cls;
-    if (text !== undefined && text !== null) n.textContent = String(text);
-    return n;
+  const n = (v) => {
+    if (v === null || v === undefined) return null;
+    if (typeof v === "string" && !v.trim()) return null;
+    const x = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(x) ? x : null;
   };
-
-  const svgEl = (tag, attrs) => {
-    const n = document.createElementNS(SVG_NS, tag);
-    for (const k in attrs) {
-      if (attrs[k] !== null && attrs[k] !== undefined) n.setAttribute(k, attrs[k]);
-    }
-    return n;
-  };
-
-  function pct(v, d) {
-    const n = isNum(v);
-    if (n === null) return DASH;
-    return (n < 0 ? MINUS : "") + (Math.abs(n) * 100).toFixed(d === undefined ? 2 : d) + "%";
-  }
-
-  function fixed(v, d) {
-    const n = isNum(v);
-    return n === null ? DASH : n.toFixed(d === undefined ? 2 : d);
-  }
-
-  function signedInt(v) {
-    const n = isNum(v);
-    if (n === null) return DASH;
-    return (n < 0 ? MINUS : n > 0 ? "+" : "") + Math.abs(n).toFixed(0);
-  }
-
-  const plural = (n, one, many) => (n === 1 ? one : many);
-  const days = (n) => n + " calendar " + plural(n, "day", "days");
-  const sessions = (n) => n + " " + plural(n, "session", "sessions");
-
-  function originClash(row) {
-    const d = isNum(row && row.dte), sd = isNum(row && row.sdte);
-    return d !== null && sd !== null && sd > d;
-  }
+  const plural = (k, one, many) => (k === 1 ? one : many);
+  const count = (v) => (n(v) === null ? DASH : Math.round(n(v)).toLocaleString("en-US"));
+  const withList = (el) => { (el.classList.contains("ui-list") ? [el] : [...el.querySelectorAll(".ui-list")]).forEach((l) => l.classList.add("fu-list")); return el; };
+  const days = (k) => k + " calendar " + plural(k, "day", "days");
+  const sessions = (k) => k + " " + plural(k, "session", "sessions");
+  const pct = (v, dp = 1) => (n(v) === null ? DASH : F.pct(n(v), dp));
+  const move = (v) => (n(v) === null ? DASH : "±" + F.pct(Math.abs(n(v)), 1));
+  const WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const dayMs = (d) => Date.parse(String(d) + "T00:00:00Z");
+  const addDays = (d, k) => new Date(dayMs(d) + k * 864e5).toISOString().slice(0, 10);
+  const weekday = (d) => WD[new Date(dayMs(d)).getUTCDay()];
+  const ET_T = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
+  const etTime = (iso) => { const t = Date.parse(String(iso || "")); return Number.isFinite(t) ? ET_T.format(new Date(t)).replace(/:00(?= )/, "") : null; };
+  const cardKey = (t) => String(t || "").toUpperCase().replace(/[^A-Z0-9.\-]/g, "");
+  const tickerHref = (t) => "/flows/ticker/?t=" + encodeURIComponent(cardKey(t));
+  const originClash = (r) => { const d = n(r && r.dte), sd = n(r && r.sdte); return d !== null && sd !== null && sd > d; };
+  const TAGS = { fomc: ["FOMC", "--s-purple"], cpi: ["CPI", "--s-orange"], ppi: ["PPI", "--s-yellow"], nfp: ["Jobs", "--s-teal"], pce: ["PCE", "--s-orange"], gdp: ["GDP", "--s-blue"], claims: ["Claims", "--s-teal"] };
 
   const STAGE = {
-    "gated": {
-      lane: "gated", label: "GATED",
-      what: "The board was FORBIDDEN from scoring this name. The pipeline removes " +
-        "every name reporting inside the gate window before the composite is " +
-        "computed, so there is no score under this row — not a low one, none at all.",
-    },
-    "board:long": {
-      lane: "board", label: "BOARD " + UP,
-      what: "Passed the gate, was scored, and published on the long side of the board.",
-    },
-    "board:short": {
-      lane: "board", label: "BOARD " + DOWN,
-      what: "Passed the gate, was scored, and published on the short side of the board.",
-    },
-    "liquid": {
-      lane: "open", label: "LIQUID",
-      what: "Passed the gate and cleared the liquidity screen, but did not reach the board.",
-    },
-    "enriched": {
-      lane: "open", label: "ENRICHED",
-      what: "Passed the gate and was enriched with per-name data, but did not reach the board.",
-    },
-    "eligible": {
-      lane: "open", label: "ELIGIBLE",
-      what: "Passed the earnings gate and was eligible for scoring, but did not reach the board.",
-    },
-    "screened": {
-      lane: "open", label: "SCREENED",
-      what: "Returned by the screener and no further. It was not gated out; it simply " +
-        "did not get further down the funnel.",
-    },
+    gated: { lane: "gated", word: "Gated", what: "The board was FORBIDDEN from scoring this name: it reports inside the gate window, so there is no score under it, not a low one." },
+    "board:long": { lane: "long", word: "Long", what: "Passed the gate, was scored, and published on the long side of the board." },
+    "board:short": { lane: "short", word: "Short", what: "Passed the gate, was scored, and published on the short side of the board." },
+    liquid: { lane: "open", word: "Liquid", what: "Passed the gate and cleared the liquidity screen, but did not reach the board." },
+    enriched: { lane: "open", word: "Enriched", what: "Passed the gate and was enriched with per-name data, but did not reach the board." },
+    eligible: { lane: "open", word: "Eligible", what: "Passed the earnings gate and was eligible for scoring, but did not reach the board." },
+    screened: { lane: "open", word: "Screened", what: "Returned by the screener and no further. It was not gated out." },
+  };
+  const stageOf = (st) => STAGE[String(st || "")] || { lane: "open", word: st ? String(st) : "Unclassified", what: st ? "A funnel stage this page has no description for, shown as the payload sent it." : "The payload carried no funnel stage for this name." };
+  const stageGlyph = (st) => {
+    const lane = stageOf(st).lane;
+    if (lane === "long") return UI.glyph("up", "fe-st is-long");
+    if (lane === "short") return UI.glyph("down", "fe-st is-short");
+    if (lane === "gated") return UI.glyph("shield", "fe-st is-gated");
+    return null;
   };
 
-  const stageOf = (st) => STAGE[String(st || "")] || {
-    lane: "open",
-    label: st ? String(st).toUpperCase() : "UNCLASSIFIED",
-    what: st
-      ? "A funnel stage this page has no description for. It is shown as the payload " +
-        "sent it rather than folded into one it is not."
-      : "The payload carried no funnel stage for this name. Not measured — this is not " +
-        "a claim that the name reached no stage.",
+  const S = { payload: null, cx: new Map(), asked: false, staleDays: null };
+
+  const setModuleState = (hostEl, st, label) => {
+    const card = hostEl && hostEl.closest(".fd-mod");
+    if (!card) return;
+    card.dataset.state = st.state;
+    const t = card.querySelector(".ui-mod-t");
+    const old = t.querySelector(".ui-state");
+    if (old) old.remove();
+    const b = UI.stateButton(st, label);
+    if (b) t.append(b);
+  };
+  const setModuleInfo = (hostEl, label, build) => {
+    const card = hostEl && hostEl.closest(".fd-mod");
+    if (!card) return;
+    const head = card.querySelector(".ui-mod-h");
+    const old = head.querySelector(":scope > .ui-info");
+    if (old) old.remove();
+    head.append(UI.infoButton(label, build));
+  };
+  const silence = (hostEl, st, label, height) => {
+    hostEl.replaceChildren(UI.silent(st, label, height));
+    setModuleState(hostEl, st, label);
+  };
+  const def = (st) => UI.STATES[st.state] || UI.STATES.unavailable;
+  const mark = (st) => h("span", { class: "ui-dash" }, DASH, h("span", { class: "ui-state", "data-state": st.state, title: def(st).word }, UI.glyph(def(st).g)));
+  const muted = (st) => UI.iconChip(def(st).g, "--label-3");
+  const blockState = (b, what) => {
+    if (b === undefined || b === null) return { state: "pending", reason: "The " + what + " is not on this payload yet. It is published by the nightly run that ships with this page; until then it is pending, not empty." };
+    if (typeof b !== "object") return { state: "withheld", reason: "The " + what + " on this payload could not be read." };
+    if (b.status === "ok" || b.status === "thin") return { state: "ok" };
+    if (b.status === "quiet") return { state: "quiet", reason: "Read, and the vendor returned nothing that applies." };
+    return { state: "unavailable", reason: "The " + what + " was not measured" + (b.reason ? " (" + String(b.reason).replace(/_/g, " ") + (n(b.http) ? ", HTTP " + b.http : "") + ")" : "") + "." };
   };
 
-  const LANES = [
-    { key: "gated", short: "GATED",
-      aria: "gated, which is to say the board was forbidden to score them" },
-    { key: "board", short: "ON THE BOARD", aria: "on the board" },
-    { key: "open", short: "PASSED, NOT ON THE BOARD",
-      aria: "past the gate but not on the board" },
-  ];
+  function pricedText(r) {
+    if (n(r.ev) !== null) return F.pct(n(r.ev), 2) + " priced over " + sessions(n(r.sdte) ?? 0);
+    if (n(r.sdte) === 0) return "0s: no sessions left to price, a horizon of zero rather than a zero move";
+    if (n(r.iv) === null) return "not measured for this name: no 30-day implied volatility arrived";
+    return "not published for this row, and not zero";
+  }
 
-  function sparkline(path, labels, domain) {
-    if (!Array.isArray(path) || !domain) return null;
-    const pts = path.map((v) => isNum(v));
-    if (!pts.some((v) => v !== null)) return null;
-
-    const W = 46, H = 14, padX = 3.5, padY = 2.5;
-    const n = pts.length;
-    const xOf = (i) => (n === 1 ? W / 2 : padX + (i / (n - 1)) * (W - padX * 2));
-    const yOf = (v) => padY + (1 - (v - domain.lo) / domain.span) * (H - padY * 2);
-
-    const svg = svgEl("svg", {
-      class: "ev-spark", viewBox: `0 0 ${W} ${H}`, width: W, height: H,
-      role: "img", preserveAspectRatio: "xMidYMid meet",
-      "aria-label": "Implied volatility path, oldest first: " + pts.map((v, i) =>
-        (labels[i] || "point " + (i + 1)) + " " + (v === null ? "not measured" : pct(v, 1)),
-      ).join(", ") + ".",
-    });
-
-    for (let i = 0; i + 1 < n; i++) {
-      if (pts[i] === null || pts[i + 1] === null) continue;
-      svg.append(svgEl("line", {
-        class: "ev-spark-l",
-        x1: xOf(i).toFixed(2), y1: yOf(pts[i]).toFixed(2),
-        x2: xOf(i + 1).toFixed(2), y2: yOf(pts[i + 1]).toFixed(2),
-      }));
+  function calIndex(payload) {
+    const out = new Map();
+    const cal = payload.earningsCalendar;
+    if (!cal || typeof cal !== "object") return out;
+    const add = (r, d) => { if (r && r.t && !out.has(r.t)) out.set(r.t, { ...r, d: r.d || d }); };
+    if (cal.tonight && Array.isArray(cal.tonight.rows)) for (const r of cal.tonight.rows) add(r, payload.sessionDate);
+    for (const s of Array.isArray(cal.sessions) ? cal.sessions : []) {
+      for (const part of [s.premarket, s.afterhours]) if (part && Array.isArray(part.rows)) for (const r of part.rows) add(r, s.date);
     }
-    pts.forEach((v, i) => {
-      if (v === null) return;
-      svg.append(svgEl("circle", {
-        class: "ev-spark-d" + (i === n - 1 ? " is-now" : ""),
-        cx: xOf(i).toFixed(2), cy: yOf(v).toFixed(2), r: i === n - 1 ? 2 : 1.5,
-      }));
-    });
-    return svg;
+    return out;
   }
 
-  function pathDomain(rows) {
-    let lo = Infinity, hi = -Infinity;
-    for (const r of rows) {
-      if (!r || !Array.isArray(r.ivPath)) continue;
-      for (const raw of r.ivPath) {
-        const v = isNum(raw);
-        if (v === null) continue;
-        if (v < lo) lo = v;
-        if (v > hi) hi = v;
-      }
+  const impliedOf = (r, cal) => {
+    const cx = S.cx.get(r.t);
+    const e = cx && cx.earnings && cx.earnings.impliedNext ? n(cx.earnings.impliedNext.em) : null;
+    const c = cal ? n(cal.em) : null;
+    if (c !== null) return { v: Math.abs(c), src: "the vendor's expected earnings move" };
+    if (e !== null) return { v: Math.abs(e), src: "the vendor's expected earnings move" };
+    if (n(r.im) !== null) return { v: Math.abs(n(r.im)), src: "the vendor's implied move to its next expiry" };
+    return null;
+  };
+
+  function realizedOf(t, payload) {
+    const hist = payload.history && typeof payload.history === "object" ? payload.history : null;
+    const digest = hist ? hist[t] : null;
+    const got = S.cx.get(t);
+    if (got && got.st) return got;
+    if (!hist) return { st: { state: "pending", reason: "The earnings history is not on this payload yet; it ships with the next nightly run." } };
+    if (!digest) return { st: { state: "unavailable", reason: "This name is outside the history window: only names reporting within ten sessions carry their past reports." } };
+    if (digest.status === "thin") return { st: { state: "quiet", reason: "Fewer reports than the statistic needs (" + (n(digest.n) ?? 0) + ")." }, digest };
+    if (digest.status !== "ok") return { st: blockState(digest, "earnings history"), digest };
+    return { st: { state: "pending", reason: "Reading this name's past reports." }, digest };
+  }
+
+  function sessionDays(payload) {
+    const cal = payload.earningsCalendar;
+    if (cal && Array.isArray(cal.sessions) && cal.sessions.length) return cal.sessions.map((s) => s.date).filter((d) => ISO.test(String(d))).slice(0, 5);
+    const out = [];
+    let d = ISO.test(String(payload.gateOrigin || "")) ? payload.gateOrigin : null;
+    if (!d) return out;
+    while (out.length < 5) {
+      const wd = new Date(dayMs(d)).getUTCDay();
+      if (wd !== 0 && wd !== 6) out.push(d);
+      d = addDays(d, 1);
     }
-    if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
-    const span = Math.max(hi - lo, 0.02);
-    const pad = span * 0.08;
-    return { lo: lo - pad, hi: hi + pad, span: span + pad * 2, rawLo: lo, rawHi: hi };
+    return out;
   }
 
-  let drawn = null;
-  let drawnW = 0;
+  const key = (...kids) => h("span", { class: "ui-key" }, ...kids);
+  const tally = (g, word, v) => key(g, word + " ", h("b", null, String(v)));
 
-  function revealPanel() {
-    if (windowPanel) windowPanel.hidden = false;
-  }
-
-  function chartWidth() {
-    revealPanel();
-
-    const box = windowHost && typeof windowHost.getBoundingClientRect === "function"
-      ? windowHost.getBoundingClientRect().width : 0;
-    const measured = box > 0 ? box : ((windowHost && windowHost.clientWidth) || 0);
-    return Math.floor(measured) || 560;
-  }
-
-  function windowMessage(text, kind) {
-    if (!windowHost) return;
-    const p = el("p", "flows-empty ew-empty", text);
-    p.dataset.empty = kind;
-    windowHost.replaceChildren(p);
-    revealPanel();
-  }
-
-  function setStatus(text, kind) {
-    statusEl.textContent = text;
-    if (kind) statusEl.dataset.empty = kind;
-    else delete statusEl.dataset.empty;
-  }
-
-  function renderWindow(payload) {
-    if (!windowHost) return;
-    drawn = payload;
-    drawnW = chartWidth();
-    windowHost.replaceChildren();
-
+  function paintWeek(payload) {
     const rows = Array.isArray(payload.rows) ? payload.rows : [];
-    const origin = ISO.test(String(payload.gateOrigin || "")) ? payload.gateOrigin : null;
-    const gateDays = isNum(payload.gateDays);
-    const windowDays = isNum(payload.windowDays);
-
-    if (!origin) {
-
-      windowMessage(
-        "This payload carried no gate origin, so the chart cannot say what its day zero " +
-        "is. It is not drawn: an axis whose origin is unstated will be read as today, " +
-        "and today is not the date the earnings gate ran against.", "unavailable");
-      if (windowNote) {
-        windowNote.textContent = "The table below is unaffected — every count in it is " +
-          "the pipeline's own, not this page's arithmetic.";
-      }
+    const cal = calIndex(payload);
+    const list = sessionDays(payload);
+    if (!list.length) {
+      silence(host.week, { state: "unavailable", reason: "This payload carried no gate origin and no session list, so the week has no day zero to be drawn from." }, "Week ahead", 220);
       return;
     }
-
-    const marks = [];
-    let undrawn = 0;
-    for (const r of rows) {
-      const dte = isNum(r && r.dte);
-      if (dte === null || dte < 0) { undrawn++; continue; }
-      marks.push({ r, dte, lane: stageOf(r.st).lane });
-    }
-
-    if (!marks.length) {
-      windowMessage("No row in this payload carries the calendar day count the gate " +
-        "measured, so there is nothing that can honestly be placed on this axis.",
-        "unavailable");
-      return;
-    }
-
-    const maxDte = marks.reduce((m, x) => Math.max(m, x.dte), 0);
-
-    const axisMax = Math.max(7, windowDays === null ? 0 : windowDays, maxDte,
-      gateDays === null ? 0 : gateDays + 1);
-    const cols = axisMax + 1;
-
-    const W = drawnW;
-    const padL = 16, padR = 16, padT = 23, axisH = 26, laneGap = 8, labelH = 15, gap = 2;
-    const plotW = W - padL - padR;
-    const colW = plotW / cols;
-    const ms = Math.max(4, Math.min(9, Math.floor(colW - 3)));
-    const rowH = ms + gap;
-    const xMid = (d) => padL + (d + 0.5) * colW;
-    const xEdge = (d) => padL + d * colW;
-
-    const stacks = new Map();
-    for (const m of marks) {
-      const k = m.lane + "@" + m.dte;
-      if (!stacks.has(k)) stacks.set(k, []);
-      stacks.get(k).push(m);
-    }
-    for (const list of stacks.values()) {
-      list.sort((a, b) => String(a.r.t).localeCompare(String(b.r.t)));
-    }
-
-    const lanes = LANES.map((L) => {
-      let tallest = 0;
-      for (const [k, list] of stacks) {
-        if (k.slice(0, L.key.length + 1) === L.key + "@") tallest = Math.max(tallest, list.length);
+    const macroSt = blockState(payload.macro, "economic calendar");
+    const fdaSt = blockState(payload.fda, "FDA calendar");
+    const catRows = payload.catalysts && Array.isArray(payload.catalysts.rows) ? payload.catalysts.rows : [];
+    const divRows = catRows.filter((c) => /div/i.test(String(c && c.type)));
+    const divSt = divRows.length ? { state: "ok" } : { state: "unavailable", reason: "Ex-dividend dates need the vendor's dividends route, which this plan does not include, so none are read. An empty row here is not a week without dividends." };
+    const drawn = rows.filter((r) => r && list.includes(r.d));
+    const earnSt = drawn.length ? { state: "ok" } : { state: "quiet", reason: "No name reports in the next five sessions." };
+    const maxEm = Math.max(0.01, ...drawn.map((r) => { const i = impliedOf(r, cal.get(r.t)); return i ? i.v : 0; }));
+    const grid = h("div", { class: "fe-week", style: { "--days": String(list.length) } });
+    const laneHead = (name, st) => h("div", { class: "fe-lane" }, h("span", null, name), st && st.state !== "ok" ? UI.stateButton(st, name) : null);
+    grid.append(h("div", { class: "fe-col fe-labels" },
+      h("div", { class: "fe-dh" }), laneHead("Macro", macroSt), laneHead("Earnings", earnSt), laneHead("FDA", fdaSt), laneHead("Ex-div", divSt)));
+    const today = payload.gateOrigin;
+    list.forEach((d, k) => {
+      const col = h("section", { class: "fe-col", "aria-label": weekday(d) + " " + F.day(d) });
+      col.append(h("div", { class: "fe-dh" }, h("b", null, weekday(d)), h("span", null, F.day(d)), d === today ? h("i", { class: "fe-next" }, "Next") : null));
+      const mac = macroSt.state === "ok" ? (payload.macro.rows || []).filter((m) => m && m.day === d).sort((a, b) => String(a.at).localeCompare(String(b.at))) : [];
+      col.append(h("div", { class: "fe-cell fe-c-macro", "data-lane": "Macro" }, mac.map(macroPill)));
+      const earn = rows.filter((r) => r && r.d === d).map((r) => ({ r, c: cal.get(r.t) || null }))
+        .sort((a, b) => laneRank(a.r) - laneRank(b.r) || (n(b.c && b.c.mcap) ?? -1) - (n(a.c && a.c.mcap) ?? -1) || String(a.r.t).localeCompare(String(b.r.t)));
+      const cell = h("div", { class: "fe-cell fe-c-earn", "data-lane": "Earnings" });
+      const cap = 6;
+      earn.forEach((x, i) => { const chip = earnChip(x.r, x.c, maxEm, i + k * 6); if (i >= cap) chip.hidden = true; cell.append(chip); });
+      if (earn.length > cap) {
+        const more = h("button", { class: "fe-more", type: "button", "aria-expanded": "false" }, "+" + (earn.length - cap));
+        more.addEventListener("click", () => {
+          const open = more.getAttribute("aria-expanded") !== "true";
+          more.setAttribute("aria-expanded", String(open));
+          [...cell.querySelectorAll(".fe-chip")].forEach((c, i) => { if (i >= cap) c.hidden = !open; });
+          more.textContent = open ? "Fewer" : "+" + (earn.length - cap);
+        });
+        cell.append(more);
       }
-      return {
-        key: L.key, short: L.short, aria: L.aria,
-        n: marks.filter((m) => m.lane === L.key).length,
-        tallest: Math.max(1, tallest),
-      };
+      col.append(cell);
+      const fd = fdaSt.state === "ok" ? (payload.fda.rows || []).filter((f) => f && f.tgt && f.tgt.p === "day" && f.tgt.from === d) : [];
+      col.append(h("div", { class: "fe-cell fe-c-fda", "data-lane": "FDA" }, fd.map(fdaPill)));
+      col.append(h("div", { class: "fe-cell fe-c-div", "data-lane": "Ex-div" }, divRows.filter((c) => c.date === d).map((c) => h("a", { class: "fe-pill", href: tickerHref(c.t) }, h("b", null, String(c.t || DASH))))));
+      grid.append(col);
     });
-
-    let y = padT;
-    for (const L of lanes) {
-      L.labelY = y + 11;
-      L.top = y + labelH;
-      L.height = L.tallest * rowH;
-      L.base = L.top + L.height;
-      y = L.base + laneGap;
-    }
-    const plotTop = padT;
-    const plotBottom = y - laneGap;
-    const H = Math.round(plotBottom + axisH);
-
-    const inBand = (m) => gateDays !== null && m.dte <= gateDays;
-    const gatedAll = marks.filter((m) => m.lane === "gated");
-    const gatedIn = gatedAll.filter(inBand).length;
-    const gatedOut = gatedAll.length - gatedIn;
-    const otherAll = marks.filter((m) => m.lane !== "gated");
-    const otherIn = otherAll.filter(inBand).length;
-
-    const svg = svgEl("svg", {
-
-      class: "ew", viewBox: `0 0 ${W} ${H}`, width: W, height: H,
-      role: "img", preserveAspectRatio: "xMidYMid meet",
-      "aria-label":
-        "Report dates for " + marks.length + " " + plural(marks.length, "name", "names") +
-        ", plotted as calendar days after " + origin + ", the run's own Eastern date. " +
-        lanes.map((L) => (L.n || "none") + " " + L.aria).join("; ") + ". " +
-        (gateDays === null
-          ? "The gate window was not published, so no band is drawn."
-          : "The earnings gate covered day 0 to day " + gateDays + ", and " + gatedIn +
-            " of the " + gatedAll.length + " gated names fall inside it."),
-    });
-
-    const defs = svgEl("defs");
-    const pat = svgEl("pattern", {
-      id: "ewHatch", width: 6, height: 6, patternUnits: "userSpaceOnUse",
-      patternTransform: "rotate(45)", class: "ew-hatch",
-    });
-    pat.append(svgEl("line", {
-      x1: 3, y1: 0, x2: 3, y2: 6, stroke: "currentColor", "stroke-width": 1.3,
-    }));
-    defs.append(pat);
-    svg.append(defs);
-
-    if (gateDays !== null) {
-
-      const right = Math.min(xEdge(gateDays + 1), W - padR);
-      const bandX = xEdge(0).toFixed(2);
-      const bandW = Math.max(0, right - xEdge(0)).toFixed(2);
-      const bandNote = "The earnings gate: day 0 through day " + gateDays + " after " +
-        origin + ", in calendar days. Every name reporting inside it was removed before " +
-        "the board was scored, so the board holds no opinion on any of them.";
-
-      for (const L of lanes) {
-        const geom = { x: bandX, y: L.top.toFixed(2), width: bandW,
-                       height: (L.base - L.top).toFixed(2) };
-        svg.append(svgEl("rect", { class: "ew-bandbg", ...geom }));
-        const seg = svgEl("rect", { class: "ew-band", ...geom, fill: "url(#ewHatch)" });
-        const bt = svgEl("title");
-        bt.textContent = bandNote;
-        seg.append(bt);
-        svg.append(seg);
-      }
-      svg.append(svgEl("line", {
-        class: "ew-edge", x1: right.toFixed(2), x2: right.toFixed(2),
-        y1: plotTop, y2: plotBottom.toFixed(2),
-      }));
-      const lab = svgEl("text", {
-        class: "ew-bandlab", x: (xEdge(0) + 3).toFixed(2), y: padT - 5,
-        "font-size": "9px", "text-anchor": "start",
-      });
-      lab.textContent = "GATE " + MID + " 0" + MINUS + gateDays + "d";
-      svg.append(lab);
-    }
-
-    for (let d = 0; d <= axisMax; d += 7) {
-      const x = xEdge(d);
-      svg.append(svgEl("line", {
-        class: "ew-grid", x1: x.toFixed(2), x2: x.toFixed(2),
-        y1: plotTop, y2: plotBottom.toFixed(2),
-      }));
-      const t = svgEl("text", {
-        class: "ew-tick", x: Math.min(Math.max(x, padL + 7), W - padR - 7).toFixed(2),
-        y: plotBottom + 15, "font-size": "9.5px", "text-anchor": "middle",
-      });
-      t.textContent = d === 0 ? "0" : "+" + d + "d";
-      svg.append(t);
-    }
-    svg.append(svgEl("line", {
-      class: "ew-axis", x1: padL, x2: (W - padR).toFixed(2),
-      y1: plotBottom.toFixed(2), y2: plotBottom.toFixed(2),
-    }));
-    const axisLab = svgEl("text", {
-      class: "ew-axislab", x: (W - padR).toFixed(2), y: plotBottom + 24,
-      "font-size": "9px", "text-anchor": "end",
-    });
-    axisLab.textContent = "calendar days after " + origin + " (not sessions)";
-    svg.append(axisLab);
-
-    for (const L of lanes) {
-      const lt = svgEl("text", {
-        class: "ew-lane is-" + L.key, x: padL, y: L.labelY,
-        "font-size": "9.5px", "text-anchor": "start",
-      });
-
-      lt.textContent = L.short + " " + MID + " " + L.n + " / " + marks.length +
-        (undrawn ? " drawn" : "");
-      svg.append(lt);
-      svg.append(svgEl("line", {
-        class: "ew-lanerule", x1: padL, x2: (W - padR).toFixed(2),
-        y1: L.base.toFixed(2), y2: L.base.toFixed(2),
-      }));
-    }
-
-    const laneOf = new Map(lanes.map((L) => [L.key, L]));
-    for (const [k, list] of stacks) {
-      const L = laneOf.get(k.slice(0, k.indexOf("@")));
-      if (!L) continue;
-      list.forEach((m, i) => {
-        const cx = xMid(m.dte);
-        const cy = L.base - (i + 0.5) * rowH;
-        const st = stageOf(m.r.st);
-        const cls = "ew-m is-" + L.key +
-          (m.r.st === "board:long" ? " is-long" : m.r.st === "board:short" ? " is-short" : "");
-        let node;
-        if (L.key === "gated") {
-          node = svgEl("rect", {
-            class: cls, x: (cx - ms / 2).toFixed(2), y: (cy - ms / 2).toFixed(2),
-            width: ms, height: ms, rx: 1,
-          });
-        } else if (L.key === "board") {
-
-          const h = ms / 2 + 0.6;
-          const x = cx.toFixed(2), lx = (cx - h).toFixed(2), rx = (cx + h).toFixed(2);
-          const ty = (cy - h).toFixed(2), by = (cy + h).toFixed(2), my = cy.toFixed(2);
-          node = svgEl("path", {
-            class: cls,
-            d: m.r.st === "board:long"
-              ? `M${x} ${ty}L${rx} ${by}L${lx} ${by}Z`
-              : m.r.st === "board:short"
-                ? `M${x} ${by}L${rx} ${ty}L${lx} ${ty}Z`
-                : `M${x} ${ty}L${rx} ${my}L${x} ${by}L${lx} ${my}Z`,
-          });
-        } else {
-          node = svgEl("circle", { class: cls, cx: cx.toFixed(2), cy: cy.toFixed(2), r: ms / 2 });
-        }
-
-        const sd = isNum(m.r.sdte);
-        const tip = svgEl("title");
-        tip.textContent = String(m.r.t || DASH) + " " + MID + " reports " + m.r.d + " " +
-          MID + " " + days(m.dte) + " out from " + origin + ", which is the position drawn " +
-          MID + " " +
-          (sd === null ? "sessions not measured"
-            : sessions(sd) + " over the same span, which is what the priced move was " +
-              "scaled by" + (originClash(m.r)
-                ? " — and on this row the two counts disagree about their origin" : "")) +
-          " " + MID + " " + st.label + " " + MID + " priced move " + pricedShort(m.r);
-        node.append(tip);
-        svg.append(node);
-      });
-    }
-
-    windowHost.append(svg);
-    if (windowPanel) windowPanel.hidden = false;
-
-    if (windowNote) {
-      const parts = [];
-      parts.push("Day 0 is " + origin + " " + MID + " the run's own Eastern date, and the " +
-        "origin the earnings gate itself used. It is NOT the session date: the prices in " +
-        "the table describe " + (payload.sessionDate || "the last completed session") +
-        ", the last completed session, while every day count on this page describes " +
-        origin + ".");
-      parts.push("The axis is CALENDAR days — the payload's own dte, which is the number " +
-        "the gate compared, taken as published rather than recomputed here. The table's " +
-        "Sessions column is a different unit: weekdays, which is what the priced move was " +
-        "scaled by. Drawing this axis in sessions instead would move " +
-        marks.filter((m) => {
-          const sd = isNum(m.r.sdte);
-          return gateDays !== null && sd !== null && (sd <= gateDays) !== (m.dte <= gateDays);
-        }).length + " of these " + marks.length + " marks to the wrong side of the band.");
-      if (gateDays !== null) {
-        if (!gatedOut && !otherIn) {
-          parts.push("The hatched band is the published gate: day 0 through day " +
-            gateDays + ". Every one of the " + gatedAll.length + " gated names falls " +
-            "inside it and every one of the " + otherAll.length + " the board was allowed " +
-            "to score falls outside it. That separation is the whole picture: the names " +
-            "the board has no opinion on are exactly the ones reporting soonest.");
-        } else {
-
-          parts.push("The hatched band is the published gate: day 0 through day " +
-            gateDays + ". " + gatedIn + " of " + gatedAll.length + " gated names fall " +
-            "inside it" + (gatedOut ? ", " + gatedOut + " outside" : "") +
-            (otherIn ? ", and " + otherIn + " " + plural(otherIn, "name", "names") +
-              " the board was allowed to score " + plural(otherIn, "sits", "sit") +
-              " inside it" : "") + ". The band and the stage should agree exactly, " +
-            "since both come from the same `dte`; where they do not, read the stage.");
-        }
-      } else {
-        parts.push("This payload published no gate window, so no band is drawn. An " +
-          "assumed one would be this page's arithmetic rather than the pipeline's.");
-      }
-      if (windowDays !== null) {
-        parts.push("The axis ends at the published window, " + days(windowDays) +
-          "; a name reporting beyond it is not in this payload at all.");
-      }
-      if (undrawn) {
-        parts.push(undrawn + " " + plural(undrawn, "row carries", "rows carry") +
-          " no calendar day count and " + plural(undrawn, "is", "are") +
-          " left off the chart rather than drawn at day 0.");
-      }
-      windowNote.textContent = parts.join(" ");
-    }
+    const counts = { long: 0, short: 0, gated: 0, open: 0 };
+    const whens = new Set();
+    for (const r of drawn) { counts[stageOf(r.st).lane]++; const c = cal.get(r.t); if (c) whens.add(c.when); }
+    const legend = UI.legend([
+      counts.long ? tally(UI.glyph("up", "fe-st is-long"), "Long", counts.long) : null,
+      counts.short ? tally(UI.glyph("down", "fe-st is-short"), "Short", counts.short) : null,
+      counts.gated ? tally(UI.glyph("shield", "fe-st is-gated"), "Gated", counts.gated) : null,
+      counts.open ? tally(null, "Open", counts.open) : null,
+      drawn.length ? key(h("i", { class: "fe-key-em" }), "Implied move") : null,
+      whens.has("premarket") ? key(h("i", { class: "fe-when is-am" }), "Before the open") : null,
+      whens.has("postmarket") ? key(UI.glyph("closed", "fe-when"), "After the close") : null,
+    ].filter(Boolean));
+    legend.classList.add("fe-legend");
+    host.week.replaceChildren(grid, legend);
+    setModuleState(host.week, UI.partial([{ name: "Macro", st: macroSt }, { name: "Earnings", st: earnSt }, { name: "FDA", st: fdaSt }, { name: "Ex-dividends", st: divSt }]), "Week ahead");
   }
 
-  function cell(text, cls, title) {
-    const td = el("td", cls, text);
-    if (title) td.title = title;
-    return td;
+  const laneRank = (r) => ({ long: 0, short: 0, open: 1, gated: 2 })[stageOf(r.st).lane];
+
+  function earnChip(r, c, maxEm, i) {
+    const imp = impliedOf(r, c);
+    const when = c && c.when;
+    const st = stageOf(r.st);
+    const chip = h("a", {
+      class: "fe-chip", href: tickerHref(r.t), "data-lane": st.lane,
+      title: String(r.t) + " " + MID + " reports " + (r.d || DASH) + (when && when !== "unknown" ? " " + (when === "premarket" ? "before the open" : "after the close") : "") +
+        " " + MID + " implied " + (imp ? move(imp.v) + " (" + imp.src + ")" : "not measured") + " " + MID + " priced " + pricedText(r) + " " + MID + " " + st.word + ": " + st.what,
+    },
+    h("span", { class: "fe-chip-t" }, stageGlyph(r.st), h("b", null, String(r.t || DASH)),
+      when === "premarket" ? h("i", { class: "fe-when is-am", "aria-label": "Before the open" }) : when === "postmarket" ? UI.glyph("closed", "fe-when") : null),
+    h("span", { class: "fe-chip-v" }, imp ? move(imp.v) : DASH),
+    h("i", { class: "fe-chip-bar", style: { width: imp ? Math.max(4, (imp.v / maxEm) * 100).toFixed(1) + "%" : "0%", "--i": String(i) } }));
+    return chip;
   }
 
-  function pricedShort(row) {
-    if (isNum(row.ev) !== null) return pct(row.ev, 2);
-    if (isNum(row.sdte) === 0) return ZERO_HORIZON + " (no sessions left to price)";
-    if (isNum(row.iv) === null) return NOT_ON_ROW + " (implied volatility not measured)";
-    return DASH + " (not published)";
+  function macroPill(m) {
+    const tag = TAGS[m.tag] || null;
+    const name = tag ? tag[0] : String(m.event || DASH).replace(/\s*\((MoM|YoY|QoQ)\)/, "");
+    return h("button", {
+      class: "fe-pill fe-macro" + (tag ? " is-tag" : ""), type: "button", "data-tag": m.tag || null,
+      "aria-haspopup": "dialog", "aria-controls": "fxPop",
+      "data-info": UI.info(() => ({
+        title: String(m.event || "Economic print"), asOf: m.day || null,
+        facts: [["Time", etTime(m.at) ? etTime(m.at) + " ET" : null], ["Forecast", m.forecastRaw || null], ["Prior", m.prevRaw || null], ["Period", m.period || null], ["Sessions out", n(m.sd) === null ? null : String(m.sd)]],
+      })),
+    }, h("i", { class: "fe-dot", style: { "--c": UI.cssVar(tag ? tag[1] : "--label-3") } }), h("span", { class: "fe-time" }, etTime(m.at) || ""), h("b", null, name));
   }
 
-  function pricedCell(row) {
-    const ev = isNum(row.ev);
-    if (ev !== null) {
-      const sd = isNum(row.sdte);
-      return cell(pct(ev, 2), "c-num ev-priced",
-        "What the option market is charging for the " +
-        (sd === null ? "sessions" : sessions(sd)) + " between the run and the report: " +
-        "this name's 30-day implied volatility scaled by the square root of time. " +
-        "Scaled by SESSIONS, not by the calendar days the chart above plots. Not a forecast.");
-    }
-
-    if (isNum(row.sdte) === 0) {
-      return cell(ZERO_HORIZON, "c-num ev-priced is-zero-horizon",
-        "There are no sessions left to price: this name reports before another session " +
-        "opens. Not a zero move — a horizon of zero sessions, which nothing can be " +
-        "scaled to. A different fact from a missing measurement.");
-    }
-    if (isNum(row.iv) === null) {
-      return cell(NOT_ON_ROW, "c-num ev-priced is-unavailable",
-        "No 30-day implied volatility arrived for this name, so there is nothing to " +
-        "scale to the report. NOT MEASURED FOR THIS NAME — not zero.");
-    }
-    return cell(DASH, "c-num ev-priced is-none",
-      "No priced move was published for this row. Not measured — not zero.");
+  const FDA_CAT = (c) => (/pdufa/i.test(c) ? "PDUFA" : /advisory/i.test(c) ? "AdCom" : /data|top-?line/i.test(c) ? "Data" : String(c || "Date").split(" ")[0]);
+  function fdaPill(f) {
+    return h(f.carded ? "a" : "span", { class: "fe-pill fe-fda", href: f.carded ? tickerHref(f.t) : null, title: String(f.t) + " " + MID + " " + String(f.cat || "") + " " + MID + " " + String(f.st || "") },
+      UI.glyph("flask"), h("b", null, String(f.t || DASH)), h("span", null, FDA_CAT(f.cat)));
   }
 
-  function stageCell(row) {
-    const st = stageOf(row.st);
-    const td = el("td", "ev-stagecell");
-    const chip = el("span",
-      "ev-st is-" + String(row.st || "unclassified").replace(":", "-"), st.label);
-    const score = isNum(row.s);
-    chip.title = st.what + (score === null
-      ? (row.st === "gated"
-        ? " There is no score under this row at all — the composite never ran on it."
-        : " No score was published for this row.")
-      : " Its published score is " + signedInt(score) + ".");
-    td.append(chip);
-    return td;
-  }
-
-  function rowFor(row, ctx) {
-    const tr = document.createElement("tr");
-    const st = stageOf(row.st);
-    if (st.lane === "gated") tr.className = "is-gated";
-
-    const th = el("th", "fb-tk");
-    th.scope = "row";
-    const link = el("a", null, String(row.t || DASH));
-    link.href = "/flows/ticker/?t=" + encodeURIComponent(String(row.t || ""));
-    th.append(link);
-
-    const rvol = isNum(row.rvol);
-    th.title = (row.sector ? String(row.sector) : "Sector not published") +
-      (rvol === null
-        ? " " + MID + " relative volume not measured"
-        : " " + MID + " relative volume " + rvol.toFixed(2) + "× its own recent norm");
-    tr.append(th);
-
-    const dte = isNum(row.dte);
-    tr.append(cell(row.d ? String(row.d) : DASH, "ev-date",
-      row.d
-        ? (dte === null
-          ? "The report date, as published. No calendar day count came with it."
-          : days(dte) + " out from " + (ctx.origin || "the run's own Eastern date") +
-            ", as the earnings gate itself measured it. This is the number the chart above " +
-            "plots and the one the gate window is quoted in — and it is a different UNIT " +
-            "from the Sessions column beside it, which counts weekdays." +
-            (originClash(row)
-              ? " On this row it is also a different ORIGIN: see the Sessions cell."
-              : ""))
-        : "No report date on the wire for this name."));
-
-    const sd = isNum(row.sdte);
-    const clash = originClash(row);
-    tr.append(cell(sd === null ? DASH : String(sd), "c-num" + (clash ? " ev-clash" : ""),
-      sd === null
-        ? "Sessions to the report were not measured for this name."
-        : (clash
-          ? "This row publishes " + sessions(sd) + " beside " + days(dte) + " — more " +
-            "weekdays than calendar days, which no single span can contain. Neither number " +
-            "is wrong on its own terms: the two were measured from different origins, and " +
-            "this row is where that gap shows. Read the stage and the chart, which use the " +
-            "calendar count, and treat the difference between these two columns as unsafe."
-          : sd === 0
-            ? "Zero sessions: this name reports before another session opens. A measured " +
-              "zero, not a missing one — and the reason the Priced column beside it is empty."
-            : sessions(sd) + " — weekdays from " + (ctx.origin || "the run's own date") +
-              ", and the horizon the priced move was scaled by. Market holidays are not " +
-              "removed. This is NOT the number the chart plots: that one counts calendar " +
-              "days over the same span, in the Reports column's own title.")));
-
-    tr.append(cell(fixed(row.px, 2), "c-num",
-      isNum(row.px) === null
-        ? "No close was published for this name."
-        : "The close of the " + (ctx.sessionDate || "last completed") + " session — the " +
-          "PRICE clock, which is not the clock any day count on this page uses."));
-
-    tr.append(pricedCell(row));
-
-    tr.append(cell(pct(row.im, 2), "c-num",
-      isNum(row.im) === null
-        ? "The vendor published no implied move for this name."
-        : "The vendor's own implied move, quoted to the vendor's own next expiry — a " +
-          "different horizon from the Priced column, and deliberately not reconciled with it."));
-
-    const ivCell = el("td", "c-num ev-iv");
-    const spark = sparkline(row.ivPath, ctx.labels, ctx.domain);
-    if (spark) ivCell.append(spark);
-    ivCell.append(el("span", "ev-ivv", pct(row.iv, 1)));
-    ivCell.title = (isNum(row.iv) === null
-      ? "No 30-day implied volatility arrived for this name."
-      : "30-day implied volatility.") +
-      (spark ? " The strip is this name's own path: " + ctx.labels.join(" " + MID + " ") +
-        ", oldest first, on one scale shared by every row. A gap is a point nobody " +
-        "measured and is not drawn across." : "");
-    tr.append(ivCell);
-
-    tr.append(cell(pct(row.rv, 1), "c-num ev-rv" + (isNum(row.rv) === null ? " is-none" : ""),
-      isNum(row.rv) === null
-        ? "Realized volatility is measured only for the enriched names, so this row " +
-          "withholds it. NOT MEASURED FOR THIS NAME — not zero, and not a reading of a " +
-          "quiet tape."
-        : "Realized 30-day volatility, measured because this name was enriched."));
-
-    tr.append(cell(pct(row.ivr, 0), "c-num",
-      isNum(row.ivr) === null
-        ? "IV rank was not measured for this name."
-        : "Where this name's 30-day implied volatility sits inside its own year."));
-
-    tr.append(stageCell(row));
-    return tr;
-  }
-
-  function emptyRow(text, kind) {
-    bodyEl.replaceChildren();
-    const tr = document.createElement("tr");
-    const td = el("td", "flows-empty ev-empty", text);
-    td.dataset.empty = kind;
-    td.colSpan = COLUMNS;
-    tr.append(td);
-    bodyEl.append(tr);
-    if (tablePanel) tablePanel.hidden = false;
-  }
-
-  function renderTable(payload) {
-    const rows = Array.isArray(payload.rows) ? payload.rows : [];
-    const ctx = {
-      origin: ISO.test(String(payload.gateOrigin || "")) ? payload.gateOrigin : null,
-      sessionDate: payload.sessionDate || null,
-      labels: (payload.ivPath && Array.isArray(payload.ivPath.labels))
-        ? payload.ivPath.labels.map(String)
-        : ["−1m", "−1w", "−1d", "now"],
-      domain: pathDomain(rows),
+  function weekInfo() {
+    const payload = S.payload || {};
+    const notes = payload.notes && typeof payload.notes === "object" ? payload.notes : {};
+    const clashes = (payload.rows || []).filter((r) => r && originClash(r)).length;
+    return {
+      title: "Week ahead",
+      asOf: payload.gateOrigin || null,
+      lead: "The next five sessions: economic prints, earnings and FDA dates, day by day. Each name is a link to its page; the bar under it is its implied move against the largest this week, so the names that can move the most stand out.",
+      facts: [
+        ["Day zero", payload.gateOrigin ? payload.gateOrigin + ", the run's own Eastern date" : null],
+        ["Prices", payload.sessionDate ? "closes of " + payload.sessionDate : null],
+        ["Gate", n(payload.gateDays) === null ? null : "day 0 to day " + payload.gateDays + ", calendar days"],
+        ["Window", n(payload.windowDays) === null ? null : days(n(payload.windowDays))],
+      ],
+      sections: [
+        { title: "The gate", lines: [notes.gate, "Every name reporting inside the gate was removed before the board was scored, so the board holds no opinion on any of them. Board names never report inside it by construction; they appear in the Earnings list once their report lies beyond it."] },
+        { title: "Two clocks", lines: [notes.clocks, clashes ? clashes + " rows publish more sessions than calendar days: the two counts were measured from different origins, and the difference between them is not safe to read on those rows." : null] },
+        { title: "Before the open or after the close", lines: [payload.announce && payload.announce.reason ? String(payload.announce.reason) : null, "A sun marks a report before the open and a moon one after the close, where the vendor's earnings calendar states it."] },
+      ],
     };
-
-    bodyEl.replaceChildren();
-    const frag = document.createDocumentFragment();
-    for (const r of rows) if (r) frag.append(rowFor(r, ctx));
-    bodyEl.append(frag);
-    if (tablePanel) tablePanel.hidden = false;
-
-    const shown = isNum(payload.shown) ?? rows.length;
-    const inWindow = isNum(payload.inWindow);
-    const evM = isNum(payload.evMeasured);
-    const rvM = isNum(payload.rvMeasured);
-
-    if (capEl) {
-      const bits = [shown + " " + plural(shown, "name", "names") + ", nearest report first"];
-      if (inWindow !== null && inWindow > shown) {
-        bits.push("the " + shown + " nearest of " + inWindow + " inside the window");
-      }
-      if (evM !== null) bits.push(evM + " of " + shown + " with a priced move");
-      if (rvM !== null) bits.push(rvM + " of " + shown + " with realized volatility");
-      capEl.textContent = bits.join(" " + MID + " ") + ".";
-    }
-
-    if (tableNote) {
-      const parts = [];
-
-      if (rvM !== null) {
-        parts.push("RV is measured only for the enriched names, so " + (shown - rvM) +
-          " of " + shown + " rows carry an em dash there. That is coverage, not a reading: " +
-          "an empty RV cell means NOT MEASURED FOR THIS NAME, never zero volatility. " +
-          (rvM
-            ? "The " + rvM + " that " + plural(rvM, "does", "do") + " carry one " +
-              plural(rvM, "says", "say") + " so in its own title."
-            : "No row in this payload carries one."));
-      }
-
-      const clashes = rows.filter((r) => r && originClash(r)).length;
-      parts.push("Reports and Sessions are two different clocks in two different units. " +
-        "Reports is a date, and its title gives the CALENDAR days the earnings gate " +
-        "measured — that is what the chart above plots and what the gate window is quoted " +
-        "in. Sessions counts WEEKDAYS, and that is the horizon the priced move was scaled " +
-        "by. Last is the close of the " + (ctx.sessionDate || "last completed") +
-        " session, a third date again." +
-        (clashes
-          ? " On this payload they are also counted from two different ORIGINS, which is " +
-            "why " + clashes + " of these " + shown + " rows publish MORE sessions than " +
-            "calendar days — something no single span can do, since every weekday in a " +
-            "span is also a day in it. Those rows are marked in the Sessions column. " +
-            "Neither number is wrong on its own terms, but the difference between the two " +
-            "columns is not safe to read on them. The chart above is unaffected: it and " +
-            "the gate band both use the calendar count."
-          : ""));
-      if (ctx.domain) {
-        parts.push("The strip in the IV column is each name's implied-volatility path, " +
-          ctx.labels.join(" " + MID + " ") + ", oldest first, drawn on one scale shared by " +
-          "every row (" + pct(ctx.domain.rawLo, 1) + " to " + pct(ctx.domain.rawHi, 1) +
-          ") so two rows can be compared. A missing point is left blank and never drawn " +
-          "across. The payload states it is \"" +
-          String((payload.ivPath && payload.ivPath.sameAs) || "the same quantity the card draws") +
-          "\".");
-      }
-      parts.push("Whether a name reports before the open or after the close is withheld " +
-        "rather than half-filled — the reason is published in full below.");
-      tableNote.textContent = parts.join(" ");
-    }
   }
 
-  const BASIS_LABELS = {
-    purpose: "What this page is",
-    clocks: "Two clocks, and which quantity uses which",
-    gate: "The gate, and what \"gated\" means",
-    sessions: "How a session is counted",
-    priced: "The priced move",
-    vendorMove: "The vendor's own implied move",
-    announce: "The announce time, and why there is not one",
-    order: "The order",
-    coverage: "Realized volatility, and why that column is mostly empty",
-  };
-
-  const BASIS_GROUPS = [
-    { keys: ["purpose", "clocks"], open: true },
-    { keys: ["gate"], summary: "The gate, which is the reason this page exists" },
-    { keys: ["priced", "vendorMove", "sessions"], summary: "How each number is built" },
-    { keys: ["coverage", "announce", "order"],
-      summary: "What is counted, what is withheld, and in what order" },
-  ];
-
-  function basisItem(key, value) {
-    const text = String(value === null || value === undefined ? "" : value).trim();
-    if (!text) return null;
-    const box = el("div", "ev-b-item");
-    box.append(el("p", "ev-b-k", BASIS_LABELS[key] || key));
-    box.append(el("p", "ev-b-p", text));
-    return box;
+  function queueCx(payload) {
+    if (S.asked) return;
+    const hist = payload.history && typeof payload.history === "object" ? payload.history : null;
+    if (!hist) return;
+    S.asked = true;
+    const names = (payload.rows || []).map((r) => r.t).filter((t) => hist[t] && hist[t].status === "ok").slice(0, 40);
+    const one = async (t) => {
+      try {
+        const res = await fetch("/api/flows/card-x?t=" + encodeURIComponent(cardKey(t)), { credentials: "same-origin", headers: { Accept: "application/json" } });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const cx = await res.json();
+        if (!cx || cx.status === "pending") S.cx.set(t, { st: { state: "pending", reason: "This name's card extension has not been published yet." } });
+        else if (!cx.earnings) S.cx.set(t, { st: { state: "unavailable", reason: "This name's card carries no earnings history." } });
+        else if (cx.earnings.status === "ok") S.cx.set(t, { st: { state: "ok" }, earnings: cx.earnings });
+        else S.cx.set(t, { st: cx.earnings.status === "thin" ? { state: "quiet", reason: "Fewer reports than the statistic needs." } : blockState(cx.earnings, "earnings history"), earnings: cx.earnings });
+      } catch (e) {
+        S.cx.set(t, { st: { state: "unavailable", reason: "This name's card could not be loaded (" + (e && e.message ? e.message : "no message") + ")." } });
+      }
+    };
+    let pending = 0;
+    const lanes = [];
+    for (let k = 0; k < 4; k++) {
+      lanes.push((async () => {
+        while (names.length) {
+          await one(names.shift());
+          if (++pending % 4 === 0) paintEarnings(payload, false);
+        }
+      })());
+    }
+    Promise.all(lanes).then(() => { paintEarnings(payload, false); host.week.classList.add("is-still"); paintWeek(payload); });
   }
 
-  function withheldBlock(announce) {
-    if (!announce || typeof announce !== "object") return null;
-    const box = el("div", "ev-withheld");
-    box.append(el("p", "ev-withheld-tag",
-      "Withheld " + MID + " announce time " + MID + " " + String(announce.status || "unavailable")));
-    const reason = String(announce.reason === null || announce.reason === undefined
-      ? "" : announce.reason).trim();
-    if (reason) box.append(el("p", "ev-b-p", reason));
-    return box;
+  function paintEarnings(payload, animate) {
+    const rows = Array.isArray(payload.rows) ? payload.rows : [];
+    if (!rows.length) {
+      const universe = n(payload.universe), wd = n(payload.windowDays);
+      silence(host.earn, { state: "quiet", reason: "No name in the screened universe" + (universe === null ? "" : " of " + universe) + " reports inside the next " + (wd === null ? "window" : days(wd)) + ". That is a measured emptiness — the run read every screener row and found no dated report inside it — and not a missing publish." }, "Earnings", 240);
+      return;
+    }
+    const cal = calIndex(payload);
+    const hist = payload.history && typeof payload.history === "object" ? payload.history : null;
+    const data = rows.map((r) => {
+      const imp = impliedOf(r, cal.get(r.t));
+      const re = realizedOf(r.t, payload);
+      const med = re.earnings ? n(re.earnings.medianAbsMove) : null;
+      const hit = re.earnings && n(re.earnings.ls1dHit) !== null ? n(re.earnings.ls1dHit) : re.digest ? n(re.digest.hit) : null;
+      return { r, c: cal.get(r.t) || null, imp, re, med, hit };
+    });
+    const max = Math.max(0.02, ...data.flatMap((x) => [x.imp ? x.imp.v : 0, x.med || 0]));
+    const items = data.map((x, i) => {
+      const w = (v) => Math.max(1.5, (v / max) * 100).toFixed(1) + "%";
+      const when = x.c && x.c.when;
+      const reSt = x.med === null ? (x.re.st.state === "ok" ? { state: "unavailable", reason: "This name's earnings history carries no median move." } : x.re.st) : null;
+      return h("a", {
+        class: "fe-erow" + (i && data[i - 1].r.d === x.r.d ? " is-cont" : ""), href: tickerHref(x.r.t), "data-t": String(x.r.t || ""), "data-realized": reSt ? reSt.state : "ok",
+        title: String(x.r.t) + " " + MID + " reports " + (x.r.d || DASH) + " " + MID + " priced " + pricedText(x.r) + " " + MID + " IV " + pct(x.r.iv) +
+          (n(x.r.ivr) === null ? "" : ", rank " + Math.round(n(x.r.ivr) * 100)) + " " + MID + " " + stageOf(x.r.st).word,
+      },
+      h("span", { class: "fe-edate" }, h("b", null, x.r.d ? weekday(x.r.d) : DASH), h("small", null, F.day(x.r.d))),
+      h("span", { class: "fu-tk fe-etk" }, stageGlyph(x.r.st), h("b", null, String(x.r.t || DASH)),
+        when === "premarket" ? h("i", { class: "fe-when is-am", "aria-label": "Before the open" }) : when === "postmarket" ? UI.glyph("closed", "fe-when") : null),
+      h("span", { class: "fe-pair", ...HIDE },
+        h("i", { class: "is-imp", style: { width: x.imp ? w(x.imp.v) : "0%", "--i": String(i) } }),
+        x.med === null ? h("i", { class: "is-none" }) : h("i", { class: "is-real", style: { width: w(x.med), "--i": String(i) } })),
+      h("span", { class: "fu-v fu-strong" }, x.imp ? move(x.imp.v) : mark({ state: "unavailable" })),
+      x.med === null ? h("span", V, mark(reSt)) : h("span", V, move(x.med)),
+      h("span", { class: "fu-v fu-wide" }, x.hit === null ? DASH : Math.round(x.hit * 100) + "%"));
+    });
+    const box = withList(UI.list(items, { visible: 8, label: "Names reporting inside the window, nearest first" }));
+    const open = !!host.earn.querySelector('.ui-disclose[aria-expanded="true"]');
+    host.earn.classList.toggle("is-still", animate === false);
+    host.earn.replaceChildren(
+      h("div", { class: "fe-erow fu-head", ...HIDE }, h("span", null, "Day"), h("span", null, "Name"), h("span", null, "Implied vs typical"), h("span", V, "Implied"), h("span", V, "Typical"), h("span", { class: "fu-v fu-wide" }, "Hit")),
+      box,
+      UI.legend([["--accent", "", "Implied move"], ["--s-gray", "", "Median past move"]]));
+    if (open) box.querySelector(".ui-disclose").click();
+    setModuleState(host.earn, hist ? { state: "ok" } : { state: "quiet", reason: "Earnings: the past-report history is not on this payload yet, so the typical move is pending." }, "Earnings");
+    if (animate !== false) queueCx(payload);
   }
 
-  function renderBasis(payload) {
-    if (!basisHost) return;
-    basisHost.replaceChildren();
-    const notes = (payload && payload.notes && typeof payload.notes === "object")
-      ? payload.notes : null;
-    const announce = payload && payload.announce;
+  function earnInfo() {
+    const payload = S.payload || {};
+    const notes = payload.notes && typeof payload.notes === "object" ? payload.notes : {};
+    const rows = Array.isArray(payload.rows) ? payload.rows : [];
+    const shown = n(payload.shown) ?? rows.length, inWindow = n(payload.inWindow);
+    return {
+      title: "Earnings",
+      lead: "Every name reporting inside the window, nearest first. The blue bar is the move the option market prices for the report; the gray bar is the median absolute one-day move over the name's past reports. A blue bar longer than the gray one is a report priced richer than this name usually moves.",
+      facts: [
+        ["Names", count(shown) + (inWindow !== null && inWindow > shown ? " of " + count(inWindow) : "")],
+        ["Priced moves", n(payload.evMeasured) === null ? null : count(payload.evMeasured) + " of " + count(shown)],
+        ["Realized volatility", n(payload.rvMeasured) === null ? null : count(payload.rvMeasured) + " of " + count(shown)],
+        ["Hit", payload.historyRule ? "share of long one-day straddles that paid" : null],
+      ],
+      sections: [
+        { title: "The implied move", lines: ["The vendor's expected earnings move where its calendar states one, otherwise the vendor's implied move to its next expiry, which is a different horizon.", notes.vendorMove] },
+        { title: "The priced move", lines: [notes.priced, "A name with no sessions left prints 0s: a horizon of zero, not a zero move. One with no implied volatility is not measured, and one whose move was not published is not zero."] },
+        { title: "Past reports", lines: [payload.historyRule ? String(payload.historyRule) : "The past-report history is not on this payload yet."] },
+        { title: "Coverage", lines: [notes.coverage] },
+      ],
+    };
+  }
 
-    if (!notes) {
+  function paintMacro(payload) {
+    const st = blockState(payload.macro, "economic calendar");
+    if (st.state !== "ok") { silence(host.macro, st, "Macro", 200); return; }
+    const rows = (payload.macro.rows || []).filter(Boolean);
+    if (!rows.length) { silence(host.macro, { state: "quiet", reason: "No economic print is scheduled after the session's close in what the vendor returned." }, "Macro", 200); return; }
+    setModuleState(host.macro, { state: "ok" }, "Macro");
+    const items = rows.map((m) => {
+      const tag = TAGS[m.tag] || null;
+      return h("div", { class: "fe-mrow", role: "listitem", title: String(m.event || "") + (m.period ? " " + MID + " " + m.period : "") },
+        h("span", { class: "fe-edate" }, h("b", null, m.day ? weekday(m.day) : DASH), h("small", null, etTime(m.at) || F.day(m.day))),
+        h("span", { class: "fe-mname" }, h("i", { class: "fe-dot", style: { "--c": UI.cssVar(tag ? tag[1] : "--label-4") } }),
+          h("b", null, tag ? tag[0] : String(m.event || DASH).replace(/\s*\((MoM|YoY|QoQ)\)/, "")), tag ? h("small", null, String(m.event || "")) : null),
+        h("span", { class: "fu-v fu-strong" }, m.forecastRaw || DASH),
+        h("span", V, m.prevRaw || DASH));
+    });
+    host.macro.replaceChildren(
+      h("div", { class: "fe-mrow fu-head", ...HIDE }, h("span", null, "When"), h("span", null, "Print"), h("span", V, "Forecast"), h("span", V, "Prior")),
+      withList(UI.list(items, { visible: 7, label: "Economic prints after the close" })));
+  }
 
-      const p = el("p", "flows-empty fc-note",
-        "This payload carries no notes block, so how these numbers were built is not " +
-        "stated in the pipeline's own words. The readings above were still measured; " +
-        "it is the method behind them that is not on this payload.");
-      p.dataset.empty = "unavailable";
-      basisHost.append(p);
+  function macroInfo() {
+    const m = (S.payload || {}).macro || {};
+    return {
+      title: "Macro",
+      lead: "Economic prints scheduled after the session's close, with the consensus forecast and the prior reading. Times are Eastern.",
+      facts: [["Seen", n(m.seen) === null ? null : count(m.seen)], ["Already past", n(m.past) === null ? null : count(m.past)]],
+      notes: [m.rule ? String(m.rule) : null],
+    };
+  }
+
+  function paintFda(payload) {
+    const st = blockState(payload.fda, "FDA calendar");
+    if (st.state !== "ok") { silence(host.fda, st, "FDA", 200); return; }
+    const rows = (payload.fda.rows || []).filter((f) => f && f.tgt);
+    if (!rows.length) { silence(host.fda, { state: "quiet", reason: "No optionable name has an FDA target date inside the horizon." }, "FDA", 200); return; }
+    setModuleState(host.fda, { state: "ok" }, "FDA");
+    const start = ISO.test(String(payload.sessionDate || "")) ? payload.sessionDate : rows[0].tgt.from;
+    const horizon = n(payload.fda.horizonDays) || 120;
+    const end = addDays(start, horizon);
+    const at = (d) => Math.max(0, Math.min(1, (dayMs(d) - dayMs(start)) / (dayMs(end) - dayMs(start))));
+    const months = [];
+    for (let m = new Date(dayMs(start)); m <= new Date(dayMs(end)); m.setUTCMonth(m.getUTCMonth() + 1, 1)) {
+      const d = new Date(Date.UTC(m.getUTCFullYear(), m.getUTCMonth(), 1)).toISOString().slice(0, 10);
+      if (d > start) months.push(d);
     }
+    const sorted = rows.slice().sort((a, b) => String(a.tgt.from).localeCompare(String(b.tgt.from)));
+    const items = sorted.map((f) => {
+      const a = at(f.tgt.from), b = at(f.tgt.to || f.tgt.from);
+      const point = f.tgt.p === "day";
+      return h(f.carded ? "a" : "div", { class: "fe-frow", href: f.carded ? tickerHref(f.t) : null, role: f.carded ? null : "listitem",
+        title: String(f.t) + " " + MID + " " + String(f.cat || "") + " " + MID + " " + String(f.st || "") + " " + MID + " target " + String(f.tgt.raw || f.tgt.from) },
+      h("span", { class: "fu-tk is-2" }, h("b", null, String(f.t || DASH)), h("small", null, FDA_CAT(f.cat))),
+      h("span", { class: "fe-track", ...HIDE },
+        months.map((d) => h("i", { class: "fe-tick", style: { left: (at(d) * 100).toFixed(2) + "%" } })),
+        point ? h("i", { class: "fe-dia", style: { left: (a * 100).toFixed(2) + "%" } })
+          : h("i", { class: "fe-span", style: { left: (a * 100).toFixed(2) + "%", width: Math.max(1, (b - a) * 100).toFixed(2) + "%" } })),
+      h("span", V, point ? F.day(f.tgt.from) : windowLabel(f.tgt)));
+    });
+    host.fda.replaceChildren(
+      h("div", { class: "fe-frow fu-head", ...HIDE }, h("span", null, "Name"),
+        h("span", { class: "fe-axis" }, months.map((d) => h("span", { style: { left: (at(d) * 100).toFixed(2) + "%" } }, F.day(d).slice(0, 3)))), h("span", V, "Target")),
+      withList(UI.list(items, { visible: 6, label: "FDA target dates" })),
+      UI.legend([key(h("i", { class: "is-dia", style: { "--c": UI.cssVar("--lvl-pain") } }), "Dated"), key(h("i", { class: "fe-key-span" }), "Window")]));
+  }
 
-    const announceReason = announce && typeof announce === "object"
-      ? String(announce.reason || "").trim() : "";
-    const drawn = new Set();
-    if (notes && announceReason && String(notes.announce || "").trim() === announceReason) {
-      drawn.add("announce");
-    }
+  function windowLabel(tgt) {
+    const y = String(tgt.from || tgt.to || "").slice(0, 4);
+    const p = String(tgt.p || "");
+    if (p === "early" || p === "mid" || p === "late") return p.charAt(0).toUpperCase() + p.slice(1) + " " + y;
+    if (p === "month" && ISO.test(String(tgt.from))) return F.day(tgt.from).slice(0, 3) + " " + y;
+    if (p === "quarter" && ISO.test(String(tgt.from))) return "Q" + (Math.floor((+String(tgt.from).slice(5, 7) - 1) / 3) + 1) + " " + y;
+    if (p === "half" && ISO.test(String(tgt.from))) return "H" + (+String(tgt.from).slice(5, 7) <= 6 ? 1 : 2) + " " + y;
+    if (p === "year") return y;
+    return String(tgt.raw || y);
+  }
 
-    for (const group of BASIS_GROUPS) {
-      const items = [];
-      for (const key of group.keys) {
-        if (drawn.has(key)) continue;
-        if (!notes || !Object.prototype.hasOwnProperty.call(notes, key)) continue;
-        const node = basisItem(key, notes[key]);
-        drawn.add(key);
-        if (node) items.push(node);
-      }
-      if (group.keys.indexOf("announce") !== -1) {
-        const w = withheldBlock(announce);
-        if (w) items.push(w);
-      }
-      if (!items.length) continue;
-      if (group.open) {
-        const open = el("div", "ev-spine");
-        for (const node of items) open.append(node);
-        basisHost.append(open);
-      } else {
-        const box = el("details", "ev-how");
-        box.append(el("summary", "ev-how-s", group.summary));
-        for (const node of items) box.append(node);
-        basisHost.append(box);
-      }
-    }
+  function fdaInfo() {
+    const f = (S.payload || {}).fda || {};
+    return {
+      title: "FDA",
+      lead: "Optionable names with an FDA target inside the horizon. A diamond is a stated day; a bar is a window parsed from the sponsor's own wording, such as a quarter or \"late\" in the year.",
+      facts: [["In window", n(f.inWindow) === null ? null : count(f.inWindow)], ["Unparsed", n(f.unparsed) === null ? null : count(f.unparsed)], ["Outside", n(f.outside) === null ? null : count(f.outside)], ["No options", n(f.noOptions) === null ? null : count(f.noOptions)], ["Horizon", n(f.horizonDays) === null ? null : days(n(f.horizonDays))]],
+      notes: [f.rule ? String(f.rule) : null],
+    };
+  }
 
-    const extra = notes ? Object.keys(notes).filter((k) => !drawn.has(k)) : [];
-    if (extra.length) {
-      const box = el("details", "ev-how");
-      box.append(el("summary", "ev-how-s", "Also published in the notes"));
-      for (const key of extra) {
-        const node = basisItem(key, notes[key]);
-        if (node) box.append(node);
-      }
-      basisHost.append(box);
-    }
-    if (basisPanel) basisPanel.hidden = false;
+  function paintReact(payload) {
+    const cal = payload.earningsCalendar;
+    const r0 = cal && typeof cal === "object" ? cal.reaction : undefined;
+    const st = r0 === undefined ? blockState(undefined, "earnings reaction") : blockState(r0, "earnings reaction");
+    if (st.state !== "ok") { silence(host.react, st, "Reaction", 200); return; }
+    const rows = (Array.isArray(r0.rows) ? r0.rows : []).filter((x) => Array.isArray(x) && n(x[3]) !== null);
+    if (!rows.length) { silence(host.react, { state: "quiet", reason: "No reporter had reacted by the session, which is common the evening of a report." }, "Reaction", 200); return; }
+    setModuleState(host.react, { state: "ok" }, "Reaction");
+    const maxDev = Math.max(0.25, ...rows.map((x) => Math.abs(n(x[3]) - 1)));
+    const items = rows.map((x, i) => {
+      const ratio = n(x[3]), dev = ratio - 1, real = n(x[1]);
+      const w = (Math.min(1, Math.abs(dev) / maxDev) * 50).toFixed(2) + "%";
+      return h("a", { class: "fe-rrow", href: tickerHref(x[0]),
+        title: String(x[0]) + " " + MID + " moved " + F.pct(real, 1, true) + " against an implied " + move(n(x[2])) + " " + MID + " " + ratio.toFixed(2) + "× the priced move" },
+      h("span", { class: "fu-tk is-2" }, h("b", null, String(x[0])), h("small", { "data-tone": real === null ? null : real > 0 ? "up" : real < 0 ? "down" : null }, real === null ? DASH : F.pct(real, 1, true))),
+      h("span", { class: "fe-dv", ...HIDE },
+        h("i", { class: dev >= 0 ? "is-more" : "is-less", style: dev >= 0 ? { left: "50%", width: w, "--i": String(i) } : { right: "50%", width: w, "--i": String(i) } })),
+      h("span", { class: "fu-v fu-strong" }, ratio.toFixed(2) + "×"));
+    });
+    host.react.replaceChildren(
+      UI.metrics([
+        UI.metric("Realized ÷ implied", n(r0.medianRatio) === null ? DASH : n(r0.medianRatio).toFixed(2) + "×", { sub: "median of " + (n(r0.n) ?? rows.length) }),
+        UI.metric("Moved more", n(r0.beat) === null ? DASH : Math.round(n(r0.beat) * 100) + "%", { sub: "than implied" }),
+      ], { min: 120 }),
+      h("div", { class: "fe-rrow fu-head", ...HIDE }, h("span", null, "Name"), h("span", { class: "fe-dv-axis" }, h("span", null, "Less"), h("span", null, "Priced"), h("span", null, "More")), h("span", V, "Ratio")),
+      withList(UI.list(items, { visible: 6, label: "Last reporters, realized over implied" })),
+      UI.legend([["--g-long", "", "Moved more than priced"], ["--g-short", "", "Moved less"]]));
+  }
+
+  function reactInfo() {
+    const r0 = ((S.payload || {}).earningsCalendar || {}).reaction || {};
+    return {
+      title: "Reaction",
+      lead: "The last session's reporters: each bar is the realized one-day move over the move the options implied, less one. Above the line a name moved more than it was priced to; below, less. The median tells whether the market has been over- or under-pricing reports lately.",
+      notes: [r0.rule ? String(r0.rule) : null],
+    };
+  }
+
+  function paintChips(payload) {
+    const rows = Array.isArray(payload.rows) ? payload.rows : [];
+    const inWindow = n(payload.inWindow);
+    const gated = payload.byStage && typeof payload.byStage === "object" ? n(payload.byStage.gated) ?? 0 : null;
+    const macroSt = blockState(payload.macro, "economic calendar"), fdaSt = blockState(payload.fda, "FDA calendar");
+    const week = sessionDays(payload);
+    const macroN = macroSt.state === "ok" ? (payload.macro.rows || []).filter((m) => m && week.includes(m.day)).length : null;
+    const fdaN = fdaSt.state === "ok" ? n(payload.fda.inWindow) ?? (payload.fda.rows || []).length : null;
+    const r0 = payload.earningsCalendar && payload.earningsCalendar.reaction;
+    const ratio = r0 && r0.status === "ok" ? n(r0.medianRatio) : null;
+    const reactSt = blockState(r0, "earnings reaction");
+    host.chips.replaceChildren(UI.chips([
+      UI.gaugeChip({ icon: "cal", color: "--accent-ink", value: inWindow === null ? String(rows.length) : String(inWindow), label: "Reporting",
+        info: { title: "Reporting", lead: "Names reporting inside the window.", facts: [["Window", n(payload.windowDays) === null ? null : days(n(payload.windowDays))], ["Screened", n(payload.universe) === null ? null : count(payload.universe)], ["Undated", n(payload.undated) === null ? null : count(payload.undated)]] } }),
+      UI.gaugeChip({ icon: "shield", color: "--label-2", value: gated === null ? DASH : String(gated), label: "Gated",
+        info: { title: "Gated", lead: stageOf("gated").what } }),
+      UI.gaugeChip({ g: macroN === null ? muted(macroSt) : undefined, icon: "wave", color: "--s-purple", value: macroN === null ? DASH : String(macroN), label: "Macro",
+        info: { title: "Macro prints", state: macroSt.state === "ok" ? null : macroSt.state, lead: macroSt.state === "ok" ? "Economic prints in the next five sessions." : macroSt.reason } }),
+      UI.gaugeChip({ g: fdaN === null ? muted(fdaSt) : undefined, icon: "flask", color: "--lvl-pain", value: fdaN === null ? DASH : String(fdaN), label: "FDA",
+        info: { title: "FDA dates", state: fdaSt.state === "ok" ? null : fdaSt.state, lead: fdaSt.state === "ok" ? "Optionable names with an FDA target inside the horizon." : fdaSt.reason } }),
+      UI.gaugeChip({ g: ratio === null ? muted(reactSt) : undefined, ring: ratio === null ? null : Math.min(1, ratio / 2), color: "--g-long", value: ratio === null ? DASH : ratio.toFixed(2) + "×", label: "Reaction",
+        info: { title: "Reaction", state: ratio === null ? reactSt.state : null, lead: ratio === null ? reactSt.reason : "Median realized move over implied move for the last session's reporters. Under 1× the options over-priced the reports." } }),
+    ], "Calendar"));
   }
 
   function renderStatus(payload) {
     const rows = Array.isArray(payload.rows) ? payload.rows : [];
-    const shown = isNum(payload.shown) ?? rows.length;
-    const inWindow = isNum(payload.inWindow);
-    const universe = isNum(payload.universe);
-    const undated = isNum(payload.undated);
-    const windowDays = isNum(payload.windowDays);
-
-    const hasStages = !!(payload.byStage && typeof payload.byStage === "object");
-    const gated = hasStages ? (isNum(payload.byStage.gated) ?? 0) : null;
-    const cap = isNum(payload.cap);
-
+    const shown = n(payload.shown) ?? rows.length;
+    const inWindow = n(payload.inWindow), universe = n(payload.universe), undated = n(payload.undated), wd = n(payload.windowDays);
+    const gated = payload.byStage && typeof payload.byStage === "object" ? n(payload.byStage.gated) ?? 0 : null;
+    const cap = n(payload.cap);
     const parts = [];
-
-    parts.push(shown + (inWindow === null || inWindow === shown ? "" : " of " + inWindow) +
-      " " + plural(shown, "name", "names") + " reporting inside the " +
-      (windowDays === null ? "" : windowDays + "-day ") + "window" +
-      (universe === null ? "" : ", of " + universe + " screened"));
-
-    if (gated !== null) {
-      parts.push("the board was gated out of scoring " + (gated || "none") + " of them");
-    }
-    if (undated !== null && undated > 0) {
-      parts.push(undated + (universe === null ? "" : " of the " + universe) +
-        " carry no earnings date at all");
-    }
-    if (cap !== null && inWindow !== null && inWindow > shown) {
-      parts.push("the cap holds the list to " + cap);
-    }
-
+    parts.push(shown + (inWindow === null || inWindow === shown ? "" : " of " + inWindow) + " " + plural(shown, "name", "names") +
+      " reporting inside the " + (wd === null ? "" : wd + "-day ") + "window" + (universe === null ? "" : ", of " + universe + " screened"));
+    if (gated !== null) parts.push("the board was gated out of scoring " + (gated || "none") + " of them");
+    if (undated !== null && undated > 0) parts.push(undated + (universe === null ? "" : " of the " + universe) + " carry no earnings date at all");
+    if (cap !== null && inWindow !== null && inWindow > shown) parts.push("the cap holds the list to " + cap);
     const sd = payload.sessionDate, go = payload.gateOrigin;
-
-    parts.push("prices are the " + (sd ? sd : "last completed") + " session's closes" +
-      "; every day count is measured from " + (go ? go : "the run's own Eastern date") +
-      (go ? ", the run's own Eastern date and the origin the earnings gate used" : "") +
-      (staleDays === null ? "" : ", which was " + staleDays + " " +
-        plural(staleDays, "day", "days") + " ago — these counts are that run's, not today's"));
-
-    setStatus(parts.join(" " + MID + " ") + ".", rows.length ? null : "quiet");
-
+    parts.push("prices are the " + (sd || "last completed") + " session's closes; every day count is measured from " +
+      (go ? go + ", the run's own Eastern date and the origin the earnings gate used" : "the run's own Eastern date") +
+      (S.staleDays === null ? "" : ", which was " + S.staleDays + " " + plural(S.staleDays, "day", "days") + " ago — these counts are that run's, not today's"));
+    statusEl.textContent = parts.join(" " + MID + " ") + ".";
+    if (rows.length) delete statusEl.dataset.empty; else statusEl.dataset.empty = "quiet";
     const slot = document.querySelector('[data-rail-count="events"]');
     if (slot && inWindow !== null) { slot.textContent = String(inWindow); slot.hidden = false; }
+  }
 
-    if (footEl) {
-      const foot = [];
-      if (payload.generatedAt) {
+  function builtAt(payload) {
+    const t = Date.parse(String(payload.generatedAt || ""));
+    return Number.isFinite(t) ? new Date(t).toISOString().slice(0, 16).replace("T", " ") + " UTC" : payload.generatedAt ? String(payload.generatedAt) : null;
+  }
 
-        const t = Date.parse(payload.generatedAt);
-        foot.push("Built " + (Number.isFinite(t)
-          ? new Date(t).toISOString().slice(0, 16).replace("T", " ") + " UTC"
-          : String(payload.generatedAt)));
-      }
-      const v = isNum(payload.v);
-      if (v !== null) foot.push("payload v" + v);
-      foot.push("Zero vendor calls: every field here was already on the wire.");
-      footEl.textContent = foot.join(" " + MID + " ");
-    }
+  function paintMeta(payload) {
+    const bits = [];
+    if (ISO.test(String(payload.sessionDate || ""))) bits.push(h("span", null, F.day(payload.sessionDate)));
+    if (n(payload.windowDays) !== null) bits.push(h("span", null, n(payload.windowDays) + "-day window"));
+    const stale = h("button", { class: "fd-pill", type: "button", id: "evStale", hidden: S.staleText ? null : true,
+      "aria-haspopup": "dialog", "aria-controls": "fxPop",
+      "data-info": UI.info(() => ({ title: "Stale calendar", state: "stale", lead: S.staleText })) }, UI.glyph("clock"), S.staleDays === null ? "Behind" : S.staleDays + "d old");
+    host.meta.replaceChildren(...bits.flatMap((b, i) => (i ? [h("span", { ...HIDE }, MID), b] : [b])), stale);
+  }
+
+  function aboutInfo() {
+    const payload = S.payload || {};
+    const notes = payload.notes && typeof payload.notes === "object" ? payload.notes : null;
+    const src = document.getElementById("evAbout");
+    const known = ["gate", "clocks", "priced", "vendorMove", "coverage", "announce"];
+    return {
+      title: "Events",
+      facts: [["Built", builtAt(payload)], ["Payload", n(payload.v) === null ? null : "v" + payload.v], ["Vendor calls", "zero: every field here was already on the wire"]],
+      sections: S.fail ? [{ title: "Method", lines: [S.fail === "unreadable"
+        ? "The basis travels inside the same payload as the numbers, so it did not parse either. Nothing on this page has been explained by the pipeline."
+        : S.fail === "failed" ? "The basis travels inside the same payload as the numbers, so it could not be fetched either. Nothing on this page has been explained by the pipeline." : null] }]
+        : notes ? Object.keys(notes).filter((k) => !known.includes(k)).map((k) => ({ title: k.charAt(0).toUpperCase() + k.slice(1).replace(/([A-Z])/g, " $1").toLowerCase(), lines: [notes[k]] }))
+        : [{ title: "Method", lines: [S.payload && S.payload.status !== "pending" ? "This payload carries no notes block, so how these numbers were built is not stated in the pipeline's own words. The readings were still measured; it is the method behind them that is not on this payload." : null] }],
+      node: src ? h("div", { class: "fd-about-pop" }, [...src.children].map((x) => x.cloneNode(true))) : null,
+    };
+  }
+
+  function wireInfos() {
+    if (host.about && !host.about.firstChild) host.about.append(UI.infoButton("this page", aboutInfo));
+    setModuleInfo(host.week, "the week ahead", weekInfo);
+    setModuleInfo(host.earn, "earnings", earnInfo);
+    setModuleInfo(host.macro, "macro prints", macroInfo);
+    setModuleInfo(host.fda, "FDA dates", fdaInfo);
+    setModuleInfo(host.react, "the reaction", reactInfo);
   }
 
   function failEverywhere(kind, what) {
-    setStatus(what, kind);
-    windowMessage(what, kind);
-    if (windowNote) windowNote.textContent = "";
-    emptyRow(what, kind);
-    if (capEl) capEl.textContent = "No name could be listed.";
-    if (tableNote) tableNote.textContent = "";
-    if (basisHost) {
+    S.fail = kind;
+    statusEl.textContent = what;
+    statusEl.dataset.empty = kind;
+    const st = { state: kind === "unreadable" ? "withheld" : kind === "pending" ? "pending" : "unavailable", reason: what };
+    for (const [el, label, hh] of [[host.week, "Week ahead", 220], [host.earn, "Earnings", 240], [host.macro, "Macro", 200], [host.fda, "FDA", 200], [host.react, "Reaction", 200]]) silence(el, st, label, hh);
+    host.chips.replaceChildren(UI.chips(["Reporting", "Gated", "Macro", "FDA", "Reaction"].map((label) =>
+      UI.gaugeChip({ g: muted(st), value: DASH, label, info: { title: label, state: st.state, lead: what } })), "Calendar"));
+  }
 
-      const p = el("p", "flows-empty fc-note", kind === "unreadable"
-        ? "The basis travels inside the same payload as the numbers, so it did not parse " +
-          "either. Nothing on this page has been explained by the pipeline."
-        : "The basis travels inside the same payload as the numbers, so it could not be " +
-          "fetched either. Nothing on this page has been explained by the pipeline.");
-      p.dataset.empty = kind;
-      basisHost.replaceChildren(p);
-      if (basisPanel) basisPanel.hidden = false;
+  function stale(payload, updatedAt) {
+    if (updatedAt) {
+      const ageHours = (Date.now() - updatedAt) / 3600000;
+      if (ageHours > 30) {
+        S.staleDays = Math.round(ageHours / 24);
+        S.staleText = "This calendar was last written " + S.staleDays + " " + plural(S.staleDays, "day", "days") + " ago. The pipeline has not published since, so every day count is measured from that run's date and not from today — each name is nearer to its report than this page says.";
+        return;
+      }
     }
-    if (footEl) footEl.textContent = "";
+    const lag = Math.round((dayMs(payload.gateOrigin) - dayMs(payload.sessionDate)) / 864e5);
+    if (Number.isFinite(lag) && lag > 4) {
+      S.staleText = "The prices here are the " + payload.sessionDate + " session's closes, but the run that measured them is dated " + payload.gateOrigin + " — " + lag + " days later. The pipeline is running but its price data is not advancing; every day count is still measured from the run's own date.";
+    }
   }
 
-  let staleDays = null;
+  const trouble = (kind, message) => { const e = new Error(message); e.evKind = kind; return e; };
 
-  function renderStale(updatedAt) {
-    if (!updatedAt) return;
-    const ageHours = (Date.now() - updatedAt) / 3600000;
-    if (ageHours <= 30) return;
-    staleDays = Math.round(ageHours / 24);
-    if (!staleEl) return;
-    staleEl.hidden = false;
-
-    staleEl.textContent = "This calendar was last written " + staleDays + " " +
-      plural(staleDays, "day", "days") + " ago. The pipeline has not published since, " +
-      "so every day count below is measured from that run's date and not from today — " +
-      "each name is nearer to its report than this page says.";
-  }
-
-  function renderLag(payload) {
-    if (!staleEl || !staleEl.hidden) return;
-    const day = (v) => Date.parse(String(v || "") + "T00:00:00Z");
-    const lag = Math.round((day(payload.gateOrigin) - day(payload.sessionDate)) / 86400000);
-    if (!Number.isFinite(lag) || lag <= 4) return;
-    staleEl.hidden = false;
-    staleEl.textContent = "The prices here are the " + payload.sessionDate +
-      " session's closes, but the run that measured them is dated " + payload.gateOrigin +
-      " — " + lag + " days later. The pipeline is running but its price data is not " +
-      "advancing; every day count below is still measured from the run's own date.";
-  }
-
-  const trouble = (kind, message) => {
-    const e = new Error(message);
-    e.evKind = kind;
-    return e;
-  };
-
-  fetch("/api/flows/events", {
-    credentials: "same-origin",
-    headers: { Accept: "application/json" },
-  }).then((response) => {
+  wireInfos();
+  fetch("/api/flows/events", { credentials: "same-origin", headers: { Accept: "application/json" } }).then((response) => {
     if (response.status === 401) { location.replace("/flows/"); return null; }
     if (!response.ok) throw trouble("failed", "HTTP " + response.status);
     const updatedAt = Number(response.headers.get("X-Payload-Updated")) || null;
-    return response.json().then(
-      (payload) => {
-        if (payload && typeof payload === "object") payload.__updatedAt = updatedAt;
-        return payload;
-      },
-      (error) => {
-        throw trouble("unreadable", (error && error.message) || "the body did not parse");
-      });
+    return response.json().then((payload) => {
+      if (payload && typeof payload === "object") payload.__updatedAt = updatedAt;
+      return payload;
+    }, (error) => { throw trouble("unreadable", (error && error.message) || "the body did not parse"); });
   }).then((payload) => {
     if (!payload) return;
-
-    if (typeof payload !== "object") {
-      throw trouble("unreadable",
-        "the endpoint answered with a " + typeof payload + ", not a payload object");
-    }
-
+    if (typeof payload !== "object") throw trouble("unreadable", "the endpoint answered with a " + typeof payload + ", not a payload object");
+    S.payload = payload;
+    UI.freshness({ sessionDate: payload.sessionDate, generatedAt: payload.generatedAt, updatedAt: payload.__updatedAt, source: "events" });
     if (payload.status === "pending") {
-
-      const msg = "The pipeline has not published this key yet. This calendar is built by " +
-        "the weekday after-close run out of screener rows it already holds — it costs no " +
-        "vendor call — and it appears with the first run after this page shipped.";
-      setStatus(msg, "pending");
-      windowMessage(msg, "pending");
-      if (windowNote) windowNote.textContent = "";
-      emptyRow(msg, "pending");
-      if (capEl) capEl.textContent = "Nothing has been published under this key.";
-      if (tableNote) tableNote.textContent = "";
-
+      failEverywhere("pending", "The pipeline has not published this key yet. This calendar is built by the weekday after-close run out of screener rows it already holds — it costs no vendor call — and it appears with the first run after this page shipped.");
       return;
     }
-
-    renderStale(payload.__updatedAt);
-    renderLag(payload);
-
-    const rows = Array.isArray(payload.rows) ? payload.rows : [];
-    if (!rows.length) {
-
-      renderStatus(payload);
-      const universe = isNum(payload.universe);
-      const windowDays = isNum(payload.windowDays);
-      const msg = "No name in the screened universe" +
-        (universe === null ? "" : " of " + universe) + " reports inside the next " +
-        (windowDays === null ? "window" : days(windowDays)) + ". That is a measured " +
-        "emptiness — the run read every screener row and found no dated report inside " +
-        "it — and not a missing publish.";
-
-      windowMessage(msg, "quiet");
-      if (windowNote) windowNote.textContent = "";
-      emptyRow(msg, "quiet");
-      if (capEl) capEl.textContent = "No name reports inside the window.";
-      if (tableNote) tableNote.textContent = "";
-      renderBasis(payload);
-      return;
-    }
-
+    stale(payload, payload.__updatedAt);
     renderStatus(payload);
-    renderWindow(payload);
-    renderTable(payload);
-    renderBasis(payload);
+    paintMeta(payload);
+    paintChips(payload);
+    paintWeek(payload);
+    paintEarnings(payload, true);
+    paintMacro(payload);
+    paintFda(payload);
+    paintReact(payload);
+    wireInfos();
   }).catch((error) => {
-    const why = (error && error.message) ? error.message : "the request failed";
+    const why = error && error.message ? error.message : "the request failed";
     if (error && error.evKind === "unreadable") {
-
-      failEverywhere("unreadable",
-        "A calendar is published under this key, but it does not parse (" + why + "). " +
-        "Reloading reads the same bytes back — only the next weekday after-close run " +
-        "replaces them.");
+      failEverywhere("unreadable", "A calendar is published under this key, but it does not parse (" + why + "). Reloading reads the same bytes back — only the next weekday after-close run replaces them.");
     } else {
-      failEverywhere("failed",
-        "The calendar could not be fetched (" + why + "). Refresh to try again.");
+      failEverywhere("failed", "The calendar could not be fetched (" + why + "). Refresh to try again.");
     }
-  });
-
-  let resizeTimer = 0;
-  window.addEventListener("resize", () => {
-    if (!drawn) return;
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => {
-      if (drawn && Math.abs(chartWidth() - drawnW) > 2) renderWindow(drawn);
-    }, 150);
   });
 })();

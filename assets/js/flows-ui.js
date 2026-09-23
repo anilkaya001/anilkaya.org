@@ -562,6 +562,8 @@
       trigger.setAttribute("aria-expanded", "true");
     }
     fillPop(d);
+    const at = trigger ? trigger.getBoundingClientRect() : null;
+    pop.dataset.span = at && at.left + at.width / 2 < window.innerWidth / 2 ? "right" : "left";
     if (!popOpen()) { try { pop.showPopover(trigger ? { source: trigger } : undefined); } catch { return; } }
     pop.scrollTop = 0;
     try { pop.focus({ preventScroll: true }); } catch { pop.focus(); }
@@ -661,7 +663,7 @@
   function ring(v01, o = {}) {
     const size = o.size || 20;
     const stroke = o.stroke || 3;
-    const n = s("svg", { width: size, height: size, viewBox: "0 0 26 26", class: "ui-gchip-g", "aria-hidden": "true" });
+    const n = s("svg", { width: size, height: size, viewBox: "0 0 26 26", class: "ui-gchip-g", "aria-hidden": "true", style: { "--ring-c": paint(o.color || "--label-1") } });
     s("circle", { cx: 13, cy: 13, r: 10.5, fill: "none", class: "ui-ring-track", "stroke-width": stroke }, n);
     if (num(v01) !== null) {
       s("circle", {
@@ -960,6 +962,10 @@
 
   function scrub(host, svg, o) {
     const xs = o.xs;
+    if (host._scrubOff) host._scrubOff.abort();
+    const off = new AbortController();
+    host._scrubOff = off;
+    const on = { signal: off.signal };
     const readout = h("div", { class: "ui-readout", "aria-hidden": "true" });
     host.append(readout);
     const xh = s("line", { class: "xh", y1: o.top, y2: o.bottom, x1: -10, x2: -10, opacity: 0 }, svg);
@@ -995,18 +1001,18 @@
     host.addEventListener("pointermove", (e) => {
       px = e.clientX;
       if (!raf) raf = requestAnimationFrame(() => { raf = 0; show(nearest(at(px))); });
-    });
-    host.addEventListener("pointerdown", (e) => show(nearest(at(e.clientX))));
-    host.addEventListener("pointerleave", (e) => { if (e.pointerType !== "touch") hide(); });
-    host.addEventListener("pointercancel", hide);
-    host.addEventListener("blur", hide);
+    }, on);
+    host.addEventListener("pointerdown", (e) => show(nearest(at(e.clientX))), on);
+    host.addEventListener("pointerleave", (e) => { if (e.pointerType !== "touch") hide(); }, on);
+    host.addEventListener("pointercancel", hide, on);
+    host.addEventListener("blur", hide, on);
     host.addEventListener("keydown", (e) => {
       const k = e.key;
       if (k === "ArrowRight" || k === "ArrowLeft") { e.preventDefault(); show(clamp((idx < 0 ? xs.length - 1 : idx) + (k === "ArrowRight" ? 1 : -1), 0, xs.length - 1), true); }
       else if (k === "Home") { e.preventDefault(); show(0, true); }
       else if (k === "End") { e.preventDefault(); show(xs.length - 1, true); }
       else if (k === "Escape") hide();
-    });
+    }, on);
     return { show, hide };
   }
 
@@ -1135,10 +1141,14 @@
         : isDate ? dateTicks(X, xAt, 5, left, w - right, phone)
         : isNumX ? niceTicks(xMin, xMax, phone ? 4 : 6).map((v) => ({ x: xs(v), text: xf(v) }))
           : X.map((v, i) => ({ i, text: xf(v) })).filter((_, i) => i % Math.max(1, Math.ceil(N / (phone ? 4 : 7))) === 0);
+      let lastX = -Infinity;
       for (const t of ticks) {
         const x = t.x ?? xAt(t.i);
-        if (x < left + 10 || x > w - right - 6) continue;
-        s("text", { x, y: H - 6, text: t.text, "text-anchor": "middle" }, svg);
+        if (x < left + 10 || x > w - right + 0.5) continue;
+        const edge = x > w - right - 6;
+        if (edge && x - lastX < 36) continue;
+        s("text", { x: edge ? w - right : x, y: H - 6, text: t.text, "text-anchor": edge ? "end" : "middle" }, svg);
+        lastX = x;
       }
     }
     for (const m of o.markers || []) {
@@ -1387,8 +1397,11 @@
       }
       if (num(o.highlightRow) !== null) s("circle", { cx: left - 3, cy: top + o.highlightRow * ch + ch / 2, r: 2.5, fill: paint("--label-1") }, svg);
       const everyX = cw < 40 ? 2 : 1;
-      cols.forEach((c, i) => { if (i % everyX === 0) s("text", { x: left + i * cw + cw / 2, y: H - 6, text: cf(c), "text-anchor": "middle" }, svg); });
-      const hl = s("rect", { class: "cell-hl", x: -99, y: -99, width: Math.max(0, cw - 1), height: ch - 1, rx: 3 }, svg);
+      const hc = num(o.highlightCol);
+      if (hc !== null && hc >= 0 && hc < C) s("rect", { x: left + hc * cw + 0.5, y: top - 0.5, width: Math.max(0, cw - 1), height: R * ch + 1, rx: 3.5, fill: "none", stroke: paint("--accent"), "stroke-width": 1.25 }, svg);
+      const phase = hc !== null && hc >= 0 && hc < C ? hc % everyX : 0;
+      cols.forEach((c, i) => { if (i % everyX === phase) s("text", { x: left + i * cw + cw / 2, y: H - 6, text: cf(c), "text-anchor": "middle", class: i === hc ? "tx-1 tx-b" : null }, svg); });
+      const hl = s("rect", { class: "cell-hl", x: 0, y: 0, width: Math.max(0, cw - 1), height: ch - 1, rx: 3, visibility: "hidden" }, svg);
       const readout = h("div", { class: "ui-readout", "aria-hidden": "true" });
       el.append(readout);
       el.tabIndex = 0;
@@ -1403,6 +1416,7 @@
         const xx = left + c * cw, yy = top + r * ch;
         hl.setAttribute("x", xx + 0.5);
         hl.setAttribute("y", yy + 0.5);
+        hl.setAttribute("visibility", "visible");
         readout.replaceChildren(part(cf(cols[c]), "k"), h("b", null, rf(rows[r])), v === null ? part("no reading", "k") : part(fmt(v), null, v > 0 ? pal.posT : v < 0 ? pal.negT : null));
         readout.classList.add("is-on");
         const rw = readout.offsetWidth;
@@ -1411,7 +1425,7 @@
         if (speak) announce(spoken(readout));
       };
       let raf = 0, pt = null;
-      const hide = () => { if (raf) { cancelAnimationFrame(raf); raf = 0; } readout.classList.remove("is-on"); hl.setAttribute("x", -99); };
+      const hide = () => { if (raf) { cancelAnimationFrame(raf); raf = 0; } readout.classList.remove("is-on"); hl.setAttribute("visibility", "hidden"); };
       el.addEventListener("pointermove", (e) => {
         pt = [e.clientX, e.clientY];
         if (raf) return;

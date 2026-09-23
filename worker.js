@@ -7,7 +7,7 @@ import {
 import { FLOWS_PAGES, modelName, neuronProvenance } from "./shared/flows-pages.js";
 import * as FLOWS_ASK from "./shared/flows-ask.js";
 import * as FLOWS_NEURON from "./shared/flows-neuron.js";
-import { chainRowsByExpiry, runCardEngine, engineState, engineStale, QUANT_CARD_VERSION } from "./shared/flows-quant-card.js";
+import { bookRows, runCardEngine, engineState, engineStale, QUANT_CARD_VERSION } from "./shared/flows-quant-card.js";
 import { aiChain, aiCallSignature, askModels, emptyNote, fallbackNote, intradayFloorMs, repliedGuard, retryableGuard, spendShape } from "./shared/flows-ai.js";
 import { COURSE_STAGE_POINTS } from "./shared/course-points.js";
 import { COURSE_BY_ID, COURSE_BY_SLUG, COURSE_TOPICS, SITE_ORIGIN } from "./shared/course-seo.js";
@@ -1672,13 +1672,14 @@ async function buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit }) 
     ...(page > 1 ? { page } : {}),
   });
 
-  const [firstPage, candles, state, info] = await Promise.all([
+  const [firstPage, candles, state, info, cardRead] = await Promise.all([
     chainPage(1),
     uwFetch(env, `/api/stock/${t}/ohlc/1d`, { timeframe: "5D" }),
 
     uwFetch(env, `/api/stock/${t}/stock-state`, {}).catch(() => null),
 
     cachedTickerInfo(env, ctx, ticker),
+    readCardWithEngine(env, ticker).catch(() => null),
   ]);
 
   const unwrap = (r) => (Array.isArray(r) ? r : (r && r.data) || []);
@@ -1737,7 +1738,22 @@ async function buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit }) 
     earnings: info
       ? { date: earnDate, announceTime: info.announceTime, issueType: info.issueType }
       : null,
+    engine: deskEngine(cardRead && cardRead.card, Date.now()),
     generatedAt: new Date().toISOString(),
+  };
+}
+
+function deskEngine(card, nowMs) {
+  const block = card && card.engine && typeof card.engine === "object" && Array.isArray(card.engine.facts) ? card.engine : null;
+  if (!block) return { status: "unavailable", reason: card ? "this name's card carries no engine block" : "no card is published for this name" };
+  return {
+    status: "ok", v: QUANT_CARD_VERSION, cardSession: card.sessionDate || null, asOf: block.asOf || null,
+    rate: block.rate || null, pLaw: block.pLaw || null, event: block.event || null, facts: block.facts,
+    levels: block.levels || null, state: block.state || null,
+    stale: engineStale({
+      cardSession: card.sessionDate, blockAsOf: block.asOf,
+      expectedSession: card.sessionDate ? FLOWS_ASK.briefAge({ sessionDate: card.sessionDate }, new Date(nowMs)).expected : null,
+    }),
   };
 }
 
@@ -1864,10 +1880,10 @@ async function buildStrategyContext(env, ctx, ticker) {
   };
 }
 
-function strategyEngine({ ticker, expiry, rawRows, spot, card, nowMs }) {
+function strategyEngine({ ticker, expiry, calls, puts, spot, card, nowMs }) {
   const block = card && card.engine && typeof card.engine === "object" && Array.isArray(card.engine.facts) ? card.engine : null;
-  const chain = chainRowsByExpiry(rawRows, { ticker });
-  const rows = chain.expiries.filter((e) => e.expiry === expiry);
+  const book = bookRows(calls, puts, ticker);
+  const rows = book.length ? [{ expiry, rows: book }] : [];
   if (!rows.length) return { status: "unavailable", reason: "no contract on this expiry parsed as the ticker's own" };
   if (!(spot > 0)) return { status: "unavailable", reason: "no live spot to price against" };
   const state = block && block.state ? block.state
@@ -1877,7 +1893,7 @@ function strategyEngine({ ticker, expiry, rawRows, spot, card, nowMs }) {
     rate: block && block.rate ? block.rate : null,
     facts: block ? block.facts : [], state, pLaw: block ? block.pLaw : null,
     levels: block ? block.levels : null, event: block ? block.event : null,
-    atr: block ? block.atr : null,
+    atr: block ? block.atr : null, fits: true,
     stale: engineStale({
       cardSession: card ? card.sessionDate : null, blockAsOf: block ? block.asOf : null,
       expectedSession: card && card.sessionDate ? FLOWS_ASK.briefAge({ sessionDate: card.sessionDate }, new Date(nowMs)).expected : null,
@@ -1969,7 +1985,7 @@ async function buildStrategyExpiry(env, ticker, expiry, { engine = false } = {})
     const card = cardRead && cardRead.card ? cardRead.card : null;
     const spot = spotLive !== null && spotLive > 0 ? spotLive : card && card.engine && numOrNull(card.engine.spot);
     try {
-      engineBlock = strategyEngine({ ticker, expiry, rawRows: calls.rows.concat(puts.rows), spot, card, nowMs: Date.now() });
+      engineBlock = strategyEngine({ ticker, expiry, calls: callRows, puts: putRows, spot, card, nowMs: Date.now() });
       engineBlock.spotSource = spotLive !== null && spotLive > 0 ? "stock-state" : spot ? "card" : null;
     } catch (error) {
       engineBlock = { status: "unavailable", reason: "the engine failed on this expiry: " + (error instanceof Error ? error.message : String(error)) };
@@ -2878,7 +2894,7 @@ async function route(request, env, url, ctx) {
 
     const validKey = card !== null
       ? FLOWS_TICKER_RE.test(card)
-      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^flowalerts$|^pulse$|^political$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^sector:premium$|^news$|^brief$|^meta$|^universe$|^regime$/.test(key);
+      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^flowalerts$|^pulse$|^political$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^sector:premium$|^news$|^brief$|^meta$|^universe$|^regime$|^ideas$/.test(key);
     if (!validKey) {
       throw new HttpError(400, "invalid_key", "Unknown payload key");
     }
@@ -3068,9 +3084,9 @@ async function route(request, env, url, ctx) {
       return passthrough(stored);
     }
 
-    if (path === "/api/flows/universe" || path === "/api/flows/regime") {
+    if (path === "/api/flows/universe" || path === "/api/flows/regime" || path === "/api/flows/ideas") {
 
-      const key = path.endsWith("/universe") ? "universe" : "regime";
+      const key = path.slice("/api/flows/".length);
       const stored = await readFlowsPayload(env, key);
       if (stored === null) return json({ status: "pending" });
       return passthrough(stored);

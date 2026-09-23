@@ -775,31 +775,56 @@ const gateDteFrom = (origin) => (date) =>
   eq(nd.sdte, null, "and so is its session horizon — both are null together, always");
 }
 
-{
+const HTML = eventsPage({ username: "test" }).replace(/<script[^>]*><\/script>/g, "");
+const SHEETS = ["assets/css/base.css", "assets/css/flows.css", "assets/css/flows-feeds.css"];
 
-  const HTML = eventsPage({ username: "test" }).replace(/<script[^>]*><\/script>/g, "");
+async function openEvents(browser, payload, opts = {}) {
+  const page = await browser.newPage({ viewport: { width: opts.width || 1280, height: 900 } });
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.route("**/*", (route) => route.fulfill({ contentType: "text/html", body: HTML }));
+  await page.addInitScript(([pl, mode, updatedAt]) => {
+    const answer = (o) => ({ ...o, clone: () => ({ text: () => Promise.resolve("") }) });
+    window.fetch = (url) => {
+      if (String(url).indexOf("/api/flows/events") < 0) {
+        return Promise.resolve(answer({ ok: true, status: 200, headers: { get: () => null }, json: () => Promise.resolve({ status: "pending" }) }));
+      }
+      if (mode === "http") {
+        return Promise.resolve(answer({ ok: false, status: 503, headers: { get: () => null }, json: () => Promise.resolve({}) }));
+      }
+      return Promise.resolve(answer({
+        ok: true, status: 200,
+        headers: { get: () => String(updatedAt) },
+        json: () => (mode === "parse"
+          ? Promise.reject(new SyntaxError("Unexpected end of JSON input"))
+          : Promise.resolve(JSON.parse(JSON.stringify(pl)))),
+      }));
+    };
+  }, [payload, opts.mode || "", opts.updatedAt || Date.now()]);
+  await page.goto("https://x.test/flows/events/", { waitUntil: "domcontentloaded" });
+  if (opts.css) for (const sheet of SHEETS) await page.addStyleTag({ path: path.join(ROOT, sheet) });
+  await page.addScriptTag({ path: path.join(ROOT, "assets/js/flows-ui.js") });
+  await page.addScriptTag({ path: path.join(ROOT, "assets/js/flows-events.js") });
+  await page.waitForFunction(() => !/^Loading/.test(document.getElementById("evStatus").textContent), null, { timeout: 15000 });
+  return { page, errors };
+}
+
+const disclose = (page, selector) => page.evaluate(async (sel) => {
+  const b = document.querySelector(sel);
+  if (!b) return null;
+  b.click();
+  await new Promise((r) => setTimeout(r, 30));
+  const pop = document.getElementById("fxPop");
+  const text = pop ? pop.textContent : null;
+  window.FlowsUI.closeInfo();
+  return text;
+}, selector);
+
+{
   const browser = await chromium.launch();
   try {
     const render = async (payload) => {
-      const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-      const errors = [];
-      page.on("pageerror", (e) => errors.push(e.message));
-      await page.route("**/*", (route) =>
-        route.fulfill({ contentType: "text/html", body: HTML }));
-      await page.addInitScript((pl) => {
-        window.fetch = () => Promise.resolve({
-          ok: true, status: 200,
-
-          headers: { get: () => String(Date.now()) },
-          json: () => Promise.resolve(JSON.parse(JSON.stringify(pl))),
-        });
-      }, payload);
-      await page.goto("https://x.test/flows/events/", { waitUntil: "domcontentloaded" });
-      await page.addScriptTag({ path: path.join(ROOT, "assets/js/flows-events.js") });
-
-      await page.waitForFunction(
-        () => !/^Loading/.test(document.getElementById("evStatus").textContent),
-        null, { timeout: 15000 });
+      const { page, errors } = await openEvents(browser, payload);
       const read = await page.evaluate(() => {
         const slot = document.querySelector('[data-rail-count="events"]');
         return {
@@ -807,7 +832,8 @@ const gateDteFrom = (origin) => (date) =>
           text: slot ? slot.textContent.trim() : null,
           hidden: slot ? slot.hidden : null,
           status: document.getElementById("evStatus").textContent,
-          rows: document.querySelectorAll("#evBody tr").length,
+          rows: document.querySelectorAll("#evEarn .fe-erow:not(.fu-head)").length,
+          quiet: !!document.querySelector('#evEarn .ui-silent[data-state="quiet"]'),
         };
       });
       await page.close();
@@ -826,10 +852,10 @@ const gateDteFrom = (origin) => (date) =>
     deep(cap.errors, [], `the calendar renders without throwing (${cap.errors[0] || "clean"})`);
 
     ok(cap.present, "the events page emits the badge slot the renderer queries");
-    eq(cap.rows, 2, "the table draws the two rows the cap left it");
+    eq(cap.rows, 2, "the earnings list draws the two rows the cap left it");
     eq(cap.text, "4",
        "and the badge reads 4 — the names reporting inside the window, which is the " +
-       "population the page was asked about and not the length of its own table");
+       "population the page was asked about and not the length of its own list");
     ok(cap.text !== String(capped.shown),
        `and never ${capped.shown}, the post-cap count it used to publish: a badge that ` +
        `means "as many as we chose to draw" is the truncation the cap already performed, ` +
@@ -837,7 +863,7 @@ const gateDteFrom = (origin) => (date) =>
     eq(cap.hidden, false, "and it is revealed, because a population did arrive");
 
     ok(/2 of 4 names reporting inside the/.test(cap.status),
-       `the sentence beside it names the same four (${cap.status.slice(0, 60)}…)`);
+       `the status sentence beside it names the same four (${cap.status.slice(0, 60)}…)`);
     ok(/the cap holds the list to 2/.test(cap.status),
        "and says out loud that the two on the page are a choice this page made");
 
@@ -851,7 +877,8 @@ const gateDteFrom = (origin) => (date) =>
     const quiet = buildEvents([], { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE });
     eq(quiet.inWindow, 0, "an empty universe measures a population of zero");
     const none = await render(quiet);
-    eq(none.rows, 1, "the table says so in a row of its own rather than going blank");
+    eq(none.rows, 0, "the earnings list draws no row");
+    ok(none.quiet, "and the module says so with the quiet mark rather than going blank");
     eq(none.text, "0",
        "and the badge prints the zero — 'no name reports this week' is a reading, and " +
        "withholding it is indistinguishable from a calendar that never published");
@@ -862,7 +889,6 @@ const gateDteFrom = (origin) => (date) =>
 }
 
 {
-  const HTML = eventsPage({ username: "test" }).replace(/<script[^>]*><\/script>/g, "");
   const BUILT_AT = "2026-09-05T01:28:48.123Z";
 
   const STAGES = {
@@ -874,9 +900,7 @@ const gateDteFrom = (origin) => (date) =>
     nameAt("SHORT", plusDays(GATE_ORIGIN, 14)),
     nameAt("GATE", plusDays(GATE_ORIGIN, 3)),
     nameAt("OPEN", plusDays(GATE_ORIGIN, 17)),
-
     nameAt("ZERO", plusDays(GATE_ORIGIN, 0)),
-
     nameAt("NOIV", plusDays(GATE_ORIGIN, 10), { iv30: null }),
     nameAt("NOEV", plusDays(GATE_ORIGIN, 12)),
   ], {
@@ -890,98 +914,47 @@ const gateDteFrom = (origin) => (date) =>
   eq(byT("ZERO").ev, null, "and so no priced move — a horizon of nothing, not a zero move");
   eq(byT("NOIV").iv, null, "a second name carries no 30-day implied volatility");
   eq(byT("NOIV").ev, null, "and so no priced move either — a different absence, same blank");
-
   ok(byT("NOEV").ev !== null && byT("NOEV").iv !== null && byT("NOEV").sdte > 0,
      "the third row publishes both inputs and a priced move before the mutation");
   byT("NOEV").ev = null;
 
   const browser = await chromium.launch();
   try {
-
     const render = async (payload, opts = {}) => {
-      const page = await browser.newPage({
-        viewport: { width: opts.width || 1280, height: 900 },
-      });
-      const errors = [];
-      page.on("pageerror", (e) => errors.push(e.message));
-      await page.route("**/*", (route) =>
-        route.fulfill({ contentType: "text/html", body: HTML }));
-      await page.addInitScript(([pl, mode, updatedAt]) => {
-        window.fetch = () => {
-          if (mode === "http") {
-            return Promise.resolve({
-              ok: false, status: 503,
-              headers: { get: () => null },
-              json: () => Promise.resolve({}),
-            });
-          }
-          return Promise.resolve({
-            ok: true, status: 200,
-            headers: { get: () => String(updatedAt) },
-            json: () => (mode === "parse"
-              ? Promise.reject(new SyntaxError("Unexpected end of JSON input"))
-              : Promise.resolve(JSON.parse(JSON.stringify(pl)))),
-          });
-        };
-      }, [payload, opts.mode || "", opts.updatedAt || Date.now()]);
-      await page.goto("https://x.test/flows/events/", { waitUntil: "domcontentloaded" });
-
-      if (opts.css) {
-        for (const sheet of ["assets/css/base.css", "assets/css/flows.css"]) {
-          await page.addStyleTag({ path: path.join(ROOT, sheet) });
-        }
-      }
-      await page.addScriptTag({ path: path.join(ROOT, "assets/js/flows-events.js") });
-      await page.waitForFunction(
-        () => !/^Loading/.test(document.getElementById("evStatus").textContent),
-        null, { timeout: 15000 });
+      const { page, errors } = await openEvents(browser, payload, opts);
       const read = await page.evaluate(() => {
-        const mark = (n) => (n ? { text: n.textContent.trim(), kind: n.dataset.empty || null } : null);
-
-        const drawn = (n) => {
-          if (!n) return null;
-          const cs = getComputedStyle(n), before = getComputedStyle(n, "::before");
-          return {
-            style: cs.borderLeftStyle, width: cs.borderLeftWidth,
-            glyph: before.content, colour: cs.borderLeftColor,
+        const rows = {};
+        for (const r of document.querySelectorAll("#evEarn .fe-erow:not(.fu-head)")) {
+          const use = r.querySelector(".fe-etk use");
+          rows[r.dataset.t] = {
+            title: r.getAttribute("title") || "",
+            glyph: use ? use.getAttribute("href") : null,
+            glyphCls: use ? use.parentNode.getAttribute("class") : null,
+            realized: r.dataset.realized,
+            realizedGlyph: (r.querySelector(".ui-dash .ui-state") || {}).dataset?.state || null,
           };
-        };
-        const svg = document.querySelector("#evWindow svg.ew");
-        const priced = {};
-        for (const tr of document.querySelectorAll("#evBody tr")) {
-          const th = tr.querySelector("th"), td = tr.querySelector("td.ev-priced");
-          if (th && td) priced[th.textContent.trim()] = { text: td.textContent.trim(), cls: td.className };
         }
-        const marks = {};
-        for (const m of document.querySelectorAll("path.ew-m")) {
-          const c = m.getAttribute("class");
-          marks[/is-long/.test(c) ? "long" : /is-short/.test(c) ? "short" : "board"] =
-            m.getAttribute("d");
-        }
+        const legend = [...document.querySelectorAll("#evWeek .fe-legend .ui-key b")].map((b) => Number(b.textContent));
+        const weekChips = document.querySelectorAll("#evWeek .fe-chip").length;
+        const weekBars = [...document.querySelectorAll("#evWeek .fe-chip-bar")].map((b) => b.style.width);
+        const earnCard = document.getElementById("evEarnCard");
+        const silentEarn = document.querySelector("#evEarn .ui-silent");
+        const week = document.querySelector("#evWeek .fe-week");
         const stale = document.getElementById("evStale");
         return {
-          status: mark(document.getElementById("evStatus")),
-          window: mark(document.querySelector("#evWindow p.flows-empty")),
-          body: mark(document.querySelector("#evBody td.flows-empty")),
-
-          basis: mark(document.querySelector("#evBasis > p")),
-          statusDrawn: drawn(document.getElementById("evStatus")),
-          windowDrawn: drawn(document.querySelector("#evWindow p.flows-empty")),
-          basisHidden: document.getElementById("evBasisPanel").hidden,
-          stale: { hidden: stale.hidden, text: stale.textContent },
-          foot: document.getElementById("evFoot").textContent,
-          hostW: document.getElementById("evWindow").clientWidth,
-
-          hostBox: document.getElementById("evWindow").getBoundingClientRect().width,
-          vb: svg ? svg.viewBox.baseVal.width : null,
-
-          rectW: svg ? svg.getBoundingClientRect().width : null,
-          widthAttr: svg ? svg.getAttribute("width") : null,
-          lanes: [...document.querySelectorAll("text.ew-lane")].map((t) => t.textContent),
-          rows: document.querySelectorAll("#evBody tr").length,
-          priced, marks,
+          status: { text: document.getElementById("evStatus").textContent.trim(), kind: document.getElementById("evStatus").dataset.empty || null },
+          earnState: earnCard.dataset.state || null,
+          silentGlyph: silentEarn ? silentEarn.querySelector("use").getAttribute("href") : null,
+          modules: [...document.querySelectorAll(".fd-mod")].map((m) => m.dataset.state || null),
+          rows, legend, weekChips, weekBars,
+          weekOver: week ? week.scrollWidth - week.clientWidth : null,
+          pageOver: document.documentElement.scrollWidth - window.innerWidth,
+          stale: stale ? { hidden: stale.hidden } : null,
         };
       });
+      read.about = await disclose(page, "#evAboutSlot .ui-info");
+      read.stalePop = read.stale && !read.stale.hidden ? await disclose(page, "#evStale") : null;
+      read.why = await disclose(page, "#evEarn .ui-silent button");
       await page.close();
       return { ...read, errors };
     };
@@ -989,74 +962,58 @@ const gateDteFrom = (origin) => (date) =>
     for (const width of [2560, 1440, 390, 320]) {
       const r = await render(CAL, { width, css: true });
       deep(r.errors, [], `[${width}] the calendar renders without throwing`);
-      eq(r.vb, r.rectW,
-         `[${width}] one viewBox unit is one CSS pixel: viewBox ${r.vb} units drawn in ` +
-         `${r.rectW}px. A stretched viewBox scales every 9.5px label with it, and the ` +
-         `chart goes on looking exactly like a chart`);
-      ok(r.vb <= r.hostBox && r.hostBox - r.vb < 1,
-         `[${width}] and the drawing fills its host without exceeding it: ${r.vb} units ` +
-         `in a ${r.hostBox}px box. A drawing WIDER than its box is squeezed back by ` +
-         `max-width; one NARROWER by a pixel or more is a clamp that binds. Both are ` +
-         `the wrong drawing, in opposite directions`);
-      ok(r.widthAttr !== "100%",
-         `[${width}] and the width is a pixel count (${r.widthAttr}), never a per cent: ` +
-         `"100%" hands the browser permission to scale the number above`);
+      ok(r.weekOver !== null && r.weekOver <= 1,
+         `[${width}] the week grid fits its module (${r.weekOver}px over): the days are laid out in ` +
+         `the width they are given, never squeezed past it or scrolled out of sight`);
+      ok(r.pageOver <= 1, `[${width}] and the page does not scroll sideways (${r.pageOver}px)`);
     }
     const wide = await render(CAL, { width: 2560, css: true });
-    ok(wide.hostW > 1900,
-       `the 2560 host is ${wide.hostW}px — wider than the 1900 the clamp used to stop ` +
-       `at, which is what made this the width the defect was measured at`);
 
-    ok(wide.marks.long && wide.marks.short,
-       "the board lane draws both a long and a short mark");
+    eq(wide.rows.LONG.glyph, "#g-up",
+       "a name on the long side of the board wears the up triangle, apex above its base (▲)");
+    ok(/is-long/.test(wide.rows.LONG.glyphCls), "classed long, so it takes the up colour");
+    eq(wide.rows.SHORT.glyph, "#g-down",
+       "and a short name the down triangle (▼) — two shapes, not two fills: a mark that " +
+       "differs by hue alone is one mark in greyscale, and the side the board took is the " +
+       "one fact this glyph exists to carry");
+    eq(wide.rows.GATE.glyph, "#g-shield", "a gated name wears the shield, a third shape");
 
-    eq(wide.marks.long.split("L").length, 3,
-       `the long mark is a three-vertex triangle (${wide.marks.long}), not the ` +
-       `four-vertex diamond both sides used to share — a mark that differs by hue alone ` +
-       `is one mark in greyscale, and the side the board took is the one fact this lane ` +
-       `exists to carry`);
-    eq(wide.marks.short.split("L").length, 3,
-       `and the short mark is the other one (${wide.marks.short})`);
-    const apexY = (d) => Number(d.match(/^M[\d.]+ ([\d.]+)/)[1]);
-    const baseY = (d) => Number(d.match(/L[\d.]+ ([\d.]+)Z$/)[1]);
-    ok(apexY(wide.marks.long) < baseY(wide.marks.long),
-       "the long mark's apex is above its base (▲)");
-    ok(apexY(wide.marks.short) > baseY(wide.marks.short),
-       "and the short mark's apex is below its base (▼) — the same direction the table's " +
-       "chip prints with ↑ and ↓, so the two surfaces agree");
+    ok(wide.weekChips >= 1 && wide.weekChips < CAL.rows.length,
+       `the week draws ${wide.weekChips} of the ${CAL.rows.length} names in the window, so a legend that counted ` +
+       "the window instead of the week could not pass the next assertion");
+    eq(wide.legend.reduce((a, b) => a + b, 0), wide.weekChips,
+       `and the week's legend counts sum to the ${wide.weekChips} names the week draws: every drawn name sits in ` +
+       "exactly one stage, and a count whose population is not the grid above it is the bare count the lane " +
+       "labels used to be refused for");
+    ok(wide.legend.every((v) => v > 0), "and no key is printed for a stage the week does not draw");
+    ok(wide.weekBars.includes("100%"),
+       `the implied-move bars are scaled to the largest move the week draws (${wide.weekBars.join(", ")}), ` +
+       "not to a larger one reported weeks out and drawn nowhere in this module");
 
-    for (const label of wide.lanes) {
-      ok(/ \d+ \/ 7$/.test(label),
-         `the lane label states its denominator: "${label}". A bare "GATED · 57" is a ` +
-         `count whose population sits 260px above it in the status strip`);
+    ok(/0s: no sessions left to price/.test(wide.rows.ZERO.title),
+       "a name with no sessions left states 0s — a measured horizon of zero SESSIONS, with its " +
+       "unit attached so it can never be read as a zero move");
+    ok(/not measured for this name/.test(wide.rows.NOIV.title),
+       "a name with no implied volatility says its priced move was not measured");
+    ok(/not published for this row, and not zero/.test(wide.rows.NOEV.title),
+       "and a row that published neither keeps its own sentence");
+    eq(new Set([wide.rows.ZERO.title, wide.rows.NOIV.title, wide.rows.NOEV.title].map((t) => t.split(" · ")[2])).size, 3,
+       "three absences, three statements: the priced move now rides with each row's detail, " +
+       "and none of the three collapses into another");
+    ok(/5\.98% priced over/.test(wide.rows.LONG.title),
+       "and a row that has a priced move still carries it, in per cent");
+
+    for (const t of Object.keys(wide.rows)) {
+      eq(wide.rows[t].realized, "pending",
+         `[${t}] with no past-report history on the payload, the typical move is PENDING, not empty`);
+      eq(wide.rows[t].realizedGlyph, "pending",
+         `[${t}] and the slot shows the em dash with the pending glyph rather than a zero or a blank`);
     }
-    eq(wide.lanes.length, 3, "and there are three of them, one per lane");
 
-    eq(wide.priced.ZERO.text, "0s",
-       "a name with no sessions left prints 0s — a measured horizon of zero SESSIONS, " +
-       "with its unit attached so it can never be read as a zero move");
-    ok(/is-zero-horizon/.test(wide.priced.ZERO.cls),
-       "and is classed for it, so the stylesheet can hold it at the ink of a withholding");
-    eq(wide.priced.NOIV.text, "†",
-       "a name with no implied volatility prints the dagger — published, and this field " +
-       "is not on it, which is the mark this stylesheet already spends on that silence");
-    ok(/is-unavailable/.test(wide.priced.NOIV.cls), "and is classed for it");
-    eq(wide.priced.NOEV.text, "—",
-       "and a row that published neither keeps the em dash, which now means one thing");
-    ok(/is-none/.test(wide.priced.NOEV.cls), "and is classed for it");
-    eq(new Set([wide.priced.ZERO.text, wide.priced.NOIV.text, wide.priced.NOEV.text]).size, 3,
-       "three absences, three glyphs: the distinction the module makes and the file " +
-       "argues at length is now on the page and not only in a hover title");
-    eq(wide.priced.LONG.text, "5.98%",
-       "and a row that has a priced move still prints it, in per cent");
-
-
-    ok(/Built 2026-09-05 01:28 UTC/.test(wide.foot),
-       `the built instant is ISO and names its zone: "${wide.foot}". toLocaleString ` +
-       `printed "9/5/2026, 1:28:48 AM" under a table of ISO report dates and beside two ` +
-       `ISO clocks — three notations for one kind of quantity on one screen, and the ` +
-       `only one of the three whose month and day a reader outside the US would swap`);
-    ok(!/\d+\/\d+\/\d{4}/.test(wide.foot),
+    ok(/Built/.test(wide.about || "") && /2026-09-05 01:28 UTC/.test(wide.about || ""),
+       `the built instant is ISO and names its zone, in the page's own disclosure: ` +
+       `"${String(wide.about).slice(0, 120)}"`);
+    ok(!/\d+\/\d+\/\d{4}/.test(wide.about || ""),
        "and no slashed locale date survives anywhere in it");
 
     const pending = await render({ status: "pending" }, { css: true });
@@ -1066,111 +1023,88 @@ const gateDteFrom = (origin) => (date) =>
     const failed = await render(CAL, { mode: "http", css: true });
 
     const kinds = {
-      pending: pending.window.kind, quiet: quiet.window.kind,
-      unreadable: unreadable.window.kind, failed: failed.window.kind,
+      pending: pending.status.kind, quiet: quiet.status.kind,
+      unreadable: unreadable.status.kind, failed: failed.status.kind,
     };
     deep(kinds, { pending: "pending", quiet: "quiet", unreadable: "unreadable", failed: "failed" },
-         `each silence names itself on data-empty (${JSON.stringify(kinds)}), so ` +
-         `flows.css's dotted / hairline / × vocabulary fires and a reader can see which ` +
-         `of the four they are in without reading the paragraph`);
-    for (const [name, r] of [["pending", pending], ["quiet", quiet],
-                             ["unreadable", unreadable], ["failed", failed]]) {
-      eq(r.status.kind, kinds[name],
-         `[${name}] the status strip carries the same kind as the region below it`);
-      eq(r.body.kind, kinds[name],
-         `[${name}] and so does the row that stands in for the table`);
+         `each silence names itself on the status line (${JSON.stringify(kinds)})`);
+    const states = {
+      pending: pending.earnState, quiet: quiet.earnState,
+      unreadable: unreadable.earnState, failed: failed.earnState,
+    };
+    deep(states, { pending: "pending", quiet: "quiet", unreadable: "withheld", failed: "unavailable" },
+         `and the module wears the matching glyph state (${JSON.stringify(states)}): a key the ` +
+         "pipeline has not written is pending, a measured emptiness is quiet, bytes that do not " +
+         "parse are withheld, and a request that never landed is unavailable");
+    eq(new Set(Object.values(states)).size, 4, "four states, four marks — not one hairline for all of them");
+    const glyphs = [pending, quiet, unreadable, failed].map((r) => r.silentGlyph);
+    eq(new Set(glyphs).size, 4,
+       `and four different glyphs in the stand-in itself (${glyphs.join(", ")}), so the state is ` +
+       "legible without the colour and without the sentence");
+    for (const [name, r] of [["pending", pending], ["unreadable", unreadable], ["failed", failed]]) {
+      ok(r.modules.every((m) => m === states[name]),
+         `[${name}] every module on the page shares that one state (${r.modules.join(", ")}) — ` +
+         "a page whose surfaces disagree about which silence it is in has told the reader nothing");
     }
-    eq(new Set(Object.values(kinds)).size, 4,
-       "four states, four kinds — not one hairline for all of them");
 
-    const strip = (r) =>
-      `${r.statusDrawn.style} ${r.statusDrawn.width} ${r.statusDrawn.glyph}`;
-    const region = (r) =>
-      `${r.windowDrawn.style} ${r.windowDrawn.width} ${r.windowDrawn.glyph}`;
-    for (const [name, r] of [["pending", pending], ["quiet", quiet],
-                             ["unreadable", unreadable], ["failed", failed]]) {
-      eq(strip(r), region(r),
-         `[${name}] the strip and the region under it draw ONE mark (strip ${strip(r)}, ` +
-         `region ${region(r)}) — a page whose two surfaces disagree about which silence ` +
-         `it is in has told the reader nothing`);
-    }
-    eq(strip(failed), strip(unreadable),
-       `a request that never came back wears the broken mark on the strip, the same one ` +
-       `the parse failure wears (${strip(failed)} vs ${strip(unreadable)}): the two share ` +
-       `a remedy, and neither is the quiet hairline`);
-    ok(/×/.test(failed.statusDrawn.glyph),
-       `and it carries the × (${failed.statusDrawn.glyph}) rather than the base rule's ` +
-       `content: none — a bar with no glyph is a mark that says only "something"`);
-    eq(failed.statusDrawn.width, "3px",
-       `at the 3px this stylesheet spends on the one silence that is THIS PAGE'S fault ` +
-       `(${failed.statusDrawn.width}), not the base rule's 2px`);
-    const stripMarks = new Set([strip(pending), strip(quiet),
-                                strip(unreadable), strip(failed)]);
-    eq(stripMarks.size, 3,
-       `and the four states resolve to three marks on the strip (${[...stripMarks].join("; ")}) ` +
-       `— unreadable and failed are one silence and share one, pending and quiet keep ` +
-       `their own, and nothing falls through to the unmarked base rule`);
-    eq(new Set([pending.window.text, quiet.window.text,
-                unreadable.window.text, failed.window.text]).size, 4,
-       "and four different sentences under them");
-
-    ok(/does not parse/.test(unreadable.window.text),
-       `the unreadable state says the bytes do not parse: "${unreadable.window.text}"`);
-    ok(!/[Rr]efresh/.test(unreadable.window.text),
+    ok(/does not parse/.test(unreadable.status.text),
+       `the unreadable state says the bytes do not parse: "${unreadable.status.text}"`);
+    ok(!/[Rr]efresh/.test(unreadable.status.text),
        "and offers no refresh, because the bytes are in the store and a refresh fetches " +
        "the same ones — the remedy that exists is the next run, and it says so");
-    ok(/Unexpected end of JSON input/.test(unreadable.window.text),
+    ok(/Unexpected end of JSON input/.test(unreadable.status.text),
        "the parser's own words are still carried, for whoever has to fix the publish");
-    ok(/Refresh to try again/.test(failed.window.text),
-       `a request that never landed DOES keep the refresh: "${failed.window.text}"`);
-    ok(/HTTP 503/.test(failed.window.text),
-       "with the status the transport actually returned");
-    ok(/did not parse/.test(unreadable.basis.text) && /could not be fetched/.test(failed.basis.text),
-       "and the basis panel fails the same way the numbers did, in the same words");
+    ok(/does not parse/.test(unreadable.why || ""),
+       "and the module's own Why opens the same sentence");
+    ok(/Refresh to try again/.test(failed.status.text),
+       `a request that never landed DOES keep the refresh: "${failed.status.text}"`);
+    ok(/HTTP 503/.test(failed.status.text), "with the status the transport actually returned");
+    ok(/did not parse/.test(unreadable.about || "") && /could not be fetched/.test(failed.about || ""),
+       "and the page's own disclosure fails the same way the numbers did, in the same words");
 
-    eq(pending.basisHidden, true,
-       "a pending key leaves the basis panel hidden rather than describing the absence " +
-       "of a run as a published payload with a hole in it");
-    ok(/has not published this key yet/.test(pending.window.text),
+    ok(!/notes block/.test(pending.about || ""),
+       "a pending key does not describe the absence of a run as a published payload with a " +
+       "hole in it");
+    ok(/has not published this key yet/.test(pending.status.text),
        "and says what is actually true: the run has not happened");
-    eq(quiet.basisHidden, false,
-       "while a quiet payload — published, measured, empty — still explains itself");
+    ok(/carries no notes block/.test(quiet.about || "") ||
+       Object.keys(EVENTS_NOTES).some((k) => (quiet.about || "").includes(String(EVENTS_NOTES[k]).slice(1, 40))),
+       "while a quiet payload — published, measured, empty — still explains itself, in the " +
+       "pipeline's own notes or in the sentence that says its notes are not on it");
+    ok(!/Method/.test(pending.about || ""),
+       "and the pending one carries no method section at all, because nothing was published to explain");
 
     const noNotes = { ...CAL };
     delete noNotes.notes;
     const bare = await render(noNotes);
-    eq(bare.basis.kind, "unavailable",
-       "a payload that arrived and parsed without a notes block is the unavailable " +
-       "silence — published, and this field is not on it — and wears the dagger");
-    ok(!/unexplained/.test(bare.basis.text),
-       `and no longer calls the readings above it unexplained (${bare.basis.text.slice(0, 48)}…): ` +
-       `they were measured, and it is the method behind them that is missing`);
+    ok(/carries no notes block/.test(bare.about || ""),
+       "a payload that arrived and parsed without a notes block says so in its disclosure");
+    ok(!/unexplained/.test(bare.about || ""),
+       "and does not call the readings unexplained: they were measured, and it is the method " +
+       "behind them that is missing");
 
     const HOUR = 3600000;
     const old3 = await render(CAL, { updatedAt: Date.now() - 72 * HOUR });
-    eq(old3.stale.hidden, false, "a calendar written three days ago raises the banner");
-    ok(/last written 3 days ago/.test(old3.stale.text),
-       `the banner counts in whole days: "${old3.stale.text.slice(0, 44)}…"`);
+    eq(old3.stale && old3.stale.hidden, false, "a calendar written three days ago raises the stale pill");
+    ok(/last written 3 days ago/.test(old3.stalePop || ""),
+       `whose disclosure counts in whole days: "${String(old3.stalePop).slice(0, 80)}…"`);
     ok(/3 days ago — these counts are that run's, not today's/.test(old3.status.text),
-       `and the status strip carries the qualifier ON the day counts it qualifies ` +
-       `("${old3.status.text.slice(-90)}"): the banner said every count below was that ` +
-       `run's, and the sentence immediately under it then stated them flat`);
+       `and the status sentence carries the qualifier ON the day counts it qualifies ` +
+       `("${old3.status.text.slice(-90)}")`);
 
     const old1 = await render(CAL, { updatedAt: Date.now() - 34 * HOUR });
-    ok(/last written 1 day ago/.test(old1.stale.text),
-       `one day is "1 day", not "1 day(s)": "${old1.stale.text.slice(0, 40)}…" — this ` +
-       `file has had plural() since it was written and every other count on the page ` +
-       `uses it`);
-    ok(!/day\(s\)/.test(old1.stale.text + old1.status.text),
+    ok(/last written 1 day ago/.test(old1.stalePop || ""),
+       `one day is "1 day", not "1 day(s)": "${String(old1.stalePop).slice(0, 60)}…"`);
+    ok(!/day\(s\)/.test(String(old1.stalePop) + old1.status.text),
        "and no parenthesised plural is left anywhere in the pair");
-    eq(wide.stale.hidden, true,
-       "while a fresh payload raises no banner and adds no qualifier");
+    eq(wide.stale && wide.stale.hidden, true, "while a fresh payload raises no pill");
     ok(!/that run's, not today's/.test(wide.status.text),
-       "so the strip states its day counts flat only when they ARE today's");
+       "and adds no qualifier, so the day counts are stated flat only when they ARE today's");
   } finally {
     await browser.close();
   }
 }
+
 
 console.log(`✓ flows-events: ${checks} assertions — a session count measured from the ` +
   `next session and never from the last completed session, with the wrong integer ` +
@@ -1187,14 +1121,4 @@ console.log(`✓ flows-events: ${checks} assertions — a session count measured
   `an announce column withheld whole with its reason published, the sentences that keep ` +
   `the page from claiming a forecast, and a rail badge read off a rendered page that counts ` +
   `the names reporting rather than the rows the cap left on it, withholds where no ` +
-  `population was published, and prints a measured zero — and, drawn at three widths, ` +
-  `one viewBox unit that is one CSS pixel at every one of them, a board lane whose two ` +
-  `sides are two shapes rather than two fills, lane counts that carry their ` +
-  `denominator, three absences in the Priced column wearing three glyphs instead of one ` +
-  `em dash and three hover titles, an ISO instant in the footer, and four silences that ` +
-  `name themselves apart — on the attribute AND on the computed border and glyph a reader ` +
-  `actually meets, since a fetch that never came back was falling through the status ` +
-  `strip's rules to an unmarked 2px hairline while the region under it drew the × — the ` +
-  `published-but-unparseable one no longer offering a ` +
-  `refresh that would read the same broken bytes back, and the pending one no longer ` +
-  `describing an empty store as a published payload missing its notes`);
+  `population was published, and prints a measured zero — and, drawn at four widths, a week grid that fits its module with no sideways scroll, board sides told apart by two triangle shapes and gated names by a third, a legend whose stage counts sum to the names drawn, three absences of the priced move kept as three statements, a typical move that is pending rather than empty until its history is published, an ISO instant in the page's own disclosure, and four silences that name themselves apart — on the status line, on the module's glyph state and in four different glyphs — the published-but-unparseable one no longer offering a refresh that would read the same broken bytes back, and the pending one no longer describing an empty store as a published payload missing its notes`);

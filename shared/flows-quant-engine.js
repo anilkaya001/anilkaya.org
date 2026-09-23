@@ -380,8 +380,9 @@ function roundTo(v, dp) {
   if (v === null || v === undefined) return null;
   if (!fin(v)) return null;
   const f = Math.pow(10, dp);
-  const r = Math.round(v * f) / f;
-  return Object.is(r, -0) ? 0 : r;
+  const a = Math.abs(v) * f;
+  const r = Math.floor(a + 0.5 + a * 1e-12) / f;
+  return r === 0 ? 0 : v < 0 ? -r : r;
 }
 
 const rp = (v) => roundTo(v, 4), r$ = (v) => roundTo(v, 2), rpr = (v) => roundTo(v, 4), rv = (v) => roundTo(v, 4);
@@ -534,7 +535,7 @@ function curveGrid(qLaw, legs, breakevens) {
 }
 
 function priceCandidate(cand, ctx) {
-  const fam = STRUCTURE_BY_ID[cand.family];
+  const fam = cand.fam || STRUCTURE_BY_ID[cand.family];
   const S = ctx.spot;
   const exp = ctx.expiries.get(cand.expiry);
   const legs = cand.legs.map((l) => {
@@ -559,6 +560,7 @@ function priceCandidate(cand, ctx) {
   const mid = sum((l) => l.mid);
   const natural = sum((l) => (l.side > 0 ? l.ask : l.bid));
   const fill = mid + ENGINE_LINES.FILL_SHARE * (natural - mid);
+  const cost = cand.basis === "mid" ? mid : cand.basis === "natural" ? natural : fill;
   const model = sum((l) => l.model);
   const Ts = [...new Set(legs.filter((l) => l.type !== "S").map((l) => l.T))].sort((a, b) => a - b);
   const multi = Ts.length > 1;
@@ -571,26 +573,26 @@ function priceCandidate(cand, ctx) {
   if (multi) legs.splice(0, legs.length, ...calibrateBackLegs(legs, vctx, qLaw, S));
   let prof, eQ, ePs;
   if (!multi) {
-    prof = expiryProfile(legs, fill);
+    prof = expiryProfile(legs, cost);
     if (fam.noUpsideRisk && (prof.lossUnbounded || prof.valueRight < -EPS)) return null;
     eQ = lawExpect(qLaw, prof.pieces);
     ePs = [laws.main, ...laws.alts].map((law) => (law ? lawExpect(law, prof.pieces) : null));
   } else {
-    prof = multiProfile(legs, vctx, fill, qLaw);
+    prof = multiProfile(legs, vctx, cost, qLaw);
     const fn = (x) => structureValue(legs, vctx, x, front.T, 0);
     const brk = legs.map((l) => l.K);
     eQ = lawIntegrate(qLaw, fn, brk);
     ePs = [laws.main, ...laws.alts].map((law) => (law ? lawIntegrate(law, fn, brk) : null));
   }
-  const evQ = (D * eQ - fill) * LOT;
-  const evPs = ePs.map((e) => (e === null ? null : (D * e - fill) * LOT));
+  const evQ = (D * eQ - cost) * LOT;
+  const evPs = ePs.map((e) => (e === null ? null : (D * e - cost) * LOT));
   const evP = evPs[0];
   const edges = ePs.map((e) => (e === null ? null : D * (e - eQ) * LOT));
   const pNatural = ePs[0] === null ? null : (D * ePs[0] - natural) * LOT;
   const pBandVals = evPs.filter((v) => v !== null);
   const popQ = lawIntervalsProb(qLaw, prof.profitIntervals);
   const popP = laws.main ? lawIntervalsProb(laws.main, prof.profitIntervals) : null;
-  const capital = capitalOf(fam, prof, legs, S, fill);
+  const capital = capitalOf(fam, prof, legs, S, cost);
   const shorts = legs.filter((l) => l.side < 0 && l.type !== "S");
   const touchShortQ = shorts.map((l) => {
     const t = touchProbability({ S, level: l.K, vol: l.iv, T: l.T, r: front.r, q: front.qImpl });
@@ -661,7 +663,7 @@ function priceCandidate(cand, ctx) {
     rules: cand.rules.slice(),
     engine: ENGINE_VERSION,
   };
-  return { out, raw: { legs, fill, prof, evQ, evP, laws, qLaw, vctx, front, multi } };
+  return { out, raw: { legs, cost, prof, evQ, evP, laws, qLaw, vctx, front, multi } };
 }
 
 export function scenarioGrid(legs, vctx, cost, S, front, levels) {
@@ -739,11 +741,29 @@ export function buildExpiry(input) {
   const prepared = prepareQuotes({ F: fwd.F, D: fwd.D, T, rows: clean });
   const slice = fitSlice({ F: fwd.F, D: fwd.D, T, points: prepared.points, prev: prev || null, event: input.event || null });
   if (!slice) return null;
+  return expiryFromFit({
+    expiry, T, dte: calendarDays(asOfDay, expiry), sessions: sessionsBetween(asOfDay, expiry), monthly: isMonthly(expiry),
+    forward: fwd, slice, points: prepared.points, rows: clean,
+  });
+}
+
+export function expiryFit(e) {
+  return {
+    expiry: e.expiry, T: e.T, dte: e.dte, sessions: e.sessions, monthly: e.monthly, forward: e.forward, slice: e.slice,
+    points: e.points.length,
+  };
+}
+
+export function expiryFromFit(input) {
+  const { expiry, T, forward: fwd, slice } = input;
+  const clean = (input.rows || []).filter((r) => r && fin(r.K) && (r.type === "C" || r.type === "P")).slice()
+    .sort((a, b) => a.K - b.K || (a.type < b.type ? -1 : a.type > b.type ? 1 : 0));
   const book = quoteBook(clean);
   const quoteCache = new Map();
   return {
-    expiry, T, dte: calendarDays(asOfDay, expiry), sessions: sessionsBetween(asOfDay, expiry), monthly: isMonthly(expiry),
-    F: fwd.F, D: fwd.D, r: fwd.r, qImpl: q, forward: fwd, slice, points: prepared.points, rows: clean,
+    expiry, T, dte: input.dte, sessions: input.sessions, monthly: input.monthly,
+    F: fwd.F, D: fwd.D, r: fwd.r, qImpl: fwd.q, forward: fwd, slice,
+    points: Array.isArray(input.points) ? input.points : { length: fin(input.points) ? input.points : 0 }, rows: clean,
     callStrikes: listedStrikes(clean, "C"), putStrikes: listedStrikes(clean, "P"),
     quoteOf: (type, K) => {
       const key = type + ":" + K;
@@ -843,10 +863,71 @@ function jumpsFor(event) {
   return { jumps: [{ x: J * scale, p: 0.5 }, { x: -J * scale, p: 0.5 }], count: hist.length };
 }
 
-export function runEngine(input) {
+export function setupEngine(input, list) {
   const asOfMs = typeof input.asOf === "number" ? input.asOf : Date.parse(input.asOf);
   const S = input.spot;
   const asOfDay = etDayOf(asOfMs);
+  const evIn = input.event && input.event.date ? input.event : null;
+  const expiries = new Map(list.map((e) => [e.expiry, e]));
+  const facts = { ...(input.facts || {}) };
+  const state = input.state || { state: "undetermined", confidence: 0, preferred: ["no position"], avoid: [] };
+  const { jumps, count: eventMoves } = jumpsFor(evIn);
+  const eventFor = (expiry) => {
+    const b = eventBucket(evIn ? { ...evIn, after: asOfDay, ratio: facts["move.event.ratio"] ? facts["move.event.ratio"].v : evIn.ratio } : null, expiry);
+    return b;
+  };
+  const qtabs = new Map();
+  const ctx = {
+    spot: S, expiries, pLaw: input.pLaw || null, levels: input.levels || null, stale: !!input.stale, curves: !!input.curves,
+    eventFor, jumps, eventMoves, event: evIn, eventMode: !!evIn,
+    sessionsTo: (d) => sessionsBetween(asOfDay, d),
+    qtab: (law, key) => { if (!qtabs.has(key)) qtabs.set(key, quantileTable(law, ENGINE_LINES.VAR_POINTS)); return qtabs.get(key); },
+  };
+  const lc = input.lawCache;
+  const lawCache = lc && typeof lc.get === "function" && typeof lc.set === "function" && typeof lc.has === "function" ? lc : new Map();
+  ctx.lawsOf = (front, spot) => {
+    const key = front.expiry + "|" + front.T + "|" + front.sessions + "|" + front.slice.F + "|" + spot;
+    if (!lawCache.has(key)) lawCache.set(key, lawsFor(ctx, front.T, front.sessions, front.expiry, front.slice.F, spot));
+    return lawCache.get(key);
+  };
+  const putSkewPct = facts["skew.rr25.30.pct"] && fin(facts["skew.rr25.30.pct"].v) ? facts["skew.rr25.30.pct"].v : null;
+  return { asOfMs, asOfDay, S, evIn, list, expiries, facts, state, ctx, putSkewPct };
+}
+
+function detailStructure(st, rw, ctx, S, curves) {
+  st.grid = scenarioGrid(rw.legs, rw.vctx, rw.cost, S, rw.front, ctx.levels);
+  if (!rw.multi && rw.laws.main) {
+    const t = tailRisk(ctx.qtab(rw.laws.main, rw.front.expiry), rw.legs, rw.cost);
+    st.tail = { var5P: r$(t.var5P), cvar5P: r$(t.cvar5P) };
+  }
+  if (curves) st.curves = curvesOf(rw.legs, rw.vctx, rw.cost, rw.qLaw, rw.laws.main, rw.prof, rw.front);
+  return st;
+}
+
+export function priceStructure(setup, cand, opts = {}) {
+  const p = priceCandidate({ rules: [], ...cand }, setup.ctx);
+  if (!p) return null;
+  const st = { ...p.out };
+  if (opts.detail) detailStructure(st, p.raw, setup.ctx, setup.S, !!opts.curves);
+  return st;
+}
+
+export function structureLegs(setup, familyId, variant, expiry, back) {
+  const e = setup.expiries.get(expiry);
+  if (!e) return null;
+  if (familyId === "long-calendar" || familyId === "diagonal") {
+    const b = back ? setup.expiries.get(back) : null;
+    return b ? buildMulti(familyId, variant, { front: e, back: b }, setup.state, setup.ctx.levels) : null;
+  }
+  return buildLegs(familyId, variant, {
+    slice: e.slice, callStrikes: e.callStrikes, putStrikes: e.putStrikes, levels: setup.ctx.levels, state: setup.state,
+    spot: setup.S, putSkewPct: setup.putSkewPct,
+  });
+}
+
+export function runEngine(input) {
+  const asOfMs = typeof input.asOf === "number" ? input.asOf : Date.parse(input.asOf);
+  const S = input.spot;
   const evIn = input.event && input.event.date ? input.event : null;
   const list = [];
   let prev = null;
@@ -862,30 +943,12 @@ export function runEngine(input) {
     list.push(ex);
     prev = ex.slice;
   }
-  const expiries = new Map(list.map((e) => [e.expiry, e]));
-  const facts = { ...(input.facts || {}) };
+  const setup = setupEngine({ ...input, asOf: asOfMs }, list);
+  const { asOfDay, expiries, facts, state, ctx, putSkewPct } = setup;
   const near30 = list.slice().sort((a, b) => Math.abs(a.dte - 30) - Math.abs(b.dte - 30) || a.T - b.T)[0] || null;
   const tier = near30 ? tierOf(near30) : { tier: null, median: null };
-  const state = input.state || { state: "undetermined", confidence: 0, preferred: ["no position"], avoid: [] };
   const scored = scoreFamilies({ facts, state, liquidityTier: tier.tier, desk: !!input.desk });
-  const { jumps, count: eventMoves } = jumpsFor(evIn);
-  const eventFor = (expiry) => {
-    const b = eventBucket(evIn ? { ...evIn, after: asOfDay, ratio: facts["move.event.ratio"] ? facts["move.event.ratio"].v : evIn.ratio } : null, expiry);
-    return b;
-  };
-  const qtabs = new Map();
-  const ctx = {
-    spot: S, expiries, pLaw: input.pLaw || null, levels: input.levels || null, stale: !!input.stale, curves: !!input.curves,
-    eventFor, jumps, eventMoves, event: evIn, eventMode: !!evIn,
-    sessionsTo: (d) => sessionsBetween(asOfDay, d),
-    qtab: (law, key) => { if (!qtabs.has(key)) qtabs.set(key, quantileTable(law, ENGINE_LINES.VAR_POINTS)); return qtabs.get(key); },
-  };
-  const lawCache = new Map();
-  ctx.lawsOf = (front, spot) => {
-    if (!lawCache.has(front.expiry)) lawCache.set(front.expiry, lawsFor(ctx, front.T, front.sessions, front.expiry, front.slice.F, spot));
-    return lawCache.get(front.expiry);
-  };
-  const putSkewPct = facts["skew.rr25.30.pct"] && fin(facts["skew.rr25.30.pct"].v) ? facts["skew.rr25.30.pct"].v : null;
+  const eventFor = ctx.eventFor;
   const families = [];
   for (const f of scored.families) {
     const fam = STRUCTURE_BY_ID[f.family];
@@ -932,16 +995,10 @@ export function runEngine(input) {
   const ranking = rankStructures(structures, state);
   const detailed = new Set(input.grids === "all" ? structures.map((x) => x.id) : [...ranking.ideas, ranking.noTrade && ranking.noTrade.closest].filter(Boolean));
   structures.forEach((st, i) => {
-    const rw = raws[i];
     if (!detailed.has(st.id)) return;
-    st.grid = scenarioGrid(rw.legs, rw.vctx, rw.fill, S, rw.front, ctx.levels);
-    if (!rw.multi && rw.laws.main) {
-      const t = tailRisk(ctx.qtab(rw.laws.main, rw.front.expiry), rw.legs, rw.fill);
-      st.tail = { var5P: r$(t.var5P), cvar5P: r$(t.cvar5P) };
-    }
-    if (ctx.curves) st.curves = curvesOf(rw.legs, rw.vctx, rw.fill, rw.qLaw, rw.laws.main, rw.prof, rw.front);
+    detailStructure(st, raws[i], ctx, S, ctx.curves);
   });
-  return {
+  const out = {
     engine: ENGINE_VERSION, ticker: input.ticker || null, asOf: asOfDay, spot: S,
     liquidity: { tier: tier.tier, medianRelSpread: rpr(tier.median) },
     expiries: list.map((e) => ({
@@ -952,6 +1009,8 @@ export function runEngine(input) {
     families: families.map((f) => ({ family: f.family, score: roundTo(f.score, 4), rules: f.rules, veto: f.veto, expiry: f.choice ? f.choice.front.expiry : null })),
     structures, ideas: ranking.ideas, noTrade: ranking.noTrade,
   };
+  if (input.fits) out.fits = list.map(expiryFit);
+  return out;
 }
 
 function buildMulti(familyId, variant, choice, state, levels) {

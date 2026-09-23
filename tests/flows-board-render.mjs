@@ -19,10 +19,12 @@ const put = (key, bodyObj) => fetch(url("/api/flows/ingest?key=" + encodeURIComp
 });
 
 const TICKERS = ["NVDA", "NVAX", "AAPL", "AMD", "MSFT", "GOOG", "INTC", "TSLA"];
+const SECTORS = ["Technology", "Healthcare", "Technology", "Technology", "Technology",
+  "Communication Services", "Technology", "Consumer Cyclical"];
 
 const boardRow = (t, i, warm) => ({
   t, r: i + 1, s: 90 - i * 7, cnv: 80 - i * 3,
-  px: 100 + i, chg: 0.01, purity: 0.02,
+  px: 100 + i, chg: 0.01, purity: 0.02, sector: SECTORS[i],
   gRegime: i % 2 ? "short" : "long", gFlipDist: -0.1 - i / 100,
   netPrem: (i % 2 ? -1 : 1) * (1e7 - i * 1e5),
   fam: { F: 10, P: 20, D: 30, V: 40, O: 50 },
@@ -49,52 +51,61 @@ page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + 
 await page.context().addCookies([
   { name: "flows_session", value: token, url: server.baseURL }]);
 
+const ROWS = "#flowsBody .bd-row[data-flip]";
+const readInfo = async (selector) => {
+  await page.click(selector);
+  await page.waitForSelector("#fxPop:popover-open");
+  const text = await page.$eval("#fxPop", (el) => el.innerText);
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => !document.querySelector("#fxPop:popover-open"));
+  return text;
+};
+
 await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
-await page.waitForSelector(".fd-card");
+await page.waitForSelector(ROWS);
 
 const uiShape = await page.evaluate(() => {
   const U = window.FlowsUI;
   if (!U) return null;
-  return { searchBox: typeof U.searchBox, sortSelect: typeof U.sortSelect, el: typeof U.el };
+  return { segmented: typeof U.segmented, infoButton: typeof U.infoButton, gaugeChip: typeof U.gaugeChip, mount: typeof (U.chart && U.chart.mount) };
 });
 ok(uiShape !== null,
-   "window.FlowsUI is defined on /flows/long/ — the board reads it at module scope " +
-   "(flows-board.js:36) and every control below is downstream of this one fact, so it is " +
-   "asserted first and on its own: an undefined library is a missing script tag, while a " +
-   "missing #fbQ could be any of a dozen things");
-eq(uiShape && uiShape.searchBox, "function",
-   "FlowsUI.searchBox is callable — buildControls() tests this exact typeof before proceeding");
-eq(uiShape && uiShape.sortSelect, "function",
-   "FlowsUI.sortSelect is callable — the second half of the same guard");
+   "window.FlowsUI is defined on /flows/long/ — the board reads it at module scope and every control " +
+   "below is downstream of this one fact, so it is asserted first and on its own: an undefined library " +
+   "is a missing script tag, while a missing #fbQ could be any of a dozen things");
+eq(uiShape && uiShape.segmented, "function", "FlowsUI.segmented is callable — the List | Map switch is built from it");
+eq(uiShape && uiShape.infoButton, "function", "FlowsUI.infoButton is callable — every sentence the board used to paint lives behind one");
+eq(uiShape && uiShape.gaugeChip, "function", "FlowsUI.gaugeChip is callable — the summary track is built from it");
+eq(uiShape && uiShape.mount, "function", "FlowsUI.chart.mount is callable — the board map draws through it");
 
 const controls = await page.evaluate(() => {
-  const wrap = document.querySelector(".fb-controls");
-  if (!wrap) return null;
+  const tools = document.querySelector("#bdTools");
   const q = document.querySelector("#fbQ");
   const s = document.querySelector("#fbSort");
   const c = document.querySelector(".fb-count");
   return {
-    wrap: true,
+    tools: !!tools,
     q: !!q, s: !!s, c: !!c,
-
-    isSibling: !!(wrap.parentNode && wrap.previousElementSibling &&
-                  wrap.previousElementSibling.classList.contains("flows-controls")),
+    inTools: !!(tools && q && s && tools.contains(q) && tools.contains(s)),
+    qSize: q ? parseFloat(getComputedStyle(q).fontSize) : 0,
     countHidden: c ? c.hidden : null,
     countRole: c ? c.getAttribute("role") : null,
     options: s ? Array.from(s.options).map((o) => o.value) : null,
   };
 });
 
-ok(controls !== null,
-   "the board's control bar is in the DOM on /flows/long/ — this is the assertion whose " +
-   "absence let ~130 lines of finished code ship dead on the two busiest routes in the section");
+ok(controls.tools,
+   "the board's control row is in the DOM on /flows/long/ — this is the assertion whose absence once let " +
+   "~130 lines of finished code ship dead on the two busiest routes in the section");
 ok(controls.q, "the ticker filter #fbQ exists");
 ok(controls.s, "the order select #fbSort exists");
 ok(controls.c, "the match denominator .fb-count exists");
-ok(controls.isSibling,
-   "the control wrap is a SIBLING of .flows-controls rather than a child — as a child it is a " +
-   "flex item whose min-width is auto, which for a box holding a native <select> is that " +
-   "select's widest option in 16px mono, and the page grew a horizontal scrollbar at 352px");
+ok(controls.inTools,
+   "both controls sit in the card's own wrapping tools row, where a native <select>'s widest option cannot " +
+   "set the width of a flex parent — the defect that grew a horizontal scrollbar at 352px when the controls " +
+   "were a flex child of the lede. The 320px measurement below is the proof");
+ok(controls.qSize >= 15,
+   `the filter's text is at least 15px on a fine pointer (${controls.qSize}px) and 16px on a coarse one, so iOS never zooms into it`);
 
 eq(controls.countHidden, true,
    "with no filter typed the count is HIDDEN rather than reading “8 of 8” — a count of " +
@@ -104,14 +115,14 @@ eq(controls.countRole, "status",
    "the case where no rows remain on screen to notice");
 
 await page.fill("#fbQ", "NV");
-await page.waitForFunction(() => document.querySelectorAll(".fd-card").length === 2);
+await page.waitForFunction((sel) => document.querySelectorAll(sel).length === 2, ROWS);
 
-const filtered = await page.evaluate(() => ({
-  cards: document.querySelectorAll(".fd-card").length,
+const filtered = await page.evaluate((sel) => ({
+  rows: document.querySelectorAll(sel).length,
   count: document.querySelector(".fb-count").textContent,
   hidden: document.querySelector(".fb-count").hidden,
-}));
-eq(filtered.cards, 2, "typing NV leaves exactly the two names that begin NV (NVDA, NVAX)");
+}), ROWS);
+eq(filtered.rows, 2, "typing NV leaves exactly the two names that begin NV (NVDA, NVAX)");
 eq(filtered.hidden, false, "the count is shown once a filter is set");
 ok(/\b2 of 8 names match\b/.test(filtered.count),
    "the count states the POPULATION the two came out of — “" + filtered.count + "”. Two rows " +
@@ -121,59 +132,151 @@ ok(filtered.count.includes("“NV”"),
    "the count echoes what was typed, in quotes, so the reader can see the filter that produced it");
 
 await page.fill("#fbQ", "ZZZZ");
-await page.waitForFunction(() => document.querySelectorAll(".fd-card").length === 0);
+await page.waitForFunction((sel) => document.querySelectorAll(sel).length === 0, ROWS);
 const none = await page.evaluate(() => {
-  const msg = document.querySelector(".fb-msg, [data-state='filtered'], .flows-msg");
+  const msg = document.querySelector('#flowsBody [data-empty="filtered"]');
   return {
     count: document.querySelector(".fb-count").textContent,
-    body: document.body.innerText,
     msg: msg ? msg.textContent : null,
+    clear: !!(msg && msg.querySelector("button")),
   };
 });
 ok(/\b0 of 8 names match\b/.test(none.count),
    "a filter matching nothing reads “0 of 8” rather than going blank — the zero is MEASURED " +
    "(eight rows were tested and none matched), which is a different statement from a board " +
    "that published nothing");
-ok(/still loaded|clear the field/i.test(none.body),
-   "the page says the rows are still loaded and the field can be cleared, so a typed filter is " +
-   "not read as an outage");
+ok(none.msg !== null && /No match/.test(none.msg) && none.clear,
+   "the empty filter says No match and offers Clear beside it, so a typed filter is not read as an " +
+   `outage and the way back is one tap (${none.msg})`);
+
+await page.click('#flowsBody [data-empty="filtered"] button');
+await page.waitForFunction((sel) => document.querySelectorAll(sel).length === 8, ROWS);
+eq(await page.inputValue("#fbQ"), "", "Clear empties the field it answers for");
+await page.fill("#fbQ", "ZZZZ");
+await page.waitForFunction((sel) => document.querySelectorAll(sel).length === 0, ROWS);
 
 const requestsBefore = [];
 page.on("request", (r) => { if (/\/api\/flows\//.test(r.url())) requestsBefore.push(r.url()); });
 await page.fill("#fbQ", "");
-await page.waitForFunction(() => document.querySelectorAll(".fd-card").length === 8);
-const restored = await page.evaluate(() => ({
-  cards: document.querySelectorAll(".fd-card").length,
+await page.waitForFunction((sel) => document.querySelectorAll(sel).length === 8, ROWS);
+const restored = await page.evaluate((sel) => ({
+  rows: document.querySelectorAll(sel).length,
   hidden: document.querySelector(".fb-count").hidden,
-}));
-eq(restored.cards, 8, "clearing the field brings all eight names back");
+}), ROWS);
+eq(restored.rows, 8, "clearing the field brings all eight names back");
 eq(restored.hidden, true, "and the count goes silent again with no filter set");
 eq(requestsBefore.length, 0,
-   "clearing the filter spends NO network call — the rows never left currentRows, and a filter " +
+   "clearing the filter spends NO network call — the rows never left memory, and a filter " +
    "that refetches is a filter that costs the reader a round trip per keystroke");
+
+await page.fill("#fbQ", "HEALTH");
+await page.waitForFunction((sel) => document.querySelectorAll(sel).length === 1, ROWS);
+eq(await page.$eval(ROWS + " .bd-open", (a) => a.textContent), "NVAX",
+   "a word of three letters or more also finds a sector — HEALTH leaves the one Healthcare name");
+await page.fill("#fbQ", "");
+await page.waitForFunction((sel) => document.querySelectorAll(sel).length === 8, ROWS);
 
 const warmOptions = controls.options;
 ok(warmOptions.includes("dr:desc"),
-   "the warm board offers “biggest climb since the previous board” — its rows carry dr");
+   "the warm board offers “climb since the previous board” — its rows carry dr");
 ok(warmOptions.includes("nw:desc"),
    "and “new to this side first” — its rows carry nw");
 ok(warmOptions.includes(""),
-   "the published rank is offered, spelled by the empty value the way ?view=deck is spelled " +
-   "by absence");
+   "the published rank is offered, spelled by the empty value the way ?view=list is spelled by absence");
+
+{
+  const shape = await page.evaluate((sel) => {
+    const rows = [...document.querySelectorAll(sel)];
+    const head = [...document.querySelectorAll("#bdHead [role=columnheader]")];
+    return {
+      head: head.length,
+      cells: rows.map((r) => r.querySelectorAll(":scope > [role=cell]").length),
+      sectors: rows.map((r) => (r.querySelector(".bd-sg") || { getAttribute: () => null }).getAttribute("aria-label")),
+      table: document.querySelector("#bdTable").getAttribute("role"),
+      rowgroup: document.querySelector("#flowsBody").getAttribute("role"),
+    };
+  }, ROWS);
+  eq(shape.table, "table", "the board is announced as a table");
+  eq(shape.rowgroup, "rowgroup", "and its body as the rowgroup #flowsBody");
+  ok(shape.cells.every((n) => n === shape.head),
+     `every row has exactly as many cells as the header has columns (${shape.head}) — a row one cell ` +
+     "short puts every heading one column off the value beneath it, silently");
+  assert.deepEqual(shape.sectors, SECTORS,
+    "each row carries its sector as a glyph whose accessible name is the sector itself"); checks++;
+}
+
+{
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('#bdHead [data-col="siP"]')).display !== "none");
+  const align = await page.evaluate(() => {
+    const row = document.querySelector("#flowsBody .bd-row[data-flip]");
+    const head = (k) => {
+      const range = document.createRange();
+      range.selectNodeContents(document.querySelector(`#bdHead [data-col="${k}"] .bd-hs`).firstChild);
+      return range.getBoundingClientRect();
+    };
+    const cell = (k) => row.querySelector(`[data-col="${k}"]`).getBoundingClientRect();
+    const right = ["cnv", "px", "netPrem", "hm", "ivr", "vrpP", "siP"].map((k) => [k, Math.abs(head(k).right - cell(k).right)]);
+    const score = Math.abs(head("s").left - row.querySelector('[data-col="s"] .bd-v').getBoundingClientRect().left);
+    const g = [...document.querySelectorAll('#flowsBody [data-col="g"] .bd-g')];
+    const text = (regime) => [...new Set(g.filter((n) => n.dataset.regime === regime).map((n) => n.textContent))];
+    return { right, score, long: text("long"), short: text("short") };
+  });
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  eq(align.right.length, 7, "all seven right-aligned columns are on screen at a desk width to be measured");
+  for (const [k, off] of align.right) {
+    ok(off <= 1.5,
+       `the ${k} heading ends where its figures end (${off.toFixed(1)}px apart): a sort arrow that takes up room ` +
+       "beside a right-aligned heading pushes it off the column it names");
+  }
+  ok(align.score <= 1.5,
+     `and Score starts where its figures start (${align.score.toFixed(1)}px apart) rather than centring over a ` +
+     "left-aligned column");
+  ok(align.long.length === 1 && align.short.length === 1 && align.long[0] !== align.short[0],
+     `the gamma regimes differ in their glyph and not only in hue (long ${align.long}, short ${align.short}), ` +
+     "so a reader without colour still tells a damping book from an amplifying one");
+  ok(/^\+/.test(align.long[0]) && /^\u2212/.test(align.short[0]), "positive gamma for long, a real minus for short");
+
+  const stale = await page.evaluate(() => {
+    const b = document.getElementById("bdStale");
+    return b ? { kind: b.dataset.stale, inTitle: !!b.closest(".ui-mod-t"), state: b.dataset.state } : null;
+  });
+  ok(stale && stale.kind === "session" && stale.inTitle && stale.state === "stale",
+     `a board whose session is weeks old wears the stale glyph in its title, stamped with WHICH outage it is (${JSON.stringify(stale)})`);
+  const staleSaid = await readInfo("#bdStale");
+  ok(/2026-09-03 session/.test(staleSaid), `and the glyph opens the sentence naming the aged session (${staleSaid.slice(0, 160)})`);
+}
+
+{
+  const sortState = () => page.evaluate(() => {
+    const on = [...document.querySelectorAll("#bdHead [aria-sort]")]
+      .filter((h) => h.getAttribute("aria-sort") !== "none").map((h) => h.dataset.col + ":" + h.getAttribute("aria-sort"));
+    return { on, first: document.querySelector("#flowsBody .bd-row .bd-open").textContent, sel: document.querySelector("#fbSort").value };
+  });
+  await page.click('#bdHead [data-col="netPrem"] .bd-hs');
+  const byPrem = await sortState();
+  assert.deepEqual(byPrem.on, ["netPrem:descending"], "a header click sorts by that column and says so on the header"); checks++;
+  eq(byPrem.first, "NVDA", "the largest net premium leads");
+  eq(byPrem.sel, "netPrem:desc", "and the order menu follows the header, so the two controls never disagree");
+  await page.click('#bdHead [data-col="netPrem"] .bd-hs');
+  eq((await sortState()).on[0], "netPrem:ascending", "a second click reverses it");
+  await page.click('#bdHead [data-col="netPrem"] .bd-hs');
+  const back = await sortState();
+  eq(back.on.length, 0, "a third click returns to the published rank, and no header claims a sort");
+  eq(back.first, "NVDA", "with the rank-one name back on top");
+}
 
 await page.goto(url("/flows/short/"), { waitUntil: "networkidle" });
-await page.waitForSelector(".fd-card");
+await page.waitForSelector(ROWS);
 const coldOptions = await page.evaluate(() => {
   const s = document.querySelector("#fbSort");
   return s ? Array.from(s.options).map((o) => o.value) : null;
 });
-ok(coldOptions !== null, "the control bar is built on /flows/short/ too, not only on long");
+ok(coldOptions !== null, "the control row is built on /flows/short/ too, not only on long");
 ok(!coldOptions.includes("dr:desc"),
    "the cold board does NOT offer the climb order — no row carries dr, and an option that " +
-   "silently leaves the board in the published order is a control that lies about having " +
-   "done something");
-ok(!coldOptions.includes("nw:desc"),
-   "nor the new-to-this-side order, for the same reason");
+   "silently leaves the board in the published order is a control that lies about having done something");
+ok(!coldOptions.includes("nw:desc"), "nor the new-to-this-side order, for the same reason");
 ok(coldOptions.includes("s:desc") && coldOptions.includes("t:asc"),
    "the orders the payload CAN produce are still offered — the gate is per option, not a " +
    "blanket refusal to build the select");
@@ -183,92 +286,78 @@ eq(warmOptions.length - coldOptions.length, 2,
 
 await page.selectOption("#fbSort", "t:asc");
 await page.waitForFunction(() =>
-  document.querySelector(".fd-card") &&
-  /AAPL/.test(document.querySelector(".fd-card").innerText));
-const ordered = await page.evaluate(() =>
-  Array.from(document.querySelectorAll(".fd-card"))
-    .map((c) => (c.innerText.match(/\b[A-Z]{2,5}\b/) || [""])[0]));
+  document.querySelector("#flowsBody .bd-open") &&
+  document.querySelector("#flowsBody .bd-open").textContent === "AAPL");
+const ordered = await page.$$eval("#flowsBody .bd-open", (a) => a.map((x) => x.textContent));
 const alphabetical = TICKERS.slice().sort();
-eq(ordered[0], alphabetical[0],
-   "choosing “ticker, A to Z” actually reorders the deck — the select is wired to " +
-   "applySortValue and not merely rendered");
+assert.deepEqual(ordered, alphabetical,
+  "choosing “Ticker” actually reorders the list — the select is wired and not merely rendered"); checks++;
 
 await page.setViewportSize({ width: 320, height: 800 });
-await page.waitForTimeout(120);
-const overflow = await page.evaluate(() =>
-  document.documentElement.scrollWidth - window.innerWidth);
+await page.waitForTimeout(160);
+const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
 ok(overflow <= 1,
    `no horizontal overflow at 320px with the controls present (measured ${overflow}px). This is ` +
-   "the measurement the sibling placement and the .st-field min-width:0 both exist for, and it " +
-   "is the one that regressed to 352px when the wrap was a flex child");
+   "the measurement the wrapping tools row exists for, and the one that regressed to 352px when the " +
+   "controls were a flex child");
 
 await page.setViewportSize({ width: 1280, height: 1000 });
 
 await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
-await page.waitForSelector(".fd-card");
+await page.waitForSelector(ROWS);
 const railFull = await page.evaluate(() => {
   const el = document.querySelector('[data-rail-count="long"]');
-  return { text: el ? el.textContent : null, hidden: el ? el.hidden : null };
+  const chip = [...document.querySelectorAll("#bdHero .ui-gchip")].find((c) => /Cleared/.test(c.textContent));
+  return { text: el ? el.textContent : null, hidden: el ? el.hidden : null, chip: chip ? chip.querySelector(".ui-chip-v").textContent : null };
 });
 eq(railFull.text, "8",
    "the rail badge for this side is filled by the page — the nav is served with the slot empty " +
    "and hidden because filling it there would cost a D1 row read per page view for a number the " +
    "page is about to fetch anyway, so the controller holding the payload fills it. This board " +
-   "publishes no `cleared`, so 8 here is also the FALLBACK arm: a board written before that " +
-   "field existed has nothing but its rows to state, and the section below is the one that " +
-   "proves the field is preferred when it is there");
+   "publishes no `cleared`, so 8 here is also the FALLBACK arm");
 eq(railFull.hidden, false, "and the slot is shown once it has a measurement in it");
+eq(railFull.chip, railFull.text,
+   "and the Cleared figure in the summary track is the same number as the badge: one population, one number");
 
 await put("board:long", { side: "long", rows: [], generatedAt: null, status: "pending" });
 await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
-
-await page.waitForFunction(() => !!document.querySelector("p.fb-empty[data-empty]"));
+await page.waitForSelector(".bd-silent[data-empty]");
 const railPending = await page.evaluate(() => {
   const el = document.querySelector('[data-rail-count="long"]');
-  const p = document.querySelector("p.fb-empty[data-empty]");
-  return {
-    text: el ? el.textContent : null,
-    hidden: el ? el.hidden : null,
-    kind: p.getAttribute("data-empty"),
-    msg: p.textContent,
-  };
+  const p = document.querySelector(".bd-silent[data-empty]");
+  return { text: el ? el.textContent : null, hidden: el ? el.hidden : null, kind: p.getAttribute("data-empty") };
 });
+const pendingSaid = await readInfo(".bd-silent[data-empty] [data-info]");
 eq(railPending.kind, "pending",
-   "the absent-row envelope is tagged PENDING — “not published yet” — and no longer wears the " +
-   "dagger that means “published, and this field is not on it”");
-ok(/No board has been published for this side yet/.test(railPending.msg),
-   "the pending payload reaches the branch that says no board has been published — the badge is " +
-   "being read BESIDE that sentence, so the sentence is confirmed on screen rather than assumed");
+   "the absent-row envelope is tagged PENDING — “not published yet” — and not “unavailable”, which means " +
+   "“published, and this field is not on it”");
+ok(/No board has been published for this side yet/.test(pendingSaid),
+   "the pending payload reaches the branch that says no board has been published, read from the silence's " +
+   "own disclosure where the sentence now lives");
 eq(railPending.hidden, true,
-   "the badge stays HIDDEN on a pending board. The fill at flows-board.js:1811 runs BEFORE the " +
-   "pending branch at :1840, and a pending payload has rows.length 0 by construction, so the " +
-   "unguarded String(rows.length) it replaced put a “0” in the rail beside a page saying the " +
-   "pipeline may never have published — a confident count of a market nobody measured");
+   "the badge stays HIDDEN on a pending board. A pending payload has rows.length 0 by construction, so an " +
+   "unguarded String(rows.length) would put a “0” in the rail beside a page saying the pipeline may never " +
+   "have published — a confident count of a market nobody measured");
 eq(railPending.text, "",
    "and the slot holds no text at all: a hidden element carrying “0” prints that zero the moment " +
-   "anything — a stylesheet, a reading tool, a future rail — disagrees about `hidden`");
+   "anything disagrees about `hidden`");
 
 await put("board:short", {
   ...board("short", false), rows: [], deadBand: 1, scored: 130, neutral: 124,
 });
 await page.goto(url("/flows/short/"), { waitUntil: "networkidle" });
-await page.waitForFunction(() => !!document.querySelector('[data-empty="quiet"]'));
+await page.waitForSelector('.bd-silent[data-empty="quiet"]');
 const railQuiet = await page.evaluate(() => {
   const el = document.querySelector('[data-rail-count="short"]');
-  return {
-    text: el ? el.textContent : null,
-    hidden: el ? el.hidden : null,
-
-    msg: document.querySelector('p.fb-empty[data-empty="quiet"]').textContent,
-  };
+  return { text: el ? el.textContent : null, hidden: el ? el.hidden : null };
 });
-ok(/130 names were scored/.test(railQuiet.msg),
-   "the measured-empty payload reaches the quiet branch, the one silence of the three that is a " +
+const quietMsg = await readInfo('.bd-silent[data-empty="quiet"] [data-info]');
+ok(/130 names were scored/.test(quietMsg),
+   "the measured-empty payload reaches the quiet branch, the one silence of the four that is a " +
    "statement about the market rather than about the plumbing");
 eq(railQuiet.text, "0",
    "a session that scored 130 names and placed none on this side badges “0”, because here the " +
-   "zero IS the reading — which is what `rows.length || isNum(payload.scored) > 0` buys over the " +
-   "bare `rows.length` the watch rail can afford");
+   "zero IS the reading");
 eq(railQuiet.hidden, false,
    "and that zero is VISIBLE: a rail that hides a measured emptiness collapses a quiet session " +
    "into an outage, the same error as the pending case with its sign reversed");
@@ -278,98 +367,94 @@ await put("board:long", {
   cleared: 12, shed: 4,
 });
 await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
-await page.waitForSelector(".fd-card");
-const capped = await page.evaluate(() => {
+await page.waitForSelector(ROWS);
+const capped = await page.evaluate((sel) => {
   const el = document.querySelector('[data-rail-count="long"]');
   return {
     text: el ? el.textContent : null,
     hidden: el ? el.hidden : null,
-    cards: document.querySelectorAll(".fd-card").length,
+    rows: document.querySelectorAll(sel).length,
     status: document.getElementById("flowsStatus").textContent,
   };
-});
-eq(capped.cards, 8,
+}, ROWS);
+eq(capped.rows, 8,
    "the page draws the eight rows the payload published, so it really is an excerpt of the " +
-   "twelve names that payload says cleared the band — a fixture where the two counts agreed " +
-   "could not tell the badge's two candidate sources apart");
+   "twelve names that payload says cleared the band");
 eq(capped.text, "12",
    "and the rail badges TWELVE, the population the publisher measured, rather than the eight " +
-   "this board had room for. A badge that silently means “as many as we chose to draw” is the " +
-   "truncation defect one element wide");
+   "this board had room for");
 eq(capped.hidden, false, "shown, because there is a measured population behind it");
 
 const said = /\((\d+) of (\d+) shown\)/.exec(capped.status);
 ok(said, `the status line states the pool it is an excerpt of at all (${capped.status})`);
 eq(said && said[2], capped.text,
-   "the population in the sentence and the population in the badge are the SAME number. " +
-   "flows-events.js:1126 states the rule for two routes — “two routes wording one quantity " +
-   "differently is how a reader concludes there are two quantities” — and two ELEMENTS on one " +
-   "page are no better than two routes");
-eq(said && said[1], String(capped.cards),
-   "while the numerator in that sentence is the rows actually drawn, so the clause reconciles " +
-   "the page against the pool instead of restating either of them twice");
+   "the population in the sentence and the population in the badge are the SAME number — two elements " +
+   "wording one quantity differently is how a reader concludes there are two quantities");
+eq(said && said[1], String(capped.rows),
+   "while the numerator in that sentence is the rows actually drawn");
+const capInfo = await readInfo("#bdMod .ui-mod-h .ui-info");
+ok(/Shown\s*8 of 12/.test(capInfo),
+   `and the board's disclosure states the same excerpt as a fact, so a sighted reader gets it too (${capInfo.slice(0, 200)})`);
 
 await put("board:short", {
   ...board("short", false), rows: [], deadBand: 1, scored: 130, neutral: 130,
   cleared: 0, shed: 0,
 });
 await page.goto(url("/flows/short/"), { waitUntil: "networkidle" });
-await page.waitForFunction(() => !!document.querySelector('[data-empty="quiet"]'));
+await page.waitForSelector('.bd-silent[data-empty="quiet"]');
 const railZero = await page.evaluate(() => {
   const el = document.querySelector('[data-rail-count="short"]');
   return { text: el ? el.textContent : null, hidden: el ? el.hidden : null };
 });
 eq(railZero.text, "0",
-   "a side that scored 130 names and cleared none of them badges the published “0” — the same " +
-   "reading the fallback arm above prints, now arriving from the field rather than from the " +
-   "absence of it");
+   "a side that scored 130 names and cleared none of them badges the published “0”");
 eq(railZero.hidden, false, "and it is visible, for the reason the fallback arm already gives");
 
-const readSilence = () => page.evaluate(() => {
-  const p = document.querySelector("p.fb-empty");
-  if (!p) return null;
-  const cs = getComputedStyle(p);
-  const before = getComputedStyle(p, "::before");
-  const status = document.getElementById("flowsStatus");
-  return {
-    kind: p.getAttribute("data-empty"),
-    text: p.textContent,
-    style: cs.borderLeftStyle,
-    width: cs.borderLeftWidth,
-    glyph: before.content,
-    align: cs.textAlign,
-    justify: cs.justifySelf,
-    statusKind: status.getAttribute("data-empty"),
-    statusText: status.textContent,
-  };
-});
+const readSilence = async () => {
+  const shape = await page.evaluate(() => {
+    const p = document.querySelector(".bd-silent[data-empty]");
+    if (!p) return null;
+    const use = p.querySelector("svg use");
+    const status = document.getElementById("flowsStatus");
+    return {
+      kind: p.getAttribute("data-empty"),
+      glyph: use ? use.getAttribute("href") : null,
+      word: (p.querySelector(".ui-silent-t") || {}).textContent || null,
+      label: p.getAttribute("aria-label"),
+      statusKind: status.getAttribute("data-empty"),
+      tableHidden: document.getElementById("bdTable").hidden,
+    };
+  });
+  shape.text = await readInfo(".bd-silent[data-empty] [data-info]");
+  return shape;
+};
 const silences = {};
 
-const waitMessage = () => page.waitForFunction(() => !!document.querySelector("p.fb-empty[data-empty]"));
+const waitSilence = () => page.waitForSelector(".bd-silent[data-empty]");
 
 await page.goto(url("/flows/short/"), { waitUntil: "networkidle" });
-await waitMessage();
+await waitSilence();
 silences.quiet = await readSilence();
 
 await put("board:long", { side: "long", rows: [], generatedAt: null, status: "pending" });
 await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
-await waitMessage();
+await waitSilence();
 silences.pending = await readSilence();
 
 await put("board:long", { side: "long", rows: [], generatedAt: null, status: "pending", reason: "read-failed" });
 await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
-await waitMessage();
+await waitSilence();
 silences.unreadable = await readSilence();
 
 await put("board:long", { side: "long", generatedAt: new Date().toISOString(),
   sessionDate: "2026-09-03", status: "ok", rows: [] });
 await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
-await waitMessage();
+await waitSilence();
 silences.unavailable = await readSilence();
 
 await page.route("**/api/flows/board*", (r) => r.abort());
 await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
-await waitMessage();
+await waitSilence();
 silences.failed = await readSilence();
 await page.unroute("**/api/flows/board*");
 
@@ -379,45 +464,30 @@ errors.splice(abortedAt, 1);
 eq(errors.filter((e) => /net::ERR_FAILED/.test(e)).length, 0,
    "and it failed exactly once — the unroute took, so nothing after it is measured against a dead API");
 
-for (const kind of ["quiet", "pending", "unreadable", "unavailable"]) {
+const FOUR = ["quiet", "pending", "unreadable", "unavailable"];
+for (const kind of FOUR) {
   eq(silences[kind].kind, kind, `the ${kind} fixture reaches the ${kind} branch and is tagged as such`);
   eq(silences[kind].statusKind, kind,
-     `and the status line above the deck carries the same data-empty="${kind}", so the silence is ` +
-     `marked where a screen reader is told about it first`);
-  eq(silences[kind].align, "left",
-     `the marked ${kind} paragraph is set flush left — a left-edge mark on a centred block floats ` +
-     `mid-grid, which is the same as no mark`);
-  eq(silences[kind].justify, "start",
-     `and it starts at the deck's left edge rather than centring in the grid, for the same reason`);
+     `and the status line carries the same data-empty="${kind}", so the silence is marked where a ` +
+     "screen reader is told about it first");
+  eq(silences[kind].tableHidden, true,
+     `the ${kind} stand-in replaces the table rather than sitting above an empty header row`);
+  ok(new RegExp("^" + silences[kind].word + ": ").test(silences[kind].label || ""),
+     `the ${kind} stand-in names its state in its accessible name (${silences[kind].label})`);
 }
-
-const shape = (k) => silences[k].style + " " + silences[k].width + " " + silences[k].glyph;
-eq(new Set(["quiet", "pending", "unreadable", "unavailable"].map(shape)).size, 4,
-   "the four silences resolve to four different treatments on the board's own paragraph — " +
-   ["quiet", "pending", "unreadable", "unavailable"].map((k) => k + "=" + shape(k)).join("; ") +
-   " — where before every one of them was the same centred grey sentence");
-eq(new Set(["quiet", "pending", "unreadable", "unavailable"]
-     .map((k) => silences[k].style + " " + silences[k].width)).size, 4,
-   "and they are separable on border STYLE and WIDTH alone, which carry no hue: the monochrome " +
-   "printout keeps all four apart");
-eq(silences.pending.style, "dotted", "pending is the dotted edge the taxonomy names (still coming)");
-eq(silences.pending.glyph, '"…"', "with the ellipsis glyph");
-eq(silences.unavailable.style, "dashed", "unavailable is the dashed edge (published, not on it)");
-eq(silences.unavailable.glyph, '"†"', "with the dagger");
-eq(silences.unreadable.style + " " + silences.unreadable.width, "solid 3px",
-   "unreadable is the wide solid edge — the one silence whose remedy is “refresh”");
-eq(silences.unreadable.glyph, '"×"', "with the cross");
-eq(silences.quiet.style + " " + silences.quiet.width, "solid 1px",
-   "quiet is a hairline: a reading about the market, at the same ink as any other note");
-eq(silences.quiet.glyph, "none", "and no glyph at all — it is not an alarm");
+eq(new Set(FOUR.map((k) => silences[k].glyph)).size, 4,
+   "the four silences resolve to four different GLYPHS — " + FOUR.map((k) => k + "=" + silences[k].glyph).join("; ") +
+   " — so they stay apart with every colour removed: a shape carries no hue");
+eq(new Set(FOUR.map((k) => silences[k].word)).size, 4, "and four different words beneath them");
+eq(silences.pending.glyph, "#g-pending", "pending is the dotted ring the silence system names (still coming)");
+eq(silences.unavailable.glyph, "#g-unavailable", "unavailable is the slashed circle (published, not on it)");
+eq(silences.unreadable.glyph, "#g-stop", "unreadable is the crossed circle — the one silence whose remedy is “refresh”");
+eq(silences.quiet.glyph, "#g-quiet", "quiet is the minus circle: a reading about the market, not an alarm");
 eq(silences.failed.kind, "unreadable",
-   "a fetch that did not come back is tagged UNREADABLE — the catch in render() used to tag it " +
-   "“unavailable”, the dagger that means “published, and this field is not on it”, which is the " +
-   "opposite of what happened");
-eq(shape("failed"), shape("unreadable"),
-   "and so it wears the SAME mark as a store read that threw: both are " +
-   "“nothing was read”, and the catch in render() used to tag it “unavailable” — the dagger " +
-   "that means “published, and this field is not on it”, which is the opposite of what happened");
+   "a fetch that did not come back is tagged UNREADABLE — never “unavailable”, which means “published, " +
+   "and this field is not on it”, the opposite of what happened");
+eq(silences.failed.glyph, silences.unreadable.glyph,
+   "and so it wears the SAME glyph as a store read that threw: both are “nothing was read”");
 eq(silences.failed.statusKind, "unreadable", "and the status line says so too on the failed fetch");
 
 ok(/has been published for this side yet/.test(silences.pending.text),
@@ -433,12 +503,19 @@ for (const kind of ["pending", "unreadable", "unavailable"]) {
 
 await put("board:long", board("long", true));
 await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
-await page.waitForSelector(".fd-card");
+await page.waitForSelector(ROWS);
 await page.fill("#fbQ", "ZZZZ");
-await page.waitForFunction(() => !!document.querySelector('p.fb-empty[data-empty="filtered"]'));
-const filteredMsg = await readSilence();
-eq(filteredMsg.style, "none", "the filtered paragraph carries no edge — it is not one of the four silences");
-eq(filteredMsg.glyph, "none", "and no glyph");
+await page.waitForSelector('#flowsBody [data-empty="filtered"]');
+const filteredMsg = await page.evaluate(() => {
+  const n = document.querySelector('#flowsBody [data-empty="filtered"]');
+  return {
+    glyph: !!n.querySelector("svg use"),
+    silent: !!document.querySelector(".bd-silent[data-empty]:not([hidden])") && !document.getElementById("bdEmpty").hidden,
+    statusKind: document.getElementById("flowsStatus").getAttribute("data-empty"),
+  };
+});
+eq(filteredMsg.glyph, false, "the filtered row carries no glyph — it is not one of the four silences");
+eq(filteredMsg.silent, false, "and no silence stand-in replaces the board");
 eq(filteredMsg.statusKind, null, "and the status line above it carries no silence either");
 
 await put("board:long", {
@@ -446,90 +523,166 @@ await put("board:long", {
   rows: TICKERS.map((t, i) => ({ ...boardRow(t, i, true), hm: i === 0 ? null : 0.0931, hr: 0.0368 })),
 });
 await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
-await page.waitForSelector(".fd-card");
+await page.waitForSelector(ROWS);
 const foot = await page.evaluate(() => {
-
-  const cardOf = (t) => Array.from(document.querySelectorAll(".fd-card"))
-    .find((c) => c.querySelector(".fd-tk").textContent === t);
-  const rowOf = (t) => Array.from(document.querySelectorAll("#flowsBody tr"))
-    .find((tr) => tr.querySelector(".fb-open").textContent === t);
-  const unpriced = cardOf("NVDA").querySelector(".fd-move");
-  const priced = cardOf("NVAX").querySelector(".fd-move");
-  const regimeCell = rowOf("NVAX").children[7];
+  const rowOf = (t) => [...document.querySelectorAll("#flowsBody .bd-row")]
+    .find((r) => r.querySelector(".bd-open").textContent === t);
+  const unpriced = rowOf("NVDA").querySelector('[data-col="hm"] .bd-move');
+  const priced = rowOf("NVAX").querySelector('[data-col="hm"] .bd-move');
+  const g = rowOf("NVAX").querySelector('[data-col="g"] .bd-g');
+  const down = document.querySelector('.bd-chg[data-tone="down"], .bd-n[data-tone="down"]');
   return {
     unpriced: {
       text: unpriced.textContent,
       empty: unpriced.getAttribute("data-empty"),
       title: unpriced.getAttribute("title") || "",
-      aria: cardOf("NVDA").getAttribute("aria-label") || "",
+      aria: rowOf("NVDA").querySelector(".bd-open").getAttribute("aria-label") || "",
     },
     priced: { text: priced.textContent, title: priced.getAttribute("title") || "" },
-    toned: document.querySelectorAll(".fd-foot .fb-neg, .fd-foot .fb-pos").length,
-    shortRegimes: Array.from(document.querySelectorAll(".fd-foot"))
-      .filter((f) => /short Γ/.test(f.textContent)).length,
-    cell: { text: regimeCell.textContent.trim(), cls: regimeCell.className },
+    tones: [...document.querySelectorAll('[data-col="g"] .bd-g')].map((n) => n.dataset.tone),
+    shortRegimes: document.querySelectorAll('[data-col="g"] .bd-g[data-regime="short"]').length,
+    regime: { aria: g.getAttribute("aria-label"), color: getComputedStyle(g).color },
+    downColor: down ? getComputedStyle(down).color : null,
     status: document.getElementById("flowsStatus").textContent,
     statusKind: document.getElementById("flowsStatus").getAttribute("data-empty"),
   };
 });
 eq(foot.unpriced.text, "±—",
    "a row with hm null prints “±—” in the priced-move slot, never “” — an unmeasured move and a " +
-   "missing field must not render the same way, and the em dash is this tile's mark for absence");
+   "missing field must not render the same way");
 eq(foot.unpriced.empty, "unavailable",
    "and the span is tagged unavailable: the board is published, and this field is not on this row");
 ok(/no usable 30-day implied volatility/.test(foot.unpriced.title),
    `the title says why the slot is empty rather than leaving a dash to be guessed at (${foot.unpriced.title})`);
 ok(/Priced move unavailable\./.test(foot.unpriced.aria),
-   "and the card's accessible name says the same, where before a screen reader heard nothing in " +
-   "that position — a silence indistinguishable from the field never having existed");
-eq(foot.priced.text, "±9.3% priced", "while a measured move still prints as it did");
+   "and the row's accessible name says the same, where before a screen reader heard nothing in that position");
+eq(foot.priced.text, "±9.3%", "while a measured move prints as the move");
 ok(/over 10 trading sessions/.test(foot.priced.title), "with its horizon in the title");
-eq(foot.toned, 0,
-   "no tile foot carries fb-neg or fb-pos: a short gamma regime is a dealer-hedging state, not a " +
-   "bearish lean, and 36 of 44 tiles on the emitted BULLISH board ended in red “short Γ” — hue " +
-   "saying bearish under text that says nothing of the kind");
-eq(foot.shortRegimes, 4, "the regime itself is still printed on every short-regime tile (4 of 8 here)");
-eq(foot.cell.text, "short Γ", "the table's Γ regime cell still prints the regime");
-ok(/fb-flat/.test(foot.cell.cls) && !/fb-neg|fb-pos/.test(foot.cell.cls),
-   `and carries the neutral class only, like the 52w, VRP and IVR cells beside it (${foot.cell.cls})`);
+ok(foot.tones.every((t) => t === "long" || t === "short"),
+   `every gamma cell carries the dealer tones long or short and never up or down (${foot.tones.join(",")}): a short ` +
+   "gamma regime is a hedging state, not a bearish lean — 36 of 44 tiles on an emitted BULLISH board once ended " +
+   "in red “short Γ”");
+ok(foot.downColor !== null && foot.regime.color !== foot.downColor,
+   `and the short regime is not painted the bearish red (${foot.regime.color} vs ${foot.downColor})`);
+eq(foot.shortRegimes, 4, "the regime is still drawn on every short-regime row (4 of 8 here)");
+ok(/short gamma/.test(foot.regime.aria), `and named in words for assistive tech (${foot.regime.aria})`);
 ok(/spread 0\.71 composite units \(95th pct of \|residual\|, not the score's scale\)/.test(foot.status),
    "the dispersion travels with its unit and its statistic: 0.71 is the 95th percentile of " +
    "|residual| in composite units, printed beside scores like +59 that are 100·tanh of a scaled " +
-   "residual — a bare “spread 0.71 (95th pct)” shared no scale with its neighbours and said so " +
-   `nowhere (${foot.status})`);
+   `residual (${foot.status})`);
 ok(/1 new to this side since the previously published board/.test(foot.status),
    "the warm board's memory clause is unchanged: one name new, against the row count this same line opens with");
 eq(foot.statusKind, null, "a board with rows carries no silence mark on its status line");
 
+{
+  const strip = await page.evaluate(() => [...document.querySelectorAll('#flowsBody [data-col="strip"]')]
+    .map((c) => ({ text: c.textContent.trim(), svg: !!c.querySelector("svg") })));
+  ok(strip.every((c) => c.text === "—" && !c.svg),
+     "with no score trace published, every five-session cell is an em dash and no strip is drawn — a strip of " +
+     "zero-height bars would read as five flat sessions");
+  const head = await page.evaluate(() => {
+    const cell = (k) => document.querySelector(`#bdHead [data-col="${k}"]`);
+    return {
+      vrp: cell("vrpP").querySelector(".ui-state") ? cell("vrpP").querySelector(".ui-state").dataset.state : null,
+      si: cell("siP").querySelector(".ui-state") ? cell("siP").querySelector(".ui-state").dataset.state : null,
+      vrpCells: [...document.querySelectorAll('#flowsBody [data-col="vrpP"]')].map((c) => c.textContent.trim()),
+    };
+  });
+  eq(head.vrp, "pending",
+     "the cross-section columns carry ONE pending glyph in their header while the universe key is not published, " +
+     "rather than a glyph in every cell");
+  eq(head.si, "pending", "on both of them");
+  ok(head.vrpCells.every((t) => t === "—"), "and their cells are em dashes, never zeros");
+}
+
+{
+  await put("scoretrack", { v: 2, status: "ok", sessionDate: "2026-09-03",
+    names: [{ t: "NVDA", s: [5, 20, null, 80, -40, 0] }, { t: "NVAX", s: [10, null, null, null, null, null] }] });
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForSelector('#flowsBody [data-col="strip"] svg');
+  const bars = await page.evaluate(() => {
+    const cell = (t) => [...document.querySelectorAll("#flowsBody .bd-row")].find((r) => r.querySelector(".bd-open").textContent === t)
+      .querySelector('[data-col="strip"]');
+    const marks = [...cell("NVDA").querySelectorAll("svg rect, svg circle")].map((m) => ({
+      tag: m.tagName, cls: m.getAttribute("class") || "", h: Number(m.getAttribute("height") || 0), y: Number(m.getAttribute("y") || m.getAttribute("cy")),
+    }));
+    return { marks, mid: Number(cell("NVDA").querySelector("line").getAttribute("y1")), label: cell("NVDA").querySelector("[role=img]").getAttribute("aria-label"),
+      nvax: cell("NVAX").textContent.trim(), nvaxSvg: !!cell("NVAX").querySelector("svg") };
+  });
+  const [a, gap, b, c, z] = bars.marks;
+  ok(a.tag === "rect" && /up/.test(a.cls) && b.tag === "rect" && /up/.test(b.cls), "two positive sessions are bars above the line");
+  ok(Math.abs(b.h / a.h - 4) < 0.05,
+     `and their heights keep the scores' own ratio, 80 to 20 is four to one (${(b.h / a.h).toFixed(2)}): a square-root ` +
+     "scale would draw it two to one and make a strong session look like a mild one");
+  eq(gap.tag, "circle", "a session the name was not scored is a dot on the line, never a zero-height bar");
+  ok(/down/.test(c.cls) && c.y >= bars.mid - 0.01, "a negative session hangs below the line");
+  ok(/zero/.test(z.cls) && !/up|down/.test(z.cls) && /last/.test(z.cls),
+     "and a measured zero is its own neutral mark, neither side's colour — zero belongs to neither side");
+  ok(/\+20, not scored, \+80, \u221240, 0/.test(bars.label), `the strip reads the five sessions in words (${bars.label})`);
+  ok(bars.nvax === "—" && !bars.nvaxSvg,
+     "a name whose last five sessions were all unscored gets an em dash, not a strip of five dots");
+  await put("scoretrack", { v: 2, status: "pending", names: [] });
+}
+
+{
+  await put("board:long", { ...board("long", true), rows: TICKERS.map((t, i) => ({ ...boardRow(t, i, true), hy: i < 3, edte: 3, t: i === 2 ? "GOOGL" : t })) });
+  const readFlags = () => page.evaluate(() => [...document.querySelectorAll("#flowsBody .bd-nm-1")].flatMap((line) => {
+    const box = line.getBoundingClientRect();
+    return [...line.querySelectorAll(".bd-flag")].map((f) => {
+      const r = f.getBoundingClientRect();
+      const inside = r.left >= box.left - 0.5 && r.right <= box.right + 0.5 && r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5;
+      const outside = r.top >= box.bottom - 0.5 || r.left >= box.right - 0.5;
+      return { kind: f.dataset.kind, inside, outside };
+    });
+  }));
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ width, height: 800 });
+    await page.reload({ waitUntil: "networkidle" });
+    await page.waitForSelector(ROWS);
+    const flags = await readFlags();
+    ok(flags.length > 0 && flags.every((f) => f.inside || f.outside),
+       `at ${width}px every flag beside a ticker is either whole or wrapped out of sight — never cut mid-word (` +
+       flags.filter((f) => !f.inside && !f.outside).map((f) => f.kind).join(",") + ")");
+    if (width === 390) ok(flags.some((f) => f.kind === "hold" && f.inside), "and the hold mark still fits on a phone, as its glyph");
+  }
+  await put("board:long", board("long", true));
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForSelector(ROWS);
+}
+
 await put("board:short", board("short", false));
 await page.goto(url("/flows/short/"), { waitUntil: "networkidle" });
-await page.waitForSelector(".fd-card");
+await page.waitForSelector(ROWS);
 const cold = await page.evaluate(() => {
-  const note = document.querySelector(".fb-memnote");
+  const chip = document.getElementById("bdMem");
   return {
     status: document.getElementById("flowsStatus").textContent,
-    note: note ? { memory: note.getAttribute("data-memory"), text: note.textContent } : null,
+    memory: chip ? chip.getAttribute("data-memory") : null,
+    value: chip ? chip.querySelector(".ui-chip-v").textContent : null,
   };
 });
-ok(cold.note && cold.note.memory === "pre-memory",
-   "the cold board draws its memory note — the one statement of the missing comparison");
+const coldSaid = await readInfo("#bdMem");
+eq(cold.memory, "pre-memory",
+   "the cold board marks its New figure with the memory state — the one statement of the missing comparison");
+eq(cold.value, "—", "and the figure is an em dash, not a zero: no comparison happened");
+ok(/published before the board kept a memory/.test(coldSaid), `with the reason one tap away (${coldSaid.slice(0, 120)})`);
 ok(!/no comparison/i.test(cold.status),
    `and the status line does not restate it in a second wording (${cold.status})`);
 
 await put("board:short", { ...board("short", false), rows: [], deadBand: 1, scored: 100, neutral: 3 });
 await page.goto(url("/flows/short/"), { waitUntil: "networkidle" });
-await page.waitForFunction(() => !!document.querySelector('p.fb-empty[data-empty="quiet"]'));
-const quietSaid = await page.evaluate(() => document.querySelector("p.fb-empty").textContent);
+await page.waitForSelector('.bd-silent[data-empty="quiet"]');
+const quietSaid = await readInfo('.bd-silent[data-empty="quiet"] [data-info]');
 ok(/cleared the ±1 band this session\. 100 names were scored, 3 of them inside the band; the other side may hold the rest\./.test(quietSaid),
    `the quiet sentence states the band, the scored population and the neutral count, each from its own field (${quietSaid})`);
 ok(!/quiet session looks like/.test(quietSaid),
-   "and characterises the session as nothing — 3 of 100 inside the band is not a quiet session, " +
-   "and the sentence no longer says it is");
+   "and characterises the session as nothing — 3 of 100 inside the band is not a quiet session");
 
 await put("board:short", { ...board("short", false), rows: [], scored: 100 });
 await page.goto(url("/flows/short/"), { waitUntil: "networkidle" });
-await page.waitForFunction(() => !!document.querySelector('p.fb-empty[data-empty="quiet"]'));
-const quietBare = await page.evaluate(() => document.querySelector("p.fb-empty").textContent);
+await page.waitForSelector('.bd-silent[data-empty="quiet"]');
+const quietBare = await readInfo('.bd-silent[data-empty="quiet"] [data-info]');
 ok(/cleared the dead band this session\. 100 names were scored; the other side may hold the rest\./.test(quietBare),
    `with no band width and no neutral count published, the sentence names neither (${quietBare})`);
 ok(!/all of them|inside the band|±/.test(quietBare),
@@ -538,38 +691,163 @@ ok(!/all of them|inside the band|±/.test(quietBare),
 {
   await put("board:long", board("long", true));
   await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
-  await page.waitForSelector(".fd-card");
-
-  await page.waitForSelector("#flowsBody tr .fb-open", { state: "attached" });
-  const shapes = await page.evaluate(() => {
-    const read = (el, t, anchors) => ({
-      tag: el.tagName, href: el.getAttribute("href"), t,
-      pop: el.getAttribute("aria-haspopup"), dataT: el.dataset.t || null, anchors });
+  await page.waitForSelector(ROWS);
+  const rows = await page.evaluate(() => [...document.querySelectorAll("#flowsBody .bd-row[data-flip]")].map((r) => {
+    const open = r.querySelector(".bd-open");
     return {
-      deck: Array.from(document.querySelectorAll(".fd-card"),
-        (c) => read(c, c.querySelector(".fd-tk").textContent, 0)),
-      rows: Array.from(document.querySelectorAll("#flowsBody tr"), (tr) => {
-        const cell = tr.querySelector(".fb-tk"), open = cell.querySelector(".fb-open");
-        return read(open, open.textContent, cell.querySelectorAll("a").length);
-      }),
+      t: open.textContent, tag: open.tagName, href: open.getAttribute("href"),
+      pop: open.getAttribute("aria-haspopup"), dataT: open.dataset.t || null, anchors: r.querySelectorAll("a").length,
     };
+  }));
+  ok(rows.length > 0, `the list rendered rows (${rows.length})`);
+  for (const o of rows) {
+    eq(o.tag, "A", `row ${o.t}: its name is an anchor, not a button that opened a modal`);
+    eq(o.href, "/flows/ticker/?t=" + o.t + "&s=signal&from=long",
+       `row ${o.t}: links to its own reader, carrying the side (${o.href})`);
+    eq(o.pop, null, `row ${o.t}: announces no dialog, because there is none`);
+    eq(o.dataT, null, `row ${o.t}: carries no data-t for a delegation to find`);
+    eq(o.anchors, 1,
+       `row ${o.t}: the row offers ONE link and not two — the whole row is that link's target, so nothing ` +
+       "else in it needs to be one");
+  }
+  const hit = await page.evaluate(() => {
+    const r = document.querySelector("#flowsBody .bd-row[data-flip]");
+    const b = r.getBoundingClientRect();
+    const at = document.elementFromPoint(b.left + b.width * 0.55, b.top + b.height / 2);
+    return at && at.closest("a") ? at.closest("a").getAttribute("href") : null;
   });
-  ok(shapes.deck.length > 0 && shapes.rows.length > 0,
-     `both views rendered rows (${shapes.deck.length} cards, ${shapes.rows.length} rows)`);
-  for (const [view, list] of [["deck card", shapes.deck], ["row", shapes.rows]]) {
-    for (const o of list) {
-      eq(o.tag, "A", `${view} ${o.t}: is an anchor, not a button that opened a modal`);
-      eq(o.href, "/flows/ticker/?t=" + o.t + "&s=signal&from=long",
-         `${view} ${o.t}: links to its own reader, carrying the side (${o.href})`);
-      eq(o.pop, null, `${view} ${o.t}: announces no dialog, because there is none`);
-      eq(o.dataT, null, `${view} ${o.t}: carries no data-t for a delegation to find`);
+  ok(hit && /t=NVDA/.test(hit), `a tap anywhere across the row lands on its reader link (${hit})`);
+}
+
+{
+  await page.goto(url("/flows/long/?view=map"), { waitUntil: "networkidle" });
+  await page.waitForSelector(".bd-map-plot svg .tile");
+  const map = await page.evaluate(() => ({
+    tiles: document.querySelectorAll(".bd-map-plot svg .tile").length,
+    tableHidden: document.getElementById("bdTable").hidden,
+    selected: [...document.querySelectorAll("#bdMod .ui-seg-i")].map((b) => b.getAttribute("aria-selected")),
+    sectors: [...document.querySelectorAll(".bd-map-plot svg .sec")].map((t) => t.textContent),
+    viewBox: document.querySelector(".bd-map-plot svg").getAttribute("viewBox"),
+    width: Math.round(document.querySelector(".bd-map-plot svg").getBoundingClientRect().width),
+    par: document.querySelector(".bd-map-plot svg").getAttribute("preserveAspectRatio"),
+  }));
+  eq(map.tiles, 8, "?view=map draws one tile per published name");
+  eq(map.tableHidden, true, "and hides the list rather than stacking both");
+  assert.deepEqual(map.selected, ["false", "true"], "with Map selected in the segmented control"); checks++;
+  ok(map.sectors.includes("Technology"), `tiles are grouped under sector headers (${map.sectors.join(", ")})`);
+  eq(Number(map.viewBox.split(" ")[2]), map.width,
+     "the map's viewBox is its own pixel width, so a tile's area means the same thing at every size");
+  eq(map.par, null, "and it never stretches with preserveAspectRatio");
+  eq(new Set(map.sectors).size, map.sectors.length,
+     `no two sector headers read the same (${map.sectors.join(", ")}): a header shortened to its first word turned ` +
+     "Consumer Cyclical and Consumer Defensive into two headers both reading Consumer");
+  const tips = (await page.$$eval(".bd-map-plot svg .against", (ps) => ps.map((p) => p.getAttribute("d").match(/-?[\d.]+/g).map(Number))))
+    .map((n) => Math.sign(n[5] - n[1]));
+  ok(tips.length === 4 && tips.every((d) => d === 1),
+     `on the bullish map the four names with premium against the board carry a triangle pointing DOWN, the way that premium leans (${tips})`);
+
+  await page.focus(".bd-map-plot");
+  await page.keyboard.press("Home");
+  const ro = await page.evaluate(() => ({
+    on: document.querySelector(".bd-map-plot .bd-readout").classList.contains("is-on"),
+    text: document.querySelector(".bd-map-plot .bd-readout").textContent,
+    live: (document.getElementById("fxLive") || {}).textContent || "",
+  }));
+  ok(ro.on && /NVDA/.test(ro.text), `Home on the focused map reads the rank-one name (${ro.text})`);
+  ok(/NVDA/.test(ro.live), "and announces it to assistive tech");
+  await page.keyboard.press("ArrowRight");
+  ok(/NVAX/.test(await page.$eval(".bd-map-plot .bd-readout", (n) => n.textContent)),
+     "ArrowRight walks the tiles in rank order, not in layout order");
+  await Promise.all([page.waitForURL(/\/flows\/ticker\/\?t=NVAX/), page.keyboard.press("Enter")]);
+  ok(true, "Enter opens that name's reader");
+
+  await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
+  await page.waitForSelector(ROWS);
+  await page.click('#bdMod .ui-seg-i:nth-of-type(2)');
+  await page.waitForSelector(".bd-map-plot svg .tile");
+  ok(/view=map/.test(page.url()), "picking Map writes ?view=map, so the view survives a reload and a shared link");
+  await page.fill("#fbQ", "NV");
+  await page.waitForFunction(() => document.querySelectorAll(".bd-map-plot svg .tile").length === 2);
+  ok(true, "the filter narrows the map exactly as it narrows the list");
+
+  await put("board:short", board("short", false));
+  await page.goto(url("/flows/short/?view=map"), { waitUntil: "networkidle" });
+  await page.waitForSelector(".bd-map-plot svg .tile");
+  const bearTips = (await page.$$eval(".bd-map-plot svg .against", (ps) => ps.map((p) => p.getAttribute("d").match(/-?[\d.]+/g).map(Number))))
+    .map((n) => Math.sign(n[5] - n[1]));
+  ok(bearTips.length === 4 && bearTips.every((d) => d === -1),
+     `and on the bearish map the names carrying BOUGHT premium against it point UP (${bearTips}); one downward mark on ` +
+     "both boards read as selling on the board where it meant buying");
+}
+
+{
+  await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
+  await page.waitForSelector(ROWS);
+  const sides = await page.evaluate(() => {
+    const vw = window.innerWidth;
+    const all = [...document.querySelectorAll("#flowsBody [data-info], .flows-main [data-info], main [data-info]")]
+      .filter((b) => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.top > 0 && r.bottom < window.innerHeight; });
+    const mid = (b) => { const r = b.getBoundingClientRect(); return r.left + r.width / 2; };
+    const left = all.filter((b) => mid(b) < vw / 2).sort((a, b) => mid(a) - mid(b))[0];
+    const right = all.filter((b) => mid(b) >= vw / 2).sort((a, b) => mid(b) - mid(a))[0];
+    if (left) left.dataset.probe = "left";
+    if (right) right.dataset.probe = "right";
+    return { left: Boolean(left), right: Boolean(right) };
+  });
+  ok(sides.left && sides.right, "the board has an info button in each half of the page to open");
+  for (const side of ["left", "right"]) {
+    await page.click(`[data-probe="${side}"]`);
+    await page.waitForSelector("#fxPop:popover-open");
+    await page.waitForTimeout(250);
+    const g = await page.evaluate((sel) => {
+      const t = document.querySelector(sel).getBoundingClientRect(), p = document.getElementById("fxPop").getBoundingClientRect();
+      return { tl: t.left, tr: t.right, pl: p.left, pr: p.right, vw: window.innerWidth };
+    }, `[data-probe="${side}"]`);
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !document.querySelector("#fxPop:popover-open"));
+    if (side === "left") {
+      ok(g.pl >= g.tl - 2 && g.pr <= g.vw,
+         `a disclosure opened from the left half grows rightward from its button (button ${Math.round(g.tl)}px, ` +
+         `popover ${Math.round(g.pl)}-${Math.round(g.pr)}px), not back over the sidebar`);
+    } else {
+      ok(g.pr <= g.tr + 2 && g.pl >= 0,
+         `and one opened from the right half grows leftward and stays on screen (button ends ${Math.round(g.tr)}px, ` +
+         `popover ${Math.round(g.pl)}-${Math.round(g.pr)}px)`);
     }
   }
-  for (const r of shapes.rows) {
-    eq(r.anchors, 1,
-       `row ${r.t}: the name cell offers ONE link and not two — the arrow beside the ` +
-       "modal-opening button has nothing left to be an alternative to");
-  }
+}
+
+{
+  await put("board:long", board("long", true));
+  const lead = (session) => ({ v: 1, status: "ok", sessionDate: session, n: 2, rows: [
+    { t: "NVDA", id: "call-debit-spread", structure: "call debit spread", dir: "bull", grade: 3 },
+    { t: "AMD", id: "iron-condor", structure: "iron condor", dir: "neutral", grade: 2 },
+  ] });
+  const ideaRead = () => page.evaluate(() => ({
+    shown: document.getElementById("bdTable").dataset.idea,
+    marks: [...document.querySelectorAll("#flowsBody .bd-row")].map((r) => {
+      const g = r.querySelector(".bd-idea");
+      return g ? (r.querySelector('[data-col="t"]') || r).textContent.replace(/\s+/g, " ").trim() + " :: " + g.getAttribute("aria-label") : null;
+    }).filter(Boolean),
+  }));
+
+  await put("ideas", lead("2026-09-02"));
+  await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
+  await page.waitForSelector(ROWS);
+  const stale = await ideaRead();
+  eq(stale.shown, "0",
+     "ideas stamped with another session are not joined: yesterday's lead structure on today's board would sit " +
+     "beside a score it was never computed from");
+
+  await put("ideas", lead("2026-09-03"));
+  await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
+  await page.waitForSelector(ROWS);
+  const same = await ideaRead();
+  eq(same.shown, "1", "the idea column appears once the engine's ideas carry the board's own session");
+  eq(same.marks.length, 2, `on exactly the two names the engine led with a structure (${same.marks.join(" | ")})`);
+  ok(same.marks.some((m) => /NVDA.* :: .*call debit spread/i.test(m)) && same.marks.some((m) => /AMD.* :: .*iron condor/i.test(m)),
+     "each drawn as its own structure's payoff glyph, named for a screen reader");
+  await put("ideas", { v: 1, status: "quiet", sessionDate: "2026-09-03", n: 0, rows: [] });
 }
 
 eq(errors.length, 0,
@@ -578,16 +856,19 @@ eq(errors.length, 0,
 await browser.close();
 await server.stop();
 
-console.log(`✓ flows-board-render: ${checks} assertions — the control bar exists at all, the ` +
+console.log(`✓ flows-board-render: ${checks} assertions — the control row exists at all, the ` +
   `library it depends on is named before its symptoms, a denominator that stays silent until ` +
-  `it has something to say, a measured zero match distinguished from an empty board, orders ` +
-  `withheld exactly when the payload cannot produce them, a rail badge that is silent on a ` +
-  `pending board, prints its measured zero on a quiet one and its whole POOL on a board the ` +
-  `length cap truncated — the same number the sentence beside it reconciles against — no ` +
-  `overflow at 320px, four silences on the deck's own paragraph that are four shapes in ` +
-  `greyscale with the Worker's failed read told apart from a never-published side, a priced ` +
-  `move that prints its absence, a gamma regime no hue calls bearish, a dispersion that ` +
-  `carries its unit, one statement of a cold memory, a quiet sentence that counts and ` +
-  `passes no verdict, and every opener on BOTH views an anchor to that name's reader — ` +
-  `carrying the side it was read off, announcing no dialog, and offering one link per name ` +
-  `rather than the button-plus-arrow pair the retired modal needed`);
+  `it has something to say, a measured zero match distinguished from an empty board with a Clear ` +
+  `beside it, orders withheld exactly when the payload cannot produce them, headers that sort and ` +
+  `say so and sit on the edge of the figures they name, a gamma regime told apart without hue, a stale ` +
+  `glyph that names its session, a five-session strip drawn to a linear scale with gaps as dots and zero ` +
+  `as neither side, flags that are whole or out of sight on a phone, a rail badge that is silent on a pending board, prints its measured zero on a quiet one ` +
+  `and its whole POOL on a board the length cap truncated — the same number the sentence and the ` +
+  `summary track reconcile against — no overflow at 320px, four silences that are four glyphs in ` +
+  `greyscale with their sentences one tap away and the Worker's failed read told apart from a ` +
+  `never-published side, a priced move that prints its absence, a gamma regime no hue calls ` +
+  `bearish, a dispersion that carries its unit, one statement of a cold memory, a quiet sentence ` +
+  `that counts and passes no verdict, every row one anchor to that name's reader across its whole ` +
+  `width, and a map that tiles every name at its own pixel size, never prints two sector headers alike, ` +
+  `points each against-the-board triangle the way its premium leans, reads by keyboard in rank order ` +
+  `and follows the filter`);

@@ -73,6 +73,15 @@ const SURFACES = [
     label: "the region assembly", vars: ["events"] },
   { key: "scoretrack", file: "assets/js/flows-overview.js", at: "Promise.all([",
     label: "the region assembly", vars: ["track"] },
+
+  { key: "board:long", file: "assets/js/flows-board.js", fn: "render", vars: ["payload"] },
+  { key: "board:long", file: "assets/js/flows-board.js", fn: "sideHero", vars: ["payload"] },
+  { key: "board:short", file: "assets/js/flows-board.js", fn: "sideStatus", vars: ["payload"] },
+  { key: "board:long", file: "assets/js/flows-board.js", fn: "readMemoryBlock", vars: ["payload"] },
+  { key: "board:long", file: "assets/js/flows-board.js", fn: "statusFacts", vars: ["p"] },
+  { key: "board:watch", file: "assets/js/flows-board.js", fn: "watchHero", vars: ["payload"] },
+  { key: "board:watch", file: "assets/js/flows-board.js", fn: "watchStatus", vars: ["payload"] },
+  { key: "scoretrack", file: "assets/js/flows-board.js", fn: "takeTrack", vars: ["track"] },
 ];
 
 const OPTIONAL = {
@@ -82,6 +91,8 @@ const OPTIONAL = {
   pulse: { status: "the worker's pending envelope carries it" },
 
   political: { status: "the worker's pending envelope carries it" },
+
+  "board:long": { reason: "the worker's board route answers a store read that threw with { status: \"pending\", reason: \"read-failed\" }" },
 };
 
 const missingReport = [];
@@ -178,29 +189,35 @@ assert.deepEqual(missingReport, [],
     .filter((c) => c && c.engine && Array.isArray(c.engine.structures) && c.engine.structures.length);
   ok(cards.length > 0, `the dry run publishes cards whose engine block carries priced structures (${cards.length})`);
   const src = readFileSync(join(ROOT, "assets/js/flows-ticker.js"), "utf8");
-  const start = src.indexOf("function engineIdea(");
-  ok(start !== -1, "flows-ticker.js still defines engineIdea() — a rename silently stops this scan");
-  const scope = src.slice(start, src.indexOf("\n  function ", start + 1));
+  const IDEA_FNS = ["payoffPoints", "ideaFacts", "legRow", "engineIdeaCard", "standAside"];
+  const scope = IDEA_FNS.map((name) => {
+    const start = src.indexOf("  function " + name + "(");
+    ok(start !== -1, `flows-ticker.js still defines ${name}() — the engine idea and the stand-aside are drawn by these five, and a rename silently stops this scan`);
+    return src.slice(start, src.indexOf("\n  function ", start + 1));
+  }).join("\n");
   const reads = (v) => [...new Set([...scope.matchAll(new RegExp("\\b" + v + "\\.([A-Za-z_][A-Za-z0-9_]*)", "g"))]
-    .map((m) => m[1]).filter((k) => !["find", "map", "join", "replace", "filter", "slice"].includes(k)))];
+    .map((m) => m[1]).filter((k) => !["find", "map", "join", "replace", "filter", "slice", "some", "every", "length", "reduce", "concat"].includes(k)))];
   const surfaces = [["eng", (c) => [c.engine]], ["st", (c) => c.engine.structures],
     ["pr", (c) => c.engine.structures.map((x) => x.prob)], ["ev", (c) => c.engine.structures.map((x) => x.ev)],
     ["l", (c) => c.engine.structures.flatMap((x) => x.legs)], ["f", (c) => c.engine.facts]];
   const missing = [];
   for (const [v, pick] of surfaces) {
     const keys = reads(v);
-    ok(keys.length > 0, `engineIdea reads fields off \`${v}\` (${keys.join(", ")}) — zero reads would make this scan vacuous`);
+    ok(keys.length > 0, `the engine idea reads fields off \`${v}\` (${keys.join(", ")}) — zero reads would make this scan vacuous`);
     for (const c of cards) {
       for (const obj of pick(c)) {
         for (const k of keys) {
+          if (v === "st" && k === "grid" && !(c.engine.ideas || []).includes(obj.id)) continue;
           if (obj && typeof obj === "object" && Object.prototype.hasOwnProperty.call(obj, k)) { checks++; continue; }
-          missing.push(`${c.ticker}: engineIdea reads \`${v}.${k}\` and the engine block has no such key`);
+          missing.push(`${c.ticker}: the engine idea reads \`${v}.${k}\` and the engine block has no such key`);
         }
       }
     }
   }
   assert.deepEqual([...new Set(missing)], [],
     "every engine field the ticker's idea renderer reads by id is one the pipeline publishes:\n  " + [...new Set(missing)].join("\n  ")); checks++;
+  ok(cards.some((c) => c.engine.structures.some((x) => !(c.engine.ideas || []).includes(x.id) && !("grid" in x))),
+     "the scenario grid is published only on the ranked ideas, so the one exemption above is exercised: a structure the model picks off the unranked list has no grid, and payoffPoints() then draws the exact expiry payoff or nothing, never a curve from nowhere");
 }
 
 {
@@ -246,14 +263,13 @@ assert.deepEqual(missingReport, [],
      "renderer branch that only fails on the names nobody checked");
 
   const src = readFileSync(join(ROOT, "assets/js/flows-ticker.js"), "utf8");
-  const start = src.indexOf("function drawMarketRank(");
+  const start = src.indexOf("  function feedSection(");
   ok(start !== -1,
-     "assets/js/flows-ticker.js still carries the marketRank drawer — if it was " +
+     "assets/js/flows-ticker.js still carries the marketRank reader, feedSection() — if it was " +
      "renamed, this scan silently stopped checking it and the rename must update this suite");
-  const end = src.indexOf("const DRAW = {", start);
-  const code = src.slice(start, end)
-    .replace(/\/\*[\s\S]*?\*\//g, " ")
-    .replace(/([^:])\/\/[^\n]*/g, "$1");
+  const join0 = src.indexOf("    const mr = P.marketRank;");
+  ok(join0 !== -1, "and the Context module still reads the panel as `mr`");
+  const code = src.slice(start, src.indexOf("\n  function ", start + 1)) + "\n" + src.slice(join0, src.indexOf("\n  function ", join0));
 
   const readsOf = (v) => {
     const re = new RegExp("\\b" + v + "\\.([A-Za-z_][A-Za-z0-9_]*)", "g");
@@ -278,15 +294,15 @@ assert.deepEqual(missingReport, [],
   ok(readsOf("f").size >= 10,
      `the scan found the drawer's feed-field reads (${readsOf("f").size} of them) — zero ` +
      "would mean the block moved and this whole section is checking nothing");
-  ok(readsOf("panel").size >= 3,
-     `and its panel-field reads (${readsOf("panel").size} of them)`);
+  ok(readsOf("mr").size >= 3,
+     `and its panel-field reads (${readsOf("mr").size} of them)`);
 
   const panelKeys = new Set(Object.keys(okCard.panels.marketRank));
 
   panelKeys.add("reason");
-  for (const field of [...readsOf("panel")].sort()) {
+  for (const field of [...readsOf("mr")].sort()) {
     ok(panelKeys.has(field),
-       `the marketRank drawer reads panel.${field} and the emitted panel carries it ` +
+       `the marketRank reader reads panel.${field} and the emitted panel carries it ` +
        `(it has: ${[...panelKeys].sort().join(", ")})`);
   }
 
@@ -495,11 +511,12 @@ assert.deepEqual(missingReport, [],
     c.panels.variation.channels.vanna && c.panels.variation.channels.charm);
   ok(full, "an emitted card carries the hedging panel with every channel and its grid, so the full arm is measurable");
 
-  const src = readFileSync(join(ROOT, "assets/js/flows-drawers.js"), "utf8");
-  const start = src.indexOf("function renderVariation(");
-  ok(start !== -1, "assets/js/flows-drawers.js still carries the hedging-flow drawer");
-  const end = src.indexOf("function renderPremiumTrack(", start);
-  const code = src.slice(start, end).replace(/\/\*[\s\S]*?\*\//g, " ").replace(/([^:])\/\/[^\n]*/g, "$1");
+  const src = readFileSync(join(ROOT, "assets/js/flows-ticker.js"), "utf8");
+  const code = ["hedgeGridChart", "buildHedging"].map((name) => {
+    const start = src.indexOf("  function " + name + "(");
+    ok(start !== -1, `assets/js/flows-ticker.js still carries ${name}(), which draws the hedging module`);
+    return src.slice(start, src.indexOf("\n  function ", start + 1));
+  }).join("\n");
   const readsOf = (v) => {
     const out = new Set();
     for (const m of code.matchAll(new RegExp("\\b" + v + "\\.([A-Za-z_][A-Za-z0-9_]*)", "g"))) out.add(m[1]);
@@ -507,17 +524,17 @@ assert.deepEqual(missingReport, [],
   };
   const V = full.panels.variation;
   const TARGETS = [
-    ["panel", V], ["inputs", V.inputs], ["ch", V.channels], ["v", V.variance], ["g", V.grid], ["c", V.conventions],
+    ["V", V], ["I", V.inputs], ["ch", V.channels], ["G", V.grid],
   ];
   const missing = [];
   for (const [name, obj] of TARGETS) {
     const reads = readsOf(name);
     ok(reads.size > 0, `the drawer reads fields off \`${name}\` (${reads.size} of them)`);
     const keys = new Set(Object.keys(obj || {}));
-    if (name === "panel") keys.add("reason");
+    if (name === "V") keys.add("reason");
     for (const field of reads) {
       if (keys.has(field)) { checks++; continue; }
-      missing.push(`renderVariation reads ${name}.${field}, and the emitted ${name} has only ${[...keys].sort().join(", ")}`);
+      missing.push(`the hedging module reads ${name}.${field}, and the emitted ${name} has only ${[...keys].sort().join(", ")}`);
     }
   }
   const ch = V.channels;
@@ -646,6 +663,30 @@ assert.deepEqual(missingReport, [],
     }
   }
   ok(Array.isArray(regime.volRadar.carded), "the radar lists the carded names it reaches");
+  {
+    const ideas = emitted("ideas");
+    const longB = emitted("board:long");
+    ok(ideas && ideas.status === "ok" && Array.isArray(ideas.rows) && ideas.rows.length > 0,
+       "the pipeline publishes the engine's lead structure per engine card as its own key, after the cards leg — the " +
+       "boards are written and archived before the engine runs, so an idea cannot ride on a board row without the live " +
+       "board carrying a column its dated archive never will");
+    eq(ideas.sessionDate, longB && longB.sessionDate,
+       "stamped with the board's own session, which is what lets the board page refuse yesterday's ideas");
+    const shapeSrc = readFileSync(join(ROOT, "assets/js/flows-ui.js"), "utf8");
+    const shapes = new Set([...shapeSrc.slice(shapeSrc.indexOf("const SHAPES")).matchAll(/^\s*"([a-z ]+)":/gm)].map((m) => m[1]));
+    ok(shapes.size > 10, `the board glyph's shape names are read from the primitive (${shapes.size})`);
+    for (const r of ideas.rows) {
+      for (const k of ["t", "id", "structure", "dir", "grade"]) {
+        if (!Object.hasOwn(r, k)) missingReport.push(`ideas row lacks \`${k}\``);
+        else checks++;
+      }
+    }
+    ok(ideas.rows.some((r) => shapes.has(r.structure)),
+       `and a lead is named the way the board's payoff glyph looks it up (${ideas.rows.map((r) => r.structure).join(", ")})`);
+    const boardSrc = readFileSync(join(ROOT, "assets/js/flows-board.js"), "utf8");
+    ok(/\/api\/flows\/ideas/.test(boardSrc) && /ideas\.sessionDate === payload\.sessionDate/.test(boardSrc),
+       "the board page reads that key and joins it only when both carry the same session");
+  }
   ok(Buffer.byteLength(JSON.stringify(regime)) < 60 * 1024, "and the regime stays inside its 60KB plan budget");
   assert.deepEqual(missingReport.filter((m) => /^card-x|^card x\.vol|^regime/.test(m)), [],
     "every field the vol contract publishes is on every emitted arm:\n  " +

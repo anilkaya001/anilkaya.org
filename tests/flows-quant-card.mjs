@@ -326,6 +326,116 @@ const FACT_INPUT = () => ({
   const b = FQ.repriceStructure({ engine: plain, legs, expiry: "2026-10-23" });
   eq(JSON.stringify(b), JSON.stringify(a), "and the browser build re-prices a put spread exactly as the shared module does");
   near(FQ.black76(100, 0.99, 105, 0.3, 0.25, "C"), BS.black76(100, 0.99, 105, 0.3, 0.25, "C"), 0, "down to Black-76 itself");
+
+  const EXP = "2026-10-23";
+  const shaped = (type) => vendorChain({ seed: "lab" }).filter((r) => r.option_symbol.includes(code(EXP) + type)).map((r) => ({
+    sym: r.option_symbol, k: QC.parseSymbol(r.option_symbol).strike, bid: Number(r.nbbo_bid), ask: Number(r.nbbo_ask),
+    iv: Number(r.implied_volatility), vol: r.volume, oi: r.open_interest,
+  }));
+  const calls = shaped("C"), puts = shaped("P");
+  const rows = QC.bookRows(calls, puts, "SYN");
+  ok(rows.length === calls.length + puts.length && rows.every((r, i) => i === 0 || rows[i - 1].K <= r.K),
+     `the strategy route's book reads back into engine rows one per listed contract, strike-ordered (${rows.length})`);
+  const compact = QC.compactLaw(law);
+  const routeIn = { ticker: "SYN", asOfMs: AS_OF_MS + 5 * 3600 * 1000 + 777, spot: 100.37, rate: RATE, expiries: [{ expiry: EXP, rows }], facts,
+    state: { state: "pinned", direction: null, confidence: 2, ...STATE_STRUCTURES.pinned.rich }, pLaw: compact,
+    levels: { callWall: 105, putWall: 95, magnet: 100, flip: 99, maxPain: 100, atr: 2 }, event: null, atr: 2, fits: true };
+  const route = JSON.parse(JSON.stringify(QC.runCardEngine(routeIn)));
+  ok(route.fits.length === 1 && route.asOfMs === routeIn.asOfMs && route.stale === false && route.structures.length >= 2,
+     `with fits requested the block carries the fitted slice, the clock it was priced at and the stale flag (${route.structures.length} structures)`);
+  const labIn = {
+    asOfMs: route.asOfMs, spot: route.spot, facts: route.facts, state: route.state, pLaw: route.pLaw, levels: route.levels,
+    event: route.event, stale: route.stale, books: [{ fit: route.fits[0], rows }],
+  };
+  const setupB = FQ.labSetup(labIn), setupM = QC.labSetup(labIn);
+  let same = 0;
+  for (const s of route.structures) {
+    const cand = {
+      family: s.family, expiry: s.expiry, dir: s.dir, rules: s.rules,
+      legs: s.legs.map((l) => ({ type: l.type, K: l.k, side: l.side, qty: l.qty, expiry: l.expiry })),
+      snapped: s.legs.filter((l) => l.snapped).map((l) => ({ K: l.k, rule: l.snapped })),
+    };
+    const want = { ...s };
+    delete want.id;
+    const fromBundle = FQ.priceStructure(setupB, cand, { detail: !!s.grid });
+    const fromModule = ENGINE.priceStructure(setupM, cand, { detail: !!s.grid });
+    eq(JSON.stringify(fromBundle), JSON.stringify(want), `the page's engine re-prices ${s.id} (${s.family}) byte for byte as the Worker published it`);
+    eq(JSON.stringify(fromModule), JSON.stringify(want), `and so does the shared module the Worker runs (${s.id})`);
+    same++;
+  }
+  ok(same === route.structures.length && route.structures.some((s) => s.grid),
+     "every published structure, including one carrying its scenario grid, is reproduced in the page from the fit alone");
+  const putKs = rows.filter((r) => r.type === "P" && r.bid > 0 && r.ask >= r.bid).map((r) => r.K);
+  let spreads = 0;
+  for (let i = 1; i < putKs.length; i++) {
+    const cr = FQ.priceStructure(setupB, { family: "put-credit-spread", expiry: EXP,
+      legs: [{ type: "P", K: putKs[i], side: -1, qty: 1 }, { type: "P", K: putKs[i - 1], side: 1, qty: 1 }] });
+    if (!cr || !(cr.price.fill < 0) || cr.profitUnbounded || cr.lossUnbounded) continue;
+    spreads++;
+    eq(cr.maxProfit.toFixed(2), (-cr.price.fill * 100).toFixed(2),
+       `a put credit spread ${putKs[i]}/${putKs[i - 1]} prints its credit and its maximum profit as one number (${cr.price.fill} a share, ${cr.maxProfit} a lot)`);
+    eq(cr.capital.value.toFixed(2), (-cr.maxLoss).toFixed(2),
+       `and its capital is its maximum loss to the cent, whichever sign each was rounded from (${cr.capital.value} against ${cr.maxLoss})`);
+  }
+  ok(spreads >= 5, `the sweep priced enough credit spreads to mean something (${spreads})`);
+  const own =route.structures.find((s) => s.legs.length >= 2);
+  const fam = FQ.STRUCTURES.find((f) => f.id === own.family);
+  ok(fam && FQ.familyDirection(fam, route.state) !== undefined, "the catalogue and its direction rule ride the bundle");
+  const built = FQ.structureLegs(setupB, own.family, FQ.DELTA_TARGETS[own.family][0], EXP);
+  ok(built && built.legs.length === own.legs.length, `the page builds ${own.family} legs by delta from the same slice (${built && built.legs.length} legs)`);
+  const mid = FQ.priceStructure(setupB, { family: own.family, expiry: EXP, legs: built.legs, basis: "mid" });
+  const fill = FQ.priceStructure(setupB, { family: own.family, expiry: EXP, legs: built.legs });
+  near(mid.ev.q - fill.ev.q, (fill.price.fill - fill.price.mid) * 100, 0.02,
+       "a mid cost basis moves EV by exactly the quarter-spread the fill pays over the mid");
+  eq(fill.price, mid.price, "while the quoted prices it reports stay the market's");
+  const custom = FQ.priceStructure(setupB, { family: "custom", fam: { id: "custom", risk: "undefined", dir: "neutral" }, expiry: EXP,
+    legs: [{ type: "P", K: 95, side: -1, qty: 1 }] });
+  ok(custom && custom.capital.kind === "reg-t" && custom.grade <= 2, "a hand-built naked put is priced, capitalised on Reg-T and capped at grade 2");
+  const flat = QC.contractFit({ expiry: EXP, asOfMs: routeIn.asOfMs, spot: 100.37, rate: R, row: rows.find((r) => r.type === "P" && r.K === 95) });
+  const flatSet = FQ.labSetup({ ...labIn, books: [{ fit: flat, rows: rows.filter((r) => r.type === "P" && r.K === 95) }] });
+  const sp = FQ.priceStructure(flatSet, { family: "short-put", expiry: EXP, legs: [{ type: "P", K: 95, side: -1, qty: 1 }], basis: "mid" });
+  near(sp.legs[0].model, sp.legs[0].mid, 1e-4, "a desk line priced on its own contract's implied vol reproduces its mid");
+  ok(sp.gradeParts.fit === 1 && sp.prob.popQ > 0.5 && sp.prob.popP !== null, "on a flat slice graded 1, with a risk-neutral and a real-world chance of profit");
+  const shared = new Map();
+  let lines = 0, sameLines = 0;
+  for (const r of rows.filter((x) => x.type === "P" && x.bid > 0)) {
+    const fitR = QC.contractFit({ expiry: EXP, asOfMs: routeIn.asOfMs, spot: 100.37, rate: R, row: r });
+    if (!fitR) continue;
+    const cand = { family: "short-put", expiry: EXP, legs: [{ type: "P", K: r.K, side: -1, qty: 1 }], basis: "natural" };
+    const alone = FQ.priceStructure(FQ.labSetup({ ...labIn, books: [{ fit: fitR, rows: [r] }] }), cand);
+    const pooled = FQ.priceStructure(FQ.labSetup({ ...labIn, books: [{ fit: fitR, rows: [r] }], lawCache: shared }), cand);
+    lines++;
+    if (JSON.stringify(alone) === JSON.stringify(pooled)) sameLines++;
+  }
+  ok(lines >= 10 && sameLines === lines && shared.size === 1,
+     `a desk that shares one real-world law cache across its lines prices every one of them to the byte it prices alone (${sameLines} of ${lines}), from one law for the expiry rather than one per line (${shared.size})`);
+
+  const { READ_BUNDLE_ENTRY, READ_BUNDLE_OUT } = await import("../scripts/build-flows-quant-bundle.mjs");
+  const readFresh = await buildQuantBundle(READ_BUNDLE_ENTRY);
+  const readCommitted = fs.readFileSync(path.join(root, READ_BUNDLE_OUT), "utf8");
+  eq(readCommitted, readFresh, `${READ_BUNDLE_OUT} is exactly what the generator builds from the same shared modules; regenerate it, never edit it`);
+  ok(readCommitted.startsWith("var FlowsQuant=") && readCommitted.length * 3 < committed.length,
+     `the read build defines the same global at under a third of the full build (${readCommitted.length} against ${committed.length} bytes)`);
+  const readBox = { window: {} };
+  vm.runInNewContext(readCommitted + "\nwindow.FlowsQuant = FlowsQuant;", readBox);
+  const FR = readBox.window.FlowsQuant;
+  const tickerSrc = fs.readFileSync(path.join(root, "assets/js/flows-ticker.js"), "utf8");
+  const tickerUses = [...new Set([...tickerSrc.matchAll(/\bFQ\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1]))].sort();
+  ok(tickerUses.length >= 5, `the dossier reads the engine through FQ (${tickerUses.join(", ")})`);
+  for (const k of tickerUses) ok(typeof FR[k] === "function", `and the read build it loads exports ${k}, so no dossier chart falls back to its silence for want of a function`);
+  ok(typeof FR.repriceStructure !== "function" && typeof FR.priceStructure !== "function",
+     "while it carries no re-pricer: the dossier reads what the Worker priced and prices nothing itself");
+  const withSmile = plain.expiries.filter((e) => e && e.smile && e.forward);
+  ok(withSmile.length >= 1, `the card's engine block carries fitted smiles to read (${withSmile.length})`);
+  let readSame = 0, readN = 0;
+  for (const e of withSmile) {
+    const a = FQ.sliceFromSummary(e), b = FR.sliceFromSummary(e);
+    for (const x of [85, 95, 100, 105, 115]) {
+      readN++;
+      if (FQ.riskNeutralCdf(a, x) === FR.riskNeutralCdf(b, x) && FQ.sliceVolK(a, Math.log(x / 100)) === FR.sliceVolK(b, Math.log(x / 100))) readSame++;
+    }
+  }
+  eq(readSame, readN, `and both builds read every fitted smile to the same bit (${readSame} of ${readN} points)`);
 }
 
 console.log(`✓ flows-quant-card: ${n} assertions — vendor chain rows read once, in fractions and by the ticker's own series; ` +

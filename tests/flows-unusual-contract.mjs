@@ -862,8 +862,6 @@ const rebuild = (em) => {
 }
 
 {
-
-  const ALERT_COLUMNS = 10;
   const { chromium } = await import("playwright");
   const { signSession } = await import("../shared/session.js");
   const { startWorker, SESSION_SECRET, FLOWS_TEST_USER } =
@@ -886,7 +884,6 @@ const rebuild = (em) => {
       t, k, expiry, cp, vol, oi: 100, doi: 5, vor: vol / 100, bidPx: 1, askPx: 1.2,
       nlo: 1000, nhi: 1200, aggr: 10, lift: 0.6, iv: 0.3, m: 0.01, dte: 20, p: 0,
     };
-
     if (stage) row.st = stage;
     return row;
   };
@@ -907,13 +904,11 @@ const rebuild = (em) => {
     v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", refreshed: "nightly",
     seen: 2, shed: 0, cap: 50, coverage: { withContract: 2, calls: 1, puts: 1 },
     rows: [
-
       { t: "AAA", cp: "C", k: 100, exp: "2026-09-18", oc: "AAA260918C00100000",
         prem: 250000, askPrem: 200000, bidPrem: 50000, size: 800, trades: 12,
         sweep: true, floor: false, single: true, opening: null,
         spanStart: "2026-09-01T13:31:00Z", spanEnd: "2026-09-01T13:36:00Z",
         rule: "RepeatedHits", st: "long" },
-
       { t: "ZZZ", cp: "P", k: 20, exp: "2026-09-25", oc: "ZZZ260925P00020000",
         prem: 90000, askPrem: 10000, bidPrem: 80000, size: 300, trades: 4,
         sweep: false, floor: false, single: false, opening: false,
@@ -923,241 +918,216 @@ const rebuild = (em) => {
   });
 
   const browser = await chromium.launch();
-  try {
+  const newPage = async (options) => {
+    const p = await browser.newPage(Object.assign({ viewport: { width: 1280, height: 900 }, reducedMotion: "reduce" }, options || {}));
+    await p.context().addCookies([{ name: "flows_session", value: session, url: server.baseURL }]);
+    return p;
+  };
+  const load = async (p) => {
+    await p.goto(at("/flows/unusual/"), { waitUntil: "networkidle" });
+    await p.waitForFunction(() => !/^Loading/.test(document.getElementById("uaStatus").textContent) &&
+      !!document.getElementById("uaTimelineCard").dataset.state && !!document.getElementById("uaFeedCard").dataset.state);
+  };
+  const press = (p, label) => p.evaluate((l) => {
+    const b = [...document.querySelectorAll("#uaFilters .ui-seg-i, #uaFilters .fu-toggle")].find((x) => x.textContent.trim() === l);
+    b.click();
+    return !!b;
+  }, label);
+  const disclose = (p, selector) => p.evaluate(async (sel) => {
+    const b = document.querySelector(sel);
+    if (!b) return null;
+    b.click();
+    await new Promise((r) => setTimeout(r, 30));
+    const text = document.getElementById("fxPop") ? document.getElementById("fxPop").textContent : null;
+    window.FlowsUI.closeInfo();
+    return text;
+  }, selector);
+  const info = (p, card) => disclose(p, "#" + card + " .ui-mod-h > .ui-info");
+  const why = (p, card) => disclose(p, "#" + card + " .ui-silent button");
+  const lists = (p) => p.evaluate(() => ({
+    feed: [...document.querySelectorAll("#uaFeed .fu-crow:not(.fu-head)")].map((r) => r.dataset.t),
+    names: [...document.querySelectorAll("#uaNames .fu-nrow:not(.fu-head) .fu-tk b")].map((b) => b.textContent),
+    on: [...document.querySelectorAll("#uaTimeline .fu-b:not(.is-off)")].length,
+    bubbles: [...document.querySelectorAll("#uaTimeline .fu-b")].length,
+    note: document.getElementById("uaFilterNote").textContent,
+    overflow: document.documentElement.scrollWidth - window.innerWidth,
+  }));
 
-    const page = await browser.newPage({ viewport: { width: 320, height: 900 } });
+  try {
+    const page = await newPage({ viewport: { width: 320, height: 900 } });
     const thrown = [];
     page.on("pageerror", (e) => thrown.push(String(e)));
-    await page.context().addCookies([{
-      name: "flows_session", value: session, url: server.baseURL,
-    }]);
-    await page.goto(at("/flows/unusual/"), { waitUntil: "networkidle" });
-    await page.waitForSelector("#uaFeedBody tr");
+    await load(page);
 
-    const first = await page.evaluate(() => ({
-      overflow: document.documentElement.scrollWidth - window.innerWidth,
-      feedBoth: [...document.querySelectorAll("#uaFeedBody .ua-both")].length,
-      feedBothTitle: (document.querySelector("#uaFeedBody .ua-both") || {}).title || "",
-      alertBoth: [...document.querySelectorAll("#uaAlertsBody .ua-both")].length,
-      feedRows: document.querySelectorAll("#uaFeedBody tr").length,
-      alertRows: document.querySelectorAll("#uaAlertsBody tr").length,
-      alertHeads: document.querySelectorAll("#uaAlerts thead .fb-sort").length,
-      feedHeads: document.querySelectorAll("#uaFeed thead .fb-sort").length,
-      pressed: [...document.querySelectorAll("#uaFilters button")]
-        .map((b) => b.textContent + ":" + b.getAttribute("aria-pressed")),
-      stages: [...document.querySelectorAll("#uaFeedBody tr")]
-        .map((tr) => (tr.querySelector(".ua-stage") || {}).textContent || null),
-    }));
+    const first = await page.evaluate(() => {
+      const svg = document.querySelector("#uaTimeline svg");
+      const bothRows = [...document.querySelectorAll('#uaFeed .fu-crow[data-both="1"]')];
+      return {
+        overflow: document.documentElement.scrollWidth - window.innerWidth,
+        feedBoth: bothRows.length,
+        feedBothTitle: bothRows[0] ? bothRows[0].getAttribute("title") : "",
+        feedBothMark: bothRows[0] ? !!bothRows[0].querySelector(".fu-both") : false,
+        tabs: [...document.querySelectorAll("#uaFilters .ui-seg-i")].map((b) => b.textContent + ":" + b.getAttribute("aria-selected")),
+        both: document.querySelector("#uaFilters .fu-toggle").getAttribute("aria-pressed"),
+        stages: [...document.querySelectorAll("#uaFeed .fu-crow:not(.fu-head)")].map((r) => [r.dataset.stage || null, !!r.querySelector(".fu-side")]),
+        vb: svg ? svg.viewBox.baseVal.width : null, rectW: svg ? svg.getBoundingClientRect().width : null,
+        widthAttr: svg ? svg.getAttribute("width") : null,
+        bubbles: document.querySelectorAll("#uaTimeline .fu-b").length,
+      };
+    });
     eq(first.overflow, 0, "nothing overflows at 320px with the filter group on the page");
     eq(thrown.length, 0, `the page threw nothing: ${thrown.join("; ")}`);
 
-    eq(first.alertHeads, ALERT_COLUMNS,
-       "EVERY ALERTS HEADING IS A SORT CONTROL. This table was the newer, richer and " +
-       "fresher of the two on the page and was the one a reader could not rank at all — " +
-       "wireHeads opened with a guard on the feed table and served it alone");
-    eq(first.feedHeads, 10, "and the counter feed keeps its own, unchanged");
+    eq(first.bubbles, 2, "the timeline draws one bubble per flagged window that states a time");
+    eq(first.vb, first.rectW,
+       `one viewBox unit is one CSS pixel on the timeline: viewBox ${first.vb} units drawn in ` +
+       `${first.rectW}px. A stretched viewBox scales every label with it, and the chart goes on ` +
+       "looking exactly like a chart");
+    ok(first.widthAttr !== "100%", `and the width is a pixel count (${first.widthAttr}), never a per cent`);
 
     eq(first.feedBoth, 1,
        "exactly one counter-feed row is marked as also flagged by the vendor — a mark " +
        "that fired on every row, or on none, would pass a laxer assertion than this");
-    eq(first.alertBoth, 1, "and exactly one alerts row is marked reciprocally");
+    ok(first.feedBothMark, "and the mark is drawn on the row, not only carried in its data");
     ok(/RepeatedHits/.test(first.feedBothTitle),
-       "with the vendor's own rule named on the mark rather than left to a legend");
+       "with the vendor's own rule named on the row rather than left to a legend");
     ok(/premium/.test(first.feedBothTitle),
        "and the window's premium beside it, so the mark carries the reading and not just " +
        "the fact of a match");
-    deep(first.pressed, ["All:true", "Calls:false", "Puts:false", "Both feeds:false"],
-       "the filter group starts unfiltered and says so on every control");
+    deep(first.tabs, ["All:true", "Calls:false", "Puts:false"],
+       "the side control starts unfiltered and says so on every tab, exactly one selected");
+    eq(first.both, "false", "and the join toggle starts unpressed");
 
-    deep(first.stages, ["long", null],
-       "THE BOARD'S OWN VIEW REACHES THE COUNTER FEED'S NAME CELL, and only where the " +
-       "payload states one — a badge drawn unconditionally would look identical on the " +
-       "row that carries a stage and would be a fabrication on the row that does not");
+    deep(first.stages, [["long", true], [null, false]],
+       "THE BOARD'S OWN VIEW REACHES THE COUNTER FEED'S ROW, and only where the payload " +
+       "states one — a mark drawn unconditionally would look identical on the row that carries " +
+       "a stage and would be a fabrication on the row that does not");
 
-    await page.click("#uaFilters button:nth-child(3)");
-    const puts = await page.evaluate(() => ({
-      feed: [...document.querySelectorAll("#uaFeedBody tr th")]
-        .map((n) => (n.querySelector("a, span") || {}).textContent || null),
-      alerts: [...document.querySelectorAll("#uaAlertsBody tr th")]
-        .map((n) => n.firstChild.textContent),
-      note: document.getElementById("uaFilterNote").textContent,
-      overflow: document.documentElement.scrollWidth - window.innerWidth,
-    }));
+    await page.evaluate(() => { const c = document.querySelector("#uaTimeline .ui-chart"); c.focus(); c.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true })); });
+    const readout = await page.evaluate(() => document.querySelector("#uaTimeline .ui-readout").textContent);
+    ok(/AAA/.test(readout) && /9:31 AM/.test(readout),
+       `the keyboard reaches the first window in time order and the readout names it and its Eastern time — got: ${readout}`);
+
+    ok(await press(page, "Puts"), "the Puts tab is there to press");
+    const puts = await lists(page);
     deep(puts.feed, ["BBB"], "filtering to puts narrows the counter feed");
-    deep(puts.alerts, ["ZZZ"], "and the alerts table, from the same control");
-    ok(/1 of 2 flagged windows are drawn/.test(puts.note)
-       && /1 of 2 contracts are drawn/.test(puts.note),
-       `and the note states both drawn counts against both published ones, each table's ` +
-       `count in its own clause so a silent one can replace its own — got: ${puts.note}`);
+    deep(puts.names, ["ZZZ"], "and the flagged names, from the same control");
+    eq(puts.on, 1, "and the timeline dims the call bubble rather than deleting the session's shape");
+    eq(puts.bubbles, 2, "both bubbles stay drawn, one of them held back");
+    ok(/1 of 2 flagged windows are drawn/.test(puts.note) && /1 of 2 contracts are drawn/.test(puts.note),
+       `and the note states both drawn counts against both published ones — got: ${puts.note}`);
     ok(/published and hidden, not absent from the read/.test(puts.note),
-       "SO A NARROWED TABLE IS NEVER MISTAKEN FOR A THIN MARKET, which is the whole " +
+       "SO A NARROWED LIST IS NEVER MISTAKEN FOR A THIN MARKET, which is the whole " +
        "risk a filter introduces to a page that reports what a vendor did not send");
     eq(puts.overflow, 0, "and the filtered page still does not overflow at 320px");
 
-    await page.click("#uaFilters button:nth-child(1)");
-    await page.click("#uaFilters button:nth-child(4)");
-    const both = await page.evaluate(() => ({
-      feed: [...document.querySelectorAll("#uaFeedBody tr th")]
-        .map((n) => (n.querySelector("a, span") || {}).textContent || null),
-      alerts: [...document.querySelectorAll("#uaAlertsBody tr th")]
-        .map((n) => n.firstChild.textContent),
+    await press(page, "All");
+    await press(page, "Both feeds");
+    const both = await lists(page);
+    deep(both.feed, ["AAA"], "the counter feed narrows to the one contract both selections agree on");
+    deep(both.names, ["AAA"], "and so do the flagged names — two independent selections, one line");
+    eq(both.on, 1, "and exactly one bubble stays lit on the timeline, the reciprocal mark of the same match");
+    eq(await page.evaluate(() => document.querySelector("#uaFilters .fu-toggle").getAttribute("aria-pressed")), "true",
+       "with the toggle announcing that it is pressed");
+    await press(page, "Both feeds");
+    const restored = await lists(page);
+    eq(restored.on, 2, "releasing it restores every window");
+    deep(await page.evaluate(() => [...document.querySelectorAll("#uaNames .fu-nrow:not(.fu-head) .fu-tk b")].map((b) => b.textContent)), ["AAA", "ZZZ"],
+       "and the flagged names come back in the vendor's own premium order, largest first");
+    const spoken = await page.evaluate(() => new Promise((resolve) => {
+      const chart = document.querySelector("#uaTimeline .ui-chart");
+      const live = document.getElementById("fxLive");
+      let records = 0;
+      const watch = new MutationObserver((m) => { records += m.length; });
+      watch.observe(live, { childList: true, characterData: true, subtree: true });
+      chart.focus();
+      chart.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+      setTimeout(() => { watch.disconnect(); resolve({ records, text: live.textContent }); }, 60);
     }));
-    deep(both.feed, ["AAA"],
-      "the counter feed narrows to the one contract both selections agree on");
-    deep(both.alerts, ["AAA"],
-      "and so does the vendor's table — two independent selections, one line");
-
-    await page.click("#uaFilters button:nth-child(4)");
-    await page.click("#uaAlerts thead th:nth-child(3) .fb-sort");
-    const ranked = await page.evaluate(() => ({
-      order: [...document.querySelectorAll("#uaAlertsBody tr th")]
-        .map((n) => n.firstChild.textContent),
-      aria: document.querySelector("#uaAlerts thead th:nth-child(3)").getAttribute("aria-sort"),
-      others: [...document.querySelectorAll("#uaAlerts thead th")]
-        .map((n) => n.getAttribute("aria-sort")),
-      label: document.querySelector("#uaAlerts thead th:nth-child(3) .fb-sort")
-        .getAttribute("aria-label"),
-    }));
-    deep(ranked.order, ["AAA", "ZZZ"], "premium ranks the larger window first");
-    eq(ranked.aria, "descending", "with aria-sort carrying the state, not the glyph");
-    eq(ranked.others.filter((v) => v === "none").length, ALERT_COLUMNS - 1,
-       "and every other heading is explicitly reset — a stale attribute announces two " +
-       "sorted columns and there is only ever one");
-    ok(/activate to/.test(ranked.label),
-       "with an accessible name that names the action rather than the abbreviation");
-
-    await page.click("#uaAlerts thead th:nth-child(3) .fb-sort");
-    await page.click("#uaAlerts thead th:nth-child(3) .fb-sort");
-    const restored = await page.evaluate(() => ({
-      order: [...document.querySelectorAll("#uaAlertsBody tr th")]
-        .map((n) => n.firstChild.textContent),
-      aria: document.querySelector("#uaAlerts thead th:nth-child(3)").getAttribute("aria-sort"),
-    }));
-    deep(restored.order, ["AAA", "ZZZ"], "the third activation restores the published order");
-    eq(restored.aria, "none", "and reports no ranking at all");
+    eq(spoken.records, 1,
+       `ONE KEY PRESS IS ONE ANNOUNCEMENT, however many times the filters redrew the timeline (${spoken.records} ` +
+       "writes to the live region). A scrub wired again on every repaint keeps every earlier drawing's handler " +
+       "alive, and each of them reads its own detached readout aloud");
+    ok(/AAA/.test(spoken.text) && /9:31 AM/.test(spoken.text),
+       `and the one it makes reads the current drawing, which a redraw started again from its first window — got: ${spoken.text}`);
     eq(thrown.length, 0, `and nothing threw across the whole interaction: ${thrown.join("; ")}`);
     await page.close();
 
     await put("flowalerts", { v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", rows: null });
-    const broken = await browser.newPage({ viewport: { width: 320, height: 900 } });
-    await broken.context().addCookies([{
-      name: "flows_session", value: session, url: server.baseURL,
-    }]);
-    await broken.goto(at("/flows/unusual/"), { waitUntil: "networkidle" });
-    await broken.waitForSelector("#uaFeedBody tr");
-    await broken.click("#uaFilters button:nth-child(2)");
-    const unread = await broken.evaluate(() =>
-      document.getElementById("uaFilterNote").textContent);
-    ok(/flagged windows could not be read/.test(unread),
-       `an unreadable alerts payload is SAID, not counted — got: ${unread}`);
+    const broken = await newPage({ viewport: { width: 320, height: 900 } });
+    await load(broken);
+    await press(broken, "Calls");
+    const unread = await broken.evaluate(() => document.getElementById("uaFilterNote").textContent);
+    ok(/flagged windows could not be read/.test(unread), `an unreadable alerts payload is SAID, not counted — got: ${unread}`);
     ok(!/of 0 flagged windows/.test(unread),
-       "and specifically not reported as '0 of 0', which is a measurement of nothing " +
-       "printed as a measurement of the market");
+       "and specifically not reported as '0 of 0', which is a measurement of nothing printed as a measurement of the market");
     ok(/1 of 2 contracts are drawn/.test(unread),
-       "while the feed that DID answer still states its own two counts — one silence " +
-       "does not swallow the other table's measurement");
-
-    await broken.click("#uaFilters button:nth-child(4)");
-    const joinDead = await broken.evaluate(() =>
-      document.getElementById("uaFilterNote").textContent);
-    ok(/cannot be resolved at all/.test(joinDead),
-       `the join says it will never resolve rather than promising a load — got: ${joinDead}`);
+       "while the feed that DID answer still states its own two counts — one silence does not swallow the other's measurement");
+    await press(broken, "All");
+    await press(broken, "Both feeds");
+    const joinDead = await broken.evaluate(() => document.getElementById("uaFilterNote").textContent);
+    ok(/cannot be resolved at all/.test(joinDead), `the join says it will never resolve rather than promising a load — got: ${joinDead}`);
     ok(!/until both payloads have loaded/.test(joinDead),
-       "which is what it used to promise, indefinitely, about a payload that had already " +
-       "come back broken");
+       "which is what it used to promise, indefinitely, about a payload that had already come back broken");
     await broken.close();
 
     const ceilingNote = async (alerts) => {
       await put("flowalerts", alerts);
-      const p = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-      await p.context().addCookies([{
-        name: "flows_session", value: session, url: server.baseURL,
-      }]);
-      await p.goto(at("/flows/unusual/"), { waitUntil: "networkidle" });
-      await p.waitForSelector("#uaFilterNote");
-      const text = await p.evaluate(() =>
-        document.getElementById("uaFilterNote").textContent);
+      const p = await newPage();
+      await load(p);
+      const text = await p.evaluate(() => document.getElementById("uaFilterNote").textContent);
+      const pop = await info(p, "uaTimelineCard");
       await p.close();
-      return text;
+      return { text, pop };
     };
     const alertRow = { t: "AAPL", cp: "C", k: 200, exp: "2026-09-18", px: 1.2 };
 
-    const capped = await ceilingNote({
-      v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", rows: [alertRow],
-      vendorLimit: 200, vendorTruncated: true,
-    });
-    ok(/vendor's own ceiling/.test(capped),
-       `a truncated read says whose ceiling it hit — got: ${capped}`);
-    ok(/200/.test(capped),
-       "and names the limit, because a ceiling without its height is not a measurement");
-    ok(/ceiling rather than a market/.test(capped),
-       "and says what that does to the count: comparing it with another session compares " +
-       "two ceilings, which is the sentence the pipeline's own comment asks for");
+    const capped = await ceilingNote({ v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", rows: [alertRow], vendorLimit: 200, vendorTruncated: true });
+    ok(/vendor's own ceiling/.test(capped.text), `a truncated read says whose ceiling it hit — got: ${capped.text}`);
+    ok(/200/.test(capped.text), "and names the limit, because a ceiling without its height is not a measurement");
+    ok(/ceiling rather than a market/.test(capped.text),
+       "and says what that does to the count: comparing it with another session compares two ceilings");
+    ok(/ceiling rather than a market/.test(capped.pop || ""), "and the timeline's own disclosure carries the same sentence");
 
-    const fitted = await ceilingNote({
-      v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", rows: [alertRow],
-      vendorLimit: 200, vendorTruncated: false,
-    });
-    ok(/under the vendor's ceiling/.test(fitted),
-       `a read that fitted says so rather than staying silent — got: ${fitted}`);
-    ok(!/ceiling rather than a market/.test(fitted),
-       "and does NOT carry the truncation caveat, which would make every read look capped");
+    const fitted = await ceilingNote({ v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", rows: [alertRow], vendorLimit: 200, vendorTruncated: false });
+    ok(/under the vendor's ceiling/.test(fitted.text), `a read that fitted says so rather than staying silent — got: ${fitted.text}`);
+    ok(!/ceiling rather than a market/.test(fitted.text), "and does NOT carry the truncation caveat, which would make every read look capped");
 
-    const unstated = await ceilingNote({
-      v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", rows: [alertRow],
-    });
-    ok(/was not recorded/.test(unstated),
-       `a payload predating the fields says the ceiling was not recorded — got: ${unstated}`);
-    ok(!/under the vendor's ceiling/.test(unstated),
-       "and specifically does NOT claim the read came in under it: `!undefined` is true, " +
-       "so the naive test would have stated a measurement this run never made");
-    ok(/may be a ceiling rather than a market/.test(unstated),
-       "it warns rather than reassures, because an unmeasured cap is closer to a cap than " +
-       "to a clean read for anyone deciding whether to trust the count");
+    const unstated = await ceilingNote({ v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", rows: [alertRow] });
+    ok(/was not recorded/.test(unstated.text), `a payload predating the fields says the ceiling was not recorded — got: ${unstated.text}`);
+    ok(!/under the vendor's ceiling/.test(unstated.text),
+       "and specifically does NOT claim the read came in under it: `!undefined` is true, so the naive test would have " +
+       "stated a measurement this run never made");
+    ok(/may be a ceiling rather than a market/.test(unstated.text),
+       "it warns rather than reassures, because an unmeasured cap is closer to a cap than to a clean read");
 
-    const read = async (unusual, alerts, options, press) => {
+    const read = async (unusual, alerts, options, pressLabel) => {
       if (unusual !== null) await put("unusual", unusual);
       if (alerts !== null) await put("flowalerts", alerts);
-      const p = await browser.newPage(Object.assign(
-        { viewport: { width: 1280, height: 900 } }, options || {}));
-      await p.context().addCookies([{
-        name: "flows_session", value: session, url: server.baseURL,
-      }]);
-      await p.goto(at("/flows/unusual/"), { waitUntil: "networkidle" });
-      await p.waitForSelector("#uaStatus");
-
-      if (press) await p.click(press);
-      const out = await p.evaluate(() => {
-        const txt = (sel) => {
-          const n = document.querySelector(sel);
-          return n ? n.textContent : null;
-        };
-        const mark = (sel) => {
-          const n = document.querySelector(sel);
-          return n ? n.getAttribute("data-empty") : null;
-        };
-        return {
-          status: txt("#uaStatus"), statusMark: mark("#uaStatus"),
-          feedEmpty: txt("#uaFeedBody .flows-empty"),
-          feedMark: mark("#uaFeedBody .flows-empty"),
-          nameEmpty: txt("#uaNameBody .flows-empty"),
-          nameMark: mark("#uaNameBody .flows-empty"),
-          alertMark: mark("#uaAlertsBody .flows-empty"),
-          feedCap: txt("#uaFeedCap"), nameCap: txt("#uaNameCap"),
-          alertsCap: txt("#uaAlertsCap"), alertsNote: txt("#uaAlertsNote"),
-          stamp: txt("#uaAlertsStamp"), filterNote: txt("#uaFilterNote"),
-        };
-      });
+      const p = await newPage(options);
+      await load(p);
+      if (pressLabel) await press(p, pressLabel);
+      const out = await p.evaluate(() => ({
+        status: document.getElementById("uaStatus").textContent,
+        statusMark: document.getElementById("uaStatus").getAttribute("data-empty"),
+        feedMark: document.getElementById("uaFeedCard").dataset.state,
+        nameMark: document.getElementById("uaSurpriseCard").dataset.state,
+        alertMark: document.getElementById("uaTimelineCard").dataset.state,
+        filterNote: document.getElementById("uaFilterNote").textContent,
+      }));
+      out.feedWhy = await why(p, "uaFeedCard");
+      out.nameWhy = await why(p, "uaSurpriseCard");
+      out.feedPop = await info(p, "uaFeedCard");
+      out.namePop = await info(p, "uaSurpriseCard");
+      out.alertsPop = await info(p, "uaTimelineCard");
       await p.close();
       return out;
     };
 
-    const BASIS = { unit: "A contract counter, and not a trade.",
-                    date: "no date parameter, the span is unobserved" };
+    const BASIS = { unit: "A contract counter, and not a trade.", date: "no date parameter, the span is unobserved" };
     const LIVE_ALERTS = {
       v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", refreshed: "nightly",
-      seen: 4, shed: 0, cap: 50, rows: [{ t: "AAPL", cp: "C", k: 200,
-        exp: "2026-09-18", prem: 1000, size: 5, trades: 1 }],
+      seen: 4, shed: 0, cap: 50, rows: [{ t: "AAPL", cp: "C", k: 200, exp: "2026-09-18", prem: 1000, size: 5, trades: 1 }],
     };
 
     const noContracts = await read({
@@ -1167,298 +1137,179 @@ const rebuild = (em) => {
       names: { rows: [], universe: 2, ranked: 2, unranked: 0, shown: 0 },
       basis: BASIS,
     }, LIVE_ALERTS);
-
     eq(noContracts.statusMark, "unavailable",
-       "A PAYLOAD WITH NO `contracts` BLOCK IS THE FOURTH SILENCE, and the strip wears the " +
-       "dagger that says so. It used to wear no mark at all, which left the reader the " +
-       "prose and nothing else to tell a missing field from a measurement");
+       "A PAYLOAD WITH NO `contracts` BLOCK IS THE UNAVAILABLE SILENCE on the status line");
     ok(!/\d/.test(noContracts.status),
-       `AND IT CARRIES NO DIGIT. "0 contracts from 0 names, of 0 that cleared the floors" ` +
-       `is three counts taken off a block that is not on the wire — a zero nobody counted, ` +
-       `which is Number(null) === 0 with a denominator attached — got: ${noContracts.status}`);
-    eq(noContracts.feedMark, "unavailable",
-       "and the feed's own empty row carries the same mark rather than the quiet hairline");
-    ok(!/\bfloors\b/.test(String(noContracts.feedCap)),
-       `with no caption counting a population that was never published — got: ` +
-       `${noContracts.feedCap}`);
+       `AND IT CARRIES NO DIGIT. "0 contracts from 0 names" is three counts taken off a block that is not on the wire — got: ${noContracts.status}`);
+    eq(noContracts.feedMark, "unavailable", "and the feed module wears the unavailable glyph rather than the quiet one");
+    ok(!/floors/.test(String(noContracts.feedPop)),
+       `with no disclosure counting a population that was never published — got: ${noContracts.feedPop}`);
+    ok(!/Both tables show every row published/.test(noContracts.filterNote),
+       `THE REASSURANCE MAY NOT OUTLIVE THE FEED IT REASSURES ABOUT — got: ${noContracts.filterNote}`);
+    ok(/contracts are not on this payload/.test(noContracts.filterNote),
+       `and the unpressed note names the silence in the same words the filtered one uses — got: ${noContracts.filterNote}`);
 
-    ok(!/Both tables show every row published/.test(String(noContracts.filterNote)),
-       `THE REASSURANCE MAY NOT OUTLIVE THE FEED IT REASSURES ABOUT. "Both tables show ` +
-       `every row published" stood two elements under a feed cell reading "the contract ` +
-       `rows are not on this payload", in the DEFAULT view, with the honest sentence ` +
-       `reachable only by pressing a pill — got: ${noContracts.filterNote}`);
-    ok(/contracts are not on this payload/.test(String(noContracts.filterNote)),
-       `and the unpressed note names the silence in the same words the filtered one uses, ` +
-       `off the same tally, so the two sentences cannot disagree — got: ` +
-       `${noContracts.filterNote}`);
-
-    const noContractsFiltered = await read(null, null, null,
-      "#uaFilters button:nth-child(2)");
-    ok(/contracts are not on this payload/.test(String(noContractsFiltered.filterNote)),
-       `and the filter note names the absence rather than reporting "0 of 0 contracts are ` +
-       `drawn" from it — got: ${noContractsFiltered.filterNote}`);
-    ok(!/of 0 contracts are drawn/.test(String(noContractsFiltered.filterNote)),
-       "which is the same displayed zero the alerts side already refuses");
-    ok(!/could not be read/.test(String(noContractsFiltered.filterNote)),
-       "and it is NOT the broken-read sentence either: this payload arrived intact and " +
-       "parsed, and the two silences have to stay two");
+    const noContractsFiltered = await read(null, null, null, "Calls");
+    ok(/contracts are not on this payload/.test(noContractsFiltered.filterNote),
+       `and the filter note names the absence rather than reporting "0 of 0 contracts are drawn" — got: ${noContractsFiltered.filterNote}`);
+    ok(!/of 0 contracts are drawn/.test(noContractsFiltered.filterNote), "which is the same displayed zero the alerts side already refuses");
+    ok(!/could not be read/.test(noContractsFiltered.filterNote),
+       "and it is NOT the broken-read sentence either: this payload arrived intact, and the two silences have to stay two");
     eq(noContractsFiltered.feedMark, "unavailable",
-       "AND PRESSING A PILL DOES NOT ERASE THE WITHHOLDING. paintFeedRows blanks the body " +
-       "before it redraws, so over a feed with no published rows it wiped the cell that " +
-       "said why and left a blank table under a caption — which is worse than any of the " +
-       "four silences, because it says nothing at all");
+       "AND PRESSING A FILTER DOES NOT ERASE THE WITHHOLDING: the module still says why it is empty");
 
     const brokenContracts = await read({
       v: 2, generatedAt: "2026-09-01T06:00:00Z", sessionDate: "2026-08-31",
       readAt: "2026-09-01T06:00:00Z", status: "ok", namesSeen: 2,
-      contracts: { shown: 50, eligible: 5953, cap: 50, perName: 2,
-                   capBound: "rows", rows: null },
+      contracts: { shown: 50, eligible: 5953, cap: 50, perName: 2, capBound: "rows", rows: null },
       coverage: [{ t: "AAA", rows: 400 }],
       names: { rows: [], universe: 2, ranked: 2, unranked: 0, shown: 0 },
       basis: BASIS,
     }, LIVE_ALERTS);
-
     eq(brokenContracts.statusMark, "unreadable",
-       "A CONTRACTS BLOCK ON THE PAYLOAD WITH NO ROWS ARRAY IS THE CROSS, NOT THE DAGGER: " +
-       "published bytes this page could not parse, which is exactly what paintAlerts " +
-       "prints for the identical shape one panel above");
-    eq(brokenContracts.feedMark, "unreadable",
-       "and the feed's own empty row carries the same cross rather than the dagger that " +
-       "says a field is missing from the payload");
-    ok(brokenContracts.statusMark !== noContracts.statusMark,
-       "which is the whole point: the two shapes are two silences and wore one mark");
-    ok(!/carries no contracts block/.test(String(brokenContracts.status)),
-       `AND THE STRIP STATES NO FALSEHOOD ABOUT THE WIRE. The block is on this payload — ` +
-       `a reader can see the shown and the eligible on it — so "this payload carries no ` +
-       `contracts block" asserts something the guard never tested — got: ` +
-       `${brokenContracts.status}`);
-    ok(/no rows array/.test(String(brokenContracts.status)),
-       `it says what was read instead — got: ${brokenContracts.status}`);
-    ok(!/\d/.test(String(brokenContracts.status)),
-       `and still carries no digit: an unreadable list is not a licence to print the ` +
-       `counts beside it as though they described a drawn table — got: ` +
-       `${brokenContracts.status}`);
-    const brokenFiltered = await read(null, null, null, "#uaFilters button:nth-child(2)");
-    ok(/contracts could not be read/.test(String(brokenFiltered.filterNote)),
-       `and the filter note words it as the broken read it is — got: ` +
-       `${brokenFiltered.filterNote}`);
-    ok(!/contracts are not on this payload/.test(String(brokenFiltered.filterNote)),
-       "and never as the absence, which is the other half of the same collapse");
+       "A CONTRACTS BLOCK WITH NO ROWS ARRAY IS UNREADABLE, NOT UNAVAILABLE: published bytes this page could not parse");
+    eq(brokenContracts.feedMark, "withheld",
+       "and the module wears the withheld glyph rather than the unavailable one that says a field is missing");
+    ok(brokenContracts.feedMark !== noContracts.feedMark && brokenContracts.statusMark !== noContracts.statusMark,
+       "which is the whole point: the two shapes are two silences, on the status and on the module");
+    ok(!/carries no contracts block/.test(brokenContracts.status),
+       `AND THE STATUS STATES NO FALSEHOOD ABOUT THE WIRE — got: ${brokenContracts.status}`);
+    ok(/no rows array/.test(brokenContracts.status), `it says what was read instead — got: ${brokenContracts.status}`);
+    ok(/no rows array/.test(String(brokenContracts.feedWhy)), "and the module's Why says the same");
+    ok(!/\d/.test(brokenContracts.status),
+       `and still carries no digit: an unreadable list is not a licence to print the counts beside it — got: ${brokenContracts.status}`);
+    const brokenFiltered = await read(null, null, null, "Calls");
+    ok(/contracts could not be read/.test(brokenFiltered.filterNote),
+       `and the filter note words it as the broken read it is — got: ${brokenFiltered.filterNote}`);
+    ok(!/contracts are not on this payload/.test(brokenFiltered.filterNote), "and never as the absence");
 
     const noNames = await read({
       v: 2, generatedAt: "2026-09-01T06:00:00Z", sessionDate: "2026-08-31",
       readAt: "2026-09-01T06:00:00Z", status: "ok", namesSeen: 1,
-      contracts: { rows: [contract("AAA", "C", 100, "2026-09-18", 900, "long")],
-                   shown: 1, eligible: 1, cap: 60, perName: 30, capBound: "eligible" },
+      contracts: { rows: [contract("AAA", "C", 100, "2026-09-18", 900, "long")], shown: 1, eligible: 1, cap: 60, perName: 30, capBound: "eligible" },
       coverage: [{ t: "AAA", rows: 400 }],
       basis: BASIS,
     }, LIVE_ALERTS);
-
-    eq(noNames.nameMark, "unavailable",
-       "A MISSING NAME PANEL IS UNAVAILABLE, NOT QUIET. The panel used to print “No name " +
-       "carried both a call and a put thirty-day average, so none could be ranked” off a " +
-       "`names` block that is not on the payload — a finding about every screened name, " +
-       "published from an absence");
-    ok(!/thirty-day average/.test(String(noNames.nameEmpty)),
-       `so the quiet sentence specifically does not appear — got: ${noNames.nameEmpty}`);
-    ok(!/\d/.test(String(noNames.nameCap)),
-       `and no caption ranks 0 of 0 names — got: ${noNames.nameCap}`);
-    eq(noNames.statusMark, null,
-       "while the strip, whose contracts DID arrive, carries no mark at all: one silence " +
-       "does not spread to a panel that measured something");
-    ok(/\b1 contracts? from 1 name\b/.test(String(noNames.status)),
-       `and still states its own count — got: ${noNames.status}`);
-    ok(!/No name was ranked/.test(String(noNames.nameEmpty)),
-       `AND THE REPLACEMENT SENTENCE ASSERTS ONLY WHAT THE GUARD READ. "No name was ` +
-       `ranked and none was found unrankable" is a claim about the RUN, made off a guard ` +
-       `that tested \`rows\` — it is a second finding published from an absence, in the ` +
-       `place the first one was removed from — got: ${noNames.nameEmpty}`);
-    ok(/Both tables show every row published/.test(String(noNames.filterNote)),
-       "while a page whose two TABLES both answered keeps its reassurance: the name panel " +
-       "is not one of them, and gating that sentence on every panel would trade a false " +
-       "reassurance for a false alarm");
+    eq(noNames.nameMark, "unavailable", "A MISSING NAME PANEL IS UNAVAILABLE, NOT QUIET");
+    ok(!/thirty-day average/.test(String(noNames.nameWhy)), `so the quiet sentence specifically does not appear — got: ${noNames.nameWhy}`);
+    ok(!/Ranked/.test(String(noNames.namePop)), `and no disclosure ranks 0 of 0 names — got: ${noNames.namePop}`);
+    eq(noNames.statusMark, null, "while the status line, whose contracts DID arrive, carries no mark at all");
+    ok(/\b1 contracts? from 1 name\b/.test(noNames.status), `and still states its own count — got: ${noNames.status}`);
+    ok(!/No name was ranked/.test(String(noNames.nameWhy)), `AND THE REPLACEMENT SENTENCE ASSERTS ONLY WHAT THE GUARD READ — got: ${noNames.nameWhy}`);
+    ok(/Both tables show every row published/.test(noNames.filterNote),
+       "while a page whose two feeds both answered keeps its reassurance");
 
     const brokenNames = await read({
       v: 2, generatedAt: "2026-09-01T06:00:00Z", sessionDate: "2026-08-31",
       readAt: "2026-09-01T06:00:00Z", status: "ok", namesSeen: 1,
-      contracts: { rows: [contract("AAA", "C", 100, "2026-09-18", 900, "long")],
-                   shown: 1, eligible: 1, cap: 60, perName: 30, capBound: "eligible" },
+      contracts: { rows: [contract("AAA", "C", 100, "2026-09-18", 900, "long")], shown: 1, eligible: 1, cap: 60, perName: 30, capBound: "eligible" },
       coverage: [{ t: "AAA", rows: 400 }],
       names: { ranked: 40, universe: 420, unranked: 0, shown: 40, rows: null },
       basis: BASIS,
     }, LIVE_ALERTS);
-
-    eq(brokenNames.nameMark, "unreadable",
-       "A NAME PANEL WHOSE ROWS COULD NOT BE READ IS THE CROSS, NOT THE DAGGER — the same " +
-       "split the feed above makes, because the payload states 40 of 420 names ranked and " +
-       "the panel is not entitled to call that missing");
-    ok(!/No name was ranked/.test(String(brokenNames.nameEmpty)),
-       `and specifically does not report the run: this payload says 40 were ranked and 0 ` +
-       `were unrankable — got: ${brokenNames.nameEmpty}`);
-    ok(/no rows array/.test(String(brokenNames.nameEmpty)),
-       `it names what could not be read instead — got: ${brokenNames.nameEmpty}`);
+    eq(brokenNames.nameMark, "withheld", "A NAME PANEL WHOSE ROWS COULD NOT BE READ IS WITHHELD, NOT UNAVAILABLE");
+    ok(!/No name was ranked/.test(String(brokenNames.nameWhy)), `and specifically does not report the run — got: ${brokenNames.nameWhy}`);
+    ok(/no rows array/.test(String(brokenNames.nameWhy)), `it names what could not be read instead — got: ${brokenNames.nameWhy}`);
 
     const quiet = await read({
       v: 2, generatedAt: "2026-09-01T06:00:00Z", sessionDate: "2026-08-31",
       readAt: "2026-09-01T06:00:00Z", status: "quiet", namesSeen: 2,
-      contracts: { rows: [], shown: 0, eligible: 0, cap: 60, perName: 30,
-                   capBound: "eligible" },
+      contracts: { rows: [], shown: 0, eligible: 0, cap: 60, perName: 30, capBound: "eligible" },
       coverage: [{ t: "AAA", rows: 400 }],
       names: { rows: [], universe: 2, ranked: 0, unranked: 2, shown: 0 },
       basis: BASIS,
     }, LIVE_ALERTS);
-
-    eq(quiet.statusMark, "quiet",
-       "A CHAIN THAT CLEARED NOTHING IS THE ONE SILENCE THAT IS A READING, and it gets the " +
-       "hairline: no glyph, no colour, because it is a fact about the market and not about " +
-       "the payload or about this page");
-    eq(quiet.feedMark, "quiet", "and so does the feed's empty row");
-    eq(quiet.nameMark, "quiet",
-       "and the name panel's, where every count IS measured and every one of them is zero");
-    ok(/cleared both floors/.test(String(quiet.feedEmpty)),
-       `with the sentence that says whose chains those were — got: ${quiet.feedEmpty}`);
+    eq(quiet.statusMark, "quiet", "A CHAIN THAT CLEARED NOTHING IS THE ONE SILENCE THAT IS A READING");
+    eq(quiet.feedMark, "quiet", "and the feed module says so");
+    eq(quiet.nameMark, "quiet", "and the name panel's, where every count IS measured and every one of them is zero");
+    ok(/cleared both floors/.test(String(quiet.feedWhy)), `with the sentence that says whose chains those were — got: ${quiet.feedWhy}`);
 
     const unlabelled = await read({
       v: 2, generatedAt: "2026-09-01T06:00:00Z", sessionDate: "2026-08-31",
       readAt: "2026-09-01T06:00:00Z", status: "ok", namesSeen: 2,
-      contracts: { rows: [], shown: 0, eligible: 0, cap: 60, perName: 30,
-                   capBound: "eligible" },
+      contracts: { rows: [], shown: 0, eligible: 0, cap: 60, perName: 30, capBound: "eligible" },
       coverage: [{ t: "AAA", rows: 400 }],
       names: { rows: [], universe: 2, ranked: 0, unranked: 2, shown: 0 },
       basis: BASIS,
     }, LIVE_ALERTS);
-    eq(unlabelled.statusMark, "quiet",
-       "an empty rows array is the measured emptiness whether or not the payload also " +
-       "stamped itself quiet: the rows are the reading, the label is a weaker second " +
-       "assertion about the same fact");
-    eq(unlabelled.statusMark, quiet.statusMark,
-       "so the strip wears one mark for one state, rather than two for a sentence it " +
-       "prints identically either way");
-    eq(unlabelled.feedMark, "quiet",
-       "and the feed cell agrees with the strip above it, which is what disagreed before");
-    ok(/did not report the read as quiet/.test(String(unlabelled.feedEmpty)),
-       `while the SENTENCE still separates the two — got: ${unlabelled.feedEmpty}`);
+    eq(unlabelled.statusMark, "quiet", "an empty rows array is the measured emptiness whether or not the payload also stamped itself quiet");
+    eq(unlabelled.feedMark, "quiet", "and the module agrees with the status above it");
+    ok(/did not report the read as quiet/.test(String(unlabelled.feedWhy)), `while the SENTENCE still separates the two — got: ${unlabelled.feedWhy}`);
 
     const alertsPending = await read(null, { v: 2, status: "pending" });
-    eq(alertsPending.alertMark, "pending",
-       "AN UNPUBLISHED KEY IS PENDING: the dotted rule and the ellipsis, which is the only " +
-       "one of the four that says “come back”");
-
-    const alertsBroken = await read(null,
-      { v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", rows: null });
-    eq(alertsBroken.alertMark, "unreadable",
-       "a payload that arrived and carries no rows array is UNREADABLE — the cross and the " +
-       "widest rule, the one silence with a remedy the reader can act on");
-
-    const alertsQuiet = await read(null,
-      { v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", refreshed: "nightly",
-        seen: 0, shed: 0, cap: 50, rows: [] });
-    eq(alertsQuiet.alertMark, "quiet",
-       "and a read the vendor's rules flagged nothing in is QUIET, not broken: the three " +
-       "states shared one paragraph and now differ by a rule and a glyph as well as by " +
-       "their sentence");
-    const alertsQuietFiltered = await read(null, null, null,
-      "#uaFilters button:nth-child(2)");
-    eq(alertsQuietFiltered.alertMark, "quiet",
-       "AND PRESSING A PILL DOES NOT ERASE THE ALERTS SIDE'S SENTENCE EITHER. repaint() " +
-       "calls paintAlertRows on every press and paintAlertRows blanks the body before it " +
-       "redraws, so without the same empty-list guard the feed has, a reader who presses " +
-       "Calls over a quiet — or pending, or unreadable — alerts read is left with a blank " +
-       "table and no sentence at all, which is worse than any of the four silences");
+    eq(alertsPending.alertMark, "pending", "AN UNPUBLISHED KEY IS PENDING: the dotted ring, the one silence that says come back");
+    const alertsBroken = await read(null, { v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", rows: null });
+    eq(alertsBroken.alertMark, "withheld", "a payload that arrived and carries no rows array is WITHHELD — published bytes the page could not read");
+    const alertsQuiet = await read(null, { v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", refreshed: "nightly", seen: 0, shed: 0, cap: 50, rows: [] });
+    eq(alertsQuiet.alertMark, "quiet", "and a read the vendor's rules flagged nothing in is QUIET, not broken");
+    const alertsQuietFiltered = await read(null, null, null, "Calls");
+    eq(alertsQuietFiltered.alertMark, "quiet", "AND PRESSING A FILTER DOES NOT ERASE THE ALERTS SIDE'S SILENCE EITHER");
 
     const unusualPending = await read({ v: 2, status: "pending" }, LIVE_ALERTS);
-    eq(unusualPending.statusMark, "pending",
-       "THE STORE'S ORDINARY FIRST STATE IS THE DOTTED RULE AND THE ELLIPSIS, on this " +
-       "key exactly as on the alerts key: a run that has not happened yet is the one " +
-       "silence of the four that tells the reader to come back");
+    eq(unusualPending.statusMark, "pending", "THE STORE'S ORDINARY FIRST STATE IS PENDING on this key exactly as on the alerts key");
 
-    const dead = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-    await dead.context().addCookies([{
-      name: "flows_session", value: session, url: server.baseURL,
-    }]);
-    await dead.route("**/api/flows/unusual", (route) =>
-      route.fulfill({ status: 500, contentType: "text/plain", body: "no" }));
-    await dead.route("**/api/flows/flowalerts", (route) =>
-      route.fulfill({ status: 500, contentType: "text/plain", body: "no" }));
-    await dead.goto(at("/flows/unusual/"), { waitUntil: "networkidle" });
-    await dead.waitForSelector("#uaFeedBody .flows-empty");
-    const broke = await dead.evaluate(() => {
-      const mark = (sel) => {
-        const n = document.querySelector(sel);
-        return n ? n.getAttribute("data-empty") : null;
-      };
-      return {
-        statusMark: mark("#uaStatus"),
-        feedMark: mark("#uaFeedBody .flows-empty"),
-        nameMark: mark("#uaNameBody .flows-empty"),
-        basisMark: mark("#uaBasis .flows-empty"),
-        alertMark: mark("#uaAlertsBody .flows-empty"),
-        filterNote: (document.getElementById("uaFilterNote") || {}).textContent,
-      };
-    });
+    const dead = await newPage();
+    await dead.route("**/api/flows/unusual", (route) => route.fulfill({ status: 500, contentType: "text/plain", body: "no" }));
+    await dead.route("**/api/flows/flowalerts", (route) => route.fulfill({ status: 500, contentType: "text/plain", body: "no" }));
+    await load(dead);
+    const broke = await dead.evaluate(() => ({
+      statusMark: document.getElementById("uaStatus").getAttribute("data-empty"),
+      states: [...document.querySelectorAll(".fd-mod")].map((m) => m.id + ":" + m.dataset.state),
+      filterNote: document.getElementById("uaFilterNote").textContent,
+    }));
+    const deadFeedPop = await info(dead, "uaFeedCard");
     await dead.close();
-
-    eq(broke.statusMark, "unreadable", "the strip wears the cross when the fetch died");
-    eq(broke.feedMark, "unreadable", "and so does the contract feed's empty row");
-    eq(broke.nameMark, "unreadable", "and the name panel's");
-    eq(broke.basisMark, "unreadable",
-       "and the basis, which is the page's own account of its method and must not read " +
-       "as though the method were withheld");
-    eq(broke.alertMark, "unreadable",
-       "and the alerts panel, whose own fetch failed separately — one payload's failure " +
-       "is not the other's, and both are this page's to own");
-    ok(/flagged windows could not be read/.test(String(broke.filterNote)) &&
-       /contracts could not be read/.test(String(broke.filterNote)),
-       `while the filter note counts neither table — got: ${broke.filterNote}`);
+    eq(broke.statusMark, "unreadable", "the status wears the broken mark when the fetch died");
+    deep(broke.states, ["uaTimelineCard:unavailable", "uaNamesCard:unavailable", "uaUrgencyCard:unavailable", "uaFeedCard:unavailable", "uaSurpriseCard:unavailable"],
+       "and every module wears the unavailable glyph — not delivered — rather than any of them going quiet");
+    ok(/could not be read either/.test(String(deadFeedPop)),
+       "and the feed's method disclosure fails with it, rather than reading as though the method were withheld");
+    ok(/flagged windows could not be read/.test(broke.filterNote) && /contracts could not be read/.test(broke.filterNote),
+       `while the filter note counts neither — got: ${broke.filterNote}`);
 
     const NY = await read(null, LIVE_ALERTS, { timezoneId: "America/New_York" });
-    ok(/^Read 2026-09-01 06:00 UTC/.test(String(NY.stamp)),
-       `THE STAMP IS THE READ INSTANT IN UTC. It went through toLocaleTimeString, so a New ` +
-       `York reader saw "Read 02:00" above a note that printed the same instant as ` +
-       `"2026-09-01 06:00 UTC" and beside a Window column headed UTC — and an Istanbul ` +
-       `reader saw a different calendar day — got: ${NY.stamp}`);
-    ok(!/\b02:00\b/.test(String(NY.stamp)),
-       "and specifically not the local wall clock, which is a fourth number on a panel " +
-       "that already carries three readings of one instant");
-    ok(!/Read /.test(String(NY.alertsNote)),
-       `while the note below no longer repeats it: two "Read …" lines on one panel invite ` +
-       `the reading that they are two reads — got: ${NY.alertsNote}`);
-    ok(/vendor's own stated span/.test(String(NY.alertsNote)),
-       "keeping the fact the note owed the reader, which is the unit those spans are in");
+    ok(/Read2026-09-01 06:00 UTC/.test(String(NY.alertsPop)),
+       `THE STAMP IS THE READ INSTANT IN UTC, the same for a New York reader — got: ${String(NY.alertsPop).slice(0, 120)}`);
+    ok(!/\b02:00\b/.test(String(NY.alertsPop)), "and specifically not the local wall clock");
+    eq((String(NY.alertsPop).match(/Read\d/g) || []).length, 1,
+       "and it is stated ONCE: two Read lines on one panel invite the reading that they are two reads");
+    ok(/vendor's own stated span/.test(String(NY.alertsPop)), "keeping the fact owed the reader, which is the unit those spans are in");
 
-    const shedNone = await read(null, {
-      v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", seen: 4, shed: 0, cap: 50,
-      rows: [{ t: "AAPL", cp: "C", k: 200, exp: "2026-09-18", prem: 1000 }],
-    });
-    const shedUnknown = await read(null, {
-      v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", seen: 4, cap: 50,
-      rows: [{ t: "AAPL", cp: "C", k: 200, exp: "2026-09-18", prem: 1000 }],
-    });
-    ok(/not recorded on this payload/.test(String(shedUnknown.alertsCap)),
-       `AN UNCOUNTED SHED SAYS SO. \`isNum(alerts.shed) ?? 0\` turned an absent count into ` +
-       `a measured zero, so a payload published before \`shed\` shipped printed the caption ` +
-       `of a read the cap did not touch — got: ${shedUnknown.alertsCap}`);
-    ok(!/not recorded on this payload/.test(String(shedNone.alertsCap)),
-       `while a read the cap genuinely did not touch stays silent about it — got: ` +
-       `${shedNone.alertsCap}`);
-    ok(shedNone.alertsCap !== shedUnknown.alertsCap,
-       "which is the whole point: the two captions were byte-identical, and one of them " +
-       "was reporting a measurement nobody made");
+    const shedNone = await read(null, { v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", seen: 4, shed: 0, cap: 50, rows: [{ t: "AAPL", cp: "C", k: 200, exp: "2026-09-18", prem: 1000 }] });
+    const shedUnknown = await read(null, { v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", seen: 4, cap: 50, rows: [{ t: "AAPL", cp: "C", k: 200, exp: "2026-09-18", prem: 1000 }] });
+    ok(/Shed by the row capnot recorded on this payload/.test(String(shedUnknown.alertsPop)),
+       `AN UNCOUNTED SHED SAYS SO rather than turning an absent count into a measured zero — got: ${shedUnknown.alertsPop}`);
+    ok(/Shed by the row cap0/.test(String(shedNone.alertsPop)) && !/Shed by the row capnot recorded/.test(String(shedNone.alertsPop)),
+       "while a read the cap genuinely did not touch states its measured zero");
+    ok(shedNone.alertsPop !== shedUnknown.alertsPop, "which is the whole point: the two disclosures must differ");
 
-    const atCeiling = await read(null, {
-      v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", seen: 200, shed: 199, cap: 50,
-      vendorLimit: 200, vendorTruncated: true,
-      rows: [{ t: "AAPL", cp: "C", k: 200, exp: "2026-09-18", prem: 1000 }],
-    });
-    ok(/of at least 200 flagged windows/.test(String(atCeiling.alertsCap)),
-       `THE DENOMINATOR IS A FLOOR WHEN THE READ HIT THE VENDOR'S LIMIT. "1 of 200" reads ` +
-       `as a market; the population above that line is unknown and the caption prints the ` +
-       `bound it actually has — got: ${atCeiling.alertsCap}`);
-    ok(!/of at least/.test(String(shedNone.alertsCap)),
-       "while a read that did not hit the ceiling keeps its exact denominator — the floor " +
-       "is a qualification of one measurement, not a hedge on every one");
+    const atCeiling = await read(null, { v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", seen: 200, shed: 199, cap: 50, vendorLimit: 200, vendorTruncated: true, rows: [{ t: "AAPL", cp: "C", k: 200, exp: "2026-09-18", prem: 1000 }] });
+    ok(/of at least 200 flagged windows/.test(String(atCeiling.alertsPop)),
+       `THE DENOMINATOR IS A FLOOR WHEN THE READ HIT THE VENDOR'S LIMIT — got: ${atCeiling.alertsPop}`);
+    ok(!/of at least/.test(String(shedNone.alertsPop)), "while a read that did not hit the ceiling keeps its exact denominator");
+
+    await put("flowalerts", { v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", rows: [
+      { t: "AAA", cp: "C", k: 100, exp: "2026-09-18", prem: 250000, askPrem: 250000, spanStart: "2026-09-01T13:31:00Z" },
+      { t: "BBB", cp: "P", k: 50, exp: "2026-09-18", prem: 180000, spanStart: "2026-09-01T14:10:00Z" },
+    ] });
+    const askless = await newPage();
+    await load(askless);
+    const marks = await askless.evaluate(() => ({
+      bubbles: [...document.querySelectorAll("#uaTimeline .fu-b")].map((b) => ({ fill: b.getAttribute("fill-opacity"), dash: b.getAttribute("stroke-dasharray") })),
+      keys: [...document.querySelectorAll("#uaTimeline .ui-legend .ui-key")].map((k) => k.textContent),
+    }));
+    await askless.close();
+    const solid = marks.bubbles.find((b) => !b.dash), open = marks.bubbles.find((b) => b.dash);
+    ok(solid && Number(solid.fill) > 0.8, `a window the vendor put wholly at the ask is drawn solid (${JSON.stringify(marks.bubbles)})`);
+    ok(open && Number(open.fill) === 0,
+       "AND A WINDOW WITH NO ASK-SIDE PREMIUM ON IT IS NOT DRAWN AS A LOW ASK SHARE. The fill used to stand a null in " +
+       "for a fifth of the premium, which is the ring the legend reads as dollars that were not at the ask — a reading " +
+       "the vendor never sent — so it is an open dashed outline instead");
+    ok(marks.keys.includes("Ask not stated"), `with a key of its own, only when such a window is drawn (${marks.keys.join(", ")})`);
+    ok(!marks.keys.some((k) => /bid/i.test(k)),
+       "and no key names the bid: a thin fill means the premium was not attributed to the ask, which is not a claim " +
+       "that it was attributed to the bid");
   } finally {
-
     await browser.close();
     await server.stop();
   }
@@ -1509,21 +1360,4 @@ console.log(`✓ flows-unusual: ${checks} assertions — a ranking key finite be
   `prose with four named exceptions and no weakened regex, one parse of every contract ` +
   `symbol per chain counted through a getter rather than asserted from memory, the board's ` +
   `own stage threaded to the feed and OMITTED rather than nulled when absent, and — in a ` +
-  `browser at 320px — two payloads joined on the four-tuple they share with a mark that ` +
-  `fires on exactly the one contract both selections chose, a filter group both tables ` +
-  `honour whose note keeps a narrowed table from reading as a thin market, and an alerts ` +
-  `table that finally ranks, announces its ranking, and gives the vendor's order back, ` +
-  `and a filter note that says which table could not be read rather than counting it as zero, ` +
-  `and the four silences kept four: a payload with no contracts block marked unavailable and ` +
-  `carrying no digit rather than "0 contracts from 0 names", a missing name panel that is not ` +
-  `a quiet market, a chain that cleared nothing marked as the reading it is, the alerts key's ` +
-  `pending, unreadable and quiet states each with its own mark, one read instant stamped once ` +
-  `in UTC rather than three clocks on one panel, an uncounted row-cap shed that says so ` +
-  `instead of printing a zero, a denominator that prints as a floor when the read hit the ` +
-  `vendor's own ceiling, a contracts block and a name panel each split between the field ` +
-  `that is not on the payload and the one whose rows could not be read — so the dagger and ` +
-  `the cross never stand in for one another and no sentence claims more than its guard ` +
-  `tested — a reassurance that does not outlive the feed it reassures about, on the default ` +
-  `screen and not behind a pill, two painters whose sentence survives a pill press, and ` +
-  `a fetch that never answered wearing the cross on the strip, on both tables, on the ` +
-  `basis and on the alerts panel rather than any of them going quiet`);
+  `browser at 320px — two payloads joined on the four-tuple they share with a mark that fires on exactly the one contract both selections chose and a timeline that lights exactly its one window when the join is pressed, a filter group both feeds honour whose note keeps a narrowed list from reading as a thin market, a timeline drawn one viewBox unit to one CSS pixel whose keyboard reads the first window in time order, a filter note that says which feed could not be read rather than counting it as zero, and the silences kept apart: a payload with no contracts block marked unavailable and carrying no digit, rows that could not be read marked withheld and unreadable, a missing name panel that is not a quiet market, a chain that cleared nothing marked as the reading it is, the alerts key's pending, withheld and quiet states each with its own glyph, one read instant stated once in UTC, an uncounted row-cap shed that says so instead of printing a zero, a denominator that prints as a floor when the read hit the vendor's own ceiling, a reassurance that does not outlive the feed it reassures about, filters that never erase a module's silence, and a fetch that never answered marking every module unavailable rather than any of them going quiet`);

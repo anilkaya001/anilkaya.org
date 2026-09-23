@@ -12,6 +12,7 @@ import * as ENGINE from "../shared/flows-quant-engine.js";
 import * as TIME from "../shared/flows-quant-time.js";
 import * as QC from "../shared/flows-quant-card.js";
 import { STATE_STRUCTURES } from "../shared/flows-neuron.js";
+import { ivConvention, parseOptionSymbol } from "../shared/flows-premium.js";
 import { stripComments } from "../scripts/strip-comments.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -534,10 +535,19 @@ function budget() {
     facts: Object.entries(facts).map(([id, f]) => ({ id, v: f.v, u: "frac", g: f.g })),
     state: rich, pLaw: normal.pLaw, levels: normal.levels, rate: { r: 0.04, method: "constant", n: 0 }, atr: 2.1,
   }));
-  const route = () => QC.runCardEngine({
-    ticker: "SYN", asOfMs: Date.parse(AS_OF), spot: 100, expiries: QC.chainRowsByExpiry(vendor, { ticker: "SYN" }).expiries,
-    rate: card.rate, facts: card.facts, state: card.state, pLaw: card.pLaw, levels: card.levels, atr: card.atr,
-  });
+  const shaped = (want) => {
+    const iv = ivConvention(vendor.map((r) => r.implied_volatility));
+    return vendor.map((r) => ({ r, p: parseOptionSymbol(r.option_symbol) })).filter(({ p }) => p && p.type === want)
+      .map(({ r, p }) => ({ sym: r.option_symbol, k: p.strike, bid: Number(r.nbbo_bid), ask: Number(r.nbbo_ask),
+        iv: Number(r.implied_volatility) / iv.divisor, vol: r.volume, oi: r.open_interest })).sort((a, b) => a.k - b.k);
+  };
+  const route = () => {
+    const calls = shaped("C"), puts = shaped("P");
+    return QC.runCardEngine({
+      ticker: "SYN", asOfMs: Date.parse(AS_OF), spot: 100, expiries: [{ expiry: normal.expiries[0].expiry, rows: QC.bookRows(calls, puts, "SYN") }],
+      rate: card.rate, facts: card.facts, state: card.state, pLaw: card.pLaw, levels: card.levels, atr: card.atr, fits: true,
+    });
+  };
   const probe = route();
   return {
     clock: CPU_CLOCK, window: PER_WINDOW, rows: worst.expiries[0].rows.length, worst: timeIt(worst), normal: timeIt(normal),

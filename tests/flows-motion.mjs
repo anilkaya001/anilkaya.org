@@ -50,26 +50,33 @@ try {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await page.goto(url("/flows/long/"), { waitUntil: "domcontentloaded" });
-    await page.waitForSelector(".fd-card", { timeout: 15000 });
+    await page.waitForSelector("#flowsBody .bd-row[data-flip]", { timeout: 15000 });
+    await page.waitForTimeout(400);
 
-    const card = page.locator(".fd-card").first();
-    const box = await card.boundingBox();
+    const row = page.locator("#flowsBody .bd-row[data-flip]").first();
+    const box = await row.boundingBox();
 
     await page.mouse.move(box.x + box.width * 0.25, box.y + box.height * 0.25);
     await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * 0.6, { steps: 8 });
     await page.waitForTimeout(300);
 
-    const state = await page.evaluate(() => {
-      const el = document.querySelector(".fd-card");
-      const style = getComputedStyle(el);
-      const after = getComputedStyle(el, "::after");
+    const state = await page.evaluate(async () => {
+      const el = document.querySelector("#flowsBody .bd-row[data-flip]");
+      const hover = getComputedStyle(el).transform;
+      const rank = () => document.querySelector('#bdHead [data-col="r"] .bd-hs');
+      rank().click();
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      rank().click();
+      const rows = [...document.querySelectorAll("#flowsBody .bd-row[data-flip]")];
+      const written = rows.filter((r) => /translate/.test(r.style.transform)).length;
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const flipping = rows.filter((r) => r.classList.contains("is-flip"));
       return {
-        transform: style.transform,
-        transition: style.transitionDuration,
-        mx: el.style.getPropertyValue("--mx"),
-        my: el.style.getPropertyValue("--my"),
-        afterDisplay: after.display,
-        afterOpacity: after.opacity,
+        transform: hover,
+        written,
+        flipping: flipping.length,
+        transition: flipping.length ? getComputedStyle(flipping[0]).transitionDuration : getComputedStyle(el).transitionDuration,
+        order: [...document.querySelectorAll("#flowsBody .bd-open")].map((a) => a.textContent).join(","),
       };
     });
     await context.close();
@@ -80,11 +87,17 @@ try {
     const fs = await import("node:fs");
     const mins = new Map(), maxes = new Map();
     let queries = 0;
-    for (const file of ["assets/css/base.css", "assets/css/flows.css"]) {
+    const sheets = ["assets/css/base.css", ...fs.readdirSync(new URL("../assets/css/", import.meta.url))
+      .filter((f) => /^flows(-[\w-]+)?\.css$/.test(f)).sort().map((f) => "assets/css/" + f)];
+    ok(sheets.length > 5, `the scan covers the shared sheets and every Flows route sheet (${sheets.length})`);
+    for (const file of sheets) {
       const css = fs.readFileSync(new URL("../" + file, import.meta.url), "utf8");
-      for (const m of css.matchAll(/@media\s*\(\s*(min|max)-width:\s*([\d.]+)rem\s*\)/g)) {
-        queries++;
-        (m[1] === "min" ? mins : maxes).set(m[2], file);
+      for (const q of css.matchAll(/@media[^{]*/g)) {
+        for (const m of q[0].matchAll(/\(\s*(min|max)-width:\s*([\d.]+)(rem|px)\s*\)/g)) {
+          queries++;
+          const px = String(+(Number(m[2]) * (m[3] === "rem" ? 16 : 1)).toFixed(2));
+          (m[1] === "min" ? mins : maxes).set(px, file);
+        }
       }
     }
 
@@ -92,8 +105,8 @@ try {
        `the width-query scan actually read the stylesheets (found ${queries})`);
     const both = [...maxes.keys()].filter((w) => mins.has(w));
     assert.deepEqual(both, [],
-      "no width is written as both a min and a max: a 60/60 pair matches at " +
-      "exactly 60rem and applies two tiers at once (write the max as X.99)");
+      "no width is written as both a min and a max, in either unit and across every Flows sheet: a " +
+      "60/60 pair matches at exactly 60rem and applies two tiers at once (write the max as X.99)");
     checks++;
   }
 
@@ -103,29 +116,25 @@ try {
 
     eq(s.transform, "none",
        `a reader who asked for no motion gets NO LIFT on hover (got ${s.transform})`);
-    eq(s.transition, "0s", `and nothing transitions (got ${s.transition})`);
-
-    eq(s.mx, "", "the pointer listener never attached, so no --mx was written");
-    eq(s.my, "", "nor --my");
-
-    eq(s.afterDisplay, "none", "and the spotlight layer is not rendered at all");
+    eq(s.order, "BBB,AAA", "the sort itself still happened — only the motion stood down");
+    eq(s.written, 0,
+       "and reordering the list wrote no transform at all: the JS never starts the slide, so the CSS " +
+       "has nothing to leak past it");
+    eq(s.flipping, 0, "and no row was marked as sliding");
   }
 
   {
     const s = await probe("no-preference");
     eq(s.errors.length, 0, `the board threw nothing with motion allowed (${s.errors[0] || ""})`);
-    ok(s.transform !== "none" && /matrix/.test(s.transform),
-       `hover lifts the card (got ${s.transform})`);
-    ok(parseFloat(s.transition) > 0, `with a real transition (got ${s.transition})`);
-
-    ok(s.mx !== "" && s.my !== "",
-       `and the pointer position reaches the card as custom properties (--mx ${s.mx}, --my ${s.my})`);
-
-    const mx = parseFloat(s.mx), my = parseFloat(s.my);
-    ok(mx > 55 && mx < 85, `--mx tracks the pointer's x (${mx}, expected near 70)`);
-    ok(my > 45 && my < 75, `--my tracks the pointer's y (${my}, expected near 60)`);
-    ok(s.afterDisplay !== "none", "and the spotlight layer is rendered");
-    ok(parseFloat(s.afterOpacity) > 0, "and visible while hovered");
+    eq(s.transform, "none",
+       `hover does not lift a row either (got ${s.transform}): a list row answers the pointer with a fill, ` +
+       "and motion is kept for a change in the data");
+    eq(s.order, "BBB,AAA", "the reversed rank reorders the rows");
+    ok(s.written > 0,
+       `with motion allowed a reorder starts every moved row from where it was (${s.written} rows written ` +
+       "a translate the moment the order changed)");
+    ok(s.flipping > 0 && parseFloat(s.transition) > 0,
+       `and slides it home on a real spring transition (${s.flipping} rows, ${s.transition})`);
   }
 
   {
@@ -204,62 +213,51 @@ try {
        "a measured-empty region carries no glyph: it is a reading, not an alarm");
 
     await page.goto(url("/flows/long/"), { waitUntil: "load" });
-    await page.waitForSelector(".fd-card", { timeout: 15000 });
+    await page.waitForSelector("#flowsBody .bd-row[data-flip]", { timeout: 15000 });
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.waitForTimeout(200);
     const leading = await page.evaluate(() => {
-      const wrap = document.querySelector("#flowsTableWrap");
-      if (wrap) wrap.hidden = false;
-      const cell = document.querySelector(".flows-table thead th");
+      const head = document.querySelector("#bdHead [role=columnheader]");
+      const cell = document.querySelector('#flowsBody [data-col="netPrem"] .bd-n');
       const body = getComputedStyle(document.body);
-      return cell ? {
-        lh: getComputedStyle(cell).lineHeight,
-        fs: getComputedStyle(cell).fontSize,
-        bodyLh: body.lineHeight,
-        bodyFs: body.fontSize,
+      const ratio = (el) => parseFloat(getComputedStyle(el).lineHeight) / parseFloat(getComputedStyle(el).fontSize);
+      return head && cell ? {
+        head: ratio(head), cell: ratio(cell),
+        bodyRatio: parseFloat(body.lineHeight) / parseFloat(body.fontSize),
       } : null;
     });
-    ok(leading, "the board's table exists to measure");
-    const ratio = parseFloat(leading.lh) / parseFloat(leading.fs);
-    ok(ratio > 1.1 && ratio < 1.4,
-       `a table cell is leaded at ${ratio.toFixed(2)}, not at the body's ` +
-       `${(parseFloat(leading.bodyLh) / parseFloat(leading.bodyFs)).toFixed(2)}`);
+    await page.setViewportSize({ width: 320, height: 720 });
+    ok(leading, "the board's header and a figure cell exist to measure");
+    ok(leading.head > 1.1 && leading.head < 1.4,
+       `a column header is leaded at ${leading.head.toFixed(2)}, not at the body's ${leading.bodyRatio.toFixed(2)}`);
+    ok(leading.cell > 1.1 && leading.cell < 1.4,
+       `and so is a figure in a row (${leading.cell.toFixed(2)}): cells are leaded for figures rather than for prose`);
 
     await page.goto(url("/flows/ticker/?t=AAA"), { waitUntil: "load" });
-    await page.waitForSelector(".ft-bar", { state: "attached", timeout: 15000 });
+    await page.waitForFunction(() => { const s = document.getElementById("ftStatus"); return s && s.textContent !== "Loading the name…"; }, null, { timeout: 15000 });
     const head = await page.evaluate(async () => {
-      const el = document.querySelector(".ft-head");
-      if (!el) return null;
-      const cs = getComputedStyle(el);
-      const out = { position: cs.position, top: cs.top };
-
-      const bar = el.closest(".ft-bar");
+      const bar = document.getElementById("fxBar"), title = document.getElementById("fxBarT");
+      const hero = document.querySelector("[data-fx-hero]"), name = document.querySelector("[data-fx-title]");
       const grid = document.getElementById("ftGrid");
-      out.inBar = !!bar;
-      if (!bar || !grid) return out;
-
-      const measure = async (pinned) => {
-
-        const sc = document.getElementById("ftScroll");
-        const scrollBox = sc && sc.scrollHeight > sc.clientHeight ? sc : window;
-        scrollBox.scrollTo({ top: 900, behavior: "instant" });
-        await new Promise((r) => setTimeout(r, 250));
-        const nav = document.querySelector(".topbar").getBoundingClientRect();
-        const box = el.getBoundingClientRect();
-        const bg = getComputedStyle(pinned).backgroundColor;
-        scrollBox.scrollTo({ top: 0, behavior: "instant" });
-        await new Promise((r) => setTimeout(r, 250));
-        return { headTop: box.top, height: box.height, navBottom: nav.bottom, bg };
-      };
-
-      grid.style.minHeight = "3000px";
+      if (!bar || !title || !hero || !name || !grid) return null;
+      if (!name.textContent.trim()) name.textContent = "AAA";
+      hero.hidden = false;
+      hero.classList.remove("is-loading");
       grid.hidden = false;
-
-      el.hidden = false;
-      bar.hidden = false;
-      out.composed = await measure(bar);
-
-      grid.parentNode.insertBefore(el, grid);
-      bar.hidden = true;
-      out.served = await measure(el);
+      grid.style.minHeight = "3000px";
+      await new Promise((r) => setTimeout(r, 120));
+      const cs = getComputedStyle(bar);
+      window.scrollTo({ top: 900, behavior: "instant" });
+      await new Promise((r) => setTimeout(r, 350));
+      const box = bar.getBoundingClientRect();
+      const heroBox = hero.getBoundingClientRect();
+      const ground = [getComputedStyle(bar).backgroundColor, getComputedStyle(bar, "::before").backgroundColor, getComputedStyle(bar, "::before").backdropFilter || ""];
+      const out = { position: cs.position, top: box.top, bottom: box.bottom, heroBottom: heroBox.bottom, scrolled: bar.classList.contains("is-scrolled"),
+        title: title.textContent.trim(), name: name.textContent.trim(), titleOpacity: Number(getComputedStyle(title).opacity), ground };
+      window.scrollTo({ top: 0, behavior: "instant" });
+      await new Promise((r) => setTimeout(r, 350));
+      out.restTitleOpacity = Number(getComputedStyle(title).opacity);
+      out.restScrolled = bar.classList.contains("is-scrolled");
       return out;
     });
 
@@ -271,28 +269,17 @@ try {
       "every element marked hidden is actually not laid out");
     checks++;
 
-    ok(head, "the ticker page emits its identity block");
-    eq(head.position, "sticky", "and it is pinned rather than scrolled away");
-    ok(head.inBar, "the controller re-parents it into the sticky bar");
-    ok(!/rgba\(0, 0, 0, 0\)/.test(head.composed.bg),
-       `[composed] the pinned box has a ground once it is pinned, or a chart's ink reads ` +
-       `through it (got ${head.composed.bg})`);
-    ok(!/rgba\(0, 0, 0, 0\)/.test(head.served.bg),
-       `[served] and so does the header when it is the pinned box itself ` +
-       `(got ${head.served.bg})`);
-
-    ok(head.composed.headTop >= 0 && head.composed.headTop < 400,
-       `[composed] the header is still on screen 900px down (top ${head.composed.headTop})`);
-    ok(head.served.headTop >= 0 && head.served.headTop < 400,
-       `[served] and so is the header the HTML ships, before the bar exists ` +
-       `(top ${head.served.headTop})`);
-
-    ok(head.composed.headTop >= head.composed.navBottom - 1,
-       `[composed] and it clears the fixed topbar (head ${head.composed.headTop} ` +
-       `vs nav bottom ${head.composed.navBottom})`);
-    ok(head.served.headTop >= head.served.navBottom - 1,
-       `[served] and so does the served shape — a sticky offset on this site is ` +
-       `never 0 (head ${head.served.headTop} vs nav bottom ${head.served.navBottom})`);
+    ok(head, "the ticker page emits its identity: a hero the toolbar watches and a title the toolbar mirrors");
+    ok(/sticky|fixed/.test(head.position), `and the toolbar that carries it once the hero is gone is pinned rather than scrolled away (${head.position})`);
+    ok(head.heroBottom < head.bottom, "900px down the hero has left the screen");
+    ok(head.scrolled, "and the toolbar knows it: it switches to its scrolled state");
+    eq(head.title, head.name, "and it names the page with the hero's own title, mirrored rather than restated");
+    ok(head.titleOpacity > 0.9, `and shows it (opacity ${head.titleOpacity})`);
+    ok(head.top >= 0 && head.top < 400, `the identity is still on screen 900px down (top ${head.top})`);
+    ok(head.ground.some((g) => g && !/rgba\(0, 0, 0, 0\)|^none$/.test(g)),
+       `the pinned bar has a ground, or a chart's ink reads through it (${head.ground.join(" | ")})`);
+    ok(!head.restScrolled && head.restTitleOpacity < 0.1,
+       "and back at the top the bar hides the title again, because the hero is saying it");
 
     await context.close();
   }
@@ -350,9 +337,10 @@ try {
     await context.close();
   }
 
-  console.log(`✓ flows-motion: ${checks} assertions — the deck card is the section's only ` +
-    `moving surface, and under reduced motion BOTH halves stand down: the CSS does not ` +
-    `transform and the JS does not attach, so neither can leak past the other. Plus the ` +
+  console.log(`✓ flows-motion: ${checks} assertions — a board row answers the pointer with a fill and ` +
+    `never a lift, and moves only when its order changes, and under reduced motion BOTH halves stand ` +
+    `down: the JS writes no transform and the CSS has no transition to run, so neither can leak past ` +
+    `the other. Plus the ` +
     `stylesheet's own contracts, which had nowhere else to be asserted: zero horizontal ` +
     `overflow at 320px on all twelve gated routes (regression.mjs covers the public pages ` +
     `and no Flows route), four visually distinct silences that stay distinct with every ` +

@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { signSession } from "../shared/session.js";
-import { TICKER_PANELS } from "../shared/flows-panels.js";
 import { archiveWriteAction, ARCHIVE_REFUSALS } from "../shared/flows-archive.js";
 import { UA_BANNED_CLAIMS } from "../shared/flows-unusual.js";
 import {
@@ -181,7 +180,9 @@ try {
       const sideHtml = await side.text();
       ok(sideHtml.includes(BOARD_MARKER), `${route} is a gated page`);
       ok(sideHtml.includes("/assets/js/flows-board.js"), `${route} loads the board controller`);
-      ok(sideHtml.includes('id="flowsBody"'), `${route} carries the results table`);
+      ok(sideHtml.includes('id="flowsBody"'), `${route} carries the results table's body`);
+      ok(sideHtml.includes('role="table"'), `${route} announces that body's list as a table`);
+      ok(sideHtml.includes("/assets/css/flows-boards.css"), `${route} carries the boards stylesheet`);
       ok(/aria-current="page"/.test(sideHtml), `${route} marks itself current in the rail`);
 
       const anon = await get(route);
@@ -200,25 +201,15 @@ try {
       eq(tick.status, 200, "/flows/ticker/ renders for an authenticated session");
       const tickHtml = await tick.text();
       ok(tickHtml.includes("/assets/js/flows-ticker.js"), "the ticker page loads its own controller");
-      ok(tickHtml.includes("/assets/js/flows-panels.js"),
-         "and the extracted renderers it cannot draw without");
-      ok(tickHtml.indexOf("/assets/js/flows-panels.js") < tickHtml.indexOf("/assets/js/flows-ticker.js"),
-         "with flows-panels.js FIRST — the controller fails closed without it");
-      ok(tickHtml.includes('id="ftGrid"'), "the ticker page carries the panel grid");
-      ok(tickHtml.includes('id="ftZoom"'), "and the enlarge dialog");
-
-      for (const p of TICKER_PANELS) {
-        const idCount = tickHtml.split(`id="${p.id}"`).length - 1;
-        eq(idCount, 1, `the ticker page emits ${p.id} exactly once`);
-        ok(tickHtml.includes(`data-panel="${p.key}"`), `and mounts panel ${p.key}`);
-      }
-      ok(tickHtml.includes("data-question="), "each panel carries its question as an attribute");
-
-      for (const p of TICKER_PANELS) {
-        ok(tickHtml.includes(p.question.replace(/&/g, "&amp;").replace(/</g, "&lt;")
-             .replace(/>/g, "&gt;").replace(/"/g, "&quot;")),
-           `panel ${p.key}'s question reaches the markup`);
-      }
+      const order = ["/assets/js/flows-ui.js", "/assets/js/flows-fresh.js", "/assets/js/flows-quant-read.bundle.js", "/assets/js/flows-ticker.js"].map((src) => tickHtml.indexOf(src));
+      ok(order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1])),
+         "with the Depth primitives, the freshness layer and the pricing bundle FIRST — the controller builds every module out of FlowsUI and fails closed without it");
+      ok(!tickHtml.includes("/assets/js/flows-panels.js") && !tickHtml.includes("/assets/js/flows-drawers.js"),
+         "and no longer the retired panel library or its deferred drawers");
+      ok(tickHtml.includes("/assets/css/flows-ticker.css"), "with the route stylesheet linked through the per-route hook");
+      ok(/<div class="ft-grid" id="ftGrid" hidden><\/div>/.test(tickHtml),
+         "the ticker page carries the module grid, served hidden and empty: its modules are built from the card, so nothing reads as a finding before one lands");
+      ok(!tickHtml.includes('id="ftZoom"'), "and no enlarge dialog: every chart is drawn in its module at full width");
 
       const anonTick = await get("/flows/ticker/");
       eq(anonTick.status, 200, "/flows/ticker/ serves a page to an anonymous visitor");
@@ -288,9 +279,9 @@ try {
       const uaHtml = await ua.text();
       ok(uaHtml.includes("/assets/js/flows-unusual.js"),
          "the unusual page loads its own controller");
-      ok(uaHtml.includes('id="uaFeedBody"'), "and carries the contract feed's table body");
-      ok(uaHtml.includes('id="uaNameBody"'), "and the name panel's");
-      ok(uaHtml.includes('id="uaBasis"'), "and the basis panel, which is the page's honesty");
+      ok(uaHtml.includes('id="uaFeed"'), "and carries the contract feed's module body");
+      ok(uaHtml.includes('id="uaSurprise"'), "and the name panel's");
+      ok(uaHtml.includes('id="uaAbout"'), "and the page's own account of what it refuses to claim, which is its honesty");
 
       const banned = new RegExp(UA_BANNED_CLAIMS.source, "ig");
       const refusalProse = [
@@ -319,16 +310,16 @@ try {
 
       const anonUa = await get("/flows/unusual/");
       eq(anonUa.status, 200, "/flows/unusual/ serves a page to an anonymous visitor");
-      ok(!(await anonUa.text()).includes('id="uaFeedBody"'),
+      ok(!(await anonUa.text()).includes('id="uaFeed"'),
          "/flows/unusual/ leaks nothing to an anonymous visitor");
 
       const bareUa = await get("/flows/unusual");
       eq(bareUa.status, 308, "/flows/unusual without its trailing slash redirects");
 
-      ok(uaHtml.includes('id="uaAlertsBody"'), "the vendor-alerts panel's table body ships");
-      ok(uaHtml.includes('id="uaAlertsNote"'), "with its own note host");
+      ok(uaHtml.includes('id="uaTimeline"'), "the vendor-alerts timeline's host ships");
+      ok(uaHtml.includes('id="uaFilterNote"'), "with the filter note that announces what is drawn");
       ok(/not the same fact as the flag being off/i.test(uaHtml),
-         "and the flags column's own header states that an absent flag is not an " +
+         "and the page's own disclosure states that an absent flag is not an " +
          "off one — the three-state distinction the module enforces");
 
       const alertsApi = await get("/api/flows/flowalerts", { headers: { Cookie: "flows_session=" + token } });
@@ -619,17 +610,17 @@ try {
       eq(ev.status, 200, "/flows/events/ renders for an authenticated session");
       const evHtml = await ev.text();
       ok(evHtml.includes("/assets/js/flows-events.js"), "the events page loads its own controller");
-      ok(evHtml.includes('id="evBody"'), "and carries the calendar's table body");
-      ok(evHtml.includes('id="evWindow"'), "and the window chart's host");
-      ok(evHtml.includes('id="evBasis"'), "and the basis panel");
+      ok(evHtml.includes('id="evEarn"'), "and carries the earnings list's host");
+      ok(evHtml.includes('id="evWeek"'), "and the week-ahead calendar's host");
+      ok(evHtml.includes('id="evAbout"'), "and the page's own account of its clocks and its gate");
 
       ok(/FORBIDDEN/i.test(evHtml),
-         "the Stage column states that a gated name was forbidden from being scored, " +
+         "the page states that a gated name was forbidden from being scored, " +
          "rather than leaving it to read as a low score");
 
       const anonEv = await get("/flows/events/");
       eq(anonEv.status, 200, "/flows/events/ serves a page to an anonymous visitor");
-      ok(!(await anonEv.text()).includes('id="evBody"'),
+      ok(!(await anonEv.text()).includes('id="evEarn"'),
          "/flows/events/ leaks nothing to an anonymous visitor");
 
       const bareEv = await get("/flows/events");
@@ -1176,6 +1167,17 @@ try {
     eq(regimeRead.status, 200, "and reads back to a signed-in page");
     eq((await regimeRead.json()).volRadar.rich.rows[0].t, "SOXS", "with the vol radar rows unchanged");
     eq((await get("/api/flows/regime")).status, 401, "an anonymous caller cannot read the regime");
+    {
+      const before = await get("/api/flows/ideas", { headers: cookie });
+      eq((await before.json()).status, "pending", "the engine's lead ideas read pending until the pipeline writes them");
+      const ideas = JSON.stringify({ v: 1, status: "ok", sessionDate: "2026-09-22", n: 1,
+        rows: [{ t: "AAPL", id: "iron-condor", structure: "iron condor", dir: "neutral", grade: 2 }] });
+      eq((await putCard("ideas", ideas)).status, 200, "the ideas key ingests");
+      const read = await get("/api/flows/ideas", { headers: cookie });
+      eq((await read.json()).rows[0].structure, "iron condor", "and reads back to a signed-in page unchanged");
+      eq((await get("/api/flows/ideas")).status, 401, "an anonymous caller cannot read them");
+      eq((await putCard("ideas:AAPL", ideas)).status, 400, "and the key admits no suffix");
+    }
     for (const prefix of ["card-x", "hist"]) {
       const body = JSON.stringify({ v: 1, ticker: "AAPL", sessionDate: "2026-09-22",
         gex: { status: "ok", why: null, z: 1.25, gaps: {} } });

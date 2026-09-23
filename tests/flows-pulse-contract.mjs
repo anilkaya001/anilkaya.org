@@ -71,6 +71,23 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   deep(season.rows.map((r) => r.month), [2, 9],
     "months sort onto the calendar — the one natural total order here");
 
+  const FUNDS = ["SPY", "QQQ", "IWM", "XLE", "XLC", "XLK", "XLV", "XLP", "XLY", "XLRE", "XLF", "XLI", "XLB"];
+  const market = [];
+  for (let m = 12; m >= 1; m--) for (const t of FUNDS) market.push({ ticker: t, month: m, avg_change: m / 100, positive_months_perc: 0.5 });
+  const fund = shapeSeasonality({ data: market });
+  eq(fund.rows.length, FUNDS.length * 12,
+    "the market endpoint's thirteen funds by twelve months all survive the cap — the old cap of twelve kept one " +
+    "fund's worth of rows and the publisher then could not say whose");
+  eq(fund.shed, 0, "nothing shed");
+  deep([...new Set(fund.rows.map((r) => r.t))], FUNDS, "every row carries its fund, in the vendor's order");
+  deep(fund.rows.slice(0, 12).map((r) => r.month), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+    "and inside a fund the months run on the calendar");
+  eq(new Set(fund.rows.map((r) => r.t + ":" + r.month)).size, fund.rows.length,
+    "so no fund month repeats: twelve Januaries are now twelve funds' Januaries");
+  eq(shapeSeasonality([{ ticker: "spy ", month: 1, avg_change: 0 }]).rows[0].t, "SPY", "a ticker is trimmed and upper-cased");
+  eq(shapeSeasonality([{ ticker: "<b>", month: 1, avg_change: 0 }]).rows[0].t, null,
+    "and anything that is not a ticker is carried as unknown rather than as markup");
+
   const totals = shapeTotals([{ date: "2026-08-01", call_volume: 1 }, { date: "2026-08-03", call_volume: 2 }]);
   eq(totals.rows[0].date, "2026-08-03", "sessions sort newest first");
 

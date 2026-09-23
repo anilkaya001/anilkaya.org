@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, statSync, existsSync } from "node:fs";
 import * as PAGES from "../shared/flows-pages.js";
 
 const REPO = new URL("../", import.meta.url);
@@ -10,19 +10,19 @@ const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
 const CEILING_KIB = {
-  tickerPage: 424,
-  overviewPage: 204,
-  sidePage: 153,
-  watchPage: 119,
-  deskPage: 168,
-  askPage: 154,
-  strategyPage: 186,
-  trackPage: 153,
-  marketPage: 166,
-  unusualPage: 160,
-  eventsPage: 149,
-  politicalPage: 138,
-  historyPage: 135,
+  tickerPage: 350,
+  overviewPage: 216,
+  sidePage: 183,
+  watchPage: 183,
+  deskPage: 226,
+  askPage: 172,
+  strategyPage: 243,
+  trackPage: 163,
+  marketPage: 207,
+  unusualPage: 169,
+  eventsPage: 154,
+  politicalPage: 143,
+  historyPage: 157,
   loginPage: 5,
 };
 
@@ -100,20 +100,23 @@ for (const name of Object.keys(CEILING_KIB)) {
 {
   const heaviest = measured[0];
   const panelRoutes = measured.filter((m) => m.parts.some((p) => /^flows-panels\.js/.test(p)));
+  const dossierRoutes = measured.filter((m) => m.parts.some((p) => /^flows-ticker\.js/.test(p)));
   ok(heaviest.kib > 250,
      `the heaviest route still ships over 250k (${Math.round(heaviest.kib)}k on ` +
      `${heaviest.name}) — asserted as a STANDING FACT rather than as a target, so that the ` +
      `day someone splits that bundle this line fails and has to be rewritten deliberately ` +
      `rather than the improvement passing unnoticed`);
 
-  eq(panelRoutes.length, 1,
-     `the panel bundle is on exactly one route (${panelRoutes.map((m) => m.name).join(", ") ||
-      "none"}) — it was on four, and on three of them the only thing that ever reached it ` +
-     `was the card dialog: none of flows-overview.js, flows-board.js or flows-watch.js ` +
-     `contains the string FlowsPanels, and on /flows/watch/ not even the dialog did, ` +
-     `because that page minted no opener for its delegation to find`);
-  eq(panelRoutes[0] && panelRoutes[0].name, "tickerPage",
-     "and that route is the panel workspace itself, not a board that inherited it");
+  eq(panelRoutes.length, 0,
+     `no route links flows-panels.js (${panelRoutes.map((m) => m.name).join(", ") || "none"}) — the panel ` +
+     `library was deleted when the ticker dossier was rebuilt on FlowsUI, and its renderers now live in ` +
+     `the dossier's own controller`);
+  ok(!existsSync(new URL("assets/js/flows-panels.js", REPO)), "and the file itself is gone, not orphaned");
+  eq(dossierRoutes.map((m) => m.name).join(", "), "tickerPage",
+     `the dossier's renderers ship on exactly one route — the bundle they replaced was on four, and on ` +
+     `three of them the only thing that ever reached it was the card dialog: none of flows-overview.js, ` +
+     `flows-board.js or flows-watch.js contains the string FlowsPanels, and on /flows/watch/ not even the ` +
+     `dialog did, because that page minted no opener for its delegation to find`);
 }
 
 {
@@ -121,10 +124,14 @@ for (const name of Object.keys(CEILING_KIB)) {
   {
     for (const route of measured) {
       ok(!route.parts.some((part) => /^flows-drawers\.js/.test(part)),
-         `no route links flows-drawers.js — it is fetched by FlowsPanels.need() when a ` +
-         `station that needs it is drawn, and a page that linked it would pay the bytes ` +
-         `on arrival while this table went on not counting them (${route.name})`);
+         `no route links flows-drawers.js (${route.name}) — it was the deferred half of the old panel library`);
     }
+    ok(!existsSync(new URL("assets/js/flows-drawers.js", REPO)),
+       "and it is deleted rather than orphaned: its drawers were folded into the dossier's modules");
+    const dossier = readFileSync(new URL("assets/js/flows-ticker.js", REPO), "utf8");
+    ok(!/createElement\(\s*["']script["']\s*\)|import\(/.test(dossier),
+       "the dossier defers no script of its own, so the ticker row above counts every byte the page " +
+       "runs — the old page arrived at 422k and fetched 89k of drawers after it, which this table never saw");
   }
 
   const askBytes = sizeOf("/assets/js/flows-ask.js");

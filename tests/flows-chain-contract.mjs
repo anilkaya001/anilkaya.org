@@ -118,7 +118,7 @@ const auth = { Cookie: "flows_session=" + token };
 const get = (p, headers) => fetch(server.baseURL + p, { redirect: "manual", headers: { ...auth, ...headers } });
 const anon = (p) => fetch(server.baseURL + p, { redirect: "manual" });
 
-const DESK_MARKER = 'id="deskBody"';
+const DESK_MARKER = 'id="dkGrid"';
 
 try {
 
@@ -135,7 +135,7 @@ try {
     const inn = await get("/flows/desk/");
     eq(inn.status, 200, "a signed-in user gets the desk");
     const deskBody = await inn.text();
-    ok(deskBody.includes(DESK_MARKER), "which contains the desk table");
+    ok(deskBody.includes(DESK_MARKER), "which contains the desk's grid of modules");
     ok(deskBody.includes('href="/flows/"'), "and a way back to the board");
 
     const canon = await anon("/flows/desk");
@@ -186,6 +186,13 @@ try {
     eq(body.prevClose, 179.1, "the previous close ships alongside rather than as spot");
 
     eq(body.asOf, "2026-08-25", "the session comes from the tape time, not the candle");
+    eq(body.tapeTime, "2026-08-25 18:06:00+00:00",
+       "and the tape time itself ships, because the desk prices each line's time to expiry from the quote, not from the fetch");
+
+    ok(body.engine && body.engine.status === "unavailable",
+       "no card is published for AAPL here, so the engine block says the real-world law is unavailable");
+    eq(body.engine.reason, "no card is published for this name",
+       "and says why, rather than shipping an empty law the desk would price as if it were one");
 
     eq(body.screened, 3, "the chain's true size is reported");
     eq(body.priced, 2, "the lottery ticket does not survive the gates");

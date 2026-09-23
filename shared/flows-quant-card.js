@@ -1,9 +1,12 @@
 import { parityForward, black76, bsmGreeks, impliedVolB76, normPdf } from "./flows-quant-bs.js";
 import { asSlice, sliceVolK, sliceTotalVariance, skewMetrics, eventVariance } from "./flows-quant-smile.js";
 import { impliedMove, lawFromSlice, lawBinned, interpolateBinned, driftNeutralBinned } from "./flows-quant-density.js";
-import { runEngine, buildExpiry, ENGINE_VERSION, ENGINE_LINES, expiryProfile, normaliseLeg, lawIntervalsProb, lawExpect } from "./flows-quant-engine.js";
+import {
+  runEngine, buildExpiry, ENGINE_VERSION, ENGINE_LINES, expiryProfile, normaliseLeg, lawIntervalsProb, lawExpect,
+  expiryFromFit, setupEngine,
+} from "./flows-quant-engine.js";
 import { gammaProfile } from "./flows-quant-structures.js";
-import { etDayOf, calendarDays, yearFraction } from "./flows-quant-time.js";
+import { etDayOf, calendarDays, yearFraction, sessionsBetween, isMonthly } from "./flows-quant-time.js";
 
 export const QUANT_CARD_VERSION = 1;
 export const QUANT_CARD_LINES = Object.freeze({
@@ -520,12 +523,65 @@ export function runCardEngine(input) {
     ticker: input.ticker || null, asOf: asOfMs, spot: input.spot, rate: input.rate ? input.rate.r : ENGINE_LINES.RATE_FALLBACK,
     expiries: input.expiries, facts: factMap(input.facts), state: engineState(input.state), pLaw: input.pLaw || null,
     levels: input.levels || null, event: input.event || null, stale: !!input.stale, curves: false,
-    topFamilies: input.topFamilies,
+    topFamilies: input.topFamilies, fits: !!input.fits,
   });
-  return compactEngine(out, {
+  const block = compactEngine(out, {
     atr: input.atr, rate: input.rate, facts: input.facts, state: engineState(input.state), levels: input.levels,
     event: input.event, zeroGamma: input.zeroGamma, pLaw: input.publishLaw === false ? null : compactLaw(input.pLaw),
   });
+  if (input.fits) Object.assign(block, { asOfMs, stale: !!input.stale, fits: out.fits });
+  return block;
+}
+
+export function bookRows(calls, puts, ticker) {
+  const want = typeof ticker === "string" && ticker ? ticker.trim().toUpperCase() : null;
+  const seen = new Set();
+  const out = [];
+  const add = (r, type) => {
+    if (!r || typeof r.sym !== "string") return;
+    const p = parseSymbol(r.sym);
+    if (!p || p.type !== type || (want && p.ticker !== want)) return;
+    const sym = r.sym.trim().toUpperCase();
+    if (seen.has(sym)) return;
+    seen.add(sym);
+    const iv = num(r.iv), volume = num(r.vol);
+    out.push({
+      K: p.strike, type, bid: num(r.bid), ask: num(r.ask), oi: num(r.oi), volume, sym,
+      ivSeed: iv !== null && iv > 0 ? iv : null, untraded: volume !== null ? !(volume > 0) : false,
+    });
+  };
+  for (const r of Array.isArray(calls) ? calls : []) add(r, "C");
+  for (const r of Array.isArray(puts) ? puts : []) add(r, "P");
+  return out.sort((a, b) => a.K - b.K || (a.type < b.type ? -1 : a.type > b.type ? 1 : 0));
+}
+
+export function contractFit(input) {
+  const { expiry, asOfMs, spot: S, row } = input;
+  const r = fin(input.rate) ? input.rate : ENGINE_LINES.RATE_FALLBACK;
+  const T = yearFraction(asOfMs, expiry);
+  if (!(T > 0) || !(S > 0) || !row || !fin(row.K)) return null;
+  const F = S * Math.exp(r * T), D = Math.exp(-r * T);
+  const mid = fin(row.bid) && fin(row.ask) && row.bid > 0 && row.ask >= row.bid ? (row.bid + row.ask) / 2 : null;
+  const iv = mid === null ? null : impliedVolB76(F, D, row.K, T, mid, row.type, fin(row.ivSeed) && row.ivSeed > 0 ? row.ivSeed : null);
+  if (!fin(iv) || !(iv > 0)) return null;
+  const day = etDayOf(asOfMs);
+  return {
+    expiry, T, dte: calendarDays(day, expiry), sessions: sessionsBetween(day, expiry), monthly: isMonthly(expiry),
+    forward: { F, D, r, q: 0, pairs: 0, method: "rate-only" },
+    slice: { method: "flat", T, F, D, params: { sigma: iv }, n: 1, fitInSpread: null, rmseIvPts: null, why: "fit.contract-iv" },
+    points: 1,
+  };
+}
+
+export function labSetup(input) {
+  const list = (Array.isArray(input.books) ? input.books : [])
+    .filter((b) => b && b.fit && b.fit.slice && b.fit.forward)
+    .map((b) => expiryFromFit({ ...b.fit, rows: b.rows }))
+    .sort((a, b) => (a.expiry < b.expiry ? -1 : a.expiry > b.expiry ? 1 : 0));
+  return setupEngine({
+    asOf: input.asOfMs, spot: input.spot, facts: factMap(input.facts), state: engineState(input.state), pLaw: input.pLaw || null,
+    levels: input.levels || null, event: input.event || null, stale: !!input.stale, lawCache: input.lawCache,
+  }, list);
 }
 
 export function sliceFromSummary(e) {
