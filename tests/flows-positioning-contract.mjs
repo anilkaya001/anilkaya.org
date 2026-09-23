@@ -854,9 +854,14 @@ try {
     { stdio: "pipe" });
   const files = readdirSync(dir);
   const read = (f) => JSON.parse(readFileSync(join(dir, f), "utf8"));
-  const cardX = files.filter((f) => /^p-card-x-/.test(f)).map(read);
+  const allX = files.filter((f) => /^p-card-x-/.test(f)).map(read);
   const hists = files.filter((f) => /^p-hist-/.test(f)).map(read);
   const cards = files.filter((f) => /^p-card-(?!x-)/.test(f)).map(read);
+  const carded = new Set(cards.map((c) => c.ticker));
+  const cardX = allX.filter((c) => carded.has(c.ticker));
+  const others = allX.filter((c) => !carded.has(c.ticker));
+  ok(others.every((c) => c.scope === "index" && !Object.hasOwn(c, "gex")),
+     `a card-x without a card is only an index dossier from the vol leg, never a flow read (${others.map((c) => c.ticker).join(", ")})`);
   ok(cardX.length === cards.length && cardX.length > 0, `every carded name gets a card-x (${cardX.length} of ${cards.length})`);
   eq(hists.length, cardX.length, "and a hist");
   for (const c of cardX) {

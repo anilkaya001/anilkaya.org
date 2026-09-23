@@ -615,7 +615,8 @@ assert.deepEqual(missingReport, [],
     missingReport.filter((m) => /^card-x|^card x\.vol|^regime/.test(m)).slice(0, 20).join("\n  ")); checks++;
   const { FLOW_CODES, UNITS } = await import("../shared/flows-positioning.js");
   const cardX = readdirSync(dir).filter((f) => /^p-card-x-[A-Z]/.test(f))
-    .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")));
+    .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")))
+    .filter((c) => c.scope !== "index");
   const hists = readdirSync(dir).filter((f) => /^p-hist-[A-Z]/.test(f))
     .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")));
   ok(cardX.length > 0 && hists.length === cardX.length,
