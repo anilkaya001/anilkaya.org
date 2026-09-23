@@ -175,8 +175,8 @@ const sidebar = (active, username) => {
 <div class="fx-scrim" id="fxScrim"></div>`;
 };
 
-const toolbar = (title, active) => `
-<header class="topbar fx-bar" id="fxBar">
+const toolbar = (title, active, hero) => `
+<header class="topbar fx-bar${hero ? " has-hero" : ""}" id="fxBar">
   <button type="button" class="fx-iconbtn" id="fxSideBtn" aria-controls="fxSide"
           aria-expanded="false" aria-label="Sidebar">${glyph("sidebar")}</button>
   <span class="fx-bar-t" id="fxBarT" aria-hidden="true">${title}</span>
@@ -318,18 +318,21 @@ const pageHead = (title, active) => `
 
 const UI_SCRIPT = `<script src="${v("/assets/js/flows-ui.js")}" defer></script>`;
 
-const shell = (title, active, username, body, { chrome = true } = {}) => `
+const shell = (title, active, username, body, { chrome = true } = {}) => {
+  const lead = chrome ? pageHead(title, active) : "";
+  return `
 <body class="flows-body has-rail" data-flows-page="${active}">
 ${SPRITE}
 <a class="flows-skip" href="#flowsMain">Skip to content</a>
 ${sidebar(active, username)}
-${toolbar(title, active)}
+${toolbar(title, active, /data-fx-hero/.test(lead + body))}
 <main class="flows-main" id="flowsMain" tabindex="-1">
-${chrome ? pageHead(title, active) : ""}
+${lead}
 ${body}
 </main>
 ${tabbar(active)}
 ${dock(active)}`;
+};
 
 export function loginPage({ error = "" } = {}) {
 

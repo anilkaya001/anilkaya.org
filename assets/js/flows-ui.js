@@ -1993,14 +1993,17 @@
     const heroes = [...document.querySelectorAll("[data-fx-hero]")];
     if (heroes.length && window.IntersectionObserver) {
       bar.classList.add("has-hero");
-      const seen = new Map();
+      const seen = new Map(), laid = new Map();
       const io = new IntersectionObserver((entries) => {
-        for (const e of entries) seen.set(e.target, e.isIntersecting && e.boundingClientRect.height > 2);
+        for (const e of entries) {
+          laid.set(e.target, e.boundingClientRect.height > 2);
+          seen.set(e.target, e.isIntersecting && e.boundingClientRect.height > 2);
+        }
         const visible = heroes.some((n) => seen.get(n));
-        bar.classList.toggle("is-scrolled", !visible);
+        bar.classList.toggle("is-scrolled", !visible && heroes.some((n) => laid.get(n)));
       }, { rootMargin: `-${Math.round(bar.getBoundingClientRect().height || 56)}px 0px 0px 0px`, threshold: [0, 0.01] });
       heroes.forEach((n) => io.observe(n));
-    }
+    } else bar.classList.remove("has-hero");
     const titleSrc = document.querySelector("[data-fx-title]");
     if (titleSrc && title && window.MutationObserver) {
       const sync = () => { const t = titleSrc.textContent.trim(); if (t) title.textContent = t; };
