@@ -649,6 +649,12 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   deep(built, [["card:SPY", "index", "unavailable"]], "an index dossier is published as depth index, shedding to fit");
   deep(out.failed, ["QQQ"], "a failed read fails that dossier alone");
   deep(out.skipped, ["IWM"], "a missing screener row skips the dossier");
+  const hidden = await buildIndexDossiers({
+    tickers: ["SPY"], indexRows: new Map([["SPY", { close: null, missing_periscope: true }]]),
+    enrich: async () => { throw new Error("enrich must not run without a spot"); },
+    features: () => ({}), perName: async () => ({}), chain: async () => null, card: () => ({}), publish: async () => {},
+  });
+  deep([hidden.skipped, hidden.failed], [["SPY"], []], "a row whose close is hidden is skipped before any vendor call, never built at spot 0");
   eq(shedToFit({ panels: {} }).dropped.length, 0, "a small card sheds nothing");
 }
 

@@ -1,4 +1,5 @@
 import { pastDeadline } from "./common.mjs";
+import { vnum } from "../../shared/flows-cross.js";
 
 export const INDEX_DEPTH = "index";
 
@@ -38,8 +39,13 @@ export async function buildIndexDossiers({
     if (pastDeadline(deadline)) { out.skipped.push(ticker); continue; }
     const row = indexRows.get(ticker);
     if (!row) { out.skipped.push(ticker); log(`  index ${ticker}: no screener row, so no spot to build from`); continue; }
+    const spot = vnum(row.close);
+    if (spot === null || !(spot > 0)) {
+      out.skipped.push(ticker);
+      log(`  index ${ticker}: the screener row carries no close, so there is no spot to build from`);
+      continue;
+    }
     try {
-      const spot = Number(row.close);
       const raw = await enrich(ticker, spot, row);
       const f = features(raw, ticker, spot, row);
       const reads = await perName(ticker, f.spot || spot, raw);
