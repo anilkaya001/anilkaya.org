@@ -512,6 +512,8 @@ function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
     "and the ex-event VRP is that iv less the same trailing RV21");
   eq(e("LLL").panels.vrp.exAnte.vrpExEvent, e("LLL").panels.vrp.exAnte.vrp,
     "a carded name with no earnings inside thirty days needs no term read: its ex-event VRP is its VRP");
+  eq(e("LLL").panels.cone.slope30_90ExEvent, e("LLL").panels.cone.slope30_90,
+    "and with none inside ninety days its ex-event slope is its slope");
   eq(e("SPY").panels.ivDyn.status, "ok", "an index name's IV dynamics come from the leg's own 1y read");
   eq(e("BBB").panels.ivDyn.code, "not-read", "a deep name's wait for the card leg");
   ok(e("AAA").panels.cone.xPct.richCheap !== undefined, "cross-sectional percentiles are attached");

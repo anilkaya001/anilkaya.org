@@ -173,18 +173,21 @@ async function readName(name, { call, sessionDate, repair, notes }) {
       sessionDate, ivHalfLife: ivDyn.status === "ok" ? ivDyn.halfLife : null,
     })) : notRead();
 
+  const eventDay = eventDayOf(name.earnings);
+  const eventWithin = (days) => !!eventDay && !!sessionDate && eventDay > sessionDate && dayDiff(sessionDate, eventDay) <= days;
+  const termSilence = () => ({ value: null, code: term.code === "not-read" ? "not-read" : "input-absent" });
   if (cone.status === "ok") {
-    const ex = exEventSlope(cone, term, sessionDate);
+    const ex = term.status === "ok" ? exEventSlope(cone, term, sessionDate)
+      : !eventWithin(90) ? { value: cone.slope30_90, code: cone.slope30_90 === null ? "input-absent" : null }
+        : termSilence();
     cone.slope30_90ExEvent = ex.value;
     if (ex.code) cone.silent.slope30_90ExEvent = ex.code;
   }
   if (vrp.status === "ok") {
-    const eventDay = eventDayOf(name.earnings);
-    const inside = eventDay && sessionDate && eventDay > sessionDate && dayDiff(sessionDate, eventDay) <= 30;
     const ex = term.status === "ok"
       ? exEventVol(vrp.exAnte.iv30, 30, term, sessionDate)
-      : !inside ? { value: vrp.exAnte.iv30, code: vrp.exAnte.iv30 === null ? "input-absent" : null }
-        : { value: null, code: term.code === "not-read" ? "not-read" : "input-absent" };
+      : !eventWithin(30) ? { value: vrp.exAnte.iv30, code: vrp.exAnte.iv30 === null ? "input-absent" : null }
+        : termSilence();
     const rv21 = rv.bars && rv.bars.length ? closeToCloseVol(rv.bars, 21) : null;
     vrp.exAnte.iv30ExEvent = round(ex.value, 4);
     vrp.exAnte.vrpExEvent = ex.value !== null && rv21 !== null && vrp.exAnte.rv21 !== null ? round(ex.value - rv21, 5) : null;
