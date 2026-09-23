@@ -240,6 +240,47 @@ function candlesFor(end, n, { from = 100, step = 0.01, volume = 1e6, after = [] 
   eq(vannaScale([{ vendor: 100, model: 1 }, { vendor: 101, model: 1 }, { vendor: 99, model: 1 }]).status, "disagree",
      "a hundredfold scale is caught");
   eq(vannaScale([{ vendor: 1, model: 1 }]).status, "unmeasured", "one name measures nothing");
+
+  const pctAt = (S) => ({ vendor: S / 100, model: 1, spot: S });
+  const coincidence = vannaScale([60, 110, 250].map(pctAt));
+  ok(coincidence.status !== "agree",
+     `a dollars-per-1% vendor whose median ratio lands near one by coincidence (${coincidence.ratio}) is no longer read as agreeing in shares: ${coincidence.reason}`);
+  eq(coincidence.family, "unsettled", "the two names far enough from $100 to tell the units apart both read dollars per 1%, which unsettles the documented share unit");
+  const pctRun = vannaScale([30, 60, 250, 400].map(pctAt));
+  eq(pctRun.family, "pct$", "four names that tell the units apart and all read dollars per 1% settle that unit");
+  eq(pctRun.status, "agree", "and the vendor's vanna then agrees with Black-Scholes in it");
+  near(pctRun.ratio, 1, 1e-9, "at a ratio of one once each name is read in dollars per 1%");
+  const shareRun = vannaScale([30, 60, 110, 250, 400].map((S) => ({ vendor: 1.05, model: 1, spot: S })));
+  eq(shareRun.family, "share", "a vendor in shares reads as shares");
+  eq(shareRun.used, "share", "and is converted by the spot");
+  eq(shareRun.status, "agree", "and agrees");
+  const splitRun = vannaScale([30, 45, 300, 400].map((S, i) => (i % 2 ? pctAt(S) : { vendor: 1, model: 1, spot: S })));
+  eq(splitRun.status, "disagree", `names that split between the units settle nothing (${splitRun.reason})`);
+}
+
+{
+  const S = 400;
+  const row = { expiry: addDays(SESSION, 9), call_gex: 100, put_gex: 0, call_vanna: 1000, put_vanna: 0,
+    call_charm: -5, put_charm: 0, call_delta: 10, put_delta: 0 };
+  const run = (unitUsed, vannaUsed) => variation({ ticker: "U", sessionDate: SESSION, spot: S, iv30: 0.3, gammaFlow: 1,
+    candles: candlesFor(SESSION, 60), expiries: [row] },
+    { probe: { call: "raw", put: "raw" }, kc: { status: "ok", value: 1 }, unit: { family: unitUsed, used: unitUsed },
+      vannaScale: { status: "agree", ratio: 1, n: 5, family: vannaUsed, used: vannaUsed } });
+  const both = run("share", "share");
+  eq(both.vannaPerPoint, 1000 * S / 100, "vanna in shares is converted by the spot: 1000 × 400 / 100 per vol point");
+  eq(both.charmPerSession, -5 * S, "and charm, measured against that vanna, by the spot too");
+  const mixed = run("pct$", "share");
+  eq(mixed.vannaPerPoint, both.vannaPerPoint,
+     "a gamma probe that reads dollars per 1% no longer rescales vanna by 100 when the chain check reads vanna in shares, which understated it S/100 = 4-fold");
+  eq(mixed.charmPerSession, both.charmPerSession, "nor charm");
+  ok(mixed.conventions.unit.vanna === "share" && mixed.conventions.unit.used === "pct$" && /its own unit/.test(mixed.conventions.unit.note),
+     "and the conventions say gamma and vanna were read in different units");
+  eq(mixed.inputs.deltaDollars, 10 * 100, "while delta keeps the gamma probe's unit");
+  eq(both.inputs.deltaDollars, 10 * S, "which reads shares when the gamma probe does");
+  const pctBoth = run("pct$", "pct$");
+  eq(pctBoth.vannaPerPoint, 1000, "a chain check that settles dollars per 1% converts vanna by 100");
+  eq(pctBoth.charmPerSession, -500, "and charm with it");
+  ok(!("note" in pctBoth.conventions.unit), "with no note when the two units agree");
 }
 
 {

@@ -324,22 +324,44 @@ export function chainCallVanna(rows, { spot, asOf, expiry, rate = VARIATION_LINE
 
 export function vannaScale(samples) {
   const L = VARIATION_LINES;
-  const ratios = [];
+  const rows = [];
   for (const s of Array.isArray(samples) ? samples : []) {
-    const v = fin(s && s.vendor), m = fin(s && s.model);
+    const v = fin(s && s.vendor), m = fin(s && s.model), S = fin(s && s.spot);
     if (v === null || m === null || !(m > 0) || !(v > 0)) continue;
-    ratios.push(v / m);
+    rows.push({ r: v / m, S: S !== null && S > 0 ? S : null });
   }
-  const n = ratios.length;
-  const ratio = medianOf(ratios);
+  const n = rows.length;
+  const apart = 2 * Math.log(1 + L.VANNA_AGREE);
+  let share = 0, pct = 0;
+  for (const x of rows) {
+    if (x.S === null || Math.abs(Math.log(x.S / 100)) <= apart) continue;
+    if (Math.abs(Math.log(x.r)) < Math.abs(Math.log(x.r * 100 / x.S))) share++; else pct++;
+  }
+  const votes = share + pct;
+  const family = votes < L.VANNA_MIN_NAMES ? (pct > 0 ? "unsettled" : "unresolved")
+    : share / votes >= L.UNIT_MAJORITY ? "share"
+    : pct / votes >= L.UNIT_MAJORITY ? "pct$"
+    : "unsettled";
+  const used = family === "pct$" ? "pct$" : "share";
+  const ratio = medianOf(used === "pct$"
+    ? rows.filter((x) => x.S !== null).map((x) => x.r * 100 / x.S)
+    : rows.map((x) => x.r));
+  const base = { ratio: round(ratio, 4), n, family, used, votes: { share, pct } };
   if (n < L.VANNA_MIN_NAMES) {
-    return { status: "unmeasured", ratio: round(ratio, 4), n,
+    return { status: "unmeasured", ...base,
       reason: `${n} name${n === 1 ? "" : "s"} carried a complete single-expiry chain to check the vendor's vanna against; the check needs ${L.VANNA_MIN_NAMES}` };
+  }
+  if (family === "unsettled") {
+    return { status: "disagree", ...base,
+      reason: `of the ${votes} name${votes === 1 ? "" : "s"} priced far enough from $100 to tell the units apart, ${share} read in shares and ${pct} in dollars per 1% move` +
+        (votes < L.VANNA_MIN_NAMES ? `, too few to overturn the documented share unit and too many to ignore` : ", with no two-thirds majority") +
+        ", so the vendor's vanna unit is not settled" };
   }
   const agree = Math.abs(ratio - 1) <= L.VANNA_AGREE;
   return {
-    status: agree ? "agree" : "disagree", ratio: round(ratio, 4), n,
-    ...(agree ? {} : { reason: `the vendor's vanna is ${round(ratio, 2)} times the Black-Scholes vanna of the same chain, outside the ${L.VANNA_AGREE * 100}% band` }),
+    status: agree ? "agree" : "disagree", ...base,
+    ...(agree ? {} : { reason: `the vendor's vanna is ${round(ratio, 2)} times the Black-Scholes vanna of the same chain` +
+      (used === "pct$" ? " read in dollars per 1% move" : "") + `, outside the ${L.VANNA_AGREE * 100}% band` }),
   };
 }
 
@@ -618,6 +640,8 @@ export function variation(input, opts = {}) {
 
   const family = unit.used === "pct$" ? "pct$" : "share";
   const toDollars = (v) => (v === null || S === null ? null : family === "pct$" ? v * 100 : v * S);
+  const vFamily = scale.used === "pct$" ? "pct$" : "share";
+  const vannaDollars = (v) => (v === null || S === null ? null : vFamily === "pct$" ? v * 100 : v * S);
   const gammaPerPct = (g) => (g === null || S === null ? null : family === "pct$" ? g : g * S * S / 100);
 
   const gBookRaw = nets.gamma !== null ? nets.gamma : fin(x.gammaBookRaw);
@@ -640,8 +664,9 @@ export function variation(input, opts = {}) {
     dealer: DEALER_ASSUMPTION,
     probe: probe ? { call: probe.call, put: probe.put, oppositeShare: probe.oppositeShare, rows: probe.rows } : null,
     kc: kc ? { value: kc.value, n: kc.n, iqrRatio: kc.iqrRatio, status: kc.status } : null,
-    unit: { family: unit.family, used: family, n: fin(unit.n), source: unit.source || null },
-    vannaScale: { status: scale.status, ratio: fin(scale.ratio), n: fin(scale.n) },
+    unit: { family: unit.family, used: family, n: fin(unit.n), source: unit.source || null, vanna: vFamily,
+      ...(vFamily !== family ? { note: `gamma and delta read in ${family === "pct$" ? "dollars per 1% move" : "shares"}, while the chain check reads vanna, and so charm, in ${vFamily === "pct$" ? "dollars per 1% move" : "shares"}; each is converted in its own unit` } : {}) },
+    vannaScale: { status: scale.status, ratio: fin(scale.ratio), n: fin(scale.n), family: scale.family || null, used: vFamily },
     sigma: sigma.source,
     horizon: { h, nextSession: next.date || null, rule: next.rule || null },
     nets: netsSource,
@@ -708,7 +733,7 @@ export function variation(input, opts = {}) {
     silent("vanna", "quiet", "vanna-zero", "vanna nets to exactly zero across the live expiries");
     v = 0;
   } else {
-    v = toDollars(nets.vanna) / 100;
+    v = vannaDollars(nets.vanna) / 100;
   }
   let b = null;
   if (v !== null && vov.sigmaV !== null) b = v * vov.sigmaV;
@@ -725,7 +750,7 @@ export function variation(input, opts = {}) {
     if (scale.status === "disagree") silent("charm", "unavailable", "charm-scale-disagree", "the charm scale is measured against the vendor's vanna, which disagrees with the chain" + (scale.reason ? ": " + scale.reason : ""));
     else silent("charm", "unavailable", "charm-scale-unchecked", "the charm scale is measured against the vendor's vanna, whose scale was not checked against a chain this run" + (scale.reason ? ": " + scale.reason : ""));
   } else {
-    c = toDollars(nets.charm) / kc.value * h;
+    c = vannaDollars(nets.charm) / kc.value * h;
   }
   if (A === null) silent("adv", "unavailable", "adv-short", adv.reason);
   if (half("gamma")) silent("bookLegs", "unreadable", "book-half-leg", halfWhy("gamma"));

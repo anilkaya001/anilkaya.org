@@ -3701,6 +3701,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     expiry: "2026-09-04", sessionDate: "2026-08-24", expiries: enriched[0].raw.expiries, spot: 45 });
   ok(live && Math.abs(live.vendor / live.model - 1) < 1e-9,
      `a chain built from the same open-interest ladder reproduces the vendor's call vanna (${live && (live.vendor / live.model)})`);
+  eq(live && live.spot, 45, "and the sample carries its spot, which is what tells a share vanna from a dollars-per-1% one");
   const meta = boardVariationMeta({ ...run, vannaScale: { status: "agree", ratio: 1, n: 5 } });
   ok(meta.codes === VARIATION_CODES && meta.kc.n === run.kc.n, "the board's variation block carries the code table and the run's probes");
   ok(/CHANGE IN DEALER DELTA/.test(meta.fields) && /negative figure means dealers buy/.test(meta.fields),
@@ -3722,6 +3723,8 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(/variation: put convention call raw, put raw/.test(log), "the run logs the pooled convention probe");
   ok(/variation: charm scale K_c [\d.]+ over \d+ expiry reading\(s\).* — ok/.test(log), "and the charm scale it measured");
   ok(/variation: vanna scale agree/.test(log), "and the vanna scale checked against the fixture's chains");
+  ok(/vanna scale agree, .*read in shares \(unit share: [1-9]\d* share, 0 dollars-per-1%/.test(log),
+     "in the unit the chain check settled from the names priced far enough from $100 to tell the units apart");
   const read = (key) => JSON.parse(fs.readFileSync(`${prefix}-${key}.json`, "utf8"));
   const meta = read("meta");
   ok(meta.variation && meta.variation.kc.status === "ok" && meta.variation.unit.family === "share" && meta.variation.votes === false,

@@ -1198,7 +1198,7 @@ export function vannaProbeSample(ticker, { rows, expiry, sessionDate, expiries, 
   }
   const model = chainCallVanna(parsed, { spot, asOf: sessionDate, expiry: exp });
   if (!model) return null;
-  return { ticker, expiry: exp, vendor, model: model.value, contracts: model.contracts };
+  return { ticker, expiry: exp, vendor, model: model.value, contracts: model.contracts, spot: num(spot, null) };
 }
 
 export function boardVariationMeta(run) {
@@ -1217,7 +1217,8 @@ export function boardVariationMeta(run) {
     kc: { value: run.kc.value, n: run.kc.n, status: run.kc.status },
     unit: { family: run.unit.family, used: run.unit.used },
     probe: { call: run.probe.call, put: run.probe.put },
-    vannaScale: { status: run.vannaScale.status, ratio: run.vannaScale.ratio, n: run.vannaScale.n },
+    vannaScale: { status: run.vannaScale.status, ratio: run.vannaScale.ratio, n: run.vannaScale.n,
+      family: run.vannaScale.family || null, used: run.vannaScale.used || null },
     next: { date: run.next.date, h: run.next.h },
   };
 }
@@ -4875,6 +4876,8 @@ async function main() {
   console.log(`  variation: vanna scale ${variationRun.vannaScale.status}` +
     (variationRun.vannaScale.ratio === null ? "" : `, vendor over Black-Scholes ${variationRun.vannaScale.ratio}`) +
     ` across ${variationRun.vannaScale.n} name(s) with a complete single-expiry chain` +
+    `, read in ${variationRun.vannaScale.used === "pct$" ? "dollars per 1% move" : "shares"} (unit ${variationRun.vannaScale.family}: ` +
+    `${variationRun.vannaScale.votes.share} share, ${variationRun.vannaScale.votes.pct} dollars-per-1% among names priced far enough from $100 to tell them apart)` +
     (variationRun.vannaScale.reason ? ` — ${variationRun.vannaScale.reason}` : ""));
   const refreshVariation = variationRun.vannaScale.status === "unmeasured" ? null : (row) => {
     const next = boardVariation(row.t);
