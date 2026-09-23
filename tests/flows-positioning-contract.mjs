@@ -553,6 +553,18 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   const pc = indexCrossFeed("darkpool", pp, { limit: 100, tickers: ["T1"], sessionDate: SESSION });
   eq(pc.orderedBy, "the print's dollar size", "and only then is the cross a premium ranking");
   eq(pc.cut, 1000, "whose last place is the premium cut");
+  const offPrice = sessionPrints({ data: [
+    rth("14:00", 9e9, { sale_cond_codes: "average_price_trade" }),
+    rth("14:01", 8e9, { sale_cond_codes: "prior_reference_price" }),
+    rth("14:02", 7e9, { trade_settlement: "next_day" }),
+    rth("14:03", 400, { trade_settlement: "regular" }),
+    rth("14:04", 300, { trade_settlement: "regular_settlement", sale_cond_codes: null }),
+    rth("14:05", 200, { sale_cond_codes: "odd_lot_execution" }),
+  ] }, SESSION, { limit: 500 });
+  assert.deepEqual(offPrice.data.map((r) => Number(r.premium)), [400, 300, 200],
+    "average-price, prior-reference and special-settlement prints are not session blocks at their price and time " +
+    "(quant spec H1), so they never top a premium ranking; both spellings of regular settlement stay"); checks++;
+  eq(offPrice.session.offPrice, 3, "and the session record counts what was set aside");
   const rankedPanel = shapeDarkpool(tp);
   ok(rankedPanel.rows.every((r, i) => i === 0 || rankedPanel.rows[i - 1].prem >= r.prem),
     "while the print list itself is still ranked by premium by its shaper");

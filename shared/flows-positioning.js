@@ -1128,6 +1128,16 @@ export function multiLeg(rows, ticker, { sessionDate = null, truncated = false, 
   };
 }
 
+const OFF_PRICE_CONDITIONS = new Set(["average_price_trade", "prior_reference_price"]);
+const SPECIAL_SETTLEMENT = /^(cash|next_day|seller)/;
+
+export function offPricePrint(r) {
+  if (!r || typeof r !== "object") return false;
+  const codes = Array.isArray(r.sale_cond_codes) ? r.sale_cond_codes : [r.sale_cond_codes];
+  if (codes.some((c) => typeof c === "string" && OFF_PRICE_CONDITIONS.has(c.trim().toLowerCase()))) return true;
+  return typeof r.trade_settlement === "string" && SPECIAL_SETTLEMENT.test(r.trade_settlement.trim().toLowerCase());
+}
+
 export function sessionPrints(raw, sessionDate, { limit = null } = {}) {
   if (raw === null || raw === undefined) return raw;
   if (typeof raw === "object" && !Array.isArray(raw) && raw.__failed) return raw;
@@ -1136,7 +1146,7 @@ export function sessionPrints(raw, sessionDate, { limit = null } = {}) {
   const win = sessionWindow(sessionDate);
   if (!win) return raw;
   const kept = [];
-  let outside = 0, canceled = 0, undated = 0, extendedCode = 0;
+  let outside = 0, canceled = 0, undated = 0, extendedCode = 0, offPrice = 0;
   const prems = [];
   for (const r of list) {
     if (!r || typeof r !== "object") continue;
@@ -1145,6 +1155,7 @@ export function sessionPrints(raw, sessionDate, { limit = null } = {}) {
     if (t === null) { undated++; continue; }
     if (!inSession(t, win)) { outside++; if (typeof r.ext_hour_sold_codes === "string" && /extended/i.test(r.ext_hour_sold_codes)) extendedCode++; continue; }
     if (r.canceled === true) { canceled++; continue; }
+    if (offPricePrint(r)) { offPrice++; continue; }
     kept.push(r);
   }
   const finite = prems.filter((p) => p !== null);
@@ -1157,7 +1168,7 @@ export function sessionPrints(raw, sessionDate, { limit = null } = {}) {
     vendorCapped: capped,
     session: {
       open: win.openIso, close: win.closeIso,
-      vendorRows: list.length, kept: kept.length, outside, extendedCode, canceled, undated,
+      vendorRows: list.length, kept: kept.length, outside, extendedCode, canceled, offPrice, undated,
       vendorOrder: byPremium ? "premium" : "time-or-other",
       capped,
       rankedBy: "premium",
