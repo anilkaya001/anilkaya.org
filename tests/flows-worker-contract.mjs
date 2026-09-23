@@ -963,6 +963,9 @@ try {
     const auth = { headers: { Cookie: "flows_session=" + token } };
     eq((await (await get("/api/flows/universe", auth)).json()).status, "pending",
        "the universe route answers pending before its first publish");
+    const regimeBefore = await get("/api/flows/regime", auth);
+    eq(regimeBefore.status, 200, "an unwritten regime is not an error");
+    eq((await regimeBefore.json()).status, "pending", "it reads pending until the pipeline writes it");
     eq((await get("/api/flows/regime")).status, 401, "the regime route refuses an anonymous reader");
     eq((await post("universe", JSON.stringify({ v: 1, t: ["TEST"], cols: { iv30: [312] }, units: { iv30: ["vol", 1000] } }),
       INGEST_TOKEN)).status, 200, "the columnar universe is an accepted key");
@@ -1140,10 +1143,6 @@ try {
 
     eq((await get("/api/flows/card?t=AAPL")).status, 401,
        "an anonymous caller cannot read a card");
-
-    const regimeBefore = await get("/api/flows/regime", { headers: cookie });
-    eq(regimeBefore.status, 200, "an unwritten regime is not an error");
-    eq((await regimeBefore.json()).status, "pending", "it reads pending until the pipeline writes it");
 
     const dossier = JSON.stringify({
       v: 1, ticker: "AAPL", scope: "deep", sessionDate: "2026-09-22",
