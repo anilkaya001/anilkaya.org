@@ -2385,6 +2385,7 @@ a.ui-row:hover { background: var(--fill-4); }
 .ui-chart .ring { stroke: var(--mat-opaque); stroke-width: 2; }
 .ui-chart .pulse { transform-box: fill-box; transform-origin: center; animation: ui-pulse 2.4s var(--ease-out) infinite; }
 .ui-chart .cell-hl { fill: none; stroke: var(--label-1); stroke-width: 1.5; }
+.ui-chart .cell-hl[x="-99"] { visibility: hidden; }
 .ui-chart .no-anim .draw { animation: none; stroke-dashoffset: 0; }
 .ui-chart .no-anim .grow, .ui-chart .no-anim .growx, .ui-chart .no-anim .fade { animation: none; }
 @keyframes ui-draw { to { stroke-dashoffset: 0; } }

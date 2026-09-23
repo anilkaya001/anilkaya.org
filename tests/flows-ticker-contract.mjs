@@ -1322,7 +1322,7 @@ try {
     const got = await page.evaluate(() => [...document.querySelectorAll("#ftVerdict .ft-idea")].map((a) => ({ title: (a.querySelector(".ft-idea-t") || {}).textContent, tags: [...a.querySelectorAll(".ui-tag")].map((t) => t.textContent),
       on: a.querySelectorAll(".ui-bars i.is-on").length, legs: a.querySelectorAll(".ft-leg").length, pay: !!a.querySelector(".ft-idea-pay svg"), silent: !!a.querySelector(".ui-silent"), text: a.innerText })));
     const pc = (v) => (v * 100).toFixed(0) + "%";
-    const usd = (v) => (v < 0 ? "−$" : "$") + Math.abs(v).toFixed(0);
+    const usd = (v) => (v < 0 ? "−$" : "$") + Math.abs(v).toFixed(Math.abs(v) < 10 ? 2 : 0);
     ok(await page.evaluate(() => [...document.querySelectorAll("#ftVerdict .ft-v-meta .ui-tag")].some((t) => t.textContent === "Harvest rich premium")), "the verdict word the server attached heads the verdict");
     eq(got[0].title, st.family.replace(/-/g, " ").replace(/^./, (c) => c.toUpperCase()), "an engine idea is titled by its structure family, read off the card's own structure");
     ok(got[0].tags.includes("Harvest rich premium"), "and carries the verdict word the server vetted");
@@ -1363,6 +1363,114 @@ try {
     const lead = worlds.metrics.find((m) => m[0] === "Lead PoP");
     ok(lead && lead[1] === pc(st.prob.popP), `and the lead idea's real-world chance of profit is the engine's own figure (${lead && lead[1]})`);
     eq(errors.length, 0, `the engine ideas and Two worlds throw nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  {
+    const lead = "This card describes an earlier session than the last closed one, so every grade is capped at weak.";
+    ok(TICKER_SRC.includes(JSON.stringify(lead)), "the page recognises the Neuron's staleness lead-in by its exact wording");
+    ok(NEURON.deterministicSummary({ stale: true, features: [{ key: "gamma", say: "A reading.", robustness: 1 }] }).startsWith(lead + " "),
+      "and that wording is the one the Neuron writes, so a rephrasing on either side fails here rather than painting the caveat as the verdict");
+    const card = clone(full);
+    const back = new Date(Date.parse(card.sessionDate + "T12:00:00Z") - 7 * 864e5).toISOString().slice(0, 10);
+    card.sessionDate = back;
+    const graded = card.engine.structures.find((s) => card.engine.ideas.includes(s.id) && s.grade > 1);
+    ok(graded, "an emitted engine idea grades above 1, so the cap has something to cap");
+    const lp = card.engine.structures.find((s) => s.id === card.engine.ideas[0]);
+    lp.ev = { ...(lp.ev || {}), p: null };
+    lp.prob = { ...(lp.prob || {}), popP: null };
+    const neuron = { status: "ok", scope: card.ticker, llm: false, model: null, generatedAt: card.generatedAt, engine: true, verdict: null, verdictWord: null, claims: [], refused: [], ideas: [],
+      summary: lead + " Dealers are short gamma above the flip. A second sentence.", provenance: "Figures, facts and structures computed by the engine; the summary is deterministic.",
+      context: { version: 3, sessionDate: back, expectedSession: card.sessionDate, stale: true, coverage: null, state: null, features: [] } };
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, card, { neuron });
+    const got = await page.evaluate(() => ({
+      line: document.getElementById("ftVerdictT").textContent,
+      stale: [...document.querySelectorAll("#ftVerdict .ft-v-meta .ui-state")].map((b) => b.dataset.state),
+      more: document.getElementById("ftVerdictX").textContent,
+      bars: [...document.querySelectorAll("#ftVerdict .ft-idea")].map((a) => a.querySelectorAll(".ui-bars i.is-on").length),
+      slots: [...document.querySelectorAll("#ftVerdict .ft-idea")][0] ? [...[...document.querySelectorAll("#ftVerdict .ft-idea")][0].querySelectorAll(".ft-slot-v")].map((v) => ({ text: v.textContent, dash: [...v.querySelectorAll(".ui-state")].map((b) => b.dataset.state) })) : [],
+      key: (document.querySelector("#ftVerdict .ft-ideas-k") || {}).innerText || "",
+    }));
+    eq(got.line, "Dealers are short gamma above the flip.", "a stale card's verdict is the reading, not the staleness caveat in front of it");
+    ok(got.stale.includes("stale"), "the caveat becomes the stale glyph beside the stance, its sentence one tap away");
+    ok(got.more.includes(lead), "and the sentence itself still stands in More, verbatim");
+    ok(got.bars.length && got.bars.every((n) => n <= 1), `a card a session behind caps every idea's grade at 1, as the Neuron's caveat says (${got.bars.join(", ")})`);
+    const gi = await infoText(page, "#ftVerdict .ft-idea .ft-idea-t");
+    ok(/\nGrade\n1 of 3, capped at 1 because this card describes an earlier session/.test(gi), "and the idea's disclosure says why its grade is 1");
+    ok(!got.slots.some((s) => /\+—|\+—/.test(s.text)), `a null expected P&L is never printed as a signed dash (${got.slots.map((s) => s.text).join(" | ")})`);
+    ok(got.slots[0] && got.slots[0].dash.includes("unavailable"), "an unpublished real-world chance of profit is a dash carrying its state");
+    ok(got.slots[1] && got.slots[1].dash.includes("unavailable") && !/\d/.test(got.slots[1].text), "and so is an unpublished expected P&L, with no figure beside it");
+    ok(/At expiry/.test(got.key) && /Today/.test(got.key) && /Implied/.test(got.key) && /Real world/.test(got.key), `the ideas carry one key for their two payoff lines and their two worlds (${got.key.replace(/\n/g, " | ")})`);
+    eq(errors.length, 0, `the stale engine verdict throws nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  {
+    const card = clone(full);
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, card);
+    const usd = (v) => (v > 0 ? "+" : "") + (v < 0 ? "−$" : "$") + Math.abs(v).toFixed(Math.abs(v) < 10 ? 2 : 0);
+    const pays = await page.evaluate(() => [...document.querySelectorAll("#ftVerdict .ft-idea[data-structure]")].map((a) => ({ id: a.dataset.structure,
+      labels: [...a.querySelectorAll(".ft-idea-pay svg text.tx-b")].map((t) => t.textContent) })));
+    ok(pays.length > 0, "the engine ideas draw priced payoffs");
+    for (const p of pays) {
+      const st = card.engine.structures.find((s) => s.id === p.id);
+      if (!st.profitUnbounded && typeof st.maxProfit === "number") ok(p.labels.includes(usd(st.maxProfit)), `${st.family}: the payoff's top label is the engine's max profit (${p.labels.join(", ")} against ${usd(st.maxProfit)})`);
+      if (!st.lossUnbounded && typeof st.maxLoss === "number") ok(p.labels.includes(usd(st.maxLoss)), `${st.family}: and its floor label the engine's max loss, the same figure as the Risk slot, even where the curve is a grid`);
+    }
+    const w = await page.evaluate(() => {
+      const q = document.querySelector("#m-worlds .ft-wq"), p = document.querySelector("#m-worlds .ft-wp");
+      const n = (el) => (el ? (el.getAttribute("d").match(/[MLC]/g) || []).length : 0);
+      return { q: n(q), p: n(p), segs: document.querySelectorAll("#m-worlds .ui-seg-i").length, hl: [...document.querySelectorAll(".ui-chart .cell-hl")].map((r) => getComputedStyle(r).visibility) };
+    });
+    ok(w.q > 10 && w.p === w.q, `the implied and real-world curves stand on the same price cells (${w.q} and ${w.p} vertices)`);
+    ok(w.segs <= 5, `Two worlds offers at most five horizons, so its header never wraps (${w.segs})`);
+    let heads = 0;
+    for (const v of ["Contracts", "OI", "Alerts", "Prints"]) {
+      if (!(await pickView(page, "m-tape", v))) continue;
+      const got = await page.evaluate(() => { const hd = document.querySelector("#m-tape .ft-cbox .ft-lh"); return { list: !!document.querySelector("#m-tape .ft-cbox .ui-list"), head: hd ? hd.innerText.replace(/\s+/g, " ").trim() : null }; });
+      if (got.list) { heads++; ok(got.head && got.head.split(" ").length >= 2, `the ${v} list names its columns (${got.head})`); }
+    }
+    ok(heads >= 2, `at least two tape lists were drawn to check their column names (${heads})`);
+    if (await pickView(page, "m-gamma", "Grid")) {
+      const hv = await page.evaluate(() => [...document.querySelectorAll("#m-gamma .cell-hl")].map((r) => [r.getAttribute("x"), getComputedStyle(r).visibility]));
+      if (hv.length) ok(hv.every(([x, v]) => x !== "-99" || v === "hidden"), "a parked cell highlight is hidden rather than drawn outside the chart, where an overflowing SVG would show it");
+    }
+    if (await pickView(page, "m-gamma", "Roll-off")) {
+      const ro = await page.evaluate(() => { const svg = document.querySelector("#m-gamma .ft-cbox svg"); const r = svg.querySelector("rect.grow"); const pth = svg.querySelector("path.ln"); const y = pth ? Number(pth.getAttribute("d").split(/[ML ]+/).filter(Boolean)[1]) : null; return { bar: r ? Number(r.getAttribute("y")) : null, step: y }; });
+      const sch = (card.panels.calendar && card.panels.calendar.schedule || []).filter((r) => typeof r.share === "number");
+      if (sch.length && Math.abs(sch[0].share - sch[0].cumShare) < 1e-9) ok(Math.abs(ro.bar - ro.step) <= 1.5, `the roll-off bars share the cumulative line's scale: the first bar tops out at the first step (${ro.bar} against ${ro.step})`);
+    }
+    eq(errors.length, 0, `the priced payoffs, worlds and tape heads throw nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  {
+    const card = clone(full);
+    card.engine.ideas = [];
+    const close = card.engine.structures[0];
+    card.engine.noTrade = { code: "ev.none-positive", closest: close.id };
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, card, { neuron: { status: "ok", scope: card.ticker, summary: "One read.", ideas: [], engine: true, context: null } });
+    const a = await page.evaluate(() => { const el = document.querySelector("#ftVerdict .ft-aside"); return el ? { text: el.innerText.replace(/\s+/g, " "), code: el.dataset.code, silent: !!el.querySelector(".ui-silent") } : null; });
+    ok(a && /Stand aside/.test(a.text) && /priced · No positive edge/.test(a.text), `a card the engine stands aside on says so as a verdict with its count and reason (${a && a.text})`);
+    ok(a && !a.silent, "and draws no silence box inside a card: standing aside is a finding");
+    ok(a && a.text.includes(close.family.replace(/-/g, " ").replace(/^./, (c) => c.toUpperCase())), "the closest structure is named");
+    const t = await infoText(page, "#ftVerdict .ft-aside");
+    ok(/no structure it priced has a positive expected P&L/.test(t) && t.includes(close.id), "and the disclosure states the rule it failed and the closest structure's figures");
+    const idx = clone(full);
+    idx.depth = "index"; idx.score = null; idx.conviction = null; idx.fam = {};
+    await mount(page, idx);
+    const sig = await page.evaluate(() => { const m = document.getElementById("m-signal"); return { silent: m.querySelectorAll(".ui-silent[data-state]").length, gauge: !!m.querySelector(".ft-sig"), fams: m.querySelectorAll(".ft-fam").length }; });
+    ok(sig.silent === 1 && !sig.gauge && sig.fams === 0, "an index dossier's Signal module is one silence, not an empty gauge over five dashes");
+    eq(errors.length, 0, `the stand-aside and index paints throw nothing (${errors.join("; ")})`);
     await page.close();
   }
 

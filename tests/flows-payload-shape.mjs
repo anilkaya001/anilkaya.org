@@ -189,10 +189,10 @@ assert.deepEqual(missingReport, [],
     .filter((c) => c && c.engine && Array.isArray(c.engine.structures) && c.engine.structures.length);
   ok(cards.length > 0, `the dry run publishes cards whose engine block carries priced structures (${cards.length})`);
   const src = readFileSync(join(ROOT, "assets/js/flows-ticker.js"), "utf8");
-  const IDEA_FNS = ["payoffPoints", "ideaFacts", "legRow", "engineIdeaCard"];
+  const IDEA_FNS = ["payoffPoints", "ideaFacts", "legRow", "engineIdeaCard", "standAside"];
   const scope = IDEA_FNS.map((name) => {
     const start = src.indexOf("  function " + name + "(");
-    ok(start !== -1, `flows-ticker.js still defines ${name}() — the engine idea is drawn by these four, and a rename silently stops this scan`);
+    ok(start !== -1, `flows-ticker.js still defines ${name}() — the engine idea and the stand-aside are drawn by these five, and a rename silently stops this scan`);
     return src.slice(start, src.indexOf("\n  function ", start + 1));
   }).join("\n");
   const reads = (v) => [...new Set([...scope.matchAll(new RegExp("\\b" + v + "\\.([A-Za-z_][A-Za-z0-9_]*)", "g"))]

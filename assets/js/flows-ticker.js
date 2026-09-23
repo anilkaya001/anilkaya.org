@@ -19,7 +19,6 @@
   const str = (v) => (typeof v === "string" && v.trim() ? v.trim() : null);
   const sgn = (v) => (v < 0 ? MINUS : v > 0 ? "+" : "");
   const K = (k) => (num(k) === null ? DASH : Number.isInteger(k) ? String(k) : Math.abs(k * 10 - Math.round(k * 10)) < 1e-6 ? k.toFixed(1) : k.toFixed(2));
-  const pctN = (v, dp = 0) => (num(v) === null ? DASH : String(+(v * 100).toFixed(dp)).replace("-", MINUS));
   const ratioP = (v, dp = 0) => (num(v) === null ? DASH : (v * 100).toFixed(dp) + "%");
   const sentence = (t) => { const x = str(t); return x ? cap(x) : null; };
   const firstSentence = (t) => (typeof t === "string" ? (t.match(/^.*?[.!?](\s|$)/) || [t])[0].trim() : "");
@@ -29,12 +28,13 @@
     const m = one.slice(24).search(/[;:]\s|\s[–—]\s/);
     return m < 0 ? [one, one.length] : [one.slice(0, 24 + m).trim() + ".", 24 + m + 1];
   }
+  const STALE_LEAD = "This card describes an earlier session than the last closed one, so every grade is capped at weak.";
+  const typo = (t) => String(t).replace(/(^|[\s(])-(?=\d)/g, "$1" + MINUS);
   const chipDash = (state) => h("span", { class: "ft-cdash" }, DASH, glyph((UI.STATES[state] || UI.STATES.unavailable).g));
   const dayDiff = (a, b) => Math.round((Date.parse(b.slice(0, 10) + "T00:00:00Z") - Date.parse(a.slice(0, 10) + "T00:00:00Z")) / 864e5);
   const dirTone = (d) => (/^(bull|bullish|up|long)$/i.test(String(d || "")) ? "up" : /^(bear|bearish|down|short)$/i.test(String(d || "")) ? "down" : "flat");
   const dirWord = (t) => (t === "up" ? "Bullish" : t === "down" ? "Bearish" : "Neutral");
   const famWord = (f) => { const t = String(f || "").replace(/-/g, " ").trim(); return t ? t[0].toUpperCase() + t.slice(1) : DASH; };
-  const escapeRe = (t) => String(t).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
   const STATE = {
     ticker: null, card: null, cardX: null, hist: null, tape: null, neuron: null, quote: null, phase: null,
@@ -118,11 +118,7 @@
   const levelList = (card) => Object.values(levelsOf(card)).filter((l) => C.LEVELS[l.kind]);
   const LVL_KEY = { gamma_flip: ["--lvl-flip", "dia", "Flip"], call_wall: ["--lvl-call", "dot", "Call wall"], put_wall: ["--lvl-put", "dot", "Put wall"], max_pain: ["--lvl-pain", "dia", "Max pain"] };
   const atrOf = (card) => numOr(card.atr, card.panels && card.panels.levels && card.panels.levels.atr, card.engine && card.engine.atr);
-  function distTxt(px, S, atr) {
-    if (num(px) === null || !(S > 0)) return null;
-    const d = px / S - 1;
-    return F.pct(d, 1, true) + (atr > 0 ? " " + MID + " " + sgn(px - S) + Math.abs((px - S) / atr).toFixed(2) + " ATR" : "");
-  }
+
 
   function leadOf(p) { return p && p.lead && typeof p.lead.say === "string" ? p.lead.say : null; }
   function notesOf(p, keys) { return (keys || ["note", "relation", "reads", "bandNote", "unit"]).map((k) => (p && typeof p[k] === "string" ? p[k] : null)).filter(Boolean); }
@@ -134,6 +130,7 @@
   const fx = (v, dp, signed) => (num(v) === null ? DASH : signed ? F.signed(v, dp) : (v < 0 ? MINUS : "") + Math.abs(v).toFixed(dp));
   function mets(list, o) { const el = UI.metrics(list.filter(Boolean), o); el.dataset.n = String(el.childElementCount); return el; }
   function keyOf(c, shape, label) { return UI.key(c, shape, label); }
+  function dashKey(c, label) { const k = UI.key(c, "ln", label); k.firstChild.classList.add("ft-dash"); return k; }
   function legend(keys) { return UI.legend(keys.filter(Boolean)); }
 
   function freshNote(sec) {
@@ -630,7 +627,7 @@
         notes: [pm.bandNote, "The blue cone widens with the square root of time between spot and the priced range at the horizon; the dashed grey cone is the realized range drawn the same way. Bars under the price are the daily options score; a dot is a session with no score, which is not a zero.",
           events.length ? "The diamond marks the next earnings report inside the horizon (" + events[0].name + ")." : null] })));
     host.append(head, chartHost, legend([
-      keyOf("--accent", "", "Implied"), keyOf("--s-gray", "ln", "Realized"),
+      keyOf("--accent", "", "Implied"), dashKey("--s-gray", "Realized"),
       ...Object.values(levelsOf(card)).filter((l) => LVL_KEY[l.kind] && S && Math.abs(l.px / S - 1) <= 0.12).map((l) => keyOf(...LVL_KEY[l.kind])),
       hasStrip ? keyOf("--label-2", "split", "Score") : null, events.length ? keyOf("--lvl-flip", "dia", "Earnings") : null,
     ]));
@@ -651,7 +648,14 @@
 
   const BASIS = { state: "State", gamma: "γ", levels: "Levels", aggressor: "Aggressor", oiDeltas: "OI Δ", pricedMove: "Move", ivSurface: "Smile", volContext: "Term", skewTerm: "Skew", calendar: "Roll-off", path: "Path", darkpool: "Dark pool", topContracts: "Contracts", variation: "Hedging", displacement: "Displacement", surface: "Grid", context: "Trend", premiumTrack: "Premium", congress: "Congress", vanna: "Vanna", charm: "Charm", deltaExposure: "Delta" };
   const LOT = 100;
-  const usd0 = (v) => (num(v) === null ? DASH : (v < 0 ? MINUS + "$" : "$") + Math.abs(v).toFixed(0));
+  const NO_TRADE = {
+    "ev.none-positive": ["No positive edge", "no structure it priced has a positive expected P&L in the real world"],
+    "grade.none": ["None cleared the grade", "the structures with a positive edge all grade below 1"],
+    "risk.undefined-only": ["Only undefined risk", "every structure that cleared the bar carries undefined risk, and the first idea must be a defined-risk one"],
+    "model.none": ["Nothing priced", "the model could not price any structure on this card"],
+    "candidates.none": ["No candidates", "no structure family fits this card's expiries and state"],
+  };
+  const usd0 = (v) => (num(v) === null ? DASH : (v < 0 ? MINUS + "$" : "$") + Math.abs(v).toFixed(Math.abs(v) < 10 ? 2 : 0));
   const legText = (l) => (l.side > 0 ? "+" : l.side < 0 ? MINUS : "") + (l.qty > 1 ? l.qty : "") + l.type + (num(l.k) === null ? "" : K(l.k));
 
   function engineOf(card) { return card && card.engine && Array.isArray(card.engine.structures) ? card.engine : null; }
@@ -703,10 +707,18 @@
     return { points: pts, projected, exact: false };
   }
 
+  function sessionBehind() {
+    const c = STATE.card;
+    if (!c) return false;
+    const said = STATE.neuron && STATE.neuron.context ? STATE.neuron.context.stale : null;
+    if (typeof said === "boolean") return said;
+    return isoOk(c.sessionDate) && c.sessionDate < UI.freshness.market().expected;
+  }
   function vettedGrade(st, n) {
     const g = num(st && st.grade);
     const v = n ? num(n.grade) : null;
-    return v !== null ? (g !== null ? Math.min(v, g) : v) : g;
+    const out = v !== null ? (g !== null ? Math.min(v, g) : v) : g;
+    return out !== null && sessionBehind() ? Math.min(out, 1) : out;
   }
   function ideaFacts(st, n, eng) {
     const pr = st.prob || {}, ev = st.ev || {}, pc = (v) => (num(v) === null ? DASH : (v * 100).toFixed(0) + "%");
@@ -726,7 +738,8 @@
       ["Capital", st.capital ? usd0(st.capital.value) + " " + (st.capital.kind || "") : null],
       ["Tail", st.tail ? "VaR 5% " + usd0(st.tail.var5P) + " " + MID + " CVaR " + usd0(st.tail.cvar5P) : null],
       ["Greeks", st.greeks ? "Δ$ " + F.num(st.greeks["delta$"], true) + " " + MID + " Γ$ per 1% " + F.num(st.greeks["gamma$1pct"], true) + " " + MID + " vega " + F.num(st.greeks.vegaPt, true) + " " + MID + " θ/day " + F.num(st.greeks.thetaDay, true) : null],
-      ["Grade", (vettedGrade(st, n) === null ? DASH : vettedGrade(st, n)) + " of 3" + (n && num(n.grade) !== null && num(st.grade) !== null && n.grade < st.grade ? ", capped by the weakest fact it rests on (the structure alone grades " + st.grade + ")" : "") + (st.gradeParts ? " (" + Object.entries(st.gradeParts).map(([k, v]) => k + " " + v).join(", ") + ")" : "")],
+      ["Grade", (vettedGrade(st, n) === null ? DASH : vettedGrade(st, n)) + " of 3" + (sessionBehind() && num(st.grade) !== null && st.grade > 1 ? ", capped at 1 because this card describes an earlier session than the last one to close (the structure alone grades " + st.grade + ")"
+        : n && num(n.grade) !== null && num(st.grade) !== null && n.grade < st.grade ? ", capped by the weakest fact it rests on (the structure alone grades " + st.grade + ")" : "") + (st.gradeParts ? " (" + Object.entries(st.gradeParts).map(([k, v]) => k + " " + v).join(", ") + ")" : "")],
       ["Rules", (st.rules || []).join(" ") || null],
       ["Rests on", because.join(" " + MID + " ") || null],
       ["Source", n ? (n.from === "model" ? "model's pick, vetted against the engine" : "engine ranking") : "engine ranking"],
@@ -754,6 +767,8 @@
     const st = e.st;
     const tn = dirTone(st.dir);
     const pr = st.prob || {};
+    const evP = st.ev ? num(st.ev.p) : null;
+    const noFig = (what) => ST("unavailable", "The engine published no " + what + " for this structure" + (what.indexOf("real-world") === 0 && !eng.pLaw ? ": the card carries no real-world law to compute it under." : ": a figure it could not compute leaves the engine as null, and a null is not a zero."));
     const pay = payoffPoints(st, S);
     const chartHost = h("div", { class: "ft-idea-pay" });
     const word = e.n && e.n.word ? e.n.word : null;
@@ -774,15 +789,41 @@
       chartHost,
       h("div", { class: "ft-slots" },
         h("div", { class: "ft-slot" }, h("span", { class: "ft-slot-l" }, "PoP"),
-          h("span", { class: "ft-slot-v" }, h("i", { class: "ft-k is-q", "aria-hidden": "true" }), ratioP(pr.popQ), h("i", { class: "ft-k is-p", "aria-hidden": "true" }), ratioP(pr.popP))),
-        h("div", { class: "ft-slot" }, h("span", { class: "ft-slot-l" }, "EV"), h("span", { class: "ft-slot-v", "data-tone": tone(st.ev && st.ev.p) }, st.ev ? (st.ev.p >= 0 ? "+" : "") + usd0(st.ev.p) : DASH)),
-        h("div", { class: "ft-slot" }, h("span", { class: "ft-slot-l" }, "Risk"), h("span", { class: "ft-slot-v" }, st.lossUnbounded ? "Unbounded" : usd0(st.maxLoss)))));
+          h("span", { class: "ft-slot-v", "aria-label": "Chance of profit " + (num(pr.popQ) === null ? "not published" : ratioP(pr.popQ)) + " implied, " + (num(pr.popP) === null ? "not published" : ratioP(pr.popP)) + " real world" },
+            h("i", { class: "ft-k is-q", "aria-hidden": "true" }), num(pr.popQ) === null ? UI.dash(noFig("chance of profit on the smile"), "PoP implied") : ratioP(pr.popQ),
+            h("i", { class: "ft-k is-p", "aria-hidden": "true" }), num(pr.popP) === null ? UI.dash(noFig("real-world chance of profit"), "PoP real world") : ratioP(pr.popP))),
+        h("div", { class: "ft-slot" }, h("span", { class: "ft-slot-l" }, "EV"),
+          h("span", { class: "ft-slot-v", "data-tone": evP === null ? "silent" : tone(evP), "aria-label": evP === null ? null : "Expected P&L in the real world " + (evP > 0 ? "+" : "") + usd0(evP) },
+            h("i", { class: "ft-k is-p", "aria-hidden": "true" }), evP === null ? UI.dash(noFig("real-world expected P&L"), "EV") : (evP > 0 ? "+" : "") + usd0(evP))),
+        h("div", { class: "ft-slot" }, h("span", { class: "ft-slot-l" }, "Risk"),
+          h("span", { class: "ft-slot-v", "data-tone": !st.lossUnbounded && num(st.maxLoss) === null ? "silent" : null }, st.lossUnbounded ? "Unbounded" : num(st.maxLoss) === null ? UI.dash(noFig("maximum loss"), "Risk") : usd0(st.maxLoss)))));
+    const fmtPl = (v) => (v > 0 ? "+" : "") + usd0(v);
     requestAnimationFrame(() => {
       if (!pay || pay.points.length < 2) { chartHost.append(UI.silent(ST("pending", "The engine published no expiry curve for this structure."), "Payoff", 96)); return; }
-      C.payoff(chartHost, { points: pay.points, projected: pay.projected, spot: S, breakevens: st.breakevens || [], height: 92,
-        format: (v) => (v >= 0 ? "+" : "") + usd0(v), maxLabel: st.profitUnbounded ? "∞" : null, label: famWord(st.family) + " P&L at expiry" });
+      C.payoff(chartHost, { points: pay.points, projected: pay.projected, spot: S, breakevens: st.breakevens || [], height: 92, format: fmtPl,
+        maxLabel: st.profitUnbounded ? "∞" : num(st.maxProfit) !== null ? fmtPl(st.maxProfit) : null,
+        minLabel: st.lossUnbounded ? MINUS + "∞" : num(st.maxLoss) !== null ? fmtPl(st.maxLoss) : null, label: famWord(st.family) + " P&L at expiry" });
     });
     return card_;
+  }
+
+  function standAside(eng) {
+    const nt = eng.noTrade || {};
+    const why = NO_TRADE[nt.code] || [nt.code || "No trade", nt.code || "no structure cleared the bar"];
+    const n = num(eng.priced) !== null ? eng.priced : eng.structures.length;
+    const st = nt.closest ? eng.structures.find((x) => x.id === nt.closest) || null : null;
+    const evC = st && st.ev ? num(st.ev.p) : null;
+    const pr = (st && st.prob) || {};
+    const lead = "The engine priced " + n + " structures and stands aside: " + why[1] + "." + (st ? " The closest was " + famWord(st.family).toLowerCase() + " (" + st.id + ")." : "");
+    return h("article", { class: "ft-idea ft-aside is-wide", role: "listitem", "data-code": nt.code || "" },
+      h("span", { class: "ft-aside-g", "aria-hidden": "true" }, glyph("quiet")),
+      h("div", { class: "ft-aside-m" }, h("span", { class: "ft-idea-t" }, "Stand aside"), h("span", { class: "ft-aside-s" }, n + " priced " + MID + " " + why[0])),
+      st ? h("div", { class: "ft-aside-c", "aria-label": "Closest structure" },
+        h("span", { class: "ft-aside-l" }, "Closest"), h("b", null, famWord(st.family)),
+        h("span", { class: "ft-slot-v", "data-tone": evC === null ? "silent" : tone(evC) }, h("i", { class: "ft-k is-p", "aria-hidden": "true" }), evC === null ? DASH : (evC > 0 ? "+" : "") + usd0(evC)),
+        h("span", { class: "ft-slot-v" }, h("i", { class: "ft-k is-q", "aria-hidden": "true" }), num(pr.popQ) === null ? DASH : ratioP(pr.popQ), h("i", { class: "ft-k is-p", "aria-hidden": "true" }), num(pr.popP) === null ? DASH : ratioP(pr.popP))) : null,
+      info("standing aside", () => ({ title: "Stand aside", state: "quiet", asOf: eng.asOf || null, lead, facts: st ? ideaFacts(st, null, eng) : [],
+        sections: [{ title: "Families", lines: (eng.families || []).map((fm) => famWord(fm.family) + " " + MID + " score " + fx(fm.score, 2) + (fm.veto && fm.veto.length ? ", vetoed: " + fm.veto.join(", ") : "")) }] })));
   }
 
   function featureTitle(k) {
@@ -858,20 +899,25 @@
     const mid = h("div", { class: "ft-v-m" });
     const entries = ideaEntries(card, neuron);
     if (ok) {
-      const [one, cut] = headline(neuron.summary);
-      mid.append(h("h2", { class: "ft-v-line", id: "ftVerdictT" }, one));
+      const said = neuron.summary.trim();
+      const caveat = said.startsWith(STALE_LEAD) && said.length > STALE_LEAD.length + 1 ? STALE_LEAD : null;
+      const body = caveat ? said.slice(caveat.length).trim() : said;
+      const [one, cut] = headline(body);
+      mid.append(h("h2", { class: "ft-v-line", id: "ftVerdictT" }, typo(one)));
       const grades = entries.map((e) => (e.kind === "engine" ? (e.st ? vettedGrade(e.st, e.n) : null) : num(e.idea.robustness))).filter((v) => v !== null);
       const st = neuron.context && neuron.context.state ? neuron.context.state : null;
       mid.append(h("div", { class: "ft-v-meta" },
         UI.capsule(dirWord(tn), { tone: tn }),
+        caveat ? UI.stateButton(ST("stale", caveat), "Neuron") : null,
         neuron.verdictWord ? tag(neuron.verdictWord, { accent: true }) : st && st.word && st.state !== "undetermined" ? tag(st.word, { accent: true }) : null,
         grades.length ? h("span", { class: "ui-key" }, UI.robustness(Math.max(...grades)), "Robustness") : null,
         neuron.generatedAt ? h("span", { class: "ui-key" }, glyph("clock"), F.time(neuron.generatedAt)) : null));
-      const rest = cap(neuron.summary.slice(cut).trim());
+      const rest = cap(body.slice(cut).trim());
       const xid = "ftVerdictX";
       const meta = stateMeta(st);
       const x = h("div", { class: "ft-v-x", id: xid }, h("div", null,
-        rest ? h("p", null, rest) : null,
+        caveat ? h("p", null, caveat) : null,
+        rest ? h("p", null, typo(rest)) : null,
         st && st.chip ? h("p", { class: "ft-v-chip", id: "ftStateChip" }, st.chip) : null,
         meta.length ? h("dl", { class: "ft-v-dl", id: "ftStateMeta" }, meta.filter((m) => m[1]).map(([k, v]) => [h("dt", null, k), h("dd", null, v)])) : null,
         neuron.provenance ? h("p", { class: "ft-v-src" }, neuron.provenance) : h("p", { class: "ft-v-src" }, neuron.llm ? "Worded by " + String(neuron.model || "the model").replace(/^@cf\//, "") : "Deterministic read, no model wording"),
@@ -896,8 +942,7 @@
     if (entries.length) {
       entries.forEach((e, i) => row.append(e.kind === "engine" ? engineIdeaCard(e, card, i, eng) : legacyIdeaCard(e.idea, card, i)));
     } else if (eng && eng.noTrade) {
-      row.append(h("article", { class: "ft-idea is-silent is-wide", role: "listitem" }, h("div", { class: "ft-idea-h" }, h("span", { class: "ft-idea-t" }, "Stand aside")),
-        UI.silent(ST("quiet", "The engine priced " + (eng.priced || eng.structures.length) + " structures and none cleared its bar (" + (eng.noTrade.code || "no trade") + (eng.noTrade.closest ? "; the closest was " + eng.noTrade.closest : "") + ")."), "Ideas", 120)));
+      row.append(standAside(eng));
     } else if (!eng) {
       row.append(h("article", { class: "ft-idea is-silent is-wide is-bare", role: "listitem" },
         UI.silent(ST("pending", "The options engine has not priced this name yet, and the Neuron published no idea; structures appear here once the engine prices this card."), "Ideas", 64)));
@@ -905,6 +950,9 @@
     if (!row.childElementCount) return;
     row.classList.toggle("is-single", row.childElementCount === 1 && row.firstElementChild.classList.contains("is-wide"));
     verdictEl.append(row);
+    if (entries.some((e) => e.kind === "engine" && e.st)) {
+      verdictEl.append(h("div", { class: "ft-ideas-k" }, legend([keyOf("--label-1", "ln", "At expiry"), dashKey("--accent", "Today"), keyOf("--accent", "dot", "Implied"), keyOf("--label-2", "dot", "Real world")])));
+    }
     const cut = () => {
       const max = row.scrollWidth - row.clientWidth;
       row.classList.toggle("is-cut-start", max > 1 && row.scrollLeft > 1);
@@ -964,6 +1012,7 @@
     return { list: ex, pick };
   }
 
+  const WORLD_CELLS = 40;
   function worldsData(eng, exp) {
     const FQ = window.FlowsQuant;
     if (!FQ || typeof FQ.sliceFromSummary !== "function") return { st: ST("unavailable", "The pricing module did not load, so the two distributions cannot be drawn on this page.") };
@@ -976,11 +1025,11 @@
     const pQ = (u) => { if (!pCdf) return null; let lo = S * 0.2, hi = S * 3; for (let i = 0; i < 60; i++) { const m = (lo + hi) / 2; if (pCdf(m) < u) lo = m; else hi = m; } return (lo + hi) / 2; };
     const qQ = (u) => FQ.riskNeutralQuantile(slice, u);
     const ends = [qQ(0.004), qQ(0.996)].concat(pCdf ? [pQ(0.004), pQ(0.996)] : []).filter((v) => num(v) !== null);
-    let lo = Math.min(...ends, S * 0.97), hi = Math.max(...ends, S * 1.03);
-    const n = 140, dx = (hi - lo) / n;
+    const lo = Math.min(...ends, S * 0.97), hi = Math.max(...ends, S * 1.03);
+    const dx = (hi - lo) / WORLD_CELLS;
     const xs = [], q = [], p = [];
     let qa = qCdf(lo), pa = pCdf ? pCdf(lo) : null;
-    for (let i = 0; i < n; i++) {
+    for (let i = 0; i < WORLD_CELLS; i++) {
       const b = lo + (i + 1) * dx;
       const qb = qCdf(b), pb = pCdf ? pCdf(b) : null;
       xs.push(lo + (i + 0.5) * dx);
@@ -990,15 +1039,11 @@
     }
     const band = (fn) => (fn ? [fn(0.1587), fn(0.8413)] : null);
     const qBand = band(qQ), pBand = pCdf ? band(pQ) : null;
-    const bins = [];
-    if (pLaw && Array.isArray(pLaw.edges)) {
-      for (let i = 0; i + 1 < pLaw.edges.length; i++) {
-        const a = Math.max(lo, pLaw.edges[i] * S), b = Math.min(hi, num(pLaw.edges[i + 1]) === null ? Infinity : pLaw.edges[i + 1] * S);
-        if (b > a) bins.push([a, b, FQ.lawIntervalsProb(pLaw, [[a, b]]) / (b - a)]);
-      }
-    }
-    for (let i = 0; i < xs.length; i++) if (bins.length) { const bn = bins.find((z) => xs[i] >= z[0] && xs[i] < z[1]); p[i] = bn ? bn[2] : 0; }
-    return { st: pCdf ? OK : ST("quiet", "The card carries no real-world law for this horizon, so only the implied distribution is drawn."), S, lo, hi, xs, q, p, bins, qCdf, pCdf, qBand, pBand, exp, F: slice.F };
+    const lerp = (arr, x) => {
+      const t = clamp((x - xs[0]) / dx, 0, xs.length - 1), i = Math.min(xs.length - 2, Math.floor(t));
+      return arr[i] + (arr[i + 1] - arr[i]) * (t - i);
+    };
+    return { st: pCdf ? OK : ST("quiet", "The card carries no real-world law for this horizon, so only the implied distribution is drawn."), S, lo, hi, dx, xs, q, p, lerp, qCdf, pCdf, qBand, pBand, exp, F: slice.F };
   }
 
   function buildWorlds(card) {
@@ -1020,8 +1065,14 @@
     }
     const metricsBox = h("div");
     let curExp = list[pick];
-    const views = list.map((e) => ({ label: (e.dte || "?") + "d", name: title + " " + e.expiry, st: OK, draw: (host) => { curExp = e; return drawWorlds(host, card, eng, e, lead, metricsBox); } }));
-    const vw = viewer("Horizon", views, pick);
+    const keep = new Set([list[pick]]);
+    for (const want of [7, 30, 90, 180]) {
+      const c = list.filter((e) => !keep.has(e)).sort((a, b) => Math.abs((a.dte || 0) - want) - Math.abs((b.dte || 0) - want))[0];
+      if (c && keep.size < 5) keep.add(c);
+    }
+    const shown = list.filter((e) => keep.has(e)).sort((a, b) => (a.dte || 0) - (b.dte || 0));
+    const views = shown.map((e) => ({ label: (e.dte || "?") + "d", name: title + " " + e.expiry, st: OK, draw: (host) => { curExp = e; return drawWorlds(host, card, eng, e, lead, metricsBox); } }));
+    const vw = viewer("Horizon", views, shown.indexOf(list[pick]));
     mod({ id: "m-worlds", title, span: [12, 8], seg: vw.seg, views: vw.views, body: [metricsBox, vw.box, vw.leg], index: 2,
       info: () => {
         const e = curExp;
@@ -1032,10 +1083,11 @@
           facts: [["Implied (Q)", "the risk-neutral density of the fitted " + (e.smile.method || "smile").toUpperCase() + " smile, forward " + F.px(e.forward.F)],
             ["Real world (P)", eng.pLaw ? "the engine's " + (eng.pLaw.model || "real-world").toUpperCase() + " law at " + e.sessions + " sessions, drift-neutral to the forward" : null],
             ["Implied 68% range", d.qBand ? F.px(d.qBand[0]) + " – " + F.px(d.qBand[1]) : null], ["Real-world 68% range", d.pBand ? F.px(d.pBand[0]) + " – " + F.px(d.pBand[1]) : null],
-            ["Smile fit", e.smile ? "RMSE " + fx(e.smile.rmseIvPts, 3) + " vol pts " + MID + " " + e.smile.n + " strikes" : null], ["Law grade", eng.pLaw ? String(eng.pLaw.grade) + " of 3" : null]],
+            ["Smile fit", e.smile ? "RMSE " + fx(e.smile.rmseIvPts, 3) + " vol pts " + MID + " " + e.smile.n + " strikes" : null], ["Law grade", eng.pLaw ? String(eng.pLaw.grade) + " of 3" : null],
+            ["Horizons", shown.length < list.length ? shown.length + " of " + list.length + " fitted expiries: the lead idea's and those nearest one week, one month, three and six months" : null]],
           notes: ["Scrub the chart to read the probability of finishing below any price under each world, and the gap between them in points. Where the real world puts more weight than the market, the market is charging less than history implies; where it puts less, the market is charging more.",
             lead ? "Dashed rules are the lead idea's breakevens; the strip under the axis is where it makes (green) or loses (red) money at expiry." : null,
-            "The implied curve is the smile's own distribution function differenced over " + (d.xs ? d.xs.length : 0) + " price bins; the real-world steps are the law's own " + (d.bins ? d.bins.length : 0) + " bins in view, each drawn at its mass over its width. Nothing is smoothed."],
+            d.xs ? "Both curves stand on the same " + d.xs.length + " price cells of $" + F.px(d.dx) + ": each cell's height is that world's exact probability of finishing inside it, differenced from its own distribution function and divided by the width, so the area under either curve between two prices is that world's probability and the two are drawn at one resolution. The line joins the cells; the scrubbed figures are read from the distribution functions themselves." : null],
         };
       } });
     vw.start();
@@ -1087,14 +1139,10 @@
       }
       const path = (vals) => C.monoPath(d.xs.map((xv, i) => [x(xv), y(vals[i])]));
       const area = (vals) => path(vals) + `L${x(d.xs[d.xs.length - 1]).toFixed(1)} ${base}L${x(d.xs[0]).toFixed(1)} ${base}Z`;
-      if (d.pCdf && d.bins.length) {
-        const st = d.bins.map(([a, b, v], i) => (i ? "L" : "M") + x(a).toFixed(1) + " " + y(v).toFixed(1) + "L" + x(b).toFixed(1) + " " + y(v).toFixed(1)).join("");
-        const x0 = x(d.bins[0][0]).toFixed(1), x1 = x(d.bins[d.bins.length - 1][1]).toFixed(1);
-        s("path", { d: "M" + x0 + " " + base + st.replace(/^M/, "L") + "L" + x1 + " " + base + "Z", fill: C.vGrad(svg, pInk, 0.16, 0.03), class: "fade", style: { "--delay": "300ms" } }, svg);
-        s("path", { d: st, class: "ln draw", stroke: pInk, "stroke-width": 1.25, "stroke-linejoin": "miter", pathLength: 1, style: { "--delay": "160ms" } }, svg);
-      }
-      s("path", { d: area(d.q), fill: C.vGrad(svg, accent, 0.34, 0.04), class: "fade", style: { "--delay": "250ms" } }, svg);
-      s("path", { d: path(d.q), class: "ln draw", stroke: accent, pathLength: 1 }, svg);
+      if (d.pCdf) s("path", { d: area(d.p), fill: C.vGrad(svg, pInk, 0.2, 0.03), class: "fade", style: { "--delay": "300ms" } }, svg);
+      s("path", { d: area(d.q), fill: C.vGrad(svg, accent, 0.3, 0.04), class: "fade", style: { "--delay": "250ms" } }, svg);
+      if (d.pCdf) s("path", { d: path(d.p), class: "ln draw ft-wp", stroke: pInk, "stroke-width": 1.5, pathLength: 1, style: { "--delay": "160ms" } }, svg);
+      s("path", { d: path(d.q), class: "ln draw ft-wq", stroke: accent, pathLength: 1 }, svg);
       s("line", { x1: left, x2: w - right, y1: base, y2: base, class: "base" }, svg);
       const lg = s("g", { class: "fade", style: { "--delay": "600ms" } }, svg);
       for (const l of levelList(card)) {
@@ -1109,14 +1157,16 @@
       s("rect", { x: px0, y: top - 28, width: pw, height: 18, rx: 9, fill: cssVar("--label-1") }, svg);
       s("text", { x: px0 + pw / 2, y: top - 15.5, text: st, "text-anchor": "middle", class: "tx-b tx-ink" }, svg);
       for (const t of C.niceTicks(d.lo, d.hi, w < 600 ? 4 : 6)) if (Math.abs(x(t) - sx) > 26) s("text", { x: x(t), y: H - 6, text: String(t), "text-anchor": "middle" }, svg);
+      const fine = [];
+      for (let k = 0; k <= 120; k++) fine.push(d.xs[0] + (d.xs[d.xs.length - 1] - d.xs[0]) * k / 120);
       C.scrub(el, svg, {
-        xs: d.xs.map(x), top, bottom: base, label: "Implied against real-world distribution",
+        xs: fine.map(x), top, bottom: base, label: "Implied against real-world distribution",
         onMove: (i) => {
-          const xv = d.xs[i];
+          const xv = fine[i];
           const qc = d.qCdf(xv), pc = d.pCdf ? d.pCdf(xv) : null;
           const gap = pc === null ? null : pc - qc;
           return {
-            dots: [{ x: x(xv), y: y(d.q[i]), color: "--accent" }].concat(d.pCdf ? [{ x: x(xv), y: y(d.p[i]), color: "--label-2" }] : []),
+            dots: [{ x: x(xv), y: y(d.lerp(d.q, xv)), color: "--accent" }].concat(d.pCdf ? [{ x: x(xv), y: y(d.lerp(d.p, xv)), color: "--label-2" }] : []),
             parts: [C.part("Below " + F.px(xv), "k"), C.part("Q", "k"), h("b", null, ratioP(qc)), pc === null ? null : C.part("P", "k"), pc === null ? null : h("b", null, ratioP(pc)),
               gap === null ? null : C.part((gap > 0 ? "+" : gap < 0 ? MINUS : "") + Math.abs(gap * 100).toFixed(0) + " pts", null, Math.abs(gap) < 0.005 ? null : gap > 0 ? "long" : gap < 0 ? "short" : null)],
           };
@@ -1274,7 +1324,8 @@
     const tp = STATE.tape && STATE.tape.prem && STATE.tape.prem.status === "ok" && Array.isArray(STATE.tape.prem.t) && STATE.tape.prem.t.length > 1 ? STATE.tape.prem : null;
     if (tp) {
       const d = Array.isArray(tp.nd) ? tp.nd.map((v) => num(v)) : tp.t.map(() => null);
-      return { src: "tape", times: tp.t.map((t) => F.time(t)), d, p: tp.net.map((v) => num(v)), calls: tp.ncp, puts: tp.npp, centroid: null, dUnit: "delta-weighted contracts, side-signed", pUnit: "US dollars, net premium, side-signed" };
+      const u = STATE.tape.units || {};
+      return { src: "tape", times: tp.t.map((t) => F.time(t)), d, p: tp.net.map((v) => num(v)), calls: tp.ncp, puts: tp.npp, centroid: null, dUnit: str(u.nd), pUnit: str(u.net) };
     }
     const P = (card.panels || {}).path;
     if (!P || P.status !== "ok" || !Array.isArray(P.series)) return null;
@@ -1295,8 +1346,12 @@
       const left = 10, right = 10, top = 14, bot = 24;
       const n = L.d.length;
       const x = (i) => left + (n > 1 ? i / (n - 1) : 0.5) * (w - left - right);
-      const mid = top + (H - top - bot) / 2, half = (H - top - bot) / 2;
-      const yD = (v) => mid - (v / mD) * half, yP = (v) => mid - (v / mP) * half;
+      const norm = L.d.map((v) => (num(v) === null ? null : v / mD)).concat(hasP ? L.p.map((v) => (num(v) === null ? null : v / mP)) : []).filter((v) => v !== null);
+      const flatPath = !norm.some((v) => v !== 0);
+      const nLo = flatPath ? -1 : Math.min(0, ...norm), nHi = flatPath ? 1 : Math.max(0, ...norm), span = nHi - nLo;
+      const yN = (u) => top + ((nHi - u) / span) * (H - top - bot);
+      const mid = yN(0);
+      const yD = (v) => yN(v / mD), yP = (v) => yN(v / mP);
       const svg = C.svgRoot(el, w, H, animate, label);
       s("line", { x1: left, x2: w - right, y1: mid, y2: mid, class: "base ft-pz" }, svg);
       if (num(L.centroid) !== null) {
@@ -1333,7 +1388,7 @@
     const P = L.panel;
     const hasP = L.p.some((v) => num(v) !== null && v !== 0);
     const out = [L.src === "tape" ? "Drawn from this session's live tape; the path signature below is the card's, from the session it describes." : null,
-      "Each leg is scaled to its own extreme, so both reach full height: net delta in " + (L.dUnit || "the unit the card publishes") + (hasP ? ", net premium in " + (L.pUnit || "dollars") + "." : "."),
+      "Each leg is scaled to its own extreme, so both reach full height: net delta in " + (L.dUnit || (L.src === "tape" ? "a unit the live tape does not state" : "the unit the card publishes")) + (hasP ? ", net premium in " + (L.pUnit || "dollars") + "." : "."),
       hasP ? null : "The session carried no net premium in either direction, so only the delta leg is drawn."];
     if (P && num(P.persistence) === null && !("persistence" in P)) out.push("This card was built before the path signature was published, so persistence, concentration and the mean minute are not stated, and no mean-minute rule is drawn.");
     else if (P) {
@@ -1499,12 +1554,12 @@
       { label: "Grid", st: stS, name: "Gamma grid", draw: (host) => ({ handle: gammaGrid(host, card, P.surface), legend: gridLegend(P.surface) }) },
       { label: "Roll-off", st: stC, name: "Gamma roll-off", draw: (host) => {
         const sch = (P.calendar.schedule || []).filter((r) => num(r.share) !== null);
-        return { handle: C.bars(host, { values: sch.map((r) => r.share), labels: sch.map((r) => r.days + "d"), cumulative: sch.map((r) => r.cumShare), color: "--s-blue", height: [200, 220, 240],
+        return { handle: C.bars(host, { values: sch.map((r) => r.share), labels: sch.map((r) => r.days + "d"), cumulative: sch.map((r) => r.cumShare), color: "--s-blue", max: 1, height: [200, 220, 240],
           format: (v) => F.pct(v, 1), label: "Share of the gamma book expiring by expiry", readout: (i) => [C.part(day(sch[i].expiry) + " " + MID + " " + sch[i].days + "d", "k"), h("b", null, F.pct(sch[i].share, 1)), C.part("cum " + F.pct(sch[i].cumShare, 0), "k")] }),
           legend: [keyOf("--s-blue", "", "Expiring"), keyOf("--label-1", "ln", "Cumulative")] };
       } },
       { label: "1Y", st: stY, name: "Dealer gamma, one year", draw: (host) => {
-        const pts = axis.map((d, i) => [d, g1y[i]]).filter((p) => p[1] !== null || true);
+        const pts = axis.map((d, i) => [d, g1y[i]]);
         return { handle: C.diverging(host, { x: pts.map((p) => p[0]), values: pts.map((p) => p[1]), palette: "gamma", height: [200, 220, 240], maxWidth: 4, endLabel: true,
           format: (v) => F.num(v, true), label: card.ticker + " net dealer gamma over the last year", readout: (i) => [C.part(day(pts[i][0]), "k"), pts[i][1] === null ? C.part("no reading", "k") : h("b", { "data-tone": pts[i][1] < 0 ? "short" : pts[i][1] > 0 ? "long" : "flat" }, F.num(pts[i][1], true) + " Γ")] }),
           legend: [keyOf("--g-long", "", "Long"), keyOf("--g-short", "", "Short")] };
@@ -1522,9 +1577,10 @@
     };
     const lvSt = (k, what) => (lv[k] ? null : ST(P.levels && P.levels.status === "ok" ? "quiet" : "unavailable", P.levels && P.levels.status === "ok" ? "The ladder resolved no " + what + " over the strikes read, which is not a distance of zero." : "The levels panel was not measured on this card, so there is no " + what + " to place."));
     const bookV = num(reg.bookGamma) !== null ? reg.bookGamma : num(reg.netGamma);
+    const clash = num(reg.bookGamma) === null && bookV !== null && ((gl === "short" && bookV > 0) || (gl === "long" && bookV < 0));
     mod({ id: "m-gamma", title: "Gamma", span: [12, 7], st, seg: vw.seg, views: vw.views, index: 4, body: [
       mets([
-        metric("Dealer γ", F.money(bookV, true), { tone: gl, unit: "/1%", sub: gl ? (gl === "short" ? "Short" : "Long") + (reg.labelFrom === "book" ? " " + MID + " book" : " " + MID + " flow") + (gx && num(gx.persist) !== null ? " " + MID + " " + gx.persist + "d" : "") : null,
+        metric("Dealer γ", clash ? (gl === "short" ? "Short" : "Long") : F.money(bookV, true), { tone: gl, unit: clash ? null : "/1%", sub: clash ? "today " + F.money(bookV, true) + "/1%" : gl ? (gl === "short" ? "Short" : "Long") + (reg.labelFrom === "book" ? " " + MID + " book" : " " + MID + " flow") + (gx && num(gx.persist) !== null ? " " + MID + " " + gx.persist + "d" : "") : null,
           state: bookV === null ? ST("unavailable", "No regime reading on the card.") : null }),
         metric("Flip", lv.gamma_flip ? F.px(lv.gamma_flip.px) : DASH, { key: keyOf("--lvl-flip", "dia", ""), sub: dist("gamma_flip"), state: lvSt("gamma_flip", "gamma flip"), id: "ftFlip" }),
         metric("Call wall", lv.call_wall ? F.px(lv.call_wall.px) : DASH, { key: keyOf("--lvl-call", "dot", ""), sub: dist("call_wall"), state: lvSt("call_wall", "call wall") }),
@@ -1644,7 +1700,7 @@
     const shares = parts.length ? h("div", { class: "ft-shares" },
       offsetting ? null : UI.split(parts.map((p) => ({ color: p[2], value: p[1] })), parts.map((p) => p[0] + " " + Math.round(p[1] * 100) + "%").join(", ")),
       legend(parts.map((p) => h("span", { class: "ui-key" }, h("i", { style: { "--c": cssVar(p[2]) }, "aria-hidden": "true" }), p[0], h("b", null, F.pct(p[1], 0, offsetting))))
-        .concat(num(V.driftInSd) !== null ? [h("span", { class: "ui-key" }, glyph("clock"), "Drift", h("b", null, Math.abs(V.driftInSd).toFixed(2) + " sd"))] : []))) : null;
+        .concat(num(V.driftInSd) !== null ? [h("span", { class: "ui-key" }, glyph("clock"), "Drift", h("b", null, Math.abs(V.driftInSd).toFixed(2) + " SD"))] : []))) : null;
     const st = UI.partial(views.map((v) => ({ name: v.label, st: v.st })));
     mod({ id: "m-hedge", title: "Hedging", span: [12, 5], st: stV.state === "ok" ? st : stV, robustness: stV.state === "ok" && V.robustness ? V.robustness.r : null, seg: vw.seg, views: vw.views, index: 5, body: [
       mets([
@@ -1723,7 +1779,7 @@
     const eng = engineOf(card);
     const FQ = window.FlowsQuant;
     const ks = [];
-    for (let k = -0.25; k <= 0.2501; k += 0.0125) ks.push(+k.toFixed(4));
+    for (let i = -20; i <= 20; i++) ks.push(+Math.log1p(i * 0.0125).toFixed(5));
     if (eng && FQ && typeof FQ.sliceVolK === "function") {
       const ex = eng.expiries.filter((e) => e.smile && e.forward);
       const pick = [];
@@ -1773,7 +1829,7 @@
           yFormat: (v) => F.pct(v, 0), height: [280, 300, 320], label: card.ticker + " implied volatility by days to expiry",
           readout: (i) => [C.part(day(termRows[i].e) + " " + MID + " " + termRows[i].d + "d", "k"), h("b", null, F.pct(termRows[i].v)), termRows[i].f !== null ? C.part("fwd " + F.pct(termRows[i].f), "k") : null,
             num(termRows[i].m) !== null ? C.part("±" + F.pct(termRows[i].m) + " move", "k") : null, termRows[i].ev ? C.part("Earnings", null, "warn") : null] }),
-          legend: [keyOf("--accent", "ln", "Implied"), fwd ? keyOf("--s-purple", "ln", "Forward") : null, num(pm.rv30) !== null ? keyOf("--s-gray", "ln", "Realized 30d") : null, evRow ? keyOf("--lvl-flip", "dia", "Earnings") : null] };
+          legend: [keyOf("--accent", "ln", "Implied"), fwd ? dashKey("--s-purple", "Forward") : null, num(pm.rv30) !== null ? dashKey("--s-gray", "Realized 30d") : null, evRow ? keyOf("--lvl-flip", "dia", "Earnings") : null] };
       } },
       { label: "Skew", st: skew && skew.series && Array.isArray(skew.series.d) ? OK : xSt(X.skew, "risk-reversal history"), name: "Skew", draw: (host) => {
         const S2 = skew.series;
@@ -1785,16 +1841,22 @@
         const cols = ["--s-teal", "--accent", "--s-purple"];
         const xl = (m) => (Math.abs(m) < 1e-9 ? "ATM" : sgn(m) + Math.round(Math.abs(Math.expm1(m)) * 100) + "%");
         return { handle: C.line(host, { x: smile.x, xType: "number", series: smile.series.map((sr, i) => ({ values: sr.values, color: cols[i], label: sr.e.dte + "d", format: (v) => F.pct(v) })),
-          xTicks: [-0.2, -0.1, 0, 0.1, 0.2].map((v) => ({ v, label: xl(v) })), yFormat: (v) => F.pct(v, 0), height: [280, 300, 320], label: card.ticker + " implied volatility smile by moneyness", xFormat: xl }),
+          xTicks: [-0.2, -0.1, 0, 0.1, 0.2].map((p) => ({ v: Math.log1p(p), label: p === 0 ? "ATM" : sgn(p) + Math.round(Math.abs(p) * 100) + "%" })), yFormat: (v) => F.pct(v, 0), height: [280, 300, 320], label: card.ticker + " implied volatility smile by strike against the forward", xFormat: xl }),
           legend: smile.series.map((sr, i) => keyOf(cols[i], "ln", sr.e.dte + "d")) };
       } },
       { label: "Surface", st: sf ? OK : panelSt(card, "ivSurface", "volatility surface"), name: "Surface", draw: (host) => {
         const rows = sf.rows.map((m, r) => ({ m, r })).sort((a, b) => b.m - a.m);
         const xl = (m) => (Math.abs(m) < 1e-9 ? "ATM" : sgn(m) + Math.round(Math.abs(Math.expm1(m)) * 100) + "%");
-        const cap = Math.max(...sf.iv.flat().filter((v) => num(v) !== null), 0.01);
-        return { handle: C.heatmap(host, { rows: rows.map((o) => o.m), cols: sf.expiries.map((e) => e.days + "d"), grid: rows.map((o) => sf.iv[o.r] || []), cap, palette: "gamma",
-          rowFormat: xl, colFormat: String, highlightRow: rows.findIndex((o) => Math.abs(o.m) < 1e-9), format: (v) => F.pct(v), cellH: 14, label: card.ticker + " implied volatility by moneyness and expiry" }),
-          legend: [keyOf("--g-long", "", "Higher IV"), keyOf("--fill-4", "", "Not quoted")] };
+        const ivs = sf.iv.flat().filter((v) => num(v) !== null && v > 0);
+        const lo = ivs.length ? Math.min(...ivs) : 0, hi = ivs.length ? Math.max(...ivs) : 0.01;
+        const floor = lo - Math.max(hi - lo, 0.005) * 0.08;
+        const grid = rows.map((o) => (sf.iv[o.r] || []).map((v) => (num(v) !== null && v > 0 ? v - floor : null)));
+        return { handle: C.heatmap(host, { rows: rows.map((o) => o.m), cols: sf.expiries.map((e) => e.days + "d"), grid, cap: hi - floor, palette: "gamma",
+          rowFormat: xl, colFormat: String, highlightRow: rows.findIndex((o) => Math.abs(o.m) < 1e-9), format: (v) => F.pct(v + floor), cellH: 14,
+          label: card.ticker + " implied volatility by moneyness and expiry, shaded from " + F.pct(lo) + " to " + F.pct(hi) }),
+          legend: [h("span", { class: "ui-key ft-ramp", role: "img", "aria-label": "Shade from " + F.pct(lo) + " to " + F.pct(hi) + " implied volatility" },
+            h("span", { class: "ft-ramp-s", "aria-hidden": "true" }, RAMP_OPACITY.map((a) => h("i", { style: { "--c": cssVar("--g-long"), opacity: String(a) } }))), F.pct(lo, 0) + " – " + F.pct(hi, 0) + " IV"),
+            keyOf("--fill-4", "", "Not quoted")] };
       } },
       { label: "History", st: ivRows.length > 4 ? OK : vc && vc.ivRank ? stOf(vc.ivRank, "implied volatility history") : panelSt(card, "volContext", "implied volatility history"), name: "Volatility history", draw: (host) => {
         const gm = new Map(), em = new Map();
@@ -1804,7 +1866,7 @@
         if (em.size) series.push({ values: ivRows.map((r) => (em.has(r.date) ? em.get(r.date) : null)), color: "--s-gray", dash: true, label: "EWMA", format: (v) => F.pct(v) });
         const refs = [num(pm.rv30) !== null ? { y: pm.rv30, color: "--s-teal", dash: true } : null].filter(Boolean);
         return { handle: C.line(host, { x: ivRows.map((r) => r.date), series, refs, yFormat: (v) => F.pct(v, 0), height: [280, 300, 320], label: card.ticker + " implied volatility against the GARCH conditional volatility and its EWMA reference" }),
-          legend: [keyOf("--accent", "ln", "Implied 30d"), gm.size ? keyOf("--label-2", "ln", "GARCH vol") : null, em.size ? keyOf("--s-gray", "ln", "EWMA(0.94)") : null, refs.length ? keyOf("--s-teal", "ln", "RV 30d " + F.pct(pm.rv30)) : null] };
+          legend: [keyOf("--accent", "ln", "Implied 30d"), gm.size ? keyOf("--label-2", "ln", "GARCH vol") : null, em.size ? dashKey("--s-gray", "EWMA(0.94)") : null, refs.length ? dashKey("--s-teal", "RV 30d " + F.pct(pm.rv30)) : null] };
       } },
     ];
     const vw = viewer("Volatility view", views);
@@ -1814,6 +1876,7 @@
     const rr = skew ? skew.rr25 : sk ? sk.skew : null;
     const slope = cone ? cone.slope30_90 : null;
     const rk = ivRankOf(card);
+    const cut = P.ivSurface && P.ivSurface.coverage && P.ivSurface.coverage.truncated ? "The vendor returned " + P.ivSurface.coverage.rowsReturned + " chain rows, the cap, so this surface may be an arbitrary subset of the book and far wings may be missing; " + P.ivSurface.coverage.filter + "." : null;
     mod({ id: "m-vol", title: "Volatility", span: [12, 6], st, seg: vw.seg, views: vw.views, index: 6, body: [
       mets([
         metric("IV 30d", F.pct(iv30), { sub: cone && num(cone.pct30) !== null ? "pct " + Math.round(cone.pct30 * 100) : num(pm.ivMomentum) !== null ? F.pts(pm.ivMomentum) + " pts 1d" : null, state: num(iv30) === null ? ST("unavailable", "No 30-day implied volatility on the card.") : null }),
@@ -1821,7 +1884,7 @@
         metric("Premium", pts1(vrpV), { unit: "pts", tone: num(vrpV) === null ? null : vrpV > 0 ? "short" : vrpV < 0 ? "long" : null, sub: vrp && num(vrp.hitRate) !== null ? "won " + F.pct(vrp.hitRate, 0) : pm.richness ? pm.richness : null, state: num(vrpV) === null ? ST("unavailable", "No realized volatility to compare.") : null }),
         metric("Skew", pts1(rr), { unit: num(rr) === null ? null : "pts", sub: skew && num(skew.z) !== null ? "z " + F.signed(skew.z, 1) : sk && sk.skewBasis ? sk.skewBasis.days + "d put − call" : null,
           state: num(rr) === null ? ST(sk ? "quiet" : "unavailable", sk && sk.skewReason ? "The wing-to-wing skew is not published: " + sk.skewReason + "." : "No skew reading on the card.") : null }),
-        metric("Term", slope === null ? DASH : F.pct(slope, 1, true), { sub: slope === null ? null : slope > 0 ? "Inverted" : "Contango", tone: slope === null ? null : slope > 0 ? "short" : null, state: slope === null ? xSt(X.cone, "term slope") : null }),
+        metric("Term", slope === null ? DASH : F.pct(slope, 1, true), { sub: slope === null ? null : slope > 0 ? "Inverted" : slope < 0 ? "Contango" : "Flat", tone: slope === null ? null : slope > 0 ? "short" : null, state: slope === null ? xSt(X.cone, "term slope") : null }),
       ], { min: 88 }), vw.box, vw.leg],
       info: () => ({
         title: "Volatility", state: st.state === "ok" ? null : st.state, asOf: pm.asOf || null, lead: leadOf(vc) || leadOf(P.pricedMove),
@@ -1840,9 +1903,9 @@
         sections: [{ title: "Cone", lines: [cone ? "Each tenor's dot is today's implied volatility; the bar is its year's range and the box its middle half. The grey band behind is the realized-volatility cone at the matching window (10th to 90th percentile over two years)." : reasonOf(views[0].st), freshNote(X.cone)] },
           { title: "Term", lines: [term && term.eventKink ? "The first expiry spanning the earnings day carries a premium of " + F.pts(term.eventKink.premium) + " percentile points over its neighbours." : null, term && term.eventMove && num(term.eventMove.sd) !== null ? "The implied earnings move is ±" + F.pct(term.eventMove.sd) + " (one sd)." : null, sk && sk.termReason] },
           { title: "Skew", lines: (sk ? skewTermRead(sk).lines : []).concat([sk && sk.relation, skew ? "The 25-delta risk reversal is read on the fixed " + skew.expiry + " expiry, so its maturity shrinks along the series; the z is maturity-adjusted." : reasonOf(views[2].st)]) },
-          { title: "Surface", lines: [sf ? surfaceRead(sf).lead : reasonOf(views[4].st), P.ivSurface && P.ivSurface.coverage && P.ivSurface.coverage.truncated ? "The vendor returned " + P.ivSurface.coverage.rowsReturned + " chain rows, the cap, so this surface may be an arbitrary subset of the book and far wings may be missing; " + P.ivSurface.coverage.filter + "." : null] },
+          { title: "Surface", lines: [sf ? surfaceRead(sf).lead : reasonOf(views[4].st), cut] },
           { title: "Smile", lines: [smile ? (smile.source === "engine" ? "Smiles are the engine's own fitted curves per expiry." : "Smiles are the chain's measured points per expiry.") : reasonOf(views[3].st), P.ivSurface && P.ivSurface.ivBasis ? "IV basis: " + P.ivSurface.ivBasis : null,
-            P.ivSurface && P.ivSurface.coverage && P.ivSurface.coverage.truncated ? "The vendor returned " + P.ivSurface.coverage.rowsReturned + " chain rows, the cap, so this surface may be an arbitrary subset of the book and far wings may be missing; " + P.ivSurface.coverage.filter + "." : null] },
+            cut] },
           { title: "History", lines: ["Implied is the 30-day at-the-money volatility; beside it the GARCH conditional volatility for the same day and, dashed, an EWMA reference on the same returns.", vc && vc.note] },
           garchSection(card)],
       }) });
@@ -1984,7 +2047,7 @@
     mod({ id: "m-flow", title: "Flow", span: [12, 6], st, seg: vw.seg, views: vw.views, index: 7, body: [
       mets([
         metric("Net premium", moneyPx(net), { tone: tone(net), sub: tp ? "live" : path && num(path.minutes) ? Math.round(path.minutes / 6) / 10 + "h session" : null, state: num(net) === null ? stSession : null }),
-        metric("Net delta", F.num(nd, true), { tone: tone(nd), sub: "delta-weighted", state: num(nd) === null ? stSession : null }),
+        metric("Net delta", F.num(nd, true), { tone: tone(nd), sub: tp ? "live tape" : "session", state: num(nd) === null ? stSession : null }),
         metric("NOPE", nope ? F.pct(nope.close, 1, true) : DASH, { tone: nope ? tone(nope.close) : null, sub: nope && num(nope.z) !== null ? "z " + F.signed(nope.z, 1) : nope ? "no history" : null, state: nope ? null : xSt(X.nope, "NOPE read") }),
         metric("Aggressor", F.num(agNet, true), { tone: tone(agNet), sub: agNet === null ? null : agNet < 0 ? "to puts" : "to calls", state: agNet === null ? panelSt(card, "aggressor", "aggressor ladder") : null }),
       ], { min: 96 }), vw.box, vw.leg, tiles],
@@ -2008,20 +2071,21 @@
     const sv = sh && sh.volume && sh.volume.status === "ok" ? sh.volume : null;
     const ins = X.insiders && (X.insiders.status === "ok" || X.insiders.status === "quiet") ? X.insiders : null;
     const stShort = sh ? OK : xSt(X.short, "short interest read");
+    const insRead = !!ins && ins.status === "ok" && num(ins.net90) !== null;
     const svPath = sv && Array.isArray(sv.path) ? sv.path.filter((p) => isoOk(p[0]) && num(p[1]) !== null) : [];
     const boPath = bo && Array.isArray(bo.path) ? bo.path.filter((p) => isoOk(p[0]) && num(p[1]) !== null) : [];
-    const dots = ins && Array.isArray(ins.dots) ? ins.dots.filter((d) => isoOk(d[0]) && num(d[1]) !== null) : [];
+    const dots = ins && Array.isArray(ins.dots) ? ins.dots.filter((d) => isoOk(d[0]) && num(d[1]) !== null).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)) : [];
     const pct2 = (v) => F.pct(v, 2);
     const views = [
       { label: "Short vol", st: svPath.length > 2 ? OK : sh ? ST(sh.volume && sh.volume.status === "unavailable" ? "unavailable" : "quiet", sh.volume && sh.volume.why ? sh.volume.why : "No short-volume history on this name's dossier.") : stShort, name: "Short volume ratio", draw: (host) => ({
         handle: C.line(host, { x: svPath.map((p) => p[0]), series: [{ values: svPath.map((p) => p[1]), color: "--s-purple", area: true, format: (v) => F.pct(v, 1) }], refs: num(sv.mean60) !== null ? [{ y: sv.mean60, dash: true }] : [],
           yFormat: (v) => F.pct(v, 0), height: [160, 180, 190], label: card.ticker + " FINRA short-volume ratio, last " + svPath.length + " sessions" }),
-        legend: [keyOf("--s-purple", "ln", "Short volume"), keyOf("--label-3", "ln", "60-day mean")] }) },
+        legend: [keyOf("--s-purple", "ln", "Short volume"), dashKey("--label-3", "60-day mean")] }) },
       { label: "Borrow", st: boPath.length > 1 ? OK : sh && sh.borrow ? xSt(sh.borrow, "borrow read") : stShort, name: "Borrow fee", draw: (host) => ({
         handle: C.line(host, { x: boPath.map((p) => p[0]), series: [{ values: boPath.map((p) => p[1]), color: "--s-orange", format: pct2 }], yFormat: pct2, height: [160, 180, 190], label: card.ticker + " borrow fee" }),
         legend: [keyOf("--s-orange", "ln", "Fee")] }) },
       { label: "Insiders", st: dots.length ? OK : ins ? ST("quiet", "No insider purchase or sale in the last 90 days.") : xSt(X.insiders, "insider read"), name: "Insider trades", draw: (host) => ({
-        handle: C.diverging(host, { x: dots.map((d) => d[0]), values: dots.map((d) => d[1]), height: [160, 180, 190], format: moneyPx, label: card.ticker + " insider purchases and sales, signed dollars",
+        handle: C.diverging(host, { x: dots.map((d) => day(d[0])), values: dots.map((d) => d[1]), height: [160, 180, 190], format: moneyPx, label: card.ticker + " insider purchases and sales, signed dollars, one bar per filing in date order",
           readout: (i) => [C.part(day(dots[i][0]), "k"), h("b", { "data-tone": tone(dots[i][1]) }, moneyPx(dots[i][1])), C.part(dots[i][2] === "P" ? "purchase" : "sale", "k"), dots[i][4] === 1 ? C.part("10b5-1 plan", "k") : null] }),
         legend: [keyOf("--up-mark", "", "Bought"), keyOf("--down-mark", "", "Sold")] }) },
     ];
@@ -2032,7 +2096,8 @@
         metric("Short float", si ? F.pct(si.si, 1) : DASH, { sub: si && num(si.dtc) !== null ? si.dtc.toFixed(1) + "d to cover" : null, state: si ? (si.stale ? ST("stale", "The latest settlement (" + si.date + ") is older than 45 days.") : null) : sh ? ST("quiet", "No short-interest settlement on this name.") : stShort }),
         metric("Borrow", bo ? F.pct(bo.fee, 2) : DASH, { tone: bo && bo.htb ? "down" : null, sub: bo && num(bo.dFee5) !== null ? F.pts(bo.dFee5, 2) + " pts 5d" : null, state: bo ? null : sh && sh.borrow ? xSt(sh.borrow, "borrow read") : stShort }),
         metric("Short vol", sv ? F.pct(sv.ratio, 0) : DASH, { sub: sv && num(sv.z) !== null ? "z " + F.signed(sv.z, 1) : null, state: sv ? null : sh && sh.volume ? xSt(sh.volume, "short-volume read") : stShort }),
-        metric("Insiders 90d", ins && num(ins.net90) !== null ? moneyPx(ins.net90) : DASH, { tone: ins ? tone(ins.net90) : null, sub: ins ? (ins.buyCount || 0) + " buy " + MID + " " + (ins.sellCount || 0) + " sell" : null, state: ins ? null : xSt(X.insiders, "insider read") }),
+        metric("Insiders 90d", insRead ? moneyPx(ins.net90) : DASH, { tone: insRead ? tone(ins.net90) : null, sub: insRead ? (ins.buyCount || 0) + " buy " + MID + " " + (ins.sellCount || 0) + " sell" : null,
+          state: !ins ? xSt(X.insiders, "insider read") : insRead ? null : ST("quiet", "No insider purchase or sale in the last 90 days.") }),
       ], { min: 92 }), vw.box, vw.leg],
       info: () => ({
         title: "Positioning and ownership", asOf: si ? si.date : null, lead: sh ? "Short interest, borrow and short volume from FINRA and the vendor, and insider Form 4 trades over the last 90 days." : stShort.reason,
@@ -2094,7 +2159,7 @@
         metric("Realized", E && num(E.medianAbsMove) !== null ? "±" + F.pct(E.medianAbsMove, 1) : DASH, { sub: E && num(E.medianRatio) !== null ? "×" + E.medianRatio.toFixed(2) + " priced" : null, state: E ? null : stE }),
         metric("Beat", E && num(E.beat) !== null ? F.pct(E.beat, 0) : DASH, { sub: "moved > priced", state: E ? null : stE }),
         metric("Straddle", E && num(E.ls1dHit) !== null ? F.pct(E.ls1dHit, 0) : DASH, { sub: "1d hit rate", state: E && num(E.ls1dHit) !== null ? null : E ? ST("quiet", "The vendor published no straddle values for these reports.") : stE }),
-      ], { min: 84 }), box, legend([keyOf("--up-mark", "", "Up"), keyOf("--down-mark", "", "Down"), keyOf("--accent-ink", "ln", "Priced"), keyOf("--label-3", "ln", "Median")])],
+      ], { min: 84 }), box, legend([keyOf("--up-mark", "", "Up"), keyOf("--down-mark", "", "Down"), keyOf("--accent-ink", "ln", "Priced"), dashKey("--label-3", "Median")])],
       info: () => ({
         title: "Events", state: stE.state === "ok" ? null : stE.state, asOf: next && next.d ? "Next " + next.d : null,
         lead: E ? "The last " + ev.length + " reports: the bar is the move the day after, the tick the move the options priced beforehand." : stE.reason,
@@ -2109,6 +2174,16 @@
     else eventsChart(box, card, ev, cols);
   }
 
+  const TAPE_COLS = {
+    contracts: "24px minmax(0,1fr) var(--mw, minmax(40px,80px)) 52px 56px", oi: "24px minmax(0,1fr) var(--mw, minmax(40px,72px)) 48px 56px",
+    prints: "minmax(0,1fr) var(--mw, minmax(40px,90px)) 64px", alerts: "24px minmax(0,1fr) var(--mw, minmax(40px,72px)) 56px 44px",
+  };
+  const TAPE_HEADS = { contracts: ["Contract", "Volume", "Net"], oi: ["Contract", "OI", "Change"], alerts: ["Contract", "Premium", "At ask"], prints: ["Print", "Premium"] };
+  function tapeHead(kind) {
+    const [a, b, c] = TAPE_HEADS[kind];
+    return h("div", { class: "ft-lh", style: { "--cols": TAPE_COLS[kind] } }, kind === "prints" ? null : h("span", { class: "ft-lh-b" }),
+      h("span", { class: "ft-lh-m" }, a), h("span", { class: "ft-lh-x" }), h("span", { class: "ft-lh-v" }, b), c ? h("span", { class: "ft-lh-v" }, c) : null);
+  }
   function tapeRows(kind, card) {
     const P = card.panels || {};
     const S = spotOf(card);
@@ -2119,7 +2194,7 @@
       const mx = Math.max(...R.map((r) => r.vol), 1);
       return R.map((r, i) => UI.listRow({ badge: r.cp, badgeTone: r.cp === "C" ? "up" : "down", badgeLabel: r.cp === "C" ? "Call" : "Put", primary: K(r.k),
         secondary: day(r.expiry) + (num(r.iv) !== null ? " " + MID + " " + F.pct(r.iv, 0) : ""), meter: r.vol / mx, index: i, value: F.num(r.vol),
-        signed: num(r.aggr) === null ? UI.dash(ST("withheld", "The vendor did not report which side took this contract's volume, so its aggressor net is withheld rather than zeroed."), "Aggressor net") : F.num(r.aggr, true), signedValue: r.aggr, cols: "24px minmax(0,1fr) var(--mw, minmax(40px,80px)) 52px 56px" }));
+        signed: num(r.aggr) === null ? UI.dash(ST("withheld", "The vendor did not report which side took this contract's volume, so its aggressor net is withheld rather than zeroed."), "Aggressor net") : F.num(r.aggr, true), signedValue: r.aggr, cols: TAPE_COLS.contracts }));
     }
     if (kind === "oi") {
       const oi = P.oiDeltas;
@@ -2132,7 +2207,7 @@
           secondary: day(r.exp) + (num(r.oiUpDays) !== null ? " " + MID + " " + r.oiUpDays + "d ↑OI" : "") + (num(r.volGtOiDays) !== null ? " " + MID + " " + r.volGtOiDays + "d V>OI" : ""),
           meter: Math.abs(num(r.diff) || 0) / mx, meterColor: num(r.diff) !== null && r.diff < 0 ? "--down-mark" : "--label-2", index: i,
           value: num(r.currOi) === null ? UI.dash(ST("unavailable", "The vendor published no open interest for this contract."), "Open interest") : F.num(r.currOi),
-          signed: num(r.diff) === null ? UI.dash(ST("unavailable", "The vendor published no prior clearing day's open interest for this contract, so its change is not stated rather than stated as zero."), "Change") : F.num(r.diff, true), signedValue: num(r.diff), cols: "24px minmax(0,1fr) var(--mw, minmax(40px,72px)) 48px 56px" });
+          signed: num(r.diff) === null ? UI.dash(ST("unavailable", "The vendor published no prior clearing day's open interest for this contract, so its change is not stated rather than stated as zero."), "Change") : F.num(r.diff, true), signedValue: num(r.diff), cols: TAPE_COLS.oi });
         row.title = "Open interest " + (num(r.currOi) === null ? DASH : F.int(r.currOi)) + ", change " + (num(r.diff) === null ? DASH : F.int(r.diff, true)) + (num(r.ratio) !== null ? ", growth " + F.pct(r.ratio, 0, true) : "");
         if (lf && Array.isArray(lf.oi)) {
           const sp = h("span", { class: "ft-life", "aria-hidden": "true" });
@@ -2152,7 +2227,7 @@
         const hhmm = Number.isFinite(Date.parse(r.at)) ? F.time(r.at).replace(" ET", "") : DASH;
         const quote = num(r.bid) !== null && num(r.ask) !== null ? F.px(r.bid) + " / " + F.px(r.ask) : DASH;
         const row = UI.listRow({ primary: F.px(r.px), secondary: hhmm + (S ? " " + MID + " " + F.pct(r.px / S - 1, 2, true) : ""),
-          meter: r.prem / mx, index: i, value: F.money(r.prem), cols: "minmax(0,1fr) var(--mw, minmax(40px,90px)) 64px" });
+          meter: r.prem / mx, index: i, value: F.money(r.prem), cols: TAPE_COLS.prints });
         row.dataset.time = hhmm;
         row.dataset.quote = quote;
         row.title = "Quote at the print: " + quote;
@@ -2168,7 +2243,7 @@
       const t = (mm) => { const mins = 570 + mm; return (Math.floor(mins / 60) % 12 || 12) + ":" + String(mins % 60).padStart(2, "0"); };
       return R.map((r, i) => UI.listRow({ badge: r.cp, badgeTone: r.cp === "C" ? "up" : "down", badgeLabel: r.cp === "C" ? "Call" : "Put", primary: K(r.k),
         secondary: day(r.e) + " " + MID + " " + t(r.m) + (r.sw ? " " + MID + " sweep" : "") + (r.op ? " " + MID + " opening" : ""), meter: r.p / mx, index: i, value: F.money(r.p),
-        signed: F.pct(r.a, 0), signedValue: num(r.a) === null ? null : r.a - 0.5, cols: "24px minmax(0,1fr) var(--mw, minmax(40px,72px)) 56px 44px" }));
+        signed: F.pct(r.a, 0), signedValue: num(r.a) === null ? null : r.a - 0.5, cols: TAPE_COLS.alerts }));
     }
     return [];
   }
@@ -2210,7 +2285,7 @@
     const tc = P.topContracts, oi = P.oiDeltas, dp = P.darkpool;
     const dl = X.dpLevels && X.dpLevels.status === "ok" ? X.dpLevels : null;
     const al = X.alerts && X.alerts.status === "ok" && Array.isArray(X.alerts.dots) && X.alerts.dots.length ? X.alerts : null;
-    const list = (kind, label) => (host) => { host.append(UI.list(tapeRows(kind, card), { visible: 8, label })); return {}; };
+    const list = (kind, label) => (host) => { host.classList.add("ft-tape"); host.append(tapeHead(kind), UI.list(tapeRows(kind, card), { visible: 8, label })); return {}; };
     const views = [
       { label: "Contracts", st: panelSt(card, "topContracts", "contract list"), name: "Top contracts", h: 200, draw: list("contracts", "Top contracts") },
       { label: "OI", st: panelSt(card, "oiDeltas", "open-interest list"), name: "Open-interest changes", h: 200, draw: list("oi", "Open-interest changes") },
@@ -2259,6 +2334,11 @@
 
   function buildSignal(card) {
     const score = num(card.score);
+    if (score === null && num(card.conviction) === null && FAMS.every(([k]) => famOf(card, k) === null)) {
+      const st = ST("unavailable", card.depth === "index" ? "Index dossiers carry no score, conviction or family readings: the score ranks single names against the board." : "No score, conviction or family reading was published on this card.");
+      mod({ id: "m-signal", title: "Signal", span: [12, 4], index: 10, st, body: [UI.silent(st, "Signal", 200)], info: () => ({ title: "Signal", state: st.state, lead: st.reason }) });
+      return;
+    }
     const chg = changeFrom((card.panels || {}).scoreOverlay);
     const said = changeLines(chg);
     const math = convMath(card);
