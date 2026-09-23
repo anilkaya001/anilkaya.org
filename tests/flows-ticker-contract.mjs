@@ -1690,10 +1690,10 @@ try {
 
     ok(/last place in the feed held/.test(got.cut[0]),
        `the open-interest block quotes the value at the last place ("${got.cut[0]}")`);
-    ok(/dollar size/.test(got.cut[1]) && /last place in the feed held \$/.test(got.cut[1]),
-       `and the print block, now cut to the regular session and ranked by premium rather than ` +
-       `by arrival, quotes the dollar value at its last place — the fact that decides whether a ` +
-       `name's print was large enough to be in it ("${got.cut[1]}")`);
+    ok(/reaches back to/.test(got.cut[1]) && !/dollar size/.test(got.cut[1]),
+       `and the print block, whose dry-run vendor answers newest first exactly as the live probe ` +
+       `did (order_by=premium unhonoured), quotes the time the window reaches back to rather than ` +
+       `claiming a premium ranking the vendor never applied ("${got.cut[1]}")`);
 
     for (let i = 0; i < 2; i++) {
       ok(/\d+ of \d+ names? carrying a card/.test(got.cover[i] || ""),

@@ -5504,7 +5504,7 @@ async function main() {
           uw(`/api/stock/${ticker}/iv-rank`, { ...IV_RANK_PARAMS, ...onSession }).catch(() => null),
         ]);
       const darkpoolCut = sessionRows(dpRaw, (r) => easternDayOf(r && r.executed_at), sessionDate);
-      const darkpoolRth = sessionPrints(darkpoolCut.raw, sessionDate, { limit: 500 });
+      const darkpoolRth = sessionPrints(dpRaw, sessionDate, { limit: 500 });
       const rankCut = sessionRows(rankRaw, (r) => easternDayOf(r && r.date), sessionDate,
         { through: true });
       if (darkpoolCut.cut || rankCut.cut) {

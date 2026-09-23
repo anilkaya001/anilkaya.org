@@ -451,7 +451,9 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   const raw = { data: [live, rth("19:59", 100), rth("14:00", 500), rth("16:00", 300),
     rth("15:00", 9e9, { canceled: true }), rth("13:00", 7e9)] };
   const s = sessionPrints(raw, SESSION, { limit: 6 });
-  assert.deepEqual(s.data.map((r) => Number(r.premium)), [500, 300, 100]); checks++;
+  assert.deepEqual(s.data.map((r) => Number(r.premium)), [100, 500, 300],
+    "the session cut keeps the vendor's own order, so the market cross can measure what the vendor ranked by"); checks++;
+  eq(s.session.capped, true, "and the session record says the vendor filled its page");
   eq(s.session.outside, 2, "the 19:59 ET after-hours print and the 09:00 ET pre-market print are cut");
   eq(s.session.extendedCode, 1, "the vendor's own extended-hours code agrees with the clock on the live row");
   eq(s.session.canceled, 1, "a canceled print is dropped");
@@ -463,6 +465,26 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   const cross = indexCrossFeed("darkpool", s, { limit: 6, tickers: ["AAPL"], sessionDate: SESSION });
   eq(cross.capped, true, "the market cross keeps the vendor's cap after the session filter");
   eq(cross.population, 3, "and ranks only the session's prints");
+
+  const t = (m) => new Date(WIN.close - m * 60000).toISOString();
+  const timeOrdered = { data: Array.from({ length: 100 }, (_, i) => ({ ticker: "T" + (i % 7), executed_at: t(1 + i * 2),
+    premium: String(1000 + ((i * 37) % 100) * 1000), size: 10, price: "1", canceled: false })) };
+  const tp = sessionPrints(timeOrdered, SESSION, { limit: 100 });
+  eq(tp.session.vendorOrder, "time-or-other", "a vendor that ignores order_by answers newest first");
+  const tc = indexCrossFeed("darkpool", tp, { limit: 100, tickers: ["T1"], sessionDate: SESSION });
+  eq(tc.orderedBy, "execution time, newest first",
+    "and the cross then says the page was cut by time, never that it was ranked by dollar size");
+  eq(tc.cutAt, t(199), "naming how far back the capped page reached");
+  eq(tc.cut, null, "with no premium threshold, because the vendor applied none");
+  const premOrdered = { data: timeOrdered.data.slice().sort((a, b) => Number(b.premium) - Number(a.premium)) };
+  const pp = sessionPrints(premOrdered, SESSION, { limit: 100 });
+  eq(pp.session.vendorOrder, "premium", "a vendor that honours order_by=premium is recorded as such");
+  const pc = indexCrossFeed("darkpool", pp, { limit: 100, tickers: ["T1"], sessionDate: SESSION });
+  eq(pc.orderedBy, "the print's dollar size", "and only then is the cross a premium ranking");
+  eq(pc.cut, 1000, "whose last place is the premium cut");
+  const rankedPanel = shapeDarkpool(tp);
+  ok(rankedPanel.rows.every((r, i) => i === 0 || rankedPanel.rows[i - 1].prem >= r.prem),
+    "while the print list itself is still ranked by premium by its shaper");
   const recent = sessionPrints(FX.darkpoolRecent, SESSION, { limit: 100 });
   eq(recent.data.length, 0, "the live recent feed's first row (MRVL 23:59:58Z) is an after-hours print");
   eq(sessionPrints(null, SESSION), null, "an absent read passes through as absent");

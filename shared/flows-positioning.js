@@ -1122,19 +1122,19 @@ export function sessionPrints(raw, sessionDate, { limit = null } = {}) {
     if (r.canceled === true) { canceled++; continue; }
     kept.push(r);
   }
-  kept.sort((a, b) => ((vnum(b.premium) ?? -Infinity) - (vnum(a.premium) ?? -Infinity))
-    || ((toMs(a.executed_at) ?? 0) - (toMs(b.executed_at) ?? 0)));
   const finite = prems.filter((p) => p !== null);
   const byPremium = finite.length > 1 && finite.every((p, i) => i === 0 || finite[i - 1] >= p);
   const lim = vnum(limit);
+  const capped = lim !== null && list.length >= lim;
   return {
     data: kept,
     vendorRows: list.length,
-    vendorCapped: lim !== null && list.length >= lim,
+    vendorCapped: capped,
     session: {
       open: win.openIso, close: win.closeIso,
       vendorRows: list.length, kept: kept.length, outside, extendedCode, canceled, undated,
       vendorOrder: byPremium ? "premium" : "time-or-other",
+      capped,
       rankedBy: "premium",
     },
   };
