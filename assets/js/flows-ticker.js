@@ -906,9 +906,10 @@
 
     if (skew !== null && skewB) {
       host.append(statList([
-        ["Put wing", wingText(skewB.putM, skewB.putStrike, skewB.putIv, skewB.putTraded)],
-        ["Call wing", wingText(skewB.callM, skewB.callStrike, skewB.callIv, skewB.callTraded)],
-        ["Target", "ln(K/S) = " + MINUS + "0.10 and +0.10, nearest listed strike within 0.04"],
+        ["Put wing", wingText(skewB.putM, skewB.putStrike, skewB.putIv, skewB.putTraded, skewB.putFrom)],
+        ["Call wing", wingText(skewB.callM, skewB.callStrike, skewB.callIv, skewB.callTraded, skewB.callFrom)],
+        ["Target", "ln(K/S) = " + MINUS + "0.10 and +0.10: interpolated between the two traded " +
+          "strikes around each, else the nearest listed strike within 0.04"],
         ["Expiry floor", "7 days — measured on " + skewB.expiry +
           (skewB.days === null ? "" : " (" + skewB.days + "d)")],
       ]));
@@ -1012,12 +1013,14 @@
     return v === 0 ? "0.0" : signed(v * 100, (a) => a.toFixed(1));
   }
 
-  function wingText(m, strike, iv, traded) {
+  function wingText(m, strike, iv, traded, from) {
     const { isNum, DASH, signed, px2, vol1 } = window.FlowsPanels;
     const mm = isNum(m), kk = isNum(strike), vv = isNum(iv);
+    const span = Array.isArray(from) && from.length === 2 && isNum(from[0]) !== null &&
+      isNum(from[1]) !== null ? px2(from[0]) + "\u2013" + px2(from[1]) + " interpolated" : null;
     if (mm === null && kk === null && vv === null) return DASH;
     return "ln(K/S) " + (mm === null ? DASH : signed(mm, (a) => a.toFixed(4))) +
-      " · K " + (kk === null ? DASH : px2(kk)) +
+      " · K " + (span || (kk === null ? DASH : px2(kk))) +
       " · iv " + (vv === null ? DASH : vol1(vv)) +
       " · " + (traded === 1 ? "traded today"
         : traded === 0 ? "quoted, did not trade today"
@@ -2629,9 +2632,9 @@
         "newest of them rather than the whole feed's.";
     }
     const p = el("p", "fc-note fmr-when", text);
-    p.title = "This pipeline runs at 05:15 Eastern and the vendor states its market-wide " +
-      "open-interest feed updates at about 06:45 Eastern, so a market-wide ranking read " +
-      "here is usually the previous session's.";
+    p.title = "This pipeline runs after the close, at 17:30 Eastern (16:30 in winter), and " +
+      "the vendor states its market-wide open-interest feed updates at about 06:45 Eastern, " +
+      "so a market-wide ranking read here is usually the one published that morning.";
     return p;
   }
 
@@ -2874,7 +2877,7 @@
         "below: the span is in each cell's own title."],
       ["Net premium", "c-num",
         "Call premium minus put premium for that session, in dollars, as the board " +
-        "published it that morning. The sign is the reading."],
+        "published it for that session. The sign is the reading."],
     ]) {
       const th = el("th", cls, label);
       th.scope = "col";
@@ -3024,7 +3027,9 @@
         const [k, why] = silence(lv, "levels");
         pairs.push([label, DASH, null, k, why]);
       } else {
-        pairs.push([label, money(px) + (dist === null ? "" : " · " + atrOf(dist))]);
+        const edge = row.edge === "window";
+        pairs.push([edge ? label + " (window edge)" : label, money(px) + (dist === null ? "" : " · " + atrOf(dist)),
+          null, null, edge ? row.note : null]);
       }
     }
 
@@ -3084,6 +3089,7 @@
   }
 
   const DRAW = {
+    variation: "variation",
     gamma: "gamma",
     aggressor: drawAggressor,
     ivSurface: drawIvSurface,
@@ -3149,6 +3155,7 @@
 
       try {
         drawer(host, panel, card, question, mount);
+        P.foldNotes(host);
       } catch (error) {
         deadPanel(host, question, drawFailed(error));
       }
@@ -3160,6 +3167,8 @@
     for (const wrap of grid.querySelectorAll(".fc-tablewrap")) cutWatch(wrap);
     writePanelLeads(card);
     writeStationLeads();
+    P.keepDates(scroller || grid);
+    schedulePack(true);
     if (missing.length) {
       console.error("flows-ticker: no drawing host for panel(s): " + missing.join(", "));
     }
@@ -3355,6 +3364,7 @@
   const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
   let boardSession = null;
+  let boardBuilt = null;
 
   function assessAge(card) {
     const now = Date.now();
@@ -3366,6 +3376,10 @@
       if (mine < boardSession) {
         parts.push("every figure on this page is from the session of " + mine +
           ", and the board has since published " + boardSession);
+      } else if (mine === boardSession && boardBuilt &&
+          Date.parse(String(card.generatedAt || "")) < boardBuilt) {
+        parts.push("this card was built by an earlier run of the " + mine + " session than " +
+          "the board's, so its score and standing are that run's");
       }
       return parts;
     }
@@ -3445,7 +3459,8 @@
     __score: { group: "signal", tier: "lead" },
     __stats: { group: "signal", tier: "table" },
     __sessions: { group: "tape", tier: "table" },
-    gamma: { group: "convexity", tier: "lead" },
+    variation: { group: "convexity", tier: "lead" },
+    gamma: { group: "convexity", tier: "chart" },
     levels: { group: "convexity", tier: "reading" },
     displacement: { group: "convexity", tier: "reading" },
     surface: { group: "convexity", tier: "chart" },
@@ -3790,6 +3805,128 @@
     window.addEventListener("popstate", () => applyStation({ url: false }));
   }
 
+  const PACK_UNIT = 4;
+  const packMq = typeof matchMedia === "function" ? matchMedia("(min-width: 76rem)") : null;
+  let packQueued = false;
+  let packFresh = true;
+  let packLock = null;
+
+  function packItems() {
+    return grid ? grid.querySelectorAll(":scope > .ft-station > *") : [];
+  }
+
+  function placeItem(n, row, span, col, width) {
+    const r = row + 1 + " / span " + span;
+    const c = col + 1 + " / span " + width;
+    if (n.style.getPropertyValue("--pack-row") !== r) n.style.setProperty("--pack-row", r);
+    if (n.style.getPropertyValue("--pack-col") !== c) n.style.setProperty("--pack-col", c);
+  }
+
+  function unplace(n) {
+    n.style.removeProperty("--pack-row");
+    n.style.removeProperty("--pack-col");
+  }
+
+  function packGrid() {
+    packQueued = false;
+    if (!grid) return;
+    const items = Array.from(packItems());
+    if (!packMq || !packMq.matches || grid.hidden) {
+      if (grid.classList.contains("is-packed")) {
+        grid.classList.remove("is-packed");
+        items.forEach(unplace);
+      }
+      packLock = null;
+      return;
+    }
+    const cs0 = getComputedStyle(grid);
+    const cols = Math.max(1, parseInt(cs0.getPropertyValue("--ft-cols"), 10) ||
+      cs0.gridTemplateColumns.split(" ").filter(Boolean).length || 1);
+    const gap = parseFloat(cs0.columnGap) || 0;
+    const spans = items.map((n) => {
+      if (n.hidden || n.getClientRects().length === 0) return null;
+      const cs = getComputedStyle(n);
+      const h = n.getBoundingClientRect().height +
+        (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
+      return Math.max(1, Math.ceil((h + gap) / PACK_UNIT));
+    });
+    const stations = new Map();
+    const shape = [];
+    items.forEach((n, i) => {
+      if (spans[i] === null) { unplace(n); return; }
+      const width = n.classList.contains("ft-panel")
+        ? (n.classList.contains("is-full") ? cols : n.classList.contains("is-wide") ? Math.min(2, cols) : 1)
+        : cols;
+      shape.push(i + ":" + width);
+      if (!stations.has(n.parentElement)) stations.set(n.parentElement, []);
+      stations.get(n.parentElement).push({ n, span: spans[i], width });
+    });
+    const key = cols + "|" + shape.join(",");
+    const keep = !packFresh && packLock && packLock.key === key ? packLock.col : null;
+    packFresh = false;
+    const col = new Map();
+    let base = 0;
+    for (const entries of stations.values()) {
+      const laid = layStation(entries, cols, base, keep);
+      entries.forEach((e, i) => {
+        placeItem(e.n, laid.tops[i], e.span, laid.cols[i], e.width);
+        col.set(e.n, laid.cols[i]);
+      });
+      base = laid.end;
+    }
+    packLock = { key, col };
+    grid.classList.add("is-packed");
+  }
+
+  function layStation(entries, cols, base, keep) {
+    const heights = new Array(cols).fill(base);
+    const pick = new Array(entries.length), tops = new Array(entries.length);
+    let best = null;
+    const walk = (i, sumTop) => {
+      const end = Math.max(...heights);
+      if (best && end > best.end) return;
+      if (i === entries.length) {
+        if (!best || end < best.end || (end === best.end && sumTop < best.sum)) {
+          best = { end, sum: sumTop, cols: pick.slice(), tops: tops.slice() };
+        }
+        return;
+      }
+      const { n, span, width } = entries[i];
+      const only = keep && keep.has(n) ? Math.min(keep.get(n), cols - width) : -1;
+      for (let c = Math.max(only, 0); c + width <= cols && (only < 0 || c === only); c++) {
+        const saved = heights.slice(c, c + width);
+        const row = Math.max(...saved);
+        for (let k = c; k < c + width; k++) heights[k] = row + span;
+        pick[i] = c;
+        tops[i] = row;
+        walk(i + 1, sumTop + row);
+        for (let k = 0; k < width; k++) heights[c + k] = saved[k];
+      }
+    };
+    walk(0, 0);
+    return best;
+  }
+
+  function schedulePack(fresh) {
+    if (fresh === true) packFresh = true;
+    if (packQueued) return;
+    packQueued = true;
+    requestAnimationFrame(packGrid);
+  }
+
+  if (grid) {
+    if (typeof ResizeObserver === "function") {
+      const ro = new ResizeObserver(() => schedulePack(false));
+      for (const n of packItems()) ro.observe(n);
+    }
+    if (packMq) {
+      const repack = () => schedulePack(true);
+      if (typeof packMq.addEventListener === "function") packMq.addEventListener("change", repack);
+      else if (typeof packMq.addListener === "function") packMq.addListener(repack);
+    }
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => schedulePack(true), () => {});
+  }
+
   function watchGroups() {
     if (typeof IntersectionObserver !== "function") return;
 
@@ -3834,8 +3971,20 @@
       if (!bar || bar.hidden || !bar.offsetHeight) return;
       scroller.style.setProperty("--ft-bar-h", bar.offsetHeight + "px");
     };
-    if (bar && typeof ResizeObserver === "function") new ResizeObserver(barSize).observe(bar);
+    const stuck = () => {
+      if (!bar || bar.hidden) return;
+      const boxed = getComputedStyle(scroller).overflowY !== "visible";
+      const moved = boxed ? scroller.scrollTop : scrollY;
+      const ref = boxed ? scroller.getBoundingClientRect().top : 0;
+      const top = parseFloat(getComputedStyle(bar).top) || 0;
+      bar.classList.toggle("is-stuck", moved > 0 && bar.getBoundingClientRect().top - ref <= top + 1);
+    };
+    scroller.addEventListener("scroll", stuck, { passive: true });
+    addEventListener("scroll", stuck, { passive: true });
+    addEventListener("resize", stuck);
+    if (bar && typeof ResizeObserver === "function") new ResizeObserver(() => { barSize(); stuck(); }).observe(bar);
     barSize();
+    stuck();
     const band3 = document.querySelector(".ft-band3");
     if (band3 && typeof MutationObserver === "function") {
       new MutationObserver(evenBand3).observe(band3, { attributes: true, attributeFilter: ["hidden"], subtree: true });
@@ -4603,11 +4752,13 @@
         ftsPlural(spec.points.length, " point", " points"),
     });
 
+    const tagY = spec.kind === "candles" && live.length ? y(live[live.length - 1].v) : null;
     for (const frac of [0, 0.5, 1]) {
       const v = lo + (hi - lo) * frac;
       const yy = y(v);
       svg.append(svgEl("line", { class: "ft-chart-rule",
         x1: plotL, x2: plotL + plotW, y1: yy, y2: yy }));
+      if (tagY !== null && Math.abs(yy - tagY) < 14) continue;
       const t = svgEl("text", { class: "ft-chart-ax", x: plotL + plotW + 4, y: yy + 3 });
       t.textContent = spec.kind === "bars" || Math.abs(v) >= 1000 ? compact(v) : px2(v);
       svg.append(t);
@@ -4756,6 +4907,7 @@
             : " " + period + " is outside this card's window, so the whole " +
               "series is drawn.");
     }
+    P.keepDates(sub);
     host.hidden = false;
   }
 
@@ -5055,6 +5207,7 @@
           : " The next-session cell is the recursion\u2019s own next state, fixed by the last shock and " +
             "the last variance; it carries no claim about the return\u2019s sign or size.");
     }
+    P.keepDates(sub);
     host.hidden = false;
   }
 
@@ -5124,6 +5277,7 @@
         (spec.points.some((pt) => isNum(pt.dte) !== null)
           ? " The ticks count days to each expiry, so a second year reads in order." : "");
     }
+    P.keepDates(sub);
     host.hidden = false;
   }
 
@@ -5317,6 +5471,7 @@
         .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
         .join(". ") + ".";
     }
+    P.keepDates(sub);
     host.hidden = false;
   }
 
@@ -5405,6 +5560,7 @@
         "zero where thousands traded");
       sub.textContent = bits.join(". ") + ".";
     }
+    P.keepDates(sub);
     host.hidden = false;
   }
 
@@ -5976,7 +6132,7 @@
     if (barEl) barEl.hidden = false;
     grid.hidden = false;
     if (picker) picker.hidden = true;
-    for (const n of [$("ftBrief"), $("ftChainBody")]) cutWatch(n);
+    for (const n of [$("ftBriefBody"), $("ftChainBody")]) cutWatch(n);
 
     $("ftTicker").textContent = card.ticker || DASH;
     const score = isNum(card.score);
@@ -6048,6 +6204,7 @@
 
       const bs = (p) => (p && ISO_DAY.test(String(p.sessionDate || "")) ? String(p.sessionDate) : null);
       boardSession = bs(long) || bs(short);
+      boardBuilt = Date.parse(String(((bs(long) ? long : short) || {}).generatedAt || "")) || null;
       paintRank();
       if (painted) paintRelated(painted);
 
@@ -6426,6 +6583,7 @@
         .then((m) => {
           if (!m || !ISO_DAY.test(String(m.sessionDate || ""))) return;
           boardSession = String(m.sessionDate);
+          boardBuilt = Date.parse(String(m.generatedAt || "")) || null;
           if (painted) setStale(assessAge(painted));
         })
         .catch(() => {   });

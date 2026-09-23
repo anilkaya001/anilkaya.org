@@ -2,7 +2,7 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "221";
+export const ASSET_VERSION = "222";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -194,14 +194,23 @@ export function neuronProvenance(summary) {
   if (guard === "forecast") return "Deterministic reading. A model\u2019s wording claimed what happens next and was refused.";
   if (guard === "ideas:unparsable") return "Deterministic reading: the model\u2019s reply could not be parsed.";
   if (guard === "summary:empty") return "Deterministic reading: the model returned ideas without a summary.";
+  if (guard.startsWith("unreachable:reparse:")) {
+    const why = guard.slice("unreachable:reparse:".length);
+    return "Deterministic reading: the model\u2019s reply carried no usable summary, and asking it again " +
+      (why === "allowance" ? "found the day\u2019s free model allowance spent, resetting 00:00 UTC"
+        : why === "capacity" ? "found no capacity"
+          : why === "plan" ? "found the configured model not available on this plan"
+            : "failed") + ".";
+  }
   if (guard.startsWith("unreachable:")) {
     const why = guard.slice("unreachable:".length);
-    const said = why === "3036"
+    const said = why === "allowance" || why === "3036"
       ? "the day\u2019s free model allowance is spent, resetting 00:00 UTC"
-      : why === "3040" ? "the model had no capacity, and nothing was spent"
-        : why === "5035" ? "the configured model is not available on this plan"
+      : why === "capacity" || why === "3040" ? "the model had no capacity, and nothing was spent"
+        : why === "plan" || why === "5035" ? "the configured model is not available on this plan"
           : why === "empty" ? "the model answered with nothing"
-            : "the model did not answer";
+            : why === "length" ? "the model spent its whole answer budget before writing any text"
+              : "the model did not answer";
     return "Deterministic reading: " + said + ".";
   }
   return "Deterministic reading. No model was asked.";
@@ -310,9 +319,9 @@ const ccHeading = (id) =>
 
 export function overviewPage({ username = "", summary = null } = {}) {
   return `${head("Flows — Overview", "The whole session on one screen: both tails, the level, what moved, and what reports next.")}
-${shell("Session Overview", "Options-flow intelligence", "overview", username, `
+${shell("Session overview", "Options-flow intelligence", "overview", username, `
   <div class="flows-scroll" id="ccScroll">
-${pageHead("Session Overview", "Options-flow intelligence", "overview")}
+${pageHead("Session overview", "Options-flow intelligence", "overview")}
   <div class="flows-status" id="flowsStatus" role="status">Loading the latest session…</div>
   <p class="flows-stale" id="flowsStale" role="status" hidden></p>
 
@@ -513,7 +522,7 @@ ${shell(title, "Options-flow intelligence", bear ? "short" : "long", username, `
 
 export function deskPage({ username = "" } = {}) {
   return `${head("Flows — Premium desk", "Option-sale economics for any listed name.")}
-${shell("Premium Desk", "Options-flow intelligence", "desk", username, `
+${shell("Premium desk", "Options-flow intelligence", "desk", username, `
 <form class="desk-entry" id="deskEntry" autocomplete="off">
     <label for="deskInput">Add symbols</label>
     <div class="desk-entry__row">
@@ -644,7 +653,7 @@ export function watchPage({ username = "" } = {}) {
   const lede = "Scored names that did not clear the band on either side, " +
     "ranked by how close they came. Nothing here is a candidate.";
   return `${head("Flows \u2014 Watch", lede)}
-${shell("Watch List", "Options-flow intelligence", "watch", username, `
+${shell("Watch list", "Options-flow intelligence", "watch", username, `
   <div class="flows-status" id="watchStatus" role="status">Loading the session\u2026</div>
   <p class="flows-stale" id="watchStale" role="status" hidden></p>
 
@@ -703,7 +712,7 @@ export function marketPage({ username = "" } = {}) {
   const lede = "Whether the screened universe was bought or sold, how broad " +
     "that was, and how much of it is five names.";
   return `${head("Flows \u2014 Market", lede)}
-${shell("Market Level", "Options-flow intelligence", "market", username, `
+${shell("Market level", "Options-flow intelligence", "market", username, `
   <div class="flows-status" id="mktStatus" role="status">Loading the session\u2026</div>
   <p class="flows-stale" id="mktStale" role="status" hidden></p>
 
@@ -839,10 +848,10 @@ ${shell("Events", "Options-flow intelligence", "events", username, `
 }
 
 export function trackPage({ username = "" } = {}) {
-  const lede = "The same score the board prints each morning, traced name by " +
+  const lede = "The same score the board prints after each close, traced name by " +
     "name across sessions. The boards show a ranking's two tails; this page " +
     "keeps the whole distribution, so a name drifting toward a board is " +
-    "visible before the morning it arrives. A gap means the name was not " +
+    "visible before the session it arrives. A gap means the name was not " +
     "scored that session — never zero.";
   return `${head("Flows — Score track", "Each name's daily score, traced across sessions.")}
 ${shell("Score track", "Options-flow intelligence", "track", username, `
@@ -884,7 +893,7 @@ export function unusualPage({ username = "" } = {}) {
     "counter, and still not a trade, because a window aggregates its executions and " +
     "the selection is the vendor's, not the market's.";
   return `${head("Flows — Unusual activity", "Contracts carrying volume far above their own open interest.")}
-${shell("Unusual Activity", "Options-flow intelligence", "unusual", username, `
+${shell("Unusual activity", "Options-flow intelligence", "unusual", username, `
   <div class="flows-status" id="uaStatus" role="status">Loading the feed…</div>
   <p class="flows-stale" id="uaStale" role="status" hidden></p>
 
@@ -980,7 +989,7 @@ export function tickerPage({ username = "" } = {}) {
     "and what flips it, what the chain is charging across strikes and " +
     "expiries, which contracts carry the volume, and how far the price is " +
     "from every level that matters — all of it read off the card the pipeline " +
-    "published this morning, with only the last price re-read live every five seconds.";
+    "published after the last close, with only the last price re-read live every five seconds.";
 
   const panelMarkup = (p) => `
     <section class="fc-panel ft-panel${p.span === 2 ? " is-wide" : p.span === 3 ? " is-full" : ""}"
@@ -1030,9 +1039,8 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
     </div>
     <div class="ft-hero-px">
       <span class="ft-hero-k">Last</span>
-
+      <span class="ft-hero-v" id="ftHeroPx"></span>
       <span class="ft-hero-stack">
-        <span class="ft-hero-v" id="ftHeroPx"></span>
         <span class="ft-hero-chg" id="ftHeroChg" hidden></span>
         <span class="ft-hero-live" id="ftHeroLive" role="status" hidden></span>
       </span>
@@ -1040,33 +1048,31 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
 
     <div class="ft-hero-b" id="ftHeroScoreB">
       <span class="ft-hero-k">Options score</span>
+      <span class="ft-hero-v" id="ftHeroScore"></span>
       <span class="ft-hero-stack">
-        <span class="ft-hero-row">
-          <span class="ft-hero-v" id="ftHeroScore"></span>
-          <span class="ft-hero-bar" id="ftHeroScoreBar" aria-hidden="true"></span>
-        </span>
+        <span class="ft-hero-bar" id="ftHeroScoreBar" aria-hidden="true"></span>
         <span class="ft-hero-pill" id="ftHeroSide" hidden></span>
       </span>
     </div>
     <div class="ft-hero-b" id="ftHeroConvB">
       <span class="ft-hero-k">Conviction</span>
+      <span class="ft-hero-v" id="ftHeroConv"></span>
       <span class="ft-hero-stack">
-        <span class="ft-hero-v" id="ftHeroConv"></span>
         <span class="ft-hero-seg" id="ftHeroConvSeg" aria-hidden="true"></span>
       </span>
     </div>
 
     <div class="ft-hero-b" id="ftHeroIvB" hidden>
       <span class="ft-hero-k">ATM IV</span>
+      <span class="ft-hero-v" id="ftHeroIv"></span>
       <span class="ft-hero-stack">
-        <span class="ft-hero-v" id="ftHeroIv"></span>
         <span class="ft-hero-m is-faint" id="ftHeroIvSub" hidden></span>
       </span>
     </div>
     <div class="ft-hero-b" id="ftHeroIvrB" hidden>
       <span class="ft-hero-k">IV rank</span>
+      <span class="ft-hero-v" id="ftHeroIvr"></span>
       <span class="ft-hero-stack">
-        <span class="ft-hero-v" id="ftHeroIvr"></span>
         <span class="ft-hero-seg" id="ftHeroIvrSeg" aria-hidden="true"></span>
       </span>
     </div>
@@ -1190,6 +1196,7 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
       <span class="ft-brief-hn">Brief</span>
       <span class="ft-brief-beta">Beta</span>
     </h2>
+    <div class="ft-brief-body" id="ftBriefBody">
     <div class="ak-neuron ft-neuron is-pending" id="ftNeuron" hidden>
       ${neuronMark("t", false)}
       <div class="ak-neuron-body">
@@ -1222,6 +1229,7 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
           class="ft-brief-ask-bt">Ask</span></button>
       </span>
     </form>
+    </div>
   </aside>
     </div>
   </div>
@@ -1331,16 +1339,24 @@ ${shell("Track record", "Options-flow intelligence", "history", username, `
       <table class="flows-table rec-table rec-feat">
         <caption class="flows-caption">
           The rank correlation of each archived board column with the forward
-          price return, pooled across every retained session and both sides.
-          This is the research loop, in public: the features the score is
-          built from, measured against what happened next, with the sample
+          return, measured inside each session on the return scaled by the
+          name’s own volatility, then averaged across sessions. A single
+          correlation pooled across sessions scores a volatility column on
+          which way the market went; it is kept, labelled, as the secondary
+          figure. This is the research loop, in public: the features the score
+          is built from, measured against what happened next, with the sample
           they were measured on. An IC near zero is a finding too.
         </caption>
         <thead>
           <tr>
             <th scope="col">Feature</th>
-            <th scope="col" class="c-num"><abbr title="Spearman information coefficient: rank correlation with the forward price return at the stated horizon">IC</abbr></th>
-            <th scope="col" class="c-num"><abbr title="Measured feature-return pairs. Consecutive sessions overlap, so the effective sample is far smaller">n</abbr></th>
+            <th scope="col" class="c-num"><abbr title="Mean of the per-session Spearman coefficients with the volatility-scaled forward return at the stated horizon">Mean IC</abbr></th>
+            <th scope="col" class="c-num"><abbr title="Standard deviation of the per-session coefficients">SD</abbr></th>
+            <th scope="col" class="c-num"><abbr title="Sessions whose coefficient was positive, of the sessions scored">Positive</abbr></th>
+            <th scope="col" class="c-num"><abbr title="Mean over its standard error with the effective sample of sessions divided by the horizon; computed only once a feature is ranked">t</abbr></th>
+            <th scope="col" class="c-num"><abbr title="Correlation of each session’s coefficient with that session’s mean forward return: near one means the feature is a bet on market direction">Market</abbr></th>
+            <th scope="col" class="c-num"><abbr title="Secondary: one Spearman coefficient over every session’s raw pairs pooled together">Pooled IC</abbr></th>
+            <th scope="col" class="c-num"><abbr title="Measured feature-return pairs behind the pooled figure. Consecutive sessions overlap, so the effective sample is far smaller">Pairs</abbr></th>
           </tr>
         </thead>
         <tbody id="recFeatBody"></tbody>
@@ -1374,7 +1390,7 @@ export function politicalPage({ username = "" } = {}) {
   const lede = "Who disclosed the largest purchases, and in what — ranked by " +
     "size, with the range each filing actually stated drawn across it.";
   return `${head("Flows — Political", lede)}
-${shell("Political Disclosures", "Options-flow intelligence", "political", username, `
+${shell("Political disclosures", "Options-flow intelligence", "political", username, `
   <div class="flows-status" id="plStatus" role="status">Loading the disclosure window…</div>
   <p class="flows-stale" id="plStale" role="status" hidden></p>
   <p class="flows-stale" id="plSource" role="status" hidden></p>
@@ -1458,7 +1474,7 @@ export function strategyPage({ username = "" } = {}) {
     "vendor's; every sum is arithmetic on those quotes; every extrapolation " +
     "carries the name of the assumption it rests on.";
   return `${head("Flows — Strategy tester", lede)}
-${shell("Strategy Tester", "Options-flow intelligence", "strategy", username, `
+${shell("Strategy tester", "Options-flow intelligence", "strategy", username, `
   <div class="flows-status" id="sgStatus" role="status">Enter a symbol to begin.</div>
 
   <div class="flows-controls">

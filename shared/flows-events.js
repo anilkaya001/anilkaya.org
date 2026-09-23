@@ -188,10 +188,11 @@ export const EVENTS_NOTES = Object.freeze({
     "on; it is not a name the board found nothing in.",
   clocks: "Two clocks, and they do not share an origin. Every PRICE here " +
     "describes the last completed session. Every DAY COUNT is measured from the " +
-    "run's own Eastern date, which is the origin the earnings gate itself used — " +
-    "at 05:15 those differ by one to three days, and counting from the wrong one " +
-    "would draw the window early and classify every name against a gate that " +
-    "never ran.",
+    "next session after it — the first weekday that follows — which is the origin " +
+    "the earnings gate itself used. The run lands after the close, so the two " +
+    "differ by one to three calendar days, and counting from the session itself " +
+    "would draw the window a session early and classify every name against a " +
+    "gate that never ran.",
   sessions: "Sessions are counted as weekdays. Market holidays are not removed: " +
     "this desk holds no holiday calendar and inventing one would be a free " +
     "parameter. The count is right to within about one session a quarter, and " +

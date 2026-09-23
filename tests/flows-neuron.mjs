@@ -6,10 +6,20 @@ import { buildContext, contextLines, contextFacts, promptForNeuron, parseNeuronO
 import { TICKER_PANELS, SENTINEL_KEYS } from "../shared/flows-panels.js";
 import { guardAnswer, selectFacts, buildFactIndex } from "../shared/flows-ask.js";
 import { modelName, neuronProvenance } from "../shared/flows-pages.js";
+import { variation, cardVariationInput } from "../shared/flows-variation.js";
+import { gammaReading } from "../shared/flows-neuron.js";
+import { aggressorGamma } from "../shared/flows-features.js";
+import { buildCard } from "../shared/flows-card.js";
+import fs from "node:fs";
+import { aiText, modelInput, askModels, aiChain, aiCallSignature, retryableGuard, repliedGuard, modelRates,
+         spendShape, fallbackNote, emptyNote, intradayFloorMs, AI_LENGTH_RETRY_MS, AI_INTRADAY_REFRESH_MS } from "../shared/flows-ai.js";
+import { readFileSync } from "node:fs";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
 const eq = (a, b, m) => { assert.equal(a, b, m); checks++; };
+const same = (a, b, m) => { assert.deepEqual(a, b, m); checks++; };
+const near = (a, b, tol, m) => { assert.ok(Number.isFinite(a) && Math.abs(a - b) <= tol, `${m} (got ${a}, want ${b})`); checks++; };
 
 const CARD = {
   ticker: "SYN1", nm: "Synthetic One", sector: "Energy", sessionDate: "2026-09-15",
@@ -17,7 +27,8 @@ const CARD = {
   score: 58, conviction: 92,
   conv: { agreement: 1, breadth: 3, coverage: 1, persistence: 0.58, gate: 1.43 },
   quality: { otmShare: 0.6, vegaTilt: 0.24 },
-  regime: { label: "short", crossings: 0 }, gammaFlip: 68.32, atr: 1.48,
+  regime: { label: "short", labelFrom: "book", crossings: 0, netGamma: -2.1e6, flowGamma: -2.1e6,
+    bookGammaRaw: -3.4e5, bookShare: -0.42 }, gammaFlip: 68.32, atr: 1.48,
   fam: { F: 59, P: 32, D: 58, V: 51, O: 71 },
   panels: {
     gamma: { status: "ok", spot: 70.22, callWall: 67, putWall: 70, strikes: 40,
@@ -63,7 +74,11 @@ const CARD = {
   ok(by.get("levels").figures.maxPain === "72.50" && by.get("levels").figures.callWall === "67.00",
      "every level on the card is a quotable figure, printed as the page prints it, so an invalidation at max pain can pass the guard");
   ok(numeralsOf(ctx).has("72.50"), "and the max-pain level is in the numerals a model may quote");
-  eq(by.get("gamma").robustness, 3, "a gamma profile over 40 strikes is robust");
+  eq(by.get("gamma").robustness, 2,
+     "a gamma ladder over 40 strikes is fair, not robust: it is one session's directionalized volume, " +
+     "the gamma dealers added today, and no longer described as the standing book");
+  ok(/added today/.test(by.get("gamma").why) && !/clearing snapshot/.test(by.get("gamma").why),
+     `and its reason names what it reads (${by.get("gamma").why})`);
   eq(by.get("ivSurface").robustness, 2, "a surface with 30 of 50 fresh quotes is fair, because a fifth or more are stale");
   eq(by.get("path").robustness, 3, "a full session with a one-sided persistence is robust");
   eq(by.get("aggressor").robustness, 1, "a quiet panel is weak: measured, but nothing to lean on");
@@ -200,7 +215,9 @@ const CARD = {
      "the deterministic summary passes the guard by construction");
   ok(/^The greeks imply a squeeze state for SYN1 with flow bearish/.test(plain),
      "and leads with the implied state, then the most robust features' own sentences");
-  ok(plain.includes("Dealer gamma for SYN1"), "which follow it");
+  ok(plain.includes("Net selling over 390 minutes") && !plain.includes("Dealer gamma for SYN1"),
+     "which follow it — the tape's sentence now, since the strike ladder is graded fair as the gamma " +
+     "dealers added today and no longer outranks the robust readings");
   const staleCtx = buildContext(CARD, { expectedSession: "2026-09-16" });
   const stalePlain = deterministicSummary(staleCtx);
   ok(/capped at weak/.test(stalePlain) && stalePlain.includes("Dealer gamma for SYN1"),
@@ -214,7 +231,9 @@ const CARD = {
   ok(STATES.includes(st.state) && st.state === "squeeze" && st.direction === "bearish" && st.flow === "bearish",
      `short gamma at spot with a one-sided selling tape and the put wall 0.15 ATR below, no flip between, is a squeeze toward that wall (${st.chip})`);
   ok(st.target && st.target.kind === "put_wall" && st.target.px === 70, "the wall the flow leans toward is the target");
-  eq(st.confidence, 2, "confidence starts at the positioning grade and loses one because the spot share of the ladder is unpublished");
+  eq(st.confidence, 2,
+     "confidence starts at the positioning grade — fair, because the walls read off today's flow ladder — and " +
+     "keeps it, the book's net sitting at 42% of its gross, over the 20% marginal line");
   ok(st.invalidation && st.invalidation.kind === "max_pain" && st.invalidation.px === 72.5,
      "the state ends past the nearest level on the other side of the flow");
   ok(st.horizon && st.horizon.kind === "priced_sessions" && st.horizon.value === 10, "and runs over the priced-move window");
@@ -244,7 +263,7 @@ const CARD = {
   ok(v.ideas.length === 1 && v.ideas[0].fromState === true, "the state's idea outranks a model idea it ties with");
   {
     const strong = { title: "Wall break", structure: "put debit spread", direction: "bearish", thesis: "Dealer gamma is short at spot 70.22.",
-      rests_on: ["gamma", "levels"], invalidation: "a close above 72.50", horizon: "10 sessions" };
+      rests_on: ["path", "standing"], invalidation: "a close above 72.50", horizon: "10 sessions" };
     const led = vetIdeas([strong, idea], ctx);
     ok(led.ideas.length === 2 && led.ideas[0].fromState === true && led.ideas[1].robustness === 3,
        "the state's idea leads the list even when a model idea outgrades it, so the provenance line that names the first idea as the state's own is true");
@@ -252,14 +271,20 @@ const CARD = {
   {
     const tied = JSON.parse(JSON.stringify(CARD));
     tied.panels.displacement = { status: "ok", gapAtr: 1.2, oiCentroid: 69, volCentroid: 70.8, spot: 70.22 };
+    tied.panels.oiDeltas = { status: "ok", rows: [{ cp: "C", diff: 900 }, { cp: "P", diff: 100 }] };
     tied.panels.path.persistence = 0.7;
     tied.panels.path.minutes = 200;
     const ts = regimeState(tied, { expectedSession: "2026-09-15" });
     const votes = ts.drivers.filter((d) => d.axis === "flow" && d.vote !== 0).map((d) => d.key + ":" + d.vote);
-    ok(votes.includes("path:-1") && votes.includes("displacement:1") && votes.includes("standing:1") && ts.flow === "bullish" && !ts.drivers.some((d) => d.key === "path" && d.split),
+    ok(votes.includes("path:-1") && votes.includes("oiDeltas:1") && votes.includes("standing:1") && ts.flow === "bullish" && !ts.drivers.some((d) => d.key === "path" && d.split),
        `when the tape's votes tie the card's score breaks the tie (${votes.join(", ")} -> ${ts.flow})`);
+    ok(!votes.some((v) => v.startsWith("displacement")),
+       "and displacement casts no vote: its centroid gap weighs calls and puts by magnitude, so buying and selling move it alike");
+    const disp = ts.drivers.find((d) => d.key === "displacement");
+    ok(disp && disp.axis === "horizon" && disp.weight === 0 && /casts no vote/.test(disp.reading),
+       `it is read on the horizon axis at weight 0 instead (${disp && disp.reading})`);
     const decided = JSON.parse(JSON.stringify(tied));
-    decided.panels.displacement.gapAtr = -1.2;
+    decided.panels.oiDeltas.rows = [{ cp: "C", diff: 100 }, { cp: "P", diff: 900 }];
     const ds = regimeState(decided, { expectedSession: "2026-09-15" });
     ok(ds.flow === "bearish" && ds.confidence === 2,
        "and when they agree the score is not counted, so a tie-breaker cannot turn a decided vote into a split");
@@ -320,7 +345,7 @@ const CARD = {
   ok(/8\. The line \[state\]/.test(promptForNeuron(ctx).system), "the prompt tells the model the state line is authoritative");
 
   const pinned = JSON.parse(JSON.stringify(CARD));
-  pinned.regime = { label: "long", crossings: 1, spotGammaShare: 0.6 };
+  pinned.regime = { label: "long", labelFrom: "book", crossings: 1, spotGammaShare: 0.6, bookGammaRaw: 4.1e5, bookShare: 0.6 };
   pinned.panels.levels.levels = [
     { kind: "max_pain", label: "Max pain", px: 70.5, distAtr: 0.19 },
     { kind: "gamma_flip", label: "Gamma flip", px: 66.1, distAtr: -2.78 },
@@ -330,7 +355,9 @@ const CARD = {
   const ps = regimeState(pinned, { expectedSession: "2026-09-15" });
   ok(ps.state === "pinned" && ps.direction === null && ps.flow === "bearish" && ps.target && ps.target.kind === "max_pain",
      `long gamma at spot with max pain inside half an ATR is pinned, with no side of its own but the flow still named (${ps.chip})`);
-  eq(ps.confidence, 3, "a strong share and a far flip cost nothing");
+  eq(ps.confidence, 2,
+     "a strong book and a far flip cost nothing, and the grade tops out at fair: the walls and the ladder's " +
+     "zero-crossing read off today's flow ladder, not the standing book, so a state resting on them is never robust");
   ok(ps.horizon.kind === "expiry" && ps.horizon.value === "2026-09-18", "the horizon is the front expiry when it carries a quarter of the book's gamma");
   ok(ps.invalidation.kind === "gamma_flip" && /Pinned · long gamma at spot, max pain 70\.50, flow bearish/.test(ps.chip), "the pin ends at the flip");
   assert.deepEqual(ps.preferred, STATE_STRUCTURES.pinned.fair.preferred, "and prefers the range structures"); checks++;
@@ -360,8 +387,14 @@ const CARD = {
   ok(tf.state === "transitional" && tf.invalidation.kind === "gamma_flip" && tf.preferred.includes("call debit spread") && !tf.preferred.includes("no position"),
        "spot inside half an ATR of the flip is transitional, leaning the way the flow votes, and a resolved lean drops the no-position placeholder that would contradict it");
 
+  const bookOnly = JSON.parse(JSON.stringify(CARD));
+  bookOnly.panels.gamma = { status: "unavailable", reason: "no ladder" };
+  const bo = regimeState(bookOnly, { expectedSession: "2026-09-15" });
+  ok(bo.state !== "undetermined" && bo.drivers.some((d) => d.key === "gamma" && /open-interest book is short/.test(d.reading)),
+     "with the flow ladder unavailable the open-interest book alone still reads a state");
   const blind = JSON.parse(JSON.stringify(CARD));
   blind.panels.gamma = { status: "unavailable", reason: "no ladder" };
+  blind.regime = { label: "short", crossings: 0 };
   const un = regimeState(blind, { expectedSession: "2026-09-15" });
   ok(un.state === "undetermined" && un.confidence === 0 && /gamma positioning is unavailable and premium is unreadable/.test(un.notes[0]),
      "no gamma and no readable premium implies no state, and the note says which silence it is");
@@ -373,6 +406,25 @@ const CARD = {
   assert.deepEqual(rich.preferred, STATE_STRUCTURES["premium-rich"].preferred, "and prefers short-premium structures"); checks++;
   eq(rich.invalidation.kind, "priced_low", "invalidated at the priced range end on the side the flow leans");
 
+  const pinnedCard = JSON.parse(JSON.stringify(CARD));
+  pinnedCard.panels.pricedMove = { ...pinnedCard.panels.pricedMove, iv30: 0.033, rv30: 0.3727, vrp: -0.3397,
+    ivRank: 0, ivMomentum: -0.249, richness: "event-pinned",
+    pin: { signals: ["collapse", "floor", "ratio"], moveRatio: 0.089, weekAgoIv: 0.282, lastRange: 0.0021, rangeRatio: 0.09 } };
+  const cheapCard = JSON.parse(JSON.stringify(pinnedCard));
+  cheapCard.panels.pricedMove.richness = "cheap";
+  delete cheapCard.panels.pricedMove.pin;
+  const cheapSt = regimeState(cheapCard, { expectedSession: "2026-09-15" });
+  const pinnedSt = regimeState(pinnedCard, { expectedSession: "2026-09-15" });
+  eq(cheapSt.premium, "cheap", "unflagged, a 3.3% implied against 37.3% realised reads as cheap premium");
+  eq(pinnedSt.premium, "pinned",
+     "flagged as pinned by an event (WBD 2026-09-21), the same numbers read as a pin, not as cheap premium");
+  ok(pinnedSt.drivers.filter((d) => d.axis === "premium").every((d) => d.vote === 0 && d.weight === 0),
+     "and no premium driver votes — realised volatility that holds the deal's jump is not the yardstick");
+  ok(!pinnedSt.preferred.includes("long straddle") && !pinnedSt.preferred.includes("long strangle") &&
+     pinnedSt.avoid.includes("long straddle") && pinnedSt.avoid.includes("long strangle"),
+     `a pinned name never prefers a long straddle or strangle, and rules both out (${pinnedSt.preferred.join(", ")})`);
+  ok(pinnedSt.preferred.length > 0, "while still naming what it does prefer");
+
   const staleSt = regimeState(CARD, { expectedSession: "2026-09-16" });
   ok(staleSt.stale === true && staleSt.confidence <= 1 && /capped/.test(stateSentence(staleSt, "SYN1")),
      "a card behind the last closed session caps the state's confidence at weak and says so");
@@ -380,6 +432,108 @@ const CARD = {
      "the fingerprint moves when the state moves, so a changed state is re-read");
   ok(STATE_LINES.FLIP_ON_ATR === 0.5 && STATE_LINES.WALL_NEAR_ATR === 1.5 && STATE_LINES.VRP_RELATIVE === 0.1,
      "the lines the states are cut at are published constants, not literals in the branches");
+}
+
+{
+  const fixtures = JSON.parse(fs.readFileSync(new URL("./fixtures-variation-cards.json", import.meta.url), "utf8"));
+  const B = fixtures.B;
+  eq(B.regime.label, "short", "the live B card was published short, from the running sum below spot");
+  ok(B.regime.netGamma > 0, `while the gamma it carries nets long (${B.regime.netGamma})`);
+  const read = gammaReading(B);
+  eq(read.label, "long", "read from the net, B is long");
+  eq(read.from, "flow", "from the gamma added today, since the snapshot carries no open-interest book");
+  const bs = regimeState(B, { expectedSession: B.sessionDate });
+  eq(bs.state, "pinned", `so B reads Pinned, not Amplifying (${bs.chip})`);
+  const g = bs.drivers.find((d) => d.key === "gamma");
+  ok(g && g.robustness === 1 && /not on this card/.test(g.reading),
+     `and the gamma driver is graded weak and says the book is missing (${g && g.reading})`);
+  ok(/running sum below spot sits at \u221252%/.test(g.reading),
+     "the running sum below spot is still published, as where the ladder sits rather than as the label");
+
+  const opts = { probe: { call: "raw", put: "raw" }, kc: { status: "ok", value: 50, n: 326, iqrRatio: 0.22 },
+    unit: { family: "share", used: "share" }, vannaScale: { status: "agree", ratio: 1, n: 5 } };
+  const withVar = JSON.parse(JSON.stringify(B));
+  withVar.panels.variation = variation(cardVariationInput(withVar), opts);
+  const ctx = buildContext(withVar, { expectedSession: B.sessionDate });
+  const f = ctx.features.find((x) => x.key === "variation");
+  ok(f && f.status === "ok", "the Neuron context carries the hedging panel");
+  eq(f.robustness, 1, "graded weak when only the gamma added today is on the card");
+  ok(f.figures.gammaPerSigma === withVar.panels.variation.gammaPerSigma && f.figures.sigmaSource === "realized",
+     "with its figures quotable");
+  const hedge = ctx.state.drivers.filter((d) => d.axis === "hedge");
+  ok(hedge.length >= 2 && hedge.every((d) => d.weight === 0), "the hedge drivers ride along at weight 0");
+  const booked = JSON.parse(JSON.stringify(B));
+  booked.regime.bookGammaRaw = 2e4;
+  booked.panels.variation = variation(cardVariationInput(booked), opts);
+  const bookedDrift = booked.panels.variation.variance && booked.panels.variation.variance.driftInSd;
+  ok(bookedDrift !== null && Math.abs(bookedDrift) >= STATE_LINES.DRIFT_SD,
+     `a booked copy of B carries a drift past the ${STATE_LINES.DRIFT_SD} sd line (${bookedDrift})`);
+  const bookedHedge = buildContext(booked, { expectedSession: B.sessionDate }).state.drivers.filter((d) => d.axis === "hedge");
+  ok(bookedHedge.length && bookedHedge.every((d) => d.weight === 0 && d.vote === 0),
+     "and even past it the hedge drivers carry no vote: a reading that says 'no vote' must not hand the model a vote of ±1");
+  ok(hedge.some((d) => d.key === "vanna" && /call \u2212 put/.test(d.reading)) && hedge.some((d) => d.key === "charm"),
+     "vanna and charm are read netted, call \u2212 put");
+  ok(!ctx.state.drivers.some((d) => /not netted/.test(d.reading)),
+     "and the old 'not netted on this card' readings are gone");
+  const sentence = stateSentence(ctx.state, "B");
+  ok(/Hedging: time alone moves dealer hedges to buy \$2\.00M over the session/.test(sentence),
+     `the state sentence gains a Hedging clause (${sentence.slice(sentence.indexOf("Hedging"), sentence.indexOf("Hedging") + 90)})`);
+
+  const alternating = (n) => {
+    const spot = 50 + n / 2 + 0.5;
+    const strikes = Array.from({ length: n }, (_, i) => ({ strike: 50 + i, call_gamma_ask: i % 2 ? -9 : 10,
+      call_gamma_bid: 0, put_gamma_ask: 0, put_gamma_bid: 0 }));
+    const g = aggressorGamma(strikes, { spot });
+    const card = buildCard({ ticker: "ALT", row: { close: String(spot) }, strikes, ticks: [], expiries: [],
+      features: { spot, atr: 1.5, netGamma: g.netGamma, gammaGross: g.gross, gRegime: "long", gRegimeFrom: "flow", gammaFlip: g.flip },
+      generatedAt: "2026-09-15T21:00:00Z", sessionDate: "2026-09-15" });
+    return { card, read: gammaReading(card), state: regimeState(card, { expectedSession: "2026-09-15" }) };
+  };
+  const drawn = alternating(60), packed = alternating(120);
+  ok(!drawn.card.panels.gamma.bucketed && packed.card.panels.gamma.bucketed,
+     "a 60-strike ladder is drawn bar for bar and a 120-strike one is bucketed in pairs for display");
+  near(drawn.read.strength, 30 / 570, 1e-12, "strikes alternating +10/−9 net 5% of the ladder's gross");
+  near(packed.read.strength, drawn.read.strength, 1e-12,
+       "and twice the ladder at the same per-strike share reads the same 5%, where the bucketed bars cancelled each pair into a 100% reading");
+  eq(packed.state.confidence, drawn.state.confidence,
+     `so display bucketing cannot lift the state's confidence across the idea gate (${drawn.state.confidence} and ${packed.state.confidence})`);
+  const legacy = JSON.parse(JSON.stringify(packed.card));
+  delete legacy.regime.flowGross;
+  eq(gammaReading(legacy).strength, null,
+     "a card published before the ladder's gross was carried reads no strength off bucketed bars, rather than an inflated one");
+
+  const grade = (mutate) => {
+    const c = JSON.parse(JSON.stringify(withVar));
+    mutate(c);
+    return buildContext(c, { expectedSession: B.sessionDate }).features.find((x) => x.key === "variation").robustness;
+  };
+  eq(grade((c) => { c.panels.variation.robustness = { r: 3, why: "all present" }; }), 3,
+     "a panel with the book, a converged skewed t, a vol-of-vol and a charm scale grades robust");
+  eq(grade((c) => { c.panels.variation = { status: "unavailable", reason: "no gamma" }; }), 0,
+     "a silent panel is withheld");
+
+  const vol = JSON.parse(JSON.stringify(CARD));
+  vol.panels.pricedMove = { ...vol.panels.pricedMove, iv30: 0.576, rv30: 0.55, vrp: 0.026, ivMomentum: 0.071 };
+  const momentum = regimeState(vol, { expectedSession: "2026-09-15" }).drivers.find((d) => d.sub === "ivMomentum");
+  ok(momentum && /rose 7\.1 points over the week/.test(momentum.reading) && !/month/.test(momentum.reading),
+     `the one-week change is called a week (${momentum && momentum.reading})`);
+  const hiVol = JSON.parse(JSON.stringify(vol));
+  hiVol.panels.pricedMove.ivMomentum = 0.04;
+  ok(!regimeState(hiVol, { expectedSession: "2026-09-15" }).drivers.some((d) => d.sub === "ivMomentum"),
+     "four points on a 58-vol name is 7% of its level and does not fire");
+  const loVol = JSON.parse(JSON.stringify(vol));
+  loVol.panels.pricedMove = { ...loVol.panels.pricedMove, iv30: 0.2, rv30: 0.19, vrp: 0.01, ivMomentum: 0.04 };
+  ok(regimeState(loVol, { expectedSession: "2026-09-15" }).drivers.some((d) => d.sub === "ivMomentum"),
+     "the same four points on a 20-vol name is 20% of its level and does: the line scales with the name");
+  ok(STATE_LINES.IV_MOMENTUM_REL === 0.1 && STATE_LINES.TERM_FRONT_BID_REL === 0.08 && STATE_LINES.GARCH_GAP_REL === 0.12,
+     "the three volatility lines are relative to the name's own level");
+
+  const avg = JSON.parse(JSON.stringify(CARD));
+  avg.panels.pricedMove = { ...avg.panels.pricedMove, iv30: 0.30, rv30: 0.25, vrp: 0.05 };
+  avg.panels.context.garch = { ...avg.panels.context.garch, nextVol: 29, avg21Vol: 25 };
+  const gd = regimeState(avg, { expectedSession: "2026-09-15" }).drivers.find((d) => d.key === "garch");
+  ok(gd && /average over the next 21 sessions is 25\.0%/.test(gd.reading) && gd.vote === 1,
+     `30-day implied volatility is compared with the GARCH average over the same horizon, not the one-step level (${gd && gd.reading})`);
 }
 
 {
@@ -396,6 +550,203 @@ const CARD = {
      "a Workers AI id is printed as the model's name, not as the vendor path a reader cannot parse");
   eq(modelName("@cf/qwen/qwen2.5-coder-32b-instruct"), "Qwen2.5 Coder 32B", "the humanised name keeps the size and drops the serving flags");
   eq(modelName(null), "a language model", "and no id at all is a language model");
+  eq(prov("unreachable:allowance"), "Deterministic reading: the day’s free model allowance is spent, resetting 00:00 UTC.",
+     "the writers store askFailure().why, so a spent allowance is named by that word and not only by the numeric code nothing writes");
+  eq(prov("unreachable:capacity"), "Deterministic reading: the model had no capacity, and nothing was spent.",
+     "a capacity refusal is named as one");
+  eq(prov("unreachable:plan"), "Deterministic reading: the configured model is not available on this plan.",
+     "and a plan fault as a configuration fault");
+  ok(/allowance is spent/.test(prov("unreachable:3036")), "the numeric codes stay as aliases for rows written before the words");
+  eq(prov("unreachable:length"), "Deterministic reading: the model spent its whole answer budget before writing any text.",
+     "a reply cut off at the token cap with no content is told apart from a model that answered with nothing");
+  eq(prov("unreachable:unreachable"), "Deterministic reading: the model did not answer.", "and an unstated failure keeps the plain wording");
+  eq(prov("unreachable:reparse:capacity"),
+     "Deterministic reading: the model’s reply carried no usable summary, and asking it again found no capacity.",
+     "A REPARSE REFUSED FOR CAPACITY IS NAMED AS ONE, not frozen as the model's unparsable output: the first reply was billed, " +
+     "so it never reads \"nothing was spent\"");
+  ok(/allowance spent/.test(prov("unreachable:reparse:allowance")) && /asking it again failed\.$/.test(prov("unreachable:reparse:unreachable")),
+     "and every other refusal of the second request keeps its own words");
+  ok(retryableGuard("unreachable:reparse:capacity", 0) && retryableGuard("unreachable:reparse:unreachable", 0),
+     "so the Neuron route re-reads the card after NEURON_RETRY_MS instead of serving a transient refusal until the next card");
+}
+
+{
+  const pinned = JSON.parse(JSON.stringify(CARD));
+  pinned.regime = { label: "long", crossings: 1, spotGammaShare: 0.6, labelFrom: "book", bookGamma: 1.2e8, bookShare: 0.6 };
+  pinned.panels.levels.levels = [
+    { kind: "max_pain", label: "Max pain", px: 70.5, distAtr: 0.19 },
+    { kind: "gamma_flip", label: "Gamma flip", px: 66.1, distAtr: -2.78 },
+    { kind: "call_wall", label: "Call wall", px: 72, distAtr: 1.2 },
+  ];
+  pinned.panels.calendar = { status: "ok", schedule: [{ expiry: "2026-09-18", days: 3, share: 0.4 }], frontLoad: 0.4, halfLifeExpiry: "2026-10-16", halfLifeDays: 31 };
+  const pctx = buildContext(pinned, { expectedSession: "2026-09-15" });
+  const pidea = stateIdea(pctx);
+  eq(pidea.structure, "iron condor", "a pinned card's own idea is the first range structure, an iron condor");
+  ok(/ An iron condor pays if spot stays inside the priced range, with the gamma flip at 66\.10 as the line that ends the state\.$/.test(pidea.thesis),
+     `the article agrees with the structure and the neutral payoff names the flip as the line that ends the state (${pidea.thesis.slice(-110)})`);
+  ok(!/ A iron condor|range against the/.test(pidea.thesis), "never 'A iron condor', never 'inside the priced range against the gamma flip'");
+  eq(vetIdeas([pidea], pctx).ideas.length, 1, "and the reworded idea still passes the same vetting");
+}
+
+{
+  const glm = "@cf/zai-org/glm-4.7-flash";
+  const llama = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+  const env = { FLOWS_ASK_MODEL: glm, FLOWS_ASK_FALLBACK_MODEL: llama,
+    FLOWS_ASK_NEURONS: "5500,36400", FLOWS_ASK_FALLBACK_NEURONS: "26668,204805" };
+  const msgs = [{ role: "user", content: "x" }];
+
+  const gIn = modelInput(glm, msgs, { maxTokens: 1024, temperature: 0.2 });
+  same(gIn.chat_template_kwargs, { enable_thinking: false },
+    "the reasoning model is asked NOT to think: on 09-22 every call spent the whole cap (29 of 31 at exactly 1024 tokens) inside its reasoning");
+  ok(gIn.max_completion_tokens === 1024 && !("max_tokens" in gIn),
+    "and its cap is max_completion_tokens, the field its schema documents, not the deprecated max_tokens");
+  const lIn = modelInput(llama, msgs, { maxTokens: 1400, temperature: 0.05 });
+  ok(lIn.max_tokens === 1400 && !("chat_template_kwargs" in lIn) && !("max_completion_tokens" in lIn),
+    "the instruct fallback gets the classic text-generation input its own schema lists, and nothing it does not");
+
+  const reasoningOnly = { choices: [{ finish_reason: "length", message: { content: null, reasoning_content: "Let me think about 42..." } }],
+    usage: { prompt_tokens: 12500, completion_tokens: 1024 } };
+  same(aiText(reasoningOnly), { text: null, finish: "length", reasoned: true },
+    "a reply that is all reasoning and stopped at the cap is no text, with the stop and the reasoning named");
+  eq(aiText({ choices: [{ finish_reason: "stop", message: { content: "Answer.", reasoning_content: "thought" } }] }).text, "Answer.",
+    "content is the answer when there is some");
+  same(aiText({ choices: [{ finish_reason: "length", message: { content: "<think>still going" } }] }),
+    { text: null, finish: "length", reasoned: true }, "an unclosed inline think block is reasoning, never the answer");
+  eq(aiText({ choices: [{ finish_reason: "stop", message: { content: "<think>a</think> Said." } }] }).text, "Said.",
+    "and a closed one is cut off the answer");
+  eq(aiText({ response: "Plain." }).text, "Plain.", "the classic `response` field still reads");
+  eq(aiText(null).text, null, "and a missing reply is no text");
+
+  const fake = (script) => {
+    const calls = [];
+    return { calls, run: async (model, input) => {
+      calls.push({ model, input });
+      const step = script[calls.length - 1];
+      if (step instanceof Error) throw step;
+      return step;
+    } };
+  };
+  const billed = [];
+  const onUsage = async (model, usage) => { billed.push([model, usage && usage.completion_tokens]); };
+
+  const rescued = fake([reasoningOnly, { response: "Fallback wording.", usage: { prompt_tokens: 12500, completion_tokens: 40 } }]);
+  const r1 = await askModels(rescued, aiChain(env), msgs, { maxTokens: 1024, temperature: 0.2 }, onUsage);
+  eq(r1.text, "Fallback wording.", "an empty primary is retried once on the instruct fallback, whose text is served");
+  eq(r1.model, llama, "and the row records the model that WROTE it, so the provenance names Llama 3.3 70B, not GLM");
+  eq(modelName(r1.model), "Llama 3.3 70B", "which is how modelName() prints it");
+  eq(r1.guard, null, "a rescued call carries no failure guard");
+  same(billed, [[glm, 1024], [llama, 40]], "and BOTH calls are billed to the model that consumed them");
+  same(rescued.calls.map((c) => c.model), [glm, llama], "in that order, the fallback exactly once");
+  same(fallbackNote(r1), { from: glm, stop: "length", reasoned: true }, "the answer can say which model came back empty and why");
+
+  const bothEmpty = fake([reasoningOnly, { response: "   " }]);
+  eq((await askModels(bothEmpty, aiChain(env), msgs, {})).guard, "unreachable:length",
+    "when neither writes text and one stopped at the cap the guard is unreachable:length, not unreachable:empty");
+  const plainEmpty = fake([{ choices: [{ finish_reason: "stop", message: { content: "" } }] }, { response: "" }]);
+  eq((await askModels(plainEmpty, aiChain(env), msgs, {})).guard, "unreachable:empty", "and an honest empty stays unreachable:empty");
+
+  const spent = fake([new Error("AiError: 3036: account limit")]);
+  const r2 = await askModels(spent, aiChain(env), msgs, {});
+  ok(r2.guard === "unreachable:allowance" && r2.failure.why === "allowance" && spent.calls.length === 1,
+    "a spent allowance is account-wide, so it is reported and the fallback is NOT asked to fail the same way");
+  const busy = fake([reasoningOnly, new Error("AiError: 3040: capacity")]);
+  const r3 = await askModels(busy, aiChain(env), msgs, {});
+  ok(r3.guard === "unreachable:length" && r3.model === glm && r3.failure.why === "capacity",
+    "A FALLBACK THAT FAILS AFTER A BILLED EMPTY PRIMARY STORES THE PRIMARY'S STOP, not its own failure: " +
+    "unreachable:capacity is retried every cron tick, and each retry pays the primary's 1,024 thinking " +
+    "tokens again — a fallback that kept failing spent 10,178 of the 10,000 daily neurons over 96 ticks " +
+    "on one fingerprint in the review's day simulation; the failure itself still travels for the Ask note");
+  const broke = fake([reasoningOnly, new Error("AiError: 5021: context window limit (24000)")]);
+  eq((await askModels(broke, aiChain(env), msgs, {})).guard, "unreachable:length",
+    "and so does a fallback that cannot take the prompt at all, a failure that never clears on retry");
+  const plainThenBusy = fake([{ choices: [{ finish_reason: "stop", message: { content: "" } }] }, new Error("AiError: 3040: capacity")]);
+  eq((await askModels(plainThenBusy, aiChain(env), msgs, {})).guard, "unreachable:empty",
+    "a primary that stopped empty without hitting the cap is an unreachable:empty, which the same facts never retry");
+  const spentAfter = fake([reasoningOnly, new Error("AiError: 3036: account limit")]);
+  eq((await askModels(spentAfter, aiChain(env), msgs, {})).guard, "unreachable:allowance",
+    "while a spent allowance keeps its own name: every retry of it fails at the primary for free");
+  const honestEmpty = { choices: [{ finish_reason: "stop", message: { content: "" } }] };
+  const cappedEmpty = { response: "", finish_reason: "length", usage: { prompt_tokens: 12500, completion_tokens: 1024 } };
+  eq(emptyNote((await askModels(fake([reasoningOnly, { response: "" }]), aiChain(env), msgs, {})).attempts),
+    "The model spent its whole answer budget before writing any text, and the fallback model asked after it answered with no text",
+    "THE ASK NOTE NAMES EACH MODEL'S OWN STOP: a primary at the cap and a fallback that answered empty no longer read " +
+    "\"and so did the fallback\", which blamed the fallback for a budget it never reached");
+  eq(emptyNote((await askModels(fake([honestEmpty, cappedEmpty]), aiChain(env), msgs, {})).attempts),
+    "The model answered with no text, and the fallback model asked after it spent its whole answer budget before writing any text",
+    "and the reverse no longer blames the primary for the fallback's cap");
+  eq(emptyNote((await askModels(fake([reasoningOnly, cappedEmpty]), aiChain(env), msgs, {})).attempts),
+    "The model spent its whole answer budget before writing any text, and so did the fallback model asked after it",
+    "two models at the cap keep the shared sentence");
+  eq(emptyNote((await askModels(fake([honestEmpty, { response: "" }]), aiChain(env), msgs, {})).attempts),
+    "The model answered with no text, and so did the fallback model asked after it", "and so do two honest empties");
+  eq(emptyNote((await askModels(fake([reasoningOnly, new Error("AiError: 3040: capacity")]), aiChain(env), msgs, {})).attempts),
+    "The model spent its whole answer budget before writing any text",
+    "a fallback that failed to run is not described as a stop: the Ask note names its failure separately");
+  ok(repliedGuard("invented") && repliedGuard("unreachable:length") && repliedGuard("unreachable:empty") &&
+     !repliedGuard("unreachable:capacity") && !repliedGuard(null),
+    "a guard written after a model replied (and was billed) is told apart from one written after a refusal to run");
+
+  ok(retryableGuard("unreachable:allowance", 0) && retryableGuard("unreachable:capacity", 0),
+    "a failure that genuinely returns is retried");
+  ok(!retryableGuard("unreachable:empty", Infinity), "an empty on the same facts and configuration is not");
+  ok(!retryableGuard("unreachable:length", AI_LENGTH_RETRY_MS - 1) && retryableGuard("unreachable:length", AI_LENGTH_RETRY_MS),
+    "a length stop is retried, never frozen, but only after an hour so a model that keeps thinking cannot spend the day's allowance every tick");
+  ok(!retryableGuard(null, Infinity) && !retryableGuard("invented", Infinity), "and a guard refusal is final");
+  ok(intradayFloorMs(0, "unreachable:length") === AI_LENGTH_RETRY_MS && intradayFloorMs(0, "unreachable:empty") === AI_LENGTH_RETRY_MS,
+    "THE ONE-HOUR FLOOR HOLDS WHEN ONLY THE INTRADAY READ TIME MOVED: the brief's alert fact carries its read time, so the summary " +
+    "fingerprint changes every tick and a length or empty stop was re-asked of both models every 45 minutes, 9 asks and 3,960 " +
+    "neurons over a 26-tick session in the review's simulation, against 7 asks and 3,080 at the hour");
+  ok(intradayFloorMs(1, null) === AI_INTRADAY_REFRESH_MS && intradayFloorMs(0, "invented") === AI_INTRADAY_REFRESH_MS &&
+     intradayFloorMs(0, "forecast") === AI_INTRADAY_REFRESH_MS && AI_INTRADAY_REFRESH_MS === 45 * 60 * 1000,
+    "while a written summary, accepted or refused, keeps the 45-minute intraday refresh");
+
+  same(aiChain({ FLOWS_ASK_MODEL: "", FLOWS_ASK_FALLBACK_MODEL: llama }), [],
+    "no configured primary means no model at all: the fallback is a retry, not a replacement");
+  same(aiChain({ FLOWS_ASK_MODEL: llama, FLOWS_ASK_FALLBACK_MODEL: llama }), [llama], "and a fallback equal to the primary is not asked twice");
+  ok(aiCallSignature(env) !== aiCallSignature({ FLOWS_ASK_MODEL: glm }) && /^ai2\./.test(aiCallSignature(env)),
+    "the call signature moves with the configuration, so an unreachable:empty stored under the old one is regenerated once, not frozen forever");
+
+  ok(modelRates(env, glm).outPerM === 36400 && modelRates(env, llama).outPerM === 204805 && modelRates(env, "@cf/x/y") === null,
+    "each model is billed at its own published rate, and an unconfigured one at none");
+  const s1 = spendShape(env, "2026-09-22", 33, 413240, 32536,
+    [{ model: glm, calls: 1, tokensIn: 12500, tokensOut: 20 }, { model: llama, calls: 1, tokensIn: 12500, tokensOut: 20 }]);
+  eq(s1.neurons, Math.ceil(((413240 - 25000) * 5500 + (32536 - 40) * 36400 + 12500 * 5500 + 20 * 36400 + 12500 * 26668 + 20 * 204805) / 1e6),
+    "the day's neurons are each model's tokens at its own rate, with calls recorded before the split billed at the primary's, the only model called then");
+  eq(s1.byModel[1].neurons, Math.ceil((12500 * 26668 + 20 * 204805) / 1e6), "and the split is published per model");
+  eq(spendShape(env, "d", 1, 10, 10, [{ model: "@cf/old/model", calls: 1, tokensIn: 10, tokensOut: 10 }]).neurons, null,
+    "a model with no configured rate makes the day's spend unknown rather than a guess");
+  eq(spendShape(env, "d", 0, 0, 0, null).neurons, null, "and so does a split that could not be read");
+  eq(spendShape(env, "d", 0, 0, 0, []).neurons, 0, "while a day with no calls is a measured zero");
+
+  const toml = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
+  ok(/FLOWS_ASK_FALLBACK_MODEL = "@cf\/meta\/llama-3\.3-70b-instruct-fp8-fast"/.test(toml) &&
+     /FLOWS_ASK_FALLBACK_NEURONS = "26668,204805"/.test(toml),
+    "the fallback is a non-reasoning instruct model configured beside its published neuron rate");
+  const worker = readFileSync(new URL("../worker.js", import.meta.url), "utf8");
+  eq((worker.match(/env\.AI\.run\(/g) || []).length, 0,
+    "no call site reaches the binding directly: all three go through askModels, so none can drop the thinking switch or the fallback");
+  eq((worker.match(/askModels\(env\.AI/g) || []).length, 3, "and all three lanes (summary, Neuron, Ask) use it");
+  ok(!/max_tokens/.test(worker), "the worker no longer carries a max_tokens literal of its own");
+  ok(/if \(attempt > 0\) \{\s*if \(said\.failure\) refused = "unreachable:reparse:" \+ said\.failure\.why;\s*break;/.test(worker) &&
+     /verdict\.ok \? "ideas:unparsable" : refused \|\| "ideas:unparsable"/.test(worker) &&
+     /guard = refused \|\| "summary:empty";/.test(worker),
+    "NEURON KEEPS A THROWN REPARSE AS A RETRYABLE GUARD: a capacity blip on the second request used to write ideas:unparsable " +
+    "or summary:empty, which the same card never retries, where origin/main retried the same failure after five minutes");
+  ok((worker.match(/emptyNote\(said\.attempts\)/g) || []).length === 2 && !/so did the fallback model asked after it/.test(worker),
+    "both Ask notes about an empty reply are built from emptyNote over the attempts, not from the chain's combined guard");
+  ok(/const meter = afterCall \|\| base\.spend;/.test(worker) && /meter\.remaining > 0/.test(worker) &&
+     /spend: meter, note: say/.test(worker) && !/spend\.remaining > 0/.test(worker),
+    "THE ALLOWANCE NOTE READS THE METER AFTER THE PRIMARY'S BILLED CALL: with 99 credits left, a primary at the cap that " +
+    "used them and a fallback refused for the allowance read \"still showed 99 of 10,000 unspent, which means something " +
+    "other than this site drew on the same account\" beside a meter at 0, blaming another spender for this site's own call");
+  ok(/sameCall && \(prior\.llm \|\| repliedGuard\(prior\.guard\)\) && intradayOnly/.test(worker),
+    "THE INTRADAY SUMMARY THROTTLE COVERS EVERY BILLED REPLY, not only an accepted one: with the fallback " +
+    "writing, a refused summary on facts that move every tick cost 13,021 neurons over a 26-tick session in " +
+    "the review's simulation, against 4,507 when the text was accepted and the 45-minute throttle held");
+  ok(/ageMs < intradayFloorMs\(prior\.llm, prior\.guard\)\) return;/.test(worker) && !/ageMs < 45 \* 60 \* 1000/.test(worker),
+    "and the worker's intraday throttle takes its floor from intradayFloorMs, not a literal of its own");
+  ok(/prior\.fingerprint\.endsWith\("\|" \+ signature\)/.test(worker),
+    "and a change of model configuration still regenerates on the next tick, throttle or not");
 }
 
 console.log(`✓ flows-neuron: ${checks} assertions — a context that carries every registry panel plus the ` +

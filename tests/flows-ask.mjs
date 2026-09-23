@@ -4,6 +4,7 @@ import { buildFactIndex, selectFacts, numeralsIn, guardAnswer, renderFactsPlain,
          promptForSummary, renderSummaryPlain, summaryFingerprint, cardFacts,
          refreshIntradayFacts, briefAge, INTRADAY_SOURCES }
   from "../shared/flows-ask.js";
+import { buildBrief, briefStoreFrom } from "../shared/flows-brief.js";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
@@ -1452,14 +1453,32 @@ import { readFile } from "node:fs/promises";
   ok(/no flip level is published \(0 crossings\)/.test(g46.say) && g46.n.crossings === 0 && !("gammaFlipPx" in g46.n),
      "crossings 0 with no flip is said as the finding it is — net gamma never changed sign — " +
      "with the measured zero pinned in n and no flip price invented");
-  ok(/flips sign at 412\.5 \(short below\)/.test(g47.say) && g47.n.gammaFlipPx === 412.5 && g47.n.crossings === 1,
-     "a measured flip level is quoted with its side, underscores read as words");
+  ok(/running sum crosses zero at 412\.5 \(short below\)/.test(g47.say) && g47.n.gammaFlipPx === 412.5 && g47.n.crossings === 1,
+     "a measured flip level is quoted with its side, underscores read as words, and called what it is: " +
+     "the crossing of the ladder's running sum, not a net that flips sign");
+  ok(/^Today's gamma flow in SYN47 at spot/.test(g47.say) && !/Dealer gamma for/.test(g47.say),
+     "the ladder the walls are read from is named as today's flow, not as the dealer book the label now reads");
   eq(g90, null,
      "and a card whose put wall did not build has NO gamma fact at all — a sentence with a " +
      "hole is worse than none — while its other readings survive: " +
      of("SYN90").map((f) => f.id.split("/")[1]).join(","));
   ok(of("SYN90").length === 4 && one("SYN90", "standing") && one("SYN90", "move") && one("SYN90", "flow"),
      "four of five survive the missing wall");
+  {
+    const src = (t, labelFrom, gamma) => buildFactIndex({ ["card:" + t]: withPanels(t, gamma ? { gamma } : {},
+      { regime: { label: "short", crossings: 0, flipSide: null, ...(labelFrom ? { labelFrom } : {}) } }) }).facts;
+    const said = (facts, tail) => (facts.find((x) => x.id.endsWith("/" + tail)) || {}).say || "";
+    ok(/; the open-interest gamma book is short\./.test(said(src("BK1", "book"), "standing")),
+       "a label read from the open-interest book says so, instead of placing a whole-book net 'at spot'");
+    ok(/; today's added gamma is short\./.test(said(src("FL1", "flow"), "standing")),
+       "a label that fell back to today's flow says that");
+    ok(/; dealer gamma is labelled short\./.test(said(src("OLD1", null), "standing")),
+       "and a card that predates the label's source claims neither");
+    const inverted = said(src("INV1", "book", { callWall: 380, putWall: 395 }), "gamma");
+    ok(/its largest long-gamma strike is at 380 and its largest short-gamma strike at 395/.test(inverted) &&
+       !/call wall|put wall/.test(inverted),
+       `a call wall below spot and a put wall above it are not called walls here either (${inverted.slice(0, 120)})`);
+  }
   {
 
     const unm = buildFactIndex({ "card:UNM": withPanels("UNM", {}, { regime: { label: "short", crossings: null, flipSide: null } }) });
@@ -1723,6 +1742,40 @@ import { readFile } from "node:fs/promises";
        "a pending feed replaces nothing either");
   eq(refreshIntradayFacts(index, {}).refreshedAt, null,
      "with nothing to read from, no refresh stamp is invented");
+
+  const briefAlerts = (x) => x.facts.find((f) => f.id === "brief:today/alerts");
+  ok(/^2 flagged windows on the tape, read 2026-09-04 08:33 UTC\.$/.test(briefAlerts(index).say),
+     "the nightly index carries the brief's own count of the alert feed");
+  eq(briefAlerts(next).say, "4 flagged windows on the tape, read 2026-09-04 18:00 UTC.",
+     "AND THE REFRESH REBUILDS IT from the feed it just wrote. Production served '60 flagged windows " +
+     "on the tape, read 17:20' beside 'holds 180 of the 226 alerts read' at 20:15, because only facts " +
+     "whose source is the feed were replaced and this one's source is the brief");
+  eq(briefAlerts(next).at, "2026-09-04T18:00:00.000Z", "stamped with the read it quotes");
+  eq(next.facts.findIndex((f) => f.id === "brief:today/alerts"), index.facts.findIndex((f) => f.id === "brief:today/alerts"),
+     "in the slot it held, so selection order is unchanged");
+  eq(next.replaced.brief, 1, "and the rebuilt brief fact is counted, so the cron writes the index back");
+  eq(quiet.facts.find((f) => f.id === "brief:today/alerts").say, briefAlerts(index).say,
+     "a quiet read leaves the brief's count alone, the same rule as the feed's own facts");
+
+  const withToday = { ...index, today: buildBrief(briefStoreFrom(STORE)).today };
+  const told = refreshIntradayFacts(withToday, { flowalerts: fresh });
+  eq(told.today.facts.find((f) => f.id === "alerts").say, briefAlerts(next).say,
+     "the Where-the-session-stands list the ask page draws from brief.today says the same sentence");
+  eq(withToday.today.facts.find((f) => f.id === "alerts").say, briefAlerts(index).say,
+     "without mutating the stored brief it was handed");
+
+  const intraday = refreshIntradayFacts(index, { flowalerts: { ...fresh,
+    vendorLimit: null, vendorTruncated: null, readLimit: 60, readTruncated: true } });
+  ok(!intraday.facts.some((f) => f.id === "flowalerts/ceiling"),
+     "the vendor-ceiling fact is gone once the merge stops carrying the nightly read's vendorTruncated");
+  const ceiling = intraday.facts.find((f) => f.id === "flowalerts/read-ceiling");
+  ok(ceiling && /this site's own cap of 60 rows per read/.test(ceiling.say) && !/vendor's maximum/.test(ceiling.say),
+     "an intraday read that came back full names THIS SITE's 60-row cap, never 'the vendor's maximum of " +
+     "200 rows' the nightly read measured and the intraday merge used to carry forward");
+  eq(ceiling.n.readLimitRows, 60, "with the cap pinned for the guard");
+  ok(!refreshIntradayFacts(index, { flowalerts: { ...fresh, vendorLimit: null, vendorTruncated: null,
+    readLimit: 60, readTruncated: false } }).facts.some((f) => /^flowalerts\/(read-)?ceiling$/.test(f.id)),
+     "and a read that fitted under it states no ceiling");
 }
 
 {

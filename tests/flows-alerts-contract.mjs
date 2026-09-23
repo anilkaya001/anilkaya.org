@@ -3,8 +3,9 @@ import { readFileSync } from "node:fs";
 import {
   alertRow, buildFlowAlerts, ALERT_ROWS, ALERTS_NOTES,
   alertBand, ALERT_BAND_ROWS,
-  alertKey, mergeAlerts, MERGED_ALERT_ROWS, MERGED_ALERT_BYTES,
+  alertKey, mergeAlerts, MERGED_ALERT_ROWS, MERGED_ALERT_BYTES, alertStamp, nightlyAlerts,
 } from "../shared/flows-alerts.js";
+import { briefAlertsFact } from "../shared/flows-brief.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -199,6 +200,65 @@ const stageOf = (t) => (t === "AAA" ? "deep" : t === "BBB" ? "gated" : null);
   ok(buildFlowAlerts({ data: [] }, { stageOf: () => null }).rows.length === 0,
     "an empty read publishes no rows, which is the condition the cron's write " +
     "guard tests — better a stale feed with an honest readAt than an empty fresh one");
+}
+
+{
+  const base = { ticker: "DIA", option_chain: "DIA241018C00415000", total_premium: 36466,
+    total_size: 50, trade_count: 3, alert_rule: "RepeatedHitsDescendingFill" };
+  const early = { ...base, start_time: 1726670212648, end_time: 1726670212748 };
+  const late = { ...base, start_time: 1726673812648, end_time: 1726673812748, total_premium: 50000 };
+  const epoch = buildFlowAlerts([early, late]);
+  eq(epoch.coverage.withSpan, 2,
+    "THE VENDOR SENDS START_TIME AND END_TIME AS EPOCH MILLISECONDS (docs/uw-openapi.yaml, Flow " +
+    "Alert Detail: start_time 1773242266346). Only strings were read, so production's 180 rows " +
+    "had withSpan 0, a dash in every Window cell, and no clock on the ticker's recent flow");
+  eq(epoch.rows.find((r) => r.prem === 36466).spanStart, "2024-09-18T14:36:52.648Z",
+    "the number becomes the ISO instant the renderers already parse, in UTC as the page says");
+  eq(epoch.rows.find((r) => r.prem === 36466).spanEnd, "2024-09-18T14:36:52.748Z", "and so does its end");
+  ok(alertKey(epoch.rows[0]) !== alertKey(epoch.rows[1]) && alertKey(epoch.rows[0]).startsWith("w"),
+    "so two windows on one contract under one rule are two identities again, not one row the " +
+    "record counted 'again' twelve times across a session");
+  eq(alertStamp(1726670212), "2024-09-18T14:36:52.000Z", "epoch seconds read as seconds, not as 1970");
+  eq(alertStamp("1726670212648"), "2024-09-18T14:36:52.648Z", "and a numeric string reads like the number");
+  eq(alertStamp("2026-08-24T13:47:00-04:00"), "2026-08-24T13:47:00-04:00", "an ISO string is carried as sent");
+  eq(alertStamp("soon"), null, "and text that is no instant is no span");
+  eq(alertStamp(0), null, "nor is a zero epoch");
+
+  const createdOnly = alertRow({ ...base, created_at: "2023-12-12T16:35:52.168490Z" });
+  eq(createdOnly.spanStart, "2023-12-12T16:35:52.168490Z",
+    "THE REST FLOW ALERT SCHEMA DOCUMENTS created_at AND NO start_time, so a row that carries only " +
+    "created_at is dated by it rather than left undated");
+  eq(createdOnly.spanEnd, createdOnly.spanStart, "with its end at the same instant, not a window it never stated");
+  eq(createdOnly.spanFrom, "created_at", "and it says where the instant came from, so the page does not call it the vendor's span");
+  eq(alertRow({ ...base, start_time: 1726670212648, created_at: "2023-12-12T16:35:52Z" }).spanFrom, undefined,
+    "a row with a real window never carries the created_at marker");
+  const startOnly = alertRow({ ...base, start_time: 1726670212648 });
+  eq(startOnly.spanStart, "2024-09-18T14:36:52.648Z", "a row with a start and no end keeps its start");
+  eq(startOnly.spanEnd, null,
+    "AND NO END IS INVENTED FOR IT: spanEnd fell back to spanStart, so the overview titled the cell " +
+    "'Window ran 10:36 to 10:36 ET.' and Unusual 'The vendor's stated span: X to X' for an end the " +
+    "vendor never sent, and the overview's 'the vendor stated no end for it' could never run");
+  eq(startOnly.spanFrom, undefined, "and it is not dated by created_at either");
+  eq(buildFlowAlerts([{ ...base, start_time: 1726670212648 }]).coverage.withSpan, 0,
+    "so coverage does not count it as a window");
+  const cov = buildFlowAlerts([early, { ...base, created_at: "2023-12-12T16:35:52Z" }, base]).coverage;
+  deep([cov.withSpan, cov.spanFromCreated], [2, 1],
+    "coverage counts rows with any instant and, separately, the ones dated only by created_at");
+  eq(alertRow(base).spanStart, null, "and a row with no time field at all stays undated");
+
+  const heldUnspanned = {
+    record: { date: "2026-08-28", reads: 4, firstReadAt: "2026-08-28T13:31:00.000Z", everEntered: 1 },
+    rows: [{ ...alertRow(base), spanStart: null, spanEnd: null, firstAt: "2026-08-28T13:31:00.000Z",
+      lastAt: "2026-08-28T14:01:00.000Z", reads: 4 }],
+  };
+  const upgraded = mergeAlerts(heldUnspanned, buildFlowAlerts([early]),
+    { at: "2026-08-28T14:16:00.000Z", sessionDate: "2026-08-28" });
+  eq(upgraded.rows.length, 1,
+    "ON THE DEPLOY DAY a record written before the fix holds the contract without a span; the first " +
+    "spanned read of it takes that row over instead of entering a duplicate beside it");
+  eq(upgraded.rows[0].firstAt, "2026-08-28T13:31:00.000Z", "so the early fact survives the upgrade");
+  eq(upgraded.rows[0].reads, 5, "and so does the count of reads that carried it");
+  deep([upgraded.record.again, upgraded.record.entered], [1, 0], "counted as seen again, not as new");
 }
 
 const T1 = "2026-08-28T13:31:00.000Z";
@@ -436,6 +496,11 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
   ok(/mergeAlerts\(prev, alerts/.test(body),
     "the handler merges into the STORED payload rather than spreading over it: " +
     "`{...prev, ...alerts}` is the exact expression that deleted the morning's flags");
+  ok(/readTruncated: alerts\.seen \+ alerts\.unusable >= ALERT_READ_LIMIT\s*\|\| \(!merged\.record\.reset && prev\.readTruncated === true\)/.test(body),
+    "A FULL READ EARLIER IN THE SESSION KEEPS THE UNION A FLOOR. The record is the union of every read " +
+    "today, so one read that came back at the 60-row cap makes its count a lower bound until the session " +
+    "resets; judged on the latest read alone, a 60-row read followed by a 10-row one published seen 70 with " +
+    "readTruncated false, and the Unusual caption dropped its 'at least'");
 }
 
 {
@@ -609,8 +674,9 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
       "different ceilings rather than one wearing two names");
 
     const envelope = (m) => JSON.stringify({
-      v: 1, generatedAt: T1, sessionDate: D28, vendorLimit: 60, vendorTruncated: false,
-      ...m, readAt: T1, refreshed: "intraday",
+      v: 1, generatedAt: T1, sessionDate: D28,
+      ...m, readAt: T1, readDay: D28, refreshed: "intraday",
+      vendorLimit: null, vendorTruncated: null, readLimit: 60, readTruncated: true,
     }).length;
     const cap = Number(/FLOWS_MAX_PAYLOAD_BYTES = (\d+) \* 1024/.exec(worker)[1]) * 1024;
     eq(cap, 128 * 1024, "worker.js still holds this key's other writer to 128KB");
@@ -630,6 +696,104 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
       "counted twice — one record shed by the row ceiling, one by the byte ceiling, " +
       "which is what makes the two bounds above two measurements");
   }
+}
+
+{
+  const DAY = "2026-09-22";
+  const slotAt = (i) => new Date(Date.parse(`${DAY}T13:15:00.000Z`) + i * 15 * 60000).toISOString();
+  const slotRows = (i) => Array.from({ length: 6 }, (_, j) => ({
+    ticker: `S${String(i).padStart(2, "0")}${String.fromCharCode(65 + j)}`,
+    option_chain: `S${String(i).padStart(2, "0")}${String.fromCharCode(65 + j)}261016C00100000`,
+    total_premium: 100000 + i * 1000 + j,
+    start_time: slotAt(i), end_time: slotAt(i).replace(":00.000Z", ":40.000Z"),
+    alert_rule: "RepeatedHits",
+  }));
+  const vendorList = (last) => Array.from({ length: Math.min(8, last + 1) }, (_, k) => slotRows(last - k)).flat();
+  const workerStage = (prev) => {
+    const lastStage = new Map((prev.rows || []).map((r) => [r.t, r.st]));
+    return (t) => lastStage.get(t) || null;
+  };
+
+  let stored = {
+    v: 1, generatedAt: "2026-09-21T21:40:00.000Z", sessionDate: "2026-09-21",
+    readAt: "2026-09-21T21:40:00.000Z", refreshed: "nightly",
+    ...buildFlowAlerts([win("OLD", "OLD261016C00100000", "2026-09-21T18:00:00.000Z", 5e6)]),
+    vendorLimit: 200, vendorTruncated: false, readLimit: null, readTruncated: null,
+  };
+  for (let i = 0; i < 29; i++) {
+    const at = slotAt(i);
+    const read = buildFlowAlerts(vendorList(i), { stageOf: workerStage(stored), stageComplete: false });
+    const merged = mergeAlerts(stored, read, { at, sessionDate: DAY });
+    stored = {
+      ...stored, ...merged, readAt: at, readDay: DAY, refreshed: "intraday",
+      vendorLimit: null, vendorTruncated: null, readLimit: 60,
+      readTruncated: read.seen + read.unusable >= 60 || (!merged.record.reset && stored.readTruncated === true),
+    };
+  }
+  eq(stored.record.reads, 29, "the Worker's day: 29 intraday reads from 13:15Z to 20:15Z");
+  eq(stored.rows.length, 174, "holding every one of the 174 windows the rolling list showed during the session");
+
+  const closeAt = `${DAY}T21:31:00.000Z`;
+  const nightlyRaw = vendorList(28);
+  const stageOf = (t) => (t === "S28A" ? "board:long" : null);
+  const read = buildFlowAlerts(nightlyRaw, { stageOf });
+  ok(!read.rows.some((r) => r.spanStart === slotAt(0)),
+    "the post-close read no longer holds the 13:15 windows: the vendor's list is rolling");
+
+  const night = nightlyAlerts(read, { payload: stored, status: 200 }, { sessionDate: DAY, at: closeAt, stageOf });
+  eq(night.mode, "merged",
+    "THE 21:30 RUN MERGES INTO THE DAY'S RECORD. It ran after the Worker's last merge at 16:15 ET and " +
+    "published one read as a straight replacement, so every evening the morning's flags left the " +
+    "published session and the record the Worker had built all day was gone until the next open");
+  eq(night.alerts.record.reads, 30, "the post-close read is the session's thirtieth");
+  eq(night.alerts.record.date, DAY, "on the same Eastern session");
+  eq(night.alerts.record.reset, null, "with no reset");
+  eq(night.alerts.rows.length, 174, "and every window the Worker held survives it");
+  ok(night.alerts.rows.some((r) => r.spanStart === slotAt(0) && r.firstAt === slotAt(0)),
+    "the 13:15 windows are still in the evening's record, first seen at 13:15");
+  eq(night.alerts.rows.find((r) => r.t === "S28A").st, "board:long",
+    "a row is staged against the board this run just built");
+  eq(night.alerts.rows.find((r) => r.t === "S00A").st, "foreign",
+    "and a carried row the complete stage map misses is foreign, as a nightly row always was");
+
+  const published = { v: 1, generatedAt: closeAt, sessionDate: DAY, readAt: closeAt, readDay: DAY,
+    refreshed: "nightly", ...night.alerts, vendorLimit: 200, vendorTruncated: false,
+    readLimit: night.readLimit, readTruncated: night.readTruncated };
+  ok(/^174 flagged windows on the tape across 30 reads on 2026-09-22, the latest 2026-09-22 21:31 UTC\.$/
+    .test(briefAlertsFact(published).say),
+    `the post-close brief quotes the day's record (${briefAlertsFact(published).say})`);
+  ok(!/across/.test(briefAlertsFact({ ...read, readAt: closeAt }).say),
+    "where a replacement would have quoted one read");
+  deep([night.readLimit, night.readTruncated], [60, false],
+    "the intraday reads' own cap travels with the record they built");
+
+  const floor = nightlyAlerts(read, { payload: { ...stored, readTruncated: true } },
+    { sessionDate: DAY, at: closeAt, stageOf });
+  eq(floor.readTruncated, true,
+    "and an intraday read that came back full keeps the evening's union a floor, as the Worker keeps it");
+
+  const empty = nightlyAlerts(buildFlowAlerts([]), { payload: stored }, { sessionDate: DAY, at: closeAt, stageOf });
+  ok(empty.mode === "kept" && empty.alerts === null && empty.held === stored,
+    "an empty post-close read writes nothing over the day's record and hands the record to the brief");
+  const unread = nightlyAlerts(read, { payload: null, failed: true, status: 403 }, { sessionDate: DAY, at: closeAt });
+  ok(unread.mode === "unverified" && unread.alerts === null,
+    "a stored feed that could not be read is not replaced: it may be the day's record");
+  const later = nightlyAlerts(read, { payload: stored }, { sessionDate: "2026-09-18", at: closeAt });
+  ok(later.mode === "newer" && later.alerts === null && later.day === DAY,
+    "a republish of an earlier session does not replace a later session's record");
+  const yesterday = nightlyAlerts(read, { payload: { ...stored, record: { ...stored.record, date: "2026-09-21" } } },
+    { sessionDate: DAY, at: closeAt });
+  ok(yesterday.mode === "snapshot" && yesterday.alerts === read && yesterday.readTruncated === null,
+    "a record from an earlier session is replaced by the single read, as before");
+  eq(nightlyAlerts(read, { payload: null, absent: true }, { sessionDate: DAY }).mode, "snapshot",
+    "and so is an empty store");
+
+  const pipeline = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  ok(/nightlyAlerts\(alerts, await readStored\("flowalerts"\)/.test(pipeline),
+    "the pipeline reads the stored feed before it writes the key");
+  eq((pipeline.match(/publish\("flowalerts"/g) || []).length, 1, "with one write to the key");
+  ok(/publish\("flowalerts", liveAlerts\)/.test(pipeline) && /\.\.\.night\.alerts,/.test(pipeline),
+    "and that write carries the merged record rather than the bare read");
 }
 
 console.log(`✓ flows-alerts: ${checks} assertions — a vendor flag that is absent staying ` +

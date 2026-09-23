@@ -8,6 +8,20 @@ const num = (v, d = null) => {
 
 const flag = (v) => (v === null || v === undefined ? null : Boolean(v));
 
+const fromEpoch = (n) => {
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const d = new Date(n > 1e12 ? n : n * 1000);
+  return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+};
+
+export function alertStamp(v) {
+  if (typeof v === "number") return fromEpoch(v);
+  if (typeof v !== "string") return null;
+  const s = v.trim();
+  if (/^\d{9,13}(\.\d+)?$/.test(s)) return fromEpoch(Number(s));
+  return /^\d{4}-\d{2}-\d{2}/.test(s) && Number.isFinite(Date.parse(s)) ? s : null;
+}
+
 export const ALERT_ROWS = 60;
 
 export const ALERTS_NOTES = Object.freeze({
@@ -70,6 +84,10 @@ export function alertRow(raw, { stageOf, stageComplete = true } = {}) {
 
   if (prem === null && size === null && trades === null) return null;
 
+  const start = alertStamp(raw.start_time);
+  const created = start === null ? alertStamp(raw.created_at) : null;
+  const spanStart = start ?? created;
+
   return {
     t,
     oc,
@@ -90,8 +108,9 @@ export function alertRow(raw, { stageOf, stageComplete = true } = {}) {
     ivStart: num(raw.iv_start),
     ivEnd: num(raw.iv_end),
     px: num(raw.underlying_price),
-    spanStart: typeof raw.start_time === "string" ? raw.start_time : null,
-    spanEnd: typeof raw.end_time === "string" ? raw.end_time : null,
+    spanStart,
+    spanEnd: alertStamp(raw.end_time) ?? created,
+    ...(created !== null ? { spanFrom: "created_at" } : {}),
     rule: typeof raw.alert_rule === "string" && raw.alert_rule ? raw.alert_rule : null,
 
     st: typeof stageOf === "function"
@@ -135,6 +154,7 @@ function coverageOf(rows) {
   return {
     withPremium: count((r) => r.prem !== null),
     withSpan: count((r) => r.spanStart !== null && r.spanEnd !== null),
+    spanFromCreated: count((r) => r.spanFrom === "created_at"),
     withContract: count((r) => r.cp !== null),
     sweeps: count((r) => r.sweep === true),
     opening: count((r) => r.opening === true),
@@ -240,7 +260,15 @@ export function mergeAlerts(prev, next, {
 
     if (thisRead.has(k)) continue;
     thisRead.add(k);
-    const prior = byKey.get(k);
+    let prior = byKey.get(k);
+    if (!prior && typeof row.spanStart === "string" && row.spanStart) {
+      const unspanned = alertKey({ ...row, spanStart: null });
+      const held = unspanned ? byKey.get(unspanned) : undefined;
+      if (held && !held.spanStart && !thisRead.has(unspanned)) {
+        prior = held;
+        byKey.delete(unspanned);
+      }
+    }
     if (prior) {
       again++;
       byKey.set(k, {
@@ -317,5 +345,29 @@ export function mergeAlerts(prev, next, {
       bytes,
       reset,
     },
+  };
+}
+
+export function nightlyAlerts(read, stored, { sessionDate = null, at = null, stageOf = null } = {}) {
+  if (stored && stored.failed) return { mode: "unverified", alerts: null, held: null };
+  const held = stored && !stored.absent && stored.payload && typeof stored.payload === "object"
+    ? stored.payload : null;
+  const record = held && held.record && typeof held.record === "object" ? held.record : null;
+  const day = record && typeof record.date === "string" ? record.date : null;
+  if (sessionDate && day && day > sessionDate) return { mode: "newer", alerts: null, held: null, day };
+  if (!sessionDate || day !== sessionDate) {
+    return { mode: "snapshot", alerts: read, held: null, readLimit: null, readTruncated: null };
+  }
+  const merged = read && read.status === "ok" && read.rows.length
+    ? mergeAlerts(held, read, { at, sessionDate })
+    : null;
+  if (!merged || !merged.rows.length) return { mode: "kept", alerts: null, held };
+  const stage = typeof stageOf === "function" ? stageOf : () => null;
+  return {
+    mode: "merged",
+    alerts: { ...merged, rows: merged.rows.map((r) => ({ ...r, st: stage(r.t) || "foreign" })) },
+    held,
+    readLimit: Number.isFinite(held.readLimit) ? held.readLimit : null,
+    readTruncated: typeof held.readTruncated === "boolean" ? held.readTruncated : null,
   };
 }

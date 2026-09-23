@@ -93,6 +93,8 @@ const truncated = cards.filter((c) =>
     volContext: 756, topContracts: 1044, __score: 1034,
 
     premiumTrack: 460, __sessions: 996,
+
+    variation: 994,
   };
   eq(Object.keys(PANEL_H).length, TICKER_PANELS.length,
      `the measured-height table covers every registry panel (${Object.keys(PANEL_H).length} ` +
@@ -282,9 +284,9 @@ const tickerSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-ticker.js"), 
 
 async function mount(page, card,
                      { ticker = null, boards = null, hash = "", events = null,
-                       html = null, station = "all" } = {}) {
+                       html = null, station = "all", meta = null } = {}) {
 
-  const installFetch = ({ card, boards, events }) => {
+  const installFetch = ({ card, boards, events, meta }) => {
     window.__requested = [];
     window.fetch = (url) => {
       window.__requested.push(String(url));
@@ -295,6 +297,8 @@ async function mount(page, card,
         ? card
         : u.includes("/api/flows/events")
           ? (events || { rows: [], status: "pending" })
+        : u.includes("/api/flows/meta")
+          ? (meta || { rows: [], status: "pending" })
           : (u.includes("side=long") ? (boards || { rows: [], status: "pending" })
                                      : { rows: [], status: "pending" });
       return Promise.resolve({
@@ -318,7 +322,7 @@ async function mount(page, card,
   await page.route("**/assets/js/flows-drawers.js*",
     (route) => route.fulfill({ contentType: "text/javascript", body: drawersSrc }));
   await page.goto(url);
-  await page.evaluate(installFetch, { card, boards, events });
+  await page.evaluate(installFetch, { card, boards, events, meta });
   await page.addStyleTag({ path: path.join(ROOT, "assets/css/base.css") });
   await page.addStyleTag({ path: path.join(ROOT, "assets/css/flows.css") });
   await page.addScriptTag({ content: panelsSrc });
@@ -689,6 +693,97 @@ try {
        "at scroll zero the hero is in view, so the bar does not repeat its identity while the name switcher stays reachable");
     ok(got.ivt.length >= 2 && got.ivt.slice(3).every((t) => /^\d+d$/.test(t)),
        `the term-structure ticks count days to expiry (${got.ivt.join(",")})`);
+    await page.waitForFunction(() => document.getElementById("ftGrid").classList.contains("is-packed"),
+      null, { timeout: 3000 }).catch(() => {});
+    const face = await page.evaluate(() => {
+      const words = (n) => n.textContent.trim().split(/\s+/).filter(Boolean).length;
+      const loud = [];
+      for (const panel of document.querySelectorAll(".ft-panel[data-panel]")) {
+        let n = 0;
+        for (const p of panel.querySelectorAll("p.fc-note")) {
+          if (p.closest("details:not([open])") || p.classList.contains("is-qualifier") ||
+              p.hasAttribute("data-empty")) continue;
+          n += words(p);
+        }
+        if (n > 60) loud.push(panel.dataset.panel + " " + n);
+      }
+      const bottoms = [...document.querySelectorAll(".ft-hero > .ft-hero-b:not([hidden]) > .ft-hero-v, .ft-hero > .ft-hero-px > .ft-hero-v")]
+        .map((v) => v.offsetTop + v.offsetHeight);
+      const grid = document.getElementById("ftGrid");
+      const stations = [...grid.querySelectorAll(".ft-station:not([hidden])")].map((st) =>
+        [...st.children].filter((n) => n.getClientRects().length).map((n) => n.getBoundingClientRect()));
+      const interleaved = stations.filter((rects, i) => i > 0 && rects.length && stations[i - 1].length &&
+        Math.min(...rects.map((r) => r.top)) < Math.max(...stations[i - 1].map((r) => r.bottom)) - 1).length;
+      const panels = [...grid.querySelectorAll(".ft-panel[data-panel]")].filter((n) => n.getClientRects().length)
+        .map((n) => n.getBoundingClientRect());
+      let overlaps = 0;
+      for (let i = 0; i < panels.length; i++) for (let j = i + 1; j < panels.length; j++) {
+        const a = panels[i], b = panels[j];
+        if (a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1) overlaps++;
+      }
+      const body = getComputedStyle(document.body);
+      const warm = ["--flow-flat", "--flow-mag", "--flow-mag-dim", "--flow-surface", "--panel-recessed",
+        "--table-head-glass"].map((k) => k + " " + body.getPropertyValue(k).trim())
+        .filter((t) => /#8a8571|#b7b298|#12110d|rgba\(13, 12, 9|rgba\(6, 6, 4/i.test(t));
+      return { loud, bottoms, packed: grid.classList.contains("is-packed"), interleaved, overlaps, warm };
+    });
+    eq(face.warm.length, 0,
+       `no Flows token still resolves to the pre-navy warm palette on the body that owns it ` +
+       `(${face.warm.join("; ")})`);
+    eq(face.loud.length, 0,
+       `no panel face carries more than sixty words of loose method notes — the method folds into ` +
+       `the panel's own disclosure, every qualifier and silence stays in the open (${face.loud.join(", ")})`);
+    ok(face.bottoms.length >= 3 && Math.max(...face.bottoms) - Math.min(...face.bottoms) <= 1,
+       `the hero values share one baseline whatever sits under each, measured on layout ` +
+       `rather than on the entrance animation's transform (${face.bottoms.join(", ")})`);
+    ok(face.packed, "at 1440px the panel grid is packed by measured row spans");
+    eq(face.overlaps, 0, "and no two packed panels overlap");
+    eq(face.interleaved, 0,
+       "and no station reaches up beside the one before it — a panel fills its own station's " +
+       "holes, never another's");
+    const moved = await page.evaluate(async () => {
+      const grid = document.getElementById("ftGrid");
+      const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const xs = () => new Map([...grid.querySelectorAll(".ft-panel[data-panel]")]
+        .filter((n) => n.getClientRects().length)
+        .map((n) => [n.dataset.panel, Math.round(n.getBoundingClientRect().left)]));
+      const out = [];
+      for (const how of grid.querySelectorAll(".ft-panel[data-panel] details.ft-how")) {
+        const before = xs();
+        how.open = true;
+        await frame(); await frame();
+        const after = xs();
+        for (const [k, x] of before) if (after.get(k) !== x) out.push(how.closest(".ft-panel").dataset.panel + " moved " + k);
+        how.open = false;
+        await frame(); await frame();
+      }
+      return { out, tried: grid.querySelectorAll(".ft-panel[data-panel] details.ft-how").length };
+    });
+    ok(moved.tried > 0 && moved.out.length === 0,
+       `opening any of ${moved.tried} "How to read this" disclosures moves no panel to another ` +
+       `column: the grid re-stacks under the reader rather than re-choosing columns (${moved.out.slice(0, 4).join("; ")})`);
+    await page.setViewportSize({ width: 2200, height: 900 });
+    await page.waitForFunction(() => {
+      const g = document.getElementById("ftGrid");
+      return g.classList.contains("is-packed") && getComputedStyle(g).gridTemplateColumns.split(" ").length === 5;
+    }, null, { timeout: 5000 }).catch(() => {});
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.waitForTimeout(700);
+    const shrunk = await page.evaluate(() => {
+      const g = document.getElementById("ftGrid");
+      const rects = [...g.querySelectorAll(".ft-station > *")].filter((n) => n.getClientRects().length)
+        .map((n) => n.getBoundingClientRect());
+      let overlaps = 0;
+      for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) {
+        const a = rects[i], b = rects[j];
+        if (a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1) overlaps++;
+      }
+      return { tracks: getComputedStyle(g).gridTemplateColumns.split(" ").length, overlaps };
+    });
+    eq(shrunk.tracks, 3,
+       `back at 1440px after the five-column tier the grid has its own three tracks, not five ` +
+       `kept alive as implicit columns by a stale placement (${shrunk.tracks})`);
+    eq(shrunk.overlaps, 0, "and nothing overlaps after the column count falls");
     await page.evaluate(() => {
       const s = document.getElementById("ftScroll");
       if (s && getComputedStyle(s).overflowY !== "visible") s.scrollTo({ top: 900, behavior: "instant" });
@@ -790,6 +885,16 @@ try {
        `THE RANK IS PICKED BY DATE, NOT BY INDEX — 73.4 on 2026-08-28 is the ` +
        `newest of three deliberately shuffled rows; 11.1 would mean rows[0] and ` +
        `44.4 would mean the last row (${r["IV rank"].text})`);
+
+    const edged = JSON.parse(JSON.stringify(base));
+    edged.panels.levels.levels[2] = { ...edged.panels.levels.levels[2], label: "Call wall (window edge)",
+      edge: "window", note: "this wall is the last strike of the ladder the run read, so the strike window ends here" };
+    const ew = await read(edged);
+    const edgeRow = ew && ew["Call wall (window edge)"];
+    ok(edgeRow && edgeRow.text === "$120.00 · +8.00 ATR" && /last strike of the ladder/.test(edgeRow.why) &&
+       !("Call wall" in ew),
+       "a wall on the last strike the run read (CSX 2026-09-21) is marked as the window's edge in key " +
+       `statistics too, with the reason on hover, not printed as where the book peaks (${edgeRow ? edgeRow.why : "absent"})`);
 
     const noFlip = JSON.parse(JSON.stringify(base));
     noFlip.gammaFlip = null;
@@ -1027,7 +1132,7 @@ try {
       ["aggressor", "calendar", "charm", "congress", "context", "darkpool",
         "deltaExposure", "displacement", "levels", "marketRank", "oiDeltas",
         "path", "pricedMove", "surface", "topContracts",
-        "vanna", "volContext"],
+        "vanna", "variation", "volContext"],
       `exactly the panels that publish a lead have a filled slot ` +
       `(${ones.map((p) => p.key).join(", ") || "none"})`); checks++;
 
@@ -1887,8 +1992,8 @@ try {
         if (typeof r.put === "number") legs++;
       }
       eq(got.bars, legs,
-         `${key}: one bar per PRESENT leg (${legs}), never one per expiry — the two legs ` +
-         `are never netted, because the vendor's put convention differs by Greek`);
+         `${key}: one bar per PRESENT leg (${legs}), never one per expiry — each leg is drawn ` +
+         `as the vendor signed it, and the dealer net is a separate figure beside them`);
       ok(got.calls > 0 && got.puts > 0,
          `${key}: both legs are drawn and told apart by class`);
       ok(got.negBelow,
@@ -1902,7 +2007,9 @@ try {
       ok(got.said.includes(panel.signConvention),
          `${key}: and its sign convention, which is why nothing here is a direction`);
       ok(/[Gg]ross size/.test(got.said),
-         `${key}: the total is labelled a SIZE — with two un-nettable legs it cannot be a direction`);
+         `${key}: the gross total is labelled a SIZE, never a direction`);
+      ok(/Dealer net, drawn \(call (\u2212|\+) put\)/.test(got.said),
+         `${key}: and the dealer net across the drawn expiries is printed with the rule that made it`);
     }
 
     const zeroed = JSON.parse(JSON.stringify(base));
@@ -1925,6 +2032,49 @@ try {
 
     eq(errors.length, 0, `the Greek ladders render without throwing (${errors.join("; ")})`);
     await page.close();
+  }
+
+  {
+    const staleOf = async (card, meta) => {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, card, { ticker: card.ticker, meta });
+      await page.waitForFunction(() => window.__requested.some((u) => u.includes("/api/flows/meta")),
+        null, { timeout: 6000 });
+      await page.waitForFunction(() => !document.getElementById("ftStale").hidden,
+        null, { timeout: 800 }).catch(() => {});
+      const out = await page.evaluate(() => {
+        const s = document.getElementById("ftStale");
+        return { hidden: s.hidden, text: s.textContent };
+      });
+      await page.close();
+      return { ...out, errors };
+    };
+    const base = JSON.parse(JSON.stringify(withChain[0]));
+    const session = base.sessionDate;
+    const at = (iso) => ({ ...base, generatedAt: iso });
+
+    const earlier = await staleOf(at(`${session}T14:02:18.489Z`),
+      { sessionDate: session, generatedAt: `${session}T17:18:54.000Z` });
+    ok(!earlier.hidden && /built by an earlier run of the \d{4}-\d{2}-\d{2} session/.test(earlier.text),
+       `UW-6: A CARD LEFT BY AN EARLIER RUN OF THE BOARD'S OWN SESSION IS FLAGGED — on ` +
+       `2026-09-21 23 cards from the 14:02 run sat under the 17:18 boards with no banner, ten of ` +
+       `them still marked depth "board" for boards they were no longer on (${earlier.text.slice(0, 90)}…)`);
+    eq(earlier.errors.length, 0, `and the banner costs no exception (${earlier.errors.join("; ")})`);
+
+    const same = await staleOf(at(`${session}T21:40:00.000Z`),
+      { sessionDate: session, generatedAt: `${session}T21:40:00.000Z` });
+    ok(same.hidden, "a card from the run that built the board carries no banner");
+
+    const later = await staleOf(at(`${session}T21:40:00.000Z`),
+      { sessionDate: session, generatedAt: `${session}T21:30:00.000Z` });
+    ok(later.hidden,
+       "nor does one written after the meta it is compared with — a run whose meta write failed " +
+       "must not flag its own cards");
+
+    const unstamped = await staleOf(at(`${session}T14:02:18.489Z`), { sessionDate: session });
+    ok(unstamped.hidden, "and a meta with no build time proves nothing, so it flags nothing");
   }
 
   {
@@ -2308,11 +2458,14 @@ try {
   }
 
   {
+    const lastTwoScored = (rows) => rows.length >= 2 &&
+      typeof rows[rows.length - 1].score === "number" && typeof rows[rows.length - 2].score === "number";
     const base = withChain.find((c) =>
       c.panels.scoreOverlay && c.panels.scoreOverlay.status === "ok" &&
       c.panels.scoreOverlay.rows.length >= 6 &&
-      typeof c.panels.scoreOverlay.deadBand === "number");
-    ok(base, "an emitted card carries a joined overlay with a published dead band");
+      typeof c.panels.scoreOverlay.deadBand === "number" &&
+      lastTwoScored(c.panels.scoreOverlay.rows));
+    ok(base, "an emitted card carries a joined overlay with a published dead band and two scored sessions at its end");
     const BAND = base.panels.scoreOverlay.deadBand;
 
     const page = await browser.newPage({ viewport: { width: 1280, height: 1200 } });
@@ -3613,6 +3766,11 @@ try {
         .find((f) => f && f.status === "quiet");
       ok(quiet, "the emitted corpus contains a name that is in no market-wide list");
       card.panels.marketRank.feeds.oiChange = JSON.parse(JSON.stringify(quiet));
+      const placed = withChain
+        .map((c) => c.panels.marketRank && c.panels.marketRank.feeds.darkpool)
+        .find((f) => f && f.status === "ok");
+      ok(placed, "and one that places in the dark-pool list, so the folded arm is the one under test");
+      card.panels.marketRank.feeds.darkpool = JSON.parse(JSON.stringify(placed));
 
       card.panels.marketRank.feeds.darkpool.sameSession = true;
       card.panels.marketRank.feeds.darkpool.asOfStated = true;
@@ -3851,6 +4009,32 @@ try {
        "unit are two different facts about the payload");
 
     eq(errors.length, 0, `the IV rank arms throw nothing (${errors.join("; ")})`);
+
+    const readBand = () => page.evaluate(() => {
+      const host = document.querySelector('.ft-panel[data-panel="pricedMove"] > div');
+      for (const stat of host.querySelectorAll(".fc-stat")) {
+        const dt = stat.querySelector("dt"), dd = stat.querySelector("dd");
+        if (dt.textContent.trim() === "Band") return dd.textContent.trim();
+      }
+      return null;
+    });
+    const band = async (over) => {
+      const c = JSON.parse(JSON.stringify(base));
+      Object.assign(c.panels.pricedMove, over);
+      await mount(page, c, { ticker: c.ticker });
+      return readBand();
+    };
+    eq(await band({ richness: "rich", vrp: 0.03087, rv30: 0.49813 }), "fair",
+       "A CARD BUILT BEFORE THE THREE-WAY BAND still stores 'rich' for AMAT's +6% of realised; the drawer " +
+       "derives the band from vrp/rv30 at the shared line, so it agrees with the Neuron row beside it");
+    eq(await band({ richness: "cheap", vrp: 0.1, rv30: 0.5 }), "rich", "the derivation wins in either direction");
+    eq(await band({ richness: "fair", vrp: -0.05, rv30: 0.5 }), "cheap", "and exactly at the line the band is cheap, as the card builder rules it");
+    eq(await band({ richness: "rich", vrp: null, rv30: 0.5 }), "rich",
+       "with no premium to divide the stored band is shown, not a guess");
+    eq(await band({ richness: "event-pinned", vrp: 0.1, rv30: 0.5 }), "event-pinned",
+       "a withheld verdict the builder published is never overwritten by the arithmetic it withheld");
+    eq(await band({ richness: null, vrp: null, rv30: null }), "—", "and no band at all is an em dash");
+    eq(errors.length, 0, `the band arms throw nothing (${errors.join("; ")})`);
     await page.close();
   }
 
@@ -4246,6 +4430,132 @@ try {
     ok(/8 robust · 10 fair · 3 weak · 3 withheld/.test(neuron.cov), "and counts each grade");
     eq(errors.length, 0, `the volatility, second-row and Neuron paints throw nothing (${errors.join("; ")})`);
     await page.close();
+  }
+
+  {
+    const card = JSON.parse(JSON.stringify(withChain.find((c) => c.panels.variation &&
+      c.panels.variation.status === "ok" && c.panels.variation.grid)));
+    ok(card, "an emitted card carries a hedging panel with its scenario grid");
+    const V = card.panels.variation;
+    for (const width of [320, 1280]) {
+      const page = await browser.newPage({ viewport: { width, height: 1400 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, card, { ticker: card.ticker, station: "convexity" });
+      const got = await page.evaluate(() => {
+        const s = document.querySelector('.ft-panel[data-panel="variation"]');
+        const host = s && s.querySelector(":scope > div");
+        const table = host && host.querySelector("table.fv-grid");
+        const right = s ? s.getBoundingClientRect().right : 0;
+        let worst = 0;
+        if (s) {
+          const walk = (n) => {
+            for (const c of n.children) {
+              if (c.closest(".fc-tablewrap") && c !== c.closest(".fc-tablewrap")) continue;
+              worst = Math.max(worst, c.getBoundingClientRect().right - right);
+              walk(c);
+            }
+          };
+          walk(s);
+        }
+        return {
+          there: !!host,
+          first: s ? s.parentElement.querySelector(".ft-panel[data-panel]") === s : false,
+          tier: s ? s.dataset.tier : null,
+          bars: host ? host.querySelectorAll("rect.fv-bar").length : 0,
+          caption: table && table.caption ? table.caption.textContent : null,
+          colHeads: table ? [...table.querySelectorAll("thead th[scope=col]")].length : 0,
+          rowHeads: table ? [...table.querySelectorAll("tbody th[scope=row]")].length : 0,
+          cells: table ? table.querySelectorAll("tbody td").length : 0,
+          silentCells: table ? table.querySelectorAll("tbody td[data-empty]").length : 0,
+          text: host ? host.textContent : "",
+          how: host ? !!host.querySelector("details.ft-how") : false,
+          spill: Math.round(worst),
+          sideways: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          height: s ? Math.round(s.getBoundingClientRect().height) : 0,
+          one: s ? (s.querySelector(":scope > .ft-panel-one") || {}).textContent : null,
+          strips: host ? host.querySelectorAll(".fv-strip").length : 0,
+          offsetNotes: host ? host.querySelectorAll(".fv-offset").length : 0,
+        };
+      });
+      ok(got.there, `${width}px: the hedging panel mounts`);
+      const negativeShare = V.variance && Object.values(V.variance.shares).some((x) => x !== null && x < 0);
+      eq(got.strips, V.variance && !negativeShare ? 1 : 0,
+         `${width}px: a part-of-whole bar is drawn only when every variance share is a part of the whole ` +
+         `(shares ${JSON.stringify(V.variance && V.variance.shares)})`);
+      eq(got.offsetNotes, negativeShare ? 1 : 0,
+         `${width}px: and when the channels offset, the panel says so instead of scaling the positive shares to fill a bar`);
+      ok(got.first && got.tier === "lead", `${width}px: it leads the Convexity station`);
+      ok(got.bars >= 1 && got.bars <= 3, `${width}px: one bar per channel with a reading (${got.bars})`);
+      ok(/hedge flow over the next session/.test(got.caption || ""),
+         `${width}px: the scenario grid is a real table with a caption ("${got.caption}")`);
+      eq(got.colHeads, 4, `${width}px: a corner header and three vol columns, each scope=col`);
+      eq(got.rowHeads, 5, `${width}px: five price rows, each a scope=row header`);
+      eq(got.cells, 15, `${width}px: fifteen cells`);
+      eq(got.silentCells, V.grid.cells.flat().filter((c) => c === null).length,
+         `${width}px: a silent cell is drawn as a silence, not as zero`);
+      ok(got.how, `${width}px: the conventions sit behind one disclosure`);
+      ok(/dealer-signed under the vendor's convention/.test(got.text),
+         `${width}px: which states the dealer assumption every figure rests on`);
+      eq(got.one, V.lead.say, `${width}px: the panel's one-line lead is the publisher's sentence verbatim`);
+      ok(got.spill <= 1, `${width}px: nothing in the panel spills past its right edge (${got.spill}px)`);
+      eq(got.sideways, 0, `${width}px: and the page does not scroll sideways`);
+      if (width === 1280) {
+        ok(Math.abs(got.height - 994) <= 150,
+           `the measured height (${got.height}px) is within reach of the table's figure, so the height ` +
+           "table stays a measurement rather than a guess");
+      }
+      eq(errors.length, 0, `${width}px: the hedging panel draws without throwing (${errors.join("; ")})`);
+      await page.close();
+    }
+
+    {
+      const wasNegative = Object.values(V.variance.shares).some((x) => x !== null && x < 0);
+      const other = JSON.parse(JSON.stringify(card));
+      other.panels.variation.variance.shares = wasNegative
+        ? { gamma: 0.7, vanna: 0.2, cross: 0.1 } : { gamma: 3.83, vanna: 1.07, cross: -3.9 };
+      const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+      await mount(page, other, { ticker: other.ticker, station: "convexity" });
+      const drawn = await page.evaluate(() => {
+        const host = document.querySelector('.ft-panel[data-panel="variation"] > div');
+        return { strips: host.querySelectorAll(".fv-strip").length, offset: host.querySelectorAll(".fv-offset").length,
+          stats: host.textContent };
+      });
+      eq(drawn.strips, wasNegative ? 1 : 0, "the other branch of the variance bar is drawn on a card built to reach it");
+      eq(drawn.offset, wasNegative ? 0 : 1, "and the offset note appears exactly when a share is below zero");
+      ok(wasNegative || /\+383%/.test(drawn.stats), "while the shares themselves are still printed, above one included");
+      await page.close();
+    }
+
+    const silent = JSON.parse(JSON.stringify(card));
+    silent.panels.variation.silences = [
+      { channel: "book", kind: "unavailable", code: "no-book", reason: "the open-interest book is not on this card" },
+      { channel: "vannaSize", kind: "quiet", code: "few-iv-changes", reason: "3 daily implied-volatility changes on the card; a vol-of-vol needs 20" },
+      { channel: "charm", kind: "pending", code: "kc-unmeasured", reason: "the charm scale is not yet published" },
+      { channel: "vanna", kind: "unreadable", code: "vanna-absent", reason: "the vanna leg could not be read" },
+    ];
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+    await mount(page, silent, { ticker: silent.ticker, station: "convexity" });
+    const words = await page.evaluate(() =>
+      [...document.querySelectorAll('.ft-panel[data-panel="variation"] .fv-silences li')]
+        .map((li) => ({ kind: li.getAttribute("data-empty"), text: li.textContent })));
+    assert.deepEqual(words.map((w) => w.kind), ["unavailable", "quiet", "pending", "unreadable"],
+      "each silence keeps its own kind — the product's four silences, never collapsed into one"); checks++;
+    ok(/^Unavailable — /.test(words[0].text) && /^Quiet — /.test(words[1].text) &&
+       /^Pending — /.test(words[2].text) && /^Unreadable — /.test(words[3].text),
+       "and says which one it is in words");
+    ok(/3 daily implied-volatility changes/.test(words[1].text), "with the publisher's reason verbatim");
+    await page.close();
+
+    const dead = JSON.parse(JSON.stringify(card));
+    dead.panels.variation = { status: "unavailable", reason: "neither the open-interest gamma book nor the day's flow ladder is on this card" };
+    const page2 = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+    await mount(page2, dead, { ticker: dead.ticker, station: "convexity" });
+    const deadText = await page2.evaluate(() =>
+      document.querySelector('.ft-panel[data-panel="variation"] [data-empty]').textContent);
+    ok(/^Unavailable — neither the open-interest gamma book/.test(deadText),
+       `a silent model draws its reason and no number (${deadText.slice(0, 70)})`);
+    await page2.close();
   }
 
 } finally {

@@ -279,7 +279,7 @@
     svg.append(axis);
 
     svg.setAttribute("aria-label",
-      `Net dealer gamma by strike for ${card.ticker}. ` +
+      `Gamma dealers added today, by strike, for ${card.ticker}. ` +
       (spot !== null ? `Spot ${px2(spot)}. ` : "") +
       (flip !== null ? `Gamma flip ${px2(flip)}. ` : "No gamma flip inside the drawn band. ") +
       `${panel.strikes} strikes drawn as ${bars.length} bars.`);
@@ -295,26 +295,27 @@
 
     leadReading(host,
       (flip !== null && !knowsSide
-        ? `The book changes sign at ${px2(flip)}.`
+        ? `Today's flow ladder changes sign at ${px2(flip)}.`
         : flip !== null
-        ? `Dealers are ${below} gamma immediately below ${px2(flip)} — ${amplifies(below)} — ` +
+        ? `Today's trading left dealers ${below} gamma immediately below ${px2(flip)} — ${amplifies(below)} — ` +
           `and ${above} immediately above it.`
-        : "Net gamma does not change sign materially inside the drawn band, so no flip " +
-          "level is published here.") +
+        : "The gamma added today does not change sign materially inside the drawn band, so no " +
+          "crossing is published here.") +
       (flip !== null && knowsSide && sep !== null
-        ? ` The thinner of the two sides carries ${(sep * 100).toFixed(0)}% of the book's peak ` +
+        ? ` The thinner of the two sides carries ${(sep * 100).toFixed(0)}% of the ladder's peak ` +
           `exposure, so this is a ${sep < 0.15 ? "weak" : sep < 0.4 ? "moderate" : "strong"} boundary.`
         : ""));
 
     leadReading(host, atSpot !== null
-      ? `Dealer gamma AT SPOT is ${Math.abs(atSpot).toFixed(2)} of this ladder's peak ` +
-        `exposure and ${atSpot < 0 ? "short" : "long"}, so the regime at spot is ` +
-        `${Math.abs(atSpot) >= 0.5 ? "close to as strong as this book gets" : "well inside its range"}.`
+      ? `Today's added gamma, summed up to spot, is ${Math.abs(atSpot).toFixed(2)} of this ladder's peak ` +
+        `and ${atSpot < 0 ? "short" : "long"}, ` +
+        `${Math.abs(atSpot) >= 0.5 ? "close to as strong as this ladder gets" : "well inside its range"}; ` +
+        "the standing book's net is on the hedging panel."
       : "Where spot sits in the cumulative is not published on this card.");
 
     if (window.FlowsCursor && bars.length) {
       window.FlowsCursor.attach(svg, {
-        name: "Dealer gamma by strike",
+        name: "Gamma dealers added today, by strike",
         axis: "y",
         band: { x0: plotL, x1: plotR },
         points: bars.map((b, i) => ({
@@ -334,8 +335,9 @@
 
     host.append(svg);
 
+    if (typeof panel.reads === "string" && panel.reads) host.append(qualifier(panel.reads));
     if (isNum(regime.crossings) !== null && regime.crossings > 1) {
-      host.append(qualifier(`The book crosses zero ${regime.crossings} times; this is the ` +
+      host.append(qualifier(`The ladder crosses zero ${regime.crossings} times; this is the ` +
         `one separating the most exposure.`));
     }
     if (flip !== null && !knowsSide) {
@@ -350,7 +352,7 @@
     }
     if (isNum(regime.bandMin) !== null && isNum(regime.bandMax) !== null) {
       host.append(qualifier(`Measured over strikes ${px2(regime.bandMin)}–${px2(regime.bandMax)} ` +
-        `only, so this is net dealer gamma inside that band, not the whole book.`));
+        `only, so this is the gamma added today inside that band, not the whole ladder.`));
     }
 
     appendMethod(host, [
@@ -454,8 +456,10 @@
       "between their gamma-weighted centroids — is what turns a static regime reading " +
       "into a statement that the regime is moving, and which way. The gap is measured " +
       "in ATR so it compares across names: half a point means one thing in a $9 stock " +
-      "and another in a $900 one. This is descriptive; it enters the score through the " +
-      "positioning axis, which is the only signed thing the gamma block contributes.")],
+      "and another in a $900 one. This is descriptive and does not enter the score: " +
+      "both centroids weigh calls and puts by magnitude, so buying and selling at the " +
+      "same strikes move the gap alike, and a reading that cannot tell who initiated " +
+      "cannot vote on a direction until it is signed and its per-session IC is measured.")],
       "How this gap is measured");
   }
 
@@ -685,7 +689,7 @@
     }
 
     svg.setAttribute("aria-label",
-      `Dealer gamma by strike and expiry` + (card && card.ticker ? ` for ${card.ticker}` : "") + `. ` +
+      `Gamma dealers added today, by strike and expiry` + (card && card.ticker ? `, for ${card.ticker}` : "") + `. ` +
       `${strikes.length} strikes from ${px2(lo)} to ${px2(hi)} across ${expiries.length} expiries ` +
       `from ${expiries[0]} to ${expiries[expiries.length - 1]}. ` +
       (s !== null ? `Spot ${px2(s)}. ` : "") +
@@ -711,8 +715,8 @@
       claim(callRow, "Call wall");
       claim(putRow, "Put wall");
       window.FlowsCursor.attach(svg, {
-        name: "Dealer gamma by strike and expiry" +
-          (card && card.ticker ? " for " + card.ticker : ""),
+        name: "Gamma dealers added today, by strike and expiry" +
+          (card && card.ticker ? ", for " + card.ticker : ""),
         band: { y0: padT, y1: padT + strikes.length * rowH },
         points: expiries.map((e, j) => {
 
@@ -766,7 +770,11 @@
         (peakAt.v < 0 ? " short" : " long")]);
     }
     const regime = card && card.regime && card.regime.label;
-    if (regime) pairs.push(["Regime", String(regime).replace(/_/g, " ")]);
+    const regimeFrom = card && card.regime ? card.regime.labelFrom : null;
+    if (regime) {
+      pairs.push([regimeFrom === "book" ? "Open-interest book" : regimeFrom === "flow" ? "Added today, net" : "Regime",
+        String(regime).replace(/_/g, " ")]);
+    }
     host.append(statList(pairs));
 
     const notes = [];
@@ -893,6 +901,18 @@
 
   const IV_RANK_TERM = "IV rank, percentile of its own year";
 
+  const RICHNESS_LINE = 0.1;
+
+  function richnessBand(panel) {
+    const stored = typeof panel.richness === "string" && panel.richness ? panel.richness : null;
+    if (stored !== null && stored !== "rich" && stored !== "cheap" && stored !== "fair") return stored;
+    const vrp = isNum(panel.vrp);
+    const rv = isNum(panel.rv30);
+    if (vrp === null || rv === null || !(rv > 0)) return stored;
+    const rel = vrp / rv;
+    return rel >= RICHNESS_LINE ? "rich" : rel <= -RICHNESS_LINE ? "cheap" : "fair";
+  }
+
   function ivRankStat(panel) {
     const n = isNum(panel.ivRank);
     if (n === null) {
@@ -925,7 +945,10 @@
     const quoted = isNum(panel.movePerc);
     const sessions = isNum(panel.sessions) ?? 10;
 
-    const widest = Math.max(imp ?? 0, real ?? 0, quoted ?? 0);
+    const lowPx = isNum(panel.impliedLow), highPx = isNum(panel.impliedHigh);
+    const downLog = imp !== null && lowPx !== null && lowPx > 0 && spot > 0 ? Math.log(spot / lowPx) : imp;
+    const upLog = imp !== null && highPx !== null && spot > 0 ? Math.log(highPx / spot) : imp;
+    const widest = Math.max(imp ?? 0, downLog ?? 0, upLog ?? 0, real ?? 0, quoted ?? 0);
     if (!(widest > 0) || spot === null) {
       return quietPanel(host, question, "no band could be measured");
     }
@@ -942,9 +965,9 @@
     });
 
     if (imp !== null) {
-      const h = halfOf(imp);
-      svg.append(svgEl("rect", { class: "pm-band is-implied", x: mid - h, y: 34, width: h * 2, height: 30, rx: 3 }));
-      for (const [x, txt] of [[mid - h, px2(panel.impliedLow)], [mid + h, px2(panel.impliedHigh)]]) {
+      const hL = halfOf(downLog), hH = halfOf(upLog);
+      svg.append(svgEl("rect", { class: "pm-band is-implied", x: mid - hL, y: 34, width: hL + hH, height: 30, rx: 3 }));
+      for (const [x, txt] of [[mid - hL, px2(panel.impliedLow)], [mid + hH, px2(panel.impliedHigh)]]) {
         const t = svgEl("text", { class: "pm-lab", x, y: 26, "text-anchor": "middle" });
         t.textContent = txt;
         svg.append(t);
@@ -1017,14 +1040,16 @@
       ["Realized vol, 21 sessions", vol1(panel.rv30)],
       ["Variance risk premium",
         fmtOr(panel.vrp, (n) => signed(n, (a) => (a * 100).toFixed(1) + " vol pts"))],
-      ["Band", panel.richness === null ? DASH : panel.richness],
+      ["Band", richnessBand(panel) || DASH],
       ivRankStat(panel),
       ["IV, past week",
         fmtOr(panel.ivMomentum, (n) => signed(n, (a) => (a * 100).toFixed(1) + " vol pts"))],
     ]));
 
     host.append(qualifier("THIS IS A PRICE, NOT A FORECAST."));
-    appendMethod(host, [el("p", "fc-note",
+    appendMethod(host, [
+      ...(typeof panel.bandNote === "string" && panel.bandNote ? [el("p", "fc-note", panel.bandNote)] : []),
+      el("p", "fc-note",
       `The wide band is 30-day implied volatility ` +
       `scaled to ${sessions} trading sessions by the square-root-of-time rule, which ` +
       `is exact whenever successive returns are uncorrelated — no fitted parameter, ` +
@@ -1569,7 +1594,7 @@
 
     if (window.FlowsCursor && rows.length) {
       window.FlowsCursor.attach(svg, {
-        name: "Dealer exposure along the term",
+        name: "Open-interest exposure along the term, legs as the vendor signs them",
         band: { y0: padT, y1: padT + plotH },
         points: rows.map((r, i) => {
           const leg = (v) => (v === null
@@ -1583,6 +1608,8 @@
             rows: [
               { k: "Call leg", v: c.v, cls: c.cls },
               { k: "Put leg", v: p2.v, cls: p2.cls },
+              { k: "Dealer net" + (panel.dealerRule ? " (" + panel.dealerRule + ")" : ""),
+                v: isNum(r.dealer) === null ? "not netted" : compact(r.dealer), cls: polarity(r.dealer) },
             ],
           };
         }),
@@ -1591,12 +1618,18 @@
 
     host.append(svg);
 
+    const netted = rows.filter((r) => isNum(r.dealer) !== null);
+    const dealerSum = netted.reduce((a, r) => a + r.dealer, 0);
     host.append(statList([
       ["Expiries", String(rows.length) +
         (isNum(panel.seen) !== null && panel.seen !== rows.length
           ? " of " + panel.seen + " read" : "")],
       ["Largest leg", compact(peak)],
       ["Gross size", compact(panel.grossAbs)],
+      ["Dealer net, drawn" + (panel.dealerRule ? " (" + panel.dealerRule + ")" : ""),
+        netted.length ? compact(dealerSum) : DASH, netted.length ? polarity(dealerSum) : "is-null",
+        netted.length ? null : "unavailable", netted.length ? null
+          : (typeof panel.dealerWhy === "string" && panel.dealerWhy ? panel.dealerWhy : "no expiry carries both legs")],
     ]));
 
     if (panel.unit) host.append(el("p", "fc-note gts-unit", String(panel.unit)));
@@ -1609,6 +1642,228 @@
         " read and not drawn: the ladder is capped at " + panel.cap + " so the far " +
         "months cannot squeeze the front weeks into a single pixel."));
     }
+  }
+
+  const SILENCE_WORD = {
+    pending: "Pending", unreadable: "Unreadable", quiet: "Quiet", unavailable: "Unavailable",
+  };
+
+  function hedgeWord(v) {
+    const n = isNum(v);
+    if (n === null) return DASH;
+    return n === 0 ? "no trade" : (n > 0 ? "dealers buy " : "dealers sell ") + money(Math.abs(n));
+  }
+
+  function shareOfDay(v) {
+    const n = isNum(v);
+    return n === null ? "" : " · " + (Math.abs(n) * 100).toFixed(2) + "% of a day";
+  }
+
+  function renderVariation(host, panel, card, questionIn) {
+    const question = questionIn ||
+      "Over the next session, how much stock would dealers trade to stay hedged, and how much comes from spot, volatility and time?";
+    if (!panel || panel.status !== "ok") return emptyPanel(host, question, panel);
+    panelHead(host, question);
+
+    const ch = panel.channels || {};
+    const inputs = panel.inputs || {};
+    const silences = Array.isArray(panel.silences) ? panel.silences : [];
+    const silenceOf = (channel) => silences.find((s) => s && s.channel === channel) || null;
+
+    const bars = [];
+    if (ch.gamma && isNum(ch.gamma.perSigma) !== null) {
+      bars.push({ key: "gamma", label: ch.gamma.source === "book" ? "Spot, +1 SD" : "Spot, +1 SD (added today only)",
+        flow: -ch.gamma.perSigma, pctAdv: isNum(ch.gamma.pctAdv) === null ? null : -ch.gamma.pctAdv, hatched: false });
+    }
+    if (ch.vanna && isNum(ch.vanna.perSigma) !== null) {
+      bars.push({ key: "vanna", label: "Volatility, +1 SD", flow: -ch.vanna.perSigma,
+        pctAdv: isNum(ch.vanna.pctAdvPerSigma) === null ? null : -ch.vanna.pctAdvPerSigma, hatched: false });
+    } else if (ch.vanna && isNum(ch.vanna.perPoint) !== null) {
+      bars.push({ key: "vanna", label: "Volatility, +1 point", flow: -ch.vanna.perPoint,
+        pctAdv: isNum(ch.vanna.pctAdvPerPoint) === null ? null : -ch.vanna.pctAdvPerPoint, hatched: true });
+    }
+    if (ch.charm && isNum(ch.charm.hedge) !== null) {
+      bars.push({ key: "charm", label: "Time, one session", flow: ch.charm.hedge,
+        pctAdv: isNum(ch.charm.pctAdv) === null ? null : -ch.charm.pctAdv, hatched: false });
+    }
+
+    if (bars.length) {
+      const W = panelWidth(host), ROW = 30, padL = 150, padR = 12, padT = 6;
+      const H = padT + bars.length * ROW + 8;
+      const mid = padL + (W - padL - padR) / 2;
+      const half = (W - padL - padR) / 2;
+      const peak = bars.reduce((m, b) => Math.max(m, Math.abs(b.flow)), 0) || 1;
+      const svg = svgEl("svg", {
+        class: "fv-bars", viewBox: `0 0 ${W} ${H}`, width: "100%", height: H,
+        role: "img", preserveAspectRatio: "xMidYMid meet",
+      });
+      svg.append(svgEl("line", { class: "gts-zero", x1: mid, x2: mid, y1: padT, y2: H - 4 }));
+      bars.forEach((b, i) => {
+        const y = padT + i * ROW;
+        const w = Math.max(1, Math.abs(b.flow) / peak * half);
+        const x = b.flow < 0 ? mid - w : mid;
+        const rect = svgEl("rect", {
+          class: "fv-bar gp-bar " + polarity(b.flow) + (b.hatched ? " is-hatched" : ""),
+          x, y: y + 6, width: w, height: ROW - 14,
+        });
+        rect.append(svgEl("title", {}));
+        rect.firstChild.textContent = b.label + ": " + hedgeWord(b.flow) + shareOfDay(b.pctAdv) +
+          (b.hatched ? ". Per vol point: the size of a typical vol move is silent on this card." : ".");
+        svg.append(rect);
+        const lab = svgEl("text", { class: "gc-exp", x: padL - 8, y: y + ROW / 2 + 3, "text-anchor": "end" });
+        lab.textContent = b.label;
+        svg.append(lab);
+      });
+      svg.setAttribute("aria-label", "Hedge flow by source, dealers buying to the right and selling to the left. " +
+        bars.map((b) => b.label + ": " + hedgeWord(b.flow) + shareOfDay(b.pctAdv)).join("; ") + ".");
+      host.append(svg);
+      host.append(statList(bars.map((b) => [b.label, hedgeWord(b.flow) + shareOfDay(b.pctAdv),
+        polarity(b.flow)])));
+    }
+
+    const v = panel.variance;
+    if (v && v.shares) {
+      const sh = v.shares;
+      const parts = [["gamma", "Spot", sh.gamma], ["vanna", "Volatility", sh.vanna], ["cross", "Co-movement", sh.cross]];
+      const offset = parts.some((p) => isNum(p[2]) !== null && p[2] < 0);
+      if (offset) {
+        host.append(el("p", "fc-note fv-offset", "The spot and volatility channels offset each other, so their " +
+          "shares exceed the whole and the co-movement share is below zero; no part-of-whole bar is drawn."));
+      } else {
+        const strip = el("div", "fv-strip");
+        strip.setAttribute("role", "img");
+        const whole = parts.reduce((a, p) => a + (isNum(p[2]) !== null ? p[2] : 0), 0) || 1;
+        for (const [key, label, value] of parts) {
+          const n = isNum(value);
+          if (n === null || !(n > 0)) continue;
+          const seg = el("span", "fv-seg is-" + key);
+          seg.style.flexGrow = String(n / whole);
+          seg.title = label + " " + Math.round(n * 100) + "% of the variance";
+          strip.append(seg);
+        }
+        strip.setAttribute("aria-label", parts.map(([, label, value]) =>
+          label + " " + (isNum(value) === null ? "silent" : Math.round(value * 100) + "%")).join(", ") + " of the variance.");
+        host.append(strip);
+      }
+      host.append(statList(parts.map(([key, label, value]) => {
+        const n = isNum(value);
+        const s = n === null ? silenceOf(key === "gamma" ? "variance" : "vannaSize") : null;
+        return [label + " share", n === null ? DASH : signed(n, (a) => Math.round(a * 100) + "%"),
+          n === null ? "is-null" : null, n === null ? (s ? s.kind : "unavailable") : null,
+          n === null && s ? s.reason : null];
+      })));
+      if (isNum(v.driftInSd) !== null) {
+        host.append(el("p", "fc-note fv-drift", "The time drift is " + Math.abs(v.driftInSd).toFixed(1) +
+          " standard deviations of the random part (" + (v.driftInSd < 0 ? "dealers buy" : v.driftInSd > 0 ? "dealers sell" : "no trade") +
+          " as time passes)."));
+      }
+    }
+
+    const g = panel.grid;
+    if (g && Array.isArray(g.rows) && Array.isArray(g.cols) && Array.isArray(g.cells)) {
+      const wrap = el("div", "fc-tablewrap");
+      const table = el("table", "fc-levels fv-grid");
+      table.append(el("caption", null,
+        "Dealer hedge flow over the next session, by spot move (rows) and implied-volatility move (columns)"));
+      const thead = el("thead");
+      const hr = el("tr");
+      const corner = el("th", null, "Price / vol");
+      corner.scope = "col";
+      hr.append(corner);
+      for (const col of g.cols) {
+        const th = el("th", "c-num", (isNum(col.vol) === null ? DASH : vol1(col.vol)) +
+          (col.kV === 0 ? " (now)" : col.kV > 0 ? " (+1 SD)" : " (−1 SD)"));
+        th.scope = "col";
+        hr.append(th);
+      }
+      thead.append(hr);
+      table.append(thead);
+      const tbody = el("tbody");
+      g.rows.forEach((r, i) => {
+        const tr = el("tr");
+        const th = el("th", "c-num", (isNum(r.price) === null ? DASH : px2(r.price)) +
+          (r.kS === 0 ? " (spot)" : " (" + (r.kS > 0 ? "+" : "−") + Math.abs(r.kS) + " SD)") +
+          (r.linear ? " · linear approximation" : ""));
+        th.scope = "row";
+        tr.append(th);
+        (g.cells[i] || []).forEach((cell) => {
+          const td = el("td", "c-num");
+          if (!cell || isNum(cell.flow) === null) {
+            td.textContent = DASH;
+            td.setAttribute("data-empty", "unavailable");
+            td.title = g.volSilent || "silent on this card";
+          } else {
+            td.textContent = signed(cell.flow, (a) => "$" + compact(a)) +
+              (isNum(cell.pctAdv) === null ? "" : " · " + signed(cell.pctAdv, (a) => (a * 100).toFixed(2) + "%"));
+            td.className = "c-num " + polarity(cell.flow);
+          }
+          tr.append(td);
+        });
+        tbody.append(tr);
+      });
+      table.append(tbody);
+      wrap.append(table);
+      host.append(wrap);
+    }
+
+    if (inputs.rollOff && isNum(inputs.rollOff.dollars) !== null) {
+      host.append(el("p", "fc-note fv-rolloff", "Delta held in options that expire before the next session: " +
+        money(inputs.rollOff.dollars) + " across " + inputs.rollOff.expiries + " expir" +
+        (inputs.rollOff.expiries === 1 ? "y" : "ies") + ". Context, not a flow: options in the money are exercised " +
+        "into stock rather than unwound through the market."));
+    }
+
+    if (silences.length) {
+      const list = el("ul", "fv-silences");
+      for (const s of silences) {
+        const li = el("li");
+        li.setAttribute("data-empty", s.kind || "unavailable");
+        li.append(el("strong", null, (SILENCE_WORD[s.kind] || "Unavailable") + " — "));
+        li.append(document.createTextNode(String(s.reason || "no reading").replace(/\.+$/, "") + "."));
+        list.append(li);
+      }
+      host.append(list);
+    }
+
+    host.append(statList([
+      ["Spot sigma, one session", isNum(inputs.sigmaDaily) === null ? DASH
+        : (inputs.sigmaDaily * 100).toFixed(2) + "% · $" + fmtOr(inputs.sigmaDollars, (n) => n.toFixed(2)) +
+          (inputs.sigmaSource === "garch" ? " (GARCH)" : " (realized)")],
+      ["Implied, one session", isNum(inputs.impliedDaily) === null ? DASH : (inputs.impliedDaily * 100).toFixed(2) + "%"],
+      ["Vol of vol", isNum(inputs.sigmaV) === null ? DASH : inputs.sigmaV.toFixed(2) + " pts/day, correlation with spot " + fmtOr(inputs.rho, (n) => neg(n.toFixed(2)))],
+      ["Typical day", money(inputs.adv)],
+      ["Book gamma, per 1%", money(inputs.gammaBook)],
+      ["Added today, per 1%", money(inputs.gammaFlow)],
+      ["Dealer delta", money(inputs.deltaDollars)],
+    ]));
+
+    const c = panel.conventions || {};
+    const notes = [];
+    notes.push(el("p", "fc-note", "Every figure is " + (c.dealer || "dealer-signed under the vendor's convention") +
+      ". Hedge flow is minus the change in dealer option delta: a positive figure means dealers buy stock."));
+    if (c.putToDealer) {
+      notes.push(el("p", "fc-note", "Put legs enter the dealer net as call + put for gamma and call − put for delta" +
+        (c.putToDealer.vanna === null ? "; vanna is not netted this run" : ", vanna") +
+        (c.putToDealer.charm === null ? "; charm is not netted this run" : c.putToDealer.charm > 0 ? "; charm as call + put, as the run's probe found it" : " and charm") + "."));
+    }
+    if (c.kc) {
+      notes.push(el("p", "fc-note", "Charm per calendar day is the vendor's field over " + fmtOr(c.kc.value, (n) => n.toFixed(1)) +
+        ", a scale measured across " + fmtOr(c.kc.n, (n) => String(n)) + " expiry readings this run (" + (c.kc.status || "unmeasured") + ")."));
+    }
+    if (c.unit) {
+      notes.push(el("p", "fc-note", "Unit family: " + (c.unit.used === "pct$" ? "dollars per 1% move" : "share-delta") +
+        (c.unit.source ? " — " + c.unit.source : "") + "."));
+    }
+    if (c.vannaScale) {
+      notes.push(el("p", "fc-note", "Vanna scale against the option chain: " + (c.vannaScale.status || "unmeasured") +
+        (isNum(c.vannaScale.ratio) === null ? "" : ", vendor over Black-Scholes " + c.vannaScale.ratio.toFixed(2)) +
+        (isNum(c.vannaScale.n) === null ? "" : " across " + c.vannaScale.n + " names") + "."));
+    }
+    if (c.nets) notes.push(el("p", "fc-note", "Nets summed over " + c.nets + "."));
+    for (const text of Object.values(c.statements || {})) {
+      if (typeof text === "string" && text) notes.push(el("p", "fc-note", text));
+    }
+    appendMethod(host, notes, "Conventions and assumptions", true);
   }
 
   function renderPremiumTrack(host, panel, card, questionIn) {
@@ -1739,7 +1994,7 @@
 
     host.append(el("p", "fc-note is-qualifier",
       "Each bar is one session's net premium — call premium minus put premium, in " +
-      "dollars, as the board published it that morning. The sign is the reading; " +
+      "dollars, as the board published it for that session. The sign is the reading; " +
       "the bars are drawn against a common scale so the two sides are comparable " +
       "by height." +
       (gaps
@@ -1752,7 +2007,7 @@
     appendMethod(host, [
       "The history is read out of the dated archive: the session's own score key where " +
       "one was written, and the archived boards for every session before that. Both " +
-      "carry the same figure the board published that morning, so this window is as " +
+      "carry the same figure the board published for that session, so this window is as " +
       "long as the archive is, not as long as the field is old.",
       "A session reconstructed from the boards alone covers only the names that MADE a " +
       "board that day, so a gap in the older half of a window is more often a name " +
@@ -1772,12 +2027,13 @@
     path: renderPath,
     premiumTrack: renderPremiumTrack,
     congress: renderCongress,
+    variation: renderVariation,
 
     vanna: (host, panel, card, q) => greekTermPanel(host, panel, q,
-      "How much dealer delta moves on a one-point change in implied volatility, by expiry?"),
+      "How does open-interest delta move with implied volatility, by expiry?"),
     charm: (host, panel, card, q) => greekTermPanel(host, panel, q,
-      "How fast is dealer delta decaying with time alone, by expiry?"),
+      "How fast does open-interest delta decay with time alone, by expiry?"),
     deltaExposure: (host, panel, card, q) => greekTermPanel(host, panel, q,
-      "How much directional exposure are dealers carrying, by expiry?"),
+      "How much delta does open interest carry along the term, each leg as the vendor signs it?"),
   });
 })();

@@ -7,22 +7,28 @@ import {
   crossFamilyRedundancy, qualityGate, percentileRank, realizedVol,
   isLiveColumn, pearson, SCORE_SCALE, horizonMove, HORIZON_SESSIONS,
   boundedScore, conviction, applyHysteresis, callGammaLeg, putGammaLeg,
+  openInterestGammaBook, strikeBookPutSign,
 } from "../shared/flows-features.js";
+import {
+  conventionProbe, estimateKc, unitFamily, vannaScale, chainCallVanna, nextSessionAfter,
+  blackScholesGreeks, variation, variationSummary, scoreVarianceShares, VARIATION_LINES,
+  VARIATION_CODES,
+} from "../shared/flows-variation.js";
 import {
   buildCard, SURFACE_EXPIRIES, indexMarketCross, CROSS_FEEDS,
 } from "../shared/flows-card.js";
 import { tradingCalendar, scoreSessions, icTable, RECORD_NOTES } from "../shared/flows-record.js";
 import { makePermitQueue } from "../shared/flows-permits.js";
 import { fitGarch } from "../shared/flows-garch.js";
-import { buildChainPanels, CHAIN_PAGE_SIZE, SKEW_MIN_DAYS, summariseSkewMisses }
+import { buildChainPanels, CHAIN_PAGE_SIZE, CHAIN_MAX_PAGES, mergeChainPages, SKEW_MIN_DAYS, summariseSkewMisses }
   from "../shared/flows-chain.js";
 import {
-  rankUnusual, rankUnusualNames, describeOiBasis,
+  rankUnusual, rankUnusualNames, describeOiBasis, poolOiBasis,
   UA_MIN_VOLUME, UA_MIN_OI, UNUSUAL_NOTES,
 } from "../shared/flows-unusual.js";
 import { buildEvents, EVENTS_NOTES } from "../shared/flows-events.js";
 import { scoresRows, buildScoreTrack, boardsToScoreRows } from "../shared/flows-scores.js";
-import { buildFlowAlerts, ALERT_ROWS, alertBand } from "../shared/flows-alerts.js";
+import { buildFlowAlerts, ALERT_ROWS, alertBand, nightlyAlerts } from "../shared/flows-alerts.js";
 import { buildPulse, PULSE_FEEDS, PULSE_CAPS } from "../shared/flows-pulse.js";
 import {
 
@@ -41,7 +47,7 @@ const EMIT = process.argv.includes("--emit")
   ? process.argv[process.argv.indexOf("--emit") + 1]
   : null;
 
-const BASE = "https://api.unusualwhales.com";
+const BASE = process.env.FLOWS_UW_BASE_URL || "https://api.unusualwhales.com";
 
 function ingestURL() {
   return process.env.FLOWS_INGEST_URL || "https://anilkaya.org/api/flows/ingest";
@@ -79,11 +85,20 @@ export const RATE = {
   floorCeilingMs: 750,
 };
 
-export const CALL_BUDGET = 1250;
+export const CALL_BUDGET = 1350;
 
 export const EARNINGS_GATE_DAYS = 12;
 
 export const SCREENER_PAGE_ROWS = 50;
+
+export const SCREENER_SPLIT_DEPTH = 2;
+
+export const SESSION_OPEN_MINUTES = 9 * 60 + 30;
+export const SESSION_CLOSE_MINUTES = 16 * 60;
+
+export const PIPELINE_CADENCE =
+  "once per weekday after the close, at 21:30 UTC — 17:30 America/New_York in " +
+  "summer, 16:30 in winter";
 
 export const DEEP_NAMES = 50;
 
@@ -488,33 +503,42 @@ function eligible(row) {
 }
 
 function screenerTilt(row) {
-  const bull = num(row.bullish_premium);
-  const bear = num(row.bearish_premium);
-  const netCall = num(row.net_call_premium);
-  const netPut = num(row.net_put_premium);
+  const both = (a, b) => a !== null && b !== null;
+  const bull = vendorNum(row.bullish_premium);
+  const bear = vendorNum(row.bearish_premium);
+  const netCall = vendorNum(row.net_call_premium);
+  const netPut = vendorNum(row.net_put_premium);
 
-  const gross = Math.abs(bull) + Math.abs(bear);
+  const gross = both(bull, bear) ? Math.abs(bull) + Math.abs(bear) : 0;
   const premiumTilt = gross > 0 ? (bull - bear) / gross : null;
 
-  const grossPremium = Math.abs(num(row.call_premium)) + Math.abs(num(row.put_premium));
-  const netTilt = grossPremium > 0 ? (netCall - netPut) / grossPremium : null;
+  const callPrem = vendorNum(row.call_premium);
+  const putPrem = vendorNum(row.put_premium);
+  const grossPremium = both(callPrem, putPrem) ? Math.abs(callPrem) + Math.abs(putPrem) : 0;
+  const netTilt = both(netCall, netPut) && grossPremium > 0
+    ? (netCall - netPut) / grossPremium : null;
 
-  const callSurprise = num(row.avg_30_day_call_volume) > 0
-    ? num(row.call_volume) / num(row.avg_30_day_call_volume) : null;
-  const putSurprise = num(row.avg_30_day_put_volume) > 0
-    ? num(row.put_volume) / num(row.avg_30_day_put_volume) : null;
+  const callVol = vendorNum(row.call_volume);
+  const putVol = vendorNum(row.put_volume);
+  const callAvg = vendorNum(row.avg_30_day_call_volume);
+  const putAvg = vendorNum(row.avg_30_day_put_volume);
+  const callSurprise = callVol !== null && callAvg > 0 ? callVol / callAvg : null;
+  const putSurprise = putVol !== null && putAvg > 0 ? putVol / putAvg : null;
 
-  const callOiChange = num(row.call_open_interest) - num(row.prev_call_oi);
-  const putOiChange = num(row.put_open_interest) - num(row.prev_put_oi);
-  const oiBase = num(row.total_open_interest) ||
-    (num(row.call_open_interest) + num(row.put_open_interest));
+  const callOi = vendorNum(row.call_open_interest);
+  const putOi = vendorNum(row.put_open_interest);
+  const prevCallOi = vendorNum(row.prev_call_oi);
+  const prevPutOi = vendorNum(row.prev_put_oi);
+  const oiBase = vendorNum(row.total_open_interest) ||
+    (both(callOi, putOi) ? callOi + putOi : 0);
+  const oiTilt = both(callOi, prevCallOi) && both(putOi, prevPutOi) && oiBase > 0
+    ? ((callOi - prevCallOi) - (putOi - prevPutOi)) / oiBase : null;
 
-  const callVol = num(row.call_volume);
-  const putVol = num(row.put_volume);
-  const volBase = callVol + putVol;
-  const volTilt = volBase > 0
-    ? ((num(row.call_volume_ask_side) - num(row.call_volume_bid_side)) -
-       (num(row.put_volume_ask_side) - num(row.put_volume_bid_side))) / volBase
+  const legs = [row.call_volume_ask_side, row.call_volume_bid_side,
+    row.put_volume_ask_side, row.put_volume_bid_side].map(vendorNum);
+  const volBase = both(callVol, putVol) ? callVol + putVol : 0;
+  const volTilt = legs.every((v) => v !== null) && volBase > 0
+    ? ((legs[0] - legs[1]) - (legs[2] - legs[3])) / volBase
     : null;
 
   const iv30 = num(row.iv30d, NaN);
@@ -524,7 +548,7 @@ function screenerTilt(row) {
     volTilt,
     surpriseTilt: (callSurprise === null || putSurprise === null)
       ? null : Math.log((callSurprise + 0.1) / (putSurprise + 0.1)),
-    oiTilt: oiBase > 0 ? (callOiChange - putOiChange) / oiBase : null,
+    oiTilt,
 
     iv30: Number.isFinite(iv30) ? iv30 : null,
     ivMomentum: Number.isFinite(iv30) ? iv30 - num(row.iv30d_1w, NaN) : null,
@@ -547,8 +571,8 @@ function screenerTilt(row) {
 
 function ivRankFraction(raw) {
   const v = num(raw, NaN);
-  if (!Number.isFinite(v) || v < 0) return NaN;
-  return v > 1 ? v / 100 : v;
+  if (!Number.isFinite(v) || v < 0 || v > 100) return NaN;
+  return v / 100;
 }
 
 function daysToEarnings(row, origin) {
@@ -559,22 +583,96 @@ function daysToEarnings(row, origin) {
   return Math.round((t - from) / 86400000);
 }
 
-async function verifyDating(sessionDate) {
-  if (!sessionDate || DRY_RUN) return { date: !!sessionDate, endDate: !!sessionDate };
+export function judgeEndDate(rows, sessionDate) {
+  const list = Array.isArray(rows) ? rows : [];
+  const dates = list.map(candleDate).filter(Boolean).sort();
+  const latest = dates.length ? dates[dates.length - 1] : null;
+  const dated = ARCHIVE_DATE_RE.test(String(sessionDate || ""));
+  return {
+    send: list.length > 0,
+    honoured: latest === null || !dated ? null : latest <= sessionDate,
+    latest,
+    past: dated ? dates.filter((d) => d > sessionDate).length : 0,
+  };
+}
+
+const SCREENER_READ_KEYS = ["close", "marketcap", "call_volume", "put_volume"];
+
+export function judgeScreenerDate(dated, undated) {
+  const a = unwrapVendorRows(dated);
+  const b = unwrapVendorRows(undated);
+  if (!a.length) {
+    return b.length
+      ? { date: false, reason: `the dated probe returned no rows while the undated one returned ${b.length}` }
+      : { date: true, reason: "neither probe returned rows, so the dated read is kept as the one correct by construction" };
+  }
+  const first = a[0] && typeof a[0] === "object" ? a[0] : {};
+  const missing = SCREENER_READ_KEYS.filter((k) => !onWire(first[k]));
+  if (missing.length) {
+    return { date: false, reason: `the dated probe's first row carries no ${missing.join(", ")}` };
+  }
+  return { date: true, reason: `the dated probe returned ${a.length} readable row(s)` };
+}
+
+export async function sweepScreenerBand([min, max], readBand, {
+  depth = SCREENER_SPLIT_DEPTH, pageRows = SCREENER_PAGE_ROWS,
+} = {}) {
+  const byTicker = new Map();
+  const unnamed = [];
+  const keep = (list) => {
+    for (const row of list) {
+      if (row && row.ticker) byTicker.set(row.ticker, row);
+      else unnamed.push(row);
+    }
+  };
+  const leaves = [];
+  let reads = 0;
+  const walk = async (lo, hi, level) => {
+    reads++;
+    const page = await readBand(lo, hi);
+    const list = Array.isArray(page) ? page : [];
+    const full = list.length >= pageRows;
+    keep(list);
+    if (!full || level >= depth) {
+      leaves.push({ min: lo, max: hi, rows: list.length, truncated: full, level });
+      return;
+    }
+    const mid = hi === null ? lo * 2 : Math.sqrt(lo * hi);
+    await walk(lo, mid, level + 1);
+    await walk(mid, hi, level + 1);
+  };
+  await walk(min, max, 0);
+  return { rows: [...byTicker.values(), ...unnamed], leaves, reads,
+    truncated: leaves.filter((l) => l.truncated).length, split: reads > 1 };
+}
+
+const SCREENER_PROBE = Object.freeze({
+  min_underlying_price: 5, min_volume: 1000, min_oi: 5000, min_marketcap: 5e11,
+});
+
+export async function verifyDating(sessionDate, { read = uw } = {}) {
+  if (!sessionDate || DRY_RUN) {
+    return { date: !!sessionDate, endDate: !!sessionDate, endDateHonoured: null,
+      endDateLatest: null, screenerDate: !!sessionDate, screenerReason: null };
+  }
 
   const usable = (rows) => (rows || []).some(
     (r) => r && r.expiry && (num(callGammaLeg(r)) !== 0 || num(putGammaLeg(r)) !== 0));
 
   const PROBE = "AAPL";
 
-  const [dated, undated, capped] = await Promise.all([
-    uw(`/api/stock/${PROBE}/greek-exposure/expiry`, { date: sessionDate }).catch(() => []),
-    uw(`/api/stock/${PROBE}/greek-exposure/expiry`).catch(() => []),
-    uw(`/api/stock/${PROBE}/ohlc/1d`, { timeframe: "1M", end_date: sessionDate }).catch(() => []),
+  const [dated, undated, capped, screenDated, screenUndated] = await Promise.all([
+    read(`/api/stock/${PROBE}/greek-exposure/expiry`, { date: sessionDate }).catch(() => []),
+    read(`/api/stock/${PROBE}/greek-exposure/expiry`).catch(() => []),
+    read(`/api/stock/${PROBE}/ohlc/1d`, { timeframe: "1M", end_date: sessionDate }).catch(() => []),
+    read("/api/screener/stocks", { ...SCREENER_PROBE, date: sessionDate }).catch(() => []),
+    read("/api/screener/stocks", SCREENER_PROBE).catch(() => []),
   ]);
 
   const date = usable(dated) || !usable(undated);
-  const endDate = Array.isArray(capped) && capped.length > 0;
+  const cap = judgeEndDate(capped, sessionDate);
+  const endDate = cap.send;
+  const screener = judgeScreenerDate(screenDated, screenUndated);
 
   if (!usable(dated) && !usable(undated)) {
     console.warn(
@@ -593,7 +691,20 @@ async function verifyDating(sessionDate) {
   if (!endDate) {
     console.warn(
       `WARNING: /ohlc/1d?end_date=${sessionDate} returned no candles for ${PROBE} — ` +
-      "dropping `end_date` for this run. Candles will include the session in progress.");
+      "dropping `end_date` for this run. Every candle series is still cut at " +
+      `${sessionDate} locally before any feature reads it.`);
+  } else if (cap.honoured === false) {
+    console.warn(
+      `WARNING: /ohlc/1d?end_date=${sessionDate} returned ${cap.past} bar(s) dated after ` +
+      `the session for ${PROBE} (latest ${cap.latest}) — the vendor does NOT honour ` +
+      "end_date on this read. The parameter is kept, since it costs nothing, and every " +
+      `candle series is cut at ${sessionDate} locally before any feature reads it.`);
+  }
+  if (!screener.date) {
+    console.warn(
+      `WARNING: /screener/stocks?date=${sessionDate} is not usable — ${screener.reason}. ` +
+      "Dropping `date` from the screener for this run, so its volumes and prices are " +
+      "whatever the vendor holds at read time.");
   }
 
   if (!usable(dated) || !usable(undated)) {
@@ -607,7 +718,8 @@ async function verifyDating(sessionDate) {
     }
   }
 
-  return { date, endDate };
+  return { date, endDate, endDateHonoured: cap.honoured, endDateLatest: cap.latest,
+    screenerDate: screener.date, screenerReason: screener.reason };
 }
 
 async function enrich(ticker, spot, sessionDate, dating = { date: true, endDate: true }) {
@@ -655,15 +767,19 @@ async function enrich(ticker, spot, sessionDate, dating = { date: true, endDate:
       `delta ${sign(first.call_delta)}/${sign(first.put_delta)} (call/put)`);
   }
 
+  const kept = sessionCandles(ohlc, sessionDate);
+
   const missing = [];
   if (!greekFlow.length) missing.push("greek-flow");
   if (!strikes.length) missing.push("spot-exposures/strike");
-  if (!ohlc.length) missing.push("ohlc/1d");
+  if (!kept.length) missing.push(ohlc.length ? `ohlc/1d on or before ${sessionDate}` : "ohlc/1d");
   if (missing.length) throw new Error(`no data from ${missing.join(", ")}`);
 
+  const past = candleCut(ohlc, sessionDate);
   return {
-    features: computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, ohlc, sessionDate }),
-    raw: { greekFlow, ticks, strikes, expiries, ohlc },
+    raw: { greekFlow, ticks, strikes, expiries, ohlc: kept },
+    pastSession: past.past,
+    pastLatest: past.latest,
   };
 }
 
@@ -693,6 +809,72 @@ function easternNow(at = new Date()) {
 
     minutes: (Number(parts.hour) % 24) * 60 + Number(parts.minute),
   };
+}
+
+const isWeekday = (day) => {
+  const dow = new Date(day + "T12:00:00Z").getUTCDay();
+  return dow !== 0 && dow !== 6;
+};
+
+const clockSaid = (minutes) =>
+  `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+
+export function intradayRefusal(sessionDate, { at = new Date(), allow = false } = {}) {
+  const clock = easternNow(at);
+  const inside = isWeekday(clock.date) &&
+    clock.minutes >= SESSION_OPEN_MINUTES && clock.minutes < SESSION_CLOSE_MINUTES;
+  const said = `the Eastern clock reads ${clockSaid(clock.minutes)} on ${clock.date}, inside ` +
+    `the ${clockSaid(SESSION_OPEN_MINUTES)}–${clockSaid(SESSION_CLOSE_MINUTES)} session`;
+  return {
+    inside,
+    allowed: inside && !!allow,
+    refuse: inside && !allow,
+    clock,
+    message: !inside ? null
+      : allow
+        ? `PUBLISHING FROM AN IN-PROGRESS TAPE because allow_intraday was set: ${said}. ` +
+          `Candles are still cut at ${sessionDate || "the unresolved session"}, but the ` +
+          "screener, chains, flow alerts, news and every other undated read describe " +
+          `${clock.date}'s session in progress, published under ${sessionDate || "no session date"}.`
+        : `refusing to publish session ${sessionDate || "(unresolved)"} from an in-progress ` +
+          `tape: ${said}, so every undated vendor read — the screener, the chains, flow ` +
+          `alerts, news — would describe ${clock.date}'s session in progress under the ` +
+          `${sessionDate || "unresolved"} label. Run after the close, or dispatch with ` +
+          "allow_intraday to publish it anyway.",
+  };
+}
+
+export function nextWeekday(day) {
+  const t = Date.parse(String(day || "") + "T12:00:00Z");
+  if (!Number.isFinite(t)) return null;
+  for (let step = 1; step <= 7; step++) {
+    const d = new Date(t + step * 86400000).toISOString().slice(0, 10);
+    if (isWeekday(d)) return d;
+  }
+  return null;
+}
+
+export function priorWeekdays(day, count) {
+  const t = Date.parse(String(day || "") + "T12:00:00Z");
+  const out = [];
+  if (!Number.isFinite(t)) return out;
+  for (let step = 1; out.length < count && step <= count * 2 + 7; step++) {
+    const d = new Date(t - step * 86400000).toISOString().slice(0, 10);
+    if (isWeekday(d)) out.push(d);
+  }
+  return out;
+}
+
+export function closedPriceWindow(generatedAt, day) {
+  if (!ARCHIVE_DATE_RE.test(String(day || ""))) return false;
+  const at = typeof generatedAt === "string" ? new Date(generatedAt) : null;
+  if (!at || Number.isNaN(at.getTime())) return false;
+  const clock = easternNow(at);
+  const next = nextWeekday(day);
+  if (clock.date === day) return clock.minutes >= SESSION_CLOSE_MINUTES;
+  if (clock.date < day || next === null) return false;
+  if (clock.date < next) return true;
+  return clock.date === next && clock.minutes < SESSION_OPEN_MINUTES;
 }
 
 function medianDollarVolume(candles, { window = 60 } = {}) {
@@ -781,8 +963,51 @@ function repairCandles(candles) {
   return { candles: cut ? rows.slice(cut) : rows, breaks };
 }
 
-function computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, ohlc: rawOhlc, sessionDate, tilt }) {
-  const { candles: ohlc, breaks } = repairCandles(rawOhlc);
+export function sessionReference(candles, sessionDate, readSpot) {
+  const asc = candlesAscending(candles);
+  const last = asc.length ? asc[asc.length - 1] : null;
+  const onSession = !!last && ARCHIVE_DATE_RE.test(String(sessionDate || "")) &&
+    candleDate(last) === sessionDate && num(last.close) > 0;
+  if (onSession) {
+    const prior = asc.length > 1 ? num(asc[asc.length - 2].close) : 0;
+    return { spot: num(last.close), prevClose: prior > 0 ? prior : null, basis: "session-close" };
+  }
+  const read = num(readSpot);
+  return { spot: read > 0 ? read : 0, prevClose: null, basis: read > 0 ? "read" : null };
+}
+
+export function sessionRow(row, features) {
+  const f = features || {};
+  if (!row || f.spotBasis !== "session-close" || !(num(f.spot) > 0)) return row;
+  return {
+    ...row,
+    close: f.spot,
+    prev_close: num(f.prevClose) > 0 ? f.prevClose : null,
+  };
+}
+
+export function readPxOf(e, readAt) {
+  const px = num(e && e.row && e.row.close);
+  const basis = (e && e.features && e.features.spotBasis) || null;
+  return {
+    px: px > 0 ? px : null,
+    readAt: readAt || null,
+    source: "screener",
+    spotBasis: basis,
+    note: basis === "session-close"
+      ? "The screener's last price when this run read it. Every level, distance and change " +
+        "on this card is measured from the session's daily close instead, so the two differ " +
+        "by whatever traded after that close."
+      : "The screener's last price when this run read it. The vendor returned no daily bar " +
+        "for this session, so this read price is also the reference every level on this " +
+        "card is measured from.",
+  };
+}
+
+function computeFeatures({ ticker, spot: readSpot, greekFlow, ticks, strikes, expiries, ohlc: rawOhlc, sessionDate, tilt }) {
+  const { candles: ohlc, breaks } = repairCandles(sessionCandles(rawOhlc, sessionDate));
+  const reference = sessionReference(ohlc, sessionDate, readSpot);
+  const spot = reference.spot;
   const purity = flowPurity(greekFlow);
   const quality = positioningQuality(greekFlow);
   const gamma = aggressorGamma(strikes, { spot });
@@ -790,6 +1015,9 @@ function computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, oh
   const displacement = bookDisplacement(strikes, atr);
   const path = pathSignature(ticks);
   const calendar = gammaDecayCalendar(expiries, { asOf: sessionDate });
+  const book = openInterestGammaBook(expiries, { asOf: sessionDate });
+  const regimeFrom = book.net !== null ? "book" : gamma.netGamma !== null ? "flow" : null;
+  const regimeNet = book.net !== null ? book.net : gamma.netGamma;
 
   const dollarVolume = medianDollarVolume(ohlc);
 
@@ -811,6 +1039,9 @@ function computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, oh
   return {
     ticker,
     spot,
+    spotBasis: reference.basis,
+    prevClose: reference.prevClose,
+    readPx: num(readSpot) > 0 ? num(readSpot) : null,
     atr,
     dollarVolume,
     sessionDate: sessionDate || null,
@@ -823,6 +1054,7 @@ function computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, oh
     hasView: quality.hasDirectionalView,
 
     netGamma: gamma.netGamma,
+    gammaGross: gamma.gross,
     gammaPeak: gamma.peak,
     gammaFlip: gamma.flip,
     flipSide: gamma.flipSide,
@@ -835,9 +1067,12 @@ function computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, oh
     flipDist,
     flipDistAtr: gamma.flip && atr > 0 ? (gamma.flip - spot) / atr : null,
 
-    gRegime: gamma.spotGammaShare === null
-      ? (gamma.netGamma >= 0 ? "long" : "short")
-      : (gamma.spotGammaShare >= 0 ? "long" : "short"),
+    gRegime: regimeNet === null ? null : regimeNet >= 0 ? "long" : "short",
+    gRegimeFrom: regimeFrom,
+    gammaBookRaw: book.net,
+    gammaBookGrossRaw: book.gross,
+    gammaBookShare: book.share,
+    gammaBookExpiries: book.expiries,
     displacement: displacement.displacement,
     displacementWeight: displacement.weight,
 
@@ -899,6 +1134,118 @@ function computeFeatures({ ticker, spot, greekFlow, ticks, strikes, expiries, oh
   };
 }
 
+export function measureVariationProbes(enriched, sessionDate) {
+  const list = (enriched || []).filter((e) => e && e.raw);
+  const names = list.map((e) => ({
+    rows: e.raw.expiries || [],
+    iv30: e.tilt && Number.isFinite(e.tilt.iv30) ? e.tilt.iv30 : null,
+  }));
+  const probe = conventionProbe(names, { asOf: sessionDate });
+  const kc = estimateKc(names, { asOf: sessionDate });
+  const unit = unitFamily(list.map((e) => {
+    let oi = 0, gex = 0;
+    for (const r of e.raw.strikes || []) {
+      const v = num(r && r.call_gamma_oi, NaN);
+      if (Number.isFinite(v)) oi += v;
+    }
+    for (const r of e.raw.expiries || []) {
+      const v = num(callGammaLeg(r), NaN);
+      if (Number.isFinite(v)) gex += v;
+    }
+    return { spot: e.features ? e.features.spot : null, callGammaOi: oi, callGex: gex };
+  }));
+  const strikeSign = strikeBookPutSign(list.map((e) => e.raw.strikes || []));
+  const next = nextSessionAfter(sessionDate) ||
+    { date: null, h: 1, rule: "one calendar day; the run carries no session date" };
+  const pctOf = (v) => (v === null || v === undefined ? "n/a" : (v * 100).toFixed(1) + "%");
+  const lines = [
+    `  variation: put convention call ${probe.call}, put ${probe.put} — |charm|-weighted opposite-sign share ` +
+      `${pctOf(probe.oppositeShare.call)} call / ${pctOf(probe.oppositeShare.put)} put over ` +
+      `${probe.rows.call}/${probe.rows.put} expiry rows at ${VARIATION_LINES.PROBE_DTE_MAX} days or less ` +
+      `(counted by row: ${pctOf(probe.countShare.put)} put)`,
+    `  variation: charm scale K_c ${kc.value === null ? "n/a" : kc.value} over ${kc.n} expiry reading(s)` +
+      (kc.iqrRatio === null ? "" : `, IQR ${(kc.iqrRatio * 100).toFixed(0)}% of the median`) +
+      ` — ${kc.status}${kc.reason ? ": " + kc.reason : ""}`,
+    `  variation: unit family ${unit.family} (${unit.share} share, ${unit.pct} dollars-per-1% of ` +
+      `${unit.n} names priced at ${VARIATION_LINES.UNIT_MIN_SPOT} or more); used: ${unit.used}`,
+    `  variation: strike book ${strikeSign.reading} (${strikeSign.rows} rows)`,
+    `  variation: next session ${next.date || "unknown"}, ${next.h} calendar day(s) ahead`,
+  ];
+  return {
+    probe, kc, unit, strikeSign, next,
+    vannaScale: { status: "unmeasured", ratio: null, n: 0,
+      reason: "the chain leg has not run yet" },
+    lines,
+  };
+}
+
+export function vannaProbeSample(ticker, { rows, expiry, sessionDate, expiries, spot }) {
+  const exp = expiry || nearestProbeExpiry(expiries, { asOf: sessionDate, minDays: SKEW_MIN_DAYS });
+  if (!exp || !sessionDate) return null;
+  const chainRows = DRY_RUN
+    ? (fakeLadders.has(ticker) ? fakeLadderChain(fakeLadders.get(ticker), exp) : null)
+    : rows;
+  if (!Array.isArray(chainRows) || !chainRows.length) return null;
+  const vendorRow = (expiries || []).find((r) => r && String(r.expiry || "").slice(0, 10) === exp);
+  const vendor = vendorRow ? num(vendorRow.call_vanna ?? vendorRow.call_vex, NaN) : NaN;
+  if (!Number.isFinite(vendor)) return null;
+  const parsed = [];
+  for (const r of chainRows) {
+    const p = r ? parseOptionSymbol(r.option_symbol) : null;
+    if (!p) continue;
+    parsed.push({ type: p.type, strike: p.strike, expiry: p.expiry,
+      iv: num(r.implied_volatility, NaN), oi: num(r.open_interest, NaN) });
+  }
+  const model = chainCallVanna(parsed, { spot, asOf: sessionDate, expiry: exp });
+  if (!model) return null;
+  return { ticker, expiry: exp, vendor, model: model.value, contracts: model.contracts, spot: num(spot, null) };
+}
+
+export function boardVariationMeta(run) {
+  if (!run) return null;
+  return {
+    fields: "variation on each row: gammaPerSigmaPctAdv, charmPctAdv and vannaPerPointPctAdv are " +
+      "fractions of a typical day's dollar volume, each signed as the CHANGE IN DEALER DELTA (per " +
+      "one-sigma rise, per session, per vol point), so dealers re-hedge the other way: a negative " +
+      "figure means dealers buy stock; driftInSd is the session's charm drift over the standard " +
+      "deviation of the random part, signed the same way, and sdBasis names what that deviation " +
+      "holds: \"gamma\" is the spot channel alone, which is every board row, since a row carries no " +
+      "implied-volatility history to size the vol channel or its co-movement with spot; a deep " +
+      "card's panel, whose sdBasis is \"gamma+vanna\", can therefore read a different drift for the " +
+      "same name; a null carries a code in why, spelled out in codes",
+    codes: VARIATION_CODES,
+    kc: { value: run.kc.value, n: run.kc.n, status: run.kc.status },
+    unit: { family: run.unit.family, used: run.unit.used },
+    probe: { call: run.probe.call, put: run.probe.put },
+    vannaScale: { status: run.vannaScale.status, ratio: run.vannaScale.ratio, n: run.vannaScale.n,
+      family: run.vannaScale.family || null, used: run.vannaScale.used || null },
+    next: { date: run.next.date, h: run.next.h },
+  };
+}
+
+export function featuresVariationInput(e, sessionDate) {
+  const f = (e && e.features) || {};
+  return {
+    ticker: f.ticker || null,
+    sessionDate: sessionDate || f.sessionDate || null,
+    spot: f.spot,
+    iv30: f.iv30,
+    gammaFlow: f.netGamma,
+    gammaBookRaw: f.gammaBookRaw,
+    candles: f.candles || null,
+    closes: f.closes || null,
+    closeDates: f.closeDates || null,
+    garch: f.garch || null,
+    ivRankRows: null,
+    expiries: (e && e.raw && e.raw.expiries) || null,
+  };
+}
+
+export function variationOptions(run) {
+  if (!run) return null;
+  return { kc: run.kc, unit: run.unit, probe: run.probe, next: run.next, vannaScale: run.vannaScale };
+}
+
 const FAMILIES = {
   F: "flow",
   P: "positioning",
@@ -936,7 +1283,7 @@ function scoreBoard(features, tilts, sectors, caps) {
 
   const familyCols = {
     F: [fDelta, fTilt, fNet, fOi, fVol],
-    P: [pDisp],
+    P: [],
     D: [dPath],
   };
 
@@ -971,7 +1318,7 @@ function scoreBoard(features, tilts, sectors, caps) {
     raw((f) => (f.vegaTilt === null ? null : -f.vegaTilt)),
     raw((f) => (f.gammaFrontLoad === null ? null : -f.gammaFrontLoad)),
 
-    raw((f) => (f.spotGammaShare === null ? null : -f.spotGammaShare)),
+    raw((f) => (f.gammaBookShare === null || f.gammaBookShare === undefined ? null : -f.gammaBookShare)),
   ];
   const gate = qualityGate(gateAxes);
 
@@ -979,6 +1326,19 @@ function scoreBoard(features, tilts, sectors, caps) {
 
   const logCap = caps.map((c) => (c > 0 ? Math.log(c) : 0));
   const residual = neutralize(composite, { numeric: [logCap], groups: sectors });
+
+  const scoreVariance = scoreVarianceShares(
+    { fDelta, fTilt, fNet, fOi, fVol, pDisp, dPath },
+    Object.fromEntries(liveKeys.map((k) => [k, weights[k]])),
+    gate, residual,
+    { families: { fDelta: "F", fTilt: "F", fNet: "F", fOi: "F", fVol: "F", pDisp: "P", dPath: "D" } });
+  if (scoreVariance) {
+    scoreVariance.horizonOnly = {
+      pDisp: "displacement is sign-agnostic (buying and selling at the same strikes move it alike), " +
+        "so it sits on the horizon axis with no weight until it is signed by initiator and its " +
+        "per-session IC is measured",
+    };
+  }
 
   const volAxes = [
     raw((f) => f.vrp),
@@ -1018,6 +1378,7 @@ function scoreBoard(features, tilts, sectors, caps) {
       convPersistence: conv.persistence,
       dispersion,
       weights,
+      scoreVariance,
     };
   });
 }
@@ -1198,12 +1559,120 @@ export function readBoardMemory(read, runSessionDate) {
     "ranking was held against.");
 }
 
+export const MEMORY_ARCHIVE_SESSIONS = 10;
+
+const MEMORY_FALLS_BACK = new Set(["unavailable", "same-session", "ahead"]);
+
+export async function resolveBoardMemory(side, sessionDate, {
+  reader = readStored, sessions = MEMORY_ARCHIVE_SESSIONS,
+} = {}) {
+  const read = await reader("board:" + side);
+  const memory = readBoardMemory(read, sessionDate);
+  if (!MEMORY_FALLS_BACK.has(memory.status) || !ARCHIVE_DATE_RE.test(String(sessionDate || ""))) {
+    return { ...memory, source: "live", key: "board:" + side };
+  }
+  const why = memory.status === "same-session"
+    ? `the live board:${side} is this session's own earlier output`
+    : memory.status === "ahead"
+      ? `the live board:${side} is stamped a later session (${memory.sessionDate})`
+      : read && read.absent
+        ? `no board is published under board:${side}`
+        : `the live board:${side} could not be read` +
+          (read && read.status ? ` (the store answered ${read.status})` : "");
+  let failures = 0;
+  for (const day of priorWeekdays(sessionDate, sessions)) {
+    const key = `board:${side}:${day}`;
+    const stored = await reader(key);
+    if (stored && stored.failed) { failures++; continue; }
+    if (!stored || stored.absent || !stored.payload) continue;
+    const archived = readBoardMemory(stored, sessionDate);
+    if (archived.status !== "ok" && archived.status !== "quiet") continue;
+    return {
+      ...archived, source: "archive", key,
+      note: `${archived.note} It was read from the dated archive (${key}) because ${why}.`,
+    };
+  }
+  return {
+    ...memory, source: "live", key: "board:" + side,
+    note: `${memory.note} The dated archive was searched back ${sessions} weekdays for an ` +
+      `earlier board:${side} as well, and ` +
+      (failures
+        ? `${failures} of those reads failed, so an earlier board may exist that this run could not see.`
+        : "held none."),
+  };
+}
+
+export function sameSessionGate({ sessionDate, archive = null, republish = false } = {}) {
+  if (!ARCHIVE_DATE_RE.test(String(sessionDate || ""))) {
+    return { mode: "fresh", skip: false, generatedAt: null,
+      note: "no session date, so there is no dated archive to check against" };
+  }
+  const keys = sessionArchiveKeys(sessionDate);
+  const readOf = (key) => (archive && archive[key]) || null;
+  const isHeld = (r) => Boolean(r && !r.failed && !r.absent && r.payload);
+  const held = keys.filter((k) => isHeld(readOf(k)));
+  const failed = keys.filter((k) => readOf(k) && readOf(k).failed);
+  const absent = keys.filter((k) => !held.includes(k) && !failed.includes(k));
+  const scores = readOf(`scores:${sessionDate}`);
+  const at = isHeld(scores) && typeof scores.payload.generatedAt === "string"
+    ? scores.payload.generatedAt : null;
+  const list = (ks) => ks.join(", ");
+  const are = (ks) => (ks.length === 1 ? "is" : "are");
+  const unread = failed.length
+    ? `${list(failed)} could not be read (the store answered ` +
+      `${failed.map((k) => readOf(k).status || "nothing").join(", ")})`
+    : "";
+  if (republish) {
+    return { mode: "republish", skip: false, generatedAt: at,
+      note: (held.length
+        ? `${list(held)} ${are(held)} archived` + (at ? ` (scores written ${at})` : "")
+        : `scores:${sessionDate} ` + (failed.includes(`scores:${sessionDate}`)
+          ? "could not be read" + (scores.status ? ` (the store answered ${scores.status})` : "")
+          : "is not archived")) +
+        ", and republish_session is set, so this run deletes whatever dated key the session " +
+        "holds before it rewrites all three together with the live boards, scores, record and " +
+        "cards — a board left behind by an earlier run whose scores write was lost would " +
+        "otherwise refuse the rewrite and split the archive from the live board again" };
+  }
+  if (held.length && absent.length) {
+    return { mode: "partial", skip: true, generatedAt: at,
+      note: `${list(held)} ${are(held)} archived but ${list(absent)} ${are(absent)} not, so an ` +
+        "earlier run of this session ranked it and part of its archive was lost. A plain run " +
+        "cannot repair that: the dated keys are immutable, so a second ranking would go live " +
+        "while the archive kept part of the first. The ranked leg is skipped and the run " +
+        "exits non-zero. Dispatch with republish_session to rewrite the session's three keys " +
+        "together." };
+  }
+  if (held.length) {
+    return { mode: "archived", skip: true, generatedAt: at,
+      note: (failed.length
+        ? `${list(held)} ${are(held)} archived and ${unread}, so the archive may be incomplete`
+        : `scores:${sessionDate} is already archived (written ${at || "at an unstamped time"}) ` +
+          "with both dated boards") +
+        ", so this run is a second run against one session. The ranked leg — boards, scores, " +
+        "score track, record, brief and cards — is skipped: a second ranking would go live " +
+        "while the archive kept the first, and the record would grade a board no reader " +
+        "saw. Only the unranked market feeds are refreshed. Dispatch with " +
+        "republish_session to rewrite the session instead." };
+  }
+  if (failed.length) {
+    return { mode: "unverified", skip: false, generatedAt: null,
+      note: `${unread}, so whether this session is already archived is unknown. Proceeding: a ` +
+        "refused dated write is reported below, and a missed session cannot be recovered later" };
+  }
+  return { mode: "fresh", skip: false, generatedAt: null,
+    note: `none of ${list(keys)} is archived, so this is the session's first run` };
+}
+
 async function fetchStoredPayload(key) {
   return (await readStored(key)).payload;
 }
 
-async function readStored(key) {
-  if (DRY_RUN) return { payload: null, absent: true, status: 0 };
+export const READ_RETRIES = 2;
+
+const READ_RETRYABLE = (status) => status === 0 || PUBLISH_RETRYABLE.has(status) || status >= 500;
+
+async function readStoredOnce(key) {
   try {
     const response = await fetch(
       ingestURL() + "?key=" + encodeURIComponent(key),
@@ -1224,6 +1693,22 @@ async function readStored(key) {
   }
 }
 
+async function readStored(key, { retries = READ_RETRIES, pause = sleep } = {}) {
+  if (DRY_RUN) return { payload: null, absent: true, status: 0 };
+  let read = await readStoredOnce(key);
+  for (let attempt = 0; read.failed && READ_RETRYABLE(read.status); attempt++) {
+    const wait = publishRetryDelay(attempt, { retries, spentMs: publishRetrySpentMs });
+    if (wait === null) break;
+    publishRetrySpentMs += wait;
+    console.warn(`  read ${key}: ${read.status ? `HTTP ${read.status}` : read.detail || "no answer"}` +
+      ` — waiting ${wait}ms and reading again (retry ${attempt + 1} of ${retries})`);
+    await pause(wait);
+    const again = await readStoredOnce(key);
+    read = again.failed ? again : { ...again, recovered: attempt + 1 };
+  }
+  return read;
+}
+
 const RECORD_HORIZONS = [1, 5, 10, 21];
 const RECORD_IC_MIN_N = 20;
 const RECORD_MAX_SESSIONS = 30;
@@ -1232,6 +1717,46 @@ const candleDate = (c) => {
   const d = String((c && (c.start_time || c.end_time || c.date)) || "").slice(0, 10);
   return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
 };
+
+export function sessionCandles(candles, sessionDate) {
+  const list = Array.isArray(candles) ? candles : [];
+  if (!ARCHIVE_DATE_RE.test(String(sessionDate || ""))) return list;
+  return list.filter((c) => {
+    const d = candleDate(c);
+    return d !== null && d <= sessionDate;
+  });
+}
+
+export function candleCut(candles, sessionDate) {
+  const list = Array.isArray(candles) ? candles : [];
+  if (!ARCHIVE_DATE_RE.test(String(sessionDate || ""))) return { past: 0, latest: null };
+  const after = list.map(candleDate).filter((d) => d !== null && d > sessionDate).sort();
+  return { past: after.length, latest: after.length ? after[after.length - 1] : null };
+}
+
+export function sessionRows(raw, dayOf, sessionDate, { through = false } = {}) {
+  if (!ARCHIVE_DATE_RE.test(String(sessionDate || ""))) return { raw, cut: 0 };
+  const list = Array.isArray(raw) ? raw : raw && Array.isArray(raw.data) ? raw.data : null;
+  if (!list) return { raw, cut: 0 };
+  const kept = list.filter((r) => {
+    const d = dayOf(r);
+    if (d === null) return true;
+    return through ? d <= sessionDate : d === sessionDate;
+  });
+  const cut = list.length - kept.length;
+  if (!cut) return { raw, cut: 0 };
+  return { raw: Array.isArray(raw) ? kept : { ...raw, data: kept }, cut };
+}
+
+const easternDayOf = (v) => {
+  if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(v.trim())) {
+    return typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v.trim()) ? v.trim() : null;
+  }
+  const at = new Date(v.trim());
+  return Number.isNaN(at.getTime()) ? null : easternNow(at).date;
+};
+
+export const readDayOf = (readAt) => easternDayOf(readAt);
 
 const ARCHIVE_READ_PACE_MS = 40;
 const ARCHIVE_READ_RETRY_MS = 600;
@@ -1349,11 +1874,11 @@ async function collectDatedBoards(sessionDate, payloads, enriched, inBandToday =
       if (probed > 1) await sleep(ARCHIVE_READ_PACE_MS);
 
       const key = what === "scores" ? `scores:${d}` : `board:${what}:${d}`;
-      let read = await readStored(key);
+      let read = await readStored(key, { retries: 0 });
 
       if (read.failed) {
         await sleep(ARCHIVE_READ_RETRY_MS);
-        const again = await readStored(key);
+        const again = await readStored(key, { retries: 0 });
         if (!again.failed) recovered++;
         read = again;
       }
@@ -1371,7 +1896,10 @@ async function collectDatedBoards(sessionDate, payloads, enriched, inBandToday =
       const stored = read.payload;
       if (stored && Array.isArray(stored.rows) && stored.rows.length) {
         if (what === "scores") scoreDays.push({ d, rows: stored.rows, source: "scores" });
-        else boards.push({ d, side: what, rows: stored.rows });
+        else {
+          boards.push({ d, side: what, rows: stored.rows,
+            generatedAt: typeof stored.generatedAt === "string" ? stored.generatedAt : null });
+        }
       } else {
 
         absent++;
@@ -1393,22 +1921,39 @@ async function collectDatedBoards(sessionDate, payloads, enriched, inBandToday =
   return { boards, scoreDays, probed, absent, failed, recovered, statuses: [...statuses], abandoned };
 }
 
-function buildRecordCloses(enriched, universe, datedBoards, sessionDate) {
+export function buildRecordCloses(enriched, datedBoards, sessionDate) {
   const closes = new Map();
+  const bounded = ARCHIVE_DATE_RE.test(String(sessionDate || ""));
   const put = (t, d, c) => {
     const v = num(c);
     if (!t || !d || !(v > 0)) return;
+    if (bounded && d > sessionDate) return;
     if (!closes.has(t)) closes.set(t, new Map());
     closes.get(t).set(d, v);
   };
+  let boardPx = 0, boardPxRefused = 0;
   for (const b of datedBoards) {
-    for (const row of b.rows || []) put(row.t, b.d, row && row.px);
+    if (!closedPriceWindow(b.generatedAt, b.d)) {
+      boardPxRefused += (b.rows || []).length;
+      continue;
+    }
+    for (const row of b.rows || []) { put(row.t, b.d, row && row.px); boardPx++; }
   }
-  for (const row of universe) put(row.ticker, sessionDate, row.close);
   for (const e of enriched) {
-    for (const c of e.raw.ohlc || []) put(e.row.ticker, candleDate(c), c.close);
+    for (const c of sessionCandles(e.raw.ohlc, sessionDate)) put(e.row.ticker, candleDate(c), c.close);
   }
+  Object.defineProperty(closes, "sources", {
+    value: { boardPx, boardPxRefused }, enumerable: false,
+  });
   return closes;
+}
+
+export function recordCalendar(enriched, datedBoards, sessionDate) {
+  return tradingCalendar([
+    ...enriched.map((e) => sessionCandles(e.raw.ohlc, sessionDate).map(candleDate)),
+    datedBoards.map((b) => b.d),
+    ARCHIVE_DATE_RE.test(String(sessionDate || "")) ? [sessionDate] : [],
+  ]).filter((d) => !ARCHIVE_DATE_RE.test(String(sessionDate || "")) || d <= sessionDate);
 }
 
 function buildRecordBreaks(enriched) {
@@ -1507,13 +2052,21 @@ async function archiveDatedBoards(payloads, sessionDate, publishFn) {
   return lines;
 }
 
-async function republishWithChain(payloads, chainByTicker, sessionDate, publishFn) {
+async function republishWithChain(payloads, chainByTicker, sessionDate, publishFn, refresh = null,
+  meta = undefined) {
   const lines = [];
   for (const side of ["long", "short"]) {
     const payload = payloads[side];
     if (!payload || !Array.isArray(payload.rows)) continue;
-    let merged = 0;
+    const metaBefore = JSON.stringify(payload.variation ?? null);
+    if (meta !== undefined) payload.variation = meta;
+    const metaMoved = JSON.stringify(payload.variation ?? null) !== metaBefore;
+    let merged = 0, refreshed = 0;
     for (const row of payload.rows) {
+      if (typeof refresh === "function") {
+        const before = JSON.stringify(row.variation ?? null);
+        if (refresh(row) && JSON.stringify(row.variation ?? null) !== before) refreshed++;
+      }
       const c = chainByTicker.get(row.t);
       if (!c) continue;
 
@@ -1524,27 +2077,105 @@ async function republishWithChain(payloads, chainByTicker, sessionDate, publishF
       row.skewDays = c.scalars.skewDays;
       merged++;
     }
-    if (!merged) continue;
+    if (!merged && !refreshed && !metaMoved) continue;
+
+    const key = datedKey(side, sessionDate);
+
+    if (!key) {
+      lines.push(`  re-publish board:${side}: SKIPPED — the session date ` +
+        `${JSON.stringify(sessionDate)} is not an archive date, so the dated copy ` +
+        `cannot be written and the live board is left as the store already has it, ` +
+        `rather than gaining columns its own archive will never carry`);
+      continue;
+    }
+
     try {
-
-      const key = datedKey(side, sessionDate);
-
-      if (!key) {
-        lines.push(`  re-publish board:${side}: SKIPPED — the session date ` +
-          `${JSON.stringify(sessionDate)} is not an archive date, so the dated copy ` +
-          `cannot be written and the live board is left as the store already has it, ` +
-          `rather than gaining columns its own archive will never carry`);
-        continue;
-      }
-
       await publishFn(key, payload);
+    } catch (error) {
+      lines.push(error && error.status === 409
+        ? `  archive ${key}: ALREADY HOLDS this session (409) — an earlier run wrote it and ` +
+          "the archive keeps the first. This run's board still goes live below; dispatch " +
+          "with republish_session to rewrite both together"
+        : `  archive ${key}: NOT WRITTEN — ${error.message}. The end-of-run check writes it ` +
+          "again from this same payload; if that fails too the run says the archive is lost");
+    }
+
+    try {
       await publishFn("board:" + side, payload);
-      lines.push(`  re-published board:${side} with chain columns on ${merged} row(s)`);
+      lines.push(`  re-published board:${side} with chain columns on ${merged} row(s)` +
+        (refreshed ? `, variation re-measured on ${refreshed}` : "") +
+        (metaMoved ? ", and the board's measured variation block" : ""));
     } catch (error) {
       lines.push(`  re-publish ${side}: ${error.message} — the store keeps the pre-chain board`);
     }
   }
   return lines;
+}
+
+export function congressRows(ticker, { byTicker = null, read = null, tapeRows = 0, namesRead = null } = {}) {
+  const rows = byTicker ? byTicker.get(ticker) : undefined;
+  if (rows) return rows;
+  return (read === "ok" && tapeRows > 0) || Boolean(namesRead && namesRead.has(ticker)) ? [] : null;
+}
+
+export function sessionArchiveKeys(sessionDate) {
+  if (!ARCHIVE_DATE_RE.test(String(sessionDate || ""))) return [];
+  return [`scores:${sessionDate}`, `board:long:${sessionDate}`, `board:short:${sessionDate}`];
+}
+
+export async function retireSession(sessionDate, {
+  remove = retire, retries = READ_RETRIES, pause = sleep,
+} = {}) {
+  const removed = [], absent = [], refused = [], kept = [];
+  const keys = sessionArchiveKeys(sessionDate);
+  const order = [...keys.filter((k) => !k.startsWith("scores:")),
+    ...keys.filter((k) => k.startsWith("scores:"))];
+  for (const key of order) {
+    if (refused.length) { kept.push(key); continue; }
+    let result = await remove(key);
+    for (let attempt = 0; !(result && (result.ok || result.status === 404)) &&
+        READ_RETRYABLE(result ? result.status : 0); attempt++) {
+      const wait = publishRetryDelay(attempt, { retries, spentMs: publishRetrySpentMs });
+      if (wait === null) break;
+      publishRetrySpentMs += wait;
+      console.warn(`  retire ${key}: HTTP ${result ? result.status : 0} — waiting ${wait}ms ` +
+        `and asking again (retry ${attempt + 1} of ${retries})`);
+      await pause(wait);
+      result = await remove(key);
+    }
+    if (result && result.ok) removed.push(key);
+    else if (result && result.status === 404) absent.push(key);
+    else refused.push({ key, status: result ? result.status : 0 });
+  }
+  return { removed, absent, refused, kept };
+}
+
+export function plainRedispatchSaid(report) {
+  return (report || []).some((a) => a && a.state !== "lost")
+    ? "a plain re-dispatch finds the session partly archived and skips it"
+    : "this run confirmed none of the session's keys, so a plain re-dispatch ranks it " +
+      "again unless the store holds one this run could not read";
+}
+
+export async function ensureArchived(payloadsByKey, { landed, reader = readStored, write }) {
+  const report = [];
+  for (const [key, payload] of Object.entries(payloadsByKey)) {
+    if (!payload) continue;
+    if (landed.has(key)) { report.push({ key, state: "written" }); continue; }
+    const read = await reader(key);
+    if (read && !read.failed && !read.absent && read.payload) {
+      report.push({ key, state: "held" });
+      continue;
+    }
+    try {
+      await write(key, payload);
+      report.push({ key, state: "repaired" });
+    } catch (error) {
+      report.push({ key, state: error && error.status === 409 ? "held" : "lost",
+        detail: error && error.message ? error.message : String(error) });
+    }
+  }
+  return report;
 }
 
 function toRows(pool, screenerByTicker, previousRows, origin) {
@@ -1671,13 +2302,13 @@ function priorNote(mark, runSessionDate, shown) {
         "it and are marked as first appearances; the rest were in it and are marked as " +
         "carried over. A first appearance is a statement about this ranked list, not about " +
         "the strike: a contract can be absent from the earlier feed because it was quiet, or " +
-        "because it sat below that morning's per-name cap.";
+        "because it sat below that run's per-name cap.";
     case "undated":
       return "The counter feed this run read carries no session date, or this run could not " +
         `resolve its own, so it could not be checked that the ${named} compared against came ` +
         "from an EARLIER session rather than from this run's own output. The comparison was " +
         "made anyway: discarding a real earlier session over a missing stamp would report a " +
-        "cold feed on a morning that had a good yesterday. Read the marks as unverified " +
+        "cold feed on a session that had a good yesterday. Read the marks as unverified " +
         "rather than as a comparison against a named session.";
     case "same-session":
       return `The counter feed this run read is stamped ${mark.sessionDate}, the same session ` +
@@ -1884,6 +2515,28 @@ export function sectorLean(rows) {
         : null,
     };
   });
+}
+
+export const HOLDERS_RETRY_DAYS = 7;
+
+export function holdersRefusal(prior, sessionDate, { days = HOLDERS_RETRY_DAYS } = {}) {
+  const h = prior && prior.holders;
+  if (!h || h.status !== "unavailable" || typeof h.reason !== "string") return null;
+  const status = /HTTP (4(?!08|29)\d\d)/.exec(h.reason);
+  if (!status || !ARCHIVE_DATE_RE.test(String(sessionDate || ""))) return null;
+  const since = /refused since (\d{4}-\d{2}-\d{2})/.exec(h.reason);
+  const first = since ? since[1]
+    : typeof prior.sessionDate === "string" && ARCHIVE_DATE_RE.test(prior.sessionDate)
+      ? prior.sessionDate : null;
+  if (!first) return null;
+  const age = (Date.parse(sessionDate + "T00:00:00Z") - Date.parse(first + "T00:00:00Z")) / 86400000;
+  if (!(age >= 0) || age >= days) return null;
+  return {
+    status: Number(status[1]), since: first,
+    reason: `not requested this run: the vendor answered this route with HTTP ${status[1]}, ` +
+      `refused since ${first}, and a refusal that is a property of the plan is not bought ` +
+      `again every night — it is asked once more ${days} days after ${first}`,
+  };
 }
 
 export const NEWS_VENDOR_LIMIT = 100;
@@ -2116,6 +2769,8 @@ export function publishRetryDelay(attempt, {
 
 const publishedStore = Object.create(null);
 
+const landedKeys = new Set();
+
 async function publish(key, payload) {
   publishedStore[key] = payload;
   const body = JSON.stringify(payload);
@@ -2125,6 +2780,7 @@ async function publish(key, payload) {
       writeFileSync(EMIT.replace(/\.json$/, "") + "-" + key.replace(":", "-") + ".json", body);
     }
     console.log(`  [dry-run] ${key}: ${summarize(payload)}, ${body.length} bytes`);
+    landedKeys.add(key);
     return;
   }
   let response, lastDetail = "";
@@ -2177,6 +2833,7 @@ async function publish(key, payload) {
     failure.status = response.status;
     throw failure;
   }
+  landedKeys.add(key);
   console.log(`  published ${key}: ${summarize(payload)}, ${body.length} bytes`);
 }
 
@@ -2193,7 +2850,7 @@ const SECTORS = ["Technology", "Healthcare", "Energy", "Financials", "Consumer C
 
 function fakeScreener(count) {
 
-  const gateOrigin = easternNow().date;
+  const gateOrigin = nextWeekday(DRY_SESSION_DATE);
   const rnd = mulberry(20260825);
   const rows = [];
   for (let i = 0; i < count; i++) {
@@ -2364,7 +3021,7 @@ function card0Unusable(row) {
     .some((k) => row[k] !== undefined && row[k] !== null && row[k] !== "");
 }
 
-export function fakeChain(ticker, spot, seed, { wide = false, expiry = null } = {}) {
+export function fakeChain(ticker, spot, seed, { wide = false, expiry = null, page = 0 } = {}) {
   const rnd = mulberry(seed);
   const rows = [];
   const ladder = wide
@@ -2418,13 +3075,13 @@ export function fakeChain(ticker, spot, seed, { wide = false, expiry = null } = 
     ask_volume: "90000", bid_volume: "9999",
   });
 
-  if (expiry || !wide) return rows;
+  if (expiry || !wide) return page ? [] : rows;
 
   for (let i = rows.length - 1; i > 0; i--) {
     const j = Math.floor(rnd() * (i + 1));
     [rows[i], rows[j]] = [rows[j], rows[i]];
   }
-  return rows.slice(0, CHAIN_PAGE_SIZE);
+  return rows.slice(page * CHAIN_PAGE_SIZE, (page + 1) * CHAIN_PAGE_SIZE);
 }
 
 function fakeSurface(ticker, spot, expiries) {
@@ -2473,7 +3130,7 @@ function fakeStockDarkpool(ticker, spot) {
     const size = Math.round(5e3 + rnd() * 4e5);
     const row = {
       ticker,
-      executed_at: `2026-08-28T${String(13 + (i % 7))}:${String(10 + (i % 49))}:00Z`,
+      executed_at: `${DRY_SESSION_DATE}T${String(13 + (i % 7))}:${String(10 + (i % 49))}:00Z`,
       price: px.toFixed(2), size,
       volume: Math.round(rnd() * 6e7),
       market_center: "L",
@@ -2517,14 +3174,17 @@ function fakeStockOiChange(ticker, spot) {
   });
 }
 
-function fakeTermStructure(ticker, spot) {
+function fakeTermStructure(ticker, spot, params = {}) {
   const rnd = mulberry(ticker.length * 3167);
+  const anchor = params && typeof params.date === "string" ? params.date : "2026-08-28";
+  const base = Date.parse(anchor + "T00:00:00Z");
   return Array.from({ length: 12 }, (_, i) => {
-    const dte = 3 + i * 12;
+    const expiryMs = Date.UTC(2026, 7, 28) + (3 + i * 12) * 86400000;
+    const dte = Math.round((expiryMs - base) / 86400000);
     const vol = 0.2 + rnd() * 0.3 + (i < 2 ? rnd() * 0.15 : 0);
     return {
-      ticker, date: "2026-08-28",
-      expiry: new Date(Date.UTC(2026, 7, 28) + dte * 86400000).toISOString().slice(0, 10),
+      ticker, date: anchor,
+      expiry: new Date(expiryMs).toISOString().slice(0, 10),
       dte, volatility: vol.toFixed(4),
       implied_move: (spot * vol * Math.sqrt(dte / 365)).toFixed(2),
       implied_move_perc: (vol * Math.sqrt(dte / 365)).toFixed(4),
@@ -2532,14 +3192,26 @@ function fakeTermStructure(ticker, spot) {
   });
 }
 
-function fakeIvRank(ticker, spot) {
+export const IV_RANK_PARAMS = Object.freeze({ timespan: "3m" });
+const IV_RANK_VENDOR_DEFAULT_ROWS = 5;
+
+export function fakeIvRank(ticker, spot, params = {}) {
   const rnd = mulberry(ticker.length * 4271);
-  return Array.from({ length: 70 }, (_, i) => {
+  const count = params && params.timespan === "3m" ? 64 : IV_RANK_VENDOR_DEFAULT_ROWS;
+  const days = tradingDaysEndingAt("2026-08-28", count);
+  let vol = 0.2 + rnd() * 0.3, px = spot * (0.9 + rnd() * 0.2);
+  const rows = days.map((t) => {
+    const shock = rnd() + rnd() + rnd() - 1.5;
+    vol = Math.max(0.05, vol + shock * 0.012);
+    px = px * Math.exp(-shock * 0.02 + (rnd() - 0.5) * 0.01);
+    return { t, vol, px };
+  });
+  return rows.reverse().map((r, i) => {
     const row = {
-      date: new Date(Date.UTC(2026, 7, 28) - i * 86400000).toISOString().slice(0, 10),
+      date: new Date(r.t).toISOString().slice(0, 10),
       updated_at: "2026-08-28T20:00:00Z",
-      volatility: (0.18 + rnd() * 0.4).toFixed(4),
-      close: (spot * (0.9 + rnd() * 0.2)).toFixed(2),
+      volatility: r.vol.toFixed(4),
+      close: r.px.toFixed(2),
     };
 
     if (i % 8 !== 7) row.iv_rank_1y = (rnd() * 100).toFixed(2);
@@ -2649,8 +3321,12 @@ function fakeFlowAlerts(tickers) {
       open_interest: Math.floor(rnd() * 20000),
       volume_oi_ratio: Number((rnd() * 8).toFixed(3)),
       underlying_price: Number((30 + rnd() * 400).toFixed(2)),
-      start_time: "2026-08-24T14:" + String(10 + (i % 45)).padStart(2, "0") + ":00Z",
-      end_time: "2026-08-24T14:" + String(12 + (i % 45)).padStart(2, "0") + ":30Z",
+      start_time: i % 2 === 0
+        ? Date.UTC(2026, 7, 24, 14, 10 + (i % 45))
+        : "2026-08-24T14:" + String(10 + (i % 45)).padStart(2, "0") + ":00Z",
+      end_time: i % 2 === 0
+        ? Date.UTC(2026, 7, 24, 14, 12 + (i % 45), 30)
+        : "2026-08-24T14:" + String(12 + (i % 45)).padStart(2, "0") + ":30Z",
       expiry: "2026-09-18",
       sector: "Technology",
       marketcap: 1e10,
@@ -2816,8 +3492,90 @@ function tradingDaysEndingAt(endDate, count) {
   return out.reverse();
 }
 
-function fakeEnrichment(ticker, spot, seed) {
+const FAKE_CHARM_SCALE = 50;
+const FAKE_RATE = 0.04;
+const fakeLadders = new Map();
+
+function tickerSeed(ticker) {
+  let h = 2166136261;
+  for (const ch of String(ticker)) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
+  return h;
+}
+
+export function fakeOiLadder(ticker, spot, iv) {
+  const rnd = mulberry(tickerSeed(ticker));
+  const vol = Number.isFinite(iv) && iv > 0.02 ? iv : 0.3;
+  const strikes = Array.from({ length: 41 }, (_, j) => spot * (0.7 + j * 0.015));
+  const expiries = Array.from({ length: 6 }, (_, i) => ({
+    expiry: new Date(Date.UTC(2026, 7, 28) + i * 7 * 86400000).toISOString().slice(0, 10),
+    days: i * 7 + 4,
+  }));
+  const oiCall = [], oiPut = [];
+  for (let i = 0; i < expiries.length; i++) {
+    const depth = 1 / (1 + i * 0.35);
+    oiCall.push(strikes.map((k) => {
+      const w = Math.exp(-Math.pow((k - spot * 1.05) / (spot * 0.12), 2));
+      return Math.round(4000 * depth * w * (0.4 + rnd()));
+    }));
+    oiPut.push(strikes.map((k) => {
+      const w = Math.exp(-Math.pow((k - spot * 0.94) / (spot * 0.12), 2));
+      return Math.round(3500 * depth * w * (0.4 + rnd()));
+    }));
+  }
+  const ladder = { ticker, spot, vol, strikes, expiries, oiCall, oiPut };
+  fakeLadders.set(ticker, ladder);
+  return ladder;
+}
+
+export function fakeLadderGreeks(ladder) {
+  const { spot, vol, strikes, expiries, oiCall, oiPut } = ladder;
+  const rows = expiries.map((e, i) => {
+    const out = { expiry: e.expiry, dte: e.days, gc: 0, gp: 0, dc: 0, dp: 0, vc: 0, vp: 0, cc: 0, cp: 0 };
+    strikes.forEach((k, j) => {
+      const c = blackScholesGreeks({ spot, strike: k, days: e.days, vol, rate: FAKE_RATE, type: "C" });
+      const p = blackScholesGreeks({ spot, strike: k, days: e.days, vol, rate: FAKE_RATE, type: "P" });
+      const nc = oiCall[i][j] * 100, np = oiPut[i][j] * 100;
+      out.gc += c.gamma * nc; out.gp += p.gamma * np;
+      out.dc += c.delta * nc; out.dp += p.delta * np;
+      out.vc += c.vanna * nc; out.vp += p.vanna * np;
+      out.cc += FAKE_CHARM_SCALE * c.charmPerDay * nc; out.cp += FAKE_CHARM_SCALE * p.charmPerDay * np;
+    });
+    return out;
+  });
+  const byStrike = strikes.map((k, j) => {
+    let gc = 0, gp = 0;
+    expiries.forEach((e, i) => {
+      const g = blackScholesGreeks({ spot, strike: k, days: e.days, vol, rate: FAKE_RATE, type: "C" }).gamma;
+      gc += g * oiCall[i][j] * 100;
+      gp += g * oiPut[i][j] * 100;
+    });
+    return { gc: gc * spot * spot / 100, gp: gp * spot * spot / 100 };
+  });
+  return { rows, byStrike };
+}
+
+export function fakeLadderChain(ladder, expiry) {
+  const i = ladder.expiries.findIndex((e) => e.expiry === expiry);
+  if (i < 0) return [];
+  const yymmdd = expiry.slice(2, 4) + expiry.slice(5, 7) + expiry.slice(8, 10);
+  const out = [];
+  ladder.strikes.forEach((k, j) => {
+    for (const [cp, oi] of [["C", ladder.oiCall[i][j]], ["P", ladder.oiPut[i][j]]]) {
+      if (!(oi > 0)) continue;
+      out.push({
+        option_symbol: `${ladder.ticker}${yymmdd}${cp}${String(Math.round(k * 1000)).padStart(8, "0")}`,
+        implied_volatility: ladder.vol.toFixed(4),
+        open_interest: oi,
+      });
+    }
+  });
+  return out;
+}
+
+function fakeEnrichment(ticker, spot, seed, iv = null) {
   const rnd = mulberry(seed);
+  const ladder = fakeOiLadder(ticker, spot, iv);
+  const book = fakeLadderGreeks(ladder);
   const bias = rnd() - 0.5;
 
   const greekFlow = Array.from({ length: 60 }, () => {
@@ -2859,51 +3617,241 @@ function fakeEnrichment(ticker, spot, seed) {
       call_gamma_bid: String(callLeg * (0.3 + rnd() * 0.3)),
       put_gamma_ask: String(putLeg * (0.4 + rnd() * 0.3)),
       put_gamma_bid: String(putLeg * (0.3 + rnd() * 0.3)),
-      call_gamma_oi: String(Math.abs(callLeg) * 2 + scale * 0.2),
-      put_gamma_oi: String(-Math.abs(putLeg) * 1.6 - scale * 0.2),
+      call_gamma_oi: String(book.byStrike[i].gc),
+      put_gamma_oi: String(-book.byStrike[i].gp),
       call_gamma_vol: String(Math.abs(callLeg) * rnd() * 2),
       put_gamma_vol: String(-Math.abs(putLeg) * rnd() * 1.4),
     };
   });
 
-  const expiries = Array.from({ length: 6 }, (_, i) => {
+  const expiries = book.rows.map((b, i) => {
+    for (let draw = 0; draw < (i !== 4 ? 8 : 6); draw++) rnd();
     const row = {
-      expiry: new Date(Date.UTC(2026, 7, 28) + i * 7 * 86400000).toISOString().slice(0, 10),
-      dte: i * 7 + 4,
-      call_gex: String(9e6 / (i + 1) * (0.6 + rnd())),
-      put_gex: String(-7e6 / (i + 1) * (0.6 + rnd())),
-      call_delta: String(2.2e8 / (i + 1) * (0.6 + rnd())),
-      put_delta: String(-1.9e8 / (i + 1) * (0.6 + rnd())),
-      call_charm: String(1.0e8 / (i + 1) * (0.6 + rnd())),
-      put_charm: String(-9.4e8 / (i + 1) * (0.6 + rnd())),
+      expiry: b.expiry,
+      dte: b.dte,
+      call_gex: String(b.gc),
+      put_gex: String(-b.gp),
+      call_delta: String(b.dc),
+      put_delta: String(b.dp),
+      call_charm: String(b.cc),
+      put_charm: String(b.cp),
     };
     if (i !== 4) {
-      row.call_vanna = String(1.5e11 / (i + 1) * (0.6 + rnd()));
-      row.put_vanna = String(4.8e11 / (i + 1) * (0.6 + rnd()));
+      row.call_vanna = String(b.vc);
+      row.put_vanna = String(b.vp);
     }
     return row;
+  });
+  const lapsed = book.rows[0];
+  expiries.unshift({
+    expiry: DRY_SESSION_DATE, dte: 0,
+    call_gex: String(lapsed.gc * 0.5), put_gex: String(-lapsed.gp * 0.5),
+    call_delta: String(lapsed.dc * 0.5), put_delta: String(lapsed.dp * 0.5),
+    call_charm: String(lapsed.cc * 0.5), put_charm: String(lapsed.cp * 0.5),
+    call_vanna: String(lapsed.vc * 0.5), put_vanna: String(lapsed.vp * 0.5),
   });
 
   let px = spot;
 
   const days = tradingDaysEndingAt(DRY_SESSION_DATE, 252);
   let s2 = 1.6, lastMove = 0;
-  const ohlc = Array.from({ length: 252 }, (_, i) => {
+  const walk = Array.from({ length: 252 }, (_, i) => {
     s2 = 0.08 + 0.09 * lastMove * lastMove + 0.86 * s2;
     lastMove = Math.sqrt(s2) * (rnd() + rnd() + rnd() - 1.5) * 2;
     const move = px * lastMove / 100;
     const open = px; px = Math.max(1, px + move);
-    return {
+    return { at: days[i], open, close: px, volume: Math.round((3e6 + rnd() * 2e7)) };
+  });
 
-      start_time: new Date(days[i]).toISOString(),
-      open: open.toFixed(2), close: px.toFixed(2),
-      high: (Math.max(open, px) * 1.008).toFixed(2),
-      low: (Math.min(open, px) * 0.992).toFixed(2),
-      volume: Math.round((3e6 + rnd() * 2e7)),
+  const scale = spot > 0 && px > 0 ? spot / px : 1;
+  const ohlc = walk.map((w) => {
+    const open = w.open * scale, close = w.close * scale;
+    return {
+      start_time: new Date(w.at).toISOString(),
+      open: open.toFixed(2), close: close.toFixed(2),
+      high: (Math.max(open, close) * 1.008).toFixed(2),
+      low: (Math.min(open, close) * 0.992).toFixed(2),
+      volume: w.volume,
     };
   });
 
   return { ticker, spot, greekFlow, ticks, strikes, expiries, ohlc };
+}
+
+async function publishPulse({ sessionDate, generatedAt, tickers = [] }) {
+  let crossRaws = null;
+
+  try {
+    const PULSE_FETCHES = {
+      tide: ["/api/market/market-tide", { interval_5m: "true" }],
+      totals: ["/api/market/total-options-volume", { limit: PULSE_CAPS.totals }],
+      oiChange: ["/api/market/oi-change", { limit: MARKET_CROSS_LIMIT }],
+      netImpact: ["/api/market/top-net-impact", { limit: PULSE_CAPS.netImpact }],
+      insiders: ["/api/market/insider-buy-sells", { limit: PULSE_CAPS.insiders }],
+      darkpool: ["/api/darkpool/recent", { limit: MARKET_CROSS_LIMIT }],
+      seasonality: ["/api/seasonality/market", {}],
+    };
+    const raws = {};
+    if (DRY_RUN) {
+      Object.assign(raws, fakePulseRaws(tickers));
+    } else {
+      for (const [feed, [path, params]] of Object.entries(PULSE_FETCHES)) {
+        try {
+          raws[feed] = await uw(path, params);
+        } catch (error) {
+          raws[feed] = { __failed: error && error.message ? error.message : String(error) };
+        }
+      }
+    }
+    const readAt = new Date().toISOString();
+
+    crossRaws = { oiChange: raws.oiChange, darkpool: raws.darkpool, readAt };
+    const pulse = buildPulse(raws);
+    for (const feed of PULSE_FEEDS) {
+      const f = pulse[feed];
+      if (f.status === "quiet") {
+        const first = (Array.isArray(raws[feed]) ? raws[feed] : (raws[feed] && raws[feed].data) || [])[0];
+        if (first && typeof first === "object") {
+          console.log(`  pulse ${feed}: NOTE returned rows but none shaped — first-row keys: ` +
+            Object.keys(first).slice(0, 24).join(", "));
+        }
+      }
+    }
+    await publish("pulse", {
+      v: BOARD_SCHEMA_VERSION,
+      generatedAt, sessionDate,
+
+      readAt,
+      readDay: readDayOf(readAt),
+      refreshed: "nightly",
+      ...pulse,
+    });
+    const okCount = PULSE_FEEDS.filter((f) => pulse[f].status === "ok").length;
+    console.log(`  pulse: ${okCount} of ${PULSE_FEEDS.length} feeds ok — ` +
+      PULSE_FEEDS.map((f) => `${f}:${pulse[f].status}${pulse[f].rows ? ":" + pulse[f].rows.length : pulse[f].points ? ":" + pulse[f].points.length : ""}`).join(" "));
+  } catch (error) {
+    console.warn(`  pulse: ${error.message} — every key above published before this leg ran`);
+  }
+  return crossRaws;
+}
+
+async function publishSectorPremium({ sessionDate, generatedAt }) {
+  try {
+    const raw = DRY_RUN
+      ? fakeSectorEtfs()
+      : await uw("/api/market/sector-etfs", {});
+    const readAt = new Date().toISOString();
+    const wire = unwrapVendorRows(raw);
+    const sectors = sectorLean(raw);
+    const measured = sectors.filter((s) => s.read === "ok").length;
+    const quiet = sectors.filter((s) => s.read === "quiet").length;
+
+    if (wire.length && measured + quiet < SECTOR_ETFS.length / 2) {
+      const first = wire[0];
+      if (first && typeof first === "object") {
+        console.log("  sector:premium: NOTE returned rows but few shaped — first-row keys: " +
+          Object.keys(first).slice(0, 24).join(", "));
+      }
+    }
+
+    await publish("sector:premium", {
+      v: BOARD_SCHEMA_VERSION,
+      generatedAt, sessionDate,
+
+      readAt,
+      readDay: readDayOf(readAt),
+      refreshed: "nightly",
+      vendorDated: false,
+      basis: "SPDR Select Sector ETFs, not GICS index levels",
+
+      units: {
+        bullishPremiumUsd: "usd", bearishPremiumUsd: "usd",
+        grossPremiumUsd: "usd", netPremiumUsd: "usd",
+        leanRatio: "ratio", changeRatio: "ratio",
+        callVolume: "contracts", putVolume: "contracts", stockVolume: "shares",
+      },
+
+      lean: {
+        rank: "leanRatio",
+        relation: "netPremiumUsd = bullishPremiumUsd - bearishPremiumUsd; " +
+          "grossPremiumUsd = bullishPremiumUsd + bearishPremiumUsd; " +
+          "leanRatio = netPremiumUsd / grossPremiumUsd",
+        choice: true,
+        rejected: "ranking the eleven on netPremiumUsd, which ranks them by " +
+          "sector size: XLK clears three orders of magnitude more premium than " +
+          "XLB on an ordinary day, so the dollar difference is dominated by the " +
+          "basket rather than by the lean",
+        undefinedAtZero: "leanRatio is null when grossPremiumUsd is 0 (0/0 is " +
+          "undefined, not neutral); netPremiumUsd stays a visible measured 0",
+      },
+
+      notSameAs: "sector:trix — that key is TRIX on daily closes and contains " +
+        "no option data; the two may disagree for weeks and neither is wrong",
+      sectors,
+      returned: wire.length,
+      measured, quiet,
+      unreadable: sectors.filter((s) => s.read === "unreadable").length,
+
+      status: measured + quiet > 0 ? "ok" : (wire.length ? "unreadable" : "quiet"),
+    });
+    console.log(`  sector:premium: ${measured}/${SECTOR_ETFS.length} sectors leaned` +
+      (quiet ? `, ${quiet} measured-and-empty` : "") +
+      ` from ${wire.length} vendor row(s)`);
+    for (const s of sectors) {
+      if (s.reason) console.warn(`    ${s.sector} (${s.etf}): ${s.read} — ${s.reason}`);
+    }
+  } catch (error) {
+    console.warn(`  sector:premium: ${error.message} — every key above published before this leg ran`);
+  }
+}
+
+async function publishNews({ sessionDate, generatedAt, tickers = [] }) {
+  try {
+    const raw = DRY_RUN
+      ? fakeNewsHeadlines(tickers)
+      : await uw("/api/news/headlines", { limit: NEWS_VENDOR_LIMIT });
+    const readAt = new Date().toISOString();
+    const wire = unwrapVendorRows(raw);
+
+    const news = shapeNews(raw, { requested: NEWS_VENDOR_LIMIT });
+
+    if (news.status === "unreadable") {
+      const first = wire[0];
+      if (first && typeof first === "object") {
+        console.log("  news: NOTE returned rows but none shaped — first-row keys: " +
+          Object.keys(first).slice(0, 24).join(", "));
+      }
+    }
+
+    await publish("news", {
+      v: BOARD_SCHEMA_VERSION,
+      generatedAt, sessionDate,
+
+      readAt,
+      readDay: readDayOf(readAt),
+      refreshed: "nightly",
+
+      cadence: PIPELINE_CADENCE,
+      staleBy: "the next weekday's close",
+      units: { returned: "rows", kept: "rows", shed: "rows", requested: "rows" },
+      scope: "market-wide; `ticker` on this route is a filter on the same path, " +
+        "so per-name news is a filter of `rows[].tickers` rather than a call",
+      ...news,
+    });
+    console.log(`  news: ${news.kept} headline(s) kept of ${news.returned} returned` +
+      (news.shed ? ` (${news.shed} shed by the ${NEWS_ROWS}-row cap)` : "") +
+      (news.atVendorLimit
+        ? ` — WHICH IS THE VENDOR'S MAXIMUM (${NEWS_VENDOR_LIMIT}), so the true ` +
+          "population is unknown and at least that large"
+        : "") +
+      (news.unusable ? `, ${news.unusable} unusable` : "") +
+      (news.undatedSeen
+        ? `, ${news.undatedSeen} undated on the wire (${news.undatedKept} of them kept)`
+        : "") +
+      `; window ${news.oldest || "—"} .. ${news.newest || "—"}`);
+  } catch (error) {
+    console.warn(`  news: ${error.message} — every key above published before this leg ran`);
+  }
 }
 
 async function main() {
@@ -2926,41 +3874,104 @@ async function main() {
 
   const sessionDate = DRY_RUN ? DRY_SESSION_DATE : await resolveSessionDate();
   console.log(`session date: ${sessionDate || "unresolved — falling back to undated calls"}`);
+
+  const intraday = DRY_RUN
+    ? null
+    : intradayRefusal(sessionDate, { allow: process.env.FLOWS_ALLOW_INTRADAY === "1" });
+  if (intraday && intraday.refuse) throw new Error(intraday.message);
+  if (intraday && intraday.allowed) console.warn(`WARNING: ${intraday.message}`);
+
+  const gateOrigin = nextWeekday(sessionDate) || today;
+
+  const archive = {};
+  if (!DRY_RUN) for (const key of sessionArchiveKeys(sessionDate)) archive[key] = await readStored(key);
+  const gate = sameSessionGate({
+    sessionDate,
+    archive,
+    republish: process.env.FLOWS_REPUBLISH_SESSION === "1",
+  });
+  console.log(`session gate: ${gate.mode} — ${gate.note}`);
+  const wall = easternNow();
+  if (gate.skip && sessionDate && wall.date > sessionDate && isWeekday(wall.date) &&
+      wall.minutes >= SESSION_CLOSE_MINUTES) {
+    console.warn(
+      `NOTE: the vendor's SPY series carries no bar for ${wall.date}, so the newest closed ` +
+      `session is ${sessionDate}, which is already archived. On a market holiday that is ` +
+      `correct; if ${wall.date} traded, the vendor has not published its bar yet and the ` +
+      "workflow should be dispatched again once it has.");
+  }
+  if (gate.skip) {
+    const refreshedAt = new Date().toISOString();
+    await publishPulse({ sessionDate, generatedAt: refreshedAt });
+    await publishSectorPremium({ sessionDate, generatedAt: refreshedAt });
+    await publishNews({ sessionDate, generatedAt: refreshedAt });
+    console.log(
+      `unranked refresh done: pulse, sector:premium and news were re-read for ${sessionDate}; ` +
+      "board:long, board:short, board:watch, scores, scoretrack, record, events, movers, " +
+      "market, unusual, flowalerts, cards, brief and meta are left as the store holds them, " +
+      `written by the run that archived this session (${gate.generatedAt || "unstamped"}) as far ` +
+      `as that run got. ${stats.calls} API call(s).`);
+    if (gate.mode === "partial") {
+      console.warn(`  ARCHIVE INCOMPLETE: ${gate.note}`);
+      process.exitCode = 1;
+    }
+    return;
+  }
+
   const dating = await verifyDating(sessionDate);
-  console.log(`dating: date=${dating.date} end_date=${dating.endDate}`);
+  console.log(`dating: date=${dating.date} end_date=${dating.endDate ? "sent" : "dropped"}` +
+    (dating.endDateHonoured === null ? ""
+      : dating.endDateHonoured ? " (honoured by the vendor)"
+        : ` (NOT honoured: the probe returned ${dating.endDateLatest}; candles are cut locally)`) +
+    ` screener date=${dating.screenerDate}`);
 
   const CAP_BANDS = capBands({ min: UNIVERSE.minMarketCap, max: 4e12, ratio: 1.3 });
 
   let screener;
+  let screenerTruncated = 0;
+  let screenerReadAt = null;
   if (DRY_RUN) {
     screener = fakeScreener(420);
+    screenerReadAt = new Date().toISOString();
   } else {
     const byTicker = new Map();
-    let saturated = 0;
-    for (const [min, max] of CAP_BANDS) {
-      const page = await uw("/api/screener/stocks", {
-        min_underlying_price: UNIVERSE.minPrice,
-        min_volume: UNIVERSE.minOptionVolume,
-        min_oi: UNIVERSE.minOpenInterest,
-        min_marketcap: min,
-        ...(max === null ? {} : { max_marketcap: max }),
-      }).catch(() => []);
-      for (const row of page) if (row && row.ticker) byTicker.set(row.ticker, row);
+    let saturated = 0, split = 0;
+    const readBand = (min, max) => uw("/api/screener/stocks", {
+      min_underlying_price: UNIVERSE.minPrice,
+      min_volume: UNIVERSE.minOptionVolume,
+      min_oi: UNIVERSE.minOpenInterest,
+      min_marketcap: min,
+      ...(max === null ? {} : { max_marketcap: max }),
+      ...(sessionDate && dating.screenerDate ? { date: sessionDate } : {}),
+    }).catch(() => []);
+    for (const band of CAP_BANDS) {
+      const [min, max] = band;
+      const swept = await sweepScreenerBand(band, readBand);
+      for (const row of swept.rows) if (row && row.ticker) byTicker.set(row.ticker, row);
       const label = max === null
         ? `>= $${(min / 1e9).toFixed(1)}B`
         : `$${(min / 1e9).toFixed(1)}-${(max / 1e9).toFixed(1)}B`;
 
-      if (page.length >= SCREENER_PAGE_ROWS) saturated++;
-      console.log(`  screener ${label.padEnd(14)} ${String(page.length).padStart(3)} rows` +
-                  `${page.length >= SCREENER_PAGE_ROWS ? " CAP" : "   "}` +
-                  `  (union ${byTicker.size})`);
+      if (swept.split) split++;
+      saturated += swept.truncated;
+      console.log(`  screener ${label.padEnd(14)} ${String(swept.rows.length).padStart(3)} rows` +
+                  `${swept.truncated ? " CAP" : "   "}` +
+                  `  (union ${byTicker.size})` +
+                  (swept.split
+                    ? ` — the first page was full, so the band was split into ` +
+                      `${swept.leaves.length} and read ${swept.reads} time(s)`
+                    : ""));
     }
     screener = [...byTicker.values()];
+    screenerReadAt = new Date().toISOString();
+    screenerTruncated = saturated;
     if (saturated) {
       console.warn(
-        `  screener: ${saturated} of ${CAP_BANDS.length} bands returned the full ` +
-        `${SCREENER_PAGE_ROWS}-row page, so those bands are TRUNCATED and the ` +
-        `universe below them is incomplete. Narrow the ladder's ratio to see more.`);
+        `  screener: ${saturated} band leaf/leaves still returned the full ` +
+        `${SCREENER_PAGE_ROWS}-row page after splitting ${SCREENER_SPLIT_DEPTH} level(s) ` +
+        `deep, so those leaves are TRUNCATED and the universe inside them is incomplete.`);
+    } else if (split) {
+      console.log(`  screener: ${split} full band(s) were split and every leaf read whole`);
     }
   }
 
@@ -2972,7 +3983,7 @@ async function main() {
 
   const withTilt = universe.map((row) => ({ row, tilt: screenerTilt(row) }));
   const tilted = withTilt.filter(({ row }) => {
-    const dte = daysToEarnings(row, today);
+    const dte = daysToEarnings(row, gateOrigin);
     return dte === null || dte < 0 || dte > EARNINGS_GATE_DAYS;
   });
   console.log(`after earnings gate: ${tilted.length}`);
@@ -3000,6 +4011,7 @@ async function main() {
 
   const enriched = [];
   let failed = 0;
+  let pastNames = 0, pastBars = 0, pastLatest = null;
   {
     const lane = poolWidth(2);
     console.log(`  enrichment: ${lane.width} name(s) in flight — ${lane.why}`);
@@ -3008,15 +4020,22 @@ async function main() {
       const ticker = pick.row.ticker;
       const spot = num(pick.row.close);
       try {
-        let features, raw;
+        let raw;
         if (DRY_RUN) {
-          const fake = fakeEnrichment(ticker, spot, 1000 + i);
-          features = computeFeatures({ ...fake, sessionDate, tilt: pick.tilt });
-          raw = fake;
+          const fake = fakeEnrichment(ticker, spot, 1000 + i, pick.tilt ? pick.tilt.iv30 : null);
+          const past = candleCut(fake.ohlc, sessionDate);
+          raw = { ...fake, ohlc: sessionCandles(fake.ohlc, sessionDate) };
+          if (past.past) { pastNames++; pastBars += past.past; }
         } else {
-          ({ features, raw } = await enrich(ticker, spot, sessionDate, dating));
-          features = computeFeatures({ ...raw, ticker, spot, sessionDate, tilt: pick.tilt });
+          const read = await enrich(ticker, spot, sessionDate, dating);
+          raw = read.raw;
+          if (read.pastSession) {
+            pastNames++;
+            pastBars += read.pastSession;
+            if (!pastLatest || read.pastLatest > pastLatest) pastLatest = read.pastLatest;
+          }
         }
+        const features = computeFeatures({ ...raw, ticker, spot, sessionDate, tilt: pick.tilt });
         return { features, raw, tilt: pick.tilt, row: pick.row };
       } catch (error) {
         console.warn(`  ${ticker}: enrichment failed — ${error.message}`);
@@ -3026,6 +4045,17 @@ async function main() {
     for (const e of results) {
       if (e) enriched.push(e); else failed++;
     }
+  }
+  console.log(pastNames
+    ? `  candles: ${pastNames} name(s) came back with ${pastBars} bar(s) dated after ` +
+      `${sessionDate}${pastLatest ? ` (latest ${pastLatest})` : ""} — cut before any feature ` +
+      "read them, so no partial session reaches ATR, realized vol, GARCH, returns or the record"
+    : `  candles: no name returned a bar dated after ${sessionDate || "the session"}`);
+  {
+    const onRead = enriched.filter((e) => e.features.spotBasis !== "session-close").length;
+    console.log(`  reference price: ${enriched.length - onRead} of ${enriched.length} name(s) ` +
+      `priced from the ${sessionDate || "session"} daily close` +
+      (onRead ? `; ${onRead} carried no bar for the session and use the screener's read price` : ""));
   }
 
   const completeness = enriched.length / picks.length;
@@ -3051,6 +4081,9 @@ async function main() {
       `rather than a board of names that cannot be traded at these costs`,
     );
   }
+
+  const variationRun = measureVariationProbes(enriched, sessionDate);
+  for (const line of variationRun.lines) console.log(line);
 
   const { kept: unique, dropped: shareClasses } = collapseShareClasses(liquid);
   for (const d of shareClasses) {
@@ -3086,24 +4119,40 @@ async function main() {
   const previous = {};
   const boardMemory = {};
   for (const side of ["long", "short"]) {
-
-    let read;
-    if (DRY_RUN) {
-      const payload = fakePriorBoard(side, sides[side], sessionDate);
-
-      read = { payload, absent: !payload, status: 0 };
-    } else {
-      read = await readStored("board:" + side);
-    }
-    boardMemory[side] = readBoardMemory(read, sessionDate);
+    const live = DRY_RUN ? fakePriorBoard(side, sides[side], sessionDate) : null;
+    boardMemory[side] = await resolveBoardMemory(side, sessionDate, DRY_RUN
+      ? { reader: async (key) => (key === "board:" + side
+        ? { payload: live, absent: !live, status: 0 }
+        : { payload: null, absent: true, status: 0 }) }
+      : {});
     previous[side] = boardMemory[side].rows;
+  }
+
+  const sessionRowByTicker = new Map(screenerByTicker);
+  for (const e of unique) sessionRowByTicker.set(e.row.ticker, sessionRow(e.row, e.features));
+
+  if (gate.mode === "republish") {
+    const retired = await retireSession(sessionDate);
+    console.log(`  republish: ${retired.removed.length} archive key(s) deleted` +
+      (retired.removed.length ? ` (${retired.removed.join(", ")})` : "") +
+      (retired.absent.length ? `, ${retired.absent.length} already absent` : ""));
+    if (retired.refused.length) {
+      throw new Error(
+        `republish_session: the store refused to delete ${retired.refused.map((r) =>
+          `${r.key} (HTTP ${r.status})`).join(", ")}` +
+        (retired.kept.length ? ` and left ${retired.kept.join(", ")} standing` : "") +
+        " — publishing nothing ranked, so the live boards cannot diverge from an archive " +
+        "this run was unable to replace. scores is always deleted last, so the session still " +
+        "reads as archived, or as partly archived, and a later plain run skips it; dispatch " +
+        "with republish_session again to finish the rewrite");
+    }
   }
 
   const published = {};
   const payloads = {};
   const first = scored[0] || {};
   for (const side of ["long", "short"]) {
-    published[side] = toRows(sides[side], screenerByTicker, previous[side], today);
+    published[side] = toRows(sides[side], sessionRowByTicker, previous[side], gateOrigin);
   }
 
   for (const side of ["long", "short"]) {
@@ -3114,14 +4163,28 @@ async function main() {
         ? `${rows.filter((r) => r.nw).length} new, ` +
           `${rows.filter((r) => r.hy).length} held on incumbency, of ${rows.length} ` +
           `(${memory.incumbents} incumbent${memory.incumbents === 1 ? "" : "s"} from ` +
-          `${memory.sessionDate || "a board carrying no session date"})`
+          `${memory.sessionDate || "a board carrying no session date"})` +
+          (memory.source === "archive" ? ` — read from ${memory.key}` : "")
         : memory.note));
   }
 
   const deepSet = new Set(deepNames(published).map((d) => d.t));
+  const uniqueByTicker = new Map(unique.map((e) => [e.features.ticker, e]));
+  const boardVariation = (ticker) => {
+    const e = uniqueByTicker.get(ticker);
+    if (!e) return null;
+    try {
+      return variationSummary(variation(featuresVariationInput(e, sessionDate),
+        variationOptions(variationRun)));
+    } catch (error) {
+      console.warn(`  variation ${ticker}: ${error.message}`);
+      return null;
+    }
+  };
   for (const side of ["long", "short"]) {
     for (const row of published[side]) {
       if (deepSet.has(row.t)) row.dp = 1;
+      row.variation = boardVariation(row.t);
 
       row.skew = null;
       row.term = null;
@@ -3136,7 +4199,7 @@ async function main() {
       v: BOARD_SCHEMA_VERSION,
       side, generatedAt, sessionDate, rows,
 
-      gateOrigin: today,
+      gateOrigin,
       gateDays: EARNINGS_GATE_DAYS,
 
       memory: {
@@ -3144,6 +4207,7 @@ async function main() {
         sessionDate: boardMemory[side].sessionDate,
         named: boardMemory[side].named,
         incumbents: boardMemory[side].incumbents,
+        source: boardMemory[side].source,
         note: boardMemory[side].note,
       },
       universe: universe.length,
@@ -3159,6 +4223,8 @@ async function main() {
 
       horizonSessions: HORIZON_SESSIONS,
       weights: first.weights || null,
+      scoreVariance: first.scoreVariance || null,
+      variation: boardVariationMeta(variationRun),
       shareClasses,
 
       deep: rows.filter((r) => r.dp).length,
@@ -3183,7 +4249,7 @@ async function main() {
   });
 
   try {
-    const watchRows = toWatchRows(sides.neutralRows, screenerByTicker, tiltByTicker);
+    const watchRows = toWatchRows(sides.neutralRows, sessionRowByTicker, tiltByTicker);
     await publish("board:watch", {
       v: BOARD_SCHEMA_VERSION,
       side: "watch", generatedAt, sessionDate,
@@ -3203,16 +4269,18 @@ async function main() {
     console.warn(`  watch: ${error.message}`);
   }
 
+  let scoresPayload = null;
   if (ARCHIVE_DATE_RE.test(String(sessionDate || ""))) {
     try {
       const scoreRows = scoresRows(sides);
-      await publish(`scores:${sessionDate}`, {
+      scoresPayload = {
         v: BOARD_SCHEMA_VERSION, generatedAt, sessionDate,
         deadBand: sides.deadBand,
         selectionEpoch: SELECTION_EPOCH,
         rows: scoreRows,
         status: scoreRows.length ? "ok" : "empty",
-      });
+      };
+      await publish(`scores:${sessionDate}`, scoresPayload);
       console.log(`  scores: ${scoreRows.length} name(s) archived for ${sessionDate}`);
     } catch (error) {
       console.warn(`  scores: ${error.message}`);
@@ -3269,7 +4337,6 @@ async function main() {
 
   try {
 
-    const gateOrigin = today;
     const stageByTicker = new Map();
     for (const { row } of withTilt) if (row && row.ticker) stageByTicker.set(row.ticker, "screened");
     for (const { row } of tilted) if (row && row.ticker) stageByTicker.set(row.ticker, "eligible");
@@ -3283,7 +4350,7 @@ async function main() {
 
     for (const { row } of withTilt) {
       if (!row || !row.ticker) continue;
-      const dte = daysToEarnings(row, today);
+      const dte = daysToEarnings(row, gateOrigin);
       if (dte !== null && dte >= 0 && dte <= EARNINGS_GATE_DAYS) {
         stageByTicker.set(row.ticker, "gated");
       }
@@ -3339,14 +4406,15 @@ async function main() {
     const { boards: datedBoards, probed: archiveProbed, failed: archiveFailed = 0,
       absent: archiveAbsent = 0, recovered: archiveRecovered = 0,
       statuses: archiveStatuses = [], abandoned: archiveAbandoned = false } = archiveWalk;
-    const recordCloses = buildRecordCloses(enriched, universe, datedBoards, sessionDate);
+    const recordCloses = buildRecordCloses(enriched, datedBoards, sessionDate);
     const recordBreaks = buildRecordBreaks(enriched);
-    const recordCalendar = tradingCalendar([
-      ...enriched.map((e) => (e.raw.ohlc || []).map(candleDate)),
-      datedBoards.map((b) => b.d),
-      [sessionDate],
-    ]);
-    const rec = scoreSessions(datedBoards, recordCloses, recordCalendar, {
+    const calendar = recordCalendar(enriched, datedBoards, sessionDate);
+    const closeSources = recordCloses.sources || { boardPx: 0, boardPxRefused: 0 };
+    console.log(`  record closes: ${recordCloses.size} name(s) from candles cut at ` +
+      `${sessionDate}; ${closeSources.boardPx} archived board price(s) used as closes, ` +
+      `${closeSources.boardPxRefused} refused because their archive was not written ` +
+      "between that session's close and the next open");
+    const rec = scoreSessions(datedBoards, recordCloses, calendar, {
       horizons: RECORD_HORIZONS,
       statedK: HORIZON_SESSIONS,
       maxSessions: RECORD_MAX_SESSIONS,
@@ -3354,9 +4422,11 @@ async function main() {
       epoch: SELECTION_EPOCH,
       breaks: recordBreaks,
     });
-    const features = icTable(datedBoards, recordCloses, recordCalendar, {
+    const features = icTable(datedBoards, recordCloses, calendar, {
       k: HORIZON_SESSIONS, minN: RECORD_IC_MIN_N, pearson, percentileRank,
       breaks: recordBreaks,
+      through: sessionDate,
+      hrSessions: HORIZON_SESSIONS,
     });
     await publish("record", {
       v: BOARD_SCHEMA_VERSION,
@@ -3369,11 +4439,27 @@ async function main() {
       archiveStatuses, archiveAbandoned,
       attrition: RECORD_NOTES.attrition,
       epochNote: RECORD_NOTES.epoch,
+      closeBasis: {
+        candlesThrough: sessionDate,
+        boardPx: closeSources.boardPx,
+        boardPxRefused: closeSources.boardPxRefused,
+        rule: "Forward returns are scored from daily closes cut at this session, never " +
+          "from a bar still trading. An archived board's price is used as a close only " +
+          "when that archive was written between its session's close and the next " +
+          "open; a price read while a later session traded is refused, and a name " +
+          "with no other close for that date is counted lost rather than scored on it.",
+      },
       ...rec,
       features: {
         k: features.k,
         minN: features.minN,
+        sessionMinN: features.sessionMinN,
+        rankedFrom: features.rankedFrom,
+        ranked: features.ranked,
+        through: features.through || null,
         method: RECORD_NOTES.method,
+        perSession: RECORD_NOTES.perSession,
+        ranking: RECORD_NOTES.ranking,
         selection: RECORD_NOTES.selection,
         overlap: RECORD_NOTES.overlap,
         calendar: RECORD_NOTES.calendar,
@@ -3381,12 +4467,17 @@ async function main() {
       },
     });
     const measuredCols = features.cols.filter((c) => c.ic !== null).length;
+    const sessionCols = features.cols.filter((c) => c.icMean !== null);
     console.log(
       `  record: ${rec.retained} retained session(s) of ${archiveProbed} dated key(s) probed` +
       (archiveFailed ? ` (${archiveFailed} READ FAILED, so "retained" is a floor` +
         `${archiveAbandoned ? " and the walk was abandoned" : ""})` : "") + ", " +
       `${rec.sessions.length} scored at k=${HORIZON_SESSIONS}; ` +
-      `features ${measuredCols}/${features.cols.length} measured`);
+      `features ${measuredCols}/${features.cols.length} measured pooled, ` +
+      `${sessionCols.length} per session over ` +
+      `${sessionCols.length ? Math.max(...sessionCols.map((c) => c.icSessions)) : 0} session(s), ` +
+      `${features.ranked} ranked (a rank needs ${features.rankedFrom} sessions)` +
+      (features.unscaled ? `; ${features.unscaled} row(s) had no entry volatility to scale by` : ""));
 
     if (rec.horizons && rec.horizons.length) {
       const leg = (ls, n) => ls === null || !n
@@ -3466,7 +4557,7 @@ async function main() {
             timeframe: "1Y",
             ...(sessionDate && dating.endDate ? { end_date: sessionDate } : {}),
           }).catch(() => []);
-        candlesByEtf.set(etf, candles);
+        candlesByEtf.set(etf, sessionCandles(candles, sessionDate));
       }
 
       const sectors = sectorTrix(candlesByEtf);
@@ -3506,6 +4597,8 @@ async function main() {
   }
 
   const chainByTicker = new Map();
+  const vannaSamples = [];
+  const chainMiss = new Map();
   try {
 
   const deep = deepNames({ long: payloads.long.rows, short: payloads.short.rows });
@@ -3522,6 +4615,7 @@ async function main() {
 
   let chainProbed = false;
   const expiriesByTicker = new Map(liquid.map((e) => [e.features.ticker, e.raw.expiries || []]));
+  const spotOfLiquid = new Map(liquid.map((e) => [e.features.ticker, e.features.spot]));
 
   if (Date.now() > stats.startedAt + DEADLINE_MS) {
     console.warn(
@@ -3531,19 +4625,52 @@ async function main() {
     const chainDeadline = stats.startedAt + DEADLINE_MS - CHAIN_RESERVE_MS;
     let scalarsRecovered = 0;
 
+    const paging = { names: 0, extra: 0, completed: 0, stillFull: 0, ignored: 0, oneBased: 0 };
+
     const chainLane = poolWidth();
     console.log(`  chains: ${boardTickers.length} name(s), ${chainLane.width} in flight — ${chainLane.why}`);
     const chainRun = await runPooled(boardTickers, async (ticker, index) => {
       try {
-        const rows = DRY_RUN
+        const readPage = async (page) => (DRY_RUN
 
           ? fakeChain(ticker, spotByTicker.get(ticker) || 100, 7000 + index,
-            { wide: index < 2 })
+            { wide: index < 4, page: index === 0 ? page : index === 2 ? Math.max(0, page - 1) : 0 })
           : await uw(`/api/stock/${ticker}/option-contracts`, {
 
             exclude_zero_oi_chains: "true",
             limit: CHAIN_PAGE_SIZE,
-          });
+            ...(page ? { page } : {}),
+          }));
+        const firstPage = await readPage(0);
+        const pages = [firstPage];
+        let nextPage = 1, countedFromOne = false;
+        while (pages[pages.length - 1].length >= CHAIN_PAGE_SIZE && pages.length < CHAIN_MAX_PAGES &&
+               Date.now() < chainDeadline) {
+          let next;
+          try { next = await readPage(nextPage); } catch (error) {
+            console.warn(`  chain ${ticker}: page ${nextPage} failed — ${error.message}`);
+            break;
+          }
+          next = Array.isArray(next) ? next : [];
+          nextPage++;
+          if (nextPage === 2 && next.length &&
+              mergeChainPages([firstPage, next]).duplicates === next.length) {
+            countedFromOne = true;
+            continue;
+          }
+          pages.push(next);
+          if (mergeChainPages(pages).duplicates) break;
+        }
+        const merged = mergeChainPages(pages);
+        const rows = merged.rows;
+        if (nextPage > 1) {
+          paging.names++;
+          paging.extra += nextPage - 1;
+          if (merged.complete) paging.completed++;
+          else if (merged.duplicates || (countedFromOne && pages.length === 1)) paging.ignored++;
+          else paging.stillFull++;
+          if (countedFromOne && !merged.duplicates && pages.length > 1) paging.oneBased++;
+        }
 
         if (!chainReported && rows.length) {
           chainReported = true;
@@ -3563,7 +4690,10 @@ async function main() {
           spot: spotByTicker.get(ticker) || null,
           asOf: sessionDate,
           ticker,
+          ...(pages.length > 1 ? { complete: merged.complete, pages: pages.length } : {}),
         });
+        let vannaRows = panels.status === "ok" && !panels.truncated ? rows : null;
+        let vannaExpiry = null;
 
         if (panels.status === "ok" && panels.truncated && Date.now() < chainDeadline) {
           const near = nearestProbeExpiry(expiriesByTicker.get(ticker), {
@@ -3580,6 +4710,10 @@ async function main() {
                   exclude_zero_oi_chains: "true",
                   limit: CHAIN_PAGE_SIZE,
                 });
+              if (Array.isArray(narrow) && narrow.length && narrow.length < CHAIN_PAGE_SIZE) {
+                vannaRows = narrow;
+                vannaExpiry = near;
+              }
               const narrowPanels = buildChainPanels(narrow, {
                 spot: spotByTicker.get(ticker) || null,
                 asOf: sessionDate,
@@ -3631,6 +4765,16 @@ async function main() {
         } catch (error) {
           console.warn(`  chain probe (${ticker}): ${error.message} — the chain itself stands`);
         }
+        try {
+          const sample = vannaProbeSample(ticker, {
+            rows: vannaRows, expiry: vannaExpiry, sessionDate,
+            expiries: expiriesByTicker.get(ticker),
+            spot: spotOfLiquid.get(ticker) || spotByTicker.get(ticker) || null,
+          });
+          if (sample) vannaSamples.push(sample);
+        } catch (error) {
+          console.warn(`  vanna check (${ticker}): ${error.message}`);
+        }
         return panels;
       } catch (error) {
         console.warn(`  chain ${ticker}: ${error.message}`);
@@ -3646,7 +4790,13 @@ async function main() {
     boardTickers.forEach((ticker, i) => {
       if (!chainRun.attempted[i]) { chainSkipped++; return; }
       const panels = chainRun.results[i];
-      if (!panels) { chainFailed++; return; }
+      if (!panels) {
+        chainFailed++;
+        chainMiss.set(ticker, "the option-chain read for this name failed this session, so " +
+          "no contract-level panel could be built from it — the failure is named in the run " +
+          "log, and the next run reads the chain again");
+        return;
+      }
       chainByTicker.set(ticker, panels);
       if (panels.status === "ok") chainOk++; else chainFailed++;
     });
@@ -3658,6 +4808,20 @@ async function main() {
     const built = [...chainByTicker.entries()].filter(([, c]) => c.status === "ok");
     const levelled = built.filter(([, c]) => c.scalars.atmIv !== null).length;
     const skewed = built.filter(([, c]) => c.scalars.skew !== null).length;
+    if (paging.names) {
+      console.log(
+        `  chains: ${paging.names} full first page(s) read on with ${paging.extra} further ` +
+        `page call(s) (up to ${CHAIN_MAX_PAGES} pages a name): ${paging.completed} now complete, ` +
+        `${paging.stillFull} still full at the last page` +
+        (paging.ignored
+          ? `, ${paging.ignored} where a later page repeated contracts already read — ` +
+            "PAGE IGNORED or the order is unstable, so those stay truncated rather than claimed whole"
+          : "") +
+        (paging.oneBased
+          ? `; on ${paging.oneBased} name(s) page=1 returned the first page again, so the ` +
+            "vendor was read as counting pages from one there (the spec says zero)"
+          : ""));
+    }
     console.log(
       `  chains: ${chainOk} built, ${chainFailed} failed` +
       (chainSkipped ? `, ${chainSkipped} skipped for the deadline` : "") +
@@ -3708,12 +4872,25 @@ async function main() {
     }
   }
 
-  if (chainByTicker.size) {
-    for (const line of await republishWithChain(payloads, chainByTicker, sessionDate, publish)) {
-      console.log(line);
-    }
-  } else {
+  variationRun.vannaScale = vannaScale(vannaSamples, { prior: variationRun.unit.used });
+  console.log(`  variation: vanna scale ${variationRun.vannaScale.status}` +
+    (variationRun.vannaScale.ratio === null ? "" : `, vendor over Black-Scholes ${variationRun.vannaScale.ratio}`) +
+    ` across ${variationRun.vannaScale.n} name(s) with a complete single-expiry chain` +
+    `, read in ${variationRun.vannaScale.used === "pct$" ? "dollars per 1% move" : "shares"} (unit ${variationRun.vannaScale.family}: ` +
+    `${variationRun.vannaScale.votes.share} share, ${variationRun.vannaScale.votes.pct} dollars-per-1% among names priced far enough from $100 to tell them apart)` +
+    (variationRun.vannaScale.reason ? ` — ${variationRun.vannaScale.reason}` : ""));
+  const refreshVariation = variationRun.vannaScale.status === "unmeasured" ? null : (row) => {
+    const next = boardVariation(row.t);
+    if (!next) return false;
+    row.variation = next;
+    return true;
+  };
 
+  for (const line of await republishWithChain(payloads, chainByTicker, sessionDate, publish,
+    refreshVariation, boardVariationMeta(variationRun))) {
+    console.log(line);
+  }
+  if (!chainByTicker.size) {
     for (const line of await archiveDatedBoards(payloads, sessionDate, publish)) {
       console.log(line);
     }
@@ -3733,6 +4910,7 @@ async function main() {
       coverage.push({
         t: ticker,
         rows: Number(c.rowsSeen) || 0,
+        pages: Number(c.pagesRead) || 1,
         p: c.truncated ? 1 : 0,
         ivDivisor: Number.isFinite(c.ivDivisor) ? c.ivDivisor : null,
         ivBasis: c.ivBasis || null,
@@ -3740,6 +4918,9 @@ async function main() {
     }
     const namesSeen = coverage.length;
     const contracts = rankUnusual(pooled, { namesSeen });
+    const pooledOiBasis = poolOiBasis(
+      [...chainByTicker.values()].filter((c) => c && c.status === "ok").map((c) => c.oiBasis),
+      { dryRun: DRY_RUN });
     const names = rankUnusualNames(withTilt);
 
     const priorUnusual = DRY_RUN
@@ -3781,6 +4962,11 @@ async function main() {
         date: UNUSUAL_NOTES.date,
         rank: { key: "vor", choice: true, relation: "vor = volume / open_interest",
           reason: UNUSUAL_NOTES.rank },
+        oiBasis: {
+          chains: pooledOiBasis.chains, seen: pooledOiBasis.seen,
+          exceeded: pooledOiBasis.exceeded, exceedShare: pooledOiBasis.exceedShare,
+          minSeen: pooledOiBasis.minSeen, verdict: pooledOiBasis.verdict,
+        },
         floors: { minVolume: UA_MIN_VOLUME, minOi: UA_MIN_OI, perName: contracts.perName,
           choice: true,
           reason: "A minimum volume keeps a 200-lot on a five-contract open interest " +
@@ -3804,7 +4990,7 @@ async function main() {
           "`prior.sessionDate` and `prior.readAt` name the session and the read time the " +
           "comparison was made against. It is a statement about this list, not about the " +
           "strike: a contract can be absent from the earlier feed because it was quiet, or " +
-          "because it sat below the per-name cap that morning.",
+          "because it sat below the per-name cap on that run.",
         lift: UNUSUAL_NOTES.lift,
         notional: UNUSUAL_NOTES.notional,
         iv: UNUSUAL_NOTES.iv,
@@ -3842,22 +5028,20 @@ async function main() {
                 "row claims to be new"
               : "no prior feed could be read, so no row claims to be new"));
 
-    const firstChain = [...chainByTicker.values()].find(
-      (c) => c && c.status === "ok" && c.oiBasis && c.oiBasis.seen > 0);
-    if (firstChain) {
-      console.log("  " + (DRY_RUN ? "[dry-run] " : "") + firstChain.oiBasis.line +
-        (DRY_RUN
-          ? " On synthetic rows this is two unrelated fixture formulas disagreeing," +
-            " and is not evidence about the vendor."
-          : ""));
-    }
+    console.log("  " + pooledOiBasis.line +
+      (DRY_RUN
+        ? " On synthetic rows this is two unrelated fixture formulas disagreeing," +
+          " and is not evidence about the vendor."
+        : ""));
 
     try {
       const raw = DRY_RUN
         ? fakeFlowAlerts((payloads.long.rows || []).map((r) => r.t))
         : await uw("/api/option-trades/flow-alerts", { limit: ALERT_VENDOR_LIMIT });
+      const alertsReadAt = new Date().toISOString();
 
-      const alertRowCount = unwrapVendorRows(raw).length;
+      const vendorRows = unwrapVendorRows(raw);
+      const alertRowCount = vendorRows.length;
 
       const survivors = new Set((tilted || []).map((x) => x.row && x.row.ticker));
       const stage = new Map();
@@ -3872,17 +5056,42 @@ async function main() {
       }
 
       const alerts = buildFlowAlerts(raw, { stageOf: (t) => stage.get(t) || null });
-      await publish("flowalerts", {
-        v: BOARD_SCHEMA_VERSION,
-        generatedAt, sessionDate,
+      const night = nightlyAlerts(alerts, await readStored("flowalerts"),
+        { sessionDate, at: alertsReadAt, stageOf: (t) => stage.get(t) || null });
+      let liveAlerts = night.held;
+      if (night.alerts) {
+        liveAlerts = {
+          v: BOARD_SCHEMA_VERSION,
+          generatedAt, sessionDate,
 
-        readAt: new Date().toISOString(),
-        refreshed: "nightly",
-        ...alerts,
+          readAt: alertsReadAt,
+          readDay: readDayOf(alertsReadAt),
+          refreshed: "nightly",
+          ...night.alerts,
 
-        vendorLimit: ALERT_VENDOR_LIMIT,
-        vendorTruncated: alertRowCount >= ALERT_VENDOR_LIMIT,
-      });
+          vendorLimit: ALERT_VENDOR_LIMIT,
+          vendorTruncated: alertRowCount >= ALERT_VENDOR_LIMIT,
+          readLimit: night.readLimit,
+          readTruncated: night.readTruncated,
+        };
+        await publish("flowalerts", liveAlerts);
+      } else if (night.held) {
+        publishedStore.flowalerts = night.held;
+      }
+      const nightSaid = {
+        merged: () => `merged into the ${sessionDate} intraday record, now ${night.alerts.record.reads} ` +
+          `read(s) holding ${night.alerts.rows.length} of ${night.alerts.seen} window(s) ` +
+          `(${night.alerts.record.entered} new, ${night.alerts.record.again} seen again)`,
+        kept: () => `NOT WRITTEN — the store holds the ${sessionDate} intraday record and this read ` +
+          "shaped no rows, so the record stands rather than being replaced by an empty read",
+        newer: () => `NOT WRITTEN — the store holds the ${night.day} intraday record, a later session ` +
+          `than ${sessionDate}, and a read published under ${sessionDate} would replace it`,
+        unverified: () => "NOT WRITTEN — the stored feed could not be read, so whether it is this " +
+          "session's intraday record is unknown and a single read would replace it; the brief " +
+          "states no alert count",
+        snapshot: () => `published as a single read — the store holds no intraday record for ${sessionDate}`,
+      };
+      console.log("  flow-alerts: " + nightSaid[night.mode]());
       console.log(
         `  flow-alerts: ${alerts.rows.length} alert(s) kept of ${alerts.seen}` +
         (alertRowCount >= ALERT_VENDOR_LIMIT
@@ -3894,10 +5103,23 @@ async function main() {
         (alerts.unusable ? `, ${alerts.unusable} unusable` : "") +
         `; ${alerts.coverage.sweeps} sweep-flagged, ${alerts.coverage.opening} all-opening, ` +
         `${alerts.coverage.calls}C/${alerts.coverage.puts}P of ${alerts.coverage.withContract} with a parsed contract`);
+      const first = vendorRows.find((r) => r && typeof r === "object") || null;
+      console.log(`  flow-alerts: time fields on the first row — start_time ${first ? typeof first.start_time : "absent"}, ` +
+        `end_time ${first ? typeof first.end_time : "absent"}, created_at ${first ? typeof first.created_at : "absent"}; ` +
+        `${alerts.coverage.withSpan} of ${alerts.rows.length} kept rows carry a window` +
+        (alerts.coverage.spanFromCreated ? `, ${alerts.coverage.spanFromCreated} of them dated only by created_at` : ""));
+      if (alerts.rows.length && alerts.coverage.withSpan < alerts.rows.length / 2) {
+        console.warn(`  flow-alerts: NOTE only ${alerts.coverage.withSpan} of ${alerts.rows.length} kept rows carry a ` +
+          "time window, so the Window column is mostly a dash and repeated windows on one contract " +
+          "collapse into one row of the day's record — first-row sample: " +
+          JSON.stringify(first ? { start_time: first.start_time ?? null, end_time: first.end_time ?? null,
+            created_at: first.created_at ?? null } : null));
+      }
 
       if (moversPayload) {
         try {
-          moversPayload.premium = { ...moversPayload.premium, byContract: alertBand(alerts.rows) };
+          moversPayload.premium = { ...moversPayload.premium,
+            byContract: alertBand(liveAlerts && Array.isArray(liveAlerts.rows) ? liveAlerts.rows : alerts.rows) };
           await publish("movers", moversPayload);
           console.log(`  movers band: ${moversPayload.premium.byContract.rows.length} contract window(s) ` +
             `of ${moversPayload.premium.byContract.seen} priced alerts`);
@@ -3917,57 +5139,9 @@ async function main() {
       "and are unaffected");
   }
 
-  let crossRaws = null;
-
-  try {
-    const PULSE_FETCHES = {
-      tide: ["/api/market/market-tide", { interval_5m: "true" }],
-      totals: ["/api/market/total-options-volume", { limit: PULSE_CAPS.totals }],
-      oiChange: ["/api/market/oi-change", { limit: MARKET_CROSS_LIMIT }],
-      netImpact: ["/api/market/top-net-impact", { limit: PULSE_CAPS.netImpact }],
-      insiders: ["/api/market/insider-buy-sells", { limit: PULSE_CAPS.insiders }],
-      darkpool: ["/api/darkpool/recent", { limit: MARKET_CROSS_LIMIT }],
-      seasonality: ["/api/seasonality/market", {}],
-    };
-    const raws = {};
-    if (DRY_RUN) {
-      Object.assign(raws, fakePulseRaws((payloads.long.rows || []).map((r) => r.t)));
-    } else {
-      for (const [feed, [path, params]] of Object.entries(PULSE_FETCHES)) {
-        try {
-          raws[feed] = await uw(path, params);
-        } catch (error) {
-          raws[feed] = { __failed: error && error.message ? error.message : String(error) };
-        }
-      }
-    }
-
-    crossRaws = { oiChange: raws.oiChange, darkpool: raws.darkpool };
-    const pulse = buildPulse(raws);
-    for (const feed of PULSE_FEEDS) {
-      const f = pulse[feed];
-      if (f.status === "quiet") {
-        const first = (Array.isArray(raws[feed]) ? raws[feed] : (raws[feed] && raws[feed].data) || [])[0];
-        if (first && typeof first === "object") {
-          console.log(`  pulse ${feed}: NOTE returned rows but none shaped — first-row keys: ` +
-            Object.keys(first).slice(0, 24).join(", "));
-        }
-      }
-    }
-    await publish("pulse", {
-      v: BOARD_SCHEMA_VERSION,
-      generatedAt, sessionDate,
-
-      readAt: new Date().toISOString(),
-      refreshed: "nightly",
-      ...pulse,
-    });
-    const okCount = PULSE_FEEDS.filter((f) => pulse[f].status === "ok").length;
-    console.log(`  pulse: ${okCount} of ${PULSE_FEEDS.length} feeds ok — ` +
-      PULSE_FEEDS.map((f) => `${f}:${pulse[f].status}${pulse[f].rows ? ":" + pulse[f].rows.length : pulse[f].points ? ":" + pulse[f].points.length : ""}`).join(" "));
-  } catch (error) {
-    console.warn(`  pulse: ${error.message} — every key above published before this leg ran`);
-  }
+  const crossRaws = await publishPulse({
+    sessionDate, generatedAt, tickers: (payloads.long.rows || []).map((r) => r.t),
+  });
 
   let politicalFilings = null;
 
@@ -4061,7 +5235,12 @@ async function main() {
 
       const holderNames = deepNames(published, POLITICAL_HOLDER_NAMES).map((d) => d.t);
       const holders = [];
-      for (const ticker of holderNames) {
+      const refusal = holdersRefusal(await fetchStoredPayload("political"), sessionDate);
+      if (refusal) {
+        raws.holders = { __failed: refusal.reason };
+        console.log(`  political holders: ${refusal.reason}`);
+      }
+      for (const ticker of refusal ? [] : holderNames) {
         try {
           holders.push({ ticker, raw: await uw(`/api/politician-portfolios/holders/${ticker}`, {}) });
         } catch (error) {
@@ -4116,154 +5295,33 @@ async function main() {
     console.warn(`  political: ${error.message} — every key above published before this leg ran`);
   }
 
-  try {
-    const raw = DRY_RUN
-      ? fakeSectorEtfs()
-      : await uw("/api/market/sector-etfs", {});
-    const wire = unwrapVendorRows(raw);
-    const sectors = sectorLean(raw);
-    const measured = sectors.filter((s) => s.read === "ok").length;
-    const quiet = sectors.filter((s) => s.read === "quiet").length;
+  await publishSectorPremium({ sessionDate, generatedAt });
 
-    if (wire.length && measured + quiet < SECTOR_ETFS.length / 2) {
-      const first = wire[0];
-      if (first && typeof first === "object") {
-        console.log("  sector:premium: NOTE returned rows but few shaped — first-row keys: " +
-          Object.keys(first).slice(0, 24).join(", "));
-      }
-    }
-
-    await publish("sector:premium", {
-      v: BOARD_SCHEMA_VERSION,
-      generatedAt, sessionDate,
-
-      readAt: new Date().toISOString(),
-      refreshed: "nightly",
-      vendorDated: false,
-      basis: "SPDR Select Sector ETFs, not GICS index levels",
-
-      units: {
-        bullishPremiumUsd: "usd", bearishPremiumUsd: "usd",
-        grossPremiumUsd: "usd", netPremiumUsd: "usd",
-        leanRatio: "ratio", changeRatio: "ratio",
-        callVolume: "contracts", putVolume: "contracts", stockVolume: "shares",
-      },
-
-      lean: {
-        rank: "leanRatio",
-        relation: "netPremiumUsd = bullishPremiumUsd - bearishPremiumUsd; " +
-          "grossPremiumUsd = bullishPremiumUsd + bearishPremiumUsd; " +
-          "leanRatio = netPremiumUsd / grossPremiumUsd",
-        choice: true,
-        rejected: "ranking the eleven on netPremiumUsd, which ranks them by " +
-          "sector size: XLK clears three orders of magnitude more premium than " +
-          "XLB on an ordinary day, so the dollar difference is dominated by the " +
-          "basket rather than by the lean",
-        undefinedAtZero: "leanRatio is null when grossPremiumUsd is 0 (0/0 is " +
-          "undefined, not neutral); netPremiumUsd stays a visible measured 0",
-      },
-
-      notSameAs: "sector:trix — that key is TRIX on daily closes and contains " +
-        "no option data; the two may disagree for weeks and neither is wrong",
-      sectors,
-      returned: wire.length,
-      measured, quiet,
-      unreadable: sectors.filter((s) => s.read === "unreadable").length,
-
-      status: measured + quiet > 0 ? "ok" : (wire.length ? "unreadable" : "quiet"),
-    });
-    console.log(`  sector:premium: ${measured}/${SECTOR_ETFS.length} sectors leaned` +
-      (quiet ? `, ${quiet} measured-and-empty` : "") +
-      ` from ${wire.length} vendor row(s)`);
-    for (const s of sectors) {
-      if (s.reason) console.warn(`    ${s.sector} (${s.etf}): ${s.read} — ${s.reason}`);
-    }
-  } catch (error) {
-    console.warn(`  sector:premium: ${error.message} — every key above published before this leg ran`);
-  }
-
-  try {
-    const raw = DRY_RUN
-      ? fakeNewsHeadlines((payloads.long.rows || []).map((r) => r.t))
-      : await uw("/api/news/headlines", { limit: NEWS_VENDOR_LIMIT });
-    const wire = unwrapVendorRows(raw);
-
-    const news = shapeNews(raw, { requested: NEWS_VENDOR_LIMIT });
-
-    if (news.status === "unreadable") {
-      const first = wire[0];
-      if (first && typeof first === "object") {
-        console.log("  news: NOTE returned rows but none shaped — first-row keys: " +
-          Object.keys(first).slice(0, 24).join(", "));
-      }
-    }
-
-    await publish("news", {
-      v: BOARD_SCHEMA_VERSION,
-      generatedAt, sessionDate,
-
-      readAt: new Date().toISOString(),
-      refreshed: "nightly",
-
-      cadence: "once per weekday morning at 05:15 America/New_York",
-      staleBy: "the close",
-      units: { returned: "rows", kept: "rows", shed: "rows", requested: "rows" },
-      scope: "market-wide; `ticker` on this route is a filter on the same path, " +
-        "so per-name news is a filter of `rows[].tickers` rather than a call",
-      ...news,
-    });
-    console.log(`  news: ${news.kept} headline(s) kept of ${news.returned} returned` +
-      (news.shed ? ` (${news.shed} shed by the ${NEWS_ROWS}-row cap)` : "") +
-      (news.atVendorLimit
-        ? ` — WHICH IS THE VENDOR'S MAXIMUM (${NEWS_VENDOR_LIMIT}), so the true ` +
-          "population is unknown and at least that large"
-        : "") +
-      (news.unusable ? `, ${news.unusable} unusable` : "") +
-      (news.undatedSeen
-        ? `, ${news.undatedSeen} undated on the wire (${news.undatedKept} of them kept)`
-        : "") +
-      `; window ${news.oldest || "—"} .. ${news.newest || "—"}`);
-  } catch (error) {
-    console.warn(`  news: ${error.message} — every key above published before this leg ran`);
-  }
-
-  const probeResults = [];
-  if (!DRY_RUN) {
-
-    const PROBE_PATHS = [
-      ["/api/shorts/AAPL/volume-and-ratio", sessionDate ? { date: sessionDate } : {}],
-    ];
-    for (const [path, params] of PROBE_PATHS) {
-      try {
-        const raw = await uw(path, params);
-        const rows = Array.isArray(raw) ? raw : (raw && raw.data) || [];
-        const first = rows[0];
-        const keys = first && typeof first === "object" ? Object.keys(first).slice(0, 24) : [];
-        probeResults.push({ path, status: "ok", rows: rows.length, keys });
-        console.log(`  probe ${path}: ok — ${rows.length} row(s)` +
-          (keys.length ? `, first-row keys: ${keys.join(", ")}` : ", no readable rows"));
-      } catch (error) {
-        const message = error && error.message ? error.message : String(error);
-        probeResults.push({ path, status: "failed", error: message });
-        console.log(`  probe ${path}: ${message}`);
-      }
-    }
-  }
+  await publishNews({
+    sessionDate, generatedAt, tickers: (payloads.long.rows || []).map((r) => r.t),
+  });
 
   const onBoard = new Map();
   for (const d of deepNames(published)) onBoard.set(d.t, d.side);
   const byTicker = new Map(liquid.map((e) => [e.features.ticker, e]));
   const scoredByTicker = new Map(scored.map((r) => [r.ticker, r]));
 
+  const crossSectionTickers = [...byTicker.keys()].filter((t) => !onBoard.has(t));
+  const cardedTickers = [...onBoard.keys()].concat(crossSectionTickers);
+  const carded = new Set(cardedTickers);
+
   const congressByTicker = new Map();
 
   let congressRead = "not attempted";
+  let congressTapeRows = 0;
+  const congressNamesRead = new Set();
   if (onBoard.size) {
     let marketWide = 0;
     try {
 
       const recent = DRY_RUN
-        ? [...onBoard.keys()].flatMap((t) => fakeCongress(t))
+        ? [...onBoard.keys(), ...crossSectionTickers.filter((_, i) => i % 2 === 0)]
+          .flatMap((t) => fakeCongress(t))
         : await uw("/api/congress/recent-trades", { limit: 100 });
 
       const identity = (r) => `${(r && r.politician_id) || (r && r.name) || ""}|` +
@@ -4278,14 +5336,16 @@ async function main() {
         merged.push(row);
       }
       marketWide = merged.length;
+      congressTapeRows = merged.length;
 
       congressRead = "ok";
       for (const row of merged) {
         const t = row && (row.ticker || row.symbol);
-        if (!t || !onBoard.has(t)) continue;
+        if (!t || !carded.has(t)) continue;
         if (!congressByTicker.has(t)) congressByTicker.set(t, []);
         congressByTicker.get(t).push(row);
       }
+      const boardMatched = [...congressByTicker.keys()].filter((t) => onBoard.has(t)).length;
       console.log(
         `  congress: ${merged.length} disclosure(s) market-wide ` +
         `(${recent.length} from this leg's own page` +
@@ -4293,7 +5353,11 @@ async function main() {
           ? `, ${politicalFilings.length} joined from the political leg's ${POLITICAL_WINDOW_DAYS}-day ladder ` +
             `— the two windows are now one, so a card can no longer deny what /flows/political/ ranks`
           : `; the political ladder read nothing to join, so this card window is the shallow one`) +
-        `), ${congressByTicker.size} of ${onBoard.size} board name(s) matched`);
+        `), ${boardMatched} of ${onBoard.size} board name(s) matched` +
+        (crossSectionTickers.length
+          ? `, and ${congressByTicker.size - boardMatched} of ${crossSectionTickers.length} ` +
+            "cross-section name(s) from the same tape, at no further call"
+          : ""));
     } catch (error) {
       congressRead = "failed";
       console.warn(`  congress: market-wide read failed — ${error.message}`);
@@ -4304,6 +5368,7 @@ async function main() {
       for (const ticker of onBoard.keys()) {
         if (Date.now() > stats.startedAt + DEADLINE_MS) break;
         const rows = await uw("/api/congress/recent-trades", { ticker, limit: 50 })
+          .then((read) => { congressNamesRead.add(ticker); return read; })
           .catch(() => []);
         if (rows.length) { congressByTicker.set(ticker, rows); recovered++; }
       }
@@ -4313,9 +5378,8 @@ async function main() {
         `which costs more than the calls do.`);
     }
   }
-
-  const crossSectionTickers = [...byTicker.keys()].filter((t) => !onBoard.has(t));
-  const cardedTickers = [...onBoard.keys()].concat(crossSectionTickers);
+  const congressState = { byTicker: congressByTicker, read: congressRead,
+    tapeRows: congressTapeRows, namesRead: congressNamesRead };
 
   const marketCross = indexMarketCross({
     oiChange: crossRaws ? crossRaws.oiChange : null,
@@ -4324,6 +5388,7 @@ async function main() {
     tickers: cardedTickers,
     sessionDate,
   });
+  const crossReadDay = crossRaws && crossRaws.readAt ? readDayOf(crossRaws.readAt) : null;
   for (const feed of CROSS_FEEDS) {
     const f = marketCross[feed];
     if (f.status !== "ok") {
@@ -4339,6 +5404,7 @@ async function main() {
           (f.sameSession === false ? ` — NOT this run's session (${sessionDate})` : "") +
           (f.asOfSessions > 1 ? ` and spans ${f.asOfSessions} sessions` : "")
         : "; the feed states no date of its own") +
+      (crossReadDay ? `; read on ${crossReadDay} Eastern` : "") +
       `; order ${f.ordered ? f.ordered + " by " + f.orderedBy : "not measurable from the rows"}`);
     if (f.coverage.of && f.coverage.in * 5 < f.coverage.of) {
       console.warn(
@@ -4349,6 +5415,8 @@ async function main() {
   }
 
   let surfaceReported = false;
+  const onSession = ARCHIVE_DATE_RE.test(String(sessionDate || "")) ? { date: sessionDate } : {};
+  const perNameCut = { names: 0, darkpool: 0, ivRank: 0 };
   const deadline = stats.startedAt + DEADLINE_MS;
   const cardTickers = [...onBoard.keys()];
   const cardLane = poolWidth(2);
@@ -4361,18 +5429,18 @@ async function main() {
 
       const surfaceExpiries = (e.raw.expiries || [])
         .map((r) => (r && r.expiry ? String(r.expiry).slice(0, 10) : null))
-        .filter((d) => d && (!sessionDate || d >= sessionDate))
+        .filter((d) => d && (!sessionDate || d > sessionDate))
         .sort()
         .slice(0, SURFACE_EXPIRIES);
 
-      const spotPx = num(e.row.close);
+      const spotPx = num(e.features.spot) || num(e.row.close);
 
-      const congress = congressByTicker.get(ticker)
-        || (congressRead === "ok" ? [] : null);
+      const congress = congressRows(ticker, congressState);
       const [maxPain, surface, dpRaw, oiRaw, termRaw, rankRaw] = DRY_RUN
         ? [fakeMaxPain(ticker, spotPx), fakeSurface(ticker, spotPx, surfaceExpiries),
            fakeStockDarkpool(ticker, spotPx), fakeStockOiChange(ticker, spotPx),
-           fakeTermStructure(ticker, spotPx), fakeIvRank(ticker, spotPx)]
+           fakeTermStructure(ticker, spotPx, sessionDate ? { date: sessionDate } : {}),
+           fakeIvRank(ticker, spotPx, IV_RANK_PARAMS)]
         : await Promise.all([
 
           uw(`/api/stock/${ticker}/max-pain`, sessionDate ? { date: sessionDate } : {}).catch(() => []),
@@ -4389,11 +5457,19 @@ async function main() {
             }).catch(() => [])
             : Promise.resolve([]),
 
-          uw(`/api/darkpool/${ticker}`, { limit: 60 }).catch(() => null),
-          uw(`/api/stock/${ticker}/oi-change`, { limit: 30 }).catch(() => null),
-          uw(`/api/stock/${ticker}/volatility/term-structure`, {}).catch(() => null),
-          uw(`/api/stock/${ticker}/iv-rank`, { limit: 70 }).catch(() => null),
+          uw(`/api/darkpool/${ticker}`, { limit: 60, ...onSession }).catch(() => null),
+          uw(`/api/stock/${ticker}/oi-change`, { limit: 30, ...onSession }).catch(() => null),
+          uw(`/api/stock/${ticker}/volatility/term-structure`, { ...onSession }).catch(() => null),
+          uw(`/api/stock/${ticker}/iv-rank`, { ...IV_RANK_PARAMS, ...onSession }).catch(() => null),
         ]);
+      const darkpoolCut = sessionRows(dpRaw, (r) => easternDayOf(r && r.executed_at), sessionDate);
+      const rankCut = sessionRows(rankRaw, (r) => easternDayOf(r && r.date), sessionDate,
+        { through: true });
+      if (darkpoolCut.cut || rankCut.cut) {
+        perNameCut.names++;
+        perNameCut.darkpool += darkpoolCut.cut;
+        perNameCut.ivRank += rankCut.cut;
+      }
 
       if (!surfaceReported && !DRY_RUN) {
         surfaceReported = true;
@@ -4417,7 +5493,7 @@ async function main() {
 
       const card = buildCard({
         ticker,
-        row: e.row,
+        row: sessionRow(e.row, e.features),
         features: { ...e.features, ...(scoredByTicker.get(ticker) || {}) },
         strikes: e.raw.strikes,
         ticks: e.raw.ticks,
@@ -4425,6 +5501,7 @@ async function main() {
         expiries: e.raw.expiries,
         surface,
         chain: chainByTicker.get(ticker) || null,
+        chainMissing: chainMiss.get(ticker) || null,
 
         scoreHistory: scoreTrack
           ? {
@@ -4437,10 +5514,12 @@ async function main() {
           : null,
         weights: first.weights || null,
         maxPain, congress, generatedAt, sessionDate,
-        darkpool: dpRaw, oiDeltas: oiRaw, termStructure: termRaw, ivRank: rankRaw,
+        darkpool: darkpoolCut.raw, oiDeltas: oiRaw, termStructure: termRaw, ivRank: rankCut.raw,
 
         marketCross,
+        variation: variationOptions(variationRun),
       });
+      card.readPx = readPxOf(e, screenerReadAt);
 
       const shed = [
         ["topContracts", "dropped to fit the payload cap — the day's most-traded contracts " +
@@ -4498,6 +5577,11 @@ async function main() {
   });
 
   const cards = foldCardOutcomes(cardTickers, cardsRun);
+  if (perNameCut.names) {
+    console.log(`  per-name feeds: ${perNameCut.names} card(s) carried rows from outside ` +
+      `${sessionDate} — ${perNameCut.darkpool} dark-pool print(s) not on the session and ` +
+      `${perNameCut.ivRank} IV-rank row(s) dated after it were cut before the card was built`);
+  }
   const { built: cardsBuilt, failed: cardsFailed, skipped: cardsSkipped,
     unenriched, deadlineSkipped, gammaProfiles } = cards;
 
@@ -4559,13 +5643,15 @@ async function main() {
         try {
           const card = buildCard({
             ticker,
-            row: e.row,
+            row: sessionRow(e.row, e.features),
             features: { ...e.features, ...(scoredByTicker.get(ticker) || {}) },
             strikes: e.raw.strikes,
             ticks: e.raw.ticks,
             expiries: e.raw.expiries,
 
-            surface: null, chain: null, maxPain: null, congress: null,
+            surface: null, chain: null, maxPain: null,
+
+            congress: congressRows(ticker, congressState),
             darkpool: null, oiDeltas: null, termStructure: null, ivRank: null,
             scoreHistory: scoreTrack
               ? {
@@ -4579,7 +5665,9 @@ async function main() {
             generatedAt, sessionDate,
             marketCross,
             unfetched,
+            variation: variationOptions(variationRun),
           });
+          card.readPx = readPxOf(e, screenerReadAt);
           const body = JSON.stringify(card);
 
           if (body.length > 100 * 1024) {
@@ -4620,6 +5708,36 @@ async function main() {
   const pruned = await prunePromise;
   if (pruned === null) console.warn("  prune: the sweep did not complete this run");
 
+  if (ARCHIVE_DATE_RE.test(String(sessionDate || ""))) {
+    const archive = await ensureArchived({
+      [`scores:${sessionDate}`]: scoresPayload,
+      [`board:long:${sessionDate}`]: payloads.long,
+      [`board:short:${sessionDate}`]: payloads.short,
+    }, { landed: landedKeys, write: publish });
+    const lost = archive.filter((a) => a.state === "lost");
+    const repaired = archive.filter((a) => a.state === "repaired");
+    const held = archive.filter((a) => a.state === "held");
+    if (repaired.length) {
+      console.log(`  archive check: ${repaired.map((a) => a.key).join(", ")} was missing and ` +
+        "has now been written from this run's payload");
+    }
+    if (held.length) {
+      console.warn(`  archive check: ${held.map((a) => a.key).join(", ")} already held an ` +
+        "earlier run's payload for this session, which the archive keeps");
+    }
+    if (lost.length) {
+      console.warn(`  ARCHIVE LOST: ${lost.map((a) => `${a.key} (${a.detail})`).join("; ")} — ` +
+        `the record has no copy of what this run published for ${sessionDate}. Dispatch the ` +
+        "workflow with republish_session to rewrite scores, board:long and board:short " +
+        "together; " + plainRedispatchSaid(archive) + ". The run finishes publishing and " +
+        "then exits non-zero, so the loss turns the workflow red instead of scrolling past in " +
+        "a green log.");
+      process.exitCode = 1;
+    } else if (!repaired.length && !held.length) {
+      console.log(`  archive check: scores, board:long and board:short are all written for ${sessionDate}`);
+    }
+  }
+
   try {
     await publish("meta", {
       generatedAt, sessionDate,
@@ -4632,7 +5750,23 @@ async function main() {
       cardsTotal: cardsBuilt + extraBuilt,
       apiCalls: stats.calls,
 
-      probes: probeResults,
+      schedule: {
+        cadence: PIPELINE_CADENCE,
+        gate: gate.mode,
+        intraday: intraday ? intraday.allowed : false,
+        screenerReadAt,
+        screenerTruncatedBands: screenerTruncated,
+        endDateHonoured: dating.endDateHonoured,
+      },
+      variation: {
+        convention: variationRun.probe,
+        kc: variationRun.kc,
+        unit: variationRun.unit,
+        vannaScale: variationRun.vannaScale,
+        strikeBook: variationRun.strikeSign,
+        next: variationRun.next,
+        votes: false,
+      },
     });
   } catch (error) {
     console.warn(`  meta: ${error.message}`);
@@ -4747,7 +5881,7 @@ export {
   runPooled, poolWidth, describeFloorVerdict, POOL_MAX_WIDTH, POOL_EVIDENCE_MIN,
   POOL_REFUSAL_HALT, POOL_REFUSAL_EASE,
   unusualContractId, markNewContracts, priorNote, fakePriorUnusual,
-  PUBLISH_SPACING_MS,
+  PUBLISH_SPACING_MS, readStored,
 };
 
 const invokedDirectly = process.argv[1]

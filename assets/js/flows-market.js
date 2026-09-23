@@ -14,7 +14,10 @@
   function el(tag, cls, text) {
     var n = document.createElement(tag);
     if (cls) n.className = cls;
-    if (text !== undefined && text !== null) n.textContent = String(text);
+    if (text !== undefined && text !== null) {
+      if (cls && /\bfc-note\b/.test(cls)) dated(n, String(text));
+      else n.textContent = String(text);
+    }
     return n;
   }
 
@@ -694,9 +697,25 @@
   }
 
   var PULSE_QUIET = "The feed answered this read with nothing — ordinary " +
-    "for a pre-open read of a series that fills during market hours.";
+    "before the open for a series that fills during market hours, and a vendor " +
+    "silence rather than a quiet market when the read is stamped after the close.";
   var MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  function dated(node, text) {
+    node.textContent = /\d{4}-\d{2}-\d{2}/.test(text) ? "" : text;
+    if (node.textContent) return node;
+    var re = /\d{4}-\d{2}-\d{2}/g, at = 0, m;
+    while ((m = re.exec(text))) {
+      if (m.index > at) node.append(document.createTextNode(text.slice(at, m.index)));
+      var d = document.createElement("span");
+      d.className = "flows-date";
+      d.textContent = m[0];
+      node.append(d);
+      at = m.index + m[0].length;
+    }
+    if (at < text.length) node.append(document.createTextNode(text.slice(at)));
+  }
 
   function utcStamp(t, withDay) {
     var iso = t.toISOString();
@@ -819,6 +838,20 @@
     var p = n * 100;
     var r = Math.abs(p) >= 100 ? Math.round(p) : Math.round(p * 10) / 10;
     return signGlyph(r) + Math.abs(r).toLocaleString("en-US") + "%";
+  }
+  function growthCell(r) {
+    var n = isNum(r.ratio), prev = isNum(r.prevOi);
+    var td = el("td", "c-num", signedGrowthPct(r.ratio));
+    if (n === null || n <= 0) return td;
+    if (prev !== null && prev < 100) {
+      td.textContent = "new";
+      td.title = "From " + grouped(prev) + " contracts, a base too small for a percentage to mean anything";
+    } else if (n >= 10) {
+      var times = Math.round(1 + n).toLocaleString("en-US");
+      td.textContent = "\u00d7" + times;
+      td.title = times + " times the previous snapshot's open interest (" + signedGrowthPct(n) + ")";
+    }
+    return td;
   }
   function hhmm(iso) {
     return (typeof iso === "string" && iso.length >= 16) ? iso.slice(11, 16) : DASH;
@@ -1150,7 +1183,7 @@
         th.scope = "row";
         tr.append(th);
         tr.append(el("td", "c-num", signedGrouped(r.diff)));
-        tr.append(el("td", "c-num", signedGrowthPct(r.ratio)));
+        tr.append(growthCell(r));
         tr.append(el("td", "c-num", grouped(r.currOi)));
         tr.append(el("td", "c-num", grouped(r.vol)));
         t.body.append(tr);
@@ -1559,11 +1592,11 @@
       if (status) {
 
         var screened = isNum(m.screened);
-        status.textContent = n + " screened names" +
+        dated(status, n + " screened names" +
           (screened === null ? "" : " of " + screened + " returned by the ladder") +
           " · session " + (m.sessionDate || "unknown") +
           (isFinite(Date.parse(m.generatedAt))
-            ? " · built " + utcStamp(new Date(m.generatedAt), true) : "");
+            ? " · built " + utcStamp(new Date(m.generatedAt), true) : ""));
       }
 
       var foot = document.getElementById("mktFoot");

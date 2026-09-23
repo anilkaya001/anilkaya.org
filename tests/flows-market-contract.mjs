@@ -314,13 +314,17 @@ try {
     },
     totals: { status: "ok", rows: totalsRows, seen: 20, cap: 20, shed: 0 },
     oiChange: {
-      status: "ok", seen: 2, cap: 20, shed: 0,
+      status: "ok", seen: 4, cap: 20, shed: 0,
       rows: [
 
         { t: "AAA", cp: "C", k: 150, exp: "2026-09-18", diff: 0, ratio: 0,
           currOi: 12000, prevOi: 12000, vol: 3400 },
         { t: "BBB", cp: "P", k: 80, exp: "2026-10-16", diff: -2500, ratio: -0.2174,
           currOi: 9000, prevOi: 11500, vol: 1200 },
+        { t: "OIA", cp: "P", k: 140, exp: "2026-09-25", diff: 22693, ratio: 3241.857,
+          currOi: 22700, prevOi: 7, vol: 30100 },
+        { t: "OIB", cp: "P", k: 20, exp: "2026-10-30", diff: 153780, ratio: 1025.2,
+          currOi: 153930, prevOi: 150, vol: 5200 },
       ],
     },
     netImpact: {
@@ -760,6 +764,13 @@ try {
   eq(oi.rows[1][1], "−21.7%",
      "and the ratio is multiplied into a percent and CARRIES THE PERCENT SIGN, so it " +
      "can never again be read as a number of contracts");
+  eq(oi.rows[2][1], "new",
+     "a contract that grew from 7 contracts reads 'new', not '+324,186%': a percentage " +
+     "of a base under a hundred contracts is noise, and the change column already " +
+     "carries the magnitude");
+  eq(oi.rows[3][1], "\u00d71,026",
+     "and ten-fold growth or more from a real base prints the multiple of the prior " +
+     "snapshot, 1 + ratio = current / previous, rather than a five-digit percent");
   eq(read.seaValues[0], "0.00%",
      "a seasonal average of exactly zero prints '0.00%', never '+0.00%'");
   eq(read.seaValues[1], "−1.25%", "and a negative month keeps the U+2212 minus");

@@ -204,18 +204,26 @@ function checkPopulation(s) {
     n, sources)];
 }
 
+function recordReads(al) {
+  const record = al && al.record && typeof al.record === "object" ? al.record : null;
+  const reads = record ? num(record.reads) : null;
+  return reads !== null && Number.isInteger(reads) && reads > 1 ? reads : null;
+}
+
 function checkAlertCeiling(s) {
   const al = answered(s.alerts);
   if (!al) return null;
   const limit = num(al.vendorLimit);
   if (limit === null || typeof al.vendorTruncated !== "boolean") return null;
   if (al.vendorTruncated !== true) return [];
+  const reads = recordReads(al);
   return [warn("caution", "ceiling:alerts",
-    "flowalerts hit the vendor's " + limit + "-row ceiling on the read that built it, so the " +
-    "windows flagged this session are unknown in number and at least " + limit + ", and the " +
-    "row count on the page below is what our own cap kept of that read rather than a count " +
-    "of the session.",
-    { limit },
+    "flowalerts hit the vendor's " + limit + "-row ceiling on " +
+    (reads === null ? "the read that built it" : "the latest of the " + reads + " reads merged into its record") +
+    ", so the windows flagged this session are unknown in number and at least " + limit +
+    ", and the row count on the page below is what our own cap kept of that " +
+    (reads === null ? "read" : "record") + " rather than a count of the session.",
+    reads === null ? { limit } : { limit, reads },
     [KEY.alerts])];
 }
 
@@ -263,9 +271,11 @@ function checkInheritedCeiling(s) {
   if (limit === null || bandRows === null || typeof al.vendorTruncated !== "boolean") return null;
   if (al.vendorTruncated !== true) return [];
   const ranked = bandRows.length;
+  const reads = recordReads(al);
 
   return [warn("caution", "ceiling:inherited",
-    "The movers per-contract premium band is cut from a flowalerts read that hit the " +
+    "The movers per-contract premium band is cut from a flowalerts " +
+    (reads === null ? "read that" : "record whose latest read") + " hit the " +
     "vendor's " + limit + "-row ceiling, so the " + ranked + " contract " +
     plural(ranked, "window", "windows") + " it ranks " + plural(ranked, "is", "are") +
     " the largest of what arrived under that ceiling rather than the largest of the session.",

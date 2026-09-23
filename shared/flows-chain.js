@@ -15,11 +15,39 @@ const round = (v, d) => (Number.isFinite(v) ? Number(v.toFixed(d)) : null);
 
 export const CHAIN_PAGE_SIZE = 500;
 
+export const CHAIN_MAX_PAGES = 3;
+
+export function mergeChainPages(pages, { pageSize = CHAIN_PAGE_SIZE } = {}) {
+  const list = (Array.isArray(pages) ? pages : []).map((p) => (Array.isArray(p) ? p : []));
+  const seen = new Set();
+  const rows = [];
+  let duplicates = 0;
+  for (const page of list) {
+    for (const row of page) {
+      const key = row && typeof row.option_symbol === "string" ? row.option_symbol : null;
+      if (key) {
+        if (seen.has(key)) { duplicates++; continue; }
+        seen.add(key);
+      }
+      rows.push(row);
+    }
+  }
+  const last = list.length ? list[list.length - 1] : [];
+  return {
+    rows,
+    pages: list.length,
+    duplicates,
+    complete: list.length > 0 && last.length < pageSize && duplicates === 0,
+  };
+}
+
 export const SKEW_MONEYNESS = 0.10;
 
 export const SKEW_TOLERANCE = 0.04;
 
 export const SKEW_MIN_DAYS = 7;
+
+export const SKEW_EXACT = 0.001;
 
 export const TERM_MIN_DAYS = 7;
 export const TERM_FAR_DAYS = 45;
@@ -112,6 +140,83 @@ function wingAt(priced, targetM, tol, type) {
   return best;
 }
 
+function wingRead(priced, targetM, tol, type) {
+  let below = null, above = null;
+  for (const p of priced) {
+    if (type && p.type !== type) continue;
+    if (p.ivTraded !== true) continue;
+    const m = numOrNull(p.moneyness);
+    const iv = numOrNull(p.iv);
+    if (m === null || iv === null || !(iv > 0)) continue;
+    const lm = Math.log1p(m);
+    const d = lm - targetM;
+    if (Math.abs(d) > tol) continue;
+    if (d <= 0 && (below === null || d > below.d)) below = { d, lm, iv, strike: p.strike };
+    if (d >= 0 && (above === null || d < above.d)) above = { d, lm, iv, strike: p.strike };
+  }
+  const onTarget = [below, above].filter((x) => x && Math.abs(x.d) <= SKEW_EXACT)
+    .sort((a, b) => Math.abs(a.d) - Math.abs(b.d))[0];
+  if (onTarget) {
+    return { d: Math.abs(onTarget.d), fresh: true, iv: onTarget.iv, m: onTarget.lm,
+      strike: onTarget.strike, type, traded: true, placed: "exact", from: null };
+  }
+  if (below && above) {
+    const w = (targetM - below.lm) / (above.lm - below.lm);
+    return { d: 0, fresh: true, iv: below.iv + w * (above.iv - below.iv), m: targetM, strike: null,
+      type, traded: true, placed: "interpolated", from: [below.strike, above.strike] };
+  }
+  const best = wingAt(priced, targetM, tol, type);
+  if (!best) return null;
+  return { ...best, placed: best.fresh && best.d <= SKEW_EXACT ? "exact" : "nearest", from: null };
+}
+
+export const SKEW_FIXED_DAYS = 30;
+
+export function fixedTenorSkew(byExpiry, {
+  targetM = SKEW_MONEYNESS, tol = SKEW_TOLERANCE, minDays = SKEW_MIN_DAYS, days = SKEW_FIXED_DAYS,
+} = {}) {
+  const exact = (e, sign, type) => {
+    const w = wingRead(e.priced, sign * targetM, tol, type);
+    return w && w.traded === true && (w.placed === "interpolated" || w.placed === "exact") ? w : null;
+  };
+  const cols = [];
+  for (const e of byExpiry.values()) {
+    const d = numOrNull(e.days);
+    if (d === null || d < minDays) continue;
+    const put = exact(e, -1, "P"), call = exact(e, 1, "C");
+    if (put && call) cols.push({ expiry: e.expiry, days: d, put: put.iv, call: call.iv });
+  }
+  cols.sort((a, b) => a.days - b.days);
+  const at = cols.find((c) => c.days === days);
+  const near = at || [...cols].reverse().find((c) => c.days < days) || null;
+  const far = at || cols.find((c) => c.days > days) || null;
+  if (!near || !far) {
+    return { skew30: null, skew30Basis: null,
+      skew30Reason: cols.length
+        ? `no pair of expiries bracketing ${days} days carried both wings placed exactly from ` +
+          `traded quotes (${cols.length} expir${cols.length === 1 ? "y does" : "ies do"}, at ` +
+          `${cols.map((c) => c.days + "d").join(", ")})`
+        : `no expiry past ${minDays} days carried both wings placed exactly from traded quotes` };
+  }
+  const leg = (key) => {
+    if (near === far) return near[key];
+    const w1 = near[key] * near[key] * near.days, w2 = far[key] * far[key] * far.days;
+    const w = w1 + (w2 - w1) * (days - near.days) / (far.days - near.days);
+    return w > 0 ? Math.sqrt(w / days) : null;
+  };
+  const put = leg("put"), call = leg("call");
+  if (put === null || call === null) {
+    return { skew30: null, skew30Basis: null,
+      skew30Reason: "total variance fell below zero between the bracketing expiries" };
+  }
+  return {
+    skew30: round(put - call, 4),
+    skew30Basis: { days, near: near.expiry, nearDays: near.days, far: far.expiry, farDays: far.days,
+      putIv: round(put, 4), callIv: round(call, 4) },
+    skew30Reason: null,
+  };
+}
+
 function wingMiss(priced, targetM, tol, type) {
   let listed = 0, unpriced = 0;
   let nearest = null, nearestM = null, nearestStrike = null;
@@ -186,8 +291,8 @@ export function chainScalars(pricedByExpiry, surface, {
     if (col.days < minDays) continue;
     const e = byExpiry.get(col.expiry);
     if (!e) continue;
-    const put = wingAt(e.priced, -targetM, tol, "P");
-    const call = wingAt(e.priced, targetM, tol, "C");
+    const put = wingRead(e.priced, -targetM, tol, "P");
+    const call = wingRead(e.priced, targetM, tol, "C");
     if (!put || !call) continue;
     skew = put.iv - call.iv;
     skewExpiry = col;
@@ -196,12 +301,18 @@ export function chainScalars(pricedByExpiry, surface, {
       putM: round(put.m, 4), putStrike: round(put.strike, 2), putIv: round(put.iv, 4),
       putType: put.type,
       putTraded: put.traded === true ? 1 : put.traded === false ? 0 : null,
+      putPlaced: put.placed,
+      putFrom: put.from ? put.from.map((k) => round(k, 2)) : null,
       callM: round(call.m, 4), callStrike: round(call.strike, 2), callIv: round(call.iv, 4),
       callType: call.type,
       callTraded: call.traded === true ? 1 : call.traded === false ? 0 : null,
+      callPlaced: call.placed,
+      callFrom: call.from ? call.from.map((k) => round(k, 2)) : null,
+      offset: round(Math.abs(put.m + targetM) + Math.abs(call.m - targetM), 4),
     };
     break;
   }
+  const fixed = fixedTenorSkew(byExpiry, { targetM, tol, minDays });
 
   const reachedFloor = anyColumn.some((e) => e.days >= minDays);
 
@@ -277,9 +388,19 @@ export function chainScalars(pricedByExpiry, surface, {
     atmIv: round(atmIv, 4),
     atmExpiry: nearLevel ? nearLevel.expiry : null,
     atmReason,
+    skew30: fixed.skew30,
+    skew30Basis: fixed.skew30Basis,
+    skew30Reason: fixed.skew30Reason,
     relation: `skew = put iv(ln K/S = −${targetM}) − call iv(ln K/S = +${targetM}) on the nearest ` +
-      `expiry at or past ${minDays} days carrying both wings; nearest listed strike within ` +
-      `${tol} of each target, freshness before distance, no interpolation. ` +
+      `expiry at or past ${minDays} days carrying both wings. Each wing is interpolated linearly ` +
+      `in ln(K/S) to exactly its target when the two strikes bracketing it within ${tol} BOTH ` +
+      `traded today; otherwise it is the nearest listed strike within ${tol}, freshness before ` +
+      `distance, never an interpolation between a traded and an untraded quote. The placement ` +
+      `of each wing (interpolated, exact or nearest), its ln(K/S) and the total offset from the ` +
+      `targets ride skewBasis, and the reading's tenor is skewBasis.days, so two names' skews ` +
+      `compare only at matching tenors and placements. skew30 is the same difference at a fixed ` +
+      `${SKEW_FIXED_DAYS} days: each wing's total variance interpolated between the two expiries ` +
+      `bracketing it, from exactly placed traded wings only. ` +
       `+ means the put wing is bid over the call wing. ` +
       `term = at-the-money iv at the nearest levelled expiry past ${termFarDays} days ` +
       `minus the nearest past ${minDays} days, both levels the surface's own.`,
@@ -518,9 +639,12 @@ export function buildChainPanels(chainRows, {
   requestedExpiry = null,
 
   stage = null,
+
+  complete = null,
+  pages = 1,
 } = {}) {
   const all = Array.isArray(chainRows) ? chainRows : [];
-  const truncated = all.length >= CHAIN_PAGE_SIZE;
+  const truncated = complete === true ? false : complete === false ? true : all.length >= CHAIN_PAGE_SIZE;
 
   const pairs = all.map((row) => ({ p: parseOptionSymbol(row && row.option_symbol), row }));
 
@@ -573,12 +697,15 @@ export function buildChainPanels(chainRows, {
     surface.expiries.length === 1 && surface.expiries[0].expiry === requestedExpiry;
 
   if (truncated && !answersRequest) {
-    const why = `the vendor returned a full page of ${CHAIN_PAGE_SIZE} contracts in no ` +
+    const why = (pages > 1
+      ? `the vendor still filled the last of ${pages} pages of ${CHAIN_PAGE_SIZE} contracts, `
+      : `the vendor returned a full page of ${CHAIN_PAGE_SIZE} contracts `) + "in no " +
       "documented order, so this is an arbitrary subset of the book and \"the nearest " +
       "expiry\" cannot be identified within it";
     scalars = {
       ...scalars,
       skew: null, skewReason: why, skewBasis: null,
+      skew30: null, skew30Reason: why, skew30Basis: null,
       term: null, termReason: why, termBasis: null,
       atmIv: null, atmReason: why, atmExpiry: null,
     };
@@ -592,6 +719,8 @@ export function buildChainPanels(chainRows, {
     identifiedExpiry: answersRequest ? requestedExpiry : null,
 
     rowsReturned: all.length,
+
+    pagesRead: pages,
 
     rowsSeen: rows.length,
 

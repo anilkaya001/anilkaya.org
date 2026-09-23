@@ -100,10 +100,10 @@ try {
     return pairs;
   }, TICKER_PANELS.map((e) => [e.id, e.key]));
 
-  eq(DRAWN_HOSTS.length, 14,
-     `fourteen registry panels are drawn by window.FlowsPanels — eleven with a drawer ` +
-     `of their own plus the three second-order Greeks that share one (${
-       DRAWN_HOSTS.length})`);
+  eq(DRAWN_HOSTS.length, 15,
+     `fifteen registry panels are drawn by window.FlowsPanels — twelve with a drawer ` +
+     `of their own, the hedging-flow panel the twelfth, plus the three second-order Greeks ` +
+     `that share one (${DRAWN_HOSTS.length})`);
 
   await page.evaluate(() => {
     const P = window.FlowsPanels;
@@ -834,11 +834,12 @@ try {
 
     eq(gr.two.leads.length, 2,
        `the profile leads on its two findings, each in its own element (${gr.two.leads.length})`);
-    ok(/^Dealers are (long|short) gamma immediately below/.test(gr.two.leads[0] || ""),
-       `the flip regime is first, and still derived rather than asserted ("${
+    ok(/^Today's trading left dealers (long|short) gamma immediately below/.test(gr.two.leads[0] || ""),
+       `the ladder's crossing is first, named as today's flow rather than the book, and still derived rather than asserted ("${
          (gr.two.leads[0] || "").slice(0, 62)}")`);
-    ok(/^Dealer gamma AT SPOT is/.test(gr.two.leads[1] || ""),
-       `and how hard dealers sit at spot is second ("${(gr.two.leads[1] || "").slice(0, 48)}")`);
+    ok(/^Today's added gamma, summed up to spot, is/.test(gr.two.leads[1] || "") &&
+       /the standing book's net is on the hedging panel/.test(gr.two.leads[1] || ""),
+       `and where spot sits in that ladder is second, pointing to the book's net ("${(gr.two.leads[1] || "").slice(0, 48)}")`);
     ok(gr.two.leadBeforeChart,
        "and both come BEFORE the drawing in DOM order — the chart is the evidence for the " +
        "reading rather than its preamble, and a sentence under a 220-unit canvas is below " +
@@ -870,7 +871,7 @@ try {
        "and it is one tab stop for the whole method set, which a <summary> is for free — " +
        "the alternative this design refused was a tabindex on every explained element");
 
-    const bandNote = gr.two.notes.find((n) => /not the whole book/.test(n.text));
+    const bandNote = gr.two.notes.find((n) => /inside that band, not the whole ladder/.test(n.text));
     ok(bandNote, "the band the profile was measured over is still stated");
     ok(bandNote && bandNote.qualifier && !bandNote.inDetails,
        "in the open and marked as a qualifier, with nothing to click — this is the line that " +
@@ -925,7 +926,7 @@ try {
     ok(/share of this ladder's peak rather than a dollar figure/.test(shot.deep.text),
        "and what makes it comparable across names is still said, in the folded method");
 
-    ok(/peak exposure and short/.test(shot.deep.text),
+    ok(/of this ladder's peak and short/.test(shot.deep.text),
        "with the sign attached to that reading rather than to the flip sentence");
     ok(!/0\.00 of|NaN|undefined/.test(shot.absent.text),
        "a card whose spot lies outside the measured band manufactures no reading");

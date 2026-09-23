@@ -121,6 +121,15 @@ function nelderMead(f, x0, { iters = 1400, step = 0.5, tol = 1e-8 } = {}) {
 
 export const GARCH_MIN_RETURNS = 60;
 export const GARCH_ANNUALISE = Math.sqrt(252);
+export const GARCH_AVG_SESSIONS = 21;
+
+export function garchAverageVariance(nextS2, longRunS2, persistence, sessions = GARCH_AVG_SESSIONS) {
+  if (!(sessions >= 1) || !Number.isFinite(nextS2) || !Number.isFinite(longRunS2)) return null;
+  const phi = persistence;
+  if (!Number.isFinite(phi) || phi < 0) return null;
+  if (Math.abs(1 - phi) < 1e-9) return nextS2;
+  return longRunS2 + (nextS2 - longRunS2) * (1 - Math.pow(phi, sessions)) / (sessions * (1 - phi));
+}
 
 export function fitGarch(closes, dates = [], { minReturns = GARCH_MIN_RETURNS } = {}) {
   const px = [], when = [];
@@ -212,6 +221,10 @@ export function fitGarch(closes, dates = [], { minReturns = GARCH_MIN_RETURNS } 
     longRunVol: Number((Math.sqrt(v0) * GARCH_ANNUALISE).toFixed(2)),
     lastVol: condVol[condVol.length - 1],
     nextVol: Number((Math.sqrt(nextS2) * GARCH_ANNUALISE).toFixed(2)),
+    avg21Vol: (() => {
+      const avg = garchAverageVariance(nextS2, v0, persistence);
+      return avg === null || !(avg > 0) ? null : Number((Math.sqrt(avg) * GARCH_ANNUALISE).toFixed(2));
+    })(),
     logLik: Number(logLik.toFixed(2)),
     converged: fit.converged && !edge,
     ...(fit.converged && !edge ? {} : {

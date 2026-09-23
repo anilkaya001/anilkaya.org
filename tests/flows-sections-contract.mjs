@@ -420,12 +420,20 @@ try {
           overlap: "consecutive sessions share most of a multi-session window, so n counts rows, " +
             "not independent observations",
           calendar: "the trading calendar is the union of observed close dates",
+          perSession: "one rank correlation pooled across sessions scores a volatility feature on " +
+            "which way the market went",
+          sessionMinN: 20, rankedFrom: 30, through: "2026-08-24",
           cols: [
-            { key: "s", ic: 0.042, n: 640 },
-            { key: "cnv", ic: -0.011, n: 640 },
+            { key: "s", ic: 0.031, n: 640, icMean: 0.042, icSd: 0.12, icSessions: 32, icPos: 0.625,
+              icMkt: 0.21, icT: 0.63, ranked: true, rankedFrom: 30 },
+            { key: "cnv", ic: 0.018, n: 640, icMean: -0.011, icSd: 0.2, icSessions: 12, icPos: 0.417,
+              icMkt: 0.88, icT: null, ranked: false, rankedFrom: 30,
+              rankReason: "12 scored sessions against the 30 a 10-session horizon needs before a mean is ranked" },
 
-            { key: "purity", ic: null, n: 640, reason: "no variation to rank" },
-            { key: "vrp", ic: null, n: 3, reason: "fewer than 20 measured pairs" },
+            { key: "purity", ic: null, n: 640, reason: "no variation to rank",
+              icMean: null, icSessions: 0, ranked: false, icReason: "no variation to rank in any session" },
+            { key: "vrp", ic: null, n: 3, reason: "fewer than 20 measured pairs",
+              icMean: null, icSessions: 0, ranked: false, icReason: "no session reached 20 measured names" },
           ],
         },
       });
@@ -499,14 +507,22 @@ try {
         const rows = Array.from(document.querySelectorAll("#recFeatBody tr")).map((tr) => {
           const th = tr.querySelector("th");
           const gloss = th.querySelector(".rec-feat-gloss");
-          const icCell = tr.querySelectorAll("td")[0];
+          const meanCell = tr.querySelector("td.c-icm");
+          const icCell = tr.querySelector("td.c-icp");
           const why = icCell.querySelector(".rec-ic-why");
+          const meanWhy = meanCell.querySelector(".rec-ic-why");
           return {
             key: own(th),
             hyp: gloss ? gloss.textContent.trim() : null,
+            mean: own(meanCell),
+            meanTitle: meanWhy ? meanWhy.textContent.trim() : null,
+            pos: tr.querySelector("td.c-icpos").textContent.trim(),
+            t: tr.querySelector("td.c-ict").textContent.trim(),
+            mkt: tr.querySelector("td.c-icmkt").textContent.trim(),
             ic: own(icCell),
             icTitle: why ? why.textContent.trim() : null,
-            n: tr.querySelectorAll("td")[1].textContent.trim(),
+            n: tr.querySelector("td.c-pairs").textContent.trim(),
+            cells: tr.querySelectorAll("td").length,
           };
         });
         return {
@@ -519,13 +535,27 @@ try {
       eq(feat.rows.length, 4, "every published column gets a row");
 
       const byKey = Object.fromEntries(feat.rows.map((r) => [r.key, r]));
-      eq(byKey.s.ic, "+0.042", "a positive IC carries its sign explicitly");
-      eq(byKey.cnv.ic, "\u22120.011", "and a negative one carries a real minus, U+2212");
-      eq(byKey.s.n, "640", "with the sample it was measured on beside it");
+      ok(feat.rows.every((r) => r.cells === 7),
+         "every row carries the session mean, its spread, its sign count, t, the market tie, " +
+         "the pooled figure and its pairs");
+      eq(byKey.s.mean, "+0.042", "a positive session-mean IC carries its sign explicitly");
+      eq(byKey.cnv.mean, "\u22120.011", "and a negative one carries a real minus, U+2212");
+      eq(byKey.s.meanTitle, null, "a ranked column wears no unranked tag");
+      ok(/unranked/.test(byKey.cnv.meanTitle || "") && /12 of 30/.test(byKey.cnv.meanTitle || ""),
+         `an unranked column says so, with its sessions against the floor (${byKey.cnv.meanTitle})`);
+      eq(byKey.s.pos, "20 of 32", "the positive sessions are counted against the sessions scored");
+      eq(byKey.s.t, "+0.63", "a ranked column prints its t");
+      eq(byKey.cnv.t, "\u2014", "an unranked one prints none rather than a t it cannot support");
+      eq(byKey.cnv.mkt, "+0.88", "and the market tie is printed where a reader can see the bet");
+      eq(byKey.s.ic, "+0.031", "the pooled figure is still printed, as the secondary column");
+      eq(byKey.s.n, "640", "with the pairs it was measured on beside it");
 
       eq(byKey.purity.ic, "\u2014", "a constant column shows the em dash, never 0.000");
       ok(/no variation/.test(byKey.purity.icTitle || ""),
          `and names its reason (${byKey.purity.icTitle})`);
+      eq(byKey.purity.mean, "\u2014", "in the session column too");
+      ok(/no variation to rank in any session/.test(byKey.purity.meanTitle || ""),
+         `with the session reason beside it (${byKey.purity.meanTitle})`);
       eq(byKey.vrp.ic, "\u2014", "so does a column below the sample floor");
       ok(/fewer than 20/.test(byKey.vrp.icTitle || ""),
          `with the floor named rather than the variance (${byKey.vrp.icTitle})`);
@@ -540,6 +570,9 @@ try {
       ok(/percentileRank/.test(notes), "the method is printed as the payload states it");
       ok(/conditional on selection/.test(notes), "including the selection caveat");
       ok(/not independent observations|effective sample/.test(notes), "and the overlap deflation");
+      ok(/which way the market went/.test(notes), "and why the table is measured per session");
+      ok(/ranked from 30 scored sessions/.test(notes) && /through 2026-08-24/.test(notes),
+         `and the ranking floor and the exit cut are stated (${notes.slice(0, 160)})`);
     }
 
     {

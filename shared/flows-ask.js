@@ -1,4 +1,4 @@
-import { buildBrief, briefStoreFrom, silenceOf, num } from "./flows-brief.js";
+import { buildBrief, briefStoreFrom, briefAlertsFact, silenceOf, num } from "./flows-brief.js";
 import { lastCompletedSession } from "./flows-freshness.js";
 
 function served(store, key) {
@@ -274,6 +274,14 @@ function alertFacts(p, at) {
       "population is unknown and at least that large.",
       { vendorLimitRows: limit }));
   }
+  const readLimit = num(p.readLimit);
+  if (p.readTruncated === true && readLimit !== null) {
+    out.push(f("flowalerts/read-ceiling", ["alerts", "ceiling", "limit", "truncated", "population"],
+      "An intraday alert read this session came back full at this site's own cap of " + readLimit +
+      " rows per read, so alerts flagged between reads may be missing from the record and " +
+      "the true population is at least what it holds.",
+      { readLimitRows: readLimit }));
+  }
   return out;
 }
 
@@ -476,9 +484,11 @@ function oneCard(t, card, at, st) {
 
   const score = num(card.score), conv = num(card.conviction);
   const label = typeof reg.label === "string" && reg.label ? reg.label : null;
+  const labelFrom = reg.labelFrom === "book" ? "the open-interest gamma book is "
+    : reg.labelFrom === "flow" ? "today's added gamma is " : "dealer gamma is labelled ";
   if (all(score, conv) && label !== null) {
     let say = t + " scored " + score + " this session with conviction " + conv +
-      " of 100; dealer gamma at spot is " + label + ".";
+      " of 100; " + labelFrom + label + ".";
 
     const n = { score, convictionOf100: conv, convictionScale: 100, regime: label };
     if (st !== null && st.rank !== null && st.rows !== null) {
@@ -492,20 +502,21 @@ function oneCard(t, card, at, st) {
   const spot = num(g.spot), cw = num(g.callWall), pw = num(g.putWall);
   const strikes = num(g.strikes), lo = num(g.bandMin), hi = num(g.bandMax);
   if (all(spot, cw, pw, strikes, lo, hi) && label !== null) {
-    let say = "Dealer gamma for " + t + " is " + label + " at spot " + r4(spot) +
-      ", measured over " + strikes + " strikes between " + r4(lo) + " and " + r4(hi) +
-      "; the call wall is at " + r4(cw) + " and the put wall at " + r4(pw) + ".";
+    let say = "Today's gamma flow in " + t + " at spot " + r4(spot) + " spans " + strikes +
+      " strikes from " + r4(lo) + " to " + r4(hi) +
+      "; its " + (cw < spot ? "largest long-gamma strike" : "call wall") + " is at " + r4(cw) +
+      " and its " + (pw > spot ? "largest short-gamma strike" : "put wall") + " at " + r4(pw) + ".";
     const n = { spotPx: r4(spot), callWallPx: r4(cw), putWallPx: r4(pw), strikes,
       bandMinPx: r4(lo), bandMaxPx: r4(hi) };
     const flip = num(card.gammaFlip), crossings = num(reg.crossings);
     if (flip !== null) {
       const side = typeof reg.flipSide === "string" && reg.flipSide
         ? " (" + reg.flipSide.replace(/_/g, " ") + ")" : "";
-      say += " Net gamma flips sign at " + r4(flip) + side + ".";
+      say += " Its running sum crosses zero at " + r4(flip) + side + ".";
       n.gammaFlipPx = r4(flip);
       if (crossings !== null) n.crossings = crossings;
     } else if (crossings === 0) {
-      say += " Net gamma does not change sign inside that band, so no flip level is " +
+      say += " Its running sum does not change sign inside that band, so no flip level is " +
         "published (0 crossings).";
       n.crossings = 0;
     }
@@ -614,6 +625,25 @@ export function fileSilence(silences, kind, what, say, source, reason) {
     reason: typeof reason === "string" && reason ? reason : null });
 }
 
+const BRIEF_SECTION_TOPICS = Object.freeze({
+  today: ["today", "session", "now"],
+  yesterday: ["yesterday", "changed", "moved", "prior"],
+  next: ["next", "tomorrow", "scheduled", "calendar", "threshold"],
+});
+
+const SIDE_WORDS = Object.freeze({ bullish: ["long"], bearish: ["short"] });
+
+function sideWords(id) {
+  const out = [];
+  for (const part of id.split(":")) for (const w of SIDE_WORDS[part] || []) out.push(w);
+  return out;
+}
+
+function briefSectionFact(name, item, at) {
+  return maker("brief", at)("brief:" + name + "/" + item.id,
+    BRIEF_SECTION_TOPICS[name].concat(item.id.split(":"), sideWords(item.id)), item.say, item.n, item.lead);
+}
+
 export function buildFactIndex(store) {
   const s = store && typeof store === "object" ? store : {};
   const facts = [];
@@ -644,23 +674,13 @@ export function buildFactIndex(store) {
   const nextUnmeasured = NEXT_SLOTS.filter(unmeasuredSlot);
 
   const SECTIONS = [
-    ["today", brief.today, ["today", "session", "now"]],
-    ["yesterday", brief.yesterday, ["yesterday", "changed", "moved", "prior"]],
-    ["next", brief.next, ["next", "tomorrow", "scheduled", "calendar", "threshold"]],
+    ["today", brief.today],
+    ["yesterday", brief.yesterday],
+    ["next", brief.next],
   ];
 
-  const SIDE_WORDS = { bullish: ["long"], bearish: ["short"] };
-  const sideWords = (id) => {
-    const out = [];
-    for (const part of id.split(":")) for (const w of SIDE_WORDS[part] || []) out.push(w);
-    return out;
-  };
-  for (const [name, section, topics] of SECTIONS) {
-    const f = maker("brief", briefAt);
-    for (const item of section.facts) {
-      facts.push(f("brief:" + name + "/" + item.id,
-        topics.concat(item.id.split(":"), sideWords(item.id)), item.say, item.n, item.lead));
-    }
+  for (const [name, section] of SECTIONS) {
+    for (const item of section.facts) facts.push(briefSectionFact(name, item, briefAt));
     for (const q of section.silences) {
 
       if (name === "yesterday" && q.what === "both boards" &&
@@ -756,6 +776,7 @@ export function refreshIntradayFacts(index, feeds) {
   const facts = index && Array.isArray(index.facts) ? index.facts.slice() : [];
   const replaced = {};
   let refreshedAt = index && typeof index.refreshedAt === "string" ? index.refreshedAt : null;
+  let today = index && index.today && typeof index.today === "object" ? index.today : null;
   for (const key of INTRADAY_SOURCES) {
     const p = feeds && Object.hasOwn(feeds, key) ? feeds[key] : undefined;
     const published = answered(p);
@@ -776,8 +797,29 @@ export function refreshIntradayFacts(index, feeds) {
     facts.length = 0; for (const f of kept) facts.push(f);
     replaced[key] = built.length;
     if (at && (refreshedAt === null || Date.parse(at) > Date.parse(refreshedAt))) refreshedAt = at;
+    if (key === "flowalerts") today = refreshBriefAlerts(facts, today, published, at, replaced);
   }
-  return { ...(index || {}), facts, refreshedAt, replaced };
+  return { ...(index || {}), ...(today ? { today } : {}), facts, refreshedAt, replaced };
+}
+
+function refreshBriefAlerts(facts, today, published, at, replaced) {
+  const item = briefAlertsFact(published);
+  if (!item) return today;
+  const id = "brief:today/" + item.id;
+  const fresh = briefSectionFact("today", item, at);
+  const held = facts.findIndex((f) => f && f.id === id);
+  if (held !== -1) facts[held] = fresh;
+  else {
+    let last = -1;
+    facts.forEach((f, i) => { if (f && typeof f.id === "string" && f.id.startsWith("brief:today/")) last = i; });
+    facts.splice(last + 1, 0, fresh);
+  }
+  replaced.brief = (replaced.brief || 0) + 1;
+  if (!today || typeof today !== "object" || !Array.isArray(today.facts)) return today;
+  const list = today.facts.slice();
+  const slot = list.findIndex((f) => f && f.id === item.id);
+  if (slot === -1) list.push(item); else list[slot] = item;
+  return { ...today, facts: list };
 }
 
 export function briefAge(index, now) {

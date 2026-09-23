@@ -473,6 +473,32 @@ const CHECKS_ON_CLEAN = 13;
      "is the page/population confusion this warning exists to name, running backwards");
 }
 {
+  const merged = clean();
+  merged.alerts.vendorTruncated = true;
+  merged.alerts.record = { date: SESSION, reads: 30, union: 234 };
+  const out = run(merged);
+  const w = byId(out, "ceiling:alerts");
+  ok(/latest of the 30 reads merged into its record/.test(w.say) &&
+     /what our own cap kept of that record rather than a count of the session/.test(w.say),
+     "an evening payload is the session's record with the post-close read merged in, so the " +
+     "ceiling belongs to its latest read and the page's row count is what the cap kept of " +
+     `the RECORD — "kept of that read" named a 60-row read under a 180-row page (${w.say})`);
+  eq(w.n.reads, 30, "and the read count the sentence quotes is pinned in n");
+  ok(/cut from a flowalerts record whose latest read hit/.test(byId(out, "ceiling:inherited").say),
+     "the movers band cut from that record says it was cut from the record, not from one read");
+
+  const single = clean();
+  single.alerts.vendorTruncated = true;
+  delete single.alerts.record;
+  const one = run(single);
+  const w1 = byId(one, "ceiling:alerts");
+  ok(/on the read that built it/.test(w1.say) && /kept of that read rather than/.test(w1.say) &&
+     !("reads" in w1.n),
+     "while a payload built from one read keeps the one-read sentence");
+  ok(/cut from a flowalerts read that hit/.test(byId(one, "ceiling:inherited").say),
+     "and so does the band cut from it");
+}
+{
 
   const s = clean();
   s.alerts.vendorTruncated = true;

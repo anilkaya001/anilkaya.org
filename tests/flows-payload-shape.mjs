@@ -295,8 +295,9 @@ assert.deepEqual(missingReport, [],
   ok(okFeed.asOfStated === true && typeof okFeed.asOf === "string",
      "the market-wide feed publishes the session IT describes, from its own rows");
   eq(okFeed.sameSession, false,
-     "and the corpus really exercises the timing trap: a 05:15 run joins the PREVIOUS " +
-     "session's cross-section onto today's card, and the payload says so rather than " +
+     "and the corpus really exercises the timing trap: a run joins the vendor's morning " +
+     "update, which here describes the PREVIOUS " +
+     "session's cross-section, onto today's card, and the payload says so rather than " +
      "letting the card imply the ranking is today's");
   ok(okFeed.asOf < okCard.sessionDate,
      `the feed's session (${okFeed.asOf}) is genuinely earlier than the card's ` +
@@ -419,8 +420,10 @@ assert.deepEqual(missingReport, [],
   eq(n.refreshed, "nightly",
      "and says it is NOT intraday-refreshed, so a renderer states the age rather than " +
      "implying the headline just arrived");
-  ok(typeof n.cadence === "string" && /05:15/.test(n.cadence),
-     "and names the cadence behind that word");
+  ok(typeof n.cadence === "string" && /after the close/.test(n.cadence) &&
+     /21:30 UTC/.test(n.cadence) && !/05:15/.test(n.cadence),
+     "and names the cadence behind that word — the post-close schedule the workflow " +
+     "actually fires on, not the 05:15 one that fired 4.5 to 6.6 hours late every weekday");
   ok(typeof n.newest === "string" && typeof n.oldest === "string" && n.oldest <= n.newest,
      `the window the published rows cover is bounded from their own stamps ` +
      `(${n.oldest} .. ${n.newest})`);
@@ -450,6 +453,54 @@ assert.deepEqual(missingReport, [],
      `the capped tape is ${(bytes / 1024).toFixed(1)}KB, well inside the 128KB ` +
      "FLOWS_MAX_PAYLOAD_BYTES the ingest route accepts (worker.js) — the cap is a budget, " +
      "not a taste");
+}
+
+{
+  const cardFiles = readdirSync(dir).filter((f) => /^p-card-/.test(f));
+  const cards = cardFiles.map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")));
+  ok(cards.every((c) => c.panels && c.panels.variation),
+     "every emitted card carries the hedging panel, deep and cross-section alike");
+  const full = cards.find((c) => c.panels.variation.status === "ok" && c.panels.variation.grid &&
+    c.panels.variation.channels.vanna && c.panels.variation.channels.charm);
+  ok(full, "an emitted card carries the hedging panel with every channel and its grid, so the full arm is measurable");
+
+  const src = readFileSync(join(ROOT, "assets/js/flows-drawers.js"), "utf8");
+  const start = src.indexOf("function renderVariation(");
+  ok(start !== -1, "assets/js/flows-drawers.js still carries the hedging-flow drawer");
+  const end = src.indexOf("function renderPremiumTrack(", start);
+  const code = src.slice(start, end).replace(/\/\*[\s\S]*?\*\//g, " ").replace(/([^:])\/\/[^\n]*/g, "$1");
+  const readsOf = (v) => {
+    const out = new Set();
+    for (const m of code.matchAll(new RegExp("\\b" + v + "\\.([A-Za-z_][A-Za-z0-9_]*)", "g"))) out.add(m[1]);
+    return out;
+  };
+  const V = full.panels.variation;
+  const TARGETS = [
+    ["panel", V], ["inputs", V.inputs], ["ch", V.channels], ["v", V.variance], ["g", V.grid], ["c", V.conventions],
+  ];
+  const missing = [];
+  for (const [name, obj] of TARGETS) {
+    const reads = readsOf(name);
+    ok(reads.size > 0, `the drawer reads fields off \`${name}\` (${reads.size} of them)`);
+    const keys = new Set(Object.keys(obj || {}));
+    if (name === "panel") keys.add("reason");
+    for (const field of reads) {
+      if (keys.has(field)) { checks++; continue; }
+      missing.push(`renderVariation reads ${name}.${field}, and the emitted ${name} has only ${[...keys].sort().join(", ")}`);
+    }
+  }
+  const ch = V.channels;
+  for (const [key, fields] of [["gamma", ["perSigma", "pctAdv", "source"]], ["vanna", ["perPoint", "perSigma", "pctAdvPerPoint", "pctAdvPerSigma"]],
+    ["charm", ["hedge", "pctAdv", "perSession"]]]) {
+    for (const f of fields) {
+      ok(Object.hasOwn(ch[key], f), `the drawer's ${key} bar reads channels.${key}.${f}, and the emitted channel carries it`);
+    }
+  }
+  for (const f of ["rows", "cols", "cells", "volSilent"]) ok(Object.hasOwn(V.grid, f), `the grid carries ${f}`);
+  ok(V.grid.rows.every((r) => "price" in r && "kS" in r && "linear" in r), "every grid row carries its price, its step and its linear flag");
+  assert.deepEqual(missing, [], "every field the hedging drawer reads is one the pipeline writes:\n  " + missing.join("\n  ")); checks++;
+  const bytes = Buffer.byteLength(JSON.stringify(V));
+  ok(bytes < 8 * 1024, `the hedging panel is ${(bytes / 1024).toFixed(1)}KB of a card capped at 100KB`);
 }
 
 rmSync(dir, { recursive: true, force: true });

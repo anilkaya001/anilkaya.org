@@ -852,7 +852,10 @@
     for (const leg of state.legs) {
       const r = byKey.get(legKey(leg));
       const tr = el("tr");
-      const th = el("th", null, legLabel(leg));
+      const th = el("th", null);
+      const label = legLabel(leg), at = label.indexOf(leg.expiry);
+      if (leg.expiry && at >= 0) th.append(label.slice(0, at), el("span", "flows-date", leg.expiry), label.slice(at + leg.expiry.length));
+      else th.textContent = label;
       th.scope = "row";
       tr.append(th);
 

@@ -131,10 +131,11 @@ export function briefToday(store) {
       const returned = num(sec.returned);
       facts.push(fact("sectors",
         "Sector premium leans most bullish in " + hi.t + " and most bearish in " + lo.t +
-        ", across " + scored2.length + " " + plural(scored2.length, "basket", "baskets") +
-        " with a readable lean" +
-        (returned !== null && returned !== scored2.length ? " of " + returned + " returned" : "") +
-        ".",
+        (returned !== null && returned !== scored2.length
+          ? ", across the " + scored2.length + " of " + returned + " returned " +
+            plural(returned, "basket", "baskets") + " that had a readable lean."
+          : ", across " + scored2.length + " " + plural(scored2.length, "basket", "baskets") +
+            " with a readable lean."),
         { mostBullish: hi.t, mostBullishLean: hi.lean,
           mostBearish: lo.t, mostBearishLean: lo.lean,
           readable: scored2.length, returned }));
@@ -150,17 +151,34 @@ export function briefToday(store) {
     if (q) silences.push(q);
   }
 
-  const al = answered(s.alerts);
-  const ar = rows(s.alerts);
-  if (al && ar && ar.length) {
-    facts.push(fact("alerts",
-      ar.length + " flagged " + plural(ar.length, "window", "windows") + " on the tape" +
-      (al.readAt ? ", read " + stampSaid(al.readAt) : "") + ".",
-      { flagged: ar.length, readAt: al.readAt || null,
-        readSaid: al.readAt ? stampSaid(al.readAt) : null }));
-  }
+  const alerts = briefAlertsFact(s.alerts);
+  if (alerts) facts.push(alerts);
 
   return { session, facts, silences };
+}
+
+export function briefAlertsFact(payload) {
+  const al = answered(payload);
+  const ar = rows(payload);
+  if (!al || !ar || !ar.length) return null;
+  const readAt = typeof al.readAt === "string" && al.readAt ? al.readAt : null;
+  const record = al.record && typeof al.record === "object" ? al.record : null;
+  const reads = record ? num(record.reads) : null;
+  const day = record && typeof record.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(record.date)
+    ? record.date : null;
+  const across = reads !== null && reads > 1;
+  const seen = num(al.seen);
+  const more = seen !== null && Number.isInteger(seen) && seen > ar.length ? seen : null;
+  const lead = more === null ? ar.length : more;
+  return fact("alerts",
+    lead + " flagged " + plural(lead, "window", "windows") + " on the tape" +
+    (across ? " across " + reads + " reads" + (day ? " on " + day : "") : "") +
+    (more === null ? "" : ", " + ar.length + " of them held on the page") +
+    (readAt ? (across ? ", the latest " : ", read ") + stampSaid(readAt) : "") + ".",
+    { flagged: ar.length, readAt,
+      readSaid: readAt ? stampSaid(readAt) : null,
+      ...(more === null ? {} : { seen: more }),
+      ...(across ? { reads, recordDate: day } : {}) });
 }
 
 export function briefYesterday(store) {

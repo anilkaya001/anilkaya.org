@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { fitGarch, skewtDensity, skewtConstants, lnGamma, GARCH_MIN_RETURNS, SKEWT_NU_MIN, SKEWT_NU_MAX,
-         GARCH_WINSOR_K, GARCH_PERSIST_CAP, GARCH_EWMA_LAMBDA }
+         GARCH_WINSOR_K, GARCH_PERSIST_CAP, GARCH_EWMA_LAMBDA, GARCH_AVG_SESSIONS, garchAverageVariance }
   from "../shared/flows-garch.js";
 import { repairCandles, CANDLE_BREAK_LOG, CANDLE_BREAK_VOLUME } from "../scripts/flows-pipeline.mjs";
 
@@ -106,6 +106,13 @@ near(meanVol, Math.sqrt(TRUE.omega / (1 - TRUE.alpha - TRUE.beta)) * Math.sqrt(2
 ok(fit.lastVol === fit.condVol[fit.condVol.length - 1], "lastVol is the path's final point, not a second computation");
 ok(fit.nextVol > 0 && Math.abs(fit.nextVol - fit.lastVol) < fit.lastVol,
    "nextVol is the one-step recursion off the last shock, in the same units, and not a forecast of the return");
+ok(GARCH_AVG_SESSIONS === 21 && fit.avg21Vol > 0 &&
+   (fit.avg21Vol - fit.nextVol) * (fit.longRunVol - fit.nextVol) >= 0 &&
+   Math.abs(fit.avg21Vol - fit.nextVol) <= Math.abs(fit.longRunVol - fit.nextVol) + 0.01,
+   `the 21-session average sits between the next session and the long run (${fit.nextVol}, ${fit.avg21Vol}, ${fit.longRunVol}) — the level a 30-day implied volatility is compared with`);
+near(garchAverageVariance(4, 1, 0.9, 1), 4, 1e-12, "over one session the average is the next session's variance");
+near(garchAverageVariance(4, 1, 0.9, 21), 1 + 3 * (1 - Math.pow(0.9, 21)) / (21 * 0.1), 1e-12,
+     "and over 21 it decays toward the long run at the fitted persistence");
 ok(!("z" in fit) && !("forecast" in fit) && !("bins" in fit) && !("density" in fit),
    "no standardised residuals, no forecast, no histogram and no density are published");
 ok(fit.nu > SKEWT_NU_MIN && fit.nu < SKEWT_NU_MAX, "the shape sits inside the bounds the optimiser searches");

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { buildBrief, briefToday, briefYesterday, briefNext, silenceOf, num }
+import { buildBrief, briefToday, briefYesterday, briefNext, briefAlertsFact, silenceOf, num }
   from "../shared/flows-brief.js";
 
 let checks = 0;
@@ -276,9 +276,11 @@ const REAL = { long: LONG, short: SHORT, watch: WATCH, events: EVENTS, alerts: A
 
   eq(sec.n.readable, 3, "three of the five rows carried a readable lean");
   eq(sec.n.returned, 5, "while five were returned, and both numbers are pinned");
-  ok(/3 baskets with a readable lean of 5 returned/.test(sec.say),
+  ok(/across the 3 of 5 returned baskets that had a readable lean\./.test(sec.say),
      "the sentence quotes both, because 'across 3 baskets' alone invites the reader to " +
-     "think three is the universe");
+     "think three is the universe, and says which three in words a reader can parse — the " +
+     "production wording read 'across 11 baskets with a readable lean of 12 returned'");
+  ok(!/of 5 returned\.$/.test(sec.say), "the old tail that hung the denominator off the lean is gone");
 
   ok(!/XLB/.test(sec.say),
      "a row whose leanRatio is null is not ranked as a zero — Number(null) is 0, and 0 is " +
@@ -326,6 +328,38 @@ const REAL = { long: LONG, short: SHORT, watch: WATCH, events: EVENTS, alerts: A
      "and with no comparand nothing is claimed about what changed");
   eq(cold.silences[0].kind, "pending",
      "which is stated as the ordinary state on a first run, not as a fault");
+}
+
+{
+  const nightly = briefToday(REAL).facts.find((f) => f.id === "alerts");
+  eq(nightly.say, "2 flagged windows on the tape, read 2026-09-04 08:33 UTC.",
+     "a nightly read with no session record keeps its one-read sentence");
+  const same = briefAlertsFact(ALERTS);
+  eq(same.say, nightly.say, "and the builder the intraday refresh calls is the one the brief itself uses");
+
+  const record = briefAlertsFact({ ...ALERTS, readAt: "2026-09-22T20:15:09.000Z",
+    rows: Array.from({ length: 180 }, (_, i) => ({ t: "T" + i })),
+    record: { date: "2026-09-22", reads: 12 } });
+  eq(record.say, "180 flagged windows on the tape across 12 reads on 2026-09-22, the latest 2026-09-22 20:15 UTC.",
+     "an intraday record says it is a union of reads and names the session it covers, rather than " +
+     "calling 180 rows one read");
+  eq(record.n.reads, 12, "the read count is pinned for the guard");
+  const union = briefAlertsFact({ ...ALERTS, readAt: "2026-09-22T20:15:09.000Z", seen: 226,
+    rows: Array.from({ length: 180 }, (_, i) => ({ t: "T" + i })),
+    record: { date: "2026-09-22", reads: 12 } });
+  eq(union.say, "226 flagged windows on the tape across 12 reads on 2026-09-22, 180 of them held on the page, " +
+     "the latest 2026-09-22 20:15 UTC.",
+     "WHEN THE DAY'S UNION IS LARGER THAN THE PAGE the count on the tape is the union and the page count is " +
+     "named as the part held: '180 flagged windows on the tape' sat beside 'holds 180 of the 226 alerts read' " +
+     "and called the page count the tape");
+  eq(union.n.seen, 226, "with the union pinned for the guard beside the page count");
+  eq(union.n.flagged, 180, "and the page count kept under its old name");
+  eq(briefAlertsFact({ ...ALERTS, seen: 200, rows: Array.from({ length: 60 }, (_, i) => ({ t: "T" + i })) }).say,
+     "200 flagged windows on the tape, 60 of them held on the page, read 2026-09-04 08:33 UTC.",
+     "a nightly read the row cap shed from says the same thing about its one read");
+  eq(briefAlertsFact({ ...ALERTS, seen: 2 }).say, nightly.say, "while a page that holds every window read keeps the short sentence");
+  eq(briefAlertsFact({ status: "quiet", rows: [] }), null, "a quiet feed states no count");
+  eq(briefAlertsFact({ status: "pending" }), null, "and neither does an unpublished one");
 }
 
 console.log(`✓ flows-brief: ${checks} assertions — a briefing whose every figure is quoted from a ` +

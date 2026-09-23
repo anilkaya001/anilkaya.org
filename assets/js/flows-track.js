@@ -892,6 +892,7 @@
     if (!changeEl) return;
     const stale = staleSaid();
     changeEl.textContent = changeSaid() + (stale ? " " + stale : "");
+    if (UI && UI.keepDates) UI.keepDates(changeEl);
     const kind = changeSilence();
     if (kind) changeEl.dataset.empty = kind;
     else delete changeEl.dataset.empty;
@@ -1001,6 +1002,7 @@
       const node = basisItem(key, notes[key]);
       if (node) basisHost.append(node);
     }
+    if (UI && UI.keepDates) UI.keepDates(basisHost);
     if (basisPanel) basisPanel.hidden = false;
   }
 
@@ -1158,7 +1160,7 @@
     if (payload.status === "pending") {
 
       const msg = "The pipeline has not published this key yet. The track is " +
-        "rebuilt by each morning run from the dated score archive the pipeline " +
+        "rebuilt by each after-close run from the dated score archive the pipeline " +
         "already holds — it costs no vendor call — and it appears with the first " +
         "run after this page shipped.";
       statusEl.textContent = msg;

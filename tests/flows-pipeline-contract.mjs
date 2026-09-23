@@ -20,9 +20,21 @@ import {
   SECTOR_ETFS, TRIX_SERIES, TRIX_MIN_CANDLES, TRIX_FULL_SCALE_BP,
   trixSeriesBp, scaleTrix, sectorTrix, MOVER_ROWS, moverRow, buildMovers,
   vendorNum, sectorLean, shapeNews, NEWS_ROWS, NEWS_VENDOR_LIMIT,
+  ensureArchived, sessionCandles, candleCut, judgeEndDate, verifyDating, computeFeatures,
+  sessionReference, sessionRow, readPxOf, intradayRefusal, nextWeekday, priorWeekdays,
+  closedPriceWindow, buildRecordCloses, recordCalendar, resolveBoardMemory, sameSessionGate,
+  retireSession, sessionArchiveKeys, sweepScreenerBand, SCREENER_SPLIT_DEPTH, SCREENER_PAGE_ROWS,
+  judgeScreenerDate, sessionRows, readDayOf, PIPELINE_CADENCE, SESSION_OPEN_MINUTES,
+  SESSION_CLOSE_MINUTES, MEMORY_ARCHIVE_SESSIONS, READ_RETRIES, readStored, holdersRefusal,
+  HOLDERS_RETRY_DAYS,
+  IV_RANK_PARAMS, fakeIvRank, measureVariationProbes, fakeOiLadder, fakeLadderGreeks,
+  fakeLadderChain, vannaProbeSample, featuresVariationInput, boardVariationMeta, congressRows,
+  plainRedispatchSaid,
 } from "../scripts/flows-pipeline.mjs";
-import { pearson, horizonMove, HORIZON_SESSIONS } from "../shared/flows-features.js";
-import { execFileSync, spawnSync } from "node:child_process";
+import { VARIATION_CODES, variationSummary } from "../shared/flows-variation.js";
+import { pinReading, buildCard } from "../shared/flows-card.js";
+import { pearson, horizonMove, HORIZON_SESSIONS, realizedVol } from "../shared/flows-features.js";
+import { execFileSync, spawnSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -132,6 +144,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     vegaTilt: (i % 5) * 0.6,
     netGamma: (i % 3 - 1) * 1e9,
     spotGammaShare: ((i % 7) - 3) / 4,
+    gammaBookShare: ((i % 7) - 3) / 4,
     flipDist: (i % 11 - 5) / 100,
     displacement: (i % 2 ? 1 : -1) * 0.6 + (i % 9 - 4) / 6,
     displacementWeight: 1,
@@ -157,7 +170,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     premiumTilt: f.dirShare * 0.5, netTilt: f.dirShare * 0.3,
     volTilt: f.dirShare * 0.4, oiTilt: f.dirShare * 0.2, surpriseTilt: 0,
   }));
-  const sectors = all.map((_, i) => ["tech", "energy", "health", "fins"][i % 4]);
+  const sectors = all.map((f, i) => (f.ticker === "LOTTO" ? "tech" : ["tech", "energy", "health", "fins"][i % 4]));
   const caps = all.map(() => 5e9);
 
   const scored = scoreBoard(all, tilts, sectors, caps);
@@ -200,13 +213,19 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      `while the quality gauge, which has no direction, stays put ` +
      `(${c.fam.O} -> ${after.fam.O})`);
 
-  const shortAtSpot = scored.filter((x) => x.spotGammaShare < -0.2);
-  const longAtSpot = scored.filter((x) => x.spotGammaShare > 0.2);
+  const shortAtSpot = scored.filter((x) => x.gammaBookShare < -0.2);
+  const longAtSpot = scored.filter((x) => x.gammaBookShare > 0.2);
   ok(shortAtSpot.length && longAtSpot.length, "the fixture covers both gamma regimes");
   const meanGate = (rows) => rows.reduce((a, x) => a + x.gate, 0) / rows.length;
   ok(meanGate(shortAtSpot) > meanGate(longAtSpot),
-     `THE FIX: short gamma at spot amplifies, long gamma damps ` +
+     `THE FIX: a short open-interest book amplifies, a long one damps — the gate reads the book's ` +
+     `net share of its gross, not the flow ladder's running sum below spot ` +
      `(${meanGate(shortAtSpot).toFixed(3)} vs ${meanGate(longAtSpot).toFixed(3)})`);
+  const noBook = scoreBoard(all.map((f) => ({ ...f, gammaBookShare: null, spotGammaShare: -f.spotGammaShare })),
+    tilts, sectors, caps);
+  ok(noBook.every((x, i) => Math.abs(x.gate - scoreBoard(all.map((f) => ({ ...f, gammaBookShare: null })),
+    tilts, sectors, caps)[i].gate) < 1e-12),
+     "and the running sum below spot no longer moves the gate at all: flipping it leaves every gate where it was");
 
   for (const k of ["F", "P", "D"]) {
     ok(scored.every((x) => x.fam[k] === null || (x.fam[k] >= -100 && x.fam[k] <= 100)),
@@ -441,7 +460,15 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(tilt("100").ivRank === 1, "the top of the range is exactly one");
   ok(tilt("0").ivRank === 0, "and the bottom exactly zero");
 
-  ok(tilt("0.5").ivRank === 0.5, "an ambiguous 0.5 is left as a fraction");
+  ok(tilt("0.5").ivRank === 0.005,
+     "A RANK UNDER ONE IS STILL ON THE VENDOR'S 0-100 SCALE: guessed per value, 0.8 read as the 80th " +
+     "percentile while 1.5 read as the 1.5th, so the lowest-ranked names escaped the pin card's floor signal");
+  const floorAt = (v) => pinReading({ iv30: 0.08, rv30: 0.2, ivRank: tilt(v).ivRank, ivMomentum: -0.005,
+    impliedH: null, realizedH: null, lastRange: { range: 0.002, date: "2026-09-18" } });
+  ok(["0", "0.3", "0.8", "1.0", "1.5", "2.0"].every((v) => floorAt(v) && floorAt(v).signals.includes("floor")) &&
+     floorAt("2.5") === null,
+     "so every rank from the 0th to the 2nd percentile raises the floor signal, and the 2.5th does not");
+  ok(Number.isNaN(tilt("100.5").ivRank), "and a rank past 100 is not a percentile at all");
   ok(Number.isNaN(tilt(null).ivRank), "a missing rank is not a zero percentile");
   ok(Number.isNaN(tilt("-3").ivRank), "and neither is a negative one");
 }
@@ -484,13 +511,68 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
       seen.push(key);
       if (key === "board:long:2026-08-24") throw new Error("archive write refused");
     });
-    ok(!seen.includes("board:long"),
-       `a failed archive write does NOT go on to publish the live board (${seen.join(", ")})`);
-    ok(lines.some((l) => /keeps the pre-chain board/.test(l)),
-       "and it says which copy the reader is left holding");
+    ok(seen.includes("board:long"),
+       `THE SPLIT: a failed archive write no longer takes the live board down with it ` +
+       `(${seen.join(", ")}) — sharing one try is how run 56 lost board:long:2026-09-15 AND ` +
+       "left readers on the pre-chain board; the end-of-run archive check rewrites the dated " +
+       "key from this same payload");
+    ok(lines.some((l) => /archive board:long:2026-08-24: NOT WRITTEN/.test(l) &&
+       /end-of-run check/.test(l)),
+       `and it says the archive was not written and what will write it (${lines[0]})`);
 
     ok(seen.includes("board:short:2026-08-24") && seen.includes("board:short"),
        "while the other side re-publishes normally — sides fail independently");
+  }
+
+  {
+    const seen = [];
+    const payloads = { long: board("long", ["AAA"]), short: board("short", ["CCC"]) };
+    const chains = new Map([["AAA", chain(0.04, -0.02, 0.31, 25)], ["CCC", chain(0.06, 0.01, 0.28, 32)]]);
+    const lines = await republishWithChain(payloads, chains, "2026-08-24", async (key) => {
+      seen.push(key);
+      if (key.endsWith(":2026-08-24")) {
+        const error = new Error("ingest board -> HTTP 409 archive_immutable");
+        error.status = 409;
+        throw error;
+      }
+    });
+    ok(seen.includes("board:long") && seen.includes("board:short"),
+       `THE UW-4 CASE: a 409 on the dated key still publishes the live board with its chain ` +
+       `columns (${seen.join(", ")}) — run 66 left 0 of 50 live rows with atmIv while the ` +
+       "archive held 25");
+    ok(lines.filter((l) => /ALREADY HOLDS this session \(409\)/.test(l)).length === 2 &&
+       lines.every((l) => !/NOT WRITTEN/.test(l)),
+       "and the 409 is reported as the archive already holding the session, not as a loss");
+  }
+
+  {
+    const store = new Map([["board:short:2026-08-24", { rows: [{ t: "EARLIER" }] }]]);
+    const written = [];
+    const report = await ensureArchived({
+      "scores:2026-08-24": { rows: [] },
+      "board:long:2026-08-24": { rows: [{ t: "AAA" }] },
+      "board:short:2026-08-24": { rows: [{ t: "CCC" }] },
+    }, {
+      landed: new Set(["scores:2026-08-24"]),
+      reader: async (key) => (store.has(key)
+        ? { payload: store.get(key), status: 200 } : { payload: null, absent: true, status: 200 }),
+      write: async (key) => { written.push(key); },
+    });
+    assert.deepEqual(report.map((r) => `${r.key}=${r.state}`),
+      ["scores:2026-08-24=written", "board:long:2026-08-24=repaired", "board:short:2026-08-24=held"],
+      "THE END-OF-RUN CHECK: a key this run wrote stands, a key the store lacks is written " +
+      "again from the run's payload, and a key an earlier run holds is left alone"); checks++;
+    assert.deepEqual(written, ["board:long:2026-08-24"],
+      "and only the missing key is written — the check never overwrites an archived session"); checks++;
+
+    const lost = await ensureArchived({ "board:long:2026-08-24": { rows: [] } }, {
+      landed: new Set(),
+      reader: async () => ({ payload: null, failed: true, status: 403 }),
+      write: async () => { const e = new Error("HTTP 403"); e.status = 403; throw e; },
+    });
+    eq(lost[0].state, "lost",
+       "and a key that can be neither read nor written is reported LOST, which main() prints " +
+       "as a loud warning rather than letting the run end green in silence");
   }
 
   {
@@ -602,6 +684,42 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        `(${seen.join(", ")}) — the order the archive's whole design rests on`);
     ok(seen.includes("board:short:2026-08-24") && seen.includes("board:short"),
        "and both sides publish, dated copy first");
+  }
+
+  {
+    const written = [];
+    const unmeasured = { vannaScale: { status: "unmeasured", ratio: null, n: 0 } };
+    const measured = { vannaScale: { status: "agree", ratio: 1.02, n: 50 } };
+    const payloads = {
+      long: { ...board("long", ["AAA"]), variation: unmeasured },
+      short: { ...board("short", ["CCC"]), variation: unmeasured },
+    };
+    for (const side of ["long", "short"]) {
+      for (const row of payloads[side].rows) row.variation = { vannaPerPointPctAdv: null, why: { vanna: "vanna-unchecked" } };
+    }
+    const refresh = (row) => { row.variation = { vannaPerPointPctAdv: 0.000718, why: {} }; return true; };
+    const chains = new Map([["AAA", chain(0.04, -0.02, 0.31, 25)]]);
+    const lines = await republishWithChain(payloads, chains, "2026-08-24",
+      async (key, payload) => { written.push([key, JSON.stringify(payload)]); }, refresh, measured);
+    const keys = written.map(([k]) => k);
+    assert.deepEqual(keys, ["board:long:2026-08-24", "board:long", "board:short:2026-08-24", "board:short"],
+      "A SIDE WITH NO CHAIN ROW IS STILL REPUBLISHED WHEN THE VARIATION REFRESH CHANGED IT: the short " +
+      "board used to be skipped, the end-of-run check archived its re-measured payload, and the live " +
+      `board kept vanna-unchecked beside an archive that said agree over 50 names (${keys.join(", ")})`); checks++;
+    const byKey = new Map(written);
+    eq(byKey.get("board:short:2026-08-24"), byKey.get("board:short"),
+       "and the dated copy is the live board, byte for byte");
+    ok(JSON.parse(byKey.get("board:short")).variation.vannaScale.status === "agree" &&
+       JSON.parse(byKey.get("board:short")).rows[0].variation.vannaPerPointPctAdv === 0.000718,
+       "carrying the measured scale and the re-measured row");
+    ok(lines.some((l) => /re-published board:short with chain columns on 0 row\(s\), variation re-measured on 1, and the board's measured variation block/.test(l)),
+       `and the log says why a side with no chain row went out again (${lines.join(" | ")})`);
+
+    const still = [];
+    const quiet = { long: { ...board("long", ["AAA"]), variation: unmeasured } };
+    await republishWithChain(quiet, new Map(), "2026-08-24", async (key) => { still.push(key); },
+      null, { vannaScale: { status: "unmeasured", ratio: null, n: 0 } });
+    eq(still.length, 0, "while a side whose rows and block did not change is still left alone");
   }
 }
 
@@ -1211,6 +1329,18 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      `and the fixture really does truncate more than one name (${recovered ? recovered[1] : 0} ` +
      "recovered), so the probe count above is a measurement rather than an accident of there " +
      "being only one candidate");
+  const paged = /chains: (\d+) full first page\(s\) read on with (\d+) further page call\(s\).*?: (\d+) now complete, (\d+) still full at the last page, (\d+) where a later page repeated/.exec(runLog);
+  ok(paged, "a chain that fills its first page is read on, page by page, and the run says what that bought");
+  ok(paged && Number(paged[3]) >= 1,
+     `at least one full first page was read to the end of the book (${paged ? paged[3] : 0} complete)`);
+  ok(paged && Number(paged[5]) >= 1,
+     "and a vendor that answers a later page with the first one is caught by the repeats, not " +
+     "counted as a complete book");
+  ok(/page=1 returned the first page again/.test(runLog),
+     "a vendor that counts pages from one (page=1 repeating the first page) is detected and " +
+     "read from page 2 on, rather than taken for one that ignores the parameter");
+  ok(!/\d+ of 2 contracts showed/.test(runLog) && /oi basis: \d+ of \d+ contracts across \d+ chains|oi basis: \d+ contracts? across/.test(runLog),
+     "the open-interest basis is judged across every chain, not on one chain's pair");
   const read = (key) => JSON.parse(fs.readFileSync(`${prefix}-${key}.json`, "utf8"));
   const board = read("board-long");
   const movers = read("movers");
@@ -1252,6 +1382,27 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
       ok(!claimed.has(t),
          `${t} is a cross-section card and no board row advertises it — the two sets are disjoint by ` +
          "construction, and an overlap would mean a name got both lanes and paid the deep calls twice");
+    }
+
+    {
+      const congressOf = { ok: 0, quiet: 0, unavailable: 0 };
+      for (const t of byDepth["cross-section"]) {
+        const card = JSON.parse(fs.readFileSync(`${prefix}-card-${t}.json`, "utf8"));
+        congressOf[card.panels.congress.status] = (congressOf[card.panels.congress.status] || 0) + 1;
+        for (const key of ["aggressor", "ivSurface", "skewTerm", "topContracts"]) {
+          const p = card.panels[key];
+          ok(p.status === "unavailable" && /not on today's board/.test(p.reason) &&
+             !/stopped before reaching this name/.test(p.reason),
+             `${t} ${key}: a chain never requested for a cross-section name says so, not that ` +
+             `the chain leg's deadline gave it up (${String(p.reason).slice(0, 60)})`);
+        }
+      }
+      eq(congressOf.unavailable, 0,
+         "no cross-section card calls congress unavailable when the market-wide tape was read — " +
+         "the card was denying what /flows/political/ ranks from the same tape");
+      ok(congressOf.ok > 0 && congressOf.quiet > 0,
+         `and the tape's own answer reaches them: ${congressOf.ok} with disclosures, ` +
+         `${congressOf.quiet} read and quiet`);
     }
 
     const total = long.rows.length + short.rows.length;
@@ -1419,11 +1570,32 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
       ok(c.n >= feat.minN, `${c.key}: measured only at or above the stated floor`);
     }
   }
-  for (const key of ["method", "selection", "overlap", "calendar"]) {
+  for (const key of ["method", "perSession", "ranking", "selection", "overlap", "calendar"]) {
     ok(typeof feat[key] === "string" && feat[key].length > 20,
        `the ${key} statement rides the payload`);
   }
   ok(/not side-signed/.test(feat.method), "and the method names the return convention");
+  eq(feat.rankedFrom, 3 * HORIZON_SESSIONS,
+     "a feature is ranked only from three horizons' worth of overlapping sessions");
+  eq(feat.through, record.sessionDate,
+     "and no exit after the session being published is scored as a close");
+  const perSession = feat.cols.filter((c) => c.icMean !== null);
+  ok(perSession.length >= 15,
+     `the replay measures the board's vocabulary per session too (${perSession.length} columns)`);
+  for (const c of feat.cols) {
+    if (c.icMean === null) {
+      ok(typeof c.icReason === "string" && c.icReason.length > 5,
+         `${c.key}: a column with no session mean says why`);
+      continue;
+    }
+    ok(Math.abs(c.icMean) <= 1 && c.icSessions >= 1, `${c.key}: a session mean is a mean of correlations`);
+    ok(c.icPos >= 0 && c.icPos <= 1, `${c.key}: the positive share is a share`);
+    eq(c.ranked, c.icSessions >= feat.rankedFrom, `${c.key}: ranked exactly when the sessions reach the floor`);
+    ok(c.ranked || c.icT === null, `${c.key}: an unranked column publishes no t`);
+  }
+  const order = feat.cols.map((c) => (c.ranked ? 0 : c.icMean !== null ? 1 : 2));
+  ok(order.every((v, i) => i === 0 || v >= order[i - 1]),
+     "ranked columns lead, unranked session means follow, and columns with none close the table");
 
   {
     const track = read("scoretrack");
@@ -2453,6 +2625,38 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     ok(dated.some((r) => r.edte !== null && r.edte > 12 && r.edte <= 21),
        `board:${side} holds at least one name reporting just past the gate — the row this ` +
        "column exists for, and proof the branch is reachable");
+    eq(board.gateOrigin, nextWeekday(board.sessionDate),
+       `board:${side}'s gate counts from the next session (${board.gateOrigin}), not the ` +
+       "machine's date — which made the dry corpus a different corpus every day it ran");
+  }
+
+  {
+    const cardFiles = emitted.filter((n) => n.startsWith(base + "-card-"));
+    ok(cardFiles.length >= 50, `the dry run emitted ${cardFiles.length} cards to check`);
+    let boardCards = 0;
+    for (const name of cardFiles) {
+      const card = JSON.parse(fs.readFileSync(path.join(dir, name), "utf8"));
+      const cx = card.panels && card.panels.context;
+      if (!cx || cx.status !== "ok") continue;
+      ok(cx.closeDates[cx.closeDates.length - 1] <= card.sessionDate &&
+         cx.candles.every((c) => c[0] <= card.sessionDate) &&
+         (!cx.garch || !Array.isArray(cx.garch.dates) || cx.garch.dates.every((d) => d <= card.sessionDate)),
+         `${card.ticker}: closeDates, candles and GARCH dates never run past ${card.sessionDate}`);
+      ok(card.readPx && card.readPx.source === "screener" && typeof card.readPx.readAt === "string",
+         `${card.ticker}: the screener price travels as a labelled readPx with its read time`);
+      if (card.depth !== "board") continue;
+      boardCards++;
+      const rank = card.panels.volContext && card.panels.volContext.ivRank;
+      ok(!rank || !Array.isArray(rank.rows) || rank.rows.every((r) => r.date <= card.sessionDate),
+         `${card.ticker}: no IV-rank row is dated after the session`);
+      eq(card.panels.levels.spot, cx.candles[cx.candles.length - 1][4],
+         `${card.ticker}: the levels are measured from the session's own close`);
+    }
+    ok(boardCards >= 25, `and ${boardCards} of them are board cards carrying the per-name feeds`);
+    ok(/per-name feeds: \d+ card\(s\) carried rows from outside/.test(runLog),
+       "the fixture's IV-rank history runs past the session, so the cut is exercised and logged");
+    ok(/archive check: scores, board:long and board:short are all written/.test(runLog),
+       "and the end-of-run archive check runs and finds the session whole");
   }
 
   {
@@ -2653,6 +2857,37 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     eq(vendorNum(undefined), null, "so is undefined");
     eq(vendorNum("n/a"), null, "and so is a string that is not a number at all");
 
+    const base = {
+      call_volume: 1000, put_volume: 800, call_premium: 5e6, put_premium: 4e6,
+      call_open_interest: 60000, put_open_interest: 40000, total_open_interest: 100000,
+      avg_30_day_call_volume: 900, avg_30_day_put_volume: 700,
+    };
+    const oneSided = screenerTilt({ ...base, bearish_premium: 2e6 });
+    eq(oneSided.premiumTilt, null,
+       "a bearish premium with no bullish side on the wire is no tilt — it was -1, a full bearish " +
+       "vote built from a field the vendor did not send");
+    eq(screenerTilt({ ...base, bullish_premium: 3e6, bearish_premium: 2e6 }).premiumTilt, 0.2,
+       "while both sides present still measure (3 - 2) / 5");
+    eq(screenerTilt({ ...base, bullish_premium: "   ", bearish_premium: 2e6 }).premiumTilt, null,
+       "and a blank side is absent, not zero");
+    eq(oneSided.oiTilt, null,
+       "with no previous open interest there is no open-interest CHANGE — it was 0.2, the " +
+       "book's call/put composition dressed as a day's positioning");
+    eq(screenerTilt({ ...base, prev_call_oi: 60000, prev_put_oi: 40000 }).oiTilt, 0,
+       "while an unchanged book is a measured zero");
+    eq(screenerTilt({ ...base, prev_call_oi: 60000 }).oiTilt, null, "half a pair is no change");
+    eq(oneSided.netTilt, null, "absent net premiums are no net tilt, not a balanced zero");
+    eq(screenerTilt({ ...base, net_call_premium: 1e6 }).netTilt, null, "nor is one leg of them");
+    near(screenerTilt({ ...base, net_call_premium: 1e6, net_put_premium: -5e5 }).netTilt, 1.5e6 / 9e6, 1e-12,
+      "both legs measure against the gross premium");
+    eq(screenerTilt({ ...base, call_volume_ask_side: 600, call_volume_bid_side: 300 }).volTilt, null,
+       "an aggressor split on the calls alone is no volume tilt — it was 0.167, half a subtraction");
+    near(screenerTilt({ ...base, call_volume_ask_side: 600, call_volume_bid_side: 300,
+      put_volume_ask_side: 200, put_volume_bid_side: 500 }).volTilt, 600 / 1800, 1e-12,
+      "all four legs measure");
+    eq(screenerTilt({ ...base, call_volume: null }).surpriseTilt, null,
+       "and a call volume off the wire is no volume surprise");
+
     const blank = find(all({ bullish_premium: "   " }), "XLRE");
     eq(blank.read, "unreadable",
        "so a blank premium string makes the row unreadable rather than a zero-dollar lean");
@@ -2831,6 +3066,729 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "and a flag the vendor omitted is NULL — \"this was not flagged major\" and \"we do not " +
        "know whether it was\" are different sentences");
   }
+}
+
+{
+  const SESSION = "2026-09-21";
+  const WFC = [86.31, 87.27, 86.87, 83.87, 85.43, 86.45, 87.89, 88.39, 89.17, 87.59, 87.25,
+    87.52, 87.45, 88.93, 88.11, 88.82, 87.54, 87.4, 85.94, 83.7, 83.84, 84.72, 84.79, 85.23,
+    84.97, 86.69, 86.39, 87.04, 89.27, 89.19, 89.97, 87.96, 89.67, 89.45, 90.29, 88.71, 89.72,
+    87.05, 86.89, 86.12, 86.54, 83.385];
+  const days = [];
+  for (let t = Date.parse("2026-09-22T12:00:00Z"); days.length < WFC.length; t -= 86400000) {
+    const d = new Date(t).toISOString().slice(0, 10);
+    const dow = new Date(t).getUTCDay();
+    if (dow !== 0 && dow !== 6) days.unshift(d);
+  }
+  const vendor = WFC.map((c, i) => ({
+    start_time: `${days[i]}T13:30:00Z`, open: String(c), high: String(c * 1.01),
+    low: String(c * 0.99), close: String(c), volume: i === WFC.length - 1 ? 8890788 : 21000000,
+  })).reverse();
+
+  eq(days[days.length - 1], "2026-09-22", "the fixture ends on the partial 2026-09-22 bar the live cards carried");
+  eq(days[days.length - 2], SESSION, "and its previous bar is the 2026-09-21 session the cards were stamped with");
+
+  const cut = sessionCandles(vendor, SESSION);
+  eq(cut.length, vendor.length - 1, "THE CUT: a vendor that ignores end_date loses exactly the bar past the session");
+  ok(cut.every((c) => c.start_time.slice(0, 10) <= SESSION), "and nothing dated after the session survives it");
+  eq(sessionCandles(vendor, null).length, vendor.length,
+     "with no session date there is nothing to cut against, so nothing is invented");
+  assert.deepEqual(candleCut(vendor, SESSION), { past: 1, latest: "2026-09-22" },
+    "the cut reports what it removed, so the run can log how often the vendor ignored end_date"); checks++;
+
+  const judged = judgeEndDate(vendor, SESSION);
+  eq(judged.honoured, false, "A FAKE VENDOR THAT IGNORES end_date IS CAUGHT: max(candleDate) > sessionDate");
+  eq(judged.latest, "2026-09-22", "and the offending date is named");
+  eq(judged.send, true, "while the parameter is still sent — dropping it would only remove the request, not the bar");
+  eq(judgeEndDate(cut, SESSION).honoured, true, "a vendor that honours it is reported as honouring it");
+  eq(judgeEndDate([], SESSION).send, false, "an empty answer drops the parameter, as before");
+
+  const calls = [];
+  const fakeUw = async (p, params = {}) => {
+    calls.push([p, params]);
+    if (p.includes("/ohlc/1d")) return vendor;
+    if (p === "/api/screener/stocks") {
+      return params.date
+        ? [{ ticker: "AAPL", close: "230", marketcap: "3e12", call_volume: 1, put_volume: 1 }]
+        : [{ ticker: "AAPL", close: "231", marketcap: "3e12", call_volume: 1, put_volume: 1 }];
+    }
+    return [];
+  };
+  const dating = await verifyDating(SESSION, { read: fakeUw });
+  eq(dating.endDateHonoured, false,
+     "verifyDating REPORTS the vendor ignoring end_date rather than deciding with it — " +
+     "the 17:17 run printed end_date=true while every card carried 2026-09-22");
+  eq(dating.endDateLatest, "2026-09-22", "and says which bar gave it away");
+  eq(dating.endDate, true, "and keeps sending the parameter");
+  eq(dating.screenerDate, true, "a dated screener that answers with readable rows keeps its date");
+  ok(calls.some(([p, q]) => p === "/api/screener/stocks" && q.date === SESSION),
+     "and the probe really asked the screener for the session");
+  const blind = await verifyDating(SESSION, {
+    read: async (p, params = {}) => (p === "/api/screener/stocks" && params.date ? [{ ticker: "X" }]
+      : p === "/api/screener/stocks" ? [{ ticker: "X", close: 1, marketcap: 1, call_volume: 1, put_volume: 1 }]
+        : p.includes("/ohlc/1d") ? cut : []),
+  });
+  eq(blind.screenerDate, false,
+     "a dated screener whose rows lack the fields the universe filter reads is dropped for the run");
+  eq(blind.endDateHonoured, true, "and an honoured end_date is reported as honoured");
+  eq(judgeScreenerDate([], []).date, true,
+     "two empty probes teach nothing, so the dated read — correct by construction — is kept");
+
+  const f = computeFeatures({
+    ticker: "WFC", spot: 83.385, greekFlow: [], ticks: [], strikes: [], expiries: [],
+    ohlc: vendor, sessionDate: SESSION, tilt: null,
+  });
+  eq(f.closeDates[f.closeDates.length - 1], SESSION,
+     "closeDates NEVER RUN PAST sessionDate — on 2026-09-21 all 166 live cards ended on 2026-09-22");
+  ok(f.candles.every((c) => c[0] <= SESSION), "nor do the published candles");
+  ok(!f.garch || !Array.isArray(f.garch.dates) || f.garch.dates.every((d) => d <= SESSION),
+     "nor the GARCH fit's dates");
+  const without = realizedVol(WFC.slice(0, -1), { window: 21 });
+  const withPartial = realizedVol(WFC, { window: 21 });
+  near(f.rv30, without, 1e-12,
+       `rv30 is the session's own (${(without * 100).toFixed(2)}%), not the ` +
+       `${(withPartial * 100).toFixed(2)}% the partial -3.71% bar produced`);
+  ok(Math.abs(withPartial - without) > 0.03, "and the fixture really separates the two readings by over three vol points");
+  eq(f.spot, 86.54, "THE REFERENCE SPOT is the session close, not the 83.385 read at 13:17 the next day");
+  eq(f.spotBasis, "session-close", "and says so");
+  eq(f.readPx, 83.385, "the read price travels beside it, labelled");
+  eq(f.prevClose, 86.12, "and the previous close is the bar before the session's");
+
+  const noBar = sessionReference(vendor.filter((c) => !c.start_time.startsWith(SESSION)), SESSION, 83.385);
+  eq(noBar.basis, "read", "a series with no bar for the session falls back to the read price and says so");
+  eq(noBar.spot, 83.385, "and uses it");
+
+  const row = { ticker: "WFC", close: "83.385", prev_close: "86.54", sector: "Financials" };
+  const card = sessionRow(row, f);
+  eq(card.close, 86.54, "the card and board row carry the session close");
+  near((card.close - card.prev_close) / card.prev_close, 86.54 / 86.12 - 1, 1e-12,
+       "and the session's own change, not the next day's intraday move");
+  eq(sessionRow(row, { spotBasis: "read", spot: 83.385 }), row,
+     "a row whose features fell back to the read price is left exactly as the screener sent it");
+  const read = readPxOf({ row, features: f }, "2026-09-22T17:18:00Z");
+  eq(read.px, 83.385, "card.readPx keeps the screener's price");
+  eq(read.readAt, "2026-09-22T17:18:00Z", "with the minute it was read");
+  ok(/session's daily close/.test(read.note), "and a sentence saying which one the levels use");
+
+  const iv = sessionRows([{ date: "2026-09-22" }, { date: "2026-09-21" }, { date: "2026-09-18" }],
+    (r) => r.date, SESSION, { through: true });
+  eq(iv.cut, 1, "iv-rank rows dated after the session are cut");
+  const dp = sessionRows({ data: [{ executed_at: "2026-09-22T13:40:00Z" }, { executed_at: "2026-09-21T19:59:00Z" }] },
+    (r) => readDayOf(r.executed_at), SESSION);
+  eq(dp.cut, 1, "and dark-pool prints not on the session's Eastern day are cut from the wrapped body");
+  eq(dp.raw.data.length, 1, "keeping the envelope the shaper reads");
+  eq(readDayOf("2026-09-23T02:00:00Z"), "2026-09-22",
+     "a read at 22:00 Eastern is that Eastern day's, whatever the UTC date says");
+}
+
+{
+  const at = (iso) => intradayRefusal("2026-09-21", { at: new Date(iso) });
+  const tuesday = at("2026-09-22T14:01:13Z");
+  ok(tuesday.inside && tuesday.refuse,
+     "THE INTRADAY GUARD REFUSES the 14:01Z firing that published 2026-09-21 from 09-22's tape");
+  ok(/refusing to publish session 2026-09-21 from an in-progress tape/.test(tuesday.message),
+     `with a message naming the session and the clock (${tuesday.message.slice(0, 90)}…)`);
+  const allowed = intradayRefusal("2026-09-21", { at: new Date("2026-09-22T17:17:00Z"), allow: true });
+  ok(allowed.inside && allowed.allowed && !allowed.refuse,
+     "allow_intraday lets a manual run through, and the result says it was allowed");
+  ok(/PUBLISHING FROM AN IN-PROGRESS TAPE/.test(allowed.message), "and the log says what that means");
+  ok(!at("2026-09-22T21:30:00Z").inside, "21:30Z in summer is 17:30 EDT — after the close");
+  ok(!at("2026-12-15T21:30:00Z").inside, "21:30Z in winter is 16:30 EST — after the close");
+  ok(at("2026-12-15T20:30:00Z").inside,
+     "while the 20:30Z first proposed is 15:30 EST — mid-session in winter, which is why it was rejected");
+  ok(!at("2026-09-23T09:30:00Z").inside && !at("2026-12-16T09:30:00Z").inside,
+     "a 21:30Z firing delayed twelve hours still lands before the next open under either zone");
+  ok(!at("2026-09-19T15:00:00Z").inside, "a Saturday is never inside a session");
+  ok(at("2026-09-22T13:30:00Z").inside && !at("2026-09-22T13:29:00Z").inside,
+     "the open is 09:30 exactly");
+  ok(!at("2026-09-22T20:00:00Z").inside && at("2026-09-22T19:59:00Z").inside,
+     "and the close is 16:00 exactly");
+  eq(SESSION_OPEN_MINUTES, 570, "09:30 in minutes");
+  eq(SESSION_CLOSE_MINUTES, 960, "16:00 in minutes");
+
+  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  const main = src.slice(src.indexOf("async function main()"));
+  const resolved = main.indexOf("await resolveSessionDate()");
+  const guard = main.indexOf("intradayRefusal(sessionDate");
+  const thrown = main.indexOf("if (intraday && intraday.refuse) throw new Error(intraday.message)");
+  const firstRead = main.indexOf("verifyDating(sessionDate");
+  ok(resolved !== -1 && guard > resolved && thrown > guard && firstRead > thrown,
+     "main() resolves the session, then consults the guard and THROWS on a refusal, before a " +
+     "single vendor read beyond the session probe");
+  ok(/allow: process\.env\.FLOWS_ALLOW_INTRADAY === "1"/.test(main),
+     "and the override is the FLOWS_ALLOW_INTRADAY=1 the workflow plumbs from allow_intraday");
+
+  const wf = readFileSync(new URL("../.github/workflows/flows-pipeline.yml", import.meta.url), "utf8");
+  const crons = [...wf.matchAll(/cron:\s*"([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(crons, ["30 21 * * 1-5"],
+    "THE SCHEDULE is one post-close cron — the '15 9'/'15 10' pair fired 4.5-6.6h late every weekday"); checks++;
+  ok(wf.includes('elif [ "$FIRED" = "30 21 * * 1-5" ]'), "and the gate step admits exactly that cron");
+  ok(!/15 9|15 10/.test(wf), "and no trace of the 05:15 pair remains to be admitted");
+  ok(/allow_intraday:[\s\S]*?type: boolean/.test(wf) && /republish_session:[\s\S]*?type: boolean/.test(wf),
+     "workflow_dispatch offers allow_intraday and republish_session");
+  ok(/FLOWS_ALLOW_INTRADAY: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.allow_intraday && '1' \|\| '' \}\}/.test(wf),
+     "and plumbs allow_intraday as FLOWS_ALLOW_INTRADAY=1, on a dispatch only");
+  ok(/FLOWS_REPUBLISH_SESSION: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.republish_session && '1' \|\| '' \}\}/.test(wf),
+     "and republish_session as FLOWS_REPUBLISH_SESSION=1, on a dispatch only");
+  for (const file of ["flows-pipeline.yml", "regression.yml"]) {
+    const text = readFileSync(new URL(`../.github/workflows/${file}`, import.meta.url), "utf8");
+    ok(/actions\/checkout@v5/.test(text) && /actions\/setup-node@v5/.test(text) && !/@v4/.test(text),
+       `${file} runs the Node-24 majors of checkout and setup-node`);
+  }
+  ok(/after the close/.test(PIPELINE_CADENCE) && /21:30 UTC/.test(PIPELINE_CADENCE),
+     `the cadence the payloads print is the schedule that fires (${PIPELINE_CADENCE})`);
+  ok(!/05:15/.test(src), "and the pipeline no longer names 05:15 anywhere");
+  ok(!/shorts\/AAPL\/volume-and-ratio/.test(src) && !/probes:/.test(src),
+     "the shorts probe that returned zero rows every run is gone, and so is meta.probes");
+}
+
+{
+  eq(nextWeekday("2026-09-18"), "2026-09-21", "the gate origin after a Friday is Monday");
+  eq(nextWeekday("2026-09-21"), "2026-09-22", "and after a Monday, Tuesday");
+  eq(nextWeekday("garbage"), null, "an unparseable session has no next session");
+  assert.deepEqual(priorWeekdays("2026-09-22", 3), ["2026-09-21", "2026-09-18", "2026-09-17"],
+    "the archive walk back skips the weekend"); checks++;
+  ok(daysToEarnings({ next_earnings_date: "2026-10-03" }, nextWeekday("2026-09-21")) === 11,
+     "UW-21: a report on 10-03 is 11 days from the NEXT session after 09-21 — the anchor a " +
+     "post-close run must use, where its own wall-clock date would say 12");
+
+  ok(closedPriceWindow("2026-09-21T21:40:00Z", "2026-09-21"),
+     "an archive written at 17:40 EDT on its own session holds that session's close");
+  ok(!closedPriceWindow("2026-09-21T19:30:00Z", "2026-09-21"), "one written at 15:30 does not");
+  ok(!closedPriceWindow("2026-09-21T15:54:00Z", "2026-09-18"),
+     "and board:*:2026-09-18, written Monday 11:54 ET, holds a MONDAY price: refused as a close");
+  ok(closedPriceWindow("2026-09-19T15:00:00Z", "2026-09-18"), "a Saturday write still holds Friday's close");
+  ok(closedPriceWindow("2026-09-21T13:29:00Z", "2026-09-18") && !closedPriceWindow("2026-09-21T13:31:00Z", "2026-09-18"),
+     "and the window closes at the next open, to the minute");
+  ok(!closedPriceWindow(null, "2026-09-18"), "an unstamped archive is never trusted as a close");
+
+  const bars = (dates, close) => dates.map((d) => ({ start_time: `${d}T13:30:00Z`, close: String(close) }));
+  const enriched = [{ row: { ticker: "AAA" }, raw: { ohlc: bars(["2026-09-17", "2026-09-18", "2026-09-21", "2026-09-22"], 10) } }];
+  const datedBoards = [
+    { d: "2026-09-18", side: "long", rows: [{ t: "BBB", px: 50 }], generatedAt: "2026-09-21T15:54:00Z" },
+    { d: "2026-09-17", side: "long", rows: [{ t: "CCC", px: 70 }], generatedAt: "2026-09-17T21:35:00Z" },
+  ];
+  const closes = buildRecordCloses(enriched, datedBoards, "2026-09-21");
+  ok(![...closes.values()].some((m) => [...m.keys()].some((d) => d > "2026-09-21")),
+     "RECORD CLOSES NEVER RUN PAST sessionDate — the partial 09-22 bar is not an exit price");
+  eq(closes.get("AAA").size, 3, "the enriched name keeps its three closed sessions");
+  ok(!closes.has("BBB"), "a dated-board px read the next session is NOT used as a close");
+  eq(closes.get("CCC").get("2026-09-17"), 70, "one written between the close and the next open is");
+  assert.deepEqual(closes.sources, { boardPx: 1, boardPxRefused: 1 },
+    "and the run can say how many it used and refused"); checks++;
+  const calendar = recordCalendar(enriched, datedBoards, "2026-09-21");
+  eq(calendar[calendar.length - 1], "2026-09-21",
+     "the record's calendar ends at the session, so k=5 and k=10 are never scored to an intraday bar");
+
+  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  ok(!/put\(row\.ticker, sessionDate, row\.close\)/.test(src),
+     "and the universe row.close — a screener price read at run time — is no longer written as a close");
+}
+
+{
+  const archived = { payload: { generatedAt: "2026-09-22T14:02:18.489Z", rows: [{ t: "B" }] }, status: 200 };
+  const board = { payload: { sessionDate: "2026-09-21", rows: [{ t: "B" }] }, status: 200 };
+  const gone = { payload: null, absent: true, status: 200 };
+  const refusedRead = { payload: null, failed: true, status: 403 };
+  const archiveOf = (scores, long, short) => ({
+    "scores:2026-09-21": scores, "board:long:2026-09-21": long, "board:short:2026-09-21": short });
+  const whole = archiveOf(archived, board, board);
+  const gate = sameSessionGate({ sessionDate: "2026-09-21", archive: whole });
+  ok(gate.skip && gate.mode === "archived",
+     "A SAME-SESSION RUN SKIPS THE RANKED LEG when the session's three archive keys are held");
+  ok(/boards, scores, score track, record, brief and cards/.test(gate.note), "and names what it skips");
+  const again = sameSessionGate({ sessionDate: "2026-09-21", archive: whole, republish: true });
+  ok(!again.skip && again.mode === "republish", "republish_session runs it, as a rewrite");
+  const unread = sameSessionGate({ sessionDate: "2026-09-21",
+    archive: archiveOf(refusedRead, refusedRead, refusedRead) });
+  ok(!unread.skip && unread.mode === "unverified" && /403/.test(unread.note),
+     "an unreadable archive does not skip a session that may never have been published");
+  eq(sameSessionGate({ sessionDate: "2026-09-21", archive: archiveOf(gone, gone, gone) }).mode, "fresh",
+     "an absent one is a first run");
+
+  const lostBoard = sameSessionGate({ sessionDate: "2026-09-21", archive: archiveOf(archived, gone, board) });
+  ok(lostBoard.skip && lostBoard.mode === "partial",
+     "A PARTLY WRITTEN ARCHIVE IS NOT READ AS WHOLE: scores held and board:long lost (the store's " +
+     "403 on board:long) used to read as archived and skip in silence, so the re-dispatch that " +
+     "ARCHIVE LOST asked for never wrote the lost board");
+  ok(/board:long:2026-09-21 is not/.test(lostBoard.note) && /republish_session/.test(lostBoard.note) &&
+     /exits non-zero/.test(lostBoard.note),
+     `and it names the missing key, the dispatch that repairs it, and the red run (${lostBoard.note.slice(0, 120)})`);
+  const lostScores = sameSessionGate({ sessionDate: "2026-09-21", archive: archiveOf(gone, board, board) });
+  ok(lostScores.skip && lostScores.mode === "partial",
+     "AND A LOST scores KEY BESIDE LANDED BOARDS IS NOT A FIRST RUN: read as fresh, it re-ranked, wrote " +
+     "new live boards and scores, and the immutable dated boards kept the first run's ranking — the split");
+  ok(/scores:2026-09-21 is not/.test(lostScores.note), "and says which key is missing");
+  const unsure = sameSessionGate({ sessionDate: "2026-09-21", archive: archiveOf(archived, refusedRead, board) });
+  ok(unsure.skip && unsure.mode === "archived" && /board:long:2026-09-21 could not be read/.test(unsure.note),
+     "a board that could not be read beside a held scores still skips, and says the archive may be incomplete");
+  eq(sameSessionGate({ sessionDate: "2026-09-21", archive: archiveOf(gone, refusedRead, gone) }).mode, "unverified",
+     "while nothing held and a board unread proceeds, as an unreadable scores always did");
+  eq(sameSessionGate({ sessionDate: "2026-09-21", archive: archiveOf(archived, gone, board), republish: true }).mode,
+     "republish", "republish_session rewrites a partly written session");
+  ok(/partly archived and skips it/.test(plainRedispatchSaid([
+    { key: "scores:2026-09-21", state: "written" }, { key: "board:long:2026-09-21", state: "lost" },
+    { key: "board:short:2026-09-21", state: "repaired" }])),
+     "ARCHIVE LOST says a plain re-dispatch skips a session that kept part of its archive, as the gate does");
+  const noneKept = plainRedispatchSaid([
+    { key: "scores:2026-09-21", state: "lost" }, { key: "board:long:2026-09-21", state: "lost" },
+    { key: "board:short:2026-09-21", state: "lost" }]);
+  ok(!/partly archived/.test(noneKept) && /ranks it again/.test(noneKept),
+     "BUT NOT WHEN NOTHING WAS KEPT: with all three keys lost the gate reads the session as fresh and " +
+     `a plain re-dispatch ranks it again, so "finds the session partly archived" was false (${noneKept})`);
+  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  ok(/"together; " \+ plainRedispatchSaid\(archive\)/.test(src),
+     "and the ARCHIVE LOST line takes its clause from that function");
+  ok(/reads as archived, or as partly archived, and a later plain run skips it/.test(src),
+     "a refused retire says the session may now read as partly archived, which the gate also skips");
+  assert.deepEqual(sessionArchiveKeys("2026-09-21"),
+    ["scores:2026-09-21", "board:long:2026-09-21", "board:short:2026-09-21"],
+    "the three keys a republish deletes and rewrites together"); checks++;
+  const removed = [];
+  const retired = await retireSession("2026-09-21", {
+    remove: async (key) => { removed.push(key); return key.startsWith("scores") ? { ok: true, status: 200 } : { ok: false, status: 404 }; },
+  });
+  eq(removed.length, 3, "a republish asks for all three");
+  ok(retired.refused.length === 0 && retired.absent.length === 2,
+     "and an absent key is not a refusal — only a store that says no stops the rewrite");
+  eq(removed[removed.length - 1], "scores:2026-09-21",
+     "SCORES IS DELETED LAST: it is the key the gate reads, so a rewrite that stops half way " +
+     "must leave the session reading as archived rather than as a first run that would split " +
+     "the archive again");
+
+  const asked = [];
+  const waits = [];
+  const refused = await retireSession("2026-09-21", {
+    remove: async (key) => { asked.push(key); return { ok: false, status: 403 }; },
+    pause: async (ms) => { waits.push(ms); },
+  });
+  eq(refused.refused.length, 1,
+     "a refusal stops the retire at the first key, which main() turns into a throw before any ranked write");
+  assert.deepEqual(refused.kept, ["board:short:2026-09-21", "scores:2026-09-21"],
+    "and the keys after it are left standing, scores among them"); checks++;
+  ok(!asked.includes("scores:2026-09-21"),
+     "so the gate key is never deleted while a dated board the rewrite needs to replace still stands");
+  eq(asked.length, 3, "the refused key is asked three times — the edge 403 that clears on retry is retried");
+  assert.deepEqual(waits, [1000, 4000], "on the same backoff as every store read"); checks++;
+
+  let flaky = 1;
+  const recovered = await retireSession("2026-09-21", {
+    remove: async () => (flaky-- > 0 ? { ok: false, status: 503 } : { ok: true, status: 200 }),
+    pause: async () => {},
+  });
+  ok(recovered.refused.length === 0 && recovered.removed.length === 3,
+     "and a transient refusal that clears on retry deletes all three");
+
+  const lost = sameSessionGate({ sessionDate: "2026-09-21",
+    archive: archiveOf(gone, gone, gone), republish: true });
+  ok(lost.mode === "republish" && !lost.skip && /deletes whatever dated key/.test(lost.note),
+     "REPUBLISH WITH NO SCORES STILL RETIRES: a session whose scores write was lost but whose " +
+     "dated boards landed would otherwise refuse the rewrite and split again");
+  eq(sameSessionGate({ sessionDate: "2026-09-21",
+    archive: archiveOf(refusedRead, gone, gone), republish: true }).mode, "republish",
+     "and so does one whose scores could not be read — the dispatch asked for a rewrite");
+}
+
+{
+  const store = new Map();
+  const reads = [];
+  const reader = async (key) => {
+    reads.push(key);
+    if (key === "board:long") return { payload: null, failed: true, status: 403 };
+    if (store.has(key)) return { payload: store.get(key), status: 200 };
+    return { payload: null, absent: true, status: 200 };
+  };
+  store.set("board:long:2026-09-18", { sessionDate: "2026-09-18", rows: [{ t: "A", r: 1 }, { t: "B", r: 2 }] });
+  const memory = await resolveBoardMemory("long", "2026-09-21", { reader });
+  eq(memory.status, "ok",
+     "THE 403 NO LONGER COLD-STARTS THE LONG BOARD: 11 of 11 dated long boards were 'unavailable'");
+  eq(memory.source, "archive", "the memory came from the archive");
+  eq(memory.key, "board:long:2026-09-18", "from the newest earlier session it holds");
+  eq(memory.incumbents, 2, "and its names reach hysteresis");
+  ok(/read from the dated archive \(board:long:2026-09-18\) because the live board:long could not be read \(the store answered 403\)/.test(memory.note),
+     `and the note says where it came from and why (${memory.note.slice(-120)})`);
+
+  store.set("board:short", { sessionDate: "2026-09-21", rows: [{ t: "X", r: 1 }] });
+  store.set("board:short:2026-09-18", { sessionDate: "2026-09-18", rows: [{ t: "Y", r: 1 }] });
+  const same = await resolveBoardMemory("short", "2026-09-21", { reader });
+  ok(same.status === "ok" && same.key === "board:short:2026-09-18" && /this session's own earlier output/.test(same.note),
+     "a same-session live board reads yesterday's archive instead of cold-starting — the 53 " +
+     "names discarded at 17:17 were a board a re-run could have held against");
+
+  const cold = await resolveBoardMemory("short", "2026-09-21", {
+    reader: async (key) => (key === "board:short" ? { payload: { sessionDate: "2026-09-21", rows: [{ t: "X" }] } }
+      : { payload: null, absent: true }),
+  });
+  ok(cold.status === "same-session" && /searched back 10 weekdays/.test(cold.note) && /held none/.test(cold.note),
+     "with no archive either, the refusal stands and says the archive was searched");
+  eq(MEMORY_ARCHIVE_SESSIONS, 10, "ten weekdays back — two weeks of archive");
+
+  const ok0 = await resolveBoardMemory("long", "2026-09-21", {
+    reader: async (key) => (key === "board:long" ? { payload: { sessionDate: "2026-09-18", rows: [{ t: "Z" }] } }
+      : { payload: null, absent: true }),
+  });
+  eq(ok0.source, "live", "a readable earlier live board is used as before, with no archive read");
+}
+
+{
+  const http = await import("node:http");
+  let answers = [403, 503, 200];
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    const status = answers.length ? answers.shift() : 200;
+    seen.push(status);
+    res.writeHead(status, { "Content-Type": "application/json" });
+    res.end(status === 200 ? '{"sessionDate":"2026-09-18","rows":[{"t":"A"}]}' : "{}");
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const prevUrl = process.env.FLOWS_INGEST_URL;
+  const prevTok = process.env.FLOWS_INGEST_TOKEN;
+  process.env.FLOWS_INGEST_URL = `http://127.0.0.1:${server.address().port}/api/flows/ingest`;
+  process.env.FLOWS_INGEST_TOKEN = "test-token";
+  try {
+    const waits = [];
+    const read = await readStored("board:long", { pause: async (ms) => { waits.push(ms); } });
+    assert.deepEqual(seen, [403, 503, 200],
+      "READSTORED RETRIES: a 403 then a 503 are read again, and the third read lands"); checks++;
+    ok(read.payload && read.payload.rows.length === 1 && read.recovered === 2,
+       "and the payload comes back, marked as recovered on the second retry");
+    assert.deepEqual(waits, [1000, 4000], "on the publish path's own backoff"); checks++;
+    eq(READ_RETRIES, 2, "two retries — bounded, and charged to the run's retry budget");
+
+    answers = [404];
+    seen.length = 0;
+    const gone = await readStored("board:long", { pause: async () => {} });
+    ok(gone.failed && gone.status === 404 && seen.length === 1,
+       "a 404 is an answer, not a transient, and is not retried");
+
+    answers = [403, 403, 403];
+    seen.length = 0;
+    const refused = await readStored("board:long", { pause: async () => {} });
+    ok(refused.failed && refused.status === 403 && seen.length === 3,
+       "and a store that keeps refusing is asked three times, then reported as failed");
+  } finally {
+    process.env.FLOWS_INGEST_URL = prevUrl;
+    process.env.FLOWS_INGEST_TOKEN = prevTok;
+    if (prevUrl === undefined) delete process.env.FLOWS_INGEST_URL;
+    if (prevTok === undefined) delete process.env.FLOWS_INGEST_TOKEN;
+    await new Promise((r) => server.close(r));
+  }
+}
+
+{
+  const population = (n, lo, hi) => Array.from({ length: n }, (_, i) =>
+    ({ ticker: "N" + i, marketcap: lo * Math.pow(hi / lo, (i + 0.5) / n) }));
+  const bandReader = (names) => async (min, max) => names
+    .filter((r) => r.marketcap >= min && (max === null || r.marketcap < max))
+    .slice(0, SCREENER_PAGE_ROWS);
+
+  const small = await sweepScreenerBand([1e9, 1.3e9], bandReader(population(30, 1e9, 1.3e9)));
+  ok(small.reads === 1 && !small.split && small.rows.length === 30, "a band under the page size is read once");
+
+  const hundredTwenty = population(120, 66.5e9, 86.5e9);
+  const split = await sweepScreenerBand([66.5e9, 86.5e9], bandReader(hundredTwenty));
+  eq(split.rows.length, 120,
+     "A TRUNCATED BAND IS RE-READ: the $66.5-86.5B band that capped at 50 in run 66 recovers all 120");
+  eq(split.truncated, 0, "with no leaf still full");
+  eq(split.reads, 7, "at 1 + 2 + 4 reads, which is the whole bound");
+  ok(split.leaves.every((l) => l.level === SCREENER_SPLIT_DEPTH), "splitting at the geometric midpoint, twice");
+
+  const dense = await sweepScreenerBand([1e9, 1.3e9], bandReader(population(400, 1e9, 1.3e9)));
+  eq(dense.reads, 7, "a band too dense to finish still stops at two levels");
+  eq(dense.truncated, 4, "and every still-full leaf stays marked TRUNCATED rather than passed off as whole");
+
+  const whole = bandReader(hundredTwenty);
+  let reads = 0;
+  const dropped = await sweepScreenerBand([66.5e9, 86.5e9],
+    async (lo, hi) => (reads++ === 0 ? whole(lo, hi) : []));
+  ok(dropped.rows.length >= SCREENER_PAGE_ROWS,
+     `A SPLIT NEVER SHRINKS THE BAND: children that come back empty (a read the vendor ` +
+     `refused, caught to []) leave the parent's own ${SCREENER_PAGE_ROWS} rows in the ` +
+     `universe (${dropped.rows.length}) rather than fewer than the unsplit read found`);
+  eq(new Set(split.rows.map((r) => r.ticker)).size, split.rows.length,
+     "and a name read at two levels is counted once");
+}
+
+{
+  const prior = (reason, sessionDate) => ({ sessionDate, holders: { status: "unavailable", reason } });
+  const refused = holdersRefusal(prior("/api/politician-portfolios/holders/B -> HTTP 422", "2026-09-21"), "2026-09-22");
+  ok(refused && refused.status === 422 && refused.since === "2026-09-21",
+     "UW-19: a 422 on the holders route last run is not bought again the next night");
+  const carried = holdersRefusal(prior(refused.reason, "2026-09-22"), "2026-09-25");
+  ok(carried && carried.since === "2026-09-21", "the refusal date is carried forward by the skipped run's own reason");
+  eq(holdersRefusal(prior(refused.reason, "2026-09-25"), "2026-09-28"), null,
+     "and after seven days the route is asked again, so a plan change is noticed within a week");
+  eq(holdersRefusal(prior("/api/politician-portfolios/holders/B -> HTTP 503", "2026-09-21"), "2026-09-22"), null,
+     "a 5xx is the vendor's weather, not the plan, and is retried every run");
+  ok(holdersRefusal(prior("/api/politician-portfolios/holders/B -> HTTP 429", "2026-09-21"), "2026-09-22") === null &&
+     holdersRefusal(prior("/api/politician-portfolios/holders/B -> HTTP 408", "2026-09-21"), "2026-09-22") === null,
+     "and so are a 429 and a 408, the two 4xx answers that describe the moment rather than the plan");
+  eq(HOLDERS_RETRY_DAYS, 7, "one week");
+}
+
+{
+  const emptyTape = { byTicker: new Map(), read: "ok", tapeRows: 0, namesRead: new Set(["BRD"]) };
+  eq(congressRows("XSEC", emptyTape), null,
+     "AN EMPTY MARKET-WIDE TAPE IS NOT A READ OF A NAME: the call did not throw, so congressRead was " +
+     "'ok' and every cross-section card got [], a confident 'no member traded this' from a tape the " +
+     "pipeline itself treated as failed and fell back from");
+  assert.deepEqual(congressRows("BRD", emptyTape), [],
+    "a board name the per-name fallback did read, and found nothing on, is quiet"); checks++;
+  eq(congressRows("BRD2", emptyTape), null,
+     "and a board name the fallback never reached, or whose call it caught as refused, is unread");
+  assert.deepEqual(congressRows("XSEC", { byTicker: new Map(), read: "ok", tapeRows: 40 }), [],
+    "a tape that returned rows and named no member for a name is still quiet for it"); checks++;
+  const rows = [{ name: "A Member", ticker: "AAA" }];
+  eq(congressRows("AAA", { byTicker: new Map([["AAA", rows]]), read: "ok", tapeRows: 40 }), rows,
+     "matched rows pass through");
+  eq(congressRows("XSEC", { byTicker: new Map(), read: "failed", tapeRows: 0 }), null, "and a thrown read is unread");
+  const thrown = { byTicker: new Map(), read: "failed", tapeRows: 0, namesRead: new Set(["BRD"]) };
+  assert.deepEqual(congressRows("BRD", thrown), [],
+    "A PER-NAME CALL THAT RESOLVED IS A READ OF THAT NAME whatever the market-wide call did: after a " +
+    "thrown tape the fallback still reads the board names, and a name it read and found nothing on " +
+    "was published as 'the disclosure tape was not read for this name in this run'"); checks++;
+  eq(congressRows("XSEC", thrown), null, "while a name the fallback never asked about stays unread");
+
+  const unfetched = "this name was measured in the run's cross-section but is not on today's board";
+  const card = (congress) => buildCard({ ticker: "XSEC", row: { close: "100" }, features: { spot: 100, atr: 4 },
+    strikes: [], ticks: [], expiries: [], congress, maxPain: null, unfetched,
+    generatedAt: "2026-09-22T21:40:00Z", sessionDate: "2026-09-22" }).panels.congress.status;
+  eq(card(congressRows("XSEC", emptyTape)), "unavailable",
+     "so the cross-section card says the panel was not fetched rather than quiet");
+  eq(card([]), "quiet", "where the old [] published quiet");
+
+  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  eq((src.match(/congress: congressRows\(ticker, congressState\)|const congress = congressRows\(ticker, congressState\)/g) || []).length, 2,
+     "both card lanes, board and cross-section, take the panel's input from the one rule");
+  ok(!/congressRead === "ok" \? \[\] : null/.test(src), "and the old expression is gone from both");
+}
+
+{
+  const http = await import("node:http");
+  const today = easternNow().date;
+  const days = priorWeekdays(today, 8).reverse();
+  const SESSION = days[days.length - 1];
+  const vendorCalls = [];
+  const uwServer = http.createServer((req, res) => {
+    const url = new URL(req.url, "http://x");
+    vendorCalls.push(url.pathname + (url.searchParams.get("date") ? "?date" : ""));
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(url.pathname === "/api/stock/SPY/ohlc/1d"
+      ? { data: days.map((d) => ({ start_time: `${d}T13:30:00Z`, close: "500", volume: 1 })) }
+      : { data: [] }));
+  });
+  const writes = [];
+  const heldKeys = new Set([`scores:${SESSION}`, `board:long:${SESSION}`, `board:short:${SESSION}`]);
+  const ingest = http.createServer((req, res) => {
+    const key = new URL(req.url, "http://x").searchParams.get("key");
+    req.resume();
+    req.on("end", () => {
+      writes.push({ method: req.method, key });
+      res.writeHead(req.method === "DELETE" ? 404 : 200, { "Content-Type": "application/json" });
+      if (req.method === "GET" && heldKeys.has(key)) {
+        res.end(JSON.stringify({ generatedAt: `${SESSION}T21:45:00.000Z`, sessionDate: SESSION, rows: [{ t: "A", s: 40 }] }));
+      } else if (req.method === "GET") {
+        res.end(JSON.stringify({ key, status: "pending" }));
+      } else {
+        res.end('{"ok":true}');
+      }
+    });
+  });
+  await new Promise((r) => uwServer.listen(0, "127.0.0.1", r));
+  await new Promise((r) => ingest.listen(0, "127.0.0.1", r));
+  const run = (extra) => new Promise((resolve) => {
+    const child = spawn(process.execPath, ["../scripts/flows-pipeline.mjs"], {
+      cwd: import.meta.dirname,
+      env: {
+        ...process.env,
+        UW_API_KEY: "test", FLOWS_INGEST_TOKEN: "test",
+        FLOWS_INGEST_URL: `http://127.0.0.1:${ingest.address().port}/api/flows/ingest`,
+        FLOWS_UW_BASE_URL: `http://127.0.0.1:${uwServer.address().port}`,
+        FLOWS_ALLOW_INTRADAY: "1",
+        ...extra,
+      },
+    });
+    let out = "";
+    child.stdout.on("data", (c) => { out += c; });
+    child.stderr.on("data", (c) => { out += c; });
+    child.on("close", (status) => resolve({ status, out }));
+  });
+  try {
+    const skipped = await run({});
+    eq(skipped.status, 0, `the same-session run exits clean (${skipped.out.slice(-300)})`);
+    ok(new RegExp(`session date: ${SESSION}`).test(skipped.out), `and resolved ${SESSION} from the vendor's SPY bars`);
+    ok(/session gate: archived — scores:\S+ is already archived/.test(skipped.out),
+       "it found the session archived and said so before spending a vendor call on the universe");
+    const posted = writes.filter((w) => w.method === "POST").map((w) => w.key).sort();
+    assert.deepEqual(posted, ["news", "pulse", "sector:premium"],
+      "A SAME-SESSION RUN SKIPS THE RANKED LEG END TO END: it wrote news, pulse and " +
+      `sector:premium and nothing else — no board, scores, record, scoretrack, card, brief or meta (${posted.join(", ")})`); checks++;
+    eq(writes.filter((w) => w.method === "DELETE").length, 0, "and deleted nothing");
+    ok(!vendorCalls.some((p) => p.startsWith("/api/screener") || p.startsWith("/api/stock/AAPL")),
+       "no screener band and no dating probe was bought for a session it would not rank");
+    assert.deepEqual(writes.filter((w) => w.method === "GET" && /:\d{4}-/.test(w.key)).map((w) => w.key),
+      [`scores:${SESSION}`, `board:long:${SESSION}`, `board:short:${SESSION}`],
+      "the gate reads all three of the session's archive keys, not scores alone"); checks++;
+
+    writes.length = 0;
+    vendorCalls.length = 0;
+    heldKeys.delete(`board:long:${SESSION}`);
+    const partial = await run({});
+    eq(partial.status, 1,
+       "A RE-DISPATCH AGAINST A PARTLY ARCHIVED SESSION TURNS RED: scores held and board:long lost " +
+       `used to exit clean after writing nothing to the lost key (${partial.out.slice(-300)})`);
+    ok(/session gate: partial — /.test(partial.out) && /ARCHIVE INCOMPLETE: .*board:long:\S+ is not/.test(partial.out) &&
+       /republish_session/.test(partial.out),
+       "and the log names the missing key and the dispatch that rewrites the session");
+    assert.deepEqual(writes.filter((w) => w.method === "POST").map((w) => w.key).sort(), ["news", "pulse", "sector:premium"],
+      "it still refreshes only the unranked feeds — no second ranking goes live beside the kept one"); checks++;
+    eq(writes.filter((w) => w.method === "DELETE").length, 0, "and deletes nothing");
+    heldKeys.add(`board:long:${SESSION}`);
+
+    writes.length = 0;
+    vendorCalls.length = 0;
+    const rewrite = await run({ FLOWS_REPUBLISH_SESSION: "1" });
+    ok(/session gate: republish/.test(rewrite.out), "republish_session proceeds past the gate as a rewrite");
+    ok(vendorCalls.some((p) => p === "/api/screener/stocks?date"),
+       "and screens the session by date, since the dated probe answered");
+    eq(rewrite.status, 1, "an empty universe still refuses to publish");
+    eq(writes.filter((w) => w.method === "DELETE").length, 0,
+       "and a republish that cannot rank deletes NOTHING — the archive keys are removed only " +
+       "after a ranking exists to replace them");
+    eq(writes.filter((w) => w.method === "POST").length, 0, "nor writes anything");
+  } finally {
+    await new Promise((r) => uwServer.close(r));
+    await new Promise((r) => ingest.close(r));
+  }
+}
+
+{
+  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  eq(IV_RANK_PARAMS.timespan, "3m", "the implied-volatility history is asked for by timespan, the parameter the vendor documents");
+  ok(!/iv-rank`,\s*\{\s*limit/.test(src), "and never with the `limit` the vendor ignores");
+  ok(/iv-rank`, \{ \.\.\.IV_RANK_PARAMS, \.\.\.onSession \}\)/.test(src),
+     "the live call reads the fixture's parameter object, with the session date added so no row past the session is asked for");
+  eq(fakeIvRank("ABC", 50).length, 5,
+     "the fixture answers an undated, unparameterised call the way the vendor does: five rows");
+  ok(fakeIvRank("ABC", 50, IV_RANK_PARAMS).length >= 60, "and a three-month timespan with a quarter's sessions");
+  ok(/volatility\/term-structure`, \{ \.\.\.onSession \}\)/.test(src) &&
+     /const onSession = ARCHIVE_DATE_RE\.test\(String\(sessionDate \|\| ""\)\) \? \{ date: sessionDate \} : \{\}/.test(src),
+     "the term structure is dated at the session, so its days to expiry agree with the greeks on the same card");
+  ok(/d > sessionDate/.test(src) && !/d >= sessionDate/.test(src),
+     "an expiry dated on the session expired at its close and is never asked for on the surface");
+
+  const enriched = ["AAA", "BBB", "CCC", "DDD", "EEE", "FFF", "GGG", "HHH", "III", "JJJ", "KKK", "LLL"].map((t, i) => {
+    const spot = 45 + i * 20;
+    const ladder = fakeOiLadder(t, spot, 0.3 + i * 0.02);
+    const book = fakeLadderGreeks(ladder);
+    const expiries = book.rows.map((b) => ({ expiry: b.expiry, call_gex: b.gc, put_gex: -b.gp, call_delta: b.dc,
+      put_delta: b.dp, call_vanna: b.vc, put_vanna: b.vp, call_charm: b.cc, put_charm: b.cp }));
+    const strikes = ladder.strikes.map((k, j) => ({ strike: k, call_gamma_oi: book.byStrike[j].gc, put_gamma_oi: -book.byStrike[j].gp }));
+    return { features: { ticker: t, spot }, tilt: { iv30: 0.3 + i * 0.02 }, raw: { expiries, strikes } };
+  });
+  const run = measureVariationProbes(enriched, "2026-08-24");
+  eq(run.probe.call, "raw", "the pooled convention probe reads Black-Scholes call legs as raw");
+  eq(run.probe.put, "raw", "and holder-signed put legs as raw");
+  eq(run.unit.family, "share", "the unit probe recovers the share family from call_gamma_oi over call_gex");
+  eq(run.strikeSign.sign, 1, "the strike book probe reads put_gamma_oi as dealer-signed");
+  eq(run.next.h, 1, "a Monday session is one calendar day from the next");
+  ok(run.lines.every((l) => /^  variation: /.test(l)), "and every probe prints one tagged log line");
+  const sample = vannaProbeSample("AAA", { rows: [], expiry: null, sessionDate: "2026-08-24",
+    expiries: enriched[0].raw.expiries, spot: 45 });
+  ok(sample === null || (sample.vendor > 0 && sample.model > 0),
+     "the vanna check returns a vendor-against-model pair or nothing at all");
+  const live = vannaProbeSample("AAA", { rows: fakeLadderChain(fakeOiLadder("AAA", 45, 0.3), "2026-09-04"),
+    expiry: "2026-09-04", sessionDate: "2026-08-24", expiries: enriched[0].raw.expiries, spot: 45 });
+  ok(live && Math.abs(live.vendor / live.model - 1) < 1e-9,
+     `a chain built from the same open-interest ladder reproduces the vendor's call vanna (${live && (live.vendor / live.model)})`);
+  eq(live && live.spot, 45, "and the sample carries its spot, which is what tells a share vanna from a dollars-per-1% one");
+  const meta = boardVariationMeta({ ...run, vannaScale: { status: "agree", ratio: 1, n: 5 } });
+  ok(meta.codes === VARIATION_CODES && meta.kc.n === run.kc.n, "the board's variation block carries the code table and the run's probes");
+  ok(/CHANGE IN DEALER DELTA/.test(meta.fields) && /negative figure means dealers buy/.test(meta.fields),
+     "and says which way its signed fractions point, since a row carries the dealer-delta change and not the hedge trade");
+  const input = featuresVariationInput({ features: { ticker: "X", spot: 50, netGamma: 1, gammaBookRaw: 2, candles: [], iv30: 0.3 },
+    raw: { expiries: [] } }, "2026-08-24");
+  eq(input.ivRankRows, null, "a board row's variation carries no vol-of-vol: the implied-volatility history is a deep-card read");
+  ok(/sdBasis/.test(meta.fields) && /"gamma" is the spot channel alone, which is every board row/.test(meta.fields) &&
+     /"gamma\+vanna"/.test(meta.fields),
+     "so the block says a row's drift is over the spot channel alone, and that a deep card's panel can read a different one");
+}
+
+{
+  const prefix = fs.mkdtempSync(path.join(os.tmpdir(), "flows-var-")) + "/e";
+  const run = spawnSync(process.execPath, ["../scripts/flows-pipeline.mjs", "--dry-run", "--emit", prefix],
+    { cwd: import.meta.dirname, encoding: "utf8" });
+  eq(run.status, 0, "the dry run exits clean with the variation leg in it");
+  const log = run.stdout + run.stderr;
+  ok(/variation: put convention call raw, put raw/.test(log), "the run logs the pooled convention probe");
+  ok(/variation: charm scale K_c [\d.]+ over \d+ expiry reading\(s\).* — ok/.test(log), "and the charm scale it measured");
+  ok(/variation: vanna scale agree/.test(log), "and the vanna scale checked against the fixture's chains");
+  ok(/vanna scale agree, .*read in shares \(unit share: [1-9]\d* share, 0 dollars-per-1%/.test(log),
+     "in the unit the chain check settled from the names priced far enough from $100 to tell the units apart");
+  const read = (key) => JSON.parse(fs.readFileSync(`${prefix}-${key}.json`, "utf8"));
+  const meta = read("meta");
+  ok(meta.variation && meta.variation.kc.status === "ok" && meta.variation.unit.family === "share" && meta.variation.votes === false,
+     "meta publishes the run's probes, with the hedge vote off");
+  const long = read("board-long");
+  const sv = long.scoreVariance;
+  ok(sv && /residual/.test(sv.basis) && /blended/.test(sv.blended.basis),
+     "the board publishes the score's variance decomposition and says which variance each set of shares divides");
+  const total = Object.values(sv.columns).reduce((a, v) => a + v, 0);
+  ok(Math.abs(total - 1) < 1e-4, `and the residual shares sum to one (${total})`);
+  eq(sv.columns.pDisp, 0, "displacement is off the blend, so it explains none of the score");
+  ok(long.rows.every((r) => r.fam.P === null), "and no row carries a positioning family score");
+  ok(long.rows.every((r) => r.variation && "gammaPerSigmaPctAdv" in r.variation && "charmPctAdv" in r.variation &&
+     "vannaPerPointPctAdv" in r.variation && "driftInSd" in r.variation),
+     "every board row carries the compact variation summary the overview's universe map will draw");
+  ok(long.rows.every((r) => Object.values((r.variation && r.variation.why) || {}).every((code) => Object.hasOwn(long.variation.codes, code))),
+     "and every null on it carries a code the board spells out");
+  ok(long.rows.some((r) => r.variation.driftInSd !== null), "with at least one drift reading on the fixture");
+  ok(long.rows.every((r) => (r.variation.driftInSd === null ? r.variation.sdBasis === null : r.variation.sdBasis === "gamma")),
+     "and every row's drift names its basis: the spot channel alone, the only one a row can measure");
+  {
+    const cardsBy = new Map(fs.readdirSync(path.dirname(prefix)).filter((f) => /-card-/.test(f))
+      .map((f) => JSON.parse(fs.readFileSync(path.join(path.dirname(prefix), f), "utf8"))).map((c) => [c.ticker, c]));
+    const rows = [];
+    for (const side of ["long", "short"]) {
+      for (const r of read("board-" + side).rows) {
+        const c = cardsBy.get(r.t);
+        const cv = c && c.panels.variation.status === "ok" ? variationSummary(c.panels.variation) : null;
+        if (r.variation.driftInSd !== null && cv && cv.driftInSd !== null && cv.driftInSd !== r.variation.driftInSd) rows.push([r, cv]);
+      }
+    }
+    ok(rows.length > 0 && rows.every(([r, cv]) => r.variation.sdBasis === "gamma" && cv.sdBasis === "gamma+vanna"),
+       `where a row's drift differs from its card's, the two carry different bases, so neither is presented as the other (${rows.length} names)`);
+  }
+  {
+    const cards0 = fs.readdirSync(path.dirname(prefix)).filter((f) => /-card-/.test(f))
+      .map((f) => JSON.parse(fs.readFileSync(path.join(path.dirname(prefix), f), "utf8")));
+    const byT = new Map(cards0.map((c) => [c.ticker, c]));
+    const signed = long.rows.filter((r) => r.variation && r.variation.charmPctAdv !== null && byT.has(r.t) &&
+      byT.get(r.t).panels.variation.status === "ok" && byT.get(r.t).panels.variation.channels.charm);
+    ok(signed.length > 0 && signed.every((r) => Math.sign(r.variation.charmPctAdv) ===
+      -Math.sign(byT.get(r.t).panels.variation.channels.charm.hedge)),
+       `a row's charm fraction points opposite to the card's hedge trade, as the block says (${signed.length} rows)`);
+  }
+  const cards = fs.readdirSync(path.dirname(prefix)).filter((f) => /-card-/.test(f))
+    .map((f) => JSON.parse(fs.readFileSync(path.join(path.dirname(prefix), f), "utf8")));
+  ok(cards.every((c) => c.panels.variation && typeof c.panels.variation.status === "string"),
+     "every card, deep or cross-section, carries the hedging panel");
+  const deep = cards.filter((c) => c.depth === "board");
+  ok(deep.every((c) => c.panels.volContext.status !== "ok" || c.panels.volContext.ivRank.seen >= 40),
+     `a deep card's implied-volatility history now carries a quarter of sessions (${deep.map((c) => c.panels.volContext.ivRank && c.panels.volContext.ivRank.seen).slice(0, 4).join(", ")})`);
+  ok(deep.every((c) => (c.panels.volContext.ivRank.rows || []).every((r) => r.date <= c.sessionDate)),
+     "with no row dated after the session");
+  ok(deep.some((c) => c.panels.variation.status === "ok" && c.panels.variation.inputs.ivChanges >= 20),
+     "so the vol-of-vol is measured on deep cards");
+  ok(cards.every((c) => !c.panels.calendar.schedule || c.panels.calendar.schedule.every((r) => r.expiry > c.sessionDate)),
+     "no card's roll-off is led by the expiry that lapsed at the session's close");
+  ok(cards.every((c) => ["vanna", "charm", "deltaExposure"].every((k) => c.panels[k].status !== "ok" ||
+     c.panels[k].rows.every((r) => r.expiry > c.sessionDate))), "nor any greek ladder");
+  ok(cards.every((c) => c.regime && (c.regime.labelFrom === "book" || c.regime.labelFrom === "flow")),
+     "every card says where its gamma label came from");
+  ok(cards.filter((c) => c.regime.labelFrom === "book").every((c) =>
+     c.regime.label === (c.regime.bookGammaRaw >= 0 ? "long" : "short")),
+     "and a book-read label is the sign of the book's net");
 }
 
 console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, the dated archive key and its bounded prune, the watch board's ranking and vocabulary, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor, sector TRIX and the fixed-clamp scaling that keeps a flat day flat, the movers band's zero-call guarantee and its unranked counts, the rate limiter's floor actually being a floor, the truncated-chain probe's three distinct verdicts, the board's memory refusing a prior board that turns out to be this run's own session, a corpus proven to REACH the change layer's branches rather than merely to satisfy assertions written around them, and a market-wide join whose published coverage is checked against the cards it was measured over rather than against itself, the sector OPTIONS lean proven to be a different quantity from the sector momentum beside it — its ratio comparable across baskets three orders of magnitude apart where the dollar difference is not, its measured zero visible in dollars and undefined as a ratio, a blank vendor string refused before it can become a confident zero, and its row vocabulary disjoint from TRIX's — and the news tape's four counts, its own ordering applied before the cap so the rows kept are the newest and not the first, and an undated row published, counted on both sides of the cap, and never given a manufactured timestamp`);

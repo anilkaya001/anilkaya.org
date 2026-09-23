@@ -1504,7 +1504,7 @@
       controls.style.setProperty("--desk-bar-h", barH + "px");
 
       controls.style.zIndex = "20";
-      controls.style.background = "var(--bg)";
+      controls.style.background = "var(--bar-glass)";
       controls.style.paddingBottom = "0.7rem";
       controls.style.borderBottom = "1px solid var(--hairline)";
       stuck();

@@ -9,8 +9,12 @@ import {
   effectiveBreadth, pearson, calibrateScoreScale, boundedScore,
   conviction, CONVICTION_WEIGHTS, applyHysteresis, gammaCrossings, isLiveColumn,
   crossFamilyRedundancy, qualityGate, percentileRank, realizedVol,
-  SCORE_SCALE,
+  SCORE_SCALE, SIGN_CONVENTION, GREEK_DEALER_SIGN, openInterestGammaBook,
 } from "../shared/flows-features.js";
+import { blackScholesGreeks, variation, variationSummary } from "../shared/flows-variation.js";
+import { computeFeatures, featuresVariationInput } from "../scripts/flows-pipeline.mjs";
+import { buildCard } from "../shared/flows-card.js";
+import { gammaReading } from "../shared/flows-neuron.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -1100,17 +1104,27 @@ const near = (a, b, tol, msg) => {
 }
 
 {
-  const VENDOR = [
-    { expiry: "2022-05-25", dte: 5,
-      call_gex: "9356683.4241",   put_gex: "-12337386.0524",
-      call_delta: "227549667.4651", put_delta: "-191893077.7193",
-      call_charm: "102382359.5786", put_charm: "-943028472.4815",
-      call_vanna: "152099632406.9564", put_vanna: "488921784213.1121" },
-    { expiry: "2022-06-17", dte: 28,
-      call_gex: "8456599.8505",   put_gex: "-12703877.0243",
-      call_charm: "81465130.0002", put_charm: "-1054548432.6111",
-      call_vanna: "161231587973.6811", put_vanna: "488921784213.1121" },
-  ];
+  const AS_OF = "2022-05-20";
+  const bsRow = (expiry, days, { spot = 100, vol = 0.45, rate = 0.04 } = {}) => {
+    const legs = { gc: 0, gp: 0, dc: 0, dp: 0, vc: 0, vp: 0, cc: 0, cp: 0 };
+    [80, 90, 95, 100, 105, 110, 125].forEach((k, j) => {
+      const oc = 2000 + 700 * j, op = 5200 - 600 * j;
+      const c = blackScholesGreeks({ spot, strike: k, days, vol, rate, type: "C" });
+      const pu = blackScholesGreeks({ spot, strike: k, days, vol, rate, type: "P" });
+      legs.gc += c.gamma * oc * 100; legs.gp += pu.gamma * op * 100;
+      legs.dc += c.delta * oc * 100; legs.dp += pu.delta * op * 100;
+      legs.vc += c.vanna * oc * 100; legs.vp += pu.vanna * op * 100;
+      legs.cc += 50 * c.charmPerDay * oc * 100; legs.cp += 50 * pu.charmPerDay * op * 100;
+    });
+    return {
+      expiry, dte: days,
+      call_gex: String(legs.gc), put_gex: String(-legs.gp),
+      call_delta: String(legs.dc), put_delta: String(legs.dp),
+      call_charm: String(legs.cc), put_charm: String(legs.cp),
+      call_vanna: String(legs.vc), put_vanna: String(legs.vp),
+    };
+  };
+  const VENDOR = [bsRow("2022-05-25", 5), bsRow("2022-06-17", 28)];
 
   ok(legPresent(VENDOR, callVannaLeg) && legPresent(VENDOR, putVannaLeg),
     "both vanna legs are found under their wire names");
@@ -1126,33 +1140,55 @@ const near = (a, b, tol, msg) => {
     "reader takes for a measured empty book");
 
   const vanna = greekTermStructure(VENDOR,
-    { name: "vanna", callLeg: callVannaLeg, putLeg: putVannaLeg, asOf: "2022-05-20" });
+    { name: "vanna", callLeg: callVannaLeg, putLeg: putVannaLeg, asOf: AS_OF });
   const charm = greekTermStructure(VENDOR,
-    { name: "charm", callLeg: callCharmLeg, putLeg: putCharmLeg, asOf: "2022-05-20" });
+    { name: "charm", callLeg: callCharmLeg, putLeg: putCharmLeg, asOf: AS_OF });
+  const delta = greekTermStructure(VENDOR,
+    { name: "delta", callLeg: callDeltaLeg, putLeg: putDeltaLeg, asOf: AS_OF });
 
   eq(vanna.status, "ok", "the vanna term structure builds");
   eq(vanna.rows.length, 2, "one row per expiry");
   eq(vanna.rows[0].expiry, "2022-05-25", "sorted onto the calendar");
-  eq(vanna.rows[0].dte, 5, "carrying the vendor's own dte where it sent one");
+  eq(vanna.rows[0].dte, 5, "counting days from the session it was asked for");
 
-  ok(charm.rows[0].call > 0 && charm.rows[0].put < 0,
-    "charm arrives DEALER-SIGNED: the put leg is negative against a positive call leg");
-  ok(vanna.rows[0].call > 0 && vanna.rows[0].put > 0,
-    "VANNA DOES NOT. Both vanna legs are positive in the vendor's own example, " +
-    "so the convention that holds for gamma and charm is false for vanna — a " +
-    "reader that netted call+put under one rule would report the wrong " +
-    "magnitude, and on a put-heavy name the wrong DIRECTION");
-  ok(/never netted/.test(vanna.signConvention) && /differs BY GREEK/.test(vanna.signConvention),
-    "so the convention rides on the payload as a field rather than living in a " +
-    "comment the renderer never reads");
-  eq(vanna.rows[0].call + vanna.rows[0].put > 0, true,
-    "and the legs stay separate: nothing here produced a net");
+  ok(Number(VENDOR[0].put_gex) < 0,
+    "put gamma arrives DEALER-SIGNED: rows generated from Black-Scholes under the vendor's " +
+    "convention carry it negated");
+  ok(delta.rows.every((r) => r.put < 0),
+    "put delta arrives with the HOLDER's sign, negative on every expiry, as it is on 1,940 of " +
+    "1,940 live rows");
+  const holder = blackScholesGreeks({ spot: 100, strike: 110, days: 5, vol: 0.45, rate: 0.04, type: "P" });
+  const callSame = blackScholesGreeks({ spot: 100, strike: 110, days: 5, vol: 0.45, rate: 0.04, type: "C" });
+  ok(holder.vanna === callSame.vanna && holder.charmPerDay === callSame.charmPerDay,
+    "a holder's put carries the call's own vanna and charm, so a put leg in the (+,\u2212) quadrant " +
+    "is raw, and one in (+,+) would be the negated charm the old note claimed");
+  ok(Math.sign(charm.rows[0].put) !== Math.sign(vanna.rows[0].put),
+    "on these rows the put leg's vanna and charm are opposite-signed: charm is NOT dealer-signed");
+  eq(vanna.signConvention, SIGN_CONVENTION,
+    "so the convention on the payload names put gamma as the only dealer-signed leg");
+  ok(/call \u2212 put for delta, vanna and charm/.test(SIGN_CONVENTION) && /call \+ put for gamma/.test(SIGN_CONVENTION),
+    "and states the dealer net for each greek");
+  for (const [built, name] of [[vanna, "vanna"], [charm, "charm"], [delta, "delta"]]) {
+    for (const r of built.rows) {
+      if (r.call === null || r.put === null) continue;
+      near(r.dealer, r.call + GREEK_DEALER_SIGN[name] * r.put, 1e-6 * Math.abs(r.call),
+        `each ${name} row carries its dealer net, call \u2212 put (${r.expiry})`);
+    }
+  }
+  eq(delta.dealerRule, "call \u2212 put", "and names the rule it applied");
 
-  ok(/VOL POINT/.test(vanna.unit), "the vanna unit names what it is per");
-  ok(/per DAY/.test(charm.unit), "and the charm unit names a different one");
+  ok(/share-delta/.test(GREEK_UNITS.delta) && /holder-signed/.test(GREEK_UNITS.delta),
+    "delta is share-delta, holder-signed, as the vendor defines it — not dollar-delta");
+  ok(!/per DAY/.test(charm.unit) && !/VOL POINT/.test(vanna.unit),
+    "and no per-day or per-vol-point unit is claimed until the scale is measured each run");
   ok(vanna.unit !== charm.unit && vanna.unit === GREEK_UNITS.vanna,
     "read without their units these are interchangeable large numbers, which " +
     "is exactly how '1352% of its year' happened");
+
+  const lapsed = greekTermStructure([{ ...VENDOR[0], expiry: AS_OF }, VENDOR[0]],
+    { name: "vanna", callLeg: callVannaLeg, putLeg: putVannaLeg, asOf: AS_OF });
+  eq(lapsed.rows.length, 1, "an expiry dated on the session expired at its close and is not a row");
+  eq(lapsed.expired, 1, "and the drop is counted");
 
   const absent = greekTermStructure(VENDOR,
     { name: "vanna", callLeg: () => undefined, putLeg: () => undefined });
@@ -1193,4 +1229,58 @@ const near = (a, b, tol, msg) => {
     "two builds over one response are byte-identical");
 }
 
-console.log(`✓ flows-features: ${checks} assertions — robust stats, a fixed score unit, materiality-gated gamma flips, multiplicative quality gating, dead-column weighting, realized vol, reachable conviction, and the four second-order exposure legs one vendor call already pays for — with the put-leg sign convention that differs by Greek asserted from the vendor's own example, and the fused hot path proven ELEMENTWISE IDENTICAL to the eight-sort form it replaces across every degenerate column that reaches a different branch`);
+{
+  const strikes = [];
+  for (let k = 80; k <= 120; k += 5) {
+    const g = k < 100 ? -40 : k === 100 ? 30 : 60;
+    strikes.push({ strike: String(k), call_gamma_ask: String(g / 2), call_gamma_bid: String(g / 2),
+      put_gamma_ask: "0", put_gamma_bid: "0" });
+  }
+  const ohlc = Array.from({ length: 30 }, (_, i) => ({
+    start_time: new Date(Date.UTC(2026, 7, 1) + i * 86400000).toISOString(),
+    open: 100, high: 101, low: 99, close: 100 + (i % 2), volume: 1e6,
+  }));
+  const base = { ticker: "T", spot: 107, greekFlow: [{ dir_delta_flow: "1", total_delta_flow: "2" }],
+    ticks: [], strikes, ohlc, sessionDate: "2026-08-31" };
+  const flowOnly = computeFeatures({ ...base, expiries: [] });
+  ok(flowOnly.netGamma > 0, `the flow ladder's total is long (${flowOnly.netGamma})`);
+  ok(flowOnly.spotGammaShare < 0, `while its running sum below spot is short (${flowOnly.spotGammaShare})`);
+  eq(flowOnly.gRegime, "long",
+    "and the label follows the net, not the running sum below spot — with no book on the card it " +
+    "falls back to the gamma dealers added today");
+  eq(flowOnly.gRegimeFrom, "flow", "and says that is where it came from");
+  const withBook = computeFeatures({ ...base, expiries: [
+    { expiry: "2026-09-04", call_gex: "10", put_gex: "-25" },
+    { expiry: "2026-08-31", call_gex: "900", put_gex: "-1" },
+  ] });
+  eq(withBook.gRegime, "short",
+    "with the open-interest book present, the label is the book's net: 10 + (\u221225) is short, " +
+    "whatever the flow ladder says");
+  eq(withBook.gRegimeFrom, "book", "read from the book");
+  eq(withBook.gammaBookRaw, -15, "an expiry dated on the session is not in the book");
+  near(withBook.gammaBookShare, -15 / 35, 1e-12, "and the book's net is published as a share of its gross");
+  eq(openInterestGammaBook([{ expiry: "2026-09-04", call_gex: null, put_gex: "" }], { asOf: "2026-08-31" }).net, null,
+    "a book with no readable leg is absent, not zero");
+
+  eq(aggressorGamma([], { spot: 100 }).netGamma, null, "an empty ladder has no net gamma, not a net of zero");
+  const legless = strikes.map((r) => ({ strike: r.strike }));
+  const noLadder = computeFeatures({ ...base, strikes: legless, expiries: [] });
+  eq(noLadder.netGamma, null, "a strike response whose rows carry no gamma leg is no flow ladder: its net is absent, not $0");
+  eq(noLadder.gRegime, null, "so no regime label is read off it, where null >= 0 would have read long");
+  eq(noLadder.gRegimeFrom, null, "and no source is claimed for one");
+  const opts = { probe: { call: "raw", put: "raw" }, kc: { status: "ok", value: 50 },
+    vannaScale: { status: "agree", ratio: 1, n: 5 } };
+  const boardV = variation(featuresVariationInput({ features: noLadder, raw: { expiries: [] } }, base.sessionDate), opts);
+  eq(boardV.status, "unavailable", "with no book either, the board row's hedging model has no gamma channel to publish");
+  eq(boardV.silences[0].code, "no-gamma", "and says so in the code the table spells out");
+  eq(variationSummary(boardV).why.all, "no-gamma", "so the row carries no gammaPerSigmaPctAdv of 0");
+  const card = buildCard({ ticker: "T", row: { close: "107" }, features: noLadder, strikes: legless, ticks: [], expiries: [],
+    generatedAt: "2026-08-31T21:00:00Z", sessionDate: base.sessionDate, variation: opts });
+  eq(card.panels.gamma.status, "unavailable", "the card's gamma panel reads no strike ladder");
+  eq(card.regime.flowGamma, null, "its regime carries no flow gamma");
+  eq(card.panels.variation.status, "unavailable",
+    "and its hedging panel agrees, rather than leading with today's trading adding $0.00 of hedging");
+  eq(gammaReading(card).from, null, "Neuron reads no gamma label, where it read a long '+$0 per 1% move'");
+}
+
+console.log(`✓ flows-features: ${checks} assertions — robust stats, a fixed score unit, materiality-gated gamma flips, multiplicative quality gating, dead-column weighting, realized vol, reachable conviction, and the four second-order exposure legs one vendor call already pays for — with the put-leg conventions generated from Black-Scholes rather than read off the vendor's placeholder (put gamma dealer-signed, put delta, vanna and charm holder-signed, every expiry's dealer net published), the gamma label read from the book's net rather than the running sum below spot, and the fused hot path proven ELEMENTWISE IDENTICAL to the eight-sort form it replaces across every degenerate column that reaches a different branch`);

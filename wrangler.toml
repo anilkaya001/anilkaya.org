@@ -29,4 +29,6 @@ crons = ["*/15 * * * *"]
 FLOWS_SESSION_EPOCH = "2"
 FLOWS_ASK_MODEL = "@cf/zai-org/glm-4.7-flash"
 FLOWS_ASK_NEURONS = "5500,36400"
+FLOWS_ASK_FALLBACK_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+FLOWS_ASK_FALLBACK_NEURONS = "26668,204805"
 

@@ -3,11 +3,12 @@ export const CARD_SCHEMA_VERSION = 2;
 import {
   horizonMove, HORIZON_SESSIONS, callGammaLeg, putGammaLeg, pathSignature,
   greekTermStructure, callVannaLeg, putVannaLeg, callCharmLeg, putCharmLeg,
-  callDeltaLeg, putDeltaLeg, CONVICTION_WEIGHTS,
+  callDeltaLeg, putDeltaLeg, CONVICTION_WEIGHTS, liveExpiry,
 } from "./flows-features.js";
 import {
   shapeStockDarkpool, shapeStockOiChange, buildVolContext, STOCK_NOTES,
 } from "./flows-stock.js";
+import { variation, cardVariationInput, putMultipliers } from "./flows-variation.js";
 
 import { UA_MIN_VOLUME } from "./flows-unusual.js";
 import { joinScoreToPrice } from "./flows-overlay.js";
@@ -99,29 +100,40 @@ export function polarityOf(key) {
   return Object.hasOwn(POLARITY, key) ? POLARITY[key] : 0;
 }
 
-export function buildLevels({ spot, atr, gammaFlip, maxPain, callWall, putWall }) {
+export const WALL_EDGE_NOTE = "this wall is the last strike of the ladder the run read, so the " +
+  "strike window ends here: the largest gamma may sit beyond it, and this is where the " +
+  "window stops rather than where the book peaks";
+
+export function buildLevels({ spot, atr, gammaFlip, maxPain, callWall, putWall, band = null }) {
   const s = numOrNull(spot);
   const a = numOrNull(atr);
   if (s === null || !(s > 0)) return unavailable("no spot price");
 
+  const lo = band ? numOrNull(band.min) : null;
+  const hi = band ? numOrNull(band.max) : null;
+  const atEdge = (px) => (lo !== null && Math.abs(px - lo) < 1e-9) || (hi !== null && Math.abs(px - hi) < 1e-9);
+
   const measure = (kind, label, raw) => {
     const px = numOrNull(raw);
     if (px === null || !(px > 0)) return null;
+    const edge = (kind === "call_wall" || kind === "put_wall") && atEdge(px);
     return {
       kind,
-      label,
+      label: edge ? label + " (window edge)" : label,
       px,
       distPct: (px - s) / s,
 
       distAtr: a !== null && a > 0 ? (px - s) / a : null,
+      ...(edge ? { edge: "window", note: WALL_EDGE_NOTE } : {}),
     };
   };
 
+  const cw = numOrNull(callWall), pw = numOrNull(putWall);
   const levels = [
     measure("gamma_flip", "Gamma flip", gammaFlip),
     measure("max_pain", "Max pain", maxPain),
-    measure("call_wall", "Call wall", callWall),
-    measure("put_wall", "Put wall", putWall),
+    measure("call_wall", cw !== null && cw < s ? "Largest long-gamma strike" : "Call wall", callWall),
+    measure("put_wall", pw !== null && pw > s ? "Largest short-gamma strike" : "Put wall", putWall),
   ].filter(Boolean);
 
   if (!levels.length) return unavailable("no levels resolved");
@@ -136,7 +148,8 @@ export function buildLevels({ spot, atr, gammaFlip, maxPain, callWall, putWall }
     `${pct.toFixed(1)}% ${above ? "above" : "below"} spot ${s.toFixed(2)}` +
     (near.distAtr === null
       ? " (ATR unavailable, so no distance in ATR)."
-      : ` — ${Math.abs(near.distAtr).toFixed(2)} ATR.`),
+      : ` — ${Math.abs(near.distAtr).toFixed(2)} ATR.`) +
+    (near.edge ? " It is the last strike the run read, so the wall may sit beyond it." : ""),
     {
       px: Number(near.px.toFixed(2)),
       spot: Number(s.toFixed(2)),
@@ -183,11 +196,18 @@ export function buildGammaProfile(strikeRows, { spot, maxBars = 60 } = {}) {
 
     bandMin: rows[0].strike,
     bandMax: rows[rows.length - 1].strike,
+    reads: GAMMA_FLOW_READS,
   });
 }
 
+export const GAMMA_FLOW_READS =
+  "Gamma dealers added today: the vendor's directionalized volume by strike (ask and bid legs " +
+  "summed, each signed by its aggressor), not the standing open-interest book. The strike " +
+  "ladder aggregates every expiry the vendor carries at the session, including any that " +
+  "expired at its close. The open-interest book's net is on the hedging panel.";
+
 export function buildCalendar(expiryRows, { asOf = null, maxRows = 10 } = {}) {
-  const rows = (expiryRows || []).map((r) => {
+  const rows = (expiryRows || []).filter((r) => r && liveExpiry(r.expiry, asOf)).map((r) => {
     const c = numOrNull(callGammaLeg(r));
     const p = numOrNull(putGammaLeg(r));
     if (c === null && p === null) return null;
@@ -312,13 +332,79 @@ export function buildDisplacement(strikeRows, { atr, spot } = {}) {
 
 export const RICHNESS_LINE = 0.1;
 
+export const PIN_LINES = Object.freeze({
+  moveRatio: 0.25,
+  ivFloor: 0.10,
+  ivRankFloor: 0.02,
+  weekCollapse: 0.5,
+  rangeRatio: 0.35,
+});
+
+export function lastRangeOf(candles, { through = null } = {}) {
+  if (!Array.isArray(candles) || !candles.length) return null;
+  const cut = typeof through === "string" && through ? through.slice(0, 10) : null;
+  let c = null;
+  for (let i = candles.length - 1; i >= 0 && c === null; i--) {
+    const row = candles[i];
+    if (!Array.isArray(row)) continue;
+    const d = typeof row[0] === "string" ? row[0].slice(0, 10) : null;
+    if (cut !== null && (d === null || d > cut)) continue;
+    c = row;
+  }
+  if (!Array.isArray(c) || c.length < 5) return null;
+  const hi = numOrNull(c[2]), lo = numOrNull(c[3]), close = numOrNull(c[4]);
+  if (hi === null || lo === null || close === null || !(close > 0) || hi < lo) return null;
+  return { range: (hi - lo) / close, date: typeof c[0] === "string" ? c[0].slice(0, 10) : null };
+}
+
+export function pinReading({ iv30, rv30, ivRank, ivMomentum, impliedH, realizedH, lastRange }) {
+  const iv = numOrNull(iv30), rv = numOrNull(rv30);
+  if (iv === null || !(iv > 0)) return null;
+  const weekAgo = numOrNull(ivMomentum) === null ? null : iv - ivMomentum;
+  const signals = [];
+  if (weekAgo !== null && weekAgo > 0 && iv < PIN_LINES.weekCollapse * weekAgo) signals.push("collapse");
+  const rank = numOrNull(ivRank);
+  if (iv < PIN_LINES.ivFloor && rank !== null && rank <= PIN_LINES.ivRankFloor) signals.push("floor");
+  const moveRatio = impliedH !== null && realizedH !== null && realizedH > 0 ? impliedH / realizedH : null;
+  if (moveRatio !== null && moveRatio < PIN_LINES.moveRatio) signals.push("ratio");
+  if (!signals.length) return null;
+  const daily = rv !== null && rv > 0 ? rv / Math.sqrt(252) : null;
+  const range = lastRange && numOrNull(lastRange.range) !== null ? lastRange.range : null;
+  const rangeRatio = range !== null && daily !== null ? range / daily : null;
+  const pinned = signals.includes("ratio") || (rangeRatio !== null && rangeRatio < PIN_LINES.rangeRatio);
+  if (!pinned) return null;
+  return {
+    signals,
+    moveRatio: moveRatio === null ? null : Number(moveRatio.toFixed(3)),
+    weekAgoIv: weekAgo === null ? null : Number(weekAgo.toFixed(4)),
+    lastRange: range === null ? null : Number(range.toFixed(5)),
+    lastRangeDate: lastRange && lastRange.date ? lastRange.date : null,
+    rangeRatio: rangeRatio === null ? null : Number(rangeRatio.toFixed(3)),
+  };
+}
+
+function skewWings(skew, iv) {
+  if (!skew || typeof skew !== "object" || iv === null) return null;
+  const k = numOrNull(skew.skew);
+  const b = skew.skewBasis && typeof skew.skewBasis === "object" ? skew.skewBasis : null;
+  if (k === null || !b) return null;
+  if (b.putTraded !== 1 || b.callTraded !== 1) return null;
+  const down = iv + k / 2, up = iv - k / 2;
+  if (!(down > 0) || !(up > 0)) return null;
+  return { skew: k, down, up, days: numOrNull(b.days), expiry: typeof b.expiry === "string" ? b.expiry : null };
+}
+
 export function buildPricedMove({
   spot, impliedMovePerc, vrp, iv30, rv30, ivRank, ivMomentum, atmVol, ivStrip, asOf,
   sessions = HORIZON_SESSIONS,
+
+  skew = null,
+  lastRange = null,
 }) {
   const s = numOrNull(spot);
   const m = numOrNull(impliedMovePerc);
-  const impliedH = horizonMove(numOrNull(iv30), { sessions });
+  const iv = numOrNull(iv30);
+  const impliedH = horizonMove(iv, { sessions });
   const realizedH = horizonMove(numOrNull(rv30), { sessions });
 
   if (s === null || !(s > 0)) return unavailable("no spot price");
@@ -326,35 +412,73 @@ export function buildPricedMove({
 
   const quoted = m !== null && m > 0;
 
+  const wings = impliedH === null ? null : skewWings(skew, iv);
+  const scale = Math.sqrt(sessions / 252);
+  const downH = impliedH === null ? null : wings ? wings.down * scale : impliedH;
+  const upH = impliedH === null ? null : wings ? wings.up * scale : impliedH;
+  const impliedLow = downH === null ? null : Number((s * Math.exp(-downH)).toFixed(2));
+  const impliedHigh = upH === null ? null : Number((s * Math.exp(upH)).toFixed(2));
+
+  const pin = pinReading({ iv30: iv, rv30, ivRank, ivMomentum, impliedH, realizedH, lastRange });
+
   const pct = (x) => Number((x * 100).toFixed(1));
+  const bandNote = impliedH === null ? null
+    : wings
+      ? `Skew-adjusted log-normal band: the down end is priced at 30-day implied volatility plus ` +
+        `half the ${wings.days === null ? "" : wings.days + "-day "}put-minus-call wing skew ` +
+        `(${pct(wings.skew)} points), the up end at it minus half, each as ` +
+        `spot × exp(±σ√(${sessions}/252)). Both wings traded today, so the skew is used; the ` +
+        `band's centre stays on 30-day implied volatility and only its lean comes from the wings.`
+      : `Log-normal band: spot × exp(±σ√(${sessions}/252)) at 30-day implied volatility, so the ` +
+        `down end sits closer to spot than the up end. No skew is applied: ` +
+        (skew && numOrNull(skew.skew) !== null
+          ? "the card's skew reading rests on a wing that did not trade today."
+          : "the card carries no skew reading.");
+
   const lead = (() => {
     if (impliedH !== null) {
-      const lo = Number((s * (1 - impliedH)).toFixed(2));
-      const hi = Number((s * (1 + impliedH)).toFixed(2));
+      const downPct = pct(1 - impliedLow / s), upPct = pct(impliedHigh / s - 1);
+      const said = wings
+        ? `Options price ${sessions} session${sessions === 1 ? "" : "s"} from −${downPct}% ` +
+          `to +${upPct}% — ${impliedLow.toFixed(2)} to ${impliedHigh.toFixed(2)}, leaning ` +
+          `${wings.skew > 0 ? "down" : wings.skew < 0 ? "up" : "neither way"} on the wing skew`
+        : `Options price a ±${pct(impliedH)}% move over ${sessions} session` +
+          `${sessions === 1 ? "" : "s"} — ${impliedLow.toFixed(2)} to ${impliedHigh.toFixed(2)}`;
+      const pinSaid = pin
+        ? ` That is ${pct(impliedH)}% against ${pct(realizedH ?? 0)}% realized, with implied ` +
+          `volatility at ${pct(iv)}%: the price reads as pinned by an event, so no ` +
+          `rich-or-cheap verdict is drawn.`
+        : "";
       return panelLead(
-        `Options price a \u00b1${pct(impliedH)}% move over ${sessions} session` +
-        `${sessions === 1 ? "" : "s"} \u2014 ${lo.toFixed(2)} to ${hi.toFixed(2)}` +
-        (realizedH === null
-          ? ", with no realized volatility to compare it against."
-          : `, against ${pct(realizedH)}% realized.`),
+        said +
+        (pin ? "." + pinSaid
+          : realizedH === null
+            ? ", with no realized volatility to compare it against."
+            : `, against ${pct(realizedH)}% realized.`),
         {
           impliedPct: pct(impliedH),
           sessions,
-          low: lo,
-          high: hi,
+          low: impliedLow,
+          high: impliedHigh,
+          downPct,
+          upPct,
           realizedPct: realizedH === null ? null : pct(realizedH),
+          ivPct: pin ? pct(iv) : null,
         });
     }
     if (!quoted) return null;
     const lo = Number((s * (1 - m)).toFixed(2));
     const hi = Number((s * (1 + m)).toFixed(2));
     return panelLead(
-      `Options price a \u00b1${pct(m)}% move to the nearest end-of-week expiry ` +
+      `Options price a ±${pct(m)}% move to the nearest end-of-week expiry ` +
 
-      `\u2014 ${lo.toFixed(2)} to ${hi.toFixed(2)}. No interpolated implied ` +
+      `— ${lo.toFixed(2)} to ${hi.toFixed(2)}. No interpolated implied ` +
       `volatility, so no fixed-horizon band to compare across names.`,
       { quotedPct: pct(m), low: lo, high: hi });
   })();
+
+  const verdict = numOrNull(vrp) === null || numOrNull(rv30) === null || !(rv30 > 0) ? null
+    : vrp / rv30 >= RICHNESS_LINE ? "rich" : vrp / rv30 <= -RICHNESS_LINE ? "cheap" : "fair";
 
   return ok({
     lead,
@@ -367,15 +491,22 @@ export function buildPricedMove({
 
     sessions,
     impliedMove: impliedH === null ? null : Number(impliedH.toFixed(5)),
-    impliedLow: impliedH === null ? null : Number((s * (1 - impliedH)).toFixed(2)),
-    impliedHigh: impliedH === null ? null : Number((s * (1 + impliedH)).toFixed(2)),
+    impliedLow,
+    impliedHigh,
     realizedMove: realizedH === null ? null : Number(realizedH.toFixed(5)),
-    realizedLow: realizedH === null ? null : Number((s * (1 - realizedH)).toFixed(2)),
-    realizedHigh: realizedH === null ? null : Number((s * (1 + realizedH)).toFixed(2)),
+    realizedLow: realizedH === null ? null : Number((s * Math.exp(-realizedH)).toFixed(2)),
+    realizedHigh: realizedH === null ? null : Number((s * Math.exp(realizedH)).toFixed(2)),
+
+    band: impliedH === null ? null : wings ? "skew" : "lognormal",
+    bandNote,
+    bandSkew: wings
+      ? { skew: Number(wings.skew.toFixed(4)), days: wings.days, expiry: wings.expiry,
+          downVol: Number(wings.down.toFixed(4)), upVol: Number(wings.up.toFixed(4)) }
+      : null,
 
     spot: s,
     vrp: numOrNull(vrp),
-    iv30: numOrNull(iv30),
+    iv30: iv,
     rv30: numOrNull(rv30),
 
     ivRank: numOrNull(ivRank),
@@ -387,8 +518,8 @@ export function buildPricedMove({
       ? ivStrip.map((p) => ({ h: p.h, v: numOrNull(p.v) }))
       : null,
 
-    richness: numOrNull(vrp) === null || numOrNull(rv30) === null || !(rv30 > 0) ? null
-      : vrp / rv30 >= RICHNESS_LINE ? "rich" : vrp / rv30 <= -RICHNESS_LINE ? "cheap" : "fair",
+    richness: pin && verdict !== null ? "event-pinned" : verdict,
+    pin: pin || null,
   }, asOf);
 }
 
@@ -783,12 +914,14 @@ function oiBasisReading(basis) {
   };
 }
 
-function chainPanel(chain, key) {
+function chainPanel(chain, key, missing = null) {
   if (!chain) {
     return {
       status: "unavailable",
-      reason: "no option chain was fetched for this name this session — the chain leg " +
-        "is the last call the pipeline spends and the first it gives up on a slow morning",
+      reason: typeof missing === "string" && missing ? missing
+        : "no option chain was fetched for this name this session — the chain leg is the " +
+          "last vendor call the pipeline spends, and it stopped before reaching this name " +
+          "to keep the run inside its deadline",
     };
   }
   const panel = chain[key] || { status: "unavailable", reason: "this panel was not built from the chain" };
@@ -814,7 +947,7 @@ function chainPanel(chain, key) {
 const GREEK_SUBJECT = Object.freeze({
   vanna: "Vol sensitivity",
   charm: "Time decay",
-  delta: "Dealer delta",
+  delta: "Open-interest delta",
 });
 
 function greekLead(name, built) {
@@ -854,8 +987,8 @@ function greekLead(name, built) {
     });
 }
 
-function greekPanel(name, expiries, callLeg, putLeg, sessionDate) {
-  const built = greekTermStructure(expiries, { name, callLeg, putLeg, asOf: sessionDate });
+function greekPanel(name, expiries, callLeg, putLeg, sessionDate, dealerSign) {
+  const built = greekTermStructure(expiries, { name, callLeg, putLeg, asOf: sessionDate, dealerSign });
   if (built.status === "ok") {
     const lead = greekLead(name, built);
     return lead ? { ...built, lead } : built;
@@ -1324,8 +1457,10 @@ export const CROSS_NOTES = Object.freeze({
     "about it.",
   timing:
     "The vendor states that its market-wide open-interest feed updates once a " +
-    "trading day at about 06:45 Eastern, and this pipeline runs at 05:15 " +
-    "Eastern. The session each feed describes is therefore published from the " +
+    "trading day at about 06:45 Eastern, and this pipeline runs after the close, " +
+    "at 17:30 Eastern (16:30 in winter), so a run reads the update published that " +
+    "morning rather than one describing the session just closed. The session each " +
+    "feed describes is therefore published from the " +
     "feed's own rows, beside the session this card describes. Where a feed " +
     "states no date of its own, that is said rather than assumed, and a rank " +
     "from another session is never presented as today's.",
@@ -1353,8 +1488,12 @@ export function buildCard({
   marketCross = null,
 
   unfetched = null,
+
+  variation: variationOpts = null,
+  chainMissing = null,
 }) {
   const f = features || {};
+  const putSigns = putMultipliers(variationOpts && variationOpts.probe ? variationOpts.probe : null);
   const spot = numOrNull(row && row.close) ?? numOrNull(features && features.spot);
   const gamma = buildGammaProfile(strikes, { spot });
   const painRow = pickMaxPainRow(maxPain, { asOf: sessionDate });
@@ -1373,7 +1512,7 @@ export function buildCard({
     rangeSessions: f.rangeSessions,
   }, { asOf: sessionDate });
 
-  return {
+  const card = {
     v: CARD_SCHEMA_VERSION,
     ticker,
 
@@ -1407,7 +1546,12 @@ export function buildCard({
     regime: f.netGamma !== undefined
       ? {
         netGamma: numOrNull(f.netGamma),
+        flowGamma: numOrNull(f.netGamma),
+        flowGross: numOrNull(f.gammaGross),
         label: f.gRegime || null,
+        labelFrom: f.gRegimeFrom || null,
+        bookGammaRaw: numOrNull(f.gammaBookRaw),
+        bookShare: numOrNull(f.gammaBookShare),
 
         flipSide: f.flipSide || null,
 
@@ -1437,21 +1581,22 @@ export function buildCard({
         maxPain: painRow ? painRow.px : null,
         callWall: gamma.status === "ok" ? gamma.callWall : null,
         putWall: gamma.status === "ok" ? gamma.putWall : null,
+        band: gamma.status === "ok" ? { min: gamma.bandMin, max: gamma.bandMax } : null,
       }),
 
       scoreOverlay: scoreOverlayPanel(scoreHistory, contextPanel),
 
       premiumTrack: premiumTrackPanel(scoreHistory),
-      ivSurface: chainPanel(chain, "ivSurface"),
-      skewTerm: chainPanel(chain, "skewTerm"),
-      topContracts: chainPanel(chain, "topContracts"),
-      aggressor: chainPanel(chain, "aggressor"),
+      ivSurface: chainPanel(chain, "ivSurface", unfetched || chainMissing),
+      skewTerm: chainPanel(chain, "skewTerm", unfetched || chainMissing),
+      topContracts: chainPanel(chain, "topContracts", unfetched || chainMissing),
+      aggressor: chainPanel(chain, "aggressor", unfetched || chainMissing),
       path: buildPath(ticks, { sessionDate }),
       calendar: buildCalendar(expiries, { asOf: sessionDate }),
 
-      vanna: greekPanel("vanna", expiries, callVannaLeg, putVannaLeg, sessionDate),
-      charm: greekPanel("charm", expiries, callCharmLeg, putCharmLeg, sessionDate),
-      deltaExposure: greekPanel("delta", expiries, callDeltaLeg, putDeltaLeg, sessionDate),
+      vanna: greekPanel("vanna", expiries, callVannaLeg, putVannaLeg, sessionDate, putSigns.vanna),
+      charm: greekPanel("charm", expiries, callCharmLeg, putCharmLeg, sessionDate, putSigns.charm),
+      deltaExposure: greekPanel("delta", expiries, callDeltaLeg, putDeltaLeg, sessionDate, putSigns.delta),
       displacement: buildDisplacement(strikes, { atr: f.atr, spot }),
       pricedMove: buildPricedMove({
         spot,
@@ -1462,6 +1607,8 @@ export function buildCard({
         ivStrip: f.ivStrip,
         asOf: sessionDate,
         sessions: HORIZON_SESSIONS,
+        skew: chain && chain.skewTerm && chain.skewTerm.status === "ok" ? chain.skewTerm : null,
+        lastRange: lastRangeOf(f.candles, { through: sessionDate }),
       }),
       context: contextPanel,
 
@@ -1479,10 +1626,24 @@ export function buildCard({
             reason: unfetched || "neither volatility feed could be read this run",
             note: STOCK_NOTES.volContext }
 
-        : withVolLead({ ...buildVolContext(termStructure, ivRank),
+        : withVolLead({ ...buildVolContext(termStructure, ivRank, { sessionDate }),
             note: STOCK_NOTES.volContext }),
     },
   };
+  card.panels.variation = buildVariation(card, { expiries, options: variationOpts });
+  if (card.regime && card.panels.variation.inputs) {
+    card.regime.bookGamma = numOrNull(card.panels.variation.inputs.gammaBook);
+  }
+  return card;
+}
+
+export function buildVariation(card, { expiries = null, options = null } = {}) {
+  try {
+    return variation(cardVariationInput(card, { expiries }), options || {});
+  } catch (error) {
+    return { status: "unavailable",
+      reason: "the hedging model failed on this card: " + String(error && error.message || error) };
+  }
 }
 
 function withVolLead(panel) {
@@ -1602,7 +1763,7 @@ export function pickMaxPainRow(rows, { asOf = null } = {}) {
   if (!parsed.length) return null;
 
   if (asOf) {
-    const live = parsed.filter((r) => String(r.expiry).slice(0, 10) >= String(asOf).slice(0, 10));
+    const live = parsed.filter((r) => liveExpiry(r.expiry, asOf));
     if (live.length) return live[0];
 
     return null;

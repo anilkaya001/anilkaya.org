@@ -976,7 +976,7 @@
     if (payload.status === "pending") {
 
       const msg = "The pipeline has not published this key yet. This calendar is built by " +
-        "the weekday-morning run out of screener rows it already holds — it costs no " +
+        "the weekday after-close run out of screener rows it already holds — it costs no " +
         "vendor call — and it appears with the first run after this page shipped.";
       setStatus(msg, "pending");
       windowMessage(msg, "pending");
@@ -1022,7 +1022,7 @@
 
       failEverywhere("unreadable",
         "A calendar is published under this key, but it does not parse (" + why + "). " +
-        "Reloading reads the same bytes back — only the next weekday-morning run " +
+        "Reloading reads the same bytes back — only the next weekday after-close run " +
         "replaces them.");
     } else {
       failEverywhere("failed",

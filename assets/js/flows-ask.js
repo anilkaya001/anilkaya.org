@@ -11,10 +11,28 @@
     var n = Number(v);
     return Number.isFinite(n) ? n : null;
   }
+  function dated(node, text) {
+    node.textContent = /\d{4}-\d{2}-\d{2}/.test(text) ? "" : text;
+    if (node.textContent) return node;
+    var re = /\d{4}-\d{2}-\d{2}/g, at = 0, m;
+    while ((m = re.exec(text))) {
+      if (m.index > at) node.append(document.createTextNode(text.slice(at, m.index)));
+      var d = document.createElement("span");
+      d.className = "flows-date";
+      d.textContent = m[0];
+      node.append(d);
+      at = m.index + m[0].length;
+    }
+    if (at < text.length) node.append(document.createTextNode(text.slice(at)));
+    return node;
+  }
   function el(tag, cls, text) {
     var n = document.createElement(tag);
     if (cls) n.className = cls;
-    if (text !== undefined && text !== null) n.textContent = String(text);
+    if (text !== undefined && text !== null) {
+      if (cls && /\bfc-(note|reading)\b/.test(cls)) dated(n, String(text));
+      else n.textContent = String(text);
+    }
     return n;
   }
   function text(s) {
@@ -73,9 +91,9 @@
         (calls === 1 ? "" : "s") + " today" + (tokIn !== null && tokOut !== null
           ? ", for " + meterFigure(tokIn) + " tokens in and " + meterFigure(tokOut) +
             " tokens out. Tokens are what the model itself reported; the credit figure is " +
-            "arithmetic over them at the published rate for the configured model, done when " +
-            "this page was drawn rather than stored, so a corrected rate repairs the whole " +
-            "history rather than leaving it stamped at yesterday's."
+            "arithmetic over them at the published rate for the model that answered each " +
+            "call, done when this page was drawn rather than stored, so a corrected rate " +
+            "repairs the whole history rather than leaving it stamped at yesterday's."
           : "."));
     }
     how.push("Cloudflare is the authority on the allowance and this meter is not. It can " +
@@ -90,7 +108,7 @@
         : "This site has asked the model " + meterFigure(calls) + " time" +
           (calls === 1 ? "" : "s") + " today.";
       box.append(el("p", "ak-meter-say", said + " The credits that cost is not shown: the " +
-        "per-token rate for the configured model is not set here, and deriving one would " +
+        "per-token rate for a model this site asked is not set here, and deriving one would " +
         "put a plausible wrong number where a measurement belongs."));
       box.append(howBox("How this is counted", how));
       return box;

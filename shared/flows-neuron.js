@@ -1,8 +1,12 @@
 import { TICKER_PANELS, SENTINEL_KEYS } from "./flows-panels.js";
 import { guardAnswer, numeralsIn } from "./flows-ask.js";
+import { VARIATION_VOTES, VARIATION_LINES } from "./flows-variation.js";
 
 export const NEURON_CONTEXT_VERSION = 2;
 export const NEURON_MAX_IDEAS = 3;
+
+const article = (noun, capital) => (/^[aeiou]/i.test(noun) ? (capital ? "An " : "an ") : (capital ? "A " : "a ")) + noun;
+
 export const NEURON_STRUCTURES = Object.freeze([
   "long call", "long put", "call debit spread", "put debit spread", "call credit spread",
   "put credit spread", "iron condor", "long straddle", "long strangle", "calendar spread",
@@ -21,8 +25,8 @@ export const STATE_LINES = Object.freeze({
   SHARE_MARGINAL: 0.2, FLIP_ON_ATR: 0.5, FLIP_NEAR_ATR: 1.5, WALL_NEAR_ATR: 1.5, PAIN_NEAR_ATR: 0.5,
   PATH_ONE_SIDED: 0.65, AGGRESSOR_SHARE: 0.25, OI_SIDE_RATIO: 2, DISPLACEMENT_ATR: 0.5,
   SCORE_DEAD_BAND: 1, CONVICTION_FAIR: 50, SPLIT_MINORITY: 1 / 3,
-  VRP_RELATIVE: 0.1, IV_RANK_HIGH: 0.7, IV_RANK_LOW: 0.2, IV_MOMENTUM_PTS: 0.03,
-  TERM_FRONT_BID_PTS: 0.03, GARCH_GAP_PTS: 5, FRONT_LOAD: 0.25,
+  VRP_RELATIVE: 0.1, IV_RANK_HIGH: 0.7, IV_RANK_LOW: 0.2, IV_MOMENTUM_REL: 0.1,
+  TERM_FRONT_BID_REL: 0.08, GARCH_GAP_REL: 0.12, FRONT_LOAD: 0.25, DRIFT_SD: VARIATION_LINES.DRIFT_SD,
 });
 const BY_PREMIUM = (rich, cheap, fair) => Object.freeze({ rich, cheap, fair });
 export const STATE_STRUCTURES = Object.freeze({
@@ -93,6 +97,8 @@ const FIGURE_KEYS = {
   darkpool: ["seen", "cap", "shed", "unpriced"],
   oiDeltas: ["seen", "cap", "shed"],
   volContext: [],
+  variation: ["gammaPerSigma", "vannaPerPoint", "charmPerSession", "driftInSd", "gammaShare",
+    "vannaShare", "crossShare", "sigmaSource", "advPct"],
 };
 
 function levelFigures(p) {
@@ -116,18 +122,22 @@ function panelRobustness(key, group, p, card) {
   switch (key) {
     case "gamma":
       return num(p.strikes) !== null && num(p.strikes) < 20
-        ? { r: 2, why: "the gamma profile rests on fewer than 20 strikes" }
-        : { r: 3, why: "standing open interest across the book, settled at the clearing snapshot" };
+        ? { r: 1, why: "the ladder of gamma dealers added today rests on fewer than 20 strikes" }
+        : { r: 2, why: "gamma dealers added today: one session's directionalized volume by strike, not the standing open-interest book" };
     case "levels": {
       const g = card.panels && card.panels.gamma && card.panels.gamma.status === "ok" ? card.panels.gamma : null;
       return g && num(g.strikes) !== null && num(g.strikes) < 20
-        ? { r: 2, why: "the walls come from a gamma profile of fewer than 20 strikes" }
-        : { r: 3, why: "walls, flip and max pain read off the same clearing snapshot as the gamma profile" };
+        ? { r: 1, why: "the walls come from a flow ladder of fewer than 20 strikes" }
+        : { r: 2, why: "the walls and the ladder's zero-crossing read off today's flow ladder; max pain off the open-interest snapshot" };
     }
     case "surface":
       return num(p.clipped) > 0
-        ? { r: 2, why: "the surface was clipped to its scale cap on some cells" }
-        : { r: 3, why: "standing open interest by strike and expiry" };
+        ? { r: 1, why: "the surface was clipped to its scale cap on some cells" }
+        : { r: 2, why: "today's directionalized volume by strike and expiry, not standing open interest" };
+    case "variation":
+      return p.robustness && num(p.robustness.r) !== null
+        ? { r: Math.max(0, Math.min(3, p.robustness.r)), why: str(p.robustness.why) || "graded by the hedging model" }
+        : { r: 1, why: "the hedging panel published no grade" };
     case "ivSurface": {
       const placed = num(p.placed), fresh = num(p.fresh);
       return placed !== null && fresh !== null && placed > 0 && fresh / placed < 0.8
@@ -170,6 +180,82 @@ const WALL_FOR = { 1: "call_wall", "-1": "put_wall" };
 function magnitude(v) {
   const mag = Math.abs(v);
   return mag >= 1e6 ? (mag / 1e6).toFixed(2) + "M" : mag >= 1e3 ? (mag / 1e3).toFixed(1) + "k" : String(Math.round(mag));
+}
+
+const signedMoney = (v) => (v < 0 ? "\u2212$" : "+$") + magnitude(v);
+
+export function gammaReading(card) {
+  const c = card && typeof card === "object" ? card : {};
+  const regime = c.regime && typeof c.regime === "object" ? c.regime : {};
+  const P = c.panels && typeof c.panels === "object" ? c.panels : {};
+  const V = okPanel(P.variation) ? P.variation : null;
+  const bookDollars = num(regime.bookGamma) !== null ? num(regime.bookGamma)
+    : V && V.inputs ? num(V.inputs.gammaBook) : null;
+  const bookNet = bookDollars !== null ? bookDollars : num(regime.bookGammaRaw);
+  const flow = num(regime.flowGamma) !== null ? num(regime.flowGamma) : num(regime.netGamma);
+  if (bookNet !== null) {
+    const share = num(regime.bookShare);
+    const label = bookNet >= 0 ? "long" : "short";
+    return {
+      from: "book", label, strength: share === null ? null : Math.abs(share),
+      sentence: "net dealer gamma across the open-interest book is " + label +
+        (bookDollars !== null ? ", " + signedMoney(bookDollars) + " per 1% move" : "") +
+        (share === null ? "" : " (" + Math.round(Math.abs(share) * 100) + "% of its gross)") +
+        (flow !== null ? "; today\u2019s trading added " + signedMoney(flow) : ""),
+    };
+  }
+  if (flow !== null) {
+    const bars = okPanel(P.gamma) && !P.gamma.bucketed && Array.isArray(P.gamma.bars) ? P.gamma.bars : [];
+    const gross = num(regime.flowGross) !== null ? num(regime.flowGross)
+      : bars.reduce((a, b) => a + Math.abs(num(b && b.g) || 0), 0);
+    const strength = gross > 0 ? Math.abs(flow) / gross : null;
+    const label = flow >= 0 ? "long" : "short";
+    return {
+      from: "flow", label, strength,
+      sentence: "the open-interest book is not on this card, so the label follows the gamma dealers added today, " +
+        signedMoney(flow) + " per 1% move, " + label +
+        (strength === null ? "" : " (" + Math.round(strength * 100) + "% of the ladder\u2019s gross)"),
+    };
+  }
+  const lab = str(regime.label);
+  return lab === "long" || lab === "short"
+    ? { from: "label", label: lab, strength: null, sentence: "dealer gamma is labelled " + lab + " on this card, with no net published beside it" }
+    : { from: null, label: null, strength: null, sentence: null };
+}
+
+function hedgeDrivers(card) {
+  const P = card.panels && typeof card.panels === "object" ? card.panels : {};
+  const V = okPanel(P.variation) ? P.variation : null;
+  if (!V) return [];
+  const r = panelRobustness("variation", "convexity", V, card).r;
+  const ch = V.channels && typeof V.channels === "object" ? V.channels : {};
+  const out = [];
+  const pctOf = (v) => (num(v) === null ? null : (Math.abs(v) * 100).toFixed(2) + "%");
+  if (ch.charm && num(ch.charm.perSession) !== null) {
+    const hedge = -ch.charm.perSession;
+    const drift = V.variance ? num(V.variance.driftInSd) : null;
+    const decisive = drift !== null && Math.abs(drift) >= STATE_LINES.DRIFT_SD;
+    out.push({ key: "variation", robustness: r, weight: VARIATION_VOTES ? r : 0, vote: VARIATION_VOTES && decisive ? Math.sign(hedge) : 0, axis: "hedge",
+      reading: "time alone moves dealer hedges to " + (hedge >= 0 ? "buy " : "sell ") + "$" + magnitude(hedge) + " over the session" +
+        (pctOf(ch.charm.pctAdv) ? " (" + pctOf(ch.charm.pctAdv) + " of a typical day)" : "") +
+        (drift === null ? "" : ", " + Math.abs(drift).toFixed(1) + " sd of the random part") +
+        "; context only, with no vote until the drift sign's per-session IC clears a shuffled null" });
+  }
+  if (ch.gamma && num(ch.gamma.perSigma) !== null) {
+    out.push({ key: "variation", sub: "gamma", robustness: r, weight: 0, vote: 0, axis: "hedge",
+      reading: "a one-sigma rise has dealers " + (ch.gamma.perSigma > 0 ? "sell" : "buy") + " $" + magnitude(ch.gamma.perSigma) +
+        (ch.gamma.source === "book" ? " on the open-interest book" : " on the gamma added today alone") });
+  }
+  if (ch.vanna && num(ch.vanna.perPoint) !== null) {
+    out.push({ key: "vanna", robustness: r, weight: 0, vote: 0, axis: "hedge",
+      reading: "dealer vanna nets to " + signedMoney(ch.vanna.perPoint) + " of delta per vol point across the live expiries (call \u2212 put)" +
+        (num(ch.vanna.perSigma) !== null ? ", " + signedMoney(ch.vanna.perSigma) + " per one-sigma vol move" : "") });
+  }
+  if (ch.charm && num(ch.charm.perSession) !== null) {
+    out.push({ key: "charm", robustness: r, weight: 0, vote: 0, axis: "hedge",
+      reading: "dealer charm nets to " + signedMoney(ch.charm.perSession) + " of delta over the session across the expiries that outlive it (call \u2212 put)" });
+  }
+  return out;
 }
 
 function levelsOf(card) {
@@ -250,19 +336,6 @@ function directionVotes(card) {
     }
   }
   {
-    const p = P.displacement;
-    if (okPanel(p)) {
-      const r = panelRobustness("displacement", "convexity", p, card).r;
-      const g = num(p.gapAtr);
-      if (g !== null) {
-        const decisive = Math.abs(g) >= T.DISPLACEMENT_ATR;
-        add("displacement", decisive ? Math.sign(g) : 0, r,
-          "today\u2019s flow builds gamma " + Math.abs(g).toFixed(2) + " ATR " + (g > 0 ? "above" : "below") + " the standing book" +
-          (decisive ? "" : " (inside " + T.DISPLACEMENT_ATR + " ATR, so no vote)"));
-      }
-    }
-  }
-  {
     const p = P.premiumTrack;
     if (okPanel(p)) {
       const r = panelRobustness("premiumTrack", "tape", p, card).r;
@@ -300,6 +373,16 @@ function premiumAxis(card) {
   const drivers = [];
   let reading = null, base = 0;
   const pm = P.pricedMove;
+  if (okPanel(pm) && pm.richness === "event-pinned") {
+    const r = panelRobustness("pricedMove", "volatility", pm, card).r;
+    const pin = pm.pin && typeof pm.pin === "object" ? pm.pin : {};
+    drivers.push({ key: "pricedMove", robustness: r, weight: 0, axis: "premium", vote: 0,
+      reading: pct1(num(pm.iv30)) + "% implied against " + pct1(num(pm.rv30)) + "% realised" +
+        (num(pin.weekAgoIv) !== null ? ", down from " + pct1(num(pin.weekAgoIv)) + "% a week ago" : "") +
+        (num(pin.lastRange) !== null ? ", on a last session that traded a " + (num(pin.lastRange) * 100).toFixed(2) + "% range" : "") +
+        ": the price is pinned by an event, so realised volatility is not the yardstick and premium is read as neither rich nor cheap" });
+    return { reading: "fair", robustness: r, drivers, pinned: true };
+  }
   if (okPanel(pm)) {
     const r = panelRobustness("pricedMove", "volatility", pm, card).r;
     const iv = num(pm.iv30), rv = num(pm.rv30), vrp = num(pm.vrp);
@@ -318,9 +401,11 @@ function premiumAxis(card) {
           reading: "IV rank " + Math.round(rank * 100) + "% of its own year" + (v > 0 ? ", in the top band" : v < 0 ? ", in the bottom band" : ", mid-range") });
       }
       const mom = num(pm.ivMomentum);
-      if (mom !== null && Math.abs(mom) >= T.IV_MOMENTUM_PTS) {
+      const momRel = mom !== null && iv > 0 ? mom / iv : null;
+      if (momRel !== null && Math.abs(momRel) >= T.IV_MOMENTUM_REL) {
         drivers.push({ key: "pricedMove", sub: "ivMomentum", robustness: r, weight: 1, axis: "premium", vote: mom > 0 ? 1 : -1,
-          reading: "implied volatility " + (mom > 0 ? "rose" : "fell") + " " + Math.abs(mom * 100).toFixed(1) + " points over the month" });
+          reading: "implied volatility " + (mom > 0 ? "rose" : "fell") + " " + Math.abs(mom * 100).toFixed(1) + " points over the week, " +
+            Math.round(Math.abs(momRel) * 100) + "% of its own level (the line is " + Math.round(T.IV_MOMENTUM_REL * 100) + "%)" });
       }
     }
   }
@@ -330,9 +415,11 @@ function premiumAxis(card) {
     if (rows.length >= 2) {
       const f = rows[0], b = rows[rows.length - 1];
       const d = f.vol - b.vol;
-      if (Math.abs(d) >= T.TERM_FRONT_BID_PTS) {
+      const rel = b.vol > 0 ? d / b.vol : null;
+      if (rel !== null && Math.abs(rel) >= T.TERM_FRONT_BID_REL) {
         drivers.push({ key: "volContext", robustness: panelRobustness("volContext", "volatility", vc, card).r, weight: 1, axis: "premium", vote: d > 0 ? 1 : 0,
-          reading: (d > 0 ? "the front is bid: " : "the back is bid: ") + pct1(f.vol) + "% at " + f.expiry + " against " + pct1(b.vol) + "% at " + b.expiry });
+          reading: (d > 0 ? "the front is bid: " : "the back is bid: ") + pct1(f.vol) + "% at " + f.expiry + " against " + pct1(b.vol) + "% at " + b.expiry +
+            ", " + Math.round(Math.abs(rel) * 100) + "% of the back's level" });
       }
     }
   }
@@ -341,13 +428,17 @@ function premiumAxis(card) {
   if (g && okPanel(pm) && num(pm.iv30) !== null) {
     const last = num(g.lastVol) !== null ? num(g.lastVol)
       : Array.isArray(g.condVol) && g.condVol.length ? num(g.condVol[g.condVol.length - 1]) : null;
-    const model = num(g.nextVol) !== null ? num(g.nextVol) : last;
-    if (model !== null) {
+    const avg = num(g.avg21Vol);
+    const model = avg !== null ? avg : num(g.nextVol) !== null ? num(g.nextVol) : last;
+    if (model !== null && model > 0) {
       const gap = num(pm.iv30) * 100 - model;
-      const wide = Math.abs(gap) >= T.GARCH_GAP_PTS;
+      const rel = gap / model;
+      const wide = Math.abs(rel) >= T.GARCH_GAP_REL;
       drivers.push({ key: "garch", robustness: g.converged === false ? 1 : g.dist === "skewt" ? 3 : 2, weight: wide ? 1 : 0, axis: "premium",
         vote: wide ? Math.sign(gap) : 0,
-        reading: "the GARCH conditional level is " + model.toFixed(1) + "% against " + pct1(num(pm.iv30)) + "% implied" +
+        reading: (avg !== null ? "the GARCH average over the next 21 sessions is " : "the GARCH one-step level is ") + model.toFixed(1) +
+          "% against " + pct1(num(pm.iv30)) + "% implied over 30 days, a gap of " + Math.round(Math.abs(rel) * 100) +
+          "% of the model (the line is " + Math.round(T.GARCH_GAP_REL * 100) + "%)" +
           (g.dist === "skewt" ? "" : " (fitted before the skewed t)") });
     }
   }
@@ -378,6 +469,8 @@ export function stateSentence(s, ticker) {
   if (abst.length) parts.push("Abstaining: " + abst.join("; ") + ".");
   parts.push("Premium is " + (s.premium || "unreadable") + (prem.length ? ": " + prem.join("; ") : "") + ".");
   if (hz.length) parts.push("Calendar: " + hz.join("; ") + ".");
+  const hedge = pick("hedge");
+  if (hedge.length) parts.push("Hedging: " + hedge.join("; ") + ".");
   if (s.notes.length) parts.push("Note: " + s.notes.join("; ") + ".");
   if (s.invalidation) parts.push("The state ends past the " + s.invalidation.label.toLowerCase() + " at " + f2(s.invalidation.px) + ".");
   if (s.horizon) {
@@ -421,9 +514,12 @@ export function regimeState(card, extras) {
   const flow = SIDE_WORD[String(votes.direction)];
   const silenceOf = (p) => (p && typeof p === "object" ? silence(p.status) : "unavailable");
   let state = "undetermined", direction = null, confidence = 0, invalidation = null, horizon = null, target = null, bound = null;
-  const label = str(regime.label);
+  const read = gammaReading(c);
+  const label = read.label;
   const share = num(regime.spotGammaShare);
-  const gammaOk = okPanel(P.gamma) && gammaR.r > 0 && (label === "long" || label === "short");
+  const gammaDriverR = read.from === "book" ? 3 : read.from === "flow" ? 1 : read.from === "label" ? 1 : 0;
+  const gammaOk = gammaDriverR > 0 && (read.from === "book" || (okPanel(P.gamma) && gammaR.r > 0)) &&
+    (label === "long" || label === "short");
   const levelsOk = okPanel(P.levels) && levelsR.r > 0;
   const cal = okPanel(P.calendar) ? P.calendar : null;
   const front = cal && Array.isArray(cal.schedule) && cal.schedule[0] && str(cal.schedule[0].expiry) ? cal.schedule[0] : null;
@@ -432,24 +528,26 @@ export function regimeState(card, extras) {
     ? { kind: "priced_sessions", value: num(pm.sessions), low: num(pm.impliedLow), high: num(pm.impliedHigh), days: null } : null;
 
   if (gammaOk) {
-    const strong = share !== null && Math.abs(share) >= T.SHARE_MARGINAL;
+    const strong = read.strength !== null && read.strength >= T.SHARE_MARGINAL;
     const flipAtr = flip ? flip.distAtr : null;
     const onFlip = flipAtr !== null && Math.abs(flipAtr) < T.FLIP_ON_ATR;
     const nearFlip = flipAtr !== null && Math.abs(flipAtr) >= T.FLIP_ON_ATR && Math.abs(flipAtr) < T.FLIP_NEAR_ATR;
-    drivers.push({ key: "gamma", robustness: gammaR.r, weight: gammaR.r, axis: "positioning",
-      reading: "dealer gamma at spot is " + label + (share === null ? "" : ", the cumulative ladder at spot sits at " +
-        Math.round(Math.abs(share) * 100) + "% of its peak" + (strong ? "" : " (under the " + Math.round(T.SHARE_MARGINAL * 100) + "% line, marginal)")) +
+    drivers.push({ key: "gamma", robustness: gammaDriverR, weight: gammaDriverR, axis: "positioning",
+      reading: read.sentence + (read.strength === null ? "" : strong ? ""
+          : " (under the " + Math.round(T.SHARE_MARGINAL * 100) + "% line, marginal)") +
+        (share === null ? "" : "; the strike ladder's running sum below spot sits at " +
+          (share < 0 ? "\u2212" : "") + Math.round(Math.abs(share) * 100) + "% of its peak") +
         (num(regime.crossings) === null ? "" : regime.crossings === 0 ? "; the ladder does not change sign across the window"
           : "; the ladder changes sign " + regime.crossings + " time" + (regime.crossings === 1 ? "" : "s")) });
     if (levelsOk && flip && flipAtr !== null) {
       drivers.push({ key: "levels", robustness: levelsR.r, weight: levelsR.r, axis: "positioning",
-        reading: "net gamma flips sign at " + f2(flip.px) + ", " + Math.abs(flipAtr).toFixed(2) + " ATR " + (flipAtr >= 0 ? "above" : "below") + " spot " + f2(L.spot) +
-          (onFlip ? " (inside " + T.FLIP_ON_ATR + " ATR: spot sits on the flip)" : nearFlip ? " (inside " + T.FLIP_NEAR_ATR + " ATR)" : "") });
+        reading: "the strike ladder's running sum crosses zero at " + f2(flip.px) + ", " + Math.abs(flipAtr).toFixed(2) + " ATR " + (flipAtr >= 0 ? "above" : "below") + " spot " + f2(L.spot) +
+          (onFlip ? " (inside " + T.FLIP_ON_ATR + " ATR: spot sits on the crossing)" : nearFlip ? " (inside " + T.FLIP_NEAR_ATR + " ATR)" : "") });
     } else if (levelsOk && num(regime.bandMin) !== null && num(regime.bandMax) !== null) {
       drivers.push({ key: "levels", robustness: levelsR.r, weight: levelsR.r, axis: "positioning",
         reading: "no sign change resolved on the ladder read over " + f2(num(regime.bandMin)) + " to " + f2(num(regime.bandMax)) + ", so the " + label + " side holds across the window" });
     }
-    const base = levelsOk ? Math.min(gammaR.r, levelsR.r) : Math.min(gammaR.r, 2);
+    const base = levelsOk ? Math.min(gammaDriverR, levelsR.r) : Math.min(gammaDriverR, 2);
     if (onFlip) {
       state = "transitional";
       direction = flow;
@@ -519,14 +617,16 @@ export function regimeState(card, extras) {
     notes.push("gamma positioning is " + silenceOf(P.gamma) + " and premium is " + (premium.reading || "unreadable") + ", so no state is implied");
   }
   for (const d of premium.drivers) drivers.push(d);
-  for (const [key, what, when] of [["vanna", "vol sensitivity", "a where, not a which way"], ["charm", "time decay", "a when, not a drift direction"]]) {
-    const n = okPanel(P[key]) && P[key].lead && P[key].lead.n ? P[key].lead.n : null;
-    if (n && str(n.expiry)) {
-      drivers.push({ key, robustness: panelRobustness(key, "convexity", P[key], c).r, weight: 0, axis: "horizon",
-        reading: what + " concentrates at " + n.expiry + (num(n.dte) !== null ? ", " + n.dte + " days out" : "") +
-          (num(n.sharePct) !== null ? " (" + n.sharePct + "% of the drawn ladder)" : "") + "; the legs are not netted on this card, so " + key + " gives " + when });
+  {
+    const p = P.displacement;
+    const g = okPanel(p) ? num(p.gapAtr) : null;
+    if (g !== null) {
+      drivers.push({ key: "displacement", robustness: panelRobustness("displacement", "convexity", p, c).r, weight: 0, vote: 0, axis: "horizon",
+        reading: "today\u2019s flow builds gamma " + Math.abs(g).toFixed(2) + " ATR " + (g > 0 ? "above" : g < 0 ? "below" : "on") +
+          " the standing book; buying and selling at the same strikes move it alike, so it places the flow and casts no vote" });
     }
   }
+  for (const d of hedgeDrivers(c)) drivers.push(d);
   if (stale) confidence = Math.min(confidence, 1);
   confidence = Math.max(0, Math.min(3, confidence));
   if (state === "undetermined") confidence = 0;
@@ -534,12 +634,15 @@ export function regimeState(card, extras) {
     : state === "squeeze" || state === "amplifying"
       ? (direction === "bullish" ? STATE_STRUCTURES.bull[prem] : direction === "bearish" ? STATE_STRUCTURES.bear[prem] : STATE_STRUCTURES.shortNoSide[prem])
       : state === "transitional" ? STATE_STRUCTURES.transitional[prem] : STATE_STRUCTURES[state];
-  const preferred = table.preferred.filter((x) => !(direction && state === "transitional" && x === "no position"));
+  const pinnedOut = premium.pinned ? ["long straddle", "long strangle"] : [];
+  const preferred = table.preferred.filter((x) => !(direction && state === "transitional" && x === "no position") && !pinnedOut.includes(x));
   if (state === "transitional" && direction) preferred.push(direction === "bullish" ? "call debit spread" : "put debit spread");
+  if (!preferred.length) preferred.push("no position");
+  if (premium.pinned) notes.push("the priced move reads as pinned by an event, so no long-volatility structure is preferred");
   const out = {
-    version: STATE_VERSION, state, direction, flow, confidence, premium: premium.reading,
+    version: STATE_VERSION, state, direction, flow, confidence, premium: premium.pinned ? "pinned" : premium.reading,
     drivers: drivers.filter((d) => d.robustness > 0), invalidation, horizon, target, bound,
-    preferred, avoid: [...table.avoid], stale, notes,
+    preferred, avoid: [...new Set([...table.avoid, ...pinnedOut])], stale, notes,
   };
   out.chip = stateChip(out);
   out.brief = stateBrief(out, str(c.ticker));
@@ -574,9 +677,11 @@ export function stateIdea(context) {
   const payoff = structure === "no position"
     ? " The flow features do not agree on a side, so no position is the reading until spot closes beyond " + level + "."
     : volLong
-      ? " A " + structure + " pays if spot closes " + (range ? "outside " + range : "beyond " + level + " in either direction") +
+      ? " " + article(structure, true) + " pays if spot closes " + (range ? "outside " + range : "beyond " + level + " in either direction") +
         "; it loses if spot holds " + (range ? "inside it" : "at " + level) + " through the horizon."
-      : " A " + structure + " pays if spot " + (direction === "bullish" ? "holds above " : direction === "bearish" ? "holds below " : "stays inside the priced range against ") + level + ".";
+      : " " + article(structure, true) + " pays if spot " + (direction === "bullish" ? "holds above " + level
+        : direction === "bearish" ? "holds below " + level
+          : "stays inside the priced range, with " + level + " as the line that ends the state") + ".";
   return {
     title: STATE_WORD[s.state] + " " + structure,
     structure, direction,
@@ -601,6 +706,7 @@ export function buildContext(card, extras) {
   const quality = c.quality && typeof c.quality === "object" ? c.quality : {};
   const regime = c.regime && typeof c.regime === "object" ? c.regime : {};
   const score = num(c.score), conviction = num(c.conviction);
+  const standingGamma = gammaReading(c);
 
   const features = [];
   const push = (f) => { features.push(f); return f; };
@@ -626,11 +732,12 @@ export function buildContext(card, extras) {
       say: score === null ? null
         : c.ticker + " scored " + score + " this session with conviction " +
           (conviction === null ? "unpublished" : conviction + " of 100") +
-          (str(regime.label) ? "; dealer gamma at spot is " + regime.label : "") +
-          (num(c.gammaFlip) !== null ? "; net gamma flips sign at " + r2(c.gammaFlip) : "") +
+          (standingGamma.label ? (standingGamma.from === "book" ? "; dealer gamma across the open-interest book is "
+            : standingGamma.from === "flow" ? "; the gamma dealers added today is " : "; dealer gamma is labelled ") + standingGamma.label : "") +
+          (num(c.gammaFlip) !== null ? "; the strike ladder's running sum crosses zero at " + r2(c.gammaFlip) : "") +
           (num(c.atr) !== null ? "; one ATR is " + r2(c.atr) : "") + ".",
       figures: {
-        score, conviction, regime: str(regime.label), gammaFlip: r2(num(c.gammaFlip)), atr: r2(num(c.atr)),
+        score, conviction, regime: standingGamma.label, gammaFlip: r2(num(c.gammaFlip)), atr: r2(num(c.atr)),
         agreement: r2(num(conv.agreement)), breadth: num(conv.breadth), coverage: r2(num(conv.coverage)),
         persistence: r2(num(conv.persistence)), gate: r2(num(conv.gate)),
         otmShare: r2(num(quality.otmShare)), vegaTilt: r2(num(quality.vegaTilt)),
@@ -674,6 +781,7 @@ export function buildContext(card, extras) {
       say: fitted
         ? "Conditional volatility closed the fitted window at " + (last === null ? "an unpublished level" : last + "% annualised") +
           (num(g.nextVol) !== null ? ", one recursion step puts the next session at " + g.nextVol + "%" : "") +
+          (num(g.avg21Vol) !== null ? ", averaging " + g.avg21Vol + "% over the next 21 sessions" : "") +
           (num(g.longRunVol) !== null ? ", against a long-run level of " + g.longRunVol + "%" : "") +
           (nu !== null ? "; the fitted tail shape is " + g.nu : "") +
           (lam !== null ? " with skew " + lam + (lam < -0.05 ? " (heavier left tail)" : lam > 0.05 ? " (heavier right tail)" : " (no material skew)") : "") +
@@ -681,7 +789,7 @@ export function buildContext(card, extras) {
           (skewt ? "" : "; the innovation density on this card predates the skewed t") + "."
         : null,
       figures: fitted ? {
-        lastVol: last, nextVol: num(g.nextVol), longRunVol: num(g.longRunVol), nu, lambda: lam,
+        lastVol: last, nextVol: num(g.nextVol), avg21Vol: num(g.avg21Vol), longRunVol: num(g.longRunVol), nu, lambda: lam,
         persistence: num(g.persistence), n: num(g.n), converged: g.converged !== false, skewt,
       } : {},
       reason: fitted ? null : (g && str(g.reason)) || null,
@@ -906,9 +1014,9 @@ export function vetIdeas(rawIdeas, context) {
     if (!title || !thesis || !structure || !invalidation || !horizon) { refused.push((title || "idea") + ": a field is missing"); continue; }
     if (!NEURON_STRUCTURES.includes(structure)) { refused.push(title + ": structure not in the list"); continue; }
     if (!["bullish", "bearish", "neutral"].includes(direction)) { refused.push(title + ": direction not bullish, bearish or neutral"); continue; }
-    if (!(IDEA_SIDES[structure] || []).includes(direction)) { refused.push(title + ": a " + structure + " is not " + direction); continue; }
+    if (!(IDEA_SIDES[structure] || []).includes(direction)) { refused.push(title + ": " + article(structure) + " is not " + direction); continue; }
     if (st && Array.isArray(st.avoid) && st.avoid.includes(structure)) {
-      refused.push(title + ": a " + structure + " is on the implied state\u2019s avoid list (" + st.chip + ")"); continue;
+      refused.push(title + ": " + article(structure) + " is on the implied state\u2019s avoid list (" + st.chip + ")"); continue;
     }
     const feats = rests.map((k) => byKey.get(k)).filter(Boolean);
     if (feats.length < 2 || feats.length !== rests.length) { refused.push(title + ": rests on fewer than two known features"); continue; }

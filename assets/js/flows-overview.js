@@ -687,7 +687,7 @@
     const bears = poolCount(short);
 
     const seen = isNum(alerts && alerts.seen);
-    const atLimit = Boolean(alerts) && alerts.vendorTruncated === true;
+    const atLimit = Boolean(alerts) && (alerts.vendorTruncated === true || alerts.readTruncated === true);
 
     const bt = isNum(breadth.tilt);
     const pt = isNum(premium.tilt);
@@ -817,6 +817,7 @@
       if (sub) {
         const se = el("span", "cc-tile-q" + (sub[2] || ""), sub[0]);
         if (sub[1]) se.dataset.empty = sub[1];
+        if (UI && UI.keepDates) UI.keepDates(se);
         tile.append(se);
       }
       into.append(tile);
@@ -891,6 +892,8 @@
     return kept.length >= 2 ? kept : null;
   }
 
+  let tideRedraw = null;
+
   function paintTide(into, seg, pulse) {
     if (silent(into, pulse, "market pulse feed")) return;
 
@@ -911,6 +914,12 @@
     });
 
     let active = 0;
+    let drawnW = 0;
+    const width = () => {
+      const cs = getComputedStyle(into);
+      const measured = Math.round(into.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0));
+      return measured > 0 ? Math.min(2400, measured) : 720;
+    };
     const draw = () => {
       into.replaceChildren();
       seg.replaceChildren();
@@ -924,9 +933,6 @@
 
       const [label, , rows] = periods[active];
 
-      const W = 1000, H = 230, padT = 20, padB = 26, padL = 0, padR = 96;
-      const plotH = H - padT - padB, plotW = W - padL - padR;
-
       let lo = 0, hi = 0;
       for (const r of rows) {
         const c = r.call === null ? null : Math.max(0, r.call);
@@ -935,6 +941,14 @@
         if (p !== null && -p < lo) lo = -p;
       }
       if (!(hi > lo)) { hi = 1; lo = 0; }
+      const yText = (v) => (v === 0 ? "$0" : v > 0 ? usd(v) + " call" : usd(-v) + " put");
+
+      const W = width();
+      drawnW = W;
+      const H = Math.round(Math.max(160, Math.min(230, W * 0.28)));
+      const widest = Math.max(...[hi, 0, lo].map((v) => yText(v).length));
+      const padT = 20, padB = 26, padL = 0, padR = Math.round(Math.min(W * 0.32, 12 + 7.4 * widest));
+      const plotH = H - padT - padB, plotW = W - padL - padR;
       const span = hi - lo;
       const yOf = (v) => padT + (1 - (Math.max(lo, Math.min(hi, v)) - lo) / span) * plotH;
       const zeroY = yOf(0);
@@ -943,7 +957,7 @@
       const barW = Math.max(0.6, Math.min(22, (step * 0.78) / 2));
 
       const svg = svgEl("svg", { class: "cc-tide-c", viewBox: "0 0 " + W + " " + H,
-        width: "100%", height: H, preserveAspectRatio: "xMidYMid meet", role: "img" });
+        width: W, height: H, preserveAspectRatio: "xMidYMid meet", role: "img" });
       const g = svgEl("g", { class: "cc-tide-bars" });
       rows.forEach((r, i) => {
         const x0 = padL + step * i + step * 0.11;
@@ -968,7 +982,7 @@
         const m = /T(\d{2}:\d{2})/.exec(v);
         return m ? m[1] : (/^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : null);
       };
-      const ends = [[stamp(rows[0].at), 2, "start"], [stamp(rows[rows.length - 1].at), W - 2, "end"]];
+      const ends = [[stamp(rows[0].at), 2, "start"], [stamp(rows[rows.length - 1].at), W - padR, "end"]];
       for (const [text, x, anchor] of ends) {
         if (!text) continue;
         const t = svgEl("text", { class: "cc-tide-x", x, y: H - 8, "text-anchor": anchor });
@@ -979,10 +993,8 @@
       for (const v of [hi, 0, lo]) {
         const y = yOf(v);
         svg.append(svgEl("line", { class: "cc-tide-g", x1: padL, x2: W - padR, y1: y, y2: y }));
-        const lab = svgEl("text", { class: "cc-tide-y", x: W - padR - 4, y: y - 4, "text-anchor": "end" });
-
-        lab.textContent = v === 0 ? "$0"
-          : v > 0 ? usd(v) + " call" : usd(-v) + " put";
+        const lab = svgEl("text", { class: "cc-tide-y", x: W - 2, y: y + 4, "text-anchor": "end" });
+        lab.textContent = yText(v);
         svg.append(lab);
       }
       svg.setAttribute("aria-label",
@@ -1009,8 +1021,8 @@
 
             label: r.at || DASH,
             rows: [
-              { k: "Call", v: r.call === null ? DASH : usd(Math.max(0, r.call)), cls: "is-pos" },
-              { k: "Put", v: r.put === null ? DASH : usd(Math.max(0, r.put)), cls: "is-neg" },
+              { k: "Call", v: r.call === null ? DASH : usd(Math.max(0, r.call)), cls: "is-call" },
+              { k: "Put", v: r.put === null ? DASH : usd(Math.max(0, r.put)), cls: "is-put" },
             ],
           })),
         });
@@ -1023,6 +1035,7 @@
         "not a running total, and not a forecast of anything."));
     };
     draw();
+    tideRedraw = () => { if (Math.abs(width() - drawnW) > 2) draw(); };
   }
 
   function paintSplit(into, sub, pulse) {
@@ -1142,8 +1155,8 @@
       const when = el("td", "c-num cc-dim", at === null ? DASH : at);
       if (at !== null) {
         const to = etTime(row.spanEnd);
-        when.title = to === null
-          ? "Window opened " + at + " ET; the vendor stated no end for it."
+        when.title = row.spanFrom === "created_at" ? "Alert created " + at + " ET; no window stated."
+          : to === null ? "Window opened " + at + " ET; the vendor stated no end for it."
           : "Window ran " + at + " to " + to + " ET.";
       }
       tr.append(when);
@@ -1650,7 +1663,7 @@
       said.push("This feed is fetched " + payload.cadence +
         (typeof payload.staleBy === "string" && payload.staleBy
           ? " and is stale by " + payload.staleBy : "") +
-        ", so it is a morning read and never a live tape.");
+        ", so it is a once-a-day read and never a live tape.");
     }
 
     const kept = isNum(payload.kept);
@@ -1702,8 +1715,9 @@
         (unflagged === 1 ? " stored row carried" : " of the stored rows carried") +
         " no major/minor flag at all, which is not the same as having been flagged not-major.");
     }
-    const cadence = typeof payload.cadence === "string" && /morning/i.test(payload.cadence)
-      ? "Morning snapshot" : "Snapshot; cadence not specified";
+    const cadence = typeof payload.cadence !== "string" ? "Snapshot; cadence not specified"
+      : /after the close/i.test(payload.cadence) ? "After-close snapshot"
+        : /morning/i.test(payload.cadence) ? "Morning snapshot" : "Snapshot; cadence not specified";
     const coverage = [readAge ? "Fetched " + readAge : "Fetch age unknown", cadence];
     if (payload.atVendorLimit === true) coverage.push("Vendor ceiling reached; total unknown");
     if (payload.capped === true && shed > 0) coverage.push(shed + " received rows omitted");
@@ -1953,10 +1967,11 @@
 
   let spineTimer = 0;
   window.addEventListener("resize", () => {
-    if (!spineDrawn) return;
+    if (!spineDrawn && !tideRedraw) return;
     clearTimeout(spineTimer);
     spineTimer = setTimeout(() => {
       if (spineDrawn && Math.abs(spineWidth() - spineW) > 2) renderSpine(spineDrawn);
+      if (tideRedraw) tideRedraw();
     }, 150);
   });
 
@@ -2108,7 +2123,8 @@
         const shown = Math.min(alrRows.length, LIST_MAX);
         const of = seen === null ? alrRows.length : seen;
 
-        said.push(alerts.vendorTruncated === true ? shown + " of ≥" + of : capSaid(shown, of));
+        said.push(alerts.vendorTruncated === true || alerts.readTruncated === true
+          ? shown + " of ≥" + of : capSaid(shown, of));
       }
 
       const cadence = alerts && alerts.status !== "pending"
@@ -2226,10 +2242,19 @@
   });
 
   scrollHint(document.querySelector(".flows-rail"));
+  scrollHint(document.querySelector(".cc-jump"));
   const ccScroll = document.getElementById("ccScroll");
   if (ccScroll) {
-    const edge = () => ccScroll.classList.toggle("is-scrolled", ccScroll.scrollTop > 2);
+    const jump = ccScroll.querySelector(".cc-jump");
+    const edge = () => {
+      ccScroll.classList.toggle("is-scrolled", ccScroll.scrollTop > 2);
+      if (!jump) return;
+      const pinned = getComputedStyle(jump).position === "sticky" && ccScroll.scrollTop > 0;
+      jump.classList.toggle("is-stuck", pinned &&
+        jump.getBoundingClientRect().top - ccScroll.getBoundingClientRect().top <= (parseFloat(getComputedStyle(jump).top) || 0) + 1);
+    };
     ccScroll.addEventListener("scroll", edge, { passive: true });
+    addEventListener("resize", edge);
     edge();
   }
 })();

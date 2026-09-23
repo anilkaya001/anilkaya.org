@@ -118,18 +118,27 @@ export function shapeStockOiChange(raw, { cap = STOCK_CAPS.oiDeltas } = {}) {
   return { status: kept.length ? "ok" : "quiet", rows: kept, seen, cap, shed: seen - kept.length };
 }
 
-export function shapeTermStructure(raw, { cap = STOCK_CAPS.term } = {}) {
+const dayDiff = (from, to) => {
+  const a = Date.parse(String(from || "").slice(0, 10) + "T00:00:00Z");
+  const b = Date.parse(String(to || "").slice(0, 10) + "T00:00:00Z");
+  return Number.isFinite(a) && Number.isFinite(b) ? Math.round((b - a) / 86400000) : null;
+};
+
+export function shapeTermStructure(raw, { cap = STOCK_CAPS.term, sessionDate = null } = {}) {
   const list = unwrap(raw);
   if (list === null) return notAList(raw, cap);
   const rows = [];
+  let expired = 0;
   for (const r of list) {
     if (!r || typeof r !== "object") continue;
     const expiry = str(r.expiry);
     const vol = num(r.volatility);
     if (!expiry || vol === null) continue;
+    const counted = sessionDate ? dayDiff(sessionDate, expiry) : null;
+    if (counted !== null && counted <= 0) { expired++; continue; }
     rows.push({
       expiry,
-      dte: num(r.dte),
+      dte: counted !== null ? counted : num(r.dte),
       vol,
       impliedMove: num(r.implied_move),
       impliedMovePerc: num(r.implied_move_perc),
@@ -139,17 +148,20 @@ export function shapeTermStructure(raw, { cap = STOCK_CAPS.term } = {}) {
   rows.sort((a, b) => (a.expiry < b.expiry ? -1 : a.expiry > b.expiry ? 1 : 0));
   const seen = rows.length;
   const kept = rows.slice(0, cap);
-  return { status: kept.length ? "ok" : "quiet", rows: kept, seen, cap, shed: seen - kept.length };
+  return { status: kept.length ? "ok" : "quiet", rows: kept, seen, cap, shed: seen - kept.length,
+    ...(sessionDate ? { dteFrom: sessionDate } : {}), ...(expired ? { expired } : {}) };
 }
 
-export function shapeIvRank(raw, { cap = STOCK_CAPS.ivRank } = {}) {
+export function shapeIvRank(raw, { cap = STOCK_CAPS.ivRank, sessionDate = null } = {}) {
   const list = unwrap(raw);
   if (list === null) return notAList(raw, cap);
   const rows = [];
+  let after = 0;
   for (const r of list) {
     if (!r || typeof r !== "object") continue;
     const date = str(r.date);
     if (!date) continue;
+    if (sessionDate && date.slice(0, 10) > sessionDate) { after++; continue; }
     const row = {
       date,
       vol: num(r.volatility),
@@ -168,12 +180,13 @@ export function shapeIvRank(raw, { cap = STOCK_CAPS.ivRank } = {}) {
     rows: kept, seen, cap,
     shed: seen - kept.length,
     rankUnit: "percent 0-100, as published",
+    ...(after ? { afterSession: after } : {}),
   };
 }
 
-export function buildVolContext(termRaw, ivRankRaw) {
-  const term = shapeTermStructure(termRaw);
-  const ivRank = shapeIvRank(ivRankRaw);
+export function buildVolContext(termRaw, ivRankRaw, { sessionDate = null } = {}) {
+  const term = shapeTermStructure(termRaw, { sessionDate });
+  const ivRank = shapeIvRank(ivRankRaw, { sessionDate });
   if (term.status === "ok" || ivRank.status === "ok") return { status: "ok", term, ivRank };
   const HALF = { unreadable: "answered with a body this side could not read",
     unavailable: "could not be read this run", quiet: "was read and holds nothing" };
