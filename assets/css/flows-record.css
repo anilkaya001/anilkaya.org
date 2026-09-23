@@ -27,7 +27,9 @@
 .ui-chart .rt-bar.is-neg { fill: var(--down-mark); }
 .ui-chart .rt-bar.is-dim { fill-opacity: 0.5; }
 .ui-chart .rt-sel { fill: var(--fill-3); }
-.ui-chart .rt-pre { stroke: var(--label-3); stroke-width: 1.5; stroke-dasharray: 2 3; }
+.ui-chart .rt-wash { fill: var(--fill-4); }
+.ui-chart .rt-erule { stroke: var(--lvl-flip); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.7; }
+.rec-hz { margin-left: 2px; }
 .ui-chart .rt-gap { fill: var(--label-4); }
 .ui-chart .rt-hit { fill: var(--label-3); }
 .ui-chart .rt-hit.is-pos { fill: var(--up-mark); }
@@ -140,7 +142,6 @@
   cursor: pointer;
 }
 .rf-row:hover { background: var(--fill-4); }
-.rf-key { color: var(--label-3) !important; font: var(--t-caption); }
 .rf-track { position: relative; height: 18px; }
 .rf-track > i { position: absolute; top: 50%; }
 .rf-zero { left: 50%; width: 1px; height: 18px; margin-top: -9px; background: var(--sep-strong); }

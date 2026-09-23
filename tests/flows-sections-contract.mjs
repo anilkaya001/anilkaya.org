@@ -569,14 +569,16 @@ try {
       eq(byKey.s.facts.Pairs, "640", "with the pairs it was measured on beside it");
 
       eq(byKey.purity.facts["Pooled IC"], "—", "a constant column shows the em dash, never 0.000");
-      ok(/no variation to rank/.test(byKey.purity.text),
-         `and names its reason (${byKey.purity.text.slice(0, 160)})`);
+      ok(/Pooled: no variation to rank(?! in any)/.test(byKey.purity.text),
+         `and names the POOLED figure's own reason, not only the session figure's, which also ` +
+         `says 'no variation to rank' and would satisfy a looser match on its own ` +
+         `(${byKey.purity.text.slice(0, 200)})`);
       eq(byKey.purity.mean, "—", "in the session figure too");
       ok(/no variation to rank in any session/i.test(byKey.purity.text),
          "with the session reason beside it");
       eq(byKey.vrp.facts["Pooled IC"], "—", "so does a column below the sample floor");
-      ok(/fewer than 20/i.test(byKey.vrp.text),
-         "with the floor named rather than the variance");
+      ok(/Pooled: fewer than 20/i.test(byKey.vrp.text),
+         "with the floor named rather than the variance, on the pooled figure it applies to");
 
       ok(/composite|claim/.test(byKey.s.text),
          `the score's row states what it is testing, in its disclosure (${byKey.s.text.slice(0, 120)})`);
@@ -654,6 +656,46 @@ try {
       eq(hit && hit.clear, false,
          "and 44% over 39 sessions is grey: counted as one call a session its interval reaches past 50%, " +
          "even though 900 names would make the naive interval look decisive");
+    }
+
+    {
+      await put("record", {
+        status: "ok", retained: 12, firstSession: "2026-08-01", lastSession: "2026-08-24",
+        horizons: [
+          { k: 1, ls: 0.003, n: 11, sd: 0.01, hit: 0.52, hitN: 700, hitSessions: 11 },
+          { k: 10, ls: -0.02, n: 8, sd: 0.004, hit: 0.40, hitN: 900, hitSessions: 8 },
+        ],
+        sessions: [{ d: "2026-08-24", long: -0.01, short: 0.01, ls: -0.02, hit: 0.4, lost: 0, names: 40 }],
+      });
+      await page.goto(url("/flows/history/"), { waitUntil: "domcontentloaded" });
+      await page.waitForSelector("#recCurve svg.rc", { timeout: 15000 });
+      const thin = await page.evaluate(() => {
+        const read = (id) => {
+          const svg = document.querySelector("#" + id + " svg.rc");
+          if (!svg) return null;
+          return {
+            clear: [...svg.querySelectorAll(".rc-dot")].map((d) => d.classList.contains("is-clear")),
+            open: [...svg.querySelectorAll(".rc-wh")].map((l) => l.classList.contains("is-open")),
+            ticks: [...svg.querySelectorAll(".rc-axislabel")].map((t) => t.textContent),
+          };
+        };
+        return { spread: read("recCurve"), hit: read("recHit") };
+      });
+      eq(JSON.stringify(thin.spread && thin.spread.open), JSON.stringify([false, true]),
+           "eight sessions at a ten-session horizon hold fewer than two independent windows, so the " +
+           "10d spread's adjusted interval is drawn open to the edges — it is unbounded, not narrow");
+      eq(thin.spread && thin.spread.clear[1], false,
+         "and its mean stays grey even though its NAIVE interval (−2.0% ± 0.3%) clears zero by a " +
+         "mile: colour is earned by the adjusted interval alone, and an unbounded one earns nothing — " +
+         "falling back to the naive interval would paint exactly the overconfidence the whisker exists to deny");
+      eq(JSON.stringify(thin.hit && thin.hit.open), JSON.stringify([false, true]),
+           "the hit rate obeys the same rule: eight sessions over ten is under two windows, so its " +
+           "adjusted interval is open rather than a Wilson interval on a sample rounded up to one");
+      eq(thin.hit && thin.hit.clear[1], false,
+         "and 40% there is grey, though 900 names make its naive interval exclude 50%");
+      ok(thin.hit && thin.hit.ticks.includes("0%") && thin.hit.ticks.includes("100%"),
+         "the hit chart keeps its whole 0–100% scale, so an open interval runs to the ends of what a " +
+         "rate can be (" + (thin.hit ? thin.hit.ticks.join(", ") : "no chart") + ")");
     }
 
     eq(errors.length, 0, `the track record threw nothing (${errors[0] || ""})`);

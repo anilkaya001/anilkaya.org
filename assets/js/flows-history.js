@@ -67,8 +67,9 @@
   function hitPoint(v, sessions, names, k) {
     if (v === null || sessions === null || sessions < MIN_SESSIONS) return null;
     const eff = sessions / Math.max(1, k);
-    return { v, n: sessions, names, naive: wilson(v, names), adj: wilson(v, Math.max(1, eff)), open: false };
+    return { v, n: sessions, names, naive: wilson(v, names), adj: eff >= 2 ? wilson(v, eff) : null, open: eff < 2 };
   }
+  const clears = (p, ref) => !!(p && p.adj && (p.adj[0] > ref || p.adj[1] < ref));
 
   function ciChart(host, o) {
     return C.mount(host, (el, w, animate) => {
@@ -77,7 +78,7 @@
       const cols = o.rows;
       const band = (w - left - right) / Math.max(1, cols.length);
       const xAt = (i) => left + band * (i + 0.5);
-      const vals = [o.ref];
+      const vals = [o.ref].concat(o.clamp || []);
       for (const r of cols) {
         for (const p of [r.cur, r.pri]) {
           if (!p) continue;
@@ -105,21 +106,19 @@
         s("text", { x: w - right + 8, y: yy + 3.8, text: o.axis(v), class: "rc-axislabel tx-3" }, svg);
       }
       const g = s("g", null, svg);
-      const tone = (p) => {
-        const ci = p.adj || p.naive;
-        return ci && (ci[0] > o.ref || ci[1] < o.ref) ? " is-clear" : "";
-      };
+      const tone = (p) => (clears(p, o.ref) ? " is-clear" : "");
+      const edge0 = o.clamp ? y(o.clamp[0]) : H - bot, edge1 = o.clamp ? y(o.clamp[1]) : top;
       cols.forEach((r, i) => {
         const x = xAt(i);
         const place = (p, dx, prior) => {
           if (!p) return;
           const cx = x + dx;
           if (p.adj) s("line", { x1: cx, x2: cx, y1: y(p.adj[0]), y2: y(p.adj[1]), class: "rc-wh fade", style: { "--delay": 120 + i * 60 + "ms" } }, g);
-          else if (p.open) s("line", { x1: cx, x2: cx, y1: top, y2: H - bot, class: "rc-wh is-open fade", style: { "--delay": 120 + i * 60 + "ms" } }, g);
+          else if (p.open) s("line", { x1: cx, x2: cx, y1: edge1, y2: edge0, class: "rc-wh is-open fade", style: { "--delay": 120 + i * 60 + "ms" } }, g);
           if (p.naive && !prior) {
             const a = y(p.naive[1]), b = y(p.naive[0]);
             const hh = Math.max(3, b - a);
-            s("rect", { x: cx - 6, y: (a + b) / 2 - hh / 2, width: 12, height: hh, rx: Math.min(6, hh / 2), class: "rc-ci grow", style: { "--i": String(i * 6), "--origin": "center" } }, g);
+            s("rect", { x: cx - 8, y: (a + b) / 2 - hh / 2, width: 16, height: hh, rx: Math.min(8, hh / 2), class: "rc-ci grow", style: { "--i": String(i * 6), "--origin": "center" } }, g);
           }
           const dot = s("circle", {
             cx, cy: y(p.v), r: prior ? 4 : 3.5,
@@ -143,9 +142,9 @@
           for (const [p, prior] of [[r.cur, false], [r.pri, true]]) {
             if (!p) continue;
             if (prior) parts.push(C.part("prior", "k"));
-            parts.push(h("b", { "data-tone": p.v < o.ref ? "down" : p.v > o.ref ? "up" : null }, o.fmt(p.v)));
-            const ci = p.adj || p.naive;
-            if (ci) parts.push(C.part(o.fmt(ci[0]) + " to " + o.fmt(ci[1]), "k"));
+            parts.push(h("b", { "data-tone": clears(p, o.ref) ? (p.v < o.ref ? "down" : "up") : null }, o.fmt(p.v)));
+            if (p.adj) parts.push(C.part("adj. " + o.fmt(p.adj[0]) + " to " + o.fmt(p.adj[1]), "k"));
+            else if (p.open) parts.push(C.part("adj. unbounded", "k"));
             parts.push(C.part("n " + p.n, "k"));
             dots.push({ x: xAt(i) + (prior && r.cur ? 13 : 0), y: y(p.v), color: "--label-1" });
           }
@@ -351,7 +350,19 @@
       if (y === null) return -1;
       return Math.abs(y) - Math.abs(x);
     });
-    const D = 0.6;
+    const bands = cols.map((col) => {
+      const mean = isNum(col.icMean), sd = isNum(col.icSd), sessions = isNum(col.icSessions);
+      const eff = sessions === null ? 0 : sessions / k;
+      return {
+        naive: mean !== null && sd !== null && sessions >= 2 ? meanCi(mean, sd, sessions) : null,
+        adj: mean !== null && sd !== null && eff >= 2 ? meanCi(mean, sd, eff) : null,
+      };
+    });
+    let reach = 0.6;
+    cols.forEach((col, i) => {
+      for (const v of [isNum(col.icMean)].concat(bands[i].naive || [], bands[i].adj || [])) if (v !== null) reach = Math.max(reach, Math.abs(v));
+    });
+    const D = Math.min(1, Math.ceil(reach * 10 - 1e-9) / 10);
     const at = (v) => ((Math.max(-D, Math.min(D, v)) + D) / (2 * D) * 100).toFixed(2) + "%";
     const rows = cols.map((col, i) => {
       const key = String(col.key);
@@ -359,16 +370,15 @@
       const pos = isNum(col.icPos), ic = isNum(col.ic), t = isNum(col.icT), mkt = isNum(col.icMkt);
       const ranked = col.ranked === true;
       const need = isNum(col.rankedFrom) ?? rankedFrom;
-      const naive = mean !== null && sd !== null && sessions >= 2 ? meanCi(mean, sd, sessions) : null;
-      const eff = sessions === null ? 0 : sessions / k;
-      const adj = mean !== null && sd !== null && eff >= 2 ? meanCi(mean, sd, eff) : null;
+      const { naive, adj } = bands[i];
+      const clear = !!(adj && (adj[0] > 0 || adj[1] < 0));
       const unrankedSaid = mean !== null && !ranked ? "unranked · " + (sessions === null ? DASH : sessions) + (need === null ? "" : " of " + need) + " sessions" : null;
       const track = h("span", { class: "rf-track", "aria-hidden": "true" }, h("i", { class: "rf-zero" }));
       if (mean !== null) {
         if (adj) track.append(h("i", { class: "rf-wh", style: { left: at(adj[0]), right: "calc(100% - " + at(adj[1]) + ")" } }));
         else if (sd !== null) track.append(h("i", { class: "rf-wh is-open" }));
         if (naive) track.append(h("i", { class: "rf-ci", style: { left: at(naive[0]), right: "calc(100% - " + at(naive[1]) + ")" } }));
-        track.append(h("i", { class: "rf-dot" + (ranked ? " is-ranked" : ""), "data-tone": mean < 0 ? "down" : mean > 0 ? "up" : null, style: { left: at(mean), "--i": String(i) } }));
+        track.append(h("i", { class: "rf-dot" + (ranked ? " is-ranked" : ""), "data-tone": clear ? (mean < 0 ? "down" : "up") : null, style: { left: at(mean), "--i": String(i) } }));
       }
       const build = () => ({
         title: LABELS[key] || key,
@@ -393,13 +403,13 @@
         "aria-haspopup": "dialog", "aria-controls": "fxPop",
         "aria-label": (LABELS[key] || key) + ", mean IC " + signed(mean, 3) + (unrankedSaid ? ", " + unrankedSaid : ""),
       },
-      h("span", { class: "ui-row-m" }, h("b", null, LABELS[key] || key), h("span", { class: "rf-key" }, key)),
+      h("span", { class: "ui-row-m" }, h("b", null, LABELS[key] || key)),
       track,
       h("span", { class: "ui-row-v c-icm", "data-tone": mean === null ? "silent" : null }, signed(mean, 3)),
       mean === null ? h("span", { class: "rf-state" }, UI.glyph("quiet")) : !ranked ? h("span", { class: "rf-state is-pending", title: unrankedSaid }, UI.glyph("pending")) : h("span", { class: "rf-state" })));
     });
     const list = UI.list(rows, { visible: 8, label: "Signal columns by mean IC" });
-    body.append(h("div", { class: "rf-axis", "aria-hidden": "true" }, h("span", null, MINUS + "0.6"), h("span", null, "0"), h("span", null, "+0.6")), list);
+    body.append(h("div", { class: "rf-axis", "aria-hidden": "true" }, h("span", null, MINUS + D.toFixed(1)), h("span", null, "0"), h("span", null, "+" + D.toFixed(1))), list);
     const ranked = features.cols.filter((c) => c.ranked === true).length;
     notes.append(UI.legend([["--label-1", "dot", "Ranked"], UI.key("--label-2", "ring", "Unranked"), ["--s-blue", "", "Naive 95%"], UI.key("--label-3", "ln", "Adjusted 95%"),
       h("span", { class: "ui-key rf-count" }, h("b", null, ranked + " of " + features.cols.length), " ranked")]));
@@ -419,7 +429,7 @@
   function timeline(host, rows, pick, selected) {
     return C.mount(host, (el, w, animate) => {
       const H = w < 600 ? 150 : 176;
-      const top = rows.some((r) => r.pre) ? 24 : 12, bot = 40, left = 4, right = 4;
+      const top = 12, bot = 40, left = 4, right = w < 600 ? 44 : 52;
       const N = rows.length;
       const band = (w - left - right) / N;
       const xAt = (i) => left + band * (i + 0.5);
@@ -431,15 +441,18 @@
       const sel = selected();
       rows.forEach((r, i) => {
         const x = xAt(i);
+        if (r.pre) s("rect", { x: x - band / 2, y: top - 6, width: band, height: H - top - bot + 12, class: "rt-wash" }, svg);
         if (sel === i) s("rect", { x: x - band / 2 + 1, y: top - 6, width: band - 2, height: H - top - bot + 12, rx: 8, class: "rt-sel" }, svg);
       });
-      const pre = rows.map((r, i) => (r.pre ? i : -1)).filter((i) => i >= 0);
-      if (pre.length) {
-        const x0 = xAt(pre[0]) - band / 2 + 6, x1 = xAt(pre[pre.length - 1]) + band / 2 - 6;
-        s("line", { x1: x0, x2: x1, y1: 3, y2: 3, class: "rt-pre" }, svg);
-        s("text", { x: x0, y: 16, text: "Prior rule", class: "tx-3" }, svg);
+      const edge = rows.findIndex((r, i) => i > 0 && !r.pre && rows[i - 1].pre);
+      if (edge > 0) {
+        const bx = xAt(edge) - band / 2;
+        s("line", { x1: bx, x2: bx, y1: top - 6, y2: H - bot + 6, class: "rt-erule" }, svg);
       }
-      s("line", { x1: 0, x2: w, y1: mid, y2: mid, class: "base" }, svg);
+      s("line", { x1: left, x2: w - right, y1: mid, y2: mid, class: "base" }, svg);
+      s("text", { x: w - right + 8, y: mid - half + 4, text: pct(max, 1), class: "tx-3" }, svg);
+      s("text", { x: w - right + 8, y: mid + 3.8, text: "0", class: "tx-3" }, svg);
+      s("text", { x: w - right + 8, y: mid + half + 4, text: pct(-max, 1), class: "tx-3" }, svg);
       rows.forEach((r, i) => {
         const x = xAt(i);
         if (r.ls === null) { s("circle", { cx: x, cy: mid, r: 1.8, class: "rt-gap" }, svg); }
@@ -465,7 +478,7 @@
           cur = i;
           const r = rows[i];
           return {
-            parts: [C.part(F.day(r.d), "k"), h("b", { "data-tone": r.ls === null ? null : r.ls < 0 ? "down" : "up" }, pct(r.ls)), C.part("hit " + hitPct(r.hit), "k"), attrition(r) ? C.part("lost " + r.lost + "/" + r.names, "k") : null],
+            parts: [C.part(F.day(r.d), "k"), h("b", { "data-tone": r.ls === null ? null : r.ls < 0 ? "down" : "up" }, pct(r.ls)), C.part("hit " + hitPct(r.hit), "k"), r.pre ? C.part("prior rule", "k") : null, attrition(r) ? C.part("lost " + r.lost + "/" + r.names, "k") : null],
             dots: [],
           };
         },
@@ -567,8 +580,9 @@
     list.append(h("div", { class: "rc-sess-h", "aria-hidden": "true" }, h("span", null, "Session"), h("span", null, "Long"), h("span", null, "Short"), h("span", null, "L" + MINUS + "S"), h("span", null, "Hit"), h("span", null, "Lost")),
       UI.list(rowEls, { visible: 5, label: "Scored sessions" }));
     const oneLegged = rows.filter((r) => r.long !== null && r.short === null);
+    const anyPre = rows.some((r) => r.pre) && rows.some((r) => !r.pre);
     const mod = UI.moduleCard({
-      id: "recSessions", title: "Sessions", index: 3,
+      id: "recSessions", title: ["Sessions", stated ? h("span", { class: "ui-tag rec-hz", title: "Measured " + kSaid(stated) + " after each board" }, stated + "d") : null], infoLabel: "sessions", index: 3,
       info: () => ({
         title: "Sessions",
         lead: "One column per published session, once enough sessions have passed to measure it" + (stated ? " at the stated " + kSaid(stated) + " horizon" : "") + ". The bar is the equal-weighted price return of that session's long names minus its short names, from the close the board was published at; the dot under it is the session's hit rate (larger is further from a coin flip), and a triangle marks a session that lost more than a fifth of its names. Not a strategy: no costs, no slippage, no borrow, and no position sizing.",
@@ -576,9 +590,11 @@
           { title: "Legs", lines: ["The long and short legs are measurements, not verdicts; only the spread is a result, and only it carries a sign colour."] },
           oneLegged.length ? { title: "One leg", lines: [oneLegged.length + " of the " + rows.length + " sessions listed " + (oneLegged.length === 1 ? "carries" : "carry") + " a long leg and no measured short leg" + (meta.epoch && oneLegged.every((r) => r.pre) ? " — every one of them predates the " + meta.epoch + " selection epoch" : "") + ", so Short and L−S cannot be formed there. Those dashes are a leg the archive does not hold, not a scoring failure."] } : null,
           { title: "Board", lines: ["Selecting a session redraws the names that session's score track placed furthest out on each side, from the score track payload."] },
+          anyPre ? { title: "Selection epoch", lines: ["The dashed rule marks the selection epoch" + (meta.epoch ? " (" + meta.epoch + ")" : "") + ". Sessions on the washed columns before it were published under the prior selection rule, from a different pool, and are drawn beside the current rule's sessions rather than averaged into them."] } : null,
+          { title: "Scale", lines: ["Bars share one linear scale whose extremes are the largest spread listed, labelled at the right edge; the hit-rate dot grows with its distance from 50%, green above it and red below."] },
         ].filter(Boolean),
       }),
-      body: [host, UI.legend([["--up-mark", "", "L" + MINUS + "S up"], ["--down-mark", "", "L" + MINUS + "S down"], ["--label-2", "dot", "Hit rate"], ["--warn", "tri", "Attrition"], ].filter(Boolean)), detail, list],
+      body: [host, UI.legend([["--up-mark", "", "L" + MINUS + "S up"], ["--down-mark", "", "L" + MINUS + "S down"], ["--label-2", "split", "Hit rate"], ["--warn", "tri", "Attrition"], anyPre ? ["--lvl-flip", "ln", "Rule change"] : null].filter(Boolean)), detail, list],
     });
     if (!rows.length) {
       host.replaceChildren(UI.silent({ state: "pending", reason: "No session has closed a horizon yet." }, "Sessions", 150));
@@ -597,18 +613,17 @@
     const rankedFrom = payload.features && isNum(payload.features.rankedFrom);
     const hitP = at ? hitPoint(at.hit, at.hitS, at.hitN, at.k) : null;
     const lsP = at ? spreadPoint(at.ls, at.n, at.sd, at.k) : null;
-    const clear = (p, ref) => { const ci = p && (p.adj || p.naive); return ci && (ci[0] > ref || ci[1] < ref); };
     const hz = stated === null ? "" : " " + stated + "d";
     return UI.chips([
       UI.gaugeChip({
-        ring: at && at.hit !== null ? at.hit : null, color: clear(hitP, 0.5) ? (at.hit > 0.5 ? "--up-mark" : "--down-mark") : "--label-2",
+        ring: at && at.hit !== null ? at.hit : null, color: clears(hitP, 0.5) ? (at.hit > 0.5 ? "--up-mark" : "--down-mark") : "--label-2",
         value: at ? hitPct(at.hit) : DASH, label: "Hit" + hz,
-        info: () => ({ title: "Hit rate" + hz, lead: "The share of published names whose price moved the way their board leaned, at the stated horizon.", facts: [["Hit", at ? hitPct(at.hit, 1) : DASH], ["Names", at && at.hitN !== null ? String(at.hitN) : DASH], ["Sessions", at && at.hitS !== null ? String(at.hitS) : DASH], ["Adjusted 95%", hitP && hitP.adj ? hitPct(hitP.adj[0]) + " to " + hitPct(hitP.adj[1]) : DASH]], notes: [CI_LINES[2]] }),
+        info: () => ({ title: "Hit rate" + hz, lead: "The share of published names whose price moved the way their board leaned, at the stated horizon.", facts: [["Hit", at ? hitPct(at.hit, 1) : DASH], ["Names", at && at.hitN !== null ? String(at.hitN) : DASH], ["Sessions", at && at.hitS !== null ? String(at.hitS) : DASH], ["Adjusted 95%", hitP && hitP.adj ? hitPct(hitP.adj[0]) + " to " + hitPct(hitP.adj[1]) : hitP && hitP.open ? "unbounded" : DASH]], notes: [CI_LINES[2]] }),
       }),
       UI.gaugeChip({
         diverging: at && at.ls !== null ? Math.max(-100, Math.min(100, at.ls * 2000)) : null,
-        value: at ? pct(at.ls) : DASH, label: "L" + MINUS + "S" + hz, tone: at && at.ls !== null && clear(lsP, 0) ? UI.tone(at.ls) : null,
-        info: () => ({ title: "Spread" + hz, lead: "Equal-weighted price return of the published long names minus the short names at the stated horizon. Price returns of an equal-weighted basket, gross of everything: no commissions, no slippage, no short borrow, no dividends.", facts: [["Mean", at ? pct(at.ls) : DASH], ["Sessions", at && at.n !== null ? String(at.n) : DASH], ["SD", at && at.sd !== null ? pct(at.sd) : DASH], ["Adjusted 95%", lsP && lsP.adj ? pct(lsP.adj[0]) + " to " + pct(lsP.adj[1]) : lsP && lsP.open ? "unbounded" : DASH]] }),
+        value: at ? pct(at.ls) : DASH, label: "L" + MINUS + "S" + hz, tone: at && at.ls !== null && clears(lsP, 0) ? UI.tone(at.ls) : null,
+        info: () => ({ title: "Spread" + hz, lead: "Equal-weighted price return of the published long names minus the short names at the stated horizon. Price returns of an equal-weighted basket, gross of everything: no commissions, no slippage, no short borrow, no dividends.", facts: [["Mean", at ? pct(at.ls) : DASH], ["Sessions", at && at.n !== null ? String(at.n) : DASH], ["SD", at && at.sd !== null ? pct(at.sd) : DASH], ["Adjusted 95%", lsP && lsP.adj ? pct(lsP.adj[0]) + " to " + pct(lsP.adj[1]) : lsP && lsP.open ? "unbounded" : DASH], ["Arc", "full at " + pct(0.05) + " either way"]], notes: [CI_LINES[2]] }),
       }),
       UI.gaugeChip({
         ring: retained !== null && rankedFrom ? Math.min(1, retained / rankedFrom) : null, color: "--s-blue",
