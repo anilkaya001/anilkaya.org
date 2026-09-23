@@ -6,7 +6,7 @@ export const ASSET_VERSION = "223";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
-const head = (title, description) => `<!doctype html>
+const head = (title, description, styles = []) => `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -19,6 +19,7 @@ const head = (title, description) => `<!doctype html>
 <link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="${v("/assets/css/base.css")}">
 <link rel="stylesheet" href="${v("/assets/css/flows.css")}">
+${styles.map((href) => `<link rel="stylesheet" href="${v(String(href))}">`).join("\n")}
 </head>`;
 
 const ICONS = {
@@ -1791,10 +1792,10 @@ ${UI_SCRIPT}
 export const FLOWS_SPRITE = SPRITE;
 
 export function flowsDocument({
-  title = "Flows", description = "", active = "", username = "", body = "", scripts = [], chrome = true,
+  title = "Flows", description = "", active = "", username = "", body = "", scripts = [], styles = [], chrome = true,
 } = {}) {
   const t = escapeHTML(String(title));
-  return `${head("Flows — " + t, escapeHTML(String(description)))}
+  return `${head("Flows — " + t, escapeHTML(String(description)), styles)}
 ${shell(t, String(active), username, String(body), { chrome })}
 ${UI_SCRIPT}
 ${scripts.map((src) => `<script src="${v(String(src))}" defer></script>`).join("\n")}
