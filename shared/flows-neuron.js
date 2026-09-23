@@ -234,7 +234,7 @@ function hedgeDrivers(card) {
     const hedge = -ch.charm.perSession;
     const drift = V.variance ? num(V.variance.driftInSd) : null;
     const decisive = drift !== null && Math.abs(drift) >= STATE_LINES.DRIFT_SD;
-    out.push({ key: "variation", robustness: r, weight: VARIATION_VOTES ? r : 0, vote: decisive ? Math.sign(hedge) : 0, axis: "hedge",
+    out.push({ key: "variation", robustness: r, weight: VARIATION_VOTES ? r : 0, vote: VARIATION_VOTES && decisive ? Math.sign(hedge) : 0, axis: "hedge",
       reading: "time alone moves dealer hedges to " + (hedge >= 0 ? "buy " : "sell ") + "$" + magnitude(hedge) + " over the session" +
         (pctOf(ch.charm.pctAdv) ? " (" + pctOf(ch.charm.pctAdv) + " of a typical day)" : "") +
         (drift === null ? "" : ", " + Math.abs(drift).toFixed(1) + " sd of the random part") +

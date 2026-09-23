@@ -813,7 +813,7 @@ p.fb-empty:is([data-empty="quiet"], [data-empty="pending"],
   max-width: var(--measure);
 }
 .fv-silences li + li { margin-top: 0.25rem; }
-.fv-drift, .fv-rolloff { max-width: var(--measure); }
+.fv-drift, .fv-rolloff, .fv-offset { max-width: var(--measure); }
 
 .ovl { display: block; width: 100%; }
 

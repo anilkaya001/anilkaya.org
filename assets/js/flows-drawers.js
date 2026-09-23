@@ -689,7 +689,7 @@
     }
 
     svg.setAttribute("aria-label",
-      `Dealer gamma by strike and expiry` + (card && card.ticker ? ` for ${card.ticker}` : "") + `. ` +
+      `Gamma dealers added today, by strike and expiry` + (card && card.ticker ? `, for ${card.ticker}` : "") + `. ` +
       `${strikes.length} strikes from ${px2(lo)} to ${px2(hi)} across ${expiries.length} expiries ` +
       `from ${expiries[0]} to ${expiries[expiries.length - 1]}. ` +
       (s !== null ? `Spot ${px2(s)}. ` : "") +
@@ -715,8 +715,8 @@
       claim(callRow, "Call wall");
       claim(putRow, "Put wall");
       window.FlowsCursor.attach(svg, {
-        name: "Dealer gamma by strike and expiry" +
-          (card && card.ticker ? " for " + card.ticker : ""),
+        name: "Gamma dealers added today, by strike and expiry" +
+          (card && card.ticker ? ", for " + card.ticker : ""),
         band: { y0: padT, y1: padT + strikes.length * rowH },
         points: expiries.map((e, j) => {
 
@@ -770,7 +770,11 @@
         (peakAt.v < 0 ? " short" : " long")]);
     }
     const regime = card && card.regime && card.regime.label;
-    if (regime) pairs.push(["Regime", String(regime).replace(/_/g, " ")]);
+    const regimeFrom = card && card.regime ? card.regime.labelFrom : null;
+    if (regime) {
+      pairs.push([regimeFrom === "book" ? "Open-interest book" : regimeFrom === "flow" ? "Added today, net" : "Regime",
+        String(regime).replace(/_/g, " ")]);
+    }
     host.append(statList(pairs));
 
     const notes = [];
@@ -1624,7 +1628,8 @@
       ["Gross size", compact(panel.grossAbs)],
       ["Dealer net, drawn" + (panel.dealerRule ? " (" + panel.dealerRule + ")" : ""),
         netted.length ? compact(dealerSum) : DASH, netted.length ? polarity(dealerSum) : "is-null",
-        netted.length ? null : "unavailable", netted.length ? null : "no expiry carries both legs"],
+        netted.length ? null : "unavailable", netted.length ? null
+          : (typeof panel.dealerWhy === "string" && panel.dealerWhy ? panel.dealerWhy : "no expiry carries both legs")],
     ]));
 
     if (panel.unit) host.append(el("p", "fc-note gts-unit", String(panel.unit)));
@@ -1720,20 +1725,26 @@
     if (v && v.shares) {
       const sh = v.shares;
       const parts = [["gamma", "Spot", sh.gamma], ["vanna", "Volatility", sh.vanna], ["cross", "Co-movement", sh.cross]];
-      const strip = el("div", "fv-strip");
-      strip.setAttribute("role", "img");
-      const positive = parts.reduce((a, p) => a + (isNum(p[2]) !== null && p[2] > 0 ? p[2] : 0), 0) || 1;
-      for (const [key, label, value] of parts) {
-        const n = isNum(value);
-        if (n === null || !(n > 0)) continue;
-        const seg = el("span", "fv-seg is-" + key);
-        seg.style.flexGrow = String(n / positive);
-        seg.title = label + " " + Math.round(n * 100) + "% of the variance";
-        strip.append(seg);
+      const offset = parts.some((p) => isNum(p[2]) !== null && p[2] < 0);
+      if (offset) {
+        host.append(el("p", "fc-note fv-offset", "The spot and volatility channels offset each other, so their " +
+          "shares exceed the whole and the co-movement share is below zero; no part-of-whole bar is drawn."));
+      } else {
+        const strip = el("div", "fv-strip");
+        strip.setAttribute("role", "img");
+        const whole = parts.reduce((a, p) => a + (isNum(p[2]) !== null ? p[2] : 0), 0) || 1;
+        for (const [key, label, value] of parts) {
+          const n = isNum(value);
+          if (n === null || !(n > 0)) continue;
+          const seg = el("span", "fv-seg is-" + key);
+          seg.style.flexGrow = String(n / whole);
+          seg.title = label + " " + Math.round(n * 100) + "% of the variance";
+          strip.append(seg);
+        }
+        strip.setAttribute("aria-label", parts.map(([, label, value]) =>
+          label + " " + (isNum(value) === null ? "silent" : Math.round(value * 100) + "%")).join(", ") + " of the variance.");
+        host.append(strip);
       }
-      strip.setAttribute("aria-label", parts.map(([, label, value]) =>
-        label + " " + (isNum(value) === null ? "silent" : Math.round(value * 100) + "%")).join(", ") + " of the variance.");
-      host.append(strip);
       host.append(statList(parts.map(([key, label, value]) => {
         const n = isNum(value);
         const s = n === null ? silenceOf(key === "gamma" ? "variance" : "vannaSize") : null;

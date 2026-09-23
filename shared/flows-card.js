@@ -8,7 +8,7 @@ import {
 import {
   shapeStockDarkpool, shapeStockOiChange, buildVolContext, STOCK_NOTES,
 } from "./flows-stock.js";
-import { variation, cardVariationInput } from "./flows-variation.js";
+import { variation, cardVariationInput, putMultipliers } from "./flows-variation.js";
 
 import { UA_MIN_VOLUME } from "./flows-unusual.js";
 import { joinScoreToPrice } from "./flows-overlay.js";
@@ -978,8 +978,8 @@ function greekLead(name, built) {
     });
 }
 
-function greekPanel(name, expiries, callLeg, putLeg, sessionDate) {
-  const built = greekTermStructure(expiries, { name, callLeg, putLeg, asOf: sessionDate });
+function greekPanel(name, expiries, callLeg, putLeg, sessionDate, dealerSign) {
+  const built = greekTermStructure(expiries, { name, callLeg, putLeg, asOf: sessionDate, dealerSign });
   if (built.status === "ok") {
     const lead = greekLead(name, built);
     return lead ? { ...built, lead } : built;
@@ -1484,6 +1484,7 @@ export function buildCard({
   chainMissing = null,
 }) {
   const f = features || {};
+  const putSigns = putMultipliers(variationOpts && variationOpts.probe ? variationOpts.probe : null);
   const spot = numOrNull(row && row.close) ?? numOrNull(features && features.spot);
   const gamma = buildGammaProfile(strikes, { spot });
   const painRow = pickMaxPainRow(maxPain, { asOf: sessionDate });
@@ -1583,9 +1584,9 @@ export function buildCard({
       path: buildPath(ticks, { sessionDate }),
       calendar: buildCalendar(expiries, { asOf: sessionDate }),
 
-      vanna: greekPanel("vanna", expiries, callVannaLeg, putVannaLeg, sessionDate),
-      charm: greekPanel("charm", expiries, callCharmLeg, putCharmLeg, sessionDate),
-      deltaExposure: greekPanel("delta", expiries, callDeltaLeg, putDeltaLeg, sessionDate),
+      vanna: greekPanel("vanna", expiries, callVannaLeg, putVannaLeg, sessionDate, putSigns.vanna),
+      charm: greekPanel("charm", expiries, callCharmLeg, putCharmLeg, sessionDate, putSigns.charm),
+      deltaExposure: greekPanel("delta", expiries, callDeltaLeg, putDeltaLeg, sessionDate, putSigns.delta),
       displacement: buildDisplacement(strikes, { atr: f.atr, spot }),
       pricedMove: buildPricedMove({
         spot,

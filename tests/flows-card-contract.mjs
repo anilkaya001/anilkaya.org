@@ -1371,6 +1371,23 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      bare.panels.variation.silences.some((q) => q.code === "vanna-unchecked"),
      "with no run-level probes the charm and vanna dollars stay silent rather than borrowing a default");
 
+  ok(card.panels.vanna.dealerRule === "call − put" && card.panels.vanna.rows.every((r) => r.dealer !== null),
+     "with the run's probe reading both legs raw, the vanna ladder publishes its dealer net per expiry");
+  const unsettled = buildCard({ ...input, variation: { ...input.variation, probe: { call: "raw", put: "undetermined" } } });
+  for (const k of ["vanna", "charm"]) {
+    ok(unsettled.panels[k].dealerRule === null && unsettled.panels[k].rows.every((r) => r.dealer === null) &&
+       /could not settle/.test(unsettled.panels[k].dealerWhy || ""),
+       `when the probe cannot settle the put leg, the ${k} ladder publishes no dealer net and says why`);
+  }
+  eq(unsettled.panels.variation.conventions.putToDealer.vanna, null,
+     "the hedging panel silences the same net, so the two surfaces cannot disagree");
+  eq(unsettled.panels.deltaExposure.dealerRule, "call − put", "while delta, whose put sign the probe does not test, keeps its net");
+  const negated = buildCard({ ...input, variation: { ...input.variation, probe: { call: "raw", put: "negated" } } });
+  const nr = negated.panels.charm.rows[0];
+  ok(negated.panels.charm.dealerRule === "call + put" && Math.abs(nr.dealer - (nr.call + nr.put)) < 1e-6,
+     "and a probe that finds put charm negated nets charm as call + put, matching the hedging panel's multiplier");
+  eq(negated.panels.variation.conventions.putToDealer.charm, 1, "which uses the same sign");
+
   const inverted = buildLevels({ spot: 100, atr: 2, callWall: 95, putWall: 104 });
   const lab = Object.fromEntries(inverted.levels.map((l) => [l.kind, l.label]));
   eq(lab.call_wall, "Largest long-gamma strike", "a call wall below spot is not called a call wall");

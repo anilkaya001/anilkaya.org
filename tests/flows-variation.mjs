@@ -242,6 +242,16 @@ function candlesFor(end, n, { from = 100, step = 0.01, volume = 1e6, after = [] 
   near(sh.gamma + sh.vanna + sh.cross, 1, 1e-5, "and the three shares sum to one");
   ok(Math.abs(rho) > 0.1, `on a series with a real spot-vol correlation (${rho})`);
 
+  ok(!/explains/.test(out.lead.say), "the lead calls the shares shares, never 'explains', which a share above one would make false");
+  const offsetCase = JSON.parse(JSON.stringify(base));
+  offsetCase.panels.volContext.ivRank.rows = ivRows(SESSION, 40, { rho: -0.95 });
+  const oc = variation(cardVariationInput(offsetCase, { expiries: rows }), opts);
+  const ab = oc.channels.gamma.perSigma * oc.channels.vanna.perSigma * oc.inputs.rho;
+  ok(ab < 0 && oc.variance.shares.cross < 0, `a strongly negative spot-vol link makes the cross share negative (${oc.variance.shares.cross})`);
+  ok(/offset each other, so the parts exceed the whole/.test(oc.lead.say),
+     `and the lead says the two channels offset rather than letting a share read as more than all of it (${oc.lead.say.slice(-120)})`);
+  ok(!/offset each other/.test(out.lead.say) || out.variance.shares.cross < 0, "and says it only when the cross term is below zero");
+
   const flat = JSON.parse(JSON.stringify(base));
   flat.panels.volContext.ivRank.rows = ivRows(SESSION, 40, { rho: 0 });
   const f = variation(cardVariationInput(flat, { expiries: rows }), opts);

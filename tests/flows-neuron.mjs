@@ -459,6 +459,15 @@ const CARD = {
      "with its figures quotable");
   const hedge = ctx.state.drivers.filter((d) => d.axis === "hedge");
   ok(hedge.length >= 2 && hedge.every((d) => d.weight === 0), "the hedge drivers ride along at weight 0");
+  const booked = JSON.parse(JSON.stringify(B));
+  booked.regime.bookGammaRaw = 2e4;
+  booked.panels.variation = variation(cardVariationInput(booked), opts);
+  const bookedDrift = booked.panels.variation.variance && booked.panels.variation.variance.driftInSd;
+  ok(bookedDrift !== null && Math.abs(bookedDrift) >= STATE_LINES.DRIFT_SD,
+     `a booked copy of B carries a drift past the ${STATE_LINES.DRIFT_SD} sd line (${bookedDrift})`);
+  const bookedHedge = buildContext(booked, { expectedSession: B.sessionDate }).state.drivers.filter((d) => d.axis === "hedge");
+  ok(bookedHedge.length && bookedHedge.every((d) => d.weight === 0 && d.vote === 0),
+     "and even past it the hedge drivers carry no vote: a reading that says 'no vote' must not hand the model a vote of ±1");
   ok(hedge.some((d) => d.key === "vanna" && /call \u2212 put/.test(d.reading)) && hedge.some((d) => d.key === "charm"),
      "vanna and charm are read netted, call \u2212 put");
   ok(!ctx.state.drivers.some((d) => /not netted/.test(d.reading)),

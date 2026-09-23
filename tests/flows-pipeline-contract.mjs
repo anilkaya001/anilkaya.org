@@ -3558,6 +3558,8 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      `a chain built from the same open-interest ladder reproduces the vendor's call vanna (${live && (live.vendor / live.model)})`);
   const meta = boardVariationMeta({ ...run, vannaScale: { status: "agree", ratio: 1, n: 5 } });
   ok(meta.codes === VARIATION_CODES && meta.kc.n === run.kc.n, "the board's variation block carries the code table and the run's probes");
+  ok(/CHANGE IN DEALER DELTA/.test(meta.fields) && /negative figure means dealers buy/.test(meta.fields),
+     "and says which way its signed fractions point, since a row carries the dealer-delta change and not the hedge trade");
   const input = featuresVariationInput({ features: { ticker: "X", spot: 50, netGamma: 1, gammaBookRaw: 2, candles: [], iv30: 0.3 },
     raw: { expiries: [] } }, "2026-08-24");
   eq(input.ivRankRows, null, "a board row's variation carries no vol-of-vol: the implied-volatility history is a deep-card read");
@@ -3590,6 +3592,16 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(long.rows.every((r) => Object.values((r.variation && r.variation.why) || {}).every((code) => Object.hasOwn(long.variation.codes, code))),
      "and every null on it carries a code the board spells out");
   ok(long.rows.some((r) => r.variation.driftInSd !== null), "with at least one drift reading on the fixture");
+  {
+    const cards0 = fs.readdirSync(path.dirname(prefix)).filter((f) => /-card-/.test(f))
+      .map((f) => JSON.parse(fs.readFileSync(path.join(path.dirname(prefix), f), "utf8")));
+    const byT = new Map(cards0.map((c) => [c.ticker, c]));
+    const signed = long.rows.filter((r) => r.variation && r.variation.charmPctAdv !== null && byT.has(r.t) &&
+      byT.get(r.t).panels.variation.status === "ok" && byT.get(r.t).panels.variation.channels.charm);
+    ok(signed.length > 0 && signed.every((r) => Math.sign(r.variation.charmPctAdv) ===
+      -Math.sign(byT.get(r.t).panels.variation.channels.charm.hedge)),
+       `a row's charm fraction points opposite to the card's hedge trade, as the block says (${signed.length} rows)`);
+  }
   const cards = fs.readdirSync(path.dirname(prefix)).filter((f) => /-card-/.test(f))
     .map((f) => JSON.parse(fs.readFileSync(path.join(path.dirname(prefix), f), "utf8")));
   ok(cards.every((c) => c.panels.variation && typeof c.panels.variation.status === "string"),

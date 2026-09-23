@@ -484,9 +484,11 @@ function oneCard(t, card, at, st) {
 
   const score = num(card.score), conv = num(card.conviction);
   const label = typeof reg.label === "string" && reg.label ? reg.label : null;
+  const labelFrom = reg.labelFrom === "book" ? "the open-interest gamma book is "
+    : reg.labelFrom === "flow" ? "today's added gamma is " : "dealer gamma is labelled ";
   if (all(score, conv) && label !== null) {
     let say = t + " scored " + score + " this session with conviction " + conv +
-      " of 100; dealer gamma at spot is " + label + ".";
+      " of 100; " + labelFrom + label + ".";
 
     const n = { score, convictionOf100: conv, convictionScale: 100, regime: label };
     if (st !== null && st.rank !== null && st.rows !== null) {
@@ -500,20 +502,21 @@ function oneCard(t, card, at, st) {
   const spot = num(g.spot), cw = num(g.callWall), pw = num(g.putWall);
   const strikes = num(g.strikes), lo = num(g.bandMin), hi = num(g.bandMax);
   if (all(spot, cw, pw, strikes, lo, hi) && label !== null) {
-    let say = "Dealer gamma for " + t + " is " + label + " at spot " + r4(spot) +
-      ", measured over " + strikes + " strikes between " + r4(lo) + " and " + r4(hi) +
-      "; the call wall is at " + r4(cw) + " and the put wall at " + r4(pw) + ".";
+    let say = "Today's gamma flow in " + t + " at spot " + r4(spot) + " spans " + strikes +
+      " strikes from " + r4(lo) + " to " + r4(hi) +
+      "; its " + (cw < spot ? "largest long-gamma strike" : "call wall") + " is at " + r4(cw) +
+      " and its " + (pw > spot ? "largest short-gamma strike" : "put wall") + " at " + r4(pw) + ".";
     const n = { spotPx: r4(spot), callWallPx: r4(cw), putWallPx: r4(pw), strikes,
       bandMinPx: r4(lo), bandMaxPx: r4(hi) };
     const flip = num(card.gammaFlip), crossings = num(reg.crossings);
     if (flip !== null) {
       const side = typeof reg.flipSide === "string" && reg.flipSide
         ? " (" + reg.flipSide.replace(/_/g, " ") + ")" : "";
-      say += " Net gamma flips sign at " + r4(flip) + side + ".";
+      say += " Its running sum crosses zero at " + r4(flip) + side + ".";
       n.gammaFlipPx = r4(flip);
       if (crossings !== null) n.crossings = crossings;
     } else if (crossings === 0) {
-      say += " Net gamma does not change sign inside that band, so no flip level is " +
+      say += " Its running sum does not change sign inside that band, so no flip level is " +
         "published (0 crossings).";
       n.crossings = 0;
     }

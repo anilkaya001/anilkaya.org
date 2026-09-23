@@ -1453,14 +1453,32 @@ import { readFile } from "node:fs/promises";
   ok(/no flip level is published \(0 crossings\)/.test(g46.say) && g46.n.crossings === 0 && !("gammaFlipPx" in g46.n),
      "crossings 0 with no flip is said as the finding it is — net gamma never changed sign — " +
      "with the measured zero pinned in n and no flip price invented");
-  ok(/flips sign at 412\.5 \(short below\)/.test(g47.say) && g47.n.gammaFlipPx === 412.5 && g47.n.crossings === 1,
-     "a measured flip level is quoted with its side, underscores read as words");
+  ok(/running sum crosses zero at 412\.5 \(short below\)/.test(g47.say) && g47.n.gammaFlipPx === 412.5 && g47.n.crossings === 1,
+     "a measured flip level is quoted with its side, underscores read as words, and called what it is: " +
+     "the crossing of the ladder's running sum, not a net that flips sign");
+  ok(/^Today's gamma flow in SYN47 at spot/.test(g47.say) && !/Dealer gamma for/.test(g47.say),
+     "the ladder the walls are read from is named as today's flow, not as the dealer book the label now reads");
   eq(g90, null,
      "and a card whose put wall did not build has NO gamma fact at all — a sentence with a " +
      "hole is worse than none — while its other readings survive: " +
      of("SYN90").map((f) => f.id.split("/")[1]).join(","));
   ok(of("SYN90").length === 4 && one("SYN90", "standing") && one("SYN90", "move") && one("SYN90", "flow"),
      "four of five survive the missing wall");
+  {
+    const src = (t, labelFrom, gamma) => buildFactIndex({ ["card:" + t]: withPanels(t, gamma ? { gamma } : {},
+      { regime: { label: "short", crossings: 0, flipSide: null, ...(labelFrom ? { labelFrom } : {}) } }) }).facts;
+    const said = (facts, tail) => (facts.find((x) => x.id.endsWith("/" + tail)) || {}).say || "";
+    ok(/; the open-interest gamma book is short\./.test(said(src("BK1", "book"), "standing")),
+       "a label read from the open-interest book says so, instead of placing a whole-book net 'at spot'");
+    ok(/; today's added gamma is short\./.test(said(src("FL1", "flow"), "standing")),
+       "a label that fell back to today's flow says that");
+    ok(/; dealer gamma is labelled short\./.test(said(src("OLD1", null), "standing")),
+       "and a card that predates the label's source claims neither");
+    const inverted = said(src("INV1", "book", { callWall: 380, putWall: 395 }), "gamma");
+    ok(/its largest long-gamma strike is at 380 and its largest short-gamma strike at 395/.test(inverted) &&
+       !/call wall|put wall/.test(inverted),
+       `a call wall below spot and a put wall above it are not called walls here either (${inverted.slice(0, 120)})`);
+  }
   {
 
     const unm = buildFactIndex({ "card:UNM": withPanels("UNM", {}, { regime: { label: "short", crossings: null, flipSide: null } }) });

@@ -1204,8 +1204,11 @@ export function boardVariationMeta(run) {
   if (!run) return null;
   return {
     fields: "variation on each row: gammaPerSigmaPctAdv, charmPctAdv and vannaPerPointPctAdv are " +
-      "fractions of a typical day's dollar volume; driftInSd is the session's charm drift over the " +
-      "standard deviation of the random part; a null carries a code in why, spelled out in codes",
+      "fractions of a typical day's dollar volume, each signed as the CHANGE IN DEALER DELTA (per " +
+      "one-sigma rise, per session, per vol point), so dealers re-hedge the other way: a negative " +
+      "figure means dealers buy stock; driftInSd is the session's charm drift over the standard " +
+      "deviation of the random part, signed the same way; a null carries a code in why, spelled out " +
+      "in codes",
     codes: VARIATION_CODES,
     kc: { value: run.kc.value, n: run.kc.n, status: run.kc.status },
     unit: { family: run.unit.family, used: run.unit.used },

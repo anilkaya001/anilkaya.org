@@ -4421,9 +4421,17 @@ try {
           sideways: document.documentElement.scrollWidth - document.documentElement.clientWidth,
           height: s ? Math.round(s.getBoundingClientRect().height) : 0,
           one: s ? (s.querySelector(":scope > .ft-panel-one") || {}).textContent : null,
+          strips: host ? host.querySelectorAll(".fv-strip").length : 0,
+          offsetNotes: host ? host.querySelectorAll(".fv-offset").length : 0,
         };
       });
       ok(got.there, `${width}px: the hedging panel mounts`);
+      const negativeShare = V.variance && Object.values(V.variance.shares).some((x) => x !== null && x < 0);
+      eq(got.strips, V.variance && !negativeShare ? 1 : 0,
+         `${width}px: a part-of-whole bar is drawn only when every variance share is a part of the whole ` +
+         `(shares ${JSON.stringify(V.variance && V.variance.shares)})`);
+      eq(got.offsetNotes, negativeShare ? 1 : 0,
+         `${width}px: and when the channels offset, the panel says so instead of scaling the positive shares to fill a bar`);
       ok(got.first && got.tier === "lead", `${width}px: it leads the Convexity station`);
       ok(got.bars >= 1 && got.bars <= 3, `${width}px: one bar per channel with a reading (${got.bars})`);
       ok(/hedge flow over the next session/.test(got.caption || ""),
@@ -4445,6 +4453,24 @@ try {
            "table stays a measurement rather than a guess");
       }
       eq(errors.length, 0, `${width}px: the hedging panel draws without throwing (${errors.join("; ")})`);
+      await page.close();
+    }
+
+    {
+      const wasNegative = Object.values(V.variance.shares).some((x) => x !== null && x < 0);
+      const other = JSON.parse(JSON.stringify(card));
+      other.panels.variation.variance.shares = wasNegative
+        ? { gamma: 0.7, vanna: 0.2, cross: 0.1 } : { gamma: 3.83, vanna: 1.07, cross: -3.9 };
+      const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+      await mount(page, other, { ticker: other.ticker, station: "convexity" });
+      const drawn = await page.evaluate(() => {
+        const host = document.querySelector('.ft-panel[data-panel="variation"] > div');
+        return { strips: host.querySelectorAll(".fv-strip").length, offset: host.querySelectorAll(".fv-offset").length,
+          stats: host.textContent };
+      });
+      eq(drawn.strips, wasNegative ? 1 : 0, "the other branch of the variance bar is drawn on a card built to reach it");
+      eq(drawn.offset, wasNegative ? 0 : 1, "and the offset note appears exactly when a share is below zero");
+      ok(wasNegative || /\+383%/.test(drawn.stats), "while the shares themselves are still printed, above one included");
       await page.close();
     }
 

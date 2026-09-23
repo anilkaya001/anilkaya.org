@@ -829,9 +829,10 @@ function variationLead({ ticker, S, sigma, a, aFlow, v, b, c, vov, variance, A, 
   }
   if (b !== null) {
     const sh = variance.shares;
-    say += ", a one-sigma vol move " + k.money("vannaPerSigma", b) + " — spot explains " + k.whole("gammaSharePct", sh.gamma * 100) +
-      "% of the variance, volatility " + k.whole("vannaSharePct", sh.vanna * 100) + "%, their co-movement " +
-      (sh.cross < 0 ? "−" : "") + k.whole("crossSharePct", Math.abs(sh.cross) * 100) + "%.";
+    say += ", a one-sigma vol move " + k.money("vannaPerSigma", b) + " — by share of the variance, spot " + k.whole("gammaSharePct", sh.gamma * 100) +
+      "%, volatility " + k.whole("vannaSharePct", sh.vanna * 100) + "%, their co-movement " +
+      (sh.cross < 0 ? "−" : "") + k.whole("crossSharePct", Math.abs(sh.cross) * 100) + "%" +
+      (sh.cross < 0 ? ": the two channels offset each other, so the parts exceed the whole." : ".");
   } else if (v !== null) {
     say += "; each vol point moves it " + k.money("vannaPerPoint", v) + ", but the card carries " + k.whole("ivChanges", vov.n) +
       " daily implied-volatility change" + (vov.n === 1 ? "" : "s") + ", too few to say how large a typical vol move is.";

@@ -527,7 +527,7 @@ export function legPresent(rows, reader) {
   return false;
 }
 
-export function greekTermStructure(expiryRows, { name, callLeg, putLeg, asOf = null, cap = 12 } = {}) {
+export function greekTermStructure(expiryRows, { name, callLeg, putLeg, asOf = null, cap = 12, dealerSign = undefined } = {}) {
   const src = Array.isArray(expiryRows) ? expiryRows : [];
   const hasCall = legPresent(src, callLeg);
   const hasPut = legPresent(src, putLeg);
@@ -545,7 +545,10 @@ export function greekTermStructure(expiryRows, { name, callLeg, putLeg, asOf = n
     const n = Number(v);
     return Number.isFinite(n) ? n : null;
   };
-  const sign = Object.hasOwn(GREEK_DEALER_SIGN, name) ? GREEK_DEALER_SIGN[name] : null;
+  const documented = Object.hasOwn(GREEK_DEALER_SIGN, name) ? GREEK_DEALER_SIGN[name] : null;
+  const sign = dealerSign === undefined ? documented
+    : dealerSign === 1 || dealerSign === -1 ? dealerSign : null;
+  const unsettled = documented !== null && sign === null;
   const rows = [];
   let expired = 0;
   for (const r of src) {
@@ -577,6 +580,7 @@ export function greekTermStructure(expiryRows, { name, callLeg, putLeg, asOf = n
 
     signConvention: SIGN_CONVENTION,
     dealerRule: sign === null ? null : sign > 0 ? "call + put" : "call − put",
+    ...(unsettled ? { dealerWhy: "the run's convention probe could not settle this put leg's sign, so no dealer net is published" } : {}),
     rows: kept,
     grossAbs: gross,
     legs: { call: hasCall, put: hasPut },
