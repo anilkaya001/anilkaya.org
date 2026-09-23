@@ -4464,7 +4464,7 @@ async function main() {
       sessionDate, screenerDate, generatedAt, harvest: harvest || universeSource, filters: screenerFilters, eligible,
       cardedTickers: liquid.map((e) => e.features.ticker),
       deepTickers: deepNames(published).map((d) => d.t),
-      windowTickers: windowTickersOf(withTilt.map((w) => w.row), { origin: gateOrigin }),
+      windowTickers: windowTickersOf(withTilt.map((w) => w.row), { origin: sessionDate || gateOrigin }),
       deadline: stats.startedAt + DEADLINE_MS, pool: runPooled, width: poolWidth(2).width, stats,
       log: (line) => console.log(line),
     });

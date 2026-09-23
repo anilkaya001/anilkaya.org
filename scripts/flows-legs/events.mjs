@@ -7,6 +7,41 @@ import { addDays, weekdaysAhead, priorWeekdayIso, vnum, compactNumbers, SILENCE 
 
 export const FDA_LIMIT = 200;
 
+export const EVENTS_ADDITIONS_BUDGET_BYTES = 64 * 1024;
+
+export const CALENDAR_SHED_CAPS = Object.freeze([20, 10, 5]);
+
+const sizeOf = (value) => JSON.stringify(value).length;
+
+export function fitEventsAdditions(additions, { budgetBytes = EVENTS_ADDITIONS_BUDGET_BYTES } = {}) {
+  const shed = [];
+  let bytes = sizeOf(additions);
+  const cal = additions && additions.earningsCalendar;
+  const routes = [];
+  if (cal && Array.isArray(cal.sessions)) {
+    for (const s of cal.sessions.slice().reverse()) {
+      for (const k of ["afterhours", "premarket"]) {
+        if (s && s[k] && Array.isArray(s[k].rows)) routes.push([`earningsCalendar ${s.date} ${k}`, s[k]]);
+      }
+    }
+  }
+  const trim = (name, holder, cap) => {
+    if (bytes <= budgetBytes || !holder || !Array.isArray(holder.rows) || holder.rows.length <= cap) return;
+    const cut = holder.rows.length - cap;
+    holder.rows = holder.rows.slice(0, cap);
+    holder.shed = (Number.isFinite(holder.shed) ? holder.shed : 0) + cut;
+    if ("kept" in holder) holder.kept = holder.rows.length;
+    shed.push(`${name} to ${cap}`);
+    bytes = sizeOf(additions);
+  };
+  for (const cap of CALENDAR_SHED_CAPS) for (const [name, route] of routes) trim(name, route, cap);
+  for (const key of ["fda", "macro"]) trim(key, additions[key], 20);
+  if (cal) trim("earningsCalendar tonight", cal.tonight, 20);
+  additions.additionsBudget = { budgetBytes, shed };
+  additions.additionsBudget.bytes = sizeOf(additions);
+  return additions;
+}
+
 export function calendarPlan(sessionDate, { sessions = CALENDAR_SESSIONS } = {}) {
   if (!sessionDate) return [];
   const plan = [
@@ -52,6 +87,7 @@ export async function readCatalysts(uw, {
 
 export function assembleCatalysts(raw, {
   sessionDate = null, carded = null, reportCatalysts = null, windowTickers = [], screenerByTicker = new Map(),
+  budgetBytes = EVENTS_ADDITIONS_BUDGET_BYTES,
 } = {}) {
   const r = raw || { calendar: [], earnings: new Map() };
   const macro = r.econ && r.econ.ok ? shapeEconomicCalendar(rowsOf(r.econ.body), { sessionDate })
@@ -110,12 +146,12 @@ export function assembleCatalysts(raw, {
     if (h) history[t] = historyDigest(h);
   }
   return {
-    additions: compactNumbers({
+    additions: fitEventsAdditions(compactNumbers({
       macro, fda, earningsCalendar: calendar,
       catalysts: reportCatalysts || { status: "unavailable", reason: SILENCE.unread },
       history,
       historyRule: "r = median |1d move| / expected move over the last reports; beat = share above 1; hit = share of long 1d straddles that paid; drift = median continuation",
-    }),
+    }), { budgetBytes }),
     earnings,
   };
 }

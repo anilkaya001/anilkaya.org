@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  vnum, isoDay, sessionsBetween, nextWeekdayIso, pctRanks, pctOf, zScores, ownZ, termSlope, frontStress,
+  vnum, isoDay, addDays, sessionsBetween, nextWeekdayIso, pctRanks, pctOf, zScores, ownZ, termSlope, frontStress,
   ivChange, vrpTrailing, gexPerAdv, sharesPerAdv, gammaDollarsPerAdv, vegaDollarsPerAdv, netTilt,
   sectorTilts, bandPosition, impliedCorrelation, compactNumbers, buildUniverse, universeValue,
   decodeColumn, UNIVERSE_COLUMNS, UNIVERSE_BUDGET_BYTES, SILENCE,
@@ -24,7 +24,7 @@ import { rowsOf, read } from "../scripts/flows-legs/common.mjs";
 import { harvestScreener, readShortInterest, readInsiders, readIndexRows, harvestBlock } from "../scripts/flows-legs/universe.mjs";
 import { readRegime, assembleRegime, REGIME_CALLS } from "../scripts/flows-legs/regime.mjs";
 import { ownershipParts } from "../scripts/flows-legs/ownership.mjs";
-import { assembleCatalysts, readCatalysts, calendarPlan } from "../scripts/flows-legs/events.mjs";
+import { assembleCatalysts, readCatalysts, calendarPlan, EVENTS_ADDITIONS_BUDGET_BYTES } from "../scripts/flows-legs/events.mjs";
 import { runMarketLegs, windowTickersOf, MARKET_LEG_CALLS } from "../scripts/flows-legs/market.mjs";
 import { makeCardXStore, cardXPayload, CARD_X_BUDGET_BYTES } from "../scripts/flows-legs/card-x.mjs";
 import { buildIndexDossiers, shedToFit } from "../scripts/flows-legs/index-dossier.mjs";
@@ -579,6 +579,37 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(legs.earnings.size >= 10, "every deep name gets an earnings history read");
   ok(MARKET_LEG_CALLS > 0 && MARKET_LEG_CALLS < 400, `the modelled leg cost is ${MARKET_LEG_CALLS} calls`);
   eq(calendarPlan(S).length, 13, "the calendar reads two reaction days, tonight and ten upcoming routes");
+
+  const emittedEventsBase = () => ({ rows: "x".repeat(32 * 1024) });
+  const season = (step, i) => Array.from({ length: 120 }, (_, k) => ({
+    ...probe("earnings-afterhours"), symbol: `E${i}_${k}`, report_date: step.date,
+    report_time: step.route === "premarket" ? "premarket" : "postmarket", marketcap: String(1e12 - k * 1e9),
+    full_name: "A COMPANY WITH A LONG REGISTERED NAME INCORPORATED", sector: "Consumer Cyclical",
+  }));
+  const peak = { calls: 0, earnings: new Map(),
+    calendar: calendarPlan(S).map((step, i) => ({ ...step, res: { ok: true, body: season(step, i) } })),
+    econ: { ok: true, body: Array.from({ length: 60 }, (_, k) => ({ ...probe("economic-calendar"), event: "Event " + k })) },
+    fda: { ok: true, body: Array.from({ length: 80 }, (_, k) => ({ ...probe("fda-calendar"), ticker: "F" + k, drug: "Drug " + k,
+      unique_identifier: "u" + k, target_date: addDays(S, 10 + k), has_options: true, marketcap: "2000000000",
+      indication: "an indication long enough to reach the sixty-character cap on the published row" })) } };
+  const unfitted = assembleCatalysts(peak, { sessionDate: S, budgetBytes: 1e9 }).additions;
+  const fullEvents = JSON.stringify({ ...emittedEventsBase(), ...unfitted }).length;
+  ok(fullEvents > 128 * 1024,
+    `an earnings-season calendar (120 reporters on each of 11 routes) and a full FDA window beside the 32KB the events rows and notes already take would put events at ${fullEvents} bytes, over the 128KB ingest cap`);
+  const fitted = assembleCatalysts(peak, { sessionDate: S }).additions;
+  ok(JSON.stringify(fitted).length <= EVENTS_ADDITIONS_BUDGET_BYTES,
+    `the additions shed to ${JSON.stringify(fitted).length} bytes, inside their ${EVENTS_ADDITIONS_BUDGET_BYTES}-byte budget`);
+  ok(JSON.stringify({ ...emittedEventsBase(), ...fitted }).length < 128 * 1024, "so events stays under the ingest cap in the busiest week");
+  eq(fitted.earningsCalendar.tonight.rows.length, 40, "tonight's reporters are the last to be trimmed");
+  const far = fitted.earningsCalendar.sessions[fitted.earningsCalendar.sessions.length - 1];
+  const near1 = fitted.earningsCalendar.sessions[0];
+  ok(far.afterhours.rows.length <= near1.premarket.rows.length, "the farthest session is trimmed first");
+  eq(far.afterhours.shed, far.afterhours.seen - far.afterhours.rows.length, "and every trimmed route counts what it shed");
+  ok(fitted.additionsBudget.shed.length > 0 && fitted.additionsBudget.bytes <= EVENTS_ADDITIONS_BUDGET_BYTES,
+    "the shed list travels with the payload");
+
+  deep(windowTickersOf([{ ticker: "TNT", next_earnings_date: S, marketcap: "1" }, { ticker: "NXT", next_earnings_date: nextWeekdayIso(S), marketcap: "2" }],
+    { origin: S }), ["TNT", "NXT"], "a name reporting after tonight's close is inside the window, first");
 
   const lateRaw = await readRegime(vendor, { sessionDate: S, deadline: Date.now() - 1 });
   eq(lateRaw.calls, 0, "past the deadline the regime leg spends no call");
