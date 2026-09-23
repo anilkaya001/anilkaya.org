@@ -529,7 +529,7 @@ const CARD = {
 
 {
   const pinned = JSON.parse(JSON.stringify(CARD));
-  pinned.regime = { label: "long", crossings: 1, spotGammaShare: 0.6 };
+  pinned.regime = { label: "long", crossings: 1, spotGammaShare: 0.6, labelFrom: "book", bookGamma: 1.2e8, bookShare: 0.6 };
   pinned.panels.levels.levels = [
     { kind: "max_pain", label: "Max pain", px: 70.5, distAtr: 0.19 },
     { kind: "gamma_flip", label: "Gamma flip", px: 66.1, distAtr: -2.78 },
