@@ -97,12 +97,18 @@ for (const table of ["flows_payload", "flows_login_failures"]) {
 
 assert(!/\b(password|passwd|hash|secret|pepper|token)\b/i.test(flowsMigration),
   "Flows migration must not store credential material in D1");
+const liveMigration = read("migrations/0010_flows_live.sql");
+for (const table of ["flows_live", "flows_tape", "flows_clock"]) {
+  assert(liveMigration.includes(`CREATE TABLE IF NOT EXISTS ${table}`), `0010 must create ${table}`);
+}
+assert(!/\b(password|passwd|hash|secret|pepper|token)\b/i.test(liveMigration),
+  "the live-layer migration must not store credential material in D1");
 const migrationTables = new Set([
   ...tablesIn(baseline), ...tablesIn(migration),
-  ...tablesIn(marketMigration), ...tablesIn(flowsMigration),
+  ...tablesIn(marketMigration), ...tablesIn(flowsMigration), ...tablesIn(liveMigration),
 ]);
 const schemaTables = tablesIn(read("schema.sql"));
 assert(migrationTables.size === schemaTables.size && [...schemaTables].every((t) => migrationTables.has(t)),
-  "migrations/ (0001+0002+0004+0005) must create exactly the tables in schema.sql");
+  "migrations/ (0001+0002+0004+0005+0010) must create exactly the tables in schema.sql");
 
 console.log("Academy contract OK: 12 courses, 365 stages, 84 skills, 252 challenge variants, 3 verified synthetic snapshots.");
