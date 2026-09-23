@@ -1,7 +1,7 @@
 import {
   LIVE_KEYS, LIVE_BUDGET, TIER1_CALLS, TAPE_SPEC, shapeMarketLive, tideSessionState, tideLastAt, checkLiveWrite,
   liveKeyFromParam, shapeTapePrem, shapeTapeGex, assembleTape, nextTapeLeg, pulseWithLive, liveAlertsWin,
-  nightlyFreshMeta, rowsOf, timeMs,
+  nightlyFreshMeta, rowsOf, timeMs, anyAnswered, marketFeeds,
 } from "./flows-live.js";
 import {
   FRESH_CLASSES, PHASE_MINUTES, LIVE_CLOCK, freshHeaders, pendingHeaders, phaseAt, tier1Due, liveDispatchDue,
@@ -213,7 +213,10 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
     const spec = LIVE_KEYS["live:market"];
     const statuses = Object.fromEntries(["tide", "zeroDte"].map((k) => [k, payload[k].status]));
     statuses.spy = payload.etf.SPY.status; statuses.qqq = payload.etf.QQQ.status; statuses.sectors = payload.sectors.status;
-    if (text.length > spec.maxBytes) {
+    if (!anyAnswered(marketFeeds(payload))) {
+      out.tier1 = { written: false, why: "no-feed-answered", bytes: text.length, statuses };
+      log.error(JSON.stringify({ message: "live:market not written: no vendor feed answered", statuses }));
+    } else if (text.length > spec.maxBytes) {
       out.tier1 = { written: false, why: "over-cap", bytes: text.length, statuses };
       log.error(JSON.stringify({ message: "live:market over its byte cap", bytes: text.length, cap: spec.maxBytes }));
     } else {

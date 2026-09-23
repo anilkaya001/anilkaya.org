@@ -1,7 +1,7 @@
 import {
   LIVE_KEYS, LIVE_BUDGET, SECTOR_TIDES, shapeBreadth, shapeStrips, appendStripSeries, shapeVol,
   indexRows, shapeMovers, shapeLiveTape, gexRotation, shapeGexSeries, mergeGex, mergeLiveAlerts, alertsPagePlan,
-  oldestCreated, stripNames, rowsOf, failed, freshEnvelope, timeMs, isoSec,
+  oldestCreated, stripNames, rowsOf, failed, freshEnvelope, timeMs, isoSec, anyAnswered,
 } from "../../shared/flows-live.js";
 import { phaseAt, closeMinutes, PHASE_MINUTES, LIVE_CLOCK, easternInstant } from "../../shared/flows-freshness.js";
 import { fakeLiveVendor, fakeBoards } from "./live-fake.mjs";
@@ -148,7 +148,12 @@ export async function runLive({
   const out = {};
   const bytes = {};
   const errors = [];
-  const put = async (key, payload) => {
+  const put = async (key, payload, { answered = true } = {}) => {
+    if (!answered) {
+      bytes[key] = null;
+      note(`${key}: not published — no read behind it answered this run, so the held row keeps its own read time`);
+      return;
+    }
     const text = JSON.stringify(payload);
     const cap = LIVE_KEYS[key].maxBytes;
     if (text.length > cap) {
@@ -176,7 +181,8 @@ export async function runLive({
   }
   const disagree = Object.entries(breadth.sectors.rows).filter(([, s]) => s.check === "disagrees").map(([k]) => k);
   if (disagree.length) note(`sector-tide basis check disagrees for ${disagree.join(", ")}`);
-  await put("live:breadth", breadth);
+  await put("live:breadth", breadth, { answered: anyAnswered([...Object.values(breadth.sectors.rows), breadth.etf.IWM,
+    breadth.etf.DIA, breadth.dte.zero, breadth.dte.weekly]) });
 
   const strips = shapeStrips(strip, { at, session, names: plan.names, writer });
   unshaped("screener strip", strip, strips.status);
@@ -185,12 +191,14 @@ export async function runLive({
     note(`screener strip: ${strips.returned ?? 0}/${plan.names.length} name(s), row date ${strips.rowDate || "absent"}, ` +
       `quote_time set on ${withQuote} row(s)`);
   }
-  await put("live:strips", strips);
+  const stripAnswered = strips.status !== "unavailable";
+  await put("live:strips", strips, { answered: stripAnswered });
 
   const prevSeries = await readStored("live:strips:series");
-  await put("live:strips:series", appendStripSeries(prevSeries && prevSeries.payload, strips, { at, session, writer }));
-  await put("live:vol", shapeVol(indexRows(strip), { at, session, writer }));
-  await put("live:movers", shapeMovers(strips, { at, session, writer }));
+  const series = appendStripSeries(prevSeries && prevSeries.payload, strips, { at, session, writer });
+  await put("live:strips:series", series, { answered: series.appended === true || series.replaced === true });
+  await put("live:vol", shapeVol(indexRows(strip), { at, session, writer }), { answered: stripAnswered });
+  await put("live:movers", shapeMovers(strips, { at, session, writer }), { answered: stripAnswered });
 
   const merged = mergeLiveAlerts(prevAlerts && prevAlerts.payload, pages, {
     at, session, writer, stageOf: (t) => plan.stage.get(t) || null,
@@ -204,9 +212,11 @@ export async function runLive({
   const okGex = Object.values(gexReads).filter((g) => g.status === "ok").length;
   if (okGex && !filled) note(`spot-exposures: ${okGex} name(s) shaped and none carried non-zero _vol/_dir legs`);
   const prevGex = await readStored("live:gex");
-  await put("live:gex", mergeGex(prevGex && prevGex.payload, gexReads, { at, session, writer, rotation }));
+  await put("live:gex", mergeGex(prevGex && prevGex.payload, gexReads, { at, session, writer, rotation }),
+    { answered: anyAnswered(Object.values(gexReads)) });
 
-  await put("live:tape", shapeLiveTape({ totals, netImpact, darkpool }, { at, session, writer }));
+  const tape = shapeLiveTape({ totals, netImpact, darkpool }, { at, session, writer });
+  await put("live:tape", tape, { answered: anyAnswered([tape.totals, tape.netImpact, tape.darkpool]) });
 
   if (typeof shapeNews === "function") {
     const news = failed(newsRaw)
@@ -216,7 +226,7 @@ export async function runLive({
       v: 1, key: "live:news", session,
       fresh: freshEnvelope({ readAt: at, source: "actions", cadenceS: LIVE_KEYS["live:news"].cadenceS, session, writer }),
       ...news,
-    });
+    }, { answered: !failed(newsRaw) });
   }
 
   const finishedAt = now();

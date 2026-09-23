@@ -160,6 +160,15 @@ export function envelopeDate(raw) {
     DAY_RE.test(raw.date) ? raw.date : null;
 }
 
+export function anyAnswered(feeds) {
+  return (Array.isArray(feeds) ? feeds : []).some((f) => f && typeof f.status === "string" && f.status !== "unavailable");
+}
+
+export function marketFeeds(payload) {
+  const p = payload || {};
+  return [p.tide, p.zeroDte, p.etf && p.etf.SPY, p.etf && p.etf.QQQ, p.sectors];
+}
+
 export function feedSilence(raw) {
   if (raw === undefined || raw === null) return { status: "unavailable", reason: SILENCE.notRead };
   if (failed(raw)) return { status: "unavailable", reason: SILENCE.failed, detail: raw.__failed.slice(0, 160) };

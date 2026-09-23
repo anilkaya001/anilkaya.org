@@ -666,6 +666,58 @@ const T = (iso) => Date.parse(iso);
       "the session's largest rather than the last few seconds'");
   }
 
+  {
+    const session = "2026-09-23";
+    const at = easternInstant(session, 11 * 60 + 7);
+    const boards = FAKE.fakeBoards();
+    const runWith = async (fails) => {
+      let clock = at;
+      const fake = FAKE.fakeLiveVendor({ now: () => (clock += 250), session });
+      const uw = async (path, params, opts) => {
+        if (fails(path)) throw new Error(`${path} -> HTTP 502`);
+        return fake(path, params, opts);
+      };
+      const published = {};
+      const result = await runLive({ uw, now: () => (clock += 250), log: () => {}, warn: () => {}, force: true, shapeNews,
+        publish: async (k, p) => { published[k] = p; },
+        readStored: async (k) => (k.startsWith("board:") ? { payload: boards[k.slice(6)] } : { payload: null }) });
+      return { published, result };
+    };
+    const down = await runWith(() => true);
+    deep(Object.keys(down.published), ["live:heartbeat"],
+      "A RUN IN WHICH NO VENDOR CALL ANSWERED publishes only its heartbeat: no key is re-stamped as read this " +
+      "instant with nothing read behind it, so each goes stale on its own clock and the watchdog can see it");
+    ok(Object.entries(down.result.run.keys).every(([k, b]) => k === "live:heartbeat" || b === null),
+      "and the heartbeat's ledger names every key it did not publish");
+    const noStrip = await runWith((p) => p === "/api/screener/stocks");
+    ok(!noStrip.published["live:strips"] && !noStrip.published["live:strips:series"] && !noStrip.published["live:vol"] &&
+       !noStrip.published["live:movers"] && noStrip.published["live:breadth"] && noStrip.published["live:gex"],
+    "a failed strip read withholds the strip and the three keys built from it, while every key with its own " +
+      "answered read is published");
+
+    const statements = [];
+    const db = {
+      prepare(sql) {
+        const st = { sql, args: [], bind(...a) { st.args = a; return st; }, first: async () => null,
+          run: async () => ({ meta: { changes: 1 } }) };
+        return st;
+      },
+      batch: async (list) => { statements.push(...list.map((x) => x.sql)); return list.map(() => ({ results: [] })); },
+    };
+    const tickAt = easternInstant(session, 10 * 60 + 6);
+    const dead = await W.rthTick({ DB: db, UW_API_KEY: "k" }, tickAt,
+      { fetchVendor: async () => { throw new Error("HTTP 502"); }, log: { error() {} } });
+    ok(dead.tier1 && dead.tier1.written === false && dead.tier1.why === "no-feed-answered" &&
+       !statements.some((q) => /INSERT INTO flows_live/.test(q)),
+    "TIER 1 likewise: when none of its five feeds answered, live:market is not rewritten");
+    let clock = tickAt;
+    const fake = FAKE.fakeLiveVendor({ now: () => (clock += 250), session });
+    const alive = await W.rthTick({ DB: db, UW_API_KEY: "k" }, tickAt + 5 * 60000,
+      { fetchVendor: (p, params) => fake(p, params, { envelope: true }), log: { error() {} } });
+    ok(alive.tier1.written === true && statements.some((q) => /INSERT INTO flows_live/.test(q)),
+      "while a tick whose feeds answered writes it");
+  }
+
   const plan = boardPlan({ long: { payload: { rows: [{ t: "AAA", s: 90 }, { t: "BBB", s: 10 }] } },
     short: { payload: { rows: [{ t: "CCC", s: -95 }] } }, watch: { payload: null } });
   deep(plan.ranked, ["CCC", "AAA", "BBB"], "the gamma rotation ranks board names by |score|");
