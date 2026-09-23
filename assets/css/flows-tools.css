@@ -537,8 +537,9 @@
 @media (min-width: 768px) { .dk-bar { padding: var(--sp-5) var(--sp-6); } }
 .dk-row1 { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3) var(--sp-4); }
 .dk-find { flex: none; }
-.dk-chips { flex: 1; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-width: 0; }
-.dk-chips:empty { display: none; }
+.dk-chipw { flex: 1; min-width: 0; }
+.dk-chipw:has(> .dk-chips:empty) { display: none; }
+.dk-chips { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-width: 0; }
 .desk-chip {
   display: inline-flex;
   align-items: center;
@@ -620,7 +621,8 @@
 .dk-note { display: flex; flex-direction: column; gap: 2px; margin: 0; color: var(--label-3); font: var(--t-caption); }
 @container dkbar (max-width: 620px) {
   .dk-find { width: 100%; }
-  .dk-chips { flex: 1 1 100%; flex-wrap: nowrap; overflow-x: auto; margin: -4px calc(var(--sp-5) * -1); padding: 4px var(--sp-5); scrollbar-width: none; }
+  .dk-chipw { flex: 1 1 100%; margin: -4px calc(var(--sp-5) * -1); }
+  .dk-chips { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; padding: 4px var(--sp-5); scrollbar-width: none; }
   .dk-chips::-webkit-scrollbar { display: none; }
   .desk-chip { flex: none; }
   .dk-row2 > .ui-seg { flex: 1 1 100%; }
@@ -630,6 +632,7 @@
 .dk-grid[hidden] { display: none; }
 .dk-scatter { min-height: 180px; }
 .dk-scatter .dk-front { stroke: var(--accent); stroke-width: 1.5; }
+.dk-scatter .dk-front.is-off { stroke-dasharray: 3 4; opacity: 0.7; }
 
 .dk-size { display: flex; flex-direction: column; gap: var(--sp-4); }
 .dk-size-r { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
@@ -757,8 +760,8 @@
 
 .dk-smile { min-height: 200px; color: var(--label-2); }
 .dk-smile .ivs { display: block; }
-.ivs-cell.is-pos { fill: var(--accent); }
-.ivs-cell.is-neg { fill: var(--s-orange); }
+.ivs-cell.is-pos { fill: var(--g-long); }
+.ivs-cell.is-neg { fill: var(--g-short); }
 .ivs-cell.is-nolevel { stroke: var(--label-3); }
 .ivs-cell.is-stale, .ivs-cell.is-unknown-age { stroke: var(--label-2); }
 .ivs-negpat { color: var(--ground-base); }

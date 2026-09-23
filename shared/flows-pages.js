@@ -492,12 +492,12 @@ export function deskPage({ username = "" } = {}) {
                  spellcheck="false" placeholder="Add symbols" enterkeyhint="go">
           <button type="submit" class="desk-add">Add</button>
         </form>
-        <div class="dk-chips" id="deskList" role="group" aria-label="Watchlist"></div>
+        <div class="tl-stripw dk-chipw"><div class="dk-chips" id="deskList" role="group" aria-label="Watchlist"></div></div>
       </div>
       <div class="dk-row2" id="dkFilters">
-        <label class="dk-all"><input type="checkbox" id="deskAll"><span>All</span></label>
+        <label class="dk-all"><input type="checkbox" id="deskAll"><span>All names</span></label>
         <button type="button" class="dk-pill" id="deskRefresh">Refresh</button>
-        <button type="button" class="dk-pill" id="deskClear">Clear</button>
+        <button type="button" class="dk-pill" id="deskClear">Remove all</button>
       </div>
       <p class="dk-note visually-hidden" id="deskStatus" role="status">Add a symbol to begin.</p>
     </section>
@@ -513,6 +513,19 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="annualized">Simple 365 over days scaling of the yield. A convention for comparing tenors, not a return anyone earns.</p>
       <p data-k="cushion">Distance from spot to breakeven in units of the move this option&#39;s own implied volatility prices over its remaining life. Not a probability.</p>
       <p data-k="smile">Each cell is one quoted contract&#39;s implied volatility, shaded by how far it sits above or below its own expiry&#39;s at-the-money level, so a seller can see where the smile pays for the risk.</p>
+      <p data-k="sm-shade">The shade is that volatility against its own expiry&#39;s at-the-money quote — hatched below it, plain above — so the smile is readable without the term structure swamping it. The strip beneath the grid, read left to right, is the term structure.</p>
+      <p data-k="sm-num">The number in a cell is the contract&#39;s own quoted implied volatility.</p>
+      <p data-k="sm-narrow">The columns are too narrow at this width to print a volatility inside each cell, so every cell carries its own in a tooltip instead.</p>
+      <p data-k="sm-nolevel">Those columns carry their quoted volatilities and no shade, and the term-structure line does not bridge them.</p>
+      <p data-k="sm-last">This vendor&#39;s implied volatility is the LAST TRANSACTION&#39;s, not a quote.</p>
+      <p data-k="sm-fresh">every cell on this surface is a print from today.</p>
+      <p data-k="sm-aged">so their volatility is of unknown age. Those cells are drawn with a broken border and NONE of them set an expiry&#39;s level — a stale cell is one marked number, but a stale level would tilt a whole column&#39;s smile with no marker on any cell it moved.</p>
+      <p data-k="sm-built">Built from every contract with a two-sided quote, before the liquidity gates that decide the lines above and regardless of the Sell toggle — those gates fall hardest on the wings, and a smile with its tails cut off is a different smile.</p>
+      <p data-k="sm-cut">This chain is larger than the desk fetches, so the surface is taken over a partial chain.</p>
+      <p data-k="sm-quoted">Quoted volatilities, and differences between quoted volatilities on the same expiry. Nothing here is fitted, interpolated or repriced.</p>
+      <p data-k="sm-crowd">contracts fall in this row of this column; the one shown is the print this surface prefers — today&#39;s first, then nearest the row&#39;s centre. The cell is never an average of quotes.</p>
+      <p data-k="sm-untraded">This contract has NOT traded today, so its implied volatility is the last transaction&#39;s — of unknown age. It is drawn but it did not set this expiry&#39;s level.</p>
+      <p data-k="sm-novol">The vendor reported no volume for this contract, so the age of its implied volatility is unknown. It did not set this expiry&#39;s level.</p>
       <p data-k="refuse">Selling options has unbounded loss on the call side and equity-sized loss on the put side. This is a screen, not advice.</p>
   </div>`,
   });

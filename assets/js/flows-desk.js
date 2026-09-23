@@ -12,7 +12,7 @@
   const refreshBtn = $("deskRefresh"), clearBtn = $("deskClear"), statusEl = $("deskStatus"), foot = $("deskFoot");
   const grid = $("dkGrid"), filters = $("dkFilters");
   if (!entry || !input || !list || !grid) return;
-  const T = (k) => { const n = document.querySelector('#dkCopy [data-k="' + k + '"]'); return n ? n.textContent.replace(/\s+/g, " ").trim() : ""; };
+  const T = (k, o) => { const n = document.querySelector('#dkCopy [data-k="' + k + '"]'); const t = n ? n.textContent.replace(/\s+/g, " ").trim() : ""; return o ? t.replace(/\{(\w+)\}/g, (m, x) => (x in o ? o[x] : m)) : t; };
 
   const MAX_BUYING_POWER = 1e11;
   const MAX_SYMBOLS = 20;
@@ -148,7 +148,17 @@
       return h("span", { class: "desk-chip is-" + e.state, "data-t": sym }, toggle, x);
     }));
     syncAll();
+    edge();
   }
+
+  const chipWrap = list.parentElement;
+  function edge() {
+    const max = list.scrollWidth - list.clientWidth;
+    chipWrap.classList.toggle("is-l", list.scrollLeft > 2);
+    chipWrap.classList.toggle("is-r", list.scrollLeft < max - 2);
+  }
+  list.addEventListener("scroll", edge, { passive: true });
+  if (window.ResizeObserver) new ResizeObserver(edge).observe(list);
 
   function syncAll() {
     allBox.disabled = !book.size;
@@ -320,7 +330,7 @@
     mods.smileSel = h("select", { id: "deskSurfaceSymbol", class: "dk-select", "aria-label": "Smile for symbol" });
     mods.smileSel.addEventListener("change", () => { surfaceSymbol = mods.smileSel.value || null; writeURL(); if (mods.smileChart) mods.smileChart.redraw(true); });
     mods.smile = h("div", { class: "dk-smile", id: "dkSmile" });
-    mods.smileCard = UI.moduleCard({ id: "deskSurface", title: "Smile", span: 12, index: 3, info: smileInfo, body: [mods.smile, h("div", { class: "tl-legend" }, UI.legend([["--accent", "", "Richer than the money"], ["--s-orange", "", "Cheaper, hatched"], ["--label-3", "ring", "No at-the-money level"], ["--label-2", "ln", "Not traded today, dashed"]]))] });
+    mods.smileCard = UI.moduleCard({ id: "deskSurface", title: "Smile", span: 12, index: 3, info: smileInfo, body: [mods.smile, h("div", { class: "tl-legend" }, UI.legend([["--g-long", "", "Above ATM"], ["--g-short", "", "Below ATM, hatched"], ["--label-3", "ring", "No ATM level"], ["--label-2", "ln", "Untraded, dashed"]]))] });
     mods.smileCard.querySelector(".ui-mod-h").insertBefore(mods.smileSel, mods.smileCard.querySelector(".ui-mod-h .ui-info"));
     mods.smileCard.hidden = true;
     mods.linesCard = lines;
@@ -542,8 +552,8 @@
     if (!pts.length) { host.append(UI.silent({ state: "withheld", reason: "No line carries both a risk reading and a yield." }, "Frontier", H)); return; }
     const ys = pts.map((p) => p.y).sort((a, b) => a - b);
     const p95 = ys[Math.min(ys.length - 1, Math.floor(ys.length * 0.95))];
-    const cap = Math.max(0.05, Math.min(ys[ys.length - 1], p95 * 3) * 1.04);
-    const left = 44, right = 16, top = 14, bottom = 26;
+    const cap = Math.max(0.05, Math.min(ys[ys.length - 1], p95 * 8) * 1.04);
+    const left = 44, right = 16, top = 24, bottom = 26;
     const x0 = axis === 0 ? 0 : Math.max(0, Math.min(...pts.map((p) => p.x)) - 0.03), x1 = axis === 0 ? Math.max(0.1, Math.max(...pts.map((p) => p.x)) * 1.08) : 1;
     const x = C.lin(x0, x1, left, w - right), yl = C.lin(0, Math.sqrt(cap), H - bottom, top);
     const y = (v) => yl(Math.sqrt(Math.max(0, v)));
@@ -552,12 +562,12 @@
     const svg = C.svgRoot(box, w, H, animate && !mods.quick, "Annualised yield against " + (axis === 0 ? "delta" : "the implied chance of profit") + " for " + pts.length + " lines");
     s("line", { x1: left, x2: w - right, y1: H - bottom, y2: H - bottom, class: "base" }, svg);
     let lastY = Infinity;
-    for (const t of [0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 16]) {
-      if (t > cap || lastY - y(t) < 22) continue;
+    for (const t of [0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32]) {
+      if (t > cap || lastY - y(t) < 40) continue;
       lastY = y(t);
-      s("line", { x1: left, x2: w - right, y1: y(t), y2: y(t), class: "hair" }, svg);
       s("text", { x: left - 8, y: y(t) + 4, text: Math.round(t * 100) + "%", "text-anchor": "end" }, svg);
     }
+    s("text", { x: 2, y: 11, text: "Ann. yield", class: "tx-3" }, svg);
     for (const t of C.niceTicks(x0, x1, phone ? 4 : 6)) {
       if (x(t) < left + 8 || x(t) > w - right - 8) continue;
       s("text", { x: x(t), y: H - 7, text: axis === 0 ? t.toFixed(2).replace(/^0/, "") : Math.round(t * 100) + "%", "text-anchor": "middle" }, svg);
@@ -567,7 +577,10 @@
     const frSet = new Set(fr);
     if (fr.length > 1) {
       const P = fr.map((p) => [x(p.x), y(Math.min(p.y, cap))]);
-      s("path", { d: C.pathOf(P), class: "ln dk-front" + (animate && !mods.quick ? " draw" : ""), pathLength: 1 }, svg);
+      const inScale = fr.findIndex((p) => p.y > cap);
+      const cut = inScale < 0 ? P.length : Math.max(1, inScale);
+      s("path", { d: C.pathOf(P.slice(0, cut)), class: "ln dk-front" + (animate && !mods.quick ? " draw" : ""), pathLength: 1 }, svg);
+      if (cut < P.length) s("path", { d: C.pathOf(P.slice(cut - 1)), class: "ln dk-front is-off" }, svg);
     }
     const syms = [...new Set(pts.map((p) => p.r.__sym))];
     const g = s("g", { class: animate && !mods.quick ? "fade" : null }, svg);
@@ -679,7 +692,7 @@
       const crosses = earn.has(e.expiry) ? earn.get(e.expiry) : undefined;
       const g = s("g", { class: "ivs-colhead" }, svg);
       s("title", { text: e.expiry + (e.days === null ? "" : ", " + e.days + " days") + ". " + (crosses === true ? "Contracts on this expiry outlive the next earnings report — the level here is priced against a jump, not a diffusion." : crosses === false ? "No earnings report falls before this expiry." : "Whether this expiry outlives the next earnings report is not determined: no contract on it survived the sale gates, so nothing on this column was dated.") }, g);
-      s("text", { class: "ivs-exp" + (crosses === true ? " crosses-earnings" : ""), x, y: padT - 18, "text-anchor": "middle", text: String(e.expiry).slice(5) + (crosses === true ? " ⚠" : "") }, g);
+      s("text", { class: "ivs-exp" + (crosses === true ? " crosses-earnings" : ""), x, y: padT - 18, "text-anchor": "middle", text: F.day(e.expiry) + (crosses === true ? " ⚠" : "") }, g);
       s("text", { class: "ivs-days", x, y: padT - 6, "text-anchor": "middle", text: e.days === null ? DASH : e.days + "d" }, g);
     });
     rows.forEach((r, i) => {
@@ -745,16 +758,16 @@
   function cellTitle(cell, e, sf) {
     const parts = [cell.strike + " " + (cell.type === "P" ? "put" : "call") + " " + cell.expiry + " · " + fmtM(cell.m) + " from the money · " + fmtVol(cell.iv) + "% implied"];
     parts.push(isNum(cell.skew) !== null ? fmtSkew(cell.skew) + " vol points against this expiry's at-the-money " + fmtVol(e.atmIv) + "%" : "No skew: " + (e.atmReason || "this expiry has no at-the-money level"));
-    if (cell.traded === false) parts.push("This contract has NOT traded today, so its implied volatility is the last transaction's — of unknown age. It is drawn but it did not set this expiry's level.");
-    else if (cell.traded === null) parts.push("The vendor reported no volume for this contract, so the age of its implied volatility is unknown. It did not set this expiry's level.");
+    if (cell.traded === false) parts.push(T("sm-untraded"));
+    else if (cell.traded === null) parts.push(T("sm-novol"));
     else parts.push("Traded " + fmtInt(cell.volume) + " today" + (cell.oi === null ? "" : ", open interest " + fmtInt(cell.oi)) + ".");
-    if (cell.crowd > 1) parts.push(cell.crowd + " contracts fall in this row of this column; the one shown is the print this surface prefers — today's first, then nearest the row's centre. The cell is never an average of quotes.");
+    if (cell.crowd > 1) parts.push(cell.crowd + " " + T("sm-crowd"));
     if (isNum(cell.skew) !== null && isNum(sf.skewCap) !== null && Math.abs(cell.skew) > sf.skewCap) parts.push("Past the shade cap of " + fmtSkew(sf.skewCap) + " vol points, so the shade understates it. Marked with a slash.");
     return parts.join(". ").replace(/\.\./g, ".");
   }
 
   function surfaceAria(sf, p) {
-    const levels = sf.expiries.map((e) => String(e.expiry).slice(5) + " " + (isNum(e.atmIv) === null ? "no level" : fmtVol(e.atmIv) + " percent"));
+    const levels = sf.expiries.map((e) => F.day(e.expiry) + " " + (isNum(e.atmIv) === null ? "no level" : fmtVol(e.atmIv) + " percent"));
     return "Implied volatility surface for " + (p && p.ticker ? p.ticker : surfaceSymbol) + ": " + sf.expiriesShown + " expiries by " + sf.rowsShown +
       " moneyness bands. At-the-money implied volatility by expiry — " + levels.join(", ") + ". Shade is each contract's implied volatility against its own expiry's at-the-money quote.";
   }
@@ -762,26 +775,25 @@
   function surfaceNotes(sf, p) {
     const bits = [];
     bits.push("Rows are log-moneyness, ln(strike ÷ spot), in bands " + (sf.step * 100).toFixed(1) + "% wide; columns are expiries, nearest first.");
-    bits.push((smileNumbers ? "The number in a cell is the contract's own quoted implied volatility. " : "The columns are too narrow at this width to print a volatility inside each cell, so every cell carries its own in a tooltip instead. ") +
-      "The shade is that volatility against its own expiry's at-the-money quote — hatched below it, plain above — so the smile is readable without the term structure swamping it. The strip beneath the grid, read left to right, is the term structure.");
-    bits.push("At the money: " + sf.expiries.map((e) => String(e.expiry).slice(5) + " " + (isNum(e.atmIv) === null ? DASH : fmtVol(e.atmIv) + "%")).join(", ") + ".");
+    bits.push((smileNumbers ? T("sm-num") : T("sm-narrow")) + " " +
+      T("sm-shade"));
+    bits.push("At the money: " + sf.expiries.map((e) => F.day(e.expiry) + " " + (isNum(e.atmIv) === null ? DASH : fmtVol(e.atmIv) + "%")).join(", ") + ".");
     const noLevel = sf.expiries.filter((e) => isNum(e.atmIv) === null);
-    if (noLevel.length) bits.push(noLevel.map((e) => String(e.expiry).slice(5) + " has no level — " + e.atmReason).join("; ") + ". Those columns carry their quoted volatilities and no shade, and the term-structure line does not bridge them.");
+    if (noLevel.length) bits.push(noLevel.map((e) => F.day(e.expiry) + " has no level — " + e.atmReason).join("; ") + ". " + T("sm-nolevel"));
     const aged = [];
     if (sf.stale > 0) aged.push(sf.stale + " did not");
     if (sf.unknownAge > 0) aged.push(sf.unknownAge + " carr" + (sf.unknownAge === 1 ? "ies" : "y") + " no volume at all");
-    bits.push("This vendor's implied volatility is the LAST TRANSACTION's, not a quote. " + sf.fresh + " of " + sf.placed + " cells traded today" +
-      (aged.length === 0 ? " — every cell on this surface is a print from today." : "; " + aged.join(" and ") + ", so their volatility is of unknown age. Those cells are drawn with a broken border and NONE of them set an expiry's level — a stale cell is one marked number, but a stale level would tilt a whole column's smile with no marker on any cell it moved."));
+    bits.push(T("sm-last") + " " + sf.fresh + " of " + sf.placed + " cells traded today" +
+      (aged.length === 0 ? " — " + T("sm-fresh") : "; " + aged.join(" and ") + ", " + T("sm-aged")));
     if (sf.crowded > 0) bits.push(sf.crowded === 1 ? "One contract shares a row with another; the cell shows one quoted contract and is never an average of two." : sf.crowded + " contracts share a row with another; each cell shows one quoted contract and is never an average of two.");
     if (sf.clipped > 0) bits.push("The shade is capped at " + fmtSkew(sf.skewCap) + " vol points; " + sf.clipped + " cell" + (sf.clipped === 1 ? " runs" : "s run") + " past it and " + (sf.clipped === 1 ? "is" : "are") + " marked with a slash.");
     const win = [];
     if (sf.expiriesShown < sf.expiriesTotal) win.push(sf.expiriesShown + " of " + sf.expiriesTotal + " expiries");
     if (sf.rowsShown < sf.rowsTotal) win.push(sf.rowsShown + " of " + sf.rowsTotal + " moneyness bands");
     if (win.length) bits.push("Showing " + win.join(" and ") + ".");
-    bits.push("Built from every contract with a two-sided quote, before the liquidity gates that decide the lines above and regardless of the Sell toggle — those gates fall hardest on the wings, and a smile with its tails cut off is a different smile" +
-      (p && p.truncated ? ". This chain is larger than the desk fetches, so the surface is taken over a partial chain." : "."));
+    bits.push(T("sm-built") + (p && p.truncated ? " " + T("sm-cut") : ""));
     if (sf.ivBasis) bits.push("Volatility units resolved once for the whole chain: " + sf.ivBasis + ".");
-    bits.push("Quoted volatilities, and differences between quoted volatilities on the same expiry. Nothing here is fitted, interpolated or repriced.");
+    bits.push(T("sm-quoted"));
     return bits;
   }
 

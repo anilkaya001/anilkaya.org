@@ -841,7 +841,7 @@ try {
     {
       const crossing = ccc.columns.filter((c) => c.crosses);
       eq(crossing.length, 1, "one expiry outlives the 11-05 report");
-      ok(/12-18/.test(crossing[0].text), "and it is the back one");
+      ok(/^Dec 18/.test(crossing[0].text), `and it is the back one, dated the way every other date on the desk is (${crossing[0].text})`);
       ok(crossing[0].text.includes("⚠"), "marked with a glyph, so it survives a greyscale render");
     }
 
@@ -1146,6 +1146,23 @@ try {
        "on a phone every figure is printed under its own label, because the header row is gone at this width");
     const cellsVisible = await page.$eval("#dkList .dk-row .dk-c small", (n) => getComputedStyle(n).position !== "absolute");
     ok(cellsVisible, "and the labels are on the surface, not only in the accessibility tree");
+  }
+
+  {
+    await page.goto(server.baseURL + "/flows/desk/?t=AAA,BBB,CCC,DDD", { waitUntil: "domcontentloaded" });
+    await settle(4);
+    const fade = (to) => page.$eval(".dk-chipw", (w, end) => new Promise((res) => {
+      const s = w.firstChild;
+      s.scrollLeft = end ? s.scrollWidth : 0;
+      setTimeout(() => res({ scrollable: s.scrollWidth > s.clientWidth + 2, left: getComputedStyle(w, "::before").opacity, right: getComputedStyle(w, "::after").opacity }), 350);
+    }), to === "end");
+    const start = await fade("start");
+    ok(start.scrollable, "on a phone four names scroll inside their own row instead of the page");
+    ok(Number(start.left) < 0.05 && Number(start.right) > 0.5,
+       `and at its start the row fades only on the right, where names are hidden (${start.left}/${start.right})`);
+    const end = await fade("end");
+    ok(Number(end.left) > 0.5 && Number(end.right) < 0.05,
+       `and at its end only on the left (${end.left}/${end.right}) — a name cut off at the edge with no fade reads as the last name`);
   }
 
   console.log(`✓ flows-desk: ${checks} assertions — cross-symbol re-ranking, URL-held state, select-all tri-state, ` +
