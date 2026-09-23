@@ -1348,7 +1348,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
   {
     const emitted = new Set(fs.readdirSync(path.dirname(prefix))
-      .map((f) => /-card-(.+)\.json$/.exec(f))
+      .map((f) => /-card-([A-Z].*)\.json$/.exec(f))
       .filter(Boolean).map((m) => m[1]));
     const claimed = new Set();
     const long = read("board-long"), short = read("board-short");
@@ -1361,14 +1361,20 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
       const c = JSON.parse(fs.readFileSync(`${prefix}-card-${t}.json`, "utf8"));
       return c.depth;
     };
-    const byDepth = { board: new Set(), "cross-section": new Set(), other: new Set() };
+    const byDepth = { board: new Set(), "cross-section": new Set(), index: new Set(), other: new Set() };
     for (const t of emitted) {
       const d = depthOf(t);
       (byDepth[d] || byDepth.other).add(t);
     }
     eq(byDepth.other.size, 0,
-       "every emitted card declares a depth this contract knows — an unrecognised one is a third " +
+       "every emitted card declares a depth this contract knows — an unrecognised one is a fourth " +
        "kind of card nobody has priced");
+    assert.deepEqual([...byDepth.index].sort(), ["IWM", "QQQ", "SPY"],
+      "the index lane writes exactly the three index dossiers, through the same buildCard path, and " +
+      "none of them is a board or cross-section name"); checks++;
+    for (const t of byDepth.index) {
+      ok(!claimed.has(t), `${t} is an index dossier and no board row advertises it`);
+    }
     ok(byDepth.board.size <= DEEP_NAMES,
        `the deep lane stayed inside its ${DEEP_NAMES}-name budget (${byDepth.board.size} board-depth ` +
        "cards), however wide the board or the cross-section got");
@@ -1417,7 +1423,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
   {
     const cardFiles = fs.readdirSync(path.dirname(prefix))
-      .filter((f) => /-card-.+\.json$/.test(f))
+      .filter((f) => /-card-[A-Z].*\.json$/.test(f))
       .map((f) => JSON.parse(fs.readFileSync(path.join(path.dirname(prefix), f), "utf8")));
     ok(cardFiles.length > 0, `the dry run emitted ${cardFiles.length} cards to check the join on`);
 
@@ -1693,11 +1699,18 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     "the re-publish writes one object to two keys rather than reconstructing it"); checks++;
 
   const cardFile = fs.readdirSync(path.dirname(prefix))
-    .find((f) => /-card-[A-Z0-9]+\.json$/.test(f));
+    .filter((f) => /-card-[A-Z0-9]+\.json$/.test(f))
+    .find((f) => JSON.parse(fs.readFileSync(path.join(path.dirname(prefix), f), "utf8")).depth === "board");
   ok(cardFile, "the dry run emitted a card");
   const card = JSON.parse(fs.readFileSync(path.join(path.dirname(prefix), cardFile), "utf8"));
 
-  eq(card.v, 2, "the schema version is unmoved: these panels are additions, not redefinitions");
+  eq(card.v, 3, "the schema version is 3, where walls, flow peaks, the crossing, zero gamma and the VRP were renamed; these chain panels are additions to it, not redefinitions");
+  ok(card.engine && Array.isArray(card.engine.facts) && Array.isArray(card.engine.structures) && card.engine.engine === "q1",
+     "a deep dry-run card carries the engine block, built from Black-Scholes fixture quotes");
+  ok(card.engine.pLaw && card.engine.pLaw.knots.length === 6 && card.engine.pLaw.knots.every((k) => k.edges.length === 65 && k.means.length === 64),
+     "with a 64-bin real-world law at six horizons");
+  ok(card.engine.ideas.every((id) => card.engine.structures.some((st) => st.id === id)), "and every ranked idea resolves to a published structure");
+  ok(card.engine.expiries.every((e) => e.forward && e.smile && e.smile.method), "and every fitted expiry names its forward and its smile method");
   for (const key of ["ivSurface", "skewTerm", "topContracts", "aggressor"]) {
     const panel = card.panels[key];
     ok(panel, `the card carries panels.${key}`);
@@ -2631,7 +2644,8 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   }
 
   {
-    const cardFiles = emitted.filter((n) => n.startsWith(base + "-card-"));
+    const cardFiles = emitted.filter((n) => n.startsWith(base + "-card-") &&
+      /^[A-Z]/.test(n.slice((base + "-card-").length)));
     ok(cardFiles.length >= 50, `the dry run emitted ${cardFiles.length} cards to check`);
     let boardCards = 0;
     for (const name of cardFiles) {
@@ -2759,6 +2773,18 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
       ok(bytes <= 120 * 1024,
          `${name} is ${(bytes / 1024).toFixed(1)}KB, inside the brief's own 120KB ceiling ` +
          "(the ingest route accepts 128KB; the shed in the pipeline measures against 120KB)");
+      continue;
+    }
+    if (/^w-card-/.test(name)) {
+      ok(bytes <= 128 * 1024,
+         `${name} is ${(bytes / 1024).toFixed(1)}KB, inside the 128KB the ingest route accepts, engine block included`);
+      const stored = JSON.parse(fs.readFileSync(path.join(dir, name), "utf8"));
+      if (stored && stored.engine && stored.engine.status !== "split") {
+        const { engine, ...body } = stored;
+        ok(JSON.stringify(body).length <= 100 * 1024,
+           `${name} without its engine block is inside the 100KB the card shedder targets; the engine is measured ` +
+           "separately against the ingest cap and splits to card-x rather than shedding a panel");
+      }
       continue;
     }
     ok(bytes <= 100 * 1024,
@@ -3558,8 +3584,8 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(card([]), "quiet", "where the old [] published quiet");
 
   const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
-  eq((src.match(/congress: congressRows\(ticker, congressState\)|const congress = congressRows\(ticker, congressState\)/g) || []).length, 2,
-     "both card lanes, board and cross-section, take the panel's input from the one rule");
+  eq((src.match(/congress: congressRows\(ticker, congressState\)|const congress = congressRows\(ticker, congressState\)/g) || []).length, 3,
+     "all three card lanes, board, cross-section and index, take the panel's input from the one rule");
   ok(!/congressRead === "ok" \? \[\] : null/.test(src), "and the old expression is gone from both");
 }
 
@@ -3664,13 +3690,15 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
 {
   const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
-  eq(IV_RANK_PARAMS.timespan, "3m", "the implied-volatility history is asked for by timespan, the parameter the vendor documents");
+  eq(IV_RANK_PARAMS.timespan, "1y",
+     "the implied-volatility history is asked for by timespan, the parameter the vendor documents, and for a " +
+     "year of it: the vol-of-vol and the AR(1) half-life read that year at no extra call");
   ok(!/iv-rank`,\s*\{\s*limit/.test(src), "and never with the `limit` the vendor ignores");
   ok(/iv-rank`, \{ \.\.\.IV_RANK_PARAMS, \.\.\.onSession \}\)/.test(src),
      "the live call reads the fixture's parameter object, with the session date added so no row past the session is asked for");
   eq(fakeIvRank("ABC", 50).length, 5,
      "the fixture answers an undated, unparameterised call the way the vendor does: five rows");
-  ok(fakeIvRank("ABC", 50, IV_RANK_PARAMS).length >= 60, "and a three-month timespan with a quarter's sessions");
+  ok(fakeIvRank("ABC", 50, IV_RANK_PARAMS).length >= 250, "and a one-year timespan with a year's sessions, as the live probe returned 251");
   ok(/volatility\/term-structure`, \{ \.\.\.onSession \}\)/.test(src) &&
      /const onSession = ARCHIVE_DATE_RE\.test\(String\(sessionDate \|\| ""\)\) \? \{ date: sessionDate \} : \{\}/.test(src),
      "the term structure is dated at the session, so its days to expiry agree with the greeks on the same card");
@@ -3746,7 +3774,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(long.rows.every((r) => (r.variation.driftInSd === null ? r.variation.sdBasis === null : r.variation.sdBasis === "gamma")),
      "and every row's drift names its basis: the spot channel alone, the only one a row can measure");
   {
-    const cardsBy = new Map(fs.readdirSync(path.dirname(prefix)).filter((f) => /-card-/.test(f))
+    const cardsBy = new Map(fs.readdirSync(path.dirname(prefix)).filter((f) => /-card-[A-Z]/.test(f))
       .map((f) => JSON.parse(fs.readFileSync(path.join(path.dirname(prefix), f), "utf8"))).map((c) => [c.ticker, c]));
     const rows = [];
     for (const side of ["long", "short"]) {
@@ -3760,7 +3788,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        `where a row's drift differs from its card's, the two carry different bases, so neither is presented as the other (${rows.length} names)`);
   }
   {
-    const cards0 = fs.readdirSync(path.dirname(prefix)).filter((f) => /-card-/.test(f))
+    const cards0 = fs.readdirSync(path.dirname(prefix)).filter((f) => /-card-[A-Z]/.test(f))
       .map((f) => JSON.parse(fs.readFileSync(path.join(path.dirname(prefix), f), "utf8")));
     const byT = new Map(cards0.map((c) => [c.ticker, c]));
     const signed = long.rows.filter((r) => r.variation && r.variation.charmPctAdv !== null && byT.has(r.t) &&
@@ -3769,7 +3797,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
       -Math.sign(byT.get(r.t).panels.variation.channels.charm.hedge)),
        `a row's charm fraction points opposite to the card's hedge trade, as the block says (${signed.length} rows)`);
   }
-  const cards = fs.readdirSync(path.dirname(prefix)).filter((f) => /-card-/.test(f))
+  const cards = fs.readdirSync(path.dirname(prefix)).filter((f) => /-card-[A-Z]/.test(f))
     .map((f) => JSON.parse(fs.readFileSync(path.join(path.dirname(prefix), f), "utf8")));
   ok(cards.every((c) => c.panels.variation && typeof c.panels.variation.status === "string"),
      "every card, deep or cross-section, carries the hedging panel");

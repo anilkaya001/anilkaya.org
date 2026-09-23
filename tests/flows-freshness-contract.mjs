@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { easternClock, isRefreshWindow, REFRESH_CADENCE_MINUTES, easternDay, lastCompletedSession }
   from "../shared/flows-freshness.js";
 
@@ -61,9 +62,38 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 }
 
 {
-  eq(REFRESH_CADENCE_MINUTES, 15,
-    "the cadence pages quote matches the wrangler.toml cron — a page promising " +
-    "15-minute freshness against a 30-minute cron would be lying politely");
+  const zone = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", weekday: "short", hour12: false,
+  });
+  let compared = 0;
+  const misses = [];
+  for (let ms = Date.UTC(2024, 0, 1); ms < Date.UTC(2033, 0, 1); ms += 30 * 60000) {
+    const p = Object.fromEntries(zone.formatToParts(ms).map((x) => [x.type, x.value]));
+    const day = `${p.year}-${p.month}-${p.day}`;
+    const minutes = (Number(p.hour) % 24) * 60 + Number(p.minute);
+    const c = easternClock(ms);
+    if (easternDay(ms) !== day || c.minutes !== minutes || c.weekday !== p.weekday) {
+      if (misses.length < 5) misses.push(new Date(ms).toISOString());
+    }
+    compared++;
+  }
+  eq(misses.length, 0,
+    `the Eastern clock is arithmetic (the US daylight rule: second Sunday of March to first Sunday of ` +
+    `November, 02:00 local) so a cold Worker isolate never pays the 16-23 ms ICU zone load inside its ` +
+    `10 ms CPU budget, and it is proven equal to the IANA America/New_York zone at every half hour ` +
+    `from 2024 to 2032 (${compared} instants; first misses ${misses.join(", ")}) — a change in the law ` +
+    `reaches ICU first and fails here rather than drifting silently`);
+}
+
+{
+  const toml = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
+  const crons = (/crons\s*=\s*\[([^\]]*)\]/.exec(toml) || [, ""])[1];
+  const rth = /"(\d+)-59\/(\d+) 13-21 \* \* 1-5"/.exec(crons);
+  ok(rth, `wrangler.toml carries the market-hours clock (${crons.trim()})`);
+  eq(REFRESH_CADENCE_MINUTES, Number(rth[2]),
+    "the cadence pages quote matches the wrangler.toml market-hours cron step — a page " +
+    "promising 5-minute freshness against a 15-minute clock would be lying politely");
 }
 
 {
@@ -86,8 +116,8 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(lastCompletedSession("nope"), null, "an unreadable instant is null");
 }
 
-console.log(`✓ flows-freshness: ${checks} assertions — an Eastern clock read through the IANA ` +
-  `zone rather than an offset table, a window inclusive at both stated edges, the same UTC ` +
+console.log(`✓ flows-freshness: ${checks} assertions — an Eastern clock proven equal to the IANA ` +
+  `zone at every half hour 2024-2032 rather than a fixed offset, a window inclusive at both stated edges, the same UTC ` +
   `instant inside in July and outside in January, dead weekends, and a cadence constant the ` +
   `pages can quote without lying, and an instant's EASTERN day told from the first ten ` +
   `characters of its ISO stamp — with the epoch refused rather than published as 1969`);

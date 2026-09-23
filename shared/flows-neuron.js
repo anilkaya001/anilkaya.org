@@ -1,8 +1,9 @@
 import { TICKER_PANELS, SENTINEL_KEYS } from "./flows-panels.js";
 import { guardAnswer, numeralsIn } from "./flows-ask.js";
 import { VARIATION_VOTES, VARIATION_LINES } from "./flows-variation.js";
+import { STRUCTURE_BY_ID, AFFINITY } from "./flows-quant-structures.js";
 
-export const NEURON_CONTEXT_VERSION = 2;
+export const NEURON_CONTEXT_VERSION = 3;
 export const NEURON_MAX_IDEAS = 3;
 
 const article = (noun, capital) => (/^[aeiou]/i.test(noun) ? (capital ? "An " : "an ") : (capital ? "A " : "a ")) + noun;
@@ -75,7 +76,7 @@ function scalarFigures(panel, keys) {
 }
 
 const FIGURE_KEYS = {
-  gamma: ["spot", "callWall", "putWall", "strikes", "bandMin", "bandMax"],
+  gamma: ["spot", "flowPeakLong", "flowPeakShort", "strikes", "bandMin", "bandMax"],
   surface: ["asOf", "atSpot", "expiriesShown", "expiriesTotal", "strikesShown", "strikesTotal"],
   levels: ["spot", "atr"],
   scoreOverlay: ["overlap", "scored", "deadBand"],
@@ -90,7 +91,8 @@ const FIGURE_KEYS = {
   charm: ["seen", "cap", "shed"],
   deltaExposure: ["seen", "cap", "shed"],
   displacement: ["oiCentroid", "volCentroid", "spot", "gapPx", "gapAtr"],
-  pricedMove: ["impliedMove", "impliedLow", "impliedHigh", "realizedMove", "sessions", "asOf"],
+  pricedMove: ["impliedMove", "impliedLow", "impliedHigh", "realizedMove", "sessions", "asOf",
+    "vrpForward", "vrpForwardVar", "vrpForwardRel", "vrpTrailing", "rvForward", "richnessFrom"],
   context: ["r5", "r21", "r42", "week52Pos", "changePct"],
   congress: ["total", "buys", "sells", "medianLagDays"],
   marketRank: ["asOf"],
@@ -127,8 +129,8 @@ function panelRobustness(key, group, p, card) {
     case "levels": {
       const g = card.panels && card.panels.gamma && card.panels.gamma.status === "ok" ? card.panels.gamma : null;
       return g && num(g.strikes) !== null && num(g.strikes) < 20
-        ? { r: 1, why: "the walls come from a flow ladder of fewer than 20 strikes" }
-        : { r: 2, why: "the walls and the ladder's zero-crossing read off today's flow ladder; max pain off the open-interest snapshot" };
+        ? { r: 1, why: "the flow ladder beside the levels rests on fewer than 20 strikes" }
+        : { r: 2, why: "the walls read off the open-interest book on their own side of spot, zero gamma off total gamma re-evaluated at hypothetical spots, the strike-sum crossing off today's flow ladder, max pain off the open-interest snapshot" };
     }
     case "surface":
       return num(p.clipped) > 0
@@ -188,39 +190,50 @@ export function gammaReading(card) {
   const c = card && typeof card === "object" ? card : {};
   const regime = c.regime && typeof c.regime === "object" ? c.regime : {};
   const P = c.panels && typeof c.panels === "object" ? c.panels : {};
-  const V = okPanel(P.variation) ? P.variation : null;
-  const bookDollars = num(regime.bookGamma) !== null ? num(regime.bookGamma)
-    : V && V.inputs ? num(V.inputs.gammaBook) : null;
-  const bookNet = bookDollars !== null ? bookDollars : num(regime.bookGammaRaw);
   const flow = num(regime.flowGamma) !== null ? num(regime.flowGamma) : num(regime.netGamma);
-  if (bookNet !== null) {
-    const share = num(regime.bookShare);
-    const label = bookNet >= 0 ? "long" : "short";
-    return {
-      from: "book", label, strength: share === null ? null : Math.abs(share),
-      sentence: "net dealer gamma across the open-interest book is " + label +
-        (bookDollars !== null ? ", " + signedMoney(bookDollars) + " per 1% move" : "") +
-        (share === null ? "" : " (" + Math.round(Math.abs(share) * 100) + "% of its gross)") +
-        (flow !== null ? "; today\u2019s trading added " + signedMoney(flow) : ""),
-    };
-  }
-  if (flow !== null) {
+  const from = str(regime.labelFrom);
+  const value = num(regime.labelValue) !== null ? num(regime.labelValue)
+    : from === "book" ? (num(regime.bookGammaRaw) !== null ? num(regime.bookGammaRaw) : num(regime.bookGamma))
+      : from === "flow" ? flow : null;
+  const label = value === null ? str(regime.label) : value >= 0 ? "long" : "short";
+  if ((from === "book" || from === "flow") && value !== null) {
+    if (from === "book") {
+      const share = num(regime.bookShare);
+      return {
+        from: "book", label, value, strength: share === null ? null : Math.abs(share),
+        sentence: "net dealer gamma across the open-interest book is " + label + ", " + signedMoney(value) + " per 1% move" +
+          (share === null ? "" : " (" + Math.round(Math.abs(share) * 100) + "% of its gross)") +
+          (flow !== null ? "; today\u2019s trading added " + signedMoney(flow) + ", read as flow and never as the book" : ""),
+      };
+    }
     const bars = okPanel(P.gamma) && !P.gamma.bucketed && Array.isArray(P.gamma.bars) ? P.gamma.bars : [];
     const gross = num(regime.flowGross) !== null ? num(regime.flowGross)
       : bars.reduce((a, b) => a + Math.abs(num(b && b.g) || 0), 0);
-    const strength = gross > 0 ? Math.abs(flow) / gross : null;
-    const label = flow >= 0 ? "long" : "short";
+    const strength = gross > 0 ? Math.abs(value) / gross : null;
     return {
-      from: "flow", label, strength,
-      sentence: "the open-interest book is not on this card, so the label follows the gamma dealers added today, " +
-        signedMoney(flow) + " per 1% move, " + label +
+      from: "flow", label, value, strength,
+      sentence: "the open-interest book is not on this card, so the label is the flow\u2019s: dealers added " +
+        signedMoney(value) + " of gamma per 1% move today, " + label +
         (strength === null ? "" : " (" + Math.round(strength * 100) + "% of the ladder\u2019s gross)"),
     };
   }
-  const lab = str(regime.label);
-  return lab === "long" || lab === "short"
-    ? { from: "label", label: lab, strength: null, sentence: "dealer gamma is labelled " + lab + " on this card, with no net published beside it" }
-    : { from: null, label: null, strength: null, sentence: null };
+  if (label === "long" || label === "short") {
+    return { from: "label", label, value: null, strength: null,
+      sentence: "the card labels dealer gamma " + label + " without the number it was read from" +
+        (flow !== null ? "; today\u2019s trading added " + signedMoney(flow) + ", which is flow and is not read as the book" : "") };
+  }
+  const bookRaw = num(regime.bookGammaRaw);
+  if (bookRaw !== null) {
+    const lab = bookRaw >= 0 ? "long" : "short";
+    return { from: "book", label: lab, value: bookRaw, strength: num(regime.bookShare) === null ? null : Math.abs(num(regime.bookShare)),
+      sentence: "net dealer gamma across the open-interest book is " + lab + ", " + signedMoney(bookRaw) + " per 1% move" };
+  }
+  if (flow !== null) {
+    const lab = flow >= 0 ? "long" : "short";
+    return { from: "flow", label: lab, value: flow, strength: null,
+      sentence: "the open-interest book is not on this card, so the label is the flow\u2019s: dealers added " + signedMoney(flow) + " of gamma per 1% move today, " + lab };
+  }
+  return { from: null, label: null, value: null, strength: null, sentence: null };
 }
 
 function hedgeDrivers(card) {
@@ -385,15 +398,26 @@ function premiumAxis(card) {
   }
   if (okPanel(pm)) {
     const r = panelRobustness("pricedMove", "volatility", pm, card).r;
-    const iv = num(pm.iv30), rv = num(pm.rv30), vrp = num(pm.vrp);
-    if (iv !== null && rv !== null && rv > 0 && vrp !== null) {
-      const rel = vrp / rv;
+    const iv = num(pm.iv30), rv = num(pm.rv30), rf = num(pm.rvForward);
+    const fwdGrade = num(pm.rvForwardGrade);
+    const forward = pm.richnessFrom === "forward" && iv !== null && rf !== null && rf > 0;
+    const legacyVrp = num(pm.vrp);
+    const trailing = num(pm.vrpTrailing) !== null ? num(pm.vrpTrailing) : legacyVrp;
+    const base0 = forward ? rf : rv;
+    const gap = forward ? iv - rf : trailing;
+    if (iv !== null && base0 !== null && base0 > 0 && gap !== null) {
+      const rel = gap / base0;
       reading = rel >= T.VRP_RELATIVE ? "rich" : rel <= -T.VRP_RELATIVE ? "cheap" : "fair";
-      base = r;
-      drivers.push({ key: "pricedMove", robustness: r, weight: r, axis: "premium", vote: reading === "rich" ? 1 : reading === "cheap" ? -1 : 0,
-        reading: pct1(iv) + "% implied against " + pct1(rv) + "% realised over 30 sessions, a premium of " +
-          (vrp >= 0 ? "+" : "\u2212") + Math.abs(vrp * 100).toFixed(1) + " points (" + (rel >= 0 ? "+" : "\u2212") + Math.abs(rel * 100).toFixed(0) +
-          "% of realised; the line is \u00b1" + Math.round(T.VRP_RELATIVE * 100) + "%)" });
+      base = forward ? Math.min(r, fwdGrade === null ? r : fwdGrade) : Math.min(r, 1);
+      drivers.push({ key: "pricedMove", robustness: base, weight: base, axis: "premium", vote: reading === "rich" ? 1 : reading === "cheap" ? -1 : 0,
+        reading: forward
+          ? pct1(iv) + "% implied against a GARCH forecast of " + pct1(rf) + "% realised over the next 21 sessions, a forward premium of " +
+            (gap >= 0 ? "+" : "\u2212") + Math.abs(gap * 100).toFixed(1) + " points, " + (num(pm.vrpForwardVar) !== null ? (pm.vrpForwardVar >= 0 ? "+" : "\u2212") + Math.abs(pm.vrpForwardVar).toFixed(4) + " in variance, " : "") +
+            (rel >= 0 ? "+" : "\u2212") + Math.abs(rel * 100).toFixed(0) + "% of the forecast; the line is \u00b1" + Math.round(T.VRP_RELATIVE * 100) + "%" +
+            (trailing !== null && rv !== null ? " (against the trailing 21 sessions' " + pct1(rv) + "% the gap is " + (trailing >= 0 ? "+" : "\u2212") + Math.abs(trailing * 100).toFixed(1) + " points, shown and not voted)" : "")
+          : pct1(iv) + "% implied against " + pct1(rv) + "% realised over the trailing 21 sessions, a backward-looking premium of " +
+            (gap >= 0 ? "+" : "\u2212") + Math.abs(gap * 100).toFixed(1) + " points (" + (rel >= 0 ? "+" : "\u2212") + Math.abs(rel * 100).toFixed(0) +
+            "% of realised; the line is \u00b1" + Math.round(T.VRP_RELATIVE * 100) + "%): no graded forward forecast was available, so it votes weakly" });
       const rank = num(pm.ivRank);
       if (rank !== null) {
         const v = rank >= T.IV_RANK_HIGH ? 1 : rank <= T.IV_RANK_LOW ? -1 : 0;
@@ -486,7 +510,8 @@ export function stateSentence(s, ticker) {
 export function stateChip(s) {
   const T = STATE_LINES;
   const flow = s.flow ? ", flow " + s.flow : "";
-  if (s.state === "pinned") return STATE_WORD.pinned + " \u00b7 long gamma at spot" + (s.target ? ", max pain " + f2(s.target.px) : "") + flow;
+  if (s.state === "pinned") return STATE_WORD.pinned + " \u00b7 long gamma " + (s.gammaFrom === "flow" ? "in today\u2019s flow" : "in the book") + (s.target ? ", max pain " + f2(s.target.px) : "") + flow;
+  if ((s.state === "squeeze" || s.state === "amplifying") && s.gammaFrom === "flow") return STATE_WORD[s.state] + " \u00b7 short gamma in today\u2019s flow" + (s.direction ? ", flow " + s.direction : ", flow undecided");
   if (s.state === "squeeze") return STATE_WORD.squeeze + " \u00b7 short gamma, flow " + s.direction + " toward the " + s.target.label.toLowerCase() + " " + f2(s.target.px);
   if (s.state === "amplifying") return STATE_WORD.amplifying + " \u00b7 short gamma" + (s.direction ? ", flow " + s.direction : ", flow undecided") + (s.bound ? ", to the flip " + f2(s.bound.px) : "");
   if (s.state === "transitional") return STATE_WORD.transitional + " \u00b7 " + (s.invalidation ? f2(s.invalidation.px) + " " : "") + "inside " + T.FLIP_ON_ATR + " ATR" + flow;
@@ -507,7 +532,7 @@ export function regimeState(card, extras) {
   const levelsR = panelRobustness("levels", "convexity", P.levels, c);
   const regime = c.regime && typeof c.regime === "object" ? c.regime : {};
   const L = levelsOf(c);
-  const flip = L.by.gamma_flip || null;
+  const flip = L.by.zero_gamma || null;
   const votes = directionVotes(c);
   const premium = premiumAxis(c);
   const prem = premium.reading || "fair";
@@ -541,18 +566,19 @@ export function regimeState(card, extras) {
           : "; the ladder changes sign " + regime.crossings + " time" + (regime.crossings === 1 ? "" : "s")) });
     if (levelsOk && flip && flipAtr !== null) {
       drivers.push({ key: "levels", robustness: levelsR.r, weight: levelsR.r, axis: "positioning",
-        reading: "the strike ladder's running sum crosses zero at " + f2(flip.px) + ", " + Math.abs(flipAtr).toFixed(2) + " ATR " + (flipAtr >= 0 ? "above" : "below") + " spot " + f2(L.spot) +
+        reading: "total dealer gamma, re-evaluated at hypothetical spots, changes sign at " + f2(flip.px) + ", " + Math.abs(flipAtr).toFixed(2) + " ATR " + (flipAtr >= 0 ? "above" : "below") + " spot " + f2(L.spot) +
           (onFlip ? " (inside " + T.FLIP_ON_ATR + " ATR: spot sits on the crossing)" : nearFlip ? " (inside " + T.FLIP_NEAR_ATR + " ATR)" : "") });
     } else if (levelsOk && num(regime.bandMin) !== null && num(regime.bandMax) !== null) {
       drivers.push({ key: "levels", robustness: levelsR.r, weight: levelsR.r, axis: "positioning",
-        reading: "no sign change resolved on the ladder read over " + f2(num(regime.bandMin)) + " to " + f2(num(regime.bandMax)) + ", so the " + label + " side holds across the window" });
+        reading: "no zero-gamma level was resolved on this card; the flow ladder read over " + f2(num(regime.bandMin)) + " to " + f2(num(regime.bandMax)) +
+          (num(regime.crossings) === 0 ? " never changes sign" : " is not the book") + ", so the " + label + " side is read from the " + (read.from === "book" ? "book" : "flow") });
     }
     const base = levelsOk ? Math.min(gammaDriverR, levelsR.r) : Math.min(gammaDriverR, 2);
     if (onFlip) {
       state = "transitional";
       direction = flow;
       confidence = base;
-      invalidation = { kind: "gamma_flip", px: flip.px, label: "Gamma flip" };
+      invalidation = { kind: "zero_gamma", px: flip.px, label: "Zero-gamma level" };
       horizon = front ? { kind: "expiry", value: front.expiry, days: num(front.days) } : pricedHorizon;
     } else if (label === "long") {
       state = "pinned";
@@ -561,7 +587,7 @@ export function regimeState(card, extras) {
       const pain = L.by.max_pain || null;
       target = pain && pain.distAtr !== null && Math.abs(pain.distAtr) <= T.PAIN_NEAR_ATR ? { kind: "max_pain", px: pain.px, label: "Max pain", distAtr: pain.distAtr } : null;
       const wall = L.list.filter((l) => l.kind === "call_wall" || l.kind === "put_wall").sort((a, b) => Math.abs(a.distAtr) - Math.abs(b.distAtr))[0] || null;
-      invalidation = flip ? { kind: "gamma_flip", px: flip.px, label: "Gamma flip" } : wall ? { kind: wall.kind, px: wall.px, label: wall.label } : null;
+      invalidation = flip ? { kind: "zero_gamma", px: flip.px, label: "Zero-gamma level" } : wall ? { kind: wall.kind, px: wall.px, label: wall.label } : null;
       horizon = cal && num(cal.frontLoad) !== null && cal.frontLoad >= T.FRONT_LOAD && front
         ? { kind: "expiry", value: front.expiry, days: num(front.days) }
         : cal && str(cal.halfLifeExpiry) ? { kind: "half_life_expiry", value: cal.halfLifeExpiry, days: num(cal.halfLifeDays) } : pricedHorizon;
@@ -585,13 +611,13 @@ export function regimeState(card, extras) {
       } else {
         state = "amplifying";
         if (flipBetween) {
-          bound = { kind: "gamma_flip", px: flip.px, label: "Gamma flip", distAtr: flipAtr };
+          bound = { kind: "zero_gamma", px: flip.px, label: "Zero-gamma level", distAtr: flipAtr };
           notes.push("the flip at " + f2(flip.px) + " lies between spot and the " + wall.label.toLowerCase() + " at " + f2(wall.px) + ", so the short-gamma zone ends before the wall");
         }
       }
       const opp = d === 0 ? null : nearestLevel(L.list, -d);
       invalidation = opp ? { kind: opp.kind, px: opp.px, label: opp.label, distAtr: opp.distAtr }
-        : flip ? { kind: "gamma_flip", px: flip.px, label: "Gamma flip" } : null;
+        : flip ? { kind: "zero_gamma", px: flip.px, label: "Zero-gamma level" } : null;
       horizon = pricedHorizon || (front ? { kind: "expiry", value: front.expiry, days: num(front.days) } : null);
       confidence = base - (strong ? 0 : 1) - (nearFlip ? 1 : 0) - (d !== 0 && votes.split ? 1 : 0);
       if (d === 0) confidence = Math.min(confidence, 1);
@@ -641,6 +667,7 @@ export function regimeState(card, extras) {
   if (premium.pinned) notes.push("the priced move reads as pinned by an event, so no long-volatility structure is preferred");
   const out = {
     version: STATE_VERSION, state, direction, flow, confidence, premium: premium.pinned ? "pinned" : premium.reading,
+    gammaFrom: read.from, gammaLabel: read.label, gammaValue: num(read.value),
     drivers: drivers.filter((d) => d.robustness > 0), invalidation, horizon, target, bound,
     preferred, avoid: [...new Set([...table.avoid, ...pinnedOut])], stale, notes,
   };
@@ -734,10 +761,12 @@ export function buildContext(card, extras) {
           (conviction === null ? "unpublished" : conviction + " of 100") +
           (standingGamma.label ? (standingGamma.from === "book" ? "; dealer gamma across the open-interest book is "
             : standingGamma.from === "flow" ? "; the gamma dealers added today is " : "; dealer gamma is labelled ") + standingGamma.label : "") +
-          (num(c.gammaFlip) !== null ? "; the strike ladder's running sum crosses zero at " + r2(c.gammaFlip) : "") +
+          (num(c.zeroGamma) !== null ? "; total dealer gamma changes sign at " + r2(c.zeroGamma) : "") +
+          (num(c.strikeSumCrossing) !== null ? "; the flow ladder's strike-sum crossing is at " + r2(c.strikeSumCrossing) : "") +
           (num(c.atr) !== null ? "; one ATR is " + r2(c.atr) : "") + ".",
       figures: {
-        score, conviction, regime: standingGamma.label, gammaFlip: r2(num(c.gammaFlip)), atr: r2(num(c.atr)),
+        score, conviction, regime: standingGamma.label, regimeFrom: standingGamma.from,
+        zeroGamma: r2(num(c.zeroGamma)), strikeSumCrossing: r2(num(c.strikeSumCrossing)), atr: r2(num(c.atr)),
         agreement: r2(num(conv.agreement)), breadth: num(conv.breadth), coverage: r2(num(conv.coverage)),
         persistence: r2(num(conv.persistence)), gate: r2(num(conv.gate)),
         otmShare: r2(num(quality.otmShare)), vegaTilt: r2(num(quality.vegaTilt)),
@@ -846,6 +875,7 @@ export function buildContext(card, extras) {
     features,
     coverage,
     state,
+    engine: engineContext(c),
   };
 }
 
@@ -867,7 +897,340 @@ export function contextLines(context) {
     if (f.say) lines.push(head + ": " + f.say + figureText(f.figures));
     else lines.push(head + ": no reading" + (f.reason ? " — " + f.reason : "") + ".");
   }
+  if (ctx.engine) lines.push(...engineLines(ctx.engine));
   return lines;
+}
+
+export const VERDICTS = Object.freeze([
+  "harvest-rich-premium", "buy-cheap-convexity", "pin-at-level", "ride-short-gamma", "fade-to-wall",
+  "event-overpriced", "event-underpriced", "sell-skew", "buy-protection-cheap", "term-roll", "stand-aside",
+]);
+export const VERDICT_WORD = Object.freeze({
+  "harvest-rich-premium": "Harvest rich premium", "buy-cheap-convexity": "Buy cheap convexity", "pin-at-level": "Pin at level",
+  "ride-short-gamma": "Ride short gamma", "fade-to-wall": "Fade to wall", "event-overpriced": "Event overpriced",
+  "event-underpriced": "Event underpriced", "sell-skew": "Sell skew", "buy-protection-cheap": "Buy cheap protection",
+  "term-roll": "Term roll", "stand-aside": "Stand aside",
+});
+export const CLAIM_RELS = Object.freeze(["gt", "lt", "near", "between", "rising", "falling", "rich", "cheap"]);
+export const VET_CODES = Object.freeze(["schema", "digit", "unknown-id", "avoid", "verdict-false", "claim-false", "withheld", "undefined-first", "dup"]);
+export const ENGINE_LINES = Object.freeze({
+  VRP_RICH: 0.10, VRP_CHEAP: -0.10, IV_LOW: 0.25, IV_MID_HIGH: 0.75, IV_HIGH: 0.70, EVENT_OVER: 1.25, EVENT_UNDER: 0.80,
+  SKEW_STEEP: 0.8, SKEW_FLAT: 0.2, FRONT_BID: 0.08, NEAR_ATR: 0.5, NEAR_VOL: 0.01, NEAR_FRAC: 0.02, MAX_IDEAS: 3, MAX_STRUCTURES: 5,
+});
+const RULE_FACT = Object.freeze({ iv: "iv.pct.30", vrp: "vrp.rel.21", term: "term.slope.30_90.exEvent", skew: "skew.rr25.30.pct", event: "move.event.ratio" });
+
+function structureBrief(st) {
+  const fam = STRUCTURE_BY_ID[st.family] || null;
+  const legs = (st.legs || []).map((l) => (l.side > 0 ? "+" : "−") + (l.qty > 1 ? l.qty : "") + l.type + (l.k === null || l.k === undefined ? "" : String(l.k))).join(" ");
+  return {
+    id: st.id, family: st.family, risk: st.risk, dir: st.dir, expiry: st.expiry, dte: num(st.dte), legs,
+    popQ: st.prob ? num(st.prob.popQ) : null, popP: st.prob ? num(st.prob.popP) : null,
+    evP: st.ev ? num(st.ev.p) : null, evQ: st.ev ? num(st.ev.q) : null, edge: st.ev ? num(st.ev.edge) : null,
+    maxProfit: num(st.maxProfit), maxLoss: num(st.maxLoss), grade: num(st.grade),
+    gradeWhy: Array.isArray(st.gradeWhy) ? st.gradeWhy.slice() : [], rules: Array.isArray(st.rules) ? st.rules.slice() : [],
+    short: (st.legs || []).filter((l) => l.side < 0 && l.type !== "S").map((l) => ({ type: l.type, k: num(l.k) })),
+    vol: fam ? fam.vol : null, premium: fam ? fam.premium : null,
+  };
+}
+
+export function engineContext(card) {
+  const e = card && card.engine && typeof card.engine === "object" && Array.isArray(card.engine.facts) && Array.isArray(card.engine.structures)
+    ? card.engine : null;
+  if (!e) return null;
+  const facts = e.facts.filter((f) => f && typeof f.id === "string").map((f) => ({
+    id: f.id, v: num(f.v), u: str(f.u), g: num(f.g) === null ? 0 : f.g,
+    ...(str(f.why) ? { why: f.why } : {}), ...(num(f.atr) !== null ? { atr: f.atr } : {}), ...(f.x === true ? { x: true } : {}),
+  }));
+  const structures = e.structures.slice(0, ENGINE_LINES.MAX_STRUCTURES).map(structureBrief);
+  const ids = new Set(structures.map((x) => x.id));
+  return {
+    engine: str(e.engine), asOf: str(e.asOf), spot: num(e.spot), atr: num(e.atr), facts,
+    state: e.state && typeof e.state === "object" ? {
+      state: str(e.state.state), direction: str(e.state.direction), confidence: num(e.state.confidence),
+      preferred: Array.isArray(e.state.preferred) ? e.state.preferred.slice() : [], avoid: Array.isArray(e.state.avoid) ? e.state.avoid.slice() : [],
+    } : null,
+    levels: e.levels && typeof e.levels === "object" ? e.levels : null,
+    structures, ideas: (Array.isArray(e.ideas) ? e.ideas : []).filter((id) => ids.has(id)),
+    noTrade: e.noTrade && typeof e.noTrade === "object" ? { code: str(e.noTrade.code), closest: str(e.noTrade.closest) } : null,
+  };
+}
+
+function engineLines(eng) {
+  const out = ["[engine] facts, one per line as id = value unit (grade):"];
+  for (const f of eng.facts) {
+    out.push("  " + f.id + " = " + (f.v === null ? "withheld" : String(f.v)) + " " + (f.u || "") + " (g " + f.g + (f.x ? ", cross-section" : "") +
+      (f.atr !== undefined ? ", " + f.atr + " ATR from spot" : "") + (f.why ? ", " + f.why : "") + ")");
+  }
+  if (eng.state) {
+    out.push("[engine] state " + eng.state.state + (eng.state.direction ? " " + eng.state.direction : "") + " (confidence " + eng.state.confidence + "); prefers " +
+      eng.state.preferred.join(", ") + "; avoids " + (eng.state.avoid.join(", ") || "nothing"));
+  }
+  out.push("[engine] structures, ranked ideas " + (eng.ideas.join(", ") || "none") + (eng.noTrade ? "; stands aside: " + eng.noTrade.code : "") + ":");
+  for (const st of eng.structures) {
+    out.push("  " + st.id + " " + st.family + " " + st.risk + " " + st.expiry + " " + st.legs + ": popQ " + st.popQ + ", popP " + st.popP +
+      ", evP " + st.evP + ", edge " + st.edge + ", max loss " + (st.maxLoss === null ? "unbounded" : st.maxLoss) + ", grade " + st.grade +
+      (st.gradeWhy.length ? " (" + st.gradeWhy.join(", ") + ")" : "") + (st.rules.length ? "; rules " + st.rules.join(" ") : ""));
+  }
+  return out;
+}
+
+function factIndex(eng) {
+  const m = new Map();
+  for (const f of eng.facts) m.set(f.id, f);
+  if (num(eng.spot) !== null) m.set("spot", { id: "spot", v: eng.spot, u: "px", g: 3 });
+  return m;
+}
+
+const val = (m, id) => { const f = m.get(id); return f && f.v !== null && f.g > 0 ? f.v : null; };
+
+function structureAt(eng, id) {
+  return eng.structures.find((x) => x.id === id) || null;
+}
+
+function nearLevel(eng, st, levelIds) {
+  const m = factIndex(eng);
+  const atr = num(eng.atr);
+  const reach = atr !== null && atr > 0 ? ENGINE_LINES.NEAR_ATR * atr : num(eng.spot) !== null ? 0.01 * eng.spot : null;
+  if (reach === null) return false;
+  const lv = levelIds.map((id) => val(m, id)).filter((v) => v !== null);
+  return st.short.some((l) => l.k !== null && lv.some((x) => Math.abs(l.k - x) <= reach));
+}
+
+export function verdictHolds(code, st, eng) {
+  const m = factIndex(eng);
+  const g = (id) => { const f = m.get(id); return f ? f.g : 0; };
+  const vrp = val(m, "vrp.rel.21"), ivp = val(m, "iv.pct.30"), ratio = val(m, "move.event.ratio");
+  const skewPct = val(m, "skew.rr25.30.pct"), front = val(m, "term.front.7_30");
+  const L = ENGINE_LINES;
+  const state = eng.state || {};
+  const shortPrem = st && (st.vol === "short" || st.premium === "credit");
+  const longPrem = st && st.vol === "long";
+  switch (code) {
+    case "harvest-rich-premium":
+      return !!st && shortPrem && ((vrp !== null && vrp >= L.VRP_RICH && g("vrp.rel.21") >= 2 && ivp !== null && ivp >= L.IV_LOW) || (ivp !== null && ivp >= L.IV_HIGH));
+    case "buy-cheap-convexity":
+      return !!st && longPrem && ((vrp !== null && vrp <= L.VRP_CHEAP && g("vrp.rel.21") >= 2 && ivp !== null && ivp <= L.IV_MID_HIGH) ||
+        (ivp !== null && ivp <= L.IV_LOW && vrp !== null && vrp <= L.VRP_RICH));
+    case "pin-at-level":
+      return !!st && state.state === "pinned" && nearLevel(eng, st, ["level.magnet", "level.maxPain"]);
+    case "ride-short-gamma":
+      return !!st && (state.state === "amplifying" || state.state === "squeeze") && !!state.direction && st.premium === "debit" &&
+        ((state.direction === "bullish" && st.dir === "bull") || (state.direction === "bearish" && st.dir === "bear"));
+    case "fade-to-wall": {
+      if (!st || (st.family !== "put-credit-spread" && st.family !== "call-credit-spread")) return false;
+      const put = st.family === "put-credit-spread";
+      const k = st.short.map((l) => l.k).filter((x) => x !== null)[0];
+      const spot = num(eng.spot);
+      if (k === undefined || spot === null) return false;
+      const wall = val(m, put ? "level.putWall" : "level.callWall"), flip = val(m, "level.flip");
+      const beyond = (lv) => lv !== null && (put ? k <= lv && lv <= spot : k >= lv && lv >= spot);
+      return beyond(wall) || beyond(flip);
+    }
+    case "event-overpriced": return ratio !== null && ratio >= L.EVENT_OVER;
+    case "event-underpriced": return ratio !== null && ratio <= L.EVENT_UNDER;
+    case "sell-skew":
+      return !!st && skewPct !== null && skewPct >= L.SKEW_STEEP &&
+        ["risk-reversal", "put-ratio", "call-ratio", "jade-lizard", "broken-wing-butterfly"].includes(st.family);
+    case "buy-protection-cheap":
+      return !!st && skewPct !== null && skewPct <= L.SKEW_FLAT && ["collar", "put-debit-spread"].includes(st.family);
+    case "term-roll":
+      return !!st && front !== null && front >= L.FRONT_BID && ["long-calendar", "diagonal"].includes(st.family);
+    case "stand-aside": return !!eng.noTrade || !eng.ideas.length;
+    default: return false;
+  }
+}
+
+export function claimHolds(claim, eng) {
+  const m = factIndex(eng);
+  const a = m.get(claim.a), b = claim.b === undefined ? null : m.get(claim.b), c = claim.c === undefined ? null : m.get(claim.c);
+  if (!a || a.v === null) return { ok: false, code: a ? "withheld" : "unknown-id" };
+  if (a.g === 0) return { ok: false, code: "withheld" };
+  const L = ENGINE_LINES;
+  const unitOk = (x, y) => x.u === y.u || ((x.u === "px" || x.id === "spot") && (y.u === "px" || y.id === "spot"));
+  const two = () => {
+    if (!b) return { err: claim.b === undefined ? "schema" : "unknown-id" };
+    if (b.v === null || b.g === 0) return { err: "withheld" };
+    if (!unitOk(a, b)) return { err: "claim-false" };
+    return null;
+  };
+  switch (claim.rel) {
+    case "gt": case "lt": {
+      const e = two(); if (e) return { ok: false, code: e.err };
+      return { ok: claim.rel === "gt" ? a.v > b.v : a.v < b.v, code: "claim-false" };
+    }
+    case "near": {
+      const e = two(); if (e) return { ok: false, code: e.err };
+      const d = Math.abs(a.v - b.v);
+      const reach = a.u === "px" ? (num(eng.atr) !== null ? L.NEAR_ATR * eng.atr : 0.01 * eng.spot)
+        : a.u === "vol" ? L.NEAR_VOL : L.NEAR_FRAC;
+      return { ok: d <= reach, code: "claim-false" };
+    }
+    case "between": {
+      const e = two(); if (e) return { ok: false, code: e.err };
+      if (!c) return { ok: false, code: claim.c === undefined ? "schema" : "unknown-id" };
+      if (c.v === null || c.g === 0) return { ok: false, code: "withheld" };
+      if (!unitOk(a, c)) return { ok: false, code: "claim-false" };
+      return { ok: a.v >= Math.min(b.v, c.v) && a.v <= Math.max(b.v, c.v), code: "claim-false" };
+    }
+    case "rising": case "falling":
+      if (!/\.mom\b|\.mom\./.test(a.id)) return { ok: false, code: "claim-false" };
+      return { ok: claim.rel === "rising" ? a.v > 0 : a.v < 0, code: "claim-false" };
+    case "rich": case "cheap": {
+      const rich = claim.rel === "rich";
+      if (/^vrp\./.test(a.id)) return { ok: rich ? a.v >= (a.id === "vrp.rel.21" ? L.VRP_RICH : 0) : a.v <= (a.id === "vrp.rel.21" ? L.VRP_CHEAP : 0), code: "claim-false" };
+      if (/\.pct\b|\.pct\.|\.rank\./.test(a.id)) return { ok: rich ? a.v >= L.IV_MID_HIGH : a.v <= L.IV_LOW, code: "claim-false" };
+      if (a.id === "move.event.ratio") return { ok: rich ? a.v >= L.EVENT_OVER : a.v <= L.EVENT_UNDER, code: "claim-false" };
+      return { ok: false, code: "claim-false" };
+    }
+    default: return { ok: false, code: "schema" };
+  }
+}
+
+function hasDigit(obj) {
+  if (typeof obj === "number") return true;
+  if (typeof obj === "string") return /\d/.test(obj);
+  if (Array.isArray(obj)) return obj.some(hasDigit);
+  if (obj && typeof obj === "object") return Object.values(obj).some(hasDigit);
+  return false;
+}
+
+const ID_KEYS = Object.freeze({ ideas: ["structure", "because"], claims: ["a", "b", "c"] });
+
+function digitOutsideIds(reply) {
+  return Object.entries(reply).some(([k, v]) => {
+    if (!ID_KEYS[k] || !Array.isArray(v)) return hasDigit(v);
+    return v.some((item) => !item || typeof item !== "object" || Array.isArray(item)
+      ? hasDigit(item)
+      : Object.entries(item).some(([f, x]) => !ID_KEYS[k].includes(f) ? hasDigit(x)
+        : Array.isArray(x) ? x.some((y) => typeof y !== "string") : typeof x !== "string" && x !== undefined && hasDigit(x)));
+  });
+}
+
+function becauseOf(st, eng) {
+  const m = factIndex(eng);
+  const out = [];
+  const add = (id) => { const f = m.get(id); if (f && f.v !== null && f.g > 0 && !out.includes(id)) out.push(id); };
+  const gradeOf = (id) => { const f = m.get(id); return f && f.v !== null ? f.g : 0; };
+  const aff = AFFINITY[st.family] || null;
+  const weighed = [];
+  st.rules.forEach((rule, i) => {
+    if (/−$/.test(rule)) return;
+    const [axis, bucket] = rule.split(".");
+    if (axis === "state") {
+      const conf = eng.state && num(eng.state.confidence) !== null ? Math.max(0, Math.min(3, eng.state.confidence)) : 0;
+      weighed.push({ c: 2 * conf / 3, i, ids: [eng.state && eng.state.state === "pinned" ? "level.magnet" : "level.flip", "gex.book"] });
+    } else if (RULE_FACT[axis] && aff && aff[axis] && num(aff[axis][bucket]) !== null) {
+      weighed.push({ c: aff[axis][bucket] * gradeOf(RULE_FACT[axis]) / 3, i, ids: [RULE_FACT[axis]] });
+    }
+  });
+  weighed.sort((a, b) => b.c - a.c || a.i - b.i);
+  for (const w of weighed) for (const id of w.ids) add(id);
+  for (const id of ["vrp.rel.21", "iv.pct.30", "level.flip", "gex.book", "iv.cm.30"]) { if (out.length >= 2) break; add(id); }
+  return out.slice(0, 2);
+}
+
+export function engineFallback(context) {
+  const eng = context && context.engine ? context.engine : null;
+  if (!eng) return null;
+  const m = factIndex(eng);
+  const ideas = [];
+  for (const id of eng.ideas.slice(0, ENGINE_LINES.MAX_IDEAS)) {
+    const st = structureAt(eng, id);
+    if (!st) continue;
+    const verdict = VERDICTS.find((v) => v !== "stand-aside" && verdictHolds(v, st, eng)) || null;
+    const because = becauseOf(st, eng);
+    const gs = because.map((f) => m.get(f).g);
+    ideas.push({ structure: id, verdict, because, grade: Math.min(num(st.grade) === null ? 0 : st.grade, ...(gs.length ? gs : [0])), from: "engine" });
+  }
+  const verdict = ideas.length ? ideas[0].verdict : verdictHolds("stand-aside", null, eng) ? "stand-aside" : null;
+  return { verdict, claims: [], ideas, refused: [] };
+}
+
+export function promptForEngine(context) {
+  const ctx = context && typeof context === "object" ? context : { features: [] };
+  const eng = ctx.engine;
+  const t = ctx.ticker || "this name";
+  const system = [
+    "You are Neuron, the reader of one name's options engine for " + t + ". Every number has already been computed by a " +
+      "deterministic engine and is listed as a numbered fact or a priced structure. You choose, order and justify; you never compute.",
+    "",
+    "Answer with ONE JSON object and nothing else, in this shape: {\"verdict\": \"<code>\", \"claims\": [{\"a\": \"<fact id or spot>\", " +
+      "\"rel\": \"<relation>\", \"b\": \"<fact id or spot>\"}], \"ideas\": [{\"structure\": \"<structure id>\", \"verdict\": \"<code>\", " +
+      "\"because\": [\"<fact id>\", \"<fact id>\"]}]}.",
+    "1. Write NO digits anywhere except inside the ids you copy. No prose fields, no numbers, no percentages.",
+    "2. verdict codes: " + VERDICTS.join(", ") + ". Each code has preconditions the server checks against the facts; a code whose " +
+      "preconditions do not hold is refused.",
+    "3. relations: " + CLAIM_RELS.join(", ") + ". A claim compares two facts of the same unit (or a price fact with spot); " +
+      "'between' takes a third id as \"c\". The server evaluates every claim on the facts and refuses a false one.",
+    "4. ideas use only the listed structure ids, at most " + ENGINE_LINES.MAX_IDEAS + ", no repeats, never a structure whose family " +
+      "the state avoids, and the first idea is defined-risk whenever a defined-risk structure is listed.",
+    "5. because names at least two fact ids with grade above zero; an idea ranks no higher than its weakest fact.",
+    "6. If nothing is worth doing, answer verdict stand-aside with no ideas.",
+  ].join("\n");
+  const user = "Engine read for " + t + (ctx.sessionDate ? ", session " + ctx.sessionDate : "") + ":\n" + engineLines(eng).join("\n");
+  return { system, user };
+}
+
+export function parseEngineOutput(text) {
+  const raw = typeof text === "string" ? text.trim() : "";
+  if (!raw) return null;
+  const unfenced = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  const a = unfenced.indexOf("{"), b = unfenced.lastIndexOf("}");
+  if (a < 0 || b <= a) return null;
+  try { const obj = JSON.parse(unfenced.slice(a, b + 1)); return obj && typeof obj === "object" && !Array.isArray(obj) ? obj : null; } catch { return null; }
+}
+
+export function vetEngineReply(reply, context) {
+  const eng = context && context.engine ? context.engine : null;
+  const refused = [];
+  const refuse = (code, at) => { refused.push({ code, at }); };
+  if (!eng) return { ok: false, verdict: null, claims: [], ideas: [], refused: [{ code: "schema", at: "context" }] };
+  if (!reply || typeof reply !== "object" || Array.isArray(reply) || (reply.ideas !== undefined && !Array.isArray(reply.ideas)) ||
+      (reply.claims !== undefined && !Array.isArray(reply.claims))) {
+    return { ok: false, verdict: null, claims: [], ideas: [], refused: [{ code: "schema", at: "reply" }] };
+  }
+  const m = factIndex(eng);
+  if (digitOutsideIds(reply)) return { ok: false, verdict: null, claims: [], ideas: [], refused: [{ code: "digit", at: "reply" }] };
+  const claims = [];
+  for (const [i, cl] of (reply.claims || []).entries()) {
+    if (!cl || typeof cl !== "object" || typeof cl.a !== "string" || !CLAIM_RELS.includes(cl.rel)) { refuse("schema", "claims." + i); continue; }
+    const r = claimHolds(cl, eng);
+    if (!r.ok) { refuse(r.code, "claims." + i); continue; }
+    claims.push({ a: cl.a, rel: cl.rel, ...(cl.b !== undefined ? { b: cl.b } : {}), ...(cl.c !== undefined ? { c: cl.c } : {}) });
+  }
+  const avoid = eng.state && Array.isArray(eng.state.avoid) ? eng.state.avoid : [];
+  const kept = [];
+  const seen = new Set();
+  const definedListed = eng.structures.some((x) => x.risk === "defined" && num(x.grade) !== null && x.grade >= 1);
+  for (const [i, idea] of (reply.ideas || []).entries()) {
+    const at = "ideas." + i;
+    if (!idea || typeof idea !== "object" || typeof idea.structure !== "string" || !Array.isArray(idea.because)) { refuse("schema", at); continue; }
+    if (idea.verdict !== undefined && idea.verdict !== null && !VERDICTS.includes(idea.verdict)) { refuse("schema", at); continue; }
+    const st = structureAt(eng, idea.structure);
+    if (!st) { refuse("unknown-id", at); continue; }
+    if (seen.has(st.id)) { refuse("dup", at); continue; }
+    if (!(num(st.grade) >= 1)) { refuse("withheld", at); continue; }
+    const fam = STRUCTURE_BY_ID[st.family];
+    if (fam && [fam.neuron, ...fam.kin].filter(Boolean).some((x) => avoid.includes(x))) { refuse("avoid", at); continue; }
+    const because = [...new Set(idea.because.filter((x) => typeof x === "string"))];
+    if (because.length < 2 || because.some((id) => !m.has(id) || id === "spot")) { refuse("unknown-id", at); continue; }
+    if (because.some((id) => m.get(id).g === 0 || m.get(id).v === null)) { refuse("withheld", at); continue; }
+    if (idea.verdict && !verdictHolds(idea.verdict, st, eng)) { refuse("verdict-false", at); continue; }
+    if (!kept.length && st.risk !== "defined" && definedListed) { refuse("undefined-first", at); continue; }
+    seen.add(st.id);
+    const grade = Math.min(num(st.grade) === null ? 0 : st.grade, ...because.map((id) => m.get(id).g));
+    kept.push({ structure: st.id, verdict: idea.verdict || null, because, grade, from: "model" });
+    if (kept.length >= ENGINE_LINES.MAX_IDEAS) break;
+  }
+  let verdict = typeof reply.verdict === "string" ? reply.verdict : null;
+  if (verdict !== null && !VERDICTS.includes(verdict)) { refuse("schema", "verdict"); verdict = null; }
+  if (verdict !== null) {
+    const holds = verdict === "stand-aside" ? verdictHolds(verdict, null, eng) || !kept.length
+      : kept.some((k) => verdictHolds(verdict, structureAt(eng, k.structure), eng)) ||
+        (["event-overpriced", "event-underpriced"].includes(verdict) && verdictHolds(verdict, null, eng));
+    if (!holds) { refuse("verdict-false", "verdict"); verdict = null; }
+  }
+  return { ok: kept.length > 0 || verdict === "stand-aside", verdict, claims, ideas: kept, refused };
 }
 
 export function contextFacts(context) {
@@ -1039,7 +1402,8 @@ export function contextFingerprint(context) {
   const joined = contextLines(context).join("\n");
   let h = 5381;
   for (let i = 0; i < joined.length; i++) h = (((h << 5) + h) ^ joined.charCodeAt(i)) >>> 0;
-  return "n" + NEURON_CONTEXT_VERSION + "." + h.toString(36) + "." + (context && context.features ? context.features.length : 0);
+  return "n" + NEURON_CONTEXT_VERSION + "." + h.toString(36) + "." + (context && context.features ? context.features.length : 0) +
+    (context && context.engine ? ".e" + context.engine.structures.length : "");
 }
 
 export function publicContext(context) {

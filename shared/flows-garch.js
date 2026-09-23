@@ -61,14 +61,15 @@ function unpack(p, v0) {
   return { omega, alpha, beta, nu, lambda };
 }
 
-function negLogLik(p, e, v0, penalised) {
+function negLogLik(p, e, v0, penalised, masked) {
   const { omega, alpha, beta, nu, lambda } = unpack(p, v0);
   const k = skewtConstants(nu, lambda);
   if (!(k.b > 0) || !Number.isFinite(k.logC)) return Infinity;
   let s2 = v0, ll = 0;
   for (let t = 0; t < e.length; t++) {
-    if (t > 0) s2 = omega + alpha * e[t - 1] * e[t - 1] + beta * s2;
+    if (t > 0) s2 = omega + alpha * (masked && masked[t - 1] ? s2 : e[t - 1] * e[t - 1]) + beta * s2;
     if (!(s2 > 0) || !Number.isFinite(s2)) return Infinity;
+    if (masked && masked[t]) continue;
     const s = Math.sqrt(s2);
     ll += skewtLogDensity(e[t] / s, nu, lambda, k) - Math.log(s);
   }
@@ -120,6 +121,41 @@ function nelderMead(f, x0, { iters = 1400, step = 0.5, tol = 1e-8 } = {}) {
 }
 
 export const GARCH_MIN_RETURNS = 60;
+export const GARCH_ALPHA_DEGENERATE = 0.01;
+export const GARCH_LJUNG_BOX_LAGS = 10;
+export const GARCH_LJUNG_BOX_P = 0.05;
+
+export function ljungBoxSquared(z, lags = GARCH_LJUNG_BOX_LAGS) {
+  const x = z.filter((v) => Number.isFinite(v)).map((v) => v * v);
+  const n = x.length;
+  if (n <= lags + 1) return null;
+  const m = x.reduce((a, b) => a + b, 0) / n;
+  let c0 = 0;
+  for (const v of x) c0 += (v - m) * (v - m);
+  if (!(c0 > 0)) return null;
+  let q = 0;
+  for (let k = 1; k <= lags; k++) {
+    let ck = 0;
+    for (let t = k; t < n; t++) ck += (x[t] - m) * (x[t - k] - m);
+    const rho = ck / c0;
+    q += rho * rho / (n - k);
+  }
+  q *= n * (n + 2);
+  return { q, p: chiSquareSurvival(q, lags), lags, n };
+}
+
+function chiSquareSurvival(q, df) {
+  if (!(q > 0)) return 1;
+  const a = df / 2, x = q / 2;
+  if (Number.isInteger(a)) {
+    let term = 1, sum = 1;
+    for (let j = 1; j < a; j++) { term *= x / j; sum += term; }
+    return Math.min(1, Math.exp(-x) * sum);
+  }
+  let sum = 0, term = 1 / a;
+  for (let n = 0; n < 500; n++) { sum += term; term *= x / (a + n + 1); if (term < 1e-16 * sum) break; }
+  return Math.max(0, Math.min(1, 1 - Math.exp(-x + a * Math.log(x) - lnGamma(a)) * sum));
+}
 export const GARCH_ANNUALISE = Math.sqrt(252);
 export const GARCH_AVG_SESSIONS = 21;
 
@@ -131,7 +167,7 @@ export function garchAverageVariance(nextS2, longRunS2, persistence, sessions = 
   return longRunS2 + (nextS2 - longRunS2) * (1 - Math.pow(phi, sessions)) / (sessions * (1 - phi));
 }
 
-export function fitGarch(closes, dates = [], { minReturns = GARCH_MIN_RETURNS } = {}) {
+export function fitGarch(closes, dates = [], { minReturns = GARCH_MIN_RETURNS, mask = null } = {}) {
   const px = [], when = [];
   for (let i = 0; i < (closes || []).length; i++) {
     const c = Number(closes[i]);
@@ -164,7 +200,12 @@ export function fitGarch(closes, dates = [], { minReturns = GARCH_MIN_RETURNS } 
   const mean = med + shift;
   const e = clipped.map((v) => v - shift);
   const raw = r.map((v) => v - mean);
-  const v0 = e.reduce((a, b) => a + b * b, 0) / e.length;
+  const maskSet = mask instanceof Set ? mask : Array.isArray(mask) ? new Set(mask.map((d) => String(d).slice(0, 10))) : null;
+  const masked = maskSet && maskSet.size ? rd.map((d) => d !== null && maskSet.has(d)) : null;
+  const maskedCount = masked ? masked.filter(Boolean).length : 0;
+  const maskArg = maskedCount ? masked : null;
+  const kept = maskArg ? e.filter((v, t) => !maskArg[t]) : e;
+  const v0 = kept.reduce((a, b) => a + b * b, 0) / kept.length;
   if (!(v0 > 0)) {
     return { status: "unavailable", reason: "every return in the window is identical, so there is no variance to model" };
   }
@@ -177,15 +218,16 @@ export function fitGarch(closes, dates = [], { minReturns = GARCH_MIN_RETURNS } 
   ];
   let fit = null;
   for (const p0 of starts) {
-    const cand = nelderMead((p) => negLogLik(p, e, v0, true), p0);
+    const cand = nelderMead((p) => negLogLik(p, e, v0, true, maskArg), p0);
     if (fit === null || cand.f < fit.f) fit = cand;
   }
-  const logLik = -negLogLik(fit.x, e, v0, false);
+  const logLik = -negLogLik(fit.x, e, v0, false, maskArg);
   const { omega, alpha, beta, nu, lambda } = unpack(fit.x, v0);
   const persistence = alpha + beta;
+  const sq = (t) => (maskArg && maskArg[t] ? null : e[t] * e[t]);
   const s2 = new Array(e.length);
   s2[0] = v0;
-  for (let t = 1; t < e.length; t++) s2[t] = omega + alpha * e[t - 1] * e[t - 1] + beta * s2[t - 1];
+  for (let t = 1; t < e.length; t++) { const q = sq(t - 1); s2[t] = omega + alpha * (q === null ? s2[t - 1] : q) + beta * s2[t - 1]; }
   const condVol = s2.map((v) => Number((Math.sqrt(v) * GARCH_ANNUALISE).toFixed(2)));
   const ewma = new Array(e.length);
   let w = v0;
@@ -193,16 +235,30 @@ export function fitGarch(closes, dates = [], { minReturns = GARCH_MIN_RETURNS } 
     if (t > 0) w = GARCH_EWMA_LAMBDA * w + (1 - GARCH_EWMA_LAMBDA) * raw[t - 1] * raw[t - 1];
     ewma[t] = Number((Math.sqrt(w) * GARCH_ANNUALISE).toFixed(2));
   }
-  const nextS2 = omega + alpha * e[e.length - 1] * e[e.length - 1] + beta * s2[e.length - 1];
+  const lastSq = sq(e.length - 1);
+  const nextS2 = omega + alpha * (lastSq === null ? s2[e.length - 1] : lastSq) + beta * s2[e.length - 1];
+  const lb = ljungBoxSquared(e.map((v, t) => (maskArg && maskArg[t] ? NaN : v / Math.sqrt(s2[t]))));
   const edges = [];
   if (persistence > 0.998) {
     edges.push("persistence reached its cap despite a prior pulling it toward " + GARCH_PRIOR.persistence +
       "; the path reads as near-integrated");
   }
-  if (alpha < 1e-3) edges.push("no ARCH effect was found in the window, so beta and persistence are not identified");
+  const degenerate = alpha < GARCH_ALPHA_DEGENERATE;
   if (nu < SKEWT_NU_MIN + 0.05) edges.push("the tail shape hit its floor");
   if (Math.abs(lambda) > SKEWT_LAMBDA_MAX - 0.02) edges.push("the skew hit its cap");
+  const hardEdge = edges.length > 0;
+  if (degenerate) {
+    edges.push("alpha " + alpha.toFixed(4) + " is under " + GARCH_ALPHA_DEGENERATE +
+      ": no ARCH effect was found in the window, so beta and persistence are not identified and the forecast is flat");
+  }
   const edge = edges.length > 0;
+  const lbFailed = lb !== null && lb.p <= GARCH_LJUNG_BOX_P;
+  const why = [];
+  if (!fit.converged) why.push("garch.not-converged");
+  if (hardEdge) why.push("garch.edge");
+  if (degenerate) why.push("garch.alpha-degenerate");
+  if (lbFailed) why.push("garch.ljung-box");
+  const grade = !fit.converged || hardEdge ? 1 : degenerate || lbFailed ? 2 : 3;
   return {
     status: "ok",
     dist: "skewt",
@@ -226,6 +282,11 @@ export function fitGarch(closes, dates = [], { minReturns = GARCH_MIN_RETURNS } 
       return avg === null || !(avg > 0) ? null : Number((Math.sqrt(avg) * GARCH_ANNUALISE).toFixed(2));
     })(),
     logLik: Number(logLik.toFixed(2)),
+    sigma2Next: Number((nextS2 / 1e4).toPrecision(6)),
+    masked: maskedCount,
+    ljungBox: lb === null ? null : { q: Number(lb.q.toFixed(3)), p: Number(lb.p.toFixed(4)), lags: lb.lags },
+    grade,
+    why,
     converged: fit.converged && !edge,
     ...(fit.converged && !edge ? {} : {
       reason: !fit.converged

@@ -17,6 +17,11 @@ on:
         description: "The session is already archived: delete its scores and dated boards and rewrite them with the live boards, record and cards"
         type: boolean
         default: false
+      origin:
+        description: "Who dispatched the run: worker (the post-close clock) or manual"
+        type: string
+        required: false
+        default: manual
 
 permissions:
   contents: read
@@ -38,13 +43,15 @@ jobs:
 
       - name: Resolve whether this firing is the intended one
         id: gate
+        env:
+          ORIGIN: ${{ inputs.origin || 'manual' }}
         run: |
           ZONE="$(TZ=America/New_York date +%Z)"
           FIRED="${{ github.event.schedule }}"
           echo "Eastern zone is $ZONE; cron that fired: '${FIRED:-none}'"
           echo "Started at $(date -u +%H:%M) UTC, $(TZ=America/New_York date +%H:%M) Eastern."
           if [ "${{ github.event_name }}" != "schedule" ]; then
-            echo "Manual run — proceeding. The pipeline itself refuses an in-progress session unless allow_intraday is set."
+            echo "Dispatched by: $ORIGIN — proceeding. The pipeline itself refuses an in-progress session unless allow_intraday is set."
             echo "run=true" >> "$GITHUB_OUTPUT"
           elif [ "$FIRED" = "30 21 * * 1-5" ]; then
             echo "21:30 UTC is 17:30 EDT or 16:30 EST — after the close under either zone, and a firing delayed by as much as twelve hours still lands before the next open."

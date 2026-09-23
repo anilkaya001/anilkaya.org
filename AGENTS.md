@@ -74,7 +74,7 @@ header readback with this repository after any dashboard rule change.
 | `shared/course-seo.js` | Canonical course slugs, metadata, and crawlable module outlines. |
 | `shared/review-manifest.js` | Generated, answer-free Worker allowlist for stable review-item IDs. |
 | `shared/mastery.js` | Server-compatible mastery transition and review-selection contract used by tests. |
-| `schema.sql` | D1 `users`, `progress`, `stats`, `mastery`, idempotent `mastery_attempts`, minimal `placement`, and per-owner `learning_sync` generation tables. |
+| `schema.sql` | D1 `users`, `progress`, `stats`, `mastery`, idempotent `mastery_attempts`, minimal `placement`, and per-owner `learning_sync` generation tables; the Flows tables, including `flows_live` (only `live:*` ids), `flows_tape`, `flows_clock` and the trigger that makes dated archive rows immutable. |
 | `assets/js/course-catalog.js` | Lightweight course metadata, prerequisites/outcomes, learning paths, and browser scoring manifest. |
 | `assets/js/curriculum.js` | Canonical OLS authoring source. |
 | `assets/js/curriculum-data.js` | Canonical IV, DiD, VAR, panel, logit, and GMM authoring sources. |
@@ -98,6 +98,11 @@ header readback with this repository after any dashboard rule change.
 | `tests/placement-contract.mjs` | Placement bank, scoring boundaries, route, privacy, no-JS, keyboard, and responsive runtime contracts. |
 | `tests/worker-regression.mjs` | Real local Wrangler routing, headers, API, and D1 tests. |
 | `tests/regression.mjs` | Full Playwright browser regression suite. |
+| `shared/flows-freshness.js` | The Eastern clock (arithmetic, proven equal to the IANA zone), market phases, the freshness threshold table, `X-Fresh-*` headers, and the live clock's due-tests. |
+| `shared/flows-live.js`, `shared/flows-live-worker.js` | The live layer's key registry and pure builders; the Worker's Tier 1 tick, dispatch, watchdog, live ingest, `/api/flows/lk`, `/now`, `/tape` and read-time overlays. |
+| `scripts/flows-legs/live.mjs`, `live-fake.mjs` | The Actions `--live` leg (Tier 2, `live:*` keys only) and its fake vendor for `--dry-run`. |
+| `assets/js/flows-fresh.js` | The client freshness helper (`FlowsUI.freshFrom`, `freshAggregate`, `heartbeat`). |
+| `tests/flows-live-contract.mjs` | Live-layer builders, phases and states, byte ceilings, the one-writer scans, the `--live` dry run and the client helper. |
 
 ## Curriculum and stage contracts
 
@@ -391,16 +396,38 @@ flows-warnings         flows-sign              flows-ask
 flows-stock-contract   flows-premium-contract  flows-pulse-contract
 flows-events-contract  flows-mint-contract     flows-permits-contract
 flows-political-contract  flows-record-contract  flows-universe-contract
-flows-garch            flows-neuron
+flows-garch            flows-neuron            flows-quant
 flows-chain-panels     flows-auth-contract     mastery-contract
 academy-contract       flows-variation         flows-probe-contract
+flows-vol-contract
+flows-positioning-contract
+flows-legs-contract
+flows-live-contract    flows-freshness-contract
+flows-quant-card
 ```
+
+`flows-quant` was measured on 2026-09-23: about 5 s with no server (8 s at a
+load average of 4.6 on 4 cores). It spawns itself once more, as a fresh
+process, to time the Worker path of the options engine (one 400-quote expiry
+fitted and 24 structures priced) in a clean heap; that child is part of the
+total. The child reads the main thread's own CPU clock
+(`process.threadCpuUsage()`, wall clock only where it is missing), because
+CPU time is what the Workers limit meters and a loaded machine inflates wall
+time several-fold. That clock ticks at the kernel's resolution (4 ms in the
+sandbox), so runs are timed in windows of five and the budget is read from
+the window means. The child warms the engine first, so it does not measure a
+cold isolate's first requests.
+`flows-quant-card` was measured the same day: under 2 s with no server. It
+rebuilds the `FlowsQuant` bundle in memory and fails when the committed file
+differs, then runs the bundle in a bare `vm` context against the modules.
 
 Confirmed to need one: `flows-overview-contract`, `flows-board-render`,
 `flows-watch-render`, `flows-political-render`, `flows-ask-render`,
 `flows-legacy-payload`, `flows-worker-contract`, `flows-desk-contract`,
 `flows-chain-contract`, `flows-sections-contract`, `worker-regression`,
-`placement-contract`, `flows-motion`.
+`placement-contract`, `flows-motion`, `flows-market-contract`, `flows-strategy` (measured on
+2026-09-23: 13 s with `FLOWS_TEST_SANDBOX=1`; it boots workerd for the
+strategy page and its `engine=1` route).
 
 `flows-motion` was in NEITHER list until 2026-09-13 and was measured then: it
 boots workerd, so without `FLOWS_TEST_SANDBOX=1` it hangs in this sandbox
@@ -455,16 +482,20 @@ write the argument in the commit message. Generated files
 `shared/stage-manifest.js`, `shared/skill-manifest.js`,
 `shared/course-points.js`, `shared/course-seo.js`) are written by
 `scripts/generate-course-payloads.mjs` without banners; edit the generator,
-not its output. `scripts/strip-comments.mjs` is now a no-op on this tree and
-stays only because a Workers Builds build command may still invoke it; it can
-be retired once that dashboard field is confirmed clear.
+not its output. `assets/js/flows-quant.bundle.js` is generated the same way by
+`scripts/build-flows-quant-bundle.mjs` (esbuild from the pinned
+`tests/node_modules`, tree-shaken from `shared/flows-quant-browser.js`); run it
+after any change to a `shared/flows-quant-*` module the browser reaches, and
+never edit the bundle by hand. `scripts/strip-comments.mjs` is now a no-op on
+this tree and stays only because a Workers Builds build command may still
+invoke it; it can be retired once that dashboard field is confirmed clear.
 
 ## Design and accessibility invariants
 
 - JavaScript remains IIFE-based and framework-free; production globals are
   deliberate: `Lab`, `Auth`, `Gamify`, `FX`, `IEWTStorage`, `MasteryScheduler`,
   `REVIEW_ITEMS`, `TOPIC_META`, `TOPIC_BY_ID`, `COURSE_STAGE_POINTS`,
-  `LEARNING_PATHS`, `toast`, `FlowsPanels`, and `FlowsUI`.
+  `LEARNING_PATHS`, `toast`, `FlowsPanels`, `FlowsUI`, and `FlowsQuant`.
   (`flowsCardPrefetch` was on this list and went with the card dialog: it
   warmed a card on hover so a modal would open instantly, and a board row is a
   link to `/flows/ticker/?t=` now.)
@@ -480,6 +511,14 @@ be retired once that dashboard field is confirmed clear.
   2,003 of that file's 2,325 lines and fixing every future chart bug twice.
   The ticker page is the only caller now, and that extraction is what made
   deleting the modal a routing change rather than a rewrite of every chart.
+  `FlowsQuant` is the options engine's browser face: the generated bundle
+  of the same `shared/flows-quant-*` modules the pipeline and the Worker run,
+  exposing what `/flows/strategy/` needs to reprice a leg the reader edits:
+  `repriceStructure`, the smile and law readers it stands on, and the
+  Black-76 primitives beneath them. It is a global because the strategy page
+  is an IIFE with no module loader, and it is generated rather than written
+  so a smile or a probability can never be computed one way on the server
+  and another in the page.
   `CURRICULUM` is an authoring/generator input, not a production course-page
   payload.
 - Design tokens live in `base.css`; typography is self-hosted subset Latin

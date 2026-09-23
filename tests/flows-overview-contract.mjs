@@ -161,6 +161,22 @@ await post("market", market);
 await post("flowalerts", alerts);
 await post("scoretrack", scoretrack(TRACK_DAYS));
 
+{
+  const { signFlowsSession } = await import("../shared/flows-auth.js");
+  const { SESSION_SECRET } = await import("./worker-server.mjs");
+  const cookie = { Cookie: "flows_session=" + await signFlowsSession(FLOWS_TEST_USER, SESSION_SECRET, 600, "1") };
+  const now = await (await fetch(url("/api/flows/now?n=board:long,board:short,flowalerts,pulse,brief"), { headers: cookie })).json();
+  for (const key of ["board:long", "board:short", "flowalerts", "pulse"]) {
+    eq(now.keys[key].session, SESSION, `the heartbeat reads ${key}'s session from its column, without the payload`);
+    ok(["fresh", "stale"].includes(now.keys[key].state), `and judges it on the nightly clock (${now.keys[key].state})`);
+  }
+  eq(now.keys.brief.state, "pending", "an unpublished key is pending on the heartbeat, never stale");
+  const board = await fetch(url("/api/flows/board?side=long"), { headers: cookie });
+  await board.text();
+  eq(board.headers.get("x-fresh-session"), SESSION, "the board passthrough carries X-Fresh-Session");
+  ok(/^\d{13}$/.test(board.headers.get("x-server-now") || ""), "and X-Server-Now for the page's clock skew");
+}
+
 function tileShape(t) {
   const val = t.querySelector(".cc-tile-v");
   const sub = t.querySelector(".cc-tile-s");
@@ -1168,10 +1184,28 @@ try {
     ok(scrolls.scrollable, "the ranked table scrolls inside its own box instead");
     ok(scrolls.focusable, "and that scroll is reachable from a keyboard");
 
+    const tabs = await page.evaluate(() => [...document.querySelectorAll(".fx-tabs a")]
+      .map((a) => a.getAttribute("href")));
+    assert.deepEqual(tabs, ["/flows/", "/flows/long/", "/flows/ticker/", "/flows/market/", "/flows/ask/"],
+      "at 390px the bottom tab bar carries Home, Boards, Search, Market and Ask"); checks++;
+    for (const dest of ["/flows/", "/flows/long/"]) {
+      ok(await page.locator(`.fx-tabs a[href="${dest}"]`).isVisible(),
+         `${dest} is one tap away in the tab bar at 390px`);
+    }
+    ok(!(await page.locator('.flows-rail a[href="/flows/desk/"]').isVisible()),
+       "the sidebar is collapsed at 390px, so the rail is not drawn over the reading column");
+    await page.click("#fxSideBtn");
+    await page.waitForTimeout(500);
     for (const dest of ["/flows/", "/flows/long/", "/flows/short/", "/flows/desk/"]) {
       ok(await page.locator(`.flows-rail a[href="${dest}"]`).isVisible(),
-         `${dest} is still reachable at 390px`);
+         `${dest} is still reachable at 390px, in the sidebar the toolbar button opens`);
     }
+    await page.keyboard.press("Escape");
+    const away = await page.locator('.flows-rail a[href="/flows/desk/"]')
+      .waitFor({ state: "hidden", timeout: 3000 }).then(() => true, () => false);
+    ok(away, "and Escape puts the sidebar away again, once its slide-out has finished");
+    eq(await page.evaluate(() => document.activeElement && document.activeElement.id), "fxSideBtn",
+       "and hands focus back to the button that opened it");
     await page.setViewportSize({ width: 1280, height: 1000 });
   }
 

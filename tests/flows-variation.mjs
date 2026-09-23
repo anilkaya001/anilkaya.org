@@ -13,6 +13,8 @@ import {
   callCharmLeg, putCharmLeg, openInterestGammaBook, strikeBookPutSign, SIGN_CONVENTION,
 } from "../shared/flows-features.js";
 
+import { normCdf as codyCdf } from "../shared/flows-quant-bs.js";
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -643,6 +645,21 @@ function ivRows(end, n, { rho = 0 } = {}) {
   eq(frontHalf.inputs.charmFront.value, null, "which is not netted against zero");
   eq(withFront.inputs.charmFront.expiries, 1, "while a complete front expiry is netted there as before");
   ok(!("halfLegs" in withFront.inputs.charmFront), "with no half-leg count when there is none");
+}
+
+{
+  const plain = blackScholesGreeks({ spot: 100, strike: 105, days: 45, vol: 0.3, rate: 0.04, type: "C" });
+  const carry = blackScholesGreeks({ spot: 100, strike: 105, days: 45, vol: 0.3, rate: 0.04, dividend: 0.03, type: "C" });
+  const T = 45 / 365, nu = 0.3 * Math.sqrt(T);
+  const d1 = (Math.log(100 / 105) + (0.04 - 0.03 + 0.045) * T) / nu;
+  near(carry.d1, d1, 1e-12, "the greeks helper carries a dividend yield in d1 (defect 9)");
+  ok(carry.delta < plain.delta, "and a 3% yield lowers a call's delta, which the carry-free helper could not show");
+  near(carry.delta, Math.exp(-0.03 * T) * codyCdf(d1), 1e-15, "the call delta is e^{-qT} N(d1)");
+  near(blackScholesGreeks({ spot: 100, strike: 105, days: 45, vol: 0.3, rate: 0.04, dividend: 0, type: "P" }).delta,
+    plain.delta - 1, 1e-15, "with no yield put and call deltas still differ by one");
+  const deep = blackScholesGreeks({ spot: 100, strike: 60, days: 20, vol: 0.25, rate: 0.04, type: "P" });
+  ok(deep.delta < 0 && deep.delta > -1e-6 && deep.delta !== 0,
+    `a deep out-of-the-money put keeps a nonzero delta of ${deep.delta.toExponential(2)}, which the old 1e-7 normal rounded away`);
 }
 
 console.log(`✓ flows-variation: ${checks} assertions — Black-Scholes vendor rows netted call + put for gamma and call − put for delta, vanna and charm to nine digits, a |charm|-weighted convention probe that reads a live-like book raw and a half-and-half one as nothing, a charm scale recovered where the rate term allows, a unit probe that refuses to classify cheap stocks, a vanna scale checked against the chain, a variance whose shares sum to one and fall silent as null rather than zero, a 15-cell grid with the right signs, candles and implied-volatility rows after the session ignored, golden B and CHTR readings from their own cut series, and a score decomposition that accounts for the residual whole`);

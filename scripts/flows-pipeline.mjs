@@ -20,6 +20,9 @@ import {
 import { tradingCalendar, scoreSessions, icTable, RECORD_NOTES } from "../shared/flows-record.js";
 import { makePermitQueue } from "../shared/flows-permits.js";
 import { fitGarch } from "../shared/flows-garch.js";
+import { runFlowLeg } from "./flows-legs/flow.mjs";
+import { makeFlowFakeVendor, makeFlowFakeStore } from "./flows-legs/flow-fake.mjs";
+import { sessionPrints, sessionPrintParams } from "../shared/flows-positioning.js";
 import { buildChainPanels, CHAIN_PAGE_SIZE, CHAIN_MAX_PAGES, mergeChainPages, SKEW_MIN_DAYS, summariseSkewMisses }
   from "../shared/flows-chain.js";
 import {
@@ -35,14 +38,26 @@ import {
   buildPolitical, POLITICAL_FEEDS, unwrapRows as unwrapVendorRows,
 } from "../shared/flows-political.js";
 import { parseOptionSymbol } from "../shared/flows-premium.js";
+import { black76 } from "../shared/flows-quant-bs.js";
+import { regimeState } from "../shared/flows-neuron.js";
+import * as QP from "./flows-quant-pipeline.mjs";
 import { marketAggregate, MARKET_NOTES } from "../shared/flows-market.js";
 import {
   capBands, selectCoverage, NDX_100, NDX_AS_OF, SELECTION_EPOCH, UNIVERSE_NOTES,
   PICK_SIZE, PICK_INDEX,
 } from "../shared/flows-universe.js";
+import { runVolLeg, volNames, attachVol, publishVol, yearOfCandles } from "./flows-legs/vol.mjs";
+import { fakeVolVendor } from "./flows-legs/vol-fake.mjs";
+import { harvestScreener, INDEX_TICKERS } from "./flows-legs/universe.mjs";
+import { runMarketLegs, windowTickersOf, totalsHistory, MARKET_LEG_CALLS } from "./flows-legs/market.mjs";
+import { makeFakeVendor } from "./flows-legs/fake-vendor.mjs";
+import { makeCardXStore, publishCardX } from "./flows-legs/card-x.mjs";
+import { buildIndexDossiers } from "./flows-legs/index-dossier.mjs";
+import { runLive, dryLiveTicks, readHeldAlerts, LIVE_READ_PACE_MS } from "./flows-legs/live.mjs";
 
 const ARGS = new Set(process.argv.slice(2));
 const DRY_RUN = ARGS.has("--dry-run");
+const LIVE_MODE = ARGS.has("--live");
 const EMIT = process.argv.includes("--emit")
   ? process.argv[process.argv.indexOf("--emit") + 1]
   : null;
@@ -57,7 +72,7 @@ const INGEST_UA = "anilkaya-flows-pipeline/1 (+https://github.com/anilkaya001/an
 
 function ingestHeaders({ json = false } = {}) {
   const headers = {
-    Authorization: "Bearer " + process.env.FLOWS_INGEST_TOKEN,
+    Authorization: "Bearer " + (LIVE_MODE ? process.env.FLOWS_LIVE_TOKEN : process.env.FLOWS_INGEST_TOKEN),
     "User-Agent": INGEST_UA,
   };
   if (json) headers["Content-Type"] = "application/json";
@@ -85,7 +100,7 @@ export const RATE = {
   floorCeilingMs: 750,
 };
 
-export const CALL_BUDGET = 1350;
+export const CALL_BUDGET = 1350 + MARKET_LEG_CALLS;
 
 export const EARNINGS_GATE_DAYS = 12;
 
@@ -410,7 +425,7 @@ function describeFloorVerdict(meter) {
     "down one step at a time, re-reading this line each morning.";
 }
 
-async function uw(path, params = {}) {
+async function uw(path, params = {}, { envelope = false } = {}) {
   const url = new URL(BASE + path);
   for (const [k, v] of Object.entries(params)) {
     if (v === undefined || v === null || v === "") continue;
@@ -480,6 +495,7 @@ async function uw(path, params = {}) {
     ({ delayMs, floorMs: delayFloorMs } = stepRateController(
       { delayMs, floorMs: delayFloorMs }, "ok"));
     const body = await response.json();
+    if (envelope) return body;
     return Array.isArray(body) ? body : (body && body.data) || [];
   }
   throw new Error(`${path} -> exhausted retries`);
@@ -736,7 +752,7 @@ async function enrich(ticker, spot, sessionDate, dating = { date: true, endDate:
     uw(`/api/stock/${ticker}/greek-exposure/expiry`, dated).catch(() => []),
 
     uw(`/api/stock/${ticker}/ohlc/1d`, {
-      timeframe: "1Y",
+      timeframe: "2Y",
       ...(sessionDate && dating.endDate ? { end_date: sessionDate } : {}),
     }).catch(() => []),
   ]);
@@ -777,7 +793,7 @@ async function enrich(ticker, spot, sessionDate, dating = { date: true, endDate:
 
   const past = candleCut(ohlc, sessionDate);
   return {
-    raw: { greekFlow, ticks, strikes, expiries, ohlc: kept },
+    raw: { greekFlow, ticks, strikes, expiries, ohlc: yearOfCandles(kept, sessionDate), ohlc2y: kept },
     pastSession: past.past,
     pastLatest: past.latest,
   };
@@ -2772,6 +2788,10 @@ const publishedStore = Object.create(null);
 const landedKeys = new Set();
 
 async function publish(key, payload) {
+  if (LIVE_MODE && !/^live:[a-z]+(?::[a-z]+)?$/.test(key)) {
+    throw new Error(`--live publishes live:* keys only, and ${key} is not one — the session archive is never ` +
+      "written by the live layer");
+  }
   publishedStore[key] = payload;
   const body = JSON.stringify(payload);
   if (EMIT || DRY_RUN) {
@@ -3041,20 +3061,25 @@ export function fakeChain(ticker, spot, seed, { wide = false, expiry = null, pag
 
       for (const cp of ["P", "C"]) {
         const isPut = cp === "P";
-        const iv = level + 0.55 * m * m - 0.22 * m + (isPut ? 0.012 : -0.012);
-        const intrinsic = isPut ? Math.max(0, strike - spot) : Math.max(0, spot - strike);
-        const bid = intrinsic + spot * iv * Math.sqrt(dte / 365) * 0.4 * Math.exp(-2 * m * m);
+        const smileVol = level + 0.55 * m * m - 0.22 * m;
+        const iv = smileVol + (isPut ? 0.012 : -0.012);
+        const T = dte / 365;
+        const F = spot * Math.exp(FAKE_RATE * T), D = Math.exp(-FAKE_RATE * T);
+        const price = black76(F, D, strike, smileVol, T, cp);
+        const half = Math.max(0.01, 0.015 * price);
+        const bid = Math.max(0.01, Math.round((price - half) * 100) / 100);
+        const ask = Math.max(bid + 0.01, Math.round((price + half) * 100) / 100);
 
         const traded = rnd() > 0.08;
         const volume = traded ? Math.round(80 + 3000 * Math.exp(-7 * m * m) * rnd()) : 0;
         const row = {
           option_symbol: `${ticker}${code}${cp}${String(Math.round(strike * 1000)).padStart(8, "0")}`,
 
-          nbbo_bid: (i === halfWidth && !isPut ? 0 : Math.max(0.05, bid)).toFixed(2),
-          nbbo_ask: (Math.max(0.05, bid) * 1.02 + 0.03).toFixed(2),
+          nbbo_bid: (i === halfWidth && !isPut ? 0 : bid).toFixed(2),
+          nbbo_ask: ask.toFixed(2),
           implied_volatility: iv.toFixed(6),
-          open_interest: String(400 + Math.round(6000 * Math.exp(-6 * m * m))),
-          prev_oi: String(380 + Math.round(5700 * Math.exp(-6 * m * m))),
+          open_interest: String(400 + Math.round(6000 * Math.exp(-6 * m * m) * (isPut ? (m < 0 ? 1.5 : 0.5) : (m > 0 ? 1.5 : 0.5)))),
+          prev_oi: String(380 + Math.round(5700 * Math.exp(-6 * m * m) * (isPut ? (m < 0 ? 1.5 : 0.5) : (m > 0 ? 1.5 : 0.5)))),
         };
 
         if (rnd() > 0.07) row.volume = String(volume);
@@ -3082,6 +3107,27 @@ export function fakeChain(ticker, spot, seed, { wide = false, expiry = null, pag
     [rows[i], rows[j]] = [rows[j], rows[i]];
   }
   return rows.slice(page * CHAIN_PAGE_SIZE, (page + 1) * CHAIN_PAGE_SIZE);
+}
+
+function fakeTreasury(sessionDate) {
+  return { data: { data: [{ value: 4.17, date: sessionDate || "2026-08-24" }, { value: 4.2, date: "2026-08-21" }], name: "3month", unit: "percent" } };
+}
+
+export function fakeEarnings(ticker, sessionDate) {
+  const rnd = mulberry(ticker.length * 977 + ticker.charCodeAt(0));
+  const rows = [];
+  const base = Date.parse((sessionDate || "2026-08-24") + "T00:00:00Z");
+  const upcoming = new Date(base + (20 + Math.floor(rnd() * 70)) * 86400000).toISOString().slice(0, 10);
+  rows.push({ source: "estimation", report_date: upcoming, report_time: "unknown", expected_move_perc: null, post_earnings_move_1d: null });
+  for (let q = 1; q <= 10; q++) {
+    const d = new Date(base - (q * 91 - 30) * 86400000);
+    while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() + 1);
+    const expected = 0.04 + 0.05 * rnd();
+    const move = (rnd() > 0.5 ? 1 : -1) * expected * (0.4 + 1.2 * rnd());
+    rows.push({ source: "company", report_date: d.toISOString().slice(0, 10), report_time: rnd() > 0.5 ? "postmarket" : "premarket",
+      expected_move_perc: expected.toFixed(6), post_earnings_move_1d: move.toFixed(6) });
+  }
+  return { data: rows };
 }
 
 function fakeSurface(ticker, spot, expiries) {
@@ -3125,7 +3171,12 @@ function fakeMaxPain(ticker, spot) {
 function fakeStockDarkpool(ticker, spot) {
   const rnd = mulberry(ticker.length * 1289 + Math.round(spot));
   if (ticker.length % 7 === 3) return [];
-  return Array.from({ length: 20 }, (_, i) => {
+  const late = Array.from({ length: 4 }, (_, i) => ({
+    ticker, executed_at: `${DRY_SESSION_DATE}T${20 + i}:${String(5 + i * 11).padStart(2, "0")}:00Z`,
+    price: spot.toFixed(2), size: 900000 - i * 1000, premium: String(Math.round(spot * (900000 - i * 1000))),
+    volume: Math.round(rnd() * 6e7), market_center: "L", ext_hour_sold_codes: "extended_hours_trade",
+  }));
+  return late.concat(Array.from({ length: 20 }, (_, i) => {
     const px = spot * (0.985 + rnd() * 0.03);
     const size = Math.round(5e3 + rnd() * 4e5);
     const row = {
@@ -3139,7 +3190,7 @@ function fakeStockDarkpool(ticker, spot) {
     if (i % 3 !== 2) { row.nbbo_bid = (px - 0.03).toFixed(2); row.nbbo_ask = (px + 0.03).toFixed(2); }
     if (i % 9 === 8) row.canceled = false;
     return row;
-  });
+  }));
 }
 
 function fakeStockOiChange(ticker, spot) {
@@ -3192,12 +3243,13 @@ function fakeTermStructure(ticker, spot, params = {}) {
   });
 }
 
-export const IV_RANK_PARAMS = Object.freeze({ timespan: "3m" });
+export const IV_RANK_PARAMS = Object.freeze({ timespan: "1y" });
 const IV_RANK_VENDOR_DEFAULT_ROWS = 5;
 
 export function fakeIvRank(ticker, spot, params = {}) {
   const rnd = mulberry(ticker.length * 4271);
-  const count = params && params.timespan === "3m" ? 64 : IV_RANK_VENDOR_DEFAULT_ROWS;
+  const count = params && params.timespan === "1y" ? 251 : params && params.timespan === "3m" ? 64
+    : IV_RANK_VENDOR_DEFAULT_ROWS;
   const days = tradingDaysEndingAt("2026-08-28", count);
   let vol = 0.2 + rnd() * 0.3, px = spot * (0.9 + rnd() * 0.2);
   const rows = days.map((t) => {
@@ -3455,13 +3507,23 @@ function fakePulseRaws(tickers) {
     sells_notional: String(Math.round(rnd() * 9e8)),
   })) };
 
-  const darkpool = { data: Array.from({ length: 45 }, (_, i) => {
+  const afterHours = Array.from({ length: 8 }, (_, i) => {
+    const px = 20 + rnd() * 400;
+    const size = Math.round(3e6 + rnd() * 2e6);
+    return {
+      ticker: pick(),
+      executed_at: `${DRY_SESSION_DATE}T23:${String(59 - i * 5).padStart(2, "0")}:00Z`,
+      price: px.toFixed(2), size, premium: String(Math.round(px * size)),
+      volume: Math.round(rnd() * 8e7), ext_hour_sold_codes: "extended_hours_trade",
+    };
+  });
+  const darkpool = { data: afterHours.concat(Array.from({ length: 45 }, (_, i) => {
     const px = 20 + rnd() * 400;
     const size = Math.round(1e4 + rnd() * 2e6);
     const minute = 959 - i;
     const row = {
       ticker: pick(),
-      executed_at: `2026-08-21T${String(Math.floor(minute / 60)).padStart(2, "0")}:` +
+      executed_at: `${DRY_SESSION_DATE}T${String(Math.floor(minute / 60)).padStart(2, "0")}:` +
         `${String(minute % 60).padStart(2, "0")}:00Z`,
       price: px.toFixed(2), size,
       premium: String(Math.round(px * size)),
@@ -3470,7 +3532,7 @@ function fakePulseRaws(tickers) {
     if (i % 3 !== 2) { row.nbbo_bid = (px - 0.05).toFixed(2); row.nbbo_ask = (px + 0.05).toFixed(2); }
     if (i % 7 === 6) row.canceled = rnd() > 0.5;
     return row;
-  }) };
+  })) };
   return {
     tide, totals, oiChange, netImpact, insiders, darkpool,
 
@@ -3678,17 +3740,20 @@ function fakeEnrichment(ticker, spot, seed, iv = null) {
   return { ticker, spot, greekFlow, ticks, strikes, expiries, ohlc };
 }
 
+export const PULSE_TOTALS_HISTORY = 252;
+
 async function publishPulse({ sessionDate, generatedAt, tickers = [] }) {
   let crossRaws = null;
 
   try {
     const PULSE_FETCHES = {
       tide: ["/api/market/market-tide", { interval_5m: "true" }],
-      totals: ["/api/market/total-options-volume", { limit: PULSE_CAPS.totals }],
+      totals: ["/api/market/total-options-volume", { limit: PULSE_TOTALS_HISTORY }],
       oiChange: ["/api/market/oi-change", { limit: MARKET_CROSS_LIMIT }],
       netImpact: ["/api/market/top-net-impact", { limit: PULSE_CAPS.netImpact }],
       insiders: ["/api/market/insider-buy-sells", { limit: PULSE_CAPS.insiders }],
-      darkpool: ["/api/darkpool/recent", { limit: MARKET_CROSS_LIMIT }],
+      darkpool: ["/api/darkpool/recent", { limit: MARKET_CROSS_LIMIT,
+        ...sessionPrintParams(sessionDate, { windowed: false }) }],
       seasonality: ["/api/seasonality/market", {}],
     };
     const raws = {};
@@ -3705,8 +3770,13 @@ async function publishPulse({ sessionDate, generatedAt, tickers = [] }) {
     }
     const readAt = new Date().toISOString();
 
+    raws.darkpool = sessionPrints(raws.darkpool, sessionDate, { limit: MARKET_CROSS_LIMIT });
     crossRaws = { oiChange: raws.oiChange, darkpool: raws.darkpool, readAt };
     const pulse = buildPulse(raws);
+    if (pulse.darkpool && raws.darkpool && raws.darkpool.session) pulse.darkpool.session = raws.darkpool.session;
+    pulse.totalsHistory = totalsHistory(unwrapVendorRows(DRY_RUN
+      ? await makeFakeVendor({ sessionDate })("/api/market/total-options-volume", { limit: PULSE_TOTALS_HISTORY })
+      : raws.totals), { sessionDate });
     for (const feed of PULSE_FEEDS) {
       const f = pulse[feed];
       if (f.status === "quiet") {
@@ -3854,7 +3924,95 @@ async function publishNews({ sessionDate, generatedAt, tickers = [] }) {
   }
 }
 
+function indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, congressState, marketCross, variationRun, volLeg = null }) {
+  const onSession = ARCHIVE_DATE_RE.test(String(sessionDate || "")) ? { date: sessionDate } : {};
+  return {
+    enrich: async (ticker, spot, row) => {
+      if (!DRY_RUN) return (await enrich(ticker, spot, sessionDate, dating)).raw;
+      const fake = fakeEnrichment(ticker, spot, 9000 + tickerSeed(ticker), num(row.iv30d) || null);
+      return { ...fake, ohlc: sessionCandles(fake.ohlc, sessionDate) };
+    },
+    features: (raw, ticker, spot, row) =>
+      computeFeatures({ ...raw, ticker, spot, sessionDate, tilt: screenerTilt(row) }),
+    perName: async (ticker, spot, raw) => {
+      const expiries = (raw.expiries || [])
+        .map((r) => (r && r.expiry ? String(r.expiry).slice(0, 10) : null))
+        .filter((d) => d && (!sessionDate || d > sessionDate)).sort().slice(0, SURFACE_EXPIRIES);
+      const [maxPain, surface, dpRaw, oiRaw, termRaw, rankRaw] = DRY_RUN
+        ? [fakeMaxPain(ticker, spot), fakeSurface(ticker, spot, expiries), fakeStockDarkpool(ticker, spot),
+          fakeStockOiChange(ticker, spot), fakeTermStructure(ticker, spot, onSession), fakeIvRank(ticker, spot, IV_RANK_PARAMS)]
+        : await Promise.all([
+          uw(`/api/stock/${ticker}/max-pain`, onSession).catch(() => []),
+          expiries.length
+            ? uw(`/api/stock/${ticker}/spot-exposures/expiry-strike`, {
+              "expirations[]": expiries, ...onSession,
+              min_strike: Math.floor(spot * 0.9), max_strike: Math.ceil(spot * 1.1), limit: 500,
+            }).catch(() => [])
+            : Promise.resolve([]),
+          uw(`/api/darkpool/${ticker}`, { limit: 60, ...onSession }).catch(() => null),
+          uw(`/api/stock/${ticker}/oi-change`, { limit: 30, ...onSession }).catch(() => null),
+          uw(`/api/stock/${ticker}/volatility/term-structure`, { ...onSession }).catch(() => null),
+          uw(`/api/stock/${ticker}/iv-rank`, { ...IV_RANK_PARAMS, ...onSession }).catch(() => null),
+        ]);
+      return {
+        maxPain, surface,
+        darkpool: sessionRows(dpRaw, (r) => easternDayOf(r && r.executed_at), sessionDate).raw,
+        oiDeltas: oiRaw, termStructure: termRaw,
+        ivRank: sessionRows(rankRaw, (r) => easternDayOf(r && r.date), sessionDate, { through: true }).raw,
+      };
+    },
+    chain: async (ticker, spot) => {
+      const rows = DRY_RUN
+        ? fakeChain(ticker, spot, 9500 + tickerSeed(ticker))
+        : await uw(`/api/stock/${ticker}/option-contracts`, {
+          exclude_zero_oi_chains: "true", limit: CHAIN_PAGE_SIZE,
+        }).catch(() => []);
+      if (!Array.isArray(rows) || !rows.length) return null;
+      return buildChainPanels(rows, { spot, asOf: sessionDate, ticker, complete: false, pages: 1 });
+    },
+    card: ({ ticker, row, raw, features, reads, chain }) => {
+      const card = buildCard({
+        ticker, row: sessionRow(row, features), features,
+        strikes: raw.strikes, ticks: raw.ticks, expiries: raw.expiries,
+        surface: reads.surface, chain,
+        chainMissing: chain ? null : "the index chain page could not be read this run",
+        scoreHistory: null, weights: null,
+        maxPain: reads.maxPain, congress: congressRows(ticker, congressState), generatedAt, sessionDate,
+        darkpool: reads.darkpool, oiDeltas: reads.oiDeltas, termStructure: reads.termStructure, ivRank: reads.ivRank,
+        marketCross, variation: variationOptions(variationRun),
+      });
+      card.readPx = readPxOf({ row, features }, screenerReadAt);
+      attachVol(card, volLeg, ticker);
+      return card;
+    },
+  };
+}
+
+async function runLiveMode() {
+  console.log(DRY_RUN ? "Flows live layer — DRY RUN (synthetic, no network)" : "Flows live layer — live");
+  if (!DRY_RUN) {
+    const missing = ["UW_API_KEY", "FLOWS_LIVE_TOKEN"].filter((k) => !process.env[k]);
+    if (missing.length) {
+      throw new Error(`missing required environment variable${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}` +
+        " — the live mode refuses the nightly FLOWS_INGEST_TOKEN on purpose");
+    }
+    console.log(`publishing to ${ingestURL()}`);
+  }
+  delayFloorMs = Math.max(delayFloorMs, LIVE_READ_PACE_MS);
+  delayMs = Math.max(delayMs, LIVE_READ_PACE_MS);
+  if (DRY_RUN) return dryLiveTicks({ publish, store: publishedStore, shapeNews });
+  const result = await runLive({ uw, publish, readStored, shapeNews, origin: process.env.FLOWS_LIVE_ORIGIN || null,
+    force: process.env.FLOWS_LIVE_FORCE === "1" });
+  if (result && result.run && result.run.errors.length) {
+    console.warn(`live: ${result.run.errors.length} key(s) not published — ${result.run.errors.join("; ")}`);
+    process.exitCode = 1;
+  }
+  return result;
+}
+
 async function main() {
+
+  if (LIVE_MODE) return runLiveMode();
 
   const today = easternNow().date;
   console.log(DRY_RUN ? "Flows pipeline — DRY RUN (synthetic, no network)" : "Flows pipeline — live");
@@ -3930,12 +4088,31 @@ async function main() {
   let screener;
   let screenerTruncated = 0;
   let screenerReadAt = null;
+  const screenerFilters = {
+    min_underlying_price: UNIVERSE.minPrice, min_volume: UNIVERSE.minOptionVolume,
+    min_oi: UNIVERSE.minOpenInterest, min_marketcap: UNIVERSE.minMarketCap,
+  };
+  const screenerDate = sessionDate && dating.screenerDate ? sessionDate : null;
+  let harvest = null;
+  let universeSource = null;
+  if (!DRY_RUN) {
+    const read = await harvestScreener(uw, { filters: screenerFilters, date: screenerDate });
+    console.log(`  screener harvest: ${read.rows.length} row(s) in ${read.pages} page(s) of ${read.limit}` +
+      (read.truncated ? " — TRUNCATED at the page cap" : "") + (read.repeated ? " — a page repeated" : "") +
+      (read.errors.length ? ` — ${read.errors.join("; ")}` : ""));
+    if (read.rows.length && !read.truncated && !read.repeated && !read.errors.length) harvest = read;
+    else console.warn("  screener harvest: not usable, so the cap-band sweep reads the universe instead");
+  }
   if (DRY_RUN) {
     screener = fakeScreener(420);
     screenerReadAt = new Date().toISOString();
+  } else if (harvest) {
+    screener = harvest.rows;
+    screenerReadAt = new Date().toISOString();
   } else {
     const byTicker = new Map();
-    let saturated = 0, split = 0;
+    const sweepStartedAt = new Date().toISOString();
+    let saturated = 0, split = 0, sweepReads = 0;
     const readBand = (min, max) => uw("/api/screener/stocks", {
       min_underlying_price: UNIVERSE.minPrice,
       min_volume: UNIVERSE.minOptionVolume,
@@ -3947,6 +4124,7 @@ async function main() {
     for (const band of CAP_BANDS) {
       const [min, max] = band;
       const swept = await sweepScreenerBand(band, readBand);
+      sweepReads += swept.reads || 0;
       for (const row of swept.rows) if (row && row.ticker) byTicker.set(row.ticker, row);
       const label = max === null
         ? `>= $${(min / 1e9).toFixed(1)}B`
@@ -3965,6 +4143,11 @@ async function main() {
     screener = [...byTicker.values()];
     screenerReadAt = new Date().toISOString();
     screenerTruncated = saturated;
+    universeSource = {
+      rows: screener, calls: sweepReads, pages: sweepReads, limit: SCREENER_PAGE_ROWS,
+      truncated: saturated > 0, repeated: false, errors: [], dated: !!screenerDate, source: "sweep",
+      readAt: sweepStartedAt,
+    };
     if (saturated) {
       console.warn(
         `  screener: ${saturated} band leaf/leaves still returned the full ` +
@@ -4335,6 +4518,35 @@ async function main() {
     console.warn(`  movers: ${error.message}`);
   }
 
+  const cardX = makeCardXStore();
+  let marketLegs = null;
+  try {
+    marketLegs = await runMarketLegs({
+      uw: DRY_RUN ? makeFakeVendor({ sessionDate, screenerRows: screener }) : uw,
+      sessionDate, screenerDate, generatedAt, harvest: harvest || universeSource, filters: screenerFilters, eligible,
+      cardedTickers: liquid.map((e) => e.features.ticker),
+      deepTickers: deepNames(published).map((d) => d.t),
+      windowTickers: windowTickersOf(withTilt.map((w) => w.row), { origin: sessionDate || gateOrigin }),
+      deadline: stats.startedAt + DEADLINE_MS, pool: runPooled, width: poolWidth(2).width, stats,
+      log: (line) => console.log(line),
+    });
+    for (const [t, part] of marketLegs.ownership) {
+      cardX.add(t, "short", part.short);
+      cardX.add(t, "insiders", part.insiders);
+    }
+    for (const [t, e] of marketLegs.earnings) cardX.add(t, "earnings", e);
+    console.log(`  market legs: ${marketLegs.calls ?? 0} vendor call(s)`);
+  } catch (error) {
+    console.warn(`  market legs: ${error.message} — universe, regime and card-x were not built this run`);
+  }
+  for (const key of marketLegs ? ["universe", "regime"] : []) {
+    try {
+      await publish(key, marketLegs[key]);
+    } catch (error) {
+      console.warn(`  ${key}: ${error.message} — the other market keys are published regardless`);
+    }
+  }
+
   try {
 
     const stageByTicker = new Map();
@@ -4386,6 +4598,7 @@ async function main() {
 
       announce: { status: "unavailable", reason: EVENTS_NOTES.announce },
       ...events,
+      ...(marketLegs ? marketLegs.eventsAdditions : {}),
       notes: EVENTS_NOTES,
     });
     const gatedShown = events.byStage.gated || 0;
@@ -4597,6 +4810,9 @@ async function main() {
   }
 
   const chainByTicker = new Map();
+  const quantRows = new Map();
+  let quantPass = { preps: new Map(), crossSection: new Map() };
+  let quantRate = null;
   const vannaSamples = [];
   const chainMiss = new Map();
   try {
@@ -4663,6 +4879,7 @@ async function main() {
         }
         const merged = mergeChainPages(pages);
         const rows = merged.rows;
+        quantRows.set(ticker, rows.slice());
         if (nextPage > 1) {
           paging.names++;
           paging.extra += nextPage - 1;
@@ -4714,6 +4931,7 @@ async function main() {
                 vannaRows = narrow;
                 vannaExpiry = near;
               }
+              if (Array.isArray(narrow) && narrow.length) quantRows.set(ticker, narrow.concat(quantRows.get(ticker) || []));
               const narrowPanels = buildChainPanels(narrow, {
                 spot: spotByTicker.get(ticker) || null,
                 asOf: sessionDate,
@@ -4870,6 +5088,26 @@ async function main() {
         "contract that traded today, so this reads as `volume` being absent or zero " +
         "chain-wide at this hour rather than as a quiet session.");
     }
+  }
+
+  try {
+    const atrOfLiquid = new Map(liquid.map((e) => [e.features.ticker, e.features.atr]));
+    const spotOfQuant = (t) => spotOfLiquid.get(t) || spotByTicker.get(t) || null;
+    const needTreasury = !QP.PARITY_SYMBOLS.some((sym) => quantRows.has(sym) && spotOfQuant(sym) > 0);
+    const treasuryRaw = !needTreasury ? null : DRY_RUN ? fakeTreasury(sessionDate)
+      : await uw("/api/economy/treasury-yield", { interval: "daily", maturity: "3month" }).catch(() => null);
+    quantRate = QP.rateFromRuns({ rowsByTicker: quantRows, spotOf: spotOfQuant, sessionDate, treasuryRaw });
+    const t0 = Date.now();
+    quantPass = QP.preparePass({
+      rowsByTicker: quantRows, sessionDate, rate: quantRate, spotOf: spotOfQuant,
+      atrOf: (t) => atrOfLiquid.get(t) || null, expiriesOf: (t) => expiriesByTicker.get(t) || [],
+    });
+    const zeros = [...quantPass.preps.values()].filter((p) => p.zero && p.zero.px !== null).length;
+    const slices = [...quantPass.preps.values()].reduce((a, p) => a + p.built.length, 0);
+    console.log(`  quant: rate ${quantRate.r} (${quantRate.method}); ${quantPass.preps.size} name(s) fitted from NBBO quotes, ` +
+      `${slices} expiry smile(s), ${zeros} with a zero-gamma level, in ${Date.now() - t0}ms`);
+  } catch (error) {
+    console.warn(`  quant: the smile pre-pass failed — ${error.message}; cards publish without an engine block`);
   }
 
   variationRun.vannaScale = vannaScale(vannaSamples, { prior: variationRun.unit.used });
@@ -5058,7 +5296,7 @@ async function main() {
       }
 
       const alerts = buildFlowAlerts(raw, { stageOf: (t) => stage.get(t) || null });
-      const night = nightlyAlerts(alerts, await readStored("flowalerts"),
+      const night = nightlyAlerts(alerts, await readHeldAlerts(readStored, sessionDate),
         { sessionDate, at: alertsReadAt, stageOf: (t) => stage.get(t) || null });
       let liveAlerts = night.held;
       if (night.alerts) {
@@ -5387,7 +5625,7 @@ async function main() {
     oiChange: crossRaws ? crossRaws.oiChange : null,
     darkpool: crossRaws ? crossRaws.darkpool : null,
     limits: { oiChange: MARKET_CROSS_LIMIT, darkpool: MARKET_CROSS_LIMIT },
-    tickers: cardedTickers,
+    tickers: marketLegs ? cardedTickers.concat(INDEX_TICKERS.filter((t) => marketLegs.indexRows.has(t))) : cardedTickers,
     sessionDate,
   });
   const crossReadDay = crossRaws && crossRaws.readAt ? readDayOf(crossRaws.readAt) : null;
@@ -5416,11 +5654,25 @@ async function main() {
     }
   }
 
+  let volLeg = null;
+  try {
+    const volRoster = volNames({ deep: [...onBoard.entries()], crossSection: crossSectionTickers, byTicker });
+    volLeg = await runVolLeg({
+      uw: DRY_RUN ? fakeVolVendor({ sessionDate, names: volRoster }) : uw,
+      names: volRoster, sessionDate, repair: repairCandles,
+      pool: (items, work) => runPooled(items, work, {
+        width: poolWidth(4).width, stopEarly: () => Date.now() > stats.startedAt + DEADLINE_MS }),
+    });
+  } catch (error) {
+    console.warn(`  vol: the leg failed (${error.message}); every card carries x.vol as unavailable and no card-x is written`);
+  }
+
   let surfaceReported = false;
   const onSession = ARCHIVE_DATE_RE.test(String(sessionDate || "")) ? { date: sessionDate } : {};
   const perNameCut = { names: 0, darkpool: 0, ivRank: 0 };
   const deadline = stats.startedAt + DEADLINE_MS;
   const cardTickers = [...onBoard.keys()];
+  const quantStats = { built: 0, withIdeas: 0, split: 0, failed: 0, bytes: [] };
   const cardLane = poolWidth(2);
   console.log(`  cards: ${cardTickers.length} name(s), ${cardLane.width} in flight — ${cardLane.why}`);
   const cardsRun = await runPooled(cardTickers, async (ticker, index) => {
@@ -5438,11 +5690,12 @@ async function main() {
       const spotPx = num(e.features.spot) || num(e.row.close);
 
       const congress = congressRows(ticker, congressState);
-      const [maxPain, surface, dpRaw, oiRaw, termRaw, rankRaw] = DRY_RUN
+      const quantPrep = quantPass.preps.get(ticker) || null;
+      const [maxPain, surface, dpRaw, oiRaw, termRaw, rankRaw, earnRaw] = DRY_RUN
         ? [fakeMaxPain(ticker, spotPx), fakeSurface(ticker, spotPx, surfaceExpiries),
            fakeStockDarkpool(ticker, spotPx), fakeStockOiChange(ticker, spotPx),
            fakeTermStructure(ticker, spotPx, sessionDate ? { date: sessionDate } : {}),
-           fakeIvRank(ticker, spotPx, IV_RANK_PARAMS)]
+           fakeIvRank(ticker, spotPx, IV_RANK_PARAMS), quantPrep ? fakeEarnings(ticker, sessionDate) : null]
         : await Promise.all([
 
           uw(`/api/stock/${ticker}/max-pain`, sessionDate ? { date: sessionDate } : {}).catch(() => []),
@@ -5459,12 +5712,16 @@ async function main() {
             }).catch(() => [])
             : Promise.resolve([]),
 
-          uw(`/api/darkpool/${ticker}`, { limit: 60, ...onSession }).catch(() => null),
+          uw(`/api/darkpool/${ticker}`, { limit: 500, ...onSession, ...sessionPrintParams(sessionDate) })
+            .catch(() => null),
           uw(`/api/stock/${ticker}/oi-change`, { limit: 30, ...onSession }).catch(() => null),
           uw(`/api/stock/${ticker}/volatility/term-structure`, { ...onSession }).catch(() => null),
           uw(`/api/stock/${ticker}/iv-rank`, { ...IV_RANK_PARAMS, ...onSession }).catch(() => null),
+
+          quantPrep ? uw(`/api/earnings/${ticker}`, {}).catch(() => null) : Promise.resolve(null),
         ]);
       const darkpoolCut = sessionRows(dpRaw, (r) => easternDayOf(r && r.executed_at), sessionDate);
+      const darkpoolRth = sessionPrints(dpRaw, sessionDate, { limit: 500 });
       const rankCut = sessionRows(rankRaw, (r) => easternDayOf(r && r.date), sessionDate,
         { through: true });
       if (darkpoolCut.cut || rankCut.cut) {
@@ -5493,12 +5750,15 @@ async function main() {
         }
       }
 
+      const earnings = quantPrep ? QP.earningsFromVendor(earnRaw, { sessionDate }) : null;
+      const garch = earnings ? QP.refitGarch(e.features, earnings.mask) : e.features.garch;
       const card = buildCard({
         ticker,
         row: sessionRow(e.row, e.features),
-        features: { ...e.features, ...(scoredByTicker.get(ticker) || {}) },
+        features: { ...e.features, ...(scoredByTicker.get(ticker) || {}), garch },
         strikes: e.raw.strikes,
         ticks: e.raw.ticks,
+        quant: quantPrep ? { zeroGamma: quantPrep.zero } : null,
 
         expiries: e.raw.expiries,
         surface,
@@ -5516,12 +5776,14 @@ async function main() {
           : null,
         weights: first.weights || null,
         maxPain, congress, generatedAt, sessionDate,
-        darkpool: darkpoolCut.raw, oiDeltas: oiRaw, termStructure: termRaw, ivRank: rankCut.raw,
+        darkpool: darkpoolRth, oiDeltas: oiRaw, termStructure: termRaw, ivRank: rankCut.raw,
 
         marketCross,
         variation: variationOptions(variationRun),
       });
       card.readPx = readPxOf(e, screenerReadAt);
+      attachVol(card, volLeg, ticker, { ivRank: rankCut.raw });
+      if (card.panels.darkpool && darkpoolRth && darkpoolRth.session) card.panels.darkpool.session = darkpoolRth.session;
 
       const shed = [
         ["topContracts", "dropped to fit the payload cap — the day's most-traded contracts " +
@@ -5554,7 +5816,29 @@ async function main() {
         throw new Error(`card is ${(body.length / 1024).toFixed(0)}KB after shedding ` +
           `${dropped.length} panel(s), still over the ingest cap`);
       }
-      await publish("card:" + ticker, card);
+      let engineOut = { card, extra: null, split: false };
+      if (quantPrep) {
+        try {
+          const closes = Array.isArray(e.features.candles) ? e.features.candles.map((c) => c && c[4]) : e.features.closes;
+          const law = QP.garchLaw({ garch, ticker, sessionDate, closes, rate: quantRate ? quantRate.r : undefined });
+          const state = regimeState(card, {});
+          const block = QP.engineBlock({
+            ticker, sessionDate, spot: spotPx, atr: e.features.atr, card, prep: quantPrep, rate: quantRate,
+            garch, law, event: earnings ? earnings.next : null, state, strikes: e.raw.strikes,
+            crossSection: quantPass.crossSection.get(ticker) || null,
+          });
+          engineOut = QP.attachEngine(card, block);
+          quantStats.built++;
+          if (block && block.ideas.length) quantStats.withIdeas++;
+          if (engineOut.split) quantStats.split++;
+          quantStats.bytes.push(engineOut.bytes);
+        } catch (error) {
+          quantStats.failed++;
+          console.warn(`  engine ${ticker}: ${error.message} — the card publishes without it`);
+        }
+      }
+      if (engineOut.extra) await publish("card-x:" + ticker, engineOut.extra);
+      await publish("card:" + ticker, engineOut.card);
 
       return {
         status: "built",
@@ -5579,6 +5863,12 @@ async function main() {
   });
 
   const cards = foldCardOutcomes(cardTickers, cardsRun);
+  if (quantStats.built || quantStats.failed) {
+    const big = quantStats.bytes.length ? Math.max(...quantStats.bytes) : 0;
+    console.log(`  engine: ${quantStats.built} card(s) carry an engine block, ${quantStats.withIdeas} with ranked ideas, ` +
+      `${quantStats.split} split to card-x for the ${QP.QUANT_PIPELINE_LINES.INGEST_CAP / 1024}KB ingest cap` +
+      (quantStats.failed ? `, ${quantStats.failed} failed` : "") + `; largest card ${(big / 1024).toFixed(1)}KB`);
+  }
   if (perNameCut.names) {
     console.log(`  per-name feeds: ${perNameCut.names} card(s) carried rows from outside ` +
       `${sessionDate} — ${perNameCut.darkpool} dark-pool print(s) not on the session and ` +
@@ -5670,6 +5960,7 @@ async function main() {
             variation: variationOptions(variationRun),
           });
           card.readPx = readPxOf(e, screenerReadAt);
+          attachVol(card, volLeg, ticker);
           const body = JSON.stringify(card);
 
           if (body.length > 100 * 1024) {
@@ -5698,6 +5989,41 @@ async function main() {
         (extraSkipped ? `, ${extraSkipped} skipped past the deadline` : "") +
         ` — ${cardsBuilt + extraBuilt} name(s) now carry a card for this session`);
     }
+  }
+
+  await publishVol(volLeg, {
+    publish, stored: (key) => publishedStore[key] || null, sessionDate, generatedAt, log: (line) => console.log(line) });
+  await runFlowLeg({
+    uw: DRY_RUN
+      ? makeFlowFakeVendor({ sessionDate, spotOf: (t) => byTicker.get(t) && byTicker.get(t).features.spot })
+      : uw,
+    readStored: DRY_RUN ? makeFlowFakeStore({ sessionDate }) : readStored,
+    publish, stored: (key) => publishedStore[key] || null, runPooled,
+    deadline, sessionDate, generatedAt,
+    deep: cardTickers.filter((t) => byTicker.has(t)), cross: crossSectionTickers,
+    featuresOf: (t) => (byTicker.get(t) || {}).features, strikesOf: (t) => ((byTicker.get(t) || {}).raw || {}).strikes,
+    cardOf: (t) => publishedStore["card:" + t] || null, variation: variationRun,
+    width: poolWidth(3).width, log: (line) => console.log(line),
+  });
+  if (marketLegs) {
+    const dossiers = await buildIndexDossiers({
+      tickers: INDEX_TICKERS, indexRows: marketLegs.indexRows, deadline,
+      ...indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, congressState, marketCross, variationRun, volLeg }),
+      publish, log: (line) => console.warn(line),
+    });
+    console.log(`  index dossiers: ${dossiers.built.length} of ${INDEX_TICKERS.length} built` +
+      (dossiers.built.length ? ` (${dossiers.built.join(", ")})` : "") +
+      (dossiers.failed.length ? `, failed ${dossiers.failed.join(", ")}` : "") +
+      (dossiers.skipped.length ? `, skipped ${dossiers.skipped.join(", ")}` : "") +
+      Object.entries(dossiers.shed).map(([t, keys]) => `; ${t} shed ${keys.join(", ")}`).join(""));
+  }
+  {
+    const cx = await publishCardX(cardX, publish, {
+      generatedAt, sessionDate, readAt: marketLegs ? marketLegs.readAt : null,
+      stored: (key) => publishedStore[key] || null, log: (line) => console.warn(line),
+    });
+    console.log(`  card-x: ${cx.written} written` + (cx.failed ? `, ${cx.failed} failed` : "") +
+      (cx.over ? `, ${cx.over} over the cap` : "") + `, largest ${cx.largest} bytes`);
   }
 
   console.log("  " + (DRY_RUN ? "[dry-run] " : "") + describeGammaRange(gammaProfiles).line +
@@ -5809,6 +6135,11 @@ async function main() {
     await publish("brief", { ...base, facts: shed.facts, namesIndexed: shed.namesIndexed });
   } catch (error) {
     console.warn(`  brief: ${error.message}`);
+  }
+
+  if (DRY_RUN) {
+    console.log("live layer (dry run of the --live mode: two synthetic Tier 2 ticks; a real nightly never writes live:*)");
+    await dryLiveTicks({ publish, store: publishedStore, shapeNews });
   }
 
   const elapsed = (Date.now() - stats.startedAt) / 1000;

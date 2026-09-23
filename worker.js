@@ -7,6 +7,7 @@ import {
 import { FLOWS_PAGES, modelName, neuronProvenance } from "./shared/flows-pages.js";
 import * as FLOWS_ASK from "./shared/flows-ask.js";
 import * as FLOWS_NEURON from "./shared/flows-neuron.js";
+import { chainRowsByExpiry, runCardEngine, engineState, engineStale, QUANT_CARD_VERSION } from "./shared/flows-quant-card.js";
 import { aiChain, aiCallSignature, askModels, emptyNote, fallbackNote, intradayFloorMs, repliedGuard, retryableGuard, spendShape } from "./shared/flows-ai.js";
 import { COURSE_STAGE_POINTS } from "./shared/course-points.js";
 import { COURSE_BY_ID, COURSE_BY_SLUG, COURSE_TOPICS, SITE_ORIGIN } from "./shared/course-seo.js";
@@ -19,10 +20,11 @@ import { MARKET_INDICES, parseIndexQuote, buildSnapshot } from "./shared/markets
 import {
   rankChain, RANK_KEYS, crossesEarnings, numOrNull, parseOptionSymbol, ivConvention,
 } from "./shared/flows-premium.js";
-import { buildFlowAlerts, mergeAlerts } from "./shared/flows-alerts.js";
-import { shapeTide } from "./shared/flows-pulse.js";
-import { isRefreshWindow } from "./shared/flows-freshness.js";
+import { isRefreshWindow, freshHeaders } from "./shared/flows-freshness.js";
+import * as FLOWS_LIVE from "./shared/flows-live-worker.js";
+import { nightlyFreshMeta } from "./shared/flows-live.js";
 import { archiveWriteAction, ARCHIVE_REFUSALS } from "./shared/flows-archive.js";
+import { readExpiryBreakdown } from "./shared/flows-positioning.js";
 
 const COURSE_ASSET_PATH = "/lab/course";
 
@@ -125,6 +127,7 @@ const FLOWS_SCHEMA_SQL = [
 
   "CREATE TABLE IF NOT EXISTS flows_ai_summary (scope TEXT PRIMARY KEY, text TEXT NOT NULL, llm INTEGER NOT NULL DEFAULT 0 CHECK (llm IN (0, 1)), model TEXT, fingerprint TEXT NOT NULL, guard TEXT, generated_at TEXT NOT NULL)",
   "CREATE TABLE IF NOT EXISTS flows_neuron (scope TEXT PRIMARY KEY, version INTEGER NOT NULL, fingerprint TEXT NOT NULL, summary TEXT NOT NULL, ideas TEXT NOT NULL, llm INTEGER NOT NULL DEFAULT 0 CHECK (llm IN (0, 1)), model TEXT, guard TEXT, generated_at TEXT NOT NULL)",
+  ...FLOWS_LIVE.LIVE_SCHEMA_SQL,
 ];
 
 const MARKET_STALE_MS = 45 * 60 * 1000;
@@ -892,141 +895,45 @@ const FLOWS_TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
 
 const DATED_ARCHIVE_KEY_RE = /^(board:(long|short)|scores):\d{4}-\d{2}-\d{2}$/;
 
-function easternSessionDate(at) {
-  const d = at instanceof Date ? at : new Date(at);
-  if (Number.isNaN(d.getTime())) return null;
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-CA", {
-      timeZone: "America/New_York",
-      year: "numeric", month: "2-digit", day: "2-digit",
-    }).formatToParts(d).map((x) => [x.type, x.value]));
-  return parts.year && parts.month && parts.day
-    ? `${parts.year}-${parts.month}-${parts.day}` : null;
-}
-
-const ALERT_READ_LIMIT = 60;
-
-async function refreshFlowsIntraday(env) {
-  if (!env.DB || !env.UW_API_KEY) return;
-  if (!isRefreshWindow(new Date())) return;
-  await ensureFlowsTables(env);
-
-  const upsert = (key, obj) => env.DB.prepare(
-    "INSERT INTO flows_payload (id, payload, updated_at) VALUES (?, ?, ?) " +
-    "ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, updated_at=excluded.updated_at",
-  ).bind(key, JSON.stringify(obj), Date.now()).run();
-
-  const written = { flowalerts: null, pulse: null };
-
-  try {
-    const stored = await readFlowsPayload(env, "flowalerts");
-    if (stored) {
-      const prev = JSON.parse(stored.payload);
-      const raw = await uwFetch(env, "/api/option-trades/flow-alerts", { limit: ALERT_READ_LIMIT });
-
-      const lastStage = new Map((prev.rows || []).map((r) => [r.t, r.st]));
-      const alerts = buildFlowAlerts(raw, {
-        stageOf: (t) => lastStage.get(t) || null,
-        stageComplete: false,
-      });
-
-      const readAt = new Date();
-      const merged = (alerts.status === "ok" && alerts.rows.length)
-        ? mergeAlerts(prev, alerts, {
-            at: readAt.toISOString(),
-            sessionDate: easternSessionDate(readAt),
-          })
-        : null;
-      if (merged && merged.rows.length) {
-
-        written.flowalerts = {
-          ...prev, ...merged,
-          readAt: readAt.toISOString(),
-          readDay: easternSessionDate(readAt),
-          refreshed: "intraday",
-          vendorLimit: null,
-          vendorTruncated: null,
-          readLimit: ALERT_READ_LIMIT,
-          readTruncated: alerts.seen + alerts.unusable >= ALERT_READ_LIMIT
-            || (!merged.record.reset && prev.readTruncated === true),
-        };
-        await upsert("flowalerts", written.flowalerts);
-
-        console.log(JSON.stringify({
-          message: "flowalerts intraday record merged",
-          date: merged.record.date, reads: merged.record.reads,
-          read: alerts.rows.length, entered: merged.record.entered,
-          again: merged.record.again, carried: merged.record.carried,
-          kept: merged.record.kept, union: merged.record.union,
-          everEntered: merged.record.everEntered,
-          shed: merged.record.shed, shedBy: merged.record.shedBy,
-          bytes: merged.record.bytes, reset: merged.record.reset,
-        }));
-      } else {
-
-        console.log(JSON.stringify({
-          message: "flowalerts intraday refresh declined to write",
-          status: alerts.status, shaped: alerts.rows.length, unusable: alerts.unusable,
-          merged: merged ? merged.rows.length : null,
-        }));
-      }
-    }
-  } catch (error) {
-    console.error(JSON.stringify({ message: "flowalerts intraday refresh failed",
-      error: error instanceof Error ? error.message : String(error) }));
-  }
-
-  try {
-    const stored = await readFlowsPayload(env, "pulse");
-    if (stored) {
-      const prev = JSON.parse(stored.payload);
-      const raw = await uwFetch(env, "/api/market/market-tide", { interval_5m: "true" });
-      const tide = shapeTide(raw);
-
-      if (tide.status === "ok") {
-        const readAt = new Date();
-        written.pulse = {
-          ...prev, tide,
-          readAt: readAt.toISOString(),
-          readDay: easternSessionDate(readAt),
-          refreshed: "intraday",
-        };
-        await upsert("pulse", written.pulse);
-      }
-    }
-  } catch (error) {
-    console.error(JSON.stringify({ message: "pulse tide intraday refresh failed",
-      error: error instanceof Error ? error.message : String(error) }));
-  }
-
-  if (written.flowalerts || written.pulse) {
-    try {
-      const stored = await readFlowsPayload(env, "brief");
-      if (stored) {
-        const index = JSON.parse(stored.payload);
-        const next = FLOWS_ASK.refreshIntradayFacts(index, written);
-        const n = Object.values(next.replaced || {}).reduce((a, b) => a + b, 0);
-        if (n > 0) {
-          await upsert("brief", next);
-          console.log(JSON.stringify({ message: "brief intraday facts refreshed",
-            replaced: next.replaced, refreshedAt: next.refreshedAt }));
-        }
-      }
-    } catch (error) {
-      console.error(JSON.stringify({ message: "brief intraday refresh failed",
-        error: error instanceof Error ? error.message : String(error) }));
-    }
-  }
-}
-
 async function readFlowsPayload(env, key, trace) {
 
   if (!env.DB) { if (trace) trace.failed = true; return null; }
   await ensureFlowsTables(env);
   const row = await env.DB.prepare(
-    "SELECT payload, updated_at FROM flows_payload WHERE id = ?"
+    "SELECT payload, updated_at, json_extract(payload, '$.sessionDate') AS session, " +
+    "COALESCE(json_extract(payload, '$.readAt'), json_extract(payload, '$.generatedAt')) AS read_iso " +
+    "FROM flows_payload WHERE id = ?"
   ).bind(key).first().catch(() => { if (trace) trace.failed = true; return null; });
-  return row && row.payload ? { payload: row.payload, updatedAt: row.updated_at } : null;
+  return row && row.payload
+    ? { payload: row.payload, updatedAt: row.updated_at, fresh: nightlyFreshMeta(row) }
+    : null;
+}
+
+function nightlyFreshHeaders(stored) {
+  if (!stored || !stored.fresh) return {};
+  return freshHeaders(stored.fresh, Date.now(), FLOWS_LIVE.memoizedClock()).headers;
+}
+
+const SPLIT_ENGINE_MARK = '"engine":{"status":"split"';
+
+async function readCardWithEngine(env, ticker) {
+  const stored = await readFlowsPayload(env, "card:" + ticker);
+  if (stored === null) return { stored: null, card: null, unreadable: false };
+  let card;
+  try { card = JSON.parse(stored.payload); } catch { return { stored, card: null, unreadable: true }; }
+  if (card && card.engine && card.engine.status === "split" && typeof card.engine.key === "string" &&
+      card.engine.key === "card-x:" + ticker) {
+    const extra = await readFlowsPayload(env, card.engine.key);
+    let block = null;
+    if (extra) {
+      try {
+        const x = JSON.parse(extra.payload);
+        block = x && x.sessionDate === card.sessionDate && x.engine && typeof x.engine === "object" ? x.engine : null;
+      } catch { block = null; }
+    }
+    card.engine = block || { status: "unreadable", key: card.engine.key };
+  }
+  return { stored, card, unreadable: false };
 }
 
 function passthrough(stored) {
@@ -1035,6 +942,7 @@ function passthrough(stored) {
     headers: {
       "Content-Type": "application/json; charset=utf-8",
       "X-Payload-Updated": String(stored.updatedAt || 0),
+      ...nightlyFreshHeaders(stored),
     },
   });
 }
@@ -1100,7 +1008,20 @@ async function askRecordSpend(env, usage, model) {
   } catch { return null;   }
 }
 
-async function refreshFlowsSummary(env) {
+async function briefWithLive(env, index) {
+  if (!env.DB || !index || typeof index !== "object") return { index, overlay: null };
+  try {
+    const feeds = await FLOWS_LIVE.liveBriefFeeds(env.DB);
+    const keys = Object.keys(feeds);
+    if (!keys.length) return { index, overlay: null };
+    return { index: FLOWS_ASK.refreshIntradayFacts(index, feeds),
+      overlay: keys.map((k) => (k === "pulse" ? "live:market" : "live:alerts")).join(",") };
+  } catch {
+    return { index, overlay: null };
+  }
+}
+
+async function refreshFlowsSummary(env, at = Date.now()) {
   if (!env.DB) return;
   await ensureFlowsTables(env);
 
@@ -1108,21 +1029,32 @@ async function refreshFlowsSummary(env) {
 
   if (stored === null) return;
 
+  const signature = aiCallSignature(env);
+  const stamp = String(stored.updatedAt || 0) + "|" + (await FLOWS_LIVE.liveBriefStamp(env.DB)) + "|" + signature;
+  const [prior, clock] = await Promise.all([
+    env.DB.prepare(
+      "SELECT fingerprint, llm, guard, generated_at FROM flows_ai_summary WHERE scope = ?",
+    ).bind("board").first().catch(() => null),
+    FLOWS_LIVE.readClock(env.DB),
+  ]);
+  if (prior && clock && clock.summaryStamp === stamp) {
+    const priorAge = typeof prior.generated_at === "string" ? at - Date.parse(prior.generated_at) : Infinity;
+    if (!retryableGuard(prior.guard, priorAge)) return;
+  }
+  const markStamp = () => FLOWS_LIVE.clockPatchStatement(env.DB, { summaryStamp: stamp }, at).run().catch(() => {});
+
   let index;
   try { index = JSON.parse(stored.payload); } catch { return; }
+  index = (await briefWithLive(env, index)).index;
   const facts = Array.isArray(index && index.facts) ? index.facts : [];
   if (!facts.length) return;
 
-  const signature = aiCallSignature(env);
   const fingerprint = FLOWS_ASK.summaryFingerprint(facts) + "|" + signature;
-  const prior = await env.DB.prepare(
-    "SELECT fingerprint, llm, guard, generated_at FROM flows_ai_summary WHERE scope = ?",
-  ).bind("board").first().catch(() => null);
 
   if (prior && prior.fingerprint === fingerprint) {
     const priorAge = typeof prior.generated_at === "string"
       ? Date.now() - Date.parse(prior.generated_at) : Infinity;
-    if (!retryableGuard(prior.guard, priorAge)) return;
+    if (!retryableGuard(prior.guard, priorAge)) { await markStamp(); return; }
   }
 
   const intradayOnly = typeof index.refreshedAt === "string" && index.refreshedAt !== "";
@@ -1134,12 +1066,15 @@ async function refreshFlowsSummary(env) {
   const age = FLOWS_ASK.briefAge(index, new Date());
 
   const plain = FLOWS_ASK.renderSummaryPlain(facts);
-  const write = (text, llm, model, guard) => env.DB.prepare(
-    "INSERT INTO flows_ai_summary (scope, text, llm, model, fingerprint, guard, generated_at) " +
-    "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(scope) DO UPDATE SET " +
-    "text=excluded.text, llm=excluded.llm, model=excluded.model, " +
-    "fingerprint=excluded.fingerprint, guard=excluded.guard, generated_at=excluded.generated_at",
-  ).bind("board", text, llm ? 1 : 0, model, fingerprint, guard, new Date().toISOString()).run();
+  const write = async (text, llm, model, guard) => {
+    await env.DB.prepare(
+      "INSERT INTO flows_ai_summary (scope, text, llm, model, fingerprint, guard, generated_at) " +
+      "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(scope) DO UPDATE SET " +
+      "text=excluded.text, llm=excluded.llm, model=excluded.model, " +
+      "fingerprint=excluded.fingerprint, guard=excluded.guard, generated_at=excluded.generated_at",
+    ).bind("board", text, llm ? 1 : 0, model, fingerprint, guard, new Date().toISOString()).run();
+    await markStamp();
+  };
 
   const chain = aiChain(env);
 
@@ -1198,11 +1133,16 @@ async function readNeuron(env, scope) {
     if (!row) return null;
     let ideas = [];
     try { ideas = JSON.parse(typeof row.ideas === "string" ? row.ideas : "[]"); } catch { ideas = []; }
+    const engine = ideas && typeof ideas === "object" && !Array.isArray(ideas) && ideas.v === 3 ? ideas : null;
     return {
       version: Number(row.version) || 0,
       fingerprint: typeof row.fingerprint === "string" ? row.fingerprint : null,
       summary: typeof row.summary === "string" ? row.summary : "",
-      ideas: Array.isArray(ideas) ? ideas : [],
+      ideas: engine ? (Array.isArray(engine.ideas) ? engine.ideas : []) : Array.isArray(ideas) ? ideas : [],
+      engine: engine !== null,
+      verdict: engine && typeof engine.verdict === "string" ? engine.verdict : null,
+      claims: engine && Array.isArray(engine.claims) ? engine.claims : [],
+      refused: engine && Array.isArray(engine.refused) ? engine.refused : [],
       llm: row.llm === 1,
       model: typeof row.model === "string" ? row.model : null,
       guard: typeof row.guard === "string" ? row.guard : null,
@@ -1250,20 +1190,52 @@ function ideaProvenance(r) {
     (r.llm !== true && r.model ? (own ? " The other ideas" : " The ideas") + " were written by " + modelName(r.model) + " and vetted one by one." : "");
 }
 
+function engineProvenance(r) {
+  const ideas = Array.isArray(r.ideas) ? r.ideas : [];
+  const refused = Array.isArray(r.refused) ? r.refused : [];
+  const codes = [...new Set(refused.map((x) => x && x.code).filter((x) => typeof x === "string"))];
+  const refusedSaid = refused.length
+    ? refused.length + " of its answer" + (refused.length === 1 ? " was" : "s were") + " refused (" + codes.join(", ") + ")"
+    : "";
+  const head = "Figures, facts and structures computed by the engine; the summary is deterministic.";
+  if (!ideas.length && r.verdict !== "stand-aside") return head + " The engine ranked no structure worth showing.";
+  if (ideas.some((i) => i && i.from === "model")) {
+    return head + " " + modelName(r.model) + " chose the ideas as structure ids and verdict codes, each checked against " +
+      "the facts" + (refusedSaid ? "; " + refusedSaid : "") + ".";
+  }
+  const guard = typeof r.guard === "string" ? r.guard : "";
+  const why = guard === "engine:refused" ? "every answer the model gave was refused" + (codes.length ? " (" + codes.join(", ") + ")" : "")
+    : guard === "ideas:unparsable" ? "the model\u2019s reply could not be parsed"
+      : guard.startsWith("unreachable") ? neuronProvenance({ llm: false, guard }).replace(/^Deterministic reading: /, "").replace(/\.$/, "")
+        : "no model was asked";
+  return head + " The ideas are the engine\u2019s own ranking: " + why + ".";
+}
+
+function engineIdeaShape(idea) {
+  if (!idea || typeof idea !== "object") return idea;
+  return { ...idea, word: idea.verdict && FLOWS_NEURON.VERDICT_WORD[idea.verdict] ? FLOWS_NEURON.VERDICT_WORD[idea.verdict] : null };
+}
+
 function neuronShape(status, ticker, ctx, row, extra) {
   const r = row && typeof row === "object" ? row : null;
   const text = r !== null && r.summary ? r.summary : null;
+  const engine = r !== null && r.engine === true;
   return {
     status, scope: ticker,
     summary: text,
-    ideas: r !== null && Array.isArray(r.ideas) ? r.ideas : [],
+    ideas: r !== null && Array.isArray(r.ideas) ? (engine ? r.ideas.map(engineIdeaShape) : r.ideas) : [],
+    engine,
+    verdict: engine ? r.verdict : null,
+    verdictWord: engine && r.verdict && FLOWS_NEURON.VERDICT_WORD[r.verdict] ? FLOWS_NEURON.VERDICT_WORD[r.verdict] : null,
+    claims: engine ? r.claims : [],
+    refused: engine ? r.refused : [],
     context: ctx ? FLOWS_NEURON.publicContext(ctx) : null,
     llm: r !== null ? r.llm === true : false,
     model: r !== null ? r.model : null,
     guard: r !== null ? r.guard : null,
     generatedAt: r !== null ? r.generatedAt : null,
-    provenance: text ? neuronProvenance({ text, llm: r.llm === true, model: r.model,
-      guard: r.guard && /^ideas:\d+ refused$/.test(r.guard) ? null : r.guard }) + ideaProvenance(r) : null,
+    provenance: text ? (engine ? engineProvenance(r) : neuronProvenance({ text, llm: r.llm === true, model: r.model,
+      guard: r.guard && /^ideas:\d+ refused$/.test(r.guard) ? null : r.guard }) + ideaProvenance(r)) : null,
     ...(extra || {}),
   };
 }
@@ -1273,10 +1245,27 @@ function neuronContextFor(card) {
   return FLOWS_NEURON.buildContext(card, { expectedSession: age.expected });
 }
 
+async function generateEngineNeuron(env, scope, ctx, fingerprint, plain, chain) {
+  const fallback = FLOWS_NEURON.engineFallback(ctx);
+  const store = (res, llm, model, guard) => writeNeuron(env, scope, fingerprint, plain,
+    { v: 3, verdict: res.verdict, claims: res.claims, ideas: res.ideas, refused: res.refused }, llm, model, guard).catch(() => {});
+  if (!env.AI || !chain.length) { await store(fallback, false, null, null); return; }
+  const { system, user } = FLOWS_NEURON.promptForEngine(ctx);
+  const said = await askModels(env.AI, chain, [{ role: "system", content: system }, { role: "user", content: user }],
+    { maxTokens: 500, temperature: 0.1 }, (billed, usage) => askRecordSpend(env, usage, billed));
+  if (!said.text) { await store(fallback, false, said.model, said.guard); return; }
+  const parsed = FLOWS_NEURON.parseEngineOutput(said.text);
+  if (parsed === null) { await store(fallback, false, said.model, "ideas:unparsable"); return; }
+  const vet = FLOWS_NEURON.vetEngineReply(parsed, ctx);
+  if (!vet.ok) { await store({ ...fallback, refused: vet.refused }, false, said.model, "engine:refused"); return; }
+  await store(vet, true, said.model, vet.refused.length ? "ideas:" + vet.refused.length + " refused" : null);
+}
+
 async function generateNeuron(env, ticker, ctx, fingerprint) {
   const scope = "ticker:" + ticker;
   const chain = aiChain(env);
   const plain = FLOWS_NEURON.deterministicSummary(ctx);
+  if (ctx.engine) return generateEngineNeuron(env, scope, ctx, fingerprint, plain, chain);
   const stateIdea = FLOWS_NEURON.stateIdea(ctx);
   const own = FLOWS_NEURON.vetIdeas(stateIdea ? [stateIdea] : [], ctx).ideas;
   if (!env.AI || !chain.length) {
@@ -1334,14 +1323,14 @@ async function tickerNeuron(env, ctx, ticker) {
     return json(neuronShape("unavailable", ticker, null, null,
       { note: "No store is bound to this route, so no reading can be read or written." }));
   }
-  const stored = await readFlowsPayload(env, "card:" + ticker);
-  if (stored === null) {
+  const read = await readCardWithEngine(env, ticker);
+  if (read.stored === null) {
     return json(neuronShape("pending", ticker, null, null,
       { note: "No card has been published for " + ticker + " this session, so there is " +
         "nothing to read yet." }));
   }
-  let card;
-  try { card = JSON.parse(stored.payload); } catch {
+  const card = read.card;
+  if (read.unreadable) {
     return json(neuronShape("unreadable", ticker, null, null,
       { note: "The card for " + ticker + " was published and could not be read, which is " +
         "a fault on this side rather than a fact about the name." }));
@@ -1578,7 +1567,36 @@ async function cachedTickerInfo(env, ctx, ticker) {
   return out;
 }
 
-const LIVE_TTL_SECONDS = 5;
+async function quoteResponse(env, ctx, ticker) {
+  try {
+    return await FLOWS_LIVE.serveQuote(env, ctx, ticker, Date.now(), {
+      json, build: () => buildLivePayload(env, ticker) });
+  } catch (error) {
+    if (!(error instanceof HttpError)) throw error;
+    return json({ ticker, status: "unavailable", why: error.code,
+      readAt: new Date().toISOString(), price: null, prevClose: null, changePct: null,
+      open: null, high: null, low: null, volume: null, marketTime: null, tapeTime: null },
+    200, { "Cache-Control": "no-store", "X-Server-Now": String(Date.now()) });
+  }
+}
+
+async function liveOverlay(env, key, stored) {
+  if (!env.DB) return null;
+  try {
+    await ensureFlowsTables(env);
+    const now = Date.now();
+    const clock = await FLOWS_LIVE.cachedClock(env, now);
+    const live = await FLOWS_LIVE.readLive(env.DB, key === "pulse" ? "live:market" : "live:alerts");
+    if (!live) return null;
+    if (key === "flowalerts") {
+      return FLOWS_LIVE.overlayFlowalerts(stored ? { session: stored.fresh && stored.fresh.session } : null,
+        live, now, clock);
+    }
+    return stored ? FLOWS_LIVE.overlayPulse(stored, live, now, clock, { json }) : null;
+  } catch {
+    return null;
+  }
+}
 
 async function buildLivePayload(env, ticker) {
   const t = encodeURIComponent(ticker);
@@ -1793,21 +1811,7 @@ async function buildStrategyContext(env, ctx, ticker) {
   const asOf = tapeDay || dailyDate;
   if (!asOf) throw new HttpError(502, "chain_no_spot", "No usable session date for that symbol");
 
-  const readExpiries = (raw) => {
-    const out = [];
-    for (const row of unwrapRows(raw)) {
-      const expiry = row && typeof row.expiry === "string" ? row.expiry.slice(0, 10) : null;
-      if (!expiry || !EXPIRY_RE.test(expiry)) continue;
-      out.push({
-        expiry,
-        chains: numOrNull(row.chains),
-        oi: numOrNull(row.open_interest),
-        volume: numOrNull(row.volume),
-      });
-    }
-    out.sort((a, b) => (a.expiry < b.expiry ? -1 : a.expiry > b.expiry ? 1 : 0));
-    return out;
-  };
+  const readExpiries = (raw) => readExpiryBreakdown(unwrapRows(raw));
 
   let expiries = readExpiries(breakdown);
 
@@ -1860,7 +1864,32 @@ async function buildStrategyContext(env, ctx, ticker) {
   };
 }
 
-async function buildStrategyExpiry(env, ticker, expiry) {
+function strategyEngine({ ticker, expiry, rawRows, spot, card, nowMs }) {
+  const block = card && card.engine && typeof card.engine === "object" && Array.isArray(card.engine.facts) ? card.engine : null;
+  const chain = chainRowsByExpiry(rawRows, { ticker });
+  const rows = chain.expiries.filter((e) => e.expiry === expiry);
+  if (!rows.length) return { status: "unavailable", reason: "no contract on this expiry parsed as the ticker's own" };
+  if (!(spot > 0)) return { status: "unavailable", reason: "no live spot to price against" };
+  const state = block && block.state ? block.state
+    : card && card.panels ? engineState(FLOWS_NEURON.regimeState(card, {})) : engineState(null);
+  const out = runCardEngine({
+    ticker, asOfMs: nowMs, spot, expiries: rows,
+    rate: block && block.rate ? block.rate : null,
+    facts: block ? block.facts : [], state, pLaw: block ? block.pLaw : null,
+    levels: block ? block.levels : null, event: block ? block.event : null,
+    atr: block ? block.atr : null,
+    stale: engineStale({
+      cardSession: card ? card.sessionDate : null, blockAsOf: block ? block.asOf : null,
+      expectedSession: card && card.sessionDate ? FLOWS_ASK.briefAge({ sessionDate: card.sessionDate }, new Date(nowMs)).expected : null,
+    }),
+  });
+  return {
+    status: "ok", v: QUANT_CARD_VERSION, cardSession: card ? card.sessionDate || null : null,
+    lawFrom: block && block.pLaw ? "card" : null, ...out,
+  };
+}
+
+async function buildStrategyExpiry(env, ticker, expiry, { engine = false } = {}) {
   const t = encodeURIComponent(ticker);
   const page = (optionType, n) => uwFetch(env, `/api/stock/${t}/option-contracts`, {
 
@@ -1870,7 +1899,11 @@ async function buildStrategyExpiry(env, ticker, expiry) {
     ...(n > 1 ? { page: n } : {}),
   });
 
-  const [callsFirst, putsFirst] = await Promise.all([page("call", 1), page("put", 1)]);
+  const [callsFirst, putsFirst, liveState, cardRead] = await Promise.all([
+    page("call", 1), page("put", 1),
+    engine ? uwFetch(env, `/api/stock/${t}/stock-state`, {}).catch(() => null) : Promise.resolve(null),
+    engine ? readCardWithEngine(env, ticker).catch(() => null) : Promise.resolve(null),
+  ]);
 
   const gather = async (optionType, first) => {
     const rows = unwrapRows(first);
@@ -1929,6 +1962,20 @@ async function buildStrategyExpiry(env, ticker, expiry) {
   const callRows = shape(calls.rows, "call");
   const putRows = shape(puts.rows, "put");
 
+  let engineBlock = null;
+  if (engine) {
+    const live = liveState && !Array.isArray(liveState) ? (liveState.data && !Array.isArray(liveState.data) ? liveState.data : liveState) : null;
+    const spotLive = numOrNull(live && live.close);
+    const card = cardRead && cardRead.card ? cardRead.card : null;
+    const spot = spotLive !== null && spotLive > 0 ? spotLive : card && card.engine && numOrNull(card.engine.spot);
+    try {
+      engineBlock = strategyEngine({ ticker, expiry, rawRows: calls.rows.concat(puts.rows), spot, card, nowMs: Date.now() });
+      engineBlock.spotSource = spotLive !== null && spotLive > 0 ? "stock-state" : spot ? "card" : null;
+    } catch (error) {
+      engineBlock = { status: "unavailable", reason: "the engine failed on this expiry: " + (error instanceof Error ? error.message : String(error)) };
+    }
+  }
+
   return {
     mode: "expiry",
     ticker, expiry,
@@ -1943,6 +1990,7 @@ async function buildStrategyExpiry(env, ticker, expiry) {
     missingGreeks,
 
     offExpiry,
+    ...(engine ? { engine: engineBlock } : {}),
     generatedAt: new Date().toISOString(),
   };
 }
@@ -2804,25 +2852,39 @@ async function route(request, env, url, ctx) {
   if (path === "/api/flows/ingest") {
 
     requireMethod(request, ["GET", "POST", "DELETE"]);
-    if (!env.FLOWS_INGEST_TOKEN) throw new HttpError(503, "unavailable", "Ingest is not configured");
+    if (!env.FLOWS_INGEST_TOKEN && !env.FLOWS_LIVE_TOKEN) {
+      throw new HttpError(503, "unavailable", "Ingest is not configured");
+    }
 
     const offered = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
 
-    if (!offered || !timingSafeEqualStr(offered, env.FLOWS_INGEST_TOKEN)) {
-      throw new HttpError(401, "unauthorized", "Authentication required");
-    }
+    const tokenKind = FLOWS_LIVE.tokenKind(offered, env, timingSafeEqualStr);
+    if (!tokenKind) throw new HttpError(401, "unauthorized", "Authentication required");
 
     const key = url.searchParams.get("key") || "";
 
-    const card = key.startsWith("card:") ? key.slice(5) : null;
+    if (key.startsWith("live:")) {
+      const scope = FLOWS_LIVE.ingestScope(key, request.method, tokenKind);
+      if (!scope.ok) throw new HttpError(scope.status, scope.code, scope.message);
+      await ensureFlowsTables(env);
+      const text = request.method === "POST"
+        ? new TextDecoder().decode(await readBounded(request, FLOWS_MAX_PAYLOAD_BYTES, "Payload too large"))
+        : "";
+      return FLOWS_LIVE.ingestLive(env, key, request.method, text, Date.now(), { json });
+    }
+
+    const tickerKey = /^(card|card-x|hist):/.exec(key);
+    const card = tickerKey ? key.slice(tickerKey[0].length) : null;
 
     const validKey = card !== null
       ? FLOWS_TICKER_RE.test(card)
-
-      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^flowalerts$|^pulse$|^political$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^sector:premium$|^news$|^brief$|^meta$/.test(key);
+      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^flowalerts$|^pulse$|^political$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^sector:premium$|^news$|^brief$|^meta$|^universe$|^regime$/.test(key);
     if (!validKey) {
       throw new HttpError(400, "invalid_key", "Unknown payload key");
     }
+
+    const scope = FLOWS_LIVE.ingestScope(key, request.method, tokenKind);
+    if (!scope.ok) throw new HttpError(scope.status, scope.code, scope.message);
 
     if (request.method === "GET") {
       const stored = await readFlowsPayload(env, key);
@@ -2941,6 +3003,8 @@ async function route(request, env, url, ctx) {
     if (path === "/api/flows/flowalerts") {
 
       const stored = await readFlowsPayload(env, "flowalerts");
+      const overlaid = await liveOverlay(env, "flowalerts", stored);
+      if (overlaid) return overlaid;
       if (stored === null) return json({ status: "pending" });
       return passthrough(stored);
     }
@@ -2948,8 +3012,31 @@ async function route(request, env, url, ctx) {
     if (path === "/api/flows/pulse") {
 
       const stored = await readFlowsPayload(env, "pulse");
+      const overlaid = await liveOverlay(env, "pulse", stored);
+      if (overlaid) return overlaid;
       if (stored === null) return json({ status: "pending" });
       return passthrough(stored);
+    }
+
+    if (path === "/api/flows/lk") {
+      await ensureFlowsTables(env);
+      return FLOWS_LIVE.serveLiveKey(env, url, Date.now(), { json, HttpError });
+    }
+
+    if (path === "/api/flows/now") {
+      await ensureFlowsTables(env);
+      return FLOWS_LIVE.serveNow(env, url, Date.now(), { json, HttpError,
+        quote: async (t) => (await quoteResponse(env, ctx, t)).json() });
+    }
+
+    if (path === "/api/flows/tape") {
+      const ticker = String(url.searchParams.get("t") || "").trim().toUpperCase();
+      if (!FLOWS_TICKER_RE.test(ticker)) {
+        throw new HttpError(400, "invalid_ticker", "Unknown ticker");
+      }
+      await ensureFlowsTables(env);
+      return FLOWS_LIVE.serveTape(env, ctx, ticker, Date.now(), {
+        json, fetchVendor: (p, params) => uwFetch(env, p, params) });
     }
 
     if (path === "/api/flows/political") {
@@ -2978,6 +3065,14 @@ async function route(request, env, url, ctx) {
 
       const stored = await readFlowsPayload(env, "sector:premium");
       if (stored === null) return json({ status: "pending", sectors: [] });
+      return passthrough(stored);
+    }
+
+    if (path === "/api/flows/universe" || path === "/api/flows/regime") {
+
+      const key = path.endsWith("/universe") ? "universe" : "regime";
+      const stored = await readFlowsPayload(env, key);
+      if (stored === null) return json({ status: "pending" });
       return passthrough(stored);
     }
 
@@ -3020,21 +3115,7 @@ async function route(request, env, url, ctx) {
       if (!FLOWS_TICKER_RE.test(ticker)) {
         throw new HttpError(400, "invalid_ticker", "Unknown ticker");
       }
-      try {
-        return await serveCachedVendorRead({
-          ctx,
-          cacheKey: new Request(`https://flows-live.internal/${ticker}`, { method: "GET" }),
-          wantsRefresh: false,
-          ttlSeconds: LIVE_TTL_SECONDS,
-          build: () => buildLivePayload(env, ticker),
-        });
-      } catch (error) {
-        if (!(error instanceof HttpError)) throw error;
-        return json({ ticker, status: "unavailable", why: error.code,
-          readAt: new Date().toISOString(), price: null, prevClose: null, changePct: null,
-          open: null, high: null, low: null, volume: null, marketTime: null, tapeTime: null },
-        200, { "Cache-Control": "no-store" });
-      }
+      return quoteResponse(env, ctx, ticker);
     }
 
     if (path === "/api/flows/brief") {
@@ -3047,8 +3128,10 @@ async function route(request, env, url, ctx) {
       let index = null;
       try { index = JSON.parse(stored.payload); } catch { index = null; }
       if (!index || typeof index !== "object" || Array.isArray(index)) return passthrough(stored);
-      return json({ ...index, session: FLOWS_ASK.briefAge(index, new Date()) }, 200,
-        { "X-Payload-Updated": String(stored.updatedAt || 0) });
+      const live = await briefWithLive(env, index);
+      return json({ ...live.index, session: FLOWS_ASK.briefAge(live.index, new Date()) }, 200,
+        { "X-Payload-Updated": String(stored.updatedAt || 0), ...nightlyFreshHeaders(stored),
+          ...(live.overlay ? { "X-Live-Overlay": live.overlay } : {}) });
     }
 
     if (path === "/api/flows/ask") {
@@ -3077,7 +3160,7 @@ async function route(request, env, url, ctx) {
           "The briefing was published and could not be read, so no answer is offered. " +
           "That is a fault on this site rather than a fact about the session.");
       }
-      return askAnswer(asked, env, index, stored.updatedAt, onPage);
+      return askAnswer(asked, env, (await briefWithLive(env, index)).index, stored.updatedAt, onPage);
     }
 
     if (path === "/api/flows/record") {
@@ -3089,18 +3172,21 @@ async function route(request, env, url, ctx) {
       return passthrough(stored);
     }
 
-    if (path === "/api/flows/card") {
+    if (path === "/api/flows/card" || path === "/api/flows/card-x" || path === "/api/flows/hist") {
 
       const ticker = String(url.searchParams.get("t") || "").trim().toUpperCase();
       if (!FLOWS_TICKER_RE.test(ticker)) {
         throw new HttpError(400, "invalid_ticker", "Unknown ticker");
       }
-      const stored = await readFlowsPayload(env, "card:" + ticker);
+      const stored = await readFlowsPayload(env, path.slice("/api/flows/".length) + ":" + ticker);
       if (stored === null) {
 
         return json({ ticker, status: "pending" });
       }
-      return passthrough(stored);
+      if (!stored.payload.includes(SPLIT_ENGINE_MARK)) return passthrough(stored);
+      const merged = await readCardWithEngine(env, ticker);
+      if (!merged.card) return passthrough(stored);
+      return json(merged.card, 200, { "X-Payload-Updated": String(stored.updatedAt || 0) });
     }
 
     if (path === "/api/flows/chain") {
@@ -3136,15 +3222,16 @@ async function route(request, env, url, ctx) {
         throw new HttpError(400, "invalid_expiry", "Expiry must be YYYY-MM-DD");
       }
       const expiry = rawExpiry === null ? null : rawExpiry;
+      const engine = expiry !== null && url.searchParams.get("engine") === "1";
 
       return serveCachedVendorRead({
         ctx,
         cacheKey: new Request(
-          `https://flows-strategy.internal/${ticker}${expiry ? "/" + expiry : ""}`,
+          `https://flows-strategy.internal/${ticker}${expiry ? "/" + expiry : ""}${engine ? "?engine=1" : ""}`,
           { method: "GET" }),
         wantsRefresh: url.searchParams.get("refresh") === "1",
         build: () => (expiry
-          ? buildStrategyExpiry(env, ticker, expiry)
+          ? buildStrategyExpiry(env, ticker, expiry, { engine })
           : buildStrategyContext(env, ctx, ticker)),
       });
     }
@@ -3196,6 +3283,9 @@ function finalize(response, request, url) {
 
     const publicMarkets = url.pathname === "/api/markets" && cacheableMethod && out.status === 200;
     if (!publicMarkets) out.headers.set("Cache-Control", "no-store");
+    if (url.pathname.startsWith("/api/flows/") && !out.headers.has("X-Server-Now")) {
+      out.headers.set("X-Server-Now", String(Date.now()));
+    }
   } else if (contentType.includes("text/html")) {
 
     out.headers.set("Cache-Control", "no-cache");
@@ -3211,26 +3301,30 @@ function finalize(response, request, url) {
 export default {
 
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(refreshMarketSnapshotIfDue(env).catch((error) => {
+    const at = event && Number.isFinite(event.scheduledTime) ? event.scheduledTime : Date.now();
+    const guard = (message, promise) => ctx.waitUntil(Promise.resolve(promise).catch((error) => {
       console.error(JSON.stringify({
-        message: "market refresh failed",
-        error: error instanceof Error ? error.message : String(error),
+        message, error: error instanceof Error ? error.message : String(error),
       }));
     }));
 
-    ctx.waitUntil(refreshFlowsIntraday(env).catch((error) => {
-      console.error(JSON.stringify({
-        message: "flows intraday refresh failed",
-        error: error instanceof Error ? error.message : String(error),
-      }));
-    }));
+    if (event && event.cron === FLOWS_LIVE.RTH_CRON) {
+      guard("flows rth tick failed", (async () => {
+        await ensureFlowsTables(env);
+        return FLOWS_LIVE.rthTick(env, at, { fetchVendor: (p, params) => uwFetch(env, p, params) });
+      })());
+      return;
+    }
 
-    ctx.waitUntil(refreshFlowsSummary(env).catch((error) => {
-      console.error(JSON.stringify({
-        message: "flows summary refresh failed",
-        error: error instanceof Error ? error.message : String(error),
-      }));
-    }));
+    guard("market refresh failed", refreshMarketSnapshotIfDue(env));
+
+    guard("flows nightly dispatch failed", (async () => {
+      await ensureFlowsTables(env);
+      await FLOWS_LIVE.nightlyTick(env, at);
+      if (FLOWS_LIVE.pruneDue(at)) await FLOWS_LIVE.pruneTape(env, at);
+    })());
+
+    guard("flows summary refresh failed", refreshFlowsSummary(env, at));
   },
 
   async fetch(request, env, ctx) {

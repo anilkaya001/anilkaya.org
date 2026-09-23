@@ -331,8 +331,10 @@ throttling:
 `SESSION_SECRET` is already set and is shared with the learning session — the
 audience claim, not the secret, is what separates the two.
 
-Four secrets are needed, and **one of them must be set in two places with the
-same value**: `FLOWS_INGEST_TOKEN` authenticates the pipeline to the Worker, so
+Four secrets are needed here (section 10.5i adds `FLOWS_LIVE_TOKEN`, which is
+also set in two places, and the optional `GITHUB_DISPATCH_TOKEN`), and **one of
+them must be set in two places with the same value**: `FLOWS_INGEST_TOKEN`
+authenticates the pipeline to the Worker, so
 the Worker needs it as a secret and GitHub Actions needs it as a repository
 secret. If the two differ, every publish returns 401, the job exits non-zero,
 and the board silently keeps yesterday's data.
@@ -1079,17 +1081,11 @@ OI-change fields "ToBeDone" and documentation has been wrong five times in
 this repository. Each feed fails alone: a vendor error becomes
 `{status:"unavailable", reason}` on that feed only.
 
-**The freshness architecture lives on the Worker, not on GitHub.** GitHub's
-crons have fired hours late all season, so intraday cadence cannot come from
-a workflow. The Worker's existing `*/15 * * * *` cron (the market snapshot's)
-also runs `refreshFlowsIntraday()`: inside the Eastern session (weekdays
-09:15–16:15, DST-safe via the IANA zone — `shared/flows-freshness.js`) it
-re-reads the market tide and the vendor's flow alerts, two vendor calls a
-tick, ~52 a day. It REFRESHES, never seeds: a cold store stays cold until the
-nightly pipeline publishes the envelope, because a cron that seeded keys
-would be a second publisher with a second idea of the schema. `refreshed:
-"nightly" | "intraday"` plus `readAt` on both payloads is how a page states
-which read it is showing.
+**The intraday layer is section 10.5i.** The Worker no longer rewrites `pulse`,
+`flowalerts` or `brief` during the session: each key has one writer, and the live
+tide and the session's alert union are overlaid onto the nightly rows when a page
+reads them. `refreshed: "nightly" | "intraday"` plus `readAt` on the served payload
+still says which read a page is showing.
 
 The log lines to read on a pipeline run:
 
@@ -1170,3 +1166,55 @@ day's union with one read. It writes nothing over that record when its own read
 shaped no rows, when the stored feed cannot be read, or when the record belongs
 to a later session (a republish of an earlier one); it publishes a single read
 only when the store holds no record for the session.
+
+### 10.5i The live layer: the Worker clock, three tiers, one writer per key
+
+The design lives in code: `shared/flows-freshness.js` (phases,
+states, thresholds), `shared/flows-live.js` (builders and the key registry),
+`shared/flows-live-worker.js` (the Worker side) and `scripts/flows-legs/live.mjs`
+(the Actions side). The data contract for pages is the key registry plus the
+`X-Fresh-*` headers; `assets/js/flows-fresh.js` is the one client helper.
+
+- **The clock is the Worker cron.** `1-59/5 13-21 * * 1-5` runs Tier 1 (five
+  vendor calls into `live:market`) from the open to ten minutes past the close,
+  dispatches the Actions run at :01/:16/:31/:46, and re-dispatches once when
+  `live:breadth` is 45 minutes old. Every dispatch needs `GITHUB_DISPATCH_TOKEN`
+  (step 3 below); without it Tier 1 still runs and the dispatches are no-ops. `*/30 * * * *` refreshes the market snapshot,
+  dispatches the nightly at or after 17:15 ET (once more after 18:15 ET if meta
+  is still behind), refreshes the board summary, and prunes `flows_tape` rows not
+  served for a week. The GitHub schedules stay as backups.
+- **Holidays and early closes are read from the tape.** The first tick at or after
+  09:45 ET whose market tide still carries yesterday's date marks the day closed
+  in `flows_clock`; a tide stuck at or before 13:05 ET for 30 minutes after 13:30
+  marks an early close. The repository still holds no calendar.
+- **Tier 2** is `node scripts/flows-pipeline.mjs --live`, run by
+  `.github/workflows/flows-live.yml`: sector and ETF tides, both net-flow expiry
+  series, one screener call for every board name, the incremental alert union,
+  spot gamma by rotation, the tape, movers and news — 35 to 39 calls at a 333 ms
+  floor, `live:*` keys only. It exits at once outside the session or when a run
+  finished under eight minutes ago. Dry run: `--live --dry-run`.
+- **Tier 3** is on demand: `/api/flows/tape?t=` (a D1 stale-while-revalidate cache
+  with a 20-second single-flight lease, one leg per refresh) and the quote on
+  `/api/flows/live?t=` (5 s in session, 30 s pre/post, 6 h closed), both behind
+  the `UW_ONDEMAND` rate-limit binding.
+
+Out-of-band steps before the first deploy of this layer:
+
+1. Apply the tables (idempotent; the Worker also creates them on first use):
+   `./tests/node_modules/.bin/wrangler d1 execute iewt --remote --file=./migrations/0010_flows_live.sql`
+2. Mint the live token and set it in **both** places with the same value:
+   `openssl rand -hex 32`, then `wrangler secret put FLOWS_LIVE_TOKEN` and the
+   Actions secret `FLOWS_LIVE_TOKEN`. The live workflow has no `FLOWS_INGEST_TOKEN`
+   in its environment on purpose: the live token can write `live:*` keys only,
+   read the boards and meta it plans from, and delete nothing, while the nightly
+   token cannot write a live key.
+3. Optional, and what turns the Worker into the clock: a fine-grained PAT for
+   this repository only, with Actions read and write, set as
+   `wrangler secret put GITHUB_DISPATCH_TOKEN`. Without it every dispatch is a
+   logged no-op and the GitHub schedules carry Tier 2 and the nightly (late).
+   Put its expiry in a calendar.
+4. After deploy, confirm both crons are registered (`wrangler triggers` or the
+   dashboard) and read `live:market` on `/api/flows/lk?k=market` at 09:36 ET.
+
+`FLOWS_LIVE_MODE = "off"` in `[vars]` is the instant rollback: no Tier 1 read and
+no dispatch; pages fall back to the nightly rows.

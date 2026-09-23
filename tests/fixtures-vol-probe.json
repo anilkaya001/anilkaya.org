@@ -1,0 +1,289 @@
+{
+ "source": "Unusual Whales live probe, GitHub Actions run 35847187962 (node scripts/flows-probe.mjs), session 2026-09-22; each row is the verbatim first row of its response",
+ "session": "2026-09-22",
+ "probes": {
+  "iv-dist:AAPL": {
+   "url": "/api/stock/AAPL/interpolated-iv/distribution?date=2026-09-22",
+   "envelope": "{data:[6]}",
+   "rowsAt": "data[]",
+   "rowCount": 6,
+   "row": {
+    "max": "0.501",
+    "min": "0.138",
+    "date": "2026-09-22",
+    "ticker": "AAPL",
+    "days": 7,
+    "median": "0.243000",
+    "percentile": "0.2191",
+    "volatility": "0.221",
+    "samples": 251,
+    "first_date": "2025-09-23",
+    "q1": "0.225500",
+    "q3": "0.273500"
+   }
+  },
+  "iv-dist:NVDA": {
+   "url": "/api/stock/NVDA/interpolated-iv/distribution?date=2026-09-22",
+   "envelope": "{data:[6]}",
+   "rowsAt": "data[]",
+   "rowCount": 6,
+   "row": {
+    "max": "0.848",
+    "min": "0.249",
+    "date": "2026-09-22",
+    "ticker": "NVDA",
+    "days": 7,
+    "median": "0.382000",
+    "percentile": "0.0438",
+    "volatility": "0.284",
+    "samples": 251,
+    "first_date": "2025-09-23",
+    "q1": "0.337500",
+    "q3": "0.433500"
+   }
+  },
+  "term-structure-dist:AAPL": {
+   "url": "/api/stock/AAPL/volatility/term-structure/distribution?date=2026-09-22",
+   "envelope": "{data:[19]}",
+   "rowsAt": "data[]",
+   "rowCount": 19,
+   "row": {
+    "max": "0.2733854995799855",
+    "min": "0.201116316708722",
+    "date": "2026-09-22",
+    "ticker": "AAPL",
+    "median": "0.246166",
+    "percentile": "0.7273",
+    "volatility": "0.251408225954508",
+    "expiry": "2026-09-23",
+    "samples": 11,
+    "first_date": "2026-09-08",
+    "dte": 1,
+    "q1": "0.238122",
+    "q3": "0.255307"
+   }
+  },
+  "term-structure-dist:NVDA": {
+   "url": "/api/stock/NVDA/volatility/term-structure/distribution?date=2026-09-22",
+   "envelope": "{data:[18]}",
+   "rowsAt": "data[]",
+   "rowCount": 18,
+   "row": {
+    "max": "0.3356347508713565",
+    "min": "0.2722521164837225",
+    "date": "2026-09-22",
+    "ticker": "NVDA",
+    "median": "0.328428",
+    "percentile": "0.3636",
+    "volatility": "0.312893202361201",
+    "expiry": "2026-09-23",
+    "samples": 11,
+    "first_date": "2026-09-08",
+    "dte": 1,
+    "q1": "0.303062",
+    "q3": "0.331274"
+   }
+  },
+  "vrp:AAPL": {
+   "url": "/api/stock/AAPL/volatility/variance-risk-premium?days=21&date=2026-09-22",
+   "envelope": "{data:[231]}",
+   "rowsAt": "data[]",
+   "rowCount": 231,
+   "row": {
+    "date": "2025-09-23",
+    "ticker": "AAPL",
+    "rank": "0.46987951807228915663",
+    "implied_volatility": "0.232000",
+    "realized_volatility": "0.228031",
+    "realized_volatility_days": 21,
+    "implied_volatility_days": 30,
+    "realized_date": "2025-10-21",
+    "risk_premium": "0.003969"
+   }
+  },
+  "vrp:NVDA": {
+   "url": "/api/stock/NVDA/volatility/variance-risk-premium?days=21&date=2026-09-22",
+   "envelope": "{data:[231]}",
+   "rowsAt": "data[]",
+   "rowCount": 231,
+   "row": {
+    "date": "2025-09-23",
+    "ticker": "NVDA",
+    "rank": "0.40963855421686746988",
+    "implied_volatility": "0.376000",
+    "realized_volatility": "0.329358",
+    "realized_volatility_days": 21,
+    "implied_volatility_days": 30,
+    "realized_date": "2025-10-21",
+    "risk_premium": "0.046642"
+   }
+  },
+  "rr-skew-25:AAPL": {
+   "url": "/api/stock/AAPL/historical-risk-reversal-skew?expiry=2026-10-16&delta=25&timeframe=1Y&date=2026-09-22",
+   "envelope": "{data:[149]}",
+   "rowsAt": "data[]",
+   "rowCount": 149,
+   "row": {
+    "date": "2026-02-19",
+    "ticker": "AAPL",
+    "delta": 25,
+    "risk_reversal": "0.00695051315237605"
+   }
+  },
+  "rr-skew-025:AAPL": {
+   "url": "/api/stock/AAPL/historical-risk-reversal-skew?expiry=2026-10-16&delta=0.25&timeframe=1Y&date=2026-09-22",
+   "envelope": "{data:[149]}",
+   "rowsAt": "data[]",
+   "rowCount": 149,
+   "row": {
+    "date": "2026-02-19",
+    "ticker": "AAPL",
+    "delta": 25,
+    "risk_reversal": "0.00695051315237605"
+   }
+  },
+  "rr-skew-10:AAPL": {
+   "url": "/api/stock/AAPL/historical-risk-reversal-skew?expiry=2026-10-16&delta=10&timeframe=1Y&date=2026-09-22",
+   "envelope": "{data:[149]}",
+   "rowsAt": "data[]",
+   "rowCount": 149,
+   "row": {
+    "date": "2026-02-19",
+    "ticker": "AAPL",
+    "delta": 10,
+    "risk_reversal": "0.076103795391265"
+   }
+  },
+  "iv-rank:AAPL": {
+   "url": "/api/stock/AAPL/iv-rank?timespan=1y&date=2026-09-22",
+   "envelope": "{data:[251]}",
+   "rowsAt": "data[]",
+   "rowCount": 251,
+   "row": {
+    "close": "254.43",
+    "date": "2025-09-23",
+    "updated_at": "2025-09-23T22:35:04.325313Z",
+    "volatility": "0.2325",
+    "iv_rank_1y": "16.2226"
+   }
+  },
+  "ohlc-1d:AAPL": {
+   "url": "/api/stock/AAPL/ohlc/1d?timeframe=2Y&end_date=2026-09-22",
+   "envelope": "{data:[1504]}",
+   "rowsAt": "data[]",
+   "rowCount": 1504,
+   "row": {
+    "close": "340.18",
+    "high": "340.79",
+    "low": "339.87",
+    "open": "340.49",
+    "date": "2026-09-23",
+    "volume": 56383,
+    "total_volume": 56383,
+    "market_time": "pr"
+   }
+  },
+  "vol-anomaly:AAPL": {
+   "url": "/api/stock/AAPL/volatility/anomaly?date=2026-09-22",
+   "envelope": "{data:{history:[68],latest:{7}}}",
+   "rowsAt": "data.history[]",
+   "rowCount": 68,
+   "row": {
+    "date": "2026-06-09",
+    "direction": "short_vol",
+    "score": "25.485241212290692"
+   }
+  },
+  "vol-sentiment:AAPL": {
+   "url": "/api/stock/AAPL/volatility/option-sentiment?date=2026-09-22",
+   "envelope": "{data:{history:[174],latest:{9}}}",
+   "rowsAt": "data.history[]",
+   "rowCount": 174,
+   "row": {
+    "date": "2026-01-13",
+    "direction": "neutral",
+    "score": "17.53",
+    "vwks": "0.022621",
+    "avar": "0.00282"
+   }
+  },
+  "vol-character:AAPL": {
+   "url": "/api/stock/AAPL/volatility/character?date=2026-09-22",
+   "envelope": "{data:{history:[67],latest:{11}}}",
+   "rowsAt": "data.history[]",
+   "rowCount": 67,
+   "row": {
+    "date": "2026-06-09",
+    "character": "moderate",
+    "half_life_days": "28.57737724761596",
+    "hurst_rv": "0.6165104303471921"
+   }
+  },
+  "vol-anomaly-top": {
+   "url": "/api/volatility/anomaly/top?direction=short_vol&date=2026-09-22&limit=50",
+   "envelope": "{data:[4],date:str,direction:str}",
+   "rowsAt": "data[]",
+   "rowCount": 4,
+   "row": {
+    "date": "2026-09-22",
+    "ticker": "SOXS",
+    "components": {
+     "iv_percentile": {
+      "raw": 83.3,
+      "value": 0.6659999999999999
+     },
+     "regime_score": {
+      "crash_probability": 0.5,
+      "raw": -0.21852342671238417,
+      "value": -0.21852342671238417
+     },
+     "skew_percentile": {
+      "percentile": 0.94,
+      "raw": 0.3901961723345326,
+      "value": 0.8799999999999999
+     },
+     "vov_percentile": {
+      "raw": 64.17699115044248,
+      "value": 0.14176991150442475
+     },
+     "vrp_z": {
+      "mean": 0.019322678041190446,
+      "raw": 1.377676,
+      "std": 0.485353048977888,
+      "value": 0.9328970768937412
+     }
+    },
+    "direction": "short_vol",
+    "updated_at": "2026-09-22T23:15:10.809504Z",
+    "score": "52.26299244513092",
+    "sample_size": 5
+   }
+  },
+  "vol-sentiment-top": {
+   "url": "/api/volatility/option-sentiment/top?direction=bullish&date=2026-09-22&limit=50",
+   "envelope": "{data:[50],date:str}",
+   "rowsAt": "data[]",
+   "rowCount": 50,
+   "row": {
+    "date": "2026-09-22",
+    "ticker": "ORBS",
+    "components": {
+     "avar": {
+      "norm": 1,
+      "value": 0.42755
+     },
+     "vwks": {
+      "norm": 1,
+      "value": 0.202703
+     }
+    },
+    "direction": "bullish",
+    "updated_at": "2026-09-22T23:20:01.005530Z",
+    "score": "100.0",
+    "vwks": "0.202703",
+    "avar": "0.42755",
+    "sample_size": 12
+   }
+  }
+ }
+}

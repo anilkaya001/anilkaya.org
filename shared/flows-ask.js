@@ -499,28 +499,44 @@ function oneCard(t, card, at, st) {
   }
 
   const g = ok(panels.gamma);
-  const spot = num(g.spot), cw = num(g.callWall), pw = num(g.putWall);
-  const strikes = num(g.strikes), lo = num(g.bandMin), hi = num(g.bandMax);
-  if (all(spot, cw, pw, strikes, lo, hi) && label !== null) {
-    let say = "Today's gamma flow in " + t + " at spot " + r4(spot) + " spans " + strikes +
-      " strikes from " + r4(lo) + " to " + r4(hi) +
-      "; its " + (cw < spot ? "largest long-gamma strike" : "call wall") + " is at " + r4(cw) +
-      " and its " + (pw > spot ? "largest short-gamma strike" : "put wall") + " at " + r4(pw) + ".";
-    const n = { spotPx: r4(spot), callWallPx: r4(cw), putWallPx: r4(pw), strikes,
-      bandMinPx: r4(lo), bandMaxPx: r4(hi) };
-    const flip = num(card.gammaFlip), crossings = num(reg.crossings);
-    if (flip !== null) {
-      const side = typeof reg.flipSide === "string" && reg.flipSide
-        ? " (" + reg.flipSide.replace(/_/g, " ") + ")" : "";
-      say += " Its running sum crosses zero at " + r4(flip) + side + ".";
-      n.gammaFlipPx = r4(flip);
+  const lv = ok(panels.levels);
+  const lvl = (kind) => {
+    const hit = Array.isArray(lv.levels) ? lv.levels.find((x) => x && x.kind === kind) : null;
+    return hit ? num(hit.px) : null;
+  };
+  const spot = num(g.spot) !== null ? num(g.spot) : num(lv.spot);
+  const cw = lvl("call_wall"), pw = lvl("put_wall"), zg = lvl("zero_gamma");
+  const peakLong = num(g.flowPeakLong) !== null ? num(g.flowPeakLong) : num(g.callWall);
+  const peakShort = num(g.flowPeakShort) !== null ? num(g.flowPeakShort) : num(g.putWall);
+  const book = cw !== null || pw !== null || zg !== null;
+  if (spot !== null && label !== null && (book || all(peakLong, peakShort))) {
+    const n = { spotPx: r4(spot) };
+    let say;
+    if (book) {
+      const parts = [];
+      if (cw !== null) { parts.push("call wall is at " + r4(cw)); n.callWallPx = r4(cw); }
+      if (pw !== null) { parts.push("put wall at " + r4(pw)); n.putWallPx = r4(pw); }
+      say = "For " + t + " at spot " + r4(spot) + (parts.length ? ", the open-interest book's " + parts.join(" and its ") : "");
+      if (zg !== null) { say += (parts.length ? "; " : ", ") + "total dealer gamma changes sign at " + r4(zg); n.zeroGammaPx = r4(zg); }
+      say += ".";
+    } else {
+      say = "Today's gamma flow in " + t + " at spot " + r4(spot) + " peaks at " + r4(peakLong) + " long and " +
+        r4(peakShort) + " short, flow extremes and not walls.";
+      n.flowPeakLongPx = r4(peakLong); n.flowPeakShortPx = r4(peakShort);
+    }
+    const cross = num(card.strikeSumCrossing) !== null ? num(card.strikeSumCrossing) : num(card.gammaFlip);
+    const crossings = num(reg.crossings);
+    const sideRaw = typeof reg.crossingSide === "string" && reg.crossingSide ? reg.crossingSide
+      : typeof reg.flipSide === "string" && reg.flipSide ? reg.flipSide : null;
+    if (n.zeroGammaPx === undefined && cross !== null) {
+      say += " The flow's strike-sum crossing is at " + r4(cross) + (sideRaw ? " (" + sideRaw.replace(/_/g, " ") + ")" : "") + ".";
+      n.strikeSumCrossingPx = r4(cross);
       if (crossings !== null) n.crossings = crossings;
-    } else if (crossings === 0) {
-      say += " Its running sum does not change sign inside that band, so no flip level is " +
-        "published (0 crossings).";
+    } else if (n.zeroGammaPx === undefined && crossings === 0) {
+      say += " The flow's running sum never changes sign, so no strike-sum crossing is published (0 crossings).";
       n.crossings = 0;
     }
-    out.push(f("card:" + t + "/gamma", [t, "gamma", "flip", "wall", "dealer"], say, n));
+    out.push(f("card:" + t + "/gamma", [t, "gamma", "wall", "flip", "zero", "crossing", "dealer"], say, n));
   }
 
   const pm = ok(panels.pricedMove);
@@ -574,7 +590,7 @@ export function cardFacts(store, options) {
 
     if (card === null || typeof card !== "object" || card.status === "pending") continue;
 
-    if (card.depth === "cross-section" && !thin) continue;
+    if ((card.depth === "cross-section" || card.depth === "index") && !thin) continue;
     const t = typeof card.ticker === "string" && card.ticker ? card.ticker : m[1];
     entries.push({ t, card, at: atOf(card), st: standing.get(t) || null });
   }

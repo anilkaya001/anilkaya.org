@@ -97,9 +97,9 @@ const upstream = http.createServer((req, res) => {
     if (ticker === "ZZZ") return send(200, { data: [] });
     if (ticker === "YYY") return send(500, {});
     return send(200, { data: [
-      { expiry: NEAR, chains: 5, open_interest: 1320, volume: 250 },
-      { expiry: BROKEN, chains: 10, open_interest: 400, volume: 5 },
-      { expiry: FAR, chains: 12223, open_interest: 90000, volume: 40 },
+      { expires: NEAR, chains: 5, open_interest: 1320, volume: 250 },
+      { expires: BROKEN, chains: 10, open_interest: 400, volume: 5 },
+      { expires: FAR, chains: 12223, open_interest: 90000, volume: 40 },
     ] });
   }
 
@@ -264,6 +264,11 @@ try {
        `warning before the read beats confessing after it`);
     ok(/42d/.test(opts[0].label),
        "and each option carries its days to expiry, counted in calendar days from the session");
+    ok(!upstreamCalls.some((u) => /\/stock\/AAA\/expiry-breakdown\?.*date=/.test(u)) &&
+       !upstreamCalls.some((u) => /\/stock\/AAA\/greek-exposure\/expiry/.test(u)),
+       "the breakdown is read under the vendor's live field name `expires` (probe 2026-09-23), " +
+       "so the list arrives on the first call and no dated retry or greek-exposure fallback " +
+       "is spent rediscovering it");
   }
 
   {
@@ -340,6 +345,31 @@ try {
        `derivative of a convex function is an extrapolation, and nobody pays it`);
     eq(r["Vega exposure"].value, "+$12.00 per volatility point",
        "vega carries the unit its convention is stated in");
+
+    ok(r["On the smile"] && /^[+\u2212]\$\d/.test(r["On the smile"].value) && /NBBO/.test(r["On the smile"].hint),
+       `beside the vendor's greeks, the engine's reading: the leg re-priced on this expiry's smile fitted to the NBBO ` +
+       `(${r["On the smile"] && r["On the smile"].value}), computed in the page by FlowsQuant rather than fetched`);
+    ok(r["Chance of profit"] && /^\d+(\.\d)?%/.test(r["Chance of profit"].value),
+       `and a chance of profit at expiry under the smile's own density (${r["Chance of profit"] && r["Chance of profit"].value})`);
+    ok(r["Expected P&L, real world"], "with the real-world expectation named as such, a dash while no law was published for the name");
+    const quant = await page.evaluate(() => typeof window.FlowsQuant === "object" && typeof window.FlowsQuant.repriceStructure === "function");
+    ok(quant, "the generated FlowsQuant bundle is the page's only engine global");
+  }
+
+  {
+    const cookie = { Cookie: "flows_session=" + token };
+    const withEngine = await (await fetch(server.baseURL + "/api/flows/strategy?t=AAA&expiry=" + NEAR + "&engine=1",
+      { headers: cookie })).json();
+    const e = withEngine.engine;
+    ok(e && e.status === "ok" && e.spotSource === "stock-state" && e.spot === 102,
+       `engine=1 runs the card engine on the expiry just read, priced against the live print (${e && e.status}, ${e && e.spotSource})`);
+    ok(e && e.expiries.length === 1 && e.expiries[0].expiry === NEAR && e.expiries[0].smile && e.expiries[0].forward,
+       "for that one expiry only, with its smile and its parity forward");
+    ok(e && Array.isArray(e.structures) && Array.isArray(e.facts) && "noTrade" in e,
+       "in the same structure objects the card publishes, so the page reads one shape wherever it came from");
+    ok(e && e.lawFrom === null && e.pLaw === null, "and with no card published for the name, no real-world law is invented for it");
+    const plain = await (await fetch(server.baseURL + "/api/flows/strategy?t=AAA&expiry=" + NEAR, { headers: cookie })).json();
+    ok(!("engine" in plain), "without engine=1 the payload is the vendor read it always was");
   }
 
   {

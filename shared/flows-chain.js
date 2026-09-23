@@ -5,6 +5,7 @@ import {
 import { buildUnusualRows, describeOiBasis } from "./flows-unusual.js";
 
 import { panelLead, saidMagnitude } from "./flows-card.js";
+import { quoteImpliedVols, QUOTE_IV_BASIS } from "./flows-quant-card.js";
 
 const numOrNull = (v) => {
   if (v === null || v === undefined || v === "") return null;
@@ -636,6 +637,8 @@ export function buildAggressor(rows, {
 export function buildChainPanels(chainRows, {
   spot, asOf, ticker = null,
 
+  ivSource = "quotes",
+
   requestedExpiry = null,
 
   stage = null,
@@ -674,15 +677,18 @@ export function buildChainPanels(chainRows, {
   }
 
   const conv = ivConvention(rows.map((r) => numOrNull(r && r.implied_volatility)));
-  const priced = [];
+  const sold = [];
   for (const pair of parsedRows) {
     const p = priceSale(pair.row, { spot, asOf, ivDivisor: conv.divisor, parsed: pair.p });
-    if (p) priced.push(p);
+    if (p) sold.push(p);
   }
+  const fromQuotes = ivSource !== "vendor";
+  const priced = fromQuotes ? quoteImpliedVols(sold, { spot }) : sold;
+  const ivBasis = fromQuotes ? QUOTE_IV_BASIS : conv.basis;
 
   const { kept, collisions } = preferOutOfTheMoney(priced);
 
-  const surface = ivSurface(kept, { ivBasis: conv.basis });
+  const surface = ivSurface(kept, { ivBasis });
   const serial = serialiseSurface(surface);
 
   const byExpiry = new Map();
@@ -729,7 +735,9 @@ export function buildChainPanels(chainRows, {
     surfacedRows: kept.length,
     strikeCollisions: collisions,
     foreignRows,
-    ivBasis: conv.basis,
+    ivBasis,
+    ivSource: fromQuotes ? "quotes" : "vendor",
+    quoteRejected: fromQuotes ? priced.filter((p) => p.iv === null).length : null,
     ivSurface: serial,
     skewTerm: buildSkewTerm(serial, scalars),
     topContracts: buildTopContracts(rows, { spot, ivDivisor: conv.divisor, parsed: parsedRows }),

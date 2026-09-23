@@ -3033,19 +3033,26 @@
       }
     }
 
-    const flip = isNum(card && card.gammaFlip);
-    if (flip === null) {
+    const zero = isNum(card && card.zeroGamma);
+    if (zero === null) {
+      pairs.push(["Zero-gamma level", DASH, null, "unavailable",
+        "No zero-gamma level: it needs the chain's open interest re-priced on the fitted smiles, and this card has none."]);
+    } else {
+      pairs.push(["Zero-gamma level", money(zero)]);
+    }
+    const cross = isNum(card && card.strikeSumCrossing) !== null ? isNum(card.strikeSumCrossing) : isNum(card && card.gammaFlip);
+    if (cross === null) {
       const gm = panels.gamma;
       if (gm && gm.status && gm.status !== "ok") {
         const [k, why] = silence(gm, "gamma");
-        pairs.push(["Gamma flip", DASH, null, k, why]);
+        pairs.push(["Strike-sum crossing", DASH, null, k, why]);
       } else {
-        pairs.push(["Gamma flip", DASH, null, "quiet",
-          "Net gamma does not change sign materially inside the drawn band, so " +
-          "no flip level is published for this name."]);
+        pairs.push(["Strike-sum crossing", DASH, null, "quiet",
+          "The flow ladder's running sum does not change sign inside the drawn band."]);
       }
     } else {
-      pairs.push(["Gamma flip", money(flip)]);
+      pairs.push(["Strike-sum crossing", money(cross), null, null,
+        "Where the flow ladder's running sum changes sign; not the zero-gamma level."]);
     }
 
     const pm = panels.pricedMove;
@@ -5879,17 +5886,10 @@
     const levelsPanel = card.panels && card.panels.levels;
     const flipLevel = levelsPanel && levelsPanel.status === "ok" &&
       Array.isArray(levelsPanel.levels)
-      ? levelsPanel.levels.find((l) => l && l.kind === "gamma_flip") || null
+      ? levelsPanel.levels.find((l) => l && l.kind === "zero_gamma") || null
       : null;
     const flipPct = flipLevel ? isNum(flipLevel.distPct) : null;
     const flipAtr = flipLevel ? isNum(flipLevel.distAtr) : null;
-    const regime = card.regime || null;
-    const bandLo = regime ? isNum(regime.bandMin) : null;
-    const bandHi = regime ? isNum(regime.bandMax) : null;
-    const bandSaid = bandLo !== null && bandHi !== null
-      ? " The ladder was read over $" + bandLo.toFixed(2) + " to $" + bandHi.toFixed(2) +
-        ", so this is the nearest sign change inside that window rather than in the whole book."
-      : "";
 
     let flipNode;
     if (flipPct === null) {
@@ -5897,11 +5897,9 @@
       flipNode = idChip("ftFlip", "flip", DASH, {
         empty: "unavailable",
         title: levelsPanel && levelsPanel.status === "ok"
-          ? "No gamma flip resolved on this name's ladder, so there is no distance to " +
-            "one. That is not a distance of zero — a book with no sign change over the " +
-            "strikes read has no flip to be near." + bandSaid
+          ? "No zero-gamma level resolved, so no distance: not a distance of zero."
           : "The levels panel is unavailable for this name today, so the distance to the " +
-            "gamma flip was not measured." + bandSaid,
+            "zero-gamma level was not measured.",
       });
     } else {
 
@@ -5914,13 +5912,12 @@
         : "exactly at spot — the name is sitting on its flip";
       flipNode = idChip("ftFlip", "", P.pct1(flipPct) + " to flip" + atrSaid, {
         cls: flipPct >= 0 ? "is-above" : "is-below",
-        title: "Gamma flip at $" + flipLevel.px.toFixed(2) + ", " + whereSaid +
-          ". Past it the sign of dealer " +
+        title: "Zero-gamma level at $" + flipLevel.px.toFixed(2) + ", " + whereSaid +
+          ": total dealer gamma, re-priced at hypothetical spots, changes sign there. Past it the sign of dealer " +
           "hedging reverses: the flow that has been damping moves starts amplifying " +
           "them." + (flipAtr === null
             ? " No ATR was published for this name, so the distance is stated in percent only."
-            : " The second figure is that distance in this name's own average true range.") +
-          bandSaid,
+            : " The second figure is that distance in this name's own average true range."),
       });
     }
 
@@ -6126,6 +6123,7 @@
 
   async function paint(card) {
     painted = card;
+    engineNow = card && card.engine && Array.isArray(card.engine.structures) ? card.engine : null;
 
     drawnStations.clear();
     if (headEl) headEl.hidden = false;
@@ -6229,6 +6227,53 @@
     more.textContent = ideasOpen ? "Show fewer ideas" : "Show " + extra + " more idea" + (extra === 1 ? "" : "s");
   }
 
+  let engineNow = null;
+  const LEG_SIGN = { 1: "+", "-1": MINUS };
+  const usd = (v) => (isNum(v) === null ? DASH : (v < 0 ? MINUS + "$" : "$") + Math.abs(v).toFixed(0));
+  const pc0 = (v) => (isNum(v) === null ? DASH : (v * 100).toFixed(0) + "%");
+
+  function engineIdea(li, idea, i) {
+    const eng = engineNow;
+    const st = eng ? eng.structures.find((x) => x && x.id === idea.structure) : null;
+    const g = isNum(idea.grade) === null ? 0 : idea.grade;
+    const top = el("div", "ft-idea-top");
+    const rank = el("span", "ft-idea-rank r" + g);
+    for (let k = 1; k <= 3; k++) rank.append(el("i", k <= g ? "is-on" : ""));
+    rank.title = "Grade " + g + " of 3: the structure's own grade, capped by the weakest fact it rests on.";
+    const fam = st ? String(st.family).replace(/-/g, " ") : String(idea.structure);
+    top.append(rank, el("span", "ft-idea-t", String(i + 1) + ". " + (idea.word || fam)));
+    li.append(top);
+    const chips = el("div", "ft-idea-chips");
+    if (idea.word) chips.append(el("span", "ft-idea-chip", fam));
+    if (st) {
+      chips.append(el("span", "ft-idea-chip", (st.legs || []).map((l) => (LEG_SIGN[l.side] || "") +
+        (l.qty > 1 ? l.qty : "") + l.type + (isNum(l.k) === null ? "" : l.k)).join(" ")));
+      chips.append(el("span", "ft-idea-chip", st.expiry + " \u00b7 " + st.dte + "d"));
+      chips.append(el("span", "ft-idea-chip is-grade", st.risk + " risk"));
+    }
+    chips.append(el("span", "ft-idea-chip" + (idea.from === "engine" ? " is-state" : ""),
+      idea.from === "model" ? "model's pick" : "engine ranking"));
+    li.append(chips);
+    if (!st) {
+      li.append(el("p", "ft-idea-p", "Structure " + idea.structure + " is not on the card this page holds; the card moved on after Neuron read it."));
+      return;
+    }
+    const meta = el("dl", "ft-idea-m");
+    const put = (k, v) => meta.append(el("dt", "", k), el("dd", "", v));
+    const pr = st.prob || {}, ev = st.ev || {};
+    put("Chance of profit", "Q " + pc0(pr.popQ) + " \u00b7 P " + pc0(pr.popP));
+    put("Expected P&L", usd(ev.p) + " real world \u00b7 " + usd(ev.q) + " on the smile");
+    put("Max loss", st.lossUnbounded ? "unbounded" : usd(st.maxLoss));
+    put("Max profit", st.profitUnbounded ? "unbounded" : usd(st.maxProfit));
+    const facts = new Map((eng.facts || []).map((f) => [f.id, f]));
+    const rests = (Array.isArray(idea.because) ? idea.because : []).map((id) => {
+      const f = facts.get(id);
+      return f && isNum(f.v) !== null ? id + " " + (f.u === "vol" || f.u === "frac" ? (f.v * 100).toFixed(1) + "%" : f.v) : id;
+    });
+    if (rests.length) put("Rests on", rests.join(" \u00b7 "));
+    li.append(meta);
+  }
+
   function paintNeuronIdeas(list, ideas, byKey) {
     list.replaceChildren();
     const rows = Array.isArray(ideas) ? ideas : [];
@@ -6241,6 +6286,7 @@
     rows.forEach((idea, i) => {
       if (!idea || typeof idea !== "object") return;
       const li = el("li", "ft-idea");
+      if (idea.from === "engine" || idea.from === "model") { engineIdea(li, idea, i); list.append(li); return; }
       const top = el("div", "ft-idea-top");
       const rank = el("span", "ft-idea-rank r" + (isNum(idea.robustness) === null ? 0 : idea.robustness));
       for (let k = 1; k <= 3; k++) rank.append(el("i", k <= (isNum(idea.robustness) || 0) ? "is-on" : ""));
@@ -6398,6 +6444,7 @@
       when.append(time);
       head.append(when);
     }
+    if (status === "ok" && r.engine === true && typeof r.verdictWord === "string") head.append(el("span", "ak-neuron-when", " \u00b7 " + r.verdictWord));
 
     if (status === "ok" && text) {
       const ideasKey = JSON.stringify(r.ideas || []);

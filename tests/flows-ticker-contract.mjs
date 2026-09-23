@@ -26,7 +26,7 @@ execFileSync(process.execPath,
   { stdio: "ignore" });
 
 const cards = fs.readdirSync(EMIT_DIR)
-  .filter((f) => f.startsWith("-card-"))
+  .filter((f) => /^-card-[A-Z]/.test(f))
   .map((f) => JSON.parse(fs.readFileSync(path.join(EMIT_DIR, f), "utf8")));
 ok(cards.length >= 5, `the emitter produced ${cards.length} cards to test against`);
 
@@ -34,7 +34,7 @@ for (const k of SENTINEL_KEYS) {
   ok(!TICKER_PANEL_KEYS.includes(k), `the sentinel "${k}" is not a card.panels key`);
 }
 
-const withChain = cards.filter((c) =>
+const withChain = cards.filter((c) => c.depth !== "index" &&
   TICKER_PANEL_KEYS.every((k) => c.panels && c.panels[k]) &&
   ["ivSurface", "skewTerm", "topContracts", "aggressor"]
     .every((k) => c.panels[k].status === "ok"));
@@ -805,12 +805,13 @@ try {
     const narrow = await phone.evaluate(() => {
       const bar = document.getElementById("ftBar"), tb = document.querySelector(".topbar");
       const tab = document.getElementById("askDockTab");
-      const tabBox = tab ? tab.getBoundingClientRect() : null;
+      const ask = document.querySelector('.fx-tabs a[href="/flows/ask/"]');
+      const askBox = ask ? ask.getBoundingClientRect() : null;
       return {
         scroller: getComputedStyle(document.getElementById("ftScroll")).overflowY,
         gap: Math.round(bar.getBoundingClientRect().top - tb.getBoundingClientRect().bottom),
         barTop: getComputedStyle(bar).top, topbarH: Math.round(tb.getBoundingClientRect().height),
-        dock: tabBox ? { bottom: Math.round(innerHeight - tabBox.bottom), h: Math.round(tabBox.height), mode: getComputedStyle(tab).writingMode } : null,
+        dock: askBox ? { bottom: Math.round(innerHeight - askBox.bottom), h: Math.round(askBox.height), toolbarAsk: tab ? getComputedStyle(tab).display : null } : null,
         chainCut: document.getElementById("ftChainBody").classList.contains("is-cut-end"),
         chainOver: document.getElementById("ftChainBody").scrollWidth - document.getElementById("ftChainBody").clientWidth,
       };
@@ -818,8 +819,8 @@ try {
     eq(narrow.scroller, "visible", "at phone width the window is the scroller, under a fixed topbar");
     ok(narrow.gap === 0 && narrow.barTop === narrow.topbarH + "px",
        `so the sticky bar sits flush under the topbar rather than a fixed 4.4rem down (gap ${narrow.gap}px, top ${narrow.barTop} for ${narrow.topbarH}px)`);
-    ok(narrow.dock && narrow.dock.mode === "horizontal-tb" && narrow.dock.bottom < 40 && narrow.dock.h >= 44,
-       `the Ask tab is a bottom-right pill of at least 44px, not a vertical tab over the reading column (${JSON.stringify(narrow.dock)})`);
+    ok(narrow.dock && narrow.dock.bottom < 40 && narrow.dock.h >= 44 && narrow.dock.toolbarAsk === "none",
+       `at phone width Ask is a tab of at least 44px in the bottom bar, and the toolbar's Ask button stands down rather than floating over the reading column (${JSON.stringify(narrow.dock)})`);
     ok(narrow.chainOver <= 4 || narrow.chainCut,
        `and a chain wider than its host is marked cut, so its fade says there is more (${narrow.chainOver}px over, cut ${narrow.chainCut})`);
     await phone.close();
@@ -828,7 +829,8 @@ try {
   {
     const base = JSON.parse(JSON.stringify(withChain[0]));
     base.atr = 2.5;
-    base.gammaFlip = 101.25;
+    base.strikeSumCrossing = 101.25;
+    base.zeroGamma = 99.5;
     base.panels.levels = {
       status: "ok", spot: 100, atr: 2.5,
       levels: [
@@ -879,7 +881,9 @@ try {
        `across names where a percentage does not (${r["Max pain"].text})`);
     eq(r["Put wall"].text, "$90.00 · \u22124.00 ATR",
        `and a wall below spot is signed (${r["Put wall"].text})`);
-    eq(r["Gamma flip"].text, "$101.25", `the flip when it is published (${r["Gamma flip"].text})`);
+    eq(r["Strike-sum crossing"].text, "$101.25", `the strike-sum crossing under its own name (${r["Strike-sum crossing"].text})`);
+    eq(r["Zero-gamma level"].text, "$99.50", `and the zero-gamma level beside it, never merged with it (${r["Zero-gamma level"].text})`);
+    ok(!("Gamma flip" in r), "no row is labelled with the ambiguous 'Gamma flip' any more");
     eq(r["Priced move"].text, "\u00b17.3%", `the priced move (${r["Priced move"].text})`);
     eq(r["IV rank"].text, "73.4% · 2026-08-28",
        `THE RANK IS PICKED BY DATE, NOT BY INDEX — 73.4 on 2026-08-28 is the ` +
@@ -897,13 +901,15 @@ try {
        `statistics too, with the reason on hover, not printed as where the book peaks (${edgeRow ? edgeRow.why : "absent"})`);
 
     const noFlip = JSON.parse(JSON.stringify(base));
-    noFlip.gammaFlip = null;
+    noFlip.strikeSumCrossing = null;
+    noFlip.zeroGamma = null;
     const q = await read(noFlip);
-    eq(q["Gamma flip"].empty, "quiet",
-       `a card with no published flip says so under the quiet mark rather than ` +
-       `printing a bare dash (${q["Gamma flip"].empty})`);
-    ok(/does not change sign/.test(q["Gamma flip"].why),
-       `and gives the gamma panel's own reason for it (${q["Gamma flip"].why})`);
+    eq(q["Strike-sum crossing"].empty, "quiet",
+       `a card with no published crossing says so under the quiet mark rather than ` +
+       `printing a bare dash (${q["Strike-sum crossing"].empty})`);
+    ok(/does not change sign/.test(q["Strike-sum crossing"].why),
+       `and gives the gamma panel's own reason for it (${q["Strike-sum crossing"].why})`);
+    eq(q["Zero-gamma level"].empty, "unavailable", "a card with no chain profile marks the zero-gamma level unavailable, with its reason");
 
     const dead = JSON.parse(JSON.stringify(base));
     dead.panels.volContext = { status: "unavailable", reason: "The vendor returned no volatility history." };
@@ -1093,7 +1099,7 @@ try {
 
     const led = JSON.parse(JSON.stringify(card));
     led.panels.levels = buildLevels({
-      spot: 180, atr: 4.2, gammaFlip: 182.5, maxPain: 175, callWall: 195, putWall: 165,
+      spot: 180, atr: 4.2, zeroGamma: 182.5, strikeSumCrossing: 181, maxPain: 175, callWall: 195, putWall: 165,
     });
     led.panels.context = buildContext({
       closes: Array.from({ length: 40 }, (_, i) => 150 + i * 0.8),
@@ -1116,7 +1122,7 @@ try {
     ], { asOf: "2026-08-24" });
 
     led.panels.pricedMove = buildPricedMove({
-      spot: 180, iv30: 0.32, rv30: 0.21, impliedMovePerc: 0.025, vrp: 0.11,
+      spot: 180, iv30: 0.32, rv30: 0.21, impliedMovePerc: 0.025,
     });
     await mount(page, led, { ticker: led.ticker, station: "all" });
 
@@ -1690,9 +1696,10 @@ try {
 
     ok(/last place in the feed held/.test(got.cut[0]),
        `the open-interest block quotes the value at the last place ("${got.cut[0]}")`);
-    ok(/reaches back to/.test(got.cut[1]),
-       `and the print block quotes the time the window reaches back to, which is the fact ` +
-       `that decides whether a name could have been in a recency list ("${got.cut[1]}")`);
+    ok(/reaches back to/.test(got.cut[1]) && !/dollar size/.test(got.cut[1]),
+       `and the print block, whose dry-run vendor answers newest first exactly as the live probe ` +
+       `did (order_by=premium unhonoured), quotes the time the window reaches back to rather than ` +
+       `claiming a premium ranking the vendor never applied ("${got.cut[1]}")`);
 
     for (let i = 0; i < 2; i++) {
       ok(/\d+ of \d+ names? carrying a card/.test(got.cover[i] || ""),
@@ -2188,9 +2195,10 @@ try {
         colW: Math.round(cols.children[0].getBoundingClientRect().width),
         labelLines: label ? Math.round(label.getBoundingClientRect().height / parseFloat(getComputedStyle(label).lineHeight)) : 0 };
     });
-    ok(narrow.tracks === 2 && narrow.colW >= 300,
-       `1024px: a ${narrow.w}px panel keeps two columns of ${narrow.colW}px rather than three of 218 that wrapped ` +
-       "the family labels one word per line — the split follows the panel's own width, not the viewport's");
+    ok(narrow.tracks >= 2 && narrow.colW >= 280,
+       `1024px: the sidebar folds into a drawer at this width, so a ${narrow.w}px panel splits into ` +
+       `${narrow.tracks} columns of ${narrow.colW}px rather than three of 218 that wrapped the family labels ` +
+       "one word per line — the split follows the panel's own width, not the viewport's");
     ok(narrow.labelLines <= 2, `and a family label sits on at most two lines (${narrow.labelLines})`);
     ok(!order.includes("scoreOverlay"), "the score-over-price series is mounted nowhere");
     await page.close();
@@ -2541,7 +2549,7 @@ try {
       const flipCard = JSON.parse(JSON.stringify(base));
       flipCard.panels.levels = {
         status: "ok", spot: 100, atr: 2,
-        levels: [{ kind: "gamma_flip", label: "Gamma flip", px: 104,
+        levels: [{ kind: "zero_gamma", label: "Zero-gamma level", px: 104,
                    distPct: 0.04, distAtr: 2 }],
       };
       const fg = await read(flipCard);
@@ -2564,11 +2572,11 @@ try {
       ok(fg.flip && !/is-pos|is-neg/.test(fg.flip.cls),
          "and specifically NOT is-pos/is-neg, which would tint a distance with the " +
          "bull/bear hues and turn a measurement into an opinion");
-      ok(fg.flip && /gamma flip at \$104\.00/i.test(fg.flip.title),
+      ok(fg.flip && /zero-gamma level at \$104\.00/i.test(fg.flip.title),
          "the title states the level itself, so the percent has a price behind it");
 
       const onFlip = JSON.parse(JSON.stringify(flipCard));
-      onFlip.panels.levels.levels[0] = { kind: "gamma_flip", label: "Gamma flip",
+      onFlip.panels.levels.levels[0] = { kind: "zero_gamma", label: "Zero-gamma level",
                                          px: 100, distPct: 0, distAtr: 0 };
       const og = await read(onFlip);
       ok(og.flip && /exactly at spot/i.test(og.flip.title),
@@ -4018,8 +4026,11 @@ try {
       }
       return null;
     });
+    const SCHEMA3_VRP = ["vrpTrailing", "vrpTrailingVar", "rvForward", "rvForwardGrade", "vrpForward",
+      "vrpForwardVar", "vrpForwardRel", "richnessFrom", "richnessRel"];
     const band = async (over) => {
       const c = JSON.parse(JSON.stringify(base));
+      for (const k of SCHEMA3_VRP) delete c.panels.pricedMove[k];
       Object.assign(c.panels.pricedMove, over);
       await mount(page, c, { ticker: c.ticker });
       return readBand();
@@ -4031,6 +4042,10 @@ try {
     eq(await band({ richness: "fair", vrp: -0.05, rv30: 0.5 }), "cheap", "and exactly at the line the band is cheap, as the card builder rules it");
     eq(await band({ richness: "rich", vrp: null, rv30: 0.5 }), "rich",
        "with no premium to divide the stored band is shown, not a guess");
+    eq(await band({ richness: "rich", richnessFrom: "forward", iv30: 0.419, rv30: 0.356, rvForward: 0.46,
+      vrpTrailing: 0.063, vrpForward: -0.041 }), "fair",
+       "a schema-3 card derives the band from the forward premium, implied against the GARCH forecast, " +
+       "so card B's trailing 'rich' reads fair beside the Neuron that reads the same forward number (defect 7)");
     eq(await band({ richness: "event-pinned", vrp: 0.1, rv30: 0.5 }), "event-pinned",
        "a withheld verdict the builder published is never overwritten by the arithmetic it withheld");
     eq(await band({ richness: null, vrp: null, rv30: null }), "—", "and no band at all is an em dash");
@@ -4055,73 +4070,15 @@ try {
        `--bg resolves to a dark ground (${ground.toFixed(2)} of 255) — the whole ` +
        "polarity argument below assumes it, so it is checked rather than assumed");
 
-    const columns = async (shot) => page.evaluate(async (b64) => {
-      const bin = atob(b64), u8 = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
-      const bmp = await createImageBitmap(new Blob([u8], { type: "image/png" }));
-      const c = new OffscreenCanvas(bmp.width, bmp.height), x = c.getContext("2d");
-      x.drawImage(bmp, 0, 0);
-      const d = x.getImageData(0, 0, bmp.width, bmp.height).data;
-      const cols = [];
-      for (let px = 0; px < bmp.width; px++) {
-        let sum = 0;
-        for (let y = 0; y < bmp.height; y++) {
-          const i = (bmp.width * y + px) << 2;
-          sum += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
-        }
-        cols.push(sum / bmp.height);
-      }
-      return cols;
-    }, shot.toString("base64"));
-
-    const rail = await page.$(".flows-rail");
-    ok(rail, "the ticker page serves the section rail this measurement reads");
     const overflow = await page.evaluate(() => {
-      const el = document.querySelector(".flows-rail");
+      const el = document.querySelector(".ft-tabs");
       el.scrollLeft = 0;
       return el.scrollWidth - el.clientWidth;
     });
     ok(overflow > 40,
-       `and at 320px it actually scrolls, hiding ${overflow}px — an edge on a strip ` +
-       "with nothing past it would be a lie, so the premise is measured first");
-
-    const atStart = await columns(await rail.screenshot());
-    await page.evaluate(() => {
-      const el = document.querySelector(".flows-rail");
-      el.scrollLeft = el.scrollWidth;
-    });
-    await page.waitForTimeout(120);
-    const atEnd = await columns(await rail.screenshot());
-
-    const W = atStart.length;
-    eq(atEnd.length, W, "both screenshots are the same width, so the columns line up");
-
-    const band = (cols, side) => Math.max(...(side === "left"
-      ? cols.slice(0, 14) : cols.slice(W - 14, W - 1)));
-    const LIT = 15, FLAT = 3;
-
-    const middle = (cols) => {
-      const inner = cols.slice(14, W - 14).slice().sort((a, b) => a - b);
-      return inner.length ? inner[inner.length >> 1] : ground;
-    };
-    const startBase = middle(atStart), endBase = middle(atEnd);
-    const startRight = band(atStart, "right"), startLeft = band(atStart, "left");
-    const endRight = band(atEnd, "right"), endLeft = band(atEnd, "left");
-
-    ok(startRight - startBase >= LIT,
-       `scrolled to the start, the RIGHT edge stands off the ground ` +
-       `(${startRight.toFixed(2)} against ${startBase.toFixed(2)}) — this is the assertion ` +
-       "a black shadow on a black page fails, and did: it measured four counts");
-    ok(startLeft - startBase <= FLAT,
-       `and the LEFT edge is the strip itself (${startLeft.toFixed(2)} against ` +
-       `${startBase.toFixed(2)}) — nothing is hidden that way, so nothing may suggest it`);
-    ok(endLeft - endBase >= LIT,
-       `scrolled to the end, the LEFT edge stands off the ground ` +
-       `(${endLeft.toFixed(2)} against ${endBase.toFixed(2)})`);
-    ok(endRight - endBase <= FLAT,
-       `and the RIGHT edge has PUT ITSELF AWAY (${endRight.toFixed(2)} against ` +
-       `${endBase.toFixed(2)}) — a static fade cannot do this, and would sit here ` +
-       "telling a reader to swipe past the last item in the strip");
+       `at 320px the station tab strip scrolls, hiding ${overflow}px — the strip the fade rules below ` +
+       "govern. The section rail this block once photographed became a vertical sidebar that folds " +
+       "into a drawer, so there is no sideways rail left to measure an edge on");
 
     const strips = await page.evaluate(() => {
 
@@ -4136,7 +4093,7 @@ try {
         return n;
       };
       const out = [];
-      for (const el of document.querySelectorAll(".ft-bar .ft-head, .flows-rail, .ft-tabs, .ft-topline, .ft-chips")) {
+      for (const el of document.querySelectorAll(".ft-bar .ft-head, .ft-tabs, .ft-topline, .ft-chips")) {
         if (el.scrollWidth - el.clientWidth < 8) continue;
         const cs = getComputedStyle(el);
         out.push({
@@ -4148,9 +4105,10 @@ try {
       }
       return out;
     });
-    ok(strips.length >= 3,
+    ok(strips.length >= 2,
        `at 320px the chrome has ${strips.length} strips that scroll inside themselves ` +
-       "— the three this rule was written for, at least");
+       "— the station tabs and the pinned identity row; the section rail, the third this rule " +
+       "was written for, is now a vertical sidebar that folds into a drawer");
     for (const s of strips) {
       eq(s.layers, 4,
          `"${s.sel}" hides ${s.hides}px and carries four background layers — two ground, ` +
@@ -4429,6 +4387,71 @@ try {
        `the coverage line states what was read and disclaims advice (${neuron.cov.slice(0, 80)})`);
     ok(/8 robust · 10 fair · 3 weak · 3 withheld/.test(neuron.cov), "and counts each grade");
     eq(errors.length, 0, `the volatility, second-row and Neuron paints throw nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  {
+    const card = JSON.parse(JSON.stringify(cards.find((c) => c.engine && Array.isArray(c.engine.structures) &&
+      c.engine.structures.length >= 2 && Array.isArray(c.engine.facts) && c.engine.facts.length >= 2)));
+    ok(card, "an emitted card carries an engine block with priced structures and numbered facts");
+    const st = card.engine.structures[0];
+    const facts = card.engine.facts.filter((f) => typeof f.v === "number" && f.g > 0).slice(0, 2);
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, card, { ticker: card.ticker, station: "all" });
+    await page.evaluate(({ sid, because }) => {
+      const inner = window.fetch;
+      window.fetch = (url) => {
+        const u = String(url);
+        if (!u.includes("/api/flows/summary")) return inner(url);
+        const body = {
+          status: "ok", scope: "X", llm: true, model: "m", generatedAt: "2026-09-22T09:41:00.000Z", engine: true,
+          verdict: "harvest-rich-premium", verdictWord: "Harvest rich premium", claims: [], refused: [],
+          summary: "A summary sentence without figures.",
+          provenance: "Figures, facts and structures computed by the engine; the summary is deterministic.",
+          ideas: [
+            { structure: sid, verdict: "harvest-rich-premium", word: "Harvest rich premium", because, grade: 2, from: "model" },
+            { structure: "S99", verdict: null, word: null, because, grade: 1, from: "engine" },
+          ],
+          context: { version: 3, sessionDate: "2026-09-21", expectedSession: "2026-09-21", stale: false,
+            coverage: { features: 24, read: 20, quiet: 1, withheld: 3, robust: 8, fair: 10, weak: 3 }, state: null, features: [] },
+        };
+        return Promise.resolve({ ok: true, status: 200, headers: { get: () => String(Date.now()) },
+          json: () => Promise.resolve(JSON.parse(JSON.stringify(body))) });
+      };
+    }, { sid: st.id, because: facts.map((f) => f.id) });
+    await page.waitForFunction(() => {
+      const l = document.getElementById("ftNeuronIdeas");
+      return l && !l.hidden && l.children.length === 2;
+    }, null, { timeout: 15000 });
+    const got = await page.evaluate(() => ({
+      head: document.getElementById("ftNeuronH").textContent,
+      ideas: [...document.querySelectorAll("#ftNeuronIdeas > .ft-idea")].map((li) => ({
+        title: li.querySelector(".ft-idea-t").textContent,
+        on: li.querySelectorAll(".ft-idea-rank i.is-on").length,
+        chips: [...li.querySelectorAll(".ft-idea-chip")].map((c) => c.textContent),
+        meta: [...li.querySelectorAll(".ft-idea-m dt")].map((d, i) => [d.textContent, li.querySelectorAll(".ft-idea-m dd")[i].textContent]),
+        text: li.textContent,
+      })),
+    }));
+    const pc = (v) => (v * 100).toFixed(0) + "%";
+    const usd = (v) => (v < 0 ? "\u2212$" : "$") + Math.abs(v).toFixed(0);
+    ok(/Harvest rich premium/.test(got.head), `the verdict word the server attached heads the Neuron column (${got.head})`);
+    eq(got.ideas[0].title, "1. Harvest rich premium", "an engine idea is titled by its verdict word, not by prose a model wrote");
+    eq(got.ideas[0].on, 2, "and lights the grade the server vetted");
+    const legs = st.legs.map((l) => (l.side > 0 ? "+" : "\u2212") + (l.qty > 1 ? l.qty : "") + l.type + (typeof l.k === "number" ? l.k : "")).join(" ");
+    assert.deepEqual(got.ideas[0].chips, [st.family.replace(/-/g, " "), legs, st.expiry + " \u00b7 " + st.dte + "d", st.risk + " risk", "model's pick"],
+      `its chips are the family, the legs, the expiry and the risk read off the card's own structure ${st.id}, and who picked it`); checks++;
+    const meta = Object.fromEntries(got.ideas[0].meta);
+    eq(meta["Chance of profit"], "Q " + pc(st.prob.popQ) + " \u00b7 P " + pc(st.prob.popP),
+       "the chance of profit on the smile and in the real world are the engine's own figures for that id");
+    eq(meta["Expected P&L"], usd(st.ev.p) + " real world \u00b7 " + usd(st.ev.q) + " on the smile", "so is the expected P&L");
+    eq(meta["Max loss"], st.lossUnbounded ? "unbounded" : usd(st.maxLoss), "and the max loss");
+    ok(facts.every((f) => meta["Rests on"].includes(f.id)), `and the facts it rests on are named by id with their values (${meta["Rests on"]})`);
+    ok(/not on the card this page holds/.test(got.ideas[1].text) && got.ideas[1].chips.includes("engine ranking"),
+       "an id the card no longer carries is said to be missing rather than drawn with figures from nowhere");
+    eq(errors.length, 0, `the engine ideas paint throws nothing (${errors.join("; ")})`);
     await page.close();
   }
 

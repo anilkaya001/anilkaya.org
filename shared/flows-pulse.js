@@ -184,9 +184,12 @@ export function shapeDarkpool(raw, { cap = PULSE_CAPS.darkpool } = {}) {
       canceled: flag(r.canceled),
     });
   }
+  rows.sort((a, b) => ((b.prem ?? -Infinity) - (a.prem ?? -Infinity))
+    || ((a.at || "") < (b.at || "") ? -1 : (a.at || "") > (b.at || "") ? 1 : 0));
   const seen = rows.length;
   const kept = rows.slice(0, cap);
-  return { status: kept.length ? "ok" : "quiet", rows: kept, seen, cap, shed: seen - kept.length };
+  return { status: kept.length ? "ok" : "quiet", rows: kept, seen, cap, shed: seen - kept.length,
+    rankedBy: "premium" };
 }
 
 export function shapeSeasonality(raw, { cap = PULSE_CAPS.seasonality } = {}) {

@@ -343,6 +343,16 @@ try {
     notes: { refusals: "No feed here supports intent or identity." },
   }, over || {});
   eq((await put("pulse", pulsePayload())).status, 200, "the ingest route accepts the pulse key");
+  {
+    const served = await fetch(url("/api/flows/pulse"), { headers: auth });
+    await served.text();
+    eq(served.headers.get("x-fresh-class"), "nightly",
+       "the served pulse carries its freshness as headers the page can compare clocks against, derived " +
+       "from the payload's own session and read stamp without the Worker parsing it");
+    eq(served.headers.get("x-fresh-session"), FRESH_SESSION, "naming the session it describes");
+    eq(served.headers.get("x-live-overlay"), null,
+       "and with no live:market row there is no overlay: the nightly pulse is served as written");
+  }
 
   const page = await browser.newPage();
   await page.context().addCookies([{ name: "flows_session", value: token, url: server.baseURL }]);

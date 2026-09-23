@@ -519,10 +519,10 @@
       get: (row) => (legacyFamilies ? null : isNum(row.purity)) },
     { key: "gRegime", kind: "text", first: "asc", name: "Gamma regime",
       get: (row) => (row.gRegime === "long" || row.gRegime === "short" ? row.gRegime : null) },
-    { key: "gFlipDist", kind: "num", first: "desc", name: "Distance to the gamma flip", get: (row) => isNum(row.gFlipDist) },
+    { key: "gFlipDist", kind: "num", first: "desc", name: "Distance to the strike-sum crossing", get: (row) => isNum(row.gFlipDist) },
     { key: "netPrem", kind: "num", first: "desc", name: "Net premium", get: (row) => isNum(row.netPrem) },
     { key: "w52",   kind: "num",  first: "desc", name: "52-week range position", get: (row) => isNum(row.w52) },
-    { key: "vrp",   kind: "num",  first: "desc", name: "Implied minus realised volatility", get: (row) => isNum(row.vrp) },
+    { key: "vrp",   kind: "num",  first: "desc", name: "Implied minus trailing realised volatility", get: (row) => isNum(row.vrp) },
     { key: "ivr",   kind: "num",  first: "desc", name: "Implied volatility rank", get: (row) => isNum(row.ivr) },
   ];
 

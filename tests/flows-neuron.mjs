@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { buildContext, contextLines, contextFacts, promptForNeuron, parseNeuronOutput, vetIdeas,
          deterministicSummary, contextFingerprint, publicContext, guardFacts, numeralsOf,
          regimeState, stateIdea, stateSentence, stateChip, STATES, STATE_STRUCTURES, STATE_LINES, STATE_WORD,
-         NEURON_CONTEXT_VERSION, NEURON_MAX_IDEAS, NEURON_STRUCTURES } from "../shared/flows-neuron.js";
+         NEURON_CONTEXT_VERSION, NEURON_MAX_IDEAS, NEURON_STRUCTURES,
+         engineContext, engineFallback, promptForEngine, parseEngineOutput, vetEngineReply, verdictHolds, claimHolds,
+         VERDICTS, VERDICT_WORD, CLAIM_RELS, VET_CODES } from "../shared/flows-neuron.js";
 import { TICKER_PANELS, SENTINEL_KEYS } from "../shared/flows-panels.js";
 import { guardAnswer, selectFacts, buildFactIndex } from "../shared/flows-ask.js";
 import { modelName, neuronProvenance } from "../shared/flows-pages.js";
@@ -27,11 +29,11 @@ const CARD = {
   score: 58, conviction: 92,
   conv: { agreement: 1, breadth: 3, coverage: 1, persistence: 0.58, gate: 1.43 },
   quality: { otmShare: 0.6, vegaTilt: 0.24 },
-  regime: { label: "short", labelFrom: "book", crossings: 0, netGamma: -2.1e6, flowGamma: -2.1e6,
-    bookGammaRaw: -3.4e5, bookShare: -0.42 }, gammaFlip: 68.32, atr: 1.48,
+  regime: { label: "short", labelFrom: "book", labelValue: -3.4e5, crossings: 0, flowGamma: -2.1e6, flowLabel: "short",
+    bookGammaRaw: -3.4e5, bookShare: -0.42 }, strikeSumCrossing: 68.32, atr: 1.48,
   fam: { F: 59, P: 32, D: 58, V: 51, O: 71 },
   panels: {
-    gamma: { status: "ok", spot: 70.22, callWall: 67, putWall: 70, strikes: 40,
+    gamma: { status: "ok", spot: 70.22, flowPeakLong: 67, flowPeakShort: 70, strikes: 40,
       lead: { say: "Dealer gamma for SYN1 is short at spot 70.22; the call wall is at 67.00 and the put wall at 70.00." } },
     levels: { status: "ok", spot: 70.22, atr: 1.48,
       levels: [{ kind: "put_wall", label: "Put wall", px: 70, distPct: -0.003, distAtr: -0.15 },
@@ -119,7 +121,7 @@ const CARD = {
   ok(stale.features.find((f) => f.key === "gamma").why.includes("capped"), "with the cap named in the reason");
 
   const fp = contextFingerprint(ctx);
-  ok(/^n2\./.test(fp), "the fingerprint carries the protocol version, now 2 for the state line");
+  ok(/^n3\./.test(fp), "the fingerprint carries the protocol version, now 3 for the engine facts and structures");
   ok(fp !== contextFingerprint(stale), "and moves when the cap changes the grades");
   ok(fp === contextFingerprint(buildContext(JSON.parse(JSON.stringify(CARD)), { expectedSession: "2026-09-15" })),
      "and is stable across a deep copy of the same card");
@@ -306,7 +308,7 @@ const CARD = {
     const weak = JSON.parse(JSON.stringify(CARD));
     weak.panels.gamma.strikes = 12;
     weak.regime = { label: "long", crossings: 1, spotGammaShare: 0.1 };
-    weak.panels.levels.levels = [{ kind: "gamma_flip", label: "Gamma flip", px: 71.6, distAtr: 0.97 }, { kind: "max_pain", label: "Max pain", px: 72.5, distAtr: 1.54 }];
+    weak.panels.levels.levels = [{ kind: "zero_gamma", label: "Zero-gamma level", px: 71.6, distAtr: 0.97 }, { kind: "max_pain", label: "Max pain", px: 72.5, distAtr: 1.54 }];
     const wctx = buildContext(weak, { expectedSession: "2026-09-15" });
     eq(wctx.state.confidence, 0, "a marginal ladder near the flip on a thin profile is a state at confidence 0");
     const call = vetIdeas([{ title: "Upside", structure: "long call", direction: "bullish", thesis: "Dealer gamma is long at spot 70.22.",
@@ -318,7 +320,7 @@ const CARD = {
     behind.panels.path.netPremium = 19251664;
     behind.panels.levels.levels = [
       { kind: "call_wall", label: "Call wall", px: 67, distAtr: -2.18 },
-      { kind: "gamma_flip", label: "Gamma flip", px: 71.6, distAtr: 0.97 },
+      { kind: "zero_gamma", label: "Zero-gamma level", px: 71.6, distAtr: 0.97 },
       { kind: "put_wall", label: "Put wall", px: 66, distAtr: -2.85 },
     ];
     const bs = regimeState(behind, { expectedSession: "2026-09-15" });
@@ -327,7 +329,7 @@ const CARD = {
   }
   {
     const vol = JSON.parse(JSON.stringify(CARD));
-    vol.panels.levels.levels.push({ kind: "gamma_flip", label: "Gamma flip", px: 70.4, distAtr: 0.12 });
+    vol.panels.levels.levels.push({ kind: "zero_gamma", label: "Zero-gamma level", px: 70.4, distAtr: 0.12 });
     vol.panels.path.persistence = 0.5;
     const vctx = buildContext(vol, { expectedSession: "2026-09-15" });
     const vi = stateIdea(vctx);
@@ -348,7 +350,7 @@ const CARD = {
   pinned.regime = { label: "long", labelFrom: "book", crossings: 1, spotGammaShare: 0.6, bookGammaRaw: 4.1e5, bookShare: 0.6 };
   pinned.panels.levels.levels = [
     { kind: "max_pain", label: "Max pain", px: 70.5, distAtr: 0.19 },
-    { kind: "gamma_flip", label: "Gamma flip", px: 66.1, distAtr: -2.78 },
+    { kind: "zero_gamma", label: "Zero-gamma level", px: 66.1, distAtr: -2.78 },
     { kind: "call_wall", label: "Call wall", px: 72, distAtr: 1.2 },
   ];
   pinned.panels.calendar = { status: "ok", schedule: [{ expiry: "2026-09-18", days: 3, share: 0.4 }], frontLoad: 0.4, halfLifeExpiry: "2026-10-16", halfLifeDays: 31 };
@@ -359,7 +361,7 @@ const CARD = {
      "a strong book and a far flip cost nothing, and the grade tops out at fair: the walls and the ladder's " +
      "zero-crossing read off today's flow ladder, not the standing book, so a state resting on them is never robust");
   ok(ps.horizon.kind === "expiry" && ps.horizon.value === "2026-09-18", "the horizon is the front expiry when it carries a quarter of the book's gamma");
-  ok(ps.invalidation.kind === "gamma_flip" && /Pinned · long gamma at spot, max pain 70\.50, flow bearish/.test(ps.chip), "the pin ends at the flip");
+  ok(ps.invalidation.kind === "zero_gamma" && /Pinned · long gamma in the book, max pain 70\.50, flow bearish/.test(ps.chip), "the pin ends at the flip");
   assert.deepEqual(ps.preferred, STATE_STRUCTURES.pinned.fair.preferred, "and prefers the range structures"); checks++;
 
   const squeeze = JSON.parse(JSON.stringify(CARD));
@@ -369,7 +371,7 @@ const CARD = {
   squeeze.panels.levels.levels = [
     { kind: "call_wall", label: "Call wall", px: 72, distAtr: 1.2 },
     { kind: "put_wall", label: "Put wall", px: 68, distAtr: -1.5 },
-    { kind: "gamma_flip", label: "Gamma flip", px: 66.1, distAtr: -2.78 },
+    { kind: "zero_gamma", label: "Zero-gamma level", px: 66.1, distAtr: -2.78 },
   ];
   const sq = regimeState(squeeze, { expectedSession: "2026-09-15" });
   ok(sq.state === "squeeze" && sq.direction === "bullish" && sq.target && sq.target.kind === "call_wall" && sq.target.px === 72,
@@ -377,14 +379,14 @@ const CARD = {
   ok(sq.invalidation.kind === "put_wall", "invalidated past the put wall behind it");
   assert.deepEqual(sq.preferred, STATE_STRUCTURES.bull.fair.preferred, "and prefers the bull structures"); checks++;
   const between = JSON.parse(JSON.stringify(squeeze));
-  between.panels.levels.levels[2] = { kind: "gamma_flip", label: "Gamma flip", px: 71, distAtr: 0.53 };
+  between.panels.levels.levels[2] = { kind: "zero_gamma", label: "Zero-gamma level", px: 71, distAtr: 0.53 };
   const bt = regimeState(between, { expectedSession: "2026-09-15" });
   ok(bt.state === "amplifying" && bt.bound && bt.bound.px === 71 && /to the flip 71\.00/.test(bt.chip),
      "with the flip between spot and the wall the short-gamma zone ends at the flip, so it is amplifying bounded there, not a squeeze");
   const onFlip = JSON.parse(JSON.stringify(between));
   onFlip.panels.levels.levels[2].distAtr = 0.2;
   const tf = regimeState(onFlip, { expectedSession: "2026-09-15" });
-  ok(tf.state === "transitional" && tf.invalidation.kind === "gamma_flip" && tf.preferred.includes("call debit spread") && !tf.preferred.includes("no position"),
+  ok(tf.state === "transitional" && tf.invalidation.kind === "zero_gamma" && tf.preferred.includes("call debit spread") && !tf.preferred.includes("no position"),
        "spot inside half an ATR of the flip is transitional, leaning the way the flow votes, and a resolved lean drops the no-position placeholder that would contradict it");
 
   const bookOnly = JSON.parse(JSON.stringify(CARD));
@@ -399,7 +401,7 @@ const CARD = {
   ok(un.state === "undetermined" && un.confidence === 0 && /gamma positioning is unavailable and premium is unreadable/.test(un.notes[0]),
      "no gamma and no readable premium implies no state, and the note says which silence it is");
   ok(stateIdea(buildContext(blind, { expectedSession: "2026-09-15" })) === null, "and an undetermined state writes no idea");
-  blind.panels.pricedMove = { ...blind.panels.pricedMove, iv30: 0.5, rv30: 0.36, vrp: 0.14, ivRank: 0.8 };
+  blind.panels.pricedMove = { ...blind.panels.pricedMove, iv30: 0.5, rv30: 0.36, rvForward: 0.36, rvForwardGrade: 3, richnessFrom: "forward", vrpTrailing: 0.14, ivRank: 0.8 };
   const rich = regimeState(blind, { expectedSession: "2026-09-15" });
   ok(rich.state === "premium-rich" && rich.premium === "rich" && rich.confidence >= 1 && /positioning withheld/.test(rich.chip),
      "readable rich premium without positioning is a premium-rich state that says positioning is withheld");
@@ -407,7 +409,7 @@ const CARD = {
   eq(rich.invalidation.kind, "priced_low", "invalidated at the priced range end on the side the flow leans");
 
   const pinnedCard = JSON.parse(JSON.stringify(CARD));
-  pinnedCard.panels.pricedMove = { ...pinnedCard.panels.pricedMove, iv30: 0.033, rv30: 0.3727, vrp: -0.3397,
+  pinnedCard.panels.pricedMove = { ...pinnedCard.panels.pricedMove, iv30: 0.033, rv30: 0.3727, rvForward: 0.3727, rvForwardGrade: 3, richnessFrom: "forward", vrpTrailing: -0.3397,
     ivRank: 0, ivMomentum: -0.249, richness: "event-pinned",
     pin: { signals: ["collapse", "floor", "ratio"], moveRatio: 0.089, weekAgoIv: 0.282, lastRange: 0.0021, rangeRatio: 0.09 } };
   const cheapCard = JSON.parse(JSON.stringify(pinnedCard));
@@ -440,13 +442,15 @@ const CARD = {
   eq(B.regime.label, "short", "the live B card was published short, from the running sum below spot");
   ok(B.regime.netGamma > 0, `while the gamma it carries nets long (${B.regime.netGamma})`);
   const read = gammaReading(B);
-  eq(read.label, "long", "read from the net, B is long");
-  eq(read.from, "flow", "from the gamma added today, since the snapshot carries no open-interest book");
+  eq(read.label, "short", "the Neuron reads B's regime as the card labels it, short, and never swaps in the flow's sign (defect 5)");
+  eq(read.from, "label", "attributed to the card's label, because this legacy card carries no number for it");
+  ok(/which is flow and is not read as the book/.test(read.sentence), `while the flow's +161.6k is named as flow (${read.sentence})`);
   const bs = regimeState(B, { expectedSession: B.sessionDate });
-  eq(bs.state, "pinned", `so B reads Pinned, not Amplifying (${bs.chip})`);
+  ok(bs.state !== "pinned" && !/long gamma/.test(bs.chip), `so B no longer reads Pinned, long gamma beside a card that says short (${bs.chip})`);
+  eq(bs.gammaLabel, "short", "the state carries the label it read");
   const g = bs.drivers.find((d) => d.key === "gamma");
-  ok(g && g.robustness === 1 && /not on this card/.test(g.reading),
-     `and the gamma driver is graded weak and says the book is missing (${g && g.reading})`);
+  ok(g && g.robustness === 1 && /without the number/.test(g.reading),
+     `and the gamma driver is graded weak and says the number is missing (${g && g.reading})`);
   ok(/running sum below spot sits at \u221252%/.test(g.reading),
      "the running sum below spot is still published, as where the ladder sits rather than as the label");
 
@@ -513,7 +517,7 @@ const CARD = {
      "a silent panel is withheld");
 
   const vol = JSON.parse(JSON.stringify(CARD));
-  vol.panels.pricedMove = { ...vol.panels.pricedMove, iv30: 0.576, rv30: 0.55, vrp: 0.026, ivMomentum: 0.071 };
+  vol.panels.pricedMove = { ...vol.panels.pricedMove, iv30: 0.576, rv30: 0.55, rvForward: 0.55, rvForwardGrade: 3, richnessFrom: "forward", vrpTrailing: 0.026, ivMomentum: 0.071 };
   const momentum = regimeState(vol, { expectedSession: "2026-09-15" }).drivers.find((d) => d.sub === "ivMomentum");
   ok(momentum && /rose 7\.1 points over the week/.test(momentum.reading) && !/month/.test(momentum.reading),
      `the one-week change is called a week (${momentum && momentum.reading})`);
@@ -522,14 +526,14 @@ const CARD = {
   ok(!regimeState(hiVol, { expectedSession: "2026-09-15" }).drivers.some((d) => d.sub === "ivMomentum"),
      "four points on a 58-vol name is 7% of its level and does not fire");
   const loVol = JSON.parse(JSON.stringify(vol));
-  loVol.panels.pricedMove = { ...loVol.panels.pricedMove, iv30: 0.2, rv30: 0.19, vrp: 0.01, ivMomentum: 0.04 };
+  loVol.panels.pricedMove = { ...loVol.panels.pricedMove, iv30: 0.2, rv30: 0.19, rvForward: 0.19, rvForwardGrade: 3, richnessFrom: "forward", vrpTrailing: 0.01, ivMomentum: 0.04 };
   ok(regimeState(loVol, { expectedSession: "2026-09-15" }).drivers.some((d) => d.sub === "ivMomentum"),
      "the same four points on a 20-vol name is 20% of its level and does: the line scales with the name");
   ok(STATE_LINES.IV_MOMENTUM_REL === 0.1 && STATE_LINES.TERM_FRONT_BID_REL === 0.08 && STATE_LINES.GARCH_GAP_REL === 0.12,
      "the three volatility lines are relative to the name's own level");
 
   const avg = JSON.parse(JSON.stringify(CARD));
-  avg.panels.pricedMove = { ...avg.panels.pricedMove, iv30: 0.30, rv30: 0.25, vrp: 0.05 };
+  avg.panels.pricedMove = { ...avg.panels.pricedMove, iv30: 0.30, rv30: 0.25, rvForward: 0.25, rvForwardGrade: 3, richnessFrom: "forward", vrpTrailing: 0.05 };
   avg.panels.context.garch = { ...avg.panels.context.garch, nextVol: 29, avg21Vol: 25 };
   const gd = regimeState(avg, { expectedSession: "2026-09-15" }).drivers.find((d) => d.key === "garch");
   ok(gd && /average over the next 21 sessions is 25\.0%/.test(gd.reading) && gd.vote === 1,
@@ -575,14 +579,14 @@ const CARD = {
   pinned.regime = { label: "long", crossings: 1, spotGammaShare: 0.6, labelFrom: "book", bookGamma: 1.2e8, bookShare: 0.6 };
   pinned.panels.levels.levels = [
     { kind: "max_pain", label: "Max pain", px: 70.5, distAtr: 0.19 },
-    { kind: "gamma_flip", label: "Gamma flip", px: 66.1, distAtr: -2.78 },
+    { kind: "zero_gamma", label: "Zero-gamma level", px: 66.1, distAtr: -2.78 },
     { kind: "call_wall", label: "Call wall", px: 72, distAtr: 1.2 },
   ];
   pinned.panels.calendar = { status: "ok", schedule: [{ expiry: "2026-09-18", days: 3, share: 0.4 }], frontLoad: 0.4, halfLifeExpiry: "2026-10-16", halfLifeDays: 31 };
   const pctx = buildContext(pinned, { expectedSession: "2026-09-15" });
   const pidea = stateIdea(pctx);
   eq(pidea.structure, "iron condor", "a pinned card's own idea is the first range structure, an iron condor");
-  ok(/ An iron condor pays if spot stays inside the priced range, with the gamma flip at 66\.10 as the line that ends the state\.$/.test(pidea.thesis),
+  ok(/ An iron condor pays if spot stays inside the priced range, with the zero-gamma level at 66\.10 as the line that ends the state\.$/.test(pidea.thesis),
      `the article agrees with the structure and the neutral payoff names the flip as the line that ends the state (${pidea.thesis.slice(-110)})`);
   ok(!/ A iron condor|range against the/.test(pidea.thesis), "never 'A iron condor', never 'inside the priced range against the gamma flip'");
   eq(vetIdeas([pidea], pctx).ideas.length, 1, "and the reworded idea still passes the same vetting");
@@ -725,7 +729,7 @@ const CARD = {
   const worker = readFileSync(new URL("../worker.js", import.meta.url), "utf8");
   eq((worker.match(/env\.AI\.run\(/g) || []).length, 0,
     "no call site reaches the binding directly: all three go through askModels, so none can drop the thinking switch or the fallback");
-  eq((worker.match(/askModels\(env\.AI/g) || []).length, 3, "and all three lanes (summary, Neuron, Ask) use it");
+  eq((worker.match(/askModels\(env\.AI/g) || []).length, 4, "and all four call sites (summary, Neuron, Neuron over the engine, Ask) use it");
   ok(!/max_tokens/.test(worker), "the worker no longer carries a max_tokens literal of its own");
   ok(/if \(attempt > 0\) \{\s*if \(said\.failure\) refused = "unreachable:reparse:" \+ said\.failure\.why;\s*break;/.test(worker) &&
      /verdict\.ok \? "ideas:unparsable" : refused \|\| "ideas:unparsable"/.test(worker) &&
@@ -749,6 +753,159 @@ const CARD = {
     "and a change of model configuration still regenerates on the next tick, throttle or not");
 }
 
+{
+  eq(NEURON_CONTEXT_VERSION, 3, "the context protocol is version 3: numbered engine facts and priced structures");
+  const leg = (type, k, side, qty = 1) => ({ type, k, side, qty });
+  const st = (id, family, risk, dir, legs, grade, rules, prob, ev, maxProfit, maxLoss) => ({
+    id, family, risk, dir, expiry: "2026-10-16", dte: 30, sessions: 22, legs, grade, gradeWhy: grade < 3 ? ["fit.in-spread"] : [],
+    rules, prob: { popQ: prob[0], popP: prob[1] }, ev: { q: ev[0], p: ev[1], edge: ev[1] - ev[0] }, maxProfit, maxLoss,
+    profitUnbounded: false, lossUnbounded: risk === "undefined", score: grade / 10,
+  });
+  const ENGINE = {
+    v: 1, engine: "q1", asOf: "2026-09-15T20:00:00.000Z", spot: 100, atr: 2.5,
+    facts: [
+      { id: "iv.cm.30", v: 0.32, u: "vol", g: 3 },
+      { id: "iv.cm.90", v: 0.29, u: "vol", g: 2 },
+      { id: "iv.pct.30", v: 0.82, u: "frac", g: 2 },
+      { id: "garch.avg.21", v: 0.27, u: "vol", g: 3 },
+      { id: "vrp.rel.21", v: 0.18, u: "frac", g: 3 },
+      { id: "vrp.var.21", v: 0.0295, u: "var", g: 3 },
+      { id: "skew.rr25.30.pct", v: 0.9, u: "frac", g: 2, x: true },
+      { id: "term.front.7_30", v: 0.02, u: "frac", g: 2 },
+      { id: "level.putWall", v: 95, u: "px", g: 3, atr: -2 },
+      { id: "level.callWall", v: 105, u: "px", g: 3, atr: 2 },
+      { id: "level.flip", v: 97, u: "px", g: 3, atr: -1.2 },
+      { id: "level.magnet", v: 100.5, u: "px", g: 2, atr: 0.2 },
+      { id: "level.maxPain", v: 104.9, u: "px", g: 2, atr: 1.96 },
+      { id: "gex.book", v: 1.2e6, u: "usdPer1pct", g: 3 },
+      { id: "move.event.ratio", v: null, u: "ratio", g: 0, why: "event.none" },
+      { id: "iv.mom.5", v: -0.012, u: "vol", g: 1 },
+    ],
+    state: { state: "pinned", direction: null, confidence: 2, premium: "rich",
+      preferred: ["iron condor", "call credit spread", "put credit spread"], avoid: ["long straddle", "long strangle", "long call", "long put"] },
+    levels: { callWall: 105, putWall: 95, magnet: 100.5, flip: 97, maxPain: 104.9 },
+    structures: [
+      st("S1", "put-credit-spread", "defined", "bull", [leg("P", 95, -1), leg("P", 90, 1)], 3, ["state.pinned", "vrp.rich", "iv.high"],
+        [0.72, 0.78], [-3, 21], 140, -360),
+      st("S2", "iron-condor", "defined", "neutral", [leg("P", 95, -1), leg("P", 90, 1), leg("C", 105, -1), leg("C", 110, 1)], 2,
+        ["state.pinned", "vrp.rich"], [0.55, 0.61], [-6, 18], 210, -290),
+      st("S3", "short-strangle", "undefined", "neutral", [leg("P", 92, -1), leg("C", 108, -1)], 3, ["vrp.rich", "iv.high"],
+        [0.8, 0.84], [-2, 30], 260, null),
+      st("S4", "long-straddle", "defined", "neutral", [leg("P", 100, 1), leg("C", 100, 1)], 1, ["vrp.rich−"],
+        [0.31, 0.28], [-8, -40], null, -780),
+      st("S5", "long-calendar", "defined", "neutral", [leg("C", 100, -1), leg("C", 100, 1)], 2, ["term.backwardation"],
+        [0.46, 0.5], [2, 9], 300, -250),
+    ],
+    ideas: ["S1", "S2", "S5"], noTrade: null, priced: 24, families: [],
+  };
+  const ecard = JSON.parse(JSON.stringify(CARD));
+  ecard.engine = ENGINE;
+  const ectx = buildContext(ecard, { expectedSession: "2026-09-15" });
+  ok(ectx.engine && ectx.engine.facts.length === ENGINE.facts.length && ectx.engine.structures.length === 5,
+     "a card with an engine block gives the context every numbered fact and the five published structures");
+  same(ectx.engine.ideas, ["S1", "S2", "S5"], "and the engine's own ranking, by id");
+  const eLines = contextLines(ectx);
+  ok(eLines.some((l) => /^\s+vrp\.rel\.21 = 0\.18 frac \(g 3\)$/.test(l)),
+     "each fact is one line as id = value unit (grade), so the model copies ids and never needs to compute");
+  ok(eLines.some((l) => /^\s+S1 put-credit-spread defined 2026-10-16 −P95 \+P90: popQ 0\.72, popP 0\.78/.test(l)),
+     "each structure is one line with its legs, both chances of profit and its grade");
+  ok(/\.e5$/.test(contextFingerprint(ectx)), "the fingerprint moves with the engine's structures");
+  ok(engineContext(CARD) === null && !/\.e\d+$/.test(contextFingerprint(buildContext(CARD, { expectedSession: "2026-09-15" }))),
+     "a card without an engine block has no engine context and keeps the plain fingerprint");
+  ok(engineContext({ ...CARD, engine: { status: "split", key: "card-x:SYN1", bytes: 40000 } }) === null,
+     "an unresolved card-x pointer is not an engine: the Worker merges it or the reader goes without");
+
+  const { system, user } = promptForEngine(ectx);
+  ok(/NO digits anywhere except inside the ids/.test(system) && VERDICTS.every((v) => system.includes(v)) &&
+     CLAIM_RELS.every((r) => system.includes(r)),
+     "the engine prompt allows digits only inside copied ids and names every verdict code and relation");
+  ok(user.includes("S1 put-credit-spread") && user.includes("vrp.rel.21 = 0.18"), "and hands the model the facts and structures");
+  same(parseEngineOutput("```json\n{\"verdict\":\"stand-aside\"}\n```"), { verdict: "stand-aside" }, "a fenced JSON reply parses");
+  eq(parseEngineOutput("no json here"), null, "and prose is not a reply");
+
+  const good = { verdict: "harvest-rich-premium",
+    claims: [{ a: "iv.cm.30", rel: "gt", b: "garch.avg.21" }, { a: "spot", rel: "between", b: "level.putWall", c: "level.callWall" },
+      { a: "vrp.rel.21", rel: "rich" }, { a: "level.magnet", rel: "near", b: "spot" }, { a: "iv.mom.5", rel: "falling" }],
+    ideas: [{ structure: "S2", verdict: "pin-at-level", because: ["level.magnet", "gex.book"] },
+      { structure: "S1", verdict: "harvest-rich-premium", because: ["vrp.rel.21", "iv.pct.30"] }] };
+  const v = vetEngineReply(good, ectx);
+  ok(v.ok && v.refused.length === 0, `a reply of ids, codes and true claims is accepted whole (${JSON.stringify(v.refused)})`);
+  same(v.ideas.map((i) => [i.structure, i.verdict, i.grade, i.from]), [["S2", "pin-at-level", 2, "model"], ["S1", "harvest-rich-premium", 2, "model"]],
+       "each idea keeps its structure and verdict, ranked no higher than its weakest fact or its own grade");
+  eq(v.claims.length, 5, "and every true claim is kept");
+  eq(v.verdict, "harvest-rich-premium", "with the overall verdict, because a kept structure satisfies it");
+
+  const code = (reply) => vetEngineReply(reply, ectx).refused.map((r) => r.code);
+  same(code({ ideas: [{ structure: "S1", verdict: "harvest-rich-premium", because: ["vrp.rel.21", "iv.pct.30"], note: "sells 95 puts" }] }),
+       ["digit"], "a digit outside a copied id refuses the whole reply: the model does not write numbers");
+  same(code({ verdict: "stand-aside", confidence: 3 }), ["digit"], "so does a bare number in any field");
+  same(code({ ideas: [{ structure: "S9", because: ["vrp.rel.21", "iv.pct.30"] }] }), ["unknown-id"],
+       "an unknown structure id is refused as unknown, not as a digit: digits are allowed inside id fields and checked there");
+  same(code({ ideas: [{ structure: "S1", because: ["vrp.rel.21", "vol.of.vol"] }] }), ["unknown-id"], "so is an unknown fact id in because");
+  same(code({ ideas: [{ structure: "S1", because: ["vrp.rel.21", "move.event.ratio"] }] }), ["withheld"],
+       "a because that leans on a withheld fact is refused as withheld");
+  same(code({ ideas: [{ structure: "S4", because: ["vrp.rel.21", "iv.pct.30"] }] }), ["avoid"],
+       "a structure whose family the state avoids is refused");
+  {
+    const zero = JSON.parse(JSON.stringify(ecard));
+    zero.engine.structures[1].grade = 0;
+    const zctx = buildContext(zero, { expectedSession: "2026-09-15" });
+    same(vetEngineReply({ ideas: [{ structure: "S2", verdict: "pin-at-level", because: ["level.magnet", "gex.book"] }] }, zctx).refused.map((r) => r.code),
+      ["withheld"], "an idea on a structure the engine graded 0 (a leg failed the liquidity gate, or no model) is refused as withheld, not kept at grade 0");
+  }
+  same(code({ ideas: [{ structure: "S3", because: ["vrp.rel.21", "iv.pct.30"] }] }), ["undefined-first"],
+       "an undefined-risk first idea is refused while a defined-risk structure is listed");
+  same(code({ ideas: [{ structure: "S5", verdict: "buy-cheap-convexity", because: ["vrp.rel.21", "term.front.7_30"] }] }),
+       ["verdict-false"], "a verdict whose preconditions fail on the facts is refused: premium is rich, not cheap");
+  same(code({ ideas: [{ structure: "S1", because: ["vrp.rel.21", "iv.pct.30"] }, { structure: "S1", because: ["vrp.rel.21", "iv.pct.30"] }] }),
+       ["dup"], "a repeated structure is refused");
+  same(code({ claims: [{ a: "iv.cm.30", rel: "lt", b: "garch.avg.21" }] }), ["claim-false"],
+       "a false comparison is refused after the server evaluates it on the facts");
+  same(code({ claims: [{ a: "iv.cm.30", rel: "gt", b: "level.flip" }] }), ["claim-false"], "so is a comparison across units");
+  same(code({ claims: [{ a: "level.maxPain", rel: "near", b: "spot" }] }), ["claim-false"],
+       "near is half an ATR for prices, so max pain 1.96 ATR away is not near");
+  same(code({ claims: [{ a: "iv.pct.30", rel: "cheap" }] }), ["claim-false"], "a percentile at 0.82 is not cheap");
+  same(code({ verdict: "event-overpriced" }), ["verdict-false"], "an event verdict with no event ratio is refused");
+  same(code({ verdict: "sell-fast" }), ["schema"], "an unknown verdict code is a schema refusal");
+  same(code({ ideas: "S1" }), ["schema"], "and a reply of the wrong shape is refused as schema");
+  ok(VET_CODES.every((c) => typeof c === "string") && ["schema", "digit", "unknown-id", "avoid", "verdict-false", "claim-false",
+    "withheld", "undefined-first", "dup"].every((c) => VET_CODES.includes(c)), "every refusal code is published");
+  ok(!vetEngineReply({ ideas: [{ structure: "S4", because: ["vrp.rel.21", "iv.pct.30"] }] }, ectx).ok,
+     "a reply whose every idea is refused is not ok, so the Worker falls back to the engine ranking");
+
+  ok(verdictHolds("pin-at-level", ENGINE.structures[1] && { ...ectx.engine.structures[1] }, ectx.engine),
+     "pin-at-level holds for the condor: the state is pinned and a short strike sits within half an ATR of the magnet");
+  ok(verdictHolds("fade-to-wall", ectx.engine.structures[0], ectx.engine),
+     "fade-to-wall holds for the put credit spread: its short 95 is at the put wall, between it and spot");
+  ok(!verdictHolds("fade-to-wall", ectx.engine.structures[1], ectx.engine), "and never for a family that is not a credit spread");
+  ok(verdictHolds("sell-skew", null, ectx.engine) === false, "a structure verdict needs its structure");
+  ok(claimHolds({ a: "spot", rel: "gt", b: "level.flip" }, ectx.engine).ok, "spot is a price fact for claims");
+
+  const fb = engineFallback(ectx);
+  same(fb.ideas.map((i) => i.structure), ENGINE.ideas.slice(0, 3),
+       "with no model, the deterministic path is exactly the engine's ranking");
+  ok(fb.ideas.every((i) => i.from === "engine" && i.because.length === 2 && i.grade <= 3), "each idea marked as the engine's, resting on two facts");
+  ok(fb.ideas.every((i) => i.verdict === null || verdictHolds(i.verdict, ectx.engine.structures.find((x) => x.id === i.structure), ectx.engine)),
+     "and every verdict it attaches is one whose preconditions hold");
+  eq(fb.ideas[0].verdict, "harvest-rich-premium", "the put credit spread reads as harvesting rich premium");
+  same(fb.ideas[0].because, ["vrp.rel.21", "level.magnet"],
+       "and rests on the facts with the largest affinity contribution: rich VRP at grade 3 adds 2, the pinned state at " +
+       "confidence 2 adds 4/3 and comes before the IV percentile's equal 4/3 in rule order");
+  const asReply = { verdict: fb.verdict, ideas: fb.ideas.map(({ structure, verdict, because }) => ({ structure, verdict, because })) };
+  const fv = vetEngineReply(asReply, ectx);
+  ok(fv.ok && fv.refused.length === 0, `the fallback, written as a model would write it, passes the same vetting (${JSON.stringify(fv.refused)})`);
+  const aside = JSON.parse(JSON.stringify(ecard));
+  aside.engine.ideas = []; aside.engine.noTrade = { code: "no-edge", closest: "S2" };
+  const w = readFileSync(new URL("../worker.js", import.meta.url), "utf8");
+  ok(/if \(ctx\.engine\) return generateEngineNeuron\(/.test(w) && /FLOWS_NEURON\.engineFallback\(ctx\)/.test(w) &&
+     /FLOWS_NEURON\.vetEngineReply\(parsed, ctx\)/.test(w) && /\{ v: 3, verdict: res\.verdict, claims: res\.claims, ideas: res\.ideas, refused: res\.refused \}/.test(w),
+     "the Worker takes the engine path whenever the card carries an engine, vets the reply, and stores the protocol-3 object " +
+     "with the engine ranking whenever no model answers or every answer is refused");
+  const af = engineFallback(buildContext(aside, { expectedSession: "2026-09-15" }));
+  ok(af.verdict === "stand-aside" && af.ideas.length === 0, "an engine that stands aside falls back to stand-aside with no ideas");
+  ok(Object.keys(VERDICT_WORD).length === VERDICTS.length, "every verdict code has a word for the page");
+}
+
 console.log(`✓ flows-neuron: ${checks} assertions — a context that carries every registry panel plus the ` +
   "standing and the volatility model, each graded 0 to 3 from the card's own coverage and quality fields " +
   "and capped at weak when the card is behind the last closed session; one line per feature so the model " +
@@ -757,4 +914,7 @@ console.log(`✓ flows-neuron: ${checks} assertions — a context that carries e
   "a listed structure, every figure quoted, no claim about what happens next — and ranked by their " +
   "weakest leg; a greeks-implied state (pinned, amplifying, squeeze, on the flip, premium rich or cheap, " +
   "undetermined) read from positioning, flow votes and premium, with the structures it prefers and rules out, " +
-  "its own vetted idea first, and the assistant's selector reaching the same facts for the page's own name");
+  "its own vetted idea first, and the assistant's selector reaching the same facts for the page's own name; and protocol 3, " +
+  "where the engine's numbered facts and priced structures are the only numbers and the model returns ids, verdict codes and " +
+  "relation claims — digits, unknown ids, withheld facts, avoided families, false verdicts, false claims, an undefined-risk " +
+  "first idea and repeats each refused under their own code, and with no model the engine's own ranking");

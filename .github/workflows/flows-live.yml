@@ -1,0 +1,66 @@
+name: flows-live
+
+on:
+  workflow_dispatch:
+    inputs:
+      tick:
+        description: "The Worker clock instant that dispatched this run"
+        type: string
+        required: false
+      origin:
+        description: "Who dispatched it: worker, watchdog or manual"
+        type: string
+        required: false
+        default: manual
+  schedule:
+    - cron: "7,22,37,52 13-20 * * 1-5"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flows-live
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      LIVE_READY: ${{ secrets.FLOWS_LIVE_TOKEN != '' && secrets.UW_API_KEY != '' }}
+    steps:
+      - name: Wait for the live token
+        if: env.LIVE_READY != 'true'
+        run: |
+          echo "::notice title=Live layer idle::FLOWS_LIVE_TOKEN or UW_API_KEY is not set as a repository secret, so Tier 2 does not run. Add FLOWS_LIVE_TOKEN here and the same value as a Worker secret to turn it on; the Worker's own Tier 1 tick runs without it."
+
+      - uses: actions/checkout@v5
+        if: env.LIVE_READY == 'true'
+        with:
+          sparse-checkout: |
+            scripts
+            shared
+
+      - uses: actions/setup-node@v5
+        if: env.LIVE_READY == 'true'
+        with:
+          node-version: 22
+
+      - name: Say who dispatched this run
+        if: env.LIVE_READY == 'true'
+        env:
+          EVENT: ${{ github.event_name }}
+          ORIGIN: ${{ inputs.origin || 'schedule' }}
+          TICK: ${{ inputs.tick || 'none' }}
+        run: |
+          echo "event: $EVENT; origin: $ORIGIN; tick: $TICK"
+          echo "Started at $(date -u +%H:%M:%S) UTC, $(TZ=America/New_York date +%H:%M:%S) Eastern."
+
+      - name: Read the live layer
+        if: env.LIVE_READY == 'true'
+        env:
+          UW_API_KEY: ${{ secrets.UW_API_KEY }}
+          FLOWS_LIVE_TOKEN: ${{ secrets.FLOWS_LIVE_TOKEN }}
+          FLOWS_INGEST_URL: ${{ secrets.FLOWS_INGEST_URL }}
+          FLOWS_LIVE_ORIGIN: ${{ github.event_name == 'schedule' && 'schedule' || inputs.origin || 'manual' }}
+        run: node scripts/flows-pipeline.mjs --live

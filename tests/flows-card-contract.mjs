@@ -47,14 +47,21 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
 }
 
 {
-  const l = buildLevels({ spot: 100, atr: 4, gammaFlip: 96, maxPain: 105, callWall: 110, putWall: 90 });
+  const l = buildLevels({ spot: 100, atr: 4, zeroGamma: 96, strikeSumCrossing: 97.5, maxPain: 105, callWall: 110, putWall: 90 });
   eq(l.status, "ok", "a complete level set resolves");
-  near(l.levels[0].distPct, -0.04, 1e-9, "nearest level is the gamma flip at -4%");
-  near(l.levels[0].distAtr, -1, 1e-9, "and at -1 ATR");
+  eq(l.levels.find((x) => x.kind === "strike_sum_crossing").label, "Strike-sum crossing",
+     "the cumulative strike-sum crossing keeps its own name and is never called the flip (defect 4 of the spec's list, F3)");
+  eq(l.levels.find((x) => x.kind === "zero_gamma").label, "Zero-gamma level", "the true zero-gamma level is its own kind");
+  ok(!l.levels.some((x) => x.kind === "gamma_flip"), "no level is published under the ambiguous gamma_flip kind");
+  const wrongSide = buildLevels({ spot: 43.23, atr: 1.41, callWall: 45, putWall: 48 });
+  ok(!wrongSide.levels.some((x) => x.kind === "put_wall"),
+     "a put wall above spot (card B: 48 against spot 43.23) is not published as a put wall: walls come from the book on their own side of spot");
+  near(l.levels[1].distPct, -0.04, 1e-9, "the zero-gamma level sits at -4%");
+  near(l.levels[1].distAtr, -1, 1e-9, "and at -1 ATR");
   ok(l.levels.every((x, i, arr) => i === 0 || Math.abs(x.distPct) >= Math.abs(arr[i - 1].distPct)),
      "levels are ordered nearest-first");
 
-  const noAtr = buildLevels({ spot: 100, atr: 0, gammaFlip: 96 });
+  const noAtr = buildLevels({ spot: 100, atr: 0, zeroGamma: 96 });
   eq(noAtr.levels[0].distAtr, null, "with no ATR the sigma distance is null, never Infinity");
   ok(Number.isFinite(noAtr.levels[0].distPct), "but the percent distance still resolves");
 
@@ -62,18 +69,18 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(buildLevels({ spot: 100, atr: 4 }).status, "unavailable", "no levels at all is unavailable");
   ok(!("levels" in buildLevels({ spot: 0 })), "an unavailable panel carries no numbers at all");
 
-  const csx = buildLevels({ spot: 46.305, atr: 0.9519, gammaFlip: 45.5, callWall: 60, putWall: 44,
+  const csx = buildLevels({ spot: 46.305, atr: 0.9519, strikeSumCrossing: 45.5, callWall: 60, putWall: 44,
     band: { min: 32, max: 60 } });
   const cw = csx.levels.find((x) => x.kind === "call_wall");
   eq(cw.edge, "window",
      "a call wall on the last strike of the ladder (CSX 2026-09-21: 60 = bandMax, 14 ATR out) is " +
      "marked as the window's edge, not read as where the book peaks");
   eq(cw.label, "Call wall (window edge)", "in the label every reader prints");
-  ok(/last strike of the ladder/.test(cw.note), "with the reason beside it");
+  ok(/last strike of the open-interest book/.test(cw.note), "with the reason beside it");
   const pw = csx.levels.find((x) => x.kind === "put_wall");
   ok(!("edge" in pw) && pw.label === "Put wall", "while a wall inside the window is unmarked");
-  ok(!("edge" in csx.levels.find((x) => x.kind === "gamma_flip")),
-     "and only a wall can sit on the edge: a flip there is still a sign change");
+  ok(!("edge" in csx.levels.find((x) => x.kind === "strike_sum_crossing")),
+     "and only a wall can sit on the edge: a crossing there is still a sign change");
   const edgeNear = buildLevels({ spot: 100, atr: 4, putWall: 98, band: { min: 98, max: 130 } });
   ok(/may sit beyond it/.test(edgeNear.lead.say),
      `a nearest level on the edge says so in the lead (${edgeNear.lead.say})`);
@@ -93,8 +100,9 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   ];
   const g = buildGammaProfile(ladder, { spot: 100 });
   eq(g.status, "ok", "a ladder resolves");
-  eq(g.callWall, 110, "the call wall is the most positive net-gamma strike");
-  eq(g.putWall, 90, "the put wall is the most negative");
+  eq(g.flowPeakLong, 110, "the flow ladder's most positive strike is its flow long peak, not a wall");
+  eq(g.flowPeakShort, 90, "and its most negative the flow short peak");
+  ok(!("callWall" in g) && !("putWall" in g), "the flow ladder publishes no field named a wall (defect 4)");
   near(g.bars[0].g, -4e8, 1, "all four aggressor legs are SUMMED, not differenced");
 
   const wrongNames = buildGammaProfile(
@@ -292,14 +300,17 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   const complete = buildCard(full);
   eq(complete.v, CARD_SCHEMA_VERSION, "the card carries its schema version");
 
-  eq(CARD_SCHEMA_VERSION, 2,
-     "schema version 2 is where V and O became unsigned gauges; bump it again " +
-     "if any published field changes MEANING, and teach the renderer the new floor");
+  eq(CARD_SCHEMA_VERSION, 3,
+     "schema version 3 is where the flow ladder's extremes became flow peaks, the walls moved to the " +
+     "open-interest book, the strike-sum crossing and zero gamma got their own names and the priced " +
+     "move's VRP split into forward and trailing; version 2 made V and O unsigned gauges, and the " +
+     "renderer's legacy floor is still below 2");
   eq(complete.sessionDate, "2026-08-24",
      "THE SESSION, not the run date: a pre-open job reads the previous completed session");
   ok(complete.generatedAt !== complete.sessionDate, "the two dates are distinct fields");
-  eq(complete.gammaFlip, 96,
-     "the flip price is a top-level field — the gamma panel draws its line from it");
+  eq(complete.strikeSumCrossing, 96,
+     "the strike-sum crossing is a top-level field under its own name — the gamma panel draws its line from it");
+  ok(!("gammaFlip" in complete), "and no field on the card is called gammaFlip any more");
   eq(complete.atr, 4, "and ATR travels with it, so distances can be shown in sigma");
 
   ok(complete.quality,
@@ -323,7 +334,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
     features: { ...full.features, otmShare: null, vegaTilt: null } }).quality || {}).otmShare, null,
      "a null from positioningQuality survives as a null rather than parsing to zero");
 
-  eq(buildCard({ ...full, features: null }).gammaFlip, null,
+  eq(buildCard({ ...full, features: null }).strikeSumCrossing, null,
      "with no features the flip is null, never 0 — 'spot is exactly at the flip' " +
      "is the most actionable state on the card and must never be manufactured");
   for (const key of ["gamma", "levels", "path", "congress", "calendar",
@@ -391,8 +402,8 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
 
   const noLevels = buildCard({ ...full, features: null, maxPain: null });
   ok(noLevels.panels.levels.status === "unavailable"
-     || noLevels.panels.levels.levels.every((l) => l.kind !== "gamma_flip"),
-     "with no features there is no gamma flip level — never 'spot is exactly at the flip'");
+     || noLevels.panels.levels.levels.every((l) => l.kind !== "strike_sum_crossing" && l.kind !== "zero_gamma"),
+     "with no features there is no crossing or zero-gamma level — never 'spot is exactly at the flip'");
 
   const emptyCongress = buildCard({ ...full, congress: [] });
   eq(emptyCongress.panels.congress.status, "quiet",
@@ -533,7 +544,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(buildCalendar(cal.schedule.length ? [] : []).asOf, null, "an unavailable calendar carries no date");
 
   const pm = buildPricedMove({
-    spot: 100, impliedMovePerc: 0.05, vrp: 0.11, iv30: 0.42, rv30: 0.31,
+    spot: 100, impliedMovePerc: 0.05, iv30: 0.42, rv30: 0.31,
     asOf: "2026-08-24", sessions: 10,
   });
   eq(pm.low, 95, "the band's low is spot times one minus the implied move");
@@ -567,7 +578,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
     status: "ok", skew: k,
     skewBasis: { expiry: "2026-09-04", days: 11, putTraded, callTraded, putIv: 0.45, callIv: 0.39 },
   });
-  const skewed = buildPricedMove({ spot: 100, iv30: 0.42, rv30: 0.31, vrp: 0.11, sessions: 10,
+  const skewed = buildPricedMove({ spot: 100, iv30: 0.42, rv30: 0.31, sessions: 10,
     skew: wing(1, 1) });
   eq(skewed.band, "skew", "with both wings traded the band leans on the card's skew");
   near(Math.log(100 / skewed.impliedLow), 0.45 * Math.sqrt(10 / 252), 1e-4,
@@ -589,7 +600,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "lognormal", "nor is a skew wider than twice the level, which would put a wing below zero");
 
   const wbd = {
-    spot: 30.8, impliedMovePerc: 0.007, iv30: 0.033, rv30: 0.3727, vrp: 0.033 - 0.3727,
+    spot: 30.8, impliedMovePerc: 0.007, iv30: 0.033, rv30: 0.3727,
     ivRank: 0, ivMomentum: 0.033 - 0.282, sessions: 10,
   };
   const pinned = buildPricedMove({ ...wbd, lastRange: { range: 0.0021, date: "2026-09-22" } });
@@ -606,7 +617,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "realized) an implied move under a quarter of realized withholds the verdict on its own — the " +
      "range cannot confirm a pin on the day the jump happens, and requiring it would read the deal as " +
      `cheap premium whenever the in-progress bar is cut from the candles (${jumpDay.pin && jumpDay.pin.rangeRatio})`);
-  const crush = { spot: 100, iv30: 0.25, rv30: 0.42, vrp: 0.25 - 0.42, ivRank: 0.3, ivMomentum: 0.25 - 0.6, sessions: 10 };
+  const crush = { spot: 100, iv30: 0.25, rv30: 0.42, ivRank: 0.3, ivMomentum: 0.25 - 0.6, sessions: 10 };
   eq(buildPricedMove({ ...crush, lastRange: { range: 0.03, date: "2026-09-22" } }).richness, "cheap",
      "while an implied collapse alone (a post-earnings crush, 60% to 25%) on a name still trading a " +
      "normal range stays a cheap verdict");
@@ -621,7 +632,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(lastRangeOf(partial, { through: "2026-09-17" }), null, "and none when no candle closes by the session");
   eq(buildPricedMove({ ...wbd, lastRange: null }).richness, "event-pinned",
      "with no range to read, an implied move under a quarter of realized is pin enough");
-  eq(buildPricedMove({ ...wbd, ivMomentum: 0, ivRank: 0.5, iv30: 0.3, vrp: -0.07, lastRange: null }).richness,
+  eq(buildPricedMove({ ...wbd, ivMomentum: 0, ivRank: 0.5, iv30: 0.3, lastRange: null }).richness,
      "cheap", "and an ordinary cheap name fires no pin signal at all");
 
   ok(Math.abs(horizonMove(0.42, { sessions: 252 }) - 0.42) < 1e-12,
@@ -644,11 +655,11 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   ok(buildPricedMove({ spot: 100, impliedMovePerc: null, iv30: null }).status === "unavailable",
      "neither band means no panel");
   eq(pm.richness, "rich", "a variance risk premium a tenth or more of realised is a rich band");
-  eq(buildPricedMove({ spot: 100, impliedMovePerc: 0.05, vrp: -0.04, rv30: 0.3, asOf: "2026-08-24" }).richness,
+  eq(buildPricedMove({ spot: 100, impliedMovePerc: 0.05, iv30: 0.26, rv30: 0.3, asOf: "2026-08-24" }).richness,
      "cheap", "and one a tenth or more below it a cheap band");
-  eq(buildPricedMove({ spot: 100, impliedMovePerc: 0.05, vrp: 0.02, rv30: 0.3, asOf: "2026-08-24" }).richness,
+  eq(buildPricedMove({ spot: 100, impliedMovePerc: 0.05, iv30: 0.32, rv30: 0.3, asOf: "2026-08-24" }).richness,
      "fair", "while a premium inside a tenth of realised either way is fair, the same line the implied state reads, so the page never says cheap beside a state that says fair");
-  eq(buildPricedMove({ spot: 100, impliedMovePerc: 0.05, vrp: null, asOf: "2026-08-24" }).richness,
+  eq(buildPricedMove({ spot: 100, impliedMovePerc: 0.05, asOf: "2026-08-24" }).richness,
      null, "with no realized-vol baseline there is no richness claim, not a default one");
   {
     const drawers = readFileSync(new URL("../assets/js/flows-drawers.js", import.meta.url), "utf8");
@@ -660,7 +671,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
     ok(/\["Band", richnessBand\(panel\)/.test(drawers),
        "and the Band row prints the derived band, not the stored field a stale card carries");
   }
-  eq(buildPricedMove({ spot: 100, impliedMovePerc: 0.05, vrp: 0.05, asOf: "2026-08-24" }).richness,
+  eq(buildPricedMove({ spot: 100, impliedMovePerc: 0.05, iv30: 0.35, asOf: "2026-08-24" }).richness,
      null, "and a premium without the realised level it is measured against is not a band either");
   ok(buildPricedMove({ spot: 100, impliedMovePerc: null }).status === "unavailable",
      "no quoted move means no band — never a zero-width one at spot");
@@ -669,12 +680,26 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(buildPricedMove({ spot: 100, impliedMovePerc: null, iv30: 0.4, asOf: "2026-08-24" }).horizonRule, null,
      "with no vendor quote there is no rule to state either");
 
-  for (const k of ["iv30", "rv30", "vrp", "ivMomentum", "impliedMovePerc", "spotGammaShare"]) {
+  for (const k of ["iv30", "rv30", "vrp", "vrpTrailing", "vrpForward", "vrpForwardVar", "vrpForwardRel", "rvForward",
+    "ivMomentum", "impliedMovePerc", "spotGammaShare"]) {
     eq(polarityOf(k), 0, `${k} carries no direction`);
+  }
+  {
+    const fwd = buildPricedMove({ spot: 43.23, impliedMovePerc: 0.05, iv30: 0.419, rv30: 0.356, rvForward: 0.46, rvForwardGrade: 3, sessions: 10 });
+    near(fwd.vrpTrailing, 0.419 - 0.356, 1e-9, "the trailing premium is implied minus the last 21 sessions' realised, and is named trailing (defect 7)");
+    near(fwd.vrpForward, 0.419 - 0.46, 1e-9, "the forward premium is implied minus the GARCH 21-session average");
+    near(fwd.vrpForwardVar, 0.419 * 0.419 - 0.46 * 0.46, 1e-9, "and in variance terms, IV30 squared minus E[RV squared] (spec D4)");
+    near(fwd.vrpForwardRel, (0.419 - 0.46) / 0.46, 1e-6, "relative to the forward realised level");
+    eq(fwd.richnessFrom, "forward", "a graded GARCH forecast decides the band");
+    eq(fwd.richness, "fair", "so card B's 'rich' against trailing RV reads fair against the forward (-8.9% of the forecast)");
+    ok(!("vrp" in fwd), "and no field on the panel is a bare 'vrp' any more");
+    const weak = buildPricedMove({ spot: 43.23, impliedMovePerc: 0.05, iv30: 0.419, rv30: 0.356, rvForward: 0.46, rvForwardGrade: 1, sessions: 10 });
+    eq(weak.richnessFrom, "trailing", "an unsettled GARCH (grade 1) does not decide; the trailing premium does, and says so");
+    eq(weak.richness, "rich", "which on card B's numbers reads rich");
   }
 
   const surf = buildPricedMove({
-    spot: 100, impliedMovePerc: 0.05, iv30: 0.4, rv30: null, vrp: null,
+    spot: 100, impliedMovePerc: 0.05, iv30: 0.4, rv30: null,
     ivRank: 0.5, ivMomentum: 0.02, asOf: "2026-08-24",
   });
   eq(surf.rv30, null, "a missing realized vol stays null beside a live implied one");
@@ -781,8 +806,8 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   ok(Math.abs(det) > 1e-6,
      "the fixture carries a genuine joint, not an outer product of two marginals");
 
-  eq(surf.callWall.strike, 110, "the call wall is the most positive row in the drawn window");
-  eq(surf.putWall.strike, 90, "the put wall is the most negative");
+  eq(surf.flowPeakLong.strike, 110, "the surface's flow long peak is the most positive row in the drawn window");
+  eq(surf.flowPeakShort.strike, 90, "and its flow short peak the most negative; neither is called a wall, because the surface is flow");
 }
 
 {
@@ -1384,6 +1409,18 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   ok(v.inputs.adv > 1e8 && v.inputs.adv < 3e8, `the candle dated after the session does not reach the typical day (${v.inputs.adv})`);
   eq(card.regime.bookGamma, v.inputs.gammaBook, "the regime carries the book's net in dollars per 1% beside the flow's");
   eq(card.regime.labelFrom, "book", "and says the label was read from the book");
+  eq(card.regime.labelValue, 1234, "with the number the label was read from beside it (defect 5)");
+  eq(card.regime.label, "long", "so the label agrees with the sign of that number");
+  eq(card.regime.flowLabel, "long", "and the flow's own label is published separately, never in the label's place");
+  ok(!("netGamma" in card.regime), "no field in the regime is an unlabelled 'netGamma' that could be read as the book");
+  {
+    const b = buildCard({ ...input, features: { ...input.features, netGamma: 161614, gammaBookRaw: -2.5e5, gRegime: "long", gRegimeFrom: "flow" } });
+    eq(b.regime.label, "short", "card B's shape, a positive flow next to a negative book, is labelled short from the book");
+    ok(b.regime.labelValue < 0 && b.regime.flowGamma > 0, "with the book's negative number as its value and the flow kept as flow");
+    const f = buildCard({ ...input, features: { ...input.features, gammaBookRaw: null, netGamma: -3e5 } });
+    eq(f.regime.labelFrom, "flow", "with no book the label says it was read from the flow");
+    ok(f.regime.label === "short" && f.regime.labelValue === -3e5, "and carries the flow's own number");
+  }
   eq(card.panels.calendar.schedule[0].expiry, day(4), "the roll-off starts at the first live expiry");
   ok(card.panels.vanna.rows.every((r) => r.expiry > session), "and so does every greek ladder");
 
@@ -1423,10 +1460,10 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "and a probe that finds put charm negated nets charm as call + put, matching the hedging panel's multiplier");
   eq(negated.panels.variation.conventions.putToDealer.charm, 1, "which uses the same sign");
 
-  const inverted = buildLevels({ spot: 100, atr: 2, callWall: 95, putWall: 104 });
+  const inverted = buildLevels({ spot: 100, atr: 2, callWall: 95, putWall: 104, maxPain: 100 });
   const lab = Object.fromEntries(inverted.levels.map((l) => [l.kind, l.label]));
-  eq(lab.call_wall, "Largest long-gamma strike", "a call wall below spot is not called a call wall");
-  eq(lab.put_wall, "Largest short-gamma strike", "nor a put wall above spot a put wall");
+  ok(!("call_wall" in lab) && !("put_wall" in lab),
+     "a call wall below spot or a put wall above it is not published at all: the book's walls are argmax on their own side of spot");
   const usual = buildLevels({ spot: 100, atr: 2, callWall: 104, putWall: 95 });
   eq(Object.fromEntries(usual.levels.map((l) => [l.kind, l.label])).call_wall, "Call wall",
      "while one on the conventional side keeps its name");

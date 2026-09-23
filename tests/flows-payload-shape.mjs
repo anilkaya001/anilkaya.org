@@ -173,6 +173,37 @@ assert.deepEqual(missingReport, [],
   missingReport.join("\n  ")); checks++;
 
 {
+  const cards = readdirSync(dir).filter((f) => /^p-card-[A-Z0-9.]+\.json$/.test(f))
+    .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")))
+    .filter((c) => c && c.engine && Array.isArray(c.engine.structures) && c.engine.structures.length);
+  ok(cards.length > 0, `the dry run publishes cards whose engine block carries priced structures (${cards.length})`);
+  const src = readFileSync(join(ROOT, "assets/js/flows-ticker.js"), "utf8");
+  const start = src.indexOf("function engineIdea(");
+  ok(start !== -1, "flows-ticker.js still defines engineIdea() — a rename silently stops this scan");
+  const scope = src.slice(start, src.indexOf("\n  function ", start + 1));
+  const reads = (v) => [...new Set([...scope.matchAll(new RegExp("\\b" + v + "\\.([A-Za-z_][A-Za-z0-9_]*)", "g"))]
+    .map((m) => m[1]).filter((k) => !["find", "map", "join", "replace", "filter", "slice"].includes(k)))];
+  const surfaces = [["eng", (c) => [c.engine]], ["st", (c) => c.engine.structures],
+    ["pr", (c) => c.engine.structures.map((x) => x.prob)], ["ev", (c) => c.engine.structures.map((x) => x.ev)],
+    ["l", (c) => c.engine.structures.flatMap((x) => x.legs)], ["f", (c) => c.engine.facts]];
+  const missing = [];
+  for (const [v, pick] of surfaces) {
+    const keys = reads(v);
+    ok(keys.length > 0, `engineIdea reads fields off \`${v}\` (${keys.join(", ")}) — zero reads would make this scan vacuous`);
+    for (const c of cards) {
+      for (const obj of pick(c)) {
+        for (const k of keys) {
+          if (obj && typeof obj === "object" && Object.prototype.hasOwnProperty.call(obj, k)) { checks++; continue; }
+          missing.push(`${c.ticker}: engineIdea reads \`${v}.${k}\` and the engine block has no such key`);
+        }
+      }
+    }
+  }
+  assert.deepEqual([...new Set(missing)], [],
+    "every engine field the ticker's idea renderer reads by id is one the pipeline publishes:\n  " + [...new Set(missing)].join("\n  ")); checks++;
+}
+
+{
   const p = emitted("sector:trix");
   ok(Array.isArray(p.sectors),
      "sector:trix publishes its readings under `sectors` — the name the renderer must read");
@@ -205,7 +236,7 @@ assert.deepEqual(missingReport, [],
 }
 
 {
-  const cardFiles = readdirSync(dir).filter((f) => /^p-card-/.test(f));
+  const cardFiles = readdirSync(dir).filter((f) => /^p-card-(?!x-)/.test(f));
   ok(cardFiles.length > 0, "the pipeline emitted cards for the panel scan to read");
   const cards = cardFiles.map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")));
 
@@ -456,7 +487,7 @@ assert.deepEqual(missingReport, [],
 }
 
 {
-  const cardFiles = readdirSync(dir).filter((f) => /^p-card-/.test(f));
+  const cardFiles = readdirSync(dir).filter((f) => /^p-card-(?!x-)/.test(f));
   const cards = cardFiles.map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")));
   ok(cards.every((c) => c.panels && c.panels.variation),
      "every emitted card carries the hedging panel, deep and cross-section alike");
@@ -503,6 +534,303 @@ assert.deepEqual(missingReport, [],
   ok(bytes < 8 * 1024, `the hedging panel is ${(bytes / 1024).toFixed(1)}KB of a card capped at 100KB`);
 }
 
+{
+  const PANEL_FIELDS = {
+    cone: ["asOf", "sameSession", "tenors", "iv30", "pct30", "coneShape", "richCheap", "view", "slope30_90", "front7_30",
+      "slope30_90ExEvent", "xPct", "weights", "units", "silent"],
+    rv: ["asOf", "sameSession", "bars", "from", "estimator", "cone", "yz", "pk21", "cc21", "gap", "breaks", "units", "silent"],
+    vrp: ["asOf", "latest", "n", "hitRate", "meanRp", "medianRp", "rankOwn", "meanVariance", "exAnte", "garch", "series",
+      "realizedSessions", "units", "silent"],
+    term: ["asOf", "sameSession", "expiries", "earnings", "eventExpiry", "eventKink", "eventMove", "minSamples",
+      "kinkThreshold", "units", "silent"],
+    skew: ["asOf", "sameSession", "expiry", "dte", "dteFirst", "rr25", "rr10", "tail", "z", "zBasis", "zRaw", "z10", "z10Raw",
+      "maturitySlope", "n", "mom5", "crash", "crashMedian", "xPct", "series", "rolled", "expirySource", "units", "silent"],
+    ivDyn: ["asOf", "sameSession", "n", "iv", "volOfVol", "volOfVolRel", "changes", "halfLife", "phi", "longRun",
+      "spotVolCorr", "rank", "pct", "vendorRank", "view", "units", "silent"],
+    anomaly: ["asOf", "sameSession", "from", "score", "direction", "view", "sampleSize", "components", "signConsistency",
+      "ours", "vote", "history", "units", "silent"],
+    sentiment: ["asOf", "sameSession", "from", "score", "direction", "lean", "vwks", "avar", "components", "sampleSize",
+      "z", "n", "ours", "vote", "history", "units", "silent"],
+    character: ["asOf", "sameSession", "from", "character", "halfLifeDays", "hurst", "ar1B", "entropyNegative",
+      "entropyConditional", "entropySamples", "sampleSize", "view", "ours", "vote", "history", "units", "silent"],
+  };
+  const ROW_FIELDS = {
+    "cone.tenors": ["days", "iv", "min", "q1", "median", "q3", "max", "pct", "samples", "firstDate", "iqrPos", "rangePos",
+      "lowSample", "rvWindow", "rvPct"],
+    "rv.cone": ["n", "ivDays", "now", "count", "min", "p10", "p25", "p50", "p75", "p90", "max", "pct"],
+    "term.expiries": ["expiry", "dte", "iv", "min", "q1", "median", "q3", "max", "pct", "pctRaw", "samples", "firstDate",
+      "zShape", "fwd", "premium", "kink", "event", "eventFirst"],
+  };
+  const files = readdirSync(dir).filter((f) => /^p-card-x-/.test(f));
+  const everyX = files.map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")));
+  const dossiers = everyX.filter((d) => Object.hasOwn(d, "scope"));
+  ok(everyX.filter((d) => !Object.hasOwn(d, "scope")).every((d) => !Object.hasOwn(d, "cone") &&
+    ["short", "insiders", "earnings"].some((k) => Object.hasOwn(d, k)) && !Object.hasOwn(d, "gex")),
+     "a card-x the vol leg did not write is an ownership-only dossier from the universe leg, not a vol dossier missing its envelope");
+  const carded = readdirSync(dir).filter((f) => /^p-card-[A-Z]/.test(f)).map((f) => f.slice("p-card-".length, -".json".length));
+  ok(carded.every((t) => dossiers.some((d) => d.ticker === t)), "every carded name has its vol dossier");
+  ok(dossiers.length >= 100, `the dry run emits a card-x dossier per carded and index name (${dossiers.length})`);
+  const byScope = (s) => dossiers.filter((d) => d.scope === s);
+  ok(byScope("deep").length > 0 && byScope("carded").length > 0 && byScope("index").length === 3,
+     "all three scopes are emitted: deep, carded and the three index names");
+  const arms = {};
+  for (const d of dossiers) {
+    for (const k of ["v", "ticker", "scope", "sessionDate", "generatedAt", "fresh", "why"]) {
+      ok(Object.hasOwn(d, k), `card-x:${d.ticker} carries its envelope field \`${k}\``);
+    }
+    for (const k of ["v", "readAt", "vendorAt", "source", "cadenceS", "session", "writer"]) {
+      ok(Object.hasOwn(d.fresh, k), `and the freshness envelope's \`${k}\``);
+    }
+    for (const panel of Object.keys(PANEL_FIELDS)) {
+      const p = d[panel];
+      ok(p && ["ok", "quiet", "unavailable", "unreadable"].includes(p.status),
+         `card-x:${d.ticker}.${panel} is present with one of the four statuses (got ${p && p.status})`);
+      (arms[panel + ":" + p.status] ||= []).push(d.ticker);
+      if (p.status === "ok") {
+        for (const f of PANEL_FIELDS[panel]) {
+          if (!Object.hasOwn(p, f)) missingReport.push(`card-x ${panel} (ok) lacks \`${f}\` on ${d.ticker}`);
+          else checks++;
+        }
+      } else {
+        ok(typeof p.code === "string" && typeof p.reason === "string" && p.asOf === null,
+           `a silent ${panel} carries its code, its reason and no date (${d.ticker}: ${p.code})`);
+        ok(Object.hasOwn(d.why, p.code), `and the dossier's legend explains ${p.code}`);
+      }
+      for (const code of Object.values((p && p.silent) || {})) {
+        ok(Object.hasOwn(d.why, code), `a silenced ${panel} field's code ${code} is in the legend`);
+      }
+    }
+    for (const [path, fields] of Object.entries(ROW_FIELDS)) {
+      const [panel, key] = path.split(".");
+      if (d[panel].status !== "ok") continue;
+      for (const row of d[panel][key]) for (const f of fields) {
+        if (!Object.hasOwn(row, f)) missingReport.push(`card-x ${path} row lacks \`${f}\` on ${d.ticker}`);
+        else checks++;
+      }
+    }
+    const bytes = Buffer.byteLength(JSON.stringify(d));
+    ok(bytes < 60 * 1024, `card-x:${d.ticker} is ${(bytes / 1024).toFixed(1)}KB, leaving the other areas' panels room under the 100KB cap`);
+  }
+  for (const arm of ["cone:ok", "rv:ok", "vrp:ok", "term:ok", "term:unavailable", "skew:ok", "ivDyn:ok",
+    "anomaly:ok", "anomaly:unavailable", "sentiment:ok", "sentiment:unreadable", "character:ok"]) {
+    ok(arms[arm] && arms[arm].length > 0, `the corpus reaches the ${arm} arm`);
+  }
+  ok(byScope("carded").every((d) => ["term", "skew", "anomaly", "sentiment", "character"].every((k) => d[k].code === "not-read")),
+     "a carded dossier says the deep-only reads were not made, rather than carrying empty panels");
+  ok(byScope("index").every((d) => d.ivDyn.status === "ok"), "an index dossier reads its own 1y iv series");
+  const dyn = byScope("deep").filter((d) => d.ivDyn.status === "ok").length;
+  ok(dyn > byScope("deep").length / 2, `the deep dossiers carry IV dynamics from the card leg's 1y read (${dyn})`);
+
+  const cardFiles = readdirSync(dir).filter((f) => /^p-card-(?!x-)/.test(f));
+  const SUMMARY = ["v", "asOf", "iv30", "iv30Pct", "richCheap", "view", "coneShape", "slope30_90", "rv21", "rv21Pct", "yz21",
+    "gap63", "vrp", "skew", "term", "ivDyn", "votes", "status"];
+  for (const f of cardFiles) {
+    const c = JSON.parse(readFileSync(join(dir, f), "utf8"));
+    ok(c.x && c.x.vol, `${f} carries the compact vol summary at x.vol`);
+    for (const k of SUMMARY) {
+      if (!Object.hasOwn(c.x.vol, k)) missingReport.push(`card x.vol lacks \`${k}\` on ${c.ticker}`);
+      else checks++;
+    }
+  }
+  const regime = emitted("regime");
+  ok(regime && regime.volRadar, "the pipeline emits a regime payload with the vol radar");
+  for (const side of ["rich", "cheap", "bullish", "bearish"]) {
+    const s = regime.volRadar[side];
+    for (const k of ["status", "seen", "rows"]) ok(Object.hasOwn(s, k), `the radar's ${side} side carries \`${k}\``);
+    const fields = side === "rich" || side === "cheap"
+      ? ["t", "score", "n", "carded", "iv", "skew", "vov", "vrpZ", "regime", "crash"]
+      : ["t", "score", "n", "carded", "vwks", "avar"];
+    for (const row of s.rows) for (const k of fields) {
+      if (!Object.hasOwn(row, k)) missingReport.push(`regime.volRadar.${side} row lacks \`${k}\``);
+      else checks++;
+    }
+  }
+  ok(Array.isArray(regime.volRadar.carded), "the radar lists the carded names it reaches");
+  ok(Buffer.byteLength(JSON.stringify(regime)) < 60 * 1024, "and the regime stays inside its 60KB plan budget");
+  assert.deepEqual(missingReport.filter((m) => /^card-x|^card x\.vol|^regime/.test(m)), [],
+    "every field the vol contract publishes is on every emitted arm:\n  " +
+    missingReport.filter((m) => /^card-x|^card x\.vol|^regime/.test(m)).slice(0, 20).join("\n  ")); checks++;
+  const { FLOW_CODES, UNITS } = await import("../shared/flows-positioning.js");
+  const cardX = readdirSync(dir).filter((f) => /^p-card-x-[A-Z]/.test(f))
+    .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")))
+    .filter((c) => Object.hasOwn(c, "depth"));
+  const hists = readdirSync(dir).filter((f) => /^p-hist-[A-Z]/.test(f))
+    .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")));
+  ok(cardX.length > 0 && hists.length === cardX.length,
+     `the pipeline emits card-x and hist for the same names (${cardX.length} and ${hists.length})`);
+  const PINNED = {
+    gex: ["asOf", "n", "net", "usd1pct", "adv", "z", "pct", "regime", "persist", "longShare", "flips",
+      "charm", "charmZ", "charmPct", "vanna", "vannaZ", "vannaPct", "u", "gaps"],
+    volume: ["asOf", "n", "netPrem", "netPremZ", "netPremPct", "bullBear", "bullBearZ", "bullBearPct", "volume",
+      "volumeZ", "volumePct", "pc", "pcZ", "pcPct", "oi", "oiSlope", "oiSlopeRel", "u", "gaps"],
+    gexLevels: ["asOf", "spot", "callWall", "putWall", "magnet", "flip", "callWallAtr", "putWallAtr", "magnetAtr",
+      "flipAtr", "nearby", "ambiguity", "ours", "flipGap", "flipAgree", "callWallAgree", "putWallAgree", "u", "gaps"],
+    flowExpiry: ["asOf", "readAt", "netTotal", "grossTotal", "otmShare", "convictionDte", "convictionBucket", "mix", "rows", "u", "gaps"],
+    flowStrike: ["asOf", "spot", "centroid", "centroidSigma", "longPeak", "shortPeak", "callWallFlow", "putWallFlow",
+      "wallShare", "ladder", "u", "gaps"],
+    nope: ["asOf", "close", "closeCheck", "fill", "high", "highM", "low", "lowM", "divergence", "z", "pct", "m", "x", "u", "gaps"],
+    gexPath: ["asOf", "flowFilled", "open", "close", "change", "flips", "flipM", "flowFlips", "charmClose",
+      "charmLastHour", "m", "px", "g", "f", "c", "u", "gaps"],
+    contracts: ["rows"],
+    dpLevels: ["asOf", "darkShare", "shelves", "profile", "u", "gaps"],
+    alerts: ["asOf", "n", "complete", "prem", "askShare", "sweepShare", "openingShare", "callShare", "urgency", "dots", "u", "gaps"],
+    multiLeg: ["asOf", "n", "truncated", "netPrem", "grossPrem", "netDelta", "netVega", "creditShare", "openingShare",
+      "byStrategy", "top", "u", "gaps"],
+    oiWalls: ["asOf", "callWall", "putWall", "callWallAtr", "putWallAtr", "calls", "puts", "pcOi", "u", "gaps"],
+  };
+  const seen = new Set();
+  for (const c of cardX) {
+    for (const f of ["v", "ticker", "sessionDate", "generatedAt", "depth", "fresh"]) {
+      ok(Object.hasOwn(c, f), `card-x:${c.ticker} carries ${f}`);
+    }
+    for (const [key, fields] of Object.entries(PINNED)) {
+      const s = c[key];
+      if (!s) continue;
+      ok(["ok", "stale", "quiet", "unavailable", "unreadable"].includes(s.status),
+         `card-x:${c.ticker}.${key} is one arm of the silence union (got ${s.status})`);
+      if (s.status !== "ok" && s.status !== "stale") {
+        ok(s.why in FLOW_CODES, `card-x:${c.ticker}.${key} ${s.status} names a code the UI can explain (${s.why})`);
+        continue;
+      }
+      seen.add(key);
+      for (const f of fields) ok(Object.hasOwn(s, f), `card-x:${c.ticker}.${key} carries ${f} on its readable arm`);
+      for (const unit of Object.values(s.u || {})) ok(unit in UNITS, `card-x:${c.ticker}.${key} unit ${unit} is declared`);
+    }
+    for (const row of (c.contracts && c.contracts.rows) || []) {
+      for (const f of ["id", "cp", "k", "e", "status", "buildStart", "buildSessions", "askShareBuild", "d", "oi", "iv", "ask"]) {
+        ok(Object.hasOwn(row, f), `card-x:${c.ticker} lifeline ${row.id} carries ${f}`);
+      }
+    }
+  }
+  assert.deepEqual([...seen].sort(), Object.keys(PINNED).sort(),
+    "every pinned section is reached on its readable arm somewhere in the corpus"); checks++;
+  for (const h of hists) {
+    for (const f of ["v", "ticker", "sessionDate", "fresh", "d0", "dd", "gex", "volume", "u"]) {
+      ok(Object.hasOwn(h, f), `hist:${h.ticker} carries ${f}`);
+    }
+    for (const [group, keys] of [["gex", ["g", "c", "v"]], ["volume", ["np", "bb", "vol", "pc", "oi"]]]) {
+      for (const k of keys) {
+        const p = h[group] && h[group][k];
+        ok(p && Number.isInteger(p.s) && Array.isArray(p.x) && p.x.length === h.dd.length,
+           `hist:${h.ticker}.${group}.${k} is a packed series on the shared axis`);
+      }
+    }
+    ok(JSON.stringify(h).length <= 16 * 1024, `hist:${h.ticker} is inside its 16 KB budget`);
+  }
+
+  const u = emitted("universe");
+  ok(u && u.status === "ok", "the pipeline emits a universe payload and it is readable");
+  ok(Array.isArray(u.t) && u.t.length === u.n && u.n > 0, `universe.t names every column row (${u.n})`);
+  ok(Array.isArray(u.sec) && u.sec.length === u.n && Array.isArray(u.sectors), "sectors travel as a dictionary and an index column");
+  for (const [k, col] of Object.entries(u.cols)) {
+    eq(col.length, u.n, `universe.cols.${k} has one cell per name`);
+    ok(Array.isArray(u.units[k]) && typeof u.units[k][0] === "string" && u.units[k][1] !== 0,
+      `universe.units.${k} states its unit and scale (${u.units[k]})`);
+    ok(col.every((v) => v === null || Number.isInteger(v)), `universe.cols.${k} is scaled integers or null, never text`);
+    ok(Number.isInteger(u.counts[k]) && u.counts[k] === col.filter((v) => v !== null).length,
+      `universe.counts.${k} is the number of names carrying a value`);
+  }
+  for (const [k, col] of Object.entries(u.pct)) {
+    ok(col.length === u.n && col.every((v) => v === null || (v >= 0 && v <= 100)), `universe.pct.${k} is 0..100 per name`);
+  }
+  ok(u.shock && Array.isArray(u.shock.v) && u.shock.v.length === u.n && /cross-sectional/.test(u.shock.rule),
+    "the IV shock z is published with its cross-sectional rule");
+  ok(Array.isArray(u.shed), "the universe says which columns it shed for its budget");
+  ok(u.fresh && u.fresh.cadenceS === 0 && u.fresh.session === u.sessionDate && u.fresh.source === "nightly",
+    "and carries the nightly freshness envelope");
+  ok(Buffer.byteLength(JSON.stringify(u)) <= 100 * 1024, "inside its 100KB budget");
+
+  const r = emitted("regime");
+  ok(r && r.status === "ok", "the pipeline emits a regime payload");
+  for (const k of ["volCurve", "zeroDte", "sectors", "etfTide", "fundFlows", "impliedCorrelation", "groups", "optionsPulse", "dailyReport"]) {
+    ok(r[k] && typeof r[k].status === "string", `regime.${k} carries a status on every arm`);
+  }
+  eq(r.volCurve.vendor.reason, "plan_gated", "the VIX futures curve's 403 is a published silence, not an absence");
+  ok(["SPY", "QQQ", "IWM"].every((t) => r.volCurve.byIndex[t] && r.volCurve.byIndex[t].status),
+    "and the screener curve is published per index ETF");
+  eq(r.sectors.rows.length, 11, "all eleven sector tides are listed, read or not");
+  ok(r.fresh && r.fresh.cadenceS === 0, "regime carries the freshness envelope");
+  ok(Buffer.byteLength(JSON.stringify(r)) <= 60 * 1024, "inside its 60KB budget");
+
+  const e = emitted("events");
+  for (const k of ["macro", "fda", "earningsCalendar", "catalysts", "history"]) {
+    ok(e[k] && typeof e[k] === "object", `events gains ${k}`);
+  }
+  ok(Array.isArray(e.rows), "and keeps its rows, which the events renderer reads");
+  ok(Buffer.byteLength(JSON.stringify(e)) <= 100 * 1024, "events stays well inside the ingest cap with its additions");
+
+  const p = emitted("pulse");
+  ok(p.totalsHistory && p.totalsHistory.status === "ok" && p.totalsHistory.n >= 60,
+    "pulse.totalsHistory carries a year of sessions for its z");
+  ok(p.totals && Array.isArray(p.totals.rows) && p.totals.rows.length <= 20,
+    "while pulse.totals keeps the twenty sessions its renderers rank");
+
+  const cx = readdirSync(dir).filter((f) => /^p-card-x-/.test(f)).map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")));
+  ok(cx.length > 0, `the pipeline emits card-x payloads (${cx.length})`);
+  for (const c of cx) {
+    ok(typeof c.ticker === "string" && c.fresh && !("panels" in c), `card-x:${c.ticker} is its own key, not a card`);
+    ok(c.scope === "index" || ["short", "insiders", "earnings"].some((k) => c[k]),
+       `card-x:${c.ticker} carries at least one ownership part, unless it is an index dossier the vol leg alone writes`);
+    ok(Buffer.byteLength(JSON.stringify(c)) <= 100 * 1024, `card-x:${c.ticker} fits its cap`);
+  }
+
+  for (const t of ["SPY", "QQQ", "IWM"]) {
+    const card = emitted("card:" + t);
+    ok(card && card.depth === "index", `card:${t} is an index dossier`);
+    ok(card.panels && card.panels.gamma && card.panels.context, `card:${t} carries the card panels`);
+  }
+
+  const { LIVE_KEYS } = await import("../shared/flows-live.js");
+  const live = (key) => {
+    const file = join(dir, "p-" + key.replace(":", "-") + ".json");
+    return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : null;
+  };
+  const SILENCES = new Set(["ok", "quiet", "unavailable", "unreadable", "prior", "pending"]);
+  for (const key of Object.keys(LIVE_KEYS).filter((k) => LIVE_KEYS[k].writer === "actions")) {
+    const p = live(key);
+    ok(p && p.key === key, `the dry run emits ${key} — publisher-pinned until a renderer reads it`);
+    ok(p.fresh && p.fresh.v === 1 && typeof p.fresh.readAt === "string" && p.fresh.source === "actions" &&
+       p.fresh.cadenceS === LIVE_KEYS[key].cadenceS && p.fresh.session === p.session,
+       `${key} carries the fresh envelope the Worker turns into X-Fresh-* headers`);
+    ok(Buffer.byteLength(JSON.stringify(p)) <= LIVE_KEYS[key].maxBytes, `${key} is inside its registered cap`);
+  }
+  const b = live("live:breadth");
+  for (const [sector, row] of Object.entries(b.sectors.rows)) {
+    ok(SILENCES.has(row.status) && (row.status !== "ok" ||
+       (row.ncp.length === b.sectors.t.length && row.npp.length === b.sectors.t.length && row.net.length === b.sectors.t.length)),
+       `live:breadth ${sector} is aligned to the one shared time axis, or names its silence`);
+  }
+  ok(Object.hasOwn(b.dte.share, "value") && Object.hasOwn(b.dte.share, "reason"),
+     "the 0DTE share carries its value beside the reason it may be null");
+  const st = live("live:strips");
+  ok(Object.values(st.rows).every((r) => r.length === st.fields.length) &&
+     st.fields.every((f) => typeof st.units[f] === "string"),
+     "every strip row is a column vector of the published fields, and every field names its unit");
+  const se = live("live:strips:series");
+  ok(Object.values(se.cols).every((col) => Object.values(col).every((a) => a.length === se.t.length)) &&
+     ["px", "net", "gex", "iv"].every((c) => typeof se.scale[c] === "number"),
+     "every series column has one value per read instant, and states the integer scale it is stored in");
+  const al = live("live:alerts");
+  for (const f of ["rows", "seen", "record", "readAt", "readDay", "refreshed", "vendorLimit", "readTruncated", "cursor"]) {
+    ok(Object.hasOwn(al, f), `live:alerts carries \`${f}\` so the Worker can serve it in place of the nightly feed`);
+  }
+  eq(al.refreshed, "intraday", "and says it is the intraday union");
+  const gx = live("live:gex");
+  ok(Object.values(gx.names).every((n) => typeof n.readAt === "string" &&
+     (!n.t || ["px", "gOi", "gVol", "gDir"].every((f) => n[f].length === n.t.length))),
+     "every gamma name carries its own read time, and a series only when it was read this run");
+  const tp = live("live:tape");
+  ok(["totals", "netImpact", "darkpool"].every((f) => SILENCES.has(tp[f].status)),
+     "each tape feed states its own silence");
+  const vl = live("live:vol");
+  ok(vl.vix.status === "unavailable" && typeof vl.vix.reason === "string", "the plan-gated VIX curve is named, not blank");
+  const mv = live("live:movers");
+  ok(typeof mv.basis === "string" && Array.isArray(mv.up) && Array.isArray(mv.down), "movers name their universe");
+  const hb = live("live:heartbeat");
+  ok(hb.run && Number.isInteger(hb.run.calls) && hb.run.keys && typeof hb.run.finishedAt === "string",
+     "the heartbeat is the run's ledger: calls, bytes per key, and when it finished");
+}
+
 rmSync(dir, { recursive: true, force: true });
 
 console.log(`✓ flows-payload-shape: ${checks} assertions — the publisher and the renderers ` +
@@ -514,8 +842,12 @@ console.log(`✓ flows-payload-shape: ${checks} assertions — the publisher and
   `join and the prior-session date of its ranking asserted on the wire, and the landing page ` +
   `whole rather than half of it: the score index, the five verdict tiles and the caption that carries the two readings they shed, the spine and the ` +
   `closure that writes the region subtitles all read against the payloads they are handed — ` +
-  `and the two market-wide keys whose renderers have not been written yet pinned on the ` +
+  `and the market-wide keys whose renderers have not been written yet pinned on the ` +
   `publisher's side while that is still free to fix: the sector option lean's three reads ` +
   `and its measured zero, its vocabulary proven DISJOINT from the sector momentum key it ` +
   `must never be merged with, and the news tape's four counts, its stated ordering and the ` +
-  `vendor stamp on every row beside the instant we read them`);
+  `vendor stamp on every row beside the instant we read them; and the volatility dossiers (card-x), the ` +
+  `card's x.vol summary and the regime's vol radar pinned field by field on every arm they are emitted on; and the per-name card-x and hist ` +
+  `keys pinned the same way, every section's readable arm, silence codes, units and packed series; and the live layer's ten Tier 2 ` +
+  `keys pinned the same way: a fresh envelope on each, series aligned to their axes, units and ` +
+  `scales stated, and every silence named`);

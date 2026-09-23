@@ -864,8 +864,11 @@ if (diffBase) {
       `${face} carries a character map`);
   }
   const flowsCss = read("assets/css/flows.css");
-  assert(/--font-figure:\s*"Inter"/.test(flowsCss),
-    "flows.css must define --font-figure as Inter — it is what the section's " +
+  assert(/--font-text:\s*-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Inter", "Helvetica Neue", system-ui, sans-serif;/.test(flowsCss),
+    "flows.css must lead with the system stack so Apple devices draw SF Pro natively, " +
+    "with the self-hosted Inter as the face every other device falls back to");
+  assert(/--font-figure:\s*var\(--font-text\)/.test(flowsCss),
+    "and --font-figure must resolve through that stack — it is what the section's " +
     "figures, tickers, labels and axis text all resolve through");
   assert(/--font-ui:\s*var\(--font-figure\)/.test(flowsCss),
     "and --font-ui must resolve to the same family: the section is ONE face at " +

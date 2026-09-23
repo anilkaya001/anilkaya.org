@@ -12,6 +12,7 @@ const server = await startWorker({ extraVars: [`FLOWS_INGEST_TOKEN:${INGEST_TOKE
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
+const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
 const url = (p) => server.baseURL + p;
 const get = (p, init) => fetch(url(p), { redirect: "manual", ...init });
@@ -308,8 +309,13 @@ try {
          "and the lede states that refusal in so many words, rather than leaving it implied");
 
       const dated = /\b(today|this session|the day's|the day\u2019s)\b/i;
-      const d = uaHtml.match(dated);
-      ok(!d, `the unusual page never dates an undated counter (found "${d && d[0]}")`);
+      const ownWords = uaHtml.replace(/<aside class="fx-side"[\s\S]*?<\/aside>/, "");
+      ok(ownWords.length < uaHtml.length,
+         "the shared sidebar is found and set aside before the page's own words are read");
+      const d = ownWords.match(dated);
+      ok(!d, `the unusual page never dates an undated counter (found "${d && d[0]}") — the ` +
+         `sidebar's "Today" is the name of a navigation group, identical on every route, ` +
+         "not a claim about when this page's counts were counted");
 
       const anonUa = await get("/flows/unusual/");
       eq(anonUa.status, 200, "/flows/unusual/ serves a page to an anonymous visitor");
@@ -679,13 +685,12 @@ try {
 
     const rail = (/<nav class="flows-rail"[\s\S]*?<\/nav>/.exec(html) || [""])[0];
     ok(rail.includes("flows-rail"), "the rail markup is found before it is read");
-    for (const gone of ["/flows/history/", "/flows/track/"]) {
-      ok(!rail.includes(`href="${gone}"`),
-         `the RAIL does NOT link to ${gone} — it was taken off deliberately`);
-      const still = await get(gone, { headers: { Cookie: "flows_session=" + token } });
-      eq(still.status, 200,
-         `but ${gone} still answers: unlisted is not deleted, and a link already ` +
-         "sent has to keep working");
+    for (const back of ["/flows/history/", "/flows/track/"]) {
+      ok(rail.includes(`href="${back}"`),
+         `the RAIL links to ${back} again, under Record — it was taken off to keep a sideways ` +
+         "phone strip short, and the sidebar that replaced the strip is a grouped vertical list");
+      const still = await get(back, { headers: { Cookie: "flows_session=" + token } });
+      eq(still.status, 200, `and ${back} answers for a session`);
     }
 
     const api = await get("/api/flows/board?side=long", {
@@ -954,6 +959,31 @@ try {
     const tape = await (await get("/api/flows/news",
       { headers: { Cookie: "flows_session=" + token } })).json();
     eq(tape.rows[0].headline, "TEST", "and reads back through its own route unchanged");
+
+    const auth = { headers: { Cookie: "flows_session=" + token } };
+    eq((await (await get("/api/flows/universe", auth)).json()).status, "pending",
+       "the universe route answers pending before its first publish");
+    const regimeBefore = await get("/api/flows/regime", auth);
+    eq(regimeBefore.status, 200, "an unwritten regime is not an error");
+    eq((await regimeBefore.json()).status, "pending", "it reads pending until the pipeline writes it");
+    eq((await get("/api/flows/regime")).status, 401, "the regime route refuses an anonymous reader");
+    eq((await post("universe", JSON.stringify({ v: 1, t: ["TEST"], cols: { iv30: [312] }, units: { iv30: ["vol", 1000] } }),
+      INGEST_TOKEN)).status, 200, "the columnar universe is an accepted key");
+    eq((await post("regime", JSON.stringify({ v: 1, volCurve: { status: "ok" } }), INGEST_TOKEN)).status, 200,
+       "and so is the market regime");
+    eq((await post("card-x:TEST", JSON.stringify({ v: 1, ticker: "TEST", short: { status: "quiet" } }), INGEST_TOKEN)).status, 200,
+       "and card-x under the ticker rule");
+    eq((await post("card-x:../etc", "{}", INGEST_TOKEN)).status, 400, "while a card-x key that is not a ticker is refused");
+    eq((await post("universe:2026-01-02", "{}", INGEST_TOKEN)).status, 400,
+       "and the universe has no dated form: it is tonight's cross-section, not an archive");
+    const uni = await (await get("/api/flows/universe", auth)).json();
+    eq(uni.cols.iv30[0], 312, "the universe reads back through its own route unchanged");
+    eq((await (await get("/api/flows/regime", auth)).json()).volCurve.status, "ok", "and the regime through its own");
+    const cxr = await get("/api/flows/card-x?t=test", auth);
+    eq(cxr.status, 200, "card-x is read by ticker, case-folded");
+    eq((await cxr.json()).short.status, "quiet", "and returns the stored parts");
+    eq((await get("/api/flows/card-x?t=../x", auth)).status, 400, "an invalid ticker is refused at the read");
+    eq((await (await get("/api/flows/card-x?t=NONE", auth)).json()).status, "pending", "and an unpublished one is pending");
   }
 
   {
@@ -1113,6 +1143,131 @@ try {
 
     eq((await get("/api/flows/card?t=AAPL")).status, 401,
        "an anonymous caller cannot read a card");
+
+    const dossier = JSON.stringify({
+      v: 1, ticker: "AAPL", scope: "deep", sessionDate: "2026-09-22",
+      cone: { status: "ok", iv30: 0.221, tenors: [{ days: 7, iv: 0.221, pct: 0.2191 }] },
+      skew: { status: "unavailable", code: "read-failed", reason: "the vendor call failed after its retries" },
+    });
+    eq((await putCard("card-x:AAPL", dossier)).status, 200,
+       "the volatility dossier ingests under card-x:<TICKER>, beside the card and never inside it");
+    const xRead = await get("/api/flows/card-x?t=aapl", { headers: cookie });
+    eq(xRead.status, 200, "an authenticated dossier read succeeds with the ticker case-folded");
+    const xBody = await xRead.json();
+    eq(xBody.cone.tenors[0].pct, 0.2191, "and the nested panels survive the byte passthrough");
+    eq(xBody.skew.code, "read-failed", "a silent panel keeps its code, so the glyph can say which silence it is");
+    eq(xRead.headers.get("cache-control"), "no-store", "the dossier is never cached");
+    const xMissing = await get("/api/flows/card-x?t=ZZZZ", { headers: cookie });
+    eq(xMissing.status, 200, "a dossier the run has not written is not an error");
+    eq((await xMissing.json()).status, "pending", "and it reports pending honestly");
+    for (const bad of ["", "../../etc/passwd", "1ABC", "TOOLONGTICKER"]) {
+      eq((await get("/api/flows/card-x?t=" + encodeURIComponent(bad), { headers: cookie })).status, 400,
+         `the dossier read refuses the ticker ${JSON.stringify(bad)}`);
+    }
+    for (const bad of ["card-x:", "card-x:a b", "card-x:1ABC", "card-y:AAPL"]) {
+      eq((await putCard(bad, dossier)).status, 400, `ingest refuses the key ${JSON.stringify(bad)}`);
+    }
+    eq((await get("/api/flows/card-x?t=AAPL")).status, 401, "an anonymous caller cannot read a dossier");
+
+    const regime = JSON.stringify({ v: 1, sessionDate: "2026-09-22",
+      volRadar: { status: "ok", rich: { status: "ok", rows: [{ t: "SOXS", score: 52.263 }] } } });
+    eq((await putCard("regime", regime)).status, 200, "the market regime key ingests");
+    const regimeRead = await get("/api/flows/regime", { headers: cookie });
+    eq(regimeRead.status, 200, "and reads back to a signed-in page");
+    eq((await regimeRead.json()).volRadar.rich.rows[0].t, "SOXS", "with the vol radar rows unchanged");
+    eq((await get("/api/flows/regime")).status, 401, "an anonymous caller cannot read the regime");
+    for (const prefix of ["card-x", "hist"]) {
+      const body = JSON.stringify({ v: 1, ticker: "AAPL", sessionDate: "2026-09-22",
+        gex: { status: "ok", why: null, z: 1.25, gaps: {} } });
+      eq((await putCard(prefix + ":AAPL", body)).status, 200,
+         `a ${prefix} payload ingests under its ticker key`);
+      const got = await get(`/api/flows/${prefix}?t=aapl`, { headers: cookie });
+      eq(got.status, 200, `an authenticated ${prefix} read succeeds, lowercase ticker included`);
+      eq((await got.json()).gex.z, 1.25, `the ${prefix} payload round-trips through the byte passthrough`);
+      eq(got.headers.get("cache-control"), "no-store", `${prefix} data is never cached`);
+      const back = await fetch(url("/api/flows/ingest?key=" + prefix + ":AAPL"),
+        { headers: { Authorization: "Bearer " + INGEST_TOKEN } });
+      eq(back.status, 200, `the pipeline can read ${prefix} back through the ingest route it writes through`);
+      eq((await (await get(`/api/flows/${prefix}?t=ZZZZ`, { headers: cookie })).json()).status, "pending",
+         `an unbuilt ${prefix} key reports pending honestly`);
+      for (const bad of [prefix + ":", prefix + ":a b", prefix + ":1ABC", prefix + "x:AAPL"]) {
+        eq((await putCard(bad, body)).status, 400, `ingest refuses the key ${JSON.stringify(bad)}`);
+      }
+      eq((await get(`/api/flows/${prefix}?t=` + encodeURIComponent("../x"), { headers: cookie })).status, 400,
+         `${prefix} read refuses a malformed ticker`);
+      eq((await get(`/api/flows/${prefix}?t=AAPL`)).status, 401, `an anonymous caller cannot read ${prefix}`);
+    }
+  }
+
+  {
+    const login = await fetch(url("/flows/login"), {
+      method: "POST", redirect: "manual",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: server.baseURL, "Sec-Fetch-Site": "same-origin",
+      },
+      body: new URLSearchParams({ username: FLOWS_TEST_USER, password: FLOWS_PASSWORD }).toString(),
+    });
+    const token = /flows_session=([^;]+)/.exec(login.headers.get("set-cookie") || "")[1];
+    const cookie = { Cookie: "flows_session=" + token };
+    const put = (key, body) => fetch(url("/api/flows/ingest?key=" + encodeURIComponent(key)), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + INGEST_TOKEN },
+      body: JSON.stringify(body),
+    });
+    const sessionDate = "2026-09-22";
+    const at = new Date().toISOString();
+    const block = { v: 1, engine: "q1", asOf: "2026-09-22T20:00:00.000Z", spot: 420.5, atr: 8,
+      facts: [{ id: "iv.cm.30", v: 0.31, u: "vol", g: 3 }, { id: "iv.pct.30", v: 0.8, u: "frac", g: 2 },
+        { id: "vrp.rel.21", v: 0.2, u: "frac", g: 3 }],
+      state: { state: "premium-rich", direction: null, confidence: 2, preferred: ["put credit spread"], avoid: ["long straddle"] },
+      structures: [{ id: "S1", family: "put-credit-spread", risk: "defined", dir: "bull", expiry: "2026-10-16", dte: 24,
+        legs: [{ type: "P", k: 400, side: -1, qty: 1 }, { type: "P", k: 390, side: 1, qty: 1 }],
+        prob: { popQ: 0.7, popP: 0.76 }, ev: { q: -2, p: 14, edge: 16 }, maxProfit: 180, maxLoss: -820,
+        grade: 3, gradeWhy: [], rules: ["vrp.rich", "iv.high"] }],
+      ideas: ["S1"], noTrade: null };
+    const panels = { pricedMove: { status: "ok", impliedMove: 0.05, realizedMove: 0.04, sessions: 10, iv30: 0.31, rv30: 0.25 } };
+
+    eq((await put("card-x:MSFT", { ticker: "MSFT", sessionDate, generatedAt: at, engine: block })).status, 200,
+       "the engine's overflow key card-x:<T> ingests beside the card");
+    eq((await put("card:MSFT", { ticker: "MSFT", sessionDate, generatedAt: at, panels,
+      engine: { status: "split", key: "card-x:MSFT", bytes: 1234 } })).status, 200,
+       "and a card carrying only the split pointer ingests under its own key");
+    const merged = await (await get("/api/flows/card?t=MSFT", { headers: cookie })).json();
+    ok(merged.engine && Array.isArray(merged.engine.structures) && merged.engine.structures[0].id === "S1" &&
+       merged.engine.facts[0].v === 0.31 && merged.panels.pricedMove.status === "ok",
+       "a card read resolves the pointer: the page receives one card with its engine block in place, panels untouched");
+    eq((await put("card-x:1ABC", {})).status, 400, "the overflow key is validated like the card key it rides beside");
+
+    await put("card-x:NVDA", { ticker: "NVDA", sessionDate: "2026-09-19", generatedAt: at, engine: block });
+    await put("card:NVDA", { ticker: "NVDA", sessionDate, generatedAt: at, panels,
+      engine: { status: "split", key: "card-x:NVDA", bytes: 1 } });
+    const stale = await (await get("/api/flows/card?t=NVDA", { headers: cookie })).json();
+    eq(stale.engine && stale.engine.status, "unreadable",
+       "an overflow written for another session is never grafted onto today's card: the pointer reads unreadable");
+    await put("card:AMD", { ticker: "AMD", sessionDate, generatedAt: at, panels,
+      engine: { status: "split", key: "card-x:MSFT", bytes: 1 } });
+    const foreign = await (await get("/api/flows/card?t=AMD", { headers: cookie })).json();
+    eq(foreign.engine && foreign.engine.status, "split", "and a pointer naming another ticker's overflow is not followed");
+
+    const first = await (await get("/api/flows/summary?t=MSFT", { headers: cookie })).json();
+    ok(first.status === "pending" || first.status === "ok", `the Neuron route reads the merged card (${first.status})`);
+    let neuron = first;
+    for (let i = 0; i < 40 && neuron.status !== "ok"; i++) {
+      await new Promise((r) => setTimeout(r, 250));
+      neuron = await (await get("/api/flows/summary?t=MSFT", { headers: cookie })).json();
+    }
+    eq(neuron.status, "ok", "and writes a reading over it");
+    eq(neuron.engine, true, "over the engine protocol, because the card carries an engine block");
+    eq(neuron.ideas.length, 1, "with the engine's own ranked idea");
+    ok(neuron.ideas[0].structure === "S1" && neuron.ideas[0].from === "engine" && neuron.ideas[0].verdict === "harvest-rich-premium" &&
+       neuron.ideas[0].word === "Harvest rich premium" && neuron.ideas[0].because.length === 2,
+       `named by structure id, with a verdict code whose preconditions hold, its word, and two facts it rests on (${JSON.stringify(neuron.ideas[0])})`);
+    ok(!("popQ" in neuron.ideas[0]) && !("maxLoss" in neuron.ideas[0]),
+       "and no figure of its own: the page draws every number from the card's engine block by that id");
+    eq(neuron.verdictWord, "Harvest rich premium", "the reading's verdict travels with its word");
+    ok(/engine\u2019s own ranking: no model was asked/.test(neuron.provenance || ""),
+       `with no model configured, the provenance says the ideas are the engine's own ranking (${neuron.provenance})`);
   }
 
   {
@@ -1169,7 +1324,235 @@ try {
     }
   }
 
-  console.log(`✓ flows-worker: ${checks} assertions — public login, no-store gating, structural bypass resistance, bidirectional audience isolation, legacy learner tolerance, uniform failures, full sign-in round trip, and the two market-wide keys this wave added served on their own gated routes: the sector option lean beside — never merged into — the sector momentum it shares eleven tickers with, and the news tape whose absent per-ticker form is asserted to stay absent. Plus the retirement of the card dialog: the four board routes serve neither it nor the 151k panel library it was the only caller of, and their own ?t= addresses — pushed into history on every open the modal ever had — are 302'd to /flows/ticker/ with the surface they came from, from a Location that is a pure function of the request URL and reads no payload and no session`);
+  {
+    const { mergeLiveAlerts, LIVE_BUDGET, LIVE_KEYS, freshEnvelope } = await import("../shared/flows-live.js");
+    const { phaseAt } = await import("../shared/flows-freshness.js");
+    const { signFlowsSession } = await import("../shared/flows-auth.js");
+    const { fakeFlowAlerts } = await import("../scripts/flows-legs/live-fake.mjs");
+    const { startStubVendor, startStubGithub } = await import("./live-stubs.mjs");
+    const et = (iso) => Date.parse(iso);
+    const marketNow = { value: et("2026-09-23T10:06:00-04:00") };
+    const vendor = await startStubVendor({ marketSession: "2026-09-23", marketNow, tapeSession: "2026-09-22" });
+    const github = await startStubGithub();
+    const LIVE_TOKEN = "test-live-token-abcdefghijklmnopqrstuv";
+    const live = await startWorker({ extraVars: [
+      `FLOWS_INGEST_TOKEN:${INGEST_TOKEN}`, `FLOWS_LIVE_TOKEN:${LIVE_TOKEN}`, "UW_API_KEY:stub-uw-key",
+      `UW_BASE:${vendor.base}`, "GITHUB_DISPATCH_TOKEN:stub-dispatch-token", `GITHUB_API_BASE:${github.base}`,
+    ] });
+    const L = (p) => live.baseURL + p;
+    const cookie = { Cookie: "flows_session=" + await signFlowsSession(FLOWS_TEST_USER, SESSION_SECRET, 600, "1") };
+    const ingest = (key, method, token, body) => fetch(L("/api/flows/ingest?key=" + encodeURIComponent(key)), {
+      method, redirect: "manual",
+      headers: { Authorization: "Bearer " + token, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+      body: body === undefined ? undefined : (typeof body === "string" ? body : JSON.stringify(body)),
+    });
+    const tick = async (cron, iso) => {
+      const res = await fetch(L(`/cdn-cgi/handler/scheduled?cron=${encodeURIComponent(cron)}&time=${et(iso)}`));
+      await res.text();
+      return res.status;
+    };
+    const RTH = "1-59/5 13-21 * * 1-5";
+    const HOUSE = "*/30 * * * *";
+    const fresh = (key, readAt, session = "2026-09-23") => ({ v: 1, readAt, session, cadenceS: LIVE_KEYS[key].cadenceS,
+      source: "actions", writer: "flows-live@test", vendorAt: null });
+    try {
+      const board = { side: "long", generatedAt: "2026-09-22T21:40:00.000Z", sessionDate: "2026-09-22", rows: [] };
+      eq((await ingest("board:long", "POST", INGEST_TOKEN, board)).status, 200, "the nightly token still writes the nightly board");
+      for (const key of ["board:long", "board:long:2026-09-22", "scores:2026-09-22", "card:AAPL", "flowalerts"]) {
+        const res = await ingest(key, "POST", LIVE_TOKEN, board);
+        eq(res.status, 403, `LAYER 2 (credential): the live token is refused on ${key}`);
+        eq((await res.json()).error.code, "live_token_scope", "with its own code");
+      }
+      eq((await ingest("live:breadth", "DELETE", LIVE_TOKEN)).status, 403, "the live token can delete nothing");
+      eq((await ingest("board:long", "GET", LIVE_TOKEN)).status, 200,
+        "it may READ the board it plans the strip from");
+      eq((await ingest("card:AAPL", "GET", LIVE_TOKEN)).status, 403, "and nothing else of the nightly store");
+      const nightlyOnLive = await ingest("live:market", "POST", INGEST_TOKEN, {});
+      eq(nightlyOnLive.status, 403, "the nightly token is refused on live:market");
+      eq((await nightlyOnLive.json()).error.code, "nightly_token_scope", "so the nightly run cannot corrupt a live row");
+      eq((await ingest("live:breadth", "GET", INGEST_TOKEN)).status, 200, "though it may read the live union it merges");
+      const wrongWriter = await ingest("live:market", "POST", LIVE_TOKEN,
+        { v: 1, fresh: { ...fresh("live:market", "2026-09-23T14:00:00.000Z"), source: "worker" } });
+      eq(wrongWriter.status, 403, "ONE WRITER PER KEY: the Actions token cannot write the Worker's live:market");
+      eq((await ingest("live:breadth", "POST", LIVE_TOKEN, { v: 1 })).status, 400, "a live payload with no fresh envelope is refused");
+      eq((await ingest("live:unknown", "POST", LIVE_TOKEN, { v: 1 })).status, 400, "and an unregistered live key");
+      const big = { v: 1, key: "live:vol", session: "2026-09-23", fresh: fresh("live:vol", "2026-09-23T14:00:00.000Z"),
+        pad: "x".repeat(LIVE_KEYS["live:vol"].maxBytes) };
+      eq((await ingest("live:vol", "POST", LIVE_TOKEN, big)).status, 413, "a live key over its own cap is refused");
+      const breadth = (readAt) => ({ v: 1, key: "live:breadth", session: "2026-09-23", fresh: fresh("live:breadth", readAt),
+        sectors: { t: [], rows: {} } });
+      const w1 = await ingest("live:breadth", "POST", LIVE_TOKEN, breadth("2026-09-23T14:10:00.000Z"));
+      eq(w1.status, 200, "a well-formed Tier 2 payload lands");
+      eq((await w1.json()).stored, "written", "and is written");
+      const w0 = await ingest("live:breadth", "POST", LIVE_TOKEN, breadth("2026-09-23T14:05:00.000Z"));
+      eq((await w0.json()).stored, "older-than-held", "a delayed older read never overwrites a newer one");
+
+      eq((await ingest("board:long:2026-01-02", "POST", INGEST_TOKEN, { ...board, sessionDate: "2026-01-02" })).status, 200,
+        "a dated archive row is created");
+      let refused = null;
+      try { await live.d1("UPDATE flows_payload SET payload = '{}' WHERE id = 'board:long:2026-01-02'"); }
+      catch (error) { refused = String(error && error.message); }
+      ok(refused && /flows archive rows are immutable/.test(refused),
+        "LAYER 4 (storage): a direct UPDATE of a dated row aborts with the trigger's message, whatever the code path");
+      await live.d1("UPDATE flows_payload SET updated_at = updated_at WHERE id = 'board:long'");
+      ok(true, "while the undated nightly rows stay writable");
+      let checked = null;
+      try {
+        await live.d1("INSERT INTO flows_live (id, payload, read_at, session, cadence_s, source, writer, updated_at) " +
+          "VALUES ('board:long', '{}', 1, '2026-09-23', 300, 'worker', 'x', 1)");
+      } catch (error) { checked = String(error && error.message); }
+      ok(checked && /CHECK constraint/i.test(checked), "LAYER 3 (table): flows_live refuses any id outside live:*");
+
+      const pulse = { v: 2, generatedAt: "2026-09-22T21:40:00.000Z", sessionDate: "2026-09-22",
+        readAt: "2026-09-22T21:40:00.000Z", readDay: "2026-09-22", refreshed: "nightly", cadenceMinutes: 15,
+        tide: { status: "ok", points: [{ t: "2026-09-22T13:30:00Z", callPrem: 1, putPrem: 2, vol: 3 }], seen: 1, cap: 480, shed: 0 },
+        totals: { status: "ok", rows: [{ date: "2026-09-22", callPrem: 1, callVol: 2, putPrem: 3, putVol: 4 }] } };
+      const pulseText = JSON.stringify(pulse);
+      eq((await ingest("pulse", "POST", INGEST_TOKEN, pulseText)).status, 200, "a nightly pulse lands");
+      eq((await ingest("meta", "POST", INGEST_TOKEN, { sessionDate: "2026-09-22", generatedAt: "2026-09-22T21:40:00.000Z" })).status,
+        200, "and the nightly meta");
+
+      eq(await tick(RTH, "2026-09-23T10:06:00-04:00"), 200, "the market-hours cron fires the RTH tick");
+      eq(vendor.count(/^\/api\/(market|net-flow)\//), 5, "TIER 1 spends exactly five vendor calls");
+      const mk = await fetch(L("/api/flows/lk?k=market"), { headers: cookie });
+      eq(mk.status, 200, "live:market is served on the live read route");
+      const market = await mk.json();
+      eq(market.key, "live:market", "whole, as the Worker wrote it");
+      eq(market.fresh.source, "worker", "stamped by the Worker");
+      eq(market.fresh.readAt, new Date(et("2026-09-23T10:06:00-04:00")).toISOString(),
+        "at the cron's scheduled instant, so a late invocation cannot pass for an earlier read");
+      ok(market.tide.status === "ok" && market.tide.n >= 7 && market.zeroDte.status === "ok" &&
+         market.etf.SPY.status === "ok" && market.etf.QQQ.status === "ok" && market.sectors.status === "ok",
+        "with all five feeds shaped");
+      eq(mk.headers.get("x-fresh-source"), "worker", "X-Fresh-Source comes from the row's column");
+      eq(mk.headers.get("x-fresh-cadence"), "300", "and X-Fresh-Cadence");
+      ok(["live", "fresh", "stale", "closed"].includes(mk.headers.get("x-fresh-state")), "X-Fresh-State is one of the four states");
+      ok(/^\d{13}$/.test(mk.headers.get("x-server-now") || ""), "and X-Server-Now gives the browser its skew");
+      eq((await fetch(L("/api/flows/lk?k=market"))).status, 401, "the live route is gated like every other");
+      eq((await fetch(L("/api/flows/lk?k=board:long"), { headers: cookie })).status, 400, "and reaches live keys only");
+
+      const pulseAfter = await (await ingest("pulse", "GET", INGEST_TOKEN)).text();
+      eq(pulseAfter, pulseText, "ONE WRITER PER KEY: the tick left the nightly pulse row byte-identical");
+      const served = await fetch(L("/api/flows/pulse"), { headers: cookie });
+      eq(served.headers.get("x-live-overlay"), "live:market", "and the page is served today's tide by a read-time overlay");
+      const sp = await served.json();
+      ok(sp.refreshed === "intraday" && sp.readDay === "2026-09-23" && sp.tide.points.length === market.tide.n,
+        "stamped intraday on today's read, with the live points");
+      deep(sp.totals, pulse.totals, "while every nightly feed beside the tide is the nightly's own");
+
+      eq(github.dispatches.length, 0, "10:06 is not a dispatch tick");
+      marketNow.value = et("2026-09-23T10:16:00-04:00");
+      await tick(RTH, "2026-09-23T10:16:00-04:00");
+      eq(github.dispatches.length, 1, "10:16 dispatches the Tier 2 run");
+      const d1 = github.dispatches[0];
+      eq(d1.path, "/repos/anilkaya001/anilkaya.org/actions/workflows/flows-live.yml/dispatches",
+        "to the live workflow of this repository");
+      ok(d1.auth === "Bearer stub-dispatch-token" && d1.body.ref === "main" && d1.body.inputs.origin === "worker",
+        "authenticated with the dispatch token, on main, saying the Worker sent it");
+      marketNow.value = et("2026-09-23T10:21:00-04:00");
+      await tick(RTH, "2026-09-23T10:21:00-04:00");
+      eq(github.dispatches.length, 1, "at 10:21 the breadth read of 10:10 is eleven minutes old, so the watchdog stays quiet");
+      marketNow.value = et("2026-09-23T10:56:00-04:00");
+      await tick(RTH, "2026-09-23T10:56:00-04:00");
+      eq(github.dispatches.length, 2, "at 10:56, with breadth 46 minutes old, the watchdog re-dispatches off the 15-minute grid");
+      eq(github.dispatches[1].body.inputs.origin, "watchdog", "and says so");
+      marketNow.value = et("2026-09-23T11:01:00-04:00");
+      await tick(RTH, "2026-09-23T11:01:00-04:00");
+      eq(github.dispatches.length, 2, "the 11:01 grid tick sees the watchdog's run in flight and sends nothing");
+      marketNow.value = et("2026-09-23T11:06:00-04:00");
+      await tick(RTH, "2026-09-23T11:06:00-04:00");
+      eq(github.dispatches.length, 2, "and the watchdog fires only once per stall");
+
+      const beforeHoliday = vendor.count(/^\/api\/(market|net-flow)\//);
+      await tick(RTH, "2026-09-24T10:06:00-04:00");
+      await tick(RTH, "2026-09-24T10:11:00-04:00");
+      eq(vendor.count(/^\/api\/(market|net-flow)\//) - beforeHoliday, 5,
+        "A TAPE-DERIVED HOLIDAY: when the tide still carries yesterday's date after 09:45, the day is marked closed and " +
+        "the next tick spends no vendor call");
+
+      await tick(HOUSE, "2026-09-23T17:14:00-04:00");
+      eq(github.dispatches.length, 2, "the nightly is not dispatched before 17:15 ET");
+      await tick(HOUSE, "2026-09-23T17:30:00-04:00");
+      eq(github.dispatches.length, 3, "at 17:30 ET, with meta a session behind, the Worker dispatches the nightly");
+      eq(github.dispatches[2].path, "/repos/anilkaya001/anilkaya.org/actions/workflows/flows-pipeline.yml/dispatches",
+        "to the nightly workflow");
+      eq(github.dispatches[2].body.inputs.origin, "worker", "with origin worker");
+      await tick(HOUSE, "2026-09-23T18:00:00-04:00");
+      eq(github.dispatches.length, 3, "once");
+      await tick(HOUSE, "2026-09-23T18:30:00-04:00");
+      eq(github.dispatches.length, 4, "and once more after 18:15 when nothing has landed");
+      await tick(HOUSE, "2026-09-23T19:00:00-04:00");
+      eq(github.dispatches.length, 4, "never a third time");
+
+      const alerts = mergeLiveAlerts(null, [{ body: fakeFlowAlerts({ session: "2026-09-23",
+        now: et("2026-09-23T11:00:00-04:00"), count: 20 }), full: false }],
+      { at: et("2026-09-23T11:00:00-04:00"), session: "2026-09-23", writer: "flows-live@test" }).write;
+      eq((await ingest("flowalerts", "POST", INGEST_TOKEN, { v: 2, sessionDate: "2026-09-22", generatedAt: "2026-09-22T21:40:00.000Z",
+        readAt: "2026-09-22T21:40:00.000Z", rows: [], status: "quiet" })).status, 200, "a nightly flowalerts lands");
+      eq((await ingest("live:alerts", "POST", LIVE_TOKEN, alerts)).status, 200, "and today's live union lands beside it");
+      const fa = await fetch(L("/api/flows/flowalerts"), { headers: cookie });
+      eq(fa.headers.get("x-live-overlay"), "live:alerts", "the alerts route serves the live union for the later session");
+      eq((await fa.json()).key, "live:alerts", "whole and unparsed");
+
+      const now = await fetch(L("/api/flows/now?k=market,breadth,tape&n=pulse,board:long,brief"), { headers: cookie });
+      eq(now.status, 200, "the heartbeat answers");
+      const nb = await now.json();
+      ok(nb.keys["live:market"].updatedAt > 0 && nb.keys["live:breadth"].readAt === "2026-09-23T14:10:00.000Z",
+        "with every subscribed live key's updatedAt and read instant from columns alone");
+      eq(nb.keys["live:tape"].state, "pending", "an unwritten key is pending");
+      eq(nb.keys.pulse.session, "2026-09-22", "and nightly keys carry their session");
+      eq(nb.keys.brief.state, "pending", "an unpublished nightly key is pending too");
+      ok(nb.phase && typeof nb.phase.phase === "string" && typeof nb.phase.endsAt === "string",
+        "the phase and when it ends travel with it");
+
+      const t0 = vendor.count(/net-prem-ticks$/);
+      const racers = await Promise.all([0, 1, 2].map(() => fetch(L("/api/flows/tape?t=AAPL"), { headers: cookie })));
+      eq(vendor.count(/net-prem-ticks$/) - t0, 1,
+        "SINGLE-FLIGHT: three concurrent readers of a cold tape spend exactly one refresh");
+      const hows = racers.map((r) => r.headers.get("x-tape")).sort();
+      ok(hows.includes("refreshed"), `one of them refreshed (${hows.join(", ")})`);
+      const first = await racers.find((r) => r.headers.get("x-tape") === "refreshed").json();
+      ok(first.prem.status === "ok" && first.prem.n >= 78 && first.gex.status === "pending",
+        "the first refresh reads the premium leg (net-prem-ticks and alerts) and leaves gamma pending — one leg per " +
+        "invocation keeps a cold isolate inside 10 ms of CPU");
+      eq(first.session, "2026-09-22", "and dates itself from the vendor's rows, not the wall clock");
+      const second = await fetch(L("/api/flows/tape?t=AAPL"), { headers: cookie });
+      eq(second.headers.get("x-tape"), "stale-refreshing", "the next reader is served at once while the missing leg refreshes");
+      let legs = 0;
+      for (let i = 0; i < 20 && legs !== 3; i++) {
+        await new Promise((r) => setTimeout(r, 250));
+        const r = await fetch(L("/api/flows/tape?t=AAPL"), { headers: cookie });
+        legs = Number(r.headers.get("x-tape-legs"));
+        await r.text();
+      }
+      eq(legs, 3, "until both legs are held");
+      eq(vendor.count(/spot-exposures$/), 1, "the gamma leg was read once");
+      const full = await (await fetch(L("/api/flows/tape?t=AAPL"), { headers: cookie })).json();
+      ok(full.gex.status === "ok" && full.prem.status === "ok", "and the tape carries both");
+      ok(Date.parse(full.fresh.readAt) <= Date.parse(full.gex.readAt), "its fresh.readAt is the older leg");
+
+      const q1 = await fetch(L("/api/flows/live?t=AAPL"), { headers: cookie });
+      const qb = await q1.json();
+      ok(qb.status === "ok" && qb.price === 101.5, "the quote reads the vendor's stock-state");
+      const phase = phaseAt(Date.now()).phase;
+      eq(q1.headers.get("x-quote-ttl"), String(LIVE_BUDGET.quoteTtlS[phase]),
+        `its cache life follows the market phase (${phase}): 5 s in session, 30 s pre and post, 6 h closed`);
+      eq(q1.headers.get("x-fresh-class"), "quote", "and it carries the quote class");
+      const before = vendor.count(/stock-state$/);
+      const q2 = await fetch(L("/api/flows/live?t=AAPL"), { headers: cookie });
+      await q2.text();
+      if (LIVE_BUDGET.quoteTtlS[phase] >= 30) {
+        eq(vendor.count(/stock-state$/) - before, 0, "inside its life a second read is served from the cache");
+        eq(q2.headers.get("x-chain-cache"), "hit", "and says so");
+      }
+    } finally {
+      await live.stop();
+      await vendor.close();
+      await github.close();
+    }
+  }
+
+  console.log(`✓ flows-worker: ${checks} assertions — public login, no-store gating, structural bypass resistance, bidirectional audience isolation, legacy learner tolerance, uniform failures, full sign-in round trip, and the two market-wide keys this wave added served on their own gated routes: the sector option lean beside — never merged into — the sector momentum it shares eleven tickers with, and the news tape whose absent per-ticker form is asserted to stay absent. Plus the retirement of the card dialog: the four board routes serve neither it nor the 151k panel library it was the only caller of, and their own ?t= addresses — pushed into history on every open the modal ever had — are 302'd to /flows/ticker/ with the surface they came from, from a Location that is a pure function of the request URL and reads no payload and no session. Plus the live layer: one writer per key held by credential, table and trigger, Tier 1 in exactly five vendor calls, read-time overlays that leave the nightly rows byte-identical, the dispatch clock with its in-flight guard and one-shot watchdog, a tape-derived holiday, the tape's single flight, and quote lives that follow the market phase`);
 } finally {
   await server.stop();
 }

@@ -72,7 +72,7 @@ eq(run.broken.length, 0,
 
 const emitDir = path.join(ROOT, "tests/.review-emit");
 const listCards = () => (fs.existsSync(emitDir)
-  ? fs.readdirSync(emitDir).filter((f) => /card/.test(f)) : []);
+  ? fs.readdirSync(emitDir).filter((f) => /-card-(?!x-)/.test(f)) : []);
 if (!listCards().length) {
 
   fs.mkdirSync(emitDir, { recursive: true });

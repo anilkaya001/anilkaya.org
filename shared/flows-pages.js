@@ -2,38 +2,28 @@ import {
   TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
 } from "./flows-panels.js";
 
-export const ASSET_VERSION = "222";
+export const ASSET_VERSION = "223";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
-const head = (title, description) => `<!doctype html>
+const head = (title, description, styles = []) => `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#07090e">
+<meta name="color-scheme" content="dark">
 <meta name="robots" content="noindex, nofollow">
 <title>${title}</title>
 <meta name="description" content="${description}">
 <link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="${v("/assets/css/base.css")}">
 <link rel="stylesheet" href="${v("/assets/css/flows.css")}">
+${styles.map((href) => `<link rel="stylesheet" href="${v(String(href))}">`).join("\n")}
 </head>`;
 
 const ICONS = {
-  overview: "M4 5h7v6H4zM13 5h7v4h-7zM13 11h7v8h-7zM4 13h7v6H4z",
-  ticker: "M4 19V9M9 19V5M14 19v-7M19 19V7",
-  unusual: "M12 3v3M12 18v3M3 12h3M18 12h3M7.8 7.8 5.6 5.6M18.4 18.4l-2.2-2.2M16.2 7.8l2.2-2.2M5.6 18.4l2.2-2.2",
-  watch: "M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6Z M12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z",
-  long: "M4 17 10 11l4 4 6-7M20 8v5M20 8h-5",
-  short: "M4 7l6 6 4-4 6 7M20 16v-5M20 16h-5",
-  events: "M4 6h16v14H4zM4 10h16M8 3v4M16 3v4",
-  market: "M3 17l5-6 4 3 4-6 5 4M3 21h18",
-  desk: "M12 3 3 8l9 5 9-5-9-5ZM3 13l9 5 9-5M3 17.5l9 5 9-5",
-  strategy: "M9 3h6M10 3v6.2L4.8 17.6A2 2 0 0 0 6.5 21h11a2 2 0 0 0 1.7-3.4L14 9.2V3M7.2 14h9.6",
-  political: "M3 20h18M5 20V9M9.5 20V9M14.5 20V9M19 20V9M12 3 3 8h18Z",
   ask: "M4 5h16v11H9l-5 4Z M8.6 9.2a3.4 3.4 0 0 1 5.6 2.1c0 1.7-2 2-2 3.2M12.2 17.4h.01",
-  search: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14ZM20 20l-4.2-4.2",
-  bell: "M12 3a6 6 0 0 0-6 6c0 4-1.5 5.5-2 6h16c-.5-.5-2-2-2-6a6 6 0 0 0-6-6ZM10 19a2 2 0 0 0 4 0",
   sun: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4",
 };
 const icon = (name) => {
@@ -45,94 +35,170 @@ const icon = (name) => {
     : "";
 };
 
+const GLYPHS = {
+  info: '<circle cx="12" cy="12" r="9.25"/><path d="M12 11v5.5"/><circle cx="12" cy="7.6" r="1.2" fill="currentColor" stroke="none"/>',
+  live: '<circle cx="12" cy="12" r="4.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.5" opacity=".35"/>',
+  closed: '<path d="M19.6 14.7A8.2 8.2 0 0 1 9.3 4.4a8.2 8.2 0 1 0 10.3 10.3z"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/>',
+  pending: '<circle cx="12" cy="12" r="8.5" stroke-dasharray="2.3 3.05"/>',
+  quiet: '<circle cx="12" cy="12" r="9"/><path d="M8.2 12h7.6"/>',
+  withheld: '<path d="M3 12s3.3-6 9-6c1.6 0 3 .4 4.2 1.1M21 12s-3.3 6-9 6c-1.7 0-3.1-.5-4.3-1.2"/><path d="M9.9 14.1a3 3 0 0 1 4.2-4.2"/><path d="M4.5 19.5 19.5 4.5"/>',
+  unavailable: '<circle cx="12" cy="12" r="9"/><path d="M5.7 18.3 18.3 5.7"/>',
+  up: '<path d="M12 4.5 21 19H3z" fill="currentColor" stroke="none"/>',
+  down: '<path d="M12 19.5 3 5h18z" fill="currentColor" stroke="none"/>',
+  flat: '<rect x="4" y="10" width="16" height="4" rx="2" fill="currentColor" stroke="none"/>',
+  gamma: '<path d="M5 7c2.5 0 3.6 1.9 5 5.5L12 17l2-4.5C15.4 9 16.5 7 19 7"/><path d="M12 17c-1 1.4-1.1 3.1 0 3.4 1.1-.3 1-2 0-3.4"/>',
+  vega: '<path d="M6 7l6 11c3.5-3 5.5-7 5.5-11"/>',
+  expand: '<path d="M14 4h6v6M20 4l-6.5 6.5M10 20H4v-6M4 20l6.5-6.5"/>',
+  back: '<path d="M15 5l-7 7 7 7"/>',
+  chev: '<path d="M6 9l6 6 6-6"/>',
+  next: '<path d="M9 5l7 7-7 7"/>',
+  search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 20 20"/>',
+  star: '<path d="M12 3.8l2.5 5.2 5.6.7-4.1 3.9 1 5.6-5-2.7-5 2.7 1-5.6-4.1-3.9 5.6-.7z"/>',
+  neuron: '<path d="M11 3c.6 4.6 2.4 6.4 7 7-4.6.6-6.4 2.4-7 7-.6-4.6-2.4-6.4-7-7 4.6-.6 6.4-2.4 7-7z"/><path d="M18.5 15c.2 1.6.8 2.2 2.4 2.4-1.6.2-2.2.8-2.4 2.4-.2-1.6-.8-2.2-2.4-2.4 1.6-.2 2.2-.8 2.4-2.4z"/>',
+  x: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
+  stop: '<circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/>',
+  cal: '<rect x="4" y="5.5" width="16" height="14.5" rx="3.2"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/>',
+  hall: '<path d="M4 20h16M5.5 17h13M7 10.5V17M10.3 10.5V17M13.7 10.5V17M17 10.5V17M3.8 9.5 12 4.5l8.2 5z"/>',
+  list: '<path d="M9 7h11M9 12h11M9 17h11"/><circle cx="4.8" cy="7" r="1" fill="currentColor" stroke="none"/><circle cx="4.8" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="4.8" cy="17" r="1" fill="currentColor" stroke="none"/>',
+  stack: '<rect x="4" y="9" width="16" height="11" rx="2.8"/><path d="M6.5 6h11M9 3.2h6"/>',
+  wave: '<path d="M3 12.5c2.3-5.3 4.7-5.3 7 0s4.7 5.3 7 0c1.2-2.7 2.5-3.5 4-3"/>',
+  levels: '<path d="M4 7h16M4 12h9M4 17h16"/>',
+  shield: '<path d="M12 3.5 19 6v5.5c0 4.3-2.9 7.6-7 9-4.1-1.4-7-4.7-7-9V6z"/>',
+  home: '<path d="M4 10.4 12 4l8 6.4V19a1.2 1.2 0 0 1-1.2 1.2H14.5v-5.4h-5v5.4H5.2A1.2 1.2 0 0 1 4 19z"/>',
+  long: '<path d="M4 17l5.2-5.2 3.6 3.6L20 8.2"/><path d="M15 8h5v5"/>',
+  short: '<path d="M4 7l5.2 5.2 3.6-3.6L20 15.8"/><path d="M15 16h5v-5"/>',
+  market: '<path d="M5 19.5v-5M10 19.5V9M15 19.5v-7.5M20 19.5V5.5"/>',
+  unusual: '<path d="M13.2 3 5.5 13.4h6L10.8 21l7.7-10.4h-6z"/>',
+  flask: '<path d="M9.5 3.5h5M10.5 3.5v5.6L5.4 17.6A2 2 0 0 0 7.1 20.5h9.8a2 2 0 0 0 1.7-2.9l-5.1-8.5V3.5"/><path d="M7.6 14.5h8.8"/>',
+  layers: '<path d="M12 4 3.5 8.4 12 12.8l8.5-4.4z"/><path d="M3.5 12.4 12 16.8l8.5-4.4"/><path d="M3.5 16.2 12 20.6l8.5-4.4"/>',
+  bubble: '<path d="M6 5h12a2.5 2.5 0 0 1 2.5 2.5v7A2.5 2.5 0 0 1 18 17h-6.2l-4.3 3.4V17H6a2.5 2.5 0 0 1-2.5-2.5v-7A2.5 2.5 0 0 1 6 5z"/>',
+  track: '<path d="M3 13h3.2l2.3-6 3.4 11 3.2-8.5 1.9 3.5H21"/>',
+  history: '<path d="M4.6 12a7.4 7.4 0 1 0 2.2-5.3"/><path d="M4.5 4.6v3.6h3.6"/><path d="M12 8.2V12l2.8 1.8"/>',
+  sidebar: '<rect x="3.5" y="5" width="17" height="14" rx="3"/><path d="M9.5 5v14"/>',
+  boards: '<rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/>',
+  bars: '<path d="M6 18v-3M12 18v-7M18 18V7"/>',
+};
+
+const SPRITE = `<svg class="ui-sprite" aria-hidden="true" focusable="false" width="0" height="0">${
+  Object.entries(GLYPHS).map(([k, d]) => `<symbol id="g-${k}" viewBox="0 0 24 24">${d}</symbol>`).join("")}</svg>`;
+
+const glyph = (name) => `<svg class="ui-g" aria-hidden="true" focusable="false"><use href="#g-${name}"/></svg>`;
+
 const initials = (username) => {
   const name = String(username || "").trim();
-  if (!name) return "\u2014";
+  if (!name) return "—";
   const parts = name.split(/[^A-Za-z0-9]+/).filter(Boolean);
   const said = parts.length >= 2
     ? parts[0].slice(0, 1) + parts[1].slice(0, 1)
     : name.replace(/[^A-Za-z0-9]/g, "").slice(0, 2);
-  return escapeHTML(said.toUpperCase() || "\u2014");
+  return escapeHTML(said.toUpperCase() || "—");
 };
 
-const topbar = (active, username) => `
+const sitePill = () => `
 <header class="topbar">
   <a class="topbar__brand" href="/" aria-label="Home">&#949;</a>
   <nav class="pill" aria-label="Primary">
     <a href="/">Home</a>
     <a href="/articles/">Articles</a>
     <a href="/lab/"><span class="lab-full">Econometrics&nbsp;Lab</span><span class="lab-short">Lab</span></a>
-    <a href="/flows/"${active ? ' class="is-active" aria-current="page"' : ""}>Flows</a>
-  </nav>${username ? `
-  <div class="topbar__tools">
-
-    <form class="flows-find" method="GET" action="/flows/ticker/" role="search">
-      <label class="visually-hidden" for="flowsFind">Open a ticker page</label>
-      ${icon("search")}
-      <input class="flows-find-i" id="flowsFind" name="t" type="search"
-             autocomplete="off" spellcheck="false" maxlength="10"
-             pattern="[A-Za-z][A-Za-z0-9.\\-]{0,9}" placeholder="Ticker"
-             title="A ticker symbol: a letter, then up to nine letters, digits, dots or dashes.">
-    </form>
-
-    <a class="topbar__bell" href="/flows/ask/" aria-label="Session briefing and warnings">
-      ${icon("bell")}<span class="topbar__bell-n" data-warn-count hidden></span>
-    </a>
-    <span class="topbar__who" title="Signed in as ${escapeHTML(String(username || ""))}"
-          aria-label="Signed in as ${escapeHTML(String(username || ""))}">${initials(username)}</span>
-
-    <form method="POST" action="/flows/logout" class="topbar__out">
-      <button type="submit" class="flows-signout">Sign out</button>
-    </form>
-  </div>` : ""}
+    <a href="/flows/" class="is-active" aria-current="page">Flows</a>
+  </nav>
 </header>`;
 
-const rail = (active) => {
+export const FLOWS_NAV = [
+  { group: "Today", id: "railToday", items: [
+    { key: "overview", href: "/flows/", label: "Home", glyph: "home", title: "Today" },
+    { key: "watch", href: "/flows/watch/", label: "Watchlist", glyph: "star", count: true },
+  ] },
+  { group: "Boards", id: "railBoards", items: [
+    { key: "long", href: "/flows/long/", label: "Bullish", glyph: "long", count: true },
+    { key: "short", href: "/flows/short/", label: "Bearish", glyph: "short", count: true },
+  ] },
+  { group: "Market", id: "railMarket", items: [
+    { key: "market", href: "/flows/market/", label: "Market", glyph: "market" },
+    { key: "unusual", href: "/flows/unusual/", label: "Unusual", glyph: "unusual" },
+    { key: "events", href: "/flows/events/", label: "Events", glyph: "cal", count: true },
+    { key: "political", href: "/flows/political/", label: "Political", glyph: "hall" },
+  ] },
+  { group: "Tools", id: "railTools", items: [
+    { key: "strategy", href: "/flows/strategy/", label: "Strategy", glyph: "flask" },
+    { key: "desk", href: "/flows/desk/", label: "Premium desk", glyph: "layers" },
+    { key: "ask", href: "/flows/ask/", label: "Ask", glyph: "bubble" },
+  ] },
+  { group: "Record", id: "railRecord", items: [
+    { key: "track", href: "/flows/track/", label: "Track", glyph: "track" },
+    { key: "history", href: "/flows/history/", label: "History", glyph: "history" },
+  ] },
+];
 
-  const item = (href, label, key) => {
-    const on = active === key;
+const TABS = [
+  { href: "/flows/", label: "Home", glyph: "home", keys: ["overview"] },
+  { href: "/flows/long/", label: "Boards", glyph: "boards", keys: ["long", "short"] },
+  { href: "/flows/ticker/", label: "Search", glyph: "search", keys: ["ticker"], search: true },
+  { href: "/flows/market/", label: "Market", glyph: "market", keys: ["market", "unusual", "events", "political"] },
+  { href: "/flows/ask/", label: "Ask", glyph: "bubble", keys: ["ask"] },
+];
 
-    const badge = key === "long" || key === "short" || key === "watch" || key === "events"
-      ? `<span class="rail-count" data-rail-count="${key}" hidden></span>` : "";
-
-    return `<a href="${href}"${on ? ' class="is-on" aria-current="page"' : ""}>` +
-      `${icon(key)}<span class="rail-label">${label}</span>${badge}</a>`;
+const sidebar = (active, username) => {
+  const item = (it) => {
+    const on = it.key === active;
+    const badge = it.count ? `<span class="rail-count" data-rail-count="${it.key}" hidden></span>` : "";
+    return `<a href="${it.href}"${on ? ' class="is-on" aria-current="page"' : ""}>` +
+      `${glyph(it.glyph)}<span class="rail-label">${it.label}</span>${badge}</a>`;
   };
+  const who = escapeHTML(String(username || ""));
   return `
-<nav class="flows-rail" aria-label="Flows">
-
-  <div class="rail-items rail-items--lead" role="group" aria-label="Ask">
-    ${item("/flows/ask/", "Ask", "ask")}
+<aside class="fx-side" id="fxSide" aria-label="Sidebar">
+  <div class="fx-side-h">
+    <a class="fx-mark" href="/" aria-label="anilkaya.org">&#949;</a>
+    <span class="fx-side-t">Flows</span>
   </div>
-  <p class="rail-group" id="railSession">Options flow</p>
-  <div class="rail-items" role="group" aria-labelledby="railSession">
-    ${item("/flows/", "Overview", "overview")}
-    ${item("/flows/ticker/", "Ticker", "ticker")}
-    ${item("/flows/unusual/", "Unusual", "unusual")}
-    ${item("/flows/watch/", "Watch", "watch")}
-    ${item("/flows/long/", "Bullish", "long")}
-    ${item("/flows/short/", "Bearish", "short")}
-    ${item("/flows/events/", "Events", "events")}
+  <nav class="flows-rail" aria-label="Flows">${FLOWS_NAV.map((g) => `
+    <p class="rail-group" id="${g.id}">${g.group}</p>
+    <div class="rail-items" role="group" aria-labelledby="${g.id}">
+      ${g.items.map(item).join("\n      ")}
+    </div>`).join("")}
+  </nav>
+  <div class="fx-side-f">
+    <nav class="fx-site" aria-label="Site">
+      <a href="/">Home</a><a href="/articles/">Articles</a><a href="/lab/">Lab</a><a href="/flows/" aria-current="true">Flows</a>
+    </nav>
+    <div class="fx-who">
+      <span class="fx-avatar" aria-hidden="true">${initials(username)}</span>
+      <span class="fx-who-n" title="Signed in as ${who}">${who}</span>
+      <form method="POST" action="/flows/logout" class="fx-out">
+        <button type="submit" class="flows-signout">Sign out</button>
+      </form>
+    </div>
   </div>
-  <p class="rail-group" id="railMarket">Market</p>
-  <div class="rail-items" role="group" aria-labelledby="railMarket">
-    ${item("/flows/market/", "Market", "market")}
-    ${item("/flows/desk/", "Premium desk", "desk")}
-    ${item("/flows/strategy/", "Strategy tester", "strategy")}
-    ${item("/flows/political/", "Political", "political")}
-  </div>
-
-  <p class="rail-foot">Nightly pipeline.<br>Intraday refresh.<br>Every silence named.</p>
-</nav>`;
+</aside>
+<div class="fx-scrim" id="fxScrim"></div>`;
 };
 
+const toolbar = (title, active, hero) => `
+<header class="topbar fx-bar${hero ? " has-hero" : ""}" id="fxBar">
+  <button type="button" class="fx-iconbtn" id="fxSideBtn" aria-controls="fxSide"
+          aria-expanded="false" aria-label="Sidebar">${glyph("sidebar")}</button>
+  <span class="fx-bar-t" id="fxBarT" aria-hidden="true">${title}</span>
+  <span class="fx-bar-sp"></span>
+  <a class="fx-search" id="fxSearch" href="/flows/ticker/" aria-haspopup="dialog"
+     aria-keyshortcuts="Meta+K Control+K">${glyph("search")}<span class="fx-search-l">Search</span><kbd>&#8984;K</kbd></a>${dockTab(active)}
+  <button type="button" class="ui-fresh" id="fxFresh" data-state="pending"
+          aria-haspopup="dialog" aria-label="Freshness">${glyph("pending")}<span class="fx-fresh-l">Session</span></button>
+</header>`;
+
+const tabbar = (active) => `
+<nav class="fx-tabs" id="fxTabs" aria-label="Sections">${TABS.map((t) => `
+  <a href="${t.href}"${t.search ? " data-fx-search" : ""}${t.keys.includes(active) ? ' aria-current="true"' : ""}>${glyph(t.glyph)}<span>${t.label}</span></a>`).join("")}
+</nav>`;
+
+const dockTab = (active) => (active === "ask" ? "" : `
+  <button type="button" class="ak-dock-tab" id="askDockTab"
+          aria-expanded="false" aria-controls="askDockPanel"
+          aria-keyshortcuts="?" title="Ask about what has been published — press ? to open">${glyph("bubble")}<span class="ak-dock-tab-l">Ask</span><span class="ak-dock-tab-k" aria-hidden="true">?</span></button>`);
+
 const dock = (active) => (active === "ask" ? "" : `
-<button type="button" class="ak-dock-tab" id="askDockTab"
-        aria-expanded="false" aria-controls="askDockPanel"
-        aria-keyshortcuts="?" title="Ask about what has been published — press ? to open">
-  <span class="ak-dock-tab-l">Ask</span>
-  <span class="ak-dock-tab-k" aria-hidden="true">?</span>
-</button>
 <aside class="ak-dock" id="askDock" data-src="${v("/assets/js/flows-ask.js")}">
   <div class="ak-dock-scrim" hidden></div>
   <div class="ak-dock-panel" id="askDockPanel" role="complementary"
@@ -246,30 +312,28 @@ function neuronDock(summary, { scope = "this session" } = {}) {
   </section>`;
 }
 
-const pageHead = (title, kicker, active) => `
-  <nav class="flows-crumbs" aria-label="Breadcrumb">
-    <a href="/flows/">Flows</a>
-    <span class="flows-crumbs-sep" aria-hidden="true">/</span>
-    <span aria-current="page">${title}</span>
-  </nav>
-
-  <header class="flows-head${active === "ticker" ? " flows-head--quiet" : ""}">
-    <div>
-      <p class="flows-kicker">${kicker}</p>
-      <h1>${title}</h1>
-    </div>
+const pageHead = (title, active) => `
+  <header class="flows-head${active === "ticker" ? " flows-head--quiet" : ""}"${active === "ticker" ? "" : " data-fx-hero"}>
+    <h1 id="fxTitle">${title}</h1>
   </header>`;
 
-const shell = (title, kicker, active, username, body, { chrome = true } = {}) => `
+const UI_SCRIPT = `<script src="${v("/assets/js/flows-ui.js")}" defer></script>`;
+
+const shell = (title, active, username, body, { chrome = true } = {}) => {
+  const lead = chrome ? pageHead(title, active) : "";
+  return `
 <body class="flows-body has-rail" data-flows-page="${active}">
+${SPRITE}
 <a class="flows-skip" href="#flowsMain">Skip to content</a>
-${topbar(true, username)}
-${rail(active)}
+${sidebar(active, username)}
+${toolbar(title, active, /data-fx-hero/.test(lead + body))}
 <main class="flows-main" id="flowsMain" tabindex="-1">
-${chrome ? pageHead(title, kicker, active) : ""}
+${lead}
 ${body}
 </main>
+${tabbar(active)}
 ${dock(active)}`;
+};
 
 export function loginPage({ error = "" } = {}) {
 
@@ -278,10 +342,10 @@ export function loginPage({ error = "" } = {}) {
     : "";
   return `${head("Flows — Sign in", "Restricted options-flow intelligence.")}
 <body class="flows-body">
-${topbar(true)}
+${sitePill()}
 <main class="flows-auth">
   <div class="flows-auth__card">
-    <p class="flows-kicker">Restricted</p>
+    <span class="fx-mark" aria-hidden="true">&#949;</span>
     <h1>Flows</h1>
     <p class="flows-auth__lede">Options-flow intelligence. Access is by assigned credential.</p>
     ${message}
@@ -319,9 +383,9 @@ const ccHeading = (id) =>
 
 export function overviewPage({ username = "", summary = null } = {}) {
   return `${head("Flows — Overview", "The whole session on one screen: both tails, the level, what moved, and what reports next.")}
-${shell("Session overview", "Options-flow intelligence", "overview", username, `
+${shell("Today", "overview", username, `
   <div class="flows-scroll" id="ccScroll">
-${pageHead("Session overview", "Options-flow intelligence", "overview")}
+${pageHead("Today", "overview")}
   <div class="flows-status" id="flowsStatus" role="status">Loading the latest session…</div>
   <p class="flows-stale" id="flowsStale" role="status" hidden></p>
 
@@ -450,10 +514,9 @@ ${neuronDock(summary)}
   </p>
   </div>
 `, { chrome: false })}
-<script src="${v("/assets/js/nav.js")}" defer></script>
+${UI_SCRIPT}
 
 <script src="${v("/assets/js/flows-cursor.js")}" defer></script>
-<script src="${v("/assets/js/flows-ui.js")}" defer></script>
 <script src="${v("/assets/js/flows-overview.js")}" defer></script>
 </body>
 </html>`;
@@ -466,7 +529,7 @@ export function sidePage({ username = "", side = "long" } = {}) {
     ? "Names leaning bearish this session, ranked by score."
     : "Names leaning bullish this session, ranked by score.";
   return `${head("Flows — " + title, lede)}
-${shell(title, "Options-flow intelligence", bear ? "short" : "long", username, `
+${shell(bear ? "Bearish" : "Bullish", bear ? "short" : "long", username, `
   <div class="flows-status" id="flowsStatus" role="status">Loading the latest session…</div>
   <p class="flows-stale" id="flowsStale" role="status" hidden></p>
 
@@ -512,9 +575,8 @@ ${shell(title, "Options-flow intelligence", bear ? "short" : "long", username, `
     <a href="/flows/history/">track record</a>.</span>
   </p>
 `)}
-<script src="${v("/assets/js/nav.js")}" defer></script>
+${UI_SCRIPT}
 
-<script src="${v("/assets/js/flows-ui.js")}" defer></script>
 <script src="${v("/assets/js/flows-board.js")}" defer></script>
 </body>
 </html>`;
@@ -522,7 +584,7 @@ ${shell(title, "Options-flow intelligence", bear ? "short" : "long", username, `
 
 export function deskPage({ username = "" } = {}) {
   return `${head("Flows — Premium desk", "Option-sale economics for any listed name.")}
-${shell("Premium desk", "Options-flow intelligence", "desk", username, `
+${shell("Premium desk", "desk", username, `
 <form class="desk-entry" id="deskEntry" autocomplete="off">
     <label for="deskInput">Add symbols</label>
     <div class="desk-entry__row">
@@ -643,7 +705,7 @@ ${shell("Premium desk", "Options-flow intelligence", "desk", username, `
     on the put side. This is a screen, not advice.
   </p>
 `)}
-<script src="${v("/assets/js/nav.js")}" defer></script>
+${UI_SCRIPT}
 <script src="${v("/assets/js/flows-desk.js")}" defer></script>
 </body>
 </html>`;
@@ -653,7 +715,7 @@ export function watchPage({ username = "" } = {}) {
   const lede = "Scored names that did not clear the band on either side, " +
     "ranked by how close they came. Nothing here is a candidate.";
   return `${head("Flows \u2014 Watch", lede)}
-${shell("Watch list", "Options-flow intelligence", "watch", username, `
+${shell("Watchlist", "watch", username, `
   <div class="flows-status" id="watchStatus" role="status">Loading the session\u2026</div>
   <p class="flows-stale" id="watchStale" role="status" hidden></p>
 
@@ -702,7 +764,7 @@ ${shell("Watch list", "Options-flow intelligence", "watch", username, `
     is stirring, never for what to do.
   </p>
 `)}
-<script src="${v("/assets/js/nav.js")}" defer></script>
+${UI_SCRIPT}
 <script src="${v("/assets/js/flows-watch.js")}" defer></script>
 </body>
 </html>`;
@@ -712,7 +774,7 @@ export function marketPage({ username = "" } = {}) {
   const lede = "Whether the screened universe was bought or sold, how broad " +
     "that was, and how much of it is five names.";
   return `${head("Flows \u2014 Market", lede)}
-${shell("Market level", "Options-flow intelligence", "market", username, `
+${shell("Market", "market", username, `
   <div class="flows-status" id="mktStatus" role="status">Loading the session\u2026</div>
   <p class="flows-stale" id="mktStale" role="status" hidden></p>
 
@@ -784,7 +846,7 @@ ${shell("Market level", "Options-flow intelligence", "market", username, `
 
   <p class="flows-foot" id="mktFoot"></p>
 `)}
-<script src="${v("/assets/js/nav.js")}" defer></script>
+${UI_SCRIPT}
 <script src="${v("/assets/js/flows-market.js")}" defer></script>
 </body>
 </html>`;
@@ -796,7 +858,7 @@ export function eventsPage({ username = "" } = {}) {
     "stopped in the board's own funnel — including the ones the board was gated " +
     "out of scoring at all.";
   return `${head("Flows — Events", "What reports next, and what is priced into it.")}
-${shell("Events", "Options-flow intelligence", "events", username, `
+${shell("Events", "events", username, `
   <div class="flows-status" id="evStatus" role="status">Loading the calendar…</div>
   <p class="flows-stale" id="evStale" role="status" hidden></p>
 
@@ -841,7 +903,7 @@ ${shell("Events", "Options-flow intelligence", "events", username, `
 
   <p class="flows-foot" id="evFoot"></p>
 `)}
-<script src="${v("/assets/js/nav.js")}" defer></script>
+${UI_SCRIPT}
 <script src="${v("/assets/js/flows-events.js")}" defer></script>
 </body>
 </html>`;
@@ -854,7 +916,7 @@ export function trackPage({ username = "" } = {}) {
     "visible before the session it arrives. A gap means the name was not " +
     "scored that session — never zero.";
   return `${head("Flows — Score track", "Each name's daily score, traced across sessions.")}
-${shell("Score track", "Options-flow intelligence", "track", username, `
+${shell("Track", "track", username, `
   <div class="flows-status" id="stStatus" role="status">Loading the track…</div>
   <p class="flows-stale" id="stStale" role="status" hidden></p>
 
@@ -875,8 +937,7 @@ ${shell("Score track", "Options-flow intelligence", "track", username, `
 
   <p class="flows-foot" id="stFoot"></p>
 `)}
-<script src="${v("/assets/js/nav.js")}" defer></script>
-<script src="${v("/assets/js/flows-ui.js")}" defer></script>
+${UI_SCRIPT}
 <script src="${v("/assets/js/flows-track.js")}" defer></script>
 </body>
 </html>`;
@@ -893,7 +954,7 @@ export function unusualPage({ username = "" } = {}) {
     "counter, and still not a trade, because a window aggregates its executions and " +
     "the selection is the vendor's, not the market's.";
   return `${head("Flows — Unusual activity", "Contracts carrying volume far above their own open interest.")}
-${shell("Unusual activity", "Options-flow intelligence", "unusual", username, `
+${shell("Unusual", "unusual", username, `
   <div class="flows-status" id="uaStatus" role="status">Loading the feed…</div>
   <p class="flows-stale" id="uaStale" role="status" hidden></p>
 
@@ -977,7 +1038,7 @@ ${shell("Unusual activity", "Options-flow intelligence", "unusual", username, `
 
   <p class="flows-foot" id="uaFoot"></p>
 `)}
-<script src="${v("/assets/js/nav.js")}" defer></script>
+${UI_SCRIPT}
 <script src="${v("/assets/js/flows-unusual.js")}" defer></script>
 </body>
 </html>`;
@@ -1021,15 +1082,15 @@ export function tickerPage({ username = "" } = {}) {
          class="ft-tab-n">${STATION_SIDE_COUNTS[g.key]}</span></a>`).join("");
 
   return `${head("Flows — Ticker", lede)}
-${shell("Ticker", "Options-flow intelligence", "ticker", username, `
+${shell("Ticker", "ticker", username, `
   <div class="flows-status" id="ftStatus" role="status">Loading the name…</div>
   <p class="flows-stale fc-staleband" id="ftStale" role="status" hidden></p>
 
   <div class="ft-scroll flows-scroll" id="ftScroll">
-  <section class="ft-hero" id="ftHero" hidden aria-label="This name at a glance">
+  <section class="ft-hero" id="ftHero" hidden data-fx-hero aria-label="This name at a glance">
 
     <div class="ft-hero-id">
-      <span class="ft-hero-t" id="ftHeroT"></span>
+      <span class="ft-hero-t" id="ftHeroT" data-fx-title></span>
       <span class="ft-hero-nm" id="ftHeroNm" hidden></span>
       <span class="ft-hero-sub">
         <span class="ft-hero-m" id="ftHeroSector"></span>
@@ -1280,7 +1341,7 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
     </section>
   </div>
 </dialog>
-<script src="${v("/assets/js/nav.js")}" defer></script>
+${UI_SCRIPT}
 
 <script src="${v("/assets/js/flows-cursor.js")}" defer></script>
 <script src="${v("/assets/js/flows-panels.js")}" defer></script>
@@ -1292,7 +1353,7 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
 export function historyPage({ username = "" } = {}) {
   const lede = "What the board said, and what happened next.";
   return `${head("Flows \u2014 Track record", lede)}
-${shell("Track record", "Options-flow intelligence", "history", username, `
+${shell("History", "history", username, `
   <div class="flows-status" id="recStatus" role="status">Loading the record\u2026</div>
 
   <div class="flows-controls">
@@ -1374,7 +1435,7 @@ ${shell("Track record", "Options-flow intelligence", "history", username, `
     important number here.
   </p>
 `)}
-<script src="${v("/assets/js/nav.js")}" defer></script>
+${UI_SCRIPT}
 <script src="${v("/assets/js/flows-history.js")}" defer></script>
 </body>
 </html>`;
@@ -1390,7 +1451,7 @@ export function politicalPage({ username = "" } = {}) {
   const lede = "Who disclosed the largest purchases, and in what — ranked by " +
     "size, with the range each filing actually stated drawn across it.";
   return `${head("Flows — Political", lede)}
-${shell("Political disclosures", "Options-flow intelligence", "political", username, `
+${shell("Political", "political", username, `
   <div class="flows-status" id="plStatus" role="status">Loading the disclosure window…</div>
   <p class="flows-stale" id="plStale" role="status" hidden></p>
   <p class="flows-stale" id="plSource" role="status" hidden></p>
@@ -1435,7 +1496,7 @@ ${shell("Political disclosures", "Options-flow intelligence", "political", usern
 
   <div class="flows-foot" id="plFoot"></div>
 `)}
-<script src="${v("/assets/js/nav.js")}" defer></script>
+${UI_SCRIPT}
 <script src="${v("/assets/js/flows-political.js")}" defer></script>
 </body>
 </html>`;
@@ -1452,7 +1513,7 @@ export function askPage({ username = "" } = {}) {
   const lede = "Yesterday, today, and what is already scheduled — from the readings " +
     "this site has published.";
   return `${head("Flows — Ask", summary)}
-${shell("Ask", "Options-flow intelligence", "ask", username, `
+${shell("Ask", "ask", username, `
   <div class="flows-status" id="askStatus" role="status">Reading the session’s briefing…</div>
 
   <div class="flows-controls">
@@ -1462,7 +1523,7 @@ ${shell("Ask", "Options-flow intelligence", "ask", username, `
   <div id="askApp"></div>
   <div id="askFoot" class="flows-foot"></div>
 `)}
-<script src="${v("/assets/js/nav.js")}" defer></script>
+${UI_SCRIPT}
 <script src="${v("/assets/js/flows-ask.js")}" defer></script>
 </body>
 </html>`;
@@ -1474,7 +1535,7 @@ export function strategyPage({ username = "" } = {}) {
     "vendor's; every sum is arithmetic on those quotes; every extrapolation " +
     "carries the name of the assumption it rests on.";
   return `${head("Flows — Strategy tester", lede)}
-${shell("Strategy tester", "Options-flow intelligence", "strategy", username, `
+${shell("Strategy", "strategy", username, `
   <div class="flows-status" id="sgStatus" role="status">Enter a symbol to begin.</div>
 
   <div class="flows-controls">
@@ -1722,9 +1783,23 @@ ${shell("Strategy tester", "Options-flow intelligence", "strategy", username, `
     </span>
   </p>
 `)}
-<script src="${v("/assets/js/nav.js")}" defer></script>
-<script src="${v("/assets/js/flows-ui.js")}" defer></script>
+${UI_SCRIPT}
+<script src="${v("/assets/js/flows-quant.bundle.js")}" defer></script>
 <script src="${v("/assets/js/flows-strategy.js")}" defer></script>
+</body>
+</html>`;
+}
+
+export const FLOWS_SPRITE = SPRITE;
+
+export function flowsDocument({
+  title = "Flows", description = "", active = "", username = "", body = "", scripts = [], styles = [], chrome = true,
+} = {}) {
+  const t = escapeHTML(String(title));
+  return `${head("Flows — " + t, escapeHTML(String(description)), styles)}
+${shell(t, String(active), username, String(body), { chrome })}
+${UI_SCRIPT}
+${scripts.map((src) => `<script src="${v(String(src))}" defer></script>`).join("\n")}
 </body>
 </html>`;
 }

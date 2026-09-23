@@ -33,6 +33,19 @@ const post = (key, body) => fetch(url("/api/flows/ingest?key=" + encodeURICompon
 });
 await post("board:long", legacyBoard);
 await post("card:INTC", legacyCard);
+{
+  const { signFlowsSession } = await import("../shared/flows-auth.js");
+  const { SESSION_SECRET } = await import("./worker-server.mjs");
+  const cookie = { Cookie: "flows_session=" + await signFlowsSession(FLOWS_TEST_USER, SESSION_SECRET, 600, "1") };
+  const served = await fetch(url("/api/flows/board?side=long"), { headers: cookie });
+  const body = await served.json();
+  if (body.rows.length !== 2) throw new Error("the legacy board is served whole");
+  if (served.headers.get("x-fresh-session") !== "2026-08-25" || served.headers.get("x-fresh-class") !== "nightly" ||
+      !served.headers.get("x-fresh-read-at")) {
+    throw new Error("a legacy payload that predates the fresh envelope still gets its X-Fresh-* headers, derived from " +
+      "sessionDate and generatedAt: " + JSON.stringify(Object.fromEntries(served.headers)));
+  }
+}
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });

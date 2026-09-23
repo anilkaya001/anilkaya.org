@@ -187,7 +187,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     [path.join(ROOT, "scripts/flows-pipeline.mjs"), "--dry-run", "--emit", dir + "/"],
     { stdio: "ignore" });
 
-  const cards = fs.readdirSync(dir).filter((f) => f.startsWith("-card-"))
+  const cards = fs.readdirSync(dir).filter((f) => /^-card-[A-Z]/.test(f))
     .map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")));
   ok(cards.length >= 5, `the emitter produced ${cards.length} cards`);
 

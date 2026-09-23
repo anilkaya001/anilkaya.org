@@ -295,7 +295,7 @@ try {
   }
 
   {
-    const emitted = fs.readdirSync(SCRATCH).filter((f) => f.startsWith("dry-card-")).sort();
+    const emitted = fs.readdirSync(SCRATCH).filter((f) => /^dry-card-[A-Z]/.test(f)).sort();
     ok(emitted.length > 0, `the dry run emitted cards to sweep (${SCRATCH})`);
 
     {
@@ -323,7 +323,8 @@ try {
       }
     }
 
-    const sample = emitted.slice(0, 5);
+    const sample = emitted.filter((f) =>
+      JSON.parse(fs.readFileSync(path.join(SCRATCH, f), "utf8")).depth !== "index").slice(0, 5);
     for (const file of sample) {
     const card = JSON.parse(fs.readFileSync(path.join(SCRATCH, file), "utf8"));
 
@@ -420,7 +421,7 @@ try {
   {
 
     await page.setViewportSize({ width: 1280, height: 1000 });
-    const emitted = fs.readdirSync(SCRATCH).filter((f) => f.startsWith("dry-card-")).sort();
+    const emitted = fs.readdirSync(SCRATCH).filter((f) => /^dry-card-[A-Z]/.test(f)).sort();
     const card = JSON.parse(fs.readFileSync(path.join(SCRATCH, emitted[0]), "utf8"));
 
     const wide = await page.evaluate(({ card, HOSTS }) => {

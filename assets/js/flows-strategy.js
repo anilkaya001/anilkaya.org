@@ -394,7 +394,7 @@
     state.loading++;
     state.bookError.delete(expiry);
     render();
-    const params = new URLSearchParams({ t: ticker, expiry });
+    const params = new URLSearchParams({ t: ticker, expiry, engine: "1" });
     if (refresh) params.set("refresh", "1");
     let out;
     try { out = await readStrategy(params); }
@@ -927,6 +927,23 @@
     }
   }
 
+  function engineReading(legs, cost) {
+    const Q = window.FlowsQuant;
+    if (!Q || !legs.length) return null;
+    const expiries = new Set(legs.map((l) => l.expiry));
+    if (expiries.size !== 1) return null;
+    const expiry = legs[0].expiry;
+    const book = state.books.get(expiry);
+    const engine = book && book.engine && book.engine.status === "ok" ? book.engine : null;
+    if (!engine) return null;
+    try {
+      return Q.repriceStructure({
+        engine, expiry, cost: isNum(cost) === null ? undefined : cost / MULT,
+        legs: legs.map((l) => ({ type: l.type === "call" ? "C" : "P", K: l.k, side: l.side === "long" ? 1 : -1, qty: l.qty })),
+      });
+    } catch { return null; }
+  }
+
   function renderReadings(host, note, legs, cost, ext, bes) {
     if (!host) return;
     const dl = el("dl", "sg-facts");
@@ -989,6 +1006,16 @@
     const tht = greekTotal(legs, "th");
     const vgt = greekTotal(legs, "vg");
     const rht = greekTotal(legs, "rh");
+    const smile = engineReading(legs, cost);
+    if (smile) {
+      const pct = (v) => (isNum(v) === null ? DASH : (v * 100).toFixed(1) + "%");
+      add("On the smile", fmtUSD(smile.model * MULT, true),
+        "Each leg re-priced on this expiry's smile, fitted to the NBBO against a parity forward; recomputed in the page as legs change.");
+      add("Chance of profit", pct(smile.popQ) + "  " + MID + "  " + pct(smile.popP),
+        "At expiry, under the risk-neutral density of the smile, then under the drift-neutral real-world law simulated from this name's own volatility model.");
+      add("Expected P&L, real world", smile.evP === null ? DASH : fmtUSD(smile.evP, true),
+        "Discounted expectation of the payoff under the real-world law, less this position's cost.");
+    }
     const withheld = (t) => "Withheld: " + t.missing.map(legLabel).join("; ") +
       " carries no such greek from the provider. A sum that skipped it would be a " +
       "confident number about a position nobody holds.";

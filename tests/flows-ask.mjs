@@ -1450,12 +1450,41 @@ import { readFile } from "node:fs/promises";
      "conviction is printed over its 100, never bare");
 
   const g46 = one("SYN46", "gamma"), g47 = one("SYN47", "gamma"), g90 = one("SYN90", "gamma");
-  ok(/no flip level is published \(0 crossings\)/.test(g46.say) && g46.n.crossings === 0 && !("gammaFlipPx" in g46.n),
+  ok(/no strike-sum crossing is published \(0 crossings\)/.test(g46.say) && g46.n.crossings === 0 && !("strikeSumCrossingPx" in g46.n),
      "crossings 0 with no flip is said as the finding it is — net gamma never changed sign — " +
      "with the measured zero pinned in n and no flip price invented");
-  ok(/running sum crosses zero at 412\.5 \(short below\)/.test(g47.say) && g47.n.gammaFlipPx === 412.5 && g47.n.crossings === 1,
-     "a measured flip level is quoted with its side, underscores read as words, and called what it is: " +
-     "the crossing of the ladder's running sum, not a net that flips sign");
+  ok(/strike-sum crossing is at 412\.5 \(short below\)/.test(g47.say) &&
+     g47.n.strikeSumCrossingPx === 412.5 && g47.n.crossings === 1,
+     "a legacy card's gammaFlip is quoted under its own name, the strike-sum crossing, with its side and underscores read as words");
+  ok(/peaks at 450\.16 long and 293\.66 short, flow extremes and not walls/.test(g47.say) &&
+     g47.n.flowPeakLongPx === 450.16 && !("callWallPx" in g47.n),
+     "and a legacy card with no open-interest book calls the flow ladder's extremes flow peaks, never walls (defect 4)");
+  {
+    const modern = buildFactIndex({ "card:NEW": CARD("NEW", {
+      gammaFlip: undefined, strikeSumCrossing: 390, zeroGamma: 381.2,
+      regime: { label: "long", labelFrom: "book", labelValue: 2e6, crossings: 1, crossingSide: "long_below" },
+      panels: { ...CARD("NEW").panels,
+        gamma: { status: "ok", spot: 386.4, flowPeakLong: 450.16, flowPeakShort: 293.66, strikes: 41, bandMin: 270.48, bandMax: 502.32 },
+        levels: { status: "ok", spot: 386.4, levels: [{ kind: "call_wall", px: 400 }, { kind: "put_wall", px: 370 }, { kind: "zero_gamma", px: 381.2 }] } },
+    }) }).facts;
+    const gm = modern.find((x) => x.id.endsWith("/gamma"));
+    ok(gm && /^For NEW at spot 386\.4, the open-interest book's call wall is at 400 and its put wall at 370; total dealer gamma changes sign at 381\.2\./.test(gm.say) &&
+       gm.n.callWallPx === 400 && gm.n.putWallPx === 370 && gm.n.zeroGammaPx === 381.2,
+       `a schema-3 card's gamma fact reads the book's walls and the zero-gamma level (${gm && gm.say})`);
+    ok(!/crossing|peak/.test(gm.say) && !("strikeSumCrossingPx" in gm.n) && !("flowPeakLongPx" in gm.n) &&
+       !modern.some((x) => x.id.endsWith("/walls")),
+       "and one fact, not two, with the true level only: the strike-sum crossing and the flow peaks stay on the card page, " +
+       "because a second per-name fact pushed ten of fifty names out of the brief's byte budget");
+    const noZero = buildFactIndex({ "card:NZ": CARD("NZ", {
+      gammaFlip: undefined, strikeSumCrossing: 390, zeroGamma: null,
+      regime: { label: "long", labelFrom: "book", labelValue: 2e6, crossings: 1, crossingSide: "long_below" },
+      panels: { ...CARD("NZ").panels,
+        levels: { status: "ok", spot: 386.4, levels: [{ kind: "call_wall", px: 400 }, { kind: "put_wall", px: 370 }] } },
+    }) }).facts.find((x) => x.id.endsWith("/gamma"));
+    ok(noZero && /put wall at 370\. The flow's strike-sum crossing is at 390 \(long below\)\./.test(noZero.say) &&
+       noZero.n.strikeSumCrossingPx === 390 && !("zeroGammaPx" in noZero.n),
+       `a card whose zero-gamma level did not solve quotes the crossing under its own name instead (${noZero && noZero.say})`);
+  }
   ok(/^Today's gamma flow in SYN47 at spot/.test(g47.say) && !/Dealer gamma for/.test(g47.say),
      "the ladder the walls are read from is named as today's flow, not as the dealer book the label now reads");
   eq(g90, null,
@@ -1475,15 +1504,15 @@ import { readFile } from "node:fs/promises";
     ok(/; dealer gamma is labelled short\./.test(said(src("OLD1", null), "standing")),
        "and a card that predates the label's source claims neither");
     const inverted = said(src("INV1", "book", { callWall: 380, putWall: 395 }), "gamma");
-    ok(/its largest long-gamma strike is at 380 and its largest short-gamma strike at 395/.test(inverted) &&
+    ok(/peaks at 380 long and 395 short/.test(inverted) &&
        !/call wall|put wall/.test(inverted),
-       `a call wall below spot and a put wall above it are not called walls here either (${inverted.slice(0, 120)})`);
+       `a flow ladder's extremes are flow peaks on whichever side of spot they sit, and never walls (${inverted.slice(0, 120)})`);
   }
   {
 
     const unm = buildFactIndex({ "card:UNM": withPanels("UNM", {}, { regime: { label: "short", crossings: null, flipSide: null } }) });
     const gu = unm.facts.find((f) => f.id === "card:UNM/gamma");
-    ok(gu && !/flip/.test(gu.say) && !("crossings" in gu.n) && !("gammaFlipPx" in gu.n),
+    ok(gu && !/flip|crossing/.test(gu.say) && !("crossings" in gu.n) && !("strikeSumCrossingPx" in gu.n),
        "a null crossings — a ladder not measured — gets NEITHER clause: not a level, and not " +
        "'no level', which over an unmeasured ladder is the confident zero in prose");
   }
