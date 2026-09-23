@@ -1,0 +1,407 @@
+{
+ "source": "nl/probe-report.json (GitHub Actions run 35847187962, session 2026-09-22). Rows are the probe's first sampled row verbatim; the flow-alert and multi-leg rows were clipped at 700 characters by the probe and their tail fields are completed from the confirmed field list; gex-levels walls were not printed, so only nearby_flips[0] is live and the other levels follow the confirmed types.",
+ "sessionDate": "2026-09-22",
+ "spot": 339.75,
+ "atr": 7.160760894064663,
+ "greekExposure": {
+  "data": [
+   {
+    "date": "2025-09-24",
+    "call_gamma": "3515910.8800",
+    "put_gamma": "-1055065.5743",
+    "call_delta": "177738345.5880",
+    "put_delta": "-22044964.3179",
+    "call_charm": "-23546409.1180",
+    "put_charm": "16324839.2996",
+    "call_vanna": "20950552.9115",
+    "put_vanna": "-54858687.1309"
+   }
+  ]
+ },
+ "optionsVolume": {
+  "data": [
+   {
+    "date": "2026-09-22",
+    "call_volume": 942134,
+    "put_volume": 339609,
+    "call_volume_ask_side": 429248,
+    "call_volume_bid_side": 425159,
+    "put_volume_ask_side": 155822,
+    "put_volume_bid_side": 146755,
+    "net_call_premium": "-46987757.0000",
+    "net_put_premium": "10802282.00",
+    "call_premium": "422361516.0000",
+    "put_premium": "103173480.00",
+    "avg_30_day_call_volume": "973121.3333",
+    "avg_30_day_put_volume": "513682.6333",
+    "avg_7_day_call_volume": "1007177.1429",
+    "avg_7_day_put_volume": "622941",
+    "bearish_premium": "270876420.0000",
+    "bullish_premium": "214836481.0000",
+    "put_open_interest": 1969666,
+    "call_open_interest": 2659889,
+    "avg_3_day_put_volume": "513796.6667",
+    "avg_3_day_call_volume": "912294.3333"
+   }
+  ]
+ },
+ "gexLevels": {
+  "data": {
+   "date": "2026-09-22",
+   "time": "2026-09-22T20:00:00Z",
+   "source": "oi",
+   "call_wall": "345",
+   "put_wall": "320",
+   "gamma_flip": "332.83",
+   "gamma_magnet": "340",
+   "nearby_flips": [
+    "332.83",
+    "329.5",
+    "337.28",
+    "325",
+    "341.9"
+   ]
+  }
+ },
+ "flowPerExpiry": [
+  {
+   "date": "2026-09-22",
+   "ticker": "AAPL",
+   "expiry": "2026-09-23",
+   "call_volume": 565838,
+   "put_volume": 169415,
+   "call_volume_ask_side": 253178,
+   "call_volume_bid_side": 256456,
+   "put_volume_ask_side": 76996,
+   "put_volume_bid_side": 70618,
+   "put_premium": "20972729.00",
+   "call_premium": "66895926.00",
+   "call_premium_bid_side": "29518322.00",
+   "put_premium_bid_side": "8351114.00",
+   "call_premium_ask_side": "30418039.00",
+   "put_premium_ask_side": "10079294.00",
+   "call_trades": 123655,
+   "put_trades": 38481,
+   "call_otm_premium": "38932415.00",
+   "call_otm_trades": 103338,
+   "call_otm_volume": 492968,
+   "put_otm_premium": "12713509.00",
+   "put_otm_trades": 32158,
+   "put_otm_volume": 144434
+  }
+ ],
+ "flowPerStrike": [
+  {
+   "timestamp": "2026-09-22T19:59:55.649000Z",
+   "date": "2026-09-22",
+   "ticker": "AAPL",
+   "call_volume": 2,
+   "put_volume": 31,
+   "call_volume_ask_side": 0,
+   "call_volume_bid_side": 2,
+   "put_volume_ask_side": 1,
+   "put_volume_bid_side": 16,
+   "strike": "5",
+   "put_premium": "157.00",
+   "call_premium": "66820.0000",
+   "call_premium_bid_side": "66820.0000",
+   "put_premium_bid_side": "50.00",
+   "call_premium_ask_side": "0",
+   "put_premium_ask_side": "9.00",
+   "call_trades": 2,
+   "put_trades": 31,
+   "call_otm_premium": "0",
+   "call_otm_trades": 0,
+   "call_otm_volume": 0,
+   "put_otm_premium": "157.00",
+   "put_otm_trades": 31,
+   "put_otm_volume": 31
+  }
+ ],
+ "nope": {
+  "data": [
+   {
+    "timestamp": "2026-09-22T19:59:00Z",
+    "call_vol": 942129,
+    "put_vol": 339605,
+    "stock_vol": 29766577,
+    "call_delta": "20844256.702439",
+    "put_delta": "-11861458.951400",
+    "call_fill_delta": "29311412.990332",
+    "put_fill_delta": "-9496308.896667",
+    "nope_fill": "0.665683",
+    "nope": "0.301775"
+   }
+  ]
+ },
+ "spotExposures": {
+  "data": [
+   {
+    "time": "2026-09-22T10:30:30.795000Z",
+    "ticker": "AAPL",
+    "start_time": "2026-09-22T10:30:00.000000Z",
+    "price": "339.3869",
+    "ticker_id": 6274,
+    "charm_per_one_percent_move_dir": "0",
+    "charm_per_one_percent_move_oi": "-1722257830.68",
+    "charm_per_one_percent_move_vol": "0",
+    "gamma_per_one_percent_move_dir": "0",
+    "gamma_per_one_percent_move_oi": "81615247.93",
+    "gamma_per_one_percent_move_vol": "0",
+    "vanna_per_one_percent_move_dir": "0",
+    "vanna_per_one_percent_move_oi": "11619719.33",
+    "vanna_per_one_percent_move_vol": "0"
+   }
+  ]
+ },
+ "oiPerStrike": {
+  "data": [
+   {
+    "date": "2026-09-22",
+    "strike": "5",
+    "call_oi": 170,
+    "put_oi": 3018
+   }
+  ]
+ },
+ "contractHistoric": {
+  "chains": [
+   {
+    "date": "2026-09-22",
+    "trades": 1285,
+    "open_interest": 106490,
+    "volume": 4586,
+    "last_price": "8.40",
+    "ask_volume": 1756,
+    "avg_price": "9.378617531617967727867422588",
+    "bid_volume": 2533,
+    "canceled_volume": 0,
+    "cross_volume": 0,
+    "floor_volume": 113,
+    "high_price": "12.01",
+    "implied_volatility": "0.241169661655305",
+    "iv_high": "0.2502255994843325",
+    "iv_low": "0.22356743440045",
+    "last_tape_time": "2026-09-22T21:30:49Z",
+    "low_price": "7.95",
+    "mid_volume": 297,
+    "multi_leg_volume": 1160,
+    "nbbo_ask": "8.45",
+    "nbbo_bid": "8.15",
+    "neutral_volume": 0,
+    "open_price": "8.70",
+    "stock_multi_leg_volume": 0,
+    "sweep_volume": 133,
+    "total_ask_changes": 2151,
+    "total_bid_changes": 2250,
+    "total_premium": "4301034.00",
+    "ticker_vol": 1281743,
+    "flex_oi_transfer": null
+   }
+  ],
+  "etf_holdings": []
+ },
+ "darkpool": {
+  "data": [
+   {
+    "size": 840,
+    "ticker": "AAPL",
+    "price": "339.84",
+    "volume": 40711698,
+    "executed_at": "2026-09-22T23:59:11Z",
+    "premium": "285465.60",
+    "canceled": false,
+    "sale_cond_codes": null,
+    "nbbo_ask": "339.92",
+    "nbbo_bid": "339.8",
+    "ext_hour_sold_codes": "extended_hours_trade",
+    "market_center": "L",
+    "nbbo_ask_quantity": 3,
+    "nbbo_bid_quantity": 61,
+    "tracking_id": 26946711166799,
+    "trade_code": null,
+    "trade_settlement": "regular",
+    "trf_executed_at": "2026-09-22T23:59:11Z"
+   }
+  ]
+ },
+ "darkpoolRecent": {
+  "data": [
+   {
+    "size": 400,
+    "ticker": "MRVL",
+    "price": "263.4155",
+    "volume": 19926587,
+    "executed_at": "2026-09-22T23:59:58Z",
+    "canceled": false,
+    "premium": "105366.2000",
+    "sale_cond_codes": null,
+    "nbbo_ask": "263.86",
+    "nbbo_bid": "263.14",
+    "ext_hour_sold_codes": "extended_hours_trade",
+    "market_center": "L",
+    "nbbo_ask_quantity": 10,
+    "nbbo_bid_quantity": 100,
+    "tracking_id": 30786411976718,
+    "trade_code": null,
+    "trade_settlement": "regular",
+    "trf_executed_at": "2026-09-22T23:59:58Z"
+   }
+  ]
+ },
+ "darkpoolLevels": {
+  "data": [
+   {
+    "price": "250",
+    "dark_pool_volume": "419",
+    "regular_volume": "0"
+   }
+  ],
+  "date": "2026-09-22"
+ },
+ "flowAlerts": {
+  "data": [
+   {
+    "iv_end": "0.255691726648767",
+    "option_chain": "AAPL260923C00340000",
+    "gamma": null,
+    "underlying_price": "339.75",
+    "has_multileg": false,
+    "delta": null,
+    "end_time": 1790107195568,
+    "total_ask_side_prem": "1700",
+    "issue_type": "Common Stock",
+    "rule_id": "a0979b52-28e4-4585-8f22-881faad2dd8e",
+    "volume_oi_ratio": "6.5632151828077",
+    "start_time": 1790107195423,
+    "iv_start": "0.252141337207799",
+    "total_premium": "25394",
+    "trade_count": 9,
+    "all_opening_trades": false,
+    "total_bid_side_prem": "23694",
+    "price": "1.68",
+    "has_floor": false,
+    "rho": null,
+    "total_size": 151,
+    "sector": "Technology",
+    "next_earnings_date": "2026-10-29",
+    "er_time": "unknown",
+    "expiry": "2026-09-23",
+    "bid": "1.68",
+    "expiry_count": 1,
+    "theta": null,
+    "created_at": "2026-09-22T20:00:00Z",
+    "ask": "1.70",
+    "has_singleleg": true,
+    "id": "7c9f0e1a-2b8f-4c9e-9d7a-1e2f3a4b5c6d",
+    "marketcap": "5043000000000.00",
+    "strike": "340",
+    "vega": null,
+    "has_sweep": false,
+    "iv": null,
+    "ticker": "AAPL",
+    "open_interest": 1490,
+    "type": "call",
+    "theo": null,
+    "volume": 9779,
+    "alert_rule": "RepeatedHits"
+   }
+  ],
+  "newer_than": "2026-09-22T13:30:00Z",
+  "older_than": "2026-09-22T20:00:00Z"
+ },
+ "multiLeg": {
+  "data": [
+   {
+    "min_dte": 59,
+    "underlying_price": "339.79",
+    "code": "mlet",
+    "net_theta": "-1.6184",
+    "net_gamma": "-0.2810",
+    "direction": "short",
+    "max_dte": 115,
+    "diff_expirations": true,
+    "size": 2,
+    "executed_at": "2026-09-22T19:59:59Z",
+    "strategy": "call_diagonal_spread",
+    "max_strike": "340",
+    "max_profit": null,
+    "ratios": 11,
+    "all_otm": false,
+    "net_price": "14.30",
+    "net_side": "ask",
+    "iv_term_spread": "0.0257",
+    "breakevens": [],
+    "txns": 2,
+    "max_loss": null,
+    "bid_ask_spread": "2.000",
+    "net_premium": "2860.00",
+    "strikes": [
+     "310",
+     "340"
+    ],
+    "ivs": [
+     "0.2780",
+     "0.2523"
+    ],
+    "total_premium": "11380.00",
+    "uniq_exchanges": [
+     "XISX"
+    ],
+    "leg_count": 2,
+    "net_delta": "52.2649",
+    "id": "01a0cab4-308f-7ee3-bb4b-9d9c63d20a79",
+    "diff_strikes": true,
+    "min_strike": "310",
+    "net_vega": "-79.8760",
+    "net_bid": "14.10",
+    "all_opening_legs": false,
+    "avg_iv": "0.2651",
+    "ticker": "AAPL",
+    "diff_types": false,
+    "net_ask": "16.10"
+   }
+  ]
+ },
+ "expiryBreakdown": {
+  "data": [
+   {
+    "expires": "2026-09-23",
+    "open_interest": 75260,
+    "volume": 735253,
+    "chains": 96
+   }
+  ]
+ },
+ "oiChange": {
+  "data": [
+   {
+    "trades": 645,
+    "volume": 13791,
+    "option_symbol": "AAPL260923P00340000",
+    "underlying_symbol": "AAPL",
+    "avg_price": "3.3203799579435863969255311439",
+    "curr_oi": 11510,
+    "last_fill": "3.00",
+    "prev_ask_volume": 1782,
+    "prev_bid_volume": 11750,
+    "prev_mid_volume": 259,
+    "prev_multi_leg_volume": 65,
+    "prev_neutral_volume": 0,
+    "prev_stock_multi_leg_volume": 1,
+    "prev_total_premium": "4579136.00",
+    "curr_date": "2026-09-22",
+    "last_date": "2026-09-21",
+    "oi_change": "6.7248322147651007",
+    "days_of_vol_greater_than_oi": 3,
+    "days_of_oi_increases": 8,
+    "last_ask": "3.25",
+    "last_oi": 1490,
+    "oi_diff_plain": 10020,
+    "percentage_of_total": "0.00939008372841679961",
+    "last_bid": "2.75",
+    "rnk": 27
+   }
+  ]
+ }
+}
