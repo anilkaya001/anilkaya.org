@@ -718,8 +718,22 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "and with no session date the old behaviour is unchanged, so the guard is the date");
   eq(pickMaxPainRow([{ expiry: "2026-05-15", max_pain: "70" }], { asOf: "2026-08-24" }), null,
      "a chain whose every expiry has passed reports NO max pain, never a stale one");
-  eq(pickMaxPainRow(stale, { asOf: "2026-08-28" }).expiry, "2026-08-28",
-     "an expiry on the session date itself is still live");
+  eq(pickMaxPainRow(stale, { asOf: "2026-08-28" }).expiry, "2026-09-18",
+     "AN EXPIRY DATED ON THE SESSION EXPIRED AT ITS CLOSE, as on every other panel: the run fires " +
+     "after the close, and the calendar, greeks, term structure and surface already drop it");
+
+  const opex = buildCard({
+    ticker: "OPEX",
+    row: { close: "100" },
+    features: { spot: 100, atr: 4, gammaFlip: 96 },
+    strikes: [], ticks: [], expiries: [], congress: [],
+    maxPain: [{ expiry: "2026-09-18", max_pain: "100" }, { expiry: "2026-09-25", max_pain: "105" }],
+    generatedAt: "2026-09-18T21:40:00Z", sessionDate: "2026-09-18",
+  });
+  const painLevel = opex.panels.levels.status === "ok"
+    ? opex.panels.levels.levels.find((l) => l.kind === "max_pain") : null;
+  eq(painLevel && painLevel.px, 105,
+     "so a Friday opex card's max pain is the next expiry's, not the level of contracts that settled at the close");
 
   const staleCard = buildCard({
     ticker: "STALE",

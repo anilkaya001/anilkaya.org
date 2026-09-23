@@ -1761,7 +1761,7 @@ export function pickMaxPainRow(rows, { asOf = null } = {}) {
   if (!parsed.length) return null;
 
   if (asOf) {
-    const live = parsed.filter((r) => String(r.expiry).slice(0, 10) >= String(asOf).slice(0, 10));
+    const live = parsed.filter((r) => liveExpiry(r.expiry, asOf));
     if (live.length) return live[0];
 
     return null;
