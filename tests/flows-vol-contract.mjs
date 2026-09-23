@@ -684,6 +684,9 @@ function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
   const stray = { panels: {} };
   attachVol(stray, leg, "NOPE");
   eq(stray.x.vol.code, "not-read", "a card the leg never read says so rather than carrying nothing");
+  const orphan = { panels: {} };
+  attachVol(orphan, null, "AAA");
+  eq(orphan.x.vol.code, "read-failed", "a card whose vol leg failed outright says so rather than carrying nothing");
   const bytesBefore = JSON.stringify(card).length;
   ok(bytesBefore < 2048, `the card summary is small (${bytesBefore} bytes with an empty card)`);
 
@@ -711,6 +714,12 @@ function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
   ok(merged.bytes > JSON.stringify(merged.body).length, "which differ once any writer's text leaves ASCII");
   const stale = cardXPayload(e("AAA"), { sessionDate: session, prior: { ...prior, sessionDate: "2026-09-21" } }).body;
   eq(stale.positioning, undefined, "a card-x from another session is not carried forward");
+  const partial = new Map();
+  const poisoned = { ...leg, byTicker: new Map([["AAA", e("AAA")], ["ZZZ", { ticker: "ZZZ", depth: "deep", panels: null }]]) };
+  const po = await publishVol(poisoned, { publish: async (k, v) => { partial.set(k, v); }, sessionDate: session, generatedAt: "g" });
+  ok(partial.has("card-x:AAA") && partial.has("regime") && !partial.has("card-x:ZZZ"),
+    "an entry that cannot be assembled is skipped; the others and the regime are still published");
+  eq(po.failed, 1, "and it is counted as failed");
   const composed = new Map();
   await publishVol({ ...leg, byTicker: new Map([["AAA", e("AAA")]]) }, {
     publish: async (k, v) => { composed.set(k, v); }, stored: (k) => (k === "card-x:AAA" ? prior : k === "regime" ? { sessionDate: session, market: { x: 1 } } : null),

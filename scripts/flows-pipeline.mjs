@@ -5420,13 +5420,18 @@ async function main() {
     }
   }
 
-  const volRoster = volNames({ deep: [...onBoard.entries()], crossSection: crossSectionTickers, byTicker });
-  const volLeg = await runVolLeg({
-    uw: DRY_RUN ? fakeVolVendor({ sessionDate, names: volRoster }) : uw,
-    names: volRoster, sessionDate, repair: repairCandles,
-    pool: (items, work) => runPooled(items, work, {
-      width: poolWidth(4).width, stopEarly: () => Date.now() > stats.startedAt + DEADLINE_MS }),
-  });
+  let volLeg = null;
+  try {
+    const volRoster = volNames({ deep: [...onBoard.entries()], crossSection: crossSectionTickers, byTicker });
+    volLeg = await runVolLeg({
+      uw: DRY_RUN ? fakeVolVendor({ sessionDate, names: volRoster }) : uw,
+      names: volRoster, sessionDate, repair: repairCandles,
+      pool: (items, work) => runPooled(items, work, {
+        width: poolWidth(4).width, stopEarly: () => Date.now() > stats.startedAt + DEADLINE_MS }),
+    });
+  } catch (error) {
+    console.warn(`  vol: the leg failed (${error.message}); every card carries x.vol as unavailable and no card-x is written`);
+  }
 
   let surfaceReported = false;
   const onSession = ARCHIVE_DATE_RE.test(String(sessionDate || "")) ? { date: sessionDate } : {};

@@ -287,7 +287,11 @@ export async function runVolLeg({
 }
 
 export function attachVol(card, leg, ticker, { ivRank = undefined } = {}) {
-  if (!card || !leg) return card;
+  if (!card) return card;
+  if (!leg) {
+    card.x = { ...(card.x || {}), vol: { v: VOL_SCHEMA_VERSION, status: "unavailable", code: "read-failed", reason: VOL_WHY["read-failed"] } };
+    return card;
+  }
   const entry = leg.byTicker.get(ticker);
   if (!entry) {
     card.x = { ...(card.x || {}), vol: { v: VOL_SCHEMA_VERSION, status: "unavailable", code: "not-read", reason: VOL_WHY["not-read"] } };
@@ -425,12 +429,16 @@ export function describeVolLeg(leg) {
 export async function publishVol(leg, { publish, stored = () => null, sessionDate = null, generatedAt = null, log = () => {} } = {}) {
   const outcome = { published: 0, failed: 0, shed: 0, maxBytes: 0, maxTicker: null };
   if (!leg) return outcome;
-  for (const line of describeVolLeg(leg)) log(line);
+  try {
+    for (const line of describeVolLeg(leg)) log(line);
+  } catch (error) {
+    log(`  vol: the leg summary could not be written (${error.message})`);
+  }
   for (const entry of leg.byTicker.values()) {
-    const { body, bytes, shed, fits } = cardXPayload(entry, { sessionDate, generatedAt, prior: stored("card-x:" + entry.ticker) });
-    if (shed.length) { outcome.shed++; log(`  card-x ${entry.ticker}: shed ${shed.join(", ")} to fit the cap`); }
-    if (!fits) { outcome.failed++; log(`  card-x ${entry.ticker}: ${(bytes / 1024).toFixed(0)}KB after shedding, over the cap`); continue; }
     try {
+      const { body, bytes, shed, fits } = cardXPayload(entry, { sessionDate, generatedAt, prior: stored("card-x:" + entry.ticker) });
+      if (shed.length) { outcome.shed++; log(`  card-x ${entry.ticker}: shed ${shed.join(", ")} to fit the cap`); }
+      if (!fits) { outcome.failed++; log(`  card-x ${entry.ticker}: ${(bytes / 1024).toFixed(0)}KB after shedding, over the cap`); continue; }
       await publish("card-x:" + entry.ticker, body);
       outcome.published++;
       if (bytes > outcome.maxBytes) { outcome.maxBytes = bytes; outcome.maxTicker = entry.ticker; }
