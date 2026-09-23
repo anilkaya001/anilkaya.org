@@ -133,7 +133,7 @@ function sessionStatePatch(clock, raws, at, today) {
   if (!same) Object.assign(patch, { day: today, trading: null, earlyClose: null, tapeAt: null, tapeMovedAt: null });
   const trading = same ? clock.trading : null;
   if ((trading === null || trading === undefined) && wall && wall.minutes >= PHASE_MINUTES.sessionProbe) {
-    const seen = tideSessionState(raws.tide, { today, afterProbe: true });
+    const seen = tideSessionState(raws, { today, afterProbe: true });
     if (seen !== null) patch.trading = seen;
   }
   const last = tideLastAt(raws.tide);

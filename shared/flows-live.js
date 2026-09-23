@@ -436,12 +436,23 @@ export function shapeMarketLive(raws, { at, session, writer = "worker", check = 
   };
 }
 
-export function tideSessionState(raw, { today, afterProbe }) {
-  if (!afterProbe || failed(raw) || raw === undefined || raw === null) return null;
-  const rows = rowsOf(raw);
-  const date = envelopeDate(raw) || (rows.length ? easternDay(timeMs(rows[rows.length - 1].timestamp)) : null);
-  if (!date) return null;
-  return date === today ? 1 : 0;
+function feedDay(raw, rows) {
+  if (!rows.length) return null;
+  const last = rows[rows.length - 1];
+  return envelopeDate(raw) || (last && typeof last.date === "string" && DAY_RE.test(last.date) ? last.date : null) ||
+    easternDay(timeMs(last && last.timestamp));
+}
+
+export function tideSessionState(raws, { today, afterProbe }) {
+  if (!afterProbe || !raws || typeof raws !== "object") return null;
+  const days = [];
+  for (const [raw, nested] of [[raws.tide, false], [raws.zeroDte, true], [raws.spy, false], [raws.qqq, false]]) {
+    if (raw === undefined || raw === null || failed(raw)) continue;
+    const d = feedDay(raw, nested ? netFlowRows(raw) : rowsOf(raw));
+    if (d) days.push(d);
+  }
+  if (days.includes(today)) return 1;
+  return days.length >= 2 && days.every((d) => d < today) ? 0 : null;
 }
 
 export function tideLastAt(raw) {

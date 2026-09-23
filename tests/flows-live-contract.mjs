@@ -146,6 +146,19 @@ const T = (iso) => Date.parse(iso);
   ok(again.due && again.redispatch, "and once more at 18:15 if nothing landed");
   eq(nightlyDispatchDue(et(18, 45), { nightlyDay: day, nightlyRedispatchedAt: et(18, 15) }, "2026-09-22").due, false,
     "but never a third time");
+
+  const feeds = (d, now) => ({ tide: FAKE.fakeMarketTide({ session: d, now }), zeroDte: FAKE.fakeNetFlow({ session: d, now }),
+    spy: FAKE.fakeEtfTide("SPY", { session: d, now }), qqq: FAKE.fakeEtfTide("QQQ", { session: d, now }) });
+  const y = feeds("2026-09-22", easternInstant("2026-09-22", 16 * 60));
+  const t = feeds(day, et(9, 45));
+  eq(L.tideSessionState(y, { today: day, afterProbe: true }), 0,
+    "THE HOLIDAY VERDICT: after 09:45, when every feed still carries the previous session, today is not trading");
+  eq(L.tideSessionState({ ...t, tide: y.tide }, { today: day, afterProbe: true }), 1,
+    "but ONE feed lagging behind the others is not a holiday — the verdict is sticky for the whole day and stops " +
+    "Tier 1 and every dispatch, so a single stale market-tide body must not be able to cast it");
+  eq(L.tideSessionState({ tide: y.tide, zeroDte: { __failed: "HTTP 502" } }, { today: day, afterProbe: true }), null,
+    "and a lone stale feed with the rest unanswered is no verdict yet: the next tick asks again");
+  eq(L.tideSessionState(t, { today: day, afterProbe: false }), null, "nor is anything decided before 09:45");
 }
 
 {
