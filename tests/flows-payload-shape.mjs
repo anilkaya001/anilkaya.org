@@ -680,6 +680,67 @@ assert.deepEqual(missingReport, [],
     }
     ok(JSON.stringify(h).length <= 16 * 1024, `hist:${h.ticker} is inside its 16 KB budget`);
   }
+
+  const u = emitted("universe");
+  ok(u && u.status === "ok", "the pipeline emits a universe payload and it is readable");
+  ok(Array.isArray(u.t) && u.t.length === u.n && u.n > 0, `universe.t names every column row (${u.n})`);
+  ok(Array.isArray(u.sec) && u.sec.length === u.n && Array.isArray(u.sectors), "sectors travel as a dictionary and an index column");
+  for (const [k, col] of Object.entries(u.cols)) {
+    eq(col.length, u.n, `universe.cols.${k} has one cell per name`);
+    ok(Array.isArray(u.units[k]) && typeof u.units[k][0] === "string" && u.units[k][1] !== 0,
+      `universe.units.${k} states its unit and scale (${u.units[k]})`);
+    ok(col.every((v) => v === null || Number.isInteger(v)), `universe.cols.${k} is scaled integers or null, never text`);
+    ok(Number.isInteger(u.counts[k]) && u.counts[k] === col.filter((v) => v !== null).length,
+      `universe.counts.${k} is the number of names carrying a value`);
+  }
+  for (const [k, col] of Object.entries(u.pct)) {
+    ok(col.length === u.n && col.every((v) => v === null || (v >= 0 && v <= 100)), `universe.pct.${k} is 0..100 per name`);
+  }
+  ok(u.shock && Array.isArray(u.shock.v) && u.shock.v.length === u.n && /cross-sectional/.test(u.shock.rule),
+    "the IV shock z is published with its cross-sectional rule");
+  ok(Array.isArray(u.shed), "the universe says which columns it shed for its budget");
+  ok(u.fresh && u.fresh.cadenceS === 0 && u.fresh.session === u.sessionDate && u.fresh.source === "nightly",
+    "and carries the nightly freshness envelope");
+  ok(Buffer.byteLength(JSON.stringify(u)) <= 100 * 1024, "inside its 100KB budget");
+
+  const r = emitted("regime");
+  ok(r && r.status === "ok", "the pipeline emits a regime payload");
+  for (const k of ["volCurve", "zeroDte", "sectors", "etfTide", "fundFlows", "impliedCorrelation", "groups", "optionsPulse", "dailyReport"]) {
+    ok(r[k] && typeof r[k].status === "string", `regime.${k} carries a status on every arm`);
+  }
+  eq(r.volCurve.vendor.reason, "plan_gated", "the VIX futures curve's 403 is a published silence, not an absence");
+  ok(["SPY", "QQQ", "IWM"].every((t) => r.volCurve.byIndex[t] && r.volCurve.byIndex[t].status),
+    "and the screener curve is published per index ETF");
+  eq(r.sectors.rows.length, 11, "all eleven sector tides are listed, read or not");
+  ok(r.fresh && r.fresh.cadenceS === 0, "regime carries the freshness envelope");
+  ok(Buffer.byteLength(JSON.stringify(r)) <= 60 * 1024, "inside its 60KB budget");
+
+  const e = emitted("events");
+  for (const k of ["macro", "fda", "earningsCalendar", "catalysts", "history"]) {
+    ok(e[k] && typeof e[k] === "object", `events gains ${k}`);
+  }
+  ok(Array.isArray(e.rows), "and keeps its rows, which the events renderer reads");
+  ok(Buffer.byteLength(JSON.stringify(e)) <= 100 * 1024, "events stays well inside the ingest cap with its additions");
+
+  const p = emitted("pulse");
+  ok(p.totalsHistory && p.totalsHistory.status === "ok" && p.totalsHistory.n >= 60,
+    "pulse.totalsHistory carries a year of sessions for its z");
+  ok(p.totals && Array.isArray(p.totals.rows) && p.totals.rows.length <= 20,
+    "while pulse.totals keeps the twenty sessions its renderers rank");
+
+  const cx = readdirSync(dir).filter((f) => /^p-card-x-/.test(f)).map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")));
+  ok(cx.length > 0, `the pipeline emits card-x payloads (${cx.length})`);
+  for (const c of cx) {
+    ok(typeof c.ticker === "string" && c.fresh && !("panels" in c), `card-x:${c.ticker} is its own key, not a card`);
+    ok(["short", "insiders", "earnings"].some((k) => c[k]), `card-x:${c.ticker} carries at least one part`);
+    ok(Buffer.byteLength(JSON.stringify(c)) <= 100 * 1024, `card-x:${c.ticker} fits its cap`);
+  }
+
+  for (const t of ["SPY", "QQQ", "IWM"]) {
+    const card = emitted("card:" + t);
+    ok(card && card.depth === "index", `card:${t} is an index dossier`);
+    ok(card.panels && card.panels.gamma && card.panels.context, `card:${t} carries the card panels`);
+  }
 }
 
 rmSync(dir, { recursive: true, force: true });
@@ -693,7 +754,7 @@ console.log(`✓ flows-payload-shape: ${checks} assertions — the publisher and
   `join and the prior-session date of its ranking asserted on the wire, and the landing page ` +
   `whole rather than half of it: the score index, the five verdict tiles and the caption that carries the two readings they shed, the spine and the ` +
   `closure that writes the region subtitles all read against the payloads they are handed — ` +
-  `and the two market-wide keys whose renderers have not been written yet pinned on the ` +
+  `and the market-wide keys whose renderers have not been written yet pinned on the ` +
   `publisher's side while that is still free to fix: the sector option lean's three reads ` +
   `and its measured zero, its vocabulary proven DISJOINT from the sector momentum key it ` +
   `must never be merged with, and the news tape's four counts, its stated ordering and the ` +

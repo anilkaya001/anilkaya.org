@@ -958,6 +958,28 @@ try {
     const tape = await (await get("/api/flows/news",
       { headers: { Cookie: "flows_session=" + token } })).json();
     eq(tape.rows[0].headline, "TEST", "and reads back through its own route unchanged");
+
+    const auth = { headers: { Cookie: "flows_session=" + token } };
+    eq((await (await get("/api/flows/universe", auth)).json()).status, "pending",
+       "the universe route answers pending before its first publish");
+    eq((await get("/api/flows/regime")).status, 401, "the regime route refuses an anonymous reader");
+    eq((await post("universe", JSON.stringify({ v: 1, t: ["TEST"], cols: { iv30: [312] }, units: { iv30: ["vol", 1000] } }),
+      INGEST_TOKEN)).status, 200, "the columnar universe is an accepted key");
+    eq((await post("regime", JSON.stringify({ v: 1, volCurve: { status: "ok" } }), INGEST_TOKEN)).status, 200,
+       "and so is the market regime");
+    eq((await post("card-x:TEST", JSON.stringify({ v: 1, ticker: "TEST", short: { status: "quiet" } }), INGEST_TOKEN)).status, 200,
+       "and card-x under the ticker rule");
+    eq((await post("card-x:../etc", "{}", INGEST_TOKEN)).status, 400, "while a card-x key that is not a ticker is refused");
+    eq((await post("universe:2026-01-02", "{}", INGEST_TOKEN)).status, 400,
+       "and the universe has no dated form: it is tonight's cross-section, not an archive");
+    const uni = await (await get("/api/flows/universe", auth)).json();
+    eq(uni.cols.iv30[0], 312, "the universe reads back through its own route unchanged");
+    eq((await (await get("/api/flows/regime", auth)).json()).volCurve.status, "ok", "and the regime through its own");
+    const cxr = await get("/api/flows/card-x?t=test", auth);
+    eq(cxr.status, 200, "card-x is read by ticker, case-folded");
+    eq((await cxr.json()).short.status, "quiet", "and returns the stored parts");
+    eq((await get("/api/flows/card-x?t=../x", auth)).status, 400, "an invalid ticker is refused at the read");
+    eq((await (await get("/api/flows/card-x?t=NONE", auth)).json()).status, "pending", "and an unpublished one is pending");
   }
 
   {
