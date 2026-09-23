@@ -468,9 +468,11 @@ try {
       ok(side.every((x) => x === side[0] && x !== "?"), `every bar of one sign sits on one side of the baseline (${f}: ${side[0]}), so sign survives without hue`);
     }
     const bar = g.bars[Math.floor(g.bars.length / 2)];
+    await page.locator("#m-gamma .ft-cbox svg").scrollIntoViewIfNeeded();
     const box = await page.locator("#m-gamma .ft-cbox svg").boundingBox();
     await page.mouse.move(box.x + bar.cx, box.y + (bar.top + bar.bot) / 2);
-    await page.waitForTimeout(80);
+    await page.waitForFunction(() => { const r = document.querySelector("#m-gamma .ui-readout.is-on"); return Boolean(r && r.textContent); },
+      null, { timeout: 5000 }).catch(() => null);
     const readout = await page.evaluate(() => (document.querySelector("#m-gamma .ui-readout.is-on") || {}).textContent || "");
     ok(/Γ/.test(readout) && /Strike/.test(readout), `the bars carry no graduated magnitude axis to misread; the exact value is read by scrubbing (${readout})`);
 
