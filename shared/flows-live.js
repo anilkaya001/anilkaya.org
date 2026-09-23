@@ -949,6 +949,8 @@ export function mergeLiveAlerts(prev, pages, { at, session, stageOf = null, writ
     return { write: null, mode: "declined", why: SILENCE.unshaped, read: rawRows.length, cursor };
   }
   const truncatedNow = lastFull && list.length >= LIVE_BUDGET.alertPages;
+  const last = list.length ? list[list.length - 1] : null;
+  const cutShort = list.length > 1 && !!last && failed(last.body);
   return {
     mode: merged.record.reset ? "reset" : "merged",
     read: rawRows.length,
@@ -962,7 +964,8 @@ export function mergeLiveAlerts(prev, pages, { at, session, stageOf = null, writ
       vendorLimit: LIVE_BUDGET.alertLimit,
       vendorTruncated: truncatedNow,
       readLimit: readLimit === null ? LIVE_BUDGET.alertLimit * LIVE_BUDGET.alertPages : readLimit,
-      readTruncated: truncatedNow || (!merged.record.reset && !!held && held.readTruncated === true),
+      readTruncated: truncatedNow || cutShort || (!merged.record.reset && !!held && held.readTruncated === true),
+      readCut: cutShort ? SILENCE.failed : null,
       cursor, pages: list.length,
     },
   };

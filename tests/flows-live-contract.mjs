@@ -375,6 +375,11 @@ const T = (iso) => Date.parse(iso);
   const cappedPages = Array.from({ length: L.LIVE_BUDGET.alertPages }, () => page(a2.data, true));
   const m3 = L.mergeLiveAlerts(m2.write, cappedPages, { at: T("2026-09-22T15:30:00Z"), session: S });
   eq(m3.write.readTruncated, true, "five full pages make the union a floor");
+  const cut = L.mergeLiveAlerts(m2.write, [page(a2.data, true), { body: { __failed: "HTTP 502" }, full: false }],
+    { at: T("2026-09-22T15:30:00Z"), session: S });
+  ok(cut.write.readTruncated === true && cut.write.readCut === "vendor-failed",
+    "A PAGED READ CUT SHORT BY A FAILED PAGE is a floor too: the cursor moves past alerts the failed page would have " +
+    "returned, so the union can no longer claim to be the session's complete record");
   const m4 = L.mergeLiveAlerts(m3.write, [page(a2.data)], { at: T("2026-09-22T15:45:00Z"), session: S });
   eq(m4.write.readTruncated, true, "and it stays a floor for the rest of the session");
   const m5 = L.mergeLiveAlerts(m4.write, [page(a1.data)], { at: T("2026-09-23T14:00:00Z"), session: "2026-09-23" });
