@@ -3241,17 +3241,45 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
 {
   const archived = { payload: { generatedAt: "2026-09-22T14:02:18.489Z", rows: [{ t: "B" }] }, status: 200 };
-  const gate = sameSessionGate({ sessionDate: "2026-09-21", archived });
+  const board = { payload: { sessionDate: "2026-09-21", rows: [{ t: "B" }] }, status: 200 };
+  const gone = { payload: null, absent: true, status: 200 };
+  const refusedRead = { payload: null, failed: true, status: 403 };
+  const archiveOf = (scores, long, short) => ({
+    "scores:2026-09-21": scores, "board:long:2026-09-21": long, "board:short:2026-09-21": short });
+  const whole = archiveOf(archived, board, board);
+  const gate = sameSessionGate({ sessionDate: "2026-09-21", archive: whole });
   ok(gate.skip && gate.mode === "archived",
-     "A SAME-SESSION RUN SKIPS THE RANKED LEG when scores:<sessionDate> is archived");
+     "A SAME-SESSION RUN SKIPS THE RANKED LEG when the session's three archive keys are held");
   ok(/boards, scores, score track, record, brief and cards/.test(gate.note), "and names what it skips");
-  const again = sameSessionGate({ sessionDate: "2026-09-21", archived, republish: true });
+  const again = sameSessionGate({ sessionDate: "2026-09-21", archive: whole, republish: true });
   ok(!again.skip && again.mode === "republish", "republish_session runs it, as a rewrite");
-  const unread = sameSessionGate({ sessionDate: "2026-09-21", archived: { payload: null, failed: true, status: 403 } });
+  const unread = sameSessionGate({ sessionDate: "2026-09-21",
+    archive: archiveOf(refusedRead, refusedRead, refusedRead) });
   ok(!unread.skip && unread.mode === "unverified" && /403/.test(unread.note),
      "an unreadable archive does not skip a session that may never have been published");
-  eq(sameSessionGate({ sessionDate: "2026-09-21", archived: { payload: null, absent: true } }).mode, "fresh",
+  eq(sameSessionGate({ sessionDate: "2026-09-21", archive: archiveOf(gone, gone, gone) }).mode, "fresh",
      "an absent one is a first run");
+
+  const lostBoard = sameSessionGate({ sessionDate: "2026-09-21", archive: archiveOf(archived, gone, board) });
+  ok(lostBoard.skip && lostBoard.mode === "partial",
+     "A PARTLY WRITTEN ARCHIVE IS NOT READ AS WHOLE: scores held and board:long lost (the store's " +
+     "403 on board:long) used to read as archived and skip in silence, so the re-dispatch that " +
+     "ARCHIVE LOST asked for never wrote the lost board");
+  ok(/board:long:2026-09-21 is not/.test(lostBoard.note) && /republish_session/.test(lostBoard.note) &&
+     /exits non-zero/.test(lostBoard.note),
+     `and it names the missing key, the dispatch that repairs it, and the red run (${lostBoard.note.slice(0, 120)})`);
+  const lostScores = sameSessionGate({ sessionDate: "2026-09-21", archive: archiveOf(gone, board, board) });
+  ok(lostScores.skip && lostScores.mode === "partial",
+     "AND A LOST scores KEY BESIDE LANDED BOARDS IS NOT A FIRST RUN: read as fresh, it re-ranked, wrote " +
+     "new live boards and scores, and the immutable dated boards kept the first run's ranking — the split");
+  ok(/scores:2026-09-21 is not/.test(lostScores.note), "and says which key is missing");
+  const unsure = sameSessionGate({ sessionDate: "2026-09-21", archive: archiveOf(archived, refusedRead, board) });
+  ok(unsure.skip && unsure.mode === "archived" && /board:long:2026-09-21 could not be read/.test(unsure.note),
+     "a board that could not be read beside a held scores still skips, and says the archive may be incomplete");
+  eq(sameSessionGate({ sessionDate: "2026-09-21", archive: archiveOf(gone, refusedRead, gone) }).mode, "unverified",
+     "while nothing held and a board unread proceeds, as an unreadable scores always did");
+  eq(sameSessionGate({ sessionDate: "2026-09-21", archive: archiveOf(archived, gone, board), republish: true }).mode,
+     "republish", "republish_session rewrites a partly written session");
   assert.deepEqual(sessionArchiveKeys("2026-09-21"),
     ["scores:2026-09-21", "board:long:2026-09-21", "board:short:2026-09-21"],
     "the three keys a republish deletes and rewrites together"); checks++;
@@ -3291,12 +3319,12 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "and a transient refusal that clears on retry deletes all three");
 
   const lost = sameSessionGate({ sessionDate: "2026-09-21",
-    archived: { payload: null, absent: true }, republish: true });
-  ok(lost.mode === "republish" && !lost.skip && /deletes whatever dated board/.test(lost.note),
+    archive: archiveOf(gone, gone, gone), republish: true });
+  ok(lost.mode === "republish" && !lost.skip && /deletes whatever dated key/.test(lost.note),
      "REPUBLISH WITH NO SCORES STILL RETIRES: a session whose scores write was lost but whose " +
      "dated boards landed would otherwise refuse the rewrite and split again");
   eq(sameSessionGate({ sessionDate: "2026-09-21",
-    archived: { payload: null, failed: true, status: 403 }, republish: true }).mode, "republish",
+    archive: archiveOf(refusedRead, gone, gone), republish: true }).mode, "republish",
      "and so does one whose scores could not be read — the dispatch asked for a rewrite");
 }
 
@@ -3452,13 +3480,14 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
       : { data: [] }));
   });
   const writes = [];
+  const heldKeys = new Set([`scores:${SESSION}`, `board:long:${SESSION}`, `board:short:${SESSION}`]);
   const ingest = http.createServer((req, res) => {
     const key = new URL(req.url, "http://x").searchParams.get("key");
     req.resume();
     req.on("end", () => {
       writes.push({ method: req.method, key });
       res.writeHead(req.method === "DELETE" ? 404 : 200, { "Content-Type": "application/json" });
-      if (req.method === "GET" && key === `scores:${SESSION}`) {
+      if (req.method === "GET" && heldKeys.has(key)) {
         res.end(JSON.stringify({ generatedAt: `${SESSION}T21:45:00.000Z`, sessionDate: SESSION, rows: [{ t: "A", s: 40 }] }));
       } else if (req.method === "GET") {
         res.end(JSON.stringify({ key, status: "pending" }));
@@ -3499,6 +3528,24 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     eq(writes.filter((w) => w.method === "DELETE").length, 0, "and deleted nothing");
     ok(!vendorCalls.some((p) => p.startsWith("/api/screener") || p.startsWith("/api/stock/AAPL")),
        "no screener band and no dating probe was bought for a session it would not rank");
+    assert.deepEqual(writes.filter((w) => w.method === "GET" && /:\d{4}-/.test(w.key)).map((w) => w.key),
+      [`scores:${SESSION}`, `board:long:${SESSION}`, `board:short:${SESSION}`],
+      "the gate reads all three of the session's archive keys, not scores alone"); checks++;
+
+    writes.length = 0;
+    vendorCalls.length = 0;
+    heldKeys.delete(`board:long:${SESSION}`);
+    const partial = await run({});
+    eq(partial.status, 1,
+       "A RE-DISPATCH AGAINST A PARTLY ARCHIVED SESSION TURNS RED: scores held and board:long lost " +
+       `used to exit clean after writing nothing to the lost key (${partial.out.slice(-300)})`);
+    ok(/session gate: partial — /.test(partial.out) && /ARCHIVE INCOMPLETE: .*board:long:\S+ is not/.test(partial.out) &&
+       /republish_session/.test(partial.out),
+       "and the log names the missing key and the dispatch that rewrites the session");
+    assert.deepEqual(writes.filter((w) => w.method === "POST").map((w) => w.key).sort(), ["news", "pulse", "sector:premium"],
+      "it still refreshes only the unranked feeds — no second ranking goes live beside the kept one"); checks++;
+    eq(writes.filter((w) => w.method === "DELETE").length, 0, "and deletes nothing");
+    heldKeys.add(`board:long:${SESSION}`);
 
     writes.length = 0;
     vendorCalls.length = 0;

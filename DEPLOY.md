@@ -1121,19 +1121,24 @@ Four guards sit behind the schedule, all in `scripts/flows-pipeline.mjs`:
   clock is inside 09:30–16:00 on a weekday throws before any read. The
   `allow_intraday` dispatch input (`FLOWS_ALLOW_INTRADAY=1`) overrides it and
   the log says what that publishes.
-- **The same-session gate.** If `scores:<sessionDate>` is already archived, the
-  run is a second run against one session: it refreshes only `pulse`,
-  `sector:premium` and `news` and leaves boards, scores, score track, record,
-  brief, cards and meta as the first run published them. The
+- **The same-session gate.** The gate reads all three of the session's archive
+  keys (`scores`, `board:long` and `board:short` at `<sessionDate>`). If they
+  are archived, the run is a second run against one session: it refreshes only
+  `pulse`, `sector:premium` and `news` and leaves boards, scores, score track,
+  record, brief, cards and meta as the store holds them. If some are held and
+  others absent, an earlier run ranked the session and lost part of its
+  archive: the gate skips the ranked leg the same way, names the missing keys
+  and exits non-zero, because the dated keys are immutable and a plain rerun
+  would put a second ranking live beside the kept part of the first. The
   `republish_session` input (`FLOWS_REPUBLISH_SESSION=1`) instead deletes the
   session's three archive keys through the ingest DELETE and rewrites them with
   everything else — even when `scores:<sessionDate>` is absent or unreadable,
   because a dated board left by a run whose scores write was lost would
   otherwise refuse the rewrite. The two boards go first and `scores` last, each
   retried on a transient refusal, and the first key the store still refuses
-  stops the retire before anything ranked is written: `scores` is the key the
-  gate reads, so a half-finished retire leaves the session reading as archived
-  and a later plain run skips it rather than splitting it. A market holiday
+  stops the retire before anything ranked is written, so a half-finished
+  retire leaves the session reading as partly archived and a later plain run
+  skips it rather than splitting it. A market holiday
   lands here too: SPY has no bar for the day, so the session resolves to the one
   already archived. The ticker page names a card that an earlier run of the
   board's own session left behind (its `generatedAt` is older than the meta's)
@@ -1151,6 +1156,8 @@ Four guards sit behind the schedule, all in `scripts/flows-pipeline.mjs`:
   writes any that are missing. `ARCHIVE LOST` in the log is the one line that
   means the record has no copy of a published session, and it makes the run
   exit non-zero after everything else is published, so the workflow turns red.
+  The repair is a `republish_session` dispatch; a plain re-dispatch finds the
+  session partly archived and skips it.
 
 Feeds read without a date (`news`, `pulse`, `flowalerts`, `sector:premium`)
 carry `readDay`, the Eastern day of their own `readAt`, beside `sessionDate`;

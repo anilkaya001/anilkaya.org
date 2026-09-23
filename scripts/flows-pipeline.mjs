@@ -1597,47 +1597,66 @@ export async function resolveBoardMemory(side, sessionDate, {
   };
 }
 
-export function sameSessionGate({ sessionDate, archived, republish = false } = {}) {
+export function sameSessionGate({ sessionDate, archive = null, republish = false } = {}) {
   if (!ARCHIVE_DATE_RE.test(String(sessionDate || ""))) {
     return { mode: "fresh", skip: false, generatedAt: null,
       note: "no session date, so there is no dated archive to check against" };
   }
-  const held = archived && !archived.failed && !archived.absent && archived.payload;
-  if (held) {
-    const at = typeof archived.payload.generatedAt === "string" ? archived.payload.generatedAt : null;
-    return republish
-      ? { mode: "republish", skip: false, generatedAt: at,
-          note: `scores:${sessionDate} is archived (written ${at || "at an unstamped time"}) and ` +
-            "republish_session is set, so this run deletes the session's three archive keys " +
-            "and rewrites them together with the live boards, scores, record and cards" }
-      : { mode: "archived", skip: true, generatedAt: at,
-          note: `scores:${sessionDate} is already archived (written ${at || "at an unstamped time"}), ` +
-            "so this run is a second run against one session. The ranked leg — boards, scores, " +
-            "score track, record, brief and cards — is skipped: a second ranking would go live " +
-            "while the archive kept the first, and the record would grade a board no reader " +
-            "saw. Only the unranked market feeds are refreshed. Dispatch with " +
-            "republish_session to rewrite the session instead." };
-  }
+  const keys = sessionArchiveKeys(sessionDate);
+  const readOf = (key) => (archive && archive[key]) || null;
+  const isHeld = (r) => Boolean(r && !r.failed && !r.absent && r.payload);
+  const held = keys.filter((k) => isHeld(readOf(k)));
+  const failed = keys.filter((k) => readOf(k) && readOf(k).failed);
+  const absent = keys.filter((k) => !held.includes(k) && !failed.includes(k));
+  const scores = readOf(`scores:${sessionDate}`);
+  const at = isHeld(scores) && typeof scores.payload.generatedAt === "string"
+    ? scores.payload.generatedAt : null;
+  const list = (ks) => ks.join(", ");
+  const are = (ks) => (ks.length === 1 ? "is" : "are");
+  const unread = failed.length
+    ? `${list(failed)} could not be read (the store answered ` +
+      `${failed.map((k) => readOf(k).status || "nothing").join(", ")})`
+    : "";
   if (republish) {
-    return { mode: "republish", skip: false, generatedAt: null,
-      note: `scores:${sessionDate} ` +
-        (archived && archived.failed
-          ? "could not be read" + (archived.status ? ` (the store answered ${archived.status})` : "")
-          : "is not archived") +
-        ", and republish_session is set, so this run still deletes whatever dated board the " +
-        "session holds before it rewrites all three keys — a board left behind by an earlier " +
-        "run whose scores write was lost would otherwise refuse the rewrite and split the " +
-        "archive from the live board again" };
+    return { mode: "republish", skip: false, generatedAt: at,
+      note: (held.length
+        ? `${list(held)} ${are(held)} archived` + (at ? ` (scores written ${at})` : "")
+        : `scores:${sessionDate} ` + (failed.includes(`scores:${sessionDate}`)
+          ? "could not be read" + (scores.status ? ` (the store answered ${scores.status})` : "")
+          : "is not archived")) +
+        ", and republish_session is set, so this run deletes whatever dated key the session " +
+        "holds before it rewrites all three together with the live boards, scores, record and " +
+        "cards — a board left behind by an earlier run whose scores write was lost would " +
+        "otherwise refuse the rewrite and split the archive from the live board again" };
   }
-  if (archived && archived.failed) {
+  if (held.length && absent.length) {
+    return { mode: "partial", skip: true, generatedAt: at,
+      note: `${list(held)} ${are(held)} archived but ${list(absent)} ${are(absent)} not, so an ` +
+        "earlier run of this session ranked it and part of its archive was lost. A plain run " +
+        "cannot repair that: the dated keys are immutable, so a second ranking would go live " +
+        "while the archive kept part of the first. The ranked leg is skipped and the run " +
+        "exits non-zero. Dispatch with republish_session to rewrite the session's three keys " +
+        "together." };
+  }
+  if (held.length) {
+    return { mode: "archived", skip: true, generatedAt: at,
+      note: (failed.length
+        ? `${list(held)} ${are(held)} archived and ${unread}, so the archive may be incomplete`
+        : `scores:${sessionDate} is already archived (written ${at || "at an unstamped time"}) ` +
+          "with both dated boards") +
+        ", so this run is a second run against one session. The ranked leg — boards, scores, " +
+        "score track, record, brief and cards — is skipped: a second ranking would go live " +
+        "while the archive kept the first, and the record would grade a board no reader " +
+        "saw. Only the unranked market feeds are refreshed. Dispatch with " +
+        "republish_session to rewrite the session instead." };
+  }
+  if (failed.length) {
     return { mode: "unverified", skip: false, generatedAt: null,
-      note: `scores:${sessionDate} could not be read` +
-        (archived.status ? ` (the store answered ${archived.status})` : "") +
-        ", so whether this session is already archived is unknown. Proceeding: a refused " +
-        "dated write is reported below, and a missed session cannot be recovered later" };
+      note: `${unread}, so whether this session is already archived is unknown. Proceeding: a ` +
+        "refused dated write is reported below, and a missed session cannot be recovered later" };
   }
   return { mode: "fresh", skip: false, generatedAt: null,
-    note: `scores:${sessionDate} is not archived, so this is the session's first run` };
+    note: `none of ${list(keys)} is archived, so this is the session's first run` };
 }
 
 async function fetchStoredPayload(key) {
@@ -3837,10 +3856,11 @@ async function main() {
 
   const gateOrigin = nextWeekday(sessionDate) || today;
 
+  const archive = {};
+  if (!DRY_RUN) for (const key of sessionArchiveKeys(sessionDate)) archive[key] = await readStored(key);
   const gate = sameSessionGate({
     sessionDate,
-    archived: DRY_RUN || !ARCHIVE_DATE_RE.test(String(sessionDate || ""))
-      ? null : await readStored(`scores:${sessionDate}`),
+    archive,
     republish: process.env.FLOWS_REPUBLISH_SESSION === "1",
   });
   console.log(`session gate: ${gate.mode} — ${gate.note}`);
@@ -3861,8 +3881,13 @@ async function main() {
     console.log(
       `unranked refresh done: pulse, sector:premium and news were re-read for ${sessionDate}; ` +
       "board:long, board:short, board:watch, scores, scoretrack, record, events, movers, " +
-      "market, unusual, flowalerts, cards, brief and meta stand as the archived run " +
-      `published them (${gate.generatedAt || "unstamped"}). ${stats.calls} API call(s).`);
+      "market, unusual, flowalerts, cards, brief and meta are left as the store holds them, " +
+      `written by the run that archived this session (${gate.generatedAt || "unstamped"}) as far ` +
+      `as that run got. ${stats.calls} API call(s).`);
+    if (gate.mode === "partial") {
+      console.warn(`  ARCHIVE INCOMPLETE: ${gate.note}`);
+      process.exitCode = 1;
+    }
     return;
   }
 
@@ -5673,10 +5698,11 @@ async function main() {
     }
     if (lost.length) {
       console.warn(`  ARCHIVE LOST: ${lost.map((a) => `${a.key} (${a.detail})`).join("; ")} — ` +
-        `the record has no copy of what this run published for ${sessionDate}. Re-dispatch ` +
-        "the workflow to write it; nothing else will. The run finishes publishing and then " +
-        "exits non-zero, so the loss turns the workflow red instead of scrolling past in a " +
-        "green log.");
+        `the record has no copy of what this run published for ${sessionDate}. Dispatch the ` +
+        "workflow with republish_session to rewrite scores, board:long and board:short " +
+        "together; a plain re-dispatch finds the session partly archived and skips it. The " +
+        "run finishes publishing and then exits non-zero, so the loss turns the workflow red " +
+        "instead of scrolling past in a green log.");
       process.exitCode = 1;
     } else if (!repaired.length && !held.length) {
       console.log(`  archive check: scores, board:long and board:short are all written for ${sessionDate}`);
