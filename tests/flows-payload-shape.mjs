@@ -205,7 +205,7 @@ assert.deepEqual(missingReport, [],
 }
 
 {
-  const cardFiles = readdirSync(dir).filter((f) => /^p-card-/.test(f));
+  const cardFiles = readdirSync(dir).filter((f) => /^p-card-(?!x-)/.test(f));
   ok(cardFiles.length > 0, "the pipeline emitted cards for the panel scan to read");
   const cards = cardFiles.map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")));
 
@@ -456,7 +456,7 @@ assert.deepEqual(missingReport, [],
 }
 
 {
-  const cardFiles = readdirSync(dir).filter((f) => /^p-card-/.test(f));
+  const cardFiles = readdirSync(dir).filter((f) => /^p-card-(?!x-)/.test(f));
   const cards = cardFiles.map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")));
   ok(cards.every((c) => c.panels && c.panels.variation),
      "every emitted card carries the hedging panel, deep and cross-section alike");
@@ -503,6 +503,118 @@ assert.deepEqual(missingReport, [],
   ok(bytes < 8 * 1024, `the hedging panel is ${(bytes / 1024).toFixed(1)}KB of a card capped at 100KB`);
 }
 
+{
+  const PANEL_FIELDS = {
+    cone: ["asOf", "sameSession", "tenors", "iv30", "pct30", "coneShape", "richCheap", "view", "slope30_90", "front7_30",
+      "slope30_90ExEvent", "xPct", "weights", "units", "silent"],
+    rv: ["asOf", "sameSession", "bars", "from", "estimator", "cone", "yz", "pk21", "cc21", "gap", "breaks", "units", "silent"],
+    vrp: ["asOf", "latest", "n", "hitRate", "meanRp", "medianRp", "rankOwn", "meanVariance", "exAnte", "garch", "series",
+      "realizedSessions", "units", "silent"],
+    term: ["asOf", "sameSession", "expiries", "earnings", "eventExpiry", "eventKink", "eventMove", "minSamples",
+      "kinkThreshold", "units", "silent"],
+    skew: ["asOf", "sameSession", "expiry", "dte", "dteFirst", "rr25", "rr10", "tail", "z", "zBasis", "zRaw", "z10", "z10Raw",
+      "maturitySlope", "n", "mom5", "crash", "crashMedian", "xPct", "series", "rolled", "expirySource", "units", "silent"],
+    ivDyn: ["asOf", "sameSession", "n", "iv", "volOfVol", "volOfVolRel", "changes", "halfLife", "phi", "longRun",
+      "spotVolCorr", "rank", "pct", "vendorRank", "view", "units", "silent"],
+    anomaly: ["asOf", "sameSession", "from", "score", "direction", "view", "sampleSize", "components", "signConsistency",
+      "ours", "vote", "history", "units", "silent"],
+    sentiment: ["asOf", "sameSession", "from", "score", "direction", "lean", "vwks", "avar", "components", "sampleSize",
+      "z", "n", "ours", "vote", "history", "units", "silent"],
+    character: ["asOf", "sameSession", "from", "character", "halfLifeDays", "hurst", "ar1B", "entropyNegative",
+      "entropyConditional", "entropySamples", "sampleSize", "view", "ours", "vote", "history", "units", "silent"],
+  };
+  const ROW_FIELDS = {
+    "cone.tenors": ["days", "iv", "min", "q1", "median", "q3", "max", "pct", "samples", "firstDate", "iqrPos", "rangePos",
+      "lowSample", "rvWindow", "rvPct"],
+    "rv.cone": ["n", "ivDays", "now", "count", "min", "p10", "p25", "p50", "p75", "p90", "max", "pct"],
+    "term.expiries": ["expiry", "dte", "iv", "min", "q1", "median", "q3", "max", "pct", "pctRaw", "samples", "firstDate",
+      "zShape", "fwd", "premium", "kink", "event", "eventFirst"],
+  };
+  const files = readdirSync(dir).filter((f) => /^p-card-x-/.test(f));
+  const dossiers = files.map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")));
+  ok(dossiers.length >= 100, `the dry run emits a card-x dossier per carded and index name (${dossiers.length})`);
+  const byScope = (s) => dossiers.filter((d) => d.scope === s);
+  ok(byScope("deep").length > 0 && byScope("carded").length > 0 && byScope("index").length === 3,
+     "all three scopes are emitted: deep, carded and the three index names");
+  const arms = {};
+  for (const d of dossiers) {
+    for (const k of ["v", "ticker", "scope", "sessionDate", "generatedAt", "fresh", "why"]) {
+      ok(Object.hasOwn(d, k), `card-x:${d.ticker} carries its envelope field \`${k}\``);
+    }
+    for (const k of ["v", "readAt", "vendorAt", "source", "cadenceS", "session", "writer"]) {
+      ok(Object.hasOwn(d.fresh, k), `and the freshness envelope's \`${k}\``);
+    }
+    for (const panel of Object.keys(PANEL_FIELDS)) {
+      const p = d[panel];
+      ok(p && ["ok", "quiet", "unavailable", "unreadable"].includes(p.status),
+         `card-x:${d.ticker}.${panel} is present with one of the four statuses (got ${p && p.status})`);
+      (arms[panel + ":" + p.status] ||= []).push(d.ticker);
+      if (p.status === "ok") {
+        for (const f of PANEL_FIELDS[panel]) {
+          if (!Object.hasOwn(p, f)) missingReport.push(`card-x ${panel} (ok) lacks \`${f}\` on ${d.ticker}`);
+          else checks++;
+        }
+      } else {
+        ok(typeof p.code === "string" && typeof p.reason === "string" && p.asOf === null,
+           `a silent ${panel} carries its code, its reason and no date (${d.ticker}: ${p.code})`);
+        ok(Object.hasOwn(d.why, p.code), `and the dossier's legend explains ${p.code}`);
+      }
+      for (const code of Object.values((p && p.silent) || {})) {
+        ok(Object.hasOwn(d.why, code), `a silenced ${panel} field's code ${code} is in the legend`);
+      }
+    }
+    for (const [path, fields] of Object.entries(ROW_FIELDS)) {
+      const [panel, key] = path.split(".");
+      if (d[panel].status !== "ok") continue;
+      for (const row of d[panel][key]) for (const f of fields) {
+        if (!Object.hasOwn(row, f)) missingReport.push(`card-x ${path} row lacks \`${f}\` on ${d.ticker}`);
+        else checks++;
+      }
+    }
+    const bytes = Buffer.byteLength(JSON.stringify(d));
+    ok(bytes < 60 * 1024, `card-x:${d.ticker} is ${(bytes / 1024).toFixed(1)}KB, leaving the other areas' panels room under the 100KB cap`);
+  }
+  for (const arm of ["cone:ok", "rv:ok", "vrp:ok", "term:ok", "term:unavailable", "skew:ok", "ivDyn:ok",
+    "anomaly:ok", "anomaly:unavailable", "sentiment:ok", "sentiment:unreadable", "character:ok"]) {
+    ok(arms[arm] && arms[arm].length > 0, `the corpus reaches the ${arm} arm`);
+  }
+  ok(byScope("carded").every((d) => ["term", "skew", "anomaly", "sentiment", "character"].every((k) => d[k].code === "not-read")),
+     "a carded dossier says the deep-only reads were not made, rather than carrying empty panels");
+  ok(byScope("index").every((d) => d.ivDyn.status === "ok"), "an index dossier reads its own 1y iv series");
+  const dyn = byScope("deep").filter((d) => d.ivDyn.status === "ok").length;
+  ok(dyn > byScope("deep").length / 2, `the deep dossiers carry IV dynamics from the card leg's 1y read (${dyn})`);
+
+  const cardFiles = readdirSync(dir).filter((f) => /^p-card-(?!x-)/.test(f));
+  const SUMMARY = ["v", "asOf", "iv30", "iv30Pct", "richCheap", "view", "coneShape", "slope30_90", "rv21", "rv21Pct", "yz21",
+    "gap63", "vrp", "skew", "term", "ivDyn", "votes", "status"];
+  for (const f of cardFiles) {
+    const c = JSON.parse(readFileSync(join(dir, f), "utf8"));
+    ok(c.x && c.x.vol, `${f} carries the compact vol summary at x.vol`);
+    for (const k of SUMMARY) {
+      if (!Object.hasOwn(c.x.vol, k)) missingReport.push(`card x.vol lacks \`${k}\` on ${c.ticker}`);
+      else checks++;
+    }
+  }
+  const regime = emitted("regime");
+  ok(regime && regime.volRadar, "the pipeline emits a regime payload with the vol radar");
+  for (const side of ["rich", "cheap", "bullish", "bearish"]) {
+    const s = regime.volRadar[side];
+    for (const k of ["status", "seen", "rows"]) ok(Object.hasOwn(s, k), `the radar's ${side} side carries \`${k}\``);
+    const fields = side === "rich" || side === "cheap"
+      ? ["t", "score", "n", "carded", "iv", "skew", "vov", "vrpZ", "regime", "crash"]
+      : ["t", "score", "n", "carded", "vwks", "avar"];
+    for (const row of s.rows) for (const k of fields) {
+      if (!Object.hasOwn(row, k)) missingReport.push(`regime.volRadar.${side} row lacks \`${k}\``);
+      else checks++;
+    }
+  }
+  ok(Array.isArray(regime.volRadar.carded), "the radar lists the carded names it reaches");
+  ok(Buffer.byteLength(JSON.stringify(regime)) < 60 * 1024, "and the regime stays inside its 60KB plan budget");
+  assert.deepEqual(missingReport.filter((m) => /^card-x|^card x\.vol|^regime/.test(m)), [],
+    "every field the vol contract publishes is on every emitted arm:\n  " +
+    missingReport.filter((m) => /^card-x|^card x\.vol|^regime/.test(m)).slice(0, 20).join("\n  ")); checks++;
+}
+
 rmSync(dir, { recursive: true, force: true });
 
 console.log(`✓ flows-payload-shape: ${checks} assertions — the publisher and the renderers ` +
@@ -518,4 +630,5 @@ console.log(`✓ flows-payload-shape: ${checks} assertions — the publisher and
   `publisher's side while that is still free to fix: the sector option lean's three reads ` +
   `and its measured zero, its vocabulary proven DISJOINT from the sector momentum key it ` +
   `must never be merged with, and the news tape's four counts, its stated ordering and the ` +
-  `vendor stamp on every row beside the instant we read them`);
+  `vendor stamp on every row beside the instant we read them; and the volatility dossiers (card-x), the ` +
+  `card's x.vol summary and the regime's vol radar pinned field by field on every arm they are emitted on`);

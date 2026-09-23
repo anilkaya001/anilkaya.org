@@ -26,7 +26,7 @@ execFileSync(process.execPath,
   { stdio: "ignore" });
 
 const cards = fs.readdirSync(EMIT_DIR)
-  .filter((f) => f.startsWith("-card-"))
+  .filter((f) => f.startsWith("-card-") && !f.startsWith("-card-x-"))
   .map((f) => JSON.parse(fs.readFileSync(path.join(EMIT_DIR, f), "utf8")));
 ok(cards.length >= 5, `the emitter produced ${cards.length} cards to test against`);
 

@@ -40,6 +40,8 @@ import {
   capBands, selectCoverage, NDX_100, NDX_AS_OF, SELECTION_EPOCH, UNIVERSE_NOTES,
   PICK_SIZE, PICK_INDEX,
 } from "../shared/flows-universe.js";
+import { runVolLeg, volNames, attachVol, publishVol, yearOfCandles } from "./flows-legs/vol.mjs";
+import { fakeVolVendor } from "./flows-legs/vol-fake.mjs";
 
 const ARGS = new Set(process.argv.slice(2));
 const DRY_RUN = ARGS.has("--dry-run");
@@ -737,7 +739,7 @@ async function enrich(ticker, spot, sessionDate, dating = { date: true, endDate:
     uw(`/api/stock/${ticker}/greek-exposure/expiry`, dated).catch(() => []),
 
     uw(`/api/stock/${ticker}/ohlc/1d`, {
-      timeframe: "1Y",
+      timeframe: "2Y",
       ...(sessionDate && dating.endDate ? { end_date: sessionDate } : {}),
     }).catch(() => []),
   ]);
@@ -778,7 +780,7 @@ async function enrich(ticker, spot, sessionDate, dating = { date: true, endDate:
 
   const past = candleCut(ohlc, sessionDate);
   return {
-    raw: { greekFlow, ticks, strikes, expiries, ohlc: kept },
+    raw: { greekFlow, ticks, strikes, expiries, ohlc: yearOfCandles(kept, sessionDate), ohlc2y: kept },
     pastSession: past.past,
     pastLatest: past.latest,
   };
@@ -3193,12 +3195,13 @@ function fakeTermStructure(ticker, spot, params = {}) {
   });
 }
 
-export const IV_RANK_PARAMS = Object.freeze({ timespan: "3m" });
+export const IV_RANK_PARAMS = Object.freeze({ timespan: "1y" });
 const IV_RANK_VENDOR_DEFAULT_ROWS = 5;
 
 export function fakeIvRank(ticker, spot, params = {}) {
   const rnd = mulberry(ticker.length * 4271);
-  const count = params && params.timespan === "3m" ? 64 : IV_RANK_VENDOR_DEFAULT_ROWS;
+  const count = params && params.timespan === "1y" ? 251 : params && params.timespan === "3m" ? 64
+    : IV_RANK_VENDOR_DEFAULT_ROWS;
   const days = tradingDaysEndingAt("2026-08-28", count);
   let vol = 0.2 + rnd() * 0.3, px = spot * (0.9 + rnd() * 0.2);
   const rows = days.map((t) => {
@@ -5417,6 +5420,14 @@ async function main() {
     }
   }
 
+  const volRoster = volNames({ deep: [...onBoard.entries()], crossSection: crossSectionTickers, byTicker });
+  const volLeg = await runVolLeg({
+    uw: DRY_RUN ? fakeVolVendor({ sessionDate, names: volRoster }) : uw,
+    names: volRoster, sessionDate, repair: repairCandles,
+    pool: (items, work) => runPooled(items, work, {
+      width: poolWidth(4).width, stopEarly: () => Date.now() > stats.startedAt + DEADLINE_MS }),
+  });
+
   let surfaceReported = false;
   const onSession = ARCHIVE_DATE_RE.test(String(sessionDate || "")) ? { date: sessionDate } : {};
   const perNameCut = { names: 0, darkpool: 0, ivRank: 0 };
@@ -5523,6 +5534,7 @@ async function main() {
         variation: variationOptions(variationRun),
       });
       card.readPx = readPxOf(e, screenerReadAt);
+      attachVol(card, volLeg, ticker, { ivRank: rankCut.raw });
 
       const shed = [
         ["topContracts", "dropped to fit the payload cap — the day's most-traded contracts " +
@@ -5671,6 +5683,7 @@ async function main() {
             variation: variationOptions(variationRun),
           });
           card.readPx = readPxOf(e, screenerReadAt);
+          attachVol(card, volLeg, ticker);
           const body = JSON.stringify(card);
 
           if (body.length > 100 * 1024) {
@@ -5700,6 +5713,8 @@ async function main() {
         ` — ${cardsBuilt + extraBuilt} name(s) now carry a card for this session`);
     }
   }
+
+  await publishVol(volLeg, { publish, sessionDate, generatedAt, log: (line) => console.log(line) });
 
   console.log("  " + (DRY_RUN ? "[dry-run] " : "") + describeGammaRange(gammaProfiles).line +
     (DRY_RUN
