@@ -474,132 +474,47 @@ ${UI_SCRIPT}
 }
 
 export function deskPage({ username = "" } = {}) {
-  return `${head("Flows — Premium desk", "Option-sale economics for any listed name.")}
-${shell("Premium desk", "desk", username, `
-<form class="desk-entry" id="deskEntry" autocomplete="off">
-    <label for="deskInput">Add symbols</label>
-    <div class="desk-entry__row">
-      <input id="deskInput" name="tickers" type="text" inputmode="latin"
-             autocapitalize="characters" autocorrect="off" spellcheck="false"
-             placeholder="AAPL MSFT NVDA"
-             aria-describedby="deskInputHelp">
-      <button type="submit" class="desk-add">Add</button>
-    </div>
-    <p class="desk-help" id="deskInputHelp">Separate with spaces or commas. Any listed US symbol.</p>
-  </form>
-
-  <div class="desk-list" id="deskList" role="group" aria-label="Watchlist"></div>
-
-  <div class="flows-status" id="deskStatus" role="status">Add a symbol to begin.</div>
-
-  <div class="desk-controls">
-    <div class="desk-bulk">
-      <label class="desk-check">
-        <input type="checkbox" id="deskAll"> <span>Select all</span>
-      </label>
-      <button type="button" class="desk-refresh" id="deskRefresh">Refresh</button>
-      <button type="button" class="desk-clear" id="deskClear">Clear</button>
-    </div>
-    <div class="desk-filters">
-
-      <span class="desk-field">
-      <label for="deskStrategy">Sell</label>
-      <select id="deskStrategy">
-        <option value="both">Puts and calls</option>
-        <option value="csp">Cash-secured puts</option>
-        <option value="cc">Covered calls</option>
-      </select>
-      </span>
-      <span class="desk-field">
-      <label for="deskRank">Rank by</label>
-      <select id="deskRank">
-        <option value="annualized">Annualised yield</option>
-        <option value="premium">Premium received</option>
-        <option value="yieldOnCollateral">Yield on collateral</option>
-        <option value="cushionSigmas">Cushion</option>
-        <option value="collectible">Premium collectible</option>
-      </select>
-      </span>
-    </div>
-  </div>
-
-  <div class="desk-capital">
-    <div class="desk-capital__entry">
-      <label for="deskBP">Buying power</label>
-      <div class="desk-capital__field">
-        <span class="desk-capital__prefix" aria-hidden="true">$</span>
-        <input id="deskBP" name="bp" type="text" inputmode="numeric" autocomplete="off"
-               spellcheck="false" placeholder="25,000" aria-describedby="deskBPHelp">
+  return flowsDocument({
+    title: "Premium desk",
+    description: "Option sales across your names, priced by the engine and ranked on a frontier.",
+    active: "desk", username,
+    styles: ["/assets/css/flows-tools.css"],
+    scripts: ["/assets/js/flows-quant.bundle.js", "/assets/js/flows-desk.js"],
+    body: `
+  <div class="tl dk" id="dkMain">
+    <section class="ui-card dk-bar" aria-label="Desk controls">
+      <div class="dk-row1">
+        <form class="tl-find dk-find" id="deskEntry" role="search" autocomplete="off">
+          <label class="visually-hidden" for="deskInput">Add symbols</label>
+          ${glyph("search")}
+          <input id="deskInput" name="tickers" type="text" inputmode="latin" autocapitalize="characters" autocorrect="off"
+                 spellcheck="false" placeholder="Add symbols" enterkeyhint="go">
+          <button type="submit" class="desk-add">Add</button>
+        </form>
+        <div class="dk-chips" id="deskList" role="group" aria-label="Watchlist"></div>
       </div>
-      <button type="button" class="desk-capital__clear" id="deskBPClear" hidden>Clear</button>
-    </div>
-    <p class="desk-help" id="deskBPHelp">
-      Cash. Puts are sized cash-secured — the whole strike is reserved — so this
-      under-counts what a margin account could write. Held in this page&#39;s address
-      so a reload keeps it, which means a link you share carries it too.
-    </p>
+      <div class="dk-row2" id="dkFilters">
+        <label class="dk-all"><input type="checkbox" id="deskAll"><span>All</span></label>
+        <button type="button" class="dk-pill" id="deskRefresh">Refresh</button>
+        <button type="button" class="dk-pill" id="deskClear">Clear</button>
+      </div>
+      <p class="dk-note visually-hidden" id="deskStatus" role="status">Add a symbol to begin.</p>
+    </section>
+    <div class="ui-grid dk-grid" id="dkGrid"></div>
+    <p class="visually-hidden" id="deskFoot" role="note"></p>
   </div>
-
-  <p class="desk-plan" id="deskPlan" role="status" hidden></p>
-
-  <div class="desk-pane" id="deskPane" hidden>
-    <div class="flows-tablewrap desk-tablewrap" id="deskTableWrap" tabindex="0" role="region"
-         aria-label="Sellable contracts">
-      <table class="flows-table desk-table">
-        <caption class="flows-caption">
-        Every quoted contract that clears the liquidity gates, ranked across all selected
-        symbols. Premium is what the bid pays today; the mid is not a price anyone must trade at.
-        Where a strike is in the money, part of that premium is intrinsic value that assignment
-        returns rather than keeps: its Yield and Ann. are greyed and carry the split.
-      </caption>
-      <thead>
-        <tr>
-          <th scope="col">Symbol</th>
-          <th scope="col">Sell</th>
-          <th scope="col" class="c-num">Strike</th>
-          <th scope="col" class="c-num">Expiry</th>
-          <th scope="col" class="c-num">Bid</th>
-          <th scope="col" class="c-num">Premium</th>
-          <th scope="col" class="c-num c-collect" id="deskCollectHead" hidden><abbr title="What your stated buying power collects on this line: contracts affordable times the premium each pays. Integer division — you cannot sell a third of a contract">Collect</abbr></th>
-          <th scope="col" class="c-num"><abbr title="Premium as a fraction of the collateral the trade ties up">Yield</abbr></th>
-          <th scope="col" class="c-num"><abbr title="Simple 365/days scaling of the yield. A convention for comparing tenors, not a return anyone earns">Ann.</abbr></th>
-          <th scope="col" class="c-num"><abbr title="Distance from spot to breakeven, in units of the move this option's own implied volatility prices over its own remaining life. Not a probability">Cushion</abbr></th>
-          <th scope="col" class="c-num">Breakeven</th>
-          <th scope="col" class="c-num"><abbr title="A covered call's total return if the shares are called away: the premium plus the move to the strike. A cash-secured put has no upside cap, so its best case is simply the premium — the Yield column">If called</abbr></th>
-          <th scope="col" class="c-num"><abbr title="Bid-ask spread as a fraction of the mid">Spread</abbr></th>
-          <th scope="col" class="c-num"><abbr title="Open interest, and the change since the prior session">OI</abbr></th>
-        </tr>
-      </thead>
-        <tbody id="deskBody"></tbody>
-      </table>
-    </div>
-    <div class="desk-grip desk-grip--x" id="deskGripX" role="separator"
-         aria-orientation="vertical" aria-label="Pane width" tabindex="0"
-         aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"></div>
-    <div class="desk-grip desk-grip--y" id="deskGripY" role="separator"
-         aria-orientation="horizontal" aria-label="Pane height" tabindex="0"
-         aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"></div>
-
-    <div class="desk-grip desk-grip--xy" id="deskGripXY" tabindex="0"
-         aria-label="Pane size, both axes — arrow keys resize width and height"></div>
-    <button type="button" class="desk-grip-reset" id="deskGripReset" hidden>Reset size</button>
-  </div>
-
-  <p class="flows-foot" id="deskFoot"></p>
-
-  <p class="flows-foot">
-    Premium is quoted at the bid and every number here is arithmetic on a quote.
-    Nothing on this page estimates a probability of assignment: that needs a
-    distribution, which needs a risk-free rate and a dividend yield, and this
-    desk does not publish numbers that depend on parameters it invented.
-    Selling options has unbounded loss on the call side and equity-sized loss
-    on the put side. This is a screen, not advice.
-  </p>
-`)}
-${UI_SCRIPT}
-<script src="${v("/assets/js/flows-desk.js")}" defer></script>
-</body>
-</html>`;
+  <div id="dkCopy" hidden>
+      <p data-k="bp">Cash. Puts are sized cash-secured, the whole strike reserved, so this under-counts what a margin account could write. Held in this page&#39;s address so a reload keeps it, which means a link you share carries it too.</p>
+      <p data-k="frontier">Every sellable line on the desk as a point: annualised yield up, risk across. The frontier joins the lines no other line beats on both, so a point below it pays less for the same risk.</p>
+      <p data-k="frontier-x">Delta is the forward delta of the short option on its own implied volatility; the implied chance of profit is the engine&#39;s, on the same volatility. A point pinned to the top edge pays more than the axis shows.</p>
+      <p data-k="engine">Each line is priced by the same engine as the strategy lab, on a flat slice at the contract&#39;s own implied volatility, inverted from its mid: the model value is the mid, and the chance of profit is the lognormal one at that volatility. The smile&#39;s skew correction is not in this number; open the line in the lab for the smile-priced figure. The real-world figures use the GARCH law the name&#39;s card publishes, and are an em dash where no card carries one.</p>
+      <p data-k="premium">Premium is what the bid pays today; the mid is not a price anyone must trade at. Where a strike is in the money, part of the premium is intrinsic value that assignment returns rather than keeps.</p>
+      <p data-k="annualized">Simple 365 over days scaling of the yield. A convention for comparing tenors, not a return anyone earns.</p>
+      <p data-k="cushion">Distance from spot to breakeven in units of the move this option&#39;s own implied volatility prices over its remaining life. Not a probability.</p>
+      <p data-k="smile">Each cell is one quoted contract&#39;s implied volatility, shaded by how far it sits above or below its own expiry&#39;s at-the-money level, so a seller can see where the smile pays for the risk.</p>
+      <p data-k="refuse">Selling options has unbounded loss on the call side and equity-sized loss on the put side. This is a screen, not advice.</p>
+  </div>`,
+  });
 }
 
 export function watchPage({ username = "" } = {}) {
