@@ -1,0 +1,39 @@
+name: flows-probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      tickers:
+        description: "Tickers for the per-name probes, comma-separated (at most 10)"
+        type: string
+        default: "AAPL,NVDA"
+      filter:
+        description: "Probe only the ids or paths containing this text; commas separate alternatives"
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flows-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Probe the vendor schema
+        env:
+          UW_API_KEY: ${{ secrets.UW_API_KEY }}
+          FLOWS_PROBE_TICKERS: ${{ inputs.tickers }}
+          FLOWS_PROBE_FILTER: ${{ inputs.filter }}
+        run: node scripts/flows-probe.mjs
