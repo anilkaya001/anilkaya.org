@@ -1045,7 +1045,7 @@ const ASK_QUESTION_MAX = 400;
 
 const FALLBACK_FAILED = Object.freeze({
   allowance: "found the day's free model allowance spent, which resets at 00:00 UTC",
-  capacity: "had no capacity just now, so asking again shortly may work",
+  capacity: "had no capacity just now, and asking again shortly may work",
   plan: "is not available on this site's plan, which is a configuration fault here",
   unreachable: "could not be reached and did not say why",
 });
