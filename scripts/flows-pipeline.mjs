@@ -571,8 +571,8 @@ function screenerTilt(row) {
 
 function ivRankFraction(raw) {
   const v = num(raw, NaN);
-  if (!Number.isFinite(v) || v < 0) return NaN;
-  return v > 1 ? v / 100 : v;
+  if (!Number.isFinite(v) || v < 0 || v > 100) return NaN;
+  return v / 100;
 }
 
 function daysToEarnings(row, origin) {

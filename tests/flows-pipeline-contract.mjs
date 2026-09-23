@@ -31,6 +31,7 @@ import {
   fakeLadderChain, vannaProbeSample, featuresVariationInput, boardVariationMeta,
 } from "../scripts/flows-pipeline.mjs";
 import { VARIATION_CODES } from "../shared/flows-variation.js";
+import { pinReading } from "../shared/flows-card.js";
 import { pearson, horizonMove, HORIZON_SESSIONS, realizedVol } from "../shared/flows-features.js";
 import { execFileSync, spawnSync, spawn } from "node:child_process";
 import fs from "node:fs";
@@ -458,7 +459,15 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(tilt("100").ivRank === 1, "the top of the range is exactly one");
   ok(tilt("0").ivRank === 0, "and the bottom exactly zero");
 
-  ok(tilt("0.5").ivRank === 0.5, "an ambiguous 0.5 is left as a fraction");
+  ok(tilt("0.5").ivRank === 0.005,
+     "A RANK UNDER ONE IS STILL ON THE VENDOR'S 0-100 SCALE: guessed per value, 0.8 read as the 80th " +
+     "percentile while 1.5 read as the 1.5th, so the lowest-ranked names escaped the pin card's floor signal");
+  const floorAt = (v) => pinReading({ iv30: 0.08, rv30: 0.2, ivRank: tilt(v).ivRank, ivMomentum: -0.005,
+    impliedH: null, realizedH: null, lastRange: { range: 0.002, date: "2026-09-18" } });
+  ok(["0", "0.3", "0.8", "1.0", "1.5", "2.0"].every((v) => floorAt(v) && floorAt(v).signals.includes("floor")) &&
+     floorAt("2.5") === null,
+     "so every rank from the 0th to the 2nd percentile raises the floor signal, and the 2.5th does not");
+  ok(Number.isNaN(tilt("100.5").ivRank), "and a rank past 100 is not a percentile at all");
   ok(Number.isNaN(tilt(null).ivRank), "a missing rank is not a zero percentile");
   ok(Number.isNaN(tilt("-3").ivRank), "and neither is a negative one");
 }
