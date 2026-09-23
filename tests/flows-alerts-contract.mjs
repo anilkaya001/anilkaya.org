@@ -789,8 +789,15 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
     "and so is an empty store");
 
   const pipeline = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
-  ok(/nightlyAlerts\(alerts, await readStored\("flowalerts"\)/.test(pipeline),
-    "the pipeline reads the stored feed before it writes the key");
+  ok(/nightlyAlerts\(alerts, await readHeldAlerts\(readStored, sessionDate\)/.test(pipeline),
+    "the pipeline reads the held record before it writes the key — the day's live:alerts union " +
+    "when it covers this session, the stored nightly feed otherwise");
+  const leg = readFileSync(new URL("../scripts/flows-legs/live.mjs", import.meta.url), "utf8");
+  const held = leg.slice(leg.indexOf("export async function readHeldAlerts"));
+  ok(/readStored\("live:alerts"\)/.test(held) && /readStored\("flowalerts"\)/.test(held) &&
+     /payload\.sessionDate === sessionDate && payload\.record && payload\.record\.date === sessionDate/.test(held),
+    "and the live union is taken only when it is this session's own record, so a stale union can " +
+    "never be merged into a later session's feed");
   eq((pipeline.match(/publish\("flowalerts"/g) || []).length, 1, "with one write to the key");
   ok(/publish\("flowalerts", liveAlerts\)/.test(pipeline) && /\.\.\.night\.alerts,/.test(pipeline),
     "and that write carries the merged record rather than the bare read");

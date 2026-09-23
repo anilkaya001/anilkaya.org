@@ -1,0 +1,55 @@
+name: flows-live
+
+on:
+  workflow_dispatch:
+    inputs:
+      tick:
+        description: "The Worker clock instant that dispatched this run"
+        type: string
+        required: false
+      origin:
+        description: "Who dispatched it: worker, watchdog or manual"
+        type: string
+        required: false
+        default: manual
+  schedule:
+    - cron: "7,22,37,52 13-20 * * 1-5"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flows-live
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: |
+            scripts
+            shared
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Say who dispatched this run
+        env:
+          EVENT: ${{ github.event_name }}
+          ORIGIN: ${{ inputs.origin || 'schedule' }}
+          TICK: ${{ inputs.tick || 'none' }}
+        run: |
+          echo "event: $EVENT; origin: $ORIGIN; tick: $TICK"
+          echo "Started at $(date -u +%H:%M:%S) UTC, $(TZ=America/New_York date +%H:%M:%S) Eastern."
+
+      - name: Read the live layer
+        env:
+          UW_API_KEY: ${{ secrets.UW_API_KEY }}
+          FLOWS_LIVE_TOKEN: ${{ secrets.FLOWS_LIVE_TOKEN }}
+          FLOWS_INGEST_URL: ${{ secrets.FLOWS_INGEST_URL }}
+          FLOWS_LIVE_ORIGIN: ${{ github.event_name == 'schedule' && 'schedule' || inputs.origin || 'manual' }}
+        run: node scripts/flows-pipeline.mjs --live

@@ -50,9 +50,11 @@ import { runMarketLegs, windowTickersOf, totalsHistory, MARKET_LEG_CALLS } from 
 import { makeFakeVendor } from "./flows-legs/fake-vendor.mjs";
 import { makeCardXStore, publishCardX } from "./flows-legs/card-x.mjs";
 import { buildIndexDossiers } from "./flows-legs/index-dossier.mjs";
+import { runLive, dryLiveTicks, readHeldAlerts, LIVE_READ_PACE_MS } from "./flows-legs/live.mjs";
 
 const ARGS = new Set(process.argv.slice(2));
 const DRY_RUN = ARGS.has("--dry-run");
+const LIVE_MODE = ARGS.has("--live");
 const EMIT = process.argv.includes("--emit")
   ? process.argv[process.argv.indexOf("--emit") + 1]
   : null;
@@ -67,7 +69,7 @@ const INGEST_UA = "anilkaya-flows-pipeline/1 (+https://github.com/anilkaya001/an
 
 function ingestHeaders({ json = false } = {}) {
   const headers = {
-    Authorization: "Bearer " + process.env.FLOWS_INGEST_TOKEN,
+    Authorization: "Bearer " + (LIVE_MODE ? process.env.FLOWS_LIVE_TOKEN : process.env.FLOWS_INGEST_TOKEN),
     "User-Agent": INGEST_UA,
   };
   if (json) headers["Content-Type"] = "application/json";
@@ -2783,6 +2785,10 @@ const publishedStore = Object.create(null);
 const landedKeys = new Set();
 
 async function publish(key, payload) {
+  if (LIVE_MODE && !/^live:[a-z]+(?::[a-z]+)?$/.test(key)) {
+    throw new Error(`--live publishes live:* keys only, and ${key} is not one — the session archive is never ` +
+      "written by the live layer");
+  }
   publishedStore[key] = payload;
   const body = JSON.stringify(payload);
   if (EMIT || DRY_RUN) {
@@ -3953,7 +3959,31 @@ function indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, co
   };
 }
 
+async function runLiveMode() {
+  console.log(DRY_RUN ? "Flows live layer — DRY RUN (synthetic, no network)" : "Flows live layer — live");
+  if (!DRY_RUN) {
+    const missing = ["UW_API_KEY", "FLOWS_LIVE_TOKEN"].filter((k) => !process.env[k]);
+    if (missing.length) {
+      throw new Error(`missing required environment variable${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}` +
+        " — the live mode refuses the nightly FLOWS_INGEST_TOKEN on purpose");
+    }
+    console.log(`publishing to ${ingestURL()}`);
+  }
+  delayFloorMs = Math.max(delayFloorMs, LIVE_READ_PACE_MS);
+  delayMs = Math.max(delayMs, LIVE_READ_PACE_MS);
+  if (DRY_RUN) return dryLiveTicks({ publish, store: publishedStore, shapeNews });
+  const result = await runLive({ uw, publish, readStored, shapeNews, origin: process.env.FLOWS_LIVE_ORIGIN || null,
+    force: process.env.FLOWS_LIVE_FORCE === "1" });
+  if (result && result.run && result.run.errors.length) {
+    console.warn(`live: ${result.run.errors.length} key(s) not published — ${result.run.errors.join("; ")}`);
+    process.exitCode = 1;
+  }
+  return result;
+}
+
 async function main() {
+
+  if (LIVE_MODE) return runLiveMode();
 
   const today = easternNow().date;
   console.log(DRY_RUN ? "Flows pipeline — DRY RUN (synthetic, no network)" : "Flows pipeline — live");
@@ -5212,7 +5242,7 @@ async function main() {
       }
 
       const alerts = buildFlowAlerts(raw, { stageOf: (t) => stage.get(t) || null });
-      const night = nightlyAlerts(alerts, await readStored("flowalerts"),
+      const night = nightlyAlerts(alerts, await readHeldAlerts(readStored, sessionDate),
         { sessionDate, at: alertsReadAt, stageOf: (t) => stage.get(t) || null });
       let liveAlerts = night.held;
       if (night.alerts) {
@@ -6016,6 +6046,11 @@ async function main() {
     await publish("brief", { ...base, facts: shed.facts, namesIndexed: shed.namesIndexed });
   } catch (error) {
     console.warn(`  brief: ${error.message}`);
+  }
+
+  if (DRY_RUN) {
+    console.log("live layer (dry run of the --live mode: two synthetic Tier 2 ticks; a real nightly never writes live:*)");
+    await dryLiveTicks({ publish, store: publishedStore, shapeNews });
   }
 
   const elapsed = (Date.now() - stats.startedAt) / 1000;
