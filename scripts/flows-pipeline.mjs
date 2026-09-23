@@ -3889,7 +3889,7 @@ async function publishNews({ sessionDate, generatedAt, tickers = [] }) {
   }
 }
 
-function indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, congressState, marketCross, variationRun }) {
+function indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, congressState, marketCross, variationRun, volLeg = null }) {
   const onSession = ARCHIVE_DATE_RE.test(String(sessionDate || "")) ? { date: sessionDate } : {};
   return {
     enrich: async (ticker, spot, row) => {
@@ -3947,6 +3947,7 @@ function indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, co
         marketCross, variation: variationOptions(variationRun),
       });
       card.readPx = readPxOf({ row, features }, screenerReadAt);
+      attachVol(card, volLeg, ticker);
       return card;
     },
   };
@@ -5888,7 +5889,7 @@ async function main() {
   if (marketLegs) {
     const dossiers = await buildIndexDossiers({
       tickers: INDEX_TICKERS, indexRows: marketLegs.indexRows, deadline,
-      ...indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, congressState, marketCross, variationRun }),
+      ...indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, congressState, marketCross, variationRun, volLeg }),
       publish, log: (line) => console.warn(line),
     });
     console.log(`  index dossiers: ${dossiers.built.length} of ${INDEX_TICKERS.length} built` +
@@ -5899,7 +5900,8 @@ async function main() {
   }
   {
     const cx = await publishCardX(cardX, publish, {
-      generatedAt, sessionDate, readAt: marketLegs ? marketLegs.readAt : null, log: (line) => console.warn(line),
+      generatedAt, sessionDate, readAt: marketLegs ? marketLegs.readAt : null,
+      stored: (key) => publishedStore[key] || null, log: (line) => console.warn(line),
     });
     console.log(`  card-x: ${cx.written} written` + (cx.failed ? `, ${cx.failed} failed` : "") +
       (cx.over ? `, ${cx.over} over the cap` : "") + `, largest ${cx.largest} bytes`);

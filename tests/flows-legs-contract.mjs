@@ -26,7 +26,7 @@ import { readRegime, assembleRegime, REGIME_CALLS } from "../scripts/flows-legs/
 import { ownershipParts } from "../scripts/flows-legs/ownership.mjs";
 import { assembleCatalysts, readCatalysts, calendarPlan, EVENTS_ADDITIONS_BUDGET_BYTES } from "../scripts/flows-legs/events.mjs";
 import { runMarketLegs, windowTickersOf, MARKET_LEG_CALLS } from "../scripts/flows-legs/market.mjs";
-import { makeCardXStore, cardXPayload, CARD_X_BUDGET_BYTES } from "../scripts/flows-legs/card-x.mjs";
+import { makeCardXStore, cardXPayload, composeCardXPayload, publishCardX, CARD_X_BUDGET_BYTES } from "../scripts/flows-legs/card-x.mjs";
 import { buildIndexDossiers, shedToFit } from "../scripts/flows-legs/index-dossier.mjs";
 import { makeFakeVendor } from "../scripts/flows-legs/fake-vendor.mjs";
 
@@ -646,6 +646,28 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   deep(p.shed, ["insiders.dots"], "shedding starts with the insider dots");
   eq(p.fresh.cadenceS, 0, "card-x carries the nightly freshness envelope");
 
+  const small = makeCardXStore();
+  small.add("BBB", "short", { status: "ok", si: 0.04 });
+  const held = { v: 1, ticker: "BBB", sessionDate: S, scope: "deep", cone: { status: "ok" }, gex: { status: "ok" },
+    shed: ["rv.series"], fresh: { v: 1, readAt: "2026-08-24T20:10:00.000Z", vendorAt: "2026-08-24T20:00:00.000Z" } };
+  const own = cardXPayload("BBB", small.get("BBB"), { sessionDate: S, readAt: "2026-08-24T21:40:00.000Z" });
+  const merged = composeCardXPayload(held, own);
+  ok(merged.cone && merged.gex && merged.short && merged.scope === "deep",
+     "the ownership parts join the vol and flow sections already written for the session, they never replace them");
+  eq(merged.fresh.readAt, "2026-08-24T20:10:00.000Z", "the composed dossier dates itself by its oldest read");
+  deep(merged.shed, ["rv.series"], "and keeps the other writers' shed list");
+  {
+    const { bytes, ...rest } = merged;
+    eq(bytes, JSON.stringify(rest).length, "its byte count is measured on the composed payload, not on one writer's part");
+  }
+  const stale = composeCardXPayload({ ...held, sessionDate: "2026-08-21" }, own);
+  ok(!stale.cone && !stale.gex && stale.short, "a dossier from another session is replaced, not merged into tonight's");
+  const written = {};
+  const res = await publishCardX(small, async (k, v) => { written[k] = v; }, {
+    sessionDate: S, readAt: "2026-08-24T21:40:00.000Z", stored: (k) => (k === "card-x:BBB" ? held : null) });
+  ok(res.written === 1 && written["card-x:BBB"].cone && written["card-x:BBB"].short,
+     "publishCardX composes with what this run already published under the same key");
+
   const built = [];
   const out = await buildIndexDossiers({
     tickers: ["SPY", "QQQ", "IWM"], indexRows: new Map([["SPY", { close: "774.26" }], ["QQQ", { close: "600" }]]),
@@ -669,7 +691,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 {
   const worker = fs.readFileSync(path.join(ROOT, "worker.js"), "utf8");
   ok(/\^universe\$\|\^regime\$/.test(worker), "the ingest allowlist accepts universe and regime");
-  ok(/key\.startsWith\("card-x:"\)/.test(worker), "and card-x:<T> under the ticker rule");
+  ok(/\/\^\(card\|card-x\|hist\):\/\.exec\(key\)/.test(worker), "and card-x:<T> under the ticker rule");
   ok(worker.includes('path === "/api/flows/universe" || path === "/api/flows/regime"'), "both read routes exist");
   ok(worker.includes('path === "/api/flows/card-x"'), "and the per-name card-x route");
   const legs = fs.readdirSync(path.join(ROOT, "scripts/flows-legs")).map((f) => fs.readFileSync(path.join(ROOT, "scripts/flows-legs", f), "utf8"));

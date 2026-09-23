@@ -47,10 +47,42 @@ export function cardXPayload(ticker, parts, { generatedAt = null, sessionDate = 
   return payload;
 }
 
-export async function publishCardX(store, publish, { generatedAt, sessionDate, readAt, log = () => {} } = {}) {
+function samePrior(prior, sessionDate) {
+  return prior && typeof prior === "object" && !Array.isArray(prior) && prior.sessionDate === sessionDate ? prior : null;
+}
+
+function mergeFresh(a, b) {
+  if (!a || typeof a !== "object") return b;
+  if (!b || typeof b !== "object") return a;
+  const older = (x, y) => (!x ? y : !y ? x : x < y ? x : y);
+  const newer = (x, y) => (!x ? y : !y ? x : x > y ? x : y);
+  return { ...a, ...b, readAt: older(a.readAt, b.readAt), vendorAt: newer(a.vendorAt, b.vendorAt) };
+}
+
+export function composeCardXPayload(prior, own, { budgetBytes = CARD_X_BUDGET_BYTES } = {}) {
+  const base = samePrior(prior, own.sessionDate);
+  if (!base) return own;
+  const payload = {
+    ...base, ...own,
+    fresh: mergeFresh(base.fresh, own.fresh),
+    shed: [...new Set([...(Array.isArray(base.shed) ? base.shed : []), ...own.shed])],
+  };
+  delete payload.bytes;
+  let bytes = JSON.stringify(payload).length;
+  for (const [name, drop] of CARD_X_SHED) {
+    if (bytes <= budgetBytes) break;
+    drop(payload);
+    if (!payload.shed.includes(name)) payload.shed.push(name);
+    bytes = JSON.stringify(payload).length;
+  }
+  payload.bytes = JSON.stringify(payload).length;
+  return payload;
+}
+
+export async function publishCardX(store, publish, { generatedAt, sessionDate, readAt, stored = () => null, log = () => {} } = {}) {
   let written = 0, failed = 0, over = 0, largest = 0;
   for (const t of store.tickers()) {
-    const payload = cardXPayload(t, store.get(t), { generatedAt, sessionDate, readAt });
+    const payload = composeCardXPayload(stored("card-x:" + t), cardXPayload(t, store.get(t), { generatedAt, sessionDate, readAt }));
     largest = Math.max(largest, payload.bytes);
     if (payload.bytes > CARD_X_BUDGET_BYTES) { over++; log(`  card-x ${t}: ${payload.bytes} bytes after shedding, over the cap — not written`); continue; }
     try {

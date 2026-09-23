@@ -2806,7 +2806,7 @@ async function route(request, env, url, ctx) {
 
     const validKey = card !== null
       ? FLOWS_TICKER_RE.test(card)
-      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^flowalerts$|^pulse$|^political$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^sector:premium$|^news$|^brief$|^meta$|^regime$|^universe$/.test(key);
+      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^flowalerts$|^pulse$|^political$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^sector:premium$|^news$|^brief$|^meta$|^universe$|^regime$/.test(key);
     if (!validKey) {
       throw new HttpError(400, "invalid_key", "Unknown payload key");
     }
@@ -2976,17 +2976,6 @@ async function route(request, env, url, ctx) {
       return passthrough(stored);
     }
 
-    if (path === "/api/flows/card-x") {
-
-      const ticker = String(url.searchParams.get("t") || "").trim().toUpperCase();
-      if (!FLOWS_TICKER_RE.test(ticker)) {
-        throw new HttpError(400, "invalid_ticker", "Unknown ticker");
-      }
-      const stored = await readFlowsPayload(env, "card-x:" + ticker);
-      if (stored === null) return json({ ticker, status: "pending" });
-      return passthrough(stored);
-    }
-
     if (path === "/api/flows/news") {
 
       const stored = await readFlowsPayload(env, "news");
@@ -3106,12 +3095,6 @@ async function route(request, env, url, ctx) {
 
         return json({ ticker, status: "pending" });
       }
-      return passthrough(stored);
-    }
-
-    if (path === "/api/flows/regime") {
-      const stored = await readFlowsPayload(env, "regime");
-      if (stored === null) return json({ status: "pending" });
       return passthrough(stored);
     }
 

@@ -531,7 +531,13 @@ assert.deepEqual(missingReport, [],
       "zShape", "fwd", "premium", "kink", "event", "eventFirst"],
   };
   const files = readdirSync(dir).filter((f) => /^p-card-x-/.test(f));
-  const dossiers = files.map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")));
+  const everyX = files.map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")));
+  const dossiers = everyX.filter((d) => Object.hasOwn(d, "scope"));
+  ok(everyX.filter((d) => !Object.hasOwn(d, "scope")).every((d) => !Object.hasOwn(d, "cone") &&
+    ["short", "insiders", "earnings"].some((k) => Object.hasOwn(d, k)) && !Object.hasOwn(d, "gex")),
+     "a card-x the vol leg did not write is an ownership-only dossier from the universe leg, not a vol dossier missing its envelope");
+  const carded = readdirSync(dir).filter((f) => /^p-card-[A-Z]/.test(f)).map((f) => f.slice("p-card-".length, -".json".length));
+  ok(carded.every((t) => dossiers.some((d) => d.ticker === t)), "every carded name has its vol dossier");
   ok(dossiers.length >= 100, `the dry run emits a card-x dossier per carded and index name (${dossiers.length})`);
   const byScope = (s) => dossiers.filter((d) => d.scope === s);
   ok(byScope("deep").length > 0 && byScope("carded").length > 0 && byScope("index").length === 3,
@@ -616,7 +622,7 @@ assert.deepEqual(missingReport, [],
   const { FLOW_CODES, UNITS } = await import("../shared/flows-positioning.js");
   const cardX = readdirSync(dir).filter((f) => /^p-card-x-[A-Z]/.test(f))
     .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")))
-    .filter((c) => c.scope !== "index");
+    .filter((c) => Object.hasOwn(c, "depth"));
   const hists = readdirSync(dir).filter((f) => /^p-hist-[A-Z]/.test(f))
     .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")));
   ok(cardX.length > 0 && hists.length === cardX.length,
@@ -732,7 +738,8 @@ assert.deepEqual(missingReport, [],
   ok(cx.length > 0, `the pipeline emits card-x payloads (${cx.length})`);
   for (const c of cx) {
     ok(typeof c.ticker === "string" && c.fresh && !("panels" in c), `card-x:${c.ticker} is its own key, not a card`);
-    ok(["short", "insiders", "earnings"].some((k) => c[k]), `card-x:${c.ticker} carries at least one part`);
+    ok(c.scope === "index" || ["short", "insiders", "earnings"].some((k) => c[k]),
+       `card-x:${c.ticker} carries at least one ownership part, unless it is an index dossier the vol leg alone writes`);
     ok(Buffer.byteLength(JSON.stringify(c)) <= 100 * 1024, `card-x:${c.ticker} fits its cap`);
   }
 

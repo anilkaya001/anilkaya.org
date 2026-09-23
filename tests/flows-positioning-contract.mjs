@@ -856,12 +856,12 @@ try {
   const read = (f) => JSON.parse(readFileSync(join(dir, f), "utf8"));
   const allX = files.filter((f) => /^p-card-x-/.test(f)).map(read);
   const hists = files.filter((f) => /^p-hist-/.test(f)).map(read);
-  const cards = files.filter((f) => /^p-card-(?!x-)/.test(f)).map(read);
+  const cards = files.filter((f) => /^p-card-(?!x-)/.test(f)).map(read).filter((c) => c.depth !== "index");
   const carded = new Set(cards.map((c) => c.ticker));
   const cardX = allX.filter((c) => carded.has(c.ticker));
   const others = allX.filter((c) => !carded.has(c.ticker));
-  ok(others.every((c) => c.scope === "index" && !Object.hasOwn(c, "gex")),
-     `a card-x without a card is only an index dossier from the vol leg, never a flow read (${others.map((c) => c.ticker).join(", ")})`);
+  ok(others.every((c) => !Object.hasOwn(c, "gex") && (c.scope === "index" || ["short", "insiders", "earnings"].some((k) => Object.hasOwn(c, k)))),
+     `a card-x without a card is an index dossier from the vol leg or an ownership-only dossier from the universe leg, never a flow read (${others.filter((c) => Object.hasOwn(c, "gex")).map((c) => c.ticker).join(", ")})`);
   ok(cardX.length === cards.length && cardX.length > 0, `every carded name gets a card-x (${cardX.length} of ${cards.length})`);
   eq(hists.length, cardX.length, "and a hist");
   for (const c of cardX) {
