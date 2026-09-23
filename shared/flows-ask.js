@@ -277,9 +277,9 @@ function alertFacts(p, at) {
   const readLimit = num(p.readLimit);
   if (p.readTruncated === true && readLimit !== null) {
     out.push(f("flowalerts/read-ceiling", ["alerts", "ceiling", "limit", "truncated", "population"],
-      "The latest intraday alert read came back full at this site's own cap of " + readLimit +
-      " rows per read, so alerts flagged since the read before it may be missing from the " +
-      "record and the true population is at least what it holds.",
+      "An intraday alert read this session came back full at this site's own cap of " + readLimit +
+      " rows per read, so alerts flagged between reads may be missing from the record and " +
+      "the true population is at least what it holds.",
       { readLimitRows: readLimit }));
   }
   return out;

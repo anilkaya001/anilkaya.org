@@ -947,7 +947,8 @@ async function refreshFlowsIntraday(env) {
           vendorLimit: null,
           vendorTruncated: null,
           readLimit: ALERT_READ_LIMIT,
-          readTruncated: alerts.seen + alerts.unusable >= ALERT_READ_LIMIT,
+          readTruncated: alerts.seen + alerts.unusable >= ALERT_READ_LIMIT
+            || (!merged.record.reset && prev.readTruncated === true),
         };
         await upsert("flowalerts", written.flowalerts);
 

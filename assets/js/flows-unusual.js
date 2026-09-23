@@ -454,15 +454,15 @@
         "compares two ceilings.";
     }
     if (alertVendorTruncated === null && alertReadTruncated === true) {
-      return " The latest intraday read came back full at this site's own cap" +
+      return " An intraday read this session came back full at this site's own cap" +
         (alertReadLimit === null ? "" : " of " + count(alertReadLimit) + " rows") +
-        ", so windows flagged since the read before it may be missing and this count is " +
+        ", so windows flagged between reads may be missing and this count is " +
         "at least what the day's record holds rather than a market.";
     }
     if (alertVendorTruncated === null && alertReadTruncated === false) {
-      return " The latest intraday read came in under this site's own per-read cap" +
+      return " Every intraday read this session came in under this site's own per-read cap" +
         (alertReadLimit === null ? "" : " of " + count(alertReadLimit) + " rows") +
-        ", so it saw every window the vendor's rolling list still held.";
+        ", so each saw every window the vendor's rolling list still held.";
     }
     if (alertVendorTruncated === null) {
 

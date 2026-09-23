@@ -486,6 +486,11 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
   ok(/mergeAlerts\(prev, alerts/.test(body),
     "the handler merges into the STORED payload rather than spreading over it: " +
     "`{...prev, ...alerts}` is the exact expression that deleted the morning's flags");
+  ok(/readTruncated: alerts\.seen \+ alerts\.unusable >= ALERT_READ_LIMIT\s*\|\| \(!merged\.record\.reset && prev\.readTruncated === true\)/.test(body),
+    "A FULL READ EARLIER IN THE SESSION KEEPS THE UNION A FLOOR. The record is the union of every read " +
+    "today, so one read that came back at the 60-row cap makes its count a lower bound until the session " +
+    "resets; judged on the latest read alone, a 60-row read followed by a 10-row one published seen 70 with " +
+    "readTruncated false, and the Unusual caption dropped its 'at least'");
 }
 
 {

@@ -167,12 +167,17 @@ export function briefAlertsFact(payload) {
   const day = record && typeof record.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(record.date)
     ? record.date : null;
   const across = reads !== null && reads > 1;
+  const seen = num(al.seen);
+  const more = seen !== null && Number.isInteger(seen) && seen > ar.length ? seen : null;
+  const lead = more === null ? ar.length : more;
   return fact("alerts",
-    ar.length + " flagged " + plural(ar.length, "window", "windows") + " on the tape" +
+    lead + " flagged " + plural(lead, "window", "windows") + " on the tape" +
     (across ? " across " + reads + " reads" + (day ? " on " + day : "") : "") +
+    (more === null ? "" : ", " + ar.length + " of them held on the page") +
     (readAt ? (across ? ", the latest " : ", read ") + stampSaid(readAt) : "") + ".",
     { flagged: ar.length, readAt,
       readSaid: readAt ? stampSaid(readAt) : null,
+      ...(more === null ? {} : { seen: more }),
       ...(across ? { reads, recordDate: day } : {}) });
 }
 

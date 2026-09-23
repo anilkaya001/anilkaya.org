@@ -1142,8 +1142,8 @@
       const when = el("td", "c-num cc-dim", at === null ? DASH : at);
       if (at !== null) {
         const to = etTime(row.spanEnd);
-        when.title = to === null
-          ? "Window opened " + at + " ET; the vendor stated no end for it."
+        when.title = row.spanFrom === "created_at" ? "Alert created " + at + " ET; no window stated."
+          : to === null ? "Window opened " + at + " ET; the vendor stated no end for it."
           : "Window ran " + at + " to " + to + " ET.";
       }
       tr.append(when);
