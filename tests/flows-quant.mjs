@@ -735,6 +735,22 @@ const OUT = ENGINE.runEngine(BASE);
     ok(chosen.fitInSpread >= 0.6 ? g.g >= 2 : g.g === 1 && g.why === "fit.out-of-spread",
       `and a slice with ${(100 * chosen.fitInSpread).toFixed(0)}% of its quotes in spread grades ${g.g}, whatever method drew it`);
   }
+  {
+    const onDay = "2026-10-09", T = TIME.yearFraction(Date.parse(AS_OF), onDay), F = 100 * Math.exp(0.03 * T), D = Math.exp(-0.04 * T);
+    const m = SMILE.mixturePrice({ F, T, diffusiveVol: 0.3, J: 0.07 });
+    const rows = [];
+    for (let K = 60; K <= 140; K += 1) {
+      const vol = SMILE.sliceVol(m.slice, K);
+      for (const type of ["C", "P"]) {
+        const price = BS.black76(F, D, K, vol, T, type), hs = Math.max(0.02, 0.015 * price);
+        rows.push({ K, type, bid: Math.max(0, Math.floor((price - hs) * 100) / 100), ask: Math.ceil((price + hs) * 100) / 100, oi: 3000, volume: 100, ivSeed: vol });
+      }
+    }
+    const spanning = ENGINE.runEngine(synthInput({ expiries: [{ expiry: onDay, rows }], event: { date: onDay, moves: [] } }));
+    const built = QC.buildSlices([{ expiry: onDay, rows }], { spot: 100, asOfMs: Date.parse(AS_OF), rate: 0.04, event: { date: onDay } });
+    eq([spanning.expiries[0].smile.method, built.built[0].slice.method], ["mixture", "mixture"],
+      "an earnings impact session on the expiry date itself is inside that expiry, so the engine and the card's pre-pass both fit it as the first post-event slice");
+  }
   const evSlice = SMILE.fitSlice({ F: 100, D: 1, T: 10 / 365, points: frown, event: { firstAfter: true } });
   eq(evSlice.method, "mixture", "the first post-earnings expiry with an ATM frown falls back to the two-lognormal mixture");
   near(evSlice.params.J, Math.log(1.08 / Math.sqrt(1.08 * 0.92)), 0.01, "and recovers the jump that made the frown");

@@ -851,7 +851,7 @@ export function runEngine(input) {
   let prev = null;
   const raw = (input.expiries || []).filter((e) => e && typeof e.expiry === "string").slice().sort((a, b) => (a.expiry < b.expiry ? -1 : a.expiry > b.expiry ? 1 : 0));
   let firstAfter = null;
-  if (evIn) firstAfter = raw.find((e) => e.expiry > evIn.date) || null;
+  if (evIn) firstAfter = raw.find((e) => e.expiry >= evIn.date) || null;
   for (const e of raw) {
     const ex = buildExpiry({
       expiry: e.expiry, rows: e.rows, spot: S, asOfMs, rate: input.rate, prev,
