@@ -484,9 +484,12 @@ write the argument in the commit message. Generated files
 `scripts/generate-course-payloads.mjs` without banners; edit the generator,
 not its output. `assets/js/flows-quant.bundle.js` is generated the same way by
 `scripts/build-flows-quant-bundle.mjs` (esbuild from the pinned
-`tests/node_modules`, tree-shaken from `shared/flows-quant-browser.js`); run it
-after any change to a `shared/flows-quant-*` module the browser reaches, and
-never edit the bundle by hand. `scripts/strip-comments.mjs` is now a no-op on
+`tests/node_modules`, tree-shaken from `shared/flows-quant-browser.js`), and so
+is `assets/js/flows-quant-read.bundle.js`, tree-shaken from
+`shared/flows-quant-read.js`: the smile and law readers alone, for the ticker
+dossier, which draws what the Worker priced and re-prices nothing. Run the
+script after any change to a `shared/flows-quant-*` module the browser reaches;
+it writes both, and never edit either bundle by hand. `scripts/strip-comments.mjs` is now a no-op on
 this tree and stays only because a Workers Builds build command may still
 invoke it; it can be retired once that dashboard field is confirmed clear.
 
@@ -513,7 +516,9 @@ invoke it; it can be retired once that dashboard field is confirmed clear.
   exposing what `/flows/strategy/` needs to reprice a leg the reader edits,
   and the laws the ticker dossier's Two worlds module draws:
   `repriceStructure`, the smile and law readers it stands on, and the
-  Black-76 primitives beneath them. It is a global because the strategy page
+  Black-76 primitives beneath them. The ticker dossier loads the read build
+  instead, under the same global name: the six readers it calls and none of
+  the pricer. It is a global because the strategy page
   is an IIFE with no module loader, and it is generated rather than written
   so a smile or a probability can never be computed one way on the server
   and another in the page.

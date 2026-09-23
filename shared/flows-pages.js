@@ -682,7 +682,7 @@ export function tickerPage({ username = "" } = {}) {
     username,
     chrome: false,
     styles: ["/assets/css/flows-ticker.css"],
-    scripts: ["/assets/js/flows-fresh.js", "/assets/js/flows-quant.bundle.js", "/assets/js/flows-ticker.js"],
+    scripts: ["/assets/js/flows-fresh.js", "/assets/js/flows-quant-read.bundle.js", "/assets/js/flows-ticker.js"],
     body: `
   <div class="visually-hidden ft-status" id="ftStatus" role="status">Loading the name…</div>
   <section class="ft-hero is-loading" id="ftHero" data-fx-hero aria-labelledby="ftHeroT"><div class="ft-hero-in">

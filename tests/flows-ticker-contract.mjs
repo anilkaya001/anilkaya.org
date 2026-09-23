@@ -222,7 +222,7 @@ const MODULES = ["m-worlds", "m-signal", "m-gamma", "m-hedge", "m-vol", "m-flow"
   ok(at(`/assets/css/flows-ticker.css?v=${VERSION}`) > at(`/assets/css/flows.css?v=${VERSION}`),
      "the route stylesheet is linked after the shared one, at the canonical asset version, through the per-route stylesheet hook");
   const ui = at(`/assets/js/flows-ui.js?v=${VERSION}`), fresh = at(`/assets/js/flows-fresh.js?v=${VERSION}`);
-  const quant = at(`/assets/js/flows-quant.bundle.js?v=${VERSION}`), tick = at(`/assets/js/flows-ticker.js?v=${VERSION}`);
+  const quant = at(`/assets/js/flows-quant-read.bundle.js?v=${VERSION}`), tick = at(`/assets/js/flows-ticker.js?v=${VERSION}`);
   ok(ui > 0 && ui < fresh && fresh < quant && quant < tick,
      "the scripts load in dependency order: the Depth primitives, the freshness layer, the pricing bundle, then the controller");
   for (const gone of ["flows-panels.js", "flows-drawers.js", "flows-cursor.js"]) ok(!served.includes(gone), `the page no longer links ${gone}`);

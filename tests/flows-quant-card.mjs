@@ -409,6 +409,33 @@ const FACT_INPUT = () => ({
   }
   ok(lines >= 10 && sameLines === lines && shared.size === 1,
      `a desk that shares one real-world law cache across its lines prices every one of them to the byte it prices alone (${sameLines} of ${lines}), from one law for the expiry rather than one per line (${shared.size})`);
+
+  const { READ_BUNDLE_ENTRY, READ_BUNDLE_OUT } = await import("../scripts/build-flows-quant-bundle.mjs");
+  const readFresh = await buildQuantBundle(READ_BUNDLE_ENTRY);
+  const readCommitted = fs.readFileSync(path.join(root, READ_BUNDLE_OUT), "utf8");
+  eq(readCommitted, readFresh, `${READ_BUNDLE_OUT} is exactly what the generator builds from the same shared modules; regenerate it, never edit it`);
+  ok(readCommitted.startsWith("var FlowsQuant=") && readCommitted.length * 3 < committed.length,
+     `the read build defines the same global at under a third of the full build (${readCommitted.length} against ${committed.length} bytes)`);
+  const readBox = { window: {} };
+  vm.runInNewContext(readCommitted + "\nwindow.FlowsQuant = FlowsQuant;", readBox);
+  const FR = readBox.window.FlowsQuant;
+  const tickerSrc = fs.readFileSync(path.join(root, "assets/js/flows-ticker.js"), "utf8");
+  const tickerUses = [...new Set([...tickerSrc.matchAll(/\bFQ\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1]))].sort();
+  ok(tickerUses.length >= 5, `the dossier reads the engine through FQ (${tickerUses.join(", ")})`);
+  for (const k of tickerUses) ok(typeof FR[k] === "function", `and the read build it loads exports ${k}, so no dossier chart falls back to its silence for want of a function`);
+  ok(typeof FR.repriceStructure !== "function" && typeof FR.priceStructure !== "function",
+     "while it carries no re-pricer: the dossier reads what the Worker priced and prices nothing itself");
+  const withSmile = plain.expiries.filter((e) => e && e.smile && e.forward);
+  ok(withSmile.length >= 1, `the card's engine block carries fitted smiles to read (${withSmile.length})`);
+  let readSame = 0, readN = 0;
+  for (const e of withSmile) {
+    const a = FQ.sliceFromSummary(e), b = FR.sliceFromSummary(e);
+    for (const x of [85, 95, 100, 105, 115]) {
+      readN++;
+      if (FQ.riskNeutralCdf(a, x) === FR.riskNeutralCdf(b, x) && FQ.sliceVolK(a, Math.log(x / 100)) === FR.sliceVolK(b, Math.log(x / 100))) readSame++;
+    }
+  }
+  eq(readSame, readN, `and both builds read every fitted smile to the same bit (${readSame} of ${readN} points)`);
 }
 
 console.log(`✓ flows-quant-card: ${n} assertions — vendor chain rows read once, in fractions and by the ticker's own series; ` +

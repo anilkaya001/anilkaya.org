@@ -201,7 +201,7 @@ try {
       eq(tick.status, 200, "/flows/ticker/ renders for an authenticated session");
       const tickHtml = await tick.text();
       ok(tickHtml.includes("/assets/js/flows-ticker.js"), "the ticker page loads its own controller");
-      const order = ["/assets/js/flows-ui.js", "/assets/js/flows-fresh.js", "/assets/js/flows-quant.bundle.js", "/assets/js/flows-ticker.js"].map((src) => tickHtml.indexOf(src));
+      const order = ["/assets/js/flows-ui.js", "/assets/js/flows-fresh.js", "/assets/js/flows-quant-read.bundle.js", "/assets/js/flows-ticker.js"].map((src) => tickHtml.indexOf(src));
       ok(order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1])),
          "with the Depth primitives, the freshness layer and the pricing bundle FIRST — the controller builds every module out of FlowsUI and fails closed without it");
       ok(!tickHtml.includes("/assets/js/flows-panels.js") && !tickHtml.includes("/assets/js/flows-drawers.js"),
