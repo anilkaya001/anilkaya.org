@@ -23,6 +23,7 @@ import { buildFlowAlerts, mergeAlerts } from "./shared/flows-alerts.js";
 import { shapeTide } from "./shared/flows-pulse.js";
 import { isRefreshWindow } from "./shared/flows-freshness.js";
 import { archiveWriteAction, ARCHIVE_REFUSALS } from "./shared/flows-archive.js";
+import { readExpiryBreakdown } from "./shared/flows-positioning.js";
 
 const COURSE_ASSET_PATH = "/lab/course";
 
@@ -1793,21 +1794,7 @@ async function buildStrategyContext(env, ctx, ticker) {
   const asOf = tapeDay || dailyDate;
   if (!asOf) throw new HttpError(502, "chain_no_spot", "No usable session date for that symbol");
 
-  const readExpiries = (raw) => {
-    const out = [];
-    for (const row of unwrapRows(raw)) {
-      const expiry = row && typeof row.expiry === "string" ? row.expiry.slice(0, 10) : null;
-      if (!expiry || !EXPIRY_RE.test(expiry)) continue;
-      out.push({
-        expiry,
-        chains: numOrNull(row.chains),
-        oi: numOrNull(row.open_interest),
-        volume: numOrNull(row.volume),
-      });
-    }
-    out.sort((a, b) => (a.expiry < b.expiry ? -1 : a.expiry > b.expiry ? 1 : 0));
-    return out;
-  };
+  const readExpiries = (raw) => readExpiryBreakdown(unwrapRows(raw));
 
   let expiries = readExpiries(breakdown);
 

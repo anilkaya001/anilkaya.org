@@ -97,9 +97,9 @@ const upstream = http.createServer((req, res) => {
     if (ticker === "ZZZ") return send(200, { data: [] });
     if (ticker === "YYY") return send(500, {});
     return send(200, { data: [
-      { expiry: NEAR, chains: 5, open_interest: 1320, volume: 250 },
-      { expiry: BROKEN, chains: 10, open_interest: 400, volume: 5 },
-      { expiry: FAR, chains: 12223, open_interest: 90000, volume: 40 },
+      { expires: NEAR, chains: 5, open_interest: 1320, volume: 250 },
+      { expires: BROKEN, chains: 10, open_interest: 400, volume: 5 },
+      { expires: FAR, chains: 12223, open_interest: 90000, volume: 40 },
     ] });
   }
 
@@ -264,6 +264,11 @@ try {
        `warning before the read beats confessing after it`);
     ok(/42d/.test(opts[0].label),
        "and each option carries its days to expiry, counted in calendar days from the session");
+    ok(!upstreamCalls.some((u) => /\/stock\/AAA\/expiry-breakdown\?.*date=/.test(u)) &&
+       !upstreamCalls.some((u) => /\/stock\/AAA\/greek-exposure\/expiry/.test(u)),
+       "the breakdown is read under the vendor's live field name `expires` (probe 2026-09-23), " +
+       "so the list arrives on the first call and no dated retry or greek-exposure fallback " +
+       "is spent rediscovering it");
   }
 
   {
