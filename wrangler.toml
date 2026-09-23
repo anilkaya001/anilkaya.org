@@ -25,10 +25,20 @@ binding = "AI"
 [triggers]
 crons = ["1-59/5 13-21 * * 1-5", "*/30 * * * *"]
 
+[[ratelimits]]
+name = "UW_ONDEMAND"
+namespace_id = "1101"
+simple = { limit = 120, period = 60 }
+
 [vars]
 FLOWS_SESSION_EPOCH = "2"
 FLOWS_ASK_MODEL = "@cf/zai-org/glm-4.7-flash"
 FLOWS_ASK_NEURONS = "5500,36400"
 FLOWS_ASK_FALLBACK_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
 FLOWS_ASK_FALLBACK_NEURONS = "26668,204805"
+FLOWS_LIVE_MODE = "actions"
+FLOWS_LIVE_REPO = "anilkaya001/anilkaya.org"
+FLOWS_LIVE_REF = "main"
+FLOWS_LIVE_WORKFLOW = "flows-live.yml"
+FLOWS_NIGHTLY_WORKFLOW = "flows-pipeline.yml"
 

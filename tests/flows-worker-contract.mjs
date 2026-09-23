@@ -12,6 +12,7 @@ const server = await startWorker({ extraVars: [`FLOWS_INGEST_TOKEN:${INGEST_TOKE
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
+const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
 const url = (p) => server.baseURL + p;
 const get = (p, init) => fetch(url(p), { redirect: "manual", ...init });
@@ -1253,7 +1254,235 @@ try {
     }
   }
 
-  console.log(`✓ flows-worker: ${checks} assertions — public login, no-store gating, structural bypass resistance, bidirectional audience isolation, legacy learner tolerance, uniform failures, full sign-in round trip, and the two market-wide keys this wave added served on their own gated routes: the sector option lean beside — never merged into — the sector momentum it shares eleven tickers with, and the news tape whose absent per-ticker form is asserted to stay absent. Plus the retirement of the card dialog: the four board routes serve neither it nor the 151k panel library it was the only caller of, and their own ?t= addresses — pushed into history on every open the modal ever had — are 302'd to /flows/ticker/ with the surface they came from, from a Location that is a pure function of the request URL and reads no payload and no session`);
+  {
+    const { mergeLiveAlerts, LIVE_BUDGET, LIVE_KEYS, freshEnvelope } = await import("../shared/flows-live.js");
+    const { phaseAt } = await import("../shared/flows-freshness.js");
+    const { signFlowsSession } = await import("../shared/flows-auth.js");
+    const { fakeFlowAlerts } = await import("../scripts/flows-legs/live-fake.mjs");
+    const { startStubVendor, startStubGithub } = await import("./live-stubs.mjs");
+    const et = (iso) => Date.parse(iso);
+    const marketNow = { value: et("2026-09-23T10:06:00-04:00") };
+    const vendor = await startStubVendor({ marketSession: "2026-09-23", marketNow, tapeSession: "2026-09-22" });
+    const github = await startStubGithub();
+    const LIVE_TOKEN = "test-live-token-abcdefghijklmnopqrstuv";
+    const live = await startWorker({ extraVars: [
+      `FLOWS_INGEST_TOKEN:${INGEST_TOKEN}`, `FLOWS_LIVE_TOKEN:${LIVE_TOKEN}`, "UW_API_KEY:stub-uw-key",
+      `UW_BASE:${vendor.base}`, "GITHUB_DISPATCH_TOKEN:stub-dispatch-token", `GITHUB_API_BASE:${github.base}`,
+    ] });
+    const L = (p) => live.baseURL + p;
+    const cookie = { Cookie: "flows_session=" + await signFlowsSession(FLOWS_TEST_USER, SESSION_SECRET, 600, "1") };
+    const ingest = (key, method, token, body) => fetch(L("/api/flows/ingest?key=" + encodeURIComponent(key)), {
+      method, redirect: "manual",
+      headers: { Authorization: "Bearer " + token, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+      body: body === undefined ? undefined : (typeof body === "string" ? body : JSON.stringify(body)),
+    });
+    const tick = async (cron, iso) => {
+      const res = await fetch(L(`/cdn-cgi/handler/scheduled?cron=${encodeURIComponent(cron)}&time=${et(iso)}`));
+      await res.text();
+      return res.status;
+    };
+    const RTH = "1-59/5 13-21 * * 1-5";
+    const HOUSE = "*/30 * * * *";
+    const fresh = (key, readAt, session = "2026-09-23") => ({ v: 1, readAt, session, cadenceS: LIVE_KEYS[key].cadenceS,
+      source: "actions", writer: "flows-live@test", vendorAt: null });
+    try {
+      const board = { side: "long", generatedAt: "2026-09-22T21:40:00.000Z", sessionDate: "2026-09-22", rows: [] };
+      eq((await ingest("board:long", "POST", INGEST_TOKEN, board)).status, 200, "the nightly token still writes the nightly board");
+      for (const key of ["board:long", "board:long:2026-09-22", "scores:2026-09-22", "card:AAPL", "flowalerts"]) {
+        const res = await ingest(key, "POST", LIVE_TOKEN, board);
+        eq(res.status, 403, `LAYER 2 (credential): the live token is refused on ${key}`);
+        eq((await res.json()).error.code, "live_token_scope", "with its own code");
+      }
+      eq((await ingest("live:breadth", "DELETE", LIVE_TOKEN)).status, 403, "the live token can delete nothing");
+      eq((await ingest("board:long", "GET", LIVE_TOKEN)).status, 200,
+        "it may READ the board it plans the strip from");
+      eq((await ingest("card:AAPL", "GET", LIVE_TOKEN)).status, 403, "and nothing else of the nightly store");
+      const nightlyOnLive = await ingest("live:market", "POST", INGEST_TOKEN, {});
+      eq(nightlyOnLive.status, 403, "the nightly token is refused on live:market");
+      eq((await nightlyOnLive.json()).error.code, "nightly_token_scope", "so the nightly run cannot corrupt a live row");
+      eq((await ingest("live:breadth", "GET", INGEST_TOKEN)).status, 200, "though it may read the live union it merges");
+      const wrongWriter = await ingest("live:market", "POST", LIVE_TOKEN,
+        { v: 1, fresh: { ...fresh("live:market", "2026-09-23T14:00:00.000Z"), source: "worker" } });
+      eq(wrongWriter.status, 403, "ONE WRITER PER KEY: the Actions token cannot write the Worker's live:market");
+      eq((await ingest("live:breadth", "POST", LIVE_TOKEN, { v: 1 })).status, 400, "a live payload with no fresh envelope is refused");
+      eq((await ingest("live:unknown", "POST", LIVE_TOKEN, { v: 1 })).status, 400, "and an unregistered live key");
+      const big = { v: 1, key: "live:vol", session: "2026-09-23", fresh: fresh("live:vol", "2026-09-23T14:00:00.000Z"),
+        pad: "x".repeat(LIVE_KEYS["live:vol"].maxBytes) };
+      eq((await ingest("live:vol", "POST", LIVE_TOKEN, big)).status, 413, "a live key over its own cap is refused");
+      const breadth = (readAt) => ({ v: 1, key: "live:breadth", session: "2026-09-23", fresh: fresh("live:breadth", readAt),
+        sectors: { t: [], rows: {} } });
+      const w1 = await ingest("live:breadth", "POST", LIVE_TOKEN, breadth("2026-09-23T14:10:00.000Z"));
+      eq(w1.status, 200, "a well-formed Tier 2 payload lands");
+      eq((await w1.json()).stored, "written", "and is written");
+      const w0 = await ingest("live:breadth", "POST", LIVE_TOKEN, breadth("2026-09-23T14:05:00.000Z"));
+      eq((await w0.json()).stored, "older-than-held", "a delayed older read never overwrites a newer one");
+
+      eq((await ingest("board:long:2026-01-02", "POST", INGEST_TOKEN, { ...board, sessionDate: "2026-01-02" })).status, 200,
+        "a dated archive row is created");
+      let refused = null;
+      try { await live.d1("UPDATE flows_payload SET payload = '{}' WHERE id = 'board:long:2026-01-02'"); }
+      catch (error) { refused = String(error && error.message); }
+      ok(refused && /flows archive rows are immutable/.test(refused),
+        "LAYER 4 (storage): a direct UPDATE of a dated row aborts with the trigger's message, whatever the code path");
+      await live.d1("UPDATE flows_payload SET updated_at = updated_at WHERE id = 'board:long'");
+      ok(true, "while the undated nightly rows stay writable");
+      let checked = null;
+      try {
+        await live.d1("INSERT INTO flows_live (id, payload, read_at, session, cadence_s, source, writer, updated_at) " +
+          "VALUES ('board:long', '{}', 1, '2026-09-23', 300, 'worker', 'x', 1)");
+      } catch (error) { checked = String(error && error.message); }
+      ok(checked && /CHECK constraint/i.test(checked), "LAYER 3 (table): flows_live refuses any id outside live:*");
+
+      const pulse = { v: 2, generatedAt: "2026-09-22T21:40:00.000Z", sessionDate: "2026-09-22",
+        readAt: "2026-09-22T21:40:00.000Z", readDay: "2026-09-22", refreshed: "nightly", cadenceMinutes: 15,
+        tide: { status: "ok", points: [{ t: "2026-09-22T13:30:00Z", callPrem: 1, putPrem: 2, vol: 3 }], seen: 1, cap: 480, shed: 0 },
+        totals: { status: "ok", rows: [{ date: "2026-09-22", callPrem: 1, callVol: 2, putPrem: 3, putVol: 4 }] } };
+      const pulseText = JSON.stringify(pulse);
+      eq((await ingest("pulse", "POST", INGEST_TOKEN, pulseText)).status, 200, "a nightly pulse lands");
+      eq((await ingest("meta", "POST", INGEST_TOKEN, { sessionDate: "2026-09-22", generatedAt: "2026-09-22T21:40:00.000Z" })).status,
+        200, "and the nightly meta");
+
+      eq(await tick(RTH, "2026-09-23T10:06:00-04:00"), 200, "the market-hours cron fires the RTH tick");
+      eq(vendor.count(/^\/api\/(market|net-flow)\//), 5, "TIER 1 spends exactly five vendor calls");
+      const mk = await fetch(L("/api/flows/lk?k=market"), { headers: cookie });
+      eq(mk.status, 200, "live:market is served on the live read route");
+      const market = await mk.json();
+      eq(market.key, "live:market", "whole, as the Worker wrote it");
+      eq(market.fresh.source, "worker", "stamped by the Worker");
+      eq(market.fresh.readAt, new Date(et("2026-09-23T10:06:00-04:00")).toISOString(),
+        "at the cron's scheduled instant, so a late invocation cannot pass for an earlier read");
+      ok(market.tide.status === "ok" && market.tide.n >= 7 && market.zeroDte.status === "ok" &&
+         market.etf.SPY.status === "ok" && market.etf.QQQ.status === "ok" && market.sectors.status === "ok",
+        "with all five feeds shaped");
+      eq(mk.headers.get("x-fresh-source"), "worker", "X-Fresh-Source comes from the row's column");
+      eq(mk.headers.get("x-fresh-cadence"), "300", "and X-Fresh-Cadence");
+      ok(["live", "fresh", "stale", "closed"].includes(mk.headers.get("x-fresh-state")), "X-Fresh-State is one of the four states");
+      ok(/^\d{13}$/.test(mk.headers.get("x-server-now") || ""), "and X-Server-Now gives the browser its skew");
+      eq((await fetch(L("/api/flows/lk?k=market"))).status, 401, "the live route is gated like every other");
+      eq((await fetch(L("/api/flows/lk?k=board:long"), { headers: cookie })).status, 400, "and reaches live keys only");
+
+      const pulseAfter = await (await ingest("pulse", "GET", INGEST_TOKEN)).text();
+      eq(pulseAfter, pulseText, "ONE WRITER PER KEY: the tick left the nightly pulse row byte-identical");
+      const served = await fetch(L("/api/flows/pulse"), { headers: cookie });
+      eq(served.headers.get("x-live-overlay"), "live:market", "and the page is served today's tide by a read-time overlay");
+      const sp = await served.json();
+      ok(sp.refreshed === "intraday" && sp.readDay === "2026-09-23" && sp.tide.points.length === market.tide.n,
+        "stamped intraday on today's read, with the live points");
+      deep(sp.totals, pulse.totals, "while every nightly feed beside the tide is the nightly's own");
+
+      eq(github.dispatches.length, 0, "10:06 is not a dispatch tick");
+      marketNow.value = et("2026-09-23T10:16:00-04:00");
+      await tick(RTH, "2026-09-23T10:16:00-04:00");
+      eq(github.dispatches.length, 1, "10:16 dispatches the Tier 2 run");
+      const d1 = github.dispatches[0];
+      eq(d1.path, "/repos/anilkaya001/anilkaya.org/actions/workflows/flows-live.yml/dispatches",
+        "to the live workflow of this repository");
+      ok(d1.auth === "Bearer stub-dispatch-token" && d1.body.ref === "main" && d1.body.inputs.origin === "worker",
+        "authenticated with the dispatch token, on main, saying the Worker sent it");
+      marketNow.value = et("2026-09-23T10:21:00-04:00");
+      await tick(RTH, "2026-09-23T10:21:00-04:00");
+      eq(github.dispatches.length, 1, "at 10:21 the breadth read of 10:10 is eleven minutes old, so the watchdog stays quiet");
+      marketNow.value = et("2026-09-23T10:56:00-04:00");
+      await tick(RTH, "2026-09-23T10:56:00-04:00");
+      eq(github.dispatches.length, 2, "at 10:56, with breadth 46 minutes old, the watchdog re-dispatches off the 15-minute grid");
+      eq(github.dispatches[1].body.inputs.origin, "watchdog", "and says so");
+      marketNow.value = et("2026-09-23T11:01:00-04:00");
+      await tick(RTH, "2026-09-23T11:01:00-04:00");
+      eq(github.dispatches.length, 2, "the 11:01 grid tick sees the watchdog's run in flight and sends nothing");
+      marketNow.value = et("2026-09-23T11:06:00-04:00");
+      await tick(RTH, "2026-09-23T11:06:00-04:00");
+      eq(github.dispatches.length, 2, "and the watchdog fires only once per stall");
+
+      const beforeHoliday = vendor.count(/^\/api\/(market|net-flow)\//);
+      await tick(RTH, "2026-09-24T10:06:00-04:00");
+      await tick(RTH, "2026-09-24T10:11:00-04:00");
+      eq(vendor.count(/^\/api\/(market|net-flow)\//) - beforeHoliday, 5,
+        "A TAPE-DERIVED HOLIDAY: when the tide still carries yesterday's date after 09:45, the day is marked closed and " +
+        "the next tick spends no vendor call");
+
+      await tick(HOUSE, "2026-09-23T17:14:00-04:00");
+      eq(github.dispatches.length, 2, "the nightly is not dispatched before 17:15 ET");
+      await tick(HOUSE, "2026-09-23T17:30:00-04:00");
+      eq(github.dispatches.length, 3, "at 17:30 ET, with meta a session behind, the Worker dispatches the nightly");
+      eq(github.dispatches[2].path, "/repos/anilkaya001/anilkaya.org/actions/workflows/flows-pipeline.yml/dispatches",
+        "to the nightly workflow");
+      eq(github.dispatches[2].body.inputs.origin, "worker", "with origin worker");
+      await tick(HOUSE, "2026-09-23T18:00:00-04:00");
+      eq(github.dispatches.length, 3, "once");
+      await tick(HOUSE, "2026-09-23T18:30:00-04:00");
+      eq(github.dispatches.length, 4, "and once more after 18:15 when nothing has landed");
+      await tick(HOUSE, "2026-09-23T19:00:00-04:00");
+      eq(github.dispatches.length, 4, "never a third time");
+
+      const alerts = mergeLiveAlerts(null, [{ body: fakeFlowAlerts({ session: "2026-09-23",
+        now: et("2026-09-23T11:00:00-04:00"), count: 20 }), full: false }],
+      { at: et("2026-09-23T11:00:00-04:00"), session: "2026-09-23", writer: "flows-live@test" }).write;
+      eq((await ingest("flowalerts", "POST", INGEST_TOKEN, { v: 2, sessionDate: "2026-09-22", generatedAt: "2026-09-22T21:40:00.000Z",
+        readAt: "2026-09-22T21:40:00.000Z", rows: [], status: "quiet" })).status, 200, "a nightly flowalerts lands");
+      eq((await ingest("live:alerts", "POST", LIVE_TOKEN, alerts)).status, 200, "and today's live union lands beside it");
+      const fa = await fetch(L("/api/flows/flowalerts"), { headers: cookie });
+      eq(fa.headers.get("x-live-overlay"), "live:alerts", "the alerts route serves the live union for the later session");
+      eq((await fa.json()).key, "live:alerts", "whole and unparsed");
+
+      const now = await fetch(L("/api/flows/now?k=market,breadth,tape&n=pulse,board:long,brief"), { headers: cookie });
+      eq(now.status, 200, "the heartbeat answers");
+      const nb = await now.json();
+      ok(nb.keys["live:market"].updatedAt > 0 && nb.keys["live:breadth"].readAt === "2026-09-23T14:10:00.000Z",
+        "with every subscribed live key's updatedAt and read instant from columns alone");
+      eq(nb.keys["live:tape"].state, "pending", "an unwritten key is pending");
+      eq(nb.keys.pulse.session, "2026-09-22", "and nightly keys carry their session");
+      eq(nb.keys.brief.state, "pending", "an unpublished nightly key is pending too");
+      ok(nb.phase && typeof nb.phase.phase === "string" && typeof nb.phase.endsAt === "string",
+        "the phase and when it ends travel with it");
+
+      const t0 = vendor.count(/net-prem-ticks$/);
+      const racers = await Promise.all([0, 1, 2].map(() => fetch(L("/api/flows/tape?t=AAPL"), { headers: cookie })));
+      eq(vendor.count(/net-prem-ticks$/) - t0, 1,
+        "SINGLE-FLIGHT: three concurrent readers of a cold tape spend exactly one refresh");
+      const hows = racers.map((r) => r.headers.get("x-tape")).sort();
+      ok(hows.includes("refreshed"), `one of them refreshed (${hows.join(", ")})`);
+      const first = await racers.find((r) => r.headers.get("x-tape") === "refreshed").json();
+      ok(first.prem.status === "ok" && first.prem.n >= 78 && first.gex.status === "pending",
+        "the first refresh reads the premium leg (net-prem-ticks and alerts) and leaves gamma pending — one leg per " +
+        "invocation keeps a cold isolate inside 10 ms of CPU");
+      eq(first.session, "2026-09-22", "and dates itself from the vendor's rows, not the wall clock");
+      const second = await fetch(L("/api/flows/tape?t=AAPL"), { headers: cookie });
+      eq(second.headers.get("x-tape"), "stale-refreshing", "the next reader is served at once while the missing leg refreshes");
+      let legs = 0;
+      for (let i = 0; i < 20 && legs !== 3; i++) {
+        await new Promise((r) => setTimeout(r, 250));
+        const r = await fetch(L("/api/flows/tape?t=AAPL"), { headers: cookie });
+        legs = Number(r.headers.get("x-tape-legs"));
+        await r.text();
+      }
+      eq(legs, 3, "until both legs are held");
+      eq(vendor.count(/spot-exposures$/), 1, "the gamma leg was read once");
+      const full = await (await fetch(L("/api/flows/tape?t=AAPL"), { headers: cookie })).json();
+      ok(full.gex.status === "ok" && full.prem.status === "ok", "and the tape carries both");
+      ok(Date.parse(full.fresh.readAt) <= Date.parse(full.gex.readAt), "its fresh.readAt is the older leg");
+
+      const q1 = await fetch(L("/api/flows/live?t=AAPL"), { headers: cookie });
+      const qb = await q1.json();
+      ok(qb.status === "ok" && qb.price === 101.5, "the quote reads the vendor's stock-state");
+      const phase = phaseAt(Date.now()).phase;
+      eq(q1.headers.get("x-quote-ttl"), String(LIVE_BUDGET.quoteTtlS[phase]),
+        `its cache life follows the market phase (${phase}): 5 s in session, 30 s pre and post, 6 h closed`);
+      eq(q1.headers.get("x-fresh-class"), "quote", "and it carries the quote class");
+      const before = vendor.count(/stock-state$/);
+      const q2 = await fetch(L("/api/flows/live?t=AAPL"), { headers: cookie });
+      await q2.text();
+      if (LIVE_BUDGET.quoteTtlS[phase] >= 30) {
+        eq(vendor.count(/stock-state$/) - before, 0, "inside its life a second read is served from the cache");
+        eq(q2.headers.get("x-chain-cache"), "hit", "and says so");
+      }
+    } finally {
+      await live.stop();
+      await vendor.close();
+      await github.close();
+    }
+  }
+
+  console.log(`✓ flows-worker: ${checks} assertions — public login, no-store gating, structural bypass resistance, bidirectional audience isolation, legacy learner tolerance, uniform failures, full sign-in round trip, and the two market-wide keys this wave added served on their own gated routes: the sector option lean beside — never merged into — the sector momentum it shares eleven tickers with, and the news tape whose absent per-ticker form is asserted to stay absent. Plus the retirement of the card dialog: the four board routes serve neither it nor the 151k panel library it was the only caller of, and their own ?t= addresses — pushed into history on every open the modal ever had — are 302'd to /flows/ticker/ with the surface they came from, from a Location that is a pure function of the request URL and reads no payload and no session. Plus the live layer: one writer per key held by credential, table and trigger, Tier 1 in exactly five vendor calls, read-time overlays that leave the nightly rows byte-identical, the dispatch clock with its in-flight guard and one-shot watchdog, a tape-derived holiday, the tape's single flight, and quote lives that follow the market phase`);
 } finally {
   await server.stop();
 }

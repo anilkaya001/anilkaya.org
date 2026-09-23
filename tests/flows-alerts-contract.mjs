@@ -474,33 +474,43 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
   eq(wouldBe.record.entered, 0, "nothing entered");
   eq(wouldBe.record.carried, 3, "and everything was carried");
 
-  const worker = readFileSync(new URL("../worker.js", import.meta.url), "utf8");
-  const body = worker.slice(
-    worker.indexOf("async function refreshFlowsIntraday"),
-    worker.indexOf("async function readFlowsPayload"));
-  ok(body.length > 500, "the refresh handler was located in worker.js");
-  ok(/alerts\.status === "ok" && alerts\.rows\.length/.test(body),
-    "AND THE EMPTY-READ GUARD STILL STANDS. Its absence cost the product its entire " +
-    "alerts feed every session once already; the merge is not a reason to drop it, " +
-    "because an empty read written into the record would still advance readAt — the " +
+  const live = readFileSync(new URL("../shared/flows-live.js", import.meta.url), "utf8");
+  const at = live.indexOf("export function mergeLiveAlerts");
+  const body = live.slice(at, live.indexOf("\nexport ", at + 10));
+  ok(at > 0 && body.length > 500, "the live alert merge was located in shared/flows-live.js");
+  ok(/if \(!\(alerts\.status === "ok" && alerts\.rows\.length\)\) \{\s*return \{ write: null/.test(body),
+    "AND THE EMPTY-READ GUARD STILL STANDS, now in the one function the live layer merges through. Its " +
+    "absence cost the product its entire alerts feed every session once already; the merge is not a " +
+    "reason to drop it, because an empty read written into the record would still advance readAt — the " +
     "page's claim about how fresh the rows are — over rows nothing confirmed");
-  eq((body.match(/upsert\("flowalerts"/g) || []).length, 1,
-    "with exactly one write to the key in the handler, so the guard cannot be routed around");
-
-  const guardAt = body.indexOf("if (merged && merged.rows.length) {");
-  const writeAt = body.indexOf("await upsert(\"flowalerts\"");
-  const elseAt = body.indexOf("} else {", guardAt);
-  ok(guardAt > 0 && writeAt > guardAt && elseAt > writeAt,
-    "and that write sits INSIDE the merge's own emptiness check as well — a ceiling " +
-    "that somehow kept nothing must not be able to blank the key either");
-  ok(/mergeAlerts\(prev, alerts/.test(body),
-    "the handler merges into the STORED payload rather than spreading over it: " +
+  ok(/if \(!merged\.rows\.length\) \{\s*return \{ write: null/.test(body),
+    "and the merge's own emptiness check declines as well — a ceiling that somehow kept nothing must " +
+    "not be able to blank the key either");
+  ok(/mergeAlerts\(held \|\| prev \|\| null, alerts/.test(body),
+    "the merge folds into the STORED payload rather than spreading over it: " +
     "`{...prev, ...alerts}` is the exact expression that deleted the morning's flags");
-  ok(/readTruncated: alerts\.seen \+ alerts\.unusable >= ALERT_READ_LIMIT\s*\|\| \(!merged\.record\.reset && prev\.readTruncated === true\)/.test(body),
+  ok(/readTruncated: truncatedNow \|\| \(!merged\.record\.reset && !!held && held\.readTruncated === true\)/.test(body),
     "A FULL READ EARLIER IN THE SESSION KEEPS THE UNION A FLOOR. The record is the union of every read " +
-    "today, so one read that came back at the 60-row cap makes its count a lower bound until the session " +
-    "resets; judged on the latest read alone, a 60-row read followed by a 10-row one published seen 70 with " +
-    "readTruncated false, and the Unusual caption dropped its 'at least'");
+    "today, so one read that hit its page cap makes its count a lower bound until the session resets; " +
+    "judged on the latest read alone, a capped read followed by a small one would publish readTruncated " +
+    "false and the Unusual caption would drop its 'at least'");
+
+  const leg = readFileSync(new URL("../scripts/flows-legs/live.mjs", import.meta.url), "utf8");
+  eq((leg.match(/put\("live:alerts"/g) || []).length, 1,
+    "the live leg writes the key exactly once, so the guard cannot be routed around");
+  ok(/if \(merged\.write\) await put\("live:alerts", merged\.write\);/.test(leg),
+    "and that single write sits behind the merge's own verdict, so a declined read never publishes");
+
+  const worker = readFileSync(new URL("../worker.js", import.meta.url), "utf8");
+  ok(!/async function refreshFlowsIntraday/.test(worker),
+    "ONE WRITER PER KEY: the Worker's cron no longer rewrites the nightly flowalerts, pulse or brief " +
+    "rows. Two writers on one key is how the 2026-09-22 morning union was lost");
+  const inserts = worker.split("INSERT INTO flows_payload").length - 1;
+  const ingest = worker.slice(worker.indexOf('if (path === "/api/flows/ingest")'),
+    worker.indexOf('if (path.startsWith("/api/flows/"))'));
+  eq(ingest.split("INSERT INTO flows_payload").length - 1, inserts,
+    "and every write to flows_payload in worker.js is inside the ingest route, whose only caller is the " +
+    "nightly token — the live layer writes flows_live and nothing else");
 }
 
 {
@@ -543,17 +553,16 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
     "every read after it read that stamp back out and re-published it");
 
   const worker = readFileSync(new URL("../worker.js", import.meta.url), "utf8");
-  const handler = worker.slice(
-    worker.indexOf("async function refreshFlowsIntraday"),
-    worker.indexOf("async function readFlowsPayload"));
+  const liveSrc = readFileSync(new URL("../shared/flows-live.js", import.meta.url), "utf8");
+  const handler = liveSrc.slice(liveSrc.indexOf("export function mergeLiveAlerts"));
 
-  const callAt = handler.indexOf("buildFlowAlerts(raw");
+  const callAt = handler.indexOf("buildFlowAlerts(rawRows");
   const call = handler.slice(callAt, handler.indexOf("});", callAt) + 3);
   ok(callAt > 0 && /stageComplete:\s*false/.test(call),
-    "AND THE CRON DECLARES ITS MAP PARTIAL, in the call rather than beside it. The " +
-    "default is complete because the pipeline's map is; a caller that forgets to say " +
-    "otherwise is back to publishing the falsehood, so the declaration is asserted " +
-    "where it is made");
+    "AND THE LIVE LAYER DECLARES ITS MAP PARTIAL, in the call rather than beside it. The " +
+    "default is complete because the pipeline's map is; the live run knows only the board " +
+    "names, so a caller that forgets to say otherwise is back to publishing the falsehood, " +
+    "and the declaration is asserted where it is made");
 
   {
     const dateless = {
@@ -678,15 +687,19 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
       ...m, readAt: T1, readDay: D28, refreshed: "intraday",
       vendorLimit: null, vendorTruncated: null, readLimit: 60, readTruncated: true,
     }).length;
-    const cap = Number(/FLOWS_MAX_PAYLOAD_BYTES = (\d+) \* 1024/.exec(worker)[1]) * 1024;
-    eq(cap, 128 * 1024, "worker.js still holds this key's other writer to 128KB");
+    const ingestCap = Number(/FLOWS_MAX_PAYLOAD_BYTES = (\d+) \* 1024/.exec(worker)[1]) * 1024;
+    eq(ingestCap, 128 * 1024, "worker.js still holds every ingest to 128KB");
+    const liveCap = Number(/"live:alerts": spec\("breadth", "actions", (\d+) \* 1024/.exec(liveSrc)[1]) * 1024;
+    const cap = Math.min(ingestCap, liveCap);
+    ok(liveCap <= ingestCap,
+      `and the live key the intraday union now lives in is capped at ${liveCap} bytes, inside the ingest's own bound`);
     for (const [label, sized] of [["the row ceiling", full], ["the byte ceiling", byBytes]]) {
       const stored = envelope(sized);
       ok(stored < cap,
         `a FULL record under ${label}, built from the widest rows the shaper can emit, ` +
         `is ${stored} bytes against the ${cap} the ingest route allows — one key with ` +
-        "two writers may not have two sizes, and the cron writes to D1 directly where " +
-        "nothing else would catch it");
+        "the live key and the nightly key it hands to may not have two sizes, and a record the " +
+        "live ingest refused would freeze the union silently");
       ok(stored > cap * 0.5,
         `and that fixture (${label}) is genuinely near the bound rather than trivially ` +
         "under it — a bound no fixture can approach certifies nothing about the bound");
@@ -817,5 +830,5 @@ console.log(`✓ flows-alerts: ${checks} assertions — a vendor flag that is ab
   `shape it was measured on, a partial stage map that publishes null rather than the ` +
   `word the page spells out as a claim about the screener, a dateless record told ` +
   `apart from a session boundary, counters that fall back to the minimum certainly ` +
-  `true instead of to zero, and the empty-read write guard still standing in worker.js ` +
-  `where the merge could not weaken it`);
+  `true instead of to zero, and the empty-read write guard still standing in the one live ` +
+  `merge where the Worker cron used to hold it, with the Worker itself no longer a writer`);

@@ -4,7 +4,8 @@ import path from "node:path";
 import { COURSE_TOPICS, SITE_ORIGIN } from "../shared/course-seo.js";
 import { applyMastery } from "../shared/mastery.js";
 import { signSession } from "../shared/session.js";
-import { REPO_ROOT, SESSION_SECRET, startWorker } from "./worker-server.mjs";
+import { signFlowsSession } from "../shared/flows-auth.js";
+import { REPO_ROOT, SESSION_SECRET, FLOWS_TEST_USER, startWorker } from "./worker-server.mjs";
 
 const server = await startWorker();
 const base = server.baseURL;
@@ -843,7 +844,23 @@ try {
   const expired = await signSession({ sub: "g_expired", exp: Date.now() - 1 }, SESSION_SECRET);
   assert.equal((await json(await fetch(base + "/api/progress", { headers: { Cookie: `session=${expired}` } }), 401)).error.code, "unauthorized");
 
-  console.log("✓ worker: routing, metadata, headers, API validation, D1 union, mastery and placement isolation, generation-fenced reset, derived points");
+  const lab = await fetch(base + "/api/me");
+  assert.equal(lab.headers.get("x-server-now"), null, "a Lab API response carries no Flows clock header");
+  assert.equal(lab.headers.get("x-fresh-state"), null, "and no freshness state");
+  const flowsToken = await signFlowsSession(FLOWS_TEST_USER, SESSION_SECRET, 600, "1");
+  for (const [route, cookie] of [["/api/flows/board", ""], ["/api/flows/lk?k=market", "flows_session=" + flowsToken],
+    ["/api/flows/now?k=market,breadth&n=board:long", "flows_session=" + flowsToken]]) {
+    const r = await fetch(base + route, { headers: cookie ? { Cookie: cookie } : {} });
+    assert.match(r.headers.get("x-server-now") || "", /^\d{13}$/, `${route}: every Flows API response carries X-Server-Now`);
+    assert.equal(r.headers.get("cache-control"), "no-store", `${route}: and stays no-store`);
+    assertSecurity(r, false);
+  }
+  const pendingLive = await fetch(base + "/api/flows/lk?k=market", { headers: { Cookie: "flows_session=" + flowsToken } });
+  assert.equal(pendingLive.status, 200, "an unpublished live key is a 200 pending, not an error");
+  assert.equal(pendingLive.headers.get("x-fresh-state"), "pending", "and says pending in its freshness header");
+  assert.equal((await pendingLive.json()).status, "pending");
+
+  console.log("✓ worker: routing, metadata, headers, API validation, D1 union, mastery and placement isolation, generation-fenced reset, derived points, and the Flows clock headers kept off the Lab APIs");
 } finally {
   await server.stop();
 }

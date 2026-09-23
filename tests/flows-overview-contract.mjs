@@ -161,6 +161,22 @@ await post("market", market);
 await post("flowalerts", alerts);
 await post("scoretrack", scoretrack(TRACK_DAYS));
 
+{
+  const { signFlowsSession } = await import("../shared/flows-auth.js");
+  const { SESSION_SECRET } = await import("./worker-server.mjs");
+  const cookie = { Cookie: "flows_session=" + await signFlowsSession(FLOWS_TEST_USER, SESSION_SECRET, 600, "1") };
+  const now = await (await fetch(url("/api/flows/now?n=board:long,board:short,flowalerts,pulse,brief"), { headers: cookie })).json();
+  for (const key of ["board:long", "board:short", "flowalerts", "pulse"]) {
+    eq(now.keys[key].session, SESSION, `the heartbeat reads ${key}'s session from its column, without the payload`);
+    ok(["fresh", "stale"].includes(now.keys[key].state), `and judges it on the nightly clock (${now.keys[key].state})`);
+  }
+  eq(now.keys.brief.state, "pending", "an unpublished key is pending on the heartbeat, never stale");
+  const board = await fetch(url("/api/flows/board?side=long"), { headers: cookie });
+  await board.text();
+  eq(board.headers.get("x-fresh-session"), SESSION, "the board passthrough carries X-Fresh-Session");
+  ok(/^\d{13}$/.test(board.headers.get("x-server-now") || ""), "and X-Server-Now for the page's clock skew");
+}
+
 function tileShape(t) {
   const val = t.querySelector(".cc-tile-v");
   const sub = t.querySelector(".cc-tile-s");
