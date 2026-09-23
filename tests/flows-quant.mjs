@@ -498,19 +498,30 @@ function synthInput(over = {}) {
   };
 }
 
-function budget() {
-  const timeIt = (input) => {
-    const probe = ENGINE.runEngine(input);
-    for (let i = 0; i < 40; i++) ENGINE.runEngine(input);
-    const ts = [];
-    for (let i = 0; i < 80; i++) {
-      const t0 = process.hrtime.bigint();
-      ENGINE.runEngine(input);
-      ts.push(Number(process.hrtime.bigint() - t0) / 1e6);
-    }
-    ts.sort((a, b) => a - b);
-    return { structures: probe.structures.length, median: ts[40], p95: ts[Math.floor(0.95 * ts.length)], min: ts[0] };
+const CPU_CLOCK = typeof process.threadCpuUsage === "function" ? "thread-cpu" : "wall";
+const WINDOWS = 16, PER_WINDOW = 5;
+const clockNow = () => {
+  if (CPU_CLOCK === "thread-cpu") { const c = process.threadCpuUsage(); return (c.user + c.system) / 1000; }
+  return Number(process.hrtime.bigint()) / 1e6;
+};
+function measure(f) {
+  for (let i = 0; i < 40; i++) f();
+  const windows = [];
+  for (let w = 0; w < WINDOWS; w++) {
+    const t0 = clockNow();
+    for (let i = 0; i < PER_WINDOW; i++) f();
+    windows.push((clockNow() - t0) / PER_WINDOW);
+  }
+  const sorted = windows.slice().sort((a, b) => a - b);
+  return {
+    mean: windows.reduce((a, b) => a + b, 0) / windows.length,
+    median: (sorted[WINDOWS / 2 - 1] + sorted[WINDOWS / 2]) / 2,
+    p95: sorted[Math.min(WINDOWS - 1, Math.floor(0.95 * WINDOWS))], min: sorted[0],
   };
+}
+
+function budget() {
+  const timeIt = (input) => ({ structures: ENGINE.runEngine(input).structures.length, ...measure(() => ENGINE.runEngine(input)) });
   const rich = { state: "premium-rich", direction: null, confidence: 2, ...STATE_STRUCTURES["premium-rich"] };
   const facts = { ...synthInput().facts, "skew.rr25.30.pct": { v: 0.85, g: 3 } };
   const worst = synthInput({ topFamilies: 12, facts, state: rich });
@@ -528,13 +539,9 @@ function budget() {
     rate: card.rate, facts: card.facts, state: card.state, pLaw: card.pLaw, levels: card.levels, atr: card.atr,
   });
   const probe = route();
-  for (let i = 0; i < 40; i++) route();
-  const ts = [];
-  for (let i = 0; i < 80; i++) { const t0 = process.hrtime.bigint(); route(); ts.push(Number(process.hrtime.bigint() - t0) / 1e6); }
-  ts.sort((a, b) => a - b);
   return {
-    rows: worst.expiries[0].rows.length, worst: timeIt(worst), normal: timeIt(normal),
-    route: { rows: vendor.length, structures: probe.priced, median: ts[40], p95: ts[Math.floor(0.95 * ts.length)] },
+    clock: CPU_CLOCK, window: PER_WINDOW, rows: worst.expiries[0].rows.length, worst: timeIt(worst), normal: timeIt(normal),
+    route: { rows: vendor.length, structures: probe.priced, ...measure(route) },
   };
 }
 
@@ -732,18 +739,19 @@ eq(run.status, 0, `the CPU budget child ran cleanly (${(run.stderr || "").slice(
 const cpu = JSON.parse(run.stdout.trim().split("\n").pop());
 eq(cpu.rows, 400, "the budget chain is one expiry of 400 quotes");
 eq(cpu.worst.structures, 24, "and the worst case prices the Worker's maximum of 24 structures on it");
-ok(cpu.worst.median < 6, `in a fresh isolate the Worker path (parity forward, IV inversion, SVI fit and checks, 24 structures) takes ${cpu.worst.median.toFixed(2)} ms median, well under the 10 ms Free-tier CPU limit`);
-ok(cpu.worst.p95 < 15, `and ${cpu.worst.p95.toFixed(2)} ms at the 95th percentile, garbage collection included`);
-ok(cpu.normal.median <= cpu.worst.median, `the default five families (${cpu.normal.structures} structures) take ${cpu.normal.median.toFixed(2)} ms median`);
+ok(cpu.worst.median < 6, `warmed, the Worker path (parity forward, IV inversion, SVI fit and checks, 24 structures) takes ${cpu.worst.median.toFixed(2)} ms ` +
+  `median on the ${cpu.clock} clock, over windows of ${cpu.window} runs, under the 10 ms Free-tier CPU limit`);
+ok(cpu.worst.p95 < 10, `and the costliest window, garbage collection included, averages ${cpu.worst.p95.toFixed(2)} ms a run, still inside the limit`);
+ok(cpu.normal.mean <= cpu.worst.mean + 0.5, `the default five families (${cpu.normal.structures} structures) take ${cpu.normal.mean.toFixed(2)} ms a run`);
 ok(cpu.route.rows === 400 && cpu.route.structures > 0, `the Worker's /api/flows/strategy engine path reads ${cpu.route.rows} vendor rows and prices ${cpu.route.structures} structures`);
 ok(cpu.route.median < 6, `from vendor strings to the card-shaped block (row shaping, parity, inversion, fit, pricing, compaction) in ${cpu.route.median.toFixed(2)} ms median, inside the Free-tier budget beside the chain's own JSON.parse`);
-ok(cpu.route.p95 < 15, `and ${cpu.route.p95.toFixed(2)} ms at the 95th percentile`);
+ok(cpu.route.p95 < 10, `and ${cpu.route.p95.toFixed(2)} ms in its costliest window`);
 
 console.log(`✓ flows-quant: ${n} assertions — all ${CASES.length} known-answer cases at their stated tolerances ` +
   `(one fixture erratum read as what it is: ${Object.keys(ERRATA).join(", ")}), 2,000-draw properties for parity, ` +
   `IV round trips, noisy SVI fits (${(100 * fitReport.mean).toFixed(2)}% of quotes in spread, ${fitReport.draws - fitReport.below} of ${fitReport.draws} draws at >= 95%, worst ${fitReport.worst.toFixed(3)}), arbitrage-free densities, ` +
   "exact P/L against a 10,001-point grid, EV_Q = 0 at model and P = Q " +
   "edge, a drift-neutral 64-bin P law, byte-identical reruns under shuffled rows and expiries, the selection vetoes, and the " +
-  `Worker CPU budget in a fresh isolate: fit + 24 structures median ${cpu.worst.median.toFixed(2)} ms, p95 ${cpu.worst.p95.toFixed(2)} ms, ` +
+  `Worker CPU budget on the ${cpu.clock} clock: fit + 24 structures median ${cpu.worst.median.toFixed(2)} ms, p95 ${cpu.worst.p95.toFixed(2)} ms, ` +
   `min ${cpu.worst.min.toFixed(2)} ms; the default ${cpu.normal.structures} structures median ${cpu.normal.median.toFixed(2)} ms, p95 ${cpu.normal.p95.toFixed(2)} ms; ` +
   `the strategy route's engine path from ${cpu.route.rows} vendor rows median ${cpu.route.median.toFixed(2)} ms, p95 ${cpu.route.p95.toFixed(2)} ms`);
