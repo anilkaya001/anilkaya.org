@@ -838,7 +838,7 @@ export function mergeGex(prev, reads, { at, session, writer, rotation, keepMs = 
     reset: same ? null : (prev ? "session-boundary" : "cold"),
     names,
   };
-  const shedOrder = [...(rotation ? rotation.rotating : []), ...(rotation ? rotation.fixed : [])].reverse();
+  const shedOrder = [...(rotation ? rotation.fixed : []), ...(rotation ? rotation.rotating : [])].reverse();
   let size = JSON.stringify(out).length;
   const shed = [];
   for (const t of shedOrder) {

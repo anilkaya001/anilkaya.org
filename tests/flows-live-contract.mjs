@@ -455,6 +455,14 @@ const T = (iso) => Date.parse(iso);
   const gex = L.mergeGex(null, reads, { at: end, session, rotation: { fixed: [..."ABCDEF"], rotating: [..."GHIJKL"] } });
   const gBytes = JSON.stringify(gex).length;
   ok(gBytes <= L.LIVE_KEYS["live:gex"].maxBytes, `fourteen full-session spot-gamma series fit live:gex (${gBytes} bytes, shed ${gex.shed.length})`);
+  const tight = L.mergeGex(null, reads, { at: end, session, rotation: { fixed: [..."ABCDEF"], rotating: [..."GHIJKL"] },
+    maxBytes: 40 * 1024 });
+  ok(tight.shed.length >= 2 && tight.shed.slice(0, 2).join("") === "LK" &&
+     tight.shed.every((t, i) => i < 6 ? "GHIJKL".includes(t) : "ABCDEF".includes(t)),
+  `OVER THE CAP, the rotating names' series go first, last-rotated first (${tight.shed.join(", ")}): the six largest ` +
+    "|score| names are the ones read every tick, so they are the last to lose their path");
+  ok(tight.names.A.t && tight.names.SPY.t && tight.names.QQQ.t && JSON.stringify(tight).length <= 40 * 1024,
+    "while the top name and the two index paths survive, and the key fits");
 
   const tape = L.shapeTickerTape({ ticks: FAKE.fakeNetPremTicks("AAPL", { session, now: end }),
     spot: FAKE.fakeSpotExposures("AAPL", { session, now: end }),
