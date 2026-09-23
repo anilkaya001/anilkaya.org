@@ -705,6 +705,7 @@ export function buildChainPanels(chainRows, {
     scalars = {
       ...scalars,
       skew: null, skewReason: why, skewBasis: null,
+      skew30: null, skew30Reason: why, skew30Basis: null,
       term: null, termReason: why, termBasis: null,
       atmIv: null, atmReason: why, atmExpiry: null,
     };

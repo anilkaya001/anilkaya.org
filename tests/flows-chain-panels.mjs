@@ -550,9 +550,13 @@ function chain({
   eq(built.rowsSeen, CHAIN_PAGE_SIZE, "with the row count it actually saw");
 
   eq(built.scalars.skew, null, "a truncated chain publishes NO skew");
+  eq(built.skewTerm.skew30, null,
+     "nor a fixed-tenor skew: the two expiries bracketing 30 days are as unidentifiable in an " +
+     "arbitrary 500-row subset as the nearest one, and this page read 0.074 off it before the cut");
+  eq(built.skewTerm.skew30Basis, null, "with no basis to describe");
   eq(built.scalars.term, null, "no term structure");
   eq(built.scalars.atmIv, null, "and no at-the-money level");
-  for (const key of ["skewReason", "termReason", "atmReason"]) {
+  for (const key of ["skewReason", "skew30Reason", "termReason", "atmReason"]) {
     ok(/arbitrary subset|no documented order/.test(String(built.skewTerm[key])),
        `${key} names the truncation rather than blaming the data (${built.skewTerm[key]})`);
   }
