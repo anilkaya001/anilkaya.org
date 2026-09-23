@@ -168,11 +168,12 @@
         "Anything hidden is published and hidden, not absent from the read.";
     }
     host.note.textContent = text + vendorCeilingSaid();
+    host.filters.inert = S.alertsKind !== "ok" && S.feedKind !== "ok";
     const cnt = host.filters.querySelector(".fu-count");
     if (cnt) {
       const shown = aRows.filter((r) => passes(r, "exp")).length;
       cnt.textContent = S.alertsKind !== "ok" ? "" : view.side === "all" && !view.both
-        ? count(aRows.length) : count(shown) + " of " + count(aRows.length);
+        ? count(aRows.length) + " shown" : count(shown) + " of " + count(aRows.length) + " shown";
     }
   }
 
@@ -257,7 +258,8 @@
       const rx = Math.min(xs(recStart.m), w - right);
       s("rect", { x: left, y: top, width: Math.max(0, rx - left), height: H - top - bot, fill: "url(#fuHatch)", class: "fu-unrec" }, svg);
     }
-    for (let m = Math.ceil(x0 / 60) * 60; m <= x1; m += phone ? 120 : 60) {
+    const step = xs(x0 + 60) - xs(x0) >= 44 ? 60 : 120;
+    for (let m = Math.ceil(x0 / 60) * 60; m <= x1; m += step) {
       const x = xs(m);
       if (x < left + 16 || x > w - right - 8) continue;
       s("text", { x, y: H - 6, text: hourLabel(m), "text-anchor": "middle" }, svg);
@@ -728,9 +730,9 @@
   function paintChips() {
     const a = S.alerts;
     if (S.alertsKind !== "ok") {
-      host.chips.replaceChildren(UI.chips([
-        UI.gaugeChip({ icon: "unusual", color: "--accent-ink", value: DASH, label: "Premium", info: { title: "Flagged premium", state: S.alertsState.state, lead: S.alertsState.reason } }),
-      ], "Flagged windows"));
+      const st = S.alertsState;
+      host.chips.replaceChildren(UI.chips([["unusual", "Premium"], ["list", "Windows"], [null, "Calls"], [null, "At ask"], [null, "Sweeps"]].map(([icon, label]) =>
+        UI.gaugeChip({ icon, ring: icon ? undefined : null, color: "--label-3", value: DASH, label, info: { title: label, state: st.state, lead: st.reason } })), "Flagged windows"));
       return;
     }
     const rows = a.rows;

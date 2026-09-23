@@ -7,6 +7,7 @@
   const { h, F } = UI;
   const DASH = UI.DASH, MID = UI.MID;
   const ISO = /^\d{4}-\d{2}-\d{2}$/;
+  const V = { class: "fu-v" }, HIDE = { "aria-hidden": "true" };
 
   const host = {
     meta: document.getElementById("evMeta"),
@@ -148,6 +149,8 @@
     return out;
   }
 
+  const tally = (g, word, v) => h("span", { class: "ui-key" }, g, word + " ", h("b", null, String(v)));
+
   function paintWeek(payload) {
     const rows = Array.isArray(payload.rows) ? payload.rows : [];
     const cal = calIndex(payload);
@@ -164,7 +167,7 @@
     const maxEm = Math.max(0.01, ...rows.map((r) => { const i = impliedOf(r, cal.get(r.t)); return i ? i.v : 0; }));
     const grid = h("div", { class: "fe-week", style: { "--days": String(list.length) } });
     const laneHead = (name, st) => h("div", { class: "fe-lane" }, h("span", null, name), st && st.state !== "ok" ? UI.stateButton(st, name) : null);
-    grid.append(h("div", { class: "fe-col fe-labels", "aria-hidden": "true" },
+    grid.append(h("div", { class: "fe-col fe-labels", ...HIDE },
       h("div", { class: "fe-dh" }), laneHead("Macro", macroSt), laneHead("Earnings", rows.length ? { state: "ok" } : { state: "quiet", reason: "No name reports inside the window." }), laneHead("FDA", fdaSt), laneHead("Ex-div", divSt)));
     const today = payload.gateOrigin;
     list.forEach((d, k) => {
@@ -196,10 +199,10 @@
     const counts = { long: 0, short: 0, gated: 0, open: 0 };
     for (const r of rows) counts[stageOf(r.st).lane]++;
     const legend = UI.legend([
-      h("span", { class: "ui-key" }, UI.glyph("up", "fe-st is-long"), "Long ", h("b", null, String(counts.long))),
-      h("span", { class: "ui-key" }, UI.glyph("down", "fe-st is-short"), "Short ", h("b", null, String(counts.short))),
-      h("span", { class: "ui-key" }, UI.glyph("shield", "fe-st is-gated"), "Gated ", h("b", null, String(counts.gated))),
-      h("span", { class: "ui-key" }, h("i", { class: "is-dot", style: { "--c": UI.cssVar("--label-3") } }), "Open ", h("b", null, String(counts.open))),
+      tally(UI.glyph("up", "fe-st is-long"), "Long", counts.long),
+      tally(UI.glyph("down", "fe-st is-short"), "Short", counts.short),
+      tally(UI.glyph("shield", "fe-st is-gated"), "Gated", counts.gated),
+      tally(h("i", { class: "is-dot", style: { "--c": UI.cssVar("--label-3") } }), "Open", counts.open),
       h("span", { class: "ui-key" }, h("i", { class: "fe-key-em" }), "Implied move"),
     ]);
     legend.classList.add("fe-legend");
@@ -320,23 +323,23 @@
       const when = x.c && x.c.when;
       const reSt = x.med === null ? (x.re.st.state === "ok" ? { state: "unavailable", reason: "This name's earnings history carries no median move." } : x.re.st) : null;
       return h("a", {
-        class: "fe-erow", href: tickerHref(x.r.t), "data-t": String(x.r.t || ""), "data-realized": reSt ? reSt.state : "ok",
+        class: "fe-erow" + (i && data[i - 1].r.d === x.r.d ? " is-cont" : ""), href: tickerHref(x.r.t), "data-t": String(x.r.t || ""), "data-realized": reSt ? reSt.state : "ok",
         title: String(x.r.t) + " " + MID + " reports " + (x.r.d || DASH) + " " + MID + " priced " + pricedText(x.r) + " " + MID + " IV " + pct(x.r.iv) +
           (n(x.r.ivr) === null ? "" : ", rank " + Math.round(n(x.r.ivr) * 100)) + " " + MID + " " + stageOf(x.r.st).word,
       },
       h("span", { class: "fe-edate" }, h("b", null, x.r.d ? weekday(x.r.d) : DASH), h("small", null, F.day(x.r.d))),
       h("span", { class: "fu-tk fe-etk" }, stageGlyph(x.r.st), h("b", null, String(x.r.t || DASH)),
         when === "premarket" ? h("i", { class: "fe-when is-am", "aria-label": "Before the open" }) : when === "postmarket" ? UI.glyph("closed", "fe-when") : null),
-      h("span", { class: "fe-pair", "aria-hidden": "true" },
+      h("span", { class: "fe-pair", ...HIDE },
         h("i", { class: "is-imp", style: { width: x.imp ? w(x.imp.v) : "0%", "--i": String(i) } }),
         x.med === null ? h("i", { class: "is-none" }) : h("i", { class: "is-real", style: { width: w(x.med), "--i": String(i) } })),
       h("span", { class: "fu-v fu-strong" }, x.imp ? move(x.imp.v) : UI.dash({ state: "unavailable", reason: "No implied move arrived for this name." }, x.r.t + " implied move")),
-      x.med === null ? h("span", { class: "fu-v" }, UI.dash(reSt, x.r.t + " median move")) : h("span", { class: "fu-v" }, pct(x.med)),
+      x.med === null ? h("span", V, UI.dash(reSt, x.r.t + " median move")) : h("span", V, pct(x.med)),
       h("span", { class: "fu-v fu-wide" }, x.hit === null ? DASH : Math.round(x.hit * 100) + "%"));
     });
     const box = withList(UI.list(items, { visible: 8, label: "Names reporting inside the window, nearest first" }));
     host.earn.replaceChildren(
-      h("div", { class: "fe-erow fu-head", "aria-hidden": "true" }, h("span", null, "Day"), h("span", null, "Name"), h("span", null, "Implied vs typical"), h("span", { class: "fu-v" }, "Implied"), h("span", { class: "fu-v" }, "Typical"), h("span", { class: "fu-v fu-wide" }, "Hit")),
+      h("div", { class: "fe-erow fu-head", ...HIDE }, h("span", null, "Day"), h("span", null, "Name"), h("span", null, "Implied vs typical"), h("span", V, "Implied"), h("span", V, "Typical"), h("span", { class: "fu-v fu-wide" }, "Hit")),
       box,
       UI.legend([["--accent", "", "Implied move"], ["--s-gray", "", "Median past move"]]));
     setModuleState(host.earn, hist ? { state: "ok" } : { state: "quiet", reason: "Earnings: the past-report history is not on this payload yet, so the typical move is pending." }, "Earnings");
@@ -379,10 +382,10 @@
         h("span", { class: "fe-mname" }, h("i", { class: "fe-dot", style: { "--c": UI.cssVar(tag ? tag[1] : "--label-4") } }),
           h("b", null, tag ? tag[0] : String(m.event || DASH).replace(/\s*\((MoM|YoY|QoQ)\)/, "")), tag ? h("small", null, String(m.event || "")) : null),
         h("span", { class: "fu-v fu-strong" }, m.forecastRaw || DASH),
-        h("span", { class: "fu-v" }, m.prevRaw || DASH));
+        h("span", V, m.prevRaw || DASH));
     });
     host.macro.replaceChildren(
-      h("div", { class: "fe-mrow fu-head", "aria-hidden": "true" }, h("span", null, "When"), h("span", null, "Print"), h("span", { class: "fu-v" }, "Forecast"), h("span", { class: "fu-v" }, "Prior")),
+      h("div", { class: "fe-mrow fu-head", ...HIDE }, h("span", null, "When"), h("span", null, "Print"), h("span", V, "Forecast"), h("span", V, "Prior")),
       withList(UI.list(items, { visible: 7, label: "Economic prints after the close" })));
   }
 
@@ -418,15 +421,15 @@
       return h(f.carded ? "a" : "div", { class: "fe-frow", href: f.carded ? tickerHref(f.t) : null, role: f.carded ? null : "listitem",
         title: String(f.t) + " " + MID + " " + String(f.cat || "") + " " + MID + " " + String(f.st || "") + " " + MID + " target " + String(f.tgt.raw || f.tgt.from) },
       h("span", { class: "fu-tk is-2" }, h("b", null, String(f.t || DASH)), h("small", null, FDA_CAT(f.cat))),
-      h("span", { class: "fe-track", "aria-hidden": "true" },
+      h("span", { class: "fe-track", ...HIDE },
         months.map((d) => h("i", { class: "fe-tick", style: { left: (at(d) * 100).toFixed(2) + "%" } })),
         point ? h("i", { class: "fe-dia", style: { left: (a * 100).toFixed(2) + "%" } })
           : h("i", { class: "fe-span", style: { left: (a * 100).toFixed(2) + "%", width: Math.max(1, (b - a) * 100).toFixed(2) + "%" } })),
-      h("span", { class: "fu-v" }, point ? F.day(f.tgt.from) : windowLabel(f.tgt)));
+      h("span", V, point ? F.day(f.tgt.from) : windowLabel(f.tgt)));
     });
     host.fda.replaceChildren(
-      h("div", { class: "fe-frow fu-head", "aria-hidden": "true" }, h("span", null, "Name"),
-        h("span", { class: "fe-axis" }, months.map((d) => h("span", { style: { left: (at(d) * 100).toFixed(2) + "%" } }, F.day(d).slice(0, 3)))), h("span", { class: "fu-v" }, "Target")),
+      h("div", { class: "fe-frow fu-head", ...HIDE }, h("span", null, "Name"),
+        h("span", { class: "fe-axis" }, months.map((d) => h("span", { style: { left: (at(d) * 100).toFixed(2) + "%" } }, F.day(d).slice(0, 3)))), h("span", V, "Target")),
       withList(UI.list(items, { visible: 6, label: "FDA target dates" })),
       UI.legend([h("span", { class: "ui-key" }, h("i", { class: "is-dia", style: { "--c": UI.cssVar("--lvl-pain") } }), "Dated"), h("span", { class: "ui-key" }, h("i", { class: "fe-key-span" }), "Window")]));
   }
@@ -456,9 +459,9 @@
     const cal = payload.earningsCalendar;
     const r0 = cal && typeof cal === "object" ? cal.reaction : undefined;
     const st = r0 === undefined ? blockState(undefined, "earnings reaction") : blockState(r0, "earnings reaction");
-    if (st.state !== "ok") { silence(host.react, st, "Reaction", 220); return; }
+    if (st.state !== "ok") { silence(host.react, st, "Reaction", 200); return; }
     const rows = (Array.isArray(r0.rows) ? r0.rows : []).filter((x) => Array.isArray(x) && n(x[3]) !== null);
-    if (!rows.length) { silence(host.react, { state: "quiet", reason: "No reporter had reacted by the session, which is common the evening of a report." }, "Reaction", 220); return; }
+    if (!rows.length) { silence(host.react, { state: "quiet", reason: "No reporter had reacted by the session, which is common the evening of a report." }, "Reaction", 200); return; }
     setModuleState(host.react, { state: "ok" }, "Reaction");
     const maxDev = Math.max(0.25, ...rows.map((x) => Math.abs(n(x[3]) - 1)));
     const items = rows.map((x, i) => {
@@ -467,7 +470,7 @@
       return h("a", { class: "fe-rrow", href: tickerHref(x[0]),
         title: String(x[0]) + " " + MID + " moved " + F.pct(real, 1, true) + " against an implied " + move(n(x[2])) + " " + MID + " " + ratio.toFixed(2) + "× the priced move" },
       h("span", { class: "fu-tk is-2" }, h("b", null, String(x[0])), h("small", { "data-tone": real === null ? null : real > 0 ? "up" : real < 0 ? "down" : null }, real === null ? DASH : F.pct(real, 1, true))),
-      h("span", { class: "fe-dv", "aria-hidden": "true" },
+      h("span", { class: "fe-dv", ...HIDE },
         h("i", { class: dev >= 0 ? "is-more" : "is-less", style: dev >= 0 ? { left: "50%", width: w, "--i": String(i) } : { right: "50%", width: w, "--i": String(i) } })),
       h("span", { class: "fu-v fu-strong" }, ratio.toFixed(2) + "×"));
     });
@@ -476,7 +479,7 @@
         UI.metric("Realized ÷ implied", n(r0.medianRatio) === null ? DASH : n(r0.medianRatio).toFixed(2) + "×", { sub: "median of " + (n(r0.n) ?? rows.length) }),
         UI.metric("Moved more", n(r0.beat) === null ? DASH : Math.round(n(r0.beat) * 100) + "%", { sub: "than implied" }),
       ], { min: 120 }),
-      h("div", { class: "fe-rrow fu-head", "aria-hidden": "true" }, h("span", null, "Name"), h("span", { class: "fe-dv-axis" }, h("span", null, "Less"), h("span", null, "Priced"), h("span", null, "More")), h("span", { class: "fu-v" }, "Ratio")),
+      h("div", { class: "fe-rrow fu-head", ...HIDE }, h("span", null, "Name"), h("span", { class: "fe-dv-axis" }, h("span", null, "Less"), h("span", null, "Priced"), h("span", null, "More")), h("span", V, "Ratio")),
       withList(UI.list(items, { visible: 6, label: "Last reporters, realized over implied" })),
       UI.legend([["--g-long", "", "Moved more than priced"], ["--g-short", "", "Moved less"]]));
   }
@@ -548,7 +551,7 @@
     const stale = h("button", { class: "fd-pill", type: "button", id: "evStale", hidden: S.staleText ? null : true,
       "aria-haspopup": "dialog", "aria-controls": "fxPop",
       "data-info": UI.info(() => ({ title: "Stale calendar", state: "stale", lead: S.staleText })) }, UI.glyph("clock"), S.staleDays === null ? "Behind" : S.staleDays + "d old");
-    host.meta.replaceChildren(...bits.flatMap((b, i) => (i ? [h("span", { "aria-hidden": "true" }, MID), b] : [b])), stale);
+    host.meta.replaceChildren(...bits.flatMap((b, i) => (i ? [h("span", { ...HIDE }, MID), b] : [b])), stale);
   }
 
   function aboutInfo() {
@@ -582,8 +585,9 @@
     statusEl.textContent = what;
     statusEl.dataset.empty = kind;
     const st = { state: kind === "unreadable" ? "withheld" : kind === "pending" ? "pending" : "unavailable", reason: what };
-    for (const [el, label, hh] of [[host.week, "Week ahead", 220], [host.earn, "Earnings", 240], [host.macro, "Macro", 200], [host.fda, "FDA", 200], [host.react, "Reaction", 220]]) silence(el, st, label, hh);
-    host.chips.replaceChildren();
+    for (const [el, label, hh] of [[host.week, "Week ahead", 220], [host.earn, "Earnings", 240], [host.macro, "Macro", 200], [host.fda, "FDA", 200], [host.react, "Reaction", 200]]) silence(el, st, label, hh);
+    host.chips.replaceChildren(UI.chips([["cal", "Reporting"], ["shield", "Gated"], ["wave", "Macro"], ["flask", "FDA"], [null, "Reaction"]].map(([icon, label]) =>
+      UI.gaugeChip({ icon, ring: icon ? undefined : null, color: "--label-3", value: DASH, label, info: { title: label, state: st.state, lead: what } })), "Calendar"));
   }
 
   function stale(payload, updatedAt) {

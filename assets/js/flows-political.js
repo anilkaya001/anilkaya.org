@@ -8,6 +8,7 @@
   const DASH = UI.DASH, MID = UI.MID;
   const FRESH = "•";
   const STATUTE = 45;
+  const V = { class: "fu-v" }, HIDE = { "aria-hidden": "true" };
 
   const host = {
     meta: document.getElementById("plMeta"),
@@ -158,7 +159,7 @@
   }
 
   function rangeBar(scale, mid, lo, hi, i) {
-    const wrap = h("span", { class: "pl-bar", "aria-hidden": "true" });
+    const wrap = h("span", { class: "pl-bar", ...HIDE });
     const m = num(mid), l = num(lo), hh = num(hi);
     if (l !== null && hh !== null && hh > l && scale > 0) {
       wrap.append(h("i", { class: "pl-bar-band", style: { left: Math.min(100, (l / scale) * 100) + "%", width: Math.max(0.4, Math.min(100, ((hh - l) / scale) * 100)) + "%" } }));
@@ -204,7 +205,7 @@
       return row;
     });
     host.buyers.replaceChildren(
-      h("div", { class: "pl-row pl-buyer fu-head", "aria-hidden": "true" }, h("span"), h("span", null, "Filer"), h("span", null, "Disclosed purchases"), h("span", { class: "fu-v" }, "Mid"), h("span", { class: "fu-v" }, "Lag"), h("span", { class: "fu-v fu-wide" }, "Sold")),
+      h("div", { class: "pl-row pl-buyer fu-head", ...HIDE }, h("span"), h("span", null, "Filer"), h("span", null, "Disclosed purchases"), h("span", V, "Mid"), h("span", V, "Lag"), h("span", { class: "fu-v fu-wide" }, "Sold")),
       listed(UI.list(items, { visible: 8, label: "Filers ranked by disclosed purchase size" })),
       UI.legend([h("span", { class: "ui-key" }, h("i", { class: "pl-key-fill" }), "Midpoint"), h("span", { class: "ui-key" }, h("i", { class: "pl-key-band" }), "Disclosed range"), h("span", { class: "ui-key" }, h("i", { class: "is-dot", style: { "--c": UI.cssVar("--warn") } }), "Late")]));
   }
@@ -240,9 +241,9 @@
           r.asset ? h("small", { class: "pl-asset" }, String(r.asset)) : null),
         rangeBar(scale, r.bought, r.boughtLo, r.boughtHi, j),
         h("span", { class: "fu-v fu-strong pl-mid" }, usd(r.bought)),
-        h("span", { class: "fu-v" }, num(r.filers) === null ? DASH : String(num(r.filers)))));
+        h("span", V, num(r.filers) === null ? DASH : String(num(r.filers)))));
         body.append(
-          h("div", { class: "pl-row pl-asset-row fu-head", "aria-hidden": "true" }, h("span", null, "Name"), h("span", null, "Disclosed purchases"), h("span", { class: "fu-v" }, "Mid"), h("span", { class: "fu-v" }, "Filers")),
+          h("div", { class: "pl-row pl-asset-row fu-head", ...HIDE }, h("span", null, "Name"), h("span", null, "Disclosed purchases"), h("span", V, "Mid"), h("span", V, "Filers")),
           listed(UI.list(items, { visible: 8, label: "Names ranked by disclosed purchase size" })));
       }
     }
@@ -277,12 +278,12 @@
         title: String(r.t || DASH) + " " + MID + " " + f + " distinct filers " + MID + " median lag " + lagText(r.medianLagDays) + " " + MID + " midpoint " + usd(r.bought) },
       h("span", { class: "pl-who" }, h("span", { class: "pl-who-l" }, num(r.freshBuys) ? h("span", { class: "pl-fresh" }, FRESH) : null, h("b", { class: "pl-tick" }, String(r.t || DASH))),
         r.asset ? h("small", { class: "pl-asset" }, String(r.asset)) : null),
-      h("span", { class: "pl-dots", "aria-hidden": "true" }, Array.from({ length: Math.min(f, 12) }, () => h("i")), f > 12 ? h("b", null, "+") : null, h("span", { class: "pl-dots-rest", style: { "--n": String(Math.max(0, maxF - f)) } })),
+      h("span", { class: "pl-dots", ...HIDE }, Array.from({ length: Math.min(f, 12) }, () => h("i")), f > 12 ? h("b", null, "+") : null, h("span", { class: "pl-dots-rest", style: { "--n": String(Math.max(0, maxF - f)) } })),
       h("span", { class: "fu-v fu-strong pl-filers" }, String(f)),
       h("span", { class: "fu-v pl-mid" }, usd(r.bought)));
     });
     return h("div", { class: "pl-clusters" },
-      h("div", { class: "pl-row pl-cluster fu-head", "aria-hidden": "true" }, h("span", null, "Name"), h("span", null, "Distinct filers"), h("span", { class: "fu-v" }, "Filers"), h("span", { class: "fu-v" }, "Mid")),
+      h("div", { class: "pl-row pl-cluster fu-head", ...HIDE }, h("span", null, "Name"), h("span", null, "Distinct filers"), h("span", V, "Filers"), h("span", V, "Mid")),
       listed(UI.list(items, { visible: 8, label: "Names ordered by the number of separate filers" })));
   }
 
@@ -339,14 +340,14 @@
         : h("span", { class: "pl-who pl-what" }, h("span", { class: "pl-asset pl-untick" }, String(r.asset || r.notes || DASH))),
       h("span", { class: "pl-side " + side }, r.txnType || DASH),
       h("span", { class: "fu-v pl-band fu-wide" }, bandText(r)),
-      h("span", { class: "pl-lag", "aria-hidden": "true", style: { "--mark": mark.toFixed(2) + "%" } },
+      h("span", { class: "pl-lag", ...HIDE, style: { "--mark": mark.toFixed(2) + "%" } },
         lag === null ? null : h("i", { class: "pl-lag-a", style: { width: (Math.min(lag, STATUTE) / maxLag * 100).toFixed(2) + "%", "--i": String(i) } }),
         late ? h("i", { class: "pl-lag-b", style: { left: mark.toFixed(2) + "%", width: ((Math.min(lag, maxLag) - STATUTE) / maxLag * 100).toFixed(2) + "%", "--i": String(i) } }) : null),
       h("span", { class: "fu-v pl-lagv" + (late ? " pl-late" : ""), "data-tone": late ? "warn" : null, title: late ? "Past the 45 days the STOCK Act allows." : null }, lagText(r.lagDays)));
     });
     host.recent.replaceChildren(
-      h("div", { class: "pl-row pl-recent fu-head", "aria-hidden": "true" }, h("span", null, "Filed"), h("span", null, "Filer"), h("span", null, "Name"), h("span", null, "Side"), h("span", { class: "fu-v fu-wide" }, "Range"),
-        h("span", { class: "pl-lag-axis", style: { "--mark": mark.toFixed(2) + "%" } }, h("span", null, "Trade"), h("span", { class: "pl-lag-45" }, "45d"), h("span", null, maxLag + "d")), h("span", { class: "fu-v" }, "Lag")),
+      h("div", { class: "pl-row pl-recent fu-head", ...HIDE }, h("span", null, "Filed"), h("span", null, "Filer"), h("span", null, "Name"), h("span", null, "Side"), h("span", { class: "fu-v fu-wide" }, "Range"),
+        h("span", { class: "pl-lag-axis", style: { "--mark": mark.toFixed(2) + "%" } }, h("span", null, "Trade"), h("span", { class: "pl-lag-45" }, "45d"), h("span", null, maxLag + "d")), h("span", V, "Lag")),
       listed(UI.list(items, { visible: 10, label: "Most recent disclosures" })),
       UI.legend([h("span", { class: "ui-key" }, h("i", { class: "pl-key-lag" }), "Days from trade to filing"), h("span", { class: "ui-key" }, h("i", { class: "is-dot", style: { "--c": UI.cssVar("--warn") } }), "Past 45 days")]));
   }
@@ -383,12 +384,12 @@
       return h("div", { class: "pl-row pl-holder", role: "listitem" },
         h("span", { class: "pl-who" }, h("b", { class: "pl-name" }, r.who || DASH), h("small", { class: "pl-owner" + (r.owner === null || r.owner === undefined ? " is-unknown" : "") }, r.owner === null || r.owner === undefined ? "not stated" : String(r.owner))),
         h("b", { class: "pl-tick" }, String(r.t || DASH)),
-        h("span", { class: "pl-bar", "aria-hidden": "true" }, lo !== null && hi !== null ? h("i", { class: "pl-bar-band", style: { left: (lo / maxQ * 100).toFixed(2) + "%", width: Math.max(0.4, (hi - lo) / maxQ * 100).toFixed(2) + "%" } }) : null),
+        h("span", { class: "pl-bar", ...HIDE }, lo !== null && hi !== null ? h("i", { class: "pl-bar-band", style: { left: (lo / maxQ * 100).toFixed(2) + "%", width: Math.max(0.4, (hi - lo) / maxQ * 100).toFixed(2) + "%" } }) : null),
         h("span", { class: "fu-v pl-q" }, qty(r.minQty) + "–" + qty(r.maxQty)),
         h("span", { class: "fu-v fu-strong pl-q" }, qty(r.midQty)));
     });
     host.holders.replaceChildren(
-      h("div", { class: "pl-row pl-holder fu-head", "aria-hidden": "true" }, h("span", null, "Holder"), h("span", null, "Name"), h("span", null, "Range"), h("span", { class: "fu-v" }, "Low–high"), h("span", { class: "fu-v" }, "Mid")),
+      h("div", { class: "pl-row pl-holder fu-head", ...HIDE }, h("span", null, "Holder"), h("span", null, "Name"), h("span", null, "Range"), h("span", V, "Low–high"), h("span", V, "Mid")),
       listed(UI.list(items, { visible: 8, label: "Politician portfolio holders" })));
   }
 
@@ -402,6 +403,12 @@
         known ? self + " of the " + known + " holdings with a stated account are the filer’s own; the rest are a spouse’s, a dependant’s or joint."
           : "The vendor stated an account owner on none of these rows, so the share held in a filer’s own name is UNKNOWN here — which is not the same fact as all of them being their own."],
     };
+  }
+
+  function idle(st, hh) {
+    for (const [el, label] of [[host.buyers, "Buyers"], [host.assets, "Names"], [host.recent, "Newest"], [host.holders, "Holdings"]]) silence(el, st, label, label === "Holdings" ? 160 : hh);
+    host.chips.replaceChildren(UI.chips([["hall", "Disclosures"], ["live", "Newest"], ["long", "Buyers"], ["list", "Names"], [null, "Late"]].map(([icon, label]) =>
+      UI.gaugeChip({ icon, ring: icon ? undefined : null, color: "--label-3", value: DASH, label, info: { title: label, state: st.state, lead: st.reason } })), "Disclosure window"));
   }
 
   function paintChips(p) {
@@ -434,7 +441,7 @@
     if (src.windowed === false) warnText = "The windowed route refused, so this page is the most recent disclosures the vendor will return in one call, with no date range. The ranking is over that selection rather than over the window named above.";
     const pill = h("button", { class: "fd-pill", type: "button", id: "plSource", hidden: warnText ? null : true,
       "aria-haspopup": "dialog", "aria-controls": "fxPop", "data-info": UI.info(() => ({ title: "A narrower read", state: "quiet", lead: warnText })) }, UI.glyph("stack"), "Partial read");
-    host.meta.replaceChildren(...bits.flatMap((b, i) => (i ? [h("span", { "aria-hidden": "true" }, MID), h("span", null, b)] : [h("span", null, b)])), pill);
+    host.meta.replaceChildren(...bits.flatMap((b, i) => (i ? [h("span", { ...HIDE }, MID), h("span", null, b)] : [h("span", null, b)])), pill);
   }
 
   function paintStatus(p) {
@@ -514,11 +521,7 @@
     if (p.status === "pending" || (!p.buyers && !p.holders)) {
       status.textContent = "No disclosure window has been read yet. This page appears with the first pipeline run after it shipped.";
       status.dataset.empty = "pending";
-      const st = { state: "pending", kind: "pending", reason: status.textContent };
-      silence(host.buyers, st, "Buyers", 220);
-      silence(host.assets, st, "Names", 220);
-      silence(host.recent, st, "Newest", 220);
-      silence(host.holders, st, "Holdings", 160);
+      idle({ state: "pending", kind: "pending", reason: status.textContent }, 220);
       return;
     }
     P = p;
@@ -533,7 +536,6 @@
   }).catch((error) => {
     status.textContent = "The disclosure window could not be loaded: " + error.message;
     status.dataset.empty = "unavailable";
-    const st = { state: "unavailable", kind: "unavailable", reason: status.textContent };
-    for (const [el, label] of [[host.buyers, "Buyers"], [host.assets, "Names"], [host.recent, "Newest"], [host.holders, "Holdings"]]) silence(el, st, label, 200);
+    idle({ state: "unavailable", kind: "unavailable", reason: status.textContent }, 200);
   });
 })();
