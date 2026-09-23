@@ -660,9 +660,13 @@ export function shapeVol(indexRaw, { at, session, writer } = {}) {
     v: 1, key: "live:vol", session,
     fresh: freshEnvelope({ readAt: at, source: "actions", cadenceS: LIVE_KEYS["live:vol"].cadenceS, session, writer }),
     units: {
-      iv: "fraction (annualised implied volatility at the tenor)", slope: "ratio, iv90 / iv30 - 1",
-      front: "ratio, iv7 / iv30 - 1 (positive = inverted front)", ivRank: "0-100",
-      steep: "vendor steepness_180_30", rv: "fraction, vendor realized_volatility",
+      iv: "fraction (annualised implied volatility at the tenor)",
+      slope: "ratio, v90 / v30 - 1 (positive = upward-sloping curve, contango)",
+      front: "ratio, v7 / v30 - 1 (positive = inverted front)", ivRank: "0-100",
+      steep: "ratio, vendor steepness_180_30 = volatility_180 / volatility_30 (1 = flat)",
+      rv: "fraction, vendor realized_volatility (20-session close-to-close, annualised)",
+      vrp: "vol points, vendor variance_risk_premium: EX-POST, a past date's implied vol less the realized vol " +
+        "that followed it; not an ex-ante premium",
     },
     vix: { status: "unavailable", reason: SILENCE.plan },
     index: {},
@@ -674,8 +678,10 @@ export function shapeVol(indexRaw, { at, session, writer } = {}) {
     const iv = {};
     for (const d of [1, 5, 7, 14, 30, 60, 90, 180, 365]) iv["v" + d] = round(vnum(r["volatility_" + d]), 4);
     const ratio = (a, b) => (a !== null && b !== null && b !== 0 ? round(a / b - 1, 6) : null);
+    const date = typeof r.date === "string" && DAY_RE.test(r.date) ? r.date : null;
+    const prior = !!date && typeof session === "string" && date < session;
     out.index[t] = {
-      status: "ok", reason: null, ...iv,
+      status: prior ? "prior" : "ok", reason: prior ? SILENCE.prior : null, date, ...iv,
       iv30: round(vnum(r.iv30d), 4), ivRank: round(vnum(r.iv_rank), 2),
       slope: ratio(iv.v90, iv.v30), front: ratio(iv.v7, iv.v30),
       steep: round(vnum(r.steepness_180_30), 6), rv: round(vnum(r.realized_volatility), 4),

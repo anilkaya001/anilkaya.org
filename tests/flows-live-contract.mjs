@@ -293,6 +293,14 @@ const T = (iso) => Date.parse(iso);
   deep([vol.index.SPY.slope, vol.index.SPY.front], [0.1, 0.2],
     "KNOWN ANSWERS: term slope = σ90/σ30 − 1 = 0.33/0.30 − 1; front inversion = σ7/σ30 − 1 = 0.36/0.30 − 1");
   eq(vol.index.QQQ.status, "unavailable", "an index the strip did not return is unavailable, not flat");
+  const priorVol = L.shapeVol({ SPY: { date: "2026-09-22", volatility_30: "0.30" } },
+    { at: T("2026-09-23T15:00:00Z"), session: "2026-09-23" });
+  ok(priorVol.index.SPY.status === "prior" && priorVol.index.SPY.date === "2026-09-22",
+    "an index row the vendor dated before the session is the prior session's curve, dated, not today's");
+  ok(["slope", "front", "steep", "rv", "vrp"].every((k) => typeof vol.units[k] === "string") &&
+     /EX-POST/.test(vol.units.vrp) && /volatility_180 \/ volatility_30/.test(vol.units.steep),
+  "every derived field names its unit, and the vendor's variance_risk_premium is labelled ex-post (probe §C): a " +
+    "reader must not take it for today's premium");
   eq(vol.vix.reason, "plan:volatility_scope_required", "the VIX curve is plan-gated (probe: 403) and says which scope");
 
   const mv = L.shapeMovers({ status: "ok", fields: strips.fields,

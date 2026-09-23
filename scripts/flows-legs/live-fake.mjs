@@ -138,7 +138,7 @@ export function fakeScreenerRows(tickers, { session, dated = false } = {}) {
       volatility_7: (v30 * (0.9 + rand() * 0.25)).toFixed(3), volatility_14: (v30 * 1.01).toFixed(3),
       volatility_30: v30.toFixed(3), volatility_60: (v30 * 1.03).toFixed(3),
       volatility_90: (v30 * (0.95 + rand() * 0.15)).toFixed(3), volatility_180: (v30 * 1.06).toFixed(3),
-      volatility_365: (v30 * 1.08).toFixed(3), steepness_180_30: (rand() * 0.1 - 0.02).toFixed(4),
+      volatility_365: (v30 * 1.08).toFixed(3), steepness_180_30: (1.06 * (0.95 + rand() * 0.1)).toFixed(4),
       realized_volatility: (v30 * 0.85).toFixed(4), variance_risk_premium: (rand() * 0.04 - 0.01).toFixed(6),
       gex_gamma_per_one_percent_move_oi: money4((rand() - 0.4) * 5e8),
       gex_gamma_per_one_percent_move_vol: money4((rand() - 0.5) * 1e8),
