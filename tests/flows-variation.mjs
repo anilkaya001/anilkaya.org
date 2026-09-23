@@ -180,6 +180,34 @@ function candlesFor(end, n, { from = 100, step = 0.01, volume = 1e6, after = [] 
   const noisy = names.map((n, i) => ({ ...n, iv30: n.iv30 * (i % 2 ? 3 : 0.3) }));
   eq(estimateKc(noisy, { asOf: SESSION }).status, "unavailable",
      "readings whose spread is wider than 60% of the median do not publish a scale");
+
+  const hundredfold = (r) => { r.call_vanna *= 100; r.put_vanna *= 100; };
+  const scaledNames = [];
+  for (let i = 0; i < 12; i++) {
+    const vol = 0.2 + i * 0.03;
+    scaledNames.push({ rows: vendorRows({ seed: 300 + i, vol, rate: 0, kc: 47, dtes: [2, 3, 5, 8, 11], mutate: hundredfold }).rows, iv30: vol });
+  }
+  const kcScaled = estimateKc(scaledNames, { asOf: SESSION });
+  rel(kcScaled.value, 0.47, 1e-6, "a vendor vanna a hundred times too large divides K_c by a hundred, since K_c is charm over the vendor's own vanna");
+  const card = { ticker: "T", sessionDate: SESSION, regime: { netGamma: 1e5 },
+    panels: { levels: { status: "ok", spot: 100 }, pricedMove: { status: "ok", iv30: 0.3 },
+      context: { status: "ok", candles: candlesFor(SESSION, 60) } } };
+  const probe = { call: "raw", put: "raw" };
+  const trueRows = vendorRows({ seed: 11, rate: 0, vol: 0.3, kc: 47 }).rows;
+  const scaledRows = vendorRows({ seed: 11, rate: 0, vol: 0.3, kc: 47, mutate: hundredfold }).rows;
+  const truth = variation(cardVariationInput(card, { expiries: trueRows }),
+    { probe, kc, vannaScale: { status: "agree", ratio: 1, n: 5 } });
+  ok(truth.channels.charm && truth.charmPerSession !== null, "with the vanna scale agreeing, charm is published at K_c");
+  for (const [status, code] of [["disagree", "charm-scale-disagree"], ["unmeasured", "charm-scale-unchecked"]]) {
+    const out = variation(cardVariationInput(card, { expiries: scaledRows }),
+      { probe, kc: kcScaled, vannaScale: { status, ratio: status === "disagree" ? 100 : null, n: status === "disagree" ? 5 : 0, reason: "planted" } });
+    eq(out.channels.charm, null, `a vanna scale that reads ${status} silences charm, which would otherwise carry the hundredfold error`);
+    eq(out.charmPerSession, null, `with no charm dollars under ${status}`);
+    eq(out.driftInSd, null, `and no drift in sd under ${status}`);
+    ok(out.silences.some((s) => s.channel === "charm" && s.code === code), `named ${code}`);
+    eq(variationSummary(out).why.charmPctAdv, code, `and the board row carries the same code under ${status}`);
+    ok(Object.hasOwn(VARIATION_CODES, code), `which the published code table spells out (${code})`);
+  }
 }
 
 {

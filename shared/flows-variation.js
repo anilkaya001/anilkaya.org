@@ -712,6 +712,9 @@ export function variation(input, opts = {}) {
     else silent("charm", "unavailable", "charm-absent", "no charm leg on the expiries that outlive the next session");
   } else if (!kc || kc.status !== "ok" || !(kc.value > 0)) {
     silent("charm", "unavailable", "kc-unmeasured", "the charm scale was not measured this run" + (kc && kc.reason ? ": " + kc.reason : ""));
+  } else if (scale.status !== "agree") {
+    if (scale.status === "disagree") silent("charm", "unavailable", "charm-scale-disagree", "the charm scale is measured against the vendor's vanna, which disagrees with the chain" + (scale.reason ? ": " + scale.reason : ""));
+    else silent("charm", "unavailable", "charm-scale-unchecked", "the charm scale is measured against the vendor's vanna, whose scale was not checked against a chain this run" + (scale.reason ? ": " + scale.reason : ""));
   } else {
     c = toDollars(nets.charm) / kc.value * h;
   }
@@ -891,6 +894,8 @@ export const VARIATION_CODES = Object.freeze({
   "charm-unnetted": "the put leg's charm convention could not be settled this run, so charm is not netted",
   "charm-absent": "no charm leg on the expiries that outlive the next session",
   "kc-unmeasured": "the charm scale was not measured this run",
+  "charm-scale-unchecked": "the charm scale is measured against the vendor's vanna, whose scale was not checked against an option chain this run",
+  "charm-scale-disagree": "the charm scale is measured against the vendor's vanna, which disagrees with the Black-Scholes vanna of the same chain by more than a quarter",
   "adv-short": "too few dated sessions with volume to name a typical day",
   "no-drift": "no drift reading",
 });
