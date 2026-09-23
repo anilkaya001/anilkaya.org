@@ -589,6 +589,7 @@
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && popOpen()) { e.preventDefault(); closeInfo(); } });
 
   let liveNode = null;
+  const spoken = (node) => [...node.childNodes].map((n) => n.textContent.trim()).filter(Boolean).join(" ");
   function announce(text) {
     if (!liveNode) {
       liveNode = document.getElementById("fxLive") || h("div", { id: "fxLive", class: "visually-hidden", "aria-live": "polite" });
@@ -979,12 +980,16 @@
       const w = host.clientWidth, rw = readout.offsetWidth;
       readout.style.left = clamp(x - rw / 2, 0, Math.max(0, w - rw)) + "px";
       readout.style.top = (r.top ?? 0) + "px";
-      if (speak) announce(readout.textContent);
+      if (speak) announce(spoken(readout));
     };
-    const hide = () => { readout.classList.remove("is-on"); xh.setAttribute("opacity", 0); dots.replaceChildren(); };
-    const at = (e) => { const b = svg.getBoundingClientRect(); return (e.clientX - b.left) * (svg.viewBox.baseVal.width / b.width); };
-    host.addEventListener("pointermove", (e) => show(nearest(at(e))));
-    host.addEventListener("pointerdown", (e) => show(nearest(at(e))));
+    let raf = 0, px = 0;
+    const hide = () => { if (raf) { cancelAnimationFrame(raf); raf = 0; } readout.classList.remove("is-on"); xh.setAttribute("opacity", 0); dots.replaceChildren(); };
+    const at = (cx) => { const b = svg.getBoundingClientRect(); return (cx - b.left) * (svg.viewBox.baseVal.width / b.width); };
+    host.addEventListener("pointermove", (e) => {
+      px = e.clientX;
+      if (!raf) raf = requestAnimationFrame(() => { raf = 0; show(nearest(at(px))); });
+    });
+    host.addEventListener("pointerdown", (e) => show(nearest(at(e.clientX))));
     host.addEventListener("pointerleave", (e) => { if (e.pointerType !== "touch") hide(); });
     host.addEventListener("pointercancel", hide);
     host.addEventListener("blur", hide);
@@ -1396,14 +1401,20 @@
         const rw = readout.offsetWidth;
         readout.style.left = clamp(xx + cw / 2 - rw / 2, 0, Math.max(0, w - rw)) + "px";
         readout.style.top = Math.max(0, yy - 32) + "px";
-        if (speak) announce(readout.textContent);
+        if (speak) announce(spoken(readout));
       };
-      const hide = () => { readout.classList.remove("is-on"); hl.setAttribute("x", -99); };
+      let raf = 0, pt = null;
+      const hide = () => { if (raf) { cancelAnimationFrame(raf); raf = 0; } readout.classList.remove("is-on"); hl.setAttribute("x", -99); };
       el.addEventListener("pointermove", (e) => {
-        const b = svg.getBoundingClientRect();
-        const c = Math.floor((e.clientX - b.left - left) / cw), r = Math.floor((e.clientY - b.top - top) / ch);
-        if (c < 0 || c >= C || r < 0 || r >= R) return;
-        show(r, c);
+        pt = [e.clientX, e.clientY];
+        if (raf) return;
+        raf = requestAnimationFrame(() => {
+          raf = 0;
+          const b = svg.getBoundingClientRect();
+          const c = Math.floor((pt[0] - b.left - left) / cw), r = Math.floor((pt[1] - b.top - top) / ch);
+          if (c < 0 || c >= C || r < 0 || r >= R) return;
+          show(r, c);
+        });
       });
       el.addEventListener("pointerleave", (e) => { if (e.pointerType !== "touch") hide(); });
       el.addEventListener("blur", hide);
@@ -1603,22 +1614,37 @@
         const a = Math.min(S, sorted[0].px), b = Math.max(S, sorted[sorted.length - 1].px);
         s("line", { x1: x(a), x2: x(b), y1: ay, y2: ay, stroke: paint("--fill-1"), "stroke-width": 4, "stroke-linecap": "round", class: "growx" }, g);
       }
-      const labs = sorted.map((l) => ({ y: x(l.px), y0: x(l.px), l }));
-      spread(labs, 52, 30, w - 30);
-      labs.sort((a, b) => a.l.px - b.l.px);
-      labs.forEach((t, i) => {
-        const d = LEVELS[t.l.kind];
-        const c = paint(d.color);
-        const above = i % 2 === 0;
-        marker(g, d.shape, x(t.l.px), ay, c, 5);
-        s("text", { x: t.y, y: above ? ay - 14 : ay + 24, text: F.px(t.l.px), "text-anchor": "middle", class: "tx-1 tx-b" }, g);
-        s("text", { x: t.y, y: above ? ay - 26 : ay + 36, text: d.label + " " + F.pct(t.l.px / S - 1, 1, true), "text-anchor": "middle", class: "tx-3" }, g);
-      });
       const sx = x(S);
       const st = F.px(S);
-      const pw = tw(st);
-      s("rect", { x: clamp(sx - pw / 2, 0, w - pw), y: ay - 9, width: pw, height: 18, rx: 9, fill: paint("--label-1") }, g);
-      s("text", { x: clamp(sx, pw / 2, w - pw / 2), y: ay + 4, text: st, "text-anchor": "middle", class: "tx-b tx-ink" }, g);
+      const labs = sorted.map((l) => ({ y: x(l.px), y0: x(l.px), l })).concat([{ y: sx, y0: sx, spot: true }]);
+      spread(labs, 52, 30, w - 30);
+      labs.sort((a, b) => a.y0 - b.y0);
+      const half = (text) => String(text).length * 3.2 + 2;
+      const ink = paint("--label-1");
+      labs.forEach((t, i) => {
+        const above = i % 2 === 0;
+        if (t.spot) {
+          const pw = tw(st);
+          const px0 = clamp(t.y - pw / 2, 0, w - pw);
+          const py = above ? ay - 30 : ay + 12;
+          s("rect", { x: px0, y: py, width: pw, height: 18, rx: 9, fill: ink }, g);
+          s("text", { x: px0 + pw / 2, y: py + 12.5, text: st, "text-anchor": "middle", class: "tx-b tx-ink" }, g);
+          return;
+        }
+        const d = LEVELS[t.l.kind];
+        const v = F.px(t.l.px), k = d.label + " " + F.pct(t.l.px / S - 1, 1, true);
+        s("text", { x: clamp(t.y, half(v), w - half(v)), y: above ? ay - 14 : ay + 24, text: v, "text-anchor": "middle", class: "tx-1 tx-b" }, g);
+        s("text", { x: clamp(t.y, half(k), w - half(k)), y: above ? ay - 26 : ay + 36, text: k, "text-anchor": "middle", class: "tx-3" }, g);
+      });
+      s("rect", { x: sx - 1.25, y: ay - 8, width: 2.5, height: 16, rx: 1.25, fill: ink }, g);
+      const edge = paint("--mat-opaque");
+      for (const l of sorted) {
+        const d = LEVELS[l.kind];
+        const m = marker(g, d.shape, x(l.px), ay, paint(d.color), 5);
+        m.setAttribute("stroke", edge);
+        m.setAttribute("stroke-width", "2");
+        m.setAttribute("paint-order", "stroke");
+      }
       const pts = sorted.map((l) => x(l.px)).concat([sx]).sort((a, b) => a - b);
       const items = sorted.map((l) => ({ x: x(l.px), l })).concat([{ x: sx, spot: true }]).sort((a, b) => a.x - b.x);
       scrub(el, svg, {
