@@ -340,9 +340,17 @@ export const PIN_LINES = Object.freeze({
   rangeRatio: 0.35,
 });
 
-export function lastRangeOf(candles) {
+export function lastRangeOf(candles, { through = null } = {}) {
   if (!Array.isArray(candles) || !candles.length) return null;
-  const c = candles[candles.length - 1];
+  const cut = typeof through === "string" && through ? through.slice(0, 10) : null;
+  let c = null;
+  for (let i = candles.length - 1; i >= 0 && c === null; i--) {
+    const row = candles[i];
+    if (!Array.isArray(row)) continue;
+    const d = typeof row[0] === "string" ? row[0].slice(0, 10) : null;
+    if (cut !== null && (d === null || d > cut)) continue;
+    c = row;
+  }
   if (!Array.isArray(c) || c.length < 5) return null;
   const hi = numOrNull(c[2]), lo = numOrNull(c[3]), close = numOrNull(c[4]);
   if (hi === null || lo === null || close === null || !(close > 0) || hi < lo) return null;
@@ -363,7 +371,7 @@ export function pinReading({ iv30, rv30, ivRank, ivMomentum, impliedH, realizedH
   const daily = rv !== null && rv > 0 ? rv / Math.sqrt(252) : null;
   const range = lastRange && numOrNull(lastRange.range) !== null ? lastRange.range : null;
   const rangeRatio = range !== null && daily !== null ? range / daily : null;
-  const pinned = rangeRatio !== null ? rangeRatio < PIN_LINES.rangeRatio : signals.includes("ratio");
+  const pinned = signals.includes("ratio") || (rangeRatio !== null && rangeRatio < PIN_LINES.rangeRatio);
   if (!pinned) return null;
   return {
     signals,
@@ -1598,7 +1606,7 @@ export function buildCard({
         asOf: sessionDate,
         sessions: HORIZON_SESSIONS,
         skew: chain && chain.skewTerm && chain.skewTerm.status === "ok" ? chain.skewTerm : null,
-        lastRange: lastRangeOf(f.candles),
+        lastRange: lastRangeOf(f.candles, { through: sessionDate }),
       }),
       context: contextPanel,
 

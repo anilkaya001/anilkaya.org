@@ -6,7 +6,7 @@ import {
   indexMarketCross, indexCrossFeed, readCrossFeed, buildMarketCross,
   measureOrder, measureOiBasis, CROSS_NOTES,
   numOrNull, polarityOf, POLARITY, pickMaxPain, pickMaxPainRow, CARD_SCHEMA_VERSION,
-  HORIZON_SESSIONS, RICHNESS_LINE,
+  HORIZON_SESSIONS, RICHNESS_LINE, lastRangeOf,
 } from "../shared/flows-card.js";
 import { STATE_LINES } from "../shared/flows-neuron.js";
 import { readFileSync } from "node:fs";
@@ -596,8 +596,25 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   ok(pinned.pin.rangeRatio < 0.35, `and the price's own range confirms the pin (${pinned.pin.rangeRatio})`);
   ok(/pinned by an event/.test(pinned.lead.say) && /no rich-or-cheap verdict/.test(pinned.lead.say),
      `the lead says so rather than calling it cheap (${pinned.lead.say})`);
-  eq(buildPricedMove({ ...wbd, lastRange: { range: 0.03, date: "2026-09-22" } }).richness, "cheap",
-     "while the same implied collapse on a name still trading a normal range stays a cheap verdict");
+  const jumpDay = buildPricedMove({ ...wbd, lastRange: { range: 0.0412, date: "2026-09-21" } });
+  eq(jumpDay.richness, "event-pinned",
+     "on the announcement session itself (WBD 2026-09-21: 29.65-30.92, a 4.1% range, 1.76 of daily " +
+     "realized) an implied move under a quarter of realized withholds the verdict on its own — the " +
+     "range cannot confirm a pin on the day the jump happens, and requiring it would read the deal as " +
+     `cheap premium whenever the in-progress bar is cut from the candles (${jumpDay.pin && jumpDay.pin.rangeRatio})`);
+  const crush = { spot: 100, iv30: 0.25, rv30: 0.42, vrp: 0.25 - 0.42, ivRank: 0.3, ivMomentum: 0.25 - 0.6, sessions: 10 };
+  eq(buildPricedMove({ ...crush, lastRange: { range: 0.03, date: "2026-09-22" } }).richness, "cheap",
+     "while an implied collapse alone (a post-earnings crush, 60% to 25%) on a name still trading a " +
+     "normal range stays a cheap verdict");
+  eq(buildPricedMove({ ...crush, lastRange: { range: 0.004, date: "2026-09-22" } }).richness, "event-pinned",
+     "and the same collapse on a session that barely traded is confirmed as a pin by the range");
+  const partial = [["2026-09-18", 28.06, 28.13, 27.74, 27.8, 44151430],
+    ["2026-09-21", 29.76, 30.92, 29.65, 30.8, 234091401],
+    ["2026-09-22", 30.83, 30.835, 30.77, 30.805, 50940895]];
+  eq(lastRangeOf(partial, { through: "2026-09-21" }).date, "2026-09-21",
+     "the range is read from the last completed session, never from a bar still trading after it");
+  eq(lastRangeOf(partial).date, "2026-09-22", "and with no session stated, from the last candle");
+  eq(lastRangeOf(partial, { through: "2026-09-17" }), null, "and none when no candle closes by the session");
   eq(buildPricedMove({ ...wbd, lastRange: null }).richness, "event-pinned",
      "with no range to read, an implied move under a quarter of realized is pin enough");
   eq(buildPricedMove({ ...wbd, ivMomentum: 0, ivRank: 0.5, iv30: 0.3, vrp: -0.07, lastRange: null }).richness,
