@@ -7653,7 +7653,8 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
   pointer-events: none;
   background: var(--ground);
 }
-.flows-body :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-xs); }
+.flows-body :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.flows-body :is(p, li, dd, td, figcaption) a:not([class]):focus-visible { border-radius: var(--r-xs); }
 .flows-body ::selection { background: var(--accent-fill); color: var(--label-1); }
 .flows-body button { font: inherit; letter-spacing: inherit; }
 
