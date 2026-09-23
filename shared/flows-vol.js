@@ -257,9 +257,7 @@ export function isOffHours(row) {
 
 export function regularSessionRows(rows) {
   const list = Array.isArray(rows) ? rows.filter((r) => r && typeof r === "object") : [];
-  const regularDays = new Set();
-  for (const r of list) if (!isOffHours(r)) { const d = candleDay(r); if (d) regularDays.add(d); }
-  return list.filter((r) => !isOffHours(r) || !regularDays.has(candleDay(r)));
+  return list.filter((r) => !isOffHours(r));
 }
 
 export function toBars(rows, { sessionDate = null } = {}) {

@@ -112,11 +112,22 @@ const S = FX.session;
     { close: "338.4", high: "338.9", low: "337.8", open: "338.0", date: "2026-09-22", volume: 91000, total_volume: 91000, market_time: "po" },
     { close: "339.1", high: "339.3", low: "338.6", open: "338.9", date: "2026-09-22", volume: 60000, total_volume: 60000, market_time: "pr" },
   ]);
-  eq(rows.length, 2, "a day with a regular-session row keeps it alone; a pre-market-only day (the probe row) is kept for its date");
-  ok(rows.some((r) => r.market_time === "pr" && r.date === "2026-09-23"), "the verbatim probe row (09-23 pre-market) survives as the only row of its day");
+  eq(rows.length, 1, "a day with a regular-session row keeps it alone, and the verbatim probe row (09-23 pre-market) is dropped");
+  ok(rows.every((r) => r.market_time === "r"), "no pre- or post-market row survives the filter");
   const bars = toBars(rows, { sessionDate: S });
-  eq(bars.length, 1, "and the session cut drops it, since 09-23 is after the 09-22 session");
+  eq(bars.length, 1, "one regular bar for the session");
   eq(bars[0].c, 338, "the regular session's close is the bar's close, read from a decimal string");
+  deepEq([bars[0].o, bars[0].h, bars[0].l, bars[0].v], [339.5, 341.2, 336.1, 48211000],
+    "and its open, high, low and volume are read from their own fields");
+  const preOnly = regularSessionRows([
+    { close: "338.00", high: "341.2", low: "336.1", open: "339.5", date: "2026-09-21", volume: 48211000, market_time: "r" },
+    { close: "339.1", high: "339.3", low: "338.6", open: "338.9", date: "2026-09-22", volume: 60000, market_time: "pr" },
+    { close: "338.4", high: "338.9", low: "337.8", open: "338.0", date: "2026-09-22", volume: 91000, market_time: "po" },
+  ]);
+  eq(toBars(preOnly, { sessionDate: S }).map((b) => b.d).join(), "2026-09-21",
+    "a session whose regular row has not arrived has no bar, rather than a pre- or post-market print standing in for it");
+  eq(regularSessionRows([{ date: "2026-09-22", close: "1", market_time: "premarket" }]).length, 0,
+    "the long form stock-state uses is off-hours too");
 
   const cone = buildConePanel({ data: [p["iv-dist:AAPL"].row] }, { sessionDate: S });
   eq(cone.status, "ok", "the live interpolated-iv/distribution row parses");
