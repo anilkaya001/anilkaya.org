@@ -562,6 +562,8 @@
       trigger.setAttribute("aria-expanded", "true");
     }
     fillPop(d);
+    const at = trigger ? trigger.getBoundingClientRect() : null;
+    pop.dataset.span = at && at.left + at.width / 2 < window.innerWidth / 2 ? "right" : "left";
     if (!popOpen()) { try { pop.showPopover(trigger ? { source: trigger } : undefined); } catch { return; } }
     pop.scrollTop = 0;
     try { pop.focus({ preventScroll: true }); } catch { pop.focus(); }

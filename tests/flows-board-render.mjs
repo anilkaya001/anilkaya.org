@@ -781,6 +781,43 @@ ok(!/all of them|inside the band|±/.test(quietBare),
 }
 
 {
+  await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
+  await page.waitForSelector(ROWS);
+  const sides = await page.evaluate(() => {
+    const vw = window.innerWidth;
+    const all = [...document.querySelectorAll("#flowsBody [data-info], .flows-main [data-info], main [data-info]")]
+      .filter((b) => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.top > 0 && r.bottom < window.innerHeight; });
+    const mid = (b) => { const r = b.getBoundingClientRect(); return r.left + r.width / 2; };
+    const left = all.filter((b) => mid(b) < vw / 2).sort((a, b) => mid(a) - mid(b))[0];
+    const right = all.filter((b) => mid(b) >= vw / 2).sort((a, b) => mid(b) - mid(a))[0];
+    if (left) left.dataset.probe = "left";
+    if (right) right.dataset.probe = "right";
+    return { left: Boolean(left), right: Boolean(right) };
+  });
+  ok(sides.left && sides.right, "the board has an info button in each half of the page to open");
+  for (const side of ["left", "right"]) {
+    await page.click(`[data-probe="${side}"]`);
+    await page.waitForSelector("#fxPop:popover-open");
+    await page.waitForTimeout(250);
+    const g = await page.evaluate((sel) => {
+      const t = document.querySelector(sel).getBoundingClientRect(), p = document.getElementById("fxPop").getBoundingClientRect();
+      return { tl: t.left, tr: t.right, pl: p.left, pr: p.right, vw: window.innerWidth };
+    }, `[data-probe="${side}"]`);
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !document.querySelector("#fxPop:popover-open"));
+    if (side === "left") {
+      ok(g.pl >= g.tl - 2 && g.pr <= g.vw,
+         `a disclosure opened from the left half grows rightward from its button (button ${Math.round(g.tl)}px, ` +
+         `popover ${Math.round(g.pl)}-${Math.round(g.pr)}px), not back over the sidebar`);
+    } else {
+      ok(g.pr <= g.tr + 2 && g.pl >= 0,
+         `and one opened from the right half grows leftward and stays on screen (button ends ${Math.round(g.tr)}px, ` +
+         `popover ${Math.round(g.pl)}-${Math.round(g.pr)}px)`);
+    }
+  }
+}
+
+{
   await put("board:long", board("long", true));
   const lead = (session) => ({ v: 1, status: "ok", sessionDate: session, n: 2, rows: [
     { t: "NVDA", id: "call-debit-spread", structure: "call debit spread", dir: "bull", grade: 3 },

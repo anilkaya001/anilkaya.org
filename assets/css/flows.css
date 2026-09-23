@@ -5197,6 +5197,18 @@ a.ui-row:hover { background: var(--fill-4); }
   margin: calc(var(--bar-h) + var(--safe-t) + 8px) 0 8px;
   max-height: min(70vh, 560px, calc(100% - var(--bar-h) - var(--safe-t) - 16px));
 }
+@position-try --ui-above-r {
+  position-area: top span-right;
+  margin: calc(var(--bar-h) + var(--safe-t) + 8px) 0 8px;
+  max-height: min(70vh, 560px, calc(100% - var(--bar-h) - var(--safe-t) - 16px));
+}
+@media (min-width: 600px) {
+  .ui-pop[data-span="right"] {
+    position-area: bottom span-right;
+    position-try-fallbacks: --ui-above-r, flip-inline, --ui-above-r flip-inline;
+    transform-origin: top left;
+  }
+}
 @starting-style { .ui-pop:popover-open { opacity: 0; scale: 0.96; } }
 .ui-pop::backdrop { background: transparent; }
 .flows-body .ui-pop:focus-visible { outline: none; }
