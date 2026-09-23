@@ -204,6 +204,10 @@ const T = (iso) => Date.parse(iso);
     darkpool: { data: [FX.darkpoolRecent.row] } }, { at: T("2026-09-22T20:00:00Z"), session: "2026-09-22" });
   deep([tape.totals.today.pcVol, tape.totals.today.pcPrem], [0.6597, 0.4365],
     "PROBE ROW: put/call = 25,895,745 / 39,255,508 by volume and 15,142,883,165.20 / 34,694,997,463.09 by premium");
+  const halfRow = L.shapeLiveTape({ totals: { data: [{ ...FX.totalOptionsVolume.row, put_volume: null, put_premium: "" }] } },
+    { at: T("2026-09-22T20:00:00Z"), session: "2026-09-22" }).totals.today;
+  ok(halfRow.putVol === null && halfRow.pcVol === null && halfRow.putPrem === null && halfRow.pcPrem === null,
+    "AN ABSENT PUT SIDE is an absent put/call ratio, never 0 (null / n coerces to 0 in JavaScript)");
   eq(tape.netImpact.rows[0].netPrem, 144891918, "top-net-impact's net_premium arrives as a JSON number and is kept");
   eq(tape.darkpool.dropped.extended, 1,
     "PROBE ROW: the recent dark-pool feed leads with an after-hours print (23:59:58Z), which the session window drops");

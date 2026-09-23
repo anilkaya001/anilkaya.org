@@ -722,9 +722,8 @@ export function shapeLiveTape(raws, { at, session, writer, keep = 20 } = {}) {
       callVol: vnum(x.call_volume), putVol: vnum(x.put_volume),
       callPrem: round(vnum(x.call_premium), 0), putPrem: round(vnum(x.put_premium), 0),
     })).filter((x) => x.date && DAY_RE.test(x.date)).sort((a, b) => (a.date < b.date ? 1 : -1));
-    const ratios = (x) => (x ? { ...x,
-      pcVol: x.callVol ? round(x.putVol / x.callVol, 4) : null,
-      pcPrem: x.callPrem ? round(x.putPrem / x.callPrem, 4) : null } : null);
+    const over = (a, b) => (a !== null && b !== null && b !== 0 ? round(a / b, 4) : null);
+    const ratios = (x) => (x ? { ...x, pcVol: over(x.putVol, x.callVol), pcPrem: over(x.putPrem, x.callPrem) } : null);
     const today = rows.find((x) => x.date === session) || null;
     const prior = rows.find((x) => typeof session === "string" && x.date < session) || null;
     out.totals = { status: today ? "ok" : rows.length ? "prior" : "unreadable",
