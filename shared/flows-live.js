@@ -383,6 +383,7 @@ function newestAt(list) {
 }
 
 const lastOf = (s, f) => (s && Array.isArray(s[f]) && s[f].length ? s[f][s[f].length - 1] : null);
+const lastOk = (s, f) => (s && s.status === "ok" ? lastOf(s, f) : null);
 
 export function shapeMarketLive(raws, { at, session, writer = "worker", check = false } = {}) {
   const r = raws || {};
@@ -407,9 +408,9 @@ export function shapeMarketLive(raws, { at, session, writer = "worker", check = 
     },
     tide, zeroDte, etf: { SPY: spy, QQQ: qqq }, sectors,
     last: {
-      tideNet: lastOf(tide, "net"), zeroDteNet: lastOf(zeroDte, "net"),
-      spyNet: lastOf(spy, "net"), qqqNet: lastOf(qqq, "net"),
-      spyPx: lastOf(spy, "px"), qqqPx: lastOf(qqq, "px"),
+      tideNet: lastOk(tide, "net"), zeroDteNet: lastOk(zeroDte, "net"),
+      spyNet: lastOk(spy, "net"), qqqNet: lastOk(qqq, "net"),
+      spyPx: lastOk(spy, "px"), qqqPx: lastOk(qqq, "px"),
     },
   };
 }
@@ -461,12 +462,16 @@ function alignBlock(entries) {
 }
 
 export function zeroDteShare(zero, weekly) {
+  const off = [zero, weekly].find((s) => !s || s.status !== "ok");
+  if (off) return { value: null, zeroNet: null, weeklyNet: null, date: null, reason: (off && off.reason) || SILENCE.notRead };
+  if (zero.date !== weekly.date) return { value: null, zeroNet: null, weeklyNet: null, date: null, reason: SILENCE.prior };
+  const date = zero.date || null;
   const z = lastOf(zero, "net");
   const w = lastOf(weekly, "net");
-  if (z === null || w === null) return { value: null, zeroNet: z, weeklyNet: w, reason: SILENCE.notRead };
+  if (z === null || w === null) return { value: null, zeroNet: z, weeklyNet: w, date, reason: SILENCE.unshaped };
   const denom = Math.abs(z) + Math.abs(w);
-  if (denom === 0) return { value: null, zeroNet: z, weeklyNet: w, reason: SILENCE.zeroGross };
-  return { value: round(Math.abs(z) / denom, 6), zeroNet: z, weeklyNet: w, reason: null };
+  if (denom === 0) return { value: null, zeroNet: z, weeklyNet: w, date, reason: SILENCE.zeroGross };
+  return { value: round(Math.abs(z) / denom, 6), zeroNet: z, weeklyNet: w, date, reason: null };
 }
 
 export function shapeBreadth(raws, { at, session, writer } = {}) {

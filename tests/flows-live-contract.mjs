@@ -235,11 +235,23 @@ const T = (iso) => Date.parse(iso);
 }
 
 {
-  eq(L.zeroDteShare({ net: [100, -300] }, { net: [900] }).value, 0.25,
+  const leg = (net, extra = {}) => ({ status: "ok", date: "2026-09-23", net, ...extra });
+  eq(L.zeroDteShare(leg([100, -300]), leg([900])).value, 0.25,
     "KNOWN ANSWER: 0DTE share = |−300| / (|−300| + |900|) = 0.25");
-  const zz = L.zeroDteShare({ net: [0] }, { net: [0] });
+  const zz = L.zeroDteShare(leg([0]), leg([0]));
   ok(zz.value === null && zz.reason === "zero-gross", "0 over 0 is undefined, not neutral");
-  ok(L.zeroDteShare({ net: [] }, { net: [5] }).value === null, "an absent leg gives no share");
+  ok(L.zeroDteShare(leg([]), leg([5])).value === null, "an absent leg gives no share");
+  const stale = L.zeroDteShare(leg([-300], { status: "prior", reason: "vendor-prior-session", date: "2026-09-22" }),
+    leg([900]));
+  ok(stale.value === null && stale.zeroNet === null && stale.reason === "vendor-prior-session",
+    "a 0DTE leg that is YESTERDAY'S final reading gives no share for today — the two legs are never mixed across sessions");
+  ok(L.zeroDteShare(leg([-300], { date: "2026-09-22" }), leg([900])).value === null,
+    "nor do two legs the vendor dated differently");
+  const closedTide = L.shapeMarketLive({ tide: { data: [FX.marketTide.row], date: FX.marketTide.date } },
+    { at: T("2026-09-23T13:36:00Z"), session: "2026-09-23" });
+  ok(closedTide.tide.status === "prior" && closedTide.tide.n === 1 && closedTide.last.tideNet === null,
+    "live:market keeps a prior-session tide under its own date, but its `last` block — the headline numbers — " +
+    "never carries yesterday's value as today's");
 
   const row = { ticker: "ZZZ", date: "2026-09-22", close: "110", prev_close: "100", net_call_premium: "3000000", net_put_premium: "1000000",
     bullish_premium: "60", bearish_premium: "20", iv30d: "0.3123", gex_gamma_per_one_percent_move_oi: "12345678" };
