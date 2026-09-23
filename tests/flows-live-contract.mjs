@@ -382,6 +382,14 @@ const T = (iso) => Date.parse(iso);
     "READ-TIME OVERLAY: the nightly pulse is served with today's live tide, stamped intraday at the 5-minute cadence");
   deep(over.totals, pulse.totals, "and every nightly feed beside the tide is left as the nightly wrote it");
   eq(over.tide.points.length, market.tide.n, "the tide points are the live series");
+  const { shapeTide } = await import("../shared/flows-pulse.js");
+  const nightlyPoint = shapeTide({ data: [FX.marketTide.row] }).points[0];
+  eq(nightlyPoint.t, "2026-09-22T09:30:00-04:00", "the nightly pulse keeps the vendor's own Eastern-offset stamp");
+  eq(over.tide.points[0].t, "2026-09-23T09:30:00-04:00",
+    "and the overlaid live point uses that same convention, not the UTC the live series is stored in — the market " +
+    "page labels a tide point with t.slice(11, 16), which would otherwise read 13:30 for the 09:30 bucket");
+  eq(Date.parse(over.tide.points[0].t), Date.parse(market.tide.t[0]), "the instant itself is unchanged");
+  eq(L.easternStamp(T("2026-01-14T14:30:00Z")), "2026-01-14T09:30:00-05:00", "and under EST the offset is −05:00");
   eq(L.pulseWithLive({ ...pulse, readAt: "2026-09-23T16:00:00Z" }, market), null,
     "a nightly pulse newer than the live row is not overlaid");
   eq(L.pulseWithLive({ ...pulse, sessionDate: "2026-09-24" }, market), null, "nor is a later session's");

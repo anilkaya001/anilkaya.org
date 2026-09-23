@@ -1,4 +1,6 @@
-import { FRESH_CLASSES, easternDay, sessionOpen, easternInstant, PHASE_MINUTES } from "./flows-freshness.js";
+import {
+  FRESH_CLASSES, easternDay, sessionOpen, easternInstant, easternOffsetMinutes, PHASE_MINUTES,
+} from "./flows-freshness.js";
 import { buildFlowAlerts, mergeAlerts } from "./flows-alerts.js";
 
 export const LIVE_KEY_RE = /^live:[a-z]+(?::[a-z]+)?$/;
@@ -126,6 +128,14 @@ export function timeMs(v) {
 }
 
 export const isoSec = (ms) => (Number.isFinite(ms) ? new Date(ms).toISOString().slice(0, 19) + "Z" : null);
+
+export function easternStamp(ms) {
+  if (!Number.isFinite(ms)) return null;
+  const off = easternOffsetMinutes(ms);
+  const pad = (n) => String(n).padStart(2, "0");
+  return new Date(ms + off * 60000).toISOString().slice(0, 19) +
+    (off < 0 ? "-" : "+") + pad(Math.floor(Math.abs(off) / 60)) + ":" + pad(Math.abs(off) % 60);
+}
 
 const round = (v, dp) => {
   if (v === null || !Number.isFinite(v)) return null;
@@ -1017,7 +1027,8 @@ export function pulseWithLive(pulse, market) {
   const nightlyDay = typeof pulse.sessionDate === "string" ? pulse.sessionDate : null;
   if (nightlyDay && liveDay && liveDay < nightlyDay) return null;
   if (typeof pulse.readAt === "string" && Date.parse(pulse.readAt) >= Date.parse(readAt)) return null;
-  const points = tide.t.map((t, i) => ({ t, callPrem: tide.ncp[i], putPrem: tide.npp[i], vol: tide.nv ? tide.nv[i] : null }));
+  const points = tide.t.map((t, i) => ({ t: easternStamp(timeMs(t)), callPrem: tide.ncp[i], putPrem: tide.npp[i],
+    vol: tide.nv ? tide.nv[i] : null }));
   return {
     ...pulse,
     tide: { status: "ok", points, seen: tide.seen ?? points.length, cap: points.length, shed: 0, date: liveDay },
