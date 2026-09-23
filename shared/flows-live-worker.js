@@ -27,6 +27,15 @@ export const LIVE_SCHEMA_SQL = Object.freeze([
 export const RTH_CRON = "1-59/5 13-21 * * 1-5";
 export const HOUSEKEEPING_CRON = "*/30 * * * *";
 
+export function cronJob(cron, at) {
+  if (cron === RTH_CRON) return "rth";
+  if (cron === HOUSEKEEPING_CRON) return "housekeeping";
+  const d = new Date(Number.isFinite(at) ? at : Date.now());
+  const weekday = d.getUTCDay() >= 1 && d.getUTCDay() <= 5;
+  const hour = d.getUTCHours();
+  return weekday && hour >= 13 && hour <= 21 && d.getUTCMinutes() % 30 !== 0 ? "rth" : "housekeeping";
+}
+
 export const NIGHTLY_READ_KEYS = Object.freeze(["board:long", "board:short", "board:watch", "meta"]);
 
 export const NOW_NIGHTLY_KEYS = Object.freeze([

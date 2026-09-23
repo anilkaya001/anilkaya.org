@@ -3308,7 +3308,7 @@ export default {
       }));
     }));
 
-    if (event && event.cron === FLOWS_LIVE.RTH_CRON) {
+    if (FLOWS_LIVE.cronJob(event && event.cron, at) === "rth") {
       guard("flows rth tick failed", (async () => {
         await ensureFlowsTables(env);
         return FLOWS_LIVE.rthTick(env, at, { fetchVendor: (p, params) => uwFetch(env, p, params) });
