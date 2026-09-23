@@ -8572,10 +8572,11 @@ a.ui-row:hover { background: var(--fill-4); }
 .ui-pop {
   position: fixed;
   inset: auto;
-  margin: 0;
+  margin: 8px 0 0;
   width: min(380px, calc(100vw - 24px));
-  max-height: min(70vh, 560px);
+  max-height: min(70vh, 560px, calc(100% - 16px));
   overflow: auto;
+  overscroll-behavior: contain;
   padding: var(--sp-5) var(--sp-5) var(--sp-4);
   border: 0;
   border-radius: var(--r-lg);
@@ -8586,22 +8587,29 @@ a.ui-row:hover { background: var(--fill-4); }
   box-shadow: var(--mat-edge), var(--lift-3);
   position-anchor: --ui-anchor;
   position-area: bottom span-left;
-  position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
-  translate: 0 8px;
+  position-try-fallbacks: --ui-above, flip-inline, --ui-above flip-inline;
+  position-try-order: most-height;
   opacity: 0;
   scale: 0.96;
   transform-origin: top right;
   transition: opacity var(--dur-fade) linear, scale var(--dur-snappy) var(--spring-snappy), translate var(--dur-snappy) var(--spring-snappy), display var(--dur-snappy) allow-discrete, overlay var(--dur-snappy) allow-discrete;
 }
-.ui-pop:popover-open { opacity: 1; scale: 1; translate: 0 6px; }
-@starting-style { .ui-pop:popover-open { opacity: 0; scale: 0.96; translate: 0 0; } }
+.ui-pop:popover-open { opacity: 1; scale: 1; }
+@position-try --ui-above {
+  position-area: top span-left;
+  margin: calc(var(--bar-h) + 8px) 0 8px;
+  max-height: min(70vh, 560px, calc(100% - var(--bar-h) - 16px));
+}
+@starting-style { .ui-pop:popover-open { opacity: 0; scale: 0.96; } }
 .ui-pop::backdrop { background: transparent; }
+.flows-body .ui-pop:focus-visible { outline: none; }
 @supports not (position-area: bottom) {
   .ui-pop { inset: 0; margin: auto; height: fit-content; }
 }
 @media (max-width: 599.98px) {
   .ui-pop {
     position-area: none;
+    position-try-fallbacks: none;
     inset: auto 8px 8px 8px;
     width: auto;
     height: auto;

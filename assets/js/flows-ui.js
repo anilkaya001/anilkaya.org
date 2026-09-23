@@ -512,7 +512,7 @@
   function ensurePop() {
     let pop = document.getElementById("fxPop");
     if (pop) return pop;
-    pop = h("div", { class: "ui-pop", id: "fxPop", popover: "manual", role: "dialog", "aria-modal": "false", "aria-labelledby": "fxPopT" },
+    pop = h("div", { class: "ui-pop", id: "fxPop", popover: "manual", role: "dialog", "aria-modal": "false", "aria-labelledby": "fxPopT", tabindex: "-1" },
       h("div", { class: "ui-pop-h" },
         h("h3", { id: "fxPopT" }),
         h("button", { class: "ui-pop-x", type: "button", "aria-label": "Close", onclick: () => closeInfo() }, glyph("x"))),
@@ -525,7 +525,9 @@
       if (!a) return;
       a.setAttribute("aria-expanded", "false");
       setTimeout(() => { if (anchor !== a) a.style.removeProperty("anchor-name"); }, 400);
-      if (a.isConnected) { try { a.focus({ preventScroll: true }); } catch { a.focus(); } }
+      const f = document.activeElement;
+      const lost = !f || f === document.body || pop.contains(f);
+      if (lost && a.isConnected) { try { a.focus({ preventScroll: true }); } catch { a.focus(); } }
     });
     return pop;
   }
@@ -560,8 +562,9 @@
       trigger.setAttribute("aria-expanded", "true");
     }
     fillPop(d);
-    if (!popOpen()) { try { pop.showPopover(); } catch { return; } }
+    if (!popOpen()) { try { pop.showPopover(trigger ? { source: trigger } : undefined); } catch { return; } }
     pop.scrollTop = 0;
+    try { pop.focus({ preventScroll: true }); } catch { pop.focus(); }
   }
   function closeInfo() {
     const pop = document.getElementById("fxPop");
