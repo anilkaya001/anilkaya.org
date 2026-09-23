@@ -10,6 +10,7 @@ import * as WORLD from "../shared/flows-quant-world.js";
 import * as STRUCT from "../shared/flows-quant-structures.js";
 import * as ENGINE from "../shared/flows-quant-engine.js";
 import * as TIME from "../shared/flows-quant-time.js";
+import * as QC from "../shared/flows-quant-card.js";
 import { STATE_STRUCTURES } from "../shared/flows-neuron.js";
 import { stripComments } from "../scripts/strip-comments.mjs";
 
@@ -514,7 +515,27 @@ function budget() {
   const facts = { ...synthInput().facts, "skew.rr25.30.pct": { v: 0.85, g: 3 } };
   const worst = synthInput({ topFamilies: 12, facts, state: rich });
   const normal = synthInput({ facts, state: rich });
-  return { rows: worst.expiries[0].rows.length, worst: timeIt(worst), normal: timeIt(normal) };
+  const vendor = normal.expiries[0].rows.map((r) => ({
+    option_symbol: r.sym, nbbo_bid: String(r.bid), nbbo_ask: String(r.ask), implied_volatility: String(r.ivSeed),
+    open_interest: r.oi, volume: r.volume, last_tape_time: "2026-09-21T19:58:00Z",
+  }));
+  const card = JSON.parse(JSON.stringify({
+    facts: Object.entries(facts).map(([id, f]) => ({ id, v: f.v, u: "frac", g: f.g })),
+    state: rich, pLaw: normal.pLaw, levels: normal.levels, rate: { r: 0.04, method: "constant", n: 0 }, atr: 2.1,
+  }));
+  const route = () => QC.runCardEngine({
+    ticker: "SYN", asOfMs: Date.parse(AS_OF), spot: 100, expiries: QC.chainRowsByExpiry(vendor, { ticker: "SYN" }).expiries,
+    rate: card.rate, facts: card.facts, state: card.state, pLaw: card.pLaw, levels: card.levels, atr: card.atr,
+  });
+  const probe = route();
+  for (let i = 0; i < 40; i++) route();
+  const ts = [];
+  for (let i = 0; i < 80; i++) { const t0 = process.hrtime.bigint(); route(); ts.push(Number(process.hrtime.bigint() - t0) / 1e6); }
+  ts.sort((a, b) => a - b);
+  return {
+    rows: worst.expiries[0].rows.length, worst: timeIt(worst), normal: timeIt(normal),
+    route: { rows: vendor.length, structures: probe.priced, median: ts[40], p95: ts[Math.floor(0.95 * ts.length)] },
+  };
 }
 
 if (BUDGET_ONLY) {
@@ -700,6 +721,9 @@ eq(cpu.worst.structures, 24, "and the worst case prices the Worker's maximum of 
 ok(cpu.worst.median < 6, `in a fresh isolate the Worker path (parity forward, IV inversion, SVI fit and checks, 24 structures) takes ${cpu.worst.median.toFixed(2)} ms median, well under the 10 ms Free-tier CPU limit`);
 ok(cpu.worst.p95 < 15, `and ${cpu.worst.p95.toFixed(2)} ms at the 95th percentile, garbage collection included`);
 ok(cpu.normal.median <= cpu.worst.median, `the default five families (${cpu.normal.structures} structures) take ${cpu.normal.median.toFixed(2)} ms median`);
+ok(cpu.route.rows === 400 && cpu.route.structures > 0, `the Worker's /api/flows/strategy engine path reads ${cpu.route.rows} vendor rows and prices ${cpu.route.structures} structures`);
+ok(cpu.route.median < 6, `from vendor strings to the card-shaped block (row shaping, parity, inversion, fit, pricing, compaction) in ${cpu.route.median.toFixed(2)} ms median, inside the Free-tier budget beside the chain's own JSON.parse`);
+ok(cpu.route.p95 < 15, `and ${cpu.route.p95.toFixed(2)} ms at the 95th percentile`);
 
 console.log(`✓ flows-quant: ${n} assertions — all ${CASES.length} known-answer cases at their stated tolerances ` +
   `(one fixture erratum read as what it is: ${Object.keys(ERRATA).join(", ")}), 2,000-draw properties for parity, ` +
@@ -707,4 +731,5 @@ console.log(`✓ flows-quant: ${n} assertions — all ${CASES.length} known-answ
   "exact P/L against a 10,001-point grid, EV_Q = 0 at model and P = Q " +
   "edge, a drift-neutral 64-bin P law, byte-identical reruns under shuffled rows and expiries, the selection vetoes, and the " +
   `Worker CPU budget in a fresh isolate: fit + 24 structures median ${cpu.worst.median.toFixed(2)} ms, p95 ${cpu.worst.p95.toFixed(2)} ms, ` +
-  `min ${cpu.worst.min.toFixed(2)} ms; the default ${cpu.normal.structures} structures median ${cpu.normal.median.toFixed(2)} ms, p95 ${cpu.normal.p95.toFixed(2)} ms`);
+  `min ${cpu.worst.min.toFixed(2)} ms; the default ${cpu.normal.structures} structures median ${cpu.normal.median.toFixed(2)} ms, p95 ${cpu.normal.p95.toFixed(2)} ms; ` +
+  `the strategy route's engine path from ${cpu.route.rows} vendor rows median ${cpu.route.median.toFixed(2)} ms, p95 ${cpu.route.p95.toFixed(2)} ms`);

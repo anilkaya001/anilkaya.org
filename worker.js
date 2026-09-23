@@ -7,6 +7,7 @@ import {
 import { FLOWS_PAGES, modelName, neuronProvenance } from "./shared/flows-pages.js";
 import * as FLOWS_ASK from "./shared/flows-ask.js";
 import * as FLOWS_NEURON from "./shared/flows-neuron.js";
+import { chainRowsByExpiry, runCardEngine, engineState, QUANT_CARD_VERSION } from "./shared/flows-quant-card.js";
 import { aiChain, aiCallSignature, askModels, emptyNote, fallbackNote, intradayFloorMs, repliedGuard, retryableGuard, spendShape } from "./shared/flows-ai.js";
 import { COURSE_STAGE_POINTS } from "./shared/course-points.js";
 import { COURSE_BY_ID, COURSE_BY_SLUG, COURSE_TOPICS, SITE_ORIGIN } from "./shared/course-seo.js";
@@ -1809,7 +1810,29 @@ async function buildStrategyContext(env, ctx, ticker) {
   };
 }
 
-async function buildStrategyExpiry(env, ticker, expiry) {
+function strategyEngine({ ticker, expiry, rawRows, spot, card, nowMs }) {
+  const block = card && card.engine && typeof card.engine === "object" && Array.isArray(card.engine.facts) ? card.engine : null;
+  const chain = chainRowsByExpiry(rawRows, { ticker });
+  const rows = chain.expiries.filter((e) => e.expiry === expiry);
+  if (!rows.length) return { status: "unavailable", reason: "no contract on this expiry parsed as the ticker's own" };
+  if (!(spot > 0)) return { status: "unavailable", reason: "no live spot to price against" };
+  const state = block && block.state ? block.state
+    : card && card.panels ? engineState(FLOWS_NEURON.regimeState(card, {})) : engineState(null);
+  const out = runCardEngine({
+    ticker, asOfMs: nowMs, spot, expiries: rows,
+    rate: block && block.rate ? block.rate : null,
+    facts: block ? block.facts : [], state, pLaw: block ? block.pLaw : null,
+    levels: block ? block.levels : null, event: block ? block.event : null,
+    atr: block ? block.atr : null,
+    stale: !!(card && card.sessionDate && block && block.asOf && block.asOf < card.sessionDate),
+  });
+  return {
+    status: "ok", v: QUANT_CARD_VERSION, cardSession: card ? card.sessionDate || null : null,
+    lawFrom: block && block.pLaw ? "card" : null, ...out,
+  };
+}
+
+async function buildStrategyExpiry(env, ticker, expiry, { engine = false } = {}) {
   const t = encodeURIComponent(ticker);
   const page = (optionType, n) => uwFetch(env, `/api/stock/${t}/option-contracts`, {
 
@@ -1819,7 +1842,11 @@ async function buildStrategyExpiry(env, ticker, expiry) {
     ...(n > 1 ? { page: n } : {}),
   });
 
-  const [callsFirst, putsFirst] = await Promise.all([page("call", 1), page("put", 1)]);
+  const [callsFirst, putsFirst, liveState, cardRead] = await Promise.all([
+    page("call", 1), page("put", 1),
+    engine ? uwFetch(env, `/api/stock/${t}/stock-state`, {}).catch(() => null) : Promise.resolve(null),
+    engine ? readCardWithEngine(env, ticker).catch(() => null) : Promise.resolve(null),
+  ]);
 
   const gather = async (optionType, first) => {
     const rows = unwrapRows(first);
@@ -1878,6 +1905,20 @@ async function buildStrategyExpiry(env, ticker, expiry) {
   const callRows = shape(calls.rows, "call");
   const putRows = shape(puts.rows, "put");
 
+  let engineBlock = null;
+  if (engine) {
+    const live = liveState && !Array.isArray(liveState) ? (liveState.data && !Array.isArray(liveState.data) ? liveState.data : liveState) : null;
+    const spotLive = numOrNull(live && live.close);
+    const card = cardRead && cardRead.card ? cardRead.card : null;
+    const spot = spotLive !== null && spotLive > 0 ? spotLive : card && card.engine && numOrNull(card.engine.spot);
+    try {
+      engineBlock = strategyEngine({ ticker, expiry, rawRows: calls.rows.concat(puts.rows), spot, card, nowMs: Date.now() });
+      engineBlock.spotSource = spotLive !== null && spotLive > 0 ? "stock-state" : spot ? "card" : null;
+    } catch (error) {
+      engineBlock = { status: "unavailable", reason: "the engine failed on this expiry: " + (error instanceof Error ? error.message : String(error)) };
+    }
+  }
+
   return {
     mode: "expiry",
     ticker, expiry,
@@ -1892,6 +1933,7 @@ async function buildStrategyExpiry(env, ticker, expiry) {
     missingGreeks,
 
     offExpiry,
+    ...(engine ? { engine: engineBlock } : {}),
     generatedAt: new Date().toISOString(),
   };
 }
@@ -3123,15 +3165,16 @@ async function route(request, env, url, ctx) {
         throw new HttpError(400, "invalid_expiry", "Expiry must be YYYY-MM-DD");
       }
       const expiry = rawExpiry === null ? null : rawExpiry;
+      const engine = expiry !== null && url.searchParams.get("engine") === "1";
 
       return serveCachedVendorRead({
         ctx,
         cacheKey: new Request(
-          `https://flows-strategy.internal/${ticker}${expiry ? "/" + expiry : ""}`,
+          `https://flows-strategy.internal/${ticker}${expiry ? "/" + expiry : ""}${engine ? "?engine=1" : ""}`,
           { method: "GET" }),
         wantsRefresh: url.searchParams.get("refresh") === "1",
         build: () => (expiry
-          ? buildStrategyExpiry(env, ticker, expiry)
+          ? buildStrategyExpiry(env, ticker, expiry, { engine })
           : buildStrategyContext(env, ctx, ticker)),
       });
     }

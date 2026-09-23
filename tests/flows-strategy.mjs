@@ -348,6 +348,22 @@ try {
   }
 
   {
+    const cookie = { Cookie: "flows_session=" + token };
+    const withEngine = await (await fetch(server.baseURL + "/api/flows/strategy?t=AAA&expiry=" + NEAR + "&engine=1",
+      { headers: cookie })).json();
+    const e = withEngine.engine;
+    ok(e && e.status === "ok" && e.spotSource === "stock-state" && e.spot === 102,
+       `engine=1 runs the card engine on the expiry just read, priced against the live print (${e && e.status}, ${e && e.spotSource})`);
+    ok(e && e.expiries.length === 1 && e.expiries[0].expiry === NEAR && e.expiries[0].smile && e.expiries[0].forward,
+       "for that one expiry only, with its smile and its parity forward");
+    ok(e && Array.isArray(e.structures) && Array.isArray(e.facts) && "noTrade" in e,
+       "in the same structure objects the card publishes, so the page reads one shape wherever it came from");
+    ok(e && e.lawFrom === null && e.pLaw === null, "and with no card published for the name, no real-world law is invented for it");
+    const plain = await (await fetch(server.baseURL + "/api/flows/strategy?t=AAA&expiry=" + NEAR, { headers: cookie })).json();
+    ok(!("engine" in plain), "without engine=1 the payload is the vendor read it always was");
+  }
+
+  {
 
     await page.$eval("#sgSceneDays", (n) => {
       n.value = "1";
