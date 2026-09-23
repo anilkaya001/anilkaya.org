@@ -140,7 +140,7 @@ export async function runLive({
   const [totals, netImpact, darkpool, newsRaw] = await Promise.all([
     read("/api/market/total-options-volume", { limit: 2 }),
     read("/api/market/top-net-impact", { limit: 20 }),
-    read("/api/darkpool/recent", { limit: 100, newer_than: new Date(open).toISOString() }),
+    read("/api/darkpool/recent", { date: session, order_by: "premium", limit: 200 }),
     read("/api/news/headlines", { limit: 100 }),
   ]);
   const at = now();

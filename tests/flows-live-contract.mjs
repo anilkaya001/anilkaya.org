@@ -11,7 +11,7 @@ import {
 import * as L from "../shared/flows-live.js";
 import * as W from "../shared/flows-live-worker.js";
 import * as FAKE from "../scripts/flows-legs/live-fake.mjs";
-import { readHeldAlerts, boardPlan, liveWindow } from "../scripts/flows-legs/live.mjs";
+import { readHeldAlerts, boardPlan, liveWindow, runLive } from "../scripts/flows-legs/live.mjs";
 import { shapeNews } from "../scripts/flows-pipeline.mjs";
 
 const ROOT = new URL("../", import.meta.url);
@@ -572,6 +572,44 @@ const T = (iso) => Date.parse(iso);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+  {
+    const SPEC_PARAMS = {
+      "/api/market/sector-tide": ["date"], "/api/market/etf-tide": ["date"],
+      "/api/net-flow/expiry": ["date", "moneyness", "tide_type", "expiration"],
+      "/api/screener/stocks": ["ticker", "limit", "offset", "date"],
+      "/api/option-trades/flow-alerts": ["ticker_symbol", "newer_than", "older_than", "limit"],
+      "/api/stock/spot-exposures": ["date"], "/api/market/total-options-volume": ["limit"],
+      "/api/market/top-net-impact": ["date", "issue_types[]", "limit"],
+      "/api/darkpool/recent": ["limit", "date", "min_premium", "max_premium", "min_size", "max_size", "min_volume",
+        "max_volume", "order", "order_by"],
+      "/api/news/headlines": ["sources", "search_term", "ticker", "major_only", "limit", "page"],
+    };
+    const LIMIT_MAX = { "/api/darkpool/recent": 200, "/api/market/top-net-impact": 100, "/api/news/headlines": 100,
+      "/api/option-trades/flow-alerts": 200, "/api/screener/stocks": 500 };
+    const session = "2026-09-23";
+    const at = easternInstant(session, 11 * 60 + 7);
+    let clock = at;
+    const uw = FAKE.fakeLiveVendor({ now: () => (clock += 250), session });
+    const boards = FAKE.fakeBoards();
+    await runLive({ uw, now: () => (clock += 250), log: () => {}, warn: () => {}, force: true, shapeNews,
+      publish: async () => {},
+      readStored: async (k) => (k.startsWith("board:") ? { payload: boards[k.slice(6)] } : { payload: null }) });
+    const undocumented = [];
+    for (const { path, params } of uw.calls) {
+      const route = path.replace(/^\/api\/(market|stock)\/[^/]+\/(sector-tide|etf-tide|spot-exposures)$/, "/api/$1/$2");
+      const allowed = SPEC_PARAMS[route] || [];
+      for (const name of Object.keys(params)) if (!allowed.includes(name)) undocumented.push(`${route}?${name}`);
+      if (LIMIT_MAX[route] && Number(params.limit) > LIMIT_MAX[route]) undocumented.push(`${route} limit ${params.limit}`);
+    }
+    deep(undocumented, [], "EVERY Tier 2 vendor call sends only query parameters the vendor's spec documents for that " +
+      "route, inside the route's documented limit — an undocumented one (darkpool/recent has no newer_than) is " +
+      "silently ignored and the read is not the window it claims");
+    const dp = uw.calls.find((c) => c.path === "/api/darkpool/recent");
+    ok(dp && dp.params.date === session && dp.params.order_by === "premium",
+      "the dark-pool read asks for the session's own prints, largest premium first, so the top twenty it keeps are " +
+      "the session's largest rather than the last few seconds'");
+  }
+
   const plan = boardPlan({ long: { payload: { rows: [{ t: "AAA", s: 90 }, { t: "BBB", s: 10 }] } },
     short: { payload: { rows: [{ t: "CCC", s: -95 }] } }, watch: { payload: null } });
   deep(plan.ranked, ["CCC", "AAA", "BBB"], "the gamma rotation ranks board names by |score|");
