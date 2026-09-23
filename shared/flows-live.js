@@ -94,6 +94,8 @@ export const SILENCE = Object.freeze({
   zeroGross: "zero-gross",
   noBase: "no-base",
   preOpen: "pre-open",
+  later: "vendor-later-session",
+  otherSession: "other-session",
 });
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -805,13 +807,18 @@ const GEX_FIELDS = Object.freeze({
 export function shapeGexSeries(raw, { session, now = null } = {}) {
   const silent = feedSilence(raw);
   if (silent) return { ...silent, n: 0 };
-  const { from } = rthWindow(session);
+  const { from, to: end } = rthWindow(session);
+  const to = Number.isFinite(now) && end !== null ? Math.min(now, end) : (Number.isFinite(now) ? now : end);
   const s = bucketSeries(rowsOf(raw), { time: "start_time", fields: GEX_FIELDS, basis: "level", bucketMin: 5,
-    from, to: now, dp: { px: 4 }, net: null });
+    from, to, dp: { px: 4 }, net: null });
   if (!s.n) {
     const any = bucketSeries(rowsOf(raw), { time: "start_time", fields: GEX_FIELDS, basis: "level", net: null });
     if (!any.n) return { status: "unreadable", reason: SILENCE.unshaped, n: 0 };
-    return easternDay(timeMs(any.lastAt)) === session
+    const lastDay = easternDay(timeMs(any.lastAt));
+    if (typeof session === "string" && lastDay && lastDay > session) {
+      return { status: "unreadable", reason: SILENCE.later, n: 0, lastAt: any.lastAt };
+    }
+    return lastDay === session
       ? { status: "quiet", reason: SILENCE.preOpen, n: 0, lastAt: any.lastAt }
       : { status: "prior", reason: SILENCE.prior, n: 0, lastAt: any.lastAt };
   }
@@ -963,9 +970,17 @@ export function shapeTapePrem(raws, { at, session, now = null, alertsCap = LIVE_
   const as = feedSilence(r.alerts);
   if (as) alerts = { ...as, rows: [] };
   else {
-    const built = buildFlowAlerts(rowsOf(r.alerts), { stageOf: () => null, stageComplete: false, cap: alertsCap });
-    alerts = { status: built.status, reason: built.status === "ok" ? null : SILENCE.unshaped, rows: built.rows,
-      seen: built.seen, shed: built.shed, coverage: built.coverage };
+    const inSession = [];
+    let outside = 0;
+    for (const row of rowsOf(r.alerts)) {
+      const day = easternDay(timeMs(row && row.created_at));
+      if (day && typeof session === "string" && day !== session) outside++;
+      else inSession.push(row);
+    }
+    const built = buildFlowAlerts(inSession, { stageOf: () => null, stageComplete: false, cap: alertsCap });
+    const status = !inSession.length ? "quiet" : built.status;
+    alerts = { status, reason: status === "ok" ? null : (!inSession.length ? SILENCE.otherSession : SILENCE.unshaped),
+      rows: built.rows, seen: built.seen, shed: built.shed, outside, coverage: built.coverage };
   }
   const readAt = new Date(typeof at === "number" ? at : timeMs(at)).toISOString();
   return { prem: { ...prem, readAt }, alerts: { ...alerts, readAt } };

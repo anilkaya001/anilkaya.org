@@ -5,7 +5,7 @@ import {
 } from "./flows-live.js";
 import {
   FRESH_CLASSES, PHASE_MINUTES, LIVE_CLOCK, freshHeaders, pendingHeaders, phaseAt, tier1Due, liveDispatchDue,
-  liveStalled, nightlyDispatchDue, easternDay, easternInstant,
+  liveStalled, nightlyDispatchDue, easternDay, easternInstant, sessionOpen,
 } from "./flows-freshness.js";
 
 export const LIVE_SCHEMA_SQL = Object.freeze([
@@ -524,35 +524,42 @@ export function tapeSession(raws, fallback) {
   return best || fallback;
 }
 
-export function tapeLegFor(heldText, heldLegs, session) {
+export function tapeLegFor(heldText, heldLegs, { session = null, rth = false } = {}) {
   const mask = Number(heldLegs) || 0;
-  if (!(mask & TAPE_LEG_BITS.prem)) return { leg: "prem", held: null };
   let held = null;
   try { held = heldText ? JSON.parse(heldText) : null; } catch { held = null; }
-  if (!held || held.session !== session) return { leg: "prem", held: null };
+  if (!held || typeof held !== "object" || typeof held.session !== "string") return { leg: "prem", held: null };
+  if (!(mask & TAPE_LEG_BITS.prem)) return { leg: "prem", held };
+  const premAt = held.prem && typeof held.prem.readAt === "string" ? timeMs(held.prem.readAt) : NaN;
+  if (rth && typeof session === "string" && held.session < session && !(premAt >= sessionOpen(session))) {
+    return { leg: "prem", held };
+  }
   if (!(mask & TAPE_LEG_BITS.gex)) return { leg: "gex", held };
   return { leg: nextTapeLeg(held), held };
 }
 
-export async function refreshTape(env, ticker, now, { fetchVendor, heldText = null, heldLegs = 0, heldSession = null }) {
+export async function refreshTape(env, ticker, now, { fetchVendor, heldText = null, heldLegs = 0 }) {
   const t = encodeURIComponent(ticker);
   const clock = await cachedClock(env, now);
   const phase = phaseAt(now, clock);
   const day = phase && phase.session ? phase.session : easternDay(now);
-  const plan = tapeLegFor(heldText, heldLegs, heldSession || day);
+  const plan = tapeLegFor(heldText, heldLegs, { session: day, rth: !!phase && phase.phase === "rth" });
   let legs;
-  let session = heldSession || day;
+  let session;
   if (plan.leg === "prem") {
+    const since = phase && phase.phase === "pre" && phase.lastClosed ? phase.lastClosed : day;
     const [ticks, alerts] = await Promise.all([
       withTimeout(fetchVendor(`/api/stock/${t}/net-prem-ticks`, {}), LIVE_BUDGET.tier1TimeoutMs),
       withTimeout(fetchVendor("/api/option-trades/flow-alerts",
-        { ticker_symbol: ticker, newer_than: day, limit: LIVE_BUDGET.alertsPerTape * 2 }), LIVE_BUDGET.tier1TimeoutMs),
+        { ticker_symbol: ticker, newer_than: since, limit: LIVE_BUDGET.alertsPerTape * 2 }), LIVE_BUDGET.tier1TimeoutMs),
     ]);
     session = tapeSession({ ticks }, day);
     legs = shapeTapePrem({ ticks, alerts }, { at: now, session, now });
     if (legs.prem.status === "unavailable" && legs.alerts.status === "unavailable") return null;
   } else {
-    const spot = await withTimeout(fetchVendor(`/api/stock/${t}/spot-exposures`, {}), LIVE_BUDGET.tier1TimeoutMs);
+    session = plan.held.session;
+    const spot = await withTimeout(fetchVendor(`/api/stock/${t}/spot-exposures`, { date: session }),
+      LIVE_BUDGET.tier1TimeoutMs);
     legs = shapeTapeGex({ spot }, { at: now, session, now });
     if (legs.gex.status === "unavailable") return null;
   }
@@ -606,7 +613,7 @@ export async function serveTape(env, ctx, ticker, now, { fetchVendor, json }) {
     try {
       if (!(await ondemandAllowed(env))) { await release(); return { throttled: true }; }
       const fresh = await refreshTape(env, ticker, now, { fetchVendor,
-        heldText: hasPayload ? row.payload : null, heldLegs: row ? row.legs : 0, heldSession: row ? row.session : null });
+        heldText: hasPayload ? row.payload : null, heldLegs: row ? row.legs : 0 });
       if (!fresh) { await release(); return null; }
       await db.prepare(
         "UPDATE flows_tape SET payload = ?, read_at = ?, session = ?, legs = ?, refreshing_until = NULL, last_served = ? " +

@@ -503,6 +503,62 @@ const T = (iso) => Date.parse(iso);
 }
 
 {
+  const yday = "2026-09-22";
+  const today = "2026-09-23";
+  const spotFor = (day, now) => FAKE.fakeSpotExposures("AAPL", { session: day, now });
+  const mixed = { data: [...spotFor(yday, easternInstant(yday, 16 * 60)).data,
+    ...spotFor(today, easternInstant(today, 8 * 60)).data] };
+  const g = L.shapeGexSeries(mixed, { session: yday, now: easternInstant(today, 8 * 60) });
+  ok(g.status === "ok" && Date.parse(g.lastAt) <= easternInstant(yday, 16 * 60 + 5) &&
+     Date.parse(g.firstAt) >= easternInstant(yday, 9 * 60 + 30),
+  "A GAMMA PATH IS ITS SESSION'S REGULAR HOURS: rows from the next morning's pre-market are never sliced into " +
+    `yesterday's series (${g.firstAt} to ${g.lastAt})`);
+  const later = L.shapeGexSeries(spotFor(today, easternInstant(today, 8 * 60)), { session: yday,
+    now: easternInstant(today, 8 * 60) });
+  ok(later.status === "unreadable" && later.reason === "vendor-later-session",
+    "and rows that belong only to a LATER session than the one asked for are named as such, never called prior");
+
+  const rows = FAKE.fakeFlowAlerts({ session: today, now: easternInstant(today, 11 * 60), tickers: ["AAPL"], count: 6 });
+  const other = FAKE.fakeFlowAlerts({ session: yday, now: easternInstant(yday, 15 * 60), tickers: ["AAPL"], count: 4 });
+  const tp = L.shapeTapePrem({ ticks: FAKE.fakeNetPremTicks("AAPL", { session: today, now: easternInstant(today, 11 * 60) }),
+    alerts: { data: [...rows.data, ...other.data] } }, { at: easternInstant(today, 11 * 60), session: today });
+  ok(tp.alerts.outside === 4 && tp.alerts.seen <= 6, "the tape's alerts are its own session's: four from the day " +
+    "before are counted as outside and not shown beside today's premium path");
+
+  const held = (session, legs) => JSON.stringify({ session, prem: { readAt: "2026-09-22T19:00:00.000Z" },
+    gex: { readAt: "2026-09-22T18:00:00.000Z" }, legs });
+  deep(W.tapeLegFor(held(yday), 3, { session: today, rth: true }).leg, "prem",
+    "IN SESSION, a tape still holding yesterday re-reads its premium leg first, which dates the new session");
+  deep(W.tapeLegFor(held(yday), 3, { session: today, rth: false }).leg, "gex",
+    "outside the session the older leg is refreshed as usual");
+  const readToday = JSON.stringify({ session: yday, prem: { readAt: new Date(easternInstant(today, 9 * 60 + 40)).toISOString() },
+    gex: { readAt: "2026-09-22T18:00:00.000Z" } });
+  deep(W.tapeLegFor(readToday, 1, { session: today, rth: true }).leg, "gex",
+    "but once the premium leg HAS been read this session and the vendor still dates it yesterday, the gamma leg is " +
+    "read next — the tape is never stuck re-reading one leg");
+
+  const calls = [];
+  const fetchVendor = async (path, params) => {
+    calls.push({ path, params });
+    if (/spot-exposures$/.test(path)) {
+      return params && params.date ? spotFor(params.date, easternInstant(params.date, 16 * 60)) :
+        spotFor(today, easternInstant(today, 8 * 60));
+    }
+    throw new Error("unexpected " + path);
+  };
+  const heldTape = L.shapeTickerTape({ ticks: FAKE.fakeNetPremTicks("AAPL", { session: yday, now: easternInstant(yday, 16 * 60) }),
+    alerts: { data: [] } }, { at: easternInstant(yday, 16 * 60 + 2), session: yday, ticker: "AAPL" });
+  const r = await W.refreshTape({}, "AAPL", easternInstant(today, 8 * 60), { fetchVendor,
+    heldText: JSON.stringify(heldTape), heldLegs: 1 });
+  const spotCall = calls.find((c) => /spot-exposures$/.test(c.path));
+  ok(r && r.leg === "gex" && r.session === yday && spotCall && spotCall.params.date === yday,
+    "the gamma leg is read FOR THE TAPE'S OWN SESSION (spot-exposures?date=), so both legs describe one session");
+  ok(r.payload.gex.status === "ok" && r.payload.gex.t.every((t) => Date.parse(t) <= easternInstant(yday, 16 * 60 + 5)) &&
+     r.legs === 3, "and at 08:00 the next morning yesterday's tape completes with yesterday's regular-hours gamma, " +
+    "not this morning's pre-market");
+}
+
+{
   const worker = read("worker.js");
   const liveWorker = read("shared/flows-live-worker.js");
   const leg = read("scripts/flows-legs/live.mjs");
