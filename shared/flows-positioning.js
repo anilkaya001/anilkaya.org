@@ -368,12 +368,12 @@ export function gexHistory(body, {
     vanna: m.vanna === null || m.vanna === undefined ? note("vanna", "convention-undetermined") : (sig(last.v) ?? note("vanna", "no-today")),
     vannaZ: m.vanna === null || m.vanna === undefined ? note("vannaZ", "convention-undetermined") : (round(vz.z, 3) ?? note("vannaZ", vz.why)),
     vannaPct: m.vanna === null || m.vanna === undefined ? note("vannaPct", "convention-undetermined") : (round(vz.pct, 4) ?? note("vannaPct", vz.why)),
-    u: { net: "shareGamma", usd1pct: "usdPer1pct", adv: "frac", z: "sd", pct: "frac", persist: "sessions",
+    u: { net: unit === "pct$" ? "usdPer1pct" : "shareGamma", usd1pct: "usdPer1pct", adv: "frac", z: "sd", pct: "frac", persist: "sessions",
       longShare: "frac", flips: "count", charm: "vendor", charmZ: "sd", charmPct: "frac", vanna: "vendor",
       vannaZ: "sd", vannaPct: "frac" },
     gaps,
   };
-  return { section, series: { d: rows.map((r) => r.d), g, c, v } };
+  return { section, series: { d: rows.map((r) => r.d), g, c, v, unit: section.u.net } };
 }
 
 export function volumeHistory(body, {

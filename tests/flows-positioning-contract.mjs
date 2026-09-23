@@ -136,6 +136,14 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   eq(s.z, null, "one session has no z-score");
   eq(s.gaps.z, "short-history", "and the gap names why");
   ok(Object.values(s.u).every((u) => u in UNITS), "every unit on the section is a declared unit");
+  eq(s.u.net, "shareGamma", "under the documented share family the net book is labelled share-gamma");
+  const dollars = gexHistory(FX.greekExposure, { sessionDate: probe.date, spot: 250, adv: 1e10, unit: "pct$" });
+  eq(dollars.section.u.net, "usdPer1pct",
+    "when the run's unit probe reads the vendor in dollars per 1%, the same number is labelled in dollars, never share-gamma");
+  eq(dollars.section.usd1pct, dollars.section.net, "and is carried unscaled into the dollar reading");
+  const packedDollars = buildHist({ ticker: "A", sessionDate: probe.date, generatedAt: "x", fresh: null,
+    gex: dollars.series, volume: null, nope: [] });
+  eq(packedDollars.u.g, "usdPer1pct", "the 1Y history of that book carries the same unit");
   const stale = gexHistory(FX.greekExposure, { sessionDate: SESSION }).section;
   eq(stale.status, "stale", "a series that ends before the session is stale");
   eq(stale.why, "not-session", "with its code");

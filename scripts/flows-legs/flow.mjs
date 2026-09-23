@@ -134,7 +134,7 @@ export function buildHist({ ticker, sessionDate, generatedAt, fresh, gex, volume
         np: pk(cols.np), bb: pk(cols.bb), vol: pk(cols.vol), pc: pk(cols.pc), oi: pk(cols.oi),
       } : null,
       nope: cols.nope ? { asOf: nopeDays[nopeDays.length - 1] || null, ...pk(cols.nope) } : null,
-      u: { dd: "days", g: "shareGamma", c: "vendor", v: "vendor", np: "usd", bb: "usd", vol: "contracts", pc: "ratio",
+      u: { dd: "days", g: (gex && gex.unit) || "shareGamma", c: "vendor", v: "vendor", np: "usd", bb: "usd", vol: "contracts", pc: "ratio",
         oi: "contracts", nope: "ratio" },
       trimmed: start,
     };
