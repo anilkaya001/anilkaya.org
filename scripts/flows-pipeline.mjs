@@ -1054,6 +1054,7 @@ function computeFeatures({ ticker, spot: readSpot, greekFlow, ticks, strikes, ex
     hasView: quality.hasDirectionalView,
 
     netGamma: gamma.netGamma,
+    gammaGross: gamma.gross,
     gammaPeak: gamma.peak,
     gammaFlip: gamma.flip,
     flipSide: gamma.flipSide,

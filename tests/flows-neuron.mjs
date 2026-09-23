@@ -8,6 +8,8 @@ import { guardAnswer, selectFacts, buildFactIndex } from "../shared/flows-ask.js
 import { modelName, neuronProvenance } from "../shared/flows-pages.js";
 import { variation, cardVariationInput } from "../shared/flows-variation.js";
 import { gammaReading } from "../shared/flows-neuron.js";
+import { aggressorGamma } from "../shared/flows-features.js";
+import { buildCard } from "../shared/flows-card.js";
 import fs from "node:fs";
 import { aiText, modelInput, askModels, aiChain, aiCallSignature, retryableGuard, repliedGuard, modelRates,
          spendShape, fallbackNote, AI_LENGTH_RETRY_MS } from "../shared/flows-ai.js";
@@ -17,6 +19,7 @@ let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
 const eq = (a, b, m) => { assert.equal(a, b, m); checks++; };
 const same = (a, b, m) => { assert.deepEqual(a, b, m); checks++; };
+const near = (a, b, tol, m) => { assert.ok(Number.isFinite(a) && Math.abs(a - b) <= tol, `${m} (got ${a}, want ${b})`); checks++; };
 
 const CARD = {
   ticker: "SYN1", nm: "Synthetic One", sector: "Energy", sessionDate: "2026-09-15",
@@ -475,6 +478,29 @@ const CARD = {
   const sentence = stateSentence(ctx.state, "B");
   ok(/Hedging: time alone moves dealer hedges to buy \$2\.00M over the session/.test(sentence),
      `the state sentence gains a Hedging clause (${sentence.slice(sentence.indexOf("Hedging"), sentence.indexOf("Hedging") + 90)})`);
+
+  const alternating = (n) => {
+    const spot = 50 + n / 2 + 0.5;
+    const strikes = Array.from({ length: n }, (_, i) => ({ strike: 50 + i, call_gamma_ask: i % 2 ? -9 : 10,
+      call_gamma_bid: 0, put_gamma_ask: 0, put_gamma_bid: 0 }));
+    const g = aggressorGamma(strikes, { spot });
+    const card = buildCard({ ticker: "ALT", row: { close: String(spot) }, strikes, ticks: [], expiries: [],
+      features: { spot, atr: 1.5, netGamma: g.netGamma, gammaGross: g.gross, gRegime: "long", gRegimeFrom: "flow", gammaFlip: g.flip },
+      generatedAt: "2026-09-15T21:00:00Z", sessionDate: "2026-09-15" });
+    return { card, read: gammaReading(card), state: regimeState(card, { expectedSession: "2026-09-15" }) };
+  };
+  const drawn = alternating(60), packed = alternating(120);
+  ok(!drawn.card.panels.gamma.bucketed && packed.card.panels.gamma.bucketed,
+     "a 60-strike ladder is drawn bar for bar and a 120-strike one is bucketed in pairs for display");
+  near(drawn.read.strength, 30 / 570, 1e-12, "strikes alternating +10/−9 net 5% of the ladder's gross");
+  near(packed.read.strength, drawn.read.strength, 1e-12,
+       "and twice the ladder at the same per-strike share reads the same 5%, where the bucketed bars cancelled each pair into a 100% reading");
+  eq(packed.state.confidence, drawn.state.confidence,
+     `so display bucketing cannot lift the state's confidence across the idea gate (${drawn.state.confidence} and ${packed.state.confidence})`);
+  const legacy = JSON.parse(JSON.stringify(packed.card));
+  delete legacy.regime.flowGross;
+  eq(gammaReading(legacy).strength, null,
+     "a card published before the ladder's gross was carried reads no strength off bucketed bars, rather than an inflated one");
 
   const grade = (mutate) => {
     const c = JSON.parse(JSON.stringify(withVar));

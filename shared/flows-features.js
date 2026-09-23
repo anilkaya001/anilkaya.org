@@ -317,9 +317,10 @@ export function aggressorGamma(strikeRows, { spot = null, materiality = 0.02 } =
     .filter((r) => Number.isFinite(r.strike) && r.strike > 0 && r.gamma !== null)
     .sort((a, b) => a.strike - b.strike);
 
-  let cum = 0, peak = 0;
+  let cum = 0, peak = 0, gross = 0;
   for (const row of ladder) {
     cum += row.gamma;
+    gross += Math.abs(row.gamma);
     row.cum = cum;
     peak = Math.max(peak, Math.abs(cum));
   }
@@ -330,6 +331,7 @@ export function aggressorGamma(strikeRows, { spot = null, materiality = 0.02 } =
   return {
     ladder,
     netGamma: ladder.length ? cum : null,
+    gross: ladder.length ? gross : null,
     peak,
     crossings,
     flip: chosen ? chosen.strike : null,

@@ -205,8 +205,9 @@ export function gammaReading(card) {
     };
   }
   if (flow !== null) {
-    const bars = okPanel(P.gamma) && Array.isArray(P.gamma.bars) ? P.gamma.bars : [];
-    const gross = bars.reduce((a, b) => a + Math.abs(num(b && b.g) || 0), 0);
+    const bars = okPanel(P.gamma) && !P.gamma.bucketed && Array.isArray(P.gamma.bars) ? P.gamma.bars : [];
+    const gross = num(regime.flowGross) !== null ? num(regime.flowGross)
+      : bars.reduce((a, b) => a + Math.abs(num(b && b.g) || 0), 0);
     const strength = gross > 0 ? Math.abs(flow) / gross : null;
     const label = flow >= 0 ? "long" : "short";
     return {

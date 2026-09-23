@@ -1547,6 +1547,7 @@ export function buildCard({
       ? {
         netGamma: numOrNull(f.netGamma),
         flowGamma: numOrNull(f.netGamma),
+        flowGross: numOrNull(f.gammaGross),
         label: f.gRegime || null,
         labelFrom: f.gRegimeFrom || null,
         bookGammaRaw: numOrNull(f.gammaBookRaw),
