@@ -1016,7 +1016,7 @@ function computeFeatures({ ticker, spot: readSpot, greekFlow, ticks, strikes, ex
   const path = pathSignature(ticks);
   const calendar = gammaDecayCalendar(expiries, { asOf: sessionDate });
   const book = openInterestGammaBook(expiries, { asOf: sessionDate });
-  const regimeFrom = book.net !== null ? "book" : "flow";
+  const regimeFrom = book.net !== null ? "book" : gamma.netGamma !== null ? "flow" : null;
   const regimeNet = book.net !== null ? book.net : gamma.netGamma;
 
   const dollarVolume = medianDollarVolume(ohlc);
@@ -1066,7 +1066,7 @@ function computeFeatures({ ticker, spot: readSpot, greekFlow, ticks, strikes, ex
     flipDist,
     flipDistAtr: gamma.flip && atr > 0 ? (gamma.flip - spot) / atr : null,
 
-    gRegime: regimeNet >= 0 ? "long" : "short",
+    gRegime: regimeNet === null ? null : regimeNet >= 0 ? "long" : "short",
     gRegimeFrom: regimeFrom,
     gammaBookRaw: book.net,
     gammaBookGrossRaw: book.gross,

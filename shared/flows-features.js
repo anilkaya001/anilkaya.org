@@ -329,7 +329,7 @@ export function aggressorGamma(strikeRows, { spot = null, materiality = 0.02 } =
 
   return {
     ladder,
-    netGamma: cum,
+    netGamma: ladder.length ? cum : null,
     peak,
     crossings,
     flip: chosen ? chosen.strike : null,

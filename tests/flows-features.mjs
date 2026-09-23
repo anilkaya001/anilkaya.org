@@ -11,8 +11,10 @@ import {
   crossFamilyRedundancy, qualityGate, percentileRank, realizedVol,
   SCORE_SCALE, SIGN_CONVENTION, GREEK_DEALER_SIGN, openInterestGammaBook,
 } from "../shared/flows-features.js";
-import { blackScholesGreeks } from "../shared/flows-variation.js";
-import { computeFeatures } from "../scripts/flows-pipeline.mjs";
+import { blackScholesGreeks, variation, variationSummary } from "../shared/flows-variation.js";
+import { computeFeatures, featuresVariationInput } from "../scripts/flows-pipeline.mjs";
+import { buildCard } from "../shared/flows-card.js";
+import { gammaReading } from "../shared/flows-neuron.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -1259,6 +1261,26 @@ const near = (a, b, tol, msg) => {
   near(withBook.gammaBookShare, -15 / 35, 1e-12, "and the book's net is published as a share of its gross");
   eq(openInterestGammaBook([{ expiry: "2026-09-04", call_gex: null, put_gex: "" }], { asOf: "2026-08-31" }).net, null,
     "a book with no readable leg is absent, not zero");
+
+  eq(aggressorGamma([], { spot: 100 }).netGamma, null, "an empty ladder has no net gamma, not a net of zero");
+  const legless = strikes.map((r) => ({ strike: r.strike }));
+  const noLadder = computeFeatures({ ...base, strikes: legless, expiries: [] });
+  eq(noLadder.netGamma, null, "a strike response whose rows carry no gamma leg is no flow ladder: its net is absent, not $0");
+  eq(noLadder.gRegime, null, "so no regime label is read off it, where null >= 0 would have read long");
+  eq(noLadder.gRegimeFrom, null, "and no source is claimed for one");
+  const opts = { probe: { call: "raw", put: "raw" }, kc: { status: "ok", value: 50 },
+    vannaScale: { status: "agree", ratio: 1, n: 5 } };
+  const boardV = variation(featuresVariationInput({ features: noLadder, raw: { expiries: [] } }, base.sessionDate), opts);
+  eq(boardV.status, "unavailable", "with no book either, the board row's hedging model has no gamma channel to publish");
+  eq(boardV.silences[0].code, "no-gamma", "and says so in the code the table spells out");
+  eq(variationSummary(boardV).why.all, "no-gamma", "so the row carries no gammaPerSigmaPctAdv of 0");
+  const card = buildCard({ ticker: "T", row: { close: "107" }, features: noLadder, strikes: legless, ticks: [], expiries: [],
+    generatedAt: "2026-08-31T21:00:00Z", sessionDate: base.sessionDate, variation: opts });
+  eq(card.panels.gamma.status, "unavailable", "the card's gamma panel reads no strike ladder");
+  eq(card.regime.flowGamma, null, "its regime carries no flow gamma");
+  eq(card.panels.variation.status, "unavailable",
+    "and its hedging panel agrees, rather than leading with today's trading adding $0.00 of hedging");
+  eq(gammaReading(card).from, null, "Neuron reads no gamma label, where it read a long '+$0 per 1% move'");
 }
 
 console.log(`✓ flows-features: ${checks} assertions — robust stats, a fixed score unit, materiality-gated gamma flips, multiplicative quality gating, dead-column weighting, realized vol, reachable conviction, and the four second-order exposure legs one vendor call already pays for — with the put-leg conventions generated from Black-Scholes rather than read off the vendor's placeholder (put gamma dealer-signed, put delta, vanna and charm holder-signed, every expiry's dealer net published), the gamma label read from the book's net rather than the running sum below spot, and the fused hot path proven ELEMENTWISE IDENTICAL to the eight-sort form it replaces across every degenerate column that reaches a different branch`);
