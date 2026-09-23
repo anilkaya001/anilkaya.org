@@ -27,7 +27,7 @@ export const STRUCTURES = Object.freeze([
   { n: 19, id: "collar", neuron: "collar", kin: [], risk: "stock", dir: "neutral", vol: "mixed", premium: "either", window: W(30, 90, 45), legs: 3, desk: true },
   { n: 20, id: "put-ratio", neuron: null, kin: ["put credit spread"], risk: "undefined", dir: "bull", vol: "short", premium: "either", window: W(21, 60, 40), legs: 2 },
   { n: 21, id: "call-ratio", neuron: null, kin: ["call credit spread"], risk: "undefined", dir: "bear", vol: "short", premium: "either", window: W(21, 60, 40), legs: 2 },
-  { n: 22, id: "jade-lizard", neuron: null, kin: ["put credit spread", "call credit spread"], risk: "undefined", dir: "bull", vol: "short", premium: "credit", window: W(21, 45, 30), legs: 3 },
+  { n: 22, id: "jade-lizard", neuron: null, kin: ["put credit spread", "call credit spread"], risk: "undefined", dir: "bull", vol: "short", premium: "credit", window: W(21, 45, 30), legs: 3, noUpsideRisk: true },
   { n: 23, id: "no-position", neuron: "no position", kin: [], risk: "none", dir: "neutral", vol: "none", premium: "none", window: null, legs: 0 },
 ].map((s) => Object.freeze({ ...s, kin: Object.freeze(s.kin) })));
 

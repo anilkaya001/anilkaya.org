@@ -524,6 +524,7 @@ function priceCandidate(cand, ctx) {
   let prof, eQ, ePs;
   if (!multi) {
     prof = expiryProfile(legs, fill);
+    if (fam.noUpsideRisk && (prof.lossUnbounded || prof.valueRight < -EPS)) return null;
     eQ = lawExpect(qLaw, prof.pieces);
     ePs = [laws.main, ...laws.alts].map((law) => (law ? lawExpect(law, prof.pieces) : null));
   } else {

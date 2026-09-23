@@ -654,6 +654,20 @@ const OUT = ENGINE.runEngine(BASE);
 }
 
 {
+  const rich = { state: "premium-rich", direction: null, confidence: 2, ...STATE_STRUCTURES["premium-rich"] };
+  const facts = { ...BASE.facts, "skew.rr25.30.pct": { v: 0.85, g: 3 } };
+  const lizards = (rows) => ENGINE.runEngine(synthInput({ topFamilies: 20, facts, state: rich, ...(rows ? { expiries: [{ expiry: "2026-10-23", rows }] } : {}) }))
+    .structures.filter((s) => s.family === "jade-lizard");
+  const upside = (s) => ENGINE.expiryProfile(s.legs.map((l) => ENGINE.normaliseLeg({ type: l.type, K: l.k, side: l.side, qty: l.qty })), s.price.fill);
+  const fine = lizards(null);
+  ok(fine.length > 0 && fine.every((s) => s.legs[2].k - s.legs[1].k <= -s.price.fill + 1e-9 && upside(s).valueRight >= 0),
+    `on half-dollar strikes the jade lizard's credit covers its call width, so it has no upside risk (${fine.length} priced)`);
+  const coarse = lizards(synthChain({ step: 5, lo: 50, hi: 150 }).rows);
+  ok(coarse.every((s) => upside(s).valueRight >= 0),
+    "on five-dollar strikes a lizard whose credit cannot cover the call width is not priced as one: no jade lizard carries upside risk");
+}
+
+{
   const wing = synthChain();
   const garbage = wing.rows.map((r) => (r.K >= 140 || r.K <= 55 ? { ...r, bid: 0.01, ask: 0.05 } : r));
   const prep = SMILE.prepareQuotes({ F: wing.F, D: wing.D, T: wing.T, rows: garbage });
