@@ -978,18 +978,22 @@ assert(cookie("session", "a.b", { maxAge: 10 }).includes("Max-Age=10"), "cookie 
 
   const LEAD = /el\("strong",\s*null,([\s\S]{0,240}?)\)\s*\)/g;
   const STR = /"((?:[^"\\]|\\.)*)"/g;
+  const JOINED = /"((?:[^"\\\n]|\\.)*)"\s*\+/g;
+  const WORDS = /^(Nothing to report|Unavailable|Not in this (feed|list)|Unreadable|Pending|Quiet)\b/;
   const offenders = [];
   let found = 0;
   for (const file of flowsJs) {
     const src = readFileSync(path.join(ROOT, file), "utf8");
-    for (const m of src.matchAll(LEAD)) {
-      for (const lit of m[1].matchAll(STR)) {
-        const text = JSON.parse(`"${lit[1]}"`);
+    const leads = [];
+    for (const m of src.matchAll(LEAD)) for (const lit of m[1].matchAll(STR)) leads.push(lit[1]);
+    for (const lit of src.matchAll(JOINED)) leads.push(lit[1]);
+    for (const lit of src.matchAll(/"((?:[^"\\\n]|\\.)*)"/g)) if (/^\S[^—]*? — /.test(lit[1]) && !leads.includes(lit[1])) leads.push(lit[1]);
+    for (const raw of leads) {
+      const text = JSON.parse(`"${raw}"`);
 
-        if (!/^(Nothing to report|Unavailable|Not in this feed|Unreadable|Pending)\b/.test(text)) continue;
-        found += 1;
-        if (/[.!?]\s*$/.test(text)) offenders.push(`${file}: ${JSON.stringify(text)}`);
-      }
+      if (!WORDS.test(text)) continue;
+      found += 1;
+      if (/[.!?]\s*$/.test(text)) offenders.push(`${file}: ${JSON.stringify(text)}`);
     }
   }
   assert(found >= 4,
