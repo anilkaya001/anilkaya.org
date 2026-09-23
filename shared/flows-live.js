@@ -820,7 +820,8 @@ export function mergeGex(prev, reads, { at, session, writer, rotation, keepMs = 
   for (const [t, s] of Object.entries(reads || {})) {
     const readAt = new Date(now).toISOString();
     if (s.status !== "ok") {
-      if (!names[t]) names[t] = { readAt, status: s.status, reason: s.reason, last: null };
+      names[t] = names[t] ? { ...names[t], reason: s.reason || s.status, triedAt: readAt }
+        : { readAt, status: s.status, reason: s.reason, last: null };
       continue;
     }
     names[t] = { readAt, status: "ok", reason: null, flowFilled: s.flowFilled, last: s.last,

@@ -317,6 +317,13 @@ const T = (iso) => Date.parse(iso);
   const g2 = L.mergeGex(g1, { A: series }, { at: at + 15 * 60000, session: "2026-09-23", rotation: { fixed: ["A"], rotating: [] } });
   ok(g2.names.B && g2.names.B.readAt === g1.names.B.readAt && g2.names.B.reason === "rotated-out" && !g2.names.B.t,
     "a rotated-out name keeps its last reading under ITS OWN read time — carried, never re-stamped as new");
+  const failedB = L.shapeGexSeries({ __failed: "HTTP 502" }, { session: "2026-09-23" });
+  const g2f = L.mergeGex(g1, { A: series, B: failedB }, { at: at + 15 * 60000, session: "2026-09-23",
+    rotation: { fixed: ["A"], rotating: ["B"] } });
+  ok(g2f.names.B.readAt === g1.names.B.readAt && g2f.names.B.last && g2f.names.B.reason === "vendor-failed" &&
+     g2f.names.B.triedAt === new Date(at + 15 * 60000).toISOString(),
+  "a name that WAS read this run and failed keeps its last reading under its own read time, but says the re-read " +
+    "failed and when — it was not rotated out");
   const g3 = L.mergeGex(g2, {}, { at: at + 3 * 3600000, session: "2026-09-23", rotation: null });
   ok(!g3.names.B, "and it is dropped once it is two hours old");
   const g4 = L.mergeGex(g2, {}, { at: T("2026-09-24T14:00:00Z"), session: "2026-09-24", rotation: null });
