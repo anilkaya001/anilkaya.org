@@ -87,11 +87,17 @@ try {
     const fs = await import("node:fs");
     const mins = new Map(), maxes = new Map();
     let queries = 0;
-    for (const file of ["assets/css/base.css", "assets/css/flows.css"]) {
+    const sheets = ["assets/css/base.css", ...fs.readdirSync(new URL("../assets/css/", import.meta.url))
+      .filter((f) => /^flows(-[\w-]+)?\.css$/.test(f)).sort().map((f) => "assets/css/" + f)];
+    ok(sheets.length > 5, `the scan covers the shared sheets and every Flows route sheet (${sheets.length})`);
+    for (const file of sheets) {
       const css = fs.readFileSync(new URL("../" + file, import.meta.url), "utf8");
-      for (const m of css.matchAll(/@media\s*\(\s*(min|max)-width:\s*([\d.]+)rem\s*\)/g)) {
-        queries++;
-        (m[1] === "min" ? mins : maxes).set(m[2], file);
+      for (const q of css.matchAll(/@media[^{]*/g)) {
+        for (const m of q[0].matchAll(/\(\s*(min|max)-width:\s*([\d.]+)(rem|px)\s*\)/g)) {
+          queries++;
+          const px = String(+(Number(m[2]) * (m[3] === "rem" ? 16 : 1)).toFixed(2));
+          (m[1] === "min" ? mins : maxes).set(px, file);
+        }
       }
     }
 
@@ -99,8 +105,8 @@ try {
        `the width-query scan actually read the stylesheets (found ${queries})`);
     const both = [...maxes.keys()].filter((w) => mins.has(w));
     assert.deepEqual(both, [],
-      "no width is written as both a min and a max: a 60/60 pair matches at " +
-      "exactly 60rem and applies two tiers at once (write the max as X.99)");
+      "no width is written as both a min and a max, in either unit and across every Flows sheet: a " +
+      "60/60 pair matches at exactly 60rem and applies two tiers at once (write the max as X.99)");
     checks++;
   }
 
