@@ -73,6 +73,15 @@ const SURFACES = [
     label: "the region assembly", vars: ["events"] },
   { key: "scoretrack", file: "assets/js/flows-overview.js", at: "Promise.all([",
     label: "the region assembly", vars: ["track"] },
+
+  { key: "board:long", file: "assets/js/flows-board.js", fn: "render", vars: ["payload"] },
+  { key: "board:long", file: "assets/js/flows-board.js", fn: "sideHero", vars: ["payload"] },
+  { key: "board:short", file: "assets/js/flows-board.js", fn: "sideStatus", vars: ["payload"] },
+  { key: "board:long", file: "assets/js/flows-board.js", fn: "readMemoryBlock", vars: ["payload"] },
+  { key: "board:long", file: "assets/js/flows-board.js", fn: "statusFacts", vars: ["p"] },
+  { key: "board:watch", file: "assets/js/flows-board.js", fn: "watchHero", vars: ["payload"] },
+  { key: "board:watch", file: "assets/js/flows-board.js", fn: "watchStatus", vars: ["payload"] },
+  { key: "scoretrack", file: "assets/js/flows-board.js", fn: "takeTrack", vars: ["track"] },
 ];
 
 const OPTIONAL = {
@@ -82,6 +91,8 @@ const OPTIONAL = {
   pulse: { status: "the worker's pending envelope carries it" },
 
   political: { status: "the worker's pending envelope carries it" },
+
+  "board:long": { reason: "the worker's board route answers a store read that threw with { status: \"pending\", reason: \"read-failed\" }" },
 };
 
 const missingReport = [];
