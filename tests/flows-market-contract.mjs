@@ -1731,6 +1731,12 @@ try {
     eq(depth.spy["Fund flow 20d"], "−$490.0M", "each ETF module carries its 20-session creation and redemption flow");
     eq(depth.spy["IV 30d"], "13.0%", "and its fixed-tenor 30-day implied volatility");
     deep(depth.etfCharts, [1, 1, 1], "and draws its own tide path");
+    const zeroYs = await deepPage.evaluate(() => ["SPY", "QQQ", "IWM"].map((t) => {
+      const base = document.querySelector("#mkEtf" + t + " svg[role=img] line.base");
+      return base ? Number(base.getAttribute("y1")) : null;
+    }));
+    ok(zeroYs.every((y) => y !== null && Math.abs(y - zeroYs[0]) < 0.5),
+       `on one shared scale: the three zero rules sit at the same height, so a taller tide is a bigger tide (${zeroYs.join(", ")})`);
 
     eq(depth.gauge.replace(/\s+/g, " ").trim().includes("69%"), true, `the expiry module's gauge reads the 0DTE share (${depth.gauge})`);
     eq(depth.expiry["0DTE net"], "+$36.5M", "beside the zero-day net");

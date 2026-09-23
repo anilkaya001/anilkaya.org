@@ -1032,23 +1032,24 @@
     const reg = regime && !pendingOf(regime) && !unreadable(regime) ? regime : null;
     const lv = live && !pendingOf(live) && !unreadable(live) ? live : null;
     const lb = breadth && !pendingOf(breadth) && !unreadable(breadth) ? breadth : null;
-    for (const T of ["SPY", "QQQ", "IWM"]) {
-      const host = clear("mkEtf" + T);
-      if (!host) continue;
-      let net = null, path = [], src = null, session = null;
+    const tideOf = (T) => {
       const liveSer = T === "IWM" ? lb && lb.etf && lb.etf.IWM : lv && lv.etf && lv.etf[T];
       const regRow = reg && reg.etfTide && reg.etfTide.byEtf ? reg.etfTide.byEtf[T] : null;
       if (liveSer && liveSer.status === "ok" && Array.isArray(liveSer.net) && (!reg || !reg.sessionDate || ((T === "IWM" ? lb.session : lv.session) >= reg.sessionDate))) {
-        path = liveSer.net.map(isNum);
-        net = path.filter((x) => x !== null).pop() ?? null;
-        src = T === "IWM" ? "live:breadth" : "live:market";
-        session = T === "IWM" ? lb.session : lv.session;
-      } else if (regRow && regRow.status === "ok") {
-        net = isNum(regRow.net);
-        path = pathOf(regRow.path);
-        src = "regime";
-        session = reg.sessionDate;
+        const path = liveSer.net.map(isNum);
+        return { regRow, path, net: path.filter((x) => x !== null).pop() ?? null, src: T === "IWM" ? "live:breadth" : "live:market", session: T === "IWM" ? lb.session : lv.session };
       }
+      if (regRow && regRow.status === "ok") return { regRow, path: pathOf(regRow.path), net: isNum(regRow.net), src: "regime", session: reg.sessionDate };
+      return { regRow, path: [], net: null, src: null, session: null };
+    };
+    const tides = { SPY: tideOf("SPY"), QQQ: tideOf("QQQ"), IWM: tideOf("IWM") };
+    const seen = Object.values(tides).flatMap((t) => t.path.filter((x) => x !== null));
+    const lo = Math.min(0, ...seen), hi = Math.max(0, ...seen), pad = (hi - lo) * 0.08 || 1;
+    const shared = [lo - (lo < 0 ? pad : 0), hi + pad];
+    for (const T of ["SPY", "QQQ", "IWM"]) {
+      const host = clear("mkEtf" + T);
+      if (!host) continue;
+      const { regRow, path, net, src, session } = tides[T];
       const curve = reg && reg.volCurve && reg.volCurve.byIndex ? reg.volCurve.byIndex[T] : null;
       const iv30 = curve && Array.isArray(curve.iv) && Array.isArray(curve.tenors) ? isNum(curve.iv[curve.tenors.indexOf(30)]) : null;
       const flow = reg && reg.fundFlows && reg.fundFlows.byEtf ? reg.fundFlows.byEtf[T] : null;
@@ -1067,13 +1068,13 @@
       const plot = h("div", { class: "mk-etf-p" });
       host.append(plot);
       if (path.filter((x) => x !== null).length >= 2) {
-        C.line(plot, { series: [{ values: path, format: usdS }], twoTone: true, zero: true, height: 84, xAxis: false, yTicks: false, gutter: 60,
+        C.line(plot, { series: [{ values: path, format: usdS }], twoTone: true, zero: true, yDomain: shared, height: 84, xAxis: false, yTicks: false, gutter: 60,
           label: T + " options tide", readout: (i) => [C.part(T, "k"), h("b", { "data-tone": toneOf(path[i]) }, path[i] === null ? DASH : usdS(path[i]))] });
       }
       staleMark("mkEtf" + T + "Card", session, T);
       infoInto("mkEtf" + T + "Card", T.toLowerCase(), () => ({
         title: T, lead: "The ETF's own options tide, its creation and redemption flow, and its fixed-tenor implied volatility.",
-        facts: [["Tide source", src || DASH], ["Session", session], ["Own net premium", regRow ? usdS(regRow.ownNet) : null],
+        facts: [["Tide source", src || DASH], ["Session", session], ["Scale", "shared by SPY, QQQ and IWM, " + usdS(shared[0]) + " to " + usdS(shared[1])], ["Own net premium", regRow ? usdS(regRow.ownNet) : null],
           ["Constituents agree", regRow && typeof regRow.agree === "boolean" ? (regRow.agree ? "yes" : "no") : null],
           ["Creations today", flow && flow.status === "ok" ? usdS(flow.changeUsd) : null], ["20-session z", z20 === null ? (flow && flow.reason) || null : F.signed(z20, 2)]],
         notes: ["The dossier opens the full reader for " + T + "."],

@@ -465,8 +465,8 @@ a.hm-chiplink:hover { background: color-mix(in srgb, var(--tone, var(--label-2))
 @container mod (max-width: 300px) {
   .hm-lrow { --cols: minmax(0, 1fr) 40px 36px 50px; }
   .hm-lrow .hm-conv { display: none; }
-  .hm-crow { --cols: 12px minmax(0, 1fr) 52px 50px; }
-  .hm-ev { justify-self: center; width: 10px; height: 10px; padding: 0; overflow: hidden; border: 1.5px solid var(--ring, var(--label-3)); border-radius: 50%; background: none; font-size: 0; }
+  .hm-crow { --cols: 10px minmax(0, 1fr) 56px 56px; }
+  .hm-ev { box-sizing: border-box; justify-self: start; width: 10px; height: 10px; padding: 0; overflow: hidden; border: 1.5px solid var(--ring, var(--label-3)); border-radius: 50%; background: none; font-size: 0; }
   #ccVol .ui-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (prefers-reduced-motion: reduce) {
