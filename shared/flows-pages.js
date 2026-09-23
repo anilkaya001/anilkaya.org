@@ -665,57 +665,41 @@ ${UI_SCRIPT}
 </html>`;
 }
 
+const FEEDS_CSS = ["/assets/css/flows-feeds.css"];
+
+const feedModule = (id, title, body, { span = "", seg = "" } = {}) => `
+    <section class="ui-card ui-mod ui-enter fd-mod${span ? " ui-span-" + span : ""}" id="${id}" aria-labelledby="${id}T">
+      <header class="ui-mod-h"><h2 class="ui-mod-t" id="${id}T">${title}</h2><span class="ui-mod-sp"></span>${seg}</header>
+      ${body}
+    </section>`;
+
+const feedHead = (key, title) => `
+  <header class="flows-head fd-head" data-fx-hero>
+    <div class="fd-head-t"><h1 id="fxTitle">${title}</h1><span class="fd-about-slot" id="${key}AboutSlot"></span></div>
+    <p class="fd-meta" id="${key}Meta"></p>
+  </header>`;
+
 export function eventsPage({ username = "" } = {}) {
-  const lede = "What the screened universe reports next, what the option market " +
-    "is charging for the sessions between now and the report, and where each name " +
-    "stopped in the board's own funnel — including the ones the board was gated " +
-    "out of scoring at all.";
-  return `${head("Flows — Events", "What reports next, and what is priced into it.")}
-${shell("Events", "events", username, `
-  <div class="flows-status" id="evStatus" role="status">Loading the calendar…</div>
-  <p class="flows-stale" id="evStale" role="status" hidden></p>
-
-  <div class="flows-controls">
-    <p class="flows-lede">${lede}</p>
+  return `${head("Flows — Events", "What reports next, what is priced into it, and what else is on the calendar.", FEEDS_CSS)}
+${shell("Events", "events", username, `${feedHead("ev", "Events")}
+  <p class="visually-hidden" id="evStatus" role="status">Loading the calendar…</p>
+  <div class="fd-about" id="evAbout" hidden>
+    <p>What the screened universe reports next, what the option market is charging for it,
+    and what else is scheduled: economic prints and FDA dates.</p>
+    <p>Gated: the board was FORBIDDEN from scoring a name that reports inside the gate window.
+    It is not a low score. There is no score under it at all.</p>
+    <p>Every day count is measured from the run&#39;s own Eastern date; every price is the last
+    completed session&#39;s close. Nothing here is a forecast.</p>
   </div>
-
-  <section class="fc-panel" id="evWindowPanel" hidden aria-labelledby="evWindowH">
-    <h2 class="fc-panel-h" id="evWindowH">The window, and where the gate falls</h2>
-    <div id="evWindow"></div>
-    <p class="fc-note" id="evWindowNote"></p>
-  </section>
-
-  <section class="fc-panel" id="evTablePanel" hidden aria-labelledby="evTableH">
-    <h2 class="fc-panel-h" id="evTableH">Reporting next</h2>
-    <div class="flows-tablewrap" tabindex="0" role="region"
-         aria-label="Names reporting inside the window">
-      <table class="flows-table" id="evTable">
-        <caption class="flows-caption" id="evCap"></caption>
-        <thead><tr>
-          <th scope="col">Name</th>
-          <th scope="col">Reports</th>
-          <th scope="col" class="c-num"><abbr title="Trading sessions between the run's own Eastern date and the report, counted as weekdays. Market holidays are not removed.">Sessions</abbr></th>
-          <th scope="col" class="c-num">Last</th>
-          <th scope="col" class="c-num"><abbr title="The name's 30-day implied volatility scaled to the sessions before the report by the square root of time. What the option market is charging for that stretch — not a forecast.">Priced</abbr></th>
-          <th scope="col" class="c-num"><abbr title="The vendor's own implied move, quoted to the vendor's own next expiry — a different horizon from the column beside it, and deliberately not reconciled with it.">Vendor</abbr></th>
-          <th scope="col" class="c-num"><abbr title="30-day implied volatility.">IV</abbr></th>
-          <th scope="col" class="c-num"><abbr title="Realized 30-day volatility. Measured only for the enriched names, so most rows withhold it.">RV</abbr></th>
-          <th scope="col" class="c-num"><abbr title="Where iv30 sits in its own year, as a fraction.">IV rank</abbr></th>
-          <th scope="col"><abbr title="How far this name got in the board&#39;s funnel. &quot;gated&quot; means the board was FORBIDDEN from scoring it, not that it scored badly.">Stage</abbr></th>
-        </tr></thead>
-        <tbody id="evBody"></tbody>
-      </table>
-    </div>
-    <p class="fc-note" id="evTableNote"></p>
-  </section>
-
-  <section class="fc-panel" id="evBasisPanel" hidden aria-labelledby="evBasisH">
-    <h2 class="fc-panel-h" id="evBasisH">What these numbers are, and what they are not</h2>
-    <div id="evBasis"></div>
-  </section>
-
-  <p class="flows-foot" id="evFoot"></p>
-`)}
+  <div class="fd-chips" id="evChips"></div>
+  <div class="ui-grid fd-grid">
+${feedModule("evWeekCard", "Week ahead", `<div class="fd-body" id="evWeek"></div>`)}
+${feedModule("evEarnCard", "Earnings", `<div class="fd-body" id="evEarn"></div>`, { span: 7 })}
+${feedModule("evMacroCard", "Macro", `<div class="fd-body" id="evMacro"></div>`, { span: 5 })}
+${feedModule("evFdaCard", "FDA", `<div class="fd-body" id="evFda"></div>`, { span: 6 })}
+${feedModule("evReactCard", "Reaction", `<div class="fd-body" id="evReact"></div>`, { span: 6 })}
+  </div>
+`, { chrome: false })}
 ${UI_SCRIPT}
 <script src="${v("/assets/js/flows-events.js")}" defer></script>
 </body>
@@ -757,101 +741,34 @@ ${UI_SCRIPT}
 }
 
 export function unusualPage({ username = "" } = {}) {
-  const lede = "Contracts whose volume counter stands far above the open interest " +
-    "beside it. A counter, not a trade: the vendor reports a total for each strike " +
-    "with no size, no time and no execution price — and this endpoint carries no " +
-    "as-of date, so the counter is stamped with when it was read and nothing more. " +
-    "Nothing here says who traded, or why. Above that counter now sit the vendor's " +
-    "own flow alerts: windows of activity the vendor's rules flagged, each carrying " +
-    "a stated span, a size, a premium and the vendor's sweep flag — richer than the " +
-    "counter, and still not a trade, because a window aggregates its executions and " +
-    "the selection is the vendor's, not the market's.";
-  return `${head("Flows — Unusual activity", "Contracts carrying volume far above their own open interest.")}
-${shell("Unusual", "unusual", username, `
-  <div class="flows-status" id="uaStatus" role="status">Loading the feed…</div>
-  <p class="flows-stale" id="uaStale" role="status" hidden></p>
-
-  <div class="flows-controls">
-    <p class="flows-lede">${lede}</p>
+  return `${head("Flows — Unusual activity", "Windows of option activity the vendor flagged, and contracts carrying volume far above their own open interest.", FEEDS_CSS)}
+${shell("Unusual", "unusual", username, `${feedHead("ua", "Unusual")}
+  <p class="visually-hidden" id="uaStatus" role="status">Loading the feed…</p>
+  <div class="fd-about" id="uaAbout" hidden>
+    <p class="flows-lede">The timeline is the vendor&#39;s own flow alerts: windows of activity the
+    vendor&#39;s rules flagged, each carrying a stated span, a size, a premium and the vendor&#39;s
+    sweep flag. A window aggregates its executions and the selection is the vendor&#39;s, not the
+    market&#39;s, so a window is not a trade. Beneath it sit contracts whose volume counter stands
+    far above the open interest beside it. A counter, not a trade: the vendor reports a total for
+    each strike with no size, no time and no execution price, and this endpoint carries no as-of
+    date, so the counter is stamped with when it was read and nothing more. Nothing here says who
+    traded, or why.</p>
+    <p>A dash where a vendor flag belongs means the vendor did not carry that flag on the window,
+    which is not the same fact as the flag being off.</p>
   </div>
-
-  <section class="fc-panel" id="uaAlertsPanel" hidden aria-labelledby="uaAlertsH">
-    <h2 class="fc-panel-h" id="uaAlertsH">What the vendor's rules flagged</h2>
-    <div class="flows-tablewrap" tabindex="0" role="region"
-         aria-label="Vendor-flagged windows of option activity">
-      <table class="flows-table" id="uaAlerts">
-        <caption class="flows-caption" id="uaAlertsCap"></caption>
-        <thead><tr>
-          <th scope="col">Name</th>
-          <th scope="col"><abbr title="The flagged contract: side, strike and expiry, parsed from the vendor&#39;s option symbol.">Contract</abbr></th>
-          <th scope="col" class="c-num"><abbr title="The vendor&#39;s total premium across the window, in dollars.">Premium</abbr></th>
-          <th scope="col" class="c-num"><abbr title="The vendor&#39;s attribution of the window&#39;s dollars to the ask side of the quote. The split is carried as published and adds no inference about who initiated.">Ask-side</abbr></th>
-          <th scope="col" class="c-num"><abbr title="The vendor&#39;s attribution to the bid side. The two sides need not sum to the total.">Bid-side</abbr></th>
-          <th scope="col" class="c-num"><abbr title="Contracts across the window, as the vendor totals them.">Size</abbr></th>
-          <th scope="col" class="c-num"><abbr title="The vendor&#39;s count of executions inside the window.">Count</abbr></th>
-          <th scope="col"><abbr title="The vendor&#39;s own activity flags, reported as sent. An em dash means the vendor did not carry that flag on this row — which is not the same fact as the flag being off.">Flags</abbr></th>
-          <th scope="col"><abbr title="The vendor&#39;s stated span of the window, in UTC.">Window</abbr></th>
-          <th scope="col"><abbr title="How far the name got in the board&#39;s own funnel this run. &quot;foreign&quot; means the screener never returned it.">Stage</abbr></th>
-        </tr></thead>
-        <tbody id="uaAlertsBody"></tbody>
-      </table>
-    </div>
-    <p class="fc-note" id="uaAlertsNote"></p>
-  </section>
-
-  <section class="fc-panel" id="uaFeedPanel" hidden aria-labelledby="uaFeedH">
-    <h2 class="fc-panel-h" id="uaFeedH">Contracts by volume over open interest</h2>
-    <div class="flows-tablewrap" tabindex="0" role="region"
-         aria-label="Contracts ranked by volume over open interest">
-      <table class="flows-table" id="uaFeed">
-        <caption class="flows-caption" id="uaFeedCap"></caption>
-        <thead><tr>
-          <th scope="col">Name</th>
-          <th scope="col" class="c-num">Strike</th>
-          <th scope="col">Expiry</th>
-          <th scope="col">C/P</th>
-          <th scope="col" class="c-num"><abbr title="The vendor's volume counter for this strike. Undated: this endpoint carries no as-of stamp.">Vol</abbr></th>
-          <th scope="col" class="c-num"><abbr title="Open interest as the vendor reported it on this response, undated.">OI</abbr></th>
-          <th scope="col" class="c-num"><abbr title="volume divided by open interest — a ratio of two counts, and the ranking key">Vol/OI</abbr></th>
-          <th scope="col" class="c-num"><abbr title="Open interest minus the previous open interest: contracts that stuck between two settlements. It does not say on which side.">&#916;OI</abbr></th>
-          <th scope="col" class="c-num"><abbr title="Share of the volume the vendor classified that hit the offer. Not a share of all volume, and not a claim about buying.">Lift</abbr></th>
-          <th scope="col" class="c-num"><abbr title="Volume times the quote times 100 shares, both ends. A scale for the money involved, not a bound on it.">Notional</abbr></th>
-        </tr></thead>
-        <tbody id="uaFeedBody"></tbody>
-      </table>
-    </div>
-    <p class="fc-note" id="uaFeedNote"></p>
-  </section>
-
-  <section class="fc-panel" id="uaNamePanel" hidden aria-labelledby="uaNameH">
-    <h2 class="fc-panel-h" id="uaNameH">Names against their own thirty-day average</h2>
-    <div class="flows-tablewrap" tabindex="0" role="region"
-         aria-label="Names ranked by option volume against their own average">
-      <table class="flows-table" id="uaNames">
-        <caption class="flows-caption" id="uaNameCap"></caption>
-        <thead><tr>
-          <th scope="col">Name</th>
-          <th scope="col" class="c-num">Last</th>
-          <th scope="col" class="c-num">Change</th>
-          <th scope="col" class="c-num"><abbr title="Call plus put volume over the sum of both thirty-day averages. Withheld when either average is missing.">Both</abbr></th>
-          <th scope="col" class="c-num">Calls</th>
-          <th scope="col" class="c-num">Puts</th>
-          <th scope="col" class="c-num"><abbr title="The vendor's own put/call ratio, passed through.">P/C</abbr></th>
-        </tr></thead>
-        <tbody id="uaNameBody"></tbody>
-      </table>
-    </div>
-    <p class="fc-note" id="uaNameNote"></p>
-  </section>
-
-  <section class="fc-panel" id="uaBasisPanel" hidden aria-labelledby="uaBasisH">
-    <h2 class="fc-panel-h" id="uaBasisH">What these numbers are, and what they are not</h2>
-    <div id="uaBasis"></div>
-  </section>
-
-  <p class="flows-foot" id="uaFoot"></p>
-`)}
+  <div class="fd-chips" id="uaChips"></div>
+  <div class="fd-filters" id="uaFilters" role="group" aria-label="Narrow the page"></div>
+  <p class="visually-hidden" id="uaFilterNote" role="status"></p>
+  <div class="ui-grid fd-grid">
+${feedModule("uaTimelineCard", "Timeline", `<div class="fd-body" id="uaTimeline"></div>`)}
+${feedModule("uaNamesCard", "Names", `<div class="fd-body" id="uaNames"></div>`, { span: 7 })}
+${feedModule("uaUrgencyCard", "Urgency", `<div class="fd-body" id="uaUrgency"></div>`, { span: 5 })}
+${feedModule("uaFeedCard", "Volume over OI", `<div class="fd-body" id="uaFeed"></div>`, { span: 6 })}
+${feedModule("uaSurpriseCard", "Surprise", `<div class="fd-body" id="uaSurprise"></div>`, { span: 6 })}
+  </div>
+`, { chrome: false })}
 ${UI_SCRIPT}
+<script src="${v("/assets/js/flows-fresh.js")}" defer></script>
 <script src="${v("/assets/js/flows-unusual.js")}" defer></script>
 </body>
 </html>`;
@@ -1261,60 +1178,29 @@ function escapeHTML(value) {
 }
 
 export function politicalPage({ username = "" } = {}) {
-  const lede = "Who disclosed the largest purchases, and in what — ranked by " +
-    "size, with the range each filing actually stated drawn across it.";
-  return `${head("Flows — Political", lede)}
-${shell("Political", "political", username, `
-  <div class="flows-status" id="plStatus" role="status">Loading the disclosure window…</div>
-  <p class="flows-stale" id="plStale" role="status" hidden></p>
-  <p class="flows-stale" id="plSource" role="status" hidden></p>
-
-  <div class="flows-controls">
-    <p class="flows-lede">${lede}</p>
+  return `${head("Flows — Political", "Who disclosed the largest purchases, and in what, with the range each filing stated and the delay since the trade.", FEEDS_CSS)}
+${shell("Political", "political", username, `${feedHead("pl", "Political")}
+  <p class="visually-hidden" id="plStatus" role="status">Loading the disclosure window…</p>
+  <div class="fd-about" id="plAbout" hidden>
+    <p class="pl-lede-warn">Every row on this page is a statutory disclosure, not a trade seen on
+    a tape. Filing is late by law and later in practice: the STOCK Act allows 45 days and late
+    filers routinely exceed 100. Each row carries the days between its transaction and its filing,
+    and each ranked total carries the median lag of the filings behind it. This page ranks what has
+    been <em>disclosed</em>, which is never the same question as what is being done now.</p>
   </div>
-
-  <p class="pl-lede-warn">
-    Every row on this page is a statutory disclosure, not a trade seen on a
-    tape. Filing is late by law and later in practice: the STOCK Act allows
-    45 days and late filers routinely exceed 100. Each row carries the days
-    between its transaction and its filing, and each ranked total carries the
-    median lag of the filings behind it. This page ranks what has been
-    <em>disclosed</em>, which is never the same question as what is being
-    done now.
-  </p>
-
-  <section class="fc-panel is-wide" id="plBuyersPanel" hidden>
-    <h2 class="fc-panel-h">Who disclosed the largest purchases</h2>
-    <div id="plBuyers"></div>
-    <p class="fc-note" id="plBuyersNote"></p>
-  </section>
-
-  <section class="fc-panel is-wide" id="plAssetsPanel" hidden>
-    <h2 class="fc-panel-h">What was bought the most</h2>
-    <div id="plAssets"></div>
-    <p class="fc-note" id="plAssetsNote"></p>
-  </section>
-
-  <section class="fc-panel is-wide" id="plRecentPanel" hidden>
-    <h2 class="fc-panel-h">Newest disclosures</h2>
-    <div id="plRecent"></div>
-    <p class="fc-note" id="plRecentNote"></p>
-  </section>
-
-  <section class="fc-panel" id="plHoldersPanel" hidden>
-    <h2 class="fc-panel-h">Holdings in the board&#39;s names</h2>
-    <div id="plHolders"></div>
-    <p class="fc-note" id="plHoldersNote"></p>
-  </section>
-
-  <div class="flows-foot" id="plFoot"></div>
-`)}
+  <div class="fd-chips" id="plChips"></div>
+  <div class="ui-grid fd-grid">
+${feedModule("plBuyersCard", "Buyers", `<div class="fd-body" id="plBuyers"></div>`, { span: 7 })}
+${feedModule("plAssetsCard", "Names", `<div class="fd-body" id="plAssets"></div>`, { span: 5 })}
+${feedModule("plRecentCard", "Newest", `<div class="fd-body" id="plRecent"></div>`)}
+${feedModule("plHoldersCard", "Holdings", `<div class="fd-body" id="plHolders"></div>`)}
+  </div>
+`, { chrome: false })}
 ${UI_SCRIPT}
 <script src="${v("/assets/js/flows-political.js")}" defer></script>
 </body>
 </html>`;
 }
-
 export function askPage({ username = "" } = {}) {
 
   const summary = "What the session says, what changed to get here, and what is " +

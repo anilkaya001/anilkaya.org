@@ -290,9 +290,9 @@ try {
       const uaHtml = await ua.text();
       ok(uaHtml.includes("/assets/js/flows-unusual.js"),
          "the unusual page loads its own controller");
-      ok(uaHtml.includes('id="uaFeedBody"'), "and carries the contract feed's table body");
-      ok(uaHtml.includes('id="uaNameBody"'), "and the name panel's");
-      ok(uaHtml.includes('id="uaBasis"'), "and the basis panel, which is the page's honesty");
+      ok(uaHtml.includes('id="uaFeed"'), "and carries the contract feed's module body");
+      ok(uaHtml.includes('id="uaSurprise"'), "and the name panel's");
+      ok(uaHtml.includes('id="uaAbout"'), "and the page's own account of what it refuses to claim, which is its honesty");
 
       const banned = new RegExp(UA_BANNED_CLAIMS.source, "ig");
       const refusalProse = [
@@ -321,16 +321,16 @@ try {
 
       const anonUa = await get("/flows/unusual/");
       eq(anonUa.status, 200, "/flows/unusual/ serves a page to an anonymous visitor");
-      ok(!(await anonUa.text()).includes('id="uaFeedBody"'),
+      ok(!(await anonUa.text()).includes('id="uaFeed"'),
          "/flows/unusual/ leaks nothing to an anonymous visitor");
 
       const bareUa = await get("/flows/unusual");
       eq(bareUa.status, 308, "/flows/unusual without its trailing slash redirects");
 
-      ok(uaHtml.includes('id="uaAlertsBody"'), "the vendor-alerts panel's table body ships");
-      ok(uaHtml.includes('id="uaAlertsNote"'), "with its own note host");
+      ok(uaHtml.includes('id="uaTimeline"'), "the vendor-alerts timeline's host ships");
+      ok(uaHtml.includes('id="uaFilterNote"'), "with the filter note that announces what is drawn");
       ok(/not the same fact as the flag being off/i.test(uaHtml),
-         "and the flags column's own header states that an absent flag is not an " +
+         "and the page's own disclosure states that an absent flag is not an " +
          "off one — the three-state distinction the module enforces");
 
       const alertsApi = await get("/api/flows/flowalerts", { headers: { Cookie: "flows_session=" + token } });
@@ -621,17 +621,17 @@ try {
       eq(ev.status, 200, "/flows/events/ renders for an authenticated session");
       const evHtml = await ev.text();
       ok(evHtml.includes("/assets/js/flows-events.js"), "the events page loads its own controller");
-      ok(evHtml.includes('id="evBody"'), "and carries the calendar's table body");
-      ok(evHtml.includes('id="evWindow"'), "and the window chart's host");
-      ok(evHtml.includes('id="evBasis"'), "and the basis panel");
+      ok(evHtml.includes('id="evEarn"'), "and carries the earnings list's host");
+      ok(evHtml.includes('id="evWeek"'), "and the week-ahead calendar's host");
+      ok(evHtml.includes('id="evAbout"'), "and the page's own account of its clocks and its gate");
 
       ok(/FORBIDDEN/i.test(evHtml),
-         "the Stage column states that a gated name was forbidden from being scored, " +
+         "the page states that a gated name was forbidden from being scored, " +
          "rather than leaving it to read as a low score");
 
       const anonEv = await get("/flows/events/");
       eq(anonEv.status, 200, "/flows/events/ serves a page to an anonymous visitor");
-      ok(!(await anonEv.text()).includes('id="evBody"'),
+      ok(!(await anonEv.text()).includes('id="evEarn"'),
          "/flows/events/ leaks nothing to an anonymous visitor");
 
       const bareEv = await get("/flows/events");
