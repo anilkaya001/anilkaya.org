@@ -256,6 +256,36 @@ function candlesFor(end, n, { from = 100, step = 0.01, volume = 1e6, after = [] 
   eq(shareRun.status, "agree", "and agrees");
   const splitRun = vannaScale([30, 45, 300, 400].map((S, i) => (i % 2 ? pctAt(S) : { vendor: 1, model: 1, spot: S })));
   eq(splitRun.status, "disagree", `names that split between the units settle nothing (${splitRun.reason})`);
+
+  const nearPar = [80, 95, 120, 140].map(pctAt);
+  const blind = vannaScale(nearPar, { prior: "pct$" });
+  eq(blind.votes.share + blind.votes.pct, 0, "names all priced near $100 cannot tell the two units apart");
+  eq(blind.family, "unresolved", "so the chain check settles no unit");
+  eq(blind.used, "pct$", "and the unit the gamma probe read stands, not a share unit nothing measured");
+  near(blind.ratio, 1, 1e-9, "the dollars-per-1% vendor then reads a ratio of one in that unit");
+  eq(vannaScale(nearPar).used, "share", "while a run whose gamma probe read shares keeps shares");
+  const pctCoincidence = vannaScale([60, 110, 250].map(pctAt), { prior: "pct$" });
+  eq(pctCoincidence.status, "agree", "two names reading dollars per 1% confirm the gamma probe's dollars-per-1% unit rather than unsettle it");
+  eq(pctCoincidence.used, "pct$", "and are read in it");
+  const againstPrior = vannaScale([30, 110, 400].map((S) => ({ vendor: 1, model: 1, spot: S })), { prior: "pct$" });
+  eq(againstPrior.family, "unsettled", "two names reading shares against a dollars-per-1% gamma probe are too few to overturn it and too many to ignore");
+  eq(againstPrior.status, "disagree", `so the scale is not certified (${againstPrior.reason})`);
+
+  const S = 140;
+  const row = { expiry: addDays(SESSION, 9), call_gex: 100, put_gex: 0, call_vanna: 1000, put_vanna: 0,
+    call_charm: -5, put_charm: 0, call_delta: 10, put_delta: 0 };
+  const at = (scale) => variation({ ticker: "P", sessionDate: SESSION, spot: S, iv30: 0.3, gammaFlow: 1,
+    candles: candlesFor(SESSION, 60), expiries: [row] },
+    { probe: { call: "raw", put: "raw" }, kc: { status: "ok", value: 1 }, unit: { family: "pct$", used: "pct$" }, vannaScale: scale });
+  const pctVendor = at(blind);
+  eq(pctVendor.vannaPerPoint, 1000, "a consistent dollars-per-1% vendor the chain check cannot classify keeps vanna at × 100, not × S = 1,400");
+  eq(pctVendor.charmPerSession, -500, "and charm with it");
+  ok(!("note" in pctVendor.conventions.unit), "with no note claiming the chain check read a different unit");
+  const legacy = at({ status: "agree", ratio: 1, n: 5 });
+  eq(legacy.conventions.unit.vanna, "pct$", "a scale that reports no unit leaves vanna in the gamma probe's unit");
+  eq(legacy.vannaPerPoint, 1000, "and converts it there");
+  ok(!("note" in at({ status: "unmeasured", ratio: null, n: 0 }).conventions.unit),
+     "and a run with no chain check never says the chain check read vanna in shares");
 }
 
 {

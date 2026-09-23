@@ -4872,7 +4872,7 @@ async function main() {
     }
   }
 
-  variationRun.vannaScale = vannaScale(vannaSamples);
+  variationRun.vannaScale = vannaScale(vannaSamples, { prior: variationRun.unit.used });
   console.log(`  variation: vanna scale ${variationRun.vannaScale.status}` +
     (variationRun.vannaScale.ratio === null ? "" : `, vendor over Black-Scholes ${variationRun.vannaScale.ratio}`) +
     ` across ${variationRun.vannaScale.n} name(s) with a complete single-expiry chain` +
