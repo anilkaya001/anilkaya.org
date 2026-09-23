@@ -96,6 +96,15 @@ const S = FX.session;
     ok(row.min <= row.p10 && row.p10 <= row.p25 && row.p25 <= row.p50 && row.p50 <= row.p75 && row.p75 <= row.p90 && row.p90 <= row.max,
       `RV${w}'s cone quantiles are ordered`);
   }
+  const cone = buildConePanel({ data: [{ days: 30, volatility: "0.2", percentile: "0.5", q1: "0.1", q3: "0.3", min: "0.05",
+    max: "0.5", median: "0.2", samples: 251, date: bars[bars.length - 1].d }] }, { sessionDate: bars[bars.length - 1].d, rolling });
+  const rv21 = rolling.get(21);
+  near(cone.tenors[0].rvPct, round(rv21.filter((v) => v <= 0.2).length / rv21.length, 4), 1e-9,
+    "the 30-day IV is placed in the 21-session realized cone: the share of two-year RV21 windows at or below it");
+  eq(cone.tenors[0].rvWindow, 21, "and names the realized window it was placed in");
+  eq(buildRvPanel(bars, { sessionDate: bars[bars.length - 1].d, breaks: [{}, {}] }).panel.breaks, 2,
+    "the repair's cut breaks are counted on the panel");
+  eq(panel.breaks, null, "and an unrepaired series says none were looked for, rather than zero");
   const cut = buildRvPanel(bars, { sessionDate: bars[400].d });
   eq(cut.panel.asOf, bars[400].d, "bars after the session are never read (no look-ahead)");
   const short = buildRvPanel(bars.slice(-40), { sessionDate: bars[bars.length - 1].d });
@@ -141,6 +150,9 @@ const S = FX.session;
   eq(cone.richCheap, null, "with one tenor the rich/cheap score is absent, not a guess from what arrived");
   eq(cone.silent.richCheap, "input-absent", "and names the silence");
   eq(cone.sameSession, true, "the row is dated on the session");
+  const behind = buildConePanel({ data: [{ ...p["iv-dist:AAPL"].row, date: "2026-09-21" }] }, { sessionDate: S });
+  eq(behind.sameSession, false, "a vendor feed a session behind is not same-session (the stale ring)");
+  eq(behind.asOf, "2026-09-21", "and its date says which session it is");
   const nv = buildConePanel({ data: [p["iv-dist:NVDA"].row] }, { sessionDate: S });
   eq(nv.tenors[0].pct, 0.0438, "NVDA's 7-day percentile reads as published");
 
@@ -180,6 +192,10 @@ const S = FX.session;
 
   const dyn = buildIvDynamics({ data: [p["iv-rank:AAPL"].row] }, { sessionDate: S });
   eq(dyn.vendorRank, 0.1622, "iv_rank_1y is 0-100 on this route and is published as a fraction");
+  const two = buildIvDynamics({ data: [{ ...p["iv-rank:AAPL"].row, date: S, iv_rank_1y: "73.5" }, p["iv-rank:AAPL"].row] },
+    { sessionDate: S });
+  eq(two.vendorRank, 0.735, "the vendor rank published is the session's row, not the oldest");
+  eq(two.asOf, S, "with the panel dated by that row");
   eq(dyn.halfLife, null, "one row is no AR(1)");
 
   const anomalyBody = { data: { history: [p["vol-anomaly:AAPL"].row],
@@ -192,8 +208,23 @@ const S = FX.session;
   eq(an.components.vrpZ.std, 0.4854, "component objects are carried with their own fields");
   eq(an.components.regime.crashProbability, 0.5, "including the regime's crash probability");
   eq(an.history.d[0], "2026-06-09", "the history rows are dated");
+  const signs = buildAnomalyPanel({ data: { history: [
+    { date: "2026-09-16", direction: "short_vol", score: "30" }, { date: "2026-09-17", direction: "short_vol", score: "-5" },
+    { date: "2026-09-18", direction: "long_vol", score: "-40" }, { date: "2026-09-21", direction: "neutral", score: "2" }],
+    latest: anomalyBody.data.latest } }, { sessionDate: S, ours: "rich" });
+  eq(signs.signConsistency, round(2 / 3, 3), "sign consistency is the share of directional history rows whose score sign matches");
   eq(buildAnomalyPanel(anomalyBody, { sessionDate: S, ours: "cheap" }).vote, -1, "a cheap cone disagrees");
   eq(buildAnomalyPanel(anomalyBody, { sessionDate: S, ours: null }).vote, null, "no cone reading is no vote");
+  const lateLatest = buildAnomalyPanel({ data: {
+    history: [{ date: "2026-09-21", direction: "long_vol", score: "-40" }, { date: S, direction: "short_vol", score: "31" },
+      { date: "2026-09-23", direction: "long_vol", score: "-80" }],
+    latest: { ...p["vol-anomaly-top"].row, ticker: "AAPL", date: "2026-09-23", direction: "long_vol", score: "-80" } } },
+  { sessionDate: S, ours: "rich" });
+  eq(lateLatest.from, "history", "a latest row dated after the session is not read; the newest history row on or before it is");
+  eq(lateLatest.score, 31, "so the score is the session's, not the next day's");
+  eq(lateLatest.view, "rich", "and so is the view");
+  eq(lateLatest.components, null, "the components belong to the unread latest row and are not carried");
+  deepEq(lateLatest.history.d, ["2026-09-21", S]);
 
   const se = buildSentimentPanel({ data: { history: [p["vol-sentiment:AAPL"].row],
     latest: { ...p["vol-sentiment-top"].row, ticker: "AAPL" } } }, { sessionDate: S, lean: 1 });
@@ -202,6 +233,14 @@ const S = FX.session;
   eq(se.vote, 1, "and agrees with a long board side");
   eq(se.vwks, 0.2027, "vwks is a decimal string");
   eq(se.components.avar.norm, 1, "components carry norm and value");
+  const hist = Array.from({ length: 30 }, (_, i) => ({ date: addDays("2026-08-01", i), direction: "neutral",
+    score: String(10 + (i % 5)), vwks: "0.01", avar: "0.001" }));
+  const today = { date: S, direction: "bullish", score: "40", vwks: "0.02", avar: "0.002" };
+  const sz = buildSentimentPanel({ data: { history: [...hist, today], latest: { ...today, ticker: "AAPL", sample_size: 12 } } },
+    { sessionDate: S, lean: -1 });
+  const prior = zAgainst(40, hist.map((h) => Number(h.score)), { min: 20 });
+  near(sz.z, prior.z, 1e-3, "the sentiment z is taken against the history BEFORE today, never with today's own score in it");
+  eq(sz.vote, -1, "a bullish vendor against a short board side is a disagreement");
 
   const ch = buildCharacterPanel({ data: { history: [p["vol-character:AAPL"].row],
     latest: { ...p["vol-character:AAPL"].row, ticker: "AAPL", ar1_b: "0.97", entropy_negative: "0.4",
@@ -260,6 +299,8 @@ function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
   near(full.front7_30, 0.1, 1e-9, "the front stress is iv7/iv30 - 1");
   eq(full.view, "neutral", "0.083 is inside the +-0.15 band, so the cone takes no side");
   deepEq(Object.keys(RICH_CHEAP_WEIGHTS).map(Number), [30, 60, 90, 180]);
+  const sampled = (n) => buildConePanel({ data: [{ ...tenor(30, 0.5), samples: n }] }, { sessionDate: S }).tenors[0].lowSample;
+  deepEq([sampled(150), sampled(199), sampled(200), sampled(251)], [true, true, false, false]);
   const odd = buildConePanel({ data: [tenor(30, 55)] }, { sessionDate: S });
   eq(odd.tenors[0].pct, null, "a percentile outside 0-1 on a 0-1 route is refused, not rescaled by guess");
   eq(odd.pctOutOfRange, 1, "and counted");
@@ -275,6 +316,20 @@ function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
     base("2026-11-20", 0.42, 0.42), base("2026-12-18", 0.40, 0.40), base("2026-09-18", 0.2, 0.5),
   ] }, { sessionDate: S, earnings: { date: "2026-10-21", time: "postmarket" } });
   eq(term.expired, 1, "an expiry on or before the session is dropped");
+  const onDay = buildTermPanel({ data: [base(S, 0.3, 0.5), base("2026-10-16", 0.3, 0.5)] }, { sessionDate: S });
+  eq(onDay.expired, 1, "including one that expires on the session itself");
+  eq(onDay.expiries.length, 1, "which leaves only the later expiry");
+  const sameDay = buildTermPanel({ data: [base("2026-10-15", 0.3, 0.5), base("2026-10-16", 0.4, 0.5), base("2026-11-20", 0.35, 0.5)] },
+    { sessionDate: S, earnings: { date: "2026-10-16", time: "premarket" } });
+  eq(sameDay.eventExpiry, "2026-10-16", "a pre-market report on an expiry day is inside that expiry");
+  const done = buildTermPanel({ data: [base("2026-10-16", 0.3, 0.5), base("2026-11-20", 0.35, 0.5)] },
+    { sessionDate: S, earnings: { date: S, time: "premarket" } });
+  eq(done.earnings, null, "a pre-market report on the session day has already moved the stock, so it is not upcoming");
+  const zs = term.expiries.find((x) => x.expiry === "2026-11-20");
+  near(zs.zShape, 0, 1e-9, "zShape is (iv - median)/(q3 - q1), zero at the median");
+  const skewed = buildTermPanel({ data: [{ ...base("2026-10-16", 0.3, 0.5), median: "0.28", q1: "0.26", q3: "0.34" }] },
+    { sessionDate: S });
+  near(skewed.expiries[0].zShape, (0.3 - 0.28) / (0.34 - 0.26), 1e-4, "and measured in IQR units");
   eq(term.earnings.eventDay, "2026-10-22", "a post-market report moves the stock the next session");
   const ev = term.expiries.find((x) => x.expiry === "2026-10-23");
   ok(ev.event && ev.eventFirst, "the first expiry after the event day contains it");
@@ -372,6 +427,8 @@ function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
   near(skew.maturitySlope, -0.0039027798509351101185, 1e-5, "the fitted maturity slope is published");
   near(skew.mom5, 0.0076521681078669765825, 1e-5, "5-session momentum RR25_t - RR25_t-5");
   near(skew.crash, 3, 1e-3, "crash premium RR10/RR25");
+  near(skew.tail, rrNow * 3 - rrNow, 1e-5, "tail = RR10 - RR25");
+  near(skew.crashMedian, 3, 1e-3, "and the crash ratio's median over the window");
   eq(skew.dte, 30, "today's maturity");
   eq(skew.dteFirst, 100, "and the oldest row's, so the shrinking maturity is visible");
   eq(skew.series.d.length, 60, "the sparkline keeps sixty sessions");
@@ -379,6 +436,10 @@ function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
     { data: rows10 }, { sessionDate: today, expiry });
   eq(calls.crash, null, "a call-bid (negative) RR25 has no crash ratio");
   eq(calls.silent.crash, "sign-mismatch", "and says why");
+  const flat = buildSkewPanel({ data: [...rows25.slice(0, -2), { date: today, delta: 25, risk_reversal: "0.001" }] },
+    { data: rows10 }, { sessionDate: today, expiry });
+  eq(flat.crash, null, "an RR25 inside the 0.002 floor gives no crash ratio (the ratio of two near-zeros is noise)");
+  eq(flat.silent.crash, "sign-mismatch", "and says so");
   const noTen = buildSkewPanel({ data: rows25 }, null, { sessionDate: today, expiry });
   eq(noTen.rr10, null, "a failed 10-delta read leaves RR10 absent");
   eq(noTen.silent.crash, "input-absent", "and the crash ratio silent");
@@ -431,6 +492,15 @@ function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
   eq(vrp.lookAhead, 1, "a row whose realized window ends after the session is counted as look-ahead");
   ok(vrp.latest.realizedDate <= session, "and the latest ex-post reading is the last COMPLETED window");
   const win = vrpRows.filter((r) => r.realized_date <= session).slice(-252);
+  const rps = win.map((r) => Number(r.risk_premium));
+  const srt = rps.slice().sort((a, b) => a - b), h = srt.length >> 1;
+  near(vrp.medianRp, srt.length % 2 ? srt[h] : (srt[h - 1] + srt[h]) / 2, 1e-5, "median rp over the completed windows");
+  near(vrp.meanRp, rps.reduce((a, b) => a + b, 0) / rps.length, 1e-5, "and the mean");
+  near(vrp.rankOwn, rps.filter((x) => x <= rps[rps.length - 1]).length / rps.length, 1e-4,
+    "the latest rp's own percentile in the window");
+  near(vrp.meanVariance, win.reduce((a, r) => a + Number(r.implied_volatility) ** 2 - Number(r.realized_volatility) ** 2, 0) / win.length,
+    1e-6, "the mean variance premium iv^2 - rv^2");
+  eq(vrp.latest.lagDays, dayDiff(vrp.latest.date, session), "lagDays counts calendar days from the latest ex-post iv date");
   near(vrp.hitRate, win.filter((r) => Number(r.risk_premium) > 0).length / win.length, 1e-4,
     "the seller hit rate is the share of the last 252 completed windows with rp > 0");
   near(vrp.exAnte.rv21, closeToCloseVol(bars, 21), 1e-4, "ex-ante RV21 is the trailing close-to-close vol at the session");
@@ -445,6 +515,20 @@ function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
   near(vrp.exAnte.z, zz.z, 2e-3, "and the z matches a direct reconstruction, with no row at or after the session in its history");
   near(vrp.garch.volPoints, 0.07, 1e-9, "VRP against the GARCH 21-session forecast, in vol points");
   eq(vrp.garch.weak, false, "a converged fit with alpha >= 0.01 is not weak");
+  const zeroRp = vrpRows.map((r, i) => (i % 5 === 0 && r.realized_date <= session
+    ? { ...r, realized_volatility: r.implied_volatility, risk_premium: "0.000000" } : r));
+  const zw = zeroRp.filter((r) => r.realized_date <= session).slice(-252);
+  near(buildVrpPanel({ data: zeroRp }, { sessionDate: session }).hitRate,
+    zw.filter((r) => Number(r.risk_premium) > 0).length / zw.length, 1e-4,
+    "a window whose realized vol equalled its implied is not a win for the premium seller");
+  const weakOf = (garch) => buildVrpPanel({ data: vrpRows }, { sessionDate: session, iv30: 0.27, bars, garch }).garch.weak;
+  eq(weakOf({ status: "ok", avg21Vol: 20, alpha: 0.005, converged: true }), true, "alpha under 0.01 leaves the forecast weak");
+  eq(weakOf({ status: "ok", avg21Vol: 20, alpha: 0.05, converged: false }), true, "and so does a fit that did not converge");
+  const onSession = buildVrpPanel({ data: [...vrpRows, { date: session, implied_volatility: "0.9", realized_volatility: null,
+    realized_date: null, risk_premium: null, rank: null }] }, { sessionDate: session, iv30: 0.27, bars });
+  near(onSession.exAnte.z, vrp.exAnte.z, 1e-9,
+    "a VRP row dated on the session itself never enters the ex-ante history its own day is z-scored against");
+  eq(onSession.exAnte.n, vrp.exAnte.n, "the history is the same length with or without it");
   const noIv = buildVrpPanel({ data: vrpRows }, { sessionDate: session, iv30: null, bars });
   eq(noIv.exAnte.vrp, null, "without today's iv30 the ex-ante VRP is absent, never zero");
   eq(noIv.silent.exAnte, "input-absent", "and its silence is named");
@@ -494,6 +578,7 @@ function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
     ["AAA", { raw: { expiries: fakeListedExpiries(session).map((e) => ({ expiry: e })), ohlc2y: candlesAAA },
       row: { next_earnings_date: "2026-10-20", er_time: "postmarket" },
       features: { garch: { status: "ok", avg21Vol: 30, alpha: 0.04, converged: true } } }],
+    ["MMM", { raw: { expiries: [] }, row: { next_earnings_date: addDays(session, 50), er_time: "premarket" }, features: {} }],
   ]);
   const deep = ["AAA", "BBB", "CCC", "DDD", "EEE", "FFF", "GGG", "HHH", "III", "JJJ", "KKK"].map((t, i) => [t, i % 2 ? "long" : "short"]);
   const names = volNames({ deep, crossSection: ["LLL", "MMM", "AAA"], byTicker });
@@ -508,7 +593,9 @@ function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
     if (path.startsWith("/api/stock/FFF/historical-risk-reversal-skew") && params.delta === 10) throw new Error(path + " -> HTTP 500");
     return fake(path, params, opts);
   };
-  const leg = await runVolLeg({ uw: recorder, names, sessionDate: session, now: () => "2026-09-22T21:40:00.000Z" });
+  let tick = 0;
+  const clock = () => new Date(Date.parse("2026-09-22T21:40:00.000Z") + 1000 * tick++).toISOString();
+  const leg = await runVolLeg({ uw: recorder, names, sessionDate: session, now: clock });
   ok(seen.every((c) => c.opts && c.opts.envelope === true), "every vol read asks uw() for the whole envelope");
   ok(seen.filter((c) => c.path.startsWith("/api/stock/")).every((c) => c.params.date === session || c.params.end_date === session),
     "every per-name read is dated at the session");
@@ -556,15 +643,26 @@ function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
   eq(e("LLL").panels.ivDyn.code, "not-read", "while a carded name's is genuinely not read");
   ok(e("AAA").panels.cone.xPct.richCheap !== undefined, "cross-sectional percentiles are attached");
   eq(e("SPY").panels.cone.xPct.richCheap, null, "and the index names are kept out of the equity cross-section");
-  eq(e("AAA").readAt, "2026-09-22T21:40:00.000Z", "each name carries the instant it was read");
+  eq(e("AAA").readAt, "2026-09-22T21:40:00.000Z", "each name carries the instant it was read: the OLDEST of its reads");
+  ok(e("BBB").readAt > e("AAA").readAt, "so a name read later carries a later instant");
+  eq(e("MMM").panels.vrp.exAnte.vrpExEvent, e("MMM").panels.vrp.exAnte.vrp,
+    "a carded name reporting in fifty days has no event inside the thirty-day VRP tenor, so its ex-event VRP is its VRP");
+  eq(e("MMM").panels.cone.slope30_90ExEvent, null, "but the event IS inside ninety days and its term is not read");
+  eq(e("MMM").panels.cone.silent.slope30_90ExEvent, "not-read", "so the ex-event slope is silent as not-read");
 
+  eq(e("BBB").panels.character.vote, null, "before the card leg, a deep name's character has no IV half-life to vote with");
+  eq(e("BBB").panels.character.silent.vote, "no-counterpart", "and says so");
   const card = { ticker: "BBB", panels: {} };
   attachVol(card, leg, "BBB", { ivRank: { data: Array.from({ length: 251 }, (_, i) => ({
     date: addDays("2025-09-01", i), volatility: String(0.3 + 0.02 * Math.sin(i / 5)), iv_rank_1y: "40", close: "100" })) } });
   eq(e("BBB").panels.ivDyn.status, "ok", "the card leg's 1y iv-rank rows complete the deep name's IV dynamics");
   ok(card.x && card.x.vol && card.x.vol.v === 1, "and the card carries a compact vol summary under x.vol");
   eq(card.x.vol.ivDyn.halfLife, e("BBB").panels.ivDyn.halfLife, "that reads the same number the dossier publishes");
-  ok(card.x.vol.votes.character !== undefined, "the character vote is re-cast with the IV half-life");
+  ok(e("BBB").panels.ivDyn.view !== null, `the attached rows classify the IV half-life (${e("BBB").panels.ivDyn.view})`);
+  eq(e("BBB").panels.character.ours, e("BBB").panels.ivDyn.view, "the character vote is re-cast with that class");
+  eq(e("BBB").panels.character.vote, volVote(e("BBB").panels.ivDyn.view, e("BBB").panels.character.view),
+    "against the vendor's class");
+  eq(card.x.vol.votes.character, e("BBB").panels.character.vote, "and the card summary carries the re-cast vote");
   const cardNull = { panels: {} };
   attachVol(cardNull, leg, "CCC", { ivRank: null });
   eq(e("CCC").panels.ivDyn.code, "read-failed", "a failed card-leg iv-rank read is a failed IV dynamics, not an empty one");
