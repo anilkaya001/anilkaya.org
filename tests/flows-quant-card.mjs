@@ -326,6 +326,63 @@ const FACT_INPUT = () => ({
   const b = FQ.repriceStructure({ engine: plain, legs, expiry: "2026-10-23" });
   eq(JSON.stringify(b), JSON.stringify(a), "and the browser build re-prices a put spread exactly as the shared module does");
   near(FQ.black76(100, 0.99, 105, 0.3, 0.25, "C"), BS.black76(100, 0.99, 105, 0.3, 0.25, "C"), 0, "down to Black-76 itself");
+
+  const EXP = "2026-10-23";
+  const shaped = (type) => vendorChain({ seed: "lab" }).filter((r) => r.option_symbol.includes(code(EXP) + type)).map((r) => ({
+    sym: r.option_symbol, k: QC.parseSymbol(r.option_symbol).strike, bid: Number(r.nbbo_bid), ask: Number(r.nbbo_ask),
+    iv: Number(r.implied_volatility), vol: r.volume, oi: r.open_interest,
+  }));
+  const calls = shaped("C"), puts = shaped("P");
+  const rows = QC.bookRows(calls, puts, "SYN");
+  ok(rows.length === calls.length + puts.length && rows.every((r, i) => i === 0 || rows[i - 1].K <= r.K),
+     `the strategy route's book reads back into engine rows one per listed contract, strike-ordered (${rows.length})`);
+  const compact = QC.compactLaw(law);
+  const routeIn = { ticker: "SYN", asOfMs: AS_OF_MS + 5 * 3600 * 1000 + 777, spot: 100.37, rate: RATE, expiries: [{ expiry: EXP, rows }], facts,
+    state: { state: "pinned", direction: null, confidence: 2, ...STATE_STRUCTURES.pinned.rich }, pLaw: compact,
+    levels: { callWall: 105, putWall: 95, magnet: 100, flip: 99, maxPain: 100, atr: 2 }, event: null, atr: 2, fits: true };
+  const route = JSON.parse(JSON.stringify(QC.runCardEngine(routeIn)));
+  ok(route.fits.length === 1 && route.asOfMs === routeIn.asOfMs && route.stale === false && route.structures.length >= 2,
+     `with fits requested the block carries the fitted slice, the clock it was priced at and the stale flag (${route.structures.length} structures)`);
+  const labIn = {
+    asOfMs: route.asOfMs, spot: route.spot, facts: route.facts, state: route.state, pLaw: route.pLaw, levels: route.levels,
+    event: route.event, stale: route.stale, books: [{ fit: route.fits[0], rows }],
+  };
+  const setupB = FQ.labSetup(labIn), setupM = QC.labSetup(labIn);
+  let same = 0;
+  for (const s of route.structures) {
+    const cand = {
+      family: s.family, expiry: s.expiry, dir: s.dir, rules: s.rules,
+      legs: s.legs.map((l) => ({ type: l.type, K: l.k, side: l.side, qty: l.qty, expiry: l.expiry })),
+      snapped: s.legs.filter((l) => l.snapped).map((l) => ({ K: l.k, rule: l.snapped })),
+    };
+    const want = { ...s };
+    delete want.id;
+    const fromBundle = FQ.priceStructure(setupB, cand, { detail: !!s.grid });
+    const fromModule = ENGINE.priceStructure(setupM, cand, { detail: !!s.grid });
+    eq(JSON.stringify(fromBundle), JSON.stringify(want), `the page's engine re-prices ${s.id} (${s.family}) byte for byte as the Worker published it`);
+    eq(JSON.stringify(fromModule), JSON.stringify(want), `and so does the shared module the Worker runs (${s.id})`);
+    same++;
+  }
+  ok(same === route.structures.length && route.structures.some((s) => s.grid),
+     "every published structure, including one carrying its scenario grid, is reproduced in the page from the fit alone");
+  const own = route.structures.find((s) => s.legs.length >= 2);
+  const fam = FQ.STRUCTURES.find((f) => f.id === own.family);
+  ok(fam && FQ.familyDirection(fam, route.state) !== undefined, "the catalogue and its direction rule ride the bundle");
+  const built = FQ.structureLegs(setupB, own.family, FQ.DELTA_TARGETS[own.family][0], EXP);
+  ok(built && built.legs.length === own.legs.length, `the page builds ${own.family} legs by delta from the same slice (${built && built.legs.length} legs)`);
+  const mid = FQ.priceStructure(setupB, { family: own.family, expiry: EXP, legs: built.legs, basis: "mid" });
+  const fill = FQ.priceStructure(setupB, { family: own.family, expiry: EXP, legs: built.legs });
+  near(mid.ev.q - fill.ev.q, (fill.price.fill - fill.price.mid) * 100, 0.02,
+       "a mid cost basis moves EV by exactly the quarter-spread the fill pays over the mid");
+  eq(fill.price, mid.price, "while the quoted prices it reports stay the market's");
+  const custom = FQ.priceStructure(setupB, { family: "custom", fam: { id: "custom", risk: "undefined", dir: "neutral" }, expiry: EXP,
+    legs: [{ type: "P", K: 95, side: -1, qty: 1 }] });
+  ok(custom && custom.capital.kind === "reg-t" && custom.grade <= 2, "a hand-built naked put is priced, capitalised on Reg-T and capped at grade 2");
+  const flat = QC.contractFit({ expiry: EXP, asOfMs: routeIn.asOfMs, spot: 100.37, rate: R, row: rows.find((r) => r.type === "P" && r.K === 95) });
+  const flatSet = FQ.labSetup({ ...labIn, books: [{ fit: flat, rows: rows.filter((r) => r.type === "P" && r.K === 95) }] });
+  const sp = FQ.priceStructure(flatSet, { family: "short-put", expiry: EXP, legs: [{ type: "P", K: 95, side: -1, qty: 1 }], basis: "mid" });
+  near(sp.legs[0].model, sp.legs[0].mid, 1e-4, "a desk line priced on its own contract's implied vol reproduces its mid");
+  ok(sp.gradeParts.fit === 1 && sp.prob.popQ > 0.5 && sp.prob.popP !== null, "on a flat slice graded 1, with a risk-neutral and a real-world chance of profit");
 }
 
 console.log(`✓ flows-quant-card: ${n} assertions — vendor chain rows read once, in fractions and by the ticker's own series; ` +
