@@ -196,6 +196,7 @@ export async function runLive({
 
   const prevSeries = await readStored("live:strips:series");
   const series = appendStripSeries(prevSeries && prevSeries.payload, strips, { at, session, writer });
+  if (series.trimmed) note(`live:strips:series: ${series.trimmed} oldest column(s) shed to fit its byte cap`);
   await put("live:strips:series", series, { answered: series.appended === true || series.replaced === true });
   await put("live:vol", shapeVol(indexRows(strip), { at, session, writer }), { answered: stripAnswered });
   await put("live:movers", shapeMovers(strips, { at, session, writer }), { answered: stripAnswered });

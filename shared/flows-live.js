@@ -615,7 +615,8 @@ export function shapeStrips(raw, { at, session, names = [], writer } = {}) {
 
 export const SERIES_SCALE = Object.freeze({ px: 0.01, net: 1000, gex: 10000, iv: 0.0001 });
 
-export function appendStripSeries(prev, strips, { at, session, writer, max = LIVE_BUDGET.seriesPoints } = {}) {
+export function appendStripSeries(prev, strips, { at, session, writer, max = LIVE_BUDGET.seriesPoints,
+  maxBytes = LIVE_KEYS["live:strips:series"].maxBytes } = {}) {
   const fields = strips && Array.isArray(strips.fields) ? strips.fields : STRIP_FIELDS.map(([n]) => n);
   const idx = (n) => fields.indexOf(n);
   const same = prev && typeof prev === "object" && prev.session === session && Array.isArray(prev.t);
@@ -667,14 +668,19 @@ export function appendStripSeries(prev, strips, { at, session, writer, max = LIV
       out.cols[c][t] = arr;
     }
   }
-  if (out.t.length > max) {
-    const drop = out.t.length - max;
+  const dropOldest = (drop) => {
     out.t = out.t.slice(drop);
     for (const c of Object.keys(out.cols)) {
       for (const t of Object.keys(out.cols[c])) out.cols[c][t] = out.cols[c][t].slice(drop);
     }
+  };
+  if (out.t.length > max) dropOldest(out.t.length - max);
+  let trimmed = 0;
+  while (out.t.length > 1 && JSON.stringify(out).length > maxBytes - 64) {
+    dropOldest(1);
+    trimmed++;
   }
-  return { ...out, appended: !replace, replaced: !!replace };
+  return { ...out, trimmed, appended: !replace, replaced: !!replace };
 }
 
 export function shapeVol(indexRaw, { at, session, writer } = {}) {

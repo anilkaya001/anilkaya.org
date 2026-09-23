@@ -490,6 +490,12 @@ const T = (iso) => Date.parse(iso);
   ok(series.t.length === 27 + 1 && sBytes <= L.LIVE_KEYS["live:strips:series"].maxBytes,
     `a full session of 15-minute columns for 120 names is ${sBytes} bytes (${series.t.length} points)`);
   ok(JSON.stringify(strips).length <= L.LIVE_KEYS["live:strips"].maxBytes, "and the snapshot fits its key");
+  const squeezed = L.appendStripSeries(series, strips, { at: easternInstant(session, 16 * 60 + 16), session,
+    maxBytes: 40 * 1024 });
+  ok(JSON.stringify(squeezed).length <= 40 * 1024 && squeezed.trimmed > 0 && squeezed.t.at(-1) === L.isoSec(easternInstant(session, 16 * 60 + 16)) &&
+     Object.values(squeezed.cols).every((col) => Object.values(col).every((a) => a.length === squeezed.t.length)),
+  `OVER ITS CAP the series sheds its oldest columns (${squeezed.trimmed}) and still lands, every name aligned to the ` +
+    "shorter axis — rather than being refused by the publisher and frozen for the rest of the session");
 
   const reads = {};
   for (const t of ["SPY", "QQQ", ..."ABCDEFGHIJKL"]) reads[t] = L.shapeGexSeries(FAKE.fakeSpotExposures(t, { session, now: end }), { session, now: end });
