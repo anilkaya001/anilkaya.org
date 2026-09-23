@@ -217,6 +217,7 @@
   function price(sym, p) {
     const eng = p.engine && p.engine.status === "ok" ? p.engine : null;
     const asOfMs = quoteMs(p);
+    const laws = new Map();
     for (const r of p.rows || []) {
       r.__eng = null;
       if (!Q) { r.__why = "The engine bundle did not load."; continue; }
@@ -225,7 +226,7 @@
       try {
         const fit = Q.contractFit({ expiry: r.expiry, asOfMs, spot: p.spot, rate: eng && eng.rate ? eng.rate.r : null, row });
         if (!fit) { r.__why = "No implied volatility inverts from this contract's mid."; continue; }
-        const setup = Q.labSetup({ asOfMs, spot: p.spot, facts: eng ? eng.facts : [], state: eng ? eng.state : null, pLaw: eng ? eng.pLaw : null, event: eng ? eng.event : null, stale: eng ? eng.stale : false, books: [{ fit, rows: [row] }] });
+        const setup = Q.labSetup({ asOfMs, spot: p.spot, facts: eng ? eng.facts : [], state: eng ? eng.state : null, pLaw: eng ? eng.pLaw : null, event: eng ? eng.event : null, stale: eng ? eng.stale : false, books: [{ fit, rows: [row] }], lawCache: laws });
         const legs = r.strategy === "cc" ? [{ type: "S", side: 1, qty: 1 }, { type: "C", K: r.strike, side: -1, qty: 1 }] : [{ type: "P", K: r.strike, side: -1, qty: 1 }];
         r.__eng = Q.priceStructure(setup, { family: r.strategy === "cc" ? "covered-call" : "short-put", expiry: r.expiry, legs, basis: "natural" });
         if (!r.__eng) r.__why = "The engine could not price this line.";

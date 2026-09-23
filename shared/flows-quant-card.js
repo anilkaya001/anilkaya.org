@@ -580,7 +580,7 @@ export function labSetup(input) {
     .sort((a, b) => (a.expiry < b.expiry ? -1 : a.expiry > b.expiry ? 1 : 0));
   return setupEngine({
     asOf: input.asOfMs, spot: input.spot, facts: factMap(input.facts), state: engineState(input.state), pLaw: input.pLaw || null,
-    levels: input.levels || null, event: input.event || null, stale: !!input.stale,
+    levels: input.levels || null, event: input.event || null, stale: !!input.stale, lawCache: input.lawCache,
   }, list);
 }
 

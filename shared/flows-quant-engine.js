@@ -883,10 +883,12 @@ export function setupEngine(input, list) {
     sessionsTo: (d) => sessionsBetween(asOfDay, d),
     qtab: (law, key) => { if (!qtabs.has(key)) qtabs.set(key, quantileTable(law, ENGINE_LINES.VAR_POINTS)); return qtabs.get(key); },
   };
-  const lawCache = new Map();
+  const lc = input.lawCache;
+  const lawCache = lc && typeof lc.get === "function" && typeof lc.set === "function" && typeof lc.has === "function" ? lc : new Map();
   ctx.lawsOf = (front, spot) => {
-    if (!lawCache.has(front.expiry)) lawCache.set(front.expiry, lawsFor(ctx, front.T, front.sessions, front.expiry, front.slice.F, spot));
-    return lawCache.get(front.expiry);
+    const key = front.expiry + "|" + front.T + "|" + front.sessions + "|" + front.slice.F + "|" + spot;
+    if (!lawCache.has(key)) lawCache.set(key, lawsFor(ctx, front.T, front.sessions, front.expiry, front.slice.F, spot));
+    return lawCache.get(key);
   };
   const putSkewPct = facts["skew.rr25.30.pct"] && fin(facts["skew.rr25.30.pct"].v) ? facts["skew.rr25.30.pct"].v : null;
   return { asOfMs, asOfDay, S, evIn, list, expiries, facts, state, ctx, putSkewPct };

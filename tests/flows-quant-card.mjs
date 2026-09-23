@@ -396,6 +396,19 @@ const FACT_INPUT = () => ({
   const sp = FQ.priceStructure(flatSet, { family: "short-put", expiry: EXP, legs: [{ type: "P", K: 95, side: -1, qty: 1 }], basis: "mid" });
   near(sp.legs[0].model, sp.legs[0].mid, 1e-4, "a desk line priced on its own contract's implied vol reproduces its mid");
   ok(sp.gradeParts.fit === 1 && sp.prob.popQ > 0.5 && sp.prob.popP !== null, "on a flat slice graded 1, with a risk-neutral and a real-world chance of profit");
+  const shared = new Map();
+  let lines = 0, sameLines = 0;
+  for (const r of rows.filter((x) => x.type === "P" && x.bid > 0)) {
+    const fitR = QC.contractFit({ expiry: EXP, asOfMs: routeIn.asOfMs, spot: 100.37, rate: R, row: r });
+    if (!fitR) continue;
+    const cand = { family: "short-put", expiry: EXP, legs: [{ type: "P", K: r.K, side: -1, qty: 1 }], basis: "natural" };
+    const alone = FQ.priceStructure(FQ.labSetup({ ...labIn, books: [{ fit: fitR, rows: [r] }] }), cand);
+    const pooled = FQ.priceStructure(FQ.labSetup({ ...labIn, books: [{ fit: fitR, rows: [r] }], lawCache: shared }), cand);
+    lines++;
+    if (JSON.stringify(alone) === JSON.stringify(pooled)) sameLines++;
+  }
+  ok(lines >= 10 && sameLines === lines && shared.size === 1,
+     `a desk that shares one real-world law cache across its lines prices every one of them to the byte it prices alone (${sameLines} of ${lines}), from one law for the expiry rather than one per line (${shared.size})`);
 }
 
 console.log(`✓ flows-quant-card: ${n} assertions — vendor chain rows read once, in fractions and by the ticker's own series; ` +
