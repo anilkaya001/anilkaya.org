@@ -406,10 +406,17 @@ flows-live-contract    flows-freshness-contract
 flows-quant-card
 ```
 
-`flows-quant` was measured on 2026-09-23: about 5 s with no server. It spawns
-itself once more, as a fresh process, to time the Worker path of the options
-engine (one 400-quote expiry fitted and 24 structures priced) in a clean heap,
-which is what a Worker isolate sees; that child is part of the 5 s.
+`flows-quant` was measured on 2026-09-23: about 5 s with no server (8 s at a
+load average of 4.6 on 4 cores). It spawns itself once more, as a fresh
+process, to time the Worker path of the options engine (one 400-quote expiry
+fitted and 24 structures priced) in a clean heap; that child is part of the
+total. The child reads the main thread's own CPU clock
+(`process.threadCpuUsage()`, wall clock only where it is missing), because
+CPU time is what the Workers limit meters and a loaded machine inflates wall
+time several-fold. That clock ticks at the kernel's resolution (4 ms in the
+sandbox), so runs are timed in windows of five and the budget is read from
+the window means. The child warms the engine first, so it does not measure a
+cold isolate's first requests.
 `flows-quant-card` was measured the same day: under 2 s with no server. It
 rebuilds the `FlowsQuant` bundle in memory and fails when the committed file
 differs, then runs the bundle in a bare `vm` context against the modules.
@@ -418,7 +425,9 @@ Confirmed to need one: `flows-overview-contract`, `flows-board-render`,
 `flows-watch-render`, `flows-political-render`, `flows-ask-render`,
 `flows-legacy-payload`, `flows-worker-contract`, `flows-desk-contract`,
 `flows-chain-contract`, `flows-sections-contract`, `worker-regression`,
-`placement-contract`, `flows-motion`, `flows-market-contract`.
+`placement-contract`, `flows-motion`, `flows-market-contract`, `flows-strategy` (measured on
+2026-09-23: 13 s with `FLOWS_TEST_SANDBOX=1`; it boots workerd for the
+strategy page and its `engine=1` route).
 
 `flows-motion` was in NEITHER list until 2026-09-13 and was measured then: it
 boots workerd, so without `FLOWS_TEST_SANDBOX=1` it hangs in this sandbox
