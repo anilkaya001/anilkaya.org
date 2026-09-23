@@ -5,7 +5,7 @@ import {
   groupMembers, groupAlignment, fundFlowSummary, volCurveFromScreener, shapeDailyReport,
   shapeOptionsPulse, holdingsMembers,
 } from "../../shared/flows-regime.js";
-import { impliedCorrelation, netTilt, vnum, addDays, compactNumbers, SILENCE } from "../../shared/flows-cross.js";
+import { impliedCorrelation, netTilt, vnum, firstPositive, addDays, compactNumbers, SILENCE } from "../../shared/flows-cross.js";
 
 export const NET_FLOW_READS = Object.freeze([
   ["zero", { expiration: "zero_dte", tide_type: "all", moneyness: "all" }],
@@ -149,14 +149,14 @@ export function assembleRegime(raw, {
 
   const volByTicker = new Map();
   for (const row of harvestRows || []) {
-    const v = vnum(row && (row.volatility_30 ?? row.iv30d));
-    if (row && row.ticker && v !== null && v > 0) volByTicker.set(row.ticker, v);
+    const v = row ? firstPositive(row.volatility_30, row.iv30d) : null;
+    if (row && row.ticker && v !== null) volByTicker.set(row.ticker, v);
   }
   const corr = {};
   for (const t of CORRELATION_ETFS) {
     const res = r.holdings && r.holdings[t];
     const idx = indexRows.get(t);
-    const sI = idx ? vnum(idx.volatility_30 ?? idx.iv30d) : null;
+    const sI = idx ? firstPositive(idx.volatility_30, idx.iv30d) : null;
     if (!res || !res.ok) { corr[t] = statusOf(res || { ok: false, error: "not read" }, "holdings"); continue; }
     const { members, asOf } = holdingsMembers(rowsOf(res.body));
     const withVol = members.map((m) => ({ w: m.w, vol: volByTicker.get(m.t) ?? null }));

@@ -26,6 +26,14 @@ export function vnum(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+export function firstPositive(...values) {
+  for (const v of values) {
+    const n = vnum(v);
+    if (n !== null && n > 0) return n;
+  }
+  return null;
+}
+
 export function vstr(v) {
   return typeof v === "string" && v.trim() ? v.trim() : null;
 }
@@ -313,8 +321,18 @@ const round = (v, scale) => (v === null || !Number.isFinite(v) ? null : Math.rou
 const sessionsToEarnings = (row, ctx) => {
   const e = isoDay(row.next_earnings_date);
   if (!e || !ctx.sessionDate) return null;
+  if (e === ctx.sessionDate && /^pre/i.test(String(row.er_time || "").trim())) return null;
   return sessionsBetween(ctx.sessionDate, e);
 };
+
+const iv30Of = (r) => firstPositive(r.volatility_30, r.iv30d, r.volatility);
+
+const iv30dOf = (r) => firstPositive(r.iv30d, r.volatility_30);
+
+export function shortIntOf(row) {
+  const v = vnum(row && row.short_int);
+  return v !== null && v > 0 ? v : null;
+}
 
 export const UNIVERSE_COLUMNS = Object.freeze([
   { key: "px", unit: "usd", scale: 100, prio: 1,
@@ -324,23 +342,23 @@ export const UNIVERSE_COLUMNS = Object.freeze([
   { key: "mcap", unit: "usd", scale: 1e-8, prio: 2,
     get: (r) => { const v = vnum(r.marketcap); return v !== null && v > 0 ? v : null; } },
   { key: "iv30", unit: "vol", scale: 1e3, prio: 1,
-    get: (r) => { const v = vnum(r.volatility_30) ?? vnum(r.iv30d) ?? vnum(r.volatility); return v !== null && v > 0 ? v : null; } },
+    get: (r) => iv30Of(r) },
   { key: "ivp", unit: "pct100", scale: 1, prio: 1,
     get: (r) => { const v = vnum(r.iv_percentile_1y); return v !== null && v >= 0 && v <= 100 ? v : null; } },
   { key: "ts", unit: "fraction", scale: 1e3, prio: 1,
-    get: (r) => termSlope(r.volatility_30 ?? r.iv30d, r.volatility_90) },
+    get: (r) => termSlope(firstPositive(r.volatility_30, r.iv30d), r.volatility_90) },
   { key: "fs", unit: "fraction", scale: 1e3, prio: 2,
-    get: (r) => frontStress(r.volatility_7, r.volatility_30 ?? r.iv30d) },
+    get: (r) => frontStress(r.volatility_7, firstPositive(r.volatility_30, r.iv30d)) },
   { key: "dIv1d", unit: "vol", scale: 1e3, prio: 1,
-    get: (r) => ivChange(r.iv30d ?? r.volatility_30, r.iv30d_1d) },
+    get: (r) => ivChange(iv30dOf(r), r.iv30d_1d) },
   { key: "dIv1w", unit: "vol", scale: 1e3, prio: 2,
-    get: (r) => ivChange(r.iv30d ?? r.volatility_30, r.iv30d_1w) },
+    get: (r) => ivChange(iv30dOf(r), r.iv30d_1w) },
   { key: "dIv1m", unit: "vol", scale: 1e3, prio: 4,
-    get: (r) => ivChange(r.iv30d ?? r.volatility_30, r.iv30d_1m) },
+    get: (r) => ivChange(iv30dOf(r), r.iv30d_1m) },
   { key: "rv20", unit: "vol", scale: 1e3, prio: 2,
     get: (r) => { const v = vnum(r.realized_volatility); return v !== null && v > 0 ? v : null; } },
   { key: "vrp", unit: "vol", scale: 1e3, prio: 1,
-    get: (r) => vrpTrailing(r.volatility_30 ?? r.iv30d, r.realized_volatility).vol },
+    get: (r) => vrpTrailing(firstPositive(r.volatility_30, r.iv30d), r.realized_volatility).vol },
   { key: "vrpPost", unit: "vol", scale: 1e3, prio: 4,
     get: (r) => vnum(r.variance_risk_premium) },
   { key: "erq", unit: "ratio", scale: 100, prio: 2,
@@ -356,7 +374,7 @@ export const UNIVERSE_COLUMNS = Object.freeze([
   { key: "dVega", unit: "fraction", scale: 1e6, prio: 3,
     get: (r) => vegaDollarsPerAdv(r.cum_dir_vega, r.avg30_volume, r.close) },
   { key: "si", unit: "fraction", scale: 1e4, prio: 2,
-    get: (r) => { const v = vnum(r.short_int); return v !== null && v >= 0 ? v : null; } },
+    get: (r) => shortIntOf(r) },
   { key: "ins3m", unit: "fraction", scale: 1e6, prio: 4,
     get: (r) => {
       const b = vnum(r.insider_buy_volume_3m), s = vnum(r.insider_sell_volume_3m);
@@ -436,7 +454,7 @@ export function buildUniverse(rows, {
 
   const raw = {};
   for (const spec of columns) raw[spec.key] = universeColumn(list, spec, ctx);
-  const shockRaw = list.map((r) => ivChangeRel(r.iv30d ?? r.volatility_30, r.iv30d_1d));
+  const shockRaw = list.map((r) => ivChangeRel(iv30dOf(r), r.iv30d_1d));
 
   const cols = {}, units = {}, counts = {};
   for (const spec of columns) {

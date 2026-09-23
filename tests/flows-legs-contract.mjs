@@ -163,6 +163,47 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(!("iv30" in Object.fromEntries(tiny.shed.map((k) => [k, 1]))), "IV30 survives");
   const none = buildUniverse([], { sessionDate: S });
   eq(none.status, "unavailable", "an empty harvest is unavailable, not an empty ok");
+}
+
+{
+  const spec = FX.specScreenerRow.row;
+  const row = { ...spec, rsi_14: 61.25, adx_14: 23.5, bb_20_2_lower: 200.5, bb_20_2_upper: 220.5, atr_14: 6.37, sma_50: 190.4 };
+  const f = (k) => Number(row[k]);
+  const want = {
+    px: f("close"), chg: f("close") / f("prev_close") - 1, mcap: f("marketcap"), iv30: f("volatility_30"),
+    ivp: f("iv_percentile_1y"), ts: f("volatility_30") / f("volatility_90") - 1, fs: f("volatility_7") / f("volatility_30") - 1,
+    dIv1d: f("iv30d") - f("iv30d_1d"), dIv1w: f("iv30d") - f("iv30d_1w"), dIv1m: f("iv30d") - f("iv30d_1m"),
+    rv20: f("realized_volatility"), vrp: f("volatility_30") - f("realized_volatility"), vrpPost: f("variance_risk_premium"),
+    erq: f("rv_1d_last_12q"), gexAdv: f("gex_gamma_per_one_percent_move_oi") / (f("avg30_volume") * f("close")),
+    gexRatio: f("gex_ratio"), dDelta: f("cum_dir_delta") / f("avg30_volume"),
+    dGamma: (f("cum_dir_gamma") * f("close") * f("close") * 0.01) / (f("avg30_volume") * f("close")),
+    dVega: f("cum_dir_vega") / (f("avg30_volume") * f("close")),
+    ins3m: (f("insider_buy_volume_3m") - f("insider_sell_volume_3m")) / f("shares_outstanding"),
+    rsi: 61.25, adx: 23.5, bb: (f("close") - 200.5) / 20, atr: 6.37 / f("close"), sma50: f("close") / 190.4 - 1,
+    rvol: f("relative_volume"),
+    tilt: (f("net_call_premium") - f("net_put_premium")) / (Math.abs(f("call_premium")) + Math.abs(f("put_premium"))),
+  };
+  const u = buildUniverse([row], { sessionDate: row.date });
+  for (const [k, v] of Object.entries(want)) {
+    const scale = u.units[k][1];
+    ok(Number.isFinite(v), `the spec row carries every input of ${k}`);
+    near(universeValue(u, "NVDA", k), Math.round(v * scale) / scale, 1e-9,
+      `${k} re-derived by hand from the vendor's own NVDA row, through its published scale`);
+  }
+  eq(universeValue(u, "NVDA", "ed"), sessionsBetween(row.date, row.next_earnings_date), "ed counts weekdays to next_earnings_date");
+  eq(row.short_int, "0", "the vendor's NVDA row reads short_int '0', where NVDA's float is about 1% short");
+  eq(universeValue(u, "NVDA", "si"), null, "so a zero short_int is the vendor's placeholder and publishes as absent, not a measured 0");
+  eq(u.counts.si, 0, "and it does not enter the column's count or its percentile");
+
+  const tonight = { ...row, next_earnings_date: row.date };
+  eq(universeValue(buildUniverse([{ ...tonight, er_time: "postmarket" }], { sessionDate: row.date }), "NVDA", "ed"), 0,
+    "a report after the session's close is 0 sessions away");
+  eq(universeValue(buildUniverse([{ ...tonight, er_time: "premarket" }], { sessionDate: row.date }), "NVDA", "ed"), null,
+    "a report before the session's open is behind the session, never 'tonight'");
+  const blank = buildUniverse([{ ...row, volatility_30: "", volatility_90: "0.4" }], { sessionDate: row.date });
+  near(universeValue(blank, "NVDA", "ts"), f("iv30d") / 0.4 - 1, 1e-3,
+    "an empty volatility_30 string falls back to iv30d instead of silencing the slope");
+
   ok(UNIVERSE_BUDGET_BYTES <= 100 * 1024 && UNIVERSE_BUDGET_BYTES < 128 * 1024, "the universe budget sits under the ingest cap");
 }
 

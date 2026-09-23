@@ -3,7 +3,7 @@ import {
   latestShortInterest, borrowSummary, shortVolumeSummary, insiderSummary, groupInsiderRows,
   squeezePressure,
 } from "../../shared/flows-ownership.js";
-import { addDays, vnum, SILENCE } from "../../shared/flows-cross.js";
+import { addDays, shortIntOf, SILENCE } from "../../shared/flows-cross.js";
 
 export const BORROW_LOOKBACK_DAYS = 12;
 
@@ -56,7 +56,7 @@ export function ownershipParts({
       interest: interest ? { ...interest } : (shortRead
         ? { status: "quiet", reason: SILENCE.absent }
         : notRead("the short-interest batch was not read")),
-      siScreener: row ? vnum(row.short_int) : null,
+      siScreener: row ? shortIntOf(row) : null,
       borrow,
       volume,
       squeeze: null,
