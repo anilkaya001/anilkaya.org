@@ -622,6 +622,15 @@ const T = (iso) => Date.parse(iso);
       `the Worker's first-use fallback creates ${table} with exactly the migration's columns`);
   }
   const toml = read("wrangler.toml");
+  eq(W.cronJob(W.RTH_CRON, T("2026-09-23T15:16:00Z")), "rth", "the market-hours cron runs the Tier 1 tick");
+  eq(W.cronJob(W.HOUSEKEEPING_CRON, T("2026-09-23T15:30:00Z")), "housekeeping", "the half-hour cron runs housekeeping");
+  eq(W.cronJob("*/15 * * * *", T("2026-09-23T15:15:00Z")), "rth",
+    "a trigger the deploy left behind still drives Tier 1 inside the session window, off the half hour");
+  eq(W.cronJob("*/15 * * * *", T("2026-09-23T15:30:00Z")), "housekeeping", "and keeps the half hour for housekeeping");
+  eq(W.cronJob("*/15 * * * *", T("2026-09-26T15:15:00Z")), "housekeeping", "never on a Saturday");
+  eq(W.cronJob("*/15 * * * *", T("2026-09-23T03:15:00Z")), "housekeeping", "and never outside the 13-21 UTC window");
+  ok(/FLOWS_LIVE\.cronJob\(event && event\.cron, at\) === "rth"/.test(worker),
+    "the scheduled handler routes by the job a trigger's instant calls for, not by the trigger's exact string");
   ok(toml.includes(`"${W.RTH_CRON}"`) && toml.includes(`"${W.HOUSEKEEPING_CRON}"`),
     "the two crons the Worker branches on are the two wrangler.toml registers");
   ok(/\[\[ratelimits\]\][\s\S]*name = "UW_ONDEMAND"[\s\S]*limit = 120, period = 60/.test(toml),

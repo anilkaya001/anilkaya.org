@@ -1215,6 +1215,15 @@ Out-of-band steps before the first deploy of this layer:
    Put its expiry in a calendar.
 4. After deploy, confirm both crons are registered (`wrangler triggers` or the
    dashboard) and read `live:market` on `/api/flows/lk?k=market` at 09:36 ET.
+   A Workers Builds deploy updates the code but can leave the previous triggers
+   in place: on 2026-09-23 the Worker ran the new code under the old
+   `*/15 * * * *` trigger. Register the two crons with
+   `./tests/node_modules/.bin/wrangler triggers deploy` or under the Worker's
+   Settings → Triggers. Until then the handler routes by instant rather than by
+   trigger string (`cronJob` in `shared/flows-live-worker.js`): a stale trigger
+   inside the 13–21 UTC weekday window runs Tier 1 off the half hour and
+   housekeeping on it, so the live layer runs at the stale trigger's cadence
+   instead of not at all.
 
 `FLOWS_LIVE_MODE = "off"` in `[vars]` is the instant rollback: no Tier 1 read and
 no dispatch; pages fall back to the nightly rows.
