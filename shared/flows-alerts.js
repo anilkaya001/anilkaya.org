@@ -109,7 +109,7 @@ export function alertRow(raw, { stageOf, stageComplete = true } = {}) {
     ivEnd: num(raw.iv_end),
     px: num(raw.underlying_price),
     spanStart,
-    spanEnd: alertStamp(raw.end_time) ?? spanStart,
+    spanEnd: alertStamp(raw.end_time) ?? created,
     ...(created !== null ? { spanFrom: "created_at" } : {}),
     rule: typeof raw.alert_rule === "string" && raw.alert_rule ? raw.alert_rule : null,
 

@@ -232,6 +232,15 @@ const stageOf = (t) => (t === "AAA" ? "deep" : t === "BBB" ? "gated" : null);
   eq(createdOnly.spanFrom, "created_at", "and it says where the instant came from, so the page does not call it the vendor's span");
   eq(alertRow({ ...base, start_time: 1726670212648, created_at: "2023-12-12T16:35:52Z" }).spanFrom, undefined,
     "a row with a real window never carries the created_at marker");
+  const startOnly = alertRow({ ...base, start_time: 1726670212648 });
+  eq(startOnly.spanStart, "2024-09-18T14:36:52.648Z", "a row with a start and no end keeps its start");
+  eq(startOnly.spanEnd, null,
+    "AND NO END IS INVENTED FOR IT: spanEnd fell back to spanStart, so the overview titled the cell " +
+    "'Window ran 10:36 to 10:36 ET.' and Unusual 'The vendor's stated span: X to X' for an end the " +
+    "vendor never sent, and the overview's 'the vendor stated no end for it' could never run");
+  eq(startOnly.spanFrom, undefined, "and it is not dated by created_at either");
+  eq(buildFlowAlerts([{ ...base, start_time: 1726670212648 }]).coverage.withSpan, 0,
+    "so coverage does not count it as a window");
   const cov = buildFlowAlerts([early, { ...base, created_at: "2023-12-12T16:35:52Z" }, base]).coverage;
   deep([cov.withSpan, cov.spanFromCreated], [2, 1],
     "coverage counts rows with any instant and, separately, the ones dated only by created_at");
