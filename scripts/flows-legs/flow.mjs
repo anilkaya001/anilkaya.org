@@ -205,7 +205,7 @@ const vendorAtOf = (sections) => {
   return at;
 };
 
-export async function runFlowLeg(ctx) {
+async function flowLeg(ctx) {
   const {
     uw, publish, stored = () => null, readStored = async () => ({ payload: null, absent: true }),
     runPooled, deadline = Infinity, sessionDate, generatedAt, deep = [], cross = [],
@@ -406,4 +406,15 @@ export async function runFlowLeg(ctx) {
   log("  flow sections: " + Object.entries(tally).map(([k, t]) =>
     `${k} ${Object.entries(t).map(([s, n]) => `${s}:${n}`).join("/")}`).join(" · "));
   return summary;
+}
+
+export async function runFlowLeg(ctx) {
+  try {
+    return await flowLeg(ctx);
+  } catch (error) {
+    const log = ctx && typeof ctx.log === "function" ? ctx.log : () => {};
+    log(`  flow leg: ${error && error.message ? error.message : String(error)} — every card-x and hist ` +
+      "written before this stands, and the rest of the run continues");
+    return { error: error && error.message ? error.message : String(error) };
+  }
 }

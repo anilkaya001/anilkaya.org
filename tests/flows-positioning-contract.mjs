@@ -778,6 +778,24 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
     "a cross-section name carries no alert tape, so its readAt is its own");
 }
 
+{
+  const lines = [];
+  let settled = null;
+  try {
+    settled = await runFlowLeg({
+      uw: async () => ({ data: [] }), publish: async () => {}, log: (l) => lines.push(l),
+      runPooled: async () => { throw new Error("pool exploded"); },
+      sessionDate: SESSION, generatedAt: "g", deep: ["AAA"], cross: [],
+    });
+  } catch (error) {
+    settled = { rejected: error.message };
+  }
+  eq(settled.rejected, undefined,
+    "the flow leg never rejects: it runs before the archive check, meta and the briefing, which must still run");
+  eq(settled.error, "pool exploded", "it resolves with the failure instead");
+  ok(lines.some((l) => /flow leg: pool exploded/.test(l)), "and says so in the run log");
+}
+
 const CODES = new Set(Object.keys(FLOW_CODES));
 const STATUSES = new Set(["ok", "stale", "quiet", "unavailable", "unreadable"]);
 const checkSection = (name, s, where) => {
