@@ -37,7 +37,6 @@
   };
   const qty = (v) => (num(v) === null ? DASH : num(v).toLocaleString("en-US"));
   const lagText = (v) => (num(v) === null ? DASH : Math.round(num(v)) + "d");
-  const plural = (k, one, many) => (k === 1 ? one : many);
   const cardKey = (t) => String(t === null || t === undefined ? "" : t).toUpperCase().replace(/[.\-\s]/g, "");
   const MEMBER = { house: "House", senate: "Senate", executive: "Executive" };
 
@@ -407,8 +406,8 @@
 
   function idle(st, hh) {
     for (const [el, label] of [[host.buyers, "Buyers"], [host.assets, "Names"], [host.recent, "Newest"], [host.holders, "Holdings"]]) silence(el, st, label, label === "Holdings" ? 160 : hh);
-    host.chips.replaceChildren(UI.chips([["hall", "Disclosures"], ["live", "Newest"], ["long", "Buyers"], ["list", "Names"], [null, "Late"]].map(([icon, label]) =>
-      UI.gaugeChip({ icon, ring: icon ? undefined : null, color: "--label-3", value: DASH, label, info: { title: label, state: st.state, lead: st.reason } })), "Disclosure window"));
+    host.chips.replaceChildren(UI.chips(["Disclosures", "Newest", "Buyers", "Names", "Late"].map((label) =>
+      UI.gaugeChip({ g: UI.iconChip((UI.STATES[st.state] || UI.STATES.unavailable).g, "--label-3"), value: DASH, label, info: { title: label, state: st.state, lead: st.reason } })), "Disclosure window"));
   }
 
   function paintChips(p) {
@@ -435,7 +434,6 @@
     const bits = [];
     if (w.from && w.to) bits.push(F.day(w.from) + " – " + F.day(w.to));
     if (num(w.days) !== null) bits.push(num(w.days) + " days");
-    if (num(src.pages) !== null) bits.push(num(src.pages) + plural(num(src.pages), " page", " pages"));
     let warnText = null;
     if (src.paginated === false) warnText = "The vendor returned the same page twice, so only the first was kept: this window is one page deep rather than the " + (src.pages || 1) + " it asked for. The ranking is over that narrower population.";
     if (src.windowed === false) warnText = "The windowed route refused, so this page is the most recent disclosures the vendor will return in one call, with no date range. The ranking is over that selection rather than over the window named above.";
