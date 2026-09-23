@@ -2107,6 +2107,12 @@ async function republishWithChain(payloads, chainByTicker, sessionDate, publishF
   return lines;
 }
 
+export function congressRows(ticker, { byTicker = null, read = null, tapeRows = 0, namesRead = null } = {}) {
+  const rows = byTicker ? byTicker.get(ticker) : undefined;
+  if (rows) return rows;
+  return read === "ok" && (tapeRows > 0 || Boolean(namesRead && namesRead.has(ticker))) ? [] : null;
+}
+
 export function sessionArchiveKeys(sessionDate) {
   if (!ARCHIVE_DATE_RE.test(String(sessionDate || ""))) return [];
   return [`scores:${sessionDate}`, `board:long:${sessionDate}`, `board:short:${sessionDate}`];
@@ -5293,6 +5299,8 @@ async function main() {
   const congressByTicker = new Map();
 
   let congressRead = "not attempted";
+  let congressTapeRows = 0;
+  const congressNamesRead = new Set();
   if (onBoard.size) {
     let marketWide = 0;
     try {
@@ -5314,6 +5322,7 @@ async function main() {
         merged.push(row);
       }
       marketWide = merged.length;
+      congressTapeRows = merged.length;
 
       congressRead = "ok";
       for (const row of merged) {
@@ -5345,6 +5354,7 @@ async function main() {
       for (const ticker of onBoard.keys()) {
         if (Date.now() > stats.startedAt + DEADLINE_MS) break;
         const rows = await uw("/api/congress/recent-trades", { ticker, limit: 50 })
+          .then((read) => { congressNamesRead.add(ticker); return read; })
           .catch(() => []);
         if (rows.length) { congressByTicker.set(ticker, rows); recovered++; }
       }
@@ -5354,6 +5364,8 @@ async function main() {
         `which costs more than the calls do.`);
     }
   }
+  const congressState = { byTicker: congressByTicker, read: congressRead,
+    tapeRows: congressTapeRows, namesRead: congressNamesRead };
 
   const marketCross = indexMarketCross({
     oiChange: crossRaws ? crossRaws.oiChange : null,
@@ -5409,8 +5421,7 @@ async function main() {
 
       const spotPx = num(e.features.spot) || num(e.row.close);
 
-      const congress = congressByTicker.get(ticker)
-        || (congressRead === "ok" ? [] : null);
+      const congress = congressRows(ticker, congressState);
       const [maxPain, surface, dpRaw, oiRaw, termRaw, rankRaw] = DRY_RUN
         ? [fakeMaxPain(ticker, spotPx), fakeSurface(ticker, spotPx, surfaceExpiries),
            fakeStockDarkpool(ticker, spotPx), fakeStockOiChange(ticker, spotPx),
@@ -5626,7 +5637,7 @@ async function main() {
 
             surface: null, chain: null, maxPain: null,
 
-            congress: congressByTicker.get(ticker) || (congressRead === "ok" ? [] : null),
+            congress: congressRows(ticker, congressState),
             darkpool: null, oiDeltas: null, termStructure: null, ivRank: null,
             scoreHistory: scoreTrack
               ? {

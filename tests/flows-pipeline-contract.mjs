@@ -28,10 +28,10 @@ import {
   SESSION_CLOSE_MINUTES, MEMORY_ARCHIVE_SESSIONS, READ_RETRIES, readStored, holdersRefusal,
   HOLDERS_RETRY_DAYS,
   IV_RANK_PARAMS, fakeIvRank, measureVariationProbes, fakeOiLadder, fakeLadderGreeks,
-  fakeLadderChain, vannaProbeSample, featuresVariationInput, boardVariationMeta,
+  fakeLadderChain, vannaProbeSample, featuresVariationInput, boardVariationMeta, congressRows,
 } from "../scripts/flows-pipeline.mjs";
 import { VARIATION_CODES } from "../shared/flows-variation.js";
-import { pinReading } from "../shared/flows-card.js";
+import { pinReading, buildCard } from "../shared/flows-card.js";
 import { pearson, horizonMove, HORIZON_SESSIONS, realizedVol } from "../shared/flows-features.js";
 import { execFileSync, spawnSync, spawn } from "node:child_process";
 import fs from "node:fs";
@@ -3508,6 +3508,37 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      holdersRefusal(prior("/api/politician-portfolios/holders/B -> HTTP 408", "2026-09-21"), "2026-09-22") === null,
      "and so are a 429 and a 408, the two 4xx answers that describe the moment rather than the plan");
   eq(HOLDERS_RETRY_DAYS, 7, "one week");
+}
+
+{
+  const emptyTape = { byTicker: new Map(), read: "ok", tapeRows: 0, namesRead: new Set(["BRD"]) };
+  eq(congressRows("XSEC", emptyTape), null,
+     "AN EMPTY MARKET-WIDE TAPE IS NOT A READ OF A NAME: the call did not throw, so congressRead was " +
+     "'ok' and every cross-section card got [], a confident 'no member traded this' from a tape the " +
+     "pipeline itself treated as failed and fell back from");
+  assert.deepEqual(congressRows("BRD", emptyTape), [],
+    "a board name the per-name fallback did read, and found nothing on, is quiet"); checks++;
+  eq(congressRows("BRD2", emptyTape), null,
+     "and a board name the fallback never reached, or whose call it caught as refused, is unread");
+  assert.deepEqual(congressRows("XSEC", { byTicker: new Map(), read: "ok", tapeRows: 40 }), [],
+    "a tape that returned rows and named no member for a name is still quiet for it"); checks++;
+  const rows = [{ name: "A Member", ticker: "AAA" }];
+  eq(congressRows("AAA", { byTicker: new Map([["AAA", rows]]), read: "ok", tapeRows: 40 }), rows,
+     "matched rows pass through");
+  eq(congressRows("XSEC", { byTicker: new Map(), read: "failed", tapeRows: 0 }), null, "and a thrown read is unread");
+
+  const unfetched = "this name was measured in the run's cross-section but is not on today's board";
+  const card = (congress) => buildCard({ ticker: "XSEC", row: { close: "100" }, features: { spot: 100, atr: 4 },
+    strikes: [], ticks: [], expiries: [], congress, maxPain: null, unfetched,
+    generatedAt: "2026-09-22T21:40:00Z", sessionDate: "2026-09-22" }).panels.congress.status;
+  eq(card(congressRows("XSEC", emptyTape)), "unavailable",
+     "so the cross-section card says the panel was not fetched rather than quiet");
+  eq(card([]), "quiet", "where the old [] published quiet");
+
+  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  eq((src.match(/congress: congressRows\(ticker, congressState\)|const congress = congressRows\(ticker, congressState\)/g) || []).length, 2,
+     "both card lanes, board and cross-section, take the panel's input from the one rule");
+  ok(!/congressRead === "ok" \? \[\] : null/.test(src), "and the old expression is gone from both");
 }
 
 {
