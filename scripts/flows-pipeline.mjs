@@ -2110,7 +2110,7 @@ async function republishWithChain(payloads, chainByTicker, sessionDate, publishF
 export function congressRows(ticker, { byTicker = null, read = null, tapeRows = 0, namesRead = null } = {}) {
   const rows = byTicker ? byTicker.get(ticker) : undefined;
   if (rows) return rows;
-  return read === "ok" && (tapeRows > 0 || Boolean(namesRead && namesRead.has(ticker))) ? [] : null;
+  return (read === "ok" && tapeRows > 0) || Boolean(namesRead && namesRead.has(ticker)) ? [] : null;
 }
 
 export function sessionArchiveKeys(sessionDate) {

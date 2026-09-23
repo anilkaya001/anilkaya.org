@@ -3526,6 +3526,12 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(congressRows("AAA", { byTicker: new Map([["AAA", rows]]), read: "ok", tapeRows: 40 }), rows,
      "matched rows pass through");
   eq(congressRows("XSEC", { byTicker: new Map(), read: "failed", tapeRows: 0 }), null, "and a thrown read is unread");
+  const thrown = { byTicker: new Map(), read: "failed", tapeRows: 0, namesRead: new Set(["BRD"]) };
+  assert.deepEqual(congressRows("BRD", thrown), [],
+    "A PER-NAME CALL THAT RESOLVED IS A READ OF THAT NAME whatever the market-wide call did: after a " +
+    "thrown tape the fallback still reads the board names, and a name it read and found nothing on " +
+    "was published as 'the disclosure tape was not read for this name in this run'"); checks++;
+  eq(congressRows("XSEC", thrown), null, "while a name the fallback never asked about stays unread");
 
   const unfetched = "this name was measured in the run's cross-section but is not on today's board";
   const card = (congress) => buildCard({ ticker: "XSEC", row: { close: "100" }, features: { spot: 100, atr: 4 },
