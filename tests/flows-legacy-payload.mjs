@@ -90,21 +90,31 @@ const withheldSort = await page.evaluate(() => ({
   firstTicker: document.querySelector("#flowsBody .bd-open").textContent.trim(),
 }));
 
+const readFams = () => page.evaluate(() => [...document.querySelectorAll("#m-signal .ft-fam")].map((row) => {
+  const v = row.querySelector(".ft-fam-v").textContent.trim();
+  const fill = row.querySelector(".ft-fam-f");
+  return { k: row.dataset.fam, v: v.startsWith("\u2014") ? "\u2014" : v, note: row.querySelector(".ft-fam-l").textContent,
+    gauge: row.querySelector(".ft-fam-t").classList.contains("is-meter"), width: fill ? getComputedStyle(fill).width : "0px" };
+}));
+const signalNotes = () => page.evaluate(() => {
+  const b = document.querySelector("#m-signal .ui-mod-h .ui-info");
+  if (!b) return "";
+  window.FlowsUI.openInfo(b);
+  const t = document.getElementById("fxPop").innerText;
+  window.FlowsUI.closeInfo();
+  const reasons = [...document.querySelectorAll("#m-signal .ft-fam .ui-state")].map((n) => { window.FlowsUI.openInfo(n); const r = document.getElementById("fxPop").innerText; window.FlowsUI.closeInfo(); return r; }).join("\n");
+  return t + "\n" + reasons;
+});
+
 await page.goto(url("/flows/ticker/?t=INTC&s=signal&from=long"), { waitUntil: "load" });
-await page.waitForSelector("#ftWhy .fc-fam li");
-const fam = await page.evaluate(() => [...document.querySelectorAll("#ftWhy .fc-fam li")].map((li) => ({
-  k: li.querySelector(".fc-fam-k").textContent,
-  v: li.querySelector(".fc-fam-v").textContent,
-  note: li.querySelector(".fc-fam-l").textContent,
-  width: getComputedStyle(li.querySelector(".fc-fam-track i")).width,
-})));
+await page.waitForSelector("#m-signal .ft-fam");
+const fam = await readFams();
 
 const V_O_NOTE = "volatility and quality readings became";
 const QUALITY_NOTE = "not published on this card";
-const legacyNote = await page.evaluate((needle) =>
-  [...document.querySelectorAll("#ftWhy .fc-note")].some((n) => n.textContent.includes(needle)), V_O_NOTE);
+const legacyNote = (await signalNotes()).includes(V_O_NOTE);
 
-const bad = await page.evaluate(() => [...document.querySelectorAll("#ftWhy .fc-fam-track i")]
+const bad = await page.evaluate(() => [...document.querySelectorAll("#m-signal .ft-fam-f")]
   .map((i) => getComputedStyle(i).width).filter((w) => w.startsWith("-")));
 
 const currentCard = JSON.parse(JSON.stringify(legacyCard));
@@ -124,21 +134,15 @@ await post("board:long", currentBoard);
 await post("card:CURR", currentCard);
 
 await page.goto(url("/flows/ticker/?t=CURR&s=signal&from=long"), { waitUntil: "load" });
-await page.waitForSelector("#ftWhy .fc-fam li");
-const famV2 = await page.evaluate(() => [...document.querySelectorAll("#ftWhy .fc-fam li")].map((li) => ({
-  k: li.querySelector(".fc-fam-k").textContent,
-  v: li.querySelector(".fc-fam-v").textContent,
-  gauge: li.classList.contains("is-gauge"),
-  width: getComputedStyle(li.querySelector(".fc-fam-track i")).width,
-})));
+await page.waitForSelector("#m-signal .ft-fam");
+const famV2 = await readFams();
 const v2 = (k) => famV2.find((f) => f.k === k);
 const px = (w) => parseFloat(w) || 0;
 
-const notesOnV2 = await page.evaluate(() =>
-  [...document.querySelectorAll("#ftWhy .fc-note")].map((n) => n.textContent));
-const legacyNoteOnV2 = notesOnV2.some((t) => t.includes(V_O_NOTE));
+const notesOnV2 = await signalNotes();
+const legacyNoteOnV2 = notesOnV2.includes(V_O_NOTE);
 
-const qualityNoteOnV2 = notesOnV2.some((t) => t.includes(QUALITY_NOTE));
+const qualityNoteOnV2 = notesOnV2.includes(QUALITY_NOTE);
 
 await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
 await page.waitForSelector(ROW);

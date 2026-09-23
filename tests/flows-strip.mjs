@@ -89,70 +89,72 @@ ok(cards.length > 0,
    "the output parses, which is the weaker half");
 
 if (cards.length) {
-  const read = (f) => fs.readFileSync(path.join(ROOT, "assets/js", f), "utf8");
-  const pair = {
-    orig: { p: read("flows-panels.js"), d: read("flows-drawers.js") },
-    strip: { p: stripComments(read("flows-panels.js")),
-             d: stripComments(read("flows-drawers.js")) },
-  };
-  const KEYS = ["gamma", "displacement", "surface", "calendar", "pricedMove", "context",
-                "levels", "path", "congress", "overlay", "vanna", "charm", "deltaExposure"];
+  const { tickerPage } = await import("../shared/flows-pages.js");
+  const HTML = tickerPage({ username: "test" });
+  const MIME = { ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".json": "application/json", ".txt": "text/plain" };
+  const side = (name) => { const f = path.join(emitDir, name); return fs.existsSync(f) ? fs.readFileSync(f, "utf8") : JSON.stringify({ status: "pending" }); };
   const browser = await chromium.launch();
   try {
-    const render = async (v) => {
+    const render = async (stripped) => {
       const page = await browser.newPage({ viewport: { width: 390, height: 900 } });
       const errors = [];
       page.on("pageerror", (e) => errors.push(String(e)));
-      await page.setContent("<div></div>");
-      await page.addScriptTag({ content: v.p });
-      await page.addScriptTag({ content: v.d });
+      await page.addInitScript(() => { let s = 42; Math.random = () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; }; });
+      let card = null;
+      await page.route("**/*", async (route) => {
+        const u = new URL(route.request().url());
+        if (u.pathname.startsWith("/assets/")) {
+          const f = path.join(ROOT, u.pathname);
+          if (!fs.existsSync(f)) return route.fulfill({ status: 404, body: "" });
+          if (stripped && f.endsWith(".js")) return route.fulfill({ contentType: "text/javascript", body: stripComments(fs.readFileSync(f, "utf8")) });
+          return route.fulfill({ path: f, contentType: MIME[path.extname(f)] || "application/octet-stream" });
+        }
+        if (u.pathname.startsWith("/api/flows/")) {
+          const key = u.pathname.slice("/api/flows/".length);
+          const body = key === "card" ? JSON.stringify(card) : key === "card-x" ? side("-card-x-" + card.ticker + ".json") : key === "hist" ? side("-hist-" + card.ticker + ".json")
+            : key === "now" ? JSON.stringify({ serverNow: Date.parse(card.generatedAt), phase: { phase: "closed", session: card.sessionDate, trading: false, endsAt: null }, keys: {} })
+              : JSON.stringify({ status: "pending", rows: [] });
+          return route.fulfill({ contentType: "application/json", body });
+        }
+        if (u.pathname.startsWith("/flows/ticker")) return route.fulfill({ contentType: "text/html; charset=utf-8", body: HTML });
+        return route.fulfill({ status: 404, body: "" });
+      });
       const out = [];
+      let clocked = false;
       for (const f of cards) {
-        const card = JSON.parse(fs.readFileSync(path.join(emitDir, f), "utf8"));
-        out.push(await page.evaluate(({ card, KEYS }) => {
-          const P = window.FlowsPanels, parts = [], threw = [];
-          for (const k of KEYS) {
-            const host = document.createElement("div");
-            document.body.append(host);
-            const key = k === "overlay" ? "scoreOverlay" : k;
-            try { P[k](host, (card.panels || {})[key], card, "q"); }
-            catch (e) { threw.push(k + ": " + e.message); }
-            parts.push(host.innerHTML);
-            host.remove();
-          }
-          const s = document.createElement("div");
-          document.body.append(s);
-          P.score(s, card, "q");
-          parts.push(s.innerHTML);
-          s.remove();
-          return { parts, threw };
-        }, { card, KEYS }));
+        card = JSON.parse(fs.readFileSync(path.join(emitDir, f), "utf8"));
+        if (!clocked) { await page.clock.setFixedTime(new Date(Date.parse(card.generatedAt) + 3600e3)); clocked = true; }
+        await page.goto("https://example.test/flows/ticker/?t=" + encodeURIComponent(card.ticker));
+        await page.waitForFunction(() => { const s = document.getElementById("ftStatus"); return s && s.textContent !== "Loading the name…"; }, null, { timeout: 15000 });
+        await page.waitForLoadState("networkidle").catch(() => {});
+        await page.waitForTimeout(350);
+        out.push(await page.evaluate(() => {
+          for (const a of document.getAnimations()) { try { a.finish(); } catch {} }
+          const parts = [["hero", document.getElementById("ftHero")], ["verdict", document.getElementById("ftVerdict")],
+            ...[...document.querySelectorAll("#ftGrid > [id]")].map((m) => [m.id, m])];
+          return parts.map(([k, el]) => [k, el ? el.innerHTML : null]);
+        }));
       }
       await page.close();
-
-      return { out: out.map((r) => r.parts), errors,
-               threw: out.flatMap((r) => r.threw) };
+      return { out, errors };
     };
-    const A = await render(pair.orig), B = await render(pair.strip);
-    eq(A.errors.length, 0, `the unstripped tree renders without a page error (${A.errors[0] || ""})`);
+    const A = await render(false), B = await render(true);
+    eq(A.errors.length, 0, `the unstripped tree renders the ticker page without a page error (${A.errors[0] || ""})`);
     eq(B.errors.length, 0, `and so does the stripped one (${B.errors[0] || ""})`);
-    eq(A.threw.length, 0,
-       `no drawer throws on the unstripped tree (${A.threw[0] || "none"}) — a panel ` +
-       `that throws in both runs would compare equal and prove nothing`);
-    eq(B.threw.length, 0, `and none throws on the stripped one (${B.threw[0] || "none"})`);
     let same = 0, diff = 0, first = null;
     for (let i = 0; i < A.out.length; i++) {
       for (let k = 0; k < A.out[i].length; k++) {
-        if (A.out[i][k] === B.out[i][k]) same++;
-        else { diff++; if (!first) first = `card ${cards[i]} panel ${KEYS[k] || "score"}`; }
+        if (A.out[i][k][1] === null) continue;
+        if (B.out[i][k] && A.out[i][k][1] === B.out[i][k][1]) same++;
+        else { diff++; if (!first) first = `card ${cards[i]} section ${A.out[i][k][0]}`; }
       }
     }
     eq(diff, 0,
-       `every panel draws byte-identical DOM stripped and unstripped ` +
+       `every section of the ticker dossier draws byte-identical DOM stripped and unstripped ` +
        `(${same} identical, ${diff} differing${first ? ", first at " + first : ""}) — ` +
        `a strip that changes what a reader sees is not a strip`);
     ok(same >= 200,
-       `and enough panels were actually rendered to mean something (${same})`);
+       `and enough sections were actually rendered to mean something (${same})`);
   } finally {
     await browser.close();
   }

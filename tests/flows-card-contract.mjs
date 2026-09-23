@@ -662,14 +662,15 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(buildPricedMove({ spot: 100, impliedMovePerc: 0.05, asOf: "2026-08-24" }).richness,
      null, "with no realized-vol baseline there is no richness claim, not a default one");
   {
-    const drawers = readFileSync(new URL("../assets/js/flows-drawers.js", import.meta.url), "utf8");
-    const line = /const RICHNESS_LINE = ([\d.]+);/.exec(drawers);
+    const page = readFileSync(new URL("../assets/js/flows-ticker.js", import.meta.url), "utf8");
+    const line = /const RICHNESS_LINE = ([\d.]+);/.exec(page);
     ok(line && Number(line[1]) === RICHNESS_LINE && RICHNESS_LINE === STATE_LINES.VRP_RELATIVE,
-       "the drawer derives the band at the SAME line the card and the implied state use — it is an IIFE " +
+       "the ticker page derives the band at the SAME line the card and the implied state use — it is an IIFE " +
        "and cannot import the constant, so the copy is pinned here. Production served AMAT's band as " +
        "'rich' from a card built before #121 while Neuron read the same vrp/rv30 of 6% as fair");
-    ok(/\["Band", richnessBand\(panel\)/.test(drawers),
-       "and the Band row prints the derived band, not the stored field a stale card carries");
+    const bands = [...page.matchAll(/\["Band", ([^\]]+)\]/g)].map((m) => m[1]);
+    ok(bands.length >= 2 && bands.every((b) => /^richnessBand\(pm\)/.test(b)),
+       `and every Band row it prints — the hero's and the volatility module's — is the derived band, not the stored field a stale card carries (${bands.join(" | ")})`);
   }
   eq(buildPricedMove({ spot: 100, impliedMovePerc: 0.05, iv30: 0.35, asOf: "2026-08-24" }).richness,
      null, "and a premium without the realised level it is measured against is not a band either");

@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { signSession } from "../shared/session.js";
-import { TICKER_PANELS } from "../shared/flows-panels.js";
 import { archiveWriteAction, ARCHIVE_REFUSALS } from "../shared/flows-archive.js";
 import { UA_BANNED_CLAIMS } from "../shared/flows-unusual.js";
 import {
@@ -202,25 +201,15 @@ try {
       eq(tick.status, 200, "/flows/ticker/ renders for an authenticated session");
       const tickHtml = await tick.text();
       ok(tickHtml.includes("/assets/js/flows-ticker.js"), "the ticker page loads its own controller");
-      ok(tickHtml.includes("/assets/js/flows-panels.js"),
-         "and the extracted renderers it cannot draw without");
-      ok(tickHtml.indexOf("/assets/js/flows-panels.js") < tickHtml.indexOf("/assets/js/flows-ticker.js"),
-         "with flows-panels.js FIRST — the controller fails closed without it");
-      ok(tickHtml.includes('id="ftGrid"'), "the ticker page carries the panel grid");
-      ok(tickHtml.includes('id="ftZoom"'), "and the enlarge dialog");
-
-      for (const p of TICKER_PANELS) {
-        const idCount = tickHtml.split(`id="${p.id}"`).length - 1;
-        eq(idCount, 1, `the ticker page emits ${p.id} exactly once`);
-        ok(tickHtml.includes(`data-panel="${p.key}"`), `and mounts panel ${p.key}`);
-      }
-      ok(tickHtml.includes("data-question="), "each panel carries its question as an attribute");
-
-      for (const p of TICKER_PANELS) {
-        ok(tickHtml.includes(p.question.replace(/&/g, "&amp;").replace(/</g, "&lt;")
-             .replace(/>/g, "&gt;").replace(/"/g, "&quot;")),
-           `panel ${p.key}'s question reaches the markup`);
-      }
+      const order = ["/assets/js/flows-ui.js", "/assets/js/flows-fresh.js", "/assets/js/flows-quant.bundle.js", "/assets/js/flows-ticker.js"].map((src) => tickHtml.indexOf(src));
+      ok(order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1])),
+         "with the Depth primitives, the freshness layer and the pricing bundle FIRST — the controller builds every module out of FlowsUI and fails closed without it");
+      ok(!tickHtml.includes("/assets/js/flows-panels.js") && !tickHtml.includes("/assets/js/flows-drawers.js"),
+         "and no longer the retired panel library or its deferred drawers");
+      ok(tickHtml.includes("/assets/css/flows-ticker.css"), "with the route stylesheet linked through the per-route hook");
+      ok(/<div class="ft-grid" id="ftGrid" hidden><\/div>/.test(tickHtml),
+         "the ticker page carries the module grid, served hidden and empty: its modules are built from the card, so nothing reads as a finding before one lands");
+      ok(!tickHtml.includes('id="ftZoom"'), "and no enlarge dialog: every chart is drawn in its module at full width");
 
       const anonTick = await get("/flows/ticker/");
       eq(anonTick.status, 200, "/flows/ticker/ serves a page to an anonymous visitor");

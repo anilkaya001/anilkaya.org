@@ -228,42 +228,30 @@ try {
        `and so is a figure in a row (${leading.cell.toFixed(2)}): cells are leaded for figures rather than for prose`);
 
     await page.goto(url("/flows/ticker/?t=AAA"), { waitUntil: "load" });
-    await page.waitForSelector(".ft-bar", { state: "attached", timeout: 15000 });
+    await page.waitForFunction(() => { const s = document.getElementById("ftStatus"); return s && s.textContent !== "Loading the name…"; }, null, { timeout: 15000 });
     const head = await page.evaluate(async () => {
-      const el = document.querySelector(".ft-head");
-      if (!el) return null;
-      const cs = getComputedStyle(el);
-      const out = { position: cs.position, top: cs.top };
-
-      const bar = el.closest(".ft-bar");
+      const bar = document.getElementById("fxBar"), title = document.getElementById("fxBarT");
+      const hero = document.querySelector("[data-fx-hero]"), name = document.querySelector("[data-fx-title]");
       const grid = document.getElementById("ftGrid");
-      out.inBar = !!bar;
-      if (!bar || !grid) return out;
-
-      const measure = async (pinned) => {
-
-        const sc = document.getElementById("ftScroll");
-        const scrollBox = sc && sc.scrollHeight > sc.clientHeight ? sc : window;
-        scrollBox.scrollTo({ top: 900, behavior: "instant" });
-        await new Promise((r) => setTimeout(r, 250));
-        const nav = document.querySelector(".topbar").getBoundingClientRect();
-        const box = el.getBoundingClientRect();
-        const bg = getComputedStyle(pinned).backgroundColor;
-        scrollBox.scrollTo({ top: 0, behavior: "instant" });
-        await new Promise((r) => setTimeout(r, 250));
-        return { headTop: box.top, height: box.height, navBottom: nav.bottom, bg };
-      };
-
-      grid.style.minHeight = "3000px";
+      if (!bar || !title || !hero || !name || !grid) return null;
+      if (!name.textContent.trim()) name.textContent = "AAA";
+      hero.hidden = false;
+      hero.classList.remove("is-loading");
       grid.hidden = false;
-
-      el.hidden = false;
-      bar.hidden = false;
-      out.composed = await measure(bar);
-
-      grid.parentNode.insertBefore(el, grid);
-      bar.hidden = true;
-      out.served = await measure(el);
+      grid.style.minHeight = "3000px";
+      await new Promise((r) => setTimeout(r, 120));
+      const cs = getComputedStyle(bar);
+      window.scrollTo({ top: 900, behavior: "instant" });
+      await new Promise((r) => setTimeout(r, 350));
+      const box = bar.getBoundingClientRect();
+      const heroBox = hero.getBoundingClientRect();
+      const ground = [getComputedStyle(bar).backgroundColor, getComputedStyle(bar, "::before").backgroundColor, getComputedStyle(bar, "::before").backdropFilter || ""];
+      const out = { position: cs.position, top: box.top, bottom: box.bottom, heroBottom: heroBox.bottom, scrolled: bar.classList.contains("is-scrolled"),
+        title: title.textContent.trim(), name: name.textContent.trim(), titleOpacity: Number(getComputedStyle(title).opacity), ground };
+      window.scrollTo({ top: 0, behavior: "instant" });
+      await new Promise((r) => setTimeout(r, 350));
+      out.restTitleOpacity = Number(getComputedStyle(title).opacity);
+      out.restScrolled = bar.classList.contains("is-scrolled");
       return out;
     });
 
@@ -275,28 +263,17 @@ try {
       "every element marked hidden is actually not laid out");
     checks++;
 
-    ok(head, "the ticker page emits its identity block");
-    eq(head.position, "sticky", "and it is pinned rather than scrolled away");
-    ok(head.inBar, "the controller re-parents it into the sticky bar");
-    ok(!/rgba\(0, 0, 0, 0\)/.test(head.composed.bg),
-       `[composed] the pinned box has a ground once it is pinned, or a chart's ink reads ` +
-       `through it (got ${head.composed.bg})`);
-    ok(!/rgba\(0, 0, 0, 0\)/.test(head.served.bg),
-       `[served] and so does the header when it is the pinned box itself ` +
-       `(got ${head.served.bg})`);
-
-    ok(head.composed.headTop >= 0 && head.composed.headTop < 400,
-       `[composed] the header is still on screen 900px down (top ${head.composed.headTop})`);
-    ok(head.served.headTop >= 0 && head.served.headTop < 400,
-       `[served] and so is the header the HTML ships, before the bar exists ` +
-       `(top ${head.served.headTop})`);
-
-    ok(head.composed.headTop >= head.composed.navBottom - 1,
-       `[composed] and it clears the fixed topbar (head ${head.composed.headTop} ` +
-       `vs nav bottom ${head.composed.navBottom})`);
-    ok(head.served.headTop >= head.served.navBottom - 1,
-       `[served] and so does the served shape — a sticky offset on this site is ` +
-       `never 0 (head ${head.served.headTop} vs nav bottom ${head.served.navBottom})`);
+    ok(head, "the ticker page emits its identity: a hero the toolbar watches and a title the toolbar mirrors");
+    ok(/sticky|fixed/.test(head.position), `and the toolbar that carries it once the hero is gone is pinned rather than scrolled away (${head.position})`);
+    ok(head.heroBottom < head.bottom, "900px down the hero has left the screen");
+    ok(head.scrolled, "and the toolbar knows it: it switches to its scrolled state");
+    eq(head.title, head.name, "and it names the page with the hero's own title, mirrored rather than restated");
+    ok(head.titleOpacity > 0.9, `and shows it (opacity ${head.titleOpacity})`);
+    ok(head.top >= 0 && head.top < 400, `the identity is still on screen 900px down (top ${head.top})`);
+    ok(head.ground.some((g) => g && !/rgba\(0, 0, 0, 0\)|^none$/.test(g)),
+       `the pinned bar has a ground, or a chart's ink reads through it (${head.ground.join(" | ")})`);
+    ok(!head.restScrolled && head.restTitleOpacity < 0.1,
+       "and back at the top the bar hides the title again, because the hero is saying it");
 
     await context.close();
   }

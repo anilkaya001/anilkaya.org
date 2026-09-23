@@ -1,7 +1,3 @@
-import {
-  TICKER_PANELS, TICKER_GROUPS, SENTINEL_KEYS, STATION_SIDE_COUNTS,
-} from "./flows-panels.js";
-
 export const ASSET_VERSION = "223";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
@@ -21,19 +17,6 @@ const head = (title, description, styles = []) => `<!doctype html>
 <link rel="stylesheet" href="${v("/assets/css/flows.css")}">
 ${styles.map((href) => `<link rel="stylesheet" href="${v(String(href))}">`).join("\n")}
 </head>`;
-
-const ICONS = {
-  ask: "M4 5h16v11H9l-5 4Z M8.6 9.2a3.4 3.4 0 0 1 5.6 2.1c0 1.7-2 2-2 3.2M12.2 17.4h.01",
-  sun: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4",
-};
-const icon = (name) => {
-  const d = ICONS[name];
-  return d
-    ? `<svg class="ic" viewBox="0 0 24 24" width="16" height="16" fill="none" ` +
-      `stroke="currentColor" stroke-width="1.6" stroke-linecap="round" ` +
-      `stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`
-    : "";
-};
 
 const GLYPHS = {
   info: '<circle cx="12" cy="12" r="9.25"/><path d="M12 11v5.5"/><circle cx="12" cy="7.6" r="1.2" fill="currentColor" stroke="none"/>',
@@ -692,309 +675,30 @@ ${UI_SCRIPT}
 }
 
 export function tickerPage({ username = "" } = {}) {
-
-  const lede = "One name and its whole option book: where dealer gamma sits " +
-    "and what flips it, what the chain is charging across strikes and " +
-    "expiries, which contracts carry the volume, and how far the price is " +
-    "from every level that matters — all of it read off the card the pipeline " +
-    "published after the last close, with only the last price re-read live every five seconds.";
-
-  const panelMarkup = (p) => `
-    <section class="fc-panel ft-panel${p.span === 2 ? " is-wide" : p.span === 3 ? " is-full" : ""}"
-             id="panel-${escapeHTML(p.key)}" data-panel="${escapeHTML(p.key)}"
-             data-group="${escapeHTML(p.group)}" data-tier="${escapeHTML(p.tier)}"${
-      SENTINEL_KEYS.has(p.key) ? " data-sentinel" : ""}
-             data-question="${escapeHTML(p.question)}"
-             aria-labelledby="${p.id}H">
-      <h3 id="${p.id}H"><span class="ft-panel-t">${p.title}</span>
-        <button type="button" class="ft-zoom-open" data-panel="${escapeHTML(p.key)}"
-                aria-label="Enlarge: ${escapeHTML(p.title)}">&#10529;</button></h3>
-      <p class="ft-panel-q">${escapeHTML(p.question)}</p>
-      <p class="ft-panel-one" id="${p.id}One"></p>
-      <div id="${p.id}"></div>
-    </section>`;
-
-  const stations = TICKER_GROUPS.map((g) => `
-  <section class="ft-station" id="ftst-${g.key}" role="tabpanel"
-           aria-labelledby="${g.hash}" data-group="${g.key}" data-side="${g.key}">
-    <h2 class="ft-group" id="${g.hash}" tabindex="-1" data-group="${g.key}"><span class="ft-group-n">${escapeHTML(g.label)}</span><span class="ft-group-b">${escapeHTML(g.blurb)}</span></h2>
-    <p class="ft-station-lead" id="ftlead-${g.key}"></p>${
-    TICKER_PANELS.filter((p) => p.group === g.key).map(panelMarkup).join("")}
-  </section>`).join("");
-
-  const tabs = TICKER_GROUPS.map((g) => `
-      <a class="ft-tab" role="tab" id="fttab-${g.key}" href="#${g.hash}"
-         aria-controls="ftst-${g.key}" aria-selected="false"
-         data-group="${g.key}" data-side="${g.key}">${escapeHTML(g.label)} <span
-         class="ft-tab-n">${STATION_SIDE_COUNTS[g.key]}</span></a>`).join("");
-
-  return `${head("Flows — Ticker", lede)}
-${shell("Ticker", "ticker", username, `
-  <div class="flows-status" id="ftStatus" role="status">Loading the name…</div>
-  <p class="flows-stale fc-staleband" id="ftStale" role="status" hidden></p>
-
-  <div class="ft-scroll flows-scroll" id="ftScroll">
-  <section class="ft-hero" id="ftHero" hidden data-fx-hero aria-label="This name at a glance">
-
-    <div class="ft-hero-id">
-      <span class="ft-hero-t" id="ftHeroT" data-fx-title></span>
-      <span class="ft-hero-nm" id="ftHeroNm" hidden></span>
-      <span class="ft-hero-sub">
-        <span class="ft-hero-m" id="ftHeroSector"></span>
-
-        <span class="ft-hero-m is-faint" id="ftHeroWhen"></span>
-      </span>
+  return flowsDocument({
+    title: "Ticker",
+    description: "One name's options dossier: price against the priced move, the Neuron verdict with priced structures, and the dealer book, volatility, flow and positioning behind it.",
+    active: "ticker",
+    username,
+    chrome: false,
+    styles: ["/assets/css/flows-ticker.css"],
+    scripts: ["/assets/js/flows-fresh.js", "/assets/js/flows-quant.bundle.js", "/assets/js/flows-ticker.js"],
+    body: `
+  <div class="visually-hidden ft-status" id="ftStatus" role="status">Loading the name…</div>
+  <section class="ft-hero is-loading" id="ftHero" data-fx-hero aria-labelledby="ftHeroT"><div class="ft-hero-in">
+    <div class="ft-id">
+      <div class="ft-name"><h1 class="ft-t" id="ftHeroT" data-fx-title></h1><span class="ft-sub" id="ftHeroSub"></span><span class="ft-flags" id="ftHeroFlags"></span></div>
+      <div class="ft-px" id="ftPx"></div>
+      <div class="ft-last" id="ftLast" hidden></div>
+      <div class="ft-chips" id="ftChips"></div>
     </div>
-    <div class="ft-hero-px">
-      <span class="ft-hero-k">Last</span>
-      <span class="ft-hero-v" id="ftHeroPx"></span>
-      <span class="ft-hero-stack">
-        <span class="ft-hero-chg" id="ftHeroChg" hidden></span>
-        <span class="ft-hero-live" id="ftHeroLive" role="status" hidden></span>
-      </span>
-    </div>
-
-    <div class="ft-hero-b" id="ftHeroScoreB">
-      <span class="ft-hero-k">Options score</span>
-      <span class="ft-hero-v" id="ftHeroScore"></span>
-      <span class="ft-hero-stack">
-        <span class="ft-hero-bar" id="ftHeroScoreBar" aria-hidden="true"></span>
-        <span class="ft-hero-pill" id="ftHeroSide" hidden></span>
-      </span>
-    </div>
-    <div class="ft-hero-b" id="ftHeroConvB">
-      <span class="ft-hero-k">Conviction</span>
-      <span class="ft-hero-v" id="ftHeroConv"></span>
-      <span class="ft-hero-stack">
-        <span class="ft-hero-seg" id="ftHeroConvSeg" aria-hidden="true"></span>
-      </span>
-    </div>
-
-    <div class="ft-hero-b" id="ftHeroIvB" hidden>
-      <span class="ft-hero-k">ATM IV</span>
-      <span class="ft-hero-v" id="ftHeroIv"></span>
-      <span class="ft-hero-stack">
-        <span class="ft-hero-m is-faint" id="ftHeroIvSub" hidden></span>
-      </span>
-    </div>
-    <div class="ft-hero-b" id="ftHeroIvrB" hidden>
-      <span class="ft-hero-k">IV rank</span>
-      <span class="ft-hero-v" id="ftHeroIvr"></span>
-      <span class="ft-hero-stack">
-        <span class="ft-hero-seg" id="ftHeroIvrSeg" aria-hidden="true"></span>
-      </span>
-    </div>
-    <div class="ft-hero-state" id="ftHeroStateB" hidden>
-      <span class="ft-hero-k">Implied state</span>
-      <span class="ft-hero-v ft-hero-v--word" id="ftHeroState"></span>
-      <span class="ft-hero-pill" id="ftHeroStateSide" hidden></span>
-      <span class="ft-hero-seg ft-hero-seg--3" id="ftHeroStateSeg" aria-hidden="true"></span>
-      <span class="ft-hero-state-chip" id="ftHeroStateChip"></span>
-    </div>
-
-  </section>
-
-  <div class="ft-bar" id="ftBar" hidden>
-    <nav class="ft-tabs" role="tablist" aria-label="Stations of this name">${tabs}
-    </nav>
-
-    <a class="ft-all-link" id="ftAll" href="#ftGrid"
-       data-side="all">All ${TICKER_PANELS.length} panels</a>
-
-    <div class="ft-band" id="ftBand">
-      <a class="ft-band-b" id="ftFrom" hidden></a>
-      <span class="ft-band-v" id="ftSector" hidden></span>
-      <span class="ft-band-v" id="ftAtr" hidden></span>
-      <nav class="ft-band-nav" id="ftRankNav" hidden
-           aria-label="Neighbouring names by rank"></nav>
-      <input class="ft-band-find" id="ftFind" type="search" list="ftFindNames"
-             autocomplete="off" aria-label="Find another name" hidden>
-      <datalist id="ftFindNames"></datalist>
-      <a class="ft-band-b" id="ftPrem" hidden></a>
-      <span class="ft-band-v" id="ftEarn" hidden></span>
-    </div>
-  </div>
-
-  <div class="ft-split">
-    <div class="ft-split-main">
-
-  <div class="ft-row0">
-    <div class="ft-row0-l">
-  <div class="ft-cards" id="ftCards" hidden aria-label="This session's flow"></div>
-  <div class="ft-flags" id="ftFlags" hidden></div>
-    </div>
-  </div>
-
-  <div class="ft-row1" id="ftRow1"></div>
-
-  <div class="ft-top">
-
-  <section class="ft-chart" id="ftChart" hidden aria-labelledby="ftChartH">
-
-    <div class="ft-chart-top">
-      <h2 class="ft-chart-h" id="ftChartH">Series</h2>
-      <div class="ft-period" id="ftPeriod" role="group"
-           aria-label="Window the series below"></div>
-      <div class="ft-chart-tabs" id="ftChartTabs" role="tablist"
-           aria-label="Which series to draw"></div>
-    </div>
-    <div class="ft-chart-body" id="ftChartBody"></div>
-    <p class="ft-chart-s" id="ftChartS"></p>
-  </section>
-
-  <section class="ft-garch" id="ftGarch" hidden aria-labelledby="ftGarchH">
-    <div class="ft-chart-top">
-      <h2 class="ft-chart-h" id="ftGarchH">GARCH(1,1) — skewed t</h2>
-      <div class="ft-period" id="ftGarchTabs" role="group"
-           aria-label="Window the volatility path"></div>
-    </div>
-    <div class="ft-chart-body" id="ftGarchBody"></div>
-    <p class="ft-chart-s" id="ftGarchS"></p>
-  </section>
-  </div>
-
-  <div class="ft-band3">
-
-  <section class="ft-chain" id="ftChain" hidden aria-labelledby="ftChainH">
-    <div class="ft-chain-top">
-      <h2 class="ft-chain-h" id="ftChainH">Options chain</h2>
-      <div class="ft-chain-tabs" id="ftChainTabs" role="tablist"
-           aria-label="How to order the chain"></div>
-    </div>
-    <div class="ft-chain-body" id="ftChainBody"></div>
-    <p class="ft-chain-s" id="ftChainS"></p>
-  </section>
-
-  <aside class="ft-lv" id="ftLv" hidden aria-labelledby="ftLvH">
-    <h2 class="ft-lv-h" id="ftLvH">Key levels</h2>
-    <ol class="ft-lv-l" id="ftLvL"></ol>
-    <p class="ft-lv-s" id="ftLvS"></p>
-  </aside>
-
-  <aside class="ft-flow" id="ftFlow" hidden aria-labelledby="ftFlowH">
-    <h2 class="ft-flow-h" id="ftFlowH">Recent flow <span class="ft-flow-hz">times in UTC</span></h2>
-    <ol class="ft-flow-l" id="ftFlowL"></ol>
-    <p class="ft-flow-s" id="ftFlowS"></p>
-  </aside>
-
-  <section class="ft-ivt" id="ftIvt" hidden aria-labelledby="ftIvtH">
-    <h2 class="ft-chart-h ft-ivt-h" id="ftIvtH">Implied volatility term structure</h2>
-    <div class="ft-chart-body" id="ftIvtBody"></div>
-    <p class="ft-chart-s" id="ftIvtS"></p>
-  </section>
-
-  <section class="ft-mix" id="ftMix" hidden aria-labelledby="ftMixH">
-    <h2 class="ft-mix-h" id="ftMixH">Volume by type</h2>
-    <div class="ft-mix-body" id="ftMixBody"></div>
-    <p class="ft-mix-s" id="ftMixS"></p>
-  </section>
-
-  <aside class="ft-rel" id="ftRel" hidden aria-labelledby="ftRelH">
-    <h2 class="ft-rel-h" id="ftRelH">Others in this sector</h2>
-    <div class="ft-rel-l" id="ftRelL"></div>
-    <p class="ft-rel-s" id="ftRelS"></p>
-  </aside>
-  </div>
-
-    </div>
-    <div class="ft-split-side">
-  <aside class="ft-brief" id="ftBrief" hidden aria-labelledby="ftBriefH">
-    <h2 class="ft-brief-h" id="ftBriefH">
-      <span class="ft-brief-ic" aria-hidden="true">${icon("sun")}</span>
-      <span class="ft-brief-hn">Brief</span>
-      <span class="ft-brief-beta">Beta</span>
-    </h2>
-    <div class="ft-brief-body" id="ftBriefBody">
-    <div class="ak-neuron ft-neuron is-pending" id="ftNeuron" hidden>
-      ${neuronMark("t", false)}
-      <div class="ak-neuron-body">
-        <p class="ak-neuron-h" id="ftNeuronH">Neuron</p>
-        <div class="ft-state" id="ftNeuronState" hidden>
-          <div class="ft-state-top">
-            <span class="ft-state-w" id="ftStateWord"></span>
-            <span class="ft-state-conf" id="ftStateConf" aria-hidden="true"></span>
-          </div>
-          <p class="ft-state-chip" id="ftStateChip"></p>
-          <dl class="ft-state-m" id="ftStateMeta"></dl>
-        </div>
-        <p class="ak-neuron-say" id="ftNeuronSay"></p>
-        <ol class="ft-ideas" id="ftNeuronIdeas" hidden aria-label="Trade ideas, ranked by robustness"></ol>
-        <button class="ft-ideas-more" id="ftNeuronMore" type="button" hidden aria-expanded="false"
-                aria-controls="ftNeuronIdeas"></button>
-        <p class="ak-neuron-src" id="ftNeuronSrc"></p>
-        <p class="ak-neuron-cov" id="ftNeuronCov" hidden></p>
-      </div>
-    </div>
-    <ol class="ft-brief-l" id="ftBriefL"></ol>
-    <p class="ft-brief-s" id="ftBriefS"></p>
-
-    <form class="ft-brief-ask" id="ftBriefAsk" hidden>
-      <label class="ft-brief-ask-l" for="ftBriefQ" id="ftBriefQL">Ask about this name</label>
-      <span class="ft-brief-ask-row">
-        <input class="ft-brief-ask-i" id="ftBriefQ" type="text" autocomplete="off"
-               aria-describedby="ftBriefQL">
-        <button class="ft-brief-ask-b" type="submit">${icon("ask")}<span
-          class="ft-brief-ask-bt">Ask</span></button>
-      </span>
-    </form>
-    </div>
-  </aside>
-    </div>
-  </div>
-
-  <header class="ft-head" id="ftHead" hidden>
-    <h2 id="ftTicker" tabindex="-1">&nbsp;</h2>
-    <span class="fc-score" id="ftScore"></span>
-
-    <span class="fc-meta" id="ftConv"></span>
-    <span class="fc-meta" id="ftRegime"></span>
-    <span class="fc-meta" id="ftDates"></span>
-
-    <button type="button" class="ft-switch" id="ftSwitch" hidden>Switch name</button>
-  </header>
-
-  <section class="ft-picker" id="ftPicker" hidden aria-labelledby="ftPickerH">
-    <h2 id="ftPickerH">Every name on today’s board</h2>
-
-    <button type="button" class="ft-backto" id="ftBackTo" hidden></button>
-    <p class="fc-note" id="ftPickerNote"></p>
-    <div class="flows-tablewrap" tabindex="0" role="region"
-         aria-label="Board names">
-      <table class="flows-table" id="ftPickerTable">
-        <thead><tr>
-          <th scope="col">Ticker</th>
-          <th scope="col">Side</th>
-          <th scope="col" class="c-num">Rank</th>
-          <th scope="col" class="c-num">Score</th>
-        </tr></thead>
-        <tbody id="ftPickerBody"></tbody>
-      </table>
-    </div>
-  </section>
-
-  <div class="ft-grid" id="ftGrid" hidden>${stations}
-  </div>
-
-  <p class="flows-foot" id="ftFoot"></p>
-  </div>
-`)}
-<dialog id="ftZoom" class="ft-zoom" aria-labelledby="ftZoomH">
-  <div class="ft-zoom-inner">
-    <section class="fc-panel" id="ftZoomPanel">
-      <h3 id="ftZoomH"><span class="ft-panel-t"></span>
-        <button type="button" class="ft-zoom-close" id="ftZoomClose"
-                aria-label="Close">&times;</button></h3>
-      <div id="ftZoomHost"></div>
-    </section>
-  </div>
-</dialog>
-${UI_SCRIPT}
-
-<script src="${v("/assets/js/flows-cursor.js")}" defer></script>
-<script src="${v("/assets/js/flows-panels.js")}" defer></script>
-<script src="${v("/assets/js/flows-ticker.js")}" defer></script>
-</body>
-</html>`;
+    <div class="ft-hc" id="ftHc"></div>
+  </div></section>
+  <section class="ui-card ft-verdict" id="ftVerdict" aria-labelledby="ftVerdictT" hidden></section>
+  <div class="ft-grid" id="ftGrid" hidden></div>
+  <section class="ft-picker" id="ftPicker" aria-labelledby="ftPickerT" hidden></section>
+`,
+  });
 }
 
 export function historyPage({ username = "" } = {}) {

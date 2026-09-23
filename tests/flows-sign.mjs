@@ -108,7 +108,7 @@ ok(files.length >= 10,
      "  Zero is the centre of the dead band and a score this pipeline assigns. It is not a\n" +
      "  small positive, and it is not an absence — absence is is-null and the em dash. Give\n" +
      "  it its own arm: `v < 0 ? \"is-neg\" : v > 0 ? \"is-pos\" : \"is-flat\"`, or the shared\n" +
-     "  polarity() helper in flows-panels.js. There is NO ALLOW-LIST here on purpose: the\n" +
+     "  FlowsUI.tone() helper. There is NO ALLOW-LIST here on purpose: the\n" +
      "  moment a line can be excused by name, the next defect is one entry from invisible.");
 }
 
@@ -117,7 +117,14 @@ ok(files.length >= 10,
   const FAMILIES = ["fc-score", "gp-cum", "fp-line", "fp-line-end", "rc-dot"];
   const MODIFIERS = ["is-pos", "is-neg", "is-flat"];
 
-  for (const family of FAMILIES) {
+  const JS_ALL = files.map((f) => readFileSync(new URL(f, JS_DIR), "utf8")).join("\n");
+  const emits = (family) => new RegExp(`["'\\s]${family}(?:["'\\s])`).test(JS_ALL);
+  for (const family of FAMILIES.filter((f) => !emits(f))) {
+    ok(!new RegExp(`\\b${family}\\b`).test(JS_ALL),
+       `.${family} is emitted by no Flows renderer any more — the ticker page that drew it was rebuilt on ` +
+       "FlowsUI, and its stylesheet rules went with it — so no polarity modifier can land on it unstyled");
+  }
+  for (const family of FAMILIES.filter(emits)) {
     for (const mod of MODIFIERS) {
       const rule = new RegExp(`\\.${family}\\.${mod}\\b`);
       ok(rule.test(CSS),
@@ -141,15 +148,34 @@ ok(files.length >= 10,
 }
 
 {
-  const panels = readFileSync(new URL("flows-panels.js", JS_DIR), "utf8");
-  ok(/const polarity = /.test(panels),
-     "the polarity helper exists, so the next new chart has a correct form to reach for " +
-     "rather than a two-armed ternary to invent — four call sites in that one file each " +
+  const ui = readFileSync(new URL("flows-ui.js", JS_DIR), "utf8");
+  const at = ui.indexOf("const tone = ");
+  ok(at > 0,
+     "the shared tone helper exists, so the next new chart has a correct form to reach for " +
+     "rather than a two-armed ternary to invent — four call sites in the old panel library each " +
      "wrote their own wrong version");
-  const body = panels.slice(panels.indexOf("const polarity = "), panels.indexOf("const polarity = ") + 400);
-  for (const arm of ["is-null", "is-neg", "is-pos", "is-flat"]) {
-    ok(body.includes(arm), `and it has an ${arm} arm: four states, not two`);
+  const body = ui.slice(at, ui.indexOf("\n", at));
+  for (const arm of ["\"up\"", "\"down\"", "\"flat\""]) ok(body.includes(arm), `and it has an ${arm} arm`);
+  ok(/num\(v\) === null \? "flat"/.test(body),
+     "and an absent value takes no direction: it is flat, and the em dash beside it carries the absence");
+  const toneFn = new Function("num", body.replace(/^const tone = /, "return ").replace(/;$/, ""))((v) => (typeof v === "number" && Number.isFinite(v) ? v : null));
+  eq(toneFn(0), "flat", "zero is flat, never a small positive");
+  eq(toneFn(null), "flat", "null is flat, never a direction");
+  eq(toneFn(-1), "down", "a negative is down");
+  eq(toneFn(1), "up", "a positive is up");
+  eq(toneFn(0.4, 0.5), "flat", "and a reading inside a dead band is flat");
+
+  const ticker = stripComments(readFileSync(new URL("flows-ticker.js", JS_DIR), "utf8"));
+  const lits = new Set(["up", "down", "flat"]);
+  for (const m of ticker.matchAll(/"data-tone":\s*([^,}]+)/g)) for (const q of m[1].matchAll(/"([a-z]+)"/g)) lits.add(q[1]);
+  for (const m of ticker.matchAll(/\btone:\s*([^,}]+)/g)) for (const q of m[1].matchAll(/"([a-z]+)"/g)) lits.add(q[1]);
+  ok(lits.size >= 5, `the ticker page's tone vocabulary was read from its source (${[...lits].join(", ")})`);
+  for (const t of lits) {
+    ok(new RegExp(`\\[data-tone="${t}"\\]\\s*\\{[^}]*--tone:`).test(CSS),
+       `data-tone="${t}", which the ticker page emits, sets a tone in the shared stylesheet — a tone with no rule draws its reading in no colour at all`);
   }
+  ok(!/\? "short" : "long"|\? "long" : "short"/.test(ticker.replace(/side === "long_below" \? "long" : "short"|below === "long" \? "short" : "long"/g, "")),
+     "and no gamma reading on the ticker page decides long or short in two arms: a strike measured at zero gamma is neither");
 }
 
 console.log(`✓ flows-sign: ${checks} assertions — a rule that lived in one file's comment and ` +
