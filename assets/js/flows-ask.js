@@ -114,12 +114,12 @@
         standing: () => ({ value: sgn(n.score), tone: UI.tone(n.score), sub: isNum(n.conviction) === null ? null : "conviction " + n.conviction }),
         variation: () => {
           const c = isNum(n.charmPerSession);
-          return { value: c === null ? DASH : (c < 0 ? "Buy " : c > 0 ? "Sell " : "") + F.money(Math.abs(c)), tone: c === null || c === 0 ? null : c < 0 ? "up" : "down", sub: "dealer hedges · next session" };
+          return { value: c === null ? DASH : (c < 0 ? "Buy " : c > 0 ? "Sell " : "") + F.money(Math.abs(c)), tone: c === null || c === 0 ? null : c < 0 ? "up" : "down", sub: "next session" };
         },
-        surface: () => ({ value: isNum(n.strikesShown) === null || isNum(n.expiriesShown) === null ? DASH : n.strikesShown + " × " + n.expiriesShown, sub: "strikes × expiries" + (isNum(n.atSpot) === null ? "" : " · spot strike " + F.px(n.atSpot)) }),
+        surface: () => ({ value: isNum(n.strikesShown) === null || isNum(n.expiriesShown) === null ? DASH : n.strikesShown + " × " + n.expiriesShown, sub: "strikes × expiries" }),
         aggressor: () => ({ value: isNum(n.shown) === null ? DASH : n.shown + (isNum(n.measuredStrikes) === null ? "" : " of " + n.measuredStrikes), sub: "strikes drawn" }),
         topContracts: () => ({ value: isNum(n.shown) === null ? DASH : n.shown + (isNum(n.total) === null ? "" : " of " + F.int(n.total)), sub: "contracts listed" }),
-        levels: () => ({ value: text(n.gammaFlip) || DASH, sub: "flip · call " + (text(n.callWall) || DASH) + " · put " + (text(n.putWall) || DASH) }),
+        levels: () => ({ value: text(n.gammaFlip) || DASH, label: text(n.gammaFlip) ? "Gamma flip" : "Levels", sub: "call " + (text(n.callWall) || DASH) + " · put " + (text(n.putWall) || DASH) }),
         displacement: () => ({ value: isNum(n.gapAtr) === null ? DASH : sgn(n.gapAtr, 2) + " ATR", sub: isNum(n.volCentroid) === null ? null : "flow at " + F.px(n.volCentroid) }),
         pricedMove: () => ({ value: isNum(n.impliedMove) === null ? DASH : "±" + F.pct(n.impliedMove, 1), sub: isNum(n.impliedLow) === null ? null : F.px(n.impliedLow) + " – " + F.px(n.impliedHigh) }),
         path: () => ({ value: F.money(n.netPremium, true), tone: UI.tone(n.netPremium), sub: isNum(n.persistence) === null ? null : "persistence " + F.pct(n.persistence, 0) }),

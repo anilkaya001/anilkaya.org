@@ -627,7 +627,7 @@
       }),
       UI.gaugeChip({
         ring: retained !== null && rankedFrom ? Math.min(1, retained / rankedFrom) : null, color: "--s-blue",
-        value: retained === null ? DASH : String(retained), label: "Sessions",
+        value: retained === null ? DASH : String(retained), label: "Retained",
         info: () => ({ title: "Sessions retained", lead: "A handful of sessions is not evidence of anything; the sample size is stated because it is the most important number here." + (rankedFrom ? " The ring fills toward the " + rankedFrom + " sessions a signal column needs before its mean is ranked." : ""), facts: [["Retained", retained === null ? DASH : String(retained)], ["Current rule", isNum(payload.epochRetained) === null ? DASH : String(payload.epochRetained)], ["Prior rule", isNum(payload.priorRetained) === null ? DASH : String(payload.priorRetained)], ["First", payload.firstSession || DASH], ["Last", payload.lastSession || DASH]] }),
       }),
       UI.gaugeChip({
