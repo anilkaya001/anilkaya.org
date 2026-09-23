@@ -228,6 +228,16 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   eq(one.flip, null, "a null vendor flip stays null");
   eq(one.gaps.flipGap, "no-level", "and the agreement is withheld with the level's code");
   eq(gexLevels({ data: [] }).status, "unreadable", "an array where the object belongs is unreadable");
+  const noBook = gexLevels(FX.gexLevels, { sessionDate: SESSION, spot: FX.spot, atr: FX.atr, strikes: [] });
+  eq(noBook.ours, null, "a card with no strike rows has no book levels, not a book of nulls");
+  eq(noBook.gaps.ours, "empty", "and says the strike read was empty");
+  eq(noBook.gaps.callWallAgree, "empty", "so the wall agreement is withheld for that reason");
+  eq(noBook.gaps.flipGap, "empty", "and so is the flip gap, rather than blaming a missing crossing");
+  eq(gexLevels(FX.gexLevels, { sessionDate: SESSION, spot: FX.spot, atr: FX.atr }).gaps.ours, "unread",
+    "no strike read at all is unread");
+  const highBook = gexLevels(FX.gexLevels, { sessionDate: SESSION, spot: FX.spot, atr: FX.atr,
+    strikes: [{ strike: "300", call_gamma_oi: "5", put_gamma_oi: "-9" }] });
+  eq(highBook.gaps.callWallAgree, "no-level", "a book with no strike above spot has no call wall: a missing level, not a missing flip");
   eq(gexLevels(FX.gexLevels, { sessionDate: "2026-09-23" }).why, "not-session", "yesterday's levels are stale");
 }
 
@@ -278,6 +288,17 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   eq(s.gaps.putWallFlow, "no-row", "and says so");
   near(s.wallShare, 0.5, 1e-12, "wall share = |flow on walls| / |flow in band|");
   eq(flowStrike([row(100, 1, 0, 0, 0)], { sessionDate: SESSION, spot: null }).why, "no-spot", "no spot, no band");
+  const far = flowStrike([row(100, 1e5, 0, 0, 0), row(110, 0, 0, 1e5, 0), row(60, 9e6, 0, 0, 0)],
+    { sessionDate: SESSION, spot: 100, iv30: 0.3, walls: { call: 100, put: 60 }, wallsFrom: "vendor" });
+  near(far.wallShare, Number(((1e5 + 9e6) / (2e5 + 9e6)).toFixed(4)), 1e-12,
+    "a wall outside the band joins the denominator too, so the wall share is a true fraction (it read 45.5 before)");
+  ok(far.wallShare <= 1, "and never exceeds one");
+  const same = flowStrike([row(100, 1e5, 0, 0, 0), row(110, 0, 0, 1e5, 0)],
+    { sessionDate: SESSION, spot: 100, iv30: 0.3, walls: { call: 100, put: 100 }, wallsFrom: "vendor" });
+  near(same.wallShare, 0.5, 1e-12, "walls on one strike are counted once");
+  const bare = flowStrike([row(100, 1e5, 0, 0, 0)], { sessionDate: SESSION, spot: 100, iv30: 0.3 });
+  eq(bare.gaps.callWall, "no-walls", "no wall to measure against is said in gaps");
+  eq(bare.gaps.wallsFrom, "no-walls", "including where the walls would have come from");
   eq(flowStrike(failedRead("refused")).why, "refused", "a refused call carries the refused code");
 }
 
@@ -762,8 +783,8 @@ const checkSection = (name, s, where) => {
     ok(unit in UNITS, `${where}.${name}.u.${field} = ${unit} is a declared unit`);
   }
   for (const [field, value] of Object.entries(s)) {
-    if (value === null && !["why", "vendorAt", "readAt", "time", "source", "asOf", "flowFlipM", "f", "ours",
-      "callWallOi", "putWallOi", "coverFromM", "cp", "k", "e", "oiChange", "wallsFrom", "callWall", "putWall"].includes(field)) {
+    if (value === null && !["why", "vendorAt", "readAt", "time", "source", "asOf", "flowFlipM", "f",
+      "coverFromM", "cp", "k", "e", "oiChange"].includes(field)) {
       ok(s.gaps && s.gaps[field], `${where}.${name}.${field} is null and says why in gaps`);
     }
   }

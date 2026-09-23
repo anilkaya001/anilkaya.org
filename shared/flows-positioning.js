@@ -490,16 +490,19 @@ export function gexLevels(body, { sessionDate = null, spot = null, atr = null, s
     magnet: level("gamma_magnet", "magnet"),
     flip: level("gamma_flip", "flip"),
   };
-  const ours = strikes === null ? null : bookLevels(strikes, S, { putSign });
+  const book = strikes === null || strikes === undefined ? null : bookLevels(strikes, S, { putSign });
+  const ours = book && book.rows > 0 ? book : null;
+  const oursWhy = book === null ? "unread" : "empty";
   const ambiguity = nearby.length < 2 ? note("ambiguity", "single-flip")
     : A === null || !(A > 0) ? note("ambiguity", "no-atr")
     : round((Math.max(...nearby) - Math.min(...nearby)) / A, 3);
   const oursFlip = ours ? ours.flip : null;
   const flipGap = vendor.flip === null ? note("flipGap", "no-level")
+    : !ours ? note("flipGap", oursWhy)
     : oursFlip === null ? note("flipGap", putSign === null ? "convention-undetermined" : "no-flip")
     : A === null || !(A > 0) ? note("flipGap", "no-atr")
     : round((vendor.flip - oursFlip) / A, 3);
-  const agree = (a, b, field) => (a === null || b === null ? note(field, a === null ? "no-level" : "no-flip") : a === b);
+  const agree = (a, b, field) => (a === null || b === null ? note(field, "no-level") : a === b);
   const date = dayOf(o.date);
   const same = isDay(sessionDate) && date ? date === sessionDate : null;
   return {
@@ -516,11 +519,12 @@ export function gexLevels(body, { sessionDate = null, spot = null, atr = null, s
     flipAtr: dist(vendor.flip, "flipAtr"),
     nearby,
     ambiguity,
-    ours: ours ? { callWall: ours.callWall, putWall: ours.putWall, magnet: ours.magnet, flip: round(oursFlip, 4) } : null,
+    ours: ours ? { callWall: ours.callWall, putWall: ours.putWall, magnet: ours.magnet, flip: round(oursFlip, 4) }
+      : note("ours", oursWhy),
     flipGap,
     flipAgree: flipGap === null ? note("flipAgree", gaps.flipGap) : Math.abs(flipGap) <= POSITIONING_LINES.FLIP_AGREE_ATR,
-    callWallAgree: ours ? agree(vendor.callWall, ours.callWall, "callWallAgree") : note("callWallAgree", "unread"),
-    putWallAgree: ours ? agree(vendor.putWall, ours.putWall, "putWallAgree") : note("putWallAgree", "unread"),
+    callWallAgree: ours ? agree(vendor.callWall, ours.callWall, "callWallAgree") : note("callWallAgree", oursWhy),
+    putWallAgree: ours ? agree(vendor.putWall, ours.putWall, "putWallAgree") : note("putWallAgree", oursWhy),
     u: { callWall: "px", putWall: "px", magnet: "px", flip: "px", callWallAtr: "atr", putWallAtr: "atr",
       magnetAtr: "atr", flipAtr: "atr", nearby: "px", ambiguity: "atr", flipGap: "atr" },
     gaps,
@@ -620,7 +624,8 @@ export function flowStrike(body, { sessionDate = null, spot = null, iv30 = null,
   }
   if (all.length && all.every((r) => r.np === null && r.gross === null)) return silence("unreadable", "malformed");
   all.sort((a, b) => a.k - b.k);
-  const inBand = all.filter((r) => r.k >= S * (1 - band) && r.k <= S * (1 + band));
+  const inBandK = (k) => k >= S * (1 - band) && k <= S * (1 + band);
+  const inBand = all.filter((r) => inBandK(r.k));
   const gaps = {};
   const note = (field, code) => { gaps[field] = code; return null; };
   const abs = sum(inBand.map((r) => Math.abs(r.np ?? 0)));
@@ -640,7 +645,10 @@ export function flowStrike(body, { sessionDate = null, spot = null, iv30 = null,
   };
   const w = walls || {};
   const callFlow = at(w.call), putFlow = at(w.put);
-  const wallAbs = [callFlow, putFlow].filter((v) => v !== undefined && v !== null).map(Math.abs);
+  const wallRows = [...new Set([vnum(w.call), vnum(w.put)].filter((k) => k !== null))]
+    .map((k) => all.find((r) => r.k === k)).filter((r) => r && r.np !== null);
+  const wallAbs = sum(wallRows.map((r) => Math.abs(r.np)));
+  const shareBase = abs + sum(wallRows.filter((r) => !inBandK(r.k)).map((r) => Math.abs(r.np)));
   const ladderRows = inBand.length > cap
     ? inBand.slice().sort((a, b) => Math.abs(b.np ?? 0) - Math.abs(a.np ?? 0)).slice(0, cap).sort((a, b) => a.k - b.k)
     : inBand;
@@ -658,13 +666,13 @@ export function flowStrike(body, { sessionDate = null, spot = null, iv30 = null,
       : sigmaMove === null ? note("centroidSigma", "no-iv") : round(Math.log(centroid / S) / sigmaMove, 3),
     longPeak: longPeak ? longPeak.k : note("longPeak", "no-premium"),
     shortPeak: shortPeak ? shortPeak.k : note("shortPeak", "no-premium"),
-    wallsFrom: wallsFrom || null,
-    callWall: vnum(w.call),
-    putWall: vnum(w.put),
+    wallsFrom: wallsFrom || note("wallsFrom", "no-walls"),
+    callWall: vnum(w.call) ?? note("callWall", "no-walls"),
+    putWall: vnum(w.put) ?? note("putWall", "no-walls"),
     callWallFlow: callFlow === undefined ? note("callWallFlow", "no-walls") : callFlow === null ? note("callWallFlow", "no-row") : usd(callFlow),
     putWallFlow: putFlow === undefined ? note("putWallFlow", "no-walls") : putFlow === null ? note("putWallFlow", "no-row") : usd(putFlow),
-    wallShare: !wallAbs.length ? note("wallShare", callFlow === undefined && putFlow === undefined ? "no-walls" : "no-row")
-      : abs > 0 ? round(sum(wallAbs) / abs, 4) : note("wallShare", "no-premium"),
+    wallShare: !wallRows.length ? note("wallShare", callFlow === undefined && putFlow === undefined ? "no-walls" : "no-row")
+      : shareBase > 0 ? round(wallAbs / shareBase, 4) : note("wallShare", "no-premium"),
     ladder: ladderRows.map((r) => ({ k: r.k, np: usd(r.np), gross: usd(r.gross), otm: usd(r.otm) })),
     shed: inBand.length - ladderRows.length,
     u: { centroid: "px", centroidSigma: "sigma", longPeak: "px", shortPeak: "px", netBand: "usd",
