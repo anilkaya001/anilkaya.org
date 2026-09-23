@@ -734,6 +734,11 @@ const CARD = {
     "or summary:empty, which the same card never retries, where origin/main retried the same failure after five minutes");
   ok((worker.match(/emptyNote\(said\.attempts\)/g) || []).length === 2 && !/so did the fallback model asked after it/.test(worker),
     "both Ask notes about an empty reply are built from emptyNote over the attempts, not from the chain's combined guard");
+  ok(/const meter = afterCall \|\| base\.spend;/.test(worker) && /meter\.remaining > 0/.test(worker) &&
+     /spend: meter, note: say/.test(worker) && !/spend\.remaining > 0/.test(worker),
+    "THE ALLOWANCE NOTE READS THE METER AFTER THE PRIMARY'S BILLED CALL: with 99 credits left, a primary at the cap that " +
+    "used them and a fallback refused for the allowance read \"still showed 99 of 10,000 unspent, which means something " +
+    "other than this site drew on the same account\" beside a meter at 0, blaming another spender for this site's own call");
   ok(/sameCall && \(prior\.llm \|\| repliedGuard\(prior\.guard\)\) && intradayOnly/.test(worker),
     "THE INTRADAY SUMMARY THROTTLE COVERS EVERY BILLED REPLY, not only an accepted one: with the fallback " +
     "writing, a refused summary on facts that move every tick cost 13,021 neurons over a 26-tick session in " +

@@ -1473,15 +1473,16 @@ async function askAnswer(question, env, index, updatedAt, subject) {
         ", so this reading is the pipeline's own wording. Every figure in it was measured."
       : failed.say;
 
+    const meter = afterCall || base.spend;
     const disagrees = failed.why === "allowance"
-      && spend !== null && typeof spend.remaining === "number" && spend.remaining > 0;
+      && meter !== null && typeof meter.remaining === "number" && meter.remaining > 0;
     const say = disagrees
-      ? told + " The meter on this page still showed " + grouped(spend.remaining) +
-        " of " + grouped(spend.allowanceNeurons) + " model credits unspent, which means something " +
+      ? told + " The meter on this page still showed " + grouped(meter.remaining) +
+        " of " + grouped(meter.allowanceNeurons) + " model credits unspent, which means something " +
         "other than this site drew on the same account today. Cloudflare is the " +
         "authority and the meter is not: it can only ever see this site's own calls."
       : told;
-    return json({ ...base, spend: afterCall || base.spend, note: say, model, llmFailure: failed.why,
+    return json({ ...base, spend: meter, note: say, model, llmFailure: failed.why,
       spendDisagrees: disagrees });
   }
 
