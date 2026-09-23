@@ -380,8 +380,9 @@ function roundTo(v, dp) {
   if (v === null || v === undefined) return null;
   if (!fin(v)) return null;
   const f = Math.pow(10, dp);
-  const r = Math.round(v * f) / f;
-  return Object.is(r, -0) ? 0 : r;
+  const a = Math.abs(v) * f;
+  const r = Math.floor(a + 0.5 + a * 1e-12) / f;
+  return r === 0 ? 0 : v < 0 ? -r : r;
 }
 
 const rp = (v) => roundTo(v, 4), r$ = (v) => roundTo(v, 2), rpr = (v) => roundTo(v, 4), rv = (v) => roundTo(v, 4);

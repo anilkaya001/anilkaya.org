@@ -365,7 +365,20 @@ const FACT_INPUT = () => ({
   }
   ok(same === route.structures.length && route.structures.some((s) => s.grid),
      "every published structure, including one carrying its scenario grid, is reproduced in the page from the fit alone");
-  const own = route.structures.find((s) => s.legs.length >= 2);
+  const putKs = rows.filter((r) => r.type === "P" && r.bid > 0 && r.ask >= r.bid).map((r) => r.K);
+  let spreads = 0;
+  for (let i = 1; i < putKs.length; i++) {
+    const cr = FQ.priceStructure(setupB, { family: "put-credit-spread", expiry: EXP,
+      legs: [{ type: "P", K: putKs[i], side: -1, qty: 1 }, { type: "P", K: putKs[i - 1], side: 1, qty: 1 }] });
+    if (!cr || !(cr.price.fill < 0) || cr.profitUnbounded || cr.lossUnbounded) continue;
+    spreads++;
+    eq(cr.maxProfit.toFixed(2), (-cr.price.fill * 100).toFixed(2),
+       `a put credit spread ${putKs[i]}/${putKs[i - 1]} prints its credit and its maximum profit as one number (${cr.price.fill} a share, ${cr.maxProfit} a lot)`);
+    eq(cr.capital.value.toFixed(2), (-cr.maxLoss).toFixed(2),
+       `and its capital is its maximum loss to the cent, whichever sign each was rounded from (${cr.capital.value} against ${cr.maxLoss})`);
+  }
+  ok(spreads >= 5, `the sweep priced enough credit spreads to mean something (${spreads})`);
+  const own =route.structures.find((s) => s.legs.length >= 2);
   const fam = FQ.STRUCTURES.find((f) => f.id === own.family);
   ok(fam && FQ.familyDirection(fam, route.state) !== undefined, "the catalogue and its direction rule ride the bundle");
   const built = FQ.structureLegs(setupB, own.family, FQ.DELTA_TARGETS[own.family][0], EXP);
