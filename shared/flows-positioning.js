@@ -473,6 +473,10 @@ export function gexLevels(body, { sessionDate = null, spot = null, atr = null, s
   const g0 = gate(body, "object");
   if (g0.quiet) return g0.quiet;
   const o = g0.rows;
+  const levelsDate = dayOf(o.date);
+  if (isDay(sessionDate) && levelsDate && levelsDate > sessionDate) {
+    return silence("unavailable", "not-session", { vendorDate: levelsDate });
+  }
   const S = vnum(spot), A = vnum(atr);
   const gaps = {};
   const note = (field, code) => { gaps[field] = code; return null; };
@@ -834,6 +838,10 @@ export function oiWalls(body, { sessionDate = null, spot = null, atr = null, top
     rows.push({ k, c, p });
   }
   if (!rows.length) return silence("quiet", "empty");
+  const snapshot = [...dates].sort().pop() || null;
+  if (isDay(sessionDate) && snapshot && snapshot > sessionDate) {
+    return silence("unavailable", "not-session", { vendorDate: snapshot });
+  }
   const callRows = rows.filter((r) => r.c !== null), putRows = rows.filter((r) => r.p !== null);
   if (!callRows.length && !putRows.length) return silence("unreadable", "malformed");
   rows.sort((a, b) => a.k - b.k);

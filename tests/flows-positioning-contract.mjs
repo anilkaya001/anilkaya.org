@@ -239,6 +239,14 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
     strikes: [{ strike: "300", call_gamma_oi: "5", put_gamma_oi: "-9" }] });
   eq(highBook.gaps.callWallAgree, "no-level", "a book with no strike above spot has no call wall: a missing level, not a missing flip");
   eq(gexLevels(FX.gexLevels, { sessionDate: "2026-09-23" }).why, "not-session", "yesterday's levels are stale");
+  eq(gexLevels(FX.gexLevels, { sessionDate: "2026-09-23" }).status, "stale", "and still drawn, in the secondary colour");
+  const ahead = gexLevels(FX.gexLevels, { sessionDate: "2026-09-21", spot: FX.spot, atr: FX.atr });
+  eq(ahead.status, "unavailable", "levels dated after the session are look-ahead, never published as its levels");
+  eq(ahead.vendorDate, "2026-09-22", "and the vendor's date is named");
+  eq(ahead.callWall, undefined, "with no number carried");
+  const aheadOi = oiWalls(FX.oiPerStrike, { sessionDate: "2026-09-21", spot: FX.spot, atr: FX.atr });
+  eq(aheadOi.status, "unavailable", "open interest dated after the session is withheld the same way");
+  eq(aheadOi.why, "not-session", "with the same code");
 }
 
 {
