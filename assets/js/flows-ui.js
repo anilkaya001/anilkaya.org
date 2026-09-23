@@ -1856,6 +1856,7 @@
     return PAL.loading;
   }
   let paletteSource = null;
+  let drawerClose = null;
   function ensurePalette() {
     let d = document.getElementById("fxPal");
     if (d) return d;
@@ -1924,27 +1925,31 @@
       const shown = WIDE.matches ? !body.classList.contains("is-side-collapsed") : body.classList.contains("has-side-open");
       btn.setAttribute("aria-expanded", String(shown));
     };
+    const behind = ["fxBar", "flowsMain", "fxTabs", "askDock"].map((id) => document.getElementById(id)).filter(Boolean);
+    const setDrawer = (open) => {
+      body.classList.toggle("has-side-open", open);
+      for (const n of behind) n.inert = open;
+      syncBtn();
+    };
     const closeDrawer = (focus) => {
       if (!body.classList.contains("has-side-open")) return;
-      body.classList.remove("has-side-open");
-      syncBtn();
+      setDrawer(false);
       if (focus && btn) btn.focus();
     };
+    drawerClose = closeDrawer;
     if (btn && side) {
       btn.addEventListener("click", () => {
-        if (WIDE.matches) body.classList.toggle("is-side-collapsed");
-        else {
-          body.classList.toggle("has-side-open");
-          if (body.classList.contains("has-side-open")) {
-            const first = side.querySelector(".flows-rail a.is-on") || side.querySelector("a");
-            if (first) setTimeout(() => first.focus({ preventScroll: true }), 30);
-          }
+        if (WIDE.matches) { body.classList.toggle("is-side-collapsed"); syncBtn(); return; }
+        const open = !body.classList.contains("has-side-open");
+        setDrawer(open);
+        if (open) {
+          const first = side.querySelector(".flows-rail a.is-on") || side.querySelector("a");
+          if (first) setTimeout(() => first.focus({ preventScroll: true }), 30);
         }
-        syncBtn();
       });
       if (scrim) scrim.addEventListener("click", () => closeDrawer(true));
       document.addEventListener("keydown", (e) => { if (e.key === "Escape" && body.classList.contains("has-side-open")) closeDrawer(true); });
-      WIDE.addEventListener("change", () => { body.classList.remove("has-side-open"); syncBtn(); });
+      WIDE.addEventListener("change", () => setDrawer(false));
       syncBtn();
     }
 
@@ -1977,7 +1982,7 @@
       openPalette();
     });
     document.addEventListener("keydown", (e) => {
-      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && String(e.key).toLowerCase() === "k") { e.preventDefault(); openPalette(); }
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && String(e.key).toLowerCase() === "k") { e.preventDefault(); closeDrawer(false); openPalette(); }
     });
 
     const fresh = document.getElementById("fxFresh");
@@ -1999,7 +2004,7 @@
     openPalette,
     paletteSource: (fn) => { paletteSource = typeof fn === "function" ? fn : null; },
     title: (text) => { const t = document.getElementById("fxBarT"); if (t && text) t.textContent = String(text); },
-    closeSidebar: () => { document.body.classList.remove("has-side-open"); },
+    closeSidebar: () => { if (drawerClose) drawerClose(false); },
   });
 
   const chart = Object.freeze({
