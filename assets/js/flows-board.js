@@ -1227,6 +1227,7 @@
       }
       parts.push("built " + when);
       statusEl.textContent = parts.join(" · ") + ".";
+      if (UI && UI.keepDates) UI.keepDates(statusEl);
       setStale(assessAge(payload));
     }).catch((error) => {
       if (error && error.name === "AbortError") return;

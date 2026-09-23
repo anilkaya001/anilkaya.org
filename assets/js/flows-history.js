@@ -9,6 +9,23 @@
   if (!statusEl || !curveHost || !body) return;
 
   const COLUMNS = 6;
+
+  function dated(node, text) {
+    node.textContent = /\d{4}-\d{2}-\d{2}/.test(text) ? "" : text;
+    if (node.textContent) return node;
+    const re = /\d{4}-\d{2}-\d{2}/g;
+    let at = 0, m;
+    while ((m = re.exec(text))) {
+      if (m.index > at) node.append(document.createTextNode(text.slice(at, m.index)));
+      const d = document.createElement("span");
+      d.className = "flows-date";
+      d.textContent = m[0];
+      node.append(d);
+      at = m.index + m[0].length;
+    }
+    if (at < text.length) node.append(document.createTextNode(text.slice(at)));
+    return node;
+  }
   const MINUS = "−";
   const DASH = "—";
 
@@ -61,7 +78,7 @@
     const client = Math.floor(curveHost.clientWidth);
     const host = rect > 0 && client > 0 ? Math.min(rect, client)
       : Math.max(rect > 0 ? rect : 0, client > 0 ? client : 0);
-    return host > 0 ? Math.min(760, host) : 300;
+    return host > 0 ? Math.min(2400, host) : 300;
   }
 
   function renderCurve(horizons, meta) {
@@ -158,8 +175,10 @@
       class: "rc-zero", x1: padL, x2: W - padR, y1: yOf(mode.ref), y2: yOf(mode.ref),
     }));
 
+    const refY = yOf(mode.ref);
     for (const v of [yHi, mode.ref, yLo]) {
-      const y = yOf(v);
+      const y = v === mode.ref ? refY
+        : v > mode.ref ? Math.min(yOf(v), refY - 16) : Math.max(yOf(v), refY + 16);
       const t = svgEl("text", {
         class: v === mode.ref ? "rc-axislabel is-zero" : "rc-axislabel",
         x: padL - 8, y: y + 4, "text-anchor": "end",
@@ -307,7 +326,7 @@
           "over, so " + (unstated === 1 ? "it is" : "they are") + " not plotted — " +
           "that is a gap in what was published, not a count of closed sessions.");
       }
-      curveNote.textContent = note.join(" ");
+      dated(curveNote, note.join(" "));
     }
   }
 

@@ -236,7 +236,7 @@ try {
       out.inBar = !!bar;
       if (!bar || !grid) return out;
 
-      const measure = async () => {
+      const measure = async (pinned) => {
 
         const sc = document.getElementById("ftScroll");
         const scrollBox = sc && sc.scrollHeight > sc.clientHeight ? sc : window;
@@ -244,25 +244,22 @@ try {
         await new Promise((r) => setTimeout(r, 250));
         const nav = document.querySelector(".topbar").getBoundingClientRect();
         const box = el.getBoundingClientRect();
+        const bg = getComputedStyle(pinned).backgroundColor;
         scrollBox.scrollTo({ top: 0, behavior: "instant" });
         await new Promise((r) => setTimeout(r, 250));
-        return { headTop: box.top, height: box.height, navBottom: nav.bottom };
+        return { headTop: box.top, height: box.height, navBottom: nav.bottom, bg };
       };
-
-      const ground = (node) => getComputedStyle(node).backgroundColor;
 
       grid.style.minHeight = "3000px";
       grid.hidden = false;
 
       el.hidden = false;
       bar.hidden = false;
-      out.composed = await measure();
-      out.composed.bg = ground(bar);
+      out.composed = await measure(bar);
 
       grid.parentNode.insertBefore(el, grid);
       bar.hidden = true;
-      out.served = await measure();
-      out.served.bg = ground(el);
+      out.served = await measure(el);
       return out;
     });
 
@@ -278,7 +275,7 @@ try {
     eq(head.position, "sticky", "and it is pinned rather than scrolled away");
     ok(head.inBar, "the controller re-parents it into the sticky bar");
     ok(!/rgba\(0, 0, 0, 0\)/.test(head.composed.bg),
-       `[composed] the pinned box has an OPAQUE ground, or a chart's ink reads ` +
+       `[composed] the pinned box has a ground once it is pinned, or a chart's ink reads ` +
        `through it (got ${head.composed.bg})`);
     ok(!/rgba\(0, 0, 0, 0\)/.test(head.served.bg),
        `[served] and so does the header when it is the pinned box itself ` +

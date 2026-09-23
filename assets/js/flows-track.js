@@ -892,6 +892,7 @@
     if (!changeEl) return;
     const stale = staleSaid();
     changeEl.textContent = changeSaid() + (stale ? " " + stale : "");
+    if (UI && UI.keepDates) UI.keepDates(changeEl);
     const kind = changeSilence();
     if (kind) changeEl.dataset.empty = kind;
     else delete changeEl.dataset.empty;
@@ -1001,6 +1002,7 @@
       const node = basisItem(key, notes[key]);
       if (node) basisHost.append(node);
     }
+    if (UI && UI.keepDates) UI.keepDates(basisHost);
     if (basisPanel) basisPanel.hidden = false;
   }
 

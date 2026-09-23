@@ -126,6 +126,29 @@
     host.append(box);
   }
 
+  function foldNotes(host) {
+    if (!host) return;
+    const loose = Array.from(host.querySelectorAll("p.fc-note")).filter((p) =>
+      !p.closest("details, table") && !p.classList.contains("is-qualifier") &&
+      !p.classList.contains("is-lead") && !p.hasAttribute("data-empty"));
+    const boxes = new Map();
+    for (const p of loose) {
+      const parent = p.parentElement;
+      let box = boxes.get(parent);
+      if (!box) {
+        const own = Array.from(parent.children).filter((n) => n.matches("details.ft-how"));
+        box = own.length ? own[own.length - 1] : null;
+        if (!box) {
+          box = el("details", "ft-how");
+          box.append(el("summary", "ft-how-s", "How to read this"));
+          parent.append(box);
+        }
+        boxes.set(parent, box);
+      }
+      box.append(p);
+    }
+  }
+
   function leadReading(host, text) {
     const p = el("p", "fc-reading is-lead");
     p.textContent = text;
@@ -134,6 +157,36 @@
   }
 
   const qualifier = (text) => el("p", "fc-note is-qualifier", text);
+
+  const ISO_DATE = /\d{4}-\d{2}-\d{2}/g;
+  const DATED = ".fc-note, .fc-reading, .ft-chg-lead, .ft-chart-s, .ft-panel-one, .ft-station-lead, .fc-stats dd";
+
+  function keepDates(root) {
+    if (!root || typeof root.querySelectorAll !== "function") return;
+    const blocks = root.matches && root.matches(DATED) ? [root] : [];
+    for (const n of root.querySelectorAll(DATED)) blocks.push(n);
+    for (const block of blocks) {
+      const texts = [];
+      const walk = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+      for (let t = walk.nextNode(); t; t = walk.nextNode()) {
+        ISO_DATE.lastIndex = 0;
+        if (ISO_DATE.test(t.nodeValue) && !(t.parentElement && t.parentElement.closest(".flows-date, svg"))) texts.push(t);
+      }
+      for (const t of texts) {
+        const s = t.nodeValue;
+        const frag = document.createDocumentFragment();
+        let at = 0;
+        ISO_DATE.lastIndex = 0;
+        for (let m = ISO_DATE.exec(s); m; m = ISO_DATE.exec(s)) {
+          if (m.index > at) frag.append(s.slice(at, m.index));
+          frag.append(el("span", "flows-date", m[0]));
+          at = m.index + m[0].length;
+        }
+        if (at < s.length) frag.append(s.slice(at));
+        t.replaceWith(frag);
+      }
+    }
+  }
 
   function symlog(tau, vmax, lambda) {
     const lam = lambda === undefined ? 0.35 : lambda;
@@ -682,7 +735,7 @@
     __register(drawers) { Object.assign(api, drawers); },
 
     el, svgEl, isNum, fmtOr, polarity, deadPanel, quietPanel, emptyPanel, statList,
-    panelHead, panelWidth, appendMethod, leadReading, qualifier, mountId,
+    panelHead, panelWidth, appendMethod, leadReading, qualifier, mountId, keepDates, foldNotes,
     niceStep, quantileAbs, symlog,
     DASH, MINUS, neg, signed, pct, pct1, atrDist, px2, vol1, money, compact,
     AXIS_CH,

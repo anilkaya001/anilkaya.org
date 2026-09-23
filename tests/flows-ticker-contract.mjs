@@ -693,6 +693,54 @@ try {
        "at scroll zero the hero is in view, so the bar does not repeat its identity while the name switcher stays reachable");
     ok(got.ivt.length >= 2 && got.ivt.slice(3).every((t) => /^\d+d$/.test(t)),
        `the term-structure ticks count days to expiry (${got.ivt.join(",")})`);
+    await page.waitForFunction(() => document.getElementById("ftGrid").classList.contains("is-packed"),
+      null, { timeout: 3000 }).catch(() => {});
+    const face = await page.evaluate(() => {
+      const words = (n) => n.textContent.trim().split(/\s+/).filter(Boolean).length;
+      const loud = [];
+      for (const panel of document.querySelectorAll(".ft-panel[data-panel]")) {
+        let n = 0;
+        for (const p of panel.querySelectorAll("p.fc-note")) {
+          if (p.closest("details:not([open])") || p.classList.contains("is-qualifier") ||
+              p.hasAttribute("data-empty")) continue;
+          n += words(p);
+        }
+        if (n > 60) loud.push(panel.dataset.panel + " " + n);
+      }
+      const bottoms = [...document.querySelectorAll(".ft-hero > .ft-hero-b:not([hidden]) > .ft-hero-v, .ft-hero > .ft-hero-px > .ft-hero-v")]
+        .map((v) => v.offsetTop + v.offsetHeight);
+      const grid = document.getElementById("ftGrid");
+      const stations = [...grid.querySelectorAll(".ft-station:not([hidden])")].map((st) =>
+        [...st.children].filter((n) => n.getClientRects().length).map((n) => n.getBoundingClientRect()));
+      const interleaved = stations.filter((rects, i) => i > 0 && rects.length && stations[i - 1].length &&
+        Math.min(...rects.map((r) => r.top)) < Math.max(...stations[i - 1].map((r) => r.bottom)) - 1).length;
+      const panels = [...grid.querySelectorAll(".ft-panel[data-panel]")].filter((n) => n.getClientRects().length)
+        .map((n) => n.getBoundingClientRect());
+      let overlaps = 0;
+      for (let i = 0; i < panels.length; i++) for (let j = i + 1; j < panels.length; j++) {
+        const a = panels[i], b = panels[j];
+        if (a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1) overlaps++;
+      }
+      const body = getComputedStyle(document.body);
+      const warm = ["--flow-flat", "--flow-mag", "--flow-mag-dim", "--flow-surface", "--panel-recessed",
+        "--table-head-glass"].map((k) => k + " " + body.getPropertyValue(k).trim())
+        .filter((t) => /#8a8571|#b7b298|#12110d|rgba\(13, 12, 9|rgba\(6, 6, 4/i.test(t));
+      return { loud, bottoms, packed: grid.classList.contains("is-packed"), interleaved, overlaps, warm };
+    });
+    eq(face.warm.length, 0,
+       `no Flows token still resolves to the pre-navy warm palette on the body that owns it ` +
+       `(${face.warm.join("; ")})`);
+    eq(face.loud.length, 0,
+       `no panel face carries more than sixty words of loose method notes — the method folds into ` +
+       `the panel's own disclosure, every qualifier and silence stays in the open (${face.loud.join(", ")})`);
+    ok(face.bottoms.length >= 3 && Math.max(...face.bottoms) - Math.min(...face.bottoms) <= 1,
+       `the hero values share one baseline whatever sits under each, measured on layout ` +
+       `rather than on the entrance animation's transform (${face.bottoms.join(", ")})`);
+    ok(face.packed, "at 1440px the panel grid is packed by measured row spans");
+    eq(face.overlaps, 0, "and no two packed panels overlap");
+    eq(face.interleaved, 0,
+       "and no station reaches up beside the one before it — a panel fills its own station's " +
+       "holes, never another's");
     await page.evaluate(() => {
       const s = document.getElementById("ftScroll");
       if (s && getComputedStyle(s).overflowY !== "visible") s.scrollTo({ top: 900, behavior: "instant" });

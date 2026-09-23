@@ -8,6 +8,23 @@
   if (!statusEl || !wrap || !body) return;
 
   const COLUMNS = 9;
+
+  function dated(node, text) {
+    node.textContent = /\d{4}-\d{2}-\d{2}/.test(text) ? "" : text;
+    if (node.textContent) return node;
+    const re = /\d{4}-\d{2}-\d{2}/g;
+    let at = 0, m;
+    while ((m = re.exec(text))) {
+      if (m.index > at) node.append(document.createTextNode(text.slice(at, m.index)));
+      const d = document.createElement("span");
+      d.className = "flows-date";
+      d.textContent = m[0];
+      node.append(d);
+      at = m.index + m[0].length;
+    }
+    if (at < text.length) node.append(document.createTextNode(text.slice(at)));
+    return node;
+  }
   const MINUS = "−";
   const DASH = "—";
 
@@ -320,7 +337,7 @@
     if (inBand !== null && inBand > rows.length) {
       parts.push("showing the " + rows.length + " closest of " + inBand);
     }
-    statusEl.textContent = parts.join(" · ") + ".";
+    dated(statusEl, parts.join(" · ") + ".");
 
     if (staleEl && payload.__updatedAt) {
       const ageHours = (Date.now() - payload.__updatedAt) / 3600000;

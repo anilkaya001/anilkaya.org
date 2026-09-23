@@ -11,10 +11,28 @@
     var n = Number(v);
     return Number.isFinite(n) ? n : null;
   }
+  function dated(node, text) {
+    node.textContent = /\d{4}-\d{2}-\d{2}/.test(text) ? "" : text;
+    if (node.textContent) return node;
+    var re = /\d{4}-\d{2}-\d{2}/g, at = 0, m;
+    while ((m = re.exec(text))) {
+      if (m.index > at) node.append(document.createTextNode(text.slice(at, m.index)));
+      var d = document.createElement("span");
+      d.className = "flows-date";
+      d.textContent = m[0];
+      node.append(d);
+      at = m.index + m[0].length;
+    }
+    if (at < text.length) node.append(document.createTextNode(text.slice(at)));
+    return node;
+  }
   function el(tag, cls, text) {
     var n = document.createElement(tag);
     if (cls) n.className = cls;
-    if (text !== undefined && text !== null) n.textContent = String(text);
+    if (text !== undefined && text !== null) {
+      if (cls && /\bfc-(note|reading)\b/.test(cls)) dated(n, String(text));
+      else n.textContent = String(text);
+    }
     return n;
   }
   function text(s) {

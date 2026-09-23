@@ -33,6 +33,23 @@
     return Number.isFinite(n) ? n : null;
   };
 
+  function dated(node, text) {
+    node.textContent = /\d{4}-\d{2}-\d{2}/.test(text) ? "" : text;
+    if (node.textContent) return node;
+    const re = /\d{4}-\d{2}-\d{2}/g;
+    let at = 0, m;
+    while ((m = re.exec(text))) {
+      if (m.index > at) node.append(document.createTextNode(text.slice(at, m.index)));
+      const d = document.createElement("span");
+      d.className = "flows-date";
+      d.textContent = m[0];
+      node.append(d);
+      at = m.index + m[0].length;
+    }
+    if (at < text.length) node.append(document.createTextNode(text.slice(at)));
+    return node;
+  }
+
   function el(tag, cls, text) {
     const node = document.createElement(tag);
     if (cls) node.className = cls;
@@ -990,7 +1007,7 @@
           "session, which is what dteAnchor names.");
       }
       if (built) bits.push("Built " + built + (isNum(payload.v) === null ? "" : ", payload v" + count(payload.v)) + ".");
-      footEl.append(document.createTextNode(bits.filter(Boolean).join(" ") + " "));
+      footEl.append(dated(el("span"), bits.filter(Boolean).join(" ") + " "));
       const link = el("a", null, "The whole payload, including the pipeline's own wording");
       link.href = PAYLOAD_URL;
       footEl.append(link);

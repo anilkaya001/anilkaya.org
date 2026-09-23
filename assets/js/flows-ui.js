@@ -297,6 +297,31 @@
     return new Date(ms).toISOString().slice(0, 16).replace("T", " ") + " UTC";
   };
 
+  const ISO_DATE = /\d{4}-\d{2}-\d{2}/g;
+
+  function keepDates(root) {
+    if (!root || typeof root.querySelectorAll !== "function") return;
+    const texts = [];
+    const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let t = walk.nextNode(); t; t = walk.nextNode()) {
+      ISO_DATE.lastIndex = 0;
+      if (ISO_DATE.test(t.nodeValue) && !(t.parentElement && t.parentElement.closest(".flows-date, svg, a"))) texts.push(t);
+    }
+    for (const t of texts) {
+      const s = t.nodeValue;
+      const frag = document.createDocumentFragment();
+      let at = 0;
+      ISO_DATE.lastIndex = 0;
+      for (let m = ISO_DATE.exec(s); m; m = ISO_DATE.exec(s)) {
+        if (m.index > at) frag.append(s.slice(at, m.index));
+        frag.append(el("span", "flows-date", m[0]));
+        at = m.index + m[0].length;
+      }
+      if (at < s.length) frag.append(s.slice(at));
+      t.replaceWith(frag);
+    }
+  }
+
   function scrollHint(node) {
     if (!node) return;
     const edge = () => {
@@ -312,7 +337,7 @@
     isNum, el, svgEl,
     fmtSigned, fmtInt, fmtMoney, fmtStamp,
     emptyState, searchBox, sortSelect,
-    staleness, scrollHint,
+    staleness, scrollHint, keepDates,
     stripGeometry, scoreStrip,
   });
 })();

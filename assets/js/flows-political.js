@@ -17,6 +17,21 @@
     var n = Number(v);
     return isFinite(n) ? n : null;
   }
+  function dated(node, text) {
+    node.textContent = /\d{4}-\d{2}-\d{2}/.test(text) ? "" : text;
+    if (node.textContent) return node;
+    var re = /\d{4}-\d{2}-\d{2}/g, at = 0, m;
+    while ((m = re.exec(text))) {
+      if (m.index > at) node.append(document.createTextNode(text.slice(at, m.index)));
+      var d = document.createElement("span");
+      d.className = "flows-date";
+      d.textContent = m[0];
+      node.append(d);
+      at = m.index + m[0].length;
+    }
+    if (at < text.length) node.append(document.createTextNode(text.slice(at)));
+  }
+
   function el(tag, cls, text) {
     var n = document.createElement(tag);
     if (cls) n.className = cls;
@@ -769,7 +784,7 @@
 
       var filings = isNum(p.filings);
       var filedWhen = w.from ? " filed between " + w.from + " and " + (w.to || "today") : "";
-      status.textContent = [
+      dated(status, [
         filings === null
           ? (filedWhen ? "Disclosures" + filedWhen : "")
           : filings + " disclosure" + (filings === 1 ? "" : "s") + filedWhen,
@@ -780,7 +795,7 @@
         isNum(p.unusable) && p.unusable
           ? p.unusable + " carried no filer or name and were dropped" : "",
         p.readAt ? "read " + new Date(p.readAt).toLocaleString() : "",
-      ].filter(Boolean).join(" · ");
+      ].filter(Boolean).join(" · "));
     }
 
     var warn = document.getElementById("plSource");

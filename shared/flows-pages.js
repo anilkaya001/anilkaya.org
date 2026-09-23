@@ -311,9 +311,9 @@ const ccHeading = (id) =>
 
 export function overviewPage({ username = "", summary = null } = {}) {
   return `${head("Flows — Overview", "The whole session on one screen: both tails, the level, what moved, and what reports next.")}
-${shell("Session Overview", "Options-flow intelligence", "overview", username, `
+${shell("Session overview", "Options-flow intelligence", "overview", username, `
   <div class="flows-scroll" id="ccScroll">
-${pageHead("Session Overview", "Options-flow intelligence", "overview")}
+${pageHead("Session overview", "Options-flow intelligence", "overview")}
   <div class="flows-status" id="flowsStatus" role="status">Loading the latest session…</div>
   <p class="flows-stale" id="flowsStale" role="status" hidden></p>
 
@@ -514,7 +514,7 @@ ${shell(title, "Options-flow intelligence", bear ? "short" : "long", username, `
 
 export function deskPage({ username = "" } = {}) {
   return `${head("Flows — Premium desk", "Option-sale economics for any listed name.")}
-${shell("Premium Desk", "Options-flow intelligence", "desk", username, `
+${shell("Premium desk", "Options-flow intelligence", "desk", username, `
 <form class="desk-entry" id="deskEntry" autocomplete="off">
     <label for="deskInput">Add symbols</label>
     <div class="desk-entry__row">
@@ -645,7 +645,7 @@ export function watchPage({ username = "" } = {}) {
   const lede = "Scored names that did not clear the band on either side, " +
     "ranked by how close they came. Nothing here is a candidate.";
   return `${head("Flows \u2014 Watch", lede)}
-${shell("Watch List", "Options-flow intelligence", "watch", username, `
+${shell("Watch list", "Options-flow intelligence", "watch", username, `
   <div class="flows-status" id="watchStatus" role="status">Loading the session\u2026</div>
   <p class="flows-stale" id="watchStale" role="status" hidden></p>
 
@@ -704,7 +704,7 @@ export function marketPage({ username = "" } = {}) {
   const lede = "Whether the screened universe was bought or sold, how broad " +
     "that was, and how much of it is five names.";
   return `${head("Flows \u2014 Market", lede)}
-${shell("Market Level", "Options-flow intelligence", "market", username, `
+${shell("Market level", "Options-flow intelligence", "market", username, `
   <div class="flows-status" id="mktStatus" role="status">Loading the session\u2026</div>
   <p class="flows-stale" id="mktStale" role="status" hidden></p>
 
@@ -885,7 +885,7 @@ export function unusualPage({ username = "" } = {}) {
     "counter, and still not a trade, because a window aggregates its executions and " +
     "the selection is the vendor's, not the market's.";
   return `${head("Flows — Unusual activity", "Contracts carrying volume far above their own open interest.")}
-${shell("Unusual Activity", "Options-flow intelligence", "unusual", username, `
+${shell("Unusual activity", "Options-flow intelligence", "unusual", username, `
   <div class="flows-status" id="uaStatus" role="status">Loading the feed…</div>
   <p class="flows-stale" id="uaStale" role="status" hidden></p>
 
@@ -1031,9 +1031,8 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
     </div>
     <div class="ft-hero-px">
       <span class="ft-hero-k">Last</span>
-
+      <span class="ft-hero-v" id="ftHeroPx"></span>
       <span class="ft-hero-stack">
-        <span class="ft-hero-v" id="ftHeroPx"></span>
         <span class="ft-hero-chg" id="ftHeroChg" hidden></span>
         <span class="ft-hero-live" id="ftHeroLive" role="status" hidden></span>
       </span>
@@ -1041,33 +1040,31 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
 
     <div class="ft-hero-b" id="ftHeroScoreB">
       <span class="ft-hero-k">Options score</span>
+      <span class="ft-hero-v" id="ftHeroScore"></span>
       <span class="ft-hero-stack">
-        <span class="ft-hero-row">
-          <span class="ft-hero-v" id="ftHeroScore"></span>
-          <span class="ft-hero-bar" id="ftHeroScoreBar" aria-hidden="true"></span>
-        </span>
+        <span class="ft-hero-bar" id="ftHeroScoreBar" aria-hidden="true"></span>
         <span class="ft-hero-pill" id="ftHeroSide" hidden></span>
       </span>
     </div>
     <div class="ft-hero-b" id="ftHeroConvB">
       <span class="ft-hero-k">Conviction</span>
+      <span class="ft-hero-v" id="ftHeroConv"></span>
       <span class="ft-hero-stack">
-        <span class="ft-hero-v" id="ftHeroConv"></span>
         <span class="ft-hero-seg" id="ftHeroConvSeg" aria-hidden="true"></span>
       </span>
     </div>
 
     <div class="ft-hero-b" id="ftHeroIvB" hidden>
       <span class="ft-hero-k">ATM IV</span>
+      <span class="ft-hero-v" id="ftHeroIv"></span>
       <span class="ft-hero-stack">
-        <span class="ft-hero-v" id="ftHeroIv"></span>
         <span class="ft-hero-m is-faint" id="ftHeroIvSub" hidden></span>
       </span>
     </div>
     <div class="ft-hero-b" id="ftHeroIvrB" hidden>
       <span class="ft-hero-k">IV rank</span>
+      <span class="ft-hero-v" id="ftHeroIvr"></span>
       <span class="ft-hero-stack">
-        <span class="ft-hero-v" id="ftHeroIvr"></span>
         <span class="ft-hero-seg" id="ftHeroIvrSeg" aria-hidden="true"></span>
       </span>
     </div>
@@ -1191,6 +1188,7 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
       <span class="ft-brief-hn">Brief</span>
       <span class="ft-brief-beta">Beta</span>
     </h2>
+    <div class="ft-brief-body" id="ftBriefBody">
     <div class="ak-neuron ft-neuron is-pending" id="ftNeuron" hidden>
       ${neuronMark("t", false)}
       <div class="ak-neuron-body">
@@ -1223,6 +1221,7 @@ ${shell("Ticker", "Options-flow intelligence", "ticker", username, `
           class="ft-brief-ask-bt">Ask</span></button>
       </span>
     </form>
+    </div>
   </aside>
     </div>
   </div>
@@ -1383,7 +1382,7 @@ export function politicalPage({ username = "" } = {}) {
   const lede = "Who disclosed the largest purchases, and in what — ranked by " +
     "size, with the range each filing actually stated drawn across it.";
   return `${head("Flows — Political", lede)}
-${shell("Political Disclosures", "Options-flow intelligence", "political", username, `
+${shell("Political disclosures", "Options-flow intelligence", "political", username, `
   <div class="flows-status" id="plStatus" role="status">Loading the disclosure window…</div>
   <p class="flows-stale" id="plStale" role="status" hidden></p>
   <p class="flows-stale" id="plSource" role="status" hidden></p>
@@ -1467,7 +1466,7 @@ export function strategyPage({ username = "" } = {}) {
     "vendor's; every sum is arithmetic on those quotes; every extrapolation " +
     "carries the name of the assumption it rests on.";
   return `${head("Flows — Strategy tester", lede)}
-${shell("Strategy Tester", "Options-flow intelligence", "strategy", username, `
+${shell("Strategy tester", "Options-flow intelligence", "strategy", username, `
   <div class="flows-status" id="sgStatus" role="status">Enter a symbol to begin.</div>
 
   <div class="flows-controls">
