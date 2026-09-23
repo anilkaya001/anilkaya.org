@@ -137,6 +137,15 @@ export function retryableGuard(guard, ageMs) {
   return true;
 }
 
+const REPLIED_GUARDS = new Set(["invented", "forecast", "unreachable:length", "unreachable:empty"]);
+
+export function repliedGuard(guard) {
+  return typeof guard === "string" && REPLIED_GUARDS.has(guard);
+}
+
+const stopGuard = (replied) =>
+  (replied.some((a) => a.finish === "length") ? "unreachable:length" : "unreachable:empty");
+
 export async function askModels(ai, chain, messages, opts, onUsage) {
   const models = [];
   for (const m of Array.isArray(chain) ? chain : []) {
@@ -150,6 +159,10 @@ export async function askModels(ai, chain, messages, opts, onUsage) {
     } catch (error) {
       const failure = askFailure(error);
       attempts.push({ model, text: null, finish: null, reasoned: false, failed: failure.why });
+      const replied = attempts.filter((a) => a.failed === null);
+      if (replied.length && failure.why !== "allowance") {
+        return { text: null, model: replied[0].model, attempts, failure, guard: stopGuard(replied) };
+      }
       return { text: null, model, attempts, failure, guard: "unreachable:" + failure.why };
     }
     if (typeof onUsage === "function") {
@@ -159,13 +172,12 @@ export async function askModels(ai, chain, messages, opts, onUsage) {
     attempts.push({ model, text: read.text, finish: read.finish, reasoned: read.reasoned, failed: null });
     if (read.text) return { text: read.text, model, attempts, failure: null, guard: null };
   }
-  const length = attempts.some((a) => a.finish === "length");
   return {
     text: null,
     model: models.length ? models[0] : null,
     attempts,
     failure: null,
-    guard: attempts.length ? (length ? "unreachable:length" : "unreachable:empty") : null,
+    guard: attempts.length ? stopGuard(attempts) : null,
   };
 }
 

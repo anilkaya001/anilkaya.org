@@ -9,7 +9,7 @@ import { modelName, neuronProvenance } from "../shared/flows-pages.js";
 import { variation, cardVariationInput } from "../shared/flows-variation.js";
 import { gammaReading } from "../shared/flows-neuron.js";
 import fs from "node:fs";
-import { aiText, modelInput, askModels, aiChain, aiCallSignature, retryableGuard, modelRates,
+import { aiText, modelInput, askModels, aiChain, aiCallSignature, retryableGuard, repliedGuard, modelRates,
          spendShape, fallbackNote, AI_LENGTH_RETRY_MS } from "../shared/flows-ai.js";
 import { readFileSync } from "node:fs";
 
@@ -607,8 +607,24 @@ const CARD = {
   ok(r2.guard === "unreachable:allowance" && r2.failure.why === "allowance" && spent.calls.length === 1,
     "a spent allowance is account-wide, so it is reported and the fallback is NOT asked to fail the same way");
   const busy = fake([reasoningOnly, new Error("AiError: 3040: capacity")]);
-  eq((await askModels(busy, aiChain(env), msgs, {})).guard, "unreachable:capacity",
-    "a fallback that fails after an empty primary reports its own failure");
+  const r3 = await askModels(busy, aiChain(env), msgs, {});
+  ok(r3.guard === "unreachable:length" && r3.model === glm && r3.failure.why === "capacity",
+    "A FALLBACK THAT FAILS AFTER A BILLED EMPTY PRIMARY STORES THE PRIMARY'S STOP, not its own failure: " +
+    "unreachable:capacity is retried every cron tick, and each retry pays the primary's 1,024 thinking " +
+    "tokens again — a fallback that kept failing spent 10,178 of the 10,000 daily neurons over 96 ticks " +
+    "on one fingerprint in the review's day simulation; the failure itself still travels for the Ask note");
+  const broke = fake([reasoningOnly, new Error("AiError: 5021: context window limit (24000)")]);
+  eq((await askModels(broke, aiChain(env), msgs, {})).guard, "unreachable:length",
+    "and so does a fallback that cannot take the prompt at all, a failure that never clears on retry");
+  const plainThenBusy = fake([{ choices: [{ finish_reason: "stop", message: { content: "" } }] }, new Error("AiError: 3040: capacity")]);
+  eq((await askModels(plainThenBusy, aiChain(env), msgs, {})).guard, "unreachable:empty",
+    "a primary that stopped empty without hitting the cap is an unreachable:empty, which the same facts never retry");
+  const spentAfter = fake([reasoningOnly, new Error("AiError: 3036: account limit")]);
+  eq((await askModels(spentAfter, aiChain(env), msgs, {})).guard, "unreachable:allowance",
+    "while a spent allowance keeps its own name: every retry of it fails at the primary for free");
+  ok(repliedGuard("invented") && repliedGuard("unreachable:length") && repliedGuard("unreachable:empty") &&
+     !repliedGuard("unreachable:capacity") && !repliedGuard(null),
+    "a guard written after a model replied (and was billed) is told apart from one written after a refusal to run");
 
   ok(retryableGuard("unreachable:allowance", 0) && retryableGuard("unreachable:capacity", 0),
     "a failure that genuinely returns is retried");
@@ -644,6 +660,12 @@ const CARD = {
     "no call site reaches the binding directly: all three go through askModels, so none can drop the thinking switch or the fallback");
   eq((worker.match(/askModels\(env\.AI/g) || []).length, 3, "and all three lanes (summary, Neuron, Ask) use it");
   ok(!/max_tokens/.test(worker), "the worker no longer carries a max_tokens literal of its own");
+  ok(/sameCall && \(prior\.llm \|\| repliedGuard\(prior\.guard\)\) && intradayOnly/.test(worker),
+    "THE INTRADAY SUMMARY THROTTLE COVERS EVERY BILLED REPLY, not only an accepted one: with the fallback " +
+    "writing, a refused summary on facts that move every tick cost 13,021 neurons over a 26-tick session in " +
+    "the review's simulation, against 4,507 when the text was accepted and the 45-minute throttle held");
+  ok(/prior\.fingerprint\.endsWith\("\|" \+ signature\)/.test(worker),
+    "and a change of model configuration still regenerates on the next tick, throttle or not");
 }
 
 console.log(`✓ flows-neuron: ${checks} assertions — a context that carries every registry panel plus the ` +

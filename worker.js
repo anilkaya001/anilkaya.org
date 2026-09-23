@@ -7,7 +7,7 @@ import {
 import { FLOWS_PAGES, modelName, neuronProvenance } from "./shared/flows-pages.js";
 import * as FLOWS_ASK from "./shared/flows-ask.js";
 import * as FLOWS_NEURON from "./shared/flows-neuron.js";
-import { aiChain, aiCallSignature, askModels, fallbackNote, retryableGuard, spendShape } from "./shared/flows-ai.js";
+import { aiChain, aiCallSignature, askModels, fallbackNote, repliedGuard, retryableGuard, spendShape } from "./shared/flows-ai.js";
 import { COURSE_STAGE_POINTS } from "./shared/course-points.js";
 import { COURSE_BY_ID, COURSE_BY_SLUG, COURSE_TOPICS, SITE_ORIGIN } from "./shared/course-seo.js";
 import { REVIEW_ITEM_BY_ID } from "./shared/review-manifest.js";
@@ -1042,6 +1042,13 @@ const askModel = (env) => aiChain(env)[0] || null;
 
 const ASK_QUESTION_MAX = 400;
 
+const FALLBACK_FAILED = Object.freeze({
+  allowance: "found the day's free model allowance spent, which resets at 00:00 UTC",
+  capacity: "had no capacity just now, so asking again shortly may work",
+  plan: "is not available on this site's plan, which is a configuration fault here",
+  unreachable: "could not be reached and did not say why",
+});
+
 function aiDay() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -1105,7 +1112,8 @@ async function refreshFlowsSummary(env) {
   const facts = Array.isArray(index && index.facts) ? index.facts : [];
   if (!facts.length) return;
 
-  const fingerprint = FLOWS_ASK.summaryFingerprint(facts) + "|" + aiCallSignature(env);
+  const signature = aiCallSignature(env);
+  const fingerprint = FLOWS_ASK.summaryFingerprint(facts) + "|" + signature;
   const prior = await env.DB.prepare(
     "SELECT fingerprint, llm, guard, generated_at FROM flows_ai_summary WHERE scope = ?",
   ).bind("board").first().catch(() => null);
@@ -1117,7 +1125,8 @@ async function refreshFlowsSummary(env) {
   }
 
   const intradayOnly = typeof index.refreshedAt === "string" && index.refreshedAt !== "";
-  if (prior && prior.llm && intradayOnly && typeof prior.generated_at === "string") {
+  const sameCall = prior && typeof prior.fingerprint === "string" && prior.fingerprint.endsWith("|" + signature);
+  if (sameCall && (prior.llm || repliedGuard(prior.guard)) && intradayOnly && typeof prior.generated_at === "string") {
     const ageMs = Date.now() - Date.parse(prior.generated_at);
     if (Number.isFinite(ageMs) && ageMs < 45 * 60 * 1000) return;
   }
@@ -1451,15 +1460,24 @@ async function askAnswer(question, env, index, updatedAt, subject) {
 
   if (said.failure) {
     const failed = said.failure;
+    const first = said.attempts[0];
+    const afterEmpty = said.attempts.length > 1 && first && first.failed === null;
+    const told = afterEmpty
+      ? (first.finish === "length"
+        ? "The model spent its whole answer budget before writing any text"
+        : "The model answered with no text") +
+        ", and the fallback model asked after it " + FALLBACK_FAILED[failed.why] +
+        ", so this reading is the pipeline's own wording. Every figure in it was measured."
+      : failed.say;
 
     const disagrees = failed.why === "allowance"
       && spend !== null && typeof spend.remaining === "number" && spend.remaining > 0;
     const say = disagrees
-      ? failed.say + " The meter on this page still showed " + grouped(spend.remaining) +
+      ? told + " The meter on this page still showed " + grouped(spend.remaining) +
         " of " + grouped(spend.allowanceNeurons) + " model credits unspent, which means something " +
         "other than this site drew on the same account today. Cloudflare is the " +
         "authority and the meter is not: it can only ever see this site's own calls."
-      : failed.say;
+      : told;
     return json({ ...base, spend: afterCall || base.spend, note: say, model, llmFailure: failed.why,
       spendDisagrees: disagrees });
   }
