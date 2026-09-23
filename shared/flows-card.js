@@ -1264,7 +1264,7 @@ export function indexCrossFeed(feed, raw, { limit = null, tickers = [], sessionD
   for (const t of wanted) if (entries[t]) present++;
 
   const lim = numOrNull(limit);
-  const capped = lim !== null && shaped.length >= lim;
+  const capped = (lim !== null && shaped.length >= lim) || (!!raw && raw.vendorCapped === true);
 
   return {
     status: "ok", feed, label: CROSS_LABEL[feed],

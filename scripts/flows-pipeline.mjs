@@ -20,6 +20,7 @@ import {
 import { tradingCalendar, scoreSessions, icTable, RECORD_NOTES } from "../shared/flows-record.js";
 import { makePermitQueue } from "../shared/flows-permits.js";
 import { fitGarch } from "../shared/flows-garch.js";
+import { sessionPrints, sessionPrintParams } from "../shared/flows-positioning.js";
 import { buildChainPanels, CHAIN_PAGE_SIZE, CHAIN_MAX_PAGES, mergeChainPages, SKEW_MIN_DAYS, summariseSkewMisses }
   from "../shared/flows-chain.js";
 import {
@@ -3128,7 +3129,12 @@ function fakeMaxPain(ticker, spot) {
 function fakeStockDarkpool(ticker, spot) {
   const rnd = mulberry(ticker.length * 1289 + Math.round(spot));
   if (ticker.length % 7 === 3) return [];
-  return Array.from({ length: 20 }, (_, i) => {
+  const late = Array.from({ length: 4 }, (_, i) => ({
+    ticker, executed_at: `${DRY_SESSION_DATE}T${20 + i}:${String(5 + i * 11).padStart(2, "0")}:00Z`,
+    price: spot.toFixed(2), size: 900000 - i * 1000, premium: String(Math.round(spot * (900000 - i * 1000))),
+    volume: Math.round(rnd() * 6e7), market_center: "L", ext_hour_sold_codes: "extended_hours_trade",
+  }));
+  return late.concat(Array.from({ length: 20 }, (_, i) => {
     const px = spot * (0.985 + rnd() * 0.03);
     const size = Math.round(5e3 + rnd() * 4e5);
     const row = {
@@ -3142,7 +3148,7 @@ function fakeStockDarkpool(ticker, spot) {
     if (i % 3 !== 2) { row.nbbo_bid = (px - 0.03).toFixed(2); row.nbbo_ask = (px + 0.03).toFixed(2); }
     if (i % 9 === 8) row.canceled = false;
     return row;
-  });
+  }));
 }
 
 function fakeStockOiChange(ticker, spot) {
@@ -3459,13 +3465,23 @@ function fakePulseRaws(tickers) {
     sells_notional: String(Math.round(rnd() * 9e8)),
   })) };
 
-  const darkpool = { data: Array.from({ length: 45 }, (_, i) => {
+  const afterHours = Array.from({ length: 8 }, (_, i) => {
+    const px = 20 + rnd() * 400;
+    const size = Math.round(3e6 + rnd() * 2e6);
+    return {
+      ticker: pick(),
+      executed_at: `${DRY_SESSION_DATE}T23:${String(59 - i * 5).padStart(2, "0")}:00Z`,
+      price: px.toFixed(2), size, premium: String(Math.round(px * size)),
+      volume: Math.round(rnd() * 8e7), ext_hour_sold_codes: "extended_hours_trade",
+    };
+  });
+  const darkpool = { data: afterHours.concat(Array.from({ length: 45 }, (_, i) => {
     const px = 20 + rnd() * 400;
     const size = Math.round(1e4 + rnd() * 2e6);
     const minute = 959 - i;
     const row = {
       ticker: pick(),
-      executed_at: `2026-08-21T${String(Math.floor(minute / 60)).padStart(2, "0")}:` +
+      executed_at: `${DRY_SESSION_DATE}T${String(Math.floor(minute / 60)).padStart(2, "0")}:` +
         `${String(minute % 60).padStart(2, "0")}:00Z`,
       price: px.toFixed(2), size,
       premium: String(Math.round(px * size)),
@@ -3474,7 +3490,7 @@ function fakePulseRaws(tickers) {
     if (i % 3 !== 2) { row.nbbo_bid = (px - 0.05).toFixed(2); row.nbbo_ask = (px + 0.05).toFixed(2); }
     if (i % 7 === 6) row.canceled = rnd() > 0.5;
     return row;
-  }) };
+  })) };
   return {
     tide, totals, oiChange, netImpact, insiders, darkpool,
 
@@ -3692,7 +3708,8 @@ async function publishPulse({ sessionDate, generatedAt, tickers = [] }) {
       oiChange: ["/api/market/oi-change", { limit: MARKET_CROSS_LIMIT }],
       netImpact: ["/api/market/top-net-impact", { limit: PULSE_CAPS.netImpact }],
       insiders: ["/api/market/insider-buy-sells", { limit: PULSE_CAPS.insiders }],
-      darkpool: ["/api/darkpool/recent", { limit: MARKET_CROSS_LIMIT }],
+      darkpool: ["/api/darkpool/recent", { limit: MARKET_CROSS_LIMIT,
+        ...sessionPrintParams(sessionDate, { windowed: false }) }],
       seasonality: ["/api/seasonality/market", {}],
     };
     const raws = {};
@@ -3709,8 +3726,10 @@ async function publishPulse({ sessionDate, generatedAt, tickers = [] }) {
     }
     const readAt = new Date().toISOString();
 
+    raws.darkpool = sessionPrints(raws.darkpool, sessionDate, { limit: MARKET_CROSS_LIMIT });
     crossRaws = { oiChange: raws.oiChange, darkpool: raws.darkpool, readAt };
     const pulse = buildPulse(raws);
+    if (pulse.darkpool && raws.darkpool && raws.darkpool.session) pulse.darkpool.session = raws.darkpool.session;
     for (const feed of PULSE_FEEDS) {
       const f = pulse[feed];
       if (f.status === "quiet") {
@@ -5476,12 +5495,14 @@ async function main() {
             }).catch(() => [])
             : Promise.resolve([]),
 
-          uw(`/api/darkpool/${ticker}`, { limit: 60, ...onSession }).catch(() => null),
+          uw(`/api/darkpool/${ticker}`, { limit: 500, ...onSession, ...sessionPrintParams(sessionDate) })
+            .catch(() => null),
           uw(`/api/stock/${ticker}/oi-change`, { limit: 30, ...onSession }).catch(() => null),
           uw(`/api/stock/${ticker}/volatility/term-structure`, { ...onSession }).catch(() => null),
           uw(`/api/stock/${ticker}/iv-rank`, { ...IV_RANK_PARAMS, ...onSession }).catch(() => null),
         ]);
       const darkpoolCut = sessionRows(dpRaw, (r) => easternDayOf(r && r.executed_at), sessionDate);
+      const darkpoolRth = sessionPrints(darkpoolCut.raw, sessionDate, { limit: 500 });
       const rankCut = sessionRows(rankRaw, (r) => easternDayOf(r && r.date), sessionDate,
         { through: true });
       if (darkpoolCut.cut || rankCut.cut) {
@@ -5533,13 +5554,14 @@ async function main() {
           : null,
         weights: first.weights || null,
         maxPain, congress, generatedAt, sessionDate,
-        darkpool: darkpoolCut.raw, oiDeltas: oiRaw, termStructure: termRaw, ivRank: rankCut.raw,
+        darkpool: darkpoolRth, oiDeltas: oiRaw, termStructure: termRaw, ivRank: rankCut.raw,
 
         marketCross,
         variation: variationOptions(variationRun),
       });
       card.readPx = readPxOf(e, screenerReadAt);
       attachVol(card, volLeg, ticker, { ivRank: rankCut.raw });
+      if (card.panels.darkpool && darkpoolRth && darkpoolRth.session) card.panels.darkpool.session = darkpoolRth.session;
 
       const shed = [
         ["topContracts", "dropped to fit the payload cap — the day's most-traded contracts " +
