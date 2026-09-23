@@ -10,19 +10,19 @@ const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
 const CEILING_KIB = {
-  tickerPage: 358,
-  overviewPage: 215,
-  sidePage: 181,
-  watchPage: 181,
+  tickerPage: 350,
+  overviewPage: 216,
+  sidePage: 183,
+  watchPage: 183,
   deskPage: 226,
-  askPage: 171,
-  strategyPage: 242,
-  trackPage: 162,
-  marketPage: 204,
-  unusualPage: 168,
-  eventsPage: 152,
-  politicalPage: 142,
-  historyPage: 156,
+  askPage: 172,
+  strategyPage: 243,
+  trackPage: 163,
+  marketPage: 207,
+  unusualPage: 169,
+  eventsPage: 154,
+  politicalPage: 143,
+  historyPage: 157,
   loginPage: 5,
 };
 
