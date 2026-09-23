@@ -1022,9 +1022,11 @@ export function alertsTape(rows, ticker, { sessionDate = null, adv = null, compl
     const key = r.id || `${r.option_chain}|${t}`;
     if (seen.has(key)) continue;
     seen.add(key);
+    const premRaw = vnum(r.total_premium);
     mine.push({
       t, m: win ? minuteOf(t, win) : null,
-      prem: vnum(r.total_premium) ?? 0,
+      priced: premRaw !== null,
+      prem: premRaw ?? 0,
       ask: vnum(r.total_ask_side_prem) ?? 0,
       sweep: truthy(r.has_sweep),
       opening: truthy(r.all_opening_trades),
@@ -1041,6 +1043,7 @@ export function alertsTape(rows, ticker, { sessionDate = null, adv = null, compl
       openingShare: note("openingShare", "no-premium"), callShare: note("callShare", "no-premium"),
       urgency: note("urgency", "no-premium"), dots: [], u: { prem: "usd", urgency: "frac" }, gaps };
   }
+  if (!mine.some((a) => a.priced)) return silence("unreadable", "malformed");
   const P = sum(mine.map((a) => a.prem));
   const w = (pred) => (P > 0 ? sum(mine.filter(pred).map((a) => a.prem)) / P : null);
   const A = vnum(adv);
@@ -1087,7 +1090,7 @@ export function multiLeg(rows, ticker, { sessionDate = null, truncated = false, 
       s: typeof r.strategy === "string" ? r.strategy : "other",
       side: typeof r.net_side === "string" ? r.net_side : null,
       dir: typeof r.direction === "string" ? r.direction : null,
-      np: vnum(r.net_premium), tp: vnum(r.total_premium) ?? 0,
+      np: vnum(r.net_premium), tpRaw: vnum(r.total_premium), tp: vnum(r.total_premium) ?? 0,
       size: vnum(r.size), legs: vnum(r.leg_count),
       k: (Array.isArray(r.strikes) ? r.strikes : []).map(vnum).filter((v) => v !== null),
       dte: [vnum(r.min_dte), vnum(r.max_dte)],
@@ -1101,6 +1104,7 @@ export function multiLeg(rows, ticker, { sessionDate = null, truncated = false, 
     return { status: "quiet", why: truncated ? "truncated" : "empty", asOf: sessionDate, n: 0,
       truncated, byStrategy: [], top: [], u: {}, gaps };
   }
+  if (mine.every((x) => x.np === null && x.tpRaw === null)) return silence("unreadable", "malformed");
   const byS = new Map();
   for (const x of mine) {
     const e = byS.get(x.s) || { s: x.s, n: 0, np: 0, tp: 0 };

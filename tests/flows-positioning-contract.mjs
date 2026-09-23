@@ -527,6 +527,12 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   eq(live.n, 1, "the probe structure executed 19:59:59Z is inside the session");
   eq(live.netPrem, 2860, "its net premium reads from the string");
   eq(multiLeg([], "AAPL", { truncated: true }).why, "truncated", "a truncated empty read is not a quiet day");
+  const unpricedMl = multiLeg([{ id: "u1", ticker: "AAPL", executed_at: at("15:00"), premium: "5000", strategy: "straddle" }],
+    "AAPL", { sessionDate: SESSION });
+  eq(unpricedMl.status, "unreadable", "structures carrying neither confirmed premium field are unreadable, not a $0 session");
+  const unpricedAlerts = alertsTape([{ id: "u1", ticker: "AAPL", start_time: Date.parse(at("15:00")), premium: "25000", type: "call" }],
+    "AAPL", { sessionDate: SESSION, adv: 1e9 });
+  eq(unpricedAlerts.status, "unreadable", "and so is an alert tape whose alerts carry no total_premium");
 }
 
 {
