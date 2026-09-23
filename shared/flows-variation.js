@@ -374,7 +374,7 @@ export function dealerNets(expiryRows, { asOf = null, h = 1, multipliers = PUT_T
   const sum = () => ({ call: 0, put: 0, rows: 0, halfLegs: 0 });
   const acc = { gamma: sum(), delta: sum(), vanna: sum(), charm: sum() };
   const gross = { gamma: 0 };
-  const charmFront = { expiries: 0, call: 0, put: 0 };
+  const charmFront = { expiries: 0, call: 0, put: 0, halfLegs: 0 };
   const rollOff = { expiries: 0, call: 0, put: 0 };
   let live = 0, seen = 0;
   const sorted = rows.slice().sort((a, b) => (isoDay(a.expiry) < isoDay(b.expiry) ? -1 : 1));
@@ -396,13 +396,15 @@ export function dealerNets(expiryRows, { asOf = null, h = 1, multipliers = PUT_T
     for (const greek of ["gamma", "delta", "vanna", "charm"]) {
       const g = vendorLegs(row, greek);
       if (g.call === null && g.put === null) continue;
-      if (g.call === null || g.put === null) { acc[greek].halfLegs++; continue; }
+      const whole = g.call !== null && g.put !== null;
       if (greek === "charm" && dte <= front) {
+        if (!whole) { charmFront.halfLegs++; continue; }
         charmFront.expiries++;
         charmFront.call += g.call;
         charmFront.put += g.put;
         continue;
       }
+      if (!whole) { acc[greek].halfLegs++; continue; }
       const a = acc[greek];
       a.call += g.call;
       a.put += g.put;
@@ -423,8 +425,10 @@ export function dealerNets(expiryRows, { asOf = null, h = 1, multipliers = PUT_T
     gammaGross: acc.gamma.rows ? gross.gamma : null,
     legs: Object.fromEntries(Object.entries(acc).map(([k, a]) =>
       [k, { call: a.call, put: a.put, expiries: a.rows, halfLegs: a.halfLegs }])),
-    charmFront: charmFront.expiries
-      ? { expiries: charmFront.expiries, value: mc === null || mc === undefined ? null : charmFront.call + mc * charmFront.put }
+    charmFront: charmFront.expiries || charmFront.halfLegs
+      ? { expiries: charmFront.expiries,
+        value: !charmFront.expiries || mc === null || mc === undefined ? null : charmFront.call + mc * charmFront.put,
+        ...(charmFront.halfLegs ? { halfLegs: charmFront.halfLegs } : {}) }
       : null,
     rollOff: rollOff.expiries
       ? { expiries: rollOff.expiries, delta: md === null || md === undefined ? null : rollOff.call + md * rollOff.put }

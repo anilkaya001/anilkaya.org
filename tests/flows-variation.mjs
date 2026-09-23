@@ -614,6 +614,18 @@ function ivRows(end, n, { rho = 0 } = {}) {
   const summary = variationSummary(allHalf);
   eq(summary.why.vannaPerPointPctAdv, "vanna-half-leg", "and a board row carries the same code for vanna");
   eq(summary.why.charmPctAdv, "charm-half-leg", "and for charm");
+
+  const frontRow = { ...full, expiry: addDays(SESSION, 1) };
+  const withFront = variation(input([full, frontRow]), opts);
+  const frontHalf = variation(input([full, { ...frontRow, put_charm: null }]), opts);
+  eq(frontHalf.inputs.charmNet, withFront.inputs.charmNet, "a front expiry, held out of the charm net either way, leaves the net unchanged when it quotes one charm leg");
+  ok(!frontHalf.silences.some((s) => s.code === "charm-half-leg"),
+     "so no silence claims a half leg was left out of a net it was never in");
+  eq(frontHalf.robustness.r, withFront.robustness.r, `and the grade does not drop for it (${frontHalf.robustness.why})`);
+  eq(frontHalf.inputs.charmFront.halfLegs, 1, "the front expiry's missing leg is counted beside the front charm instead");
+  eq(frontHalf.inputs.charmFront.value, null, "which is not netted against zero");
+  eq(withFront.inputs.charmFront.expiries, 1, "while a complete front expiry is netted there as before");
+  ok(!("halfLegs" in withFront.inputs.charmFront), "with no half-leg count when there is none");
 }
 
 console.log(`✓ flows-variation: ${checks} assertions — Black-Scholes vendor rows netted call + put for gamma and call − put for delta, vanna and charm to nine digits, a |charm|-weighted convention probe that reads a live-like book raw and a half-and-half one as nothing, a charm scale recovered where the rate term allows, a unit probe that refuses to classify cheap stocks, a vanna scale checked against the chain, a variance whose shares sum to one and fall silent as null rather than zero, a 15-cell grid with the right signs, candles and implied-volatility rows after the session ignored, golden B and CHTR readings from their own cut series, and a score decomposition that accounts for the residual whole`);
