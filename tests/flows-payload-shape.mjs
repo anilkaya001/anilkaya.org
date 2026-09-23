@@ -613,6 +613,72 @@ assert.deepEqual(missingReport, [],
   assert.deepEqual(missingReport.filter((m) => /^card-x|^card x\.vol|^regime/.test(m)), [],
     "every field the vol contract publishes is on every emitted arm:\n  " +
     missingReport.filter((m) => /^card-x|^card x\.vol|^regime/.test(m)).slice(0, 20).join("\n  ")); checks++;
+  const { FLOW_CODES, UNITS } = await import("../shared/flows-positioning.js");
+  const cardX = readdirSync(dir).filter((f) => /^p-card-x-[A-Z]/.test(f))
+    .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")));
+  const hists = readdirSync(dir).filter((f) => /^p-hist-[A-Z]/.test(f))
+    .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")));
+  ok(cardX.length > 0 && hists.length === cardX.length,
+     `the pipeline emits card-x and hist for the same names (${cardX.length} and ${hists.length})`);
+  const PINNED = {
+    gex: ["asOf", "n", "net", "usd1pct", "adv", "z", "pct", "regime", "persist", "longShare", "flips",
+      "charm", "charmZ", "charmPct", "vanna", "vannaZ", "vannaPct", "u", "gaps"],
+    volume: ["asOf", "n", "netPrem", "netPremZ", "netPremPct", "bullBear", "bullBearZ", "bullBearPct", "volume",
+      "volumeZ", "volumePct", "pc", "pcZ", "pcPct", "oi", "oiSlope", "oiSlopeRel", "u", "gaps"],
+    gexLevels: ["asOf", "spot", "callWall", "putWall", "magnet", "flip", "callWallAtr", "putWallAtr", "magnetAtr",
+      "flipAtr", "nearby", "ambiguity", "ours", "flipGap", "flipAgree", "callWallAgree", "putWallAgree", "u", "gaps"],
+    flowExpiry: ["asOf", "readAt", "netTotal", "grossTotal", "otmShare", "convictionDte", "convictionBucket", "mix", "rows", "u", "gaps"],
+    flowStrike: ["asOf", "spot", "centroid", "centroidSigma", "longPeak", "shortPeak", "callWallFlow", "putWallFlow",
+      "wallShare", "ladder", "u", "gaps"],
+    nope: ["asOf", "close", "closeCheck", "fill", "high", "highM", "low", "lowM", "divergence", "z", "pct", "m", "x", "u", "gaps"],
+    gexPath: ["asOf", "flowFilled", "open", "close", "change", "flips", "flipM", "flowFlips", "charmClose",
+      "charmLastHour", "m", "px", "g", "f", "c", "u", "gaps"],
+    contracts: ["rows"],
+    dpLevels: ["asOf", "darkShare", "shelves", "profile", "u", "gaps"],
+    alerts: ["asOf", "n", "complete", "prem", "askShare", "sweepShare", "openingShare", "callShare", "urgency", "dots", "u", "gaps"],
+    multiLeg: ["asOf", "n", "truncated", "netPrem", "grossPrem", "netDelta", "netVega", "creditShare", "openingShare",
+      "byStrategy", "top", "u", "gaps"],
+    oiWalls: ["asOf", "callWall", "putWall", "callWallAtr", "putWallAtr", "calls", "puts", "pcOi", "u", "gaps"],
+  };
+  const seen = new Set();
+  for (const c of cardX) {
+    for (const f of ["v", "ticker", "sessionDate", "generatedAt", "depth", "fresh"]) {
+      ok(Object.hasOwn(c, f), `card-x:${c.ticker} carries ${f}`);
+    }
+    for (const [key, fields] of Object.entries(PINNED)) {
+      const s = c[key];
+      if (!s) continue;
+      ok(["ok", "stale", "quiet", "unavailable", "unreadable"].includes(s.status),
+         `card-x:${c.ticker}.${key} is one arm of the silence union (got ${s.status})`);
+      if (s.status !== "ok" && s.status !== "stale") {
+        ok(s.why in FLOW_CODES, `card-x:${c.ticker}.${key} ${s.status} names a code the UI can explain (${s.why})`);
+        continue;
+      }
+      seen.add(key);
+      for (const f of fields) ok(Object.hasOwn(s, f), `card-x:${c.ticker}.${key} carries ${f} on its readable arm`);
+      for (const unit of Object.values(s.u || {})) ok(unit in UNITS, `card-x:${c.ticker}.${key} unit ${unit} is declared`);
+    }
+    for (const row of (c.contracts && c.contracts.rows) || []) {
+      for (const f of ["id", "cp", "k", "e", "status", "buildStart", "buildSessions", "askShareBuild", "d", "oi", "iv", "ask"]) {
+        ok(Object.hasOwn(row, f), `card-x:${c.ticker} lifeline ${row.id} carries ${f}`);
+      }
+    }
+  }
+  assert.deepEqual([...seen].sort(), Object.keys(PINNED).sort(),
+    "every pinned section is reached on its readable arm somewhere in the corpus"); checks++;
+  for (const h of hists) {
+    for (const f of ["v", "ticker", "sessionDate", "fresh", "d0", "dd", "gex", "volume", "u"]) {
+      ok(Object.hasOwn(h, f), `hist:${h.ticker} carries ${f}`);
+    }
+    for (const [group, keys] of [["gex", ["g", "c", "v"]], ["volume", ["np", "bb", "vol", "pc", "oi"]]]) {
+      for (const k of keys) {
+        const p = h[group] && h[group][k];
+        ok(p && Number.isInteger(p.s) && Array.isArray(p.x) && p.x.length === h.dd.length,
+           `hist:${h.ticker}.${group}.${k} is a packed series on the shared axis`);
+      }
+    }
+    ok(JSON.stringify(h).length <= 16 * 1024, `hist:${h.ticker} is inside its 16 KB budget`);
+  }
 }
 
 rmSync(dir, { recursive: true, force: true });
@@ -631,4 +697,5 @@ console.log(`✓ flows-payload-shape: ${checks} assertions — the publisher and
   `and its measured zero, its vocabulary proven DISJOINT from the sector momentum key it ` +
   `must never be merged with, and the news tape's four counts, its stated ordering and the ` +
   `vendor stamp on every row beside the instant we read them; and the volatility dossiers (card-x), the ` +
-  `card's x.vol summary and the regime's vol radar pinned field by field on every arm they are emitted on`);
+  `card's x.vol summary and the regime's vol radar pinned field by field on every arm they are emitted on; and the per-name card-x and hist ` +
+  `keys pinned the same way, every section's readable arm, silence codes, units and packed series`);

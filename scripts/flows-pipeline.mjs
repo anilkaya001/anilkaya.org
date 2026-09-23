@@ -20,6 +20,8 @@ import {
 import { tradingCalendar, scoreSessions, icTable, RECORD_NOTES } from "../shared/flows-record.js";
 import { makePermitQueue } from "../shared/flows-permits.js";
 import { fitGarch } from "../shared/flows-garch.js";
+import { runFlowLeg } from "./flows-legs/flow.mjs";
+import { makeFlowFakeVendor, makeFlowFakeStore } from "./flows-legs/flow-fake.mjs";
 import { sessionPrints, sessionPrintParams } from "../shared/flows-positioning.js";
 import { buildChainPanels, CHAIN_PAGE_SIZE, CHAIN_MAX_PAGES, mergeChainPages, SKEW_MIN_DAYS, summariseSkewMisses }
   from "../shared/flows-chain.js";
@@ -5743,6 +5745,18 @@ async function main() {
 
   await publishVol(volLeg, {
     publish, stored: (key) => publishedStore[key] || null, sessionDate, generatedAt, log: (line) => console.log(line) });
+  await runFlowLeg({
+    uw: DRY_RUN
+      ? makeFlowFakeVendor({ sessionDate, spotOf: (t) => byTicker.get(t) && byTicker.get(t).features.spot })
+      : uw,
+    readStored: DRY_RUN ? makeFlowFakeStore({ sessionDate }) : readStored,
+    publish, stored: (key) => publishedStore[key] || null, runPooled,
+    deadline, sessionDate, generatedAt,
+    deep: cardTickers.filter((t) => byTicker.has(t)), cross: crossSectionTickers,
+    featuresOf: (t) => (byTicker.get(t) || {}).features, strikesOf: (t) => ((byTicker.get(t) || {}).raw || {}).strikes,
+    cardOf: (t) => publishedStore["card:" + t] || null, variation: variationRun,
+    width: poolWidth(3).width, log: (line) => console.log(line),
+  });
 
   console.log("  " + (DRY_RUN ? "[dry-run] " : "") + describeGammaRange(gammaProfiles).line +
     (DRY_RUN

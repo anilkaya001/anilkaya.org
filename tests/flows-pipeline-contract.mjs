@@ -1348,7 +1348,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
   {
     const emitted = new Set(fs.readdirSync(path.dirname(prefix))
-      .map((f) => /-card-(?!x-)(.+)\.json$/.exec(f))
+      .map((f) => /-card-([A-Z].*)\.json$/.exec(f))
       .filter(Boolean).map((m) => m[1]));
     const claimed = new Set();
     const long = read("board-long"), short = read("board-short");
@@ -1417,7 +1417,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
   {
     const cardFiles = fs.readdirSync(path.dirname(prefix))
-      .filter((f) => /-card-(?!x-).+\.json$/.test(f))
+      .filter((f) => /-card-[A-Z].*\.json$/.test(f))
       .map((f) => JSON.parse(fs.readFileSync(path.join(path.dirname(prefix), f), "utf8")));
     ok(cardFiles.length > 0, `the dry run emitted ${cardFiles.length} cards to check the join on`);
 
@@ -2631,7 +2631,8 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   }
 
   {
-    const cardFiles = emitted.filter((n) => n.startsWith(base + "-card-"));
+    const cardFiles = emitted.filter((n) => n.startsWith(base + "-card-") &&
+      /^[A-Z]/.test(n.slice((base + "-card-").length)));
     ok(cardFiles.length >= 50, `the dry run emitted ${cardFiles.length} cards to check`);
     let boardCards = 0;
     for (const name of cardFiles) {
@@ -3748,7 +3749,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(long.rows.every((r) => (r.variation.driftInSd === null ? r.variation.sdBasis === null : r.variation.sdBasis === "gamma")),
      "and every row's drift names its basis: the spot channel alone, the only one a row can measure");
   {
-    const cardsBy = new Map(fs.readdirSync(path.dirname(prefix)).filter((f) => /-card-(?!x-)/.test(f))
+    const cardsBy = new Map(fs.readdirSync(path.dirname(prefix)).filter((f) => /-card-[A-Z]/.test(f))
       .map((f) => JSON.parse(fs.readFileSync(path.join(path.dirname(prefix), f), "utf8"))).map((c) => [c.ticker, c]));
     const rows = [];
     for (const side of ["long", "short"]) {
@@ -3762,7 +3763,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        `where a row's drift differs from its card's, the two carry different bases, so neither is presented as the other (${rows.length} names)`);
   }
   {
-    const cards0 = fs.readdirSync(path.dirname(prefix)).filter((f) => /-card-(?!x-)/.test(f))
+    const cards0 = fs.readdirSync(path.dirname(prefix)).filter((f) => /-card-[A-Z]/.test(f))
       .map((f) => JSON.parse(fs.readFileSync(path.join(path.dirname(prefix), f), "utf8")));
     const byT = new Map(cards0.map((c) => [c.ticker, c]));
     const signed = long.rows.filter((r) => r.variation && r.variation.charmPctAdv !== null && byT.has(r.t) &&
@@ -3771,7 +3772,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
       -Math.sign(byT.get(r.t).panels.variation.channels.charm.hedge)),
        `a row's charm fraction points opposite to the card's hedge trade, as the block says (${signed.length} rows)`);
   }
-  const cards = fs.readdirSync(path.dirname(prefix)).filter((f) => /-card-(?!x-)/.test(f))
+  const cards = fs.readdirSync(path.dirname(prefix)).filter((f) => /-card-[A-Z]/.test(f))
     .map((f) => JSON.parse(fs.readFileSync(path.join(path.dirname(prefix), f), "utf8")));
   ok(cards.every((c) => c.panels.variation && typeof c.panels.variation.status === "string"),
      "every card, deep or cross-section, carries the hedging panel");
