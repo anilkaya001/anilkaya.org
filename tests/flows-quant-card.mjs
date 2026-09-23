@@ -187,7 +187,13 @@ const CLOSES = (() => { const c = [100]; const rng = WORLD.xoshiro128ss("closes"
   const ev = QP.earningsFromVendor(raw, { sessionDate: SESSION });
   eq(ev.mask, ["2026-01-30", "2026-04-30", "2026-07-31"],
      "a postmarket report hits the next session and a premarket one its own day, and those sessions are masked from the GARCH fit");
-  eq(ev.next.date, "2026-10-30", "an unknown-time upcoming report is dated by the later of its two possible sessions");
+  eq([ev.next.date, ev.next.latest], ["2026-10-29", "2026-10-30"],
+     "an unknown-time upcoming report is dated by the EARLIER of its two possible sessions (a premarket report would hit it), " +
+     "so an expiry on the report day is read as holding the event and short premium through it is vetoed; the later session rides beside it");
+  const fri = QP.earningsFromVendor({ data: [{ source: "company", report_date: "2026-10-16", report_time: "unknown" }] }, { sessionDate: SESSION });
+  eq(fri.next.date, "2026-10-16", "a Friday report of unknown time is on that Friday's expiry, not the Monday after it");
+  const pct = QP.earningsFromVendor({ data: raw.data.map((r) => ({ ...r, expected_move_perc: r.expected_move_perc === null ? null : String(100 * Number(r.expected_move_perc)) })) }, { sessionDate: SESSION });
+  near(pct.realizedOverImplied, 0.7, 1e-12, "and an expected move quoted in percent is read on the same scale as the realised one");
   eq(ev.next.confirmed, false, "and an estimated date is not confirmed");
   eq(ev.moves, [-0.071, 0.042, 0.03], "the historical one-day moves are kept newest first");
   near(ev.realizedOverImplied, 0.7, 1e-12, "and realised over implied is their median ratio");

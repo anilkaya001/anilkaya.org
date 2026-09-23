@@ -64,8 +64,9 @@ export function earningsFromVendor(raw, { sessionDate } = {}) {
     const expected = num(r.expected_move_perc);
     const impact = sessions[sessions.length - 1] || date;
     if (sessionDate && impact > sessionDate) {
-      if (!next || impact < next.date) {
-        next = { date: impact, report: date, time: time || "unknown", confirmed: r.source !== "estimation" && time !== "unknown" };
+      const first = sessions.find((d) => d > sessionDate) || impact;
+      if (!next || first < next.date) {
+        next = { date: first, latest: impact, report: date, time: time || "unknown", confirmed: r.source !== "estimation" && time !== "unknown" };
       }
       continue;
     }
@@ -74,9 +75,10 @@ export function earningsFromVendor(raw, { sessionDate } = {}) {
   hist.sort((a, b) => (a.date < b.date ? 1 : -1));
   const withMove = hist.filter((h) => h.move !== null);
   const scaleDown = median(withMove.map((h) => Math.abs(h.move))) > 0.5;
+  const expectedDown = median(hist.filter((h) => h.expected !== null && h.expected > 0).map((h) => h.expected)) > 0.5;
   const moves = withMove.slice(0, QUANT_PIPELINE_LINES.HISTORY_MOVES).map((h) => (scaleDown ? h.move / 100 : h.move));
   const ratios = withMove.filter((h) => h.expected !== null && h.expected > 0)
-    .map((h) => Math.abs(scaleDown ? h.move / 100 : h.move) / h.expected);
+    .map((h) => Math.abs(scaleDown ? h.move / 100 : h.move) / (expectedDown ? h.expected / 100 : h.expected));
   const mask = [...new Set(hist.flatMap((h) => h.sessions))].sort();
   return {
     mask, moves, history: hist.length,
