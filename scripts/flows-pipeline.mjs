@@ -2145,6 +2145,13 @@ export async function retireSession(sessionDate, {
   return { removed, absent, refused, kept };
 }
 
+export function plainRedispatchSaid(report) {
+  return (report || []).some((a) => a && a.state !== "lost")
+    ? "a plain re-dispatch finds the session partly archived and skips it"
+    : "this run confirmed none of the session's keys, so a plain re-dispatch ranks it " +
+      "again unless the store holds one this run could not read";
+}
+
 export async function ensureArchived(payloadsByKey, { landed, reader = readStored, write }) {
   const report = [];
   for (const [key, payload] of Object.entries(payloadsByKey)) {
@@ -4131,8 +4138,8 @@ async function main() {
         (retired.kept.length ? ` and left ${retired.kept.join(", ")} standing` : "") +
         " — publishing nothing ranked, so the live boards cannot diverge from an archive " +
         "this run was unable to replace. scores is always deleted last, so the session still " +
-        "reads as archived and a later run skips it; dispatch with republish_session again " +
-        "to finish the rewrite");
+        "reads as archived, or as partly archived, and a later plain run skips it; dispatch " +
+        "with republish_session again to finish the rewrite");
     }
   }
 
@@ -5715,9 +5722,9 @@ async function main() {
       console.warn(`  ARCHIVE LOST: ${lost.map((a) => `${a.key} (${a.detail})`).join("; ")} — ` +
         `the record has no copy of what this run published for ${sessionDate}. Dispatch the ` +
         "workflow with republish_session to rewrite scores, board:long and board:short " +
-        "together; a plain re-dispatch finds the session partly archived and skips it. The " +
-        "run finishes publishing and then exits non-zero, so the loss turns the workflow red " +
-        "instead of scrolling past in a green log.");
+        "together; " + plainRedispatchSaid(archive) + ". The run finishes publishing and " +
+        "then exits non-zero, so the loss turns the workflow red instead of scrolling past in " +
+        "a green log.");
       process.exitCode = 1;
     } else if (!repaired.length && !held.length) {
       console.log(`  archive check: scores, board:long and board:short are all written for ${sessionDate}`);

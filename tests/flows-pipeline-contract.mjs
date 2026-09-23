@@ -29,6 +29,7 @@ import {
   HOLDERS_RETRY_DAYS,
   IV_RANK_PARAMS, fakeIvRank, measureVariationProbes, fakeOiLadder, fakeLadderGreeks,
   fakeLadderChain, vannaProbeSample, featuresVariationInput, boardVariationMeta, congressRows,
+  plainRedispatchSaid,
 } from "../scripts/flows-pipeline.mjs";
 import { VARIATION_CODES } from "../shared/flows-variation.js";
 import { pinReading, buildCard } from "../shared/flows-card.js";
@@ -3325,6 +3326,21 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "while nothing held and a board unread proceeds, as an unreadable scores always did");
   eq(sameSessionGate({ sessionDate: "2026-09-21", archive: archiveOf(archived, gone, board), republish: true }).mode,
      "republish", "republish_session rewrites a partly written session");
+  ok(/partly archived and skips it/.test(plainRedispatchSaid([
+    { key: "scores:2026-09-21", state: "written" }, { key: "board:long:2026-09-21", state: "lost" },
+    { key: "board:short:2026-09-21", state: "repaired" }])),
+     "ARCHIVE LOST says a plain re-dispatch skips a session that kept part of its archive, as the gate does");
+  const noneKept = plainRedispatchSaid([
+    { key: "scores:2026-09-21", state: "lost" }, { key: "board:long:2026-09-21", state: "lost" },
+    { key: "board:short:2026-09-21", state: "lost" }]);
+  ok(!/partly archived/.test(noneKept) && /ranks it again/.test(noneKept),
+     "BUT NOT WHEN NOTHING WAS KEPT: with all three keys lost the gate reads the session as fresh and " +
+     `a plain re-dispatch ranks it again, so "finds the session partly archived" was false (${noneKept})`);
+  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  ok(/"together; " \+ plainRedispatchSaid\(archive\)/.test(src),
+     "and the ARCHIVE LOST line takes its clause from that function");
+  ok(/reads as archived, or as partly archived, and a later plain run skips it/.test(src),
+     "a refused retire says the session may now read as partly archived, which the gate also skips");
   assert.deepEqual(sessionArchiveKeys("2026-09-21"),
     ["scores:2026-09-21", "board:long:2026-09-21", "board:short:2026-09-21"],
     "the three keys a republish deletes and rewrites together"); checks++;
