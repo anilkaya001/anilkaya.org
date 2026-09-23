@@ -410,7 +410,7 @@ function describeFloorVerdict(meter) {
     "down one step at a time, re-reading this line each morning.";
 }
 
-async function uw(path, params = {}) {
+async function uw(path, params = {}, { envelope = false } = {}) {
   const url = new URL(BASE + path);
   for (const [k, v] of Object.entries(params)) {
     if (v === undefined || v === null || v === "") continue;
@@ -480,6 +480,7 @@ async function uw(path, params = {}) {
     ({ delayMs, floorMs: delayFloorMs } = stepRateController(
       { delayMs, floorMs: delayFloorMs }, "ok"));
     const body = await response.json();
+    if (envelope) return body;
     return Array.isArray(body) ? body : (body && body.data) || [];
   }
   throw new Error(`${path} -> exhausted retries`);
