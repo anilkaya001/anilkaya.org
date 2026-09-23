@@ -470,7 +470,7 @@
         "ceiling rather than a market, and comparing it with another session's " +
         "compares two ceilings.";
     }
-    if (alertVendorTruncated === null && alertReadTruncated === true) {
+    if (alertReadTruncated === true) {
       return " An intraday read this session came back full at this site's own cap" +
         (alertReadLimit === null ? "" : " of " + count(alertReadLimit) + " rows") +
         ", so windows flagged between reads may be missing and this count is " +

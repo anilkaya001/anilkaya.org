@@ -347,3 +347,27 @@ export function mergeAlerts(prev, next, {
     },
   };
 }
+
+export function nightlyAlerts(read, stored, { sessionDate = null, at = null, stageOf = null } = {}) {
+  if (stored && stored.failed) return { mode: "unverified", alerts: null, held: null };
+  const held = stored && !stored.absent && stored.payload && typeof stored.payload === "object"
+    ? stored.payload : null;
+  const record = held && held.record && typeof held.record === "object" ? held.record : null;
+  const day = record && typeof record.date === "string" ? record.date : null;
+  if (sessionDate && day && day > sessionDate) return { mode: "newer", alerts: null, held: null, day };
+  if (!sessionDate || day !== sessionDate) {
+    return { mode: "snapshot", alerts: read, held: null, readLimit: null, readTruncated: null };
+  }
+  const merged = read && read.status === "ok" && read.rows.length
+    ? mergeAlerts(held, read, { at, sessionDate })
+    : null;
+  if (!merged || !merged.rows.length) return { mode: "kept", alerts: null, held };
+  const stage = typeof stageOf === "function" ? stageOf : () => null;
+  return {
+    mode: "merged",
+    alerts: { ...merged, rows: merged.rows.map((r) => ({ ...r, st: stage(r.t) || "foreign" })) },
+    held,
+    readLimit: Number.isFinite(held.readLimit) ? held.readLimit : null,
+    readTruncated: typeof held.readTruncated === "boolean" ? held.readTruncated : null,
+  };
+}

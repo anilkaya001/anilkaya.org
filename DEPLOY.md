@@ -1155,4 +1155,11 @@ Four guards sit behind the schedule, all in `scripts/flows-pipeline.mjs`:
 Feeds read without a date (`news`, `pulse`, `flowalerts`, `sector:premium`)
 carry `readDay`, the Eastern day of their own `readAt`, beside `sessionDate`;
 the Worker's intraday refresh stamps the same field when it rewrites
-`flowalerts` and `pulse`.
+`flowalerts` and `pulse`. The post-close run is the last writer of
+`flowalerts` for the session (the Worker's refresh window closes at 16:15 ET),
+so it merges its read into the stored record when that record's date is the
+run's session, exactly as the Worker's refresh does, instead of replacing the
+day's union with one read. It writes nothing over that record when its own read
+shaped no rows, when the stored feed cannot be read, or when the record belongs
+to a later session (a republish of an earlier one); it publishes a single read
+only when the store holds no record for the session.

@@ -28,7 +28,7 @@ import {
 } from "../shared/flows-unusual.js";
 import { buildEvents, EVENTS_NOTES } from "../shared/flows-events.js";
 import { scoresRows, buildScoreTrack, boardsToScoreRows } from "../shared/flows-scores.js";
-import { buildFlowAlerts, ALERT_ROWS, alertBand } from "../shared/flows-alerts.js";
+import { buildFlowAlerts, ALERT_ROWS, alertBand, nightlyAlerts } from "../shared/flows-alerts.js";
 import { buildPulse, PULSE_FEEDS, PULSE_CAPS } from "../shared/flows-pulse.js";
 import {
 
@@ -5007,20 +5007,42 @@ async function main() {
       }
 
       const alerts = buildFlowAlerts(raw, { stageOf: (t) => stage.get(t) || null });
-      await publish("flowalerts", {
-        v: BOARD_SCHEMA_VERSION,
-        generatedAt, sessionDate,
+      const night = nightlyAlerts(alerts, await readStored("flowalerts"),
+        { sessionDate, at: alertsReadAt, stageOf: (t) => stage.get(t) || null });
+      let liveAlerts = night.held;
+      if (night.alerts) {
+        liveAlerts = {
+          v: BOARD_SCHEMA_VERSION,
+          generatedAt, sessionDate,
 
-        readAt: alertsReadAt,
-        readDay: readDayOf(alertsReadAt),
-        refreshed: "nightly",
-        ...alerts,
+          readAt: alertsReadAt,
+          readDay: readDayOf(alertsReadAt),
+          refreshed: "nightly",
+          ...night.alerts,
 
-        vendorLimit: ALERT_VENDOR_LIMIT,
-        vendorTruncated: alertRowCount >= ALERT_VENDOR_LIMIT,
-        readLimit: null,
-        readTruncated: null,
-      });
+          vendorLimit: ALERT_VENDOR_LIMIT,
+          vendorTruncated: alertRowCount >= ALERT_VENDOR_LIMIT,
+          readLimit: night.readLimit,
+          readTruncated: night.readTruncated,
+        };
+        await publish("flowalerts", liveAlerts);
+      } else if (night.held) {
+        publishedStore.flowalerts = night.held;
+      }
+      const nightSaid = {
+        merged: () => `merged into the ${sessionDate} intraday record, now ${night.alerts.record.reads} ` +
+          `read(s) holding ${night.alerts.rows.length} of ${night.alerts.seen} window(s) ` +
+          `(${night.alerts.record.entered} new, ${night.alerts.record.again} seen again)`,
+        kept: () => `NOT WRITTEN — the store holds the ${sessionDate} intraday record and this read ` +
+          "shaped no rows, so the record stands rather than being replaced by an empty read",
+        newer: () => `NOT WRITTEN — the store holds the ${night.day} intraday record, a later session ` +
+          `than ${sessionDate}, and a read published under ${sessionDate} would replace it`,
+        unverified: () => "NOT WRITTEN — the stored feed could not be read, so whether it is this " +
+          "session's intraday record is unknown and a single read would replace it; the brief " +
+          "states no alert count",
+        snapshot: () => `published as a single read — the store holds no intraday record for ${sessionDate}`,
+      };
+      console.log("  flow-alerts: " + nightSaid[night.mode]());
       console.log(
         `  flow-alerts: ${alerts.rows.length} alert(s) kept of ${alerts.seen}` +
         (alertRowCount >= ALERT_VENDOR_LIMIT
@@ -5047,7 +5069,8 @@ async function main() {
 
       if (moversPayload) {
         try {
-          moversPayload.premium = { ...moversPayload.premium, byContract: alertBand(alerts.rows) };
+          moversPayload.premium = { ...moversPayload.premium,
+            byContract: alertBand(liveAlerts && Array.isArray(liveAlerts.rows) ? liveAlerts.rows : alerts.rows) };
           await publish("movers", moversPayload);
           console.log(`  movers band: ${moversPayload.premium.byContract.rows.length} contract window(s) ` +
             `of ${moversPayload.premium.byContract.seen} priced alerts`);
