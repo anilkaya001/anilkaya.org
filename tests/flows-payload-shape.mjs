@@ -748,6 +748,56 @@ assert.deepEqual(missingReport, [],
     ok(card && card.depth === "index", `card:${t} is an index dossier`);
     ok(card.panels && card.panels.gamma && card.panels.context, `card:${t} carries the card panels`);
   }
+
+  const { LIVE_KEYS } = await import("../shared/flows-live.js");
+  const live = (key) => {
+    const file = join(dir, "p-" + key.replace(":", "-") + ".json");
+    return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : null;
+  };
+  const SILENCES = new Set(["ok", "quiet", "unavailable", "unreadable", "prior", "pending"]);
+  for (const key of Object.keys(LIVE_KEYS).filter((k) => LIVE_KEYS[k].writer === "actions")) {
+    const p = live(key);
+    ok(p && p.key === key, `the dry run emits ${key} — publisher-pinned until a renderer reads it`);
+    ok(p.fresh && p.fresh.v === 1 && typeof p.fresh.readAt === "string" && p.fresh.source === "actions" &&
+       p.fresh.cadenceS === LIVE_KEYS[key].cadenceS && p.fresh.session === p.session,
+       `${key} carries the fresh envelope the Worker turns into X-Fresh-* headers`);
+    ok(Buffer.byteLength(JSON.stringify(p)) <= LIVE_KEYS[key].maxBytes, `${key} is inside its registered cap`);
+  }
+  const b = live("live:breadth");
+  for (const [sector, row] of Object.entries(b.sectors.rows)) {
+    ok(SILENCES.has(row.status) && (row.status !== "ok" ||
+       (row.ncp.length === b.sectors.t.length && row.npp.length === b.sectors.t.length && row.net.length === b.sectors.t.length)),
+       `live:breadth ${sector} is aligned to the one shared time axis, or names its silence`);
+  }
+  ok(Object.hasOwn(b.dte.share, "value") && Object.hasOwn(b.dte.share, "reason"),
+     "the 0DTE share carries its value beside the reason it may be null");
+  const st = live("live:strips");
+  ok(Object.values(st.rows).every((r) => r.length === st.fields.length) &&
+     st.fields.every((f) => typeof st.units[f] === "string"),
+     "every strip row is a column vector of the published fields, and every field names its unit");
+  const se = live("live:strips:series");
+  ok(Object.values(se.cols).every((col) => Object.values(col).every((a) => a.length === se.t.length)) &&
+     ["px", "net", "gex", "iv"].every((c) => typeof se.scale[c] === "number"),
+     "every series column has one value per read instant, and states the integer scale it is stored in");
+  const al = live("live:alerts");
+  for (const f of ["rows", "seen", "record", "readAt", "readDay", "refreshed", "vendorLimit", "readTruncated", "cursor"]) {
+    ok(Object.hasOwn(al, f), `live:alerts carries \`${f}\` so the Worker can serve it in place of the nightly feed`);
+  }
+  eq(al.refreshed, "intraday", "and says it is the intraday union");
+  const gx = live("live:gex");
+  ok(Object.values(gx.names).every((n) => typeof n.readAt === "string" &&
+     (!n.t || ["px", "gOi", "gVol", "gDir"].every((f) => n[f].length === n.t.length))),
+     "every gamma name carries its own read time, and a series only when it was read this run");
+  const tp = live("live:tape");
+  ok(["totals", "netImpact", "darkpool"].every((f) => SILENCES.has(tp[f].status)),
+     "each tape feed states its own silence");
+  const vl = live("live:vol");
+  ok(vl.vix.status === "unavailable" && typeof vl.vix.reason === "string", "the plan-gated VIX curve is named, not blank");
+  const mv = live("live:movers");
+  ok(typeof mv.basis === "string" && Array.isArray(mv.up) && Array.isArray(mv.down), "movers name their universe");
+  const hb = live("live:heartbeat");
+  ok(hb.run && Number.isInteger(hb.run.calls) && hb.run.keys && typeof hb.run.finishedAt === "string",
+     "the heartbeat is the run's ledger: calls, bytes per key, and when it finished");
 }
 
 rmSync(dir, { recursive: true, force: true });
@@ -767,4 +817,6 @@ console.log(`✓ flows-payload-shape: ${checks} assertions — the publisher and
   `must never be merged with, and the news tape's four counts, its stated ordering and the ` +
   `vendor stamp on every row beside the instant we read them; and the volatility dossiers (card-x), the ` +
   `card's x.vol summary and the regime's vol radar pinned field by field on every arm they are emitted on; and the per-name card-x and hist ` +
-  `keys pinned the same way, every section's readable arm, silence codes, units and packed series`);
+  `keys pinned the same way, every section's readable arm, silence codes, units and packed series; and the live layer's ten Tier 2 ` +
+  `keys pinned the same way: a fresh envelope on each, series aligned to their axes, units and ` +
+  `scales stated, and every silence named`);
