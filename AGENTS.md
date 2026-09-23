@@ -396,6 +396,7 @@ flows-chain-panels     flows-auth-contract     mastery-contract
 academy-contract       flows-variation         flows-probe-contract
 flows-vol-contract
 flows-positioning-contract
+flows-legs-contract
 ```
 
 Confirmed to need one: `flows-overview-contract`, `flows-board-render`,
