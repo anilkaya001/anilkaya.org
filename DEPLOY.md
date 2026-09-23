@@ -1127,8 +1127,17 @@ Four guards sit behind the schedule, all in `scripts/flows-pipeline.mjs`:
   brief, cards and meta as the first run published them. The
   `republish_session` input (`FLOWS_REPUBLISH_SESSION=1`) instead deletes the
   session's three archive keys through the ingest DELETE and rewrites them with
-  everything else. A market holiday lands here too: SPY has no bar for the day,
-  so the session resolves to the one already archived.
+  everything else — even when `scores:<sessionDate>` is absent or unreadable,
+  because a dated board left by a run whose scores write was lost would
+  otherwise refuse the rewrite. The two boards go first and `scores` last, each
+  retried on a transient refusal, and the first key the store still refuses
+  stops the retire before anything ranked is written: `scores` is the key the
+  gate reads, so a half-finished retire leaves the session reading as archived
+  and a later plain run skips it rather than splitting it. A market holiday
+  lands here too: SPY has no bar for the day, so the session resolves to the one
+  already archived. The ticker page names a card that an earlier run of the
+  board's own session left behind (its `generatedAt` is older than the meta's)
+  in its stale banner.
 - **The candle cut.** Every daily series is cut at `sessionDate` before any
   feature reads it (`sessionCandles`), because the vendor does not honour
   `end_date`: on 2026-09-21 all 166 cards carried a partial 2026-09-22 bar.
@@ -1140,7 +1149,8 @@ Four guards sit behind the schedule, all in `scripts/flows-pipeline.mjs`:
   `board:<side>:<date>` when the live key is unreadable or is this session's
   own, and the end of every run re-reads the session's three archive keys and
   writes any that are missing. `ARCHIVE LOST` in the log is the one line that
-  means the record has no copy of a published session.
+  means the record has no copy of a published session, and it makes the run
+  exit non-zero after everything else is published, so the workflow turns red.
 
 Feeds read without a date (`news`, `pulse`, `flowalerts`, `sector:premium`)
 carry `readDay`, the Eastern day of their own `readAt`, beside `sessionDate`;

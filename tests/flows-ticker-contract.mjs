@@ -284,9 +284,9 @@ const tickerSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-ticker.js"), 
 
 async function mount(page, card,
                      { ticker = null, boards = null, hash = "", events = null,
-                       html = null, station = "all" } = {}) {
+                       html = null, station = "all", meta = null } = {}) {
 
-  const installFetch = ({ card, boards, events }) => {
+  const installFetch = ({ card, boards, events, meta }) => {
     window.__requested = [];
     window.fetch = (url) => {
       window.__requested.push(String(url));
@@ -297,6 +297,8 @@ async function mount(page, card,
         ? card
         : u.includes("/api/flows/events")
           ? (events || { rows: [], status: "pending" })
+        : u.includes("/api/flows/meta")
+          ? (meta || { rows: [], status: "pending" })
           : (u.includes("side=long") ? (boards || { rows: [], status: "pending" })
                                      : { rows: [], status: "pending" });
       return Promise.resolve({
@@ -320,7 +322,7 @@ async function mount(page, card,
   await page.route("**/assets/js/flows-drawers.js*",
     (route) => route.fulfill({ contentType: "text/javascript", body: drawersSrc }));
   await page.goto(url);
-  await page.evaluate(installFetch, { card, boards, events });
+  await page.evaluate(installFetch, { card, boards, events, meta });
   await page.addStyleTag({ path: path.join(ROOT, "assets/css/base.css") });
   await page.addStyleTag({ path: path.join(ROOT, "assets/css/flows.css") });
   await page.addScriptTag({ content: panelsSrc });
@@ -1929,6 +1931,49 @@ try {
 
     eq(errors.length, 0, `the Greek ladders render without throwing (${errors.join("; ")})`);
     await page.close();
+  }
+
+  {
+    const staleOf = async (card, meta) => {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, card, { ticker: card.ticker, meta });
+      await page.waitForFunction(() => window.__requested.some((u) => u.includes("/api/flows/meta")),
+        null, { timeout: 6000 });
+      await page.waitForFunction(() => !document.getElementById("ftStale").hidden,
+        null, { timeout: 800 }).catch(() => {});
+      const out = await page.evaluate(() => {
+        const s = document.getElementById("ftStale");
+        return { hidden: s.hidden, text: s.textContent };
+      });
+      await page.close();
+      return { ...out, errors };
+    };
+    const base = JSON.parse(JSON.stringify(withChain[0]));
+    const session = base.sessionDate;
+    const at = (iso) => ({ ...base, generatedAt: iso });
+
+    const earlier = await staleOf(at(`${session}T14:02:18.489Z`),
+      { sessionDate: session, generatedAt: `${session}T17:18:54.000Z` });
+    ok(!earlier.hidden && /built by an earlier run of the \d{4}-\d{2}-\d{2} session/.test(earlier.text),
+       `UW-6: A CARD LEFT BY AN EARLIER RUN OF THE BOARD'S OWN SESSION IS FLAGGED — on ` +
+       `2026-09-21 23 cards from the 14:02 run sat under the 17:18 boards with no banner, ten of ` +
+       `them still marked depth "board" for boards they were no longer on (${earlier.text.slice(0, 90)}…)`);
+    eq(earlier.errors.length, 0, `and the banner costs no exception (${earlier.errors.join("; ")})`);
+
+    const same = await staleOf(at(`${session}T21:40:00.000Z`),
+      { sessionDate: session, generatedAt: `${session}T21:40:00.000Z` });
+    ok(same.hidden, "a card from the run that built the board carries no banner");
+
+    const later = await staleOf(at(`${session}T21:40:00.000Z`),
+      { sessionDate: session, generatedAt: `${session}T21:30:00.000Z` });
+    ok(later.hidden,
+       "nor does one written after the meta it is compared with — a run whose meta write failed " +
+       "must not flag its own cards");
+
+    const unstamped = await staleOf(at(`${session}T14:02:18.489Z`), { sessionDate: session });
+    ok(unstamped.hidden, "and a meta with no build time proves nothing, so it flags nothing");
   }
 
   {

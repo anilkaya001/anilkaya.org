@@ -3250,8 +3250,42 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(removed.length, 3, "a republish asks for all three");
   ok(retired.refused.length === 0 && retired.absent.length === 2,
      "and an absent key is not a refusal — only a store that says no stops the rewrite");
-  const refused = await retireSession("2026-09-21", { remove: async () => ({ ok: false, status: 403 }) });
-  eq(refused.refused.length, 3, "a refusal is reported per key, which main() turns into a throw before any ranked write");
+  eq(removed[removed.length - 1], "scores:2026-09-21",
+     "SCORES IS DELETED LAST: it is the key the gate reads, so a rewrite that stops half way " +
+     "must leave the session reading as archived rather than as a first run that would split " +
+     "the archive again");
+
+  const asked = [];
+  const waits = [];
+  const refused = await retireSession("2026-09-21", {
+    remove: async (key) => { asked.push(key); return { ok: false, status: 403 }; },
+    pause: async (ms) => { waits.push(ms); },
+  });
+  eq(refused.refused.length, 1,
+     "a refusal stops the retire at the first key, which main() turns into a throw before any ranked write");
+  assert.deepEqual(refused.kept, ["board:short:2026-09-21", "scores:2026-09-21"],
+    "and the keys after it are left standing, scores among them"); checks++;
+  ok(!asked.includes("scores:2026-09-21"),
+     "so the gate key is never deleted while a dated board the rewrite needs to replace still stands");
+  eq(asked.length, 3, "the refused key is asked three times — the edge 403 that clears on retry is retried");
+  assert.deepEqual(waits, [1000, 4000], "on the same backoff as every store read"); checks++;
+
+  let flaky = 1;
+  const recovered = await retireSession("2026-09-21", {
+    remove: async () => (flaky-- > 0 ? { ok: false, status: 503 } : { ok: true, status: 200 }),
+    pause: async () => {},
+  });
+  ok(recovered.refused.length === 0 && recovered.removed.length === 3,
+     "and a transient refusal that clears on retry deletes all three");
+
+  const lost = sameSessionGate({ sessionDate: "2026-09-21",
+    archived: { payload: null, absent: true }, republish: true });
+  ok(lost.mode === "republish" && !lost.skip && /deletes whatever dated board/.test(lost.note),
+     "REPUBLISH WITH NO SCORES STILL RETIRES: a session whose scores write was lost but whose " +
+     "dated boards landed would otherwise refuse the rewrite and split again");
+  eq(sameSessionGate({ sessionDate: "2026-09-21",
+    archived: { payload: null, failed: true, status: 403 }, republish: true }).mode, "republish",
+     "and so does one whose scores could not be read — the dispatch asked for a rewrite");
 }
 
 {
@@ -3361,6 +3395,17 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   const dense = await sweepScreenerBand([1e9, 1.3e9], bandReader(population(400, 1e9, 1.3e9)));
   eq(dense.reads, 7, "a band too dense to finish still stops at two levels");
   eq(dense.truncated, 4, "and every still-full leaf stays marked TRUNCATED rather than passed off as whole");
+
+  const whole = bandReader(hundredTwenty);
+  let reads = 0;
+  const dropped = await sweepScreenerBand([66.5e9, 86.5e9],
+    async (lo, hi) => (reads++ === 0 ? whole(lo, hi) : []));
+  ok(dropped.rows.length >= SCREENER_PAGE_ROWS,
+     `A SPLIT NEVER SHRINKS THE BAND: children that come back empty (a read the vendor ` +
+     `refused, caught to []) leave the parent's own ${SCREENER_PAGE_ROWS} rows in the ` +
+     `universe (${dropped.rows.length}) rather than fewer than the unsplit read found`);
+  eq(new Set(split.rows.map((r) => r.ticker)).size, split.rows.length,
+     "and a name read at two levels is counted once");
 }
 
 {
@@ -3374,6 +3419,9 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "and after seven days the route is asked again, so a plan change is noticed within a week");
   eq(holdersRefusal(prior("/api/politician-portfolios/holders/B -> HTTP 503", "2026-09-21"), "2026-09-22"), null,
      "a 5xx is the vendor's weather, not the plan, and is retried every run");
+  ok(holdersRefusal(prior("/api/politician-portfolios/holders/B -> HTTP 429", "2026-09-21"), "2026-09-22") === null &&
+     holdersRefusal(prior("/api/politician-portfolios/holders/B -> HTTP 408", "2026-09-21"), "2026-09-22") === null,
+     "and so are a 429 and a 408, the two 4xx answers that describe the moment rather than the plan");
   eq(HOLDERS_RETRY_DAYS, 7, "one week");
 }
 

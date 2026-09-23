@@ -617,7 +617,14 @@ export function judgeScreenerDate(dated, undated) {
 export async function sweepScreenerBand([min, max], readBand, {
   depth = SCREENER_SPLIT_DEPTH, pageRows = SCREENER_PAGE_ROWS,
 } = {}) {
-  const rows = [];
+  const byTicker = new Map();
+  const unnamed = [];
+  const keep = (list) => {
+    for (const row of list) {
+      if (row && row.ticker) byTicker.set(row.ticker, row);
+      else unnamed.push(row);
+    }
+  };
   const leaves = [];
   let reads = 0;
   const walk = async (lo, hi, level) => {
@@ -625,8 +632,8 @@ export async function sweepScreenerBand([min, max], readBand, {
     const page = await readBand(lo, hi);
     const list = Array.isArray(page) ? page : [];
     const full = list.length >= pageRows;
+    keep(list);
     if (!full || level >= depth) {
-      rows.push(...list);
       leaves.push({ min: lo, max: hi, rows: list.length, truncated: full, level });
       return;
     }
@@ -635,8 +642,8 @@ export async function sweepScreenerBand([min, max], readBand, {
     await walk(mid, hi, level + 1);
   };
   await walk(min, max, 0);
-  return { rows, leaves, reads, truncated: leaves.filter((l) => l.truncated).length,
-    split: reads > 1 };
+  return { rows: [...byTicker.values(), ...unnamed], leaves, reads,
+    truncated: leaves.filter((l) => l.truncated).length, split: reads > 1 };
 }
 
 const SCREENER_PROBE = Object.freeze({
@@ -1608,6 +1615,17 @@ export function sameSessionGate({ sessionDate, archived, republish = false } = {
             "saw. Only the unranked market feeds are refreshed. Dispatch with " +
             "republish_session to rewrite the session instead." };
   }
+  if (republish) {
+    return { mode: "republish", skip: false, generatedAt: null,
+      note: `scores:${sessionDate} ` +
+        (archived && archived.failed
+          ? "could not be read" + (archived.status ? ` (the store answered ${archived.status})` : "")
+          : "is not archived") +
+        ", and republish_session is set, so this run still deletes whatever dated board the " +
+        "session holds before it rewrites all three keys — a board left behind by an earlier " +
+        "run whose scores write was lost would otherwise refuse the rewrite and split the " +
+        "archive from the live board again" };
+  }
   if (archived && archived.failed) {
     return { mode: "unverified", skip: false, generatedAt: null,
       note: `scores:${sessionDate} could not be read` +
@@ -1616,8 +1634,7 @@ export function sameSessionGate({ sessionDate, archived, republish = false } = {
         "dated write is reported below, and a missed session cannot be recovered later" };
   }
   return { mode: "fresh", skip: false, generatedAt: null,
-    note: `scores:${sessionDate} is not archived, so this is the session's first run` +
-      (republish ? " (republish_session has nothing to delete)" : "") };
+    note: `scores:${sessionDate} is not archived, so this is the session's first run` };
 }
 
 async function fetchStoredPayload(key) {
@@ -2064,15 +2081,31 @@ export function sessionArchiveKeys(sessionDate) {
   return [`scores:${sessionDate}`, `board:long:${sessionDate}`, `board:short:${sessionDate}`];
 }
 
-export async function retireSession(sessionDate, { remove = retire } = {}) {
-  const removed = [], absent = [], refused = [];
-  for (const key of sessionArchiveKeys(sessionDate)) {
-    const result = await remove(key);
+export async function retireSession(sessionDate, {
+  remove = retire, retries = READ_RETRIES, pause = sleep,
+} = {}) {
+  const removed = [], absent = [], refused = [], kept = [];
+  const keys = sessionArchiveKeys(sessionDate);
+  const order = [...keys.filter((k) => !k.startsWith("scores:")),
+    ...keys.filter((k) => k.startsWith("scores:"))];
+  for (const key of order) {
+    if (refused.length) { kept.push(key); continue; }
+    let result = await remove(key);
+    for (let attempt = 0; !(result && (result.ok || result.status === 404)) &&
+        READ_RETRYABLE(result ? result.status : 0); attempt++) {
+      const wait = publishRetryDelay(attempt, { retries, spentMs: publishRetrySpentMs });
+      if (wait === null) break;
+      publishRetrySpentMs += wait;
+      console.warn(`  retire ${key}: HTTP ${result ? result.status : 0} — waiting ${wait}ms ` +
+        `and asking again (retry ${attempt + 1} of ${retries})`);
+      await pause(wait);
+      result = await remove(key);
+    }
     if (result && result.ok) removed.push(key);
     else if (result && result.status === 404) absent.push(key);
     else refused.push({ key, status: result ? result.status : 0 });
   }
-  return { removed, absent, refused };
+  return { removed, absent, refused, kept };
 }
 
 export async function ensureArchived(payloadsByKey, { landed, reader = readStored, write }) {
@@ -2220,13 +2253,13 @@ function priorNote(mark, runSessionDate, shown) {
         "it and are marked as first appearances; the rest were in it and are marked as " +
         "carried over. A first appearance is a statement about this ranked list, not about " +
         "the strike: a contract can be absent from the earlier feed because it was quiet, or " +
-        "because it sat below that morning's per-name cap.";
+        "because it sat below that run's per-name cap.";
     case "undated":
       return "The counter feed this run read carries no session date, or this run could not " +
         `resolve its own, so it could not be checked that the ${named} compared against came ` +
         "from an EARLIER session rather than from this run's own output. The comparison was " +
         "made anyway: discarding a real earlier session over a missing stamp would report a " +
-        "cold feed on a morning that had a good yesterday. Read the marks as unverified " +
+        "cold feed on a session that had a good yesterday. Read the marks as unverified " +
         "rather than as a comparison against a named session.";
     case "same-session":
       return `The counter feed this run read is stamped ${mark.sessionDate}, the same session ` +
@@ -2440,7 +2473,7 @@ export const HOLDERS_RETRY_DAYS = 7;
 export function holdersRefusal(prior, sessionDate, { days = HOLDERS_RETRY_DAYS } = {}) {
   const h = prior && prior.holders;
   if (!h || h.status !== "unavailable" || typeof h.reason !== "string") return null;
-  const status = /HTTP (4\d\d)/.exec(h.reason);
+  const status = /HTTP (4(?!08|29)\d\d)/.exec(h.reason);
   if (!status || !ARCHIVE_DATE_RE.test(String(sessionDate || ""))) return null;
   const since = /refused since (\d{4}-\d{2}-\d{2})/.exec(h.reason);
   const first = since ? since[1]
@@ -4051,8 +4084,12 @@ async function main() {
     if (retired.refused.length) {
       throw new Error(
         `republish_session: the store refused to delete ${retired.refused.map((r) =>
-          `${r.key} (HTTP ${r.status})`).join(", ")} — publishing nothing ranked, so the ` +
-        "live boards cannot diverge from an archive this run was unable to replace");
+          `${r.key} (HTTP ${r.status})`).join(", ")}` +
+        (retired.kept.length ? ` and left ${retired.kept.join(", ")} standing` : "") +
+        " — publishing nothing ranked, so the live boards cannot diverge from an archive " +
+        "this run was unable to replace. scores is always deleted last, so the session still " +
+        "reads as archived and a later run skips it; dispatch with republish_session again " +
+        "to finish the rewrite");
     }
   }
 
@@ -4844,7 +4881,7 @@ async function main() {
           "`prior.sessionDate` and `prior.readAt` name the session and the read time the " +
           "comparison was made against. It is a statement about this list, not about the " +
           "strike: a contract can be absent from the earlier feed because it was quiet, or " +
-          "because it sat below the per-name cap that morning.",
+          "because it sat below the per-name cap on that run.",
         lift: UNUSUAL_NOTES.lift,
         notional: UNUSUAL_NOTES.notional,
         iv: UNUSUAL_NOTES.iv,
@@ -5558,7 +5595,10 @@ async function main() {
     if (lost.length) {
       console.warn(`  ARCHIVE LOST: ${lost.map((a) => `${a.key} (${a.detail})`).join("; ")} — ` +
         `the record has no copy of what this run published for ${sessionDate}. Re-dispatch ` +
-        "the workflow to write it; nothing else will.");
+        "the workflow to write it; nothing else will. The run finishes publishing and then " +
+        "exits non-zero, so the loss turns the workflow red instead of scrolling past in a " +
+        "green log.");
+      process.exitCode = 1;
     } else if (!repaired.length && !held.length) {
       console.log(`  archive check: scores, board:long and board:short are all written for ${sessionDate}`);
     }

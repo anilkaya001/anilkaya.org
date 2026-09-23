@@ -3359,6 +3359,7 @@
   const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
   let boardSession = null;
+  let boardBuilt = null;
 
   function assessAge(card) {
     const now = Date.now();
@@ -3370,6 +3371,10 @@
       if (mine < boardSession) {
         parts.push("every figure on this page is from the session of " + mine +
           ", and the board has since published " + boardSession);
+      } else if (mine === boardSession && boardBuilt &&
+          Date.parse(String(card.generatedAt || "")) < boardBuilt) {
+        parts.push("this card was built by an earlier run of the " + mine + " session than " +
+          "the board's, so its score and standing are that run's");
       }
       return parts;
     }
@@ -6053,6 +6058,7 @@
 
       const bs = (p) => (p && ISO_DAY.test(String(p.sessionDate || "")) ? String(p.sessionDate) : null);
       boardSession = bs(long) || bs(short);
+      boardBuilt = Date.parse(String(((bs(long) ? long : short) || {}).generatedAt || "")) || null;
       paintRank();
       if (painted) paintRelated(painted);
 
@@ -6431,6 +6437,7 @@
         .then((m) => {
           if (!m || !ISO_DAY.test(String(m.sessionDate || ""))) return;
           boardSession = String(m.sessionDate);
+          boardBuilt = Date.parse(String(m.generatedAt || "")) || null;
           if (painted) setStale(assessAge(painted));
         })
         .catch(() => {   });
