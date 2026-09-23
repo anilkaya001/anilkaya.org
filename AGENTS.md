@@ -403,7 +403,7 @@ flows-vol-contract
 flows-positioning-contract
 flows-legs-contract
 flows-live-contract    flows-freshness-contract
-flows-quant-card
+flows-quant-card       flows-track-render
 ```
 
 `flows-quant` was measured on 2026-09-23: about 5 s with no server (8 s at a

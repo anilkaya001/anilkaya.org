@@ -636,37 +636,25 @@ ${UI_SCRIPT}
 }
 
 export function trackPage({ username = "" } = {}) {
-  const lede = "The same score the board prints after each close, traced name by " +
-    "name across sessions. The boards show a ranking's two tails; this page " +
-    "keeps the whole distribution, so a name drifting toward a board is " +
-    "visible before the session it arrives. A gap means the name was not " +
-    "scored that session — never zero.";
-  return `${head("Flows — Score track", "Each name's daily score, traced across sessions.")}
-${shell("Track", "track", username, `
-  <div class="flows-status" id="stStatus" role="status">Loading the track…</div>
-  <p class="flows-stale" id="stStale" role="status" hidden></p>
-
-  <div class="flows-controls">
-    <p class="flows-lede">${lede}</p>
-  </div>
-
-  <section class="fc-panel" id="stTrackPanel" hidden aria-labelledby="stTrackH">
-    <h2 class="fc-panel-h" id="stTrackH">The score, session by session</h2>
-    <div id="stTrack"></div>
-    <p class="fc-note" id="stTrackNote"></p>
-  </section>
-
-  <section class="fc-panel" id="stBasisPanel" hidden aria-labelledby="stBasisH">
-    <h2 class="fc-panel-h" id="stBasisH">What this number is, and what a gap is not</h2>
-    <div id="stBasis"></div>
-  </section>
-
-  <p class="flows-foot" id="stFoot"></p>
-`)}
-${UI_SCRIPT}
-<script src="${v("/assets/js/flows-track.js")}" defer></script>
-</body>
-</html>`;
+  return flowsDocument({
+    title: "Track",
+    description: "Each name's daily score traced across sessions, with what followed each call. A gap is a session the name was not scored, never zero.",
+    active: "track",
+    username,
+    chrome: false,
+    styles: ["/assets/css/flows-record.css"],
+    scripts: ["/assets/js/flows-track.js"],
+    body: `
+  <header class="flows-head rec-head" data-fx-hero>
+    <h1 id="fxTitle">Track</h1>
+    <span class="rec-head-s" id="stHeadState"></span>
+    <button type="button" class="ui-info" id="stBasis" aria-label="About the score track"
+            aria-haspopup="dialog" aria-controls="fxPop" aria-expanded="false">${glyph("info")}</button>
+  </header>
+  <p class="visually-hidden" id="stStatus" role="status">Loading the track\u2026</p>
+  <div class="ui-grid st-grid" id="stTrack"></div>
+`,
+  });
 }
 
 export function unusualPage({ username = "" } = {}) {
