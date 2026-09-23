@@ -86,6 +86,9 @@ const TRACK = {
   notes: { change: "x", crossing: "x", saturation: "x", run: "x", gaps: "x" },
 };
 
+const ROW = "#watchBody .bd-row[data-flip]";
+const rowOf = (t) => `#watchBody .bd-row:has(.bd-open:text-is('${t}'))`;
+
 const browser = await chromium.launch();
 const open = async (viewport = { width: 1400, height: 1000 }) => {
   const page = await browser.newPage({ viewport });
@@ -100,12 +103,12 @@ try {
 
   const page = await open();
   await page.goto(url("/flows/watch/"), { waitUntil: "networkidle" });
-  await page.waitForSelector("#watchBody tr");
+  await page.waitForSelector(ROW);
 
-  const order = await page.$$eval("#watchBody tr th a", (a) => a.map((x) => x.textContent.trim()));
+  const order = await page.$$eval(ROW + " .bd-open", (a) => a.map((x) => x.textContent.trim()));
   eq(order.length, 6, "every fixture row rendered");
 
-  const readerHrefs = await page.$$eval("#watchBody tr th a",
+  const readerHrefs = await page.$$eval(ROW + " .bd-open",
     (as) => as.map((a) => [a.textContent.trim(), a.getAttribute("href")]));
   for (const [name, href] of readerHrefs) {
     eq(href, "/flows/ticker/?t=" + name + "&s=signal&from=watch",
@@ -120,7 +123,7 @@ try {
      "the edge is the more urgent row, which is the whole of this page's former blind spot. " +
      "The fixture listed WIDEN first, so this cannot pass on input order");
 
-  const closeCell = await page.$eval("#watchBody tr:has(th a:text-is('CLOSE')) .c-toband",
+  const closeCell = await page.$eval(rowOf("CLOSE") + " .c-toband",
     (el) => ({ text: el.textContent, html: el.innerHTML, title: (el.querySelector(".c-approach") || {}).title || "" }));
   ok(/▸/.test(closeCell.text),
      "an approaching row carries a right-pointing marker — a glyph, so the direction " +
@@ -129,7 +132,7 @@ try {
      "beside a signed number, which is the SECOND channel: the sign is never carried by " +
      "hue alone, and here it is not carried by the glyph alone either");
 
-  const widenCell = await page.$eval("#watchBody tr:has(th a:text-is('WIDEN')) .c-toband",
+  const widenCell = await page.$eval(rowOf("WIDEN") + " .c-toband",
     (el) => el.textContent);
   ok(/◂/.test(widenCell) && /−|-/.test(widenCell),
      "and a retreating row points the other way and carries a minus — the two rows differ " +
@@ -137,7 +140,7 @@ try {
 
   ok(/1 session/.test(closeCell.title),
      "the overnight row names the single session its rate was measured across");
-  const slowTitle = await page.$eval("#watchBody tr:has(th a:text-is('SLOW')) .c-approach",
+  const slowTitle = await page.$eval(rowOf("SLOW") + " .c-approach",
     (el) => el.title);
   ok(/5 sessions/.test(slowTitle) && /divided by 5/.test(slowTitle),
      "and a rate measured across five sessions says so AND says it was divided by five — " +
@@ -145,7 +148,7 @@ try {
 
   ok(/≈/.test(closeCell.text),
      "the overnight approach carries a projection, marked as approximate");
-  const slowText = await page.$eval("#watchBody tr:has(th a:text-is('SLOW')) .c-toband",
+  const slowText = await page.$eval(rowOf("SLOW") + " .c-toband",
     (el) => el.textContent);
   ok(!/≈/.test(slowText),
      "but a rate averaged over FIVE sessions gets no projection at all — it says nothing " +
@@ -155,11 +158,11 @@ try {
   ok(/[+]0\.\d\d/.test(slowText),
      "while the rate itself is still shown: the observation is real, only the extrapolation " +
      "from it is refused");
-  ok(!/▸|◂/.test(await page.$eval("#watchBody tr:has(th a:text-is('WIDEN')) .c-toband",
+  ok(!/▸|◂/.test(await page.$eval(rowOf("WIDEN") + " .c-toband",
      (el) => el.textContent.replace(/◂/, ""))),
      "and the retreating row carries exactly one direction marker, not two");
 
-  const noqvText = await page.$eval("#watchBody tr:has(th a:text-is('NOQV')) .c-toband",
+  const noqvText = await page.$eval(rowOf("NOQV") + " .c-toband",
     (el) => el.textContent);
   ok(!/▸|◂|≈/.test(noqvText),
      "a name whose earlier observation carried no residual gets NO approach, no direction " +
@@ -168,14 +171,14 @@ try {
   ok(/^\s*\d/.test(noqvText.trim()) || noqvText.trim().length > 0,
      "though its distance still renders: the row is not blanked for want of a second reading");
 
-  const bareText = await page.$eval("#watchBody tr:has(th a:text-is('BARE')) .c-toband",
+  const bareText = await page.$eval(rowOf("BARE") + " .c-toband",
     (el) => el.textContent);
   ok(!/▸|◂|≈/.test(bareText),
      "and a name absent from the trace entirely renders its distance and nothing more");
 
   const fadedMark = await page.$$eval("#watchBody .c-faded", (els) => els.length);
   eq(fadedMark, 1, "exactly the one name that came back through the edge is marked");
-  const fadedRow = await page.$eval("#watchBody tr:has(.c-faded) th a", (el) => el.textContent.trim());
+  const fadedRow = await page.$eval("#watchBody .bd-row:has(.c-faded) .bd-open", (el) => el.textContent.trim());
   eq(fadedRow, "FADED",
      "and it is the right one — this row is here BECAUSE it fell in, which a reader " +
      "scanning for what is about to leave should not have to work out");
@@ -193,6 +196,17 @@ try {
      "indistinguishable from 'six approaching and seventy-four we could not measure'");
   ok(/came back through the edge/.test(status),
      "and the faded crossing is counted in words as well as marked on its row");
+
+  const said = /(\d+) of (\d+) measurable/.exec(status);
+  const chips = await page.$$eval("#bdHero .ui-gchip", (cs) => Object.fromEntries(cs.map((c) =>
+    [c.querySelector(".ui-chip-l").textContent, c.querySelector(".ui-chip-v").textContent])));
+  eq(chips["Closing in"], said[1] + "/" + said[2],
+     "the summary track's Closing in figure is the status line's own fraction, numerator over denominator, " +
+     "so the page states one measurement once in two forms rather than two measurements");
+  eq(chips["Came back"], "1", "and Came back counts the one marked row");
+  eq(chips["In band"], String(WATCH.neutral), "and In band is the published neutral count");
+  const fadedSays = await page.$eval("#watchBody .c-faded", (el) => el.getAttribute("aria-label"));
+  ok(/came back through it/.test(fadedSays), `the came-back mark names what happened (${fadedSays})`);
   await page.close();
 
   {
@@ -200,9 +214,9 @@ try {
     const p2 = await open();
     await p2.route("**/api/flows/scoretrack", (route) => route.abort());
     await p2.goto(url("/flows/watch/"), { waitUntil: "networkidle" });
-    await p2.waitForSelector("#watchBody tr");
+    await p2.waitForSelector(ROW);
 
-    const rows = await p2.$$eval("#watchBody tr th a", (a) => a.map((x) => x.textContent.trim()));
+    const rows = await p2.$$eval(ROW + " .bd-open", (a) => a.map((x) => x.textContent.trim()));
     eq(rows.length, 6,
        "every row still renders — a failed second read costs this page its approach column " +
        "and nothing else");
@@ -212,6 +226,8 @@ try {
     ok(/did not load/.test(s2),
        "and the page SAYS the trace did not load rather than letting an absent measurement " +
        "read as a measured stillness");
+    const closing = await p2.$eval("#bdHero .ui-gchip:nth-child(3) .ui-chip-v", (el) => el.textContent);
+    eq(closing, "\u2014", "and the Closing in figure is an em dash with its reason one tap away, never a zero");
     ok(!/measurable/.test(s2),
        "so it claims no denominator it does not have");
 
@@ -234,7 +250,7 @@ try {
     await put("scoretrack", { ...TRACK, names: [], change: { ...TRACK.change, comparable: 0, status: "cold" } });
     const p3 = await open();
     await p3.goto(url("/flows/watch/"), { waitUntil: "networkidle" });
-    await p3.waitForSelector("#watchBody tr");
+    await p3.waitForSelector(ROW);
     const s3 = await p3.$eval("#watchStatus", (el) => el.textContent);
     ok(/prior scored session to measure against/.test(s3),
        "a trace that LOADED and held nothing comparable is a measured emptiness and gets its " +
@@ -248,7 +264,7 @@ try {
   {
     const p4 = await open({ width: 320, height: 900 });
     await p4.goto(url("/flows/watch/"), { waitUntil: "networkidle" });
-    await p4.waitForSelector("#watchBody tr");
+    await p4.waitForSelector(ROW);
     const over = await p4.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     ok(over <= 1,
        `the page overflows nothing at 320px (over by ${over}px) — the second line inside the ` +
@@ -260,9 +276,9 @@ try {
   {
     const p5 = await open();
     await p5.goto(url("/flows/watch/"), { waitUntil: "networkidle" });
-    await p5.waitForSelector("#watchBody tr");
-    const heads = await p5.$$eval("#watchTableWrap thead th", (e) => e.length);
-    const cells = await p5.$$eval("#watchBody tr:first-child > *", (e) => e.length);
+    await p5.waitForSelector(ROW);
+    const heads = await p5.$$eval("#bdHead [role=columnheader]", (e) => e.length);
+    const cells = await p5.$$eval("#watchBody .bd-row:first-child > [role=cell]", (e) => e.length);
     eq(cells, heads,
        `every row has exactly as many cells as the head has columns (${cells} of ${heads}) — ` +
        "a renderer that appends a cell to a head emitted from the page template produces a " +

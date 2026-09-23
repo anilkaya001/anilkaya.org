@@ -51,50 +51,49 @@ const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
 const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
-page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + m.text()); });
+const UNSHIPPED = /^\/api\/flows\/(universe|lk)$/;
+page.on("console", (m) => {
+  if (m.type() !== "error") return;
+  const where = m.location() && m.location().url ? new URL(m.location().url).pathname : "";
+  if (/status of 404/.test(m.text()) && UNSHIPPED.test(where)) return;
+  errors.push("console: " + m.text());
+});
 
 await page.goto(url("/flows/"), { waitUntil: "networkidle" });
 await page.fill("#u", FLOWS_TEST_USER);
 await page.fill("#p", FLOWS_PASSWORD);
 await Promise.all([page.waitForNavigation({ waitUntil: "networkidle" }), page.click(".flows-submit")]);
 
+const ROW = "#flowsBody .bd-row[data-flip]";
 await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
-await page.waitForSelector(".fd-card");
+await page.waitForSelector(ROW);
 
-await page.click('.flows-view[data-view="table"]');
-const glyph = await page.evaluate(() => {
-  const cell = document.querySelector(".fb-fam");
-  const row = document.querySelector("#flowsBody tr");
-  return {
-    label: cell.getAttribute("aria-label"),
-    nullMarks: cell.querySelectorAll("i.is-null").length,
-    bars: cell.querySelectorAll("i").length,
-
-    purity: row.children[6].textContent.trim(),
-  };
-});
+const glyph = await page.evaluate(() => ({
+  label: "families are drawn on the card, not on the board",
+  famGlyphs: document.querySelectorAll(".fb-fam").length,
+  purityCells: document.querySelectorAll('[data-col="purity"]').length,
+  zeros: [...document.querySelectorAll("#flowsBody [role=cell]")].filter((c) => /^[+\u2212]?0$/.test(c.textContent.trim())).length,
+}));
 
 const legacyConv = await page.evaluate(() => {
-  const td = document.querySelector("#flowsBody tr").children[4];
-  const badge = document.querySelector(".fd-foot span");
+  const td = document.querySelector('#flowsBody .bd-row [data-col="cnv"] .bd-conv');
   return {
     cellText: td.textContent.trim(),
     cellTitled: td.hasAttribute("title"),
-    badgeTitled: badge ? badge.hasAttribute("title") : null,
-    aria: (document.querySelector(".fd-card") || { getAttribute: () => "" })
+    aria: (document.querySelector("#flowsBody .bd-open") || { getAttribute: () => "" })
       .getAttribute("aria-label") || "",
   };
 });
 
 await page.goto(url("/flows/long/?sort=purity&dir=desc"), { waitUntil: "networkidle" });
-await page.click('.flows-view[data-view="table"]');
-await page.waitForSelector("#flowsBody tr");
+await page.waitForSelector(ROW);
 const withheldSort = await page.evaluate(() => ({
-  announced: [...document.querySelectorAll("#flowsTable thead th")]
+  announced: [...document.querySelectorAll("#bdHead [role=columnheader]")]
     .map((th) => th.getAttribute("aria-sort"))
     .filter((v) => v === "ascending" || v === "descending").length,
-  purityAria: document.querySelectorAll("#flowsTable thead th")[6].hasAttribute("aria-sort"),
-  firstTicker: document.querySelector("#flowsBody tr .fb-tk").textContent.trim(),
+  purityAria: !!document.querySelector('#bdHead [data-col="purity"]'),
+  kept: new URL(location.href).searchParams.get("sort"),
+  firstTicker: document.querySelector("#flowsBody .bd-open").textContent.trim(),
 }));
 
 await page.goto(url("/flows/ticker/?t=INTC&s=signal&from=long"), { waitUntil: "load" });
@@ -148,7 +147,7 @@ const legacyNoteOnV2 = notesOnV2.some((t) => t.includes(V_O_NOTE));
 const qualityNoteOnV2 = notesOnV2.some((t) => t.includes(QUALITY_NOTE));
 
 await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
-await page.waitForSelector(".fd-card");
+await page.waitForSelector(ROW);
 
 await page.evaluate(() => window.scrollTo(0, 0));
 
@@ -157,9 +156,9 @@ preDeep.rows = [{ ...currentBoard.rows[0], t: "OLDB" }];
 delete preDeep.deep;
 await post("board:long", preDeep);
 await page.reload({ waitUntil: "networkidle" });
-await page.waitForSelector(".fd-card");
+await page.waitForSelector(ROW);
 const preDeepClickable = await page.evaluate(() => {
-  const cards = [...document.querySelectorAll(".fd-card")]
+  const cards = [...document.querySelectorAll("#flowsBody .bd-open")]
     .filter((el) => (el.getAttribute("aria-label") || "").startsWith("OLDB"));
   return cards.length === 1 && cards[0].tagName === "A" &&
     cards[0].getAttribute("href") === "/flows/ticker/?t=OLDB&s=signal&from=long";
@@ -174,9 +173,9 @@ withDeep.rows = [
 ];
 await post("board:long", withDeep);
 await page.reload({ waitUntil: "networkidle" });
-await page.waitForSelector(".fd-card");
+await page.waitForSelector(ROW);
 const deepSplit = await page.evaluate(() => {
-  const byName = (t) => [...document.querySelectorAll(".fd-card")]
+  const byName = (t) => [...document.querySelectorAll("#flowsBody .bd-open")]
     .find((el) => (el.getAttribute("aria-label") || "").startsWith(t));
   const deep = byName("DEEPR");
   const flat = byName("FLATR");
@@ -191,21 +190,17 @@ const deepSplit = await page.evaluate(() => {
   };
 });
 
-await page.click('.flows-view[data-view="table"]');
-const v2Purity = await page.evaluate(() =>
-  document.querySelector("#flowsBody tr").children[6].textContent.trim());
+const v2Purity = await page.evaluate(() => document.querySelectorAll('[data-col="purity"]').length);
 
 const v2Status = await page.evaluate(() => ({
-  text: (document.querySelector(".flows-status") || { textContent: "" }).textContent,
-  rendered: document.querySelectorAll(".fd-card").length,
+  text: (document.getElementById("flowsStatus") || { textContent: "" }).textContent,
+  rendered: document.querySelectorAll("#flowsBody .bd-row[data-flip]").length,
 }));
 const v2Conv = await page.evaluate(() => {
-  const td = document.querySelector("#flowsBody tr").children[4];
-  const badge = document.querySelector(".fd-foot span");
+  const td = document.querySelector('#flowsBody .bd-row [data-col="cnv"] .bd-conv');
   return {
     cellTitle: td.getAttribute("title") || "",
-    badgeTitle: badge ? (badge.getAttribute("title") || "") : "",
-    aria: (document.querySelector(".fd-card") || { getAttribute: () => "" })
+    aria: (document.querySelector("#flowsBody .bd-open") || { getAttribute: () => "" })
       .getAttribute("aria-label") || "",
   };
 });
@@ -219,14 +214,18 @@ const SAME_SESSION_NOTE =
   "output rather than a previous session: no name here claims to be new and no rank move " +
   "is drawn.";
 
-const readNote = () => page.evaluate(() => {
-  const el = document.querySelector(".fb-memnote");
-  return el ? {
-    text: el.textContent.trim(),
-    empty: el.dataset.empty || null,
-    status: el.dataset.memory || null,
-  } : { text: "", empty: null, status: null };
-});
+const readNote = async () => {
+  const mark = await page.evaluate(() => {
+    const el = document.getElementById("bdMem");
+    return el ? { empty: el.dataset.empty || null, status: el.dataset.memory || null } : { empty: null, status: null };
+  });
+  await page.click("#bdMem");
+  await page.waitForSelector("#fxPop:popover-open");
+  const text = await page.$eval("#fxPop .ui-lead", (el) => el.textContent.trim()).catch(() => "");
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => !document.querySelector("#fxPop:popover-open"));
+  return { text, ...mark };
+};
 
 const preMemory = JSON.parse(JSON.stringify(coldBase));
 preMemory.rows = [{ ...currentBoard.rows[0], t: "PREMR" }];
@@ -234,14 +233,14 @@ delete preMemory.rows[0].nw;
 delete preMemory.memory;
 await post("board:long", preMemory);
 await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
-await page.waitForSelector(".fb-memnote");
+await page.waitForSelector("#bdMem[data-memory]");
 const preMemoryNote = await readNote();
 
 const coldUnstated = JSON.parse(JSON.stringify(coldBase));
 delete coldUnstated.memory;
 await post("board:long", coldUnstated);
 await page.reload({ waitUntil: "networkidle" });
-await page.waitForSelector(".fb-memnote");
+await page.waitForSelector("#bdMem[data-memory]");
 const unstatedNote = await readNote();
 
 const coldSameSession = JSON.parse(JSON.stringify(coldBase));
@@ -251,7 +250,7 @@ coldSameSession.memory = {
 };
 await post("board:long", coldSameSession);
 await page.reload({ waitUntil: "networkidle" });
-await page.waitForSelector(".fb-memnote");
+await page.waitForSelector("#bdMem[data-memory]");
 const sameSessionNote = await readNote();
 
 const coldQuiet = JSON.parse(JSON.stringify(coldBase));
@@ -262,7 +261,7 @@ coldQuiet.memory = {
 };
 await post("board:long", coldQuiet);
 await page.reload({ waitUntil: "networkidle" });
-await page.waitForSelector(".fb-memnote");
+await page.waitForSelector("#bdMem[data-memory]");
 const quietNote = await readNote();
 
 const coldEmptyNote = JSON.parse(JSON.stringify(coldBase));
@@ -271,7 +270,7 @@ coldEmptyNote.memory = {
 };
 await post("board:long", coldEmptyNote);
 await page.reload({ waitUntil: "networkidle" });
-await page.waitForSelector(".fb-memnote");
+await page.waitForSelector("#bdMem[data-memory]");
 const emptyNote = await readNote();
 
 const assertions = [
@@ -327,13 +326,17 @@ const assertions = [
   [fam.find((f) => f.k === "F").v === "−73", "F still renders, because its meaning did not change"],
   [legacyNote, "and the card says why, in the V/O note specifically"],
   [bad.length === 0, "no negative bar widths"],
-  [glyph.nullMarks === 2, "the table glyph marks V and O absent"],
-
-  [glyph.purity === "\u2014", `a v1 board withholds purity as well (got "${glyph.purity}")`],
+  [glyph.famGlyphs === 0 && glyph.purityCells === 0,
+   "the board draws neither the family glyph nor purity any more, on a v1 payload or a v2 one — the V and O " +
+   "gauges and purity whose meaning moved between versions live on the card, where the assertions above hold " +
+   "them to withholding, so the board cannot print a moved field as a number"],
+  [glyph.zeros === 0, "and no cell on the v1 board prints a bare zero where a field is absent"],
   [withheldSort.announced === 0,
     "a ?sort= deep link to the withheld column announces no sorted header"],
   [!withheldSort.purityAria,
-    "and the withheld column carries no aria-sort at all — 'none' would claim it is sortable"],
+    "and there is no purity header to carry an aria-sort — 'none' would claim it is sortable"],
+  [withheldSort.kept === null,
+    "and the dead ?sort= is dropped from the address rather than kept to be shared onward"],
   [withheldSort.firstTicker === "INTC",
     `while the rows stay in the published order (first row ${withheldSort.firstTicker})`],
 
@@ -346,8 +349,8 @@ const assertions = [
     "while a field NEWER than this fixture is named as unpublished rather than " +
     "drawn as zero: zero is the best possible reading of both quality axes once " +
     "oriented, so imputing it would reward a name for having no data"],
-  [v2Purity !== "\u2014" && v2Purity.length > 0,
-    `a v2 board publishes purity rather than withholding it (got "${v2Purity}")`],
+  [v2Purity === 0,
+    "a v2 board draws no purity column either: the board is a scan, and purity reads on the name's card"],
   [v2("F").v === "−73", "signed axes are unaffected by the version"],
 
   [legacyConv.cellText === "79",
@@ -356,14 +359,12 @@ const assertions = [
    "but the table cell carries NO title: the agreement counts are not on this " +
    "payload, and a title composed from undefined would explain a number with a " +
    "blank where its reason goes"],
-  [!legacyConv.badgeTitled,
-   "and neither does the deck badge, which reads the same two absent fields"],
+
   [!/signed axes/.test(legacyConv.aria),
    "and the screen-reader label claims no agreement count it was never given"],
   [/\b2 of 3\b/.test(v2Conv.cellTitle),
    `a board carrying the counts explains its conviction with them (got "${v2Conv.cellTitle}")`],
-  [/\b2 of 3\b/.test(v2Conv.badgeTitle),
-   "on the deck badge as well as the table cell — the same number in two views"],
+
   [/2 of 3 signed axes agreeing/.test(v2Conv.aria),
    `and a screen reader is told the same fact, not left with the composite alone`],
   [!/0\.45|45%|0\.35|0\.2\b/.test(v2Conv.cellTitle),

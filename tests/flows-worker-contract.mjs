@@ -181,7 +181,9 @@ try {
       const sideHtml = await side.text();
       ok(sideHtml.includes(BOARD_MARKER), `${route} is a gated page`);
       ok(sideHtml.includes("/assets/js/flows-board.js"), `${route} loads the board controller`);
-      ok(sideHtml.includes('id="flowsBody"'), `${route} carries the results table`);
+      ok(sideHtml.includes('id="flowsBody"'), `${route} carries the results table's body`);
+      ok(sideHtml.includes('role="table"'), `${route} announces that body's list as a table`);
+      ok(sideHtml.includes("/assets/css/flows-boards.css"), `${route} carries the boards stylesheet`);
       ok(/aria-current="page"/.test(sideHtml), `${route} marks itself current in the rail`);
 
       const anon = await get(route);

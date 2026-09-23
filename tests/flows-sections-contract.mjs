@@ -24,6 +24,15 @@ const put = (key, bodyObj) => fetch(url("/api/flows/ingest?key=" + encodeURIComp
   body: JSON.stringify(bodyObj),
 });
 
+const WROW = "#watchBody .bd-row[data-flip]";
+const readWhy = async (page) => {
+  await page.click(".bd-silent[data-empty] [data-info]");
+  await page.waitForSelector("#fxPop:popover-open");
+  const text = await page.$eval("#fxPop", (el) => el.innerText);
+  await page.keyboard.press("Escape");
+  return text;
+};
+
 const browser = await chromium.launch();
 try {
 
@@ -55,21 +64,23 @@ try {
       }]);
       const page = await context.newPage();
       await page.goto(url("/flows/watch/"), { waitUntil: "domcontentloaded" });
-      await page.waitForSelector(".flows-empty", { timeout: 15000 });
-      const pendingText = await page.locator(".flows-empty").textContent();
+      await page.waitForSelector('.bd-silent[data-empty="pending"]', { timeout: 15000 });
+      const pendingText = await readWhy(page);
       ok(/has been published yet/.test(pendingText) && !/publishing fault/.test(pendingText),
-         `an unwritten store renders the never-published copy, not the fault copy (${pendingText})`);
+         `an unwritten store renders the never-published copy behind its pending glyph, not the fault copy (${pendingText})`);
 
       eq(await page.locator('[data-rail-count="watch"]').isHidden(), true,
          "the watch badge stays hidden on a pending payload");
 
       await page.goto(url("/flows/long/"), { waitUntil: "domcontentloaded" });
-      await page.click('.flows-view[data-view="table"]');
-      await page.waitForSelector("#flowsBody .fb-empty", { timeout: 15000 });
-      const sortBtn = page.locator(".fb-sort:enabled").first();
+      await page.waitForSelector(".bd-silent[data-empty]", { timeout: 15000 });
+      const sortBtn = page.locator("#bdHead .bd-hs:enabled").first();
       if (await sortBtn.count()) await sortBtn.click();
-      eq(await page.locator("#flowsBody .fb-empty").count(), 1,
-         "a header click on an empty board leaves the explanation standing");
+      const sortSel = page.locator("#fbSort");
+      if (await sortSel.count()) await sortSel.selectOption({ index: 0 });
+      eq(await page.locator(".bd-silent[data-empty]").count(), 1,
+         "a sort on an empty board leaves the explanation standing");
+      eq(await page.locator("#bdEmpty").isHidden(), false, "and visible");
       await context.close();
     }
   }
@@ -259,13 +270,13 @@ try {
     });
 
     await page.goto(url("/flows/watch/"), { waitUntil: "domcontentloaded" });
-    await page.waitForSelector("#watchBody tr", { timeout: 15000 });
+    await page.waitForSelector(WROW, { timeout: 15000 });
 
-    const order = (await page.locator("#watchBody th").allTextContents()).map((t) => t.trim());
+    const order = (await page.locator(WROW + " .bd-open").allTextContents()).map((t) => t.trim());
     assert.deepEqual(order, ["BBB", "CCC", "DDD", "AAA"],
       "the watch list is ranked by distance to the band, not by score"); checks++;
 
-    const dist = (await page.locator("#watchBody td.c-toband").allTextContents()).map((t) => t.trim());
+    const dist = (await page.locator("#watchBody .c-toband").allTextContents()).map((t) => t.trim());
     assert.deepEqual(dist, ["0.99", "1.99", "10.99", "16.00"],
       "and the distance is the band minus the UNROUNDED score. The hundredth " +
       "below each integer is the tanh/atanh round-trip through the fixture's " +
@@ -274,20 +285,21 @@ try {
       "at the precision actually printed rather than at the ideal, because a " +
       "tolerance here would hide the day the two inverses stop agreeing"); checks++;
 
-    const near = await page.locator("#watchBody td.c-toband.is-near").count();
+    const near = await page.locator("#watchBody .c-toband.is-near").count();
     eq(near, 2, "rows within a fifth of the band's half-width of the edge are marked");
 
-    const surprised = await page.locator("#watchBody td.is-surprise").count();
+    const surprised = await page.locator("#watchBody .is-surprise").count();
     eq(surprised, 1, "and only a tilt past log 3 — one side surprising 3× the other — is marked");
 
-    const surTexts = await page.locator("#watchBody tr").first().locator("td").nth(4).textContent();
+    const surTexts = await page.locator(WROW).first().locator('[data-col="sur"]').textContent();
     ok(/^\+1\.39$/.test(surTexts.trim()), `surprise renders as a signed tilt (${surTexts})`);
-    const negTilt = await page.locator("#watchBody tr").nth(1).locator("td").nth(4).textContent();
+    const negTilt = await page.locator(WROW).nth(1).locator('[data-col="sur"]').textContent();
     ok(/^\u22120\.51$/.test(negTilt.trim()),
        `a put-side tilt carries a real minus, U+2212 (${negTilt})`);
 
-    const dddCells = await page.locator("#watchBody tr").nth(2).locator("td").allTextContents();
-    assert.deepEqual(dddCells.slice(4).map((t) => t.trim()), ["—", "—", "—", "—"],
+    const dddCells = await Promise.all(["sur", "rvol", "pcr", "w52"].map((k) =>
+      page.locator(WROW).nth(2).locator(`[data-col="${k}"]`).textContent()));
+    assert.deepEqual(dddCells.map((t) => t.trim()), ["—", "—", "—", "—"],
       `DDD's surprise, rel vol, P/C and 52w are all withheld, never zero (${dddCells.join("|")})`); checks++;
 
     eq(await page.locator('[data-rail-count="watch"]').textContent(), "4",
@@ -302,15 +314,15 @@ try {
       ],
     });
     await page.goto(url("/flows/watch/"), { waitUntil: "domcontentloaded" });
-    await page.waitForSelector("#watchBody tr", { timeout: 15000 });
+    await page.waitForSelector(WROW, { timeout: 15000 });
 
-    const bandOrder = (await page.locator("#watchBody th").allTextContents()).map((t) => t.trim());
+    const bandOrder = (await page.locator(WROW + " .bd-open").allTextContents()).map((t) => t.trim());
     assert.deepEqual(bandOrder, ["EDGE", "MID", "FAR"],
       "AT THE LIVE BAND THE ORDERING IS RECOVERED. All three rows score 0, so " +
       "on the score this sort had nothing to work with and returned input " +
       "order — which was alphabetical here and would have read as a ranking"); checks++;
 
-    const bandDist = (await page.locator("#watchBody td.c-toband").allTextContents()).map((t) => t.trim());
+    const bandDist = (await page.locator("#watchBody .c-toband").allTextContents()).map((t) => t.trim());
     ok(new Set(bandDist).size === 3,
       `and the distance column carries three distinct values rather than one ` +
       `constant (${bandDist.join(", ")}) — at this band the old column was ` +
@@ -320,13 +332,13 @@ try {
       "beside it — an earlier attempt reported residual units here and, at the " +
       "±20 band above, collapsed its two closest rows onto one printed value");
 
-    const bandNear = await page.locator("#watchBody td.c-toband.is-near").count();
+    const bandNear = await page.locator("#watchBody .c-toband.is-near").count();
     ok(bandNear >= 1 && bandNear < 3,
       `the near mark selects some rows but not all (${bandNear} of 3) — ` +
       "hard-coded at three score units it selected every row at this band, " +
       "and a mark on everything marks nothing");
 
-    const unitTitle = await page.locator("#watchBody td.c-toband").first().getAttribute("title");
+    const unitTitle = await page.locator("#watchBody .c-toband").first().getAttribute("title");
     ok(/unrounded score/.test(unitTitle || ""),
       "AND THE ROW SAYS WHERE ITS PRECISION CAME FROM: the score printed beside " +
       "this column is an integer that would place the name at the edge exactly, " +
@@ -336,8 +348,8 @@ try {
       side: "watch", sessionDate: "2026-08-24", deadBand: 20, scored: 60, status: "ok", rows: [],
     });
     await page.goto(url("/flows/watch/"), { waitUntil: "domcontentloaded" });
-    await page.waitForSelector(".flows-empty", { timeout: 15000 });
-    const emptyText = await page.locator(".flows-empty").textContent();
+    await page.waitForSelector('.bd-silent[data-empty="unavailable"]', { timeout: 15000 });
+    const emptyText = await readWhy(page);
     ok(/publishing fault/.test(emptyText),
        `an empty band is flagged as a likely fault, not reported as a quiet session (${emptyText})`);
 

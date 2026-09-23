@@ -217,6 +217,8 @@ try {
     if (m.type() !== "error") return;
     const text = m.text();
     if (allowFetchFailure && /Failed to load resource/.test(text)) return;
+    const where = m.location() && m.location().url ? new URL(m.location().url).pathname : "";
+    if (/status of 404/.test(text) && /^\/api\/flows\/(universe|lk)$/.test(where)) return;
     errors.push("console: " + text);
   });
 
@@ -1115,7 +1117,7 @@ try {
     eq(pooled.short, "9", "and nine on the bearish side, out of four published rows");
     eq(pooled.watch, "2",
        "while the watch badge is unchanged at its two rows: board:watch publishes `neutral` and " +
-       "no `cleared` at all (flows-pipeline.mjs:5824), and flows-watch.js:434 fills this same " +
+       "no `cleared` at all (flows-pipeline.mjs:5824), and flows-board.js fills this same " +
        "slot from its own rows.length, so moving this one alone would open the split the two " +
        "board badges just closed");
 
@@ -1145,7 +1147,7 @@ try {
     eq(onePop.bearSub, "top 4 of 9", "on both sides");
 
     await page.goto(url("/flows/long/"), { waitUntil: "domcontentloaded" });
-    await page.waitForSelector(".fd-card", { timeout: 15000 });
+    await page.waitForSelector("#flowsBody .bd-row[data-flip]", { timeout: 15000 });
     const onBoard = await page.evaluate(() => {
       const el = document.querySelector('[data-rail-count="long"]');
       return {

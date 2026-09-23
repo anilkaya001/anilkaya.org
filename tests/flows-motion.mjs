@@ -50,26 +50,33 @@ try {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await page.goto(url("/flows/long/"), { waitUntil: "domcontentloaded" });
-    await page.waitForSelector(".fd-card", { timeout: 15000 });
+    await page.waitForSelector("#flowsBody .bd-row[data-flip]", { timeout: 15000 });
+    await page.waitForTimeout(400);
 
-    const card = page.locator(".fd-card").first();
-    const box = await card.boundingBox();
+    const row = page.locator("#flowsBody .bd-row[data-flip]").first();
+    const box = await row.boundingBox();
 
     await page.mouse.move(box.x + box.width * 0.25, box.y + box.height * 0.25);
     await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * 0.6, { steps: 8 });
     await page.waitForTimeout(300);
 
-    const state = await page.evaluate(() => {
-      const el = document.querySelector(".fd-card");
-      const style = getComputedStyle(el);
-      const after = getComputedStyle(el, "::after");
+    const state = await page.evaluate(async () => {
+      const el = document.querySelector("#flowsBody .bd-row[data-flip]");
+      const hover = getComputedStyle(el).transform;
+      const rank = () => document.querySelector('#bdHead [data-col="r"] .bd-hs');
+      rank().click();
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      rank().click();
+      const rows = [...document.querySelectorAll("#flowsBody .bd-row[data-flip]")];
+      const written = rows.filter((r) => /translate/.test(r.style.transform)).length;
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const flipping = rows.filter((r) => r.classList.contains("is-flip"));
       return {
-        transform: style.transform,
-        transition: style.transitionDuration,
-        mx: el.style.getPropertyValue("--mx"),
-        my: el.style.getPropertyValue("--my"),
-        afterDisplay: after.display,
-        afterOpacity: after.opacity,
+        transform: hover,
+        written,
+        flipping: flipping.length,
+        transition: flipping.length ? getComputedStyle(flipping[0]).transitionDuration : getComputedStyle(el).transitionDuration,
+        order: [...document.querySelectorAll("#flowsBody .bd-open")].map((a) => a.textContent).join(","),
       };
     });
     await context.close();
@@ -103,29 +110,25 @@ try {
 
     eq(s.transform, "none",
        `a reader who asked for no motion gets NO LIFT on hover (got ${s.transform})`);
-    eq(s.transition, "0s", `and nothing transitions (got ${s.transition})`);
-
-    eq(s.mx, "", "the pointer listener never attached, so no --mx was written");
-    eq(s.my, "", "nor --my");
-
-    eq(s.afterDisplay, "none", "and the spotlight layer is not rendered at all");
+    eq(s.order, "BBB,AAA", "the sort itself still happened — only the motion stood down");
+    eq(s.written, 0,
+       "and reordering the list wrote no transform at all: the JS never starts the slide, so the CSS " +
+       "has nothing to leak past it");
+    eq(s.flipping, 0, "and no row was marked as sliding");
   }
 
   {
     const s = await probe("no-preference");
     eq(s.errors.length, 0, `the board threw nothing with motion allowed (${s.errors[0] || ""})`);
-    ok(s.transform !== "none" && /matrix/.test(s.transform),
-       `hover lifts the card (got ${s.transform})`);
-    ok(parseFloat(s.transition) > 0, `with a real transition (got ${s.transition})`);
-
-    ok(s.mx !== "" && s.my !== "",
-       `and the pointer position reaches the card as custom properties (--mx ${s.mx}, --my ${s.my})`);
-
-    const mx = parseFloat(s.mx), my = parseFloat(s.my);
-    ok(mx > 55 && mx < 85, `--mx tracks the pointer's x (${mx}, expected near 70)`);
-    ok(my > 45 && my < 75, `--my tracks the pointer's y (${my}, expected near 60)`);
-    ok(s.afterDisplay !== "none", "and the spotlight layer is rendered");
-    ok(parseFloat(s.afterOpacity) > 0, "and visible while hovered");
+    eq(s.transform, "none",
+       `hover does not lift a row either (got ${s.transform}): a list row answers the pointer with a fill, ` +
+       "and motion is kept for a change in the data");
+    eq(s.order, "BBB,AAA", "the reversed rank reorders the rows");
+    ok(s.written > 0,
+       `with motion allowed a reorder starts every moved row from where it was (${s.written} rows written ` +
+       "a translate the moment the order changed)");
+    ok(s.flipping > 0 && parseFloat(s.transition) > 0,
+       `and slides it home on a real spring transition (${s.flipping} rows, ${s.transition})`);
   }
 
   {
@@ -204,24 +207,25 @@ try {
        "a measured-empty region carries no glyph: it is a reading, not an alarm");
 
     await page.goto(url("/flows/long/"), { waitUntil: "load" });
-    await page.waitForSelector(".fd-card", { timeout: 15000 });
+    await page.waitForSelector("#flowsBody .bd-row[data-flip]", { timeout: 15000 });
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.waitForTimeout(200);
     const leading = await page.evaluate(() => {
-      const wrap = document.querySelector("#flowsTableWrap");
-      if (wrap) wrap.hidden = false;
-      const cell = document.querySelector(".flows-table thead th");
+      const head = document.querySelector("#bdHead [role=columnheader]");
+      const cell = document.querySelector('#flowsBody [data-col="netPrem"] .bd-n');
       const body = getComputedStyle(document.body);
-      return cell ? {
-        lh: getComputedStyle(cell).lineHeight,
-        fs: getComputedStyle(cell).fontSize,
-        bodyLh: body.lineHeight,
-        bodyFs: body.fontSize,
+      const ratio = (el) => parseFloat(getComputedStyle(el).lineHeight) / parseFloat(getComputedStyle(el).fontSize);
+      return head && cell ? {
+        head: ratio(head), cell: ratio(cell),
+        bodyRatio: parseFloat(body.lineHeight) / parseFloat(body.fontSize),
       } : null;
     });
-    ok(leading, "the board's table exists to measure");
-    const ratio = parseFloat(leading.lh) / parseFloat(leading.fs);
-    ok(ratio > 1.1 && ratio < 1.4,
-       `a table cell is leaded at ${ratio.toFixed(2)}, not at the body's ` +
-       `${(parseFloat(leading.bodyLh) / parseFloat(leading.bodyFs)).toFixed(2)}`);
+    await page.setViewportSize({ width: 320, height: 720 });
+    ok(leading, "the board's header and a figure cell exist to measure");
+    ok(leading.head > 1.1 && leading.head < 1.4,
+       `a column header is leaded at ${leading.head.toFixed(2)}, not at the body's ${leading.bodyRatio.toFixed(2)}`);
+    ok(leading.cell > 1.1 && leading.cell < 1.4,
+       `and so is a figure in a row (${leading.cell.toFixed(2)}): cells are leaded for figures rather than for prose`);
 
     await page.goto(url("/flows/ticker/?t=AAA"), { waitUntil: "load" });
     await page.waitForSelector(".ft-bar", { state: "attached", timeout: 15000 });
@@ -350,9 +354,10 @@ try {
     await context.close();
   }
 
-  console.log(`✓ flows-motion: ${checks} assertions — the deck card is the section's only ` +
-    `moving surface, and under reduced motion BOTH halves stand down: the CSS does not ` +
-    `transform and the JS does not attach, so neither can leak past the other. Plus the ` +
+  console.log(`✓ flows-motion: ${checks} assertions — a board row answers the pointer with a fill and ` +
+    `never a lift, and moves only when its order changes, and under reduced motion BOTH halves stand ` +
+    `down: the JS writes no transform and the CSS has no transition to run, so neither can leak past ` +
+    `the other. Plus the ` +
     `stylesheet's own contracts, which had nowhere else to be asserted: zero horizontal ` +
     `overflow at 320px on all twelve gated routes (regression.mjs covers the public pages ` +
     `and no Flows route), four visually distinct silences that stay distinct with every ` +

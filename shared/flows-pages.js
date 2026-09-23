@@ -522,61 +522,59 @@ ${UI_SCRIPT}
 </html>`;
 }
 
+const SECTOR_GLYPHS = {
+  tech: '<rect x="7" y="7" width="10" height="10" rx="2.2"/><path d="M10 3.5v3M14 3.5v3M10 17.5v3M14 17.5v3M3.5 10h3M3.5 14h3M17.5 10h3M17.5 14h3"/>',
+  health: '<path d="M9.6 4h4.8v5.6H20v4.8h-5.6V20H9.6v-5.6H4V9.6h5.6z"/>',
+  fin: '<path d="M4 20h16M5.5 17h13M7 10.5V17M10.3 10.5V17M13.7 10.5V17M17 10.5V17M3.8 9.5 12 4.5l8.2 5z"/>',
+  disc: '<path d="M5.6 8.5h12.8l-1.1 11.5H6.7z"/><path d="M9 8.5V7a3 3 0 0 1 6 0v1.5"/>',
+  staples: '<path d="M4 9.5h16l-1.9 10H5.9z"/><path d="M8.5 9.5 11 4.5M15.5 9.5 13 4.5"/>',
+  ind: '<circle cx="12" cy="12" r="3.2"/><path d="M12 3.5v3M12 17.5v3M3.5 12h3M17.5 12h3M6 6l2.1 2.1M15.9 15.9 18 18M6 18l2.1-2.1M15.9 8.1 18 6"/>',
+  energy: '<path d="M12 3.5c1 3.4 5 5.2 5 9.8a5 5 0 0 1-10 0c0-2.5 1.3-3.9 2.5-5.2.3 1.5 1 2.5 2.1 3C11.4 8.6 11 6.2 12 3.5z"/>',
+  mat: '<path d="M12 3.8 19.2 7.7v8.6L12 20.2l-7.2-3.9V7.7z"/><path d="M4.8 7.7 12 11.6l7.2-3.9M12 11.6v8.6"/>',
+  re: '<path d="M4 10.4 12 4l8 6.4V19a1.2 1.2 0 0 1-1.2 1.2H14.5v-5.4h-5v5.4H5.2A1.2 1.2 0 0 1 4 19z"/>',
+  util: '<path d="M9 3.5v4.5M15 3.5v4.5M6.5 8h11v3a5.5 5.5 0 0 1-11 0z"/><path d="M12 16.5v4"/>',
+  comm: '<circle cx="12" cy="12" r="1.8"/><path d="M8.6 8.6a4.8 4.8 0 0 0 0 6.8M15.4 8.6a4.8 4.8 0 0 1 0 6.8M5.7 5.7a8.9 8.9 0 0 0 0 12.6M18.3 5.7a8.9 8.9 0 0 1 0 12.6"/>',
+  none: '<circle cx="12" cy="12" r="3"/>',
+};
+
+const SECTOR_SPRITE = `<svg class="ui-sprite" aria-hidden="true" focusable="false" width="0" height="0">${
+  Object.entries(SECTOR_GLYPHS).map(([k, d]) => `<symbol id="g-sec-${k}" viewBox="0 0 24 24">${d}</symbol>`).join("")}</svg>`;
+
+const BOARD_SIDES = [
+  { key: "long", href: "/flows/long/", label: "Bullish", glyph: "long" },
+  { key: "short", href: "/flows/short/", label: "Bearish", glyph: "short" },
+  { key: "watch", href: "/flows/watch/", label: "Watch", glyph: "star" },
+];
+
+const boardBody = (key, { status, body, label }) => `
+  <nav class="bd-sides" aria-label="Boards">${BOARD_SIDES.map((b) =>
+    `<a href="${b.href}"${b.key === key ? ' aria-current="page"' : ""}>${glyph(b.glyph)}<span>${b.label}</span></a>`).join("")}</nav>
+  <div class="bd-hero" id="bdHero" hidden></div>
+  <section class="ui-card ui-mod bd-mod" id="bdMod" aria-labelledby="bdModT">
+    ${SECTOR_SPRITE}
+    <p class="visually-hidden" id="${status}" role="status">Loading the latest session\u2026</p>
+    <header class="ui-mod-h"><h2 class="ui-mod-t" id="bdModT">${key === "watch" ? "Near the edge" : "Names"}</h2><span class="ui-mod-sp"></span></header>
+    <div class="bd-tools" id="bdTools"></div>
+    <div class="bd-table" id="bdTable" data-board="${key === "watch" ? "watch" : "side"}" role="table" aria-label="${label}" aria-describedby="${status}">
+      <div class="bd-head" role="rowgroup"><div class="bd-row bd-hrow" role="row" id="bdHead"></div></div>
+      <div class="bd-body" role="rowgroup" id="${body}" aria-busy="true"></div>
+    </div>
+    ${key === "watch" ? "" : '<div class="bd-map" id="bdMap" hidden></div>'}
+    <div class="bd-empty" id="bdEmpty" hidden></div>
+  </section>
+  <p class="flows-foot bd-foot"><span class="foot-hit" id="flowsHitRate"><a href="/flows/history/">${glyph("history")}<span>Track record</span></a></span></p>
+`;
+
 export function sidePage({ username = "", side = "long" } = {}) {
   const bear = side === "short";
   const title = bear ? "Bearish candidates" : "Bullish candidates";
   const lede = bear
     ? "Names leaning bearish this session, ranked by score."
     : "Names leaning bullish this session, ranked by score.";
-  return `${head("Flows — " + title, lede)}
-${shell(bear ? "Bearish" : "Bullish", bear ? "short" : "long", username, `
-  <div class="flows-status" id="flowsStatus" role="status">Loading the latest session…</div>
-  <p class="flows-stale" id="flowsStale" role="status" hidden></p>
-
-  <div class="flows-controls">
-    <p class="flows-lede">${lede}</p>
-    <div class="flows-views" role="group" aria-label="Layout">
-      <button type="button" class="flows-view is-on" data-view="deck" aria-pressed="true">Deck</button>
-      <button type="button" class="flows-view" data-view="table" aria-pressed="false">Table</button>
-    </div>
-  </div>
-
-  <div class="flows-deck" id="flowsDeck" role="list" aria-label="Ranked candidates"></div>
-
-  <div class="flows-tablewrap" id="flowsTableWrap" tabindex="0" role="region" aria-label="Ranked candidates" hidden>
-    <table class="flows-table" id="flowsTable">
-      <caption class="flows-caption">Ranked candidates. Select a ticker for its gamma profile, key levels and disclosed congressional trades. Every score decomposes into its contributing families.</caption>
-      <thead>
-        <tr>
-          <th scope="col" class="c-rank">#</th>
-          <th scope="col">Ticker</th>
-          <th scope="col" class="c-num">Last</th>
-          <th scope="col" class="c-num">Score</th>
-          <th scope="col" class="c-num">Conv</th>
-          <th scope="col" class="c-num"><abbr title="Three signed axes — Flow, Positioning, Path — then two unsigned gauges: Vol regime and Quality">F&middot;P&middot;D&middot;V&middot;O</abbr></th>
-          <th scope="col" class="c-num">&Pi;</th>
-          <th scope="col" class="c-num">&Gamma; regime</th>
-          <th scope="col" class="c-num">&Gamma;&#8320; dist</th>
-          <th scope="col" class="c-num">Net prem</th>
-
-          <th scope="col" class="c-num"><abbr title="Where the last close sits in its own 52-week range: 0% at the year's low, 100% at the high. A position in a range, not a return — a name can sit at 95% after a year of going nowhere and a month of going up">52w</abbr></th>
-          <th scope="col" class="c-num"><abbr title="Thirty-day implied volatility minus the volatility this name has actually delivered over the 21 sessions spanning the same thirty calendar days, both annualised, in volatility points. The difference between two measurements — not a forecast, not an edge, and not a variance premium in the swap sense. It says what the option market is charging against what the stock has been doing, and nothing about which of the two is right">VRP</abbr></th>
-          <th scope="col" class="c-num"><abbr title="Where 30-day implied volatility sits within its own past year: 0 at the year's low, 100 at the high. A percentile of volatility, not a level of it — a 20 IVR name can still be the most volatile name on the board">IVR</abbr></th>
-        </tr>
-      </thead>
-      <tbody id="flowsBody"></tbody>
-    </table>
-  </div>
-
-  <p class="flows-foot">
-    Scores are a ranked attention signal, not a return forecast.
-    <span class="foot-hit" id="flowsHitRate">Whether this side has been right
-    is measured rather than asserted, session by session, on the
-    <a href="/flows/history/">track record</a>.</span>
-  </p>
-`)}
+  return `${head("Flows \u2014 " + title, lede, ["/assets/css/flows-boards.css"])}
+${shell(bear ? "Bearish" : "Bullish", bear ? "short" : "long", username,
+    boardBody(bear ? "short" : "long", { status: "flowsStatus", body: "flowsBody", label: "Ranked candidates" }))}
 ${UI_SCRIPT}
-
 <script src="${v("/assets/js/flows-board.js")}" defer></script>
 </body>
 </html>`;
@@ -714,58 +712,11 @@ ${UI_SCRIPT}
 export function watchPage({ username = "" } = {}) {
   const lede = "Scored names that did not clear the band on either side, " +
     "ranked by how close they came. Nothing here is a candidate.";
-  return `${head("Flows \u2014 Watch", lede)}
-${shell("Watchlist", "watch", username, `
-  <div class="flows-status" id="watchStatus" role="status">Loading the session\u2026</div>
-  <p class="flows-stale" id="watchStale" role="status" hidden></p>
-
-  <div class="flows-controls">
-    <p class="flows-lede">${lede}</p>
-  </div>
-
-  <div class="flows-tablewrap" id="watchTableWrap" tabindex="0" role="region"
-       aria-label="Names inside the dead band" hidden>
-    <table class="flows-table watch-table">
-      <caption class="flows-caption">
-        Every name the pipeline scored and published on neither side. Distance is
-        how far the score sits from the band edge, so a row near zero is one
-        session from appearing on a board. Surprise is the log ratio of
-        call-side to put-side volume surprise, each side against this
-        name&#39;s own thirty-day norm &#8212; the most conventional reading of
-        &#8220;unusual activity&#8221; there is, signed by which side is doing
-        the surprising, and one this product computed and never showed.
-        <span class="watch-key">Under a distance, &#9656; is a name that moved
-        toward the edge since its prior scored session and &#9666; one that
-        moved away, at the signed rate beside it per session; &#8776;<i>n</i>s
-        is the sessions to the edge at that rate. &#9662; after a ticker marks
-        a name that came back inside through the edge.</span>
-      </caption>
-      <thead>
-        <tr>
-          <th scope="col">Ticker</th>
-          <th scope="col" class="c-num">Last</th>
-          <th scope="col" class="c-num">Score</th>
-          <th scope="col" class="c-num"><abbr title="How far this score sits from the nearest edge of the dead band, in score units. Zero means it would publish">To band</abbr></th>
-          <th scope="col" class="c-num">Conv</th>
-          <th scope="col" class="c-num"><abbr title="Log ratio of call to put volume surprise, each side against this name&#39;s own thirty-day average. 0 is a balanced day for this name; positive means the call side is doing the surprising, negative the put side">Surprise</abbr></th>
-          <th scope="col" class="c-num"><abbr title="Today&#39;s share volume against its own recent norm, as the vendor reports it">Rel vol</abbr></th>
-          <th scope="col" class="c-num"><abbr title="Put contracts traded per call contract. A ratio of the tape, not a positioning estimate">P/C</abbr></th>
-          <th scope="col" class="c-num"><abbr title="Where the last price sits between the 52-week low and high. 0% is the low, 100% the high">52w</abbr></th>
-        </tr>
-      </thead>
-      <tbody id="watchBody"></tbody>
-    </table>
-  </div>
-
-  <p class="flows-foot">
-    A name inside the band is one the cross-section could not separate from
-    noise this session. Proximity to the edge is not a weaker version of a
-    signal &#8212; it is the absence of one, measured. Read this list for what
-    is stirring, never for what to do.
-  </p>
-`)}
+  return `${head("Flows \u2014 Watch", lede, ["/assets/css/flows-boards.css"])}
+${shell("Watchlist", "watch", username,
+    boardBody("watch", { status: "watchStatus", body: "watchBody", label: "Names inside the dead band" }))}
 ${UI_SCRIPT}
-<script src="${v("/assets/js/flows-watch.js")}" defer></script>
+<script src="${v("/assets/js/flows-board.js")}" defer></script>
 </body>
 </html>`;
 }
