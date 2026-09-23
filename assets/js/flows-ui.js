@@ -960,6 +960,10 @@
 
   function scrub(host, svg, o) {
     const xs = o.xs;
+    if (host._scrubOff) host._scrubOff.abort();
+    const off = new AbortController();
+    host._scrubOff = off;
+    const on = { signal: off.signal };
     const readout = h("div", { class: "ui-readout", "aria-hidden": "true" });
     host.append(readout);
     const xh = s("line", { class: "xh", y1: o.top, y2: o.bottom, x1: -10, x2: -10, opacity: 0 }, svg);
@@ -995,18 +999,18 @@
     host.addEventListener("pointermove", (e) => {
       px = e.clientX;
       if (!raf) raf = requestAnimationFrame(() => { raf = 0; show(nearest(at(px))); });
-    });
-    host.addEventListener("pointerdown", (e) => show(nearest(at(e.clientX))));
-    host.addEventListener("pointerleave", (e) => { if (e.pointerType !== "touch") hide(); });
-    host.addEventListener("pointercancel", hide);
-    host.addEventListener("blur", hide);
+    }, on);
+    host.addEventListener("pointerdown", (e) => show(nearest(at(e.clientX))), on);
+    host.addEventListener("pointerleave", (e) => { if (e.pointerType !== "touch") hide(); }, on);
+    host.addEventListener("pointercancel", hide, on);
+    host.addEventListener("blur", hide, on);
     host.addEventListener("keydown", (e) => {
       const k = e.key;
       if (k === "ArrowRight" || k === "ArrowLeft") { e.preventDefault(); show(clamp((idx < 0 ? xs.length - 1 : idx) + (k === "ArrowRight" ? 1 : -1), 0, xs.length - 1), true); }
       else if (k === "Home") { e.preventDefault(); show(0, true); }
       else if (k === "End") { e.preventDefault(); show(xs.length - 1, true); }
       else if (k === "Escape") hide();
-    });
+    }, on);
     return { show, hide };
   }
 
@@ -1135,10 +1139,14 @@
         : isDate ? dateTicks(X, xAt, 5, left, w - right, phone)
         : isNumX ? niceTicks(xMin, xMax, phone ? 4 : 6).map((v) => ({ x: xs(v), text: xf(v) }))
           : X.map((v, i) => ({ i, text: xf(v) })).filter((_, i) => i % Math.max(1, Math.ceil(N / (phone ? 4 : 7))) === 0);
+      let lastX = -Infinity;
       for (const t of ticks) {
         const x = t.x ?? xAt(t.i);
-        if (x < left + 10 || x > w - right - 6) continue;
-        s("text", { x, y: H - 6, text: t.text, "text-anchor": "middle" }, svg);
+        if (x < left + 10 || x > w - right + 0.5) continue;
+        const edge = x > w - right - 6;
+        if (edge && x - lastX < 36) continue;
+        s("text", { x: edge ? w - right : x, y: H - 6, text: t.text, "text-anchor": edge ? "end" : "middle" }, svg);
+        lastX = x;
       }
     }
     for (const m of o.markers || []) {

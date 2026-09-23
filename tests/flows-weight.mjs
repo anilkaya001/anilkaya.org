@@ -15,14 +15,14 @@ const CEILING_KIB = {
   sidePage: 181,
   watchPage: 181,
   deskPage: 168,
-  askPage: 154,
+  askPage: 155,
   strategyPage: 186,
   trackPage: 153,
-  marketPage: 194,
+  marketPage: 195,
   unusualPage: 160,
   eventsPage: 149,
-  politicalPage: 138,
-  historyPage: 135,
+  politicalPage: 139,
+  historyPage: 136,
   loginPage: 5,
 };
 
