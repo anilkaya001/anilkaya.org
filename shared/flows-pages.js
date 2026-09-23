@@ -613,82 +613,50 @@ ${UI_SCRIPT}
 </html>`;
 }
 
+const marketModule = (id, title, bodyId, { span = "", sub = "", seg = "", body = "" } = {}) => `
+    <section class="ui-card ui-mod mk-mod${span ? " ui-span-" + span : ""}" id="${id}" aria-labelledby="${id}T">
+      <header class="ui-mod-h"><h2 class="ui-mod-t" id="${id}T">${title}</h2><span class="ui-mod-sp"></span>${sub}${seg}</header>
+      ${body || `<div class="mk-body" id="${bodyId}"></div>`}
+    </section>`;
+
+const dossier = (t) => `<a class="mk-dossier" href="/flows/ticker/?t=${t}">Dossier</a>`;
+
 export function marketPage({ username = "" } = {}) {
-  const lede = "Whether the screened universe was bought or sold, how broad " +
-    "that was, and how much of it is five names.";
-  return `${head("Flows \u2014 Market", lede)}
+  return `${head("Flows \u2014 Market", "The market in depth: the session tide, breadth, sectors, index ETFs, expiries, volatility and the market-wide feeds.", ["/assets/css/flows-market.css"])}
 ${shell("Market", "market", username, `
-  <div class="flows-status" id="mktStatus" role="status">Loading the session\u2026</div>
-  <p class="flows-stale" id="mktStale" role="status" hidden></p>
+  <header class="flows-head mk-head" data-fx-hero>
+    <h1 id="fxTitle">Market</h1>
+    <p class="mk-meta" id="mkMeta"></p><span id="mkStalePill"></span>
+  </header>
+  <p class="visually-hidden" id="mktStatus" role="status">Loading the session\u2026</p>
+  <p class="visually-hidden" id="mktStale" role="status" hidden></p>
+  <p class="visually-hidden" id="mkPulseStamp"></p>
 
-  <div class="flows-controls">
-
+  <div class="ui-grid mk-grid">
+${marketModule("mkTideCard", "Tide", "mkTide", { seg: `<div class="mk-segc" id="mkTideSeg"></div>`,
+    body: `<div class="mk-body"><div id="mkTideLegs"></div><div id="mkTide"></div></div>` })}
+${marketModule("mkBreadthCard", "Breadth", "", { span: 5, body: `<div class="mk-body"><div id="mktTilt"></div><div id="mktBreadth"></div></div>` })}
+${marketModule("mkTapeCard", "Tape", "mktTape", { span: 7 })}
+${["SPY", "QQQ", "IWM"].map((t) => marketModule("mkEtf" + t + "Card", t, "mkEtf" + t, { span: 4, sub: dossier(t) })).join("")}
+${marketModule("mkSecTidesCard", "Sector tides", "mkSecTides")}
+${marketModule("mkSectorsCard", "Momentum", "mktSectors", { span: 6 })}
+${marketModule("mkGroupsCard", "Groups", "mkGroups", { span: 6 })}
+${marketModule("mkExpiryCard", "Expiry", "mkExpiry", { span: 5 })}
+${marketModule("mkVolCard", "Volatility", "mkVol", { span: 7 })}
+${marketModule("mkRadarCard", "Radar", "mkRadar", { span: 6, seg: `<div class="mk-segc" id="mkRadarSeg"></div>` })}
+${marketModule("mkAdvCard", "Advancers", "mkAdv", { span: 6 })}
+${marketModule("mkVolumeCard", "Volume", "mkVolume", { span: 6 })}
+${marketModule("mkAgainstCard", "Against the tape", "mktAgainst", { span: 6 })}
+${marketModule("mkMoversCard", "Extremes", "mktMovers", { seg: `<div class="mk-segc mk-seg-phone" id="mkMoversSeg"></div>` })}
+${marketModule("mkOiCard", "Open interest", "mkOi", { span: 6 })}
+${marketModule("mkDarkCard", "Dark pool", "mkDark", { span: 6 })}
+${marketModule("mkImpactCard", "Net impact", "mkImpact", { span: 4 })}
+${marketModule("mkInsidersCard", "Insiders", "mkInsiders", { span: 4 })}
+${marketModule("mkSeasonCard", "Seasonality", "mkSeason", { span: 4 })}
   </div>
-
-  <section class="fc-panel" id="mktTiltPanel" hidden>
-    <h2 class="fc-panel-h">Bought or sold, two ways</h2>
-    <p class="fc-reading is-lead" id="mktTiltLead"></p>
-    <div id="mktTilt"></div>
-    <p class="fc-note" id="mktTiltNote"></p>
-  </section>
-
-  <section class="fc-panel" id="mktBreadthPanel" hidden>
-    <h2 class="fc-panel-h">Breadth, and what it is made of</h2>
-    <p class="fc-reading is-lead" id="mktBreadthLead"></p>
-    <div id="mktBreadth"></div>
-    <p class="fc-note is-qualifier" id="mktBreadthQual"></p>
-    <p class="fc-note" id="mktBreadthNote"></p>
-  </section>
-
-  <section class="fc-panel" id="mktTapePanel" hidden>
-    <h2 class="fc-panel-h">The tape</h2>
-    <div class="flows-tablewrap" tabindex="0" role="region"
-         aria-label="Aggregate tape readings over the screened universe">
-      <table class="flows-table" id="mktTape">
-
-        <caption class="flows-caption">
-          Each row states the population it was measured over.
-        </caption>
-        <thead>
-          <tr>
-            <th scope="col">Reading</th>
-            <th scope="col" class="c-num">Value</th>
-            <th scope="col" class="c-num"><abbr title="How many names of the screened universe quoted every field this reading needs">Names</abbr></th>
-          </tr>
-        </thead>
-        <tbody id="mktTapeBody"></tbody>
-      </table>
-    </div>
-  </section>
-
-  <section class="fc-panel" id="mktSectorPanel" hidden>
-    <h2 class="fc-panel-h">Sector momentum</h2>
-    <p class="fc-reading is-lead" id="mktSectorLead"></p>
-    <div id="mktSectors"></div>
-    <p class="fc-note is-qualifier" id="mktSectorQual"></p>
-    <p class="fc-note" id="mktSectorNote"></p>
-  </section>
-
-  <section class="fc-panel" id="mktMoversPanel" hidden>
-    <h2 class="fc-panel-h">The session&#39;s extremes</h2>
-    <div id="mktMovers"></div>
-    <div id="mktMoversBand"></div>
-    <p class="fc-note">
-      Ranked over the whole screened universe, not over the board. Tickers here
-      are plain text: a detail card exists only for the names the board went
-      deep on, and a link that usually leads nowhere is worse than no link.
-    </p>
-  </section>
-
-  <section class="fc-panel" id="mkPulsePanel" hidden>
-    <h2 class="fc-panel-h">Market pulse</h2>
-    <p class="fc-note" id="mkPulseStamp"></p>
-    <div class="mk-pulse-grid" id="mkPulseGrid"></div>
-    <p class="fc-note" id="mkPulseFoot"></p>
-  </section>
-
-  <p class="flows-foot" id="mktFoot"></p>
-`)}
+  <p class="visually-hidden" id="mkPulseFoot"></p>
+  <p class="visually-hidden" id="mktFoot"></p>
+`, { chrome: false })}
 ${UI_SCRIPT}
 <script src="${v("/assets/js/flows-market.js")}" defer></script>
 </body>
