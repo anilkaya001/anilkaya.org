@@ -234,14 +234,6 @@ function neuronMark(id, live) {
     `<g fill="url(#akNN${id})">${nodes}</g></svg>`;
 }
 
-const NEURON_CLAMP = 32;
-
-function neuronWords(text) {
-
-  return String(text).split(/\s+/).filter(Boolean).map((word, i) =>
-    `<span class="ak-w" style="--d:${Math.min(i, NEURON_CLAMP)}">${escapeHTML(word)}</span>`).join(" ");
-}
-
 export function modelName(id) {
   if (typeof id !== "string" || !id) return "a language model";
   if (!id.startsWith("@cf/")) return id;
@@ -282,32 +274,42 @@ export function neuronProvenance(summary) {
   return "Deterministic reading. No model was asked.";
 }
 
-function neuronDock(summary, { scope = "this session" } = {}) {
+function neuronVerdict(summary) {
+  const glyphTile = `<span class="hm-verdict-g" aria-hidden="true">${glyph("neuron")}</span>`;
   if (!summary || typeof summary.text !== "string" || !summary.text.trim()) {
-
     return `
-  <section class="ak-neuron is-pending" aria-labelledby="akNeuronH">
-    ${neuronMark("p", false)}
-    <div class="ak-neuron-body">
-      <p class="ak-neuron-h" id="akNeuronH">Neuron</p>
-      <p class="ak-neuron-say ak-neuron-none">No summary has been written for ${escapeHTML(scope)} yet.</p>
-      <p class="ak-neuron-src">Not published yet \u2014 not a quiet session. Nothing here is claimed about the market.</p>
+  <section class="ui-card hm-verdict is-pending" id="hmVerdict" aria-labelledby="hmVerdictT">
+    <div class="hm-verdict-h">
+      ${glyphTile}
+      <div class="hm-verdict-b">
+        <h2 class="hm-verdict-line" id="hmVerdictT">No read yet</h2>
+        <div class="hm-verdict-meta"><span class="hm-verdict-by">Neuron</span>
+          <span class="ui-state hm-mark" data-state="pending" title="Pending" aria-label="Pending: not published yet — not a quiet session. Nothing here is claimed about the market.">${glyph("pending")}</span></div>
+      </div>
     </div>
   </section>`;
   }
-  const when = typeof summary.generatedAt === "string" && summary.generatedAt
-    ? `<span class="ak-neuron-when">&middot; written <time datetime="${escapeHTML(summary.generatedAt)}">${escapeHTML(summary.generatedAt.slice(0, 10))} ${escapeHTML(summary.generatedAt.slice(11, 16))} UTC</time></span>`
+  const text = String(summary.text).trim();
+  const cut = /^(.+?[.!?])(\s+[A-Z(\u2212+\-\d])/.exec(text);
+  const headline = cut ? cut[1] : text;
+  const rest = cut ? text.slice(cut[1].length).trim() : "";
+  const at = typeof summary.generatedAt === "string" && summary.generatedAt ? summary.generatedAt : null;
+  const when = at
+    ? `<time datetime="${escapeHTML(at)}">${escapeHTML(at.slice(0, 10))} ${escapeHTML(at.slice(11, 16))} UTC</time>`
     : "";
-  const words = neuronWords(summary.text);
-  const caretAt = Math.min(String(summary.text).split(/\s+/).filter(Boolean).length, NEURON_CLAMP) + 1;
-
   return `
-  <section class="ak-neuron${summary.llm ? " is-llm" : ""}" aria-labelledby="akNeuronH">
-    ${neuronMark(summary.llm ? "d" : "s", summary.llm)}
-    <div class="ak-neuron-body">
-      <p class="ak-neuron-h" id="akNeuronH">Neuron ${when}</p>
-      <p class="ak-neuron-say">${words}<span class="ak-caret" style="--d:${caretAt}" aria-hidden="true"></span></p>
-      <p class="ak-neuron-src"${summary.llm && summary.model ? ` title="${escapeHTML(summary.model)}"` : ""}>${neuronProvenance(summary)}</p>
+  <section class="ui-card hm-verdict${summary.llm ? " is-llm" : ""}" id="hmVerdict" aria-labelledby="hmVerdictT">
+    <div class="hm-verdict-h">
+      ${glyphTile}
+      <div class="hm-verdict-b">
+        <h2 class="hm-verdict-line" id="hmVerdictT">${escapeHTML(headline)}</h2>
+        <div class="hm-verdict-meta"><span class="hm-verdict-by">Neuron</span>${when}</div>
+      </div>
+      <button class="hm-more" type="button" id="hmNeuronMore" aria-expanded="false" aria-controls="hmNeuronX"><span>More</span>${glyph("chev")}</button>
+    </div>
+    <div class="hm-verdict-x" id="hmNeuronX" hidden>
+      ${rest ? `<p class="hm-verdict-rest">${escapeHTML(rest)}</p>` : ""}
+      <p class="hm-verdict-src"${summary.llm && summary.model ? ` title="${escapeHTML(summary.model)}"` : ""}>${neuronProvenance(summary)}</p>
     </div>
   </section>`;
 }
@@ -364,159 +366,49 @@ ${sitePill()}
 </html>`;
 }
 
-const OVERVIEW_SECTIONS = [
-  ["ccChgH", "What changed"],
-  ["ccTideH", "Daily flow"],
-  ["ccBullH", "Bullish"],
-  ["ccBearH", "Bearish"],
-  ["ccAlertsH", "Largest flagged windows"],
-  ["ccEventsH", "Reporting soon"],
-  ["ccWatchH", "Nearly in"],
-  ["ccLeanH", "Sector lean · options premium"],
-  ["ccSplitH", "Flow distribution"],
-  ["ccNewsH", "Headlines"],
-  ["ccSpineH", "The whole distribution"],
-];
-
-const ccHeading = (id) =>
-  `<h2 class="cc-h-t" id="${id}">${OVERVIEW_SECTIONS.find((s) => s[0] === id)[1]}</h2>`;
+const homeModule = (id, title, bodyId, { span = "", sub = "", seg = "", body = "" } = {}) => `
+    <section class="ui-card ui-mod hm-mod${span ? " ui-span-" + span : ""}" id="${id}" aria-labelledby="${id}T">
+      <header class="ui-mod-h"><h2 class="ui-mod-t" id="${id}T">${title}</h2><span class="ui-mod-sp"></span>${sub}${seg}</header>
+      ${body || `<div class="hm-body" id="${bodyId}"></div>`}
+    </section>`;
 
 export function overviewPage({ username = "", summary = null } = {}) {
-  return `${head("Flows — Overview", "The whole session on one screen: both tails, the level, what moved, and what reports next.")}
+  return `${head("Flows — Today", "The market in one glance: the tide, the regime, both leaders, what changed and what reports next.", ["/assets/css/flows-home.css"])}
 ${shell("Today", "overview", username, `
-  <div class="flows-scroll" id="ccScroll">
-${pageHead("Today", "overview")}
-  <div class="flows-status" id="flowsStatus" role="status">Loading the latest session…</div>
-  <p class="flows-stale" id="flowsStale" role="status" hidden></p>
+  <header class="flows-head hm-head" data-fx-hero>
+    <h1 id="fxTitle">Today</h1>
+    <p class="hm-meta"><time id="ccMetaDate"></time><span id="ccMetaScreened" hidden></span><span id="hmStale"></span></p>
+  </header>
+  <p class="visually-hidden" id="flowsStatus" role="status">Loading the latest session…</p>
+  <p class="visually-hidden" id="flowsStale" role="status" hidden></p>
 
-${neuronDock(summary)}
-
-  <nav class="cc-jump" aria-label="Overview sections">
-    ${OVERVIEW_SECTIONS.map(([id, label]) => `<a href="#${id}">${label}</a>`).join("")}
-  </nav>
-  <div class="cc">
-
-    <div class="cc-meta" id="ccMeta" hidden>
-      <span class="cc-meta-d" id="ccMetaDate"></span>
-      <span class="cc-meta-n" id="ccMetaScreened"></span>
-      <span class="cc-meta-live" id="ccMetaLive" hidden></span>
-    </div>
-
-    <section class="cc-verdict" id="ccVerdict" aria-label="Session verdict"></section>
-
-    <section class="cc-region cc-chg" aria-labelledby="ccChgH">
-      <div class="cc-h">
-        ${ccHeading("ccChgH")}
-
-        <span class="cc-h-s" id="ccChgSub">since each name&#39;s prior scored session</span>
+  <div class="ui-grid hm-grid">
+    <section class="ui-card hm-hero" id="hmHero" aria-labelledby="hmHeroT"><div class="hm-hero-in">
+      <div class="hm-hero-id">
+        <div class="hm-hero-k"><h2 class="hm-hero-t" id="hmHeroT">Market tide</h2><span id="hmTideState"></span></div>
+        <div class="hm-hero-v" id="hmTideV" data-tone="silent">—</div>
+        <div class="hm-hero-cap" id="hmTideCap"></div>
+        <div class="hm-hero-legs" id="hmTideLegs"></div>
       </div>
-      <div class="cc-body" id="ccChg"></div>
-    </section>
-
-    <section class="cc-region cc-tide" aria-labelledby="ccTideH">
-      <div class="cc-h">
-        ${ccHeading("ccTideH")}
-        <div class="cc-seg" id="ccTideSeg" role="group" aria-label="How many sessions this flow is drawn over"></div>
-      </div>
-      <div class="cc-body" id="ccTide"></div>
-    </section>
-
-    <section class="cc-region cc-bull" aria-labelledby="ccBullH">
-      <div class="cc-h">
-        ${ccHeading("ccBullH")}
-
-        <a class="cc-h-s" href="/flows/long/" id="ccBullSub" hidden></a>
-      </div>
-      <div class="cc-body" id="ccBull"></div>
-    </section>
-
-    <section class="cc-region cc-bear" aria-labelledby="ccBearH">
-      <div class="cc-h">
-        ${ccHeading("ccBearH")}
-        <a class="cc-h-s" href="/flows/short/" id="ccBearSub" hidden></a>
-      </div>
-      <div class="cc-body" id="ccBear"></div>
-    </section>
-
-    <section class="cc-region cc-alerts" aria-labelledby="ccAlertsH">
-      <div class="cc-h">
-        ${ccHeading("ccAlertsH")}
-        <span class="cc-h-s" id="ccAlertsSub"></span>
-
-        <a class="cc-h-s cc-h-all" href="/flows/unusual/">All flagged windows →</a>
-      </div>
-      <div class="cc-body" id="ccAlerts"></div>
-    </section>
-
-    <section class="cc-region cc-ev" aria-labelledby="ccEventsH">
-      <div class="cc-h">
-        ${ccHeading("ccEventsH")}
-        <span class="cc-h-s" id="ccEventsSub"></span>
-      </div>
-      <div class="cc-body" id="ccEvents"></div>
-    </section>
-
-    <section class="cc-region cc-watch" aria-labelledby="ccWatchH">
-      <div class="cc-h">
-        ${ccHeading("ccWatchH")}
-        <a class="cc-h-s" href="/flows/watch/" id="ccWatchSub">inside the dead band</a>
-      </div>
-      <div class="cc-body" id="ccWatch"></div>
-    </section>
-
-    <section class="cc-region cc-lean" aria-labelledby="ccLeanH">
-      <div class="cc-h">
-        ${ccHeading("ccLeanH")}
-
-        <span class="cc-h-s" id="ccLeanSub">options premium, not price momentum</span>
-
-        <div class="cc-seg" id="ccLeanSeg" role="group"
-             aria-label="Which quantity the sector strip draws"></div>
-      </div>
-      <div class="cc-body" id="ccLean"></div>
-    </section>
-
-    <section class="cc-region cc-split" aria-labelledby="ccSplitH">
-      <div class="cc-h">
-        ${ccHeading("ccSplitH")}
-        <span class="cc-h-s" id="ccSplitSub"></span>
-      </div>
-      <div class="cc-body" id="ccSplit"></div>
-    </section>
-
-    <section class="cc-region cc-news" aria-labelledby="ccNewsH">
-      <div class="cc-h">
-        ${ccHeading("ccNewsH")}
-        <span class="cc-h-s" id="ccNewsSub"></span>
-      </div>
-      <div class="cc-body" id="ccNews"></div>
-    </section>
-
-    <section class="cc-region cc-spine" aria-labelledby="ccSpineH">
-      <div class="cc-h">
-        ${ccHeading("ccSpineH")}
-        <span class="cc-h-s">every published name on a fixed axis</span>
-      </div>
-      <section class="spine" aria-labelledby="spineH">
-        <h2 id="spineH" class="spine-h">Where the session leans</h2>
-        <div id="spinePlot"></div>
-      </section>
-    </section>
-
+      <div class="hm-hero-chart" id="hmTide"></div>
+      <div class="hm-hero-chips" id="ccVerdict" role="group" aria-label="Session readings"></div>
+    </div></section>
+${neuronVerdict(summary)}
+${homeModule("hmBull", "Bullish", "ccBull", { span: 6, sub: `<a class="hm-count cc-bull" href="/flows/long/" id="ccBullSub" hidden></a>` })}
+${homeModule("hmBear", "Bearish", "ccBear", { span: 6, sub: `<a class="hm-count cc-bear" href="/flows/short/" id="ccBearSub" hidden></a>` })}
+${homeModule("hmChg", "What changed", "ccChg", { span: 7, sub: `<span class="hm-count" id="ccChgSub"></span>`,
+    body: `<div class="hm-body" id="ccChg"><div id="ccChgStats"></div><div class="hm-spine" id="spinePlot"></div><div id="ccChgNote"></div><div id="ccChgList"></div></div>` })}
+${homeModule("hmVol", "Volatility", "ccVol", { span: 5 })}
+${homeModule("hmLean", "Sectors", "ccLean", { sub: `<span class="hm-count" id="ccLeanSub"></span>`, seg: `<div class="hm-seg" id="ccLeanSeg"></div>` })}
+${homeModule("hmAlerts", "Flagged", "ccAlerts", { span: 4, sub: `<a class="hm-count" href="/flows/unusual/" id="ccAlertsSub"></a>` })}
+${homeModule("hmEvents", "Reporting", "ccEvents", { span: 4, sub: `<a class="hm-count" href="/flows/events/" id="ccEventsSub"></a>` })}
+${homeModule("hmWatch", "Nearly in", "ccWatch", { span: 4, sub: `<a class="hm-count" href="/flows/watch/" id="ccWatchSub"></a>` })}
+${homeModule("hmNews", "Headlines", "ccNews", { sub: `<span class="hm-count" id="ccNewsSub"></span>` })}
   </div>
 
-  <p class="flows-foot">
-    Scores are a ranked attention signal, not a return forecast. Names inside
-    the dead band are not published on either side.
-    <span class="foot-hit" id="flowsHitRate">Whether this board has been right
-    is measured rather than asserted, session by session, on the
-    <a href="/flows/history/">track record</a>.</span>
-  </p>
-  </div>
+  <p class="flows-foot hm-foot"><span class="foot-hit" id="flowsHitRate"><a href="/flows/history/">Track record</a></span></p>
 `, { chrome: false })}
 ${UI_SCRIPT}
-
-<script src="${v("/assets/js/flows-cursor.js")}" defer></script>
 <script src="${v("/assets/js/flows-overview.js")}" defer></script>
 </body>
 </html>`;

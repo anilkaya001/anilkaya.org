@@ -3,7 +3,6 @@
 
   const statusEl = document.getElementById("flowsStatus");
   const staleEl = document.getElementById("flowsStale");
-  const spineHost = document.getElementById("spinePlot");
 
   const UI = window.FlowsUI;
   if (!UI) {
@@ -13,16 +12,17 @@
     }
     return;
   }
-  const { isNum, el, svgEl, DASH, MINUS, fmtSigned, fmtStamp, scrollHint, scoreStrip,
-    emptyState } = UI;
+  const { h, F, isNum, DASH, MINUS, fmtSigned, fmtStamp, scoreStrip, glyph } = UI;
+  const C = UI.chart;
 
-  const host = (id) => document.getElementById(id);
-  const verdictHost = host("ccVerdict");
-  if (!statusEl || !spineHost || !verdictHost) return;
+  const $ = (id) => document.getElementById(id);
+  const verdictHost = $("ccVerdict");
+  if (!statusEl || !verdictHost) return;
 
   const ROW_MAX = 10;
   const LIST_MAX = 8;
   const CHANGE_MAX = 12;
+  const SHOW = 5;
 
   const NO_CARD_SAID =
     "No detail card: the chain and the card cost vendor calls the run spends " +
@@ -44,6 +44,10 @@
     if (a >= 1e3) return sign + "$" + (a / 1e3).toFixed(0) + "K";
     return sign + "$" + a.toFixed(0);
   };
+  const usdS = (v) => {
+    const n = isNum(v);
+    return n !== null && n > 0 ? "+" + usd(n) : usd(n);
+  };
 
   const etTime = (at) => {
     if (typeof at !== "string" || !/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(at.trim())) {
@@ -57,41 +61,107 @@
       }).format(d);
     } catch { return null; }
   };
+  const NY_CLOCK = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
+  const NY_PARTS = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "numeric", hourCycle: "h23" });
+  const clock = (at) => {
+    const t = Date.parse(at);
+    return Number.isFinite(t) ? NY_CLOCK.format(new Date(t)) : DASH;
+  };
+  const nyMinutes = (at) => {
+    const t = Date.parse(at);
+    if (!Number.isFinite(t)) return null;
+    const p = Object.fromEntries(NY_PARTS.formatToParts(new Date(t)).map((x) => [x.type, x.value]));
+    return (+p.hour % 24) * 60 + +p.minute;
+  };
+  const hourTicks = (lo, hi, step) => {
+    const out = [];
+    const every = step || 60;
+    for (let m = Math.ceil(lo / every) * every; m <= hi; m += every) {
+      const hr = m / 60;
+      out.push({ v: m, label: (hr % 12 || 12) + (hr < 12 ? " AM" : " PM") });
+    }
+    return out;
+  };
 
   const sessionsSaid = (n) => n + (n === 1 ? " session" : " sessions");
   const daysSaid = (n) => n + (n === 1 ? " calendar day" : " calendar days");
 
   const capSaid = (shown, of) => (of > shown ? shown + " of " + of : "all " + of);
+  const countSaid = (shown, of) => (of > shown ? shown + " of " + of : String(of));
 
-  const tone = (v) => {
+  const toneOf = (v) => {
     const n = isNum(v);
-    return n === null ? "" : n > 0 ? " is-pos" : n < 0 ? " is-neg" : "";
+    return n === null ? null : n > 0 ? "up" : n < 0 ? "down" : "flat";
   };
 
-  function quiet(into, kind, text) {
-    const p = emptyState(kind, text);
-    p.classList.add("cc-quiet");
-    into.append(p);
+  const KIND = {
+    pending: ["pending", "Pending"],
+    empty: ["quiet", "Quiet"],
+    unavailable: ["unavailable", "Unavailable"],
+    unreadable: ["stop", "Unreadable"],
+  };
+  const disclose = (title, lead, more) => UI.info(() => Object.assign({ title, lead }, more || {}));
+
+  function hush(into, kind, text, what, height) {
+    const [g, word] = KIND[kind] || KIND.unavailable;
+    into.append(h("div", {
+      class: "ui-silent hm-hush", "data-empty": kind, "data-state": kind, role: "note",
+      "aria-label": word + ": " + what, style: { "--silent-h": (height || 112) + "px" },
+    },
+    glyph(g), h("div", { class: "ui-silent-t" }, word),
+    h("button", { type: "button", "aria-haspopup": "dialog", "aria-controls": "fxPop", "data-info": disclose(cap1(what), text) }, "Why")));
     return true;
   }
 
-  function lead(into, text) {
-    if (!text) return;
-    into.append(el("p", "fc-reading is-lead", text));
+  function mark(kind, text, label) {
+    const [g, word] = KIND[kind] || KIND.unavailable;
+    return h("button", {
+      class: "ui-state hm-mark", type: "button", "data-empty": kind, "data-state": kind, title: word,
+      "aria-label": word + ": " + label, "aria-haspopup": "dialog", "aria-controls": "fxPop",
+      "data-info": disclose(cap1(label), text),
+    }, glyph(g));
   }
 
-  function silent(into, payload, what) {
+  const cap1 = (t) => (typeof t === "string" && t ? t[0].toUpperCase() + t.slice(1) : t);
+
+  function silent(into, payload, what, height) {
     if (!payload) {
-      return quiet(into, "unreadable",
+      return hush(into, "unreadable",
         "The " + what + " could not be read, so this region is blank. That is a " +
-        "fault on this page and not a fact about the session — refresh to try again.");
+        "fault on this page and not a fact about the session — refresh to try again.", what, height);
     }
     if (payload.status === "pending") {
-      return quiet(into, "pending",
+      return hush(into, "pending",
         "The " + what + " has not been published for this session yet. Nothing has " +
-        "been measured here, so nothing is being claimed.");
+        "been measured here, so nothing is being claimed.", what, height);
     }
     return false;
+  }
+
+  function infoInto(sectionId, label, build) {
+    const head = document.querySelector("#" + sectionId + " .ui-mod-h");
+    if (!head) return;
+    const old = head.querySelector(":scope > .ui-info");
+    if (old) old.remove();
+    head.append(UI.infoButton(label, build));
+  }
+
+  function headMark(sectionId, node) {
+    const t = document.querySelector("#" + sectionId + " .ui-mod-t");
+    if (!t) return;
+    for (const old of t.querySelectorAll(".hm-mark")) old.remove();
+    if (node) t.append(node);
+  }
+
+  function table(label, heads, rows) {
+    return h("div", { class: "hm-tw", role: "region", "aria-label": label, tabindex: "0" },
+      h("table", { class: "hm-tbl" },
+        h("thead", null, h("tr", null, heads.map(([t, num, said]) =>
+          h("th", { scope: "col", class: num ? "c-num" : null, title: said || null }, t)))),
+        h("tbody", null, rows.map((r) => h("tr", r.attrs || null, r.cells.map((c) => {
+          const cell = Array.isArray(c) ? c : [c];
+          return h("td", { class: cell[1] || null, title: cell[2] || null }, cell[0]);
+        }))))));
   }
 
   const rowCount = (payload) =>
@@ -117,18 +187,12 @@
     return list;
   }
 
-  function nameNode(t, hasCard) {
-    if (!t) return el("span", "cc-flat", DASH);
-    if (!hasCard) {
-      const flat = el("span", "cc-flat", t);
-      flat.title = NO_CARD_SAID;
-      return flat;
-    }
-    const link = el("a", "cc-open", t);
+  const readerHref = (t) => "/flows/ticker/?t=" + encodeURIComponent(t) + "&s=signal&from=overview";
 
-    link.href = "/flows/ticker/?t=" + encodeURIComponent(t) + "&s=signal&from=overview";
-    link.title = "Open the full reader for " + t;
-    return link;
+  function nameNode(t, hasCard) {
+    if (!t) return h("span", { class: "cc-flat" }, DASH);
+    if (!hasCard) return h("span", { class: "cc-flat", title: NO_CARD_SAID }, t);
+    return h("a", { class: "cc-open", href: readerHref(t), title: "Open the full reader for " + t }, t);
   }
 
   function earningsMark(row, ev) {
@@ -136,157 +200,87 @@
     const d = isNum(row && row.edte);
     const date = (ev && ev.d) || (row && row.ed) || null;
     let text = null, said = null;
-    if (s !== null) { text = "⚠" + s + "s"; said = sessionsSaid(s) + " away"; }
-    else if (d !== null) { text = "⚠" + d + "d"; said = daysSaid(d) + " away"; }
-    else if (date) { text = "⚠"; said = null; }
-    if (!text) return null;
-    const mark = el("span", "cc-dim cc-ern", text);
-    mark.title = "Reports " + (date || "inside the events window") +
+    if (s !== null) { text = s + "s"; said = sessionsSaid(s) + " away"; }
+    else if (d !== null) { text = d + "d"; said = daysSaid(d) + " away"; }
+    else if (date) { text = ""; said = null; }
+    if (text === null) return null;
+    const title = "Reports " + (date || "inside the events window") +
       (said ? " · " + said : "") +
       ". A signal carried into a print stops being the signal that was ranked.";
-    mark.setAttribute("aria-label", mark.title);
-    return mark;
+    const near = (s !== null && s <= 5) || (s === null && d !== null && d <= 7);
+    return h("span", { class: "hm-tag cc-ern" + (near ? " is-near" : ""), title, "aria-label": title }, glyph("cal"), text);
   }
 
-  const NOTE_WALL_CHARS = 420;
+  const CROSS_WORDS = { cleared: "cleared", faded: "faded", flipped: "flipped" };
+  const CROSS_SAID = {
+    cleared: "Was inside the dead band at the previous scored session and is " +
+      "outside it now. The name became actionable this session.",
+    faded: "Was outside the dead band and is inside it now. The exit signal, " +
+      "and exactly as load-bearing as the entry.",
+    flipped: "Outside the band at both ends with opposite signs. The name did " +
+      "not weaken and re-strengthen; it changed sides without resting in the middle.",
+  };
 
-  function appendMethod(host, lines, summary, fold) {
-    const list = (lines || []).filter((one) => typeof one === "string" && one.trim());
-    if (!list.length) return;
-    const chars = list.reduce((n, one) => n + one.length, 0);
-    if (chars <= NOTE_WALL_CHARS && !fold) {
-      host.append(el("p", "cc-quiet cc-ln-note", list.join(" ")));
-      return;
+  const strips = [];
+
+  function drawStrips() {
+    const shown = strips.find((s) => s.cell.isConnected && s.cell.clientWidth > 0);
+    const base = shown ? Math.round(shown.cell.clientWidth) : 0;
+    for (const s of strips) {
+      if (!s.cell.isConnected) continue;
+      const w = Math.round(s.cell.clientWidth) || base;
+      if (!w || w === s.w) continue;
+      s.w = w;
+      s.cell.replaceChildren();
+      scoreStrip(s.cell, {
+        values: s.series, width: w, height: 28,
+        domain: s.track.domain, deadBand: s.track.deadBand, prefix: "hm",
+        ariaLabel: "Score for " + s.t + " across " + s.measured + " archived sessions",
+      });
     }
-    const box = el("details", "ft-how");
-    box.append(el("summary", "ft-how-s", summary || "How this reading was made"));
-    box.append(el("p", "cc-quiet cc-ln-note", list.join(" ")));
-    host.append(box);
   }
 
-  function tableWrap(label) {
-    const wrap = el("div", "cc-wrap");
-    wrap.tabIndex = 0;
-    wrap.setAttribute("role", "region");
-    wrap.setAttribute("aria-label", label);
-    scrollHint(wrap);
-    return wrap;
-  }
+  function sideList(into, rows, knowsDeep, track, label, evBy) {
+    const list = [];
+    const shown = rows.slice(0, ROW_MAX);
+    for (const row of shown) {
+      const t = String((row && row.t) || "");
+      const deep = !knowsDeep || (row && row.dp === 1);
+      const card = Boolean(t) && deep;
+      const mv = track.moveBy[t] || null;
+      const cross = mv && mv.current && typeof mv.d1.cross === "string" ? mv.d1.cross : null;
 
-  function headRow(cols) {
-    const thead = el("thead");
-    const tr = el("tr");
-    for (const [label, cls, said] of cols) {
-      const th = el("th", cls || null, label);
-      th.setAttribute("scope", "col");
-      if (said) th.title = said;
-      tr.append(th);
-    }
-    thead.append(tr);
-    return thead;
-  }
+      const name = h("span", { class: "hm-name cc-t" },
+        h("b", { class: "hm-t" }, t || DASH),
+        cross ? h("span", { class: "hm-tag cc-cross", "data-cross": cross, title: CROSS_SAID[cross] || null }, CROSS_WORDS[cross]) : null,
+        earningsMark(row, evBy.get(t)));
+      const conv = isNum(row.cnv);
+      const sub = h("span", { class: "hm-sub" },
+        h("span", { class: "hm-prem", "data-tone": toneOf(row.netPrem) }, usdS(row.netPrem)),
+        h("span", { class: "hm-conv", title: "Conviction measures agreement in the published inputs, not a probability of profit." },
+          "conv " + (conv === null ? DASH : String(Math.round(conv)))));
 
-  function nameCell(row, knowsDeep, mark, cross) {
-    const td = el("td", "cc-t");
-    const t = String((row && row.t) || "");
-    const deep = !knowsDeep || (row && row.dp === 1);
-    td.append(nameNode(t, Boolean(t) && deep));
-
-    const nm = row && typeof row.nm === "string" && row.nm.trim() ? row.nm.trim() : null;
-    if (nm && nm !== t) td.append(el("span", "cc-nm", nm));
-
-    if (cross) {
-      const tag = el("span", "cc-dim cc-cross", cross);
-      tag.title = CROSS_SAID[cross] || "";
-      td.append(tag);
-    }
-    if (mark) td.append(mark);
-    return td;
-  }
-
-  function sideTable(into, rows, knowsDeep, track, label, evBy) {
-
-    const drawsTrack = rows.slice(0, ROW_MAX).some((row) => {
-      const series = track.byName[row && row.t];
-      return Array.isArray(series) && series.some((v) => isNum(v) !== null);
-    });
-    const wrap = tableWrap(label);
-    const table = el("table", "cc-tbl");
-    table.append(headRow([
-      ["", "cc-rank"], ["Name", null],
-      ["Score", "c-num", "Signed attention score on a fixed −100 to +100 scale; not a return forecast."],
-      ["Conv", "c-num", "Conviction measures agreement in the published inputs, not a probability of profit."],
-
-      ["Px chg", "c-num",
-        "The session's price return: close over the prior close. Not the " +
-        "score move — that is the \u0394 score column in the region above, " +
-        "and it is in score points."],
-      ["Net prem", "c-num"],
-    ].concat(drawsTrack ? [[track.label, "cc-trk"]] : [])));
-
-    const body = el("tbody");
-    for (const row of rows.slice(0, ROW_MAX)) {
-      const tr = el("tr");
-
-      const mv = track.moveBy[row.t] || null;
-      tr.append(el("td", "cc-rank", isNum(row.r) === null ? DASH : String(row.r)));
-      tr.append(nameCell(row, knowsDeep, earningsMark(row, evBy.get(String(row.t || ""))),
-        mv && mv.current && typeof mv.d1.cross === "string" ? mv.d1.cross : null));
-      const score = el("td", "c-num cc-score" + tone(row.s), fmtSigned(row.s));
-      const value = isNum(row.s);
-      if (value !== null) {
-        const scale = el("span", "cc-score-scale");
-        scale.setAttribute("aria-hidden", "true");
-        const mark = el("i");
-        mark.style.width = Math.min(50, Math.abs(value) / 2) + "%";
-        mark.style.left = (value < 0 ? 50 - Math.min(50, Math.abs(value) / 2) : 50) + "%";
-        scale.append(mark);
-        score.append(scale);
-      }
-      tr.append(score);
-      tr.append(el("td", "c-num", isNum(row.cnv) === null ? DASH : String(Math.round(row.cnv))));
-      tr.append(el("td", "c-num" + tone(row.chg), pct(row.chg)));
-      tr.append(el("td", "c-num" + tone(row.netPrem), usd(row.netPrem)));
-
-      if (!drawsTrack) { body.append(tr); continue; }
-      const cell = el("td", "cc-trk");
-      const series = track.byName[row.t];
+      const trk = h("span", { class: "hm-trk cc-trk" });
+      const series = track.byName[t];
       const measured = (series || []).filter((v) => isNum(v) !== null).length;
-      if (series && measured) {
+      if (series && measured) strips.push({ cell: trk, series, track, t, measured, w: 0 });
+      else trk.textContent = DASH;
 
-        const strip = scoreStrip(cell, {
-          values: series, width: 150, height: 22,
-          domain: track.domain, deadBand: track.deadBand, prefix: "cc",
-          ariaLabel: "Score for " + row.t + " across " + measured + " archived sessions",
-        });
-
-        if (window.FlowsCursor && strip) {
-
-          const geo = UI.stripGeometry(series.length, 150);
-          window.FlowsCursor.attach(strip, {
-            name: "Score for " + row.t + " by session",
-            band: { y0: 0, y1: 22 },
-            points: series.map((raw, i) => {
-              const v = isNum(raw);
-              return {
-                x: geo.xMid(i),
-                label: track.dates[i] || "session " + (i + 1),
-                rows: [{ k: "Score", v: v === null ? "not scored" : fmtSigned(v, 0),
-                         cls: v === null ? "" : v > 0 ? "is-pos" : v < 0 ? "is-neg" : "" }],
-              };
-            }),
-          });
-        }
-      } else {
-
-        cell.textContent = DASH;
-      }
-      tr.append(cell);
-      body.append(tr);
+      const score = isNum(row.s);
+      const kids = [
+        h("span", { class: "hm-rk" }, isNum(row.r) === null ? DASH : String(row.r)),
+        h("span", { class: "hm-who" }, name, sub),
+        trk,
+        h("span", { class: "hm-score cc-score", "data-tone": toneOf(score) }, fmtSigned(row.s)),
+        h("span", { class: "hm-chg", "data-tone": toneOf(row.chg), title: "The session's price return: close over the prior close. Not the score move." }, pct(row.chg)),
+      ];
+      const said = t + ", score " + fmtSigned(row.s) + ", conviction " + (conv === null ? DASH : Math.round(conv)) +
+        ", price " + pct(row.chg) + ", net premium " + usd(row.netPrem);
+      list.push(card
+        ? h("a", { class: "ui-row hm-lrow cc-open", href: readerHref(t), "aria-label": said + ". Open the reader.", "data-ticker": t }, kids)
+        : h("div", { class: "ui-row hm-lrow cc-flat", role: "listitem", title: t ? NO_CARD_SAID : null, "aria-label": said, "data-ticker": t }, kids));
     }
-    table.append(body);
-    wrap.append(table);
-    into.append(wrap);
+    into.append(UI.list(list, { visible: SHOW, label }));
   }
 
   function readTrack(payload) {
@@ -321,25 +315,13 @@
     }
     return {
       byName, moveBy, domain: { lo, hi },
-
       dates: sessionRows.map((r) => (r && r.d) || null),
       deadBand: payload ? isNum(payload.deadBand) : null,
-
       label: sessions ? sessions + " sessions" : "Score track",
     };
   }
 
   const CHANGE_SAID = "since each name's prior scored session";
-
-  const CROSS_WORDS = { cleared: "cleared", faded: "faded", flipped: "flipped" };
-  const CROSS_SAID = {
-    cleared: "Was inside the dead band at the previous scored session and is " +
-      "outside it now. The name became actionable this session.",
-    faded: "Was outside the dead band and is inside it now. The exit signal, " +
-      "and exactly as load-bearing as the entry.",
-    flipped: "Outside the band at both ends with opposite signs. The name did " +
-      "not weaken and re-strengthen; it changed sides without resting in the middle.",
-  };
 
   function changeLede(change, band, sessionRows, shedBy, shed) {
     const said = [];
@@ -350,7 +332,6 @@
       : "The dead band is ±" + band + " score points wide.";
 
     if (!change) {
-
       said.push("This track published no pooled change summary, so the rows below " +
         "are the moves this payload carries rather than a share of a stated " +
         "population. " + bandSaid);
@@ -395,7 +376,6 @@
       "moved" + (from && to ? " between " + from + " and " + to : "") +
       (held === null ? "" : "; " + held + " held their score") + ".");
     if (consecutive !== null && moved !== null) {
-
       said.push(consecutive + (comparable === null
         ? " of the comparisons below span"
         : " of the " + comparable + " comparisons span") +
@@ -431,12 +411,17 @@
   }
 
   function paintChanged(into, payload, cards, evBy, boardBy) {
-
-    const sub = host("ccChgSub");
-    const saySub = (said) => {
-      if (sub) sub.textContent = said ? said + " · " + CHANGE_SAID : CHANGE_SAID;
+    const sub = $("ccChgSub");
+    const saySub = (said, spoken) => {
+      if (!sub) return;
+      sub.textContent = said || "";
+      sub.setAttribute("aria-label", spoken ? spoken + " · " + CHANGE_SAID : CHANGE_SAID);
     };
     saySub(null);
+    const list = $("ccChgList");
+    const tiles = $("ccChgStats");
+    if (list) list.replaceChildren();
+    if (tiles) tiles.replaceChildren();
     if (silent(into, payload, "score track")) return;
 
     const names = Array.isArray(payload.names) ? payload.names : [];
@@ -449,11 +434,11 @@
 
     const anyMove = names.some((nm) => nm && nm.d1);
     if (!change && !anyMove) {
-      quiet(into, "unavailable",
+      hush(into, "unavailable",
         "This score track was published without a change layer: no name carries a " +
         "d1 move and the payload states no session-level change. Nothing about " +
         "what moved can be read from it, and this page will not subtract two " +
-        "scores itself — a difference with no session span attached is not a reading.");
+        "scores itself — a difference with no session span attached is not a reading.", "what changed");
       return;
     }
 
@@ -467,14 +452,12 @@
       const v = isNum(d1.v), gap = isNum(d1.gap);
       if (v === null || gap === null) continue;
       const cross = typeof d1.cross === "string" ? d1.cross : null;
-
       if (v === 0 && !cross) continue;
       const at = isNum(nm.lastAt);
       moves.push({
         t: String(nm.t || ""), v, gap, cross,
         qv: isNum(d1.qv), at, now: isNum(nm.last), run: isNum(nm.run),
         ext: nm.ext && typeof nm.ext === "object" ? nm.ext : null,
-
         stale: dated && at !== null && at !== lastIndex,
       });
     }
@@ -488,92 +471,42 @@
     const lede = changeLede(change, band, sessionRows, shedBy, shed);
 
     if (!moves.length) {
-
       const measured = change && change.status === "flat";
-
       const shedOut = change && change.status === "ok"
         ? " No name that moved is carried on this payload, so the count above " +
           "has no rows behind it — the row ceiling shed them."
         : "";
-      quiet(into, measured ? "empty" : "unavailable", lede + shedOut);
+      hush(into, measured ? "empty" : "unavailable", lede + shedOut, "what changed");
       return;
     }
 
-    if (change) {
-      const summary = el("div", "cc-change-summary");
+    if (change && tiles) {
       const crossings = change.crossings || {};
-      for (const [label, value] of [["Moved", change.moved], ["Cleared", crossings.cleared],
-        ["Faded", crossings.faded], ["Flipped", crossings.flipped]]) {
-        const metric = el("div", "cc-change-metric");
-        metric.append(el("strong", null, isNum(value) === null ? DASH : value));
-        metric.append(el("span", null, label));
-        summary.append(metric);
-      }
-      into.append(summary);
+      const stat = (label, value, of, id) => UI.metric(label, isNum(value) === null ? DASH : String(value),
+        { id, sub: of || null });
+      tiles.append(UI.metrics([
+        stat("Moved", change.moved, isNum(change.comparable) === null ? null : "of " + change.comparable, "chgMoved"),
+        stat("Cleared", crossings.cleared, null, "chgCleared"),
+        stat("Faded", crossings.faded, null, "chgFaded"),
+        stat("Flipped", crossings.flipped, null, "chgFlipped"),
+      ], { min: 72 }));
     }
 
-    const detail = el("details", "ft-how cc-change-detail");
-    detail.append(el("summary", "ft-how-s", "Comparison scope and methodology"));
-    if (change) {
-      detail.append(el("p", "cc-quiet", "Compared: " + (isNum(change.comparable) ?? DASH) +
-        " names · " + (isNum(change.consecutive) ?? DASH) + " single-session comparisons. " +
-        "Each row states its comparison span. " +
-        (change.prior && change.session ? change.prior + " → " + change.session + ". " : "") +
-        (band === null ? "Band unavailable." : "Band: ±" + band + " score points.") +
-        (shed ? " " + shed + " counted names omitted from this payload." : "")));
-    }
-    detail.append(el("p", "cc-quiet cc-lede", lede));
-    into.append(detail);
+    const drawn = moves.slice(0, CHANGE_MAX);
+    saySub(countSaid(drawn.length, moves.length), capSaid(drawn.length, moves.length));
 
-    saySub(capSaid(Math.min(moves.length, CHANGE_MAX), moves.length));
-
-    const wrap = tableWrap("What changed " + CHANGE_SAID);
-    const table = el("table", "cc-tbl");
-    table.append(headRow([
-      ["Event", null, notes.crossing || null],
-      ["Name", null],
-      ["Δ score", "c-num", notes.change || null],
-      ["Over", null, notes.gaps || null],
-
-      ["Ended at", "c-num",
-        "The score the name held at the end of this comparison — its newest " +
-        "measured score, which on a row that is not about today is not today's. " +
-        (notes.score || "")],
-      ["Δ resid ×10⁴", "c-num", notes.saturation || null],
-      ["Run · sessions", "c-num", notes.run || null],
-      ["As of", null,
-        "Which session this name was last scored on. A move on an older " +
-        "session is real and is not about today."],
-    ]));
-
-    const body = el("tbody");
-    for (const mv of moves.slice(0, CHANGE_MAX)) {
-      const tr = el("tr", mv.stale ? "cc-old" : null);
-
-      const ev = el("td", mv.cross ? "cc-cross is-" + mv.cross : "cc-dim");
-      ev.append(el("span", null, mv.cross ? CROSS_WORDS[mv.cross] : "drift"));
-      if (mv.cross) ev.title = CROSS_SAID[mv.cross];
-
+    const eventOf = (mv) => {
+      let word = mv.cross ? CROSS_WORDS[mv.cross] : "drift";
       if (mv.ext && mv.at !== null) {
         const hiAt = isNum(mv.ext.hiAt), loAt = isNum(mv.ext.loAt);
         const extreme = hiAt === mv.at ? "window high" : loAt === mv.at ? "window low" : null;
-        if (extreme) {
-          const tag = el("span", "cc-dim", " · " + extreme);
-          tag.title = "The highest and lowest score this name recorded inside the " +
-            "published window, with the session it happened on.";
-          ev.append(tag);
-        }
+        if (extreme) word += " · " + extreme;
       }
-      tr.append(ev);
-
-      tr.append(nameCell(
-        { t: mv.t, dp: cards.has(mv.t) ? 1 : 0 }, true,
-        earningsMark(boardBy.get(mv.t) || null, evBy.get(mv.t)), null));
-
-      tr.append(el("td", "c-num" + tone(mv.v), fmtSigned(mv.v)));
-
-      const over = el("td", mv.gap === 1 ? "cc-dim" : null);
-      over.append(el("span", null, sessionsSaid(mv.gap)));
+      return word;
+    };
+    const overOf = (mv) => {
+      let said = sessionsSaid(mv.gap);
+      const flags = [];
       if (mv.at !== null && mv.gap > 0) {
         const from = mv.at - mv.gap;
         let boardOnly = false, crossedEpoch = false;
@@ -584,59 +517,90 @@
           const a = sessionRows[from], b = sessionRows[mv.at];
           if (a && b && Boolean(a.preEpoch) !== Boolean(b.preEpoch)) crossedEpoch = true;
         }
-
         if (boardOnly) {
-          const tag = el("span", "cc-dim", " · board-only");
-          tag.title = notes.backfill ||
-            "One of the sessions this comparison spans was reconstructed from " +
-            "archived boards and is genuinely sparser.";
-          over.append(tag);
+          said += " · board-only";
+          flags.push(notes.backfill || "One of the sessions this comparison spans was reconstructed from " +
+            "archived boards and is genuinely sparser.");
         }
         if (crossedEpoch) {
-          const tag = el("span", "cc-dim", " · across the epoch");
-          tag.title = notes.epoch ||
-            "The two observations come from different selection pools.";
-          over.append(tag);
+          said += " · across the epoch";
+          flags.push(notes.epoch || "The two observations come from different selection pools.");
         }
       }
-      tr.append(over);
+      return [said, flags.join(" ")];
+    };
+    const asOfOf = (mv) => {
+      if (!dated || mv.at === null) return [DASH, "This payload published no session index for the name, so which session it was last scored on cannot be stated."];
+      if (!mv.stale) return ["this session", null];
+      const behind = lastIndex - mv.at;
+      const on = (sessionRows[mv.at] && sessionRows[mv.at].d) || null;
+      return [(on ? on : "an earlier session") + " · " + sessionsSaid(behind) + " back",
+        "This name was not scored in the newest session, so its move is real and is not about today."];
+    };
 
-      tr.append(el("td", "c-num" + tone(mv.now), fmtSigned(mv.now)));
-
-      tr.append(el("td", "c-num" + tone(mv.qv), mv.qv === null ? DASH : fmtSigned(mv.qv)));
-
-      const runCell = el("td", "c-num", mv.run === null ? DASH : String(mv.run));
-      runCell.title = mv.run === null
-        ? "This payload published no run length for the name."
-        : mv.run === 0
-          ? "The newest score is exactly zero, which belongs to neither side and " +
-            "ends the run."
-          : sessionsSaid(mv.run) + " in a row on this sign. A run of one is a new " +
-            "opinion; a run of thirty is an old one.";
-      tr.append(runCell);
-
-      const asOf = el("td", "cc-dim cc-date");
-      if (!dated || mv.at === null) {
-        asOf.textContent = DASH;
-        asOf.title = "This payload published no session index for the name, so " +
-          "which session it was last scored on cannot be stated.";
-      } else if (!mv.stale) {
-        asOf.textContent = "this session";
-      } else {
-        const behind = lastIndex - mv.at;
-        const on = (sessionRows[mv.at] && sessionRows[mv.at].d) || null;
-        asOf.textContent = (on ? on : "an earlier session") +
-          " · " + sessionsSaid(behind) + " back";
-        asOf.title = "This name was not scored in the newest session, so its move " +
-          "is real and is not about today.";
-      }
-      tr.append(asOf);
-
-      body.append(tr);
+    if (list) {
+      const rows = drawn.map((mv) => {
+        const card = cards.has(mv.t);
+        const [over, overWhy] = overOf(mv);
+        const [asOf] = asOfOf(mv);
+        const ern = earningsMark(boardBy.get(mv.t) || null, evBy.get(mv.t));
+        const kids = [
+          h("span", { class: "hm-ev", "data-cross": mv.cross || "drift", title: mv.cross ? CROSS_SAID[mv.cross] : null }, mv.cross ? CROSS_WORDS[mv.cross] : "drift"),
+          h("span", { class: "hm-who" },
+            h("span", { class: "hm-name" }, h("b", { class: "hm-t" }, mv.t), ern),
+            h("span", { class: "hm-sub", title: overWhy || null }, mv.stale ? asOf : over)),
+          h("span", { class: "hm-dv", "data-tone": toneOf(mv.v) }, fmtSigned(mv.v)),
+          h("span", { class: "hm-end", "data-tone": toneOf(mv.now) }, fmtSigned(mv.now)),
+        ];
+        const said = mv.t + " " + eventOf(mv) + ", " + fmtSigned(mv.v) + " over " + over + ", now " + fmtSigned(mv.now);
+        return card
+          ? h("a", { class: "ui-row hm-crow cc-open" + (mv.stale ? " is-old" : ""), href: readerHref(mv.t), "aria-label": said, "data-ticker": mv.t }, kids)
+          : h("div", { class: "ui-row hm-crow cc-flat" + (mv.stale ? " is-old" : ""), role: "listitem", title: NO_CARD_SAID, "aria-label": said, "data-ticker": mv.t }, kids);
+      });
+      list.append(UI.list(rows, { visible: SHOW, label: "What changed " + CHANGE_SAID }));
     }
-    table.append(body);
-    wrap.append(table);
-    into.append(wrap);
+
+    const facts = change ? [
+      ["Compared", (isNum(change.comparable) ?? DASH) + " names"],
+      ["Single-session", (isNum(change.consecutive) ?? DASH) + " comparisons"],
+      ["Sessions", change.prior && change.session ? change.prior + " → " + change.session : null],
+      ["Band", band === null ? "not published" : "±" + band + " score points"],
+      ["Omitted", shed ? shed + " counted names" : null],
+    ] : [];
+    const detail = table("Every move " + CHANGE_SAID, [
+      ["Event", false, notes.crossing || null],
+      ["Name", false],
+      ["Δ score", true, notes.change || null],
+      ["Over", false, notes.gaps || null],
+      ["Ended at", true, "The score the name held at the end of this comparison — its newest measured score, which on a row that is not about today is not today's. " + (notes.score || "")],
+      ["Δ resid ×10⁴", true, notes.saturation || null],
+      ["Run · sessions", true, notes.run || null],
+      ["As of", false, "Which session this name was last scored on. A move on an older session is real and is not about today."],
+    ], drawn.map((mv) => {
+      const [over, overWhy] = overOf(mv);
+      const [asOf, asWhy] = asOfOf(mv);
+      return {
+        attrs: { class: mv.stale ? "cc-old" : null },
+        cells: [
+          [eventOf(mv), mv.cross ? "cc-cross is-" + mv.cross : "cc-dim", mv.cross ? CROSS_SAID[mv.cross] : null],
+          [mv.t, "cc-t"],
+          [fmtSigned(mv.v), "c-num"],
+          [over, null, overWhy || null],
+          [fmtSigned(mv.now), "c-num"],
+          [mv.qv === null ? DASH : fmtSigned(mv.qv), "c-num"],
+          [mv.run === null ? DASH : String(mv.run), "c-num",
+            mv.run === null ? "This payload published no run length for the name."
+              : mv.run === 0 ? "The newest score is exactly zero, which belongs to neither side and ends the run."
+                : sessionsSaid(mv.run) + " in a row on this sign. A run of one is a new opinion; a run of thirty is an old one."],
+          [asOf, "cc-date", asWhy],
+        ],
+      };
+    }));
+    infoInto("hmChg", "what changed", () => ({
+      title: "What changed", lead: lede, facts,
+      notes: ["Crossings of the dead band lead, then fresh drift by size; readings that are not about today are dated and demoted."],
+      node: detail,
+    }));
   }
 
   const keySilence = (payload, read, quietSaid) => {
@@ -647,181 +611,150 @@
     return ["unavailable", "not on this payload"];
   };
 
+  function chip(o) {
+    const attrs = {
+      class: "ui-gchip hm-chip", type: "button", "aria-haspopup": "dialog", "aria-controls": "fxPop",
+      "data-chip": o.key, "data-empty": o.silence ? o.silence[0] : null, "data-info": UI.info(o.info),
+    };
+    const g = o.silence
+      ? h("span", { class: "ui-gchip-g hm-chip-g", "data-empty": o.silence[0] }, glyph((KIND[o.silence[0]] || KIND.unavailable)[0]))
+      : o.g;
+    return h("button", attrs, g,
+      h("span", { class: "ui-chip-v", "data-tone": o.silence ? "silent" : o.tone || null }, o.value),
+      h("span", { class: "ui-chip-l" }, o.key));
+  }
+
+  function pair(a, b, word) {
+    const whole = a !== null && b !== null && a + b > 0 ? Math.round((a / (a + b)) * 100) + "%" : null;
+    return [h("span", { class: "hm-v-full" },
+      h("span", { class: "hm-half" }, a === null ? DASH : String(a)), h("span", { class: "hm-sl" }, " / "),
+      h("span", { class: "hm-half" }, b === null ? DASH : String(b)), h("span", { class: "visually-hidden" }, " " + word)),
+    h("span", { class: "hm-v-short", "aria-hidden": "true" }, whole || (a === null ? DASH : String(a)) + "/" + (b === null ? DASH : String(b)))];
+  }
+
   function paintVerdict(into, long, short, market, alerts, pulse) {
+    into.replaceChildren();
     const breadth = (market && market.breadth) || {};
     const premium = (market && market.premium) || {};
 
-    const daily = (() => {
-      const tot = pulse && pulse.totals;
-      if (!tot || tot.status !== "ok" || !Array.isArray(tot.rows)) return null;
-      const rows = tot.rows.slice().reverse().slice(-21);
-      const gross = rows.map((r) => {
-        const c = isNum(r && r.callPrem), pu = isNum(r && r.putPrem);
-        return c === null || pu === null ? null : Math.abs(c) + Math.abs(pu);
-      });
-      const to = tot.rows[0] && typeof tot.rows[0].date === "string" ? tot.rows[0].date : null;
-      return { gross, to };
-    })();
-
-    const shareOf = (a, b) => {
-      if (a === null || b === null) return null;
-      const whole = a + b;
-      if (!(whole > 0)) return null;
-      return [Math.round((a / whole) * 100) + "% bull / " +
-        Math.round((b / whole) * 100) + "% bear", null, null];
-    };
-
-    const grossNow = (() => {
-      if (!daily || !Array.isArray(daily.gross)) return null;
-      for (let i = daily.gross.length - 1; i >= 0; i--) {
-        if (daily.gross[i] !== null) return daily.gross[i];
-      }
-      return null;
-    })();
-
-    const tileSilence = keySilence;
-
-    const { silence: boardsSilence, date: sessionDate } = boardsRead(long, short);
-
+    const { silence: boardsSilence } = boardsRead(long, short);
     const bulls = poolCount(long);
     const bears = poolCount(short);
 
     const seen = isNum(alerts && alerts.seen);
     const atLimit = Boolean(alerts) && (alerts.vendorTruncated === true || alerts.readTruncated === true);
+    const alertRows = alerts && Array.isArray(alerts.rows) ? alerts.rows.length : null;
 
     const bt = isNum(breadth.tilt);
     const pt = isNum(premium.tilt);
-
     const bull = isNum(breadth.bull), bear = isNum(breadth.bear);
     const leaned = bull !== null && bear !== null ? bull + bear : null;
     const up = isNum(premium.netPositive), down = isNum(premium.netNegative);
     const gross = up !== null && down !== null ? up + down : null;
-    const btSilence = tileSilence(market, bt !== null, leaned === 0 ? "no name leaned" : null);
-    const ptSilence = tileSilence(market, pt !== null,
-      gross === 0 ? "no net premium was priced" : null);
+    const btSilence = keySilence(market, bt !== null, leaned === 0 ? "no name leaned" : null);
+    const ptSilence = keySilence(market, pt !== null, gross === 0 ? "no net premium was priced" : null);
+    const brSilence = keySilence(market, bull !== null && bear !== null, null);
 
-    const flagSpread = (() => {
+    const pc = pcOf(pulse);
+    const pcSilence = keySilence(pulse, pc.now !== null, null);
+    const clSilence = bulls === null && bears === null ? boardsSilence(false) : null;
+    const flSilence = keySilence(alerts, seen !== null, null);
 
-      const rows = Array.isArray(alerts && alerts.rows) ? alerts.rows : [];
-      const prems = rows.map((r) => isNum(r && r.prem))
-        .filter((v) => v !== null && v > 0).sort((a2, b2) => b2 - a2).slice(0, 14);
-      return prems.length >= 3 ? ["hist", prems] : null;
-    })();
+    const share = (a, b) => (a !== null && b !== null && a + b > 0 ? a / (a + b) : null);
+    const silenceSaid = (s, subject) => (!s ? null
+      : s[0] === "unreadable" ? cap1(subject) + " could not be read — refresh to try again."
+        : s[0] === "empty" ? cap1(subject) + " is empty: " + s[1] + "."
+          : cap1(subject) + " is " + s[1] + ".");
 
-    const tiles = [
-      ["Breadth",
-        (bull === null ? DASH : String(bull)) + " bull / " + (bear === null ? DASH : String(bear)) + " bear",
-        null, tileSilence(market, bull !== null && bear !== null, null), ["split", bull, bear],
-        shareOf(bull, bear)],
-      ["Cleared",
-        (bulls === null ? DASH : bulls) + " bull / " + (bears === null ? DASH : bears) + " bear",
-        null, boardsSilence(bulls !== null || bears !== null), ["split", bulls, bears],
-        shareOf(bulls, bears)],
-
-      ["Flow bias", pct(pt, 1), tone(pt), ptSilence, ["signed", pt],
-        bt !== null
-          ? [pct(bt, 1) + " weighting names equally", null, tone(bt)]
-          : (btSilence ? ["Names equally weighted: " + btSilence[1], btSilence[0], null] : null)],
-
-      ["Premium", grossNow === null ? DASH : usd(grossNow), null,
-        tileSilence(pulse, grossNow !== null, null),
-        daily && daily.gross ? ["spark", daily.gross, true] : null,
-        daily && daily.to && sessionDate && daily.to !== sessionDate
-          ? ["vendor daily totals to " + daily.to + ", not this session", null, null] : null],
-      ["Flagged windows", seen === null ? DASH : (atLimit ? "\u2265" : "") + seen, null,
-        tileSilence(alerts, seen !== null, null), flagSpread,
-        flagSpread ? [flagSpread[1].length + " largest by premium", null, null] : null],
+    const chips = [
+      chip({
+        key: "Flow bias", value: pct(pt, 1), tone: toneOf(pt), silence: ptSilence,
+        g: UI.divRing(pt === null ? null : pt * 100, { max: 25 }),
+        info: () => ({
+          title: "Flow bias", state: null,
+          lead: ptSilence ? silenceSaid(ptSilence, "the dollar-weighted tilt")
+            : "Net premium over gross premium across the screened universe, weighted by dollars.",
+          facts: [
+            ["By dollars", pct(pt, 1)],
+            ["Names equally weighted", bt !== null ? pct(bt, 1) : btSilence ? btSilence[1] : DASH],
+            ["Net call premium", usd(premium.netPositive)],
+            ["Net put premium", usd(premium.netNegative)],
+          ],
+          notes: [bt !== null && pt !== null && (bt > 0) !== (pt > 0) && bt !== 0 && pt !== 0
+            ? "The two weightings point opposite ways: breadth without size, or size without breadth." : null],
+        }),
+      }),
+      chip({
+        key: "Breadth", value: pair(bull, bear, "names net bought against net sold"), silence: brSilence,
+        g: UI.ring(share(bull, bear), { color: "--up-mark" }),
+        info: () => ({
+          title: "Breadth",
+          lead: brSilence ? silenceSaid(brSilence, "the breadth split")
+            : "Screened names whose net premium was bought against those whose net premium was sold.",
+          facts: [["Bought", bull === null ? DASH : String(bull)], ["Sold", bear === null ? DASH : String(bear)],
+            ["Bought share", share(bull, bear) === null ? DASH : F.pct(share(bull, bear), 0)],
+            ["Screened", isNum(market && market.n) === null ? DASH : String(market.n)]],
+        }),
+      }),
+      chip({
+        key: "Cleared", value: pair(bulls, bears, "names cleared the band bullish against bearish"),
+        silence: clSilence,
+        g: UI.ring(share(bulls, bears), { color: "--up-mark" }),
+        info: () => ({
+          title: "Cleared the band",
+          lead: clSilence ? silenceSaid(clSilence, "the cleared pool")
+            : "Names past the dead band on each board, counted whole rather than to the rows this page draws.",
+          facts: [["Bullish", bulls === null ? DASH : String(bulls)], ["Bearish", bears === null ? DASH : String(bears)]],
+        }),
+      }),
+      chip({
+        key: "Put/call", value: pc.now === null ? DASH : pc.now.toFixed(2), silence: pcSilence,
+        tone: pc.z === null ? null : pc.z > 1 ? "down" : pc.z < -1 ? "up" : null,
+        g: pc.z !== null ? UI.divRing(-pc.z, { max: 3 }) : UI.ring(pc.now === null ? null : Math.min(1, pc.now / 1.5), { color: "--label-2" }),
+        info: () => ({
+          title: "Put/call volume",
+          lead: pcSilence ? silenceSaid(pcSilence, "the put/call ratio")
+            : "Put contracts traded per call contract across the whole options market, on the vendor's daily totals.",
+          facts: [["Today", pc.now === null ? DASH : pc.now.toFixed(3)], ["Session", pc.date],
+            ["z against the year", pc.z === null ? (pc.zWhy || "not published yet") : F.signed(pc.z, 2) + " sd"],
+            ["Mean", pc.mean === null ? null : pc.mean.toFixed(3)], ["Sessions", pc.n === null ? null : String(pc.n)]],
+        }),
+      }),
+      chip({
+        key: "Flagged", value: seen === null ? DASH : (atLimit ? "≥" : "") + seen,
+        silence: flSilence,
+        g: UI.iconChip("unusual", "--s-orange"),
+        info: () => ({
+          title: "Flagged windows",
+          lead: flSilence ? silenceSaid(flSilence, "the flagged-window count") : "Option windows the vendor's own rules flagged in this read." +
+            (atLimit ? " The read hit the vendor's ceiling, so the count is a floor and never a census." : ""),
+          facts: [["Seen", seen === null ? DASH : (atLimit ? "≥" : "") + seen], ["Carried", alertRows === null ? DASH : String(alertRows)]],
+        }),
+      }),
     ];
+    into.append(UI.chips(chips, "Session readings"));
+  }
 
-    const viz = (spec) => {
-      if (!Array.isArray(spec)) return null;
-      const svg = svgEl("svg", { class: "cc-viz", viewBox: "0 0 100 8",
-        preserveAspectRatio: "none", "aria-hidden": "true", focusable: "false" });
-      if (spec[0] === "signed") {
-        const v = isNum(spec[1]);
-        if (v === null) return null;
-
-        const frac = Math.max(-1, Math.min(1, v / 0.25));
-        const half = Math.abs(frac) * 50;
-        svg.append(svgEl("rect", { class: "cc-viz-t", x: frac < 0 ? 50 - half : 50,
-          y: 1, width: Math.max(0.8, half), height: 6 }));
-        svg.append(svgEl("line", { class: "cc-viz-z", x1: 50, x2: 50, y1: 0, y2: 8 }));
-        svg.setAttribute("class", "cc-viz " + (v < 0 ? "is-neg" : v > 0 ? "is-pos" : "is-zero"));
-        return svg;
-      }
-      if (spec[0] === "split") {
-        const a = isNum(spec[1]), b = isNum(spec[2]);
-        if (a === null || b === null || !(a + b > 0)) return null;
-        const w = (a / (a + b)) * 100;
-        svg.append(svgEl("rect", { class: "cc-viz-a", x: 0, y: 1, width: w, height: 6 }));
-        svg.append(svgEl("rect", { class: "cc-viz-b", x: w, y: 1, width: 100 - w, height: 6 }));
-        return svg;
-      }
-
-      if (spec[0] === "spark") {
-        const vals = Array.isArray(spec[1]) ? spec[1].map((v) => isNum(v)) : [];
-        const seen = vals.filter((v) => v !== null);
-        if (seen.length < 3) return null;
-        const lo = Math.min(0, ...seen), hi = Math.max(0, ...seen);
-        const range = (hi - lo) || 1;
-        const step = vals.length > 1 ? 100 / (vals.length - 1) : 100;
-        const pts = [];
-        vals.forEach((v, i) => {
-          if (v === null) return;
-          pts.push((step * i).toFixed(2) + "," + (8 - ((v - lo) / range) * 8).toFixed(2));
-        });
-        if (pts.length < 3) return null;
-
-        if (lo < 0 && hi > 0) {
-          const zy = (8 - ((0 - lo) / range) * 8).toFixed(2);
-          svg.append(svgEl("line", { class: "cc-viz-z", x1: 0, x2: 100, y1: zy, y2: zy }));
-        }
-        const last = seen[seen.length - 1];
-        svg.append(svgEl("polyline", {
-          class: "cc-viz-s" + (spec[2] ? "" : last < 0 ? " is-neg" : last > 0 ? " is-pos" : ""),
-          points: pts.join(" "), fill: "none",
-        }));
-        return svg;
-      }
-
-      if (spec[0] === "hist") {
-        const vals = Array.isArray(spec[1]) ? spec[1].map((v) => isNum(v)).filter((v) => v !== null) : [];
-        if (vals.length < 3) return null;
-        const top = Math.max(...vals.map(Math.abs));
-        if (!(top > 0)) return null;
-        const step = 100 / vals.length;
-        vals.forEach((v, i) => {
-          const h = Math.max(0.8, (Math.abs(v) / top) * 8);
-          svg.append(svgEl("rect", { class: "cc-viz-h",
-            x: (step * i + step * 0.16).toFixed(2), width: (step * 0.68).toFixed(2),
-            y: (8 - h).toFixed(2), height: h.toFixed(2) }));
-        });
-        return svg;
-      }
-      return null;
-    };
-
-    for (const [key, value, cls, silence, spec, sub] of tiles) {
-      const tile = el("div", "cc-tile");
-      if (silence) tile.dataset.empty = silence[0];
-      tile.append(el("span", "cc-tile-k", key));
-      const shown = el("span", "cc-tile-v" + (cls || ""));
-      const halves = String(value).split(" / ");
-      if (halves.length === 2) shown.append(el("span", null, halves[0]), " / ", el("span", null, halves[1]));
-      else shown.textContent = String(value);
-      tile.append(shown);
-      const bar = silence ? null : viz(spec);
-      if (bar) tile.append(bar);
-
-      if (silence && silence[1]) tile.append(el("span", "cc-tile-s", silence[1]));
-      if (sub) {
-        const se = el("span", "cc-tile-q" + (sub[2] || ""), sub[0]);
-        if (sub[1]) se.dataset.empty = sub[1];
-        if (UI && UI.keepDates) UI.keepDates(se);
-        tile.append(se);
-      }
-      into.append(tile);
+  function pcOf(pulse) {
+    const out = { now: null, z: null, mean: null, n: null, date: null, zWhy: null };
+    if (!pulse || pulse.status === "pending") return out;
+    const hist = pulse.totalsHistory && typeof pulse.totalsHistory === "object" ? pulse.totalsHistory : null;
+    const pv = hist && hist.pcVolume && typeof hist.pcVolume === "object" ? hist.pcVolume : null;
+    if (pv) {
+      out.now = isNum(pv.now);
+      out.z = isNum(pv.z);
+      out.mean = isNum(pv.mean);
+      out.n = isNum(hist.n);
+      out.date = typeof hist.date === "string" ? hist.date : null;
+      out.zWhy = typeof pv.reason === "string" ? pv.reason : null;
     }
+    const tot = pulse.totals;
+    if (out.now === null && tot && tot.status === "ok" && Array.isArray(tot.rows) && tot.rows[0]) {
+      const c = isNum(tot.rows[0].callVol), p = isNum(tot.rows[0].putVol);
+      out.now = c !== null && p !== null && c > 0 ? p / c : null;
+      out.date = typeof tot.rows[0].date === "string" ? tot.rows[0].date : null;
+    }
+    return out;
   }
 
   function boardsRead(long, short) {
@@ -837,420 +770,402 @@
     return { silence, date };
   }
 
-  function paintMeta(box, dateEl, screenedEl, liveEl, boards, market, reads) {
-    if (!box) return;
-    let said = false;
-
+  function paintMeta(dateEl, screenedEl, boards, market) {
     const { silence: boardsSilence, date } = boardsRead(boards[0], boards[1]);
     const quiet = boardsSilence(date !== null);
     if (dateEl) {
-      dateEl.textContent = date || (quiet ? "session " + quiet[1] : "");
-      if (quiet) dateEl.dataset.empty = quiet[0];
-      else delete dateEl.dataset.empty;
-      said = said || Boolean(date) || Boolean(quiet);
+      dateEl.replaceChildren();
+      if (date) {
+        dateEl.setAttribute("datetime", date);
+        dateEl.textContent = dayLong(date);
+        delete dateEl.dataset.empty;
+      } else {
+        dateEl.removeAttribute("datetime");
+        dateEl.append("Session ", mark(quiet ? quiet[0] : "unavailable", "The session " + (quiet ? quiet[1] : "is unknown") + ".", "session"));
+        dateEl.dataset.empty = quiet ? quiet[0] : "unavailable";
+        dateEl.dataset.said = "session " + (quiet ? quiet[1] : "unknown");
+      }
     }
-
     const n = isNum(market && market.n);
     const nQuiet = keySilence(market, n !== null, null);
     if (screenedEl) {
-      screenedEl.textContent = n === null
-        ? (nQuiet ? "screened " + nQuiet[1] : "")
-        : n + " names screened";
-      if (nQuiet) screenedEl.dataset.empty = nQuiet[0];
-      else delete screenedEl.dataset.empty;
+      screenedEl.replaceChildren();
+      if (n !== null) {
+        screenedEl.textContent = n + " screened";
+        delete screenedEl.dataset.empty;
+      } else if (nQuiet) {
+        screenedEl.append("Screened ", mark(nQuiet[0], "The screened population " + nQuiet[1] + ".", "screened names"));
+        screenedEl.dataset.empty = nQuiet[0];
+        screenedEl.dataset.said = "screened " + nQuiet[1];
+      }
       screenedEl.hidden = n === null && !nQuiet;
-      said = said || n !== null || Boolean(nQuiet);
     }
-
-    const stamps = reads.map((r) => (typeof r === "string" && /T\d{2}:\d{2}/.test(r) ? r : null))
-      .filter(Boolean).sort();
-    if (liveEl && stamps.length) {
-      const newest = stamps[stamps.length - 1];
-      const m = /T(\d{2}:\d{2})/.exec(newest);
-      liveEl.textContent = m ? "read " + m[1] + " UTC" : "";
-      liveEl.hidden = !m;
-      said = said || Boolean(m);
-    }
-    box.hidden = !said;
   }
 
-  const TIDE_PERIODS = [
-    ["1W", "totals", 5],
-    ["1M", "totals", 21],
-    ["3M", "totals", 63],
-    ["All", "totals", null],
-  ];
-
-  function tideSeries(pulse, span) {
-    const tot = pulse && pulse.totals;
-    if (!tot || tot.status !== "ok" || !Array.isArray(tot.rows)) return null;
-
-    const rows = tot.rows.slice().reverse()
-      .map((r) => ({ at: r && r.date, call: isNum(r && r.callPrem), put: isNum(r && r.putPrem) }))
-      .filter((r) => r.call !== null || r.put !== null);
-    const kept = span && span < rows.length ? rows.slice(-span) : rows;
-    return kept.length >= 2 ? kept : null;
+  function dayLong(iso) {
+    const t = Date.parse(iso + "T12:00:00Z");
+    if (!Number.isFinite(t)) return iso;
+    try {
+      return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long", month: "short", day: "numeric" }).format(new Date(t));
+    } catch { return iso; }
   }
 
-  let tideRedraw = null;
-
-  function paintTide(into, seg, pulse) {
-    if (silent(into, pulse, "market pulse feed")) return;
-
-    const live = TIDE_PERIODS
-      .map(([label, , span]) => [label, span, tideSeries(pulse, span)])
-      .filter(([, , rows]) => rows);
-    if (!live.length) {
-      quiet(into, "empty",
-        "The pulse key carried no timestamped premium series for this session.");
-      return;
-    }
-
-    const seen = new Set();
-    const periods = live.filter(([, , rows]) => {
-      if (seen.has(rows.length)) return false;
-      seen.add(rows.length);
-      return true;
-    });
-
-    let active = 0;
-    let drawnW = 0;
-    const width = () => {
-      const cs = getComputedStyle(into);
-      const measured = Math.round(into.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0));
-      return measured > 0 ? Math.min(2400, measured) : 720;
-    };
-    const draw = () => {
-      into.replaceChildren();
-      seg.replaceChildren();
-      periods.forEach(([label], i) => {
-        const b = el("button", "cc-seg-b", label);
-        b.type = "button";
-        if (i === active) b.setAttribute("aria-current", "true");
-        b.addEventListener("click", () => { active = i; draw(); });
-        seg.append(b);
-      });
-
-      const [label, , rows] = periods[active];
-
-      let lo = 0, hi = 0;
-      for (const r of rows) {
-        const c = r.call === null ? null : Math.max(0, r.call);
-        const p = r.put === null ? null : Math.max(0, r.put);
-        if (c !== null && c > hi) hi = c;
-        if (p !== null && -p < lo) lo = -p;
-      }
-      if (!(hi > lo)) { hi = 1; lo = 0; }
-      const yText = (v) => (v === 0 ? "$0" : v > 0 ? usd(v) + " call" : usd(-v) + " put");
-
-      const W = width();
-      drawnW = W;
-      const H = Math.round(Math.max(160, Math.min(230, W * 0.28)));
-      const widest = Math.max(...[hi, 0, lo].map((v) => yText(v).length));
-      const padT = 20, padB = 26, padL = 0, padR = Math.round(Math.min(W * 0.32, 12 + 7.4 * widest));
-      const plotH = H - padT - padB, plotW = W - padL - padR;
-      const span = hi - lo;
-      const yOf = (v) => padT + (1 - (Math.max(lo, Math.min(hi, v)) - lo) / span) * plotH;
-      const zeroY = yOf(0);
-      const step = plotW / rows.length;
-
-      const barW = Math.max(0.6, Math.min(22, (step * 0.78) / 2));
-
-      const svg = svgEl("svg", { class: "cc-tide-c", viewBox: "0 0 " + W + " " + H,
-        width: W, height: H, preserveAspectRatio: "xMidYMid meet", role: "img" });
-      const g = svgEl("g", { class: "cc-tide-bars" });
-      rows.forEach((r, i) => {
-        const x0 = padL + step * i + step * 0.11;
-        for (const [v, cls, off] of [
-          [r.call === null ? null : Math.max(0, r.call), "is-call", 0],
-          [r.put === null ? null : -Math.max(0, r.put), "is-put", barW],
-        ]) {
-          if (v === null) continue;
-          const y = yOf(v);
-          g.append(svgEl("rect", {
-            class: "cc-tide-b " + cls,
-            x: (x0 + off).toFixed(2), width: barW.toFixed(2),
-            y: Math.min(y, zeroY).toFixed(2),
-            height: Math.max(0.7, Math.abs(zeroY - y)).toFixed(2),
-          }));
-        }
-      });
-      svg.append(g);
-
-      const stamp = (v) => {
-        if (typeof v !== "string") return null;
-        const m = /T(\d{2}:\d{2})/.exec(v);
-        return m ? m[1] : (/^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : null);
+  function tideOf(liveMkt, pulse) {
+    const lt = liveMkt && liveMkt.status !== "pending" && liveMkt.tide;
+    const pulseDay = pulse && pulse.status !== "pending" ? (pulse.readDay || pulse.sessionDate || null) : null;
+    if (lt && lt.status === "ok" && Array.isArray(lt.t) && lt.t.length >= 2 &&
+        (!pulseDay || !liveMkt.session || liveMkt.session >= pulseDay)) {
+      const at = (arr, i) => (Array.isArray(arr) ? isNum(arr[i]) : null);
+      const zero = liveMkt.zeroDte && liveMkt.zeroDte.status === "ok" && Array.isArray(liveMkt.zeroDte.t) ? liveMkt.zeroDte : null;
+      const bucket = (iso) => { const ms = Date.parse(iso); return Number.isFinite(ms) ? Math.floor(ms / 300000) : null; };
+      const zBy = new Map();
+      if (zero) zero.t.forEach((t, i) => zBy.set(bucket(t), at(zero.net, i)));
+      return {
+        src: "live", session: liveMkt.session || null,
+        readAt: liveMkt.fresh && liveMkt.fresh.readAt, fresh: liveMkt.__fresh || null,
+        t: lt.t.slice(), net: lt.t.map((_, i) => at(lt.net, i)),
+        call: lt.t.map((_, i) => at(lt.ncp, i)), put: lt.t.map((_, i) => at(lt.npp, i)),
+        zero: zero ? lt.t.map((t) => (zBy.has(bucket(t)) ? zBy.get(bucket(t)) : null)) : null,
       };
-      const ends = [[stamp(rows[0].at), 2, "start"], [stamp(rows[rows.length - 1].at), W - padR, "end"]];
-      for (const [text, x, anchor] of ends) {
-        if (!text) continue;
-        const t = svgEl("text", { class: "cc-tide-x", x, y: H - 8, "text-anchor": anchor });
-        t.textContent = text;
-        svg.append(t);
-      }
-
-      for (const v of [hi, 0, lo]) {
-        const y = yOf(v);
-        svg.append(svgEl("line", { class: "cc-tide-g", x1: padL, x2: W - padR, y1: y, y2: y }));
-        const lab = svgEl("text", { class: "cc-tide-y", x: W - 2, y: y + 4, "text-anchor": "end" });
-        lab.textContent = yText(v);
-        svg.append(lab);
-      }
-      svg.setAttribute("aria-label",
-        rows.length + " sessions" +
-        " from " + (stamp(rows[0].at) || "the start of the window") +
-        " to " + (stamp(rows[rows.length - 1].at) || "its end") +
-        ", the vendor's gross call and put premium drawn as two bars a session " +
-        "against one common scale — calls upward to " + usd(hi) + ", puts downward " +
-        "to " + usd(-lo) + ". Both are magnitudes; neither side is a negative number.");
-
-      const key = el("div", "cc-tide-k");
-      key.append(el("span", "cc-tide-key is-call", "Call premium"));
-      key.append(el("span", "cc-tide-key is-put", "Put premium"));
-
-      into.append(key);
-      into.append(svg);
-
-      if (window.FlowsCursor && rows.length) {
-        window.FlowsCursor.attach(svg, {
-          name: "Daily call and put premium, " + label,
-          band: { y0: padT, y1: padT + plotH },
-          points: rows.map((r, i) => ({
-            x: padL + step * i + step * 0.11 + barW,
-
-            label: r.at || DASH,
-            rows: [
-              { k: "Call", v: r.call === null ? DASH : usd(Math.max(0, r.call)), cls: "is-call" },
-              { k: "Put", v: r.put === null ? DASH : usd(Math.max(0, r.put)), cls: "is-put" },
-            ],
-          })),
-        });
-      }
-
-      into.append(el("p", "cc-note",
-        label + " is " + rows.length + " session" + (rows.length === 1 ? "" : "s") +
-        " of the vendor's own daily call and put premium, one bar a session, carried " +
-        "without cumulation or smoothing. Each pair is what crossed that session — " +
-        "not a running total, and not a forecast of anything."));
-    };
-    draw();
-    tideRedraw = () => { if (Math.abs(width() - drawnW) > 2) draw(); };
+    }
+    const pt = pulse && pulse.status !== "pending" && pulse.tide;
+    if (pt && pt.status === "ok" && Array.isArray(pt.points) && pt.points.length >= 2) {
+      const pts = pt.points;
+      return {
+        src: "pulse", session: pulseDay, readAt: pulse.readAt || null, fresh: pulse.__fresh || null,
+        t: pts.map((p) => p && p.t),
+        call: pts.map((p) => isNum(p && p.callPrem)), put: pts.map((p) => isNum(p && p.putPrem)),
+        net: pts.map((p) => {
+          const c = isNum(p && p.callPrem), q = isNum(p && p.putPrem);
+          return c === null || q === null ? null : c - q;
+        }),
+        zero: null,
+      };
+    }
+    return null;
   }
 
-  function paintSplit(into, sub, pulse) {
-    if (silent(into, pulse, "market pulse feed")) return;
-    const tot = (pulse && pulse.totals) || null;
-    if (!tot || tot.status !== "ok" || !Array.isArray(tot.rows)) {
-      quiet(into, "unavailable",
-        "The pulse key is published without the daily totals this split is built from.");
+  const lastOf = (arr) => {
+    if (!Array.isArray(arr)) return null;
+    for (let i = arr.length - 1; i >= 0; i--) if (isNum(arr[i]) !== null) return isNum(arr[i]);
+    return null;
+  };
+
+  function freshStateOf(tide) {
+    if (!tide) return "pending";
+    const hdr = typeof tide.fresh === "string" ? tide.fresh : null;
+    if (hdr && UI.STATES[hdr]) return hdr;
+    const m = UI.freshness.market();
+    if (tide.session && tide.session < m.expected) return "stale";
+    return m.open ? "fresh" : "closed";
+  }
+
+  let tideChart = null;
+  let tideShown = null;
+
+  function paintHero(tide, regime, liveMkt) {
+    const v = $("hmTideV"), cap = $("hmTideCap"), legs = $("hmTideLegs"), pill = $("hmTideState"), plot = $("hmTide");
+    if (!v || !plot) return;
+    const state = freshStateOf(tide);
+    if (pill) {
+      const def = UI.STATES[state] || UI.STATES.pending;
+      const when = !tide ? "" : state === "live" && tide.readAt ? clock(tide.readAt) : tide.session ? F.day(tide.session) : "";
+      pill.replaceChildren(h("button", {
+        class: "hm-pill", type: "button", "data-state": state, "aria-haspopup": "dialog", "aria-controls": "fxPop",
+        "data-info": UI.info(() => ({
+          title: "Market tide", state,
+          lead: !tide ? "Neither the live market key nor the nightly pulse carried a tide series, so nothing is drawn."
+            : tide.src === "live" ? "Read from the live market layer, refreshed during market hours."
+              : "Read from the nightly pulse; the live market layer had nothing newer.",
+          facts: [["Source", !tide ? DASH : tide.src === "live" ? "live:market" : "pulse"], ["Session", tide && tide.session],
+            ["Read", tide && tide.readAt ? fmtStamp(tide.readAt) : null], ["Points", tide ? String(tide.t.length) : null]],
+          notes: ["Net premium is net call premium minus net put premium, cumulative over the session; positive is bullish premium."],
+        })),
+      }, glyph(def.g), h("span", null, def.word), when ? h("span", { class: "hm-pill-when" }, "· " + when) : null));
+    }
+    if (!tide) {
+      v.replaceChildren(DASH);
+      v.dataset.tone = "silent";
+      if (cap) cap.replaceChildren();
+      if (legs) legs.replaceChildren();
+      if (tideChart) { tideChart.destroy(); tideChart = null; }
+      plot.replaceChildren();
+      hush(plot, liveMkt === null ? "unreadable" : "pending",
+        "Neither the live market key nor the nightly pulse carried a session tide, so the river has nothing to draw.",
+        "market tide", 220);
       return;
     }
-    if (!tot.rows.length) {
-      quiet(into, "empty", "The daily totals were read and carried no session.");
+    const net = lastOf(tide.net);
+    const text = net === null ? DASH : (net > 0 ? "+" : "") + usd(net);
+    if (tideShown === null) UI.roll(v, text);
+    else if (tideShown !== text) UI.roll(v, text, tideShown, true);
+    tideShown = text;
+    v.dataset.tone = toneOf(net) || "flat";
+    if (cap) {
+      const t = toneOf(net);
+      cap.replaceChildren(UI.capsule(t === "up" ? "Bullish premium" : t === "down" ? "Bearish premium" : "Level", { tone: t || "flat" }));
+    }
+    if (legs) {
+      const zNow = lastOf(tide.zero);
+      const zr = regime && regime.status !== "pending" && regime.zeroDte && regime.zeroDte.status === "ok" ? regime.zeroDte : null;
+      const zero = zNow !== null ? zNow : zr ? isNum(zr.np0) : null;
+      legs.replaceChildren(UI.metrics([
+        UI.metric("Net calls", usdS(lastOf(tide.call)), { tone: toneOf(lastOf(tide.call)) }),
+        UI.metric("Net puts", usdS(lastOf(tide.put)), { tone: toneOf(-(lastOf(tide.put) || 0)) }),
+        UI.metric("0DTE", zero === null ? DASH : usdS(zero), { tone: toneOf(zero),
+          state: zero === null ? { state: "pending", reason: "No 0DTE net flow was read for this session yet." } : null }),
+      ], { min: 84 }));
+    }
+    const series = [{ values: tide.net, label: "Net", format: (x) => (x > 0 ? "+" : "") + usd(x) }];
+    if (tide.zero && tide.zero.some((x) => x !== null)) {
+      series.push({ values: tide.zero, label: "0DTE", color: "--s-gray", dash: true, width: 1.25, format: (x) => (x > 0 ? "+" : "") + usd(x) });
+    }
+    const mins = tide.t.map(nyMinutes);
+    const timed = mins.every((m) => m !== null) && mins.every((m, i) => i === 0 || m > mins[i - 1]);
+    const opts = {
+      x: timed ? mins : tide.t, xType: timed ? "number" : "index", xFormat: (iso) => clock(iso),
+      xTicks: timed ? hourTicks(mins[0], mins[mins.length - 1], plot.clientWidth < 480 ? 120 : 60) : undefined, series, twoTone: true, zero: true,
+      height: [190, 220, 236], live: state === "live",
+      yFormat: (x) => (x > 0 ? "+" : "") + usd(x),
+      label: "Market tide, net premium across the session",
+      readout: (i) => [C.part(clock(tide.t[i]), "k"), C.part("Net", "k"),
+        h("b", { "data-tone": toneOf(tide.net[i]) }, tide.net[i] === null ? DASH : usdS(tide.net[i])),
+        tide.zero ? C.part("0DTE " + (tide.zero[i] === null ? DASH : usdS(tide.zero[i])), "k") : null],
+    };
+    if (tideChart) { tideChart.destroy(); tideChart = null; }
+    plot.replaceChildren();
+    const chartHost = h("div", { class: "hm-river" });
+    plot.append(chartHost, UI.legend([
+      h("span", { class: "ui-key" }, h("i", { class: "is-split", "aria-hidden": "true" }), "Net premium"),
+      series.length > 1 ? ["--s-gray", "ln", "0DTE net"] : null,
+    ].filter(Boolean)));
+    tideChart = C.line(chartHost, opts);
+    if (state === "live" && tide.readAt) UI.freshness({ readAt: tide.readAt, live: true, source: "live:market" });
+  }
+
+  function paintVol(regime, liveVol) {
+    const into = $("ccVol");
+    if (!into) return;
+    into.replaceChildren();
+    headMark("hmVol", null);
+    const reg = regime && regime.status !== "pending" ? regime : null;
+    const curve = reg && reg.volCurve && reg.volCurve.byIndex ? reg.volCurve.byIndex : null;
+    const lv = liveVol && liveVol.status !== "pending" && liveVol.index ? liveVol : null;
+    const useLive = lv && (!reg || !reg.sessionDate || (lv.session && lv.session >= reg.sessionDate));
+    const TEN = [1, 5, 7, 14, 30, 60, 90, 180, 365];
+    const idx = {};
+    for (const k of ["SPY", "QQQ", "IWM"]) {
+      if (useLive && lv.index[k] && lv.index[k].status === "ok") {
+        const r = lv.index[k];
+        idx[k] = { iv: TEN.map((d) => isNum(r["v" + d])), iv30: isNum(r.iv30), ivp: isNum(r.ivRank), rv: isNum(r.rv),
+          ts: isNum(r.v30) !== null && isNum(r.v90) ? r.v30 / r.v90 - 1 : null, src: "live:vol" };
+      } else if (curve && curve[k] && curve[k].status === "ok" && Array.isArray(curve[k].iv)) {
+        const r = curve[k];
+        const ten = Array.isArray(r.tenors) ? r.tenors : TEN;
+        idx[k] = { iv: TEN.map((d) => { const j = ten.indexOf(d); return j < 0 ? null : isNum(r.iv[j]); }),
+          iv30: isNum(r.iv[ten.indexOf(30)]), ivp: isNum(r.ivp), rv: isNum(r.rv20), ts: isNum(r.ts), shape: r.shape || null, src: "regime" };
+      }
+    }
+    const names = Object.keys(idx);
+    if (!names.length) {
+      if (!regime && !liveVol) hush(into, "unreadable", "Neither the regime key nor the live volatility key could be read.", "volatility", 220);
+      else hush(into, "pending", "The index volatility curve arrives with the regime key and the live volatility layer; neither has published a curve yet.", "volatility", 220);
       return;
     }
-
-    const row = tot.rows[0] || {};
-    const call = isNum(row.callPrem), put = isNum(row.putPrem);
-    if (call === null || put === null) {
-      quiet(into, "unavailable",
-        "The newest session carries no call/put premium pair, so there is no split to take.");
-      return;
+    const spy = idx.SPY || idx[names[0]];
+    const shape = spy.shape || (spy.ts === null ? null : spy.ts < 0 ? "contango" : spy.ts > 0 ? "backwardation" : "flat");
+    const ic = reg && reg.impliedCorrelation && reg.impliedCorrelation.byIndex ? reg.impliedCorrelation.byIndex : {};
+    const rho = ic.SPY && ic.SPY.status === "ok" ? isNum(ic.SPY.rho) : null;
+    const rhoQ = ic.QQQ && ic.QQQ.status === "ok" ? isNum(ic.QQQ.rho) : null;
+    const z = reg && reg.zeroDte && reg.zeroDte.status === "ok" ? reg.zeroDte : null;
+    const share0 = z ? isNum(z.share) : null;
+    const pend = (what) => ({ state: "pending", reason: what + " arrives with the regime key, which has not published yet." });
+    const vrp = spy.iv30 !== null && spy.rv !== null && spy.rv !== undefined ? spy.iv30 - spy.rv : null;
+    const disp = ic.SPY && ic.SPY.status === "ok" ? isNum(ic.SPY.dispersion) : null;
+    into.append(UI.metrics([
+      UI.metric("IV 30d", spy.iv30 === null ? DASH : F.pct(spy.iv30, 1), { sub: (idx.SPY ? "SPY" : names[0]) + (spy.ivp === null ? "" : " · pct " + Math.round(spy.ivp)) }),
+      UI.metric("RV 20d", spy.rv === null || spy.rv === undefined ? DASH : F.pct(spy.rv, 1), { sub: vrp === null ? null : "IV − RV " + F.pts(vrp) + " pts" }),
+      UI.metric("Term", shape ? cap1(shape) : DASH, { tone: shape === "backwardation" ? "warn" : null,
+        sub: spy.ts === null ? null : "30/90 " + F.pct(spy.ts, 1, true), state: shape ? null : pend("The term shape") }),
+      UI.metric("Correlation", rho === null ? DASH : rho.toFixed(2), { sub: rhoQ === null ? null : "QQQ " + rhoQ.toFixed(2), state: rho === null ? pend("Implied correlation") : null }),
+      UI.metric("Dispersion", disp === null ? DASH : F.pct(disp, 0), { sub: "members over index", state: disp === null ? pend("Dispersion") : null }),
+      UI.metric("0DTE share", share0 === null ? DASH : F.pct(share0, 0), { state: share0 === null ? pend("The 0DTE share") : null }),
+    ], { min: 96 }));
+    const COL = { SPY: "--s-blue", QQQ: "--s-purple", IWM: "--s-teal" };
+    const plot = h("div", { class: "hm-term" });
+    into.append(plot);
+    C.line(plot, {
+      x: TEN, xType: "number", xScale: "sqrt", height: [150, 170, 180],
+      xTicks: [{ v: 7, label: "1w" }, { v: 30, label: "1m" }, { v: 90, label: "3m" }, { v: 180, label: "6m" }, { v: 365, label: "1y" }],
+      series: names.map((k) => ({ values: idx[k].iv, color: COL[k], label: k, format: (x) => F.pct(x, 1) })),
+      yFormat: (x) => F.pct(x, 0), label: "Implied volatility by tenor for the index ETFs",
+      readout: (i) => [C.part(TEN[i] + "d", "k")].concat(names.map((k) => C.part(k + " " + F.pct(idx[k].iv[i], 1), null))),
+    });
+    into.append(UI.legend(names.map((k) => [COL[k], "ln", k])));
+    const radar = reg && reg.volRadar && reg.volRadar.status !== "pending" ? reg.volRadar : null;
+    const side = (s) => (radar && radar[s] && Array.isArray(radar[s].rows) ? radar[s].rows.slice(0, 4) : []);
+    const tagRow = (word, rows, tone) => h("div", { class: "hm-radar-r" }, h("span", { class: "hm-radar-k" }, word),
+      rows.length ? rows.map((r) => (r.carded
+        ? h("a", { class: "hm-chiplink", href: readerHref(r.t), "data-tone": tone }, r.t)
+        : h("span", { class: "hm-chiplink", "data-tone": tone }, r.t))) : h("span", { class: "ui-dash" }, DASH));
+    if (radar) into.append(h("div", { class: "hm-radar" }, tagRow("Rich", side("rich"), "short"), tagRow("Cheap", side("cheap"), "long")));
+    const sess = (reg && reg.sessionDate) || (lv && lv.session) || null;
+    const expected = UI.freshness.market().expected;
+    if (sess && sess < expected) {
+      headMark("hmVol", h("button", {
+        class: "ui-state hm-mark", type: "button", "data-state": "stale", title: "Stale", "aria-label": "Stale: volatility",
+        "aria-haspopup": "dialog", "aria-controls": "fxPop",
+        "data-info": disclose("Volatility", "These readings are the " + F.day(sess) + " session; the last completed session is " + F.day(expected) + ".", { state: "stale" }),
+      }, glyph("clock")));
     }
-
-    const a = Math.abs(call), b = Math.abs(put), whole = a + b;
-    if (!(whole > 0)) {
-      quiet(into, "empty",
-        "Neither side of the session carried any premium, so there is no split to take.");
-      return;
-    }
-    const callShare = a / whole;
-
-    const R = 54, C = 64, SW = 15, circ = 2 * Math.PI * R;
-    const svg = svgEl("svg", { class: "cc-ring", viewBox: "0 0 128 128", role: "img",
-      "aria-label": "Calls are " + (callShare * 100).toFixed(0) + "% of " + usd(whole) +
-        " in premium and puts are " + ((1 - callShare) * 100).toFixed(0) + "%." });
-
-    svg.append(svgEl("circle", { class: "cc-ring-put", cx: C, cy: C, r: R, "stroke-width": SW }));
-    svg.append(svgEl("circle", { class: "cc-ring-call", cx: C, cy: C, r: R, "stroke-width": SW,
-      "stroke-dasharray": (circ * callShare).toFixed(2) + " " + circ.toFixed(2),
-      transform: "rotate(-90 " + C + " " + C + ")" }));
-
-    const mid = svgEl("text", { class: "cc-ring-v", x: C, y: C - 2, "text-anchor": "middle" });
-    mid.textContent = usd(whole);
-    svg.append(mid);
-    const cap = svgEl("text", { class: "cc-ring-c", x: C, y: C + 14, "text-anchor": "middle" });
-    cap.textContent = "premium";
-    svg.append(cap);
-
-    svg.dataset.fxRead = "face";
-
-    const wrap = el("div", "cc-split-w");
-    wrap.append(svg);
-    const legend = el("div", "cc-split-l");
-    for (const [cls, label, share, dollars] of [
-      ["is-call", "Calls", callShare, a],
-      ["is-put", "Puts", 1 - callShare, b],
-    ]) {
-      const row = el("div", "cc-split-r " + cls);
-      row.append(el("span", "cc-split-dot"));
-      row.append(el("span", "cc-split-n", label));
-      row.append(el("span", "cc-split-p", (share * 100).toFixed(0) + "%"));
-      row.append(el("span", "cc-split-d", usd(dollars)));
-      legend.append(row);
-    }
-    wrap.append(legend);
-    into.append(wrap);
-
-    if (sub) {
-      const when = typeof row.date === "string" && row.date ? row.date : null;
-      sub.textContent = when
-        ? "the vendor's gross call and put premium for " + when
-        : "the vendor's gross call and put premium, for a session the feed did not date";
-      sub.hidden = false;
-    }
+    infoInto("hmVol", "volatility", () => ({
+      title: "Volatility", asOf: sess ? "Session " + F.day(sess) : null,
+      lead: "The index ETFs' fixed-tenor implied volatility stands in for the VIX curve, which the vendor plan does not serve.",
+      facts: [["Source", spy.src], ["SPY 30d", spy.iv30 === null ? DASH : F.pct(spy.iv30, 1)],
+        ["Term slope 30/90", spy.ts === null ? DASH : F.pct(spy.ts, 1, true)],
+        ["Implied correlation SPY", rho === null ? DASH : rho.toFixed(3)], ["Implied correlation QQQ", rhoQ === null ? DASH : rhoQ.toFixed(3)],
+        ["0DTE share of net premium", share0 === null ? DASH : F.pct(share0, 1)]],
+      notes: ["Contango (a rising curve) is the calm shape; an inverted front is stress.",
+        "Implied correlation is the index variance left after the members' own variances, over what perfect correlation would add.",
+        radar ? "Rich and cheap are the vendor's volatility anomaly screen; a linked name has a card today." : null],
+    }));
   }
 
   function paintAlerts(into, payload) {
     if (silent(into, payload, "flow alerts feed")) return;
     const rows = Array.isArray(payload.rows) ? payload.rows : [];
     if (!rows.length) {
-      quiet(into, "empty", "The vendor's rules flagged nothing in this read.");
+      hush(into, "empty", "The vendor's rules flagged nothing in this read.", "flagged windows");
       return;
     }
-
     const drawn = rows.slice(0, LIST_MAX);
-
     const priced = drawn.map((row) => isNum(row && row.prem)).filter((one) => one !== null);
     const pool = priced.reduce((sum, one) => sum + Math.abs(one), 0);
     const top = priced.length ? Math.max(...priced.map(Math.abs)) : null;
     const share = pool > 0 && top !== null ? top / pool : null;
-    lead(into, (drawn.length === 1
+    const lede = (drawn.length === 1
       ? "This is the largest flagged window by premium, not the newest"
       : "These " + drawn.length + " are the largest flagged windows by PREMIUM, not the newest") +
       (share === null
         ? " — and no row here quoted a premium, so nothing ranks them and the order is the " +
           "feed's own tie-break."
-        : ", and the biggest is " + (share * 100).toFixed(1) + "% of the premium across them."));
+        : ", and the biggest is " + (share * 100).toFixed(1) + "% of the premium across them.");
 
-    const wrap = tableWrap("Flagged option windows, largest premium first");
-    const table = el("table", "cc-tbl");
-
-    table.append(headRow([
-      ["Time \u00b7 ET", null, "The start of the vendor's flagged window, in Eastern time. " +
-        "A window is a span rather than a print; hover a cell for both ends."],
-      ["Name", null], ["Contract", null], ["Premium", "c-num"],
-      ["Side", "c-num", "The vendor's ATTRIBUTION of this window's premium to the ask or the " +
-        "bid, as a share of the two. A print at the ask is not proof of a buyer, so this " +
-        "column names the side of the quote and never an intent."],
-      ["Rule", null, "The vendor's own name for the screen that flagged the window, printed as " +
-        "published; this page does not restate its definition."],
-    ]));
-    const body = el("tbody");
-    for (const row of drawn) {
-      const tr = el("tr");
-
-      const at = etTime(row.spanStart);
-      const when = el("td", "c-num cc-dim", at === null ? DASH : at);
-      if (at !== null) {
-        const to = etTime(row.spanEnd);
-        when.title = row.spanFrom === "created_at" ? "Alert created " + at + " ET; no window stated."
-          : to === null ? "Window opened " + at + " ET; the vendor stated no end for it."
-          : "Window ran " + at + " to " + to + " ET.";
-      }
-      tr.append(when);
-
-      tr.append(el("td", "cc-t", row.t || DASH));
-      tr.append(el("td", "cc-date",
-        (row.cp || DASH) + " " + (isNum(row.k) === null ? DASH : row.k) +
-        (row.exp ? " " + String(row.exp).slice(5) : "")));
-      tr.append(el("td", "c-num", usd(row.prem)));
-
+    const sideOf = (row) => {
       const ask = isNum(row.askPrem), bid = isNum(row.bidPrem);
       const two = ask === null || bid === null ? null : Math.abs(ask) + Math.abs(bid);
-      const askShare = two === null || two === 0 ? null : Math.abs(ask) / two;
+      return two === null || two === 0 ? null : Math.abs(ask) / two;
+    };
+    const sideSaid = (s) => (s === null ? DASH : s === 0.5 ? "even"
+      : (s > 0.5 ? "ask " : "bid ") + ((s > 0.5 ? s : 1 - s) * 100).toFixed(0) + "%");
+    const contract = (row) => (row.cp || DASH) + " " + (isNum(row.k) === null ? DASH : row.k) +
+      (row.exp ? " " + String(row.exp).slice(5) : "");
 
-      tr.append(el("td", "c-num",
-        askShare === null ? DASH
-          : askShare === 0.5 ? "even"
-          : (askShare > 0.5 ? "ask " : "bid ") +
-            ((askShare > 0.5 ? askShare : 1 - askShare) * 100).toFixed(0) + "%"));
-
-      const rule = el("td", "cc-dim", row.rule || DASH);
-      if (row.rule) {
-        rule.title = "Flagged by the vendor's " +
-          String(row.rule).replace(/([a-z\d])([A-Z])/g, "$1 $2").toLowerCase() +
-          " rule, under the vendor's own name for it.";
-      }
-      tr.append(rule);
-      body.append(tr);
-    }
-    table.append(body);
-    wrap.append(table);
-    into.append(wrap);
+    const list = drawn.map((row, i) => {
+      const s = sideOf(row);
+      return h("div", { class: "ui-row hm-arow", role: "listitem", "aria-label": (row.t || DASH) + " " + contract(row) + ", " + usd(row.prem) + ", " + sideSaid(s) },
+        h("span", { class: "ui-badge", "data-tone": row.cp === "C" ? "up" : row.cp === "P" ? "down" : null, "aria-label": row.cp === "C" ? "Call" : row.cp === "P" ? "Put" : null }, row.cp === "C" || row.cp === "P" ? row.cp : "·"),
+        h("span", { class: "ui-row-m" }, h("b", null, row.t || DASH), h("span", null, (isNum(row.k) === null ? DASH : row.k) + (row.exp ? " · " + F.day(String(row.exp)) : ""))),
+        s === null ? h("span", { class: "ui-dash hm-side" }, DASH)
+          : h("span", { class: "ui-meter hm-side", title: sideSaid(s) }, h("i", { style: { "--w": (s * 100).toFixed(1) + "%", "--i": String(i), "--c": UI.cssVar(s >= 0.5 ? "--label-2" : "--label-3") } })),
+        h("span", { class: "ui-row-v" }, usd(row.prem)));
+    });
+    into.append(UI.list(list, { visible: SHOW, label: "Flagged option windows, largest premium first" }));
+    const detail = table("Flagged option windows, largest premium first", [
+      ["Time · ET", false, "The start of the vendor's flagged window, in Eastern time. A window is a span rather than a print."],
+      ["Name", false], ["Contract", false], ["Premium", true],
+      ["Side", true, "The vendor's ATTRIBUTION of this window's premium to the ask or the bid, as a share of the two. A print at the ask is not proof of a buyer, so this column names the side of the quote and never an intent."],
+      ["Rule", false, "The vendor's own name for the screen that flagged the window, printed as published."],
+    ], drawn.map((row) => {
+      const at = etTime(row.spanStart);
+      const to = etTime(row.spanEnd);
+      return {
+        cells: [
+          [at === null ? DASH : at, "c-num cc-dim", at === null ? null
+            : row.spanFrom === "created_at" ? "Alert created " + at + " ET; no window stated."
+              : to === null ? "Window opened " + at + " ET; the vendor stated no end for it." : "Window ran " + at + " to " + to + " ET."],
+          [row.t || DASH, "cc-t"], [contract(row), "cc-date"], [usd(row.prem), "c-num"],
+          [sideSaid(sideOf(row)), "c-num"],
+          [row.rule || DASH, "cc-dim", row.rule ? "Flagged by the vendor's " + String(row.rule).replace(/([a-z\d])([A-Z])/g, "$1 $2").toLowerCase() + " rule, under the vendor's own name for it." : null],
+        ],
+      };
+    }));
+    const seen = isNum(payload.seen);
+    const cadence = payload.refreshed === "intraday" ? "intraday" : payload.refreshed === "nightly" ? "nightly" : null;
+    const read = typeof payload.readAt === "string" && Number.isFinite(Date.parse(payload.readAt))
+      ? (cadence ? cadence + " read " : "read ") + (fmtStamp(payload.readAt) || DASH) + (cadence ? "" : ", cadence not published")
+      : cadence ? cadence + " read" : "cadence not published";
+    infoInto("hmAlerts", "flagged windows", () => ({
+      title: "Flagged windows", lead: lede,
+      facts: [["Seen", seen === null ? DASH : (payload.vendorTruncated === true || payload.readTruncated === true ? "≥" : "") + seen],
+        ["Read", read]],
+      notes: ["The meter is the share of each window's premium the vendor attributed to the ask."],
+      node: detail,
+    }));
   }
 
   function paintEvents(into, payload) {
     if (silent(into, payload, "events calendar")) return;
     const rows = Array.isArray(payload.rows) ? payload.rows : [];
     if (!rows.length) {
-      quiet(into, "empty", "No name in the screened universe reports inside the window.");
+      hush(into, "empty", "No name in the screened universe reports inside the window.", "reporting soon");
       return;
     }
-
     const drawn = rows.slice(0, LIST_MAX);
-
     const scored = drawn.filter((row) => isNum(row && row.s) !== null).length;
     const opinionless = drawn.length - scored;
-    lead(into, scored + " of the " + drawn.length + " name" +
+    const lede = scored + " of the " + drawn.length + " name" +
       (drawn.length === 1 ? "" : "s") + " drawn carr" +
       (scored === 1 ? "ies" : "y") + " a score" +
       (opinionless
         ? " and " + opinionless + " reached this calendar with none, so the boards hold no " +
           "opinion on " + (opinionless === 1 ? "it" : "them") + " going into the print."
-        : ", so every name here can be read against the ranking above."));
-
-    const wrap = tableWrap("Names reporting inside the window");
-    const table = el("table", "cc-tbl");
-    table.append(headRow([
-      ["Name", null], ["Date", null], ["In · sessions", "c-num"],
-      ["Priced move", "c-num"], ["Score", "c-num"],
-      ["Stage", null, "Where this name stopped in the run's funnel. \"gated\" means " +
-        "the board was forbidden from holding an opinion on it, not that it had none."],
-    ]));
-    const body = el("tbody");
-    for (const row of drawn) {
-      const tr = el("tr");
-      tr.append(el("td", "cc-t", row.t || DASH));
-      tr.append(el("td", "cc-date", row.d || DASH));
-
-      tr.append(el("td", "c-num", isNum(row.sdte) === null ? DASH : row.sdte + "s"));
+        : ", so every name here can be read against the ranking above.");
+    const list = drawn.map((row) => {
       const im = isNum(row.im);
-      tr.append(el("td", "c-num", im === null ? DASH : "±" + (Math.abs(im) * 100).toFixed(1) + "%"));
-
-      tr.append(el("td", "c-num" + tone(row.s), fmtSigned(row.s)));
-      tr.append(el("td", "cc-dim", row.st || DASH));
-      body.append(tr);
-    }
-    table.append(body);
-    wrap.append(table);
-    into.append(wrap);
+      const sd = isNum(row.sdte);
+      return UI.listRow({
+        primary: row.t || DASH,
+        secondary: (row.d ? F.day(row.d) : DASH) + (sd === null ? "" : sd === 0 ? " · next session" : " · in " + sd + "s"),
+        value: im === null ? DASH : "±" + (Math.abs(im) * 100).toFixed(1) + "%",
+        signed: isNum(row.s) === null ? h("span", { class: "hm-tag", title: row.st === "gated" ? "The board was forbidden from holding an opinion on this name." : "No score was published for this name." }, row.st === "gated" ? "gated" : "unscored") : fmtSigned(row.s),
+        signedValue: isNum(row.s), signedTone: isNum(row.s) === null ? "silent" : undefined,
+        cols: "minmax(0,1fr) 60px 58px",
+      });
+    });
+    into.append(UI.list(list, { visible: SHOW, label: "Names reporting inside the window" }));
+    const detail = table("Names reporting inside the window", [
+      ["Name", false], ["Date", false], ["In · sessions", true], ["Priced move", true], ["Score", true],
+      ["Stage", false, "Where this name stopped in the run's funnel. \"gated\" means the board was forbidden from holding an opinion on it, not that it had none."],
+    ], drawn.map((row) => {
+      const im = isNum(row.im);
+      return {
+        cells: [[row.t || DASH, "cc-t"], [row.d || DASH, "cc-date"],
+          [isNum(row.sdte) === null ? DASH : row.sdte + "s", "c-num"],
+          [im === null ? DASH : "±" + (Math.abs(im) * 100).toFixed(1) + "%", "c-num"],
+          [fmtSigned(row.s), "c-num"], [row.st || DASH, "cc-dim"]],
+      };
+    }));
+    const inWindow = isNum(payload.inWindow);
+    infoInto("hmEvents", "reporting soon", () => ({
+      title: "Reporting soon", lead: lede,
+      facts: [["Reporting in the window", inWindow === null ? String(rows.length) : String(inWindow)]],
+      notes: ["The value is the move the options price into the report; the signed number is the board score."],
+      node: detail,
+    }));
   }
 
   function paintWatch(into, payload) {
     if (silent(into, payload, "watch board")) return;
     const rows = ranked(payload.rows);
     if (!rows.length) {
-
-      quiet(into, "unavailable",
+      hush(into, "unavailable",
         "The watch board published no rows. With a dead band this narrow a " +
         "session where no name sits inside it would be extraordinary, so this " +
-        "is more likely a key that did not publish than a market with no middle.");
+        "is more likely a key that did not publish than a market with no middle.", "nearly in");
       return;
     }
     const drawn = rows.slice(0, LIST_MAX);
-
     const sideOf = (row) => {
       const value = isNum(row && row.resid) !== null ? isNum(row.resid) : isNum(row && row.s);
       return value === null ? null : (value > 0 ? 1 : value < 0 ? -1 : 0);
@@ -1260,42 +1175,31 @@
     const below = sides.filter((one) => one === -1).length;
     const onRule = sides.filter((one) => one === 0).length;
     const unplaced = sides.filter((one) => one === null).length;
-    const nearest = drawn.length + " name" + (drawn.length === 1 ? "" : "s") +
-      " nearest the edge";
-    lead(into, above + below + onRule === 0
+    const nearest = drawn.length + " name" + (drawn.length === 1 ? "" : "s") + " nearest the edge";
+    const lede = above + below + onRule === 0
       ? "None of the " + nearest + " published a number to place against the zero rule, so " +
         "this list is ordered and unsided."
       : above + " of the " + nearest + " sit above the zero rule and " + below + " below it" +
         (onRule ? ", " + onRule + " exactly on it" : "") +
-        (unplaced ? "; " + unplaced + " published no number to place" : "") + ".");
-
-    const list = el("ul", "cc-moves");
-    for (const row of drawn) {
-      const li = el("li");
-      li.append(el("span", "cc-t", row.t || DASH));
-
+        (unplaced ? "; " + unplaced + " published no number to place" : "") + ".";
+    const anyResid = drawn.some((row) => isNum(row.resid) !== null);
+    const list = drawn.map((row) => {
       const resid = isNum(row.resid);
-
-      const [unit, said, cls] = resid !== null
-        ? ["resid", fmtSigned(resid, 4), tone(resid)]
-        : ["score", fmtSigned(row.s), tone(row.s)];
-      const cell = el("span", "c-num" + cls);
-      cell.append(el("span", "cc-dim", unit + " "));
-      cell.append(document.createTextNode(said));
-      cell.title = resid !== null
-        ? "The cross-sectional residual this name was ranked on, in the units " +
-          "the score is a bounded transform of. The rows are ordered on its " +
-          "size, which is how close the name is to leaving the band."
-        : "The score, on the ±100 scale, because this payload was published " +
-          "before the residual rode on the watch rows. On a narrow band every " +
-          "row rounds to the same integer at this scale, so this column can " +
-          "order them no better than the payload already has.";
-      li.append(cell);
-      li.append(el("span", "cc-dim",
-        "conv " + (isNum(row.cnv) === null ? DASH : Math.round(row.cnv))));
-      list.append(li);
-    }
-    into.append(list);
+      const value = resid !== null ? resid : isNum(row.s);
+      return UI.listRow({
+        primary: row.t || DASH, secondary: "conv " + (isNum(row.cnv) === null ? DASH : Math.round(row.cnv)),
+        signed: resid !== null ? [h("small", { class: "hm-unit" }, "resid "), fmtSigned(resid, 4)] : fmtSigned(row.s), signedValue: value,
+        cols: resid !== null ? "minmax(0,1fr) auto" : "minmax(0,1fr) 72px",
+      });
+    });
+    into.append(UI.list(list, { visible: SHOW, label: "Names inside the dead band, nearest the edge first" }));
+    infoInto("hmWatch", "nearly in", () => ({
+      title: "Nearly in", lead: lede,
+      facts: [["Unit", anyResid ? "cross-sectional residual (resid)" : "score on the ±100 scale"], ["Rows", String(rows.length)]],
+      notes: [anyResid
+        ? "The residual is what the name was ranked on, in the units the score is a bounded transform of; the rows are ordered on its size, which is how close the name is to leaving the band."
+        : "The score is printed because this payload was published before the residual rode on the watch rows; on a narrow band every row rounds to the same integer at this scale."],
+    }));
   }
 
   const LEAN_TAIL = { quiet: 1, unreadable: 2 };
@@ -1309,68 +1213,31 @@
     });
   }
 
-  function leanCell(row, read) {
-    const td = el("td", "cc-ln-c");
-    const r = isNum(row && row.leanRatio);
-    if (r === null) {
-      if (read === "quiet") {
-        const flat = el("span", "cc-ln-flat", "no premium");
-        flat.title = "Both premium sums were measured at zero: 0/0 is undefined, not " +
-          "neutral, so this basket is not placed on the axis. Its measured $0 is beside it.";
-        td.append(flat);
-        return td;
-      }
-      const none = el("span", "cc-ln-none", DASH);
-      none.title = typeof row.reason === "string" && row.reason ? row.reason
-        : "This basket's lean could not be read, so nothing is drawn for it.";
-      td.append(none);
-      return td;
-    }
-
-    const bar = el("span", "cc-ln-bar");
-    bar.setAttribute("role", "img");
-    bar.setAttribute("aria-label",
-      (row.sector || row.etf || "This basket") + " leaned " + pct(r, 1) +
-      " of its two-sided option premium, " +
-      (r < 0 ? "left of" : r > 0 ? "right of" : "exactly on") + " the zero rule.");
-    bar.append(el("i", "cc-ln-mid"));
-
-    const frac = Math.min(Math.abs(r), 1);
-    const fill = el("i", "cc-ln-fill" + tone(r));
-    fill.style.width = (frac * 50) + "%";
-    fill.style.left = r < 0 ? (50 - frac * 50) + "%" : "50%";
-    bar.append(fill);
-    td.append(bar);
-    return td;
-  }
-
-  function paintLean(into, payload, seg) {
-
-    if (seg) seg.replaceChildren();
-    const sub = host("ccLeanSub");
+  function paintLean(into, payload, segHost) {
+    const sub = $("ccLeanSub");
     const saySub = (said) => { if (sub) sub.textContent = said; };
-    saySub("options premium, not price momentum");
+    saySub("");
+    if (segHost) segHost.replaceChildren();
     if (silent(into, payload, "sector premium lean")) return;
 
     if (payload.status === "quiet") {
-      quiet(into, "empty",
+      hush(into, "empty",
         "The sector feed was read and the vendor returned no rows at all, so not one of the " +
-        "eleven baskets could be placed. That is a measurement of the feed, not of the market.");
+        "eleven baskets could be placed. That is a measurement of the feed, not of the market.", "sector lean");
       return;
     }
     if (payload.status === "unreadable") {
-      quiet(into, "unreadable",
+      hush(into, "unreadable",
         "The sector feed returned rows and not one of the eleven baskets carried a readable " +
         "pair of premium sums. Nothing here is a reading about the session: the field names " +
-        "on the wire and the ones this pipeline expects have parted company.");
+        "on the wire and the ones this pipeline expects have parted company.", "sector lean");
       return;
     }
-
     const sectors = Array.isArray(payload.sectors) ? payload.sectors : [];
     if (!sectors.length) {
-      quiet(into, "unavailable",
+      hush(into, "unavailable",
         "This payload carried no sector rows, so the page cannot say where any basket " +
-        "leaned. A gap in the payload rather than a fact about the market.");
+        "leaned. A gap in the payload rather than a fact about the market.", "sector lean");
       return;
     }
 
@@ -1378,30 +1245,20 @@
     const leaned = ordered.filter((s) => isNum(s && s.leanRatio) !== null).length;
     const quietN = ordered.filter((s) => s && s.read === "quiet").length;
     const badN = ordered.length - leaned - quietN;
-    saySub(leaned + " of " + ordered.length + " leaned");
-
     const lean = payload.lean && typeof payload.lean === "object" ? payload.lean : null;
 
-    const caveats = [];
+    const caveats = ["Bullish minus bearish OPTION premium on the eleven SPDR sector baskets, today only."];
     const method = [];
-
-    caveats.push("Bullish minus bearish OPTION premium on the eleven SPDR sector baskets, " +
-      "today only.");
-
     if (lean && typeof lean.relation === "string" && lean.relation) {
       method.push("Derived: " + lean.relation + " — in words, net is bullish minus bearish " +
         "premium, gross is their sum, and the lean is net over gross.");
     }
     caveats.push("Ordered on the RATIO — the share of each basket's own two-sided premium " +
       "that leaned one way — because that is what the publisher ranks on" +
-      (lean && typeof lean.rejected === "string" && lean.rejected
-        ? ", having rejected " + lean.rejected : "") +
-      " — the table below keeps that rank in every mode; the strip above it is ordered " +
-      "on whichever quantity its toggle is showing.");
+      (lean && typeof lean.rejected === "string" && lean.rejected ? ", having rejected " + lean.rejected : "") + ".");
     caveats.push("The dollars ride beside it because a ratio carries no size: +90% on $30k of " +
       "premium and +90% on $300M are not the same fact.");
-    method.push("Sign is carried by POSITION — left of the centre rule is bearish premium — " +
-      "and by the glyph on every number.");
+    method.push("Sign is carried by POSITION in the table's lean bar and by the glyph on every number; the tint is only a second channel.");
     if (quietN) {
       caveats.push(quietN + (quietN === 1 ? " basket was" : " baskets were") +
         " read with both premium sums at zero: measured and empty, printed as the $0 they " +
@@ -1412,9 +1269,7 @@
       caveats.push(badN + (badN === 1 ? " basket" : " baskets") + " could not be read at all " +
         "and print the em dash instead; the publisher's reason is on the row.");
     }
-    if (typeof payload.basis === "string" && payload.basis) {
-      caveats.push("Basis: " + payload.basis + ".");
-    }
+    if (typeof payload.basis === "string" && payload.basis) caveats.push("Basis: " + payload.basis + ".");
     if (typeof payload.notSameAs === "string" && payload.notSameAs) {
       caveats.push("This is not " + payload.notSameAs + " — that is the key the sector panel " +
         "on /flows/market/ draws, in basis points per session.");
@@ -1429,186 +1284,106 @@
       if (a >= 1e3) return sign + (a / 1e3).toFixed(0) + "K";
       return sign + String(Math.round(a));
     };
-
     const netCts = (r) => {
       const c = isNum(r && r.callVolume), p = isNum(r && r.putVolume);
       return c === null || p === null ? null : c - p;
     };
     const basket = (r) => r.sector || r.fullName || r.etf || DASH;
-
+    const SHORT = { "Information Technology": "Technology", "Consumer Discretionary": "Discretionary",
+      "Consumer Staples": "Staples", "Communication Services": "Communication" };
+    const brief = (r) => SHORT[basket(r)] || basket(r);
     const MODES = [
-      { label: "$ Premium", noun: "net option premium",
-        val: (r) => isNum(r && r.netPremiumUsd), fmt: usd, axis: null,
-        said: (n, d) => n + " of " + d + " cleared readable premium",
-        one: (b, v) => b + " is the only basket with a readable premium sum, at " +
-          usd(v) + " net.",
-        two: (bh, vh, bl, vl) => bh + " cleared the most bullish net premium at " + usd(vh) +
-          "; " + bl + " the most bearish at " + usd(vl) + ".",
-        none: "No basket carried a readable premium sum this session, so none is named.",
-        why: "Showing NET PREMIUM in dollars — bullish minus bearish — so basket size is in " +
-          "the bar. The bars are scaled to the largest figure on this strip rather than to a " +
-          "fixed axis, so heights compare baskets within this session and not one session " +
-          "with another." },
-      { label: "# Contracts", noun: "net contracts",
-        val: netCts, fmt: cts, axis: null,
-        said: (n, d) => n + " of " + d + " reported both volumes",
-        one: (b, v) => b + " is the only basket that reported both volumes, at " + cts(v) +
-          " contracts net.",
-        two: (bh, vh, bl, vl) => bh + " traded the most calls over puts at " + cts(vh) +
-          " contracts; " + bl + " the most puts over calls at " + cts(vl) + ".",
-        none: "No basket reported both a call and a put volume this session, so none is named.",
-        why: "Showing NET CONTRACTS — call volume minus put volume, arithmetic on two counts " +
-          "the publisher carries per basket, in one unit. A count says nothing about what the " +
-          "contracts cost: a million five-cent contracts and a thousand fifty-dollar ones are " +
-          "the same figure here. Volumes are read independently of the premium sums, so this " +
-          "mode can report a basket the other two cannot, and the other way round." },
-      { label: "Flow Ratio", noun: "share of its own premium",
-        val: (r) => isNum(r && r.leanRatio), fmt: (v) => pct(v, 1), axis: 1,
+      { label: "Ratio", noun: "share of its own premium", val: (r) => isNum(r && r.leanRatio), fmt: (v) => pct(v, 1), axis: 1,
         said: (n, d) => n + " of " + d + " leaned",
-        one: (b, v) => b + " is the only basket with a readable lean, at " + pct(v, 1) +
-          " of its own premium.",
-        two: (bh, vh, bl, vl) => bh + " leans most bullish at " + pct(vh, 1) +
-          " of its own premium; " + bl + " most bearish at " + pct(vl, 1) + ".",
-        none: "No basket carried a readable lean this session, so none is named.",
-        why: "Showing the FLOW RATIO — the share of each basket's own two-sided premium that " +
-          "leaned one way — on a fixed ±1 axis, which is the one mode whose bar heights " +
-          "mean the same thing on every session. It carries no size: +90% on $30K of premium " +
-          "and +90% on $300M are not the same fact, and the dollars are in the table below." },
+        two: (bh, vh, bl, vl) => bh + " leans most bullish at " + pct(vh, 1) + " of its own premium; " + bl + " most bearish at " + pct(vl, 1) + ".",
+        one: (b, v) => b + " is the only basket with a readable lean, at " + pct(v, 1) + " of its own premium." },
+      { label: "Premium", noun: "net option premium", val: (r) => isNum(r && r.netPremiumUsd), fmt: usdS, axis: null,
+        said: (n, d) => n + " of " + d + " cleared premium",
+        two: (bh, vh, bl, vl) => bh + " cleared the most bullish net premium at " + usd(vh) + "; " + bl + " the most bearish at " + usd(vl) + ".",
+        one: (b, v) => b + " is the only basket with a readable premium sum, at " + usd(v) + " net." },
+      { label: "Contracts", noun: "net contracts", val: netCts, fmt: cts, axis: null,
+        said: (n, d) => n + " of " + d + " reported volume",
+        two: (bh, vh, bl, vl) => bh + " traded the most calls over puts at " + cts(vh) + " contracts; " + bl + " the most puts over calls at " + cts(vl) + ".",
+        one: (b, v) => b + " is the only basket that reported both volumes, at " + cts(v) + " contracts net." },
     ];
+    let mode = 0;
+    const strip = h("div", { class: "hm-heat", role: "list", "aria-label": "Sector lean, eleven baskets" });
+    into.append(strip);
 
-    let mode = 2;
-
-    const glance = el("div", "cc-lean-glance");
-    into.append(glance);
-
-    const drawGlance = () => {
+    const finding = (M, vals, reporting) => {
+      if (!reporting.length) return "No basket carried a readable " + M.noun + " this session, so none is named.";
+      const s = reporting.slice().sort((a, b) => vals.get(b) - vals.get(a));
+      return s.length === 1 ? M.one(basket(s[0]), vals.get(s[0]))
+        : M.two(basket(s[0]), vals.get(s[0]), basket(s[s.length - 1]), vals.get(s[s.length - 1]));
+    };
+    const draw = () => {
       const M = MODES[mode];
-      glance.replaceChildren();
-      if (seg) {
-        seg.replaceChildren();
-        MODES.forEach((m, i) => {
-          const b = el("button", "cc-seg-b", m.label);
-          b.type = "button";
-          if (i === mode) b.setAttribute("aria-current", "true");
-          b.addEventListener("click", () => { mode = i; drawGlance(); });
-          seg.append(b);
-        });
-      }
-
-      const vals = new Map();
-      for (const r of ordered) vals.set(r, M.val(r));
+      const vals = new Map(ordered.map((r) => [r, M.val(r)]));
       const reporting = ordered.filter((r) => vals.get(r) !== null);
       saySub(M.said(reporting.length, ordered.length));
-
-      const strung = reporting.slice().sort((a, b) => vals.get(b) - vals.get(a));
-      const rank = strung.concat(ordered.filter((r) => vals.get(r) === null));
-
-      if (reporting.length) {
-        const hi = strung[0], lo = strung[strung.length - 1];
-        lead(glance, reporting.length === 1
-          ? M.one(basket(hi), vals.get(hi))
-          : M.two(basket(hi), vals.get(hi), basket(lo), vals.get(lo)));
-      } else {
-        glance.append(el("p", "cc-quiet", M.none));
-      }
-
-      const peak = M.axis !== null ? M.axis
-        : reporting.reduce((m, r) => Math.max(m, Math.abs(vals.get(r))), 0);
-
-      const strip = el("div", "cc-chips");
-      strip.setAttribute("role", "list");
-      for (const r of rank) {
+      const rank = reporting.slice().sort((a, b) => vals.get(b) - vals.get(a)).concat(ordered.filter((r) => vals.get(r) === null));
+      const peak = M.axis !== null ? M.axis : reporting.reduce((m, r) => Math.max(m, Math.abs(vals.get(r))), 0);
+      strip.replaceChildren(...rank.map((r, i) => {
         const v = vals.get(r);
-        const chip = el("div", "cc-chip" +
-          (v === null ? " is-null" : v > 0 ? " is-pos" : v < 0 ? " is-neg" : ""));
-        chip.setAttribute("role", "listitem");
-        if (r.etf) chip.append(el("span", "cc-chip-e", r.etf));
-        chip.append(el("span", "cc-chip-n", basket(r)));
-        chip.append(el("span", "cc-chip-v", v === null ? DASH : M.fmt(v)));
-
-        if (v !== null) {
-          const bar = el("span", "cc-chip-bar");
-          const fill = el("i");
-          const half = peak > 0 ? Math.min(50, Math.abs(v) / peak * 50) : 0;
-          fill.style.width = Math.max(1.5, half) + "%";
-          fill.style.left = (v < 0 ? 50 - half : 50) + "%";
-          bar.append(fill);
-          chip.append(bar);
-        }
-
-        const net = isNum(r && r.netPremiumUsd), ratio = isNum(r && r.leanRatio);
-        const nc = netCts(r);
-        chip.title = v === null
-          ? (typeof r.reason === "string" && r.reason ? r.reason
+        const read = typeof r.read === "string" ? r.read : "unreadable";
+        const a = v === null || !(peak > 0) ? 0 : Math.sqrt(Math.min(1, Math.abs(v) / peak));
+        const title = v === null
+          ? (typeof r.reason === "string" && r.reason ? r.reason : read === "quiet"
+            ? "Both premium sums were measured at zero: 0/0 is undefined, not neutral, so this basket is not placed."
             : "This basket carried no readable " + M.noun + ", so it is not placed.")
-          : (r.etf ? r.etf + ": " : "") + M.fmt(v) + " " + M.noun + " · " +
-            "net " + usd(net) + " · " + cts(nc) + " contracts" +
-            " · " + pct(ratio, 1) + " of its own premium.";
-        strip.append(chip);
-      }
-      glance.append(strip);
-
-      glance.append(el("p", "cc-ln-note is-mode", M.why));
+          : (r.etf ? r.etf + ": " : "") + M.fmt(v) + " " + M.noun + " · net " + usd(r.netPremiumUsd) +
+            " · " + cts(netCts(r)) + " contracts · " + pct(r.leanRatio, 1) + " of its own premium.";
+        return h("div", {
+          class: "hm-cell", role: "listitem", "data-read": read, "data-etf": r.etf || null,
+          "data-tone": v === null ? "silent" : toneOf(v), title,
+          style: { "--a": a.toFixed(3), "--i": String(i) },
+        },
+        h("span", { class: "hm-cell-e" }, r.etf || DASH),
+        h("span", { class: "hm-cell-v" }, v === null ? (read === "quiet" && M.axis === 1 ? "0/0" : DASH) : M.fmt(v)),
+        h("span", { class: "hm-cell-n" }, brief(r)));
+      }));
+      strip.dataset.finding = finding(M, vals, reporting);
     };
-    drawGlance();
+    draw();
+    if (segHost) segHost.append(UI.segmented("Sector quantity", MODES.map((m) => ({ label: m.label })), (i) => { mode = i; draw(); }, 0));
 
-    const wrap = tableWrap("Sector option-premium lean, most bullish first");
-    const table = el("table", "cc-tbl");
-
-    table.append(headRow([
-      ["Sector", null], ["Lean", "cc-ln-c"], ["Lean · % of premium", "c-num"],
-      ["Net · $", "c-num"], ["Gross · $", "c-num"],
-    ]));
-
-    const body = el("tbody");
-    for (const row of ordered) {
-      const tr = el("tr");
-
-      const read = typeof row.read === "string" ? row.read : "unreadable";
-      tr.dataset.read = read;
-
-      const name = el("td", "cc-ln-name");
-      name.append(el("span", "cc-t", row.sector || row.fullName || DASH));
-
-      name.append(el("small", "cc-etf", row.etf || DASH));
-      if (read !== "ok") {
-        const tag = el("span", "cc-dim cc-ln-tag", read);
-        tag.title = typeof row.reason === "string" && row.reason ? row.reason
-          : (read === "quiet"
-            ? "Read, and both premium sums were zero: measured and empty."
-            : "This basket's premium could not be read from the response.");
-        name.append(tag);
+    const leanBar = (row) => {
+      const r = isNum(row && row.leanRatio);
+      if (r === null) {
+        return row.read === "quiet"
+          ? h("span", { class: "cc-ln-flat" }, "no premium")
+          : h("span", { class: "cc-ln-none", title: typeof row.reason === "string" && row.reason ? row.reason : null }, DASH);
       }
-      tr.append(name);
-
-      tr.append(leanCell(row, read));
-
-      tr.append(el("td", "c-num" + tone(row.leanRatio), pct(row.leanRatio, 1)));
-      tr.append(el("td", "c-num" + tone(row.netPremiumUsd), usd(row.netPremiumUsd)));
-      tr.append(el("td", "c-num", usd(row.grossPremiumUsd)));
-      body.append(tr);
-    }
-    table.append(body);
-    wrap.append(table);
-    into.append(wrap);
-
-    if (caveats.length) {
-      const box = el("ul", "fc-note is-qualifier cc-ln-note");
-      for (const c of caveats) box.append(el("li", null, c));
-      into.append(box);
-    }
-    appendMethod(into, method, "How this lean was derived", true);
+      const frac = Math.min(Math.abs(r), 1);
+      return h("span", { class: "cc-ln-bar", role: "img",
+        "aria-label": (row.sector || row.etf || "This basket") + " leaned " + pct(r, 1) + " of its two-sided option premium, " +
+          (r < 0 ? "left of" : r > 0 ? "right of" : "exactly on") + " the zero rule." },
+      h("i", { class: "cc-ln-mid" }),
+      h("i", { class: "cc-ln-fill", "data-tone": toneOf(r), style: { width: (frac * 50) + "%", left: r < 0 ? (50 - frac * 50) + "%" : "50%" } }));
+    };
+    const detail = table("Sector option-premium lean, most bullish first", [
+      ["Sector", false], ["Lean", false], ["Lean · % of premium", true], ["Net · $", true], ["Gross · $", true],
+    ], ordered.map((row) => ({
+      attrs: { "data-read": typeof row.read === "string" ? row.read : "unreadable" },
+      cells: [[h("span", null, h("span", { class: "cc-t" }, basket(row)), " ", h("small", { class: "cc-etf" }, row.etf || DASH),
+        row.read && row.read !== "ok" ? h("span", { class: "cc-dim cc-ln-tag", title: row.reason || null }, " " + row.read) : null), "cc-ln-name"],
+      [leanBar(row), "cc-ln-c"], [pct(row.leanRatio, 1), "c-num"], [usd(row.netPremiumUsd), "c-num"], [usd(row.grossPremiumUsd), "c-num"]],
+    })));
+    infoInto("hmLean", "sector lean", () => ({
+      title: "Sector lean",
+      lead: finding(MODES[0], new Map(ordered.map((r) => [r, MODES[0].val(r)])), ordered.filter((r) => MODES[0].val(r) !== null)),
+      sections: [{ title: "What it is", lines: caveats }, { title: "How it is derived", lines: method }],
+      node: detail,
+    }));
   }
 
   function agoSaid(fromMs, now) {
     const d = now - fromMs;
-
     if (d < 0) return null;
     const mins = Math.floor(d / 60000);
     if (mins < 1) return "under a minute ago";
     if (mins < 60) return mins + " min ago";
     const hours = Math.floor(mins / 60);
-
     if (hours < 24) return hours + "h" + (mins % 60 ? " " + (mins % 60) + "m" : "") + " ago";
     const days = Math.floor(hours / 24);
     return days + (days === 1 ? " day ago" : " days ago");
@@ -1617,74 +1392,62 @@
   const NEWS_TICKERS = 4;
 
   function paintNews(into, payload, cards, now) {
-    const sub = host("ccNewsSub");
+    const sub = $("ccNewsSub");
     if (sub) sub.textContent = "";
-    if (silent(into, payload, "headlines feed")) return;
-
+    if (silent(into, payload, "headlines feed", 64)) return;
     if (payload.status === "quiet") {
-      quiet(into, "empty",
+      hush(into, "empty",
         "The headlines feed was read and the vendor returned no rows: a measurement — the " +
-        "tape was checked and was empty — and not a request that failed.");
+        "tape was checked and was empty — and not a request that failed.", "headlines", 64);
       return;
     }
     if (payload.status === "unreadable") {
-      quiet(into, "unreadable",
+      hush(into, "unreadable",
         "The headlines feed returned rows and not one carried a headline, so nothing here " +
         "is publishable. A fault on the wire between the vendor and this pipeline, not a " +
-        "quiet news day.");
+        "quiet news day.", "headlines", 64);
       return;
     }
-
     const rows = Array.isArray(payload.rows) ? payload.rows : [];
     if (!rows.length) {
-      quiet(into, "unavailable",
+      hush(into, "unavailable",
         "This payload carried no headline rows: the key published, and the list this region " +
-        "is made of is not on it.");
+        "is made of is not on it.", "headlines", 64);
       return;
     }
-
     const stamp = typeof payload.readAt === "string" ? Date.parse(payload.readAt) : NaN;
     const readMs = Number.isFinite(stamp) ? stamp : null;
     const readAge = readMs === null ? null : agoSaid(readMs, now);
 
     const said = [];
     if (readMs === null) {
-
       said.push("This payload states no read time, so how long ago these headlines were " +
         "fetched cannot be said. Treat every row below as being of unknown age rather " +
         "than as something that just happened.");
     } else {
       said.push("Fetched at " + (fmtStamp(payload.readAt) || DASH) +
-        (readAge === null
-          ? ", which is ahead of this browser's clock, so no age can be stated"
-          : ", " + readAge) + ".");
+        (readAge === null ? ", which is ahead of this browser's clock, so no age can be stated" : ", " + readAge) + ".");
     }
     if (typeof payload.cadence === "string" && payload.cadence) {
       said.push("This feed is fetched " + payload.cadence +
-        (typeof payload.staleBy === "string" && payload.staleBy
-          ? " and is stale by " + payload.staleBy : "") +
+        (typeof payload.staleBy === "string" && payload.staleBy ? " and is stale by " + payload.staleBy : "") +
         ", so it is a once-a-day read and never a live tape.");
     }
-
     const kept = isNum(payload.kept);
     const oldestAt = typeof payload.oldest === "string" ? Date.parse(payload.oldest) : NaN;
     if (Number.isFinite(oldestAt)) {
       const oldAge = agoSaid(oldestAt, now);
-
       if (oldAge) {
         said.push("The oldest of the " + (kept === null ? "stored" : kept + " stored") +
           " rows is " + oldAge.replace(/ ago$/, " old") + ".");
       }
     }
-
     const requested = isNum(payload.requested), returned = isNum(payload.returned);
     const cap = isNum(payload.cap), shed = isNum(payload.shed);
     if (payload.atVendorLimit === true) {
-      said.push("The vendor returned " +
-        (returned === null ? "its own maximum number of rows" : returned + " rows") +
+      said.push("The vendor returned " + (returned === null ? "its own maximum number of rows" : returned + " rows") +
         (requested === null ? "" : " against the " + requested + " asked for") +
-        ", which is its documented ceiling — so the true population is UNKNOWN and at " +
-        "least that large.");
+        ", which is its documented ceiling — so the true population is UNKNOWN and at least that large.");
     }
     if (payload.capped === true && shed !== null && shed > 0) {
       said.push("Our own " + (cap === null ? "row cap" : cap + "-row cap") + " then shed " +
@@ -1696,23 +1459,17 @@
       said.push(unusable + (unusable === 1 ? " row" : " rows") +
         " arrived with no headline at all and went unpublished: counted, not rendered blank.");
     }
-    const undatedKept = isNum(payload.undatedKept);
-    const undatedSeen = isNum(payload.undatedSeen);
+    const undatedKept = isNum(payload.undatedKept), undatedSeen = isNum(payload.undatedSeen);
     if (undatedKept !== null && undatedKept > 0) {
-      said.push(undatedKept +
-        (undatedKept === 1 ? " stored row carries" : " of the stored rows carry") +
-        " no timestamp and cannot be aged; " +
-        (undatedKept === 1 ? "it sorts" : "they sort") + " last rather than being dated to now.");
+      said.push(undatedKept + (undatedKept === 1 ? " stored row carries" : " of the stored rows carry") +
+        " no timestamp and cannot be aged; " + (undatedKept === 1 ? "it sorts" : "they sort") + " last rather than being dated to now.");
     } else if (undatedSeen !== null && undatedSeen > 0) {
       said.push(undatedSeen + " undated " + (undatedSeen === 1 ? "row" : "rows") +
-        " arrived on the wire and the cap shed " + (undatedSeen === 1 ? "it" : "them") +
-        " before this list, so every row below can be aged.");
+        " arrived on the wire and the cap shed " + (undatedSeen === 1 ? "it" : "them") + " before this list, so every row below can be aged.");
     }
-
     const unflagged = rows.filter((r) => r && (r.major === null || r.major === undefined)).length;
     if (unflagged) {
-      said.push(unflagged +
-        (unflagged === 1 ? " stored row carried" : " of the stored rows carried") +
+      said.push(unflagged + (unflagged === 1 ? " stored row carried" : " of the stored rows carried") +
         " no major/minor flag at all, which is not the same as having been flagged not-major.");
     }
     const cadence = typeof payload.cadence !== "string" ? "Snapshot; cadence not specified"
@@ -1722,258 +1479,164 @@
     if (payload.atVendorLimit === true) coverage.push("Vendor ceiling reached; total unknown");
     if (payload.capped === true && shed > 0) coverage.push(shed + " received rows omitted");
     if (undatedKept > 0) coverage.push(undatedKept + " undated rows");
-    into.append(el("p", "cc-quiet cc-news-status", coverage.join(" · ")));
-    const newsDetail = el("details", "ft-how");
-    newsDetail.append(el("summary", "ft-how-s", "News freshness and coverage"));
-    newsDetail.append(el("p", "cc-quiet cc-nw-note", said.join(" ")));
-    into.append(newsDetail);
 
-    const list = el("ul", "cc-nw");
-    for (const row of rows.slice(0, LIST_MAX)) {
-      const li = el("li", "cc-nw-row");
+    const listNode = h("div", { class: "hm-news" },
+      h("p", { class: "cc-nw-note" }, said.join(" ")),
+      h("ul", { class: "cc-nw" }, rows.slice(0, LIST_MAX).map((row) => {
+        const at = isNum(row && row.createdAtMs);
+        const age = at === null ? null : agoSaid(at, now);
+        const tickers = (Array.isArray(row && row.tickers) ? row.tickers : [])
+          .map((raw) => (typeof raw === "string" ? raw.trim().toUpperCase() : "")).filter(Boolean);
+        return h("li", { class: "cc-nw-row" },
+          h("p", { class: "cc-nw-h" }, typeof row.headline === "string" && row.headline ? row.headline : DASH),
+          h("p", { class: "cc-nw-m" },
+            h("span", { class: "cc-nw-age", title: at === null ? "This row carried no timestamp, so its age is not known and none is claimed."
+              : "The vendor's own stamp, verbatim: " + (typeof row.createdAt === "string" ? row.createdAt : String(at)) },
+            at === null ? "undated" : (age === null ? "stamped ahead of this clock" : age)),
+            typeof row.source === "string" && row.source ? h("span", { class: "cc-nw-src" }, row.source) : null,
+            typeof row.sentiment === "string" && row.sentiment
+              ? h("span", { class: "cc-nw-sent", title: "The vendor's own sentiment label, verbatim and never mapped onto a number. It is not this product's score and does not enter it." }, row.sentiment) : null,
+            row && row.major === true ? h("span", { class: "cc-nw-major", title: "The vendor flagged this headline as major." }, "major") : null,
+            tickers.length ? h("span", { class: "cc-nw-tks" },
+              tickers.slice(0, NEWS_TICKERS).map((t) => (cards.has(t) ? nameNode(t, true)
+                : h("span", { class: "cc-nw-tk", title: "Named by the vendor on this headline. This session built no card for it, so there is nothing here to open." }, t))),
+              tickers.length > NEWS_TICKERS ? h("span", { class: "cc-nw-more" }, "+" + (tickers.length - NEWS_TICKERS) + " more") : null) : null));
+      })));
 
-      li.append(el("p", "cc-nw-h",
-        typeof row.headline === "string" && row.headline ? row.headline : DASH));
-
-      const meta = el("p", "cc-nw-m");
-
-      const at = isNum(row && row.createdAtMs);
-      const age = at === null ? null : agoSaid(at, now);
-      const ageNode = el("span", "cc-nw-age",
-        at === null ? "undated" : (age === null ? "stamped ahead of this clock" : age));
-      ageNode.title = at === null
-        ? "This row carried no timestamp, so its age is not known and none is claimed."
-        : "The vendor's own stamp, verbatim: " +
-          (typeof row.createdAt === "string" ? row.createdAt : String(at));
-      meta.append(ageNode);
-
-      if (typeof row.source === "string" && row.source) {
-        meta.append(el("span", "cc-nw-src", row.source));
-      }
-
-      if (typeof row.sentiment === "string" && row.sentiment) {
-        const sent = el("span", "cc-nw-sent", row.sentiment);
-        sent.title = "The vendor's own sentiment label, verbatim and never mapped onto a " +
-          "number. It is not this product's score and does not enter it.";
-        meta.append(sent);
-      }
-
-      if (row && row.major === true) {
-        const mark = el("span", "cc-nw-major", "major");
-        mark.title = "The vendor flagged this headline as major.";
-        meta.append(mark);
-      }
-
-      const tickers = Array.isArray(row && row.tickers) ? row.tickers : [];
-      const named = [];
-      for (const raw of tickers) {
-        const t = typeof raw === "string" ? raw.trim().toUpperCase() : "";
-        if (t) named.push(t);
-      }
-      if (named.length) {
-        const box = el("span", "cc-nw-tks");
-        for (const t of named.slice(0, NEWS_TICKERS)) {
-
-          if (cards.has(t)) { box.append(nameNode(t, true)); continue; }
-          const flat = el("span", "cc-nw-tk", t);
-          flat.title = "Named by the vendor on this headline. This session built no card for " +
-            "it, so there is nothing here to open.";
-          box.append(flat);
-        }
-
-        if (named.length > NEWS_TICKERS) {
-          box.append(el("span", "cc-nw-more", "+" + (named.length - NEWS_TICKERS) + " more"));
-        }
-        meta.append(box);
-      }
-
-      li.append(meta);
-      list.append(li);
-    }
-    into.append(list);
-
+    const first = rows[0] || {};
+    const at0 = isNum(first.createdAtMs);
+    const shown = Math.min(rows.length, LIST_MAX);
+    into.append(h("button", {
+      class: "hm-news-open", type: "button", "aria-haspopup": "dialog", "aria-controls": "fxPop",
+      "data-info": UI.info(() => ({ title: "Headlines", lead: coverage.join(" · "), node: listNode })),
+    },
+    h("span", { class: "hm-news-h" }, typeof first.headline === "string" ? first.headline : DASH),
+    h("span", { class: "hm-news-a" }, at0 === null ? "undated" : agoSaid(at0, now) || ""),
+    h("span", { class: "hm-news-n" }, "All " + shown), glyph("next")));
     if (sub) {
-
-      const shown = Math.min(rows.length, LIST_MAX);
-      sub.textContent = capSaid(shown, kept === null ? rows.length : kept) +
-        (readAge === null ? "" : " · fetched " + readAge);
+      sub.textContent = countSaid(shown, kept === null ? rows.length : kept);
+      sub.setAttribute("aria-label", capSaid(shown, kept === null ? rows.length : kept) + (readAge === null ? "" : " · fetched " + readAge));
     }
   }
 
   let spineDrawn = null;
-  let spineW = 0;
-
-  function spineWidth() {
-    const measured = Math.round(spineHost.clientWidth);
-    return measured > 0 ? Math.min(2400, measured) : 720;
-  }
 
   function renderSpine(payload) {
     spineDrawn = payload;
-    spineHost.replaceChildren();
-
+    const plot = $("spinePlot");
+    if (!plot) return;
     const band = isNum(payload.deadBand);
     const scored = isNum(payload.scored);
     const neutral = isNum(payload.neutral);
     const moves = payload.__moves instanceof Map ? payload.__moves : new Map();
+    C.mount(plot, (host, W, animate) => spineDraw(host, W, animate, payload, band, scored, neutral, moves));
+  }
 
-    const W = spineWidth();
-    spineW = W;
-    const H = 92;
-    const padX = 14, axisY = 56;
+  function spineDraw(host, W, animate, payload, band, scored, neutral, moves) {
+    const padX = 14;
     const plotW = W - padX * 2;
-    const xOf = (s) => padX + ((s + 100) / 200) * plotW;
-
-    const svg = svgEl("svg", {
-      class: "sp", viewBox: `0 0 ${W} ${H}`, width: W, height: H,
-      role: "img", preserveAspectRatio: "xMidYMid meet",
-    });
-
-    const defs = svgEl("defs");
-    const pat = svgEl("pattern", {
-      id: "spBand", width: 6, height: 6, patternUnits: "userSpaceOnUse",
-      patternTransform: "rotate(45)", class: "sp-bandpat",
-    });
-    pat.append(svgEl("line", { x1: 3, y1: 0, x2: 3, y2: 6, stroke: "currentColor", "stroke-width": 1.4 }));
-    defs.append(pat);
-    svg.append(defs);
-
-    svg.append(svgEl("line", { class: "sp-axis", x1: padX, x2: W - padX, y1: axisY, y2: axisY }));
-
-    if (band !== null) {
-      svg.append(svgEl("rect", {
-        class: "sp-band", x: xOf(-band), y: axisY - 13, width: xOf(band) - xOf(-band), height: 26,
-        fill: "url(#spBand)",
-      }));
-    }
-
-    for (const s of [-100, -50, 0, 50, 100]) {
-      svg.append(svgEl("line", { class: "sp-tick", x1: xOf(s), x2: xOf(s), y1: axisY + 10, y2: axisY + 15 }));
-      const t = svgEl("text", { class: "sp-ticklabel", x: xOf(s), y: axisY + 27, "text-anchor": "middle" });
-      t.textContent = s === 0 ? "0" : fmtSigned(s, 0);
-      svg.append(t);
-    }
-
-    const bandLabel = svgEl("text", {
-      class: "sp-bandlabel", x: xOf(0), y: axisY - 19, "text-anchor": "middle",
-    });
-    bandLabel.textContent = band === null
-
-      ? "no dead band published for this session · the axis is drawn without one"
-      : scored !== null && neutral !== null
-        ? neutral + " of " + scored + " inside ±" + band + " · not named"
-        : "±" + band + " dead band · not named";
-    svg.append(bandLabel);
-
-    let trails = 0;
+    const xOf = (sc) => padX + ((sc + 100) / 200) * plotW;
     const marks = [];
     for (const [rows, cls] of [[payload.__bull, "is-bull"], [payload.__bear, "is-bear"]]) {
       for (const r of rows || []) {
-        const s = isNum(r.s);
-        if (s === null) continue;
+        const sc = isNum(r.s);
+        if (sc === null) continue;
         const t = String(r.t || "");
         const mv = moves.get(t) || null;
-
-        const usable = Boolean(mv && mv.current && mv.last !== null && mv.last === s);
-        const v = usable ? isNum(mv.d1.v) : null;
-        const gap = usable ? isNum(mv.d1.gap) : null;
-        if (v !== null && v !== 0 && gap !== null) {
-          const from = Math.max(-100, Math.min(100, s - v));
-          const trail = svgEl("line", {
-            class: "sp-move " + cls + (gap > 1 ? " is-gapped" : ""),
-            x1: xOf(from), x2: xOf(s), y1: axisY, y2: axisY,
-            stroke: "currentColor", "stroke-width": 2.2, "stroke-linecap": "round",
-            opacity: 0.42,
-
-            "stroke-dasharray": gap > 1 ? "3 2.5" : null,
-          });
-          const trailSaid = svgEl("title");
-          trailSaid.textContent = t + " " + fmtSigned(v, 0) + " over " + sessionsSaid(gap) +
-            ", from " + fmtSigned(s - v, 0);
-          trail.append(trailSaid);
-          svg.append(trail);
-          trails++;
-        }
-
-        if (usable && typeof mv.d1.cross === "string") {
-          svg.append(svgEl("circle", {
-            class: "sp-cross is-" + mv.d1.cross, cx: xOf(s), cy: axisY, r: 8,
-            fill: "none", stroke: "currentColor", "stroke-width": 1.2, opacity: 0.85,
-          }));
-        }
-
-        const dot = svgEl("circle", {
-          class: "sp-dot " + cls, cx: xOf(s), cy: axisY, r: 4.5, "data-t": t,
-        });
-        const label = svgEl("title");
-
-        label.textContent = t + " " + fmtSigned(s, 0) +
-          (v !== null && gap !== null
-            ? ", " + fmtSigned(v, 0) + " over " + sessionsSaid(gap)
-            : mv && mv.on ? ", last scored " + mv.on : "") +
-
-          (usable && typeof mv.d1.cross === "string" ? " · " + mv.d1.cross : "");
-        dot.append(label);
-        svg.append(dot);
-
-        marks.push({ s, t, v, gap, cross: usable && typeof mv.d1.cross === "string"
-          ? mv.d1.cross : null, on: mv && mv.on ? mv.on : null });
+        const usable = Boolean(mv && mv.current && mv.last !== null && mv.last === sc);
+        marks.push({ s: sc, t, cls, mv, usable, v: usable ? isNum(mv.d1.v) : null, gap: usable ? isNum(mv.d1.gap) : null,
+          cross: usable && typeof mv.d1.cross === "string" ? mv.d1.cross : null, on: mv && mv.on ? mv.on : null, x: xOf(sc), dy: 0 });
       }
     }
+    const r = marks.length > 60 ? 3.4 : 4.5;
+    const step = r * 2 + 0.8;
+    const placed = [];
+    let reach = 0;
+    for (const m of marks.slice().sort((a, b) => a.x - b.x)) {
+      for (let k = 0; k < 15; k++) {
+        const off = (k % 2 ? -1 : 1) * Math.ceil(k / 2) * step;
+        const hit = placed.some((p) => Math.abs(p.x - m.x) < step && Math.abs(p.dy - off) < step);
+        if (!hit || k === 14) { m.dy = off; break; }
+      }
+      placed.push(m);
+      reach = Math.max(reach, Math.abs(m.dy));
+    }
+    const half = reach + r + 6;
+    const axisY = 26 + half;
+    const H = Math.round(axisY + half + 30);
+    const svg = C.svgRoot(host, W, H, animate, "");
+    svg.setAttribute("class", "sp");
+    svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+    const s = UI.s;
+    const defs = s("defs", null, svg);
+    const pat = s("pattern", { id: "spBand", width: 6, height: 6, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)", class: "sp-bandpat" }, defs);
+    s("line", { x1: 3, y1: 0, x2: 3, y2: 6, stroke: "currentColor", "stroke-width": 1.2 }, pat);
+    if (band !== null) {
+      s("rect", { class: "sp-band", x: xOf(-band), y: axisY - half, width: xOf(band) - xOf(-band), height: half * 2, rx: 4, fill: "url(#spBand)" }, svg);
+    }
+    s("line", { class: "sp-axis base", x1: padX, x2: W - padX, y1: axisY, y2: axisY }, svg);
+    for (const v of [-100, -50, 0, 50, 100]) {
+      s("line", { class: "sp-tick", x1: xOf(v), x2: xOf(v), y1: axisY + half + 2, y2: axisY + half + 6 }, svg);
+      s("text", { class: "sp-ticklabel", x: xOf(v), y: axisY + half + 19, "text-anchor": "middle", text: v === 0 ? "0" : fmtSigned(v, 0) }, svg);
+    }
+    s("text", { class: "sp-bandlabel", x: xOf(0), y: axisY - half - 8, "text-anchor": "middle",
+      text: band === null ? "no dead band published for this session · the axis is drawn without one"
+        : scored !== null && neutral !== null ? neutral + " of " + scored + " inside ±" + band + " · not named"
+          : "±" + band + " dead band · not named" }, svg);
 
-    svg.setAttribute("aria-label",
-      "Score axis from minus 100 to plus 100. " +
+    let trails = 0;
+    for (const m of marks) {
+      if (m.v === null || m.v === 0 || m.gap === null || !m.cross) continue;
+      const from = Math.max(-100, Math.min(100, m.s - m.v));
+      const trail = s("line", {
+        class: "sp-move " + m.cls + (m.gap > 1 ? " is-gapped" : ""),
+        x1: xOf(from), x2: xOf(m.s), y1: axisY + m.dy, y2: axisY + m.dy,
+        "stroke-dasharray": m.gap > 1 ? "3 2.5" : null,
+      }, svg);
+      s("title", { text: m.t + " " + fmtSigned(m.v, 0) + " over " + sessionsSaid(m.gap) + ", from " + fmtSigned(m.s - m.v, 0) }, trail);
+      trails++;
+    }
+    for (const m of marks) {
+      if (m.cross) s("circle", { class: "sp-cross is-" + m.cross, cx: m.x, cy: axisY + m.dy, r: r + 3 }, svg);
+    }
+    for (const m of marks) {
+      const dot = s("circle", { class: "sp-dot " + m.cls, cx: m.x, cy: axisY + m.dy, r, "data-t": m.t }, svg);
+      s("title", { text: m.t + " " + fmtSigned(m.s, 0) +
+        (m.v !== null && m.gap !== null ? ", " + fmtSigned(m.v, 0) + " over " + sessionsSaid(m.gap)
+          : m.on ? ", last scored " + m.on : "") +
+        (m.cross ? " · " + m.cross : "") }, dot);
+    }
+    const said = "Score axis from minus 100 to plus 100. " +
       (neutral !== null && scored !== null
         ? neutral + " of " + scored + " names scored inside the " +
-          (band === null ? "dead band, whose width this payload does not state,"
-            : "plus or minus " + band + " dead band") +
+          (band === null ? "dead band, whose width this payload does not state," : "plus or minus " + band + " dead band") +
           " and are not published. "
         : "") +
-      ((payload.__bull || []).length) + " bullish and " + ((payload.__bear || []).length) +
-      " bearish names cleared it." +
-      (trails ? " " + trails + " of them trail the move since their previous scored session." : ""));
-
-    if (window.FlowsCursor && marks.length) {
-      const byScore = new Map();
-      for (const m of marks) {
-        if (!byScore.has(m.s)) byScore.set(m.s, []);
-        byScore.get(m.s).push(m);
-      }
-      const SHOW = 6;
-      window.FlowsCursor.attach(svg, {
-        name: "Every cleared name on the score axis",
-        band: { y0: axisY - 16, y1: axisY + 16 },
-        points: [...byScore.keys()].sort((a, b) => a - b).map((score) => {
-          const at = byScore.get(score);
-          const rows = at.slice(0, SHOW).map((m) => ({
-            k: m.t,
-
-            v: m.v !== null && m.gap !== null
-              ? fmtSigned(m.v, 0) + " over " + sessionsSaid(m.gap)
-              : m.on ? "last scored " + m.on : "no earlier scored session",
-            cls: m.v === null ? "" : m.v > 0 ? "is-pos" : m.v < 0 ? "is-neg" : "",
-          }));
-          if (at.length > SHOW) {
-            rows.push({ k: "and " + (at.length - SHOW) + " more",
-                        v: "at this same score", cls: "" });
-          }
-          return { x: xOf(score), label: fmtSigned(score, 0), rows };
-        }),
-      });
+      ((payload.__bull || []).length) + " bullish and " + ((payload.__bear || []).length) + " bearish names cleared it." +
+      (trails ? " " + trails + " that crossed the band trail the move since their previous scored session." : "");
+    svg.setAttribute("aria-label", said);
+    if (!marks.length) return;
+    const byScore = new Map();
+    for (const m of marks) {
+      if (!byScore.has(m.s)) byScore.set(m.s, []);
+      byScore.get(m.s).push(m);
     }
-
-    spineHost.append(svg);
+    const scores = [...byScore.keys()].sort((a, b) => a - b);
+    C.scrub(host, svg, {
+      xs: scores.map(xOf), top: axisY - half, bottom: axisY + half, label: "Every cleared name on the score axis",
+      onMove: (i) => {
+        const at = byScore.get(scores[i]);
+        const parts = [C.part(fmtSigned(scores[i], 0), "k")];
+        for (const m of at.slice(0, 4)) {
+          parts.push(h("b", null, m.t));
+          parts.push(C.part(m.v !== null && m.gap !== null ? fmtSigned(m.v, 0) + " over " + sessionsSaid(m.gap)
+            : m.on ? "last scored " + m.on : "no earlier session", "k"));
+        }
+        if (at.length > 4) parts.push(C.part("+" + (at.length - 4) + " more", "k"));
+        return { parts, top: Math.max(0, axisY - half - 34), dots: at.slice(0, 4).map((m) => ({ x: m.x, y: axisY + m.dy, color: scores[i] < 0 ? "--down" : "--up" })) };
+      },
+    });
   }
-
-  let spineTimer = 0;
-  window.addEventListener("resize", () => {
-    if (!spineDrawn && !tideRedraw) return;
-    clearTimeout(spineTimer);
-    spineTimer = setTimeout(() => {
-      if (spineDrawn && Math.abs(spineWidth() - spineW) > 2) renderSpine(spineDrawn);
-      if (tideRedraw) tideRedraw();
-    }, 150);
-  });
 
   function assessAge(payload) {
     if (typeof UI.staleness !== "function") {
@@ -1984,7 +1647,6 @@
           "today's. The session named above is the payload's own claim about itself.",
       };
     }
-
     return UI.staleness(payload, Date.now(), { subject: "This session" });
   }
 
@@ -1995,6 +1657,16 @@
       staleEl.textContent = text;
     }
     document.body.classList.toggle("is-stale", Boolean(text));
+    const slot = $("hmStale");
+    if (slot) {
+      slot.replaceChildren();
+      if (text) {
+        slot.append(h("button", {
+          class: "hm-pill", type: "button", "data-state": "stale", "aria-haspopup": "dialog", "aria-controls": "fxPop",
+          "data-info": disclose("Freshness", text, { state: "stale" }),
+        }, glyph("clock"), h("span", null, "Stale")));
+      }
+    }
   }
 
   function setRailCount(side, n) {
@@ -2006,7 +1678,10 @@
 
   function stampUpdated(response, body) {
     const at = isNum(response.headers.get("X-Payload-Updated"));
-    if (body && typeof body === "object") body.__updatedAt = at !== null && at > 0 ? at : null;
+    if (body && typeof body === "object") {
+      body.__updatedAt = at !== null && at > 0 ? at : null;
+      body.__fresh = response.headers.get("X-Fresh-State") || null;
+    }
     return body;
   }
 
@@ -2022,10 +1697,61 @@
     }).catch(() => null);
   }
 
-  function loadRegion(path) {
+  function loadRegion(path, soon) {
     return fetch(path, { credentials: "same-origin", signal: AbortSignal.timeout(15000), headers: { Accept: "application/json" } })
-      .then((r) => (r.ok ? r.json().then((body) => stampUpdated(r, body)) : null))
+      .then((r) => (r.ok ? r.json().then((body) => stampUpdated(r, body))
+        : soon && r.status === 404 ? { status: "pending", __route: 404 } : null))
       .catch(() => null);
+  }
+
+  function neuronWire(lng, sht) {
+    const more = $("hmNeuronMore"), x = $("hmNeuronX");
+    if (more && x) {
+      more.addEventListener("click", () => {
+        const open = more.getAttribute("aria-expanded") !== "true";
+        more.setAttribute("aria-expanded", String(open));
+        x.hidden = !open;
+        const label = more.querySelector("span");
+        if (label) label.textContent = open ? "Less" : "More";
+      });
+    }
+    const wrote = document.querySelector(".hm-verdict time");
+    if (wrote && Number.isFinite(Date.parse(wrote.dateTime))) wrote.textContent = clock(wrote.dateTime) + " ET";
+    const built = Date.parse((lng && lng.generatedAt) || (sht && sht.generatedAt) || "");
+    if (wrote && Number.isFinite(built) && Date.parse(wrote.dateTime) < built) {
+      const box = wrote.closest(".hm-verdict");
+      box.classList.add("is-old");
+      const note = " Written before the boards were rebuilt at " + fmtStamp(new Date(built).toISOString()) +
+        ", so it reads an earlier publication.";
+      const src = box.querySelector(".hm-verdict-src");
+      if (src) src.append(note);
+      const meta = box.querySelector(".hm-verdict-meta");
+      if (meta) {
+        meta.append(h("button", {
+          class: "ui-state hm-mark", type: "button", "data-state": "stale", title: "Stale", "aria-label": "Stale: Neuron",
+          "aria-haspopup": "dialog", "aria-controls": "fxPop", "data-info": disclose("Neuron", note.trim(), { state: "stale" }),
+        }, glyph("clock")));
+      }
+    }
+  }
+
+  let resizeTimer = 0;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(drawStrips, 150);
+  });
+
+  function live(pulse, regime) {
+    if (typeof UI.heartbeat !== "function") return;
+    UI.heartbeat({
+      keys: ["market"], nightly: ["pulse"], page: "overview",
+      onChange(changed) {
+        if (!Array.isArray(changed) || !changed.some((k) => /market/.test(String(k)))) return;
+        loadRegion("/api/flows/lk?k=market", true).then((mkt) => {
+          if (mkt) paintHero(tideOf(mkt, pulse), regime, mkt);
+        });
+      },
+    });
   }
 
   Promise.all([
@@ -2036,13 +1762,13 @@
     loadRegion("/api/flows/flowalerts"),
     loadRegion("/api/flows/events"),
     loadRegion("/api/flows/scoretrack"),
-
     loadRegion("/api/flows/sector-premium"),
     loadRegion("/api/flows/news"),
-
     loadRegion("/api/flows/pulse"),
-  ]).then(([lng, sht, watch, market, alerts, events, track, lean, news, pulse]) => {
-
+    loadRegion("/api/flows/regime", true),
+    loadRegion("/api/flows/lk?k=market", true),
+    loadRegion("/api/flows/lk?k=vol", true),
+  ]).then(([lng, sht, watch, market, alerts, events, track, lean, news, pulse, regime, liveMkt, liveVol]) => {
     if (gated) return;
 
     const bull = ranked(lng && lng.rows);
@@ -2055,7 +1781,6 @@
     const boardBy = new Map();
     const cards = new Set();
     for (const [payload, rows] of [[lng, bull], [sht, bear]]) {
-
       const knows = isNum(payload && payload.deep) !== null;
       for (const row of rows) {
         if (!row || !row.t) continue;
@@ -2065,113 +1790,103 @@
       }
     }
 
-    paintMeta(host("ccMeta"), host("ccMetaDate"), host("ccMetaScreened"), host("ccMetaLive"),
-      [lng, sht], market,
-      [alerts && alerts.readAt, pulse && pulse.readAt, lean && lean.readAt,
-        news && news.readAt, market && market.generatedAt]);
-    paintVerdict(verdictHost, lng, sht, market, alerts, pulse);
+    const answered = (p) => (p && p.status !== "pending" ? p : null);
+    const meta = answered(lng) || answered(sht) || lng || sht || {};
+    if (typeof meta.sessionDate === "string") {
+      UI.freshness({ sessionDate: meta.sessionDate, generatedAt: meta.generatedAt, updatedAt: meta.__updatedAt, source: "boards" });
+    }
 
-    const tideHost = host("ccTide"), tideSeg = host("ccTideSeg");
-    if (tideHost && tideSeg) paintTide(tideHost, tideSeg, pulse);
-    const splitHost = host("ccSplit");
-    if (splitHost) paintSplit(splitHost, host("ccSplitSub"), pulse);
+    paintMeta($("ccMetaDate"), $("ccMetaScreened"), [lng, sht], market);
+    paintVerdict(verdictHost, lng, sht, market, alerts, pulse);
+    paintHero(tideOf(liveMkt, pulse), regime, liveMkt);
+    paintVol(regime, liveVol);
 
     const trk = readTrack(track && track.status !== "pending" ? track : null);
 
-    for (const [id, subId, payload, rows, label, all] of [
-      ["ccBull", "ccBullSub", lng, bull, "Bullish candidates, ranked", "bullish"],
-      ["ccBear", "ccBearSub", sht, bear, "Bearish candidates, ranked", "bearish"],
+    for (const [id, subId, payload, rows, label, all, route] of [
+      ["ccBull", "ccBullSub", lng, bull, "Bullish candidates, ranked", "bullish", "long"],
+      ["ccBear", "ccBearSub", sht, bear, "Bearish candidates, ranked", "bearish", "short"],
     ]) {
-      const into = host(id);
-      const sub = host(subId);
+      const into = $(id);
+      const sub = $(subId);
       if (!into) continue;
       into.replaceChildren();
-      if (silent(into, payload, all + " board")) {
+      if (silent(into, payload, all + " board", 240)) {
         if (sub) { sub.textContent = ""; sub.hidden = true; }
         continue;
       }
       if (!rows.length) {
-
-        quiet(into, "empty",
-          "No name leaned " + all + " past the band this session.");
-        if (sub) { sub.textContent = "0 ranked"; sub.hidden = false; }
+        hush(into, "empty", "No name leaned " + all + " past the band this session.", all + " board", 240);
+        if (sub) { sub.textContent = "0"; sub.setAttribute("aria-label", "0 ranked"); sub.hidden = false; }
         continue;
       }
-      sideTable(into, rows, isNum(payload && payload.deep) !== null, trk, label, evBy);
+      sideList(into, rows, isNum(payload && payload.deep) !== null, trk, label, evBy);
+      infoInto(id === "ccBull" ? "hmBull" : "hmBear", all + " leaders", () => ({
+        title: cap1(all), lead: "Names past the dead band on the " + all + " board, in the board's published rank order.",
+        facts: [["Pool", String(poolCount(payload) ?? rows.length)], ["Drawn", String(Math.min(rows.length, ROW_MAX))], ["Strip", trk.label]],
+        notes: ["Scores are a ranked attention signal on a fixed −100 to +100 scale, not a return forecast. Names inside the dead band are not published on either side.",
+          "Each strip draws the name's score by archived session on one scale shared by both sides, against an always-drawn zero rule.",
+          "The percentage is the session's price return: close over the prior close. It is not the score move.",
+          "A row with no detail card is scored and ranked from the same five sources as every other; the card costs vendor calls the run spends only on the names furthest from neutral."],
+      }));
       if (sub) {
-
         const pool = poolCount(payload) ?? rows.length;
         const shown = Math.min(rows.length, ROW_MAX);
-        sub.textContent = shown < pool ? "top " + shown + " of " + pool : "all " + pool;
+        sub.textContent = String(pool);
+        sub.setAttribute("aria-label", (shown < pool ? "top " + shown + " of " + pool : "all " + pool) + " — open the " + route + " board");
+        sub.dataset.said = shown < pool ? "top " + shown + " of " + pool : "all " + pool;
         sub.hidden = false;
       }
     }
+    drawStrips();
 
-    const chg = host("ccChg");
+    const chg = $("ccChgNote");
     if (chg) { chg.replaceChildren(); paintChanged(chg, track, cards, evBy, boardBy); }
 
-    const alr = host("ccAlerts");
+    const alr = $("ccAlerts");
     if (alr) { alr.replaceChildren(); paintAlerts(alr, alerts); }
-    const alrSub = host("ccAlertsSub");
+    const alrSub = $("ccAlertsSub");
     if (alrSub) {
-      const said = [];
-
-      const alrRows = alerts && alerts.status !== "pending" && Array.isArray(alerts.rows)
-        ? alerts.rows : null;
+      const alrRows = alerts && alerts.status !== "pending" && Array.isArray(alerts.rows) ? alerts.rows : null;
       if (alrRows) {
         const seen = isNum(alerts.seen);
         const shown = Math.min(alrRows.length, LIST_MAX);
         const of = seen === null ? alrRows.length : seen;
-
-        said.push(alerts.vendorTruncated === true || alerts.readTruncated === true
-          ? shown + " of ≥" + of : capSaid(shown, of));
-      }
-
-      const cadence = alerts && alerts.status !== "pending"
-        ? (alerts.refreshed === "intraday" ? "intraday"
-          : alerts.refreshed === "nightly" ? "nightly" : null)
-        : null;
-      const read = alerts && typeof alerts.readAt === "string" ? Date.parse(alerts.readAt) : NaN;
-      if (Number.isFinite(read)) {
-        said.push((cadence ? cadence + " read " : "read ") + (fmtStamp(alerts.readAt) || DASH)
-          + (alrRows && !cadence ? ", cadence not published" : ""));
-      } else if (alrRows) {
-        said.push(cadence ? cadence + " read" : "cadence not published");
-      }
-      alrSub.textContent = said.join(" · ");
+        const floor = alerts.vendorTruncated === true || alerts.readTruncated === true;
+        alrSub.textContent = floor ? shown + " of ≥" + of : countSaid(shown, of);
+        alrSub.setAttribute("aria-label", (floor ? shown + " of at least " + of : capSaid(shown, of)) + " flagged windows — open the unusual flow page");
+      } else { alrSub.textContent = ""; alrSub.removeAttribute("aria-label"); }
     }
 
-    const evr = host("ccEvents");
+    const evr = $("ccEvents");
     if (evr) { evr.replaceChildren(); paintEvents(evr, events); }
-    const evSub = host("ccEventsSub");
+    const evSub = $("ccEventsSub");
     if (evSub) {
-
-      const evRows = events && events.status !== "pending" && Array.isArray(events.rows)
-        ? events.rows : null;
+      const evRows = events && events.status !== "pending" && Array.isArray(events.rows) ? events.rows : null;
       const inWindow = isNum(events && events.inWindow);
-      evSub.textContent = evRows === null ? ""
-        : capSaid(Math.min(evRows.length, LIST_MAX),
-            inWindow === null ? evRows.length : inWindow) + " in the window";
+      const evShown = evRows === null ? 0 : Math.min(evRows.length, LIST_MAX);
+      const evOf = evRows === null ? 0 : inWindow === null ? evRows.length : inWindow;
+      evSub.textContent = evRows === null ? "" : countSaid(evShown, evOf);
+      if (evRows === null) evSub.removeAttribute("aria-label");
+      else evSub.setAttribute("aria-label", capSaid(evShown, evOf) + " in the window — open the events page");
     }
 
     const drawnAt = Date.now();
-    const lea = host("ccLean");
-    if (lea) { lea.replaceChildren(); paintLean(lea, lean, host("ccLeanSeg")); }
-    const nws = host("ccNews");
+    const lea = $("ccLean");
+    if (lea) { lea.replaceChildren(); paintLean(lea, lean, $("ccLeanSeg")); }
+    const nws = $("ccNews");
     if (nws) { nws.replaceChildren(); paintNews(nws, news, cards, drawnAt); }
 
-    const wtc = host("ccWatch");
+    const wtc = $("ccWatch");
     if (wtc) { wtc.replaceChildren(); paintWatch(wtc, watch); }
-    const wtcSub = host("ccWatchSub");
+    const wtcSub = $("ccWatchSub");
     if (wtcSub) {
-
       const n = rowCount(watch);
-      wtcSub.textContent = n === null
-        ? "inside the dead band" : capSaid(Math.min(n, LIST_MAX), n);
+      wtcSub.textContent = n === null ? "" : countSaid(Math.min(n, LIST_MAX), n);
+      if (n === null) wtcSub.removeAttribute("aria-label");
+      else wtcSub.setAttribute("aria-label", capSaid(Math.min(n, LIST_MAX), n) + " inside the dead band — open the watch board");
     }
 
-    const answered = (p) => (p && p.status !== "pending" ? p : null);
-    const meta = answered(lng) || answered(sht) || lng || sht || {};
     meta.__bull = bull;
     meta.__bear = bear;
     meta.__moves = new Map(Object.entries(trk.moveBy));
@@ -2183,46 +1898,27 @@
       notes.push("These two halves are from different sessions — bullish " +
         ld + ", bearish " + sd + ". Treat the comparison with care.");
     }
-
-    const seen = new Set();
-    for (const payload of [lng, sht]) {
-      const verdict = payload ? assessAge(payload) : null;
+    const seenMsg = new Set();
+    for (const one of [lng, sht]) {
+      const verdict = one ? assessAge(one) : null;
       const message = (verdict && verdict.message) || null;
-      if (message && !seen.has(message)) { seen.add(message); notes.push(message); }
+      if (message && !seenMsg.has(message)) { seenMsg.add(message); notes.push(message); }
     }
     setStale(notes);
-
-    const wrote = document.querySelector(".ak-neuron time");
-    const built = Date.parse((lng && lng.generatedAt) || (sht && sht.generatedAt) || "");
-    if (wrote && Number.isFinite(built) && Date.parse(wrote.dateTime) < built) {
-      const box = wrote.closest(".ak-neuron");
-      box.classList.add("is-old");
-      const src = box.querySelector(".ak-neuron-src");
-      if (src) {
-        src.append(" Written before the boards were rebuilt at " + fmtStamp(new Date(built).toISOString()) +
-          ", so it reads an earlier publication.");
-      }
-    }
+    neuronWire(lng, sht);
 
     const scored = isNum(meta.scored), neutral = isNum(meta.neutral);
-
     const sideSaid = (rows, pool, word) => rows === null ? DASH + " " + word
       : pool !== null && pool > rows ? rows + " of " + pool + " " + word + " carried"
         : rows + " " + word;
-
     const lngRows = rowCount(lng), shtRows = rowCount(sht);
     const lngPool = poolCount(lng), shtPool = poolCount(sht);
     const cut = (rows, pool) => rows !== null && pool !== null && pool > rows;
-
-    const unknown = (rows) => rows === null;
     const parts = [];
-    if (cut(lngRows, lngPool) || cut(shtRows, shtPool) ||
-        unknown(lngRows) || unknown(shtRows)) {
-      parts.push(sideSaid(lngRows, lngPool, "bullish") + " · " +
-        sideSaid(shtRows, shtPool, "bearish"));
+    if (cut(lngRows, lngPool) || cut(shtRows, shtPool) || lngRows === null || shtRows === null) {
+      parts.push(sideSaid(lngRows, lngPool, "bullish") + " · " + sideSaid(shtRows, shtPool, "bearish"));
     }
     if (scored !== null && neutral !== null) parts.push(neutral + " of " + scored + " inside the band");
-
     const unread = [lng ? null : "bullish", sht ? null : "bearish"].filter(Boolean);
     const said = parts.length ? parts.join(" · ") + "." : "";
     statusEl.textContent = said + (unread.length
@@ -2234,27 +1930,9 @@
     setRailCount("long", poolCount(lng));
     setRailCount("short", poolCount(sht));
     setRailCount("watch", rowCount(watch));
-
-    setRailCount("events", events && events.status !== "pending"
-      ? isNum(events.inWindow) : null);
-  }).catch(() => {
-    statusEl.textContent = "The session could not be loaded. Refresh to try again.";
+    setRailCount("events", events && events.status !== "pending" ? isNum(events.inWindow) : null);
+    live(pulse, regime);
+  }).catch((error) => {
+    statusEl.textContent = "The session could not be loaded. Refresh to try again." + (error && error.message ? " (" + error.message + ")" : "");
   });
-
-  scrollHint(document.querySelector(".flows-rail"));
-  scrollHint(document.querySelector(".cc-jump"));
-  const ccScroll = document.getElementById("ccScroll");
-  if (ccScroll) {
-    const jump = ccScroll.querySelector(".cc-jump");
-    const edge = () => {
-      ccScroll.classList.toggle("is-scrolled", ccScroll.scrollTop > 2);
-      if (!jump) return;
-      const pinned = getComputedStyle(jump).position === "sticky" && ccScroll.scrollTop > 0;
-      jump.classList.toggle("is-stuck", pinned &&
-        jump.getBoundingClientRect().top - ccScroll.getBoundingClientRect().top <= (parseFloat(getComputedStyle(jump).top) || 0) + 1);
-    };
-    ccScroll.addEventListener("scroll", edge, { passive: true });
-    addEventListener("resize", edge);
-    edge();
-  }
 })();
