@@ -8057,6 +8057,44 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
   white-space: nowrap;
 }
 
+.flows-body .flows-auth__card {
+  width: min(380px, 100%);
+  padding: var(--sp-8) var(--sp-7) var(--sp-7);
+  border: 0;
+  border-radius: var(--r-lg);
+  background: var(--mat-regular);
+  -webkit-backdrop-filter: var(--mat-blur);
+  backdrop-filter: var(--mat-blur);
+  box-shadow: var(--mat-edge), var(--lift-3);
+}
+.flows-body .flows-auth__card h1 { margin: var(--sp-4) 0 var(--sp-2); font: var(--t-large); letter-spacing: var(--t-large-track); }
+.flows-body .flows-auth__lede { margin: 0 0 var(--sp-5); color: var(--label-2); font: var(--t-callout); font-weight: 400; }
+.flows-body .flows-form { gap: var(--sp-3); }
+.flows-body .flows-form label {
+  margin-top: var(--sp-3);
+  color: var(--label-2);
+  font: var(--t-footnote);
+  letter-spacing: var(--t-footnote-track);
+  text-transform: none;
+}
+.flows-body .flows-form input {
+  min-height: 44px;
+  padding: 0 var(--sp-4);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: var(--fill-3);
+  color: var(--label-1);
+  font: 400 17px / 1.29 var(--font-text);
+}
+.flows-body .flows-form input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.flows-body .flows-submit {
+  margin-top: var(--sp-6);
+  border-radius: var(--r-sm);
+  font: var(--t-headline);
+  letter-spacing: var(--t-headline-track);
+  text-transform: none;
+}
+
 .flows-body .fx-bar .ak-dock-tab {
   position: relative;
   inset: auto;
