@@ -12,7 +12,7 @@ import { aggressorGamma } from "../shared/flows-features.js";
 import { buildCard } from "../shared/flows-card.js";
 import fs from "node:fs";
 import { aiText, modelInput, askModels, aiChain, aiCallSignature, retryableGuard, repliedGuard, modelRates,
-         spendShape, fallbackNote, emptyNote, AI_LENGTH_RETRY_MS } from "../shared/flows-ai.js";
+         spendShape, fallbackNote, emptyNote, intradayFloorMs, AI_LENGTH_RETRY_MS, AI_INTRADAY_REFRESH_MS } from "../shared/flows-ai.js";
 import { readFileSync } from "node:fs";
 
 let checks = 0;
@@ -692,6 +692,13 @@ const CARD = {
   ok(!retryableGuard("unreachable:length", AI_LENGTH_RETRY_MS - 1) && retryableGuard("unreachable:length", AI_LENGTH_RETRY_MS),
     "a length stop is retried, never frozen, but only after an hour so a model that keeps thinking cannot spend the day's allowance every tick");
   ok(!retryableGuard(null, Infinity) && !retryableGuard("invented", Infinity), "and a guard refusal is final");
+  ok(intradayFloorMs(0, "unreachable:length") === AI_LENGTH_RETRY_MS && intradayFloorMs(0, "unreachable:empty") === AI_LENGTH_RETRY_MS,
+    "THE ONE-HOUR FLOOR HOLDS WHEN ONLY THE INTRADAY READ TIME MOVED: the brief's alert fact carries its read time, so the summary " +
+    "fingerprint changes every tick and a length or empty stop was re-asked of both models every 45 minutes, 9 asks and 3,960 " +
+    "neurons over a 26-tick session in the review's simulation, against 7 asks and 3,080 at the hour");
+  ok(intradayFloorMs(1, null) === AI_INTRADAY_REFRESH_MS && intradayFloorMs(0, "invented") === AI_INTRADAY_REFRESH_MS &&
+     intradayFloorMs(0, "forecast") === AI_INTRADAY_REFRESH_MS && AI_INTRADAY_REFRESH_MS === 45 * 60 * 1000,
+    "while a written summary, accepted or refused, keeps the 45-minute intraday refresh");
 
   same(aiChain({ FLOWS_ASK_MODEL: "", FLOWS_ASK_FALLBACK_MODEL: llama }), [],
     "no configured primary means no model at all: the fallback is a retry, not a replacement");
@@ -731,6 +738,8 @@ const CARD = {
     "THE INTRADAY SUMMARY THROTTLE COVERS EVERY BILLED REPLY, not only an accepted one: with the fallback " +
     "writing, a refused summary on facts that move every tick cost 13,021 neurons over a 26-tick session in " +
     "the review's simulation, against 4,507 when the text was accepted and the 45-minute throttle held");
+  ok(/ageMs < intradayFloorMs\(prior\.llm, prior\.guard\)\) return;/.test(worker) && !/ageMs < 45 \* 60 \* 1000/.test(worker),
+    "and the worker's intraday throttle takes its floor from intradayFloorMs, not a literal of its own");
   ok(/prior\.fingerprint\.endsWith\("\|" \+ signature\)/.test(worker),
     "and a change of model configuration still regenerates on the next tick, throttle or not");
 }

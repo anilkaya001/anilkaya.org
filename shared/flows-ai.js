@@ -137,6 +137,13 @@ export function retryableGuard(guard, ageMs) {
   return true;
 }
 
+export const AI_INTRADAY_REFRESH_MS = 45 * 60 * 1000;
+
+export function intradayFloorMs(llm, guard) {
+  return !llm && (guard === "unreachable:length" || guard === "unreachable:empty")
+    ? AI_LENGTH_RETRY_MS : AI_INTRADAY_REFRESH_MS;
+}
+
 const REPLIED_GUARDS = new Set(["invented", "forecast", "unreachable:length", "unreachable:empty"]);
 
 export function repliedGuard(guard) {

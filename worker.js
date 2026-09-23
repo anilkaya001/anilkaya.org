@@ -7,7 +7,7 @@ import {
 import { FLOWS_PAGES, modelName, neuronProvenance } from "./shared/flows-pages.js";
 import * as FLOWS_ASK from "./shared/flows-ask.js";
 import * as FLOWS_NEURON from "./shared/flows-neuron.js";
-import { aiChain, aiCallSignature, askModels, emptyNote, fallbackNote, repliedGuard, retryableGuard, spendShape } from "./shared/flows-ai.js";
+import { aiChain, aiCallSignature, askModels, emptyNote, fallbackNote, intradayFloorMs, repliedGuard, retryableGuard, spendShape } from "./shared/flows-ai.js";
 import { COURSE_STAGE_POINTS } from "./shared/course-points.js";
 import { COURSE_BY_ID, COURSE_BY_SLUG, COURSE_TOPICS, SITE_ORIGIN } from "./shared/course-seo.js";
 import { REVIEW_ITEM_BY_ID } from "./shared/review-manifest.js";
@@ -1129,7 +1129,7 @@ async function refreshFlowsSummary(env) {
   const sameCall = prior && typeof prior.fingerprint === "string" && prior.fingerprint.endsWith("|" + signature);
   if (sameCall && (prior.llm || repliedGuard(prior.guard)) && intradayOnly && typeof prior.generated_at === "string") {
     const ageMs = Date.now() - Date.parse(prior.generated_at);
-    if (Number.isFinite(ageMs) && ageMs < 45 * 60 * 1000) return;
+    if (Number.isFinite(ageMs) && ageMs < intradayFloorMs(prior.llm, prior.guard)) return;
   }
   const age = FLOWS_ASK.briefAge(index, new Date());
 
