@@ -139,16 +139,22 @@ export async function readInsiders(uw, tickers, {
   return { rows, calls, failed, capped, lookbackDays };
 }
 
+export function harvestBlock(h) {
+  const errors = Array.isArray(h.errors) ? h.errors.length : Number.isFinite(h.errors) ? h.errors : 0;
+  return {
+    calls: h.calls ?? null, pages: h.pages ?? null, limit: h.limit ?? null,
+    truncated: !!h.truncated, repeated: !!h.repeated, errors, dated: !!h.dated,
+    rows: Array.isArray(h.rows) ? h.rows.length : 0, source: h.source || "harvest",
+    complete: !h.truncated && !h.repeated && errors === 0,
+  };
+}
+
 export function universePayload(rows, {
   sessionDate, generatedAt, harvest, screened, readAt,
 } = {}) {
   return buildUniverse(rows, {
     sessionDate, generatedAt, screened,
-    harvest: harvest ? {
-      calls: harvest.calls, pages: harvest.pages, limit: harvest.limit,
-      truncated: harvest.truncated, repeated: harvest.repeated, dated: harvest.dated,
-      rows: harvest.rows.length, source: harvest.source || "harvest",
-    } : null,
+    harvest: harvest ? harvestBlock(harvest) : null,
     fresh: freshStamp({ readAt, session: sessionDate }),
   });
 }

@@ -21,7 +21,7 @@ import {
   shapeEconomicCalendar, macroTag, parseFdaTarget, shapeFdaCalendar, sessionCloseInstant,
 } from "../shared/flows-catalysts.js";
 import { rowsOf, read } from "../scripts/flows-legs/common.mjs";
-import { harvestScreener, readShortInterest, readInsiders, readIndexRows } from "../scripts/flows-legs/universe.mjs";
+import { harvestScreener, readShortInterest, readInsiders, readIndexRows, harvestBlock } from "../scripts/flows-legs/universe.mjs";
 import { readRegime, assembleRegime, REGIME_CALLS } from "../scripts/flows-legs/regime.mjs";
 import { ownershipParts } from "../scripts/flows-legs/ownership.mjs";
 import { assembleCatalysts, calendarPlan } from "../scripts/flows-legs/events.mjs";
@@ -163,6 +163,18 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(!("iv30" in Object.fromEntries(tiny.shed.map((k) => [k, 1]))), "IV30 survives");
   const none = buildUniverse([], { sessionDate: S });
   eq(none.status, "unavailable", "an empty harvest is unavailable, not an empty ok");
+  eq(none.reason, SILENCE.absent, "and an empty read is a measured absence");
+  eq(buildUniverse([], { sessionDate: S, harvest: harvestBlock({ rows: [], errors: ["HTTP 500"] }) }).reason, SILENCE.unreadable,
+    "while an empty harvest whose read failed is unreadable, not quiet");
+  const refused = buildUniverse(rows, { sessionDate: S, budgetBytes: 400 });
+  eq(refused.status, "unavailable", "a universe still over budget after shedding every sheddable column is unavailable");
+  eq(refused.reason, "over_budget", "and says why");
+  ok(!("cols" in refused) && !("t" in refused), "and carries no columns, so the refusal itself fits under the ingest cap");
+  ok(refused.bytes < 1024 && refused.overBytes > 400, `it is ${refused.bytes} bytes and names the ${refused.overBytes} it would have been`);
+  const partial = harvestBlock({ rows: [{}, {}], calls: 2, pages: 1, limit: 500, errors: ["/api/screener/stocks -> HTTP 502"] });
+  deep([partial.errors, partial.complete, partial.rows], [1, false, 2],
+    "a harvest whose second page failed says it is incomplete rather than passing for the whole cross-section");
+  eq(harvestBlock({ rows: [], truncated: false, repeated: false, errors: [] }).complete, true, "a clean harvest is complete");
 }
 
 {
@@ -479,6 +491,21 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   });
   eq(legs.universe.status, "ok", "the universe publishes");
   eq(legs.universe.n, 60, "over every eligible harvested name");
+  eq(legs.universe.harvest.complete, true, "from a complete harvest");
+
+  const screenerReads = [];
+  const counting = async (p, params, opts) => {
+    if (p === "/api/screener/stocks" && !params.ticker) screenerReads.push(params);
+    return vendor(p, params, opts);
+  };
+  const swept = await runMarketLegs({
+    uw: counting, sessionDate: S, screenerDate: S, generatedAt: "t",
+    harvest: { rows: vendor.augmented, calls: 9, pages: 9, limit: 50, truncated: true, repeated: false, errors: [], dated: true, source: "sweep" },
+    eligible: () => true, cardedTickers: [], deepTickers: [], windowTickers: [],
+  });
+  eq(screenerReads.length, 0, "a universe handed the pipeline's own read never harvests the screener a second time");
+  deep([swept.universe.harvest.source, swept.universe.harvest.complete, swept.universe.n], ["sweep", false, 60],
+    "and says it came from the cap-band sweep, whose truncated leaf makes it incomplete");
   ok(legs.universe.bytes <= UNIVERSE_BUDGET_BYTES, "inside its budget");
   eq(legs.ownership.size, 30, "every carded name gets an ownership part");
   eq(legs.ownership.get("T00").short.borrow.status, "ok", "a deep name carries its borrow read");
@@ -529,6 +556,11 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(worker.includes('path === "/api/flows/card-x"'), "and the per-name card-x route");
   const legs = fs.readdirSync(path.join(ROOT, "scripts/flows-legs")).map((f) => fs.readFileSync(path.join(ROOT, "scripts/flows-legs", f), "utf8"));
   for (const src of legs) ok(!/\/\/|\/\*/.test(src.replace(/https?:\/\/\S+/g, "")), "leg modules carry no comments");
+  const pipe = fs.readFileSync(path.join(ROOT, "scripts/flows-pipeline.mjs"), "utf8");
+  ok(pipe.includes("harvest: harvest || universeSource"),
+    "when the harvest is refused the market legs are handed the sweep's rows, not left to read the screener again");
+  ok(/try \{\s*await publish\(key, marketLegs\[key\]\);/.test(pipe) && !/for \(const key of \["universe", "regime"\]\) await publish/.test(pipe),
+    "universe and regime publish one at a time, so a refused universe cannot take the regime and every card-x down with it");
   const own = fs.readFileSync(path.join(ROOT, "scripts/flows-legs/ownership.mjs"), "utf8");
   ok(/volume-and-ratio`, \{\}, \{ envelope: true \}/.test(own), "volume-and-ratio is read with the envelope, never the data unwrap");
 }

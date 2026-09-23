@@ -37,8 +37,9 @@ export async function runMarketLegs({
   const harvested = h.rows || [];
   const eligibleRows = harvested.filter((r) => { try { return eligible(r); } catch { return false; } });
   const screenerByTicker = new Map(harvested.map((r) => [r.ticker, r]));
-  say(`  universe harvest: ${harvested.length} row(s) in ${h.pages} page(s) of ${h.limit}` +
+  say(`  universe ${h.source || "harvest"}: ${harvested.length} row(s) in ${h.pages} page(s) of ${h.limit}` +
     (h.truncated ? " — TRUNCATED at the page cap" : "") + (h.repeated ? " — a page repeated its predecessor" : "") +
+    (h.errors && h.errors.length ? ` — ${h.errors.length} read(s) failed` : "") +
     `, ${eligibleRows.length} eligible`);
 
   const index = await readIndexRows(uw, { date: screenerDate });
@@ -59,8 +60,10 @@ export async function runMarketLegs({
   const universe = universePayload(eligibleRows, {
     sessionDate, generatedAt, readAt, harvest: h, screened: harvested.length,
   });
-  say(`  universe: ${universe.n} names, ${Object.keys(universe.cols).length} columns` +
-    (universe.shed.length ? `, shed ${universe.shed.join(", ")}` : "") + `, ${universe.bytes} bytes`);
+  say(`  universe: ${universe.n} names, ${universe.cols ? Object.keys(universe.cols).length : 0} columns` +
+    (universe.shed.length ? `, shed ${universe.shed.join(", ")}` : "") + `, ${universe.bytes} bytes` +
+    (universe.status !== "ok" ? ` — ${universe.status} (${universe.reason})` : "") +
+    (universe.harvest && !universe.harvest.complete ? " — the cross-section is INCOMPLETE" : ""));
 
   const carded = [...new Set(cardedTickers)];
   const shortRead = await readShortInterest(uw, carded, { sessionDate, deadline });

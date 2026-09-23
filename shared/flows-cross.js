@@ -475,7 +475,7 @@ export function buildUniverse(rows, {
     generatedAt, sessionDate,
     ...(fresh ? { fresh } : {}),
     status: list.length ? "ok" : "unavailable",
-    ...(list.length ? {} : { reason: SILENCE.absent }),
+    ...(list.length ? {} : { reason: harvest && harvest.errors > 0 ? SILENCE.unreadable : SILENCE.absent }),
     screened: screened === null ? null : screened,
     n: list.length,
     harvest: harvest || null,
@@ -516,11 +516,17 @@ export function buildUniverse(rows, {
     bytes = JSON.stringify(payload).length;
   }
   payload.bytes = JSON.stringify(payload).length;
-  if (payload.bytes > budgetBytes) {
-    payload.status = "unavailable";
-    payload.reason = "over_budget";
-  }
-  return payload;
+  if (payload.bytes <= budgetBytes) return payload;
+  const refused = {
+    v: payload.v, generatedAt, sessionDate,
+    ...(fresh ? { fresh } : {}),
+    status: "unavailable",
+    reason: "over_budget",
+    screened: payload.screened, n: payload.n, harvest: payload.harvest, order: payload.order,
+    shed: payload.shed, budgetBytes, overBytes: payload.bytes,
+  };
+  refused.bytes = JSON.stringify(refused).length;
+  return refused;
 }
 
 export function universeValue(universe, ticker, key) {

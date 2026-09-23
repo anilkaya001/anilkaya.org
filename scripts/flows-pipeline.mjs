@@ -4034,6 +4034,7 @@ async function main() {
   };
   const screenerDate = sessionDate && dating.screenerDate ? sessionDate : null;
   let harvest = null;
+  let universeSource = null;
   if (!DRY_RUN) {
     const read = await harvestScreener(uw, { filters: screenerFilters, date: screenerDate });
     console.log(`  screener harvest: ${read.rows.length} row(s) in ${read.pages} page(s) of ${read.limit}` +
@@ -4050,7 +4051,7 @@ async function main() {
     screenerReadAt = new Date().toISOString();
   } else {
     const byTicker = new Map();
-    let saturated = 0, split = 0;
+    let saturated = 0, split = 0, sweepReads = 0;
     const readBand = (min, max) => uw("/api/screener/stocks", {
       min_underlying_price: UNIVERSE.minPrice,
       min_volume: UNIVERSE.minOptionVolume,
@@ -4062,6 +4063,7 @@ async function main() {
     for (const band of CAP_BANDS) {
       const [min, max] = band;
       const swept = await sweepScreenerBand(band, readBand);
+      sweepReads += swept.reads || 0;
       for (const row of swept.rows) if (row && row.ticker) byTicker.set(row.ticker, row);
       const label = max === null
         ? `>= $${(min / 1e9).toFixed(1)}B`
@@ -4080,6 +4082,10 @@ async function main() {
     screener = [...byTicker.values()];
     screenerReadAt = new Date().toISOString();
     screenerTruncated = saturated;
+    universeSource = {
+      rows: screener, calls: sweepReads, pages: sweepReads, limit: SCREENER_PAGE_ROWS,
+      truncated: saturated > 0, repeated: false, errors: [], dated: !!screenerDate, source: "sweep",
+    };
     if (saturated) {
       console.warn(
         `  screener: ${saturated} band leaf/leaves still returned the full ` +
@@ -4455,14 +4461,13 @@ async function main() {
   try {
     marketLegs = await runMarketLegs({
       uw: DRY_RUN ? makeFakeVendor({ sessionDate, screenerRows: screener }) : uw,
-      sessionDate, screenerDate, generatedAt, harvest, filters: screenerFilters, eligible,
+      sessionDate, screenerDate, generatedAt, harvest: harvest || universeSource, filters: screenerFilters, eligible,
       cardedTickers: liquid.map((e) => e.features.ticker),
       deepTickers: deepNames(published).map((d) => d.t),
       windowTickers: windowTickersOf(withTilt.map((w) => w.row), { origin: gateOrigin }),
       deadline: stats.startedAt + DEADLINE_MS, pool: runPooled, width: poolWidth(2).width, stats,
       log: (line) => console.log(line),
     });
-    for (const key of ["universe", "regime"]) await publish(key, marketLegs[key]);
     for (const [t, part] of marketLegs.ownership) {
       cardX.add(t, "short", part.short);
       cardX.add(t, "insiders", part.insiders);
@@ -4470,7 +4475,14 @@ async function main() {
     for (const [t, e] of marketLegs.earnings) cardX.add(t, "earnings", e);
     console.log(`  market legs: ${marketLegs.calls ?? 0} vendor call(s)`);
   } catch (error) {
-    console.warn(`  market legs: ${error.message} — universe and regime were not published this run`);
+    console.warn(`  market legs: ${error.message} — universe, regime and card-x were not built this run`);
+  }
+  for (const key of marketLegs ? ["universe", "regime"] : []) {
+    try {
+      await publish(key, marketLegs[key]);
+    } catch (error) {
+      console.warn(`  ${key}: ${error.message} — the other market keys are published regardless`);
+    }
   }
 
   try {
