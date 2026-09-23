@@ -199,6 +199,8 @@
 .st-open:hover .ui-g { transform: translateX(2px); }
 .st-name-b { display: flex; flex-direction: column; gap: var(--sp-4); }
 .st-tags:empty { display: none; }
+.st-ev { border: 0; font: var(--t-caption2); cursor: pointer; }
+.st-ev:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .st-chart { min-height: 250px; }
 .ui-chart .st-wash { fill: var(--fill-4); }
 .ui-chart .st-erule { stroke: var(--lvl-flip); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.7; }
@@ -272,6 +274,7 @@
 .st-meter > i { position: absolute; top: 50%; }
 .st-m-half { left: 50%; width: 1px; height: 18px; margin-top: -9px; background: var(--label-3); }
 .st-m-wh { height: 2px; margin-top: -1px; border-radius: 1px; background: var(--label-2); }
+.st-m-wh.is-open { left: 0; right: 0; background: repeating-linear-gradient(90deg, var(--label-3) 0 2px, transparent 2px 6px); }
 .st-m-ci { height: 10px; margin-top: -5px; border-radius: 5px; background: color-mix(in srgb, var(--s-blue) 50%, transparent); }
 .st-m-dot { width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: var(--label-2); box-shadow: 0 0 0 2px var(--mat-opaque); }
 .st-m-dot.is-clear { background: var(--tone, var(--label-1)); }
@@ -283,6 +286,10 @@
 .ui-chart .sc-pt.is-miss { fill: var(--down-mark); }
 .ui-chart .sc-pt.is-in { fill: none; stroke: var(--label-2); }
 
+.st-grid > :is(#stOutcomes, #stCalib), .rec-grid > :is(#recHitMod, #recSpreadMod) { align-self: stretch; }
+@container mod (max-width: 540px) {
+  .flows-body :is(.st-grid, .rec-grid) .ui-mod-h { grid-template-rows: minmax(32px, auto); align-items: center; }
+}
 @media (min-width: 768px) and (max-width: 1199px) {
   .st-grid > #stOutcomes, .st-grid > #stCalib { grid-column: span 6; }
 }

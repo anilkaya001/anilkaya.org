@@ -348,6 +348,11 @@
         if (pl !== undefined) {
           s("circle", { cx: xAt(pl), cy: py(px[pl]), r: 3.5, fill: color, class: "ring" }, svg);
           tags.push({ y: py(px[pl]), y0: py(px[pl]), x0: xAt(pl), text: F.px(px[pl]), cls: "tx-1 tx-b" });
+          const hiP = Math.max(...pv), loP = Math.min(...pv);
+          for (const v of [hiP, loP]) {
+            if (Math.abs(py(v) - py(px[pl])) < 18 || (v === loP && F.px(loP) === F.px(hiP))) continue;
+            tags.push({ y: py(v), y0: py(v), x0: w - right, text: F.px(v), cls: "tx-3" });
+          }
         }
         s("line", { x1: left, x2: w - right, y1: split, y2: split, class: "hair" }, svg);
       }
@@ -400,8 +405,13 @@
       const beta = sxx ? pts.reduce((a, p) => a + (p.x - mx) * (p.y - my), 0) / sxx : null;
       if (beta !== null) {
         const a = my - beta * mx;
-        const xa = -xm * 0.95, xb = xm * 0.95;
-        s("line", { x1: x(xa), x2: x(xb), y1: y(Math.max(-ym, Math.min(ym, a + beta * xa))), y2: y(Math.max(-ym, Math.min(ym, a + beta * xb))), class: "sc-fit draw", pathLength: 1 }, svg);
+        let xa = -xm * 0.95, xb = xm * 0.95;
+        if (beta !== 0) {
+          const xAtY = (v) => (v - a) / beta;
+          const lo = Math.min(xAtY(-ym), xAtY(ym)), hi = Math.max(xAtY(-ym), xAtY(ym));
+          xa = Math.max(xa, lo); xb = Math.min(xb, hi);
+        }
+        if (xb > xa) s("line", { x1: x(xa), x2: x(xb), y1: y(a + beta * xa), y2: y(a + beta * xb), class: "sc-fit draw", pathLength: 1 }, svg);
       }
       const sorted = pts.slice().sort((a, b) => a.x - b.x);
       sorted.forEach((p, i) => s("circle", { cx: x(p.x), cy: y(p.y), r: 4, class: "sc-pt fade " + (p.hit === null ? "is-in" : p.hit ? "is-hit" : "is-miss"), style: { "--delay": 200 + i * 25 + "ms" } }, svg));
@@ -425,11 +435,12 @@
 
   function hitMeter(p, n, k) {
     const naive = wilson(p, n);
-    const adj = wilson(p, Math.max(1, n / k));
+    const eff = n / Math.max(1, k);
+    const adj = eff >= 2 ? wilson(p, eff) : null;
     const at = (v) => (v * 100).toFixed(2) + "%";
-    const track = h("div", { class: "st-meter", role: "img", "aria-label": "Hit rate " + F.pct(p, 0) + ", adjusted 95% interval " + (adj ? F.pct(adj[0], 0) + " to " + F.pct(adj[1], 0) : "unknown") },
+    const track = h("div", { class: "st-meter", role: "img", "aria-label": "Hit rate " + F.pct(p, 0) + ", adjusted 95% interval " + (adj ? F.pct(adj[0], 0) + " to " + F.pct(adj[1], 0) : "unbounded: fewer than two independent windows") },
       h("i", { class: "st-m-half" }),
-      adj ? h("i", { class: "st-m-wh", style: { left: at(adj[0]), right: "calc(100% - " + at(adj[1]) + ")" } }) : null,
+      adj ? h("i", { class: "st-m-wh", style: { left: at(adj[0]), right: "calc(100% - " + at(adj[1]) + ")" } }) : h("i", { class: "st-m-wh is-open" }),
       naive ? h("i", { class: "st-m-ci", style: { left: at(naive[0]), right: "calc(100% - " + at(naive[1]) + ")" } }) : null,
       h("i", { class: "st-m-dot" + (adj && (adj[0] > 0.5 || adj[1] < 0.5) ? " is-clear" : ""), "data-tone": p > 0.5 ? "up" : p < 0.5 ? "down" : null, style: { left: at(p) } }));
     return { node: h("div", { class: "st-meter-w" }, h("span", null, "0"), track, h("span", null, "100%")), naive, adj };
@@ -499,15 +510,17 @@
     const callsHost = h("div", { class: "st-calls" });
     ob.replaceChildren(
       UI.metrics([
-        UI.metric("Hit", p === null ? DASH : F.pct(p, 0), { id: "hit", hero: true, tone: meter && meter.adj && (meter.adj[0] > 0.5 || meter.adj[1] < 0.5) ? (p > 0.5 ? "up" : "down") : null, sub: n ? o.hits + " of " + n + " calls" : null, state: n ? null : { state: "pending", reason: "No call on " + r.t + " has had " + k + " sessions to close yet." } }),
-        UI.metric("Mean", o.mean === null ? DASH : pct(o.mean, 2), { id: "mean", tone: o.mean === null ? null : UI.tone(o.mean), sub: "signed " + k + "d return" }),
-        UI.metric("Open", String(o.open), { id: "open", sub: "not yet " + k + "d" }),
+        UI.metric("Hit", p === null ? DASH : F.pct(p, 0), { id: "hit", hero: true, tone: meter && meter.adj && (meter.adj[0] > 0.5 || meter.adj[1] < 0.5) ? (p > 0.5 ? "up" : "down") : null, sub: [n ? o.hits + " of " + n + " calls" : null, o.open ? o.open + " open" : null].filter(Boolean).join(" " + MID + " ") || null, state: n ? null : { state: "pending", reason: "No call on " + r.t + " has had " + k + " sessions to close yet." + (o.open ? " " + o.open + (o.open === 1 ? " call is" : " calls are") + " still open." : "") } }),
+        UI.metric("Mean", o.mean === null ? DASH : pct(o.mean, 2), { id: "mean", tone: o.mean === null ? null : UI.tone(o.mean), sub: "signed " + k + "d return", state: o.mean === null ? { state: "pending", reason: "No call on " + r.t + " has closed at " + k + " sessions, so there is no return to average yet." } : null }),
       ], { min: 72 }),
       meter ? meter.node : null,
       callsHost,
       UI.legend([["--up-mark", "", "Right"], ["--down-mark", "", "Wrong"], ["--label-4", "dot", "Open"]]));
     if (o.calls.length) {
+      const extreme = (sign) => o.closed.reduce((b, c) => (sign * c.sr > 0 && (!b || Math.abs(c.sr) > Math.abs(b.sr)) ? c : b), null);
+      const ends = [extreme(1), extreme(-1)].filter(Boolean).map((c) => ({ x: c.d, text: pct(c.sr, 1) }));
       C.diverging(callsHost, {
+        labels: ends,
         values: o.calls.map((c) => c.sr), x: o.calls.map((c) => c.d), xType: "index", height: [150, 160, 170],
         format: (v) => pct(v, 1), label: "Signed return " + k + " sessions after each call on " + r.t,
         readout: (i) => {
@@ -532,10 +545,11 @@
       lead: "Every session that scored " + r.t + " outside the dead band is a call. Each call is scored by the close " + k + " sessions later against the close of the session it was made on, signed by the call's direction: a bullish score is right when the price rose.",
       facts: [["Calls", String(o.calls.length)], ["Closed", String(n)], ["Right", String(o.hits)], ["Open", String(o.open)], ["No close", String(o.lost)],
         ["Naive 95%", meter && meter.naive ? F.pct(meter.naive[0], 0) + " to " + F.pct(meter.naive[1], 0) : null],
-        ["Adjusted 95%", meter && meter.adj ? F.pct(meter.adj[0], 0) + " to " + F.pct(meter.adj[1], 0) : null]],
+        ["Adjusted 95%", meter && meter.adj ? F.pct(meter.adj[0], 0) + " to " + F.pct(meter.adj[1], 0) : meter ? "unbounded" : null]],
       sections: [{ title: "Intervals", lines: [
         "The thick capsule is the naive 95% interval: every call treated as an independent coin.",
-        "The thin whisker is the adjusted 95% interval: consecutive calls share most of a " + k + "-session window, so the sample is divided by the horizon. Where it spans 50% the record cannot yet be told apart from chance.",
+        "The thin whisker is the adjusted 95% interval: consecutive calls share most of a " + k + "-session window, so the sample is divided by the horizon. Where it spans 50% the record cannot yet be told apart from chance, and where it runs dashed across the whole track fewer than two independent windows remain and the interval is unbounded.",
+        "The hit rate is coloured only when its adjusted interval clears 50%.",
       ] }, { title: "Not a strategy", lines: ["Price returns from daily closes, gross of everything: no costs, no slippage, no borrow, no sizing."] }],
     });
     detail.calInfo = () => ({
@@ -691,12 +705,16 @@
     const comparable = isNum(ch.comparable), moved = isNum(ch.moved);
     const cs = (key) => (isNum(cr[key]) === null ? DASH : String(cr[key]));
     const say = changeSaid();
+    const crossChip = (key, label, color) => UI.gaugeChip({
+      ring: isNum(cr[key]) !== null && comparable ? Math.min(1, cr[key] / comparable) : null, color, value: cs(key), label,
+      info: () => ({ title: label, lead: CROSS_SAID[key], facts: [["Names", cs(key)], ["Of compared", comparable === null ? null : String(comparable)], ["Band", ctx.deadBand === null ? null : "±" + ctx.deadBand]], notes: ["The ring is the share of the names compared across the two sessions."] }),
+    });
     return UI.chips([
       UI.gaugeChip({ ring: isNum(ch.current) !== null && ctx.rows.length ? Math.min(1, ch.current / ctx.rows.length) : null, color: "--s-blue", value: isNum(ch.current) === null ? DASH : String(ch.current), label: "Scored", info: () => ({ title: "Scored", lead: say, facts: [["Session", ch.session || null], ["Names carried", String(ctx.rows.length)], ["New", isNum(ch.entered) === null ? null : String(ch.entered)], ["Left", isNum(ch.left) === null ? null : String(ch.left)]] }) }),
       UI.gaugeChip({ ring: moved !== null && comparable ? moved / comparable : null, color: "--label-1", value: moved === null ? DASH : String(moved), label: "Moved", info: () => ({ title: "Moved", lead: say, facts: [["Compared", comparable === null ? null : String(comparable)], ["Held", isNum(ch.held) === null ? null : String(ch.held)], ["One session apart", isNum(ch.consecutive) === null ? null : String(ch.consecutive)]] }) }),
-      UI.gaugeChip({ icon: "up", color: "--up", value: cs("cleared"), label: "Cleared", tone: isNum(cr.cleared) ? "up" : null, info: () => ({ title: "Cleared", lead: CROSS_SAID.cleared }) }),
-      UI.gaugeChip({ icon: "quiet", color: "--warn", value: cs("faded"), label: "Faded", info: () => ({ title: "Faded", lead: CROSS_SAID.faded }) }),
-      UI.gaugeChip({ icon: "levels", color: "--s-purple", value: cs("flipped"), label: "Flipped", info: () => ({ title: "Flipped", lead: CROSS_SAID.flipped }) }),
+      crossChip("cleared", "Cleared", "--accent"),
+      crossChip("faded", "Faded", "--warn"),
+      crossChip("flipped", "Flipped", "--s-purple"),
     ], "Session change");
   }
 

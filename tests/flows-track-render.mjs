@@ -108,13 +108,21 @@ const popOf = (page, sel) => page.evaluate((sel) => {
 
   const out = await page.evaluate(() => {
     const m = (id) => { const n = document.querySelector(`#stOutcomes [data-metric="${id}"]`); return n ? n.textContent : null; };
-    return { hit: m("hit"), open: m("open"), calls: document.querySelectorAll("#stOutcomes .st-calls rect.grow").length };
+    return { hit: m("hit"), calls: document.querySelectorAll("#stOutcomes .st-calls rect.grow").length,
+      open: !!document.querySelector("#stOutcomes .st-m-wh.is-open"),
+      tone: document.querySelector('#stOutcomes [data-metric="hit"] .ui-metric-v').getAttribute("data-tone") };
   });
+  ok(out.open && !out.tone,
+     "two closed calls at a five-session horizon are under two independent windows, so the adjusted " +
+     "interval is drawn unbounded across the whole meter and the hit rate stays uncoloured — not a " +
+     "Wilson interval on a sample rounded up to one (" + JSON.stringify({ open: out.open, tone: out.tone }) + ")");
   ok(/50%/.test(out.hit) && /1 of 2 calls/.test(out.hit),
      "five sessions after each call, AAA was right once in two closed calls: the bullish call on " +
      "Sep 1 closed flat (100 → 100, not a hit), the bearish call on Sep 3 fell 101 → 97 (a hit) — " +
      "and the zero on Sep 4 is inside the band, so it is no call at all (" + out.hit + ")");
-  ok(/1/.test(out.open), "the call on Sep 5 has no close five sessions later yet, so it is open, not a miss (" + out.open + ")");
+  ok(/1 open/.test(out.hit) && !/of 3 calls/.test(out.hit),
+     "the call on Sep 5 has no close five sessions later yet, so it is counted open beside the hit rate, " +
+     "not added to its denominator as a miss (" + out.hit + ")");
 
   const settled = (before) => page.waitForFunction((b) => {
     const n = document.querySelector('#stOutcomes [data-metric="hit"]');
@@ -123,6 +131,8 @@ const popOf = (page, sel) => page.evaluate((sel) => {
   await page.click("#stOutcomes .ui-seg-i >> nth=0");
   await settled(out.hit);
   const one = await page.evaluate(() => document.querySelector('#stOutcomes [data-metric="hit"]').textContent);
+  ok(await page.evaluate(() => !document.querySelector("#stOutcomes .st-m-wh.is-open") && !!document.querySelector("#stOutcomes .st-m-wh")),
+     "while three one-session calls are three independent windows, and the adjusted interval is bounded");
   ok(/100%/.test(one) && /3 of 3 calls/.test(one),
      "one session after each call all three were right: +2.0% after the bullish Sep 1, −2.0% " +
      "after the bearish Sep 3, +2.0% after the bullish Sep 5 (" + one + ")");
