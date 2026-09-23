@@ -24,7 +24,7 @@ import { rowsOf, read } from "../scripts/flows-legs/common.mjs";
 import { harvestScreener, readShortInterest, readInsiders, readIndexRows, harvestBlock } from "../scripts/flows-legs/universe.mjs";
 import { readRegime, assembleRegime, REGIME_CALLS } from "../scripts/flows-legs/regime.mjs";
 import { ownershipParts } from "../scripts/flows-legs/ownership.mjs";
-import { assembleCatalysts, calendarPlan } from "../scripts/flows-legs/events.mjs";
+import { assembleCatalysts, readCatalysts, calendarPlan } from "../scripts/flows-legs/events.mjs";
 import { runMarketLegs, windowTickersOf, MARKET_LEG_CALLS } from "../scripts/flows-legs/market.mjs";
 import { makeCardXStore, cardXPayload, CARD_X_BUDGET_BYTES } from "../scripts/flows-legs/card-x.mjs";
 import { buildIndexDossiers, shedToFit } from "../scripts/flows-legs/index-dossier.mjs";
@@ -579,6 +579,17 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(legs.earnings.size >= 10, "every deep name gets an earnings history read");
   ok(MARKET_LEG_CALLS > 0 && MARKET_LEG_CALLS < 400, `the modelled leg cost is ${MARKET_LEG_CALLS} calls`);
   eq(calendarPlan(S).length, 13, "the calendar reads two reaction days, tonight and ten upcoming routes");
+
+  const lateRaw = await readRegime(vendor, { sessionDate: S, deadline: Date.now() - 1 });
+  eq(lateRaw.calls, 0, "past the deadline the regime leg spends no call");
+  const lateRegime = assembleRegime(lateRaw, { sessionDate: S, generatedAt: "t" }).regime;
+  deep([lateRegime.zeroDte.reason, lateRegime.sectors.rows[0].reason, lateRegime.volCurve.vendor.reason, lateRegime.optionsPulse.reason],
+    [SILENCE.unread, SILENCE.unread, SILENCE.unread, SILENCE.unread],
+    "and every arm it skipped says not_read (pending), never unreadable: nothing failed, nothing was asked");
+  const lateCat = assembleCatalysts(await readCatalysts(vendor, { sessionDate: S, earningsTickers: ["T00"], deadline: Date.now() - 1 }),
+    { sessionDate: S });
+  deep([lateCat.additions.macro.reason, lateCat.additions.fda.reason, lateCat.additions.earningsCalendar.reason],
+    [SILENCE.unread, SILENCE.unread, SILENCE.unread], "the catalyst reads skipped at the deadline are not_read too");
 
   const parts = ownershipParts({ tickers: ["X"], deepTickers: ["X"], deep: new Map([["X", {
     borrow: { ok: false, gated: true, status: 403 }, volume: { ok: true, body: { si: [probe("shorts-volume:AAPL")] } } }]]),

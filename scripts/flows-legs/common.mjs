@@ -23,6 +23,7 @@ export function rowsOf(body, key = "data") {
 
 export function silenceOf(result, { what = "read" } = {}) {
   if (result.ok) return null;
+  if (result.skipped) return { status: "unavailable", reason: "not_read", why: `${what}: ${result.error || "not read this run"}` };
   if (result.gated) {
     return { status: "unavailable", reason: "plan_gated", http: result.status, detail: `${what}: ${result.error}` };
   }

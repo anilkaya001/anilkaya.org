@@ -75,7 +75,7 @@ export function assembleRegime(raw, {
   const vendorCurve = vix.ok
     ? { status: "unshaped", reason: "the vendor answered but its Volatility Result shape is undocumented and unprobed",
         keys: vix.body && typeof vix.body === "object" ? Object.keys(vix.body).slice(0, 12) : [] }
-    : { status: "unavailable", reason: vix.gated ? SILENCE.gated : SILENCE.unreadable, http: vix.status ?? null,
+    : { status: "unavailable", reason: vix.skipped ? SILENCE.unread : vix.gated ? SILENCE.gated : SILENCE.unreadable, http: vix.status ?? null,
         code: vix.gated && vix.status === 403 ? "volatility_scope_required" : null };
   const curves = {};
   for (const t of ETF_TIDES) curves[t] = volCurveFromScreener(indexRows.get(t));

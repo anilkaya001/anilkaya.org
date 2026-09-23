@@ -26,7 +26,7 @@ export async function readCatalysts(uw, {
 } = {}) {
   const raw = { calls: 0, calendar: [], earnings: new Map() };
   const get = async (path, params, opts) => {
-    if (pastDeadline(deadline)) return { ok: false, body: null, status: null, error: "past the run deadline" };
+    if (pastDeadline(deadline)) return { ok: false, body: null, status: null, error: "past the run deadline", skipped: true };
     raw.calls++;
     return read(uw, path, params, opts);
   };
@@ -73,9 +73,13 @@ export function assembleCatalysts(raw, {
     if (!sessions.has(step.date)) sessions.set(step.date, { date: step.date, premarket: null, afterhours: null });
     sessions.get(step.date)[step.route] = shaped;
   }
+  const steps = r.calendar || [];
+  const calendarRead = steps.some((s) => s.res.ok);
   const calendar = {
-    status: (r.calendar || []).some((s) => s.res.ok) ? "ok" : "unavailable",
-    ...((r.calendar || []).length ? {} : { reason: SILENCE.unread }),
+    status: calendarRead ? "ok" : "unavailable",
+    ...(calendarRead ? {} : {
+      reason: !steps.length || steps.every((s) => s.res.skipped) ? SILENCE.unread : SILENCE.unreadable,
+    }),
     tonight,
     sessions: [...sessions.values()],
     reaction: reactionGauge(reactionRows),
