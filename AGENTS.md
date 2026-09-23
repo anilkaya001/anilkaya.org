@@ -339,10 +339,41 @@ manual dispatch. It uses pinned dependencies from `tests/package-lock.json`.
 
 ### Which suites need the dev server, and which do not
 
-Some suites boot workerd (`wrangler dev`) and some only need Node and
-Playwright. In a sandbox that cannot reach Cloudflare's endpoints, workerd
-never starts and those suites hang until they are killed — so it is worth
-knowing which is which BEFORE deciding what can be run before a push.
+Some suites boot workerd (`wrangler dev`, through `tests/worker-server.mjs`)
+and some only need Node and Playwright. It is worth knowing which is which
+BEFORE deciding what can be run before a push.
+
+**In the agent sandbox, run the server suites with `FLOWS_TEST_SANDBOX=1`.**
+
+```bash
+cd tests && FLOWS_TEST_SANDBOX=1 node flows-worker-contract.mjs
+```
+
+With it set, `startWorker()` copies the regular files Git sees in the working
+tree (`git ls-files --cached --others --exclude-standard`, skipping dot
+directories) into a temporary directory and runs `wrangler dev` there. It also
+sets `CLOUDFLARE_CF_FETCH_ENABLED=false` and `WRANGLER_SEND_METRICS=false`.
+`HTTPS_PROXY` stays set and TLS verification stays on. CI leaves the variable
+unset and runs exactly as before. Measured on 2026-09-23 with it set:
+`flows-watch-render` passed in 12 seconds and `flows-worker-contract` in two to
+five minutes, depending on load. Without it, under the same conditions, the
+first suite was still silent when `timeout` killed it at 200 seconds.
+
+The hang was never the network. `wrangler dev` watches its assets directory,
+which is the repository root, with a watcher that follows symlinks, and no CLI
+flag turns that watcher off. The sandbox tree is full of symlink loops:
+`tests/node_modules/node_modules` points at its own parent, each worktree's
+`tests/node_modules` is a symlink into that loop, and the main checkout holds
+dozens of worktrees under `.claude/worktrees/`. The crawl consumed 4.3 GB of
+memory in 80 seconds, and one run hit the 8 GB heap limit and ran out of
+memory after seven minutes. That starves the reload: `reloadComplete` never
+arrives, the ProxyWorker stays paused, and the port accepts connections
+without answering. The `Request.cf` fetch through the proxy fails in under
+three seconds and does not cause the hang. The copy contains no symlinks, so
+the watcher has nothing to follow. Without the variable, a worktree with a
+single symlinked `node_modules` often boots after all, because the loop
+reaches `ELOOP` and the watcher disables itself. That made the failure look
+intermittent.
 
 **This list is measured, not inferred.** Grepping for `workerd` misclassifies
 in both directions: `contracts.mjs` and `flows-weight.mjs` merely mention the
@@ -362,7 +393,7 @@ flows-events-contract  flows-mint-contract     flows-permits-contract
 flows-political-contract  flows-record-contract  flows-universe-contract
 flows-garch            flows-neuron
 flows-chain-panels     flows-auth-contract     mastery-contract
-academy-contract       flows-variation
+academy-contract       flows-variation         flows-probe-contract
 ```
 
 Confirmed to need one: `flows-overview-contract`, `flows-board-render`,
@@ -372,12 +403,13 @@ Confirmed to need one: `flows-overview-contract`, `flows-board-render`,
 `placement-contract`, `flows-motion`.
 
 `flows-motion` was in NEITHER list until 2026-09-13 and was measured then: it
-boots workerd, so in this sandbox it hangs on `workers.cloudflare.com` and
-`sparrow.cloudflare.com` until the timeout kills it. That matters beyond the
-bookkeeping — a suite that HANGS reports as a failure to any runner that wraps
+boots workerd, so without `FLOWS_TEST_SANDBOX=1` it hangs in this sandbox
+until the timeout kills it. That matters beyond the bookkeeping — a suite
+that HANGS reports as a failure to any runner that wraps
 it in `timeout`, so an unmeasured suite can be mistaken for a real assertion
 failure and sent chasing a defect that does not exist. If a suite produces no
-output and dies at the timeout, check the proxy before reading it as red.
+output and dies at the timeout, confirm that it ran with
+`FLOWS_TEST_SANDBOX=1` before reading it as red.
 Anything not named in either list has not been measured — run it and find
 out rather than assuming.
 

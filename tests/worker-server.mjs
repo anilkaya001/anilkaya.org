@@ -1,14 +1,22 @@
-import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { execFile, spawn } from "node:child_process";
+import { copyFile, lstat, mkdir, mkdtemp, rm } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(TEST_DIR, "..");
 const WRANGLER = path.join(TEST_DIR, "node_modules", "wrangler", "bin", "wrangler.js");
 export const SESSION_SECRET = "test-session-secret-abcdefghijklmnopqrstuvwxyz";
+
+const SANDBOX = process.env.FLOWS_TEST_SANDBOX === "1";
+const childEnv = () => ({
+  ...process.env,
+  NO_COLOR: "1",
+  ...(SANDBOX ? { CLOUDFLARE_CF_FETCH_ENABLED: "false", WRANGLER_SEND_METRICS: "false" } : {}),
+});
 
 export const FLOWS_PEPPER = "test-flows-pepper-abcdefghijklmnopqrstuvwxyz";
 export const FLOWS_PASSWORD = "test-flows-password";
@@ -26,7 +34,7 @@ function run(args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [WRANGLER, ...args], {
       cwd: REPO_ROOT,
-      env: { ...process.env, NO_COLOR: "1" },
+      env: childEnv(),
       stdio: ["ignore", "pipe", "pipe"],
       ...options,
     });
@@ -128,13 +136,37 @@ async function flowsCredentialsJSON() {
   return JSON.stringify(map);
 }
 
+async function stageServedTree(stage) {
+  const { stdout } = await promisify(execFile)(
+    "git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+    { cwd: REPO_ROOT, maxBuffer: 64 * 1024 * 1024 },
+  );
+  for (const relative of stdout.split("\0")) {
+    if (!relative || (relative.startsWith(".") && relative.includes("/"))) continue;
+    const source = path.join(REPO_ROOT, relative);
+    const info = await lstat(source).catch(() => null);
+    if (!info?.isFile()) continue;
+    const target = path.join(stage, relative);
+    await mkdir(path.dirname(target), { recursive: true });
+    await copyFile(source, target);
+  }
+}
+
 export async function startWorker({ extraVars = [] } = {}) {
   const port = await freePort();
   const persist = await mkdtemp(path.join(os.tmpdir(), "anilkaya-worker-test-"));
+  const scratch = [persist];
+  const cleanup = () => Promise.all(scratch.map((dir) => rm(dir, { recursive: true, force: true })));
+  let served = REPO_ROOT;
   try {
     await run(["d1", "execute", "iewt", "--local", "--file", "schema.sql", "--persist-to", persist, "-y"]);
+    if (SANDBOX) {
+      served = await mkdtemp(path.join(os.tmpdir(), "anilkaya-worker-tree-"));
+      scratch.push(served);
+      await stageServedTree(served);
+    }
   } catch (error) {
-    await rm(persist, { recursive: true, force: true });
+    await cleanup();
     throw error;
   }
 
@@ -155,8 +187,8 @@ export async function startWorker({ extraVars = [] } = {}) {
     ...extraVars.flatMap((v) => ["--var", v]),
     "--log-level", "error", "--show-interactive-dev-session=false",
   ], {
-    cwd: REPO_ROOT,
-    env: { ...process.env, NO_COLOR: "1" },
+    cwd: served,
+    env: childEnv(),
     stdio: ["ignore", "pipe", "pipe"],
 
     detached: true,
@@ -171,7 +203,7 @@ export async function startWorker({ extraVars = [] } = {}) {
       .catch(() => {});
   } catch (error) {
     await stopProcess(child);
-    await rm(persist, { recursive: true, force: true });
+    await cleanup();
     throw error;
   }
 
@@ -183,7 +215,7 @@ export async function startWorker({ extraVars = [] } = {}) {
     },
     async stop() {
       await stopProcess(child);
-      await rm(persist, { recursive: true, force: true });
+      await cleanup();
     },
   };
 }
