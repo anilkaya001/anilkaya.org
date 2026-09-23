@@ -233,7 +233,11 @@ export async function runFlowLeg(ctx) {
       t[st] = (t[st] || 0) + 1;
     }
   };
-  const published = { cardX: 0, hist: 0, failed: 0, shed: 0 };
+  const published = { cardX: 0, hist: 0, histHeld: 0, failed: 0, shed: 0 };
+  const readPrior = (ticker) => Promise.resolve()
+    .then(() => readStored("hist:" + ticker))
+    .then((r) => (r && typeof r === "object" ? r : { payload: null, failed: true, status: 0 }))
+    .catch(() => ({ payload: null, failed: true, status: 0 }));
 
   const alertBatches = new Map();
   let alertPages = 0;
@@ -264,6 +268,12 @@ export async function runFlowLeg(ctx) {
     try {
       await publish("card-x:" + ticker, card.payload);
       published.cardX++;
+      if (hist.priorFailed) {
+        published.histHeld++;
+        log(`  flow ${ticker}: hist:${ticker} not rewritten — its stored history could not be read back` +
+          (hist.priorStatus ? ` (HTTP ${hist.priorStatus})` : "") + ", so the NOPE closes it keeps are held, not replaced");
+        return { status: "built", shed: card.shed, bytes: card.bytes, histHeld: true };
+      }
       await publish("hist:" + ticker, h);
       published.hist++;
       return { status: "built", shed: card.shed, bytes: card.bytes };
@@ -287,8 +297,10 @@ export async function runFlowLeg(ctx) {
       read(`/api/stock/${ticker}/spot-exposures`, dated),
       read(`/api/darkpool/${ticker}/price-levels`, dated),
       win ? readMultiLeg(read, ticker, win) : Promise.resolve({ rows: undefined, truncated: false }),
-      Promise.resolve().then(() => readStored("hist:" + ticker)).catch(() => null),
+      readPrior(ticker),
     ]);
+    const priorFailed = prior.failed === true;
+    const kept = priorFailed ? [] : histNope(prior, sessionDate);
     const card = cardOf(ticker);
     const oiPanel = card && card.panels && card.panels.oiDeltas;
     const picks = oiPanel && oiPanel.status === "ok"
@@ -304,7 +316,7 @@ export async function runFlowLeg(ctx) {
     const walls = vendorWalls ? { call: levels.callWall, put: levels.putWall }
       : levels.ours ? { call: levels.ours.callWall, put: levels.ours.putWall } : null;
     const nope = nopeSection(nopeRaw, {
-      sessionDate, candle: sessionCandle(f.candles, sessionDate), prior: histNope(prior, sessionDate),
+      sessionDate, candle: sessionCandle(f.candles, sessionDate), prior: kept, priorFailed,
     });
     const batch = alertBatches.get(ticker) || { rows: undefined, complete: false, coverFromM: null };
     const sections = {
@@ -326,10 +338,11 @@ export async function runFlowLeg(ctx) {
       }),
       multiLeg: multiLeg(ml.rows, ticker, { sessionDate, truncated: ml.truncated }),
     };
-    const nopeHistory = histNope(prior, sessionDate);
+    const nopeHistory = kept.slice();
     if (nope.close !== null && isDay(sessionDate)) nopeHistory.push({ d: sessionDate, v: nope.close });
     return emit(ticker, "deep", sections, {
       readAt, gex: gex.series, volume: volume.series, nope: nopeHistory.slice(-FLOW_LEG.NOPE_KEEP),
+      priorFailed, priorStatus: prior.status || null,
     });
   };
 
@@ -340,8 +353,9 @@ export async function runFlowLeg(ctx) {
       read(`/api/stock/${ticker}/greek-exposure`, { timeframe: "1Y", ...dated }),
       read(`/api/stock/${ticker}/options-volume`, { limit: 252 }),
       read(`/api/stock/${ticker}/oi-per-strike`, dated),
-      Promise.resolve().then(() => readStored("hist:" + ticker)).catch(() => null),
+      readPrior(ticker),
     ]);
+    const priorFailed = prior.failed === true;
     const gex = gexHistory(gexRaw, { sessionDate, spot: f.spot, adv: f.dollarVolume, unit, multipliers });
     const volume = volumeHistory(volRaw, { sessionDate });
     const sections = {
@@ -350,7 +364,9 @@ export async function runFlowLeg(ctx) {
       oiWalls: oiWalls(oiRaw, { sessionDate, spot: f.spot, atr: f.atr }),
     };
     return emit(ticker, "cross", sections, {
-      readAt, gex: gex.series, volume: volume.series, nope: histNope(prior, sessionDate).slice(-FLOW_LEG.NOPE_KEEP),
+      readAt, gex: gex.series, volume: volume.series,
+      nope: priorFailed ? [] : histNope(prior, sessionDate).slice(-FLOW_LEG.NOPE_KEEP),
+      priorFailed, priorStatus: prior.status || null,
     });
   };
 
@@ -377,7 +393,9 @@ export async function runFlowLeg(ctx) {
   };
   log(`  flow leg: ${deep.length} deep + ${cross.length} cross-section name(s), ${meter.calls} vendor ` +
     `call(s) (${meter.failed} failed), ${alertPages} flow-alert page(s)`);
-  log(`  flow leg: card-x ${published.cardX} and hist ${published.hist} published, ${published.failed} failed, ` +
+  log(`  flow leg: card-x ${published.cardX} and hist ${published.hist} published` +
+    (published.histHeld ? ` (${published.histHeld} hist held unrewritten: the stored history could not be read back)` : "") +
+    `, ${published.failed} failed, ` +
     `${published.shed} shed a section to fit, ${skipped} skipped past the deadline` +
     (summary.maxCardXBytes ? `, largest card-x ${summary.maxCardXBytes} bytes` : ""));
   log("  flow sections: " + Object.entries(tally).map(([k, t]) =>

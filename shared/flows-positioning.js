@@ -39,6 +39,7 @@ export const FLOW_CODES = Object.freeze({
   empty: "The vendor answered with no rows: measured and empty.",
   "not-session": "The vendor dated these rows to a different session.",
   "short-history": "Fewer sessions of history than the statistic needs.",
+  "history-unread": "The name's stored history could not be read back this run, so it was neither used nor overwritten.",
   "zero-sd": "The history has no dispersion, so a z-score is undefined.",
   "no-today": "There is no value for the session itself.",
   "no-spot": "No reference price for the session.",
@@ -682,7 +683,8 @@ export function sessionCandle(candles, sessionDate) {
   return null;
 }
 
-export function nopeSection(body, { sessionDate = null, candle = null, prior = [], min = POSITIONING_LINES.NOPE_MIN } = {}) {
+export function nopeSection(body, { sessionDate = null, candle = null, prior = [], priorFailed = false,
+  min = POSITIONING_LINES.NOPE_MIN } = {}) {
   const g0 = gate(body, "data");
   if (g0.quiet) return { section: g0.quiet, close: null };
   if (!g0.rows.length) return { section: silence("quiet", "empty"), close: null };
@@ -713,7 +715,7 @@ export function nopeSection(body, { sessionDate = null, candle = null, prior = [
     .filter((p) => p && isDay(p.d) && (!isDay(sessionDate) || p.d < sessionDate))
     .sort((a, b) => (a.d < b.d ? -1 : 1))
     .map((p) => p.v);
-  const hz = ownHistory([...history, last.v], { min });
+  const hz = priorFailed ? { z: null, pct: null, n: null, why: "history-unread" } : ownHistory([...history, last.v], { min });
   const ds = downsample(pts.filter((p) => p.m !== null));
   return {
     section: {
@@ -730,7 +732,7 @@ export function nopeSection(body, { sessionDate = null, candle = null, prior = [
       divergence,
       z: round(hz.z, 3) ?? note("z", hz.why),
       pct: round(hz.pct, 4) ?? note("pct", hz.why),
-      historyN: hz.n,
+      historyN: hz.n ?? note("historyN", hz.why),
       m: ds.map((p) => p.m),
       x: ds.map((p) => round(p.v, 4)),
       u: { close: "ratio", closeCheck: "ratio", fill: "ratio", high: "ratio", low: "ratio", highM: "min", lowM: "min",

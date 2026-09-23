@@ -613,6 +613,54 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   ok(summary.calls >= tickers.length * 10, `a deep name costs its reads (${summary.calls} calls for three deep and one cross)`);
 }
 
+{
+  const days = weekdaysEndingAt("2026-09-21", 200);
+  const kept = days.map((_, i) => ((i % 9) - 4) / 10);
+  const stored = { v: 1, ticker: "X", sessionDate: days[199], d0: days[0],
+    dd: days.map((d) => Math.round((Date.parse(d + "T00:00:00Z") - Date.parse(days[0] + "T00:00:00Z")) / 86400000)),
+    nope: { asOf: days[199], ...packSeries(kept) } };
+  const answers = {
+    "hist:DOWN": async () => ({ payload: null, failed: true, status: 503 }),
+    "hist:THROW": async () => { throw new Error("socket hang up"); },
+    "hist:GOOD": async () => ({ payload: stored, status: 200 }),
+    "hist:XDOWN": async () => ({ payload: null, failed: true, status: 0 }),
+    "hist:FRESH": async () => ({ payload: null, absent: true, status: 200 }),
+  };
+  const published = {};
+  const lines = [];
+  const summary = await runFlowLeg({
+    uw: makeFlowFakeVendor({ sessionDate: SESSION, spotOf: () => 150 }),
+    readStored: (key) => answers[key](),
+    publish: async (key, payload) => { published[key] = JSON.parse(JSON.stringify(payload)); },
+    stored: (key) => published[key] || null,
+    runPooled: async (items, work) => {
+      const results = [];
+      for (const [i, it] of items.entries()) results.push(await work(it, i));
+      return { results, attempted: items.map(() => true) };
+    },
+    sessionDate: SESSION, generatedAt: "2026-09-22T21:40:00Z",
+    deep: ["DOWN", "THROW", "GOOD", "FRESH"], cross: ["XDOWN"],
+    featuresOf: () => ({ spot: 150, atr: 3, dollarVolume: 2e9, iv30: 0.3, candles: [[SESSION, 149, 151, 148, 150.5, 1e6]] }),
+    strikesOf: () => [], cardOf: () => null, log: (l) => lines.push(l),
+  });
+  for (const t of ["DOWN", "THROW", "XDOWN"]) {
+    ok(published["card-x:" + t], `${t}'s card-x still publishes when its history read fails`);
+    eq(published["hist:" + t], undefined,
+      `but hist:${t} is not rewritten: a failed read-back must never replace 200 kept NOPE closes with one`);
+  }
+  eq(published["card-x:DOWN"].nope.z, null, "no z-score is drawn from a history that could not be read");
+  eq(published["card-x:DOWN"].nope.gaps.z, "history-unread", "and the gap says the history was unread, not short");
+  eq(published["card-x:DOWN"].nope.gaps.historyN, "history-unread", "nor is its length reported as zero");
+  eq(summary.published.histHeld, 3, "the summary counts the held histories");
+  ok(lines.some((l) => /hist:DOWN not rewritten .*HTTP 503/.test(l)), "and the log names the name and the status");
+  const good = published["hist:GOOD"];
+  eq(good.nope.x.filter((x) => x !== null).length, 201, "a readable history carries its 200 closes forward plus today's");
+  eq(published["card-x:GOOD"].nope.historyN, 200, "and the z-score is drawn against all 200");
+  eq(published["hist:FRESH"].nope.x.filter((x) => x !== null).length, 1,
+    "a name with no stored history yet starts one with today's close");
+  eq(published["card-x:FRESH"].nope.gaps.z, "short-history", "and is honestly short of history");
+}
+
 const CODES = new Set(Object.keys(FLOW_CODES));
 const STATUSES = new Set(["ok", "stale", "quiet", "unavailable", "unreadable"]);
 const checkSection = (name, s, where) => {
