@@ -1102,12 +1102,17 @@ export function characterVote(panel, ivHalfLife) {
   return { ...panel, ours, vote, silent };
 }
 
-function radarRows(body, kind, carded) {
+function radarRows(body, kind, carded, sessionDate) {
   const list = rowsOf(body);
   if (list === null) return null;
   const out = [];
+  let cutAfter = 0, vendorAt = null, newest = null;
   for (const r of list) {
     if (!r || typeof r !== "object" || typeof r.ticker !== "string") continue;
+    const d = isoDay(r.date);
+    if (d && sessionDate && d > sessionDate) { cutAfter++; continue; }
+    if (d && (!newest || d > newest)) newest = d;
+    if (typeof r.updated_at === "string" && (!vendorAt || r.updated_at > vendorAt)) vendorAt = r.updated_at;
     const c = r.components && typeof r.components === "object" ? r.components : {};
     const base = { t: r.ticker, score: round(vnum(r.score), 3), n: vnum(r.sample_size), carded: carded.has(r.ticker) };
     if (kind === "anomaly") {
@@ -1120,20 +1125,24 @@ function radarRows(body, kind, carded) {
     }
   }
   out.sort((a, b) => Math.abs(b.score ?? 0) - Math.abs(a.score ?? 0));
-  return out;
+  return { rows: out, cutAfter, vendorAt, newest };
 }
 
 export function buildVolRadar(bodies, { sessionDate = null, carded = [] } = {}) {
   const set = new Set(carded);
   const side = (body, kind) => {
     if (body === null || body === undefined) return { status: "unavailable", code: "read-failed", rows: [], seen: 0 };
-    const rows = radarRows(body, kind, set);
-    if (rows === null) return { status: "unreadable", code: "unreadable-body", rows: [], seen: 0 };
-    const asOf = isoDay(body && body.date);
+    const read = radarRows(body, kind, set, sessionDate);
+    if (read === null) return { status: "unreadable", code: "unreadable-body", rows: [], seen: 0 };
+    const { rows, cutAfter } = read;
+    const dated = isoDay(body && body.date);
+    const asOf = dated && !(sessionDate && dated > sessionDate) ? dated : read.newest;
     return {
-      status: rows.length ? "ok" : "quiet", code: rows.length ? null : "no-rows",
+      status: rows.length ? "ok" : "quiet", code: rows.length ? null : cutAfter ? "after-session" : "no-rows",
       asOf, sameSession: sessionDate && asOf ? asOf === sessionDate : null,
       seen: rows.length, rows: rows.slice(0, RADAR_KEEP),
+      ...(cutAfter ? { cutAfter } : {}),
+      vendorAt: read.vendorAt,
     };
   };
   const rich = side(bodies.rich, "anomaly");
@@ -1147,6 +1156,7 @@ export function buildVolRadar(bodies, { sessionDate = null, carded = [] } = {}) 
   return {
     status: okCount ? "ok" : all.some((s) => s.status === "unreadable") ? "unreadable" : all.every((s) => s.status === "quiet") ? "quiet" : "unavailable",
     asOf: [rich, cheap, bullish, bearish].map((s) => s.asOf).filter(Boolean).sort().pop() || null,
+    vendorAt: all.map((s) => s.vendorAt).filter(Boolean).sort().pop() || null,
     rich, cheap, bullish, bearish,
     carded: [...overlap].sort(),
     keep: RADAR_KEEP,

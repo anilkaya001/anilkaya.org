@@ -280,7 +280,7 @@ export async function runVolLeg({
       bodies[kind] = r.error ? null : r.body;
       stamps.push(r.at);
     }
-    radarSection = buildVolRadar(bodies, { sessionDate, carded: names.map((n) => n.ticker) });
+    radarSection = buildVolRadar(bodies, { sessionDate, carded: names.filter((n) => n.depth !== "index").map((n) => n.ticker) });
     radarReadAt = stamps.filter(Boolean).sort()[0] || null;
   }
   return { byTicker, radar: radarSection, radarReadAt, stats, notes, sessionDate };
@@ -366,7 +366,7 @@ export function cardXPayload(entry, { sessionDate = null, generatedAt = null, ca
 export function regimePayload(leg, { sessionDate = null, generatedAt = null } = {}) {
   return {
     v: VOL_SCHEMA_VERSION, sessionDate, generatedAt,
-    fresh: freshEnvelope({ readAt: leg && leg.radarReadAt, vendorAt: null, sessionDate }),
+    fresh: freshEnvelope({ readAt: leg && leg.radarReadAt, vendorAt: leg && leg.radar ? leg.radar.vendorAt || null : null, sessionDate }),
     volRadar: leg && leg.radar ? leg.radar : { status: "unavailable", code: "not-read", reason: VOL_WHY["not-read"] },
   };
 }

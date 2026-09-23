@@ -228,6 +228,16 @@ const S = FX.session;
   eq(radar.bullish.rows[0].vwks, 0.2027, "sentiment rows carry vwks");
   eq(radar.asOf, S, "the radar is dated by the vendor's envelope");
   deepEq(radar.carded, ["SOXS"]);
+  eq(radar.vendorAt, p["vol-sentiment-top"].row.updated_at, "the radar's vendor stamp is the newest updated_at among its rows");
+  const later = { ...p["vol-anomaly-top"].row, ticker: "LATE", date: "2026-09-23", score: "99" };
+  const mixed = buildVolRadar({ rich: { data: [later, p["vol-anomaly-top"].row], date: "2026-09-23", direction: "short_vol" } },
+    { sessionDate: S, carded: [] });
+  deepEq(mixed.rich.rows.map((r) => r.t), ["SOXS"]);
+  eq(mixed.rich.cutAfter, 1, "a radar row dated after the session is cut and counted, however large its score");
+  eq(mixed.rich.asOf, S, "and an envelope dated after the session is not the side's date: its newest kept row is");
+  const allLate = buildVolRadar({ rich: { data: [later], date: "2026-09-23", direction: "short_vol" } }, { sessionDate: S });
+  eq(allLate.rich.status, "quiet", "a side holding only rows after the session is quiet");
+  eq(allLate.rich.code, "after-session", "and says why");
 }
 
 function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
@@ -578,6 +588,11 @@ function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
 
   const rg = regimePayload(leg, { sessionDate: session, generatedAt: "g" });
   eq(rg.volRadar.status, "ok", "the regime carries the vol radar");
+  ok(typeof rg.fresh.vendorAt === "string", "and its freshness envelope carries the vendor's newest stamp");
+  const spyRow = rg.volRadar.bullish.rows.find((r) => r.t === "SPY");
+  ok(spyRow && spyRow.carded === false,
+    "an index name has a dossier but no card, so a radar row for it is not marked carded (it would link to an empty ticker page)");
+  ok(!rg.volRadar.carded.includes("SPY"), "and it is not listed among the carded names");
   ok(JSON.stringify(rg).length < 16 * 1024, "and stays small");
 
   const published = new Map();
