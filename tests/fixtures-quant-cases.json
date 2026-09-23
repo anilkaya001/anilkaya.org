@@ -1,0 +1,1775 @@
+{
+ "version": 1,
+ "generated": "2026-09-23",
+ "conventions": {
+  "time": "T in years = calendar days / 365 for option pricing; realized vol annualised with 252 sessions",
+  "vol": "decimal (0.30 = 30%); a vol point is 0.01",
+  "greeks": "per share and per 1.00 of vol unless named perVolPoint/perCalendarDay; dollar figures per contract multiply by 100",
+  "skewSign": "risk reversal = IV(put) - IV(call), the vendor's convention: positive means puts are bid",
+  "tolerance": "abs is an absolute bound; rel is relative; exact means equality after rounding the inputs as given"
+ },
+ "cases": [
+  {
+   "id": "bsm.hull-call-put",
+   "group": "pricing",
+   "what": "Black-Scholes European call and put, Hull's textbook example",
+   "fn": "bsmPrice",
+   "inputs": {
+    "S": 42,
+    "K": 40,
+    "r": 0.1,
+    "q": 0,
+    "sigma": 0.2,
+    "T": 0.5
+   },
+   "expect": {
+    "call": 4.759422392871533,
+    "put": 0.8085993729000936
+   },
+   "tol": {
+    "abs": 1e-09
+   },
+   "source": "Hull, Options Futures and Other Derivatives, example 15.6: call 4.76, put 0.81"
+  },
+  {
+   "id": "bsm.haug-put-yield",
+   "group": "pricing",
+   "what": "Black-Scholes-Merton with a continuous dividend yield, Haug's example",
+   "fn": "bsmPrice",
+   "inputs": {
+    "S": 100,
+    "K": 95,
+    "r": 0.1,
+    "q": 0.05,
+    "sigma": 0.2,
+    "T": 0.5
+   },
+   "expect": {
+    "put": 2.464787646755821,
+    "call": 9.628983522021258
+   },
+   "tol": {
+    "abs": 1e-09
+   },
+   "source": "Haug, The Complete Guide to Option Pricing Formulas, 1.2.1: put 2.4648"
+  },
+  {
+   "id": "bsm.put-call-parity",
+   "group": "pricing",
+   "what": "C - P = S e^{-qT} - K e^{-rT} for every strike",
+   "fn": "bsmPrice",
+   "inputs": {
+    "S": 100,
+    "r": 0.045,
+    "q": 0.012,
+    "sigma": 0.31,
+    "T": 0.75,
+    "strikes": [
+     80,
+     90,
+     100,
+     110,
+     120
+    ]
+   },
+   "expect": {
+    "rows": [
+     {
+      "K": 80,
+      "call": 24.00764457553123,
+      "put": 2.2486609159662914,
+      "cMinusP": 21.75898365956494,
+      "rhs": 21.75898365956494
+     },
+     {
+      "K": 90,
+      "call": 17.118263769292277,
+      "put": 5.027411886942764,
+      "cMinusP": 12.090851882349513,
+      "rhs": 12.090851882349513
+     },
+     {
+      "K": 100,
+      "call": 11.708696576177811,
+      "put": 9.285976471043728,
+      "cMinusP": 2.422720105134084,
+      "rhs": 2.4227201051340845
+     },
+     {
+      "K": 110,
+      "call": 7.720954351536835,
+      "put": 14.966366023618178,
+      "cMinusP": -7.245411672081344,
+      "rhs": -7.245411672081343
+     },
+     {
+      "K": 120,
+      "call": 4.935808395406431,
+      "put": 21.849351844703204,
+      "cMinusP": -16.91354344929677,
+      "rhs": -16.91354344929677
+     }
+    ],
+    "property": "|cMinusP - rhs| <= 1e-12 * S"
+   },
+   "tol": {
+    "abs": 1e-10
+   }
+  },
+  {
+   "id": "black76.forward-equivalence",
+   "group": "pricing",
+   "what": "Black-76 on (F, D) equals BSM on (S, r, q)",
+   "fn": "black76Price",
+   "inputs": {
+    "F": 100.24687958947796,
+    "D": 0.9963082013704571,
+    "K": 105,
+    "sigma": 0.35,
+    "T": 0.1232876712328767
+   },
+   "expect": {
+    "call": 2.9930689244336994,
+    "put": 7.728641771538122
+   },
+   "tol": {
+    "abs": 1e-10
+   }
+  },
+  {
+   "id": "greeks.fd-call",
+   "group": "greeks",
+   "what": "Closed-form BSM greeks equal central finite differences of the price (theta and charm are per YEAR of calendar time, sign = d/dt with t running forward; vega, vanna, volga per 1.00 of vol)",
+   "fn": "bsmGreeks",
+   "inputs": {
+    "S": 100,
+    "K": 105,
+    "r": 0.03,
+    "q": 0.01,
+    "sigma": 0.35,
+    "T": 0.1232876712328767,
+    "type": "C"
+   },
+   "expect": {
+    "closedForm": {
+     "delta": 0.37572678970457524,
+     "gamma": 0.03084832677900703,
+     "vega": 13.311264295050979,
+     "theta": -19.556261663817946,
+     "vanna": 0.47485076733232556,
+     "volga": 5.260402347003352,
+     "charm": -0.7319636692910193,
+     "rho": 4.263239594715266
+    },
+    "finiteDifference": {
+     "delta": 0.37572679776259615,
+     "gamma": 0.03084832509972567,
+     "vega": 13.311264220631891,
+     "theta": -19.55626272691574,
+     "vanna": 0.4748507949343823,
+     "volga": 5.2604031383229755,
+     "charm": -0.7319639025107023
+    },
+    "perUnit": {
+     "vegaPerVolPoint": 0.13311264295050979,
+     "thetaPerCalendarDay": -0.05357879907895327,
+     "charmPerCalendarDay": -0.002005379915865806,
+     "vannaPerVolPoint": 0.0047485076733232556,
+     "dollarGammaPer1pctPerContract": 308.48326779007033
+    }
+   },
+   "tol": {
+    "rel": 1e-06,
+    "note": "engine closed form vs expect.closedForm to 1e-9 relative; closed form vs FD within 1e-6 relative"
+   }
+  },
+  {
+   "id": "greeks.fd-put",
+   "group": "greeks",
+   "what": "Closed-form BSM greeks equal central finite differences of the price (theta and charm are per YEAR of calendar time, sign = d/dt with t running forward; vega, vanna, volga per 1.00 of vol)",
+   "fn": "bsmGreeks",
+   "inputs": {
+    "S": 100,
+    "K": 105,
+    "r": 0.03,
+    "q": 0.01,
+    "sigma": 0.35,
+    "T": 0.1232876712328767,
+    "type": "P"
+   },
+   "expect": {
+    "closedForm": {
+     "delta": -0.6230410932633604,
+     "gamma": 0.03084832677900703,
+     "vega": 13.311264295050979,
+     "theta": -17.41665871246894,
+     "vanna": 0.47485076733232556,
+     "volga": 5.260402347003352,
+     "charm": -0.7419513481206987,
+     "rho": -8.634174792888595
+    },
+    "finiteDifference": {
+     "delta": -0.6230410852053395,
+     "gamma": 0.03084832509972567,
+     "vega": 13.311264220631891,
+     "theta": -17.416659775562195,
+     "vanna": 0.4748507949343823,
+     "volga": 5.2604031383229755,
+     "charm": -0.7419515813403833
+    },
+    "perUnit": {
+     "vegaPerVolPoint": 0.13311264295050979,
+     "thetaPerCalendarDay": -0.04771687318484641,
+     "charmPerCalendarDay": -0.0020327434195087637,
+     "vannaPerVolPoint": 0.0047485076733232556,
+     "dollarGammaPer1pctPerContract": 308.48326779007033
+    }
+   },
+   "tol": {
+    "rel": 1e-06,
+    "note": "engine closed form vs expect.closedForm to 1e-9 relative; closed form vs FD within 1e-6 relative"
+   }
+  },
+  {
+   "id": "iv.round-trip",
+   "group": "implied-vol",
+   "what": "Invert a BSM price back to its volatility (safeguarded Newton in total-variance space, bisection fallback)",
+   "fn": "impliedVol",
+   "inputs": {
+    "cases": [
+     {
+      "S": 100,
+      "K": 100,
+      "r": 0.03,
+      "q": 0,
+      "T": 0.5,
+      "type": "C",
+      "price": 2.268423362823795,
+      "sigma": 0.05
+     },
+     {
+      "S": 100,
+      "K": 110,
+      "r": 0.03,
+      "q": 0.01,
+      "T": 0.25,
+      "type": "C",
+      "price": 3.8812674596218604,
+      "sigma": 0.37
+     },
+     {
+      "S": 100,
+      "K": 90,
+      "r": 0.03,
+      "q": 0.01,
+      "T": 0.25,
+      "type": "P",
+      "price": 2.955337142495545,
+      "sigma": 0.37
+     },
+     {
+      "S": 100,
+      "K": 150,
+      "r": 0.02,
+      "q": 0,
+      "T": 0.1,
+      "type": "C",
+      "price": 0.03290469476167098,
+      "sigma": 0.5
+     },
+     {
+      "S": 100,
+      "K": 60,
+      "r": 0.02,
+      "q": 0,
+      "T": 1.0,
+      "type": "P",
+      "price": 24.98025082020457,
+      "sigma": 1.5
+     },
+     {
+      "S": 50,
+      "K": 50,
+      "r": 0.04,
+      "q": 0,
+      "T": 0.019178082191780823,
+      "type": "C",
+      "price": 2.2271471885978698,
+      "sigma": 0.8
+     }
+    ]
+   },
+   "expect": {
+    "property": "recovered sigma equals the generating sigma"
+   },
+   "tol": {
+    "abs": 1e-07
+   }
+  },
+  {
+   "id": "iv.out-of-bounds",
+   "group": "implied-vol",
+   "what": "A price outside the no-arbitrage bounds has no implied volatility",
+   "fn": "impliedVol",
+   "inputs": {
+    "cases": [
+     {
+      "S": 100,
+      "K": 90,
+      "r": 0.03,
+      "q": 0.01,
+      "T": 0.25,
+      "type": "C",
+      "price": 10.412787306023553,
+      "note": "below discounted intrinsic 10.422787306023553"
+     },
+     {
+      "S": 100,
+      "K": 90,
+      "r": 0.03,
+      "q": 0.01,
+      "T": 0.25,
+      "type": "C",
+      "price": 99.76031223974601,
+      "note": "above S e^{-qT}"
+     },
+     {
+      "S": 100,
+      "K": 90,
+      "r": 0.03,
+      "q": 0.01,
+      "T": 0.25,
+      "type": "P",
+      "price": 0,
+      "note": "zero bid-side price"
+     }
+    ]
+   },
+   "expect": {
+    "sigma": [
+     null,
+     null,
+     null
+    ]
+   },
+   "tol": {
+    "exact": true
+   }
+  },
+  {
+   "id": "forward.parity-regression",
+   "group": "forward",
+   "what": "Regress (C - P) on K across near-the-money strikes: slope = -D, intercept = D F; implied carry q = r - ln(F/S)/T given r = -ln(D)/T",
+   "fn": "parityForward",
+   "inputs": {
+    "S": 100,
+    "T": 0.25,
+    "chain": [
+     {
+      "K": 90.0,
+      "call": 12.683610077217129,
+      "put": 1.976334541890806
+     },
+     {
+      "K": 92.5,
+      "call": 10.874377905097862,
+      "put": 2.6391349812996223
+     },
+     {
+      "K": 95.0,
+      "call": 9.210462386777458,
+      "put": 3.447252074507299
+     },
+     {
+      "K": 97.5,
+      "call": 7.701877895483759,
+      "put": 4.4107001947416835
+     },
+     {
+      "K": 100.0,
+      "call": 6.354665491092967,
+      "put": 5.5355204018789745
+     },
+     {
+      "K": 102.5,
+      "call": 5.170512633003119,
+      "put": 6.823400155317208
+     },
+     {
+      "K": 105.0,
+      "call": 4.146724406869037,
+      "put": 8.27164454071121
+     },
+     {
+      "K": 107.5,
+      "call": 3.2765361731966856,
+      "put": 9.873488918566942
+     },
+     {
+      "K": 110.0,
+      "call": 2.5497153083331954,
+      "put": 11.618700665231533
+     }
+    ]
+   },
+   "expect": {
+    "D": 0.9888130446112331,
+    "F": 100.82841250292775,
+    "r": 0.045,
+    "q": 0.012
+   },
+   "tol": {
+    "abs": 1e-08
+   }
+  },
+  {
+   "id": "strike.from-delta-flat",
+   "group": "selection",
+   "what": "Strike whose BSM delta hits a target under a flat smile (r = q = 0)",
+   "fn": "strikeForDelta",
+   "inputs": {
+    "S": 100,
+    "r": 0,
+    "q": 0,
+    "sigma": 0.3,
+    "T": 0.25,
+    "targets": [
+     {
+      "type": "C",
+      "delta": 0.25
+     },
+     {
+      "type": "P",
+      "delta": -0.25
+     }
+    ]
+   },
+   "expect": {
+    "callStrike": 111.89866092305019,
+    "putStrike": 91.40011379294057,
+    "d1Call": -0.6744897501960817
+   },
+   "tol": {
+    "abs": 1e-06
+   }
+  },
+  {
+   "id": "rnd.flat-is-lognormal",
+   "group": "density",
+   "what": "Breeden-Litzenberger on a flat smile reproduces the lognormal: CDF(K) = N(-d2), density = lognormal pdf, total mass 1, mean F",
+   "fn": "riskNeutralCdf/riskNeutralPdf",
+   "inputs": {
+    "F": 100,
+    "T": 0.5,
+    "svi": {
+     "a": 0.03125,
+     "b": 0,
+     "rho": 0,
+     "m": 0,
+     "sigma": 0.1
+    },
+    "strikes": [
+     80,
+     90,
+     100,
+     110,
+     125
+    ]
+   },
+   "expect": {
+    "cdf": {
+     "80": 0.12021710081443256,
+     "90": 0.3058596738520017,
+     "100": 0.5352159888611936,
+     "110": 0.7348486951572168,
+     "125": 0.911600841975517
+    },
+    "pdf": {
+     "80": 0.014163027561768871,
+     "90": 0.022043893450584776,
+     "100": 0.022479600672507812,
+     "110": 0.016849121273425235,
+     "125": 0.007251470111625662
+    },
+    "blCdfAt110": 0.7348486951560552,
+    "blPdfAt100": 0.02247960066721574,
+    "mass": 1.0,
+    "mean": 100.0
+   },
+   "tol": {
+    "abs": 1e-07,
+    "note": "engine quadrature of mass and mean within 1e-6"
+   }
+  },
+  {
+   "id": "rnd.svi-closed-form",
+   "group": "density",
+   "what": "With a skewed SVI slice, the closed-form CDF N(-d2) + phi(d2) w'(k)/(2 sqrt w) equals dP/dK by finite differences, the Gatheral density g(k) exp(-d2^2/2)/sqrt(2 pi w) integrates to 1 with mean F",
+   "fn": "riskNeutralCdf/riskNeutralPdf",
+   "inputs": {
+    "F": 100,
+    "T": 0.5,
+    "svi": {
+     "a": 0.01,
+     "b": 0.04,
+     "rho": -0.6,
+     "m": 0.0,
+     "sigma": 0.15
+    },
+    "strikes": [
+     80,
+     90,
+     100,
+     110,
+     120
+    ]
+   },
+   "expect": {
+    "cdf": {
+     "80": 0.06645040832316965,
+     "90": 0.19627021838456113,
+     "100": 0.48744314492626745,
+     "110": 0.7976716180371709,
+     "120": 0.942412252430117
+    },
+    "blCdf": {
+     "80": 0.06645040832448147,
+     "90": 0.19627021838759184,
+     "100": 0.487443144926712,
+     "110": 0.7976716180339348,
+     "120": 0.9424122524284987
+    },
+    "minG": 0.2708275570554269,
+    "mass": 1.0,
+    "mean": 100.0,
+    "atmVol": 0.17888543819998318
+   },
+   "tol": {
+    "abs": 1e-07
+   }
+  },
+  {
+   "id": "pop.short-strangle-flat",
+   "group": "probability",
+   "what": "Short 90/110 strangle under a flat 30% smile, r = q = 0: POP = P(BE_low < S_T < BE_high) under the lognormal, closed form",
+   "fn": "structureMetrics",
+   "inputs": {
+    "S": 100,
+    "r": 0,
+    "q": 0,
+    "T": 0.0821917808219178,
+    "flatVol": 0.3,
+    "legs": [
+     {
+      "type": "P",
+      "K": 90,
+      "side": "short",
+      "qty": 1
+     },
+     {
+      "type": "C",
+      "K": 110,
+      "side": "short",
+      "qty": 1
+     }
+    ],
+    "priceAt": "model"
+   },
+   "expect": {
+    "putPrice": 0.43448983580374134,
+    "callPrice": 0.6086893415412379,
+    "creditPerShare": 1.0431791773449792,
+    "breakevens": [
+     88.95682082265502,
+     111.04317917734498
+    ],
+    "popQ": 0.802505288466024,
+    "probMaxProfitQ": 0.756568238678313,
+    "maxProfit": 104.31791773449791,
+    "maxLoss": null,
+    "lossUnbounded": true
+   },
+   "tol": {
+    "abs": 1e-07
+   }
+  },
+  {
+   "id": "ev.risk-neutral-zero-at-model",
+   "group": "probability",
+   "what": "A structure bought at its own model value has zero expected value under the risk-neutral density it was priced on (iron condor, flat 28%, r = 4%)",
+   "fn": "structureMetrics",
+   "inputs": {
+    "S": 100,
+    "r": 0.04,
+    "q": 0,
+    "T": 0.1095890410958904,
+    "flatVol": 0.28,
+    "legs": [
+     {
+      "type": "P",
+      "K": 85,
+      "side": "long",
+      "qty": 1
+     },
+     {
+      "type": "P",
+      "K": 90,
+      "side": "short",
+      "qty": 1
+     },
+     {
+      "type": "C",
+      "K": 110,
+      "side": "short",
+      "qty": 1
+     },
+     {
+      "type": "C",
+      "K": 115,
+      "side": "long",
+      "qty": 1
+     }
+    ],
+    "priceAt": "model"
+   },
+   "expect": {
+    "netValuePerShare": -0.9066061833518947,
+    "discountedExpectedPayoff": -0.9066061833518947,
+    "evQ": 0.0
+   },
+   "tol": {
+    "abs": 1e-06
+   }
+  },
+  {
+   "id": "move.atmf-straddle-is-mad",
+   "group": "implied-move",
+   "what": "The undiscounted at-the-forward straddle equals the risk-neutral mean absolute move E|S_T - F|; for the lognormal it is F(2N(sigma sqrt T / 2) - 1)",
+   "fn": "impliedMove",
+   "inputs": {
+    "F": 100,
+    "T": 0.25,
+    "flatVol": 0.4
+   },
+   "expect": {
+    "straddle": 15.931134910811593,
+    "meanAbsMove": 7.965567455405797,
+    "ratioToSigmaSqrtT": 0.7965567455405796,
+    "oneSigmaBand": [
+     80.25187979624785,
+     119.72173631218102
+    ]
+   },
+   "tol": {
+    "abs": 1e-09
+   }
+  },
+  {
+   "id": "svi.butterfly-arbitrage-vogt",
+   "group": "no-arbitrage",
+   "what": "Vogt's SVI slice (T = 1) has negative Gatheral g(k), so a negative risk-neutral density: the fit must be rejected or repaired",
+   "fn": "sviButterflyCheck",
+   "inputs": {
+    "svi": {
+     "a": -0.041,
+     "b": 0.1331,
+     "rho": 0.306,
+     "m": 0.3586,
+     "sigma": 0.4153
+    },
+    "T": 1,
+    "kGrid": [
+     -1.5,
+     1.5,
+     0.001
+    ]
+   },
+   "expect": {
+    "ok": false,
+    "minG": -0.032863573453623014,
+    "kAtMinG": 0.8792625416220679,
+    "negativeRegion": [
+     0.643,
+     1.256
+    ]
+   },
+   "tol": {
+    "abs": 0.002,
+    "note": "region ends to the grid step"
+   },
+   "source": "Gatheral & Jacquier (2014), Arbitrage-free SVI volatility surfaces, example 3.1 (Axel Vogt)"
+  },
+  {
+   "id": "svi.butterfly-clean",
+   "group": "no-arbitrage",
+   "what": "A well-behaved skewed slice passes the butterfly check",
+   "fn": "sviButterflyCheck",
+   "inputs": {
+    "svi": {
+     "a": 0.01,
+     "b": 0.04,
+     "rho": -0.6,
+     "m": 0.0,
+     "sigma": 0.15
+    },
+    "T": 0.5,
+    "kGrid": [
+     -3,
+     3,
+     0.01
+    ]
+   },
+   "expect": {
+    "ok": true,
+    "minG": 0.2708275570554269
+   },
+   "tol": {
+    "abs": 1e-06
+   }
+  },
+  {
+   "id": "svi.calendar-arbitrage",
+   "group": "no-arbitrage",
+   "what": "Total variance must not decrease with maturity at any log-moneyness: slice 2 (T = 0.5) dips under slice 1 (T = 0.25, flat 40%) near the money",
+   "fn": "calendarCheck",
+   "inputs": {
+    "slices": [
+     {
+      "T": 0.25,
+      "svi": {
+       "a": 0.04,
+       "b": 0,
+       "rho": 0,
+       "m": 0,
+       "sigma": 0.1
+      }
+     },
+     {
+      "T": 0.5,
+      "svi": {
+       "a": 0.025,
+       "b": 0.1,
+       "rho": 0,
+       "m": 0,
+       "sigma": 0.1
+      }
+     }
+    ],
+    "kGrid": [
+     -1,
+     1,
+     0.001
+    ]
+   },
+   "expect": {
+    "ok": false,
+    "violation": [
+     -0.11180339887498948,
+     0.11180339887498948
+    ],
+    "worstK": 0.0,
+    "worstGap": -0.005
+   },
+   "tol": {
+    "abs": 0.0015
+   }
+  },
+  {
+   "id": "svi.lee-wing-bound",
+   "group": "no-arbitrage",
+   "what": "Roger Lee's moment bound on the wings of total variance: b (1 + |rho|) <= 4",
+   "fn": "sviWingCheck",
+   "inputs": {
+    "cases": [
+     {
+      "b": 3.5,
+      "rho": 0.2
+     },
+     {
+      "b": 1.0,
+      "rho": -0.9
+     },
+     {
+      "b": 2.0,
+      "rho": 1.0
+     }
+    ]
+   },
+   "expect": {
+    "ok": [
+     false,
+     true,
+     true
+    ],
+    "value": [
+     4.2,
+     1.9,
+     4.0
+    ]
+   },
+   "tol": {
+    "abs": 1e-12
+   }
+  },
+  {
+   "id": "ssvi.power-law-condition",
+   "group": "no-arbitrage",
+   "what": "SSVI with phi(theta) = eta theta^-gamma (1+theta)^(gamma-1), 0 < gamma <= 1/2, is free of butterfly arbitrage when eta (1 + |rho|) <= 2 and of calendar arbitrage when ATM total variance theta_t is non-decreasing",
+   "fn": "ssviCheck",
+   "inputs": {
+    "cases": [
+     {
+      "eta": 1.2,
+      "rho": -0.7,
+      "gamma": 0.5,
+      "thetas": [
+       0.01,
+       0.02,
+       0.035
+      ]
+     },
+     {
+      "eta": 1.0,
+      "rho": -0.7,
+      "gamma": 0.5,
+      "thetas": [
+       0.01,
+       0.02,
+       0.035
+      ]
+     },
+     {
+      "eta": 1.0,
+      "rho": -0.7,
+      "gamma": 0.5,
+      "thetas": [
+       0.01,
+       0.03,
+       0.025
+      ]
+     }
+    ]
+   },
+   "expect": {
+    "ok": [
+     false,
+     true,
+     false
+    ],
+    "why": [
+     "butterfly: eta(1+|rho|) = 2.04",
+     "ok",
+     "calendar: theta decreases between slices 2 and 3"
+    ]
+   },
+   "tol": {
+    "exact": true
+   },
+   "source": "Gatheral & Jacquier (2014), Theorem 4.2 and Remark 4.4"
+  },
+  {
+   "id": "svi.fit-recovers-parameters",
+   "group": "smile-fit",
+   "what": "Quasi-explicit SVI calibration (linear least squares in (a, d, c) inside a 2-D search over (m, sigma)) recovers the generating parameters from noise-free total variances",
+   "fn": "fitSvi",
+   "inputs": {
+    "T": 0.25,
+    "points": [
+     {
+      "k": -0.35,
+      "w": 0.0619925706097981
+     },
+     {
+      "k": -0.3,
+      "w": 0.05571841348314311
+     },
+     {
+      "k": -0.25,
+      "w": 0.04952691606484948
+     },
+     {
+      "k": -0.2,
+      "w": 0.043463935355054995
+     },
+     {
+      "k": -0.15,
+      "w": 0.03761278684201633
+     },
+     {
+      "k": -0.1,
+      "w": 0.032133506473629427
+     },
+     {
+      "k": -0.05,
+      "w": 0.02733819959050482
+     },
+     {
+      "k": 0.0,
+      "w": 0.02375897255453679
+     },
+     {
+      "k": 0.05,
+      "w": 0.021917385189167683
+     },
+     {
+      "k": 0.1,
+      "w": 0.021739984591670362
+     },
+     {
+      "k": 0.15,
+      "w": 0.022657625411658718
+     },
+     {
+      "k": 0.2,
+      "w": 0.024179976887505544
+     },
+     {
+      "k": 0.25,
+      "w": 0.02603301918793113
+     },
+     {
+      "k": 0.3,
+      "w": 0.028076783181110072
+     },
+     {
+      "k": 0.35,
+      "w": 0.03023768975894299
+     }
+    ],
+    "weights": "uniform"
+   },
+   "expect": {
+    "params": {
+     "a": 0.012,
+     "b": 0.09,
+     "rho": -0.45,
+     "m": 0.02,
+     "sigma": 0.12
+    },
+    "rmseW": 0.0
+   },
+   "tol": {
+    "abs": 0.0001,
+    "rmse": 1e-07
+   }
+  },
+  {
+   "id": "term.fixed-tenor-variance-interp",
+   "group": "term-structure",
+   "what": "Constant-maturity IV between two expiries interpolates TOTAL variance linearly in time",
+   "fn": "fixedTenorVol",
+   "inputs": {
+    "near": {
+     "days": 20,
+     "vol": 0.4
+    },
+    "far": {
+     "days": 40,
+     "vol": 0.3
+    },
+    "days": 30
+   },
+   "expect": {
+    "vol": 0.33665016461206926
+   },
+   "tol": {
+    "abs": 1e-10
+   }
+  },
+  {
+   "id": "event.earnings-jump-from-term",
+   "group": "events",
+   "what": "Two expiries that both span the earnings date: diffusive variance sd^2 = (s2^2 T2 - s1^2 T1)/(T2 - T1); event total variance J^2 = s1^2 T1 - sd^2 T1; implied event move J (one sd) and J sqrt(2/pi) (mean absolute)",
+   "fn": "eventVariance",
+   "inputs": {
+    "front": {
+     "vol": 0.6,
+     "T": 0.0273972602739726
+    },
+    "back": {
+     "vol": 0.45,
+     "T": 0.10410958904109589
+    }
+   },
+   "expect": {
+    "diffusiveVol": 0.3824264635194589,
+    "eventSd": 0.07652557992960028,
+    "eventMeanAbs": 0.06105857873231369
+   },
+   "tol": {
+    "abs": 1e-10
+   }
+  },
+  {
+   "id": "event.no-premium",
+   "group": "events",
+   "what": "A front that is not elevated over the back yields no event variance (J^2 <= 0), reported as absent rather than as zero",
+   "fn": "eventVariance",
+   "inputs": {
+    "front": {
+     "vol": 0.4,
+     "T": 0.0273972602739726
+    },
+    "back": {
+     "vol": 0.45,
+     "T": 0.10410958904109589
+    }
+   },
+   "expect": {
+    "eventSd": null
+   },
+   "tol": {
+    "exact": true
+   }
+  },
+  {
+   "id": "vrp.variance-and-vol-units",
+   "group": "volatility",
+   "what": "Variance risk premium in variance units and in vol points against a forecast of realized volatility",
+   "fn": "varianceRiskPremium",
+   "inputs": {
+    "iv": 0.418,
+    "rvForecast": 0.356
+   },
+   "expect": {
+    "volPoints": 0.062,
+    "variance": 0.047988,
+    "relativeToForecast": 0.17415730337078653,
+    "ratioVar": 1.3786453730589572
+   },
+   "tol": {
+    "abs": 1e-12
+   }
+  },
+  {
+   "id": "garch.average-variance",
+   "group": "real-world",
+   "what": "Mean of the h-step GARCH(1,1) variance path: longRun + (next - longRun)(1 - phi^h)/(h (1 - phi)); phi = 1 returns next",
+   "fn": "garchAverageVariance",
+   "inputs": {
+    "cases": [
+     {
+      "next": 4.0,
+      "longRun": 2.25,
+      "persistence": 0.95,
+      "sessions": 21
+     },
+     {
+      "next": 4.0,
+      "longRun": 2.25,
+      "persistence": 1.0,
+      "sessions": 21
+     }
+    ]
+   },
+   "expect": {
+    "values": [
+     3.349063956186474,
+     4.0
+    ],
+    "annualisedVolPct": [
+     29.051060513499184,
+     31.74901573277509
+    ]
+   },
+   "tol": {
+    "abs": 1e-10
+   }
+  },
+  {
+   "id": "skewt.hansen-moments",
+   "group": "real-world",
+   "what": "Hansen's skewed t is standardised: mass 1, mean 0, variance 1; the left branch carries (1 - lambda)/2 of the mass; skewness has the sign of lambda",
+   "fn": "skewtDensity",
+   "inputs": {
+    "nu": 5,
+    "lambda_": -0.2
+   },
+   "expect": {
+    "a": -0.2940420775582891,
+    "b": 1.0166313277807275,
+    "c": 0.49007012926381516,
+    "mass": 1.0,
+    "mean": 3.7174806111899516e-42,
+    "variance": 1.0,
+    "skewness": -0.8543476962112685,
+    "leftMass": 0.6,
+    "cutoff": 0.2892317692001221
+   },
+   "tol": {
+    "abs": 1e-06
+   }
+  },
+  {
+   "id": "gex.dollar-gamma-per-1pct",
+   "group": "dealer",
+   "what": "Dollar gamma per 1% move of an open-interest line: gamma x OI x 100 shares x S x (1% of S); the vendor's gamma x OI x S^2 is the same number because 100 x 0.01 = 1",
+   "fn": "dollarGammaPer1pct",
+   "inputs": {
+    "gamma": 0.05,
+    "oi": 1000,
+    "S": 100
+   },
+   "expect": {
+    "dollars": 500000.0,
+    "vendorFormula": 500000.0
+   },
+   "tol": {
+    "abs": 1e-06
+   }
+  },
+  {
+   "id": "levels.max-pain",
+   "group": "dealer",
+   "what": "Max pain: the listed strike minimising the intrinsic value paid to holders of all open interest at expiry",
+   "fn": "maxPain",
+   "inputs": {
+    "strikes": [
+     90,
+     95,
+     100,
+     105,
+     110
+    ],
+    "callOi": [
+     100,
+     200,
+     500,
+     800,
+     300
+    ],
+    "putOi": [
+     600,
+     700,
+     400,
+     100,
+     50
+    ]
+   },
+   "expect": {
+    "maxPain": 100,
+    "payoutByStrike": {
+     "90": 10000,
+     "95": 4250,
+     "100": 3000,
+     "105": 6250,
+     "110": 14000
+    }
+   },
+   "tol": {
+    "exact": true
+   }
+  },
+  {
+   "id": "structure.iron-condor-exact",
+   "group": "structures",
+   "what": "Iron condor from quoted mids: credit, max profit, max loss and breakevens are exact piecewise-linear results",
+   "fn": "structureMetrics",
+   "inputs": {
+    "S": 100,
+    "legs": [
+     {
+      "type": "P",
+      "K": 85,
+      "side": "long",
+      "qty": 1,
+      "price": 1.0
+     },
+     {
+      "type": "P",
+      "K": 90,
+      "side": "short",
+      "qty": 1,
+      "price": 2.0
+     },
+     {
+      "type": "C",
+      "K": 110,
+      "side": "short",
+      "qty": 1,
+      "price": 2.1
+     },
+     {
+      "type": "C",
+      "K": 115,
+      "side": "long",
+      "qty": 1,
+      "price": 1.05
+     }
+    ],
+    "priceAt": "given"
+   },
+   "expect": {
+    "netCredit": 205.0,
+    "maxProfit": 205.0,
+    "maxLoss": -295.0,
+    "breakevens": [
+     87.95,
+     112.05
+    ],
+    "riskReward": 0.6949152542372882
+   },
+   "tol": {
+    "abs": 1e-09
+   }
+  },
+  {
+   "id": "structure.jade-lizard",
+   "group": "structures",
+   "what": "Jade lizard: short put + short call vertical; when the credit covers the call-spread width there is no upside risk",
+   "fn": "structureMetrics",
+   "inputs": {
+    "S": 100,
+    "legs": [
+     {
+      "type": "P",
+      "K": 95,
+      "side": "short",
+      "qty": 1,
+      "price": 3.4
+     },
+     {
+      "type": "C",
+      "K": 105,
+      "side": "short",
+      "qty": 1,
+      "price": 2.1
+     },
+     {
+      "type": "C",
+      "K": 110,
+      "side": "long",
+      "qty": 1,
+      "price": 0.4
+     }
+    ],
+    "priceAt": "given"
+   },
+   "expect": {
+    "netCredit": 510.0,
+    "upsideAtInfinity": 10.0,
+    "upsideRisk": false,
+    "maxProfit": 510.0,
+    "maxLoss": -8990.0,
+    "maxLossAt": 0,
+    "breakevens": [
+     89.9
+    ]
+   },
+   "tol": {
+    "abs": 1e-09
+   }
+  },
+  {
+   "id": "structure.call-broken-wing-butterfly",
+   "group": "structures",
+   "what": "1x-2x+1 call broken-wing butterfly 100/105/115: debit, peak at the body, loss capped to the upside",
+   "fn": "structureMetrics",
+   "inputs": {
+    "S": 100,
+    "legs": [
+     {
+      "type": "C",
+      "K": 100,
+      "side": "long",
+      "qty": 1,
+      "price": 4.0
+     },
+     {
+      "type": "C",
+      "K": 105,
+      "side": "short",
+      "qty": 2,
+      "price": 2.0
+     },
+     {
+      "type": "C",
+      "K": 115,
+      "side": "long",
+      "qty": 1,
+      "price": 0.3
+     }
+    ],
+    "priceAt": "given"
+   },
+   "expect": {
+    "netDebit": 30.0,
+    "maxProfit": 470.0,
+    "maxProfitAt": 105,
+    "maxLoss": -530.0,
+    "breakevens": [
+     100.3,
+     109.7
+    ]
+   },
+   "tol": {
+    "abs": 1e-09
+   }
+  },
+  {
+   "id": "structure.ratio-call-spread",
+   "group": "structures",
+   "what": "1x2 call ratio 100/110 for a small credit: loss unbounded above, max profit at the short strike",
+   "fn": "structureMetrics",
+   "inputs": {
+    "S": 100,
+    "legs": [
+     {
+      "type": "C",
+      "K": 100,
+      "side": "long",
+      "qty": 1,
+      "price": 3.0
+     },
+     {
+      "type": "C",
+      "K": 110,
+      "side": "short",
+      "qty": 2,
+      "price": 1.6
+     }
+    ],
+    "priceAt": "given"
+   },
+   "expect": {
+    "netCredit": 20.0,
+    "maxProfit": 1020.0,
+    "maxProfitAt": 110,
+    "maxLoss": null,
+    "lossUnbounded": true,
+    "breakevens": [
+     120.2
+    ]
+   },
+   "tol": {
+    "abs": 1e-09
+   }
+  },
+  {
+   "id": "structure.calendar-at-front-expiry",
+   "group": "structures",
+   "what": "Long call calendar (short 30d, long 60d, same strike) under a flat 30% smile and sticky moneyness: value at the front expiry is the back call with 30 days left; the peak is at the strike",
+   "fn": "structureMetrics",
+   "inputs": {
+    "S": 100,
+    "r": 0,
+    "q": 0,
+    "flatVol": 0.3,
+    "legs": [
+     {
+      "type": "C",
+      "K": 100,
+      "side": "short",
+      "qty": 1,
+      "T": 0.0821917808219178
+     },
+     {
+      "type": "C",
+      "K": 100,
+      "side": "long",
+      "qty": 1,
+      "T": 0.1643835616438356
+     }
+    ],
+    "priceAt": "model",
+    "horizon": "front-expiry"
+   },
+   "expect": {
+    "debitPerShare": 1.4193155748773398,
+    "valueAtStrikePerShare": 3.43013864387799,
+    "maxProfitPerShare": 2.01082306900065
+   },
+   "tol": {
+    "abs": 1e-06,
+    "note": "max over the spot grid within grid spacing"
+   }
+  },
+  {
+   "id": "skew.rr-bf-from-smile",
+   "group": "skew",
+   "what": "25 and 10 delta risk reversal (PUT minus CALL, the vendor's sign) and butterfly from a fitted slice; strikes solved with the smile's own vol (forward delta, r = q = 0); ATM is the delta-neutral straddle strike",
+   "fn": "skewMetrics",
+   "inputs": {
+    "F": 100,
+    "T": 0.5,
+    "svi": {
+     "a": 0.01,
+     "b": 0.04,
+     "rho": -0.6,
+     "m": 0.0,
+     "sigma": 0.15
+    }
+   },
+   "expect": {
+    "strikes": {
+     "put25": 92.01722696865073,
+     "call25": 109.37163770587348,
+     "put10": 82.96334483361416,
+     "call10": 117.84504000165421,
+     "atmDns": 100.79406172448512
+    },
+    "vols": {
+     "put25": 0.19420463877574398,
+     "call25": 0.17227065127714386,
+     "put10": 0.21938301815564132,
+     "call10": 0.1729461833826844,
+     "atm": 0.17786800106131778
+    },
+    "rr25": 0.021933987498600125,
+    "bf25": 0.00536964396512613,
+    "rr10": 0.04643683477295693,
+    "bf10": 0.018296599707845057
+   },
+   "tol": {
+    "abs": 1e-06
+   }
+  },
+  {
+   "id": "skew.flat-is-zero",
+   "group": "skew",
+   "what": "A flat smile has zero risk reversal and zero butterfly at every delta",
+   "fn": "skewMetrics",
+   "inputs": {
+    "F": 100,
+    "T": 0.5,
+    "svi": {
+     "a": 0.03125,
+     "b": 0,
+     "rho": 0,
+     "m": 0,
+     "sigma": 0.1
+    }
+   },
+   "expect": {
+    "rr25": 0.0,
+    "bf25": 0.0,
+    "rr10": 0.0,
+    "bf10": 0.0
+   },
+   "tol": {
+    "abs": 1e-10
+   }
+  },
+  {
+   "id": "rv.estimators",
+   "group": "realized",
+   "what": "Close-to-close (sample sd, n-1) and zero-mean RMS realized vol, and Parkinson high-low vol, annualised with 252",
+   "fn": "realizedVol",
+   "inputs": {
+    "closes": [
+     100,
+     101,
+     99.5,
+     100.5,
+     102,
+     101
+    ],
+    "highLow": [
+     [
+      101.5,
+      99.0
+     ],
+     [
+      102,
+      100.2
+     ],
+     [
+      101,
+      99.1
+     ],
+     [
+      101.2,
+      99.8
+     ],
+     [
+      102.6,
+      100.4
+     ]
+    ]
+   },
+   "expect": {
+    "closeToClose": 0.21292724883866165,
+    "zeroMeanRms": 0.19305031003860926,
+    "parkinson": 0.18892508278422787
+   },
+   "tol": {
+    "abs": 1e-10
+   }
+  },
+  {
+   "id": "iv.rank-vs-percentile",
+   "group": "volatility",
+   "what": "IV rank (position in the min-max range) and IV percentile (share of days at or below today, today included) are different numbers",
+   "fn": "ivRankPercentile",
+   "inputs": {
+    "history": [
+     0.3,
+     0.35,
+     0.4,
+     0.25,
+     0.5,
+     0.45,
+     0.32
+    ],
+    "current": 0.4
+   },
+   "expect": {
+    "rank": 0.6,
+    "percentile": 0.7142857142857143
+   },
+   "tol": {
+    "abs": 1e-12
+   }
+  },
+  {
+   "id": "edge.p-equals-q-is-zero",
+   "group": "probability",
+   "what": "When the real-world distribution is the same lognormal as the risk-neutral one (GARCH constant at the implied vol, normal innovations, drift-neutral), every structure's edge is zero and POP_P = POP_Q",
+   "fn": "structureMetrics",
+   "inputs": {
+    "ref": "pop.short-strangle-flat",
+    "realWorld": {
+     "kind": "lognormal",
+     "vol": 0.3,
+     "driftNeutral": true
+    }
+   },
+   "expect": {
+    "edge": 0.0,
+    "popP": "equals popQ"
+   },
+   "tol": {
+    "abs": 1e-06,
+    "note": "quantile-grid integration error bound; 1e-4 when P is a 201-point quantile grid"
+   }
+  },
+  {
+   "id": "realworld.drift-neutral-shift",
+   "group": "real-world",
+   "what": "Shift the simulated log-return sample by c so that E_P[S_T] = F: c = ln(F/S) - ln(mean(exp X))",
+   "fn": "driftNeutralShift",
+   "inputs": {
+    "logReturns": [
+     -0.1,
+     0.0,
+     0.1
+    ],
+    "forwardOverSpot": 1.0
+   },
+   "expect": {
+    "shift": -0.0033305595611344383
+   },
+   "tol": {
+    "abs": 1e-12
+   }
+  },
+  {
+   "id": "event.mixture-frown",
+   "group": "events",
+   "what": "An earnings slice priced as an equal mixture of two lognormals (F x 1.08 and F x 0.92, diffusive 25%, 10 days) keeps the forward and produces an ATM-concave smile that SVI (convex in k) cannot fit; the engine must fall back to the mixture",
+   "fn": "mixturePrice",
+   "inputs": {
+    "F": 100,
+    "T": 0.0273972602739726,
+    "diffusiveVol": 0.25,
+    "up": 1.08,
+    "down": 0.92,
+    "weights": [
+     0.5,
+     0.5
+    ]
+   },
+   "expect": {
+    "forward": 100.0,
+    "impliedVols": {
+     "92": 0.5275404831408168,
+     "96": 0.5916655079560431,
+     "100": 0.6124587672402881,
+     "104": 0.578398964996835,
+     "108": 0.5164956945641942
+    },
+    "concaveAtAtm": true
+   },
+   "tol": {
+    "abs": 1e-06
+   }
+  },
+  {
+   "id": "delta.sticky-moneyness-adjusted",
+   "group": "greeks",
+   "what": "Smile-adjusted delta under sticky moneyness: delta_BS + vega x dsigma/dS with sigma = sigma0 + s ln(K/F), so dsigma/dS = -s/S",
+   "fn": "smileDelta",
+   "inputs": {
+    "S": 100,
+    "K": 100,
+    "T": 0.25,
+    "r": 0,
+    "q": 0,
+    "sigmaAtm": 0.3,
+    "skewSlope": -0.1,
+    "type": "C"
+   },
+   "expect": {
+    "deltaBS": 0.5298926440528947,
+    "vega": 19.891091580374855,
+    "dSigmaDS": 0.001,
+    "deltaAdjusted": 0.5497837356332697
+   },
+   "tol": {
+    "abs": 1e-10
+   }
+  },
+  {
+   "id": "pop.touch-probability",
+   "group": "probability",
+   "what": "Risk-neutral probability that spot touches a level before expiry (reflection principle with log drift -sigma^2/2, r = q = 0); roughly twice the probability of finishing beyond it",
+   "fn": "touchProbability",
+   "inputs": {
+    "S": 100,
+    "level": 110,
+    "vol": 0.3,
+    "T": 0.0821917808219178
+   },
+   "expect": {
+    "touch": 0.25519701342887147,
+    "finishBeyond": 0.12483173698015738,
+    "ratio": 2.044327985834534
+   },
+   "tol": {
+    "abs": 1e-09
+   }
+  },
+  {
+   "id": "vix.model-free-variance-flat",
+   "group": "volatility",
+   "what": "Model-free implied variance (2/T) integral of OTM prices / K^2 dK (r = 0, strikes at the forward split) equals sigma^2 on a flat smile",
+   "fn": "modelFreeVariance",
+   "inputs": {
+    "F": 100,
+    "T": 0.5,
+    "flatVol": 0.25
+   },
+   "expect": {
+    "variance": 0.0625,
+    "vol": 0.25,
+    "exactVariance": 0.0625
+   },
+   "tol": {
+    "abs": 1e-06
+   }
+  },
+  {
+   "id": "realworld.sample-grid-integration",
+   "group": "real-world",
+   "what": "The real-world law is carried as N = 4096 equally weighted sorted log-return samples; expectations are sample means. On midpoint quantiles of the lognormal the call value, the ITM probability and the forward are reproduced to the stated error",
+   "fn": "expectUnderSamples",
+   "inputs": {
+    "S": 100,
+    "sigma": 0.3,
+    "T": 0.0821917808219178,
+    "K": 105,
+    "samples": "x_i = -sigma^2 T/2 + sigma sqrt(T) Phi^-1((i + 0.5)/4096), i = 0..4095"
+   },
+   "expect": {
+    "callSampleMean": 1.566195743219784,
+    "callClosedForm": 1.5664370191311872,
+    "pItmSample": 0.270751953125,
+    "pItmClosedForm": 0.2708372364641189,
+    "forwardSampleMean": 99.99987949232724
+   },
+   "tol": {
+    "abs": 0.002,
+    "note": "sample-mean vs closed form; the engine must reproduce callSampleMean itself to 1e-9"
+   }
+  },
+  {
+   "id": "ssvi.slice-values",
+   "group": "smile-fit",
+   "what": "SSVI slice w(k) = theta/2 (1 + rho phi k + sqrt((phi k + rho)^2 + 1 - rho^2)) with the power-law phi; w(0) = theta",
+   "fn": "ssviW",
+   "inputs": {
+    "theta": 0.04,
+    "rho": -0.7,
+    "eta": 1.0,
+    "gamma": 0.5,
+    "k": [
+     -0.2,
+     0,
+     0.2
+    ]
+   },
+   "expect": {
+    "phi": 4.902903378454601,
+    "w": {
+     "-0.2": 0.07024854242286786,
+     "0": 0.04,
+     "0.2": 0.021617560691912653
+    }
+   },
+   "tol": {
+    "abs": 1e-12
+   }
+  },
+  {
+   "id": "forward.implied-carry",
+   "group": "forward",
+   "what": "Carry implied by the parity forward: q_implied = r - ln(F/S)/T (dividend yield plus borrow cost); compared with the vendor's fee_rate it flags hard-to-borrow names",
+   "fn": "impliedCarry",
+   "inputs": {
+    "S": 50,
+    "F": 50.2,
+    "r": 0.045,
+    "T": 0.5
+   },
+   "expect": {
+    "q": 0.03701595746092498
+   },
+   "tol": {
+    "abs": 1e-12
+   }
+  },
+  {
+   "id": "pop.put-credit-spread-svi",
+   "group": "probability",
+   "what": "Short 95/90 put vertical on the skewed SVI slice (r = q = 0): credit from the slice, breakeven 95 - credit, POP_Q = 1 - CDF(BE) with the closed-form smile CDF; the skew makes it differ from the flat-ATM answer",
+   "fn": "structureMetrics",
+   "inputs": {
+    "F": 100,
+    "T": 0.5,
+    "svi": {
+     "a": 0.01,
+     "b": 0.04,
+     "rho": -0.6,
+     "m": 0,
+     "sigma": 0.15
+    },
+    "legs": [
+     {
+      "type": "P",
+      "K": 95,
+      "side": "short",
+      "qty": 1
+     },
+     {
+      "type": "P",
+      "K": 90,
+      "side": "long",
+      "qty": 1
+     }
+    ],
+    "priceAt": "model"
+   },
+   "expect": {
+    "creditPerShare": 1.274345458166862,
+    "breakeven": 93.72565454183314,
+    "popQ": 0.7149999395486663,
+    "popIfFlatAtAtmVol": 0.673294816168316,
+    "maxProfit": 127.4345458166862,
+    "maxLoss": -372.5654541833138
+   },
+   "tol": {
+    "abs": 1e-08
+   }
+  }
+ ]
+}
