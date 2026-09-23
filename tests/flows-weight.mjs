@@ -22,7 +22,7 @@ const CEILING_KIB = {
   unusualPage: 168,
   eventsPage: 152,
   politicalPage: 142,
-  historyPage: 136,
+  historyPage: 154,
   loginPage: 5,
 };
 

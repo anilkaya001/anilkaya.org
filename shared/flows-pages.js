@@ -1010,94 +1010,25 @@ ${UI_SCRIPT}
 }
 
 export function historyPage({ username = "" } = {}) {
-  const lede = "What the board said, and what happened next.";
-  return `${head("Flows \u2014 Track record", lede)}
-${shell("History", "history", username, `
-  <div class="flows-status" id="recStatus" role="status">Loading the record\u2026</div>
-
-  <div class="flows-controls">
-    <p class="flows-lede">${lede}</p>
-  </div>
-
-  <section class="rec-block" aria-labelledby="recCurveH">
-    <h2 id="recCurveH">Forward return by horizon</h2>
-    <p class="rec-note" id="recCurveNote"></p>
-    <div id="recCurve"></div>
-  </section>
-
-  <section class="rec-block" aria-labelledby="recTableH">
-    <h2 id="recTableH">Every scored session</h2>
-    <div class="flows-tablewrap" id="recTableWrap" tabindex="0" role="region"
-         aria-label="Scored sessions" hidden>
-      <table class="flows-table rec-table">
-        <caption class="flows-caption">
-          One row per published session, once enough sessions have passed to
-          measure it. Return is the equal-weighted price return of that
-          session&#39;s names, long side minus short side, from the close the
-          board was published at. Not a strategy: no costs, no slippage, no
-          borrow, and no position sizing.
-        </caption>
-        <thead>
-          <tr>
-            <th scope="col">Session</th>
-            <th scope="col" class="c-num">Long</th>
-            <th scope="col" class="c-num">Short</th>
-            <th scope="col" class="c-num"><abbr title="Equal-weighted price return of the long names minus that of the short names, over the stated horizon">L&#8722;S</abbr></th>
-            <th scope="col" class="c-num"><abbr title="Share of published names whose price moved in the direction the board leaned">Hit</abbr></th>
-            <th scope="col" class="c-num"><abbr title="Names that could not be scored because they left the screened universe before the horizon closed. A high number makes the row&#39;s return unreliable, not merely noisy">Lost</abbr></th>
-          </tr>
-        </thead>
-        <tbody id="recBody"></tbody>
-      </table>
-    </div>
-  </section>
-
-  <section class="rec-block" aria-labelledby="recFeatH">
-    <h2 id="recFeatH">What actually predicted, feature by feature</h2>
-    <div class="flows-tablewrap" id="recFeatWrap" tabindex="0" role="region"
-         aria-label="Feature information coefficients" hidden>
-      <table class="flows-table rec-table rec-feat">
-        <caption class="flows-caption">
-          The rank correlation of each archived board column with the forward
-          return, measured inside each session on the return scaled by the
-          name’s own volatility, then averaged across sessions. A single
-          correlation pooled across sessions scores a volatility column on
-          which way the market went; it is kept, labelled, as the secondary
-          figure. This is the research loop, in public: the features the score
-          is built from, measured against what happened next, with the sample
-          they were measured on. An IC near zero is a finding too.
-        </caption>
-        <thead>
-          <tr>
-            <th scope="col">Feature</th>
-            <th scope="col" class="c-num"><abbr title="Mean of the per-session Spearman coefficients with the volatility-scaled forward return at the stated horizon">Mean IC</abbr></th>
-            <th scope="col" class="c-num"><abbr title="Standard deviation of the per-session coefficients">SD</abbr></th>
-            <th scope="col" class="c-num"><abbr title="Sessions whose coefficient was positive, of the sessions scored">Positive</abbr></th>
-            <th scope="col" class="c-num"><abbr title="Mean over its standard error with the effective sample of sessions divided by the horizon; computed only once a feature is ranked">t</abbr></th>
-            <th scope="col" class="c-num"><abbr title="Correlation of each session’s coefficient with that session’s mean forward return: near one means the feature is a bet on market direction">Market</abbr></th>
-            <th scope="col" class="c-num"><abbr title="Secondary: one Spearman coefficient over every session’s raw pairs pooled together">Pooled IC</abbr></th>
-            <th scope="col" class="c-num"><abbr title="Measured feature-return pairs behind the pooled figure. Consecutive sessions overlap, so the effective sample is far smaller">Pairs</abbr></th>
-          </tr>
-        </thead>
-        <tbody id="recFeatBody"></tbody>
-      </table>
-    </div>
-    <div id="recFeatNotes" class="rec-notes"></div>
-  </section>
-
-  <p class="flows-foot">
-    These are PRICE returns of an equal-weighted basket, gross of everything:
-    no commissions, no slippage, no short borrow, no dividends. They are the
-    arithmetic of published closes and nothing more, which is the only claim
-    this page can make without inventing a parameter. A handful of sessions is
-    not evidence of anything; the sample size is stated because it is the most
-    important number here.
-  </p>
-`)}
-${UI_SCRIPT}
-<script src="${v("/assets/js/flows-history.js")}" defer></script>
-</body>
-</html>`;
+  return flowsDocument({
+    title: "History",
+    description: "What the board said, and what happened next.",
+    active: "history",
+    username,
+    chrome: false,
+    styles: ["/assets/css/flows-record.css"],
+    scripts: ["/assets/js/flows-history.js"],
+    body: `
+  <header class="flows-head rec-head" data-fx-hero>
+    <h1 id="fxTitle">History</h1>
+    <span class="rec-head-s" id="recHeadState"></span>
+    <button type="button" class="ui-info" id="recAbout" aria-label="About the track record"
+            aria-haspopup="dialog" aria-controls="fxPop" aria-expanded="false">${glyph("info")}</button>
+  </header>
+  <p class="visually-hidden" id="recStatus" role="status">Loading the record\u2026</p>
+  <div class="ui-grid rec-grid" id="recApp"></div>
+`,
+  });
 }
 
 function escapeHTML(value) {

@@ -367,23 +367,35 @@ try {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
 
+    const popOf = (sel) => page.evaluate((sel) => {
+      const t = document.querySelector(sel);
+      if (!t) return null;
+      t.click();
+      const pop = document.getElementById("fxPop");
+      const text = pop ? pop.textContent : null;
+      window.FlowsUI.closeInfo();
+      return text;
+    }, sel);
+
     {
       await page.goto(url("/flows/history/"), { waitUntil: "domcontentloaded" });
       await page.waitForSelector("#recCurve .rec-empty", { timeout: 15000 });
-      const note = await page.locator("#recCurve .rec-empty").textContent();
-      ok(/first pipeline run|No session has been scored/.test(note),
-         `an empty record explains WHY it is empty (${note})`);
+      const note = await popOf("#recCurve .rec-empty [data-info]");
+      ok(/first pipeline run|No session has been scored/.test(note || ""),
+         `an empty record explains WHY it is empty, one tap away on its silent state (${note})`);
       const status = await page.locator("#recStatus").textContent();
       ok(/retained|empty/.test(status), `and the status says so too (${status})`);
 
-      eq(await page.locator("#recCurve svg").count(), 0,
+      eq(await page.locator("#recCurve svg.rc").count(), 0,
          "nothing is plotted when nothing has been measured");
 
-      eq(await page.locator("#recFeatWrap").isHidden(), true,
-         "and no evidence table is framed around zero rows");
-      const featEmpty = await page.locator("#recFeatNotes").textContent();
-      ok(/not been measured yet/.test(featEmpty),
-         `the evidence section says it has not been measured (${featEmpty})`);
+      eq(await page.locator("#recFeatWrap .rf-row").count(), 0,
+         "and no evidence rows are framed around zero columns");
+      eq(await page.locator("#recFeatWrap").getAttribute("data-empty"), "pending",
+         "the evidence module wears the pending state instead");
+      const featEmpty = await popOf("#recFeatNotes [data-info]");
+      ok(/not been measured yet/.test(featEmpty || ""),
+         `and its disclosure says it has not been measured (${featEmpty})`);
     }
 
     {
@@ -395,16 +407,16 @@ try {
         ],
       });
       await page.goto(url("/flows/history/"), { waitUntil: "domcontentloaded" });
-      await page.waitForSelector("#recCurve .rec-empty, #recCurve svg", { timeout: 15000 });
+      await page.waitForSelector("#recCurve .rec-empty, #recCurve svg.rc", { timeout: 15000 });
 
-      eq(await page.locator("#recCurve svg").count(), 0,
+      eq(await page.locator("#recCurve svg.rc").count(), 0,
          "a horizon below the stated session floor is not plotted");
-      const note = await page.locator("#recCurve .rec-empty").textContent();
-      ok(/3/.test(note), `and the note names how many sessions there actually are (${note})`);
+      const note = await popOf("#recCurve .rec-empty [data-info]");
+      ok(/3/.test(note || ""), `and the note names how many sessions there actually are (${note})`);
 
-      eq(await page.locator("#recBody th").first().textContent(), "2026-08-20",
-         "though the per-session table still shows the session that was measured");
-      eq(await page.locator("#recBody td.c-leg").count(), 2,
+      eq(await page.locator(".rc-sess").first().getAttribute("data-d"), "2026-08-20",
+         "though the session list still shows the session that was measured");
+      eq(await page.locator(".rc-sess").first().locator(".c-leg").count(), 2,
          "with both legs rendered as measurements");
     }
 
@@ -450,10 +462,10 @@ try {
         },
       });
       await page.goto(url("/flows/history/"), { waitUntil: "domcontentloaded" });
-      await page.waitForSelector("#recCurve svg", { timeout: 15000 });
+      await page.waitForSelector("#recCurve svg.rc", { timeout: 15000 });
 
       const plot = await page.evaluate(() => {
-        const svg = document.querySelector("#recCurve svg");
+        const svg = document.querySelector("#recCurve svg.rc");
         const dots = Array.from(svg.querySelectorAll(".rc-dot"));
         const zero = svg.querySelector(".rc-zero");
         const vb = svg.getAttribute("viewBox").split(/\s+/).map(Number);
@@ -472,9 +484,8 @@ try {
          "only horizons past the session floor AND with a measured mean are plotted");
       eq(plot.negs, 1, "and a negative horizon is drawn as negative");
 
-      const hitCell = await page.evaluate(() =>
-        document.querySelectorAll("#recBody tr")[1].querySelectorAll("td")[3].textContent.trim());
-      eq(hitCell, "\u2014", "a session with no hit rate shows the em dash, never a confident 0%");
+      const hitCell = await page.locator(".rc-sess").nth(1).locator(".c-hit").textContent();
+      eq(hitCell.trim(), "—", "a session with no hit rate shows the em dash, never a confident 0%");
 
       ok(plot.zeroY !== null && plot.zeroY > 0 && plot.zeroY < plot.height,
          `the zero line is drawn inside the plot (${plot.zeroY} of ${plot.height})`);
@@ -486,25 +497,28 @@ try {
       ok(/long minus short|Long-minus-short/i.test(plot.aria || ""),
          `the chart states what it measures to a screen reader (${plot.aria})`);
 
-      const attrition = await page.locator("#recBody td.is-attrition").count();
+      const attrition = await page.locator(".rc-sess .c-lost.is-attrition").count();
       eq(attrition, 1, "a session that lost more than a fifth of its names is marked");
-      const marked = await page.locator("#recBody td.is-attrition").getAttribute("title");
+      const marked = await page.locator(".rc-sess .c-lost.is-attrition").getAttribute("title");
       ok(marked && /not a random sample/.test(marked),
          "and says why that makes the row unreliable rather than noisy");
 
       const status = await page.locator("#recStatus").textContent();
       ok(/40 sessions retained/.test(status), `the status leads with the sample (${status})`);
 
-      const legClasses = await page.evaluate(() => {
-        const tr = document.querySelector("#recBody tr");
-        return Array.from(tr.querySelectorAll("td")).slice(0, 3).map((td) => td.className);
+      const legTones = await page.evaluate(() => {
+        const row = document.querySelector(".rc-sess");
+        return ["c-long", "c-short", "c-ls"].map((c) => {
+          const n = row.querySelector("." + c);
+          return { cls: n.className, tone: n.getAttribute("data-tone") };
+        });
       });
-      ok(/c-leg/.test(legClasses[0]) && !/fb-pos|fb-neg/.test(legClasses[0]),
-         `the long leg is a measurement, not a verdict (${legClasses[0]})`);
-      ok(/c-leg/.test(legClasses[1]) && !/fb-pos|fb-neg/.test(legClasses[1]),
-         `and so is the short leg (${legClasses[1]})`);
-      ok(/fb-pos|fb-neg/.test(legClasses[2]),
-         `while the spread, which IS a result, carries its sign (${legClasses[2]})`);
+      ok(/c-leg/.test(legTones[0].cls) && !legTones[0].tone,
+         `the long leg is a measurement, not a verdict (${JSON.stringify(legTones[0])})`);
+      ok(/c-leg/.test(legTones[1].cls) && !legTones[1].tone,
+         `and so is the short leg (${JSON.stringify(legTones[1])})`);
+      ok(legTones[2].tone === "up" || legTones[2].tone === "down",
+         `while the spread, which IS a result, carries its sign (${JSON.stringify(legTones[2])})`);
 
       const axis = await page.evaluate(() =>
         Array.from(document.querySelectorAll("#recCurve .rc-axislabel")).map((t) => t.textContent));
@@ -514,70 +528,62 @@ try {
          `and the extremes carry a magnitude (${axis.join(", ")})`);
 
       const feat = await page.evaluate(() => {
-        const own = (node) => Array.from(node.childNodes)
-          .filter((c) => c.nodeType === Node.TEXT_NODE).map((c) => c.textContent).join("").trim();
-        const rows = Array.from(document.querySelectorAll("#recFeatBody tr")).map((tr) => {
-          const th = tr.querySelector("th");
-          const gloss = th.querySelector(".rec-feat-gloss");
-          const meanCell = tr.querySelector("td.c-icm");
-          const icCell = tr.querySelector("td.c-icp");
-          const why = icCell.querySelector(".rec-ic-why");
-          const meanWhy = meanCell.querySelector(".rec-ic-why");
+        const rows = Array.from(document.querySelectorAll("#recFeatBody .rf-row")).map((b) => {
+          b.click();
+          const pop = document.getElementById("fxPop");
+          const facts = {};
+          for (const dt of pop.querySelectorAll("dt")) facts[dt.textContent] = dt.nextElementSibling ? dt.nextElementSibling.textContent : null;
+          const text = pop.textContent;
+          window.FlowsUI.closeInfo();
+          const state = b.querySelector(".rf-state.is-pending");
           return {
-            key: own(th),
-            hyp: gloss ? gloss.textContent.trim() : null,
-            mean: own(meanCell),
-            meanTitle: meanWhy ? meanWhy.textContent.trim() : null,
-            pos: tr.querySelector("td.c-icpos").textContent.trim(),
-            t: tr.querySelector("td.c-ict").textContent.trim(),
-            mkt: tr.querySelector("td.c-icmkt").textContent.trim(),
-            ic: own(icCell),
-            icTitle: why ? why.textContent.trim() : null,
-            n: tr.querySelector("td.c-pairs").textContent.trim(),
-            cells: tr.querySelectorAll("td").length,
+            key: b.getAttribute("data-key"),
+            mean: b.querySelector(".c-icm").textContent.trim(),
+            unranked: state ? state.getAttribute("title") : null,
+            facts, text,
           };
         });
-        return {
-          rows,
-          hidden: document.getElementById("recFeatWrap").hidden,
-          notes: Array.from(document.querySelectorAll("#recFeatNotes .rec-note")).map((p) => p.textContent),
-        };
+        const about = document.querySelector("#recFeatWrap .ui-mod-h .ui-info");
+        about.click();
+        const notes = document.getElementById("fxPop").textContent;
+        window.FlowsUI.closeInfo();
+        return { rows, notes, hidden: document.getElementById("recFeatWrap").hidden };
       });
-      eq(feat.hidden, false, "the evidence table is shown once the record carries one");
+      eq(feat.hidden, false, "the evidence module is shown once the record carries one");
       eq(feat.rows.length, 4, "every published column gets a row");
 
       const byKey = Object.fromEntries(feat.rows.map((r) => [r.key, r]));
-      ok(feat.rows.every((r) => r.cells === 7),
+      ok(feat.rows.every((r) => ["Mean IC", "SD", "Positive", "t", "Market tie", "Pooled IC", "Pairs"].every((k) => k in r.facts)),
          "every row carries the session mean, its spread, its sign count, t, the market tie, " +
-         "the pooled figure and its pairs");
+         "the pooled figure and its pairs, one tap away on the row");
       eq(byKey.s.mean, "+0.042", "a positive session-mean IC carries its sign explicitly");
-      eq(byKey.cnv.mean, "\u22120.011", "and a negative one carries a real minus, U+2212");
-      eq(byKey.s.meanTitle, null, "a ranked column wears no unranked tag");
-      ok(/unranked/.test(byKey.cnv.meanTitle || "") && /12 of 30/.test(byKey.cnv.meanTitle || ""),
-         `an unranked column says so, with its sessions against the floor (${byKey.cnv.meanTitle})`);
-      eq(byKey.s.pos, "20 of 32", "the positive sessions are counted against the sessions scored");
-      eq(byKey.s.t, "+0.63", "a ranked column prints its t");
-      eq(byKey.cnv.t, "\u2014", "an unranked one prints none rather than a t it cannot support");
-      eq(byKey.cnv.mkt, "+0.88", "and the market tie is printed where a reader can see the bet");
-      eq(byKey.s.ic, "+0.031", "the pooled figure is still printed, as the secondary column");
-      eq(byKey.s.n, "640", "with the pairs it was measured on beside it");
+      eq(byKey.cnv.mean, "−0.011", "and a negative one carries a real minus, U+2212");
+      eq(byKey.s.unranked, null, "a ranked column wears no unranked mark");
+      ok(/unranked/.test(byKey.cnv.unranked || "") && /12 of 30/.test(byKey.cnv.unranked || ""),
+         `an unranked column says so, with its sessions against the floor (${byKey.cnv.unranked})`);
+      eq(byKey.s.facts.Positive, "20 of 32", "the positive sessions are counted against the sessions scored");
+      eq(byKey.s.facts.t, "+0.63", "a ranked column prints its t");
+      eq(byKey.cnv.facts.t, "—", "an unranked one prints none rather than a t it cannot support");
+      eq(byKey.cnv.facts["Market tie"], "+0.88", "and the market tie is printed where a reader can see the bet");
+      eq(byKey.s.facts["Pooled IC"], "+0.031", "the pooled figure is still printed, as the secondary figure");
+      eq(byKey.s.facts.Pairs, "640", "with the pairs it was measured on beside it");
 
-      eq(byKey.purity.ic, "\u2014", "a constant column shows the em dash, never 0.000");
-      ok(/no variation/.test(byKey.purity.icTitle || ""),
-         `and names its reason (${byKey.purity.icTitle})`);
-      eq(byKey.purity.mean, "\u2014", "in the session column too");
-      ok(/no variation to rank in any session/.test(byKey.purity.meanTitle || ""),
-         `with the session reason beside it (${byKey.purity.meanTitle})`);
-      eq(byKey.vrp.ic, "\u2014", "so does a column below the sample floor");
-      ok(/fewer than 20/.test(byKey.vrp.icTitle || ""),
-         `with the floor named rather than the variance (${byKey.vrp.icTitle})`);
+      eq(byKey.purity.facts["Pooled IC"], "—", "a constant column shows the em dash, never 0.000");
+      ok(/no variation to rank/.test(byKey.purity.text),
+         `and names its reason (${byKey.purity.text.slice(0, 160)})`);
+      eq(byKey.purity.mean, "—", "in the session figure too");
+      ok(/no variation to rank in any session/i.test(byKey.purity.text),
+         "with the session reason beside it");
+      eq(byKey.vrp.facts["Pooled IC"], "—", "so does a column below the sample floor");
+      ok(/fewer than 20/i.test(byKey.vrp.text),
+         "with the floor named rather than the variance");
 
-      ok(/composite|claim/.test(byKey.s.hyp || ""),
-         `the score's row states what it is testing, in text a reader can see rather than a hover (${byKey.s.hyp})`);
-      ok(/agreement|conviction/.test(byKey.cnv.hyp || ""),
-         `and so does conviction's (${byKey.cnv.hyp})`);
+      ok(/composite|claim/.test(byKey.s.text),
+         `the score's row states what it is testing, in its disclosure (${byKey.s.text.slice(0, 120)})`);
+      ok(/agreement|conviction/.test(byKey.cnv.text),
+         "and so does conviction's");
 
-      const notes = feat.notes.join(" | ");
+      const notes = feat.notes;
       ok(/10 sessions/.test(notes), `the horizon is stated (${notes.slice(0, 80)})`);
       ok(/percentileRank/.test(notes), "the method is printed as the payload states it");
       ok(/conditional on selection/.test(notes), "including the selection caveat");
@@ -591,17 +597,17 @@ try {
       await put("record", {
         status: "ok", retained: 40, firstSession: "2026-07-01", lastSession: "2026-08-24",
         horizons: [
-          { k: 1, ls: -0.004, n: 39 },
-          { k: 5, ls: -0.012, n: 35 },
-          { k: 10, ls: -0.021, n: 30 },
+          { k: 1, ls: -0.004, n: 39, sd: 0.01, hit: 0.44, hitN: 900, hitSessions: 39 },
+          { k: 5, ls: -0.012, n: 35, sd: 0.02 },
+          { k: 10, ls: -0.021, n: 30, sd: 0.05 },
         ],
         sessions: [{ d: "2026-08-24", long: -0.01, short: 0.011, ls: -0.021, hit: 0.38, lost: 0, names: 24 }],
       });
       await page.goto(url("/flows/history/"), { waitUntil: "domcontentloaded" });
-      await page.waitForSelector("#recCurve svg", { timeout: 15000 });
+      await page.waitForSelector("#recCurve svg.rc", { timeout: 15000 });
 
       const neg = await page.evaluate(() => {
-        const svg = document.querySelector("#recCurve svg");
+        const svg = document.querySelector("#recCurve svg.rc");
         const zero = Number(svg.querySelector(".rc-zero").getAttribute("y1"));
         const ys = Array.from(svg.querySelectorAll(".rc-dot")).map((d) => Number(d.getAttribute("cy")));
         return {
@@ -609,6 +615,9 @@ try {
           plotTop: Number(svg.getAttribute("data-plot-top")),
           plotHeight: Number(svg.getAttribute("data-plot-height")),
           negs: svg.querySelectorAll(".rc-dot.is-neg").length,
+          clear: [...svg.querySelectorAll(".rc-dot")].map((d) => d.classList.contains("is-clear")),
+          whiskers: [...svg.querySelectorAll(".rc-wh")].map((l) => ({ open: l.classList.contains("is-open"), y1: +l.getAttribute("y1"), y2: +l.getAttribute("y2") })),
+          capsules: svg.querySelectorAll(".rc-ci").length,
         };
       });
 
@@ -621,6 +630,30 @@ try {
       ok(neg.ys.every((y) => y > neg.zero),
          `and every point sits below it rather than being rescaled above it ` +
          `(zero at ${neg.zero}, points at ${neg.ys.map((y) => y.toFixed(0)).join(", ")})`);
+
+      eq(neg.capsules, 3, "each measured spread carries its naive interval, drawn");
+      ok(neg.whiskers.length === 3 && neg.whiskers.every((w) => !w.open),
+         "and its adjusted interval: at 39, 35 and 30 sessions each horizon keeps at least two " +
+         "independent windows (30 / 10 = 3), so none of the three is unbounded");
+      const w10 = neg.whiskers[2], w1 = neg.whiskers[0];
+      ok(Math.abs(w10.y2 - w10.y1) > Math.abs(w1.y2 - w1.y1),
+         "and the 10-session interval is drawn wider than the 1-session one: overlapping " +
+         "windows divide the sample by the horizon, and a wider whisker is that honesty made visible");
+      eq(neg.clear[0], true,
+         "a mean whose adjusted interval clears zero is drawn in colour (−0.4% ± 0.3% at 39 sessions)");
+      eq(neg.clear[2], false,
+         "while one whose interval spans zero is grey: −2.1% with a 5% spread over three " +
+         "independent windows cannot be told apart from chance, and the chart says so without a word");
+
+      const hit = await page.evaluate(() => {
+        const svg = document.querySelector("#recHit svg.rc");
+        return svg ? { dots: svg.querySelectorAll(".rc-dot").length, clear: svg.querySelector(".rc-dot").classList.contains("is-clear") } : null;
+      });
+      ok(hit && hit.dots === 1,
+         "the hit-rate chart draws the one horizon that published a hit rate with its sessions, and no other");
+      eq(hit && hit.clear, false,
+         "and 44% over 39 sessions is grey: counted as one call a session its interval reaches past 50%, " +
+         "even though 900 names would make the naive interval look decisive");
     }
 
     eq(errors.length, 0, `the track record threw nothing (${errors[0] || ""})`);
@@ -632,14 +665,14 @@ try {
     eq(overflow, false, "and the track record overflows nothing at 390px");
 
     await page.waitForFunction(() => {
-      const svg = document.querySelector("#recCurve svg");
+      const svg = document.querySelector("#recCurve svg.rc");
       if (!svg) return false;
       const drawn = Number(svg.getAttribute("viewBox").split(/\s+/)[2]);
       const shown = svg.getBoundingClientRect().width;
       return shown > 0 && drawn / shown > 0.85 && drawn / shown < 1.15;
     }, { timeout: 10000 }).catch(() => {});
     const chart = await page.evaluate(() => {
-      const svg = document.querySelector("#recCurve svg");
+      const svg = document.querySelector("#recCurve svg.rc");
       if (!svg) return null;
       const vb = svg.getAttribute("viewBox").split(/\s+/).map(Number);
       return { drawn: vb[2], shown: svg.getBoundingClientRect().width,
