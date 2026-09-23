@@ -1117,6 +1117,43 @@ try {
 
     eq((await get("/api/flows/card?t=AAPL")).status, 401,
        "an anonymous caller cannot read a card");
+
+    const regimeBefore = await get("/api/flows/regime", { headers: cookie });
+    eq(regimeBefore.status, 200, "an unwritten regime is not an error");
+    eq((await regimeBefore.json()).status, "pending", "it reads pending until the pipeline writes it");
+
+    const dossier = JSON.stringify({
+      v: 1, ticker: "AAPL", scope: "deep", sessionDate: "2026-09-22",
+      cone: { status: "ok", iv30: 0.221, tenors: [{ days: 7, iv: 0.221, pct: 0.2191 }] },
+      skew: { status: "unavailable", code: "read-failed", reason: "the vendor call failed after its retries" },
+    });
+    eq((await putCard("card-x:AAPL", dossier)).status, 200,
+       "the volatility dossier ingests under card-x:<TICKER>, beside the card and never inside it");
+    const xRead = await get("/api/flows/card-x?t=aapl", { headers: cookie });
+    eq(xRead.status, 200, "an authenticated dossier read succeeds with the ticker case-folded");
+    const xBody = await xRead.json();
+    eq(xBody.cone.tenors[0].pct, 0.2191, "and the nested panels survive the byte passthrough");
+    eq(xBody.skew.code, "read-failed", "a silent panel keeps its code, so the glyph can say which silence it is");
+    eq(xRead.headers.get("cache-control"), "no-store", "the dossier is never cached");
+    const xMissing = await get("/api/flows/card-x?t=ZZZZ", { headers: cookie });
+    eq(xMissing.status, 200, "a dossier the run has not written is not an error");
+    eq((await xMissing.json()).status, "pending", "and it reports pending honestly");
+    for (const bad of ["", "../../etc/passwd", "1ABC", "TOOLONGTICKER"]) {
+      eq((await get("/api/flows/card-x?t=" + encodeURIComponent(bad), { headers: cookie })).status, 400,
+         `the dossier read refuses the ticker ${JSON.stringify(bad)}`);
+    }
+    for (const bad of ["card-x:", "card-x:a b", "card-x:1ABC", "card-y:AAPL"]) {
+      eq((await putCard(bad, dossier)).status, 400, `ingest refuses the key ${JSON.stringify(bad)}`);
+    }
+    eq((await get("/api/flows/card-x?t=AAPL")).status, 401, "an anonymous caller cannot read a dossier");
+
+    const regime = JSON.stringify({ v: 1, sessionDate: "2026-09-22",
+      volRadar: { status: "ok", rich: { status: "ok", rows: [{ t: "SOXS", score: 52.263 }] } } });
+    eq((await putCard("regime", regime)).status, 200, "the market regime key ingests");
+    const regimeRead = await get("/api/flows/regime", { headers: cookie });
+    eq(regimeRead.status, 200, "and reads back to a signed-in page");
+    eq((await regimeRead.json()).volRadar.rich.rows[0].t, "SOXS", "with the vol radar rows unchanged");
+    eq((await get("/api/flows/regime")).status, 401, "an anonymous caller cannot read the regime");
   }
 
   {
