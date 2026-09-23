@@ -43,17 +43,11 @@ const board = (side, warm) => ({
 await put("board:long", board("long", true));
 await put("board:short", board("short", false));
 
-const UNSHIPPED = /^\/api\/flows\/(universe|lk)$/;
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
 const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
-page.on("console", (m) => {
-  if (m.type() !== "error") return;
-  const where = m.location() && m.location().url ? new URL(m.location().url).pathname : "";
-  if (/status of 404/.test(m.text()) && UNSHIPPED.test(where)) return;
-  errors.push("console: " + m.text());
-});
+page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + m.text()); });
 await page.context().addCookies([
   { name: "flows_session", value: token, url: server.baseURL }]);
 
@@ -784,6 +778,39 @@ ok(!/all of them|inside the band|±/.test(quietBare),
   ok(bearTips.length === 4 && bearTips.every((d) => d === -1),
      `and on the bearish map the names carrying BOUGHT premium against it point UP (${bearTips}); one downward mark on ` +
      "both boards read as selling on the board where it meant buying");
+}
+
+{
+  await put("board:long", board("long", true));
+  const lead = (session) => ({ v: 1, status: "ok", sessionDate: session, n: 2, rows: [
+    { t: "NVDA", id: "call-debit-spread", structure: "call debit spread", dir: "bull", grade: 3 },
+    { t: "AMD", id: "iron-condor", structure: "iron condor", dir: "neutral", grade: 2 },
+  ] });
+  const ideaRead = () => page.evaluate(() => ({
+    shown: document.getElementById("bdTable").dataset.idea,
+    marks: [...document.querySelectorAll("#flowsBody .bd-row")].map((r) => {
+      const g = r.querySelector(".bd-idea");
+      return g ? (r.querySelector('[data-col="t"]') || r).textContent.replace(/\s+/g, " ").trim() + " :: " + g.getAttribute("aria-label") : null;
+    }).filter(Boolean),
+  }));
+
+  await put("ideas", lead("2026-09-02"));
+  await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
+  await page.waitForSelector(ROWS);
+  const stale = await ideaRead();
+  eq(stale.shown, "0",
+     "ideas stamped with another session are not joined: yesterday's lead structure on today's board would sit " +
+     "beside a score it was never computed from");
+
+  await put("ideas", lead("2026-09-03"));
+  await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
+  await page.waitForSelector(ROWS);
+  const same = await ideaRead();
+  eq(same.shown, "1", "the idea column appears once the engine's ideas carry the board's own session");
+  eq(same.marks.length, 2, `on exactly the two names the engine led with a structure (${same.marks.join(" | ")})`);
+  ok(same.marks.some((m) => /NVDA.* :: .*call debit spread/i.test(m)) && same.marks.some((m) => /AMD.* :: .*iron condor/i.test(m)),
+     "each drawn as its own structure's payoff glyph, named for a screen reader");
+  await put("ideas", { v: 1, status: "quiet", sessionDate: "2026-09-03", n: 0, rows: [] });
 }
 
 eq(errors.length, 0,

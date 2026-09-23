@@ -657,6 +657,30 @@ assert.deepEqual(missingReport, [],
     }
   }
   ok(Array.isArray(regime.volRadar.carded), "the radar lists the carded names it reaches");
+  {
+    const ideas = emitted("ideas");
+    const longB = emitted("board:long");
+    ok(ideas && ideas.status === "ok" && Array.isArray(ideas.rows) && ideas.rows.length > 0,
+       "the pipeline publishes the engine's lead structure per engine card as its own key, after the cards leg — the " +
+       "boards are written and archived before the engine runs, so an idea cannot ride on a board row without the live " +
+       "board carrying a column its dated archive never will");
+    eq(ideas.sessionDate, longB && longB.sessionDate,
+       "stamped with the board's own session, which is what lets the board page refuse yesterday's ideas");
+    const shapeSrc = readFileSync(join(ROOT, "assets/js/flows-ui.js"), "utf8");
+    const shapes = new Set([...shapeSrc.slice(shapeSrc.indexOf("const SHAPES")).matchAll(/^\s*"([a-z ]+)":/gm)].map((m) => m[1]));
+    ok(shapes.size > 10, `the board glyph's shape names are read from the primitive (${shapes.size})`);
+    for (const r of ideas.rows) {
+      for (const k of ["t", "id", "structure", "dir", "grade"]) {
+        if (!Object.hasOwn(r, k)) missingReport.push(`ideas row lacks \`${k}\``);
+        else checks++;
+      }
+    }
+    ok(ideas.rows.some((r) => shapes.has(r.structure)),
+       `and a lead is named the way the board's payoff glyph looks it up (${ideas.rows.map((r) => r.structure).join(", ")})`);
+    const boardSrc = readFileSync(join(ROOT, "assets/js/flows-board.js"), "utf8");
+    ok(/\/api\/flows\/ideas/.test(boardSrc) && /ideas\.sessionDate === payload\.sessionDate/.test(boardSrc),
+       "the board page reads that key and joins it only when both carry the same session");
+  }
   ok(Buffer.byteLength(JSON.stringify(regime)) < 60 * 1024, "and the regime stays inside its 60KB plan budget");
   assert.deepEqual(missingReport.filter((m) => /^card-x|^card x\.vol|^regime/.test(m)), [],
     "every field the vol contract publishes is on every emitted arm:\n  " +

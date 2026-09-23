@@ -2128,6 +2128,11 @@ async function republishWithChain(payloads, chainByTicker, sessionDate, publishF
   return lines;
 }
 
+export function ideasPayload(ideaByTicker, { sessionDate, generatedAt, built = 0 }) {
+  const rows = [...ideaByTicker.keys()].sort().map((t) => ({ t, ...ideaByTicker.get(t) }));
+  return { v: 1, status: rows.length ? "ok" : "quiet", sessionDate, generatedAt, built, n: rows.length, rows };
+}
+
 export function congressRows(ticker, { byTicker = null, read = null, tapeRows = 0, namesRead = null } = {}) {
   const rows = byTicker ? byTicker.get(ticker) : undefined;
   if (rows) return rows;
@@ -5674,6 +5679,7 @@ async function main() {
   const cardTickers = [...onBoard.keys()];
   const quantStats = { built: 0, withIdeas: 0, split: 0, failed: 0, bytes: [] };
   const cardLane = poolWidth(2);
+  const ideaByTicker = new Map();
   console.log(`  cards: ${cardTickers.length} name(s), ${cardLane.width} in flight — ${cardLane.why}`);
   const cardsRun = await runPooled(cardTickers, async (ticker, index) => {
     const e = byTicker.get(ticker);
@@ -5828,6 +5834,8 @@ async function main() {
             crossSection: quantPass.crossSection.get(ticker) || null,
           });
           engineOut = QP.attachEngine(card, block);
+          const idea = QP.leadIdea(block);
+          if (idea) ideaByTicker.set(ticker, idea);
           quantStats.built++;
           if (block && block.ideas.length) quantStats.withIdeas++;
           if (engineOut.split) quantStats.split++;
@@ -5868,6 +5876,14 @@ async function main() {
     console.log(`  engine: ${quantStats.built} card(s) carry an engine block, ${quantStats.withIdeas} with ranked ideas, ` +
       `${quantStats.split} split to card-x for the ${QP.QUANT_PIPELINE_LINES.INGEST_CAP / 1024}KB ingest cap` +
       (quantStats.failed ? `, ${quantStats.failed} failed` : "") + `; largest card ${(big / 1024).toFixed(1)}KB`);
+  }
+  if (quantStats.built) {
+    try {
+      await publish("ideas", ideasPayload(ideaByTicker, { sessionDate, generatedAt, built: quantStats.built }));
+      console.log(`  ideas: the engine's lead structure for ${ideaByTicker.size} of ${quantStats.built} engine card(s)`);
+    } catch (error) {
+      console.warn(`  ideas: ${error.message} — the boards draw no idea column this session`);
+    }
   }
   if (perNameCut.names) {
     console.log(`  per-name feeds: ${perNameCut.names} card(s) carried rows from outside ` +

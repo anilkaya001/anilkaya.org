@@ -51,13 +51,7 @@ const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
 const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
-const UNSHIPPED = /^\/api\/flows\/(universe|lk)$/;
-page.on("console", (m) => {
-  if (m.type() !== "error") return;
-  const where = m.location() && m.location().url ? new URL(m.location().url).pathname : "";
-  if (/status of 404/.test(m.text()) && UNSHIPPED.test(where)) return;
-  errors.push("console: " + m.text());
-});
+page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + m.text()); });
 
 await page.goto(url("/flows/"), { waitUntil: "networkidle" });
 await page.fill("#u", FLOWS_TEST_USER);

@@ -298,8 +298,6 @@ try {
     if (m.type() !== "error") return;
     const text = m.text();
     if (allowFetchFailure && /Failed to load resource/.test(text)) return;
-    const where = m.location() && m.location().url ? new URL(m.location().url).pathname : "";
-    if (/status of 404/.test(text) && /^\/api\/flows\/(universe|lk)$/.test(where)) return;
     errors.push("console: " + text);
   });
 

@@ -1178,6 +1178,17 @@ try {
     eq(regimeRead.status, 200, "and reads back to a signed-in page");
     eq((await regimeRead.json()).volRadar.rich.rows[0].t, "SOXS", "with the vol radar rows unchanged");
     eq((await get("/api/flows/regime")).status, 401, "an anonymous caller cannot read the regime");
+    {
+      const before = await get("/api/flows/ideas", { headers: cookie });
+      eq((await before.json()).status, "pending", "the engine's lead ideas read pending until the pipeline writes them");
+      const ideas = JSON.stringify({ v: 1, status: "ok", sessionDate: "2026-09-22", n: 1,
+        rows: [{ t: "AAPL", id: "iron-condor", structure: "iron condor", dir: "neutral", grade: 2 }] });
+      eq((await putCard("ideas", ideas)).status, 200, "the ideas key ingests");
+      const read = await get("/api/flows/ideas", { headers: cookie });
+      eq((await read.json()).rows[0].structure, "iron condor", "and reads back to a signed-in page unchanged");
+      eq((await get("/api/flows/ideas")).status, 401, "an anonymous caller cannot read them");
+      eq((await putCard("ideas:AAPL", ideas)).status, 400, "and the key admits no suffix");
+    }
     for (const prefix of ["card-x", "hist"]) {
       const body = JSON.stringify({ v: 1, ticker: "AAPL", sessionDate: "2026-09-22",
         gex: { status: "ok", why: null, z: 1.25, gaps: {} } });

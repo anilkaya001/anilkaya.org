@@ -206,6 +206,18 @@ export function engineBlock({ ticker, sessionDate, spot, atr, card, prep, rate, 
   });
 }
 
+const IDEA_SHAPES = Object.freeze({ "iron-fly": "iron butterfly", "long-calendar": "calendar spread", diagonal: "diagonal spread" });
+
+export function leadIdea(block) {
+  if (!block || !Array.isArray(block.ideas) || !block.ideas.length || !Array.isArray(block.structures)) return null;
+  const s = block.structures.find((x) => x && x.id === block.ideas[0]);
+  if (!s || typeof s.family !== "string" || !s.family) return null;
+  return {
+    id: s.family, structure: IDEA_SHAPES[s.family] || s.family.replace(/-/g, " "),
+    dir: typeof s.dir === "string" ? s.dir : null, grade: Number.isFinite(s.grade) ? s.grade : null,
+  };
+}
+
 const ENCODER = new TextEncoder();
 export const bytesOf = (value) => ENCODER.encode(JSON.stringify(value)).length;
 

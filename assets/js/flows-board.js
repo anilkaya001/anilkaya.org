@@ -1423,10 +1423,15 @@
     body.setAttribute("aria-busy", "true");
     const boardP = getJson("/api/flows/board?side=" + encodeURIComponent(side));
     const trackP = WATCH ? getJson("/api/flows/scoretrack").catch(() => null) : null;
-    Promise.all([boardP, trackP]).then(([payload, track]) => {
+    const ideasP = WATCH ? null : getJson("/api/flows/ideas").catch(() => null);
+    Promise.all([boardP, trackP, ideasP]).then(([payload, track, ideas]) => {
       if (!payload) return;
       st.payload = payload;
       const rows = Array.isArray(payload.rows) ? payload.rows : [];
+      if (ideas && ideas.status === "ok" && Array.isArray(ideas.rows) && ideas.sessionDate && ideas.sessionDate === payload.sessionDate) {
+        const byT = new Map(ideas.rows.filter((r) => r && typeof r.t === "string").map((r) => [r.t.toUpperCase(), r]));
+        for (const r of rows) if (r && !r.idea && typeof r.t === "string" && byT.has(r.t.toUpperCase())) r.idea = byT.get(r.t.toUpperCase());
+      }
       railCount(payload, rows);
       UI.freshness({ sessionDate: payload.sessionDate, generatedAt: payload.generatedAt, updatedAt: payload.__updatedAt, source: "board" });
       const scoredN = num(payload.scored);
