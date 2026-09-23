@@ -323,7 +323,8 @@ try {
       }
     }
 
-    const sample = emitted.slice(0, 5);
+    const sample = emitted.filter((f) =>
+      JSON.parse(fs.readFileSync(path.join(SCRATCH, f), "utf8")).depth !== "index").slice(0, 5);
     for (const file of sample) {
     const card = JSON.parse(fs.readFileSync(path.join(SCRATCH, file), "utf8"));
 

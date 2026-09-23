@@ -1361,14 +1361,20 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
       const c = JSON.parse(fs.readFileSync(`${prefix}-card-${t}.json`, "utf8"));
       return c.depth;
     };
-    const byDepth = { board: new Set(), "cross-section": new Set(), other: new Set() };
+    const byDepth = { board: new Set(), "cross-section": new Set(), index: new Set(), other: new Set() };
     for (const t of emitted) {
       const d = depthOf(t);
       (byDepth[d] || byDepth.other).add(t);
     }
     eq(byDepth.other.size, 0,
-       "every emitted card declares a depth this contract knows — an unrecognised one is a third " +
+       "every emitted card declares a depth this contract knows — an unrecognised one is a fourth " +
        "kind of card nobody has priced");
+    assert.deepEqual([...byDepth.index].sort(), ["IWM", "QQQ", "SPY"],
+      "the index lane writes exactly the three index dossiers, through the same buildCard path, and " +
+      "none of them is a board or cross-section name"); checks++;
+    for (const t of byDepth.index) {
+      ok(!claimed.has(t), `${t} is an index dossier and no board row advertises it`);
+    }
     ok(byDepth.board.size <= DEEP_NAMES,
        `the deep lane stayed inside its ${DEEP_NAMES}-name budget (${byDepth.board.size} board-depth ` +
        "cards), however wide the board or the cross-section got");
@@ -1693,7 +1699,8 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     "the re-publish writes one object to two keys rather than reconstructing it"); checks++;
 
   const cardFile = fs.readdirSync(path.dirname(prefix))
-    .find((f) => /-card-[A-Z0-9]+\.json$/.test(f));
+    .filter((f) => /-card-[A-Z0-9]+\.json$/.test(f))
+    .find((f) => JSON.parse(fs.readFileSync(path.join(path.dirname(prefix), f), "utf8")).depth === "board");
   ok(cardFile, "the dry run emitted a card");
   const card = JSON.parse(fs.readFileSync(path.join(path.dirname(prefix), cardFile), "utf8"));
 
@@ -3559,8 +3566,8 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(card([]), "quiet", "where the old [] published quiet");
 
   const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
-  eq((src.match(/congress: congressRows\(ticker, congressState\)|const congress = congressRows\(ticker, congressState\)/g) || []).length, 2,
-     "both card lanes, board and cross-section, take the panel's input from the one rule");
+  eq((src.match(/congress: congressRows\(ticker, congressState\)|const congress = congressRows\(ticker, congressState\)/g) || []).length, 3,
+     "all three card lanes, board, cross-section and index, take the panel's input from the one rule");
   ok(!/congressRead === "ok" \? \[\] : null/.test(src), "and the old expression is gone from both");
 }
 

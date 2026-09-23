@@ -45,6 +45,11 @@ import {
 } from "../shared/flows-universe.js";
 import { runVolLeg, volNames, attachVol, publishVol, yearOfCandles } from "./flows-legs/vol.mjs";
 import { fakeVolVendor } from "./flows-legs/vol-fake.mjs";
+import { harvestScreener, INDEX_TICKERS } from "./flows-legs/universe.mjs";
+import { runMarketLegs, windowTickersOf, totalsHistory, MARKET_LEG_CALLS } from "./flows-legs/market.mjs";
+import { makeFakeVendor } from "./flows-legs/fake-vendor.mjs";
+import { makeCardXStore, publishCardX } from "./flows-legs/card-x.mjs";
+import { buildIndexDossiers } from "./flows-legs/index-dossier.mjs";
 
 const ARGS = new Set(process.argv.slice(2));
 const DRY_RUN = ARGS.has("--dry-run");
@@ -90,7 +95,7 @@ export const RATE = {
   floorCeilingMs: 750,
 };
 
-export const CALL_BUDGET = 1350;
+export const CALL_BUDGET = 1350 + MARKET_LEG_CALLS;
 
 export const EARNINGS_GATE_DAYS = 12;
 
@@ -3700,13 +3705,15 @@ function fakeEnrichment(ticker, spot, seed, iv = null) {
   return { ticker, spot, greekFlow, ticks, strikes, expiries, ohlc };
 }
 
+export const PULSE_TOTALS_HISTORY = 252;
+
 async function publishPulse({ sessionDate, generatedAt, tickers = [] }) {
   let crossRaws = null;
 
   try {
     const PULSE_FETCHES = {
       tide: ["/api/market/market-tide", { interval_5m: "true" }],
-      totals: ["/api/market/total-options-volume", { limit: PULSE_CAPS.totals }],
+      totals: ["/api/market/total-options-volume", { limit: PULSE_TOTALS_HISTORY }],
       oiChange: ["/api/market/oi-change", { limit: MARKET_CROSS_LIMIT }],
       netImpact: ["/api/market/top-net-impact", { limit: PULSE_CAPS.netImpact }],
       insiders: ["/api/market/insider-buy-sells", { limit: PULSE_CAPS.insiders }],
@@ -3732,6 +3739,9 @@ async function publishPulse({ sessionDate, generatedAt, tickers = [] }) {
     crossRaws = { oiChange: raws.oiChange, darkpool: raws.darkpool, readAt };
     const pulse = buildPulse(raws);
     if (pulse.darkpool && raws.darkpool && raws.darkpool.session) pulse.darkpool.session = raws.darkpool.session;
+    pulse.totalsHistory = totalsHistory(unwrapVendorRows(DRY_RUN
+      ? await makeFakeVendor({ sessionDate })("/api/market/total-options-volume", { limit: PULSE_TOTALS_HISTORY })
+      : raws.totals), { sessionDate });
     for (const feed of PULSE_FEEDS) {
       const f = pulse[feed];
       if (f.status === "quiet") {
@@ -3879,6 +3889,69 @@ async function publishNews({ sessionDate, generatedAt, tickers = [] }) {
   }
 }
 
+function indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, congressState, marketCross, variationRun }) {
+  const onSession = ARCHIVE_DATE_RE.test(String(sessionDate || "")) ? { date: sessionDate } : {};
+  return {
+    enrich: async (ticker, spot, row) => {
+      if (!DRY_RUN) return (await enrich(ticker, spot, sessionDate, dating)).raw;
+      const fake = fakeEnrichment(ticker, spot, 9000 + tickerSeed(ticker), num(row.iv30d) || null);
+      return { ...fake, ohlc: sessionCandles(fake.ohlc, sessionDate) };
+    },
+    features: (raw, ticker, spot, row) =>
+      computeFeatures({ ...raw, ticker, spot, sessionDate, tilt: screenerTilt(row) }),
+    perName: async (ticker, spot, raw) => {
+      const expiries = (raw.expiries || [])
+        .map((r) => (r && r.expiry ? String(r.expiry).slice(0, 10) : null))
+        .filter((d) => d && (!sessionDate || d > sessionDate)).sort().slice(0, SURFACE_EXPIRIES);
+      const [maxPain, surface, dpRaw, oiRaw, termRaw, rankRaw] = DRY_RUN
+        ? [fakeMaxPain(ticker, spot), fakeSurface(ticker, spot, expiries), fakeStockDarkpool(ticker, spot),
+          fakeStockOiChange(ticker, spot), fakeTermStructure(ticker, spot, onSession), fakeIvRank(ticker, spot, IV_RANK_PARAMS)]
+        : await Promise.all([
+          uw(`/api/stock/${ticker}/max-pain`, onSession).catch(() => []),
+          expiries.length
+            ? uw(`/api/stock/${ticker}/spot-exposures/expiry-strike`, {
+              "expirations[]": expiries, ...onSession,
+              min_strike: Math.floor(spot * 0.9), max_strike: Math.ceil(spot * 1.1), limit: 500,
+            }).catch(() => [])
+            : Promise.resolve([]),
+          uw(`/api/darkpool/${ticker}`, { limit: 60, ...onSession }).catch(() => null),
+          uw(`/api/stock/${ticker}/oi-change`, { limit: 30, ...onSession }).catch(() => null),
+          uw(`/api/stock/${ticker}/volatility/term-structure`, { ...onSession }).catch(() => null),
+          uw(`/api/stock/${ticker}/iv-rank`, { ...IV_RANK_PARAMS, ...onSession }).catch(() => null),
+        ]);
+      return {
+        maxPain, surface,
+        darkpool: sessionRows(dpRaw, (r) => easternDayOf(r && r.executed_at), sessionDate).raw,
+        oiDeltas: oiRaw, termStructure: termRaw,
+        ivRank: sessionRows(rankRaw, (r) => easternDayOf(r && r.date), sessionDate, { through: true }).raw,
+      };
+    },
+    chain: async (ticker, spot) => {
+      const rows = DRY_RUN
+        ? fakeChain(ticker, spot, 9500 + tickerSeed(ticker))
+        : await uw(`/api/stock/${ticker}/option-contracts`, {
+          exclude_zero_oi_chains: "true", limit: CHAIN_PAGE_SIZE,
+        }).catch(() => []);
+      if (!Array.isArray(rows) || !rows.length) return null;
+      return buildChainPanels(rows, { spot, asOf: sessionDate, ticker, complete: false, pages: 1 });
+    },
+    card: ({ ticker, row, raw, features, reads, chain }) => {
+      const card = buildCard({
+        ticker, row: sessionRow(row, features), features,
+        strikes: raw.strikes, ticks: raw.ticks, expiries: raw.expiries,
+        surface: reads.surface, chain,
+        chainMissing: chain ? null : "the index chain page could not be read this run",
+        scoreHistory: null, weights: null,
+        maxPain: reads.maxPain, congress: congressRows(ticker, congressState), generatedAt, sessionDate,
+        darkpool: reads.darkpool, oiDeltas: reads.oiDeltas, termStructure: reads.termStructure, ivRank: reads.ivRank,
+        marketCross, variation: variationOptions(variationRun),
+      });
+      card.readPx = readPxOf({ row, features }, screenerReadAt);
+      return card;
+    },
+  };
+}
+
 async function main() {
 
   const today = easternNow().date;
@@ -3955,8 +4028,25 @@ async function main() {
   let screener;
   let screenerTruncated = 0;
   let screenerReadAt = null;
+  const screenerFilters = {
+    min_underlying_price: UNIVERSE.minPrice, min_volume: UNIVERSE.minOptionVolume,
+    min_oi: UNIVERSE.minOpenInterest, min_marketcap: UNIVERSE.minMarketCap,
+  };
+  const screenerDate = sessionDate && dating.screenerDate ? sessionDate : null;
+  let harvest = null;
+  if (!DRY_RUN) {
+    const read = await harvestScreener(uw, { filters: screenerFilters, date: screenerDate });
+    console.log(`  screener harvest: ${read.rows.length} row(s) in ${read.pages} page(s) of ${read.limit}` +
+      (read.truncated ? " — TRUNCATED at the page cap" : "") + (read.repeated ? " — a page repeated" : "") +
+      (read.errors.length ? ` — ${read.errors.join("; ")}` : ""));
+    if (read.rows.length && !read.truncated && !read.repeated && !read.errors.length) harvest = read;
+    else console.warn("  screener harvest: not usable, so the cap-band sweep reads the universe instead");
+  }
   if (DRY_RUN) {
     screener = fakeScreener(420);
+    screenerReadAt = new Date().toISOString();
+  } else if (harvest) {
+    screener = harvest.rows;
     screenerReadAt = new Date().toISOString();
   } else {
     const byTicker = new Map();
@@ -4360,6 +4450,29 @@ async function main() {
     console.warn(`  movers: ${error.message}`);
   }
 
+  const cardX = makeCardXStore();
+  let marketLegs = null;
+  try {
+    marketLegs = await runMarketLegs({
+      uw: DRY_RUN ? makeFakeVendor({ sessionDate, screenerRows: screener }) : uw,
+      sessionDate, screenerDate, generatedAt, harvest, filters: screenerFilters, eligible,
+      cardedTickers: liquid.map((e) => e.features.ticker),
+      deepTickers: deepNames(published).map((d) => d.t),
+      windowTickers: windowTickersOf(withTilt.map((w) => w.row), { origin: gateOrigin }),
+      deadline: stats.startedAt + DEADLINE_MS, pool: runPooled, width: poolWidth(2).width, stats,
+      log: (line) => console.log(line),
+    });
+    for (const key of ["universe", "regime"]) await publish(key, marketLegs[key]);
+    for (const [t, part] of marketLegs.ownership) {
+      cardX.add(t, "short", part.short);
+      cardX.add(t, "insiders", part.insiders);
+    }
+    for (const [t, e] of marketLegs.earnings) cardX.add(t, "earnings", e);
+    console.log(`  market legs: ${marketLegs.calls ?? 0} vendor call(s)`);
+  } catch (error) {
+    console.warn(`  market legs: ${error.message} — universe and regime were not published this run`);
+  }
+
   try {
 
     const stageByTicker = new Map();
@@ -4411,6 +4524,7 @@ async function main() {
 
       announce: { status: "unavailable", reason: EVENTS_NOTES.announce },
       ...events,
+      ...(marketLegs ? marketLegs.eventsAdditions : {}),
       notes: EVENTS_NOTES,
     });
     const gatedShown = events.byStage.gated || 0;
@@ -5412,7 +5526,7 @@ async function main() {
     oiChange: crossRaws ? crossRaws.oiChange : null,
     darkpool: crossRaws ? crossRaws.darkpool : null,
     limits: { oiChange: MARKET_CROSS_LIMIT, darkpool: MARKET_CROSS_LIMIT },
-    tickers: cardedTickers,
+    tickers: marketLegs ? cardedTickers.concat(INDEX_TICKERS.filter((t) => marketLegs.indexRows.has(t))) : cardedTickers,
     sessionDate,
   });
   const crossReadDay = crossRaws && crossRaws.readAt ? readDayOf(crossRaws.readAt) : null;
@@ -5757,6 +5871,25 @@ async function main() {
     cardOf: (t) => publishedStore["card:" + t] || null, variation: variationRun,
     width: poolWidth(3).width, log: (line) => console.log(line),
   });
+  if (marketLegs) {
+    const dossiers = await buildIndexDossiers({
+      tickers: INDEX_TICKERS, indexRows: marketLegs.indexRows, deadline,
+      ...indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, congressState, marketCross, variationRun }),
+      publish, log: (line) => console.warn(line),
+    });
+    console.log(`  index dossiers: ${dossiers.built.length} of ${INDEX_TICKERS.length} built` +
+      (dossiers.built.length ? ` (${dossiers.built.join(", ")})` : "") +
+      (dossiers.failed.length ? `, failed ${dossiers.failed.join(", ")}` : "") +
+      (dossiers.skipped.length ? `, skipped ${dossiers.skipped.join(", ")}` : "") +
+      Object.entries(dossiers.shed).map(([t, keys]) => `; ${t} shed ${keys.join(", ")}`).join(""));
+  }
+  {
+    const cx = await publishCardX(cardX, publish, {
+      generatedAt, sessionDate, readAt: marketLegs ? marketLegs.readAt : null, log: (line) => console.warn(line),
+    });
+    console.log(`  card-x: ${cx.written} written` + (cx.failed ? `, ${cx.failed} failed` : "") +
+      (cx.over ? `, ${cx.over} over the cap` : "") + `, largest ${cx.largest} bytes`);
+  }
 
   console.log("  " + (DRY_RUN ? "[dry-run] " : "") + describeGammaRange(gammaProfiles).line +
     (DRY_RUN

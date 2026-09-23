@@ -574,7 +574,7 @@ export function cardFacts(store, options) {
 
     if (card === null || typeof card !== "object" || card.status === "pending") continue;
 
-    if (card.depth === "cross-section" && !thin) continue;
+    if ((card.depth === "cross-section" || card.depth === "index") && !thin) continue;
     const t = typeof card.ticker === "string" && card.ticker ? card.ticker : m[1];
     entries.push({ t, card, at: atOf(card), st: standing.get(t) || null });
   }

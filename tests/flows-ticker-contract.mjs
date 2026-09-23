@@ -34,7 +34,7 @@ for (const k of SENTINEL_KEYS) {
   ok(!TICKER_PANEL_KEYS.includes(k), `the sentinel "${k}" is not a card.panels key`);
 }
 
-const withChain = cards.filter((c) =>
+const withChain = cards.filter((c) => c.depth !== "index" &&
   TICKER_PANEL_KEYS.every((k) => c.panels && c.panels[k]) &&
   ["ivSurface", "skewTerm", "topContracts", "aggressor"]
     .every((k) => c.panels[k].status === "ok"));
