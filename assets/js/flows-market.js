@@ -54,7 +54,7 @@
   function emptyLine(kind, text, what, height) {
     const [g, word] = KIND[kind] || KIND.unavailable;
     return h("div", {
-      class: "ui-silent mk-hush", "data-empty": kind, "data-state": kind, role: "note",
+      class: "ui-silent mk-hush" + (height && height <= 72 ? " is-row" : ""), "data-empty": kind, "data-state": kind, role: "note",
       "aria-label": word + ": " + (what || text), style: { "--silent-h": (height || 96) + "px" },
     }, glyph(g), h("div", { class: "ui-silent-t" }, word),
     h("button", { type: "button", "aria-haspopup": "dialog", "aria-controls": "fxPop", "data-info": disclose(cap1(what || word), text) }, "Why"));
@@ -131,9 +131,10 @@
   };
   const hourTicks = (lo, hi, every) => {
     const out = [];
-    for (let m = Math.ceil(lo / 60) * 60; m <= hi; m += 60 * (every || 1)) {
-      const hr = m / 60;
-      out.push({ v: m, label: (hr % 12 || 12) + (hr < 12 ? " AM" : " PM") });
+    const step = hi - lo < 150 ? 30 : 60 * (every || 1);
+    for (let m = Math.ceil(lo / step) * step; m <= hi; m += step) {
+      const hr = Math.floor(m / 60), mm = m % 60;
+      out.push({ v: m, label: mm ? (hr % 12 || 12) + ":" + String(mm).padStart(2, "0") : (hr % 12 || 12) + (hr < 12 ? " AM" : " PM") });
     }
     return out;
   };
@@ -318,6 +319,8 @@
   const SECTOR_SHORT = { "Information Technology": "Technology", "Communication Services": "Communication",
     "Consumer Discretionary": "Discretionary", "Consumer Staples": "Staples" };
 
+  const NARROW = { "Communication Services": "Comms", "consumer cyclical": "Cyclicals", "financial services": "Financials" };
+
   function sectorBp(r) {
     return isNum(r && r.trixBp);
   }
@@ -355,7 +358,8 @@
     let railed = 0;
     const key = (r) => {
       const name = r.sector || r.etf || DASH;
-      return h("span", { class: "mk-sector-k", title: name }, SECTOR_SHORT[name] || name, r.etf && r.etf !== name ? h("small", { class: "mk-sector-etf" }, r.etf) : null);
+      return h("span", { class: "mk-sector-k", title: name, "data-short": NARROW[name] || null },
+        h("span", { class: "mk-k-full" }, SECTOR_SHORT[name] || name), r.etf && r.etf !== name ? h("small", { class: "mk-sector-etf" }, r.etf) : null);
     };
     const spoken = (r) => { const name = r.sector || r.etf || DASH; return name + (r.etf && r.etf !== name ? " (" + r.etf + ")" : ""); };
     const list = h("ul", { class: "mk-sectors" });
@@ -698,6 +702,19 @@
     return said.join(" ");
   }
 
+  function dayTicks(svg, dates, xAt, w, y) {
+    const N = dates.length;
+    const every = Math.max(1, Math.ceil(N / (w < 600 ? 4 : 6)));
+    let placed = null;
+    for (let i = N - 1; i >= 0; i -= every) {
+      if (!dates[i]) continue;
+      const x = Math.max(22, Math.min(w - 22, xAt(i)));
+      if (placed !== null && placed - x < 48) continue;
+      UI.s("text", { x, y, "text-anchor": "middle", text: F.day(dates[i]), class: "mk-vol-x" }, svg);
+      placed = x;
+    }
+  }
+
   function paintVolume(pulse) {
     const host = clear("mkVolume");
     if (!host) return;
@@ -713,44 +730,52 @@
     const volPct = hist && hist.volume ? isNum(hist.volume.pct) : null;
     const pending = { state: "pending", reason: "The year of daily totals arrives with the pulse history addition, which has not published yet." };
     host.append(UI.metrics([
-      UI.metric("P/C contracts", pcNow === null ? DASH : pcNow.toFixed(2), { sub: newest.date ? F.day(newest.date) : null }),
+      UI.metric("Market P/C", pcNow === null ? DASH : pcNow.toFixed(2), { sub: newest.date ? F.day(newest.date) : null }),
       UI.metric("z vs 1Y", z === null ? DASH : F.signed(z, 1), { tone: z === null ? null : z > 1 ? "down" : z < -1 ? "up" : null, state: z === null ? pending : null }),
       UI.metric("Volume pct", volPct === null ? DASH : F.pct(volPct > 1 ? volPct / 100 : volPct, 0), { state: volPct === null ? pending : null }),
     ], { min: 90 }));
     const ordered = rows.slice().reverse();
-    const plot = h("div", { class: "mk-pairs" });
-    host.append(plot, UI.legend([["--up-mark", "", "Call premium"], ["--down-mark", "", "Put premium"]]));
-    C.mount(plot, (el, w, animate) => {
-      const H = w < 600 ? 150 : 170, top = 10, bot = 22, mid = top + (H - top - bot) / 2;
-      const svg = C.svgRoot(el, w, H, animate, "Call premium up and put premium down per session, oldest at the left");
-      const N = ordered.length, band = (w - 8) / N;
-      const hi = Math.max(1, ...ordered.map((r) => Math.max(isNum(r.callPrem) || 0, isNum(r.putPrem) || 0)));
-      const half = (H - top - bot) / 2 - 2;
-      const bw = Math.max(2, Math.min(14, band * 0.62));
-      UI.s("line", { x1: 0, x2: w, y1: mid, y2: mid, class: "base" }, svg);
-      ordered.forEach((r, i) => {
-        const x = 4 + band * (i + 0.5);
-        const c = isNum(r.callPrem), q = isNum(r.putPrem);
-        const last = i === N - 1;
-        if (c === null) UI.s("circle", { cx: x, cy: mid - 3, r: 1.6, fill: UI.cssVar("--label-4") }, svg);
-        else { const hh = Math.max(1, c / hi * half); UI.s("rect", { x: x - bw / 2, y: mid - hh, width: bw, height: hh, rx: Math.min(3, bw / 2), fill: UI.cssVar("--up-mark"), "fill-opacity": last ? 1 : 0.62, class: "grow", style: { "--i": String(i), "--origin": "bottom" } }, svg); }
-        if (q === null) UI.s("circle", { cx: x, cy: mid + 3, r: 1.6, fill: UI.cssVar("--label-4") }, svg);
-        else { const hh = Math.max(1, q / hi * half); UI.s("rect", { x: x - bw / 2, y: mid, width: bw, height: hh, rx: Math.min(3, bw / 2), fill: UI.cssVar("--down-mark"), "fill-opacity": last ? 1 : 0.62, class: "grow", style: { "--i": String(i), "--origin": "top" } }, svg); }
+    const slot = h("div", { class: "mk-pairs-w" });
+    host.append(slot, UI.legend([["--up-mark", "", "Calls"], ["--down-mark", "", "Puts"]]));
+    const VIEWS = [
+      { label: "Contracts", c: "callVol", p: "putVol", fmt: (v) => F.num(v), said: "contracts" },
+      { label: "Premium", c: "callPrem", p: "putPrem", fmt: usd, said: "premium" },
+    ];
+    let view = 0;
+    let chart = null;
+    const draw = () => {
+      const V = VIEWS[view];
+      if (chart) chart.destroy();
+      const plot = h("div", { class: "mk-pairs" });
+      slot.replaceChildren(plot);
+      chart = C.mount(plot, (el, w, animate) => {
+        const H = w < 600 ? 150 : 170, top = 10, bot = 22, mid = top + (H - top - bot) / 2;
+        const svg = C.svgRoot(el, w, H, animate, "Call " + V.said + " up and put " + V.said + " down per session, oldest at the left");
+        const N = ordered.length, band = (w - 8) / N;
+        const hi = Math.max(1, ...ordered.map((r) => Math.max(isNum(r[V.c]) || 0, isNum(r[V.p]) || 0)));
+        const half = (H - top - bot) / 2 - 2;
+        const bw = Math.max(2, Math.min(14, band * 0.62));
+        UI.s("line", { x1: 0, x2: w, y1: mid, y2: mid, class: "base" }, svg);
+        ordered.forEach((r, i) => {
+          const x = 4 + band * (i + 0.5);
+          const c = isNum(r[V.c]), q = isNum(r[V.p]);
+          const last = i === N - 1;
+          if (c === null) UI.s("circle", { cx: x, cy: mid - 3, r: 1.6, fill: UI.cssVar("--label-4") }, svg);
+          else { const hh = Math.max(1, c / hi * half); UI.s("rect", { x: x - bw / 2, y: mid - hh, width: bw, height: hh, rx: Math.min(3, bw / 2), fill: UI.cssVar("--up-mark"), "fill-opacity": last ? 1 : 0.62, class: "grow", style: { "--i": String(i), "--origin": "bottom" } }, svg); }
+          if (q === null) UI.s("circle", { cx: x, cy: mid + 3, r: 1.6, fill: UI.cssVar("--label-4") }, svg);
+          else { const hh = Math.max(1, q / hi * half); UI.s("rect", { x: x - bw / 2, y: mid, width: bw, height: hh, rx: Math.min(3, bw / 2), fill: UI.cssVar("--down-mark"), "fill-opacity": last ? 1 : 0.62, class: "grow", style: { "--i": String(i), "--origin": "top" } }, svg); }
+        });
+        dayTicks(svg, ordered.map((r) => r.date), (i) => 4 + band * (i + 0.5), w, H - 6);
+        C.scrub(el, svg, {
+          xs: ordered.map((_, i) => 4 + band * (i + 0.5)), top, bottom: H - bot, label: "Call and put " + V.said + " per session",
+          onMove: (i) => ({ parts: [C.part(F.day(ordered[i].date), "k"), C.part("Calls", "k"), h("b", { "data-tone": "up" }, V.fmt(ordered[i][V.c])),
+            C.part("Puts", "k"), h("b", { "data-tone": "down" }, V.fmt(ordered[i][V.p]))] }),
+        });
       });
-      const every = Math.max(1, Math.ceil(N / (w < 600 ? 4 : 6)));
-      let placed = null;
-      for (let i = N - 1; i >= 0; i -= every) {
-        const x = Math.max(22, Math.min(w - 22, 4 + band * (i + 0.5)));
-        if (placed !== null && placed - x < 48) continue;
-        UI.s("text", { x, y: H - 6, "text-anchor": "middle", text: F.day(ordered[i].date), class: "mk-vol-x" }, svg);
-        placed = x;
-      }
-      C.scrub(el, svg, {
-        xs: ordered.map((_, i) => 4 + band * (i + 0.5)), top, bottom: H - bot, label: "Call and put premium per session",
-        onMove: (i) => ({ parts: [C.part(F.day(ordered[i].date), "k"), C.part("Calls", "k"), h("b", { "data-tone": "up" }, usd(ordered[i].callPrem)),
-          C.part("Puts", "k"), h("b", { "data-tone": "down" }, usd(ordered[i].putPrem))] }),
-      });
-    });
+    };
+    draw();
+    const volSeg = clear("mkVolumeSeg");
+    if (volSeg) volSeg.append(UI.segmented("Volume unit", VIEWS.map((x) => ({ label: x.label })), (i) => { view = i; draw(); }, 0));
     const shown = rows.slice(0, 10);
     const detail = table("Total options volume and premium per session, split call and put",
       [["Session"], ["Call vol", true], ["Put vol", true], ["Call prem", true], ["Put prem", true]],
@@ -772,7 +797,11 @@
     const plain = n === null ? DASH : (() => { const v = Math.abs(p) >= 100 ? Math.round(p) : Math.round(p * 10) / 10; return signGlyph(v) + Math.abs(v).toLocaleString("en-US") + "%"; })();
     if (n === null || n <= 0) return [plain, null];
     if (prev !== null && prev < 100) return ["new", "From " + grouped(prev) + " contracts, a base too small for a percentage to mean anything"];
-    if (n >= 10) { const times = Math.round(1 + n).toLocaleString("en-US"); return ["×" + times, times + " times the previous snapshot's open interest (" + plain + ")"]; }
+    if (n >= 1) {
+      const x = 1 + n;
+      const times = x >= 10 ? Math.round(x).toLocaleString("en-US") : x.toFixed(1);
+      return ["×" + times, times + " times the previous snapshot's open interest (" + plain + ")"];
+    }
     return [plain, null];
   }
   const contractLabel = (r) => (r.cp && isNum(r.k) !== null && r.exp ? (r.t || DASH) + " " + r.cp + String(r.k) + " " + String(r.exp).slice(5) : r.oc || (r.t || DASH) + " " + DASH);
@@ -828,27 +857,29 @@
     const ordered = rows.slice().reverse();
     const last = rows[0] || {};
     host.append(UI.metrics([
-      UI.metric("Buys", usd(last.buysNotional), { sub: count(last.buys) + " filings", tone: "up" }),
-      UI.metric("Sells", usd(isNum(last.sellsNotional) === null ? null : Math.abs(last.sellsNotional)), { sub: count(last.sells) + " filings", tone: "down" }),
+      UI.metric("Buys", usd(last.buysNotional), { sub: count(last.buys) + " filings" + (last.date ? " · " + F.day(last.date) : ""), tone: "up" }),
+      UI.metric("Sells", usd(isNum(last.sellsNotional) === null ? null : Math.abs(last.sellsNotional)), { sub: count(last.sells) + " filings" + (last.date ? " · " + F.day(last.date) : ""), tone: "down" }),
     ], { min: 100 }));
     const plot = h("div", { class: "mk-pairs" });
     host.append(plot);
     C.mount(plot, (el, w, animate) => {
-      const H = 110, top = 6, bot = 20, mid = top + (H - top - bot) / 2, half = (H - top - bot) / 2 - 2;
+      const H = w < 600 ? 130 : 170, top = 6, bot = 20, mid = top + (H - top - bot) / 2, half = (H - top - bot) / 2 - 2;
       const svg = C.svgRoot(el, w, H, animate, "Insider buy and sell notional per filing day");
       const N = ordered.length, band = (w - 8) / N, bw = Math.max(2, Math.min(12, band * 0.6));
       const hi = Math.max(1, ...ordered.map((r) => Math.max(Math.abs(isNum(r.buysNotional) || 0), Math.abs(isNum(r.sellsNotional) || 0))));
       UI.s("line", { x1: 0, x2: w, y1: mid, y2: mid, class: "base" }, svg);
       ordered.forEach((r, i) => {
         const x = 4 + band * (i + 0.5);
-        const b = Math.abs(isNum(r.buysNotional) || 0), s = Math.abs(isNum(r.sellsNotional) || 0);
-        const hb = Math.max(1, b / hi * half), hs = Math.max(1, s / hi * half);
-        UI.s("rect", { x: x - bw / 2, y: mid - hb, width: bw, height: hb, rx: 2, fill: UI.cssVar("--up-mark"), class: "grow", style: { "--i": String(i), "--origin": "bottom" } }, svg);
-        UI.s("rect", { x: x - bw / 2, y: mid, width: bw, height: hs, rx: 2, fill: UI.cssVar("--down-mark"), class: "grow", style: { "--i": String(i), "--origin": "top" } }, svg);
+        const b = isNum(r.buysNotional), q = isNum(r.sellsNotional);
+        if (b === null) UI.s("circle", { cx: x, cy: mid - 3, r: 1.6, fill: UI.cssVar("--label-4") }, svg);
+        else { const hb = Math.max(1, Math.abs(b) / hi * half); UI.s("rect", { x: x - bw / 2, y: mid - hb, width: bw, height: hb, rx: 2, fill: UI.cssVar("--up-mark"), class: "grow", style: { "--i": String(i), "--origin": "bottom" } }, svg); }
+        if (q === null) UI.s("circle", { cx: x, cy: mid + 3, r: 1.6, fill: UI.cssVar("--label-4") }, svg);
+        else { const hs = Math.max(1, Math.abs(q) / hi * half); UI.s("rect", { x: x - bw / 2, y: mid, width: bw, height: hs, rx: 2, fill: UI.cssVar("--down-mark"), class: "grow", style: { "--i": String(i), "--origin": "top" } }, svg); }
       });
+      dayTicks(svg, ordered.map((r) => r.date), (i) => 4 + band * (i + 0.5), w, H - 5);
       C.scrub(el, svg, { xs: ordered.map((_, i) => 4 + band * (i + 0.5)), top, bottom: H - bot, label: "Insider filings per day",
         onMove: (i) => ({ parts: [C.part(F.day(ordered[i].date), "k"), C.part("Buys", "k"), h("b", { "data-tone": "up" }, usd(ordered[i].buysNotional)),
-          C.part("Sells", "k"), h("b", { "data-tone": "down" }, usd(Math.abs(isNum(ordered[i].sellsNotional) || 0)))] }) });
+          C.part("Sells", "k"), h("b", { "data-tone": "down" }, isNum(ordered[i].sellsNotional) === null ? DASH : usd(Math.abs(ordered[i].sellsNotional)))] }) });
     });
     const detail = table("Aggregate insider filings per filing day", [["Filing day"], ["Buys", true], ["Sells", true], ["Buy notional", true], ["Sell notional", true]],
       rows.map((r) => [r.date || DASH, grouped(r.buys), grouped(r.sells), usd(r.buysNotional), usd(r.sellsNotional)]));
@@ -948,7 +979,7 @@
     return p && Array.isArray(p.pts) ? p.pts.map((x) => (Array.isArray(x) ? isNum(x[1]) : null)) : [];
   }
 
-  const TIDE_SHORT = { "Consumer Cyclical": "Cyclicals", "Consumer Defensive": "Defensives", "Communication Services": "Communication",
+  const TIDE_SHORT = { "Consumer Cyclical": "Cyclicals", "Consumer Defensive": "Defensives", "Communication Services": "Comms",
     "Financial Services": "Financials", "Basic Materials": "Materials" };
 
   function paintSectorTides(regime, breadth) {
@@ -1114,12 +1145,12 @@
     for (const k of ["SPY", "QQQ", "IWM"]) {
       if (useLive && lv.index[k] && lv.index[k].status === "ok") {
         const r = lv.index[k];
-        idx[k] = { iv: TEN.map((d) => isNum(r["v" + d])), iv30: isNum(r.iv30), ivp: isNum(r.ivRank), rv: isNum(r.rv),
+        idx[k] = { iv: TEN.map((d) => isNum(r["v" + d])), iv30: isNum(r.iv30), ivp: isNum(r.ivRank), ivpWord: "rank", rv: isNum(r.rv), rvWord: "RV",
           ts: isNum(r.v30) !== null && isNum(r.v90) ? r.v30 / r.v90 - 1 : null };
       } else if (curve && curve[k] && curve[k].status === "ok" && Array.isArray(curve[k].iv)) {
         const r = curve[k], ten = Array.isArray(r.tenors) ? r.tenors : TEN;
         idx[k] = { iv: TEN.map((d) => { const j = ten.indexOf(d); return j < 0 ? null : isNum(r.iv[j]); }), iv30: isNum(r.iv[ten.indexOf(30)]),
-          ivp: isNum(r.ivp), rv: isNum(r.rv20), ts: isNum(r.ts), shape: r.shape || null };
+          ivp: isNum(r.ivp), ivpWord: "pct", rv: isNum(r.rv20), rvWord: "RV 20d", ts: isNum(r.ts), shape: r.shape || null };
       }
     }
     const names = Object.keys(idx);
@@ -1134,10 +1165,10 @@
     const vrp = spy.iv30 !== null && spy.rv !== null ? spy.iv30 - spy.rv : null;
     const pend = (what) => ({ state: "pending", reason: what + " arrives with the regime key, which has not published yet." });
     host.append(UI.metrics([
-      UI.metric("IV 30d", spy.iv30 === null ? DASH : F.pct(spy.iv30, 1), { sub: "SPY" + (spy.ivp === null ? "" : " · pct " + Math.round(spy.ivp)) }),
-      UI.metric("RV 20d", spy.rv === null ? DASH : F.pct(spy.rv, 1), { sub: vrp === null ? null : "IV − RV " + F.pts(vrp) + " pts" }),
+      UI.metric("IV 30d", spy.iv30 === null ? DASH : F.pct(spy.iv30, 1), { sub: "SPY" + (spy.ivp === null ? "" : " · " + spy.ivpWord + " " + Math.round(spy.ivp)) }),
+      UI.metric(spy.rvWord, spy.rv === null ? DASH : F.pct(spy.rv, 1), { sub: vrp === null ? null : "IV − RV " + F.pts(vrp) + " pts" }),
       UI.metric("Term", shape ? cap1(shape) : DASH, { tone: shape === "backwardation" ? "warn" : null, sub: spy.ts === null ? null : "30/90 " + F.pct(spy.ts, 1, true) }),
-      UI.metric("Correlation", rho ? isNum(rho.rho).toFixed(2) : DASH, { sub: rho && isNum(rho.dispersion) !== null ? "dispersion " + F.pct(rho.dispersion, 0) : null, state: rho ? null : pend("Implied correlation") }),
+      UI.metric("Correlation", rho ? isNum(rho.rho).toFixed(2) : DASH, { sub: rho && isNum(rho.dispersion) !== null ? "dispersion " + F.pts(rho.dispersion) + " pts" : null, state: rho ? null : pend("Implied correlation") }),
     ], { min: 100 }));
     const COL = { SPY: "--s-blue", QQQ: "--s-purple", IWM: "--s-teal" };
     const plot = h("div", { class: "mk-term" });
@@ -1155,7 +1186,7 @@
       facts: [["Source", useLive ? "live:vol" : "regime"], ["Implied correlation QQQ", ic.QQQ && ic.QQQ.status === "ok" ? isNum(ic.QQQ.rho).toFixed(3) : DASH],
         ["SPY coverage", rho ? F.pct(rho.coverage, 0) : null], ["Holdings as of", rho ? rho.weightsAsOf : null]],
       notes: ["Contango (a rising curve) is the calm shape; an inverted front is stress.",
-        "Implied correlation is the index variance left after the members' own variances, over what perfect correlation would add; dispersion is the members' average IV less the index IV."],
+        "Implied correlation is the index variance left after the members' own variances, over what perfect correlation would add; dispersion is the members' weighted 30-day IV less the index's, in volatility points."],
     }));
   }
 
@@ -1218,8 +1249,9 @@
       const tr = track(d, peak);
       tr.setAttribute("role", "img");
       tr.setAttribute("aria-label", g.group + " delta flow " + F.num(d, true));
-      list.append(h("li", { class: "mk-sector" }, h("span", { class: "mk-sector-k" }, cap1(g.group === "mag7" ? "Mag 7" : g.group)), tr,
-        h("span", { class: "mk-sector-v", "data-tone": toneOf(d) }, F.num(d, true))));
+      list.append(h("li", { class: "mk-sector" }, h("span", { class: "mk-sector-k", title: g.group, "data-short": NARROW[g.group] || null },
+        h("span", { class: "mk-k-full" }, cap1(g.group === "mag7" ? "Mag 7" : g.group))), tr,
+        h("span", { class: "mk-sector-v", "data-tone": toneOf(d) }, F.num(d, true), h("small", { class: "mk-unit" }, " Δ"))));
     });
     host.append(list);
     staleMark("mkGroupsCard", regime.sessionDate, "group flows");

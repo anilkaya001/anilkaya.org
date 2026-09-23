@@ -401,7 +401,7 @@ try {
     },
     totals: { status: "ok", rows: totalsRows, seen: 20, cap: 20, shed: 0 },
     oiChange: {
-      status: "ok", seen: 4, cap: 20, shed: 0,
+      status: "ok", seen: 5, cap: 20, shed: 0,
       rows: [
 
         { t: "AAA", cp: "C", k: 150, exp: "2026-09-18", diff: 0, ratio: 0,
@@ -412,6 +412,8 @@ try {
           currOi: 22700, prevOi: 7, vol: 30100 },
         { t: "OIB", cp: "P", k: 20, exp: "2026-10-30", diff: 153780, ratio: 1025.2,
           currOi: 153930, prevOi: 150, vol: 5200 },
+        { t: "OIC", cp: "C", k: 230, exp: "2026-09-25", diff: 47481, ratio: 4.7,
+          currOi: 57583, prevOi: 10102, vol: 61000 },
       ],
     },
     netImpact: {
@@ -743,6 +745,15 @@ try {
   });
   eq(totalsTicks[totalsTicks.length - 1].text, dayLabel(dayStamp(1)),
      "and the newest session keeps its label, so the tick dropped was the one crowding it");
+  const volLabel = () => page.evaluate(() => document.querySelector("#mkVolume svg[role=img]").getAttribute("aria-label"));
+  ok(/contracts/.test(await volLabel()),
+     "the volume module draws contracts by default — the unit its title and its P/C reading are in");
+  await page.locator("#mkVolumeSeg .ui-seg-i", { hasText: "Premium" }).click();
+  await page.waitForFunction(() => /premium/.test(document.querySelector("#mkVolume svg[role=img]").getAttribute("aria-label")),
+    null, { timeout: 5000 }).catch(() => {});
+  ok(/premium/.test(await volLabel()), "and draws premium one tap away, on the same session axis");
+  eq(await page.locator("#mkVolume svg text.mk-vol-x").count(), totalsTicks.length, "with the same dated ticks");
+  await page.locator("#mkVolumeSeg .ui-seg-i", { hasText: "Contracts" }).click();
 
   ok(/screened universe/i.test(read.foot),
      "the footer states the population in the payload's own words");
@@ -771,6 +782,12 @@ try {
   eq(read.againstEmpties, 1,
      "and the side with no overlap gets its own silence rather than an empty column");
   const againstEmpty = await silenceAt(page, "#mktAgainst [data-empty]");
+  const rowH = await page.evaluate(() => {
+    const e = document.querySelector("#mktAgainst .mk-movers-col [data-empty]");
+    return e ? { row: e.classList.contains("is-row"), h: Math.round(e.getBoundingClientRect().height) } : null;
+  });
+  ok(rowH && rowH.row && rowH.h <= 56,
+     `a column-sized silence is one slim row, glyph, word and Why, not a hatched box taller than the list it stands for (${JSON.stringify(rowH)})`);
   eq(againstEmpty.kind, "quiet",
      "tagged QUIET: both inputs were read and the intersection is genuinely empty, which " +
      "is a fact about the session and not a failure to measure it");
@@ -850,6 +867,9 @@ try {
      "of a base under a hundred contracts is noise, and the change column already " +
      "carries the magnitude");
   ok(/From 7 contracts/.test(read.oiTitles[2] || ""), `and says what 'new' means behind it (${read.oiTitles[2]})`);
+  eq(read.oi[4][1], "×5.7",
+     "and a contract that more than doubled prints its multiple too, to one decimal — one column never mixes " +
+     "\"×103\" with \"+470%\", which a reader would have to convert to compare");
   eq(read.oi[3][1], "×1,026",
      "and ten-fold growth or more from a real base prints the multiple of the prior " +
      "snapshot, 1 + ratio = current / previous, rather than a five-digit percent");
@@ -1779,6 +1799,20 @@ try {
       const over = await deepPage.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       ok(over <= 1, `no horizontal overflow at ${width}px with every depth module drawn (${over}px)`);
     }
+    const spoken = await deepPage.evaluate(() => new Promise((done) => {
+      const host = document.querySelector("#mkTide .ui-chart[role=group]");
+      let n = 0;
+      const mo = new MutationObserver((recs) => { n += recs.filter((r) => r.target.id === "fxLive").length; });
+      mo.observe(document.body, { childList: true, subtree: true, characterData: true });
+      host.focus();
+      host.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
+      setTimeout(() => { mo.disconnect(); done(n); }, 50);
+    }));
+    eq(spoken, 1,
+      "after three resizes a chart still answers one key with one announcement: a repaint replaces the scrub's listeners " +
+      "instead of stacking one more set per paint, which read every value aloud once per resize");
+    const endTick = await deepPage.evaluate(() => Array.from(document.querySelectorAll("#mkVol svg text"), (t) => t.textContent));
+    ok(endTick.includes("1y"), `the vol curve labels its one-year end rather than dropping the tick at the plot edge (${endTick.join(" ")})`);
     await deepPage.close();
   }
 

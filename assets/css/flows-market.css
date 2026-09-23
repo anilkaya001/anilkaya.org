@@ -63,6 +63,17 @@
   .mk-mod .ui-mod-h > .mk-segc .ui-seg-i { padding: 0 4px; overflow: hidden; text-overflow: ellipsis; }
 }
 
+.mk-hush.is-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 44px;
+  padding: 4px 6px 4px 12px;
+  text-align: left;
+}
+.mk-hush.is-row > .ui-g { font-size: 17px; }
+.mk-hush.is-row > button { margin-left: auto; }
+
 .mk-mark[data-state="stale"] { color: var(--warn); }
 .mk-mark[data-state="pending"] .ui-g { animation: ui-spin 6s linear infinite; }
 .mk-mark[data-state="unreadable"] { color: var(--down); }
@@ -140,8 +151,12 @@
 .mk-sector-etf { color: var(--label-3); font: var(--t-caption2); }
 .mk-sector-v { text-align: right; font: var(--t-footnote); font-weight: 600; font-variant-numeric: tabular-nums; color: var(--tone, var(--label-1)); }
 .mk-sector.is-unsettled .mk-unset { grid-column: 2 / -1; display: inline-flex; align-items: center; gap: 4px; color: var(--label-3); }
+.mk-k-full { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mk-unit { color: var(--label-3); font-weight: 400; }
 @container mod (max-width: 460px) {
   .mk-sector { grid-template-columns: minmax(80px, 110px) minmax(0, 1fr) 72px; gap: var(--sp-3); }
+  .mk-sector-k[data-short] > .mk-k-full { display: none; }
+  .mk-sector-k[data-short]::before { content: attr(data-short); }
 }
 
 .mk-movers-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-5) var(--sp-6); }

@@ -646,19 +646,20 @@ ${marketModule("mkExpiryCard", "Expiry", "mkExpiry", { span: 5 })}
 ${marketModule("mkVolCard", "Volatility", "mkVol", { span: 7 })}
 ${marketModule("mkRadarCard", "Radar", "mkRadar", { span: 6, seg: `<div class="mk-segc" id="mkRadarSeg"></div>` })}
 ${marketModule("mkAdvCard", "Advancers", "mkAdv", { span: 6 })}
-${marketModule("mkVolumeCard", "Volume", "mkVolume", { span: 6 })}
+${marketModule("mkVolumeCard", "Volume", "mkVolume", { span: 6, seg: `<div class="mk-segc" id="mkVolumeSeg"></div>` })}
 ${marketModule("mkAgainstCard", "Against the tape", "mktAgainst", { span: 6 })}
 ${marketModule("mkMoversCard", "Extremes", "mktMovers", { seg: `<div class="mk-segc mk-seg-phone" id="mkMoversSeg"></div>` })}
 ${marketModule("mkOiCard", "Open interest", "mkOi", { span: 6 })}
 ${marketModule("mkDarkCard", "Dark pool", "mkDark", { span: 6 })}
-${marketModule("mkImpactCard", "Net impact", "mkImpact", { span: 4 })}
-${marketModule("mkInsidersCard", "Insiders", "mkInsiders", { span: 4 })}
-${marketModule("mkSeasonCard", "Seasonality", "mkSeason", { span: 4 })}
+${marketModule("mkImpactCard", "Net impact", "mkImpact", { span: 6 })}
+${marketModule("mkInsidersCard", "Insiders", "mkInsiders", { span: 6 })}
+${marketModule("mkSeasonCard", "Seasonality", "mkSeason")}
   </div>
   <p class="visually-hidden" id="mkPulseFoot"></p>
   <p class="visually-hidden" id="mktFoot"></p>
 `, { chrome: false })}
 ${UI_SCRIPT}
+<script src="${v("/assets/js/flows-fresh.js")}" defer></script>
 <script src="${v("/assets/js/flows-market.js")}" defer></script>
 </body>
 </html>`;

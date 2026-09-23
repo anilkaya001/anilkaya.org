@@ -18,7 +18,7 @@ const CEILING_KIB = {
   askPage: 155,
   strategyPage: 186,
   trackPage: 153,
-  marketPage: 195,
+  marketPage: 204,
   unusualPage: 160,
   eventsPage: 149,
   politicalPage: 139,
