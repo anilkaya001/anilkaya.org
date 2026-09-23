@@ -2047,14 +2047,21 @@ async function archiveDatedBoards(payloads, sessionDate, publishFn) {
   return lines;
 }
 
-async function republishWithChain(payloads, chainByTicker, sessionDate, publishFn, refresh = null) {
+async function republishWithChain(payloads, chainByTicker, sessionDate, publishFn, refresh = null,
+  meta = undefined) {
   const lines = [];
   for (const side of ["long", "short"]) {
     const payload = payloads[side];
     if (!payload || !Array.isArray(payload.rows)) continue;
-    let merged = 0;
+    const metaBefore = JSON.stringify(payload.variation ?? null);
+    if (meta !== undefined) payload.variation = meta;
+    const metaMoved = JSON.stringify(payload.variation ?? null) !== metaBefore;
+    let merged = 0, refreshed = 0;
     for (const row of payload.rows) {
-      if (typeof refresh === "function") refresh(row);
+      if (typeof refresh === "function") {
+        const before = JSON.stringify(row.variation ?? null);
+        if (refresh(row) && JSON.stringify(row.variation ?? null) !== before) refreshed++;
+      }
       const c = chainByTicker.get(row.t);
       if (!c) continue;
 
@@ -2065,7 +2072,7 @@ async function republishWithChain(payloads, chainByTicker, sessionDate, publishF
       row.skewDays = c.scalars.skewDays;
       merged++;
     }
-    if (!merged) continue;
+    if (!merged && !refreshed && !metaMoved) continue;
 
     const key = datedKey(side, sessionDate);
 
@@ -2090,7 +2097,9 @@ async function republishWithChain(payloads, chainByTicker, sessionDate, publishF
 
     try {
       await publishFn("board:" + side, payload);
-      lines.push(`  re-published board:${side} with chain columns on ${merged} row(s)`);
+      lines.push(`  re-published board:${side} with chain columns on ${merged} row(s)` +
+        (refreshed ? `, variation re-measured on ${refreshed}` : "") +
+        (metaMoved ? ", and the board's measured variation block" : ""));
     } catch (error) {
       lines.push(`  re-publish ${side}: ${error.message} — the store keeps the pre-chain board`);
     }
@@ -4850,9 +4859,6 @@ async function main() {
     (variationRun.vannaScale.ratio === null ? "" : `, vendor over Black-Scholes ${variationRun.vannaScale.ratio}`) +
     ` across ${variationRun.vannaScale.n} name(s) with a complete single-expiry chain` +
     (variationRun.vannaScale.reason ? ` — ${variationRun.vannaScale.reason}` : ""));
-  for (const side of ["long", "short"]) {
-    if (payloads[side]) payloads[side].variation = boardVariationMeta(variationRun);
-  }
   const refreshVariation = variationRun.vannaScale.status === "unmeasured" ? null : (row) => {
     const next = boardVariation(row.t);
     if (!next) return false;
@@ -4860,13 +4866,11 @@ async function main() {
     return true;
   };
 
-  if (chainByTicker.size) {
-    for (const line of await republishWithChain(payloads, chainByTicker, sessionDate, publish,
-      refreshVariation)) {
-      console.log(line);
-    }
-  } else {
-
+  for (const line of await republishWithChain(payloads, chainByTicker, sessionDate, publish,
+    refreshVariation, boardVariationMeta(variationRun))) {
+    console.log(line);
+  }
+  if (!chainByTicker.size) {
     for (const line of await archiveDatedBoards(payloads, sessionDate, publish)) {
       console.log(line);
     }

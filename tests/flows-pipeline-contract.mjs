@@ -675,6 +675,42 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     ok(seen.includes("board:short:2026-08-24") && seen.includes("board:short"),
        "and both sides publish, dated copy first");
   }
+
+  {
+    const written = [];
+    const unmeasured = { vannaScale: { status: "unmeasured", ratio: null, n: 0 } };
+    const measured = { vannaScale: { status: "agree", ratio: 1.02, n: 50 } };
+    const payloads = {
+      long: { ...board("long", ["AAA"]), variation: unmeasured },
+      short: { ...board("short", ["CCC"]), variation: unmeasured },
+    };
+    for (const side of ["long", "short"]) {
+      for (const row of payloads[side].rows) row.variation = { vannaPerPointPctAdv: null, why: { vanna: "vanna-unchecked" } };
+    }
+    const refresh = (row) => { row.variation = { vannaPerPointPctAdv: 0.000718, why: {} }; return true; };
+    const chains = new Map([["AAA", chain(0.04, -0.02, 0.31, 25)]]);
+    const lines = await republishWithChain(payloads, chains, "2026-08-24",
+      async (key, payload) => { written.push([key, JSON.stringify(payload)]); }, refresh, measured);
+    const keys = written.map(([k]) => k);
+    assert.deepEqual(keys, ["board:long:2026-08-24", "board:long", "board:short:2026-08-24", "board:short"],
+      "A SIDE WITH NO CHAIN ROW IS STILL REPUBLISHED WHEN THE VARIATION REFRESH CHANGED IT: the short " +
+      "board used to be skipped, the end-of-run check archived its re-measured payload, and the live " +
+      `board kept vanna-unchecked beside an archive that said agree over 50 names (${keys.join(", ")})`); checks++;
+    const byKey = new Map(written);
+    eq(byKey.get("board:short:2026-08-24"), byKey.get("board:short"),
+       "and the dated copy is the live board, byte for byte");
+    ok(JSON.parse(byKey.get("board:short")).variation.vannaScale.status === "agree" &&
+       JSON.parse(byKey.get("board:short")).rows[0].variation.vannaPerPointPctAdv === 0.000718,
+       "carrying the measured scale and the re-measured row");
+    ok(lines.some((l) => /re-published board:short with chain columns on 0 row\(s\), variation re-measured on 1, and the board's measured variation block/.test(l)),
+       `and the log says why a side with no chain row went out again (${lines.join(" | ")})`);
+
+    const still = [];
+    const quiet = { long: { ...board("long", ["AAA"]), variation: unmeasured } };
+    await republishWithChain(quiet, new Map(), "2026-08-24", async (key) => { still.push(key); },
+      null, { vannaScale: { status: "unmeasured", ratio: null, n: 0 } });
+    eq(still.length, 0, "while a side whose rows and block did not change is still left alone");
+  }
 }
 
 {
