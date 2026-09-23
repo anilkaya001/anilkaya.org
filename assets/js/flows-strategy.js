@@ -8,7 +8,7 @@
   const C = UI.chart;
 
   const $ = (id) => document.getElementById(id);
-  const T = (k) => { const n = document.querySelector('#sgCopy [data-k="' + k + '"]'); return n ? n.textContent.replace(/\s+/g, " ").trim() : ""; };
+  const T = (k, o) => { const n = document.querySelector('#sgCopy [data-k="' + k + '"]'); const t = n ? n.textContent.replace(/\s+/g, " ").trim() : ""; return o ? t.replace(/\{(\w+)\}/g, (m, x) => (x in o ? o[x] : m)) : t; };
   const entry = $("sgEntry"), input = $("sgTicker"), statusEl = $("sgStatus"), pickHost = $("sgPick"), grid = $("sgGrid");
   const titleEl = $("sgTitle"), subEl = $("sgSub"), pxEl = $("sgPx"), hero = $("sgHero");
   if (!entry || !input || !grid || !pickHost) return;
@@ -23,6 +23,7 @@
     return (v < 0 && r ? MINUS : signed && v > 0 && r ? "+" : "") + "$" + r.toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp });
   };
   const gusd = (v) => (num(v) === null ? DASH : Math.abs(v) < 10 ? usd(v, true) : sg(Math.round(v)) + "$" + Math.abs(Math.round(v)).toLocaleString("en-US"));
+  const whole = (v) => (num(v) === null ? DASH : Math.abs(v) >= 1e5 ? F.money(v, true) : sg(Math.round(v)) + "$" + Math.abs(Math.round(v)).toLocaleString("en-US"));
   const kf = (K) => (num(K) === null ? DASH : String(+(+K).toFixed(2)));
   const pct = (v, dp = 1) => (num(v) === null ? DASH : (Math.round(v * Math.pow(10, dp + 2)) / Math.pow(10, dp)).toFixed(dp) + "%");
   const days = (a, b) => {
@@ -30,14 +31,8 @@
     return Number.isFinite(x) && Number.isFinite(y) ? Math.round((y - x) / 864e5) : null;
   };
 
-  const NAMES = {
-    "long-call": "Long call", "long-put": "Long put", "short-put": "Short put", "covered-call": "Covered call",
-    "call-debit-spread": "Call debit spread", "put-debit-spread": "Put debit spread", "put-credit-spread": "Put credit spread",
-    "call-credit-spread": "Call credit spread", "long-straddle": "Long straddle", "long-strangle": "Long strangle",
-    "short-strangle": "Short strangle", "iron-condor": "Iron condor", "iron-fly": "Iron fly", "long-butterfly": "Butterfly",
-    "broken-wing-butterfly": "Broken wing", "long-calendar": "Calendar", diagonal: "Diagonal", "risk-reversal": "Risk reversal",
-    collar: "Collar", "put-ratio": "Put ratio", "call-ratio": "Call ratio", "jade-lizard": "Jade lizard", custom: "Custom",
-  };
+  const NAMES = { "long-butterfly": "Butterfly", "broken-wing-butterfly": "Broken wing", "long-calendar": "Calendar", custom: "Custom" };
+  if (Q) for (const f of Q.STRUCTURES) if (f.id !== "no-position" && !NAMES[f.id]) NAMES[f.id] = f.id[0].toUpperCase() + f.id.slice(1).replace(/-/g, " ");
   const P_ = (t, K, side, qty = 1) => ({ type: t, K, side, qty });
   const CANON = {
     "long-call": [P_("C", 0.5, 1)], "long-put": [P_("P", 0.5, 1)], "short-put": [P_("P", 0.5, -1)],
@@ -291,7 +286,7 @@
     if (!st.setup || !st.family || !Q) return;
     const variants = Q.DELTA_TARGETS[st.family] || [{}];
     const out = Q.structureLegs(st.setup, st.family, variants[0], st.expiry, MULTI.has(st.family) ? st.back : undefined);
-    if (!out || !out.legs) { st.why = { state: "unavailable", keep: true, reason: "No listed strikes on " + F.day(st.expiry) + " reach the deltas a " + NAMES[st.family].toLowerCase() + " is built from." }; return; }
+    if (!out || !out.legs) { st.why = { state: "unavailable", keep: true, reason: T("no-legs", { d: F.day(st.expiry), s: NAMES[st.family].toLowerCase() }) }; return; }
     st.legs = out.legs.map((l) => ({ type: l.type, K: l.type === "S" ? null : l.K, side: l.side, qty: l.qty, expiry: l.type === "S" ? null : l.expiry || st.expiry }));
     st.snapped = out.snapped || [];
   }
@@ -358,8 +353,8 @@
     try { st.res = Q.priceStructure(st.setup, cand, { detail: true, curves: true }); } catch { st.res = null; }
     if (!st.res && st.mf && !st.mf.bad.length) {
       st.why = st.family === "jade-lizard" && !st.custom
-        ? { state: "withheld", reason: "These strikes no longer make a jade lizard: the credit does not cover the call spread's width, so the position carries upside risk the structure exists to remove." }
-        : { state: "withheld", reason: "A leg has no two-sided quote on the book the engine read, so the position has no mid to price from." };
+        ? { state: "withheld", reason: T("why-jade") }
+        : { state: "withheld", reason: T("why-quote") };
     }
   }
 
@@ -428,7 +423,7 @@
     const earn = c.earnings;
     return {
       title: st.t + " spot", asOf: c.asOf ? "Session " + F.day(c.asOf) : null,
-      lead: (c.spotSource === "stock-state" ? "The live print" : "The prior daily close") + " every reading on this page is measured from. Re-loading the symbol re-reads it; picking another expiry does not, because a second read per pick would spend a shared vendor quota to re-learn a number the page already holds and can date.",
+      lead: (c.spotSource === "stock-state" ? "The live print" : "The prior daily close") + " " + T("ctx"),
       facts: [
         ["Spot", F.px(S) + " " + UI.MID + " " + (c.spotSource === "stock-state" ? "live print" : "prior daily close")],
         ["Read", st.ctxAge === null ? "age unknown" : ageText() === "Now" ? "moments ago" : ageText() + " ago"],
@@ -472,7 +467,7 @@
         h("header", { class: "ui-mod-h" }, h("h2", { class: "ui-mod-t" }, "Structure"), h("span", { class: "ui-mod-sp" }), seg,
           UI.infoButton("structures", structInfo)),
         el.tileWrap,
-        h("div", { class: "tl-exprow" }, h("div", { class: "tl-exph" }, h("span", { class: "tl-lbl" }, "Expiry"), UI.infoButton("expiries", expiryInfo, { small: true })), el.expWrap));
+        el.expRow = h("div", { class: "tl-exprow" }, h("div", { class: "tl-exph" }, h("span", { class: "tl-lbl" }, "Expiry"), UI.infoButton("expiries", expiryInfo, { small: true })), el.expWrap));
       pickHost.append(el.pick);
       for (const w of [el.tileWrap, el.expWrap]) {
         const strip = w.firstChild;
@@ -514,7 +509,7 @@
       const w = f.window ? f.window.min + "–" + f.window.max + "d" : "";
       const b = h("button", {
         type: "button", class: "tl-tile" + (on ? " is-on" : ""), role: "radio", "aria-checked": String(on), "data-family": f.id,
-        "aria-label": NAMES[f.id] + ", " + f.legs + (f.legs === 1 ? " leg" : " legs") + ", " + w + (picks.has(f.id) ? ", engine pick " + picks.get(f.id) : ""),
+        "aria-label": NAMES[f.id] + ", " + f.legs + (f.legs === 1 ? " leg" : " legs") + ", " + w + (f.risk === "undefined" ? ", uncovered" : "") + (picks.has(f.id) ? ", engine pick " + picks.get(f.id) : ""),
         tabindex: on || (!cur && f === list[0]) ? "0" : "-1",
         onclick: () => choose(f.id),
       },
@@ -522,7 +517,7 @@
       h("span", { class: "tl-tile-n" }, NAMES[f.id]),
       h("span", { class: "tl-tile-m" }, f.legs + (f.legs === 1 ? " leg" : " legs") + "  " + w),
       picks.has(f.id) ? h("span", { class: "tl-pickdot", "aria-hidden": "true" }, String(picks.get(f.id))) : null,
-      f.risk === "undefined" ? h("span", { class: "tl-risk", title: "Undefined risk", "aria-hidden": "true" }, glyph("unavailable")) : null);
+      f.risk === "undefined" ? h("span", { class: "tl-risk", title: "Uncovered: a sold option no other leg covers", "aria-hidden": "true" }, glyph("uncovered")) : null);
       b.addEventListener("keydown", (e) => roving(e, el.tiles));
       return b;
     }));
@@ -535,9 +530,14 @@
     const on = el.tiles.querySelector(".is-on");
     if (on && on.dataset.family !== "custom" && st.tileShown !== on.dataset.family) {
       st.tileShown = on.dataset.family;
-      requestAnimationFrame(() => { const r = on.offsetLeft - el.tiles.clientWidth / 2 + on.offsetWidth / 2; el.tiles.scrollLeft = Math.max(0, r); });
+      requestAnimationFrame(() => centre(el.tiles));
     }
     if (el.tileWrap._edge) requestAnimationFrame(el.tileWrap._edge);
+  }
+
+  function centre(strip) {
+    const on = strip.querySelector(".is-on");
+    if (on) strip.scrollLeft = Math.max(0, on.offsetLeft - strip.clientWidth / 2 + on.offsetWidth / 2);
   }
 
   function customShape() {
@@ -573,10 +573,10 @@
       title: "Structures",
       lead: T("struct"),
       facts: f ? [["Selected", NAMES[f.id]], ["Window", f.window ? f.window.min + " to " + f.window.max + " days, aiming at " + f.window.target : DASH],
-        ["Risk", f.risk === "undefined" ? "Undefined" : f.risk === "stock" ? "Carries the stock" : "Defined"], ["Premium", cap(f.premium)]] : [],
+        ["Risk", f.risk === "undefined" ? "Uncovered" : f.risk === "stock" ? "Carries the stock" : "Defined"], ["Premium", cap(f.premium)]] : [],
       sections: [
         { title: "Engine picks", lines: [picks.size ? T("struct-picks") : T("struct-nopick")] },
-        { title: "Undefined risk", lines: [T("struct-risk")] },
+        { title: "Uncovered", lines: [T("struct-risk")] },
       ],
     };
   }
@@ -590,13 +590,13 @@
     if (book) {
       const rows = (book.calls || []).length + (book.puts || []).length;
       const quotable = (book.calls || []).concat(book.puts || []).filter((r) => num(r.bid) > 0 && num(r.ask) >= num(r.bid)).length;
-      lines.push(quotable + " of " + rows + " contracts read at " + F.day(st.expiry) + " carry a two-sided quote. Strike handles snap only to those.");
+      lines.push(T("exp-q", { n: quotable, m: rows, d: F.day(st.expiry) }));
       if (book.callsTruncated || book.putsTruncated) {
         const which = book.callsTruncated && book.putsTruncated ? "Both sides" : book.callsTruncated ? "The call side" : "The put side";
-        lines.push(which + " of this expiry is CUT OFF: the provider caps a page at " + book.pageSize + " contracts and this page reads " + book.pagesPerType + " of them per side, so strikes beyond those are not listed here at all.");
+        lines.push(T("exp-cut", { w: which, n: book.pageSize, p: book.pagesPerType }));
       }
       const off = num(book.offExpiry);
-      if (off) lines.push(off + " row" + (off === 1 ? "" : "s") + " the provider returned belonged to a different expiry or option type and were dropped, so treat the strike list as incomplete.");
+      if (off) lines.push(off + " row" + (off === 1 ? "" : "s") + " " + T("exp-off"));
       if (book.ivBasis) lines.push("Implied volatility units, resolved once for the whole expiry: " + book.ivBasis + ".");
     }
     return {
@@ -611,7 +611,7 @@
 
   function paintExpiries() {
     const list = expiries();
-    el.expWrap.hidden = !list.length;
+    el.expRow.hidden = !list.length;
     if (!list.length) { el.exp.replaceChildren(); return; }
     const fam = !st.custom && st.family ? FAM[st.family] : null;
     const w = fam && fam.window;
@@ -636,8 +636,7 @@
     el.exp.scrollLeft = keep;
     if (!st.expShown && st.expiry) {
       st.expShown = true;
-      const on = el.exp.querySelector(".is-on");
-      if (on) requestAnimationFrame(() => { el.exp.scrollLeft = Math.max(0, on.offsetLeft - el.exp.clientWidth / 2 + on.offsetWidth / 2); });
+      requestAnimationFrame(() => centre(el.exp));
     }
     if (el.expWrap._edge) requestAnimationFrame(el.expWrap._edge);
   }
@@ -654,7 +653,7 @@
     const fits = e && e.dte !== null && fam.window && e.dte >= fam.window.min && e.dte <= fam.window.max && (!fam.minDte || e.dte >= fam.minDte);
     if (!fits && st.ctx) { st.expiry = pickExpiry(id); st.expShown = false; }
     st.back = MULTI.has(id) ? backFor(id, st.expiry) : "";
-    if (MULTI.has(id) && !st.back) st.why = { state: "unavailable", keep: true, reason: "No listed expiry sits in a " + NAMES[id].toLowerCase() + "'s back-month window behind " + F.day(st.expiry) + "." };
+    if (MULTI.has(id) && !st.back) st.why = { state: "unavailable", keep: true, reason: T("no-back", { s: NAMES[id].toLowerCase(), d: F.day(st.expiry) }) };
     st.legs = [];
     st.rebuildLegs = true;
     st.setupKey = "";
@@ -668,7 +667,7 @@
     st.why = null;
     if (!st.custom && st.family && MULTI.has(st.family)) {
       st.back = backFor(st.family, e);
-      if (!st.back) st.why = { state: "unavailable", keep: true, reason: "No listed expiry sits in a " + NAMES[st.family].toLowerCase() + "'s back-month window behind " + F.day(e) + "." };
+      if (!st.back) st.why = { state: "unavailable", keep: true, reason: T("no-back", { s: NAMES[st.family].toLowerCase(), d: F.day(e) }) };
     }
     if (st.custom) { st.legs = st.legs.map((l) => (l.expiry ? { ...l, expiry: e } : l)); st.snapLegs = true; }
     else { st.legs = []; st.rebuildLegs = true; }
@@ -678,30 +677,30 @@
 
   function paintGrid() {
     const c = st.ctx;
-    if (!st.t) { status("Enter a symbol to begin."); showSilence(null); return; }
+    if (!st.t) { status("Enter a symbol to begin."); showSilence({ state: "quiet", reason: T("empty") }, "Payoff"); return; }
     if (st.loading > 0 && !c) { status("Reading the book…", "pending"); showSilence({ state: "pending", reason: "Reading " + st.t + "…" }, "Reading"); return; }
     if (st.ctxErr) {
-      const t = st.t + ": " + st.ctxErr + ". Nothing below was read — this is the request failing, not the market being quiet.";
+      const t = st.t + ": " + st.ctxErr + ". " + T("st-fail");
       status(t, "unreadable");
       showSilence({ state: "unavailable", reason: t }, st.t);
       return;
     }
     if (!c) { status("Enter a symbol to begin."); showSilence(null); return; }
     if (c.expiryStatus === "unreadable") {
-      const t = st.t + ": the expiry list did not come back, so there is nothing to pick from. The price above was read; this one request was not.";
+      const t = st.t + ": " + T("st-list");
       status(t, "unreadable");
       showSilence({ state: "unavailable", reason: t }, "Expiries");
       return;
     }
     if (!expiries().length) {
-      const t = st.t + " was read and lists no option expiries. That is a reading about the name, not a failure of this page.";
+      const t = st.t + " " + T("st-none");
       status(t, "quiet");
       showSilence({ state: "quiet", reason: t }, "Expiries");
       return;
     }
     const failed = needed().find((e) => st.bookErr.has(e));
     if (failed) {
-      const t = "The book for " + failed + " did not come back: " + st.bookErr.get(failed) + ". Nothing is priced because nothing was read, which is not the same as this expiry being empty.";
+      const t = "The book for " + failed + " did not come back: " + st.bookErr.get(failed) + ". " + T("st-book");
       status(t, "unreadable");
       showSilence({ state: "unavailable", reason: t }, "Book");
       return;
@@ -745,7 +744,7 @@
     m.pop = h("div", { class: "tl-pop" });
     m.evP = slot("EV real world"); m.evQ = slot("EV implied"); m.edge = slot("Edge");
     m.grade = h("span", { class: "tl-grade" });
-    const odds = UI.moduleCard({ id: "sgOddsM", title: "Odds", index: 1, info: oddsInfo, body: [m.pop, UI.metrics([m.evP, m.evQ, m.edge], { min: 96 })] });
+    const odds = UI.moduleCard({ id: "sgOddsM", title: "Odds", index: 1, info: oddsInfo, body: [m.pop, UI.metrics([m.evQ, m.evP, m.edge], { min: 88 })] });
     odds.querySelector(".ui-mod-t").append(m.grade);
     m.dl = slot("Delta"); m.gm = slot("Gamma"); m.vg = slot("Vega"); m.th = slot("Theta"); m.cap = slot("Capital"); m.ror = slot("Return");
     const greeks = UI.moduleCard({ id: "sgGreeksM", title: "Greeks", index: 3, info: greeksInfo, body: [UI.metrics([m.dl, m.gm, m.vg, m.th, m.cap, m.ror], { min: 112 })] });
@@ -783,13 +782,13 @@
   }
 
   function engineState() {
-    if (!Q) return { state: "unavailable", reason: "The engine bundle did not load, so nothing on the smile can be computed in this page." };
+    if (!Q) return { state: "unavailable", reason: T("no-q") };
     if (st.why) return st.why;
     const book = st.books.get(st.legs.find((l) => l.expiry) ? st.legs.find((l) => l.expiry).expiry : st.expiry);
     const e = book && book.engine;
     if (!e) return { state: "unavailable", reason: "The route returned the book without an engine block." };
     if (e.status !== "ok") return { state: "unavailable", reason: cap(e.reason || "the engine did not price this expiry") + "." };
-    if (!engineOf(book)) return { state: "withheld", reason: "No smile could be fitted to this expiry's quotes, so no leg can be priced on it." };
+    if (!engineOf(book)) return { state: "withheld", reason: T("no-fit") };
     if (!st.legs.length) return { state: "quiet", reason: "No legs yet: pick a structure or add a leg." };
     if (st.mf && st.mf.bad.length) return badState(st.mf.bad);
     if (!st.res) return { state: "withheld", reason: "The engine could not price this position." };
@@ -798,9 +797,9 @@
 
   function badState(bad) {
     const which = (k) => bad.filter((b) => b.why === k).map((b) => legName(b.l)).join("; ");
-    if (bad.some((b) => b.why === "unreadable")) return { state: "unavailable", reason: "Withheld: the book for " + which("unreadable") + " did not come back. Nothing here is computed from a partial position." };
-    if (bad.some((b) => b.why === "gone")) return { state: "withheld", reason: "Withheld: " + which("gone") + " is no longer listed at that expiry. The contract was read for and is not in the book, so remove the leg." };
-    if (bad.some((b) => b.why === "quote")) return { state: "withheld", reason: "Withheld: " + which("quote") + " has no " + (st.basis === "mid" || st.basis === "fill" ? "two-sided quote, so it has no mid" : "quote on the side this basis would trade at") + ". A position with one unpriced leg has an unknown cost, not a smaller one." };
+    if (bad.some((b) => b.why === "unreadable")) return { state: "unavailable", reason: "Withheld: the book for " + which("unreadable") + " " + T("bad-read") };
+    if (bad.some((b) => b.why === "gone")) return { state: "withheld", reason: "Withheld: " + which("gone") + " " + T("bad-gone") };
+    if (bad.some((b) => b.why === "quote")) return { state: "withheld", reason: "Withheld: " + which("quote") + " has no " + (st.basis === "mid" || st.basis === "fill" ? "two-sided quote, so it has no mid" : "quote on the side this basis would trade at") + ". " + T("bad-quote") };
     if (bad.some((b) => b.why === "spot")) return { state: "unavailable", reason: "Withheld: the share leg needs a spot price and none was read." };
     return { state: "pending", reason: "Reading the book that prices " + which("pending") + "…" };
   }
@@ -868,14 +867,54 @@
     return row;
   }
 
+  function loupe() {
+    const wrap = (cls, kid) => h("span", { class: "tl-lp-w" + (cls ? " " + cls : "") }, kid);
+    const seg = wrap("tl-lp-sw", h("i", { class: "tl-lp-seg" }));
+    const q = wrap(null, h("b", { class: "tl-lp-q" })), p = wrap(null, h("b", { class: "tl-lp-p" }));
+    const lo = h("span", { class: "tl-lp-e" }), hi = h("span", { class: "tl-lp-e" });
+    const val = h("span", { class: "tl-lp-v" });
+    const row = h("div", { class: "tl-pop-r tl-lp", "data-law": "gap", role: "img" },
+      h("span", { class: "tl-pop-l" }, "Gap"),
+      h("span", { class: "tl-lp-box", "aria-hidden": "true" }, lo, h("span", { class: "tl-lp-t" }, seg, q, p), hi), val);
+    return Object.assign(row, { _seg: seg, _q: q, _p: p, _lo: lo, _hi: hi, _val: val });
+  }
+
+  const pop1 = (v) => (v >= 0.9995 ? ">99.9%" : v > 0 && v < 0.0005 ? "<0.1%" : pct(v, 1));
+
+  function fillLoupe(row, q, p, stt) {
+    const both = q !== null && p !== null;
+    row.classList.toggle("is-none", !both);
+    if (!both) {
+      row._val.replaceChildren(UI.dash(stt, "Gap"));
+      row.setAttribute("aria-label", "Gap between the real-world and the implied chance of profit: not available");
+      return;
+    }
+    const lo = Math.min(q, p), hi = Math.max(q, p), pad = Math.max((hi - lo) * 0.6, 0.015);
+    let a0 = Math.max(0, Math.floor((lo - pad) * 100) / 100), a1 = Math.min(1, Math.ceil((hi + pad) * 100) / 100);
+    if (a1 - a0 < 0.03) { if (a0 > 0) a0 = Math.max(0, a1 - 0.03); else a1 = Math.min(1, a0 + 0.03); }
+    const at = (v) => String((v - a0) / (a1 - a0));
+    row._lo.textContent = Math.round(a0 * 100) + "%";
+    row._hi.textContent = Math.round(a1 * 100) + "%";
+    row._q.style.setProperty("--x", at(q));
+    row._p.style.setProperty("--x", at(p));
+    row._seg.style.setProperty("--x", at(lo));
+    row._seg.style.setProperty("--w", String((hi - lo) / (a1 - a0)));
+    const tenths = Math.round(p * 1000) - Math.round(q * 1000);
+    const tone = tenths > 0 ? "up" : tenths < 0 ? "down" : "flat";
+    row.dataset.tone = tone;
+    const txt = sg(tenths) + (Math.abs(tenths) / 10).toFixed(1);
+    row._val.replaceChildren(h("b", { class: "ui-num", "data-tone": tone }, txt), h("small", null, "pts"));
+    row.setAttribute("aria-label", "Real world against implied: " + txt + " points of chance of profit, " + pop1(q) + " implied and " + pop1(p) + " real world, drawn on a scale from " + row._lo.textContent + " to " + row._hi.textContent);
+  }
+
   function fillOdds(r, es, animate) {
     const m = st.mods;
     if (!m.popQ) {
       m.popQ = popRow("Implied", "q", "--accent");
       m.popP = popRow("Real world", "p", "--s-orange");
-      m.popD = h("div", { class: "tl-pop-d" });
-      m.pop.append(m.popQ, m.popP, m.popD);
-      m.pop.setAttribute("role", "img");
+      m.popD = loupe();
+      m.bars = h("div", { class: "tl-pop-b", role: "img" }, m.popQ, m.popP);
+      m.pop.append(m.bars, m.popD);
       requestAnimationFrame(() => requestAnimationFrame(() => m.pop.classList.add("is-in")));
     }
     const popQ = r ? r.prob.popQ : null, popP = r ? r.prob.popP : null;
@@ -885,7 +924,7 @@
       row._bar.style.setProperty("--p", v === null ? "0" : String(v));
       if (v === null) row._val.replaceChildren(UI.dash(stt, row._label));
       else {
-        const txt = v >= 0.995 ? ">99%" : v > 0 && v <= 0.005 ? "<1%" : pct(v, 0);
+        const txt = pop1(v);
         const cur = row._val.querySelector(".ui-roll");
         if (cur) UI.roll(cur, txt, cur.dataset.value, animate); else row._val.replaceChildren(UI.roll(h("b", { class: "ui-num" }), txt, null, animate));
       }
@@ -902,9 +941,8 @@
     m.popP._gap.dataset.tone = d >= 0 ? "up" : "down";
     m.popP._gap.style.setProperty("--a", String(both ? Math.min(popQ, popP) : 0));
     m.popP._gap.style.setProperty("--b", String(both ? Math.max(popQ, popP) : 0));
-    m.popD.replaceChildren(...(both ? [UI.capsule(sg(d) + Math.abs(d * 100).toFixed(1) + " pts", { tone: Math.abs(d) < 0.0005 ? "flat" : d > 0 ? "up" : "down", label: "Real world against implied, " + sg(d) + Math.abs(d * 100).toFixed(1) + " points" }),
-      h("span", { class: "tl-pop-dl" }, "Chance of profit")] : [h("span", { class: "tl-pop-dl" }, "Chance of profit")]));
-    m.pop.setAttribute("aria-label", "Chance of profit at expiry: implied " + (popQ === null ? "not available" : pct(popQ, 1)) + ", real world " + (popP === null ? "not available" : pct(popP, 1)));
+    fillLoupe(m.popD, popQ, popP, lawState || es);
+    m.bars.setAttribute("aria-label", "Chance of profit at expiry: implied " + (popQ === null ? "not available" : pop1(popQ)) + ", real world " + (popP === null ? "not available" : pop1(popP)));
     const evP = r ? r.ev.p : null, evQ = r ? r.ev.q : null, edge = r ? r.ev.edge : null;
     const tone = (v) => (num(v) === null ? "flat" : v > 0 ? "up" : v < 0 ? "down" : "flat");
     put(m.evP, usd(evP, true), { state: r ? (evP === null ? lawState : null) : es, tone: tone(evP), animate });
@@ -915,7 +953,7 @@
 
   function lawWhy() {
     const e = engineOf(st.books.get(st.expiry));
-    return e && e.lawFrom === null ? "no card with a GARCH law is published for " + st.t + " this session, so there is no real-world distribution to take a probability over" : "the card's law could not be read";
+    return e && e.lawFrom === null ? T("law-none", { t: st.t }) : "the card's law could not be read";
   }
 
   function fillGreeks(r, es, animate) {
@@ -950,22 +988,22 @@
     const zi = g.spot.findIndex((x) => Math.abs(x - S) < 1e-6);
     const Z = ["−2 SD", "−1 SD", "−½ SD", "Spot", "+½ SD", "+1 SD", "+2 SD"];
     const tagOf = (i) => {
-      if (i < 7) return Z[i];
+      if (i < 7) return [Z[i], null];
       const x = g.spot[i];
       const near = (v) => num(v) !== null && Math.abs(v - x) < 1e-3;
-      return near(lv.callWall) ? "Call wall" : near(lv.putWall) ? "Put wall" : near(lv.flip) ? "Flip" : "Level";
+      return near(lv.callWall) ? ["Call wall", "call"] : near(lv.putWall) ? ["Put wall", "put"] : near(lv.flip) ? ["Flip", "flip"] : ["Level", null];
     };
     const head = h("tr", null, h("th", { scope: "col" }, h("span", { class: "visually-hidden" }, "Spot")),
       ...g.days.map((d, j) => h("th", { scope: "col" }, j === 0 ? "Now" : j === g.days.length - 1 ? F.day(st.legs.filter((l) => l.expiry).map((l) => l.expiry).sort()[0] || st.expiry) : d + "d")));
     const body = order.map((i) => h("tr", { class: i === zi ? "is-spot" : i >= 7 ? "is-level" : null },
-      h("th", { scope: "row" }, h("b", { class: "ui-num" }, kf(g.spot[i])), h("span", null, tagOf(i))),
+      h("th", { scope: "row" }, h("b", { class: "ui-num" }, F.px(g.spot[i])), h("span", { "data-level": tagOf(i)[1] }, tagOf(i)[0])),
       ...g.days.map((d, j) => {
         const v = g.pnl[i][vi][j];
         const a = Math.sqrt(Math.abs(v || 0) / max);
         return h("td", {
-          class: "ui-num" + (i === zi && j === 0 && vi === 1 ? " is-now" : ""), "data-tone": v > 0 ? "up" : v < 0 ? "down" : null,
+          class: "ui-num" + (i === zi && j === 0 && g.vol[vi] === 0 ? " is-now" : ""), "data-tone": v > 0 ? "up" : v < 0 ? "down" : null,
           style: { "--a": (0.08 + 0.52 * a).toFixed(3), "--d": j * 40 + "ms" },
-        }, F.money(v, true));
+        }, whole(v));
       })));
     const table = h("table", { class: "tl-scn-t" }, h("caption", { class: "visually-hidden" }, "Profit and loss per lot at each spot and day, volatility " + ["5 points lower", "unchanged", "5 points higher"][vi]), h("thead", null, head), h("tbody", null, body));
     m.scn.replaceChildren(table);
@@ -1133,9 +1171,10 @@
     const lu = res ? res.lossUnbounded : mf && mf.prof && mf.prof.lossUnbounded;
     tags.push({ y: y(hiV), text: pu ? "Unbounded" : F.money(hiV, true), tone: "up" });
     tags.push({ y: y(loV), text: lu ? "Unbounded" : F.money(loV, true), tone: "down" });
-    if (ser.today && ser.today.length) {
-      const nearS = S === null ? ser.today[ser.today.length - 1] : ser.today.reduce((b, p) => (Math.abs(p[0] - S) < Math.abs(b[0] - S) ? p : b), ser.today[0]);
-      tags.push({ y: y(nearS[1]), text: F.money(nearS[1], true), tone: "accent", now: true });
+    const now = nowAtSpot();
+    if (ser.today && ser.today.length && now !== null && S >= ser.d0 && S <= ser.d1) {
+      tags.push({ y: y(now), text: whole(now), tone: "accent", now: true });
+      C.marker(svg, "dot", x(S), y(now), UI.cssVar("--accent"), 3.5).classList.add("tl-now");
     }
     C.spread(tags, 15, top + 6, top + Hp - 2);
     for (const t of tags) s("text", { x: w - right + 10, y: t.y + 4, text: t.text, class: "tx-b " + (t.now ? "tl-tag-now" : t.tone === "up" ? "tl-tag-up" : "tl-tag-dn") }, svg);
@@ -1181,6 +1220,14 @@
     st.x = x;
     st.plotW = w;
     placeHandles(ser);
+  }
+
+  function nowAtSpot() {
+    const g = st.res && st.res.grid, S = spot();
+    if (!g || S === null) return null;
+    const i = g.spot.findIndex((x) => Math.abs(x - S) < 1e-6);
+    const flat = g.vol.findIndex((v) => v === 0);
+    return i < 0 || flat < 0 || num(g.pnl[i][flat][0]) === null ? null : g.pnl[i][flat][0];
   }
 
   function smooth(pts) {
@@ -1315,6 +1362,8 @@
     else if (e.key === "ArrowLeft" || e.key === "ArrowDown") k = ks[Math.max(0, j - 1)];
     else if (e.key === "PageUp") k = ks[Math.min(ks.length - 1, j + 5)];
     else if (e.key === "PageDown") k = ks[Math.max(0, j - 5)];
+    else if (e.key === "Home") k = ks[0];
+    else if (e.key === "End") k = ks[ks.length - 1];
     if (k === null || k === undefined) return;
     e.preventDefault();
     st.domain = null;
@@ -1338,7 +1387,7 @@
       for (const b0 of mf.prof.breakevens) push(b0, "breakeven");
       if (S !== null) push(S, "spot today");
       pts.sort((a, b) => a.x - b.x);
-      node.append(h("table", { class: "tl-pts" }, h("caption", null, "Profit and loss at expiry at each turning point; between two rows it is a straight line."),
+      node.append(h("table", { class: "tl-pts" }, h("caption", null, T("pts")),
         h("thead", null, h("tr", null, h("th", { scope: "col" }, "Underlying"), h("th", { scope: "col" }, "P&L"), h("th", { scope: "col" }, "What it is"))),
         h("tbody", null, pts.map((p) => h("tr", null, h("th", { scope: "row" }, "$" + kf(p.x)), h("td", null, usd((Q.payoffValue(mf.norm, p.x) - mf.cost) * LOT, true)), h("td", null, p.what.join(", ")))))));
     }
@@ -1439,7 +1488,7 @@
     e.preventDefault();
     const t = String(input.value || "").trim().toUpperCase();
     if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(t)) {
-      status("That is not a symbol this page accepts: one to ten characters, starting with a letter.", "unavailable");
+      status(T("bad-sym"), "unavailable");
       input.setAttribute("aria-invalid", "true");
       return;
     }

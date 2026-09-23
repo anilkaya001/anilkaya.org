@@ -65,6 +65,7 @@ const GLYPHS = {
   wave: '<path d="M3 12.5c2.3-5.3 4.7-5.3 7 0s4.7 5.3 7 0c1.2-2.7 2.5-3.5 4-3"/>',
   levels: '<path d="M4 7h16M4 12h9M4 17h16"/>',
   shield: '<path d="M12 3.5 19 6v5.5c0 4.3-2.9 7.6-7 9-4.1-1.4-7-4.7-7-9V6z"/>',
+  uncovered: '<path d="M12 3.5 19 6v5.5c0 4.3-2.9 7.6-7 9-4.1-1.4-7-4.7-7-9V6z"/><path d="M4 4l16 16"/>',
   home: '<path d="M4 10.4 12 4l8 6.4V19a1.2 1.2 0 0 1-1.2 1.2H14.5v-5.4h-5v5.4H5.2A1.2 1.2 0 0 1 4 19z"/>',
   long: '<path d="M4 17l5.2-5.2 3.6 3.6L20 8.2"/><path d="M15 8h5v5"/>',
   short: '<path d="M4 7l5.2 5.2 3.6-3.6L20 15.8"/><path d="M15 16h5v-5"/>',
@@ -1211,7 +1212,7 @@ export function strategyPage({ username = "" } = {}) {
       <p data-k="ctx-earn">A contract that outlives an earnings report is a different trade at the same premium.</p>
       <p data-k="about">Pick a name and a structure; the engine chooses each strike by delta on this expiry&#39;s fitted smile and prices the position exactly as the server does. Drag a strike and everything re-prices in the page.</p>
       <p data-k="struct">Twenty-two structures from the engine&#39;s catalogue. Each chooses its expiry inside its own window of days to expiry and its strikes by forward delta on the fitted smile, snapped to a listed, two-sided strike.</p>
-      <p data-k="struct-risk">A tile marked with the slashed circle can lose more than any fixed amount: its capital is the Reg-T formula and its grade is capped at 2.</p>
+      <p data-k="struct-risk">A tile marked with the slashed shield sells an option no other leg of it covers. Its capital is the exchange&#39;s Reg-T formula rather than a maximum loss, its grade is capped at 2, and a short call among its legs can lose without limit.</p>
       <p data-k="struct-picks">Numbered tiles are the engine&#39;s own ranking on this expiry, by expected value under the real-world law per dollar of capital, among structures graded at least 1.</p>
       <p data-k="struct-nopick">The engine ranked nothing on this expiry, so no tile is numbered.</p>
       <p data-k="exp">Each chip is one listed expiry, with its calendar days to expiry from the session and a bar for how many contracts it lists. Chips inside the structure&#39;s window are underlined. The book is read one expiry at a time.</p>
@@ -1235,6 +1236,27 @@ export function strategyPage({ username = "" } = {}) {
       <p data-k="legs-mid">Halfway between bid and ask; no one is obliged to trade there</p>
       <p data-k="legs-fill">Mid plus a quarter of the spread, the engine&#39;s execution assumption</p>
       <p data-k="legs-nat">The ask on every buy and the bid on every sell: what crossing the spread costs</p>
+      <p data-k="no-legs">No listed strikes on {d} reach the deltas a {s} is built from.</p>
+      <p data-k="why-jade">These strikes no longer make a jade lizard: the credit does not cover the call spread&#39;s width, so the position carries upside risk the structure exists to remove.</p>
+      <p data-k="why-quote">A leg has no two-sided quote on the book the engine read, so the position has no mid to price from.</p>
+      <p data-k="ctx">every reading on this page is measured from. Re-loading the symbol re-reads it; picking another expiry does not, because a second read per pick would spend a shared vendor quota to re-learn a number the page already holds and can date.</p>
+      <p data-k="exp-q">{n} of {m} contracts read at {d} carry a two-sided quote. Strike handles snap only to those.</p>
+      <p data-k="exp-cut">{w} of this expiry is CUT OFF: the provider caps a page at {n} contracts and this page reads {p} of them per side, so strikes beyond those are not listed here at all.</p>
+      <p data-k="exp-off">the provider returned belonged to a different expiry or option type and were dropped, so treat the strike list as incomplete.</p>
+      <p data-k="no-back">No listed expiry sits in a {s}&#39;s back-month window behind {d}.</p>
+      <p data-k="st-fail">Nothing below was read — this is the request failing, not the market being quiet.</p>
+      <p data-k="st-list">the expiry list did not come back, so there is nothing to pick from. The price above was read; this one request was not.</p>
+      <p data-k="st-none">was read and lists no option expiries. That is a reading about the name, not a failure of this page.</p>
+      <p data-k="st-book">Nothing is priced because nothing was read, which is not the same as this expiry being empty.</p>
+      <p data-k="no-q">The engine bundle did not load, so nothing on the smile can be computed in this page.</p>
+      <p data-k="no-fit">No smile could be fitted to this expiry&#39;s quotes, so no leg can be priced on it.</p>
+      <p data-k="bad-read">did not come back. Nothing here is computed from a partial position.</p>
+      <p data-k="bad-gone">is no longer listed at that expiry. The contract was read for and is not in the book, so remove the leg.</p>
+      <p data-k="bad-quote">A position with one unpriced leg has an unknown cost, not a smaller one.</p>
+      <p data-k="law-none">no card with a GARCH law is published for {t} this session, so there is no real-world distribution to take a probability over</p>
+      <p data-k="pts">Profit and loss at expiry at each turning point; between two rows it is a straight line.</p>
+      <p data-k="bad-sym">That is not a symbol this page accepts: one to ten characters, starting with a letter.</p>
+      <p data-k="empty">No symbol yet. Enter one above and the lab reads its option book, fits the smile and prices the structure you pick on it.</p>
       <p data-k="legs-link">A link to this page carries the legs as contracts with signed quantities and never their prices: a quote is a fact about a moment, and a link opened tomorrow re-reads the book.</p>
   </div>`,
   });

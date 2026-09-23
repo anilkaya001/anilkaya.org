@@ -339,8 +339,36 @@ try {
     const d = await slot("Delta");
     ok(!d.silent && /^[+−]\d/.test(d.value),
        `the position delta comes from the smile, not from the vendor's per-contract greek (${d.value}); a contract the vendor sent no greeks for no longer silences it`);
-    const popQ = flat(await page.locator('.tl-pop-r[data-law="q"] .tl-pop-v').textContent());
-    ok(/^\d+%/.test(popQ), `and a chance of profit at expiry under the smile's own density (${popQ})`);
+    const popQ = await page.$eval('.tl-pop-r[data-law="q"] .tl-pop-v', (n) => (n.querySelector("[data-value]") || n).dataset.value || n.textContent);
+    ok(/^\d+\.\d%$/.test(popQ), `and a chance of profit at expiry under the smile's own density, to a tenth of a point (${popQ})`);
+
+    const want = await page.evaluate(async (exp) => {
+      const b = await (await fetch("/api/flows/strategy?t=AAA&expiry=" + exp + "&engine=1", { credentials: "same-origin" })).json();
+      const en = b.engine, Q = window.FlowsQuant;
+      const setup = Q.labSetup({ asOfMs: en.asOfMs, spot: en.spot, facts: en.facts, state: en.state, pLaw: en.pLaw, levels: en.levels, event: en.event, stale: en.stale,
+        books: [{ fit: en.fits[0], rows: Q.bookRows(b.calls, b.puts, "AAA") }] });
+      const r = Q.priceStructure(setup, { family: "custom", fam: { id: "custom", risk: "defined", dir: "neutral" }, expiry: exp, dir: "neutral",
+        legs: [{ type: "C", K: 100, side: 1, qty: 1, expiry: exp }] }, { detail: true, curves: true });
+      return { g: r.greeks, S: en.spot, popQ: r.prob.popQ };
+    }, NEAR);
+    const money = (v) => (v < 0 ? MINUS : v > 0 ? "+" : "") + "$" + Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: Math.abs(v) < 1000 ? 2 : 0, maximumFractionDigits: Math.abs(v) < 1000 ? 2 : 0 });
+    eq(popQ, (Math.round(want.popQ * 1000) / 10).toFixed(1) + "%", "the implied chance is the engine's, re-priced in the page at the fill the page shows");
+    const sh = want.g.delta$ / want.S;
+    eq(d.value, (sh < 0 ? MINUS : "+") + Math.abs(sh).toFixed(Math.abs(sh) < 10 ? 1 : 0), `the delta is the engine's dollar delta in shares, unmodified (${d.value})`);
+    await page.click('[aria-label="About greeks"]');
+    await page.waitForSelector("#fxPop:popover-open");
+    const gf = await page.$$eval("#fxPop dt", (dts) => Object.fromEntries(dts.map((dt) => [dt.textContent.trim(), dt.nextElementSibling.textContent.trim()])));
+    const gtext = await popText();
+    await closeInfo();
+    ok(gf.Delta.startsWith(money(want.g.delta$)), `the disclosure carries the engine's dollar delta to the cent (${gf.Delta})`);
+    eq(gf.Gamma, money(want.g.gamma$1pct) + " of delta per 1% move", "and its gamma per 1% move");
+    eq(gf.Vega, money(want.g.vegaPt) + " per volatility point", "and its vega per volatility point");
+    eq(gf.Theta, money(want.g.thetaDay) + " per day", "and its theta per calendar day, the engine's number with nothing re-derived in the page");
+    const bw = sh * 1.5 * (102 / 600);
+    eq(gf["Beta-weighted delta"], (bw < 0 ? MINUS : "+") + Math.abs(bw).toFixed(1) + " SPY share-equivalents",
+       `the beta-weighted delta is delta × beta × (this price ÷ the index's price) against a NAMED index (${gf["Beta-weighted delta"]})`);
+    ok(/× 1\.50 ×/.test(gtext) && /102\.00 ÷ 600\.00/.test(gtext) && /against a different index it is a different number/.test(gtext),
+       "and the disclosure shows the terms, so the number is never delta times beta passed off as the weighted one");
     const evP = await slot("EV real world");
     ok(evP.silent && evP.state === "unavailable",
        "with the real-world expectation shown as an em dash and a glyph while no law was published for the name");
@@ -388,8 +416,8 @@ try {
     eq((await slot("Cost")).value, "$320.00",
        "priced natural the same spread costs the ask on the buy and pays the bid on the sell — twenty dollars more than the mid, a real cost the mid hides");
     const px4 = await page.$$eval("#sgLegsM .tl-px4 > div", (ds) => Object.fromEntries(ds.map((d) => [d.firstChild.textContent, d.lastChild.textContent])));
-    ok(px4.Mid && px4.Natural && px4.Fill && px4.Model,
-       `and the crossing cost is published beside it rather than left to be inferred: mid ${px4.Mid}, natural ${px4.Natural}`);
+    ok(px4.Mid === "$300.00" && px4.Natural === "$320.00" && px4.Fill === "$305.00" && /^\$\d/.test(px4.Model),
+       `and the crossing cost is published beside it rather than left to be inferred: mid ${px4.Mid}, fill ${px4.Fill}, natural ${px4.Natural}, on the smile ${px4.Model}`);
     eq((await slot("Max loss")).value, MINUS + "$320.00", "the whole payoff moves with the basis");
     eq(new URL(page.url()).searchParams.get("basis"), "natural", "and the basis is held in the link");
   }
@@ -471,6 +499,14 @@ try {
     const scen = await page.$$eval("#sgScenM tbody td", (tds) => tds.length);
     ok(scen >= 28, `the scenario grid prices every spot row at four points in time (${scen} cells)`);
     ok(await page.locator("#sgScenM td.is-now").count() === 1, "and rings the one cell that is today at spot");
+    const nowCell = flat(await page.locator("#sgScenM td.is-now").textContent());
+    const nowTag = flat(await page.locator("#sgPayoff text.tl-tag-now").textContent());
+    eq(nowTag, nowCell, `the payoff's today tag and the ringed cell are one number, as the disclosure says they are (${nowTag})`);
+    eq(await page.locator("#sgPayoff circle.tl-now").count(), 1, "and the today line carries a dot at spot, where that number is read");
+    const spots = await page.$$eval("#sgScenM tbody th b", (bs) => bs.map((b) => b.textContent));
+    ok(spots.every((t) => /^\d+\.\d\d$/.test(t)), `every spot row prints to the cent, one way (${spots.join(", ")})`);
+    const cellText = await page.$$eval("#sgScenM tbody td", (tds) => tds.map((t) => t.textContent));
+    ok(cellText.every((t) => /^[+−]?\$\d{1,3}(,\d{3})*$/.test(t)), `and every cell in whole dollars with no abbreviation below $100,000 (${cellText.slice(0, 4).join(", ")}…)`);
   }
 
   {
@@ -490,7 +526,17 @@ try {
     eq((await slot("Max profit")).value, fmt(idea.maxProfit), "the page's maximum profit is the Worker's, to the cent");
     eq((await slot("Max loss")).value, fmt(idea.maxLoss), "and so is its maximum loss");
     const rp = await page.$eval('.tl-pop-r[data-law="p"] .tl-pop-v', (n) => (n.querySelector("[data-value]") || n).dataset.value || n.textContent);
-    ok(/^\d+%$/.test(rp), `and the real-world chance of profit is drawn from the card's law (${rp})`);
+    const rq = await page.$eval('.tl-pop-r[data-law="q"] .tl-pop-v', (n) => (n.querySelector("[data-value]") || n).dataset.value || n.textContent);
+    const tenth = (v) => Math.round(v * 1000);
+    eq(rp, (tenth(idea.prob.popP) / 10).toFixed(1) + "%", `the real-world chance of profit is the Worker's, under the card's law (${rp})`);
+    eq(rq, (tenth(idea.prob.popQ) / 10).toFixed(1) + "%", `and the implied one too (${rq})`);
+    const gapWant = tenth(idea.prob.popP) - tenth(idea.prob.popQ);
+    const gap = await page.$eval('.tl-lp .tl-lp-v b', (b) => b.textContent);
+    eq(gap, (gapWant < 0 ? MINUS : gapWant > 0 ? "+" : "") + (Math.abs(gapWant) / 10).toFixed(1),
+       `the gap is printed as the difference of the two chances as printed, so a reader's subtraction agrees with it (${gap})`);
+    const lp = await page.$eval(".tl-lp", (n) => ({ label: n.getAttribute("aria-label"), q: n.querySelector(".tl-lp-q") !== null, p: n.querySelector(".tl-lp-p") !== null, lo: n.querySelector(".tl-lp-e").textContent }));
+    ok(lp.q && lp.p && /points of chance of profit/.test(lp.label) && /on a scale from \d+% to \d+%/.test(lp.label),
+       `and it is drawn as two marks on a magnified scale whose ends are printed and spoken, so a gap of a point is visible rather than a hairline (${lp.label})`);
 
     const same = await page.evaluate(async (exp) => {
       const b = await (await fetch("/api/flows/strategy?t=BBB&expiry=" + exp + "&engine=1", { credentials: "same-origin" })).json();
