@@ -919,8 +919,9 @@ function chainPanel(chain, key, missing = null) {
     return {
       status: "unavailable",
       reason: typeof missing === "string" && missing ? missing
-        : "no option chain was fetched for this name this session — the chain leg " +
-          "is the last call the pipeline spends and the first it gives up on a slow morning",
+        : "no option chain was fetched for this name this session — the chain leg is the " +
+          "last vendor call the pipeline spends, and it stopped before reaching this name " +
+          "to keep the run inside its deadline",
     };
   }
   const panel = chain[key] || { status: "unavailable", reason: "this panel was not built from the chain" };

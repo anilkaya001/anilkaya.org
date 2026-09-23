@@ -654,7 +654,7 @@ The call count is derived, not estimated:
 
 THE CHAIN LEG IS THE LAST VENDOR SPEND AND THE FIRST THING DROPPED. It runs
 after both boards, the dated archive, the watch list, the movers band, the
-record and the sector panel are all committed, so a slow morning costs the
+record and the sector panel are all committed, so a slow run costs the
 reader four card panels and a gappy history column rather than a session.
 Two guards, not one: the leg refuses to start past the 30-minute deadline, and
 it stops partway if it comes within six minutes of it, because a run that

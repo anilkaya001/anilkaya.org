@@ -1391,9 +1391,9 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
         for (const key of ["aggressor", "ivSurface", "skewTerm", "topContracts"]) {
           const p = card.panels[key];
           ok(p.status === "unavailable" && /not on today's board/.test(p.reason) &&
-             !/slow morning/.test(p.reason),
+             !/stopped before reaching this name/.test(p.reason),
              `${t} ${key}: a chain never requested for a cross-section name says so, not that ` +
-             `a slow morning gave it up (${String(p.reason).slice(0, 60)})`);
+             `the chain leg's deadline gave it up (${String(p.reason).slice(0, 60)})`);
         }
       }
       eq(congressOf.unavailable, 0,

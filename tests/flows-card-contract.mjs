@@ -423,15 +423,19 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   for (const key of ["aggressor", "ivSurface", "skewTerm", "topContracts"]) {
     eq(crossCard.panels[key].reason, never,
        `a cross-section card's ${key} gives the reason its chain was never requested, the same ` +
-       "sentence its other withheld panels give — not a slow morning that never happened");
+       "sentence its other withheld panels give — not a deadline that never happened");
   }
   eq(crossCard.panels.congress.status, "quiet",
      "and a cross-section card handed the market-wide tape reads it: quiet, not unfetched");
   const failed = "the option-chain read for this name failed this session";
   eq(buildCard({ ...full, chain: null, chainMissing: failed }).panels.topContracts.reason, failed,
      "a deep name whose chain read failed says it failed");
-  ok(/slow morning/.test(buildCard({ ...full, chain: null }).panels.topContracts.reason),
+  const unreached = buildCard({ ...full, chain: null }).panels.topContracts.reason;
+  ok(/stopped before reaching this name/.test(unreached) && /deadline/.test(unreached),
      "while a deep name the chain lane never reached keeps the deadline sentence");
+  ok(!/morning|evening|night/.test(unreached),
+     "AND IT NAMES NO TIME OF DAY: the only schedule is 21:30 UTC, after the close, so 'the first it " +
+     `gives up on a slow morning' blamed a run that no longer exists (${unreached})`);
 }
 
 {
