@@ -468,7 +468,7 @@ function tailRisk(qtab, legs, cost) {
 }
 
 function legDollarGreeks(l, S, r, qc, sigma) {
-  if (l.type === "S") return { delta$: l.side * l.qty * LOT * S, gamma$1pct: 0, vegaPt: 0, thetaDay: 0, vannaPt$: 0, charmDay$: 0 };
+  if (l.type === "S") { const d = l.side * l.qty * LOT * S; return { delta$: d, gamma$1pct: 0, vegaPt: 0, thetaDay: 0, vannaPt$: 0, charmDay$: 0, deltaAdj$: d }; }
   const g = bsmGreeks({ S, K: l.K, r, q: qc, sigma, T: l.T, type: l.type });
   if (!g) return null;
   const m = l.side * l.qty * LOT;
@@ -823,7 +823,8 @@ export function rankStructures(structs, state) {
   if (ideas.length) return { ideas: ideas.map((s) => s.id), noTrade: null };
   const all = structs.filter((s) => fin(s.score)).sort(cmp);
   const code = !structs.length ? "candidates.none" : structs.every((s) => !fin(s.ev.p)) ? "model.none"
-    : structs.some((s) => fin(s.ev.p) && s.ev.p > 0) ? "grade.none" : "ev.none-positive";
+    : eligible.length ? "risk.undefined-only"
+      : structs.some((s) => fin(s.ev.p) && s.ev.p > 0) ? "grade.none" : "ev.none-positive";
   return { ideas: [], noTrade: { code, closest: all.length ? all[0].id : null } };
 }
 

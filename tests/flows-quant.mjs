@@ -672,6 +672,13 @@ const OUT = ENGINE.runEngine(BASE);
   const noP = vetoed({ pLaw: null });
   ok(noP.structures.every((s) => s.ev.p === null && s.grade === 0), "with no P law there is no EV_P and every grade is withheld");
   eq(noP.noTrade && noP.noTrade.code, "model.none", "and the engine stands aside for want of a model");
+  const lone = ENGINE.rankStructures([{ id: "S1", family: "short-strangle", risk: "undefined", grade: 2, ev: { p: 5 }, score: 0.1, prob: { popP: 0.8 } }], { preferred: [] });
+  ok(lone.ideas.length === 0 && lone.noTrade.code === "risk.undefined-only" && lone.noTrade.closest === "S1",
+    "when only undefined-risk structures qualify the engine stands aside and says so, rather than blaming the grades");
+  const desk = vetoed({ desk: true, topFamilies: 12 });
+  const cc = desk.structures.filter((s) => s.family === "covered-call");
+  ok(cc.length > 0 && cc.every((s) => Math.abs(s.greeks.deltaAdj$ - s.greeks.delta$) < 0.1 * 100 * 100),
+    "a covered call's smile-adjusted delta carries its hundred shares, as its Black-Scholes delta does");
   ok(noP.noTrade.closest !== undefined, "showing the closest candidate slot");
   const cheapP = vetoed({ pLaw: { ...BASE.pLaw, knots: [5, 10, 21, 42].map((h) => ({ h, ...DENSITY.binnedFromLognormal({ sigma: 0.9, T: h / 252, forwardOverSpot: 1 }) })), ewmaVol: 0.9, coneMedianVol: 0.9 } });
   ok(cheapP.ideas.length === 0 && cheapP.noTrade && cheapP.noTrade.code === "ev.none-positive" && cheapP.noTrade.closest,
