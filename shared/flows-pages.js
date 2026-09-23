@@ -200,15 +200,15 @@ const dockTab = (active) => (active === "ask" ? "" : `
           aria-keyshortcuts="?" title="Ask about what has been published — press ? to open">${glyph("bubble")}<span class="ak-dock-tab-l">Ask</span><span class="ak-dock-tab-k" aria-hidden="true">?</span></button>`);
 
 const dock = (active) => (active === "ask" ? "" : `
-<aside class="ak-dock" id="askDock" data-src="${v("/assets/js/flows-ask.js")}">
+<aside class="ak-dock" id="askDock" data-src="${v("/assets/js/flows-ask.js")}" data-css="${v("/assets/css/flows-ask.css")}">
   <div class="ak-dock-scrim" hidden></div>
   <div class="ak-dock-panel" id="askDockPanel" role="complementary"
        aria-label="Ask about the published readings" hidden tabindex="-1">
     <div class="ak-dock-head">
-      <p class="ak-dock-title">Ask about what has been published</p>
-      <button type="button" class="ak-dock-close" aria-label="Close the assistant">×</button>
+      <p class="ak-dock-title">${glyph("neuron")}Ask</p>
+      <button type="button" class="ak-dock-close" aria-label="Close the assistant">${glyph("x")}</button>
     </div>
-    <p class="flows-status" id="askStatus" role="status"></p>
+    <p class="visually-hidden" id="askStatus" role="status"></p>
     <div id="askApp" data-mode="dock"></div>
   </div>
 </aside>
@@ -1050,30 +1050,25 @@ ${UI_SCRIPT}
 </html>`;
 }
 export function askPage({ username = "" } = {}) {
-
-  const summary = "What the session says, what changed to get here, and what is " +
-    "already on the calendar before the next one — assembled from the same " +
-    "published readings every other page here draws. Ask a question and the " +
-    "wording may be a model's; the figures never are. Anything it writes that " +
-    "is not already in the measurements it was handed is refused, and the " +
-    "measured reading is served instead.";
-  const lede = "Yesterday, today, and what is already scheduled — from the readings " +
-    "this site has published.";
-  return `${head("Flows — Ask", summary)}
-${shell("Ask", "ask", username, `
-  <div class="flows-status" id="askStatus" role="status">Reading the session’s briefing…</div>
-
-  <div class="flows-controls">
-    <p class="flows-lede">${lede}</p>
-  </div>
-
-  <div id="askApp"></div>
-  <div id="askFoot" class="flows-foot"></div>
-`)}
-${UI_SCRIPT}
-<script src="${v("/assets/js/flows-ask.js")}" defer></script>
-</body>
-</html>`;
+  return flowsDocument({
+    title: "Ask",
+    description: "Yesterday, today, and what is already scheduled, from the readings this site has published. The wording may be a model's; the figures never are.",
+    active: "ask",
+    username,
+    chrome: false,
+    styles: ["/assets/css/flows-ask.css"],
+    scripts: ["/assets/js/flows-ask.js"],
+    body: `
+  <header class="flows-head ak-head" data-fx-hero>
+    <h1 id="fxTitle">Ask</h1>
+    <span class="ak-head-s" id="askHeadState"></span>
+    <button type="button" class="ui-info" id="askAbout" aria-label="About Ask"
+            aria-haspopup="dialog" aria-controls="fxPop" aria-expanded="false">${glyph("info")}</button>
+  </header>
+  <p class="visually-hidden" id="askStatus" role="status">Reading the session\u2019s briefing\u2026</p>
+  <div id="askApp" class="ak-app"></div>
+`,
+  });
 }
 
 export function strategyPage({ username = "" } = {}) {

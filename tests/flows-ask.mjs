@@ -829,133 +829,107 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
 }
 
 import { readFile } from "node:fs/promises";
+import { chromium } from "playwright";
 {
-  const SRC = await readFile(new URL("../assets/js/flows-ask.js", import.meta.url), "utf8");
-
-  class TextNode {
-    constructor(s) { this.data = String(s); }
-    get textContent() { return this.data; }
-  }
-  class El {
-    constructor(tag) {
-      this.tagName = tag; this.children = []; this.attrs = new Map();
-      this.className = ""; this.own = "";
-    }
-    append(...kids) { for (const k of kids) this.children.push(k); }
-    setAttribute(k, v) { this.attrs.set(k, String(v)); }
-    getAttribute(k) { return this.attrs.has(k) ? this.attrs.get(k) : null; }
-    removeAttribute(k) { this.attrs.delete(k); }
-
-    addEventListener(type, fn) {
-      submits.push({ type, fn });
-      (this.on || (this.on = [])).push({ type, fn });
-    }
-    focus() {}
-    get textContent() {
-      return this.own + this.children.map((c) => c.textContent).join("");
-    }
-    set textContent(v) { this.children = []; this.own = String(v); }
-  }
-
-  const submits = [];
-  const byId = new Map();
-  const doc = {
-    createElement: (t) => new El(t),
-    createTextNode: (s) => new TextNode(s),
-    getElementById: (id) => byId.get(id) || null,
-  };
-
-  const loc = { href: "https://x.test/flows/side/", replace() {} };
-
+  const ROOT = new URL("../", import.meta.url);
+  const browser = await chromium.launch();
+  const STAMP2 = "2026-09-04T08:10:00.000Z";
   let briefBody = null;
   let askBody = null;
-
   let sentBody = null;
-  const fetchStub = (path, init) => {
-    if (init && init.method === "POST") sentBody = JSON.parse(init.body);
-    return Promise.resolve({
-      ok: true, status: 200,
-      json: () => Promise.resolve(init && init.method === "POST" ? askBody : briefBody),
+  const SPEND = { spend: { day: "2026-09-04", calls: 7, tokensIn: 41000, tokensOut: 3100,
+    allowanceNeurons: 10000, neurons: 1588, remaining: 8412 } };
+
+  const shell = (mode) => `<!doctype html><html><head>
+<link rel="stylesheet" href="/assets/css/base.css"><link rel="stylesheet" href="/assets/css/flows.css">
+<link rel="stylesheet" href="/assets/css/flows-ask.css"></head>
+<body class="flows-body"><main class="flows-main"><p class="visually-hidden" id="askStatus" role="status"></p>
+<div id="askApp"${mode ? ` data-mode="${mode}"` : ""}></div></main>
+<script src="/assets/js/flows-ui.js"></script><script src="/assets/js/flows-ask.js"></script></body></html>`;
+
+  const pages = [];
+  const mount = async (mode, href) => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    pages.push(page);
+    page._errors = [];
+    page.on("pageerror", (e) => page._errors.push(e.message));
+    await page.route("**/*", async (route) => {
+      const req = route.request();
+      const u = new URL(req.url());
+      const json = (body) => route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
+      if (u.pathname === "/api/flows/ask") { sentBody = JSON.parse(req.postData() || "null"); return json(askBody); }
+      if (u.pathname === "/api/flows/brief") return json(briefBody);
+      if (u.pathname === "/api/flows/ai-usage") return json(SPEND);
+      if (u.pathname.startsWith("/assets/")) {
+        return route.fulfill({ contentType: (u.pathname.endsWith(".css") ? "text/css" : "text/javascript") + "; charset=utf-8",
+          body: await readFile(new URL("." + u.pathname, ROOT)) });
+      }
+      return route.fulfill({ contentType: "text/html; charset=utf-8", body: shell(mode) });
     });
+    await page.goto(href || "https://x.test/flows/side/");
+    await page.waitForFunction(() => !!document.getElementById("askQ") && !!document.querySelector("#askMeter .ak-meter"));
+    return page;
   };
 
-  const run = new Function("document", "fetch", "location", SRC);
-  const tick = () => new Promise((r) => setTimeout(r, 0));
-
-  const walk = (node, out = []) => {
-    for (const c of node.children || []) {
-      if (c instanceof El) { out.push(c); walk(c, out); }
+  const read = (page, sel) => page.evaluate((sel) => {
+    const root = document.querySelector(sel);
+    const out = { open: "", visible: "", marks: [], infos: [] };
+    if (!root) return out;
+    out.open = root.textContent;
+    const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let n;
+    while ((n = walk.nextNode())) {
+      if (n.parentElement.closest(".visually-hidden, [hidden]")) continue;
+      out.visible += n.textContent + " ";
     }
-    return out;
-  };
-  const hasClass = (n, cls) => String(n.className).split(/\s+/).includes(cls);
-  const byClass = (root, cls) => walk(root).find((n) => hasClass(n, cls));
-  const allClass = (root, cls) => walk(root).filter((n) => hasClass(n, cls));
-  const marks = (root) => walk(root)
-    .map((n) => n.getAttribute("data-empty")).filter((v) => v !== null);
-
-  const openText = (node) => {
-    let out = node.own || "";
-    for (const c of node.children || []) {
-      if (c instanceof El) {
-        if (String(c.tagName).toLowerCase() === "details") continue;
-        out += openText(c);
-      } else out += c.textContent;
+    out.marks = [...root.querySelectorAll("[data-empty]")].map((x) => x.getAttribute("data-empty"));
+    for (const t of root.querySelectorAll("[data-info]")) {
+      t.click();
+      const pop = document.getElementById("fxPop");
+      out.infos.push({ fact: t.getAttribute("data-fact"), cls: String(t.getAttribute("class") || ""), text: pop ? pop.textContent : "" });
+      window.FlowsUI.closeInfo();
     }
+    out.info = out.infos.map((i) => i.text).join(" \n ");
+    out.all = out.open + " \n " + out.info;
     return out;
-  };
+  }, sel);
 
-  const firstSaying = (root) => walk(root)
-    .find((n) => String(n.own || "").trim() !== "" && n.tagName !== "details");
-
-  const mount = (mode, href) => {
-    submits.length = 0; byId.clear(); sentBody = null;
-    loc.href = href || "https://x.test/flows/side/";
-    const app = new El("div");
-    if (mode) app.setAttribute("data-mode", mode);
-    byId.set("askApp", app);
-    run(doc, fetchStub, loc);
-    return app;
-  };
-
-  const ask = async (app, payload, question) => {
+  const ask = async (page, payload, question) => {
     askBody = payload;
-    byClass(app, "ak-ask-in").value = question;
-
-    submits.filter((s) => s.type === "submit").pop().fn({ preventDefault() {} });
-    await tick(); await tick();
-    return byClass(app, "ak-answer");
+    sentBody = null;
+    await page.fill("#askQ", question);
+    await page.evaluate(() => document.getElementById("askForm").requestSubmit());
+    await page.waitForFunction(() => !!document.querySelector("#askAnswer .ak-a"), null, { timeout: 5000 });
+    return read(page, "#askAnswer");
   };
-
-  const STAMP2 = "2026-09-04T08:10:00.000Z";
 
   {
-    const app = mount(); await tick();
-    const host = await ask(app, {
+    const page = await mount();
+    const host = await ask(page, {
       status: "pending", question: "what changed on the short board?", answer: null,
       llm: false, facts: [], guard: null, model: null,
       note: "The briefing has not been published for this session yet, so there is " +
         "nothing measured to answer from. Nothing is claimed about the market by that.",
     }, "what changed on the short board?");
 
-    same(marks(host), ["pending"],
+    same(host.marks, ["pending"],
        "a question asked before the session's first pipeline run is answered with the " +
        "PENDING mark and nothing else: the key has not been written, which is not the " +
        "same fact as a payload this page could not read");
-    ok(/has not been published for this session yet/.test(host.textContent),
-       "and it is the route's own sentence that is printed, because the route is where " +
+    ok(/has not been published for this session yet/.test(host.all),
+       "and it is the route's own sentence that is carried, because the route is where " +
        "the state was established");
-    ok(!/fault on this page/.test(host.textContent),
+    ok(!/fault on this page/.test(host.all),
        "a pipeline that has not run yet is never reported as a fault on this page — the " +
        "reader would go looking for a break in the one case where nothing is broken");
-    ok(!/quoted from a payload/.test(host.textContent),
+    ok(!/quoted from a payload/.test(host.all),
        "and nothing claims a reading was assembled from published facts, because on this " +
        "envelope there are none: facts is empty and answer is null");
   }
 
   {
-    const app = mount(); await tick();
-    const host = await ask(app, {
+    const page = await mount();
+    const host = await ask(page, {
       answer: "The long board cleared 44 names.", llm: true, capped: false, facts: [],
       silences: null, why: "", model: "@cf/zai-org/glm-4.7-flash", note: null,
       guard: { ok: false, rejected: [], numerals: [], invented: false, forecast: false,
@@ -963,21 +937,24 @@ import { readFile } from "node:fs/promises";
           "to show." },
     }, "what cleared?");
 
-    ok(/discarded before it reached this page/.test(host.textContent),
+    ok(/discarded before it reached this page/.test(host.all),
        "a guard verdict of ok:false is a refusal even when it names no token, and the " +
        "page says so: an empty `rejected` counts how many tokens were refused, and a " +
        "measured 0 is a reading rather than a verdict");
-    ok(!/came back from a language model/.test(host.textContent),
+    ok(/Model refused/.test(host.visible),
+       "and the refusal is marked in the open, on the provenance tag a reader sees without " +
+       "opening anything");
+    ok(!/came back from a language model/.test(host.all),
        "so the answer is never introduced as the model's wording over a verdict that " +
        "threw that wording away — llm:true reports only that a model was ASKED");
-    ok(!/found every one of them already written/.test(host.textContent),
+    ok(!/found every one of them already written/.test(host.all),
        "and the audit trail does not report a clean scan inside the answer the guard " +
        "refused, which is the same empty list read as a pass one paragraph lower");
   }
 
   {
-    const app = mount(); await tick();
-    const host = await ask(app, {
+    const page = await mount();
+    const host = await ask(page, {
       answer: "The long board cleared 44 names.", llm: false, capped: false, facts: [],
       silences: null, why: "", model: "@cf/zai-org/glm-4.7-flash",
       guard: { ok: false, rejected: ["1200000"], numerals: ["1200000"], invented: true,
@@ -989,93 +966,92 @@ import { readFile } from "node:fs/promises";
         "it was measured.",
     }, "what cleared?");
 
-    ok(!/No model wrote any part of it/.test(host.textContent),
+    ok(!/No model wrote any part of it/.test(host.all),
        "the route sets llm:false on a refusal to say whose wording is being SERVED, and " +
        "reading it as 'no model was asked' printed that denial directly above the " +
        "qualifier explaining that the model's wording had been discarded");
-    ok(/what it wrote was refused before it reached this page/.test(host.textContent),
+    ok(/what it wrote was refused before it reached this page/.test(host.all),
        "a fired guard is itself the proof a model wrote something, so that is what the " +
-       "provenance line says");
-    ok(!/listed in `rejected`/.test(host.textContent),
+       "provenance says");
+    ok(!/listed in `rejected`/.test(host.all),
        "and the discard sentence is the route's `note`, never guard.reason, which ends " +
        "by naming a JSON field — right for a developer and wrong for a page");
   }
 
   {
-    const app = mount(); await tick();
+    const page = await mount();
     const noModel = {
       answer: "The long board cleared 44 names.", llm: false, guard: null, capped: false,
       facts: [], silences: null, why: "", model: "@cf/zai-org/glm-4.7-flash", note: null,
     };
-
-    const spent = await ask(app, { ...noModel, llmFailure: "allowance",
+    const spent = await ask(page, { ...noModel, llmFailure: "allowance",
       note: "The free daily allowance for the model is spent for today. It resets at " +
         "00:00 UTC. The readings below were measured by the pipeline and are unaffected.",
     }, "what cleared?");
-    ok(/resets at 00:00 UTC/.test(spent.textContent),
+    ok(/resets at 00:00 UTC/.test(spent.all),
        "a spent allowance is reported as a spent allowance, with the reset the reader " +
        "needs in order to know when to come back");
-    ok(!/did not state why/.test(spent.textContent),
+    ok(!/did not state why/.test(spent.all),
        "and never as the unreachable-for-an-unstated-reason answer, which is a different " +
        "fact: one says come back tomorrow, the other says nobody knows");
 
-    const unconfigured = await ask(app, { ...noModel,
+    const unconfigured = await ask(page, { ...noModel,
       note: "No model is configured for this site, so the reading below is the " +
         "pipeline's own wording. Every figure in it was measured.",
     }, "what cleared?");
-    ok(/No model is configured for this site/.test(unconfigured.textContent),
-       "the route's own sentence is printed on the branch that carries `note` and no " +
+    ok(/No model is configured for this site/.test(unconfigured.all),
+       "the route's own sentence is carried on the branch that carries `note` and no " +
        "cause word at all — which is the branch a site with no AI binding takes on " +
        "every question it is ever asked");
-    ok(!/did not state why/.test(unconfigured.textContent),
+    ok(!/did not state why/.test(unconfigured.all),
        "so the most permanent no-model state this route has is never reported as an " +
        "unexplained one");
 
-    const noCapacity = await ask(app, { ...noModel, llmFailure: "capacity" },
-      "what cleared?");
-    ok(/no capacity for this question just now/.test(noCapacity.textContent),
+    const noCapacity = await ask(page, { ...noModel, llmFailure: "capacity" }, "what cleared?");
+    ok(/no capacity for this question just now/.test(noCapacity.all),
        "and the cause word alone is enough, which is what LLM_REASONS is for: a route " +
        "that sends the code without a sentence still reaches the reader with the " +
        "distinction the brief insists on — 3040 means ask again now, 3036 means " +
        "come back tomorrow, and nothing of the allowance went on this one");
-    ok(!/did not state why/.test(noCapacity.textContent),
+    ok(!/did not state why/.test(noCapacity.all),
        "rather than falling through to the third answer, which is reserved for a model " +
        "that was unreachable for a reason nobody can read");
   }
 
   {
-    const app = mount(); await tick();
-    const host = await ask(app, {
+    const page = await mount();
+    const host = await ask(page, {
       answer: "A reading.", llm: false, guard: null, capped: false, silences: null,
       why: "", model: null, note: null,
       facts: [{ id: "board/long/tilt", n: { cleared: 44 }, source: "board:long", at: STAMP2 }],
     }, "what cleared?");
 
-    ok(/1 fact was handed to the answer above/.test(host.textContent),
-       "the count line states one fact was handed to the answer");
-    ok(marks(host).includes("unreadable"),
+    ok(/1 fact was handed to the answer above/.test(host.info),
+       "the count line in the answer's method disclosure states one fact was handed to the answer");
+    ok(host.marks.includes("unreadable"),
        "and a fact carrying no `say` is drawn as a NAMED gap rather than as an empty " +
-       "paragraph, because the count above it is confident and white space beneath a " +
-       "confident count reads as a rendering fault rather than as a payload that lost a " +
-       "field");
-    ok(/without the sentence that states it/.test(host.textContent),
-       "worded as the gap it is — silenceLine() has always refused to drop a silence " +
-       "that lost its wording, and a reading is not owed less");
+       "figure, because the count is confident and a blank beneath a confident count " +
+       "reads as a rendering fault rather than as a payload that lost a field");
+    ok(/without the sentence that states it/.test(host.info),
+       "worded as the gap it is, in the figure's own disclosure — a silence that lost its " +
+       "wording has always been named, and a reading is not owed less");
   }
 
   {
-    const app = mount(); await tick();
-    const host = await ask(app, {
+    const page = await mount();
+    const host = await ask(page, {
       answer: "A reading.", llm: false, guard: null, capped: false, facts: [],
       why: "", model: null, note: null,
       silences: { quiet: [{ kind: "pending", what: "sector premium",
         say: "The sector premium key was measured and held no rows." }] },
     }, "what about the sector premium?");
 
-    same(marks(host), ["quiet"],
+    same(host.marks, ["quiet"],
        "a silence filed under `quiet` is drawn QUIET even when its own `kind` field says " +
        "pending: the publisher's filing is the publisher's answer, and trusting the " +
        "field let a measured, empty market wear the mark of a job that never ran");
+    ok(/The sector premium key was measured and held no rows/.test(host.info),
+       "and its sentence is one tap away on the glyph that marks it");
   }
 
   {
@@ -1087,143 +1063,137 @@ import { readFile } from "node:fs/promises";
         { severity: "critical", say: "Two surfaces disagree about the session date." },
       ],
     };
-    const app = mount(); await tick();
-    const brief = byClass(app, "ak-brief");
+    const page = await mount();
+    await page.waitForSelector(".ak-warns");
+    const brief = await read(page, ".ak-warns");
+    const sev = await page.evaluate(() => [...document.querySelectorAll(".ak-warn-sev")].map((n) => n.textContent));
+    const marks = await page.evaluate(() => [...document.querySelectorAll(".ak-warn-mark")].map((n) => n.textContent));
 
-    same(allClass(brief, "ak-warn-sev").map((n) => n.textContent), ["blocking", "critical"],
+    same(sev, ["blocking", "critical"],
        "a severity this page has no mark for keeps the word its publisher chose. The " +
        "lookup was a truth test over the mark table, so an unknown level was relabelled " +
        "`note` — the least severe of the three, asserted on the publisher's behalf, on " +
        "the one surface whose job is to say how much a thing matters");
-    same(allClass(brief, "ak-warn-mark").map((n) => n.textContent), ["!!", "?"],
+    same(marks, ["!!", "?"],
        "and is marked as unknown rather than given the mark of a level it was not");
-    ok(/without the sentence that states it/.test(brief.textContent),
-       "a warning that lost its `say` is named as a gap: the heading above counts it as " +
-       "a thing to know before reading the rest, so drawing it blank told the reader " +
-       "there was something to know and then showed them nothing");
-    ok(/2 things to know before reading the rest/.test(brief.textContent),
-       "while the heading keeps counting both, because a warning that arrived is a " +
-       "warning that arrived");
+    ok(/without the sentence that states it/.test(brief.info),
+       "a warning that lost its `say` is named as a gap in its own disclosure: the module " +
+       "counts it as a thing to know before reading the rest, so drawing it blank told the " +
+       "reader there was something to know and then showed them nothing");
+    ok(/2 things to know before reading the rest/.test(brief.info),
+       "while the count keeps both, because a warning that arrived is a warning that arrived");
+    ok(/2/.test(await page.evaluate(() => document.querySelector('[data-metric="found"]').textContent)),
+       "and the count is on the surface as a figure, not only inside the disclosure");
+    briefBody = null;
   }
 
   {
-    const app = mount(); await tick();
+    const page = await mount();
     const facts = [
-      { id: "a", say: "The long board cleared 44 names.", n: {}, topic: [],
-        source: "brief", at: STAMP2 },
-      { id: "b", say: "The short board cleared 53 names.", n: {}, topic: [],
-        source: "brief", at: STAMP2 },
+      { id: "a", say: "The long board cleared 44 names.", n: {}, topic: [], source: "brief", at: STAMP2 },
+      { id: "b", say: "The short board cleared 53 names.", n: {}, topic: [], source: "brief", at: STAMP2 },
     ];
     const plainAnswer = "These are the published readings that bear on what you asked.\n\n" +
       "- The long board cleared 44 names.\n" +
       "- The short board cleared 53 names.\n\n" +
       "Every figure above is quoted from a payload this pipeline published; none of it " +
       "was computed for this answer.";
-    const host = await ask(app, {
+    const host = await ask(page, {
       answer: plainAnswer, llm: false, guard: null, capped: false, facts,
       silences: null, why: "", model: null,
       note: "No model is configured for this site, so the reading below is the pipeline's " +
         "own wording. Every figure in it was measured.",
     }, "what cleared?");
-    const said = host.textContent;
     const times = (hay, needle) => hay.split(needle).length - 1;
+    const chipText = host.infos.filter((i) => i.fact).map((i) => i.text).join(" \n ");
+    const how = (host.infos.find((i) => /ak-how/.test(i.cls)) || { text: "" }).text;
 
-    eq(times(said, "The long board cleared 44 names."), 1,
-       "when the answer IS the fact list, each sentence is printed ONCE. The deterministic " +
-       "answer's dashed lines become the answer's own list and the block below them used to " +
-       "restate every one of them, so the page said everything it had to say twice — and " +
-       "the second copy wore the authority of evidence for the first");
-    eq(times(said, "The short board cleared 53 names."), 1, "and so is the second");
-    ok(/2 facts were handed to the answer above\. All of them come from the brief key, built /
-       .test(said),
-       "what is left below is the provenance, stated once with its denominator: the key and " +
-       "the stamp both facts share, in one sentence rather than under each of them");
-    ok(/Their sentences are the lines in the answer above, and are not repeated here\./.test(said),
+    eq(times(host.open, "The long board cleared 44 names."), 0,
+       "when the answer IS the fact list, no sentence is painted on the surface: the " +
+       "deterministic answer's dashed lines become the figures, and the list below them used " +
+       "to restate every one of them, so the page said everything it had to say twice");
+    eq(times(chipText, "The long board cleared 44 names."), 1,
+       "and each sentence is carried ONCE, in the disclosure of the figure that draws it — " +
+       "never a second copy wearing the authority of evidence for the first");
+    eq(times(chipText, "The short board cleared 53 names."), 1, "and so is the second");
+    ok(/2 facts were handed to the answer above\. All of them come from the brief key, built /.test(how),
+       "what the method disclosure keeps is the provenance, stated once with its denominator: " +
+       "the key and the stamp both facts share, in one sentence rather than under each of them");
+    ok(/Their sentences are the lines in the answer above; each is drawn once/.test(how),
        "and the count line says where the sentences went, so a reader is not left wondering " +
        "whether a list went missing");
-    eq(times(said, "built "), 1,
-       "the stamp is printed exactly once. paintAnswer passed null for both provenance " +
-       "defaults, which switched off the 'only where it differs' rule this file argues for " +
-       "— nothing equals null — so 'built <stamp>' was drawn under every one of up to " +
-       "fourteen sentences that all came from the same run");
-    eq(allClass(host, "ak-fact-say").length, 0,
-       "no fact draws a sentence on this branch, because the sentence is above it");
+    eq(times(how, "built "), 1,
+       "the shared stamp is stated exactly once in the method, rather than under every one " +
+       "of up to fourteen sentences that all came from the same run");
+    ok(!/built /i.test(host.visible),
+       "and no build stamp is painted on the surface at all");
   }
 
   {
-    const app = mount(); await tick();
+    const page = await mount();
     const facts = [
-      { id: "a", say: "The long board cleared 44 names.", n: {}, topic: [],
-        source: "brief", at: STAMP2 },
-      { id: "b", say: "The short board cleared 53 names.", n: {}, topic: [],
-        source: "market", at: "2026-09-04T09:31:00.000Z" },
+      { id: "a", say: "The long board cleared 44 names.", n: {}, topic: [], source: "brief", at: STAMP2 },
+      { id: "b", say: "The short board cleared 53 names.", n: {}, topic: [], source: "market", at: "2026-09-04T09:31:00.000Z" },
     ];
-    const host = await ask(app, {
+    const host = await ask(page, {
       answer: "The session leans long, and the short side is the wider of the two.",
       llm: true, capped: false, facts, silences: null, why: "", model: "m", note: null,
       guard: { ok: true, rejected: [], numerals: [], invented: false, forecast: false },
     }, "how does the session lean?");
-    const said = host.textContent;
-    eq(allClass(host, "ak-fact-say").length, 2,
-       "where the answer is the model's prose the facts still carry their sentences: the " +
-       "dedupe is measured against the served text, never assumed from the `llm` flag, " +
-       "which reports whether a model was ASKED and not whose wording is served");
-    ok(/1 of them comes from the brief key, built [^;]+; the other 1 names its own key and stamp under itself\./
-       .test(said),
+    const chips = host.infos.filter((i) => i.fact);
+    const how = (host.infos.find((i) => /ak-how/.test(i.cls)) || { text: "" }).text;
+    eq(chips.length, 2,
+       "where the answer is the model's prose the facts still carry their sentences, one " +
+       "figure each: the dedupe is measured against the served text, never assumed from the " +
+       "`llm` flag, which reports whether a model was ASKED and not whose wording is served");
+    ok(chips.every((c) => /cleared \d+ names/.test(c.text)),
+       "and each figure's disclosure holds its own sentence");
+    ok(/1 of them comes from the brief key, built [^;]+; the other 1 names its own key and stamp under itself\./.test(how),
        "and where the facts do NOT share one origin the count line says so with both " +
        "numbers over the same population, rather than naming a majority as though it were " +
-       "all of them — AND BOTH HALVES AGREE WITH THEIR OWN COUNT. One market-wide reading " +
-       "beside one card reading is the commonest split this page draws, and it is the only " +
-       "shape that fires both singulars: '1 of them come ... the other 1 name their own " +
-       "key' is prose a reader can see was assembled, on a page whose whole claim is that " +
-       "it can be told apart from a model's — " + said.slice(said.indexOf("2 facts were handed"), said.indexOf("2 facts were handed") + 180));
-    eq(allClass(host, "ak-fact-src").length, 1,
-       "exactly one fact draws its own provenance line: the one that disagrees with the " +
-       "origin the sentence above already stated");
-    ok(/market/.test(allClass(host, "ak-fact-src")[0].textContent),
-       "and it is the one from the other key");
+       "all of them — AND BOTH HALVES AGREE WITH THEIR OWN COUNT: '1 of them come ... the " +
+       "other 1 name their own key' is prose a reader can see was assembled — " + how.slice(0, 240));
+    ok(/Sourcemarket/.test(chips.find((c) => c.fact === "b").text.replace(/\s+/g, "")),
+       "the fact from the other key names that key in its own disclosure");
 
-    const mixed = await ask(app, {
+    const mixed = await ask(page, {
       answer: "The session leans long.",
       llm: true, capped: false, silences: null, why: "", model: "m", note: null,
       guard: { ok: true, rejected: [], numerals: [], invented: false, forecast: false },
       facts: [
-        { id: "a", say: "The long board cleared 44 names.", n: {}, topic: [],
-          source: "brief", at: STAMP2 },
-        { id: "b", say: "The session tilts long.", n: {}, topic: [],
-          source: "brief", at: STAMP2 },
-        { id: "c", say: "The short board cleared 53 names.", n: {}, topic: [],
-          source: "market", at: "2026-09-04T09:31:00.000Z" },
+        { id: "a", say: "The long board cleared 44 names.", n: {}, topic: [], source: "brief", at: STAMP2 },
+        { id: "b", say: "The session tilts long.", n: {}, topic: [], source: "brief", at: STAMP2 },
+        { id: "c", say: "The short board cleared 53 names.", n: {}, topic: [], source: "market", at: "2026-09-04T09:31:00.000Z" },
       ],
     }, "how does the session lean?");
-    ok(/2 of them come from the brief key, built [^;]+; the other 1 names its own key and stamp under itself\./
-       .test(mixed.textContent),
+    ok(/2 of them come from the brief key, built [^;]+; the other 1 names its own key and stamp under itself\./.test(mixed.info),
        "two from one key and one from another puts a plural verb and a singular in the " +
        "same sentence, which is the case that proves the halves are agreed with their own " +
        "counts rather than with each other");
   }
 
   {
-    const app = mount(); await tick();
-    const facts = [{ id: "a", say: "The long board cleared 44 names.", n: {}, topic: [],
-      source: "brief", at: STAMP2 }];
+    const page = await mount();
+    const facts = [{ id: "a", say: "The long board cleared 44 names.", n: {}, topic: [], source: "brief", at: STAMP2 }];
     const withheld = "Nothing indexed is about ZZZ, so no reading below is about it.";
-    const host = await ask(app, {
+    const host = await ask(page, {
       answer: "The long side is the busier of the two today.", llm: true, capped: false,
       facts, silences: null, model: "m", note: null, withheld,
       why: "Nothing indexed is about ZZZ. Picked 1 of the 1 fact that matched the words board.",
       guard: { ok: true, rejected: [], numerals: [], invented: false, forecast: false },
     }, "what about ZZZ");
 
-    ok(/Nothing indexed is about ZZZ/.test(openText(host)),
-       "the withholding is ABOVE the fold on the model-worded branch, where nothing else " +
-       "says it: the model's prose is about the market and a reader takes it for an answer " +
-       "to the name they typed unless told otherwise");
-    ok(/Nothing indexed is about ZZZ\. Picked /.test(host.textContent),
+    ok(/ZZZ not covered/.test(host.visible),
+       "the withholding is IN THE OPEN on the model-worded branch, as a tag beside the " +
+       "answer, where nothing else says it: the model's prose is about the market and a " +
+       "reader takes it for an answer to the name they typed unless told otherwise");
+    ok(/Nothing indexed is about ZZZ, so no reading below is about it/.test(host.info),
+       "and the tag opens onto the route's own sentence");
+    ok(/Nothing indexed is about ZZZ\. Picked /.test(host.info),
        "and the audit trail still holds `why` entire, because a record with a hole cut in " +
        "it is worse than a sentence read twice");
 
-    const plain = await ask(app, {
+    const plain = await ask(page, {
       answer: "None of the readings below is about ZZZ. Nothing else in the question " +
         "matched a topic the published payloads carry, so these are the session's " +
         "headline readings.\n\n- The long board cleared 44 names.",
@@ -1231,90 +1201,93 @@ import { readFile } from "node:fs/promises";
       note: "No model is configured for this site.", withheld,
       why: "Nothing indexed is about ZZZ. Picked 1 of the 1 fact that matched the words board.",
     }, "what about ZZZ");
-    ok(!/Nothing indexed is about ZZZ/.test(openText(plain)),
+    ok(!/not covered/.test(plain.visible),
        "while the deterministic answer's own lead carries it, so it is not lifted a second " +
        "time — the rule is that a withholding is in the open, not that it is printed twice");
-    ok(/None of the readings below is about ZZZ/.test(openText(plain)),
+    ok(/None of the readings below is about ZZZ/.test(plain.visible),
        "and the control that keeps that assertion from passing against a page which simply " +
-       "stopped saying it: the coverage claim is there, in the answer's own words");
+       "stopped saying it: the coverage claim is the answer's own visible lead");
   }
 
   {
-    const app = mount("dock"); await tick();
-    const host = byClass(app, "ak-answer");
-    byClass(app, "ak-ask-in").value = "";
-    submits.filter((x) => x.type === "submit").pop().fn({ preventDefault() {} });
-    ok(!/briefing above/.test(host.textContent),
-       "the rail never points at 'the briefing above': paintBrief is skipped when docked, " +
-       "so on twelve of the thirteen routes this box appears on that sentence directed a " +
-       "reader to a page region that is not on the page");
-    ok(/\/flows\/ask\//.test(host.textContent),
-       "it points at the route the briefing is actually on");
+    const dock = await mount("dock");
+    await dock.fill("#askQ", "");
+    await dock.evaluate(() => document.getElementById("askForm").requestSubmit());
+    const d = await read(dock, "#askAnswer");
+    ok(!/briefing (above|below)/.test(d.all),
+       "the rail never points at a briefing on the page: paintBrief is skipped when docked, " +
+       "so on every route this box is docked on that sentence would direct a reader to a " +
+       "region that is not on the page");
+    ok(/\/flows\/ask\//.test(d.all), "it points at the route the briefing is actually on");
 
-    const page = mount(); await tick();
-    const pageHost = byClass(page, "ak-answer");
-    byClass(page, "ak-ask-in").value = "";
-    submits.filter((x) => x.type === "submit").pop().fn({ preventDefault() {} });
-    ok(/briefing above/.test(pageHost.textContent),
-       "while on /flows/ask, where the briefing IS above, the sentence keeps saying so — " +
-       "the control that stops the fix from being 'delete the reference everywhere'");
+    const page = await mount();
+    await page.fill("#askQ", "");
+    await page.evaluate(() => document.getElementById("askForm").requestSubmit());
+    const p = await read(page, "#askAnswer");
+    ok(/briefing below/.test(p.all),
+       "while on /flows/ask, where the briefing IS drawn below the box, the sentence says so " +
+       "— the control that stops the fix from being 'delete the reference everywhere'");
   }
 
   {
-    const app = mount("dock"); await tick();
-    const first = firstSaying(app);
-    ok(first && /^ak-example/.test(String(first.className)),
+    const page = await mount("dock");
+    const first = await page.evaluate(() => {
+      const app = document.getElementById("askApp");
+      const walk = document.createTreeWalker(app, NodeFilter.SHOW_TEXT);
+      let n;
+      while ((n = walk.nextNode())) {
+        if (!n.textContent.trim() || n.parentElement.closest(".visually-hidden")) continue;
+        return n.parentElement.closest("button") ? n.parentElement.closest("button").className : n.parentElement.className;
+      }
+      return null;
+    });
+    ok(first && /^ak-example/.test(first),
        "the first thing a reader meets in the rail is the examples, not a paragraph: what " +
        "was there was a 335-character guarantee, which answered 'what can I ask this?' in " +
-       "prose where three buttons answer it in three lines — first said was " +
-       (first ? String(first.className) + ": " + first.own : "nothing"));
-    ok(!/It reads nothing live/.test(openText(app)),
+       "prose where three buttons answer it in three lines — first said was " + first);
+    const app = await read(page, "#askApp");
+    ok(!/It reads nothing live/.test(app.open),
        "the guarantee is folded, because it is reassurance about what the box will NOT do " +
        "and nothing in it changes what a visible number means");
-    ok(/It reads nothing live/.test(app.textContent),
-       "and it is folded rather than deleted: every word of it is still on the page, one " +
-       "click below the field it constrains");
-    ok(/model credits left today|could not read what has been spent/.test(openText(app)),
-       "while the meter stays OPEN, because its numbers are a withholding about capacity " +
-       "rather than a reassurance — a budget you can only see after spending from it is a " +
-       "receipt");
-    eq(allClass(app, "ak-example").length, 3, "three examples are offered");
-    ok(allClass(app, "ak-example").every((b) => !/SYN|NVDA|AAPL/.test(b.own)),
+    ok(/It reads nothing live/.test(app.info),
+       "and it is folded rather than deleted: every word of it is one tap below the field it constrains");
+    ok(/8,412 of 10,000 credits · this site.s calls/.test(app.visible.replace(/\s+/g, " ")),
+       "while the meter stays OPEN, with its condition beside it, because its numbers are a " +
+       "withholding about capacity rather than a reassurance — a budget you can only see " +
+       "after spending from it is a receipt");
+    const ex = await page.evaluate(() => [...document.querySelectorAll(".ak-example")].map((b) => b.getAttribute("aria-label")));
+    eq(ex.length, 3, "three examples are offered");
+    ok(ex.every((b) => !/SYN|NVDA|AAPL/.test(b)),
        "and not one of them names a ticker before a payload has said which names this " +
        "session holds readings for: a symbol written into the renderer would go stale the " +
        "first session the roster changed, and it would go stale looking like an offer");
-
-    const b = allClass(app, "ak-example")[1];
-    b.on.find((l) => l.type === "click").fn({ preventDefault() {} });
-    eq(byClass(app, "ak-ask-in").value, b.own,
-       "pressing one fills the field with it");
-    eq(byClass(app, "ak-answer").textContent, "",
+    await page.click(".ak-example >> nth=1");
+    eq(await page.inputValue("#askQ"), ex[1], "pressing one fills the field with it");
+    eq(await page.evaluate(() => document.getElementById("askAnswer").textContent), "",
        "and sends nothing: a button that spent a model call on one click would spend it " +
-       "out of the allowance the meter above it exists to show a reader before they decide");
+       "out of the allowance the meter beside it exists to show a reader before they decide");
   }
 
   {
-    const app = mount("dock", "https://x.test/flows/ticker/?t=syn046"); await tick();
-    ok(/Asking about SYN046 — the name on this page/.test(app.textContent),
+    const page = await mount("dock", "https://x.test/flows/ticker/?t=syn046");
+    const app = await read(page, "#askApp");
+    ok(/Asking about SYN046 — the name on this page/.test(app.open),
        "the rail reads `?t=` off the page it is mounted on and says which name that is, " +
        "for a SIX-character name — docked on every gated route, it knew neither the route " +
        "nor the name, so a reader who opened it on one name's page and typed 'what " +
-       "changed' was answered about the market; and a bound narrower than the one " +
-       "/flows/ticker itself accepts drops SYN046 silently, which is every card this " +
-       "pipeline emits");
-    eq(byClass(app, "ak-ask-in").value || "", "",
+       "changed' was answered about the market");
+    ok(/SYN046/.test(app.visible), "and the name is on the surface as a tag, not only in a sentence for assistive technology");
+    eq(await page.inputValue("#askQ"), "",
        "and it prefills NOTHING — a field that opened already holding a symbol puts words " +
        "in a reader's question that the reader did not write");
-
-    const insert = byClass(app, "ak-onpage-go");
-    insert.on.find((l) => l.type === "click").fn({ preventDefault() {} });
-    eq(byClass(app, "ak-ask-in").value, "SYN046",
+    await page.click(".ak-onpage-go");
+    eq(await page.inputValue("#askQ"), "SYN046",
        "the button inserts the symbol into the field, for a reader who wants it inside a " +
        "question of their own");
 
     const facts = [{ id: "a", say: "SYN046 is rank 1 of 2 on the long board.", n: {},
       topic: ["syn046"], source: "card:SYN046", at: STAMP2 }];
-    const host = await ask(app, {
+    const host = await ask(page, {
       answer: "SYN046 leads the long board.", llm: false, guard: null, capped: false,
       facts, silences: null, why: "", model: null, subject: "SYN046", subjectApplied: true,
       note: "No model is configured for this site.",
@@ -1323,30 +1296,29 @@ import { readFile } from "node:fs/promises";
        "and the name travels to the route as its own field beside the question, because " +
        "whether to use it depends on whether the reader named a ticker themselves and " +
        "shared/flows-ask.js is the module that decides that");
-    ok(/the name on the page this was asked from/.test(openText(host)),
-       "the answer says in the open that the page's name was added, because a reader who " +
+    ok(/SYN046 added/.test(host.visible),
+       "the answer marks in the open that the page's name was added, because a reader who " +
        "typed no symbol and is handed readings about one is owed where it came from");
-    ok(/What is new for SYN046\?/.test(app.textContent),
+    ok(/the name on the page this was asked from/.test(host.info),
+       "and the mark opens onto the sentence that says so");
+    ok(/What is new for SYN046\?/.test(await page.evaluate(() => document.getElementById("askExamples").textContent)),
        "and the examples above the field are rebuilt from the names this answer proves the " +
        "index holds readings for, rather than from a list written into the renderer");
   }
 
   {
-    const dotted = mount("dock", "https://x.test/flows/ticker/?t=brk.b"); await tick();
-    ok(/Asking about BRK\.B — the name on this page/.test(dotted.textContent),
+    const dotted = await mount("dock", "https://x.test/flows/ticker/?t=brk.b");
+    ok(/Asking about BRK\.B — the name on this page/.test((await read(dotted, "#askApp")).open),
        "a share-class symbol carrying a dot is a name, not a malformed token: readTicker() " +
        "in flows-ticker.js accepts /^[A-Z][A-Z0-9.-]{0,9}$/ and hands `?t=BRK.B` a page, " +
        "so a rail docked to that page that refuses the same string answers about the " +
        "market and says nothing about having ignored it");
-
-    const hyphen = mount("dock", "https://x.test/flows/ticker/?t=rds-a"); await tick();
-    ok(/Asking about RDS-A — the name on this page/.test(hyphen.textContent),
+    const hyphen = await mount("dock", "https://x.test/flows/ticker/?t=rds-a");
+    ok(/Asking about RDS-A — the name on this page/.test((await read(hyphen, "#askApp")).open),
        "and so is one carrying a hyphen — the two punctuation marks a symbol is allowed, " +
        "and the two the first version of this bound rejected");
-
-    const junk = mount("dock", "https://x.test/flows/ticker/?t=not%20a%20symbol");
-    await tick();
-    ok(!/the name on this page/.test(junk.textContent),
+    const junk = await mount("dock", "https://x.test/flows/ticker/?t=not%20a%20symbol");
+    ok(!/the name on this page/.test((await read(junk, "#askApp")).open),
        "while a value that is not shaped like a symbol at all draws no sentence: the bound " +
        "is widened to the route's own shape, not removed, because `?t=` is a query string " +
        "anybody can type into");
@@ -1357,33 +1329,38 @@ import { readFile } from "node:fs/promises";
       generatedAt: STAMP2, sessionDate: "2026-09-04", warningsChecked: 4,
       warningsQuestions: 4, warnings: [], today: null, yesterday: null, next: null,
       facts: [
-        { id: "brief/tilt", say: "The session tilts long.", n: {}, topic: [],
-          source: "brief", at: STAMP2 },
+        { id: "brief/tilt", say: "The session tilts long.", n: {}, topic: [], source: "brief", at: STAMP2 },
         { id: "card:SYN46/standing", say: "SYN46 is rank 1 of 2 on the long board.",
           n: {}, topic: ["syn46"], source: "card:SYN46", at: STAMP2 },
       ],
       silences: { pending: [], unreadable: [], quiet: [] },
     };
-    const app = mount(); await tick(); await tick();
-    ok(/What is new for SYN46\?/.test(app.textContent),
+    const page = await mount();
+    await page.waitForSelector("#askBrief .ak-region");
+    const ex = await page.evaluate(() => [...document.querySelectorAll(".ak-example")].map((b) => b.getAttribute("aria-label")));
+    ok(ex.some((q) => /What is new for SYN46\?/.test(q)),
        "on /flows/ask, where the briefing IS fetched, the first example names a name the " +
        "index has just proved it holds readings for — a `card:` source is a per-name " +
        "reading, so the offer is measured rather than written into the renderer");
-    ok(allClass(app, "ak-example").every((b) => !/SYN46/.test(b.own) || /new for SYN46/.test(b.own)),
+    ok(ex.every((b) => !/SYN46/.test(b) || /new for SYN46/.test(b)),
        "and only that one: the other two stay topic questions, because two of the three " +
        "offers are about the session rather than about any name");
     briefBody = null;
   }
 
   {
-    const app = mount("dock", "https://x.test/flows/side/?side=long"); await tick();
-    ok(!byClass(app, "ak-onpage"),
+    const page = await mount("dock", "https://x.test/flows/side/?side=long");
+    ok(await page.evaluate(() => !document.querySelector(".ak-onpage")),
        "a route whose URL names no ticker draws no hint about one");
-    await ask(app, { answer: "A reading.", llm: false, guard: null, capped: false,
+    await ask(page, { answer: "A reading.", llm: false, guard: null, capped: false,
       facts: [], silences: null, why: "", model: null, note: null }, "what changed");
     eq(sentBody.subject, null,
        "and sends none, so the selection is never handed a name nobody is looking at");
   }
+
+  const thrown = pages.flatMap((p) => p._errors);
+  eq(thrown.length, 0, "and the renderer threw nothing across every mount above: " + thrown.join(" | "));
+  await browser.close();
 }
 
 {

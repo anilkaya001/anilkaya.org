@@ -45,6 +45,29 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
 
 const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
+
+const readIn = (sel) => page.evaluate((sel) => {
+  const root = document.querySelector(sel);
+  const out = { open: "", visible: "", marks: [], infos: [] };
+  if (!root) return out;
+  out.open = root.textContent;
+  const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let n;
+  while ((n = walk.nextNode())) {
+    if (n.parentElement.closest(".visually-hidden, [hidden]")) continue;
+    out.visible += n.textContent + " ";
+  }
+  out.marks = [...root.querySelectorAll("[data-empty]")].map((x) => x.getAttribute("data-empty"));
+  for (const t of root.querySelectorAll("[data-info]")) {
+    t.click();
+    const pop = document.getElementById("fxPop");
+    out.infos.push({ fact: t.getAttribute("data-fact"), cls: String(t.getAttribute("class") || ""), text: pop ? pop.textContent : "" });
+    window.FlowsUI.closeInfo();
+  }
+  out.info = out.infos.map((i) => i.text).join(" \n ");
+  out.all = out.open + " \n " + out.info;
+  return out;
+}, sel);
 await page.context().addCookies([
   { name: "flows_session", value: token, url: server.baseURL }]);
 
@@ -52,7 +75,7 @@ const warnsText = async (warnings, checkedField) => {
   await put("brief", briefWith(warnings, checkedField));
   await page.goto(url("/flows/ask/"), { waitUntil: "networkidle" });
   await page.waitForSelector(".ak-warns");
-  return (await page.evaluate(() => document.querySelector(".ak-warns").textContent)).trim();
+  return (await readIn(".ak-warns")).all;
 };
 
 const zero = await warnsText([], { warningsChecked: 0 });
@@ -115,14 +138,13 @@ const ask = async (payload) => {
     status: 200, contentType: "application/json", body: JSON.stringify(payload) }));
   await page.fill("#askQ", "who leads the short board");
   await page.click(".ak-ask-go");
-  await page.waitForSelector("#askAnswer .ft-how");
-  const said = await page.evaluate(() =>
-    document.getElementById("askAnswer").textContent);
+  await page.waitForSelector("#askAnswer .ak-a");
+  const said = await readIn("#askAnswer");
   await page.unroute("**/api/flows/ask");
   return said;
 };
 
-const noFigures = await ask({
+const noFiguresRead = await ask({
   answer: "The short board leads with a name that also led it in the prior session.",
   llm: true, model: "@cf/zai-org/glm-4.7-flash", note: null, capped: false,
   why: "Picked 1 of the 1 facts that matched: matched on topic words, no ticker in the " +
@@ -131,6 +153,7 @@ const noFigures = await ask({
   guard: { ok: true, rejected: [], numerals: [], invented: false, forecast: false,
     reason: null },
 });
+const noFigures = noFiguresRead.all;
 
 ok(!/scanned 0 figures/.test(noFigures),
    "an answer stating no figure at all reports no count of figures checked: 'the guard " +
@@ -144,13 +167,14 @@ ok(/not a verification it passed/i.test(noFigures),
    "and refuses the reading a reader would otherwise take from it, in the audit trail that " +
    "is the only place on this page a reader can go to weigh a model's prose");
 
-const withFigure = await ask({
+const withFigureRead = await ask({
   answer: "The short board's leading name is SYN35 at 58.",
   llm: true, model: "@cf/zai-org/glm-4.7-flash", note: null, capped: false,
   why: "Picked 1 of the 1 facts that matched.", facts: [LEAD], silences: null,
   guard: { ok: true, rejected: [], numerals: ["58"], invented: false, forecast: false,
     reason: null },
 });
+const withFigure = withFigureRead.all;
 ok(/scanned 1 figure in the answer above and found every one of them already written/
    .test(withFigure),
    "while an answer carrying one figure keeps the sentence saying that figure was found " +
@@ -163,12 +187,16 @@ ok(!/Every figure it wrote was checked/.test(noFigures),
    "vacuously true over an empty set, and it sits in the open above the fold that has just " +
    "refused to call the same empty scan a verification");
 ok(/none for the guard to check/i.test(noFigures),
-   "and the open line says what the fold says — there was no figure to check — so a reader " +
-   "who never opens the disclosure is told the same thing as one who does");
+   "and the provenance says what the method says — there was no figure to check");
+ok(!/Figures checked/.test(noFiguresRead.visible),
+   "and nothing on the surface claims a check for the answer that carried no figure: the " +
+   "open provenance tag is the only thing a reader who never opens the disclosure sees, and " +
+   "it must not award the vacuous scan the mark of a performed one");
 ok(/Every figure it wrote was checked against those same facts/.test(withFigure),
-   "while the answer that DID state a figure keeps the sentence in the open, because for " +
-   "that answer the check was performed and the reader is entitled to hear so without " +
-   "opening anything");
+   "while the answer that DID state a figure keeps the sentence in its provenance");
+ok(/Figures checked/.test(withFigureRead.visible),
+   "and says so in the open with a tag, because for that answer the check was performed and " +
+   "the reader is entitled to hear so without opening anything");
 
 ok(!/Every figure in the prose above is one of these values/.test(withFigure),
    "the fact-pin paragraph does not claim `n` holds every figure in the prose: SYN35 puts " +
@@ -196,7 +224,7 @@ await page.route("**/api/flows/ask", (route) => route.fulfill({
 await page.fill("#askQ", "who leads the short board");
 await page.click(".ak-ask-go");
 await page.waitForSelector('#askAnswer [data-empty="unreadable"]');
-const failed = await page.evaluate(() => document.getElementById("askAnswer").textContent);
+const failed = (await readIn("#askAnswer")).all;
 await page.unroute("**/api/flows/ask");
 
 ok(failed.includes(BRIEF_UNREADABLE),
@@ -217,7 +245,7 @@ await page.route("**/api/flows/ask", (route) => route.abort("connectionrefused")
 await page.fill("#askQ", "who leads the short board");
 await page.click(".ak-ask-go");
 await page.waitForSelector('#askAnswer [data-empty="unreadable"]');
-const dropped = await page.evaluate(() => document.getElementById("askAnswer").textContent);
+const dropped = (await readIn("#askAnswer")).all;
 await page.unroute("**/api/flows/ask");
 
 ok(/failing to reach its route/.test(dropped),
@@ -229,24 +257,21 @@ const meterOf = async (body) => {
   await page.route("**/api/flows/ai-usage", (route) => route.fulfill({
     status: 200, contentType: "application/json", body: JSON.stringify(body) }));
   await page.goto(url("/flows/ask/"), { waitUntil: "networkidle" });
-  await page.waitForSelector("#askMeter *");
+  await page.waitForSelector("#askMeter .ak-meter");
+  const read = await readIn("#askMeter");
   const out = await page.evaluate(() => {
     const live = document.getElementById("askMeter");
-    const copy = live.cloneNode(true);
-    const fold = copy.querySelector("details");
-    const foldText = fold ? fold.textContent : "";
-    if (fold) fold.remove();
-    const fill = live.querySelector(".ak-meter-fill");
     const bar = live.querySelector(".ak-meter-bar");
     const empty = live.querySelector("[data-empty]");
     return {
-      open: copy.textContent, fold: foldText,
-
-      width: fill && /%$/.test(fill.style.width) ? parseFloat(fill.style.width) : null,
+      width: bar && bar.getAttribute("data-fill") !== null ? parseFloat(bar.getAttribute("data-fill")) : null,
       hasBar: !!bar, barHidden: bar ? bar.getAttribute("aria-hidden") : null,
       emptyKind: empty ? empty.getAttribute("data-empty") : null,
+      sendable: !document.querySelector(".ak-ask-go").disabled,
     };
   });
+  out.open = read.visible.replace(/\s+/g, " ");
+  out.fold = read.info;
   await page.unroute("**/api/flows/ai-usage");
   return out;
 };
@@ -260,12 +285,14 @@ const spent = await meterOf(SPEND());
 ok(/8,412/.test(spent.open) && /10,000/.test(spent.open),
    "the budget is drawn as a figure over its allowance, in the open: a reader deciding " +
    "whether to ask is the one who needs it, and a reader who has already asked has spent it");
-ok(/counting only this site.s own calls/i.test(spent.open),
+ok(/this site.s calls/i.test(spent.open),
    "and the condition the subtraction rests on is in the open WITH it, outside the " +
-   "disclosure — the text here is read from a copy of the host with the <details> removed, " +
-   "so folding the condition away later fails this assertion. It is not reassurance about " +
-   "the number, it is the number's units: 8,412 left means one thing if this site is the " +
-   "only thing drawing on the account and another if it is not");
+   "disclosure — the text here is the visible text of the meter with every disclosure " +
+   "unopened, so folding the condition away later fails this assertion. It is not " +
+   "reassurance about the number, it is the number's units: 8,412 left means one thing if " +
+   "this site is the only thing drawing on the account and another if it is not");
+ok(/counting only this site.s own calls/i.test(spent.fold),
+   "and the disclosure states the condition in full");
 ok(/Cloudflare is the authority/i.test(spent.fold),
    "while what folds is the derivation — who the authority actually is, the day, the token " +
    "totals — none of which changes what the visible figure means");
@@ -283,12 +310,14 @@ ok(!/10,000/.test(norate.open),
    "full allowance: Number(null) === 0 reaching the subtraction would render 10,000 of " +
    "10,000 left on a day this route may have emptied it, which is the confident zero this " +
    "codebase is organised against — arriving through arithmetic rather than through a field");
-ok(/7 times today/.test(norate.open),
-   "the call count is still printed, because it was still measured — withholding the derived " +
-   "figure is not a reason to withhold the measurement it was derived from");
-ok(/rate for a model this site asked is not set/i.test(norate.open),
-   "and the reason is named, so a reader can tell a missing rate from a spent allowance — " +
-   "worded for the two configured models, since the fallback is billed at its own rate");
+ok(/7 calls today/.test(norate.open),
+   "the call count is still on the surface, because it was still measured — withholding " +
+   "the derived figure is not a reason to withhold the measurement it was derived from");
+ok(/7 times today/.test(norate.fold) && norate.emptyKind === "withheld",
+   "and the missing credit figure wears the withheld glyph, whose disclosure restates the count");
+ok(/rate for a model this site asked is not set/i.test(norate.fold),
+   "and the reason is named one tap away, so a reader can tell a missing rate from a spent " +
+   "allowance — worded for the two configured models, since the fallback is billed at its own rate");
 
 const fresh = await meterOf(SPEND({ calls: 0, tokensIn: 0, tokensOut: 0,
   neurons: 0, remaining: 10000 }));
@@ -304,19 +333,19 @@ ok(drained.hasBar && drained.width === 0,
    "a spent budget still draws its track: a gauge that renders as nothing at zero is " +
    "indistinguishable from a gauge that failed to draw, and those are the two states this " +
    "box most needs to keep apart");
-ok(/Asking is still allowed/i.test(drained.open),
-   "and it says asking is still allowed, because this meter is a gauge and not a gate — the " +
-   "figures in an answer were measured by the pipeline and cost no model call, so a reader " +
-   "at zero loses the phrasing and nothing else");
+ok(/Asking is still allowed/i.test(drained.fold) && drained.sendable,
+   "and it says asking is still allowed, and the send button stays live, because this meter " +
+   "is a gauge and not a gate — the figures in an answer were measured by the pipeline and " +
+   "cost no model call, so a reader at zero loses the phrasing and nothing else");
 
 const unread = await meterOf({ spend: null });
 ok(unread.emptyKind === "unreadable",
    "a route that looked and could not read the meter gets the unreadable mark, not the " +
    "quiet one: a quiet meter would read as a day on which nothing was spent, which is " +
    "exactly the reading the fresh-morning case above is entitled to and this one is not");
-ok(/Nothing follows from that about the allowance/i.test(unread.open),
-   "and it says what does not follow, rather than leaving a reader to decide whether a " +
-   "blank meter means the budget is gone");
+ok(/Nothing follows from that about the allowance/i.test(unread.fold),
+   "and it says what does not follow, one tap away on the glyph, rather than leaving a " +
+   "reader to decide whether a blank meter means the budget is gone");
 
 await page.route("**/api/flows/ask", (route) => route.fulfill({
   status: 200, contentType: "application/json",
@@ -439,13 +468,10 @@ await page.unroute("**/api/flows/ask");
      "the first thing a reader meets in the opened rail is the examples: it used to be 335 " +
      "characters of guarantee and then the credit meter, 469 characters of chrome above an " +
      "empty box — first said was " + (opensOnto ? JSON.stringify(opensOnto.said) : "nothing"));
-  ok(await page.evaluate(() => {
-       const d = [...document.querySelectorAll("#askApp details")]
-         .find((x) => /It reads nothing live/.test(x.textContent));
-       return !!d && !d.open;
-     }),
-     "the guarantee is kept, whole, inside a closed disclosure: it is reassurance about " +
-     "what the box will NOT do, and the fold rule allows reassurance to fold");
+  const railRead = await readIn("#askApp");
+  ok(!/It reads nothing live/.test(railRead.open) && /It reads nothing live/.test(railRead.info),
+     "the guarantee is kept, whole, inside a disclosure that is closed until tapped: it is " +
+     "reassurance about what the box will NOT do, and the fold rule allows reassurance to fold");
 
   ok(await page.waitForFunction(() => {
        const meter = document.querySelector("#askMeter");
@@ -482,11 +508,11 @@ await page.unroute("**/api/flows/ask");
      "nor does it push the document sideways (" + fit.pageOverflow.toFixed(1) + "px), which " +
      "is what an overflowing fixed rail does to the page it is pinned to");
 
-  const dockSaid = await page.evaluate(() =>
-    document.querySelector(".ak-dock #askAnswer").textContent);
-  ok(dockSaid.split("The long board cleared 44 of 118 names.").length - 1 === 1,
-     "each selected sentence appears exactly once in the answer region: on this branch the " +
-     "answer IS the fact list, and the block below it used to print every sentence again");
+  const dockRead = await readIn(".ak-dock #askAnswer");
+  const dockSaid = dockRead.info;
+  ok((dockRead.open + dockRead.infos.filter((i) => i.fact).map((i) => i.text).join(" ")).split("The long board cleared 44 of 118 names.").length - 1 === 1,
+     "each selected sentence appears exactly once across the answer and its figures: on this " +
+     "branch the answer IS the fact list, and the block below it used to print every sentence again");
   ok(/All of them come from the board:short key, built /.test(dockSaid) === false,
      "with two facts from two different keys the count line names no single origin for all " +
      "of them");
@@ -521,19 +547,16 @@ await page.unroute("**/api/flows/ask");
 
   await page.fill("#askQ", "what changed");
   await page.keyboard.press("Enter");
-  await page.waitForSelector("#askAnswer .ak-asked", { timeout: 5000 });
+  await page.waitForSelector("#askAnswer .ak-a", { timeout: 5000 });
   ok(posted !== null && JSON.parse(posted).subject === "SYN035",
      "the page's name travels to the route as its own field beside the question — not glued " +
      "onto the question here, because whether to use it depends on whether the reader named " +
      "a ticker themselves and shared/flows-ask.js is the module that decides that");
-  ok(await page.evaluate(() => {
-       const host = document.getElementById("askAnswer");
-       const said = [...host.children]
-         .filter((n) => !n.matches("details")).map((n) => n.textContent).join(" ");
-       return /the name on the page this was asked from/.test(said);
-     }),
-     "and the answer says in the open that the page's name was added, because a reader who " +
-     "typed no symbol and is handed readings selected by one is owed where it came from");
+  const subjRead = await readIn("#askAnswer");
+  ok(/SYN035 added/.test(subjRead.visible) && /the name on the page this was asked from/.test(subjRead.info),
+     "and the answer marks in the open that the page's name was added, with the sentence one " +
+     "tap away on the mark, because a reader who typed no symbol and is handed readings " +
+     "selected by one is owed where it came from");
 
   await page.goto(url("/flows/history/?t=brk.b"), { waitUntil: "networkidle" });
   await page.click("#askDockTab");

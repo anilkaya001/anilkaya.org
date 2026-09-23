@@ -16,6 +16,11 @@
   function ensureRenderer() {
     if (loaded || loading) return;
     loading = true;
+    var css = dock.dataset.css;
+    if (css) {
+      delete dock.dataset.css;
+      document.head.append(Object.assign(document.createElement("link"), { rel: "stylesheet", href: css }));
+    }
     var s = document.createElement("script");
     s.src = dock.getAttribute("data-src");
     s.defer = true;
@@ -28,7 +33,7 @@
     s.onerror = function () {
       loading = false;
       var p = document.createElement("p");
-      p.className = "flows-status";
+      p.className = "ak-empty";
       p.setAttribute("data-empty", "unreadable");
       p.textContent = "The assistant's script did not load, so the question box is not " +
         "available on this page. Nothing about the readings on the page changes; reloading " +
