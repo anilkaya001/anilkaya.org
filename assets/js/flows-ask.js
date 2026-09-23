@@ -68,7 +68,14 @@
   }
   const tail = (id) => String(id || "").replace(/^[^/]*\//, "");
 
-  const NEURON_LABEL = { standing: "Score", variation: "Hedging flow", levels: "Levels", displacement: "Displacement", pricedMove: "Priced move", path: "Premium path", context: "21d return", garch: "GARCH vol", state: "Implied state", congress: "Congress", calendar: "Gamma decay" };
+  const NEURON_LABEL = { standing: "Score", variation: "Hedging flow", levels: "Levels", displacement: "Displacement", pricedMove: "Priced move", path: "Premium path", context: "21d return", garch: "GARCH vol", state: "Implied state", congress: "Congress", calendar: "Gamma decay",
+    surface: "Gamma surface", charm: "Charm", vanna: "Vanna", deltaExposure: "OI delta", darkpool: "Dark pool", oiDeltas: "OI changes", aggressor: "Aggressor", topContracts: "Top contracts", volContext: "Vol context", marketRank: "Market rank" };
+  const DRAWN = { charm: "expiries drawn", vanna: "expiries drawn", deltaExposure: "expiries drawn", darkpool: "prints drawn", oiDeltas: "lines drawn" };
+  function gist(say) {
+    const body = String(say || "").replace(/^.*?\(robustness [^)]*\):\s*/, "");
+    const first = (body.match(/^[^:;,.]+/) || [""])[0].trim();
+    return first && first.length <= 40 ? first : null;
+  }
 
   function figureOf(fact) {
     const n = fact && fact.n && typeof fact.n === "object" ? fact.n : {};
@@ -91,7 +98,11 @@
       return { ...out, value: (up ? "+" : UI.MINUS) + n.places, tone: up ? "up" : "down", label: up ? "Top climber" : "Top faller", sub: isNum(n.from) !== null && isNum(n.to) !== null ? "rank " + n.from + " → " + n.to : null };
     }
     if (b === "sectors") return { ...out, value: (text(n.mostBullish) || DASH) + " / " + (text(n.mostBearish) || DASH), label: "Sector lean", sub: isNum(n.readable) === null ? null : n.readable + " of " + (n.returned ?? DASH) + " baskets" };
-    if (b === "nearly-in") return { ...out, ticker: text(n.nearest), value: isNum(n.inBand) === null ? DASH : String(n.inBand), label: "In the band", sub: text(n.nearest) ? "nearest " + n.nearest : null };
+    if (b === "nearly-in") return { ...out, ticker: null, value: isNum(n.inBand) === null ? DASH : String(n.inBand), label: "In the band", sub: text(n.nearest) ? "nearest " + n.nearest : null };
+    if (b === "alerts" && isNum(n.flagged) !== null) {
+      const seen = isNum(n.seen), reads = isNum(n.reads);
+      return { ...out, value: F.int(seen === null ? n.flagged : seen), label: "Flagged windows", sub: [seen === null ? null : F.int(n.flagged) + " held", reads === null ? null : reads + (reads === 1 ? " read" : " reads")].filter(Boolean).join(" " + MID + " ") || null };
+    }
     if (b === "flip") return { ...out, value: isNum(n.distance) === null ? DASH : F.pct(n.distance, 2), label: "To gamma flip" };
     if (b === "reporting") return { ...out, value: isNum(n.count) === null ? DASH : String(n.count), label: "Report next", tags: Array.isArray(n.tickers) ? n.tickers.filter((x) => typeof x === "string") : null };
     if (b === "gate") return { ...out, value: isNum(n.count) === null ? DASH : String(n.count), label: "Earnings gate", sub: isNum(n.gateDays) === null ? null : n.gateDays + "-day gate" };
@@ -101,7 +112,13 @@
       const sgn = (v, d) => (isNum(v) === null ? DASH : F.signed(v, d));
       const cases = {
         standing: () => ({ value: sgn(n.score), tone: UI.tone(n.score), sub: isNum(n.conviction) === null ? null : "conviction " + n.conviction }),
-        variation: () => ({ value: F.money(n.charmPerSession, true), tone: UI.tone(n.charmPerSession), sub: "charm each session" }),
+        variation: () => {
+          const c = isNum(n.charmPerSession);
+          return { value: c === null ? DASH : (c < 0 ? "Buy " : c > 0 ? "Sell " : "") + F.money(Math.abs(c)), tone: c === null || c === 0 ? null : c < 0 ? "up" : "down", sub: "dealer hedges · next session" };
+        },
+        surface: () => ({ value: isNum(n.strikesShown) === null || isNum(n.expiriesShown) === null ? DASH : n.strikesShown + " × " + n.expiriesShown, sub: "strikes × expiries" + (isNum(n.atSpot) === null ? "" : " · spot strike " + F.px(n.atSpot)) }),
+        aggressor: () => ({ value: isNum(n.shown) === null ? DASH : n.shown + (isNum(n.measuredStrikes) === null ? "" : " of " + n.measuredStrikes), sub: "strikes drawn" }),
+        topContracts: () => ({ value: isNum(n.shown) === null ? DASH : n.shown + (isNum(n.total) === null ? "" : " of " + F.int(n.total)), sub: "contracts listed" }),
         levels: () => ({ value: text(n.gammaFlip) || DASH, sub: "flip · call " + (text(n.callWall) || DASH) + " · put " + (text(n.putWall) || DASH) }),
         displacement: () => ({ value: isNum(n.gapAtr) === null ? DASH : sgn(n.gapAtr, 2) + " ATR", sub: isNum(n.volCentroid) === null ? null : "flow at " + F.px(n.volCentroid) }),
         pricedMove: () => ({ value: isNum(n.impliedMove) === null ? DASH : "±" + F.pct(n.impliedMove, 1), sub: isNum(n.impliedLow) === null ? null : F.px(n.impliedLow) + " – " + F.px(n.impliedHigh) }),
@@ -113,8 +130,11 @@
         calendar: () => ({ value: isNum(n.halfLifeDays) === null ? DASH : n.halfLifeDays + "d", sub: "half-life" }),
       };
       if (cases[t]) return { ...nf, ...cases[t]() };
+      if (isNum(n.seen) !== null && isNum(n.cap) !== null) return { ...nf, value: Math.min(n.cap, n.seen) + " of " + n.seen, sub: DRAWN[t] || "drawn" };
       const keys = numericKeys(n).filter((k) => k !== "robustness");
-      return keys.length ? { ...nf, value: fmtKey(keys[0], n[keys[0]]), sub: keys[1] ? human(keys[1]) + " " + fmtKey(keys[1], n[keys[1]]) : null } : { ...nf, value: DASH };
+      if (keys.length) return { ...nf, value: fmtKey(keys[0], n[keys[0]]), sub: keys[1] ? human(keys[1]) + " " + fmtKey(keys[1], n[keys[1]]) : null };
+      const g = gist(fact.say);
+      return { ...nf, value: g || DASH, word: !!g };
     }
     if (/^movers\/extremes$/.test(id)) return { ...out, ticker: null, value: (text(n.riser) || DASH) + " / " + (text(n.faller) || DASH), label: "Top riser / faller", sub: isNum(n.riserChangeRatio) === null ? null : F.pct(n.riserChangeRatio, 1, true) + " / " + F.pct(n.fallerChangeRatio, 1, true) };
     if (/^movers\/premium$/.test(id)) return { ...out, value: (text(n.bullishName) || DASH) + " / " + (text(n.bearishName) || DASH), label: "Premium leaders", sub: isNum(n.bullishNetPremiumUsd) === null ? null : F.money(n.bullishNetPremiumUsd, true) + " / " + F.money(n.bearishNetPremiumUsd, true) };
@@ -143,8 +163,9 @@
     });
   }
 
-  function factChip(fact, fallbackSource, fallbackAt, i) {
+  function factChip(fact, fallbackSource, fallbackAt, i, focus) {
     const f = figureOf(fact);
+    if (focus && f.ticker === focus) f.ticker = null;
     const unread = text(fact && fact.say) === null;
     return h("button", {
       type: "button", class: "ak-fact" + (unread ? " is-unread" : ""), "data-fact": fact && fact.id ? String(fact.id) : null,
@@ -152,7 +173,7 @@
       "aria-label": (f.ticker ? f.ticker + " " : "") + (f.label || "") + " " + (f.value || ""),
     },
     f.ticker || isNum(f.robustness) !== null ? h("span", { class: "ak-fact-t" }, f.ticker || "", isNum(f.robustness) !== null ? UI.robustness(f.robustness) : null) : null,
-    h("span", { class: "ak-fact-v", "data-tone": f.tone }, unread ? UI.dash({ state: "withheld", reason: "A reading was published without the sentence that states it." }, "Reading") : f.value),
+    h("span", { class: "ak-fact-v" + (f.word ? " is-word" : ""), "data-tone": f.tone }, unread ? UI.dash({ state: "withheld", reason: "A reading was published without the sentence that states it." }, "Reading") : f.value),
     h("span", { class: "ak-fact-l" }, f.label || DASH),
     f.sub ? h("span", { class: "ak-fact-s" }, f.sub) : null);
   }
@@ -374,12 +395,14 @@
   const guarantee = UI.infoButton("what this box answers from", { title: "What this box answers from", lead: GUARANTEE }, { small: true });
   guarantee.classList.add("ak-guarantee");
   const greetHost = h("div", { class: "ak-greet", id: "askGreet" });
-  const foot = h("div", { class: "ak-foot" }, meterHost, h("span", { class: "ak-foot-sp" }), guarantee);
+  const foot = h("div", { class: "ak-foot" }, meterHost, h("span", { class: "ak-foot-sp" }), DOCKED ? guarantee : null);
   if (DOCKED) box.append(exampleHost, onPageHost, form, foot);
   else box.append(greetHost, form, onPageHost, exampleHost, foot);
   const answerHost = h("div", { class: "ak-answer", id: "askAnswer", "aria-live": "polite" });
   const briefHost = h("div", { class: "ak-brief ui-grid", id: "askBrief" });
   const checksHost = h("div", { class: "ak-checks-slot", id: "askChecksSlot" });
+  const aboutBtn0 = DOCKED ? null : document.getElementById("askAbout");
+  if (aboutBtn0) aboutBtn0.dataset.info = UI.info({ title: "Ask", lead: GUARANTEE });
   if (DOCKED) app.append(box, answerHost);
   else {
     app.classList.add("ui-grid");
@@ -582,7 +605,7 @@
       const origin = count.origin;
       const shown = strip ? facts.filter((f) => !(tickerOf(f) === focus && /\/(standing|move|ivrank)$/.test(String(f.id || "")))) : facts;
       const grid = h("div", { class: "ak-facts", role: "list", "aria-label": facts.length + (facts.length === 1 ? " fact" : " facts") + " behind this answer" },
-        shown.map((f, i) => h("div", { role: "listitem", class: "ak-fact-li" }, factChip(f, origin.source, origin.at, i))));
+        shown.map((f, i) => h("div", { role: "listitem", class: "ak-fact-li" }, factChip(f, origin.source, origin.at, i, strip ? focus : null))));
       if (shown.length) card.append(grid);
     }
     const sil = silenceTags(silenceList(payload.silences));
@@ -667,6 +690,12 @@
   }
 
   const WARN_MARK = { blocking: "!!", caution: "!", note: MID };
+  const WARN_WORD = {
+    "session:split": "Sessions split", "population:shrank": "Population shrank", "ceiling:alerts": "Alerts capped",
+    "ceiling:news": "News capped", "ceiling:chains": "Chains truncated", "ceiling:inherited": "Cap inherited",
+    "scored:disagree": "Counts disagree", "band:disagree": "Bands disagree", "partition:impossible": "Split impossible",
+    "gate:window": "Gate window", "gate:origin": "Gate origin", "stamp:silent": "Silent stamp",
+  };
   function paintWarnings(brief) {
     const list = brief && Array.isArray(brief.warnings) ? brief.warnings : null;
     const checked = brief && typeof brief.warningsChecked === "number" ? brief.warningsChecked : null;
@@ -701,11 +730,12 @@
       const idParts = text(w.id) ? w.id.split(":") : [];
       const kind = idParts[0] ? UI.cap(idParts[0]).replace(/\.$/, "") : "Check";
       const what = idParts[1] ? UI.cap(idParts[1].replace(/[-_]/g, " ")).replace(/\.$/, "") : kind;
-      return h("div", { role: "listitem", class: "ak-warn-li" }, h("button", { type: "button", class: "ak-warn is-" + sev, ...infoAttrs({ title: what + (what === kind ? "" : " " + kind.toLowerCase()), state: wsaid === null ? "withheld" : null,
+      const word = WARN_WORD[idParts.slice(0, 2).join(":")] || (what === kind ? what : what + " " + kind.toLowerCase());
+      return h("div", { role: "listitem", class: "ak-warn-li" }, h("button", { type: "button", class: "ak-warn is-" + sev, ...infoAttrs({ title: word, state: wsaid === null ? "withheld" : null,
         lead: wsaid === null ? "A warning was published without the sentence that states it, so this page cannot say what it found. That is a gap in the payload rather than a clean surface." : wsaid,
         facts: [["Severity", severity === null ? "no severity published" : severity], ["Sources", src.length ? src.join(", ") : null]] }) },
       h("span", { class: "ak-warn-mark" }, known ? WARN_MARK[severity] : "?"),
-      h("span", { class: "ak-warn-body" }, h("b", null, what), h("span", { class: "ak-src-key" }, what === kind ? src.join(", ") : kind.toLowerCase() + (src.length ? " " + MID + " " + src.join(", ") : ""))),
+      h("span", { class: "ak-warn-body" }, h("b", null, word)),
       h("span", { class: "ak-warn-sev" }, severity === null ? "no severity published" : severity)));
     });
     const listed = rows.length ? UI.list(rows, { visible: 2, label: lead.split(". ")[0] }) : null;

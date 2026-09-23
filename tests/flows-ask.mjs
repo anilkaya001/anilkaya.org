@@ -1358,6 +1358,39 @@ import { chromium } from "playwright";
        "and sends none, so the selection is never handed a name nobody is looking at");
   }
 
+  {
+    const page = await mount();
+    await ask(page, {
+      answer: "Readings.", llm: false, guard: null, capped: false, silences: null, why: "", model: null, note: null,
+      facts: [
+        { id: "brief:today/alerts", say: "184 flagged windows on the tape across 14 reads on 2026-09-22, 180 of them held on the page.",
+          n: { flagged: 180, seen: 184, reads: 14 }, topic: [], source: "brief", at: STAMP2 },
+        { id: "neuron:SYN7/variation", say: "SYN7 — Where hedging flow comes from (robustness 3 of 3): Next session, time alone moves dealer hedges to buy $16.02M of SYN7.",
+          n: { robustness: 3, charmPerSession: -16023457 }, topic: ["syn7"], source: "card:SYN7", at: STAMP2 },
+        { id: "neuron:SYN7/charm", say: "SYN7 — Charm by expiry (robustness 2 of 3): Time decay concentrates at 2026-09-25.",
+          n: { robustness: 2, seen: 18, cap: 12, shed: 6 }, topic: ["syn7"], source: "card:SYN7", at: STAMP2 },
+      ],
+    }, "what about SYN7?");
+    const by = Object.fromEntries((await page.evaluate(() => [...document.querySelectorAll("#askAnswer .ak-fact")].map((b) => [b.getAttribute("data-fact"), {
+      v: b.querySelector(".ak-fact-v").textContent, tone: b.querySelector(".ak-fact-v").getAttribute("data-tone"),
+      s: (b.querySelector(".ak-fact-s") || {}).textContent || "" }]))));
+    eq(by["brief:today/alerts"].v, "184",
+       "the alerts figure is the windows flagged on the tape, the number its own sentence leads with: `flagged` " +
+       "on this fact counts the rows HELD on the page, and heading the tile with it under 'Flagged windows' " +
+       "contradicted the sentence one tap below it");
+    ok(/180 held/.test(by["brief:today/alerts"].s) && /14 reads/.test(by["brief:today/alerts"].s),
+       "and the held count and the reads sit beside it, labelled (" + by["brief:today/alerts"].s + ")");
+    eq(by["neuron:SYN7/variation"].v, "Buy $16.0M",
+       "charm is dealer delta, and the hedge it forces is its negative: −$16.0M of charm is dealers BUYING " +
+       "$16.0M, which is what the pipeline's own sentence says. Printing the raw −$16.0M in red under " +
+       "'Hedging flow' told a reader the opposite of the sentence behind it");
+    eq(by["neuron:SYN7/variation"].tone, "up", "and it wears the colour of the side it trades");
+    eq(by["neuron:SYN7/charm"].v, "12 of 18",
+       "a Neuron reading that publishes only its coverage is drawn as that coverage, not as whichever count " +
+       "happened to be the first numeric field");
+    briefBody = null;
+  }
+
   const thrown = pages.flatMap((p) => p._errors);
   eq(thrown.length, 0, "and the renderer threw nothing across every mount above: " + thrown.join(" | "));
   await browser.close();
