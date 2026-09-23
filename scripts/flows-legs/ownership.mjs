@@ -32,6 +32,7 @@ export async function readDeepOwnership(uw, tickers, {
 export function ownershipParts({
   tickers = [], deepTickers = [], shortInterestRows = [], insiderRows = [], deep = new Map(),
   screenerByTicker = new Map(), sessionDate = null, insidersRead = true, shortRead = true,
+  shortUnread = new Map(), insiderUnread = new Map(), insiderPartial = new Set(),
 } = {}) {
   const si = latestShortInterest(shortInterestRows, { sessionDate });
   const insiders = groupInsiderRows(insiderRows);
@@ -51,27 +52,35 @@ export function ownershipParts({
           : { status: "unavailable", reason: d.volume.gated ? SILENCE.gated : SILENCE.unreadable, http: d.volume.status };
     const interest = si.byTicker.get(t) || null;
     const row = screenerByTicker.get(t) || null;
+    const measured = interest || borrow.status === "ok" || volume.status === "ok";
+    const interestSilence = shortUnread.get(t) || null;
     const short = {
-      status: interest || borrow.status === "ok" || volume.status === "ok" ? "ok" : "quiet",
-      interest: interest ? { ...interest } : (shortRead
-        ? { status: "quiet", reason: SILENCE.absent }
-        : notRead("the short-interest batch was not read")),
+      status: measured ? "ok" : interestSilence ? "unavailable" : "quiet",
+      interest: interest ? { ...interest }
+        : interestSilence ? { ...interestSilence }
+          : shortRead ? { status: "quiet", reason: SILENCE.absent }
+            : notRead("the short-interest batch was not read"),
       siScreener: row ? shortIntOf(row) : null,
       borrow,
       volume,
       squeeze: null,
     };
     if (deepSet.has(t)) {
+      const fresh = interest && interest.stale === false ? interest : null;
       squeezeInputs.push({
         t,
-        si: interest ? interest.si : null,
-        dtc: interest ? interest.dtc : null,
+        si: fresh ? fresh.si : null,
+        dtc: fresh ? fresh.dtc : null,
         fee: borrow.status === "ok" ? borrow.fee : null,
       });
     }
-    const ins = insidersRead
-      ? insiderSummary(insiders.get(t) || [], { sessionDate })
-      : notRead("the insider batch was not read");
+    const ins = insiderUnread.has(t) ? { ...insiderUnread.get(t) }
+      : insidersRead ? insiderSummary(insiders.get(t) || [], { sessionDate })
+        : notRead("the insider batch was not read");
+    if (insiderPartial.has(t) && !insiderUnread.has(t)) {
+      ins.complete = false;
+      ins.why = "the batch this name was read in still had more pages when the read stopped, so older transactions can be missing";
+    }
     parts.set(t, { short, insiders: ins });
   }
 
@@ -81,7 +90,7 @@ export function ownershipParts({
     if (p) {
       p.short.squeeze = {
         ...s,
-        rule: "z(si_float) + z(days_to_cover) + z(fee) across the deep names, sample sd; null when any leg is absent",
+        rule: "z(si_float) + z(days_to_cover) + z(fee) across the deep names, sample sd; null when any leg is absent or the settlement is stale",
       };
     }
   }

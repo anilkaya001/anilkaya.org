@@ -71,13 +71,18 @@ export async function runMarketLegs({
   say(`  ownership batches: short interest ${shortRead.rows.length} row(s) in ${shortRead.calls} call(s)` +
     (shortRead.minHonoured === false ? " — min_market_date NOT honoured, older rows were cut locally" : "") +
     (shortRead.truncated ? `, ${shortRead.truncated} batch(es) at the row limit` : "") +
-    `; insiders ${insiderRead.rows.length} row(s) in ${insiderRead.calls} call(s)`);
+    `; insiders ${insiderRead.rows.length} row(s) in ${insiderRead.calls} call(s)` +
+    (shortRead.unread.size ? `; short interest unread for ${shortRead.unread.size} name(s)` : "") +
+    (insiderRead.unread.size ? `; insiders unread for ${insiderRead.unread.size} name(s)` : "") +
+    (insiderRead.partial.size ? `; insiders INCOMPLETE for ${insiderRead.partial.size} name(s)` +
+      (insiderRead.repeated ? " (a page repeated its predecessor: the page parameter may be 1-based)" : "") : ""));
 
   const deep = await readDeepOwnership(uw, deepTickers, { sessionDate, deadline, pool, width });
   const { parts: ownership, future } = ownershipParts({
     tickers: carded, deepTickers, shortInterestRows: shortRead.rows, insiderRows: insiderRead.rows,
     deep: deep.byTicker, screenerByTicker, sessionDate,
     insidersRead: insiderRead.calls > insiderRead.failed, shortRead: shortRead.calls > shortRead.failed,
+    shortUnread: shortRead.unread, insiderUnread: insiderRead.unread, insiderPartial: insiderRead.partial,
   });
   say(`  deep ownership: ${deep.byTicker.size} of ${deepTickers.length} name(s) read in ${deep.calls} call(s)` +
     (future ? `; ${future} short-interest row(s) dated after the session were cut` : ""));

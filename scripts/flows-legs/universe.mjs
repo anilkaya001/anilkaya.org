@@ -72,14 +72,29 @@ export async function readIndexRows(uw, { date = null, tickers = INDEX_TICKERS }
   };
 }
 
+export function batchSilence(kind, { res = null, why = null } = {}) {
+  if (kind === "deadline") return { status: "unavailable", reason: "not_read", why: why || "the run deadline passed before this batch was read" };
+  if (kind === "truncated") {
+    return { status: "unavailable", reason: "unreadable", detail: why || "the batch reached the vendor's row limit before this name" };
+  }
+  return {
+    status: "unavailable", reason: res && res.gated ? "plan_gated" : "unreadable",
+    http: res ? res.status ?? null : null, detail: why || (res && res.error) || "the batch read failed",
+  };
+}
+
 export async function readShortInterest(uw, tickers, {
   sessionDate = null, batch = SHORT_BATCH, lookbackDays = SHORT_LOOKBACK_DAYS, deadline = null,
 } = {}) {
   const rows = [];
+  const unread = new Map();
   let calls = 0, truncated = 0, unfiltered = 0, failed = 0;
   const min = sessionDate ? addDays(sessionDate, -lookbackDays) : null;
   for (const group of chunks([...new Set(tickers)], batch)) {
-    if (pastDeadline(deadline)) break;
+    if (pastDeadline(deadline)) {
+      for (const t of group) unread.set(t, batchSilence("deadline"));
+      continue;
+    }
     const res = await read(uw, "/api/short_screener", {
       tickers: group.join(","),
       limit: SHORT_LIMIT,
@@ -87,14 +102,22 @@ export async function readShortInterest(uw, tickers, {
       ...(sessionDate ? { max_market_date: sessionDate } : {}),
     });
     calls++;
-    if (!res.ok) { failed++; continue; }
+    if (!res.ok) {
+      failed++;
+      for (const t of group) unread.set(t, batchSilence("failed", { res }));
+      continue;
+    }
     const list = rowsOf(res.body);
-    if (list.length >= SHORT_LIMIT) truncated++;
+    if (list.length >= SHORT_LIMIT) {
+      truncated++;
+      const named = new Set(list.map((r) => r && (vstr(r.symbol) || vstr(r.ticker))).filter(Boolean));
+      for (const t of group) if (!named.has(t)) unread.set(t, batchSilence("truncated"));
+    }
     if (min && list.some((r) => r && typeof r.market_date === "string" && r.market_date < min)) unfiltered++;
     rows.push(...list);
   }
   return {
-    rows, calls, truncated, failed,
+    rows, calls, truncated, failed, unread,
     minHonoured: calls - failed > 0 ? unfiltered === 0 : null,
     lookbackDays,
   };
@@ -106,12 +129,21 @@ export async function readInsiders(uw, tickers, {
 } = {}) {
   const rows = [];
   const seen = new Set();
-  let calls = 0, failed = 0, capped = 0;
+  const unread = new Map();
+  const partial = new Set();
+  let calls = 0, failed = 0, capped = 0, repeated = 0;
   const start = sessionDate ? addDays(sessionDate, -lookbackDays) : null;
   for (const group of chunks([...new Set(tickers)], batch)) {
     let more = true;
     for (let page = 0; more && page < maxPages; page++) {
-      if (pastDeadline(deadline)) { more = false; break; }
+      if (pastDeadline(deadline)) {
+        more = false;
+        for (const t of group) {
+          if (page === 0) unread.set(t, batchSilence("deadline"));
+          else partial.add(t);
+        }
+        break;
+      }
       const res = await read(uw, "/api/insider/transactions", {
         ticker_symbol: group.join(","),
         "form_types[]": ["4"],
@@ -122,7 +154,14 @@ export async function readInsiders(uw, tickers, {
         ...(page ? { page } : {}),
       }, { envelope: true });
       calls++;
-      if (!res.ok) { failed++; break; }
+      if (!res.ok) {
+        failed++;
+        for (const t of group) {
+          if (page === 0) unread.set(t, batchSilence("failed", { res }));
+          else partial.add(t);
+        }
+        break;
+      }
       const list = rowsOf(res.body);
       let added = 0;
       for (const r of list) {
@@ -132,11 +171,16 @@ export async function readInsiders(uw, tickers, {
         rows.push(r);
         added++;
       }
-      more = !!(res.body && res.body.has_more === true) && added > 0;
-      if (more && page === maxPages - 1) capped++;
+      const hasMore = !!(res.body && res.body.has_more === true);
+      more = hasMore && added > 0;
+      if (hasMore && !added) repeated++;
+      if (hasMore && (!added || page === maxPages - 1)) {
+        capped++;
+        for (const t of group) partial.add(t);
+      }
     }
   }
-  return { rows, calls, failed, capped, lookbackDays };
+  return { rows, calls, failed, capped, repeated, unread, partial, lookbackDays };
 }
 
 export function harvestBlock(h) {

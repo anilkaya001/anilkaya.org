@@ -139,7 +139,7 @@ export function insiderSummary(rows, {
   const seen = new Set();
   const txs = [];
   const from = sessionDate ? addDays(sessionDate, -days) : null;
-  let future = 0;
+  let future = 0, otherCodes = 0;
   for (const r of Array.isArray(rows) ? rows : []) {
     if (!r || typeof r !== "object") continue;
     const id = vstr(r.id) || (Array.isArray(r.ids) && r.ids.length ? String(r.ids.join(",")) : null);
@@ -151,17 +151,20 @@ export function insiderSummary(rows, {
     if (sessionDate && (d > sessionDate || (f && f > sessionDate))) { future++; continue; }
     if (from && d <= from) continue;
     const code = vstr(r.transaction_code);
+    if (code !== "P" && code !== "S") { otherCodes++; continue; }
     const amount = vnum(r.amount);
     const price = vnum(r.price);
-    const usd = amount !== null && price !== null ? amount * price : null;
+    const shares = amount === null ? null : (code === "S" ? -1 : 1) * Math.abs(amount);
+    const usd = shares !== null && price !== null && price > 0 ? shares * price : null;
     txs.push({
-      d, f, code, amount, price, usd,
+      d, f, code, amount: shares, price, usd,
       who: vstr(r.reporter_cik) || vstr(r.owner_name),
       role: roleOf(r),
       plan: r.is_10b5_1 === true,
     });
   }
   const sum = (list) => list.reduce((a, x) => (x.usd === null ? a : a + x.usd), 0);
+  const sideSum = (list) => (!list.length ? 0 : list.some((x) => x.usd !== null) ? sum(list) : null);
   const priced = txs.filter((x) => x.usd !== null);
   const buys = txs.filter((x) => x.code === "P");
   const sells = txs.filter((x) => x.code === "S");
@@ -190,8 +193,8 @@ export function insiderSummary(rows, {
     unpriced: txs.length - priced.length,
     net90: priced.length ? sum(priced) : null,
     net90ExPlan: priced.length ? sum(priced.filter((x) => !x.plan)) : null,
-    buys90: sum(buys.filter((x) => x.usd !== null)),
-    sells90: sum(sells.filter((x) => x.usd !== null)),
+    buys90: sideSum(buys),
+    sells90: sideSum(sells),
     buyCount: buys.length,
     sellCount: sells.length,
     buyers: buyers.size,
@@ -202,6 +205,7 @@ export function insiderSummary(rows, {
     planShare: sells.length ? sells.filter((x) => x.plan).length / sells.length : null,
     lastFiling,
     future,
+    otherCodes,
     dots,
     dotCols: ["transaction date", "signed usd", "code P|S", "role O|D|T|null", "10b5-1 plan 1|0"],
   };

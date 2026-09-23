@@ -355,6 +355,17 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(late.status, "quiet", "and leaves the name quiet");
   const planned = insiderSummary([{ ...ins, is_10b5_1: true, id: "p" }], { sessionDate: S });
   eq(planned.net90ExPlan, 0, "10b5-1 plan sales are excluded from the ex-plan net");
+  const mixed = insiderSummary([
+    { ...ins, id: "award", transaction_code: "A", amount: 50000, price: "0" },
+    { ...ins, id: "unsigned", amount: 1000, price: "200" },
+    { ...buy("X", "2026-09-10"), id: "free", price: "0" },
+  ], { sessionDate: S });
+  eq(mixed.otherCodes, 1, "a grant (code A) that slips through the vendor filter is counted and left out");
+  eq(mixed.n, 2, "so only purchases and sales are transactions");
+  near(mixed.net90, -200000, 1e-9, "a sale reported with a positive share count still subtracts: the code sets the sign");
+  eq(mixed.buys90, null, "a purchase with no price leaves the buy dollars absent, not a measured 0");
+  eq(mixed.unpriced, 1, "and is counted as unpriced");
+  eq(insiderSummary([{ ...ins, id: "s1" }], { sessionDate: S }).buys90, 0, "while a window with no purchase at all reads 0 bought");
 
   const sq = squeezePressure([{ t: "A", si: 0.1, dtc: 1, fee: 0.01 }, { t: "B", si: 0.2, dtc: 2, fee: 0.02 },
     { t: "C", si: 0.3, dtc: 3, fee: null }, { t: "D", si: 0.4, dtc: 4, fee: 0.04 }]);
@@ -363,6 +374,14 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   near(sq.get("A").pressure, 2 * (-0.15 / Math.sqrt(0.05 / 3)) + (0.01 - fm) / fsd, 1e-12,
     "squeeze = z(SI) + z(DTC) + z(fee), each a sample-sd z across the deep names");
   eq(sq.get("C").pressure, null, "a missing fee silences the pressure rather than scoring it 0");
+  const fresh = ["N1", "N2", "N3"].map((t, i) => ({ symbol: t, market_date: "2026-09-15", si_float: String(0.05 * (i + 1)), days_to_cover: String(i + 1) }));
+  const staleParts = ownershipParts({
+    tickers: ["OLD", "N1", "N2", "N3"], deepTickers: ["OLD", "N1", "N2", "N3"], sessionDate: S,
+    shortInterestRows: [{ symbol: "OLD", market_date: "2026-06-30", si_float: "0.3", days_to_cover: "9" }, ...fresh],
+  }).parts;
+  eq(staleParts.get("OLD").short.interest.stale, true, "an 84-day-old settlement is stale");
+  eq(staleParts.get("OLD").short.squeeze.zSi, null, "and never enters the squeeze z as if it were today's short interest");
+  near(staleParts.get("N1").short.squeeze.zSi, -1, 1e-12, "the z is taken across the three fresh settlements alone");
 }
 
 {
@@ -453,6 +472,49 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   const ir = await readInsiders(insUw, ["A"], { sessionDate: S });
   eq(ir.rows.length, 1, "a page that repeats the last one ends paging and is deduplicated");
   eq(ir.calls, 2, "after exactly one extra call");
+
+  const batches = [];
+  const shortUw = async (p, params) => {
+    const names = params.tickers.split(",");
+    batches.push(names);
+    if (batches.length === 1) throw new Error("/api/short_screener -> HTTP 502");
+    if (batches.length === 2) return Array.from({ length: 500 }, (_, i) => ({ symbol: names[0], market_date: S, si_float: String(i / 1e4) }));
+    return names.map((t) => ({ symbol: t, market_date: S, si_float: "0.05" }));
+  };
+  const names = Array.from({ length: 6 }, (_, i) => "N" + i);
+  const sr = await readShortInterest(shortUw, names, { sessionDate: S, batch: 2 });
+  deep([sr.unread.get("N0").reason, sr.unread.get("N1").reason, sr.unread.get("N0").http], [SILENCE.unreadable, SILENCE.unreadable, 502],
+    "names in a failed short-interest batch are unreadable, never a measured absence");
+  eq(sr.unread.has("N2"), false, "a name that did arrive in a truncated batch was read");
+  ok(sr.unread.get("N3").reason === SILENCE.unreadable && /row limit/.test(sr.unread.get("N3").detail),
+    "while its batch-mate crowded out by the 500-row limit is unreadable, with the limit named");
+  eq(sr.unread.has("N4"), false, "a whole batch reads cleanly");
+  const late = await readShortInterest(shortUw, ["Z1"], { sessionDate: S, deadline: Date.now() - 1 });
+  eq(late.unread.get("Z1").reason, SILENCE.unread, "a batch skipped at the deadline is not_read");
+
+  const pagesSeen = [];
+  const insPaged = async (p, params) => {
+    const page = params.page || 0;
+    pagesSeen.push([params.ticker_symbol, page]);
+    if (params.ticker_symbol === "A,B") return { data: [{ id: "1", ticker: "A" }], has_more: false };
+    if (params.ticker_symbol === "C,D") throw new Error("/api/insider/transactions -> HTTP 500");
+    if (page === 0) return { data: [{ id: "e0", ticker: "E" }], has_more: true };
+    throw new Error("/api/insider/transactions -> HTTP 500");
+  };
+  const paged = await readInsiders(insPaged, ["A", "B", "C", "D", "E", "F"], { sessionDate: S, batch: 2 });
+  deep([paged.unread.has("A"), paged.unread.get("C").reason, paged.unread.get("D").reason], [false, SILENCE.unreadable, SILENCE.unreadable],
+    "a first page that fails leaves its names unreadable");
+  deep([paged.partial.has("E"), paged.partial.has("F"), paged.unread.has("E")], [true, true, false],
+    "and a later page that fails leaves them read but incomplete");
+
+  const parts2 = ownershipParts({
+    tickers: ["C", "E", "N0"], deepTickers: [], sessionDate: S, insiderRows: paged.rows,
+    shortUnread: sr.unread, insiderUnread: paged.unread, insiderPartial: paged.partial,
+  });
+  deep([parts2.parts.get("N0").short.interest.reason, parts2.parts.get("N0").short.status],
+    [SILENCE.unreadable, "unavailable"], "the part says the short interest was unreadable, not quiet");
+  eq(parts2.parts.get("C").insiders.reason, SILENCE.unreadable, "and the insider part likewise");
+  eq(parts2.parts.get("E").insiders.complete, false, "while a name from an unfinished batch is flagged incomplete");
 
   const idx = await readIndexRows(async () => [{ ticker: "SPY" }, { ticker: "QQQ" }], {});
   deep(idx.missing, ["IWM"], "a missing index row is named");
