@@ -625,6 +625,27 @@ const OUT = ENGINE.runEngine(BASE);
   const c = out.structures.find((s) => s.family === "long-calendar");
   ok(c && new Set(c.legs.map((l) => l.expiry)).size === 2, "a steep front builds a two-expiry long calendar");
   ok(c.maxLoss < 0 && c.maxProfit > 0 && !c.lossUnbounded, "whose front-expiry profile is numeric and bounded");
+  near(c.ev.q, (c.price.model - c.price.fill) * 100, 0.02,
+    "on a skewed smile the calendar bought at its fill has EV_Q equal to model minus fill: the back leg revalued at the front expiry reprices");
+  const all = ENGINE.runEngine({ ...cal, grids: "all" }).structures.find((s) => s.family === "long-calendar");
+  const zi = all.grid.spot.indexOf(100);
+  near(all.grid.pnl[zi][1][0], (all.price.model - all.price.fill) * 100, 0.02, "and its scenario grid's centre is the same model value");
+  const at = (expiry, svi) => {
+    const T = TIME.yearFraction(Date.parse(AS_OF), expiry);
+    return { method: "svi", T, F: 100 * Math.exp(0.03 * T), D: Math.exp(-0.04 * T), params: svi };
+  };
+  let worstBias = 0;
+  for (const [fp, bp] of [[{ ...SVI_TRUE, a: 0.009 }, { ...SVI_TRUE, a: 0.02 }], [{ ...SVI_TRUE, rho: 0 }, { ...SVI_TRUE, rho: 0, a: 0.02 }], [{ ...SVI_TRUE, rho: -0.8, b: 0.1 }, { ...SVI_TRUE, rho: -0.7, b: 0.08, a: 0.03 }]]) {
+    const front = at("2026-10-16", fp), back = at("2026-11-20", bp);
+    const vctx = { sliceOf: (l) => (l.T > front.T ? back : front), frontT: front.T, frontSlice: front, r: 0.04, q: 0.01, spot: 100 };
+    const qLaw = DENSITY.lawFromSlice(front);
+    for (const K of [85, 95, 100, 105, 115]) for (const type of ["C", "P"]) {
+      const legs = ENGINE.calibrateBackLegs([{ type, K, side: 1, qty: 1, T: back.T }], vctx, qLaw, 100);
+      const e = ENGINE.lawIntegrate(qLaw, (x) => ENGINE.structureValue(legs, vctx, x, front.T, 0), [K]);
+      worstBias = Math.max(worstBias, Math.abs(front.D * e - ENGINE.structureValue(legs, vctx, 100, 0, 0)));
+    }
+  }
+  ok(worstBias <= 1e-8 * 100, `a back leg revalued on the forward smile at the front expiry keeps its price under Q to ${worstBias.toExponential(1)} (1e-8 S)`);
 }
 
 {

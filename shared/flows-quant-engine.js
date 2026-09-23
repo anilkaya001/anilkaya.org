@@ -17,6 +17,7 @@ export const ENGINE_LINES = Object.freeze({
   GRID_Z: Object.freeze([-2, -1, -0.5, 0, 0.5, 1, 2]), GRID_VOL: Object.freeze([-0.05, 0, 0.05]),
   UNDEFINED_CAP: 2, STALE_CAP: 1, TOP_IDEAS: 3, RATE_FALLBACK: 0.04, REG_T_BASE: 0.2, REG_T_FLOOR: 0.1,
   EDGE_COST_MULTIPLE: 2, FIT_CLEAN_IN_SPREAD: 0.8, FIT_FAIR_IN_SPREAD: 0.6, FIT_RMSE_PTS: 1, EVENT_MODE_MAX_DTE: 60,
+  FWD_CAL_TOL: 1e-11, FWD_CAL_STEP: 0.01,
 });
 
 const fin = (v) => typeof v === "number" && Number.isFinite(v);
@@ -155,9 +156,17 @@ export function lawIntegrate(law, fn, breaks = []) {
     }
     return s * law.p;
   }
+  const { xs, ws } = lawNodes(law, breaks);
+  let s = 0;
+  for (let i = 0; i < xs.length; i++) s += ws[i] * fn(xs[i]);
+  return s;
+}
+
+export function lawNodes(law, breaks = []) {
+  const { x: gx, w: gw } = gaussLegendre(16);
   const lo = Math.log(lawQuantile(law, 1e-10)), hi = Math.log(lawQuantile(law, 1 - 1e-10));
   const cuts = [lo, ...breaks.filter((b) => b > 0).map(Math.log).filter((v) => v > lo && v < hi), hi].sort((a, b) => a - b);
-  let s = 0;
+  const xs = [], ws = [];
   for (let j = 0; j + 1 < cuts.length; j++) {
     const a = cuts[j], b = cuts[j + 1];
     const panels = Math.max(1, Math.ceil((b - a) / ((hi - lo) / 24)));
@@ -165,12 +174,12 @@ export function lawIntegrate(law, fn, breaks = []) {
     for (let p = 0; p < panels; p++) {
       const c = a + (p + 0.5) * h;
       for (let i = 0; i < 16; i++) {
-        const y = c + gx[i] * h / 2, x = Math.exp(y);
-        s += gw[i] * h / 2 * fn(x) * lawPdf(law, x) * x;
+        const x = Math.exp(c + gx[i] * h / 2);
+        xs.push(x); ws.push(gw[i] * h / 2 * lawPdf(law, x) * x);
       }
     }
   }
-  return s;
+  return { xs, ws };
 }
 
 export function structureValue(legs, ctx, x, t, shift) {
@@ -181,17 +190,52 @@ export function structureValue(legs, ctx, x, t, shift) {
     if (l.type === "S") { v += qty * x; continue; }
     const tau = l.T - t;
     if (!(tau > 1e-10)) { v += qty * legPayoff(l, x); continue; }
-    const F = x * Math.exp((r - qc) * tau);
+    const own = ctx.sliceOf(l);
+    const perLeg = ctx.spot > 0 && own && own.F > 0 && own.D > 0 && own.T > 0;
+    const carry = perLeg ? Math.log(own.F / ctx.spot) / own.T : r - qc, rl = perLeg ? -Math.log(own.D) / own.T : r;
+    const F = x * Math.exp(carry * tau);
     const k = Math.log(l.K / F);
-    const wOwn = sliceTotalVariance(ctx.sliceOf(l), k);
+    const wOwn = sliceTotalVariance(own, k);
     let wRem;
     if (t <= 0) wRem = wOwn;
     else if (ctx.frontSlice && ctx.frontT < l.T - 1e-12) wRem = wOwn - sliceTotalVariance(ctx.frontSlice, k) * Math.min(1, t / ctx.frontT);
     else wRem = wOwn * (1 - t / l.T);
-    const sigma = Math.max(0, Math.sqrt(Math.max(0, wRem) / tau) + dv);
-    v += qty * black76(F, Math.exp(-r * tau), l.K, sigma, tau, l.type);
+    const fwd = t > 0 && fin(l.fwdShift) && ctx.frontT > 0 && ctx.frontT < l.T - 1e-12 ? l.fwdShift * Math.min(1, t / ctx.frontT) : 0;
+    const sigma = Math.max(0, Math.sqrt(Math.max(0, wRem) / tau) + dv + fwd);
+    v += qty * black76(F, Math.exp(-rl * tau), l.K, sigma, tau, l.type);
   }
   return v;
+}
+
+export function calibrateBackLegs(legs, ctx, qLaw, S) {
+  const frontT = ctx.frontT, D1 = ctx.frontSlice ? ctx.frontSlice.D : 1;
+  return legs.map((l) => {
+    if (l.type === "S" || !(l.T > frontT + 1e-12)) return l;
+    const one = { ...l, side: 1, qty: 1, fwdShift: 0 };
+    const target = structureValue([one], ctx, S, 0, 0) / D1;
+    const { xs, ws } = lawNodes(qLaw, [l.K]);
+    const gap = (d) => {
+      const leg = [{ ...one, fwdShift: d }];
+      let e = 0;
+      for (let i = 0; i < xs.length; i++) e += ws[i] * structureValue(leg, ctx, xs[i], frontT, 0);
+      return e - target;
+    };
+    const tol = ENGINE_LINES.FWD_CAL_TOL * S;
+    let a = 0, fa = gap(0);
+    if (!fin(fa) || Math.abs(fa) <= tol) return { ...l, fwdShift: 0 };
+    let b = fa > 0 ? -ENGINE_LINES.FWD_CAL_STEP : ENGINE_LINES.FWD_CAL_STEP, fb = gap(b);
+    for (let g = 0; g < 8 && fin(fb) && Math.sign(fb) === Math.sign(fa); g++) { a = b; fa = fb; b *= 2; fb = gap(b); }
+    if (!fin(fb) || Math.sign(fb) === Math.sign(fa)) return { ...l, fwdShift: 0, fwdShiftFailed: true };
+    let d = b, fd = fb;
+    for (let it = 0; it < 40 && Math.abs(fd) > tol; it++) {
+      let m = b - fb * (b - a) / (fb - fa);
+      if (!(m > Math.min(a, b) && m < Math.max(a, b))) m = (a + b) / 2;
+      const fm = gap(m);
+      if (Math.sign(fm) === Math.sign(fa)) { a = m; fa = fm; } else { b = m; fb = fm; }
+      d = m; fd = fm;
+    }
+    return { ...l, fwdShift: d };
+  });
 }
 
 function multiProfile(legs, ctx, cost, law) {
@@ -314,7 +358,9 @@ export function structureMetrics(input) {
     }
     return out;
   }
-  const ctx = { sliceOf, frontT, frontSlice, r, q };
+  const ctx = { sliceOf, frontT, frontSlice, r, q, spot: S };
+  const calibrated = qLaw ? calibrateBackLegs(priced, ctx, qLaw, S) : priced;
+  priced.splice(0, priced.length, ...calibrated);
   const prof = multiProfile(priced, ctx, cost, qLaw);
   const strikeK = priced.find((l) => l.type !== "S").K;
   Object.assign(out, {
@@ -518,10 +564,11 @@ function priceCandidate(cand, ctx) {
   const multi = Ts.length > 1;
   const front = ctx.expiries.get(legs.filter((l) => l.type !== "S").sort((a, b) => a.T - b.T)[0].expiry);
   const sliceOf = (l) => ctx.expiries.get(l.expiry).slice;
-  const vctx = { sliceOf, frontT: front.T, frontSlice: front.slice, r: front.r, q: front.qImpl };
+  const vctx = { sliceOf, frontT: front.T, frontSlice: front.slice, r: front.r, q: front.qImpl, spot: S };
   const qLaw = lawFromSlice(front.slice);
   const D = front.slice.D;
   const laws = ctx.lawsOf(front, S);
+  if (multi) legs.splice(0, legs.length, ...calibrateBackLegs(legs, vctx, qLaw, S));
   let prof, eQ, ePs;
   if (!multi) {
     prof = expiryProfile(legs, fill);
