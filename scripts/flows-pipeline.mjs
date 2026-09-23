@@ -5714,7 +5714,8 @@ async function main() {
     }
   }
 
-  await publishVol(volLeg, { publish, sessionDate, generatedAt, log: (line) => console.log(line) });
+  await publishVol(volLeg, {
+    publish, stored: (key) => publishedStore[key] || null, sessionDate, generatedAt, log: (line) => console.log(line) });
 
   console.log("  " + (DRY_RUN ? "[dry-run] " : "") + describeGammaRange(gammaProfiles).line +
     (DRY_RUN

@@ -583,6 +583,29 @@ function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
   for (const code of Object.keys(out.body.why)) eq(out.body.why[code], VOL_WHY[code], `the ${code} silence is explained once on the payload`);
   const tiny = cardXPayload(e("AAA"), { sessionDate: session, cap: 8 * 1024 });
   ok(tiny.shed.length > 0 && tiny.shed[0] === "sentiment.history", "over the cap the histories are shed first, sentiment first");
+  const prior = { v: 7, ticker: "AAA", depth: "deep", sessionDate: session, positioning: { status: "ok", note: "net \u2212 flow" },
+    why: { shed: "another leg's legend" },
+    fresh: { v: 1, readAt: "2026-09-22T21:30:00.000Z", vendorAt: "2026-09-22T23:59:00.000Z", source: "nightly", cadenceS: 0 } };
+  const merged = cardXPayload(e("AAA"), { sessionDate: session, generatedAt: "g", prior });
+  deepEq(merged.body.positioning, prior.positioning);
+  eq(merged.body.why.shed, "another leg's legend", "another leg's legend survives beside this leg's codes");
+  ok(Object.keys(out.body.why).every((c) => merged.body.why[c] === VOL_WHY[c]), "and this leg's codes are all still explained");
+  eq(merged.body.fresh.readAt, "2026-09-22T21:30:00.000Z", "the merged read instant is the older of the two writers'");
+  eq(merged.body.fresh.vendorAt, "2026-09-22T23:59:00.000Z", "and the vendor stamp the newer");
+  eq(merged.body.scope, "deep", "while the vol panels and scope are this leg's");
+  eq(merged.bytes, Buffer.byteLength(JSON.stringify(merged.body), "utf8"),
+    "the cap is measured in UTF-8 bytes, as the ingest's bounded reader counts them, not in UTF-16 characters");
+  ok(merged.bytes > JSON.stringify(merged.body).length, "which differ once any writer's text leaves ASCII");
+  const stale = cardXPayload(e("AAA"), { sessionDate: session, prior: { ...prior, sessionDate: "2026-09-21" } }).body;
+  eq(stale.positioning, undefined, "a card-x from another session is not carried forward");
+  const composed = new Map();
+  await publishVol({ ...leg, byTicker: new Map([["AAA", e("AAA")]]) }, {
+    publish: async (k, v) => { composed.set(k, v); }, stored: (k) => (k === "card-x:AAA" ? prior : k === "regime" ? { sessionDate: session, market: { x: 1 } } : null),
+    sessionDate: session, generatedAt: "g" });
+  deepEq(composed.get("card-x:AAA").positioning, prior.positioning);
+  deepEq(composed.get("regime").market, { x: 1 });
+  ok(composed.get("regime").volRadar && composed.get("regime").volRadar.status === "ok",
+    "publishing composes with what another leg already wrote under card-x:<T> and regime this run, instead of overwriting it");
   const dossierDDD = cardXPayload(e("DDD"), { sessionDate: session }).body;
   eq(dossierDDD.why.refused, VOL_WHY.refused, "a refused read's silence is in the dossier's legend");
 

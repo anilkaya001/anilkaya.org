@@ -335,21 +335,40 @@ export function freshEnvelope({ readAt = null, vendorAt = null, sessionDate = nu
   return { v: 1, readAt, vendorAt, source: "nightly", cadenceS: 0, session: sessionDate, writer: "flows-pipeline" };
 }
 
-export function cardXPayload(entry, { sessionDate = null, generatedAt = null, cap = CARD_X_CAP } = {}) {
+export function payloadBytes(value) {
+  return new TextEncoder().encode(JSON.stringify(value)).length;
+}
+
+export function mergeFresh(a, b) {
+  if (!a || typeof a !== "object") return b;
+  if (!b || typeof b !== "object") return a;
+  const older = (x, y) => (!x ? y : !y ? x : x < y ? x : y);
+  const newer = (x, y) => (!x ? y : !y ? x : x > y ? x : y);
+  return { ...a, ...b, readAt: older(a.readAt, b.readAt), vendorAt: newer(a.vendorAt, b.vendorAt) };
+}
+
+function samePrior(prior, sessionDate) {
+  return prior && typeof prior === "object" && !Array.isArray(prior) && prior.sessionDate === sessionDate ? prior : null;
+}
+
+export function cardXPayload(entry, { sessionDate = null, generatedAt = null, cap = CARD_X_CAP, prior = null } = {}) {
   const panels = {};
   for (const k of VOL_PANELS) panels[k] = entry.panels[k] ? structuredClone(entry.panels[k]) : notRead();
+  const base = samePrior(prior, sessionDate);
+  const priorWhy = base && base.why && typeof base.why === "object" && !Array.isArray(base.why) ? base.why : {};
   const build = () => {
-    const why = {};
+    const why = { ...priorWhy };
     for (const c of [...codesIn(panels, new Set())].sort()) why[c] = VOL_WHY[c];
     return {
+      ...(base || {}),
       v: VOL_SCHEMA_VERSION, ticker: entry.ticker, scope: entry.depth, sessionDate, generatedAt,
-      fresh: freshEnvelope({ readAt: entry.readAt, vendorAt: entry.vendorAt, sessionDate }),
+      fresh: mergeFresh(base && base.fresh, freshEnvelope({ readAt: entry.readAt, vendorAt: entry.vendorAt, sessionDate })),
       ...panels,
       why,
     };
   };
   let body = build();
-  let bytes = JSON.stringify(body).length;
+  let bytes = payloadBytes(body);
   const shed = [];
   for (const [panel, field] of SHED_ORDER) {
     if (bytes <= cap) break;
@@ -358,15 +377,18 @@ export function cardXPayload(entry, { sessionDate = null, generatedAt = null, ca
     panels[panel].shed = [...(panels[panel].shed || []), field];
     shed.push(panel + "." + field);
     body = build();
-    bytes = JSON.stringify(body).length;
+    bytes = payloadBytes(body);
   }
   return { body, bytes, shed, fits: bytes <= cap };
 }
 
-export function regimePayload(leg, { sessionDate = null, generatedAt = null } = {}) {
+export function regimePayload(leg, { sessionDate = null, generatedAt = null, prior = null } = {}) {
+  const base = samePrior(prior, sessionDate);
+  const own = freshEnvelope({ readAt: leg && leg.radarReadAt, vendorAt: leg && leg.radar ? leg.radar.vendorAt || null : null, sessionDate });
   return {
+    ...(base || {}),
     v: VOL_SCHEMA_VERSION, sessionDate, generatedAt,
-    fresh: freshEnvelope({ readAt: leg && leg.radarReadAt, vendorAt: leg && leg.radar ? leg.radar.vendorAt || null : null, sessionDate }),
+    fresh: mergeFresh(base && base.fresh, own),
     volRadar: leg && leg.radar ? leg.radar : { status: "unavailable", code: "not-read", reason: VOL_WHY["not-read"] },
   };
 }
@@ -400,12 +422,12 @@ export function describeVolLeg(leg) {
   return lines;
 }
 
-export async function publishVol(leg, { publish, sessionDate = null, generatedAt = null, log = () => {} } = {}) {
+export async function publishVol(leg, { publish, stored = () => null, sessionDate = null, generatedAt = null, log = () => {} } = {}) {
   const outcome = { published: 0, failed: 0, shed: 0, maxBytes: 0, maxTicker: null };
   if (!leg) return outcome;
   for (const line of describeVolLeg(leg)) log(line);
   for (const entry of leg.byTicker.values()) {
-    const { body, bytes, shed, fits } = cardXPayload(entry, { sessionDate, generatedAt });
+    const { body, bytes, shed, fits } = cardXPayload(entry, { sessionDate, generatedAt, prior: stored("card-x:" + entry.ticker) });
     if (shed.length) { outcome.shed++; log(`  card-x ${entry.ticker}: shed ${shed.join(", ")} to fit the cap`); }
     if (!fits) { outcome.failed++; log(`  card-x ${entry.ticker}: ${(bytes / 1024).toFixed(0)}KB after shedding, over the cap`); continue; }
     try {
@@ -418,7 +440,7 @@ export async function publishVol(leg, { publish, sessionDate = null, generatedAt
     }
   }
   try {
-    await publish("regime", regimePayload(leg, { sessionDate, generatedAt }));
+    await publish("regime", regimePayload(leg, { sessionDate, generatedAt, prior: stored("regime") }));
   } catch (error) {
     log(`  regime: ${error.message}`);
   }
