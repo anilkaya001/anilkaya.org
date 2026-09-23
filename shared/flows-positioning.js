@@ -895,9 +895,9 @@ export function lifeline(body, { id, diff = null, sessionDate = null, sessions =
     oiChange: vnum(diff) };
   const g0 = gate(body, "chains");
   if (g0.quiet) return { ...head, ...g0.quiet };
-  const days = dedupeByDay(g0.rows, "date", sessionDate).slice(-sessions);
+  const days = dedupeByDay(g0.rows, "date", sessionDate);
   if (!days.length) return { ...head, ...silence("quiet", "empty") };
-  const rows = days.map(([d, r]) => {
+  const full = days.map(([d, r]) => {
     const vol = vnum(r.volume);
     return {
       d, oi: vnum(r.open_interest), vol, iv: vnum(r.implied_volatility),
@@ -905,25 +905,26 @@ export function lifeline(body, { id, diff = null, sessionDate = null, sessions =
       prem: vnum(r.total_premium),
     };
   });
+  const rows = full.slice(-sessions);
   const gaps = {};
   const note = (field, code) => { gaps[field] = code; return null; };
-  const n = rows.length;
+  const n = full.length;
   let i = n - 1;
-  while (i > 0 && rows[i].oi !== null && rows[i - 1].oi !== null && rows[i].oi > rows[i - 1].oi) i--;
+  while (i > 0 && full[i].oi !== null && full[i - 1].oi !== null && full[i].oi > full[i - 1].oi) i--;
   const built = i < n - 1;
-  const traded = built ? rows.slice(i, n - 1) : [];
+  const traded = built ? full.slice(i, n - 1) : [];
   const tot = (k) => sum(traded.map((r) => r[k] ?? 0));
   const volBuild = tot("vol");
   const ivs = rows.map((r) => r.iv).filter((v) => v !== null);
-  const same = isDay(sessionDate) ? rows[n - 1].d === sessionDate : null;
+  const same = isDay(sessionDate) ? full[n - 1].d === sessionDate : null;
   return {
     ...head,
     status: same === false ? "stale" : "ok",
     why: same === false ? "not-session" : null,
-    asOf: rows[n - 1].d,
-    buildStart: built ? rows[i].d : note("buildStart", "no-build"),
+    asOf: full[n - 1].d,
+    buildStart: built ? full[i].d : note("buildStart", "no-build"),
     buildSessions: built ? n - 1 - i : 0,
-    buildOi: built ? rows[n - 1].oi - rows[i].oi : note("buildOi", "no-build"),
+    buildOi: built ? full[n - 1].oi - full[i].oi : note("buildOi", "no-build"),
     askShareBuild: !built ? note("askShareBuild", "no-build") : round(shareOf(tot("ask"), volBuild), 4) ?? note("askShareBuild", "no-volume"),
     sweepShareBuild: !built ? note("sweepShareBuild", "no-build") : round(shareOf(tot("sw"), volBuild), 4) ?? note("sweepShareBuild", "no-volume"),
     floorShareBuild: !built ? note("floorShareBuild", "no-build") : round(shareOf(tot("fl"), volBuild), 4) ?? note("floorShareBuild", "no-volume"),

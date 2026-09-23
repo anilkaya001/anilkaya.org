@@ -401,6 +401,14 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
     "ask share over the build uses the volume that settled into it (OI is T+1)");
   near(l.floorShareBuild, Number((30 / 1400).toFixed(4)), 1e-12, "and so does the floor share");
   eq(lifeline({ data: [] }, { id: "AAPL261016C00340000" }).status, "unreadable", "rows under data are not the historic shape");
+  const longDays = weekdaysEndingAt(SESSION, 45);
+  const longRows = longDays.map((d, i) => ({ ...base, date: d, open_interest: i < 5 ? 100 : 100 + (i - 4) * 10,
+    volume: 50, ask_volume: 30, sweep_volume: 5, floor_volume: 1 }));
+  const long = lifeline({ chains: longRows.slice().reverse() }, { id: "AAPL261016C00340000", sessionDate: SESSION });
+  eq(long.buildStart, longDays[4], "a build longer than the drawn 30 sessions is measured over every session fetched");
+  eq(long.buildSessions, 40, "forty sessions, not a 29-session build clipped by the chart window");
+  eq(long.buildOi, 400, "adding the whole 400 contracts");
+  eq(long.d.length, POSITIONING_LINES.LIFE_SESSIONS, "while the drawn series stays the last 30 sessions");
 }
 
 {
