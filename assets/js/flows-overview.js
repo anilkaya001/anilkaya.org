@@ -482,13 +482,13 @@
 
     if (change && tiles) {
       const crossings = change.crossings || {};
-      const stat = (label, value, of, id) => UI.metric(label, isNum(value) === null ? DASH : String(value),
-        { id, sub: of || null });
+      const stat = (label, value, of, id, ring) => UI.metric(label, isNum(value) === null ? DASH : String(value),
+        { id, sub: of || null, key: ring ? UI.key(ring, "ring", "") : null });
       tiles.append(UI.metrics([
         stat("Moved", change.moved, isNum(change.comparable) === null ? null : "of " + change.comparable, "chgMoved"),
-        stat("Cleared", crossings.cleared, null, "chgCleared"),
-        stat("Faded", crossings.faded, null, "chgFaded"),
-        stat("Flipped", crossings.flipped, null, "chgFlipped"),
+        stat("Cleared", crossings.cleared, null, "chgCleared", "--up"),
+        stat("Faded", crossings.faded, null, "chgFaded", "--label-2"),
+        stat("Flipped", crossings.flipped, null, "chgFlipped", "--accent-ink"),
       ], { min: 72 }));
     }
 
@@ -627,8 +627,8 @@
   function pair(a, b, word) {
     const whole = a !== null && b !== null && a + b > 0 ? Math.round((a / (a + b)) * 100) + "%" : null;
     return [h("span", { class: "hm-v-full" },
-      h("span", { class: "hm-half" }, a === null ? DASH : String(a)), h("span", { class: "hm-sl" }, " / "),
-      h("span", { class: "hm-half" }, b === null ? DASH : String(b)), h("span", { class: "visually-hidden" }, " " + word)),
+      h("span", { class: "hm-half", "data-tone": a === null ? null : "up" }, a === null ? DASH : String(a)), h("span", { class: "hm-sl" }, " / "),
+      h("span", { class: "hm-half", "data-tone": b === null ? null : "down" }, b === null ? DASH : String(b)), h("span", { class: "visually-hidden" }, " " + word)),
     h("span", { class: "hm-v-short", "aria-hidden": "true" }, whole || (a === null ? DASH : String(a)) + "/" + (b === null ? DASH : String(b)))];
   }
 
@@ -926,7 +926,7 @@
       x: timed ? mins : tide.t, xType: timed ? "number" : "index", xFormat: (iso) => clock(iso),
       xTicks: timed ? hourTicks(mins[0], mins[mins.length - 1], plot.clientWidth < 480 ? 120 : 60) : undefined, series, twoTone: true, zero: true,
       height: [190, 220, 236], live: state === "live",
-      yFormat: (x) => (x > 0 ? "+" : "") + usd(x),
+      yFormat: (x) => ((x > 0 ? "+" : "") + usd(x)).replace(/\.0(?=[KMB])/, ""),
       label: "Market tide, net premium across the session",
       readout: (i) => [C.part(clock(tide.t[i]), "k"), C.part("Net", "k"),
         h("b", { "data-tone": toneOf(tide.net[i]) }, tide.net[i] === null ? DASH : usdS(tide.net[i])),
@@ -943,7 +943,16 @@
     if (state === "live" && tide.readAt) UI.freshness({ readAt: tide.readAt, live: true, source: "live:market" });
   }
 
-  function paintVol(regime, liveVol) {
+  function zeroShareOf(reg, breadth) {
+    const lb = breadth && breadth.status !== "pending" && breadth.dte && breadth.dte.share ? breadth : null;
+    const z = reg && reg.zeroDte && reg.zeroDte.status === "ok" ? reg.zeroDte : null;
+    if (lb && isNum(lb.dte.share.value) !== null && (!reg || !reg.sessionDate || (lb.session && lb.session >= reg.sessionDate))) {
+      return { share: isNum(lb.dte.share.value), src: "live:breadth" };
+    }
+    return z ? { share: isNum(z.share), src: "regime" } : { share: null, src: null };
+  }
+
+  function paintVol(regime, liveVol, liveBreadth) {
     const into = $("ccVol");
     if (!into) return;
     into.replaceChildren();
@@ -957,13 +966,14 @@
     for (const k of ["SPY", "QQQ", "IWM"]) {
       if (useLive && lv.index[k] && lv.index[k].status === "ok") {
         const r = lv.index[k];
-        idx[k] = { iv: TEN.map((d) => isNum(r["v" + d])), iv30: isNum(r.iv30), ivp: isNum(r.ivRank), rv: isNum(r.rv),
+        idx[k] = { iv: TEN.map((d) => isNum(r["v" + d])), iv30: isNum(r.iv30), ivp: isNum(r.ivRank), ivpWord: "rank", rv: isNum(r.rv), rvWord: "RV",
           ts: isNum(r.v30) !== null && isNum(r.v90) ? r.v30 / r.v90 - 1 : null, src: "live:vol" };
       } else if (curve && curve[k] && curve[k].status === "ok" && Array.isArray(curve[k].iv)) {
         const r = curve[k];
         const ten = Array.isArray(r.tenors) ? r.tenors : TEN;
         idx[k] = { iv: TEN.map((d) => { const j = ten.indexOf(d); return j < 0 ? null : isNum(r.iv[j]); }),
-          iv30: isNum(r.iv[ten.indexOf(30)]), ivp: isNum(r.ivp), rv: isNum(r.rv20), ts: isNum(r.ts), shape: r.shape || null, src: "regime" };
+          iv30: isNum(r.iv[ten.indexOf(30)]), ivp: isNum(r.ivp), ivpWord: "pct", rv: isNum(r.rv20), rvWord: "RV 20d",
+          ts: isNum(r.ts), shape: r.shape || null, src: "regime" };
       }
     }
     const names = Object.keys(idx);
@@ -977,25 +987,25 @@
     const ic = reg && reg.impliedCorrelation && reg.impliedCorrelation.byIndex ? reg.impliedCorrelation.byIndex : {};
     const rho = ic.SPY && ic.SPY.status === "ok" ? isNum(ic.SPY.rho) : null;
     const rhoQ = ic.QQQ && ic.QQQ.status === "ok" ? isNum(ic.QQQ.rho) : null;
-    const z = reg && reg.zeroDte && reg.zeroDte.status === "ok" ? reg.zeroDte : null;
-    const share0 = z ? isNum(z.share) : null;
+    const zero = zeroShareOf(reg, liveBreadth);
+    const share0 = zero.share;
     const pend = (what) => ({ state: "pending", reason: what + " arrives with the regime key, which has not published yet." });
     const vrp = spy.iv30 !== null && spy.rv !== null && spy.rv !== undefined ? spy.iv30 - spy.rv : null;
     const disp = ic.SPY && ic.SPY.status === "ok" ? isNum(ic.SPY.dispersion) : null;
     into.append(UI.metrics([
-      UI.metric("IV 30d", spy.iv30 === null ? DASH : F.pct(spy.iv30, 1), { sub: (idx.SPY ? "SPY" : names[0]) + (spy.ivp === null ? "" : " · pct " + Math.round(spy.ivp)) }),
-      UI.metric("RV 20d", spy.rv === null || spy.rv === undefined ? DASH : F.pct(spy.rv, 1), { sub: vrp === null ? null : "IV − RV " + F.pts(vrp) + " pts" }),
+      UI.metric("IV 30d", spy.iv30 === null ? DASH : F.pct(spy.iv30, 1), { sub: (idx.SPY ? "SPY" : names[0]) + (spy.ivp === null ? "" : " · " + spy.ivpWord + " " + Math.round(spy.ivp)) }),
+      UI.metric(spy.rvWord, spy.rv === null || spy.rv === undefined ? DASH : F.pct(spy.rv, 1), { sub: vrp === null ? null : "IV − RV " + F.pts(vrp) + " pts" }),
       UI.metric("Term", shape ? cap1(shape) : DASH, { tone: shape === "backwardation" ? "warn" : null,
         sub: spy.ts === null ? null : "30/90 " + F.pct(spy.ts, 1, true), state: shape ? null : pend("The term shape") }),
       UI.metric("Correlation", rho === null ? DASH : rho.toFixed(2), { sub: rhoQ === null ? null : "QQQ " + rhoQ.toFixed(2), state: rho === null ? pend("Implied correlation") : null }),
-      UI.metric("Dispersion", disp === null ? DASH : F.pct(disp, 0), { sub: "members over index", state: disp === null ? pend("Dispersion") : null }),
+      UI.metric("Dispersion", disp === null ? DASH : F.pts(disp), { unit: disp === null ? null : "pts", sub: disp === null ? null : "SPY members", state: disp === null ? pend("Dispersion") : null }),
       UI.metric("0DTE share", share0 === null ? DASH : F.pct(share0, 0), { state: share0 === null ? pend("The 0DTE share") : null }),
     ], { min: 96 }));
     const COL = { SPY: "--s-blue", QQQ: "--s-purple", IWM: "--s-teal" };
     const plot = h("div", { class: "hm-term" });
     into.append(plot);
     C.line(plot, {
-      x: TEN, xType: "number", xScale: "sqrt", height: [150, 170, 180],
+      x: TEN, xType: "number", xScale: "sqrt", height: [150, 170, 240],
       xTicks: [{ v: 7, label: "1w" }, { v: 30, label: "1m" }, { v: 90, label: "3m" }, { v: 180, label: "6m" }, { v: 365, label: "1y" }],
       series: names.map((k) => ({ values: idx[k].iv, color: COL[k], label: k, format: (x) => F.pct(x, 1) })),
       yFormat: (x) => F.pct(x, 0), label: "Implied volatility by tenor for the index ETFs",
@@ -1024,9 +1034,12 @@
       facts: [["Source", spy.src], ["SPY 30d", spy.iv30 === null ? DASH : F.pct(spy.iv30, 1)],
         ["Term slope 30/90", spy.ts === null ? DASH : F.pct(spy.ts, 1, true)],
         ["Implied correlation SPY", rho === null ? DASH : rho.toFixed(3)], ["Implied correlation QQQ", rhoQ === null ? DASH : rhoQ.toFixed(3)],
-        ["0DTE share of net premium", share0 === null ? DASH : F.pct(share0, 1)]],
+        ["Dispersion", disp === null ? DASH : F.pts(disp) + " vol pts"],
+        ["0DTE share of net premium", share0 === null ? DASH : F.pct(share0, 1)], ["0DTE share source", zero.src]],
       notes: ["Contango (a rising curve) is the calm shape; an inverted front is stress.",
         "Implied correlation is the index variance left after the members' own variances, over what perfect correlation would add.",
+        "Dispersion is the SPY members' weighted 30-day implied volatility minus SPY's own, in volatility points.",
+        "The 0DTE share is |0DTE net| over |0DTE net| plus |weekly net|, read from the live breadth layer when it is as new as the regime key, as on the market page.",
         radar ? "Rich and cheap are the vendor's volatility anomaly screen; a linked name has a card today." : null],
     }));
   }
@@ -1070,7 +1083,8 @@
           : h("span", { class: "ui-meter hm-side", title: sideSaid(s) }, h("i", { style: { "--w": (s * 100).toFixed(1) + "%", "--i": String(i), "--c": UI.cssVar(s >= 0.5 ? "--label-2" : "--label-3") } })),
         h("span", { class: "ui-row-v" }, usd(row.prem)));
     });
-    into.append(UI.list(list, { visible: SHOW, label: "Flagged option windows, largest premium first" }));
+    into.append(UI.list(list, { visible: SHOW, label: "Flagged option windows, largest premium first" }),
+      UI.legend([["--label-2", "", "Share at the ask"]]));
     const detail = table("Flagged option windows, largest premium first", [
       ["Time · ET", false, "The start of the vendor's flagged window, in Eastern time. A window is a span rather than a print."],
       ["Name", false], ["Contract", false], ["Premium", true],
@@ -1290,7 +1304,7 @@
     };
     const basket = (r) => r.sector || r.fullName || r.etf || DASH;
     const SHORT = { "Information Technology": "Technology", "Consumer Discretionary": "Discretionary",
-      "Consumer Staples": "Staples", "Communication Services": "Communication" };
+      "Consumer Staples": "Staples", "Communication Services": "Comms" };
     const brief = (r) => SHORT[basket(r)] || basket(r);
     const MODES = [
       { label: "Ratio", noun: "share of its own premium", val: (r) => isNum(r && r.leanRatio), fmt: (v) => pct(v, 1), axis: 1,
@@ -1741,15 +1755,20 @@
     resizeTimer = setTimeout(drawStrips, 150);
   });
 
-  function live(pulse, regime) {
+  function live(pulse, regime, liveVol) {
     if (typeof UI.heartbeat !== "function") return;
     UI.heartbeat({
-      keys: ["market"], nightly: ["pulse"], page: "overview",
+      keys: ["market", "breadth"], nightly: ["pulse"], page: "overview",
       onChange(changed) {
-        if (!Array.isArray(changed) || !changed.some((k) => /market/.test(String(k)))) return;
-        loadRegion("/api/flows/lk?k=market", true).then((mkt) => {
-          if (mkt) paintHero(tideOf(mkt, pulse), regime, mkt);
-        });
+        if (!Array.isArray(changed)) return;
+        if (changed.some((k) => /market/.test(String(k)))) {
+          loadRegion("/api/flows/lk?k=market", true).then((mkt) => {
+            if (mkt) paintHero(tideOf(mkt, pulse), regime, mkt);
+          });
+        }
+        if (changed.some((k) => /breadth/.test(String(k)))) {
+          loadRegion("/api/flows/lk?k=breadth", true).then((b) => { if (b) paintVol(regime, liveVol, b); });
+        }
       },
     });
   }
@@ -1768,7 +1787,8 @@
     loadRegion("/api/flows/regime", true),
     loadRegion("/api/flows/lk?k=market", true),
     loadRegion("/api/flows/lk?k=vol", true),
-  ]).then(([lng, sht, watch, market, alerts, events, track, lean, news, pulse, regime, liveMkt, liveVol]) => {
+    loadRegion("/api/flows/lk?k=breadth", true),
+  ]).then(([lng, sht, watch, market, alerts, events, track, lean, news, pulse, regime, liveMkt, liveVol, liveBreadth]) => {
     if (gated) return;
 
     const bull = ranked(lng && lng.rows);
@@ -1799,7 +1819,7 @@
     paintMeta($("ccMetaDate"), $("ccMetaScreened"), [lng, sht], market);
     paintVerdict(verdictHost, lng, sht, market, alerts, pulse);
     paintHero(tideOf(liveMkt, pulse), regime, liveMkt);
-    paintVol(regime, liveVol);
+    paintVol(regime, liveVol, liveBreadth);
 
     const trk = readTrack(track && track.status !== "pending" ? track : null);
 
@@ -1931,7 +1951,7 @@
     setRailCount("short", poolCount(sht));
     setRailCount("watch", rowCount(watch));
     setRailCount("events", events && events.status !== "pending" ? isNum(events.inWindow) : null);
-    live(pulse, regime);
+    live(pulse, regime, liveVol);
   }).catch((error) => {
     statusEl.textContent = "The session could not be loaded. Refresh to try again." + (error && error.message ? " (" + error.message + ")" : "");
   });

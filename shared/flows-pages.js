@@ -409,6 +409,7 @@ ${homeModule("hmNews", "Headlines", "ccNews", { sub: `<span class="hm-count" id=
   <p class="flows-foot hm-foot"><span class="foot-hit" id="flowsHitRate"><a href="/flows/history/">Track record</a></span></p>
 `, { chrome: false })}
 ${UI_SCRIPT}
+<script src="${v("/assets/js/flows-fresh.js")}" defer></script>
 <script src="${v("/assets/js/flows-overview.js")}" defer></script>
 </body>
 </html>`;

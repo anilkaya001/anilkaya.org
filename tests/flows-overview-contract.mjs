@@ -430,6 +430,8 @@ try {
        "and the equal weighting carries its own sign in its own glyph");
 
     deep(tiles.Breadth?.halves, ["9", "12"], "breadth prints both sides of the split");
+    deep(await page.evaluate(() => Array.from(document.querySelectorAll('#ccVerdict [data-chip="Breadth"] .hm-v-full .hm-half'), (x) => x.dataset.tone)),
+      ["up", "down"], "the bought side toned up and the sold side down, so the pair reads without its label");
     ok(/bought/.test(tiles.Breadth?.spoken) && /sold/.test(tiles.Breadth?.spoken),
        `and names which side is which to assistive tech, so a bare 9 / 12 is never a ratio (${tiles.Breadth?.spoken})`);
     const breadth = await chipWhy(page, "Breadth");
@@ -662,6 +664,13 @@ try {
     const cells = Object.fromEntries(list.map((r) => [r.t, r]));
     eq(cells.CAT.ev, "flipped", "a crossing names itself on the row");
     eq(cells.CAT.dv, "+56", "beside its move in score points");
+    const labels = await page.evaluate(() => {
+      const r = document.querySelector('#ccChgList .hm-crow[data-ticker="CAT"]');
+      const c = (sel) => getComputedStyle(r.querySelector(sel), "::before").content;
+      return { dv: c(".hm-dv"), end: c(".hm-end") };
+    });
+    ok(/\u0394|Δ/.test(labels.dv) && /now/.test(labels.end),
+      `and neither number on the row is bare: the move wears a delta and the end score says it is the score now (${labels.dv} / ${labels.end})`);
     eq(cells.ORCL?.tag, "A", "a changed name with a card links to its reader");
     eq(cells.ORCL?.href, "/flows/ticker/?t=ORCL&s=signal&from=overview",
        `at the address the ranked region uses for the same name (${cells.ORCL?.href})`);
@@ -2711,6 +2720,31 @@ try {
       "a rich name with a card links to its reader");
     ok(vol.stale, "an August regime read in September wears the stale mark on the module title");
     eq(vol.zero, "+$12.5M", "and the hero's 0DTE leg falls back to the regime's zero-day net premium");
+    eq(vol.m["RV 20d"], "11.8%", "the regime's realized vol is named by its own 20-day window");
+    const volSubs = await page.evaluate(() => Object.fromEntries(Array.from(document.querySelectorAll("#ccVol .ui-metric"), (m) => [
+      m.querySelector(".ui-metric-l").textContent.trim(), (m.querySelector(".ui-metric-s") || {}).textContent || ""])));
+    eq(volSubs["IV 30d"], "SPY · pct 38", "and its 1-year IV percentile is called a percentile");
+    eq(vol.m.Dispersion, "+22.0pts",
+      "dispersion is the members' IV less the index's: a difference of two vols, printed in vol points, never as a percent");
+
+    const breadthAt = (session, value) => (route) => route.fulfill({ status: 200, contentType: "application/json",
+      body: JSON.stringify({ status: "ok", session, dte: { share: { value, zeroNet: 1e5, weeklyNet: 1.9e6 } } }) });
+    const shareNow = async () => {
+      await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+      await page.waitForSelector("#ccVol .ui-metric", { timeout: 15000 });
+      return page.evaluate(() => {
+        const m = Array.from(document.querySelectorAll("#ccVol .ui-metric")).find((x) => x.querySelector(".ui-metric-l").textContent.trim() === "0DTE share");
+        return m ? m.querySelector(".ui-metric-v").textContent.trim() : null;
+      });
+    };
+    await page.route("**/api/flows/lk?k=breadth", breadthAt(SESSION, 0.052));
+    eq(await shareNow(), "5%",
+      "a live breadth layer as new as the regime supplies the 0DTE share, by the same rule the market page's expiry gauge uses, " +
+      "so the two pages never print two shares for one session");
+    await page.unroute("**/api/flows/lk?k=breadth");
+    await page.route("**/api/flows/lk?k=breadth", breadthAt("2026-08-21", 0.052));
+    eq(await shareNow(), "41%", "while a breadth layer older than the regime yields to it");
+    await page.unroute("**/api/flows/lk?k=breadth");
     await page.unroute("**/api/flows/regime");
 
     const liveAt = new Date().toISOString();
