@@ -67,7 +67,13 @@
 .fu-toggle::after { content: ""; position: absolute; inset: -6px 0; }
 .fu-toggle .ui-g { font-size: 14px; }
 .fu-toggle[aria-pressed="true"] { background: var(--accent-fill); color: var(--accent-soft); }
-.fu-count { margin-left: auto; color: var(--label-3); font: var(--t-footnote); font-variant-numeric: tabular-nums; }
+.fu-count { margin-left: auto; color: var(--label-3); font: var(--t-footnote); font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (max-width: 480px) {
+  .fd-filters { gap: 8px; }
+  .fd-filters .ui-seg-i { padding-inline: 10px; }
+  .fu-toggle { padding: 0 10px; }
+  .fu-toggle .ui-g { display: none; }
+}
 
 .fu-chart { min-height: 250px; }
 .fu-chart .fu-hatch { stroke: var(--label-4); stroke-width: 1; }
@@ -91,6 +97,7 @@
   background: repeating-linear-gradient(135deg, var(--label-4) 0 1px, transparent 1px 4px) !important;
   box-shadow: inset 0 0 0 1px var(--sep);
 }
+.fu-key-open { width: 8px !important; height: 8px !important; border: 1px dashed var(--label-1); border-radius: 50% !important; background: none !important; }
 
 .fu-nrow, .fu-urow, .fu-crow, .fu-srow {
   display: grid;
@@ -106,6 +113,7 @@
 a.fu-nrow:hover, a.fu-urow:hover, a.fu-crow:hover, a.fu-srow:hover { background: var(--fill-4); }
 .fu-list > :last-child { border-bottom: 0; }
 .fu-head { min-height: 24px; border-bottom: 1px solid var(--sep); color: var(--label-3); font: var(--t-caption); }
+.fu-urow.fu-head, .fu-srow.fu-head { min-height: 24px; }
 .fu-nrow { grid-template-columns: minmax(64px, 1fr) minmax(80px, 2.2fr) 60px 40px 46px 42px; }
 .fu-urow { grid-template-columns: minmax(128px, 1fr) minmax(60px, 1.5fr) 56px; }
 .fu-crow { grid-template-columns: 22px minmax(92px, 1.4fr) minmax(50px, 1.6fr) 48px 52px; }
@@ -170,7 +178,7 @@ a.fu-nrow:hover, a.fu-urow:hover, a.fu-crow:hover, a.fu-srow:hover { background:
   box-shadow: 0 0 0 2px var(--mat-opaque);
 }
 .fu-db-d.is-c { background: var(--up-mark); }
-.fu-db-d.is-p { background: var(--down-mark); }
+.fu-db-d.is-p { border-radius: 2px; background: var(--down-mark); }
 .fu-db-axis { position: relative; height: 14px; }
 .fu-db-axis > span { position: absolute; transform: translateX(-50%); color: var(--label-3); font: var(--t-caption2); }
 

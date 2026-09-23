@@ -90,6 +90,14 @@
     hostEl.replaceChildren(UI.silent(st, label, height));
     setModuleState(hostEl, st, label);
   };
+  const def = (st) => UI.STATES[st.state] || UI.STATES.unavailable;
+  const mark = (st) => h("span", { class: "ui-dash" }, DASH, h("span", { class: "ui-state", "data-state": st.state, title: def(st).word }, UI.glyph(def(st).g)));
+  const keep = (hostEl, paint) => {
+    const open = !!hostEl.querySelector('.ui-disclose[aria-expanded="true"]');
+    paint();
+    const b = open && hostEl.querySelector(".ui-disclose");
+    if (b) b.click();
+  };
 
   function vendorCeilingSaid() {
     const a = S.alerts;
@@ -285,8 +293,8 @@
       const on = passes(pt.r, "exp");
       const color = UI.cssVar(pt.cp === "P" ? "--down-mark" : pt.cp === "C" ? "--up-mark" : "--s-gray");
       s("circle", {
-        cx, cy, r, fill: color, "fill-opacity": (0.14 + 0.72 * (pt.ask === null ? 0.2 : pt.ask)).toFixed(3),
-        stroke: color, "stroke-width": 1.25,
+        cx, cy, r, fill: color, "fill-opacity": pt.ask === null ? 0 : (0.14 + 0.72 * pt.ask).toFixed(3),
+        stroke: color, "stroke-width": 1.25, "stroke-dasharray": pt.ask === null ? "2 2" : null,
         class: "fu-b" + (on ? "" : " is-off"), style: { "--i": String(Math.min(k, 60)) },
       }, g);
       return { pt, cx, cy, r };
@@ -296,18 +304,20 @@
   }
 
   function wireBubbleScrub(el, svg, placed, ring, box) {
-    const list = placed.slice().sort((p, q) => p.cx - q.cx || q.pt.p - p.pt.p);
     const readout = h("div", { class: "ui-readout", "aria-hidden": "true" });
     el.append(readout);
     const xh = s("line", { class: "xh", y1: box.top, y2: box.bottom, x1: -10, x2: -10, opacity: 0 }, svg);
-    let idx = -1;
+    const wired = !!el._fu;
+    el._fu = { list: placed.slice().sort((p, q) => p.cx - q.cx || q.pt.p - p.pt.p), svg, ring, xh, readout, idx: -1 };
+    if (wired) return;
     el.tabIndex = 0;
     el.setAttribute("role", "group");
     el.setAttribute("aria-roledescription", "chart");
     el.setAttribute("aria-label", "Flagged windows over the session. Use the arrow keys to read each window.");
     const show = (i, speak) => {
+      const { list, ring, xh, readout } = el._fu;
       if (i < 0 || i >= list.length) return;
-      idx = i;
+      el._fu.idx = i;
       const b = list[i], r = b.pt.r;
       ring.setAttribute("cx", b.cx); ring.setAttribute("cy", b.cy); ring.setAttribute("r", b.r + 3); ring.setAttribute("opacity", 1);
       xh.setAttribute("x1", b.cx); xh.setAttribute("x2", b.cx); xh.setAttribute("opacity", 0.5);
@@ -325,15 +335,15 @@
       readout.style.top = Math.max(0, b.cy - b.r - 40) + "px";
       if (speak) UI.announce(readout.textContent);
     };
-    const hide = () => { readout.classList.remove("is-on"); ring.setAttribute("opacity", 0); xh.setAttribute("opacity", 0); };
+    const hide = () => { const f = el._fu; f.readout.classList.remove("is-on"); f.ring.setAttribute("opacity", 0); f.xh.setAttribute("opacity", 0); };
     const at = (e) => {
-      const bb = svg.getBoundingClientRect();
-      const k = svg.viewBox.baseVal.width / bb.width;
+      const bb = el._fu.svg.getBoundingClientRect();
+      const k = el._fu.svg.viewBox.baseVal.width / bb.width;
       return [(e.clientX - bb.left) * k, (e.clientY - bb.top) * k];
     };
     const nearest = (x, y) => {
       let best = -1, bd = Infinity;
-      list.forEach((b, i) => {
+      el._fu.list.forEach((b, i) => {
         const d = Math.hypot(b.cx - x, (b.cy - y) * 0.6) - b.r * 0.5;
         if (d < bd) { bd = d; best = i; }
       });
@@ -348,7 +358,7 @@
     el.addEventListener("pointerleave", (e) => { if (e.pointerType !== "touch") hide(); });
     el.addEventListener("blur", hide);
     el.addEventListener("keydown", (e) => {
-      const k = e.key;
+      const k = e.key, { list, idx } = el._fu;
       if (k === "ArrowRight" || k === "ArrowLeft") {
         e.preventDefault();
         show(UI.clamp((idx < 0 ? (k === "ArrowRight" ? -1 : list.length) : idx) + (k === "ArrowRight" ? 1 : -1), 0, list.length - 1), true);
@@ -405,9 +415,10 @@
     const chartHost = h("div", { class: "fu-chart" });
     const legend = UI.legend([
       ["--up-mark", "dot", "Call"], ["--down-mark", "dot", "Put"],
-      UI.key("--label-1", "dot", "At ask"), UI.key("--label-1", "ring", "At bid"),
+      UI.key("--label-1", "dot", "At ask"), UI.key("--label-1", "ring", "Not at ask"),
+      rows.some((r) => n(r.askPrem) === null) ? h("span", { class: "ui-key" }, h("i", { class: "fu-key-open", "aria-hidden": "true" }), "Ask not stated") : null,
       h("span", { class: "ui-key" }, h("i", { class: "fu-key-hatch", "aria-hidden": "true" }), "Not recorded"),
-    ]);
+    ].filter(Boolean));
     host.timeline.replaceChildren(chartHost, legend);
     charts.timeline = C.mount(chartHost, drawTimeline);
   }
@@ -464,7 +475,7 @@
         title: g.t + " " + MID + " " + g.n + plural(g.n, " window", " windows") + " " + MID + " " + F.money(g.prem) +
           " " + MID + " calls " + F.money(g.call) + ", puts " + F.money(g.put),
       },
-      h("span", { class: "fu-tk" }, h("b", null, g.t), sideGlyph(g.st), h("small", null, String(g.n))),
+      h("span", { class: "fu-tk is-2" }, h("span", { class: "fu-tk-l" }, h("b", null, g.t), sideGlyph(g.st)), h("small", null, g.n + plural(g.n, " window", " windows"))),
       h("span", { class: "fu-split", "aria-hidden": "true" },
         cw > 0 ? h("i", { class: "is-c", style: { width: cw.toFixed(2) + "%", "--i": String(i) } }) : null,
         pw > 0 ? h("i", { class: "is-p", style: { width: pw.toFixed(2) + "%", "--i": String(i) } }) : null),
@@ -474,7 +485,7 @@
       h("span", { class: "fu-v fu-wide" }, pct0(g.open)));
       return row;
     });
-    host.names.replaceChildren(head, listOf(items, 8, "Names ranked by flagged premium"));
+    keep(host.names, () => host.names.replaceChildren(head, listOf(items, 8, "Names ranked by flagged premium")));
   }
 
   function listOf(items, visible, label) {
@@ -501,23 +512,28 @@
       silence(host.urgency, { state: "quiet", reason: "No board name is among the flagged windows, and urgency is measured only for the board's deep names." }, "Urgency", 200);
       return;
     }
+    const session = typeof S.alerts.sessionDate === "string" ? S.alerts.sessionDate : S.alerts.record && S.alerts.record.date;
     const draw = () => {
       const got = board.map((g) => ({ g, u: S.urgency.get(g.t) }));
       const vals = got.map((x) => (x.u && x.u.tape ? n(x.u.tape.urgency) : null)).filter((v) => v !== null);
       const max = vals.length ? Math.max(...vals, 1e-9) : 1;
-      const worstState = UI.worst(got.map((x) => (x.u ? x.u.st : { state: "pending", reason: "Reading this name's card." })));
+      const worstState = UI.worst(got.map((x) => (x.u ? (x.u.tape && session && typeof x.u.tape.asOf === "string" && x.u.tape.asOf < session
+        ? { state: "stale", reason: x.g.t + "'s alert tape is from " + x.u.tape.asOf + ", before this record's session of " + session + "." } : x.u.st) : { state: "pending", reason: "Reading this name's card." })));
       setModuleState(host.urgency, worstState.state === "ok" ? { state: "ok" } : { state: vals.length ? "quiet" : worstState.state, reason: worstState.reason }, "Urgency");
       const ranked = got.slice().sort((a, b) => (n(b.u && b.u.tape && b.u.tape.urgency) ?? -1) - (n(a.u && a.u.tape && a.u.tape.urgency) ?? -1));
       const items = ranked.map((x, i) => {
         const al = x.u && x.u.tape;
         const u = al ? n(al.urgency) : null;
         const st = x.u ? x.u.st : { state: "pending", reason: "Reading this name's card." };
-        return h("a", { class: "fu-urow", href: tickerHref(x.g.t) },
+        const floor = !!al && al.complete === false;
+        const old = !!al && session && typeof al.asOf === "string" && al.asOf < session;
+        return h("a", { class: "fu-urow", href: tickerHref(x.g.t),
+          title: al ? x.g.t + " " + MID + " tape of " + (al.asOf || "an unstated session") + (floor ? ", cut short before the open, so a floor" : "") + (old ? ", older than this record's " + session : "") : null },
           h("span", { class: "fu-tk is-2" }, h("span", { class: "fu-tk-l" }, h("b", null, x.g.t), sideGlyph(x.g.st)),
             h("small", null, al && n(al.n) !== null ? count(al.n) + " alerts " + MID + " " + pct0(al.sweepShare) + " sweep" : st.state === "pending" ? "Pending" : DASH)),
           h("span", { class: "fu-meter", "aria-hidden": "true" }, u === null ? null : h("i", { style: { width: ((u / max) * 100).toFixed(1) + "%", "--i": String(i) } })),
-          u === null ? UI.dash(st.state === "ok" ? { state: "unavailable", reason: "This name's card carries no alert tape." } : st, x.g.t + " urgency")
-            : h("span", { class: "fu-v fu-strong" }, F.pct(u, 2)));
+          u === null ? mark(st.state === "ok" ? { state: "unavailable" } : st)
+            : h("span", { class: "fu-v fu-strong", "data-tone": old ? "silent" : null }, (floor ? "≥" : "") + F.pct(u, 2), old ? mark({ state: "stale" }).lastChild : null));
       });
       host.urgency.replaceChildren(
         h("div", { class: "fu-urow fu-head", "aria-hidden": "true" }, h("span", null, "Name"), h("span", null, "Sweeps into new OI"), h("span", { class: "fu-v" }, "of ADV")),
@@ -600,9 +616,9 @@
       h("span", { class: "fu-v fu-strong" }, vor === null ? DASH : (vor >= 100 ? vor.toFixed(0) : vor.toFixed(1)) + "×"),
       h("span", { class: "fu-v fu-wide", "data-tone": doi === null ? null : doi > 0 ? "up" : doi < 0 ? "down" : "flat" }, doi === null ? DASH : F.num(doi, true)));
     });
-    host.feed.replaceChildren(
+    keep(host.feed, () => host.feed.replaceChildren(
       h("div", { class: "fu-crow fu-head", "aria-hidden": "true" }, h("span"), h("span", null, "Contract"), h("span", null, "Volume ÷ OI"), h("span", { class: "fu-v" }, "Ratio"), h("span", { class: "fu-v fu-wide" }, "ΔOI")),
-      listOf(items, 6, "Contracts ranked by volume over open interest"));
+      listOf(items, 6, "Contracts ranked by volume over open interest")));
   }
 
   const BASIS_TITLES = {
@@ -688,7 +704,8 @@
       return h(tag, {
         class: "fu-srow", href: tag === "a" ? tickerHref(r.t) : null, role: tag === "a" ? null : "listitem",
         title: String(r.t) + " " + MID + " both " + (st === null ? "withheld" : st.toFixed(2) + "×") + " " + MID + " calls " + (sc === null ? DASH : sc.toFixed(2) + "×") +
-          " " + MID + " puts " + (sp === null ? DASH : sp.toFixed(2) + "×") + " " + MID + " put/call " + (n(r.putCallRatio) === null ? DASH : n(r.putCallRatio).toFixed(2)),
+          " " + MID + " puts " + (sp === null ? DASH : sp.toFixed(2) + "×") + " " + MID + " put/call " + (n(r.putCallRatio) === null ? DASH : n(r.putCallRatio).toFixed(2)) +
+          " " + MID + " day change " + (chg === null ? DASH : F.pct(chg, 1, true)),
       },
       h("span", { class: "fu-tk is-2" }, h("b", null, String(r.t || DASH)), h("small", { "data-tone": chg === null ? null : chg > 0 ? "up" : chg < 0 ? "down" : null }, chg === null ? DASH : F.pct(chg, 1, true))),
       h("span", { class: "fu-db", "aria-hidden": "true" },
@@ -698,11 +715,11 @@
         sp !== null && sp > 0 ? h("i", { class: "fu-db-d is-p", style: { left: pos(sp) } }) : null),
       h("span", { class: "fu-v fu-strong" }, st === null ? DASH : (st >= 10 ? st.toFixed(0) : st.toFixed(1)) + "×"));
     });
-    host.surprise.replaceChildren(
+    keep(host.surprise, () => host.surprise.replaceChildren(
       h("div", { class: "fu-srow fu-head", "aria-hidden": "true" }, h("span", null, "Name"),
         h("span", { class: "fu-db-axis" }, ticks.map((v) => h("span", { style: { left: pos(v) } }, v + "×"))), h("span", { class: "fu-v" }, "Both")),
       listOf(items, 6, "Names ranked by option volume against their own average"),
-      UI.legend([["--up-mark", "dot", "Calls"], ["--down-mark", "dot", "Puts"]]));
+      UI.legend([["--up-mark", "dot", "Calls"], ["--down-mark", "", "Puts"]])));
   }
 
   function surpriseInfo() {
@@ -731,8 +748,8 @@
     const a = S.alerts;
     if (S.alertsKind !== "ok") {
       const st = S.alertsState;
-      host.chips.replaceChildren(UI.chips([["unusual", "Premium"], ["list", "Windows"], [null, "Calls"], [null, "At ask"], [null, "Sweeps"]].map(([icon, label]) =>
-        UI.gaugeChip({ icon, ring: icon ? undefined : null, color: "--label-3", value: DASH, label, info: { title: label, state: st.state, lead: st.reason } })), "Flagged windows"));
+      host.chips.replaceChildren(UI.chips(["Premium", "Windows", "Calls", "At ask", "Sweeps"].map((label) =>
+        UI.gaugeChip({ g: UI.iconChip(def(st).g, "--label-3"), value: DASH, label, info: { title: label, state: st.state, lead: st.reason } })), "Flagged windows"));
       return;
     }
     const rows = a.rows;

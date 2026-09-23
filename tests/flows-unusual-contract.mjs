@@ -1034,6 +1034,22 @@ const rebuild = (em) => {
     eq(restored.on, 2, "releasing it restores every window");
     deep(await page.evaluate(() => [...document.querySelectorAll("#uaNames .fu-nrow:not(.fu-head) .fu-tk b")].map((b) => b.textContent)), ["AAA", "ZZZ"],
        "and the flagged names come back in the vendor's own premium order, largest first");
+    const spoken = await page.evaluate(() => new Promise((resolve) => {
+      const chart = document.querySelector("#uaTimeline .ui-chart");
+      const live = document.getElementById("fxLive");
+      let records = 0;
+      const watch = new MutationObserver((m) => { records += m.length; });
+      watch.observe(live, { childList: true, characterData: true, subtree: true });
+      chart.focus();
+      chart.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+      setTimeout(() => { watch.disconnect(); resolve({ records, text: live.textContent }); }, 60);
+    }));
+    eq(spoken.records, 1,
+       `ONE KEY PRESS IS ONE ANNOUNCEMENT, however many times the filters redrew the timeline (${spoken.records} ` +
+       "writes to the live region). A scrub wired again on every repaint keeps every earlier drawing's handler " +
+       "alive, and each of them reads its own detached readout aloud");
+    ok(/AAA/.test(spoken.text) && /9:31 AM/.test(spoken.text),
+       `and the one it makes reads the current drawing, which a redraw started again from its first window — got: ${spoken.text}`);
     eq(thrown.length, 0, `and nothing threw across the whole interaction: ${thrown.join("; ")}`);
     await page.close();
 
@@ -1271,6 +1287,28 @@ const rebuild = (em) => {
     ok(/of at least 200 flagged windows/.test(String(atCeiling.alertsPop)),
        `THE DENOMINATOR IS A FLOOR WHEN THE READ HIT THE VENDOR'S LIMIT — got: ${atCeiling.alertsPop}`);
     ok(!/of at least/.test(String(shedNone.alertsPop)), "while a read that did not hit the ceiling keeps its exact denominator");
+
+    await put("flowalerts", { v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", rows: [
+      { t: "AAA", cp: "C", k: 100, exp: "2026-09-18", prem: 250000, askPrem: 250000, spanStart: "2026-09-01T13:31:00Z" },
+      { t: "BBB", cp: "P", k: 50, exp: "2026-09-18", prem: 180000, spanStart: "2026-09-01T14:10:00Z" },
+    ] });
+    const askless = await newPage();
+    await load(askless);
+    const marks = await askless.evaluate(() => ({
+      bubbles: [...document.querySelectorAll("#uaTimeline .fu-b")].map((b) => ({ fill: b.getAttribute("fill-opacity"), dash: b.getAttribute("stroke-dasharray") })),
+      keys: [...document.querySelectorAll("#uaTimeline .ui-legend .ui-key")].map((k) => k.textContent),
+    }));
+    await askless.close();
+    const solid = marks.bubbles.find((b) => !b.dash), open = marks.bubbles.find((b) => b.dash);
+    ok(solid && Number(solid.fill) > 0.8, `a window the vendor put wholly at the ask is drawn solid (${JSON.stringify(marks.bubbles)})`);
+    ok(open && Number(open.fill) === 0,
+       "AND A WINDOW WITH NO ASK-SIDE PREMIUM ON IT IS NOT DRAWN AS A LOW ASK SHARE. The fill used to stand a null in " +
+       "for a fifth of the premium, which is the ring the legend reads as dollars that were not at the ask — a reading " +
+       "the vendor never sent — so it is an open dashed outline instead");
+    ok(marks.keys.includes("Ask not stated"), `with a key of its own, only when such a window is drawn (${marks.keys.join(", ")})`);
+    ok(!marks.keys.some((k) => /bid/i.test(k)),
+       "and no key names the bid: a thin fill means the premium was not attributed to the ask, which is not a claim " +
+       "that it was attributed to the bid");
   } finally {
     await browser.close();
     await server.stop();
