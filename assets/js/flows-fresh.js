@@ -25,6 +25,7 @@
   function fromHeaders(src) {
     var state = header(src, "X-Fresh-State");
     if (!state) return null;
+    var serverNow = header(src, "X-Server-Now");
     return {
       state: STATES.indexOf(state) >= 0 ? state : "stale",
       reason: header(src, "X-Fresh-Reason"),
@@ -37,7 +38,7 @@
       staleAt: ms(header(src, "X-Fresh-Stale-At")),
       phase: header(src, "X-Fresh-Phase"),
       phaseEndsAt: ms(header(src, "X-Fresh-Phase-Ends")),
-      serverNow: ms(Number(header(src, "X-Server-Now"))),
+      serverNow: serverNow === null ? null : ms(Number(serverNow)),
       throttled: header(src, "X-Fresh-Throttled") === "1",
       overlay: header(src, "X-Live-Overlay"),
     };

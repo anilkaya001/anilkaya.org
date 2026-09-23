@@ -760,6 +760,12 @@ const T = (iso) => Date.parse(iso);
   deep(JSON.parse(JSON.stringify(f.forFreshness(at - skewed))), { readAt: new Date(at - 60000).toISOString(), live: true,
     sessionDate: "2026-09-23", source: "worker", state: "live" },
   "and forFreshness() is the object FlowsUI.freshness() takes");
+  const bare = new Headers(headers);
+  bare.delete("X-Server-Now");
+  const noClock = UI.freshFrom(bare);
+  ok(noClock.skewMs === 0 && noClock.stateAt(at + 30 * 60000) === "stale",
+    "A RESPONSE WITHOUT X-Server-Now leaves the skew at zero and the page's own clock in charge — Number(null) is 0, " +
+    "and a server clock of the epoch would pin every glyph at live for good");
   eq(UI.freshAggregate(["live", "fresh"], "rth"), "live", "page aggregate: live if any module is live");
   eq(UI.freshAggregate(["live", "stale"], "rth"), "stale", "stale if any is stale");
   eq(UI.freshAggregate(["fresh", "closed"], "post"), "closed", "closed outside the session when nothing is live");
