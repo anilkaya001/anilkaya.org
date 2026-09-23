@@ -606,7 +606,8 @@ export function buildTermPanel(body, { sessionDate = null, earnings = null } = {
       : eventVariance({ vol: rows[eventIndex].iv, T: rows[eventIndex].T },
         { vol: rows[eventIndex + 1].iv, T: rows[eventIndex + 1].T });
   if (move.eventSd === null) silent.eventMove = move.code || "input-absent";
-  const eventKink = out.find((r) => r.kink && r.event) || null;
+  const eventRead = out.find((r) => r.event && r.pct !== null) || null;
+  const eventKink = eventRead && eventRead.kink ? eventRead : null;
   return {
     status: "ok",
     asOf,

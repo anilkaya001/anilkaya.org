@@ -271,6 +271,21 @@ function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
   near(ev.premium, 0.95 - (0.45 + 0.42) / 2, 1e-9, "premium = pct - median of the neighbouring pcts");
   eq(ev.kink, true, "and above 0.3 it is a kink");
   eq(term.eventKink.expiry, "2026-10-23", "the event kink is the kink that contains earnings");
+  const kinkAt = (pcts) => buildTermPanel({ data: pcts.map(([e, p, n]) => base(e, 0.3, p, n)) },
+    { sessionDate: S, earnings: { date: "2026-10-21", time: "postmarket" } });
+  const edge = kinkAt([["2026-10-16", 0.4], ["2026-10-23", 0.75], ["2026-11-20", 0.4]]);
+  eq(edge.expiries[1].kink, true, "a premium of 0.35 clears the 0.3 kink line");
+  eq(kinkAt([["2026-10-16", 0.4], ["2026-10-23", 0.65], ["2026-11-20", 0.4]]).expiries[1].kink, false,
+    "and one of 0.25 does not");
+  const late = kinkAt([["2026-10-16", 0.4], ["2026-10-23", 0.45], ["2026-11-20", 0.4], ["2026-12-18", 0.95],
+    ["2027-01-15", 0.4]]);
+  eq(late.expiries[3].kink && late.expiries[3].event, true, "a far expiry can kink, and it too spans the event");
+  eq(late.eventKink, null,
+    "but the event premium is read on the first trusted expiry that spans the event, so a far kink is not an event kink");
+  const weekly = kinkAt([["2026-10-16", 0.4], ["2026-10-23", 0.97, 12], ["2026-11-20", 0.9], ["2026-12-18", 0.4]]);
+  eq(weekly.eventExpiry, "2026-10-23", "a fresh weekly is still the first expiry after the event");
+  eq(weekly.eventKink && weekly.eventKink.expiry, "2026-11-20",
+    "and when its percentile is under the sample floor the premium is read on the next expiry that spans the event");
   const T1 = dayDiff(S, "2026-10-23") / 365, T2 = dayDiff(S, "2026-11-20") / 365;
   const e = eventVariance({ vol: 0.52, T: T1 }, { vol: 0.42, T: T2 });
   ok(e.eventSd > 0, "the fixture carries a real event premium");
