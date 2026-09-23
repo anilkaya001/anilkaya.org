@@ -86,6 +86,9 @@
     hostEl.replaceChildren(UI.silent(st, label, height));
     setModuleState(hostEl, st, label);
   };
+  const def = (st) => UI.STATES[st.state] || UI.STATES.unavailable;
+  const mark = (st) => h("span", { class: "ui-dash" }, DASH, h("span", { class: "ui-state", "data-state": st.state, title: def(st).word }, UI.glyph(def(st).g)));
+  const muted = (st) => UI.iconChip(def(st).g, "--label-3");
   const blockState = (b, what) => {
     if (b === undefined || b === null) return { state: "pending", reason: "The " + what + " is not on this payload yet. It is published by the nightly run that ships with this page; until then it is pending, not empty." };
     if (typeof b !== "object") return { state: "withheld", reason: "The " + what + " on this payload could not be read." };
@@ -149,7 +152,8 @@
     return out;
   }
 
-  const tally = (g, word, v) => h("span", { class: "ui-key" }, g, word + " ", h("b", null, String(v)));
+  const key = (...kids) => h("span", { class: "ui-key" }, ...kids);
+  const tally = (g, word, v) => key(g, word + " ", h("b", null, String(v)));
 
   function paintWeek(payload) {
     const rows = Array.isArray(payload.rows) ? payload.rows : [];
@@ -164,11 +168,13 @@
     const catRows = payload.catalysts && Array.isArray(payload.catalysts.rows) ? payload.catalysts.rows : [];
     const divRows = catRows.filter((c) => /div/i.test(String(c && c.type)));
     const divSt = divRows.length ? { state: "ok" } : { state: "unavailable", reason: "Ex-dividend dates need the vendor's dividends route, which this plan does not include, so none are read. An empty row here is not a week without dividends." };
-    const maxEm = Math.max(0.01, ...rows.map((r) => { const i = impliedOf(r, cal.get(r.t)); return i ? i.v : 0; }));
+    const drawn = rows.filter((r) => r && list.includes(r.d));
+    const earnSt = drawn.length ? { state: "ok" } : { state: "quiet", reason: "No name reports in the next five sessions." };
+    const maxEm = Math.max(0.01, ...drawn.map((r) => { const i = impliedOf(r, cal.get(r.t)); return i ? i.v : 0; }));
     const grid = h("div", { class: "fe-week", style: { "--days": String(list.length) } });
     const laneHead = (name, st) => h("div", { class: "fe-lane" }, h("span", null, name), st && st.state !== "ok" ? UI.stateButton(st, name) : null);
-    grid.append(h("div", { class: "fe-col fe-labels", ...HIDE },
-      h("div", { class: "fe-dh" }), laneHead("Macro", macroSt), laneHead("Earnings", rows.length ? { state: "ok" } : { state: "quiet", reason: "No name reports inside the window." }), laneHead("FDA", fdaSt), laneHead("Ex-div", divSt)));
+    grid.append(h("div", { class: "fe-col fe-labels" },
+      h("div", { class: "fe-dh" }), laneHead("Macro", macroSt), laneHead("Earnings", earnSt), laneHead("FDA", fdaSt), laneHead("Ex-div", divSt)));
     const today = payload.gateOrigin;
     list.forEach((d, k) => {
       const col = h("section", { class: "fe-col", "aria-label": weekday(d) + " " + F.day(d) });
@@ -197,17 +203,20 @@
       grid.append(col);
     });
     const counts = { long: 0, short: 0, gated: 0, open: 0 };
-    for (const r of rows) counts[stageOf(r.st).lane]++;
+    const whens = new Set();
+    for (const r of drawn) { counts[stageOf(r.st).lane]++; const c = cal.get(r.t); if (c) whens.add(c.when); }
     const legend = UI.legend([
-      tally(UI.glyph("up", "fe-st is-long"), "Long", counts.long),
-      tally(UI.glyph("down", "fe-st is-short"), "Short", counts.short),
-      tally(UI.glyph("shield", "fe-st is-gated"), "Gated", counts.gated),
-      tally(h("i", { class: "is-dot", style: { "--c": UI.cssVar("--label-3") } }), "Open", counts.open),
-      h("span", { class: "ui-key" }, h("i", { class: "fe-key-em" }), "Implied move"),
-    ]);
+      counts.long ? tally(UI.glyph("up", "fe-st is-long"), "Long", counts.long) : null,
+      counts.short ? tally(UI.glyph("down", "fe-st is-short"), "Short", counts.short) : null,
+      counts.gated ? tally(UI.glyph("shield", "fe-st is-gated"), "Gated", counts.gated) : null,
+      counts.open ? tally(null, "Open", counts.open) : null,
+      drawn.length ? key(h("i", { class: "fe-key-em" }), "Implied move") : null,
+      whens.has("premarket") ? key(h("i", { class: "fe-when is-am" }), "Before the open") : null,
+      whens.has("postmarket") ? key(UI.glyph("closed", "fe-when"), "After the close") : null,
+    ].filter(Boolean));
     legend.classList.add("fe-legend");
     host.week.replaceChildren(grid, legend);
-    setModuleState(host.week, UI.partial([{ name: "Macro", st: macroSt }, { name: "FDA", st: fdaSt }, { name: "Ex-dividends", st: divSt }]), "Week ahead");
+    setModuleState(host.week, UI.partial([{ name: "Macro", st: macroSt }, { name: "Earnings", st: earnSt }, { name: "FDA", st: fdaSt }, { name: "Ex-dividends", st: divSt }]), "Week ahead");
   }
 
   const laneRank = (r) => ({ long: 0, short: 0, open: 1, gated: 2 })[stageOf(r.st).lane];
@@ -232,7 +241,7 @@
     const tag = TAGS[m.tag] || null;
     const name = tag ? tag[0] : String(m.event || DASH).replace(/\s*\((MoM|YoY|QoQ)\)/, "");
     return h("button", {
-      class: "fe-pill fe-macro", type: "button", "data-tag": m.tag || null,
+      class: "fe-pill fe-macro" + (tag ? " is-tag" : ""), type: "button", "data-tag": m.tag || null,
       "aria-haspopup": "dialog", "aria-controls": "fxPop",
       "data-info": UI.info(() => ({
         title: String(m.event || "Economic print"), asOf: m.day || null,
@@ -298,7 +307,7 @@
         }
       })());
     }
-    Promise.all(lanes).then(() => { paintEarnings(payload, false); paintWeek(payload); });
+    Promise.all(lanes).then(() => { paintEarnings(payload, false); host.week.classList.add("is-still"); paintWeek(payload); });
   }
 
   function paintEarnings(payload, animate) {
@@ -333,15 +342,18 @@
       h("span", { class: "fe-pair", ...HIDE },
         h("i", { class: "is-imp", style: { width: x.imp ? w(x.imp.v) : "0%", "--i": String(i) } }),
         x.med === null ? h("i", { class: "is-none" }) : h("i", { class: "is-real", style: { width: w(x.med), "--i": String(i) } })),
-      h("span", { class: "fu-v fu-strong" }, x.imp ? move(x.imp.v) : UI.dash({ state: "unavailable", reason: "No implied move arrived for this name." }, x.r.t + " implied move")),
-      x.med === null ? h("span", V, UI.dash(reSt, x.r.t + " median move")) : h("span", V, pct(x.med)),
+      h("span", { class: "fu-v fu-strong" }, x.imp ? move(x.imp.v) : mark({ state: "unavailable" })),
+      x.med === null ? h("span", V, mark(reSt)) : h("span", V, move(x.med)),
       h("span", { class: "fu-v fu-wide" }, x.hit === null ? DASH : Math.round(x.hit * 100) + "%"));
     });
     const box = withList(UI.list(items, { visible: 8, label: "Names reporting inside the window, nearest first" }));
+    const open = !!host.earn.querySelector('.ui-disclose[aria-expanded="true"]');
+    host.earn.classList.toggle("is-still", animate === false);
     host.earn.replaceChildren(
       h("div", { class: "fe-erow fu-head", ...HIDE }, h("span", null, "Day"), h("span", null, "Name"), h("span", null, "Implied vs typical"), h("span", V, "Implied"), h("span", V, "Typical"), h("span", { class: "fu-v fu-wide" }, "Hit")),
       box,
       UI.legend([["--accent", "", "Implied move"], ["--s-gray", "", "Median past move"]]));
+    if (open) box.querySelector(".ui-disclose").click();
     setModuleState(host.earn, hist ? { state: "ok" } : { state: "quiet", reason: "Earnings: the past-report history is not on this payload yet, so the typical move is pending." }, "Earnings");
     if (animate !== false) queueCx(payload);
   }
@@ -431,7 +443,7 @@
       h("div", { class: "fe-frow fu-head", ...HIDE }, h("span", null, "Name"),
         h("span", { class: "fe-axis" }, months.map((d) => h("span", { style: { left: (at(d) * 100).toFixed(2) + "%" } }, F.day(d).slice(0, 3)))), h("span", V, "Target")),
       withList(UI.list(items, { visible: 6, label: "FDA target dates" })),
-      UI.legend([h("span", { class: "ui-key" }, h("i", { class: "is-dia", style: { "--c": UI.cssVar("--lvl-pain") } }), "Dated"), h("span", { class: "ui-key" }, h("i", { class: "fe-key-span" }), "Window")]));
+      UI.legend([key(h("i", { class: "is-dia", style: { "--c": UI.cssVar("--lvl-pain") } }), "Dated"), key(h("i", { class: "fe-key-span" }), "Window")]));
   }
 
   function windowLabel(tgt) {
@@ -503,17 +515,18 @@
     const fdaN = fdaSt.state === "ok" ? n(payload.fda.inWindow) ?? (payload.fda.rows || []).length : null;
     const r0 = payload.earningsCalendar && payload.earningsCalendar.reaction;
     const ratio = r0 && r0.status === "ok" ? n(r0.medianRatio) : null;
+    const reactSt = blockState(r0, "earnings reaction");
     host.chips.replaceChildren(UI.chips([
       UI.gaugeChip({ icon: "cal", color: "--accent-ink", value: inWindow === null ? String(rows.length) : String(inWindow), label: "Reporting",
         info: { title: "Reporting", lead: "Names reporting inside the window.", facts: [["Window", n(payload.windowDays) === null ? null : days(n(payload.windowDays))], ["Screened", n(payload.universe) === null ? null : count(payload.universe)], ["Undated", n(payload.undated) === null ? null : count(payload.undated)]] } }),
       UI.gaugeChip({ icon: "shield", color: "--label-2", value: gated === null ? DASH : String(gated), label: "Gated",
         info: { title: "Gated", lead: stageOf("gated").what } }),
-      UI.gaugeChip({ icon: "wave", color: "--s-purple", value: macroN === null ? DASH : String(macroN), label: "Macro",
+      UI.gaugeChip({ g: macroN === null ? muted(macroSt) : undefined, icon: "wave", color: "--s-purple", value: macroN === null ? DASH : String(macroN), label: "Macro",
         info: { title: "Macro prints", state: macroSt.state === "ok" ? null : macroSt.state, lead: macroSt.state === "ok" ? "Economic prints in the next five sessions." : macroSt.reason } }),
-      UI.gaugeChip({ icon: "flask", color: "--lvl-pain", value: fdaN === null ? DASH : String(fdaN), label: "FDA",
+      UI.gaugeChip({ g: fdaN === null ? muted(fdaSt) : undefined, icon: "flask", color: "--lvl-pain", value: fdaN === null ? DASH : String(fdaN), label: "FDA",
         info: { title: "FDA dates", state: fdaSt.state === "ok" ? null : fdaSt.state, lead: fdaSt.state === "ok" ? "Optionable names with an FDA target inside the horizon." : fdaSt.reason } }),
-      UI.gaugeChip({ ring: ratio === null ? null : Math.min(1, ratio / 2), color: "--g-long", value: ratio === null ? DASH : ratio.toFixed(2) + "×", label: "Reaction",
-        info: { title: "Reaction", lead: "Median realized move over implied move for the last session's reporters. Under 1× the options over-priced the reports." } }),
+      UI.gaugeChip({ g: ratio === null ? muted(reactSt) : undefined, ring: ratio === null ? null : Math.min(1, ratio / 2), color: "--g-long", value: ratio === null ? DASH : ratio.toFixed(2) + "×", label: "Reaction",
+        info: { title: "Reaction", state: ratio === null ? reactSt.state : null, lead: ratio === null ? reactSt.reason : "Median realized move over implied move for the last session's reporters. Under 1× the options over-priced the reports." } }),
     ], "Calendar"));
   }
 
@@ -547,7 +560,7 @@
   function paintMeta(payload) {
     const bits = [];
     if (ISO.test(String(payload.sessionDate || ""))) bits.push(h("span", null, F.day(payload.sessionDate)));
-    if (n(payload.windowDays) !== null) bits.push(h("span", null, n(payload.windowDays) + " days"));
+    if (n(payload.windowDays) !== null) bits.push(h("span", null, n(payload.windowDays) + "-day window"));
     const stale = h("button", { class: "fd-pill", type: "button", id: "evStale", hidden: S.staleText ? null : true,
       "aria-haspopup": "dialog", "aria-controls": "fxPop",
       "data-info": UI.info(() => ({ title: "Stale calendar", state: "stale", lead: S.staleText })) }, UI.glyph("clock"), S.staleDays === null ? "Behind" : S.staleDays + "d old");
@@ -586,8 +599,8 @@
     statusEl.dataset.empty = kind;
     const st = { state: kind === "unreadable" ? "withheld" : kind === "pending" ? "pending" : "unavailable", reason: what };
     for (const [el, label, hh] of [[host.week, "Week ahead", 220], [host.earn, "Earnings", 240], [host.macro, "Macro", 200], [host.fda, "FDA", 200], [host.react, "Reaction", 200]]) silence(el, st, label, hh);
-    host.chips.replaceChildren(UI.chips([["cal", "Reporting"], ["shield", "Gated"], ["wave", "Macro"], ["flask", "FDA"], [null, "Reaction"]].map(([icon, label]) =>
-      UI.gaugeChip({ icon, ring: icon ? undefined : null, color: "--label-3", value: DASH, label, info: { title: label, state: st.state, lead: what } })), "Calendar"));
+    host.chips.replaceChildren(UI.chips(["Reporting", "Gated", "Macro", "FDA", "Reaction"].map((label) =>
+      UI.gaugeChip({ g: muted(st), value: DASH, label, info: { title: label, state: st.state, lead: what } })), "Calendar"));
   }
 
   function stale(payload, updatedAt) {

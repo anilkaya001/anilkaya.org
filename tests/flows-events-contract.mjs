@@ -935,6 +935,8 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
           };
         }
         const legend = [...document.querySelectorAll("#evWeek .fe-legend .ui-key b")].map((b) => Number(b.textContent));
+        const weekChips = document.querySelectorAll("#evWeek .fe-chip").length;
+        const weekBars = [...document.querySelectorAll("#evWeek .fe-chip-bar")].map((b) => b.style.width);
         const earnCard = document.getElementById("evEarnCard");
         const silentEarn = document.querySelector("#evEarn .ui-silent");
         const week = document.querySelector("#evWeek .fe-week");
@@ -944,7 +946,7 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
           earnState: earnCard.dataset.state || null,
           silentGlyph: silentEarn ? silentEarn.querySelector("use").getAttribute("href") : null,
           modules: [...document.querySelectorAll(".fd-mod")].map((m) => m.dataset.state || null),
-          rows, legend,
+          rows, legend, weekChips, weekBars,
           weekOver: week ? week.scrollWidth - week.clientWidth : null,
           pageOver: document.documentElement.scrollWidth - window.innerWidth,
           stale: stale ? { hidden: stale.hidden } : null,
@@ -976,10 +978,17 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
        "one fact this glyph exists to carry");
     eq(wide.rows.GATE.glyph, "#g-shield", "a gated name wears the shield, a third shape");
 
-    eq(wide.legend.length, 4, "the week's legend counts four stages");
-    eq(wide.legend.reduce((a, b) => a + b, 0), CAL.rows.length,
-       `and its counts sum to the ${CAL.rows.length} names drawn: every name sits in exactly one ` +
-       "stage, and a bare count with no population is not what the legend prints");
+    ok(wide.weekChips >= 1 && wide.weekChips < CAL.rows.length,
+       `the week draws ${wide.weekChips} of the ${CAL.rows.length} names in the window, so a legend that counted ` +
+       "the window instead of the week could not pass the next assertion");
+    eq(wide.legend.reduce((a, b) => a + b, 0), wide.weekChips,
+       `and the week's legend counts sum to the ${wide.weekChips} names the week draws: every drawn name sits in ` +
+       "exactly one stage, and a count whose population is not the grid above it is the bare count the lane " +
+       "labels used to be refused for");
+    ok(wide.legend.every((v) => v > 0), "and no key is printed for a stage the week does not draw");
+    ok(wide.weekBars.includes("100%"),
+       `the implied-move bars are scaled to the largest move the week draws (${wide.weekBars.join(", ")}), ` +
+       "not to a larger one reported weeks out and drawn nowhere in this module");
 
     ok(/0s: no sessions left to price/.test(wide.rows.ZERO.title),
        "a name with no sessions left states 0s — a measured horizon of zero SESSIONS, with its " +

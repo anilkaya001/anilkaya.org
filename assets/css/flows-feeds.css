@@ -16,7 +16,7 @@
   font-variant-numeric: tabular-nums;
 }
 .fd-meta:empty { visibility: hidden; }
-.fd-pill {
+.flows-body .fd-pill {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -127,6 +127,10 @@ a.fu-nrow:hover, a.fu-urow:hover, a.fu-crow:hover, a.fu-srow:hover { background:
 .fu-side.is-down { color: var(--down); }
 .fu-both { display: inline-grid; align-self: center; color: var(--accent-ink); font-size: 12px; }
 .fu-both .ui-g { font-size: 12px; }
+.ui-dash span.ui-state { cursor: inherit; }
+.ui-dash span.ui-state::after { content: none; }
+.fu-v > .ui-state { width: 16px; height: 16px; margin-left: 3px; vertical-align: -3px; color: var(--warn); }
+.fu-v > .ui-state .ui-g { font-size: 13px; }
 
 .fu-split { display: flex; align-items: center; gap: 2px; height: 8px; min-width: 0; }
 .fu-split > i {
@@ -203,7 +207,7 @@ a.fu-nrow:hover, a.fu-urow:hover, a.fu-crow:hover, a.fu-srow:hover { background:
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: baseline;
+  align-items: center;
   gap: 3px 6px;
   padding: 5px 6px 6px;
   margin: 0 -6px;
@@ -234,7 +238,7 @@ a.fu-nrow:hover, a.fu-urow:hover, a.fu-crow:hover, a.fu-srow:hover { background:
 .fe-st.is-gated { font-size: 12px; color: var(--label-3); }
 .fe-when { flex: none; font-size: 11px; color: var(--label-3); }
 .fe-when.is-am { width: 7px; height: 7px; border-radius: 50%; background: var(--lvl-flip); box-shadow: 0 0 0 2px color-mix(in srgb, var(--lvl-flip) 25%, transparent); }
-.fe-more {
+.flows-body .fe-more {
   align-self: flex-start;
   min-height: 28px;
   margin: 2px -6px 0;
@@ -248,7 +252,7 @@ a.fu-nrow:hover, a.fu-urow:hover, a.fu-crow:hover, a.fu-srow:hover { background:
   cursor: pointer;
 }
 .fe-more:hover { background: var(--fill-3); }
-.fe-pill {
+.flows-body .fe-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -267,10 +271,14 @@ a.fu-nrow:hover, a.fu-urow:hover, a.fu-crow:hover, a.fu-srow:hover { background:
   cursor: pointer;
 }
 .fe-pill:hover { background: var(--fill-3); }
+.flows-body .fe-macro { align-items: baseline; padding-block: 5px; }
+.fe-pill.fe-macro b { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; }
+.fe-macro:not(.is-tag) b { color: var(--label-2); font-weight: 500; }
 .fe-pill b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .fe-pill > span { color: var(--label-2); white-space: nowrap; }
 .fe-pill .ui-g { flex: none; font-size: 13px; color: var(--lvl-pain); }
-.fe-time { color: var(--label-2); white-space: nowrap; }
+.fe-time { flex: none; color: var(--label-2); white-space: nowrap; }
+.fe-week .fe-time { min-width: 4.1em; }
 .fe-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--c, var(--label-3)); }
 .fe-legend { margin-top: var(--sp-2); }
 .fe-legend .ui-key .ui-g { font-size: 10px; }
@@ -301,6 +309,7 @@ a.fe-erow:hover, a.fe-frow:hover { background: var(--fill-4); }
 .fe-pair > i.is-imp { background: var(--accent); }
 .fe-pair > i.is-real { background: var(--s-gray); }
 .fe-pair > i.is-none { width: 100%; background: repeating-linear-gradient(90deg, var(--label-4) 0 2px, transparent 2px 6px); opacity: 0.7; animation: none; }
+.is-still .fe-pair > i, .is-still .fe-chip-bar { animation: none; }
 .fe-mrow { grid-template-columns: 44px minmax(0, 1fr) 62px 54px; }
 .fe-mname { display: flex; align-items: center; gap: 7px; min-width: 0; white-space: nowrap; }
 .fe-mname b { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
@@ -322,7 +331,9 @@ a.fe-erow:hover, a.fe-frow:hover { background: var(--fill-4); }
 
 @container mod (max-width: 700px) {
   .fe-week { display: flex; flex-direction: column; gap: var(--sp-3); }
-  .fe-labels { display: none; }
+  .fe-labels { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+  .fe-labels > .fe-dh, .fe-labels > .fe-lane:not(:has(.ui-state)) { display: none; }
+  .fe-labels > .fe-lane { align-items: center; padding: 0; border-top: 0; }
   .fe-col:not(.fe-labels) { display: block; padding: 0 var(--sp-4) var(--sp-3); }
   .fe-dh { padding: var(--sp-4) 0 var(--sp-2); }
   .fe-cell { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding: var(--sp-2) 0; border-top: 0; }
