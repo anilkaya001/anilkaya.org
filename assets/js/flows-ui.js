@@ -740,7 +740,13 @@
       }
     }
     requestAnimationFrame(() => { place(); requestAnimationFrame(() => wrap.classList.remove("is-static")); });
-    if (window.ResizeObserver) new ResizeObserver(place).observe(wrap);
+    if (window.ResizeObserver) {
+      new ResizeObserver(() => {
+        wrap.classList.add("is-static");
+        place();
+        requestAnimationFrame(() => wrap.classList.remove("is-static"));
+      }).observe(wrap);
+    }
     wrap.pick = (i) => pick(i, false);
     wrap.index = () => current;
     return wrap;

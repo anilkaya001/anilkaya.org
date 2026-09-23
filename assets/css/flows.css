@@ -8297,7 +8297,7 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
   border-radius: 7px;
   background: rgba(99, 99, 102, 0.72);
   box-shadow: 0 3px 8px rgba(0, 0, 0, 0.22), 0 1px 1px rgba(0, 0, 0, 0.16), inset 0 0.5px 0 rgba(255, 255, 255, 0.12);
-  transition: transform var(--dur-snappy) var(--spring-snappy), width var(--dur-snappy) var(--spring-snappy);
+  transition: transform var(--dur-snappy) var(--spring-snappy);
 }
 .ui-seg.is-static .ui-seg-knob { transition: none; }
 @media (pointer: coarse) { .ui-seg-i { min-height: 32px; } }
