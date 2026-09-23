@@ -50,7 +50,7 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  flex: 1 1 200px;
+  flex: 1 1 140px;
   max-width: 320px;
   min-width: 0;
   height: 36px;
@@ -130,7 +130,7 @@
 .bd-body > .bd-row:hover + .bd-row::before { opacity: 0; }
 .bd-body > .bd-row:has(.bd-open:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
 .bd-row.is-flip { transition: transform var(--dur-smooth) var(--spring-smooth); }
-.bd-row.is-in { animation: ui-rise var(--dur-smooth) var(--spring-smooth) both; animation-delay: calc(var(--i, 0) * 16ms); }
+.bd-row.is-in { animation: ui-rise var(--dur-smooth) var(--spring-smooth) backwards; animation-delay: calc(var(--i, 0) * 16ms); }
 
 .bd-head {
   position: sticky;
@@ -238,8 +238,8 @@
 }
 .bd-flag .ui-g { font-size: 8px; }
 .bd-flag[data-kind="new"] { --tone: var(--accent-soft); background: var(--accent-fill); }
-.bd-flag[data-kind="up"] { --tone: var(--up); }
-.bd-flag[data-kind="down"] { --tone: var(--down); }
+.bd-flag[data-kind="up"] { --tone: var(--label-1); }
+.bd-flag[data-kind="down"] { --tone: var(--label-3); }
 .bd-flag[data-kind="earn"] { --tone: var(--warn); }
 .bd-flag[data-kind="earn"] .ui-g, .bd-flag[data-kind="hold"] .ui-g, .bd-flag[data-kind="faded"] .ui-g { font-size: 10px; }
 .bd-flag[data-kind="hold"] { --tone: var(--label-2); }
@@ -307,7 +307,7 @@
 .bd-strip rect.last { opacity: 1; }
 .bd-strip rect.up { fill: var(--up-mark); transform-origin: bottom; }
 .bd-strip rect.down { fill: var(--down-mark); transform-origin: top; }
-.bd-row.is-in .bd-strip rect { animation: ui-grow var(--dur-smooth) var(--spring-smooth) both; animation-delay: calc(var(--i, 0) * 40ms + 120ms); }
+.bd-row.is-in .bd-strip rect { animation: ui-grow var(--dur-smooth) var(--spring-smooth) backwards; animation-delay: calc(var(--i, 0) * 40ms + 120ms); }
 
 .bd-band { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .bd-band-1 { display: flex; align-items: center; gap: 8px; }

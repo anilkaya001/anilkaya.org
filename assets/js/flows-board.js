@@ -578,7 +578,7 @@
   function buildTools() {
     if (sortSel) return;
     searchEl = h("input", {
-      class: "bd-q-in", id: "fbQ", type: "search", placeholder: WATCH ? "Ticker" : "Ticker or sector",
+      class: "bd-q-in", id: "fbQ", type: "search", placeholder: "Search",
       autocomplete: "off", spellcheck: "false", autocapitalize: "characters", "aria-label": "Filter by ticker",
     });
     searchEl.addEventListener("input", () => {
@@ -698,6 +698,7 @@
       r.style.removeProperty("transform");
       r.classList.remove("is-flip");
       if (first) { r.classList.add("is-in"); r.style.setProperty("--i", String(Math.min(i, 14))); }
+      else r.classList.remove("is-in");
       return r;
     }));
     st.painted = true;
@@ -878,7 +879,7 @@
     "Score: the composite ranked across every scored name, +100 strongest bullish and −100 strongest bearish. Conv: how much of the evidence agrees; the count behind it is on the name's card.",
     "5d: the score over the last five scored sessions, oldest first; a dot is a session the name was not scored.",
     "Premium: call premium bought minus put premium bought across the session. Move: the option market's priced move over the board's horizon.",
-    "γ: blue where dealers are long gamma and hedging damps moves, orange where they are short and hedging amplifies them.",
+    "Dealer γ: blue where dealers are long gamma and hedging damps moves, orange where they are short and hedging amplifies them.",
     "IVR: where 30-day implied volatility sits within its own past year, 0 at the low and 100 at the high. VRP: implied minus realized volatility as a percentile across every eligible name. SI: short interest as a share of float, as a percentile across every eligible name.",
     "Flags: New to this side, places climbed or fallen since the previous board, held on incumbency, and earnings within " + EARNINGS_SOON_DAYS + " days.",
   ];
@@ -1321,16 +1322,23 @@
     }
   }
 
-  function refresh() {
-    rowCache.clear();
+  function refresh(keys) {
+    const cols = shownCols().filter((c) => keys.includes(c.key));
+    st.rows.forEach((row, index) => {
+      const node = rowCache.get(row);
+      if (!node) return;
+      for (const c of cols) {
+        const cell = node.querySelector(':scope > [data-col="' + c.key + '"]');
+        if (cell) cell.replaceChildren(...[].concat(c.cell(row, index)));
+      }
+    });
     paintHead();
-    paintRows(false);
     if (st.view === "map") redrawMap();
   }
 
   function loadExtras() {
     if (!WATCH) {
-      getJson("/api/flows/scoretrack").then(takeTrack, () => takeTrack(null)).then(() => { if (st.rows.length) refresh(); });
+      getJson("/api/flows/scoretrack").then(takeTrack, () => takeTrack(null)).then(() => { if (st.rows.length) refresh(["strip"]); });
     }
     if (!WATCH) {
       getJson("/api/flows/universe").then((u) => {
@@ -1345,7 +1353,7 @@
         }
       }, () => {
         st.uniState = { state: "pending", reason: "The cross-section of every eligible name publishes with the next pipeline run." };
-      }).then(() => { if (st.rows.length) { buildSortOptions(); refresh(); } });
+      }).then(() => { if (st.rows.length) { buildSortOptions(); refresh(["vrpP", "siP"]); } });
     }
     getJson("/api/flows/lk?k=strips").then(takeLive, () => null);
   }
@@ -1380,7 +1388,7 @@
     if (!hit) return;
     table.dataset.live = "1";
     if (live.fresh && typeof live.fresh.readAt === "string") UI.freshness({ readAt: live.fresh.readAt, live: true, source: "strips" });
-    refresh();
+    refresh(["t", "px"]);
   }
 
   function render() {
