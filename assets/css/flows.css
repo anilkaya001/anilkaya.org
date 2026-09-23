@@ -7253,10 +7253,18 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
   background: var(--flows-ground);
 }
 
-.flows-body .topbar {
-  background: linear-gradient(to bottom, var(--bar-glass) 55%, rgb(8 11 20 / 0));
+.flows-body .topbar { background: none; }
+.flows-body .topbar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--bar-glass);
   -webkit-backdrop-filter: var(--bar-blur);
   backdrop-filter: var(--bar-blur);
+  -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent);
+  mask-image: linear-gradient(to bottom, #000 55%, transparent);
 }
 
 .ft-bar.is-stuck, .cc-jump.is-stuck {
@@ -7280,7 +7288,6 @@ a.ft-rel-c:hover, a.ft-rel-c:focus-visible { color: var(--ink); border-color: va
     --bar-glass:        var(--bg);
     --bar-blur:         none;
   }
-  .flows-body .topbar { background: linear-gradient(to bottom, var(--bg) 58%, transparent); }
 }
 
 @media (min-width: 60rem) {
