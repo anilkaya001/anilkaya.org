@@ -779,9 +779,10 @@ export function gexPath(body, { sessionDate = null } = {}) {
   pts.sort((a, b) => a.t - b.t);
   const gaps = {};
   const note = (field, code) => { gaps[field] = code; return null; };
-  const filled = pts.some((p) => (p.gVol !== null && p.gVol !== 0) || (p.gDir !== null && p.gDir !== 0));
+  const dirFilled = pts.some((p) => p.gDir !== null && p.gDir !== 0);
+  const filled = dirFilled || pts.some((p) => p.gVol !== null && p.gVol !== 0);
   const book = signFlips(pts.map((p) => p.gOi));
-  const flow = filled ? signFlips(pts.map((p) => p.gDir)) : null;
+  const flow = dirFilled ? signFlips(pts.map((p) => p.gDir)) : null;
   const first = pts.find((p) => p.gOi !== null) || null;
   const lastG = [...pts].reverse().find((p) => p.gOi !== null) || null;
   const last = pts[pts.length - 1];
@@ -807,7 +808,7 @@ export function gexPath(body, { sessionDate = null } = {}) {
     m: ds.map((p) => p.m),
     px: ds.map((p) => round(p.px, 4)),
     g: ds.map((p) => sig(p.gOi, 5)),
-    f: filled ? ds.map((p) => sig(p.gDir, 5)) : null,
+    f: dirFilled ? ds.map((p) => sig(p.gDir, 5)) : null,
     c: ds.map((p) => sig(p.cOi, 5)),
     u: { open: "usdPer1pct", close: "usdPer1pct", change: "usdPer1pct", flips: "count", flipM: "min",
       flowFlips: "count", flowFlipM: "min", charmClose: "vendor", charmLastHour: "vendor", vannaClose: "vendor",

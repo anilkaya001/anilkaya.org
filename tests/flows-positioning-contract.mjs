@@ -355,6 +355,12 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   const filled = gexPath({ data: [mk("13:30", 1, 2), mk("13:40", 1, -2)] }, { sessionDate: SESSION });
   eq(filled.flowFilled, true, "a nonzero flow leg fills the flow clock");
   eq(filled.flowFlips, 1, "and its flips are counted");
+  const volOnly = gexPath({ data: [mk("13:30", 1, 0), mk("13:31", 1, 0)].map((r, i) => ({ ...r,
+    gamma_per_one_percent_move_vol: String(i ? -4 : 3) })) }, { sessionDate: SESSION });
+  eq(volOnly.flowFilled, true, "a volume leg that moves while the directional leg stays zero still counts as filled");
+  eq(volOnly.flowFlips, null, "but the flow flips, counted on the directional leg, are not read off a leg of zeros");
+  eq(volOnly.gaps.flowFlips, "flow-unfilled", "and say why");
+  eq(volOnly.f, null, "nor is a flat directional path drawn");
 }
 
 {
