@@ -8,7 +8,7 @@ import {
   UA_MIN_VOLUME, UA_MIN_OI, UA_ROWS, UA_NAMES, UA_PER_NAME_MIN, UA_PER_NAME_MAX,
   perNameCap, buildUnusualRows, rankUnusual,
   unusualNameRow, rankUnusualNames,
-  describeFlowAlerts, describeOiBasis, UNUSUAL_NOTES,
+  describeFlowAlerts, describeOiBasis, UNUSUAL_NOTES, poolOiBasis, OI_BASIS_MIN_SEEN, UA_BANNED_CLAIMS,
 } from "../shared/flows-unusual.js";
 import { buildChainPanels, buildTopContracts, buildAggressor } from "../shared/flows-chain.js";
 import { daysToExpiry, SHARES_PER_CONTRACT } from "../shared/flows-premium.js";
@@ -1462,6 +1462,40 @@ const rebuild = (em) => {
     await browser.close();
     await server.stop();
   }
+}
+
+{
+  const two = poolOiBasis([{ seen: 2, exceeded: 2 }]);
+  eq(two.verdict, "thin",
+     "two contracts are not a sample: run 64 logged 2 of 2 NOT aligned and run 66 0 of 2 " +
+     "INCONCLUSIVE off one chain each, and the verdict flipped with nothing but the hour");
+  ok(/draws none/.test(two.line), `and the line says it draws no verdict (${two.line.slice(0, 80)})`);
+  eq(poolOiBasis([]).verdict, "no-data", "nothing measured is no data, not a thin sample");
+
+  const pooled = poolOiBasis([
+    { seen: 2, exceeded: 2 }, { seen: 20, exceeded: 1 }, { seen: 18, exceeded: 0 }, null, { seen: 0 },
+  ]);
+  eq(pooled.chains, 3, "the check pools every chain that measured anything");
+  eq(pooled.seen, 40, "their contracts together");
+  eq(pooled.verdict, "falsified", `and over ${OI_BASIS_MIN_SEEN} of them one exceedance is a falsification`);
+  eq(pooled.exceedShare, 0.075, "with the share across every chain published beside it");
+  ok(/across 3 chains/.test(pooled.line) && /NOT aligned/.test(pooled.line), pooled.line.slice(0, 90));
+  eq(poolOiBasis([{ seen: 40, exceeded: 0 }]).verdict, "inconclusive",
+     "and none over the floor is inconclusive, never confirmation");
+  for (const line of [two.line, pooled.line]) {
+    UA_BANNED_CLAIMS.lastIndex = 0;
+    ok(!UA_BANNED_CLAIMS.test(line), `the pooled line makes no banned claim (${line.slice(0, 50)})`);
+  }
+
+  const basis = PAYLOAD.basis.oiBasis;
+  ok(basis && basis.chains > 0 && basis.seen >= basis.exceeded,
+     "the unusual payload carries the pooled check, not one chain's pair");
+  ok(["thin", "falsified", "inconclusive", "no-data"].includes(basis.verdict),
+     `with one of its four verdicts (${basis.verdict})`);
+  ok(PAYLOAD.coverage.every((x) => Number.isInteger(x.pages) && x.pages >= 1),
+     "and every coverage entry says how many pages of its chain were read");
+  ok(PAYLOAD.coverage.some((x) => x.pages > 1 && x.p === 0),
+     "one of them read past its first full page to the end of the book, and is not flagged partial");
 }
 
 console.log(`✓ flows-unusual: ${checks} assertions — a ranking key finite because the ` +

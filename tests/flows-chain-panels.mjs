@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import {
   buildChainPanels, chainScalars, buildTopContracts, buildAggressor,
   serialiseSurface, CHAIN_PAGE_SIZE, SKEW_MONEYNESS, SKEW_TOLERANCE, SKEW_MIN_DAYS,
-  summariseSkewMisses,
+  summariseSkewMisses, mergeChainPages, CHAIN_MAX_PAGES,
 } from "../shared/flows-chain.js";
 import { ivConvention, priceSale, ivSurface } from "../shared/flows-premium.js";
 import { buildCard } from "../shared/flows-card.js";
@@ -558,6 +558,45 @@ function chain({
   }
   eq(built.ivSurface.status, "ok",
      "while the surface still builds, because a partial view of a book is a real view of part of it");
+}
+
+{
+  const book = [];
+  for (let k = 0; book.length < 2 * CHAIN_PAGE_SIZE + 150; k++) {
+    for (const r of chain()) {
+      book.push({ ...r, option_symbol: r.option_symbol.replace(/^TST/, "T" + String.fromCharCode(65 + k) + "Z") });
+    }
+  }
+  const whole = book.slice(0, 2 * CHAIN_PAGE_SIZE + 150);
+  const pageOf = (p) => whole.slice(p * CHAIN_PAGE_SIZE, (p + 1) * CHAIN_PAGE_SIZE);
+
+  const done = mergeChainPages([pageOf(0), pageOf(1), pageOf(2)]);
+  eq(done.rows.length, whole.length, "three pages of a 1,150-contract book merge to all of it");
+  eq(done.complete, true, "and a short last page with no repeat is the whole book");
+  eq(done.duplicates, 0, "with nothing read twice");
+
+  const full = mergeChainPages([pageOf(0), pageOf(1)]);
+  eq(full.complete, false, "a last page that is still full leaves the book unfinished");
+
+  const ignored = mergeChainPages([pageOf(0), pageOf(0)]);
+  eq(ignored.duplicates, CHAIN_PAGE_SIZE,
+     "a vendor that ignores `page` returns the first page again, and every row of it is a repeat");
+  eq(ignored.rows.length, CHAIN_PAGE_SIZE, "which the merge keeps once");
+  eq(ignored.complete, false, "and never calls complete, whatever the last page's length");
+  eq(mergeChainPages([pageOf(0), []]).complete, true,
+     "an empty page after a full one is the end of a book of exactly one page");
+  ok(CHAIN_MAX_PAGES >= 2, `the pipeline reads up to ${CHAIN_MAX_PAGES} pages a name`);
+
+  const opts = { spot: SPOT, asOf: ASOF };
+  const truncatedRead = buildChainPanels(done.rows, opts);
+  eq(truncatedRead.truncated, true, "on row count alone, 1,150 contracts look like a truncated page");
+  const paged = buildChainPanels(done.rows, { ...opts, complete: true, pages: 3 });
+  eq(paged.truncated, false, "while a book read to its short last page is complete");
+  eq(paged.pagesRead, 3, "and says how many pages it took");
+  ok(paged.unusualRows.every((r) => r.p === 0), "so its unusual-activity rows are not flagged as partial");
+  const stillFull = buildChainPanels(full.rows, { ...opts, complete: false, pages: 2 });
+  ok(stillFull.truncated && /last of 2 pages/.test(stillFull.skewTerm.skewReason),
+     `a book still full at its last page stays truncated and says how far it was read (${stillFull.skewTerm.skewReason})`);
 }
 
 {

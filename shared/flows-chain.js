@@ -15,6 +15,32 @@ const round = (v, d) => (Number.isFinite(v) ? Number(v.toFixed(d)) : null);
 
 export const CHAIN_PAGE_SIZE = 500;
 
+export const CHAIN_MAX_PAGES = 3;
+
+export function mergeChainPages(pages, { pageSize = CHAIN_PAGE_SIZE } = {}) {
+  const list = (Array.isArray(pages) ? pages : []).map((p) => (Array.isArray(p) ? p : []));
+  const seen = new Set();
+  const rows = [];
+  let duplicates = 0;
+  for (const page of list) {
+    for (const row of page) {
+      const key = row && typeof row.option_symbol === "string" ? row.option_symbol : null;
+      if (key) {
+        if (seen.has(key)) { duplicates++; continue; }
+        seen.add(key);
+      }
+      rows.push(row);
+    }
+  }
+  const last = list.length ? list[list.length - 1] : [];
+  return {
+    rows,
+    pages: list.length,
+    duplicates,
+    complete: list.length > 0 && last.length < pageSize && duplicates === 0,
+  };
+}
+
 export const SKEW_MONEYNESS = 0.10;
 
 export const SKEW_TOLERANCE = 0.04;
@@ -613,9 +639,12 @@ export function buildChainPanels(chainRows, {
   requestedExpiry = null,
 
   stage = null,
+
+  complete = null,
+  pages = 1,
 } = {}) {
   const all = Array.isArray(chainRows) ? chainRows : [];
-  const truncated = all.length >= CHAIN_PAGE_SIZE;
+  const truncated = complete === true ? false : complete === false ? true : all.length >= CHAIN_PAGE_SIZE;
 
   const pairs = all.map((row) => ({ p: parseOptionSymbol(row && row.option_symbol), row }));
 
@@ -668,7 +697,9 @@ export function buildChainPanels(chainRows, {
     surface.expiries.length === 1 && surface.expiries[0].expiry === requestedExpiry;
 
   if (truncated && !answersRequest) {
-    const why = `the vendor returned a full page of ${CHAIN_PAGE_SIZE} contracts in no ` +
+    const why = (pages > 1
+      ? `the vendor still filled the last of ${pages} pages of ${CHAIN_PAGE_SIZE} contracts, `
+      : `the vendor returned a full page of ${CHAIN_PAGE_SIZE} contracts `) + "in no " +
       "documented order, so this is an arbitrary subset of the book and \"the nearest " +
       "expiry\" cannot be identified within it";
     scalars = {
@@ -687,6 +718,8 @@ export function buildChainPanels(chainRows, {
     identifiedExpiry: answersRequest ? requestedExpiry : null,
 
     rowsReturned: all.length,
+
+    pagesRead: pages,
 
     rowsSeen: rows.length,
 

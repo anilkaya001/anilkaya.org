@@ -1283,6 +1283,18 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      `and the fixture really does truncate more than one name (${recovered ? recovered[1] : 0} ` +
      "recovered), so the probe count above is a measurement rather than an accident of there " +
      "being only one candidate");
+  const paged = /chains: (\d+) full first page\(s\) read on with (\d+) further page call\(s\).*?: (\d+) now complete, (\d+) still full at the last page, (\d+) where a later page repeated/.exec(runLog);
+  ok(paged, "a chain that fills its first page is read on, page by page, and the run says what that bought");
+  ok(paged && Number(paged[3]) >= 1,
+     `at least one full first page was read to the end of the book (${paged ? paged[3] : 0} complete)`);
+  ok(paged && Number(paged[5]) >= 1,
+     "and a vendor that answers a later page with the first one is caught by the repeats, not " +
+     "counted as a complete book");
+  ok(/page=1 returned the first page again/.test(runLog),
+     "a vendor that counts pages from one (page=1 repeating the first page) is detected and " +
+     "read from page 2 on, rather than taken for one that ignores the parameter");
+  ok(!/\d+ of 2 contracts showed/.test(runLog) && /oi basis: \d+ of \d+ contracts across \d+ chains|oi basis: \d+ contracts? across/.test(runLog),
+     "the open-interest basis is judged across every chain, not on one chain's pair");
   const read = (key) => JSON.parse(fs.readFileSync(`${prefix}-${key}.json`, "utf8"));
   const board = read("board-long");
   const movers = read("movers");

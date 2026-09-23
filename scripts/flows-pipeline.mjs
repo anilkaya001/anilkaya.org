@@ -20,10 +20,10 @@ import {
 import { tradingCalendar, scoreSessions, icTable, RECORD_NOTES } from "../shared/flows-record.js";
 import { makePermitQueue } from "../shared/flows-permits.js";
 import { fitGarch } from "../shared/flows-garch.js";
-import { buildChainPanels, CHAIN_PAGE_SIZE, SKEW_MIN_DAYS, summariseSkewMisses }
+import { buildChainPanels, CHAIN_PAGE_SIZE, CHAIN_MAX_PAGES, mergeChainPages, SKEW_MIN_DAYS, summariseSkewMisses }
   from "../shared/flows-chain.js";
 import {
-  rankUnusual, rankUnusualNames, describeOiBasis,
+  rankUnusual, rankUnusualNames, describeOiBasis, poolOiBasis,
   UA_MIN_VOLUME, UA_MIN_OI, UNUSUAL_NOTES,
 } from "../shared/flows-unusual.js";
 import { buildEvents, EVENTS_NOTES } from "../shared/flows-events.js";
@@ -85,7 +85,7 @@ export const RATE = {
   floorCeilingMs: 750,
 };
 
-export const CALL_BUDGET = 1250;
+export const CALL_BUDGET = 1350;
 
 export const EARNINGS_GATE_DAYS = 12;
 
@@ -2972,7 +2972,7 @@ function card0Unusable(row) {
     .some((k) => row[k] !== undefined && row[k] !== null && row[k] !== "");
 }
 
-export function fakeChain(ticker, spot, seed, { wide = false, expiry = null } = {}) {
+export function fakeChain(ticker, spot, seed, { wide = false, expiry = null, page = 0 } = {}) {
   const rnd = mulberry(seed);
   const rows = [];
   const ladder = wide
@@ -3026,13 +3026,13 @@ export function fakeChain(ticker, spot, seed, { wide = false, expiry = null } = 
     ask_volume: "90000", bid_volume: "9999",
   });
 
-  if (expiry || !wide) return rows;
+  if (expiry || !wide) return page ? [] : rows;
 
   for (let i = rows.length - 1; i > 0; i--) {
     const j = Math.floor(rnd() * (i + 1));
     [rows[i], rows[j]] = [rows[j], rows[i]];
   }
-  return rows.slice(0, CHAIN_PAGE_SIZE);
+  return rows.slice(page * CHAIN_PAGE_SIZE, (page + 1) * CHAIN_PAGE_SIZE);
 }
 
 function fakeSurface(ticker, spot, expiries) {
@@ -4570,19 +4570,52 @@ async function main() {
     const chainDeadline = stats.startedAt + DEADLINE_MS - CHAIN_RESERVE_MS;
     let scalarsRecovered = 0;
 
+    const paging = { names: 0, extra: 0, completed: 0, stillFull: 0, ignored: 0, oneBased: 0 };
+
     const chainLane = poolWidth();
     console.log(`  chains: ${boardTickers.length} name(s), ${chainLane.width} in flight — ${chainLane.why}`);
     const chainRun = await runPooled(boardTickers, async (ticker, index) => {
       try {
-        const rows = DRY_RUN
+        const readPage = async (page) => (DRY_RUN
 
           ? fakeChain(ticker, spotByTicker.get(ticker) || 100, 7000 + index,
-            { wide: index < 2 })
+            { wide: index < 4, page: index === 0 ? page : index === 2 ? Math.max(0, page - 1) : 0 })
           : await uw(`/api/stock/${ticker}/option-contracts`, {
 
             exclude_zero_oi_chains: "true",
             limit: CHAIN_PAGE_SIZE,
-          });
+            ...(page ? { page } : {}),
+          }));
+        const firstPage = await readPage(0);
+        const pages = [firstPage];
+        let nextPage = 1, countedFromOne = false;
+        while (pages[pages.length - 1].length >= CHAIN_PAGE_SIZE && pages.length < CHAIN_MAX_PAGES &&
+               Date.now() < chainDeadline) {
+          let next;
+          try { next = await readPage(nextPage); } catch (error) {
+            console.warn(`  chain ${ticker}: page ${nextPage} failed — ${error.message}`);
+            break;
+          }
+          next = Array.isArray(next) ? next : [];
+          nextPage++;
+          if (nextPage === 2 && next.length &&
+              mergeChainPages([firstPage, next]).duplicates === next.length) {
+            countedFromOne = true;
+            continue;
+          }
+          pages.push(next);
+          if (mergeChainPages(pages).duplicates) break;
+        }
+        const merged = mergeChainPages(pages);
+        const rows = merged.rows;
+        if (nextPage > 1) {
+          paging.names++;
+          paging.extra += nextPage - 1;
+          if (merged.complete) paging.completed++;
+          else if (merged.duplicates || (countedFromOne && pages.length === 1)) paging.ignored++;
+          else paging.stillFull++;
+          if (countedFromOne && !merged.duplicates && pages.length > 1) paging.oneBased++;
+        }
 
         if (!chainReported && rows.length) {
           chainReported = true;
@@ -4602,6 +4635,7 @@ async function main() {
           spot: spotByTicker.get(ticker) || null,
           asOf: sessionDate,
           ticker,
+          ...(pages.length > 1 ? { complete: merged.complete, pages: pages.length } : {}),
         });
         let vannaRows = panels.status === "ok" && !panels.truncated ? rows : null;
         let vannaExpiry = null;
@@ -4719,6 +4753,20 @@ async function main() {
     const built = [...chainByTicker.entries()].filter(([, c]) => c.status === "ok");
     const levelled = built.filter(([, c]) => c.scalars.atmIv !== null).length;
     const skewed = built.filter(([, c]) => c.scalars.skew !== null).length;
+    if (paging.names) {
+      console.log(
+        `  chains: ${paging.names} full first page(s) read on with ${paging.extra} further ` +
+        `page call(s) (up to ${CHAIN_MAX_PAGES} pages a name): ${paging.completed} now complete, ` +
+        `${paging.stillFull} still full at the last page` +
+        (paging.ignored
+          ? `, ${paging.ignored} where a later page repeated contracts already read — ` +
+            "PAGE IGNORED or the order is unstable, so those stay truncated rather than claimed whole"
+          : "") +
+        (paging.oneBased
+          ? `; on ${paging.oneBased} name(s) page=1 returned the first page again, so the ` +
+            "vendor was read as counting pages from one there (the spec says zero)"
+          : ""));
+    }
     console.log(
       `  chains: ${chainOk} built, ${chainFailed} failed` +
       (chainSkipped ? `, ${chainSkipped} skipped for the deadline` : "") +
@@ -4810,6 +4858,7 @@ async function main() {
       coverage.push({
         t: ticker,
         rows: Number(c.rowsSeen) || 0,
+        pages: Number(c.pagesRead) || 1,
         p: c.truncated ? 1 : 0,
         ivDivisor: Number.isFinite(c.ivDivisor) ? c.ivDivisor : null,
         ivBasis: c.ivBasis || null,
@@ -4817,6 +4866,9 @@ async function main() {
     }
     const namesSeen = coverage.length;
     const contracts = rankUnusual(pooled, { namesSeen });
+    const pooledOiBasis = poolOiBasis(
+      [...chainByTicker.values()].filter((c) => c && c.status === "ok").map((c) => c.oiBasis),
+      { dryRun: DRY_RUN });
     const names = rankUnusualNames(withTilt);
 
     const priorUnusual = DRY_RUN
@@ -4858,6 +4910,11 @@ async function main() {
         date: UNUSUAL_NOTES.date,
         rank: { key: "vor", choice: true, relation: "vor = volume / open_interest",
           reason: UNUSUAL_NOTES.rank },
+        oiBasis: {
+          chains: pooledOiBasis.chains, seen: pooledOiBasis.seen,
+          exceeded: pooledOiBasis.exceeded, exceedShare: pooledOiBasis.exceedShare,
+          minSeen: pooledOiBasis.minSeen, verdict: pooledOiBasis.verdict,
+        },
         floors: { minVolume: UA_MIN_VOLUME, minOi: UA_MIN_OI, perName: contracts.perName,
           choice: true,
           reason: "A minimum volume keeps a 200-lot on a five-contract open interest " +
@@ -4919,15 +4976,11 @@ async function main() {
                 "row claims to be new"
               : "no prior feed could be read, so no row claims to be new"));
 
-    const firstChain = [...chainByTicker.values()].find(
-      (c) => c && c.status === "ok" && c.oiBasis && c.oiBasis.seen > 0);
-    if (firstChain) {
-      console.log("  " + (DRY_RUN ? "[dry-run] " : "") + firstChain.oiBasis.line +
-        (DRY_RUN
-          ? " On synthetic rows this is two unrelated fixture formulas disagreeing," +
-            " and is not evidence about the vendor."
-          : ""));
-    }
+    console.log("  " + pooledOiBasis.line +
+      (DRY_RUN
+        ? " On synthetic rows this is two unrelated fixture formulas disagreeing," +
+          " and is not evidence about the vendor."
+        : ""));
 
     try {
       const raw = DRY_RUN

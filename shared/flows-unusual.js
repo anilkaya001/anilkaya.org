@@ -282,6 +282,44 @@ export function describeOiBasis(rows, { minVolume = UA_MIN_VOLUME, dryRun = fals
       "stretch. It is not evidence either way." };
 }
 
+export const OI_BASIS_MIN_SEEN = 30;
+
+export function poolOiBasis(readings, {
+  minSeen = OI_BASIS_MIN_SEEN, minVolume = UA_MIN_VOLUME, dryRun = false,
+} = {}) {
+  let seen = 0, exceeded = 0, chains = 0;
+  for (const r of Array.isArray(readings) ? readings : []) {
+    const n = numOrNull(r && r.seen);
+    if (n === null || !(n > 0)) continue;
+    chains++;
+    seen += n;
+    exceeded += numOrNull(r.exceeded) || 0;
+  }
+  const tag = dryRun ? "[dry-run] " : "";
+  const share = seen ? exceeded / seen : null;
+  const out = { chains, seen, exceeded, exceedShare: share === null ? null : round(share, 4), minSeen };
+  const across = `${seen} contract${seen === 1 ? "" : "s"} across ${chains} chain${chains === 1 ? "" : "s"}`;
+  if (seen < minSeen) {
+    return { ...out, verdict: seen ? "thin" : "no-data",
+      line: `${tag}oi basis: ${across} carried a volume of ${minVolume} or more, an open ` +
+        `interest and a previous open interest together — under the ${minSeen} this check ` +
+        `needs before it draws a verdict, so it draws none (${exceeded} of them showed an ` +
+        "open-interest change larger than their own volume)." };
+  }
+  if (exceeded > 0) {
+    return { ...out, verdict: "falsified",
+      line: `${tag}oi basis: ${exceeded} of ${across} (${(share * 100).toFixed(1)}%) showed an ` +
+        "open-interest change LARGER than their own volume. Open interest cannot move further " +
+        "across one settlement than the volume between them, so the volume counter and the " +
+        "open-interest pair are NOT aligned in time; the share across every chain, not one " +
+        "chain's pair, is the reading." };
+  }
+  return { ...out, verdict: "inconclusive",
+    line: `${tag}oi basis: 0 of ${across} showed an open-interest change exceeding their own ` +
+      "volume. This is INCONCLUSIVE — consistent with an intraday counter, with an aligned " +
+      "same-session pair, and with a quiet stretch." };
+}
+
 export const UNUSUAL_NOTES = Object.freeze({
   unit: "A contract counter, not a trade. The vendor reports one row per listed " +
     "strike with a volume total, an open interest and a quote — no size, no " +
