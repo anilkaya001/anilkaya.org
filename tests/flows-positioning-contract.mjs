@@ -402,6 +402,40 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
 }
 
 {
+  const noLit = darkpoolLevels({ data: [{ price: "100", dark_pool_volume: "500" }, { price: "101", dark_pool_volume: "700" }],
+    date: SESSION }, { sessionDate: SESSION, spot: 100, atr: 2 });
+  eq(noLit.darkShare, null, "a level with no regular_volume is not 100% dark: the share is withheld");
+  eq(noLit.gaps.darkShare, "malformed", "because the confirmed field is missing from the body");
+  eq(noLit.shelves[0].share, null, "and so is each shelf's own share");
+  eq(noLit.profile[0].lit, null, "the lit volume stays absent, never zero");
+  eq(noLit.shelves[0].dark, 700, "while the dark volume the body does carry still ranks the shelves");
+  eq(darkpoolLevels({ data: [{ px: "100", volume: "5" }], date: SESSION }, { sessionDate: SESSION, spot: 100, atr: 2 }).status,
+    "unreadable", "rows with none of the confirmed level fields are unreadable, not a quiet band");
+
+  const noPuts = oiWalls({ data: [{ date: SESSION, strike: "100", call_oi: 10 }, { date: SESSION, strike: "95", call_oi: 5 }] },
+    { sessionDate: SESSION, spot: 100, atr: 2 });
+  eq(noPuts.putOi, null, "open interest per strike without put_oi is not zero put OI");
+  eq(noPuts.pcOi, null, "so there is no put/call ratio");
+  eq(noPuts.gaps.pcOi, "malformed", "and the gap says the field was missing, not that OI summed to zero");
+  eq(noPuts.putWall, null, "no put wall either");
+  eq(noPuts.gaps.putWall, "malformed", "for the same reason");
+  eq(noPuts.callWall, 100, "while the call side still reads");
+  eq(oiWalls({ data: [{ date: SESSION, strike: "100" }] }, { sessionDate: SESSION, spot: 100, atr: 2 }).status, "unreadable",
+    "a strike list with neither OI field is unreadable");
+
+  const renamed = (r) => { const o = {}; for (const [k, v] of Object.entries(r)) o[k.replace(/premium/g, "prem")] = v; return o; };
+  eq(flowExpiry(FX.flowPerExpiry.map(renamed), { sessionDate: SESSION }).status, "unreadable",
+    "flow-per-expiry whose premium fields are not the confirmed names is unreadable, never a measured $0 day");
+  eq(flowStrike([{ ...renamed(FX.flowPerStrike[0]), strike: "340" }], { sessionDate: SESSION, spot: 339.75, iv30: 0.25 }).status,
+    "unreadable", "and so is flow-per-strike");
+  const noGamma = FX.greekExposure.data.map((r) => ({ date: r.date, call_gex: undefined, gamma: r.call_gamma }));
+  eq(gexHistory({ data: noGamma }, { sessionDate: noGamma[0].date }).section.status, "unreadable",
+    "a greek-exposure series with no gamma legs is unreadable, not a flat book with zero flips");
+  eq(volumeHistory({ data: [{ date: SESSION, calls: 5 }] }, { sessionDate: SESSION }).section.status, "unreadable",
+    "an options-volume series with none of its confirmed fields is unreadable");
+}
+
+{
   const probe = FX.flowAlerts.data[0];
   const mk = (i, prem, ask, sweep, opening, type, vol, oi, hhmm = "15:00", t = "AAPL") => ({
     ...probe, id: "a" + i, ticker: t, total_premium: String(prem), total_ask_side_prem: String(ask),

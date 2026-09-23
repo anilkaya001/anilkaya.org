@@ -331,6 +331,7 @@ export function gexHistory(body, {
     v: leg(vnum(r.call_vanna), vnum(r.put_vanna), m.vanna),
   }));
   if (!rows.length) return { section: silence("quiet", "empty"), series: null };
+  if (rows.every((r) => r.g === null)) return { section: silence("unreadable", "malformed"), series: null };
   const g = rows.map((r) => r.g), c = rows.map((r) => r.c), v = rows.map((r) => r.v);
   const last = rows[rows.length - 1];
   const gaps = {};
@@ -398,6 +399,9 @@ export function volumeHistory(body, {
     };
   });
   if (!rows.length) return { section: silence("quiet", "empty"), series: null };
+  if (rows.every((r) => r.np === null && r.bb === null && r.vol === null && r.oi === null)) {
+    return { section: silence("unreadable", "malformed"), series: null };
+  }
   const col = (k) => rows.map((r) => r[k]);
   const last = rows[rows.length - 1];
   const gaps = {};
@@ -562,6 +566,7 @@ export function flowExpiry(body, { sessionDate = null, readAt = null } = {}) {
   }
   rows.sort((a, b) => (a.e < b.e ? -1 : a.e > b.e ? 1 : 0));
   if (!rows.length) return silence("quiet", "empty", { readAt });
+  if (rows.every((r) => r.np === null && r.gross === null)) return silence("unreadable", "malformed", { readAt });
   const gaps = {};
   const note = (field, code) => { gaps[field] = code; return null; };
   const grossTotal = sum(rows.map((r) => r.gross ?? 0));
@@ -613,6 +618,7 @@ export function flowStrike(body, { sessionDate = null, spot = null, iv30 = null,
     const t = toMs(r.timestamp);
     if (t !== null && (vendorAt === null || t > vendorAt)) vendorAt = t;
   }
+  if (all.length && all.every((r) => r.np === null && r.gross === null)) return silence("unreadable", "malformed");
   all.sort((a, b) => a.k - b.k);
   const inBand = all.filter((r) => r.k >= S * (1 - band) && r.k <= S * (1 + band));
   const gaps = {};
@@ -816,18 +822,22 @@ export function oiWalls(body, { sessionDate = null, spot = null, atr = null, top
     if (k === null || !(k > 0)) continue;
     const d = dayOf(r.date);
     if (d) dates.add(d);
-    rows.push({ k, c: c ?? 0, p: p ?? 0 });
+    rows.push({ k, c, p });
   }
   if (!rows.length) return silence("quiet", "empty");
+  const callRows = rows.filter((r) => r.c !== null), putRows = rows.filter((r) => r.p !== null);
+  if (!callRows.length && !putRows.length) return silence("unreadable", "malformed");
   rows.sort((a, b) => a.k - b.k);
   const gaps = {};
   const note = (field, code) => { gaps[field] = code; return null; };
-  const above = rows.filter((r) => r.k >= S).sort((a, b) => b.c - a.c || a.k - b.k);
-  const below = rows.filter((r) => r.k <= S).sort((a, b) => b.p - a.p || b.k - a.k);
+  const above = callRows.filter((r) => r.k >= S).sort((a, b) => b.c - a.c || a.k - b.k);
+  const below = putRows.filter((r) => r.k <= S).sort((a, b) => b.p - a.p || b.k - a.k);
   const callWall = above.length && above[0].c > 0 ? above[0] : null;
   const putWall = below.length && below[0].p > 0 ? below[0] : null;
-  const dist = (k, field) => (k === null ? note(field, "no-level") : A !== null && A > 0 ? round((k - S) / A, 3) : note(field, "no-atr"));
-  const callOi = sum(rows.map((r) => r.c)), putOi = sum(rows.map((r) => r.p));
+  const missing = (list) => (list.length ? "no-level" : "malformed");
+  const dist = (k, field, why) => (k === null ? note(field, why) : A !== null && A > 0 ? round((k - S) / A, 3) : note(field, "no-atr"));
+  const callOi = callRows.length ? sum(callRows.map((r) => r.c)) : null;
+  const putOi = putRows.length ? sum(putRows.map((r) => r.p)) : null;
   const date = [...dates].sort().pop() || null;
   const same = isDay(sessionDate) && date ? date === sessionDate : null;
   return {
@@ -835,16 +845,18 @@ export function oiWalls(body, { sessionDate = null, spot = null, atr = null, top
     why: same === false ? "not-session" : null,
     asOf: date,
     spot: S,
-    callWall: callWall ? callWall.k : note("callWall", "no-level"),
-    callWallOi: callWall ? callWall.c : null,
-    callWallAtr: dist(callWall ? callWall.k : null, "callWallAtr"),
-    putWall: putWall ? putWall.k : note("putWall", "no-level"),
-    putWallOi: putWall ? putWall.p : null,
-    putWallAtr: dist(putWall ? putWall.k : null, "putWallAtr"),
+    callWall: callWall ? callWall.k : note("callWall", missing(callRows)),
+    callWallOi: callWall ? callWall.c : note("callWallOi", missing(callRows)),
+    callWallAtr: dist(callWall ? callWall.k : null, "callWallAtr", missing(callRows)),
+    putWall: putWall ? putWall.k : note("putWall", missing(putRows)),
+    putWallOi: putWall ? putWall.p : note("putWallOi", missing(putRows)),
+    putWallAtr: dist(putWall ? putWall.k : null, "putWallAtr", missing(putRows)),
     calls: above.filter((r) => r.c > 0).slice(0, top).map((r) => ({ k: r.k, oi: r.c })),
     puts: below.filter((r) => r.p > 0).slice(0, top).map((r) => ({ k: r.k, oi: r.p })),
-    callOi, putOi,
-    pcOi: callOi > 0 ? round(putOi / callOi, 4) : note("pcOi", "no-oi"),
+    callOi: callOi ?? note("callOi", "malformed"),
+    putOi: putOi ?? note("putOi", "malformed"),
+    pcOi: callOi === null || putOi === null ? note("pcOi", "malformed")
+      : callOi > 0 ? round(putOi / callOi, 4) : note("pcOi", "no-oi"),
     u: { callWall: "px", putWall: "px", callWallOi: "contracts", putWallOi: "contracts", callWallAtr: "atr",
       putWallAtr: "atr", callOi: "contracts", putOi: "contracts", pcOi: "ratio", oi: "contracts", k: "px" },
     gaps,
@@ -939,8 +951,9 @@ export function darkpoolLevels(body, { sessionDate = null, spot = null, atr = nu
     if (!r || typeof r !== "object") continue;
     const px = vnum(r.price), dark = vnum(r.dark_pool_volume), lit = vnum(r.regular_volume);
     if (px === null || !(px > 0) || dark === null) continue;
-    levels.push({ px, dark, lit: lit ?? 0 });
+    levels.push({ px, dark, lit });
   }
+  if (!levels.length) return silence("unreadable", "malformed");
   const inBand = levels.filter((l) => Math.abs(l.px - S) <= bandAtr * A).sort((a, b) => a.px - b.px);
   if (!inBand.length) return silence("quiet", "outside-band", { levels: levels.length });
   const gaps = {};
@@ -948,17 +961,20 @@ export function darkpoolLevels(body, { sessionDate = null, spot = null, atr = nu
   const darks = inBand.map((l) => l.dark);
   const mean = sum(darks) / darks.length;
   const sd = darks.length >= 3 ? Math.sqrt(sum(darks.map((d) => (d - mean) ** 2)) / (darks.length - 1)) : null;
-  const shareAt = (l) => (l.dark + l.lit > 0 ? round(l.dark / (l.dark + l.lit), 4) : null);
+  const shareAt = (l) => (l.lit !== null && l.dark + l.lit > 0 ? round(l.dark / (l.dark + l.lit), 4) : null);
   const top = inBand.slice().sort((a, b) => b.dark - a.dark || a.px - b.px).slice(0, shelves);
-  const darkTotal = sum(darks), litTotal = sum(inBand.map((l) => l.lit));
+  const litKnown = inBand.filter((l) => l.lit !== null);
+  const darkTotal = sum(litKnown.map((l) => l.dark)), litTotal = sum(litKnown.map((l) => l.lit));
   if (!(sd > 0)) note("z", darks.length < 3 ? "short-history" : "zero-sd");
+  if (litKnown.length < inBand.length) note("share", "malformed");
   return {
     status: "ok", why: null,
     asOf: vendorDate || sessionDate,
     spot: S, atr: A, bandAtr,
     levels: levels.length,
     outside: levels.length - inBand.length,
-    darkShare: darkTotal + litTotal > 0 ? round(darkTotal / (darkTotal + litTotal), 4) : note("darkShare", "no-volume"),
+    darkShare: !litKnown.length ? note("darkShare", "malformed")
+      : darkTotal + litTotal > 0 ? round(darkTotal / (darkTotal + litTotal), 4) : note("darkShare", "no-volume"),
     shelves: top.map((l) => ({
       px: l.px, dark: l.dark, share: shareAt(l),
       atr: round((l.px - S) / A, 3),
