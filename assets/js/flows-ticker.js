@@ -3027,7 +3027,9 @@
         const [k, why] = silence(lv, "levels");
         pairs.push([label, DASH, null, k, why]);
       } else {
-        pairs.push([label, money(px) + (dist === null ? "" : " · " + atrOf(dist))]);
+        const edge = row.edge === "window";
+        pairs.push([edge ? label + " (window edge)" : label, money(px) + (dist === null ? "" : " · " + atrOf(dist)),
+          null, null, edge ? row.note : null]);
       }
     }
 

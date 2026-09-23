@@ -886,6 +886,16 @@ try {
        `newest of three deliberately shuffled rows; 11.1 would mean rows[0] and ` +
        `44.4 would mean the last row (${r["IV rank"].text})`);
 
+    const edged = JSON.parse(JSON.stringify(base));
+    edged.panels.levels.levels[2] = { ...edged.panels.levels.levels[2], label: "Call wall (window edge)",
+      edge: "window", note: "this wall is the last strike of the ladder the run read, so the strike window ends here" };
+    const ew = await read(edged);
+    const edgeRow = ew && ew["Call wall (window edge)"];
+    ok(edgeRow && edgeRow.text === "$120.00 · +8.00 ATR" && /last strike of the ladder/.test(edgeRow.why) &&
+       !("Call wall" in ew),
+       "a wall on the last strike the run read (CSX 2026-09-21) is marked as the window's edge in key " +
+       `statistics too, with the reason on hover, not printed as where the book peaks (${edgeRow ? edgeRow.why : "absent"})`);
+
     const noFlip = JSON.parse(JSON.stringify(base));
     noFlip.gammaFlip = null;
     const q = await read(noFlip);
