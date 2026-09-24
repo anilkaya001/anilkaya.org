@@ -105,7 +105,6 @@
 @container hero (max-width: 400px) {
   .hm-hero-legs .ui-metric-v { font: var(--t-callout); font-weight: 600; letter-spacing: var(--t-callout-track); }
   .hm-hero-legs .ui-metrics { gap: var(--sp-3); }
-  .hm-pill-when { display: none; }
 }
 
 .hm-river { min-width: 0; }
