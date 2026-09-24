@@ -659,7 +659,7 @@
       place();
       if (user && typeof onPick === "function") {
         const run = () => onPick(i);
-        if (document.startViewTransition && moving()) document.startViewTransition(run); else run();
+        if (document.startViewTransition && moving()) document.startViewTransition(run).ready.catch(() => {}); else run();
       }
     }
     requestAnimationFrame(() => { place(); requestAnimationFrame(() => wrap.classList.remove("is-static")); });

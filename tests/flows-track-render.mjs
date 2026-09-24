@@ -257,6 +257,36 @@ const popOf = (page, sel) => page.evaluate((sel) => {
      "and when its control narrows it stays inside it in the SAME frame, before any ResizeObserver runs " +
      `(${knob.narrow.map(Math.round).join(" vs ")}): a knob measured in pixels kept its desktop width and offset ` +
      "until the observer fired, and on a loaded machine that was long enough to push the page 148px past a 320px screen");
+  const before = errors.length;
+  const vt = await page.evaluate(async () => {
+    const real = document.startViewTransition;
+    const seen = [];
+    let handled = false;
+    document.startViewTransition = (update) => {
+      const failed = Promise.reject(new DOMException("Transition was aborted because of timeout in DOM update", "TimeoutError"));
+      const ready = {
+        then: (ok, no) => { if (typeof no === "function") handled = true; return failed.then(ok, no); },
+        catch: (no) => { handled = true; return failed.catch(no); },
+        finally: (f) => failed.finally(f),
+      };
+      update();
+      return { ready, updateCallbackDone: Promise.resolve(), finished: Promise.resolve(), skipTransition() {} };
+    };
+    const seg = window.FlowsUI.segmented("Mode", [{ label: "One" }, { label: "Two" }], (i) => seen.push(i), 0);
+    document.body.append(seg);
+    seg.querySelectorAll(".ui-seg-i")[1].click();
+    await new Promise((r) => setTimeout(r, 100));
+    seg.remove();
+    document.startViewTransition = real;
+    return { seen, handled };
+  });
+  ok(vt.seen.join(",") === "1",
+     "a pick made while a view transition times out still reaches its handler: the DOM update runs, only the animation is lost");
+  ok(vt.handled,
+     "and the segmented control handles the transition's ready promise, which is the one a skipped or timed-out " +
+     "transition rejects (\"Transition was aborted because of timeout in DOM update\"). Left unhandled, the CI runner's " +
+     "Chromium reports it as an uncaught page error, and that failed the market suite on a busy runner");
+  eq(errors.length - before, 0, "so no page error follows from it: " + errors.slice(before).join(" | "));
   eq(got.swapped.join(","), "0,1",
      "a host that changes chart kind drops the old kind's listeners: a heatmap mounted where a line was keeps no " +
      "scrub pointerdown, and one pointermove of its own");
