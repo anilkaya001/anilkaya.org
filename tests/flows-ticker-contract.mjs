@@ -1557,6 +1557,88 @@ try {
     await page.close();
   }
 
+  {
+    const card = clone(full);
+    ok(card.engine && card.engine.state, "the emitted engine card carries an implied state to rewrite");
+    card.engine.state = { ...card.engine.state, state: "transitional", direction: "bearish", confidence: 1 };
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, card, { neuron: { status: "unavailable" } });
+    const v = await page.evaluate(() => ({ read: document.getElementById("ftVerdict").dataset.read, line: document.getElementById("ftVerdictT").textContent,
+      cap: document.querySelector("#ftVerdict .ft-v-meta .ui-capsule").textContent.trim(), src: document.getElementById("ftVerdictSrc").textContent }));
+    eq(v.read, "card", "an unreadable Neuron answer still leaves the engine block's reading");
+    ok(!/\ba on\b/.test(v.line) && v.line.startsWith("The greeks imply a transitional state on the flip for " + card.ticker), `a transitional state is worded as the deterministic brief words it (${v.line})`);
+    ok(v.line.includes("with flow bearish"), `and the engine block's direction is read as the flow (${v.line})`);
+    eq(v.cap, "Bearish", "the capsule agrees with the sentence beside it");
+    ok(!/replaces it/.test(v.src), `nothing promises wording that is not being generated (${v.src})`);
+    eq(errors.length, 0, `the transitional engine read throws nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  {
+    const spy = cards.find((c) => c.depth === "index");
+    const base = neuronFor(spy);
+    const idea = { title: "Range", structure: "iron condor", direction: "neutral", invalidation: "The state ends past the put wall at 760.00", horizon: "5 sessions",
+      robustness: 2, robustnessWord: "fair", restsOn: ["state", "gamma", "levels"], fromState: true, thesis: "The range holds." };
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, spy, { neuron: { ...base, status: "ok", summary: "SPY holds its range. More.", ideas: [idea] } });
+    const v = await page.evaluate(() => ({ ideas: document.querySelectorAll("#ftVerdict .ft-idea").length, slots: document.querySelectorAll("#ftVerdict .ft-slots").length,
+      bad: [...document.querySelectorAll("#ftVerdict [data-state]")].filter((n) => n.dataset.state === "unavailable" || n.dataset.state === "pending").length,
+      snug: getComputedStyle(document.getElementById("m-context")).alignSelf }));
+    eq(v.ideas, 1, "an index dossier with an ok Neuron draws the Neuron's idea");
+    eq(v.slots, 0, "without the priced PoP, EV and Risk row the engine never fills for an index");
+    eq(v.bad, 0, "so its verdict carries no unavailable or pending mark");
+    eq(v.snug, "start", "and Context on an index sits at its own height beside Tape instead of stretching to an empty card");
+    eq(errors.length, 0, `the index idea throws nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  {
+    const spy = cards.find((c) => c.depth === "index");
+    const base = neuronFor(spy);
+    const ctx = clone(base.context);
+    ctx.state = { ...ctx.state, state: "pinned", direction: null, flow: "bearish", brief: null };
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    await mount(page, spy, { neuron: { status: "pending", scope: spy.ticker, summary: null, ideas: [], context: ctx } });
+    const v = await page.evaluate(() => ({ line: document.getElementById("ftVerdictT").textContent, cap: document.querySelector("#ftVerdict .ft-v-meta .ui-capsule").textContent.trim() }));
+    ok(v.line.includes("with flow bearish"), `the pinned reading names its flow (${v.line})`);
+    eq(v.cap, "Bearish", "and a pinned state with no direction takes its capsule from that flow, not a contradicting Neutral");
+    await page.close();
+    const other = clone(full);
+    const p2 = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    await mount(p2, other, {});
+    eq(await p2.evaluate(() => getComputedStyle(document.getElementById("m-context")).alignSelf), "auto", "a single-name Context keeps the grid's row height");
+    await p2.close();
+  }
+
+  {
+    const card = clone(full);
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, card, { neuron: { status: "pending", scope: card.ticker, summary: null, ideas: [], context: null } });
+    const first = await page.evaluate(() => ({ cov: !!document.getElementById("ftNeuronCov"), src: document.getElementById("ftVerdictSrc").textContent }));
+    ok(!first.cov && /replaces it/.test(first.src), `a pending first answer reads the engine block and says the wording is on its way (${first.src})`);
+    let calls = 0;
+    await page.route("**/api/flows/summary*", (route) => {
+      calls++;
+      const body = calls === 1 ? { ...neuronFor(card), status: "pending", summary: null, ideas: [] } : { status: "unavailable", scope: card.ticker };
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
+    });
+    await page.waitForFunction(() => !!document.getElementById("ftNeuronCov"), null, { timeout: 12000 });
+    const mid = await page.evaluate(() => ({ read: document.getElementById("ftVerdict").dataset.read, src: document.getElementById("ftVerdictSrc").textContent }));
+    eq(mid.read, "card", "a later pending answer that brings the Neuron's context upgrades the card read at once");
+    ok(/replaces it/.test(mid.src), "while the wording is still being generated");
+    await page.waitForFunction(() => !/replaces it/.test(document.getElementById("ftVerdictSrc").textContent), null, { timeout: 15000 });
+    const last = await page.evaluate(() => ({ read: document.getElementById("ftVerdict").dataset.read, cov: !!document.getElementById("ftNeuronCov") }));
+    ok(last.read === "card" && last.cov, "when the poll ends without wording, the card read stays and drops its promise");
+    eq(errors.length, 0, `the polled verdicts throw nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
 } finally {
   await browser.close();
   fs.rmSync(EMIT_DIR, { recursive: true, force: true });

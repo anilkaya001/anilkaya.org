@@ -208,6 +208,7 @@ button.ft-idea-t:hover { color: var(--accent-ink); }
 .ft-grid[hidden] { display: none; }
 .ft-grid { align-items: stretch; }
 .ft-grid > * { grid-column: 1 / -1; min-width: 0; }
+.ft-grid > .ft-snug { align-self: start; }
 .ft-m { scroll-margin-top: calc(var(--bar-h) + var(--safe-t) + var(--sp-4)); }
 @container ftgrid (min-width: 700px) {
   .ft-grid > .ft-md6 { grid-column: span 6; }
