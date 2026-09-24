@@ -405,7 +405,12 @@ flows-positioning-contract
 flows-legs-contract
 flows-live-contract    flows-freshness-contract
 flows-quant-card       flows-track-render
+flows-pipeline-contract
 ```
+
+`flows-pipeline-contract` was measured on 2026-09-24: 123 s with no server. It
+was on neither list, so a source scan in it (every ingest call site must
+`await ingestHeaders(`) went unrun until CI caught it.
 
 `flows-quant` was measured on 2026-09-23: about 5 s with no server (8 s at a
 load average of 4.6 on 4 cores). It spawns itself once more, as a fresh
