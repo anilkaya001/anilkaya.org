@@ -64,7 +64,7 @@
     alerts: null, alertsState: { state: "pending", reason: "Reading the flagged windows." }, alertsKind: "pending",
     payload: null, feedState: { state: "pending", reason: "Reading the counter feed." }, feedKind: "pending",
     namesState: { state: "pending", reason: "Reading the counter feed." },
-    alertKeys: null, feedKeys: null, urgency: new Map(), urgencyAsked: false,
+    alertKeys: null, feedKeys: null, urgency: new Map(), urgencyAsked: new Set(),
   };
   const charts = { timeline: null };
 
@@ -506,50 +506,52 @@
   }
 
   async function paintUrgency() {
-    if (S.alertsKind !== "ok") return;
-    const board = aggregate(S.alerts.rows).filter((g) => g.st === "board:long" || g.st === "board:short").slice(0, 6);
-    if (!board.length) {
-      silence(host.urgency, { state: "quiet", reason: "No board name is among the flagged windows, and urgency is measured only for the board's deep names." }, "Urgency", 200);
-      return;
-    }
-    const session = typeof S.alerts.sessionDate === "string" ? S.alerts.sessionDate : null;
+    if (S.alertsKind !== "ok" || S.feedKind === "pending") return;
+    const cov = S.feedKind === "ok" && Array.isArray(S.payload.coverage) ? new Set(S.payload.coverage.map((c) => c && c.t)) : null;
+    const board = aggregate(S.alerts.rows).filter((g) => (g.st === "board:long" || g.st === "board:short") && (!cov || cov.has(g.t))).slice(0, 6);
+    const none = { state: "quiet", reason: "No deep board name is among the flagged windows. Urgency is read from each name's own alert tape, which the run keeps only for the names the board went deep on." };
+    if (!board.length) { silence(host.urgency, none, "Urgency", 200); return; }
+    const m = UI.freshness && UI.freshness.market ? UI.freshness.market() : null;
+    const session = (S.payload && typeof S.payload.sessionDate === "string" && S.payload.sessionDate) || (m && m.expected) || null;
+    const old = (al) => !!al && !!session && typeof al.asOf === "string" && al.asOf < session;
     const draw = () => {
-      const got = board.map((g) => ({ g, u: S.urgency.get(g.t) }));
+      const got = board.map((g) => ({ g, u: S.urgency.get(g.t) })).filter((x) => !(x.u && x.u.shallow));
+      if (!got.length) { silence(host.urgency, none, "Urgency", 200); return; }
       const vals = got.map((x) => (x.u && x.u.tape ? n(x.u.tape.urgency) : null)).filter((v) => v !== null);
       const max = vals.length ? Math.max(...vals, 1e-9) : 1;
-      const worstState = UI.worst(got.map((x) => (x.u ? (x.u.tape && session && typeof x.u.tape.asOf === "string" && x.u.tape.asOf < session
-        ? { state: "stale", reason: x.g.t + "'s alert tape is from " + x.u.tape.asOf + ", before this record's session of " + session + "." } : x.u.st) : { state: "pending", reason: "Reading this name's card." })));
-      setModuleState(host.urgency, worstState.state === "ok" ? { state: "ok" } : { state: vals.length ? "quiet" : worstState.state, reason: worstState.reason }, "Urgency");
+      const w = UI.worst(got.map((x) => (!x.u ? { state: "pending", reason: "Reading this name's card." } : old(x.u.tape)
+        ? { state: "stale", reason: x.g.t + "'s alert tape is from " + x.u.tape.asOf + ", before the last completed session, " + session + "." } : x.u.st)));
+      setModuleState(host.urgency, w.state === "ok" ? { state: "ok" } : w.state === "stale" || !vals.length ? w : { state: "quiet", reason: w.reason }, "Urgency");
       const ranked = got.slice().sort((a, b) => (n(b.u && b.u.tape && b.u.tape.urgency) ?? -1) - (n(a.u && a.u.tape && a.u.tape.urgency) ?? -1));
       const items = ranked.map((x, i) => {
         const al = x.u && x.u.tape;
         const u = al ? n(al.urgency) : null;
         const st = x.u ? x.u.st : { state: "pending", reason: "Reading this name's card." };
         const floor = !!al && al.complete === false;
-        const old = !!al && session && typeof al.asOf === "string" && al.asOf < session;
+        const late = old(al);
         return h("a", { class: "fu-urow", href: tickerHref(x.g.t),
-          title: al ? x.g.t + " " + MID + " tape of " + (al.asOf || "an unstated session") + (floor ? ", cut short before the open, so a floor" : "") + (old ? ", older than this record's " + session : "") : null },
+          title: al ? x.g.t + " " + MID + " tape of " + (al.asOf || "an unstated session") + (floor ? ", cut short before the open, so a floor" : "") + (late ? ", older than the last completed session, " + session : "") : null },
           h("span", { class: "fu-tk is-2" }, h("span", { class: "fu-tk-l" }, h("b", null, x.g.t), sideGlyph(x.g.st)),
             h("small", null, al && n(al.n) !== null ? count(al.n) + " alerts " + MID + " " + pct0(al.sweepShare) + " sweep" : st.state === "pending" ? "Pending" : DASH)),
           h("span", { class: "fu-meter", "aria-hidden": "true" }, u === null ? null : h("i", { style: { width: ((u / max) * 100).toFixed(1) + "%", "--i": String(i) } })),
           u === null ? mark(st.state === "ok" ? { state: "unavailable" } : st)
-            : h("span", { class: "fu-v fu-strong", "data-tone": old ? "silent" : null }, (floor ? "≥" : "") + F.pct(u, 2), old ? mark({ state: "stale" }).lastChild : null));
+            : h("span", { class: "fu-v fu-strong", "data-tone": late ? "silent" : null }, (floor ? "≥" : "") + F.pct(u, 2), late ? mark({ state: "stale" }).lastChild : null));
       });
       host.urgency.replaceChildren(
         h("div", { class: "fu-urow fu-head", "aria-hidden": "true" }, h("span", null, "Name"), h("span", null, "Sweeps into new OI"), h("span", { class: "fu-v" }, "of ADV")),
         h("div", { class: "ui-list fu-list", role: "group", "aria-label": "Board names ranked by urgency" }, items));
     };
     draw();
-    if (S.urgencyAsked) return;
-    S.urgencyAsked = true;
-    const queue = board.map((g) => g.t);
+    const queue = board.map((g) => g.t).filter((t) => !S.urgencyAsked.has(t));
+    queue.forEach((t) => S.urgencyAsked.add(t));
     const one = async (t) => {
       try {
         const res = await fetch("/api/flows/card-x?t=" + encodeURIComponent(cardKey(t)), { credentials: "same-origin", headers: { Accept: "application/json" } });
         if (!res.ok) throw new Error("HTTP " + res.status);
         const cx = await res.json();
         const { alerts: tape } = cx || {};
-        if (!cx || cx.status === "pending") S.urgency.set(t, { st: { state: "pending", reason: "This name's card extension has not been published yet." } });
+        if (cx && cx.status !== "pending" && !tape && cx.scope !== "deep") S.urgency.set(t, { shallow: true });
+        else if (!cx || cx.status === "pending") S.urgency.set(t, { st: { state: "pending", reason: "This name's card extension has not been published yet." } });
         else if (!tape) S.urgency.set(t, { st: { state: "unavailable", reason: "This name's card carries no alert tape." } });
         else if (tape.status !== "ok") S.urgency.set(t, { st: UI.stateOf({ status: tape.status === "unreadable" ? "withheld" : tape.status, reason: tape.why ? "Vendor code: " + tape.why + "." : null }, "alert tape"), tape: null });
         else S.urgency.set(t, { st: { state: "ok" }, tape });
@@ -874,7 +876,7 @@
       }
     }
     if (kind === "ok" || kind === "absent" || kind === "withheld") paintSurprise();
-    if (S.alertsKind === "ok") { paintTimeline(false); paintNames(); }
+    if (S.alertsKind === "ok") { paintTimeline(false); paintNames(); if (S.alerts.rows.length) paintUrgency(); }
     paintMeta();
     paintStatus();
     syncNote();
