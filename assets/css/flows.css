@@ -8,7 +8,7 @@
   --font-ui: var(--font-figure);
 
   --ground-base: #07090e;
-  --ground-sky: url("/assets/img/atmosphere.svg?v=226") center / cover no-repeat;
+  --ground-sky: url("/assets/img/atmosphere.svg?v=227") center / cover no-repeat;
   --ground:
     linear-gradient(180deg, rgba(6, 8, 12, 0.50) 0%, rgba(6, 8, 12, 0.70) 26%, rgba(7, 8, 10, 0.88) 42%, rgba(8, 8, 9, 0.94) 60%, rgba(7, 7, 8, 0.97) 100%),
     radial-gradient(70% 50% at 12% 0%, rgba(64, 132, 230, 0.10), transparent 70%),

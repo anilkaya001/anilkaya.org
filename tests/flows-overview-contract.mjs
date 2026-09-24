@@ -407,6 +407,24 @@ try {
     ok(meta.screened.includes("264"),
        "and how many names were screened, from the market payload");
 
+    const head = await page.evaluate(() => {
+      const box = document.getElementById("hmVerdict");
+      return {
+        title: document.getElementById("fxTitle").textContent.trim(),
+        line: document.getElementById("hmVerdictT").textContent.trim(),
+        by: box.querySelector(".hm-verdict-by").textContent.trim(),
+        mark: (box.querySelector(".hm-mark") || {}).dataset?.state || null,
+        pending: box.querySelectorAll("[data-state=pending]").length,
+      };
+    });
+    eq(head.title, "Last session",
+       "a session that is not today's Eastern trading day is titled as the last session, never as Today over an older date");
+    eq(head.line, "Bearish premium: flow bias \u22122.1%, 12 names net sold against 9 bought.",
+       "with no written summary the verdict line is computed from the page's own flow bias and breadth");
+    eq(head.by, "Computed", "and is attributed to the arithmetic rather than to Neuron");
+    eq(head.mark, "quiet", "under a quiet mark");
+    eq(head.pending, 0, "never a bare pending sign where a reading exists");
+
     eq(tiles["Flow bias"]?.v, "−2.1%",
        "the dollar-weight tilt is a share of premium, with its unit");
     const bias = await chipWhy(page, "Flow bias");
@@ -912,6 +930,30 @@ try {
     eq((await page.locator("#ccWatchSub").textContent()).trim(), "",
        "and the module header counts nothing it was never given");
     await page.unroute("**/api/flows/board?side=watch");
+
+    await page.route("**/api/flows/board?side=watch", (route) => route.fulfill({
+      status: 200, contentType: "application/json",
+      body: JSON.stringify({ ...watch, rows: [], status: "thin", neutral: 0, deadBand: 1 }),
+    }));
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccWatch [data-empty]", { timeout: 15000 });
+    const thin = await silenceOf(page, "#ccWatch [data-empty]");
+    eq(thin.kind, "empty", "a thin watch board, with no name inside the band, is the measured quiet and not an outage");
+    eq(thin.word, "Quiet", "in one word on the surface");
+    ok(/cleared the ±1 band/.test(thin.text), `and says why behind Why (${thin.text})`);
+    eq((await page.locator("#ccWatchSub").textContent()).trim(), "0", "with its count beside the title");
+    await page.unroute("**/api/flows/board?side=watch");
+
+    const todayET = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
+    for (const [side, rows] of [["long", bullRows], ["short", bearRows]]) {
+      await page.route("**/api/flows/board?side=" + side, (route) => route.fulfill({ status: 200, contentType: "application/json",
+        body: JSON.stringify(board(side, rows, todayET, { deep: 4 })) }));
+    }
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccMetaDate[datetime]", { timeout: 15000 });
+    eq(await page.locator("#fxTitle").textContent(), "Today",
+       "and only a session that IS today's Eastern date is titled Today");
+    for (const side of ["long", "short"]) await page.unroute("**/api/flows/board?side=" + side);
   }
 
   {
@@ -1276,8 +1318,8 @@ try {
     eq(tiles.Cleared.halves[0], pooled.long,
        "and the same on the bullish side");
 
-    ok(/5 of 12 bullish carried · 4 of 9 bearish carried/.test(onePop.status),
-       `the status line reconciles the rows it drew against the same pool (${onePop.status})`);
+    ok(/^Bullish 5 of 12 · Bearish 4 of 9\b/.test(onePop.status),
+       `the status line reconciles the rows it drew against the same pool, a word and a count per side (${onePop.status})`);
     eq(onePop.bullText, "12", "the pole count is the pool its link opens, not the excerpt on the wire");
     eq(onePop.bullSub, "top 5 of 12",
        "and says it is the top five of that pool");
@@ -1730,9 +1772,9 @@ try {
        `(${metaLive.datetime})`);
     eq(metaLive.kind, null,
        "unmarked, because one half answering is enough to know which session this is");
-    ok(/15 of 24 inside the band/.test(status),
+    ok(/Band 15 of 24/.test(status),
        `and still states how much of the pool the band held (${status})`);
-    ok(/\u2014 bullish · 4 bearish/.test(status),
+    ok(/Bullish \u2014 · Bearish 4/.test(status),
        `while counting the unpublished side as nothing known rather than as 0 (${status})`);
     ok(!/could not be read/.test(status),
        `and a key that has not published is not reported as a failed fetch (${status})`);
@@ -2773,6 +2815,69 @@ try {
     eq(src.facts.Source, "live:market", "and the disclosure names the live key as the source");
     await shut(page);
     await page.unroute("**/api/flows/lk?k=market");
+
+    const heroNow = () => page.evaluate(() => {
+      const pill = document.querySelector("#hmTideState .hm-pill");
+      return {
+        value: document.getElementById("hmTideV").dataset.value || document.getElementById("hmTideV").textContent.trim(),
+        state: pill.dataset.state, pill: pill.textContent.trim(),
+        svg: document.querySelectorAll("#hmTide svg[role=img]").length,
+        empty: (document.querySelector("#hmTide [data-empty]") || {}).dataset?.empty || null,
+        note: (document.querySelector("#hmTide .ui-silent-t") || {}).textContent || null,
+        zero: Array.from(document.querySelectorAll("#hmTideLegs .ui-metric-v"), (v) => v.textContent.trim())[2],
+      };
+    });
+    const liveTide = (n, fresh, extra = {}) => (route) => route.fulfill({
+      status: 200, headers: { "Content-Type": "application/json", "X-Fresh-State": fresh },
+      body: JSON.stringify({ status: "ok", session: SESSION, fresh: { readAt: liveAt },
+        tide: { status: "ok", t: ts.slice(0, n), ncp: [5e6, 3e6, 5e6, 9e6].slice(0, n), npp: [1e6, 2e6, 1e6, 1e6].slice(0, n),
+                net: [4e6, 1e6, 4e6, 8e6].slice(0, n) }, ...extra }) });
+    const heroAfter = async () => {
+      await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+      await page.waitForSelector("#hmTideState .hm-pill:not([data-state=pending])", { timeout: 15000 });
+      return heroNow();
+    };
+
+    await page.route("**/api/flows/lk?k=market", liveTide(1, "live"));
+    const opening = await heroAfter();
+    eq(opening.value, "+$100.1M",
+       "a live tide of one read (the opening minutes) yields to the last session's whole tide rather than to Pending");
+    eq(opening.svg, 1, "and the river is drawn from it");
+
+    await page.route("**/api/flows/pulse", (route) => route.fulfill({ status: 200,
+      headers: { "Content-Type": "application/json", "X-Fresh-State": "stale" },
+      body: JSON.stringify({ ...pulsePayload, readAt: liveAt, live: { key: "live:market", session: SESSION },
+        tide: { status: "ok", points: [{ t: ts[0], callPrem: 5e6, putPrem: 1e6 }] } }) }));
+    const one = await heroAfter();
+    eq(one.value, "+$4.0M", "with one read anywhere, the hero prints that read");
+    eq(one.state, "live", "marked by the live key's own state");
+    eq(one.empty, null, "and the river region is not a waiting sign");
+    eq(one.note, "First read", "but one quiet word: the river draws from the second read");
+    await page.unroute("**/api/flows/pulse");
+
+    await page.route("**/api/flows/lk?k=market", liveTide(4, "stale"));
+    const late = await heroAfter();
+    eq(late.state, "stale", "a live tide past its fresh window is still drawn, marked stale");
+    eq(late.svg, 1, "with its river");
+    ok(/Stale/.test(late.pill) && /\d:\d\d/.test(late.pill) || /Aug/.test(late.pill),
+       `and the pill carries when it was read (${late.pill})`);
+
+    await page.route("**/api/flows/lk?k=breadth", (route) => route.fulfill({ status: 200, contentType: "application/json",
+      body: JSON.stringify({ status: "ok", session: SESSION, dte: { zero: { status: "ok", t: ts, net: [0, 1e6, 3e6, 7e6] } } }) }));
+    await page.route("**/api/flows/lk?k=market", liveTide(4, "live",
+      { zeroDte: { status: "ok", t: ts, net: [0, 5e5, 1e6, 2.5e6] } }));
+    eq((await heroAfter()).zero, "+$7.0M", "the 0DTE leg reads live:breadth.dte.zero before live:market.zeroDte");
+    await page.unroute("**/api/flows/lk?k=breadth");
+    await page.route("**/api/flows/lk?k=market", liveTide(4, "live"));
+    eq((await heroAfter()).zero, "\u2014", "and a live tide with no live 0DTE series does not borrow another session's number");
+    await page.unroute("**/api/flows/lk?k=market");
+
+    await page.route("**/api/flows/pulse", (route) => route.fulfill({ status: 200, contentType: "application/json",
+      body: JSON.stringify({ status: "pending" }) }));
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#hmTide [data-empty]", { timeout: 15000 });
+    eq((await heroNow()).empty, "pending", "only with no tide anywhere does the hero fall silent");
+    await page.unroute("**/api/flows/pulse");
 
     await page.unroute(NEW_KEYS);
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
