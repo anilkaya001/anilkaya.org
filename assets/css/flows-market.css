@@ -74,6 +74,30 @@
 .mk-hush.is-row > .ui-g { font-size: 17px; }
 .mk-hush.is-row > button { margin-left: auto; }
 
+.flows-body .mk-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 22px;
+  padding: 0 8px 0 6px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--fill-4);
+  color: var(--label-2);
+  font: var(--t-caption);
+  font-weight: 500;
+  letter-spacing: 0;
+  vertical-align: middle;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.mk-chip::after { content: ""; position: absolute; inset: -11px -2px; }
+.mk-chip .ui-g { font-size: 12px; }
+.flows-body .mk-chip:hover { background: var(--fill-3); color: var(--label-1); }
+.mk-small-open { position: relative; height: 56px; }
+.mk-small-open::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 1px dashed var(--sep-strong); }
+.mk-small-open > i { position: absolute; left: 0; top: calc(50% - 3px); width: 6px; height: 6px; border-radius: 50%; background: var(--tone, var(--label-2)); }
 .mk-mark[data-state="stale"] { color: var(--warn); }
 .mk-mark[data-state="pending"] .ui-g { animation: ui-spin 6s linear infinite; }
 .mk-mark[data-state="unreadable"] { color: var(--down); }
