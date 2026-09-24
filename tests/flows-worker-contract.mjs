@@ -1536,6 +1536,14 @@ try {
         okAt: new Date(et("2026-09-24T10:06:00-04:00")).toISOString(), why: "holiday" },
       "TIER 1 TELEMETRY FROM D1: /now carries when the last tick began, when one last wrote live:market and how the " +
         "last one ended — on a flows_clock created with 0010's columns, which the Worker's first use upgraded in place");
+      deep(nb.clock, { day: "2026-09-24", trading: 0, earlyClose: null },
+        "THE SESSION CLOCK TIER 2 READS: /now carries the tape-derived day verdict, so the Actions loop stops on a " +
+        "holiday or at an early close the calendar alone cannot know");
+      const ic = await ingest("clock", "GET", LIVE_TOKEN);
+      deep([ic.status, await ic.json()], [200, { key: "clock", clock: { day: "2026-09-24", trading: 0, earlyClose: null } }],
+        "and the Actions loop reads the same verdict from the ingest route under its live credential, not a signed-in route");
+      eq((await ingest("clock", "GET", "wrong-token")).status, 401, "never without a credential");
+      eq((await ingest("clock", "POST", LIVE_TOKEN, {})).status, 405, "and only by GET: the clock is written by Tier 1 alone");
       eq(nb.keys.pulse.session, "2026-09-22", "and nightly keys carry their session");
       eq(nb.keys.brief.state, "pending", "an unpublished nightly key is pending too");
       ok(nb.phase && typeof nb.phase.phase === "string" && typeof nb.phase.endsAt === "string",
@@ -1583,6 +1591,18 @@ try {
         eq(vendor.count(/stock-state$/) - before, 0, "inside its life a second read is served from the cache");
         eq(q2.headers.get("x-chain-cache"), "hit", "and says so");
       }
+
+      const beforeOpen = vendor.count(/^\/api\/(market|net-flow)\//);
+      for (const hm of ["09:31", "09:36", "09:41"]) {
+        marketNow.value = et(`2026-09-25T${hm}:00-04:00`);
+        await tick(RTH, `2026-09-25T${hm}:00-04:00`);
+      }
+      const opened = await (await fetch(L("/api/flows/now?k=market"), { headers: cookie })).json();
+      ok(vendor.count(/^\/api\/(market|net-flow)\//) - beforeOpen === 6 && opened.clock.day === "2026-09-25" &&
+         opened.clock.trading === null && opened.tier1.why === "written" &&
+         opened.tier1.okAt === new Date(et("2026-09-25T09:41:00-04:00")).toISOString(),
+      "THE MORNING AFTER, ON REAL D1: the 09:31 tick rolls flows_clock to the new day with trading NULL, and the 09:36 " +
+        "and 09:41 ticks still read and write — a NULL verdict is undecided, never a holiday");
     } finally {
       await live.stop();
       await vendor.close();

@@ -320,7 +320,10 @@ export function shapeTideFeed(raw, { session, withPx = false, bucketMin = 5, che
     time: "timestamp", fields: withPx ? PX_TIDE_FIELDS : TIDE_FIELDS, basis: "cumulative",
     bucketMin, ...rthWindow(date), dp: { px: 4 }, check,
   });
-  if (!series.n) return { status: "unreadable", reason: SILENCE.unshaped, date, ...series };
+  if (!series.n) {
+    const blank = series.seen > 0 && series.dropped === series.seen;
+    return { status: blank ? "quiet" : "unreadable", reason: blank ? SILENCE.empty : SILENCE.unshaped, date, ...series };
+  }
   const prior = typeof session === "string" && date && date < session;
   return { status: prior ? "prior" : "ok", reason: prior ? SILENCE.prior : null, date, ...series };
 }

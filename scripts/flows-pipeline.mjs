@@ -53,7 +53,9 @@ import { runMarketLegs, windowTickersOf, totalsHistory, MARKET_LEG_CALLS } from 
 import { makeFakeVendor } from "./flows-legs/fake-vendor.mjs";
 import { makeCardXStore, publishCardX } from "./flows-legs/card-x.mjs";
 import { buildIndexDossiers } from "./flows-legs/index-dossier.mjs";
-import { runLive, runLiveLoop, chainDispatch, dryLiveTicks, readHeldAlerts, LIVE_READ_PACE_MS } from "./flows-legs/live.mjs";
+import {
+  runLive, runLiveLoop, chainDispatch, dryLiveTicks, readHeldAlerts, readLiveClock, LIVE_READ_PACE_MS,
+} from "./flows-legs/live.mjs";
 import { LIVE_OIDC, actionsIdToken, jwtExpiry } from "../shared/flows-oidc.js";
 
 const ARGS = new Set(process.argv.slice(2));
@@ -2808,6 +2810,12 @@ const PUBLISH_RETRIES = 3;
 const PUBLISH_RETRY_BUDGET_MS = 90_000;
 let publishRetrySpentMs = 0;
 
+export function resetPublishRetryBudget() {
+  const spent = publishRetrySpentMs;
+  publishRetrySpentMs = 0;
+  return spent;
+}
+
 const PUBLISH_RETRYABLE = new Set([403, 408, 429, 500, 502, 503, 504]);
 
 export function publishRetryDelay(attempt, {
@@ -4045,14 +4053,18 @@ async function runLiveMode() {
     if (errors.length) console.warn(`live: ${errors.length} key(s) not published — ${errors.join("; ")}`);
     return errors.length > 0;
   };
+  const readClock = () => readLiveClock(readStoredOnce);
   if (force || process.env.FLOWS_LIVE_LOOP !== "1") {
-    const result = await runLive({ uw, publish, readStored, shapeNews, origin, force });
+    const clock = force ? null : await readClock();
+    const result = await runLive({ uw, publish, readStored, shapeNews, origin, force, clock });
     if (reportErrors(result)) process.exitCode = 1;
     return result;
   }
   const loop = await runLiveLoop({
-    pass: async ({ first }) => {
-      const result = await runLive({ uw, publish, readStored, shapeNews, origin, skipRecent: first });
+    readClock,
+    pass: async ({ first, clock }) => {
+      resetPublishRetryBudget();
+      const result = await runLive({ uw, publish, readStored, shapeNews, origin, skipRecent: first, clock });
       return { skipped: result.skipped || null, errored: reportErrors(result) };
     },
     chain: ({ at }) => chainDispatch({ env: process.env, at }),

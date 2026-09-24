@@ -10,14 +10,32 @@ export const LIVE_READ_PACE_MS = LIVE_BUDGET.tier2PaceMs;
 
 export const LIVE_WRITER = "flows-live";
 
-export function liveWindow(at) {
-  const p = phaseAt(at, null);
+export function liveWindow(at, clock = null) {
+  const p = phaseAt(at, clock);
   if (!p) return { run: false, why: "no-clock", phase: null };
   if (!p.trading) return { run: false, why: "not-trading", phase: p };
-  const closeMin = closeMinutes(p.day, null);
+  const closeMin = closeMinutes(p.day, clock);
   if (p.minutes < PHASE_MINUTES.open) return { run: false, why: "before-open", phase: p };
   if (p.minutes > closeMin + LIVE_CLOCK.runAfterCloseMin) return { run: false, why: "after-close", phase: p };
   return { run: true, why: "session", phase: p };
+}
+
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+const clockFlag = (v) => (v === 0 || v === 1 ? v : null);
+
+export function sessionClock(body) {
+  const c = body && typeof body === "object" ? body.clock : null;
+  if (!c || typeof c !== "object" || typeof c.day !== "string" || !DAY_RE.test(c.day)) return null;
+  return { day: c.day, trading: clockFlag(c.trading), earlyClose: clockFlag(c.earlyClose) };
+}
+
+export async function readLiveClock(readOnce) {
+  try {
+    const read = await readOnce("clock");
+    return sessionClock(read && read.payload);
+  } catch {
+    return null;
+  }
 }
 
 const rowsOfBoard = (read) => {
@@ -55,10 +73,10 @@ function firstRowKeys(raw) {
 
 export async function runLive({
   uw, publish, readStored, now = () => Date.now(), log = console.log, warn = console.warn, shapeNews = null,
-  origin = null, force = false, writer = LIVE_WRITER, skipRecent = true,
+  origin = null, force = false, writer = LIVE_WRITER, skipRecent = true, clock = null,
 } = {}) {
   const startedAt = now();
-  const window = liveWindow(startedAt);
+  const window = liveWindow(startedAt, clock);
   if (!force && !window.run) {
     log(`live: nothing to do (${window.why}) — the live layer reads only inside the regular session ` +
       `and ${LIVE_CLOCK.runAfterCloseMin} minutes after it`);
@@ -284,30 +302,53 @@ export async function chainDispatch({ env = {}, fetchImpl = fetch, at = Date.now
 const realSleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 
 export async function runLiveLoop({ pass, chain, now = () => Date.now(), sleep = realSleep, window = liveWindow,
-  slotMs = LIVE_LOOP.slotMs, budgetMs = LIVE_LOOP.budgetMs, log = console.log } = {}) {
+  readClock = async () => null, slotMs = LIVE_LOOP.slotMs, budgetMs = LIVE_LOOP.budgetMs, log = console.log,
+  warn = console.warn } = {}) {
   const startedAt = now();
   const passes = [];
-  const opening = window(startedAt);
+  let clock = null;
+  const refresh = async () => {
+    let read = null;
+    try { read = await readClock(); } catch { read = null; }
+    if (read) clock = read;
+    return clock;
+  };
+  await refresh();
+  const opening = window(startedAt, clock);
   if (!opening.run) {
     log(`live loop: nothing to do (${opening.why}) — a starter that ran outside the session exits without a pass`);
-    return { exit: "outside-window", why: opening.why, passes, chained: null };
+    return { exit: "outside-window", why: opening.why, passes, chained: null, clock };
   }
   for (;;) {
-    passes.push(await pass({ first: passes.length === 0, index: passes.length }));
+    const index = passes.length;
+    try {
+      passes.push(await pass({ first: index === 0, index, clock }));
+    } catch (error) {
+      const threw = error instanceof Error ? error.message : String(error);
+      warn(`live loop: pass ${index + 1} threw — ${threw.slice(0, 300)}; the loop carries on to the next slot`);
+      passes.push({ errored: true, threw: threw.slice(0, 300) });
+    }
+    await refresh();
     const next = nextSlot(now(), slotMs);
-    const ahead = window(next);
+    const ahead = window(next, clock);
     if (!ahead.run) {
       log(`live loop: the session window closes before ${new Date(next).toISOString()} (${ahead.why}); ` +
         `${passes.length} pass(es)`);
-      return { exit: "window-closed", why: ahead.why, passes, chained: null };
+      return { exit: "window-closed", why: ahead.why, passes, chained: null, clock };
     }
     if (next - startedAt > budgetMs) {
       const chained = await chain({ at: now() });
       log(`live loop: time budget spent after ${passes.length} pass(es) with the session still open — ` +
         `re-dispatched: ${chained.why}${chained.status ? " (" + chained.status + ")" : ""}`);
-      return { exit: "budget", why: "budget", passes, chained };
+      return { exit: "budget", why: "budget", passes, chained, clock };
     }
     await sleep(next - now());
+    await refresh();
+    const here = window(now(), clock);
+    if (!here.run) {
+      log(`live loop: the session window closed while waiting (${here.why}); ${passes.length} pass(es)`);
+      return { exit: "window-closed", why: here.why, passes, chained: null, clock };
+    }
   }
 }
 

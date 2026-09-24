@@ -12,9 +12,12 @@ import * as L from "../shared/flows-live.js";
 import * as W from "../shared/flows-live-worker.js";
 import * as FAKE from "../scripts/flows-legs/live-fake.mjs";
 import {
-  readHeldAlerts, boardPlan, liveWindow, runLive, runLiveLoop, chainDispatch, nextSlot, LIVE_LOOP,
+  readHeldAlerts, boardPlan, liveWindow, runLive, runLiveLoop, chainDispatch, nextSlot, LIVE_LOOP, readLiveClock,
+  sessionClock,
 } from "../scripts/flows-legs/live.mjs";
-import { shapeNews, liveCredential, liveCredentialSource, LIVE_BEARER_MARGIN_MS } from "../scripts/flows-pipeline.mjs";
+import {
+  shapeNews, liveCredential, liveCredentialSource, LIVE_BEARER_MARGIN_MS, resetPublishRetryBudget,
+} from "../scripts/flows-pipeline.mjs";
 import * as O from "../shared/flows-oidc.js";
 import { oidcIssuer, tickDb, tier1Bodies } from "./live-stubs.mjs";
 
@@ -73,6 +76,14 @@ const T = (iso) => Date.parse(iso);
   eq(phaseAt(edt("11:00"), holiday).phase, "closed",
     "A TAPE-DERIVED HOLIDAY (flows_clock.trading = 0 for today) is closed through the session — the repo holds no calendar");
   eq(phaseAt(edt("11:00"), holiday).lastClosed, "2026-09-22", "and its last closed session is the day before");
+  const undecided = { day: "2026-09-23", trading: null, earlyClose: null };
+  ok(phaseAt(edt("11:00"), undecided).phase === "rth" && phaseAt(edt("11:00"), undecided).trading === true &&
+     phaseAt(edt("11:00"), { day: "2026-09-23" }).trading === true,
+  "AN UNDECIDED DAY IS A TRADING DAY: the 09:31 tick rolls flows_clock to today with trading NULL until the 09:45 " +
+    "probe, and Number(null) is 0 — reading it as a closed day silenced Tier 1 for the rest of 2026-09-24");
+  ok(phaseAt(edt("11:00"), { day: "2026-09-23", trading: "0" }).phase === "closed" &&
+     phaseAt(edt("11:00"), { day: "2026-09-23", trading: 1 }).phase === "rth",
+  "only an explicit 0 closes the day");
   const half = { day: "2026-11-27", earlyClose: 1 };
   eq(phaseAt(T("2026-11-27T13:30:00-05:00"), half).phase, "post", "A TAPE-DERIVED EARLY CLOSE ends the session at 13:00");
   eq(new Date(sessionClose("2026-11-27", half)).toISOString(), "2026-11-27T18:00:00.000Z", "13:00 EST is 18:00Z");
@@ -635,6 +646,9 @@ const T = (iso) => Date.parse(iso);
   ok(/GITHUB_TOKEN: \$\{\{ github\.token \}\}/.test(wf) && /FLOWS_LIVE_LOOP: "1"/.test(wf),
     "the read step runs the session loop and hands it the run's own token for the chain dispatch — no new secret");
   ok(/LIVE_READY: \$\{\{ secrets\.UW_API_KEY != '' \}\}/.test(wf), "so the vendor key is the only secret it waits for");
+  ok(/uses: actions\/checkout@[0-9a-f]{40}\n(?:\s+if: .*\n)?\s+with:\n\s+persist-credentials: false\n/.test(wf),
+    "the checkout keeps no credential in .git/config: the job's token can dispatch workflows, and only the chain " +
+      "dispatch, which receives it through env, needs it");
   const uses = [...wf.matchAll(/uses:\s*(\S+)/g)].map((m) => m[1]);
   ok(uses.length >= 2 && uses.every((u) => /^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/.test(u)),
     `every action in the live job is pinned to a commit SHA (${uses.join(", ")}): id-token: write lets any step mint ` +
@@ -816,6 +830,22 @@ const T = (iso) => Date.parse(iso);
   deep(plan.ranked, ["CCC", "AAA", "BBB"], "the gamma rotation ranks board names by |score|");
   eq(liveWindow(T("2026-09-23T12:00:00Z")).why, "before-open", "the live run exits at once before the open");
   eq(liveWindow(T("2026-09-26T15:00:00Z")).why, "not-trading", "and on a weekend");
+  const thanksgiving = easternInstant("2026-11-26", 11 * 60);
+  eq(liveWindow(thanksgiving).why, "session",
+    "THE CALENDAR ALONE CANNOT KNOW A HOLIDAY: without the Worker's clock, Thanksgiving reads as a session");
+  eq(liveWindow(thanksgiving, { day: "2026-11-26", trading: 0, earlyClose: null }).why, "not-trading",
+    "so the live window takes the Worker's tape-derived clock, and a day it closed is not a session");
+  eq(liveWindow(thanksgiving, { day: "2026-11-25", trading: 0, earlyClose: null }).why, "session",
+    "a verdict for another day is never applied to this one");
+  const early = { day: "2026-11-27", trading: 1, earlyClose: 1 };
+  ok(liveWindow(easternInstant("2026-11-27", 13 * 60 + 25), early).run &&
+     liveWindow(easternInstant("2026-11-27", 13 * 60 + 30), early).why === "after-close" &&
+     liveWindow(easternInstant("2026-11-27", 13 * 60 + 30)).run,
+  "AN EARLY CLOSE ends the window at 13:25 (13:00 plus the run-after-close), which the calendar alone would run to 16:25");
+  const skipped = await runLive({ uw: async () => { throw new Error("no vendor call on a holiday"); },
+    publish: async () => {}, readStored: async () => { throw new Error("no store read on a holiday"); },
+    now: () => thanksgiving, log: () => {}, clock: { day: "2026-11-26", trading: 0, earlyClose: null } });
+  deep(skipped, { skipped: "not-trading" }, "and a single live pass on a closed day spends nothing");
 }
 
 {
@@ -1094,6 +1124,30 @@ const T = (iso) => Date.parse(iso);
     "so an ETF tide an hour in shapes to thirteen buckets ending at its latest filled minute, not rows-unshaped");
   eq(L.tideLastAt(tide), open + 60 * 60000,
     "and the tape's last instant is the last minute with values, not the pre-filled 15:59 placeholder");
+  const blank = { date: S, data: day(0) };
+  const early = L.shapeTideFeed(blank, { session: S, withPx: true });
+  ok(early.status === "quiet" && early.reason === L.SILENCE.empty && early.n === 0 && early.seen === 390 &&
+     early.dropped === 390,
+  "BEFORE THE FIRST PRINT a pre-filled feed is every minute a null placeholder: that is quiet (vendor-empty), " +
+    "no trade yet, not unreadable — nothing about the feed is broken");
+  const dteBlank = L.shapeNetFlowFeed({ date: S, data: [{ expiration: "zero_dte", data: day(0) }] },
+    { session: S, expiration: "zero_dte" });
+  ok(dteBlank.status === "quiet" && dteBlank.reason === L.SILENCE.empty && dteBlank.expiration === "zero_dte",
+    "and so is the 0DTE net flow at 09:30, through the same shaper");
+  eq(L.anyAnswered([early]), true, "a quiet feed answered, so the key it feeds is still written with its read time");
+  const garbled = L.shapeTideFeed({ date: S, data: [{ timestamp: "not a time", ncp: 1 }, ...day(0).slice(0, 3)] },
+    { session: S });
+  eq(garbled.status, "unreadable", "while rows the shaper cannot place (a bad timestamp among them) stay unreadable");
+  const offHours = L.shapeTideFeed({ date: S, data: [{ timestamp: new Date(open - 3600000).toISOString(), ncp: 1,
+    npp: 1 }] }, { session: S });
+  eq(offHours.status, "unreadable", "as do rows that all fall outside the session window");
+  let noted = [];
+  await runLive({ uw: async (path) => (/etf-tide|net-flow|sector-tide/.test(path) ? blank : { data: [] }),
+    publish: async () => {}, readStored: async () => ({ payload: null, absent: true }),
+    now: (() => { let t = easternInstant(S, 9 * 60 + 31); return () => (t += 50); })(),
+    log: (line) => noted.push(line), warn: () => {}, force: true });
+  ok(!noted.some((l) => /shaped none/.test(l)),
+    "and a live pass at 09:31 logs no 'returned rows but shaped none' for feeds that have simply not printed yet");
 }
 
 {
@@ -1133,6 +1187,24 @@ const T = (iso) => Date.parse(iso);
     "a tick no feed answered says so, and leaves tier1_ok_at where the last good tick put it");
   const early = await run(easternInstant(S, 9 * 60 + 20), { fetchVendor: vendor });
   eq(early.col("tier1_why"), "not-due", "a tick before the open is not-due");
+  {
+    const row = { id: 1, day: "2026-09-23", trading: 1, early_close: 0, tape_at: null, tape_moved_at: null };
+    const written = [];
+    for (let m = 9 * 60 + 31; m <= 10 * 60 + 6; m += 5) {
+      const tickAt = easternInstant(S, m);
+      const bodies = await tier1Bodies({ session: S, at: tickAt });
+      const t = await run(tickAt, { fetchVendor: async (path) => JSON.parse(bodies[path]), clockRow: { ...row } });
+      for (const patch of t.patches) {
+        const cols = /\(([^)]*)\) VALUES/.exec(patch.sql)[1].split(", ");
+        cols.forEach((c, j) => { row[c] = patch.args[j]; });
+      }
+      written.push([m, t.out.why || t.out.skipped, row.trading]);
+    }
+    ok(written.every(([, why]) => why === "written") && written[0][2] === null && row.trading === 1 && row.day === S,
+      "A SESSION THREADED THROUGH ITS OWN CLOCK ROW: the 09:31 tick rolls the day with trading NULL, and every tick " +
+        `after it still writes live:market; the 09:46 probe then records trading = 1 (${written.map(([m, w, tr]) =>
+          `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")} ${w} ${tr}`).join(", ")})`);
+  }
   const holiday = await run(at, { fetchVendor: vendor, clockRow: { id: 1, day: S, trading: 0 } });
   ok(holiday.out.skipped === "holiday" && holiday.col("tier1_why") === "holiday", "a tape-derived holiday says holiday");
   const off = await run(at, { env: { FLOWS_LIVE_MODE: "off" }, fetchVendor: vendor });
@@ -1214,6 +1286,94 @@ const T = (iso) => Date.parse(iso);
     ok(w.exit === "outside-window" && w.why === "not-trading" && passes === 0, "as does one on a weekend");
   }
   {
+    const TG = "2026-11-26";
+    const verdict = easternInstant(TG, 9 * 60 + 46);
+    const c = sim(easternInstant(TG, 9 * 60 + 31));
+    const passAt = [];
+    let reads = 0;
+    const r = await runLiveLoop({ now: c.now, sleep: c.sleep, log: () => {},
+      readClock: async () => { reads++; return c.now() >= verdict ? { day: TG, trading: 0, earlyClose: null } : { day: TG,
+        trading: null, earlyClose: null }; },
+      pass: async () => { passAt.push(c.now()); c.advance(40000); return {}; },
+      chain: async () => { throw new Error("never chain on a holiday"); } });
+    ok(r.exit === "window-closed" && r.why === "not-trading" && passAt.every((t) => t < verdict) && passAt.length === 4 &&
+       reads > passAt.length,
+    "A TAPE-DERIVED HOLIDAY: the loop reads the Worker's clock around every pass, and once Tier 1 has closed the day " +
+      `(09:46 on Thanksgiving) no pass follows and nothing is chained (${passAt.length} passes before the verdict)`);
+  }
+  {
+    const EC = "2026-11-27";
+    const c = sim(easternInstant(EC, 9 * 60 + 31));
+    const passAt = [];
+    const r = await runLiveLoop({ now: c.now, sleep: c.sleep, log: () => {},
+      readClock: async () => ({ day: EC, trading: 1, earlyClose: 1 }),
+      pass: async () => { passAt.push(c.now()); c.advance(40000); return {}; },
+      chain: async () => { throw new Error("never chain after an early close"); } });
+    ok(r.exit === "window-closed" && r.why === "after-close" && passAt.at(-1) === easternInstant(EC, 13 * 60 + 25),
+      `AN EARLY CLOSE: the last pass is at 13:25, not 16:25 (${new Date(passAt.at(-1)).toISOString()})`);
+    const verdict = easternInstant(EC, 13 * 60 + 36);
+    const d = sim(easternInstant(EC, 12 * 60));
+    const late = [];
+    const lr = await runLiveLoop({ now: d.now, sleep: d.sleep, log: () => {},
+      readClock: async () => ({ day: EC, trading: 1, earlyClose: d.now() >= verdict ? 1 : null }),
+      pass: async () => { late.push(d.now()); d.advance(40000); return {}; },
+      chain: async () => { throw new Error("never chain after an early close"); } });
+    ok(lr.exit === "window-closed" && lr.why === "after-close" && late.at(-1) === easternInstant(EC, 13 * 60 + 35),
+      "and when Tier 1 marks it only at 13:36, as its 30-minute quiet rule does, the loop stops at the next slot " +
+        `(last pass ${new Date(late.at(-1)).toISOString()})`);
+  }
+  {
+    const c = sim(et(12 * 60));
+    const TG = "2026-11-26";
+    const late = sim(easternInstant(TG, 12 * 60));
+    let passes = 0;
+    const w = await runLiveLoop({ now: late.now, sleep: late.sleep, log: () => {}, pass: async () => { passes++; },
+      readClock: async () => ({ day: TG, trading: 0, earlyClose: null }),
+      chain: async () => { throw new Error("never"); } });
+    ok(w.exit === "outside-window" && w.why === "not-trading" && passes === 0,
+      "a starter that begins on a day the Worker has already closed exits without a pass");
+    let calls = 0;
+    const flaky = await runLiveLoop({ now: c.now, sleep: c.sleep, log: () => {}, budgetMs: 24 * 3600 * 1000,
+      readClock: async () => { calls++; if (calls === 2) return { day: S, trading: 1, earlyClose: 1 }; throw new Error("down"); },
+      pass: async () => { c.advance(30000); return {}; }, chain: async () => { throw new Error("never"); } });
+    ok(flaky.exit === "window-closed" && flaky.why === "after-close" && flaky.clock.earlyClose === 1,
+      "a clock read that fails keeps the last verdict it had, so one blip never forgets an early close");
+  }
+  {
+    const c = sim(et(15 * 60 + 50));
+    const warned = [];
+    let n = 0;
+    const r = await runLiveLoop({ now: c.now, sleep: c.sleep, log: () => {}, warn: (l) => warned.push(l),
+      pass: async () => { n++; c.advance(20000); if (n === 2) throw new Error("unexpected vendor body"); return { errored: false }; },
+      chain: async () => { throw new Error("never"); } });
+    ok(r.exit === "window-closed" && r.passes.length === n && n > 3 && r.passes[1].errored === true &&
+       r.passes[1].threw === "unexpected vendor body" && r.passes.slice(2).every((p) => p.errored === false) &&
+       warned.length === 1,
+    "A PASS THAT THROWS is logged and recorded as errored, and the loop carries on: the next slots still run, so one bad " +
+      "vendor body costs one pass, not the rest of the session");
+  }
+  {
+    const at = { day: S, trading: 1, earlyClose: null };
+    const asked = [];
+    deep(await readLiveClock(async (key) => { asked.push(key); return { payload: { key: "clock", clock: at }, status: 200 }; }),
+      at, "THE CLOCK READ is the Worker's flows_clock verdict, through the ingest route under the live credential");
+    deep(asked, ["clock"], "one GET of the ingest key clock, not a signed-in page route");
+    eq(await readLiveClock(async () => ({ payload: null, failed: true, status: 400 })), null,
+      "a Worker that predates the key answers 400, which reads as no clock, so either deploy order works");
+    eq(await readLiveClock(async () => { throw new Error("offline"); }), null,
+      "and an unreachable Worker reads as no clock too (the loop then keeps its last verdict, or the weekday calendar)");
+    deep([sessionClock({ clock: { day: "2026-9-1", trading: 1 } }), sessionClock({ clock: { day: S, trading: "0",
+      earlyClose: 7 } })], [null, { day: S, trading: null, earlyClose: null }],
+    "a malformed day is no clock, and a flag that is not exactly 0 or 1 is unknown, never a verdict");
+    deep(W.clockView({ day: S, trading: null, earlyClose: "1", tier1At: 5 }), { day: S, trading: null, earlyClose: 1 },
+      "the Worker's view of its clock is the day and its two verdicts, NULL kept as undecided, nothing else");
+    const ingestSrc = read("worker.js");
+    ok(/if \(key === "clock"\) \{\s*requireMethod\(request, \["GET"\]\);\s*await ensureFlowsTables\(env\);\s*return FLOWS_LIVE\.serveIngestClock\(env, \{ json \}\);/
+      .test(ingestSrc) && ingestSrc.indexOf('if (key === "clock")') > ingestSrc.indexOf('if (!tokenKind) throw new HttpError(401'),
+    "the ingest route serves the clock to a verified credential only, and to GET only");
+    eq(resetPublishRetryBudget(), 0, "the publish retry budget can be reset, and a fresh process has spent none of it");
+  }
+  {
     const sent = [];
     const fetchImpl = async (url, init) => { sent.push({ url, init }); return { status: 204 }; };
     const at = et(15 * 60 + 11);
@@ -1235,7 +1395,13 @@ const T = (iso) => Date.parse(iso);
       fetchImpl: async () => ({ status: 403 }) })).why, "refused", "a refused dispatch is reported, not thrown");
   }
   const pipeline = read("scripts/flows-pipeline.mjs");
-  ok(/runLive\(\{ uw, publish, readStored, shapeNews, origin, skipRecent: first \}\)/.test(pipeline) &&
+  ok(/pass: async \(\{ first, clock \}\) => \{\s*resetPublishRetryBudget\(\);/.test(pipeline),
+    "EACH PASS HAS ITS OWN RETRY BUDGET: the loop resets the 90 s publish/read retry budget at the start of every " +
+      "pass, as each separate run had, so a blip at 10:00 cannot leave the 15:00 pass with no retries");
+  ok(/readClock = \(\) => readLiveClock\(readStoredOnce\)/.test(pipeline) && /runLiveLoop\(\{\s*readClock,/.test(pipeline) &&
+     /const clock = force \? null : await readClock\(\);/.test(pipeline),
+  "and --live gates both the loop and a single pass on the Worker's clock");
+  ok(/runLive\(\{ uw, publish, readStored, shapeNews, origin, skipRecent: first, clock \}\)/.test(pipeline) &&
      /chainDispatch\(\{ env: process\.env, at \}\)/.test(pipeline) && /process\.env\.FLOWS_LIVE_LOOP !== "1"/.test(pipeline),
   "--live runs the loop when the workflow asks for it, each pass after the first ignoring the heartbeat skip");
 }

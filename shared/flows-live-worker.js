@@ -5,7 +5,7 @@ import {
 } from "./flows-live.js";
 import {
   FRESH_CLASSES, PHASE_MINUTES, LIVE_CLOCK, freshHeaders, pendingHeaders, phaseAt, tier1Due, liveDispatchDue,
-  liveStalled, nightlyDispatchDue, easternDay, easternInstant, sessionOpen,
+  liveStalled, nightlyDispatchDue, easternDay, easternInstant, sessionOpen, clockClosed,
 } from "./flows-freshness.js";
 import { LIVE_OIDC, looksLikeJwt, rsaKeys, verifyLiveOidc, claimsBrief } from "./flows-oidc.js";
 
@@ -249,7 +249,7 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
   const clock = normalizeClock(clockRes && clockRes.results ? clockRes.results[0] : null);
   const breadthReadAt = breadthRes && breadthRes.results && breadthRes.results[0]
     ? Number(breadthRes.results[0].read_at) : null;
-  if (clock && clock.day === today && Number(clock.trading) === 0) {
+  if (clock && clock.day === today && clockClosed(clock.trading)) {
     if (telemetry) await clockPatchStatement(env.DB, { tier1Why: "holiday" }, at).run().catch(() => {});
     memoClock({ ...clock, tier1At: at, tier1Why: telemetry ? "holiday" : clock.tier1Why }, at);
     return { ...out, skipped: "holiday" };
@@ -503,6 +503,18 @@ export function parseList(raw, allow, max = 16) {
   return out;
 }
 
+const clockFlag = (v) => (v === null || v === undefined || v === "" ? null : Number(v) === 1 ? 1 : Number(v) === 0 ? 0 : null);
+
+export function clockView(clock) {
+  return clock && typeof clock.day === "string"
+    ? { day: clock.day, trading: clockFlag(clock.trading), earlyClose: clockFlag(clock.earlyClose) }
+    : null;
+}
+
+export async function serveIngestClock(env, { json }) {
+  return json({ key: "clock", clock: clockView(await readClock(env && env.DB)) });
+}
+
 export async function serveNow(env, url, now, { json, HttpError, quote }) {
   const liveKeys = parseList(url.searchParams.get("k"), (k) => liveKeyFromParam(k) !== null).map(liveKeyFromParam);
   const nightly = parseList(url.searchParams.get("n"),
@@ -558,6 +570,7 @@ export async function serveNow(env, url, now, { json, HttpError, quote }) {
     serverNow: now,
     tier1: { at: iso(clock && clock.tier1At), okAt: iso(clock && clock.tier1OkAt),
       why: clock && typeof clock.tier1Why === "string" ? clock.tier1Why : null },
+    clock: clockView(clock),
     phase: phase ? { phase: phase.phase, session: phase.session, trading: phase.trading,
       endsAt: Number.isFinite(phase.endsAt) ? new Date(phase.endsAt).toISOString() : null } : null,
     keys,

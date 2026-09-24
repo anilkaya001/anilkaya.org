@@ -2887,6 +2887,12 @@ async function route(request, env, url, ctx) {
 
     const key = url.searchParams.get("key") || "";
 
+    if (key === "clock") {
+      requireMethod(request, ["GET"]);
+      await ensureFlowsTables(env);
+      return FLOWS_LIVE.serveIngestClock(env, { json });
+    }
+
     if (key.startsWith("live:")) {
       const scope = FLOWS_LIVE.ingestScope(key, request.method, tokenKind);
       if (!scope.ok) throw new HttpError(scope.status, scope.code, scope.message);

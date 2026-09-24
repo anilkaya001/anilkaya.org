@@ -1214,6 +1214,11 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   that disagree on which earlier session they carry, is no verdict. A tide stuck
   at or before 13:05 ET for 30 minutes after 13:30 marks an early close. The
   repository still holds no calendar.
+- **An undecided day is a trading day.** The 09:31 tick rolls `flows_clock` to
+  the new day with `trading` NULL until the 09:45 probe decides it. Only an
+  explicit `0` closes a day. A NULL once read as closed (`Number(null)` is `0`),
+  so every tick after 09:31 skipped as a holiday, the probe never ran, and on
+  2026-09-24 `live:market` was written once, at 09:31, and never again.
 - **Buckets are sampled at their last row with values.** The vendor pre-fills a
   one-minute feed with a null row for every minute of the day not yet traded, so
   a five-minute bucket keeps its last row that carries a value, not its last row.
@@ -1238,6 +1243,19 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   landed under eight minutes ago; the loop's later passes do not. A single pass
   runs when `FLOWS_LIVE_LOOP` is unset or `FLOWS_LIVE_FORCE=1`. Dry run:
   `--live --dry-run`.
+- **The loop keeps the Worker's clock.** Before its first pass and around every
+  later one it reads `clock: { day, trading, earlyClose }` with a GET of the
+  ingest key `clock` under its live credential (`/api/flows/now` carries the same
+  view for signed-in pages). Once Tier 1 has marked the day closed from the tape
+  (from 09:46 ET) the loop makes no further pass and never chains. An early close
+  ends the window at 13:25 ET; Tier 1 marks one only after 13:30, so the loop
+  stops at the first slot after that verdict, about 13:35 to 13:40, instead of
+  running to 16:25. A failed clock read keeps the last verdict; with none, the
+  weekday calendar applies. A pass that throws is logged and recorded as errored
+  and the loop carries on to the next slot. Each pass starts with a fresh 90 s
+  publish/read retry budget, as each separate run had. The checkout keeps no
+  credential (`persist-credentials: false`); only the chain dispatch holds the
+  job token, through `env`.
 - **Tier 3** is on demand: `/api/flows/tape?t=` (a D1 stale-while-revalidate cache
   with a 20-second single-flight lease, one leg per refresh) and the quote on
   `/api/flows/live?t=` (5 s in session, 30 s pre/post, 6 h closed), both behind
