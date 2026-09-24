@@ -2,6 +2,7 @@
 .fd-head { display: flex; flex-direction: column; gap: var(--sp-2); padding-bottom: var(--sp-5); }
 .fd-head-t { display: flex; align-items: center; gap: var(--sp-3); }
 .fd-about-slot { display: inline-flex; }
+.fd-mod[hidden] { display: none; }
 .fd-about-slot .ui-info { margin: 0; }
 .fd-meta {
   display: flex;
@@ -201,10 +202,10 @@ a.fu-nrow:hover, a.fu-urow:hover, a.fu-crow:hover, a.fu-srow:hover { background:
 .fe-week {
   display: grid;
   grid-template-columns: 62px repeat(var(--days, 5), minmax(0, 1fr));
-  grid-template-rows: repeat(5, auto);
+  grid-template-rows: repeat(var(--rows, 5), auto);
   column-gap: var(--sp-3);
 }
-.fe-col { display: grid; grid-row: 1 / span 5; grid-template-rows: subgrid; min-width: 0; }
+.fe-col { display: grid; grid-row: 1 / -1; grid-template-rows: subgrid; min-width: 0; }
 .fe-col:not(.fe-labels) { padding: 0 var(--sp-3); border-radius: var(--r-md); background: var(--fill-4); }
 .fe-dh { display: flex; align-items: baseline; gap: 6px; padding: var(--sp-4) 0 var(--sp-3); white-space: nowrap; }
 .fe-dh b { font: var(--t-headline); letter-spacing: var(--t-headline-track); }

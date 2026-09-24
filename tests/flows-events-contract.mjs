@@ -1106,6 +1106,44 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
 }
 
 
+{
+  const print = (at, event, extra = {}) => ({ at, day: at.slice(0, 10), sd: 1, event, type: "report", tag: null,
+    prev: 1.1, prevRaw: "1.1%", forecast: -0.3, forecastRaw: "-0.3%", period: "August", ...extra });
+  const A = print(GATE_ORIGIN + "T12:30:00.000Z", "Durable Goods");
+  const B = print(GATE_ORIGIN + "T14:00:00.000Z", "New Home Sales", { prevRaw: "607000", forecastRaw: "620000" });
+  const CAL = buildEvents([nameAt("WEEK", plusDays(GATE_ORIGIN, 1))], { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE });
+  CAL.macro = { status: "ok", rows: [A, { ...A }, B, { ...B }], seen: 4, past: 0 };
+  CAL.catalysts = { status: "ok", rows: [] };
+  const browser = await chromium.launch();
+  try {
+    for (const width of [1440, 390]) {
+      const { page, errors } = await openEvents(browser, CAL, { width, css: true });
+      const r = await page.evaluate(() => ({
+        weekState: document.getElementById("evWeekCard") ? document.getElementById("evWeekCard").dataset.state || null : null,
+        lanes: [...document.querySelectorAll("#evWeek .fe-lane > span:first-child")].map((n) => n.textContent),
+        divCells: document.querySelectorAll("#evWeek .fe-c-div").length,
+        macroRows: document.querySelectorAll("#evMacro .fe-mrow:not(.fu-head)").length,
+        weekMacro: document.querySelectorAll("#evWeek .fe-c-macro > *").length,
+        forecast: (document.querySelector("#evMacro .fe-mrow:not(.fu-head) .fu-strong") || {}).textContent,
+        over: document.documentElement.scrollWidth - window.innerWidth,
+      }));
+      deep(errors, [], `[${width}] the week renders with no ex-dividend producer and without throwing`);
+      deep(r.lanes, ["Macro", "Earnings", "FDA"],
+        `[${width}] a week with no ex-dividend rows draws no ex-dividend lane: no run reads the vendor's dividends ` +
+        "route on this plan, and a permanently unavailable lane dragged the whole module onto the unavailable glyph");
+      eq(r.divCells, 0, `[${width}] and no empty cell per day stands in for it`);
+      ok(r.weekState !== "unavailable", `[${width}] so the module is not marked unavailable for a lane with no producer (${r.weekState})`);
+      eq(r.macroRows, 2, `[${width}] the vendor's doubled prints are drawn once each in the Macro list`);
+      eq(r.weekMacro, 2, `[${width}] and once each in the week`);
+      eq(r.forecast, "\u22120.3%", `[${width}] and a negative raw forecast keeps the true minus sign`);
+      ok(r.over <= 1, `[${width}] and nothing overflows (${r.over}px)`);
+      await page.close();
+    }
+  } finally {
+    await browser.close();
+  }
+}
+
 console.log(`✓ flows-events: ${checks} assertions — a session count measured from the ` +
   `next session and never from the last completed session, with the wrong integer ` +
   `written down beside every right one, a window bound tested in the unit its name carries ` +

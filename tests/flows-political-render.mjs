@@ -573,6 +573,32 @@ try {
   }
 
   {
+    await put("political", { ...payload, holders: { status: "unavailable", reason: "not requested this run: the vendor answered this route with HTTP 422, refused since 2026-09-21, and a refusal that is a property of the plan is not bought again every night — it is asked once more 7 days after 2026-09-21" } });
+    const p4 = await open();
+    await p4.waitForSelector(ROWS("plRecent", "pl-recent"));
+    const refused = await p4.evaluate(() => {
+      const card = document.getElementById("plHoldersCard");
+      return { hidden: card.hidden, shown: card.getClientRects().length };
+    });
+    eq(refused.hidden, true,
+      "a holdings route the plan refuses (a 4xx other than 408 or 429, the pipeline's own test in holdersRefusal) " +
+      "leaves the module out of the page — a permanent unavailable tile is a waiting sign with nothing to wait for");
+    eq(refused.shown, 0, "and nothing of it is laid out");
+    await p4.close();
+
+    await put("political", { ...payload, holders: { status: "unavailable", reason: "HTTP 503" } });
+    const p4b = await open();
+    await p4b.waitForSelector("#plHolders [data-empty]");
+    const failed = await p4b.evaluate(() => ({
+      hidden: document.getElementById("plHoldersCard").hidden,
+      kind: document.querySelector("#plHolders [data-empty]").getAttribute("data-empty"),
+    }));
+    eq(failed.hidden, false, "while a holdings read that FAILED stays on the page");
+    eq(failed.kind, "unavailable", "wearing the unavailable silence, because a failure is a fact the reader should see");
+    await p4b.close();
+  }
+
+  {
     await put("political", { ...payload, assets: { status: "unavailable", reason: "HTTP 502" }, clusters: { status: "unavailable", reason: "HTTP 502" } });
     const p5 = await open();
     await breadth(p5);

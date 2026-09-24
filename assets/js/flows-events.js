@@ -152,6 +152,7 @@
     return out;
   }
 
+  const raw = (v) => (v ? String(v).replace(/^-/, UI.MINUS) : DASH);
   const key = (...kids) => h("span", { class: "ui-key" }, ...kids);
   const tally = (g, word, v) => key(g, word + " ", h("b", null, String(v)));
 
@@ -167,18 +168,19 @@
     const fdaSt = blockState(payload.fda, "FDA calendar");
     const catRows = payload.catalysts && Array.isArray(payload.catalysts.rows) ? payload.catalysts.rows : [];
     const divRows = catRows.filter((c) => /div/i.test(String(c && c.type)));
-    const divSt = divRows.length ? { state: "ok" } : { state: "unavailable", reason: "Ex-dividend dates need the vendor's dividends route, which this plan does not include, so none are read. An empty row here is not a week without dividends." };
+    const divSt = divRows.length ? { state: "ok" } : null;
     const drawn = rows.filter((r) => r && list.includes(r.d));
     const earnSt = drawn.length ? { state: "ok" } : { state: "quiet", reason: "No name reports in the next five sessions." };
     const maxEm = Math.max(0.01, ...drawn.map((r) => { const i = impliedOf(r, cal.get(r.t)); return i ? i.v : 0; }));
-    const grid = h("div", { class: "fe-week", style: { "--days": String(list.length) } });
+    const grid = h("div", { class: "fe-week", style: { "--days": String(list.length), "--rows": divSt ? "5" : "4" } });
     const laneHead = (name, st) => h("div", { class: "fe-lane" }, h("span", null, name), st && st.state !== "ok" ? UI.stateButton(st, name) : null);
     grid.append(h("div", { class: "fe-col fe-labels" },
-      h("div", { class: "fe-dh" }), laneHead("Macro", macroSt), laneHead("Earnings", earnSt), laneHead("FDA", fdaSt), laneHead("Ex-div", divSt)));
+      h("div", { class: "fe-dh" }), laneHead("Macro", macroSt), laneHead("Earnings", earnSt), laneHead("FDA", fdaSt), divSt ? laneHead("Ex-div", divSt) : null));
     const today = payload.gateOrigin;
+    const now = UI.freshness.market().today;
     list.forEach((d, k) => {
       const col = h("section", { class: "fe-col", "aria-label": weekday(d) + " " + F.day(d) });
-      col.append(h("div", { class: "fe-dh" }, h("b", null, weekday(d)), h("span", null, F.day(d)), d === today ? h("i", { class: "fe-next" }, "Next") : null));
+      col.append(h("div", { class: "fe-dh" }, h("b", null, weekday(d)), h("span", null, F.day(d)), d === today ? h("i", { class: "fe-next" }, d === now ? "Today" : "Next") : null));
       const mac = macroSt.state === "ok" ? (payload.macro.rows || []).filter((m) => m && m.day === d).sort((a, b) => String(a.at).localeCompare(String(b.at))) : [];
       col.append(h("div", { class: "fe-cell fe-c-macro", "data-lane": "Macro" }, mac.map(macroPill)));
       const earn = rows.filter((r) => r && r.d === d).map((r) => ({ r, c: cal.get(r.t) || null }))
@@ -199,7 +201,7 @@
       col.append(cell);
       const fd = fdaSt.state === "ok" ? (payload.fda.rows || []).filter((f) => f && f.tgt && f.tgt.p === "day" && f.tgt.from === d) : [];
       col.append(h("div", { class: "fe-cell fe-c-fda", "data-lane": "FDA" }, fd.map(fdaPill)));
-      col.append(h("div", { class: "fe-cell fe-c-div", "data-lane": "Ex-div" }, divRows.filter((c) => c.date === d).map((c) => h("a", { class: "fe-pill", href: tickerHref(c.t) }, h("b", null, String(c.t || DASH))))));
+      if (divSt) col.append(h("div", { class: "fe-cell fe-c-div", "data-lane": "Ex-div" }, divRows.filter((c) => c.date === d).map((c) => h("a", { class: "fe-pill", href: tickerHref(c.t) }, h("b", null, String(c.t || DASH))))));
       grid.append(col);
     });
     const counts = { long: 0, short: 0, gated: 0, open: 0 };
@@ -216,7 +218,7 @@
     ].filter(Boolean));
     legend.classList.add("fe-legend");
     host.week.replaceChildren(grid, legend);
-    setModuleState(host.week, UI.partial([{ name: "Macro", st: macroSt }, { name: "Earnings", st: earnSt }, { name: "FDA", st: fdaSt }, { name: "Ex-dividends", st: divSt }]), "Week ahead");
+    setModuleState(host.week, UI.partial([{ name: "Macro", st: macroSt }, { name: "Earnings", st: earnSt }, { name: "FDA", st: fdaSt }, ...(divSt ? [{ name: "Ex-dividends", st: divSt }] : [])]), "Week ahead");
   }
 
   const laneRank = (r) => ({ long: 0, short: 0, open: 1, gated: 2 })[stageOf(r.st).lane];
@@ -245,7 +247,7 @@
       "aria-haspopup": "dialog", "aria-controls": "fxPop",
       "data-info": UI.info(() => ({
         title: String(m.event || "Economic print"), asOf: m.day || null,
-        facts: [["Time", etTime(m.at) ? etTime(m.at) + " ET" : null], ["Forecast", m.forecastRaw || null], ["Prior", m.prevRaw || null], ["Period", m.period || null], ["Sessions out", n(m.sd) === null ? null : String(m.sd)]],
+        facts: [["Time", etTime(m.at) ? etTime(m.at) + " ET" : null], ["Forecast", m.forecastRaw ? raw(m.forecastRaw) : null], ["Prior", m.prevRaw ? raw(m.prevRaw) : null], ["Period", m.period || null], ["Sessions out", n(m.sd) === null ? null : String(m.sd)]],
       })),
     }, h("i", { class: "fe-dot", style: { "--c": UI.cssVar(tag ? tag[1] : "--label-3") } }), h("span", { class: "fe-time" }, etTime(m.at) || ""), h("b", null, name));
   }
@@ -274,6 +276,7 @@
         { title: "The gate", lines: [notes.gate, "Every name reporting inside the gate was removed before the board was scored, so the board holds no opinion on any of them. Board names never report inside it by construction; they appear in the Earnings list once their report lies beyond it."] },
         { title: "Two clocks", lines: [notes.clocks, clashes ? clashes + " rows publish more sessions than calendar days: the two counts were measured from different origins, and the difference between them is not safe to read on those rows." : null] },
         { title: "Before the open or after the close", lines: [payload.announce && payload.announce.reason ? String(payload.announce.reason) : null, "A sun marks a report before the open and a moon one after the close, where the vendor's earnings calendar states it."] },
+        document.querySelector(".fe-c-div") ? null : { title: "Ex-dividends", lines: ["Ex-dividend dates need the vendor's dividends route, which this plan does not include. Until a run reads them the week carries no lane for them, rather than an empty one that would read as a week without dividends."] },
       ],
     };
   }
@@ -393,8 +396,8 @@
         h("span", { class: "fe-edate" }, h("b", null, m.day ? weekday(m.day) : DASH), h("small", null, etTime(m.at) || F.day(m.day))),
         h("span", { class: "fe-mname" }, h("i", { class: "fe-dot", style: { "--c": UI.cssVar(tag ? tag[1] : "--label-4") } }),
           h("b", null, tag ? tag[0] : String(m.event || DASH).replace(/\s*\((MoM|YoY|QoQ)\)/, "")), tag ? h("small", null, String(m.event || "")) : null),
-        h("span", { class: "fu-v fu-strong" }, m.forecastRaw || DASH),
-        h("span", V, m.prevRaw || DASH));
+        h("span", { class: "fu-v fu-strong" }, raw(m.forecastRaw)),
+        h("span", V, raw(m.prevRaw)));
     });
     host.macro.replaceChildren(
       h("div", { class: "fe-mrow fu-head", ...HIDE }, h("span", null, "When"), h("span", null, "Print"), h("span", V, "Forecast"), h("span", V, "Prior")),
@@ -633,6 +636,10 @@
     if (!payload) return;
     if (typeof payload !== "object") throw trouble("unreadable", "the endpoint answered with a " + typeof payload + ", not a payload object");
     S.payload = payload;
+    if (payload.macro && Array.isArray(payload.macro.rows)) {
+      const seen = new Set();
+      payload.macro.rows = payload.macro.rows.filter((m) => { const k = m && m.at + "|" + m.event; return !seen.has(k) && seen.add(k); });
+    }
     UI.freshness({ sessionDate: payload.sessionDate, generatedAt: payload.generatedAt, updatedAt: payload.__updatedAt, source: "events" });
     if (payload.status === "pending") {
       failEverywhere("pending", "The pipeline has not published this key yet. This calendar is built by the weekday after-close run out of screener rows it already holds — it costs no vendor call — and it appears with the first run after this page shipped.");

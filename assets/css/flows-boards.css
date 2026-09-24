@@ -435,6 +435,7 @@
 
 .bd-empty[hidden] { display: none; }
 .bd-empty .ui-silent { min-height: 240px; }
+.bd-silent .ui-silent-t small { display: block; margin-top: 2px; color: var(--label-3); font: var(--t-caption); font-variant-numeric: tabular-nums; }
 
 .flows-foot.bd-foot { display: flex; justify-content: flex-end; margin-top: var(--sp-4); padding: 0; border: 0; }
 .bd-foot a {

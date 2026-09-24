@@ -1210,13 +1210,13 @@
 
   const SILENT_GLYPH = { pending: ["pending", "Pending"], quiet: ["quiet", "Quiet"], unavailable: ["unavailable", "Unavailable"], unreadable: ["stop", "Unreadable"] };
 
-  function showSilence(text, kind) {
+  function showSilence(text, kind, count) {
     const [g, word] = SILENT_GLYPH[kind] || SILENT_GLYPH.unavailable;
     const label = WATCH ? "Watchlist" : SIDE_WORD + " board";
     emptyHost.replaceChildren(h("div", {
-      class: "ui-silent bd-silent", "data-state": kind === "unreadable" ? "unavailable" : kind, "data-empty": kind, role: "note", "aria-label": word + ": " + label,
+      class: "ui-silent bd-silent", "data-state": kind === "unreadable" ? "unavailable" : kind, "data-empty": kind, role: "note", "aria-label": word + ": " + label + (count ? ", " + count : ""),
     },
-    UI.glyph(g), h("div", { class: "ui-silent-t" }, word),
+    UI.glyph(g), h("div", { class: "ui-silent-t" }, word, count ? h("small", null, count) : null),
     h("button", { type: "button", "aria-haspopup": "dialog", "aria-controls": "fxPop", "data-info": UI.info(() => ({ title: label, lead: text })) }, "Why")));
     emptyHost.hidden = false;
     table.hidden = true;
@@ -1436,10 +1436,19 @@
       UI.freshness({ sessionDate: payload.sessionDate, generatedAt: payload.generatedAt, updatedAt: payload.__updatedAt, source: "board" });
       const scoredN = num(payload.scored);
 
-      if (!WATCH && !rows.length && scoredN > 0) {
-        const neutralN = num(payload.neutral);
+      const neutralN = num(payload.neutral);
+      if (!rows.length && scoredN > 0 && payload.status !== "pending" && (!WATCH || neutralN === 0)) {
         const bandN = num(payload.deadBand);
-        showSilence("No name on this side cleared " + (bandN === null ? "the dead band" : "the ±" + bandN + " band") +
+        const bandW = bandN === null ? "the dead band" : "the ±" + bandN + " band";
+        if (WATCH) {
+          showSilence("Every one of the " + scoredN + " scored names cleared " + bandW + " this session, so none sits inside it to watch. The boards hold them all.",
+            "quiet", "0 of " + scoredN + " in band");
+          statusEl.textContent = "Nothing inside " + bandW + " · session " + (payload.sessionDate || "unknown") + ".";
+          statusEl.dataset.empty = "quiet";
+          setStale(UI.staleness(payload, Date.now(), { subject: "This list" }));
+          return;
+        }
+        showSilence("No name on this side cleared " + bandW +
           " this session. " + scoredN + " names were scored" + (neutralN === null ? "" : ", " + neutralN + " of them inside the band") +
           "; the other side may hold the rest.", "quiet");
         statusEl.textContent = "No " + side + " candidates this session · session " + (payload.sessionDate || "unknown") + ".";

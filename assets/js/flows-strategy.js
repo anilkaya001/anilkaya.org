@@ -682,14 +682,14 @@
     if (st.ctxErr) {
       const t = st.t + ": " + st.ctxErr + ". " + T("st-fail");
       status(t, "unreadable");
-      showSilence({ state: "unavailable", reason: t }, st.t);
+      showSilence({ state: "unavailable", word: "Unavailable", reason: t }, st.t);
       return;
     }
     if (!c) { status("Enter a symbol to begin."); showSilence(null); return; }
     if (c.expiryStatus === "unreadable") {
       const t = st.t + ": " + T("st-list");
       status(t, "unreadable");
-      showSilence({ state: "unavailable", reason: t }, "Expiries");
+      showSilence({ state: "unavailable", word: "Unavailable", reason: t }, "Expiries");
       return;
     }
     if (!expiries().length) {

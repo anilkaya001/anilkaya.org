@@ -64,7 +64,7 @@
     alerts: null, alertsState: { state: "pending", reason: "Reading the flagged windows." }, alertsKind: "pending",
     payload: null, feedState: { state: "pending", reason: "Reading the counter feed." }, feedKind: "pending",
     namesState: { state: "pending", reason: "Reading the counter feed." },
-    alertKeys: null, feedKeys: null, urgency: new Map(), urgencyAsked: false,
+    alertKeys: null, feedKeys: null, urgency: new Map(), urgencyAsked: new Set(),
   };
   const charts = { timeline: null };
 
@@ -506,10 +506,11 @@
   }
 
   async function paintUrgency() {
-    if (S.alertsKind !== "ok") return;
-    const board = aggregate(S.alerts.rows).filter((g) => g.st === "board:long" || g.st === "board:short").slice(0, 6);
+    if (S.alertsKind !== "ok" || S.feedKind === "pending") return;
+    const cov = S.payload && Array.isArray(S.payload.coverage) ? new Set(S.payload.coverage.map((c) => c && c.t)) : null;
+    const board = aggregate(S.alerts.rows).filter((g) => (g.st === "board:long" || g.st === "board:short") && (!cov || cov.has(g.t))).slice(0, 6);
     if (!board.length) {
-      silence(host.urgency, { state: "quiet", reason: "No board name is among the flagged windows, and urgency is measured only for the board's deep names." }, "Urgency", 200);
+      silence(host.urgency, { state: "quiet", reason: "No deep board name is among the flagged windows. Urgency is read from each name's own alert tape, which the run keeps only for the names the board went deep on." }, "Urgency", 200);
       return;
     }
     const session = typeof S.alerts.sessionDate === "string" ? S.alerts.sessionDate : null;
@@ -540,9 +541,8 @@
         h("div", { class: "ui-list fu-list", role: "group", "aria-label": "Board names ranked by urgency" }, items));
     };
     draw();
-    if (S.urgencyAsked) return;
-    S.urgencyAsked = true;
-    const queue = board.map((g) => g.t);
+    const queue = board.map((g) => g.t).filter((t) => !S.urgencyAsked.has(t));
+    queue.forEach((t) => S.urgencyAsked.add(t));
     const one = async (t) => {
       try {
         const res = await fetch("/api/flows/card-x?t=" + encodeURIComponent(cardKey(t)), { credentials: "same-origin", headers: { Accept: "application/json" } });
@@ -874,7 +874,7 @@
       }
     }
     if (kind === "ok" || kind === "absent" || kind === "withheld") paintSurprise();
-    if (S.alertsKind === "ok") { paintTimeline(false); paintNames(); }
+    if (S.alertsKind === "ok") { paintTimeline(false); paintNames(); if (S.alerts.rows.length) paintUrgency(); }
     paintMeta();
     paintStatus();
     syncNote();

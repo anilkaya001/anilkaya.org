@@ -375,6 +375,8 @@
   function paintHolders(p) {
     const feed = p.holders;
     const st = feedState(feed, "The feed answered and named no holder in the board’s names.");
+    const card = document.getElementById("plHoldersCard");
+    if (card) card.hidden = !!st && st.kind === "unavailable" && /HTTP 4(?!08|29)\d\d/.test(String(feed.reason));
     if (st) { silence(host.holders, st, "Holdings", 120); return; }
     setModuleState(host.holders, { state: "ok" }, "Holdings");
     const maxQ = Math.max(1, ...feed.rows.map((r) => num(r.maxQty) || 0));

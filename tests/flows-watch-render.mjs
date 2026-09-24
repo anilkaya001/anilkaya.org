@@ -286,6 +286,46 @@ try {
        "nothing overflowing to give it away");
     await p5.close();
   }
+  {
+    await put("board:watch", { ...WATCH, rows: [], scored: 152, neutral: 0, status: "thin" });
+    for (const width of [1440, 390]) {
+      const p6 = await open({ width, height: 900 });
+      await p6.goto(url("/flows/watch/"), { waitUntil: "networkidle" });
+      await p6.waitForSelector("#bdEmpty .bd-silent");
+      const thin = await p6.evaluate(() => {
+        const n = document.querySelector("#bdEmpty .bd-silent");
+        return {
+          state: n.dataset.state, word: n.querySelector(".ui-silent-t").firstChild.textContent,
+          count: (n.querySelector(".ui-silent-t small") || {}).textContent || null,
+          status: document.getElementById("watchStatus").textContent,
+          over: document.documentElement.scrollWidth - window.innerWidth,
+        };
+      });
+      eq(thin.state, "quiet",
+         `a thin watch list — every scored name cleared the band — is a reading, not a failure: it wears the quiet glyph at ${width}px`);
+      eq(thin.word, "Quiet", "with one word on the surface");
+      eq(thin.count, "0 of 152 in band", "and the count that makes it a reading");
+      ok(/Nothing inside the ±1 band/.test(thin.status) && !/unavailable/i.test(thin.status),
+         "the live region says what was measured rather than calling it missing");
+      ok(thin.over <= 1, `and nothing overflows at ${width}px (over by ${thin.over}px)`);
+      await p6.close();
+    }
+
+    for (const [over, said] of [
+      [{ scored: null, neutral: null }, "an empty list with no scored population behind it"],
+      [{ scored: 152, neutral: 4 }, "an empty list whose payload counts four names inside the band"],
+      [{ scored: 152, neutral: undefined }, "an empty list that never says how many sat inside the band"],
+    ]) {
+      await put("board:watch", { ...WATCH, rows: [], status: "thin", ...over });
+      const p7 = await open();
+      await p7.goto(url("/flows/watch/"), { waitUntil: "networkidle" });
+      await p7.waitForSelector("#bdEmpty .bd-silent");
+      eq(await p7.$eval("#bdEmpty .bd-silent", (n) => n.dataset.state), "unavailable",
+         `while ${said} stays unavailable — quiet is earned only by a measured zero inside the band, and anything else is a publishing fault`);
+      await p7.close();
+    }
+    await put("board:watch", WATCH);
+  }
 } finally {
   await browser.close();
   await server.stop();
