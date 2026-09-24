@@ -8,16 +8,18 @@ on:
         type: string
         required: false
       origin:
-        description: "Who dispatched it: worker, watchdog or manual"
+        description: "Who dispatched it: worker, watchdog, chain or manual"
         type: string
         required: false
         default: manual
   schedule:
-    - cron: "7,22,37,52 13-20 * * 1-5"
+    - cron: "31 13,14 * * 1-5"
+    - cron: "3 16,18,20 * * 1-5"
 
 permissions:
   contents: read
   id-token: write
+  actions: write
 
 concurrency:
   group: flows-live
@@ -26,7 +28,7 @@ concurrency:
 jobs:
   live:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 355
     env:
       LIVE_READY: ${{ secrets.UW_API_KEY != '' }}
     steps:
@@ -38,6 +40,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         if: env.LIVE_READY == 'true'
         with:
+          persist-credentials: false
           sparse-checkout: |
             scripts
             shared
@@ -63,4 +66,6 @@ jobs:
           UW_API_KEY: ${{ secrets.UW_API_KEY }}
           FLOWS_INGEST_URL: ${{ secrets.FLOWS_INGEST_URL }}
           FLOWS_LIVE_ORIGIN: ${{ github.event_name == 'schedule' && 'schedule' || inputs.origin || 'manual' }}
+          FLOWS_LIVE_LOOP: "1"
+          GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/flows-pipeline.mjs --live

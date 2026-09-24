@@ -180,7 +180,10 @@ CREATE TABLE IF NOT EXISTS flows_clock (
   nightly_dispatched_at   INTEGER,
   nightly_redispatched_at INTEGER,
   summary_stamp           TEXT,
-  updated_at              INTEGER
+  updated_at              INTEGER,
+  tier1_at                INTEGER,
+  tier1_ok_at             INTEGER,
+  tier1_why               TEXT
 );
 
 CREATE TRIGGER IF NOT EXISTS flows_archive_immutable

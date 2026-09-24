@@ -2016,6 +2016,7 @@ async function ensureFlowsTables(env) {
   if (flowsSchemaReady || !env.DB) return;
   try {
     await env.DB.batch(FLOWS_SCHEMA_SQL.map((sql) => env.DB.prepare(sql)));
+    await FLOWS_LIVE.upgradeClockColumns(env.DB);
     flowsSchemaReady = true;
   } catch {   }
 }
@@ -2885,6 +2886,12 @@ async function route(request, env, url, ctx) {
     if (!tokenKind) throw new HttpError(401, "unauthorized", "Authentication required");
 
     const key = url.searchParams.get("key") || "";
+
+    if (key === "clock") {
+      requireMethod(request, ["GET"]);
+      await ensureFlowsTables(env);
+      return FLOWS_LIVE.serveIngestClock(env, { json });
+    }
 
     if (key.startsWith("live:")) {
       const scope = FLOWS_LIVE.ingestScope(key, request.method, tokenKind);

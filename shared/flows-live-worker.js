@@ -5,7 +5,7 @@ import {
 } from "./flows-live.js";
 import {
   FRESH_CLASSES, PHASE_MINUTES, LIVE_CLOCK, freshHeaders, pendingHeaders, phaseAt, tier1Due, liveDispatchDue,
-  liveStalled, nightlyDispatchDue, easternDay, easternInstant, sessionOpen,
+  liveStalled, nightlyDispatchDue, easternDay, easternInstant, sessionOpen, clockClosed,
 } from "./flows-freshness.js";
 import { LIVE_OIDC, looksLikeJwt, rsaKeys, verifyLiveOidc, claimsBrief } from "./flows-oidc.js";
 
@@ -20,12 +20,39 @@ export const LIVE_SCHEMA_SQL = Object.freeze([
   "CREATE TABLE IF NOT EXISTS flows_clock (id INTEGER PRIMARY KEY CHECK (id = 1), day TEXT, trading INTEGER, " +
     "early_close INTEGER, tape_at INTEGER, tape_moved_at INTEGER, live_dispatched_at INTEGER, live_done_at INTEGER, " +
     "live_redispatched_at INTEGER, nightly_day TEXT, nightly_dispatched_at INTEGER, nightly_redispatched_at INTEGER, " +
-    "summary_stamp TEXT, updated_at INTEGER)",
+    "summary_stamp TEXT, updated_at INTEGER, tier1_at INTEGER, tier1_ok_at INTEGER, tier1_why TEXT)",
   "CREATE TRIGGER IF NOT EXISTS flows_archive_immutable BEFORE UPDATE ON flows_payload " +
     "WHEN OLD.id GLOB 'board:*:[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' " +
     "OR OLD.id GLOB 'scores:[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' " +
     "BEGIN SELECT RAISE(ABORT, 'flows archive rows are immutable'); END",
 ]);
+
+export const CLOCK_ADDED_COLUMNS = Object.freeze([
+  Object.freeze(["tier1_at", "INTEGER"]), Object.freeze(["tier1_ok_at", "INTEGER"]), Object.freeze(["tier1_why", "TEXT"]),
+]);
+
+export async function upgradeClockColumns(db) {
+  if (!db) return [];
+  let have = new Set();
+  try {
+    const info = await db.prepare("PRAGMA table_info(flows_clock)").all();
+    have = new Set(((info && info.results) || []).map((r) => r && r.name));
+  } catch {
+    have = new Set();
+  }
+  const added = [];
+  for (const [column, type] of CLOCK_ADDED_COLUMNS) {
+    if (have.has(column)) continue;
+    try {
+      await db.prepare(`ALTER TABLE flows_clock ADD COLUMN ${column} ${type}`).run();
+      added.push(column);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/duplicate column/i.test(message)) throw error;
+    }
+  }
+  return added;
+}
 
 export const RTH_CRON = "1-59/5 13-21 * * 1-5";
 export const HOUSEKEEPING_CRON = "*/30 * * * *";
@@ -51,7 +78,14 @@ const CLOCK_COLUMNS = Object.freeze({
   liveDispatchedAt: "live_dispatched_at", liveDoneAt: "live_done_at", liveRedispatchedAt: "live_redispatched_at",
   nightlyDay: "nightly_day", nightlyDispatchedAt: "nightly_dispatched_at",
   nightlyRedispatchedAt: "nightly_redispatched_at", summaryStamp: "summary_stamp",
+  tier1At: "tier1_at", tier1OkAt: "tier1_ok_at", tier1Why: "tier1_why",
 });
+
+export function tier1Why(value) {
+  const raw = typeof value === "string" ? value : "";
+  if (!raw.startsWith("error:")) return raw.slice(0, 24);
+  return "error:" + raw.slice(6).replace(/[^\w .:-]+/g, " ").trim().slice(0, 48);
+}
 
 const CLOCK_MEMO_MS = 60 * 1000;
 let clockMemo = { at: 0, clock: null };
@@ -201,7 +235,12 @@ export function liveMode(env) {
 export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = console } = {}) {
   const out = { tier1: null, dispatch: null, watchdog: null };
   if (!env || !env.DB) return { ...out, skipped: "no-db" };
-  if (liveMode(env) === "off") return { ...out, skipped: "off" };
+  const telemetry = await clockPatchStatement(env.DB, { tier1At: at }, at).run().then(() => true, () => false);
+  out.telemetry = telemetry;
+  if (liveMode(env) === "off") {
+    if (telemetry) await clockPatchStatement(env.DB, { tier1Why: "off" }, at).run().catch(() => {});
+    return { ...out, skipped: "off" };
+  }
   const today = easternDay(at);
   const [clockRes, breadthRes] = await env.DB.batch([
     env.DB.prepare("SELECT * FROM flows_clock WHERE id = 1"),
@@ -210,34 +249,50 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
   const clock = normalizeClock(clockRes && clockRes.results ? clockRes.results[0] : null);
   const breadthReadAt = breadthRes && breadthRes.results && breadthRes.results[0]
     ? Number(breadthRes.results[0].read_at) : null;
-  if (clock && clock.day === today && Number(clock.trading) === 0) {
-    memoClock(clock, at);
+  if (clock && clock.day === today && clockClosed(clock.trading)) {
+    if (telemetry) await clockPatchStatement(env.DB, { tier1Why: "holiday" }, at).run().catch(() => {});
+    memoClock({ ...clock, tier1At: at, tier1Why: telemetry ? "holiday" : clock.tier1Why }, at);
     return { ...out, skipped: "holiday" };
   }
   const statements = [];
   const patch = {};
+  let why = "not-due";
 
-  if (tier1Due(at, clock) && env.UW_API_KEY && typeof fetchVendor === "function") {
-    const raws = await tier1Reads(fetchVendor);
-    Object.assign(patch, sessionStatePatch(clock, raws, at, today));
-    const payload = shapeMarketLive(raws, { at, session: today, writer: "worker@tier1" });
-    const text = JSON.stringify(payload);
-    const spec = LIVE_KEYS["live:market"];
-    const statuses = Object.fromEntries(["tide", "zeroDte"].map((k) => [k, payload[k].status]));
-    statuses.spy = payload.etf.SPY.status; statuses.qqq = payload.etf.QQQ.status; statuses.sectors = payload.sectors.status;
-    if (!anyAnswered(marketFeeds(payload))) {
-      out.tier1 = { written: false, why: "no-feed-answered", bytes: text.length, statuses };
-      log.error(JSON.stringify({ message: "live:market not written: no vendor feed answered", statuses }));
-    } else if (text.length > spec.maxBytes) {
-      out.tier1 = { written: false, why: "over-cap", bytes: text.length, statuses };
-      log.error(JSON.stringify({ message: "live:market over its byte cap", bytes: text.length, cap: spec.maxBytes }));
-    } else {
-      statements.push(writeLiveStatement(env.DB, "live:market", text, {
-        readAt: at, session: today, cadenceS: spec.cadenceS, source: "worker", writer: "worker@tier1",
-      }, at));
-      out.tier1 = { written: true, bytes: text.length, statuses };
+  if (tier1Due(at, clock)) {
+    if (!env.UW_API_KEY || typeof fetchVendor !== "function") why = "error:no-key";
+    else {
+      try {
+        const raws = await tier1Reads(fetchVendor);
+        Object.assign(patch, sessionStatePatch(clock, raws, at, today));
+        const payload = shapeMarketLive(raws, { at, session: today, writer: "worker@tier1" });
+        const text = JSON.stringify(payload);
+        const spec = LIVE_KEYS["live:market"];
+        const statuses = { tide: payload.tide.status, sectors: payload.sectors.status };
+        if (!anyAnswered(marketFeeds(payload))) {
+          why = "no-feed-answered";
+          out.tier1 = { written: false, why, bytes: text.length, statuses };
+          log.error(JSON.stringify({ message: "live:market not written: no vendor feed answered", statuses }));
+        } else if (text.length > spec.maxBytes) {
+          why = "over-cap";
+          out.tier1 = { written: false, why, bytes: text.length, statuses };
+          log.error(JSON.stringify({ message: "live:market over its byte cap", bytes: text.length, cap: spec.maxBytes }));
+        } else {
+          statements.push(writeLiveStatement(env.DB, "live:market", text, {
+            readAt: at, session: today, cadenceS: spec.cadenceS, source: "worker", writer: "worker@tier1",
+          }, at));
+          why = "written";
+          patch.tier1OkAt = at;
+          out.tier1 = { written: true, bytes: text.length, statuses };
+        }
+      } catch (error) {
+        why = tier1Why("error:" + (error instanceof Error ? error.message : String(error)));
+        out.tier1 = { written: false, why };
+        log.error(JSON.stringify({ message: "tier 1 read failed", why }));
+      }
     }
   }
+  if (telemetry) patch.tier1Why = tier1Why(why);
+  else delete patch.tier1OkAt;
 
   const merged = { ...(clock || {}), ...patch };
   const due = liveDispatchDue(at, merged);
@@ -265,7 +320,8 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
 
   if (Object.keys(patch).length) statements.push(clockPatchStatement(env.DB, patch, at));
   if (statements.length) await env.DB.batch(statements);
-  memoClock({ ...(clock || {}), ...patch }, at);
+  memoClock({ ...(clock || {}), ...(telemetry ? { tier1At: at } : {}), ...patch }, at);
+  out.why = why;
   return out;
 }
 
@@ -447,6 +503,18 @@ export function parseList(raw, allow, max = 16) {
   return out;
 }
 
+const clockFlag = (v) => (v === null || v === undefined || v === "" ? null : Number(v) === 1 ? 1 : Number(v) === 0 ? 0 : null);
+
+export function clockView(clock) {
+  return clock && typeof clock.day === "string"
+    ? { day: clock.day, trading: clockFlag(clock.trading), earlyClose: clockFlag(clock.earlyClose) }
+    : null;
+}
+
+export async function serveIngestClock(env, { json }) {
+  return json({ key: "clock", clock: clockView(await readClock(env && env.DB)) });
+}
+
 export async function serveNow(env, url, now, { json, HttpError, quote }) {
   const liveKeys = parseList(url.searchParams.get("k"), (k) => liveKeyFromParam(k) !== null).map(liveKeyFromParam);
   const nightly = parseList(url.searchParams.get("n"),
@@ -497,8 +565,12 @@ export async function serveNow(env, url, now, { json, HttpError, quote }) {
       place(k, nightlyFreshMeta(r), Number(r.updated_at));
     }
   }
+  const iso = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? new Date(Number(v)).toISOString() : null);
   const body = {
     serverNow: now,
+    tier1: { at: iso(clock && clock.tier1At), okAt: iso(clock && clock.tier1OkAt),
+      why: clock && typeof clock.tier1Why === "string" ? clock.tier1Why : null },
+    clock: clockView(clock),
     phase: phase ? { phase: phase.phase, session: phase.session, trading: phase.trading,
       endsAt: Number.isFinite(phase.endsAt) ? new Date(phase.endsAt).toISOString() : null } : null,
     keys,
