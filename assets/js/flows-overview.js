@@ -16,6 +16,7 @@
   const C = UI.chart;
 
   const $ = (id) => document.getElementById(id);
+  const POP = { "aria-haspopup": "dialog", "aria-controls": "fxPop" };
   const verdictHost = $("ccVerdict");
   if (!statusEl || !verdictHost) return;
 
@@ -109,7 +110,7 @@
       "aria-label": word + ": " + what, style: { "--silent-h": (height || 112) + "px" },
     },
     glyph(g), h("div", { class: "ui-silent-t" }, word),
-    h("button", { type: "button", "aria-haspopup": "dialog", "aria-controls": "fxPop", "data-info": disclose(cap1(what), text) }, "Why")));
+    h("button", { type: "button", ...POP, "data-info": disclose(cap1(what), text) }, "Why")));
     return true;
   }
 
@@ -117,7 +118,7 @@
     const [g, word] = KIND[kind] || KIND.unavailable;
     return h("button", {
       class: "ui-state hm-mark", type: "button", "data-empty": kind, "data-state": kind, title: word,
-      "aria-label": word + ": " + label, "aria-haspopup": "dialog", "aria-controls": "fxPop",
+      "aria-label": word + ": " + label, ...POP,
       "data-info": disclose(cap1(label), text),
     }, glyph(g));
   }
@@ -530,7 +531,7 @@
       return [said, flags.join(" ")];
     };
     const asOfOf = (mv) => {
-      if (!dated || mv.at === null) return [DASH, "This payload published no session index for the name, so which session it was last scored on cannot be stated."];
+      if (!dated || mv.at === null) return [DASH, "No session index was published for this name."];
       if (!mv.stale) return ["this session", null];
       const behind = lastIndex - mv.at;
       const on = (sessionRows[mv.at] && sessionRows[mv.at].d) || null;
@@ -572,10 +573,10 @@
       ["Name", false],
       ["Δ score", true, notes.change || null],
       ["Over", false, notes.gaps || null],
-      ["Ended at", true, "The score the name held at the end of this comparison — its newest measured score, which on a row that is not about today is not today's. " + (notes.score || "")],
+      ["Ended at", true, "The name's newest measured score, which on a dated row is not today's. " + (notes.score || "")],
       ["Δ resid ×10⁴", true, notes.saturation || null],
       ["Run · sessions", true, notes.run || null],
-      ["As of", false, "Which session this name was last scored on. A move on an older session is real and is not about today."],
+      ["As of", false, "The session this name was last scored on; an older move is real but not today's."],
     ], drawn.map((mv) => {
       const [over, overWhy] = overOf(mv);
       const [asOf, asWhy] = asOfOf(mv);
@@ -613,7 +614,7 @@
 
   function chip(o) {
     const attrs = {
-      class: "ui-gchip hm-chip", type: "button", "aria-haspopup": "dialog", "aria-controls": "fxPop",
+      class: "ui-gchip hm-chip", type: "button", ...POP,
       "data-chip": o.key, "data-empty": o.silence ? o.silence[0] : null, "data-info": UI.info(o.info),
     };
     const g = o.silence
@@ -770,8 +771,18 @@
     return { silence, date };
   }
 
+  function titleFor(date) {
+    const m = UI.freshness.market();
+    const t = $("fxTitle");
+    const word = (date || m.expected) === m.today ? "Today" : "Last session";
+    if (t) t.textContent = word;
+    if (UI.shell && typeof UI.shell.title === "function") UI.shell.title(word);
+  }
+  titleFor(null);
+
   function paintMeta(dateEl, screenedEl, boards, market) {
     const { silence: boardsSilence, date } = boardsRead(boards[0], boards[1]);
+    titleFor(date);
     const quiet = boardsSilence(date !== null);
     if (dateEl) {
       dateEl.replaceChildren();
@@ -810,39 +821,62 @@
     } catch { return iso; }
   }
 
-  function tideOf(liveMkt, pulse) {
-    const lt = liveMkt && liveMkt.status !== "pending" && liveMkt.tide;
-    const pulseDay = pulse && pulse.status !== "pending" ? (pulse.readDay || pulse.sessionDate || null) : null;
-    if (lt && lt.status === "ok" && Array.isArray(lt.t) && lt.t.length >= 2 &&
-        (!pulseDay || !liveMkt.session || liveMkt.session >= pulseDay)) {
-      const at = (arr, i) => (Array.isArray(arr) ? isNum(arr[i]) : null);
-      const zero = liveMkt.zeroDte && liveMkt.zeroDte.status === "ok" && Array.isArray(liveMkt.zeroDte.t) ? liveMkt.zeroDte : null;
-      const bucket = (iso) => { const ms = Date.parse(iso); return Number.isFinite(ms) ? Math.floor(ms / 300000) : null; };
-      const zBy = new Map();
-      if (zero) zero.t.forEach((t, i) => zBy.set(bucket(t), at(zero.net, i)));
-      return {
-        src: "live", session: liveMkt.session || null,
-        readAt: liveMkt.fresh && liveMkt.fresh.readAt, fresh: liveMkt.__fresh || null,
-        t: lt.t.slice(), net: lt.t.map((_, i) => at(lt.net, i)),
-        call: lt.t.map((_, i) => at(lt.ncp, i)), put: lt.t.map((_, i) => at(lt.npp, i)),
-        zero: zero ? lt.t.map((t) => (zBy.has(bucket(t)) ? zBy.get(bucket(t)) : null)) : null,
-      };
-    }
+  const bucket = (iso) => Math.floor(Date.parse(iso) / 300000);
+  const onBuckets = (t, zt, zv) => {
+    const by = new Map(zt.map((x, i) => [bucket(x), isNum(zv[i])]));
+    return t.map((x) => by.get(bucket(x)) ?? null);
+  };
+
+  function liveSeries(lt, session, ff, readAt) {
+    if (!lt || lt.status !== "ok" || !Array.isArray(lt.t) || !lt.t.length) return null;
+    const at = (arr, i) => (Array.isArray(arr) ? isNum(arr[i]) : null);
+    return {
+      live: true, session: session || lt.date || null, readAt: readAt || null, ff: ff || null,
+      t: lt.t.slice(), net: lt.t.map((_, i) => at(lt.net, i)),
+      call: lt.t.map((_, i) => at(lt.ncp, i)), put: lt.t.map((_, i) => at(lt.npp, i)),
+    };
+  }
+
+  function pulseSeries(pulse) {
     const pt = pulse && pulse.status !== "pending" && pulse.tide;
-    if (pt && pt.status === "ok" && Array.isArray(pt.points) && pt.points.length >= 2) {
-      const pts = pt.points;
-      return {
-        src: "pulse", session: pulseDay, readAt: pulse.readAt || null, fresh: pulse.__fresh || null,
-        t: pts.map((p) => p && p.t),
-        call: pts.map((p) => isNum(p && p.callPrem)), put: pts.map((p) => isNum(p && p.putPrem)),
-        net: pts.map((p) => {
-          const c = isNum(p && p.callPrem), q = isNum(p && p.putPrem);
-          return c === null || q === null ? null : c - q;
-        }),
-        zero: null,
-      };
+    if (!pt || pt.status !== "ok" || !Array.isArray(pt.points) || !pt.points.length) return null;
+    const pts = pt.points;
+    const call = pts.map((p) => isNum(p && p.callPrem)), put = pts.map((p) => isNum(p && p.putPrem));
+    return {
+      live: Boolean(pulse.live), session: pulse.readDay || pulse.sessionDate || null,
+      readAt: pulse.readAt || null, ff: pulse.__ff || null, t: pts.map((p) => p && p.t), call, put,
+      net: call.map((c, i) => (c === null || put[i] === null ? null : c - put[i])),
+    };
+  }
+
+  function zeroOf(tide, S) {
+    const lb = S.liveBreadth && S.liveBreadth.status !== "pending" && S.liveBreadth.dte ? S.liveBreadth.dte.zero : null;
+    const lm = S.liveMkt && S.liveMkt.status !== "pending" ? S.liveMkt.zeroDte : null;
+    const reg = S.regime && S.regime.status !== "pending" && S.regime.zeroDte && S.regime.zeroDte.status === "ok" ? S.regime.zeroDte : null;
+    const same = (d) => !d || !tide.session || d === tide.session;
+    if (tide.live) {
+      for (const z of [lb, lm]) {
+        if (z && z.status === "ok" && Array.isArray(z.t) && z.t.length && same(z.date)) {
+          return { series: onBuckets(tide.t, z.t, z.net || []), last: lastOf(z.net) };
+        }
+      }
     }
-    return null;
+    return { series: null, last: reg && same(reg.date || S.regime.sessionDate) ? isNum(reg.np0) : null };
+  }
+
+  function tideOf(S) {
+    const p = pulseSeries(S.pulse);
+    const pulseDay = S.pulse && S.pulse.status !== "pending" ? S.pulse.sessionDate || null : null;
+    const lm = S.liveMkt && S.liveMkt.status !== "pending" ? S.liveMkt : null;
+    const l = lm && (!pulseDay || !lm.session || lm.session >= pulseDay)
+      ? liveSeries(lm.tide, lm.session, lm.__ff, lm.fresh && lm.fresh.readAt) : null;
+    const tide = [l, p].find((x) => x && x.t.length >= 2) || [l, p].find(Boolean) || null;
+    if (tide) {
+      const z = zeroOf(tide, S);
+      tide.zero = z.series && z.series.some((x) => x !== null) ? z.series : null;
+      tide.zeroLast = lastOf(tide.zero) ?? z.last;
+    }
+    return tide;
   }
 
   const lastOf = (arr) => {
@@ -851,48 +885,63 @@
     return null;
   };
 
-  function freshStateOf(tide) {
-    if (!tide) return "pending";
-    const hdr = typeof tide.fresh === "string" ? tide.fresh : null;
-    if (hdr && UI.STATES[hdr]) return hdr;
+  function heroState(tide, boardsDay) {
+    if (!tide) return ["pending", "Pending", ""];
     const m = UI.freshness.market();
-    if (tide.session && tide.session < m.expected) return "stale";
-    return m.open ? "fresh" : "closed";
+    const day = tide.session ? F.day(tide.session) : "";
+    const past = tide.session && tide.session < m.today;
+    const age = Date.now() - Date.parse(tide.readAt);
+    let s = tide.live && tide.ff ? tide.ff.stateAt() : null;
+    if (!s && tide.session && tide.session < m.expected) return ["stale", "Stale", day];
+    if (!tide.live) return past ? ["last", "Last session", day] : ["closed", "Closed", day];
+    const broken = s === "closed" && tide.ff && tide.ff.phase === "closed" && m.open && !past;
+    if (!s || broken) s = m.open && !past ? (age <= 600000 ? "live" : "stale") : "closed";
+    const other = boardsDay && tide.session && tide.session !== boardsDay;
+    const at = tide.readAt ? (other ? day + " " : "") + clock(tide.readAt) : day;
+    if (s === "live") return ["live", "Live", at];
+    if (s === "fresh") return ["fresh", "Updated", at];
+    if (s === "stale") return ["stale", "Stale", past ? day : at];
+    return past ? ["last", "Last session", day] : ["closed", "Closed", day];
+  }
+
+  function paintPill(tide) {
+    const pill = $("hmTideState");
+    if (!pill) return "pending";
+    const [state, word, when] = heroState(tide, S.boardsDay);
+    const def = UI.STATES[state === "last" ? "fresh" : state] || UI.STATES.closed;
+    pill.replaceChildren(h("button", {
+      class: "hm-pill", type: "button", "data-state": state, ...POP,
+      "data-info": UI.info(() => ({
+        title: "Market tide", state: UI.STATES[state] ? state : "closed",
+        lead: !tide ? "No tide is published yet." : tide.live ? "Read live during the session." : "The nightly record of this session; no live read is newer.",
+        facts: [["Source", !tide ? DASH : tide.live ? "live:market" : "pulse"], ["Session", tide && tide.session],
+          ["Read", tide && tide.readAt ? fmtStamp(tide.readAt) : null], ["Points", tide ? String(tide.t.length) : null]],
+        notes: ["Net premium is net call premium minus net put premium, cumulative over the session; positive is bullish premium.",
+          tide && tide.t.length < 2 ? "The river draws from the second read." : null],
+      })),
+    }, glyph(def.g), h("span", null, word), when ? h("span", { class: "hm-pill-when" }, "· " + when) : null));
+    return state;
   }
 
   let tideChart = null;
   let tideShown = null;
+  let heroTide = null;
+  const S = { pulse: null, regime: null, liveMkt: null, liveBreadth: null, boardsDay: null };
+  const hero = () => paintHero(heroTide = tideOf(S));
 
-  function paintHero(tide, regime, liveMkt) {
-    const v = $("hmTideV"), cap = $("hmTideCap"), legs = $("hmTideLegs"), pill = $("hmTideState"), plot = $("hmTide");
+  function paintHero(tide) {
+    const v = $("hmTideV"), cap = $("hmTideCap"), legs = $("hmTideLegs"), plot = $("hmTide");
     if (!v || !plot) return;
-    const state = freshStateOf(tide);
-    if (pill) {
-      const def = UI.STATES[state] || UI.STATES.pending;
-      const when = !tide ? "" : state === "live" && tide.readAt ? clock(tide.readAt) : tide.session ? F.day(tide.session) : "";
-      pill.replaceChildren(h("button", {
-        class: "hm-pill", type: "button", "data-state": state, "aria-haspopup": "dialog", "aria-controls": "fxPop",
-        "data-info": UI.info(() => ({
-          title: "Market tide", state,
-          lead: !tide ? "Neither the live market key nor the nightly pulse carried a tide series, so nothing is drawn."
-            : tide.src === "live" ? "Read from the live market layer, refreshed during market hours."
-              : "Read from the nightly pulse; the live market layer had nothing newer.",
-          facts: [["Source", !tide ? DASH : tide.src === "live" ? "live:market" : "pulse"], ["Session", tide && tide.session],
-            ["Read", tide && tide.readAt ? fmtStamp(tide.readAt) : null], ["Points", tide ? String(tide.t.length) : null]],
-          notes: ["Net premium is net call premium minus net put premium, cumulative over the session; positive is bullish premium."],
-        })),
-      }, glyph(def.g), h("span", null, def.word), when ? h("span", { class: "hm-pill-when" }, "· " + when) : null));
-    }
+    const state = paintPill(tide);
+    if (tideChart) { tideChart.destroy(); tideChart = null; }
+    plot.replaceChildren();
     if (!tide) {
       v.replaceChildren(DASH);
       v.dataset.tone = "silent";
       if (cap) cap.replaceChildren();
       if (legs) legs.replaceChildren();
-      if (tideChart) { tideChart.destroy(); tideChart = null; }
-      plot.replaceChildren();
-      hush(plot, liveMkt === null ? "unreadable" : "pending",
-        "Neither the live market key nor the nightly pulse carried a session tide, so the river has nothing to draw.",
-        "market tide", 220);
+      hush(plot, S.liveMkt === null && S.pulse === null ? "unreadable" : "pending",
+        "No tide is published yet, so the river has nothing to draw.", "market tide", 220);
       return;
     }
     const net = lastOf(tide.net);
@@ -906,18 +955,24 @@
       cap.replaceChildren(UI.capsule(t === "up" ? "Bullish premium" : t === "down" ? "Bearish premium" : "Level", { tone: t || "flat" }));
     }
     if (legs) {
-      const zNow = lastOf(tide.zero);
-      const zr = regime && regime.status !== "pending" && regime.zeroDte && regime.zeroDte.status === "ok" ? regime.zeroDte : null;
-      const zero = zNow !== null ? zNow : zr ? isNum(zr.np0) : null;
+      const zero = tide.zeroLast;
       legs.replaceChildren(UI.metrics([
         UI.metric("Net calls", usdS(lastOf(tide.call)), { tone: toneOf(lastOf(tide.call)) }),
         UI.metric("Net puts", usdS(lastOf(tide.put)), { tone: toneOf(-(lastOf(tide.put) || 0)) }),
         UI.metric("0DTE", zero === null ? DASH : usdS(zero), { tone: toneOf(zero),
-          state: zero === null ? { state: "pending", reason: "No 0DTE net flow was read for this session yet." } : null }),
+          state: zero === null ? (state === "live" || state === "fresh"
+            ? { state: "pending", reason: "No 0DTE net flow was read for this session yet." }
+            : { state: "quiet", reason: "No 0DTE net flow was read for this session." }) : null }),
       ], { min: 84 }));
     }
+    if (tide.t.length < 2) {
+      const first = state === "live" || state === "fresh";
+      plot.append(h("div", { class: "ui-silent hm-hush", "data-state": "quiet", role: "note", style: { "--silent-h": "220px" } },
+        glyph("clock"), h("div", { class: "ui-silent-t" }, first ? "First read" : "One read")));
+      return;
+    }
     const series = [{ values: tide.net, label: "Net", format: (x) => (x > 0 ? "+" : "") + usd(x) }];
-    if (tide.zero && tide.zero.some((x) => x !== null)) {
+    if (tide.zero) {
       series.push({ values: tide.zero, label: "0DTE", color: "--s-gray", dash: true, width: 1.25, format: (x) => (x > 0 ? "+" : "") + usd(x) });
     }
     const mins = tide.t.map(nyMinutes);
@@ -932,8 +987,6 @@
         h("b", { "data-tone": toneOf(tide.net[i]) }, tide.net[i] === null ? DASH : usdS(tide.net[i])),
         tide.zero ? C.part("0DTE " + (tide.zero[i] === null ? DASH : usdS(tide.zero[i])), "k") : null],
     };
-    if (tideChart) { tideChart.destroy(); tideChart = null; }
-    plot.replaceChildren();
     const chartHost = h("div", { class: "hm-river" });
     plot.append(chartHost, UI.legend([
       h("span", { class: "ui-key" }, h("i", { class: "is-split", "aria-hidden": "true" }), "Net premium"),
@@ -966,7 +1019,9 @@
     for (const k of ["SPY", "QQQ", "IWM"]) {
       if (useLive && lv.index[k] && lv.index[k].status === "ok") {
         const r = lv.index[k];
-        idx[k] = { iv: TEN.map((d) => isNum(r["v" + d])), iv30: isNum(r.iv30), ivp: isNum(r.ivRank), ivpWord: "rank", rv: isNum(r.rv), rvWord: "RV",
+        const rv20 = isNum(r.rv) === null && curve && curve[k] && curve[k].status === "ok" ? isNum(curve[k].rv20) : null;
+        idx[k] = { iv: TEN.map((d) => isNum(r["v" + d])), iv30: isNum(r.iv30), ivp: isNum(r.ivRank), ivpWord: "rank",
+          rv: rv20 ?? isNum(r.rv), rvWord: rv20 === null ? "RV" : "RV 20d",
           ts: isNum(r.v30) !== null && isNum(r.v90) ? r.v30 / r.v90 - 1 : null, src: "live:vol" };
       } else if (curve && curve[k] && curve[k].status === "ok" && Array.isArray(curve[k].iv)) {
         const r = curve[k];
@@ -1024,7 +1079,7 @@
     if (sess && sess < expected) {
       headMark("hmVol", h("button", {
         class: "ui-state hm-mark", type: "button", "data-state": "stale", title: "Stale", "aria-label": "Stale: volatility",
-        "aria-haspopup": "dialog", "aria-controls": "fxPop",
+        ...POP,
         "data-info": disclose("Volatility", "These readings are the " + F.day(sess) + " session; the last completed session is " + F.day(expected) + ".", { state: "stale" }),
       }, glyph("clock")));
     }
@@ -1038,8 +1093,8 @@
         ["0DTE share of net premium", share0 === null ? DASH : F.pct(share0, 1)], ["0DTE share source", zero.src]],
       notes: ["Contango (a rising curve) is the calm shape; an inverted front is stress.",
         "Implied correlation is the index variance left after the members' own variances, over what perfect correlation would add.",
-        "Dispersion is the SPY members' weighted 30-day implied volatility minus SPY's own, in volatility points.",
-        "The 0DTE share is |0DTE net| over |0DTE net| plus |weekly net|, read from the live breadth layer when it is as new as the regime key, as on the market page.",
+        "Dispersion is the SPY members' weighted 30-day IV minus SPY's own, in vol points.",
+        "The 0DTE share is |0DTE net| over |0DTE net| + |weekly net|, from the live breadth layer when it is as new as the regime key.",
         radar ? "Rich and cheap are the vendor's volatility anomaly screen; a linked name has a card today." : null],
     }));
   }
@@ -1086,10 +1141,10 @@
     into.append(UI.list(list, { visible: SHOW, label: "Flagged option windows, largest premium first" }),
       UI.legend([["--label-2", "", "Share at the ask"]]));
     const detail = table("Flagged option windows, largest premium first", [
-      ["Time · ET", false, "The start of the vendor's flagged window, in Eastern time. A window is a span rather than a print."],
+      ["Time · ET", false, "When the vendor's flagged window opened, in Eastern time."],
       ["Name", false], ["Contract", false], ["Premium", true],
-      ["Side", true, "The vendor's ATTRIBUTION of this window's premium to the ask or the bid, as a share of the two. A print at the ask is not proof of a buyer, so this column names the side of the quote and never an intent."],
-      ["Rule", false, "The vendor's own name for the screen that flagged the window, printed as published."],
+      ["Side", true, "The share of premium the vendor attributed to the ask or the bid: a side of the quote, never proof of a buyer."],
+      ["Rule", false, "The vendor's name for the screen that flagged the window."],
     ], drawn.map((row) => {
       const at = etTime(row.spanStart);
       const to = etTime(row.spanEnd);
@@ -1173,10 +1228,10 @@
     if (silent(into, payload, "watch board")) return;
     const rows = ranked(payload.rows);
     if (!rows.length) {
-      hush(into, "unavailable",
-        "The watch board published no rows. With a dead band this narrow a " +
-        "session where no name sits inside it would be extraordinary, so this " +
-        "is more likely a key that did not publish than a market with no middle.", "nearly in");
+      const band = isNum(payload.deadBand);
+      if (payload.status === "thin" || isNum(payload.neutral) === 0) {
+        hush(into, "empty", "Every scored name cleared the " + (band === null ? "dead" : "±" + band) + " band this session.", "nearly in");
+      } else hush(into, "unavailable", "The watch board published no rows.", "nearly in");
       return;
     }
     const drawn = rows.slice(0, LIST_MAX);
@@ -1211,8 +1266,8 @@
       title: "Nearly in", lead: lede,
       facts: [["Unit", anyResid ? "cross-sectional residual (resid)" : "score on the ±100 scale"], ["Rows", String(rows.length)]],
       notes: [anyResid
-        ? "The residual is what the name was ranked on, in the units the score is a bounded transform of; the rows are ordered on its size, which is how close the name is to leaving the band."
-        : "The score is printed because this payload was published before the residual rode on the watch rows; on a narrow band every row rounds to the same integer at this scale."],
+        ? "The residual is what the name was ranked on; rows are ordered on its size, which is how close the name is to leaving the band."
+        : "The score is printed because this payload predates the residual on watch rows; on a narrow band every row rounds alike."],
     }));
   }
 
@@ -1509,11 +1564,11 @@
             at === null ? "undated" : (age === null ? "stamped ahead of this clock" : age)),
             typeof row.source === "string" && row.source ? h("span", { class: "cc-nw-src" }, row.source) : null,
             typeof row.sentiment === "string" && row.sentiment
-              ? h("span", { class: "cc-nw-sent", title: "The vendor's own sentiment label, verbatim and never mapped onto a number. It is not this product's score and does not enter it." }, row.sentiment) : null,
+              ? h("span", { class: "cc-nw-sent", title: "The vendor's sentiment label, verbatim: not this product's score and not an input to it." }, row.sentiment) : null,
             row && row.major === true ? h("span", { class: "cc-nw-major", title: "The vendor flagged this headline as major." }, "major") : null,
             tickers.length ? h("span", { class: "cc-nw-tks" },
               tickers.slice(0, NEWS_TICKERS).map((t) => (cards.has(t) ? nameNode(t, true)
-                : h("span", { class: "cc-nw-tk", title: "Named by the vendor on this headline. This session built no card for it, so there is nothing here to open." }, t))),
+                : h("span", { class: "cc-nw-tk", title: "Named by the vendor on this headline; no card was built for it." }, t))),
               tickers.length > NEWS_TICKERS ? h("span", { class: "cc-nw-more" }, "+" + (tickers.length - NEWS_TICKERS) + " more") : null) : null));
       })));
 
@@ -1521,7 +1576,7 @@
     const at0 = isNum(first.createdAtMs);
     const shown = Math.min(rows.length, LIST_MAX);
     into.append(h("button", {
-      class: "hm-news-open", type: "button", "aria-haspopup": "dialog", "aria-controls": "fxPop",
+      class: "hm-news-open", type: "button", ...POP,
       "data-info": UI.info(() => ({ title: "Headlines", lead: coverage.join(" · "), node: listNode })),
     },
     h("span", { class: "hm-news-h" }, typeof first.headline === "string" ? first.headline : DASH),
@@ -1595,8 +1650,9 @@
     }
     s("text", { class: "sp-bandlabel", x: xOf(0), y: axisY - half - 8, "text-anchor": "middle",
       text: band === null ? "no dead band published for this session · the axis is drawn without one"
-        : scored !== null && neutral !== null ? neutral + " of " + scored + " inside ±" + band + " · not named"
-          : "±" + band + " dead band · not named" }, svg);
+        : neutral === 0 ? "±" + band + " band · empty"
+          : scored !== null && neutral !== null ? neutral + " of " + scored + " inside ±" + band + " · not named"
+            : "±" + band + " dead band · not named" }, svg);
 
     let trails = 0;
     for (const m of marks) {
@@ -1676,7 +1732,7 @@
       slot.replaceChildren();
       if (text) {
         slot.append(h("button", {
-          class: "hm-pill", type: "button", "data-state": "stale", "aria-haspopup": "dialog", "aria-controls": "fxPop",
+          class: "hm-pill", type: "button", "data-state": "stale", ...POP,
           "data-info": disclose("Freshness", text, { state: "stale" }),
         }, glyph("clock"), h("span", null, "Stale")));
       }
@@ -1694,7 +1750,7 @@
     const at = isNum(response.headers.get("X-Payload-Updated"));
     if (body && typeof body === "object") {
       body.__updatedAt = at !== null && at > 0 ? at : null;
-      body.__fresh = response.headers.get("X-Fresh-State") || null;
+      body.__ff = typeof UI.freshFrom === "function" ? UI.freshFrom(response) : null;
     }
     return body;
   }
@@ -1716,6 +1772,30 @@
       .then((r) => (r.ok ? r.json().then((body) => stampUpdated(r, body))
         : soon && r.status === 404 ? { status: "pending", __route: 404 } : null))
       .catch(() => null);
+  }
+
+  function neuronComputed(market) {
+    const box = $("hmVerdict"), t = $("hmVerdictT");
+    if (!box || !t || !box.classList.contains("is-pending")) return;
+    const pt = isNum(market && market.premium && market.premium.tilt);
+    const b = (market && market.breadth) || {};
+    const up = isNum(b.bull), dn = isNum(b.bear);
+    const names = up === null || dn === null ? null
+      : dn > up ? dn + " names net sold against " + up + " bought" : up + " names net bought against " + dn + " sold";
+    const line = pt !== null ? (pt > 0.02 ? "Bullish" : pt < -0.02 ? "Bearish" : "Balanced") + " premium: flow bias " + pct(pt, 1) +
+      (names ? ", " + names : "") + "." : names ? cap1(names) + "." : null;
+    if (!line) return;
+    t.textContent = line;
+    box.classList.replace("is-pending", "is-computed");
+    const by = box.querySelector(".hm-verdict-by");
+    if (by) by.textContent = "Computed";
+    const mk = box.querySelector(".hm-verdict-meta .hm-mark");
+    if (mk) {
+      mk.replaceWith(h("button", {
+        class: "ui-state hm-mark", type: "button", "data-state": "quiet", "aria-label": "Computed: no written summary yet",
+        ...POP, "data-info": disclose("Neuron", "No written summary yet; this line is computed from the flow bias and breadth above."),
+      }, glyph("quiet")));
+    }
   }
 
   function neuronWire(lng, sht) {
@@ -1743,7 +1823,7 @@
       if (meta) {
         meta.append(h("button", {
           class: "ui-state hm-mark", type: "button", "data-state": "stale", title: "Stale", "aria-label": "Stale: Neuron",
-          "aria-haspopup": "dialog", "aria-controls": "fxPop", "data-info": disclose("Neuron", note.trim(), { state: "stale" }),
+          ...POP, "data-info": disclose("Neuron", note.trim(), { state: "stale" }),
         }, glyph("clock")));
       }
     }
@@ -1755,20 +1835,23 @@
     resizeTimer = setTimeout(drawStrips, 150);
   });
 
-  function live(pulse, regime, liveVol) {
+  function live(liveVol) {
     if (typeof UI.heartbeat !== "function") return;
     UI.heartbeat({
       keys: ["market", "breadth"], nightly: ["pulse"], page: "overview",
+      onBeat() { if (heroTide && heroTide.live) paintPill(heroTide); },
       onChange(changed) {
         if (!Array.isArray(changed)) return;
-        if (changed.some((k) => /market/.test(String(k)))) {
-          loadRegion("/api/flows/lk?k=market", true).then((mkt) => {
-            if (mkt) paintHero(tideOf(mkt, pulse), regime, mkt);
-          });
-        }
-        if (changed.some((k) => /breadth/.test(String(k)))) {
-          loadRegion("/api/flows/lk?k=breadth", true).then((b) => { if (b) paintVol(regime, liveVol, b); });
-        }
+        const mk = changed.some((k) => /market/.test(String(k)));
+        const br = changed.some((k) => /breadth/.test(String(k)));
+        const pu = changed.some((k) => /pulse/.test(String(k)));
+        Promise.all([mk ? loadRegion("/api/flows/lk?k=market", true) : null, br ? loadRegion("/api/flows/lk?k=breadth", true) : null,
+          pu ? loadRegion("/api/flows/pulse") : null]).then(([m, b, p]) => {
+          if (m) S.liveMkt = m;
+          if (b) { S.liveBreadth = b; paintVol(S.regime, liveVol, b); }
+          if (p) S.pulse = p;
+          if (m || b || p) hero();
+        });
       },
     });
   }
@@ -1818,7 +1901,9 @@
 
     paintMeta($("ccMetaDate"), $("ccMetaScreened"), [lng, sht], market);
     paintVerdict(verdictHost, lng, sht, market, alerts, pulse);
-    paintHero(tideOf(liveMkt, pulse), regime, liveMkt);
+    neuronComputed(market && market.status !== "pending" ? market : null);
+    Object.assign(S, { pulse, regime, liveMkt, liveBreadth, boardsDay: boardsRead(lng, sht).date });
+    hero();
     paintVol(regime, liveVol, liveBreadth);
 
     const trk = readTrack(track && track.status !== "pending" ? track : null);
@@ -1847,7 +1932,7 @@
         notes: ["Scores are a ranked attention signal on a fixed −100 to +100 scale, not a return forecast. Names inside the dead band are not published on either side.",
           "Each strip draws the name's score by archived session on one scale shared by both sides, against an always-drawn zero rule.",
           "The percentage is the session's price return: close over the prior close. It is not the score move.",
-          "A row with no detail card is scored and ranked from the same five sources as every other; the card costs vendor calls the run spends only on the names furthest from neutral."],
+          NO_CARD_SAID],
       }));
       if (sub) {
         const pool = poolCount(payload) ?? rows.length;
@@ -1928,30 +2013,18 @@
     neuronWire(lng, sht);
 
     const scored = isNum(meta.scored), neutral = isNum(meta.neutral);
-    const sideSaid = (rows, pool, word) => rows === null ? DASH + " " + word
-      : pool !== null && pool > rows ? rows + " of " + pool + " " + word + " carried"
-        : rows + " " + word;
-    const lngRows = rowCount(lng), shtRows = rowCount(sht);
-    const lngPool = poolCount(lng), shtPool = poolCount(sht);
-    const cut = (rows, pool) => rows !== null && pool !== null && pool > rows;
-    const parts = [];
-    if (cut(lngRows, lngPool) || cut(shtRows, shtPool) || lngRows === null || shtRows === null) {
-      parts.push(sideSaid(lngRows, lngPool, "bullish") + " · " + sideSaid(shtRows, shtPool, "bearish"));
-    }
-    if (scored !== null && neutral !== null) parts.push(neutral + " of " + scored + " inside the band");
+    const sideSaid = (word, rows, pool) => word + " " + (rows === null ? DASH : pool !== null && pool > rows ? rows + " of " + pool : rows);
+    const parts = [sideSaid("Bullish", rowCount(lng), poolCount(lng)), sideSaid("Bearish", rowCount(sht), poolCount(sht))];
+    if (scored !== null && neutral) parts.push("Band " + neutral + " of " + scored);
     const unread = [lng ? null : "bullish", sht ? null : "bearish"].filter(Boolean);
-    const said = parts.length ? parts.join(" · ") + "." : "";
-    statusEl.textContent = said + (unread.length
-      ? (said ? " " : "") + "The " + unread.join(" and ") + " board" + (unread.length > 1 ? "s" : "") +
-        " could not be read, so " + (unread.length > 1 ? "neither side is" : "that side is not") +
-        " on this page. Refresh to try again."
-      : "");
+    statusEl.textContent = parts.join(" · ") + "." + (unread.length
+      ? " The " + unread.join(" and ") + " board" + (unread.length > 1 ? "s" : "") + " could not be read. Refresh to try again." : "");
 
     setRailCount("long", poolCount(lng));
     setRailCount("short", poolCount(sht));
     setRailCount("watch", rowCount(watch));
     setRailCount("events", events && events.status !== "pending" ? isNum(events.inWindow) : null);
-    live(pulse, regime, liveVol);
+    live(liveVol);
   }).catch((error) => {
     statusEl.textContent = "The session could not be loaded. Refresh to try again." + (error && error.message ? " (" + error.message + ")" : "");
   });

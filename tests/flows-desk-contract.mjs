@@ -1165,6 +1165,27 @@ try {
        `and at its end only on the left (${end.left}/${end.right}) — a name cut off at the edge with no fade reads as the last name`);
   }
 
+  {
+    const metaPut = await fetch(server.baseURL + "/api/flows/ingest?key=meta", {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + INGEST },
+      body: JSON.stringify({ generatedAt: new Date().toISOString(), sessionDate: "2026-08-25", universe: 10 }),
+    });
+    ok(metaPut.ok, `the nightly meta payload is published with its session (${metaPut.status})`);
+    const bareCtx = await browser.newContext({ viewport: { width: 390, height: 900 } });
+    await bareCtx.addCookies([{ name: "flows_session", value: token, domain: "127.0.0.1", path: "/", httpOnly: true, sameSite: "Lax" }]);
+    const empty = await bareCtx.newPage();
+    await empty.goto(server.baseURL + "/flows/desk/", { waitUntil: "domcontentloaded" });
+    await empty.waitForFunction(() => document.getElementById("fxFresh").dataset.state !== "pending", null, { timeout: 4000 });
+    const pill = await empty.$eval("#fxFresh", (b) => ({ state: b.dataset.state, label: b.textContent.trim(), aria: b.getAttribute("aria-label") }));
+    eq(pill.label, "Aug 25",
+       "a desk with no symbol on it still names the session the nightly archive holds, read from meta, " +
+       "well before the shell's six-second settle — the pill used to sit on a pending \u201cSession\u201d there");
+    ok(pill.state === "stale" || pill.state === "closed" || pill.state === "fresh",
+       `and wears the state that session earns against the clock (${pill.state}), never pending once a session is known`);
+    ok(/session 2026-08-25/.test(pill.aria), "with the session spelled out for assistive technology");
+    await bareCtx.close();
+  }
+
   console.log(`✓ flows-desk: ${checks} assertions — cross-symbol re-ranking, URL-held state, select-all tri-state, ` +
     `a refresh floor that spends nothing, per-chip failure isolation, every line priced in the page by the engine ` +
     `to the byte the server module prices it, the real-world figures present only where a card publishes a law, ` +

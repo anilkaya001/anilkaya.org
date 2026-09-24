@@ -185,7 +185,7 @@ export async function startWorker({ extraVars = [] } = {}) {
     "--var", "FLOWS_ASK_MODEL:",
     "--var", "FLOWS_ASK_FALLBACK_MODEL:",
     ...extraVars.flatMap((v) => ["--var", v]),
-    "--log-level", "error", "--show-interactive-dev-session=false",
+    "--inspector-port", "0", "--log-level", "error", "--show-interactive-dev-session=false",
   ], {
     cwd: served,
     env: childEnv(),

@@ -11,10 +11,15 @@ import {
 import * as L from "../shared/flows-live.js";
 import * as W from "../shared/flows-live-worker.js";
 import * as FAKE from "../scripts/flows-legs/live-fake.mjs";
-import { readHeldAlerts, boardPlan, liveWindow, runLive } from "../scripts/flows-legs/live.mjs";
-import { shapeNews, liveCredential, liveCredentialSource, LIVE_BEARER_MARGIN_MS } from "../scripts/flows-pipeline.mjs";
+import {
+  readHeldAlerts, boardPlan, liveWindow, runLive, runLiveLoop, chainDispatch, nextSlot, LIVE_LOOP, readLiveClock,
+  sessionClock,
+} from "../scripts/flows-legs/live.mjs";
+import {
+  shapeNews, liveCredential, liveCredentialSource, LIVE_BEARER_MARGIN_MS, resetPublishRetryBudget,
+} from "../scripts/flows-pipeline.mjs";
 import * as O from "../shared/flows-oidc.js";
-import { oidcIssuer } from "./live-stubs.mjs";
+import { oidcIssuer, tickDb, tier1Bodies } from "./live-stubs.mjs";
 
 const ROOT = new URL("../", import.meta.url);
 const read = (p) => readFileSync(new URL(p, ROOT), "utf8");
@@ -41,8 +46,13 @@ const T = (iso) => Date.parse(iso);
   eq(Object.values(L.LIVE_KEYS).filter((s) => s.writer === "worker").length, 1,
     "exactly one live key is written by the Worker itself (live:market); every other live key has the Actions run " +
     "as its single writer");
-  eq(L.TIER1_CALLS.length, L.LIVE_BUDGET.tier1Calls, "Tier 1 spends five vendor calls a tick");
-  eq(L.TIER1_CALLS.length, 5, "and five is the budget the design set");
+  eq(L.TIER1_CALLS.length, L.LIVE_BUDGET.tier1Calls, "Tier 1 spends two vendor calls a tick");
+  deep(L.TIER1_CALLS.map((c) => c.feed), ["tide", "sectors"],
+    "and they are the five-minute market tide and the sector-ETF snapshot: the three 390-row one-minute feeds " +
+    "(0DTE net flow, SPY and QQQ etf-tide) left Tier 1 for Tier 2, because parsing and bucketing them filled the " +
+    "Workers Free 10 ms CPU cap once the session's rows filled in");
+  deep(L.TIER1_CALLS[0].params, { interval_5m: "true" }, "the tide is read at five-minute resolution, 78 rows a session");
+  deep([...L.BREADTH_ETFS], ["SPY", "QQQ", "IWM", "DIA"], "Tier 2 carries the four index ETF tides in one shape");
 }
 
 {
@@ -66,6 +76,14 @@ const T = (iso) => Date.parse(iso);
   eq(phaseAt(edt("11:00"), holiday).phase, "closed",
     "A TAPE-DERIVED HOLIDAY (flows_clock.trading = 0 for today) is closed through the session — the repo holds no calendar");
   eq(phaseAt(edt("11:00"), holiday).lastClosed, "2026-09-22", "and its last closed session is the day before");
+  const undecided = { day: "2026-09-23", trading: null, earlyClose: null };
+  ok(phaseAt(edt("11:00"), undecided).phase === "rth" && phaseAt(edt("11:00"), undecided).trading === true &&
+     phaseAt(edt("11:00"), { day: "2026-09-23" }).trading === true,
+  "AN UNDECIDED DAY IS A TRADING DAY: the 09:31 tick rolls flows_clock to today with trading NULL until the 09:45 " +
+    "probe, and Number(null) is 0 — reading it as a closed day silenced Tier 1 for the rest of 2026-09-24");
+  ok(phaseAt(edt("11:00"), { day: "2026-09-23", trading: "0" }).phase === "closed" &&
+     phaseAt(edt("11:00"), { day: "2026-09-23", trading: 1 }).phase === "rth",
+  "only an explicit 0 closes the day");
   const half = { day: "2026-11-27", earlyClose: 1 };
   eq(phaseAt(T("2026-11-27T13:30:00-05:00"), half).phase, "post", "A TAPE-DERIVED EARLY CLOSE ends the session at 13:00");
   eq(new Date(sessionClose("2026-11-27", half)).toISOString(), "2026-11-27T18:00:00.000Z", "13:00 EST is 18:00Z");
@@ -149,17 +167,23 @@ const T = (iso) => Date.parse(iso);
   eq(nightlyDispatchDue(et(18, 45), { nightlyDay: day, nightlyRedispatchedAt: et(18, 15) }, "2026-09-22").due, false,
     "but never a third time");
 
-  const feeds = (d, now) => ({ tide: FAKE.fakeMarketTide({ session: d, now }), zeroDte: FAKE.fakeNetFlow({ session: d, now }),
-    spy: FAKE.fakeEtfTide("SPY", { session: d, now }), qqq: FAKE.fakeEtfTide("QQQ", { session: d, now }) });
+  const feeds = (d, now) => ({ tide: FAKE.fakeMarketTide({ session: d, now }), sectors: FAKE.fakeSectorEtfs({ session: d }) });
   const y = feeds("2026-09-22", easternInstant("2026-09-22", 16 * 60));
   const t = feeds(day, et(9, 45));
+  eq(L.sectorEtfsDay(t.sectors), day,
+    "the sector-ETF snapshot dates itself by prev_date: its rows describe the weekday after the vendor's prev_date");
+  eq(L.sectorEtfsDay({ data: [FX.sectorEtfs.full] }), "2026-09-22", "PROBE ROW: prev_date 2026-09-21 is the 09-22 snapshot");
   eq(L.tideSessionState(y, { today: day, afterProbe: true }), 0,
-    "THE HOLIDAY VERDICT: after 09:45, when every feed still carries the previous session, today is not trading");
+    "THE HOLIDAY VERDICT: after 09:45, when both Tier 1 feeds still carry the previous session, today is not trading");
   eq(L.tideSessionState({ ...t, tide: y.tide }, { today: day, afterProbe: true }), 1,
-    "but ONE feed lagging behind the others is not a holiday — the verdict is sticky for the whole day and stops " +
+    "but ONE feed lagging behind the other is not a holiday — the verdict is sticky for the whole day and stops " +
     "Tier 1 and every dispatch, so a single stale market-tide body must not be able to cast it");
-  eq(L.tideSessionState({ tide: y.tide, zeroDte: { __failed: "HTTP 502" } }, { today: day, afterProbe: true }), null,
-    "and a lone stale feed with the rest unanswered is no verdict yet: the next tick asks again");
+  eq(L.tideSessionState({ tide: y.tide, sectors: { __failed: "HTTP 502" } }, { today: day, afterProbe: true }), null,
+    "and a lone stale feed with the other unanswered is no verdict yet: the next tick asks again");
+  const afterHoliday = { tide: y.tide, sectors: FAKE.fakeSectorEtfs({ session: "2026-09-23" }) };
+  eq(L.tideSessionState(afterHoliday, { today: "2026-09-24", afterProbe: true }), null,
+    "two stale feeds that disagree on WHICH earlier session they carry (a lagging tide the morning after a holiday) " +
+    "are no verdict either: a holiday shows every feed on the same last session");
   eq(L.tideSessionState(t, { today: day, afterProbe: false }), null, "nor is anything decided before 09:45");
 }
 
@@ -421,6 +445,16 @@ const T = (iso) => Date.parse(iso);
   eq(L.pulseWithLive({ ...pulse, readAt: "2026-09-23T16:00:00Z" }, market), null,
     "a nightly pulse newer than the live row is not overlaid");
   eq(L.pulseWithLive({ ...pulse, sessionDate: "2026-09-24" }, market), null, "nor is a later session's");
+  const lone = { ...market, tide: { ...market.tide, t: market.tide.t.slice(0, 1), ncp: market.tide.ncp.slice(0, 1),
+    npp: market.tide.npp.slice(0, 1), nv: market.tide.nv ? market.tide.nv.slice(0, 1) : undefined, n: 1 } };
+  const river = { ...pulse, tide: { status: "ok", points: [{ t: "a" }, { t: "b" }, { t: "c" }] } };
+  eq(L.pulseWithLive(river, lone), null,
+    "A LONE LIVE POINT DOES NOT REPLACE A NIGHTLY RIVER: one reading at the open, or a stalled Tier 1, keeps the " +
+    "last session's full tide in the pulse, and pages read the lone point from live:market and date it themselves");
+  ok(L.pulseWithLive(pulse, lone)?.tide.points.length === 1,
+    "but it still stands in when the nightly pulse has no tide of its own to show");
+  ok(L.pulseWithLive(river, market)?.tide.points.length === market.tide.n,
+    "and two or more live points replace the nightly river as before");
   ok(L.liveAlertsWin("2026-09-22", "2026-09-23") && !L.liveAlertsWin("2026-09-23", "2026-09-23") &&
     !L.liveAlertsWin("2026-09-23", "2026-09-22"),
     "live:alerts replaces the nightly feed only when it covers a later session than the nightly does");
@@ -458,23 +492,34 @@ const T = (iso) => Date.parse(iso);
   const session = "2026-09-22";
   const end = easternInstant(session, 16 * 60 + 5);
   const market = L.shapeMarketLive({
-    tide: FAKE.fakeMarketTide({ session, now: end }), zeroDte: FAKE.fakeNetFlow({ session, now: end }),
-    spy: FAKE.fakeEtfTide("SPY", { session, now: end }), qqq: FAKE.fakeEtfTide("QQQ", { session, now: end }),
-    sectors: FAKE.fakeSectorEtfs({ session }),
+    tide: FAKE.fakeMarketTide({ session, now: end }), sectors: FAKE.fakeSectorEtfs({ session }),
   }, { at: end, session });
   const mBytes = JSON.stringify(market).length;
-  ok(mBytes <= L.LIVE_KEYS["live:market"].maxBytes && market.tide.n >= 78 && market.zeroDte.n >= 78,
-    `a FULL-SESSION live:market (${market.tide.n} tide points, ${market.zeroDte.n} 0DTE points) is ${mBytes} bytes, ` +
-    `inside its ${L.LIVE_KEYS["live:market"].maxBytes}`);
+  ok(mBytes <= L.LIVE_KEYS["live:market"].maxBytes && market.tide.n >= 78 && market.sectors.rows.length === 12,
+    `a FULL-SESSION live:market (${market.tide.n} tide points, ${market.sectors.rows.length} sector-ETF rows) is ` +
+    `${mBytes} bytes, inside its ${L.LIVE_KEYS["live:market"].maxBytes}`);
   ok(mBytes > 0.4 * L.LIVE_KEYS["live:market"].maxBytes, "and genuinely near the cap, so the cap certifies something");
+  deep(Object.keys(market).filter((k) => !["v", "key", "session", "fresh", "units"].includes(k)).sort(),
+    ["last", "sectors", "tide"], "LIVE:MARKET CARRIES ONLY THE TIDE AND THE SECTOR ETFS (and their headline): the " +
+    "0DTE series and the SPY/QQQ ETF tides live in live:breadth now");
+  deep(Object.keys(market.last), ["tideNet"], "its `last` block is the tide's alone");
   const sectors = {};
   for (const { sector } of L.SECTOR_TIDES) sectors[sector] = FAKE.fakeSectorTide(sector, { session, now: end });
-  const breadth = L.shapeBreadth({ sectors, etf: { IWM: FAKE.fakeEtfTide("IWM", { session, now: end }),
-    DIA: FAKE.fakeEtfTide("DIA", { session, now: end }) }, zeroDte: FAKE.fakeNetFlow({ session, now: end }),
-  weekly: FAKE.fakeNetFlow({ session, now: end, expiration: "weekly" }) }, { at: end, session });
+  const etfRaws = Object.fromEntries(L.BREADTH_ETFS.map((t) => [t, FAKE.fakeEtfTide(t, { session, now: end })]));
+  const breadth = L.shapeBreadth({ sectors, etf: etfRaws, zeroDte: FAKE.fakeNetFlow({ session, now: end }),
+    weekly: FAKE.fakeNetFlow({ session, now: end, expiration: "weekly" }) }, { at: end, session });
   const bBytes = JSON.stringify(breadth).length;
   ok(bBytes <= L.LIVE_KEYS["live:breadth"].maxBytes && breadth.sectors.t.length >= 78,
-    `a full-session live:breadth with eleven aligned sector tides is ${bBytes} bytes`);
+    `a full-session live:breadth with eleven aligned sector tides and four ETF tides is ${bBytes} bytes`);
+  ok(Math.abs(breadth.etf.SPY.net.at(-1)) > 1e8,
+    "and the ETF tides it was sized on carry SPY's real magnitude (a session net in the hundreds of millions)");
+  ok(bBytes <= 0.75 * L.LIVE_KEYS["live:breadth"].maxBytes,
+    "with a quarter of the cap to spare: an over-cap breadth is refused and freezes for the session");
+  for (const t of L.BREADTH_ETFS) {
+    const e = breadth.etf[t];
+    ok(e.status === "ok" && e.n === 78 && ["t", "ncp", "npp", "nv", "px", "net"].every((f) => e[f].length === 78),
+      `live:breadth.etf.${t} is a full-session five-minute tide with price, in the one shape every ETF shares`);
+  }
   deep(Object.keys(breadth.sectors.rows).sort(), L.SECTOR_TIDES.map((s) => s.sector).sort(),
     "every one of the vendor's eleven sectors is present, each on the shared time axis");
 
@@ -604,33 +649,62 @@ const T = (iso) => Date.parse(iso);
   ok(credFn.length > 0 && !/FLOWS_INGEST_TOKEN/.test(credFn),
     "and neither the live credential nor its source ever falls back to the nightly token");
   const wf = read(".github/workflows/flows-live.yml");
-  ok(!/FLOWS_INGEST_TOKEN|FLOWS_LIVE_TOKEN/.test(wf) && /permissions:\s*\n\s*contents: read\s*\n\s*id-token: write/.test(wf),
-    "and the live workflow holds no shared secret at all: it proves itself with a GitHub OIDC token minted per run");
+  ok(!/FLOWS_INGEST_TOKEN|FLOWS_LIVE_TOKEN|GITHUB_DISPATCH_TOKEN/.test(wf) &&
+     /permissions:\s*\n\s*contents: read\s*\n\s*id-token: write\s*\n\s*actions: write\s*\n\s*\n/.test(wf),
+    "and the live workflow holds no shared secret at all: it proves itself with a GitHub OIDC token minted per run, " +
+    "and its only other grant is actions: write, which lets the run's own GITHUB_TOKEN re-dispatch the loop");
+  ok(/GITHUB_TOKEN: \$\{\{ github\.token \}\}/.test(wf) && /FLOWS_LIVE_LOOP: "1"/.test(wf),
+    "the read step runs the session loop and hands it the run's own token for the chain dispatch — no new secret");
   ok(/LIVE_READY: \$\{\{ secrets\.UW_API_KEY != '' \}\}/.test(wf), "so the vendor key is the only secret it waits for");
+  ok(/uses: actions\/checkout@[0-9a-f]{40}\n(?:\s+if: .*\n)?\s+with:\n\s+persist-credentials: false\n/.test(wf),
+    "the checkout keeps no credential in .git/config: the job's token can dispatch workflows, and only the chain " +
+      "dispatch, which receives it through env, needs it");
   const uses = [...wf.matchAll(/uses:\s*(\S+)/g)].map((m) => m[1]);
   ok(uses.length >= 2 && uses.every((u) => /^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/.test(u)),
     `every action in the live job is pinned to a commit SHA (${uses.join(", ")}): id-token: write lets any step mint ` +
     "the live credential, so no step may run code a moved tag could swap");
-  ok(/concurrency:\s*\n\s*group: flows-live\s*\n\s*cancel-in-progress: false/.test(wf) && /timeout-minutes: 8/.test(wf),
-    "one live run at a time, eight minutes at most");
-  ok(/cron: "7,22,37,52 13-20 \* \* 1-5"/.test(wf), "with a backup schedule that exits at once outside the session");
+  const timeout = Number((/timeout-minutes: (\d+)/.exec(wf) || [])[1]);
+  const { LIVE_LOOP } = await import("../scripts/flows-legs/live.mjs");
+  ok(/concurrency:\s*\n\s*group: flows-live\s*\n\s*cancel-in-progress: false/.test(wf) && timeout < 360 &&
+     LIVE_LOOP.budgetMs + 10 * 60000 <= timeout * 60000,
+    `one live run at a time (so never more than one loop), ${timeout} minutes at most — under GitHub's six-hour job ` +
+    `cap, with the loop's ${LIVE_LOOP.budgetMs / 60000}-minute budget and a pass's overrun inside it`);
+  const crons = [...wf.matchAll(/cron: "([^"]+)"/g)].map((m) => m[1]);
+  deep(crons, ["31 13,14 * * 1-5", "3 15-20 * * 1-5"],
+    "STARTERS, not a schedule: 13:31 and 14:31 UTC start the loop at the open under EDT and EST, and every hour at :03 " +
+    "from 15:03 to 20:03 restarts it if GitHub dropped a starter or a run died, so a dropped slot costs an hour at most " +
+    "— a starter that queues behind a running loop exits at once when it finally starts outside the window");
 
   const migration = read("migrations/0010_flows_live.sql");
+  const clockMigration = read("migrations/0011_flows_clock_tier1.sql");
   const schema = read("schema.sql");
-  ok(schema.includes(migration.trim()), "LAYER 3 and 4 (table, storage): schema.sql carries the migration verbatim");
+  const clockBlock = /CREATE TABLE IF NOT EXISTS flows_clock \([\s\S]*?\n\);\n/;
+  ok(schema.includes(migration.replace(clockBlock, "").trim().split("\n\n")[0].trim()) &&
+     schema.includes(migration.slice(migration.indexOf("CREATE TABLE IF NOT EXISTS flows_tape"), migration.search(clockBlock)).trim()) &&
+     schema.includes(migration.slice(migration.indexOf("CREATE TRIGGER")).trim()),
+  "LAYER 3 and 4 (table, storage): schema.sql carries the migration verbatim, flows_clock aside");
   ok(/id\s+TEXT PRIMARY KEY CHECK \(id GLOB 'live:\*'\)/.test(migration), "flows_live refuses any id outside live:*");
   ok(/BEFORE UPDATE ON flows_payload[\s\S]*RAISE\(ABORT, 'flows archive rows are immutable'\)/.test(migration),
     "and a trigger makes the dated archive immutable at the storage layer");
   ok(!/ALTER TABLE/.test(migration), "every statement is IF NOT EXISTS, so applying it twice is safe");
+  const added = [...clockMigration.matchAll(/ALTER TABLE flows_clock ADD COLUMN (\w+) (\w+);/g)].map((m) => [m[1], m[2]]);
+  deep(added, W.CLOCK_ADDED_COLUMNS.map((c) => [...c]),
+    "TIER 1 TELEMETRY: 0011 adds tier1_at, tier1_ok_at and tier1_why to flows_clock, and the Worker's first-use path " +
+    "adds exactly those columns to a production table that predates them");
+  eq(clockMigration.trim().split("\n").length, added.length, "and 0011 does nothing else");
   const cols = (sql, table) => {
     const body = new RegExp(`CREATE TABLE IF NOT EXISTS ${table} \\(([\\s\\S]*?)\\)(?:;|")`).exec(sql);
-    return body ? body[1].split(",").map((c) => c.trim().split(/\s+/)[0]).filter((c) => /^[a-z_]+$/.test(c)) : [];
+    return body ? body[1].split(",").map((c) => c.trim().split(/\s+/)[0]).filter((c) => /^[a-z_0-9]+$/.test(c)) : [];
   };
   const workerDdl = W.LIVE_SCHEMA_SQL.join(";\n") + ";";
-  for (const table of ["flows_live", "flows_tape", "flows_clock"]) {
+  for (const table of ["flows_live", "flows_tape"]) {
     deep(cols(workerDdl, table), cols(migration, table),
       `the Worker's first-use fallback creates ${table} with exactly the migration's columns`);
   }
+  const clockCols = [...cols(migration, "flows_clock"), ...added.map(([c]) => c)];
+  deep(cols(workerDdl, "flows_clock"), clockCols,
+    "and flows_clock with 0010's columns plus 0011's, in the order an upgraded production table has them");
+  deep(cols(schema, "flows_clock"), clockCols, "as schema.sql declares it");
   const toml = read("wrangler.toml");
   eq(W.cronJob(W.RTH_CRON, T("2026-09-23T15:16:00Z")), "rth", "the market-hours cron runs the Tier 1 tick");
   eq(W.cronJob(W.HOUSEKEEPING_CRON, T("2026-09-23T15:30:00Z")), "housekeeping", "the half-hour cron runs housekeeping");
@@ -752,7 +826,7 @@ const T = (iso) => Date.parse(iso);
       { fetchVendor: async () => { throw new Error("HTTP 502"); }, log: { error() {} } });
     ok(dead.tier1 && dead.tier1.written === false && dead.tier1.why === "no-feed-answered" &&
        !statements.some((q) => /INSERT INTO flows_live/.test(q)),
-    "TIER 1 likewise: when none of its five feeds answered, live:market is not rewritten");
+    "TIER 1 likewise: when neither of its two feeds answered, live:market is not rewritten");
     let clock = tickAt;
     const fake = FAKE.fakeLiveVendor({ now: () => (clock += 250), session });
     const alive = await W.rthTick({ DB: db, UW_API_KEY: "k" }, tickAt + 5 * 60000,
@@ -766,6 +840,22 @@ const T = (iso) => Date.parse(iso);
   deep(plan.ranked, ["CCC", "AAA", "BBB"], "the gamma rotation ranks board names by |score|");
   eq(liveWindow(T("2026-09-23T12:00:00Z")).why, "before-open", "the live run exits at once before the open");
   eq(liveWindow(T("2026-09-26T15:00:00Z")).why, "not-trading", "and on a weekend");
+  const thanksgiving = easternInstant("2026-11-26", 11 * 60);
+  eq(liveWindow(thanksgiving).why, "session",
+    "THE CALENDAR ALONE CANNOT KNOW A HOLIDAY: without the Worker's clock, Thanksgiving reads as a session");
+  eq(liveWindow(thanksgiving, { day: "2026-11-26", trading: 0, earlyClose: null }).why, "not-trading",
+    "so the live window takes the Worker's tape-derived clock, and a day it closed is not a session");
+  eq(liveWindow(thanksgiving, { day: "2026-11-25", trading: 0, earlyClose: null }).why, "session",
+    "a verdict for another day is never applied to this one");
+  const early = { day: "2026-11-27", trading: 1, earlyClose: 1 };
+  ok(liveWindow(easternInstant("2026-11-27", 13 * 60 + 25), early).run &&
+     liveWindow(easternInstant("2026-11-27", 13 * 60 + 30), early).why === "after-close" &&
+     liveWindow(easternInstant("2026-11-27", 13 * 60 + 30)).run,
+  "AN EARLY CLOSE ends the window at 13:25 (13:00 plus the run-after-close), which the calendar alone would run to 16:25");
+  const skipped = await runLive({ uw: async () => { throw new Error("no vendor call on a holiday"); },
+    publish: async () => {}, readStored: async () => { throw new Error("no store read on a holiday"); },
+    now: () => thanksgiving, log: () => {}, clock: { day: "2026-11-26", trading: 0, earlyClose: null } });
+  deep(skipped, { skipped: "not-trading" }, "and a single live pass on a closed day spends nothing");
 }
 
 {
@@ -1012,6 +1102,345 @@ const T = (iso) => Date.parse(iso);
   checks += 2;
 }
 
+{
+  const S = "2026-09-24";
+  const open = easternInstant(S, 9 * 60 + 30);
+  const minute = (i, v) => ({ timestamp: new Date(open + i * 60000).toISOString(), ncp: v, npp: v === null ? null : -v });
+  const day = (filled) => Array.from({ length: 390 }, (_, i) => minute(i, i < filled ? i + 1 : null));
+  const opts = (basis) => ({ fields: { ncp: "ncp", npp: "npp" }, basis, check: false });
+  for (const basis of ["cumulative", "level"]) {
+    const atOpen = L.bucketSeries(day(1), opts(basis));
+    ok(atOpen.n === 1 && atOpen.ncp[0] === 1 && atOpen.t[0] === L.isoSec(open),
+      `THE VENDOR PRE-FILLS THE DAY WITH NULLS (${basis}): at 09:31 the one filled minute is kept — the bucket's last ` +
+      "row WITH VALUES, not its last row, which is a null placeholder for a minute not yet traded");
+    eq(atOpen.dropped, 389, "and the 389 placeholders are counted as dropped, never as values");
+    const mid = L.bucketSeries(day(152), opts(basis));
+    eq(mid.n, 31, `MID-SESSION (${basis}): 152 filled minutes are 30 complete buckets and the current partial one`);
+    deep([mid.ncp.at(-1), mid.t.at(-1)], [152, L.isoSec(open + 151 * 60000)],
+      "and the partial bucket is sampled at its latest filled minute, so the headline is this minute's, not five ago");
+    const full = L.bucketSeries(day(390), opts(basis));
+    ok(full.n === 78 && full.ncp.at(-1) === 390 && full.dropped === 0 && full.net.at(-1) === 780,
+      `A FULL DAY (${basis}) is 78 buckets, each at its last minute, net = ncp − npp`);
+    const holey = day(12);
+    holey[9] = minute(9, null);
+    const h = L.bucketSeries(holey, opts(basis));
+    deep(h.ncp, [5, 9, 12], "a null minute at a bucket's end is skipped too: 09:35–09:39 is sampled at 09:38's value");
+  }
+  const tide = FAKE.fakeEtfTide("SPY", { session: S, now: open + 61 * 60000 });
+  ok(tide.data.length === 390 && tide.data.at(-1).net_call_premium === null,
+    "the fake vendor pre-fills the rest of the day with nulls, as the real one does");
+  const shaped = L.shapeTideFeed(tide, { session: S, withPx: true });
+  ok(shaped.status === "ok" && shaped.n === 13 && shaped.lastAt === L.isoSec(open + 60 * 60000),
+    "so an ETF tide an hour in shapes to thirteen buckets ending at its latest filled minute, not rows-unshaped");
+  eq(L.tideLastAt(tide), open + 60 * 60000,
+    "and the tape's last instant is the last minute with values, not the pre-filled 15:59 placeholder");
+  const blank = { date: S, data: day(0) };
+  const early = L.shapeTideFeed(blank, { session: S, withPx: true });
+  ok(early.status === "quiet" && early.reason === L.SILENCE.empty && early.n === 0 && early.seen === 390 &&
+     early.dropped === 390,
+  "BEFORE THE FIRST PRINT a pre-filled feed is every minute a null placeholder: that is quiet (vendor-empty), " +
+    "no trade yet, not unreadable — nothing about the feed is broken");
+  const dteBlank = L.shapeNetFlowFeed({ date: S, data: [{ expiration: "zero_dte", data: day(0) }] },
+    { session: S, expiration: "zero_dte" });
+  ok(dteBlank.status === "quiet" && dteBlank.reason === L.SILENCE.empty && dteBlank.expiration === "zero_dte",
+    "and so is the 0DTE net flow at 09:30, through the same shaper");
+  eq(L.anyAnswered([early]), true, "a quiet feed answered, so the key it feeds is still written with its read time");
+  const garbled = L.shapeTideFeed({ date: S, data: [{ timestamp: "not a time", ncp: 1 }, ...day(0).slice(0, 3)] },
+    { session: S });
+  eq(garbled.status, "unreadable", "while rows the shaper cannot place (a bad timestamp among them) stay unreadable");
+  const offHours = L.shapeTideFeed({ date: S, data: [{ timestamp: new Date(open - 3600000).toISOString(), ncp: 1,
+    npp: 1 }] }, { session: S });
+  eq(offHours.status, "unreadable", "as do rows that all fall outside the session window");
+  let noted = [];
+  await runLive({ uw: async (path) => (/etf-tide|net-flow|sector-tide/.test(path) ? blank : { data: [] }),
+    publish: async () => {}, readStored: async () => ({ payload: null, absent: true }),
+    now: (() => { let t = easternInstant(S, 9 * 60 + 31); return () => (t += 50); })(),
+    log: (line) => noted.push(line), warn: () => {}, force: true });
+  ok(!noted.some((l) => /shaped none/.test(l)),
+    "and a live pass at 09:31 logs no 'returned rows but shaped none' for feeds that have simply not printed yet");
+}
+
+{
+  const S = "2026-09-24";
+  const run = async (at, { env = {}, fetchVendor, clockRow = null } = {}) => {
+    const db = tickDb();
+    const batch = db.batch;
+    db.batch = async (list) => {
+      const res = await batch(list);
+      if (/SELECT \* FROM flows_clock/.test(list[0].sql)) res[0] = { results: clockRow ? [clockRow] : [] };
+      return res;
+    };
+    const out = await W.rthTick({ DB: db, UW_API_KEY: "k", ...env }, at, { fetchVendor, log: { error() {} } });
+    const patches = db.statements.filter((st) => /INSERT INTO flows_clock/.test(st.sql));
+    const col = (name) => {
+      for (let i = patches.length - 1; i >= 0; i--) {
+        const cols = /\(([^)]*)\) VALUES/.exec(patches[i].sql)[1].split(", ");
+        const j = cols.indexOf(name);
+        if (j >= 0) return patches[i].args[j];
+      }
+      return undefined;
+    };
+    return { out, db, patches, col };
+  };
+  const at = easternInstant(S, 10 * 60 + 6);
+  const texts = await tier1Bodies({ session: S, at });
+  const vendor = async (path) => JSON.parse(texts[path]);
+  const ok1 = await run(at, { fetchVendor: vendor });
+  ok(/^INSERT INTO flows_clock \(id, tier1_at, updated_at\)/.test(ok1.db.statements[0].sql) && ok1.db.statements[0].args[1] === at,
+    "TIER 1 TELEMETRY: the first thing a tick does is stamp tier1_at, alone and cheaply, before any vendor read");
+  deep([ok1.col("tier1_why"), ok1.col("tier1_ok_at"), ok1.out.why], ["written", at, "written"],
+    "a tick that writes live:market records tier1_why written and moves tier1_ok_at");
+  ok(ok1.db.statements.some((st) => /INSERT INTO flows_live/.test(st.sql)) && ok1.out.tier1.written,
+    "in the same batch as the live:market write, so the two never disagree");
+  const dead = await run(at, { fetchVendor: async () => { throw new Error("HTTP 502"); } });
+  deep([dead.col("tier1_why"), dead.col("tier1_ok_at")], ["no-feed-answered", undefined],
+    "a tick no feed answered says so, and leaves tier1_ok_at where the last good tick put it");
+  const early = await run(easternInstant(S, 9 * 60 + 20), { fetchVendor: vendor });
+  eq(early.col("tier1_why"), "not-due", "a tick before the open is not-due");
+  {
+    const row = { id: 1, day: "2026-09-23", trading: 1, early_close: 0, tape_at: null, tape_moved_at: null };
+    const written = [];
+    for (let m = 9 * 60 + 31; m <= 10 * 60 + 6; m += 5) {
+      const tickAt = easternInstant(S, m);
+      const bodies = await tier1Bodies({ session: S, at: tickAt });
+      const t = await run(tickAt, { fetchVendor: async (path) => JSON.parse(bodies[path]), clockRow: { ...row } });
+      for (const patch of t.patches) {
+        const cols = /\(([^)]*)\) VALUES/.exec(patch.sql)[1].split(", ");
+        cols.forEach((c, j) => { row[c] = patch.args[j]; });
+      }
+      written.push([m, t.out.why || t.out.skipped, row.trading]);
+    }
+    ok(written.every(([, why]) => why === "written") && written[0][2] === null && row.trading === 1 && row.day === S,
+      "A SESSION THREADED THROUGH ITS OWN CLOCK ROW: the 09:31 tick rolls the day with trading NULL, and every tick " +
+        `after it still writes live:market; the 09:46 probe then records trading = 1 (${written.map(([m, w, tr]) =>
+          `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")} ${w} ${tr}`).join(", ")})`);
+  }
+  const holiday = await run(at, { fetchVendor: vendor, clockRow: { id: 1, day: S, trading: 0 } });
+  ok(holiday.out.skipped === "holiday" && holiday.col("tier1_why") === "holiday", "a tape-derived holiday says holiday");
+  const off = await run(at, { env: { FLOWS_LIVE_MODE: "off" }, fetchVendor: vendor });
+  ok(off.out.skipped === "off" && off.col("tier1_why") === "off" && off.col("tier1_at") === at, "and a switched-off layer says off");
+  const noKey = await run(at, { env: { UW_API_KEY: "" }, fetchVendor: vendor });
+  eq(noKey.col("tier1_why"), "error:no-key", "a missing vendor key is an error with a short name");
+  ok(W.tier1Why("error:" + "Cannot read <b>x</b>\n".repeat(20)).length <= 54, "an error reason is short");
+  ok(/^error:[\w .:-]*$/.test(W.tier1Why("error:bad\u0000<chars>")), "and carries no markup or control characters");
+
+  const upgrades = [];
+  const fakeDb = (have, fail = null) => ({
+    prepare(sql) {
+      return {
+        all: async () => ({ results: have.map((name) => ({ name })) }),
+        run: async () => { if (fail && sql.includes(fail[0])) throw new Error(fail[1]); upgrades.push(sql); return {}; },
+      };
+    },
+  });
+  deep(await W.upgradeClockColumns(fakeDb(["id", "day", "tier1_at"])), ["tier1_ok_at", "tier1_why"],
+    "THE PRODUCTION TABLE UPGRADES ITSELF: the first-use path adds only the telemetry columns flows_clock lacks");
+  deep(upgrades, ["ALTER TABLE flows_clock ADD COLUMN tier1_ok_at INTEGER", "ALTER TABLE flows_clock ADD COLUMN tier1_why TEXT"],
+    "with one ALTER TABLE ADD COLUMN each");
+  deep(await W.upgradeClockColumns(fakeDb(["id"], ["tier1_at", "duplicate column name: tier1_at"])), ["tier1_ok_at", "tier1_why"],
+    "a racing isolate that added a column first is tolerated (duplicate column)");
+  let threw = false;
+  try { await W.upgradeClockColumns(fakeDb(["id"], ["tier1_at", "database is locked"])); } catch { threw = true; }
+  ok(threw, "while any other failure surfaces, so the schema is not marked ready and the next request retries");
+  ok(/await FLOWS_LIVE\.upgradeClockColumns\(env\.DB\);\s*flowsSchemaReady = true;/.test(read("worker.js")),
+    "and ensureFlowsTables marks the schema ready only after the upgrade");
+}
+
+{
+  const S = "2026-09-24";
+  const et = (m) => easternInstant(S, m);
+  const sim = (start) => {
+    let t = start;
+    const sleeps = [];
+    return { now: () => t, sleep: async (ms) => { sleeps.push(ms); t += ms; }, sleeps, advance: (ms) => { t += ms; } };
+  };
+  {
+    const c = sim(et(9 * 60 + 31) + 20000);
+    const passAt = [];
+    const r = await runLiveLoop({ now: c.now, sleep: c.sleep, log: () => {}, budgetMs: 24 * 3600 * 1000,
+      pass: async ({ first }) => { passAt.push([c.now(), first]); c.advance(40000); return {}; },
+      chain: async () => { throw new Error("no chain inside the window"); } });
+    eq(passAt[0][0], et(9 * 60 + 31) + 20000, "THE LOOP: a pass at once when the run starts");
+    ok(passAt.slice(1).every(([t]) => t % LIVE_LOOP.slotMs === 0) && passAt.every(([, f], i) => f === (i === 0)),
+      "then one pass on every five-minute slot, the first alone honouring a recent heartbeat");
+    ok(c.sleeps.every((ms) => ms > 0 && ms <= LIVE_LOOP.slotMs), "sleeping only to the next slot");
+    const last = passAt.at(-1)[0];
+    ok(r.exit === "window-closed" && liveWindow(last).run && !liveWindow(nextSlot(last)).run &&
+       last === easternInstant(S, 16 * 60 + 25),
+    `and it exits when the session window closes, run-after-close included (last pass ${new Date(last).toISOString()})`);
+    eq(r.passes.length, 1 + (16 * 60 + 25 - (9 * 60 + 35)) / 5 + 1, "a pass on every slot from the open to 16:25");
+  }
+  {
+    const c = sim(et(9 * 60 + 31));
+    const chained = [];
+    const r = await runLiveLoop({ now: c.now, sleep: c.sleep, log: () => {},
+      pass: async () => { c.advance(45000); return {}; },
+      chain: async ({ at }) => { chained.push(at); return { sent: true, why: "sent", status: 204 }; } });
+    ok(r.exit === "budget" && chained.length === 1 && chained[0] - et(9 * 60 + 31) <= LIVE_LOOP.budgetMs &&
+       liveWindow(chained[0]).run,
+    "THE BUDGET: when the next slot would fall past the time budget with the session still open, the run " +
+      "re-dispatches itself once and exits");
+    ok(r.passes.length > 60 && r.passes.length <= LIVE_LOOP.budgetMs / LIVE_LOOP.slotMs + 1,
+      `after ${r.passes.length} passes`);
+  }
+  {
+    const c = sim(et(16 * 60 + 40));
+    let passes = 0;
+    const r = await runLiveLoop({ now: c.now, sleep: c.sleep, log: () => {}, pass: async () => { passes++; return {}; },
+      chain: async () => { throw new Error("never"); } });
+    ok(r.exit === "outside-window" && passes === 0 && c.sleeps.length === 0,
+      "A STARTER THAT QUEUED BEHIND A RUNNING LOOP and starts after the window closed exits at once, without a pass");
+    const sat = sim(T("2026-09-26T15:00:00Z"));
+    const w = await runLiveLoop({ now: sat.now, sleep: sat.sleep, log: () => {}, pass: async () => { passes++; },
+      chain: async () => { throw new Error("never"); } });
+    ok(w.exit === "outside-window" && w.why === "not-trading" && passes === 0, "as does one on a weekend");
+  }
+  {
+    const TG = "2026-11-26";
+    const verdict = easternInstant(TG, 9 * 60 + 46);
+    const c = sim(easternInstant(TG, 9 * 60 + 31));
+    const passAt = [];
+    let reads = 0;
+    const r = await runLiveLoop({ now: c.now, sleep: c.sleep, log: () => {},
+      readClock: async () => { reads++; return c.now() >= verdict ? { day: TG, trading: 0, earlyClose: null } : { day: TG,
+        trading: null, earlyClose: null }; },
+      pass: async () => { passAt.push(c.now()); c.advance(40000); return {}; },
+      chain: async () => { throw new Error("never chain on a holiday"); } });
+    ok(r.exit === "window-closed" && r.why === "not-trading" && passAt.every((t) => t < verdict) && passAt.length === 4 &&
+       reads > passAt.length,
+    "A TAPE-DERIVED HOLIDAY: the loop reads the Worker's clock around every pass, and once Tier 1 has closed the day " +
+      `(09:46 on Thanksgiving) no pass follows and nothing is chained (${passAt.length} passes before the verdict)`);
+  }
+  {
+    const EC = "2026-11-27";
+    const c = sim(easternInstant(EC, 9 * 60 + 31));
+    const passAt = [];
+    const r = await runLiveLoop({ now: c.now, sleep: c.sleep, log: () => {},
+      readClock: async () => ({ day: EC, trading: 1, earlyClose: 1 }),
+      pass: async () => { passAt.push(c.now()); c.advance(40000); return {}; },
+      chain: async () => { throw new Error("never chain after an early close"); } });
+    ok(r.exit === "window-closed" && r.why === "after-close" && passAt.at(-1) === easternInstant(EC, 13 * 60 + 25),
+      `AN EARLY CLOSE: the last pass is at 13:25, not 16:25 (${new Date(passAt.at(-1)).toISOString()})`);
+    const verdict = easternInstant(EC, 13 * 60 + 36);
+    const d = sim(easternInstant(EC, 12 * 60));
+    const late = [];
+    const lr = await runLiveLoop({ now: d.now, sleep: d.sleep, log: () => {},
+      readClock: async () => ({ day: EC, trading: 1, earlyClose: d.now() >= verdict ? 1 : null }),
+      pass: async () => { late.push(d.now()); d.advance(40000); return {}; },
+      chain: async () => { throw new Error("never chain after an early close"); } });
+    ok(lr.exit === "window-closed" && lr.why === "after-close" && late.at(-1) === easternInstant(EC, 13 * 60 + 35),
+      "and when Tier 1 marks it only at 13:36, as its 30-minute quiet rule does, the loop stops at the next slot " +
+        `(last pass ${new Date(late.at(-1)).toISOString()})`);
+  }
+  {
+    const c = sim(et(12 * 60));
+    const TG = "2026-11-26";
+    const late = sim(easternInstant(TG, 12 * 60));
+    let passes = 0;
+    const w = await runLiveLoop({ now: late.now, sleep: late.sleep, log: () => {}, pass: async () => { passes++; },
+      readClock: async () => ({ day: TG, trading: 0, earlyClose: null }),
+      chain: async () => { throw new Error("never"); } });
+    ok(w.exit === "outside-window" && w.why === "not-trading" && passes === 0,
+      "a starter that begins on a day the Worker has already closed exits without a pass");
+    let calls = 0;
+    const flaky = await runLiveLoop({ now: c.now, sleep: c.sleep, log: () => {}, budgetMs: 24 * 3600 * 1000,
+      readClock: async () => { calls++; if (calls === 2) return { day: S, trading: 1, earlyClose: 1 }; throw new Error("down"); },
+      pass: async () => { c.advance(30000); return {}; }, chain: async () => { throw new Error("never"); } });
+    ok(flaky.exit === "window-closed" && flaky.why === "after-close" && flaky.clock.earlyClose === 1,
+      "a clock read that fails keeps the last verdict it had, so one blip never forgets an early close");
+  }
+  {
+    const c = sim(et(15 * 60 + 50));
+    const warned = [];
+    let n = 0;
+    const r = await runLiveLoop({ now: c.now, sleep: c.sleep, log: () => {}, warn: (l) => warned.push(l),
+      pass: async () => { n++; c.advance(20000); if (n === 2) throw new Error("unexpected vendor body"); return { errored: false }; },
+      chain: async () => { throw new Error("never"); } });
+    ok(r.exit === "window-closed" && r.passes.length === n && n > 3 && r.passes[1].errored === true &&
+       r.passes[1].threw === "unexpected vendor body" && r.passes.slice(2).every((p) => p.errored === false) &&
+       warned.length === 1,
+    "A PASS THAT THROWS is logged and recorded as errored, and the loop carries on: the next slots still run, so one bad " +
+      "vendor body costs one pass, not the rest of the session");
+  }
+  {
+    const at = { day: S, trading: 1, earlyClose: null };
+    const asked = [];
+    deep(await readLiveClock(async (key) => { asked.push(key); return { payload: { key: "clock", clock: at }, status: 200 }; }),
+      at, "THE CLOCK READ is the Worker's flows_clock verdict, through the ingest route under the live credential");
+    deep(asked, ["clock"], "one GET of the ingest key clock, not a signed-in page route");
+    eq(await readLiveClock(async () => ({ payload: null, failed: true, status: 400 })), null,
+      "a Worker that predates the key answers 400, which reads as no clock, so either deploy order works");
+    eq(await readLiveClock(async () => { throw new Error("offline"); }), null,
+      "and an unreachable Worker reads as no clock too (the loop then keeps its last verdict, or the weekday calendar)");
+    deep([sessionClock({ clock: { day: "2026-9-1", trading: 1 } }), sessionClock({ clock: { day: S, trading: "0",
+      earlyClose: 7 } })], [null, { day: S, trading: null, earlyClose: null }],
+    "a malformed day is no clock, and a flag that is not exactly 0 or 1 is unknown, never a verdict");
+    deep(W.clockView({ day: S, trading: null, earlyClose: "1", tier1At: 5 }), { day: S, trading: null, earlyClose: 1 },
+      "the Worker's view of its clock is the day and its two verdicts, NULL kept as undecided, nothing else");
+    const ingestSrc = read("worker.js");
+    ok(/if \(key === "clock"\) \{\s*requireMethod\(request, \["GET"\]\);\s*await ensureFlowsTables\(env\);\s*return FLOWS_LIVE\.serveIngestClock\(env, \{ json \}\);/
+      .test(ingestSrc) && ingestSrc.indexOf('if (key === "clock")') > ingestSrc.indexOf('if (!tokenKind) throw new HttpError(401'),
+    "the ingest route serves the clock to a verified credential only, and to GET only");
+    eq(resetPublishRetryBudget(), 0, "the publish retry budget can be reset, and a fresh process has spent none of it");
+  }
+  {
+    const sent = [];
+    const fetchImpl = async (url, init) => { sent.push({ url, init }); return { status: 204 }; };
+    const at = et(15 * 60 + 11);
+    const r = await chainDispatch({ env: { GITHUB_TOKEN: "ghs_run_token", GITHUB_REPOSITORY: "anilkaya001/anilkaya.org" },
+      fetchImpl, at });
+    ok(r.sent && sent.length === 1, "THE CHAIN DISPATCH is one request");
+    eq(sent[0].url, "https://api.github.com/repos/anilkaya001/anilkaya.org/actions/workflows/flows-live.yml/dispatches",
+      "to this repository's live workflow");
+    ok(sent[0].init.method === "POST" && sent[0].init.headers.Authorization === "Bearer ghs_run_token" &&
+       sent[0].init.headers.Accept === "application/vnd.github+json",
+    "authenticated with the run's own GITHUB_TOKEN (workflow_dispatch is the documented exception to its no-recursion rule)");
+    deep(JSON.parse(sent[0].init.body), { ref: "main", inputs: { tick: new Date(at).toISOString(), origin: "chain" } },
+      "on main, saying the chain sent it");
+    deep(await chainDispatch({ env: { GITHUB_REPOSITORY: "a/b" }, fetchImpl }), { sent: false, why: "no-token" },
+      "without a token it sends nothing");
+    eq((await chainDispatch({ env: { GITHUB_TOKEN: "t", GITHUB_REPOSITORY: "a/b", GITHUB_API_URL: "https://evil.example" },
+      fetchImpl })).why, "bad-base", "and never to a host other than the GitHub API");
+    eq((await chainDispatch({ env: { GITHUB_TOKEN: "t", GITHUB_REPOSITORY: "a/b" },
+      fetchImpl: async () => ({ status: 403 }) })).why, "refused", "a refused dispatch is reported, not thrown");
+  }
+  const pipeline = read("scripts/flows-pipeline.mjs");
+  ok(/pass: async \(\{ first, clock \}\) => \{\s*resetPublishRetryBudget\(\);/.test(pipeline),
+    "EACH PASS HAS ITS OWN RETRY BUDGET: the loop resets the 90 s publish/read retry budget at the start of every " +
+      "pass, as each separate run had, so a blip at 10:00 cannot leave the 15:00 pass with no retries");
+  ok(/readClock = \(\) => readLiveClock\(readStoredOnce\)/.test(pipeline) && /runLiveLoop\(\{\s*readClock,/.test(pipeline) &&
+     /const clock = force \? null : await readClock\(\);/.test(pipeline),
+  "and --live gates both the loop and a single pass on the Worker's clock");
+  ok(/runLive\(\{ uw, publish, readStored, shapeNews, origin, skipRecent: first, clock \}\)/.test(pipeline) &&
+     /chainDispatch\(\{ env: process\.env, at \}\)/.test(pipeline) && /process\.env\.FLOWS_LIVE_LOOP !== "1"/.test(pipeline),
+  "--live runs the loop when the workflow asks for it, each pass after the first ignoring the heartbeat skip");
+}
+
+{
+  const child = (arg) => {
+    const out = execFileSync("node", [new URL("tests/live-stubs.mjs", ROOT).pathname, "--tier1-budget", ...arg],
+      { encoding: "utf8" });
+    return JSON.parse(out.trim().split("\n").pop());
+  };
+  const colds = Array.from({ length: 10 }, () => child(["cold"]));
+  ok(colds.every((c) => c.written), "the budget child's cold ticks each wrote a full-session live:market");
+  const coldCpu = colds.reduce((a, c) => a + c.cold, 0) / colds.length;
+  const walls = colds.map((c) => c.coldWall).sort((a, b) => a - b);
+  const coldWall = (walls[4] + walls[5]) / 2;
+  const warm = child([]);
+  ok(coldCpu < 7.5,
+    `COLD ISOLATE: the first Tier 1 tick of a fresh process (lazy compilation included) over full-session bodies ` +
+    `(${warm.bytes} bytes of vendor JSON) takes ${coldCpu.toFixed(2)} ms of ${colds[0].clock} time, the mean of ten ` +
+    `processes (the clock ticks in 4 ms steps, so one reading is 4 or 8; the mean is unbiased), under the 10 ms cap`);
+  ok(coldWall < 8, `its median wall time, a finer clock and an upper bound on an idle machine, is ${coldWall.toFixed(2)} ms`);
+  ok(warm.median < 2.5 && warm.worst < 5,
+    `WARM: ${warm.median.toFixed(2)} ms median over windows of ${warm.window} ticks, ${warm.worst.toFixed(2)} ms in the ` +
+    "costliest window, garbage collection included");
+  ok(warm.payloadBytes <= L.LIVE_KEYS["live:market"].maxBytes, `writing ${warm.payloadBytes} bytes of live:market`);
+  console.log(`  tier 1 CPU: cold ${coldCpu.toFixed(2)} ms (${colds[0].clock}, mean of 10), cold wall ${coldWall.toFixed(2)} ms ` +
+    `(median), warm ${warm.median.toFixed(2)} ms median, ${warm.worst.toFixed(2)} ms worst window`);
+}
+
 console.log(`✓ flows-live: ${checks} assertions — one threshold table in code; phases on the Eastern clock at every ` +
   `boundary under EDT and EST, a tape-derived holiday and early close; states and absolute instants for every class; ` +
   `the Tier 1 and Tier 2 clocks, in-flight dispatch and a once-only nightly retry; probe rows shaped to known answers ` +
@@ -1019,4 +1448,6 @@ console.log(`✓ flows-live: ${checks} assertions — one threshold table in cod
   `and its session reset; gamma rotation with carried readings under their own read time; the live alert union with ` +
   `its empty-read guard, cursor, floor and session reset; read-time overlays instead of a second writer; one writer ` +
   `per key and a credential per namespace, the live one a GitHub OIDC token checked claim by claim; full-session byte ceilings; the five-layer archive immutability scan; the ` +
-  `--live dry run; and a client helper that only compares clocks`);
+  `--live dry run; buckets sampled at their last row with values under the vendor's pre-filled nulls; Tier 1 in two ` +
+  `feeds under the 10 ms CPU cap cold and warm, with D1 telemetry that names every tick's outcome; the self-sustaining ` +
+  `Tier 2 session loop, its budget and its chain dispatch; and a client helper that only compares clocks`);

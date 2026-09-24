@@ -433,7 +433,9 @@ Confirmed to need one: `flows-overview-contract`, `flows-board-render`,
 `flows-chain-contract`, `flows-sections-contract`, `worker-regression`,
 `placement-contract`, `flows-motion`, `flows-market-contract`, `flows-strategy` (measured on
 2026-09-23: 13 s with `FLOWS_TEST_SANDBOX=1`; it boots workerd for the
-strategy page and its `engine=1` route).
+strategy page and its `engine=1` route), `flows-unusual-contract` (measured on
+2026-09-24: 80–92 s with `FLOWS_TEST_SANDBOX=1`; it boots workerd through
+`startWorker`).
 
 `flows-motion` was in NEITHER list until 2026-09-13 and was measured then: it
 boots workerd, so without `FLOWS_TEST_SANDBOX=1` it hangs in this sandbox

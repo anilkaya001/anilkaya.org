@@ -156,10 +156,14 @@ export function easternInstant(day, minutes) {
 const clockFor = (clock, day) =>
   clock && typeof clock === "object" && clock.day === day ? clock : null;
 
+export function clockClosed(flag) {
+  return flag === 0 || flag === "0";
+}
+
 export function isTradingDay(day, clock) {
   if (!isWeekdayDay(day)) return false;
   const c = clockFor(clock, day);
-  return !(c && Number(c.trading) === 0);
+  return !(c && clockClosed(c.trading));
 }
 
 export function closeMinutes(day, clock) {

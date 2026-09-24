@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { signSession } from "../shared/session.js";
 import { archiveWriteAction, ARCHIVE_REFUSALS } from "../shared/flows-archive.js";
 import { UA_BANNED_CLAIMS } from "../shared/flows-unusual.js";
@@ -1344,6 +1345,10 @@ try {
       `GITHUB_OIDC_JWKS:${github.base}/.well-known/jwks`,
     ] });
     const L = (p) => live.baseURL + p;
+    const liveMigration = readFileSync(new URL("../migrations/0010_flows_live.sql", import.meta.url), "utf8");
+    const oldClock = /CREATE TABLE IF NOT EXISTS flows_clock \([\s\S]*?\n\);/.exec(liveMigration)[0];
+    await live.d1("DROP TABLE flows_clock");
+    await live.d1(oldClock.replace(/\s+/g, " "));
     const cookie = { Cookie: "flows_session=" + await signFlowsSession(FLOWS_TEST_USER, SESSION_SECRET, 600, "1") };
     const ingest = (key, method, token, body) => fetch(L("/api/flows/ingest?key=" + encodeURIComponent(key)), {
       method, redirect: "manual",
@@ -1440,7 +1445,7 @@ try {
         200, "and the nightly meta");
 
       eq(await tick(RTH, "2026-09-23T10:06:00-04:00"), 200, "the market-hours cron fires the RTH tick");
-      eq(vendor.count(/^\/api\/(market|net-flow)\//), 5, "TIER 1 spends exactly five vendor calls");
+      eq(vendor.count(/^\/api\/(market|net-flow)\//), 2, "TIER 1 spends exactly two vendor calls");
       const mk = await fetch(L("/api/flows/lk?k=market"), { headers: cookie });
       eq(mk.status, 200, "live:market is served on the live read route");
       const market = await mk.json();
@@ -1448,9 +1453,9 @@ try {
       eq(market.fresh.source, "worker", "stamped by the Worker");
       eq(market.fresh.readAt, new Date(et("2026-09-23T10:06:00-04:00")).toISOString(),
         "at the cron's scheduled instant, so a late invocation cannot pass for an earlier read");
-      ok(market.tide.status === "ok" && market.tide.n >= 7 && market.zeroDte.status === "ok" &&
-         market.etf.SPY.status === "ok" && market.etf.QQQ.status === "ok" && market.sectors.status === "ok",
-        "with all five feeds shaped");
+      ok(market.tide.status === "ok" && market.tide.n >= 7 && market.sectors.status === "ok" &&
+         !("zeroDte" in market) && !("etf" in market),
+        "with both feeds shaped, and neither the 0DTE series nor the SPY/QQQ tides, which live:breadth carries now");
       eq(mk.headers.get("x-fresh-source"), "worker", "X-Fresh-Source comes from the row's column");
       eq(mk.headers.get("x-fresh-cadence"), "300", "and X-Fresh-Cadence");
       ok(["live", "fresh", "stale", "closed"].includes(mk.headers.get("x-fresh-state")), "X-Fresh-State is one of the four states");
@@ -1493,7 +1498,7 @@ try {
       const beforeHoliday = vendor.count(/^\/api\/(market|net-flow)\//);
       await tick(RTH, "2026-09-24T10:06:00-04:00");
       await tick(RTH, "2026-09-24T10:11:00-04:00");
-      eq(vendor.count(/^\/api\/(market|net-flow)\//) - beforeHoliday, 5,
+      eq(vendor.count(/^\/api\/(market|net-flow)\//) - beforeHoliday, 2,
         "A TAPE-DERIVED HOLIDAY: when the tide still carries yesterday's date after 09:45, the day is marked closed and " +
         "the next tick spends no vendor call");
 
@@ -1527,6 +1532,18 @@ try {
       ok(nb.keys["live:market"].updatedAt > 0 && nb.keys["live:breadth"].readAt === "2026-09-23T14:10:00.000Z",
         "with every subscribed live key's updatedAt and read instant from columns alone");
       eq(nb.keys["live:tape"].state, "pending", "an unwritten key is pending");
+      deep(nb.tier1, { at: new Date(et("2026-09-24T10:11:00-04:00")).toISOString(),
+        okAt: new Date(et("2026-09-24T10:06:00-04:00")).toISOString(), why: "holiday" },
+      "TIER 1 TELEMETRY FROM D1: /now carries when the last tick began, when one last wrote live:market and how the " +
+        "last one ended — on a flows_clock created with 0010's columns, which the Worker's first use upgraded in place");
+      deep(nb.clock, { day: "2026-09-24", trading: 0, earlyClose: null },
+        "THE SESSION CLOCK TIER 2 READS: /now carries the tape-derived day verdict, so the Actions loop stops on a " +
+        "holiday or at an early close the calendar alone cannot know");
+      const ic = await ingest("clock", "GET", LIVE_TOKEN);
+      deep([ic.status, await ic.json()], [200, { key: "clock", clock: { day: "2026-09-24", trading: 0, earlyClose: null } }],
+        "and the Actions loop reads the same verdict from the ingest route under its live credential, not a signed-in route");
+      eq((await ingest("clock", "GET", "wrong-token")).status, 401, "never without a credential");
+      eq((await ingest("clock", "POST", LIVE_TOKEN, {})).status, 405, "and only by GET: the clock is written by Tier 1 alone");
       eq(nb.keys.pulse.session, "2026-09-22", "and nightly keys carry their session");
       eq(nb.keys.brief.state, "pending", "an unpublished nightly key is pending too");
       ok(nb.phase && typeof nb.phase.phase === "string" && typeof nb.phase.endsAt === "string",
@@ -1544,7 +1561,12 @@ try {
         "invocation keeps a cold isolate inside 10 ms of CPU");
       eq(first.session, "2026-09-22", "and dates itself from the vendor's rows, not the wall clock");
       const second = await fetch(L("/api/flows/tape?t=AAPL"), { headers: cookie });
-      eq(second.headers.get("x-tape"), "stale-refreshing", "the next reader is served at once while the missing leg refreshes");
+      const ahead = hows.includes("stale-refreshing");
+      eq(second.headers.get("x-tape"), ahead ? "stale-leased" : "stale-refreshing",
+        "the next reader is served at once while the missing leg refreshes" + (ahead
+          ? " — a racer that reached the Worker after the first refresh landed already took the lease for that leg " +
+            `(${hows.join(", ")}), so this reader finds it held and does not start a second one`
+          : ""));
       let legs = 0;
       for (let i = 0; i < 20 && legs !== 3; i++) {
         await new Promise((r) => setTimeout(r, 250));
@@ -1574,6 +1596,18 @@ try {
         eq(vendor.count(/stock-state$/) - before, 0, "inside its life a second read is served from the cache");
         eq(q2.headers.get("x-chain-cache"), "hit", "and says so");
       }
+
+      const beforeOpen = vendor.count(/^\/api\/(market|net-flow)\//);
+      for (const hm of ["09:31", "09:36", "09:41"]) {
+        marketNow.value = et(`2026-09-25T${hm}:00-04:00`);
+        await tick(RTH, `2026-09-25T${hm}:00-04:00`);
+      }
+      const opened = await (await fetch(L("/api/flows/now?k=market"), { headers: cookie })).json();
+      ok(vendor.count(/^\/api\/(market|net-flow)\//) - beforeOpen === 6 && opened.clock.day === "2026-09-25" &&
+         opened.clock.trading === null && opened.tier1.why === "written" &&
+         opened.tier1.okAt === new Date(et("2026-09-25T09:41:00-04:00")).toISOString(),
+      "THE MORNING AFTER, ON REAL D1: the 09:31 tick rolls flows_clock to the new day with trading NULL, and the 09:36 " +
+        "and 09:41 ticks still read and write — a NULL verdict is undecided, never a holiday");
     } finally {
       await live.stop();
       await vendor.close();
@@ -1581,7 +1615,7 @@ try {
     }
   }
 
-  console.log(`✓ flows-worker: ${checks} assertions — public login, no-store gating, structural bypass resistance, bidirectional audience isolation, legacy learner tolerance, uniform failures, full sign-in round trip, and the two market-wide keys this wave added served on their own gated routes: the sector option lean beside — never merged into — the sector momentum it shares eleven tickers with, and the news tape whose absent per-ticker form is asserted to stay absent. Plus the retirement of the card dialog: the four board routes serve neither it nor the 151k panel library it was the only caller of, and their own ?t= addresses — pushed into history on every open the modal ever had — are 302'd to /flows/ticker/ with the surface they came from, from a Location that is a pure function of the request URL and reads no payload and no session. Plus the live layer: one writer per key held by credential, table and trigger, Tier 1 in exactly five vendor calls, read-time overlays that leave the nightly rows byte-identical, the dispatch clock with its in-flight guard and one-shot watchdog, a tape-derived holiday, the tape's single flight, and quote lives that follow the market phase`);
+  console.log(`✓ flows-worker: ${checks} assertions — public login, no-store gating, structural bypass resistance, bidirectional audience isolation, legacy learner tolerance, uniform failures, full sign-in round trip, and the two market-wide keys this wave added served on their own gated routes: the sector option lean beside — never merged into — the sector momentum it shares eleven tickers with, and the news tape whose absent per-ticker form is asserted to stay absent. Plus the retirement of the card dialog: the four board routes serve neither it nor the 151k panel library it was the only caller of, and their own ?t= addresses — pushed into history on every open the modal ever had — are 302'd to /flows/ticker/ with the surface they came from, from a Location that is a pure function of the request URL and reads no payload and no session. Plus the live layer: one writer per key held by credential, table and trigger, Tier 1 in exactly two vendor calls with its outcome in D1 on a clock table that upgrades itself, read-time overlays that leave the nightly rows byte-identical, the dispatch clock with its in-flight guard and one-shot watchdog, a tape-derived holiday, the tape's single flight, and quote lives that follow the market phase`);
 } finally {
   await server.stop();
 }

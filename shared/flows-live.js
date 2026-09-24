@@ -1,5 +1,5 @@
 import {
-  FRESH_CLASSES, easternDay, sessionOpen, easternInstant, easternOffsetMinutes, PHASE_MINUTES,
+  FRESH_CLASSES, easternDay, sessionOpen, easternInstant, easternOffsetMinutes, PHASE_MINUTES, nextWeekdayDay,
 } from "./flows-freshness.js";
 import { buildFlowAlerts, mergeAlerts } from "./flows-alerts.js";
 
@@ -10,8 +10,8 @@ const spec = (klass, writer, maxBytes, reads) => Object.freeze({
 });
 
 export const LIVE_KEYS = Object.freeze({
-  "live:market": spec("market", "worker", 32 * 1024, 5),
-  "live:breadth": spec("breadth", "actions", 64 * 1024, 15),
+  "live:market": spec("market", "worker", 16 * 1024, 2),
+  "live:breadth": spec("breadth", "actions", 96 * 1024, 17),
   "live:strips": spec("breadth", "actions", 64 * 1024, 1),
   "live:strips:series": spec("breadth", "actions", 96 * 1024, 0),
   "live:alerts": spec("breadth", "actions", 120 * 1024, 5),
@@ -26,7 +26,7 @@ export const LIVE_KEYS = Object.freeze({
 export const TAPE_SPEC = spec("tape", "ondemand", 32 * 1024, 2);
 
 export const LIVE_BUDGET = Object.freeze({
-  tier1Calls: 5,
+  tier1Calls: 2,
   tier1TimeoutMs: 6000,
   tier2PaceMs: 333,
   tier2MaxCalls: 48,
@@ -73,12 +73,10 @@ export const SECTOR_ETF_NAMES = Object.freeze({
 
 export const INDEX_NAMES = Object.freeze(["SPY", "QQQ", "IWM"]);
 
+export const BREADTH_ETFS = Object.freeze(["SPY", "QQQ", "IWM", "DIA"]);
+
 export const TIER1_CALLS = Object.freeze([
   Object.freeze({ feed: "tide", path: "/api/market/market-tide", params: Object.freeze({ interval_5m: "true" }) }),
-  Object.freeze({ feed: "zeroDte", path: "/api/net-flow/expiry",
-    params: Object.freeze({ expiration: "zero_dte", moneyness: "all", tide_type: "all" }) }),
-  Object.freeze({ feed: "spy", path: "/api/market/SPY/etf-tide", params: Object.freeze({}) }),
-  Object.freeze({ feed: "qqq", path: "/api/market/QQQ/etf-tide", params: Object.freeze({}) }),
   Object.freeze({ feed: "sectors", path: "/api/market/sector-etfs", params: Object.freeze({}) }),
 ]);
 
@@ -166,7 +164,7 @@ export function anyAnswered(feeds) {
 
 export function marketFeeds(payload) {
   const p = payload || {};
-  return [p.tide, p.zeroDte, p.etf && p.etf.SPY, p.etf && p.etf.QQQ, p.sectors];
+  return [p.tide, p.sectors];
 }
 
 export function feedSilence(raw) {
@@ -197,9 +195,12 @@ export function bucketSeries(rows, {
   tail = null, dp = {}, net = ["ncp", "npp"], check = true, recentRows = 0,
 } = {}) {
   const names = Object.keys(fields);
+  const width = names.length;
+  const cols = names.map((n) => fields[n]);
   const list = Array.isArray(rows) ? rows : [];
   const size = Math.max(1, bucketMin) * 60000;
-  const stamps = [];
+  let stampTs = [];
+  let stampIdx = [];
   let dropped = 0;
   let sorted = true;
   let prev = -Infinity;
@@ -210,35 +211,26 @@ export function bucketSeries(rows, {
     if ((from !== null && ts < from) || (to !== null && ts > to)) continue;
     if (ts < prev) sorted = false;
     prev = ts;
-    stamps.push([ts, i]);
+    stampTs.push(ts);
+    stampIdx.push(i);
   }
-  if (!sorted) stamps.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (!sorted) {
+    const order = stampTs.map((_, j) => j).sort((a, b) => stampTs[a] - stampTs[b] || stampIdx[a] - stampIdx[b]);
+    stampTs = order.map((j) => stampTs[j]);
+    stampIdx = order.map((j) => stampIdx[j]);
+  }
+  const n = stampTs.length;
 
-  const valuesOf = (i) => {
-    const r = list[i];
-    const out = {};
-    let any = false;
-    for (const n of names) {
-      const v = vnum(r[fields[n]]);
-      out[n] = v;
-      if (v !== null) any = true;
-    }
-    return any ? out : null;
-  };
-
-  let seenCheck = null;
   const kept = [];
-  let seen = 0;
   const recent = [];
+  let seenCheck = null;
+  let seen = 0;
+  let lastKey = null;
   if (basis === "increment") {
-    const cols = names.map((n) => fields[n]);
-    const width = names.length;
     const running = new Array(width).fill(null);
     const primary = [];
-    let lastKey = null;
-    for (let j = 0; j < stamps.length; j++) {
-      const [ts, i] = stamps[j];
-      const r = list[i];
+    for (let j = 0; j < n; j++) {
+      const r = list[stampIdx[j]];
       let any = false;
       for (let c = 0; c < width; c++) {
         const v = vnum(r[cols[c]]);
@@ -247,8 +239,8 @@ export function bucketSeries(rows, {
       }
       if (!any) { dropped++; continue; }
       seen++;
-      const key = Math.floor(ts / size);
-      const snap = { ts, row: running.slice() };
+      const key = Math.floor(stampTs[j] / size);
+      const snap = { ts: stampTs[j], row: running.slice() };
       if (key === lastKey) kept[kept.length - 1] = snap;
       else kept.push(snap);
       lastKey = key;
@@ -257,58 +249,54 @@ export function bucketSeries(rows, {
         if (recent.length > recentRows) recent.shift();
       }
     }
-    for (const k of [...kept, ...recent]) {
-      if (k.out) continue;
-      const out = {};
-      for (let c = 0; c < width; c++) out[names[c]] = k.row[c];
-      k.out = out;
-    }
     if (check) seenCheck = basisCheck(primary);
   } else {
-    const lastInBucket = [];
-    let lastKey = null;
-    for (const pair of stamps) {
-      const key = Math.floor(pair[0] / size);
-      if (key === lastKey) lastInBucket[lastInBucket.length - 1] = pair;
-      else lastInBucket.push(pair);
+    for (let j = 0; j < n; j++) {
+      const r = list[stampIdx[j]];
+      let row = null;
+      for (let c = 0; c < width; c++) {
+        const v = vnum(r[cols[c]]);
+        if (v === null) continue;
+        if (row === null) row = new Array(width).fill(null);
+        row[c] = v;
+      }
+      if (row === null) { dropped++; continue; }
+      const key = Math.floor(stampTs[j] / size);
+      const snap = { ts: stampTs[j], row };
+      if (key === lastKey) kept[kept.length - 1] = snap;
+      else kept.push(snap);
       lastKey = key;
     }
-    for (const [ts, i] of lastInBucket) {
-      const vals = valuesOf(i);
-      if (!vals) { dropped++; continue; }
-      kept.push({ ts, out: vals });
+    seen = n;
+    if (check && basis !== "level" && width) {
+      const primary = new Array(n);
+      for (let j = 0; j < n; j++) primary[j] = vnum(list[stampIdx[j]][cols[0]]);
+      seenCheck = basisCheck(primary);
     }
-    seen = stamps.length;
-    if (check && basis !== "level" && names.length) seenCheck = basisCheck(stamps.map(([, i]) => vnum(list[i][fields[names[0]]])));
   }
   const trimmed = Number.isFinite(tail) && tail > 0 && kept.length > tail ? kept.slice(-tail) : kept;
+  const netA = net ? names.indexOf(net[0]) : -1;
+  const netB = net ? names.indexOf(net[1]) : -1;
+  const block = (snaps) => {
+    const out = { t: snaps.map((k) => isoSec(k.ts)) };
+    for (let c = 0; c < width; c++) {
+      const d = Object.hasOwn(dp, names[c]) ? dp[names[c]] : 0;
+      out[names[c]] = snaps.map((k) => round(k.row[c], d));
+    }
+    if (netA >= 0 && netB >= 0) {
+      out.net = snaps.map((k) => (k.row[netA] !== null && k.row[netB] !== null ? Math.round(k.row[netA] - k.row[netB]) : null));
+    }
+    return out;
+  };
+  const main = block(trimmed);
   const series = {
     basis,
     check: seenCheck === null ? null : (seenCheck === basis ? "agrees" : "disagrees"),
-    n: trimmed.length, seen, dropped, t: trimmed.map((k) => isoSec(k.ts)),
+    n: trimmed.length, seen, dropped, ...main,
+    firstAt: trimmed.length ? isoSec(trimmed[0].ts) : null,
+    lastAt: trimmed.length ? isoSec(trimmed[trimmed.length - 1].ts) : null,
   };
-  for (const n of names) {
-    const d = Object.hasOwn(dp, n) ? dp[n] : 0;
-    series[n] = trimmed.map((k) => round(k.out[n], d));
-  }
-  if (net && names.includes(net[0]) && names.includes(net[1])) {
-    series.net = trimmed.map((k) => (k.out[net[0]] !== null && k.out[net[1]] !== null
-      ? Math.round(k.out[net[0]] - k.out[net[1]]) : null));
-  }
-  series.firstAt = trimmed.length ? isoSec(trimmed[0].ts) : null;
-  series.lastAt = trimmed.length ? isoSec(trimmed[trimmed.length - 1].ts) : null;
-  if (recentRows > 0) {
-    const r = { n: recent.length, t: recent.map((k) => isoSec(k.ts)) };
-    for (const n of names) {
-      const d = Object.hasOwn(dp, n) ? dp[n] : 0;
-      r[n] = recent.map((k) => round(k.out[n], d));
-    }
-    if (net && names.includes(net[0]) && names.includes(net[1])) {
-      r.net = recent.map((k) => (k.out[net[0]] !== null && k.out[net[1]] !== null
-        ? Math.round(k.out[net[0]] - k.out[net[1]]) : null));
-    }
-    series.recent = r;
-  }
+  if (recentRows > 0) series.recent = { n: recent.length, ...block(recent) };
   return series;
 }
 
@@ -332,7 +320,10 @@ export function shapeTideFeed(raw, { session, withPx = false, bucketMin = 5, che
     time: "timestamp", fields: withPx ? PX_TIDE_FIELDS : TIDE_FIELDS, basis: "cumulative",
     bucketMin, ...rthWindow(date), dp: { px: 4 }, check,
   });
-  if (!series.n) return { status: "unreadable", reason: SILENCE.unshaped, date, ...series };
+  if (!series.n) {
+    const blank = series.seen > 0 && series.dropped === series.seen;
+    return { status: blank ? "quiet" : "unreadable", reason: blank ? SILENCE.empty : SILENCE.unshaped, date, ...series };
+  }
   const prior = typeof session === "string" && date && date < session;
   return { status: prior ? "prior" : "ok", reason: prior ? SILENCE.prior : null, date, ...series };
 }
@@ -409,11 +400,8 @@ const lastOk = (s, f) => (s && s.status === "ok" ? lastOf(s, f) : null);
 export function shapeMarketLive(raws, { at, session, writer = "worker", check = false } = {}) {
   const r = raws || {};
   const tide = shapeTideFeed(r.tide, { session, check });
-  const zeroDte = shapeNetFlowFeed(r.zeroDte, { session, expiration: "zero_dte", check });
-  const spy = shapeTideFeed(r.spy, { session, withPx: true, check });
-  const qqq = shapeTideFeed(r.qqq, { session, withPx: true, check });
   const sectors = shapeSectorEtfs(r.sectors);
-  const vendorAt = newestAt([tide, zeroDte, spy, qqq]);
+  const vendorAt = newestAt([tide]);
   return {
     v: 1, key: "live:market", session,
     fresh: freshEnvelope({ readAt: at, vendorAt, source: "worker", cadenceS: LIVE_KEYS["live:market"].cadenceS,
@@ -423,16 +411,11 @@ export function shapeMarketLive(raws, { at, session, writer = "worker", check = 
       npp: "USD, net put premium, ask side minus bid side, cumulative (positive = puts bought)",
       net: "USD, ncp - npp (positive = bullish premium), cumulative",
       nv: "contracts, vendor net volume, cumulative",
-      px: "USD, underlying price at the sampled minute",
-      t: "ISO-8601 UTC of the sampled vendor row (the last row inside each 5-minute bucket)",
+      t: "ISO-8601 UTC of the sampled vendor row (the last row with values inside each 5-minute bucket)",
       chg: "ratio, last / prev_close - 1", lean: "ratio in [-1, 1], (bull - bear) / (bull + bear)",
     },
-    tide, zeroDte, etf: { SPY: spy, QQQ: qqq }, sectors,
-    last: {
-      tideNet: lastOk(tide, "net"), zeroDteNet: lastOk(zeroDte, "net"),
-      spyNet: lastOk(spy, "net"), qqqNet: lastOk(qqq, "net"),
-      spyPx: lastOk(spy, "px"), qqqPx: lastOk(qqq, "px"),
-    },
+    tide, sectors,
+    last: { tideNet: lastOk(tide, "net") },
   };
 }
 
@@ -443,6 +426,18 @@ function feedDay(raw, rows) {
     easternDay(timeMs(last && last.timestamp));
 }
 
+export function sectorEtfsDay(raw) {
+  if (raw === undefined || raw === null || failed(raw)) return null;
+  const count = new Map();
+  for (const r of rowsOf(raw)) {
+    const d = r && typeof r.prev_date === "string" && DAY_RE.test(r.prev_date) ? r.prev_date : null;
+    if (d) count.set(d, (count.get(d) || 0) + 1);
+  }
+  let best = null;
+  for (const [d, n] of count) if (best === null || n > best[1] || (n === best[1] && d > best[0])) best = [d, n];
+  return best ? nextWeekdayDay(best[0]) : null;
+}
+
 export function tideSessionState(raws, { today, afterProbe }) {
   if (!afterProbe || !raws || typeof raws !== "object") return null;
   const days = [];
@@ -451,15 +446,18 @@ export function tideSessionState(raws, { today, afterProbe }) {
     const d = feedDay(raw, nested ? netFlowRows(raw) : rowsOf(raw));
     if (d) days.push(d);
   }
+  const sectorDay = sectorEtfsDay(raws.sectors);
+  if (sectorDay) days.push(sectorDay);
   if (days.includes(today)) return 1;
-  return days.length >= 2 && days.every((d) => d < today) ? 0 : null;
+  return days.length >= 2 && days.every((d) => d === days[0] && d < today) ? 0 : null;
 }
 
 export function tideLastAt(raw) {
   const rows = rowsOf(raw);
   let best = NaN;
   for (const r of rows) {
-    const t = timeMs(r && r.timestamp);
+    if (!r || (vnum(r.net_call_premium) === null && vnum(r.net_put_premium) === null)) continue;
+    const t = timeMs(r.timestamp);
     if (Number.isFinite(t) && !(t <= best)) best = t;
   }
   return best;
@@ -515,10 +513,10 @@ export function shapeBreadth(raws, { at, session, writer } = {}) {
   const block = alignBlock(sectorEntries);
   for (const [sector, s] of sectorEntries) block.rows[sector].etf = s.etf;
   const etf = {};
-  for (const t of ["IWM", "DIA"]) etf[t] = shapeTideFeed(r.etf ? r.etf[t] : undefined, { session, withPx: true });
+  for (const t of BREADTH_ETFS) etf[t] = shapeTideFeed(r.etf ? r.etf[t] : undefined, { session, withPx: true });
   const zero = shapeNetFlowFeed(r.zeroDte, { session, expiration: "zero_dte" });
   const weekly = shapeNetFlowFeed(r.weekly, { session, expiration: "weekly" });
-  const vendorAt = newestAt([...sectorEntries.map(([, s]) => s), etf.IWM, etf.DIA, zero, weekly]);
+  const vendorAt = newestAt([...sectorEntries.map(([, s]) => s), ...BREADTH_ETFS.map((t) => etf[t]), zero, weekly]);
   return {
     v: 1, key: "live:breadth", session,
     fresh: freshEnvelope({ readAt: at, vendorAt, source: "actions", cadenceS: LIVE_KEYS["live:breadth"].cadenceS,
@@ -1071,6 +1069,8 @@ export function pulseWithLive(pulse, market) {
   if (!pulse || typeof pulse !== "object" || !market || typeof market !== "object") return null;
   const tide = market.tide;
   if (!tide || tide.status !== "ok" || !Array.isArray(tide.t) || !tide.t.length) return null;
+  const nightlyPoints = pulse.tide && Array.isArray(pulse.tide.points) ? pulse.tide.points.length : 0;
+  if (tide.t.length < 2 && nightlyPoints >= 2) return null;
   const readAt = market.fresh && market.fresh.readAt;
   if (typeof readAt !== "string") return null;
   const liveDay = tide.date || market.session;

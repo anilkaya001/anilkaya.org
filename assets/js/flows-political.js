@@ -372,9 +372,15 @@
       freshNote(p, fresh)].filter(Boolean).join(" ");
   }
 
+  function holdersShown(on) {
+    const card = document.getElementById("plHoldersCard");
+    if (card) card.hidden = !on;
+  }
+
   function paintHolders(p) {
     const feed = p.holders;
     const st = feedState(feed, "The feed answered and named no holder in the board’s names.");
+    holdersShown(!(st && st.kind === "unavailable" && /HTTP 4(?!08|29)\d\d/.test(String(feed.reason))));
     if (st) { silence(host.holders, st, "Holdings", 120); return; }
     setModuleState(host.holders, { state: "ok" }, "Holdings");
     const maxQ = Math.max(1, ...feed.rows.map((r) => num(r.maxQty) || 0));
@@ -405,6 +411,7 @@
   }
 
   function idle(st, hh) {
+    holdersShown(true);
     for (const [el, label] of [[host.buyers, "Buyers"], [host.assets, "Names"], [host.recent, "Newest"], [host.holders, "Holdings"]]) silence(el, st, label, label === "Holdings" ? 160 : hh);
     host.chips.replaceChildren(UI.chips(["Disclosures", "Newest", "Buyers", "Names", "Late"].map((label) =>
       UI.gaugeChip({ g: UI.iconChip((UI.STATES[st.state] || UI.STATES.unavailable).g, "--label-3"), value: DASH, label, info: { title: label, state: st.state, lead: st.reason } })), "Disclosure window"));

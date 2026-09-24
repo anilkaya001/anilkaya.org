@@ -181,8 +181,9 @@ const FEEDS = ["mkTide", "mkVolume", "mkOi", "mkImpact", "mkInsiders", "mkDark",
 
 const browser = await chromium.launch();
 
-async function openMarket({ stub = true, routes = [], viewport } = {}) {
+async function openMarket({ stub = true, routes = [], viewport, at } = {}) {
   const page = await browser.newPage(viewport ? { viewport } : undefined);
+  if (at) await page.clock.setFixedTime(new Date(at));
   await page.context().addCookies([{ name: "flows_session", value: token, url: server.baseURL }]);
   page.on("pageerror", (e) => errors.push(e.message));
   if (stub) {
@@ -518,6 +519,8 @@ try {
         .reduce((s, i) => s + parseFloat(i.style.width || "0"), 0),
       againstCard: Boolean(document.getElementById("mkAgainstCard")),
       againstMetric: (document.querySelector("#mktAgainst .ui-metric .ui-metric-v") || {}).textContent || "",
+      againstWith: Object.fromEntries([...document.querySelectorAll("#mktAgainst .ui-metric")].map((m) =>
+        [m.querySelector(".ui-metric-l").textContent.trim(), m.querySelector(".ui-metric-v").textContent.trim()])),
       againstTickers: [...document.querySelectorAll("#mktAgainst .mk-mv-t")].map((n) => n.textContent),
       againstEmpties: document.querySelectorAll("#mktAgainst [data-empty]").length,
       pulseStamp: document.getElementById("mkPulseStamp").textContent,
@@ -775,6 +778,9 @@ try {
 
   ok(read.againstCard, "the against module is drawn rather than hidden");
   eq(read.againstMetric, "1 of 5", "and leads with the join count against its population");
+  eq(read.againstWith.With, "0 of 5",
+     "beside it the agreeing count over the same population — long names in the call extreme, short names in the put " +
+     "extreme — so two quiet columns read as a measured session rather than an empty panel");
   assert.deepEqual(read.againstTickers, ["DDD #3"],
     "the one long-board name sitting in the largest net put premium is named, with its " +
     "board rank beside it — a contradiction on the name ranked first is different news " +
@@ -1884,6 +1890,187 @@ try {
     const endTick = await deepPage.evaluate(() => Array.from(document.querySelectorAll("#mkVol svg text"), (t) => t.textContent));
     ok(endTick.includes("1y"), `the vol curve labels its one-year end rather than dropping the tick at the plot edge (${endTick.join(" ")})`);
     await deepPage.close();
+
+    const nextDay = new Date(EXPECTED + "T12:00:00Z");
+    do nextDay.setUTCDate(nextDay.getUTCDate() + 1); while ([0, 6].includes(nextDay.getUTCDay()));
+    const D = nextDay.toISOString().slice(0, 10);
+    const OPEN_AT = D + "T14:40:00Z", LATE_AT = D + "T19:00:00Z";
+    const oneT = [D + "T14:35:00Z"];
+    const openRows = Object.fromEntries(SECTOR_NAMES.map(([name, etf], k) => [name, { status: "ok", etf, n: 1, ncp: [2e5], npp: [1e5], net: [(k - 5) * 1e5] }]));
+    const BREADTH_OPEN = { v: 1, key: "live:breadth", session: D, fresh: { readAt: D + "T14:35:40Z" },
+      sectors: { t: oneT, rows: openRows },
+      etf: { SPY: series(3e6, 1e6), IWM: series(2e6, 1e6), DIA: series(1e6, 1e6) },
+      dte: { zero: { status: "unreadable", reason: "rows-unshaped", t: [], net: [] }, share: { value: null, reason: "rows-unshaped" } } };
+    const LIVE_OPEN = { status: "ok", session: D, fresh: { readAt: D + "T14:35:50Z" },
+      tide: { status: "ok", t: oneT, ncp: [1e7], npp: [1.4e6], net: [8.6e6] },
+      zeroDte: { status: "unreadable", reason: "rows-unshaped", t: [], net: [] }, etf: { SPY: series(2e6, 5e6), QQQ: series(1e6, 1e6) } };
+    const readOpen = (pg) => pg.evaluate((day) => {
+      const metrics = (id) => Object.fromEntries([...document.querySelectorAll("#" + id + " .ui-metric")].map((m) =>
+        [m.querySelector(".ui-metric-l").textContent.trim(), m.querySelector(".ui-metric-v").textContent.trim()]));
+      const chipOf = (id) => {
+        const c = document.querySelector("#" + id + " .ui-mod-t .mk-chip");
+        return c ? { state: c.dataset.state, word: c.textContent.trim() } : null;
+      };
+      const waiting = (ids) => ids.flatMap((id) => [...document.querySelectorAll("#" + id + " [data-state=pending], #" + id + " [data-empty=pending]")]
+        .map(() => id));
+      return {
+        dayWord: window.FlowsUI.F.day(day),
+        secChip: chipOf("mkSecTidesCard"), iwmChip: chipOf("mkEtfIWMCard"), spyChip: chipOf("mkEtfSPYCard"),
+        smalls: document.querySelectorAll("#mkSecTides .mk-small").length,
+        smallCharts: document.querySelectorAll("#mkSecTides .mk-small svg[role=img]").length,
+        smallOpen: document.querySelectorAll("#mkSecTides .mk-small-open").length,
+        secEmpties: [...document.querySelectorAll("#mkSecTides [data-empty]")].map((e) => e.getAttribute("data-empty")),
+        spy: metrics("mkEtfSPY"), qqq: metrics("mkEtfQQQ"), iwm: metrics("mkEtfIWM"),
+        etfCharts: ["SPY", "QQQ", "IWM"].map((t) => document.querySelectorAll("#mkEtf" + t + " svg[role=img]").length),
+        tideOpen: Boolean(document.querySelector("#mkTide [data-state=opening]")),
+        tideHush: (() => { const n = document.querySelector("#mkTide .mk-hush"); return n ? { state: n.dataset.state, word: n.querySelector(".ui-silent-t").textContent.trim() } : null; })(),
+        tideChip: chipOf("mkTideCard"),
+        openings: document.querySelectorAll("[data-state=opening]").length,
+        tideCharts: document.querySelectorAll("#mkTide svg[role=img]").length,
+        tideNet: metrics("mkTideLegs").Net,
+        tideTabs: [...document.querySelectorAll("#mkTideSeg .ui-seg-i")].map((b) => b.textContent.trim()),
+        waiting: waiting(["mkTideCard", "mkEtfSPYCard", "mkEtfQQQCard", "mkEtfIWMCard", "mkSecTidesCard"]),
+      };
+    }, EXPECTED);
+
+    const openPage = await openMarket({ at: OPEN_AT, viewport: { width: 1440, height: 1000 }, routes: [
+      ["**/api/flows/pulse", json({ status: "pending" })],
+      ["**/api/flows/regime", json(REGIME)],
+      ["**/api/flows/lk?k=market", json(LIVE_OPEN)],
+      ["**/api/flows/lk?k=breadth", json(BREADTH_OPEN)],
+    ] });
+    await openPage.waitForSelector("#mkSecTides .mk-small");
+    const opened = await readOpen(openPage);
+    eq(opened.smalls, 11, "at the open, with one live reading per sector, the sector tides still draw eleven tiles");
+    eq(opened.smallCharts, 10,
+       "and they are the last session's full paths from the regime key, not eleven single points the live layer cannot draw a line through");
+    deep(opened.secChip, { state: "dated", word: opened.dayWord },
+      "the module says whose session it is drawing in one dated chip, beside its title");
+    const secDated = await why(openPage, "#mkSecTidesCard .ui-mod-t .mk-chip");
+    ok(/single reading, at \d{1,2}:35/.test(secDated.lead) && !/next refresh/.test(secDated.lead),
+       `and the chip's Why says why the last session stands in, naming the reading's time and promising no refresh (${secDated.lead})`);
+    eq(opened.spy["Net premium"], "+$16.0M",
+       "SPY's tide is read from live:breadth first, where the live stream publishes every index ETF, ahead of the older live:market row");
+    eq(opened.iwm["Net premium"], "+$8.0M",
+       "IWM's tide, which only the breadth layer carries, is read from live:breadth.etf.IWM rather than left pending");
+    eq(opened.qqq["Net premium"], "$0", "QQQ, absent from the breadth row, falls back to live:market");
+    deep(opened.etfCharts, [1, 1, 1], "all three ETFs draw their tide path");
+    ok(opened.tideOpen && opened.tideCharts === 0,
+       "a market tide holding one reading shows a calm Opening state instead of a chart with one dot on an empty axis");
+    eq(opened.tideNet, "+$8.6M", "while the reading itself is still printed");
+    deep(opened.tideTabs, ["Market", "SPY", "QQQ"],
+      "the tide's views take SPY from the breadth layer and QQQ from the market layer, and leave out a zero-day series the vendor could not shape");
+    deep(opened.waiting, [], "and no tide, ETF or sector-tide module carries a pending mark while its data exists");
+    await openPage.close();
+
+    const REGIME_B = Object.assign({}, REGIME, { sectors: { status: "pending" }, etfTide: { status: "ok", byEtf: Object.assign({}, REGIME.etfTide.byEtf,
+      { IWM: { status: "quiet", reason: "absent", points: 0, ownNet: 5455337, ownTilt: 0.0125, agree: null } }) } });
+    const BREADTH_B = Object.assign({}, BREADTH_OPEN, { etf: {} });
+    const openB = await openMarket({ at: OPEN_AT, viewport: { width: 390, height: 900 }, routes: [
+      ["**/api/flows/regime", json(REGIME_B)],
+      ["**/api/flows/lk?k=breadth", json(BREADTH_B)],
+    ] });
+    await openB.waitForSelector("#mkSecTides .mk-small");
+    const b = await readOpen(openB);
+    eq(b.smallOpen, 11,
+       "with no nightly sector paths to stand in, the first live reading draws each tile's value over a calm dashed baseline");
+    deep(b.secEmpties, [], "and not one tile says unavailable");
+    deep(b.secChip, { state: "opening", word: "Opening" }, "the module wears one Opening chip rather than eleven marks");
+    const opening = await why(openB, "#mkSecTidesCard .ui-mod-t .mk-chip");
+    ok(/first reading/.test(opening.lead), `whose Why says the path draws from the next refresh (${opening.lead})`);
+    eq(b.iwm["Own net"], "+$5.5M",
+       "an IWM tide the vendor did not carry shows the ETF's own options net premium, labelled as such, instead of a pending dash");
+    eq(b.iwm["Net premium"], undefined, "and does not print it under the tide's label");
+    deep(b.waiting.filter((id) => id !== "mkTideCard"), [], "no ETF or sector-tide module waits on data that exists");
+    const overB = await openB.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    ok(overB <= 1, `no horizontal overflow at 390px with the opening chips drawn (${overB}px)`);
+    await openB.close();
+
+    const at0930 = D + "T13:30:00Z";
+    const clockOf = (pg, iso) => pg.evaluate((x) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" }).format(new Date(x)), iso);
+    const LIVE_LATE = { status: "ok", session: D, fresh: { readAt: D + "T13:31:44Z" },
+      tide: { status: "ok", t: [at0930], ncp: [1.0125e7], npp: [1.409e6], net: [8.716e6] },
+      zeroDte: { status: "unreadable", reason: "rows-unshaped", t: [], net: [] }, etf: {} };
+    const BREADTH_LATE = Object.assign({}, BREADTH_B, { fresh: { readAt: D + "T13:31:32Z" }, sectors: { t: [D + "T13:31:00Z"], rows: openRows } });
+    const late = await openMarket({ at: LATE_AT, viewport: { width: 390, height: 900 }, routes: [
+      ["**/api/flows/pulse", json({ status: "pending" })],
+      ["**/api/flows/regime", json(REGIME_B)],
+      ["**/api/flows/lk?k=market", json(LIVE_LATE)],
+      ["**/api/flows/lk?k=breadth", json(BREADTH_LATE)],
+    ] });
+    await late.waitForSelector("#mkSecTides .mk-small");
+    const lr = await readOpen(late);
+    const word930 = await clockOf(late, at0930);
+    eq(lr.openings, 0,
+       "hours into the session, a live layer that wrote once at the open and never again is not called Opening anywhere on the page");
+    deep(lr.tideHush, { state: "stale", word: word930 },
+      "the tide's one reading wears a clock and the time it was taken, not a promise that a path is coming");
+    eq(lr.tideNet, "+$8.7M", "and the reading itself is still printed above it");
+    const lateWhy = await why(late, "#mkTide .mk-hush button");
+    ok(/has not written since/.test(lateWhy.lead) && !/next refresh/.test(lateWhy.lead),
+       `whose Why says the layer has gone quiet rather than that a refresh is due (${lateWhy.lead})`);
+    deep(lr.secChip, { state: "stale", word: await clockOf(late, D + "T13:31:00Z") },
+      "the sector tides' single reading is dated by its clock too, rather than an Opening chip that never ages");
+    const lateSec = await why(late, "#mkSecTidesCard .ui-mod-t .mk-chip");
+    ok(!/next refresh/.test(lateSec.lead), `and its Why promises no refresh (${lateSec.lead})`);
+    const overLate = await late.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    ok(overLate <= 1, `no horizontal overflow at 390px with the stale marks drawn (${overLate}px)`);
+    await late.close();
+
+    const priorPts = liveT.map((t, i) => ({ t, callPrem: 1e6 * (i + 2), putPrem: 5e5 * (i + 1) }));
+    const PULSE_OVERLAID = { v: 1, status: "ok", sessionDate: EXPECTED, readAt: D + "T13:31:44Z", readDay: D, refreshed: "intraday", cadenceMinutes: 5,
+      live: { key: "live:market", session: D, tideDate: D },
+      tide: { status: "ok", points: [{ t: at0930, callPrem: 1.0125e7, putPrem: 1.409e6 }], date: D, prior: { date: EXPECTED, points: priorPts } } };
+    const withPrior = await openMarket({ at: LATE_AT, viewport: { width: 1440, height: 1000 }, routes: [
+      ["**/api/flows/pulse", json(PULSE_OVERLAID)],
+      ["**/api/flows/regime", json(REGIME)],
+      ["**/api/flows/lk?k=market", json(LIVE_LATE)],
+      ["**/api/flows/lk?k=breadth", json(BREADTH_LATE)],
+    ] });
+    await withPrior.waitForSelector("#mkTide svg[role=img]");
+    const wp = await readOpen(withPrior);
+    eq(wp.tideCharts, 1,
+       "a pulse whose live overlay holds one point but carries the last session as prior draws that session's full path");
+    deep(wp.tideChip, { state: "dated", word: wp.dayWord }, "under one dated chip naming whose session it is");
+    eq(wp.tideNet, "+$5.0M", "and its metrics read that path's last point, not the lone live reading");
+    eq(wp.openings, 0, "nothing on the page says Opening at 15:00 ET");
+    await withPrior.close();
+
+    const oneSer = (a, b) => ({ status: "ok", t: [liveT[0]], ncp: [a], npp: [b], net: [a - b] });
+    const BREADTH_THIN = { v: 1, key: "live:breadth", session: EXPECTED, fresh: { readAt: liveT[0] },
+      sectors: { t: [], rows: {} }, etf: { SPY: oneSer(9e6, 1e6) }, dte: { zero: oneSer(3e6, 1e6), share: { value: null } } };
+    const LIVE_FULL = { status: "ok", session: EXPECTED, fresh: { readAt: liveT[7] },
+      tide: series(4e7, 1e7), zeroDte: series(4e6, 3e6), etf: { SPY: series(2e6, 5e6), QQQ: series(1e6, 1e6) } };
+    const thin = await openMarket({ viewport: { width: 1440, height: 1000 }, routes: [
+      ["**/api/flows/regime", json(REGIME)],
+      ["**/api/flows/lk?k=market", json(LIVE_FULL)],
+      ["**/api/flows/lk?k=breadth", json(BREADTH_THIN)],
+    ] });
+    await thin.waitForSelector("#mkEtfSPY .ui-metric");
+    const th = await readOpen(thin);
+    eq(th.spy["Net premium"], "−$24.0M",
+       "a breadth ETF series holding one point does not shadow a full live:market series for the same ETF: the one that can draw a path wins");
+    deep(th.tideTabs, ["Market", "0DTE", "SPY", "QQQ"],
+      "and the tide keeps its 0DTE and SPY views, read from live:market, instead of dropping them for a one-point breadth series");
+    await thin.close();
+
+    const dayBefore = new Date(Date.parse(EXPECTED + "T12:00:00Z") - 864e5).toISOString().slice(0, 10);
+    const BREADTH_OLD = { v: 1, key: "live:breadth", session: dayBefore, fresh: { readAt: dayBefore + "T20:00:00Z" },
+      sectors: { t: [], rows: {} }, etf: { SPY: series(9e6, 1e6), QQQ: series(7e6, 1e6) }, dte: { zero: series(5e6, 1e6), share: { value: null } } };
+    const old = await openMarket({ viewport: { width: 1440, height: 1000 }, routes: [
+      ["**/api/flows/regime", json(REGIME)],
+      ["**/api/flows/lk?k=market", json(LIVE_FULL)],
+      ["**/api/flows/lk?k=breadth", json(BREADTH_OLD)],
+    ] });
+    await old.waitForSelector("#mkEtfSPY .ui-metric");
+    const od = await readOpen(old);
+    eq(od.spy["Net premium"], "−$24.0M",
+       "a breadth row from an older session never shadows today's live:market series, however full it is");
+    eq(od.qqq["Net premium"], "$0", "for every ETF the breadth row carries");
+    deep(od.tideTabs, ["Market", "0DTE", "SPY", "QQQ"], "and the tide's views are all today's");
+    const oldSrc = await cardWhy(old, "mkTideCard");
+    eq(oldSrc && oldSrc.facts.Source, "live:market", "and the tide's disclosure names the layer it read");
+    await old.close();
   }
 
   assert.deepEqual([...seenSilences.keys()].sort(), ["pending", "quiet", "unavailable", "unreadable"],
@@ -1898,4 +2085,4 @@ try {
   await server.stop();
 }
 
-console.log(`✓ flows-market: ${checks} assertions — a level the board neutralises away by design, net premium measured only where both legs were quoted, ratios of sums over one population, an IV rank that is a fraction on both sides of the wire, sector momentum drawn from the RAW signed reading on the payload's own published band with a measured zero printed unsigned and unclassed, a failed request told apart from an unpublished key and from a quiet one by glyph and by sentence, twenty sessions of totals turned into a rank with its denominator, the boards read against the session's premium extremes, a stale banner that can finally fire carrying WHICH outage it found, no line bridged across a bucket the vendor never sent and none dropped either, a part-to-whole bar refused when one of its parts was never published, a rank whose denominator is the sessions that could be ranked and says so, a superlative withheld from a tie, a session date that parses but names no day refused before it can date anything, a reading the vendor quoted rendered as the number it is, two ratios that formatted the coerced value and a reading after them proving nothing threw, a ladder that admitted nobody rendered as the session it is, a blank string and a boolean refused before the coercion, the depth modules — sector tides as eleven small multiples, the three index ETFs with their tide, flow and vol, net flow by expiry, the index vol curve, the radar's four screens, group delta flow and the advancers histogram — pending by design until their keys ship, every chart asserted at its DRAWN size, and no prose on the surface`);
+console.log(`✓ flows-market: ${checks} assertions — a level the board neutralises away by design, net premium measured only where both legs were quoted, ratios of sums over one population, an IV rank that is a fraction on both sides of the wire, sector momentum drawn from the RAW signed reading on the payload's own published band with a measured zero printed unsigned and unclassed, a failed request told apart from an unpublished key and from a quiet one by glyph and by sentence, twenty sessions of totals turned into a rank with its denominator, the boards read against the session's premium extremes, a stale banner that can finally fire carrying WHICH outage it found, no line bridged across a bucket the vendor never sent and none dropped either, a part-to-whole bar refused when one of its parts was never published, a rank whose denominator is the sessions that could be ranked and says so, a superlative withheld from a tie, a session date that parses but names no day refused before it can date anything, a reading the vendor quoted rendered as the number it is, two ratios that formatted the coerced value and a reading after them proving nothing threw, a ladder that admitted nobody rendered as the session it is, a blank string and a boolean refused before the coercion, the depth modules — sector tides as eleven small multiples, the three index ETFs with their tide, flow and vol, net flow by expiry, the index vol curve, the radar's four screens, group delta flow and the advancers histogram — each reading the live layers first and, at the open, standing in the last session dated or an Opening chip rather than a pending tile, every chart asserted at its DRAWN size, and no prose on the surface`);

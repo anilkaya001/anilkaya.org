@@ -40,24 +40,6 @@
     return (n < 0 ? MINUS : n > 0 ? "+" : "") + Math.abs(n).toFixed(dp === undefined ? 0 : dp);
   };
 
-  const fmtInt = (v) => {
-    const n = isNum(v);
-    return n === null ? DASH : String(Math.round(n));
-  };
-
-  const fmtMoney = (v, opts) => {
-    const n = isNum(v);
-    if (n === null) return DASH;
-    const asked = isNum(opts && opts.dp);
-    const dp = asked === null ? 2 : Math.max(0, Math.min(4, Math.round(asked)));
-    const abs = Math.abs(n);
-    const sign = n < 0 ? MINUS : "";
-    if (abs >= 1e9) return sign + "$" + (abs / 1e9).toFixed(dp) + "B";
-    if (abs >= 1e6) return sign + "$" + (abs / 1e6).toFixed(dp) + "M";
-    if (abs >= 1e3) return sign + "$" + Math.round(abs / 1e3) + "K";
-    return sign + "$" + Math.round(abs);
-  };
-
   const STALE_WRITE_MS = 30 * 60 * 60 * 1000;
   const STALE_SESSION_MS = 4 * 24 * 60 * 60 * 1000;
 
@@ -700,12 +682,13 @@
   function silent(st, label, height) {
     const state = st && st.state ? st.state : "unavailable";
     const def = STATES[state] || STATES.unavailable;
+    const word = (st && st.word) || def.word;
     return h("div", {
-      class: "ui-silent", "data-state": state, role: "note", "aria-label": def.word + ": " + label,
+      class: "ui-silent", "data-state": state, role: "note", "aria-label": word + ": " + label,
       style: { "--silent-h": (height || 180) + "px" },
     },
     glyph(def.g),
-    h("div", { class: "ui-silent-t" }, def.word),
+    h("div", { class: "ui-silent-t" }, word),
     h("button", { type: "button", "aria-haspopup": "dialog", "aria-controls": "fxPop", "data-info": info(() => ({ title: label, state, lead: st && st.reason })) }, "Why"));
   }
   function dash(st, label) {
@@ -1718,26 +1701,26 @@
     return { open, weekday, today: n.date, expected: built ? n.date : prevWeekday(n.date) };
   }
 
-  const FRESH = { sessionDate: null, generatedAt: null, updatedAt: null, readAt: null, live: false, sources: new Map(), explicit: false, settled: false };
+  const FRESH = { sessionDate: null, nightly: null, meta: false, generatedAt: null, updatedAt: null, readAt: null, live: false, sources: new Map(), explicit: false, settled: false };
   function freshState() {
     const m = market(new Date());
+    const S = FRESH.sessionDate || FRESH.nightly;
     const liveNow = FRESH.live && FRESH.readAt && Date.now() - Date.parse(FRESH.readAt) < 3 * 60 * 1000 && m.open;
     let state;
-    if (!FRESH.sessionDate) state = FRESH.settled ? (m.open ? "fresh" : "closed") : "pending";
-    else if (FRESH.sessionDate < m.expected) state = "stale";
+    if (!S) state = FRESH.settled ? (m.open ? "fresh" : "closed") : "pending";
+    else if (S < m.expected) state = "stale";
     else if (liveNow) state = "live";
     else if (m.open) state = "fresh";
     else state = "closed";
-    return { state, market: m };
+    return { state, market: m, S };
   }
   function freshDetails() {
-    const { state, market: m } = freshState();
-    const S = FRESH.sessionDate;
+    const { state, market: m, S } = freshState();
+    const which = S === m.today ? "today\u2019s session." : "the last completed session, " + F.day(S) + ".";
     const lead = state === "stale" ? `These readings are the ${F.day(S)} session; the last completed session is ${F.day(m.expected)}.`
       : state === "live" ? "The market is open and the last price was read moments ago. Everything else is the last completed session."
-        : state === "fresh" ? "The market is open. The readings are the current session archive; only a live layer re-reads price."
-          : state === "closed" ? "The market is closed. Everything here is the last completed session."
-            : "No payload on this page has reported its session yet.";
+        : !S ? (state === "pending" ? "No payload on this page has reported its session yet." : "No session is published yet.")
+          : (m.open ? "The market is open. " : "The market is closed. ") + "These readings are " + which;
     const sources = [...FRESH.sources.entries()];
     const behind = sources.filter(([, v]) => v !== S);
     const facts = [
@@ -1757,14 +1740,14 @@
   function paintFresh() {
     const b = document.getElementById("fxFresh");
     if (!b) return;
-    const { state } = freshState();
+    const { state, market: m, S } = freshState();
     const def = STATES[state] || STATES.pending;
-    const label = state === "live" ? "Live" : FRESH.sessionDate ? F.day(FRESH.sessionDate) : state === "pending" ? "Session" : state === "closed" ? "Closed" : "Open";
+    const label = state === "live" ? "Live" : S ? (S === m.today ? "Today" : F.day(S)) : state === "pending" ? "Session" : state === "closed" ? "Closed" : "Open";
     if (b.dataset.state === state && b.dataset.label === label) return;
     b.dataset.state = state;
     b.dataset.label = label;
     b.replaceChildren(glyph(def.g), h("span", { class: "fx-fresh-l" }, label));
-    b.setAttribute("aria-label", "Freshness: " + def.word + (FRESH.sessionDate ? ", session " + FRESH.sessionDate : ""));
+    b.setAttribute("aria-label", "Freshness: " + def.word + (S ? ", session " + S : ""));
   }
   function freshness(o = {}) {
     if (o.explicit !== false) FRESH.explicit = true;
@@ -1803,11 +1786,18 @@
       freshness(o);
     }).catch(() => {});
   }
+  function takeMeta(p) {
+    FRESH.meta = true;
+    p.then((r) => (r && r.ok ? r.clone().json() : null)).then((j) => {
+      if (j && isoDay(j.sessionDate)) { FRESH.nightly = j.sessionDate.slice(0, 10); FRESH.settled = true; paintFresh(); }
+    }).catch(() => {});
+  }
   if (nativeFetch) {
     window.fetch = function (input, init) {
       const p = nativeFetch(input, init);
       try {
         const url = typeof input === "string" ? input : input && input.url;
+        if (url && url.indexOf("/api/flows/meta") >= 0) takeMeta(p);
         if (url && url.indexOf("/api/flows/") >= 0) p.then((r) => observe(url, r), () => {});
       } catch { return p; }
       return p;
@@ -1978,6 +1968,7 @@
         if (anchor === fresh && popOpen()) { closeInfo(); return; }
         openInfo(fresh, freshDetails());
       });
+      setTimeout(() => { if (!FRESH.meta && !FRESH.sessionDate && nativeFetch) takeMeta(nativeFetch("/api/flows/meta", { credentials: "same-origin" })); }, 800);
       setTimeout(() => { FRESH.settled = true; paintFresh(); }, 6000);
       setInterval(paintFresh, 30000);
       paintFresh();
@@ -2001,7 +1992,7 @@
   window.FlowsUI = Object.freeze({
     MINUS, DASH, MID,
     isNum, el, svgEl,
-    fmtSigned, fmtInt, fmtMoney, fmtStamp,
+    fmtSigned, fmtStamp,
     emptyState,
     staleness,
     stripGeometry, scoreStrip,

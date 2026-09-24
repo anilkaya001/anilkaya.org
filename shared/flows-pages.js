@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "226";
+export const ASSET_VERSION = "227";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -266,9 +266,9 @@ function neuronVerdict(summary) {
     <div class="hm-verdict-h">
       ${glyphTile}
       <div class="hm-verdict-b">
-        <h2 class="hm-verdict-line" id="hmVerdictT">No read yet</h2>
+        <h2 class="hm-verdict-line" id="hmVerdictT">No summary yet</h2>
         <div class="hm-verdict-meta"><span class="hm-verdict-by">Neuron</span>
-          <span class="ui-state hm-mark" data-state="pending" title="Pending" aria-label="Pending: not published yet — not a quiet session. Nothing here is claimed about the market.">${glyph("pending")}</span></div>
+          <span class="ui-state hm-mark" data-state="quiet" title="Quiet" aria-label="Quiet: the written summary for this session has not been generated yet.">${glyph("quiet")}</span></div>
       </div>
     </div>
   </section>`;
@@ -357,10 +357,10 @@ const homeModule = (id, title, bodyId, { span = "", sub = "", seg = "", body = "
     </section>`;
 
 export function overviewPage({ username = "", summary = null } = {}) {
-  return `${head("Flows — Today", "The market in one glance: the tide, the regime, both leaders, what changed and what reports next.", ["/assets/css/flows-home.css"])}
-${shell("Today", "overview", username, `
+  return `${head("Flows — Home", "The market in one glance: the tide, the regime, both leaders, what changed and what reports next.", ["/assets/css/flows-home.css"])}
+${shell("Session", "overview", username, `
   <header class="flows-head hm-head" data-fx-hero>
-    <h1 id="fxTitle">Today</h1>
+    <h1 id="fxTitle">Session</h1>
     <p class="hm-meta"><time id="ccMetaDate"></time><span id="ccMetaScreened" hidden></span><span id="hmStale"></span></p>
   </header>
   <p class="visually-hidden" id="flowsStatus" role="status">Loading the latest session…</p>
