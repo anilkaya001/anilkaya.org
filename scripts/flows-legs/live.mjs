@@ -1,7 +1,7 @@
 import {
   LIVE_KEYS, LIVE_BUDGET, SECTOR_TIDES, shapeBreadth, shapeStrips, appendStripSeries, shapeVol,
   indexRows, shapeMovers, shapeLiveTape, gexRotation, shapeGexSeries, mergeGex, mergeLiveAlerts, alertsPagePlan,
-  oldestCreated, stripNames, rowsOf, failed, freshEnvelope, timeMs, isoSec, anyAnswered,
+  oldestCreated, stripNames, rowsOf, failed, freshEnvelope, timeMs, isoSec, anyAnswered, BREADTH_ETFS,
 } from "../../shared/flows-live.js";
 import { phaseAt, closeMinutes, PHASE_MINUTES, LIVE_CLOCK, easternInstant } from "../../shared/flows-freshness.js";
 import { fakeLiveVendor, fakeBoards } from "./live-fake.mjs";
@@ -55,7 +55,7 @@ function firstRowKeys(raw) {
 
 export async function runLive({
   uw, publish, readStored, now = () => Date.now(), log = console.log, warn = console.warn, shapeNews = null,
-  origin = null, force = false, writer = LIVE_WRITER,
+  origin = null, force = false, writer = LIVE_WRITER, skipRecent = true,
 } = {}) {
   const startedAt = now();
   const window = liveWindow(startedAt);
@@ -69,7 +69,7 @@ export async function runLive({
 
   const beat = await readStored("live:heartbeat");
   const lastBeat = beat && beat.payload && beat.payload.run ? timeMs(beat.payload.run.finishedAt) : NaN;
-  if (!force && Number.isFinite(lastBeat) && startedAt - lastBeat < LIVE_BUDGET.tier2HeartbeatSkipMs) {
+  if (!force && skipRecent && Number.isFinite(lastBeat) && startedAt - lastBeat < LIVE_BUDGET.tier2HeartbeatSkipMs) {
     log(`live: a run finished ${Math.round((startedAt - lastBeat) / 1000)} s ago — skipping (${origin || "manual"})`);
     return { skipped: "recent" };
   }
@@ -105,7 +105,7 @@ export async function runLive({
     ...SECTOR_TIDES.map(async ({ sector }) => {
       sectorRaws[sector] = await read(`/api/market/${encodeURIComponent(sector)}/sector-tide`);
     }),
-    ...["IWM", "DIA"].map(async (t) => { etfRaws[t] = await read(`/api/market/${t}/etf-tide`); }),
+    ...BREADTH_ETFS.map(async (t) => { etfRaws[t] = await read(`/api/market/${t}/etf-tide`); }),
   ]);
   const [zeroDte, weekly] = await Promise.all([
     read("/api/net-flow/expiry", { expiration: "zero_dte", moneyness: "all", tide_type: "all" }),
@@ -176,13 +176,13 @@ export async function runLive({
   const breadth = shapeBreadth({ sectors: sectorRaws, etf: etfRaws, zeroDte, weekly }, { at, session, writer });
   for (const [sector, s] of Object.entries(breadth.sectors.rows)) unshaped(`sector-tide ${sector}`, sectorRaws[sector], s.status);
   for (const [name, s] of Object.entries({ "net-flow zero_dte": breadth.dte.zero, "net-flow weekly": breadth.dte.weekly,
-    "etf-tide IWM": breadth.etf.IWM, "etf-tide DIA": breadth.etf.DIA })) {
+    ...Object.fromEntries(BREADTH_ETFS.map((t) => ["etf-tide " + t, breadth.etf[t]])) })) {
     if (s.check === "disagrees") note(`${name}: the variance-ratio check disagrees with the declared cumulative basis`);
   }
   const disagree = Object.entries(breadth.sectors.rows).filter(([, s]) => s.check === "disagrees").map(([k]) => k);
   if (disagree.length) note(`sector-tide basis check disagrees for ${disagree.join(", ")}`);
-  await put("live:breadth", breadth, { answered: anyAnswered([...Object.values(breadth.sectors.rows), breadth.etf.IWM,
-    breadth.etf.DIA, breadth.dte.zero, breadth.dte.weekly]) });
+  await put("live:breadth", breadth, { answered: anyAnswered([...Object.values(breadth.sectors.rows),
+    ...BREADTH_ETFS.map((t) => breadth.etf[t]), breadth.dte.zero, breadth.dte.weekly]) });
 
   const strips = shapeStrips(strip, { at, session, names: plan.names, writer });
   unshaped("screener strip", strip, strips.status);
@@ -245,6 +245,70 @@ export async function runLive({
   log(`live: ${ledger.calls} call(s) (${ledger.failed} failed), ${Object.values(bytes).filter((b) => b !== null).length} ` +
     `key(s) published in ${((finishedAt - startedAt) / 1000).toFixed(1)} s`);
   return { run, published: Object.keys(out), bytes };
+}
+
+export const LIVE_LOOP = Object.freeze({
+  slotMs: 5 * 60 * 1000,
+  budgetMs: 340 * 60 * 1000,
+  workflow: "flows-live.yml",
+  ref: "main",
+});
+
+export function nextSlot(at, slotMs = LIVE_LOOP.slotMs) {
+  return (Math.floor(at / slotMs) + 1) * slotMs;
+}
+
+export async function chainDispatch({ env = {}, fetchImpl = fetch, at = Date.now(), workflow = LIVE_LOOP.workflow,
+  ref = LIVE_LOOP.ref } = {}) {
+  const token = typeof env.GITHUB_TOKEN === "string" ? env.GITHUB_TOKEN.trim() : "";
+  if (!token) return { sent: false, why: "no-token" };
+  const repo = env.GITHUB_REPOSITORY || "";
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) return { sent: false, why: "bad-repo" };
+  const api = String(env.GITHUB_API_URL || "https://api.github.com").replace(/\/+$/, "");
+  if (!/^https:\/\/api\.github\.com$|^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(api)) return { sent: false, why: "bad-base" };
+  try {
+    const res = await fetchImpl(`${api}/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/dispatches`, {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer " + token, Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "anilkaya-flows-live", "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ ref, inputs: { tick: new Date(at).toISOString(), origin: "chain" } }),
+    });
+    return { sent: res.status === 204, status: res.status, why: res.status === 204 ? "sent" : "refused" };
+  } catch (error) {
+    return { sent: false, why: "unreachable", error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+const realSleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+
+export async function runLiveLoop({ pass, chain, now = () => Date.now(), sleep = realSleep, window = liveWindow,
+  slotMs = LIVE_LOOP.slotMs, budgetMs = LIVE_LOOP.budgetMs, log = console.log } = {}) {
+  const startedAt = now();
+  const passes = [];
+  const opening = window(startedAt);
+  if (!opening.run) {
+    log(`live loop: nothing to do (${opening.why}) — a starter that ran outside the session exits without a pass`);
+    return { exit: "outside-window", why: opening.why, passes, chained: null };
+  }
+  for (;;) {
+    passes.push(await pass({ first: passes.length === 0, index: passes.length }));
+    const next = nextSlot(now(), slotMs);
+    const ahead = window(next);
+    if (!ahead.run) {
+      log(`live loop: the session window closes before ${new Date(next).toISOString()} (${ahead.why}); ` +
+        `${passes.length} pass(es)`);
+      return { exit: "window-closed", why: ahead.why, passes, chained: null };
+    }
+    if (next - startedAt > budgetMs) {
+      const chained = await chain({ at: now() });
+      log(`live loop: time budget spent after ${passes.length} pass(es) with the session still open — ` +
+        `re-dispatched: ${chained.why}${chained.status ? " (" + chained.status + ")" : ""}`);
+      return { exit: "budget", why: "budget", passes, chained };
+    }
+    await sleep(next - now());
+  }
 }
 
 export async function dryLiveTicks({ publish, store, shapeNews, log = console.log, warn = console.warn,

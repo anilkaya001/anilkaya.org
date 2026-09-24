@@ -97,3 +97,67 @@ export async function startStubGithub({ jwks = null } = {}) {
     close: () => new Promise((resolve) => server.close(resolve)),
   };
 }
+
+export async function tier1Bodies({ session, at }) {
+  const vendor = fakeLiveVendor({ session, now: at });
+  const [tide, sectors] = await Promise.all([
+    vendor("/api/market/market-tide", { interval_5m: "true" }, { envelope: true }),
+    vendor("/api/market/sector-etfs", {}, { envelope: true }),
+  ]);
+  return { "/api/market/market-tide": JSON.stringify(tide), "/api/market/sector-etfs": JSON.stringify(sectors) };
+}
+
+export function tickDb() {
+  const statements = [];
+  const st = (sql) => {
+    const s = { sql, args: [], bind(...a) { s.args = a; return s; }, first: async () => null,
+      run: async () => { statements.push(s); return { meta: { changes: 1 } }; }, all: async () => ({ results: [] }) };
+    return s;
+  };
+  return {
+    statements,
+    prepare: st,
+    batch: async (list) => { statements.push(...list); return list.map(() => ({ results: [] })); },
+  };
+}
+
+export async function tier1Budget({ windows = 16, perWindow = 5, coldOnly = false } = {}) {
+  const W = await import("../shared/flows-live-worker.js");
+  const session = "2026-09-22";
+  const at = easternInstant(session, 16 * 60 + 6);
+  const texts = await tier1Bodies({ session, at });
+  const bytes = Object.values(texts).reduce((a, t) => a + t.length, 0);
+  const clock = typeof process.threadCpuUsage === "function" ? "thread-cpu" : "wall";
+  const cpu = () => {
+    if (clock === "thread-cpu") { const c = process.threadCpuUsage(); return (c.user + c.system) / 1000; }
+    return Number(process.hrtime.bigint()) / 1e6;
+  };
+  const fetchVendor = async (path) => JSON.parse(texts[path]);
+  const env = { DB: tickDb(), UW_API_KEY: "k" };
+  const tick = () => W.rthTick(env, at, { fetchVendor, log: { error() {} } });
+  const w0 = process.hrtime.bigint();
+  const c0 = cpu();
+  const first = await tick();
+  const cold = cpu() - c0;
+  const coldWall = Number(process.hrtime.bigint() - w0) / 1e6;
+  if (coldOnly) return { clock, cold, coldWall, written: !!(first.tier1 && first.tier1.written) };
+  for (let i = 0; i < 40; i++) await tick();
+  const means = [];
+  for (let w = 0; w < windows; w++) {
+    const t0 = cpu();
+    for (let i = 0; i < perWindow; i++) await tick();
+    means.push((cpu() - t0) / perWindow);
+  }
+  const sorted = means.slice().sort((a, b) => a - b);
+  return {
+    clock, window: perWindow, bytes, written: !!(first.tier1 && first.tier1.written),
+    payloadBytes: first.tier1 ? first.tier1.bytes : null, cold, coldWall,
+    median: (sorted[windows / 2 - 1] + sorted[windows / 2]) / 2, worst: sorted[sorted.length - 1],
+    mean: means.reduce((a, b) => a + b, 0) / means.length,
+  };
+}
+
+if (process.argv[2] === "--tier1-budget") {
+  tier1Budget({ coldOnly: process.argv[3] === "cold" }).then((r) => { console.log(JSON.stringify(r)); process.exit(0); },
+    (e) => { console.error(e && e.stack ? e.stack : String(e)); process.exit(1); });
+}

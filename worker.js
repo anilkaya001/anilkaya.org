@@ -2016,6 +2016,7 @@ async function ensureFlowsTables(env) {
   if (flowsSchemaReady || !env.DB) return;
   try {
     await env.DB.batch(FLOWS_SCHEMA_SQL.map((sql) => env.DB.prepare(sql)));
+    await FLOWS_LIVE.upgradeClockColumns(env.DB);
     flowsSchemaReady = true;
   } catch {   }
 }

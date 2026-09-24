@@ -1175,24 +1175,69 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
 (the Actions side). The data contract for pages is the key registry plus the
 `X-Fresh-*` headers; `assets/js/flows-fresh.js` is the one client helper.
 
-- **The clock is the Worker cron.** `1-59/5 13-21 * * 1-5` runs Tier 1 (five
-  vendor calls into `live:market`) from the open to ten minutes past the close,
+- **The clock is the Worker cron.** `1-59/5 13-21 * * 1-5` runs Tier 1 (two
+  vendor calls into `live:market`: the five-minute market tide and the sector-ETF
+  snapshot) from the open to ten minutes past the close,
   dispatches the Actions run at :01/:16/:31/:46, and re-dispatches once when
   `live:breadth` is 45 minutes old. Every dispatch needs `GITHUB_DISPATCH_TOKEN`
   (step 3 below); without it Tier 1 still runs and the dispatches are no-ops. `*/30 * * * *` refreshes the market snapshot,
   dispatches the nightly at or after 17:15 ET (once more after 18:15 ET if meta
   is still behind), refreshes the board summary, and prunes `flows_tape` rows not
-  served for a week. The GitHub schedules stay as backups.
+  served for a week.
+- **Tier 1 fits the Workers Free CPU cap.** Until 2026-09-24 Tier 1 also read the
+  0DTE net flow and the SPY and QQQ ETF tides: three 390-row one-minute feeds,
+  about 200 KB of JSON a tick. Once the session's rows filled in, a tick needed
+  about 10 ms of CPU and the Free plan's 10 ms cap killed it before its D1 write,
+  silently: `live:market` was written once at 09:31 and never again that day.
+  Those feeds now come from Tier 2 (`live:breadth.dte.zero` and
+  `live:breadth.etf.{SPY,QQQ,IWM,DIA}`); `live:market` carries the tide, the
+  sector ETFs and `last.tideNet` only. `tests/flows-live-contract.mjs` times the
+  tick over full-session bodies in child processes on the thread CPU clock: about
+  5 ms for the first tick of a cold process (lazy compilation included) and under
+  1 ms warm, against about 10 ms and 3.4 ms for the old five-feed tick on the same
+  machine.
+- **Tier 1 reports itself in D1.** Every tick first stamps `flows_clock.tier1_at`
+  alone, then records how it ended in `tier1_why` (`written`, `no-feed-answered`,
+  `over-cap`, `not-due`, `holiday`, `off` or `error:<short>`) and, when it wrote
+  `live:market`, `tier1_ok_at`. `/api/flows/now` returns the three as `tier1`.
+  A tick killed by the CPU cap reads as `tier1_at` moving while `tier1_why` and
+  `tier1_ok_at` stay on the last tick that finished:
+
+  ```bash
+  ./tests/node_modules/.bin/wrangler d1 execute iewt --remote --command \
+    "SELECT datetime(tier1_at/1000,'unixepoch') AS began, datetime(tier1_ok_at/1000,'unixepoch') AS wrote, tier1_why FROM flows_clock"
+  ```
 - **Holidays and early closes are read from the tape.** The first tick at or after
-  09:45 ET whose market tide still carries yesterday's date marks the day closed
-  in `flows_clock`; a tide stuck at or before 13:05 ET for 30 minutes after 13:30
-  marks an early close. The repository still holds no calendar.
+  09:45 ET at which both Tier 1 feeds still carry the same earlier session (the
+  market tide by its date, the sector-ETF snapshot by the weekday after its
+  `prev_date`) marks the day closed in `flows_clock`; one lagging feed, or two
+  that disagree on which earlier session they carry, is no verdict. A tide stuck
+  at or before 13:05 ET for 30 minutes after 13:30 marks an early close. The
+  repository still holds no calendar.
+- **Buckets are sampled at their last row with values.** The vendor pre-fills a
+  one-minute feed with a null row for every minute of the day not yet traded, so
+  a five-minute bucket keeps its last row that carries a value, not its last row.
 - **Tier 2** is `node scripts/flows-pipeline.mjs --live`, run by
-  `.github/workflows/flows-live.yml`: sector and ETF tides, both net-flow expiry
-  series, one screener call for every board name, the incremental alert union,
-  spot gamma by rotation, the tape, movers and news — 35 to 39 calls at a 333 ms
-  floor, `live:*` keys only. It exits at once outside the session or when a run
-  finished under eight minutes ago. Dry run: `--live --dry-run`.
+  `.github/workflows/flows-live.yml`: sector tides, the SPY, QQQ, IWM and DIA ETF
+  tides, both net-flow expiry series, one screener call for every board name, the
+  incremental alert union, spot gamma by rotation, the tape, movers and news —
+  37 to 41 calls a pass (the budget is 48) at a 333 ms floor, `live:*` keys only.
+- **Tier 2 sustains itself through the session, with no new secret.** The
+  workflow is one long job (`timeout-minutes: 355`, under GitHub's six-hour cap)
+  that runs with `FLOWS_LIVE_LOOP=1`: a pass at once, then a pass on every
+  five-minute slot until the session window closes (25 minutes after the close)
+  or its 340-minute budget is spent. If the session is still open when the budget
+  ends, the run re-dispatches its own workflow with the job's `GITHUB_TOKEN`
+  (`permissions: actions: write`; `workflow_dispatch` is the documented exception
+  to that token's no-recursion rule), origin `chain`, on `main`, and exits. The
+  `flows-live` concurrency group keeps it to one loop. The GitHub schedule is only
+  starters, `31 13,14 * * 1-5` for the open under EDT and EST and
+  `3 16,18,20 * * 1-5` in case GitHub drops a starter or a run dies; a starter
+  that queued behind a running loop starts after the window closed and exits at
+  once without a pass. The first pass of a run still skips when a heartbeat
+  landed under eight minutes ago; the loop's later passes do not. A single pass
+  runs when `FLOWS_LIVE_LOOP` is unset or `FLOWS_LIVE_FORCE=1`. Dry run:
+  `--live --dry-run`.
 - **Tier 3** is on demand: `/api/flows/tape?t=` (a D1 stale-while-revalidate cache
   with a 20-second single-flight lease, one leg per refresh) and the quote on
   `/api/flows/live?t=` (5 s in session, 30 s pre/post, 6 h closed), both behind
@@ -1202,6 +1247,11 @@ Out-of-band steps before the first deploy of this layer:
 
 1. Apply the tables (idempotent; the Worker also creates them on first use):
    `./tests/node_modules/.bin/wrangler d1 execute iewt --remote --file=./migrations/0010_flows_live.sql`
+   The Tier 1 telemetry columns come from `migrations/0011_flows_clock_tier1.sql`
+   (three `ALTER TABLE ... ADD COLUMN`, so not re-runnable: a second run fails on
+   the duplicate column and changes nothing). The Worker's first-use path adds
+   any of the three the production table lacks and tolerates a duplicate column,
+   so the table upgrades itself on the first request after deploy.
 2. Nothing to mint. The live workflow holds no shared secret: it runs with
    `permissions: id-token: write`, asks the runner for a GitHub OIDC token with
    the audience `https://anilkaya.org/api/flows/ingest#live`, and the Worker
@@ -1235,7 +1285,8 @@ Out-of-band steps before the first deploy of this layer:
 3. Optional, and what turns the Worker into the clock: a fine-grained PAT for
    this repository only, with Actions read and write, set as
    `wrangler secret put GITHUB_DISPATCH_TOKEN`. Without it every dispatch is a
-   logged no-op and the GitHub schedules carry Tier 2 and the nightly (late).
+   logged no-op; Tier 2 then runs on its own starters and chain, and the
+   nightly on its GitHub schedule (late).
    Put its expiry in a calendar.
 4. After deploy, confirm both crons are registered (`wrangler triggers` or the
    dashboard) and read `live:market` on `/api/flows/lk?k=market` at 09:36 ET.

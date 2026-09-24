@@ -1,4 +1,4 @@
-import { sessionOpen, easternInstant, PHASE_MINUTES } from "../../shared/flows-freshness.js";
+import { sessionOpen, easternInstant, PHASE_MINUTES, prevWeekdayDay } from "../../shared/flows-freshness.js";
 import { SECTOR_TIDES, INDEX_NAMES } from "../../shared/flows-live.js";
 
 function mulberry(seed) {
@@ -48,7 +48,7 @@ function cumulativeWalk(rand, n, { drift = 0, step = 1, start = 0 } = {}) {
 }
 
 export function fakeTide({ session, now, seed = "tide", interval5m = true, withPx = false, pxBase = 500,
-  scale = 4e6, etOffset = false, netVolumeString = false } = {}) {
+  scale = 4e6, etOffset = false, netVolumeString = false, prefill = !interval5m } = {}) {
   const rand = mulberry(seedOf(seed + session));
   const mins = minutesUpTo(session, now, interval5m ? 5 : 1);
   const calls = cumulativeWalk(rand, mins.length, { drift: scale * 0.05, step: scale });
@@ -65,6 +65,17 @@ export function fakeTide({ session, now, seed = "tide", interval5m = true, withP
     row.net_volume = netVolumeString ? String(vols[i]) : vols[i];
     return row;
   });
+  if (prefill) {
+    const step = (interval5m ? 5 : 1) * 60000;
+    const close = easternInstant(session, PHASE_MINUTES.close);
+    const from = mins.length ? mins[mins.length - 1] + step : sessionOpen(session);
+    for (let t = from; t < close; t += step) {
+      const row = { timestamp: etOffset ? isoEt(t) : isoZ(t), date: session, net_call_premium: null, net_put_premium: null };
+      if (withPx) row.underlying_price = null;
+      row.net_volume = null;
+      data.push(row);
+    }
+  }
   return { data, date: session };
 }
 
@@ -77,8 +88,9 @@ export function fakeNetFlow({ session, now, expiration = "zero_dte" } = {}) {
 
 export function fakeEtfTide(ticker, { session, now } = {}) {
   const base = { SPY: 774, QQQ: 612, IWM: 241, DIA: 468 }[ticker] || 300;
+  const scale = { SPY: 7e6, QQQ: 6e6, IWM: 1e6, DIA: 5e5 }[ticker] || 6e5;
   return fakeTide({ session, now, seed: "etf-" + ticker, interval5m: false, withPx: true, pxBase: base,
-    scale: 6e5, netVolumeString: true });
+    scale, netVolumeString: true });
 }
 
 export function fakeSectorTide(sector, { session, now } = {}) {
@@ -108,7 +120,7 @@ export function fakeSectorEtfs({ session } = {}) {
       high: money(last * 1.004), low: money(last * 0.996), open: money(prev), last: money(last), ticker, full_name,
       volume: Math.round(rand() * 3e7), call_volume: Math.round(rand() * 5e5), put_volume: Math.round(rand() * 5e5),
       marketcap: String(Math.round(rand() * 8e11)), put_premium: money4(rand() * 1e8), call_premium: money4(rand() * 1e8),
-      prev_date: session, in_out_flow: [{ date: session, change: Math.round((rand() - 0.5) * 1e7) }],
+      prev_date: prevWeekdayDay(session), in_out_flow: [{ date: session, change: Math.round((rand() - 0.5) * 1e7) }],
       avg30_call_volume: money4(rand() * 5e5), avg_30_day_call_volume: money4(rand() * 5e5),
       avg30_put_volume: money4(rand() * 5e5), avg_30_day_put_volume: money4(rand() * 5e5),
       week52_high: money(prev * 1.2), week52_low: money(prev * 0.8), avg30_stock_volume: money4(rand() * 3e7),
