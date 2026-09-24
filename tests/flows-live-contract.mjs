@@ -607,6 +607,10 @@ const T = (iso) => Date.parse(iso);
   ok(!/FLOWS_INGEST_TOKEN|FLOWS_LIVE_TOKEN/.test(wf) && /permissions:\s*\n\s*contents: read\s*\n\s*id-token: write/.test(wf),
     "and the live workflow holds no shared secret at all: it proves itself with a GitHub OIDC token minted per run");
   ok(/LIVE_READY: \$\{\{ secrets\.UW_API_KEY != '' \}\}/.test(wf), "so the vendor key is the only secret it waits for");
+  const uses = [...wf.matchAll(/uses:\s*(\S+)/g)].map((m) => m[1]);
+  ok(uses.length >= 2 && uses.every((u) => /^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/.test(u)),
+    `every action in the live job is pinned to a commit SHA (${uses.join(", ")}): id-token: write lets any step mint ` +
+    "the live credential, so no step may run code a moved tag could swap");
   ok(/concurrency:\s*\n\s*group: flows-live\s*\n\s*cancel-in-progress: false/.test(wf) && /timeout-minutes: 8/.test(wf),
     "one live run at a time, eight minutes at most");
   ok(/cron: "7,22,37,52 13-20 \* \* 1-5"/.test(wf), "with a backup schedule that exits at once outside the session");
@@ -872,36 +876,91 @@ const T = (iso) => Date.parse(iso);
       `${file} never asks workerd for redirect "error", which it rejects with a TypeError on every fetch`);
   }
   let hits = 0;
+  const logs = [];
+  const log = { error: (line) => logs.push(JSON.parse(line)) };
   const served = (list) => async (url, init) => {
     hits++;
     ok(init && init.redirect === "manual", "the JWKS fetch follows no redirect, in the one form workerd accepts");
     return new Response(JSON.stringify({ keys: list }), { status: 200, headers: { "Content-Type": "application/json" } });
   };
+  const kind = async (t, env, opts) => (await W.oidcKind(t, env, { log, ...opts })).kind;
   W.resetJwksMemo();
-  eq(await W.oidcKind(token, {}, { fetchImpl: served(keys), now }), "live", "the Worker grants a verified OIDC token the live role");
-  eq(await W.oidcKind(token, {}, { fetchImpl: served(keys), now: now + 30_000 }), "live", "from its isolate's JWKS memo");
+  eq(await kind(token, {}, { fetchImpl: served(keys), now }), "live", "the Worker grants a verified OIDC token the live role");
+  eq(await kind(token, {}, { fetchImpl: served(keys), now: now + 30_000 }), "live", "from its isolate's JWKS memo");
   eq(hits, 1, "one JWKS fetch serves every write in the memo's hour");
+  eq(logs.length, 0, "and a token that is honoured logs nothing");
   W.resetJwksMemo(); hits = 0;
-  eq(await W.oidcKind(await issuer.mint(now, { aud: "x" }), {}, { fetchImpl: served(keys), now }), null,
-    "a token that fails its claims is refused");
+  const wrongAud = await W.oidcKind(await issuer.mint(now, { aud: "x" }), {}, { fetchImpl: served(keys), now, log });
+  deep([wrongAud.kind, wrongAud.why, wrongAud.unavailable], [null, "aud", false], "a token that fails its claims is refused");
   eq(hits, 0, "before it can cost a JWKS fetch");
+  const said = logs.pop();
+  deep([said.message, said.why, said.claims.aud, said.claims.workflow_ref, said.claims.event_name],
+    ["live OIDC token refused", "aud", "x", O.LIVE_OIDC.workflowRef, "schedule"],
+  "and the refusal is logged with its reason and the token's non-secret claims, so a production 401 can be read");
+  ok(!JSON.stringify(said).includes(token.split(".")[2]), "while the token itself is never logged");
   W.resetJwksMemo(); hits = 0;
   const rotated = await issuer.sign(good, { kid: "k2" });
-  eq(await W.oidcKind(rotated, {}, { fetchImpl: served(keys), now }), null, "an unknown kid is refused");
+  eq((await W.oidcKind(rotated, {}, { fetchImpl: served(keys), now, log })).why, "unknown-kid", "an unknown kid is refused");
   eq(hits, 1, "and a refetch for it waits out the retry window");
   const next = await oidcIssuer({ kid: "k2" });
-  eq(await W.oidcKind(await next.mint(now + 61_000), {}, { fetchImpl: served([issuer.jwk, next.jwk]), now: now + 61_000 }), "live",
+  eq(await kind(await next.mint(now + 61_000), {}, { fetchImpl: served([issuer.jwk, next.jwk]), now: now + 61_000 }), "live",
     "a minute later the unknown kid refetches the set, so a rotated GitHub key is honoured within the minute");
   eq(hits, 2, "with exactly one more fetch");
+
+  W.resetJwksMemo(); hits = 0;
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const slow = async (url, init) => { await gate; return served(keys)(url, init); };
+  const racing = [W.oidcKind(token, {}, { fetchImpl: slow, now, log }), W.oidcKind(token, {}, { fetchImpl: slow, now, log })];
+  release();
+  deep((await Promise.all(racing)).map((r) => r.kind), ["live", "live"],
+    "SINGLE FLIGHT: two writes reaching a cold isolate together both wait on the one key-set fetch");
+  eq(hits, 1, "and it is fetched once, not refused to the second while the first is in flight");
+
+  W.resetJwksMemo(); logs.length = 0;
+  const down = await W.oidcKind(token, {}, { fetchImpl: async () => { throw new Error("down"); }, now, log });
+  deep([down.kind, down.why, down.unavailable], [null, "keys-unavailable", true],
+    "an unreachable key set fails closed, and says it is an outage rather than a bad credential");
+  eq(logs.pop().message, "live OIDC key set unavailable", "in the log as well");
   W.resetJwksMemo();
-  eq(await W.oidcKind(token, {}, { fetchImpl: async () => { throw new Error("down"); }, now }), null,
-    "an unreachable JWKS fails closed");
-  W.resetJwksMemo();
-  eq(await W.oidcKind(token, {}, { fetchImpl: async () => new Response("nope", { status: 503 }), now }), null, "and so does a 5xx");
+  eq((await W.oidcKind(token, {}, { fetchImpl: async () => new Response("nope", { status: 503 }), now, log })).unavailable, true,
+    "and so does a 5xx");
+  hits = 0;
+  eq((await W.oidcKind(token, {}, { fetchImpl: served(keys), now: now + 2000, log })).unavailable, true,
+    "a cold isolate that has never held the key set waits a few seconds before fetching again");
+  eq(await kind(token, {}, { fetchImpl: served(keys), now: now + W.JWKS_COLD_RETRY_MS }), "live",
+    `then fetches again after ${W.JWKS_COLD_RETRY_MS / 1000} s, inside the pipeline's own retries, not a minute later`);
+  eq(hits, 1, "with one fetch");
+
   W.resetJwksMemo();
   let asked = null;
-  await W.oidcKind(token, {}, { fetchImpl: async (url) => { asked = url; return new Response("{}"); }, now });
+  await W.oidcKind(token, {}, { fetchImpl: async (url) => { asked = url; return new Response("{}"); }, now, log });
   eq(asked, O.LIVE_OIDC.jwks, "the key set comes from GitHub's own issuer by default");
+  const jw = (v) => W.jwksUrl({ GITHUB_OIDC_JWKS: v });
+  deep([jw("https://token.actions.githubusercontent.com/.well-known/jwks"), jw("http://127.0.0.1:8787/.well-known/jwks"),
+    jw("http://localhost:9/jwks"), jw("https://evil.example/.well-known/jwks"),
+    jw("http://token.actions.githubusercontent.com/.well-known/jwks"), jw("https://token.actions.githubusercontent.com.evil/x"),
+    jw("http://10.0.0.1:80/jwks")],
+  ["https://token.actions.githubusercontent.com/.well-known/jwks", "http://127.0.0.1:8787/.well-known/jwks",
+    "http://localhost:9/jwks", null, null, null, null],
+  "the key-set override is the trust root, so it is held to GitHub's own https issuer or a loopback test stub, as the " +
+  "dispatch base is");
+  W.resetJwksMemo(); hits = 0;
+  const hostile = await W.oidcKind(token, { GITHUB_OIDC_JWKS: "https://evil.example/jwks" }, { fetchImpl: served(keys), now, log });
+  deep([hostile.kind, hostile.unavailable, hits], [null, true, 0], "and any other override fetches nothing and grants nothing");
+  eq(logs.pop().jwks, "bad-override", "saying why");
+
+  const ingestRoute = read("worker.js").slice(read("worker.js").indexOf('if (path === "/api/flows/ingest")'));
+  ok(/if \(check\.unavailable\) \{\s*throw new HttpError\(503,/.test(ingestRoute.slice(0, 1500)),
+    "the ingest route answers a key-set outage with 503, which the pipeline retries, rather than a 401 it gives up on");
+  const spy = { imports: 0, importKey: (...a) => { spy.imports++; return crypto.subtle.importKey(...a); },
+    verify: (...a) => crypto.subtle.verify(...a) };
+  const jwt = O.decodeJwt(token);
+  const fresh = { ...issuer.jwk };
+  deep([await O.rsaVerify(jwt, fresh, spy), await O.rsaVerify(jwt, fresh, spy), spy.imports], [true, true, 1],
+    "the imported public key is cached beside the key set, so a verified write costs one RSA verify and no re-import");
+  eq((await O.verifyLiveOidc(token, async () => null, now)).why, "keys-unavailable",
+    "ONE VERIFIER: the Worker's path is verifyLiveOidc with a key resolver, so the claim suite above tests what runs");
   W.resetJwksMemo();
   eq(await W.tokenKind(token, { FLOWS_INGEST_TOKEN: "n", FLOWS_LIVE_TOKEN: "l" }, (a, b) => a === b), null,
     "the static comparison never mistakes a JWT for a configured token");
@@ -932,6 +991,20 @@ const T = (iso) => Date.parse(iso);
   eq(requests.length, 1, "and reuses it while more than a minute of its life is left");
   await liveCredential({ env, now: now + 300_000 - LIVE_BEARER_MARGIN_MS + 1000, fetchImpl: idFetch });
   eq(requests.length, 2, "then mints the next before the Worker could see it expire");
+  requests.length = 0;
+  const later = now + 3 * 3600_000;
+  const pair = await Promise.all([liveCredential({ env, now: later, fetchImpl: idFetch }),
+    liveCredential({ env, now: later, fetchImpl: idFetch })]);
+  deep([pair[0] === token, pair[1] === token, requests.length], [true, true, 1],
+    "SINGLE FLIGHT: two ingest calls that need a fresh token at once share one mint");
+  const otherRunner = { ...env, ACTIONS_ID_TOKEN_REQUEST_URL: "https://pipelines.actions.githubusercontent.com/y/idtoken?api-version=2.0" };
+  await liveCredential({ env: otherRunner, now: later, fetchImpl: idFetch });
+  eq(requests.length, 2, "and a token is bound to the runner that minted it: another request URL mints its own");
+  const pipelineSrc = read("scripts/flows-pipeline.mjs");
+  const liveModeBody = pipelineSrc.slice(pipelineSrc.indexOf("async function runLiveMode"), pipelineSrc.indexOf("async function main"));
+  ok(liveModeBody.length > 0 && !/liveCredential\(/.test(liveModeBody),
+    "LAZY: --live mints nothing before runLive decides to run, so an out-of-window or recently-beaten run never " +
+    "depends on GitHub's token service");
   await assert.rejects(liveCredential({ env: {}, now: far, fetchImpl: idFetch }), /id-token: write/,
     "a job without the permission fails with the line that fixes it");
   await assert.rejects(liveCredential({ env, now: far, fetchImpl: async () => new Response("no", { status: 403 }) }),

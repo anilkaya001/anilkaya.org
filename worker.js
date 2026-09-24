@@ -2874,8 +2874,14 @@ async function route(request, env, url, ctx) {
       throw new HttpError(503, "unavailable", "Ingest is not configured");
     }
 
-    const tokenKind = FLOWS_LIVE.tokenKind(offered, env, timingSafeEqualStr)
-      || (oidc ? await FLOWS_LIVE.oidcKind(offered, env) : null);
+    let tokenKind = FLOWS_LIVE.tokenKind(offered, env, timingSafeEqualStr);
+    if (!tokenKind && oidc) {
+      const check = await FLOWS_LIVE.oidcKind(offered, env);
+      if (check.unavailable) {
+        throw new HttpError(503, "unavailable", "The live credential's signing keys could not be read; retry shortly");
+      }
+      tokenKind = check.kind;
+    }
     if (!tokenKind) throw new HttpError(401, "unauthorized", "Authentication required");
 
     const key = url.searchParams.get("key") || "";

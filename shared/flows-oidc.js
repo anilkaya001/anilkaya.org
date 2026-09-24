@@ -1,3 +1,5 @@
+import { fromB64url } from "./session.js";
+
 export const LIVE_OIDC = Object.freeze({
   issuer: "https://token.actions.githubusercontent.com",
   jwks: "https://token.actions.githubusercontent.com/.well-known/jwks",
@@ -21,11 +23,11 @@ export const looksLikeJwt = (s) => typeof s === "string" && s.length <= LIVE_OID
 const isObj = (v) => !!v && typeof v === "object" && !Array.isArray(v);
 
 function b64urlBytes(s) {
-  if (typeof s !== "string" || !/^[A-Za-z0-9_-]+$/.test(s) || s.length % 4 === 1) return null;
-  const bin = atob(s.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (s.length % 4)) % 4));
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
+  try {
+    return fromB64url(s);
+  } catch {
+    return null;
+  }
 }
 
 function b64urlJson(s) {
@@ -79,7 +81,16 @@ export function inspectLiveOidc(token, now, policy = LIVE_OIDC) {
   const jwt = decodeJwt(token);
   if (!jwt) return { ok: false, why: "malformed" };
   const why = claimsProblem(jwt.header, jwt.claims, Math.floor(now / 1000), policy);
-  return why ? { ok: false, why } : { ok: true, jwt };
+  return why ? { ok: false, why, claims: jwt.claims } : { ok: true, jwt };
+}
+
+export function claimsBrief(claims) {
+  if (!isObj(claims)) return null;
+  const pick = (k) => (typeof claims[k] === "string" ? claims[k].slice(0, 160) : null);
+  return {
+    repository: pick("repository"), workflow_ref: pick("workflow_ref"), ref: pick("ref"),
+    event_name: pick("event_name"), runner_environment: pick("runner_environment"), aud: pick("aud"),
+  };
 }
 
 export function rsaKeys(body) {
@@ -91,10 +102,16 @@ export function rsaKeys(body) {
 
 export const jwkFor = (keys, kid) => (Array.isArray(keys) ? keys.find((k) => k.kid === kid) || null : null);
 
+const imported = new WeakMap();
+
 export async function rsaVerify(jwt, jwk, subtle = crypto.subtle) {
   try {
-    const key = await subtle.importKey("jwk", { kty: "RSA", n: jwk.n, e: jwk.e, alg: "RS256", ext: true },
-      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+    let key = imported.get(jwk);
+    if (!key) {
+      key = await subtle.importKey("jwk", { kty: "RSA", n: jwk.n, e: jwk.e, alg: "RS256", ext: true },
+        { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+      imported.set(jwk, key);
+    }
     return await subtle.verify("RSASSA-PKCS1-v1_5", key, jwt.signature, jwt.signed);
   } catch {
     return false;
@@ -104,9 +121,16 @@ export async function rsaVerify(jwt, jwk, subtle = crypto.subtle) {
 export async function verifyLiveOidc(token, keys, now, policy = LIVE_OIDC) {
   const seen = inspectLiveOidc(token, now, policy);
   if (!seen.ok) return seen;
-  const jwk = jwkFor(keys, seen.jwt.header.kid);
-  if (!jwk) return { ok: false, why: "unknown-kid" };
-  return (await rsaVerify(seen.jwt, jwk)) ? { ok: true, claims: seen.jwt.claims } : { ok: false, why: "signature" };
+  const { claims, header } = seen.jwt;
+  const resolve = typeof keys === "function" ? keys : async () => keys;
+  let set = await resolve(false);
+  let jwk = jwkFor(set, header.kid);
+  if (!jwk) {
+    set = await resolve(true);
+    jwk = jwkFor(set, header.kid);
+  }
+  if (!jwk) return { ok: false, why: Array.isArray(set) && set.length ? "unknown-kid" : "keys-unavailable", claims };
+  return (await rsaVerify(seen.jwt, jwk)) ? { ok: true, claims } : { ok: false, why: "signature", claims };
 }
 
 export async function actionsIdToken(env, { audience = LIVE_OIDC.audience, fetchImpl = fetch } = {}) {

@@ -35,14 +35,14 @@ jobs:
         run: |
           echo "::notice title=Live layer idle::UW_API_KEY is not set as a repository secret, so Tier 2 does not run; the Worker's own Tier 1 tick runs without it."
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         if: env.LIVE_READY == 'true'
         with:
           sparse-checkout: |
             scripts
             shared
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         if: env.LIVE_READY == 'true'
         with:
           node-version: 22

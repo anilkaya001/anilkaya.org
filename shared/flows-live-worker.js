@@ -7,7 +7,7 @@ import {
   FRESH_CLASSES, PHASE_MINUTES, LIVE_CLOCK, freshHeaders, pendingHeaders, phaseAt, tier1Due, liveDispatchDue,
   liveStalled, nightlyDispatchDue, easternDay, easternInstant, sessionOpen,
 } from "./flows-freshness.js";
-import { LIVE_OIDC, looksLikeJwt, inspectLiveOidc, rsaKeys, jwkFor, rsaVerify } from "./flows-oidc.js";
+import { LIVE_OIDC, looksLikeJwt, rsaKeys, verifyLiveOidc, claimsBrief } from "./flows-oidc.js";
 
 export { looksLikeJwt };
 
@@ -320,39 +320,57 @@ export function tokenKind(offered, env, equal) {
 
 export const JWKS_TTL_MS = 60 * 60 * 1000;
 export const JWKS_RETRY_MS = 60 * 1000;
-let jwksMemo = { url: null, keys: null, at: 0, triedAt: 0 };
+export const JWKS_COLD_RETRY_MS = 5 * 1000;
+const emptyMemo = (url) => ({ url, keys: null, at: 0, triedAt: 0, inflight: null });
+let jwksMemo = emptyMemo(null);
 
 export function resetJwksMemo() {
-  jwksMemo = { url: null, keys: null, at: 0, triedAt: 0 };
+  jwksMemo = emptyMemo(null);
 }
 
-function jwksUrl(env) {
+export function jwksUrl(env) {
   const raw = env && typeof env.GITHUB_OIDC_JWKS === "string" ? env.GITHUB_OIDC_JWKS.trim() : "";
-  return raw || LIVE_OIDC.jwks;
+  if (!raw) return LIVE_OIDC.jwks;
+  return /^https:\/\/token\.actions\.githubusercontent\.com\/[^\s?#]*$|^http:\/\/(127\.0\.0\.1|localhost):\d+\/[^\s?#]*$/.test(raw)
+    ? raw : null;
 }
 
-async function jwksKeys(env, fetchImpl, now, force) {
+export function jwksKeys(env, fetchImpl, now, force) {
   const url = jwksUrl(env);
-  if (jwksMemo.url !== url) jwksMemo = { url, keys: null, at: 0, triedAt: 0 };
-  const fresh = !!jwksMemo.keys && now - jwksMemo.at < JWKS_TTL_MS;
-  if ((fresh && !force) || now - jwksMemo.triedAt < JWKS_RETRY_MS) return jwksMemo.keys;
-  jwksMemo.triedAt = now;
-  const keys = await fetchImpl(url, {
+  if (!url) return Promise.resolve(null);
+  if (jwksMemo.url !== url) jwksMemo = emptyMemo(url);
+  const memo = jwksMemo;
+  if (memo.inflight) return memo.inflight;
+  const fresh = !!memo.keys && now - memo.at < JWKS_TTL_MS;
+  const wait = memo.keys ? JWKS_RETRY_MS : JWKS_COLD_RETRY_MS;
+  if ((fresh && !force) || now - memo.triedAt < wait) return Promise.resolve(memo.keys);
+  memo.triedAt = now;
+  memo.inflight = fetchImpl(url, {
     redirect: "manual", signal: AbortSignal.timeout(4000),
     headers: { Accept: "application/json", "User-Agent": "anilkaya-flows-worker" },
-  }).then((res) => (res.ok ? res.json().then(rsaKeys) : [])).catch(() => []);
-  if (keys.length) jwksMemo = { url, keys, at: now, triedAt: now };
-  return jwksMemo.keys;
+  }).then((res) => (res.ok ? res.json().then(rsaKeys) : [])).catch(() => []).then((keys) => {
+    if (keys.length) {
+      memo.keys = keys;
+      memo.at = now;
+    }
+    memo.inflight = null;
+    return memo.keys;
+  });
+  return memo.inflight;
 }
 
-export async function oidcKind(offered, env, { fetchImpl = fetch, now = Date.now() } = {}) {
-  if (!looksLikeJwt(offered)) return null;
-  const seen = inspectLiveOidc(offered, now);
-  if (!seen.ok) return null;
-  const kid = seen.jwt.header.kid;
-  let jwk = jwkFor(await jwksKeys(env, fetchImpl, now, false), kid);
-  if (!jwk) jwk = jwkFor(await jwksKeys(env, fetchImpl, now, true), kid);
-  return jwk && (await rsaVerify(seen.jwt, jwk)) ? "live" : null;
+export async function oidcKind(offered, env, { fetchImpl = fetch, now = Date.now(), log = console } = {}) {
+  if (!looksLikeJwt(offered)) return { kind: null, why: "not-a-jwt", unavailable: false };
+  const out = await verifyLiveOidc(offered, (force) => jwksKeys(env, fetchImpl, now, force), now);
+  if (out.ok) return { kind: "live", why: null, unavailable: false };
+  const unavailable = out.why === "keys-unavailable";
+  if (out.why !== "malformed") {
+    log.error(JSON.stringify({
+      message: unavailable ? "live OIDC key set unavailable" : "live OIDC token refused",
+      why: out.why, jwks: jwksUrl(env) ? "ok" : "bad-override", claims: claimsBrief(out.claims),
+    }));
+  }
+  return { kind: null, why: out.why, unavailable };
 }
 
 export function ingestScope(key, method, kind) {

@@ -72,7 +72,8 @@ function ingestURL() {
 const INGEST_UA = "anilkaya-flows-pipeline/1 (+https://github.com/anilkaya001/anilkaya.org)";
 
 export const LIVE_BEARER_MARGIN_MS = 60_000;
-let liveBearer = { token: null, exp: 0 };
+let liveBearer = { token: null, exp: 0, url: null };
+let liveMinting = null;
 
 export function liveCredentialSource(env = process.env) {
   if (env.FLOWS_LIVE_TOKEN) return "the live token";
@@ -82,10 +83,21 @@ export function liveCredentialSource(env = process.env) {
 
 export async function liveCredential({ env = process.env, now = Date.now(), fetchImpl = fetch } = {}) {
   if (env.FLOWS_LIVE_TOKEN) return env.FLOWS_LIVE_TOKEN;
-  if (liveBearer.token && liveBearer.exp - now > LIVE_BEARER_MARGIN_MS) return liveBearer.token;
-  const token = await actionsIdToken(env, { audience: LIVE_OIDC.audience, fetchImpl });
-  liveBearer = { token, exp: jwtExpiry(token) };
-  return token;
+  const url = env.ACTIONS_ID_TOKEN_REQUEST_URL || null;
+  if (liveBearer.token && liveBearer.url === url && liveBearer.exp - now > LIVE_BEARER_MARGIN_MS) return liveBearer.token;
+  if (!liveMinting || liveMinting.url !== url) {
+    const minting = { url, promise: null };
+    minting.promise = actionsIdToken(env, { audience: LIVE_OIDC.audience, fetchImpl })
+      .then((token) => {
+        liveBearer = { token, exp: jwtExpiry(token), url };
+        return token;
+      })
+      .finally(() => {
+        if (liveMinting === minting) liveMinting = null;
+      });
+    liveMinting = minting;
+  }
+  return liveMinting.promise;
 }
 
 async function ingestHeaders({ json = false } = {}) {
@@ -4021,7 +4033,6 @@ async function runLiveMode() {
       throw new Error(`missing required environment variable${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}` +
         " — the live mode refuses the nightly FLOWS_INGEST_TOKEN on purpose");
     }
-    await liveCredential();
     console.log(`publishing to ${ingestURL()} as ${source}`);
   }
   delayFloorMs = Math.max(delayFloorMs, LIVE_READ_PACE_MS);

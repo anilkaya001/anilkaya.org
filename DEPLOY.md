@@ -1212,11 +1212,26 @@ Out-of-band steps before the first deploy of this layer:
    expires about five minutes after it is minted. The live role can write
    `live:*` keys only, read the boards and meta it plans from, and delete
    nothing, while the nightly token cannot write a live key. The workflow has
-   no `FLOWS_INGEST_TOKEN` in its environment on purpose. A static
-   `FLOWS_LIVE_TOKEN` (Worker secret plus environment variable) still works for
-   a local `--live` run, and is not needed in production. `GITHUB_OIDC_JWKS`
-   points the Worker at a stub key set in the Worker contract suite; production
-   leaves it unset and reads GitHub's own.
+   no `FLOWS_INGEST_TOKEN` in its environment on purpose, and every action in
+   the job is pinned to a commit SHA, because `id-token: write` lets any step
+   mint the credential.
+
+   The Worker still honours a static `FLOWS_LIVE_TOKEN` when one is set. That
+   is for a local `--live` run against a local Worker: put it in `.dev.vars`,
+   export the same value, and point the pipeline at the local route with
+   `FLOWS_INGEST_URL=http://127.0.0.1:8787/api/flows/ingest` (the default is
+   production). Never set it on the production Worker, where it would be a
+   second, long-lived live credential beside OIDC. If an earlier revision of
+   this step had you set it, delete both copies:
+   `./tests/node_modules/.bin/wrangler secret delete FLOWS_LIVE_TOKEN` and the
+   repository secret of the same name.
+
+   `GITHUB_OIDC_JWKS` points the Worker at a stub key set in the Worker
+   contract suite. The Worker accepts it only for GitHub's own
+   `https://token.actions.githubusercontent.com/` or a loopback `http` stub;
+   production leaves it unset. A key-set outage answers 503, which the
+   pipeline retries, and every refusal is logged with its reason and the
+   token's non-secret claims.
 3. Optional, and what turns the Worker into the clock: a fine-grained PAT for
    this repository only, with Actions read and write, set as
    `wrangler secret put GITHUB_DISPATCH_TOKEN`. Without it every dispatch is a
