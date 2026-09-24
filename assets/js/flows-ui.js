@@ -1701,7 +1701,7 @@
     return { open, weekday, today: n.date, expected: built ? n.date : prevWeekday(n.date) };
   }
 
-  const FRESH = { sessionDate: null, nightly: null, generatedAt: null, updatedAt: null, readAt: null, live: false, sources: new Map(), explicit: false, settled: false };
+  const FRESH = { sessionDate: null, nightly: null, meta: false, generatedAt: null, updatedAt: null, readAt: null, live: false, sources: new Map(), explicit: false, settled: false };
   function freshState() {
     const m = market(new Date());
     const S = FRESH.sessionDate || FRESH.nightly;
@@ -1786,11 +1786,18 @@
       freshness(o);
     }).catch(() => {});
   }
+  function takeMeta(p) {
+    FRESH.meta = true;
+    p.then((r) => (r && r.ok ? r.clone().json() : null)).then((j) => {
+      if (j && isoDay(j.sessionDate)) { FRESH.nightly = j.sessionDate.slice(0, 10); FRESH.settled = true; paintFresh(); }
+    }).catch(() => {});
+  }
   if (nativeFetch) {
     window.fetch = function (input, init) {
       const p = nativeFetch(input, init);
       try {
         const url = typeof input === "string" ? input : input && input.url;
+        if (url && url.indexOf("/api/flows/meta") >= 0) takeMeta(p);
         if (url && url.indexOf("/api/flows/") >= 0) p.then((r) => observe(url, r), () => {});
       } catch { return p; }
       return p;
@@ -1961,9 +1968,7 @@
         if (anchor === fresh && popOpen()) { closeInfo(); return; }
         openInfo(fresh, freshDetails());
       });
-      if (nativeFetch) nativeFetch("/api/flows/meta", { credentials: "same-origin" }).then((r) => (r.ok ? r.json() : null)).then((j) => {
-        if (j && isoDay(j.sessionDate)) { FRESH.nightly = j.sessionDate.slice(0, 10); FRESH.settled = true; paintFresh(); }
-      }).catch(() => {});
+      setTimeout(() => { if (!FRESH.meta && !FRESH.sessionDate && nativeFetch) takeMeta(nativeFetch("/api/flows/meta", { credentials: "same-origin" })); }, 800);
       setTimeout(() => { FRESH.settled = true; paintFresh(); }, 6000);
       setInterval(paintFresh, 30000);
       paintFresh();

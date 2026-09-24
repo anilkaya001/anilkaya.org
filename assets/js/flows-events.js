@@ -62,7 +62,7 @@
     return null;
   };
 
-  const S = { payload: null, cx: new Map(), asked: false, staleDays: null };
+  const S = { payload: null, cx: new Map(), asked: false, staleDays: null, divLane: null };
 
   const setModuleState = (hostEl, st, label) => {
     const card = hostEl && hostEl.closest(".fd-mod");
@@ -161,6 +161,7 @@
     const cal = calIndex(payload);
     const list = sessionDays(payload);
     if (!list.length) {
+      S.divLane = null;
       silence(host.week, { state: "unavailable", reason: "This payload carried no gate origin and no session list, so the week has no day zero to be drawn from." }, "Week ahead", 220);
       return;
     }
@@ -169,6 +170,7 @@
     const catRows = payload.catalysts && Array.isArray(payload.catalysts.rows) ? payload.catalysts.rows : [];
     const divRows = catRows.filter((c) => /div/i.test(String(c && c.type)));
     const divSt = divRows.length ? { state: "ok" } : null;
+    S.divLane = !!divSt;
     const drawn = rows.filter((r) => r && list.includes(r.d));
     const earnSt = drawn.length ? { state: "ok" } : { state: "quiet", reason: "No name reports in the next five sessions." };
     const maxEm = Math.max(0.01, ...drawn.map((r) => { const i = impliedOf(r, cal.get(r.t)); return i ? i.v : 0; }));
@@ -276,7 +278,7 @@
         { title: "The gate", lines: [notes.gate, "Every name reporting inside the gate was removed before the board was scored, so the board holds no opinion on any of them. Board names never report inside it by construction; they appear in the Earnings list once their report lies beyond it."] },
         { title: "Two clocks", lines: [notes.clocks, clashes ? clashes + " rows publish more sessions than calendar days: the two counts were measured from different origins, and the difference between them is not safe to read on those rows." : null] },
         { title: "Before the open or after the close", lines: [payload.announce && payload.announce.reason ? String(payload.announce.reason) : null, "A sun marks a report before the open and a moon one after the close, where the vendor's earnings calendar states it."] },
-        document.querySelector(".fe-c-div") ? null : { title: "Ex-dividends", lines: ["Ex-dividend dates need the vendor's dividends route, which this plan does not include. Until a run reads them the week carries no lane for them, rather than an empty one that would read as a week without dividends."] },
+        S.divLane !== false ? null : { title: "Ex-dividends", lines: ["Ex-dividend dates need the vendor's dividends route, which this plan does not include. Until a run reads them the week carries no lane for them, rather than an empty one that would read as a week without dividends."] },
       ],
     };
   }
@@ -598,6 +600,7 @@
 
   function failEverywhere(kind, what) {
     S.fail = kind;
+    S.divLane = null;
     statusEl.textContent = what;
     statusEl.dataset.empty = kind;
     const st = { state: kind === "unreadable" ? "withheld" : kind === "pending" ? "pending" : "unavailable", reason: what };

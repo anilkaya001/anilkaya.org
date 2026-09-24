@@ -1347,6 +1347,48 @@ const rebuild = (em) => {
     eq(await noDeep.$eval("#uaUrgency .ui-silent", (n) => n.dataset.state), "quiet",
       "and a session whose flagged board names are all cross-section reads as quiet, not as a wall of missing tapes");
     await noDeep.close();
+
+    const urgencyOf = async () => {
+      const pg = await newPage();
+      await load(pg);
+      await pg.waitForFunction(() => {
+        const rows = document.querySelectorAll("#uaUrgency .fu-urow:not(.fu-head)");
+        return rows.length > 0 && ![...rows].some((r) => /Pending/.test(r.textContent));
+      });
+      const out = await pg.evaluate(() => ({
+        names: [...document.querySelectorAll("#uaUrgency .fu-urow:not(.fu-head) .fu-tk b")].map((b) => b.textContent),
+        stale: document.querySelectorAll('#uaUrgency [data-state="stale"]').length,
+        bad: document.querySelectorAll('#uaUrgency [data-state="unavailable"], #uaUrgency [data-state="pending"]').length,
+        card: document.getElementById("uaUrgencyCard").dataset.state,
+      }));
+      await pg.close();
+      return out;
+    };
+    await put("flowalerts", { ...urgent, sessionDate: "2026-09-01" });
+    const liveDay = await urgencyOf();
+    deep(liveDay.names, ["AAA"], "with the alerts read live a session ahead of the nightly, urgency still draws the deep name");
+    eq(liveDay.stale, 0,
+      "and does not mark its tape stale: card-x tapes are nightly, so a tape dated the nightly session is the newest " +
+      "that can exist, and measuring it against the live alerts' date marked every row stale every trading day");
+    eq(liveDay.card, "ok", "and the module header reads ok, not quiet");
+
+    await put("card-x:AAA", { v: 1, ticker: "AAA", sessionDate: "2026-08-28", scope: "deep",
+      alerts: { status: "ok", why: null, asOf: "2026-08-28", n: 4, complete: true, prem: 250000, sweepShare: 0.5, urgency: 0.02, dots: [] } });
+    const oldTape = await urgencyOf();
+    ok(oldTape.stale >= 1, `a tape older than the nightly session the page shows is marked stale (${oldTape.stale})`);
+    eq(oldTape.card, "stale",
+      "and the header says stale, not the quiet glyph with a staleness reason behind it, when every row has a value");
+
+    await put("card-x:AAA", { v: 1, ticker: "AAA", sessionDate: "2026-08-31", scope: "deep",
+      alerts: { status: "ok", why: null, asOf: "2026-08-31", n: 4, complete: true, prem: 250000, sweepShare: 0.5, urgency: 0.02, dots: [] } });
+    await put("card-x:CCC", { v: 1, ticker: "CCC", sessionDate: "2026-08-31", scope: "carded" });
+    await put("unusual", { v: 2, generatedAt: "2026-09-01T06:00:00Z", sessionDate: "2026-08-31", status: "ok" });
+    const noCov = await urgencyOf();
+    deep(noCov.names, ["AAA"],
+      "without the counter feed's coverage, a candidate whose card-x says it is not deep and carries no tape is " +
+      "dropped instead of drawn as a dash with the unavailable mark");
+    eq(noCov.bad, 0, "so no row in it is unavailable or pending once the cards are read");
+    eq(noCov.card, "ok", `and the header is ok (${noCov.card})`);
   } finally {
     await browser.close();
     await server.stop();
