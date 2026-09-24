@@ -856,6 +856,7 @@ ok(!/all of them|inside the band|±/.test(quietBare),
     pct: { vrp: TICKERS.map((_, i) => 10 + i * 10), si } });
   const read = () => page.evaluate(() => {
     const shown = (n) => !!n && getComputedStyle(n).display !== "none";
+    const right = (n) => n.offsetLeft + n.offsetWidth;
     const row = document.querySelector("#flowsBody .bd-row[data-flip]");
     const head = document.querySelector("#bdHead");
     return {
@@ -866,8 +867,7 @@ ok(!/all of them|inside the band|±/.test(quietBare),
       tracks: getComputedStyle(row).gridTemplateColumns.split(" ").length,
       visible: [...row.children].filter(shown).length,
       headVisible: [...head.children].filter(shown).length,
-      vrpOff: Math.abs(head.querySelector('[data-col="vrpP"]').getBoundingClientRect().right
-        - row.querySelector('[data-col="vrpP"]').getBoundingClientRect().right),
+      vrpOff: Math.abs(right(head.querySelector('[data-col="vrpP"]')) - right(row.querySelector('[data-col="vrpP"]'))),
     };
   });
   await page.setViewportSize({ width: 1600, height: 1000 });
@@ -879,8 +879,9 @@ ok(!/all of them|inside the band|±/.test(quietBare),
      "A CROSS-SECTION COLUMN NO ROW CAN FILL IS NOT DRAWN: with the universe published and short interest covering " +
      "none of this board's names, SI leaves the table rather than printing a column of em dashes, and VRP stays");
   ok(bare.tracks === bare.visible && bare.headVisible === bare.visible && bare.vrpOff <= 1.5,
-     `and the grid drops its track with it (${bare.tracks} tracks, ${bare.visible} cells), so every heading still ` +
-     `sits on its own figures (VRP ${bare.vrpOff.toFixed(1)}px apart)`);
+     `and the grid drops its track with it (${bare.tracks} tracks, ${bare.visible} cells, ${bare.headVisible} headings), ` +
+     `so every heading still sits on its own figures (VRP ${bare.vrpOff.toFixed(1)}px apart, measured in layout so a ` +
+     "row still gliding into its new place is not read as a misaligned column)");
 
   await put("universe", uni(TICKERS.map((_, i) => (i === 3 ? 42 : null))));
   await page.goto(url("/flows/long/"), { waitUntil: "networkidle" });
