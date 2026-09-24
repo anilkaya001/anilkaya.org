@@ -347,11 +347,15 @@ ok(/Nothing follows from that about the allowance/i.test(unread.fold),
    "and it says what does not follow, one tap away on the glyph, rather than leaving a " +
    "reader to decide whether a blank meter means the budget is gone");
 
-await page.route("**/api/flows/ask", (route) => route.fulfill({
-  status: 200, contentType: "application/json",
-  body: JSON.stringify({ answer: "A short board reading.", llm: false, model: null,
-    note: "No model is configured for this route.", capped: false, why: "Picked 1 of 1.",
-    facts: [LEAD], silences: null, guard: null }) }));
+let enterAsks = 0;
+await page.route("**/api/flows/ask", (route) => {
+  if (route.request().method() === "POST") enterAsks++;
+  return route.fulfill({
+    status: 200, contentType: "application/json",
+    body: JSON.stringify({ answer: "A short board reading.", llm: false, model: null,
+      note: "No model is configured for this route.", capped: false, why: "Picked 1 of 1.",
+      facts: [LEAD], silences: null, guard: null }) });
+});
 await page.goto(url("/flows/ask/"), { waitUntil: "networkidle" });
 
 const answerText = () => page.evaluate(() =>
@@ -360,7 +364,7 @@ const answerText = () => page.evaluate(() =>
 await page.fill("#askQ", "what leads the short board");
 await page.focus("#askQ");
 await page.keyboard.press("Enter");
-await page.waitForSelector("#askAnswer .ak-asked", { timeout: 5000 });
+await page.waitForSelector("#askAnswer .ak-a", { timeout: 5000 });
 ok(/what leads the short board/.test(await answerText()),
    "Enter in the question field sends it: the field is a textarea, whose native Enter is a " +
    "newline, so this is behaviour the page adds and can lose");
@@ -368,6 +372,7 @@ ok((await page.inputValue("#askQ")).indexOf("\n") === -1,
    "and the newline Enter would otherwise have inserted is suppressed, rather than being " +
    "sent AND left behind in the field for the next question to inherit");
 
+const sentBefore = enterAsks;
 await page.evaluate(() => { document.getElementById("askAnswer").textContent = ""; });
 await page.fill("#askQ", "first line");
 await page.focus("#askQ");
@@ -379,9 +384,12 @@ ok((await page.inputValue("#askQ")) === "first line\nsecond line",
    "Shift-Enter makes a new line instead of sending, so a question can still be written " +
    "across two lines — which is why this field stays a textarea rather than becoming an " +
    "<input> that would send on Enter for free");
-ok((await answerText()) === "",
-   "and nothing was sent by it: a Shift-Enter that both broke the line and submitted would " +
-   "look correct in the field and be wrong in the answer");
+ok(sentBefore === 1 && enterAsks === sentBefore && (await answerText()) === "",
+   `and nothing was sent by it (${enterAsks - sentBefore} request(s) after the one Enter sent): a Shift-Enter ` +
+   "that both broke the line and submitted would look correct in the field and be wrong in the answer. " +
+   "The count is read off the route, and the Enter case above waits for the settled answer (.ak-a) rather " +
+   "than the question echo (.ak-asked) the pending state already carries, so a first answer landing late " +
+   "on a busy runner can no longer fill the cleared box and read as a send");
 
 const composed = await page.evaluate(() => {
   const q = document.getElementById("askQ");
