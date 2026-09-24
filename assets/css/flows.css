@@ -8,7 +8,7 @@
   --font-ui: var(--font-figure);
 
   --ground-base: #07090e;
-  --ground-sky: url("/assets/img/atmosphere.svg?v=224") center / cover no-repeat;
+  --ground-sky: url("/assets/img/atmosphere.svg?v=225") center / cover no-repeat;
   --ground:
     linear-gradient(180deg, rgba(6, 8, 12, 0.50) 0%, rgba(6, 8, 12, 0.70) 26%, rgba(7, 8, 10, 0.88) 42%, rgba(8, 8, 9, 0.94) 60%, rgba(7, 7, 8, 0.97) 100%),
     radial-gradient(70% 50% at 12% 0%, rgba(64, 132, 230, 0.10), transparent 70%),
@@ -753,11 +753,6 @@ body.is-stale .flows-tablewrap {
   }
 }
 
-.flows-tablewrap.has-more {
-  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 2.5rem), transparent);
-  mask-image: linear-gradient(90deg, #000 calc(100% - 2.5rem), transparent);
-}
-
 .flows-lede { margin: 0; min-width: 0; font-size: var(--fs-body); color: var(--ink-dim); }
 
 .ft-how-s::-webkit-details-marker { display: none; }
@@ -1014,41 +1009,6 @@ body.is-stale .flows-tablewrap {
 
 .fm-gap.is-wide { color: var(--ink-dim); font-weight: 600; }
 
-.fui-field { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
-
-.flows-controls .fui-field { align-self: flex-end; }
-
-.fui-label {
-  font-family: var(--font-figure);
-  font-size: var(--fs-micro);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--ink-faint);
-}
-
-.fui-input,
-.fui-select {
-  min-height: 44px;
-  padding: 0.35rem 0.6rem;
-  font-family: var(--font-figure);
-
-  font-size: 16px;
-  color: var(--ink);
-  background: var(--bg-deep);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-1);
-}
-.fui-input:focus-visible,
-.fui-select:focus-visible { outline: 2px solid var(--gold-harvest); outline-offset: 2px; }
-
-.fui-count {
-  align-self: end;
-  font-family: var(--font-figure);
-  font-size: var(--fs-fine);
-  color: var(--ink-faint);
-  font-variant-numeric: tabular-nums;
-}
-
 [data-flows-page="political"] .fc-panel > .fc-panel-h {
   margin: calc(var(--space-2) * -1) calc(var(--panel-pad-x) * -1) var(--space-2);
   padding: var(--space-1) var(--panel-pad-x);
@@ -1286,7 +1246,6 @@ svg[data-fx-cursor="on"]:focus-visible {
 }
 svg[data-fx-cursor="on"] { touch-action: pan-y; }
 
-.flows-date,
 td.c-num { white-space: nowrap; }
 
 .flows-head--quiet {

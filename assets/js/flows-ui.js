@@ -108,50 +108,6 @@
     return p;
   };
 
-  function searchBox(opts) {
-    const o = opts || {};
-    const prefix = o.prefix || "fui";
-    const id = o.id || prefix + "-q-" + (++uid);
-    const root = el("div", prefix + "-field" + (o.cls ? " " + o.cls : ""));
-    const label = el("label", prefix + "-label", o.label || "Search");
-    label.htmlFor = id;
-    const input = el("input", prefix + "-input");
-    input.type = "search";
-    input.id = id;
-    if (o.placeholder) input.placeholder = o.placeholder;
-    input.autocomplete = "off";
-    input.spellcheck = false;
-    input.setAttribute("autocapitalize", "characters");
-    if (typeof o.onInput === "function") {
-      input.addEventListener("input", () => o.onInput(input.value));
-    }
-    root.append(label, input);
-    return { root, input };
-  }
-
-  function sortSelect(opts) {
-    const o = opts || {};
-    const prefix = o.prefix || "fui";
-    const id = o.id || prefix + "-sort-" + (++uid);
-    const root = el("div", prefix + "-field" + (o.cls ? " " + o.cls : ""));
-    const label = el("label", prefix + "-label", o.label || "Order");
-    label.htmlFor = id;
-    const select = el("select", prefix + "-select");
-    select.id = id;
-    for (const opt of (Array.isArray(o.options) ? o.options : [])) {
-      if (!opt) continue;
-      const node = el("option", null, opt.label === undefined ? String(opt.value) : opt.label);
-      node.value = String(opt.value);
-      if (opt.selected) node.selected = true;
-      select.append(node);
-    }
-    if (typeof o.onChange === "function") {
-      select.addEventListener("change", () => o.onChange(select.value));
-    }
-    root.append(label, select);
-    return { root, select };
-  }
-
   function stripGeometry(count, width) {
     const n = Math.max(1, Math.floor(isNum(count) ?? 1));
     const w = Math.max(1, isNum(width) ?? 1);
@@ -296,41 +252,6 @@
     if (!Number.isFinite(ms)) return null;
     return new Date(ms).toISOString().slice(0, 16).replace("T", " ") + " UTC";
   };
-
-  const ISO_DATE = /\d{4}-\d{2}-\d{2}/g;
-
-  function keepDates(root) {
-    if (!root || typeof root.querySelectorAll !== "function") return;
-    const texts = [];
-    const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    for (let t = walk.nextNode(); t; t = walk.nextNode()) {
-      ISO_DATE.lastIndex = 0;
-      if (ISO_DATE.test(t.nodeValue) && !(t.parentElement && t.parentElement.closest(".flows-date, svg, a"))) texts.push(t);
-    }
-    for (const t of texts) {
-      const s = t.nodeValue;
-      const frag = document.createDocumentFragment();
-      let at = 0;
-      ISO_DATE.lastIndex = 0;
-      for (let m = ISO_DATE.exec(s); m; m = ISO_DATE.exec(s)) {
-        if (m.index > at) frag.append(s.slice(at, m.index));
-        frag.append(el("span", "flows-date", m[0]));
-        at = m.index + m[0].length;
-      }
-      if (at < s.length) frag.append(s.slice(at));
-      t.replaceWith(frag);
-    }
-  }
-
-  function scrollHint(node) {
-    if (!node) return;
-    const edge = () => {
-      node.classList.toggle("has-more", node.scrollLeft + node.clientWidth < node.scrollWidth - 1);
-    };
-    node.addEventListener("scroll", edge, { passive: true });
-    if (window.ResizeObserver) new ResizeObserver(edge).observe(node);
-    edge();
-  }
 
   const REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)");
   const WIDE = window.matchMedia("(min-width: 1025px)");
@@ -726,10 +647,10 @@
       return b;
     });
     const place = () => {
-      const b = btns[current];
-      if (!b || !b.offsetWidth) return;
-      knob.style.width = b.offsetWidth + "px";
-      knob.style.transform = `translateX(${b.offsetLeft}px)`;
+      const b = btns[current], W = wrap.clientWidth;
+      if (!b || !b.offsetWidth || !W) return;
+      knob.style.width = (b.offsetWidth / W) * 100 + "%";
+      knob.style.transform = `translateX(${(b.offsetLeft / b.offsetWidth) * 100}%)`;
     };
     function pick(i, user) {
       if (items[i] && items[i].disabled) return;
@@ -862,6 +783,7 @@
   }
   function mount(host, draw) {
     if (host._fxChart) { CHARTS.delete(host._fxChart); if (RO) RO.unobserve(host); }
+    releaseHost(host);
     host.classList.add("ui-chart");
     const rec = { host, draw, w: 0 };
     host._fxChart = rec;
@@ -872,7 +794,7 @@
       el: host,
       redraw: (animate) => { rec.draw = rec.draw; repaint(rec, !!animate, true); },
       set: (next, animate) => { rec.draw = next; repaint(rec, animate !== false, true); },
-      destroy: () => { CHARTS.delete(rec); if (RO) RO.unobserve(host); host._fxChart = null; host.replaceChildren(); },
+      destroy: () => { CHARTS.delete(rec); if (RO) RO.unobserve(host); host._fxChart = null; releaseHost(host); host.replaceChildren(); },
     };
   }
   function svgRoot(host, w, H, animate, label) {
@@ -960,12 +882,19 @@
     return v;
   };
 
+  function hostSignal(host, key) {
+    if (host[key]) host[key].abort();
+    const off = new AbortController();
+    host[key] = off;
+    return { signal: off.signal };
+  }
+  function releaseHost(host) {
+    for (const key of ["_scrubOff", "_heatOff"]) if (host[key]) { host[key].abort(); host[key] = null; }
+  }
+
   function scrub(host, svg, o) {
     const xs = o.xs;
-    if (host._scrubOff) host._scrubOff.abort();
-    const off = new AbortController();
-    host._scrubOff = off;
-    const on = { signal: off.signal };
+    const on = hostSignal(host, "_scrubOff");
     const readout = h("div", { class: "ui-readout", "aria-hidden": "true" });
     host.append(readout);
     const xh = s("line", { class: "xh", y1: o.top, y2: o.bottom, x1: -10, x2: -10, opacity: 0 }, svg);
@@ -1426,6 +1355,8 @@
       };
       let raf = 0, pt = null;
       const hide = () => { if (raf) { cancelAnimationFrame(raf); raf = 0; } readout.classList.remove("is-on"); hl.setAttribute("visibility", "hidden"); };
+      const on = hostSignal(el, "_heatOff");
+      on.signal.addEventListener("abort", () => { if (raf) { cancelAnimationFrame(raf); raf = 0; } });
       el.addEventListener("pointermove", (e) => {
         pt = [e.clientX, e.clientY];
         if (raf) return;
@@ -1436,14 +1367,14 @@
           if (c < 0 || c >= C || r < 0 || r >= R) return;
           show(r, c);
         });
-      });
-      el.addEventListener("pointerleave", (e) => { if (e.pointerType !== "touch") hide(); });
-      el.addEventListener("blur", hide);
+      }, on);
+      el.addEventListener("pointerleave", (e) => { if (e.pointerType !== "touch") hide(); }, on);
+      el.addEventListener("blur", hide, on);
       el.addEventListener("keydown", (e) => {
         const d = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] }[e.key];
         if (d) { e.preventDefault(); show(clamp(cur[0] + d[0], 0, R - 1), clamp(cur[1] + d[1], 0, C - 1), true); }
         else if (e.key === "Escape") hide();
-      });
+      }, on);
     });
   }
 
@@ -2071,8 +2002,8 @@
     MINUS, DASH, MID,
     isNum, el, svgEl,
     fmtSigned, fmtInt, fmtMoney, fmtStamp,
-    emptyState, searchBox, sortSelect,
-    staleness, scrollHint, keepDates,
+    emptyState,
+    staleness,
     stripGeometry, scoreStrip,
     h, s, glyph, cssVar, num, clamp, F, tone, cap, reduced: () => REDUCED.matches,
     STATES, stateOf, worst, partial,

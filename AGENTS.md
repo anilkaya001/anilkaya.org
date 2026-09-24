@@ -513,7 +513,7 @@ invoke it; it can be retired once that dashboard field is confirmed clear.
   `flows-drawers.js` are deleted.)
   This list is an ALLOWLIST: a global that is not on it is an undocumented
   one. `FlowsUI` is the shared Flows UI primitives (formatters that keep the
-  minus U+2212 and the absent-value em dash, the labeled controls, and the
+  minus U+2212 and the absent-value em dash, and the
   score-strip chart whose gap-is-not-zero contract is enforced in the
   primitive rather than re-derived per page) — the seed of the component
   layer, introduced with `/flows/track/`.

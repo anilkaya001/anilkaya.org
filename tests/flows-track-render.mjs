@@ -195,6 +195,74 @@ const popOf = (page, sel) => page.evaluate((sel) => {
   await page.close();
 }
 
+{
+  const page = await open();
+  const got = await page.evaluate(() => {
+    const orig = EventTarget.prototype.addEventListener;
+    const recs = [];
+    EventTarget.prototype.addEventListener = function (type, fn, opts) {
+      if (this.dataset && this.dataset.leak) recs.push({ host: this.dataset.leak, type, signal: (opts && opts.signal) || null });
+      return orig.call(this, type, fn, opts);
+    };
+    const live = (host, types) => types.map((t) => recs.filter((r) => r.host === host && r.type === t && !(r.signal && r.signal.aborted)).length);
+    const HEAT = ["pointermove", "pointerleave", "blur", "keydown"];
+    const SCRUB = ["pointermove", "pointerdown", "pointerleave", "pointercancel", "blur", "keydown"];
+    const mk = (name) => { const d = document.createElement("div"); d.dataset.leak = name; d.style.width = "640px"; document.body.append(d); return d; };
+    const C = window.FlowsUI.chart;
+    const grid = { rows: ["AAA", "BBB"], cols: ["Jan", "Feb", "Mar"], grid: [[0.01, -0.02, 0], [0.005, null, -0.01]], label: "Grid" };
+    const heat = C.heatmap(mk("heat"), grid);
+    for (let i = 0; i < 5; i++) heat.redraw(false);
+    const heatAfter = live("heat", HEAT);
+    heat.destroy();
+    const heatGone = live("heat", HEAT);
+    const lineOpts = { x: ["2026-09-01", "2026-09-02", "2026-09-03"], series: [{ values: [1, 2, 3] }], label: "Line" };
+    const line = C.line(mk("line"), lineOpts);
+    for (let i = 0; i < 5; i++) line.redraw(false);
+    const lineAfter = live("line", SCRUB);
+    line.destroy();
+    const lineGone = live("line", SCRUB);
+    const swap = mk("swap");
+    C.line(swap, lineOpts);
+    C.heatmap(swap, grid);
+    const swapped = [live("swap", ["pointerdown"])[0], live("swap", ["pointermove"])[0]];
+    EventTarget.prototype.addEventListener = orig;
+    return { heatAfter, heatGone, lineAfter, lineGone, swapped };
+  });
+  eq(got.heatAfter.join(","), "1,1,1,1",
+     "LISTENERS: five repaints of a heatmap leave one live pointermove, pointerleave, blur and keydown listener on its " +
+     "host, not six of each — every repaint (a resize, a set, a redraw) used to add four more closures over a detached grid");
+  eq(got.heatGone.join(","), "0,0,0,0", "and destroy() releases them");
+  eq(got.lineAfter.join(","), "1,1,1,1,1,1", "a scrubbed line keeps one of each of its six listeners across repaints");
+  eq(got.lineGone.join(","), "0,0,0,0,0,0", "and destroy() now releases the scrub's too, which it never did");
+  const knob = await page.evaluate(() => {
+    const box = document.createElement("div");
+    box.style.width = "600px";
+    document.body.append(box);
+    const seg = window.FlowsUI.segmented("Mode", [{ label: "Average" }, { label: "Up months" }, { label: "Range" }], null, 2);
+    box.append(seg);
+    return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => {
+      const k = seg.querySelector(".ui-seg-knob");
+      const wide = [k.getBoundingClientRect().right, seg.getBoundingClientRect().right];
+      box.style.width = "180px";
+      seg.style.width = "100%";
+      seg.style.gridAutoColumns = "minmax(0, 1fr)";
+      const narrow = [k.getBoundingClientRect().right, seg.getBoundingClientRect().right];
+      box.remove();
+      resolve({ wide, narrow });
+    })));
+  });
+  ok(Math.abs(knob.wide[0] - knob.wide[1]) <= 3,
+     `the segmented knob sits on its selected (last) segment (${knob.wide.map(Math.round).join(" vs ")})`);
+  ok(knob.narrow[0] <= knob.narrow[1] + 1,
+     "and when its control narrows it stays inside it in the SAME frame, before any ResizeObserver runs " +
+     `(${knob.narrow.map(Math.round).join(" vs ")}): a knob measured in pixels kept its desktop width and offset ` +
+     "until the observer fired, and on a loaded machine that was long enough to push the page 148px past a 320px screen");
+  eq(got.swapped.join(","), "0,1",
+     "a host that changes chart kind drops the old kind's listeners: a heatmap mounted where a line was keeps no " +
+     "scrub pointerdown, and one pointermove of its own");
+  await page.close();
+}
+
 eq(errors.length, 0, "and the page threw nothing: " + errors.join(" | "));
 await browser.close();
 
@@ -203,4 +271,4 @@ console.log(`✓ flows-track-render: ${checks} assertions — a score track that
   `page that opens on today's strongest reading and on any linked name, calls scored against ` +
   `the closes that followed them at 1, 5 and 10 sessions with open calls left open, a name ` +
   `without closes drawn unavailable rather than empty, and the gap-is-not-zero sentence one tap ` +
-  `from the title`);
+  `from the title; and chart hosts that hold one set of listeners across repaints, remounts and destroy`);
