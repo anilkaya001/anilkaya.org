@@ -232,6 +232,7 @@ button.ft-idea-t:hover { color: var(--accent-ink); }
 }
 .ft-cbox { min-width: 0; }
 .ft-view { min-width: 0; }
+.ft-view .ft-off { fill: none; stroke: var(--label-3); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .ft-leg-row { min-width: 0; }
 .ft-leg-row:empty { display: none; }
 .ui-key > i.ft-hatch { background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--label-1) 38%, transparent) 0 1.4px, transparent 1.4px 3.5px), var(--c); }

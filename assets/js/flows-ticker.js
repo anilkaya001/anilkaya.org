@@ -38,11 +38,13 @@
 
   const STATE = {
     ticker: null, card: null, cardX: null, hist: null, tape: null, neuron: null, quote: null, phase: null,
-    meta: null, first: true, hb: null, pxShown: null, beats: 0, earlier: null,
+    meta: null, first: true, hb: null, pxShown: null, beats: 0,
   };
 
   const ST = (state, reason) => ({ state, reason: reason || null });
   const OK = ST("ok");
+  const isIndex = (card) => !!card && card.depth === "index";
+  const offIndex = (card, sec) => isIndex(card) && sec == null;
   const stOf = (p, what) => UI.stateOf(p, what);
   const PRE = {
     ivSurface: "the option chain leg", skewTerm: "the option chain leg", topContracts: "the option chain leg", aggressor: "the option chain leg",
@@ -410,10 +412,10 @@
     const im = num(pm.impliedMove);
     const cx = STATE.cardX && STATE.cardX.gex && STATE.cardX.gex.status === "ok" ? STATE.cardX.gex : null;
     const chipList = [
-      UI.gaugeChip({ diverging: score, value: score === null ? chipDash("unavailable") : F.signed(score), label: "Score", tone: tone(score),
-        info: () => ({ title: "Options score", lead: score === null ? (card.depth === "index" ? "Index dossiers carry no score or conviction." : "No score was published on this card.") : card.ticker + " scores " + F.signed(score) + " of ±100 this session, with conviction " + (num(card.conviction) === null ? DASH : card.conviction) + " of 100.",
+      isIndex(card) && score === null ? null : UI.gaugeChip({ diverging: score, value: score === null ? chipDash("unavailable") : F.signed(score), label: "Score", tone: tone(score),
+        info: () => ({ title: "Options score", lead: score === null ? "No score was published on this card." : card.ticker + " scores " + F.signed(score) + " of ±100 this session, with conviction " + (num(card.conviction) === null ? DASH : card.conviction) + " of 100.",
           facts: famFacts(card), notes: ["The score is a weighted sum of signed family readings; conviction gates it by agreement, coverage and persistence."] }) }),
-      UI.gaugeChip({ ring: num(card.conviction) === null ? null : card.conviction / 100, color: "--label-1", value: num(card.conviction) === null ? chipDash("unavailable") : String(card.conviction), label: "Conviction",
+      isIndex(card) && num(card.conviction) === null ? null : UI.gaugeChip({ ring: num(card.conviction) === null ? null : card.conviction / 100, color: "--label-1", value: num(card.conviction) === null ? chipDash("unavailable") : String(card.conviction), label: "Conviction",
         info: () => ({ title: "Conviction", lead: "How far the families agree, how much of the card was measured, and how long the flow persisted.", facts: convFacts(card), notes: [convMath(card)] }) }),
       UI.gaugeChip({ icon: "gamma", color: gl === "short" ? "--g-short-ink" : "--g-long-ink", value: gl ? (gl === "short" ? "Short" : "Long") : chipDash("unavailable"), label: "Dealer γ", tone: gl,
         info: () => ({ title: "Dealer gamma", lead: gl === "short" ? "Dealers are short gamma: their hedging buys rallies and sells dips, which amplifies moves." : gl === "long" ? "Dealers are long gamma: their hedging sells rallies and buys dips, which dampens moves." : "No regime reading on this card.",
@@ -428,7 +430,7 @@
           facts: [["Implied", im === null ? null : "±" + F.pct(im)], ["Range", F.px(pm.impliedLow) + " – " + F.px(pm.impliedHigh)], ["Realized", num(pm.realizedMove) === null ? null : "±" + F.pct(pm.realizedMove)], ["Horizon", pm.horizonRule || null]],
           notes: [pm.bandNote] }) }),
     ];
-    $("ftChips").replaceChildren(UI.chips(chipList, "Signal"));
+    $("ftChips").replaceChildren(UI.chips(chipList.filter(Boolean), "Signal"));
   }
 
   function eventInHorizon(card, Hs) {
@@ -846,7 +848,8 @@
         ["Robustness", (idea.robustnessWord || "") + (num(idea.robustness) !== null ? " (" + idea.robustness + " of 3)" : "")], ["Rests on", (idea.restsOn || []).map((k) => featureTitle(k)).join(" " + MID + " ")],
         ["Source", idea.fromState ? "the implied-state engine" : "the model"]],
       notes: ["Strikes, prices, breakevens, probability of profit and expected value come from the structure engine, which this card does not carry yet. The sketch is the structure's shape at expiry, not a priced position."] }));
-    const pend = ST("pending", "The structure engine has not priced this idea: this card predates it, so no strike, price or probability is claimed.");
+    const pend = isIndex(card) ? ST("unavailable", "The structure engine does not price index dossiers.")
+      : ST("pending", "The structure engine has not priced this idea: this card predates it, so no strike, price or probability is claimed.");
     return h("article", { class: "ft-idea is-legacy ui-enter", role: "listitem", style: { "--i": String(i + 2) }, "data-dir": tn },
       h("div", { class: "ft-idea-h" },
         h("span", { class: "ft-dir", "data-tone": tn, "aria-label": dirWord(tn) }, glyph(tn === "down" ? "down" : tn === "up" ? "up" : "flat")),
@@ -876,7 +879,7 @@
     if (!st || st.state === "undetermined") return [];
     const inv = st.invalidation && typeof st.invalidation === "object" ? st.invalidation : null;
     const hz = st.horizon && typeof st.horizon === "object" ? st.horizon : null;
-    return [["Flow", st.flow || "no side resolved"], ["Premium", typeof st.premium === "string" ? st.premium : "unreadable"],
+    return [["Flow", st.flow || ("flow" in st ? "no side resolved" : null)], ["Premium", typeof st.premium === "string" ? st.premium : "unreadable"],
       ["Prefer", Array.isArray(st.preferred) && st.preferred.length ? st.preferred.join(" " + MID + " ") : null],
       ["Avoid", Array.isArray(st.avoid) && st.avoid.length ? st.avoid.join(" " + MID + " ") : null],
       ["Ends past", inv && num(inv.px) !== null ? String(inv.label || inv.kind || "level").toLowerCase() + " " + inv.px.toFixed(2) : null],
@@ -889,52 +892,67 @@
     return "Neuron read " + c.read + " of " + c.features + " features (" + c.robust + " robust " + MID + " " + c.fair + " fair " + MID + " " + c.weak + " weak " + MID + " " + c.withheld + " withheld); nothing here is advice.";
   }
 
+  function cardRead(card, n) {
+    const st = [n.context && n.context.state, card.engine && card.engine.state].find((x) => x && x.state && x.state !== "undetermined");
+    const sc = num(card.score);
+    if (st) {
+      const w = st.state === "transitional" ? "On the flip" : cap(st.state.replace("-", " ")), c = num(st.confidence);
+      return { text: str(st.brief) || "The greeks imply " + (/^[aeiou]/.test(st.state) ? "an " : "a ") + w.toLowerCase() + " state for " + card.ticker + (str(st.flow) ? " with flow " + st.flow : "") + (c === null ? "" : " (confidence " + c + " of 3)") + ".",
+        st, word: str(st.word) || w, stale: st.stale };
+    }
+    return sc === null ? null : { text: card.ticker + " scores " + F.signed(sc) + " of ±100" + (num(card.conviction) === null ? "" : ", conviction " + card.conviction) + ".", st: null };
+  }
+
   function renderVerdict(card, neuron) {
     verdictEl.hidden = false;
     verdictEl.replaceChildren();
     const eng = engineOf(card);
-    const ok = neuron && neuron.status === "ok" && typeof neuron.summary === "string" && neuron.summary.trim();
-    const tn = stanceOf(card, neuron);
+    const n = neuron || { status: "unavailable" };
+    const ok = n.status === "ok" && typeof n.summary === "string" && n.summary.trim();
+    const own = ok ? null : cardRead(card, n);
+    const tn = stanceOf(card, n);
     const head = h("div", { class: "ft-v-h" }, h("span", { class: "ft-neuron", "aria-hidden": "true" }, glyph("neuron")));
     const mid = h("div", { class: "ft-v-m" });
-    const entries = ideaEntries(card, neuron);
-    if (ok) {
-      const said = neuron.summary.trim();
-      const caveat = said.startsWith(STALE_LEAD) && said.length > STALE_LEAD.length + 1 ? STALE_LEAD : null;
-      const body = caveat ? said.slice(caveat.length).trim() : said;
+    const entries = ideaEntries(card, n);
+    verdictEl.dataset.read = ok ? "neuron" : own ? "card" : "none";
+    if (ok || own) {
+      const said = ok ? n.summary.trim() : own.text;
+      const caveat = ok ? (said.startsWith(STALE_LEAD) && said.length > STALE_LEAD.length + 1 ? STALE_LEAD : null) : own.stale ? STALE_LEAD : null;
+      const body = ok && caveat ? said.slice(caveat.length).trim() : said;
       const [one, cut] = headline(body);
       mid.append(h("h2", { class: "ft-v-line", id: "ftVerdictT" }, typo(one)));
-      const grades = entries.map((e) => (e.kind === "engine" ? (e.st ? vettedGrade(e.st, e.n) : null) : num(e.idea.robustness))).filter((v) => v !== null);
-      const st = neuron.context && neuron.context.state ? neuron.context.state : null;
+      const grades = ok ? entries.map((e) => (e.kind === "engine" ? (e.st ? vettedGrade(e.st, e.n) : null) : num(e.idea.robustness))).filter((v) => v !== null) : [];
+      const st = ok ? (n.context && n.context.state ? n.context.state : null) : own.st;
+      const word = ok ? (n.verdictWord || (st && st.word && st.state !== "undetermined" ? st.word : null)) : own.word;
       mid.append(h("div", { class: "ft-v-meta" },
         UI.capsule(dirWord(tn), { tone: tn }),
         caveat ? UI.stateButton(ST("stale", caveat), "Neuron") : null,
-        neuron.verdictWord ? tag(neuron.verdictWord, { accent: true }) : st && st.word && st.state !== "undetermined" ? tag(st.word, { accent: true }) : null,
+        word ? tag(word, { accent: true }) : null,
         grades.length ? h("span", { class: "ui-key" }, UI.robustness(Math.max(...grades)), "Robustness") : null,
-        neuron.generatedAt ? h("span", { class: "ui-key" }, glyph("clock"), F.time(neuron.generatedAt)) : null));
+        ok && n.generatedAt ? h("span", { class: "ui-key" }, glyph("clock"), F.time(n.generatedAt)) : null));
       const rest = cap(body.slice(cut).trim());
       const xid = "ftVerdictX";
-      const meta = stateMeta(st);
+      const meta = st ? stateMeta(st) : [];
+      const src = ok ? (n.provenance || (n.llm ? "Worded by " + String(n.model || "the model").replace(/^@cf\//, "") : "Deterministic read, no model wording"))
+        : "Read from the card, no model wording." + (n.status === "pending" ? " The Neuron's wording replaces it when it lands." : "");
       const x = h("div", { class: "ft-v-x", id: xid }, h("div", null,
         caveat ? h("p", null, caveat) : null,
         rest ? h("p", null, typo(rest)) : null,
         st && st.chip ? h("p", { class: "ft-v-chip", id: "ftStateChip" }, st.chip) : null,
         meta.length ? h("dl", { class: "ft-v-dl", id: "ftStateMeta" }, meta.filter((m) => m[1]).map(([k, v]) => [h("dt", null, k), h("dd", null, v)])) : null,
-        neuron.provenance ? h("p", { class: "ft-v-src" }, neuron.provenance) : h("p", { class: "ft-v-src" }, neuron.llm ? "Worded by " + String(neuron.model || "the model").replace(/^@cf\//, "") : "Deterministic read, no model wording"),
-        coverageLine(neuron.context) ? h("p", { class: "ft-v-src", id: "ftNeuronCov" }, coverageLine(neuron.context)) : null,
-        Array.isArray(neuron.refused) && neuron.refused.length ? h("p", { class: "ft-v-src" }, neuron.refused.length + " of the model's answers were refused (" + [...new Set(neuron.refused.map((r) => r && r.code).filter(Boolean))].join(", ") + ").") : null));
+        h("p", { class: "ft-v-src", id: "ftVerdictSrc" }, src),
+        coverageLine(n.context) ? h("p", { class: "ft-v-src", id: "ftNeuronCov" }, coverageLine(n.context)) : null,
+        ok && Array.isArray(n.refused) && n.refused.length ? h("p", { class: "ft-v-src" }, n.refused.length + " of the model's answers were refused (" + [...new Set(n.refused.map((r) => r && r.code).filter(Boolean))].join(", ") + ").") : null));
       const more = h("button", { class: "ft-more", type: "button", "aria-expanded": "false", "aria-controls": xid }, "More", glyph("chev"));
       more.addEventListener("click", () => { const o = more.getAttribute("aria-expanded") !== "true"; more.setAttribute("aria-expanded", String(o)); x.classList.toggle("is-open", o); });
       head.append(mid, more);
       verdictEl.append(head, x);
     } else {
-      const status = neuron && typeof neuron.status === "string" ? neuron.status : "unavailable";
-      const reason = status === "pending" ? "Not published yet — not a quiet name. Nothing here is claimed about it."
-        : status === "quiet" ? "This card carries no reading a summary could be written over."
-          : "No Neuron read could be fetched for this name and session; nothing here is claimed about the name.";
+      const status = typeof n.status === "string" ? n.status : "unavailable";
+      const reason = status === "pending" ? "Not published yet." : status === "quiet" ? "This card carries no reading to summarise." : "No read could be fetched for this name.";
       const st = ST(status === "pending" ? "pending" : status === "quiet" ? "quiet" : "unavailable", reason);
       mid.append(h("h2", { class: "ft-v-line is-empty", id: "ftVerdictT" }, "No read"));
-      mid.append(h("div", { class: "ft-v-meta" }, UI.capsule(tn === "down" ? "Bearish score" : tn === "up" ? "Bullish score" : "Neutral", { tone: tn }), UI.stateButton(st, "Neuron")));
+      mid.append(h("div", { class: "ft-v-meta" }, UI.capsule(dirWord(tn), { tone: tn }), UI.stateButton(st, "Neuron")));
       head.append(mid);
       verdictEl.append(head);
     }
@@ -943,7 +961,7 @@
       entries.forEach((e, i) => row.append(e.kind === "engine" ? engineIdeaCard(e, card, i, eng) : legacyIdeaCard(e.idea, card, i)));
     } else if (eng && eng.noTrade) {
       row.append(standAside(eng));
-    } else if (!eng) {
+    } else if (!eng && !isIndex(card)) {
       row.append(h("article", { class: "ft-idea is-silent is-wide is-bare", role: "listitem" },
         UI.silent(ST("pending", "The options engine has not priced this name yet, and the Neuron published no idea; structures appear here once the engine prices this card."), "Ideas", 64)));
     }
@@ -973,7 +991,8 @@
     return sec;
   }
 
-  function viewer(label, list, first) {
+  function viewer(label, all, first) {
+    const list = all.filter((v) => !v.never);
     const box = h("div", { class: "ft-cbox" });
     const leg = h("div", { class: "ft-leg-row" });
     let cur = first !== undefined && list[first] && list[first].st.state === "ok" ? first : list.findIndex((v) => v.st.state === "ok");
@@ -1051,6 +1070,7 @@
     const ideas = ideaEntries(card, STATE.neuron).filter((e) => e.kind === "engine" && e.st);
     const lead = ideas.length ? ideas[0].st : null;
     const title = "Two worlds";
+    if (!eng && isIndex(card)) return;
     if (!eng) {
       const st = ST("pending", "The options engine has not priced this name yet. The two distributions need its smile fit per expiry (the market's risk-neutral density) and its real-world GARCH law.");
       mod({ id: "m-worlds", title, span: [12, 8], st, body: [UI.silent(st, title, 260)], index: 2,
@@ -1530,7 +1550,7 @@
     const wallLabels = (xs) => ["call_wall", "put_wall"].map((k) => lv[k]).filter((l) => l && xs.some((x) => Math.abs(x - l.px) < 1e-6)).map((l) => ({ x: xs.find((x) => Math.abs(x - l.px) < 1e-6), text: K(l.px) }));
     const vendorKey = vendorMarks.length ? keyOf("--label-1", "ring", "Vendor") : null;
     const views = [
-      { label: "Book", st: stB, name: "Gamma book", draw: (host) => {
+      { label: "Book", st: stB, never: isIndex(card) && !prof, name: "Gamma book", draw: (host) => {
         const [lo, hi] = strikeWindow(card, S);
         const idx = prof.x.map((x, i) => i).filter((i) => prof.x[i] >= lo && prof.x[i] <= hi && num(prof.g[i]) !== null);
         const xs = idx.map((i) => prof.x[i]);
@@ -1558,7 +1578,7 @@
           format: (v) => F.pct(v, 1), label: "Share of the gamma book expiring by expiry", readout: (i) => [C.part(day(sch[i].expiry) + " " + MID + " " + sch[i].days + "d", "k"), h("b", null, F.pct(sch[i].share, 1)), C.part("cum " + F.pct(sch[i].cumShare, 0), "k")] }),
           legend: [keyOf("--s-blue", "", "Expiring"), keyOf("--label-1", "ln", "Cumulative")] };
       } },
-      { label: "1Y", st: stY, name: "Dealer gamma, one year", draw: (host) => {
+      { label: "1Y", st: stY, never: isIndex(card) && stY.state !== "ok", name: "Dealer gamma, one year", draw: (host) => {
         const pts = axis.map((d, i) => [d, g1y[i]]);
         return { handle: C.diverging(host, { x: pts.map((p) => p[0]), values: pts.map((p) => p[1]), palette: "gamma", height: [200, 220, 240], maxWidth: 4, endLabel: true,
           format: (v) => F.num(v, true), label: card.ticker + " net dealer gamma over the last year", readout: (i) => [C.part(day(pts[i][0]), "k"), pts[i][1] === null ? C.part("no reading", "k") : h("b", { "data-tone": pts[i][1] < 0 ? "short" : pts[i][1] > 0 ? "long" : "flat" }, F.num(pts[i][1], true) + " Γ")] }),
@@ -1566,7 +1586,7 @@
       } },
     ];
     const vw = viewer("Gamma view", views);
-    const st = UI.partial(views.map((v) => ({ name: v.label, st: v.st })));
+    const st = UI.partial(vw.views.map((v) => ({ name: v.label, st: v.st })));
     const dist = (k) => {
       const l = lv[k];
       if (!l || !S) return null;
@@ -1664,7 +1684,7 @@
     const stGrid = stV.state === "ok" && V.grid && Array.isArray(V.grid.cells) ? OK : stV.state === "ok" ? ST("unavailable", "No scenario grid: it needs the open-interest book.") : stV;
     const views = [
       { label: "Grid", st: stGrid, name: "Scenario grid", h: 240, draw: (host) => ({ handle: hedgeGridChart(host, card, V), legend: [keyOf("--up-mark", "", "Dealers buy"), keyOf("--down-mark", "", "Dealers sell"), keyOf("--label-1", "ring", "Spot, today's vol")] }) },
-      { label: "Clock", st: stClock, name: "Session gamma clock", draw: (host) => {
+      { label: "Clock", st: stClock, never: offIndex(card, X.gexPath), name: "Session gamma clock", draw: (host) => {
         const m = gp.m || [];
         const series = [{ values: gp.g || [], color: "--s-blue", label: "Book", format: moneyPx }].concat(Array.isArray(gp.f) ? [{ values: gp.f, color: "--s-orange", label: "Flow", format: moneyPx }] : []);
         const t = (mm) => { const mins = 570 + mm; return (Math.floor(mins / 60) % 12 || 12) + ":" + String(mins % 60).padStart(2, "0"); };
@@ -1701,7 +1721,7 @@
       offsetting ? null : UI.split(parts.map((p) => ({ color: p[2], value: p[1] })), parts.map((p) => p[0] + " " + Math.round(p[1] * 100) + "%").join(", ")),
       legend(parts.map((p) => h("span", { class: "ui-key" }, h("i", { style: { "--c": cssVar(p[2]) }, "aria-hidden": "true" }), p[0], h("b", null, F.pct(p[1], 0, offsetting))))
         .concat(num(V.driftInSd) !== null ? [h("span", { class: "ui-key" }, glyph("clock"), "Drift", h("b", null, Math.abs(V.driftInSd).toFixed(2) + " SD"))] : []))) : null;
-    const st = UI.partial(views.map((v) => ({ name: v.label, st: v.st })));
+    const st = UI.partial(vw.views.map((v) => ({ name: v.label, st: v.st })));
     mod({ id: "m-hedge", title: "Hedging", span: [12, 5], st: stV.state === "ok" ? st : stV, robustness: stV.state === "ok" && V.robustness ? V.robustness.r : null, seg: vw.seg, views: vw.views, index: 5, body: [
       mets([
         metric("Overnight", F.money(c1, true), { key: glyph("clock"), tone: tone(c1), sub: ch.charm && num(ch.charm.pctAdv) !== null ? F.pct(Math.abs(ch.charm.pctAdv), 1) + " of a day" : null, state: c1 === null ? silence("charm") : null }),
@@ -1734,19 +1754,18 @@
   function coneChart(host, card, cone, rv) {
     const T = (cone.tenors || []).filter((t) => num(t.days) !== null && num(t.iv) !== null);
     const rvBy = new Map((rv && rv.status === "ok" ? rv.cone || [] : []).filter((r) => num(r.ivDays) !== null).map((r) => [r.ivDays, r]));
+    const nn = (a) => a.filter((v) => num(v) !== null);
+    const core = nn(T.flatMap((t) => [t.q1, t.q3, t.iv]).concat([...rvBy.values()].flatMap((r) => [r.p10, r.p90, r.now])));
+    const c0 = Math.min(...core), c1 = Math.max(...core), r = Math.max(c1 - c0, 0.02) / 2;
+    const lo = Math.max(Math.min(c0, ...nn(T.map((t) => t.min))), c0 - r), hi = Math.min(Math.max(c1, ...nn(T.map((t) => t.max))), c1 + r);
+    const pad = (hi - lo) * 0.08 || 0.01, y0 = Math.max(0, lo - pad), y1 = hi + pad;
     return C.mount(host, (el, w, animate) => {
       const H = heightOf(w, [280, 300, 320]);
       const top = 16, bot = 24, left = 36, right = 12;
       const sx = (d) => Math.sqrt(d);
       const x = C.lin(sx(T[0].days), sx(T[T.length - 1].days), left + 10, w - right - 10);
-      const vals = [];
-      for (const t of T) vals.push(t.min, t.max, t.iv);
-      for (const r of rvBy.values()) vals.push(r.p10, r.p90, r.now);
-      const fin = vals.filter((v) => num(v) !== null);
-      let y0 = Math.min(...fin), y1 = Math.max(...fin);
-      const pad = (y1 - y0) * 0.08 || 0.01;
-      y0 -= pad; y1 += pad;
       const y = C.lin(y0, y1, H - bot, top);
+      const yc = (v) => y(clamp(v, y0, y1));
       const svg = C.svgRoot(el, w, H, animate, card.ticker + " implied volatility against its own year, by tenor, with the realized cone behind");
       for (const t of C.niceTicks(y0, y1, 3)) s("text", { x: 0, y: y(t) + 4, text: Math.round(t * 100) + "%" }, svg);
       s("line", { x1: left, x2: w - right, y1: H - bot, y2: H - bot, class: "base" }, svg);
@@ -1761,7 +1780,8 @@
       T.forEach((t, i) => {
         const cx = x(sx(t.days));
         const g = s("g", { class: "fade", style: { "--delay": i * 50 + "ms" } }, svg);
-        if (num(t.min) !== null && num(t.max) !== null) s("rect", { x: cx - 1.5, y: y(t.max), width: 3, height: Math.max(1, y(t.min) - y(t.max)), rx: 1.5, fill: cssVar("--fill-2") }, g);
+        if (num(t.min) !== null && num(t.max) !== null) s("rect", { x: cx - 1.5, y: yc(t.max), width: 3, height: Math.max(1, yc(t.min) - yc(t.max)), rx: 1.5, fill: cssVar("--fill-2") }, g);
+        for (const [v, yy, d] of [[num(t.max) !== null && t.max > y1, top, 1], [num(t.min) !== null && t.min < y0, H - bot, -1]]) if (v) s("path", { d: "M" + (cx - 4) + " " + (yy + 4 * d) + "l4 " + -4 * d + "l4 " + 4 * d, class: "ft-off" }, g);
         if (num(t.q1) !== null && num(t.q3) !== null) s("rect", { x: cx - 6, y: y(t.q3), width: 12, height: Math.max(2, y(t.q1) - y(t.q3)), rx: 4, fill: cssVar("--fill-1") }, g);
         if (num(t.median) !== null) s("line", { x1: cx - 6, x2: cx + 6, y1: y(t.median), y2: y(t.median), stroke: cssVar("--label-2"), "stroke-width": 1.5 }, g);
         const dot = s("circle", { cx, cy: y(t.iv), r: 4.5, fill: t.lowSample ? "none" : accent, stroke: accent, "stroke-width": 1.5, class: "ring" }, g);
@@ -1870,7 +1890,7 @@
       } },
     ];
     const vw = viewer("Volatility view", views);
-    const st = UI.partial(views.map((v) => ({ name: v.label, st: v.st })));
+    const st = UI.partial(vw.views.map((v) => ({ name: v.label, st: v.st })));
     const iv30 = cone ? cone.iv30 : num(pm.iv30);
     const vrpV = vrp && vrp.exAnte ? vrp.exAnte.vrp : num(pm.vrp);
     const rr = skew ? skew.rr25 : sk ? sk.skew : null;
@@ -1990,16 +2010,17 @@
     const axis = histAxis(STATE.hist);
     const npY = axis && STATE.hist.volume ? unpack(STATE.hist.volume.np, axis.length) : null;
     const pt = P.premiumTrack && P.premiumTrack.status === "ok" ? P.premiumTrack : null;
+    const npOk = npY && npY.some((v) => v !== null);
     const S = spotOf(card);
     const views = [
       { label: "Session", st: stSession, name: "Session path", draw: (host) => pathChart(host, card, legs) },
-      { label: "Tenor", st: fe ? OK : xSt(X.flowExpiry, "flow by expiry"), name: "Premium by expiry", draw: (host) => {
+      { label: "Tenor", st: fe ? OK : xSt(X.flowExpiry, "flow by expiry"), never: offIndex(card, X.flowExpiry), name: "Premium by expiry", draw: (host) => {
         const rows = fe.rows.filter((r) => isoOk(r.e));
         return { handle: C.diverging(host, { x: rows.map((r) => r.e), values: rows.map((r) => r.np), height: [200, 220, 240], format: moneyPx, label: card.ticker + " net premium by expiry",
           readout: (i) => [C.part(day(rows[i].e) + " " + MID + " " + rows[i].dte + "d", "k"), h("b", { "data-tone": tone(rows[i].np) }, moneyPx(rows[i].np)), C.part("gross " + F.money(rows[i].gross), "k"), C.part("otm " + F.pct(rows[i].gross ? rows[i].otm / rows[i].gross : null, 0), "k")] }),
           legend: [keyOf("--up-mark", "", "Net bought"), keyOf("--down-mark", "", "Net sold")] };
       } },
-      { label: "Strikes", st: fs || ag ? OK : xSt(X.flowStrike, "flow by strike"), name: "Flow by strike", draw: (host) => {
+      { label: "Strikes", st: fs || ag ? OK : xSt(X.flowStrike, "flow by strike"), never: !ag && offIndex(card, X.flowStrike), name: "Flow by strike", draw: (host) => {
         if (fs) {
           const L = fs.ladder.filter((r) => num(r.k) !== null && num(r.np) !== null).sort((a, b) => a.k - b.k);
           const xs = L.map((r) => r.k);
@@ -2014,8 +2035,8 @@
           readout: (i) => [C.part("Strike", "k"), h("b", null, K(bars[i].k)), C.part(F.num(bars[i].net, true) + " net", null, tone(bars[i].net)), C.part(F.num(bars[i].vol) + " traded", "k")] }),
           legend: [keyOf("--up-mark", "", "Call side"), keyOf("--down-mark", "", "Put side"), keyOf("--label-1", "ln", "Spot")] };
       } },
-      { label: "Days", st: (npY && npY.some((v) => v !== null)) || pt ? OK : panelSt(card, "premiumTrack", "premium history"), name: "Premium by session", draw: (host) => {
-        if (npY && npY.some((v) => v !== null)) {
+      { label: "Days", st: npOk || pt ? OK : panelSt(card, "premiumTrack", "premium history"), never: isIndex(card) && !pt && !npOk, name: "Premium by session", draw: (host) => {
+        if (npOk) {
           return { handle: C.diverging(host, { x: axis, values: npY, height: [200, 220, 240], maxWidth: 4, endLabel: true, format: moneyPx, label: card.ticker + " net premium by session over the year",
             readout: (i) => [C.part(day(axis[i]), "k"), npY[i] === null ? C.part("no reading", "k") : h("b", { "data-tone": tone(npY[i]) }, moneyPx(npY[i]))] }),
             legend: [keyOf("--up-mark", "", "Net bought"), keyOf("--down-mark", "", "Net sold"), keyOf("--label-4", "dot", "No reading")] };
@@ -2026,7 +2047,7 @@
       } },
     ];
     const vw = viewer("Flow view", views);
-    const st = UI.partial(views.map((v) => ({ name: v.label, st: v.st })));
+    const st = UI.partial(vw.views.map((v) => ({ name: v.label, st: v.st })));
     const net = tp ? tp.net[tp.net.length - 1] : path ? path.netPremium : null;
     const nd = tp && Array.isArray(tp.nd) ? tp.nd[tp.nd.length - 1] : path ? path.netDelta : null;
     const nope = X.nope && X.nope.status === "ok" ? X.nope : null;
@@ -2034,21 +2055,23 @@
     const al = X.alerts && X.alerts.status === "ok" ? X.alerts : null;
     const ml = X.multiLeg && X.multiLeg.status === "ok" ? X.multiLeg : null;
     const meter = (label, v, c) => h("div", { class: "ft-meter" }, h("span", null, label), h("span", { class: "ui-meter" }, h("i", { style: { "--w": (clamp(num(v) || 0, 0, 1) * 100).toFixed(1) + "%", "--c": cssVar(c) } })), h("b", null, F.pct(v, 0)));
-    const tiles = h("div", { class: "ui-tiles ft-tiles" },
-      UI.tile({ title: "Alerts", value: al ? String(al.n) : DASH, unit: al ? F.money(al.prem) : null, state: al ? null : xSt(X.alerts, "alert tape"),
+    const tileList = [
+      offIndex(card, X.alerts) ? null : UI.tile({ title: "Alerts", value: al ? String(al.n) : DASH, unit: al ? F.money(al.prem) : null, state: al ? null : xSt(X.alerts, "alert tape"),
         info: () => ({ title: "Flow alerts", lead: al ? al.n + " alerts on this name in the session, " + F.money(al.prem) + " of premium" + (al.complete ? "." : "; the read stopped before the open, so the count is a floor.") : null,
           facts: [["At the ask", F.pct(al && al.askShare, 0)], ["Sweeps", F.pct(al && al.sweepShare, 0)], ["Opening", F.pct(al && al.openingShare, 0)], ["Calls", F.pct(al && al.callShare, 0)], ["Urgency", al ? F.pct(al.urgency, 2) + " of ADV" : null]] }),
         body: al ? h("div", { class: "ft-meters" }, meter("Ask", al.askShare, "--up-mark"), meter("Sweep", al.sweepShare, "--s-orange"), meter("Open", al.openingShare, "--s-blue")) : null }),
-      UI.tile({ title: "Structures", value: ml ? String(ml.n) : DASH, unit: ml ? F.money(ml.grossPrem) : null, state: ml ? null : xSt(X.multiLeg, "multi-leg read"),
+      offIndex(card, X.multiLeg) ? null : UI.tile({ title: "Structures", value: ml ? String(ml.n) : DASH, unit: ml ? F.money(ml.grossPrem) : null, state: ml ? null : xSt(X.multiLeg, "multi-leg read"),
         info: () => ({ title: "Multi-leg structures", lead: ml ? ml.n + " multi-leg structures traded in the session" + (ml.truncated ? " (the read hit its page ceiling, so this is a floor)" : "") + "." : null,
           facts: ml ? [["Net premium", moneyPx(ml.netPrem)], ["Credit share", F.pct(ml.creditShare, 0)], ["Opening share", F.pct(ml.openingShare, 0)], ["Long / short", ml.long + " / " + ml.short],
             ...ml.byStrategy.slice(0, 6).map((b) => [String(b.s).replace(/_/g, " "), b.n + " " + MID + " " + moneyPx(b.np)])] : [], notes: ["Net greeks on multi-leg rows are in the vendor's own unit and are not converted."] }),
-        body: ml ? h("div", { class: "ft-meters" }, meter("Credit", ml.creditShare, "--s-purple"), meter("Open", ml.openingShare, "--s-blue"), h("div", { class: "ui-tags" }, ml.byStrategy.slice(0, 2).map((b) => tag(String(b.s).replace(/_/g, " "))))) : null }));
+        body: ml ? h("div", { class: "ft-meters" }, meter("Credit", ml.creditShare, "--s-purple"), meter("Open", ml.openingShare, "--s-blue"), h("div", { class: "ui-tags" }, ml.byStrategy.slice(0, 2).map((b) => tag(String(b.s).replace(/_/g, " "))))) : null }),
+    ].filter(Boolean);
+    const tiles = tileList.length ? h("div", { class: "ui-tiles ft-tiles" }, tileList) : null;
     mod({ id: "m-flow", title: "Flow", span: [12, 6], st, seg: vw.seg, views: vw.views, index: 7, body: [
       mets([
         metric("Net premium", moneyPx(net), { tone: tone(net), sub: tp ? "live" : path && num(path.minutes) ? Math.round(path.minutes / 6) / 10 + "h session" : null, state: num(net) === null ? stSession : null }),
         metric("Net delta", F.num(nd, true), { tone: tone(nd), sub: tp ? "live tape" : "session", state: num(nd) === null ? stSession : null }),
-        metric("NOPE", nope ? F.pct(nope.close, 1, true) : DASH, { tone: nope ? tone(nope.close) : null, sub: nope && num(nope.z) !== null ? "z " + F.signed(nope.z, 1) : nope ? "no history" : null, state: nope ? null : xSt(X.nope, "NOPE read") }),
+        offIndex(card, X.nope) ? null : metric("NOPE", nope ? F.pct(nope.close, 1, true) : DASH, { tone: nope ? tone(nope.close) : null, sub: nope && num(nope.z) !== null ? "z " + F.signed(nope.z, 1) : nope ? "no history" : null, state: nope ? null : xSt(X.nope, "NOPE read") }),
         metric("Aggressor", F.num(agNet, true), { tone: tone(agNet), sub: agNet === null ? null : agNet < 0 ? "to puts" : "to calls", state: agNet === null ? panelSt(card, "aggressor", "aggressor ladder") : null }),
       ], { min: 96 }), vw.box, vw.leg, tiles],
       info: () => ({
@@ -2065,6 +2088,7 @@
 
   function buildPositioning(card) {
     const X = STATE.cardX || {};
+    if (offIndex(card, X.short) && offIndex(card, X.insiders)) return;
     const sh = X.short && X.short.status === "ok" ? X.short : null;
     const si = sh && sh.interest && num(sh.interest.si) !== null ? sh.interest : null;
     const bo = sh && sh.borrow && sh.borrow.status === "ok" ? sh.borrow : null;
@@ -2090,7 +2114,7 @@
         legend: [keyOf("--up-mark", "", "Bought"), keyOf("--down-mark", "", "Sold")] }) },
     ];
     const vw = viewer("Positioning view", views);
-    const st = UI.partial(views.map((v) => ({ name: v.label, st: v.st })));
+    const st = UI.partial(vw.views.map((v) => ({ name: v.label, st: v.st })));
     mod({ id: "m-pos", title: "Positioning", span: [6, 6], st: sh || ins ? st : UI.worst([stShort, xSt(X.insiders, "insider read")]), seg: vw.seg, views: vw.views, index: 8, body: [
       mets([
         metric("Short float", si ? F.pct(si.si, 1) : DASH, { sub: si && num(si.dtc) !== null ? si.dtc.toFixed(1) + "d to cover" : null, state: si ? (si.stale ? ST("stale", "The latest settlement (" + si.date + ") is older than 45 days.") : null) : sh ? ST("quiet", "No short-interest settlement on this name.") : stShort }),
@@ -2144,6 +2168,7 @@
 
   function buildEvents(card) {
     const X = STATE.cardX || {};
+    if (offIndex(card, X.earnings)) return;
     const E = X.earnings && (X.earnings.status === "ok" || X.earnings.status === "thin") ? X.earnings : null;
     const stE = E ? OK : xSt(X.earnings, "earnings history");
     const next = E && E.next ? E.next : null;
@@ -2289,12 +2314,12 @@
     const views = [
       { label: "Contracts", st: panelSt(card, "topContracts", "contract list"), name: "Top contracts", h: 200, draw: list("contracts", "Top contracts") },
       { label: "OI", st: panelSt(card, "oiDeltas", "open-interest list"), name: "Open-interest changes", h: 200, draw: list("oi", "Open-interest changes") },
-      { label: "Alerts", st: al ? OK : xSt(X.alerts, "alert tape"), name: "Flow alerts", h: 200, draw: list("alerts", "Flow alerts") },
+      { label: "Alerts", st: al ? OK : xSt(X.alerts, "alert tape"), never: offIndex(card, X.alerts), name: "Flow alerts", h: 200, draw: list("alerts", "Flow alerts") },
       { label: "Prints", st: panelSt(card, "darkpool", "dark-pool prints"), name: "Dark-pool prints", h: 200, draw: list("prints", "Dark-pool prints") },
-      { label: "Shelves", st: dl ? OK : xSt(X.dpLevels, "dark-pool price levels"), name: "Dark-pool shelves", draw: (host) => ({ handle: shelvesChart(host, card, dl), legend: [keyOf("--s-purple", "", "Top shelves"), keyOf("--label-3", "", "Dark"), keyOf("--fill-2", "", "Lit")] }) },
+      { label: "Shelves", st: dl ? OK : xSt(X.dpLevels, "dark-pool price levels"), never: offIndex(card, X.dpLevels), name: "Dark-pool shelves", draw: (host) => ({ handle: shelvesChart(host, card, dl), legend: [keyOf("--s-purple", "", "Top shelves"), keyOf("--label-3", "", "Dark"), keyOf("--fill-2", "", "Lit")] }) },
     ];
     const vw = viewer("Tape view", views);
-    const st = UI.partial(views.map((v) => ({ name: v.label, st: v.st })));
+    const st = UI.partial(vw.views.map((v) => ({ name: v.label, st: v.st })));
     const basis = tc && tc.oiBasis ? tc.oiBasis : null;
     const basisLine = (() => {
       if (!basis) return null;
@@ -2309,9 +2334,9 @@
         title: "Tape", state: st.state === "ok" ? null : st.state,
         sections: [{ title: "Contracts", lines: [leadOf(tc) || reasonOf(views[0].st), tc && tc.relation, basisLine, "ΔOI counts the change in open interest the vendor reports against the prior clearing day; the spacing of the two counts is unstated, so it is whatever span the vendor clears on."] },
           { title: "Open interest", lines: [leadOf(oi) || reasonOf(views[1].st), oi && oi.note, oi && num(oi.shed) ? oi.rows.length + " kept of " + oi.seen + " lines." : null, "Streaks count the sessions open interest rose (↑OI) and volume beat open interest (V>OI), as the vendor counts them; a missing counter is a dash, never a zero."] },
-          { title: "Alerts", lines: [al ? "The session's " + al.n + " flow alerts on this name, largest premium first; the right column is the share of each alert's premium taken at the ask." : reasonOf(views[2].st)] },
+          views[2].never ? null : { title: "Alerts", lines: [al ? "The session's " + al.n + " flow alerts on this name, largest premium first; the right column is the share of each alert's premium taken at the ask." : reasonOf(views[2].st)] },
           { title: "Prints", lines: [leadOf(dp) || reasonOf(views[3].st), dp && dp.note, dp && num(dp.shed) ? dp.rows.length + " kept of " + dp.seen + " prints" + (num(dp.unpriced) ? ", +" + dp.unpriced + " unpriced print" + (dp.unpriced === 1 ? "" : "s") : "") + "." : null, "Each print shows its time, price, distance from the close and the quote at execution; a print missing either side of the quote shows a dash, never half a spread."] },
-          { title: "Shelves", lines: [dl ? "Dark and lit volume by price within " + dl.bandAtr + " ATR of spot; " + F.pct(dl.darkShare, 0) + " of the in-band volume printed dark. The purple rows are the three largest dark shelves." : reasonOf(views[4].st)] }],
+          views[4].never ? null : { title: "Shelves", lines: [dl ? "Dark and lit volume by price within " + dl.bandAtr + " ATR of spot; " + F.pct(dl.darkShare, 0) + " of the in-band volume printed dark. The purple rows are the three largest dark shelves." : reasonOf(views[4].st)] }],
       }) });
     vw.start();
   }
@@ -2335,7 +2360,8 @@
   function buildSignal(card) {
     const score = num(card.score);
     if (score === null && num(card.conviction) === null && FAMS.every(([k]) => famOf(card, k) === null)) {
-      const st = ST("unavailable", card.depth === "index" ? "Index dossiers carry no score, conviction or family readings: the score ranks single names against the board." : "No score, conviction or family reading was published on this card.");
+      if (isIndex(card)) return;
+      const st = ST("unavailable", "No score, conviction or family reading was published on this card.");
       mod({ id: "m-signal", title: "Signal", span: [12, 4], index: 10, st, body: [UI.silent(st, "Signal", 200)], info: () => ({ title: "Signal", state: st.state, lead: st.reason }) });
       return;
     }
@@ -2368,7 +2394,7 @@
         : h("span", { class: "ft-fam-v", "data-tone": signed ? tone(val) : null }, F.num(val, signed)));
       box.append(row);
     });
-    mod({ id: "m-signal", title: "Signal", span: [12, 4], index: 10, st: score === null ? ST("unavailable", card.depth === "index" ? "Index dossiers carry no score or conviction." : "No score was published on this card.") : null,
+    mod({ id: "m-signal", title: "Signal", span: [12, 4], index: 10, st: score === null ? ST("unavailable", "No score was published on this card.") : null,
       body: [h("div", { class: "ft-sig-w" }, h("div", { class: "ft-sig-a" }, top, evTag), box)],
       info: () => ({ title: "Signal", lead: score === null ? null : "Score " + F.signed(score) + " with conviction " + card.conviction + ".",
         facts: famFacts(card).concat(convFacts(card)).concat(qualityOf(card).facts),
@@ -2411,12 +2437,12 @@
     const rankTxt = (f, l) => (f && f.status === "ok" && num(f.rank) !== null ? l + " " + f.rank + "/" + f.population : null);
     const lists = [rankTxt(feeds.oiChange, "OI"), rankTxt(feeds.darkpool, "DP")].filter(Boolean);
     body.push(h("div", { class: "ft-rows" },
-      h("div", { class: "ft-crow" }, glyph("hall"), h("span", { class: "ft-crow-l" }, "Congress"),
+      isIndex(card) && !(cg && cg.status === "ok") ? null : h("div", { class: "ft-crow" }, glyph("hall"), h("span", { class: "ft-crow-l" }, "Congress"),
         cg && cg.status === "ok" ? [num(cg.buys) ? h("b", { "data-tone": "up" }, cg.buys + " buy" + (cg.buys === 1 ? "" : "s")) : null, num(cg.sells) ? h("b", { "data-tone": "down" }, cg.sells + " sell" + (cg.sells === 1 ? "" : "s")) : null] : UI.stateButton(cgSt, "Congress")),
       h("div", { class: "ft-crow" }, glyph("list"), h("span", { class: "ft-crow-l" }, "Market lists"),
         lists.length ? h("b", null, lists.join(" " + MID + " ")) : UI.stateButton(mrSt.state === "ok" ? ST("quiet", feeds.oiChange && feeds.oiChange.reason ? cap(feeds.oiChange.reason) : "In no market-wide list this run.") : mrSt, "Market lists")),
-      h("div", { class: "ft-crow" }, glyph("stack"), h("span", { class: "ft-crow-l" }, "Sector"), h("b", null, card.sector || DASH))));
-    mod({ id: "m-context", title: "Context", span: [6, 6], index: 11, st: panelSt(card, "context", "price context"), body,
+      isIndex(card) && !card.sector ? null : h("div", { class: "ft-crow" }, glyph("stack"), h("span", { class: "ft-crow-l" }, "Sector"), h("b", null, card.sector || DASH))));
+    mod({ id: "m-context", title: "Context", span: isIndex(card) ? [12, 5] : [6, 6], index: 11, st: panelSt(card, "context", "price context"), body,
       info: () => ({ title: "Context", asOf: ctx.asOf || null, lead: leadOf(P.context),
         facts: (cg && cg.status === "ok" ? (cg.trades || []).map((t) => [t.member + " " + MID + " " + day(t.txnDate), t.side + " " + (t.amountRange || "") + (t.chamber ? " (" + t.chamber + ")" : "")]) : []),
         sections: [{ title: "Congress", lines: [leadOf(cg) || reasonOf(cgSt), cg && num(cg.medianLagDays) !== null ? "Median disclosure lag " + cg.medianLagDays + " days." : null] },
@@ -2581,6 +2607,15 @@
     return !tape.prem || tape.prem.readAt !== before;
   }
 
+  function awaitNeuron(t, card, i = 0) {
+    if (STATE.card !== card || i > 6) return;
+    setTimeout(() => soft(getJSON("/api/flows/summary?t=" + encodeURIComponent(t))).then((nr) => {
+      if (STATE.card !== card || !nr) return;
+      if (nr.status === "pending") { if (nr.context) STATE.neuron = nr; awaitNeuron(t, card, i + 1); }
+      else if (nr.status === "ok") { STATE.neuron = nr; renderVerdict(card, nr); buildWorlds(card); }
+    }), 5000 + i * 3500);
+  }
+
   function jumpToHash() {
     const m = /^#(?:panel-|ftg-|m-)?([A-Za-z_]\w*)$/.exec(String(location.hash || ""));
     if (!m) return;
@@ -2615,6 +2650,7 @@
             if (!card || card.status === "pending" || !card.panels) return;
             STATE.card = card; STATE.neuron = neuron || STATE.neuron; STATE.cardX = cx || STATE.cardX; STATE.hist = hist || STATE.hist;
             paintAll();
+            if (STATE.neuron && STATE.neuron.status === "pending") awaitNeuron(t, card);
           });
       },
     });
@@ -2650,6 +2686,7 @@
     sayStatus("");
     jumpToHash();
     tapeP.then((moved) => { if (moved && STATE.card === card) buildFlow(card); });
+    if (STATE.neuron.status === "pending") awaitNeuron(ticker, card);
     const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1200));
     idle(() => soft(getJSON("/api/flows/meta")).then((m) => {
       if (!m || !isoOk(m.sessionDate) || STATE.card !== card) return;

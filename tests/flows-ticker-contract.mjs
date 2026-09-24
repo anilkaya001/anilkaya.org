@@ -1468,9 +1468,92 @@ try {
     const idx = clone(full);
     idx.depth = "index"; idx.score = null; idx.conviction = null; idx.fam = {};
     await mount(page, idx);
-    const sig = await page.evaluate(() => { const m = document.getElementById("m-signal"); return { silent: m.querySelectorAll(".ui-silent[data-state]").length, gauge: !!m.querySelector(".ft-sig"), fams: m.querySelectorAll(".ft-fam").length }; });
-    ok(sig.silent === 1 && !sig.gauge && sig.fams === 0, "an index dossier's Signal module is one silence, not an empty gauge over five dashes");
+    const sig = await page.evaluate(() => ({ signal: !!document.getElementById("m-signal"), worlds: !!document.getElementById("m-worlds"), chips: document.querySelectorAll("#ftChips .ui-gchip").length }));
+    ok(!sig.signal, "an index dossier carries no score, conviction or family reading, so its Signal module is left out rather than drawn as a silence");
+    ok(sig.worlds, "while an index card that does carry an engine block still draws its two worlds");
+    eq(sig.chips, 3, "and the hero strip drops the score and conviction chips an index never carries");
     eq(errors.length, 0, `the stand-aside and index paints throw nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  {
+    const spy = cards.find((c) => c.depth === "index");
+    ok(spy, "the emitter wrote an index dossier to test against");
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    const pend = { ...neuronFor(spy), status: "pending", summary: null, ideas: [], note: "Neuron is reading this card now." };
+    await mount(page, spy, { neuron: pend, hist: { status: "pending" } });
+    const got = await page.evaluate(() => {
+      const vis = (n) => n && n.getClientRects().length > 0;
+      const segs = (id) => [...document.querySelectorAll("#" + id + " .ui-seg-i")].map((b) => b.textContent.trim());
+      return {
+        mods: [...document.querySelectorAll("#ftGrid > section")].map((m) => m.id),
+        read: document.getElementById("ftVerdict").dataset.read,
+        line: document.getElementById("ftVerdictT").textContent,
+        vStates: [...document.querySelectorAll("#ftVerdict [data-state]")].filter(vis).map((n) => n.dataset.state),
+        ideas: document.querySelectorAll("#ftVerdict .ft-idea").length,
+        chips: [...document.querySelectorAll("#ftChips .ui-gchip")].map((c) => c.innerText.replace(/\s+/g, " ")),
+        gamma: segs("m-gamma"), hedge: segs("m-hedge"), flow: segs("m-flow"), tape: segs("m-tape"),
+        tiles: document.querySelectorAll("#m-flow .ui-tile").length,
+        flowMets: [...document.querySelectorAll("#m-flow .ui-metric-l")].map((n) => n.textContent),
+        rows: [...document.querySelectorAll("#m-context .ft-crow-l")].map((n) => n.textContent),
+        unavailable: [...document.querySelectorAll("#ftGrid .ui-silent[data-state=unavailable], #ftGrid .ui-tile [data-state=unavailable], #ftGrid .ft-crow [data-state=unavailable]")].filter(vis).map((n) => (n.closest("[id]") || {}).id + ":" + ((n.closest(".ui-metric") || n).innerText || "").replace(/\s+/g, " ").trim()),
+      };
+    });
+    eq(got.mods.join(" "), "m-gamma m-hedge m-vol m-flow m-tape m-context", "an index dossier leaves out every module an index card never carries: the two worlds the engine does not price for an index, the score, earnings, insiders and short interest");
+    eq(got.read, "card", "a verdict still being worded by the Neuron shows the card's own reading at once");
+    ok(/^The greeks imply an? [a-z -]+ state/.test(got.line) && !/No read/.test(got.line), `and it is the implied-state reading the card carries, not a bare wait (${got.line})`);
+    eq(got.vStates.filter((x) => x === "pending").length, 0, "with no pending pill on the verdict");
+    eq(got.ideas, 0, "an index dossier draws no ideas placeholder: the engine does not price an index, so nothing is on its way");
+    ok(got.chips.length === 3 && !got.chips.some((c) => /Score|Conviction/.test(c)), `the hero strip carries no score or conviction chip (${got.chips.join(" | ")})`);
+    ok(!got.gamma.includes("1Y") && !got.gamma.includes("Book"), `Gamma offers no view the index card cannot fill (${got.gamma.join(", ")})`);
+    ok(!got.hedge.includes("Clock"), `nor does Hedging (${got.hedge.join(", ")})`);
+    ok(!got.flow.includes("Tenor") && !got.flow.includes("Days"), `nor Flow (${got.flow.join(", ")})`);
+    ok(!got.tape.includes("Alerts") && !got.tape.includes("Shelves"), `nor Tape (${got.tape.join(", ")})`);
+    eq(got.tiles, 0, "Flow draws no alert or structure tile for an index");
+    ok(!got.flowMets.includes("NOPE"), `and no NOPE metric (${got.flowMets.join(", ")})`);
+    ok(!got.rows.includes("Sector"), `Context names no sector for an index (${got.rows.join(", ")})`);
+    eq(got.unavailable.length, 0, `and no silence box, tile or context row on the index dossier reads unavailable: what an index never carries is left out, not drawn as missing (${got.unavailable.join(", ")})`);
+    eq(errors.length, 0, `the index dossier throws nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  {
+    const card = clone(full);
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, card, { neuron: { status: "pending", scope: card.ticker, summary: null, ideas: [], context: null } });
+    const first = await page.evaluate(() => ({ read: document.getElementById("ftVerdict").dataset.read, line: document.getElementById("ftVerdictT").textContent,
+      states: [...document.querySelectorAll("#ftVerdict .ft-v-meta [data-state]")].map((n) => n.dataset.state) }));
+    eq(first.read, "card", "a pending Neuron with no context still gets a reading from the engine block the card carries");
+    ok(/^The greeks imply /.test(first.line) && first.line.includes(card.ticker), `and it names the engine's implied state (${first.line})`);
+    ok(!first.states.includes("pending"), "without a pending pill beside it");
+    await page.route("**/api/flows/summary*", (route) => route.fulfill({ contentType: "application/json",
+      body: JSON.stringify({ ...neuronFor(card), summary: "The landed wording. A second sentence." }) }));
+    await page.waitForFunction(() => document.getElementById("ftVerdict").dataset.read === "neuron", null, { timeout: 12000 });
+    eq(await page.evaluate(() => document.getElementById("ftVerdictT").textContent), "The landed wording.", "and the Neuron's wording replaces the card's reading when it lands, without a reload");
+    eq(errors.length, 0, `the pending and landed verdicts throw nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  {
+    const card = clone(full);
+    const cx = clone(cardXOf(card.ticker));
+    ok(cx && cx.cone && cx.cone.status === "ok" && cx.cone.tenors.length > 1, "the emitted card-x carries a cone to stretch");
+    cx.cone.tenors[0].max = 6.258;
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    await mount(page, card, { cardX: cx });
+    ok(await pickView(page, "m-vol", "Cone"), "the Volatility module offers the cone");
+    const c = await page.evaluate(() => {
+      const svg = document.querySelector("#m-vol .ft-cbox svg");
+      const ticks = [...svg.querySelectorAll("text")].map((t) => t.textContent).filter((t) => /%$/.test(t)).map((t) => Number(t.replace("%", "").replace("−", "-")));
+      return { top: Math.max(...ticks), off: svg.querySelectorAll(".ft-off").length, whisker: Math.min(...[...svg.querySelectorAll("rect")].map((r) => Number(r.getAttribute("y")))) };
+    });
+    ok(c.top < 200, `one tenor's 626% extreme does not flatten the cone: the scale tops out at ${c.top}%`);
+    eq(c.off, 1, "the whisker that runs past the scale is marked where it leaves");
+    ok(c.whisker >= 15, `and the whisker stops at the top of the plot instead of running out of it (${c.whisker})`);
     await page.close();
   }
 
