@@ -7,7 +7,7 @@
     if (statusEl) statusEl.textContent = "The shared UI library did not load, so this page cannot draw. Refresh to try again.";
     return;
   }
-  const { h, F, isNum, DASH, MINUS, fmtSigned, fmtStamp, glyph } = UI;
+  const { h, F, isNum, DASH, MINUS, glyph } = UI;
   const C = UI.chart;
   const $ = (id) => document.getElementById(id);
 
@@ -31,6 +31,7 @@
     return sign + "$" + a.toFixed(0);
   };
   const usdS = (v) => { const n = isNum(v); return n !== null && n > 0 ? "+" + usd(n) : usd(n); };
+  const tb = (v) => h("b", { "data-tone": toneOf(v) }, usdS(v));
   const toneOf = (v) => { const n = isNum(v); return n === null ? null : n > 0 ? "up" : n < 0 ? "down" : "flat"; };
   const barClass = (n) => (n < 0 ? "is-neg" : n > 0 ? "is-pos" : "is-flat");
   const count = (v) => { const n = isNum(v); return n === null ? DASH : String(n); };
@@ -48,23 +49,27 @@
     quiet: ["quiet", "Quiet"],
     unavailable: ["unavailable", "Unavailable"],
     unreadable: ["stop", "Unreadable"],
+    opening: ["clock", "Opening"],
+    stale: ["clock", "Stale"],
   };
+  const POP = { "aria-haspopup": "dialog", "aria-controls": "fxPop" };
   const disclose = (title, lead, more) => UI.info(() => Object.assign({ title, lead }, more || {}));
 
-  function emptyLine(kind, text, what, height) {
-    const [g, word] = KIND[kind] || KIND.unavailable;
+  function emptyLine(kind, text, what, height, said) {
+    const [g, w] = KIND[kind] || KIND.unavailable;
+    const word = said || w;
     return h("div", {
-      class: "ui-silent mk-hush" + (height && height <= 72 ? " is-row" : ""), "data-empty": kind, "data-state": kind, role: "note",
+      class: "ui-silent mk-hush" + (height && height <= 72 ? " is-row" : ""), "data-empty": kind === "opening" || kind === "stale" ? null : kind, "data-state": kind, role: "note",
       "aria-label": word + ": " + (what || text), style: { "--silent-h": (height || 96) + "px" },
     }, glyph(g), h("div", { class: "ui-silent-t" }, word),
-    h("button", { type: "button", "aria-haspopup": "dialog", "aria-controls": "fxPop", "data-info": disclose(cap1(what || word), text) }, "Why"));
+    h("button", { type: "button", ...POP, "data-info": disclose(cap1(what || word), text) }, "Why"));
   }
 
   function inlineHush(kind, text, label) {
     const [g, word] = KIND[kind] || KIND.unavailable;
     return h("button", {
       class: "ui-state mk-mark", type: "button", "data-empty": kind, "data-state": kind, title: word,
-      "aria-label": word + ": " + label, "aria-haspopup": "dialog", "aria-controls": "fxPop",
+      "aria-label": word + ": " + label, ...POP,
       "data-info": disclose(cap1(label), text),
     }, glyph(g));
   }
@@ -84,12 +89,19 @@
     if (node) t.append(node);
   }
 
-  function staleMark(sectionId, session, what) {
+  function chip(state, word, what, text) {
+    return h("button", {
+      class: "mk-chip mk-mark", type: "button", "data-state": state, title: word, "aria-label": word + ": " + what,
+      ...POP, "data-info": disclose(cap1(what), text),
+    }, glyph("clock"), h("span", null, word));
+  }
+
+  function staleMark(sectionId, session, what, calm) {
     const expected = UI.freshness.market().expected;
-    if (!session || session >= expected) return headMark(sectionId, null);
+    if (!session || session >= expected) return headMark(sectionId, calm ? chip(calm.state, calm.word, what, calm.text) : null);
     headMark(sectionId, h("button", {
       class: "ui-state mk-mark", type: "button", "data-state": "stale", title: "Stale", "aria-label": "Stale: " + what,
-      "aria-haspopup": "dialog", "aria-controls": "fxPop",
+      ...POP,
       "data-info": disclose(cap1(what), "These readings are the " + F.day(session) + " session; the last completed session is " + F.day(expected) + ".", { state: "stale" }),
     }, glyph("clock")));
   }
@@ -107,14 +119,47 @@
   const clear = (id) => { const n = $(id); if (n) n.replaceChildren(); return n; };
   const unreadable = (feed) => Boolean(feed && feed.__unreadable === true);
   const pendingOf = (feed) => !feed || feed.status === "pending";
+  const okFeed = (feed) => (feed && !pendingOf(feed) && !unreadable(feed) ? feed : null);
+  const nums = (arr) => (Array.isArray(arr) ? arr.map(isNum) : []);
+  const drawn = (path) => path.filter((x) => x !== null).length;
+  const lastOf = (path) => { for (let i = path.length - 1; i >= 0; i--) if (path[i] !== null) return path[i]; return null; };
+  const newer = (day, reg) => !reg || !reg.sessionDate || (Boolean(day) && day >= reg.sessionDate);
+  const readSeries = (s) => Boolean(s && s.status === "ok" && Array.isArray(s.net) && nums(s.net).some((x) => x !== null));
+  const readAtOf = (f) => (f && f.fresh && typeof f.fresh.readAt === "string" ? f.fresh.readAt : f && typeof f.readAt === "string" ? f.readAt : null);
+  const recent = (at) => UI.freshness.market().open && Date.now() - Date.parse(at) <= 15 * 60000;
+
+  function liveSer(live, breadth, pick, minDay) {
+    const all = [];
+    for (const [feed, src] of [[okFeed(breadth), "live:breadth"], [okFeed(live), "live:market"]]) {
+      const s = feed && pick(feed, src);
+      if (readSeries(s)) all.push({ s, src, session: feed.session || null, at: readAtOf(feed), n: drawn(nums(s.net)) });
+    }
+    const top = all.reduce((d, c) => (c.session && (!d || c.session > d) ? c.session : d), minDay || null);
+    const kept = all.filter((c) => !top || (c.session && c.session >= top));
+    return kept.find((c) => c.n >= 2) || kept.sort((a, b) => b.n - a.n || String(b.at).localeCompare(String(a.at)))[0] || null;
+  }
+
+  const gap = (v, feed, row, what) => (v === null ? rowState(feed, row, what) : null);
+  function rowState(feed, row, what) {
+    if (!feed || pendingOf(feed)) return { state: "pending", reason: what + " arrives with the nightly build." };
+    const why = row && row.reason ? " (" + row.reason + ")." : ".";
+    return row && row.status === "quiet" ? { state: "quiet", reason: what + " was read and came back empty" + why }
+      : { state: "unavailable", reason: what + " was not carried this session" + why };
+  }
+
+  const openingSaid = (at) => "The session's first reading" + (at ? ", at " + clock(at) + " ET," : "") +
+    " is in. A line needs two, so the path draws from the next refresh.";
+  const staleSaid = (at) => "The live layer holds one reading of this session" + (at ? ", at " + clock(at) + " ET" : "") +
+    ", and has not written since. A line needs two, so no path is drawn.";
+  const calmOf = (t, what) => (t.opening ? (recent(t.at) ? { state: "opening", word: "Opening", text: openingSaid(t.at) }
+    : { state: "stale", word: t.at ? clock(t.at) : "Stale", text: staleSaid(t.at) })
+    : t.fellBack && t.session ? { state: "dated", word: F.day(t.session), text: "Today's live " + what + " holds a single reading" +
+      (t.at ? ", at " + clock(t.at) + " ET" : "") + ", too few for a path, so this is the " + F.day(t.session) + " session in full." } : null);
 
   function unreadableLine(feed, what) {
     return emptyLine("unreadable",
-      "The request for " + what + " did not come back" +
-      (feed && feed.__reason ? " (" + feed.__reason + ")" : "") +
-      ". That is this page failing to READ the payload, not a statement about " +
-      "what the payload holds — reload before drawing any conclusion from the " +
-      "panels that did load.", what);
+      "The request for " + what + " did not come back" + (feed && feed.__reason ? " (" + feed.__reason + ")" : "") +
+      ": a failed read, not a statement about what the payload holds. Reload before reading the rest.", what);
   }
   function pendingLine(what, cost) {
     return emptyLine("pending", "The pipeline has not published " + what + " yet. " + cost, what);
@@ -217,13 +262,13 @@
       said = "One of the two weightings could not be measured this session, so they cannot be compared.";
     } else if (b === 0 || p === 0) {
       if (b === 0 && p === 0) {
-        said = "Both weightings came back exactly level: the names split evenly and so did the dollars. There is no lean to agree or disagree about.";
+        said = "Both weightings came back exactly level: the names split evenly and so did the dollars.";
       } else {
         said = (b === 0
           ? "Counting names, the session was exactly level while the dollars leaned " + (p > 0 ? "positive" : "negative")
           : "The dollars were exactly level while more names leaned " + (b > 0 ? "positive" : "negative")) +
           ", so the two weightings neither agree nor disagree.";
-        how = "One weighting has a sign and the other does not, which is itself a reading and the reason both are drawn.";
+        how = "One weighting has a sign and the other does not, which is why both are drawn.";
       }
     } else if ((b > 0) !== (p > 0)) {
       said = "The two weightings DISAGREE in sign: more names leaned " + (b > 0 ? "positive" : "negative") +
@@ -334,7 +379,7 @@
     host.dataset.note = "";
     if (unreadable(sectors)) { host.append(unreadableLine(sectors, "sector momentum (/api/flows/sectors)")); return; }
     if (!sectors || sectors.status === "pending") {
-      host.append(pendingLine("sector momentum", "It costs eleven candle calls a run, so it appears with the first pipeline run after it shipped."));
+      host.append(pendingLine("sector momentum", "It appears with the next pipeline run."));
       return;
     }
     if (!entries.length) {
@@ -404,9 +449,8 @@
     }
     host.dataset.lead = measured.length + " of " + entries.length + " sector" + (entries.length === 1 ? "" : "s") + " settled a reading.";
     host.dataset.qual = caveats.join(" ");
-    host.dataset.note = "TRIX in basis points per session: a triple-smoothed momentum reading on each sector ETF's own log closes, " +
-      "so it describes the sector's trend rather than its level. Sign is carried by POSITION — left of the centre rule is " +
-      "negative — and by the glyph on the number, so the panel survives greyscale and a monochrome printout.";
+    host.dataset.note = "TRIX in basis points per session: triple-smoothed momentum on each sector ETF's log closes, a trend rather than a level. " +
+      "Sign is carried by position and by the glyph on the number, not by colour alone.";
   }
 
   function moverList(title, rows, key, opts) {
@@ -444,7 +488,7 @@
     host.dataset.pop = "";
     if (unreadable(movers)) { host.append(unreadableLine(movers, "the session's extremes (/api/flows/movers)")); return; }
     if (!movers || movers.status === "pending") {
-      host.append(pendingLine("the session's extremes", "They are cut from screener rows the run already holds and cost no vendor call, so they appear with the first pipeline run after this shipped."));
+      host.append(pendingLine("the session's extremes", "They are cut from the screener rows and appear with the next pipeline run."));
       return;
     }
     const prem = movers.premium || {};
@@ -453,8 +497,7 @@
       ["Calls", prem.bullish, "netPrem", "the most net call premium"], ["Puts", prem.bearish, "netPrem", "the most net put premium"],
     ];
     if (!lists.some((spec) => spec[1] && spec[1].length)) {
-      host.append(emptyLine("quiet", "This payload ranked no name on any of the four extremes. The screener answered " +
-        "and the ranking came back empty, which is a statement about the session rather than a failure to read it.", "extremes"));
+      host.append(emptyLine("quiet", "The screener answered and ranked no name on any of the four extremes.", "extremes"));
       return;
     }
     const cols = lists.map((spec) => moverList(spec[0], spec[1], spec[2], { said: spec[3] }));
@@ -466,8 +509,7 @@
     const universe = isNum(movers.universe), ranked = isNum(movers.ranked), priced = isNum(movers.priced);
     const noChange = isNum(movers.unrankedChange), noPrem = isNum(movers.unrankedPremium);
     if (universe === null || ranked === null || priced === null || noChange === null || noPrem === null) {
-      host.append(emptyLine("unavailable", "This payload published no count of the screened names it ranked, so the four " +
-        "columns above carry no denominator. That is a gap in the payload, not a statement about the session.", "extremes population", 64));
+      host.append(emptyLine("unavailable", "This payload published no count of the screened names it ranked, so the columns carry no denominator.", "extremes population", 64));
     } else {
       host.dataset.pop = ranked + " of " + universe + " screened names could be ranked by change and " + priced +
         " by net premium; " + noChange + " quoted no change and " + noPrem + " no net premium, and those names are in no column. " +
@@ -499,22 +541,21 @@
     }
     if (unreadable(movers)) { host.append(unreadableLine(movers, "the session's premium extremes (/api/flows/movers)")); return; }
     if (pendingOf(boardLong) || pendingOf(boardShort) || pendingOf(movers)) {
-      host.append(pendingLine("both halves of this join", "It reads the two published boards against the session's premium extremes and needs both; it fills on the first run that writes them."));
+      host.append(pendingLine("both halves of this join", "It needs both boards and the premium extremes; it fills on the next pipeline run."));
       return;
     }
     const prem = movers.premium || {};
     const sides = [
-      { title: "Long in puts", said: "Long board, in the largest net PUT premium", board: boardLong, side: "long", list: prem.bearish,
+      { title: "Long in puts", said: "Long board, in the largest net PUT premium", board: boardLong, side: "long", list: prem.bearish, withList: prem.bullish,
         ranking: "the session's largest net put premium", empty: "No long-board name appears in the session's largest net put premium." },
-      { title: "Short in calls", said: "Short board, in the largest net CALL premium", board: boardShort, side: "short", list: prem.bullish,
+      { title: "Short in calls", said: "Short board, in the largest net CALL premium", board: boardShort, side: "short", list: prem.bullish, withList: prem.bearish,
         ranking: "the session's largest net call premium", empty: "No short-board name appears in the session's largest net call premium." },
     ];
     if (!sides.some((side) => Array.isArray(side.list))) {
-      host.append(emptyLine("unavailable", "This movers payload published neither premium extreme, so there is nothing for " +
-        "the boards to be joined against. The absence is in the payload, not in the overlap.", "against the tape"));
+      host.append(emptyLine("unavailable", "This movers payload published neither premium extreme, so the boards have nothing to join.", "against the tape"));
       return;
     }
-    let hits = 0, population = 0;
+    let hits = 0, population = 0, agree = 0, agreePop = 0;
     const joined = [], skipped = [];
     const grid = h("div", { class: "mk-movers-grid mk-against" });
     for (const side of sides) {
@@ -529,11 +570,11 @@
         continue;
       }
       if (!boardRows.length) {
-        col.append(emptyLine("quiet", "The " + side.side + " board ranked no name this session, so there is nothing on " +
-          "this side to read against the tape. That is a fact about the board rather than about the overlap.", side.side + " board join", 64));
+        col.append(emptyLine("quiet", "The " + side.side + " board ranked no name this session, so nothing on this side is read against the tape.", side.side + " board join", 64));
         continue;
       }
       const found = crossBoard(boardRows, side.list);
+      if (Array.isArray(side.withList)) { agree += crossBoard(boardRows, side.withList).length; agreePop += boardRows.length; }
       hits += found.length;
       population += boardRows.length;
       joined.push(boardRows.length + " " + side.side);
@@ -545,20 +586,20 @@
     host.prepend(UI.metrics([
       UI.metric("Against", population ? hits + " of " + population : DASH, { tone: hits ? "warn" : null, sub: population ? "board names" : null,
         state: population ? null : { state: "quiet", reason: "No board name was joined against the tape this session." } }),
-    ], { min: 140 }));
+      agreePop ? UI.metric("With", agree + " of " + agreePop, { tone: agree ? "up" : null, sub: "board names" }) : null,
+    ].filter(Boolean), { min: 140 }));
     host.append(grid);
     host.dataset.lead = !population
       ? "No board name was joined against the tape this session, so there is no population to state a count against."
-      : hits + " of " + population + " published board names (" + joined.join(", ") + ") appear in the opposite premium extreme this session.";
+      : hits + " of " + population + " published board names (" + joined.join(", ") + ") appear in the opposite premium extreme this session" +
+        (agreePop ? ", and " + agree + " of " + agreePop + " in the extreme on their own side." : ".");
     const caveats = [];
     if (skipped.length) caveats.push(skipped.join("; ") + ".");
-    caveats.push("Both mover lists are CAPPED extremes rather than the universe, so a name absent from them has not been " +
-      "shown to agree with the tape: it has only been shown not to be one of the session's loudest disagreements.");
+    caveats.push("Both mover lists are CAPPED extremes rather than the universe: a name absent from them is only not among the loudest disagreements.");
     host.dataset.qual = caveats.join(" ");
   }
 
-  const PULSE_QUIET = "The feed answered this read with nothing — ordinary before the open for a series that fills during " +
-    "market hours, and a vendor silence rather than a quiet market when the read is stamped after the close.";
+  const PULSE_QUIET = "The feed answered with nothing: ordinary before the open, a vendor silence after the close.";
 
   function feedSilence(feed, what) {
     if (!feed || feed.status === "unavailable") {
@@ -576,47 +617,56 @@
 
   let stampSaid = "";
 
-  function tideViews(pulse, live) {
+  function tideViews(pulse, live, breadth) {
     const views = [];
-    const lv = live && !pendingOf(live) && !unreadable(live) ? live : null;
-    const pulseDay = pulse && !pendingOf(pulse) && !unreadable(pulse) ? (pulse.readDay || pulse.sessionDate || null) : null;
-    const series = (label, sr, src) => {
-      if (!sr || sr.status !== "ok" || !Array.isArray(sr.t) || sr.t.length < 2) return;
+    const P = okFeed(pulse);
+    const pulseDay = P ? (P.readDay || P.sessionDate || null) : null;
+    const series = (label, sr, src, day, min) => {
+      if (views.some((v) => v.label === label) || !sr || sr.status !== "ok" || !Array.isArray(sr.t) || sr.t.length < (min || 2)) return;
       const at = (arr, i) => (Array.isArray(arr) ? isNum(arr[i]) : null);
-      views.push({ label, src, t: sr.t, call: sr.t.map((_, i) => at(sr.ncp, i)), put: sr.t.map((_, i) => at(sr.npp, i)),
-        net: sr.t.map((_, i) => at(sr.net, i)), px: Array.isArray(sr.px) ? sr.t.map((_, i) => at(sr.px, i)) : null });
+      views.push({ label, src, day, t: sr.t, call: sr.t.map((_, i) => at(sr.ncp, i)), put: sr.t.map((_, i) => at(sr.npp, i)),
+        net: sr.t.map((_, i) => at(sr.net, i)) });
     };
-    if (lv && (!pulseDay || !lv.session || lv.session >= pulseDay)) series("Market", lv.tide, "live:market");
-    if (!views.length && pulse && !pendingOf(pulse) && !unreadable(pulse) && pulse.tide && pulse.tide.status === "ok" &&
-        Array.isArray(pulse.tide.points) && pulse.tide.points.length) {
-      const pts = pulse.tide.points;
-      views.push({ label: "Market", src: "pulse", t: pts.map((p) => p && p.t),
-        call: pts.map((p) => isNum(p && p.callPrem)), put: pts.map((p) => isNum(p && p.putPrem)),
-        net: pts.map((p) => { const c = isNum(p && p.callPrem), q = isNum(p && p.putPrem); return c === null || q === null ? null : c - q; }), px: null });
+    const fromPts = (tide) => {
+      const pts = tide && Array.isArray(tide.points) ? tide.points : [];
+      const leg = (k) => pts.map((p) => isNum(p && p[k]));
+      const c = leg("callPrem"), q = leg("putPrem");
+      return { status: tide && (tide.status || "ok"), t: pts.map((p) => p && p.t), ncp: c, npp: q, net: c.map((x, i) => (x === null || q[i] === null ? null : x - q[i])) };
+    };
+    const lv = liveSer(live, null, (f) => f.tide, pulseDay);
+    const prior = P && P.tide && P.tide.prior;
+    for (const min of [2, 1]) {
+      if (lv) series("Market", lv.s, "live:market", lv.session, min);
+      if (P) series("Market", fromPts(P.tide), P.live ? "pulse + live:market" : "pulse", pulseDay, min);
+      if (prior && min === 2) series("Market", fromPts(prior), "pulse", prior.date || null, 2);
     }
-    if (lv) {
-      series("0DTE", lv.zeroDte, "live:market");
-      if (lv.etf) { series("SPY", lv.etf.SPY, "live:market"); series("QQQ", lv.etf.QQQ, "live:market"); }
+    const zero = liveSer(live, breadth, (f, src) => (src === "live:market" ? f.zeroDte : f.dte && f.dte.zero), pulseDay);
+    if (zero) series("0DTE", zero.s, zero.src, zero.session);
+    for (const T of ["SPY", "QQQ"]) {
+      const e = liveSer(live, breadth, (f) => f.etf && f.etf[T], pulseDay);
+      if (e) series(T, e.s, e.src, e.session);
     }
-    return views;
+    return { views, today: lv && lv.session };
   }
 
   let tideChart = null;
+  let tideLabel = null;
 
-  function paintTide(pulse, live) {
+  function paintTide(pulse, live, breadth) {
     const host = clear("mkTide");
     const legs = clear("mkTideLegs");
     const seg = clear("mkTideSeg");
     if (!host) return;
     if (tideChart) { tideChart.destroy(); tideChart = null; }
-    const views = tideViews(pulse, live);
+    const { views, today } = tideViews(pulse, live, breadth);
+    headMark("mkTideCard", null);
     if (!views.length) {
       if (unreadable(pulse)) host.append(unreadableLine(pulse, "the market pulse (/api/flows/pulse)"));
       else if (pendingOf(pulse)) host.append(pendingLine("the market tide", "The live market layer and the pulse both fill during market hours."));
       else host.append(feedSilence(pulse.tide, "market tide"));
       return;
     }
-    let active = 0;
+    let active = Math.max(0, views.findIndex((v) => v.label === tideLabel));
     const last = (arr) => { for (let i = arr.length - 1; i >= 0; i--) if (arr[i] !== null) return arr[i]; return null; };
     const draw = () => {
       const v = views[active];
@@ -629,9 +679,16 @@
         ], { min: 110 }));
       }
       host.replaceChildren();
+      if (tideChart) { tideChart.destroy(); tideChart = null; }
+      const dated = v.day && today && v.day < today;
+      headMark("mkTideCard", dated ? chip("dated", F.day(v.day), "tide", "Today's live tide holds too few readings for a path, so this is the " + F.day(v.day) + " session in full.") : null);
+      if (v.t.length < 2) {
+        const fresh = recent(v.t[0]);
+        host.append(emptyLine(fresh ? "opening" : "stale", fresh ? openingSaid(v.t[0]) : staleSaid(v.t[0]), v.label.toLowerCase() + " tide", 180, fresh ? null : clock(v.t[0])));
+        return;
+      }
       const plot = h("div", { class: "mk-river" });
       host.append(plot, UI.legend([["--up", "ln", "Net calls"], ["--down", "ln", "Net puts"]]));
-      if (tideChart) tideChart.destroy();
       tideChart = C.line(plot, {
           x: ax.x, xType: ax.xType, xTicks: ax.ticks(host.clientWidth || 600), xFormat: (x) => clock(x), zero: true, height: [220, 260, 300],
           series: [
@@ -639,12 +696,12 @@
             { values: v.put, color: "--down", label: "Net puts", dash: true, format: usdS },
           ],
           yFormat: usdS, label: v.label + " tide: net call and net put premium across the session",
-          readout: (i) => [C.part(clock(v.t[i]), "k"), C.part("Calls", "k"), h("b", { "data-tone": "up" }, v.call[i] === null ? DASH : usdS(v.call[i])),
-            C.part("Puts", "k"), h("b", { "data-tone": "down" }, v.put[i] === null ? DASH : usdS(v.put[i])),
-            C.part("Net " + (v.net[i] === null ? DASH : usdS(v.net[i])), "k")],
+          readout: (i) => [C.part(clock(v.t[i]), "k"), C.part("Calls", "k"), h("b", { "data-tone": "up" }, usdS(v.call[i])),
+            C.part("Puts", "k"), h("b", { "data-tone": "down" }, usdS(v.put[i])),
+            C.part("Net " + (usdS(v.net[i])), "k")],
       });
     };
-    if (seg && views.length > 1) seg.append(UI.segmented("Tide", views.map((v) => ({ label: v.label })), (i) => { active = i; draw(); }, 0));
+    if (seg && views.length > 1) seg.append(UI.segmented("Tide", views.map((v) => ({ label: v.label })), (i) => { active = i; tideLabel = views[i].label; draw(); }, active));
     draw();
     const src = views[0].src;
     const notes = pulse && pulse.notes ? pulse.notes : {};
@@ -696,10 +753,16 @@
     }
     if (share || size) {
       const span = (share || size).of;
-      said.push("A rank over " + span + " session" + (span === 1 ? "" : "s") + " is an ordinal claim and nothing more: this window is " +
-        "far too short to support a standard deviation, and a sigma computed from it would be a confident number where the honest one is a position in a queue.");
+      said.push("A rank over " + span + " session" + (span === 1 ? "" : "s") + " is an ordinal claim and nothing more: the window is too short for a standard deviation.");
     }
     return said.join(" ");
+  }
+
+  function bar(svg, x, mid, v, k, bw, i, up, rx, op) {
+    if (v === null) return UI.s("circle", { cx: x, cy: mid + (up ? -3 : 3), r: 1.6, fill: UI.cssVar("--label-4") }, svg);
+    const hh = Math.max(1, v * k);
+    UI.s("rect", { x: x - bw / 2, y: up ? mid - hh : mid, width: bw, height: hh, rx, fill: UI.cssVar(up ? "--up-mark" : "--down-mark"), "fill-opacity": op,
+      class: "grow", style: { "--i": String(i), "--origin": up ? "bottom" : "top" } }, svg);
   }
 
   function dayTicks(svg, dates, xAt, w, y) {
@@ -728,11 +791,10 @@
     const pcNow = pv && isNum(pv.now) !== null ? isNum(pv.now) : c0 && p0 !== null ? p0 / c0 : null;
     const z = pv ? isNum(pv.z) : null;
     const volPct = hist && hist.volume ? isNum(hist.volume.pct) : null;
-    const pending = { state: "pending", reason: "The year of daily totals arrives with the pulse history addition, which has not published yet." };
     host.append(UI.metrics([
       UI.metric("Market P/C", pcNow === null ? DASH : pcNow.toFixed(2), { sub: newest.date ? F.day(newest.date) : null }),
-      UI.metric("z vs 1Y", z === null ? DASH : F.signed(z, 1), { tone: z === null ? null : z > 1 ? "down" : z < -1 ? "up" : null, state: z === null ? pending : null }),
-      UI.metric("Volume pct", volPct === null ? DASH : F.pct(volPct > 1 ? volPct / 100 : volPct, 0), { state: volPct === null ? pending : null }),
+      UI.metric("z vs 1Y", z === null ? DASH : F.signed(z, 1), { tone: z === null ? null : z > 1 ? "down" : z < -1 ? "up" : null, state: gap(z, pulse, pv, "The one-year z") }),
+      UI.metric("Volume pct", volPct === null ? DASH : F.pct(volPct > 1 ? volPct / 100 : volPct, 0), { state: gap(volPct, pulse, hist && hist.volume, "The volume percentile") }),
     ], { min: 90 }));
     const ordered = rows.slice().reverse();
     const slot = h("div", { class: "mk-pairs-w" });
@@ -760,10 +822,8 @@
           const x = 4 + band * (i + 0.5);
           const c = isNum(r[V.c]), q = isNum(r[V.p]);
           const last = i === N - 1;
-          if (c === null) UI.s("circle", { cx: x, cy: mid - 3, r: 1.6, fill: UI.cssVar("--label-4") }, svg);
-          else { const hh = Math.max(1, c / hi * half); UI.s("rect", { x: x - bw / 2, y: mid - hh, width: bw, height: hh, rx: Math.min(3, bw / 2), fill: UI.cssVar("--up-mark"), "fill-opacity": last ? 1 : 0.62, class: "grow", style: { "--i": String(i), "--origin": "bottom" } }, svg); }
-          if (q === null) UI.s("circle", { cx: x, cy: mid + 3, r: 1.6, fill: UI.cssVar("--label-4") }, svg);
-          else { const hh = Math.max(1, q / hi * half); UI.s("rect", { x: x - bw / 2, y: mid, width: bw, height: hh, rx: Math.min(3, bw / 2), fill: UI.cssVar("--down-mark"), "fill-opacity": last ? 1 : 0.62, class: "grow", style: { "--i": String(i), "--origin": "top" } }, svg); }
+          bar(svg, x, mid, c, half / hi, bw, i, 1, Math.min(3, bw / 2), last ? 1 : 0.62);
+          bar(svg, x, mid, q, half / hi, bw, i, 0, Math.min(3, bw / 2), last ? 1 : 0.62);
         });
         dayTicks(svg, ordered.map((r) => r.date), (i) => 4 + band * (i + 0.5), w, H - 6);
         C.scrub(el, svg, {
@@ -871,10 +931,8 @@
       ordered.forEach((r, i) => {
         const x = 4 + band * (i + 0.5);
         const b = isNum(r.buysNotional), q = isNum(r.sellsNotional);
-        if (b === null) UI.s("circle", { cx: x, cy: mid - 3, r: 1.6, fill: UI.cssVar("--label-4") }, svg);
-        else { const hb = Math.max(1, Math.abs(b) / hi * half); UI.s("rect", { x: x - bw / 2, y: mid - hb, width: bw, height: hb, rx: 2, fill: UI.cssVar("--up-mark"), class: "grow", style: { "--i": String(i), "--origin": "bottom" } }, svg); }
-        if (q === null) UI.s("circle", { cx: x, cy: mid + 3, r: 1.6, fill: UI.cssVar("--label-4") }, svg);
-        else { const hs = Math.max(1, Math.abs(q) / hi * half); UI.s("rect", { x: x - bw / 2, y: mid, width: bw, height: hs, rx: 2, fill: UI.cssVar("--down-mark"), class: "grow", style: { "--i": String(i), "--origin": "top" } }, svg); }
+        bar(svg, x, mid, b === null ? b : Math.abs(b), half / hi, bw, i, 1, 2);
+        bar(svg, x, mid, q === null ? q : Math.abs(q), half / hi, bw, i, 0, 2);
       });
       dayTicks(svg, ordered.map((r) => r.date), (i) => 4 + band * (i + 0.5), w, H - 5);
       C.scrub(el, svg, { xs: ordered.map((_, i) => 4 + band * (i + 0.5)), top, bottom: H - bot, label: "Insider filings per day",
@@ -978,7 +1036,7 @@
         const host = clear(id);
         if (!host) continue;
         host.append(unreadable(pulse) ? unreadableLine(pulse, "the market pulse (/api/flows/pulse)")
-          : pendingLine("the market pulse", "Seven market-wide feeds are pooled under one key that refreshes during market hours; the section fills on the first run that writes it."));
+          : pendingLine("the market pulse", "The section fills on the first run that writes it."));
       }
       return;
     }
@@ -1012,23 +1070,25 @@
   function paintSectorTides(regime, breadth) {
     const host = clear("mkSecTides");
     if (!host) return;
-    const lb = breadth && !pendingOf(breadth) && !unreadable(breadth) && breadth.sectors && breadth.sectors.rows ? breadth : null;
-    const reg = regime && !pendingOf(regime) && !unreadable(regime) && regime.sectors && regime.sectors.status === "ok" ? regime : null;
-    const useLive = lb && (!reg || !reg.sessionDate || (lb.session && lb.session >= reg.sessionDate));
-    const cells = [];
-    if (useLive) {
-      for (const [name, r] of Object.entries(lb.sectors.rows)) {
-        if (!r || r.status !== "ok" || !Array.isArray(r.net)) { cells.push({ name, etf: r && r.etf, net: null, path: [], why: r && r.reason }); continue; }
-        const path = r.net.map(isNum);
-        cells.push({ name, etf: r.etf, net: path.filter((x) => x !== null).pop() ?? null, path });
-      }
-    } else if (reg) {
-      for (const r of reg.sectors.rows || []) cells.push({ name: r.sector, etf: null, net: r.status === "ok" ? isNum(r.net) : null, path: pathOf(r.path), why: r.reason });
-    }
+    const lb = okFeed(breadth) && breadth.sectors && breadth.sectors.rows && typeof breadth.sectors.rows === "object" ? breadth : null;
+    const reg = okFeed(regime) && regime.sectors && regime.sectors.status === "ok" && Array.isArray(regime.sectors.rows) ? regime : null;
+    const liveCells = lb && newer(lb.session, reg) ? Object.entries(lb.sectors.rows).map(([name, r]) => {
+      const path = r && r.status === "ok" ? nums(r.net) : [];
+      return { name, net: lastOf(path), path, why: r && r.reason };
+    }) : [];
+    const nightCells = reg ? reg.sectors.rows.filter(Boolean).map((r) => ({ name: r.sector, net: r.status === "ok" ? isNum(r.net) : null, path: pathOf(r.path), why: r.reason })) : [];
+    const liveDrawn = liveCells.some((c) => drawn(c.path) >= 2);
+    const liveRead = liveCells.some((c) => c.net !== null);
+    const useLive = liveCells.length && (liveDrawn || !nightCells.length);
+    const cells = useLive ? liveCells : nightCells;
+    const opening = useLive && !liveDrawn && liveRead;
+    const fellBack = !useLive && liveRead;
     if (!cells.length) {
       if (!newGate(host, regime, "the sector tides", 160)) host.append(emptyLine("unavailable", "Neither the regime key nor the live breadth layer carried sector tides.", "sector tides", 160));
+      headMark("mkSecTidesCard", null);
       return;
     }
+    const liveTs = lb && Array.isArray(lb.sectors.t) ? lb.sectors.t : [];
     cells.sort((a, b) => (b.net ?? -Infinity) - (a.net ?? -Infinity));
     const peak = Math.max(1, ...cells.map((c) => Math.max(...c.path.filter((x) => x !== null).map(Math.abs), 0)));
     const grid = h("div", { class: "mk-smalls" });
@@ -1036,37 +1096,38 @@
     for (const c of cells) {
       const cell = h("div", { class: "mk-small", "data-tone": toneOf(c.net) },
         h("div", { class: "mk-small-h" }, h("span", { class: "mk-small-n", title: c.name }, TIDE_SHORT[c.name] || c.name),
-          h("b", { "data-tone": toneOf(c.net) }, c.net === null ? DASH : usdS(c.net))));
+          tb(c.net)));
       const plot = h("div", { class: "mk-small-p" });
       cell.append(plot);
       grid.append(cell);
-      if (c.path.filter((x) => x !== null).length >= 2) {
+      if (drawn(c.path) >= 2) {
         C.line(plot, { series: [{ values: c.path, format: usdS }], twoTone: true, zero: true, yDomain: [-peak, peak], height: 56,
-          xAxis: false, yTicks: false, endLabels: false, gutter: 4, label: c.name + " sector tide", readout: (i) => [C.part(c.name, "k"), h("b", { "data-tone": toneOf(c.path[i]) }, c.path[i] === null ? DASH : usdS(c.path[i]))] });
+          xAxis: false, yTicks: false, endLabels: false, gutter: 4, label: c.name + " sector tide", readout: (i) => [C.part(c.name, "k"), tb(c.path[i])] });
+      } else if (opening && c.net !== null) {
+        plot.append(h("div", { class: "mk-small-open", "aria-hidden": "true" }, h("i", { "data-tone": toneOf(c.net) })));
       } else {
         plot.append(h("div", { class: "mk-small-none" }, DASH, inlineHush("unavailable", c.why || "No path was carried for this sector.", c.name)));
       }
     }
-    staleMark("mkSecTidesCard", useLive ? lb.session : reg && reg.sessionDate, "sector tides");
+    const session = useLive ? lb.session : reg && reg.sessionDate;
+    staleMark("mkSecTidesCard", session, "sector tides", calmOf({ opening, fellBack, session, at: liveTs[liveTs.length - 1] }, "sector tide"));
     infoInto("mkSecTidesCard", "sector tides", () => ({
       title: "Sector tides", lead: "Net option premium through the session for each of the eleven sectors, on one shared scale so heights compare.",
-      facts: [["Source", useLive ? "live:breadth" : "regime"], ["Scale", "±" + usd(peak)]],
+      facts: [["Source", useLive ? "live:breadth" : "regime"], ["Session", session || null], ["Scale", "±" + usd(peak)]],
       notes: ["Net is net call premium minus net put premium, cumulative; the vendor's sector tide is assumed cumulative, and the session value is the last row."],
     }));
   }
 
   function paintEtfs(regime, live, breadth) {
-    const reg = regime && !pendingOf(regime) && !unreadable(regime) ? regime : null;
-    const lv = live && !pendingOf(live) && !unreadable(live) ? live : null;
-    const lb = breadth && !pendingOf(breadth) && !unreadable(breadth) ? breadth : null;
+    const reg = okFeed(regime);
     const tideOf = (T) => {
-      const liveSer = T === "IWM" ? lb && lb.etf && lb.etf.IWM : lv && lv.etf && lv.etf[T];
+      const lv = liveSer(live, breadth, (f) => f.etf && f.etf[T]);
       const regRow = reg && reg.etfTide && reg.etfTide.byEtf ? reg.etfTide.byEtf[T] : null;
-      if (liveSer && liveSer.status === "ok" && Array.isArray(liveSer.net) && (!reg || !reg.sessionDate || ((T === "IWM" ? lb.session : lv.session) >= reg.sessionDate))) {
-        const path = liveSer.net.map(isNum);
-        return { regRow, path, net: path.filter((x) => x !== null).pop() ?? null, src: T === "IWM" ? "live:breadth" : "live:market", session: T === "IWM" ? lb.session : lv.session };
-      }
-      if (regRow && regRow.status === "ok") return { regRow, path: pathOf(regRow.path), net: isNum(regRow.net), src: "regime", session: reg.sessionDate };
+      const regOk = Boolean(regRow && regRow.status === "ok");
+      const liveNewer = lv && newer(lv.session, reg);
+      const at = liveNewer && Array.isArray(lv.s.t) ? lv.s.t[0] : null;
+      if (liveNewer && (lv.n >= 2 || !regOk)) return { regRow, path: nums(lv.s.net), net: lastOf(nums(lv.s.net)), src: lv.src, session: lv.session, opening: lv.n < 2, at };
+      if (regOk) return { regRow, path: pathOf(regRow.path), net: isNum(regRow.net), src: "regime", session: reg.sessionDate, fellBack: Boolean(liveNewer), at };
       return { regRow, path: [], net: null, src: null, session: null };
     };
     const tides = { SPY: tideOf("SPY"), QQQ: tideOf("QQQ"), IWM: tideOf("IWM") };
@@ -1082,29 +1143,34 @@
       const flow = reg && reg.fundFlows && reg.fundFlows.byEtf ? reg.fundFlows.byEtf[T] : null;
       const f20 = flow && flow.status === "ok" ? isNum(flow.cum20Usd) : null;
       const z20 = flow && flow.status === "ok" ? isNum(flow.z20) : null;
-      if (src === null && !curve && !flow) {
+      const own = net === null && regRow ? isNum(regRow.ownNet) : null;
+      if (src === null && !curve && !flow && own === null) {
         if (!newGate(host, regime, "the " + T + " tide", 150)) host.append(emptyLine("unavailable", "No tide was carried for " + T + ".", T + " tide", 150));
+        headMark("mkEtf" + T + "Card", null);
         continue;
       }
-      const pend = (what) => ({ state: "pending", reason: what + " arrives with the regime key." });
+      const tideMetric = net !== null || own === null
+        ? UI.metric("Net premium", usdS(net), { tone: toneOf(net), state: gap(net, regime, regRow, "The " + T + " tide") })
+        : UI.metric("Own net", usdS(own), { tone: toneOf(own), sub: T + " options" });
       host.append(UI.metrics([
-        UI.metric("Net premium", net === null ? DASH : usdS(net), { tone: toneOf(net), state: net === null ? pend("The ETF tide") : null }),
-        UI.metric("Fund flow 20d", f20 === null ? DASH : usdS(f20), { tone: toneOf(f20), sub: z20 === null ? null : "z " + F.signed(z20, 1), state: f20 === null ? pend("The creation and redemption flow") : null }),
-        UI.metric("IV 30d", iv30 === null ? DASH : F.pct(iv30, 1), { state: iv30 === null ? pend("The fixed-tenor IV") : null }),
+        tideMetric,
+        UI.metric("Fund flow 20d", usdS(f20), { tone: toneOf(f20), sub: z20 === null ? null : "z " + F.signed(z20, 1), state: gap(f20, regime, flow, "The creation and redemption flow") }),
+        UI.metric("IV 30d", iv30 === null ? DASH : F.pct(iv30, 1), { state: gap(iv30, regime, curve, "The fixed-tenor IV") }),
       ], { min: 84 }));
       const plot = h("div", { class: "mk-etf-p" });
       host.append(plot);
-      if (path.filter((x) => x !== null).length >= 2) {
+      if (drawn(path) >= 2) {
         C.line(plot, { series: [{ values: path, format: usdS }], twoTone: true, zero: true, yDomain: shared, height: 84, xAxis: false, yTicks: false, gutter: 60,
-          label: T + " options tide", readout: (i) => [C.part(T, "k"), h("b", { "data-tone": toneOf(path[i]) }, path[i] === null ? DASH : usdS(path[i]))] });
+          label: T + " options tide", readout: (i) => [C.part(T, "k"), tb(path[i])] });
       }
-      staleMark("mkEtf" + T + "Card", session, T);
+      staleMark("mkEtf" + T + "Card", session, T, calmOf(tides[T], T + " tide"));
       infoInto("mkEtf" + T + "Card", T.toLowerCase(), () => ({
         title: T, lead: "The ETF's own options tide, its creation and redemption flow, and its fixed-tenor implied volatility.",
         facts: [["Tide source", src || DASH], ["Session", session], ["Scale", "shared by SPY, QQQ and IWM, " + usdS(shared[0]) + " to " + usdS(shared[1])], ["Own net premium", regRow ? usdS(regRow.ownNet) : null],
           ["Constituents agree", regRow && typeof regRow.agree === "boolean" ? (regRow.agree ? "yes" : "no") : null],
           ["Creations today", flow && flow.status === "ok" ? usdS(flow.changeUsd) : null], ["20-session z", z20 === null ? (flow && flow.reason) || null : F.signed(z20, 2)]],
-        notes: ["The dossier opens the full reader for " + T + "."],
+        notes: [net === null && own !== null ? "No " + T + " tide was carried, so Own net is the premium in " + T + "'s own options, not its holdings." : null,
+          "The dossier opens the full reader for " + T + "."],
       }));
     }
   }
@@ -1112,9 +1178,9 @@
   function paintExpiry(regime, breadth) {
     const host = clear("mkExpiry");
     if (!host) return;
-    const reg = regime && !pendingOf(regime) && !unreadable(regime) && regime.zeroDte && regime.zeroDte.status === "ok" ? regime.zeroDte : null;
-    const lb = breadth && !pendingOf(breadth) && !unreadable(breadth) && breadth.dte ? breadth.dte : null;
-    const useLive = lb && lb.share && isNum(lb.share.value) !== null && (!regime || !regime.sessionDate || (breadth.session && breadth.session >= regime.sessionDate));
+    const reg = okFeed(regime) && regime.zeroDte && regime.zeroDte.status === "ok" ? regime.zeroDte : null;
+    const lb = okFeed(breadth) && breadth.dte ? breadth.dte : null;
+    const useLive = lb && lb.share && isNum(lb.share.value) !== null && newer(breadth.session, regime);
     const share = useLive ? isNum(lb.share.value) : reg ? isNum(reg.share) : null;
     const zero = useLive ? isNum(lb.share.zeroNet) : reg ? isNum(reg.np0) : null;
     const weekly = useLive ? isNum(lb.share.weeklyNet) : reg ? isNum(reg.npw) : null;
@@ -1129,29 +1195,20 @@
       UI.metrics([
         UI.metric("0DTE net", usdS(zero), { tone: toneOf(zero) }),
         UI.metric("Weekly net", usdS(weekly), { tone: toneOf(weekly) }),
-        useLive ? null : UI.metric("Equities", reg && isNum(reg.equityShare) !== null ? F.pct(reg.equityShare, 0) : DASH, { sub: "of 0DTE", state: reg && isNum(reg.equityShare) !== null ? null : { state: "pending", reason: "The equity and index split arrives with the regime key." } }),
+        useLive ? null : UI.metric("Equities", reg && isNum(reg.equityShare) !== null ? F.pct(reg.equityShare, 0) : DASH, { sub: "of 0DTE", state: reg && isNum(reg.equityShare) !== null ? null : rowState(regime, regime && regime.zeroDte, "The equity and index split") }),
       ].filter(Boolean), { min: 90 })));
-    const pts = useLive ? [] : reg && reg.path && Array.isArray(reg.path.pts) ? reg.path.pts : [];
-    if (livePath && livePath.t.length >= 2) {
+    const pts = !useLive && reg && reg.path && Array.isArray(reg.path.pts) ? reg.path.pts : [];
+    const t0 = reg && reg.path ? Date.parse(reg.path.t0) : NaN;
+    const P = livePath ? { t: livePath.t, net: nums(livePath.net) }
+      : Number.isFinite(t0) ? { t: pts.map((p) => new Date(t0 + (isNum(p[0]) || 0) * 60000).toISOString()), net: pts.map((p) => isNum(p[1])), px: pts.map((p) => isNum(p[2])) } : null;
+    if (P && P.t.length >= 2) {
       const plot = h("div", { class: "mk-expiry-p" });
       host.append(plot);
-      const ax = timeAxis(livePath.t);
-      const net = livePath.t.map((_, i) => isNum(livePath.net[i]));
-      C.line(plot, { x: ax.x, xType: ax.xType, xTicks: ax.ticks(0), xFormat: (x) => String(x), series: [{ values: net, format: usdS }],
+      const ax = timeAxis(P.t);
+      C.line(plot, { x: ax.x, xType: ax.xType, xTicks: ax.ticks(0), xFormat: (x) => String(x), series: [{ values: P.net, format: usdS }],
         twoTone: true, zero: true, height: [120, 130, 140], yFormat: usdS, label: "0DTE net premium through the session",
-        readout: (i) => [C.part(clock(livePath.t[i]), "k"), h("b", { "data-tone": toneOf(net[i]) }, net[i] === null ? DASH : usdS(net[i]))] });
-    } else if (pts.length >= 2) {
-      const plot = h("div", { class: "mk-expiry-p" });
-      host.append(plot);
-      const x = pts.map((p) => isNum(p[0]));
-      const t0 = Date.parse(reg.path.t0);
-      const at = (m) => (Number.isFinite(t0) && m !== null ? new Date(t0 + m * 60000).toISOString() : null);
-      const mins = x.map((m) => nyMinutes(at(m)));
-      const ok = mins.every((m, i) => m !== null && (i === 0 || m > mins[i - 1]));
-      C.line(plot, { x: ok ? mins : x, xType: "number", xTicks: ok ? hourTicks(mins[0], mins[mins.length - 1], 2) : undefined, xFormat: (m) => String(m),
-        series: [{ values: pts.map((p) => isNum(p[1])), format: usdS }], twoTone: true, zero: true, height: [120, 130, 140],
-        yFormat: usdS, label: "0DTE net premium through the session",
-        readout: (i) => [C.part(clock(at(x[i])), "k"), h("b", { "data-tone": toneOf(pts[i][1]) }, usdS(pts[i][1])), C.part("SPY " + (isNum(pts[i][2]) === null ? DASH : isNum(pts[i][2]).toFixed(2)), "k")] });
+        readout: (i) => [C.part(clock(P.t[i]), "k"), tb(P.net[i]),
+          P.px ? C.part("SPY " + (P.px[i] === null ? DASH : P.px[i].toFixed(2)), "k") : null].filter(Boolean) });
     }
     staleMark("mkExpiryCard", useLive ? breadth.session : regime && regime.sessionDate, "net flow by expiry");
     infoInto("mkExpiryCard", "expiry", () => ({
@@ -1164,16 +1221,18 @@
   function paintVol(regime, liveVol) {
     const host = clear("mkVol");
     if (!host) return;
-    const reg = regime && !pendingOf(regime) && !unreadable(regime) ? regime : null;
+    const reg = okFeed(regime);
     const curve = reg && reg.volCurve && reg.volCurve.byIndex ? reg.volCurve.byIndex : null;
-    const lv = liveVol && !pendingOf(liveVol) && !unreadable(liveVol) && liveVol.index ? liveVol : null;
-    const useLive = lv && (!reg || !reg.sessionDate || (lv.session && lv.session >= reg.sessionDate));
+    const lv = okFeed(liveVol) && liveVol.index ? liveVol : null;
+    const useLive = lv && newer(lv.session, reg);
     const TEN = [1, 5, 7, 14, 30, 60, 90, 180, 365];
     const idx = {};
     for (const k of ["SPY", "QQQ", "IWM"]) {
       if (useLive && lv.index[k] && lv.index[k].status === "ok") {
         const r = lv.index[k];
-        idx[k] = { iv: TEN.map((d) => isNum(r["v" + d])), iv30: isNum(r.iv30), ivp: isNum(r.ivRank), ivpWord: "rank", rv: isNum(r.rv), rvWord: "RV",
+        const night = curve && curve[k] && curve[k].status === "ok" ? isNum(curve[k].rv20) : null;
+        const rv = isNum(r.rv);
+        idx[k] = { iv: TEN.map((d) => isNum(r["v" + d])), iv30: isNum(r.iv30), ivp: isNum(r.ivRank), ivpWord: "rank", rv: rv !== null ? rv : night, rvWord: rv !== null ? "RV" : "RV 20d",
           ts: isNum(r.v30) !== null && isNum(r.v90) ? r.v30 / r.v90 - 1 : null };
       } else if (curve && curve[k] && curve[k].status === "ok" && Array.isArray(curve[k].iv)) {
         const r = curve[k], ten = Array.isArray(r.tenors) ? r.tenors : TEN;
@@ -1191,12 +1250,11 @@
     const ic = reg && reg.impliedCorrelation && reg.impliedCorrelation.byIndex ? reg.impliedCorrelation.byIndex : {};
     const rho = ic.SPY && ic.SPY.status === "ok" ? ic.SPY : null;
     const vrp = spy.iv30 !== null && spy.rv !== null ? spy.iv30 - spy.rv : null;
-    const pend = (what) => ({ state: "pending", reason: what + " arrives with the regime key, which has not published yet." });
     host.append(UI.metrics([
       UI.metric("IV 30d", spy.iv30 === null ? DASH : F.pct(spy.iv30, 1), { sub: "SPY" + (spy.ivp === null ? "" : " · " + spy.ivpWord + " " + Math.round(spy.ivp)) }),
       UI.metric(spy.rvWord, spy.rv === null ? DASH : F.pct(spy.rv, 1), { sub: vrp === null ? null : "IV − RV " + F.pts(vrp) + " pts" }),
       UI.metric("Term", shape ? cap1(shape) : DASH, { tone: shape === "backwardation" ? "warn" : null, sub: spy.ts === null ? null : "30/90 " + F.pct(spy.ts, 1, true) }),
-      UI.metric("Correlation", rho ? isNum(rho.rho).toFixed(2) : DASH, { sub: rho && isNum(rho.dispersion) !== null ? "dispersion " + F.pts(rho.dispersion) + " pts" : null, state: rho ? null : pend("Implied correlation") }),
+      UI.metric("Correlation", rho ? isNum(rho.rho).toFixed(2) : DASH, { sub: rho && isNum(rho.dispersion) !== null ? "dispersion " + F.pts(rho.dispersion) + " pts" : null, state: rho ? null : rowState(regime, ic.SPY, "Implied correlation") }),
     ], { min: 100 }));
     const COL = { SPY: "--s-blue", QQQ: "--s-purple", IWM: "--s-teal" };
     const plot = h("div", { class: "mk-term" });
@@ -1222,7 +1280,7 @@
     const host = clear("mkRadar");
     const segHost = clear("mkRadarSeg");
     if (!host) return;
-    const radar = regime && !pendingOf(regime) && !unreadable(regime) && regime.volRadar ? regime.volRadar : null;
+    const radar = okFeed(regime) && regime.volRadar ? regime.volRadar : null;
     if (!radar || radar.status === "pending") {
       if (!newGate(host, regime, "the volatility radar", 240)) host.append(emptyLine("pending", "The volatility radar has not been published yet.", "volatility radar", 240));
       return;
@@ -1264,7 +1322,7 @@
   function paintGroups(regime) {
     const host = clear("mkGroups");
     if (!host) return;
-    const groups = regime && !pendingOf(regime) && !unreadable(regime) && regime.groups && regime.groups.status === "ok" ? regime.groups.rows || [] : null;
+    const groups = okFeed(regime) && regime.groups && regime.groups.status === "ok" ? regime.groups.rows || [] : null;
     if (!groups) {
       if (!newGate(host, regime, "the group flows", 200)) host.append(emptyLine("unavailable", "The regime key carried no group flows.", "group flows", 200));
       return;
@@ -1294,7 +1352,7 @@
   function paintUniverse(universe) {
     const host = clear("mkAdv");
     if (!host) return;
-    const u = universe && !pendingOf(universe) && !unreadable(universe) && universe.status === "ok" ? universe : null;
+    const u = okFeed(universe) && universe.status === "ok" ? universe : null;
     const col = u && u.cols && Array.isArray(u.cols.chg) ? u.cols.chg : null;
     const scale = u && u.units && u.units.chg ? isNum(u.units.chg[1]) : null;
     if (!col || !scale) {
@@ -1344,7 +1402,7 @@
     return fetch(path, { credentials: "same-origin", headers: { Accept: "application/json" } })
       .then((r) => {
         if (r.status === 401) { location.replace("/flows/"); return null; }
-        if (soon && r.status === 404) return { status: "pending", __route: 404 };
+        if (soon && r.status === 404) return { status: "pending" };
         if (!r.ok) throw new Error("HTTP " + r.status);
         if (path === "/api/flows/market") {
           const stamp = r.headers.get("X-Payload-Updated");
@@ -1378,7 +1436,7 @@
     const pill = $("mkStalePill");
     if (pill) {
       pill.replaceChildren();
-      if (message) pill.append(h("button", { class: "mk-pill", type: "button", "data-state": "stale", "aria-haspopup": "dialog", "aria-controls": "fxPop",
+      if (message) pill.append(h("button", { class: "mk-pill", type: "button", "data-state": "stale", ...POP,
         "data-info": disclose("Freshness", message, { state: "stale" }) }, glyph("clock"), h("span", null, "Stale")));
     }
   }
@@ -1396,7 +1454,8 @@
     optional("/api/flows/lk?k=breadth", true),
     optional("/api/flows/lk?k=vol", true),
   ]).then((all) => {
-    const [m, sectors, movers, pulse, boardLong, boardShort, regime, universe, live, breadth, liveVol] = all;
+    const [m, sectors, movers, pulse, boardLong, boardShort, regime, universe, liveFirst, breadthFirst, liveVol] = all;
+    let live = liveFirst, breadth = breadthFirst;
     if (!m) return;
     if (typeof m === "object") m.__updatedAt = marketUpdatedAt;
     const n = unreadable(m) ? null : isNum(m.n);
@@ -1404,7 +1463,7 @@
     const meta = $("mkMeta");
     if (level !== "ok") {
       marketSilence(level === "unreadable" ? unreadableLine(m, "the market level (/api/flows/market)")
-        : pendingLine("the market level", "It is built from the same screener response the board is drawn from, so it appears with the first pipeline run after it shipped."));
+        : pendingLine("the market level", "It appears with the next pipeline run."));
       if (statusEl) {
         statusEl.textContent = level === "unreadable" ? "The market level did not come back: " + m.__reason + "." : "No session has been measured yet.";
         statusEl.setAttribute("data-empty", level);
@@ -1449,12 +1508,12 @@
     textInfo("mkSectorsCard", "momentum", $("mktSectors"), "Momentum");
     paintMovers(movers);
     textInfo("mkMoversCard", "extremes", $("mktMovers"), "Extremes", () => ({ notes: [($("mktMovers") || {}).dataset && $("mktMovers").dataset.pop,
-      "Ranked over the whole screened universe, not over the board. Tickers here are plain text: a detail card exists only for the names the board went deep on."] }));
+      "Ranked over the whole screened universe, not over the board. Only names the board went deep on have a card."] }));
     paintAgainst([boardLong, boardShort], movers);
     textInfo("mkAgainstCard", "against the tape", $("mktAgainst"), "Against the tape", () => ({ notes: [
-      "The board score is a residual — sector and size are divided out before the ranking — while these premium lists are the raw level, so the two are allowed to disagree; a name where they do is one to read twice, not a signal to fade."] }));
+      "The board score is a residual, with sector and size divided out, while these lists are the raw level, so the two may disagree; a name where they do is one to read twice, not a signal to fade."] }));
     paintPulse(pulse);
-    paintTide(pulse, live);
+    paintTide(pulse, live, breadth);
     paintUniverse(universe);
     paintSectorTides(regime, breadth);
     paintEtfs(regime, live, breadth);
@@ -1466,8 +1525,16 @@
       UI.heartbeat({ keys: ["market", "breadth"], nightly: ["pulse"], page: "market",
         onChange(changed) {
           const keys = Array.isArray(changed) ? changed.map(String) : [];
-          if (keys.some((k) => /live:market/.test(k))) optional("/api/flows/lk?k=market", true).then((x) => { paintTide(pulse, x); paintEtfs(regime, x, breadth); });
-          if (keys.some((k) => /live:breadth/.test(k))) optional("/api/flows/lk?k=breadth", true).then((x) => { paintSectorTides(regime, x); paintExpiry(regime, x); });
+          for (const k of ["market", "breadth"]) {
+            if (keys.some((c) => c.includes("live:" + k))) optional("/api/flows/lk?k=" + k, true).then((x) => {
+              if (!okFeed(x)) return;
+              if (k === "market") live = x; else breadth = x;
+              paintSectorTides(regime, breadth);
+              paintExpiry(regime, breadth);
+              paintEtfs(regime, live, breadth);
+              paintTide(pulse, live, breadth);
+            }).catch(() => {});
+          }
         } });
     }
   }).catch((error) => {
