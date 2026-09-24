@@ -12,7 +12,9 @@ import * as L from "../shared/flows-live.js";
 import * as W from "../shared/flows-live-worker.js";
 import * as FAKE from "../scripts/flows-legs/live-fake.mjs";
 import { readHeldAlerts, boardPlan, liveWindow, runLive } from "../scripts/flows-legs/live.mjs";
-import { shapeNews } from "../scripts/flows-pipeline.mjs";
+import { shapeNews, liveCredential, liveCredentialSource, LIVE_BEARER_MARGIN_MS } from "../scripts/flows-pipeline.mjs";
+import * as O from "../shared/flows-oidc.js";
+import { oidcIssuer } from "./live-stubs.mjs";
 
 const ROOT = new URL("../", import.meta.url);
 const read = (p) => readFileSync(new URL(p, ROOT), "utf8");
@@ -596,11 +598,15 @@ const T = (iso) => Date.parse(iso);
   ok(puts.length >= 10 && puts.every((k) => /^live:/.test(k)), `the live leg publishes only live:* keys (${puts.join(", ")})`);
   ok(/if \(LIVE_MODE && !\/\^live:\[a-z\]\+\(\?::\[a-z\]\+\)\?\$\/\.test\(key\)\) \{\s*throw/.test(pipeline),
     "and publish() itself throws on any other key in --live mode, before the network");
-  ok(/LIVE_MODE \? process\.env\.FLOWS_LIVE_TOKEN : process\.env\.FLOWS_INGEST_TOKEN/.test(pipeline),
-    "LAYER 2 (credential): --live authenticates with the live token only");
+  ok(/LIVE_MODE \? await liveCredential\(\) : process\.env\.FLOWS_INGEST_TOKEN/.test(pipeline),
+    "LAYER 2 (credential): --live authenticates with a live credential only");
+  const credFn = pipeline.slice(pipeline.indexOf("export function liveCredentialSource"), pipeline.indexOf("async function ingestHeaders"));
+  ok(credFn.length > 0 && !/FLOWS_INGEST_TOKEN/.test(credFn),
+    "and neither the live credential nor its source ever falls back to the nightly token");
   const wf = read(".github/workflows/flows-live.yml");
-  ok(!/FLOWS_INGEST_TOKEN/.test(wf) && /FLOWS_LIVE_TOKEN: \$\{\{ secrets\.FLOWS_LIVE_TOKEN \}\}/.test(wf),
-    "and the live workflow's environment does not contain the nightly token at all");
+  ok(!/FLOWS_INGEST_TOKEN|FLOWS_LIVE_TOKEN/.test(wf) && /permissions:\s*\n\s*contents: read\s*\n\s*id-token: write/.test(wf),
+    "and the live workflow holds no shared secret at all: it proves itself with a GitHub OIDC token minted per run");
+  ok(/LIVE_READY: \$\{\{ secrets\.UW_API_KEY != '' \}\}/.test(wf), "so the vendor key is the only secret it waits for");
   ok(/concurrency:\s*\n\s*group: flows-live\s*\n\s*cancel-in-progress: false/.test(wf) && /timeout-minutes: 8/.test(wf),
     "one live run at a time, eight minutes at most");
   ok(/cron: "7,22,37,52 13-20 \* \* 1-5"/.test(wf), "with a backup schedule that exits at once outside the session");
@@ -808,11 +814,136 @@ const T = (iso) => Date.parse(iso);
   ok(!/localStorage|sessionStorage/.test(src), "and it touches no browser storage");
 }
 
+{
+  const issuer = await oidcIssuer({ kid: "k1" });
+  const other = await oidcIssuer({ kid: "k1" });
+  const now = T("2026-09-24T14:00:00Z");
+  const s = Math.floor(now / 1000);
+  const keys = [issuer.jwk];
+  const good = issuer.claims(now);
+  const token = await issuer.sign(good);
+  deep(await O.verifyLiveOidc(token, keys, now), { ok: true, claims: good },
+    "OIDC: a GitHub token for this repository's flows-live.yml on main, with this audience and inside its window, is the live credential");
+  const cases = [
+    ["iss", "https://token.actions.githubusercontent.com.evil", "iss"],
+    ["aud", "https://github.com/anilkaya001", "aud"],
+    ["aud", [O.LIVE_OIDC.audience], "aud"],
+    ["repository", "someone/anilkaya.org", "repository"],
+    ["repository_id", "1", "repository"],
+    ["repository_owner_id", "2", "repository"],
+    ["workflow_ref", "anilkaya001/anilkaya.org/.github/workflows/flows-pipeline.yml@refs/heads/main", "workflow"],
+    ["workflow_ref", "anilkaya001/anilkaya.org/.github/workflows/flows-live.yml@refs/heads/feature", "workflow"],
+    ["job_workflow_ref", "someone/else/.github/workflows/x.yml@refs/heads/main", "workflow"],
+    ["ref", "refs/heads/feature", "ref"],
+    ["event_name", "pull_request", "event"],
+    ["event_name", "push", "event"],
+    ["runner_environment", "self-hosted", "runner"],
+    ["exp", s - 61, "expired"],
+    ["iat", s + 120, "early"],
+    ["nbf", s + 120, "early"],
+    ["exp", s + 3700, "lifetime"],
+    ["iat", "0", "time"],
+  ];
+  for (const [field, value, why] of cases) {
+    eq((await O.verifyLiveOidc(await issuer.sign({ ...good, [field]: value }), keys, now)).why, why,
+      `OIDC: ${field} = ${JSON.stringify(value)} is refused as ${why}`);
+  }
+  eq((await O.verifyLiveOidc(token, keys, now + 359_000)).ok, true, "a token is honoured to its exp plus a minute of skew");
+  eq((await O.verifyLiveOidc(token, keys, now + 361_000)).why, "expired", "and not a second after");
+  eq((await O.verifyLiveOidc(await issuer.sign(good, { alg: "none" }), keys, now)).why, "alg", "alg none is refused");
+  eq((await O.verifyLiveOidc(await issuer.sign(good, { alg: "HS256" }), keys, now)).why, "alg",
+    "and so is HS256, so the public key can never be used as an HMAC secret");
+  eq((await O.verifyLiveOidc(await issuer.sign(good, { kid: "" }), keys, now)).why, "kid", "a token without a key id is refused");
+  eq((await O.verifyLiveOidc(await issuer.sign(good, { kid: "k9" }), keys, now)).why, "unknown-kid",
+    "and one naming a key GitHub does not publish");
+  eq((await O.verifyLiveOidc(await other.sign(good), keys, now)).why, "signature",
+    "a token signed by any other key under the same kid is refused on its signature");
+  const [h, , sig] = token.split(".");
+  const forged = h + "." + Buffer.from(JSON.stringify({ ...good, run_id: "2" })).toString("base64url") + "." + sig;
+  eq((await O.verifyLiveOidc(forged, keys, now)).why, "signature", "and a single edited claim breaks the signature");
+  for (const bad of ["", "a.b", "a.b.c.d", "a..c", "e30.e30.@@", "x".repeat(9000), token + "="]) {
+    eq((await O.verifyLiveOidc(bad, keys, now)).why, "malformed", `a malformed token (${bad.slice(0, 12)}…) is refused before any crypto`);
+  }
+  ok(!O.looksLikeJwt("test-live-token-abcdefghijklmnopqrstuv") && O.looksLikeJwt(token),
+    "a static hex token never takes the OIDC path, and a JWT always does");
+
+  for (const file of ["worker.js", "shared/flows-live-worker.js"]) {
+    ok(!/redirect:\s*"error"/.test(read(file)),
+      `${file} never asks workerd for redirect "error", which it rejects with a TypeError on every fetch`);
+  }
+  let hits = 0;
+  const served = (list) => async (url, init) => {
+    hits++;
+    ok(init && init.redirect === "manual", "the JWKS fetch follows no redirect, in the one form workerd accepts");
+    return new Response(JSON.stringify({ keys: list }), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  W.resetJwksMemo();
+  eq(await W.oidcKind(token, {}, { fetchImpl: served(keys), now }), "live", "the Worker grants a verified OIDC token the live role");
+  eq(await W.oidcKind(token, {}, { fetchImpl: served(keys), now: now + 30_000 }), "live", "from its isolate's JWKS memo");
+  eq(hits, 1, "one JWKS fetch serves every write in the memo's hour");
+  W.resetJwksMemo(); hits = 0;
+  eq(await W.oidcKind(await issuer.mint(now, { aud: "x" }), {}, { fetchImpl: served(keys), now }), null,
+    "a token that fails its claims is refused");
+  eq(hits, 0, "before it can cost a JWKS fetch");
+  W.resetJwksMemo(); hits = 0;
+  const rotated = await issuer.sign(good, { kid: "k2" });
+  eq(await W.oidcKind(rotated, {}, { fetchImpl: served(keys), now }), null, "an unknown kid is refused");
+  eq(hits, 1, "and a refetch for it waits out the retry window");
+  const next = await oidcIssuer({ kid: "k2" });
+  eq(await W.oidcKind(await next.mint(now + 61_000), {}, { fetchImpl: served([issuer.jwk, next.jwk]), now: now + 61_000 }), "live",
+    "a minute later the unknown kid refetches the set, so a rotated GitHub key is honoured within the minute");
+  eq(hits, 2, "with exactly one more fetch");
+  W.resetJwksMemo();
+  eq(await W.oidcKind(token, {}, { fetchImpl: async () => { throw new Error("down"); }, now }), null,
+    "an unreachable JWKS fails closed");
+  W.resetJwksMemo();
+  eq(await W.oidcKind(token, {}, { fetchImpl: async () => new Response("nope", { status: 503 }), now }), null, "and so does a 5xx");
+  W.resetJwksMemo();
+  let asked = null;
+  await W.oidcKind(token, {}, { fetchImpl: async (url) => { asked = url; return new Response("{}"); }, now });
+  eq(asked, O.LIVE_OIDC.jwks, "the key set comes from GitHub's own issuer by default");
+  W.resetJwksMemo();
+  eq(await W.tokenKind(token, { FLOWS_INGEST_TOKEN: "n", FLOWS_LIVE_TOKEN: "l" }, (a, b) => a === b), null,
+    "the static comparison never mistakes a JWT for a configured token");
+  deep([W.ingestScope("live:breadth", "POST", "live").ok, W.ingestScope("board:long", "POST", "live").ok,
+    W.ingestScope("live:breadth", "DELETE", "live").ok], [true, false, false],
+  "and the OIDC role IS the live role: live:* writes only, no nightly key, no delete");
+
+  eq(liveCredentialSource({ FLOWS_LIVE_TOKEN: "x" }), "the live token", "a local --live run may still use a static live token");
+  eq(liveCredentialSource({ ACTIONS_ID_TOKEN_REQUEST_URL: "u", ACTIONS_ID_TOKEN_REQUEST_TOKEN: "t" }), "GitHub OIDC",
+    "an Actions job with id-token: write proves itself with OIDC");
+  eq(liveCredentialSource({ FLOWS_INGEST_TOKEN: "n" }), null, "and the nightly token is never a live credential");
+  const requests = [];
+  const env = {
+    ACTIONS_ID_TOKEN_REQUEST_URL: "https://pipelines.actions.githubusercontent.com/x/idtoken?api-version=2.0",
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN: "req-token", FLOWS_INGEST_TOKEN: "nightly",
+  };
+  const idFetch = async (url, init) => {
+    requests.push({ url: new URL(url), auth: init.headers.Authorization, redirect: init.redirect });
+    return new Response(JSON.stringify({ value: token }), { status: 200 });
+  };
+  const far = now + 10 * 3600_000;
+  eq(await liveCredential({ env, now, fetchImpl: idFetch }), token, "the pipeline mints the OIDC token");
+  const first = requests[0];
+  deep([requests.length, first.url.searchParams.get("audience"), first.url.searchParams.get("api-version"), first.auth,
+    first.redirect], [1, O.LIVE_OIDC.audience, "2.0", "Bearer req-token", "error"],
+  "once, for the Worker's audience, on the runner's own request URL and bearer");
+  await liveCredential({ env, now: now + 300_000 - LIVE_BEARER_MARGIN_MS - 1000, fetchImpl: idFetch });
+  eq(requests.length, 1, "and reuses it while more than a minute of its life is left");
+  await liveCredential({ env, now: now + 300_000 - LIVE_BEARER_MARGIN_MS + 1000, fetchImpl: idFetch });
+  eq(requests.length, 2, "then mints the next before the Worker could see it expire");
+  await assert.rejects(liveCredential({ env: {}, now: far, fetchImpl: idFetch }), /id-token: write/,
+    "a job without the permission fails with the line that fixes it");
+  await assert.rejects(liveCredential({ env, now: far, fetchImpl: async () => new Response("no", { status: 403 }) }),
+    /HTTP 403/, "and a refused request names its status");
+  checks += 2;
+}
+
 console.log(`✓ flows-live: ${checks} assertions — one threshold table in code; phases on the Eastern clock at every ` +
   `boundary under EDT and EST, a tape-derived holiday and early close; states and absolute instants for every class; ` +
   `the Tier 1 and Tier 2 clocks, in-flight dispatch and a once-only nightly retry; probe rows shaped to known answers ` +
   `with absent inputs null, never zero; the 0DTE share, lean, term slope and front inversion, the scaled strip series ` +
   `and its session reset; gamma rotation with carried readings under their own read time; the live alert union with ` +
   `its empty-read guard, cursor, floor and session reset; read-time overlays instead of a second writer; one writer ` +
-  `per key and a token per namespace; full-session byte ceilings; the five-layer archive immutability scan; the ` +
+  `per key and a credential per namespace, the live one a GitHub OIDC token checked claim by claim; full-session byte ceilings; the five-layer archive immutability scan; the ` +
   `--live dry run; and a client helper that only compares clocks`);

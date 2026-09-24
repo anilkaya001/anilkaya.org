@@ -54,6 +54,7 @@ import { makeFakeVendor } from "./flows-legs/fake-vendor.mjs";
 import { makeCardXStore, publishCardX } from "./flows-legs/card-x.mjs";
 import { buildIndexDossiers } from "./flows-legs/index-dossier.mjs";
 import { runLive, dryLiveTicks, readHeldAlerts, LIVE_READ_PACE_MS } from "./flows-legs/live.mjs";
+import { LIVE_OIDC, actionsIdToken, jwtExpiry } from "../shared/flows-oidc.js";
 
 const ARGS = new Set(process.argv.slice(2));
 const DRY_RUN = ARGS.has("--dry-run");
@@ -70,9 +71,26 @@ function ingestURL() {
 
 const INGEST_UA = "anilkaya-flows-pipeline/1 (+https://github.com/anilkaya001/anilkaya.org)";
 
-function ingestHeaders({ json = false } = {}) {
+export const LIVE_BEARER_MARGIN_MS = 60_000;
+let liveBearer = { token: null, exp: 0 };
+
+export function liveCredentialSource(env = process.env) {
+  if (env.FLOWS_LIVE_TOKEN) return "the live token";
+  if (env.ACTIONS_ID_TOKEN_REQUEST_URL && env.ACTIONS_ID_TOKEN_REQUEST_TOKEN) return "GitHub OIDC";
+  return null;
+}
+
+export async function liveCredential({ env = process.env, now = Date.now(), fetchImpl = fetch } = {}) {
+  if (env.FLOWS_LIVE_TOKEN) return env.FLOWS_LIVE_TOKEN;
+  if (liveBearer.token && liveBearer.exp - now > LIVE_BEARER_MARGIN_MS) return liveBearer.token;
+  const token = await actionsIdToken(env, { audience: LIVE_OIDC.audience, fetchImpl });
+  liveBearer = { token, exp: jwtExpiry(token) };
+  return token;
+}
+
+async function ingestHeaders({ json = false } = {}) {
   const headers = {
-    Authorization: "Bearer " + (LIVE_MODE ? process.env.FLOWS_LIVE_TOKEN : process.env.FLOWS_INGEST_TOKEN),
+    Authorization: "Bearer " + (LIVE_MODE ? await liveCredential() : process.env.FLOWS_INGEST_TOKEN),
     "User-Agent": INGEST_UA,
   };
   if (json) headers["Content-Type"] = "application/json";
@@ -1694,7 +1712,7 @@ async function readStoredOnce(key) {
       ingestURL() + "?key=" + encodeURIComponent(key),
       {
         redirect: "error",
-        headers: ingestHeaders(),
+        headers: await ingestHeaders(),
       },
     );
     if (!response.ok) return { payload: null, failed: true, status: response.status };
@@ -2738,7 +2756,7 @@ async function retire(key) {
       {
         method: "DELETE",
         redirect: "error",
-        headers: ingestHeaders(),
+        headers: await ingestHeaders(),
       },
     );
     return { ok: response.ok, status: response.status };
@@ -2819,7 +2837,7 @@ async function publish(key, payload) {
 
       redirect: "error",
 
-      headers: ingestHeaders({ json: true }),
+      headers: await ingestHeaders({ json: true }),
       body,
     },
   );
@@ -3996,12 +4014,15 @@ function indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, co
 async function runLiveMode() {
   console.log(DRY_RUN ? "Flows live layer — DRY RUN (synthetic, no network)" : "Flows live layer — live");
   if (!DRY_RUN) {
-    const missing = ["UW_API_KEY", "FLOWS_LIVE_TOKEN"].filter((k) => !process.env[k]);
+    const missing = ["UW_API_KEY"].filter((k) => !process.env[k]);
+    const source = liveCredentialSource();
+    if (!source) missing.push("FLOWS_LIVE_TOKEN (or a GitHub Actions job with id-token: write)");
     if (missing.length) {
       throw new Error(`missing required environment variable${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}` +
         " — the live mode refuses the nightly FLOWS_INGEST_TOKEN on purpose");
     }
-    console.log(`publishing to ${ingestURL()}`);
+    await liveCredential();
+    console.log(`publishing to ${ingestURL()} as ${source}`);
   }
   delayFloorMs = Math.max(delayFloorMs, LIVE_READ_PACE_MS);
   delayMs = Math.max(delayMs, LIVE_READ_PACE_MS);

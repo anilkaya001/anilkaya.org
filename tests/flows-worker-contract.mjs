@@ -1331,15 +1331,17 @@ try {
     const { phaseAt } = await import("../shared/flows-freshness.js");
     const { signFlowsSession } = await import("../shared/flows-auth.js");
     const { fakeFlowAlerts } = await import("../scripts/flows-legs/live-fake.mjs");
-    const { startStubVendor, startStubGithub } = await import("./live-stubs.mjs");
+    const { startStubVendor, startStubGithub, oidcIssuer } = await import("./live-stubs.mjs");
     const et = (iso) => Date.parse(iso);
     const marketNow = { value: et("2026-09-23T10:06:00-04:00") };
     const vendor = await startStubVendor({ marketSession: "2026-09-23", marketNow, tapeSession: "2026-09-22" });
-    const github = await startStubGithub();
+    const issuer = await oidcIssuer();
+    const github = await startStubGithub({ jwks: issuer.jwks });
     const LIVE_TOKEN = "test-live-token-abcdefghijklmnopqrstuv";
     const live = await startWorker({ extraVars: [
       `FLOWS_INGEST_TOKEN:${INGEST_TOKEN}`, `FLOWS_LIVE_TOKEN:${LIVE_TOKEN}`, "UW_API_KEY:stub-uw-key",
       `UW_BASE:${vendor.base}`, "GITHUB_DISPATCH_TOKEN:stub-dispatch-token", `GITHUB_API_BASE:${github.base}`,
+      `GITHUB_OIDC_JWKS:${github.base}/.well-known/jwks`,
     ] });
     const L = (p) => live.baseURL + p;
     const cookie = { Cookie: "flows_session=" + await signFlowsSession(FLOWS_TEST_USER, SESSION_SECRET, 600, "1") };
@@ -1388,6 +1390,29 @@ try {
       eq((await w1.json()).stored, "written", "and is written");
       const w0 = await ingest("live:breadth", "POST", LIVE_TOKEN, breadth("2026-09-23T14:05:00.000Z"));
       eq((await w0.json()).stored, "older-than-held", "a delayed older read never overwrites a newer one");
+      const oidc = await issuer.mint();
+      const viaOidc = await ingest("live:breadth", "POST", oidc, breadth("2026-09-23T14:01:00.000Z"));
+      eq(viaOidc.status, 200, "OIDC: the live workflow's own GitHub token is accepted, with no shared secret anywhere");
+      eq((await viaOidc.json()).stored, "older-than-held", "and its write meets the same read-time rule as any live write");
+      const oidcBoard = await ingest("board:long", "POST", oidc, board);
+      eq(oidcBoard.status, 403, "OIDC: the token is refused on the nightly board");
+      eq((await oidcBoard.json()).error.code, "live_token_scope", "because the role it earns is the live role");
+      eq((await ingest("live:breadth", "DELETE", oidc)).status, 403, "and it deletes nothing");
+      const otherBranch = await issuer.mint(Date.now(), {
+        workflow_ref: "anilkaya001/anilkaya.org/.github/workflows/flows-live.yml@refs/heads/feature",
+        job_workflow_ref: "anilkaya001/anilkaya.org/.github/workflows/flows-live.yml@refs/heads/feature",
+        ref: "refs/heads/feature",
+      });
+      eq((await ingest("live:breadth", "POST", otherBranch, breadth("2026-09-23T14:01:00.000Z"))).status, 401,
+        "OIDC: the same workflow run from any branch but main is refused");
+      eq((await ingest("live:breadth", "POST", await issuer.mint(Date.now(), { aud: "https://github.com/anilkaya001" }),
+        breadth("2026-09-23T14:01:00.000Z"))).status, 401, "and so is a token minted for another audience");
+      eq((await ingest("live:breadth", "POST", await issuer.mint(Date.now() - 3600_000),
+        breadth("2026-09-23T14:01:00.000Z"))).status, 401, "or one that has expired");
+      const stranger = await oidcIssuer();
+      eq((await ingest("live:breadth", "POST", await stranger.mint(), breadth("2026-09-23T14:01:00.000Z"))).status, 401,
+        "or one signed by a key the issuer never published");
+      ok(github.jwksHits() >= 1, "the Worker read the key set from the configured issuer");
 
       eq((await ingest("board:long:2026-01-02", "POST", INGEST_TOKEN, { ...board, sessionDate: "2026-01-02" })).status, 200,
         "a dated archive row is created");
@@ -1536,9 +1561,11 @@ try {
       const q1 = await fetch(L("/api/flows/live?t=AAPL"), { headers: cookie });
       const qb = await q1.json();
       ok(qb.status === "ok" && qb.price === 101.5, "the quote reads the vendor's stock-state");
-      const phase = phaseAt(Date.now()).phase;
+      const phase = phaseAt(Date.now(), { day: "2026-09-24", trading: 0 }).phase;
       eq(q1.headers.get("x-quote-ttl"), String(LIVE_BUDGET.quoteTtlS[phase]),
-        `its cache life follows the market phase (${phase}): 5 s in session, 30 s pre and post, 6 h closed`);
+        `its cache life follows the market phase on the Worker's own clock (${phase}): 5 s in session, 30 s pre and ` +
+        "post, 6 h closed — a clock that holds the tape-derived holiday this suite marked, so a run on that real date " +
+        "expects closed");
       eq(q1.headers.get("x-fresh-class"), "quote", "and it carries the quote class");
       const before = vendor.count(/stock-state$/);
       const q2 = await fetch(L("/api/flows/live?t=AAPL"), { headers: cookie });

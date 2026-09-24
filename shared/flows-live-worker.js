@@ -7,6 +7,9 @@ import {
   FRESH_CLASSES, PHASE_MINUTES, LIVE_CLOCK, freshHeaders, pendingHeaders, phaseAt, tier1Due, liveDispatchDue,
   liveStalled, nightlyDispatchDue, easternDay, easternInstant, sessionOpen,
 } from "./flows-freshness.js";
+import { LIVE_OIDC, looksLikeJwt, inspectLiveOidc, rsaKeys, jwkFor, rsaVerify } from "./flows-oidc.js";
+
+export { looksLikeJwt };
 
 export const LIVE_SCHEMA_SQL = Object.freeze([
   "CREATE TABLE IF NOT EXISTS flows_live (id TEXT PRIMARY KEY CHECK (id GLOB 'live:*'), payload TEXT NOT NULL, " +
@@ -313,6 +316,43 @@ export function tokenKind(offered, env, equal) {
   if (env.FLOWS_INGEST_TOKEN && equal(offered, env.FLOWS_INGEST_TOKEN)) return "nightly";
   if (env.FLOWS_LIVE_TOKEN && equal(offered, env.FLOWS_LIVE_TOKEN)) return "live";
   return null;
+}
+
+export const JWKS_TTL_MS = 60 * 60 * 1000;
+export const JWKS_RETRY_MS = 60 * 1000;
+let jwksMemo = { url: null, keys: null, at: 0, triedAt: 0 };
+
+export function resetJwksMemo() {
+  jwksMemo = { url: null, keys: null, at: 0, triedAt: 0 };
+}
+
+function jwksUrl(env) {
+  const raw = env && typeof env.GITHUB_OIDC_JWKS === "string" ? env.GITHUB_OIDC_JWKS.trim() : "";
+  return raw || LIVE_OIDC.jwks;
+}
+
+async function jwksKeys(env, fetchImpl, now, force) {
+  const url = jwksUrl(env);
+  if (jwksMemo.url !== url) jwksMemo = { url, keys: null, at: 0, triedAt: 0 };
+  const fresh = !!jwksMemo.keys && now - jwksMemo.at < JWKS_TTL_MS;
+  if ((fresh && !force) || now - jwksMemo.triedAt < JWKS_RETRY_MS) return jwksMemo.keys;
+  jwksMemo.triedAt = now;
+  const keys = await fetchImpl(url, {
+    redirect: "manual", signal: AbortSignal.timeout(4000),
+    headers: { Accept: "application/json", "User-Agent": "anilkaya-flows-worker" },
+  }).then((res) => (res.ok ? res.json().then(rsaKeys) : [])).catch(() => []);
+  if (keys.length) jwksMemo = { url, keys, at: now, triedAt: now };
+  return jwksMemo.keys;
+}
+
+export async function oidcKind(offered, env, { fetchImpl = fetch, now = Date.now() } = {}) {
+  if (!looksLikeJwt(offered)) return null;
+  const seen = inspectLiveOidc(offered, now);
+  if (!seen.ok) return null;
+  const kid = seen.jwt.header.kid;
+  let jwk = jwkFor(await jwksKeys(env, fetchImpl, now, false), kid);
+  if (!jwk) jwk = jwkFor(await jwksKeys(env, fetchImpl, now, true), kid);
+  return jwk && (await rsaVerify(seen.jwt, jwk)) ? "live" : null;
 }
 
 export function ingestScope(key, method, kind) {
