@@ -361,6 +361,15 @@
 .bd-table[data-board="watch"] .bd-row {
   --cols: 24px minmax(150px, 2fr) minmax(116px, 1.4fr) minmax(40px, 0.5fr) minmax(52px, 0.6fr) minmax(76px, 0.9fr) minmax(56px, 0.7fr) minmax(60px, 0.7fr) minmax(56px, 0.7fr) minmax(44px, 0.55fr) minmax(44px, 0.55fr);
 }
+@container bd (min-width: 980px) {
+  .bd-table[data-board="side"][data-si="0"] .bd-row {
+    --cols: 24px minmax(168px, 2.3fr) minmax(104px, 1.5fr) minmax(52px, 0.6fr) minmax(76px, 0.9fr) minmax(56px, 0.7fr) minmax(76px, 0.9fr) minmax(54px, 0.7fr) minmax(30px, 0.4fr) minmax(34px, 0.45fr) minmax(34px, 0.45fr);
+  }
+  .bd-table[data-board="side"][data-si="0"][data-idea="1"] .bd-row {
+    --cols: 24px minmax(168px, 2.3fr) minmax(104px, 1.5fr) minmax(52px, 0.6fr) minmax(76px, 0.9fr) minmax(56px, 0.7fr) minmax(76px, 0.9fr) minmax(54px, 0.7fr) minmax(30px, 0.4fr) minmax(34px, 0.45fr) minmax(34px, 0.45fr) minmax(40px, 0.5fr);
+  }
+  .bd-table[data-board="side"][data-si="0"] .bd-c[data-col="siP"] { display: none; }
+}
 @container bd (max-width: 979.98px) {
   .bd-table[data-board="side"] .bd-row, .bd-table[data-board="side"][data-idea="1"] .bd-row {
     --cols: 24px minmax(160px, 2.3fr) minmax(96px, 1.5fr) minmax(50px, 0.6fr) minmax(76px, 0.9fr) minmax(56px, 0.7fr) minmax(72px, 0.9fr) minmax(56px, 0.7fr) minmax(28px, 0.4fr);

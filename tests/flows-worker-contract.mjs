@@ -1561,7 +1561,12 @@ try {
         "invocation keeps a cold isolate inside 10 ms of CPU");
       eq(first.session, "2026-09-22", "and dates itself from the vendor's rows, not the wall clock");
       const second = await fetch(L("/api/flows/tape?t=AAPL"), { headers: cookie });
-      eq(second.headers.get("x-tape"), "stale-refreshing", "the next reader is served at once while the missing leg refreshes");
+      const ahead = hows.includes("stale-refreshing");
+      eq(second.headers.get("x-tape"), ahead ? "stale-leased" : "stale-refreshing",
+        "the next reader is served at once while the missing leg refreshes" + (ahead
+          ? " — a racer that reached the Worker after the first refresh landed already took the lease for that leg " +
+            `(${hows.join(", ")}), so this reader finds it held and does not start a second one`
+          : ""));
       let legs = 0;
       for (let i = 0; i < 20 && legs !== 3; i++) {
         await new Promise((r) => setTimeout(r, 250));

@@ -614,6 +614,7 @@
     const cols = shownCols();
     table.style.setProperty("--n", String(cols.length));
     table.dataset.idea = st.hasIdea ? "1" : "0";
+    table.dataset.si = !WATCH && st.uniState.state === "ok" && !st.rows.some((r) => uniPct("si", r) !== null) ? "0" : "1";
     headRow.replaceChildren(...cols.map((c) => {
       const cell = h("div", { class: "bd-c", role: "columnheader", "data-col": c.key });
       const live = sortable(c);
