@@ -366,8 +366,9 @@ try {
       "the hero splits the net into its two legs and the zero-day share");
     eq(hero.legs[0].v, "+$88.1M", "the call leg at the last point");
     eq(hero.legs[1].v, "\u2212$12.0M", "and the put leg, signed with U+2212");
-    ok(hero.legs[2].silent && hero.legs[2].state === "pending",
-      `a 0DTE leg no key carried is an em dash wearing the pending glyph (${JSON.stringify(hero.legs[2])})`);
+    ok(hero.legs[2].silent && hero.legs[2].state === "quiet",
+      `a 0DTE leg no key carried for a stale session is an em dash wearing the quiet glyph, since no later read ` +
+      `will fill it; the pending glyph is kept for a live tide (${JSON.stringify(hero.legs[2])})`);
     eq(hero.svg, 1, "the tide river is drawn");
     ok(/net premium/i.test(hero.label || ""), `and names what it plots to assistive tech (${hero.label})`);
 
@@ -411,6 +412,8 @@ try {
       const box = document.getElementById("hmVerdict");
       return {
         title: document.getElementById("fxTitle").textContent.trim(),
+        bar: document.getElementById("fxBarT").textContent.trim(),
+        cls: box.className,
         line: document.getElementById("hmVerdictT").textContent.trim(),
         by: box.querySelector(".hm-verdict-by").textContent.trim(),
         mark: (box.querySelector(".hm-mark") || {}).dataset?.state || null,
@@ -419,10 +422,13 @@ try {
     });
     eq(head.title, "Last session",
        "a session that is not today's Eastern trading day is titled as the last session, never as Today over an older date");
+    eq(head.bar, "Last session", "and the compact toolbar title that replaces the heading on scroll says the same");
     eq(head.line, "Bearish premium: flow bias \u22122.1%, 12 names net sold against 9 bought.",
        "with no written summary the verdict line is computed from the page's own flow bias and breadth");
     eq(head.by, "Computed", "and is attributed to the arithmetic rather than to Neuron");
     eq(head.mark, "quiet", "under a quiet mark");
+    ok(/\bis-computed\b/.test(head.cls) && !/\bis-pending\b/.test(head.cls),
+       `and the card leaves its pending styling, so the computed line is not dimmed like a placeholder (${head.cls})`);
     eq(head.pending, 0, "never a bare pending sign where a reading exists");
 
     eq(tiles["Flow bias"]?.v, "−2.1%",
@@ -953,6 +959,11 @@ try {
     await page.waitForSelector("#ccMetaDate[datetime]", { timeout: 15000 });
     eq(await page.locator("#fxTitle").textContent(), "Today",
        "and only a session that IS today's Eastern date is titled Today");
+    const served = await page.evaluate(() => fetch("/flows/", { credentials: "same-origin" }).then((r) => r.text()));
+    ok(/<h1 id="fxTitle">Session<\/h1>/.test(served),
+       "the server renders a neutral heading, so no reader without script, and no first paint, sees Today over an older session");
+    ok(/<title>Flows — Home<\/title>/.test(served) && !/<title>[^<]*Today/.test(served),
+       "and the document title names the page, not a day it cannot know");
     for (const side of ["long", "short"]) await page.unroute("**/api/flows/board?side=" + side);
   }
 
@@ -2859,8 +2870,61 @@ try {
     const late = await heroAfter();
     eq(late.state, "stale", "a live tide past its fresh window is still drawn, marked stale");
     eq(late.svg, 1, "with its river");
-    ok(/Stale/.test(late.pill) && /\d:\d\d/.test(late.pill) || /Aug/.test(late.pill),
+    ok(/^Stale\s*·\s*(\d{1,2}:\d\d\s*[AP]M|[A-Z][a-z]{2} \d{1,2})$/.test(late.pill),
        `and the pill carries when it was read (${late.pill})`);
+
+    {
+      const thu = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
+      await stubNewKeys(thu);
+      const tp = await thu.newPage();
+      tp.on("pageerror", (e) => errors.push("thu: " + e.message));
+      await tp.clock.setFixedTime(new Date("2026-09-24T17:00:00Z"));
+      await signIn(tp);
+      await tp.route("**/api/flows/pulse", (route) => route.fulfill({ status: 200, contentType: "application/json",
+        body: JSON.stringify({ status: "pending" }) }));
+      const today = "2026-09-24";
+      const one = [today + "T13:31:00Z"];
+      const liveToday = (headers, n = 1) => (route) => route.fulfill({ status: 200,
+        headers: { "Content-Type": "application/json", ...headers },
+        body: JSON.stringify({ status: "ok", session: today, fresh: { readAt: today + "T13:31:44Z" },
+          tide: { status: "ok", t: n === 1 ? one : [today + "T13:30:00Z", today + "T13:35:00Z", today + "T13:40:00Z"],
+                  ncp: [9e6, 9.5e6, 9.9e6].slice(0, n), npp: [3e5, 1e6, 1.2e6].slice(0, n),
+                  net: [8.7e6, 8.5e6, 8.7e6].slice(0, n) } }) });
+      const pillOf = async () => {
+        await tp.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+        await tp.waitForSelector("#hmTideState .hm-pill:not([data-state=pending])", { timeout: 15000 });
+        return tp.evaluate(() => {
+          const pill = document.querySelector("#hmTideState .hm-pill");
+          return { state: pill.dataset.state, pill: pill.textContent.trim(),
+            title: document.getElementById("fxTitle").textContent.trim(),
+            note: (document.querySelector("#hmTide .ui-silent-t") || {}).textContent || null,
+            zero: (document.querySelector("#hmTideLegs [data-state]") || {}).dataset?.state || null };
+        });
+      };
+
+      await tp.route("**/api/flows/lk?k=market", liveToday({ "X-Fresh-State": "closed", "X-Fresh-Phase": "closed" }));
+      const broken = await pillOf();
+      eq(broken.title, "Last session", "on a Thursday afternoon the boards of an earlier session are the last session");
+      eq(broken.state, "stale",
+         "a 'closed' header whose phase says the whole day is not trading, while the Eastern clock is inside the session, " +
+         "is a broken trading flag: today's single morning read is shown as stale");
+      ok(/^Stale\s*·\s*Sep 24 9:31\s*AM$/.test(broken.pill),
+         `and because the tide is of another session than the page's boards, the pill names its day as well as its time (${broken.pill})`);
+      eq(broken.note, "One read", "a lone read that was never followed up says one read, not first read, since no second is coming");
+      eq(broken.zero, "quiet", "and a 0DTE leg that was never read for a stale tide is quiet, not a pending promise");
+
+      await tp.route("**/api/flows/lk?k=market", liveToday({ "X-Fresh-State": "closed", "X-Fresh-Phase": "post" }));
+      const early = await pillOf();
+      eq(early.state, "closed", "an early close (phase post) is a true closed state and is left alone, not overridden to stale");
+      ok(/^Closed\s*·\s*Sep 24$/.test(early.pill), `dated by its session (${early.pill})`);
+
+      await tp.route("**/api/flows/lk?k=market", liveToday({ "X-Fresh-State": "live", "X-Fresh-Phase": "rth" }, 3));
+      const live = await pillOf();
+      eq(live.state, "live", "a live tide of today under yesterday's boards is live");
+      ok(/^Live\s*·\s*Sep 24 9:31\s*AM$/.test(live.pill), `and its pill still carries the day (${live.pill})`);
+      eq(live.zero, "pending", "while a live tide's missing 0DTE leg is still pending, since the next read may carry it");
+      await thu.close();
+    }
 
     await page.route("**/api/flows/lk?k=breadth", (route) => route.fulfill({ status: 200, contentType: "application/json",
       body: JSON.stringify({ status: "ok", session: SESSION, dte: { zero: { status: "ok", t: ts, net: [0, 1e6, 3e6, 7e6] } } }) }));

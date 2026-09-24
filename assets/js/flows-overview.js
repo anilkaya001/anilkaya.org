@@ -774,7 +774,9 @@
   function titleFor(date) {
     const m = UI.freshness.market();
     const t = $("fxTitle");
-    if (t) t.textContent = (date || m.expected) === m.today ? "Today" : "Last session";
+    const word = (date || m.expected) === m.today ? "Today" : "Last session";
+    if (t) t.textContent = word;
+    if (UI.shell && typeof UI.shell.title === "function") UI.shell.title(word);
   }
   titleFor(null);
 
@@ -883,7 +885,7 @@
     return null;
   };
 
-  function heroState(tide) {
+  function heroState(tide, boardsDay) {
     if (!tide) return ["pending", "Pending", ""];
     const m = UI.freshness.market();
     const day = tide.session ? F.day(tide.session) : "";
@@ -892,8 +894,10 @@
     let s = tide.live && tide.ff ? tide.ff.stateAt() : null;
     if (!s && tide.session && tide.session < m.expected) return ["stale", "Stale", day];
     if (!tide.live) return past ? ["last", "Last session", day] : ["closed", "Closed", day];
-    if (!s || (s === "closed" && m.open && !past)) s = m.open && !past ? (age <= 600000 ? "live" : "stale") : "closed";
-    const at = tide.readAt ? clock(tide.readAt) : day;
+    const broken = s === "closed" && tide.ff && tide.ff.phase === "closed" && m.open && !past;
+    if (!s || broken) s = m.open && !past ? (age <= 600000 ? "live" : "stale") : "closed";
+    const other = boardsDay && tide.session && tide.session !== boardsDay;
+    const at = tide.readAt ? (other ? day + " " : "") + clock(tide.readAt) : day;
     if (s === "live") return ["live", "Live", at];
     if (s === "fresh") return ["fresh", "Updated", at];
     if (s === "stale") return ["stale", "Stale", past ? day : at];
@@ -903,7 +907,7 @@
   function paintPill(tide) {
     const pill = $("hmTideState");
     if (!pill) return "pending";
-    const [state, word, when] = heroState(tide);
+    const [state, word, when] = heroState(tide, S.boardsDay);
     const def = UI.STATES[state === "last" ? "fresh" : state] || UI.STATES.closed;
     pill.replaceChildren(h("button", {
       class: "hm-pill", type: "button", "data-state": state, ...POP,
@@ -922,7 +926,7 @@
   let tideChart = null;
   let tideShown = null;
   let heroTide = null;
-  const S = { pulse: null, regime: null, liveMkt: null, liveBreadth: null };
+  const S = { pulse: null, regime: null, liveMkt: null, liveBreadth: null, boardsDay: null };
   const hero = () => paintHero(heroTide = tideOf(S));
 
   function paintHero(tide) {
@@ -956,12 +960,15 @@
         UI.metric("Net calls", usdS(lastOf(tide.call)), { tone: toneOf(lastOf(tide.call)) }),
         UI.metric("Net puts", usdS(lastOf(tide.put)), { tone: toneOf(-(lastOf(tide.put) || 0)) }),
         UI.metric("0DTE", zero === null ? DASH : usdS(zero), { tone: toneOf(zero),
-          state: zero === null ? { state: "pending", reason: "No 0DTE net flow was read for this session yet." } : null }),
+          state: zero === null ? (state === "live" || state === "fresh"
+            ? { state: "pending", reason: "No 0DTE net flow was read for this session yet." }
+            : { state: "quiet", reason: "No 0DTE net flow was read for this session." }) : null }),
       ], { min: 84 }));
     }
     if (tide.t.length < 2) {
+      const first = state === "live" || state === "fresh";
       plot.append(h("div", { class: "ui-silent hm-hush", "data-state": "quiet", role: "note", style: { "--silent-h": "220px" } },
-        glyph("clock"), h("div", { class: "ui-silent-t" }, "First read")));
+        glyph("clock"), h("div", { class: "ui-silent-t" }, first ? "First read" : "One read")));
       return;
     }
     const series = [{ values: tide.net, label: "Net", format: (x) => (x > 0 ? "+" : "") + usd(x) }];
@@ -1779,6 +1786,7 @@
       (names ? ", " + names : "") + "." : names ? cap1(names) + "." : null;
     if (!line) return;
     t.textContent = line;
+    box.classList.replace("is-pending", "is-computed");
     const by = box.querySelector(".hm-verdict-by");
     if (by) by.textContent = "Computed";
     const mk = box.querySelector(".hm-verdict-meta .hm-mark");
@@ -1894,7 +1902,7 @@
     paintMeta($("ccMetaDate"), $("ccMetaScreened"), [lng, sht], market);
     paintVerdict(verdictHost, lng, sht, market, alerts, pulse);
     neuronComputed(market && market.status !== "pending" ? market : null);
-    Object.assign(S, { pulse, regime, liveMkt, liveBreadth });
+    Object.assign(S, { pulse, regime, liveMkt, liveBreadth, boardsDay: boardsRead(lng, sht).date });
     hero();
     paintVol(regime, liveVol, liveBreadth);
 

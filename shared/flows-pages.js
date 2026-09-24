@@ -357,10 +357,10 @@ const homeModule = (id, title, bodyId, { span = "", sub = "", seg = "", body = "
     </section>`;
 
 export function overviewPage({ username = "", summary = null } = {}) {
-  return `${head("Flows — Today", "The market in one glance: the tide, the regime, both leaders, what changed and what reports next.", ["/assets/css/flows-home.css"])}
-${shell("Today", "overview", username, `
+  return `${head("Flows — Home", "The market in one glance: the tide, the regime, both leaders, what changed and what reports next.", ["/assets/css/flows-home.css"])}
+${shell("Session", "overview", username, `
   <header class="flows-head hm-head" data-fx-hero>
-    <h1 id="fxTitle">Today</h1>
+    <h1 id="fxTitle">Session</h1>
     <p class="hm-meta"><time id="ccMetaDate"></time><span id="ccMetaScreened" hidden></span><span id="hmStale"></span></p>
   </header>
   <p class="visually-hidden" id="flowsStatus" role="status">Loading the latest session…</p>
