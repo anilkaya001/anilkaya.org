@@ -7,6 +7,9 @@ import {
   FRESH_CLASSES, PHASE_MINUTES, LIVE_CLOCK, freshHeaders, pendingHeaders, phaseAt, tier1Due, liveDispatchDue,
   liveStalled, nightlyDispatchDue, easternDay, easternInstant, sessionOpen,
 } from "./flows-freshness.js";
+import { LIVE_OIDC, looksLikeJwt, rsaKeys, verifyLiveOidc, claimsBrief } from "./flows-oidc.js";
+
+export { looksLikeJwt };
 
 export const LIVE_SCHEMA_SQL = Object.freeze([
   "CREATE TABLE IF NOT EXISTS flows_live (id TEXT PRIMARY KEY CHECK (id GLOB 'live:*'), payload TEXT NOT NULL, " +
@@ -313,6 +316,61 @@ export function tokenKind(offered, env, equal) {
   if (env.FLOWS_INGEST_TOKEN && equal(offered, env.FLOWS_INGEST_TOKEN)) return "nightly";
   if (env.FLOWS_LIVE_TOKEN && equal(offered, env.FLOWS_LIVE_TOKEN)) return "live";
   return null;
+}
+
+export const JWKS_TTL_MS = 60 * 60 * 1000;
+export const JWKS_RETRY_MS = 60 * 1000;
+export const JWKS_COLD_RETRY_MS = 5 * 1000;
+const emptyMemo = (url) => ({ url, keys: null, at: 0, triedAt: 0, inflight: null });
+let jwksMemo = emptyMemo(null);
+
+export function resetJwksMemo() {
+  jwksMemo = emptyMemo(null);
+}
+
+export function jwksUrl(env) {
+  const raw = env && typeof env.GITHUB_OIDC_JWKS === "string" ? env.GITHUB_OIDC_JWKS.trim() : "";
+  if (!raw) return LIVE_OIDC.jwks;
+  return /^https:\/\/token\.actions\.githubusercontent\.com\/[^\s?#]*$|^http:\/\/(127\.0\.0\.1|localhost):\d+\/[^\s?#]*$/.test(raw)
+    ? raw : null;
+}
+
+export function jwksKeys(env, fetchImpl, now, force) {
+  const url = jwksUrl(env);
+  if (!url) return Promise.resolve(null);
+  if (jwksMemo.url !== url) jwksMemo = emptyMemo(url);
+  const memo = jwksMemo;
+  if (memo.inflight) return memo.inflight;
+  const fresh = !!memo.keys && now - memo.at < JWKS_TTL_MS;
+  const wait = memo.keys ? JWKS_RETRY_MS : JWKS_COLD_RETRY_MS;
+  if ((fresh && !force) || now - memo.triedAt < wait) return Promise.resolve(memo.keys);
+  memo.triedAt = now;
+  memo.inflight = fetchImpl(url, {
+    redirect: "manual", signal: AbortSignal.timeout(4000),
+    headers: { Accept: "application/json", "User-Agent": "anilkaya-flows-worker" },
+  }).then((res) => (res.ok ? res.json().then(rsaKeys) : [])).catch(() => []).then((keys) => {
+    if (keys.length) {
+      memo.keys = keys;
+      memo.at = now;
+    }
+    memo.inflight = null;
+    return memo.keys;
+  });
+  return memo.inflight;
+}
+
+export async function oidcKind(offered, env, { fetchImpl = fetch, now = Date.now(), log = console } = {}) {
+  if (!looksLikeJwt(offered)) return { kind: null, why: "not-a-jwt", unavailable: false };
+  const out = await verifyLiveOidc(offered, (force) => jwksKeys(env, fetchImpl, now, force), now);
+  if (out.ok) return { kind: "live", why: null, unavailable: false };
+  const unavailable = out.why === "keys-unavailable";
+  if (out.why !== "malformed") {
+    log.error(JSON.stringify({
+      message: unavailable ? "live OIDC key set unavailable" : "live OIDC token refused",
+      why: out.why, jwks: jwksUrl(env) ? "ok" : "bad-override", claims: claimsBrief(out.claims),
+    }));
+  }
+  return { kind: null, why: out.why, unavailable };
 }
 
 export function ingestScope(key, method, kind) {

@@ -906,7 +906,10 @@ try {
     "each index ETF module is an entry point to that fund's dossier on the ticker page");
 
   await page.setViewportSize({ width: 320, height: 720 });
-  await page.waitForTimeout(500);
+  await page.waitForFunction(() => {
+    const charts = [...document.querySelectorAll(".mk-grid svg[role=img]")];
+    return charts.length >= 2 && charts.every((g) => Number(g.getAttribute("width")) <= 320);
+  }, null, { timeout: 15000 }).catch(() => {});
   const narrow = await page.evaluate((mods) => {
     const vw = window.innerWidth;
     return {

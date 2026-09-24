@@ -2868,13 +2868,20 @@ async function route(request, env, url, ctx) {
   if (path === "/api/flows/ingest") {
 
     requireMethod(request, ["GET", "POST", "DELETE"]);
-    if (!env.FLOWS_INGEST_TOKEN && !env.FLOWS_LIVE_TOKEN) {
+    const offered = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
+    const oidc = FLOWS_LIVE.looksLikeJwt(offered);
+    if (!env.FLOWS_INGEST_TOKEN && !env.FLOWS_LIVE_TOKEN && !oidc) {
       throw new HttpError(503, "unavailable", "Ingest is not configured");
     }
 
-    const offered = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
-
-    const tokenKind = FLOWS_LIVE.tokenKind(offered, env, timingSafeEqualStr);
+    let tokenKind = FLOWS_LIVE.tokenKind(offered, env, timingSafeEqualStr);
+    if (!tokenKind && oidc) {
+      const check = await FLOWS_LIVE.oidcKind(offered, env);
+      if (check.unavailable) {
+        throw new HttpError(503, "unavailable", "The live credential's signing keys could not be read; retry shortly");
+      }
+      tokenKind = check.kind;
+    }
     if (!tokenKind) throw new HttpError(401, "unauthorized", "Authentication required");
 
     const key = url.searchParams.get("key") || "";

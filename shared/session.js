@@ -4,7 +4,7 @@ function b64url(buf) {
   return btoa(String.fromCharCode(...new Uint8Array(buf)))
     .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
-function fromB64url(s) {
+export function fromB64url(s) {
   if (typeof s !== "string" || !s || !/^[A-Za-z0-9_-]+$/.test(s)) throw new Error("invalid base64url");
   s = s.replace(/-/g, "+").replace(/_/g, "/");
   s += "=".repeat((4 - (s.length % 4)) % 4);

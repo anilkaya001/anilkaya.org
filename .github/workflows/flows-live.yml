@@ -17,6 +17,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
   group: flows-live
@@ -27,21 +28,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
-      LIVE_READY: ${{ secrets.FLOWS_LIVE_TOKEN != '' && secrets.UW_API_KEY != '' }}
+      LIVE_READY: ${{ secrets.UW_API_KEY != '' }}
     steps:
-      - name: Wait for the live token
+      - name: Wait for the vendor key
         if: env.LIVE_READY != 'true'
         run: |
-          echo "::notice title=Live layer idle::FLOWS_LIVE_TOKEN or UW_API_KEY is not set as a repository secret, so Tier 2 does not run. Add FLOWS_LIVE_TOKEN here and the same value as a Worker secret to turn it on; the Worker's own Tier 1 tick runs without it."
+          echo "::notice title=Live layer idle::UW_API_KEY is not set as a repository secret, so Tier 2 does not run; the Worker's own Tier 1 tick runs without it."
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         if: env.LIVE_READY == 'true'
         with:
           sparse-checkout: |
             scripts
             shared
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         if: env.LIVE_READY == 'true'
         with:
           node-version: 22
@@ -60,7 +61,6 @@ jobs:
         if: env.LIVE_READY == 'true'
         env:
           UW_API_KEY: ${{ secrets.UW_API_KEY }}
-          FLOWS_LIVE_TOKEN: ${{ secrets.FLOWS_LIVE_TOKEN }}
           FLOWS_INGEST_URL: ${{ secrets.FLOWS_INGEST_URL }}
           FLOWS_LIVE_ORIGIN: ${{ github.event_name == 'schedule' && 'schedule' || inputs.origin || 'manual' }}
         run: node scripts/flows-pipeline.mjs --live

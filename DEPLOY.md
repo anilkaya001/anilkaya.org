@@ -331,8 +331,8 @@ throttling:
 `SESSION_SECRET` is already set and is shared with the learning session — the
 audience claim, not the secret, is what separates the two.
 
-Four secrets are needed here (section 10.5i adds `FLOWS_LIVE_TOKEN`, which is
-also set in two places, and the optional `GITHUB_DISPATCH_TOKEN`), and **one of
+Four secrets are needed here (section 10.5i adds only the optional
+`GITHUB_DISPATCH_TOKEN`: the live workflow authenticates with GitHub OIDC), and **one of
 them must be set in two places with the same value**: `FLOWS_INGEST_TOKEN`
 authenticates the pipeline to the Worker, so
 the Worker needs it as a secret and GitHub Actions needs it as a repository
@@ -1202,12 +1202,36 @@ Out-of-band steps before the first deploy of this layer:
 
 1. Apply the tables (idempotent; the Worker also creates them on first use):
    `./tests/node_modules/.bin/wrangler d1 execute iewt --remote --file=./migrations/0010_flows_live.sql`
-2. Mint the live token and set it in **both** places with the same value:
-   `openssl rand -hex 32`, then `wrangler secret put FLOWS_LIVE_TOKEN` and the
-   Actions secret `FLOWS_LIVE_TOKEN`. The live workflow has no `FLOWS_INGEST_TOKEN`
-   in its environment on purpose: the live token can write `live:*` keys only,
-   read the boards and meta it plans from, and delete nothing, while the nightly
-   token cannot write a live key.
+2. Nothing to mint. The live workflow holds no shared secret: it runs with
+   `permissions: id-token: write`, asks the runner for a GitHub OIDC token with
+   the audience `https://anilkaya.org/api/flows/ingest#live`, and the Worker
+   verifies it against GitHub's published keys (`shared/flows-oidc.js`). The
+   token earns the live role only when it names this repository by name and
+   numeric id, `.github/workflows/flows-live.yml` on `refs/heads/main`, a
+   `schedule` or `workflow_dispatch` event and a GitHub-hosted runner, and it
+   expires about five minutes after it is minted. The live role can write
+   `live:*` keys only, read the boards and meta it plans from, and delete
+   nothing, while the nightly token cannot write a live key. The workflow has
+   no `FLOWS_INGEST_TOKEN` in its environment on purpose, and every action in
+   the job is pinned to a commit SHA, because `id-token: write` lets any step
+   mint the credential.
+
+   The Worker still honours a static `FLOWS_LIVE_TOKEN` when one is set. That
+   is for a local `--live` run against a local Worker: put it in `.dev.vars`,
+   export the same value, and point the pipeline at the local route with
+   `FLOWS_INGEST_URL=http://127.0.0.1:8787/api/flows/ingest` (the default is
+   production). Never set it on the production Worker, where it would be a
+   second, long-lived live credential beside OIDC. If an earlier revision of
+   this step had you set it, delete both copies:
+   `./tests/node_modules/.bin/wrangler secret delete FLOWS_LIVE_TOKEN` and the
+   repository secret of the same name.
+
+   `GITHUB_OIDC_JWKS` points the Worker at a stub key set in the Worker
+   contract suite. The Worker accepts it only for GitHub's own
+   `https://token.actions.githubusercontent.com/` or a loopback `http` stub;
+   production leaves it unset. A key-set outage answers 503, which the
+   pipeline retries, and every refusal is logged with its reason and the
+   token's non-secret claims.
 3. Optional, and what turns the Worker into the clock: a fine-grained PAT for
    this repository only, with Actions read and write, set as
    `wrangler secret put GITHUB_DISPATCH_TOKEN`. Without it every dispatch is a
@@ -1215,9 +1239,13 @@ Out-of-band steps before the first deploy of this layer:
    Put its expiry in a calendar.
 4. After deploy, confirm both crons are registered (`wrangler triggers` or the
    dashboard) and read `live:market` on `/api/flows/lk?k=market` at 09:36 ET.
-   A Workers Builds deploy updates the code but can leave the previous triggers
-   in place: on 2026-09-23 the Worker ran the new code under the old
-   `*/15 * * * *` trigger. Register the two crons with
+   The tick instants in D1 prove it without dashboard access: `flows_live.read_at`
+   for `live:market` is the Tier 1 cron's scheduled time, and only
+   `1-59/5 13-21 * * 1-5` produces minutes ending in 1 or 6. On 2026-09-23 the
+   first Workers Builds deploy of this layer ran under the old `*/15 * * * *`
+   trigger; by that evening `live:market` was stamped 19:56 and 20:06 UTC, so a
+   later production deploy (`npx wrangler deploy`) had registered both crons.
+   If a deploy ever leaves stale triggers again, register them with
    `./tests/node_modules/.bin/wrangler triggers deploy` or under the Worker's
    Settings → Triggers. Until then the handler routes by instant rather than by
    trigger string (`cronJob` in `shared/flows-live-worker.js`): a stale trigger

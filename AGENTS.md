@@ -100,6 +100,7 @@ header readback with this repository after any dashboard rule change.
 | `tests/regression.mjs` | Full Playwright browser regression suite. |
 | `shared/flows-freshness.js` | The Eastern clock (arithmetic, proven equal to the IANA zone), market phases, the freshness threshold table, `X-Fresh-*` headers, and the live clock's due-tests. |
 | `shared/flows-live.js`, `shared/flows-live-worker.js` | The live layer's key registry and pure builders; the Worker's Tier 1 tick, dispatch, watchdog, live ingest, `/api/flows/lk`, `/now`, `/tape` and read-time overlays. |
+| `shared/flows-oidc.js` | The live credential: the GitHub OIDC claim policy (this repository by id, `flows-live.yml` on main), the pure JWT verifier the Worker runs, and the runner-side token request the `--live` leg uses. No shared secret. |
 | `scripts/flows-legs/live.mjs`, `live-fake.mjs` | The Actions `--live` leg (Tier 2, `live:*` keys only) and its fake vendor for `--dry-run`. |
 | `assets/js/flows-fresh.js` | The client freshness helper (`FlowsUI.freshFrom`, `freshAggregate`, `heartbeat`). |
 | `tests/flows-live-contract.mjs` | Live-layer builders, phases and states, byte ceilings, the one-writer scans, the `--live` dry run and the client helper. |
@@ -404,7 +405,12 @@ flows-positioning-contract
 flows-legs-contract
 flows-live-contract    flows-freshness-contract
 flows-quant-card       flows-track-render
+flows-pipeline-contract
 ```
+
+`flows-pipeline-contract` was measured on 2026-09-24: 123 s with no server. It
+was on neither list, so a source scan in it (every ingest call site must
+`await ingestHeaders(`) went unrun until CI caught it.
 
 `flows-quant` was measured on 2026-09-23: about 5 s with no server (8 s at a
 load average of 4.6 on 4 cores). It spawns itself once more, as a fresh
@@ -507,7 +513,7 @@ invoke it; it can be retired once that dashboard field is confirmed clear.
   `flows-drawers.js` are deleted.)
   This list is an ALLOWLIST: a global that is not on it is an undocumented
   one. `FlowsUI` is the shared Flows UI primitives (formatters that keep the
-  minus U+2212 and the absent-value em dash, the labeled controls, and the
+  minus U+2212 and the absent-value em dash, and the
   score-strip chart whose gap-is-not-zero contract is enforced in the
   primitive rather than re-derived per page) — the seed of the component
   layer, introduced with `/flows/track/`.

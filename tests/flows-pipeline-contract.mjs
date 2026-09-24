@@ -2047,9 +2047,11 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "A fourth must join the builder rather than hand-rolling headers");
   for (const site of sites) {
     const window = src.slice(site.index, site.index + 900);
-    ok(/headers: ingestHeaders\(/.test(window),
+    ok(/headers: await ingestHeaders\(/.test(window),
        "each ingest fetch takes its headers from ingestHeaders() rather than assembling its " +
-       "own — the read path assembling its own is precisely the bug this pins");
+       "own — the read path assembling its own is precisely the bug this pins — and awaits it, " +
+       "because the builder is async (the live credential is a GitHub OIDC token minted on demand) " +
+       "and a Promise passed as headers sends no Authorization at all");
     ok(!/Authorization: "Bearer " \+ process\.env\.FLOWS_INGEST_TOKEN/.test(window),
        "and none of them still builds an Authorization header inline, which is what a copied " +
        "call site looks like on the way back in");
