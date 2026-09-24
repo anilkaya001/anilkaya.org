@@ -181,8 +181,9 @@ const FEEDS = ["mkTide", "mkVolume", "mkOi", "mkImpact", "mkInsiders", "mkDark",
 
 const browser = await chromium.launch();
 
-async function openMarket({ stub = true, routes = [], viewport } = {}) {
+async function openMarket({ stub = true, routes = [], viewport, at } = {}) {
   const page = await browser.newPage(viewport ? { viewport } : undefined);
+  if (at) await page.clock.setFixedTime(new Date(at));
   await page.context().addCookies([{ name: "flows_session", value: token, url: server.baseURL }]);
   page.on("pageerror", (e) => errors.push(e.message));
   if (stub) {
@@ -1890,13 +1891,17 @@ try {
     ok(endTick.includes("1y"), `the vol curve labels its one-year end rather than dropping the tick at the plot edge (${endTick.join(" ")})`);
     await deepPage.close();
 
-    const oneT = [EXPECTED + "T13:31:00Z"];
+    const nextDay = new Date(EXPECTED + "T12:00:00Z");
+    do nextDay.setUTCDate(nextDay.getUTCDate() + 1); while ([0, 6].includes(nextDay.getUTCDay()));
+    const D = nextDay.toISOString().slice(0, 10);
+    const OPEN_AT = D + "T14:40:00Z", LATE_AT = D + "T19:00:00Z";
+    const oneT = [D + "T14:35:00Z"];
     const openRows = Object.fromEntries(SECTOR_NAMES.map(([name, etf], k) => [name, { status: "ok", etf, n: 1, ncp: [2e5], npp: [1e5], net: [(k - 5) * 1e5] }]));
-    const BREADTH_OPEN = { v: 1, key: "live:breadth", session: EXPECTED, fresh: { readAt: new Date().toISOString() },
+    const BREADTH_OPEN = { v: 1, key: "live:breadth", session: D, fresh: { readAt: D + "T14:35:40Z" },
       sectors: { t: oneT, rows: openRows },
       etf: { SPY: series(3e6, 1e6), IWM: series(2e6, 1e6), DIA: series(1e6, 1e6) },
       dte: { zero: { status: "unreadable", reason: "rows-unshaped", t: [], net: [] }, share: { value: null, reason: "rows-unshaped" } } };
-    const LIVE_OPEN = { status: "ok", session: EXPECTED, fresh: { readAt: new Date().toISOString() },
+    const LIVE_OPEN = { status: "ok", session: D, fresh: { readAt: D + "T14:35:50Z" },
       tide: { status: "ok", t: oneT, ncp: [1e7], npp: [1.4e6], net: [8.6e6] },
       zeroDte: { status: "unreadable", reason: "rows-unshaped", t: [], net: [] }, etf: { SPY: series(2e6, 5e6), QQQ: series(1e6, 1e6) } };
     const readOpen = (pg) => pg.evaluate((day) => {
@@ -1918,6 +1923,9 @@ try {
         spy: metrics("mkEtfSPY"), qqq: metrics("mkEtfQQQ"), iwm: metrics("mkEtfIWM"),
         etfCharts: ["SPY", "QQQ", "IWM"].map((t) => document.querySelectorAll("#mkEtf" + t + " svg[role=img]").length),
         tideOpen: Boolean(document.querySelector("#mkTide [data-state=opening]")),
+        tideHush: (() => { const n = document.querySelector("#mkTide .mk-hush"); return n ? { state: n.dataset.state, word: n.querySelector(".ui-silent-t").textContent.trim() } : null; })(),
+        tideChip: chipOf("mkTideCard"),
+        openings: document.querySelectorAll("[data-state=opening]").length,
         tideCharts: document.querySelectorAll("#mkTide svg[role=img]").length,
         tideNet: metrics("mkTideLegs").Net,
         tideTabs: [...document.querySelectorAll("#mkTideSeg .ui-seg-i")].map((b) => b.textContent.trim()),
@@ -1925,7 +1933,7 @@ try {
       };
     }, EXPECTED);
 
-    const openPage = await openMarket({ viewport: { width: 1440, height: 1000 }, routes: [
+    const openPage = await openMarket({ at: OPEN_AT, viewport: { width: 1440, height: 1000 }, routes: [
       ["**/api/flows/pulse", json({ status: "pending" })],
       ["**/api/flows/regime", json(REGIME)],
       ["**/api/flows/lk?k=market", json(LIVE_OPEN)],
@@ -1939,7 +1947,8 @@ try {
     deep(opened.secChip, { state: "dated", word: opened.dayWord },
       "the module says whose session it is drawing in one dated chip, beside its title");
     const secDated = await why(openPage, "#mkSecTidesCard .ui-mod-t .mk-chip");
-    ok(/one reading so far/.test(secDated.lead), `and the chip's Why says why the last session stands in (${secDated.lead})`);
+    ok(/single reading, at \d{1,2}:35/.test(secDated.lead) && !/next refresh/.test(secDated.lead),
+       `and the chip's Why says why the last session stands in, naming the reading's time and promising no refresh (${secDated.lead})`);
     eq(opened.spy["Net premium"], "+$16.0M",
        "SPY's tide is read from live:breadth first, where the live stream publishes every index ETF, ahead of the older live:market row");
     eq(opened.iwm["Net premium"], "+$8.0M",
@@ -1957,7 +1966,7 @@ try {
     const REGIME_B = Object.assign({}, REGIME, { sectors: { status: "pending" }, etfTide: { status: "ok", byEtf: Object.assign({}, REGIME.etfTide.byEtf,
       { IWM: { status: "quiet", reason: "absent", points: 0, ownNet: 5455337, ownTilt: 0.0125, agree: null } }) } });
     const BREADTH_B = Object.assign({}, BREADTH_OPEN, { etf: {} });
-    const openB = await openMarket({ viewport: { width: 390, height: 900 }, routes: [
+    const openB = await openMarket({ at: OPEN_AT, viewport: { width: 390, height: 900 }, routes: [
       ["**/api/flows/regime", json(REGIME_B)],
       ["**/api/flows/lk?k=breadth", json(BREADTH_B)],
     ] });
@@ -1976,6 +1985,92 @@ try {
     const overB = await openB.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     ok(overB <= 1, `no horizontal overflow at 390px with the opening chips drawn (${overB}px)`);
     await openB.close();
+
+    const at0930 = D + "T13:30:00Z";
+    const clockOf = (pg, iso) => pg.evaluate((x) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" }).format(new Date(x)), iso);
+    const LIVE_LATE = { status: "ok", session: D, fresh: { readAt: D + "T13:31:44Z" },
+      tide: { status: "ok", t: [at0930], ncp: [1.0125e7], npp: [1.409e6], net: [8.716e6] },
+      zeroDte: { status: "unreadable", reason: "rows-unshaped", t: [], net: [] }, etf: {} };
+    const BREADTH_LATE = Object.assign({}, BREADTH_B, { fresh: { readAt: D + "T13:31:32Z" }, sectors: { t: [D + "T13:31:00Z"], rows: openRows } });
+    const late = await openMarket({ at: LATE_AT, viewport: { width: 390, height: 900 }, routes: [
+      ["**/api/flows/pulse", json({ status: "pending" })],
+      ["**/api/flows/regime", json(REGIME_B)],
+      ["**/api/flows/lk?k=market", json(LIVE_LATE)],
+      ["**/api/flows/lk?k=breadth", json(BREADTH_LATE)],
+    ] });
+    await late.waitForSelector("#mkSecTides .mk-small");
+    const lr = await readOpen(late);
+    const word930 = await clockOf(late, at0930);
+    eq(lr.openings, 0,
+       "hours into the session, a live layer that wrote once at the open and never again is not called Opening anywhere on the page");
+    deep(lr.tideHush, { state: "stale", word: word930 },
+      "the tide's one reading wears a clock and the time it was taken, not a promise that a path is coming");
+    eq(lr.tideNet, "+$8.7M", "and the reading itself is still printed above it");
+    const lateWhy = await why(late, "#mkTide .mk-hush button");
+    ok(/has not written since/.test(lateWhy.lead) && !/next refresh/.test(lateWhy.lead),
+       `whose Why says the layer has gone quiet rather than that a refresh is due (${lateWhy.lead})`);
+    deep(lr.secChip, { state: "stale", word: await clockOf(late, D + "T13:31:00Z") },
+      "the sector tides' single reading is dated by its clock too, rather than an Opening chip that never ages");
+    const lateSec = await why(late, "#mkSecTidesCard .ui-mod-t .mk-chip");
+    ok(!/next refresh/.test(lateSec.lead), `and its Why promises no refresh (${lateSec.lead})`);
+    const overLate = await late.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    ok(overLate <= 1, `no horizontal overflow at 390px with the stale marks drawn (${overLate}px)`);
+    await late.close();
+
+    const priorPts = liveT.map((t, i) => ({ t, callPrem: 1e6 * (i + 2), putPrem: 5e5 * (i + 1) }));
+    const PULSE_OVERLAID = { v: 1, status: "ok", sessionDate: EXPECTED, readAt: D + "T13:31:44Z", readDay: D, refreshed: "intraday", cadenceMinutes: 5,
+      live: { key: "live:market", session: D, tideDate: D },
+      tide: { status: "ok", points: [{ t: at0930, callPrem: 1.0125e7, putPrem: 1.409e6 }], date: D, prior: { date: EXPECTED, points: priorPts } } };
+    const withPrior = await openMarket({ at: LATE_AT, viewport: { width: 1440, height: 1000 }, routes: [
+      ["**/api/flows/pulse", json(PULSE_OVERLAID)],
+      ["**/api/flows/regime", json(REGIME)],
+      ["**/api/flows/lk?k=market", json(LIVE_LATE)],
+      ["**/api/flows/lk?k=breadth", json(BREADTH_LATE)],
+    ] });
+    await withPrior.waitForSelector("#mkTide svg[role=img]");
+    const wp = await readOpen(withPrior);
+    eq(wp.tideCharts, 1,
+       "a pulse whose live overlay holds one point but carries the last session as prior draws that session's full path");
+    deep(wp.tideChip, { state: "dated", word: wp.dayWord }, "under one dated chip naming whose session it is");
+    eq(wp.tideNet, "+$5.0M", "and its metrics read that path's last point, not the lone live reading");
+    eq(wp.openings, 0, "nothing on the page says Opening at 15:00 ET");
+    await withPrior.close();
+
+    const oneSer = (a, b) => ({ status: "ok", t: [liveT[0]], ncp: [a], npp: [b], net: [a - b] });
+    const BREADTH_THIN = { v: 1, key: "live:breadth", session: EXPECTED, fresh: { readAt: liveT[0] },
+      sectors: { t: [], rows: {} }, etf: { SPY: oneSer(9e6, 1e6) }, dte: { zero: oneSer(3e6, 1e6), share: { value: null } } };
+    const LIVE_FULL = { status: "ok", session: EXPECTED, fresh: { readAt: liveT[7] },
+      tide: series(4e7, 1e7), zeroDte: series(4e6, 3e6), etf: { SPY: series(2e6, 5e6), QQQ: series(1e6, 1e6) } };
+    const thin = await openMarket({ viewport: { width: 1440, height: 1000 }, routes: [
+      ["**/api/flows/regime", json(REGIME)],
+      ["**/api/flows/lk?k=market", json(LIVE_FULL)],
+      ["**/api/flows/lk?k=breadth", json(BREADTH_THIN)],
+    ] });
+    await thin.waitForSelector("#mkEtfSPY .ui-metric");
+    const th = await readOpen(thin);
+    eq(th.spy["Net premium"], "−$24.0M",
+       "a breadth ETF series holding one point does not shadow a full live:market series for the same ETF: the one that can draw a path wins");
+    deep(th.tideTabs, ["Market", "0DTE", "SPY", "QQQ"],
+      "and the tide keeps its 0DTE and SPY views, read from live:market, instead of dropping them for a one-point breadth series");
+    await thin.close();
+
+    const dayBefore = new Date(Date.parse(EXPECTED + "T12:00:00Z") - 864e5).toISOString().slice(0, 10);
+    const BREADTH_OLD = { v: 1, key: "live:breadth", session: dayBefore, fresh: { readAt: dayBefore + "T20:00:00Z" },
+      sectors: { t: [], rows: {} }, etf: { SPY: series(9e6, 1e6), QQQ: series(7e6, 1e6) }, dte: { zero: series(5e6, 1e6), share: { value: null } } };
+    const old = await openMarket({ viewport: { width: 1440, height: 1000 }, routes: [
+      ["**/api/flows/regime", json(REGIME)],
+      ["**/api/flows/lk?k=market", json(LIVE_FULL)],
+      ["**/api/flows/lk?k=breadth", json(BREADTH_OLD)],
+    ] });
+    await old.waitForSelector("#mkEtfSPY .ui-metric");
+    const od = await readOpen(old);
+    eq(od.spy["Net premium"], "−$24.0M",
+       "a breadth row from an older session never shadows today's live:market series, however full it is");
+    eq(od.qqq["Net premium"], "$0", "for every ETF the breadth row carries");
+    deep(od.tideTabs, ["Market", "0DTE", "SPY", "QQQ"], "and the tide's views are all today's");
+    const oldSrc = await cardWhy(old, "mkTideCard");
+    eq(oldSrc && oldSrc.facts.Source, "live:market", "and the tide's disclosure names the layer it read");
+    await old.close();
   }
 
   assert.deepEqual([...seenSilences.keys()].sort(), ["pending", "quiet", "unavailable", "unreadable"],
