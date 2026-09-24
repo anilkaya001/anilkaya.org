@@ -445,6 +445,16 @@ const T = (iso) => Date.parse(iso);
   eq(L.pulseWithLive({ ...pulse, readAt: "2026-09-23T16:00:00Z" }, market), null,
     "a nightly pulse newer than the live row is not overlaid");
   eq(L.pulseWithLive({ ...pulse, sessionDate: "2026-09-24" }, market), null, "nor is a later session's");
+  const lone = { ...market, tide: { ...market.tide, t: market.tide.t.slice(0, 1), ncp: market.tide.ncp.slice(0, 1),
+    npp: market.tide.npp.slice(0, 1), nv: market.tide.nv ? market.tide.nv.slice(0, 1) : undefined, n: 1 } };
+  const river = { ...pulse, tide: { status: "ok", points: [{ t: "a" }, { t: "b" }, { t: "c" }] } };
+  eq(L.pulseWithLive(river, lone), null,
+    "A LONE LIVE POINT DOES NOT REPLACE A NIGHTLY RIVER: one reading at the open, or a stalled Tier 1, keeps the " +
+    "last session's full tide in the pulse, and pages read the lone point from live:market and date it themselves");
+  ok(L.pulseWithLive(pulse, lone)?.tide.points.length === 1,
+    "but it still stands in when the nightly pulse has no tide of its own to show");
+  ok(L.pulseWithLive(river, market)?.tide.points.length === market.tide.n,
+    "and two or more live points replace the nightly river as before");
   ok(L.liveAlertsWin("2026-09-22", "2026-09-23") && !L.liveAlertsWin("2026-09-23", "2026-09-23") &&
     !L.liveAlertsWin("2026-09-23", "2026-09-22"),
     "live:alerts replaces the nightly feed only when it covers a later session than the nightly does");
@@ -660,10 +670,10 @@ const T = (iso) => Date.parse(iso);
     `one live run at a time (so never more than one loop), ${timeout} minutes at most — under GitHub's six-hour job ` +
     `cap, with the loop's ${LIVE_LOOP.budgetMs / 60000}-minute budget and a pass's overrun inside it`);
   const crons = [...wf.matchAll(/cron: "([^"]+)"/g)].map((m) => m[1]);
-  deep(crons, ["31 13,14 * * 1-5", "3 16,18,20 * * 1-5"],
-    "STARTERS, not a schedule: 13:31 and 14:31 UTC start the loop at the open under EDT and EST, and 16:03, 18:03 " +
-    "and 20:03 restart it if GitHub dropped a starter or a run died — a starter that queues behind a running loop " +
-    "exits at once when it finally starts outside the window");
+  deep(crons, ["31 13,14 * * 1-5", "3 15-20 * * 1-5"],
+    "STARTERS, not a schedule: 13:31 and 14:31 UTC start the loop at the open under EDT and EST, and every hour at :03 " +
+    "from 15:03 to 20:03 restarts it if GitHub dropped a starter or a run died, so a dropped slot costs an hour at most " +
+    "— a starter that queues behind a running loop exits at once when it finally starts outside the window");
 
   const migration = read("migrations/0010_flows_live.sql");
   const clockMigration = read("migrations/0011_flows_clock_tier1.sql");

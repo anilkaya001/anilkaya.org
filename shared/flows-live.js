@@ -1069,6 +1069,8 @@ export function pulseWithLive(pulse, market) {
   if (!pulse || typeof pulse !== "object" || !market || typeof market !== "object") return null;
   const tide = market.tide;
   if (!tide || tide.status !== "ok" || !Array.isArray(tide.t) || !tide.t.length) return null;
+  const nightlyPoints = pulse.tide && Array.isArray(pulse.tide.points) ? pulse.tide.points.length : 0;
+  if (tide.t.length < 2 && nightlyPoints >= 2) return null;
   const readAt = market.fresh && market.fresh.readAt;
   if (typeof readAt !== "string") return null;
   const liveDay = tide.date || market.session;

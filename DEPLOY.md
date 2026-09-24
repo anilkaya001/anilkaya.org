@@ -1237,7 +1237,7 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   to that token's no-recursion rule), origin `chain`, on `main`, and exits. The
   `flows-live` concurrency group keeps it to one loop. The GitHub schedule is only
   starters, `31 13,14 * * 1-5` for the open under EDT and EST and
-  `3 16,18,20 * * 1-5` in case GitHub drops a starter or a run dies; a starter
+  `3 15-20 * * 1-5` in case GitHub drops a starter or a run dies; a starter
   that queued behind a running loop starts after the window closed and exits at
   once without a pass. The first pass of a run still skips when a heartbeat
   landed under eight minutes ago; the loop's later passes do not. A single pass
