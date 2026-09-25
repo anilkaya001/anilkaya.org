@@ -3087,6 +3087,24 @@ try {
 
     const fx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
     await stubNewKeys(fx);
+    await fx.addInitScript(() => {
+      let ui;
+      const pref = (name, value) => {
+        try {
+          if (value === undefined) return localStorage.getItem("flows:pref:" + name);
+          localStorage.setItem("flows:pref:" + name, value);
+        } catch {}
+        return null;
+      };
+      Object.defineProperty(window, "FlowsUI", {
+        configurable: true, get: () => ui,
+        set(v) {
+          const add = v.pref ? {} : { pref };
+          if (v.heartbeat) add.heartbeat = (o) => (window.__hb = v.heartbeat(o));
+          ui = Object.freeze(Object.assign({}, v, add));
+        },
+      });
+    });
     const fp = await fx.newPage();
     fp.on("pageerror", (e) => errors.push("focus: " + e.message));
     await signIn(fp);
@@ -3102,6 +3120,7 @@ try {
         net: m.querySelector(".hm-mnet .hm-prem").textContent.trim(),
         spark: (m.querySelector(".hm-mspark svg") || { getAttribute: () => null }).getAttribute("aria-label"),
         line: Boolean(m.querySelector(".hm-mspark path.ln")), ref: Boolean(m.querySelector(".hm-mspark line")),
+        stroke: (m.querySelector(".hm-mspark path.ln") || { getAttribute: () => null }).getAttribute("stroke"),
         rel: Array.from(m.querySelectorAll(".hm-mrow"), (r) => [r.dataset.ticker,
           r.querySelector(".hm-chg").textContent.trim(), r.querySelector(".hm-prem").textContent.trim()]),
       })),
@@ -3114,6 +3133,8 @@ try {
         return p ? { state: p.dataset.state, text: p.textContent.replace(/\s+/g, " ").trim() } : null;
       }),
       links: Array.from(document.querySelectorAll("#hmMetals a, #hmLeaders a"), (a) => [a.dataset.ticker, a.getAttribute("href"), a.getAttribute("aria-label")]),
+      src: ["hmMetals", "hmLeaders"].map((id) => [...new Set(Array.from(document.querySelectorAll("#" + id + " a[data-src]"), (a) => a.dataset.src))].sort().join()),
+      ink: Object.fromEntries(["--up", "--down", "--label-2"].map((k) => [k, getComputedStyle(document.body).getPropertyValue(k).trim()])),
       hush: ["ccMetals", "ccLeaders"].map((id) => {
         const s = document.querySelector("#" + id + " [data-empty]");
         return s ? [s.dataset.empty, s.querySelector(".ui-silent-t").textContent.trim(), document.querySelectorAll("#" + id + " [data-empty]").length] : null;
@@ -3134,6 +3155,23 @@ try {
 
     const ingest = await post("focus", FOCUS_FIXTURE);
     eq(ingest.status, 200, "the Worker accepts the nightly focus key on ingest");
+    const nowUrl = await fp.waitForFunction(() => performance.getEntriesByType("resource")
+      .map((e) => e.name).find((n) => /\/api\/flows\/now/.test(n)), null, { timeout: 15000 }).then((j) => j.jsonValue());
+    ok(/[?&]n=[^&]*\bfocus\b/.test(decodeURIComponent(nowUrl)), `the open page's heartbeat asks after the nightly focus key (${nowUrl})`);
+    await fp.waitForTimeout(150);
+    await fp.route(/\/api\/flows\/now\?/, async (route) => {
+      const res = await route.fetch();
+      const body = await res.json();
+      body.keys = Object.assign({}, body.keys, { focus: { updatedAt: Date.parse(FOCUS_AT) } });
+      await route.fulfill({ response: res, body: JSON.stringify(body) });
+    });
+    await fp.evaluate(() => window.__hb.now());
+    await fp.waitForSelector("#ccMetals .hm-metal", { timeout: 15000 });
+    const arrived = await fp.evaluate(FOCUS_READ);
+    deep(arrived.metals.map((m) => m.lead), ["GLD", "SLV", "CPER"],
+      "a page left open when the nightly writes the focus key re-reads it on the next beat, never pending until a reload");
+    deep(arrived.pills.map((p) => p && p.text), ["Aug 24", "Aug 24"], "and dates both modules by the session it now shows");
+    await fp.unroute(/\/api\/flows\/now\?/);
 
     const night = await focusNow();
     deep(night.metals.map((m) => [m.group, m.label, m.lead]), [["gold", "Gold", "GLD"], ["silver", "Silver", "SLV"], ["copper", "Copper", "CPER"]],
@@ -3166,6 +3204,9 @@ try {
     deep(ndx.leaders.map((r) => r[0]), GROUPS[4].tickers, "NDX 10 swaps in the ten Nasdaq leaders the payload names");
     deep(ndx.leaders.find((r) => r[0] === "NFLX"), ["NFLX", "—", "—", "—", "—"], "a leader the vendor skipped is em dashes");
     ok(/[?&]lead=ndx10\b/.test(fp.url()), `the choice is kept in the address (${fp.url()})`);
+    const home = await focusNow("/flows/");
+    deep(home.seg.map((s) => s[1]), ["false", "true"],
+      "and remembered for this viewer, so the plain Home link opens on NDX 10 too");
     const again = await focusNow("/flows/?lead=ndx10");
     deep(again.seg.map((s) => s[1]), ["false", "true"], "so a reload or a shared link opens on the same leaders");
     await fp.focus("#ccLeadSeg .ui-seg-i[aria-selected=true]");
@@ -3174,6 +3215,14 @@ try {
     ok(true, "the segmented control switches from the keyboard");
 
     await fp.focus("#ccMetalsWhen .hm-pill");
+    const beat = async () => {
+      await Promise.all([fp.waitForResponse(/\/api\/flows\/now/), fp.evaluate(() => window.__hb.now())]);
+      await fp.waitForTimeout(150);
+    };
+    await fp.evaluate(() => { window.__pill = document.activeElement; });
+    await beat();
+    ok(await fp.evaluate(() => document.activeElement === window.__pill && window.__pill.isConnected),
+      "a heartbeat refreshes the date chip in place: keyboard focus stays on it");
     await fp.keyboard.press("Tab");
     const kb = await fp.evaluate(() => {
       const a = document.activeElement;
@@ -3184,22 +3233,45 @@ try {
 
     const t0 = new Date().toISOString();
     const LIVE_DAY = "2026-08-25";
-    const liveStrips = (session, readAt, state) => (route) => route.fulfill({ status: 200,
+    const METALS = GROUPS.slice(0, 3).flatMap((g) => g.tickers).filter((t) => FOCUS_FIXTURE.rows[t]);
+    const LIVE_V = Object.fromEntries(VENDOR.map((v) => [v.ticker, v]));
+    LIVE_V.GLD = vend("GLD", 395, 392.88, 1.2e6, -3e5, 5e7, 3e7, 0.21);
+    const liveStrips = (session, readAt, state, names = METALS) => (route) => route.fulfill({ status: 200,
       headers: { "Content-Type": "application/json", "X-Fresh-State": state },
       body: JSON.stringify({ v: 1, key: "live:strips", status: "ok", session, fresh: { readAt, cadenceS: 300 }, fields: STRIP_NAMES,
-        rows: { GLD: stripValues(vend("GLD", 395, 392.88, 1.2e6, -3e5, 5e7, 3e7, 0.21)) } }) });
+        rows: Object.fromEntries(names.map((t) => [t, stripValues(LIVE_V[t])])) }) });
     await fp.route("**/api/flows/lk?k=strips:series", (route) => route.fulfill({ status: 200, contentType: "application/json",
       body: JSON.stringify({ v: 1, key: "live:strips:series", session: LIVE_DAY, scale: { px: 0.01 }, base: { GLD: 393.5 },
         t: [LIVE_DAY + "T13:45:00Z", LIVE_DAY + "T14:00:00Z", LIVE_DAY + "T14:15:00Z"], cols: { px: { GLD: [0, 80, 150] } } }) }));
+    await fp.route("**/api/flows/lk?k=strips", liveStrips(LIVE_DAY, t0, "live", ["GLD"]));
+    const part = await focusNow();
+    eq(part.metals[0].px, "391.70", "a live read that covers only some of a module's names does not mix sessions: the fund keeps its nightly row");
+    deep(part.pills.map((p) => p.text), ["Aug 24", "Aug 24"], "and the module stays dated by the nightly session it shows");
+    deep(part.src, ["nightly", "nightly"], "every row in it is the nightly record");
+    ok(part.metals[0].line && part.metals[0].stroke === part.ink["--label-2"],
+      `a line of several sessions' closes is drawn neutral, never read as today's direction (${part.metals[0].stroke})`);
+
     await fp.route("**/api/flows/lk?k=strips", liveStrips(LIVE_DAY, t0, "live"));
     const live = await focusNow();
-    eq(live.metals[0].px, "395.00", "a live strips row of a newer session takes the fund's price");
+    eq(live.metals[0].px, "395.00", "a live read of a newer session that covers every name takes the fund's price");
     eq(live.metals[0].flow, "Bullish", "and its flow lean");
     ok(/GLD today/.test(live.metals[0].spark || "") && live.metals[0].ref,
       `the sparkline draws the intraday series against the prior close while the session runs (${live.metals[0].spark})`);
-    eq(live.metals[1].px, "57.60", "a name the live read did not carry keeps its nightly row");
+    eq(live.metals[0].stroke, live.ink["--up"], "toned by the day change it is drawn against");
+    eq(live.metals[1].px, "57.60", "each name takes its own live row");
+    deep(live.metals[0].rel.at(-1), ["AEM", "—", "—"], "and a name neither read carries stays em dashes");
+    deep(live.src, ["live", "nightly"], "Metals is all live rows; Leaders, which the live read did not cover, stays nightly");
     eq(live.pills[0].state, "live", "the module wears a Live pill");
     ok(/^Live\s*·\s*\d{1,2}:\d\d\s*[AP]M$/.test(live.pills[0].text), `with the read time (${live.pills[0].text})`);
+    eq(live.pills[1].text, "Aug 24", "while Leaders keeps its own date chip");
+    for (const r of [part, live]) {
+      r.pills.forEach((p, i) => ok(p.state !== "live" || r.src[i] === "live", "a Live pill never sits over a nightly row"));
+    }
+    await fp.focus("#ccMetalsWhen .hm-pill");
+    await fp.evaluate(() => { window.__pill = document.activeElement; });
+    await beat();
+    ok(await fp.evaluate(() => document.activeElement === window.__pill && window.__pill.dataset.state === "live"),
+      "a heartbeat keeps focus on the Live pill it refreshes");
 
     await fp.route("**/api/flows/lk?k=strips", liveStrips(LIVE_DAY, t0, "stale"));
     const lapsed = await focusNow();
@@ -3281,7 +3353,9 @@ try {
     `dash, caveats kept apart from method, a headline tape whose fetch age leads its ` +
     `disclosure and whose vendor strings stay characters, gold, silver and copper each led by ` +
     `its fund with its related names beneath, the Mag 7 and the NDX 10 on one switch the address ` +
-    `remembers, a live strips row taking a name only when it is the newer read, every figure a ` +
+    `and the viewer remember, a live read taking a module only when it is the newer read of every ` +
+    `name in it so no Live pill sits over a nightly row, date chips that keep keyboard focus through ` +
+    `every heartbeat, a focus key that arrives in an open page, every figure a ` +
     `link to its dossier and an em dash where the vendor said nothing, and no visible run of prose longer ` +
     `than six words anywhere on the surface`);
 } finally {
