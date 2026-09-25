@@ -153,31 +153,45 @@ export function repliedGuard(guard) {
 const stopGuard = (replied) =>
   (replied.some((a) => a.finish === "length") ? "unreachable:length" : "unreachable:empty");
 
-export async function askModels(ai, chain, messages, opts, onUsage) {
+export async function askModels(ai, chain, messages, opts, onUsage, log = console) {
   const models = [];
   for (const m of Array.isArray(chain) ? chain : []) {
     if (typeof m === "string" && m && !models.includes(m)) models.push(m);
   }
   const attempts = [];
+  let failure = null;
+  let failedModel = null;
   for (const model of models) {
     let out;
     try {
       out = await ai.run(model, modelInput(model, messages, opts));
     } catch (error) {
-      const failure = askFailure(error);
+      failure = askFailure(error);
+      failedModel = model;
       attempts.push({ model, text: null, finish: null, reasoned: false, failed: failure.why });
-      const replied = attempts.filter((a) => a.failed === null);
-      if (replied.length && failure.why !== "allowance") {
-        return { text: null, model: replied[0].model, attempts, failure, guard: stopGuard(replied) };
+      if (failure.why === "allowance") break;
+      const next = models[models.indexOf(model) + 1];
+      if (next && log && typeof log.error === "function") {
+        log.error(JSON.stringify({ message: "ai failover", from: model, to: next, why: failure.why,
+          error: error && error.message ? String(error.message).slice(0, 200) : null }));
       }
-      return { text: null, model, attempts, failure, guard: "unreachable:" + failure.why };
+      continue;
     }
     if (typeof onUsage === "function") {
       try { await onUsage(model, out && out.usage); } catch {  }
     }
     const read = aiText(out);
     attempts.push({ model, text: read.text, finish: read.finish, reasoned: read.reasoned, failed: null });
-    if (read.text) return { text: read.text, model, attempts, failure: null, guard: null };
+    if (read.text) {
+      return { text: read.text, model, attempts, failure: null, guard: null, failedOver: failedOver(attempts) };
+    }
+  }
+  const replied = attempts.filter((a) => a.failed === null);
+  if (failure) {
+    if (replied.length && failure.why !== "allowance") {
+      return { text: null, model: replied[0].model, attempts, failure, guard: stopGuard(replied), failedOver: failedOver(attempts) };
+    }
+    return { text: null, model: failedModel, attempts, failure, guard: "unreachable:" + failure.why, failedOver: failedOver(attempts) };
   }
   return {
     text: null,
@@ -185,8 +199,11 @@ export async function askModels(ai, chain, messages, opts, onUsage) {
     attempts,
     failure: null,
     guard: attempts.length ? stopGuard(attempts) : null,
+    failedOver: false,
   };
 }
+
+const failedOver = (attempts) => attempts.slice(0, -1).some((a) => a.failed !== null);
 
 const stopSaid = (a) => (a && a.finish === "length"
   ? "spent its whole answer budget before writing any text"
@@ -205,5 +222,6 @@ export function fallbackNote(result) {
   const a = result && Array.isArray(result.attempts) ? result.attempts : [];
   if (a.length < 2 || !result.text) return null;
   const first = a[0];
-  return { from: first.model, stop: first.finish === "length" ? "length" : "empty", reasoned: first.reasoned === true };
+  const stop = first.failed ? "failed:" + first.failed : first.finish === "length" ? "length" : "empty";
+  return { from: first.model, stop, reasoned: first.reasoned === true };
 }

@@ -1113,8 +1113,7 @@ export function guardAnswer(answer, picked, options) {
         "to show." };
   }
 
-  const allowed = new Set();
-  for (const f of facts) for (const t of numeralsIn(f && f.say)) allowed.add(t);
+  const allowed = new Set(numeralsIn(facts.map((f) => (f && typeof f.say === "string" ? f.say : "")).join("\n")));
 
   const numerals = numeralsIn(text);
   const rejected = [];
@@ -1346,13 +1345,27 @@ export function renderSummaryPlain(picked) {
     "below is the pipeline's own either way.";
 }
 
+const FINGERPRINT_ENCODER = new TextEncoder();
+
 export function summaryFingerprint(picked) {
   const facts = Array.isArray(picked) ? picked : [];
-
-  const joined = facts
+  const bytes = FINGERPRINT_ENCODER.encode(facts
     .map((f) => (f && typeof f.say === "string" ? f.say : ""))
-    .join("");
-  let h = 5381;
-  for (let i = 0; i < joined.length; i++) h = (((h << 5) + h) ^ joined.charCodeAt(i)) >>> 0;
-  return h.toString(36) + "." + facts.length;
+    .join("\u001f"));
+  const w = new Uint32Array(bytes.buffer, bytes.byteOffset, bytes.length >>> 2);
+  const n = w.length;
+  let h = 0x811c9dc5 ^ bytes.length;
+  let i = 0;
+  for (; i + 4 <= n; i += 4) {
+    h = Math.imul(h ^ w[i], 0x01000193);
+    h = Math.imul(h ^ w[i + 1], 0x01000193);
+    h = Math.imul(h ^ w[i + 2], 0x01000193);
+    h = Math.imul(h ^ w[i + 3], 0x01000193);
+  }
+  for (; i < n; i++) h = Math.imul(h ^ w[i], 0x01000193);
+  for (let j = n * 4; j < bytes.length; j++) h = Math.imul(h ^ bytes[j], 0x01000193);
+  h ^= h >>> 15;
+  h = Math.imul(h, 0x2c1b3c6d);
+  h ^= h >>> 12;
+  return (h >>> 0).toString(36) + "." + facts.length;
 }
