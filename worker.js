@@ -1,8 +1,8 @@
 import { signSession, verifySession, getCookie, cookie } from "./shared/session.js";
 import {
-  FLOWS_COOKIE, FLOWS_SESSION_TTL_SECONDS, LEARN_AUDIENCE, FLOWS_USERNAMES,
-  parseCredentials, verifyCredential, signFlowsSession, verifyFlowsSession,
-  isLearnAudience, isLocked, nextFailureState, sessionEpoch,
+  FLOWS_COOKIE, FLOWS_SESSION_TTL_SECONDS, LEARN_AUDIENCE, THROTTLE_SHARED_BUCKET,
+  parseCredentials, readMembers, memberOf, throttleBucket, verifyCredential,
+  signFlowsSession, verifyFlowsSession, isLearnAudience, isLocked, nextFailureState, sessionEpoch,
 } from "./shared/flows-auth.js";
 import { FLOWS_PAGES, modelName, neuronProvenance } from "./shared/flows-pages.js";
 import * as FLOWS_ASK from "./shared/flows-ask.js";
@@ -865,7 +865,7 @@ async function loadAcademyBootstrapSnapshot(env, user) {
 async function currentFlowsUser(request, env) {
   const token = getCookie(request, FLOWS_COOKIE);
   if (!token || !env.SESSION_SECRET) return null;
-  return verifyFlowsSession(token, env.SESSION_SECRET, sessionEpoch(env));
+  return verifyFlowsSession(token, env.SESSION_SECRET, sessionEpoch(env), readMembers(env.FLOWS_CREDENTIALS));
 }
 
 async function readFlowsForm(request) {
@@ -2022,10 +2022,8 @@ async function ensureFlowsTables(env) {
 }
 
 function flowsThrottleKey(request, username) {
-  if (!FLOWS_USERNAMES.includes(username)) return null;
-
   const ip = request.headers.get("CF-Connecting-IP") || "unknown";
-  return username + "|" + ip;
+  return throttleBucket(username) + "|" + ip;
 }
 
 async function flowsLockRecord(env, username) {
@@ -2790,9 +2788,10 @@ async function route(request, env, url, ctx) {
       return flowsLoginResponse("Those credentials were not recognised.");
     }
 
-    await clearFlowsFailures(env, throttleKey);
+    if (!throttleKey.startsWith(THROTTLE_SHARED_BUCKET + "|")) await clearFlowsFailures(env, throttleKey);
     const session = await signFlowsSession(
       verified, env.SESSION_SECRET, FLOWS_SESSION_TTL_SECONDS, sessionEpoch(env),
+      memberOf(credentials, verified).epoch,
     );
     return redirect(origin + "/flows/", 303, [
       cookie(FLOWS_COOKIE, session, { maxAge: FLOWS_SESSION_TTL_SECONDS }),

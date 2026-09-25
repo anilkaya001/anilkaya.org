@@ -1,10 +1,17 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { signSession, verifySession } from "../shared/session.js";
 import {
   FLOWS_AUDIENCE, LEARN_AUDIENCE, FLOWS_COOKIE, FLOWS_USERNAMES,
   PBKDF2_ITERATIONS, deriveHash, timingSafeEqual, parseCredentials,
   verifyCredential, signFlowsSession, verifyFlowsSession, isLearnAudience,
   LOCKOUT, isLocked, nextFailureState, sessionEpoch, DEFAULT_SESSION_EPOCH,
+  MEMBER_NAME, readMembers, memberRecord, memberOf, memberActive, isMemberDay,
+  throttleBucket, THROTTLE_SHARED_BUCKET,
 } from "../shared/flows-auth.js";
 
 let checks = 0;
@@ -45,6 +52,9 @@ const PASSWORD = "Ankara06**--";
 
   const wrongPw = await deriveHash("anilkaya", "wrong", PEPPER);
   ok(a !== wrongPw, "a wrong password cannot reproduce the hash");
+
+  ok(a === "Ct9eJHKJa8C/B829TA/m4Tz1bEVxehNxCFEjfaTHugU=",
+     "THE KNOWN ANSWER: the derivation is byte-identical to the one every stored hash was minted with");
 }
 
 {
@@ -62,12 +72,64 @@ const PASSWORD = "Ankara06**--";
   ok(parseCredentials("not json") === null, "malformed secret yields no credentials");
   ok(parseCredentials("[]") === null, "an array is not a credential map");
   ok(parseCredentials("{}") === null, "an empty object yields no credentials");
-  ok(parseCredentials('{"nobody":"x"}') === null, "usernames outside the roster are ignored");
+  ok(parseCredentials('{"No Body":"x","ab":"x","a/b":"x"}') === null,
+     "names outside /^[a-z0-9_.-]{3,32}$/ are ignored");
 
-  const parsed = parseCredentials('{"anilkaya":"HASH","nobody":"x"}');
-  ok(parsed && parsed.anilkaya === "HASH", "roster members are kept");
-  ok(parsed && !("nobody" in parsed), "non-roster entries are dropped");
+  const parsed = parseCredentials('{"anilkaya":"HASH","newmember":"H2","Bad Name":"x"}');
+  ok(parsed && parsed.anilkaya.hash === "HASH", "legacy roster members are kept");
+  ok(parsed && parsed.newmember.hash === "H2", "THE ALLOWLIST IS THE SECRET: a name only in the secret is kept");
+  ok(parsed && !("Bad Name" in parsed), "an invalid name is dropped");
   ok(Object.getPrototypeOf(parsed) === null, "the map has a null prototype (no __proto__ tricks)");
+  ok(Object.isFrozen(parsed) && Object.isFrozen(parsed.anilkaya), "the parsed map and its records are frozen");
+  ok(parsed.anilkaya.until === null && parsed.anilkaya.epoch === 0,
+     "an old string value means no end date and per-user epoch 0");
+
+  const proto = readMembers('{"__proto__":"P","toString":"T","constructor":"C"}');
+  ok(Object.getPrototypeOf(proto) === null, "a __proto__ key cannot replace the map's prototype");
+  ok(memberOf(proto, "tostring") === null && memberOf(proto, "hasOwnProperty") === null,
+     "an inherited name is never a member");
+  ok(memberOf(proto, "constructor").hash === "C", "a plain own key is looked up as data, nothing more");
+
+  ok(MEMBER_NAME.test("abc") && MEMBER_NAME.test("a.b-c_9") && MEMBER_NAME.test("x".repeat(32)),
+     "the name rule admits 3 to 32 of [a-z0-9_.-]");
+  ok(!MEMBER_NAME.test("ab") && !MEMBER_NAME.test("x".repeat(33)) && !MEMBER_NAME.test("Abc") &&
+     !MEMBER_NAME.test("a b") && !MEMBER_NAME.test("a\u0000b"), "and nothing else");
+  ok(FLOWS_USERNAMES.every((u) => MEMBER_NAME.test(u)), "every legacy roster name satisfies the rule");
+}
+
+{
+  ok(isMemberDay("2026-12-31") && !isMemberDay("2026-02-30") && !isMemberDay("2026-12-31T00:00") &&
+     !isMemberDay(20261231) && !isMemberDay(""), "an end date is a real calendar day, nothing looser");
+  ok(memberRecord({ hash: "H", until: "2026-12-31", epoch: 3 }).epoch === 3, "the object form is accepted");
+  ok(memberRecord({ hash: "H", until: "2026-12-31", note: "renewed" }).until === "2026-12-31",
+     "an unknown extra field is ignored, so a later field never breaks an older Worker");
+  ok(memberRecord({ hash: "H", until: null }).until === null, "an explicit null end date means none");
+  ok(memberRecord({ hash: "", epoch: 1 }) === null, "an empty hash is refused");
+  ok(memberRecord({ until: "2026-12-31" }) === null, "a missing hash is refused");
+  ok(memberRecord({ hash: "H", until: "2026-13-01" }) === null,
+     "an impossible end date refuses the entry rather than granting open-ended access");
+  ok(memberRecord({ hash: "H", epoch: -1 }) === null && memberRecord({ hash: "H", epoch: 1.5 }) === null &&
+     memberRecord({ hash: "H", epoch: "2" }) === null, "a malformed epoch refuses the entry");
+  ok(memberRecord({ hash: "x".repeat(257) }) === null && memberRecord("x".repeat(257)) === null,
+     "an oversized hash is refused, so no entry can make a login costly");
+  ok(memberRecord(["H"]) === null && memberRecord(7) === null && memberRecord(null) === null,
+     "other shapes are refused");
+
+  const mixed = readMembers(JSON.stringify({
+    good: "HASH-GOOD", later: { hash: "HASH-L", until: "2027-01-31" },
+    badday: { hash: "H", until: "31/01/2027" }, badepoch: { hash: "H", epoch: "x" }, arr: ["H"],
+  }));
+  ok(mixed && Object.keys(mixed).join() === "good,later",
+     "A MALFORMED ENTRY IS IGNORED, NOT FATAL: the well-formed members survive beside it");
+
+  const a1 = readMembers('{"abc":"H"}');
+  ok(readMembers('{"abc":"H"}') === a1, "the same secret value is parsed once and reused");
+  ok(readMembers('{"abd":"H"}') !== a1 && memberOf(readMembers('{"abc":"H"}'), "abc").hash === "H",
+     "a changed secret value is parsed afresh");
+  ok(readMembers("not json") === null && readMembers(undefined) === null && readMembers("[1]") === null,
+     "an unreadable secret reads as null");
+  const empty = readMembers("{}");
+  ok(empty !== null && Object.keys(empty).length === 0, "a readable but empty secret is an empty map, not null");
 }
 
 {
@@ -94,6 +156,124 @@ const PASSWORD = "Ankara06**--";
   for (const u of FLOWS_USERNAMES) {
     ok(await verifyCredential(u, PASSWORD, creds, PEPPER) === u, `${u} authenticates`);
   }
+}
+
+{
+  const at = (iso) => Date.parse(iso);
+  const raw = JSON.stringify({
+    anilkaya: await deriveHash("anilkaya", PASSWORD, PEPPER),
+    newmember: await deriveHash("newmember", PASSWORD, PEPPER),
+    lapsed: { hash: await deriveHash("lapsed", PASSWORD, PEPPER), until: "2026-09-24" },
+    renewed: { hash: await deriveHash("renewed", PASSWORD, PEPPER), until: "2026-12-31", epoch: 2 },
+  });
+  const members = parseCredentials(raw);
+
+  ok(await verifyCredential("newmember", PASSWORD, members, PEPPER) === "newmember",
+     "A NAME ONLY IN THE SECRET SIGNS IN: no code change, no deploy");
+  ok(await verifyCredential("NewMember ", PASSWORD, members, PEPPER) === "newmember",
+     "and it is normalised like every other name");
+  ok(await verifyCredential("anilkaya", PASSWORD, members, PEPPER) === "anilkaya",
+     "an old string entry keeps working unchanged");
+  ok(await verifyCredential("renewed", PASSWORD, members, PEPPER, at("2026-10-01T15:00:00Z")) === "renewed",
+     "an object entry inside its end date signs in");
+
+  const wrong = await verifyCredential("lapsed", "wrong", members, PEPPER, at("2026-09-25T15:00:00Z"));
+  const lapsed = await verifyCredential("lapsed", PASSWORD, members, PEPPER, at("2026-09-25T15:00:00Z"));
+  const unknown = await verifyCredential("nobody-here", PASSWORD, members, PEPPER, at("2026-09-25T15:00:00Z"));
+  ok(lapsed === null, "AN END DATE IN THE PAST IS REFUSED, even with the right password");
+  ok(lapsed === wrong && lapsed === unknown,
+     "with exactly the failure a wrong password or an unknown name gets (no enumeration)");
+
+  ok(await verifyCredential("lapsed", PASSWORD, members, PEPPER, at("2026-09-24T20:00:00Z")) === "lapsed",
+     "the end date is inclusive: its own day still admits");
+  ok(await verifyCredential("lapsed", PASSWORD, members, PEPPER, at("2026-09-25T03:30:00Z")) === "lapsed",
+     "THE EASTERN DAY: 23:30 in New York on the end date admits although UTC has rolled over");
+  ok(await verifyCredential("lapsed", PASSWORD, members, PEPPER, at("2026-09-25T04:00:00Z")) === null,
+     "and New York's midnight ends it");
+  ok(memberActive(memberOf(members, "lapsed"), NaN) === false, "an unreadable clock fails closed");
+
+  const legacyMap = Object.create(null);
+  legacyMap.anilkaya = await deriveHash("anilkaya", PASSWORD, PEPPER);
+  ok(await verifyCredential("anilkaya", PASSWORD, legacyMap, PEPPER) === "anilkaya",
+     "a hand-built map of plain hash strings is still accepted");
+  const oddMap = Object.create(null);
+  oddMap["bad name"] = await deriveHash("bad name", PASSWORD, PEPPER);
+  ok(await verifyCredential("bad name", PASSWORD, oddMap, PEPPER) === null,
+     "a name that breaks the rule never signs in, whatever map it is given");
+}
+
+{
+  const at = (iso) => Date.parse(iso);
+  const members = parseCredentials(JSON.stringify({
+    anilkaya: "H-A", newmember: "H-N",
+    lapsed: { hash: "H-L", until: "2026-09-24" },
+    renewed: { hash: "H-R", until: "2026-12-31", epoch: 2 },
+  }));
+
+  const legacyToken = await signFlowsSession("anilkaya", SECRET, 3600, "1");
+  const legacyClaims = await verifySession(legacyToken, SECRET);
+  ok(!("uep" in legacyClaims),
+     "a member at per-user epoch 0 gets a token shaped exactly as before, so the deploy signs nobody out");
+  ok((await verifyFlowsSession(legacyToken, SECRET, "1", members)).username === "anilkaya",
+     "and a pre-existing session verifies against the secret");
+
+  const fresh = await signFlowsSession("newmember", SECRET, 3600, "1", 0);
+  ok((await verifyFlowsSession(fresh, SECRET, "1", members)).username === "newmember",
+     "a session for a name only in the secret verifies");
+  ok(await verifyFlowsSession(fresh, SECRET, "1") === null,
+     "while the legacy check alone (no members given) still refuses a name outside the old roster");
+
+  const gone = parseCredentials(JSON.stringify({ anilkaya: "H-A" }));
+  ok(await verifyFlowsSession(fresh, SECRET, "1", gone) === null,
+     "REMOVAL IS REVOCATION: dropping a name from the secret ends its live session");
+
+  const lapsedToken = await signFlowsSession("lapsed", SECRET, 3600, "1");
+  ok((await verifyFlowsSession(lapsedToken, SECRET, "1", members, at("2026-09-24T21:00:00Z"))).username === "lapsed",
+     "a session inside its member's end date verifies");
+  ok(await verifyFlowsSession(lapsedToken, SECRET, "1", members, at("2026-09-25T13:00:00Z")) === null,
+     "THE END DATE ENDS A LIVE SESSION BY ITSELF, not only the next sign-in");
+
+  const r2 = await signFlowsSession("renewed", SECRET, 3600, "1", 2);
+  const a0 = await signFlowsSession("anilkaya", SECRET, 3600, "1", 0);
+  ok((await verifySession(r2, SECRET)).uep === 2, "the per-user epoch rides in the token");
+  ok((await verifyFlowsSession(r2, SECRET, "1", members, at("2026-10-01T15:00:00Z"))).username === "renewed",
+     "a session minted at the member's current epoch verifies");
+  const bumped = parseCredentials(JSON.stringify({
+    anilkaya: "H-A", newmember: "H-N",
+    lapsed: { hash: "H-L", until: "2026-09-24" },
+    renewed: { hash: "H-R", until: "2026-12-31", epoch: 3 },
+  }));
+  ok(await verifyFlowsSession(r2, SECRET, "1", bumped, at("2026-10-01T15:00:00Z")) === null,
+     "BUMPING ONE USER'S EPOCH REVOKES THAT USER");
+  ok((await verifyFlowsSession(a0, SECRET, "1", bumped)).username === "anilkaya" &&
+     (await verifyFlowsSession(fresh, SECRET, "1", bumped)).username === "newmember",
+     "AND ONLY THAT USER: everyone else stays signed in");
+  ok(await verifyFlowsSession(a0, SECRET, "2", members) === null,
+     "the global FLOWS_SESSION_EPOCH still signs everyone out");
+
+  const forgedEpoch = await signSession(
+    { sub: "renewed", aud: FLOWS_AUDIENCE, epoch: "1", uep: "2", exp: Date.now() + 60000 }, SECRET);
+  ok(await verifyFlowsSession(forgedEpoch, SECRET, "1", members, at("2026-10-01T15:00:00Z")) === null,
+     "a per-user epoch of the wrong type never matches");
+
+  const nobody = readMembers("{}");
+  ok(await verifyFlowsSession(a0, SECRET, "1", nobody) === null,
+     "a readable secret with no members admits no session: the secret is authoritative");
+  ok((await verifyFlowsSession(a0, SECRET, "1", readMembers("broken{"))).username === "anilkaya",
+     "THE TRANSITION FALLBACK: an unreadable secret falls back to the legacy roster for live sessions");
+  ok(await verifyFlowsSession(fresh, SECRET, "1", readMembers("broken{")) === null,
+     "and that fallback never admits a name beyond the legacy roster");
+}
+
+{
+  ok(throttleBucket("anilkaya") === "anilkaya", "a legacy roster name keeps its own throttle bucket");
+  ok(throttleBucket("newmember") === THROTTLE_SHARED_BUCKET && throttleBucket("zz-nobody") === THROTTLE_SHARED_BUCKET,
+     "every other name, member or not, shares one bucket per address, so a lockout cannot tell them apart");
+  const buckets = new Set();
+  for (let i = 0; i < 5000; i++) buckets.add(throttleBucket("guess" + i));
+  ok(buckets.size === 1, "and unknown names never grow the throttle table by name");
+  ok(!MEMBER_NAME.test(THROTTLE_SHARED_BUCKET), "the shared bucket can never collide with a member's name");
+  ok(throttleBucket(undefined) === THROTTLE_SHARED_BUCKET, "a missing name is safe");
 }
 
 {
@@ -189,4 +369,67 @@ const PASSWORD = "Ankara06**--";
      "a correct epoch does not excuse a wrong audience");
 }
 
-console.log(`✓ flows-auth: ${checks} assertions — roster, peppered PBKDF2, timing-safe verify, bidirectional session isolation with legacy tolerance, lockout`);
+{
+  const SCRIPT = fileURLToPath(new URL("../scripts/generate-flows-credentials.mjs", import.meta.url));
+  const MINT_PEPPER = "members-contract-pepper-0123456789";
+  const dir = mkdtempSync(path.join(tmpdir(), "flows-members-"));
+  const run = (args, input = "") => spawnSync(process.execPath, [SCRIPT, ...args], { input, encoding: "utf8" });
+  try {
+    const file = path.join(dir, "members.json");
+    writeFileSync(file, JSON.stringify({ anilkaya: await deriveHash("anilkaya", PASSWORD, MINT_PEPPER) }));
+
+    const added = run(["--add", "new.member", "--until", "2099-12-31", "--from", file, "--out", file], MINT_PEPPER + "\n");
+    ok(added.status === 0, "--add succeeds: " + added.stderr);
+    ok(added.stdout === "", "with --out, nothing but the file receives the JSON");
+    const password = /password for new\.member:\s+(\S+)/.exec(added.stderr)?.[1];
+    ok(/^[a-z2-9]{4}(-[a-z2-9]{4}){3}$/.test(password || ""), "a fresh password is shown once, on the terminal");
+    ok(added.stderr.includes("wrangler secret put FLOWS_CREDENTIALS < " + file),
+       "THE ONE COMMAND: the exact install line is printed");
+    const afterAdd = readMembers(readFileSync(file, "utf8").trim());
+    ok(afterAdd.anilkaya && afterAdd["new.member"].until === "2099-12-31",
+       "the new member lands beside the old one, with its end date, in the object form");
+    ok(await verifyCredential("new.member", password, afterAdd, MINT_PEPPER) === "new.member",
+       "the printed password signs the new member in against the new secret");
+    ok(await verifyCredential("anilkaya", PASSWORD, afterAdd, MINT_PEPPER) === "anilkaya",
+       "and the existing member's password is untouched");
+
+    const bumped = run(["--set", "new.member", "--epoch", "next"], readFileSync(file, "utf8"));
+    ok(bumped.status === 0, "--set reads the current JSON from stdin");
+    const lines = bumped.stdout.split("\n").filter(Boolean);
+    ok(lines.length === 1, "and stdout carries exactly one line, the JSON, so it pipes straight into wrangler");
+    const afterSet = readMembers(lines[0]);
+    ok(afterSet["new.member"].epoch === 1 && afterSet["new.member"].hash === afterAdd["new.member"].hash,
+       "--epoch next revokes by bumping the epoch and keeps the password");
+    ok(afterSet.anilkaya.epoch === 0, "nobody else's epoch moves");
+    ok(JSON.parse(lines[0]).anilkaya === afterAdd.anilkaya.hash,
+       "a member with no end date and epoch 0 stays in the old string form");
+
+    const cleared = run(["--set", "new.member", "--until", "never"], lines[0]);
+    ok(readMembers(cleared.stdout.trim())["new.member"].until === null, "--until never lifts an end date");
+
+    const removed = run(["--remove", "new.member"], lines[0]);
+    ok(removed.status === 0 && !("new.member" in readMembers(removed.stdout.trim())), "--remove drops a member");
+
+    ok(run(["--add", "Bad Name"], MINT_PEPPER + "\n{}").status !== 0, "a name outside the rule is refused");
+    ok(run(["--add", "okname", "--until", "2026-02-30"], MINT_PEPPER + "\n{}").status !== 0,
+       "an impossible end date is refused");
+    ok(run(["--add", "okname", "--epoch", "-1"], MINT_PEPPER + "\n{}").status !== 0, "a negative epoch is refused");
+    ok(run(["--add", "okname"], "short\n{}").status !== 0, "a pepper too short to be the real one is refused");
+    ok(run(["--set", "okname", "--epoch", "1"], "{}").status !== 0, "--set on a stranger is refused");
+    const dirty = run(["--set", "anilkaya", "--epoch", "1"], JSON.stringify({ anilkaya: "H", broken: { until: "x" } }));
+    ok(dirty.status !== 0 && dirty.stderr.includes('"broken"'),
+       "a current map holding an entry the Worker would ignore is named, not silently rewritten");
+    const cleaned = run(["--remove", "broken"], JSON.stringify({ anilkaya: "H", broken: { until: "x" } }));
+    ok(cleaned.status === 0 && JSON.parse(cleaned.stdout).anilkaya === "H", "and --remove can clear it");
+
+    const crowd = {};
+    for (let i = 0; i < 60; i++) crowd["member" + String(i).padStart(3, "0")] = { hash: "x".repeat(44), until: "2099-12-31", epoch: 1 };
+    const full = run(["--set", "member000", "--epoch", "2"], JSON.stringify(crowd));
+    ok(full.status !== 0 && /at most 5000/.test(full.stderr),
+       "a map past Cloudflare's 5 KB secret ceiling is refused before wrangler would reject it");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+console.log(`✓ flows-auth: ${checks} assertions — members from the secret, end dates on the Eastern day, per-user epochs, peppered PBKDF2, timing-safe verify, bidirectional session isolation with legacy tolerance, bounded lockout`);

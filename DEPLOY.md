@@ -340,14 +340,18 @@ secret. If the two differ, every publish returns 401, the job exits non-zero,
 and the board silently keeps yesterday's data.
 
 The normal flow is **mint mode**: one command mints a distinct crypto-random
-password per roster account plus a fresh pepper, derives the hash map, and
-prints everything ONCE — nothing touches disk, argv, or shell history.
+password per member plus a fresh pepper, derives the hash map, and prints
+everything ONCE. Passwords and the pepper never touch disk, argv, or shell
+history; `--out` also saves the hash map (never a password) as the members file
+that section 10.2a starts from.
 
 ```bash
 # 1. Mint the whole set: per-user passwords, a fresh pepper, and the
 #    FLOWS_CREDENTIALS JSON. Printed ONCE; keep the terminal open until both
 #    secrets are pasted below, because none of it can be recovered afterwards.
-node scripts/generate-flows-credentials.mjs --mint
+#    Without --from it mints the legacy roster; --from members.json mints
+#    every member listed there instead, keeping end dates and epochs.
+node scripts/generate-flows-credentials.mjs --mint --out members.json
 
 # 2. The ingest token is separate (it authenticates the pipeline, not people).
 INGEST_TOKEN=$(openssl rand -hex 32); printf 'FLOWS_INGEST_TOKEN: %s\n' "$INGEST_TOKEN"
@@ -372,13 +376,16 @@ Legacy shared-password mode still exists (`printf '%s\n%s\n' "$PASSWORD"
 passwords are the default for a reason: with a shared password, one person's
 leak rotates everybody.
 
-**Adding a secret does not deploy it.** The dashboard stores it as a new Worker
-version and leaves that version undeployed, so the running Worker keeps serving
-the previous one and every route behaves exactly as if the secret were never
-set — `/flows/login` answers `503 "Sign-in is not configured"` and
-`/api/flows/ingest` answers the same. Nothing in the UI flags this. After adding
-all three, go to **Deployments** and promote the new version to 100%, or run
-`wrangler deploy`.
+**`wrangler secret put` deploys; the dashboard does not.** The CLI creates a
+new Worker version carrying the secret and deploys it at once (Cloudflare's
+Secrets page says so), so no code deploy follows it. A secret added in the
+dashboard is stored as a new version that waits for its **Deploy** button; until
+then the running Worker behaves exactly as if the secret were never set —
+`/flows/login` answers `503 "Sign-in is not configured"` and
+`/api/flows/ingest` answers the same, and nothing in the UI flags it. If the
+CLI refuses because the latest version is not the deployed one (gradual
+deployments), use `wrangler versions secret put` and then
+`wrangler versions deploy`.
 
 Two checks that distinguish "deployed" from "stored but dormant", both from any
 terminal and neither revealing a value:
@@ -400,6 +407,72 @@ unset INGEST_TOKEN
 
 **The repository is public.** None of these values may ever be committed,
 echoed into CI logs, or pasted into an issue.
+
+### 10.2a Members: add, renew, end, revoke — one command, no deploy
+
+The members are the keys of `FLOWS_CREDENTIALS`. Adding, renewing, ending or
+revoking a subscriber is one `wrangler secret put FLOWS_CREDENTIALS`: no code
+change and no deploy, and nobody else is signed out.
+
+A key is a sign-in name, `^[a-z0-9_.-]{3,32}$`. Its value is either the hash
+string the mint prints, or an object:
+
+```json
+{ "alice": { "hash": "<from the script>", "until": "2026-12-31", "epoch": 1 } }
+```
+
+- `until` is the **last Eastern calendar day** of access, inclusive. From the
+  next New York midnight the member can no longer sign in, and a live session
+  stops at its next request. A lapsed subscription therefore ends by itself.
+- `epoch` (a whole number, default 0) revokes one person: raise it and that
+  member's live sessions end at their next request while everyone else stays
+  signed in. `FLOWS_SESSION_EPOCH` still signs everyone out.
+- An old plain-string value keeps working unchanged (no end date, epoch 0).
+- An entry the Worker cannot read (a bad name, an impossible date, a
+  non-integer epoch, no hash) is ignored on its own: that one person cannot sign
+  in, and everyone else is unaffected. A secret that is not JSON at all makes
+  sign-in answer 503, and live sessions fall back to the legacy roster
+  (`FLOWS_USERNAMES` in `shared/flows-auth.js`) until it is fixed. That constant
+  exists only for this transition: when every member is in the secret it can be
+  emptied, and the secret becomes the only list.
+- Removing a key is revocation: that member's live session ends at its next
+  request.
+- Failures stay uniform: an ended, revoked, unknown or mistyped sign-in all
+  get the same 401 page. The throttle keeps a bucket per address for every
+  name outside the legacy roster, so a lockout cannot reveal whether a name is
+  a member, and guessed names never add rows to D1.
+
+Cloudflare never shows a secret's value again, so keep the current JSON as a
+private `members.json` (outside this public repository, and apart from the
+pepper; it holds peppered hashes, never passwords). The script edits it and
+prints the one install command:
+
+```bash
+# Add a subscriber through 2026-12-31. Stdin: the pepper (the FLOWS_PEPPER value).
+node scripts/generate-flows-credentials.mjs --add alice --until 2026-12-31 --from members.json --out members.json
+./tests/node_modules/.bin/wrangler secret put FLOWS_CREDENTIALS < members.json
+
+# Renew, end, or lift an end date (no pepper needed):
+node scripts/generate-flows-credentials.mjs --set alice --until 2027-06-30 --from members.json --out members.json
+node scripts/generate-flows-credentials.mjs --set alice --until never --from members.json --out members.json
+
+# Revoke one person's sessions, keeping the password (or give it a new
+# password with --add alice again, plus --epoch N to end the old sessions):
+node scripts/generate-flows-credentials.mjs --set alice --epoch next --from members.json --out members.json
+
+# Drop a member entirely:
+node scripts/generate-flows-credentials.mjs --remove alice --from members.json --out members.json
+```
+
+Each run prints the new password (for `--add`) on the terminal once, lists
+members whose end date has passed, and refuses a map over Cloudflare's 5 KB
+secret limit (about 80 plain entries, or about 50 in the object form; remove
+ended members to reclaim room). Without `--out`, the new JSON is the only thing
+on stdout, so it can be piped straight into `wrangler secret put`.
+
+Verify from any terminal, without revealing anything: sign in as the member
+(303 and a `flows_session` cookie), or, for an ended or revoked member, confirm
+the sign-in page comes back with 401.
 
 #### `FLOWS_SESSION_EPOCH` is a plain var, not a secret
 
@@ -424,14 +497,18 @@ These are two different operations and only one of them signs anyone out.
 
 | Goal | Action | Effect on live sessions |
 |---|---|---|
-| Change passwords | Re-mint (`--mint`) and set `FLOWS_PEPPER` + `FLOWS_CREDENTIALS` | **None** — everyone stays signed in |
+| Change passwords | Re-mint (`--mint --from members.json`) and set `FLOWS_PEPPER` + `FLOWS_CREDENTIALS` | **None** — everyone stays signed in |
+| Change one password | `--add NAME` again, then `wrangler secret put FLOWS_CREDENTIALS` | **None**, unless `--epoch` is raised too |
+| Revoke one person | `--set NAME --epoch next` (or `--remove NAME`), then `wrangler secret put FLOWS_CREDENTIALS` | That member only, at their next request |
+| End a subscription on a date | `--set NAME --until YYYY-MM-DD`, then `wrangler secret put FLOWS_CREDENTIALS` | That member only, from the next Eastern day |
 | Revoke every session | Increment `FLOWS_SESSION_EPOCH` in `[vars]` and redeploy | All sessions invalid immediately |
 
 Rotating `FLOWS_PEPPER` does **not** sign anyone out. The pepper is used for
 credential derivation only and never touches session verification, so an
 already-issued token keeps working for its full 14-day life. Changing the
-password without bumping the epoch means a departing user's existing cookie
-still opens the board for up to two weeks — bump the epoch as well.
+password without bumping an epoch means a departing user's existing cookie
+still opens the board for up to two weeks — raise that member's `epoch` (or
+remove them) as well.
 
 ### 10.2b Deploy
 
