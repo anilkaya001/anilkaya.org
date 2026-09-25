@@ -20,9 +20,9 @@ import { MARKET_INDICES, parseIndexQuote, buildSnapshot } from "./shared/markets
 import {
   rankChain, RANK_KEYS, crossesEarnings, numOrNull, parseOptionSymbol, ivConvention,
 } from "./shared/flows-premium.js";
-import { isRefreshWindow, freshHeaders } from "./shared/flows-freshness.js";
+import { isRefreshWindow, freshHeaders, phaseAt, easternDay } from "./shared/flows-freshness.js";
 import * as FLOWS_LIVE from "./shared/flows-live-worker.js";
-import { nightlyFreshMeta } from "./shared/flows-live.js";
+import { nightlyFreshMeta, STRIP_FIELDS, stripValues } from "./shared/flows-live.js";
 import { archiveWriteAction, ARCHIVE_REFUSALS } from "./shared/flows-archive.js";
 import { readExpiryBreakdown } from "./shared/flows-positioning.js";
 
@@ -934,6 +934,118 @@ async function readCardWithEngine(env, ticker) {
     card.engine = block || { status: "unreadable", key: card.engine.key };
   }
   return { stored, card, unreadable: false };
+}
+
+const STORE_GONE = Object.freeze({ status: "unavailable", reason: "store" });
+const storeGone = () => new HttpError(503, "store_unreadable", "The store could not be read", { "Retry-After": "30" }, STORE_GONE);
+
+async function readServed(env, key) {
+  const trace = {};
+  const stored = await readFlowsPayload(env, key, trace);
+  if (trace.failed) throw storeGone();
+  return stored;
+}
+
+const LITE_SQL =
+  "SELECT j.key AS i, p.updated_at, json_extract(p.payload, '$.sessionDate') AS session, " +
+  "COALESCE(json_extract(p.payload, '$.readAt'), json_extract(p.payload, '$.generatedAt')) AS read_iso, " +
+  "json_extract(p.payload, '$.generatedAt') AS generated, json_extract(p.payload, '$.n') AS n, " +
+  "json_extract(p.payload, '$.units') AS units, " +
+  "(SELECT json_group_object(c.key, json_extract(c.value, '$[' || j.key || ']')) FROM json_each(p.payload, '$.cols') c) AS cols, " +
+  "(SELECT json_group_object(c.key, json_extract(c.value, '$[' || j.key || ']')) FROM json_each(p.payload, '$.pct') c) AS pct, " +
+  "(SELECT json_extract(p.payload, '$.sectors[' || s.value || ']') FROM json_each(p.payload, '$.sec') s WHERE s.key = j.key " +
+  "AND s.type = 'integer') AS sector " +
+  "FROM flows_payload p, json_each(p.payload, '$.t') j WHERE p.id = 'universe' AND j.value = ? LIMIT 1";
+const GATE_SQL =
+  "SELECT json_extract(r.value, '$.d') AS d, json_extract(r.value, '$.dte') AS dte FROM flows_payload p, " +
+  "json_each(p.payload, '$.rows') r WHERE p.id = 'events' AND json_extract(r.value, '$.t') = ? " +
+  "AND json_extract(r.value, '$.st') = 'gated' LIMIT 1";
+const ROSTER_SQL =
+  "SELECT json_extract(payload, '$.sessionDate') AS session, json_extract(payload, '$.depth.\"' || ? || '\"') AS depth " +
+  "FROM flows_payload WHERE id = 'roster'";
+const KNOWN_SQL =
+  "SELECT 1 AS k FROM flows_payload WHERE id = ?1 UNION ALL SELECT 1 FROM flows_payload p, json_each(p.payload, '$.t') j " +
+  "WHERE p.id = 'universe' AND j.value = ?2 LIMIT 1";
+const CLASS_TTL_S = 12 * 3600;
+const parseOr = (text, fallback) => { try { const v = JSON.parse(text); return v && typeof v === "object" ? v : fallback; } catch { return fallback; } };
+
+async function scheduledTonight(env, ticker) {
+  const row = await env.DB.prepare(ROSTER_SQL).bind(ticker).first().catch(() => { throw storeGone(); });
+  if (!row || typeof row.depth !== "string" || typeof row.session !== "string") return false;
+  const now = Date.now();
+  const phase = phaseAt(now, await FLOWS_LIVE.cachedClock(env, now));
+  return !!phase && typeof phase.lastClosed === "string" && row.session < phase.lastClosed;
+}
+
+async function liteCard(env, ticker) {
+  const [uni, gate] = await env.DB.batch([env.DB.prepare(LITE_SQL).bind(ticker), env.DB.prepare(GATE_SQL).bind(ticker)])
+    .catch(() => { throw storeGone(); });
+  const r = uni && uni.results && uni.results[0];
+  if (!r) return null;
+  const units = parseOr(r.units, {}), cols = parseOr(r.cols, {});
+  const u = {};
+  for (const [k, v] of Object.entries(cols)) {
+    const scale = Array.isArray(units[k]) ? Number(units[k][1]) : NaN;
+    u[k] = Number.isFinite(v) && Number.isFinite(scale) && scale !== 0 ? v / scale : null;
+  }
+  const g = gate && gate.results && gate.results[0];
+  const card = {
+    v: 1, ticker, status: "ok", lite: true, depth: "universe", sessionDate: r.session, generatedAt: r.generated,
+    sector: typeof r.sector === "string" ? r.sector : null, n: Number(r.n) || null, rank: Number(r.i) + 1,
+    u, pct: parseOr(r.pct, {}), why: g ? "gated" : "not-covered",
+    gate: g ? { earnings: typeof g.d === "string" ? g.d : null, dte: Number.isFinite(g.dte) ? g.dte : null } : null,
+  };
+  return json(card, 200, nightlyFreshHeaders({ fresh: nightlyFreshMeta(r) }));
+}
+
+async function classifyTicker(env, ctx, ticker) {
+  const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
+  const key = new Request(`https://flows-class.internal/${ticker}`, { method: "GET" });
+  const hit = cache ? await cache.match(key).catch(() => null) : null;
+  if (hit) {
+    const body = await hit.json().catch(() => null);
+    if (body && typeof body.known === "boolean") return body;
+  }
+  if (!env.UW_API_KEY || !(await FLOWS_LIVE.ondemandAllowed(env))) return null;
+  const raw = await uwFetch(env, "/api/screener/stocks", { ticker }).catch(() => null);
+  const rows = raw && Array.isArray(raw.data) ? raw.data : Array.isArray(raw) ? raw : null;
+  if (!rows) return null;
+  const row = rows.find((x) => x && typeof x.ticker === "string" && x.ticker.trim().toUpperCase() === ticker) || null;
+  const verdict = row ? { known: true, row } : { known: false };
+  if (cache) {
+    const store = new Response(JSON.stringify(verdict), { headers: {
+      "Content-Type": "application/json; charset=utf-8", "Cache-Control": `max-age=${CLASS_TTL_S}` } });
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(cache.put(key, store).catch(() => {}));
+    else await cache.put(key, store).catch(() => {});
+  }
+  return verdict;
+}
+
+function quoteCard(ticker, row, now) {
+  const vals = stripValues(row);
+  const u = {};
+  STRIP_FIELDS.forEach(([name], i) => { u[name === "ivRank" ? "ivp" : name] = vals[i]; });
+  const text = (v, n) => (typeof v === "string" && v.trim() ? v.trim().slice(0, n) : null);
+  const day = typeof row.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(row.date) ? row.date : easternDay(now);
+  return { v: 1, ticker, status: "ok", lite: true, depth: "quote", sessionDate: day, generatedAt: new Date(now).toISOString(),
+    nm: text(row.full_name, 40), type: text(row.issue_type, 24), sector: text(row.sector, 40), u, why: "not-covered" };
+}
+
+async function absentKey(env, ctx, kind, ticker) {
+  if (await scheduledTonight(env, ticker)) return json({ ticker, status: "pending" });
+  if (kind !== "card") return json({ ticker, status: "absent", why: "not-covered" });
+  const lite = await liteCard(env, ticker);
+  if (lite) return lite;
+  const verdict = await classifyTicker(env, ctx, ticker);
+  if (verdict && verdict.known) return json(quoteCard(ticker, verdict.row, Date.now()));
+  return json({ ticker, status: "absent", why: verdict ? "unknown" : "not-covered" });
+}
+
+async function tapeAdmits(env, ctx, ticker) {
+  const row = await env.DB.prepare(KNOWN_SQL).bind("card:" + ticker, ticker).first().catch(() => null);
+  if (row) return true;
+  const verdict = await classifyTicker(env, ctx, ticker);
+  return !verdict || verdict.known;
 }
 
 function passthrough(stored) {
@@ -2908,7 +3020,7 @@ async function route(request, env, url, ctx) {
 
     const validKey = card !== null
       ? FLOWS_TICKER_RE.test(card)
-      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^flowalerts$|^pulse$|^political$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^sector:premium$|^news$|^brief$|^meta$|^universe$|^regime$|^ideas$/.test(key);
+      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^flowalerts$|^pulse$|^political$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^sector:premium$|^news$|^brief$|^meta$|^universe$|^regime$|^ideas$|^focus$|^roster$/.test(key);
     if (!validKey) {
       throw new HttpError(400, "invalid_key", "Unknown payload key");
     }
@@ -3004,46 +3116,50 @@ async function route(request, env, url, ctx) {
 
     if (path === "/api/flows/market") {
 
-      const stored = await readFlowsPayload(env, "market");
+      const stored = await readServed(env, "market");
       if (stored === null) return json({ status: "pending" });
       return passthrough(stored);
     }
 
     if (path === "/api/flows/events") {
 
-      const stored = await readFlowsPayload(env, "events");
+      const stored = await readServed(env, "events");
       if (stored === null) return json({ status: "pending" });
       return passthrough(stored);
     }
 
     if (path === "/api/flows/scoretrack") {
 
-      const stored = await readFlowsPayload(env, "scoretrack");
+      const stored = await readServed(env, "scoretrack");
       if (stored === null) return json({ status: "pending" });
       return passthrough(stored);
     }
 
     if (path === "/api/flows/meta") {
 
-      const stored = await readFlowsPayload(env, "meta");
+      const stored = await readServed(env, "meta");
       if (stored === null) return json({ status: "pending" });
       return passthrough(stored);
     }
 
     if (path === "/api/flows/flowalerts") {
 
-      const stored = await readFlowsPayload(env, "flowalerts");
+      const trace = {};
+      const stored = await readFlowsPayload(env, "flowalerts", trace);
       const overlaid = await liveOverlay(env, "flowalerts", stored);
       if (overlaid) return overlaid;
+      if (trace.failed) throw storeGone();
       if (stored === null) return json({ status: "pending" });
       return passthrough(stored);
     }
 
     if (path === "/api/flows/pulse") {
 
-      const stored = await readFlowsPayload(env, "pulse");
+      const trace = {};
+      const stored = await readFlowsPayload(env, "pulse", trace);
       const overlaid = await liveOverlay(env, "pulse", stored);
       if (overlaid) return overlaid;
+      if (trace.failed) throw storeGone();
       if (stored === null) return json({ status: "pending" });
       return passthrough(stored);
     }
@@ -3066,19 +3182,19 @@ async function route(request, env, url, ctx) {
       }
       await ensureFlowsTables(env);
       return FLOWS_LIVE.serveTape(env, ctx, ticker, Date.now(), {
-        json, fetchVendor: (p, params) => uwFetch(env, p, params) });
+        json, fetchVendor: (p, params) => uwFetch(env, p, params), admit: (t) => tapeAdmits(env, ctx, t) });
     }
 
     if (path === "/api/flows/political") {
 
-      const stored = await readFlowsPayload(env, "political");
+      const stored = await readServed(env, "political");
       if (stored === null) return json({ status: "pending" });
       return passthrough(stored);
     }
 
     if (path === "/api/flows/unusual") {
 
-      const stored = await readFlowsPayload(env, "unusual");
+      const stored = await readServed(env, "unusual");
       if (stored === null) return json({ status: "pending" });
       return passthrough(stored);
     }
@@ -3086,29 +3202,29 @@ async function route(request, env, url, ctx) {
     if (path === "/api/flows/movers" || path === "/api/flows/sectors") {
 
       const key = path.endsWith("/movers") ? "movers" : "sector:trix";
-      const stored = await readFlowsPayload(env, key);
+      const stored = await readServed(env, key);
       if (stored === null) return json({ status: "pending", rows: [] });
       return passthrough(stored);
     }
 
     if (path === "/api/flows/sector-premium") {
 
-      const stored = await readFlowsPayload(env, "sector:premium");
+      const stored = await readServed(env, "sector:premium");
       if (stored === null) return json({ status: "pending", sectors: [] });
       return passthrough(stored);
     }
 
-    if (path === "/api/flows/universe" || path === "/api/flows/regime" || path === "/api/flows/ideas") {
+    if (path === "/api/flows/universe" || path === "/api/flows/regime" || path === "/api/flows/ideas" || path === "/api/flows/focus" || path === "/api/flows/roster") {
 
       const key = path.slice("/api/flows/".length);
-      const stored = await readFlowsPayload(env, key);
+      const stored = await readServed(env, key);
       if (stored === null) return json({ status: "pending" });
       return passthrough(stored);
     }
 
     if (path === "/api/flows/news") {
 
-      const stored = await readFlowsPayload(env, "news");
+      const stored = await readServed(env, "news");
       if (stored === null) return json({ status: "pending", rows: [] });
       return passthrough(stored);
     }
@@ -3150,7 +3266,7 @@ async function route(request, env, url, ctx) {
 
     if (path === "/api/flows/brief") {
 
-      const stored = await readFlowsPayload(env, "brief");
+      const stored = await readServed(env, "brief");
       if (stored === null) {
         return json({ status: "pending", today: null, yesterday: null, next: null,
           facts: [], silences: { pending: [], unreadable: [], quiet: [], unavailable: [] } });
@@ -3195,7 +3311,7 @@ async function route(request, env, url, ctx) {
 
     if (path === "/api/flows/record") {
 
-      const stored = await readFlowsPayload(env, "record");
+      const stored = await readServed(env, "record");
       if (stored === null) {
         return json({ status: "pending", horizons: [], sessions: 0 });
       }
@@ -3208,11 +3324,9 @@ async function route(request, env, url, ctx) {
       if (!FLOWS_TICKER_RE.test(ticker)) {
         throw new HttpError(400, "invalid_ticker", "Unknown ticker");
       }
-      const stored = await readFlowsPayload(env, path.slice("/api/flows/".length) + ":" + ticker);
-      if (stored === null) {
-
-        return json({ ticker, status: "pending" });
-      }
+      const kind = path.slice("/api/flows/".length);
+      const stored = await readServed(env, kind + ":" + ticker);
+      if (stored === null) return absentKey(env, ctx, kind, ticker);
       if (!stored.payload.includes(SPLIT_ENGINE_MARK)) return passthrough(stored);
       const merged = await readCardWithEngine(env, ticker);
       if (!merged.card) return passthrough(stored);

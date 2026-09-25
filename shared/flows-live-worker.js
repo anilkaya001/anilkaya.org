@@ -713,7 +713,7 @@ export async function refreshTape(env, ticker, now, { fetchVendor, heldText = nu
     readAt: Number.isFinite(readAt) ? readAt : now };
 }
 
-export async function serveTape(env, ctx, ticker, now, { fetchVendor, json }) {
+export async function serveTape(env, ctx, ticker, now, { fetchVendor, json, admit = null }) {
   const db = env.DB;
   const clock = await cachedClock(env, now);
   const phase = phaseAt(now, clock);
@@ -741,6 +741,9 @@ export async function serveTape(env, ctx, ticker, now, { fetchVendor, json }) {
   const age = hasPayload ? now - Number(row.read_at) : Infinity;
   if (hasPayload && age <= tapeTtlMs(phase, row)) return respond(row, "fresh");
   const usable = hasPayload && (phase && phase.phase === "rth" ? age <= LIVE_BUDGET.tapeUsableMs : true);
+  if (!hasPayload && typeof admit === "function" && !(await admit(ticker))) {
+    return json({ ticker, status: "absent", why: "unknown" }, 200, { "Cache-Control": "no-store", "X-Tape": "unknown" });
+  }
 
   if (!env.UW_API_KEY) return usable ? respond(row, "stale-unconfigured") : pending("unconfigured");
 
