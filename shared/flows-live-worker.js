@@ -5,7 +5,7 @@ import {
 } from "./flows-live.js";
 import {
   FRESH_CLASSES, PHASE_MINUTES, LIVE_CLOCK, freshHeaders, pendingHeaders, phaseAt, tier1Due, liveDispatchDue,
-  liveStalled, nightlyDispatchDue, easternDay, easternInstant, sessionOpen, clockClosed,
+  liveStalled, nightlyDispatchDue, easternDay, easternInstant, sessionOpen, clockClosed, expectedNightlySession,
 } from "./flows-freshness.js";
 import { LIVE_OIDC, looksLikeJwt, rsaKeys, verifyLiveOidc, claimsBrief } from "./flows-oidc.js";
 
@@ -571,6 +571,7 @@ export async function serveNow(env, url, now, { json, HttpError, quote }) {
     tier1: { at: iso(clock && clock.tier1At), okAt: iso(clock && clock.tier1OkAt),
       why: clock && typeof clock.tier1Why === "string" ? clock.tier1Why : null },
     clock: clockView(clock),
+    expected: expectedNightlySession(now, clock),
     phase: phase ? { phase: phase.phase, session: phase.session, trading: phase.trading,
       endsAt: Number.isFinite(phase.endsAt) ? new Date(phase.endsAt).toISOString() : null } : null,
     keys,

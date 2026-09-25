@@ -1,9 +1,11 @@
+import { nyseHolidays, nyseEarlyCloses } from "./flows-quant-time.js";
+
 export const FRESH_CLASSES = Object.freeze({
   quote: Object.freeze({ cadenceS: 5, liveS: 20, staleS: 90, source: "ondemand" }),
   tape: Object.freeze({ cadenceS: 60, liveS: 150, staleS: 600, source: "ondemand" }),
   market: Object.freeze({ cadenceS: 300, liveS: 660, staleS: 1500, source: "worker" }),
   breadth: Object.freeze({ cadenceS: 900, liveS: 1200, staleS: 2700, source: "actions" }),
-  nightly: Object.freeze({ cadenceS: 0, liveS: null, staleS: null, source: "nightly", graceS: 3 * 3600 }),
+  nightly: Object.freeze({ cadenceS: 0, liveS: null, staleS: null, source: "nightly", graceS: 5 * 3600 }),
 });
 
 export const REFRESH_CADENCE_MINUTES = FRESH_CLASSES.market.cadenceS / 60;
@@ -81,23 +83,16 @@ export function isRefreshWindow(date) {
   return clock.minutes >= OPEN_MINUTES && clock.minutes <= CLOSE_MINUTES;
 }
 
-export function lastCompletedSession(date) {
-  const d = date instanceof Date ? date : new Date(date);
-  if (Number.isNaN(d.getTime())) return null;
-  const clock = easternClock(d);
-  if (!clock) return null;
-
-  let steps = 0;
-  const closed = clock.weekday !== "Sat" && clock.weekday !== "Sun" &&
-    clock.minutes > CLOSE_MINUTES;
-  if (!closed) steps = 1;
-  for (let i = 0; i < 7; i++) {
-    const at = new Date(d.getTime() - steps * 86400000);
-    const c = easternClock(at);
-    if (c && c.weekday !== "Sat" && c.weekday !== "Sun") return easternDay(at);
-    steps += 1;
+export function lastCompletedSession(date, clock = null) {
+  const ms = toMs(date);
+  if (!Number.isFinite(ms)) return null;
+  const today = easternDay(ms);
+  const wall = easternClock(ms);
+  if (!today || !wall) return null;
+  if (isTradingDay(today, clock) && wall.minutes > closeMinutes(today, clock) + CLOSE_MINUTES - PHASE_MINUTES.close) {
+    return today;
   }
-  return null;
+  return prevTradingDay(today, clock);
 }
 
 const toMs = (v) => {
@@ -160,15 +155,35 @@ export function clockClosed(flag) {
   return flag === 0 || flag === "0";
 }
 
+const clockOpen = (flag) => flag === 1 || flag === "1";
+
+const closedDaysOf = (clock) =>
+  clock && typeof clock === "object" && Array.isArray(clock.closedDays) ? clock.closedDays : null;
+
+export function isHoliday(day) {
+  const p = dayParts(day);
+  return !!p && nyseHolidays(p.y).has(day);
+}
+
+export function isEarlyCloseDay(day) {
+  const p = dayParts(day);
+  return !!p && nyseEarlyCloses(p.y).has(day);
+}
+
 export function isTradingDay(day, clock) {
   if (!isWeekdayDay(day)) return false;
   const c = clockFor(clock, day);
-  return !(c && clockClosed(c.trading));
+  if (c && clockClosed(c.trading)) return false;
+  if (c && clockOpen(c.trading)) return true;
+  if (isHoliday(day)) return false;
+  const closed = closedDaysOf(clock);
+  return !(closed && closed.includes(day));
 }
 
 export function closeMinutes(day, clock) {
   const c = clockFor(clock, day);
-  return c && Number(c.earlyClose ?? c.early_close) === 1 ? PHASE_MINUTES.earlyClose : PHASE_MINUTES.close;
+  if (c && Number(c.earlyClose ?? c.early_close) === 1) return PHASE_MINUTES.earlyClose;
+  return isEarlyCloseDay(day) ? PHASE_MINUTES.earlyClose : PHASE_MINUTES.close;
 }
 
 export function sessionClose(day, clock) {
@@ -179,13 +194,13 @@ export function sessionOpen(day) {
   return easternInstant(day, PHASE_MINUTES.open);
 }
 
-function prevTradingDay(day, clock) {
+export function prevTradingDay(day, clock) {
   let d = prevWeekdayDay(day);
   for (let i = 0; d && i < 10 && !isTradingDay(d, clock); i++) d = prevWeekdayDay(d);
   return d;
 }
 
-function nextTradingDay(day, clock) {
+export function nextTradingDay(day, clock) {
   let d = nextWeekdayDay(day);
   for (let i = 0; d && i < 10 && !isTradingDay(d, clock); i++) d = nextWeekdayDay(d);
   return d;

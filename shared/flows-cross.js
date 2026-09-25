@@ -1,3 +1,5 @@
+import { isTradingDay } from "./flows-freshness.js";
+
 export const CROSS_SCHEMA_VERSION = 1;
 
 export const UNIVERSE_BUDGET_BYTES = 100 * 1024;
@@ -91,7 +93,7 @@ export function sessionsBetween(from, to) {
   let n = 0;
   for (let d = a; d < b;) {
     d = addDays(d, 1);
-    if (isWeekdayIso(d)) n++;
+    if (isTradingDay(d)) n++;
   }
   return n;
 }

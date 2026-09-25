@@ -1693,22 +1693,40 @@
     do { t -= 864e5; } while ([0, 6].includes(new Date(t).getUTCDay()));
     return new Date(t).toISOString().slice(0, 10);
   }
+  const SRV = { day: null, at: 0, ph: null, until: 0, busy: false, asked: 0 };
+  function takeNow(b) {
+    if (!b) return;
+    if (isoDay(b.expected)) { SRV.day = b.expected.slice(0, 10); SRV.at = Date.now(); }
+    const t = b.phase ? Date.parse(b.phase.endsAt) : NaN;
+    if (t > 0) { SRV.ph = b.phase.phase; SRV.until = t; }
+  }
+  function confirmExpected() {
+    const t = Date.now();
+    if (!nativeFetch || SRV.busy || t - SRV.asked < 6e4 || t - SRV.at < 6e4) return;
+    SRV.busy = true;
+    SRV.asked = t;
+    nativeFetch("/api/flows/now", { credentials: "same-origin" }).then((r) => r.ok && r.json()).then(takeNow, () => {})
+      .then(() => { SRV.busy = false; paintFresh(); });
+  }
   function market(now) {
-    const n = nyClock(now || new Date());
+    const at = now || new Date(), n = nyClock(at);
     const weekday = !["Sat", "Sun"].includes(n.wd);
-    const open = weekday && n.mins >= 570 && n.mins < 960;
-    const built = weekday && n.mins >= 17 * 60 + 45;
-    return { open, weekday, today: n.date, expected: built ? n.date : prevWeekday(n.date) };
+    const open = SRV.until > at ? SRV.ph === "rth" : weekday && n.mins >= 570 && n.mins < 960;
+    const local = weekday && n.mins >= 1260 ? n.date : prevWeekday(n.date);
+    if (SRV.day && local > SRV.day) confirmExpected();
+    return { open, weekday, today: n.date, expected: SRV.day || local, source: SRV.day ? "server" : "local" };
   }
 
-  const FRESH = { sessionDate: null, nightly: null, meta: false, generatedAt: null, updatedAt: null, readAt: null, live: false, sources: new Map(), explicit: false, settled: false };
+  const FRESH = { sessionDate: null, primary: null, nightly: null, meta: false, generatedAt: null, updatedAt: null, readAt: null, live: false, sources: new Map(), explicit: false, settled: false };
   function freshState() {
     const m = market(new Date());
-    const S = FRESH.sessionDate || FRESH.nightly;
+    const S = FRESH.primary || FRESH.sessionDate || FRESH.nightly;
     const liveNow = FRESH.live && FRESH.readAt && Date.now() - Date.parse(FRESH.readAt) < 3 * 60 * 1000 && m.open;
+    let behind = !!S && S < m.expected;
+    if (behind && m.source === "local") { confirmExpected(); behind = !SRV.busy; }
     let state;
     if (!S) state = FRESH.settled ? (m.open ? "fresh" : "closed") : "pending";
-    else if (S < m.expected) state = "stale";
+    else if (behind) state = "stale";
     else if (liveNow) state = "live";
     else if (m.open) state = "fresh";
     else state = "closed";
@@ -1753,6 +1771,7 @@
     if (o.explicit !== false) FRESH.explicit = true;
     if (isoDay(o.sessionDate)) {
       const d = o.sessionDate.slice(0, 10);
+      if (o.primary === true) FRESH.primary = d;
       if (!FRESH.sessionDate || d > FRESH.sessionDate) FRESH.sessionDate = d;
       FRESH.sources.set(o.source || "page", d);
     }
@@ -1798,6 +1817,7 @@
       try {
         const url = typeof input === "string" ? input : input && input.url;
         if (url && url.indexOf("/api/flows/meta") >= 0) takeMeta(p);
+        if (url && url.indexOf("/api/flows/now") >= 0) p.then((r) => r.ok && r.clone().json()).then((j) => { takeNow(j); paintFresh(); }, () => {});
         if (url && url.indexOf("/api/flows/") >= 0) p.then((r) => observe(url, r), () => {});
       } catch { return p; }
       return p;

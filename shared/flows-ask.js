@@ -1,5 +1,5 @@
 import { buildBrief, briefStoreFrom, briefAlertsFact, silenceOf, num } from "./flows-brief.js";
-import { lastCompletedSession } from "./flows-freshness.js";
+import { expectedNightlySession } from "./flows-freshness.js";
 
 function served(store, key) {
   if (!store || typeof store !== "object" || !Object.hasOwn(store, key)) {
@@ -838,10 +838,10 @@ function refreshBriefAlerts(facts, today, published, at, replaced) {
   return { ...today, facts: list };
 }
 
-export function briefAge(index, now) {
+export function briefAge(index, now, clock = null) {
   const session = index && typeof index.sessionDate === "string" && index.sessionDate
     ? index.sessionDate.slice(0, 10) : null;
-  const expected = now === undefined || now === null ? null : lastCompletedSession(now);
+  const expected = now === undefined || now === null ? null : expectedNightlySession(now, clock);
   const stale = session !== null && expected !== null && session < expected;
   const refreshedAt = index && typeof index.refreshedAt === "string" ? index.refreshedAt : null;
   const generatedAt = index && typeof index.generatedAt === "string" ? index.generatedAt : null;
