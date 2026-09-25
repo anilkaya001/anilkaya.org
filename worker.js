@@ -2908,7 +2908,7 @@ async function route(request, env, url, ctx) {
 
     const validKey = card !== null
       ? FLOWS_TICKER_RE.test(card)
-      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^flowalerts$|^pulse$|^political$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^sector:premium$|^news$|^brief$|^meta$|^universe$|^regime$|^ideas$/.test(key);
+      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^flowalerts$|^pulse$|^political$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^sector:premium$|^news$|^brief$|^meta$|^universe$|^regime$|^ideas$|^focus$|^roster$/.test(key);
     if (!validKey) {
       throw new HttpError(400, "invalid_key", "Unknown payload key");
     }
@@ -3098,7 +3098,7 @@ async function route(request, env, url, ctx) {
       return passthrough(stored);
     }
 
-    if (path === "/api/flows/universe" || path === "/api/flows/regime" || path === "/api/flows/ideas") {
+    if (path === "/api/flows/universe" || path === "/api/flows/regime" || path === "/api/flows/ideas" || path === "/api/flows/focus" || path === "/api/flows/roster") {
 
       const key = path.slice("/api/flows/".length);
       const stored = await readFlowsPayload(env, key);
