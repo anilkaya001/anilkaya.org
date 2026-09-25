@@ -55,7 +55,9 @@ import { makeCardXStore, publishCardX } from "./flows-legs/card-x.mjs";
 import { buildIndexDossiers } from "./flows-legs/index-dossier.mjs";
 import {
   runLive, runLiveLoop, chainDispatch, dryLiveTicks, readHeldAlerts, readLiveClock, LIVE_READ_PACE_MS,
+  passOutcome, liveRunVerdict,
 } from "./flows-legs/live.mjs";
+import { runHealthGate, REPUBLISH_REPAIR } from "./flows-legs/health.mjs";
 import { LIVE_OIDC, actionsIdToken, jwtExpiry } from "../shared/flows-oidc.js";
 
 const ARGS = new Set(process.argv.slice(2));
@@ -144,8 +146,8 @@ export const SESSION_OPEN_MINUTES = 9 * 60 + 30;
 export const SESSION_CLOSE_MINUTES = 16 * 60;
 
 export const PIPELINE_CADENCE =
-  "once per weekday after the close, at 21:30 UTC — 17:30 America/New_York in " +
-  "summer, 16:30 in winter";
+  "once per weekday after the close, at 21:30 UTC in summer and 22:30 UTC in winter — " +
+  "17:30 America/New_York either way";
 
 export const DEEP_NAMES = 50;
 
@@ -1720,6 +1722,8 @@ export const READ_RETRIES = 2;
 
 const READ_RETRYABLE = (status) => status === 0 || PUBLISH_RETRYABLE.has(status) || status >= 500;
 
+export const edgeRefusals = { count: 0 };
+
 async function readStoredOnce(key) {
   try {
     const response = await fetch(
@@ -1729,6 +1733,7 @@ async function readStoredOnce(key) {
         headers: await ingestHeaders(),
       },
     );
+    if (response.status === 403) edgeRefusals.count++;
     if (!response.ok) return { payload: null, failed: true, status: response.status };
     const body = await response.json();
 
@@ -2773,6 +2778,7 @@ async function retire(key) {
         headers: await ingestHeaders(),
       },
     );
+    if (response.status === 403) edgeRefusals.count++;
     return { ok: response.ok, status: response.status };
   } catch (error) {
     return { ok: false, status: 0, message: error.message };
@@ -2862,6 +2868,7 @@ async function publish(key, payload) {
     },
   );
 
+  if (response.status === 403) edgeRefusals.count++;
   const wait = PUBLISH_RETRYABLE.has(response.status)
     ? publishRetryDelay(attempt, { spentMs: publishRetrySpentMs })
     : null;
@@ -4051,13 +4058,21 @@ async function runLiveMode() {
   const reportErrors = (result) => {
     const errors = result && result.run ? result.run.errors : [];
     if (errors.length) console.warn(`live: ${errors.length} key(s) not published — ${errors.join("; ")}`);
-    return errors.length > 0;
+    return passOutcome(result);
   };
   const readClock = () => readLiveClock(readStoredOnce);
+  const settle = (loop) => {
+    const verdict = liveRunVerdict(loop);
+    if (verdict.failed) {
+      console.warn(`live: FAILED — ${verdict.why}`);
+      process.exitCode = 1;
+    }
+    return loop;
+  };
   if (force || process.env.FLOWS_LIVE_LOOP !== "1") {
     const clock = force ? null : await readClock();
     const result = await runLive({ uw, publish, readStored, shapeNews, origin, force, clock });
-    if (reportErrors(result)) process.exitCode = 1;
+    settle({ passes: [reportErrors(result)] });
     return result;
   }
   const loop = await runLiveLoop({
@@ -4065,15 +4080,11 @@ async function runLiveMode() {
     pass: async ({ first, clock }) => {
       resetPublishRetryBudget();
       const result = await runLive({ uw, publish, readStored, shapeNews, origin, skipRecent: first, clock });
-      return { skipped: result.skipped || null, errored: reportErrors(result) };
+      return reportErrors(result);
     },
     chain: ({ at }) => chainDispatch({ env: process.env, at }),
   });
-  const ran = loop.passes.filter((p) => !p.skipped);
-  if ((ran.length && ran.every((p) => p.errored)) || (loop.exit === "budget" && !(loop.chained && loop.chained.sent))) {
-    process.exitCode = 1;
-  }
-  return loop;
+  return settle(loop);
 }
 
 async function main() {
@@ -4137,6 +4148,7 @@ async function main() {
       `as that run got. ${stats.calls} API call(s).`);
     if (gate.mode === "partial") {
       console.warn(`  ARCHIVE INCOMPLETE: ${gate.note}`);
+      console.warn(`  ${REPUBLISH_REPAIR}`);
       process.exitCode = 1;
     }
     return;
@@ -6137,6 +6149,7 @@ async function main() {
         "together; " + plainRedispatchSaid(archive) + ". The run finishes publishing and " +
         "then exits non-zero, so the loss turns the workflow red instead of scrolling past in " +
         "a green log.");
+      console.warn(`  ${REPUBLISH_REPAIR}`);
       process.exitCode = 1;
     } else if (!repaired.length && !held.length) {
       console.log(`  archive check: scores, board:long and board:short are all written for ${sessionDate}`);
@@ -6270,6 +6283,10 @@ async function main() {
 
   const verdict = describeFloorVerdict(stats);
   if (verdict) console.log("  " + verdict);
+
+  const health = await runHealthGate({ sessionDate, read: readStoredOnce, dry: DRY_RUN,
+    edge403: edgeRefusals.count, retrySpentMs: publishRetrySpentMs });
+  if (health.failures.length) process.exitCode = 1;
 }
 
 export {

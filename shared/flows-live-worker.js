@@ -1,7 +1,7 @@
 import {
   LIVE_KEYS, LIVE_BUDGET, TIER1_CALLS, TAPE_SPEC, shapeMarketLive, tideSessionState, tideLastAt, checkLiveWrite,
   liveKeyFromParam, shapeTapePrem, shapeTapeGex, assembleTape, nextTapeLeg, pulseWithLive, liveAlertsWin,
-  nightlyFreshMeta, rowsOf, timeMs, anyAnswered, marketFeeds,
+  nightlyFreshMeta, rowsOf, timeMs, anyAnswered, marketFeeds, VERDICT, verdictPatch, parseClosedDays,
 } from "./flows-live.js";
 import {
   FRESH_CLASSES, PHASE_MINUTES, LIVE_CLOCK, freshHeaders, pendingHeaders, phaseAt, tier1Due, liveDispatchDue,
@@ -20,7 +20,8 @@ export const LIVE_SCHEMA_SQL = Object.freeze([
   "CREATE TABLE IF NOT EXISTS flows_clock (id INTEGER PRIMARY KEY CHECK (id = 1), day TEXT, trading INTEGER, " +
     "early_close INTEGER, tape_at INTEGER, tape_moved_at INTEGER, live_dispatched_at INTEGER, live_done_at INTEGER, " +
     "live_redispatched_at INTEGER, nightly_day TEXT, nightly_dispatched_at INTEGER, nightly_redispatched_at INTEGER, " +
-    "summary_stamp TEXT, updated_at INTEGER, tier1_at INTEGER, tier1_ok_at INTEGER, tier1_why TEXT)",
+    "summary_stamp TEXT, updated_at INTEGER, tier1_at INTEGER, tier1_ok_at INTEGER, tier1_why TEXT, " +
+    "closed_probe_at INTEGER, closed_days TEXT, dispatch_why TEXT)",
   "CREATE TRIGGER IF NOT EXISTS flows_archive_immutable BEFORE UPDATE ON flows_payload " +
     "WHEN OLD.id GLOB 'board:*:[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' " +
     "OR OLD.id GLOB 'scores:[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' " +
@@ -29,6 +30,7 @@ export const LIVE_SCHEMA_SQL = Object.freeze([
 
 export const CLOCK_ADDED_COLUMNS = Object.freeze([
   Object.freeze(["tier1_at", "INTEGER"]), Object.freeze(["tier1_ok_at", "INTEGER"]), Object.freeze(["tier1_why", "TEXT"]),
+  Object.freeze(["closed_probe_at", "INTEGER"]), Object.freeze(["closed_days", "TEXT"]), Object.freeze(["dispatch_why", "TEXT"]),
 ]);
 
 export async function upgradeClockColumns(db) {
@@ -66,7 +68,9 @@ export function cronJob(cron, at) {
   return weekday && hour >= 13 && hour <= 21 && d.getUTCMinutes() % 30 !== 0 ? "rth" : "housekeeping";
 }
 
-export const NIGHTLY_READ_KEYS = Object.freeze(["board:long", "board:short", "board:watch", "meta"]);
+export const NIGHTLY_READ_KEYS = Object.freeze(["board:long", "board:short", "board:watch", "meta", "focus"]);
+
+export const NIGHTLY_MISSING_AFTER_MIN = 300;
 
 export const NOW_NIGHTLY_KEYS = Object.freeze([
   "board:long", "board:short", "board:watch", "brief", "pulse", "flowalerts", "market", "meta", "events",
@@ -79,6 +83,7 @@ const CLOCK_COLUMNS = Object.freeze({
   nightlyDay: "nightly_day", nightlyDispatchedAt: "nightly_dispatched_at",
   nightlyRedispatchedAt: "nightly_redispatched_at", summaryStamp: "summary_stamp",
   tier1At: "tier1_at", tier1OkAt: "tier1_ok_at", tier1Why: "tier1_why",
+  closedProbeAt: "closed_probe_at", closedDays: "closed_days", dispatchWhy: "dispatch_why",
 });
 
 export function tier1Why(value) {
@@ -105,6 +110,7 @@ export function normalizeClock(row) {
     const v = row[col];
     out[camel] = v === undefined ? null : v;
   }
+  out.closedDays = parseClosedDays(out.closedDays);
   return out;
 }
 
@@ -122,7 +128,8 @@ export async function cachedClock(env, now = Date.now()) {
 }
 
 export function clockPatchStatement(db, patch, now) {
-  const cols = Object.keys(patch).filter((k) => Object.hasOwn(CLOCK_COLUMNS, k)).map((k) => [CLOCK_COLUMNS[k], patch[k]]);
+  const cols = Object.keys(patch).filter((k) => Object.hasOwn(CLOCK_COLUMNS, k))
+    .map((k) => [CLOCK_COLUMNS[k], Array.isArray(patch[k]) ? JSON.stringify(patch[k]) : patch[k]]);
   const names = ["id", ...cols.map(([c]) => c), "updated_at"];
   const values = [1, ...cols.map(([, v]) => v), now];
   const sets = [...cols.map(([c]) => `${c} = excluded.${c}`), "updated_at = excluded.updated_at"];
@@ -172,15 +179,27 @@ export async function tier1Reads(fetchVendor, { timeoutMs = LIVE_BUDGET.tier1Tim
   return raws;
 }
 
-function sessionStatePatch(clock, raws, at, today) {
+const clockFlag = (v) => (v === null || v === undefined || v === "" ? null : Number(v) === 1 ? 1 : Number(v) === 0 ? 0 : null);
+
+export function verdictReprobeDue(at, clock) {
+  const wall = phaseAt(at, clock);
+  return !!wall && wall.minutes >= PHASE_MINUTES.sessionProbe && wall.minutes < VERDICT.provisionalUntilMin &&
+    wall.minutes % VERDICT.reprobeEveryMin < 5;
+}
+
+export function sessionStatePatch(clock, raws, at, today) {
   const wall = phaseAt(at, clock);
   const patch = {};
-  const same = clock && clock.day === today;
-  if (!same) Object.assign(patch, { day: today, trading: null, earlyClose: null, tapeAt: null, tapeMovedAt: null });
-  const trading = same ? clock.trading : null;
-  if ((trading === null || trading === undefined) && wall && wall.minutes >= PHASE_MINUTES.sessionProbe) {
-    const seen = tideSessionState(raws, { today, afterProbe: true });
-    if (seen !== null) patch.trading = seen;
+  const same = !!clock && clock.day === today;
+  if (!same) Object.assign(patch, { day: today, trading: null, earlyClose: null, tapeAt: null, tapeMovedAt: null,
+    closedProbeAt: null });
+  const trading = same ? clockFlag(clock.trading) : null;
+  if (wall && wall.minutes >= PHASE_MINUTES.sessionProbe &&
+      (trading === null || (trading === 0 && wall.minutes < VERDICT.provisionalUntilMin))) {
+    Object.assign(patch, verdictPatch({
+      seen: tideSessionState(raws, { today, afterProbe: true }), trading,
+      closedProbeAt: same ? clock.closedProbeAt : null, closedDays: clock ? clock.closedDays : [], at, today,
+    }));
   }
   const last = tideLastAt(raws.tide);
   if (Number.isFinite(last) && easternDay(last) === today) {
@@ -196,6 +215,12 @@ function sessionStatePatch(clock, raws, at, today) {
     }
   }
   return patch;
+}
+
+export function dispatchOutcome(sent) {
+  if (!sent || sent.why === "no-token") return null;
+  if (sent.sent) return "sent";
+  return (sent.why + (sent.status ? ":" + sent.status : "")).slice(0, 24);
 }
 
 export function dispatchBase(env) {
@@ -249,7 +274,9 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
   const clock = normalizeClock(clockRes && clockRes.results ? clockRes.results[0] : null);
   const breadthReadAt = breadthRes && breadthRes.results && breadthRes.results[0]
     ? Number(breadthRes.results[0].read_at) : null;
-  if (clock && clock.day === today && clockClosed(clock.trading)) {
+  const closedToday = !!clock && clock.day === today && clockClosed(clock.trading);
+  const reprobe = closedToday && verdictReprobeDue(at, clock);
+  if (closedToday && !reprobe) {
     if (telemetry) await clockPatchStatement(env.DB, { tier1Why: "holiday" }, at).run().catch(() => {});
     memoClock({ ...clock, tier1At: at, tier1Why: telemetry ? "holiday" : clock.tier1Why }, at);
     return { ...out, skipped: "holiday" };
@@ -258,7 +285,7 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
   const patch = {};
   let why = "not-due";
 
-  if (tier1Due(at, clock)) {
+  if (reprobe || tier1Due(at, clock)) {
     if (!env.UW_API_KEY || typeof fetchVendor !== "function") why = "error:no-key";
     else {
       try {
@@ -268,7 +295,10 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
         const text = JSON.stringify(payload);
         const spec = LIVE_KEYS["live:market"];
         const statuses = { tide: payload.tide.status, sectors: payload.sectors.status };
-        if (!anyAnswered(marketFeeds(payload))) {
+        if (reprobe && patch.trading !== 1) {
+          why = "holiday";
+          out.tier1 = { written: false, why, reprobe: true, statuses };
+        } else if (!anyAnswered(marketFeeds(payload))) {
           why = "no-feed-answered";
           out.tier1 = { written: false, why, bytes: text.length, statuses };
           log.error(JSON.stringify({ message: "live:market not written: no vendor feed answered", statuses }));
@@ -300,20 +330,23 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
     const sent = await dispatchWorkflow(env, env.FLOWS_LIVE_WORKFLOW || "flows-live.yml",
       { tick: new Date(at).toISOString(), origin: "worker" }, fetchImpl);
     out.dispatch = sent;
+    if (dispatchOutcome(sent)) patch.dispatchWhy = dispatchOutcome(sent);
     if (sent.sent) patch.liveDispatchedAt = at;
     else if (sent.why !== "no-token") log.error(JSON.stringify({ message: "live dispatch failed", ...sent }));
   } else out.dispatch = { sent: false, why: due.why };
 
-  if (env.GITHUB_DISPATCH_TOKEN && liveStalled(at, breadthReadAt, merged)) {
+  if (liveStalled(at, breadthReadAt, merged)) {
     const ageMin = Number.isFinite(breadthReadAt) && breadthReadAt > 0 ? Math.round((at - breadthReadAt) / 60000) : null;
-    log.error(JSON.stringify({ message: "live layer stalled", ageMin,
+    const canDispatch = !!env.GITHUB_DISPATCH_TOKEN;
+    log.error(JSON.stringify({ message: "live layer stalled", ageMin, canDispatch,
       dispatchedAt: merged.liveDispatchedAt || null, doneAt: merged.liveDoneAt || null }));
     const again = Number(merged.liveRedispatchedAt);
     const episode = Number.isFinite(again) && again > 0 && at - again < LIVE_CLOCK.watchdogMs;
-    if (!episode && !(out.dispatch && out.dispatch.sent)) {
+    if (canDispatch && !episode && !(out.dispatch && out.dispatch.sent)) {
       const sent = await dispatchWorkflow(env, env.FLOWS_LIVE_WORKFLOW || "flows-live.yml",
         { tick: new Date(at).toISOString(), origin: "watchdog" }, fetchImpl);
       out.watchdog = { stalled: true, ageMin, redispatch: sent };
+      if (dispatchOutcome(sent)) patch.dispatchWhy = dispatchOutcome(sent);
       if (sent.sent) { patch.liveRedispatchedAt = at; patch.liveDispatchedAt = at; }
     } else out.watchdog = { stalled: true, ageMin, redispatch: null };
   }
@@ -337,7 +370,8 @@ export async function nightlyTick(env, at, { fetchImpl = fetch, log = console } 
   const due = nightlyDispatchDue(at, clock, metaSession);
   const today = easternDay(at);
   const wall = phaseAt(at, clock);
-  if (wall && due.why !== "landed" && due.why !== "not-trading" && wall.minutes >= PHASE_MINUTES.close + 180) {
+  if (wall && due.why !== "landed" && due.why !== "not-trading" &&
+      wall.minutes >= PHASE_MINUTES.close + NIGHTLY_MISSING_AFTER_MIN) {
     log.error(JSON.stringify({ message: "nightly missing", today, metaSession }));
   }
   if (!due.due) return { due: false, why: due.why, metaSession };
@@ -347,9 +381,10 @@ export async function nightlyTick(env, at, { fetchImpl = fetch, log = console } 
     const patch = due.redispatch
       ? { nightlyRedispatchedAt: at }
       : { nightlyDay: today, nightlyDispatchedAt: at, nightlyRedispatchedAt: null };
-    await clockPatchStatement(env.DB, patch, at).run();
+    await clockPatchStatement(env.DB, { ...patch, dispatchWhy: "sent" }, at).run();
   } else if (sent.why !== "no-token") {
     log.error(JSON.stringify({ message: "nightly dispatch failed", ...sent }));
+    await clockPatchStatement(env.DB, { dispatchWhy: dispatchOutcome(sent) }, at).run().catch(() => {});
   }
   return { due: true, redispatch: !!due.redispatch, sent, metaSession };
 }
@@ -503,11 +538,18 @@ export function parseList(raw, allow, max = 16) {
   return out;
 }
 
-const clockFlag = (v) => (v === null || v === undefined || v === "" ? null : Number(v) === 1 ? 1 : Number(v) === 0 ? 0 : null);
+const isoOf = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? new Date(Number(v)).toISOString() : null);
+
+export function tier1View(clock) {
+  return { at: isoOf(clock && clock.tier1At), okAt: isoOf(clock && clock.tier1OkAt),
+    why: clock && typeof clock.tier1Why === "string" ? clock.tier1Why : null };
+}
 
 export function clockView(clock) {
   return clock && typeof clock.day === "string"
-    ? { day: clock.day, trading: clockFlag(clock.trading), earlyClose: clockFlag(clock.earlyClose) }
+    ? { day: clock.day, trading: clockFlag(clock.trading), earlyClose: clockFlag(clock.earlyClose),
+      closedDays: parseClosedDays(clock.closedDays), tier1: tier1View(clock),
+      dispatchWhy: typeof clock.dispatchWhy === "string" ? clock.dispatchWhy : null }
     : null;
 }
 

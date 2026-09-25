@@ -1,7 +1,7 @@
 import {
   LIVE_KEYS, LIVE_BUDGET, SECTOR_TIDES, shapeBreadth, shapeStrips, appendStripSeries, shapeVol,
   indexRows, shapeMovers, shapeLiveTape, gexRotation, shapeGexSeries, mergeGex, mergeLiveAlerts, alertsPagePlan,
-  oldestCreated, stripNames, rowsOf, failed, freshEnvelope, timeMs, isoSec, anyAnswered, BREADTH_ETFS,
+  oldestCreated, stripNames, focusStripNames, rowsOf, failed, freshEnvelope, timeMs, isoSec, anyAnswered, BREADTH_ETFS,
 } from "../../shared/flows-live.js";
 import { phaseAt, closeMinutes, PHASE_MINUTES, LIVE_CLOCK, easternInstant } from "../../shared/flows-freshness.js";
 import { fakeLiveVendor, fakeBoards } from "./live-fake.mjs";
@@ -45,12 +45,14 @@ const rowsOfBoard = (read) => {
 
 const tickerOf = (r) => (r && typeof r.t === "string" ? r.t.trim().toUpperCase() : null);
 
-export function boardPlan(boards) {
+export function boardPlan(boards, focusRead = null) {
   const long = rowsOfBoard(boards.long);
   const short = rowsOfBoard(boards.short);
   const watch = rowsOfBoard(boards.watch);
+  const focus = focusStripNames(focusRead && focusRead.payload && typeof focusRead.payload === "object"
+    ? focusRead.payload : null);
   const names = stripNames({
-    long: long.map(tickerOf), short: short.map(tickerOf), watch: watch.map(tickerOf),
+    long: long.map(tickerOf), short: short.map(tickerOf), watch: watch.map(tickerOf), focus: focus.names,
   });
   const ranked = [...long, ...short]
     .map((r) => ({ t: tickerOf(r), mag: Math.abs(Number(r && r.s)) }))
@@ -60,8 +62,8 @@ export function boardPlan(boards) {
   const stage = new Map();
   for (const r of long) if (tickerOf(r)) stage.set(tickerOf(r), "board:long");
   for (const r of short) if (tickerOf(r)) stage.set(tickerOf(r), "board:short");
-  return { names, ranked, deep: ranked.slice(0, 50), stage, counts: { long: long.length, short: short.length,
-    watch: watch.length } };
+  return { names, ranked, deep: ranked.slice(0, 50), stage, focus, counts: { long: long.length, short: short.length,
+    watch: watch.length, focus: focus.names.length } };
 }
 
 function firstRowKeys(raw) {
@@ -94,11 +96,11 @@ export async function runLive({
 
   const boards = {};
   for (const side of ["long", "short", "watch"]) boards[side] = await readStored("board:" + side);
-  const plan = boardPlan(boards);
+  const plan = boardPlan(boards, await readStored("focus"));
   const tick = Math.max(0, Math.floor((startedAt - open) / (15 * 60000)));
   const rotation = gexRotation({ ranked: plan.ranked, deep: plan.deep, tick });
-  log(`live: session ${session}, ${plan.names.length} strip name(s) from boards ` +
-    `${plan.counts.long}/${plan.counts.short}/${plan.counts.watch}, gex ${rotation.all.length} name(s) (tick ${tick})`);
+  log(`live: session ${session}, ${plan.names.length} strip name(s): ${plan.counts.focus} focus (${plan.focus.source}), ` +
+    `boards ${plan.counts.long}/${plan.counts.short}/${plan.counts.watch}, gex ${rotation.all.length} name(s) (tick ${tick})`);
 
   const ledger = { calls: 0, failed: 0 };
   const read = async (path, params = {}) => {
@@ -253,7 +255,8 @@ export async function runLive({
     origin: origin || "manual", startedAt: new Date(startedAt).toISOString(),
     finishedAt: new Date(finishedAt).toISOString(), durationMs: finishedAt - startedAt,
     calls: ledger.calls, failedCalls: ledger.failed, keys: bytes, errors, notes: notes.slice(0, 20),
-    names: plan.names.length, gex: rotation, alerts: { mode: merged.mode, read: merged.read, pages: pages.length },
+    names: plan.names.length, focus: { n: plan.counts.focus, source: plan.focus.source }, gex: rotation,
+    alerts: { mode: merged.mode, read: merged.read, pages: pages.length },
   };
   await put("live:heartbeat", {
     v: 1, key: "live:heartbeat", session,
@@ -263,6 +266,27 @@ export async function runLive({
   log(`live: ${ledger.calls} call(s) (${ledger.failed} failed), ${Object.values(bytes).filter((b) => b !== null).length} ` +
     `key(s) published in ${((finishedAt - startedAt) / 1000).toFixed(1)} s`);
   return { run, published: Object.keys(out), bytes };
+}
+
+export function passOutcome(result) {
+  if (!result || result.skipped) return { skipped: result ? result.skipped : "no-result", answered: 0, landed: 0 };
+  const run = result.run || {};
+  const answered = Math.max(0, (Number(run.calls) || 0) - (Number(run.failedCalls) || 0));
+  const landed = (result.published || []).filter((k) => k !== "live:heartbeat").length;
+  return { skipped: null, answered, landed, errored: (run.errors || []).length > 0 };
+}
+
+export function liveRunVerdict(loop) {
+  const passes = loop && Array.isArray(loop.passes) ? loop.passes : [];
+  const ran = passes.filter((p) => p && !p.skipped);
+  const dead = (p) => !!p.threw || !(p.answered > 0) || !(p.landed > 0);
+  if (ran.length && ran.every(dead)) {
+    return { failed: true, why: `every one of ${ran.length} pass(es) answered no vendor call or landed no key` };
+  }
+  if (loop && loop.exit === "budget" && !(loop.chained && loop.chained.sent)) {
+    return { failed: true, why: "the session was still open when the budget ran out and the chain dispatch was refused" };
+  }
+  return { failed: false, why: null };
 }
 
 export const LIVE_LOOP = Object.freeze({

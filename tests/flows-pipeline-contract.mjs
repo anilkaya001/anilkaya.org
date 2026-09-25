@@ -38,6 +38,7 @@ import { execFileSync, spawnSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { easternOffsetMinutes, easternDay, easternClock } from "../shared/flows-freshness.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -3248,20 +3249,113 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
   const wf = readFileSync(new URL("../.github/workflows/flows-pipeline.yml", import.meta.url), "utf8");
   const crons = [...wf.matchAll(/cron:\s*"([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(crons, ["30 21 * * 1-5"],
-    "THE SCHEDULE is one post-close cron — the '15 9'/'15 10' pair fired 4.5-6.6h late every weekday"); checks++;
-  ok(wf.includes('elif [ "$FIRED" = "30 21 * * 1-5" ]'), "and the gate step admits exactly that cron");
+  assert.deepEqual(crons, ["30 21 * * 1-5", "30 22 * * 1-5", "17 1 * * 2-6", "47 3 * * 2-6"],
+    "THE SCHEDULE is two zone-keyed primaries and two backups — the '15 9'/'15 10' pair fired 4.5-6.6h late every " +
+    "weekday, and one cron alone lost a session for good whenever GitHub dropped it"); checks++;
+  const gate = /- name: Resolve whether this firing is the intended one[\s\S]*?run: \|\n([\s\S]*?)\n\n/.exec(wf)[1]
+    .split("\n").map((l) => l.replace(/^ {10}/, "")).join("\n");
+  const admitted = [...gate.matchAll(/\[ "\$FIRED" = "([^"]+)" \] && \[ "\$ZONE" = "(EDT|EST)" \]/g)].map((m) => [m[1], m[2]]);
+  assert.deepEqual(admitted, [["30 21 * * 1-5", "EDT"], ["30 22 * * 1-5", "EST"]],
+    "the gate admits each primary only in its own zone, keyed on the cron STRING that fired, never on the wall time, " +
+    "so a firing GitHub delivered hours late still runs exactly once"); checks++;
+  const backups = [...gate.matchAll(/\[ "\$FIRED" = "([^"]+)" \] \|\| \[ "\$FIRED" = "([^"]+)" \]/g)].flatMap((m) => [m[1], m[2]]);
+  assert.deepEqual(backups, ["17 1 * * 2-6", "47 3 * * 2-6"], "and both backups in either zone"); checks++;
+  const gateDir = fs.mkdtempSync(path.join(os.tmpdir(), "flows-gate-"));
+  const decide = (event, fired, zone) => {
+    const script = gate.replace('ZONE="$(TZ=America/New_York date +%Z)"', `ZONE="${zone}"`);
+    const output = path.join(gateDir, `out-${event}-${zone}-${fired.replace(/\W+/g, "_")}`);
+    fs.writeFileSync(output, "");
+    spawnSync("bash", ["-e", "-c", script], { encoding: "utf8",
+      env: { ...process.env, EVENT: event, FIRED: fired, ORIGIN: "manual", GITHUB_OUTPUT: output } });
+    return (/run=(true|false)/.exec(fs.readFileSync(output, "utf8")) || [])[1];
+  };
+  assert.deepEqual([["schedule", "30 21 * * 1-5", "EDT"], ["schedule", "30 21 * * 1-5", "EST"],
+    ["schedule", "30 22 * * 1-5", "EST"], ["schedule", "30 22 * * 1-5", "EDT"], ["schedule", "17 1 * * 2-6", "EST"],
+    ["schedule", "47 3 * * 2-6", "EDT"], ["workflow_dispatch", "", "EST"], ["schedule", "15 9 * * 1-5", "EDT"]]
+    .map(([e, f, z]) => decide(e, f, z)), ["true", "false", "true", "false", "true", "true", "true", "false"],
+  "RUN UNDER BASH, the gate step says run=true for the zone's own primary, both backups and a dispatch, and " +
+    "run=false for the other zone's primary and anything unknown"); checks++;
+  fs.rmSync(gateDir, { recursive: true, force: true });
+  const cronFires = (cron, utcDay) => {
+    const [min, hour, , , dow] = cron.split(" ");
+    const [lo, hi] = dow.split("-").map(Number);
+    const wd = new Date(utcDay + "T00:00:00Z").getUTCDay();
+    return wd >= lo && wd <= hi ? Date.parse(utcDay + "T00:00:00Z") + (Number(hour) * 60 + Number(min)) * 60000 : null;
+  };
+  const zoneAt = (ms) => (easternOffsetMinutes(ms) === -240 ? "EDT" : "EST");
+  const admits = (cron, ms) => admitted.some(([c, z]) => c === cron && z === zoneAt(ms)) || backups.includes(cron);
+  let weekdays = 0;
+  const offenders = [];
+  for (let t = Date.UTC(2026, 0, 1); t < Date.UTC(2031, 0, 1); t += 86400000) {
+    const day = new Date(t).toISOString().slice(0, 10);
+    const wd = new Date(t).getUTCDay();
+    if (wd === 0 || wd === 6) continue;
+    weekdays++;
+    const firings = [];
+    for (const utc of [day, new Date(t + 86400000).toISOString().slice(0, 10)]) {
+      for (const cron of crons) {
+        const ms = cronFires(cron, utc);
+        if (ms === null || !admits(cron, ms) || easternDay(ms) !== day) continue;
+        const local = easternClock(ms).minutes;
+        firings.push({ cron, local });
+      }
+    }
+    const primary = firings.filter((f) => f.local >= 17 * 60 + 15 && f.local <= 18 * 60);
+    const stray = firings.filter((f) => !(f.local >= 17 * 60 + 15 && f.local <= 18 * 60) && !(f.local >= 20 * 60));
+    if (primary.length !== 1 || stray.length) offenders.push(`${day}: ${JSON.stringify(firings)}`);
+  }
+  assert.deepEqual(offenders, [],
+    `FOR EVERY WEEKDAY 2026-2030 (${weekdays} of them, every DST switch included) exactly one admitted cron lands ` +
+    "between 17:15 and 18:00 ET, and every other admitted firing that day is a backup after 20:00 ET"); checks++;
+  ok(weekdays > 1300, "and the loop really walked five years");
   ok(!/15 9|15 10/.test(wf), "and no trace of the 05:15 pair remains to be admitted");
+  ok(/EVENT: \$\{\{ github\.event_name \}\}/.test(wf) && /FIRED: \$\{\{ github\.event\.schedule \}\}/.test(wf) &&
+     !/run: \|[\s\S]*\$\{\{ github\.event\.schedule/.test(wf),
+  "the gate reads the event and the cron through env, never interpolated into the script");
   ok(/allow_intraday:[\s\S]*?type: boolean/.test(wf) && /republish_session:[\s\S]*?type: boolean/.test(wf),
      "workflow_dispatch offers allow_intraday and republish_session");
   ok(/FLOWS_ALLOW_INTRADAY: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.allow_intraday && '1' \|\| '' \}\}/.test(wf),
      "and plumbs allow_intraday as FLOWS_ALLOW_INTRADAY=1, on a dispatch only");
   ok(/FLOWS_REPUBLISH_SESSION: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.republish_session && '1' \|\| '' \}\}/.test(wf),
      "and republish_session as FLOWS_REPUBLISH_SESSION=1, on a dispatch only");
-  for (const file of ["flows-pipeline.yml", "regression.yml"]) {
+
+  const keep = wf.slice(wf.indexOf("\n  keepalive:"));
+  ok(/^permissions:\n {2}contents: read\n\n/m.test(wf) && (wf.match(/actions: write/g) || []).length === 1 &&
+     /\n  keepalive:\n    if: github\.event_name == 'schedule'\n[\s\S]*?\n    permissions:\n      actions: write\n    steps:/.test(keep),
+  "THE KEEPALIVE: actions: write is granted to the keepalive job alone, which runs only on a schedule; the build job " +
+    "that holds the ingest token keeps contents: read");
+  ok(!/uses:/.test(keep) && !/checkout/.test(keep), "and it checks out nothing and runs no third-party action");
+  ok(/TZ=America\/New_York date \+%u\)" != "1"/.test(keep),
+    "once a week: on the Monday firings in New York (four chances, since GitHub drops some)");
+  const enabled = [...keep.matchAll(/for wf in ([^;]+); do/g)].flatMap((m) => m[1].trim().split(/\s+/));
+  const scheduled = fs.readdirSync(new URL("../.github/workflows/", import.meta.url))
+    .filter((f) => /cron:/.test(readFileSync(new URL(`../.github/workflows/${f}`, import.meta.url), "utf8"))).sort();
+  assert.deepEqual(enabled.slice().sort(), scheduled,
+    `it re-enables every scheduled workflow (${scheduled.join(", ")}), so 60 days without a commit never switches ` +
+    "the product off"); checks++;
+  ok(/-X PUT/.test(keep) && /\$API\/repos\/\$REPO\/actions\/workflows\/\$wf\/enable/.test(keep) &&
+     /Authorization: Bearer \$GH_TOKEN/.test(keep) && /GH_TOKEN: \$\{\{ github\.token \}\}/.test(keep),
+  "with PUT /repos/<repo>/actions/workflows/<file>/enable under the job's own GITHUB_TOKEN — no new secret");
+  ok(/echo "enable \$wf: HTTP \$code"/.test(keep) && /\[ "\$code" = "204" \] \|\| failed=1/.test(keep) && /exit "\$failed"/.test(keep),
+    "it logs each HTTP status and turns red when one is not 204");
+
+  const regression = readFileSync(new URL("../.github/workflows/regression.yml", import.meta.url), "utf8");
+  const regOn = regression.slice(regression.indexOf("\non:"), regression.indexOf("\npermissions:"));
+  assert.deepEqual([...regOn.matchAll(/cron: "([^"]+)"/g)].map((m) => m[1]), ["17 6 * * 1"],
+    "REGRESSION RUNS WEEKLY TOO (Monday 06:17 UTC), so a fixture date that the real clock overtakes fails within a " +
+    "week instead of on the owner's next unrelated push"); checks++;
+  ok(/push:\n\s+branches: \[main\]/.test(regOn) && /pull_request:/.test(regOn), "beside push and pull request");
+  for (const file of fs.readdirSync(new URL("../.github/workflows/", import.meta.url))) {
     const text = readFileSync(new URL(`../.github/workflows/${file}`, import.meta.url), "utf8");
-    ok(/actions\/checkout@v5/.test(text) && /actions\/setup-node@v5/.test(text) && !/@v4/.test(text),
-       `${file} runs the Node-24 majors of checkout and setup-node`);
+    const uses = [...text.matchAll(/uses:\s*(\S+)/g)].map((m) => m[1]);
+    ok(uses.length > 0 && uses.every((u) => /^actions\/(checkout|setup-node)@[0-9a-f]{40}$/.test(u)) &&
+       uses.every((u) => ["actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09",
+         "actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444"].includes(u)),
+    `${file} pins checkout and setup-node to the commits of their v5 tags (${uses.join(", ")}): a moved tag can swap ` +
+      "no code into a job");
+    ok([...text.matchAll(/uses: actions\/checkout@\S+\n(?:\s+if: .*\n)?\s+with:\n((?:\s{10}.*\n)+)/g)]
+      .every((m) => /persist-credentials: false/.test(m[1])) && /persist-credentials: false/.test(text),
+    `${file} keeps no credential in .git/config after checkout`);
   }
   ok(/after the close/.test(PIPELINE_CADENCE) && /21:30 UTC/.test(PIPELINE_CADENCE),
      `the cadence the payloads print is the schedule that fires (${PIPELINE_CADENCE})`);
