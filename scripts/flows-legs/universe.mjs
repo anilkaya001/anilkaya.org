@@ -58,6 +58,53 @@ export async function harvestScreener(uw, {
   };
 }
 
+export const HOLDINGS_PATH = "/api/etfs/QQQ/holdings";
+
+export async function readHoldings(uw, { path = HOLDINGS_PATH } = {}) {
+  const res = await read(uw, path, {}, { envelope: true });
+  return { ...res, rows: res.ok ? rowsOf(res.body) : null, path, calls: 1 };
+}
+
+export function withPrefetched(uw, prefetched = new Map()) {
+  const wrapped = async (path, params = {}, opts = {}) => {
+    const hit = prefetched.get(path);
+    if (hit && (!params || !Object.keys(params).length)) {
+      if (!hit.ok) throw new Error(hit.error || `${path} -> read failed`);
+      if (opts && opts.envelope) return hit.body;
+      return Array.isArray(hit.body) ? hit.body : (hit.body && hit.body.data) || [];
+    }
+    return uw(path, params, opts);
+  };
+  return Object.assign(wrapped, uw);
+}
+
+export async function screenerByTicker(uw, tickers, { date = null } = {}) {
+  const want = [...new Set((tickers || []).filter((t) => typeof t === "string" && t))];
+  if (!want.length) return { rows: new Map(), missing: [], calls: 0, ok: true, error: null };
+  const res = await read(uw, "/api/screener/stocks", {
+    ticker: want.join(","), limit: HARVEST_LIMIT, ...(date ? { date } : {}),
+  });
+  const rows = new Map();
+  if (res.ok) for (const r of rowsOf(res.body)) if (r && want.includes(r.ticker) && !rows.has(r.ticker)) rows.set(r.ticker, r);
+  return {
+    rows, ok: res.ok, gated: !!res.gated, error: res.ok ? null : res.error,
+    missing: want.filter((t) => !rows.has(t)), calls: 1,
+  };
+}
+
+export async function fetchMissingMembers(uw, wanted, heldTickers, { date = null } = {}) {
+  const held = heldTickers instanceof Set ? heldTickers : new Set(heldTickers || []);
+  const absent = [...new Set(wanted || [])].filter((t) => !held.has(t)).sort();
+  if (!absent.length) return { asked: [], rows: [], missing: [], calls: 0, ok: true, error: null };
+  const got = await screenerByTicker(uw, absent, { date });
+  return { asked: absent, rows: [...got.rows.values()], missing: got.missing, calls: got.calls, ok: got.ok, error: got.error };
+}
+
+export async function readFocusRows(uw, tickers, { date = null, readAt = () => new Date().toISOString() } = {}) {
+  const got = await screenerByTicker(uw, tickers, { date });
+  return { ...got, readAt: readAt() };
+}
+
 export async function readIndexRows(uw, { date = null, tickers = INDEX_TICKERS } = {}) {
   const res = await read(uw, "/api/screener/stocks", {
     ticker: tickers.join(","), limit: HARVEST_LIMIT, ...(date ? { date } : {}),
