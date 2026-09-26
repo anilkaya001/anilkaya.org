@@ -1,6 +1,8 @@
 name: flows-probe
 
 on:
+  schedule:
+    - cron: "23 14 * * 0"
   workflow_dispatch:
     inputs:
       tickers:
@@ -12,6 +14,10 @@ on:
         type: string
         required: false
         default: ""
+      strict:
+        description: "Fail the run on an unexpected refusal or a field the code reads that did not arrive"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -25,9 +31,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: 22
 
@@ -36,4 +44,5 @@ jobs:
           UW_API_KEY: ${{ secrets.UW_API_KEY }}
           FLOWS_PROBE_TICKERS: ${{ inputs.tickers }}
           FLOWS_PROBE_FILTER: ${{ inputs.filter }}
+          FLOWS_PROBE_STRICT: ${{ (github.event_name == 'schedule' || inputs.strict) && '1' || '' }}
         run: node scripts/flows-probe.mjs

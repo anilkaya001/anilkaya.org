@@ -153,5 +153,27 @@
     "/api/market/{sector}/sector-tide": ["net_call_premium", "net_put_premium", "net_volume", "timestamp"],
     "/api/market/fda-calendar": ["catalyst", "description", "drug", "end_date", "has_options", "indication", "marketcap", "notes", "outcome", "outcome_brief", "source_link", "start_date", "status", "ticker"],
     "/api/option-activity/unusual": ["ask_side_volume", "avg_price", "bid_side_volume", "chain_prev_close", "close", "cross_volume", "er_time", "expiry", "floor_volume", "high", "last_fill", "low", "mid_volume", "multileg_volume", "next_earnings_date", "no_side_volume", "open", "open_interest", "option_symbol", "option_type", "premium", "sector", "stock_multi_leg_volume", "stock_price", "strike", "sweep_volume", "ticker_vol", "total_ask_changes", "total_bid_changes", "trades", "volume"]
+  },
+  "reads": {
+    "/api/stock/{ticker}/ohlc/{candle_size}": ["open", "high", "low", "close", "volume"],
+    "/api/stock/{ticker}/stock-state": ["close", "prev_close", "open", "high", "low", "volume", "tape_time", "market_time"],
+    "/api/market/market-tide": ["timestamp", "net_call_premium", "net_put_premium", "net_volume"],
+    "/api/market/sector-etfs": ["ticker", "last", "prev_close", "prev_date", "bullish_premium", "bearish_premium", "call_premium", "put_premium", "call_volume", "put_volume", "volume"],
+    "/api/market/{ticker}/etf-tide": ["timestamp", "net_call_premium", "net_put_premium", "net_volume", "underlying_price"],
+    "/api/market/{sector}/sector-tide": ["timestamp", "net_call_premium", "net_put_premium", "net_volume"],
+    "/api/net-flow/expiry": ["timestamp", "net_call_premium", "net_put_premium", "net_volume", "underlying_price"],
+    "/api/screener/stocks": ["ticker", "close", "prev_close", "net_call_premium", "net_put_premium", "bullish_premium", "bearish_premium", "call_volume", "put_volume", "call_volume_ask_side", "put_volume_ask_side", "iv30d", "iv_rank", "implied_move_perc", "gex_gamma_per_one_percent_move_oi", "gex_gamma_per_one_percent_move_vol", "gex_gamma_per_one_percent_move_dir", "put_call_ratio", "relative_volume", "stock_volume", "marketcap", "issue_type", "full_name"],
+    "/api/stock/{ticker}/spot-exposures": ["start_time", "price", "gamma_per_one_percent_move_oi", "gamma_per_one_percent_move_vol", "gamma_per_one_percent_move_dir"],
+    "/api/stock/{ticker}/net-prem-ticks": ["tape_time", "net_call_premium", "net_put_premium", "net_delta", "call_volume", "put_volume", "call_volume_ask_side", "call_volume_bid_side", "put_volume_ask_side", "put_volume_bid_side"],
+    "/api/option-trades/flow-alerts": ["created_at", "ticker", "option_chain", "strike", "expiry", "total_premium", "total_ask_side_prem", "total_bid_side_prem", "total_size", "trade_count", "open_interest", "volume_oi_ratio", "underlying_price", "has_sweep", "has_floor", "has_singleleg", "all_opening_trades", "start_time", "end_time", "iv_start", "iv_end"],
+    "/api/market/total-options-volume": ["date", "call_volume", "put_volume", "call_premium", "put_premium"],
+    "/api/market/top-net-impact": ["ticker", "net_premium"],
+    "/api/darkpool/recent": ["executed_at", "canceled", "ext_hour_sold_codes", "ticker", "price", "size", "premium"],
+    "/api/news/headlines": ["created_at", "headline", "source", "is_major", "sentiment"],
+    "/api/etfs/{ticker}/holdings": ["ticker", "type", "weight"]
+  },
+  "gated": {
+    "/api/volatility/vix-term-structure": 403,
+    "/api/politician-portfolios/holders/{ticker}": 422
   }
 }

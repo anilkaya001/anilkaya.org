@@ -1525,10 +1525,14 @@ try {
 
       const beforeHoliday = vendor.count(/^\/api\/(market|net-flow)\//);
       await tick(RTH, "2026-09-24T10:06:00-04:00");
-      await tick(RTH, "2026-09-24T10:11:00-04:00");
-      eq(vendor.count(/^\/api\/(market|net-flow)\//) - beforeHoliday, 2,
-        "A TAPE-DERIVED HOLIDAY: when the tide still carries yesterday's date after 09:45, the day is marked closed and " +
-        "the next tick spends no vendor call");
+      const provisional = await (await fetch(L("/api/flows/now"), { headers: cookie })).json();
+      eq(provisional.clock.trading, null,
+        "A FIRST CLOSED PROBE IS PROVISIONAL: the tide still carries yesterday at 10:06, and the day stays undecided");
+      await tick(RTH, "2026-09-24T10:21:00-04:00");
+      await tick(RTH, "2026-09-24T10:26:00-04:00");
+      eq(vendor.count(/^\/api\/(market|net-flow)\//) - beforeHoliday, 4,
+        "A TAPE-DERIVED HOLIDAY: the probe fifteen minutes later agrees, the day is marked closed, and the next tick " +
+        "spends no vendor call");
 
       await tick(HOUSE, "2026-09-23T17:14:00-04:00");
       eq(github.dispatches.length, 2, "the nightly is not dispatched before 17:15 ET");
@@ -1560,16 +1564,27 @@ try {
       ok(nb.keys["live:market"].updatedAt > 0 && nb.keys["live:breadth"].readAt === "2026-09-23T14:10:00.000Z",
         "with every subscribed live key's updatedAt and read instant from columns alone");
       eq(nb.keys["live:tape"].state, "pending", "an unwritten key is pending");
-      deep(nb.tier1, { at: new Date(et("2026-09-24T10:11:00-04:00")).toISOString(),
-        okAt: new Date(et("2026-09-24T10:06:00-04:00")).toISOString(), why: "holiday" },
+      deep(nb.tier1, { at: new Date(et("2026-09-24T10:26:00-04:00")).toISOString(),
+        okAt: new Date(et("2026-09-24T10:21:00-04:00")).toISOString(), why: "holiday" },
       "TIER 1 TELEMETRY FROM D1: /now carries when the last tick began, when one last wrote live:market and how the " +
         "last one ended — on a flows_clock created with 0010's columns, which the Worker's first use upgraded in place");
-      deep(nb.clock, { day: "2026-09-24", trading: 0, earlyClose: null },
-        "THE SESSION CLOCK TIER 2 READS: /now carries the tape-derived day verdict, so the Actions loop stops on a " +
-        "holiday or at an early close the calendar alone cannot know");
+      deep(nb.clock, { day: "2026-09-24", trading: 0, earlyClose: null, closedDays: ["2026-09-24"] },
+        "THE SESSION CLOCK: /now carries the tape-derived day verdict and the closed day on record, on a table the Worker " +
+          "upgraded from 0010's columns — and no operations string (Tier 1 reasons, dispatch outcomes) for a subscriber");
+      const clockNow = { day: "2026-09-24", trading: 0, earlyClose: null, closedDays: ["2026-09-24"], tier1: nb.tier1,
+        dispatchWhy: "sent" };
       const ic = await ingest("clock", "GET", LIVE_TOKEN);
-      deep([ic.status, await ic.json()], [200, { key: "clock", clock: { day: "2026-09-24", trading: 0, earlyClose: null } }],
-        "and the Actions loop reads the same verdict from the ingest route under its live credential, not a signed-in route");
+      deep([ic.status, await ic.json()], [200, { key: "clock", clock: clockNow }],
+        "the Actions loop reads the same verdict from the ingest route under its live credential, not a signed-in " +
+          "route, so it stops on a holiday or at an early close the calendar alone cannot know; that key adds the " +
+          "Tier 1 telemetry and the last dispatch outcome");
+      const nightlyClock = await ingest("clock", "GET", INGEST_TOKEN);
+      deep(await nightlyClock.json(), { key: "clock", clock: clockNow },
+        "as does the nightly's health gate under the nightly token");
+      const focusKnown = readFileSync(new URL("../worker.js", import.meta.url), "utf8").includes("|^focus$");
+      eq((await ingest("focus", "GET", LIVE_TOKEN)).status, focusKnown ? 200 : 400,
+        "the live role may ask for the focus key it plans the strip from (a Worker that does not know the key yet " +
+          "answers 400, and the strip falls back to the focus roster)");
       eq((await ingest("clock", "GET", "wrong-token")).status, 401, "never without a credential");
       eq((await ingest("clock", "POST", LIVE_TOKEN, {})).status, 405, "and only by GET: the clock is written by Tier 1 alone");
       eq(nb.keys.pulse.session, "2026-09-22", "and nightly keys carry their session");

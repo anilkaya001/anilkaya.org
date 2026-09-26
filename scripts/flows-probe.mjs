@@ -8,6 +8,7 @@ export const BASE_ENV = "FLOWS_UW_BASE_URL";
 export const KEY_ENV = "UW_API_KEY";
 export const TICKERS_ENV = "FLOWS_PROBE_TICKERS";
 export const FILTER_ENV = "FLOWS_PROBE_FILTER";
+export const STRICT_ENV = "FLOWS_PROBE_STRICT";
 export const LIST_PATH = fileURLToPath(new URL("./flows-probe-list.json", import.meta.url));
 export const DEFAULT_TICKERS = Object.freeze(["AAPL", "NVDA"]);
 export const MAX_TICKERS = 10;
@@ -161,9 +162,11 @@ export function parseTickers(text) {
 export function parseArgs(argv, env = {}) {
   const raw = { tickers: env[TICKERS_ENV] || "", filter: env[FILTER_ENV] || "", date: "", list: LIST_PATH };
   let dryRun = false;
+  let strict = env[STRICT_ENV] === "1";
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--dry-run") { dryRun = true; continue; }
+    if (arg === "--strict") { strict = true; continue; }
     const inline = /^--(tickers|filter|date|list)=(.*)$/s.exec(arg);
     if (inline) { raw[inline[1]] = inline[2]; continue; }
     const named = /^--(tickers|filter|date|list)$/.exec(arg);
@@ -175,7 +178,8 @@ export function parseArgs(argv, env = {}) {
     throw new UsageError(`unknown argument ${JSON.stringify(arg)}`);
   }
   if (raw.date && !isDay(raw.date)) throw new UsageError(`--date must be YYYY-MM-DD, got ${JSON.stringify(raw.date)}`);
-  return { dryRun, tickers: parseTickers(raw.tickers), filter: String(raw.filter || "").trim(), date: raw.date, list: raw.list };
+  return { dryRun, strict, tickers: parseTickers(raw.tickers), filter: String(raw.filter || "").trim(), date: raw.date,
+    list: raw.list };
 }
 
 export function validateList(list) {
@@ -214,6 +218,19 @@ export function validateList(list) {
       throw new Error(`probe list: expect for ${op} must be a non-empty list of names`);
     }
   }
+  for (const [op, names] of Object.entries(list.reads || {})) {
+    if (!ops.has(op)) throw new Error(`probe list: reads names ${op}, which no probe exercises`);
+    if (!Array.isArray(names) || !names.length || names.some((n) => typeof n !== "string" || !n) ||
+        new Set(names).size !== names.length) {
+      throw new Error(`probe list: reads for ${op} must be a non-empty list of distinct names`);
+    }
+  }
+  for (const [op, status] of Object.entries(list.gated || {})) {
+    if (!ops.has(op)) throw new Error(`probe list: gated names ${op}, which no probe exercises`);
+    if (!Number.isInteger(status) || status < 400 || status > 499) {
+      throw new Error(`probe list: gated status for ${op} must be a 4xx status`);
+    }
+  }
   return list;
 }
 
@@ -245,6 +262,8 @@ export function expandProbes(list, tickers) {
           maxBy: b.maxBy || null,
         }])),
         expect: (list.expect && list.expect[p.op]) || null,
+        reads: (list.reads && list.reads[p.op]) || null,
+        gated: (list.gated && list.gated[p.op]) || null,
       });
     }
   }
@@ -543,6 +562,10 @@ export function analyse(probe, call, redact) {
   result.sets = sets;
   result.empty = !sets.some((set) => set.union.fields.length || set.union.scalars.length);
   result.spec = result.empty ? null : specDiff(probe.expect, body, sets);
+  if (!result.empty && Array.isArray(probe.reads)) {
+    const live = collectKeys(body);
+    result.reads = { checked: probe.reads.length, unseen: probe.reads.filter((k) => !live.has(k)) };
+  }
   result.sample = located.rows.length ? clip(redact(JSON.stringify(located.rows[0])), SAMPLE_CHARS) : null;
   result.cls = classify(result);
   return result;
@@ -698,6 +721,24 @@ export function exitCode(results) {
   return called.some((r) => r.cls === "ok" || r.cls === "empty") ? 0 : 1;
 }
 
+export function strictVerdict(results, list) {
+  const gated = (list && list.gated) || {};
+  const failures = [];
+  const notes = [];
+  for (const r of results) {
+    if (!r || r.cls === "skipped") continue;
+    const expected = Object.hasOwn(gated, r.op) ? gated[r.op] : null;
+    if (["4xx", "5xx", "network", "other"].includes(r.cls)) {
+      if (expected !== null && r.status === expected) notes.push(`${r.id} ${r.status}: gated, as expected`);
+      else failures.push(`FAIL ${r.id} ${r.status || "no response"}${r.code ? " " + r.code : ""}`);
+      continue;
+    }
+    if (expected !== null) notes.push(`${r.id} answers ${r.status} where ${expected} was expected: the plan changed`);
+    if (r.reads && r.reads.unseen.length) failures.push(`DRIFT ${r.id}: ${r.reads.unseen.join(" ")} did not arrive`);
+  }
+  return { failures, notes };
+}
+
 export async function runProbe(options, deps = {}) {
   const fetchImpl = deps.fetch || globalThis.fetch;
   const log = deps.log || ((line) => console.log(line));
@@ -788,6 +829,16 @@ export async function runProbe(options, deps = {}) {
   }
   for (const line of renderSummary(results, { session, elapsedMs: now() - started })) emit(line);
   const code = exitCode(results);
+  if (options.strict) {
+    const verdict = strictVerdict(results, list);
+    for (const n of verdict.notes) emit(`   strict  ${n}`);
+    for (const f of verdict.failures) emit(`   strict  ${f}`);
+    if (code !== 0) emit("== exit 1: no call answered, so the key, the plan or the network is broken");
+    else if (verdict.failures.length) {
+      emit(`== exit 1: strict: ${verdict.failures.length} unexpected refusal(s) or field(s) the code reads went missing`);
+    } else emit("== exit 0: strict: every call answered as expected and every field the code reads arrived");
+    return { results, code: code || (verdict.failures.length ? 1 : 0), session, probes, strict: verdict };
+  }
   emit(code === 0
     ? "== exit 0: the probe is informational; at least one call answered"
     : "== exit 1: no call answered, so the key, the plan or the network is broken");

@@ -298,6 +298,70 @@ its own cookie, its own audience claim, its own D1 tables, and its own secrets.
 Nothing about it can grant access to `/api/*`, and nothing about the Google
 OAuth path can grant access to `/flows/`.
 
+### 10.0 Owner actions, in priority order
+
+Everything else runs on its own. These five need a person, once; each says what
+it unlocks and what tells you it has lapsed.
+
+1. **`GITHUB_DISPATCH_TOKEN` — makes the Worker the clock.** Create a
+   fine-grained personal access token at GitHub → Settings → Developer settings
+   → Fine-grained tokens: resource owner `anilkaya001`, repository access *Only
+   select repositories* → `anilkaya001/anilkaya.org`, repository permission
+   **Actions: Read and write** (Metadata: Read is added by itself), and the
+   longest expiry offered. Then:
+
+   ```bash
+   ./tests/node_modules/.bin/wrangler secret put GITHUB_DISPATCH_TOKEN
+   ```
+
+   It unlocks the Worker's five-minute cron as the dispatcher: Tier 2 at
+   :01/:16/:31/:46 through the session, one re-dispatch after 45 minutes of
+   stall, and the nightly at 17:15 ET (again at 18:15 ET if it has not
+   landed). Without it Tier 2 depends on GitHub's scheduled starters, which
+   delivered about one slot in twenty on 2026-09-23 and 09-24, and the nightly
+   on its own crons (section 10.5h). Put the expiry in a calendar; when it
+   lapses the nightly turns red with
+   `HEALTH: GitHub refused the Worker's dispatch (refused:401): renew GITHUB_DISPATCH_TOKEN`.
+   Any other 4xx refusal turns it red too, with its own remedy: `refused:403`
+   (the token lacks Actions write), `refused:404` (the token cannot see this
+   repository) and `refused:422` (a bad ref or inputs). Removing the token
+   instead of renewing it records `no-token` and clears the alert.
+2. **`UW_API_KEY` in both places.** The same Unusual Whales key is a GitHub
+   repository secret (the nightly, Tier 2 and the weekly probe) and a Worker
+   secret (Tier 1, the tape, the quote, the chain and the strategy engine):
+
+   ```bash
+   ./tests/node_modules/.bin/wrangler secret put UW_API_KEY
+   ```
+
+   A rotation updates both. A Worker without it turns the nightly red with
+   `HEALTH: Tier 1's last tick failed with error:no-key`.
+3. **A WAF skip rule for the ingest route.** Cloudflare's edge sometimes
+   answers GitHub runners with a 403 on `/api/flows/ingest` (eleven on
+   2026-09-24, all absorbed by retries). Check Security → Events filtered on
+   that path; then Security → WAF → Custom rules → Create rule, expression
+   `(http.request.uri.path eq "/api/flows/ingest")`, action **Skip** (all
+   remaining custom rules, rate limiting rules and managed rules), placed
+   first. Bot Fight Mode cannot be skipped on the Free plan: if the events name
+   it, turn it off. The nightly counts every edge 403 and turns red at 24 of
+   them, or 60 s of retry budget, before the 90 s budget runs out.
+4. **The Google OAuth client.** Google deletes OAuth clients left unused for
+   about six months, and Lab sign-in is rare. Sign in to the Lab every three
+   months, or watch the Google Cloud console (APIs & Services → Credentials)
+   for inactivity notices; the client must keep the callback
+   `https://anilkaya.org/auth/callback`.
+5. **Optional: Workers Paid ($5/month).** It removes the 100,000
+   requests-a-day cliff (every static asset passes through the Worker, so the
+   cliff would take the Lab and the landing page down with Flows) and the 10 ms
+   CPU cap, which is what forces Tier 2 onto GitHub Actions. No code change is
+   needed to switch.
+
+Nothing routine is left: a weekly keepalive keeps GitHub from disabling the
+scheduled workflows after 60 days without a commit, a weekly strict probe turns
+red on vendor drift, a weekly regression run catches a fixture the calendar
+overtakes, and the nightly ends with a health gate that turns the run red,
+which emails the owner, whenever the live layer failed that session.
+
 ### 10.1 Apply the schema
 
 ```bash
@@ -331,9 +395,10 @@ throttling:
 `SESSION_SECRET` is already set and is shared with the learning session — the
 audience claim, not the secret, is what separates the two.
 
-Four secrets are needed here (section 10.5i adds only the optional
-`GITHUB_DISPATCH_TOKEN`: the live workflow authenticates with GitHub OIDC), and **one of
-them must be set in two places with the same value**: `FLOWS_INGEST_TOKEN`
+Four secrets are needed here, plus `UW_API_KEY` on the Worker and the
+`GITHUB_DISPATCH_TOKEN` of section 10.0 (the live workflow itself authenticates
+with GitHub OIDC), and **two of them must be set in two places with the same
+value**: `UW_API_KEY` (section 10.0) and `FLOWS_INGEST_TOKEN`
 authenticates the pipeline to the Worker, so
 the Worker needs it as a secret and GitHub Actions needs it as a repository
 secret. If the two differ, every publish returns 401, the job exits non-zero,
@@ -955,7 +1020,7 @@ Repository secrets required (Settings → Secrets and variables → Actions):
 
 | Secret | Required | Purpose |
 |---|---|---|
-| `UW_API_KEY` | yes | Unusual Whales API bearer token |
+| `UW_API_KEY` | yes | Unusual Whales API bearer token. The Worker holds the same key as a secret (section 10.0); rotate both. |
 | `FLOWS_INGEST_TOKEN` | yes | Bearer token authenticating the POST. Must be **byte-identical** to the Worker secret of the same name. |
 | `FLOWS_INGEST_URL` | no | Overrides the ingest endpoint. Defaults to `https://anilkaya.org/api/flows/ingest`; set it only for a staging Worker. |
 
@@ -974,8 +1039,10 @@ live `iewt` learning database. The pipeline posts to the Worker instead.
 Two failure modes to watch:
 
 - **Scheduled workflows are disabled after 60 days** of repository inactivity.
-  This is the most likely way the board silently goes stale. Check the Actions
-  tab if `generatedAt` stops advancing.
+  The `keepalive` job of `flows-pipeline.yml` prevents it: on the Monday
+  firings it calls `PUT /repos/<repo>/actions/workflows/<file>/enable` for every
+  scheduled workflow with the job's own `GITHUB_TOKEN` (`actions: write` on
+  that job alone), logs each HTTP status, and turns red if one is not 204.
 - **Unusual Whales publishes no rate limits.** The pipeline discovers the real
   limit empirically with adaptive backoff and logs the achieved rate. Read that
   number after the first few runs and size the universe against it.
@@ -1254,12 +1321,24 @@ not from the spec. Wave B has landed and the probes are retired; the last one,
 
 ### 10.5h The schedule, and the session each run reads
 
-The workflow fires once, at `30 21 * * 1-5` — 17:30 EDT or 16:30 EST, after the
-close under either zone. It used to fire at 05:15 Eastern, and GitHub delivered
-that firing 4.5 to 6.6 hours late every weekday from 2026-08-27 on: every run
-read the session in progress and published it under the previous session's
-date. A post-close firing delayed by as much as twelve hours still lands before
-the next open, so lateness no longer changes which tape is read.
+The workflow has four crons. `30 21 * * 1-5` and `30 22 * * 1-5` are the
+primaries: 17:30 Eastern under EDT and under EST respectively. The gate step
+admits each only in its own zone, keyed on the cron string that fired rather
+than on the wall time, so a firing GitHub delivers hours late still runs once,
+and the other zone's primary exits in its first step. `17 1 * * 2-6` and
+`47 3 * * 2-6` are backups (21:17 and 23:47 EDT, 20:17 and 22:47 EST): if the
+primary was dropped, a backup ranks the session; if it landed, the same-session
+gate makes the backup a refresh of about a minute. The primary stays at 17:30,
+not at the close, on purpose: the vendor's post-close rows need the time.
+`tests/flows-pipeline-contract.mjs` walks every weekday from 2026 to 2030,
+through every DST switch, and proves exactly one admitted cron lands between
+17:15 and 18:00 ET and every other admitted firing after 20:00 ET; it also runs
+the gate script under bash for each cron and zone. The workflow used to fire at
+05:15 Eastern, and GitHub delivered that firing 4.5 to 6.6 hours late every
+weekday from 2026-08-27 on: every run read the session in progress and
+published it under the previous session's date. A post-close firing delayed by
+as much as twelve hours still lands before the next open, so lateness no longer
+changes which tape is read.
 
 Four guards sit behind the schedule, all in `scripts/flows-pipeline.mjs`:
 
@@ -1302,8 +1381,30 @@ Four guards sit behind the schedule, all in `scripts/flows-pipeline.mjs`:
   writes any that are missing. `ARCHIVE LOST` in the log is the one line that
   means the record has no copy of a published session, and it makes the run
   exit non-zero after everything else is published, so the workflow turns red.
-  The repair is a `republish_session` dispatch; a plain re-dispatch finds the
-  session partly archived and skips it.
+  The line after it is the whole repair, with its deadline:
+  `REPAIR (before 09:30 ET on <next weekday>; ...): GitHub → Actions →
+  flows-pipeline → Run workflow → tick republish_session → Run workflow` (or
+  `gh workflow run flows-pipeline.yml -f republish_session=true`). It works only
+  until the next weekday's open: from 09:30 ET the pipeline refuses an
+  in-progress session, and after that close it ranks the new session, so the
+  lost one stays lost. A plain re-dispatch finds the session partly archived
+  and skips it. `ARCHIVE INCOMPLETE` from the same-session gate prints the same
+  repair line.
+- **The health gate.** The last thing a nightly run does is
+  `scripts/flows-legs/health.mjs`. On the evening of the session it ranked it
+  reads, through the ingest route and with the run's usual retries (so one
+  random edge 403 is not a failure), the Worker's `clock` (day, verdict, Tier 1
+  telemetry, last dispatch outcome), `live:market` and `live:heartbeat`, and
+  prints one `HEALTH:` line per failure: a clock that never rolled to the
+  session, a holiday verdict on a day the vendor printed, `tier1_why`
+  `error:<...>` (`error:no-key` names the missing Worker secret), a last tick
+  before the close, `live:market` last written before 15:50 ET (12:50 on an
+  early close), no Tier 2 pass for the session, a last pass that answered no
+  vendor call or finished more than 30 minutes before the close, any 4xx
+  dispatch refusal from GitHub, and, on every run, 24 or more edge 403s on the
+  ingest route or 60 s of retry budget spent. Any failure makes the run exit
+  non-zero after everything is published, and a red scheduled run emails the
+  owner. `FLOWS_LIVE_MODE = "off"` is a deliberate rollback, not a failure.
 
 Feeds read without a date (`news`, `pulse`, `flowalerts`, `sector:premium`)
 carry `readDay`, the Eastern day of their own `readAt`, beside `sessionDate`;
@@ -1330,10 +1431,17 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   snapshot) from the open to ten minutes past the close,
   dispatches the Actions run at :01/:16/:31/:46, and re-dispatches once when
   `live:breadth` is 45 minutes old. Every dispatch needs `GITHUB_DISPATCH_TOKEN`
-  (step 3 below); without it Tier 1 still runs and the dispatches are no-ops. `*/30 * * * *` refreshes the market snapshot,
+  (section 10.0); without it Tier 1 still runs and the dispatches are no-ops.
+  The stall is logged (`live layer stalled`, with `canDispatch`) whether or not
+  the token is set. Every dispatch outcome is kept in
+  `flows_clock.dispatch_why` (`sent`, `refused:<status>`, `unreachable` or
+  `no-token`).
+  `*/30 * * * *` refreshes the market snapshot,
   dispatches the nightly at or after 17:15 ET (once more after 18:15 ET if meta
   is still behind), refreshes the board summary, and prunes `flows_tape` rows not
-  served for a week.
+  served for a week. It logs `nightly missing` from 21:00 ET (close + 300
+  minutes) when meta is still behind: the scheduled nightly lands about 20:00
+  ET, so the old close + 180 fired falsely every weekday evening.
 - **Tier 1 fits the Workers Free CPU cap.** Until 2026-09-24 Tier 1 also read the
   0DTE net flow and the SPY and QQQ ETF tides: three 390-row one-minute feeds,
   about 200 KB of JSON a tick. Once the session's rows filled in, a tick needed
@@ -1347,23 +1455,45 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   1 ms warm, against about 10 ms and 3.4 ms for the old five-feed tick on the same
   machine.
 - **Tier 1 reports itself in D1.** Every tick first stamps `flows_clock.tier1_at`
-  alone, then records how it ended in `tier1_why` (`written`, `no-feed-answered`,
-  `over-cap`, `not-due`, `holiday`, `off` or `error:<short>`) and, when it wrote
-  `live:market`, `tier1_ok_at`. `/api/flows/now` returns the three as `tier1`.
-  A tick killed by the CPU cap reads as `tier1_at` moving while `tier1_why` and
-  `tier1_ok_at` stay on the last tick that finished:
+  alone, then, when it did Tier 1 work, records how it ended in `tier1_why`
+  (`written`, `no-feed-answered`, `over-cap`, `holiday`, `off` or
+  `error:<short>`) and, when it wrote `live:market`, `tier1_ok_at`. A tick with
+  nothing due (before the open, after close + 10) leaves `tier1_why` alone, so
+  an `error:no-key` from the last working tick is still there when the nightly's
+  health gate reads it at 17:30 ET. `/api/flows/now` returns the three as
+  `tier1`; its `clock` carries only the day, the two verdicts and `closedDays`,
+  and the Tier 1 telemetry and `dispatchWhy` ride on the ingest `clock` key,
+  behind the pipeline's credential. A tick killed by the CPU cap reads as
+  `tier1_at` moving while `tier1_why` and `tier1_ok_at` stay on the last tick
+  that finished:
 
   ```bash
   ./tests/node_modules/.bin/wrangler d1 execute iewt --remote --command \
     "SELECT datetime(tier1_at/1000,'unixepoch') AS began, datetime(tier1_ok_at/1000,'unixepoch') AS wrote, tier1_why FROM flows_clock"
   ```
-- **Holidays and early closes are read from the tape.** The first tick at or after
-  09:45 ET at which both Tier 1 feeds still carry the same earlier session (the
-  market tide by its date, the sector-ETF snapshot by the weekday after its
-  `prev_date`) marks the day closed in `flows_clock`; one lagging feed, or two
-  that disagree on which earlier session they carry, is no verdict. A tide stuck
-  at or before 13:05 ET for 30 minutes after 13:30 marks an early close. The
-  repository still holds no calendar.
+- **Holidays and early closes are read from the tape.** From 09:45 ET a tick at
+  which both Tier 1 feeds still carry the same earlier session (the market tide
+  by its date, the sector-ETF snapshot by the weekday after its `prev_date`) is
+  a closed probe; one lagging feed, or two that disagree on which earlier
+  session they carry, is no verdict. A first closed probe is provisional: it is
+  stamped in `flows_clock.closed_probe_at` and `trading` stays NULL. The day is
+  closed (`trading = 0`) only when a second probe at least 15 minutes after the
+  first agrees, and only then does the day join `flows_clock.closed_days` (a
+  JSON array of at most 20 ISO days, newest last, carried across days and
+  served as `clock.closedDays`). Any feed that carries today sets `trading = 1`
+  at once. Until 11:00 ET a closed day is re-probed every third tick (:01, :16,
+  :31, :46, two calls each), and a re-probe that sees today reopens the day,
+  takes it out of `closed_days` and writes `live:market`. The Tier 2 loop reads
+  a closed day before 11:00 ET as a wait, not an exit: it skips its passes and
+  re-reads the clock every slot, so a day the re-probe reopens gets its passes
+  back without waiting for a GitHub starter; from 11:00 ET a closed day ends the
+  loop. On 2026-09-24 a single
+  probe that saw a lagging vendor at 09:45 could have closed a trading day for
+  good; `tests/flows-live-contract.mjs` threads a lagging vendor at 09:46 and
+  today's data at 09:51 through the clock row and ends with `trading = 1`. A
+  tide stuck at or before 13:05 ET for 30 minutes after 13:30 marks an early
+  close. The migration is `migrations/0012_flows_clock_verdict.sql`; the
+  Worker's first-use path adds the three columns to a table that lacks them.
 - **An undecided day is a trading day.** The 09:31 tick rolls `flows_clock` to
   the new day with `trading` NULL until the 09:45 probe decides it. Only an
   explicit `0` closes a day. A NULL once read as closed (`Number(null)` is `0`),
@@ -1377,6 +1507,13 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   tides, both net-flow expiry series, one screener call for every board name, the
   incremental alert union, spot gamma by rotation, the tape, movers and news —
   37 to 41 calls a pass (the budget is 48) at a 333 ms floor, `live:*` keys only.
+  The one screener call reads the three index ETFs, then every focus ticker
+  (the groups of the nightly `focus` payload, which the live role may read;
+  before that key exists, the `shared/flows-focus.js` roster: the three metal
+  groups, the Mag 7, the metal funds and the miners), then the board names,
+  160 names at most. A full session of `live:strips:series` for 160 names at
+  production magnitudes is about 100 KB, so its cap is 112 KB; `live:strips`
+  stays at 64 KB (about 29 KB for 160 names).
 - **Tier 2 sustains itself through the session, with no new secret.** The
   workflow is one long job (`timeout-minutes: 355`, under GitHub's six-hour cap)
   that runs with `FLOWS_LIVE_LOOP=1`: a pass at once, then a pass on every
@@ -1386,8 +1523,9 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   (`permissions: actions: write`; `workflow_dispatch` is the documented exception
   to that token's no-recursion rule), origin `chain`, on `main`, and exits. The
   `flows-live` concurrency group keeps it to one loop. The GitHub schedule is only
-  starters, `31 13,14 * * 1-5` for the open under EDT and EST and
-  `3 15-20 * * 1-5` in case GitHub drops a starter or a run dies; a starter
+  starters, `31,46 13,14 * * 1-5` for the open under EDT and EST and
+  `3,37 15-20 * * 1-5` in case GitHub drops a starter or a run dies (sixteen
+  slots, because GitHub delivered about one in twenty); a starter
   that queued behind a running loop starts after the window closed and exits at
   once without a pass. The first pass of a run still skips when a heartbeat
   landed under eight minutes ago; the loop's later passes do not. A single pass
@@ -1403,7 +1541,10 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   running to 16:25. A failed clock read keeps the last verdict; with none, the
   weekday calendar applies. A pass that throws is logged and recorded as errored
   and the loop carries on to the next slot. Each pass starts with a fresh 90 s
-  publish/read retry budget, as each separate run had. The checkout keeps no
+  publish/read retry budget, as each separate run had. The job exits non-zero
+  only when every pass answered no vendor call or landed no key (or threw), or
+  when the chain dispatch was refused with the session still open; one over-cap
+  key in a pass that landed the rest stays green. The checkout keeps no
   credential (`persist-credentials: false`); only the chain dispatch holds the
   job token, through `env`.
 - **Tier 3** is on demand: `/api/flows/tape?t=` (a D1 stale-while-revalidate cache
@@ -1450,12 +1591,8 @@ Out-of-band steps before the first deploy of this layer:
    production leaves it unset. A key-set outage answers 503, which the
    pipeline retries, and every refusal is logged with its reason and the
    token's non-secret claims.
-3. Optional, and what turns the Worker into the clock: a fine-grained PAT for
-   this repository only, with Actions read and write, set as
-   `wrangler secret put GITHUB_DISPATCH_TOKEN`. Without it every dispatch is a
-   logged no-op; Tier 2 then runs on its own starters and chain, and the
-   nightly on its GitHub schedule (late).
-   Put its expiry in a calendar.
+3. `GITHUB_DISPATCH_TOKEN` and the Worker's `UW_API_KEY`: section 10.0, items 1
+   and 2.
 4. After deploy, confirm both crons are registered (`wrangler triggers` or the
    dashboard) and read `live:market` on `/api/flows/lk?k=market` at 09:36 ET.
    The tick instants in D1 prove it without dashboard access: `flows_live.read_at`
@@ -1474,3 +1611,17 @@ Out-of-band steps before the first deploy of this layer:
 
 `FLOWS_LIVE_MODE = "off"` in `[vars]` is the instant rollback: no Tier 1 read and
 no dispatch; pages fall back to the nightly rows.
+
+### 10.5j The weekly monitors
+
+- **The vendor probe** (`.github/workflows/flows-probe.yml`) runs every Sunday at
+  14:23 UTC in `--strict` mode (`FLOWS_PROBE_STRICT=1`), about 140 calls. It
+  fails when an operation answers anything but 2xx, except the refusals listed
+  under `gated` in `scripts/flows-probe-list.json` (the VIX term structure's
+  403 without the volatility add-on, and politician holders' enterprise-only
+  422), and when a field listed under `reads` (the fields the code reads) did
+  not arrive. An expected refusal that starts answering is noted as a plan
+  change. A dispatched run is informational unless `strict` is ticked.
+- **The regression suite** (`regression.yml`) also runs every Monday at 06:17
+  UTC, so a fixture date that the real clock overtakes fails within a week,
+  not on the next unrelated push.
