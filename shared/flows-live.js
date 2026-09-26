@@ -2,7 +2,6 @@ import {
   FRESH_CLASSES, easternDay, sessionOpen, easternInstant, easternOffsetMinutes, PHASE_MINUTES, nextWeekdayDay,
 } from "./flows-freshness.js";
 import { buildFlowAlerts, mergeAlerts } from "./flows-alerts.js";
-import { FOCUS_METALS, MAG7, FOCUS_FUNDS, FOCUS_MINERS } from "./flows-focus.js";
 
 export const LIVE_KEY_RE = /^live:[a-z]+(?::[a-z]+)?$/;
 
@@ -600,26 +599,9 @@ export function stripValues(row) {
   return out;
 }
 
-const TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
+export const TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
 
-const upperTicker = (t) => (typeof t === "string" ? t.trim().toUpperCase() : "");
-
-export const FOCUS_FALLBACK = Object.freeze(Array.from(new Set([
-  ...FOCUS_METALS.flatMap((m) => [m.lead, ...m.tickers]), ...MAG7, ...FOCUS_FUNDS, ...FOCUS_MINERS,
-])));
-
-export function focusStripNames(payload, { max = LIVE_BUDGET.stripFocusMax } = {}) {
-  const groups = payload && typeof payload === "object" && Array.isArray(payload.groups) ? payload.groups : [];
-  const out = [];
-  for (const g of groups) {
-    if (!g || typeof g !== "object") continue;
-    for (const t of [g.lead, ...(Array.isArray(g.tickers) ? g.tickers : [])]) {
-      const s = upperTicker(t);
-      if (TICKER_RE.test(s) && !out.includes(s) && out.length < max) out.push(s);
-    }
-  }
-  return out.length ? { names: out, source: "focus" } : { names: FOCUS_FALLBACK.slice(0, max), source: "constants" };
-}
+export const upperTicker = (t) => (typeof t === "string" ? t.trim().toUpperCase() : "");
 
 export function stripNames({ long = [], short = [], watch = [], focus = [] } = {}, { max = LIVE_BUDGET.stripMax } = {}) {
   const out = [];

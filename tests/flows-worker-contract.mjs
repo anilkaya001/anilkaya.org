@@ -1540,15 +1540,16 @@ try {
         okAt: new Date(et("2026-09-24T10:21:00-04:00")).toISOString(), why: "holiday" },
       "TIER 1 TELEMETRY FROM D1: /now carries when the last tick began, when one last wrote live:market and how the " +
         "last one ended — on a flows_clock created with 0010's columns, which the Worker's first use upgraded in place");
+      deep(nb.clock, { day: "2026-09-24", trading: 0, earlyClose: null, closedDays: ["2026-09-24"] },
+        "THE SESSION CLOCK: /now carries the tape-derived day verdict and the closed day on record, on a table the Worker " +
+          "upgraded from 0010's columns — and no operations string (Tier 1 reasons, dispatch outcomes) for a subscriber");
       const clockNow = { day: "2026-09-24", trading: 0, earlyClose: null, closedDays: ["2026-09-24"], tier1: nb.tier1,
         dispatchWhy: "sent" };
-      deep(nb.clock, clockNow,
-        "THE SESSION CLOCK TIER 2 READS: /now carries the tape-derived day verdict, so the Actions loop stops on a " +
-        "holiday or at an early close the calendar alone cannot know — with the closed day on record, the Tier 1 " +
-        "telemetry and the last dispatch outcome, on a table the Worker upgraded from 0010's columns");
       const ic = await ingest("clock", "GET", LIVE_TOKEN);
       deep([ic.status, await ic.json()], [200, { key: "clock", clock: clockNow }],
-        "and the Actions loop reads the same verdict from the ingest route under its live credential, not a signed-in route");
+        "the Actions loop reads the same verdict from the ingest route under its live credential, not a signed-in " +
+          "route, so it stops on a holiday or at an early close the calendar alone cannot know; that key adds the " +
+          "Tier 1 telemetry and the last dispatch outcome");
       const nightlyClock = await ingest("clock", "GET", INGEST_TOKEN);
       deep(await nightlyClock.json(), { key: "clock", clock: clockNow },
         "as does the nightly's health gate under the nightly token");

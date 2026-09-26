@@ -1,8 +1,10 @@
 import {
   LIVE_KEYS, LIVE_BUDGET, SECTOR_TIDES, shapeBreadth, shapeStrips, appendStripSeries, shapeVol,
   indexRows, shapeMovers, shapeLiveTape, gexRotation, shapeGexSeries, mergeGex, mergeLiveAlerts, alertsPagePlan,
-  oldestCreated, stripNames, focusStripNames, rowsOf, failed, freshEnvelope, timeMs, isoSec, anyAnswered, BREADTH_ETFS,
+  oldestCreated, stripNames, rowsOf, failed, freshEnvelope, timeMs, isoSec, anyAnswered, BREADTH_ETFS, VERDICT, TICKER_RE,
+  upperTicker,
 } from "../../shared/flows-live.js";
+import { FOCUS_METALS, MAG7, FOCUS_FUNDS, FOCUS_MINERS } from "../../shared/flows-focus.js";
 import { phaseAt, closeMinutes, PHASE_MINUTES, LIVE_CLOCK, easternInstant } from "../../shared/flows-freshness.js";
 import { fakeLiveVendor, fakeBoards } from "./live-fake.mjs";
 
@@ -13,7 +15,12 @@ export const LIVE_WRITER = "flows-live";
 export function liveWindow(at, clock = null) {
   const p = phaseAt(at, clock);
   if (!p) return { run: false, why: "no-clock", phase: null };
-  if (!p.trading) return { run: false, why: "not-trading", phase: p };
+  if (!p.trading) {
+    const reopenable = !!clock && clock.day === p.day && clock.trading === 0 && p.minutes < VERDICT.provisionalUntilMin &&
+      phaseAt(at, null).trading;
+    return reopenable ? { run: false, wait: true, why: "provisional-closed", phase: p }
+      : { run: false, why: "not-trading", phase: p };
+  }
   const closeMin = closeMinutes(p.day, clock);
   if (p.minutes < PHASE_MINUTES.open) return { run: false, why: "before-open", phase: p };
   if (p.minutes > closeMin + LIVE_CLOCK.runAfterCloseMin) return { run: false, why: "after-close", phase: p };
@@ -44,6 +51,23 @@ const rowsOfBoard = (read) => {
 };
 
 const tickerOf = (r) => (r && typeof r.t === "string" ? r.t.trim().toUpperCase() : null);
+
+export const FOCUS_FALLBACK = Object.freeze(Array.from(new Set([
+  ...FOCUS_METALS.flatMap((m) => [m.lead, ...m.tickers]), ...MAG7, ...FOCUS_FUNDS, ...FOCUS_MINERS,
+])));
+
+export function focusStripNames(payload, { max = LIVE_BUDGET.stripFocusMax } = {}) {
+  const groups = payload && typeof payload === "object" && Array.isArray(payload.groups) ? payload.groups : [];
+  const out = [];
+  for (const g of groups) {
+    if (!g || typeof g !== "object") continue;
+    for (const t of [g.lead, ...(Array.isArray(g.tickers) ? g.tickers : [])]) {
+      const s = upperTicker(t);
+      if (TICKER_RE.test(s) && !out.includes(s) && out.length < max) out.push(s);
+    }
+  }
+  return out.length ? { names: out, source: "focus" } : { names: FOCUS_FALLBACK.slice(0, max), source: "constants" };
+}
 
 export function boardPlan(boards, focusRead = null) {
   const long = rowsOfBoard(boards.long);
@@ -339,39 +363,48 @@ export async function runLiveLoop({ pass, chain, now = () => Date.now(), sleep =
   };
   await refresh();
   const opening = window(startedAt, clock);
-  if (!opening.run) {
+  if (!opening.run && !opening.wait) {
     log(`live loop: nothing to do (${opening.why}) — a starter that ran outside the session exits without a pass`);
     return { exit: "outside-window", why: opening.why, passes, chained: null, clock };
   }
+  let here = opening;
+  let waits = 0;
   for (;;) {
-    const index = passes.length;
-    try {
-      passes.push(await pass({ first: index === 0, index, clock }));
-    } catch (error) {
-      const threw = error instanceof Error ? error.message : String(error);
-      warn(`live loop: pass ${index + 1} threw — ${threw.slice(0, 300)}; the loop carries on to the next slot`);
-      passes.push({ errored: true, threw: threw.slice(0, 300) });
+    if (here.run) {
+      const index = passes.length;
+      try {
+        passes.push(await pass({ first: index === 0, index, clock }));
+      } catch (error) {
+        const threw = error instanceof Error ? error.message : String(error);
+        warn(`live loop: pass ${index + 1} threw — ${threw.slice(0, 300)}; the loop carries on to the next slot`);
+        passes.push({ errored: true, threw: threw.slice(0, 300) });
+      }
+    } else {
+      waits++;
+      log(`live loop: Tier 1 has closed ${here.phase.day} before ` +
+        `${Math.floor(VERDICT.provisionalUntilMin / 60)}:00 ET, when a late vendor can still reopen it — no pass, ` +
+        "waiting for the next slot");
     }
     await refresh();
     const next = nextSlot(now(), slotMs);
     const ahead = window(next, clock);
-    if (!ahead.run) {
+    if (!ahead.run && !ahead.wait) {
       log(`live loop: the session window closes before ${new Date(next).toISOString()} (${ahead.why}); ` +
         `${passes.length} pass(es)`);
-      return { exit: "window-closed", why: ahead.why, passes, chained: null, clock };
+      return { exit: "window-closed", why: ahead.why, passes, waits, chained: null, clock };
     }
     if (next - startedAt > budgetMs) {
       const chained = await chain({ at: now() });
       log(`live loop: time budget spent after ${passes.length} pass(es) with the session still open — ` +
         `re-dispatched: ${chained.why}${chained.status ? " (" + chained.status + ")" : ""}`);
-      return { exit: "budget", why: "budget", passes, chained, clock };
+      return { exit: "budget", why: "budget", passes, waits, chained, clock };
     }
     await sleep(next - now());
     await refresh();
-    const here = window(now(), clock);
-    if (!here.run) {
+    here = window(now(), clock);
+    if (!here.run && !here.wait) {
       log(`live loop: the session window closed while waiting (${here.why}); ${passes.length} pass(es)`);
-      return { exit: "window-closed", why: here.why, passes, chained: null, clock };
+      return { exit: "window-closed", why: here.why, passes, waits, chained: null, clock };
     }
   }
 }

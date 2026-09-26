@@ -1,4 +1,4 @@
-import { easternDay, easternClock, easternInstant, closeMinutes } from "../../shared/flows-freshness.js";
+import { easternDay, easternClock, easternInstant, closeMinutes, nextWeekdayDay } from "../../shared/flows-freshness.js";
 import { timeMs } from "../../shared/flows-live.js";
 
 export const HEALTH = Object.freeze({
@@ -9,8 +9,23 @@ export const HEALTH = Object.freeze({
   retrySpentMs: 60_000,
 });
 
-export const REPUBLISH_REPAIR = "REPAIR: GitHub → Actions → flows-pipeline → Run workflow → tick republish_session → " +
-  "Run workflow (from a shell: gh workflow run flows-pipeline.yml -f republish_session=true). Nothing else is needed.";
+export function republishRepair(sessionDate) {
+  const next = DAY_RE.test(String(sessionDate || "")) ? nextWeekdayDay(sessionDate) : null;
+  const when = next
+    ? `before 09:30 ET on ${next}; from that open the pipeline refuses an in-progress session, and after that ` +
+      `close it ranks ${next} instead, so ${sessionDate} can no longer be republished`
+    : "before the next session's 09:30 ET open";
+  return `REPAIR (${when}): GitHub → Actions → flows-pipeline → Run workflow → tick republish_session → ` +
+    "Run workflow (from a shell: gh workflow run flows-pipeline.yml -f republish_session=true). Nothing else is needed.";
+}
+
+export const DISPATCH_ADVICE = Object.freeze({
+  401: "renew GITHUB_DISPATCH_TOKEN",
+  403: "give GITHUB_DISPATCH_TOKEN Actions read and write on this repository, or renew it",
+  404: "GITHUB_DISPATCH_TOKEN cannot see this repository or its workflow: scope it to this repository (DEPLOY.md 10.0)",
+  422: "GitHub rejected the ref or the inputs: check FLOWS_LIVE_REF and the workflow's inputs on main",
+  other: "check GITHUB_DISPATCH_TOKEN and the workflow (DEPLOY.md 10.0)",
+});
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const pad = (n) => String(n).padStart(2, "0");
@@ -55,29 +70,35 @@ export function healthChecks({ sessionDate, now = Date.now(), clockRead = null, 
 
   if (readFailed(clockRead) || !clock) {
     failures.push(`HEALTH: the Worker's clock could not be read (${readFailed(clockRead) ? said(clockRead) : "no clock"})`);
-  } else if (!sameDay) {
-    failures.push(`HEALTH: Tier 1 never ticked on ${sessionDate}: the Worker's clock still holds ${clock.day}`);
   } else {
-    if (clock.trading === 0) {
-      failures.push(`HEALTH: Tier 1 closed ${sessionDate} as a holiday, but the vendor printed a ${sessionDate} session`);
-    }
     const tier1 = clock.tier1 && typeof clock.tier1 === "object" ? clock.tier1 : null;
-    if (!tier1) notes.push("the Worker's clock carries no Tier 1 telemetry (a Worker older than this check)");
-    else if (tier1.why === "off") {
+    if (tier1 && tier1.why === "off") {
       notes.push("FLOWS_LIVE_MODE is off, so the live layer is not checked");
       return { applies: true, why: "live-off", failures, notes };
-    } else {
+    }
+    const at = tier1 ? timeMs(tier1.at) : NaN;
+    if (!sameDay) {
+      failures.push(at >= close
+        ? `HEALTH: Tier 1 ticked through ${etTime(at, sessionDate)} but never read the ${sessionDate} session: ` +
+          `the Worker's clock still holds ${clock.day}`
+        : `HEALTH: Tier 1 never ticked on ${sessionDate}: the Worker's clock still holds ${clock.day}`);
+    } else if (clock.trading === 0) {
+      failures.push(`HEALTH: Tier 1 closed ${sessionDate} as a holiday, but the vendor printed a ${sessionDate} session`);
+    }
+    if (!tier1) notes.push("the Worker's clock carries no Tier 1 telemetry (a Worker older than this check)");
+    else {
       if (typeof tier1.why === "string" && tier1.why.startsWith("error:")) {
         failures.push(`HEALTH: Tier 1's last tick failed with ${tier1.why}` + (tier1.why === "error:no-key"
           ? ": the Worker has no UW_API_KEY secret (wrangler secret put UW_API_KEY)" : ""));
       }
-      const at = timeMs(tier1.at);
-      if (!(at >= close)) {
+      if (sameDay && !(at >= close)) {
         failures.push(`HEALTH: Tier 1 last ticked at ${etTime(at, sessionDate)}, before the ${etTime(close)} close`);
       }
     }
-    if (typeof clock.dispatchWhy === "string" && /^refused:40[13]$/.test(clock.dispatchWhy)) {
-      failures.push(`HEALTH: GitHub refused the Worker's dispatch (${clock.dispatchWhy}): renew GITHUB_DISPATCH_TOKEN`);
+    const refused = typeof clock.dispatchWhy === "string" ? /^refused:(4\d\d)$/.exec(clock.dispatchWhy) : null;
+    if (refused) {
+      failures.push(`HEALTH: GitHub refused the Worker's dispatch (${clock.dispatchWhy}): ` +
+        (DISPATCH_ADVICE[refused[1]] || DISPATCH_ADVICE.other));
     }
   }
 

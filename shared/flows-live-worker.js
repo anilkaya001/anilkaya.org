@@ -218,7 +218,7 @@ export function sessionStatePatch(clock, raws, at, today) {
 }
 
 export function dispatchOutcome(sent) {
-  if (!sent || sent.why === "no-token") return null;
+  if (!sent) return null;
   if (sent.sent) return "sent";
   return (sent.why + (sent.status ? ":" + sent.status : "")).slice(0, 24);
 }
@@ -321,8 +321,8 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
       }
     }
   }
-  if (telemetry) patch.tier1Why = tier1Why(why);
-  else delete patch.tier1OkAt;
+  if (!telemetry) delete patch.tier1OkAt;
+  else if (why !== "not-due") patch.tier1Why = tier1Why(why);
 
   const merged = { ...(clock || {}), ...patch };
   const due = liveDispatchDue(at, merged);
@@ -382,9 +382,12 @@ export async function nightlyTick(env, at, { fetchImpl = fetch, log = console } 
       ? { nightlyRedispatchedAt: at }
       : { nightlyDay: today, nightlyDispatchedAt: at, nightlyRedispatchedAt: null };
     await clockPatchStatement(env.DB, { ...patch, dispatchWhy: "sent" }, at).run();
-  } else if (sent.why !== "no-token") {
-    log.error(JSON.stringify({ message: "nightly dispatch failed", ...sent }));
-    await clockPatchStatement(env.DB, { dispatchWhy: dispatchOutcome(sent) }, at).run().catch(() => {});
+  } else {
+    if (sent.why !== "no-token") log.error(JSON.stringify({ message: "nightly dispatch failed", ...sent }));
+    const outcome = dispatchOutcome(sent);
+    if (!clock || clock.dispatchWhy !== outcome) {
+      await clockPatchStatement(env.DB, { dispatchWhy: outcome }, at).run().catch(() => {});
+    }
   }
   return { due: true, redispatch: !!due.redispatch, sent, metaSession };
 }
@@ -548,13 +551,18 @@ export function tier1View(clock) {
 export function clockView(clock) {
   return clock && typeof clock.day === "string"
     ? { day: clock.day, trading: clockFlag(clock.trading), earlyClose: clockFlag(clock.earlyClose),
-      closedDays: parseClosedDays(clock.closedDays), tier1: tier1View(clock),
-      dispatchWhy: typeof clock.dispatchWhy === "string" ? clock.dispatchWhy : null }
+      closedDays: parseClosedDays(clock.closedDays) }
     : null;
 }
 
+export function ingestClockView(clock) {
+  const view = clockView(clock);
+  return view ? { ...view, tier1: tier1View(clock),
+    dispatchWhy: typeof clock.dispatchWhy === "string" ? clock.dispatchWhy : null } : null;
+}
+
 export async function serveIngestClock(env, { json }) {
-  return json({ key: "clock", clock: clockView(await readClock(env && env.DB)) });
+  return json({ key: "clock", clock: ingestClockView(await readClock(env && env.DB)) });
 }
 
 export async function serveNow(env, url, now, { json, HttpError, quote }) {

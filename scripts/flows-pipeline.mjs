@@ -57,7 +57,7 @@ import {
   runLive, runLiveLoop, chainDispatch, dryLiveTicks, readHeldAlerts, readLiveClock, LIVE_READ_PACE_MS,
   passOutcome, liveRunVerdict,
 } from "./flows-legs/live.mjs";
-import { runHealthGate, REPUBLISH_REPAIR } from "./flows-legs/health.mjs";
+import { runHealthGate, republishRepair } from "./flows-legs/health.mjs";
 import { LIVE_OIDC, actionsIdToken, jwtExpiry } from "../shared/flows-oidc.js";
 
 const ARGS = new Set(process.argv.slice(2));
@@ -4148,7 +4148,7 @@ async function main() {
       `as that run got. ${stats.calls} API call(s).`);
     if (gate.mode === "partial") {
       console.warn(`  ARCHIVE INCOMPLETE: ${gate.note}`);
-      console.warn(`  ${REPUBLISH_REPAIR}`);
+      console.warn(`  ${republishRepair(sessionDate)}`);
       process.exitCode = 1;
     }
     return;
@@ -6149,7 +6149,7 @@ async function main() {
         "together; " + plainRedispatchSaid(archive) + ". The run finishes publishing and " +
         "then exits non-zero, so the loss turns the workflow red instead of scrolling past in " +
         "a green log.");
-      console.warn(`  ${REPUBLISH_REPAIR}`);
+      console.warn(`  ${republishRepair(sessionDate)}`);
       process.exitCode = 1;
     } else if (!repaired.length && !held.length) {
       console.log(`  archive check: scores, board:long and board:short are all written for ${sessionDate}`);
@@ -6284,7 +6284,7 @@ async function main() {
   const verdict = describeFloorVerdict(stats);
   if (verdict) console.log("  " + verdict);
 
-  const health = await runHealthGate({ sessionDate, read: readStoredOnce, dry: DRY_RUN,
+  const health = await runHealthGate({ sessionDate, read: readStored, dry: DRY_RUN,
     edge403: edgeRefusals.count, retrySpentMs: publishRetrySpentMs });
   if (health.failures.length) process.exitCode = 1;
 }

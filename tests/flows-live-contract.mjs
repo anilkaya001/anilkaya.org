@@ -13,11 +13,11 @@ import * as W from "../shared/flows-live-worker.js";
 import * as FAKE from "../scripts/flows-legs/live-fake.mjs";
 import {
   readHeldAlerts, boardPlan, liveWindow, runLive, runLiveLoop, chainDispatch, nextSlot, LIVE_LOOP, readLiveClock,
-  sessionClock, liveRunVerdict, passOutcome,
+  sessionClock, liveRunVerdict, passOutcome, focusStripNames, FOCUS_FALLBACK,
 } from "../scripts/flows-legs/live.mjs";
 import { healthChecks, runHealthGate } from "../scripts/flows-legs/health.mjs";
 import {
-  shapeNews, liveCredential, liveCredentialSource, LIVE_BEARER_MARGIN_MS, resetPublishRetryBudget,
+  shapeNews, liveCredential, liveCredentialSource, LIVE_BEARER_MARGIN_MS, resetPublishRetryBudget, intradayRefusal,
 } from "../scripts/flows-pipeline.mjs";
 import * as O from "../shared/flows-oidc.js";
 import { oidcIssuer, tickDb, tier1Bodies } from "./live-stubs.mjs";
@@ -524,17 +524,43 @@ const T = (iso) => Date.parse(iso);
   deep(Object.keys(breadth.sectors.rows).sort(), L.SECTOR_TIDES.map((s) => s.sector).sort(),
     "every one of the vendor's eleven sectors is present, each on the shared time axis");
 
-  const focus = L.focusStripNames(null);
+  const focus = focusStripNames(null);
   deep([focus.source, focus.names.length, focus.names.slice(0, 4)], ["constants", 22, ["GLD", "GDX", "NEM", "AEM"]],
     "WITHOUT A FOCUS PAYLOAD the strip falls back to the shared/flows-focus.js roster: the three metal groups, the Mag 7, " +
     "the metal funds and the miners, 22 names once each");
   const stored = { groups: [{ id: "gold", lead: "GLD", tickers: ["GLD", "GDX"] }, { id: "ndx10", tickers: ["avgo", "COST", "GLD"] },
     { id: "bad", tickers: ["not a ticker", 7] }] };
-  deep(L.focusStripNames(stored), { names: ["GLD", "GDX", "AVGO", "COST"], source: "focus" },
+  deep(focusStripNames(stored), { names: ["GLD", "GDX", "AVGO", "COST"], source: "focus" },
     "WITH ONE, every ticker its groups list, lead first, in order, once, upper-cased — whatever the nightly derived " +
     "for the NDX 10, the strip follows it with no code change");
-  eq(L.focusStripNames({ groups: [{ tickers: Array.from({ length: 60 }, (_, i) => "Q" + i) }] }).names.length,
+  eq(focusStripNames({ groups: [{ tickers: Array.from({ length: 60 }, (_, i) => "Q" + i) }] }).names.length,
     L.LIVE_BUDGET.stripFocusMax, "and a runaway focus list is held to its own share, so it can never crowd the boards out");
+  deep(focus.names, FOCUS_FALLBACK.slice(0, L.LIVE_BUDGET.stripFocusMax), "the fallback is the constants' roster itself");
+  {
+    const src = (p) => read(p);
+    const importsOf = (text) => [...text.matchAll(/^\s*(?:import|export)\b[^;]*?\bfrom\s*"([^"]+)"|^\s*import\s*"([^"]+)"/gm)]
+      .map((m) => m[1] || m[2]);
+    deep(importsOf(src("shared/flows-focus.js")), [],
+      "shared/flows-focus.js IS A LEAF: it imports nothing, so every module may import its constants without a cycle");
+    ok(!importsOf(src("shared/flows-live.js")).some((i) => /flows-focus/.test(i)),
+      "and shared/flows-live.js, which the Worker bundles, never imports it: the focus roster reaches the strip only " +
+        "through the Actions leg (scripts/flows-legs/live.mjs)");
+    const rootPath = new URL(".", ROOT).pathname;
+    const edges = (file) => importsOf(readFileSync(file, "utf8")).filter((i) => i.startsWith("."))
+      .map((i) => new URL(i, "file://" + file).pathname);
+    const state = new Map();
+    const cycles = [];
+    const visit = (f, stack) => {
+      if (state.get(f) === 2) return;
+      if (state.get(f) === 1) { cycles.push([...stack.slice(stack.indexOf(f)), f].map((x) => x.slice(rootPath.length))); return; }
+      state.set(f, 1); stack.push(f);
+      for (const g of edges(f)) visit(g, stack);
+      stack.pop(); state.set(f, 2);
+    };
+    for (const entry of ["worker.js", "scripts/flows-pipeline.mjs"]) visit(rootPath + entry, []);
+    deep(cycles, [], `NO IMPORT CYCLE from worker.js or the pipeline (${state.size} modules walked): a cycle leaves a ` +
+      "const in its temporal dead zone and the Worker throws at module evaluation, taking every route down");
+  }
   const fb = FAKE.fakeBoards({ n: 80 });
   const names = L.stripNames({ long: fb.long.rows.map((r) => r.t), short: fb.short.rows.map((r) => r.t),
     watch: fb.watch.rows.map((r) => r.t), focus: focus.names });
@@ -1240,7 +1266,35 @@ const T = (iso) => Date.parse(iso);
   deep([dead.col("tier1_why"), dead.col("tier1_ok_at")], ["no-feed-answered", undefined],
     "a tick no feed answered says so, and leaves tier1_ok_at where the last good tick put it");
   const early = await run(easternInstant(S, 9 * 60 + 20), { fetchVendor: vendor });
-  eq(early.col("tier1_why"), "not-due", "a tick before the open is not-due");
+  deep([early.col("tier1_why"), early.out.why, early.db.statements[0].args[1]], [undefined, "not-due", easternInstant(S, 9 * 60 + 20)],
+    "a tick with no Tier 1 work (not-due) stamps tier1_at and leaves tier1_why on the last tick that did the work, " +
+      "so a failure before the close is still there when the nightly's health gate reads it");
+  {
+    const row = { id: 1, day: "2026-09-23", trading: 1, early_close: 0, tier1_why: "written" };
+    const whys = [];
+    for (let m = 15 * 60 + 56; m <= 17 * 60 + 56; m += 5) {
+      const tickAt = easternInstant(S, m);
+      const t = await run(tickAt, { env: { UW_API_KEY: "" }, fetchVendor: vendor, clockRow: { ...row } });
+      for (const patch of t.patches) {
+        const cols = /\(([^)]*)\) VALUES/.exec(patch.sql)[1].split(", ");
+        cols.forEach((c, j) => { row[c] = patch.args[j]; });
+      }
+      whys.push(t.out.why);
+    }
+    ok(whys[0] === "error:no-key" && whys.includes("not-due") && row.tier1_why === "error:no-key" &&
+       row.tier1_at === easternInstant(S, 17 * 60 + 56),
+    "A WORKER WITH NO UW_API_KEY, threaded 15:56 to 17:56 ET: the ticks after close + 10 are not-due, and tier1_why " +
+      `still reads error:no-key at 17:56 (${whys.filter((w) => w !== "not-due").length} working ticks)`);
+    const view = W.ingestClockView(W.normalizeClock(row));
+    const H = healthChecks({ sessionDate: S, now: easternInstant(S, 17 * 60 + 58),
+      clockRead: { payload: { key: "clock", clock: view }, status: 200 },
+      marketRead: { payload: { fresh: { readAt: new Date(easternInstant(S, 15 * 60 + 55)).toISOString() } }, status: 200 },
+      heartbeatRead: { payload: { session: S, run: { calls: 39, failedCalls: 0,
+        finishedAt: new Date(easternInstant(S, 16 * 60 + 21)).toISOString() } }, status: 200 } });
+    ok(H.failures.includes("HEALTH: Tier 1's last tick failed with error:no-key: the Worker has no UW_API_KEY secret " +
+      "(wrangler secret put UW_API_KEY)"),
+    "and the nightly health gate, reading that clock through the ingest view, names the missing Worker secret");
+  }
   {
     const row = { id: 1, day: "2026-09-23", trading: 1, early_close: 0, tape_at: null, tape_moved_at: null };
     const written = [];
@@ -1357,6 +1411,41 @@ const T = (iso) => Date.parse(iso);
        reads > passAt.length,
     "A TAPE-DERIVED HOLIDAY: the loop reads the Worker's clock around every pass, and once Tier 1 has closed the day " +
       `(09:46 on Thanksgiving) no pass follows and nothing is chained (${passAt.length} passes before the verdict)`);
+    ok(r.waits > 0 && c.now() >= easternInstant(TG, L.VERDICT.provisionalUntilMin - 5) &&
+       c.now() < easternInstant(TG, L.VERDICT.provisionalUntilMin),
+    `and it waits without a pass until ${L.VERDICT.provisionalUntilMin / 60}:00 ET, while Tier 1 can still reopen the ` +
+      `day, before it exits (${r.waits} waits)`);
+  }
+  {
+    const S2 = "2026-09-24";
+    const closedAt = easternInstant(S2, 10 * 60 + 1);
+    const reopenAt = easternInstant(S2, 10 * 60 + 16);
+    const c = sim(easternInstant(S2, 9 * 60 + 56));
+    const passAt = [];
+    const r = await runLiveLoop({ now: c.now, sleep: c.sleep, log: () => {}, budgetMs: 24 * 3600 * 1000,
+      readClock: async () => ({ day: S2, trading: c.now() >= closedAt && c.now() < reopenAt ? 0 : null, earlyClose: null }),
+      pass: async () => { passAt.push(c.now()); c.advance(40000); return {}; },
+      chain: async () => { throw new Error("no chain inside the window"); } });
+    const gap = passAt.filter((t) => t >= closedAt && t < reopenAt);
+    ok(r.exit === "window-closed" && r.why === "after-close" && gap.length === 0 && r.waits >= 2 &&
+       passAt.includes(easternInstant(S2, 10 * 60 + 20)) && passAt.at(-1) === easternInstant(S2, 16 * 60 + 25),
+    "A VERDICT REVERSED (OPS-4): the vendor lags past two probes, Tier 1 closes the day at 10:01 and its 10:16 re-probe " +
+      "reopens it; the loop waits through the closed slots instead of exiting, then passes on every slot to 16:25 " +
+      `(${r.waits} waits, ${passAt.length} passes)`);
+    const late = sim(easternInstant(S2, 10 * 60 + 5));
+    const latePasses = [];
+    const lr = await runLiveLoop({ now: late.now, sleep: late.sleep, log: () => {}, budgetMs: 24 * 3600 * 1000,
+      readClock: async () => ({ day: S2, trading: late.now() >= closedAt && late.now() < reopenAt ? 0 : 1, earlyClose: null }),
+      pass: async () => { latePasses.push(late.now()); late.advance(40000); return {}; },
+      chain: async () => { throw new Error("no chain inside the window"); } });
+    ok(lr.exit === "window-closed" && latePasses[0] === easternInstant(S2, 10 * 60 + 20) && lr.waits >= 2,
+      "and a starter that lands while the day is provisionally closed waits for the reopening rather than exiting");
+    eq(liveWindow(easternInstant(S2, 10 * 60 + 30), { day: S2, trading: 0, earlyClose: null }).why, "provisional-closed",
+      "a closed verdict before 11:00 ET is a wait");
+    eq(liveWindow(easternInstant(S2, 11 * 60), { day: S2, trading: 0, earlyClose: null }).why, "not-trading",
+      "and final from 11:00 ET, when Tier 1 stops re-probing");
+    eq(liveWindow(T("2026-09-26T14:00:00Z"), { day: "2026-09-26", trading: 0, earlyClose: null }).why, "not-trading",
+      "a weekend is never a wait");
   }
   {
     const EC = "2026-11-27";
@@ -1422,12 +1511,19 @@ const T = (iso) => Date.parse(iso);
     deep([sessionClock({ clock: { day: "2026-9-1", trading: 1 } }), sessionClock({ clock: { day: S, trading: "0",
       earlyClose: 7 } })], [null, { day: S, trading: null, earlyClose: null }],
     "a malformed day is no clock, and a flag that is not exactly 0 or 1 is unknown, never a verdict");
-    deep(W.clockView({ day: S, trading: null, earlyClose: "1", tier1At: 5, closedDays: "[\"2026-09-07\"]",
-      dispatchWhy: "refused:401", liveDoneAt: 9 }),
-    { day: S, trading: null, earlyClose: 1, closedDays: ["2026-09-07"], tier1: { at: new Date(5).toISOString(), okAt: null,
-      why: null }, dispatchWhy: "refused:401" },
-    "the Worker's view of its clock is the day and its two verdicts (NULL kept as undecided), the closed days the tape " +
-      "proved, the Tier 1 telemetry and the last dispatch outcome — what the nightly health gate and the calendar read");
+    const rowClock = { day: S, trading: null, earlyClose: "1", tier1At: 5, closedDays: "[\"2026-09-07\"]",
+      dispatchWhy: "refused:401", liveDoneAt: 9 };
+    deep(W.clockView(rowClock), { day: S, trading: null, earlyClose: 1, closedDays: ["2026-09-07"] },
+      "the Worker's public view of its clock is the day, its two verdicts (NULL kept as undecided) and the closed days " +
+        "the tape proved — what /api/flows/now serves and the calendar reads, with no operations string in it");
+    deep(W.ingestClockView(rowClock),
+      { day: S, trading: null, earlyClose: 1, closedDays: ["2026-09-07"], tier1: { at: new Date(5).toISOString(), okAt: null,
+        why: null }, dispatchWhy: "refused:401" },
+      "and the ingest clock key, behind the pipeline's credential, adds the Tier 1 telemetry and the last dispatch " +
+        "outcome, which the nightly health gate reads");
+    const liveSrc = read("shared/flows-live-worker.js");
+    ok(/json\(\{ key: "clock", clock: ingestClockView\(/.test(liveSrc) && /\n    clock: clockView\(clock\),\n/.test(liveSrc),
+      "serveIngestClock serves the operations view and serveNow the public one");
     const ingestSrc = read("worker.js");
     ok(/if \(key === "clock"\) \{\s*requireMethod\(request, \["GET"\]\);\s*await ensureFlowsTables\(env\);\s*return FLOWS_LIVE\.serveIngestClock\(env, \{ json \}\);/
       .test(ingestSrc) && ingestSrc.indexOf('if (key === "clock")') > ingestSrc.indexOf('if (!tokenKind) throw new HttpError(401'),
@@ -1565,9 +1661,18 @@ const T = (iso) => Date.parse(iso);
 
   deep([W.dispatchOutcome({ sent: false, why: "no-token" }), W.dispatchOutcome({ sent: true, status: 204, why: "sent" }),
     W.dispatchOutcome({ sent: false, status: 401, why: "refused" }), W.dispatchOutcome({ sent: false, why: "unreachable" })],
-  [null, "sent", "refused:401", "unreachable"],
-  "EVERY DISPATCH OUTCOME is recorded in flows_clock.dispatch_why (none without a token), so an expired token turns " +
-    "the nightly health gate red");
+  ["no-token", "sent", "refused:401", "unreachable"],
+  "EVERY DISPATCH OUTCOME is recorded in flows_clock.dispatch_why, no-token included, so an expired token turns " +
+    "the nightly health gate red and a token the owner removed clears the old refusal instead of alerting forever");
+  {
+    const db = tickDb();
+    db.batch = async () => [{ results: [{ id: 1, day: "2026-09-24", trading: 1, dispatch_why: "refused:401" }] },
+      { results: [{ session: "2026-09-23" }] }];
+    const r = await W.nightlyTick({ DB: db }, easternInstant("2026-09-24", 19 * 60), { log: { error() {} } });
+    const patch = db.statements.find((w) => /INSERT INTO flows_clock/.test(w.sql));
+    ok(r.due && r.sent.why === "no-token" && patch && /dispatch_why/.test(patch.sql) && patch.args.includes("no-token"),
+      "a due nightly dispatch with no token overwrites a stale refused:401 with no-token");
+  }
 
   const clockRow = { id: 1, day: S, trading: 1, early_close: 0 };
   const stallDb = () => {
@@ -1613,7 +1718,7 @@ const T = (iso) => Date.parse(iso);
   const good = {
     sessionDate: S, now: at(20, 5),
     clockRead: { payload: { key: "clock", clock: { day: S, trading: 1, earlyClose: null, closedDays: [],
-      tier1: { at: new Date(at(17, 56)).toISOString(), okAt: new Date(at(16, 6)).toISOString(), why: "not-due" },
+      tier1: { at: new Date(at(17, 56)).toISOString(), okAt: new Date(at(16, 6)).toISOString(), why: "written" },
       dispatchWhy: null } }, status: 200 },
     marketRead: { payload: { fresh: { readAt: new Date(at(16, 6)).toISOString() } }, status: 200 },
     heartbeatRead: beat(S, { calls: 39, failedCalls: 0, finishedAt: new Date(at(16, 21)).toISOString() }),
@@ -1641,10 +1746,25 @@ const T = (iso) => Date.parse(iso);
   deep(fails({ clockRead: clockWith({ trading: 0 }) }),
     [`HEALTH: Tier 1 closed ${S} as a holiday, but the vendor printed a ${S} session`],
   "a false holiday verdict is caught the same evening, against the session the nightly just ranked");
-  deep(fails({ clockRead: clockWith({ day: "2026-09-23" }) }), [`HEALTH: Tier 1 never ticked on ${S}: the Worker's clock still holds ${"2026-09-23"}`],
+  deep(fails({ clockRead: clockWith({ day: "2026-09-23", tier1: { at: new Date(easternInstant("2026-09-23", 21 * 60)).toISOString(),
+    okAt: null, why: "written" } }) }), [`HEALTH: Tier 1 never ticked on ${S}: the Worker's clock still holds ${"2026-09-23"}`],
     "a Worker cron that never ran today");
+  deep(fails({ clockRead: clockWith({ day: "2026-09-23" }) }),
+    [`HEALTH: Tier 1 ticked through 17:56 ET but never read the ${S} session: the Worker's clock still holds 2026-09-23`],
+    "and one that ticked all day without ever reading the vendor says that instead");
   deep(fails({ clockRead: clockWith({ dispatchWhy: "refused:401" }) }),
     ["HEALTH: GitHub refused the Worker's dispatch (refused:401): renew GITHUB_DISPATCH_TOKEN"], "an expired dispatch token");
+  deep(["refused:403", "refused:404", "refused:422", "refused:409"].map((w) => fails({ clockRead: clockWith({ dispatchWhy: w }) })),
+    [[`HEALTH: GitHub refused the Worker's dispatch (refused:403): ${"give GITHUB_DISPATCH_TOKEN Actions read and write on this repository, or renew it"}`],
+      ["HEALTH: GitHub refused the Worker's dispatch (refused:404): GITHUB_DISPATCH_TOKEN cannot see this repository or its " +
+        "workflow: scope it to this repository (DEPLOY.md 10.0)"],
+      ["HEALTH: GitHub refused the Worker's dispatch (refused:422): GitHub rejected the ref or the inputs: check " +
+        "FLOWS_LIVE_REF and the workflow's inputs on main"],
+      ["HEALTH: GitHub refused the Worker's dispatch (refused:409): check GITHUB_DISPATCH_TOKEN and the workflow (DEPLOY.md 10.0)"]],
+  "EVERY 4xx REFUSAL fails the gate, each with its own remedy: a token scoped to the wrong repository (404) or a bad " +
+    "ref (422) is as dead as an expired one");
+  deep(["no-token", "sent", "unreachable"].map((w) => fails({ clockRead: clockWith({ dispatchWhy: w }) }).length), [0, 0, 0],
+    "while no token, a sent dispatch or one unreachable blip is not a token failure");
   deep(fails({ edge403: 30 }), ["HEALTH: the edge answered 30 ingest request(s) with HTTP 403 and retries spent 6 s of the " +
     "90 s budget: add the WAF skip rule for /api/flows/ingest (DEPLOY.md 10.0)"], "and an edge refusing ingest more than twice the worst night");
   deep(fails({ clockRead: { payload: null, failed: true, status: 403 } }), ["HEALTH: the Worker's clock could not be read (HTTP 403)"],
@@ -1656,7 +1776,7 @@ const T = (iso) => Date.parse(iso);
      healthChecks({ ...good, now: easternInstant("2026-09-25", 20 * 60), edge403: 40 }).failures.length === 1,
   "the live checks apply only on the evening of the session the run ranked; the edge count applies to every run");
   const early = healthChecks({ ...good, now: at(14, 0),
-    clockRead: clockWith({ earlyClose: 1, tier1: { at: new Date(at(13, 56)).toISOString(), okAt: null, why: "not-due" } }),
+    clockRead: clockWith({ earlyClose: 1, tier1: { at: new Date(at(13, 56)).toISOString(), okAt: null, why: "written" } }),
     marketRead: { payload: { fresh: { readAt: new Date(at(13, 6)).toISOString() } }, status: 200 },
     heartbeatRead: beat(S, { calls: 39, failedCalls: 0, finishedAt: new Date(at(13, 21)).toISOString() }) });
   ok(early.applies && early.failures.length === 0, "on an early close the checks follow the 13:00 close");
@@ -1669,15 +1789,41 @@ const T = (iso) => Date.parse(iso);
     "runHealthGate reads the clock, live:market and live:heartbeat through the ingest route and prints one line");
   const pipeline = read("scripts/flows-pipeline.mjs");
   const tail = pipeline.slice(pipeline.indexOf("async function main()"), pipeline.indexOf("\nexport {\n"));
-  ok(/const health = await runHealthGate\(\{ sessionDate, read: readStoredOnce, dry: DRY_RUN,\s*edge403: edgeRefusals\.count, retrySpentMs: publishRetrySpentMs \}\);\s*if \(health\.failures\.length\) process\.exitCode = 1;\s*\}\s*$/
+  ok(/const health = await runHealthGate\(\{ sessionDate, read: readStored, dry: DRY_RUN,\s*edge403: edgeRefusals\.count, retrySpentMs: publishRetrySpentMs \}\);\s*if \(health\.failures\.length\) process\.exitCode = 1;\s*\}\s*$/
     .test(tail), "THE NIGHTLY ENDS WITH THE GATE: its last statement runs it and turns the run red on any failure, after " +
     "every key is published");
   eq((pipeline.match(/if \(response\.status === 403\) edgeRefusals\.count\+\+;/g) || []).length, 3,
     "and every ingest read, write and delete counts an edge 403 into it");
-  const { REPUBLISH_REPAIR } = await import("../scripts/flows-legs/health.mjs");
-  ok(/republish_session/.test(REPUBLISH_REPAIR) && /gh workflow run flows-pipeline\.yml -f republish_session=true/.test(REPUBLISH_REPAIR) &&
-     (pipeline.match(/console\.warn\(`  \$\{REPUBLISH_REPAIR\}`\);\s*process\.exitCode = 1;/g) || []).length === 2,
-  "ARCHIVE LOST and ARCHIVE INCOMPLETE are each followed by the whole repair, as one line an owner can follow as-is");
+  const { republishRepair } = await import("../scripts/flows-legs/health.mjs");
+  const repair = republishRepair("2026-09-25");
+  ok(/republish_session/.test(repair) && /gh workflow run flows-pipeline\.yml -f republish_session=true/.test(repair) &&
+     /^REPAIR \(before 09:30 ET on 2026-09-28;/.test(repair) &&
+     (pipeline.match(/console\.warn\(`  \$\{republishRepair\(sessionDate\)\}`\);\s*process\.exitCode = 1;/g) || []).length === 2,
+  "ARCHIVE LOST and ARCHIVE INCOMPLETE are each followed by the whole repair, as one line an owner can follow as-is, " +
+    "including when it still works: before the next weekday's open (a Friday session until Monday 09:30 ET)");
+  {
+    const at = (day, h, m) => new Date(easternInstant(day, h * 60 + m));
+    ok(!intradayRefusal("2026-09-25", { at: at("2026-09-28", 9, 29) }).refuse &&
+       intradayRefusal("2026-09-25", { at: at("2026-09-28", 9, 30) }).refuse,
+    "and that deadline is the pipeline's own: the republish runs at 09:29 ET on the next weekday and is refused at 09:30");
+  }
+  {
+    const reads = [];
+    const failing = { clock: 1, "live:market": 0, "live:heartbeat": 0 };
+    const retrying = async (key) => {
+      reads.push(key);
+      if (failing[key]-- > 0) return { payload: null, failed: true, status: 403 };
+      return ({ clock: good.clockRead, "live:market": good.marketRead, "live:heartbeat": good.heartbeatRead })[key];
+    };
+    const g = await runHealthGate({ sessionDate: S, now: () => at(20, 5), read: async (key) => {
+      let r = await retrying(key);
+      for (let i = 0; r.failed && i < 2; i++) r = await retrying(key);
+      return r;
+    }, log: () => {}, warn: () => {} });
+    ok(g.failures.length === 0 && reads.filter((k) => k === "clock").length === 2,
+      "A RANDOM EDGE 403 ON A GATE READ is retried (the pipeline passes its retrying readStored), so one refusal the " +
+        "retry absorbs never turns a healthy session red");
+  }
 
   const dead = (answered, landed) => ({ skipped: null, answered, landed });
   deep([liveRunVerdict({ passes: [dead(0, 0), dead(0, 0)] }).failed, liveRunVerdict({ passes: [dead(0, 0), dead(30, 9)] }).failed,
