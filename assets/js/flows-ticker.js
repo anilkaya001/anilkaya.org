@@ -47,21 +47,20 @@
   const isIndex = (card) => !!card && (card.depth === "index" || card.depth === "fund");
   const isDeep = (card) => !!card && (card.depth === "board" || card.depth === "focus" || !!engineOf(card));
   const behind = (card) => isoOk(card.sessionDate) && card.sessionDate < UI.freshness.market().expected;
-  const etDay = (t) => { const d = new Date(t); return isNaN(d) ? null : d.toLocaleDateString("en-CA", { timeZone: "America/New_York" }); };
+  const etDay = (t) => { const d = new Date(t || NaN); return isNaN(d) ? null : d.toLocaleDateString("en-CA", { timeZone: "America/New_York" }); };
   function joined(x, card) {
     if (!x || typeof x !== "object") return { status: "absent" };
     if (!isoOk(x.sessionDate) || !isoOk(card.sessionDate) || x.sessionDate === card.sessionDate) return x;
-    return { status: "absent", off: x.sessionDate, earnings: x.earnings };
+    return x.sessionDate < card.sessionDate ? { ...x, off: x.sessionDate } : { status: "absent", off: x.sessionDate, earnings: x.earnings };
   }
+  const vwSt = (vw) => UI.partial(vw.views.map((v) => ({ name: v.label, st: v.st })));
+  const slot = (l, v) => h("div", { class: "ft-slot" }, h("span", { class: "ft-slot-l" }, l), v);
   const offIndex = (card, sec) => isIndex(card) && sec == null;
   const stOf = (p, what) => UI.stateOf(p, what);
-  const PRE = {
-    ivSurface: "the option chain leg", skewTerm: "the option chain leg", topContracts: "the option chain leg", aggressor: "the option chain leg",
-    darkpool: "the per-name deep feeds", oiDeltas: "the per-name deep feeds", volContext: "the per-name deep feeds",
-    marketRank: "the market-wide join", variation: "the hedging stage", scoreOverlay: "the score overlay", premiumTrack: "the score overlay",
-    congress: "the congress read", calendar: "the gamma roll-off", surface: "the gamma surface", vanna: "the second-order greeks",
-    charm: "the second-order greeks", deltaExposure: "the second-order greeks", displacement: "the displacement read", pricedMove: "the priced move",
-  };
+  const PRE = {};
+  for (const [w, ks] of [["option chain leg", "ivSurface skewTerm topContracts aggressor"], ["per-name deep feeds", "darkpool oiDeltas volContext"], ["market-wide join", "marketRank"],
+    ["hedging stage", "variation"], ["score overlay", "scoreOverlay premiumTrack"], ["congress read", "congress"], ["gamma roll-off", "calendar"], ["gamma surface", "surface"],
+    ["second-order greeks", "vanna charm deltaExposure"], ["displacement read", "displacement"], ["priced move", "pricedMove"]]) for (const k of ks.split(" ")) PRE[k] = "the " + w;
   function panelSt(card, key, what) {
     const P = (card && card.panels) || {};
     if (!Object.prototype.hasOwnProperty.call(P, key)) {
@@ -81,7 +80,7 @@
     if (sec.status === "ok" || sec.status === "thin") return OK;
     if (sec.status === "stale") return ST("stale", sentence(said) || "The vendor dated this read to another session.");
     if (sec.status === "quiet") return ST("quiet", sentence(said) || "Read, with nothing to report.");
-    if (sec.status === "unreadable" || sec.status === "unshaped") return ST("withheld", sentence(said) || "The vendor answered with a body that is not the confirmed shape.");
+    if (sec.status === "unreadable" || sec.status === "unshaped") return ST("withheld", sentence(said) || FLOW_CODES.malformed);
     if (sec.status === "pending") return ST("pending", sentence(said) || "Not computed yet.");
     return ST("unavailable", sentence(said) || "Not measured this run.");
   };
@@ -144,6 +143,8 @@
   function mets(list, o) { const el = UI.metrics(list.filter(Boolean), o); el.dataset.n = String(el.childElementCount); return el; }
   function keyOf(c, shape, label) { return UI.key(c, shape, label); }
   function dashKey(c, label) { const k = UI.key(c, "ln", label); k.firstChild.classList.add("ft-dash"); return k; }
+  const fadeG = (d, p) => s("g", { class: "fade", style: { "--delay": d + "ms" } }, p);
+  const netKeys = () => [keyOf("--up-mark", "", "Net bought"), keyOf("--down-mark", "", "Net sold")];
   function legend(keys) { return UI.legend(keys.filter(Boolean)); }
 
   function freshNote(sec) {
@@ -330,12 +331,16 @@
     const lq = liveQuote();
     if (lq) return { px: lq.price, prev: numOr(lq.prevClose, S !== null && card.sessionDate === UI.freshness.market().expected ? S : null), live: true, readAt: lq.readAt };
     const q = quoteOf();
-    if (q && (card.lite || behind(card))) return { px: q.price, prev: num(q.prevClose), live: false, close: true, readAt: q.readAt };
+    if (q && (card.lite || behind(card))) return { px: q.price, prev: num(q.prevClose), live: false, close: true, readAt: q.readAt, day: closeDay(q) };
     const ctx = (card.panels || {}).context || {};
     const c = candlesOf(card);
     const ch = ctx.status === "ok" ? num(ctx.changePct) : card.u ? num(card.u.chg) : null;
     const prev = S !== null && ch !== null ? S / (1 + ch) : c.length > 1 ? c[c.length - 2].c : null;
     return { px: S, prev, live: false, readAt: null };
+  }
+  function closeDay(q) {
+    const d = etDay(q.tapeTime), lc = STATE.lastClosed;
+    return d && STATE.phase !== "rth" && isoOk(lc) && d > lc ? lc : d;
   }
   function quoteOf() { const q = STATE.quote; return q && q.status === "ok" && num(q.price) !== null ? q : null; }
 
@@ -375,6 +380,7 @@
     const b = UI.stateButton(st, "Session");
     b.classList.add("ft-stale");
     b.append(h("span", null, "Stale"), h("b", null, day(card.sessionDate)));
+    b.setAttribute("aria-label", "Stale: session " + day(card.sessionDate));
     return b;
   }
   function renderFlags(card) {
@@ -418,7 +424,7 @@
     }
     if (pp.close) {
       last.hidden = false;
-      last.append(glyph("closed"), h("span", null, "Close"), h("b", null, day(etDay(pp.readAt))),
+      last.append(glyph("closed"), h("span", null, "Close"), pp.day ? h("b", null, day(pp.day)) : "",
         info("the close", () => ({ title: "Close", asOf: F.time(pp.readAt), lead: "The vendor's last price. Every other figure on this page is from the session of " + card.sessionDate + ".",
           facts: [["Last", F.px(q.price)], ["Previous close", F.px(q.prevClose)], ["Card close", F.px(S)]] })));
       return;
@@ -568,7 +574,7 @@
         mark(eg, "dia", ex, top - 8, cssVar("--lvl-flip"), 3.4);
         s("text", { x: ex, y: top - 15, text: e.label, "text-anchor": "middle", class: "tx-1 tx-b" }, eg);
       }
-      const lvG = s("g", { class: "fade", style: { "--delay": "600ms" } }, svg);
+      const lvG = fadeG(600, svg);
       for (const l of lv) s("line", { x1: xNow, x2: xf(Hs), y1: y(l.px), y2: y(l.px), stroke: cssVar(C.LEVELS[l.kind].color), "stroke-width": 1, "stroke-opacity": 0.75 }, lvG);
       s("path", { d: C.pathOf(pts), class: "ln draw", stroke: lineC, pathLength: 1 }, svg);
       if (o.live) s("circle", { cx: xNow, cy: y(S), r: 4, fill: lineC, class: "pulse" }, svg);
@@ -577,7 +583,7 @@
       if (band) tags.push({ y: y(o.hi), y0: y(o.hi), text: F.px(o.hi), kind: "band" }, { y: y(o.lo), y0: y(o.lo), text: F.px(o.lo), kind: "band" });
       for (const l of lv) tags.push({ y: y(l.px), y0: y(l.px), text: F.px(l.px), kind: l.kind });
       spreadTags(tags, 17, top, plotB);
-      const tg = s("g", { class: "fade", style: { "--delay": "700ms" } }, svg);
+      const tg = fadeG(700, svg);
       const tx = plotW + 8;
       for (const t of tags) {
         if (Math.abs(t.y - t.y0) > 2) s("path", { d: "M" + fx1(xf(Hs) + 3) + " " + fx1(t.y0) + "L" + fx1(tx - 3) + " " + fx1(t.y), stroke: cssVar("--label-4"), "stroke-width": 1, fill: "none" }, tg);
@@ -822,14 +828,14 @@
       h("ul", { class: "ft-legs", "aria-label": "Legs" }, (st.legs || []).map(legRow)),
       chartHost,
       h("div", { class: "ft-slots" },
-        h("div", { class: "ft-slot" }, h("span", { class: "ft-slot-l" }, "PoP"),
+        slot("PoP",
           h("span", { class: "ft-slot-v", "aria-label": "Chance of profit " + (num(pr.popQ) === null ? "not published" : ratioP(pr.popQ)) + " implied, " + (num(pr.popP) === null ? "not published" : ratioP(pr.popP)) + " real world" },
             h("i", { class: "ft-k is-q", "aria-hidden": "true" }), num(pr.popQ) === null ? UI.dash(noFig("chance of profit on the smile"), "PoP implied") : ratioP(pr.popQ),
             h("i", { class: "ft-k is-p", "aria-hidden": "true" }), num(pr.popP) === null ? UI.dash(noFig("real-world chance of profit"), "PoP real world") : ratioP(pr.popP))),
-        h("div", { class: "ft-slot" }, h("span", { class: "ft-slot-l" }, "EV"),
+        slot("EV",
           h("span", { class: "ft-slot-v", "data-tone": evP === null ? "silent" : tone(evP), "aria-label": evP === null ? null : "Expected P&L in the real world " + (evP > 0 ? "+" : "") + usd0(evP) },
             h("i", { class: "ft-k is-p", "aria-hidden": "true" }), evP === null ? UI.dash(noFig("real-world expected P&L"), "EV") : (evP > 0 ? "+" : "") + usd0(evP))),
-        h("div", { class: "ft-slot" }, h("span", { class: "ft-slot-l" }, "Risk"),
+        slot("Risk",
           h("span", { class: "ft-slot-v", "data-tone": !st.lossUnbounded && num(st.maxLoss) === null ? "silent" : null }, st.lossUnbounded ? "Unbounded" : num(st.maxLoss) === null ? UI.dash(noFig("maximum loss"), "Risk") : usd0(st.maxLoss)))));
     const fmtPl = (v) => (v > 0 ? "+" : "") + usd0(v);
     requestAnimationFrame(() => {
@@ -888,9 +894,9 @@
         C.payoff(null, { structure: idea.structure })),
       h("div", { class: "ft-idea-s" }, idea.fromState ? tag("Implied state", { accent: true }) : null, basis.slice(0, 3).map((b) => tag(b)), UI.robustness(num(idea.robustness) || 0, idea.robustnessWord)),
       h("div", { class: "ft-facts2" },
-        h("div", { class: "ft-slot" }, h("span", { class: "ft-slot-l" }, glyph("stop"), "Stop"), h("span", { class: "ft-slot-v" }, invV, inv.length === 1 && S ? h("small", null, " " + F.pct(inv[0] / S - 1, 1, true)) : null)),
-        h("div", { class: "ft-slot" }, h("span", { class: "ft-slot-l" }, glyph("cal"), "Horizon"), h("span", { class: "ft-slot-v" }, hz, hzD ? h("small", null, " " + hzD) : null))),
-      isIndex(card) || !isDeep(card) ? null : h("div", { class: "ft-slots", "aria-label": "Not priced" }, ["PoP", "EV", "Risk"].map((l) => h("div", { class: "ft-slot" }, h("span", { class: "ft-slot-l" }, l), h("span", { class: "ft-slot-v", "data-tone": "silent" }, UI.dash(pend, l))))));
+        slot([glyph("stop"), "Stop"], h("span", { class: "ft-slot-v" }, invV, inv.length === 1 && S ? h("small", null, " " + F.pct(inv[0] / S - 1, 1, true)) : null)),
+        slot([glyph("cal"), "Horizon"], h("span", { class: "ft-slot-v" }, hz, hzD ? h("small", null, " " + hzD) : null))),
+      isIndex(card) || !isDeep(card) ? null : h("div", { class: "ft-slots", "aria-label": "Not priced" }, ["PoP", "EV", "Risk"].map((l) => slot(l, h("span", { class: "ft-slot-v", "data-tone": "silent" }, UI.dash(pend, l))))));
   }
 
   function stanceOf(card, neuron) {
@@ -1175,7 +1181,7 @@
           const P0 = pay.points;
           const at = (xv) => { for (let i = 1; i < P0.length; i++) if (xv <= P0[i][0]) { const a = P0[i - 1], b = P0[i]; return a[1] + (b[1] - a[1]) * (xv - a[0]) / ((b[0] - a[0]) || 1); } return P0[P0.length - 1][1]; };
           const sy = base + 8;
-          const g = s("g", { class: "fade", style: { "--delay": "700ms" } }, svg);
+          const g = fadeG(700, svg);
           let runStart = d.lo, runSign = Math.sign(at(d.lo));
           const flush = (a, b, sg) => { if (b <= a) return; s("rect", { x: x(a), y: sy, width: Math.max(1, x(b) - x(a)), height: 4, rx: 2, fill: cssVar(sg > 0 ? "--up-mark" : "--down-mark"), "fill-opacity": 0.85 }, g); };
           for (let i = 1; i <= 120; i++) {
@@ -1197,7 +1203,7 @@
       if (d.pCdf) s("path", { d: path(d.p), class: "ln draw ft-wp", stroke: pInk, "stroke-width": 1.5, pathLength: 1, style: { "--delay": "160ms" } }, svg);
       s("path", { d: path(d.q), class: "ln draw ft-wq", stroke: accent, pathLength: 1 }, svg);
       s("line", { x1: left, x2: w - right, y1: base, y2: base, class: "base" }, svg);
-      const lg = s("g", { class: "fade", style: { "--delay": "600ms" } }, svg);
+      const lg = fadeG(600, svg);
       for (const l of levelList(card)) {
         if (l.px < d.lo || l.px > d.hi) continue;
         const def = C.LEVELS[l.kind];
@@ -1619,7 +1625,7 @@
       } },
     ];
     const vw = viewer("Gamma view", views);
-    const st = UI.partial(vw.views.map((v) => ({ name: v.label, st: v.st })));
+    const st = vwSt(vw);
     const dist = (k) => {
       const l = lv[k];
       if (!l || !S) return null;
@@ -1754,7 +1760,7 @@
       offsetting ? null : UI.split(parts.map((p) => ({ color: p[2], value: p[1] })), parts.map((p) => p[0] + " " + Math.round(p[1] * 100) + "%").join(", ")),
       legend(parts.map((p) => h("span", { class: "ui-key" }, h("i", { style: { "--c": cssVar(p[2]) }, "aria-hidden": "true" }), p[0], h("b", null, F.pct(p[1], 0, offsetting))))
         .concat(num(V.driftInSd) !== null ? [h("span", { class: "ui-key" }, glyph("clock"), "Drift", h("b", null, Math.abs(V.driftInSd).toFixed(2) + " SD"))] : []))) : null;
-    const st = UI.partial(vw.views.map((v) => ({ name: v.label, st: v.st })));
+    const st = vwSt(vw);
     mod({ id: "m-hedge", title: "Hedging", span: [12, 5], st: stV.state === "ok" ? st : stV, robustness: stV.state === "ok" && V.robustness ? V.robustness.r : null, seg: vw.seg, views: vw.views, index: 5, body: [
       mets([
         metric("Overnight", F.money(c1, true), { key: glyph("clock"), tone: tone(c1), sub: ch.charm && num(ch.charm.pctAdv) !== null ? F.pct(Math.abs(ch.charm.pctAdv), 1) + " of a day" : null, state: c1 === null ? silence("charm") : null }),
@@ -1812,7 +1818,7 @@
       const accent = cssVar("--accent");
       T.forEach((t, i) => {
         const cx = x(sx(t.days));
-        const g = s("g", { class: "fade", style: { "--delay": i * 50 + "ms" } }, svg);
+        const g = fadeG(i * 50, svg);
         if (num(t.min) !== null && num(t.max) !== null) s("rect", { x: cx - 1.5, y: yc(t.max), width: 3, height: Math.max(1, yc(t.min) - yc(t.max)), rx: 1.5, fill: cssVar("--fill-2") }, g);
         for (const [v, yy, d] of [[num(t.max) !== null && t.max > y1, top, 1], [num(t.min) !== null && t.min < y0, H - bot, -1]]) if (v) s("path", { d: "M" + (cx - 4) + " " + (yy + 4 * d) + "l4 " + -4 * d + "l4 " + 4 * d, class: "ft-off" }, g);
         if (num(t.q1) !== null && num(t.q3) !== null) s("rect", { x: cx - 6, y: y(t.q3), width: 12, height: Math.max(2, y(t.q1) - y(t.q3)), rx: 4, fill: cssVar("--fill-1") }, g);
@@ -1923,7 +1929,7 @@
       } },
     ];
     const vw = viewer("Volatility view", views);
-    const st = UI.partial(vw.views.map((v) => ({ name: v.label, st: v.st })));
+    const st = vwSt(vw);
     const iv30 = cone ? cone.iv30 : num(pm.iv30);
     const vrpV = vrp && vrp.exAnte ? vrp.exAnte.vrp : num(pm.vrp);
     const rr = skew ? skew.rr25 : sk ? sk.skew : null;
@@ -2051,7 +2057,7 @@
         const rows = fe.rows.filter((r) => isoOk(r.e));
         return { handle: C.diverging(host, { x: rows.map((r) => r.e), values: rows.map((r) => r.np), height: [200, 220, 240], format: moneyPx, label: card.ticker + " net premium by expiry",
           readout: (i) => [C.part(day(rows[i].e) + SEP + rows[i].dte + "d", "k"), h("b", { "data-tone": tone(rows[i].np) }, moneyPx(rows[i].np)), C.part("gross " + F.money(rows[i].gross), "k"), C.part("otm " + F.pct(rows[i].gross ? rows[i].otm / rows[i].gross : null, 0), "k")] }),
-          legend: [keyOf("--up-mark", "", "Net bought"), keyOf("--down-mark", "", "Net sold")] };
+          legend: netKeys() };
       } },
       { label: "Strikes", st: fs || ag ? OK : xSt(X.flowStrike, "flow by strike"), never: !ag && offIndex(card, X.flowStrike), name: "Flow by strike", draw: (host) => {
         if (fs) {
@@ -2060,7 +2066,7 @@
           const marks = [num(fs.centroid) !== null ? { x: fs.centroid, shape: "ring", color: "--label-1", row: "base", r: 4.5 } : null, num(fs.callWall) !== null ? { x: fs.callWall, shape: "dot", color: "--lvl-call", row: "base", r: 3.5 } : null, num(fs.putWall) !== null ? { x: fs.putWall, shape: "dot", color: "--lvl-put", row: "base", r: 3.5 } : null].filter(Boolean);
           return { handle: C.diverging(host, { x: xs, values: L.map((r) => r.np), xType: "number", spot: S, markers: marks, height: [200, 230, 250], format: moneyPx, xFormat: (v) => K(v), label: card.ticker + " net premium by strike",
             readout: (i) => [C.part("Strike", "k"), h("b", null, K(xs[i])), C.part(moneyPx(L[i].np), null, tone(L[i].np)), C.part("gross " + F.money(L[i].gross), "k")] }),
-            legend: [keyOf("--up-mark", "", "Net bought"), keyOf("--down-mark", "", "Net sold"), keyOf("--label-1", "ring", "Centroid"), keyOf("--lvl-call", "dot", "Call wall"), keyOf("--lvl-put", "dot", "Put wall")] };
+            legend: [...netKeys(), keyOf("--label-1", "ring", "Centroid"), keyOf("--lvl-call", "dot", "Call wall"), keyOf("--lvl-put", "dot", "Put wall")] };
         }
         const [lo, hi] = strikeWindow(card, S);
         const bars = ag.bars.filter((b) => num(b.k) !== null && num(b.net) !== null && b.k >= lo && b.k <= hi).sort((a, b) => a.k - b.k);
@@ -2072,15 +2078,15 @@
         if (npOk) {
           return { handle: C.diverging(host, { x: axis, values: npY, height: [200, 220, 240], maxWidth: 4, endLabel: true, format: moneyPx, label: card.ticker + " net premium by session over the year",
             readout: (i) => [C.part(day(axis[i]), "k"), npY[i] === null ? C.part("no reading", "k") : h("b", { "data-tone": tone(npY[i]) }, moneyPx(npY[i]))] }),
-            legend: [keyOf("--up-mark", "", "Net bought"), keyOf("--down-mark", "", "Net sold"), keyOf("--label-4", "dot", "No reading")] };
+            legend: [...netKeys(), keyOf("--label-4", "dot", "No reading")] };
         }
         const rows = pt.rows.filter((r) => isoOk(r.d)).sort((a, b) => (a.d < b.d ? -1 : 1));
         return { handle: C.diverging(host, { x: rows.map((r) => r.d), values: rows.map((r) => num(r.p)), height: [200, 220, 240], endLabel: true, format: moneyPx, label: card.ticker + " net premium by session" }),
-          legend: [keyOf("--up-mark", "", "Net bought"), keyOf("--down-mark", "", "Net sold"), keyOf("--label-4", "dot", "No reading")] };
+          legend: [...netKeys(), keyOf("--label-4", "dot", "No reading")] };
       } },
     ];
     const vw = viewer("Flow view", views);
-    const st = UI.partial(vw.views.map((v) => ({ name: v.label, st: v.st })));
+    const st = vwSt(vw);
     const net = tp ? tp.net[tp.net.length - 1] : path ? path.netPremium : null;
     const nd = tp && Array.isArray(tp.nd) ? tp.nd[tp.nd.length - 1] : path ? path.netDelta : null;
     const nope = X.nope && X.nope.status === "ok" ? X.nope : null;
@@ -2147,7 +2153,7 @@
         legend: [keyOf("--up-mark", "", "Bought"), keyOf("--down-mark", "", "Sold")] }) },
     ];
     const vw = viewer("Positioning view", views);
-    const st = UI.partial(vw.views.map((v) => ({ name: v.label, st: v.st })));
+    const st = vwSt(vw);
     mod({ id: "m-pos", title: "Positioning", span: [6, 6], st: sh || ins ? st : isIndex(card) ? stShort : UI.worst([stShort, xSt(X.insiders, "insider read")]), seg: vw.seg, views: vw.views, index: 8, body: [
       mets([
         metric("Short float", si ? F.pct(si.si, 1) : DASH, { sub: si && num(si.dtc) !== null ? si.dtc.toFixed(1) + "d to cover" : null, state: si ? (si.stale ? ST("stale", "The latest settlement (" + si.date + ") is older than 45 days.") : null) : sh ? ST("quiet", "No short-interest settlement on this name.") : stShort }),
@@ -2353,7 +2359,7 @@
       { label: "Shelves", st: dl ? OK : xSt(X.dpLevels, "dark-pool price levels"), never: offIndex(card, X.dpLevels), name: "Dark-pool shelves", draw: (host) => ({ handle: shelvesChart(host, card, dl), legend: [keyOf("--s-purple", "", "Top shelves"), keyOf("--label-3", "", "Dark"), keyOf("--fill-2", "", "Lit")] }) },
     ];
     const vw = viewer("Tape view", views);
-    const st = UI.partial(vw.views.map((v) => ({ name: v.label, st: v.st })));
+    const st = vwSt(vw);
     const basis = tc && tc.oiBasis ? tc.oiBasis : null;
     const basisLine = (() => {
       if (!basis) return null;
@@ -2493,6 +2499,8 @@
     for (const b of builders) {
       try { b(card); } catch (e) { console.error("flows-ticker: " + b.name + " failed", e); }
     }
+    for (const [x, ids] of [[STATE.cardX, "gamma hedge vol flow pos tape"], [STATE.hist, "gamma flow"]]) if (x.off && x.status !== "absent")
+      for (const id of ids.split(" ")) { const t = document.querySelector("#m-" + id + " .ui-mod-t"); if (t && !t.textContent.includes(day(x.off))) t.append(tag(day(x.off))); }
   }
 
   function paintAll() {
@@ -2511,30 +2519,31 @@
     convexity: "m-gamma", volatility: "m-vol", tape: "m-flow", signal: "m-signal",
   };
 
-  const LITE = [["Volatility", [["iv30", "IV 30d", "p"], ["ivp", "IV rank", "i"], ["rv20", "RV 20d", "p"], ["vrp", "VRP", "v"], ["ts", "Term", "s"], ["im", "Move", "m"], ["dIv1w", "IV 1w", "v"]]],
+  const LITE = [["Volatility", [["iv30", "IV 30d", "p"], ["ivp", "IV pct", "i"], ["ivRank", "IV rank", "i"], ["rv20", "RV 20d", "p"], ["vrp", "VRP", "v"], ["ts", "Term", "s"], ["im", "Move", "m"], ["dIv1w", "IV 1w", "v"]]],
     ["Dealers", [["gexAdv", "γ / ADV", "s"], ["gOi", "γ per 1%", "$"], ["gexRatio", "γ ratio", "x"], ["dDelta", "Δ / ADV", "t"]]],
     ["Flow", [["net", "Net premium", "$"], ["lean", "Lean", "s"], ["pcr", "P/C", "x"]]],
     ["Trend", [["rsi", "RSI", "i"], ["adx", "ADX", "i"], ["bb", "Band", "p"], ["atr", "ATR", "p"], ["sma50", "vs 50d", "s"], ["rvol", "RVOL", "x"], ["si", "Short float", "p"]]]];
   const liteV = (v, f) => (f === "p" ? F.pct(v, 1) : f === "s" ? F.pct(v, 1, true) : f === "t" ? F.pct(v, 2, true) : f === "v" ? volPts(v) + " pts" : f === "m" ? "±" + F.pct(v, 1) : f === "x" ? "×" + v.toFixed(2) : f === "$" ? moneyPx(v) : String(Math.round(v)));
-  const RANKS = [["iv30", "IV 30d"], ["vrp", "VRP"], ["ts", "Term"], ["gexAdv", "γ / ADV"], ["si", "Short float"]];
+  const LAB = Object.fromEntries(LITE.flatMap(([, l]) => l));
+  const RANKS = ["iv30", "vrp", "ts", "gexAdv", "si"];
 
   function liteChips(card) {
     const u = card.u || {};
-    const iv = num(u.ivp), g = num(numOr(u.gexAdv, u.gOi)), ed = num(u.ed), gate = card.gate && isoOk(card.gate.earnings) ? card.gate : null;
-    const why = (t, lead) => () => ({ title: t, lead });
+    const ik = num(u.ivp) === null ? "ivRank" : "ivp", il = ik === "ivp" ? "IV pct" : "IV rank", iv = num(u[ik]), g = num(numOr(u.gexAdv, u.gOi)), ed = num(u.ed), gate = card.gate && isoOk(card.gate.earnings) ? card.gate : null;
+    const why = (t, lead) => () => ({ title: t, lead }), gs = g < 0 ? "short" : g > 0 ? "long" : null;
     return [
-      UI.gaugeChip({ ring: iv === null ? null : iv / 100, color: "--s-blue", value: iv === null ? chipDash("unavailable") : String(Math.round(iv)), label: "IV rank", info: why("IV rank", "Where 30-day implied volatility sits inside its own one-year range.") }),
+      UI.gaugeChip({ ring: iv === null ? null : iv / 100, color: "--s-blue", value: iv === null ? chipDash("unavailable") : String(Math.round(iv)), label: il, info: why(il, ik === "ivp" ? "Share of the past year's sessions with 30-day implied volatility below today's." : "Where 30-day implied volatility sits between its one-year low and high.") }),
       UI.gaugeChip({ icon: "vega", color: "--s-blue", value: num(u.iv30) === null ? chipDash("unavailable") : F.pct(u.iv30, 0), label: "IV 30d", info: why("IV 30d", "Thirty-day implied volatility.") }),
-      g === null && card.depth === "quote" ? null : UI.gaugeChip({ icon: "gamma", color: g < 0 ? "--g-short-ink" : "--g-long-ink", value: g === null ? chipDash("unavailable") : g < 0 ? "Short" : "Long", label: "Dealer γ", tone: g === null ? null : g < 0 ? "short" : "long",
+      g === null && card.depth === "quote" ? null : UI.gaugeChip({ icon: "gamma", color: gs === "short" ? "--g-short-ink" : "--g-long-ink", value: g === null ? chipDash("unavailable") : gs ? (gs === "short" ? "Short" : "Long") : "Zero", label: "Dealer γ", tone: gs,
         info: why("Dealer gamma", g === null ? "No dealer-gamma reading." : "The sign of the vendor's dealer gamma for " + card.ticker + ".") }),
-      gate || ed !== null ? UI.gaugeChip({ icon: "cal", color: "--lvl-flip", value: gate ? day(gate.earnings) : String(ed), label: gate ? "Earnings" : "To earnings",
+      gate || ed !== null ? UI.gaugeChip({ icon: "cal", color: "--lvl-flip", value: gate ? day(gate.earnings) : ed + "d", label: "Earnings",
         info: why("Earnings", gate ? card.ticker + " reports " + gate.earnings + ", inside the earnings gate." : ed + " sessions to the next report.") }) : null,
       card.rank ? UI.gaugeChip({ icon: "levels", color: "--accent-soft", value: "#" + card.rank, label: "Size", info: why("Size", card.ticker + " is number " + card.rank + " by market cap of the " + (card.n || "") + " names screened.") }) : null,
     ].filter(Boolean);
   }
 
   function liteRanks(card) {
-    const P = card.pct || {}, rows = RANKS.filter(([k]) => num(P[k]) !== null);
+    const P = card.pct || {}, rows = RANKS.filter((k) => num(P[k]) !== null).map((k) => [k, LAB[k]]);
     const host = $("ftHc");
     host.replaceChildren();
     host.classList.add("is-ranks");
@@ -2553,7 +2562,7 @@
     mod({ id: "m-screen", title: "Screen", span: [12, 12], index: 2,
       body: groups.map(([g, l]) => h("div", { class: "ft-scr" }, h("h3", null, g), mets(l.map(([k, lab, f]) => metric(lab, liteV(u[k], f), { tone: /[svt$]/.test(f) ? tone(u[k]) : null })), { min: 96 }))),
       info: () => ({ title: "Screen", asOf: card.sessionDate, lead: card.depth === "quote" ? "One read of the vendor's screener row for " + card.ticker + "." : "The nightly screen's row for " + card.ticker + ". No card was built for it this session, so this is its whole dossier.",
-        facts: [["Source", card.depth === "quote" ? "vendor screener" : "nightly screen"], ["No card because", card.why === "gated" ? "the earnings gate" : "outside tonight's coverage"], ["Sector", card.sector], ["Type", card.type]] }) });
+        facts: [["No card because", card.why === "gated" ? "the earnings gate" : "outside tonight's coverage"]] }) });
   }
 
   function buildLiteFlow(card) {
@@ -2572,10 +2581,9 @@
     heroEl.classList.remove("is-loading");
     $("ftHeroT").textContent = card.ticker;
     $("ftHeroSub").replaceChildren(...[card.nm || card.sector || "", kindTag(card)].filter(Boolean));
-    $("ftHeroFlags").replaceChildren(tag(card.depth === "quote" ? "Quote" : "Screen", { glyph: card.depth === "quote" ? "search" : "list" }),
+    $("ftHeroFlags").replaceChildren(...(behind(card) ? [staleChip(card, staleState(card)[0])] : []), tag(card.depth === "quote" ? "Quote" : "Screen", { glyph: card.depth === "quote" ? "search" : "list" }),
       info("this name", () => ({ title: card.ticker + (card.nm ? SEP + card.nm : ""), asOf: "Session " + card.sessionDate,
-        lead: card.depth === "quote" ? "No card: this page is the vendor's quote and screener row, with the live tape." : "No card this session: this page is the nightly screen's row, with the live quote and tape.",
-        facts: [["Sector", card.sector], ["Type", card.type], ["Depth", card.depth], ["Size", card.rank ? "#" + card.rank + " of " + card.n : null]] })));
+        facts: [["Sector", card.sector], ["Type", card.type], ["Size", card.rank ? "#" + card.rank + " of " + card.n : null]] })));
     paintPrice(card, true);
     $("ftChips").replaceChildren(UI.chips(liteChips(card), "Signal"));
     liteRanks(card);
@@ -2618,8 +2626,7 @@
     if (all.length > shown.length) return "Today’s board ranks " + NAMES(all.length) + " and this run built a card for " + shown.length + " of them, which are the rows below. A card costs vendor calls the run cannot spend on every name, so the rest are ranked without one and are not listed: such a page would have nothing on it. " + tail;
     return "All " + NAMES(all.length) + " on today’s board, every one of which carries a card. " + tail;
   }
-  const DEPTH_G = { focus: "star", fund: "stack", index: "market", board: "boards", cross: "layers" };
-  const DEPTH_W = { focus: "Focus", fund: "ETF", index: "Index", board: "Board", cross: "Card" };
+  const DEPTH_G = UI.depths;
   const ROSTER_NOTE = "Every name with a dossier this session: focus names, funds and indexes first.";
   async function rosterRows() {
     const r = await soft(getJSON("/api/flows/roster"));
@@ -2635,7 +2642,7 @@
 
   function showPicker(rows, note, titled) {
     pickerEl.hidden = false;
-    const list = rows.map((r, i) => (r.depth ? UI.listRow({ href: "/flows/ticker/?t=" + encodeURIComponent(r.t), badge: glyph(DEPTH_G[r.depth]), badgeLabel: DEPTH_W[r.depth], primary: r.t, secondary: DEPTH_W[r.depth], index: i, cols: "24px minmax(0,1fr)" })
+    const list = rows.map((r, i) => (r.depth ? UI.listRow({ href: "/flows/ticker/?t=" + encodeURIComponent(r.t), badge: glyph(DEPTH_G[r.depth][0]), badgeLabel: DEPTH_G[r.depth][1], primary: r.t, secondary: DEPTH_G[r.depth][1], index: i, cols: "24px minmax(0,1fr)" })
       : UI.listRow({ href: "/flows/ticker/?t=" + encodeURIComponent(r.t), badge: r.side === "short" ? "S" : "L", badgeTone: r.side === "short" ? "down" : "up",
         badgeLabel: r.side === "short" ? "Bearish" : "Bullish", primary: r.t, secondary: [r.sector, num(r.r) === null ? null : "#" + r.r].filter(Boolean).join(SEP),
         signed: num(r.s) === null ? DASH : F.signed(r.s), signedValue: r.s, index: i, cols: "24px minmax(0,1fr) 56px" })));
@@ -2735,6 +2742,7 @@
       ticker: t, page: "ticker", nightly: lite ? [] : ["card:" + t],
       onBeat: ({ body }) => {
         STATE.phase = body && body.phase ? body.phase.phase : null;
+        STATE.lastClosed = body && body.phase ? body.phase.lastClosed : null;
         STATE.beats++;
         if (STATE.phase === "rth" && STATE.beats % 6 === 0) fetchTape(t).then((moved) => { if (moved && STATE.card) flowOf(STATE.card); });
       },

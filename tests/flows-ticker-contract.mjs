@@ -636,13 +636,20 @@ try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
-    await mount(page, card, { boards });
+    await mount(page, card, { boards, roster: { v: 1, sessionDate: card.sessionDate, depth: { AAA: "board", GLD: "fund", NVDA: "focus", COST: "cross" } } });
     await page.waitForTimeout(400);
     eq(page._requested.filter((u) => u.startsWith("board")).length, 0, "loading a named ticker page fetches NO board — the name switcher's cost is paid only by the readers who use it");
     ok(await page.evaluate(() => !!document.getElementById("fxSearch")), "but the switcher is there, in the toolbar, on every width");
     await page.click("#fxSearch");
     await page.waitForFunction(() => /AAA/.test((document.querySelector(".ui-pal") || {}).textContent || ""), null, { timeout: 5000 });
     ok(page._requested.some((u) => u.startsWith("board")), "opening it fetches the boards, then");
+    await page.waitForFunction(() => /COST/.test((document.querySelector(".ui-pal") || {}).textContent || ""), null, { timeout: 5000 }).catch(() => {});
+    const pal = await page.evaluate(() => [...document.querySelectorAll(".ui-pal-opt")].map((o) => [o.querySelector("b").textContent, o.children[1].textContent, !!o.children[1].querySelector("svg")]));
+    eq(pal.slice(0, 2).map((r) => r[0]).sort().join(" "), "GLD NVDA", `T10: the palette reads the roster, focus names and funds one keystroke away (${pal.map((r) => r[0]).join(" ")})`);
+    const word = Object.fromEntries(pal.map((r) => [r[0], r[1]]));
+    ok(/Focus/.test(word.NVDA) && /ETF/.test(word.GLD) && /Card/.test(word.COST) && !/\b(focus|fund|cross)\b/.test(pal.map((r) => r[1]).join(" ")),
+       `each roster row says its depth in the picker's own short words, never the raw depth (${JSON.stringify(word)})`);
+    ok(pal.filter((r) => ["GLD", "NVDA", "COST"].includes(r[0])).every((r) => r[2]), "beside its depth glyph");
     await page.keyboard.press("Escape");
     await page.waitForTimeout(200);
     ok(await page.evaluate(() => document.querySelectorAll("#ftGrid > section").length === 10 && !document.getElementById("ftGrid").hidden), "and closing it leaves the dossier exactly where it was");
@@ -716,7 +723,7 @@ try {
       .find((x) => x.earnings && x.earnings.status === "ok" && Array.isArray(x.earnings.events) && x.earnings.events.length);
     ok(withEarnings, "the emitter wrote a card-x with an earnings history to test against");
     const session = full.sessionDate;
-    const at = Date.parse(full.generatedAt || session + "T21:00:00Z") + 3600e3;
+    const at = Date.parse(session + "T23:00:00Z");
     const tape = { v: 1, key: "tape", ticker: "LITE", session, units: { nd: "delta", net: "USD" },
       prem: { status: "ok", readAt: new Date(at).toISOString(), t: ["13:35", "14:00", "15:00", "16:00", "17:00", "18:00"].map((x) => session + "T" + x + ":00Z"),
         nd: [0, 1200, 3400, 2100, 5200, 6100], net: [0, 2e5, 5.5e5, 4e5, 8e5, 9.1e5], ncp: [0, 3e5, 7e5, 6e5, 1.1e6, 1.3e6], npp: [0, 1e5, 1.5e5, 2e5, 3e5, 3.9e5] } };
@@ -724,7 +731,7 @@ try {
       u: { px: 72.52, chg: -0.0009, mcap: 1.041e11, iv30: 0.47, ivp: 39, ts: 0.013, fs: -0.026, dIv1w: 0.019, rv20: 0.41, vrp: 0.06, gexAdv: 0.0219, gexRatio: 0.64, dDelta: -0.0232,
         si: null, ed: 20, rsi: 51, adx: 13, bb: 0.46, atr: 0.039, sma50: 0.046, rvol: 0.7 },
       pct: { iv30: 40, ts: 55, vrp: 60, gexAdv: 70, si: null }, why: "not-covered", gate: null };
-    for (const width of [390, 1440]) {
+    for (const width of [320, 390, 1440]) {
       const page = await browser.newPage({ viewport: { width, height: 1000 }, hasTouch: width < 800, isMobile: width < 800 });
       const errors = [];
       page.on("pageerror", (e) => errors.push(String(e)));
@@ -733,13 +740,15 @@ try {
       const got = await page.evaluate(() => ({
         px: document.querySelector("#ftPxV .visually-hidden").textContent, flags: document.getElementById("ftHeroFlags").innerText.trim(),
         chips: [...document.querySelectorAll("#ftChips .ui-gchip .ui-chip-l")].map((n) => n.textContent),
+        clipped: [...document.querySelectorAll("#ftChips .ui-gchip .ui-chip-l, #ftChips .ui-gchip .ui-chip-v")].filter((n) => n.scrollWidth > n.clientWidth + 1).length,
         ranks: [...document.querySelectorAll("#ftHc .ft-meter > span:first-child")].map((n) => n.textContent),
         mods: [...document.querySelectorAll("#ftGrid > section")].map((m) => m.id), verdict: document.getElementById("ftVerdict").hidden,
         screen: [...document.querySelectorAll("#m-screen .ui-metric-l")].map((n) => n.textContent),
         waiting: [...document.querySelectorAll("[data-state=pending]")].filter((n) => n.getClientRects().length && n.id !== "fxFresh").length }));
       eq(got.px, "72.52", `${width}px T7: a lite card draws the universe's close as the headline price`);
       eq(got.flags, "Screen", "and names its depth in one word");
-      eq(got.chips.join(" "), "IV rank IV 30d Dealer γ To earnings Size", "with the five screen readings as hero chips");
+      eq(got.chips.join(" "), "IV pct IV 30d Dealer γ Earnings Size", "with the five screen readings as hero chips, the universe's one-year IV percentile named pct, never rank");
+      eq(got.clipped, 0, `${width}px no chip label is cut off`);
       eq(got.ranks.join(" "), "IV 30d VRP Term γ / ADV", "and its percentile ranks in the screen beside them, a missing rank left out rather than drawn at zero");
       eq(got.mods.join(" "), "m-screen m-events m-flow", "the grid carries the Screen, the earnings history its card-x holds, and the live tape once it resolves");
       ok(got.verdict, "and no verdict: there is no card for the Neuron to read");
@@ -759,7 +768,7 @@ try {
     }
     {
       const quote = { v: 1, ticker: "GLD", status: "ok", lite: true, depth: "quote", sessionDate: session, generatedAt: full.generatedAt, nm: "SPDR Gold Shares", type: "ETF", sector: null,
-        u: { px: 391.66, prev: 392.88, chg: -0.0031, iv30: 0.182, ivp: 41.5, im: 0.021, pcr: 0.8, net: 1.2e6, lean: 0.2, rvol: 1.1 }, why: "not-covered" };
+        u: { px: 391.66, prev: 392.88, chg: -0.0031, iv30: 0.182, ivRank: 41.5, im: 0.021, pcr: 0.8, net: 1.2e6, lean: 0.2, rvol: 1.1 }, why: "not-covered" };
       const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
       const errors = [];
       page.on("pageerror", (e) => errors.push(String(e)));
@@ -817,6 +826,66 @@ try {
     ok(got.pill.includes(got.mine) && !got.pill.includes(got.other), `T8: companions from another session never lift the page pill off the card's own (${got.pill})`);
     eq(got.chip, got.other, "and the earnings history they carry is shown dated on its own module");
     eq(errors.length, 0, `the mixed-session page throws nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  {
+    const card = clone(full);
+    const prev = new Date(Date.parse(card.sessionDate + "T00:00:00Z") - 864e5).toISOString().slice(0, 10);
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, card, { cardX: { ...(cardXOf(card.ticker) || {}), sessionDate: prev }, hist: { ...(histOf(card.ticker) || {}), sessionDate: prev } });
+    const got = await page.evaluate(async (s) => {
+      const tags = (id) => [...document.querySelectorAll("#" + id + " .ui-mod-t .ui-tag")].map((n) => n.textContent);
+      const b = [...document.querySelectorAll("#m-gamma .ui-seg-i")].find((n) => n.textContent === "1Y");
+      if (b) b.click();
+      await new Promise((r) => setTimeout(r, 300));
+      return { pill: document.getElementById("fxFresh").innerText, mine: window.FlowsUI.F.day(s[0]), other: window.FlowsUI.F.day(s[1]),
+        gamma: tags("m-gamma"), vol: tags("m-vol"), oneYear: !!b && !b.disabled && !document.querySelector("#m-gamma .ft-cbox .ui-silent") };
+    }, [card.sessionDate, prev]);
+    ok(got.gamma.includes(got.other) && got.vol.includes(got.other), `T8: an older card-x and hist are kept and dated on the modules that draw from them (${got.gamma} / ${got.vol})`);
+    ok(got.oneYear, "so the one-year dealer-gamma view draws the history that exists, rather than saying Unavailable");
+    ok(got.pill.includes(got.mine) && !got.pill.includes(got.other), `and the pill stays on the card's own session (${got.pill})`);
+    eq(errors.length, 0, `the older-companion page throws nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  {
+    const base = clone(withChain.find((c) => c.engine) || withChain[0]);
+    const old = { ...base, sessionDate: "2026-09-16" };
+    const sat = Date.parse("2026-09-26T15:00:00Z");
+    const q = (tapeTime) => ({ ticker: old.ticker, status: "ok", readAt: new Date(sat).toISOString(), price: 123.45, prevClose: 120, changePct: 0.02875, open: 121, high: 124, low: 120.5, volume: 1e6, marketTime: "po", tapeTime });
+    for (const [tapeTime, want, why] of [["2026-09-25T20:00:00Z", "2026-09-25", "the quote's own tape time, a Friday, while it is read on the Saturday"],
+      ["2026-09-26T14:59:00Z", "2026-09-25", "a tape stamp past the last close is held to the last closed session"], [null, null, "no tape time hides the day rather than guessing it from the read"]]) {
+      const now = { serverNow: sat, phase: { phase: "closed", session: null, day: "2026-09-26", lastClosed: "2026-09-25", trading: false, endsAt: null }, keys: {}, quote: q(tapeTime) };
+      const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, old, { now, cardX: { ticker: old.ticker, status: "absent", why: "not-covered" }, hist: { status: "absent", why: "not-covered" }, at: sat });
+      await page.waitForFunction(() => /Close/.test(document.getElementById("ftLast").textContent), null, { timeout: 8000 }).catch(() => {});
+      const got = await page.evaluate((w) => ({ last: document.getElementById("ftLast").innerText.replace(/\s+/g, " ").trim(), want: w ? window.FlowsUI.F.day(w) : null,
+        sat: window.FlowsUI.F.day("2026-09-26"), aria: (document.querySelector("#ftHeroFlags .ft-stale") || { getAttribute: () => null }).getAttribute("aria-label"), card: window.FlowsUI.F.day("2026-09-16") }), want);
+      if (want) eq(got.last, "Close " + got.want, `T5: the close is dated by ${why} (${got.last})`);
+      else eq(got.last, "Close", `T5: ${why} (${got.last})`);
+      ok(!got.last.includes(got.sat), "never by the Saturday the quote was read on");
+      ok(got.aria && got.aria.includes(got.card), `the Stale chip's accessible name carries the date it shows (${got.aria})`);
+      eq(errors.length, 0, `the weekend close throws nothing (${errors.join("; ")})`);
+      await page.close();
+    }
+  }
+
+  {
+    const lite = { v: 1, ticker: "OLDL", status: "ok", lite: true, depth: "universe", sessionDate: "2026-08-10", generatedAt: "2026-08-10T23:00:00Z", sector: "Technology", n: 695, rank: 40,
+      u: { px: 50.1, chg: 0.01, iv30: 0.4, ivp: 20 }, pct: {}, why: "not-covered", gate: null };
+    const page = await browser.newPage({ viewport: { width: 390, height: 900 }, hasTouch: true, isMobile: true });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, lite, { neuron: { status: "unavailable" }, cardX: { status: "absent" }, hist: { status: "absent" }, at: Date.parse("2026-08-24T22:00:00Z") });
+    const got = await page.evaluate(() => ({ chip: (document.querySelector("#ftHeroFlags .ft-stale") || {}).innerText, flags: document.getElementById("ftHeroFlags").innerText, day: window.FlowsUI.F.day("2026-08-10") }));
+    ok(got.chip && /Stale/.test(got.chip) && got.chip.includes(got.day), `a lite page from a universe behind the expected session shows the Stale chip with its date (${got.chip})`);
+    ok(/Screen/.test(got.flags), "beside its depth word");
+    eq(errors.length, 0, `the stale lite page throws nothing (${errors.join("; ")})`);
     await page.close();
   }
 
