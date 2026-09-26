@@ -776,7 +776,7 @@
     const t = $("fxTitle");
     const word = (date || m.expected) === m.today ? "Today" : "Last session";
     if (t) t.textContent = word;
-    if (UI.shell && typeof UI.shell.title === "function") UI.shell.title(word);
+    UI.shell.title(word);
   }
   titleFor(null);
 
@@ -1416,19 +1416,15 @@
     draw();
     if (segHost) segHost.append(UI.segmented("Sector quantity", MODES.map((m) => ({ label: m.label })), (i) => { mode = i; draw(); }, 0));
 
-    const leanBar = (row) => {
+    const basketBar = (row) => {
       const r = isNum(row && row.leanRatio);
       if (r === null) {
         return row.read === "quiet"
           ? h("span", { class: "cc-ln-flat" }, "no premium")
           : h("span", { class: "cc-ln-none", title: typeof row.reason === "string" && row.reason ? row.reason : null }, DASH);
       }
-      const frac = Math.min(Math.abs(r), 1);
-      return h("span", { class: "cc-ln-bar", role: "img",
-        "aria-label": (row.sector || row.etf || "This basket") + " leaned " + pct(r, 1) + " of its two-sided option premium, " +
-          (r < 0 ? "left of" : r > 0 ? "right of" : "exactly on") + " the zero rule." },
-      h("i", { class: "cc-ln-mid" }),
-      h("i", { class: "cc-ln-fill", "data-tone": toneOf(r), style: { width: (frac * 50) + "%", left: r < 0 ? (50 - frac * 50) + "%" : "50%" } }));
+      return leanBar(r, (row.sector || row.etf || "This basket") + " leaned " + pct(r, 1) + " of its two-sided option premium, " +
+        (r < 0 ? "left of" : r > 0 ? "right of" : "exactly on") + " the zero rule.");
     };
     const detail = table("Sector option-premium lean, most bullish first", [
       ["Sector", false], ["Lean", false], ["Lean · % of premium", true], ["Net · $", true], ["Gross · $", true],
@@ -1436,7 +1432,7 @@
       attrs: { "data-read": typeof row.read === "string" ? row.read : "unreadable" },
       cells: [[h("span", null, h("span", { class: "cc-t" }, basket(row)), " ", h("small", { class: "cc-etf" }, row.etf || DASH),
         row.read && row.read !== "ok" ? h("span", { class: "cc-dim cc-ln-tag", title: row.reason || null }, " " + row.read) : null), "cc-ln-name"],
-      [leanBar(row), "cc-ln-c"], [pct(row.leanRatio, 1), "c-num"], [usd(row.netPremiumUsd), "c-num"], [usd(row.grossPremiumUsd), "c-num"]],
+      [basketBar(row), "cc-ln-c"], [pct(row.leanRatio, 1), "c-num"], [usd(row.netPremiumUsd), "c-num"], [usd(row.grossPremiumUsd), "c-num"]],
     })));
     infoInto("hmLean", "sector lean", () => ({
       title: "Sector lean",
@@ -1588,10 +1584,7 @@
     }
   }
 
-  let spineDrawn = null;
-
   function renderSpine(payload) {
-    spineDrawn = payload;
     const plot = $("spinePlot");
     if (!plot) return;
     const band = isNum(payload.deadBand);
@@ -1706,6 +1699,187 @@
         return { parts, top: Math.max(0, axisY - half - 34), dots: at.slice(0, 4).map((m) => ({ x: m.x, y: axisY + m.dy, color: scores[i] < 0 ? "--down" : "--up" })) };
       },
     });
+  }
+
+  function leanBar(r, label) {
+    const frac = Math.min(Math.abs(r), 1);
+    return h("span", { class: "cc-ln-bar", role: "img", "aria-label": label },
+      h("i", { class: "cc-ln-mid" }),
+      h("i", { class: "cc-ln-fill", "data-tone": toneOf(r), style: { width: (frac * 50) + "%", left: r < 0 ? (50 - frac * 50) + "%" : "50%" } }));
+  }
+
+  const pref = (v) => { try { return UI.pref ? UI.pref("lead", v) : null; } catch { return null; } };
+  const FOCUS = { focus: null, strips: null, series: null, lead: new URLSearchParams(location.search).get("lead") || pref(), pills: {} };
+  const FK = ["px", "prev", "chg", "net", "lean", "iv30"];
+  const dossier = (t) => "/flows/ticker/?t=" + encodeURIComponent(t);
+  const pick = (row, fields, k) => {
+    if (Array.isArray(row)) { const i = Array.isArray(fields) ? fields.indexOf(k) : -1; return i < 0 ? null : isNum(row[i]); }
+    return row && typeof row === "object" ? isNum(row[k]) : null;
+  };
+  const counted = (a) => a.filter((x) => x !== null).length;
+
+  function focusRows(ts) {
+    const f = FOCUS.focus && FOCUS.focus.status !== "pending" ? FOCUS.focus : null;
+    const s = FOCUS.strips, se = FOCUS.series;
+    const fday = f && typeof f.sessionDate === "string" ? f.sessionDate : null;
+    const nr = (t) => f && f.rows && f.rows[t];
+    const live = s && s.status === "ok" && s.rows && Array.isArray(s.fields) && typeof s.session === "string" &&
+      (!fday || s.session > fday || (s.session === fday && !(Date.parse(s.fresh && s.fresh.readAt) <= Date.parse(f.readAt || f.generatedAt)))) &&
+      ts.every((t) => s.rows[t] || !nr(t));
+    return ts.map((t) => {
+      const [src, row, fields, day] = live && s.rows[t] ? ["live", s.rows[t], s.fields, s.session]
+        : nr(t) ? ["nightly", nr(t), f.fields, fday] : [];
+      const v = { t, src, day, today: 0 };
+      for (const k of FK) v[k] = pick(row, fields, k);
+      if (v.chg === null && v.px !== null && v.prev) v.chg = v.px / v.prev - 1;
+      const b = se && se.base ? isNum(se.base[t]) : null;
+      const col = se && se.cols && se.cols.px ? se.cols.px[t] : null;
+      if (b !== null && src === "live" && se.session === day && Array.isArray(col)) {
+        const k = isNum(se.scale && se.scale.px) ?? 0.01;
+        v.spark = col.map((x) => (isNum(x) === null ? null : b + x * k));
+        v.intraday = true;
+      }
+      if (!v.spark || counted(v.spark) < 2) {
+        const c = f && f.closes && Array.isArray(f.closes[t]) ? f.closes[t].map(isNum) : [];
+        v.today = +(src === "live" && day > fday && v.px !== null);
+        v.spark = v.today ? c.concat(v.px) : c;
+        v.intraday = false;
+      }
+      return v;
+    });
+  }
+
+  const flowWord = (v) => {
+    const l = v.lean !== null ? v.lean : v.net === null ? null : Math.sign(v.net);
+    return l === null ? null : Math.abs(l) < 0.1 ? ["flat", "Even"] : l > 0 ? ["up", "Bullish"] : ["down", "Bearish"];
+  };
+  const tick = (v) => h("b", { class: "hm-t" }, v.t);
+  const chgOf = (v) => h("span", { class: "hm-chg", "data-tone": toneOf(v.chg) }, pct(v.chg));
+  const premOf = (v) => h("span", { class: "hm-prem", "data-tone": toneOf(v.net) }, usdS(v.net));
+  const link = (v, cls, label, ...kids) => h("a", {
+    class: cls, href: dossier(v.t), "data-ticker": v.t, "data-src": v.src,
+    "aria-label": [label, v.t, "price " + F.px(v.px), "day " + pct(v.chg), "net premium " + usd(v.net),
+      (flowWord(v) || [0, "no flow read"])[1], "IV " + F.pct(v.iv30, 1)].filter(Boolean).join(", ") + ". Open the dossier.",
+  }, ...kids);
+  const netCell = (v, cls) => h("span", { class: cls }, premOf(v),
+    v.lean === null ? null : leanBar(v.lean, "Bullish against bearish premium " + pct(v.lean, 0)));
+
+  function sparkIn(host, v, height) {
+    const n = counted(v.spark), t = toneOf(v.chg);
+    if (!host.isConnected || n < 2) return;
+    C.sparkline(host, v.spark, { height, color: v.intraday && (t === "up" || t === "down") ? "--" + t : "--label-2",
+      ref: v.intraday ? v.prev : null, label: v.t + (v.intraday ? " today" : ", last " + (n - v.today) + " closes" + (v.today ? " and today" : "")) });
+  }
+
+  function whenPill(slotId, rows, title) {
+    const slot = $(slotId);
+    if (!slot) return;
+    FOCUS.pills[slotId] = [rows, title];
+    const s = FOCUS.strips, m = UI.freshness.market();
+    const live = rows.filter((v) => v.src === "live").length;
+    const day = rows.map((v) => v.day).filter(Boolean).sort().pop() || null;
+    const readAt = live && s.fresh ? s.fresh.readAt : null;
+    const ff = live && s.__ff ? s.__ff.stateAt() : null;
+    const state = ff === "live" ? "live" : ff === "stale" || (day && day < m.expected) ? "stale" : "fresh";
+    const at = readAt && (state === "live" || ff === "stale") ? clock(readAt) : null;
+    const word = state === "live" ? "Live" : day ? F.day(day) : DASH;
+    let b = slot.firstElementChild;
+    if (!b) slot.append(b = h("button", { class: "hm-pill", type: "button", ...POP, "data-info": UI.info(() => b.$) }));
+    b.$ = { title, state, lead: live ? "Read during the session." : "The nightly record of this session.",
+      facts: [["Session", day ? F.day(day) : DASH], ["Read", readAt ? fmtStamp(readAt) : null],
+        ["Live rows", live + " of " + rows.length], ["Missing", rows.filter((v) => !v.src).map((v) => v.t).join(", ") || null]] };
+    if (b.k === state + word + at) return;
+    b.k = state + word + at;
+    b.dataset.state = state;
+    b.replaceChildren(glyph(state === "live" ? "live" : "clock"), h("span", null, word), at ? h("span", { class: "hm-pill-when" }, "· " + at) : "");
+  }
+
+  function focusSilent(into, groups, what, pill) {
+    const f = FOCUS.focus;
+    into.closest("section").hidden = Boolean(f && f.status === "ok" && Array.isArray(f.groups) && !groups.length);
+    const rows = focusRows(groups.flatMap((g) => g.tickers));
+    if (rows.some((v) => v.src)) return rows;
+    if (pill) { pill.replaceChildren(); delete FOCUS.pills[pill.id]; }
+    if (!f) hush(into, "unreadable", "The focus payload could not be read. Refresh to try again.", what, 160);
+    else if (f.status === "pending" || !groups.length) hush(into, "pending", "The focus names publish with the nightly run.", what, 160);
+    else hush(into, "unavailable", cap1(typeof f.reason === "string" && f.reason ? f.reason : "the vendor returned none of these names") + ".", what, 160);
+    return null;
+  }
+
+  function paintMetals(groups) {
+    const into = $("ccMetals");
+    if (!into) return;
+    into.replaceChildren();
+    const all = focusSilent(into, groups, "metals", $("ccMetalsWhen"));
+    if (!all) return;
+    const by = new Map(all.map((v) => [v.t, v]));
+    const sparks = [];
+    into.append(h("div", { class: "hm-metals" }, groups.map((g) => {
+      const lead = by.get(g.tickers.includes(g.lead) ? g.lead : g.tickers[0]);
+      const fw = flowWord(lead);
+      const sp = h("span", { class: "hm-mspark" });
+      sparks.push([sp, lead]);
+      return h("div", { class: "hm-metal", role: "group", "aria-label": g.label || lead.t, "data-group": g.id || null },
+        link(lead, "hm-mlead", g.label,
+          h("span", { class: "hm-mhead" }, h("span", { class: "hm-mlabel" }, g.label || lead.t), tick(lead)),
+          h("span", { class: "hm-mpx" }, h("span", { class: "hm-mpx-v" }, F.px(lead.px)), chgOf(lead)),
+          sp,
+          h("span", { class: "hm-mflow" }, fw ? UI.capsule(fw[1], { tone: fw[0] }) : h("span", { class: "ui-dash" }, DASH), netCell(lead, "hm-mnet"))),
+        h("div", { class: "ui-list hm-mrel", role: "group", "aria-label": (g.label || lead.t) + " related" },
+          g.tickers.filter((t) => t !== lead.t).map((t) => by.get(t)).map((v) => link(v, "ui-row hm-mrow", g.label, tick(v), chgOf(v), premOf(v)))));
+    })));
+    for (const [sp, v] of sparks) sparkIn(sp, v, 44);
+    whenPill("ccMetalsWhen", all, "Metals");
+  }
+
+  function paintLeaders(groups) {
+    const into = $("ccLeaders"), seg = $("ccLeadSeg");
+    if (!into) return;
+    into.replaceChildren();
+    if (seg) seg.replaceChildren();
+    if (!focusSilent(into, groups, "leaders", $("ccLeadersWhen"))) return;
+    let at = Math.max(0, groups.findIndex((g) => g.id === FOCUS.lead));
+    const body = h("div", { class: "hm-qlist", role: "group" });
+    into.append(body);
+    const head = (two) => h("div", { class: "ui-row hm-qrow hm-qhead" + (two ? " is-2" : ""), "aria-hidden": "true" },
+      ["", "", "Price", "Day", "Net premium", "IV 30d"].map((x) => h("span", null, x)));
+    const draw = () => {
+      const g = groups[at];
+      const rows = focusRows(g.tickers);
+      const n = Math.ceil(rows.length / 2);
+      const row = (v) => link(v, "ui-row hm-qrow", null, tick(v), h("span", { class: "hm-qsp" }), h("span", { class: "hm-qpx" }, F.px(v.px)),
+        chgOf(v), netCell(v, "hm-qnet"), h("span", { class: "hm-qiv" }, F.pct(v.iv30, 1)));
+      body.setAttribute("aria-label", g.label || g.id);
+      body.style.setProperty("--rows", String(n + 1));
+      body.replaceChildren(head(), ...rows.slice(0, n).map(row), head(true), ...rows.slice(n).map(row));
+      const cells = body.querySelectorAll(".hm-qsp");
+      rows.forEach((v, i) => sparkIn(cells[i], v, 24));
+      whenPill("ccLeadersWhen", rows, g.label || "Leaders");
+    };
+    draw();
+    if (seg && groups.length > 1) {
+      seg.append(UI.segmented("Leaders", groups.map((g) => ({ label: g.label || g.id })), (i) => {
+        at = i;
+        pref(FOCUS.lead = groups[i].id);
+        const u = new URL(location.href);
+        u.searchParams.set("lead", FOCUS.lead);
+        history.replaceState(history.state, "", u);
+        draw();
+      }, at));
+    }
+  }
+
+  function paintFocus() {
+    const a = document.activeElement;
+    const q = a && a.closest && a.closest("#hmMetals, #hmLeaders") &&
+      (a.dataset.ticker ? '[data-ticker="' + a.dataset.ticker + '"]' : a.closest("#ccLeadSeg") && "[aria-selected=true]");
+    const f = FOCUS.focus;
+    const groups = f && f.status !== "pending" && Array.isArray(f.groups)
+      ? f.groups.filter((g) => g && Array.isArray(g.tickers) && g.tickers.length) : [];
+    paintMetals(groups.filter((g) => g.kind === "metal"));
+    paintLeaders(groups.filter((g) => g.kind !== "metal"));
+    const back = q && document.querySelector("#hmMetals " + q + ", #hmLeaders " + q);
+    if (back) back.focus();
   }
 
   function assessAge(payload) {
@@ -1838,15 +2012,24 @@
   function live(liveVol) {
     if (typeof UI.heartbeat !== "function") return;
     UI.heartbeat({
-      keys: ["market", "breadth"], nightly: ["pulse"], page: "overview",
-      onBeat() { if (heroTide && heroTide.live) paintPill(heroTide); },
+      keys: ["market", "breadth", "strips"], nightly: ["pulse", "focus"], page: "overview",
+      onBeat() { if (heroTide && heroTide.live) paintPill(heroTide); for (const k in FOCUS.pills) whenPill(k, ...FOCUS.pills[k]); },
       onChange(changed) {
         if (!Array.isArray(changed)) return;
-        const mk = changed.some((k) => /market/.test(String(k)));
-        const br = changed.some((k) => /breadth/.test(String(k)));
-        const pu = changed.some((k) => /pulse/.test(String(k)));
-        Promise.all([mk ? loadRegion("/api/flows/lk?k=market", true) : null, br ? loadRegion("/api/flows/lk?k=breadth", true) : null,
-          pu ? loadRegion("/api/flows/pulse") : null]).then(([m, b, p]) => {
+        const has = (re) => changed.some((k) => re.test(String(k)));
+        const st = has(/strips/), fo = has(/focus/);
+        if (st || fo) {
+          Promise.all([fo && loadRegion("/api/flows/focus"), st && loadRegion("/api/flows/lk?k=strips", true),
+            st && loadRegion("/api/flows/lk?k=strips:series", true)]).then(([f, s, se]) => {
+            if (f) FOCUS.focus = f;
+            if (s) FOCUS.strips = s;
+            if (se) FOCUS.series = se;
+            paintFocus();
+          });
+        }
+        const mk = has(/market/), br = has(/breadth/), pu = has(/pulse/);
+        Promise.all([mk && loadRegion("/api/flows/lk?k=market", true), br && loadRegion("/api/flows/lk?k=breadth", true),
+          pu && loadRegion("/api/flows/pulse")]).then(([m, b, p]) => {
           if (m) S.liveMkt = m;
           if (b) { S.liveBreadth = b; paintVol(S.regime, liveVol, b); }
           if (p) S.pulse = p;
@@ -1871,8 +2054,13 @@
     loadRegion("/api/flows/lk?k=market", true),
     loadRegion("/api/flows/lk?k=vol", true),
     loadRegion("/api/flows/lk?k=breadth", true),
-  ]).then(([lng, sht, watch, market, alerts, events, track, lean, news, pulse, regime, liveMkt, liveVol, liveBreadth]) => {
+    loadRegion("/api/flows/focus"),
+    loadRegion("/api/flows/lk?k=strips", true),
+    loadRegion("/api/flows/lk?k=strips:series", true),
+  ]).then(([lng, sht, watch, market, alerts, events, track, lean, news, pulse, regime, liveMkt, liveVol, liveBreadth, focus, strips, series]) => {
     if (gated) return;
+    Object.assign(FOCUS, { focus, strips, series });
+    paintFocus();
 
     const bull = ranked(lng && lng.rows);
     const bear = ranked(sht && sht.rows);
