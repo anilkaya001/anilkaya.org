@@ -20,7 +20,7 @@ import { MARKET_INDICES, parseIndexQuote, buildSnapshot } from "./shared/markets
 import {
   rankChain, RANK_KEYS, crossesEarnings, numOrNull, parseOptionSymbol, ivConvention,
 } from "./shared/flows-premium.js";
-import { isRefreshWindow, freshHeaders, phaseAt, easternDay } from "./shared/flows-freshness.js";
+import { isRefreshWindow, freshHeaders, phaseAt, easternDay, sessionOpen } from "./shared/flows-freshness.js";
 import * as FLOWS_LIVE from "./shared/flows-live-worker.js";
 import { nightlyFreshMeta, STRIP_FIELDS, stripValues } from "./shared/flows-live.js";
 import { archiveWriteAction, ARCHIVE_REFUSALS } from "./shared/flows-archive.js";
@@ -916,14 +916,14 @@ function nightlyFreshHeaders(stored) {
 
 const SPLIT_ENGINE_MARK = '"engine":{"status":"split"';
 
-async function readCardWithEngine(env, ticker) {
-  const stored = await readFlowsPayload(env, "card:" + ticker);
+async function readCardWithEngine(env, ticker, trace = {}) {
+  const stored = await readFlowsPayload(env, "card:" + ticker, trace);
   if (stored === null) return { stored: null, card: null, unreadable: false };
   let card;
   try { card = JSON.parse(stored.payload); } catch { return { stored, card: null, unreadable: true }; }
   if (card && card.engine && card.engine.status === "split" && typeof card.engine.key === "string" &&
       card.engine.key === "card-x:" + ticker) {
-    const extra = await readFlowsPayload(env, card.engine.key);
+    const extra = await readFlowsPayload(env, card.engine.key, trace);
     let block = null;
     if (extra) {
       try {
@@ -931,7 +931,7 @@ async function readCardWithEngine(env, ticker) {
         block = x && x.sessionDate === card.sessionDate && x.engine && typeof x.engine === "object" ? x.engine : null;
       } catch { block = null; }
     }
-    card.engine = block || { status: "unreadable", key: card.engine.key };
+    card.engine = block || (trace.failed ? { ...STORE_GONE, key: card.engine.key } : { status: "unreadable", key: card.engine.key });
   }
   return { stored, card, unreadable: false };
 }
@@ -969,12 +969,16 @@ const KNOWN_SQL =
 const CLASS_TTL_S = 12 * 3600;
 const parseOr = (text, fallback) => { try { const v = JSON.parse(text); return v && typeof v === "object" ? v : fallback; } catch { return fallback; } };
 
-async function scheduledTonight(env, ticker) {
+async function scheduledTonight(env, kind, ticker) {
   const row = await env.DB.prepare(ROSTER_SQL).bind(ticker).first().catch(() => { throw storeGone(); });
   if (!row || typeof row.depth !== "string" || typeof row.session !== "string") return false;
+  if (kind === "hist" && (row.depth === "index" || row.depth === "fund")) return false;
   const now = Date.now();
-  const phase = phaseAt(now, await FLOWS_LIVE.cachedClock(env, now));
-  return !!phase && typeof phase.lastClosed === "string" && row.session < phase.lastClosed;
+  const clock = await FLOWS_LIVE.cachedClock(env, now);
+  const phase = phaseAt(now, clock);
+  if (!phase || (phase.phase !== "post" && phase.phase !== "closed") || phase.day !== phase.lastClosed) return false;
+  const before = phaseAt(sessionOpen(phase.lastClosed), clock);
+  return !!before && row.session === before.lastClosed;
 }
 
 async function liteCard(env, ticker) {
@@ -1024,7 +1028,7 @@ async function classifyTicker(env, ctx, ticker) {
 function quoteCard(ticker, row, now) {
   const vals = stripValues(row);
   const u = {};
-  STRIP_FIELDS.forEach(([name], i) => { u[name === "ivRank" ? "ivp" : name] = vals[i]; });
+  STRIP_FIELDS.forEach(([name], i) => { u[name] = vals[i]; });
   const text = (v, n) => (typeof v === "string" && v.trim() ? v.trim().slice(0, n) : null);
   const day = typeof row.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(row.date) ? row.date : easternDay(now);
   return { v: 1, ticker, status: "ok", lite: true, depth: "quote", sessionDate: day, generatedAt: new Date(now).toISOString(),
@@ -1032,7 +1036,7 @@ function quoteCard(ticker, row, now) {
 }
 
 async function absentKey(env, ctx, kind, ticker) {
-  if (await scheduledTonight(env, ticker)) return json({ ticker, status: "pending" });
+  if (await scheduledTonight(env, kind, ticker)) return json({ ticker, status: "pending" });
   if (kind !== "card") return json({ ticker, status: "absent", why: "not-covered" });
   const lite = await liteCard(env, ticker);
   if (lite) return lite;
@@ -1435,7 +1439,9 @@ async function tickerNeuron(env, ctx, ticker) {
     return json(neuronShape("unavailable", ticker, null, null,
       { note: "No store is bound to this route, so no reading can be read or written." }));
   }
-  const read = await readCardWithEngine(env, ticker);
+  const trace = {};
+  const read = await readCardWithEngine(env, ticker, trace);
+  if (trace.failed) return json(neuronShape("unavailable", ticker, null, null, { ...STORE_GONE, note: "The store could not be read." }));
   if (read.stored === null) {
     return json(neuronShape("pending", ticker, null, null,
       { note: "No card has been published for " + ticker + " this session, so there is " +
@@ -3328,7 +3334,9 @@ async function route(request, env, url, ctx) {
       const stored = await readServed(env, kind + ":" + ticker);
       if (stored === null) return absentKey(env, ctx, kind, ticker);
       if (!stored.payload.includes(SPLIT_ENGINE_MARK)) return passthrough(stored);
-      const merged = await readCardWithEngine(env, ticker);
+      const trace = {};
+      const merged = await readCardWithEngine(env, ticker, trace);
+      if (trace.failed) throw storeGone();
       if (!merged.card) return passthrough(stored);
       return json(merged.card, 200, { "X-Payload-Updated": String(stored.updatedAt || 0) });
     }

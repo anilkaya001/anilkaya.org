@@ -1227,24 +1227,40 @@ try {
     ok(gated.why === "gated" && gated.gate && gated.gate.earnings === "2026-09-29" && gated.gate.dte === 5 && gated.u.chg === null,
        "a name the earnings gate removed says gated, with the report date, and an absent column stays null, never 0");
 
-    eq((await putCard("roster", JSON.stringify({ v: 1, sessionDate: "2020-01-02", depth: { PEND: "cross", LITE: "cross" } }))).status, 200,
-       "the roster key ingests");
-    eq((await (await get("/api/flows/card-x?t=PEND", { headers: cookie })).json()).status, "pending",
-       "PENDING only when tonight's run is due to write the key: the roster names the ticker and its session is behind the last close");
-    eq((await (await get("/api/flows/card?t=PEND", { headers: cookie })).json()).status, "pending", "for the card as for its companions");
-    await putCard("roster", JSON.stringify({ v: 1, sessionDate: "2999-01-04", depth: { PEND: "cross" } }));
-    eq((await (await get("/api/flows/card-x?t=PEND", { headers: cookie })).json()).status, "absent",
-       "and absent once the roster is current: nothing is coming");
+    {
+      const { phaseAt, sessionOpen } = await import("../shared/flows-freshness.js");
+      const ph = phaseAt(Date.now());
+      const due = (ph.phase === "post" || ph.phase === "closed") && ph.day === ph.lastClosed;
+      const before = phaseAt(sessionOpen(ph.lastClosed)).lastClosed;
+      const word = due ? "pending" : "absent";
+      const st = async (kind, t) => (await (await get(`/api/flows/${kind}?t=${t}`, { headers: cookie })).json());
+      eq((await putCard("roster", JSON.stringify({ v: 1, sessionDate: before, depth: { PEND: "cross", LITE: "cross", IDX: "index", ETF: "fund" } }))).status, 200,
+         "the roster key ingests");
+      eq((await st("card-x", "PEND")).status, word,
+         `PENDING only while tonight's run is due to write the key: after ${ph.lastClosed}'s close, with the roster one session behind (now ${ph.phase} on ${ph.day})`);
+      eq((await st("card", "PEND")).status, word, "for the card as for its companions");
+      eq((await st("card-x", "IDX")).status, word, "an index dossier's card-x is written tonight like any other");
+      const ih = await st("hist", "IDX"), fh = await st("hist", "ETF");
+      ok(ih.status === "absent" && ih.why === "not-covered" && fh.status === "absent",
+         `but no hist is ever built for an index or a fund, so it is absent, never pending, even while the run is due (${JSON.stringify(ih)})`);
+      await putCard("roster", JSON.stringify({ v: 1, sessionDate: "2020-01-02", depth: { PEND: "cross" } }));
+      eq((await st("card-x", "PEND")).status, "absent",
+         "a roster left behind by a failed run is not a promise: its names read absent, not pending through the next day");
+      await putCard("roster", JSON.stringify({ v: 1, sessionDate: "2999-01-04", depth: { PEND: "cross" } }));
+      eq((await st("card-x", "PEND")).status, "absent", "and absent once the roster is current: nothing is coming");
+    }
 
     await server.d1("ALTER TABLE flows_payload RENAME COLUMN payload TO payload_hidden");
     const gone = await get("/api/flows/card?t=AAPL", { headers: cookie });
     const goneBody = await gone.json();
     const goneMarket = await get("/api/flows/market", { headers: cookie });
     const goneMarketBody = await goneMarket.json();
+    const goneNeuron = await (await get("/api/flows/summary?t=AAPL", { headers: cookie })).json();
     await server.d1("ALTER TABLE flows_payload RENAME COLUMN payload_hidden TO payload");
     ok(gone.status === 503 && goneBody.status === "unavailable" && goneBody.reason === "store" && goneBody.error.code === "store_unreadable",
        `OPS-14: a store that cannot be read answers 503 unavailable, never pending (${gone.status} ${JSON.stringify(goneBody)})`);
     ok(goneMarket.status === 503 && goneMarketBody.status === "unavailable", "and the page payload routes answer the same way");
+    ok(goneNeuron.status === "unavailable" && goneNeuron.reason === "store", `and the name's reading says unavailable, not that no card was published (${JSON.stringify(goneNeuron).slice(0, 120)})`);
     eq((await get("/api/flows/card?t=AAPL", { headers: cookie })).status, 200, "with the store back the card reads again");
 
     {
@@ -1268,7 +1284,7 @@ try {
         const gld = await (await C("/api/flows/card?t=GLD")).json();
         ok(gld.status === "ok" && gld.lite === true && gld.depth === "quote" && gld.type === "ETF" && gld.nm === "SPDR Gold Shares",
            `T7: a symbol outside the universe is classified by ONE screener read; an ETF gets a quote page (${JSON.stringify(gld).slice(0, 160)})`);
-        ok(gld.u.px === 391.645 && gld.u.prev === 392.88 && gld.u.ivp === 41.5 && gld.u.iv30 === 0.182 && gld.sessionDate === "2026-09-24",
+        ok(gld.u.px === 391.645 && gld.u.prev === 392.88 && gld.u.ivRank === 41.5 && gld.u.iv30 === 0.182 && gld.sessionDate === "2026-09-24",
            "with the screener's own values, in the strip's names and units");
         eq((await (await C("/api/flows/card?t=ZZZZ")).json()).why, "unknown", "a symbol the vendor does not know is unknown");
         const reads = asked.filter((a) => a.startsWith("/api/screener/stocks")).length;
