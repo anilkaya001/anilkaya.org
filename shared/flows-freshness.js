@@ -30,6 +30,7 @@ export const LIVE_CLOCK = Object.freeze({
   inFlightMs: 10 * 60 * 1000,
   watchdogMs: 45 * 60 * 1000,
   earlyCloseQuietMs: 30 * 60 * 1000,
+  holidayProbeMin: 10,
 });
 
 const OPEN_MINUTES = 9 * 60 + 15;
@@ -256,7 +257,7 @@ export function expectedNightlySession(at, clock = null) {
   const grace = FRESH_CLASSES.nightly.graceS * 1000;
   let d = easternDay(ms);
   for (let i = 0; d && i < 14; i++) {
-    if (isTradingDay(d, clock) && sessionClose(d, clock) + grace <= ms) return d;
+    if (isTradingDay(d, clock) && easternInstant(d, PHASE_MINUTES.close) + grace <= ms) return d;
     d = shiftDay(d, -1);
   }
   return null;
@@ -293,7 +294,7 @@ export function freshnessState(meta, at, clock = null) {
     if (!out.session) return { ...out, reason: "unsessioned" };
     if (expected && out.session < expected) return { ...out, reason: "behind" };
     const following = nextTradingDay(out.session, clock);
-    out.staleAt = following ? sessionClose(following, clock) + spec.graceS * 1000 : null;
+    out.staleAt = following ? easternInstant(following, PHASE_MINUTES.close) + spec.graceS * 1000 : null;
     return { ...out, state: "fresh", reason: "session" };
   }
 
@@ -360,9 +361,20 @@ export function pendingHeaders(klass, at, clock = null) {
   };
 }
 
+function holidayProbeDue(p, clock) {
+  if (!isWeekdayDay(p.day) || !isHoliday(p.day)) return false;
+  const c = clockFor(clock, p.day);
+  if (c && (clockClosed(c.trading) || clockOpen(c.trading))) return false;
+  const closed = closedDaysOf(clock);
+  if (closed && closed.includes(p.day)) return false;
+  return p.minutes >= PHASE_MINUTES.sessionProbe &&
+    p.minutes <= PHASE_MINUTES.sessionProbe + LIVE_CLOCK.holidayProbeMin;
+}
+
 export function tier1Due(at, clock = null) {
   const p = phaseAt(at, clock);
-  if (!p || !p.trading) return false;
+  if (!p) return false;
+  if (!p.trading) return holidayProbeDue(p, clock);
   const closeMin = closeMinutes(p.day, clock);
   return p.minutes >= PHASE_MINUTES.open && p.minutes <= closeMin + LIVE_CLOCK.tier1AfterCloseMin;
 }

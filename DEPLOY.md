@@ -1000,11 +1000,15 @@ boundary.
   `announce.status` is `"unavailable"` with the reason published, and every
   `when` is `null`. A column populated for the first fortnight and blank after
   invites the wrong inference about everything in the blank half.
-- **Sessions are counted as NYSE sessions**: weekends and exchange holidays
-  removed, from the same computed calendar the freshness clock uses
-  (`nyseHolidays` in `shared/flows-quant-time.js`, held to the exchange's
-  published 2026-2028 schedule by `tests/flows-freshness-contract.mjs`). The
-  gate origin itself is still the next weekday (`nextWeekday` in the pipeline).
+- **Sessions are counted as weekdays, holidays not removed**, and the payload
+  says so. This desk's `sdte` (`sessionsToEarnings` in
+  `shared/flows-events.js`) and its gate origin (`nextWeekday` in the
+  pipeline) still count weekdays; the computed NYSE calendar the freshness
+  clock uses (`isTradingDay` in `shared/flows-freshness.js`) is not yet routed
+  here. The market leg's earnings window (`windowTickersOf`, through
+  `sessionsBetween` in `shared/flows-cross.js`) already counts NYSE sessions,
+  which is never more than the weekday count: across a holiday it can reach
+  one session further than this desk, never one session short.
 - **The priced move is a price, not a forecast.** `horizonMove` scales the
   name's 30-day implied volatility by the square root of sessions — no rate,
   no dividend, no distribution. It is what the option market is CHARGING for
@@ -1222,16 +1226,24 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   expiry on an early close has three hours left at 10:00 ET, not six. The tape
   remains the backstop for anything unscheduled: the first tick at or after
   09:45 ET at which both Tier 1 feeds still carry the same earlier session (the
-  market tide by its date, the sector-ETF snapshot by the session after its
+  market tide by its date, the sector-ETF snapshot by the weekday after its
   `prev_date`) marks the day closed; one lagging feed, or two that disagree on
-  which earlier session they carry, is no verdict. A tide stuck at or before
+  which earlier session they carry, is no verdict. A computed holiday is
+  checked the same way, once: Tier 1 reads the tape in the 09:45 to 09:55 ET
+  probe window of a weekday holiday, and a tape that shows the day trading
+  records `trading = 1`, so the day becomes a session and the live layer and
+  the nightly dispatch run; a tape still on the previous session records `0`
+  and every later tick skips the day. A wrong or outdated holiday rule
+  therefore costs the first quarter hour, never the session. A tide stuck at or before
   13:05 ET for 30 minutes after 13:30 marks an unscheduled early close. When the
   NYSE changes its rules, `tests/flows-freshness-contract.mjs` holds the
   published schedule to compare against.
-- **A nightly session is due five hours after its close** (21:00 ET, 18:00 ET on
-  an early close). The 2026-09-23 and 09-24 runs started at 23:48 and 23:56 UTC
-  and wrote `meta` at 00:08 UTC, 20:08 ET, so the old three-hour grace called
-  every weekday evening stale for an hour. `/api/flows/now` returns the server's
+- **A nightly session is due at 21:00 ET on every session, early closes
+  included**, because the run is scheduled by wall clock: the pipeline cron and
+  the Worker's 17:15 ET dispatch do not move when the market shuts at 13:00.
+  The 2026-09-23 and 09-24 runs started at 23:48 and 23:56 UTC and wrote
+  `meta` at 00:08 UTC, 20:08 ET, so the old three-hour grace called every
+  weekday evening stale for an hour. `/api/flows/now` returns the server's
   `expected` nightly session, and the page pill dates itself by it; the pill's
   own weekday fallback uses the same 21:00 ET, and asks the server before it
   ever shows a stale it computed alone.

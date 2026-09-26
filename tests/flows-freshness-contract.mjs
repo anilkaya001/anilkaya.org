@@ -186,8 +186,18 @@ const NYSE_PUBLISHED = Object.freeze({
   const wed = "2026-09-23";
   eq(expectedNightlySession(easternInstant(wed, 20 * 60 + 59)), "2026-09-22", "at 20:59 ET the evening's run is not yet due");
   eq(expectedNightlySession(easternInstant(wed, 21 * 60)), wed, "and from 21:00 it is");
-  eq(expectedNightlySession(easternInstant("2026-11-27", 18 * 60)), "2026-11-27",
-    "an early close is due five hours after ITS close, 18:00 ET");
+  eq(expectedNightlySession(easternInstant("2026-11-27", 20 * 60 + 59)), "2026-11-25",
+    "an early close is NOT due five hours after its 13:00 close: the pipeline cron is fixed on the wall clock and the " +
+    "dispatch opens at 17:15 ET on every session, so at 20:59 ET the day after Thanksgiving the Wednesday nightly is current");
+  eq(expectedNightlySession(easternInstant("2026-11-27", 21 * 60)), "2026-11-27", "and the early close's own is due at 21:00");
+  eq(expectedNightlySession(easternInstant("2028-07-03", 20 * 60 + 8)), "2028-06-30",
+    "an EDT early close waits for 21:00 too, past the 20:08 ET its run lands");
+  {
+    const s = freshnessState({ klass: "nightly", session: "2026-11-25", readAt: easternInstant("2026-11-25", 20 * 60 + 8) },
+      easternInstant("2026-11-27", 19 * 60 + 5));
+    ok(s.state === "fresh" && s.staleAt === easternInstant("2026-11-27", 21 * 60),
+      "so the 11-25 nightly is fresh at 19:05 ET on the early close, and goes stale at 21:00, not 18:00");
+  }
 }
 
 {
@@ -287,7 +297,7 @@ const NYSE_PUBLISHED = Object.freeze({
     };
     ctx.window = ctx;
     vm.createContext(ctx);
-    vm.runInContext(`(() => { const Real = Date; const fixed = Real.parse(${JSON.stringify(iso)});
+    vm.runInContext(`(() => { const Real = Date; let fixed = Real.parse(${JSON.stringify(iso)}); globalThis.advance = (ms) => { fixed += ms; };
       globalThis.Date = class extends Real { constructor(...a) { if (a.length) super(...a); else super(fixed); }
         static now() { return fixed; } }; })();`, ctx);
     vm.runInContext(src, ctx);
@@ -315,6 +325,17 @@ const NYSE_PUBLISHED = Object.freeze({
     eq(p.UI.freshness.state(), "fresh", "so the Wednesday session is current on the Friday after Thanksgiving, not stale");
     p.UI.freshness({ sessionDate: "2026-11-25", source: "board" });
     eq(p.asked.length, 1, "and it asks no more while the server's answer is fresh");
+    for (let i = 0; i < 12; i++) {
+      p.ctx.advance(2 * 60 * 1000);
+      p.UI.freshness.market();
+      p.UI.freshness.state();
+    }
+    eq(p.asked.length, 1,
+      "NOR AN HOUR LATER: the local weekday calendar still runs ahead of the server around a holiday, but it has not moved " +
+      "since the server answered, so no open tab sends /api/flows/now every minute for the day");
+    p.ctx.advance(9 * 3600 * 1000 - 24 * 60 * 1000);
+    p.UI.freshness.market();
+    eq(p.asked.length, 2, "and once the local calendar moves on (21:00 ET) it asks the server again");
   }
   {
     const p = pill("2026-11-27T12:00:00-05:00", null);

@@ -1688,15 +1688,16 @@
     const p = Object.fromEntries(ET_PARTS.formatToParts(d).map((x) => [x.type, x.value]));
     return { date: `${p.year}-${p.month}-${p.day}`, wd: p.weekday, mins: (+p.hour % 24) * 60 + +p.minute };
   }
-  function prevWeekday(iso) {
-    let t = Date.parse(iso + "T12:00:00Z");
+  function localExpected(n) {
+    if (n.wd !== "Sat" && n.wd !== "Sun" && n.mins >= 1260) return n.date;
+    let t = Date.parse(n.date + "T12:00:00Z");
     do { t -= 864e5; } while ([0, 6].includes(new Date(t).getUTCDay()));
     return new Date(t).toISOString().slice(0, 10);
   }
-  const SRV = { day: null, at: 0, ph: null, until: 0, busy: false, asked: 0 };
+  const SRV = { day: null, at: 0, ph: null, until: 0, busy: false, asked: 0, local: null };
   function takeNow(b) {
     if (!b) return;
-    if (isoDay(b.expected)) { SRV.day = b.expected.slice(0, 10); SRV.at = Date.now(); }
+    if (isoDay(b.expected)) { SRV.day = b.expected.slice(0, 10); SRV.at = Date.now(); SRV.local = localExpected(nyClock(new Date())); }
     const t = b.phase ? Date.parse(b.phase.endsAt) : NaN;
     if (t > 0) { SRV.ph = b.phase.phase; SRV.until = t; }
   }
@@ -1712,8 +1713,8 @@
     const at = now || new Date(), n = nyClock(at);
     const weekday = !["Sat", "Sun"].includes(n.wd);
     const open = SRV.until > at ? SRV.ph === "rth" : weekday && n.mins >= 570 && n.mins < 960;
-    const local = weekday && n.mins >= 1260 ? n.date : prevWeekday(n.date);
-    if (SRV.day && local > SRV.day) confirmExpected();
+    const local = localExpected(n);
+    if (SRV.day && local > SRV.day && local !== SRV.local) confirmExpected();
     return { open, weekday, today: n.date, expected: SRV.day || local, source: SRV.day ? "server" : "local" };
   }
 

@@ -1226,6 +1226,42 @@ const T = (iso) => Date.parse(iso);
         `after it still writes live:market; the 09:46 probe then records trading = 1 (${written.map(([m, w, tr]) =>
           `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")} ${w} ${tr}`).join(", ")})`);
   }
+  {
+    const GF = "2027-03-26";
+    const thread = async (tape) => {
+      const row = { id: 1, day: "2027-03-25", trading: 1, early_close: 0, tape_at: null, tape_moved_at: null };
+      const seen = [];
+      for (let m = 9 * 60 + 31; m <= 10 * 60 + 11; m += 5) {
+        const tickAt = easternInstant(GF, m);
+        const bodies = await tape(tickAt);
+        const t = await run(tickAt, { fetchVendor: async (path) => JSON.parse(bodies[path]), clockRow: { ...row } });
+        for (const patch of t.patches) {
+          const cols = /\(([^)]*)\) VALUES/.exec(patch.sql)[1].split(", ");
+          cols.forEach((c, j) => { row[c] = patch.args[j]; });
+        }
+        seen.push(`${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")} ${t.out.skipped || t.col("tier1_why")} ${row.day} ${row.trading}`);
+      }
+      return { row, seen };
+    };
+    const traded = await thread((tickAt) => tier1Bodies({ session: GF, at: tickAt }));
+    ok(traded.seen[0].endsWith("not-due 2027-03-25 1") && traded.row.day === GF && traded.row.trading === 1 &&
+       traded.seen.slice(3).every((l) => / written /.test(l)),
+      "A COMPUTED HOLIDAY IS PROBED ONCE: on Good Friday the Worker reads the tape in the 09:45 probe window, and a tape " +
+      "that shows the day trading records trading = 1, so a wrong or outdated rule can never silence a live session " +
+      `(${traded.seen.join(", ")})`);
+    const shut = await thread(() => tier1Bodies({ session: "2027-03-25", at: easternInstant("2027-03-25", 16 * 60 + 6) }));
+    ok(shut.row.day === GF && shut.row.trading === 0 && shut.seen.slice(4).every((l) => / holiday /.test(l)) &&
+       shut.seen.filter((l) => / written /.test(l)).length <= 1,
+      "while a tape still on the previous session confirms the holiday at the first probe, and every later tick skips it " +
+      `(${shut.seen.join(", ")})`);
+    ok(!tier1Due(easternInstant(GF, 9 * 60 + 44)) && tier1Due(easternInstant(GF, 9 * 60 + 45)) &&
+       tier1Due(easternInstant(GF, 9 * 60 + 55)) && !tier1Due(easternInstant(GF, 9 * 60 + 56)) &&
+       !tier1Due(easternInstant(GF, 11 * 60)) && !tier1Due(easternInstant("2027-03-27", 9 * 60 + 50)),
+      "the probe window is 09:45 to 09:55 on a weekday computed holiday only: never later, and never on a weekend");
+    ok(!tier1Due(easternInstant(GF, 9 * 60 + 50), { day: GF, trading: 0 }) &&
+       !tier1Due(easternInstant(GF, 9 * 60 + 50), { day: "2027-03-25", closedDays: [GF] }),
+      "and a day the tape already closed is not probed again");
+  }
   const holiday = await run(at, { fetchVendor: vendor, clockRow: { id: 1, day: S, trading: 0 } });
   ok(holiday.out.skipped === "holiday" && holiday.col("tier1_why") === "holiday", "a tape-derived holiday says holiday");
   const off = await run(at, { env: { FLOWS_LIVE_MODE: "off" }, fetchVendor: vendor });
