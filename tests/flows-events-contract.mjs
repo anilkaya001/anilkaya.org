@@ -11,7 +11,8 @@ import {
 } from "../shared/flows-events.js";
 import { eventsPage } from "../shared/flows-pages.js";
 import { horizonMove, TRADING_YEAR } from "../shared/flows-features.js";
-import { EARNINGS_GATE_DAYS, daysToEarnings, screenerTilt, nextWeekday } from "../scripts/flows-pipeline.mjs";
+import { EARNINGS_GATE_DAYS, daysToEarnings, screenerTilt } from "../scripts/flows-pipeline.mjs";
+import { nextTradingDay } from "../shared/flows-freshness.js";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 let checks = 0;
@@ -66,8 +67,8 @@ const gateDteFrom = (origin) => (date) =>
   ok(PAYLOAD.gateOrigin > PAYLOAD.sessionDate,
      `the gate's origin (${PAYLOAD.gateOrigin}), the next session, is strictly later than the last ` +
      `completed session (${PAYLOAD.sessionDate}) — the corpus can tell the two clocks apart`);
-  eq(PAYLOAD.gateOrigin, nextWeekday(PAYLOAD.sessionDate),
-     "and it is the first weekday after the session, not the wall-clock date the run happened " +
+  eq(PAYLOAD.gateOrigin, nextTradingDay(PAYLOAD.sessionDate, null),
+     "and it is the first NYSE trading day after the session, not the wall-clock date the run happened " +
      "to fire on — after the close that would be the session itself, a day early");
   eq(PAYLOAD.sessionDate, SESSION_DATE,
      "and the dry run's sessionDate is the anchor every hand count below is written against");
@@ -385,11 +386,11 @@ const gateDteFrom = (origin) => (date) =>
   const straddle = eventRow(nameAt("STRADDLE", "2026-09-09").row, tiltOf(),
     { gateOrigin: GATE_ORIGIN });
   eq(straddle.dte, 14, "Wed 26 → Wed Sep 9 is fourteen calendar days");
-  eq(straddle.sdte, 10, "and ten trading sessions");
+  eq(straddle.sdte, 9, "and nine trading sessions: Labor Day, Monday Sep 7, is a weekday the exchange is shut");
   const cut = buildEvents([nameAt("STRADDLE", "2026-09-09"), nameAt("INSIDE", "2026-09-02")],
     { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE, windowDays: 10 });
   deep(cut.rows.map((r) => r.t), ["INSIDE"],
-     "a 10-day window EXCLUDES a name 14 calendar days out whose ten SESSIONS would have " +
+     "a 10-day window EXCLUDES a name 14 calendar days out whose nine SESSIONS would have " +
      "cleared a bound tested in the wrong unit");
   eq(cut.inWindow, 1, "and does not count it as in the window");
   eq(cut.rows[0].dte, 7, "while the name that is genuinely inside — seven days — is kept");
@@ -722,11 +723,15 @@ const gateDteFrom = (origin) => (date) =>
   ok(/gate/i.test(EVENTS_NOTES.clocks),
      "tying the second to the gate that actually ran, which is why it is the one that counts");
 
-  ok(/weekdays/i.test(EVENTS_NOTES.sessions), "notes.sessions states that sessions are weekdays");
-  ok(/holidays are not removed/i.test(EVENTS_NOTES.sessions),
-     "and ADMITS that market holidays are not removed — the count is approximate and says so");
-  ok(/no holiday calendar/i.test(EVENTS_NOTES.sessions),
-     "giving the reason: this desk holds no holiday calendar and inventing one is a free parameter");
+  ok(/NYSE trading days/i.test(EVENTS_NOTES.sessions) && /scheduled holidays are not sessions/i.test(EVENTS_NOTES.sessions),
+     "notes.sessions states that sessions are NYSE trading days, scheduled holidays removed");
+  ok(/did not schedule/i.test(EVENTS_NOTES.sessions),
+     "and ADMITS the one thing the count cannot know in advance: a closure the exchange did not schedule");
+  eq(sessionsToEarnings("2026-11-30", "2026-11-25"), 2,
+     "SESSIONS SKIP THE EXCHANGE'S HOLIDAYS: from Wednesday 2026-11-25 to Monday 11-30 is Friday's early close and " +
+     "Monday, two sessions, where counting weekdays said three because Thanksgiving is a weekday");
+  eq(nextTradingDay("2026-11-25", null), "2026-11-27",
+     "and the gate's origin after the session before Thanksgiving is the Friday after it, not the holiday");
 
   ok(/FORBIDDEN/.test(EVENTS_NOTES.gate),
      "notes.gate says a gated name is one the board was FORBIDDEN from holding an opinion on, " +
@@ -1000,8 +1005,9 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
     eq(new Set([wide.rows.ZERO.title, wide.rows.NOIV.title, wide.rows.NOEV.title].map((t) => t.split(" · ")[2])).size, 3,
        "three absences, three statements: the priced move now rides with each row's detail, " +
        "and none of the three collapses into another");
-    ok(/5\.98% priced over/.test(wide.rows.LONG.title),
-       "and a row that has a priced move still carries it, in per cent");
+    ok(/5\.67% priced over/.test(wide.rows.LONG.title),
+       "and a row that has a priced move still carries it, in per cent: 30% implied volatility over nine sessions, " +
+       "Labor Day not among them");
 
     for (const t of Object.keys(wide.rows)) {
       eq(wide.rows[t].realized, "pending",

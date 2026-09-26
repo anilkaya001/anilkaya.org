@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { nextTradingDay } from "../shared/flows-freshness.js";
 import {
   num, quantile, winsorize, robustZ, neutralize,
   flowPurity, aggressorGamma, bookDisplacement, pathSignature,
@@ -3014,7 +3015,7 @@ export const DRY_FOCUS_ROWS = Object.freeze([
 ].map((r) => Object.freeze(r)));
 
 function fakeFocusRows() {
-  const gateOrigin = nextWeekday(DRY_SESSION_DATE);
+  const gateOrigin = nextTradingDay(DRY_SESSION_DATE, null);
   const rnd = mulberry(20260925);
   return DRY_FOCUS_ROWS.map(([ticker, price, cap, sector, name, earnIn]) => {
     const callVol = Math.round(20000 + rnd() * 900000);
@@ -3050,7 +3051,7 @@ function fakeFocusRows() {
 
 function fakeScreener(count) {
 
-  const gateOrigin = nextWeekday(DRY_SESSION_DATE);
+  const gateOrigin = nextTradingDay(DRY_SESSION_DATE, null);
   const rnd = mulberry(20260825);
   const rows = [];
   for (let i = 0; i < count; i++) {
@@ -4384,7 +4385,7 @@ async function main() {
   if (intraday && intraday.refuse) throw new Error(intraday.message);
   if (intraday && intraday.allowed) console.warn(`WARNING: ${intraday.message}`);
 
-  const gateOrigin = nextWeekday(sessionDate) || today;
+  const gateOrigin = nextTradingDay(sessionDate, null) || today;
 
   const archive = {};
   if (!DRY_RUN) for (const key of sessionArchiveKeys(sessionDate)) archive[key] = await readStored(key);
