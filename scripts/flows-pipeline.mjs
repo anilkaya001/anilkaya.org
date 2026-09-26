@@ -49,8 +49,9 @@ import {
 } from "../shared/flows-universe.js";
 import {
   MAG7 as FOCUS_MAG7, FOCUS_FUNDS, FOCUS_MINERS, ndx10, ndxMembership, focusDeepSet, focusTickers, focusGroups,
-  focusCloses, buildFocusPayload, FOCUS_BUDGET_BYTES,
+  focusCloses, FOCUS_BUDGET_BYTES,
 } from "../shared/flows-focus.js";
+import { buildFocusPayload } from "./flows-legs/focus.mjs";
 import { runVolLeg, volNames, attachVol, publishVol, yearOfCandles } from "./flows-legs/vol.mjs";
 import { fakeVolVendor } from "./flows-legs/vol-fake.mjs";
 import {

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import {
   capBands, selectCoverage, NDX_100, NDX_AS_OF, SELECTION_EPOCH,
   PICK_SIZE, PICK_INDEX, UNIVERSE_NOTES,
@@ -10,8 +11,9 @@ import {
 } from "../shared/flows-universe.js";
 import {
   FOCUS_METALS, MAG7, FOCUS_FUNDS, FOCUS_MINERS, ndx10, ndxMembership, focusTickers, focusGroups, focusDeepSet,
-  focusRow, focusCloses, buildFocusPayload, FOCUS_FIELDS, FOCUS_BUDGET_BYTES, SHARE_CLASS,
+  focusCloses, FOCUS_FIELDS, FOCUS_BUDGET_BYTES, SHARE_CLASS,
 } from "../shared/flows-focus.js";
+import { focusRow, buildFocusPayload } from "../scripts/flows-legs/focus.mjs";
 import { MAG7 as REGIME_MAG7 } from "../shared/flows-regime.js";
 import { STRIP_FIELDS } from "../shared/flows-live.js";
 
@@ -231,6 +233,13 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "an absent payload falls back to the constants, so a reader is never left with nothing");
   const deep = focusDeepSet(ndx);
   ok(deep.has("AVGO") && deep.has("PAAS") && !deep.has("GLD"), "the deep focus set is Mag 7, NDX 10 and miners; funds go the dossier path");
+
+  const leaf = fs.readFileSync(new URL("../shared/flows-focus.js", import.meta.url), "utf8");
+  ok(!/^\s*import\b|\bimport\s*\(|^\s*export\s[^;]*\bfrom\s/m.test(leaf),
+    "shared/flows-focus.js imports nothing, so shared/flows-live.js can read the focus constants without a cycle");
+  const builder = fs.readFileSync(new URL("../scripts/flows-legs/focus.mjs", import.meta.url), "utf8");
+  ok(builder.includes('from "../../shared/flows-live.js"') && builder.includes('from "../../shared/flows-focus.js"'),
+    "the focus payload builder, which needs the strip fields, lives in the pipeline's legs and reads the leaf's constants");
 
   const row = { ticker: "GLD", close: "391.645", prev_close: "392.88", net_call_premium: "100", net_put_premium: "40",
     bullish_premium: "", call_volume: 5, issue_type: "ETF", full_name: "SPDR Gold Shares Trust Of A Very Long Name Indeed" };

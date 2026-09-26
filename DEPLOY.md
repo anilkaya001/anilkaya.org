@@ -712,6 +712,15 @@ is `missing`, and only a payload with no row at all publishes `unavailable`
 same chain, so one failed call cannot skip all nine: a fund absent from the
 focus read is read again by ticker, one call, only on the night it is needed.
 
+`shared/flows-focus.js` is a leaf: the focus constants (`FOCUS_METALS`,
+`MAG7`, `FOCUS_FUNDS`, `FOCUS_MINERS`) and the pure functions that need nothing
+else (`ndx10`, `ndxMembership`, `focusTickers`, `focusGroups`, `focusCloses`).
+It imports nothing, so `shared/flows-live.js` can read the constants for the
+live strips without an import cycle. The payload builder needs the strip
+fields from `shared/flows-live.js`, so it lives in the pipeline's legs,
+`scripts/flows-legs/focus.mjs` (`focusRow`, `buildFocusPayload`); the
+universe contract asserts both.
+
 **The Ask indexes every deep name.** Sixty-odd deep cards at about 2 KB of
 facts each do not fit the brief's 120 KB beside its 18 KB of market facts, so
 before any name is dropped the brief LEANS the weakest board names to their
