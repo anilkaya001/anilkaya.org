@@ -25,11 +25,13 @@ import {
   closedPriceWindow, buildRecordCloses, recordCalendar, resolveBoardMemory, sameSessionGate,
   retireSession, sessionArchiveKeys, sweepScreenerBand, SCREENER_SPLIT_DEPTH, SCREENER_PAGE_ROWS,
   judgeScreenerDate, sessionRows, readDayOf, PIPELINE_CADENCE, SESSION_OPEN_MINUTES,
-  SESSION_CLOSE_MINUTES, MEMORY_ARCHIVE_SESSIONS, READ_RETRIES, readStored, holdersRefusal,
+  SESSION_CLOSE_MINUTES, MEMORY_ARCHIVE_SESSIONS, READ_RETRIES, readStored, holdersRefusal, resetPublishRetryBudget,
+  LEDGER_PROBE_FAIL_MAX, LEDGER_PROBE_RETRY_BUDGET_MS,
   HOLDERS_RETRY_DAYS,
   IV_RANK_PARAMS, fakeIvRank, measureVariationProbes, fakeOiLadder, fakeLadderGreeks,
   fakeLadderChain, vannaProbeSample, featuresVariationInput, boardVariationMeta, congressRows,
   plainRedispatchSaid, retireAndRoster, bootstrapLedger, callModel, CALL_COST, NOMINAL_SHAPE, markGate,
+  screenerDollarVolume, gatedWorthEnriching, GATED_LIQUIDITY_MARGIN, pickPriorRoster,
 } from "../scripts/flows-pipeline.mjs";
 import { FOCUS_FUNDS, MAG7 as FOCUS_MAG7, FOCUS_MINERS } from "../shared/flows-focus.js";
 import { VARIATION_CODES, variationSummary } from "../shared/flows-variation.js";
@@ -1944,6 +1946,9 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     for (let i = 0; i < 50; i++) t = stepRateController(t, "limited");
     eq(t.floorMs, RATE.floorCeilingMs,
        "fifty consecutive 429s pin the floor at its ceiling, not at maxDelayMs");
+    eq(t.delayMs, RATE.maxDelayMs,
+       "while the per-call delay under that same sustained refusal sits at the 5s backoff ceiling: the floor's ceiling " +
+       "caps what the delay decays back to between refusals, never how far a refused call backs off");
     ok(RATE.floorCeilingMs < RATE.maxDelayMs,
        "and the floor's ceiling is strictly below the per-call backoff ceiling: a single " +
        "call may sleep 5s, but every call may not");
@@ -2868,41 +2873,60 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "(and inside the 100KB the card shedder targets)");
   }
   {
-    const m = /brief: (\d+) facts, (\d+) of them per-name over (\d+) of (\d+) carded names(?: \((\d+) shed)?/.exec(runLog);
+    const m = /brief: (\d+) facts, (\d+) of them per-name over (\d+) of (\d+) carded names([^\n]*)/.exec(runLog);
     ok(m !== null, "the run log states how many carded names the brief indexed, against how many were carded");
     if (m !== null) {
-      const [, , perName, indexed, of, shed] = m;
-      eq(Number(indexed) + Number(shed || 0), Number(of),
-         `the brief accounts for every deep card: ${indexed} indexed plus ${shed || 0} shed of ${of}`);
+      const [, , perName, indexed, of, tail] = m;
+      eq(Number(indexed), Number(of),
+         `every carded name is indexed on this corpus (${indexed} of ${of}); a shed here means the per-name facts ` +
+         "outgrew the brief, and coverage must not fall in silence");
+      ok(!/shed to stay under/.test(tail), "and no name is shed whole: the brief leans the weakest names before it drops one");
       const brief = JSON.parse(fs.readFileSync(`${prefix}-brief.json`, "utf8"));
-      const inBrief = new Set(brief.facts.map((f) => /^card:([^/]+)/.exec(String(f.source || ""))).filter(Boolean).map((x) => x[1]));
-      const cardOf = (t) => JSON.parse(fs.readFileSync(`${prefix}-card-${t}.json`, "utf8"));
-      const focusCards = fs.readdirSync(path.dirname(prefix)).map((f) => /-card-([A-Z].*)\.json$/.exec(f)).filter(Boolean)
-        .map((x) => x[1]).filter((t) => cardOf(t).depth === "focus");
-      ok(focusCards.length > 0 && focusCards.every((t) => inBrief.has(t)),
-         `every focus-depth name is indexed (${focusCards.filter((t) => inBrief.has(t)).length} of ${focusCards.length}): ` +
-         "the owner's watch list is what the Ask is asked about most, so the shed never reaches it");
-      if (shed !== undefined) {
-        const said = /shed to stay under \d+ bytes: the weakest board name\(s\) ([A-Z0-9., -]+);/.exec(runLog);
-        ok(said, "a shed names the names it dropped in the run log, so coverage never falls in silence");
-        const dropped = said ? said[1].split(", ") : [];
-        eq(dropped.length, Number(shed), "and names exactly as many as it counts");
-        const boardAbs = new Map([...read("board-long").rows, ...read("board-short").rows].map((r) => [r.t, Math.abs(r.s)]));
-        const ndxGroup = read("focus").groups.find((g) => g.id === "ndx10");
-        const focusSet = new Set([...FOCUS_MAG7, ...ndxGroup.tickers, ...FOCUS_MINERS]);
-        const keptBoard = [...inBrief].filter((t) => boardAbs.has(t) && cardOf(t).depth === "board" && !focusSet.has(t))
-          .map((t) => boardAbs.get(t));
-        for (const t of dropped) {
-          ok(cardOf(t).depth === "board" && !focusSet.has(t) && boardAbs.get(t) <= Math.min(...keptBoard),
-             `${t}: the shed takes the WEAKEST board names first (|score| ${boardAbs.get(t)}), never a focus name ` +
-             "and never a stronger board name than one it kept");
-        }
-        ok(Number(indexed) >= 45,
-           `and the brief still indexes ${indexed} names — a shed deeper than a handful means the per-name facts ` +
-           "grew, which is a decision to take in flows-ask, not here");
+      ok(JSON.stringify(brief).length <= 120 * 1024, "inside the brief's 120 KB budget, under the 128 KB ingest cap");
+      const factsOf = new Map();
+      for (const f of brief.facts) {
+        const hit = /^card:([^/]+)/.exec(String(f.source || ""));
+        if (hit) factsOf.set(hit[1], (factsOf.get(hit[1]) || []).concat(String(f.id).split("/").pop()));
       }
-      ok(Number(perName) >= 4 * Number(indexed),
-         `at least four readings per indexed name reached the brief (${perName} over ${indexed})`);
+      const cardOf = (t) => JSON.parse(fs.readFileSync(`${prefix}-card-${t}.json`, "utf8"));
+      const deepCards = fs.readdirSync(path.dirname(prefix)).map((f) => /-card-([A-Z].*)\.json$/.exec(f)).filter(Boolean)
+        .map((x) => x[1]).filter((t) => ["board", "focus"].includes(cardOf(t).depth));
+      ok(deepCards.length >= 60 && deepCards.every((t) => factsOf.has(t)),
+         `every deep card (board and focus, ${deepCards.length}) reaches the brief`);
+      const focusCards = deepCards.filter((t) => cardOf(t).depth === "focus");
+      const leanSaid = /; (\d+) lean \((?:[a-z]+(?:, )?)+ only, to stay under \d+ bytes: the weakest ([A-Z0-9., -]+); focus names are leaned last\)/.exec(tail);
+      const leaned = leanSaid ? leanSaid[2].split(", ") : [];
+      if (leanSaid) eq(leaned.length, Number(leanSaid[1]), "a lean names exactly as many names as it counts");
+      ok(focusCards.length > 0 && focusCards.every((t) => !leaned.includes(t)),
+         `every focus-depth name keeps its full reading (${focusCards.length}): the owner's watch list is what the Ask ` +
+         "is asked about most, so the lean never reaches it");
+      const boardAbs = new Map([...read("board-long").rows, ...read("board-short").rows].map((r) => [r.t, Math.abs(r.s)]));
+      const ndxGroup = read("focus").groups.find((g) => g.id === "ndx10");
+      const focusSet = new Set([...FOCUS_MAG7, ...ndxGroup.tickers, ...FOCUS_MINERS]);
+      const fullBoard = deepCards.filter((t) => !leaned.includes(t) && boardAbs.has(t) && cardOf(t).depth === "board" && !focusSet.has(t))
+        .map((t) => boardAbs.get(t));
+      for (const t of leaned) {
+        ok(cardOf(t).depth === "board" && !focusSet.has(t) && boardAbs.get(t) <= Math.min(...fullBoard),
+           `${t}: the lean takes the WEAKEST board names first (|score| ${boardAbs.get(t)}), never a focus name ` +
+           "and never a stronger board name than one it kept whole");
+        ok(factsOf.get(t).length >= 2 && factsOf.get(t).every((k) => ["standing", "gamma", "move"].includes(k)),
+           `${t} keeps its core readings (${factsOf.get(t).join(", ")}): standing, gamma and move`);
+      }
+      const cardBytes = brief.facts.filter((f) => /^card:/.test(String(f.source || ""))).reduce((a, f) => a + JSON.stringify(f).length + 1, 0);
+      const coreBytes = brief.facts.filter((f) => /^card:/.test(String(f.source || "")) &&
+        ["standing", "gamma", "move"].includes(String(f.id).split("/").pop())).reduce((a, f) => a + JSON.stringify(f).length + 1, 0);
+      const baseBytes = JSON.stringify(brief).length - cardBytes;
+      const ceilingNames = DEEP_NAMES + FOCUS_MAG7.length + 10 + FOCUS_MINERS.length;
+      const allLean = baseBytes + Math.ceil(ceilingNames * coreBytes / deepCards.length);
+      ok(allLean <= 120 * 1024,
+         `the brief can index every deep name the focus era can produce (${ceilingNames}: ${DEEP_NAMES} board plus every ` +
+         `focus name off the board) at their core readings: ${allLean} bytes modelled against 122880 — past that the ` +
+         "per-name facts grew, which is a decision to take in flows-ask, not here");
+      const leanFacts = brief.facts.filter((f) => leaned.some((t) => f.source === "card:" + t)).length;
+      const fullNames = Number(indexed) - leaned.length;
+      ok(fullNames > 0 && Number(perName) - leanFacts >= 4 * fullNames,
+         `at least four readings per name kept whole reached the brief (${Number(perName) - leanFacts} over ${fullNames}; ` +
+         `the ${leaned.length} lean names carry their core readings, checked above)`);
     }
   }
 }
@@ -3592,6 +3616,18 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     const refused = await readStored("board:long", { pause: async () => {} });
     ok(refused.failed && refused.status === 403 && seen.length === 3,
        "and a store that keeps refusing is asked three times, then reported as failed");
+
+    answers = [403, 403, 403];
+    seen.length = 0;
+    resetPublishRetryBudget();
+    const probeBudget = { spentMs: 0, budgetMs: 4500 };
+    const probeWaits = [];
+    const probed = await readStored("card:OLD", { budget: probeBudget, pause: async (ms) => { probeWaits.push(ms); } });
+    ok(probed.failed && seen.length === 2 && probeWaits.join() === "1000",
+       "a read given its own retry budget stops retrying when THAT budget is spent (1s spent, the 4s retry would pass 4.5s)");
+    eq(probeBudget.spentMs, 1000, "and charges its wait to that budget");
+    eq(resetPublishRetryBudget(), 0,
+       "and not to the run's publish budget, so the ledger probe can never starve the meta and brief publishes of their retries");
   } finally {
     process.env.FLOWS_INGEST_URL = prevUrl;
     process.env.FLOWS_INGEST_TOKEN = prevTok;
@@ -3934,6 +3970,16 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   markGate(card, { gate: { earnings: "2026-09-29", dte: 5 } });
   ok(card.score === null && card.conviction === null && card.gate.earnings === "2026-09-29" && card.gate.dte === 5,
      "a gated card carries score null and gate {earnings, dte}");
+  const thin = { ticker: "THIN", close: "20", avg30_volume: "1000000" };
+  const deepLiquid = { ticker: "DEEP", close: "20", avg30_volume: "5000000" };
+  eq(screenerDollarVolume(thin), 2e7, "the pre-check reads the screener's 30-day average volume times the close");
+  ok(!gatedWorthEnriching(thin), "a gated name whose $20M average dollar volume is far under the $50M card floor is not enriched: " +
+     "five vendor calls for a card the floor would refuse");
+  ok(gatedWorthEnriching(deepLiquid), "a gated name that clears it is enriched and carded");
+  ok(gatedWorthEnriching({ ticker: "EDGE", close: "10", avg30_volume: "4500000" }),
+     `a name within the ${GATED_LIQUIDITY_MARGIN} margin of the floor is still enriched: the candle median decides, not the proxy`);
+  ok(gatedWorthEnriching(thin, { focus: new Set(["THIN"]) }), "a focus name is enriched whatever its volume");
+  ok(gatedWorthEnriching({ ticker: "NOVOL", close: "20" }), "and a row with no average volume is enriched rather than skipped on a guess");
   const plain = { score: 3 };
   markGate(plain, { gate: null });
   eq(plain.score, 3, "and an ungated one is untouched");
@@ -3997,6 +4043,75 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   const blind = await run({ prior: { payload: null, failed: true, status: 503 }, reader: async () => ({ failed: true }) });
   eq(deletes.length, 0, "when the prior roster cannot be read nothing is retired on a guess");
   eq(blind.ledger, "unread", "and the roster says so");
+
+  {
+    const shelf = new Map([["card:OLD", { sessionDate: "2026-09-21" }], ["card-x:OLD", { sessionDate: "2026-09-21" }],
+      ["card:B", { sessionDate: "2026-09-23" }]]);
+    const rosters = [];
+    const night = async (sessionDate, prior, candidates) => {
+      const nightLogs = [], nightDeletes = [];
+      let roster = null;
+      const out = await retireAndRoster({
+        sessionDate, generatedAt: "t", depth: new Map([["B", "cross-section"]]), landed: new Set(["card:B"]), candidates,
+        prior,
+        reader: async (key) => (shelf.has(key) ? { payload: shelf.get(key), status: 200 } : { payload: null, absent: true, status: 200 }),
+        remove: async (key) => { nightDeletes.push(key); return shelf.delete(key) ? { ok: true, status: 200 } : { ok: false, status: 404 }; },
+        write: async (key, payload) => { roster = payload; rosters.push(payload); },
+        log: (line) => nightLogs.push(line),
+      });
+      shelf.set("card:B", { sessionDate });
+      return { out, roster, deletes: nightDeletes, logs: nightLogs };
+    };
+    const n1 = await night("2026-09-22", { payload: { v: 1, sessionDate: "2026-09-21", depth: {}, held: { "card:OLD": "2026-09-21", "card-x:OLD": "2026-09-21" }, ledger: "carried" }, status: 200 }, ["B"]);
+    ok(n1.out.ledger === "carried" && Object.hasOwn(n1.roster.held, "card:OLD"), "night one carries OLD, still young, in its ledger");
+    const early = { payload: n1.roster, status: 200 };
+    const saidEarly = [];
+    ok(pickPriorRoster({ payload: null, failed: true, status: 403 }, early, { log: (l) => saidEarly.push(l) }) === early &&
+       saidEarly.length === 1,
+       "a roster read that fails at the retire step falls back to the copy the run read at its start, and says so");
+    const lateOk = { payload: n1.roster, status: 200 };
+    ok(pickPriorRoster(lateOk, { failed: true, status: 500 }) === lateOk, "a late read that answered is always preferred");
+    ok(pickPriorRoster({ failed: true, status: 403 }, null).failed, "and with no early copy the failure stands");
+    const n2 = await night("2026-09-23", { payload: null, failed: true, status: 403 }, ["B"]);
+    ok(n2.out.ledger === "unread" && !Object.hasOwn(n2.roster.held, "card:OLD") && n2.deletes.length === 0,
+       "night two cannot read the roster: nothing is retired and the ledger it writes has forgotten OLD");
+    const n3 = await night("2026-09-28", { payload: n2.roster, status: 200 }, ["B", "OLD"]);
+    ok(n3.out.ledger === "bootstrap" && n3.logs.some((l) => /not complete \(ledger-unread\)/.test(l)),
+       "night three reads a ledger marked unread and does NOT trust it: it probes the store");
+    assert.deepEqual(n3.deletes.sort(), ["card-x:OLD", "card:OLD"],
+      "so the key only the older ledger knew is found and retired once it is more than three sessions old"); checks++;
+    const n4 = await night("2026-09-29", { payload: n3.roster, status: 200 }, ["B"]);
+    ok(n4.out.ledger === "carried" && n4.deletes.length === 0, "and the night after, the rebuilt ledger is carried again");
+
+    shelf.set("card:LOST", { sessionDate: "2026-09-25" });
+    const gap = await night("2026-09-30", { payload: n3.roster, status: 200 }, ["B", "LOST"]);
+    ok(gap.out.ledger === "bootstrap" && gap.logs.some((l) => /not complete \(gap-2\)/.test(l)),
+       "a prior roster two sessions behind (a night whose roster write failed, or a run killed after its cards) is not trusted either");
+    ok(Object.hasOwn(gap.roster.held, "card:LOST"),
+       "so a card that landed only on the lost night enters the ledger and is retired in its turn");
+
+    const failing = await retireAndRoster({
+      sessionDate: "2026-09-24", generatedAt: "t", landed: new Set(),
+      prior: { payload: { v: 1, sessionDate: "2026-09-23", depth: {}, held: { "card:GONE": "2026-09-10" } }, status: 200 },
+      reader: async () => ({ payload: null, absent: true }),
+      remove: async () => ({ ok: true, status: 200 }),
+      write: async () => { throw new Error("HTTP 500"); },
+      log: (line) => logs.push(line),
+    });
+    ok(failing.written === false && failing.retired === 1 &&
+       logs.some((l) => /roster: NOT written \(HTTP 500\) after 1 key\(s\) were removed/.test(l)),
+       "a roster write that fails after the deletes says how many were removed, never that nothing was retired");
+
+    let reads = 0;
+    const stuck = await bootstrapLedger({
+      tickers: Array.from({ length: 200 }, (_, i) => "T" + i), reader: async () => { reads++; return { failed: true, status: 403 }; },
+      pool: async (list, fn) => { for (const x of list) await fn(x); },
+    });
+    ok(stuck.capped && reads === LEDGER_PROBE_FAIL_MAX,
+       `a probe against a store that keeps refusing stops after ${LEDGER_PROBE_FAIL_MAX} failed reads and is marked partial, ` +
+       "rather than spending the run on 400 refusals");
+    ok(LEDGER_PROBE_RETRY_BUDGET_MS <= 20_000, "and its retries have their own budget of at most twenty seconds");
+  }
 }
 
 console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, the dated archive key and its bounded prune, the watch board's ranking and vocabulary, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor, sector TRIX and the fixed-clamp scaling that keeps a flat day flat, the movers band's zero-call guarantee and its unranked counts, the rate limiter's floor actually being a floor, the truncated-chain probe's three distinct verdicts, the board's memory refusing a prior board that turns out to be this run's own session, a corpus proven to REACH the change layer's branches rather than merely to satisfy assertions written around them, and a market-wide join whose published coverage is checked against the cards it was measured over rather than against itself, the sector OPTIONS lean proven to be a different quantity from the sector momentum beside it — its ratio comparable across baskets three orders of magnitude apart where the dollar difference is not, its measured zero visible in dollars and undefined as a ratio, a blank vendor string refused before it can become a confident zero, and its row vocabulary disjoint from TRIX's — and the news tape's four counts, its own ordering applied before the cap so the rows kept are the newest and not the first, and an undated row published, counted on both sides of the cap, and never given a manufactured timestamp; and the focus-era coverage — gated names carded without a score, focus names built deep whatever their rank, fund dossiers, a roster that is also the retire ledger, and a call model that reproduces the measured nightly`);

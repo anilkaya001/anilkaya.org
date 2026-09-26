@@ -568,6 +568,32 @@ index ticker's `card:` and `card-x:` keys are read through the ingest route
 the prior roster cannot be read at all, nothing is retired that night. A
 refused DELETE keeps its key in `held` for the next run.
 
+The roster is read twice: once as the run starts and again at the retire
+step. Only the nightly writes it, so when the late read fails the early copy
+is used and the night still retires. Only when both fail does the night
+retire nothing and write `ledger: "unread"`.
+
+The ledger is trusted only when it is whole and current. The probe runs
+whenever the prior roster's `ledger` is anything but `carried` or `bootstrap`
+(`bootstrap-partial`, `dropped`, `unread` — the roster written on a night that
+could not read its own prior has an empty `held`, so every older key would
+otherwise be forgotten for good), and whenever its `sessionDate` is more than
+one NYSE session before tonight's (a night whose roster write failed after its
+cards landed, or a run killed between the two, leaves an older roster behind,
+and the cards of the lost night are in no ledger). The probe has its own
+20-second retry budget, separate from the 90 seconds the meta and brief
+publishes rely on, and stops after 25 failed reads; either way it marks the
+ledger `bootstrap-partial` so the next night probes again. A roster write that
+fails after the deletes logs how many keys were removed.
+
+What the probe cannot see is a key that only a LOST ledger knew and whose
+ticker is in none of tonight's candidates (the harvest of about 830 names, the
+guarantee, the funds, the indices and the Nasdaq-100 constant): a name that
+left the screen entirely in the same few nights its ledger was lost. Such a
+row stays until its ticker returns to the screen. A Worker-side sweep of
+`card:`, `card-x:` and `hist:` rows by `updated_at` would close it; it is not
+in the Worker today.
+
 ### 10.5 The data pipeline
 
 Compute runs in GitHub Actions, never on Cloudflare: the Workers free plan
@@ -648,7 +674,12 @@ name approaching earnings kept whatever card it last had for up to twelve days
 The scored pool is unchanged — the largest hundred of the GATED screen plus the
 guarantee — but every name the same rule would pick from the UNGATED screen is
 now enriched too, and carded for the session with `score: null` and
-`gate: {earnings, dte}`. It is never scored and never on a board.
+`gate: {earnings, dte}`. It is never scored and never on a board. A gated name
+that is not a focus name is enriched only when its screener row's 30-day
+average volume times its close reaches 80% of the $50M card floor: below that
+the candle median would refuse the card anyway, and the five enrichment calls
+would buy nothing. A row with no average volume is enriched rather than
+skipped on a guess.
 
 **Focus names are built deep whatever their rank.** The Mag 7, the NDX 10 and
 the six focus miners (`shared/flows-focus.js`) get the full deep treatment —
@@ -671,8 +702,24 @@ as for SPY.
 ticker and fund: the metal groups, the Mag 7 and the NDX 10 with their source,
 one row per ticker in the live strip's field names and units, up to 22 closes
 where the run already holds candles, and the tickers the vendor did not
-return. It is capped at 24 KB and sheds closes, never rows; a failed read
-publishes `unavailable` with the groups still listed.
+return. It is capped at 24 KB and sheds closes, never rows. When the read
+fails, or does not return a ticker, the row is filled from what the run
+already holds — the harvest's own screener row for a stock, the market leg's
+or a second by-ticker read's row for a fund — and the payload's `backfill`
+names those tickers, when they were read and why. Only a ticker no read holds
+is `missing`, and only a payload with no row at all publishes `unavailable`
+(with the groups still listed). Fund dossiers take their spot row from the
+same chain, so one failed call cannot skip all nine: a fund absent from the
+focus read is read again by ticker, one call, only on the night it is needed.
+
+**The Ask indexes every deep name.** Sixty-odd deep cards at about 2 KB of
+facts each do not fit the brief's 120 KB beside its 18 KB of market facts, so
+before any name is dropped the brief LEANS the weakest board names to their
+core readings (standing, gamma and move; `CARD_CORE_FACTS` in
+`shared/flows-ask.js`), weakest first and focus names last. The log names the
+leaned names. A name is shed whole only if every name's core readings cannot
+fit, which the pipeline contract proves does not happen for the largest deep
+set the focus era can produce (73 names modelled).
 
 **The board widened for free; the expensive legs did not.** The board is built
 from data already fetched, so publishing 93 rows instead of 11 costs nothing. A
@@ -837,8 +884,16 @@ that publishes nothing at all, which is strictly worse than being rate-limited.
 It was 750 ms until 2026-09-25, when the budget was regenerated from measured
 legs (1,613 → 4,191): at 750 ms that budget needs 52 minutes, so the relation
 below had silently stopped holding once the real run passed 2,400 calls. At
-400 ms it needs 27.9 minutes against the 30 the chain reserve leaves; the last
-learned floor was 150 ms with one 429 in 3,071 calls.
+400 ms it needs 27.9 minutes against the 30 the chain reserve leaves. The
+evidence for lowering it is the 2026-09-24 nightly's own floor verdict: "1 of
+3071 calls refused (0.0%), backoff 0.2s against 256.3s of queueing (0% as
+large). The floor is CONSERVATIVE — refusals are under 5%", with the learned
+floor never above 150 ms, so 400 ms is still more than two and a half times
+the highest floor the vendor has ever asked for. The ceiling caps only what
+the delay decays back to between refusals: a refused call still backs off to
+the 5-second per-call ceiling (the pipeline contract asserts both). If a
+future verdict reads "roughly where the vendor wants it" at 400 ms, cut calls
+before raising it.
 `rateFloorSurvivesBudget()` asserts the relation and the contract test holds it
 from both sides, so raising the ceiling without raising the deadline fails the
 build rather than the morning.

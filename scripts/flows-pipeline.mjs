@@ -604,6 +604,22 @@ function eligible(row, { skipCap = false } = {}) {
   return true;
 }
 
+export const GATED_LIQUIDITY_MARGIN = 0.8;
+
+export function screenerDollarVolume(row) {
+  const px = vendorNum(row && row.close);
+  const adv = vendorNum(row && row.avg30_volume);
+  return px !== null && adv !== null && px > 0 && adv >= 0 ? px * adv : null;
+}
+
+export function gatedWorthEnriching(row, { focus = new Set(), floor = UNIVERSE.minDollarVolume,
+  margin = GATED_LIQUIDITY_MARGIN } = {}) {
+  if (!row || typeof row.ticker !== "string") return false;
+  if (focus.has(row.ticker)) return true;
+  const dv = screenerDollarVolume(row);
+  return dv === null || dv >= floor * margin;
+}
+
 function screenerTilt(row) {
   const both = (a, b) => a !== null && b !== null;
   const bull = vendorNum(row.bullish_premium);
@@ -1795,13 +1811,16 @@ async function readStoredOnce(key) {
   }
 }
 
-async function readStored(key, { retries = READ_RETRIES, pause = sleep } = {}) {
+async function readStored(key, { retries = READ_RETRIES, pause = sleep, budget = null } = {}) {
   if (DRY_RUN) return { payload: null, absent: true, status: 0 };
   let read = await readStoredOnce(key);
   for (let attempt = 0; read.failed && READ_RETRYABLE(read.status); attempt++) {
-    const wait = publishRetryDelay(attempt, { retries, spentMs: publishRetrySpentMs });
+    const wait = budget
+      ? publishRetryDelay(attempt, { retries, spentMs: budget.spentMs, budgetMs: budget.budgetMs })
+      : publishRetryDelay(attempt, { retries, spentMs: publishRetrySpentMs });
     if (wait === null) break;
-    publishRetrySpentMs += wait;
+    if (budget) budget.spentMs += wait;
+    else publishRetrySpentMs += wait;
     console.warn(`  read ${key}: ${read.status ? `HTTP ${read.status}` : read.detail || "no answer"}` +
       ` — waiting ${wait}ms and reading again (retry ${attempt + 1} of ${retries})`);
     await pause(wait);
@@ -4131,12 +4150,12 @@ function indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, co
       if (!Array.isArray(rows) || !rows.length) return null;
       return buildChainPanels(rows, { spot, asOf: sessionDate, ticker, complete: false, pages: 1 });
     },
-    card: ({ ticker, row, raw, features, reads, chain }) => {
+    card: ({ ticker, row, raw, features, reads, chain, depth = "index" }) => {
       const card = buildCard({
         ticker, row: { ...sessionRow(row, features), nm: typeof row.full_name === "string" && row.full_name.trim() ? row.full_name.trim().slice(0, 60) : null }, features,
         strikes: raw.strikes, ticks: raw.ticks, expiries: raw.expiries,
         surface: reads.surface, chain,
-        chainMissing: chain ? null : "the index chain page could not be read this run",
+        chainMissing: chain ? null : `the ${depth === "fund" ? "fund" : "index"} chain page could not be read this run`,
         scoreHistory: null, weights: null,
         maxPain: reads.maxPain, congress: congressRows(ticker, congressState), generatedAt, sessionDate,
         darkpool: reads.darkpool, oiDeltas: reads.oiDeltas, termStructure: reads.termStructure, ivRank: reads.ivRank,
@@ -4149,10 +4168,22 @@ function indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, co
   };
 }
 
+export function pickPriorRoster(late, early, { log = () => {} } = {}) {
+  if (!late || !late.failed) return late;
+  if (!early || early.failed) return late;
+  log(`  roster: the prior roster could not be read now (HTTP ${late.status}); using the copy read at the start of ` +
+    "this run, which only this run could have changed");
+  return early;
+}
+
 export const LEDGER_PROBE_MAX = 2400;
 
+export const LEDGER_PROBE_FAIL_MAX = 25;
+
+export const LEDGER_PROBE_RETRY_BUDGET_MS = 20_000;
+
 export async function bootstrapLedger({ tickers = [], landed = new Set(), reader, pool = runPooled, width = 4,
-  deadline = null, limit = LEDGER_PROBE_MAX } = {}) {
+  deadline = null, limit = LEDGER_PROBE_MAX, failLimit = LEDGER_PROBE_FAIL_MAX } = {}) {
   const known = new Map();
   let reads = 0, failed = 0, capped = false;
   const dayOf = (p) => {
@@ -4160,7 +4191,10 @@ export async function bootstrapLedger({ tickers = [], landed = new Set(), reader
     return ARCHIVE_DATE_RE.test(String(d || "")) ? d : null;
   };
   const probe = async (key) => {
-    if (reads >= limit || (Number.isFinite(deadline) && Date.now() > deadline)) { capped = true; return "skipped"; }
+    if (reads >= limit || failed >= failLimit || (Number.isFinite(deadline) && Date.now() > deadline)) {
+      capped = true;
+      return "skipped";
+    }
     reads++;
     const r = await reader(key);
     if (!r || r.failed) { failed++; return "failed"; }
@@ -4188,20 +4222,20 @@ export async function retireAndRoster({
     return null;
   }
   const priorPayload = prior && prior.payload ? prior.payload : null;
-  let { known, complete } = priorLedger(priorPayload);
+  let { known, complete, why } = priorLedger(priorPayload, { sessionDate });
   let ledger = "carried";
   if (prior && prior.failed) {
     ledger = "unread";
     known = new Map();
-    log(`  roster: the prior roster could not be read (HTTP ${prior.status}) — nothing is retired tonight, and the next run rebuilds the ledger`);
+    log(`  roster: the prior roster could not be read (HTTP ${prior.status}) — nothing is retired tonight, and the next run probes the store to rebuild the ledger`);
   } else if (!complete) {
     const probed = await bootstrapLedger({ tickers: [...new Set([...candidates, ...known.keys()].map((k) => rosterKeyTicker(k) || k))],
       landed, reader, deadline });
-    for (const [k, v] of probed.known) known.set(k, v);
+    for (const [k, v] of probed.known) if (!known.has(k) || v) known.set(k, v);
     ledger = probed.capped || probed.failed ? "bootstrap-partial" : "bootstrap";
-    log(`  roster: no ledger in the prior roster, so the store was probed — ${probed.reads} read(s), ` +
+    log(`  roster: the prior ledger is not complete (${why}), so the store was probed — ${probed.reads} read(s), ` +
       `${probed.known.size} older key(s) found` + (probed.failed ? `, ${probed.failed} read(s) failed` : "") +
-      (probed.capped ? " — the probe stopped at its cap or the deadline" : ""));
+      (probed.capped ? " — the probe stopped at its cap, its failure limit or the deadline" : ""));
   }
   const plan = retirePlan({ sessionDate, known, landed, exempt });
   let removed = 0, absent = 0, refused = 0, streak = 0, lastStatus = 0;
@@ -4221,17 +4255,27 @@ export async function retireAndRoster({
     `; ${Object.keys(held).length} older key(s) held (${plan.kept.young} within the window, ${plan.kept.exempt} exempt` +
     (plan.kept.undated ? `, ${plan.kept.undated} undated` : "") + ")");
   const built = buildRoster({ sessionDate, generatedAt, depth, landed, held, retired: gone, ledger });
-  if (!built.fits) {
-    log(`  roster: ${built.bytes} bytes, over the cap — the held ledger is dropped so the roster still publishes`);
-    const slim = buildRoster({ sessionDate, generatedAt, depth, landed, held: {}, retired: [], ledger: "dropped" });
-    await write("roster", slim.payload);
-  } else {
-    await write("roster", built.payload);
+  let written = true;
+  try {
+    if (!built.fits) {
+      log(`  roster: ${built.bytes} bytes, over the cap — the held ledger is dropped so the roster still publishes`);
+      const slim = buildRoster({ sessionDate, generatedAt, depth, landed, held: {}, retired: [], ledger: "dropped" });
+      await write("roster", slim.payload);
+    } else {
+      await write("roster", built.payload);
+    }
+  } catch (error) {
+    written = false;
+    log(`  roster: NOT written (${error.message}) after ${removed} key(s) were removed` +
+      (absent ? ` and ${absent} found already absent` : "") +
+      ` — the stored roster stays at its older session, so the next run finds the gap and probes the store`);
   }
   const counts = built.payload.counts;
-  log(`  roster: ${Object.keys(built.payload.depth).length} carded name(s) — ` +
-    Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(", ") + `, ${built.bytes} bytes (ledger ${ledger})`);
-  return { retired: removed, absent, refused, held: Object.keys(held).length, ledger, bytes: built.bytes };
+  if (written) {
+    log(`  roster: ${Object.keys(built.payload.depth).length} carded name(s) — ` +
+      Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(", ") + `, ${built.bytes} bytes (ledger ${ledger})`);
+  }
+  return { retired: removed, absent, refused, held: Object.keys(held).length, ledger, bytes: built.bytes, written };
 }
 
 export function dryRosterReader(sessionDate) {
@@ -4509,10 +4553,12 @@ async function main() {
     guaranteed,
   });
   const scoredPicked = new Set(scoredCoverage.map(({ row }) => row.ticker));
-  const gatedCoverage = selectCoverage(withTilt.map(({ row }) => row), {
+  const gatedPool = selectCoverage(withTilt.map(({ row }) => row), {
     count: UNIVERSE.enrichCount,
     guaranteed,
   }).filter(({ row }) => !scoredPicked.has(row.ticker) && gatedTickers.has(row.ticker));
+  const gatedCoverage = gatedPool.filter(({ row }) => gatedWorthEnriching(row, { focus: focusDeep }));
+  const gatedThin = gatedPool.filter(({ row }) => !gatedWorthEnriching(row, { focus: focusDeep })).map(({ row }) => row.ticker);
   const picks = scoredCoverage.concat(gatedCoverage).map(({ row, why }) => ({
     row, why, tilt: tiltByPick.get(row.ticker) || screenerTilt(row), gate: gateOf(row),
   }));
@@ -4523,7 +4569,10 @@ async function main() {
     `(the largest ${UNIVERSE.enrichCount} of ${tilted.length} gated), ` +
     `${byIndex} added by Nasdaq-100 membership, the Mag 7 and the miners ` +
     `(${membership.fallback ? `constant dated ${NDX_AS_OF}` : `QQQ holdings ${membership.asOf || "undated"}`}), ` +
-    `${gatedCoverage.length} inside the ${EARNINGS_GATE_DAYS}-day earnings gate carded without a score; ` +
+    `${gatedCoverage.length} inside the ${EARNINGS_GATE_DAYS}-day earnings gate carded without a score` +
+    (gatedThin.length ? ` (${gatedThin.length} more gated name(s) skipped before enrichment: their 30-day average ` +
+      `dollar volume is under ${Math.round(GATED_LIQUIDITY_MARGIN * 100)}% of the ` +
+      `$${(UNIVERSE.minDollarVolume / 1e6).toFixed(0)}M card floor — ${gatedThin.slice(0, 12).join(", ")})` : "") + "; " +
     `${focusDeep.size - focusMissing.length} of ${focusDeep.size} focus name(s) among them` +
     (focusMissing.length ? ` (not screened or not eligible: ${focusMissing.join(", ")})` : ""));
 
@@ -4781,6 +4830,8 @@ async function main() {
     console.warn(`  prune: ${error.message}`);
     return null;
   });
+  const earlyRoster = DRY_RUN ? Promise.resolve(null)
+    : readStored("roster", { budget: { spentMs: 0, budgetMs: 5_000 } }).catch(() => null);
 
   try {
     const watchRows = toWatchRows(sides.neutralRows, sessionRowByTicker, tiltByTicker);
@@ -6379,12 +6430,26 @@ async function main() {
   console.log(`  focus read: ${focusRead.rows.size} of ${focusAsk.length + FOCUS_FUNDS.filter((t) => !focusAsk.includes(t)).length} ` +
     `row(s) in ${focusRead.calls} call(s)` + (focusRead.missing.length ? `, missing ${focusRead.missing.join(", ")}` : "") +
     (focusRead.ok ? "" : ` — FAILED (${focusRead.error})`));
+  const fundRows = new Map();
+  for (const t of FOCUS_FUNDS) {
+    const row = focusRead.rows.get(t) || (marketLegs && marketLegs.indexRows.get(t));
+    if (row) fundRows.set(t, row);
+  }
+  {
+    const lost = FOCUS_FUNDS.filter((t) => !fundRows.has(t));
+    if (lost.length && Date.now() < deadline) {
+      const again = await readFocusRows(vendor, lost, { date: screenerDate });
+      for (const [t, row] of again.rows) fundRows.set(t, row);
+      console.log(`  fund rows: ${lost.length} not in the focus read (${lost.join(", ")}), read again in ${again.calls} call(s): ` +
+        `${again.rows.size} returned` + (again.ok ? "" : ` — FAILED (${again.error})`));
+    }
+  }
   const dossierFeatures = new Map();
   const dossierBuilt = new Map();
   {
     const roster = dossierRoster({ index: INDEX_TICKERS, funds: FOCUS_FUNDS });
     const rows = new Map(marketLegs ? marketLegs.indexRows : []);
-    for (const t of FOCUS_FUNDS) if (!rows.has(t) && focusRead.rows.has(t)) rows.set(t, focusRead.rows.get(t));
+    for (const [t, row] of fundRows) if (!rows.has(t)) rows.set(t, row);
     const deps = indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, congressState, marketCross, variationRun, volLeg });
     const dossiers = await buildIndexDossiers({
       tickers: roster.tickers, depthOf: (t) => roster.depth.get(t), indexRows: rows, deadline,
@@ -6412,14 +6477,19 @@ async function main() {
     const featuresFor = new Map(enriched.map((e) => [e.features.ticker, e.features]));
     for (const [t, f] of dossierFeatures) featuresFor.set(t, f);
     try {
+      const askSet = new Set(focusAsk);
+      const held = new Map(fundRows);
+      for (const r of screener) if (r && askSet.has(r.ticker) && !held.has(r.ticker)) held.set(r.ticker, r);
       const focusPayload = buildFocusPayload({
         ndx, rows: focusRead.rows, read: focusRead, sessionDate, generatedAt, readAt: focusRead.readAt,
         closesOf: (t) => focusCloses(featuresFor.get(t), sessionDate),
+        backfill: held, backfillFrom: "harvest", backfillReadAt: screenerReadAt,
       });
       await publish("focus", focusPayload);
       console.log(`  focus: ${focusPayload.status}, ${Object.keys(focusPayload.rows).length} row(s) over ` +
         `${focusPayload.groups.length} group(s), ${Object.keys(focusPayload.closes || {}).length} with closes` +
         (focusPayload.missing.length ? `, missing ${focusPayload.missing.join(", ")}` : "") +
+        (focusPayload.backfill ? `, ${focusPayload.backfill.tickers.length} filled from the run's own harvest (${focusPayload.backfill.why})` : "") +
         `, ${focusPayload.bytes || JSON.stringify(focusPayload).length} bytes of ${FOCUS_BUDGET_BYTES}`);
     } catch (error) {
       console.warn(`  focus: ${error.message}`);
@@ -6435,6 +6505,7 @@ async function main() {
   }
 
   let rosterSummary = null;
+  const probeBudget = { spentMs: 0, budgetMs: LEDGER_PROBE_RETRY_BUDGET_MS };
   try {
     rosterSummary = await retireAndRoster({
       sessionDate, generatedAt,
@@ -6446,12 +6517,16 @@ async function main() {
       exempt: new Set([...INDEX_TICKERS, ...FOCUS_FUNDS, ...focusDeep]),
       candidates: [...new Set([...screener.map((r) => r && r.ticker).filter(Boolean), ...guaranteed, ...FOCUS_FUNDS,
         ...INDEX_TICKERS, ...NDX_100])],
-      reader: DRY_RUN ? dryRosterReader(sessionDate) : readStored,
-      prior: DRY_RUN ? await dryRosterReader(sessionDate)("roster") : await readStored("roster"),
+      reader: DRY_RUN ? dryRosterReader(sessionDate)
+        : (key) => readStored(key, { budget: probeBudget }),
+      prior: DRY_RUN ? await dryRosterReader(sessionDate)("roster")
+        : pickPriorRoster(await readStored("roster", { budget: probeBudget }), await earlyRoster,
+          { log: (line) => console.warn(line) }),
       deadline,
     });
   } catch (error) {
-    console.warn(`  roster: ${error.message} — no card was retired and the roster was not written`);
+    console.warn(`  roster: ${error.message} — the retire step stopped before the roster was written; the stored ` +
+      "roster stays at its older session, so the next run finds the gap and probes the store");
   }
 
   console.log("  " + (DRY_RUN ? "[dry-run] " : "") + describeGammaRange(gammaProfiles).line +
@@ -6555,7 +6630,7 @@ async function main() {
     }
 
     const BRIEF_BYTE_BUDGET = 120 * 1024;
-    const { shedCardFacts } = await import("../shared/flows-ask.js");
+    const { shedCardFacts, CARD_CORE_FACTS } = await import("../shared/flows-ask.js");
     const base = {
       generatedAt, sessionDate,
       ...buildBrief(briefStoreFrom(publishedStore)),
@@ -6569,10 +6644,12 @@ async function main() {
     const indexed = index.cardNames || [];
     const priority = [...focusCarded, ...deepTickers.filter((t) => !focusDeep.has(t))];
     const briefOrder = [...priority.filter((t) => indexed.includes(t)), ...indexed.filter((t) => !priority.includes(t))];
-    const shed = shedCardFacts(index.facts, briefOrder, over);
+    const shed = shedCardFacts(index.facts, briefOrder, over, { lean: CARD_CORE_FACTS });
     const cardCount = shed.facts.filter((f) => typeof f.source === "string" && f.source.startsWith("card:")).length;
     console.log(`  brief: ${shed.facts.length} facts, ${cardCount} of them per-name over ` +
       `${shed.namesIndexed.indexed} of ${shed.namesIndexed.of} carded names` +
+      (shed.leaned.length ? `; ${shed.leaned.length} lean (${CARD_CORE_FACTS.join(", ")} only, to stay under ` +
+        `${BRIEF_BYTE_BUDGET} bytes: the weakest ${shed.leaned.join(", ")}; focus names are leaned last)` : "") +
       (shed.namesIndexed.shed ? ` (${shed.namesIndexed.shed} shed to stay under ${BRIEF_BYTE_BUDGET} bytes: ` +
         `the weakest board name(s) ${briefOrder.slice(briefOrder.length - shed.namesIndexed.shed).join(", ")}; ` +
         "focus names are kept first)" : ""));

@@ -204,7 +204,8 @@ export function focusRow(row) {
 
 export function buildFocusPayload({
   ndx = null, rows = null, read = null, closesOf = () => null, sessionDate = null, generatedAt = null,
-  readAt = null, fresh = null, budgetBytes = FOCUS_BUDGET_BYTES,
+  readAt = null, fresh = null, budgetBytes = FOCUS_BUDGET_BYTES, backfill = null, backfillFrom = "harvest",
+  backfillReadAt = null,
 } = {}) {
   const groups = focusGroups(ndx);
   const asked = focusTickers({ groups });
@@ -214,7 +215,9 @@ export function buildFocusPayload({
     fields: FOCUS_FIELDS.slice(),
     groups,
   };
-  if (!read || read.ok === false || !(rows instanceof Map) || !rows.size) {
+  const primary = read && read.ok !== false && rows instanceof Map ? rows : new Map();
+  const spare = backfill instanceof Map ? backfill : new Map();
+  if (!asked.some((t) => primary.has(t) || spare.has(t))) {
     const reason = read && read.ok === false ? (read.gated ? "plan_gated" : "unreadable") : "empty";
     return { ...base, status: "unavailable", reason, detail: read && read.error ? String(read.error).slice(0, 200) : null,
       rows: {}, missing: asked.slice() };
@@ -222,14 +225,20 @@ export function buildFocusPayload({
   const out = {};
   const closes = {};
   const missing = [];
+  const filled = [];
   for (const t of asked) {
-    const row = rows.get(t);
+    const row = primary.get(t) || spare.get(t);
     if (!row) { missing.push(t); continue; }
+    if (!primary.has(t)) filled.push(t);
     out[t] = focusRow(row);
     const c = closesOf(t);
     if (Array.isArray(c) && c.length) closes[t] = c;
   }
   const payload = { ...base, status: Object.keys(out).length ? "ok" : "unavailable", rows: out, closes, missing };
+  if (filled.length) {
+    payload.backfill = { from: backfillFrom, readAt: backfillReadAt, tickers: filled,
+      why: read && read.ok === false ? (read.gated ? "plan_gated" : "unreadable") : "not_returned" };
+  }
   if (payload.status !== "ok") payload.reason = "empty";
   const size = () => new TextEncoder().encode(JSON.stringify(payload)).length;
   const shed = [];

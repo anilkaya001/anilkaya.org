@@ -62,7 +62,7 @@ export async function buildIndexDossiers({
       const f = features(raw, ticker, spot, row);
       const reads = await perName(ticker, f.spot || spot, raw);
       const panels = await chain(ticker, f.spot || spot, raw);
-      const built = card({ ticker, row, raw, features: f, reads, chain: panels });
+      const built = card({ ticker, row, raw, features: f, reads, chain: panels, depth });
       built.depth = depth;
       const fit = shedToFit(built);
       if (fit.dropped.length) out.shed[ticker] = fit.dropped;

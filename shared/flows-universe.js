@@ -123,9 +123,11 @@ export function cardDepthOf(depth) {
   return ROSTER_DEPTHS.includes(depth) ? depth : null;
 }
 
-export function priorLedger(prior) {
+export const LEDGER_GAPLESS = Object.freeze(["carried", "bootstrap"]);
+
+export function priorLedger(prior, { sessionDate = null } = {}) {
   const known = new Map();
-  if (!prior || typeof prior !== "object" || Array.isArray(prior)) return { known, complete: false };
+  if (!prior || typeof prior !== "object" || Array.isArray(prior)) return { known, complete: false, why: "absent" };
   const day = DAY_RE.test(String(prior.sessionDate || "")) ? prior.sessionDate : null;
   const depth = prior.depth && typeof prior.depth === "object" ? prior.depth : {};
   const session = prior.session && typeof prior.session === "object" ? prior.session : {};
@@ -144,7 +146,13 @@ export function priorLedger(prior) {
     if (!rosterKeyTicker(key) || known.has(key)) continue;
     known.set(key, DAY_RE.test(String(s || "")) ? s : null);
   }
-  return { known, complete: !!held && prior.v === 1 && prior.ledger !== "bootstrap-partial" && prior.ledger !== "dropped" };
+  const gap = day && DAY_RE.test(String(sessionDate || "")) ? tradingSessionsBetween(day, sessionDate) : null;
+  const why = !held || prior.v !== 1 ? "no-ledger"
+    : !LEDGER_GAPLESS.includes(prior.ledger || "carried") ? "ledger-" + prior.ledger
+    : sessionDate !== null && gap === null ? "undated"
+    : gap !== null && gap > 1 ? "gap-" + gap
+    : null;
+  return { known, complete: why === null, why, gap };
 }
 
 export function retirePlan({ sessionDate, known = new Map(), landed = new Set(), exempt = new Set(),

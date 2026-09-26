@@ -695,16 +695,19 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   const roster = dossierRoster({ index: ["SPY", "QQQ", "IWM"], funds: ["GLD", "SPY", "COPX"] });
   deep(roster.tickers, ["SPY", "QQQ", "IWM", "GLD", "COPX"], "the dossier roster is the indices then the funds, each once");
   const funds = [];
+  const cardDepths = {};
   const fundOut = await buildIndexDossiers({
     tickers: roster.tickers, depthOf: (t) => roster.depth.get(t),
     indexRows: new Map(roster.tickers.map((t) => [t, { close: "100" }])),
     enrich: async () => ({}), features: () => ({}), perName: async () => ({}), chain: async () => null,
-    card: ({ ticker }) => ({ ticker, depth: "board", panels: {} }),
+    card: ({ ticker, depth }) => { cardDepths[ticker] = depth; return { ticker, depth: "board", panels: {} }; },
     publish: async (key, card) => funds.push([key, card.depth]),
   });
   deep(funds, [["card:SPY", "index"], ["card:QQQ", "index"], ["card:IWM", "index"], ["card:GLD", "fund"], ["card:COPX", "fund"]],
     "fund dossiers go through the same path and are published as depth fund; the indices stay index");
   deep(fundOut.depth, { SPY: "index", QQQ: "index", IWM: "index", GLD: "fund", COPX: "fund" }, "and the run is told which depth each got");
+  deep(cardDepths, { SPY: "index", QQQ: "index", IWM: "index", GLD: "fund", COPX: "fund" },
+    "the card builder is told the depth too, so a fund's missing-chain reason names a fund chain and not an index one");
 }
 
 {

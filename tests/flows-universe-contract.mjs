@@ -258,6 +258,20 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   const down = buildFocusPayload({ ndx, rows: new Map(), read: { ok: false, error: "HTTP 500" }, sessionDate: "2026-09-24" });
   ok(down.status === "unavailable" && down.reason === "unreadable" && down.groups.length === 5 && !Object.keys(down.rows).length,
      "a failed read publishes unavailable with the groups still listed and no fabricated row");
+  const harvest = new Map([["NVDA", { ticker: "NVDA", close: "181", prev_close: "180" }], ["FCX", { ticker: "FCX", close: "45" }]]);
+  const held = buildFocusPayload({ ndx, rows: new Map(), read: { ok: false, error: "HTTP 500" }, sessionDate: "2026-09-24",
+    backfill: harvest, backfillReadAt: "h" });
+  ok(held.status === "ok" && held.rows.NVDA && held.rows.NVDA.px === 181 && held.rows.FCX,
+     "a failed focus read still publishes the stock rows the run already holds from its own harvest: no waiting sign where data exists");
+  assert.deepEqual(held.backfill, { from: "harvest", readAt: "h", tickers: ["NVDA", "FCX"].sort((a, b) => listed.indexOf(a) - listed.indexOf(b)), why: "unreadable" },
+    "and says which rows came from the harvest, read when, and why"); checks++;
+  ok(held.missing.includes("GLD") && !Object.hasOwn(held.rows, "GLD"),
+     "a fund the harvest never holds stays missing, never fabricated");
+  const mixed = buildFocusPayload({ ndx, rows: new Map([["NVDA", { ticker: "NVDA", close: "190" }]]), read: { ok: true },
+    sessionDate: "2026-09-24", backfill: harvest });
+  ok(mixed.rows.NVDA.px === 190 && mixed.backfill.tickers.join() === "FCX" && mixed.backfill.why === "not_returned",
+     "the focus read wins where it answered; the harvest fills only what it did not return");
+  ok(!Object.hasOwn(p, "backfill"), "and a payload with nothing filled carries no backfill note");
   const big = new Map(listed.map((t) => [t, { ticker: t, close: "100" }]));
   const fat = buildFocusPayload({ ndx, rows: big, read: { ok: true }, sessionDate: "2026-09-24",
     closesOf: () => Array.from({ length: 22 }, () => 123456.7891), budgetBytes: 8000 });
@@ -297,6 +311,20 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(priorLedger({ v: 1, depth: {}, held: {}, ledger: "bootstrap-partial" }).complete, false,
      "and so is one whose probe was partial (a read failed or the cap was hit): the next run probes again rather than " +
      "forgetting a key it never saw");
+
+  eq(priorLedger({ v: 1, depth: {}, held: {}, ledger: "unread" }).complete, false,
+     "and so is one written on a night that could not read ITS prior: its empty ledger forgot every older key, so the next run probes");
+  eq(priorLedger({ v: 1, depth: {}, held: {}, ledger: "dropped" }).why, "ledger-dropped", "a dropped ledger is named as the reason");
+  eq(priorLedger({ v: 1, depth: {}, held: {}, ledger: "someday" }).complete, false,
+     "a ledger state this code does not know is not trusted");
+  eq(priorLedger({ v: 1, sessionDate: "2026-09-23", depth: {}, held: {} }, { sessionDate: S }).complete, true,
+     "a ledger from the session immediately before tonight is complete");
+  eq(priorLedger({ v: 1, sessionDate: "2026-09-18", depth: {}, held: {} }, { sessionDate: "2026-09-21" }).complete, true,
+     "a weekend between the two sessions is not a gap");
+  const gapped = priorLedger({ v: 1, sessionDate: "2026-09-21", depth: {}, held: {} }, { sessionDate: S });
+  ok(!gapped.complete && gapped.why === "gap-3",
+     "a ledger three sessions behind is incomplete: the nights between may have landed cards no ledger recorded");
+  eq(priorLedger({ v: 1, depth: {}, held: {} }, { sessionDate: S }).why, "undated", "and an undated one cannot be placed, so it is probed");
 
   const depth = new Map([["NVDA", "focus"], ["PLD", "board"], ["COST", "cross-section"], ["SPY", "index"], ["GLD", "fund"], ["NOPE", "cross"]]);
   const r = buildRoster({ sessionDate: S, generatedAt: "t", depth, held: plan.held, retired: plan.retire,

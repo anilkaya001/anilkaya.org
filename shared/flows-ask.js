@@ -615,9 +615,23 @@ export function cardFacts(store, options) {
   return { facts, names };
 }
 
-export function shedCardFacts(facts, names, measure) {
-  const list = Array.isArray(facts) ? facts.slice() : [];
+export const CARD_CORE_FACTS = Object.freeze(["standing", "gamma", "move"]);
+
+export function shedCardFacts(facts, names, measure, options) {
+  let list = Array.isArray(facts) ? facts.slice() : [];
   const order = Array.isArray(names) ? names.slice() : [];
+  const core = options !== null && typeof options === "object" && Array.isArray(options.lean) ? options.lean : null;
+  const leaned = [];
+  if (core !== null) {
+    for (let i = order.length - 1; i >= 0 && measure(list) > 0; i--) {
+      const src = "card:" + order[i];
+      const kept = list.filter((f) => !(f && f.source === src) || core.includes(String(f.id).split("/").pop()));
+      if (kept.length === list.length) continue;
+      if (!kept.some((f) => f && f.source === src)) continue;
+      list = kept;
+      leaned.unshift(order[i]);
+    }
+  }
   let kept = order.length;
   while (kept > 0 && measure(list) > 0) {
     const drop = order[kept - 1];
@@ -626,7 +640,9 @@ export function shedCardFacts(facts, names, measure) {
     }
     kept--;
   }
-  return { facts: list, namesIndexed: { of: order.length, indexed: kept, shed: order.length - kept } };
+  const namesIndexed = { of: order.length, indexed: kept, shed: order.length - kept };
+  if (core !== null) namesIndexed.lean = leaned.filter((t) => order.indexOf(t) < kept).length;
+  return { facts: list, namesIndexed, leaned: leaned.filter((t) => order.indexOf(t) < kept) };
 }
 
 export const SILENCE_KINDS = Object.freeze(["pending", "unreadable", "quiet", "unavailable"]);
