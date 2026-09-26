@@ -764,8 +764,8 @@ assert(read("wrangler.toml").includes('html_handling = "auto-trailing-slash"'), 
       dates: ["2026-10-16"] },
     "flows-unusual-contract.mjs": { reason: "the unusual fixture carries its own fixed dte, so the expiry is a label",
       dates: ["2026-10-16"] },
-    "flows-worker-contract.mjs": { reason: "a stored engine structure with its published dte, served as written",
-      dates: ["2026-10-16"] },
+    "flows-worker-contract.mjs": { reason: "a stored engine structure with its published dte, and a lite card's stored " +
+      "earnings dates, both served as written and never compared with today", dates: ["2026-10-16", "2026-09-29", "2026-10-20"] },
   });
   const today = new Date().toISOString().slice(0, 10);
   const horizon = new Date(Date.now() + 400 * 86400000).toISOString().slice(0, 10);

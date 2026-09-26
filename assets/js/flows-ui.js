@@ -237,7 +237,6 @@
 
   const REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)");
   const WIDE = window.matchMedia("(min-width: 1025px)");
-  const PHONE = window.matchMedia("(max-width: 599.98px)");
   const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const nextId = (p) => p + (++uid);

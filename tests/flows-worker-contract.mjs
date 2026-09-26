@@ -1581,7 +1581,7 @@ try {
       await res.text();
       return res.status;
     };
-    const RTH = "1-59/5 13-21 * * 1-5";
+    const RTH = "1-59/5 13-21 * * MON-FRI";
     const HOUSE = "*/30 * * * *";
     const fresh = (key, readAt, session = "2026-09-23") => ({ v: 1, readAt, session, cadenceS: LIVE_KEYS[key].cadenceS,
       source: "actions", writer: "flows-live@test", vendorAt: null });

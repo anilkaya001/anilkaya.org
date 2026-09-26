@@ -8,7 +8,7 @@ import { FLOWS_PAGES, modelName, neuronProvenance } from "./shared/flows-pages.j
 import * as FLOWS_ASK from "./shared/flows-ask.js";
 import * as FLOWS_NEURON from "./shared/flows-neuron.js";
 import { bookRows, runCardEngine, engineState, engineStale, QUANT_CARD_VERSION } from "./shared/flows-quant-card.js";
-import { aiChain, aiCallSignature, askModels, emptyNote, fallbackNote, intradayFloorMs, repliedGuard, retryableGuard, spendShape } from "./shared/flows-ai.js";
+import { aiChain, aiCallSignature, askModels, emptyNote, fallbackNote, intradayFloorMs, repliedGuard, retryableGuard, spendShape, thrownThenEmptyNote } from "./shared/flows-ai.js";
 import { COURSE_STAGE_POINTS } from "./shared/course-points.js";
 import { COURSE_BY_ID, COURSE_BY_SLUG, COURSE_TOPICS, SITE_ORIGIN } from "./shared/course-seo.js";
 import { REVIEW_ITEM_BY_ID } from "./shared/review-manifest.js";
@@ -1179,7 +1179,7 @@ async function refreshFlowsSummary(env, at = Date.now()) {
     const ageMs = Date.now() - Date.parse(prior.generated_at);
     if (Number.isFinite(ageMs) && ageMs < intradayFloorMs(prior.llm, prior.guard)) return;
   }
-  const age = FLOWS_ASK.briefAge(index, new Date());
+  const age = FLOWS_ASK.briefAge(index, new Date(), FLOWS_LIVE.memoizedClock());
 
   const plain = FLOWS_ASK.renderSummaryPlain(facts);
   const write = async (text, llm, model, guard) => {
@@ -1357,7 +1357,7 @@ function neuronShape(status, ticker, ctx, row, extra) {
 }
 
 function neuronContextFor(card) {
-  const age = FLOWS_ASK.briefAge({ sessionDate: card.sessionDate }, new Date());
+  const age = FLOWS_ASK.briefAge({ sessionDate: card.sessionDate }, new Date(), FLOWS_LIVE.memoizedClock());
   return FLOWS_NEURON.buildContext(card, { expectedSession: age.expected });
 }
 
@@ -1538,7 +1538,7 @@ async function askAnswer(question, env, index, updatedAt, subject) {
 
   const plain = FLOWS_ASK.renderFactsPlain(picked, framed);
 
-  const age = FLOWS_ASK.briefAge(index, new Date());
+  const age = FLOWS_ASK.briefAge(index, new Date(), FLOWS_LIVE.memoizedClock());
 
   const spend = await askSpend(env);
   const base = {
@@ -1574,11 +1574,15 @@ async function askAnswer(question, env, index, updatedAt, subject) {
     const failed = said.failure;
     const first = said.attempts[0];
     const afterEmpty = said.attempts.length > 1 && first && first.failed === null;
+    const thrown = afterEmpty ? null
+      : thrownThenEmptyNote(said.attempts, first && (FALLBACK_FAILED[first.failed] || FALLBACK_FAILED.unreachable));
     const told = afterEmpty
       ? emptyNote(said.attempts) +
         ", and the fallback model asked after it " + FALLBACK_FAILED[failed.why] +
         ", so this reading is the pipeline's own wording. Every figure in it was measured."
-      : failed.say;
+      : thrown
+        ? thrown + ", so this reading is the pipeline's own wording. Every figure in it was measured."
+        : failed.say;
 
     const meter = afterCall || base.spend;
     const disagrees = failed.why === "allowance"
@@ -1870,7 +1874,7 @@ function deskEngine(card, nowMs) {
     levels: block.levels || null, state: block.state || null,
     stale: engineStale({
       cardSession: card.sessionDate, blockAsOf: block.asOf,
-      expectedSession: card.sessionDate ? FLOWS_ASK.briefAge({ sessionDate: card.sessionDate }, new Date(nowMs)).expected : null,
+      expectedSession: card.sessionDate ? FLOWS_ASK.briefAge({ sessionDate: card.sessionDate }, new Date(nowMs), FLOWS_LIVE.memoizedClock(nowMs)).expected : null,
     }),
   };
 }
@@ -2014,7 +2018,7 @@ function strategyEngine({ ticker, expiry, calls, puts, spot, card, nowMs }) {
     atr: block ? block.atr : null, fits: true,
     stale: engineStale({
       cardSession: card ? card.sessionDate : null, blockAsOf: block ? block.asOf : null,
-      expectedSession: card && card.sessionDate ? FLOWS_ASK.briefAge({ sessionDate: card.sessionDate }, new Date(nowMs)).expected : null,
+      expectedSession: card && card.sessionDate ? FLOWS_ASK.briefAge({ sessionDate: card.sessionDate }, new Date(nowMs), FLOWS_LIVE.memoizedClock(nowMs)).expected : null,
     }),
   });
   return {
@@ -3283,7 +3287,7 @@ async function route(request, env, url, ctx) {
       try { index = JSON.parse(stored.payload); } catch { index = null; }
       if (!index || typeof index !== "object" || Array.isArray(index)) return passthrough(stored);
       const live = await briefWithLive(env, index);
-      return json({ ...live.index, session: FLOWS_ASK.briefAge(live.index, new Date()) }, 200,
+      return json({ ...live.index, session: FLOWS_ASK.briefAge(live.index, new Date(), FLOWS_LIVE.memoizedClock()) }, 200,
         { "X-Payload-Updated": String(stored.updatedAt || 0), ...nightlyFreshHeaders(stored),
           ...(live.overlay ? { "X-Live-Overlay": live.overlay } : {}) });
     }

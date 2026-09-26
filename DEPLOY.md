@@ -1521,7 +1521,7 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
 (the Actions side). The data contract for pages is the key registry plus the
 `X-Fresh-*` headers; `assets/js/flows-fresh.js` is the one client helper.
 
-- **The clock is the Worker cron.** `1-59/5 13-21 * * 1-5` runs Tier 1 (two
+- **The clock is the Worker cron.** `1-59/5 13-21 * * MON-FRI` runs Tier 1 (two
   vendor calls into `live:market`: the five-minute market tide and the sector-ETF
   snapshot) from the open to ten minutes past the close,
   dispatches the Actions run at :01/:16/:31/:46, and re-dispatches once when
@@ -1530,7 +1530,12 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   The stall is logged (`live layer stalled`, with `canDispatch`) whether or not
   the token is set. Every dispatch outcome is kept in
   `flows_clock.dispatch_why` (`sent`, `refused:<status>`, `unreachable` or
-  `no-token`).
+  `no-token`). The weekday field is written by name because Cloudflare counts
+  weekdays from 1 = Sunday to 7 = Saturday: the numeric `1-5` this trigger
+  carried until 2026-09-26 fired Sunday to Thursday, so Tier 1 never ticked on
+  Friday 2026-09-25. `tests/flows-live-contract.mjs` refuses a numeric weekday
+  in any Worker cron. GitHub Actions schedules use standard cron, where `1-5`
+  is Monday to Friday, so the workflow files keep their numbers.
   `*/30 * * * *` refreshes the market snapshot,
   dispatches the nightly at or after 17:15 ET (once more after 18:15 ET if meta
   is still behind), refreshes the board summary, and prunes `flows_tape` rows not
@@ -1604,8 +1609,11 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   computed holiday is checked once: Tier 1 reads the tape in the 09:45 to 09:55
   ET probe window of a weekday holiday, and a tape that shows the day trading
   records `trading = 1`, so the day becomes a session and the live layer and the
-  nightly dispatch run; a tape still on the previous session leaves the computed
-  calendar in charge and every later tick skips the day. A wrong or outdated
+  nightly dispatch run; a tape still on the previous session records `trading =
+  0` at that first probe, since it agrees with the calendar and there is nothing
+  for a second probe to overturn, and every later tick skips the day. The day
+  does not join `closed_days`, which holds only closures the calendar did not
+  know. A wrong or outdated
   holiday rule therefore costs the first quarter hour, never the session. A tide
   stuck at or before 13:05 ET for 30 minutes after 13:30 marks an unscheduled
   early close. The migration is `migrations/0012_flows_clock_verdict.sql`; the
@@ -1648,9 +1656,14 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   (`permissions: actions: write`; `workflow_dispatch` is the documented exception
   to that token's no-recursion rule), origin `chain`, on `main`, and exits. The
   `flows-live` concurrency group keeps it to one loop. The GitHub schedule is only
-  starters, `31,46 13,14 * * 1-5` for the open under EDT and EST and
-  `3,37 15-20 * * 1-5` in case GitHub drops a starter or a run dies (sixteen
-  slots, because GitHub delivered about one in twenty); a starter
+  starters: `17 10,11,12 * * 1-5` lands before the open however late GitHub
+  delivers it, and a run that starts up to 200 minutes before 09:31 ET sleeps
+  until then instead of exiting (on Friday 2026-09-25 the first starter GitHub
+  delivered ran in the afternoon, so the morning had no Tier 2); a run started
+  earlier than that exits and leaves the open to the next starter.
+  `31,46 13,14 * * 1-5` starts the loop at the open under EDT and EST and
+  `3,37 15-20 * * 1-5` restarts it in case GitHub drops a starter or a run dies
+  (sixteen slots, because GitHub delivered about one in twenty); a starter
   that queued behind a running loop starts after the window closed and exits at
   once without a pass. The first pass of a run still skips when a heartbeat
   landed under eight minutes ago; the loop's later passes do not. A single pass
@@ -1723,7 +1736,7 @@ Out-of-band steps before the first deploy of this layer:
    dashboard) and read `live:market` on `/api/flows/lk?k=market` at 09:36 ET.
    The tick instants in D1 prove it without dashboard access: `flows_live.read_at`
    for `live:market` is the Tier 1 cron's scheduled time, and only
-   `1-59/5 13-21 * * 1-5` produces minutes ending in 1 or 6. On 2026-09-23 the
+   `1-59/5 13-21 * * MON-FRI` produces minutes ending in 1 or 6. On 2026-09-23 the
    first Workers Builds deploy of this layer ran under the old `*/15 * * * *`
    trigger; by that evening `live:market` was stamped 19:56 and 20:06 UTC, so a
    later production deploy (`npx wrangler deploy`) had registered both crons.

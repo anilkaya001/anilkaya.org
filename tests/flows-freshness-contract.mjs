@@ -248,7 +248,7 @@ const NYSE_PUBLISHED = Object.freeze({
 {
   const toml = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
   const crons = (/crons\s*=\s*\[([^\]]*)\]/.exec(toml) || [, ""])[1];
-  const rth = /"(\d+)-59\/(\d+) 13-21 \* \* 1-5"/.exec(crons);
+  const rth = /"(\d+)-59\/(\d+) 13-21 \* \* MON-FRI"/.exec(crons);
   ok(rth, `wrangler.toml carries the market-hours clock (${crons.trim()})`);
   eq(REFRESH_CADENCE_MINUTES, Number(rth[2]),
     "the cadence pages quote matches the wrangler.toml market-hours cron step — a page " +

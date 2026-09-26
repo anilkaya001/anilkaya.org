@@ -56,7 +56,7 @@ export async function upgradeClockColumns(db) {
   return added;
 }
 
-export const RTH_CRON = "1-59/5 13-21 * * 1-5";
+export const RTH_CRON = "1-59/5 13-21 * * MON-FRI";
 export const HOUSEKEEPING_CRON = "*/30 * * * *";
 
 export function cronJob(cron, at) {
@@ -70,11 +70,11 @@ export function cronJob(cron, at) {
 
 export const NIGHTLY_READ_KEYS = Object.freeze(["board:long", "board:short", "board:watch", "meta", "focus"]);
 
-export const NIGHTLY_MISSING_AFTER_MIN = 300;
+export const NIGHTLY_MISSING_AFTER_MIN = FRESH_CLASSES.nightly.graceS / 60;
 
 export const NOW_NIGHTLY_KEYS = Object.freeze([
   "board:long", "board:short", "board:watch", "brief", "pulse", "flowalerts", "market", "meta", "events",
-  "movers", "news", "unusual", "political", "record", "scoretrack", "sector:trix", "sector:premium",
+  "movers", "news", "unusual", "political", "record", "scoretrack", "sector:trix", "sector:premium", "focus",
 ]);
 
 const CLOCK_COLUMNS = Object.freeze({

@@ -218,6 +218,14 @@ export function emptyNote(attempts) {
     : ", and the fallback model asked after it " + stopSaid(second));
 }
 
+export function thrownThenEmptyNote(attempts, said) {
+  const list = Array.isArray(attempts) ? attempts : [];
+  const first = list[0];
+  const replied = list.find((a) => a && a.failed === null);
+  if (!first || first.failed === null || !replied || typeof said !== "string" || !said) return null;
+  return "The model asked first " + said + ", and the fallback model asked after it " + stopSaid(replied);
+}
+
 export function fallbackNote(result) {
   const a = result && Array.isArray(result.attempts) ? result.attempts : [];
   if (a.length < 2 || !result.text) return null;

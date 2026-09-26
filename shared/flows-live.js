@@ -1,5 +1,5 @@
 import {
-  FRESH_CLASSES, easternDay, sessionOpen, easternInstant, easternOffsetMinutes, PHASE_MINUTES, nextWeekdayDay,
+  FRESH_CLASSES, easternDay, sessionOpen, easternInstant, easternOffsetMinutes, PHASE_MINUTES, nextWeekdayDay, isTradingDay,
 } from "./flows-freshness.js";
 import { buildFlowAlerts, mergeAlerts } from "./flows-alerts.js";
 
@@ -483,6 +483,7 @@ export function verdictPatch({ seen, trading = null, closedProbeAt = null, close
     return patch;
   }
   if (seen !== 0 || trading !== null) return {};
+  if (!isTradingDay(today, null)) return { trading: 0, closedProbeAt: null };
   const first = Number(closedProbeAt);
   if (!(Number.isFinite(first) && first > 0 && first <= at)) return { closedProbeAt: at };
   if (at - first < VERDICT.agreeMs) return {};

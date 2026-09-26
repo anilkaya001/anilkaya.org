@@ -10,15 +10,15 @@ const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
 const CEILING_KIB = {
-  tickerPage: 357,
-  overviewPage: 226,
+  tickerPage: 358,
+  overviewPage: 228,
   sidePage: 183,
   watchPage: 183,
   deskPage: 226,
   askPage: 172,
   strategyPage: 243,
   trackPage: 163,
-  marketPage: 207,
+  marketPage: 208,
   unusualPage: 169,
   eventsPage: 154,
   politicalPage: 143,

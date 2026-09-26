@@ -14,7 +14,7 @@ import { aggressorGamma } from "../shared/flows-features.js";
 import { buildCard } from "../shared/flows-card.js";
 import fs from "node:fs";
 import { aiText, modelInput, askModels, aiChain, aiCallSignature, retryableGuard, repliedGuard, modelRates,
-         spendShape, fallbackNote, emptyNote, intradayFloorMs, AI_LENGTH_RETRY_MS, AI_INTRADAY_REFRESH_MS } from "../shared/flows-ai.js";
+         spendShape, fallbackNote, emptyNote, thrownThenEmptyNote, intradayFloorMs, AI_LENGTH_RETRY_MS, AI_INTRADAY_REFRESH_MS } from "../shared/flows-ai.js";
 import { readFileSync } from "node:fs";
 
 let checks = 0;
@@ -721,6 +721,13 @@ const CARD = {
   eq(emptyNote((await askModels(fake([reasoningOnly, new Error("AiError: 3040: capacity")]), aiChain(env), msgs, {})).attempts),
     "The model spent its whole answer budget before writing any text",
     "a fallback that failed to run is not described as a stop: the Ask note names its failure separately");
+  const thrownThenEmpty = (await askModels(fake([new Error("AiError: 3040: capacity"), { response: "" }]), aiChain(env), msgs, {})).attempts;
+  eq(thrownThenEmptyNote(thrownThenEmpty, "had no capacity just now"),
+    "The model asked first had no capacity just now, and the fallback model asked after it answered with no text",
+    "A PRIMARY THAT THREW AND A FALLBACK THAT ANSWERED EMPTY ARE BOTH NAMED: the Ask note used to give only the primary's " +
+    "failure, as if no fallback had been asked");
+  eq(thrownThenEmptyNote((await askModels(fake([reasoningOnly, { response: "" }]), aiChain(env), msgs, {})).attempts, "x"), null,
+    "and it stays silent when the primary replied, which emptyNote describes");
   ok(repliedGuard("invented") && repliedGuard("unreachable:length") && repliedGuard("unreachable:empty") &&
      !repliedGuard("unreachable:capacity") && !repliedGuard(null),
     "a guard written after a model replied (and was billed) is told apart from one written after a refusal to run");
@@ -773,6 +780,8 @@ const CARD = {
     "or summary:empty, which the same card never retries, where origin/main retried the same failure after five minutes");
   ok((worker.match(/emptyNote\(said\.attempts\)/g) || []).length === 2 && !/so did the fallback model asked after it/.test(worker),
     "both Ask notes about an empty reply are built from emptyNote over the attempts, not from the chain's combined guard");
+  ok(/thrownThenEmptyNote\(said\.attempts, first && \(FALLBACK_FAILED\[first\.failed\]/.test(worker),
+    "the Ask route builds that note from the primary's own failure phrase");
   ok(/const meter = afterCall \|\| base\.spend;/.test(worker) && /meter\.remaining > 0/.test(worker) &&
      /spend: meter, note: say/.test(worker) && !/spend\.remaining > 0/.test(worker),
     "THE ALLOWANCE NOTE READS THE METER AFTER THE PRIMARY'S BILLED CALL: with 99 credits left, a primary at the cap that " +

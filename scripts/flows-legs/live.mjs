@@ -316,6 +316,8 @@ export function liveRunVerdict(loop) {
 export const LIVE_LOOP = Object.freeze({
   slotMs: 5 * 60 * 1000,
   budgetMs: 340 * 60 * 1000,
+  preOpenWaitMs: 200 * 60 * 1000,
+  openLagMs: 60 * 1000,
   workflow: "flows-live.yml",
   ref: "main",
 });
@@ -362,10 +364,22 @@ export async function runLiveLoop({ pass, chain, now = () => Date.now(), sleep =
     return clock;
   };
   await refresh();
-  const opening = window(startedAt, clock);
+  let opening = window(startedAt, clock);
+  let preOpenMs = 0;
+  if (opening.why === "before-open" && opening.phase && Number.isFinite(opening.phase.open)) {
+    const firstAt = opening.phase.open + LIVE_LOOP.openLagMs;
+    if (firstAt - startedAt <= LIVE_LOOP.preOpenWaitMs) {
+      preOpenMs = firstAt - startedAt;
+      log(`live loop: started ${Math.round(preOpenMs / 60000)} min before the open — waiting for it rather than ` +
+        "exiting, because a GitHub starter lands anywhere from on time to hours late");
+      await sleep(firstAt - now());
+      await refresh();
+      opening = window(now(), clock);
+    }
+  }
   if (!opening.run && !opening.wait) {
     log(`live loop: nothing to do (${opening.why}) — a starter that ran outside the session exits without a pass`);
-    return { exit: "outside-window", why: opening.why, passes, chained: null, clock };
+    return { exit: "outside-window", why: opening.why, passes, chained: null, clock, preOpenMs };
   }
   let here = opening;
   let waits = 0;
@@ -391,20 +405,20 @@ export async function runLiveLoop({ pass, chain, now = () => Date.now(), sleep =
     if (!ahead.run && !ahead.wait) {
       log(`live loop: the session window closes before ${new Date(next).toISOString()} (${ahead.why}); ` +
         `${passes.length} pass(es)`);
-      return { exit: "window-closed", why: ahead.why, passes, waits, chained: null, clock };
+      return { exit: "window-closed", why: ahead.why, passes, waits, chained: null, clock, preOpenMs };
     }
     if (next - startedAt > budgetMs) {
       const chained = await chain({ at: now() });
       log(`live loop: time budget spent after ${passes.length} pass(es) with the session still open — ` +
         `re-dispatched: ${chained.why}${chained.status ? " (" + chained.status + ")" : ""}`);
-      return { exit: "budget", why: "budget", passes, waits, chained, clock };
+      return { exit: "budget", why: "budget", passes, waits, chained, clock, preOpenMs };
     }
     await sleep(next - now());
     await refresh();
     here = window(now(), clock);
     if (!here.run && !here.wait) {
       log(`live loop: the session window closed while waiting (${here.why}); ${passes.length} pass(es)`);
-      return { exit: "window-closed", why: here.why, passes, waits, chained: null, clock };
+      return { exit: "window-closed", why: here.why, passes, waits, chained: null, clock, preOpenMs };
     }
   }
 }

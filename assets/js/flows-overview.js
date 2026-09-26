@@ -1708,8 +1708,7 @@
       h("i", { class: "cc-ln-fill", "data-tone": toneOf(r), style: { width: (frac * 50) + "%", left: r < 0 ? (50 - frac * 50) + "%" : "50%" } }));
   }
 
-  const pref = (v) => { try { return UI.pref ? UI.pref("lead", v) : null; } catch { return null; } };
-  const FOCUS = { focus: null, strips: null, series: null, lead: new URLSearchParams(location.search).get("lead") || pref(), pills: {} };
+  const FOCUS = { focus: null, strips: null, series: null, lead: new URLSearchParams(location.search).get("lead"), pills: {} };
   const FK = ["px", "prev", "chg", "net", "lean", "iv30"];
   const dossier = (t) => "/flows/ticker/?t=" + encodeURIComponent(t);
   const pick = (row, fields, k) => {
@@ -1860,7 +1859,7 @@
     if (seg && groups.length > 1) {
       seg.append(UI.segmented("Leaders", groups.map((g) => ({ label: g.label || g.id })), (i) => {
         at = i;
-        pref(FOCUS.lead = groups[i].id);
+        FOCUS.lead = groups[i].id;
         const u = new URL(location.href);
         u.searchParams.set("lead", FOCUS.lead);
         history.replaceState(history.state, "", u);

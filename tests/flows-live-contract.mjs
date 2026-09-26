@@ -739,8 +739,9 @@ const T = (iso) => Date.parse(iso);
     `one live run at a time (so never more than one loop), ${timeout} minutes at most — under GitHub's six-hour job ` +
     `cap, with the loop's ${LIVE_LOOP.budgetMs / 60000}-minute budget and a pass's overrun inside it`);
   const crons = [...wf.matchAll(/cron: "([^"]+)"/g)].map((m) => m[1]);
-  deep(crons, ["31,46 13,14 * * 1-5", "3,37 15-20 * * 1-5"],
-    "STARTERS, not a schedule: 13:31/13:46 and 14:31/14:46 UTC start the loop at the open under EDT and EST, and :03 " +
+  deep(crons, ["17 10,11,12 * * 1-5", "31,46 13,14 * * 1-5", "3,37 15-20 * * 1-5"],
+    "STARTERS, not a schedule: 10:17, 11:17 and 12:17 UTC land before the open under EDT and EST however late GitHub " +
+    "delivers them, and the loop waits for 09:31 ET; 13:31/13:46 and 14:31/14:46 UTC start it at the open, and :03 " +
     "and :37 of every hour from 15:03 to 20:37 restart it if GitHub dropped a starter or a run died — sixteen slots, " +
     "because GitHub delivered about one high-frequency slot in twenty on 2026-09-23 and 09-24 and any one that lands " +
     "starts a loop that chains itself to the close; a starter that queues behind a running loop exits at once when " +
@@ -792,6 +793,10 @@ const T = (iso) => Date.parse(iso);
     "the scheduled handler routes by the job a trigger's instant calls for, not by the trigger's exact string");
   ok(toml.includes(`"${W.RTH_CRON}"`) && toml.includes(`"${W.HOUSEKEEPING_CRON}"`),
     "the two crons the Worker branches on are the two wrangler.toml registers");
+  const cronList = (toml.match(/^crons = \[([^\]]*)\]/m) || [null, ""])[1].match(/"[^"]+"/g) || [];
+  ok(cronList.length >= 2 && cronList.every((c) => { const f = c.slice(1, -1).trim().split(/\s+/); return f.length === 5 && /^(\*|[A-Za-z]{3}(-[A-Za-z]{3})?(,[A-Za-z]{3}(-[A-Za-z]{3})?)*)$/.test(f[4]); }),
+    "EVERY WORKER CRON NAMES ITS WEEKDAYS BY NAME: Cloudflare counts 1 = Sunday to 7 = Saturday, so the numeric 1-5 " +
+    "this file carried ran Tier 1 Sunday to Thursday and never on a Friday, as 2026-09-25 showed (" + cronList.join(", ") + ")");
   ok(/\[\[ratelimits\]\][\s\S]*name = "UW_ONDEMAND"[\s\S]*limit = 120, period = 60/.test(toml),
     "and the on-demand vendor guard is bound at 120 calls a minute");
 }
@@ -1337,7 +1342,7 @@ const T = (iso) => Date.parse(iso);
           const cols = /\(([^)]*)\) VALUES/.exec(patch.sql)[1].split(", ");
           cols.forEach((c, j) => { row[c] = patch.args[j]; });
         }
-        seen.push(`${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")} ${t.out.skipped || t.col("tier1_why")} ${row.day} ${row.trading}`);
+        seen.push(`${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")} ${t.out.skipped || t.col("tier1_why") || t.out.why} ${row.day} ${row.trading}`);
       }
       return { row, seen };
     };
@@ -1442,6 +1447,35 @@ const T = (iso) => Date.parse(iso);
     const w = await runLiveLoop({ now: sat.now, sleep: sat.sleep, log: () => {}, pass: async () => { passes++; },
       chain: async () => { throw new Error("never"); } });
     ok(w.exit === "outside-window" && w.why === "not-trading" && passes === 0, "as does one on a weekend");
+  }
+  {
+    const early = async (iso, clock = null) => {
+      const c = sim(T(iso));
+      const passAt = [];
+      const r = await runLiveLoop({ now: c.now, sleep: c.sleep, log: () => {}, readClock: async () => clock,
+        pass: async () => { passAt.push(c.now()); c.advance(40000); return {}; },
+        chain: async ({ at }) => ({ sent: true, why: "sent", status: 204, at }) });
+      return { r, passAt };
+    };
+    const edt = await early("2026-09-28T10:17:00Z");
+    ok(edt.passAt[0] === easternInstant("2026-09-28", 9 * 60 + 31) && edt.r.preOpenMs === 194 * 60000 &&
+       edt.r.exit === "budget" && edt.r.chained && edt.r.chained.sent,
+    "A STARTER THAT LANDS BEFORE THE OPEN WAITS FOR IT (EDT): GitHub delivered Friday 2026-09-25's first starter in the " +
+      "afternoon, so a 10:17 UTC starter that arrives on time sleeps 194 minutes, passes from 09:31 ET, and chains " +
+      `itself when its budget ends (${edt.passAt.length} passes)`);
+    const est = await early("2026-12-07T11:17:00Z");
+    ok(est.passAt[0] === easternInstant("2026-12-07", 9 * 60 + 31) && est.r.preOpenMs === 194 * 60000,
+      "and the same under EST, where the 11:17 UTC starter is the one 194 minutes before the open");
+    const tooEarly = await early("2026-12-07T10:17:00Z");
+    ok(tooEarly.r.exit === "outside-window" && tooEarly.r.why === "before-open" && tooEarly.passAt.length === 0 &&
+       tooEarly.r.preOpenMs === 0,
+    `a starter more than ${LIVE_LOOP.preOpenWaitMs / 60000} minutes early exits at once, leaving the open to a later starter ` +
+      "and the job's six-hour cap to the session");
+    const holiday = await early("2026-11-26T12:17:00Z");
+    ok(holiday.r.exit === "outside-window" && holiday.r.why === "not-trading" && holiday.passAt.length === 0,
+      "a starter on a computed NYSE holiday never waits");
+    ok(LIVE_LOOP.preOpenWaitMs + 60 * 60000 <= LIVE_LOOP.budgetMs,
+      "and a run that waited the longest still has an hour of passes before it chains");
   }
   {
     const TG = "2026-11-24";
@@ -1620,7 +1654,7 @@ const T = (iso) => Date.parse(iso);
 }
 
 {
-  const T0 = "2026-11-25";
+  const T0 = "2026-11-23";
   const closed = (n) => Array.from({ length: n }, (_, i) => new Date(Date.UTC(2026, 0, 5 + i)).toISOString().slice(0, 10));
   deep(L.parseClosedDays(JSON.stringify(["2026-11-26", "2026-07-03", "junk", 7, "2026-11-26"])), ["2026-07-03", "2026-11-26"],
     "CLOSED DAYS are a JSON array of ISO days, read back sorted, once each, junk dropped");
@@ -1629,21 +1663,26 @@ const T = (iso) => Date.parse(iso);
   const ring = L.withClosedDay(closed(25), "2026-11-26");
   ok(ring.length === L.VERDICT.closedDaysMax && ring.at(-1) === "2026-11-26" && ring[0] === closed(25)[6],
     `at most ${L.VERDICT.closedDaysMax} are kept, newest last`);
-  const at = easternInstant("2026-11-26", 9 * 60 + 46);
-  deep(L.verdictPatch({ seen: 0, trading: null, closedProbeAt: null, closedDays: [T0], at, today: "2026-11-26" }),
+  const at = easternInstant("2026-11-24", 9 * 60 + 46);
+  deep(L.verdictPatch({ seen: 0, trading: null, closedProbeAt: null, closedDays: [T0], at, today: "2026-11-24" }),
     { closedProbeAt: at }, "A FIRST CLOSED PROBE IS PROVISIONAL: it records when it was seen and leaves trading NULL");
-  deep(L.verdictPatch({ seen: 0, trading: null, closedProbeAt: at, closedDays: [], at: at + 10 * 60000, today: "2026-11-26" }),
+  deep(L.verdictPatch({ seen: 0, trading: null, closedProbeAt: at, closedDays: [], at: at + 10 * 60000, today: "2026-11-24" }),
     {}, "a second one ten minutes later is not yet agreement");
-  deep(L.verdictPatch({ seen: 0, trading: null, closedProbeAt: at, closedDays: [T0], at: at + 15 * 60000, today: "2026-11-26" }),
-    { trading: 0, closedDays: [T0, "2026-11-26"] },
+  deep(L.verdictPatch({ seen: 0, trading: null, closedProbeAt: at, closedDays: [T0], at: at + 15 * 60000, today: "2026-11-24" }),
+    { trading: 0, closedDays: [T0, "2026-11-24"] },
   "two agreeing probes at least fifteen minutes apart are final: trading = 0, and the day joins closed_days");
-  deep(L.verdictPatch({ seen: 1, trading: null, closedProbeAt: at, closedDays: [], at: at + 5 * 60000, today: "2026-11-26" }),
+  deep(L.verdictPatch({ seen: 1, trading: null, closedProbeAt: at, closedDays: [], at: at + 5 * 60000, today: "2026-11-24" }),
     { trading: 1, closedProbeAt: null }, "ANY feed carrying today settles it at once: trading = 1, the provisional mark cleared");
-  deep(L.verdictPatch({ seen: 1, trading: 0, closedProbeAt: at, closedDays: [T0, "2026-11-26"], at: at + 30 * 60000,
-    today: "2026-11-26" }), { trading: 1, closedProbeAt: null, closedDays: [T0] },
+  deep(L.verdictPatch({ seen: 1, trading: 0, closedProbeAt: at, closedDays: [T0, "2026-11-24"], at: at + 30 * 60000,
+    today: "2026-11-24" }), { trading: 1, closedProbeAt: null, closedDays: [T0] },
   "and a final 0 that a later re-probe contradicts is reversed, today leaving closed_days");
-  deep(L.verdictPatch({ seen: null, trading: null, closedProbeAt: null, closedDays: [], at, today: "2026-11-26" }), {},
+  deep(L.verdictPatch({ seen: null, trading: null, closedProbeAt: null, closedDays: [], at, today: "2026-11-24" }), {},
     "no verdict is no change");
+  deep(L.verdictPatch({ seen: 0, trading: null, closedProbeAt: null, closedDays: [T0], at: easternInstant("2026-11-26", 9 * 60 + 46),
+    today: "2026-11-26" }), { trading: 0, closedProbeAt: null },
+  "ON A COMPUTED HOLIDAY ONE CLOSED PROBE IS FINAL: the tape agrees with the calendar, so there is nothing for a second " +
+    "probe to overturn, and the probe window ends before one could run; the day stays out of closed_days, which holds " +
+    "only the closures the calendar did not know");
 
   const thread = async (row, ticks) => {
     const log = [];
@@ -1684,7 +1723,7 @@ const T = (iso) => Date.parse(iso);
     `(${lagLog.map((t) => `${Math.floor(t.m / 60)}:${String(t.m % 60).padStart(2, "0")} ${t.why} ${t.trading}`).join(", ")})`);
   eq(lagLog[1].trading, null, "the 09:46 closed probe alone never closed the day");
 
-  const TG = "2026-11-26";
+  const TG = "2026-11-24";
   const hol = { id: 1, day: T0, trading: 1, early_close: 0, closed_days: null };
   const holLog = await thread(hol, [
     { m: 9 * 60 + 46, day: TG, feeds: T0 }, { m: 9 * 60 + 51, day: TG, feeds: T0 }, { m: 9 * 60 + 56, day: TG, feeds: T0 },
@@ -1693,7 +1732,7 @@ const T = (iso) => Date.parse(iso);
     { m: 11 * 60 + 1, day: TG, feeds: T0, calls: 0 },
   ]);
   deep(holLog.slice(0, 4).map((t) => t.trading), [null, null, null, 0],
-    "A REAL HOLIDAY: the 09:46 probe is provisional, 09:51 and 09:56 are too close to it to agree, and at 10:01 the " +
+    "AN UNSCHEDULED CLOSURE (a day the calendar thought traded): the 09:46 probe is provisional, 09:51 and 09:56 are too close to it to agree, and at 10:01 the " +
       "second agreeing probe fifteen minutes on makes it final");
   deep(JSON.parse(hol.closed_days), [TG], "and only then does the day join closed_days");
   ok(holLog[4].why === "holiday" && holLog[5].why === "holiday" && !holLog[5].wrote && holLog[6].why === "holiday" &&
@@ -1711,8 +1750,8 @@ const T = (iso) => Date.parse(iso);
     "and takes the day back out of closed_days");
 
   const roll = { id: 1, day: TG, trading: 0, early_close: 0, closed_days: JSON.stringify([TG]) };
-  await thread(roll, [{ m: 9 * 60 + 31, day: "2026-11-27", feeds: "2026-11-27" }]);
-  ok(roll.day === "2026-11-27" && roll.trading === null && JSON.parse(roll.closed_days).join() === TG,
+  await thread(roll, [{ m: 9 * 60 + 31, day: "2026-11-25", feeds: "2026-11-25" }]);
+  ok(roll.day === "2026-11-25" && roll.trading === null && JSON.parse(roll.closed_days).join() === TG,
     "the next morning's roll resets the day's verdict and keeps closed_days, which stream E's calendar reads");
 
   deep([W.dispatchOutcome({ sent: false, why: "no-token" }), W.dispatchOutcome({ sent: true, status: 204, why: "sent" }),
