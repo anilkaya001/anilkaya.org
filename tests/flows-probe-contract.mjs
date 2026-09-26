@@ -463,17 +463,86 @@ const mini = probe.validateList({
 }
 
 {
+  const strictList = probe.validateList({ ...mini,
+    reads: { "/api/stock/{ticker}/greek-flow": ["timestamp", "dir_delta_flow", "call_gex"],
+      "/api/stock/{ticker}/option-contracts": ["option_symbol", "open_interest"] },
+    gated: { "/api/volatility/vix-term-structure": 403 } });
+  const vendor = fakeVendor();
+  const lines = [];
+  const run = await probe.runProbe(
+    { key: KEY, base: "https://vendor.test", tickers: ["AAPL", "NVDA"], filter: "", strict: true, list: strictList },
+    { fetch: vendor.fetch, log: (l) => lines.push(l), now: vendor.now, sleep: vendor.sleep,
+      clock: () => new Date("2026-09-23T13:32:00Z") });
+  deep(run.strict.failures.slice().sort(), ["DRIFT flow:AAPL: call_gex did not arrive", "DRIFT flow:NVDA: call_gex did not arrive",
+    "FAIL broken 500", "FAIL offline no response"],
+  "STRICT (the weekly schedule): a field the code reads that did not arrive, a 5xx and an unanswered call are failures");
+  ok(run.strict.notes.some((n) => n.startsWith("gated 403: gated, as expected")),
+    "while the plan-gated VIX curve's 403 is expected and only noted");
+  eq(run.code, 1, "so the strict run exits 1, which turns the scheduled workflow red and emails the owner");
+  ok(lines.at(-1).startsWith("== exit 1: strict: 4 unexpected refusal(s)"), "and says why on its last line");
+  ok(lines.every((l) => !l.includes(KEY)), "and never prints the key");
+
+  const clean = await probe.runProbe(
+    { key: KEY, base: "https://vendor.test", tickers: ["AAPL", "NVDA"], filter: "chain,gated", strict: true,
+      date: SESSION, list: strictList },
+    { fetch: vendor.fetch, log: () => {}, now: vendor.now, sleep: vendor.sleep });
+  ok(clean.code === 0 && clean.strict.failures.length === 0,
+    "a strict run whose reads all arrived and whose only refusal is the expected one exits 0 — and an empty answer " +
+      "(chain:NVDA) is not drift");
+  const planned = probe.strictVerdict([{ id: "gated", op: "/api/volatility/vix-term-structure", cls: "ok", status: 200 }],
+    strictList);
+  ok(planned.failures.length === 0 && /the plan changed/.test(planned.notes[0]),
+    "an expected-gated call that starts answering is noted as a plan change, not a failure");
+  throwsLike(() => probe.validateList({ ...mini, reads: { "/api/zzz": ["x"] } }), /no probe exercises/,
+    "a read list for an operation no probe calls is refused");
+  throwsLike(() => probe.validateList({ ...mini, reads: { "/api/stock/{ticker}/greek-flow": ["a", "a"] } }), /distinct/,
+    "and a read list with a name twice");
+  throwsLike(() => probe.validateList({ ...mini, gated: { "/api/volatility/vix-term-structure": 200 } }), /4xx/,
+    "an expected-gated status is a 4xx");
+
+  const reads = list.reads;
+  const L = await import("../shared/flows-live.js");
+  const readsOf = (op) => new Set(reads[op] || []);
+  const stripSources = L.STRIP_FIELDS.map(([, field]) => field).filter(Boolean);
+  ok(stripSources.every((f) => readsOf("/api/screener/stocks").has(f)),
+    `THE STRICT READ LIST covers every screener field the live strip reads (${stripSources.length} of them)`);
+  ok(["timestamp", "net_call_premium", "net_put_premium", "net_volume"].every((f) =>
+    readsOf("/api/market/market-tide").has(f) && readsOf("/api/market/{sector}/sector-tide").has(f) &&
+    readsOf("/api/market/{ticker}/etf-tide").has(f) && readsOf("/api/net-flow/expiry").has(f)),
+  "and every tide field Tier 1 and Tier 2 read");
+  ok(["gamma_per_one_percent_move_oi", "gamma_per_one_percent_move_vol", "gamma_per_one_percent_move_dir", "price",
+    "start_time"].every((f) => readsOf("/api/stock/{ticker}/spot-exposures").has(f)), "and the spot-gamma fields");
+  const SEEN_OUTSIDE_SPEC = {
+    "/api/market/sector-etfs": ["last"], "/api/market/{ticker}/etf-tide": ["underlying_price"],
+    "/api/stock/{ticker}/spot-exposures": ["start_time"],
+    "/api/option-trades/flow-alerts": ["start_time", "end_time", "iv_start", "iv_end"],
+    "/api/etfs/{ticker}/holdings": ["type", "weight"],
+  };
+  for (const [op, names] of Object.entries(reads)) {
+    const documented = new Set(list.expect[op] || []);
+    const undocumented = names.filter((n) => !documented.has(n));
+    ok(undocumented.every((n) => (SEEN_OUTSIDE_SPEC[op] || []).includes(n)),
+      `${op}: every name the code reads is one the spec documents, or one the 2026-09-23 probe saw arrive ` +
+      `(${undocumented.join(", ") || "none outside the spec"})`);
+  }
+  deep(list.gated, { "/api/volatility/vix-term-structure": 403, "/api/politician-portfolios/holders/{ticker}": 422 },
+    "EXPECTED REFUSALS are the two the 2026-09-23 probe recorded: the VIX curve needs the volatility add-on (403) and " +
+      "politician holders is enterprise-only (422)");
+}
+
+{
   deep(probe.parseTickers(""), ["AAPL", "NVDA"], "no tickers means the default pair");
   deep(probe.parseTickers(" aapl, nvda ,AAPL"), ["AAPL", "NVDA"], "tickers are trimmed, uppercased and deduplicated");
   deep(probe.parseTickers("BRK.B spy"), ["BRK.B", "SPY"], "a class share and a space separator are accepted");
   throwsLike(() => probe.parseTickers("../etc"), probe.UsageError, "a path cannot pass as a ticker");
   throwsLike(() => probe.parseTickers("A,B,C,D,E,F,G,H,I,J,K"), /at most 10/, "the ticker list is bounded");
   deep(probe.parseArgs(["--dry-run", "--tickers", "spy", "--filter=skew", "--date", "2026-09-18"], {}),
-       { dryRun: true, tickers: ["SPY"], filter: "skew", date: "2026-09-18", list: probe.LIST_PATH },
+       { dryRun: true, strict: false, tickers: ["SPY"], filter: "skew", date: "2026-09-18", list: probe.LIST_PATH },
        "flags parse in both spellings");
-  deep(probe.parseArgs([], { FLOWS_PROBE_TICKERS: "tsla", FLOWS_PROBE_FILTER: "gex" }),
-       { dryRun: false, tickers: ["TSLA"], filter: "gex", date: "", list: probe.LIST_PATH },
-       "the workflow's inputs arrive through the environment, never through the shell");
+  deep(probe.parseArgs([], { FLOWS_PROBE_TICKERS: "tsla", FLOWS_PROBE_FILTER: "gex", FLOWS_PROBE_STRICT: "1" }),
+       { dryRun: false, strict: true, tickers: ["TSLA"], filter: "gex", date: "", list: probe.LIST_PATH },
+       "the workflow's inputs arrive through the environment, never through the shell, strict among them");
+  eq(probe.parseArgs(["--strict"], {}).strict, true, "and --strict is the same switch by hand");
   throwsLike(() => probe.parseArgs(["--date", "2026-02-30"], {}), /YYYY-MM-DD/, "an impossible date is refused");
   throwsLike(() => probe.parseArgs(["--bogus"], {}), /unknown argument/, "an unknown flag is refused");
   throwsLike(() => probe.parseArgs(["--tickers"], {}), /needs a value/, "a flag without its value is refused");
@@ -500,14 +569,23 @@ const mini = probe.validateList({
 {
   const wf = fs.readFileSync(path.join(ROOT, ".github/workflows/flows-probe.yml"), "utf8");
   const on = wf.slice(wf.indexOf("\non:"), wf.indexOf("\npermissions:"));
-  ok(/^\s*workflow_dispatch:/m.test(on) && !/schedule|cron|push|pull_request/.test(on),
-     "the probe runs only when dispatched: it is a measurement, never a job that spends calls on its own");
+  const crons = [...on.matchAll(/cron: "([^"]+)"/g)].map((m) => m[1]);
+  deep(crons, ["23 14 * * 0"],
+    "THE PROBE IS A WEEKLY MONITOR now (Sunday 14:23 UTC, off the hour GitHub drops most), not only a hand-run " +
+      "measurement: about 140 calls a week against a 100M-call plan, so vendor drift turns a run red within a week");
+  ok(/^\s*workflow_dispatch:/m.test(on) && !/push|pull_request/.test(on), "and it can still be dispatched by hand");
+  ok(/FLOWS_PROBE_STRICT: \$\{\{ \(github\.event_name == 'schedule' \|\| inputs\.strict\) && '1' \|\| '' \}\}/.test(wf),
+    "the scheduled run is always strict; a dispatched one is strict only when asked");
   ok(/tickers:[\s\S]*?default: "AAPL,NVDA"/.test(on), "tickers default to AAPL,NVDA");
   ok(/filter:[\s\S]*?required: false/.test(on), "the filter is optional");
   ok(/^permissions:\n {2}contents: read\n/m.test(wf), "the job can read the repository and nothing else");
   ok(/timeout-minutes: 20\b/.test(wf), "and is bounded at 20 minutes");
-  ok(/actions\/checkout@v5/.test(wf) && /actions\/setup-node@v5/.test(wf) && /node-version: 22\b/.test(wf) && !/@v4/.test(wf),
-     "with the same checkout, setup-node and Node major as flows-pipeline.yml");
+  const pipelineWf = fs.readFileSync(path.join(ROOT, ".github/workflows/flows-pipeline.yml"), "utf8");
+  const usesOf = (text) => [...text.matchAll(/uses:\s*(\S+)/g)].map((m) => m[1]);
+  ok(usesOf(wf).length === 2 && usesOf(wf).every((u) => usesOf(pipelineWf).includes(u)) &&
+     usesOf(wf).every((u) => /@[0-9a-f]{40}$/.test(u)) && /node-version: 22\b/.test(wf) &&
+     /persist-credentials: false/.test(wf),
+  "with the same SHA-pinned checkout and setup-node and Node major as flows-pipeline.yml, keeping no credential");
   ok(/UW_API_KEY: \$\{\{ secrets\.UW_API_KEY \}\}/.test(wf), "the key comes from the repository secret");
   ok(/FLOWS_PROBE_TICKERS: \$\{\{ inputs\.tickers \}\}/.test(wf) && /FLOWS_PROBE_FILTER: \$\{\{ inputs\.filter \}\}/.test(wf),
      "the inputs reach the script through the environment");
@@ -524,6 +602,7 @@ console.log(`✓ flows-probe: ${checks} assertions — a probe list that covers 
   `guessed when absent, rows found under data, si, chains, trades or a {latest, history} object, a key union typed ` +
   `over five rows with numbers-as-strings marked, the spec's documented names diffed against what arrived so a ` +
   `renamed field like call_gex is named in the summary, calls paced 250 ms apart with a 429 retried on its ` +
-  `Retry-After, exit 1 only when nothing answered, a dispatch-only workflow whose inputs reach the script through ` +
-  `the environment and never the shell, and the key absent from every printed line — raw, escaped, URL-encoded, ` +
+  `Retry-After, exit 1 only when nothing answered — or, strict, on an unexpected refusal or a field the code reads ` +
+  `that did not arrive — a weekly strict workflow whose inputs reach the script through the environment and never ` +
+  `the shell, and the key absent from every printed line — raw, escaped, URL-encoded, ` +
   `echoed in a header, or cut in half by a clip`);

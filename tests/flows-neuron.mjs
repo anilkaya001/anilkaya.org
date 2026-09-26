@@ -14,7 +14,7 @@ import { aggressorGamma } from "../shared/flows-features.js";
 import { buildCard } from "../shared/flows-card.js";
 import fs from "node:fs";
 import { aiText, modelInput, askModels, aiChain, aiCallSignature, retryableGuard, repliedGuard, modelRates,
-         spendShape, fallbackNote, emptyNote, intradayFloorMs, AI_LENGTH_RETRY_MS, AI_INTRADAY_REFRESH_MS } from "../shared/flows-ai.js";
+         spendShape, fallbackNote, emptyNote, thrownThenEmptyNote, intradayFloorMs, AI_LENGTH_RETRY_MS, AI_INTRADAY_REFRESH_MS } from "../shared/flows-ai.js";
 import { readFileSync } from "node:fs";
 
 let checks = 0;
@@ -653,6 +653,41 @@ const CARD = {
   const r2 = await askModels(spent, aiChain(env), msgs, {});
   ok(r2.guard === "unreachable:allowance" && r2.failure.why === "allowance" && spent.calls.length === 1,
     "a spent allowance is account-wide, so it is reported and the fallback is NOT asked to fail the same way");
+  for (const [code, why] of [["5007: No such model", "unreachable"], ["5035: model not available on your plan", "plan"]]) {
+    const gone = fake([new Error("AiError: " + code), { response: "Fallback wording.", usage: { prompt_tokens: 900, completion_tokens: 30 } }]);
+    const paid = [];
+    const logged = [];
+    const r = await askModels(gone, aiChain(env), msgs, {}, async (m, u) => { paid.push([m, u && u.completion_tokens]); },
+      { error: (line) => logged.push(JSON.parse(line)) });
+    ok(r.text === "Fallback wording." && r.model === llama && r.guard === null && r.failure === null &&
+       r.attempts.length === 2 && r.attempts[0].failed === why && r.failedOver === true,
+      `A PRIMARY THAT THROWS ${code.slice(0, 4)} FAILS OVER: the fallback answers, the guard is clear and the result says it ` +
+        "failed over — a deprecated or plan-gated primary used to take all four AI surfaces down with the fallback never asked");
+    same(paid, [[llama, 30]], "and the spend is recorded under the model that answered, the only one that consumed tokens");
+    ok(logged.length === 1 && logged[0].message === "ai failover" && logged[0].from === glm && logged[0].to === llama &&
+       logged[0].why === why, "with one structured log line naming both models and the reason");
+    same(fallbackNote(r), { from: glm, stop: "failed:" + why, reasoned: false },
+      "and the fallback note says the primary failed rather than calling it an empty reply");
+  }
+  const bothGone = await askModels(fake([new Error("AiError: 5007: No such model"), new Error("AiError: 3040: capacity")]),
+    aiChain(env), msgs, {}, null, { error() {} });
+  ok(bothGone.text === null && bothGone.guard === "unreachable:capacity" && bothGone.model === llama &&
+     bothGone.failure.why === "capacity" && bothGone.attempts.length === 2 && bothGone.failedOver === true,
+    "when both throw, the last failure is the one reported, because it is why this question went unanswered after the failover");
+  const thenEmpty = await askModels(fake([new Error("AiError: 5007: No such model"), { response: "" }]),
+    aiChain(env), msgs, {}, null, { error() {} });
+  ok(thenEmpty.text === null && thenEmpty.model === llama && thenEmpty.failure.why === "unreachable" &&
+     thenEmpty.attempts[0].failed === "unreachable" && thenEmpty.attempts[1].failed === null &&
+     thenEmpty.attempts[1].text === null && thenEmpty.guard === "unreachable:empty" && thenEmpty.failedOver === true,
+    "THROW, THEN EMPTY: a primary that throws and a fallback that answers with no text returns the primary's failure, " +
+      "attempts in that order with the fallback's empty reply second, the fallback as the model and its stop as the guard, " +
+      "so a caller can say both halves (the ask route's afterEmpty covers only empty-then-throw)");
+  const spentFirst = fake([new Error("AiError: 3036: account limit"), { response: "never" }]);
+  const r36 = await askModels(spentFirst, aiChain(env), msgs, {}, null, { error() { throw new Error("no failover log"); } });
+  ok(r36.guard === "unreachable:allowance" && spentFirst.calls.length === 1 && r36.failedOver === false,
+    "but 3036, the account-wide allowance, never fails over: the fallback would draw on the same exhausted pool");
+  ok(r1.failedOver === false, "and an empty primary rescued by the fallback is a fallback, not a failover");
+
   const busy = fake([reasoningOnly, new Error("AiError: 3040: capacity")]);
   const r3 = await askModels(busy, aiChain(env), msgs, {});
   ok(r3.guard === "unreachable:length" && r3.model === glm && r3.failure.why === "capacity",
@@ -686,6 +721,13 @@ const CARD = {
   eq(emptyNote((await askModels(fake([reasoningOnly, new Error("AiError: 3040: capacity")]), aiChain(env), msgs, {})).attempts),
     "The model spent its whole answer budget before writing any text",
     "a fallback that failed to run is not described as a stop: the Ask note names its failure separately");
+  const thrownThenEmpty = (await askModels(fake([new Error("AiError: 3040: capacity"), { response: "" }]), aiChain(env), msgs, {})).attempts;
+  eq(thrownThenEmptyNote(thrownThenEmpty, "had no capacity just now"),
+    "The model asked first had no capacity just now, and the fallback model asked after it answered with no text",
+    "A PRIMARY THAT THREW AND A FALLBACK THAT ANSWERED EMPTY ARE BOTH NAMED: the Ask note used to give only the primary's " +
+    "failure, as if no fallback had been asked");
+  eq(thrownThenEmptyNote((await askModels(fake([reasoningOnly, { response: "" }]), aiChain(env), msgs, {})).attempts, "x"), null,
+    "and it stays silent when the primary replied, which emptyNote describes");
   ok(repliedGuard("invented") && repliedGuard("unreachable:length") && repliedGuard("unreachable:empty") &&
      !repliedGuard("unreachable:capacity") && !repliedGuard(null),
     "a guard written after a model replied (and was billed) is told apart from one written after a refusal to run");
@@ -738,6 +780,8 @@ const CARD = {
     "or summary:empty, which the same card never retries, where origin/main retried the same failure after five minutes");
   ok((worker.match(/emptyNote\(said\.attempts\)/g) || []).length === 2 && !/so did the fallback model asked after it/.test(worker),
     "both Ask notes about an empty reply are built from emptyNote over the attempts, not from the chain's combined guard");
+  ok(/thrownThenEmptyNote\(said\.attempts, first && \(FALLBACK_FAILED\[first\.failed\]/.test(worker),
+    "the Ask route builds that note from the primary's own failure phrase");
   ok(/const meter = afterCall \|\| base\.spend;/.test(worker) && /meter\.remaining > 0/.test(worker) &&
      /spend: meter, note: say/.test(worker) && !/spend\.remaining > 0/.test(worker),
     "THE ALLOWANCE NOTE READS THE METER AFTER THE PRIMARY'S BILLED CALL: with 99 credits left, a primary at the cap that " +

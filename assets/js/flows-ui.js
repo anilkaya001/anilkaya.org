@@ -237,7 +237,6 @@
 
   const REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)");
   const WIDE = window.matchMedia("(min-width: 1025px)");
-  const PHONE = window.matchMedia("(max-width: 599.98px)");
   const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const nextId = (p) => p + (++uid);
@@ -1688,27 +1687,46 @@
     const p = Object.fromEntries(ET_PARTS.formatToParts(d).map((x) => [x.type, x.value]));
     return { date: `${p.year}-${p.month}-${p.day}`, wd: p.weekday, mins: (+p.hour % 24) * 60 + +p.minute };
   }
-  function prevWeekday(iso) {
-    let t = Date.parse(iso + "T12:00:00Z");
+  function localExpected(n) {
+    if (n.wd !== "Sat" && n.wd !== "Sun" && n.mins >= 1260) return n.date;
+    let t = Date.parse(n.date + "T12:00:00Z");
     do { t -= 864e5; } while ([0, 6].includes(new Date(t).getUTCDay()));
     return new Date(t).toISOString().slice(0, 10);
   }
+  const SRV = { day: null, at: 0, ph: null, until: 0, busy: false, asked: 0, local: null };
+  function takeNow(b) {
+    if (!b) return;
+    if (isoDay(b.expected)) { SRV.day = b.expected.slice(0, 10); SRV.at = Date.now(); SRV.local = localExpected(nyClock(new Date())); }
+    const t = b.phase ? Date.parse(b.phase.endsAt) : NaN;
+    if (t > 0) { SRV.ph = b.phase.phase; SRV.until = t; }
+  }
+  function confirmExpected() {
+    const t = Date.now();
+    if (!nativeFetch || SRV.busy || t - SRV.asked < 6e4 || t - SRV.at < 6e4) return;
+    SRV.busy = true;
+    SRV.asked = t;
+    nativeFetch("/api/flows/now", { credentials: "same-origin" }).then((r) => r.ok && r.json()).then(takeNow, () => {})
+      .then(() => { SRV.busy = false; paintFresh(); });
+  }
   function market(now) {
-    const n = nyClock(now || new Date());
+    const at = now || new Date(), n = nyClock(at);
     const weekday = !["Sat", "Sun"].includes(n.wd);
-    const open = weekday && n.mins >= 570 && n.mins < 960;
-    const built = weekday && n.mins >= 17 * 60 + 45;
-    return { open, weekday, today: n.date, expected: built ? n.date : prevWeekday(n.date) };
+    const open = SRV.until > at ? SRV.ph === "rth" : weekday && n.mins >= 570 && n.mins < 960;
+    const local = localExpected(n);
+    if (SRV.day && local > SRV.day && local !== SRV.local) confirmExpected();
+    return { open, weekday, today: n.date, expected: SRV.day || local, source: SRV.day ? "server" : "local" };
   }
 
-  const FRESH = { sessionDate: null, nightly: null, meta: false, generatedAt: null, updatedAt: null, readAt: null, live: false, sources: new Map(), explicit: false, settled: false };
+  const FRESH = { sessionDate: null, primary: null, nightly: null, meta: false, generatedAt: null, updatedAt: null, readAt: null, live: false, sources: new Map(), explicit: false, settled: false };
   function freshState() {
     const m = market(new Date());
-    const S = FRESH.sessionDate || FRESH.nightly;
+    const S = FRESH.primary || FRESH.sessionDate || FRESH.nightly;
     const liveNow = FRESH.live && FRESH.readAt && Date.now() - Date.parse(FRESH.readAt) < 3 * 60 * 1000 && m.open;
+    let behind = !!S && S < m.expected;
+    if (behind && m.source === "local") { confirmExpected(); behind = !SRV.busy; }
     let state;
     if (!S) state = FRESH.settled ? (m.open ? "fresh" : "closed") : "pending";
-    else if (S < m.expected) state = "stale";
+    else if (behind) state = "stale";
     else if (liveNow) state = "live";
     else if (m.open) state = "fresh";
     else state = "closed";
@@ -1753,6 +1771,7 @@
     if (o.explicit !== false) FRESH.explicit = true;
     if (isoDay(o.sessionDate)) {
       const d = o.sessionDate.slice(0, 10);
+      if (o.primary === true) FRESH.primary = d;
       if (!FRESH.sessionDate || d > FRESH.sessionDate) FRESH.sessionDate = d;
       FRESH.sources.set(o.source || "page", d);
     }
@@ -1798,32 +1817,35 @@
       try {
         const url = typeof input === "string" ? input : input && input.url;
         if (url && url.indexOf("/api/flows/meta") >= 0) takeMeta(p);
+        if (url && url.indexOf("/api/flows/now") >= 0) p.then((r) => r.ok && r.clone().json()).then((j) => { takeNow(j); paintFresh(); }, () => {});
         if (url && url.indexOf("/api/flows/") >= 0) p.then((r) => observe(url, r), () => {});
       } catch { return p; }
       return p;
     };
   }
 
-  const PAL = { rows: null, loading: null };
+  const PAL = {};
+  const PAL_G = { focus: ["star", "Focus"], fund: ["stack", "ETF"], index: ["market", "Index"], board: ["boards", "Board"], cross: ["layers", "Card"] };
   async function paletteRows() {
-    if (PAL.rows) return PAL.rows;
     if (PAL.loading) return PAL.loading;
     const get = (u) => (nativeFetch ? nativeFetch(u, { credentials: "same-origin" }).then((r) => (r.ok ? r.json() : null)).catch(() => null) : Promise.resolve(null));
-    PAL.loading = Promise.all([get("/api/flows/board?side=long"), get("/api/flows/board?side=short"), get("/api/flows/board?side=watch"), get("/api/flows/scoretrack")])
-      .then(([L, S, W, T]) => {
-        if (!L && !S && !W && !T) { PAL.loading = null; return []; }
+    PAL.loading = Promise.all(["board?side=long", "board?side=short", "board?side=watch", "scoretrack", "roster"].map((k) => get("/api/flows/" + k)))
+      .then((all) => {
+        const [L, S, W, T, R] = all;
+        if (!all.some(Boolean)) { PAL.loading = null; return []; }
         const by = new Map();
         const add = (r, side, session) => {
           if (!r || typeof r.t !== "string") return;
           const t = r.t.toUpperCase();
           if (!by.has(t)) by.set(t, { t, side, sector: r.sector || null, px: num(r.px), s: num(r.s), session });
         };
-        for (const [p, side] of [[L, "Bullish"], [S, "Bearish"], [W, "Watch"]]) {
-          if (p && Array.isArray(p.rows)) for (const r of p.rows) add(r, side, p.sessionDate || null);
-        }
-        if (T && Array.isArray(T.names)) for (const n of T.names) add({ t: n.t, s: n.last }, "Scored", T.sessionDate || null);
-        PAL.rows = [...by.values()];
-        return PAL.rows;
+        for (const [p, side] of [[L, "Bullish"], [S, "Bearish"], [W, "Watch"]]) if (p && Array.isArray(p.rows)) for (const r of p.rows) add(r, side, p.sessionDate);
+        if (T && Array.isArray(T.names)) for (const n of T.names) add({ t: n.t, s: n.last }, "Scored", T.sessionDate);
+        const D = (R && R.depth) || {};
+        for (const t in D) add({ t }, null, R.sessionDate);
+        const rows = [...by.values()];
+        for (const r of rows) r.d = PAL_G[D[r.t]];
+        return rows;
       });
     return PAL.loading;
   }
@@ -1849,13 +1871,13 @@
     const render = (rows) => {
       const t = q.value.trim().toUpperCase();
       const rank = (r) => (!t ? 5 : r.t === t ? 0 : r.t.startsWith(t) ? 1 : r.t.includes(t) ? 2 : (r.sector || "").toUpperCase().includes(t) ? 3 : 9);
-      shown = rows.map((r) => [rank(r), r]).filter((x) => x[0] < 9).sort((a, b) => a[0] - b[0] || Math.abs(b[1].s || 0) - Math.abs(a[1].s || 0)).map((x) => x[1]).slice(0, 40);
-      if (t && /^[A-Z][A-Z0-9.\-]{0,9}$/.test(t) && !shown.some((r) => r.t === t)) shown.push({ t, side: null, sector: null, px: null, s: null, open: true });
+      shown = rows.map((r) => [rank(r), r]).filter((x) => x[0] < 9).sort((a, b) => a[0] - b[0] || !/,[FEI]/.test(a[1].d) - !/,[FEI]/.test(b[1].d) || Math.abs(b[1].s || 0) - Math.abs(a[1].s || 0)).map((x) => x[1]).slice(0, 40);
+      if (t && /^[A-Z][A-Z0-9.\-]{0,9}$/.test(t) && !shown.some((r) => r.t === t)) shown.push({ t, px: null, s: null, open: true });
       sel = clamp(sel, 0, Math.max(0, shown.length - 1));
       L.replaceChildren(...shown.map((r, i) => {
         const opt = h("li", { class: "ui-pal-opt", role: "option", id: "fxPo" + i, "aria-selected": String(i === sel) },
           h("b", null, r.t),
-          h("span", null, r.open ? "Open this name" : [r.sector, r.side, r.session ? F.day(r.session) : null].filter(Boolean).join(" " + MID + " ")),
+          h("span", null, r.d ? glyph(r.d[0]) : null, r.open ? "Open this name" : [r.sector, r.side || (r.d && r.d[1]), r.session ? F.day(r.session) : null].filter(Boolean).join(" " + MID + " ")),
           h("span", { class: "ui-pal-px" }, r.px === null ? "" : F.px(r.px)),
           h("span", { class: "ui-num", "data-tone": r.s === null ? null : tone(r.s) }, r.s === null ? "" : F.signed(r.s)));
         opt.addEventListener("click", () => go(r.t));
@@ -2003,7 +2025,7 @@
     ring, divRing, iconChip, gaugeChip, chips,
     segmented, tag, capsule, key, legend, robustness,
     silent, dash, listRow, list, tile, split, moduleCard,
-    freshness, shell, chart,
+    freshness, shell, chart, depths: PAL_G,
   });
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initShell, { once: true });

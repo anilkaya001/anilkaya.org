@@ -9,6 +9,7 @@ import * as WORLD from "../shared/flows-quant-world.js";
 import * as QC from "../shared/flows-quant-card.js";
 import * as QP from "../scripts/flows-quant-pipeline.mjs";
 import { STATE_STRUCTURES } from "../shared/flows-neuron.js";
+import { easternDay, prevTradingDay, isTradingDay, shiftDay } from "../shared/flows-freshness.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -19,10 +20,30 @@ const DASH = "—";
 
 const flat = (s) => String(s == null ? "" : s).replace(/\s+/g, " ").trim();
 
-const SESSION_DAY = "2026-09-04";
-const NEAR = "2026-10-16";
-const FAR = "2026-12-18";
-const BROKEN = "2026-11-20";
+const SESSION_DAY = prevTradingDay(easternDay(Date.now()));
+const DAYS = (a, b) => Math.round((Date.parse(b + "T00:00:00Z") - Date.parse(a + "T00:00:00Z")) / 864e5);
+const monthlies = (() => {
+  const out = [];
+  const y0 = Number(SESSION_DAY.slice(0, 4)), m0 = Number(SESSION_DAY.slice(5, 7)) - 1;
+  for (let i = 0; i < 8; i++) {
+    const first = new Date(Date.UTC(y0, m0 + i, 1));
+    const third = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), 1 + ((5 - first.getUTCDay() + 7) % 7) + 14));
+    const day = third.toISOString().slice(0, 10);
+    if (isTradingDay(day)) out.push(day);
+  }
+  return out;
+})();
+const NEAR = monthlies.find((d) => DAYS(SESSION_DAY, d) >= 21);
+const BROKEN = monthlies[monthlies.indexOf(NEAR) + 1];
+const FAR = monthlies.find((d) => DAYS(SESSION_DAY, d) >= 84 && d > BROKEN);
+const NEAR_DTE = DAYS(SESSION_DAY, NEAR);
+const OCC = (d) => d.slice(2).replace(/-/g, "");
+const NY = OCC(NEAR);
+const FY = OCC(FAR);
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const NEAR_LABEL = MONTHS[Number(NEAR.slice(5, 7)) - 1] + " " + Number(NEAR.slice(8, 10));
+const PREV_DAY = prevTradingDay(SESSION_DAY);
+const EARNINGS = shiftDay(NEAR, 20);
 
 const greeks = (d, g, t, v, r) => ({
   delta: String(d), gamma: String(g), theta: String(t), vega: String(v), rho: String(r),
@@ -30,49 +51,49 @@ const greeks = (d, g, t, v, r) => ({
 
 const NEAR_CALLS = [
 
-  { option_symbol: "AAA261016C00100000", nbbo_bid: "4.90", nbbo_ask: "5.10",
+  { option_symbol: `AAA${NY}C00100000`, nbbo_bid: "4.90", nbbo_ask: "5.10",
     implied_volatility: "0.30", volume: "100", open_interest: "500",
     ...greeks(0.55, 0.03, -0.05, 0.12, 0.04) },
 
-  { option_symbol: "AAA261016C00110000", nbbo_bid: "1.90", nbbo_ask: "2.10",
+  { option_symbol: `AAA${NY}C00110000`, nbbo_bid: "1.90", nbbo_ask: "2.10",
     implied_volatility: "0.28", volume: "80", open_interest: "400",
     ...greeks(0.30, 0.02, -0.04, 0.10, 0.02) },
 
-  { option_symbol: "AAA261016C00120000", nbbo_bid: "0.45", nbbo_ask: "0.55",
+  { option_symbol: `AAA${NY}C00120000`, nbbo_bid: "0.45", nbbo_ask: "0.55",
     implied_volatility: null, volume: "5", open_interest: "20",
     delta: null, gamma: null, theta: null, vega: null, rho: null },
 ];
 
 const NEAR_PUTS = [
 
-  { option_symbol: "AAA261016P00100000", nbbo_bid: "4.90", nbbo_ask: "5.10",
+  { option_symbol: `AAA${NY}P00100000`, nbbo_bid: "4.90", nbbo_ask: "5.10",
     implied_volatility: "0.31", volume: "60", open_interest: "300",
     ...greeks(-0.45, 0.03, -0.05, 0.12, -0.03) },
-  { option_symbol: "AAA261016P00090000", nbbo_bid: "1.40", nbbo_ask: "1.60",
+  { option_symbol: `AAA${NY}P00090000`, nbbo_bid: "1.40", nbbo_ask: "1.60",
     implied_volatility: "0.35", volume: "10", open_interest: "120",
     ...greeks(-0.20, 0.02, -0.03, 0.08, -0.01) },
 
-  { option_symbol: "AAA261016P00080000", nbbo_bid: null, nbbo_ask: "0.10",
+  { option_symbol: `AAA${NY}P00080000`, nbbo_bid: null, nbbo_ask: "0.10",
     implied_volatility: "0.40", volume: "0", open_interest: "5",
     ...greeks(-0.05, 0.01, -0.01, 0.02, -0.01) },
 ];
 
 const farCall = (strike) => ({
-  option_symbol: "AAA261218C" + String(strike * 1000).padStart(8, "0"),
+  option_symbol: "AAA" + FY + "C" + String(strike * 1000).padStart(8, "0"),
   nbbo_bid: "1.00", nbbo_ask: "1.20", implied_volatility: "0.30",
   volume: "1", open_interest: "10", ...greeks(0.5, 0.01, -0.01, 0.05, 0.01),
 });
 const FAR_CALLS_P1 = Array.from({ length: 500 }, (_, i) => farCall(i + 1));
 const FAR_CALLS_P2 = Array.from({ length: 500 }, (_, i) => farCall(i + 501));
 const FAR_PUTS = [90, 100, 110].map((k) => ({
-  option_symbol: "AAA261218P" + String(k * 1000).padStart(8, "0"),
+  option_symbol: "AAA" + FY + "P" + String(k * 1000).padStart(8, "0"),
   nbbo_bid: "2.00", nbbo_ask: "2.20", implied_volatility: "0.30",
   volume: "1", open_interest: "10", ...greeks(-0.4, 0.01, -0.01, 0.05, -0.01),
 }));
 
 const SVI = { a: 0.006, b: 0.06, rho: -0.55, m: 0.02, sigma: 0.12 };
 const BBB = (() => {
-  const T = 42 / 365, F = 102 * Math.exp(0.04 * T), D = Math.exp(-0.04 * T);
+  const T = NEAR_DTE / 365, F = 102 * Math.exp(0.04 * T), D = Math.exp(-0.04 * T);
   const rng = WORLD.xoshiro128ss("bbb");
   const rows = { C: [], P: [] };
   for (let K = 70; K <= 135 + 1e-9; K += 2.5) {
@@ -84,7 +105,7 @@ const BBB = (() => {
       const otm = type === "C" ? K >= 102 : K <= 102;
       const oi = Math.round((otm ? 5000 : 1800) * Math.exp(-Math.abs(Math.log(K / 102)) / 0.1)) + 300;
       rows[type].push({
-        option_symbol: "BBB261016" + type + String(Math.round(K * 1000)).padStart(8, "0"),
+        option_symbol: "BBB" + NY + type + String(Math.round(K * 1000)).padStart(8, "0"),
         nbbo_bid: String(Math.max(0.01, Math.round((mid - half) * 100) / 100)), nbbo_ask: String(Math.round((mid + half) * 100) / 100 + 0.01),
         implied_volatility: String(vol), open_interest: String(oi), volume: String(Math.round(oi / 7)),
         ...greeks(0.5, 0.01, -0.01, 0.05, 0.01),
@@ -116,13 +137,13 @@ const upstream = http.createServer((req, res) => {
   }
 
   if (url.pathname.includes("/ohlc/")) {
-    return send(200, { data: [{ date: "2026-09-03", close: "100.00" }] });
+    return send(200, { data: [{ date: PREV_DAY, close: "100.00" }] });
   }
 
   if (url.pathname.endsWith("/info")) {
 
     return send(200, { data: {
-      next_earnings_date: "2026-11-05", announce_time: "postmarket",
+      next_earnings_date: EARNINGS, announce_time: "postmarket",
       issue_type: "Common Stock", beta: "1.50",
     } });
   }
@@ -277,16 +298,16 @@ try {
     const ctx = await openInfo("Live print");
     const facts = await page.$$eval("#fxPop dt", (dts) => Object.fromEntries(dts.map((dt) => [dt.textContent.trim(), dt.nextElementSibling.textContent.trim()])));
     ok(/live print/.test(ctx) && /live print/.test(facts.Spot), `and the disclosure says it is the live print (${facts.Spot})`);
-    eq(facts.Session, "2026-09-04", "the session date comes from the tape rather than from the wall clock");
+    eq(facts.Session, SESSION_DAY, "the session date comes from the tape rather than from the wall clock");
     eq(facts.Beta, "1.50", "beta is published");
     eq(facts["Reference index"], "SPY 600.00",
        "the reference index is NAMED and priced — a beta-weighted delta against an unnamed index is a number whose definition was withheld");
-    ok(/2026-11-05/.test(facts["Next earnings"]), "and the earnings date rides along, because a contract that outlives a report is a different trade at the same premium");
+    ok(String(facts["Next earnings"]).includes(EARNINGS), "and the earnings date rides along, because a contract that outlives a report is a different trade at the same premium");
     await closeInfo();
 
     const contractCalls = upstreamCalls.filter((u) => u.includes("/option-contracts"));
     ok(contractCalls.length > 0, "the expiry read reached the provider");
-    ok(contractCalls.every((u) => /expiry=2026-10-16/.test(u)),
+    ok(contractCalls.every((u) => u.includes("expiry=" + NEAR)),
        "every contract request names ONE expiry — the vendor's own documented query parameter, and what makes a 12,000-contract book reachable a slice at a time");
     ok(contractCalls.some((u) => /option_type=call/.test(u)) && contractCalls.some((u) => /option_type=put/.test(u)),
        "and splits calls from puts, which halves the population each 500-row page has to hold");
@@ -297,21 +318,21 @@ try {
     eq(chips.length, 3, "every listed expiry is offered");
     ok(/12223 listed/.test(chips[2].label),
        `THE SIZE OF AN EXPIRY IS IN THE PICKER, BEFORE IT IS READ (${chips[2].label}); its bar is drawn to that count`);
-    ok(/42d/.test(chips[0].text) && /42 days/.test(chips[0].label),
+    ok(chips[0].text.includes(NEAR_DTE + "d") && chips[0].label.includes(NEAR_DTE + " days"),
        "and each chip carries its days to expiry, counted in calendar days from the session");
-    eq(chips[0].on, "true", "the first read is the expiry nearest the structure's window, 42 days here");
+    eq(chips[0].on, "true", `the first read is the expiry nearest the structure's window, ${NEAR_DTE} days here`);
     ok(!upstreamCalls.some((u) => /\/stock\/AAA\/expiry-breakdown\?.*date=/.test(u)) &&
        !upstreamCalls.some((u) => /\/stock\/AAA\/greek-exposure\/expiry/.test(u)),
        "the breakdown is read under the vendor's live field name `expires`, so no dated retry or fallback is spent");
 
     const ex = await openInfo("About expiries");
-    ok(/5 of 6 contracts read at Oct 16 carry a two-sided quote/.test(ex),
+    ok(ex.includes(`5 of 6 contracts read at ${NEAR_LABEL} carry a two-sided quote`),
        `the book states what it holds OF WHAT — two-sided quotes among contracts read — because a strike handle can only land on one of those (${ex.slice(0, 160)}…)`);
     await closeInfo();
   }
 
   {
-    await go("?t=AAA&expiry=2026-10-16&basis=mid&legs=AAA261016C00100000@1");
+    await go(`?t=AAA&expiry=${NEAR}&basis=mid&legs=AAA${NY}C00100000@1`);
     const cost = await slot("Cost");
     eq(cost.label, "Debit", "a long call is a debit, and the sign is in the NAME");
     eq(cost.value, "$500.00", "the net debit is the mid times one hundred shares");
@@ -398,7 +419,7 @@ try {
   }
 
   {
-    await go("?t=AAA&expiry=2026-10-16&basis=mid&legs=AAA261016C00100000@1,AAA261016C00110000@-1");
+    await go(`?t=AAA&expiry=${NEAR}&basis=mid&legs=AAA${NY}C00100000@1,AAA${NY}C00110000@-1`);
     eq((await slot("Cost")).value, "$300.00", "the spread's debit is the difference of the two mids");
     const mp = await slot("Max profit");
     eq(mp.value, "+$700.00",
@@ -423,7 +444,7 @@ try {
   }
 
   {
-    await go("?t=AAA&expiry=2026-10-16&basis=mid&legs=AAA261016C00100000@-1");
+    await go(`?t=AAA&expiry=${NEAR}&basis=mid&legs=AAA${NY}C00100000@-1`);
     const cost = await slot("Cost");
     eq(cost.label, "Credit", "a short position opens for a CREDIT and the reading is named for it");
     eq(cost.value, "$500.00", "at the credit received");
@@ -443,7 +464,7 @@ try {
   }
 
   {
-    await go("?t=AAA&expiry=2026-10-16&basis=mid&legs=AAA261016P00100000@-1");
+    await go(`?t=AAA&expiry=${NEAR}&basis=mid&legs=AAA${NY}P00100000@-1`);
     eq((await slot("Max loss")).value, MINUS + "$9,500",
        "A NAKED SHORT PUT'S LOSS IS BOUNDED and this prints the number: a share cannot trade below zero, so the loss is exactly the strike less the credit");
     const t = await turning();
@@ -454,7 +475,7 @@ try {
   }
 
   {
-    await go("?t=AAA&expiry=2026-10-16&basis=mid&legs=AAA261016C00100000@1,AAA261016C00120000@1");
+    await go(`?t=AAA&expiry=${NEAR}&basis=mid&legs=AAA${NY}C00100000@1,AAA${NY}C00120000@1`);
     eq((await slot("Cost")).value, "$550.00",
        "the money arithmetic is unaffected by a contract the vendor sent no greeks or IV for: the expiry payoff needs no greek at all");
     eq((await slot("Max loss")).value, MINUS + "$550.00", "and the maximum loss still renders as a number");
@@ -462,7 +483,7 @@ try {
     ok(legIv.length === 2 && legIv.every((t) => /IV\s*\d/.test(t)),
        "and both legs carry an implied volatility read off the fitted smile, so the one the vendor left blank is no longer a hole");
 
-    await go("?t=AAA&expiry=2026-10-16&basis=mid&legs=AAA261016C00100000@1,AAA261016P00080000@1");
+    await go(`?t=AAA&expiry=${NEAR}&basis=mid&legs=AAA${NY}C00100000@1,AAA${NY}P00080000@1`);
     for (const name of ["Cost", "Max loss", "Delta"]) {
       const s0 = await slot(name);
       ok(s0.silent && s0.value === DASH,
@@ -476,7 +497,7 @@ try {
        `and the leg responsible is NAMED (${reason.slice(0, 120)}…): "withheld" without a reason is indistinguishable from a bug`);
     await closeInfo();
 
-    await go("?t=AAA&expiry=2026-10-16&basis=mid&legs=AAA261016C00100000@1,AAA261016C00130000@-1");
+    await go(`?t=AAA&expiry=${NEAR}&basis=mid&legs=AAA${NY}C00100000@1,AAA${NY}C00130000@-1`);
     const gone = await slot("Cost");
     ok(gone.silent && gone.state === "withheld", "a leg the book does not list is withheld too");
     await page.click('[data-slot="Cost"] .ui-state');
@@ -486,7 +507,7 @@ try {
   }
 
   {
-    await go("?t=AAA&expiry=2026-10-16&basis=mid&legs=AAA261016C00100000@1");
+    await go(`?t=AAA&expiry=${NEAR}&basis=mid&legs=AAA${NY}C00100000@1`);
     eq(await page.locator("#sgPayoff path.tl-exp").count(), 1, "the expiry line is drawn");
     eq(await page.locator("#sgPayoff path.tl-today").count(), 1, "and the today line re-priced on the smile is drawn beside it");
     eq(await page.locator("#sgPayoff line.base").count(), 1, "with the zero rule, the axis the sign is read against");
@@ -569,7 +590,7 @@ try {
     const after = (await slot("Max profit")).value;
     ok(after !== before, `and everything re-prices in the page (max profit ${before} → ${after})`);
     const u = new URL(page.url());
-    ok(u.searchParams.get("s") === idea.family && new RegExp("BBB261016[CP]" + String(Math.round(k1 * 1000)).padStart(8, "0")).test(u.searchParams.get("legs") || ""),
+    ok(u.searchParams.get("s") === idea.family && new RegExp("BBB" + NY + "[CP]" + String(Math.round(k1 * 1000)).padStart(8, "0")).test(u.searchParams.get("legs") || ""),
        "and the moved position is in the link, structure and contracts, so it survives a reload");
 
     await h0.scrollIntoViewIfNeeded();
@@ -585,9 +606,9 @@ try {
   }
 
   {
-    await go("?t=AAA&expiry=2026-10-16&basis=mid&legs=AAA261016C00100000@1,AAA261016C00110000@-1");
+    await go(`?t=AAA&expiry=${NEAR}&basis=mid&legs=AAA${NY}C00100000@1,AAA${NY}C00110000@-1`);
     const legs = new URL(page.url()).searchParams.get("legs");
-    eq(legs, "AAA261016C00100000@1,AAA261016C00110000@-1",
+    eq(legs, `AAA${NY}C00100000@1,AAA${NY}C00110000@-1`,
        "the position lives in the URL, one contract per entry with the SIGN carrying the side — a link is the only form of a position that can be sent to anyone");
     ok(!/4\.90|5\.10|500/.test(legs), "and it carries no PRICES: a quote is a fact about a moment");
     await page.click('#sgLegsM .tl-leg[data-leg="1"] .tl-bs');
@@ -604,7 +625,7 @@ try {
   {
     await go("?t=AAA");
     await page.click(`.tl-chip[data-expiry="${FAR}"]`);
-    await page.waitForFunction(() => document.querySelector(".tl-chip.is-on") && document.querySelector(".tl-chip.is-on").dataset.expiry === "2026-12-18");
+    await page.waitForFunction((far) => document.querySelector(".tl-chip.is-on") && document.querySelector(".tl-chip.is-on").dataset.expiry === far, FAR);
     await ready();
     const note = await openInfo("About expiries");
     ok(/The call side of this expiry is CUT OFF/.test(note),
@@ -644,7 +665,7 @@ try {
   }
 
   {
-    await go("?t=AAA&expiry=2026-10-16&legs=AAA261016C00100000@1,AAA261016C00110000@-1");
+    await go(`?t=AAA&expiry=${NEAR}&legs=AAA${NY}C00100000@1,AAA${NY}C00110000@-1`);
     for (const width of [320, 390, 768]) {
       await page.setViewportSize({ width, height: 900 });
       await page.waitForTimeout(200);

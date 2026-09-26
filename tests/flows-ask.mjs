@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { buildFactIndex, selectFacts, numeralsIn, guardAnswer, renderFactsPlain, promptFor,
          tickerCoverage, shedCardFacts, emptySilences, fileSilence, SILENCE_KINDS,
-         promptForSummary, renderSummaryPlain, summaryFingerprint, cardFacts,
+         promptForSummary, renderSummaryPlain, summaryFingerprint, cardFacts, CARD_CORE_FACTS,
          refreshIntradayFacts, briefAge, INTRADAY_SOURCES }
   from "../shared/flows-ask.js";
 import { buildBrief, briefStoreFrom } from "../shared/flows-brief.js";
@@ -1579,6 +1579,32 @@ import { chromium } from "playwright";
   ok(none.facts.length === all.length && none.namesIndexed.shed === 0 && none.namesIndexed.indexed === 4,
      "and under budget nothing is shed and the count says all four are indexed");
 
+  const kindOf = (f) => String(f.id).split("/").pop();
+  const perNameCount = (facts, t) => facts.filter((f) => f.source === "card:" + t).length;
+  const fullCount = new Map(idx.cardNames.map((t) => [t, perNameCount(all, t)]));
+  const coreOnly = all.filter((f) => CARD_CORE_FACTS.includes(kindOf(f))).length;
+  const last = idx.cardNames[idx.cardNames.length - 1];
+  const lastExtra = all.filter((f) => f.source === "card:" + last && !CARD_CORE_FACTS.includes(kindOf(f))).length;
+  ok(lastExtra > 0, "the least-read name carries a reading beyond its core, so there is something to lean");
+  const lean = shedCardFacts(all, idx.cardNames, (facts) => facts.length - (all.length - lastExtra), { lean: CARD_CORE_FACTS });
+  eq(lean.namesIndexed.shed, 0, "LEAN: a small overrun leans a name instead of shedding one whole");
+  eq(lean.namesIndexed.indexed, 4, "so every name stays indexed");
+  assert.deepEqual(lean.leaned, [last], "and the name leaned is the last in the order, the least read"); checks++;
+  ok(lean.facts.filter((f) => f.source === "card:" + last).every((f) => CARD_CORE_FACTS.includes(kindOf(f))),
+     "it keeps only its core readings: " + CARD_CORE_FACTS.join(", "));
+  ok(idx.cardNames.slice(0, -1).every((t) => perNameCount(lean.facts, t) === fullCount.get(t)),
+     "and every stronger name keeps all of its readings");
+  eq(lean.namesIndexed.lean, 1, "the published count carries how many names were leaned");
+  const deep = shedCardFacts(all, idx.cardNames, (facts) => facts.length - coreOnly, { lean: CARD_CORE_FACTS });
+  ok(deep.namesIndexed.shed === 0 && deep.leaned.length === 4 && deep.facts.length === coreOnly,
+     "a budget that fits only the core readings leans every name, weakest first, and still sheds none");
+  const tight = shedCardFacts(all, idx.cardNames, (facts) => facts.length - 3, { lean: CARD_CORE_FACTS });
+  ok(tight.namesIndexed.shed > 0 && tight.namesIndexed.indexed + tight.namesIndexed.shed === 4 &&
+     tight.leaned.every((t) => idx.cardNames.indexOf(t) < tight.namesIndexed.indexed),
+     "only when the core readings of every name cannot fit does the shed drop names whole, and the lean list never names a shed name");
+  const plainShed = shedCardFacts(all, idx.cardNames, (facts) => facts.length - 12);
+  ok(!Object.hasOwn(plainShed.namesIndexed, "lean"), "without the lean option the shed is unchanged");
+
   let scanned = 0;
   for (const f of all) {
     const quoted = new Set();
@@ -1955,4 +1981,141 @@ console.log(`✓ flows-ask: ${checks} assertions — an index whose every figure
   const thinFacts = cardFacts({ "card:THN": thin }, { includeThin: true }).facts;
   ok(thinFacts.length === 1 && /THN scored 12/.test(thinFacts[0].say),
      "and the per-name lane reads it when asked to, because a thin card is still that name's card");
+}
+
+{
+  ok(summaryFingerprint([{ say: "ab" }, { say: "c" }]) !== summaryFingerprint([{ say: "a" }, { say: "bc" }]),
+     "the boundary between two facts is part of the fingerprint, so moving a word across it is a change");
+  ok(summaryFingerprint([{ say: "net −1.2" }]) !== summaryFingerprint([{ say: "net -1.2" }]),
+     "and the fingerprint reads UTF-8 bytes, so the minus sign U+2212 and a hyphen are two different facts");
+  const SAID = [{ say: "net −1.2 bn across 55 names" }, { say: "IV rank 52.15" }, { say: "call wall 450.16" }];
+  const aligned = summaryFingerprint(SAID);
+  const encode = TextEncoder.prototype.encode;
+  TextEncoder.prototype.encode = function (str) {
+    const b = encode.call(this, str);
+    const pooled = new Uint8Array(b.length + 5);
+    pooled.set(b, 1);
+    return pooled.subarray(1, 1 + b.length);
+  };
+  let pooled;
+  try { pooled = summaryFingerprint(SAID); } finally { TextEncoder.prototype.encode = encode; }
+  eq(pooled, aligned,
+     "and an encoder that hands back a view into a pooled buffer at an odd offset gives the same fingerprint instead of " +
+     "a RangeError inside the half-hourly cron");
+}
+
+{
+  const { spawnSync } = await import("node:child_process");
+  const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const names = Array.from({ length: 55 }, (_, i) =>
+    "N" + String.fromCharCode(65 + (i % 26)) + String.fromCharCode(65 + Math.floor(i / 26)) + "X");
+  const synthCard = (t, i) => ({
+    v: "2", ticker: t, generatedAt: STAMP, sessionDate: "2026-09-04", depth: "board",
+    score: 60 - i, conviction: 90 - (i % 40), strikeSumCrossing: 380 + i * 1.37, zeroGamma: 377.2 + i,
+    regime: { label: i % 2 ? "long" : "short", labelFrom: "book", labelValue: 2e6 + i * 1e5, crossings: i % 3,
+      crossingSide: "long_below" },
+    panels: {
+      gamma: { status: "ok", spot: 386.4 + i, callWall: 450.16 + i, putWall: 293.66 + i, strikes: 41,
+        bandMin: 270.48, bandMax: 502.32 },
+      pricedMove: { status: "ok", impliedMove: 0.0928123 + i / 1000, realizedMove: 0.03681 + i / 2000, sessions: 10,
+        impliedLow: 350.54 + i, impliedHigh: 422.26 + i, horizonRule: "the nearest end-of-week expiry" },
+      path: { status: "ok", netPremium: 20352135 + i * 91723, persistence: 0.7948717948717948 - i / 100, minutes: 390 },
+      volContext: { status: "ok", ivRank: { status: "ok", rankUnit: "percent 0-100, as published",
+        rows: [{ date: "2026-09-03", rank1y: 52.15 + i / 3 }] } },
+    },
+  });
+  const store = { ...STORE,
+    "board:long": { ...LONG, rows: names.slice(0, 28).map((t, i) => ({ t, r: i + 1, s: 60 - i, cnv: 90 })) },
+    "board:short": { ...SHORT, rows: names.slice(28).map((t, i) => ({ t, r: i + 1, s: -60 + i, cnv: 90 })) } };
+  names.forEach((t, i) => { store["card:" + t] = synthCard(t, i); });
+  const brief = JSON.stringify(buildFactIndex(store));
+  const facts = JSON.parse(brief).facts.length;
+  ok(facts >= 285 && brief.length >= 110 * 1024,
+     `the timed brief is production-sized: ${facts} facts in ${(brief.length / 1024).toFixed(0)} KB, against the ` +
+     "291 facts and 118 KB of the 2026-09-24 production brief");
+
+  const dir = mkdtempSync(join(tmpdir(), "flows-ask-cpu-"));
+  const file = join(dir, "brief.json");
+  writeFileSync(file, brief);
+  writeFileSync(join(dir, "feeds.json"), JSON.stringify({ pulse: PULSE, flowalerts: ALERTS }));
+  const child = [
+    "import { readFileSync } from 'node:fs';",
+    "const cpu = () => { const u = process.threadCpuUsage(); return (u.user + u.system) / 1000; };",
+    "const text = readFileSync(process.argv[1], 'utf8');",
+    "const feeds = readFileSync(process.argv[2], 'utf8');",
+    `const A = await import(${JSON.stringify(new URL("../shared/flows-ask.js", import.meta.url).href)});`,
+    "const run = () => {",
+    "  const w0 = performance.now(), c0 = cpu();",
+    "  let index = JSON.parse(text);",
+    "  index = A.refreshIntradayFacts(index, JSON.parse(feeds));",
+    "  const facts = index.facts;",
+    "  A.summaryFingerprint(facts);",
+    "  const w1 = performance.now(), c1 = cpu();",
+    "  const age = A.briefAge(index, new Date());",
+    "  A.renderSummaryPlain(facts);",
+    "  A.promptForSummary(facts, age);",
+    "  A.guardAnswer(facts.slice(0, 6).map((f) => f.say).join(' '), facts, { smallIntegers: false });",
+    "  return { unchanged: w1 - w0, full: performance.now() - w0, unchangedCpu: c1 - c0, fullCpu: cpu() - c0 };",
+    "};",
+    "const cold = run();",
+    "for (let i = 0; i < 5; i++) run();",
+    "const c1 = cpu();",
+    "for (let i = 0; i < 20; i++) run();",
+    "console.log(JSON.stringify({ ...cold, warm: (cpu() - c1) / 20 }));",
+  ].join("\n");
+  const runs = [];
+  const PROCESSES = 21;
+  for (let i = 0; i < PROCESSES; i++) {
+    const r = spawnSync(process.execPath, ["--input-type=module", "-e", child, file, join(dir, "feeds.json")], { encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    runs.push(JSON.parse(r.stdout.trim()));
+  }
+  rmSync(dir, { recursive: true, force: true });
+  const least = (k) => Math.min(...runs.map((r) => r[k]));
+  const mean = (k) => runs.reduce((a, r) => a + r[k], 0) / runs.length;
+  const median = (k) => runs.map((r) => r[k]).sort((a, b) => a - b)[runs.length >> 1];
+  const cold = (k) => {
+    const cpu = mean(k + "Cpu"), wall = least(k);
+    return cpu <= wall ? { ms: cpu, clock: `thread CPU, mean of ${PROCESSES} fresh processes` }
+      : { ms: wall, clock: `wall, least of ${PROCESSES} fresh processes` };
+  };
+  const SUMMARY_CPU = { unchangedColdMs: 6.5, fullColdMs: 9.5, warmMs: 3.5 };
+  const unchanged = cold("unchanged"), full = cold("full");
+  ok(unchanged.ms <= SUMMARY_CPU.unchangedColdMs,
+     `THE HALF-HOURLY SUMMARY REFRESH, COLD, on a production-sized brief: parse, intraday merge and fingerprint take ` +
+     `${unchanged.ms.toFixed(2)} ms (${unchanged.clock}; wall least ${least("unchanged").toFixed(2)}, median ` +
+     `${median("unchanged").toFixed(2)}), inside ${SUMMARY_CPU.unchangedColdMs} ms of the Workers Free 10 ms cap; this is ` +
+     "every firing whose facts did not move. CPU is what the cap meters and the thread clock ticks in 4 ms steps here, " +
+     "so a single cold run is read on it only as a mean across processes; a loaded machine inflates wall time, not that mean");
+  ok(full.ms <= SUMMARY_CPU.fullColdMs,
+     `and a firing that asks the model adds the brief's age, the prompt and the guard: ${full.ms.toFixed(2)} ms ` +
+     `cold (${full.clock}; wall least ${least("full").toFixed(2)}), under ${SUMMARY_CPU.fullColdMs} ms`);
+  ok(median("warm") <= SUMMARY_CPU.warmMs,
+     `and ${median("warm").toFixed(2)} ms on the thread CPU clock once the isolate is warm (ceiling ${SUMMARY_CPU.warmMs} ms)`);
+  console.log(`  summary refresh CPU: unchanged path ${unchanged.ms.toFixed(2)} ms cold (${unchanged.clock}), full path ` +
+    `${full.ms.toFixed(2)} ms cold (${full.clock}), ${median("warm").toFixed(2)} ms warm (${facts} facts, ` +
+    `${(brief.length / 1024).toFixed(0)} KB); CPU means ${mean("unchangedCpu").toFixed(2)} / ${mean("fullCpu").toFixed(2)} ms`);
+}
+
+{
+  const { askModels, aiChain } = await import("../shared/flows-ai.js");
+  const chain = aiChain({ FLOWS_ASK_MODEL: "@cf/zai-org/glm-4.7-flash", FLOWS_ASK_FALLBACK_MODEL: "@cf/meta/llama-3.3-70b-instruct-fp8-fast" });
+  const facts = INDEX.facts.slice(0, 6);
+  const quoted = facts[0].say;
+  const { system, user } = promptForSummary(facts, briefAge(INDEX, new Date("2026-09-04T15:00:00Z")));
+  for (const [code, calls] of [["5007: No such model", 2], ["5035: not on your plan", 2], ["3036: account limit", 1]]) {
+    const asked = [];
+    const ai = { run: async (model) => { asked.push(model); if (asked.length === 1) throw new Error("AiError: " + code); return { response: quoted }; } };
+    const said = await askModels(ai, chain, [{ role: "system", content: system }, { role: "user", content: user }], {}, null, { error() {} });
+    eq(asked.length, calls, `the summary path with a primary that throws ${code.slice(0, 4)} asks ${calls} model${calls > 1 ? "s" : ""}`);
+    if (calls === 2) {
+      ok(said.text === quoted && said.failedOver && guardAnswer(said.text, facts, { smallIntegers: false }).ok,
+         "and the fallback's summary is served through the same guard as the primary's would have been");
+    } else {
+      ok(said.text === null && said.guard === "unreachable:allowance",
+         "while a spent allowance keeps the pipeline's own wording and asks nobody else");
+    }
+  }
 }

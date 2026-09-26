@@ -1,3 +1,5 @@
+import { nyseHolidays } from "./flows-quant-time.js";
+
 export function capBands({ min = 1e9, max = 4e12, ratio = 1.3 } = {}) {
   if (!(min > 0) || !(max > min) || !(ratio > 1)) return [];
   const bands = [];
@@ -53,6 +55,16 @@ export function selectCoverage(universe, { count = 100, guaranteed = NDX_100 } =
 
 export const SELECTION_EPOCH = "2026-08-26";
 
+export const NDX_STALE_DAYS = 400;
+
+export function ndxConstantAge(sessionDate, { asOf = NDX_AS_OF, staleDays = NDX_STALE_DAYS } = {}) {
+  const a = Date.parse(String(asOf) + "T00:00:00Z");
+  const b = Date.parse(String(sessionDate || "") + "T00:00:00Z");
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return { days: null, stale: false };
+  const days = Math.round((b - a) / 86400000);
+  return { days, stale: days > staleDays };
+}
+
 export const UNIVERSE_NOTES = Object.freeze({
   rule:
     "Every name in the screened universe whose market capitalisation puts it in " +
@@ -61,12 +73,133 @@ export const UNIVERSE_NOTES = Object.freeze({
     "independent of the option flow being scored — selecting on the flow itself " +
     "would trim the cross-section to its own tails before the score is taken.",
   index:
-    "Nasdaq-100 membership is a repository constant dated " + NDX_AS_OF + ", not a " +
-    "measurement: no endpoint on this key returns index membership. It is used " +
-    "only to ADD names, never to remove them, so a stale list costs calls rather " +
-    "than correctness.",
+    "Nasdaq-100 membership is read each night from the vendor's QQQ holdings " +
+    "(/api/etfs/QQQ/holdings, the stock rows with a positive weight), dated by " +
+    "the holdings' own update stamp. When that read fails or lists fewer than " +
+    "ninety weighted stocks, the repository constant dated " + NDX_AS_OF + " is " +
+    "used instead, together with whatever the read did return. Membership only " +
+    "ADDS names, never removes them, so a stale list costs calls rather than " +
+    "correctness.",
   epoch:
     "Boards published before " + SELECTION_EPOCH + " were drawn from a different pool " +
     "and their scores are not comparable with later ones. The record scorer " +
     "reports the two separately rather than averaging them.",
 });
+
+export const ROSTER_DEPTHS = Object.freeze(["board", "focus", "cross", "index", "fund"]);
+
+export const ROSTER_KEY_KINDS = Object.freeze(["card", "card-x", "hist"]);
+
+export const RETIRE_AFTER_SESSIONS = 3;
+
+export const ROSTER_BUDGET_BYTES = 32 * 1024;
+
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+const ROSTER_KEY_RE = /^(card|card-x|hist):([A-Z][A-Z0-9.-]{0,9})$/;
+
+export function rosterKeyTicker(key) {
+  const m = ROSTER_KEY_RE.exec(String(key || ""));
+  return m ? m[2] : null;
+}
+
+export function tradingSessionsBetween(from, to) {
+  if (!DAY_RE.test(String(from || "")) || !DAY_RE.test(String(to || ""))) return null;
+  if (to < from) return 0;
+  let n = 0;
+  let t = Date.parse(from + "T00:00:00Z");
+  const end = Date.parse(to + "T00:00:00Z");
+  while (t < end) {
+    t += 86400000;
+    const d = new Date(t);
+    const wd = d.getUTCDay();
+    if (wd !== 0 && wd !== 6 && !nyseHolidays(d.getUTCFullYear()).has(d.toISOString().slice(0, 10))) n++;
+  }
+  return n;
+}
+
+export function cardDepthOf(depth) {
+  if (depth === "cross-section") return "cross";
+  return ROSTER_DEPTHS.includes(depth) ? depth : null;
+}
+
+export const LEDGER_GAPLESS = Object.freeze(["carried", "bootstrap"]);
+
+export function priorLedger(prior, { sessionDate = null } = {}) {
+  const known = new Map();
+  if (!prior || typeof prior !== "object" || Array.isArray(prior)) return { known, complete: false, why: "absent" };
+  const day = DAY_RE.test(String(prior.sessionDate || "")) ? prior.sessionDate : null;
+  const depth = prior.depth && typeof prior.depth === "object" ? prior.depth : {};
+  const session = prior.session && typeof prior.session === "object" ? prior.session : {};
+  for (const t of Object.keys(depth)) {
+    const s = DAY_RE.test(String(session[t] || "")) ? session[t] : day;
+    if (rosterKeyTicker("card:" + t)) known.set("card:" + t, s);
+  }
+  const x = prior.x && typeof prior.x === "object" ? prior.x : {};
+  for (const kind of ["card-x", "hist"]) {
+    for (const t of Array.isArray(x[kind]) ? x[kind] : []) {
+      if (rosterKeyTicker(kind + ":" + t)) known.set(kind + ":" + t, day);
+    }
+  }
+  const held = prior.held && typeof prior.held === "object" && !Array.isArray(prior.held) ? prior.held : null;
+  for (const [key, s] of Object.entries(held || {})) {
+    if (!rosterKeyTicker(key) || known.has(key)) continue;
+    known.set(key, DAY_RE.test(String(s || "")) ? s : null);
+  }
+  const gap = day && DAY_RE.test(String(sessionDate || "")) ? tradingSessionsBetween(day, sessionDate) : null;
+  const why = !held || prior.v !== 1 ? "no-ledger"
+    : !LEDGER_GAPLESS.includes(prior.ledger || "carried") ? "ledger-" + prior.ledger
+    : sessionDate !== null && gap === null ? "undated"
+    : gap !== null && gap > 1 ? "gap-" + gap
+    : null;
+  return { known, complete: why === null, why, gap };
+}
+
+export function retirePlan({ sessionDate, known = new Map(), landed = new Set(), exempt = new Set(),
+  after = RETIRE_AFTER_SESSIONS } = {}) {
+  const retire = [];
+  const held = {};
+  const kept = { exempt: 0, young: 0, undated: 0 };
+  for (const [key, s] of known) {
+    if (landed.has(key)) continue;
+    const t = rosterKeyTicker(key);
+    if (!t) continue;
+    if (exempt.has(t)) { held[key] = s; kept.exempt++; continue; }
+    const age = s ? tradingSessionsBetween(s, sessionDate) : null;
+    if (age === null) { held[key] = s; kept.undated++; continue; }
+    if (age > after) retire.push(key);
+    else { held[key] = s; kept.young++; }
+  }
+  retire.sort();
+  return { retire, held, kept };
+}
+
+export function buildRoster({ sessionDate, generatedAt = null, depth = new Map(), landed = new Set(), held = {},
+  retired = [], ledger = null, budgetBytes = ROSTER_BUDGET_BYTES } = {}) {
+  const depthOut = {};
+  const sessionOut = {};
+  for (const [t, d] of [...depth].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))) {
+    const kind = cardDepthOf(d);
+    if (!kind || !landed.has("card:" + t)) continue;
+    depthOut[t] = kind;
+    sessionOut[t] = sessionDate;
+  }
+  const x = { "card-x": [], hist: [] };
+  for (const key of [...landed].sort()) {
+    const m = ROSTER_KEY_RE.exec(key);
+    if (m && m[1] !== "card") x[m[1]].push(m[2]);
+  }
+  const heldOut = {};
+  for (const k of Object.keys(held).sort()) heldOut[k] = held[k];
+  const payload = {
+    v: 1, sessionDate, generatedAt,
+    depth: depthOut, session: sessionOut,
+    x, held: heldOut,
+    counts: Object.fromEntries(ROSTER_DEPTHS.map((d) => [d, Object.values(depthOut).filter((v) => v === d).length])),
+    retired: retired.length,
+    ledger: ledger || "carried",
+    retireAfterSessions: RETIRE_AFTER_SESSIONS,
+  };
+  const bytes = new TextEncoder().encode(JSON.stringify(payload)).length;
+  return { payload, bytes, fits: bytes <= budgetBytes };
+}

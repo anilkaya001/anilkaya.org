@@ -492,7 +492,7 @@ try {
   }
   eq(errors.length, 0, `the fixture renders throw nothing (${errors.join("; ")})`);
 
-  const sample = cards.filter((c) => c.depth !== "index").slice(0, 5);
+  const sample = cards.filter((c) => c.depth !== "index" && c.depth !== "fund").slice(0, 5);
   ok(sample.length >= 3, `the sweep has real emitted cards to paint (${sample.length})`);
   for (const [vw, vh, list] of [[320, 900, sample], [1280, 1000, sample.slice(0, 2)]]) {
     await page.setViewportSize({ width: vw, height: vh });

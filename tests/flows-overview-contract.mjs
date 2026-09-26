@@ -316,10 +316,10 @@ try {
         jump: document.querySelectorAll(".cc-jump").length,
       };
     });
-    deep(seat.ids, ["hmHero", "hmVerdict", "hmBull", "hmBear", "hmChg", "hmVol", "hmLean",
+    deep(seat.ids, ["hmHero", "hmMetals", "hmLeaders", "hmVerdict", "hmBull", "hmBear", "hmChg", "hmVol", "hmLean",
       "hmAlerts", "hmEvents", "hmWatch", "hmNews"],
-      "the page reads hero, verdict, both leaders, what changed, volatility, sectors, " +
-      "flagged windows, the calendar, the band's edge and the headlines, in that order");
+      "the page reads hero, the metals and the index leaders the owner watches most, verdict, both boards, " +
+      "what changed, volatility, sectors, flagged windows, the calendar, the band's edge and the headlines, in that order");
     ok(Math.abs(seat.heroW - seat.gridW) <= 2,
       `the market hero spans the whole grid (${seat.heroW} of ${seat.gridW})`);
     ok(seat.chipsInHero, "and carries the session readings inside it rather than as a second bar");
@@ -3043,6 +3043,293 @@ try {
     await page.setViewportSize({ width: 1280, height: 1000 });
   }
 
+  {
+    const vend = (ticker, close, prev, ncp, npp, bull, bear, iv) => ({ ticker, close: String(close), prev_close: String(prev),
+      net_call_premium: String(ncp), net_put_premium: String(npp), bullish_premium: String(bull), bearish_premium: String(bear),
+      iv30d: String(iv), call_volume: 1000, put_volume: 800, issue_type: "ETF" });
+    const VENDOR = [
+      vend("GLD", 391.7, 392.88, -3.74e6, 4.08e6, 78.2e6, 105.8e6, 0.199), vend("GDX", 92.29, 93.56, -2.53e6, 7.7e4, 9.4e6, 12e6, 0.42),
+      vend("NEM", 121.29, 123.55, -0.89e6, -2.25e6, 4.46e6, 3.09e6, 0.43),
+      vend("SLV", 57.6, 58.16, -4.18e6, 4.73e6, 46.8e6, 68.7e6, 0.338), vend("SIL", 90.86, 92.22, 5.13e5, 6.6e4, 2.45e6, 2.0e6, 0.467),
+      vend("PAAS", 47.5, 48.11, -2.57e5, -1.77e5, 5.3e5, 6.1e5, 0.472), vend("WPM", 143.99, 145.45, -9.9e3, -1.28e5, 7.75e5, 6.57e5, 0.451),
+      vend("CPER", 40.65, 40.61, -8.47e4, 8.32e4, 1.0e5, 1.05e5, 0.259), vend("COPX", 86.23, 87.03, -1.58e5, -1.88e4, 5.36e5, 6.76e5, 0.408),
+      vend("FCX", 72.04, 72.58, -2.91e6, 8.67e5, 2.41e6, 6.19e6, 0.469), vend("SCCO", 201.39, 201.94, 5.44e4, -3.19e4, 3.32e5, 2.45e5, 0.479),
+      vend("AAPL", 336, 337.02, -4.41e6, 1.1e6, 2e7, 2.4e7, 0.236), vend("MSFT", 497.61, 500.59, 2.42e6, 1.27e7, 3e7, 3.5e7, 0.261),
+      vend("GOOGL", 342.48, 337.83, -1.28e6, -6.15e6, 2e7, 1.6e7, 0.314), vend("AMZN", 249.47, 249.27, 7.98e6, -2.35e5, 2.2e7, 1.7e7, 0.312),
+      vend("META", 777.65, 744.1, 1.14e8, -2.82e7, 2e8, 6e7, 0.479), vend("NVDA", 224.47, 225.51, -1.01e7, 1.68e7, 9e7, 1.1e8, 0.309),
+      vend("TSLA", 377.93, 380.12, -1.83e7, -8.17e6, 8e7, 9e7, 0.441), vend("AVGO", 350.47, 354.99, -2.1e7, -6.87e6, 4e7, 5e7, 0.348),
+      vend("COST", 896.82, 904.7, -1.52e7, -4.34e5, 1e7, 2.4e7, 0.235),
+    ];
+    const { STRIP_FIELDS, stripValues } = await import("../shared/flows-live.js");
+    const STRIP_NAMES = STRIP_FIELDS.map(([n]) => n);
+    const FOCUS_FIELDS = ["px", "prev", "chg", "ncp", "npp", "net", "bull", "bear", "lean", "cv", "pv", "iv30", "ivRank", "im", "pcr", "rvol", "vol"];
+    const asRow = (v) => {
+      const arr = stripValues(v);
+      return Object.fromEntries([...FOCUS_FIELDS.map((f) => [f, arr[STRIP_NAMES.indexOf(f)]]), ["type", v.issue_type]]);
+    };
+    const GROUPS = [
+      { id: "gold", label: "Gold", kind: "metal", lead: "GLD", tickers: ["GLD", "GDX", "NEM", "AEM"] },
+      { id: "silver", label: "Silver", kind: "metal", lead: "SLV", tickers: ["SLV", "SIL", "PAAS", "WPM"] },
+      { id: "copper", label: "Copper", kind: "metal", lead: "CPER", tickers: ["CPER", "COPX", "FCX", "SCCO"] },
+      { id: "mag7", label: "Mag 7", kind: "equity", tickers: ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA"] },
+      { id: "ndx10", label: "NDX 10", kind: "equity", source: "qqq-holdings:2026-08-21",
+        tickers: ["NVDA", "MSFT", "AAPL", "AMZN", "AVGO", "META", "GOOGL", "TSLA", "NFLX", "COST"] },
+    ];
+    const FOCUS_AT = SESSION + "T23:40:00.000Z";
+    const FOCUS_FIXTURE = {
+      v: 1, status: "ok", sessionDate: SESSION, generatedAt: FOCUS_AT, readAt: FOCUS_AT,
+      fresh: { v: 1, readAt: FOCUS_AT, source: "nightly", session: SESSION },
+      fields: FOCUS_FIELDS, groups: GROUPS,
+      rows: Object.fromEntries(VENDOR.map((v) => [v.ticker, asRow(v)])),
+      closes: { GLD: [401.2, 398.4, 394.2, 392.88, 391.7] },
+      missing: ["AEM", "NFLX"],
+    };
+
+    const fx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+    await stubNewKeys(fx);
+    await fx.addInitScript(() => {
+      let ui;
+      const pref = (name, value) => {
+        try {
+          if (value === undefined) return localStorage.getItem("flows:pref:" + name);
+          localStorage.setItem("flows:pref:" + name, value);
+        } catch {}
+        return null;
+      };
+      Object.defineProperty(window, "FlowsUI", {
+        configurable: true, get: () => ui,
+        set(v) {
+          const add = v.pref ? {} : { pref };
+          if (v.heartbeat) add.heartbeat = (o) => (window.__hb = v.heartbeat(o));
+          ui = Object.freeze(Object.assign({}, v, add));
+        },
+      });
+    });
+    const fp = await fx.newPage();
+    fp.on("pageerror", (e) => errors.push("focus: " + e.message));
+    await signIn(fp);
+
+    const FOCUS_READ = () => ({
+      metals: Array.from(document.querySelectorAll("#ccMetals .hm-metal"), (m) => ({
+        group: m.dataset.group, label: m.querySelector(".hm-mlabel").textContent.trim(),
+        lead: m.querySelector(".hm-mlead").dataset.ticker,
+        px: m.querySelector(".hm-mpx-v").textContent.trim(),
+        chg: m.querySelector(".hm-mpx .hm-chg").textContent.trim(),
+        tone: m.querySelector(".hm-mpx .hm-chg").dataset.tone || null,
+        flow: (m.querySelector(".hm-mflow .ui-capsule") || { textContent: "" }).textContent.trim(),
+        net: m.querySelector(".hm-mnet .hm-prem").textContent.trim(),
+        spark: (m.querySelector(".hm-mspark svg") || { getAttribute: () => null }).getAttribute("aria-label"),
+        line: Boolean(m.querySelector(".hm-mspark path.ln")), ref: Boolean(m.querySelector(".hm-mspark line")),
+        stroke: (m.querySelector(".hm-mspark path.ln") || { getAttribute: () => null }).getAttribute("stroke"),
+        rel: Array.from(m.querySelectorAll(".hm-mrow"), (r) => [r.dataset.ticker,
+          r.querySelector(".hm-chg").textContent.trim(), r.querySelector(".hm-prem").textContent.trim()]),
+      })),
+      leaders: Array.from(document.querySelectorAll("#ccLeaders a.hm-qrow"), (r) => [r.dataset.ticker,
+        r.querySelector(".hm-qpx").textContent.trim(), r.querySelector(".hm-chg").textContent.trim(),
+        r.querySelector(".hm-prem").textContent.trim(), r.querySelector(".hm-qiv").textContent.trim()]),
+      seg: Array.from(document.querySelectorAll("#ccLeadSeg .ui-seg-i"), (b) => [b.textContent.trim(), b.getAttribute("aria-selected")]),
+      pills: ["ccMetalsWhen", "ccLeadersWhen"].map((id) => {
+        const p = document.querySelector("#" + id + " .hm-pill");
+        return p ? { state: p.dataset.state, text: p.textContent.replace(/\s+/g, " ").trim() } : null;
+      }),
+      links: Array.from(document.querySelectorAll("#hmMetals a, #hmLeaders a"), (a) => [a.dataset.ticker, a.getAttribute("href"), a.getAttribute("aria-label")]),
+      src: ["hmMetals", "hmLeaders"].map((id) => [...new Set(Array.from(document.querySelectorAll("#" + id + " a[data-src]"), (a) => a.dataset.src))].sort().join()),
+      ink: Object.fromEntries(["--up", "--down", "--label-2"].map((k) => [k, getComputedStyle(document.body).getPropertyValue(k).trim()])),
+      hush: ["ccMetals", "ccLeaders"].map((id) => {
+        const s = document.querySelector("#" + id + " [data-empty]");
+        return s ? [s.dataset.empty, s.querySelector(".ui-silent-t").textContent.trim(), document.querySelectorAll("#" + id + " [data-empty]").length] : null;
+      }),
+    });
+    const focusNow = async (path = "/flows/") => {
+      await fp.goto(url(path), { waitUntil: "domcontentloaded" });
+      await fp.waitForSelector("#ccMetals :is(.hm-metal, [data-empty])", { timeout: 15000 });
+      await fp.waitForSelector("#ccLeaders :is(.hm-qrow, [data-empty])", { timeout: 15000 });
+      return fp.evaluate(FOCUS_READ);
+    };
+
+    const before = await focusNow();
+    deep(before.hush.map((x) => x && x[0]), ["pending", "pending"],
+      "before the nightly has written the focus key, each module is one calm pending state");
+    eq(before.hush.map((x) => x[2]).join(), "1,1", "exactly one state per module, never a scatter of waiting signs");
+    deep(before.pills, [null, null], "and no date or live pill is left promising a reading");
+
+    const ingest = await post("focus", FOCUS_FIXTURE);
+    eq(ingest.status, 200, "the Worker accepts the nightly focus key on ingest");
+    const nowUrl = await fp.waitForFunction(() => performance.getEntriesByType("resource")
+      .map((e) => e.name).find((n) => /\/api\/flows\/now\?(?:[^#]*&)?n=/.test(n)), null, { timeout: 15000 }).then((j) => j.jsonValue());
+    ok(/[?&]n=[^&]*\bfocus\b/.test(decodeURIComponent(nowUrl)), `the open page's heartbeat asks after the nightly focus key (${nowUrl})`);
+    await fp.waitForTimeout(150);
+    await fp.route(/\/api\/flows\/now\?/, async (route) => {
+      const res = await route.fetch();
+      const body = await res.json();
+      body.keys = Object.assign({}, body.keys, { focus: { updatedAt: Date.parse(FOCUS_AT) } });
+      await route.fulfill({ response: res, body: JSON.stringify(body) });
+    });
+    await fp.evaluate(() => window.__hb.now());
+    await fp.waitForSelector("#ccMetals .hm-metal", { timeout: 15000 });
+    const arrived = await fp.evaluate(FOCUS_READ);
+    deep(arrived.metals.map((m) => m.lead), ["GLD", "SLV", "CPER"],
+      "a page left open when the nightly writes the focus key re-reads it on the next beat, never pending until a reload");
+    deep(arrived.pills.map((p) => p && p.text), ["Aug 24", "Aug 24"], "and dates both modules by the session it now shows");
+    await fp.unroute(/\/api\/flows\/now\?/);
+
+    const night = await focusNow();
+    deep(night.metals.map((m) => [m.group, m.label, m.lead]), [["gold", "Gold", "GLD"], ["silver", "Silver", "SLV"], ["copper", "Copper", "CPER"]],
+      "Metals draws the payload's three metal groups in order, each led by its fund");
+    deep(night.metals.map((m) => [m.px, m.chg, m.tone]), [["391.70", "−0.30%", "down"], ["57.60", "−0.96%", "down"], ["40.65", "+0.10%", "up"]],
+      "each fund leads with its price and toned day change");
+    deep(night.metals.map((m) => [m.flow, m.net]), [["Bearish", "−$7.8M"], ["Bearish", "−$8.9M"], ["Even", "−$168K"]],
+      "and its options-flow lean as one word beside the net premium; a near-balanced book reads Even");
+    deep(night.metals[0].rel, [["GDX", "−1.36%", "−$2.6M"], ["NEM", "−1.83%", "+$1.4M"], ["AEM", "—", "—"]],
+      "the related names follow as compact rows, and a name the vendor did not return shows em dashes, never zero");
+    deep(night.metals[1].rel.map((r) => r[0]), ["SIL", "PAAS", "WPM"], "silver's related names in payload order");
+    ok(night.metals[0].line && /last 5 closes/.test(night.metals[0].spark || ""),
+      `outside a live session the lead's sparkline draws the nightly closes (${night.metals[0].spark})`);
+    ok(!night.metals[1].line, "and a fund with no closes carries no invented line");
+    deep(night.seg, [["Mag 7", "true"], ["NDX 10", "false"]], "Leaders offers the payload's equity groups on one segmented control");
+    deep(night.leaders.map((r) => r[0]), GROUPS[3].tickers, "Mag 7 rows in payload order");
+    deep(night.leaders[0], ["AAPL", "336.00", "−0.30%", "−$5.5M", "23.6%"], "each row: ticker, price, day, net premium and IV 30d");
+    deep(night.pills.map((p) => p && p.state), ["stale", "stale"], "an August session read in September is dated stale");
+    deep(night.pills.map((p) => p && p.text), ["Aug 24", "Aug 24"], "by a date chip for the session shown");
+    const links = night.links;
+    ok(links.length === 12 + 7, `every metal tile, related row and leader row is a link (${links.length})`);
+    for (const [t, href, said] of links) {
+      eq(href, "/flows/ticker/?t=" + t, `${t} links to its dossier`);
+      ok(/Open the dossier\.$/.test(said || ""), `and says where it goes (${t})`);
+    }
+
+    await fp.click("#ccLeadSeg .ui-seg-i:nth-of-type(2)");
+    await fp.waitForFunction(() => document.querySelector("#ccLeaders a.hm-qrow")?.dataset.ticker === "NVDA");
+    const ndx = await fp.evaluate(FOCUS_READ);
+    deep(ndx.leaders.map((r) => r[0]), GROUPS[4].tickers, "NDX 10 swaps in the ten Nasdaq leaders the payload names");
+    deep(ndx.leaders.find((r) => r[0] === "NFLX"), ["NFLX", "—", "—", "—", "—"], "a leader the vendor skipped is em dashes");
+    ok(/[?&]lead=ndx10\b/.test(fp.url()), `the choice is kept in the address (${fp.url()})`);
+    const home = await focusNow("/flows/");
+    deep(home.seg.map((s) => s[1]), ["true", "false"],
+      "and nowhere else: the plain Home link opens on Mag 7, because Flows pages keep nothing in browser storage " +
+      "(every storage access goes through IEWTStorage, which these pages do not load)");
+    const again = await focusNow("/flows/?lead=ndx10");
+    deep(again.seg.map((s) => s[1]), ["false", "true"], "so a reload or a shared link opens on the same leaders");
+    await fp.focus("#ccLeadSeg .ui-seg-i[aria-selected=true]");
+    await fp.keyboard.press("ArrowLeft");
+    await fp.waitForFunction(() => document.querySelector("#ccLeaders a.hm-qrow")?.dataset.ticker === "AAPL");
+    ok(true, "the segmented control switches from the keyboard");
+
+    await fp.focus("#ccMetalsWhen .hm-pill");
+    const beat = async () => {
+      await Promise.all([fp.waitForResponse(/\/api\/flows\/now\?/), fp.evaluate(() => window.__hb.now())]);
+      await fp.waitForTimeout(150);
+    };
+    await fp.evaluate(() => { window.__pill = document.activeElement; });
+    await beat();
+    ok(await fp.evaluate(() => document.activeElement === window.__pill && window.__pill.isConnected),
+      "a heartbeat refreshes the date chip in place: keyboard focus stays on it");
+    await fp.keyboard.press("Tab");
+    const kb = await fp.evaluate(() => {
+      const a = document.activeElement;
+      return { t: a.dataset.ticker, cls: a.className, outline: getComputedStyle(a).outlineStyle, visible: a.matches(":focus-visible") };
+    });
+    eq(kb.t, "GLD", "Tab from the module's date chip lands on the first fund tile");
+    ok(kb.visible && kb.outline !== "none", `with a visible focus ring (${kb.outline})`);
+
+    const t0 = new Date().toISOString();
+    const LIVE_DAY = "2026-08-25";
+    const METALS = GROUPS.slice(0, 3).flatMap((g) => g.tickers).filter((t) => FOCUS_FIXTURE.rows[t]);
+    const LIVE_V = Object.fromEntries(VENDOR.map((v) => [v.ticker, v]));
+    LIVE_V.GLD = vend("GLD", 395, 392.88, 1.2e6, -3e5, 5e7, 3e7, 0.21);
+    const liveStrips = (session, readAt, state, names = METALS) => (route) => route.fulfill({ status: 200,
+      headers: { "Content-Type": "application/json", "X-Fresh-State": state },
+      body: JSON.stringify({ v: 1, key: "live:strips", status: "ok", session, fresh: { readAt, cadenceS: 300 }, fields: STRIP_NAMES,
+        rows: Object.fromEntries(names.map((t) => [t, stripValues(LIVE_V[t])])) }) });
+    await fp.route("**/api/flows/lk?k=strips:series", (route) => route.fulfill({ status: 200, contentType: "application/json",
+      body: JSON.stringify({ v: 1, key: "live:strips:series", session: LIVE_DAY, scale: { px: 0.01 }, base: { GLD: 393.5 },
+        t: [LIVE_DAY + "T13:45:00Z", LIVE_DAY + "T14:00:00Z", LIVE_DAY + "T14:15:00Z"], cols: { px: { GLD: [0, 80, 150] } } }) }));
+    await fp.route("**/api/flows/lk?k=strips", liveStrips(LIVE_DAY, t0, "live", ["GLD"]));
+    const part = await focusNow();
+    eq(part.metals[0].px, "391.70", "a live read that covers only some of a module's names does not mix sessions: the fund keeps its nightly row");
+    deep(part.pills.map((p) => p.text), ["Aug 24", "Aug 24"], "and the module stays dated by the nightly session it shows");
+    deep(part.src, ["nightly", "nightly"], "every row in it is the nightly record");
+    ok(part.metals[0].line && part.metals[0].stroke === part.ink["--label-2"],
+      `a line of several sessions' closes is drawn neutral, never read as today's direction (${part.metals[0].stroke})`);
+
+    await fp.route("**/api/flows/lk?k=strips", liveStrips(LIVE_DAY, t0, "live"));
+    const live = await focusNow();
+    eq(live.metals[0].px, "395.00", "a live read of a newer session that covers every name takes the fund's price");
+    eq(live.metals[0].flow, "Bullish", "and its flow lean");
+    ok(/GLD today/.test(live.metals[0].spark || "") && live.metals[0].ref,
+      `the sparkline draws the intraday series against the prior close while the session runs (${live.metals[0].spark})`);
+    eq(live.metals[0].stroke, live.ink["--up"], "toned by the day change it is drawn against");
+    eq(live.metals[1].px, "57.60", "each name takes its own live row");
+    deep(live.metals[0].rel.at(-1), ["AEM", "—", "—"], "and a name neither read carries stays em dashes");
+    deep(live.src, ["live", "nightly"], "Metals is all live rows; Leaders, which the live read did not cover, stays nightly");
+    eq(live.pills[0].state, "live", "the module wears a Live pill");
+    ok(/^Live\s*·\s*\d{1,2}:\d\d\s*[AP]M$/.test(live.pills[0].text), `with the read time (${live.pills[0].text})`);
+    eq(live.pills[1].text, "Aug 24", "while Leaders keeps its own date chip");
+    for (const r of [part, live]) {
+      r.pills.forEach((p, i) => ok(p.state !== "live" || r.src[i] === "live", "a Live pill never sits over a nightly row"));
+    }
+    await fp.focus("#ccMetalsWhen .hm-pill");
+    await fp.evaluate(() => { window.__pill = document.activeElement; });
+    await beat();
+    ok(await fp.evaluate(() => document.activeElement === window.__pill && window.__pill.dataset.state === "live"),
+      "a heartbeat keeps focus on the Live pill it refreshes");
+
+    await fp.route("**/api/flows/lk?k=strips", liveStrips(LIVE_DAY, t0, "stale"));
+    const lapsed = await focusNow();
+    eq(lapsed.pills[0].state, "stale", "a live read past its window is dated stale, never left saying Live");
+    ok(/^Aug 25\s*·\s*\d{1,2}:\d\d\s*[AP]M$/.test(lapsed.pills[0].text), `by its day and read time (${lapsed.pills[0].text})`);
+
+    await fp.route("**/api/flows/lk?k=strips", liveStrips(SESSION, SESSION + "T17:50:00Z", "closed"));
+    const tie = await focusNow();
+    eq(tie.metals[0].px, "391.70", "a mid-session read of the same session yields to the later nightly record");
+    await fp.route("**/api/flows/lk?k=strips", liveStrips("2026-08-21", t0, "live"));
+    eq((await focusNow()).metals[0].px, "391.70", "and an older session's live row never replaces the nightly one");
+    await fp.unroute("**/api/flows/lk?k=strips");
+    await fp.unroute("**/api/flows/lk?k=strips:series");
+
+    for (const width of [320, 390, 768]) {
+      await fp.setViewportSize({ width, height: 900 });
+      await fp.waitForTimeout(250);
+      const fit = await fp.evaluate(() => ({
+        over: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        cols: getComputedStyle(document.querySelector(".hm-metals")).gridTemplateColumns.split(" ").length,
+        clipped: Array.from(document.querySelectorAll("#hmMetals a, #hmLeaders a"), (a) => {
+          const box = a.getBoundingClientRect();
+          const out = Array.from(a.children).filter((c) => c.getClientRects().length &&
+            (c.getBoundingClientRect().right > box.right + 1 || c.scrollWidth > c.clientWidth + 1));
+          return out.length ? a.dataset.ticker : null;
+        }).filter(Boolean),
+      }));
+      ok(fit.over <= 1, `no horizontal overflow at ${width}px with the focus modules drawn (${fit.over}px)`);
+      deep(fit.clipped, [], `and no figure spills out of its row at ${width}px`);
+      eq(fit.cols, width < 600 ? 1 : 3, `metals ${width < 600 ? "stack" : "sit in three columns"} at ${width}px`);
+    }
+
+    await fp.route("**/api/flows/focus", (route) => route.fulfill({ status: 200, contentType: "application/json",
+      body: JSON.stringify({ v: 1, status: "unavailable", reason: "the vendor read failed", sessionDate: SESSION, groups: GROUPS }) }));
+    const down = await focusNow();
+    deep(down.hush.map((x) => x && x[0]), ["unavailable", "unavailable"], "a failed nightly read with no live rows is one unavailable state per module");
+    deep(down.pills, [null, null], "with no pill");
+    await fp.route("**/api/flows/focus", (route) => route.fulfill({ status: 500, contentType: "application/json", body: "{}" }));
+    allowFetchFailure = true;
+    const broken = await focusNow();
+    deep(broken.hush.map((x) => x && x[0]), ["unreadable", "unreadable"], "an unreadable response is named as a fault, not a quiet market");
+    allowFetchFailure = false;
+    await fp.unroute("**/api/flows/focus");
+    await fx.close();
+
+    const touch = await browser.newContext({ viewport: { width: 390, height: 900 }, hasTouch: true, isMobile: true });
+    await stubNewKeys(touch);
+    const tp = await touch.newPage();
+    tp.on("pageerror", (e) => errors.push("touch: " + e.message));
+    await signIn(tp);
+    await tp.waitForSelector("#ccLeaders a.hm-qrow", { timeout: 15000 });
+    const small = await tp.evaluate(() => Array.from(document.querySelectorAll("#hmMetals a, #hmLeaders a"),
+      (a) => [a.dataset.ticker, Math.round(a.getBoundingClientRect().height)]).filter(([, hgt]) => hgt < 44));
+    deep(small, [], "every focus link is at least 44px tall on a coarse pointer");
+    await touch.close();
+  }
+
   eq(errors.length, 0, `no uncaught page error across the whole session (${errors[0] || ""})`);
 
   console.log(`✓ flows-overview: ${checks} assertions — a one-glance cockpit that leads on the ` +
@@ -3065,7 +3352,12 @@ try {
     `read instant on a 24-hour clock that names its zone, eleven sector baskets on a heat strip ` +
     `ranked on the publisher's ratio with a quiet basket at 0/0 and an unreadable one at an em ` +
     `dash, caveats kept apart from method, a headline tape whose fetch age leads its ` +
-    `disclosure and whose vendor strings stay characters, and no visible run of prose longer ` +
+    `disclosure and whose vendor strings stay characters, gold, silver and copper each led by ` +
+    `its fund with its related names beneath, the Mag 7 and the NDX 10 on one switch the address ` +
+    `and the viewer remember, a live read taking a module only when it is the newer read of every ` +
+    `name in it so no Live pill sits over a nightly row, date chips that keep keyboard focus through ` +
+    `every heartbeat, a focus key that arrives in an open page, every figure a ` +
+    `link to its dossier and an em dash where the vendor said nothing, and no visible run of prose longer ` +
     `than six words anywhere on the surface`);
 } finally {
   await browser.close();

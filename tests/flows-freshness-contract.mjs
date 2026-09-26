@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { easternClock, isRefreshWindow, REFRESH_CADENCE_MINUTES, easternDay, lastCompletedSession }
+import { spawnSync } from "node:child_process";
+import { easternClock, isRefreshWindow, REFRESH_CADENCE_MINUTES, easternDay, lastCompletedSession,
+  isTradingDay, isHoliday, isEarlyCloseDay, prevTradingDay, nextTradingDay, phaseAt, expectedNightlySession,
+  freshnessState, sessionOpen, easternInstant, closeMinutes, PHASE_MINUTES, FRESH_CLASSES }
   from "../shared/flows-freshness.js";
+import { nyseHolidays, nyseEarlyCloses, closeUtcMs, etDayOf } from "../shared/flows-quant-time.js";
+import { briefAge } from "../shared/flows-ask.js";
+import { sessionsBetween } from "../shared/flows-cross.js";
+import { nextSessionAfter } from "../shared/flows-variation.js";
+import { serveNow } from "../shared/flows-live-worker.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
+const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
 {
   const summer = easternClock(new Date("2026-07-08T13:31:00Z"));
@@ -61,35 +70,185 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   }
 }
 
+const YEAR_NOW = new Date().getUTCFullYear();
+const FIRST_YEAR = YEAR_NOW - 1;
+const LAST_YEAR = YEAR_NOW + 6;
+
 {
   const zone = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
     hour: "2-digit", minute: "2-digit", weekday: "short", hour12: false,
   });
+  const parts = (ms) => Object.fromEntries(zone.formatToParts(ms).map((x) => [x.type, x.value]));
   let compared = 0;
   const misses = [];
-  for (let ms = Date.UTC(2024, 0, 1); ms < Date.UTC(2033, 0, 1); ms += 30 * 60000) {
-    const p = Object.fromEntries(zone.formatToParts(ms).map((x) => [x.type, x.value]));
+  const quantMisses = [];
+  for (let ms = Date.UTC(FIRST_YEAR, 0, 1); ms < Date.UTC(LAST_YEAR + 1, 0, 1); ms += 30 * 60000) {
+    const p = parts(ms);
     const day = `${p.year}-${p.month}-${p.day}`;
     const minutes = (Number(p.hour) % 24) * 60 + Number(p.minute);
     const c = easternClock(ms);
     if (easternDay(ms) !== day || c.minutes !== minutes || c.weekday !== p.weekday) {
       if (misses.length < 5) misses.push(new Date(ms).toISOString());
     }
+    if (etDayOf(ms) !== day && quantMisses.length < 5) quantMisses.push(new Date(ms).toISOString());
     compared++;
   }
   eq(misses.length, 0,
     `the Eastern clock is arithmetic (the US daylight rule: second Sunday of March to first Sunday of ` +
     `November, 02:00 local) so a cold Worker isolate never pays the 16-23 ms ICU zone load inside its ` +
     `10 ms CPU budget, and it is proven equal to the IANA America/New_York zone at every half hour ` +
-    `from 2024 to 2032 (${compared} instants; first misses ${misses.join(", ")}) — a change in the law ` +
+    `from ${FIRST_YEAR} to ${LAST_YEAR}, a window computed from today's date so it never ages out ` +
+    `(${compared} instants; first misses ${misses.join(", ")}) — a change in the law ` +
     `reaches ICU first and fails here rather than drifting silently`);
+  eq(quantMisses.length, 0,
+    `and the options engine's own day rule (flows-quant-time etDayOf) is held to the same zone at the same ` +
+    `instants (first misses ${quantMisses.join(", ")})`);
+
+  const closeMisses = [];
+  for (let t = Date.UTC(FIRST_YEAR, 0, 1); t < Date.UTC(LAST_YEAR + 1, 0, 1); t += 86400000) {
+    const day = new Date(t).toISOString().slice(0, 10);
+    const p = parts(closeUtcMs(day));
+    const want = isEarlyCloseDay(day) ? "13:00" : "16:00";
+    if (`${p.year}-${p.month}-${p.day}` !== day || `${p.hour}:${p.minute}` !== want) {
+      if (closeMisses.length < 5) closeMisses.push(day + " " + p.hour + ":" + p.minute);
+    }
+    if (easternInstant(day, closeMinutes(day)) !== closeUtcMs(day) && closeMisses.length < 5) closeMisses.push(day + " disagrees");
+  }
+  eq(closeMisses.length, 0,
+    `the engine's expiry close (closeUtcMs, on its own daylight rule usDst) is 16:00 New York on every day from ` +
+    `${FIRST_YEAR} to ${LAST_YEAR} and 13:00 on each early close, read back through ICU, and the freshness ` +
+    `calendar puts the same close at the same instant (first misses ${closeMisses.join(", ")})`);
+}
+
+const NYSE_PUBLISHED = Object.freeze({
+  2026: { holidays: ["2026-01-01", "2026-01-19", "2026-02-16", "2026-04-03", "2026-05-25", "2026-06-19", "2026-07-03",
+    "2026-09-07", "2026-11-26", "2026-12-25"], early: ["2026-11-27", "2026-12-24"] },
+  2027: { holidays: ["2027-01-01", "2027-01-18", "2027-02-15", "2027-03-26", "2027-05-31", "2027-06-18", "2027-07-05",
+    "2027-09-06", "2027-11-25", "2027-12-24"], early: ["2027-11-26"] },
+  2028: { holidays: ["2028-01-17", "2028-02-21", "2028-04-14", "2028-05-29", "2028-06-19", "2028-07-04",
+    "2028-09-04", "2028-11-23", "2028-12-25"], early: ["2028-07-03", "2028-11-24"] },
+});
+
+{
+  for (const [y, want] of Object.entries(NYSE_PUBLISHED)) {
+    same([...nyseHolidays(Number(y))].sort(), want.holidays,
+      `the computed ${y} NYSE holidays are the exchange's published list, observed-day rules included ` +
+      `(Juneteenth and Independence Day on a Saturday close the Friday, New Year's Day on a Saturday closes nothing)`);
+    same([...nyseEarlyCloses(Number(y))].sort(), want.early,
+      `and the ${y} 13:00 early closes are its published list: the day after Thanksgiving, and 3 July and 24 December ` +
+      `only when they fall Monday to Thursday`);
+  }
+}
+
+{
+  let cases = 0;
+  const noonMs = (day) => easternInstant(day, 12 * 60);
+  for (let y = 2026; y <= 2032; y++) {
+    for (const h of [...nyseHolidays(y)].sort()) {
+      ok(!isTradingDay(h) && isHoliday(h), `${h} is closed by the computed calendar, with no clock`);
+      const next = nextTradingDay(h);
+      const prev = prevTradingDay(next);
+      ok(next > h && prev < h && isTradingDay(next) && isTradingDay(prev), `${h} sits between the sessions ${prev} and ${next}`);
+      const noon = noonMs(next);
+      const nightly = { readAt: easternInstant(prev, 20 * 60 + 8), session: prev, cadenceS: 0 };
+      const f = freshnessState(nightly, noon);
+      eq(f.state, "fresh",
+        `AT 12:00 ET ON ${next}, THE SESSION AFTER THE ${h} HOLIDAY, the ${prev} nightly is fresh (${f.reason}, expected ${f.expected})`);
+      eq(expectedNightlySession(noon), prev, `and the nightly expected then is ${prev}, never the holiday`);
+      const age = briefAge({ sessionDate: prev }, new Date(noon));
+      ok(age.expected === prev && age.stale === false,
+        `and the AI brief's age says the same: expected ${age.expected}, not stale`);
+      eq(lastCompletedSession(noon), prev, `and the last completed session at that noon is ${prev}`);
+      eq(phaseAt(easternInstant(prev, 17 * 60)).nextOpen, sessionOpen(next),
+        `the evening of ${prev} opens next on ${next}, skipping ${h}`);
+      eq(phaseAt(noonMs(h)).phase, "closed", `and ${h} itself is closed at noon`);
+      eq(nextSessionAfter(prev).date, next, "the variation horizon steps over it too");
+      eq(sessionsBetween(prev, next), 1, "and the cross-section counts one session across it");
+      cases++;
+    }
+  }
+  ok(cases >= 60, `${cases} NYSE holidays from 2026 to 2032 walked`);
+
+  for (let y = 2026; y <= 2032; y++) {
+    for (const d of nyseEarlyCloses(y)) {
+      eq(phaseAt(easternInstant(d, 13 * 60 + 5)).phase, "post",
+        `at 13:05 on the ${d} early close the session is over with no clock at all`);
+      eq(phaseAt(easternInstant(d, 12 * 60 + 55)).phase, "rth", "and it traded until 13:00");
+    }
+  }
+}
+
+{
+  eq(FRESH_CLASSES.nightly.graceS, 5 * 3600,
+    "the nightly is due five hours after the close: runs on 2026-09-23 and 09-24 started 23:48 and 23:56 UTC and " +
+    "wrote meta at 00:08 UTC, 20:08 ET, so a three-hour grace called every weekday evening stale for an hour");
+  const wed = "2026-09-23";
+  eq(expectedNightlySession(easternInstant(wed, 20 * 60 + 59)), "2026-09-22", "at 20:59 ET the evening's run is not yet due");
+  eq(expectedNightlySession(easternInstant(wed, 21 * 60)), wed, "and from 21:00 it is");
+  eq(expectedNightlySession(easternInstant("2026-11-27", 20 * 60 + 59)), "2026-11-25",
+    "an early close is NOT due five hours after its 13:00 close: the pipeline cron is fixed on the wall clock and the " +
+    "dispatch opens at 17:15 ET on every session, so at 20:59 ET the day after Thanksgiving the Wednesday nightly is current");
+  eq(expectedNightlySession(easternInstant("2026-11-27", 21 * 60)), "2026-11-27", "and the early close's own is due at 21:00");
+  eq(expectedNightlySession(easternInstant("2028-07-03", 20 * 60 + 8)), "2028-06-30",
+    "an EDT early close waits for 21:00 too, past the 20:08 ET its run lands");
+  {
+    const s = freshnessState({ klass: "nightly", session: "2026-11-25", readAt: easternInstant("2026-11-25", 20 * 60 + 8) },
+      easternInstant("2026-11-27", 19 * 60 + 5));
+    ok(s.state === "fresh" && s.staleAt === easternInstant("2026-11-27", 21 * 60),
+      "so the 11-25 nightly is fresh at 19:05 ET on the early close, and goes stale at 21:00, not 18:00");
+  }
+}
+
+{
+  const day = "2026-10-14";
+  const clock = { day: "2026-10-15", trading: null, earlyClose: null, closedDays: [day] };
+  ok(isTradingDay(day) && !isTradingDay(day, clock),
+    "A PAST TAPE-PROVEN CLOSURE (flows_clock.closed_days) closes a day the computed calendar thought traded");
+  eq(expectedNightlySession(easternInstant("2026-10-15", 12 * 60), clock), "2026-10-13",
+    "so the morning after it the nightly expected is the session before the closure");
+  eq(prevTradingDay("2026-10-15", clock), "2026-10-13", "and the previous session skips it");
+  ok(isTradingDay(day, { closedDays: "2026-10-14" }), "a closed_days value that is not an array is ignored, not trusted");
+  ok(!isTradingDay("2026-10-15", { day: "2026-10-15", trading: 0 }) && isTradingDay("2026-10-15", { day: "2026-10-14", trading: 0 }),
+    "today's tape verdict closes today and never another day");
+  ok(isTradingDay("2026-11-26", { day: "2026-11-26", trading: 1 }),
+    "and a tape that saw today trade outranks the computed holiday, so a rule change can never silence a live session");
+  eq(closeMinutes("2026-11-20", { day: "2026-11-20", earlyClose: 1 }), PHASE_MINUTES.earlyClose,
+    "an unscheduled early close the tape detected is honoured");
+}
+
+{
+  const env = { DB: { prepare: () => ({ first: async () => null, bind() { return this; } }) } };
+  const body = await serveNow(env, new URL("https://x.test/api/flows/now"), easternInstant("2026-11-27", 12 * 60),
+    { json: (b) => b, HttpError: Error });
+  eq(body.expected, "2026-11-25",
+    "/api/flows/now carries the server's expected nightly session, so the page pill stops keeping its own " +
+    "weekday calendar: at noon the day after Thanksgiving it is the Wednesday before, not the holiday");
+}
+
+{
+  const code = [
+    "const cpu = () => { const u = process.threadCpuUsage(); return (u.user + u.system) / 1000; };",
+    `const F = await import(${JSON.stringify(new URL("../shared/flows-freshness.js", import.meta.url).href)});`,
+    "const at = Date.parse('2026-11-27T17:00:00Z');",
+    "const w0 = performance.now(), c0 = cpu();",
+    "F.phaseAt(at, null); F.freshnessState({ readAt: at - 3600e3, session: '2026-11-25', cadenceS: 0 }, at, null);",
+    "const cold = Math.min(performance.now() - w0, cpu() - c0 + 4);",
+    "const N = 5000; const c1 = cpu();",
+    "for (let i = 0; i < N; i++) { F.phaseAt(at + i * 60000, null); F.expectedNightlySession(at + i * 60000, null); }",
+    "console.log(JSON.stringify({ cold, warmUs: (cpu() - c1) / N * 1000 }));",
+  ].join("\n");
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", code], { encoding: "utf8" });
+  const m = JSON.parse(r.stdout.trim());
+  ok(m.cold < 3, `the calendar's first phase and nightly verdict in a fresh process cost ${m.cold.toFixed(2)} ms, ` +
+    "holiday table built once per year, well inside the Worker's 10 ms");
+  ok(m.warmUs < 50, `and ${m.warmUs.toFixed(1)} µs per phase plus nightly verdict warm`);
 }
 
 {
   const toml = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
   const crons = (/crons\s*=\s*\[([^\]]*)\]/.exec(toml) || [, ""])[1];
-  const rth = /"(\d+)-59\/(\d+) 13-21 \* \* 1-5"/.exec(crons);
+  const rth = /"(\d+)-59\/(\d+) 13-21 \* \* MON-FRI"/.exec(crons);
   ok(rth, `wrangler.toml carries the market-hours clock (${crons.trim()})`);
   eq(REFRESH_CADENCE_MINUTES, Number(rth[2]),
     "the cadence pages quote matches the wrangler.toml market-hours cron step — a page " +
@@ -116,8 +275,94 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(lastCompletedSession("nope"), null, "an unreadable instant is null");
 }
 
-console.log(`✓ flows-freshness: ${checks} assertions — an Eastern clock proven equal to the IANA ` +
-  `zone at every half hour 2024-2032 rather than a fixed offset, a window inclusive at both stated edges, the same UTC ` +
+{
+  const vm = await import("node:vm");
+  const src = readFileSync(new URL("../assets/js/flows-ui.js", import.meta.url), "utf8");
+  const pill = (iso, answer) => {
+    const asked = [];
+    let release = null;
+    const ctx = {
+      console, setTimeout, clearTimeout, setInterval, clearInterval, URL,
+      location: { href: "https://x.test/flows/" },
+      matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
+      document: { addEventListener() {}, removeEventListener() {}, getElementById: () => null, querySelector: () => null,
+        documentElement: { dataset: {}, style: {} }, hidden: false },
+      fetch: (url) => {
+        asked.push(String(url));
+        return new Promise((resolve) => {
+          release = () => resolve({ ok: answer !== null, status: answer ? 200 : 503, headers: { get: () => null },
+            clone() { return this; }, json: async () => answer, text: async () => JSON.stringify(answer) });
+        });
+      },
+    };
+    ctx.window = ctx;
+    vm.createContext(ctx);
+    vm.runInContext(`(() => { const Real = Date; let fixed = Real.parse(${JSON.stringify(iso)}); globalThis.advance = (ms) => { fixed += ms; };
+      globalThis.Date = class extends Real { constructor(...a) { if (a.length) super(...a); else super(fixed); }
+        static now() { return fixed; } }; })();`, ctx);
+    vm.runInContext(src, ctx);
+    return { ctx, UI: ctx.window.FlowsUI, asked, release: async () => { if (release) release(); for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r)); } };
+  };
+
+  {
+    const p = pill("2026-09-23T20:30:00-04:00", null);
+    const m = p.UI.freshness.market();
+    ok(m.expected === "2026-09-22" && m.source === "local",
+      "THE PILL'S OWN FALLBACK waits for the nightly until 21:00 ET, when it really lands (20:08 ET on 2026-09-24), " +
+      "rather than calling every evening stale from 17:45");
+    eq(pill("2026-09-23T21:00:00-04:00", null).UI.freshness.market().expected, "2026-09-23", "and expects it from 21:00");
+  }
+  {
+    const p = pill("2026-11-27T12:00:00-05:00", { expected: "2026-11-25", phase: { phase: "rth", endsAt: "2026-11-27T18:00:00.000Z" } });
+    p.UI.freshness({ sessionDate: "2026-11-25", source: "board" });
+    ok(p.asked.length === 1 && /\/api\/flows\/now$/.test(p.asked[0]),
+      "the day after Thanksgiving the weekday fallback would call the Wednesday session stale, so the pill asks the server once");
+    eq(p.UI.freshness.state(), "fresh", "and while it asks it never flashes stale");
+    await p.release();
+    const m = p.UI.freshness.market();
+    ok(m.expected === "2026-11-25" && m.source === "server" && m.open === true,
+      "then it dates the page by the server's expected nightly session and the server's phase, not its own weekday calendar");
+    eq(p.UI.freshness.state(), "fresh", "so the Wednesday session is current on the Friday after Thanksgiving, not stale");
+    p.UI.freshness({ sessionDate: "2026-11-25", source: "board" });
+    eq(p.asked.length, 1, "and it asks no more while the server's answer is fresh");
+    for (let i = 0; i < 12; i++) {
+      p.ctx.advance(2 * 60 * 1000);
+      p.UI.freshness.market();
+      p.UI.freshness.state();
+    }
+    eq(p.asked.length, 1,
+      "NOR AN HOUR LATER: the local weekday calendar still runs ahead of the server around a holiday, but it has not moved " +
+      "since the server answered, so no open tab sends /api/flows/now every minute for the day");
+    p.ctx.advance(9 * 3600 * 1000 - 24 * 60 * 1000);
+    p.UI.freshness.market();
+    eq(p.asked.length, 2, "and once the local calendar moves on (21:00 ET) it asks the server again");
+  }
+  {
+    const p = pill("2026-11-27T12:00:00-05:00", null);
+    p.UI.freshness({ sessionDate: "2026-11-24", source: "board" });
+    await p.release();
+    eq(p.UI.freshness.state(), "stale", "when the server cannot be reached, the fallback's stale stands: a truly old page still says so");
+  }
+  {
+    const p = pill("2026-09-25T12:00:00-04:00", { expected: "2026-09-24", phase: { phase: "rth", endsAt: "2026-09-25T20:00:00.000Z" } });
+    p.ctx.fetch("/api/flows/now?k=market");
+    await p.release();
+    p.UI.freshness({ sessionDate: "2026-09-16", source: "card", primary: true });
+    p.UI.freshness({ sessionDate: "2026-09-24", source: "card-x" });
+    eq(p.UI.freshness.state(), "stale",
+      "A PRIMARY SOURCE DATES THE PAGE: a 09-16 card with a 09-24 card-x beside it is stale, where the newest-wins rule said " +
+      "Sep 24 over MU's nine-day-old price");
+    const q = pill("2026-09-25T12:00:00-04:00", null);
+    q.UI.freshness({ sessionDate: "2026-09-16", source: "a" });
+    q.UI.freshness({ sessionDate: "2026-09-24", source: "b" });
+    eq(q.UI.freshness.state(), "fresh", "without a primary the newest session still wins, as before");
+  }
+}
+
+console.log(`✓ flows-freshness: ${checks} assertions — an Eastern clock and the engine's own day and close rules ` +
+  `proven equal to the IANA zone at every half hour ${FIRST_YEAR}-${LAST_YEAR} rather than a fixed offset, one NYSE ` +
+  `calendar matching the exchange's published 2026-2028 holidays and early closes, every holiday to 2032 stepped over ` +
+  `by the nightly, the brief, the phase, the variation horizon and the session count, a window inclusive at both stated edges, the same UTC ` +
   `instant inside in July and outside in January, dead weekends, and a cadence constant the ` +
   `pages can quote without lying, and an instant's EASTERN day told from the first ten ` +
   `characters of its ISO stamp — with the epoch refused rather than published as 1969`);

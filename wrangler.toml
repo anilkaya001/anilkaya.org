@@ -1,6 +1,6 @@
 name = "anilkaya"
 main = "worker.js"
-compatibility_date = "2026-07-14"
+compatibility_date = "2026-07-08"
 
 [assets]
 directory = "."
@@ -23,7 +23,7 @@ migrations_dir = "migrations"
 binding = "AI"
 
 [triggers]
-crons = ["1-59/5 13-21 * * 1-5", "*/30 * * * *"]
+crons = ["1-59/5 13-21 * * MON-FRI", "*/30 * * * *"]
 
 [[ratelimits]]
 name = "UW_ONDEMAND"

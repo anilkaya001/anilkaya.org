@@ -23,7 +23,7 @@ const emitted = (name) => { const f = path.join(EMIT_DIR, name); return fs.exist
 const cards = fs.readdirSync(EMIT_DIR).filter((f) => /^-card-[A-Z][A-Z0-9.\-]*\.json$/.test(f)).map((f) => JSON.parse(fs.readFileSync(path.join(EMIT_DIR, f), "utf8")));
 ok(cards.length >= 5, `the emitter produced ${cards.length} cards to test against`);
 
-const withChain = cards.filter((c) => c.depth !== "index" && TICKER_PANEL_KEYS.every((k) => c.panels && c.panels[k]) &&
+const withChain = cards.filter((c) => c.depth !== "index" && c.depth !== "fund" && TICKER_PANEL_KEYS.every((k) => c.panels && c.panels[k]) &&
   ["ivSurface", "skewTerm", "topContracts", "aggressor"].every((k) => c.panels[k].status === "ok"));
 ok(withChain.length > 0, `at least one emitted card carries all four chain panels (${withChain.length} do)`);
 const engineCards = cards.filter((c) => c.engine && Array.isArray(c.engine.structures) && c.engine.structures.length >= 2 && Array.isArray(c.engine.expiries) && c.engine.expiries.length);
@@ -62,6 +62,7 @@ async function mount(page, card, o = {}) {
     tape: o.tape || { status: "pending" },
     meta: o.meta || { status: "pending" },
     events: o.events || { status: "pending", rows: [] },
+    roster: o.roster || { status: "pending" },
     now: o.now || { serverNow: Date.parse("2026-08-24T22:00:00Z"), phase: { phase: "closed", session: card ? card.sessionDate : "2026-08-24", trading: false, endsAt: null }, keys: {} },
   };
   const requested = [];
@@ -78,7 +79,7 @@ async function mount(page, card, o = {}) {
       requested.push(key + u.search);
       let body = key === "board" ? (o.boards && o.boards[u.searchParams.get("side")]) || { status: "pending", rows: [] } : api[key];
       if (body === undefined) body = { status: "pending" };
-      return route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
+      return route.fulfill({ status: (o.codes && o.codes[key]) || 200, contentType: "application/json", body: JSON.stringify(body) });
     }
     if (u.pathname.startsWith("/flows/ticker")) return route.fulfill({ contentType: "text/html; charset=utf-8", body: o.html || PAGE_HTML });
     return route.fulfill({ status: 404, body: "" });
@@ -172,7 +173,8 @@ const MODULES = ["m-worlds", "m-signal", "m-gamma", "m-hedge", "m-vol", "m-flow"
   const body = block.slice(0, block.indexOf("};"));
   const map = new Map([...body.matchAll(/([A-Za-z_][A-Za-z0-9_]*): "([a-zA-Z-]+)"/g)].map((m) => [m[1], m[2]]));
   const built = new Set([...TICKER_SRC.matchAll(/mod\(\{ id: "(m-[a-z]+)"/g)].map((m) => m[1]));
-  eq([...built].sort().join(" "), [...MODULES].sort().join(" "), "the page builds exactly the ten modules this contract sweeps");
+  eq([...built].sort().join(" "), [...MODULES, "m-screen"].sort().join(" "),
+     "the page builds exactly the ten dossier modules this contract sweeps, plus the lite page's Screen, swept by its own block below");
   for (const p of TICKER_PANELS) {
     ok(map.has(p.key), `registry panel "${p.key}" is placed in a module by the page's panel map — a panel no module reads is a vendor call nobody sees`);
     ok(built.has(map.get(p.key)) || map.get(p.key) === "ftHero", `and "${p.key}" is placed in ${map.get(p.key)}, a module the page actually builds`);
@@ -634,13 +636,20 @@ try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
-    await mount(page, card, { boards });
+    await mount(page, card, { boards, roster: { v: 1, sessionDate: card.sessionDate, depth: { AAA: "board", GLD: "fund", NVDA: "focus", COST: "cross" } } });
     await page.waitForTimeout(400);
     eq(page._requested.filter((u) => u.startsWith("board")).length, 0, "loading a named ticker page fetches NO board — the name switcher's cost is paid only by the readers who use it");
     ok(await page.evaluate(() => !!document.getElementById("fxSearch")), "but the switcher is there, in the toolbar, on every width");
     await page.click("#fxSearch");
     await page.waitForFunction(() => /AAA/.test((document.querySelector(".ui-pal") || {}).textContent || ""), null, { timeout: 5000 });
     ok(page._requested.some((u) => u.startsWith("board")), "opening it fetches the boards, then");
+    await page.waitForFunction(() => /COST/.test((document.querySelector(".ui-pal") || {}).textContent || ""), null, { timeout: 5000 }).catch(() => {});
+    const pal = await page.evaluate(() => [...document.querySelectorAll(".ui-pal-opt")].map((o) => [o.querySelector("b").textContent, o.children[1].textContent, !!o.children[1].querySelector("svg")]));
+    eq(pal.slice(0, 2).map((r) => r[0]).sort().join(" "), "GLD NVDA", `T10: the palette reads the roster, focus names and funds one keystroke away (${pal.map((r) => r[0]).join(" ")})`);
+    const word = Object.fromEntries(pal.map((r) => [r[0], r[1]]));
+    ok(/Focus/.test(word.NVDA) && /ETF/.test(word.GLD) && /Card/.test(word.COST) && !/\b(focus|fund|cross)\b/.test(pal.map((r) => r[1]).join(" ")),
+       `each roster row says its depth in the picker's own short words, never the raw depth (${JSON.stringify(word)})`);
+    ok(pal.filter((r) => ["GLD", "NVDA", "COST"].includes(r[0])).every((r) => r[2]), "beside its depth glyph");
     await page.keyboard.press("Escape");
     await page.waitForTimeout(200);
     ok(await page.evaluate(() => document.querySelectorAll("#ftGrid > section").length === 10 && !document.getElementById("ftGrid").hidden), "and closing it leaves the dossier exactly where it was");
@@ -674,26 +683,256 @@ try {
     await page.close();
   }
   {
-    const pendingCases = [
-      [{ long: { deep: 1, rows: [{ t: "ZZZ", r: 1, s: 5, dp: 1 }] } }, "has not landed", "a card that really is lagging its row"],
-      [{ long: { deep: 1, rows: [{ t: "QQQ", r: 1, s: 5, dp: 1 }] } }, "not on today", "a name the board does not carry at all"],
-      [{ long: { deep: 1, rows: [{ t: "AAA", r: 1, s: 9, dp: 1 }, { t: "ZZZ", r: 2, s: 5 }] } }, "built no card for it", "a name the board RANKS and this run built no card for"],
+    const roster = { v: 1, sessionDate: "2026-08-24", depth: { AAA: "board", GLD: "fund", NVDA: "focus", SPY: "index", COST: "cross", ZZZZ: "cross" } };
+    const cases = [
+      [{ ticker: "ZZZZ", status: "absent", why: "unknown" }, "Unknown", "unavailable", { roster }],
+      [{ ticker: "ZZZZ", status: "absent", why: "not-covered" }, "Not covered", "unavailable", {}],
+      [{ ticker: "ZZZZ", status: "absent", why: "gated" }, "Gated", "unavailable", {}],
+      [{ ticker: "ZZZZ", status: "pending" }, "Pending", "pending", {}],
+      [{ error: { code: "store_unreadable" }, status: "unavailable", reason: "store" }, "Unavailable", "unavailable", { codes: { card: 503 } }],
     ];
-    for (const [boards, want, what] of pendingCases) {
+    for (const [body, word, state, extra] of cases) {
       const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
-      await mount(page, null, { ticker: "ZZZ", boards });
-      await page.waitForFunction(() => document.getElementById("ftStatus").textContent.length > 20, null, { timeout: 5000 });
-      const got = await page.evaluate(() => ({ status: document.getElementById("ftStatus").textContent, silent: !!document.querySelector("#ftPx .ui-silent[data-state]"), picker: document.querySelectorAll("#ftPicker a.ui-row").length }));
-      ok(got.status.includes(want), `${what} says so specifically ("${want}")`);
-      ok(got.silent, `and the hero draws the designed silence in place of a price (${what})`);
-      if (want === "built no card for it") {
-        ok(/2 of 2 on the bullish side/.test(got.status), "the rank is stated against the whole side, not against the carded half");
-        ok(!/has not landed|briefly lag/.test(got.status), "and never as a lag, because reloading cannot produce a card the run did not budget for");
-        eq(got.picker, 1, "while the list beside it holds only the name that does have a card");
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, body, { ticker: "ZZZZ", neuron: { status: "pending" }, cardX: { status: "absent" }, hist: { status: "absent" },
+        boards: { long: { deep: 1, rows: [{ t: "AAA", r: 1, s: 9, dp: 1 }, { t: "BBB", r: 2, s: 5 }] } }, ...extra });
+      await page.waitForSelector("#ftPicker:not([hidden])", { timeout: 5000 }).catch(() => {});
+      const got = await page.evaluate(() => ({ word: (document.querySelector("#ftPx .ui-silent .ui-silent-t") || {}).textContent, state: (document.querySelector("#ftPx .ui-silent") || { dataset: {} }).dataset.state,
+        status: document.getElementById("ftStatus").textContent, prose: document.getElementById("ftHero").innerText,
+        rows: [...document.querySelectorAll("#ftPicker a.ui-row")].map((a) => [a.querySelector(".ui-row-m b").textContent, (a.querySelector(".ui-row-m span") || {}).textContent, !!a.querySelector(".ui-badge svg")]) }));
+      eq(got.word, word, `T7: ${JSON.stringify(body)} draws the one word "${word}" on the surface`);
+      eq(got.state, state, `with the ${state} glyph`);
+      ok(got.status.startsWith(word), `and the status line leads with the same word (${got.status})`);
+      ok(!/board names|Cards are built only/.test(got.prose + got.status), "the false prose about board-only cards is gone");
+      ok(got.prose.split(/\s+/).length <= 5, `the hero surface is the name, a glyph and a word, with its reason behind Why (${got.prose})`);
+      eq(page._requested.filter((u) => u.startsWith("tape")).length, 0, "T9: no tape is read for a name with no card");
+      if (extra.roster) {
+        eq(got.rows.map((r) => r[0]).join(" "), "NVDA GLD SPY AAA COST", "T10: the picker reads the roster, focus names first, then funds, indexes, board and cross-section names, and never the name itself");
+        eq(got.rows.map((r) => r[1]).join(" "), "Focus ETF Index Board Card", "each row says its depth in one word");
+        ok(got.rows.every((r) => r[2]), "beside a glyph for its depth");
+      } else {
+        eq(got.rows.map((r) => r[0]).join(" "), "AAA", "without a roster it falls back to the board names that carry a card");
       }
+      eq(errors.length, 0, `the absent page throws nothing (${errors.join("; ")})`);
       await page.close();
     }
   }
+  {
+    const withEarnings = fs.readdirSync(EMIT_DIR).filter((f) => /^-card-x-/.test(f)).map((f) => JSON.parse(fs.readFileSync(path.join(EMIT_DIR, f), "utf8")))
+      .find((x) => x.earnings && x.earnings.status === "ok" && Array.isArray(x.earnings.events) && x.earnings.events.length);
+    ok(withEarnings, "the emitter wrote a card-x with an earnings history to test against");
+    const session = full.sessionDate;
+    const at = Date.parse(session + "T23:00:00Z");
+    const tape = { v: 1, key: "tape", ticker: "LITE", session, units: { nd: "delta", net: "USD" },
+      prem: { status: "ok", readAt: new Date(at).toISOString(), t: ["13:35", "14:00", "15:00", "16:00", "17:00", "18:00"].map((x) => session + "T" + x + ":00Z"),
+        nd: [0, 1200, 3400, 2100, 5200, 6100], net: [0, 2e5, 5.5e5, 4e5, 8e5, 9.1e5], ncp: [0, 3e5, 7e5, 6e5, 1.1e6, 1.3e6], npp: [0, 1e5, 1.5e5, 2e5, 3e5, 3.9e5] } };
+    const lite = { v: 1, ticker: "LITE", status: "ok", lite: true, depth: "universe", sessionDate: session, generatedAt: full.generatedAt, sector: "Basic Materials", n: 695, rank: 115,
+      u: { px: 72.52, chg: -0.0009, mcap: 1.041e11, iv30: 0.47, ivp: 39, ts: 0.013, fs: -0.026, dIv1w: 0.019, rv20: 0.41, vrp: 0.06, gexAdv: 0.0219, gexRatio: 0.64, dDelta: -0.0232,
+        si: null, ed: 20, rsi: 51, adx: 13, bb: 0.46, atr: 0.039, sma50: 0.046, rvol: 0.7 },
+      pct: { iv30: 40, ts: 55, vrp: 60, gexAdv: 70, si: null }, why: "not-covered", gate: null };
+    for (const width of [320, 390, 1440]) {
+      const page = await browser.newPage({ viewport: { width, height: 1000 }, hasTouch: width < 800, isMobile: width < 800 });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, lite, { neuron: { status: "unavailable" }, cardX: { ...withEarnings, ticker: "LITE", sessionDate: session }, hist: { status: "absent", why: "not-covered" }, tape, at });
+      await page.waitForSelector("#m-flow", { timeout: 5000 }).catch(() => {});
+      const got = await page.evaluate(() => ({
+        px: document.querySelector("#ftPxV .visually-hidden").textContent, flags: document.getElementById("ftHeroFlags").innerText.trim(),
+        chips: [...document.querySelectorAll("#ftChips .ui-gchip .ui-chip-l")].map((n) => n.textContent),
+        clipped: [...document.querySelectorAll("#ftChips .ui-gchip .ui-chip-l, #ftChips .ui-gchip .ui-chip-v")].filter((n) => n.scrollWidth > n.clientWidth + 1).length,
+        ranks: [...document.querySelectorAll("#ftHc .ft-meter > span:first-child")].map((n) => n.textContent),
+        mods: [...document.querySelectorAll("#ftGrid > section")].map((m) => m.id), verdict: document.getElementById("ftVerdict").hidden,
+        screen: [...document.querySelectorAll("#m-screen .ui-metric-l")].map((n) => n.textContent),
+        waiting: [...document.querySelectorAll("[data-state=pending]")].filter((n) => n.getClientRects().length && n.id !== "fxFresh").length }));
+      eq(got.px, "72.52", `${width}px T7: a lite card draws the universe's close as the headline price`);
+      eq(got.flags, "Screen", "and names its depth in one word");
+      eq(got.chips.join(" "), "IV pct IV 30d Dealer γ Earnings Size", "with the five screen readings as hero chips, the universe's one-year IV percentile named pct, never rank");
+      eq(got.clipped, 0, `${width}px no chip label is cut off`);
+      eq(got.ranks.join(" "), "IV 30d VRP Term γ / ADV", "and its percentile ranks in the screen beside them, a missing rank left out rather than drawn at zero");
+      eq(got.mods.join(" "), "m-screen m-events m-flow", "the grid carries the Screen, the earnings history its card-x holds, and the live tape once it resolves");
+      ok(got.verdict, "and no verdict: there is no card for the Neuron to read");
+      ok(["IV 30d", "VRP", "γ / ADV", "RSI", "vs 50d"].every((l) => got.screen.includes(l)) && !got.screen.includes("Short float"),
+         `the Screen draws every column the row carries and none it lacks (${got.screen.join(", ")})`);
+      eq(got.waiting, 0, "and nothing on the page waits on a sign");
+      const sw = await page.evaluate(sweep);
+      for (const m of sw.mods) {
+        ok(m.heading.length > 1 && m.heading.split(/\s+/).length <= 3, `${width}px lite ${m.id}: its title is one to three words`);
+        ok(m.spill <= 1, `${width}px lite ${m.id}: nothing reaches past the module's right edge (${m.spill}px)`);
+      }
+      ok(sw.overflow <= 0 && sw.body <= 0, `${width}px lite: the page never scrolls sideways`);
+      const order = page._requested.map((u) => u.split("?")[0]);
+      ok(order.indexOf("card") >= 0 && order.indexOf("tape") > order.indexOf("card"), `T9: the tape is read only after the card resolves (${order.join(", ")})`);
+      eq(errors.length, 0, `${width}px the lite page throws nothing (${errors.join("; ")})`);
+      await page.close();
+    }
+    {
+      const quote = { v: 1, ticker: "GLD", status: "ok", lite: true, depth: "quote", sessionDate: session, generatedAt: full.generatedAt, nm: "SPDR Gold Shares", type: "ETF", sector: null,
+        u: { px: 391.66, prev: 392.88, chg: -0.0031, iv30: 0.182, ivRank: 41.5, im: 0.021, pcr: 0.8, net: 1.2e6, lean: 0.2, rvol: 1.1 }, why: "not-covered" };
+      const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, quote, { neuron: { status: "unavailable" }, cardX: { ticker: "GLD", status: "absent", why: "not-covered" }, hist: { status: "absent" }, at });
+      const got = await page.evaluate(() => ({ sub: document.getElementById("ftHeroSub").innerText, flags: document.getElementById("ftHeroFlags").innerText.trim(),
+        silent: document.getElementById("ftHero").classList.contains("is-silent"), mods: [...document.querySelectorAll("#ftGrid > section")].map((m) => m.id),
+        screen: [...document.querySelectorAll("#m-screen .ui-metric-l")].map((n) => n.textContent), px: document.querySelector("#ftPxV .visually-hidden").textContent }));
+      ok(/SPDR Gold Shares/.test(got.sub) && /ETF/.test(got.sub), `T7: an ETF outside the universe opens a quote page with its name and an ETF tag (${got.sub})`);
+      eq(got.flags, "Quote", "whose depth word is Quote");
+      eq(got.px, "391.66", "priced from the screener row");
+      ok(got.silent, "with no percentile column to draw beside the price");
+      eq(got.mods.join(" "), "m-screen", "and no Events module: an ETF has no earnings");
+      ok(["IV 30d", "IV rank", "Move", "Net premium", "P/C"].every((l) => got.screen.includes(l)), `the Screen reads the quote's own fields (${got.screen.join(", ")})`);
+      eq(errors.length, 0, `the quote page throws nothing (${errors.join("; ")})`);
+      await page.close();
+    }
+  }
+
+  {
+    const base = clone(withChain.find((c) => c.engine) || withChain[0]);
+    const expected = base.sessionDate;
+    const old = { ...clone(base), sessionDate: "2026-08-10" };
+    const at = Date.parse(base.generatedAt || expected + "T21:00:00Z") + 3600e3;
+    const readAt = new Date(at).toISOString();
+    const now = { serverNow: at, phase: { phase: "closed", session: expected, trading: false, endsAt: null }, keys: {},
+      quote: { ticker: old.ticker, status: "ok", readAt, price: 123.45, prevClose: 120, changePct: 0.02875, open: 121, high: 124, low: 120.5, volume: 1e6, marketTime: "r", tapeTime: readAt } };
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, old, { now, cardX: { ticker: old.ticker, status: "absent", why: "not-covered" }, hist: { status: "absent", why: "not-covered" }, at });
+    await page.waitForFunction(() => /Close/.test(document.getElementById("ftLast").textContent), null, { timeout: 8000 }).catch(() => {});
+    const got = await page.evaluate(() => ({ px: document.querySelector("#ftPxV .visually-hidden").textContent, last: document.getElementById("ftLast").innerText.replace(/\s+/g, " ").trim(),
+      chip: (document.querySelector("#ftHeroFlags .ft-stale") || {}).innerText, day: window.FlowsUI.F.day("2026-08-10"),
+      waiting: [...document.querySelectorAll("#ftGrid [data-state=pending], #ftVerdict [data-state=pending]")].filter((n) => n.getClientRects().length).length,
+      worlds: !!document.getElementById("m-worlds") }));
+    ok(got.chip && /Stale/.test(got.chip) && got.chip.includes(got.day), `T5: a card behind the expected session shows a visible Stale chip with its date (${got.chip})`);
+    eq(got.px, "123.45", "and the headline price is the vendor's last price, not the old card's");
+    ok(/^Close /.test(got.last), `labelled Close with its day (${got.last})`);
+    eq(got.waiting, 0, "T6: missing card-x and hist on a stale card are unavailable, never pending");
+    eq(errors.length, 0, `the stale card throws nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  {
+    const card = clone(full);
+    const next = new Date(Date.parse(card.sessionDate + "T00:00:00Z") + 864e5).toISOString().slice(0, 10);
+    const cx = { ...(cardXOf(card.ticker) || {}), earnings: fs.readdirSync(EMIT_DIR).filter((f) => /^-card-x-/.test(f)).map((f) => JSON.parse(fs.readFileSync(path.join(EMIT_DIR, f), "utf8")))
+      .map((x) => x.earnings).find((e) => e && e.status === "ok"), sessionDate: next };
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, card, { cardX: cx, hist: { ...(histOf(card.ticker) || {}), sessionDate: next } });
+    const got = await page.evaluate((s) => ({ pill: document.getElementById("fxFresh").innerText, mine: window.FlowsUI.F.day(s[0]), other: window.FlowsUI.F.day(s[1]),
+      chip: (document.querySelector("#m-events .ui-mod-t .ui-tag") || {}).textContent }), [card.sessionDate, next]);
+    ok(got.pill.includes(got.mine) && !got.pill.includes(got.other), `T8: companions from another session never lift the page pill off the card's own (${got.pill})`);
+    eq(got.chip, got.other, "and the earnings history they carry is shown dated on its own module");
+    eq(errors.length, 0, `the mixed-session page throws nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  {
+    const card = clone(full);
+    const prev = new Date(Date.parse(card.sessionDate + "T00:00:00Z") - 864e5).toISOString().slice(0, 10);
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, card, { cardX: { ...(cardXOf(card.ticker) || {}), sessionDate: prev }, hist: { ...(histOf(card.ticker) || {}), sessionDate: prev } });
+    const got = await page.evaluate(async (s) => {
+      const tags = (id) => [...document.querySelectorAll("#" + id + " .ui-mod-t .ui-tag")].map((n) => n.textContent);
+      const b = [...document.querySelectorAll("#m-gamma .ui-seg-i")].find((n) => n.textContent === "1Y");
+      if (b) b.click();
+      await new Promise((r) => setTimeout(r, 300));
+      return { pill: document.getElementById("fxFresh").innerText, mine: window.FlowsUI.F.day(s[0]), other: window.FlowsUI.F.day(s[1]),
+        gamma: tags("m-gamma"), vol: tags("m-vol"), oneYear: !!b && !b.disabled && !document.querySelector("#m-gamma .ft-cbox .ui-silent") };
+    }, [card.sessionDate, prev]);
+    ok(got.gamma.includes(got.other) && got.vol.includes(got.other), `T8: an older card-x and hist are kept and dated on the modules that draw from them (${got.gamma} / ${got.vol})`);
+    ok(got.oneYear, "so the one-year dealer-gamma view draws the history that exists, rather than saying Unavailable");
+    ok(got.pill.includes(got.mine) && !got.pill.includes(got.other), `and the pill stays on the card's own session (${got.pill})`);
+    eq(errors.length, 0, `the older-companion page throws nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  {
+    const base = clone(withChain.find((c) => c.engine) || withChain[0]);
+    const old = { ...base, sessionDate: "2026-09-16" };
+    const sat = Date.parse("2026-09-26T15:00:00Z");
+    const q = (tapeTime) => ({ ticker: old.ticker, status: "ok", readAt: new Date(sat).toISOString(), price: 123.45, prevClose: 120, changePct: 0.02875, open: 121, high: 124, low: 120.5, volume: 1e6, marketTime: "po", tapeTime });
+    for (const [tapeTime, want, why] of [["2026-09-25T20:00:00Z", "2026-09-25", "the quote's own tape time, a Friday, while it is read on the Saturday"],
+      ["2026-09-26T14:59:00Z", "2026-09-25", "a tape stamp past the last close is held to the last closed session"], [null, null, "no tape time hides the day rather than guessing it from the read"]]) {
+      const now = { serverNow: sat, phase: { phase: "closed", session: null, day: "2026-09-26", lastClosed: "2026-09-25", trading: false, endsAt: null }, keys: {}, quote: q(tapeTime) };
+      const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, old, { now, cardX: { ticker: old.ticker, status: "absent", why: "not-covered" }, hist: { status: "absent", why: "not-covered" }, at: sat });
+      await page.waitForFunction(() => /Close/.test(document.getElementById("ftLast").textContent), null, { timeout: 8000 }).catch(() => {});
+      const got = await page.evaluate((w) => ({ last: document.getElementById("ftLast").innerText.replace(/\s+/g, " ").trim(), want: w ? window.FlowsUI.F.day(w) : null,
+        sat: window.FlowsUI.F.day("2026-09-26"), aria: (document.querySelector("#ftHeroFlags .ft-stale") || { getAttribute: () => null }).getAttribute("aria-label"), card: window.FlowsUI.F.day("2026-09-16") }), want);
+      if (want) eq(got.last, "Close " + got.want, `T5: the close is dated by ${why} (${got.last})`);
+      else eq(got.last, "Close", `T5: ${why} (${got.last})`);
+      ok(!got.last.includes(got.sat), "never by the Saturday the quote was read on");
+      ok(got.aria && got.aria.includes(got.card), `the Stale chip's accessible name carries the date it shows (${got.aria})`);
+      eq(errors.length, 0, `the weekend close throws nothing (${errors.join("; ")})`);
+      await page.close();
+    }
+  }
+
+  {
+    const lite = { v: 1, ticker: "OLDL", status: "ok", lite: true, depth: "universe", sessionDate: "2026-08-10", generatedAt: "2026-08-10T23:00:00Z", sector: "Technology", n: 695, rank: 40,
+      u: { px: 50.1, chg: 0.01, iv30: 0.4, ivp: 20 }, pct: {}, why: "not-covered", gate: null };
+    const page = await browser.newPage({ viewport: { width: 390, height: 900 }, hasTouch: true, isMobile: true });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, lite, { neuron: { status: "unavailable" }, cardX: { status: "absent" }, hist: { status: "absent" }, at: Date.parse("2026-08-24T22:00:00Z") });
+    const got = await page.evaluate(() => ({ chip: (document.querySelector("#ftHeroFlags .ft-stale") || {}).innerText, flags: document.getElementById("ftHeroFlags").innerText, day: window.FlowsUI.F.day("2026-08-10") }));
+    ok(got.chip && /Stale/.test(got.chip) && got.chip.includes(got.day), `a lite page from a universe behind the expected session shows the Stale chip with its date (${got.chip})`);
+    ok(/Screen/.test(got.flags), "beside its depth word");
+    eq(errors.length, 0, `the stale lite page throws nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  {
+    const spy = cards.find((c) => c.depth === "index");
+    const fund = { ...clone(spy), ticker: "GLD", depth: "fund", nm: "SPDR Gold Shares" };
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, fund, { cardX: { ...(cardXOf(spy.ticker) || {}), ticker: "GLD", insiders: { status: "ok", net90: 1e6, dots: [["2026-08-01", 1e6, "P"]] } }, hist: histOf(spy.ticker) || { status: "absent" } });
+    const got = await page.evaluate(() => ({ sub: document.getElementById("ftHeroSub").innerText, mods: [...document.querySelectorAll("#ftGrid > section")].map((m) => m.id),
+      pos: [...document.querySelectorAll("#m-pos .ui-seg-i, #m-pos .ui-metric-l")].map((n) => n.textContent.trim()) }));
+    ok(/ETF/.test(got.sub), `T2: a fund dossier carries an ETF tag (${got.sub})`);
+    ok(!got.mods.includes("m-signal") && !got.mods.includes("m-events"), `and, like an index, no Signal and no Events module (${got.mods.join(" ")})`);
+    ok(!got.pos.some((t) => /Insiders/.test(t)), "and no insider view or figure, even when a block is present: funds have no insiders");
+    eq(errors.length, 0, `the fund dossier throws nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  {
+    const cross = clone(withChain[0]);
+    delete cross.engine;
+    cross.depth = "cross";
+    const deepNoEngine = { ...clone(cross), depth: "board" };
+    const gated = { ...clone(cross), score: null, gate: { earnings: "2026-09-30", dte: 5 } };
+    const read = async (card) => {
+      const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+      await mount(page, card);
+      const got = await page.evaluate(() => ({ worlds: document.getElementById("m-worlds") ? [document.getElementById("m-worlds").querySelector(".ui-silent") ? document.querySelector("#m-worlds .ui-silent-t").textContent : "drawn"] : null,
+        waiting: [...document.querySelectorAll("#ftVerdict [data-state=pending], #m-worlds [data-state=pending]")].filter((n) => n.getClientRects().length).length,
+        chips: [...document.querySelectorAll("#ftChips .ui-gchip .ui-chip-l")].map((n) => n.textContent),
+        order: null }));
+      got.order = page._requested.map((u) => u.split("?")[0]);
+      await page.close();
+      return got;
+    };
+    const a = await read(cross);
+    eq(a.worlds, null, "T6: a cross-section card the engine never prices draws no Two worlds module at all");
+    eq(a.waiting, 0, "and no Ideas or Two worlds waiting sign");
+    ok(a.order.indexOf("tape") > a.order.indexOf("card"), `T9: the tape is read only after the card resolves (${a.order.join(", ")})`);
+    const b = await read(deepNoEngine);
+    eq(b.worlds && b.worlds[0], "Unavailable", "a deep card with no engine block says Unavailable, since no later run will price it");
+    eq(b.waiting, 0, "and never Pending");
+    const c = await read(gated);
+    ok(c.chips[0] === "Earnings" && !c.chips.includes("Score"), `T1: a gated card leads with an Earnings chip instead of a score (${c.chips.join(", ")})`);
+  }
+
   {
     const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
     const card = withChain[0];
@@ -1084,32 +1323,19 @@ try {
   }
 
   {
-    const say = async (events) => {
-      const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
-      const errors = [];
-      page.on("pageerror", (e) => errors.push(String(e)));
-      await mount(page, null, { ticker: "ZZZ", boards: { long: { deep: 1, rows: [{ t: "QQQ", r: 1, s: 5, dp: 1 }] } }, events });
-      await page.waitForFunction(() => document.getElementById("ftStatus").textContent.length > 20, null, { timeout: 5000 });
-      const got = await page.evaluate(() => ({ text: document.getElementById("ftStatus").textContent, href: (document.querySelector("#ftStatus a") || { getAttribute: () => null }).getAttribute("href"),
-        why: (() => { const b = document.querySelector("#ftPx .ui-silent [data-info]"); if (!b) return ""; window.FlowsUI.openInfo(b); return document.getElementById("fxPop").innerText; })() }));
-      eq(errors.length, 0, `the absent-name branch throws nothing (${errors.join("; ")})`);
-      await page.close();
-      return got;
-    };
-    const gated = await say({ gateOrigin: "2026-09-03", gateDays: 12, rows: [{ t: "ZZZ", d: "2026-09-08", dte: 5, st: "gated", s: null }] });
-    ok(gated.text.includes("2026-09-08") && /5 calendar days/.test(gated.text) && gated.text.includes("2026-09-03"), "a gated name is told when it reports, in calendar days, from the origin the gate counted from");
-    ok(/BEFORE the composite ran/.test(gated.text) && /not a low one/.test(gated.text), "and that the gate fired before any score existed — not that it scored badly");
-    ok(!/it may be on the watch list/.test(gated.text) && /holds only names that were scored/.test(gated.text), "the false watch-list suggestion is replaced by what the watch list actually holds");
-    eq(gated.href, "/flows/events/", "and the page offers the way on");
-    ok(gated.why.includes("BEFORE the composite ran"), "the hero's silence carries the same account in its own disclosure");
-    const stalled = await say({ gateOrigin: "2026-09-03", gateDays: 12, rows: [{ t: "ZZZ", d: "2026-11-01", dte: 59, st: "eligible", s: null }] });
-    ok(/eligible/.test(stalled.text) && /cleared the earnings gate/.test(stalled.text) && !/BEFORE the composite ran/.test(stalled.text), "a name that cleared the gate is told the stage it stopped at, and never borrows the gated sentence");
-    const missing = await say({ gateOrigin: "2026-09-03", gateDays: 12, windowDays: 21, capBound: false, rows: [] });
-    ok(/cannot say which stage/.test(missing.text) && /21 calendar days/.test(missing.text) && /silence here is a missing row, not evidence/.test(missing.text) && !/capped/.test(missing.text), "a name with no funnel row gets no invented stage, is told the calendar's window, and is not handed a cap that did not bind");
-    const cappedOut = await say({ gateOrigin: "2026-09-03", gateDays: 12, windowDays: 21, capBound: true, rows: [] });
-    ok(/capped/.test(cappedOut.text) && /does not reach every name even inside it/.test(cappedOut.text), "and when the cap DID bind the calendar says so, naming what it cost");
-    const unread = await say({ status: "pending" });
-    ok(/could not be read/.test(unread.text) && /not on today/.test(unread.text), "an unreadable funnel says so rather than guessing, while stating the one thing known");
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, null, { ticker: "ZZZ", boards: { long: { deep: 1, rows: [{ t: "QQQ", r: 1, s: 5, dp: 1 }] } },
+      events: { gateOrigin: "2026-09-03", gateDays: 12, rows: [{ t: "ZZZ", d: "2026-09-08", dte: 5, st: "gated", s: null }] } });
+    await page.waitForFunction(() => document.getElementById("ftStatus").textContent.length > 8, null, { timeout: 5000 });
+    const got = await page.evaluate(() => ({ text: document.getElementById("ftStatus").textContent,
+      why: (() => { const b = document.querySelector("#ftPx .ui-silent [data-info]"); if (!b) return ""; window.FlowsUI.openInfo(b); return document.getElementById("fxPop").innerText; })() }));
+    ok(/tonight's run/.test(got.text) && /tonight's run/.test(got.why), `a pending card is a key tonight's run will write, and says so in the status line and behind Why (${got.text})`);
+    eq(page._requested.filter((u) => u.startsWith("events")).length, 0,
+       "and the page no longer reconstructs the funnel from the earnings calendar: the Worker classifies a missing card (gated, not covered, unknown) and serves the gated name a lite card with its report date, which flows-worker-contract proves");
+    eq(errors.length, 0, `the pending branch throws nothing (${errors.join("; ")})`);
+    await page.close();
   }
 
   {
@@ -1280,7 +1506,7 @@ try {
     const got = await page.evaluate(() => ({
       line: document.getElementById("ftVerdictT").textContent,
       ideas: [...document.querySelectorAll("#ftVerdict .ft-idea")].map((a) => ({ title: a.querySelector(".ft-idea-t").textContent, on: a.querySelectorAll(".ui-bars i.is-on").length, dots: a.querySelectorAll(".ui-bars i").length,
-        dir: a.querySelector(".ft-dir").getAttribute("aria-label"), tags: [...a.querySelectorAll(".ui-tag")].map((t) => t.textContent), slots: [...a.querySelectorAll(".ft-slots .ft-slot")].filter((x) => x.querySelector(".ui-dash .ui-state[data-state=pending]") && !/\d/.test(x.querySelector(".ft-slot-v").textContent)).length })),
+        dir: a.querySelector(".ft-dir").getAttribute("aria-label"), tags: [...a.querySelectorAll(".ui-tag")].map((t) => t.textContent), slots: [...a.querySelectorAll(".ft-slots .ft-slot")].filter((x) => x.querySelector(".ui-dash .ui-state[data-state=unavailable]") && !/\d/.test(x.querySelector(".ft-slot-v").textContent)).length })),
       lit: [...document.querySelectorAll("#ftVerdict .ui-bars i.is-on")].every((i) => { const bg = getComputedStyle(i).backgroundColor; return bg && bg !== "rgba(0, 0, 0, 0)" && bg !== "transparent"; }),
       chip: (document.getElementById("ftStateChip") || {}).textContent, cov: (document.getElementById("ftNeuronCov") || {}).textContent,
       meta: [...document.querySelectorAll("#ftStateMeta dt")].map((d, i) => [d.textContent, document.querySelectorAll("#ftStateMeta dd")[i].textContent]),
@@ -1292,7 +1518,7 @@ try {
     ok(got.lit, "and every lit bar has a painted background, so the grade is visible and not a token that never resolved");
     eq(got.ideas[0].dir, "Bullish", "the direction is carried by the idea's badge, with its word for a screen reader");
     ok(got.ideas[0].tags.includes("Implied state"), "the state's own idea says where it came from");
-    ok(got.ideas.every((i) => i.slots === 3), `an unpriced idea shows the pending glyph in each of its three price slots, never a figure from nowhere (${got.ideas.map((i) => i.slots).join(", ")})`);
+    ok(got.ideas.every((i) => i.slots === 3), `an unpriced idea shows the unavailable glyph in each of its three price slots, never a figure from nowhere and never a wait for a pricing that will not come (${got.ideas.map((i) => i.slots).join(", ")})`);
     ok(got.tag.includes("Amplifying"), "the implied state is named beside the stance");
     eq(got.chip, "Amplifying · short gamma, flow bullish, to the flip 44.59", "and More quotes the chip the server wrote");
     assert.deepEqual(got.meta, [["Flow", "bullish"], ["Premium", "rich"], ["Prefer", "put credit spread · call debit spread"], ["Avoid", "iron condor · call credit spread"], ["Ends past", "max pain 42.50"], ["Horizon", "10 sessions"]],

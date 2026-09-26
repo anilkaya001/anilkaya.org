@@ -1,5 +1,5 @@
 import { buildBrief, briefStoreFrom, briefAlertsFact, silenceOf, num } from "./flows-brief.js";
-import { lastCompletedSession } from "./flows-freshness.js";
+import { expectedNightlySession } from "./flows-freshness.js";
 
 function served(store, key) {
   if (!store || typeof store !== "object" || !Object.hasOwn(store, key)) {
@@ -590,7 +590,7 @@ export function cardFacts(store, options) {
 
     if (card === null || typeof card !== "object" || card.status === "pending") continue;
 
-    if ((card.depth === "cross-section" || card.depth === "index") && !thin) continue;
+    if ((card.depth === "cross-section" || card.depth === "index" || card.depth === "fund") && !thin) continue;
     const t = typeof card.ticker === "string" && card.ticker ? card.ticker : m[1];
     entries.push({ t, card, at: atOf(card), st: standing.get(t) || null });
   }
@@ -615,9 +615,23 @@ export function cardFacts(store, options) {
   return { facts, names };
 }
 
-export function shedCardFacts(facts, names, measure) {
-  const list = Array.isArray(facts) ? facts.slice() : [];
+export const CARD_CORE_FACTS = Object.freeze(["standing", "gamma", "move"]);
+
+export function shedCardFacts(facts, names, measure, options) {
+  let list = Array.isArray(facts) ? facts.slice() : [];
   const order = Array.isArray(names) ? names.slice() : [];
+  const core = options !== null && typeof options === "object" && Array.isArray(options.lean) ? options.lean : null;
+  const leaned = [];
+  if (core !== null) {
+    for (let i = order.length - 1; i >= 0 && measure(list) > 0; i--) {
+      const src = "card:" + order[i];
+      const kept = list.filter((f) => !(f && f.source === src) || core.includes(String(f.id).split("/").pop()));
+      if (kept.length === list.length) continue;
+      if (!kept.some((f) => f && f.source === src)) continue;
+      list = kept;
+      leaned.unshift(order[i]);
+    }
+  }
   let kept = order.length;
   while (kept > 0 && measure(list) > 0) {
     const drop = order[kept - 1];
@@ -626,7 +640,9 @@ export function shedCardFacts(facts, names, measure) {
     }
     kept--;
   }
-  return { facts: list, namesIndexed: { of: order.length, indexed: kept, shed: order.length - kept } };
+  const namesIndexed = { of: order.length, indexed: kept, shed: order.length - kept };
+  if (core !== null) namesIndexed.lean = leaned.filter((t) => order.indexOf(t) < kept).length;
+  return { facts: list, namesIndexed, leaned: leaned.filter((t) => order.indexOf(t) < kept) };
 }
 
 export const SILENCE_KINDS = Object.freeze(["pending", "unreadable", "quiet", "unavailable"]);
@@ -838,10 +854,10 @@ function refreshBriefAlerts(facts, today, published, at, replaced) {
   return { ...today, facts: list };
 }
 
-export function briefAge(index, now) {
+export function briefAge(index, now, clock = null) {
   const session = index && typeof index.sessionDate === "string" && index.sessionDate
     ? index.sessionDate.slice(0, 10) : null;
-  const expected = now === undefined || now === null ? null : lastCompletedSession(now);
+  const expected = now === undefined || now === null ? null : expectedNightlySession(now, clock);
   const stale = session !== null && expected !== null && session < expected;
   const refreshedAt = index && typeof index.refreshedAt === "string" ? index.refreshedAt : null;
   const generatedAt = index && typeof index.generatedAt === "string" ? index.generatedAt : null;
@@ -1113,8 +1129,7 @@ export function guardAnswer(answer, picked, options) {
         "to show." };
   }
 
-  const allowed = new Set();
-  for (const f of facts) for (const t of numeralsIn(f && f.say)) allowed.add(t);
+  const allowed = new Set(numeralsIn(facts.map((f) => (f && typeof f.say === "string" ? f.say : "")).join("\n")));
 
   const numerals = numeralsIn(text);
   const rejected = [];
@@ -1346,13 +1361,28 @@ export function renderSummaryPlain(picked) {
     "below is the pipeline's own either way.";
 }
 
+const FINGERPRINT_ENCODER = new TextEncoder();
+
 export function summaryFingerprint(picked) {
   const facts = Array.isArray(picked) ? picked : [];
-
-  const joined = facts
+  let bytes = FINGERPRINT_ENCODER.encode(facts
     .map((f) => (f && typeof f.say === "string" ? f.say : ""))
-    .join("");
-  let h = 5381;
-  for (let i = 0; i < joined.length; i++) h = (((h << 5) + h) ^ joined.charCodeAt(i)) >>> 0;
-  return h.toString(36) + "." + facts.length;
+    .join("\u001f"));
+  if (bytes.byteOffset & 3) bytes = bytes.slice();
+  const w = new Uint32Array(bytes.buffer, bytes.byteOffset, bytes.length >>> 2);
+  const n = w.length;
+  let h = 0x811c9dc5 ^ bytes.length;
+  let i = 0;
+  for (; i + 4 <= n; i += 4) {
+    h = Math.imul(h ^ w[i], 0x01000193);
+    h = Math.imul(h ^ w[i + 1], 0x01000193);
+    h = Math.imul(h ^ w[i + 2], 0x01000193);
+    h = Math.imul(h ^ w[i + 3], 0x01000193);
+  }
+  for (; i < n; i++) h = Math.imul(h ^ w[i], 0x01000193);
+  for (let j = n * 4; j < bytes.length; j++) h = Math.imul(h ^ bytes[j], 0x01000193);
+  h ^= h >>> 15;
+  h = Math.imul(h, 0x2c1b3c6d);
+  h ^= h >>> 12;
+  return (h >>> 0).toString(36) + "." + facts.length;
 }

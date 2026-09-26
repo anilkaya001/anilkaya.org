@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "227";
+export const ASSET_VERSION = "228";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -377,6 +377,8 @@ ${shell("Session", "overview", username, `
       <div class="hm-hero-chart" id="hmTide"></div>
       <div class="hm-hero-chips" id="ccVerdict" role="group" aria-label="Session readings"></div>
     </div></section>
+${homeModule("hmMetals", "Metals", "ccMetals", { sub: `<span class="hm-when" id="ccMetalsWhen"></span>` })}
+${homeModule("hmLeaders", "Leaders", "ccLeaders", { sub: `<span class="hm-when" id="ccLeadersWhen"></span>`, seg: `<div class="hm-seg" id="ccLeadSeg"></div>` })}
 ${neuronVerdict(summary)}
 ${homeModule("hmBull", "Bullish", "ccBull", { span: 6, sub: `<a class="hm-count cc-bull" href="/flows/long/" id="ccBullSub" hidden></a>` })}
 ${homeModule("hmBear", "Bearish", "ccBear", { span: 6, sub: `<a class="hm-count cc-bear" href="/flows/short/" id="ccBearSub" hidden></a>` })}

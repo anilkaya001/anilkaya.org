@@ -150,11 +150,14 @@ try {
     eq(sHit.status, 200, "a dated scores pool can be swept");
     eq((await sHit.json()).removed, 1, "and reports what it removed");
 
-    for (const key of ["board:long", "board:short", "board:watch", "record", "meta", "card:AAPL",
-                       "scoretrack", "flowalerts", "pulse"]) {
+    for (const key of ["board:long", "board:short", "board:watch", "record", "meta",
+                       "scoretrack", "flowalerts", "pulse", "universe", "focus", "roster"]) {
       const res = await del(key);
       eq(res.status, 400, `the sweep cannot delete ${key}`);
     }
+    const retired = await del("card:AAPL");
+    eq(retired.status, 200, "a per-ticker card is the one other thing the nightly token may delete: the run retires " +
+      "cards that stopped being rebuilt, and the live token is refused the same DELETE");
     const live = await (await fetch(url("/api/flows/ingest?key=board:long"), {
       headers: { Authorization: "Bearer " + TOKEN },
     })).json();

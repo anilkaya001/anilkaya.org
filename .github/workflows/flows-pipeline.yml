@@ -3,6 +3,9 @@ name: flows-pipeline
 on:
   schedule:
     - cron: "30 21 * * 1-5"
+    - cron: "30 22 * * 1-5"
+    - cron: "17 1 * * 2-6"
+    - cron: "47 3 * * 2-6"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -35,9 +38,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: 22
 
@@ -45,19 +50,26 @@ jobs:
         id: gate
         env:
           ORIGIN: ${{ inputs.origin || 'manual' }}
+          EVENT: ${{ github.event_name }}
+          FIRED: ${{ github.event.schedule }}
         run: |
           ZONE="$(TZ=America/New_York date +%Z)"
-          FIRED="${{ github.event.schedule }}"
           echo "Eastern zone is $ZONE; cron that fired: '${FIRED:-none}'"
           echo "Started at $(date -u +%H:%M) UTC, $(TZ=America/New_York date +%H:%M) Eastern."
-          if [ "${{ github.event_name }}" != "schedule" ]; then
+          if [ "$EVENT" != "schedule" ]; then
             echo "Dispatched by: $ORIGIN — proceeding. The pipeline itself refuses an in-progress session unless allow_intraday is set."
             echo "run=true" >> "$GITHUB_OUTPUT"
-          elif [ "$FIRED" = "30 21 * * 1-5" ]; then
-            echo "21:30 UTC is 17:30 EDT or 16:30 EST — after the close under either zone, and a firing delayed by as much as twelve hours still lands before the next open."
+          elif [ "$FIRED" = "30 21 * * 1-5" ] && [ "$ZONE" = "EDT" ]; then
+            echo "21:30 UTC is 17:30 EDT: the primary run under daylight time."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif [ "$FIRED" = "30 22 * * 1-5" ] && [ "$ZONE" = "EST" ]; then
+            echo "22:30 UTC is 17:30 EST: the primary run under standard time."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif [ "$FIRED" = "17 1 * * 2-6" ] || [ "$FIRED" = "47 3 * * 2-6" ]; then
+            echo "A backup firing. If the session is already archived the same-session gate makes it a refresh of about a minute; if the primary firing was dropped, this run ranks the session."
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
-            echo "No schedule other than '30 21 * * 1-5' owns a run. Skipping."
+            echo "'$FIRED' is the primary cron of the other zone ($ZONE is in force). Skipping."
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -74,3 +86,30 @@ jobs:
           FLOWS_ALLOW_INTRADAY: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_intraday && '1' || '' }}
           FLOWS_REPUBLISH_SESSION: ${{ github.event_name == 'workflow_dispatch' && inputs.republish_session && '1' || '' }}
         run: node scripts/flows-pipeline.mjs
+
+  keepalive:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Keep the scheduled workflows enabled
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          API: ${{ github.api_url }}
+        run: |
+          if [ "$(TZ=America/New_York date +%u)" != "1" ]; then
+            echo "Not a Monday in New York: the weekly keepalive waits for Monday's firings."
+            exit 0
+          fi
+          failed=0
+          for wf in flows-pipeline.yml flows-live.yml flows-probe.yml regression.yml; do
+            code="$(curl -sS -o /dev/null -w '%{http_code}' -X PUT \
+              -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" "$API/repos/$REPO/actions/workflows/$wf/enable")" || true
+            echo "enable $wf: HTTP $code"
+            [ "$code" = "204" ] || failed=1
+          done
+          exit "$failed"

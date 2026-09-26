@@ -754,6 +754,48 @@ for (const file of ["lab/index.html", "lab/course.html", "lab/placement/index.ht
 }
 assert(read("wrangler.toml").includes("run_worker_first = true"), "Worker must run before assets");
 assert(read("wrangler.toml").includes('html_handling = "auto-trailing-slash"'), "HTML handling must be explicit");
+{
+  const ANCHORED = Object.freeze({
+    "flows-desk-contract.mjs": { reason: "desk quotes are timed by the fixture's own asOf (quoteMs), never by the wall clock",
+      dates: ["2026-10-16", "2026-11-05"] },
+    "flows-market-contract.mjs": { reason: "OI-change rows are published fixture fields the page prints, dated against the payload session",
+      dates: ["2026-10-16", "2026-10-30"] },
+    "flows-overview-contract.mjs": { reason: "a stored alert row's expiry is printed, not priced against today",
+      dates: ["2026-10-16"] },
+    "flows-unusual-contract.mjs": { reason: "the unusual fixture carries its own fixed dte, so the expiry is a label",
+      dates: ["2026-10-16"] },
+    "flows-worker-contract.mjs": { reason: "a stored engine structure with its published dte, and a lite card's stored " +
+      "earnings dates, both served as written and never compared with today", dates: ["2026-10-16", "2026-09-29", "2026-10-20"] },
+  });
+  const today = new Date().toISOString().slice(0, 10);
+  const horizon = new Date(Date.now() + 400 * 86400000).toISOString().slice(0, 10);
+  const unanchored = [];
+  for (const file of readdirSync(path.join(ROOT, "tests")).filter((f) => f.endsWith(".mjs"))) {
+    const src = read(path.join("tests", file));
+    if (!/\bstartWorker\(/.test(src)) continue;
+    const allowed = new Set(ANCHORED[file] ? ANCHORED[file].dates : []);
+    src.split("\n").forEach((line, i) => {
+      for (const m of line.matchAll(/(?<![\d-])20\d\d-\d\d-\d\d(?!\d)/g)) {
+        if (m[0] > today && m[0] <= horizon && !allowed.has(m[0])) unanchored.push(`${file}:${i + 1} ${m[0]}`);
+      }
+    });
+  }
+  assert.deepEqual(unanchored, [],
+    "A SERVER SUITE HOLDS AN ISO DATE INSIDE THE NEXT 400 DAYS that is not anchored to a tape or session date: " +
+    "workerd runs on the real clock and cannot be shifted, so a fixed expiry or session there starts failing on the " +
+    "day the calendar reaches it, on a push that did not touch it (flows-strategy's 2026-10-16 expiry would have " +
+    "broken every push from 2026-10-16 20:00 UTC). Build the date from the clock, as flows-strategy does, or, when " +
+    "the suite really does date it by a fixture tape or session, add it to ANCHORED with that reason: " +
+    unanchored.join(", "));
+}
+{
+  const { supportedCompatibilityDate } = await import("miniflare");
+  const compat = (/^compatibility_date\s*=\s*"(\d{4}-\d{2}-\d{2})"/m.exec(read("wrangler.toml")) || [])[1];
+  assert(compat && /^\d{4}-\d{2}-\d{2}$/.test(supportedCompatibilityDate) && compat <= supportedCompatibilityDate,
+    `wrangler.toml compatibility_date ${compat} must not be later than ${supportedCompatibilityDate}, the newest date ` +
+    "the pinned workerd supports: past it, wrangler dev silently runs every server suite on an older date than " +
+    "production, so the tests stop describing the runtime that serves the site");
+}
 for (const file of ["assets/js/lab-ui.js", "assets/js/gamify.js"]) {
   assert(read(file).includes('document.readyState === "loading"'), `${file}: must initialize when DOMContentLoaded is delayed`);
 }

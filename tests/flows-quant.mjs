@@ -800,6 +800,14 @@ const OUT = ENGINE.runEngine(BASE);
   eq(TIME.sessionsBetween("2026-12-24", "2027-01-04"), 5, "a holiday week counts only its sessions");
   eq(TIME.closeUtcMs("2026-10-16") - Date.UTC(2026, 9, 16), 20 * 3600000, "16:00 New York is 20:00 UTC in October");
   eq(TIME.closeUtcMs("2026-12-18") - Date.UTC(2026, 11, 18), 21 * 3600000, "and 21:00 UTC in December");
+  eq([...TIME.nyseEarlyCloses(2026)].sort(), ["2026-11-27", "2026-12-24"],
+    "the 2026 early closes are the day after Thanksgiving and Christmas Eve; 3 July is itself the observed holiday");
+  eq(TIME.closeUtcMs("2026-11-27") - Date.UTC(2026, 10, 27), 18 * 3600000,
+    "an early close ends at 13:00 New York, 18:00 UTC, not at 16:00");
+  eq(TIME.yearFraction(Date.parse("2026-11-27T15:00:00Z"), "2026-11-27"), 3 * 3600 / TIME.YEAR_SECONDS,
+    "SO A SAME-DAY EXPIRY ON AN EARLY CLOSE HAS THREE HOURS LEFT AT 10:00 ET, NOT SIX: the 16:00 close overstated " +
+    "time to expiry about 2x and σ√T about 41% on the strategy, desk and ticker pages");
+  eq(TIME.closeUtcMs("2028-07-03") - Date.UTC(2028, 6, 3), 17 * 3600000, "and 3 July 2028, a Monday, closes at 13:00 EDT");
   ok(TIME.isMonthly("2026-10-16") && !TIME.isMonthly("2026-10-23"), "the third Friday is the monthly");
   eq(TIME.etDayOf(Date.parse("2026-09-22T01:30:00Z")), "2026-09-21", "half past nine in New York is still that day's session");
 }

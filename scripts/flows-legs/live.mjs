@@ -1,8 +1,10 @@
 import {
   LIVE_KEYS, LIVE_BUDGET, SECTOR_TIDES, shapeBreadth, shapeStrips, appendStripSeries, shapeVol,
   indexRows, shapeMovers, shapeLiveTape, gexRotation, shapeGexSeries, mergeGex, mergeLiveAlerts, alertsPagePlan,
-  oldestCreated, stripNames, rowsOf, failed, freshEnvelope, timeMs, isoSec, anyAnswered, BREADTH_ETFS,
+  oldestCreated, stripNames, rowsOf, failed, freshEnvelope, timeMs, isoSec, anyAnswered, BREADTH_ETFS, VERDICT, TICKER_RE,
+  upperTicker,
 } from "../../shared/flows-live.js";
+import { FOCUS_METALS, MAG7, FOCUS_FUNDS, FOCUS_MINERS } from "../../shared/flows-focus.js";
 import { phaseAt, closeMinutes, PHASE_MINUTES, LIVE_CLOCK, easternInstant } from "../../shared/flows-freshness.js";
 import { fakeLiveVendor, fakeBoards } from "./live-fake.mjs";
 
@@ -13,7 +15,12 @@ export const LIVE_WRITER = "flows-live";
 export function liveWindow(at, clock = null) {
   const p = phaseAt(at, clock);
   if (!p) return { run: false, why: "no-clock", phase: null };
-  if (!p.trading) return { run: false, why: "not-trading", phase: p };
+  if (!p.trading) {
+    const reopenable = !!clock && clock.day === p.day && clock.trading === 0 && p.minutes < VERDICT.provisionalUntilMin &&
+      phaseAt(at, null).trading;
+    return reopenable ? { run: false, wait: true, why: "provisional-closed", phase: p }
+      : { run: false, why: "not-trading", phase: p };
+  }
   const closeMin = closeMinutes(p.day, clock);
   if (p.minutes < PHASE_MINUTES.open) return { run: false, why: "before-open", phase: p };
   if (p.minutes > closeMin + LIVE_CLOCK.runAfterCloseMin) return { run: false, why: "after-close", phase: p };
@@ -45,12 +52,31 @@ const rowsOfBoard = (read) => {
 
 const tickerOf = (r) => (r && typeof r.t === "string" ? r.t.trim().toUpperCase() : null);
 
-export function boardPlan(boards) {
+export const FOCUS_FALLBACK = Object.freeze(Array.from(new Set([
+  ...FOCUS_METALS.flatMap((m) => [m.lead, ...m.tickers]), ...MAG7, ...FOCUS_FUNDS, ...FOCUS_MINERS,
+])));
+
+export function focusStripNames(payload, { max = LIVE_BUDGET.stripFocusMax } = {}) {
+  const groups = payload && typeof payload === "object" && Array.isArray(payload.groups) ? payload.groups : [];
+  const out = [];
+  for (const g of groups) {
+    if (!g || typeof g !== "object") continue;
+    for (const t of [g.lead, ...(Array.isArray(g.tickers) ? g.tickers : [])]) {
+      const s = upperTicker(t);
+      if (TICKER_RE.test(s) && !out.includes(s) && out.length < max) out.push(s);
+    }
+  }
+  return out.length ? { names: out, source: "focus" } : { names: FOCUS_FALLBACK.slice(0, max), source: "constants" };
+}
+
+export function boardPlan(boards, focusRead = null) {
   const long = rowsOfBoard(boards.long);
   const short = rowsOfBoard(boards.short);
   const watch = rowsOfBoard(boards.watch);
+  const focus = focusStripNames(focusRead && focusRead.payload && typeof focusRead.payload === "object"
+    ? focusRead.payload : null);
   const names = stripNames({
-    long: long.map(tickerOf), short: short.map(tickerOf), watch: watch.map(tickerOf),
+    long: long.map(tickerOf), short: short.map(tickerOf), watch: watch.map(tickerOf), focus: focus.names,
   });
   const ranked = [...long, ...short]
     .map((r) => ({ t: tickerOf(r), mag: Math.abs(Number(r && r.s)) }))
@@ -60,8 +86,8 @@ export function boardPlan(boards) {
   const stage = new Map();
   for (const r of long) if (tickerOf(r)) stage.set(tickerOf(r), "board:long");
   for (const r of short) if (tickerOf(r)) stage.set(tickerOf(r), "board:short");
-  return { names, ranked, deep: ranked.slice(0, 50), stage, counts: { long: long.length, short: short.length,
-    watch: watch.length } };
+  return { names, ranked, deep: ranked.slice(0, 50), stage, focus, counts: { long: long.length, short: short.length,
+    watch: watch.length, focus: focus.names.length } };
 }
 
 function firstRowKeys(raw) {
@@ -94,11 +120,11 @@ export async function runLive({
 
   const boards = {};
   for (const side of ["long", "short", "watch"]) boards[side] = await readStored("board:" + side);
-  const plan = boardPlan(boards);
+  const plan = boardPlan(boards, await readStored("focus"));
   const tick = Math.max(0, Math.floor((startedAt - open) / (15 * 60000)));
   const rotation = gexRotation({ ranked: plan.ranked, deep: plan.deep, tick });
-  log(`live: session ${session}, ${plan.names.length} strip name(s) from boards ` +
-    `${plan.counts.long}/${plan.counts.short}/${plan.counts.watch}, gex ${rotation.all.length} name(s) (tick ${tick})`);
+  log(`live: session ${session}, ${plan.names.length} strip name(s): ${plan.counts.focus} focus (${plan.focus.source}), ` +
+    `boards ${plan.counts.long}/${plan.counts.short}/${plan.counts.watch}, gex ${rotation.all.length} name(s) (tick ${tick})`);
 
   const ledger = { calls: 0, failed: 0 };
   const read = async (path, params = {}) => {
@@ -253,7 +279,8 @@ export async function runLive({
     origin: origin || "manual", startedAt: new Date(startedAt).toISOString(),
     finishedAt: new Date(finishedAt).toISOString(), durationMs: finishedAt - startedAt,
     calls: ledger.calls, failedCalls: ledger.failed, keys: bytes, errors, notes: notes.slice(0, 20),
-    names: plan.names.length, gex: rotation, alerts: { mode: merged.mode, read: merged.read, pages: pages.length },
+    names: plan.names.length, focus: { n: plan.counts.focus, source: plan.focus.source }, gex: rotation,
+    alerts: { mode: merged.mode, read: merged.read, pages: pages.length },
   };
   await put("live:heartbeat", {
     v: 1, key: "live:heartbeat", session,
@@ -265,9 +292,32 @@ export async function runLive({
   return { run, published: Object.keys(out), bytes };
 }
 
+export function passOutcome(result) {
+  if (!result || result.skipped) return { skipped: result ? result.skipped : "no-result", answered: 0, landed: 0 };
+  const run = result.run || {};
+  const answered = Math.max(0, (Number(run.calls) || 0) - (Number(run.failedCalls) || 0));
+  const landed = (result.published || []).filter((k) => k !== "live:heartbeat").length;
+  return { skipped: null, answered, landed, errored: (run.errors || []).length > 0 };
+}
+
+export function liveRunVerdict(loop) {
+  const passes = loop && Array.isArray(loop.passes) ? loop.passes : [];
+  const ran = passes.filter((p) => p && !p.skipped);
+  const dead = (p) => !!p.threw || !(p.answered > 0) || !(p.landed > 0);
+  if (ran.length && ran.every(dead)) {
+    return { failed: true, why: `every one of ${ran.length} pass(es) answered no vendor call or landed no key` };
+  }
+  if (loop && loop.exit === "budget" && !(loop.chained && loop.chained.sent)) {
+    return { failed: true, why: "the session was still open when the budget ran out and the chain dispatch was refused" };
+  }
+  return { failed: false, why: null };
+}
+
 export const LIVE_LOOP = Object.freeze({
   slotMs: 5 * 60 * 1000,
   budgetMs: 340 * 60 * 1000,
+  preOpenWaitMs: 200 * 60 * 1000,
+  openLagMs: 60 * 1000,
   workflow: "flows-live.yml",
   ref: "main",
 });
@@ -314,40 +364,61 @@ export async function runLiveLoop({ pass, chain, now = () => Date.now(), sleep =
     return clock;
   };
   await refresh();
-  const opening = window(startedAt, clock);
-  if (!opening.run) {
-    log(`live loop: nothing to do (${opening.why}) — a starter that ran outside the session exits without a pass`);
-    return { exit: "outside-window", why: opening.why, passes, chained: null, clock };
+  let opening = window(startedAt, clock);
+  let preOpenMs = 0;
+  if (opening.why === "before-open" && opening.phase && Number.isFinite(opening.phase.open)) {
+    const firstAt = opening.phase.open + LIVE_LOOP.openLagMs;
+    if (firstAt - startedAt <= LIVE_LOOP.preOpenWaitMs) {
+      preOpenMs = firstAt - startedAt;
+      log(`live loop: started ${Math.round(preOpenMs / 60000)} min before the open — waiting for it rather than ` +
+        "exiting, because a GitHub starter lands anywhere from on time to hours late");
+      await sleep(firstAt - now());
+      await refresh();
+      opening = window(now(), clock);
+    }
   }
+  if (!opening.run && !opening.wait) {
+    log(`live loop: nothing to do (${opening.why}) — a starter that ran outside the session exits without a pass`);
+    return { exit: "outside-window", why: opening.why, passes, chained: null, clock, preOpenMs };
+  }
+  let here = opening;
+  let waits = 0;
   for (;;) {
-    const index = passes.length;
-    try {
-      passes.push(await pass({ first: index === 0, index, clock }));
-    } catch (error) {
-      const threw = error instanceof Error ? error.message : String(error);
-      warn(`live loop: pass ${index + 1} threw — ${threw.slice(0, 300)}; the loop carries on to the next slot`);
-      passes.push({ errored: true, threw: threw.slice(0, 300) });
+    if (here.run) {
+      const index = passes.length;
+      try {
+        passes.push(await pass({ first: index === 0, index, clock }));
+      } catch (error) {
+        const threw = error instanceof Error ? error.message : String(error);
+        warn(`live loop: pass ${index + 1} threw — ${threw.slice(0, 300)}; the loop carries on to the next slot`);
+        passes.push({ errored: true, threw: threw.slice(0, 300) });
+      }
+    } else {
+      waits++;
+      log(`live loop: Tier 1 has closed ${here.phase.day} before ` +
+        `${Math.floor(VERDICT.provisionalUntilMin / 60)}:00 ET, when a late vendor can still reopen it — no pass, ` +
+        "waiting for the next slot");
     }
     await refresh();
     const next = nextSlot(now(), slotMs);
     const ahead = window(next, clock);
-    if (!ahead.run) {
+    if (!ahead.run && !ahead.wait) {
       log(`live loop: the session window closes before ${new Date(next).toISOString()} (${ahead.why}); ` +
         `${passes.length} pass(es)`);
-      return { exit: "window-closed", why: ahead.why, passes, chained: null, clock };
+      return { exit: "window-closed", why: ahead.why, passes, waits, chained: null, clock, preOpenMs };
     }
     if (next - startedAt > budgetMs) {
       const chained = await chain({ at: now() });
       log(`live loop: time budget spent after ${passes.length} pass(es) with the session still open — ` +
         `re-dispatched: ${chained.why}${chained.status ? " (" + chained.status + ")" : ""}`);
-      return { exit: "budget", why: "budget", passes, chained, clock };
+      return { exit: "budget", why: "budget", passes, waits, chained, clock, preOpenMs };
     }
     await sleep(next - now());
     await refresh();
-    const here = window(now(), clock);
-    if (!here.run) {
+    here = window(now(), clock);
+    if (!here.run && !here.wait) {
       log(`live loop: the session window closed while waiting (${here.why}); ${passes.length} pass(es)`);
-      return { exit: "window-closed", why: here.why, passes, chained: null, clock };
+      return { exit: "window-closed", why: here.why, passes, waits, chained: null, clock, preOpenMs };
     }
   }
 }

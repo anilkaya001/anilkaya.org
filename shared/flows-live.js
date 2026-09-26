@@ -1,5 +1,5 @@
 import {
-  FRESH_CLASSES, easternDay, sessionOpen, easternInstant, easternOffsetMinutes, PHASE_MINUTES, nextWeekdayDay,
+  FRESH_CLASSES, easternDay, sessionOpen, easternInstant, easternOffsetMinutes, PHASE_MINUTES, nextWeekdayDay, isTradingDay,
 } from "./flows-freshness.js";
 import { buildFlowAlerts, mergeAlerts } from "./flows-alerts.js";
 
@@ -13,7 +13,7 @@ export const LIVE_KEYS = Object.freeze({
   "live:market": spec("market", "worker", 16 * 1024, 2),
   "live:breadth": spec("breadth", "actions", 96 * 1024, 17),
   "live:strips": spec("breadth", "actions", 64 * 1024, 1),
-  "live:strips:series": spec("breadth", "actions", 96 * 1024, 0),
+  "live:strips:series": spec("breadth", "actions", 112 * 1024, 0),
   "live:alerts": spec("breadth", "actions", 120 * 1024, 5),
   "live:gex": spec("breadth", "actions", 64 * 1024, 14),
   "live:vol": spec("breadth", "actions", 8 * 1024, 0),
@@ -31,7 +31,8 @@ export const LIVE_BUDGET = Object.freeze({
   tier2PaceMs: 333,
   tier2MaxCalls: 48,
   tier2HeartbeatSkipMs: 8 * 60 * 1000,
-  stripMax: 120,
+  stripMax: 160,
+  stripFocusMax: 40,
   gexFixed: 6,
   gexRotating: 6,
   gexIndex: Object.freeze(["SPY", "QQQ"]),
@@ -452,6 +453,43 @@ export function tideSessionState(raws, { today, afterProbe }) {
   return days.length >= 2 && days.every((d) => d === days[0] && d < today) ? 0 : null;
 }
 
+export const VERDICT = Object.freeze({
+  provisionalUntilMin: 11 * 60,
+  agreeMs: 15 * 60 * 1000,
+  reprobeEveryMin: 15,
+  closedDaysMax: 20,
+});
+
+export function parseClosedDays(value) {
+  let list = value;
+  if (typeof value === "string") {
+    try { list = JSON.parse(value); } catch { list = null; }
+  }
+  if (!Array.isArray(list)) return [];
+  const days = Array.from(new Set(list.filter((d) => typeof d === "string" && DAY_RE.test(d)))).sort();
+  return days.slice(-VERDICT.closedDaysMax);
+}
+
+export function withClosedDay(list, day, closed = true) {
+  const held = parseClosedDays(list).filter((d) => d !== day);
+  if (closed && typeof day === "string" && DAY_RE.test(day)) held.push(day);
+  return parseClosedDays(held);
+}
+
+export function verdictPatch({ seen, trading = null, closedProbeAt = null, closedDays = [], at, today }) {
+  if (seen === 1) {
+    const patch = { trading: 1, closedProbeAt: null };
+    if (trading === 0 || parseClosedDays(closedDays).includes(today)) patch.closedDays = withClosedDay(closedDays, today, false);
+    return patch;
+  }
+  if (seen !== 0 || trading !== null) return {};
+  if (!isTradingDay(today, null)) return { trading: 0, closedProbeAt: null };
+  const first = Number(closedProbeAt);
+  if (!(Number.isFinite(first) && first > 0 && first <= at)) return { closedProbeAt: at };
+  if (at - first < VERDICT.agreeMs) return {};
+  return { trading: 0, closedDays: withClosedDay(closedDays, today, true) };
+}
+
 export function tideLastAt(raw) {
   const rows = rowsOf(raw);
   let best = NaN;
@@ -562,15 +600,20 @@ export function stripValues(row) {
   return out;
 }
 
-export function stripNames({ long = [], short = [], watch = [] } = {}, { max = LIVE_BUDGET.stripMax } = {}) {
+export const TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
+
+export const upperTicker = (t) => (typeof t === "string" ? t.trim().toUpperCase() : "");
+
+export function stripNames({ long = [], short = [], watch = [], focus = [] } = {}, { max = LIVE_BUDGET.stripMax } = {}) {
   const out = [];
   const seen = new Set();
   const add = (t) => {
-    const s = typeof t === "string" ? t.trim().toUpperCase() : "";
-    if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(s) || seen.has(s) || out.length >= max) return;
+    const s = upperTicker(t);
+    if (!TICKER_RE.test(s) || seen.has(s) || out.length >= max) return;
     seen.add(s); out.push(s);
   };
   for (const t of INDEX_NAMES) add(t);
+  for (const t of (Array.isArray(focus) ? focus : []).slice(0, LIVE_BUDGET.stripFocusMax)) add(t);
   const lists = [long, short, watch].map((l) => (Array.isArray(l) ? l : []));
   const longest = Math.max(0, ...lists.map((l) => l.length));
   for (let i = 0; i < longest; i++) for (const l of lists) if (i < l.length) add(l[i]);
@@ -730,7 +773,7 @@ export function shapeMovers(strips, { at, session, writer, n = 8 } = {}) {
   const base = {
     v: 1, key: "live:movers", session,
     fresh: freshEnvelope({ readAt: at, source: "actions", cadenceS: LIVE_KEYS["live:movers"].cadenceS, session, writer }),
-    basis: "the names in live:strips (board, watch and index), ranked by the session change; not the whole market",
+    basis: "the names in live:strips (focus, board and watch), ranked by the session change; not the whole market",
     units: { chg: "ratio", px: "USD", rvol: "ratio", net: "USD, ncp - npp" },
   };
   if (!strips || strips.status !== "ok") {

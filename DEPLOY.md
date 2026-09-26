@@ -298,6 +298,70 @@ its own cookie, its own audience claim, its own D1 tables, and its own secrets.
 Nothing about it can grant access to `/api/*`, and nothing about the Google
 OAuth path can grant access to `/flows/`.
 
+### 10.0 Owner actions, in priority order
+
+Everything else runs on its own. These five need a person, once; each says what
+it unlocks and what tells you it has lapsed.
+
+1. **`GITHUB_DISPATCH_TOKEN` — makes the Worker the clock.** Create a
+   fine-grained personal access token at GitHub → Settings → Developer settings
+   → Fine-grained tokens: resource owner `anilkaya001`, repository access *Only
+   select repositories* → `anilkaya001/anilkaya.org`, repository permission
+   **Actions: Read and write** (Metadata: Read is added by itself), and the
+   longest expiry offered. Then:
+
+   ```bash
+   ./tests/node_modules/.bin/wrangler secret put GITHUB_DISPATCH_TOKEN
+   ```
+
+   It unlocks the Worker's five-minute cron as the dispatcher: Tier 2 at
+   :01/:16/:31/:46 through the session, one re-dispatch after 45 minutes of
+   stall, and the nightly at 17:15 ET (again at 18:15 ET if it has not
+   landed). Without it Tier 2 depends on GitHub's scheduled starters, which
+   delivered about one slot in twenty on 2026-09-23 and 09-24, and the nightly
+   on its own crons (section 10.5h). Put the expiry in a calendar; when it
+   lapses the nightly turns red with
+   `HEALTH: GitHub refused the Worker's dispatch (refused:401): renew GITHUB_DISPATCH_TOKEN`.
+   Any other 4xx refusal turns it red too, with its own remedy: `refused:403`
+   (the token lacks Actions write), `refused:404` (the token cannot see this
+   repository) and `refused:422` (a bad ref or inputs). Removing the token
+   instead of renewing it records `no-token` and clears the alert.
+2. **`UW_API_KEY` in both places.** The same Unusual Whales key is a GitHub
+   repository secret (the nightly, Tier 2 and the weekly probe) and a Worker
+   secret (Tier 1, the tape, the quote, the chain and the strategy engine):
+
+   ```bash
+   ./tests/node_modules/.bin/wrangler secret put UW_API_KEY
+   ```
+
+   A rotation updates both. A Worker without it turns the nightly red with
+   `HEALTH: Tier 1's last tick failed with error:no-key`.
+3. **A WAF skip rule for the ingest route.** Cloudflare's edge sometimes
+   answers GitHub runners with a 403 on `/api/flows/ingest` (eleven on
+   2026-09-24, all absorbed by retries). Check Security → Events filtered on
+   that path; then Security → WAF → Custom rules → Create rule, expression
+   `(http.request.uri.path eq "/api/flows/ingest")`, action **Skip** (all
+   remaining custom rules, rate limiting rules and managed rules), placed
+   first. Bot Fight Mode cannot be skipped on the Free plan: if the events name
+   it, turn it off. The nightly counts every edge 403 and turns red at 24 of
+   them, or 60 s of retry budget, before the 90 s budget runs out.
+4. **The Google OAuth client.** Google deletes OAuth clients left unused for
+   about six months, and Lab sign-in is rare. Sign in to the Lab every three
+   months, or watch the Google Cloud console (APIs & Services → Credentials)
+   for inactivity notices; the client must keep the callback
+   `https://anilkaya.org/auth/callback`.
+5. **Optional: Workers Paid ($5/month).** It removes the 100,000
+   requests-a-day cliff (every static asset passes through the Worker, so the
+   cliff would take the Lab and the landing page down with Flows) and the 10 ms
+   CPU cap, which is what forces Tier 2 onto GitHub Actions. No code change is
+   needed to switch.
+
+Nothing routine is left: a weekly keepalive keeps GitHub from disabling the
+scheduled workflows after 60 days without a commit, a weekly strict probe turns
+red on vendor drift, a weekly regression run catches a fixture the calendar
+overtakes, and the nightly ends with a health gate that turns the run red,
+which emails the owner, whenever the live layer failed that session.
+
 ### 10.1 Apply the schema
 
 ```bash
@@ -331,23 +395,33 @@ throttling:
 `SESSION_SECRET` is already set and is shared with the learning session — the
 audience claim, not the secret, is what separates the two.
 
-Four secrets are needed here (section 10.5i adds only the optional
-`GITHUB_DISPATCH_TOKEN`: the live workflow authenticates with GitHub OIDC), and **one of
-them must be set in two places with the same value**: `FLOWS_INGEST_TOKEN`
+Four secrets are needed here, plus `UW_API_KEY` on the Worker and the
+`GITHUB_DISPATCH_TOKEN` of section 10.0 (the live workflow itself authenticates
+with GitHub OIDC), and **two of them must be set in two places with the same
+value**: `UW_API_KEY` (section 10.0) and `FLOWS_INGEST_TOKEN`
 authenticates the pipeline to the Worker, so
 the Worker needs it as a secret and GitHub Actions needs it as a repository
 secret. If the two differ, every publish returns 401, the job exits non-zero,
 and the board silently keeps yesterday's data.
 
 The normal flow is **mint mode**: one command mints a distinct crypto-random
-password per roster account plus a fresh pepper, derives the hash map, and
-prints everything ONCE — nothing touches disk, argv, or shell history.
+password per member plus a fresh pepper, derives the hash map, and prints
+everything ONCE. Passwords and the pepper never touch disk, argv, or shell
+history; `--out` also saves the hash map (never a password) as the members file
+that section 10.2a starts from.
 
 ```bash
 # 1. Mint the whole set: per-user passwords, a fresh pepper, and the
 #    FLOWS_CREDENTIALS JSON. Printed ONCE; keep the terminal open until both
 #    secrets are pasted below, because none of it can be recovered afterwards.
-node scripts/generate-flows-credentials.mjs --mint
+#    FIRST TIME ONLY: without --from it mints the legacy roster and creates
+#    members.json. It refuses to run once members.json exists, because that
+#    file is the only copy of the member list.
+node scripts/generate-flows-credentials.mjs --mint --out members.json
+
+#    EVERY LATER RE-MINT (rotating every password): --from mints each member
+#    the file lists, keeping end dates and epochs, and writes it back.
+node scripts/generate-flows-credentials.mjs --mint --from members.json --out members.json
 
 # 2. The ingest token is separate (it authenticates the pipeline, not people).
 INGEST_TOKEN=$(openssl rand -hex 32); printf 'FLOWS_INGEST_TOKEN: %s\n' "$INGEST_TOKEN"
@@ -372,13 +446,16 @@ Legacy shared-password mode still exists (`printf '%s\n%s\n' "$PASSWORD"
 passwords are the default for a reason: with a shared password, one person's
 leak rotates everybody.
 
-**Adding a secret does not deploy it.** The dashboard stores it as a new Worker
-version and leaves that version undeployed, so the running Worker keeps serving
-the previous one and every route behaves exactly as if the secret were never
-set — `/flows/login` answers `503 "Sign-in is not configured"` and
-`/api/flows/ingest` answers the same. Nothing in the UI flags this. After adding
-all three, go to **Deployments** and promote the new version to 100%, or run
-`wrangler deploy`.
+**`wrangler secret put` deploys; the dashboard does not.** The CLI creates a
+new Worker version carrying the secret and deploys it at once (Cloudflare's
+Secrets page says so), so no code deploy follows it. A secret added in the
+dashboard is stored as a new version that waits for its **Deploy** button; until
+then the running Worker behaves exactly as if the secret were never set —
+`/flows/login` answers `503 "Sign-in is not configured"` and
+`/api/flows/ingest` answers the same, and nothing in the UI flags it. If the
+CLI refuses because the latest version is not the deployed one (gradual
+deployments), use `wrangler versions secret put` and then
+`wrangler versions deploy`.
 
 Two checks that distinguish "deployed" from "stored but dormant", both from any
 terminal and neither revealing a value:
@@ -400,6 +477,80 @@ unset INGEST_TOKEN
 
 **The repository is public.** None of these values may ever be committed,
 echoed into CI logs, or pasted into an issue.
+
+### 10.2a Members: add, renew, end, revoke — one command, no deploy
+
+The members are the keys of `FLOWS_CREDENTIALS`. Adding, renewing, ending or
+revoking a subscriber is one `wrangler secret put FLOWS_CREDENTIALS`: no code
+change and no deploy, and nobody else is signed out.
+
+A key is a sign-in name, `^[a-z0-9_.-]{3,32}$`. Its value is either the hash
+string the mint prints, or an object:
+
+```json
+{ "alice": { "hash": "<from the script>", "until": "2026-12-31", "epoch": 1 } }
+```
+
+- `until` is the **last Eastern calendar day** of access, inclusive. From the
+  next New York midnight the member can no longer sign in, and a live session
+  stops at its next request. A lapsed subscription therefore ends by itself.
+- `epoch` (a whole number, default 0) revokes one person: raise it and that
+  member's live sessions end at their next request while everyone else stays
+  signed in. `FLOWS_SESSION_EPOCH` still signs everyone out.
+- An old plain-string value keeps working unchanged (no end date, epoch 0).
+- An entry the Worker cannot read (a bad name, an impossible date, a
+  non-integer epoch, no hash) is ignored on its own: that one person cannot sign
+  in, and everyone else is unaffected.
+- A secret that is missing or not JSON at all (one bad hand edit, such as a
+  trailing comma) fails closed: sign-in answers 503 and **every live session is
+  refused** until the secret is fixed. It never falls back to a built-in list,
+  because a fallback would quietly re-admit members whose access had ended or
+  been revoked. The script only ever writes JSON the Worker reads, so install
+  its output rather than editing the secret by hand. `FLOWS_USERNAMES` in
+  `shared/flows-auth.js` no longer grants anything: it only chooses which names
+  keep a throttle counter of their own, and can be emptied once every member is
+  in the secret.
+- Removing a key is revocation: that member's live session ends at its next
+  request.
+- Failures stay uniform: an ended, revoked, unknown or mistyped sign-in all
+  get the same 401 page. The throttle keeps a bucket per address for every
+  name outside the legacy roster, so a lockout cannot reveal whether a name is
+  a member. Guessed names never key a row: every name outside the legacy
+  roster shares one counter per address (an IPv6 address counts as its /64),
+  and each failure also deletes the counters older than the 15-minute window,
+  so `flows_login_failures` holds at most one window of failing addresses.
+
+Cloudflare never shows a secret's value again, so keep the current JSON as a
+private `members.json` (outside this public repository, and apart from the
+pepper; it holds peppered hashes, never passwords). The script edits it and
+prints the one install command:
+
+```bash
+# Add a subscriber through 2026-12-31. Stdin: the pepper (the FLOWS_PEPPER value).
+node scripts/generate-flows-credentials.mjs --add alice --until 2026-12-31 --from members.json --out members.json
+./tests/node_modules/.bin/wrangler secret put FLOWS_CREDENTIALS < members.json
+
+# Renew, end, or lift an end date (no pepper needed):
+node scripts/generate-flows-credentials.mjs --set alice --until 2027-06-30 --from members.json --out members.json
+node scripts/generate-flows-credentials.mjs --set alice --until never --from members.json --out members.json
+
+# Revoke one person's sessions, keeping the password (or give it a new
+# password with --add alice again, plus --epoch N to end the old sessions):
+node scripts/generate-flows-credentials.mjs --set alice --epoch next --from members.json --out members.json
+
+# Drop a member entirely:
+node scripts/generate-flows-credentials.mjs --remove alice --from members.json --out members.json
+```
+
+Each run prints the new password (for `--add`) on the terminal once, lists
+members whose end date has passed, and refuses a map over Cloudflare's 5 KB
+secret limit (about 80 plain entries, or about 50 in the object form; remove
+ended members to reclaim room). Without `--out`, the new JSON is the only thing
+on stdout, so it can be piped straight into `wrangler secret put`.
+
+Verify from any terminal, without revealing anything: sign in as the member
+(303 and a `flows_session` cookie), or, for an ended or revoked member, confirm
+the sign-in page comes back with 401.
 
 #### `FLOWS_SESSION_EPOCH` is a plain var, not a secret
 
@@ -424,14 +575,18 @@ These are two different operations and only one of them signs anyone out.
 
 | Goal | Action | Effect on live sessions |
 |---|---|---|
-| Change passwords | Re-mint (`--mint`) and set `FLOWS_PEPPER` + `FLOWS_CREDENTIALS` | **None** — everyone stays signed in |
+| Change passwords | Re-mint (`--mint --from members.json`) and set `FLOWS_PEPPER` + `FLOWS_CREDENTIALS` | **None** — everyone stays signed in |
+| Change one password | `--add NAME` again, then `wrangler secret put FLOWS_CREDENTIALS` | **None**, unless `--epoch` is raised too |
+| Revoke one person | `--set NAME --epoch next` (or `--remove NAME`), then `wrangler secret put FLOWS_CREDENTIALS` | That member only, at their next request |
+| End a subscription on a date | `--set NAME --until YYYY-MM-DD`, then `wrangler secret put FLOWS_CREDENTIALS` | That member only, from the next Eastern day |
 | Revoke every session | Increment `FLOWS_SESSION_EPOCH` in `[vars]` and redeploy | All sessions invalid immediately |
 
 Rotating `FLOWS_PEPPER` does **not** sign anyone out. The pepper is used for
 credential derivation only and never touches session verification, so an
 already-issued token keeps working for its full 14-day life. Changing the
-password without bumping the epoch means a departing user's existing cookie
-still opens the board for up to two weeks — bump the epoch as well.
+password without bumping an epoch means a departing user's existing cookie
+still opens the board for up to two weeks — raise that member's `epoch` (or
+remove them) as well.
 
 ### 10.2b Deploy
 
@@ -496,7 +651,10 @@ roll back — the legacy allowance in `isLearnAudience()` has regressed.
 | `board:watch` | each run | `/api/flows/board?side=watch` | overwritten daily |
 | `board:<side>:YYYY-MM-DD` | each run, then again after the chain leg | the pipeline's scorer | 126 days, then swept |
 | `record` | each run (the scorer, step 7c') | `/api/flows/record` | overwritten |
-| `card:<TICKER>` | each run, best effort | `/api/flows/card?t=` | overwritten |
+| `card:<TICKER>` | each run, best effort | `/api/flows/card?t=` | overwritten; retired after 3 sessions unrebuilt |
+| `card-x:<TICKER>`, `hist:<TICKER>` | each run (vol, flow, ownership and earnings legs) | `/api/flows/card-x?t=`, `/api/flows/hist?t=` | overwritten; retired after 3 sessions unrebuilt |
+| `focus` | each run | `/api/flows/focus` (the home page's metals, Mag 7 and NDX 10) | overwritten daily |
+| `roster` | each run, after every per-ticker key | `/api/flows/roster` (search, "Open instead", absent-card classification) | overwritten daily; also the retire ledger |
 | `meta` | each run | diagnostics | overwritten |
 
 THE DATED BOARDS ARE WHY A TRACK RECORD EXISTS AT ALL. Until they did, every
@@ -512,8 +670,10 @@ forecast horizon). Steady state is about 270 rows and +3 row writes per run
 against a 100,000/day budget **shared with the live learning app**.
 
 The prune is a `DELETE` on the ingest route, and that route accepts DELETE for
-**dated boards only**. That is a blast-radius limit rather than a privilege
-one: the same bearer can already overwrite the live board, but a sweep with an
+**dated boards, and — for the nightly token only — `card:`, `card-x:` and
+`hist:` keys**. The live token deletes nothing, and no token can delete a
+view key such as `board:long`, `universe`, `focus` or `roster`. That is a
+blast-radius limit rather than a privilege one: the same bearer can already overwrite the live board, but a sweep with an
 off-by-one in its date arithmetic that could name `board:long` would take the
 section down in a way that reads as "the pipeline has never run". A miss
 answers 404 and is an ordinary empty day — the sweep names a fixed skirt of
@@ -539,6 +699,55 @@ If that read count ever becomes the binding constraint, the escape hatch is
 additive and needs no schema change: cache each session's already-scored row
 inside the `record` blob itself and fetch only the dates not yet scored, which
 turns the steady state into ~2 reads per run.
+
+**PER-TICKER KEYS ARE RETIRED, NOT LEFT TO AGE IN PLACE.** Until 2026-09-25 a
+card was overwritten only when its ticker was built again, so a name that left
+coverage (an acquisition, an index change, a market-cap move) kept serving its
+last dossier — on 2026-09-25, 110 of 262 cards were stale, back to 2026-08-24,
+each showing an old price as its headline. The nightly now retires every
+`card:`, `card-x:` and `hist:` key that is **more than three NYSE sessions
+old** (`RETIRE_AFTER_SESSIONS`, holidays excluded) **and was not rebuilt by
+the run**. Index, fund and focus dossiers are exempt: they are rebuilt every
+night by design, and on the night one fails a dated dossier is better than
+none.
+
+The run cannot list the store, so the `roster` key doubles as the ledger:
+besides `depth` and `session` for every card it published, it carries `x`
+(the tickers whose `card-x` and `hist` landed) and `held` (older keys it knows
+exist and has not yet retired, with their session). The next run reads it,
+retires what has aged out, and carries the rest. A roster with no `held`
+(the first run after this change, or one that shed its ledger to fit its
+32 KB cap) triggers a one-time probe: every screened, guaranteed, fund and
+index ticker's `card:` and `card-x:` keys are read through the ingest route
+(and `hist:` wherever either exists), at most 2,400 reads, worker-only. If
+the prior roster cannot be read at all, nothing is retired that night. A
+refused DELETE keeps its key in `held` for the next run.
+
+The roster is read twice: once as the run starts and again at the retire
+step. Only the nightly writes it, so when the late read fails the early copy
+is used and the night still retires. Only when both fail does the night
+retire nothing and write `ledger: "unread"`.
+
+The ledger is trusted only when it is whole and current. The probe runs
+whenever the prior roster's `ledger` is anything but `carried` or `bootstrap`
+(`bootstrap-partial`, `dropped`, `unread` — the roster written on a night that
+could not read its own prior has an empty `held`, so every older key would
+otherwise be forgotten for good), and whenever its `sessionDate` is more than
+one NYSE session before tonight's (a night whose roster write failed after its
+cards landed, or a run killed between the two, leaves an older roster behind,
+and the cards of the lost night are in no ledger). The probe has its own
+20-second retry budget, separate from the 90 seconds the meta and brief
+publishes rely on, and stops after 25 failed reads; either way it marks the
+ledger `bootstrap-partial` so the next night probes again. A roster write that
+fails after the deletes logs how many keys were removed.
+
+What the probe cannot see is a key that only a LOST ledger knew and whose
+ticker is in none of tonight's candidates (the harvest of about 830 names, the
+guarantee, the funds, the indices and the Nasdaq-100 constant): a name that
+left the screen entirely in the same few nights its ledger was lost. Such a
+row stays until its ticker returns to the screen. A Worker-side sweep of
+`card:`, `card-x:` and `hist:` rows by `updated_at` would close it; it is not
+in the Worker today.
 
 ### 10.5 The data pipeline
 
@@ -584,20 +793,97 @@ is the selection's rather than the market's, and every z-score on the board
 inherits it. A pool chosen for extreme tilt makes tilt look ordinary.
 
 The pool is now a **stated universe**: the largest `UNIVERSE.enrichCount` (100)
-names in the gated screen, plus any Nasdaq-100 member the screen returned.
+names in the gated screen, plus every guaranteed name (Nasdaq-100 members, the
+Mag 7 and the focus miners) the screen returned.
 Market cap is the selection axis because it is on the screener row already, is
 stable session to session, and — the property that does the work — **is
 independent of the option flow being scored**, so selecting on it cannot bias
 the cross-section.
 
-Nasdaq-100 membership is a dated repository constant (`NDX_AS_OF`), not a
-measurement: no endpoint on this key returns index membership. It is used
-**additively** — it guarantees inclusion and never excludes — so the failure
-mode of letting the list rot is a slightly different hundred names at the cost
-of five calls, never a wrong reading. Guarantee-first with a cap would let a
-stale list push real large caps off the board, which is the one way a dated
-constant could produce a wrong number; `tests/flows-universe-contract.mjs`
+Nasdaq-100 membership is **read every night** from the vendor's QQQ holdings
+(`/api/etfs/QQQ/holdings`, the stock rows with a positive weight), one call
+before selection that the regime leg then reuses for its implied correlation
+instead of reading it again. The repository constant (`NDX_AS_OF`, `NDX_100`)
+is only the fallback: when the read fails or lists fewer than 90 weighted
+stocks, the constant is unioned with whatever the read returned and the run
+says so in its log and in `meta.warnings`; `meta.warnings` also says when the
+constant is more than 400 days old. The log names the drift between the two
+every night (members the constant lacks, and constant entries no longer
+held). Membership is used **additively** — it guarantees inclusion and never
+excludes — so the failure mode is a slightly different hundred names at the
+cost of five calls, never a wrong reading; `tests/flows-universe-contract.mjs`
 asserts the order.
+
+**Guaranteed names missing from the harvest are read by ticker.** The harvest
+asks the vendor for `min_marketcap` 1e9, so a guaranteed name whose vendor cap
+is wrong (TECK read 505 million on 2026-09-24) or an index member the harvest
+did not return is fetched with one `/api/screener/stocks?ticker=A,B,…` call.
+Focus names (the Mag 7, the NDX 10 and the miners) then skip ONLY the
+market-cap floor in `eligible()`; price, option volume and open interest
+still apply. Funds never enter this path: GDX's vendor market cap reads 52.
+
+**Coverage is chosen before the earnings gate; the gate applies to the score.**
+Until 2026-09-25 only names that passed the 12-day gate were enriched, so a
+name approaching earnings kept whatever card it last had for up to twelve days
+(MU showed 978.50 against a 1,076.60 close four sessions before its report).
+The scored pool is unchanged — the largest hundred of the GATED screen plus the
+guarantee — but every name the same rule would pick from the UNGATED screen is
+now enriched too, and carded for the session with `score: null` and
+`gate: {earnings, dte}`. It is never scored and never on a board. A gated name
+that is not a focus name is enriched only when its screener row's 30-day
+average volume times its close reaches 80% of the $50M card floor: below that
+the candle median would refuse the card anyway, and the five enrichment calls
+would buy nothing. A row with no average volume is enriched rather than
+skipped on a guess.
+
+**Focus names are built deep whatever their rank.** The Mag 7, the NDX 10 and
+the six focus miners (`shared/flows-focus.js`) get the full deep treatment —
+chain, surface, dark pool, OI, term, IV rank, the flow and vol legs, earnings
+and the options engine — in ADDITION to the fifty `DEEP_NAMES`. Their card
+depth is `focus` unless they are among the fifty, in which case it is `board`;
+a focus name that sits on a board carries `dp` like any deep row. The NDX 10
+is the ten largest distinct companies by QQQ weight (GOOG collapses onto
+GOOGL), falling back to the members ranked by market cap and naming the
+fallback in its `source`.
+
+**Funds are dossiers, not coverage.** GLD, IAU, SLV, CPER, COPX, GDX, GDXJ,
+SIL and SILJ are built through the index-dossier path (13 calls each) with
+depth `fund`, and the vol leg reads them like an index (cone, term, skew, IV
+rank), outside the stock cross-section's percentiles. The vendor has no
+earnings or insiders for ETFs, so those modules are hidden for funds exactly
+as for SPY.
+
+**The `focus` key** is one `/api/screener/stocks?ticker=` call for every focus
+ticker and fund: the metal groups, the Mag 7 and the NDX 10 with their source,
+one row per ticker in the live strip's field names and units, up to 22 closes
+where the run already holds candles, and the tickers the vendor did not
+return. It is capped at 24 KB and sheds closes, never rows. When the read
+fails, or does not return a ticker, the row is filled from what the run
+already holds — the harvest's own screener row for a stock, the market leg's
+or a second by-ticker read's row for a fund — and the payload's `backfill`
+names those tickers, when they were read and why. Only a ticker no read holds
+is `missing`, and only a payload with no row at all publishes `unavailable`
+(with the groups still listed). Fund dossiers take their spot row from the
+same chain, so one failed call cannot skip all nine: a fund absent from the
+focus read is read again by ticker, one call, only on the night it is needed.
+
+`shared/flows-focus.js` is a leaf: the focus constants (`FOCUS_METALS`,
+`MAG7`, `FOCUS_FUNDS`, `FOCUS_MINERS`) and the pure functions that need nothing
+else (`ndx10`, `ndxMembership`, `focusTickers`, `focusGroups`, `focusCloses`).
+It imports nothing, so `shared/flows-live.js` can read the constants for the
+live strips without an import cycle. The payload builder needs the strip
+fields from `shared/flows-live.js`, so it lives in the pipeline's legs,
+`scripts/flows-legs/focus.mjs` (`focusRow`, `buildFocusPayload`); the
+universe contract asserts both.
+
+**The Ask indexes every deep name.** Sixty-odd deep cards at about 2 KB of
+facts each do not fit the brief's 120 KB beside its 18 KB of market facts, so
+before any name is dropped the brief LEANS the weakest board names to their
+core readings (standing, gamma and move; `CARD_CORE_FACTS` in
+`shared/flows-ask.js`), weakest first and focus names last. The log names the
+leaned names. A name is shed whole only if every name's core readings cannot
+fit, which the pipeline contract proves does not happen for the largest deep
+set the focus era can produce (73 names modelled).
 
 **The board widened for free; the expensive legs did not.** The board is built
 from data already fetched, so publishing 93 rows instead of 11 costs nothing. A
@@ -632,27 +918,33 @@ band would have answered "show me more names" by measuring more names and
 showing the same few. One rather than zero, so a score of exactly 0 — a real
 outcome — has an unambiguous home on the watch board.
 
-The call count is derived, not estimated:
+The call count is modelled per leg from the 2026-09-24 nightly (3,071 calls
+in 692 s, 4.44 calls/s) and `callModel()` in `scripts/flows-pipeline.mjs`
+reproduces that run from its own shape to within four calls (3,075):
 
 ```
-  1  screener call, x6 market-cap bands (the endpoint caps at ~50 rows
-     and takes no page or offset, so the universe is walked by band) =  6
-     -- which puts the LIVE universe at <=300 names, not the 420 the
-     dry-run fixture carries. Anything sized against 420 is sized
-     against a fixture.
-+ 3  dating probe (AAPL, dated and undated, plus candles)            =  3
-+ 1  SPY candles, to resolve the session date                        =  1
-+ 5  per enriched name x 2 sides x enrichPerSide (30)                = 300
-+ 3  per board name (max-pain, congress, gamma surface)
-        x boardSize (25) x 2                                         = 150
-+ 11 sector ETF candles, one per SPDR sector (XLB XLC XLE XLF XLI XLK
-     XLP XLRE XLU XLV XLY), for the sector momentum panel          =  11
-+ 50 option chains, one per board name (25 x 2 sides), for the
-     implied volatility surface, the skew and term scalars, the
-     day's most-traded contracts and the aggressor ladder        =  50
-+ 2  reads of the live board, for hysteresis (Worker, not vendor)
-                                                                     = 521, plus retries
+setup (session, dating, harvest) + coverage (holdings, missing members)   10
+enrichment        5 per enriched name
+market legs       49 fixed + short/insider batches + 2 per deep name
+                  + 1 earnings history per deep or window name
+sector TRIX       11
+chains            1.4 per deep name (pages and single-expiry reads)
+card reads        7 per deep name
+vol               8 per deep, 2 per cross-section, 10 per dossier, 4 radar
+flow              12.2 per deep, 3 per cross-section, 12 alert pages
+dossiers          13 per index or fund dossier
+focus             1
+misc              67 (pulse, political, news, alerts, congress, treasury)
 ```
+
+The focus-era shape (about 165 enriched, 63 deep, 100 cross-section, 12
+dossiers, 86 earnings names) models to about 3,780 calls, 14 minutes at the
+measured rate. `CALL_BUDGET` is the model at a nominal shape with headroom
+(180 enriched, 72 deep, 110 cross-section, 12 dossiers, 95 earnings: 4,191),
+and the end of every run prints `calls: modelled N for this run's shape`. The
+`BUDGET:` warning prints only when the run spends more than 10% over the model
+for its OWN shape, so it means a real overrun (retries, paging, a vendor
+change), not a stale constant.
 
 THE CHAIN LEG IS THE LAST VENDOR SPEND AND THE FIRST THING DROPPED. It runs
 after both boards, the dated archive, the watch list, the movers band, the
@@ -749,10 +1041,23 @@ floor rising 1.5× per 429 and never falling within a run. A 5xx or a transport
 failure backs off but teaches the floor NOTHING — a server error is not a rate
 limit, and 5xx storms are when the run can least afford a permanent slowdown.
 
-The floor's ceiling (750 ms) is deliberately far below the per-call backoff
+The floor's ceiling (400 ms) is deliberately far below the per-call backoff
 ceiling (5 s). One call may sleep five seconds; every call may not, because
-`CALL_BUDGET × 5s` is 79 minutes against the 36-minute deadline — a run that
-publishes nothing at all, which is strictly worse than being rate-limited.
+`CALL_BUDGET × 5s` is about 350 minutes against the 36-minute deadline — a run
+that publishes nothing at all, which is strictly worse than being rate-limited.
+It was 750 ms until 2026-09-25, when the budget was regenerated from measured
+legs (1,613 → 4,191): at 750 ms that budget needs 52 minutes, so the relation
+below had silently stopped holding once the real run passed 2,400 calls. At
+400 ms it needs 27.9 minutes against the 30 the chain reserve leaves. The
+evidence for lowering it is the 2026-09-24 nightly's own floor verdict: "1 of
+3071 calls refused (0.0%), backoff 0.2s against 256.3s of queueing (0% as
+large). The floor is CONSERVATIVE — refusals are under 5%", with the learned
+floor never above 150 ms, so 400 ms is still more than two and a half times
+the highest floor the vendor has ever asked for. The ceiling caps only what
+the delay decays back to between refusals: a refused call still backs off to
+the 5-second per-call ceiling (the pipeline contract asserts both). If a
+future verdict reads "roughly where the vendor wants it" at 400 ms, cut calls
+before raising it.
 `rateFloorSurvivesBudget()` asserts the relation and the contract test holds it
 from both sides, so raising the ceiling without raising the deadline fails the
 build rather than the morning.
@@ -805,7 +1110,7 @@ Repository secrets required (Settings → Secrets and variables → Actions):
 
 | Secret | Required | Purpose |
 |---|---|---|
-| `UW_API_KEY` | yes | Unusual Whales API bearer token |
+| `UW_API_KEY` | yes | Unusual Whales API bearer token. The Worker holds the same key as a secret (section 10.0); rotate both. |
 | `FLOWS_INGEST_TOKEN` | yes | Bearer token authenticating the POST. Must be **byte-identical** to the Worker secret of the same name. |
 | `FLOWS_INGEST_URL` | no | Overrides the ingest endpoint. Defaults to `https://anilkaya.org/api/flows/ingest`; set it only for a staging Worker. |
 
@@ -824,8 +1129,10 @@ live `iewt` learning database. The pipeline posts to the Worker instead.
 Two failure modes to watch:
 
 - **Scheduled workflows are disabled after 60 days** of repository inactivity.
-  This is the most likely way the board silently goes stale. Check the Actions
-  tab if `generatedAt` stops advancing.
+  The `keepalive` job of `flows-pipeline.yml` prevents it: on the Monday
+  firings it calls `PUT /repos/<repo>/actions/workflows/<file>/enable` for every
+  scheduled workflow with the job's own `GITHUB_TOKEN` (`actions: write` on
+  that job alone), logs each HTTP status, and turns red if one is not 204.
 - **Unusual Whales publishes no rate limits.** The pipeline discovers the real
   limit empirically with adaptive backoff and logs the achieved rate. Read that
   number after the first few runs and size the universe against it.
@@ -1000,10 +1307,14 @@ boundary.
   `announce.status` is `"unavailable"` with the reason published, and every
   `when` is `null`. A column populated for the first fortnight and blank after
   invites the wrong inference about everything in the blank half.
-- **Sessions are counted as weekdays, holidays not removed**, and the payload
-  says so. This desk holds no holiday calendar and inventing one would be a
-  free parameter; a count right to within about one session a quarter is
-  honest, one that assumes an unpublished calendar is not.
+- **Sessions are NYSE trading days**, and the payload says so. This desk's
+  `sdte` (`sessionsToEarnings` in `shared/flows-events.js`) and its gate origin
+  (`nextTradingDay` from the pipeline) count on the computed NYSE calendar
+  (`isTradingDay` in `shared/flows-freshness.js`): weekends and scheduled
+  holidays are not sessions, early closes are. The market leg's earnings window
+  (`windowTickersOf`, through `sessionsBetween` in `shared/flows-cross.js`)
+  counts the same way. Only a closure the exchange did not schedule can make a
+  count one session long, until the day has passed.
 - **The priced move is a price, not a forecast.** `horizonMove` scales the
   name's 30-day implied volatility by the square root of sessions — no rate,
   no dividend, no distribution. It is what the option market is CHARGING for
@@ -1104,12 +1415,24 @@ not from the spec. Wave B has landed and the probes are retired; the last one,
 
 ### 10.5h The schedule, and the session each run reads
 
-The workflow fires once, at `30 21 * * 1-5` — 17:30 EDT or 16:30 EST, after the
-close under either zone. It used to fire at 05:15 Eastern, and GitHub delivered
-that firing 4.5 to 6.6 hours late every weekday from 2026-08-27 on: every run
-read the session in progress and published it under the previous session's
-date. A post-close firing delayed by as much as twelve hours still lands before
-the next open, so lateness no longer changes which tape is read.
+The workflow has four crons. `30 21 * * 1-5` and `30 22 * * 1-5` are the
+primaries: 17:30 Eastern under EDT and under EST respectively. The gate step
+admits each only in its own zone, keyed on the cron string that fired rather
+than on the wall time, so a firing GitHub delivers hours late still runs once,
+and the other zone's primary exits in its first step. `17 1 * * 2-6` and
+`47 3 * * 2-6` are backups (21:17 and 23:47 EDT, 20:17 and 22:47 EST): if the
+primary was dropped, a backup ranks the session; if it landed, the same-session
+gate makes the backup a refresh of about a minute. The primary stays at 17:30,
+not at the close, on purpose: the vendor's post-close rows need the time.
+`tests/flows-pipeline-contract.mjs` walks every weekday from 2026 to 2030,
+through every DST switch, and proves exactly one admitted cron lands between
+17:15 and 18:00 ET and every other admitted firing after 20:00 ET; it also runs
+the gate script under bash for each cron and zone. The workflow used to fire at
+05:15 Eastern, and GitHub delivered that firing 4.5 to 6.6 hours late every
+weekday from 2026-08-27 on: every run read the session in progress and
+published it under the previous session's date. A post-close firing delayed by
+as much as twelve hours still lands before the next open, so lateness no longer
+changes which tape is read.
 
 Four guards sit behind the schedule, all in `scripts/flows-pipeline.mjs`:
 
@@ -1152,8 +1475,30 @@ Four guards sit behind the schedule, all in `scripts/flows-pipeline.mjs`:
   writes any that are missing. `ARCHIVE LOST` in the log is the one line that
   means the record has no copy of a published session, and it makes the run
   exit non-zero after everything else is published, so the workflow turns red.
-  The repair is a `republish_session` dispatch; a plain re-dispatch finds the
-  session partly archived and skips it.
+  The line after it is the whole repair, with its deadline:
+  `REPAIR (before 09:30 ET on <next weekday>; ...): GitHub → Actions →
+  flows-pipeline → Run workflow → tick republish_session → Run workflow` (or
+  `gh workflow run flows-pipeline.yml -f republish_session=true`). It works only
+  until the next weekday's open: from 09:30 ET the pipeline refuses an
+  in-progress session, and after that close it ranks the new session, so the
+  lost one stays lost. A plain re-dispatch finds the session partly archived
+  and skips it. `ARCHIVE INCOMPLETE` from the same-session gate prints the same
+  repair line.
+- **The health gate.** The last thing a nightly run does is
+  `scripts/flows-legs/health.mjs`. On the evening of the session it ranked it
+  reads, through the ingest route and with the run's usual retries (so one
+  random edge 403 is not a failure), the Worker's `clock` (day, verdict, Tier 1
+  telemetry, last dispatch outcome), `live:market` and `live:heartbeat`, and
+  prints one `HEALTH:` line per failure: a clock that never rolled to the
+  session, a holiday verdict on a day the vendor printed, `tier1_why`
+  `error:<...>` (`error:no-key` names the missing Worker secret), a last tick
+  before the close, `live:market` last written before 15:50 ET (12:50 on an
+  early close), no Tier 2 pass for the session, a last pass that answered no
+  vendor call or finished more than 30 minutes before the close, any 4xx
+  dispatch refusal from GitHub, and, on every run, 24 or more edge 403s on the
+  ingest route or 60 s of retry budget spent. Any failure makes the run exit
+  non-zero after everything is published, and a red scheduled run emails the
+  owner. `FLOWS_LIVE_MODE = "off"` is a deliberate rollback, not a failure.
 
 Feeds read without a date (`news`, `pulse`, `flowalerts`, `sector:premium`)
 carry `readDay`, the Eastern day of their own `readAt`, beside `sessionDate`;
@@ -1175,15 +1520,27 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
 (the Actions side). The data contract for pages is the key registry plus the
 `X-Fresh-*` headers; `assets/js/flows-fresh.js` is the one client helper.
 
-- **The clock is the Worker cron.** `1-59/5 13-21 * * 1-5` runs Tier 1 (two
+- **The clock is the Worker cron.** `1-59/5 13-21 * * MON-FRI` runs Tier 1 (two
   vendor calls into `live:market`: the five-minute market tide and the sector-ETF
   snapshot) from the open to ten minutes past the close,
   dispatches the Actions run at :01/:16/:31/:46, and re-dispatches once when
   `live:breadth` is 45 minutes old. Every dispatch needs `GITHUB_DISPATCH_TOKEN`
-  (step 3 below); without it Tier 1 still runs and the dispatches are no-ops. `*/30 * * * *` refreshes the market snapshot,
+  (section 10.0); without it Tier 1 still runs and the dispatches are no-ops.
+  The stall is logged (`live layer stalled`, with `canDispatch`) whether or not
+  the token is set. Every dispatch outcome is kept in
+  `flows_clock.dispatch_why` (`sent`, `refused:<status>`, `unreachable` or
+  `no-token`). The weekday field is written by name because Cloudflare counts
+  weekdays from 1 = Sunday to 7 = Saturday: the numeric `1-5` this trigger
+  carried until 2026-09-26 fired Sunday to Thursday, so Tier 1 never ticked on
+  Friday 2026-09-25. `tests/flows-live-contract.mjs` refuses a numeric weekday
+  in any Worker cron. GitHub Actions schedules use standard cron, where `1-5`
+  is Monday to Friday, so the workflow files keep their numbers.
+  `*/30 * * * *` refreshes the market snapshot,
   dispatches the nightly at or after 17:15 ET (once more after 18:15 ET if meta
   is still behind), refreshes the board summary, and prunes `flows_tape` rows not
-  served for a week.
+  served for a week. It logs `nightly missing` from 21:00 ET (close + 300
+  minutes) when meta is still behind: the scheduled nightly lands about 20:00
+  ET, so the old close + 180 fired falsely every weekday evening.
 - **Tier 1 fits the Workers Free CPU cap.** Until 2026-09-24 Tier 1 also read the
   0DTE net flow and the SPY and QQQ ETF tides: three 390-row one-minute feeds,
   about 200 KB of JSON a tick. Once the session's rows filled in, a tick needed
@@ -1197,23 +1554,78 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   1 ms warm, against about 10 ms and 3.4 ms for the old five-feed tick on the same
   machine.
 - **Tier 1 reports itself in D1.** Every tick first stamps `flows_clock.tier1_at`
-  alone, then records how it ended in `tier1_why` (`written`, `no-feed-answered`,
-  `over-cap`, `not-due`, `holiday`, `off` or `error:<short>`) and, when it wrote
-  `live:market`, `tier1_ok_at`. `/api/flows/now` returns the three as `tier1`.
-  A tick killed by the CPU cap reads as `tier1_at` moving while `tier1_why` and
-  `tier1_ok_at` stay on the last tick that finished:
+  alone, then, when it did Tier 1 work, records how it ended in `tier1_why`
+  (`written`, `no-feed-answered`, `over-cap`, `holiday`, `off` or
+  `error:<short>`) and, when it wrote `live:market`, `tier1_ok_at`. A tick with
+  nothing due (before the open, after close + 10) leaves `tier1_why` alone, so
+  an `error:no-key` from the last working tick is still there when the nightly's
+  health gate reads it at 17:30 ET. `/api/flows/now` returns the three as
+  `tier1`; its `clock` carries only the day, the two verdicts and `closedDays`,
+  and the Tier 1 telemetry and `dispatchWhy` ride on the ingest `clock` key,
+  behind the pipeline's credential. A tick killed by the CPU cap reads as
+  `tier1_at` moving while `tier1_why` and `tier1_ok_at` stay on the last tick
+  that finished:
 
   ```bash
   ./tests/node_modules/.bin/wrangler d1 execute iewt --remote --command \
     "SELECT datetime(tier1_at/1000,'unixepoch') AS began, datetime(tier1_ok_at/1000,'unixepoch') AS wrote, tier1_why FROM flows_clock"
   ```
-- **Holidays and early closes are read from the tape.** The first tick at or after
-  09:45 ET at which both Tier 1 feeds still carry the same earlier session (the
-  market tide by its date, the sector-ETF snapshot by the weekday after its
-  `prev_date`) marks the day closed in `flows_clock`; one lagging feed, or two
-  that disagree on which earlier session they carry, is no verdict. A tide stuck
-  at or before 13:05 ET for 30 minutes after 13:30 marks an early close. The
-  repository still holds no calendar.
+- **One market calendar, with the tape as the last word for today.** Scheduled
+  holidays and 13:00 early closes are computed (`nyseHolidays` and
+  `nyseEarlyCloses` in `shared/flows-quant-time.js`: the exchange's rules,
+  observed-day shifts included; early closes are the day after Thanksgiving and
+  3 July and 24 December when they fall Monday to Thursday). `isTradingDay` in
+  `shared/flows-freshness.js` is the one test every consumer uses: today's tape
+  verdict when `flows_clock` is for that day and `trading` is 0 or 1, else a
+  weekday that is not a computed holiday and not in `flows_clock.closed_days`.
+  The freshness clock, the nightly's expected session, the AI brief's age, the
+  options engine's expiry close, the variation horizon and the cross-section
+  session counts all read it, so the session after a holiday is never called
+  stale and a same-day expiry on an early close has three hours left at 10:00
+  ET, not six. When the NYSE changes its rules,
+  `tests/flows-freshness-contract.mjs` holds the published schedule to compare
+  against.
+- **Anything unscheduled is read from the tape, and a closed verdict takes two
+  probes.** From 09:45 ET a tick at which both Tier 1 feeds still carry the same
+  earlier session (the market tide by its date, the sector-ETF snapshot by the
+  weekday after its `prev_date`) is a closed probe; one lagging feed, or two
+  that disagree on which earlier session they carry, is no verdict. A first
+  closed probe is provisional: it is stamped in `flows_clock.closed_probe_at`
+  and `trading` stays NULL. The day is closed (`trading = 0`) only when a second
+  probe at least 15 minutes after the first agrees, and only then does the day
+  join `flows_clock.closed_days` (a JSON array of at most 20 ISO days, newest
+  last, carried across days and served as `clock.closedDays`). Any feed that
+  carries today sets `trading = 1` at once. Until 11:00 ET a closed day is
+  re-probed every third tick (:01, :16, :31, :46, two calls each), and a
+  re-probe that sees today reopens the day, takes it out of `closed_days` and
+  writes `live:market`. The Tier 2 loop reads a closed day before 11:00 ET as a
+  wait, not an exit: it skips its passes and re-reads the clock every slot, so a
+  day the re-probe reopens gets its passes back without waiting for a GitHub
+  starter; from 11:00 ET a closed day ends the loop. On 2026-09-24 a single
+  probe that saw a lagging vendor at 09:45 could have closed a trading day for
+  good; `tests/flows-live-contract.mjs` threads a lagging vendor at 09:46 and
+  today's data at 09:51 through the clock row and ends with `trading = 1`. A
+  computed holiday is checked once: Tier 1 reads the tape in the 09:45 to 09:55
+  ET probe window of a weekday holiday, and a tape that shows the day trading
+  records `trading = 1`, so the day becomes a session and the live layer and the
+  nightly dispatch run; a tape still on the previous session records `trading =
+  0` at that first probe, since it agrees with the calendar and there is nothing
+  for a second probe to overturn, and every later tick skips the day. The day
+  does not join `closed_days`, which holds only closures the calendar did not
+  know. A wrong or outdated
+  holiday rule therefore costs the first quarter hour, never the session. A tide
+  stuck at or before 13:05 ET for 30 minutes after 13:30 marks an unscheduled
+  early close. The migration is `migrations/0012_flows_clock_verdict.sql`; the
+  Worker's first-use path adds the three columns to a table that lacks them.
+- **A nightly session is due at 21:00 ET on every session, early closes
+  included**, because the run is scheduled by wall clock: the pipeline cron and
+  the Worker's 17:15 ET dispatch do not move when the market shuts at 13:00.
+  The 2026-09-23 and 09-24 runs started at 23:48 and 23:56 UTC and wrote
+  `meta` at 00:08 UTC, 20:08 ET, so the old three-hour grace called every
+  weekday evening stale for an hour. `/api/flows/now` returns the server's
+  `expected` nightly session, and the page pill dates itself by it; the pill's
+  own weekday fallback uses the same 21:00 ET, and asks the server before it
+  ever shows a stale it computed alone.
 - **An undecided day is a trading day.** The 09:31 tick rolls `flows_clock` to
   the new day with `trading` NULL until the 09:45 probe decides it. Only an
   explicit `0` closes a day. A NULL once read as closed (`Number(null)` is `0`),
@@ -1227,6 +1639,13 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   tides, both net-flow expiry series, one screener call for every board name, the
   incremental alert union, spot gamma by rotation, the tape, movers and news —
   37 to 41 calls a pass (the budget is 48) at a 333 ms floor, `live:*` keys only.
+  The one screener call reads the three index ETFs, then every focus ticker
+  (the groups of the nightly `focus` payload, which the live role may read;
+  before that key exists, the `shared/flows-focus.js` roster: the three metal
+  groups, the Mag 7, the metal funds and the miners), then the board names,
+  160 names at most. A full session of `live:strips:series` for 160 names at
+  production magnitudes is about 100 KB, so its cap is 112 KB; `live:strips`
+  stays at 64 KB (about 29 KB for 160 names).
 - **Tier 2 sustains itself through the session, with no new secret.** The
   workflow is one long job (`timeout-minutes: 355`, under GitHub's six-hour cap)
   that runs with `FLOWS_LIVE_LOOP=1`: a pass at once, then a pass on every
@@ -1236,8 +1655,14 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   (`permissions: actions: write`; `workflow_dispatch` is the documented exception
   to that token's no-recursion rule), origin `chain`, on `main`, and exits. The
   `flows-live` concurrency group keeps it to one loop. The GitHub schedule is only
-  starters, `31 13,14 * * 1-5` for the open under EDT and EST and
-  `3 15-20 * * 1-5` in case GitHub drops a starter or a run dies; a starter
+  starters: `17 10,11,12 * * 1-5` lands before the open however late GitHub
+  delivers it, and a run that starts up to 200 minutes before 09:31 ET sleeps
+  until then instead of exiting (on Friday 2026-09-25 the first starter GitHub
+  delivered ran in the afternoon, so the morning had no Tier 2); a run started
+  earlier than that exits and leaves the open to the next starter.
+  `31,46 13,14 * * 1-5` starts the loop at the open under EDT and EST and
+  `3,37 15-20 * * 1-5` restarts it in case GitHub drops a starter or a run dies
+  (sixteen slots, because GitHub delivered about one in twenty); a starter
   that queued behind a running loop starts after the window closed and exits at
   once without a pass. The first pass of a run still skips when a heartbeat
   landed under eight minutes ago; the loop's later passes do not. A single pass
@@ -1247,13 +1672,17 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   later one it reads `clock: { day, trading, earlyClose }` with a GET of the
   ingest key `clock` under its live credential (`/api/flows/now` carries the same
   view for signed-in pages). Once Tier 1 has marked the day closed from the tape
-  (from 09:46 ET) the loop makes no further pass and never chains. An early close
-  ends the window at 13:25 ET; Tier 1 marks one only after 13:30, so the loop
-  stops at the first slot after that verdict, about 13:35 to 13:40, instead of
-  running to 16:25. A failed clock read keeps the last verdict; with none, the
-  weekday calendar applies. A pass that throws is logged and recorded as errored
+  (from 09:46 ET) the loop makes no further pass and never chains; a scheduled
+  holiday never starts one. A scheduled early close ends the window at 13:25 ET
+  from the calendar. An unscheduled one Tier 1 marks only after 13:30, so the
+  loop stops at the first slot after that verdict, about 13:35 to 13:40, instead
+  of running to 16:25. A failed clock read keeps the last verdict; with none, the
+  computed NYSE calendar applies. A pass that throws is logged and recorded as errored
   and the loop carries on to the next slot. Each pass starts with a fresh 90 s
-  publish/read retry budget, as each separate run had. The checkout keeps no
+  publish/read retry budget, as each separate run had. The job exits non-zero
+  only when every pass answered no vendor call or landed no key (or threw), or
+  when the chain dispatch was refused with the session still open; one over-cap
+  key in a pass that landed the rest stays green. The checkout keeps no
   credential (`persist-credentials: false`); only the chain dispatch holds the
   job token, through `env`.
 - **Tier 3** is on demand: `/api/flows/tape?t=` (a D1 stale-while-revalidate cache
@@ -1300,17 +1729,13 @@ Out-of-band steps before the first deploy of this layer:
    production leaves it unset. A key-set outage answers 503, which the
    pipeline retries, and every refusal is logged with its reason and the
    token's non-secret claims.
-3. Optional, and what turns the Worker into the clock: a fine-grained PAT for
-   this repository only, with Actions read and write, set as
-   `wrangler secret put GITHUB_DISPATCH_TOKEN`. Without it every dispatch is a
-   logged no-op; Tier 2 then runs on its own starters and chain, and the
-   nightly on its GitHub schedule (late).
-   Put its expiry in a calendar.
+3. `GITHUB_DISPATCH_TOKEN` and the Worker's `UW_API_KEY`: section 10.0, items 1
+   and 2.
 4. After deploy, confirm both crons are registered (`wrangler triggers` or the
    dashboard) and read `live:market` on `/api/flows/lk?k=market` at 09:36 ET.
    The tick instants in D1 prove it without dashboard access: `flows_live.read_at`
    for `live:market` is the Tier 1 cron's scheduled time, and only
-   `1-59/5 13-21 * * 1-5` produces minutes ending in 1 or 6. On 2026-09-23 the
+   `1-59/5 13-21 * * MON-FRI` produces minutes ending in 1 or 6. On 2026-09-23 the
    first Workers Builds deploy of this layer ran under the old `*/15 * * * *`
    trigger; by that evening `live:market` was stamped 19:56 and 20:06 UTC, so a
    later production deploy (`npx wrangler deploy`) had registered both crons.
@@ -1324,3 +1749,17 @@ Out-of-band steps before the first deploy of this layer:
 
 `FLOWS_LIVE_MODE = "off"` in `[vars]` is the instant rollback: no Tier 1 read and
 no dispatch; pages fall back to the nightly rows.
+
+### 10.5j The weekly monitors
+
+- **The vendor probe** (`.github/workflows/flows-probe.yml`) runs every Sunday at
+  14:23 UTC in `--strict` mode (`FLOWS_PROBE_STRICT=1`), about 140 calls. It
+  fails when an operation answers anything but 2xx, except the refusals listed
+  under `gated` in `scripts/flows-probe-list.json` (the VIX term structure's
+  403 without the volatility add-on, and politician holders' enterprise-only
+  422), and when a field listed under `reads` (the fields the code reads) did
+  not arrive. An expected refusal that starts answering is noted as a plan
+  change. A dispatched run is informational unless `strict` is ticked.
+- **The regression suite** (`regression.yml`) also runs every Monday at 06:17
+  UTC, so a fixture date that the real clock overtakes fails within a week,
+  not on the next unrelated push.
