@@ -674,6 +674,14 @@ const CARD = {
   ok(bothGone.text === null && bothGone.guard === "unreachable:capacity" && bothGone.model === llama &&
      bothGone.failure.why === "capacity" && bothGone.attempts.length === 2 && bothGone.failedOver === true,
     "when both throw, the last failure is the one reported, because it is why this question went unanswered after the failover");
+  const thenEmpty = await askModels(fake([new Error("AiError: 5007: No such model"), { response: "" }]),
+    aiChain(env), msgs, {}, null, { error() {} });
+  ok(thenEmpty.text === null && thenEmpty.model === llama && thenEmpty.failure.why === "unreachable" &&
+     thenEmpty.attempts[0].failed === "unreachable" && thenEmpty.attempts[1].failed === null &&
+     thenEmpty.attempts[1].text === null && thenEmpty.guard === "unreachable:empty" && thenEmpty.failedOver === true,
+    "THROW, THEN EMPTY: a primary that throws and a fallback that answers with no text returns the primary's failure, " +
+      "attempts in that order with the fallback's empty reply second, the fallback as the model and its stop as the guard, " +
+      "so a caller can say both halves (the ask route's afterEmpty covers only empty-then-throw)");
   const spentFirst = fake([new Error("AiError: 3036: account limit"), { response: "never" }]);
   const r36 = await askModels(spentFirst, aiChain(env), msgs, {}, null, { error() { throw new Error("no failover log"); } });
   ok(r36.guard === "unreachable:allowance" && spentFirst.calls.length === 1 && r36.failedOver === false,

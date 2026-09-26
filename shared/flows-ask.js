@@ -1349,9 +1349,10 @@ const FINGERPRINT_ENCODER = new TextEncoder();
 
 export function summaryFingerprint(picked) {
   const facts = Array.isArray(picked) ? picked : [];
-  const bytes = FINGERPRINT_ENCODER.encode(facts
+  let bytes = FINGERPRINT_ENCODER.encode(facts
     .map((f) => (f && typeof f.say === "string" ? f.say : ""))
     .join("\u001f"));
+  if (bytes.byteOffset & 3) bytes = bytes.slice();
   const w = new Uint32Array(bytes.buffer, bytes.byteOffset, bytes.length >>> 2);
   const n = w.length;
   let h = 0x811c9dc5 ^ bytes.length;
