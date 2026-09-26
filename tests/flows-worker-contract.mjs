@@ -975,7 +975,8 @@ try {
     eq(cxr.status, 200, "card-x is read by ticker, case-folded");
     eq((await cxr.json()).short.status, "quiet", "and returns the stored parts");
     eq((await get("/api/flows/card-x?t=../x", auth)).status, 400, "an invalid ticker is refused at the read");
-    eq((await (await get("/api/flows/card-x?t=NONE", auth)).json()).status, "pending", "and an unpublished one is pending");
+    eq((await (await get("/api/flows/card-x?t=NONE", auth)).json()).status, "absent",
+       "and an unpublished one is absent: pending is kept for a key tonight's run is due to write");
 
     for (const key of ["focus", "roster"]) {
       eq((await (await get("/api/flows/" + key, auth)).json()).status, "pending", `the ${key} route answers pending before its first publish`);
@@ -998,7 +999,7 @@ try {
     eq((await del("card:RETIRE")).status, 404, "and a second retire of the same key is an honest 404, which the run counts as absent");
     eq((await del("card-x:TEST")).status, 200, "card-x keys retire the same way");
     eq((await del("hist:NONE")).status, 404, "and hist keys are deletable too");
-    eq((await (await get("/api/flows/card-x?t=TEST", auth)).json()).status, "pending", "a retired key reads as unpublished");
+    eq((await (await get("/api/flows/card-x?t=TEST", auth)).json()).status, "absent", "a retired key reads as unpublished, and absent while no run is due to write it");
     for (const key of ["universe", "focus", "roster", "board:long", "card:../etc"]) {
       eq((await del(key)).status, 400, `${key} stays undeletable: only dated archives and per-ticker keys can be removed`);
     }
@@ -1149,7 +1150,8 @@ try {
 
     const missing = await get("/api/flows/card?t=ZZZZ", { headers: cookie });
     eq(missing.status, 200, "an unbuilt card is not an error");
-    eq((await missing.json()).status, "pending", "it reports pending honestly");
+    deep(await missing.json(), { ticker: "ZZZZ", status: "absent", why: "not-covered" },
+       "it reports absent, not pending: no run is due to write it, and with no vendor key the Worker cannot call it unknown");
 
     for (const bad of ["", "../../etc/passwd", "A B", "TOOLONGTICKER", "1ABC", "%2e%2e"]) {
       const res = await get("/api/flows/card?t=" + encodeURIComponent(bad), { headers: cookie });
@@ -1177,7 +1179,7 @@ try {
     eq(xRead.headers.get("cache-control"), "no-store", "the dossier is never cached");
     const xMissing = await get("/api/flows/card-x?t=ZZZZ", { headers: cookie });
     eq(xMissing.status, 200, "a dossier the run has not written is not an error");
-    eq((await xMissing.json()).status, "pending", "and it reports pending honestly");
+    eq((await xMissing.json()).status, "absent", "and it reports absent honestly");
     for (const bad of ["", "../../etc/passwd", "1ABC", "TOOLONGTICKER"]) {
       eq((await get("/api/flows/card-x?t=" + encodeURIComponent(bad), { headers: cookie })).status, 400,
          `the dossier read refuses the ticker ${JSON.stringify(bad)}`);
@@ -1217,14 +1219,111 @@ try {
       const back = await fetch(url("/api/flows/ingest?key=" + prefix + ":AAPL"),
         { headers: { Authorization: "Bearer " + INGEST_TOKEN } });
       eq(back.status, 200, `the pipeline can read ${prefix} back through the ingest route it writes through`);
-      eq((await (await get(`/api/flows/${prefix}?t=ZZZZ`, { headers: cookie })).json()).status, "pending",
-         `an unbuilt ${prefix} key reports pending honestly`);
+      eq((await (await get(`/api/flows/${prefix}?t=ZZZZ`, { headers: cookie })).json()).status, "absent",
+         `an unbuilt ${prefix} key reports absent honestly`);
       for (const bad of [prefix + ":", prefix + ":a b", prefix + ":1ABC", prefix + "x:AAPL"]) {
         eq((await putCard(bad, body)).status, 400, `ingest refuses the key ${JSON.stringify(bad)}`);
       }
       eq((await get(`/api/flows/${prefix}?t=` + encodeURIComponent("../x"), { headers: cookie })).status, 400,
          `${prefix} read refuses a malformed ticker`);
       eq((await get(`/api/flows/${prefix}?t=AAPL`)).status, 401, `an anonymous caller cannot read ${prefix}`);
+    }
+
+    const universe = { v: 1, sessionDate: "2026-09-24", generatedAt: "2026-09-24T23:57:30.290Z", n: 3, t: ["BIG", "LITE", "GATED"],
+      sectors: ["Technology", "Basic Materials"], sec: [0, 1, 0],
+      units: { px: ["usd", 100], chg: ["fraction", 10000], iv30: ["vol", 1000], ivp: ["pct100", 1], ed: ["sessions", 1] },
+      cols: { px: [107660, 7252, 11421], chg: [44, -9, null], iv30: [622, 470, 356], ivp: [19, 39, 74], ed: [4, 20, 3] },
+      pct: { iv30: [90, 50, 10] } };
+    eq((await putCard("universe", JSON.stringify(universe))).status, 200, "a columnar universe ingests");
+    eq((await putCard("events", JSON.stringify({ v: 1, sessionDate: "2026-09-24",
+      rows: [{ t: "GATED", d: "2026-09-29", dte: 5, st: "gated" }, { t: "LITE", d: "2026-10-20", dte: 26, st: "screened" }] }))).status, 200,
+       "and so does the earnings calendar that names the gated ones");
+    const lite = await get("/api/flows/card?t=lite", { headers: cookie });
+    eq(lite.status, 200, "T7: a name with no card but a row in the universe answers 200");
+    const lb = await lite.json();
+    ok(lb.status === "ok" && lb.lite === true && lb.depth === "universe" && lb.ticker === "LITE" && lb.sessionDate === "2026-09-24",
+       `with a LITE card of depth universe, dated by the universe's session (${JSON.stringify(lb).slice(0, 160)})`);
+    ok(lb.u.px === 72.52 && lb.u.chg === -0.0009 && lb.u.iv30 === 0.47 && lb.u.ivp === 39 && lb.u.ed === 20,
+       "whose columns are decoded by the universe's own units, so the page sees prices and fractions, never the stored integers");
+    ok(lb.sector === "Basic Materials" && lb.rank === 2 && lb.n === 3 && lb.pct.iv30 === 50,
+       "carrying its sector, its market-cap rank, the screen size and its percentile ranks");
+    eq(lb.why, "not-covered", "and saying why there is no card: outside tonight's coverage");
+    eq(lite.headers.get("x-fresh-class"), "nightly", "dated like the nightly payload it was read from");
+    const gated = await (await get("/api/flows/card?t=GATED", { headers: cookie })).json();
+    ok(gated.why === "gated" && gated.gate && gated.gate.earnings === "2026-09-29" && gated.gate.dte === 5 && gated.u.chg === null,
+       "a name the earnings gate removed says gated, with the report date, and an absent column stays null, never 0");
+
+    {
+      const { phaseAt, sessionOpen } = await import("../shared/flows-freshness.js");
+      const ph = phaseAt(Date.now());
+      const due = (ph.phase === "post" || ph.phase === "closed") && ph.day === ph.lastClosed;
+      const before = phaseAt(sessionOpen(ph.lastClosed)).lastClosed;
+      const word = due ? "pending" : "absent";
+      const st = async (kind, t) => (await (await get(`/api/flows/${kind}?t=${t}`, { headers: cookie })).json());
+      eq((await putCard("roster", JSON.stringify({ v: 1, sessionDate: before, depth: { PEND: "cross", LITE: "cross", IDX: "index", ETF: "fund" } }))).status, 200,
+         "the roster key ingests");
+      eq((await st("card-x", "PEND")).status, word,
+         `PENDING only while tonight's run is due to write the key: after ${ph.lastClosed}'s close, with the roster one session behind (now ${ph.phase} on ${ph.day})`);
+      eq((await st("card", "PEND")).status, word, "for the card as for its companions");
+      eq((await st("card-x", "IDX")).status, word, "an index dossier's card-x is written tonight like any other");
+      const ih = await st("hist", "IDX"), fh = await st("hist", "ETF");
+      ok(ih.status === "absent" && ih.why === "not-covered" && fh.status === "absent",
+         `but no hist is ever built for an index or a fund, so it is absent, never pending, even while the run is due (${JSON.stringify(ih)})`);
+      await putCard("roster", JSON.stringify({ v: 1, sessionDate: "2020-01-02", depth: { PEND: "cross" } }));
+      eq((await st("card-x", "PEND")).status, "absent",
+         "a roster left behind by a failed run is not a promise: its names read absent, not pending through the next day");
+      await putCard("roster", JSON.stringify({ v: 1, sessionDate: "2999-01-04", depth: { PEND: "cross" } }));
+      eq((await st("card-x", "PEND")).status, "absent", "and absent once the roster is current: nothing is coming");
+    }
+
+    await server.d1("ALTER TABLE flows_payload RENAME COLUMN payload TO payload_hidden");
+    const gone = await get("/api/flows/card?t=AAPL", { headers: cookie });
+    const goneBody = await gone.json();
+    const goneMarket = await get("/api/flows/market", { headers: cookie });
+    const goneMarketBody = await goneMarket.json();
+    const goneNeuron = await (await get("/api/flows/summary?t=AAPL", { headers: cookie })).json();
+    await server.d1("ALTER TABLE flows_payload RENAME COLUMN payload_hidden TO payload");
+    ok(gone.status === 503 && goneBody.status === "unavailable" && goneBody.reason === "store" && goneBody.error.code === "store_unreadable",
+       `OPS-14: a store that cannot be read answers 503 unavailable, never pending (${gone.status} ${JSON.stringify(goneBody)})`);
+    ok(goneMarket.status === 503 && goneMarketBody.status === "unavailable", "and the page payload routes answer the same way");
+    ok(goneNeuron.status === "unavailable" && goneNeuron.reason === "store", `and the name's reading says unavailable, not that no card was published (${JSON.stringify(goneNeuron).slice(0, 120)})`);
+    eq((await get("/api/flows/card?t=AAPL", { headers: cookie })).status, 200, "with the store back the card reads again");
+
+    {
+      const http = await import("node:http");
+      const asked = [];
+      const vendor = http.createServer((req, res) => {
+        const u = new URL(req.url, "http://stub");
+        asked.push(u.pathname + "?" + u.searchParams.toString());
+        const t = u.searchParams.get("ticker");
+        const data = u.pathname === "/api/screener/stocks" && t === "GLD" ? [{ ticker: "GLD", issue_type: "ETF", full_name: "SPDR Gold Shares",
+          sector: null, close: "391.645", prev_close: "392.88", iv30d: "0.182", iv_rank: "41.5", implied_move_perc: "0.021", put_call_ratio: "0.8",
+          date: "2026-09-24" }] : [];
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ data }));
+      });
+      await new Promise((r) => vendor.listen(0, "127.0.0.1", r));
+      const classed = await startWorker({ extraVars: [`FLOWS_INGEST_TOKEN:${INGEST_TOKEN}`, "UW_API_KEY:stub-uw-key",
+        `UW_BASE:http://127.0.0.1:${vendor.address().port}`] });
+      try {
+        const C = (p) => fetch(classed.baseURL + p, { headers: cookie, redirect: "manual" });
+        const gld = await (await C("/api/flows/card?t=GLD")).json();
+        ok(gld.status === "ok" && gld.lite === true && gld.depth === "quote" && gld.type === "ETF" && gld.nm === "SPDR Gold Shares",
+           `T7: a symbol outside the universe is classified by ONE screener read; an ETF gets a quote page (${JSON.stringify(gld).slice(0, 160)})`);
+        ok(gld.u.px === 391.645 && gld.u.prev === 392.88 && gld.u.ivRank === 41.5 && gld.u.iv30 === 0.182 && gld.sessionDate === "2026-09-24",
+           "with the screener's own values, in the strip's names and units");
+        eq((await (await C("/api/flows/card?t=ZZZZ")).json()).why, "unknown", "a symbol the vendor does not know is unknown");
+        const reads = asked.filter((a) => a.startsWith("/api/screener/stocks")).length;
+        eq(reads, 2, "one screener read per symbol");
+        await (await C("/api/flows/card?t=ZZZZ")).text();
+        eq(asked.filter((a) => a.startsWith("/api/screener/stocks")).length, reads, "and a second visit is served from the cached verdict");
+        const tape = await C("/api/flows/tape?t=ZZZZ");
+        deep(await tape.json(), { ticker: "ZZZZ", status: "absent", why: "unknown" }, "T9: the tape refuses an unknown symbol");
+        eq(asked.filter((a) => !a.startsWith("/api/screener/stocks")).length, 0, "before any vendor call");
+      } finally {
+        await classed.stop();
+        vendor.close();
+      }
     }
   }
 

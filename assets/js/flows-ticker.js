@@ -41,18 +41,26 @@
     meta: null, first: true, hb: null, pxShown: null, beats: 0,
   };
 
-  const ST = (state, reason) => ({ state, reason: reason || null });
+  const ST = (state, reason, word) => ({ state, reason: reason || null, word: word || null });
+  const NA = (reason) => ST("unavailable", reason, "Unavailable");
   const OK = ST("ok");
-  const isIndex = (card) => !!card && card.depth === "index";
+  const isIndex = (card) => !!card && (card.depth === "index" || card.depth === "fund");
+  const isDeep = (card) => !!card && (card.depth === "board" || card.depth === "focus" || !!engineOf(card));
+  const behind = (card) => isoOk(card.sessionDate) && card.sessionDate < UI.freshness.market().expected;
+  const etDay = (t) => { const d = new Date(t || NaN); return isNaN(d) ? null : d.toLocaleDateString("en-CA", { timeZone: "America/New_York" }); };
+  function joined(x, card) {
+    if (!x || typeof x !== "object") return { status: "absent" };
+    if (!isoOk(x.sessionDate) || !isoOk(card.sessionDate) || x.sessionDate === card.sessionDate) return x;
+    return x.sessionDate < card.sessionDate ? { ...x, off: x.sessionDate } : { status: "absent", off: x.sessionDate, earnings: x.earnings };
+  }
+  const vwSt = (vw) => UI.partial(vw.views.map((v) => ({ name: v.label, st: v.st })));
+  const slot = (l, v) => h("div", { class: "ft-slot" }, h("span", { class: "ft-slot-l" }, l), v);
   const offIndex = (card, sec) => isIndex(card) && sec == null;
   const stOf = (p, what) => UI.stateOf(p, what);
-  const PRE = {
-    ivSurface: "the option chain leg", skewTerm: "the option chain leg", topContracts: "the option chain leg", aggressor: "the option chain leg",
-    darkpool: "the per-name deep feeds", oiDeltas: "the per-name deep feeds", volContext: "the per-name deep feeds",
-    marketRank: "the market-wide join", variation: "the hedging stage", scoreOverlay: "the score overlay", premiumTrack: "the score overlay",
-    congress: "the congress read", calendar: "the gamma roll-off", surface: "the gamma surface", vanna: "the second-order greeks",
-    charm: "the second-order greeks", deltaExposure: "the second-order greeks", displacement: "the displacement read", pricedMove: "the priced move",
-  };
+  const PRE = {};
+  for (const [w, ks] of [["option chain leg", "ivSurface skewTerm topContracts aggressor"], ["per-name deep feeds", "darkpool oiDeltas volContext"], ["market-wide join", "marketRank"],
+    ["hedging stage", "variation"], ["score overlay", "scoreOverlay premiumTrack"], ["congress read", "congress"], ["gamma roll-off", "calendar"], ["gamma surface", "surface"],
+    ["second-order greeks", "vanna charm deltaExposure"], ["displacement read", "displacement"], ["priced move", "pricedMove"]]) for (const k of ks.split(" ")) PRE[k] = "the " + w;
   function panelSt(card, key, what) {
     const P = (card && card.panels) || {};
     if (!Object.prototype.hasOwnProperty.call(P, key)) {
@@ -62,7 +70,9 @@
     return stOf(P[key], what);
   }
   const xSt = (sec, what) => {
-    if (!STATE.cardX || STATE.cardX.status === "pending") return ST("pending", "The " + what + " is published with the next post-close run; this name's extended dossier has not landed yet.");
+    const X = STATE.cardX;
+    if (X && X.status === "pending") return ST("pending", "Publishes with tonight's run.");
+    if (!X || X.status === "absent" || X.status === "unavailable") return NA(X && X.off ? "Built for " + day(X.off) + ", not this card's session." : X && X.reason === "store" ? "The store could not be read." : "Not built for this name.");
     if (!sec || typeof sec !== "object") return ST("unavailable", "This name's dossier carries no " + what + ".");
     const why = STATE.cardX.why || {};
     const code = sec.why || sec.code || sec.reason || null;
@@ -70,7 +80,7 @@
     if (sec.status === "ok" || sec.status === "thin") return OK;
     if (sec.status === "stale") return ST("stale", sentence(said) || "The vendor dated this read to another session.");
     if (sec.status === "quiet") return ST("quiet", sentence(said) || "Read, with nothing to report.");
-    if (sec.status === "unreadable" || sec.status === "unshaped") return ST("withheld", sentence(said) || "The vendor answered with a body that is not the confirmed shape.");
+    if (sec.status === "unreadable" || sec.status === "unshaped") return ST("withheld", sentence(said) || FLOW_CODES.malformed);
     if (sec.status === "pending") return ST("pending", sentence(said) || "Not computed yet.");
     return ST("unavailable", sentence(said) || "Not measured this run.");
   };
@@ -100,7 +110,7 @@
     const P = (card && card.panels) || {};
     const pick = (p) => (p && p.status === "ok" ? num(p.spot) : null);
     const c = candlesOf(card);
-    return numOr(pick(P.pricedMove), pick(P.levels), pick(P.gamma), card.engine && card.engine.spot, c.length ? c[c.length - 1].c : null);
+    return numOr(pick(P.pricedMove), pick(P.levels), pick(P.gamma), card.engine && card.engine.spot, c.length ? c[c.length - 1].c : null, card.u && card.u.px);
   }
   function levelsOf(card) {
     const L = card.panels && card.panels.levels;
@@ -133,6 +143,8 @@
   function mets(list, o) { const el = UI.metrics(list.filter(Boolean), o); el.dataset.n = String(el.childElementCount); return el; }
   function keyOf(c, shape, label) { return UI.key(c, shape, label); }
   function dashKey(c, label) { const k = UI.key(c, "ln", label); k.firstChild.classList.add("ft-dash"); return k; }
+  const fadeG = (d, p) => s("g", { class: "fade", style: { "--delay": d + "ms" } }, p);
+  const netKeys = () => [keyOf("--up-mark", "", "Net bought"), keyOf("--down-mark", "", "Net sold")];
   function legend(keys) { return UI.legend(keys.filter(Boolean)); }
 
   function freshNote(sec) {
@@ -318,12 +330,19 @@
     const S = spotOf(card);
     const lq = liveQuote();
     if (lq) return { px: lq.price, prev: numOr(lq.prevClose, S !== null && card.sessionDate === UI.freshness.market().expected ? S : null), live: true, readAt: lq.readAt };
+    const q = quoteOf();
+    if (q && (card.lite || behind(card))) return { px: q.price, prev: num(q.prevClose), live: false, close: true, readAt: q.readAt, day: closeDay(q) };
     const ctx = (card.panels || {}).context || {};
     const c = candlesOf(card);
-    const ch = ctx.status === "ok" ? num(ctx.changePct) : null;
+    const ch = ctx.status === "ok" ? num(ctx.changePct) : card.u ? num(card.u.chg) : null;
     const prev = S !== null && ch !== null ? S / (1 + ch) : c.length > 1 ? c[c.length - 2].c : null;
     return { px: S, prev, live: false, readAt: null };
   }
+  function closeDay(q) {
+    const d = etDay(q.tapeTime), lc = STATE.lastClosed;
+    return d && STATE.phase !== "rth" && isoOk(lc) && d > lc ? lc : d;
+  }
+  function quoteOf() { const q = STATE.quote; return q && q.status === "ok" && num(q.price) !== null ? q : null; }
 
   function staleState(card) {
     const m = UI.freshness.market();
@@ -346,16 +365,27 @@
     const pm = P.pricedMove && P.pricedMove.status === "ok" ? P.pricedMove : {};
     $("ftHeroT").textContent = card.ticker;
     const sub = $("ftHeroSub");
-    sub.replaceChildren(...[card.nm || card.sector || "", card.depth === "index" ? tag("Index") : null].filter(Boolean));
+    sub.replaceChildren(...[card.nm || card.sector || "", kindTag(card)].filter(Boolean));
     renderFlags(card);
     paintPrice(card, true);
     renderChips(card, pm);
     renderHeroChart(card, pm);
   }
 
+  function kindTag(card) {
+    const k = card.depth === "fund" || /etf/i.test(card.type || "") ? "ETF" : card.depth === "index" ? "Index" : /adr/i.test(card.type || "") ? "ADR" : null;
+    return k ? tag(k) : null;
+  }
+  function staleChip(card, st) {
+    const b = UI.stateButton(st, "Session");
+    b.classList.add("ft-stale");
+    b.append(h("span", null, "Stale"), h("b", null, day(card.sessionDate)));
+    b.setAttribute("aria-label", "Stale: session " + day(card.sessionDate));
+    return b;
+  }
   function renderFlags(card) {
     const flags = $("ftHeroFlags");
-    flags.replaceChildren(...staleState(card).map((st) => UI.stateButton(st, "Session")),
+    flags.replaceChildren(...staleState(card).map((st, i) => (i === 0 && behind(card) ? staleChip(card, st) : UI.stateButton(st, "Session"))),
       info("this name", () => ({
         title: card.ticker + (card.nm ? SEP + card.nm : ""), asOf: "Session " + card.sessionDate,
         lead: "The dossier the post-close pipeline published for this name; during the session only price is re-read live.",
@@ -392,6 +422,13 @@
           facts: [["Last", F.px(q.price)], ["Previous close", F.px(q.prevClose)], ["Session open", F.px(q.open)], ["High", F.px(q.high)], ["Low", F.px(q.low)], ["Tape time", q.tapeTime ? F.time(q.tapeTime) : null], ["Card close", F.px(S)]] })));
       return;
     }
+    if (pp.close) {
+      last.hidden = false;
+      last.append(glyph("closed"), h("span", null, "Close"), pp.day ? h("b", null, day(pp.day)) : "",
+        info("the close", () => ({ title: "Close", asOf: F.time(pp.readAt), lead: "The vendor's last price. Every other figure on this page is from the session of " + card.sessionDate + ".",
+          facts: [["Last", F.px(q.price)], ["Previous close", F.px(q.prevClose)], ["Card close", F.px(S)]] })));
+      return;
+    }
     const src = q || rp;
     if (!src || S === null) { last.hidden = true; return; }
     const lastPx = q ? q.price : rp.px;
@@ -411,7 +448,9 @@
     const ivr = ivRankOf(card);
     const im = num(pm.impliedMove);
     const cx = STATE.cardX && STATE.cardX.gex && STATE.cardX.gex.status === "ok" ? STATE.cardX.gex : null;
+    const gate = score === null && card.gate && isoOk(card.gate.earnings) ? card.gate : null;
     const chipList = [
+      gate ? UI.gaugeChip({ icon: "cal", color: "--lvl-flip", value: day(gate.earnings), label: "Earnings", info: () => ({ title: "Earnings gate", lead: card.ticker + " reports " + gate.earnings + ", inside the earnings gate, so this session carries no score." }) }) :
       isIndex(card) && score === null ? null : UI.gaugeChip({ diverging: score, value: score === null ? chipDash("unavailable") : F.signed(score), label: "Score", tone: tone(score),
         info: () => ({ title: "Options score", lead: score === null ? "No score was published on this card." : card.ticker + " scores " + F.signed(score) + " of ±100 this session, with conviction " + (num(card.conviction) === null ? DASH : card.conviction) + " of 100.",
           facts: famFacts(card), notes: ["The score is a weighted sum of signed family readings; conviction gates it by agreement, coverage and persistence."] }) }),
@@ -535,7 +574,7 @@
         mark(eg, "dia", ex, top - 8, cssVar("--lvl-flip"), 3.4);
         s("text", { x: ex, y: top - 15, text: e.label, "text-anchor": "middle", class: "tx-1 tx-b" }, eg);
       }
-      const lvG = s("g", { class: "fade", style: { "--delay": "600ms" } }, svg);
+      const lvG = fadeG(600, svg);
       for (const l of lv) s("line", { x1: xNow, x2: xf(Hs), y1: y(l.px), y2: y(l.px), stroke: cssVar(C.LEVELS[l.kind].color), "stroke-width": 1, "stroke-opacity": 0.75 }, lvG);
       s("path", { d: C.pathOf(pts), class: "ln draw", stroke: lineC, pathLength: 1 }, svg);
       if (o.live) s("circle", { cx: xNow, cy: y(S), r: 4, fill: lineC, class: "pulse" }, svg);
@@ -544,7 +583,7 @@
       if (band) tags.push({ y: y(o.hi), y0: y(o.hi), text: F.px(o.hi), kind: "band" }, { y: y(o.lo), y0: y(o.lo), text: F.px(o.lo), kind: "band" });
       for (const l of lv) tags.push({ y: y(l.px), y0: y(l.px), text: F.px(l.px), kind: l.kind });
       spreadTags(tags, 17, top, plotB);
-      const tg = s("g", { class: "fade", style: { "--delay": "700ms" } }, svg);
+      const tg = fadeG(700, svg);
       const tx = plotW + 8;
       for (const t of tags) {
         if (Math.abs(t.y - t.y0) > 2) s("path", { d: "M" + fx1(xf(Hs) + 3) + " " + fx1(t.y0) + "L" + fx1(tx - 3) + " " + fx1(t.y), stroke: cssVar("--label-4"), "stroke-width": 1, fill: "none" }, tg);
@@ -642,8 +681,7 @@
   }
 
   function paintFreshness(card) {
-    UI.freshness({ sessionDate: card.sessionDate, generatedAt: card.generatedAt, source: "card" });
-    for (const [k, v] of [["card-x", STATE.cardX], ["hist", STATE.hist]]) if (v && isoOk(v.sessionDate)) UI.freshness({ sessionDate: v.sessionDate, generatedAt: v.generatedAt, source: k });
+    UI.freshness({ sessionDate: card.sessionDate, generatedAt: card.generatedAt, source: "card", primary: true });
     const lq = liveQuote();
     if (lq) UI.freshness({ readAt: lq.readAt, live: true });
   }
@@ -790,18 +828,18 @@
       h("ul", { class: "ft-legs", "aria-label": "Legs" }, (st.legs || []).map(legRow)),
       chartHost,
       h("div", { class: "ft-slots" },
-        h("div", { class: "ft-slot" }, h("span", { class: "ft-slot-l" }, "PoP"),
+        slot("PoP",
           h("span", { class: "ft-slot-v", "aria-label": "Chance of profit " + (num(pr.popQ) === null ? "not published" : ratioP(pr.popQ)) + " implied, " + (num(pr.popP) === null ? "not published" : ratioP(pr.popP)) + " real world" },
             h("i", { class: "ft-k is-q", "aria-hidden": "true" }), num(pr.popQ) === null ? UI.dash(noFig("chance of profit on the smile"), "PoP implied") : ratioP(pr.popQ),
             h("i", { class: "ft-k is-p", "aria-hidden": "true" }), num(pr.popP) === null ? UI.dash(noFig("real-world chance of profit"), "PoP real world") : ratioP(pr.popP))),
-        h("div", { class: "ft-slot" }, h("span", { class: "ft-slot-l" }, "EV"),
+        slot("EV",
           h("span", { class: "ft-slot-v", "data-tone": evP === null ? "silent" : tone(evP), "aria-label": evP === null ? null : "Expected P&L in the real world " + (evP > 0 ? "+" : "") + usd0(evP) },
             h("i", { class: "ft-k is-p", "aria-hidden": "true" }), evP === null ? UI.dash(noFig("real-world expected P&L"), "EV") : (evP > 0 ? "+" : "") + usd0(evP))),
-        h("div", { class: "ft-slot" }, h("span", { class: "ft-slot-l" }, "Risk"),
+        slot("Risk",
           h("span", { class: "ft-slot-v", "data-tone": !st.lossUnbounded && num(st.maxLoss) === null ? "silent" : null }, st.lossUnbounded ? "Unbounded" : num(st.maxLoss) === null ? UI.dash(noFig("maximum loss"), "Risk") : usd0(st.maxLoss)))));
     const fmtPl = (v) => (v > 0 ? "+" : "") + usd0(v);
     requestAnimationFrame(() => {
-      if (!pay || pay.points.length < 2) { chartHost.append(UI.silent(ST("pending", "The engine published no expiry curve for this structure."), "Payoff", 96)); return; }
+      if (!pay || pay.points.length < 2) { chartHost.append(UI.silent(NA("The engine published no expiry curve for this structure."), "Payoff", 96)); return; }
       C.payoff(chartHost, { points: pay.points, projected: pay.projected, spot: S, breakevens: st.breakevens || [], height: 92, format: fmtPl,
         maxLabel: st.profitUnbounded ? "∞" : num(st.maxProfit) !== null ? fmtPl(st.maxProfit) : null,
         minLabel: st.lossUnbounded ? MINUS + "∞" : num(st.maxLoss) !== null ? fmtPl(st.maxLoss) : null, label: famWord(st.family) + " P&L at expiry" });
@@ -848,7 +886,7 @@
         ["Robustness", (idea.robustnessWord || "") + (num(idea.robustness) !== null ? " (" + idea.robustness + " of 3)" : "")], ["Rests on", (idea.restsOn || []).map((k) => featureTitle(k)).join(SEP)],
         ["Source", idea.fromState ? "the implied-state engine" : "the model"]],
       notes: ["Strikes, prices, breakevens, probability of profit and expected value come from the structure engine, which this card does not carry yet. The sketch is the structure's shape at expiry, not a priced position."] }));
-    const pend = ST("pending", "The structure engine has not priced this idea: this card predates it, so no strike, price or probability is claimed.");
+    const pend = NA("The engine did not price this idea, so no strike, price or probability is claimed.");
     return h("article", { class: "ft-idea is-legacy ui-enter", role: "listitem", style: { "--i": String(i + 2) }, "data-dir": tn },
       h("div", { class: "ft-idea-h" },
         h("span", { class: "ft-dir", "data-tone": tn, "aria-label": dirWord(tn) }, glyph(tn === "down" ? "down" : tn === "up" ? "up" : "flat")),
@@ -856,9 +894,9 @@
         C.payoff(null, { structure: idea.structure })),
       h("div", { class: "ft-idea-s" }, idea.fromState ? tag("Implied state", { accent: true }) : null, basis.slice(0, 3).map((b) => tag(b)), UI.robustness(num(idea.robustness) || 0, idea.robustnessWord)),
       h("div", { class: "ft-facts2" },
-        h("div", { class: "ft-slot" }, h("span", { class: "ft-slot-l" }, glyph("stop"), "Stop"), h("span", { class: "ft-slot-v" }, invV, inv.length === 1 && S ? h("small", null, " " + F.pct(inv[0] / S - 1, 1, true)) : null)),
-        h("div", { class: "ft-slot" }, h("span", { class: "ft-slot-l" }, glyph("cal"), "Horizon"), h("span", { class: "ft-slot-v" }, hz, hzD ? h("small", null, " " + hzD) : null))),
-      isIndex(card) ? null : h("div", { class: "ft-slots", "aria-label": "Pricing pending" }, ["PoP", "EV", "Risk"].map((l) => h("div", { class: "ft-slot" }, h("span", { class: "ft-slot-l" }, l), h("span", { class: "ft-slot-v", "data-tone": "silent" }, UI.dash(pend, l))))));
+        slot([glyph("stop"), "Stop"], h("span", { class: "ft-slot-v" }, invV, inv.length === 1 && S ? h("small", null, " " + F.pct(inv[0] / S - 1, 1, true)) : null)),
+        slot([glyph("cal"), "Horizon"], h("span", { class: "ft-slot-v" }, hz, hzD ? h("small", null, " " + hzD) : null))),
+      isIndex(card) || !isDeep(card) ? null : h("div", { class: "ft-slots", "aria-label": "Not priced" }, ["PoP", "EV", "Risk"].map((l) => slot(l, h("span", { class: "ft-slot-v", "data-tone": "silent" }, UI.dash(pend, l))))));
   }
 
   function stanceOf(card, neuron) {
@@ -962,9 +1000,9 @@
       entries.forEach((e, i) => row.append(e.kind === "engine" ? engineIdeaCard(e, card, i, eng) : legacyIdeaCard(e.idea, card, i)));
     } else if (eng && eng.noTrade) {
       row.append(standAside(eng));
-    } else if (!eng && !isIndex(card)) {
+    } else if (!eng && !isIndex(card) && isDeep(card)) {
       row.append(h("article", { class: "ft-idea is-silent is-wide is-bare", role: "listitem" },
-        UI.silent(ST("pending", "The options engine has not priced this name yet, and the Neuron published no idea; structures appear here once the engine prices this card."), "Ideas", 64)));
+        UI.silent(NA("The options engine did not price this card, and the Neuron published no idea."), "Ideas", 64)));
     }
     if (!row.childElementCount) return;
     row.classList.toggle("is-single", row.childElementCount === 1 && row.firstElementChild.classList.contains("is-wide"));
@@ -1071,11 +1109,11 @@
     const ideas = ideaEntries(card, STATE.neuron).filter((e) => e.kind === "engine" && e.st);
     const lead = ideas.length ? ideas[0].st : null;
     const title = "Two worlds";
-    if (!eng && isIndex(card)) return;
+    if (!eng && (isIndex(card) || !isDeep(card))) return;
     if (!eng) {
-      const st = ST("pending", "The options engine has not priced this name yet. The two distributions need its smile fit per expiry (the market's risk-neutral density) and its real-world GARCH law.");
+      const st = NA("The options engine did not price this card. The two distributions need its smile fit per expiry and its real-world GARCH law.");
       mod({ id: "m-worlds", title, span: [12, 8], st, body: [UI.silent(st, title, 260)], index: 2,
-        info: () => ({ title: "Two worlds", state: "pending", lead: st.reason }) });
+        info: () => ({ title: "Two worlds", state: st.state, lead: st.reason }) });
       return;
     }
     const { list, pick } = worldsExpiry(eng, lead);
@@ -1143,7 +1181,7 @@
           const P0 = pay.points;
           const at = (xv) => { for (let i = 1; i < P0.length; i++) if (xv <= P0[i][0]) { const a = P0[i - 1], b = P0[i]; return a[1] + (b[1] - a[1]) * (xv - a[0]) / ((b[0] - a[0]) || 1); } return P0[P0.length - 1][1]; };
           const sy = base + 8;
-          const g = s("g", { class: "fade", style: { "--delay": "700ms" } }, svg);
+          const g = fadeG(700, svg);
           let runStart = d.lo, runSign = Math.sign(at(d.lo));
           const flush = (a, b, sg) => { if (b <= a) return; s("rect", { x: x(a), y: sy, width: Math.max(1, x(b) - x(a)), height: 4, rx: 2, fill: cssVar(sg > 0 ? "--up-mark" : "--down-mark"), "fill-opacity": 0.85 }, g); };
           for (let i = 1; i <= 120; i++) {
@@ -1165,7 +1203,7 @@
       if (d.pCdf) s("path", { d: path(d.p), class: "ln draw ft-wp", stroke: pInk, "stroke-width": 1.5, pathLength: 1, style: { "--delay": "160ms" } }, svg);
       s("path", { d: path(d.q), class: "ln draw ft-wq", stroke: accent, pathLength: 1 }, svg);
       s("line", { x1: left, x2: w - right, y1: base, y2: base, class: "base" }, svg);
-      const lg = s("g", { class: "fade", style: { "--delay": "600ms" } }, svg);
+      const lg = fadeG(600, svg);
       for (const l of levelList(card)) {
         if (l.px < d.lo || l.px > d.hi) continue;
         const def = C.LEVELS[l.kind];
@@ -1542,7 +1580,7 @@
     const stB = prof ? OK : P.levels && P.levels.status === "ok" ? ST("unavailable", "This card predates the open-interest book profile, so the book cannot be drawn against spot; the flow view still reads.") : panelSt(card, "levels", "levels panel");
     const axis = histAxis(STATE.hist);
     const g1y = axis && STATE.hist.gex ? unpack(STATE.hist.gex.g, axis.length) : null;
-    const stY = g1y && g1y.some((v) => v !== null) ? OK : STATE.hist && STATE.hist.status !== "pending" ? ST("unavailable", "This name's history carries no dealer-gamma series.") : ST("pending", "The one-year gamma history lands with the next post-close run.");
+    const stY = g1y && g1y.some((v) => v !== null) ? OK : STATE.hist && STATE.hist.status === "pending" ? ST("pending", "Publishes with tonight's run.") : NA("No one-year dealer-gamma history for this name.");
     const vendorMarks = vl ? [["flip", "gamma_flip"], ["callWall", "call_wall"], ["putWall", "put_wall"]].filter(([k]) => num(vl[k]) !== null).map(([k, kind]) => ({ x: vl[k], shape: "ring", color: C.LEVELS[kind].color, row: "base", r: 4.5 })) : [];
     const ourMarks = (withFlip) => [
       withFlip && lv.gamma_flip ? { x: lv.gamma_flip.px, shape: "dia", color: "--lvl-flip", rule: true } : null,
@@ -1587,7 +1625,7 @@
       } },
     ];
     const vw = viewer("Gamma view", views);
-    const st = UI.partial(vw.views.map((v) => ({ name: v.label, st: v.st })));
+    const st = vwSt(vw);
     const dist = (k) => {
       const l = lv[k];
       if (!l || !S) return null;
@@ -1722,7 +1760,7 @@
       offsetting ? null : UI.split(parts.map((p) => ({ color: p[2], value: p[1] })), parts.map((p) => p[0] + " " + Math.round(p[1] * 100) + "%").join(", ")),
       legend(parts.map((p) => h("span", { class: "ui-key" }, h("i", { style: { "--c": cssVar(p[2]) }, "aria-hidden": "true" }), p[0], h("b", null, F.pct(p[1], 0, offsetting))))
         .concat(num(V.driftInSd) !== null ? [h("span", { class: "ui-key" }, glyph("clock"), "Drift", h("b", null, Math.abs(V.driftInSd).toFixed(2) + " SD"))] : []))) : null;
-    const st = UI.partial(vw.views.map((v) => ({ name: v.label, st: v.st })));
+    const st = vwSt(vw);
     mod({ id: "m-hedge", title: "Hedging", span: [12, 5], st: stV.state === "ok" ? st : stV, robustness: stV.state === "ok" && V.robustness ? V.robustness.r : null, seg: vw.seg, views: vw.views, index: 5, body: [
       mets([
         metric("Overnight", F.money(c1, true), { key: glyph("clock"), tone: tone(c1), sub: ch.charm && num(ch.charm.pctAdv) !== null ? F.pct(Math.abs(ch.charm.pctAdv), 1) + " of a day" : null, state: c1 === null ? silence("charm") : null }),
@@ -1780,7 +1818,7 @@
       const accent = cssVar("--accent");
       T.forEach((t, i) => {
         const cx = x(sx(t.days));
-        const g = s("g", { class: "fade", style: { "--delay": i * 50 + "ms" } }, svg);
+        const g = fadeG(i * 50, svg);
         if (num(t.min) !== null && num(t.max) !== null) s("rect", { x: cx - 1.5, y: yc(t.max), width: 3, height: Math.max(1, yc(t.min) - yc(t.max)), rx: 1.5, fill: cssVar("--fill-2") }, g);
         for (const [v, yy, d] of [[num(t.max) !== null && t.max > y1, top, 1], [num(t.min) !== null && t.min < y0, H - bot, -1]]) if (v) s("path", { d: "M" + (cx - 4) + " " + (yy + 4 * d) + "l4 " + -4 * d + "l4 " + 4 * d, class: "ft-off" }, g);
         if (num(t.q1) !== null && num(t.q3) !== null) s("rect", { x: cx - 6, y: y(t.q3), width: 12, height: Math.max(2, y(t.q1) - y(t.q3)), rx: 4, fill: cssVar("--fill-1") }, g);
@@ -1891,7 +1929,7 @@
       } },
     ];
     const vw = viewer("Volatility view", views);
-    const st = UI.partial(vw.views.map((v) => ({ name: v.label, st: v.st })));
+    const st = vwSt(vw);
     const iv30 = cone ? cone.iv30 : num(pm.iv30);
     const vrpV = vrp && vrp.exAnte ? vrp.exAnte.vrp : num(pm.vrp);
     const rr = skew ? skew.rr25 : sk ? sk.skew : null;
@@ -2019,7 +2057,7 @@
         const rows = fe.rows.filter((r) => isoOk(r.e));
         return { handle: C.diverging(host, { x: rows.map((r) => r.e), values: rows.map((r) => r.np), height: [200, 220, 240], format: moneyPx, label: card.ticker + " net premium by expiry",
           readout: (i) => [C.part(day(rows[i].e) + SEP + rows[i].dte + "d", "k"), h("b", { "data-tone": tone(rows[i].np) }, moneyPx(rows[i].np)), C.part("gross " + F.money(rows[i].gross), "k"), C.part("otm " + F.pct(rows[i].gross ? rows[i].otm / rows[i].gross : null, 0), "k")] }),
-          legend: [keyOf("--up-mark", "", "Net bought"), keyOf("--down-mark", "", "Net sold")] };
+          legend: netKeys() };
       } },
       { label: "Strikes", st: fs || ag ? OK : xSt(X.flowStrike, "flow by strike"), never: !ag && offIndex(card, X.flowStrike), name: "Flow by strike", draw: (host) => {
         if (fs) {
@@ -2028,7 +2066,7 @@
           const marks = [num(fs.centroid) !== null ? { x: fs.centroid, shape: "ring", color: "--label-1", row: "base", r: 4.5 } : null, num(fs.callWall) !== null ? { x: fs.callWall, shape: "dot", color: "--lvl-call", row: "base", r: 3.5 } : null, num(fs.putWall) !== null ? { x: fs.putWall, shape: "dot", color: "--lvl-put", row: "base", r: 3.5 } : null].filter(Boolean);
           return { handle: C.diverging(host, { x: xs, values: L.map((r) => r.np), xType: "number", spot: S, markers: marks, height: [200, 230, 250], format: moneyPx, xFormat: (v) => K(v), label: card.ticker + " net premium by strike",
             readout: (i) => [C.part("Strike", "k"), h("b", null, K(xs[i])), C.part(moneyPx(L[i].np), null, tone(L[i].np)), C.part("gross " + F.money(L[i].gross), "k")] }),
-            legend: [keyOf("--up-mark", "", "Net bought"), keyOf("--down-mark", "", "Net sold"), keyOf("--label-1", "ring", "Centroid"), keyOf("--lvl-call", "dot", "Call wall"), keyOf("--lvl-put", "dot", "Put wall")] };
+            legend: [...netKeys(), keyOf("--label-1", "ring", "Centroid"), keyOf("--lvl-call", "dot", "Call wall"), keyOf("--lvl-put", "dot", "Put wall")] };
         }
         const [lo, hi] = strikeWindow(card, S);
         const bars = ag.bars.filter((b) => num(b.k) !== null && num(b.net) !== null && b.k >= lo && b.k <= hi).sort((a, b) => a.k - b.k);
@@ -2040,15 +2078,15 @@
         if (npOk) {
           return { handle: C.diverging(host, { x: axis, values: npY, height: [200, 220, 240], maxWidth: 4, endLabel: true, format: moneyPx, label: card.ticker + " net premium by session over the year",
             readout: (i) => [C.part(day(axis[i]), "k"), npY[i] === null ? C.part("no reading", "k") : h("b", { "data-tone": tone(npY[i]) }, moneyPx(npY[i]))] }),
-            legend: [keyOf("--up-mark", "", "Net bought"), keyOf("--down-mark", "", "Net sold"), keyOf("--label-4", "dot", "No reading")] };
+            legend: [...netKeys(), keyOf("--label-4", "dot", "No reading")] };
         }
         const rows = pt.rows.filter((r) => isoOk(r.d)).sort((a, b) => (a.d < b.d ? -1 : 1));
         return { handle: C.diverging(host, { x: rows.map((r) => r.d), values: rows.map((r) => num(r.p)), height: [200, 220, 240], endLabel: true, format: moneyPx, label: card.ticker + " net premium by session" }),
-          legend: [keyOf("--up-mark", "", "Net bought"), keyOf("--down-mark", "", "Net sold"), keyOf("--label-4", "dot", "No reading")] };
+          legend: [...netKeys(), keyOf("--label-4", "dot", "No reading")] };
       } },
     ];
     const vw = viewer("Flow view", views);
-    const st = UI.partial(vw.views.map((v) => ({ name: v.label, st: v.st })));
+    const st = vwSt(vw);
     const net = tp ? tp.net[tp.net.length - 1] : path ? path.netPremium : null;
     const nd = tp && Array.isArray(tp.nd) ? tp.nd[tp.nd.length - 1] : path ? path.netDelta : null;
     const nope = X.nope && X.nope.status === "ok" ? X.nope : null;
@@ -2089,7 +2127,7 @@
 
   function buildPositioning(card) {
     const X = STATE.cardX || {};
-    if (offIndex(card, X.short) && offIndex(card, X.insiders)) return;
+    if (offIndex(card, X.short) && (isIndex(card) || offIndex(card, X.insiders))) return;
     const sh = X.short && X.short.status === "ok" ? X.short : null;
     const si = sh && sh.interest && num(sh.interest.si) !== null ? sh.interest : null;
     const bo = sh && sh.borrow && sh.borrow.status === "ok" ? sh.borrow : null;
@@ -2109,19 +2147,19 @@
       { label: "Borrow", st: boPath.length > 1 ? OK : sh && sh.borrow ? xSt(sh.borrow, "borrow read") : stShort, name: "Borrow fee", draw: (host) => ({
         handle: C.line(host, { x: boPath.map((p) => p[0]), series: [{ values: boPath.map((p) => p[1]), color: "--s-orange", format: pct2 }], yFormat: pct2, height: [160, 180, 190], label: card.ticker + " borrow fee" }),
         legend: [keyOf("--s-orange", "ln", "Fee")] }) },
-      { label: "Insiders", st: dots.length ? OK : ins ? ST("quiet", "No insider purchase or sale in the last 90 days.") : xSt(X.insiders, "insider read"), name: "Insider trades", draw: (host) => ({
+      { label: "Insiders", never: isIndex(card), st: dots.length ? OK : ins ? ST("quiet", "No insider purchase or sale in the last 90 days.") : xSt(X.insiders, "insider read"), name: "Insider trades", draw: (host) => ({
         handle: C.diverging(host, { x: dots.map((d) => day(d[0])), values: dots.map((d) => d[1]), height: [160, 180, 190], format: moneyPx, label: card.ticker + " insider purchases and sales, signed dollars, one bar per filing in date order",
           readout: (i) => [C.part(day(dots[i][0]), "k"), h("b", { "data-tone": tone(dots[i][1]) }, moneyPx(dots[i][1])), C.part(dots[i][2] === "P" ? "purchase" : "sale", "k"), dots[i][4] === 1 ? C.part("10b5-1 plan", "k") : null] }),
         legend: [keyOf("--up-mark", "", "Bought"), keyOf("--down-mark", "", "Sold")] }) },
     ];
     const vw = viewer("Positioning view", views);
-    const st = UI.partial(vw.views.map((v) => ({ name: v.label, st: v.st })));
-    mod({ id: "m-pos", title: "Positioning", span: [6, 6], st: sh || ins ? st : UI.worst([stShort, xSt(X.insiders, "insider read")]), seg: vw.seg, views: vw.views, index: 8, body: [
+    const st = vwSt(vw);
+    mod({ id: "m-pos", title: "Positioning", span: [6, 6], st: sh || ins ? st : isIndex(card) ? stShort : UI.worst([stShort, xSt(X.insiders, "insider read")]), seg: vw.seg, views: vw.views, index: 8, body: [
       mets([
         metric("Short float", si ? F.pct(si.si, 1) : DASH, { sub: si && num(si.dtc) !== null ? si.dtc.toFixed(1) + "d to cover" : null, state: si ? (si.stale ? ST("stale", "The latest settlement (" + si.date + ") is older than 45 days.") : null) : sh ? ST("quiet", "No short-interest settlement on this name.") : stShort }),
         metric("Borrow", bo ? F.pct(bo.fee, 2) : DASH, { tone: bo && bo.htb ? "down" : null, sub: bo && num(bo.dFee5) !== null ? F.pts(bo.dFee5, 2) + " pts 5d" : null, state: bo ? null : sh && sh.borrow ? xSt(sh.borrow, "borrow read") : stShort }),
         metric("Short vol", sv ? F.pct(sv.ratio, 0) : DASH, { sub: sv && num(sv.z) !== null ? "z " + F.signed(sv.z, 1) : null, state: sv ? null : sh && sh.volume ? xSt(sh.volume, "short-volume read") : stShort }),
-        metric("Insiders 90d", insRead ? moneyPx(ins.net90) : DASH, { tone: insRead ? tone(ins.net90) : null, sub: insRead ? (ins.buyCount || 0) + " buy" + SEP + (ins.sellCount || 0) + " sell" : null,
+        isIndex(card) ? null : metric("Insiders 90d", insRead ? moneyPx(ins.net90) : DASH, { tone: insRead ? tone(ins.net90) : null, sub: insRead ? (ins.buyCount || 0) + " buy" + SEP + (ins.sellCount || 0) + " sell" : null,
           state: !ins ? xSt(X.insiders, "insider read") : insRead ? null : ST("quiet", "No insider purchase or sale in the last 90 days.") }),
       ], { min: 92 }), vw.box, vw.leg],
       info: () => ({
@@ -2169,7 +2207,7 @@
 
   function buildEvents(card) {
     const X = STATE.cardX || {};
-    if (offIndex(card, X.earnings)) return;
+    if (isIndex(card)) return;
     const E = X.earnings && (X.earnings.status === "ok" || X.earnings.status === "thin") ? X.earnings : null;
     const stE = E ? OK : xSt(X.earnings, "earnings history");
     const next = E && E.next ? E.next : null;
@@ -2178,7 +2216,7 @@
     const cols = E && Array.isArray(E.eventCols) ? E.eventCols : [];
     const ev = E && Array.isArray(E.events) ? E.events : [];
     const box = h("div", { class: "ft-cbox" });
-    mod({ id: "m-events", title: "Events", span: [12, 5], st: stE, index: 3, body: [
+    const sec = mod({ id: "m-events", title: "Events", span: [12, 5], st: stE, index: 3, body: [
       mets([
         metric("Next report", next && isoOk(next.d) ? day(next.d) : DASH, { sub: next ? (num(next.sessions) !== null ? SESSIONS(next.sessions) : "") + (next.confirmed ? "" : SEP + "est.") : null, state: next ? null : E ? ST("quiet", "No upcoming report on the calendar.") : stE }),
         metric("Implied", implied === null ? DASH : "±" + F.pct(implied, 1), { key: keyOf("--accent-ink", "ln", ""), state: implied === null ? ST("quiet", "No implied earnings move: the report is not inside the listed expiries or the next five sessions.") : null }),
@@ -2196,6 +2234,7 @@
           ["Long straddle 1d / 1w", num(E.ls1dHit) !== null ? F.pct(E.ls1dHit, 0) + " / " + F.pct(E.ls1wHit, 0) + " profitable" : null], ["Vendor cross-check", num(E.vendorRatio) !== null ? E.vendorRatio.toFixed(2) : null]] : [],
         sections: [{ title: "Rules", lines: E && E.rules ? Object.values(E.rules) : [] }, { title: "Term", lines: [term && term.eventExpiry ? "The first expiry after the report is " + term.eventExpiry + "." : null] }],
       }) });
+    if (X.off) sec.querySelector(".ui-mod-t").append(tag(day(X.off)));
     if (!E || !ev.length) box.append(UI.silent(E ? ST("quiet", "No past report with a priced move to compare against.") : stE, "Earnings history", 170));
     else eventsChart(box, card, ev, cols);
   }
@@ -2320,7 +2359,7 @@
       { label: "Shelves", st: dl ? OK : xSt(X.dpLevels, "dark-pool price levels"), never: offIndex(card, X.dpLevels), name: "Dark-pool shelves", draw: (host) => ({ handle: shelvesChart(host, card, dl), legend: [keyOf("--s-purple", "", "Top shelves"), keyOf("--label-3", "", "Dark"), keyOf("--fill-2", "", "Lit")] }) },
     ];
     const vw = viewer("Tape view", views);
-    const st = UI.partial(vw.views.map((v) => ({ name: v.label, st: v.st })));
+    const st = vwSt(vw);
     const basis = tc && tc.oiBasis ? tc.oiBasis : null;
     const basisLine = (() => {
       if (!basis) return null;
@@ -2460,6 +2499,8 @@
     for (const b of builders) {
       try { b(card); } catch (e) { console.error("flows-ticker: " + b.name + " failed", e); }
     }
+    for (const [x, ids] of [[STATE.cardX, "gamma hedge vol flow pos tape"], [STATE.hist, "gamma flow"]]) if (x.off && x.status !== "absent")
+      for (const id of ids.split(" ")) { const t = document.querySelector("#m-" + id + " .ui-mod-t"); if (t && !t.textContent.includes(day(x.off))) t.append(tag(day(x.off))); }
   }
 
   function paintAll() {
@@ -2478,9 +2519,86 @@
     convexity: "m-gamma", volatility: "m-vol", tape: "m-flow", signal: "m-signal",
   };
 
+  const LITE = [["Volatility", [["iv30", "IV 30d", "p"], ["ivp", "IV pct", "i"], ["ivRank", "IV rank", "i"], ["rv20", "RV 20d", "p"], ["vrp", "VRP", "v"], ["ts", "Term", "s"], ["im", "Move", "m"], ["dIv1w", "IV 1w", "v"]]],
+    ["Dealers", [["gexAdv", "γ / ADV", "s"], ["gOi", "γ per 1%", "$"], ["gexRatio", "γ ratio", "x"], ["dDelta", "Δ / ADV", "t"]]],
+    ["Flow", [["net", "Net premium", "$"], ["lean", "Lean", "s"], ["pcr", "P/C", "x"]]],
+    ["Trend", [["rsi", "RSI", "i"], ["adx", "ADX", "i"], ["bb", "Band", "p"], ["atr", "ATR", "p"], ["sma50", "vs 50d", "s"], ["rvol", "RVOL", "x"], ["si", "Short float", "p"]]]];
+  const liteV = (v, f) => (f === "p" ? F.pct(v, 1) : f === "s" ? F.pct(v, 1, true) : f === "t" ? F.pct(v, 2, true) : f === "v" ? volPts(v) + " pts" : f === "m" ? "±" + F.pct(v, 1) : f === "x" ? "×" + v.toFixed(2) : f === "$" ? moneyPx(v) : String(Math.round(v)));
+  const LAB = Object.fromEntries(LITE.flatMap(([, l]) => l));
+  const RANKS = ["iv30", "vrp", "ts", "gexAdv", "si"];
+
+  function liteChips(card) {
+    const u = card.u || {};
+    const ik = num(u.ivp) === null ? "ivRank" : "ivp", il = ik === "ivp" ? "IV pct" : "IV rank", iv = num(u[ik]), g = num(numOr(u.gexAdv, u.gOi)), ed = num(u.ed), gate = card.gate && isoOk(card.gate.earnings) ? card.gate : null;
+    const why = (t, lead) => () => ({ title: t, lead }), gs = g < 0 ? "short" : g > 0 ? "long" : null;
+    return [
+      UI.gaugeChip({ ring: iv === null ? null : iv / 100, color: "--s-blue", value: iv === null ? chipDash("unavailable") : String(Math.round(iv)), label: il, info: why(il, ik === "ivp" ? "Share of the past year's sessions with 30-day implied volatility below today's." : "Where 30-day implied volatility sits between its one-year low and high.") }),
+      UI.gaugeChip({ icon: "vega", color: "--s-blue", value: num(u.iv30) === null ? chipDash("unavailable") : F.pct(u.iv30, 0), label: "IV 30d", info: why("IV 30d", "Thirty-day implied volatility.") }),
+      g === null && card.depth === "quote" ? null : UI.gaugeChip({ icon: "gamma", color: gs === "short" ? "--g-short-ink" : "--g-long-ink", value: g === null ? chipDash("unavailable") : gs ? (gs === "short" ? "Short" : "Long") : "Zero", label: "Dealer γ", tone: gs,
+        info: why("Dealer gamma", g === null ? "No dealer-gamma reading." : "The sign of the vendor's dealer gamma for " + card.ticker + ".") }),
+      gate || ed !== null ? UI.gaugeChip({ icon: "cal", color: "--lvl-flip", value: gate ? day(gate.earnings) : ed + "d", label: "Earnings",
+        info: why("Earnings", gate ? card.ticker + " reports " + gate.earnings + ", inside the earnings gate." : ed + " sessions to the next report.") }) : null,
+      card.rank ? UI.gaugeChip({ icon: "levels", color: "--accent-soft", value: "#" + card.rank, label: "Size", info: why("Size", card.ticker + " is number " + card.rank + " by market cap of the " + (card.n || "") + " names screened.") }) : null,
+    ].filter(Boolean);
+  }
+
+  function liteRanks(card) {
+    const P = card.pct || {}, rows = RANKS.filter((k) => num(P[k]) !== null).map((k) => [k, LAB[k]]);
+    const host = $("ftHc");
+    host.replaceChildren();
+    host.classList.add("is-ranks");
+    heroEl.classList.toggle("is-silent", !rows.length);
+    if (!rows.length) return;
+    host.append(h("div", { class: "ft-hc-h" }, h("b", null, "Rank in the screen"), h("span", { class: "ft-sp" }),
+      info("the ranks", () => ({ title: "Rank in the screen", lead: "Where " + card.ticker + " sits among the " + (card.n || "") + " names the nightly run screened; 100 is the highest reading.", facts: rows.map(([k, l]) => [l, P[k] + " of 100"]) }))),
+    h("div", { class: "ft-hc-chart ft-ranks" }, rows.map(([k, l]) => h("div", { class: "ft-meter" }, h("span", null, l),
+      h("span", { class: "ui-meter" }, h("i", { style: { "--w": clamp(P[k], 0, 100) + "%", "--c": cssVar("--s-blue") } })), h("b", null, String(P[k]))))));
+  }
+
+  function buildScreen(card) {
+    const u = card.u || {};
+    const groups = LITE.map(([g, l]) => [g, l.filter(([k]) => num(u[k]) !== null)]).filter(([, l]) => l.length);
+    if (!groups.length) return;
+    mod({ id: "m-screen", title: "Screen", span: [12, 12], index: 2,
+      body: groups.map(([g, l]) => h("div", { class: "ft-scr" }, h("h3", null, g), mets(l.map(([k, lab, f]) => metric(lab, liteV(u[k], f), { tone: /[svt$]/.test(f) ? tone(u[k]) : null })), { min: 96 }))),
+      info: () => ({ title: "Screen", asOf: card.sessionDate, lead: card.depth === "quote" ? "One read of the vendor's screener row for " + card.ticker + "." : "The nightly screen's row for " + card.ticker + ". No card was built for it this session, so this is its whole dossier.",
+        facts: [["No card because", card.why === "gated" ? "the earnings gate" : "outside tonight's coverage"]] }) });
+  }
+
+  function buildLiteFlow(card) {
+    const L = pathLegs(card);
+    if (!L || !L.d.some((v) => num(v) !== null)) return;
+    const view = h("div", { class: "ft-view" }), leg = h("div", { class: "ft-leg-row" });
+    const p = L.p[L.p.length - 1], d = L.d[L.d.length - 1];
+    mod({ id: "m-flow", title: "Flow", span: [12, 6], index: 7, body: [mets([metric("Net premium", moneyPx(p), { tone: tone(p), sub: "live" }), metric("Net delta", F.num(d, true), { tone: tone(d), sub: "live tape" })], { min: 96 }), h("div", { class: "ft-cbox" }, view), leg],
+      info: () => ({ title: "Flow", lead: "This session's live tape for " + card.ticker + ".", sections: [{ title: "Session", lines: pathNotes(card, L) }] }) });
+    const r = pathChart(view, card, L);
+    if (r.legend) leg.append(legend(r.legend));
+  }
+
+  function paintLite(card) {
+    heroEl.hidden = false;
+    heroEl.classList.remove("is-loading");
+    $("ftHeroT").textContent = card.ticker;
+    $("ftHeroSub").replaceChildren(...[card.nm || card.sector || "", kindTag(card)].filter(Boolean));
+    $("ftHeroFlags").replaceChildren(...(behind(card) ? [staleChip(card, staleState(card)[0])] : []), tag(card.depth === "quote" ? "Quote" : "Screen", { glyph: card.depth === "quote" ? "search" : "list" }),
+      info("this name", () => ({ title: card.ticker + (card.nm ? SEP + card.nm : ""), asOf: "Session " + card.sessionDate,
+        facts: [["Sector", card.sector], ["Type", card.type], ["Size", card.rank ? "#" + card.rank + " of " + card.n : null]] })));
+    paintPrice(card, true);
+    $("ftChips").replaceChildren(UI.chips(liteChips(card), "Signal"));
+    liteRanks(card);
+    gridEl.hidden = false;
+    gridEl.replaceChildren();
+    buildScreen(card);
+    if (STATE.cardX && STATE.cardX.earnings) buildEvents(card);
+    paintFreshness(card);
+    STATE.first = false;
+  }
+
   async function getJSON(url) {
     const r = await fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" } });
     if (r.status === 401) { location.replace("/flows/"); return null; }
+    if (r.status === 503) { const b = await r.json().catch(() => null); if (b && b.status) return b; }
     if (!r.ok) throw new Error("HTTP " + r.status);
     return r.json();
   }
@@ -2508,12 +2626,26 @@
     if (all.length > shown.length) return "Today’s board ranks " + NAMES(all.length) + " and this run built a card for " + shown.length + " of them, which are the rows below. A card costs vendor calls the run cannot spend on every name, so the rest are ranked without one and are not listed: such a page would have nothing on it. " + tail;
     return "All " + NAMES(all.length) + " on today’s board, every one of which carries a card. " + tail;
   }
+  const DEPTH_G = UI.depths;
+  const ROSTER_NOTE = "Every name with a dossier this session: focus names, funds and indexes first.";
+  async function rosterRows() {
+    const r = await soft(getJSON("/api/flows/roster"));
+    const d = r && r.depth && typeof r.depth === "object" ? r.depth : {};
+    const ord = Object.keys(DEPTH_G);
+    const rows = Object.keys(d).filter((t) => TICKER_RE.test(t) && DEPTH_G[d[t]]).map((t) => ({ t, depth: d[t] }));
+    return rows.length ? rows.sort((a, b) => ord.indexOf(a.depth) - ord.indexOf(b.depth) || (a.t < b.t ? -1 : 1)) : null;
+  }
+  async function namesFor() {
+    const [long, short, roster] = await Promise.all([soft(getJSON("/api/flows/board?side=long")), soft(getJSON("/api/flows/board?side=short")), rosterRows()]);
+    return { all: boardRows(long, short), roster };
+  }
 
   function showPicker(rows, note, titled) {
     pickerEl.hidden = false;
-    const list = rows.map((r, i) => UI.listRow({ href: "/flows/ticker/?t=" + encodeURIComponent(r.t), badge: r.side === "short" ? "S" : "L", badgeTone: r.side === "short" ? "down" : "up",
-      badgeLabel: r.side === "short" ? "Bearish" : "Bullish", primary: r.t, secondary: [r.sector, num(r.r) === null ? null : "#" + r.r].filter(Boolean).join(SEP),
-      signed: num(r.s) === null ? DASH : F.signed(r.s), signedValue: r.s, index: i, cols: "24px minmax(0,1fr) 56px" }));
+    const list = rows.map((r, i) => (r.depth ? UI.listRow({ href: "/flows/ticker/?t=" + encodeURIComponent(r.t), badge: glyph(DEPTH_G[r.depth][0]), badgeLabel: DEPTH_G[r.depth][1], primary: r.t, secondary: DEPTH_G[r.depth][1], index: i, cols: "24px minmax(0,1fr)" })
+      : UI.listRow({ href: "/flows/ticker/?t=" + encodeURIComponent(r.t), badge: r.side === "short" ? "S" : "L", badgeTone: r.side === "short" ? "down" : "up",
+        badgeLabel: r.side === "short" ? "Bearish" : "Bullish", primary: r.t, secondary: [r.sector, num(r.r) === null ? null : "#" + r.r].filter(Boolean).join(SEP),
+        signed: num(r.s) === null ? DASH : F.signed(r.s), signedValue: r.s, index: i, cols: "24px minmax(0,1fr) 56px" })));
     pickerEl.replaceChildren(
       h("header", { class: "ft-picker-h" }, titled ? h("h1", { class: "ui-title", id: "ftPickerT" }, "Choose a name") : h("h2", { class: "ft-picker-t", id: "ftPickerT" }, "Open instead"),
         h("span", { class: "ft-sp" }), info("these names", () => ({ title: "Names", lead: note }))),
@@ -2534,62 +2666,32 @@
     $("ftLast").hidden = true;
   }
 
-  function sayWhyAbsent(ticker, events, boardsRead) {
-    const lead = boardsRead === false ? "Neither board could be read just now, so this page cannot say whether " + ticker + " is on today's board. What follows is the funnel's own account of it. " : ticker + " is not on today's board, so no card was built for it. ";
-    const rows = events && Array.isArray(events.rows) ? events.rows : null;
-    const row = rows ? rows.find((r) => r && String(r.t).toUpperCase() === ticker) : null;
-    let tail;
-    if (row && String(row.st || "").startsWith("board:")) {
-      tail = "The funnel places it on today’s " + (row.st === "board:short" ? "bearish" : "bullish") + " board, which the board payload this page just read does not agree with — either that read failed or the two payloads are from different runs. Reload before concluding anything about this name.";
-    } else if (!rows) {
-      tail = "The earnings calendar could not be read just now, so this page cannot say which stage of the funnel it stopped at. It is not on the watch list either: that list holds only names that were scored and landed inside the dead band.";
-    } else if (row && row.st === "gated") {
-      const dte = num(row.dte);
-      tail = "It reports on " + (row.d ? String(row.d) : "a date the calendar did not publish") + (dte === null ? ", with no calendar-day count published beside it, " : ", " + dte + " calendar " + (dte === 1 ? "day" : "days") + " from " + (events.gateOrigin || "the run's own Eastern date") + ", ") +
-        "and the earnings gate removed it BEFORE the composite ran" + (num(events.gateDays) === null ? ". " : " — the gate covers day 0 to day " + events.gateDays + ". ") +
-        "So there is no score under this name at all today, not a low one. It is not on the watch list either: that list holds only names that were scored and landed inside the dead band.";
-    } else if (row) {
-      tail = "The funnel stopped it at “" + String(row.st || "an unclassified stage") + "”: it cleared the earnings gate and did not reach the board. Cards are built only for board names, so there is nothing to draw for it today.";
-    } else {
-      const win = num(events.windowDays);
-      tail = "The earnings calendar carries no row for this name, so this page cannot say which stage of the funnel it stopped at. That calendar holds only names reporting within " + (win === null ? "its own window" : win + " calendar " + (win === 1 ? "day" : "days")) + " of " + (events.gateOrigin || "the run’s own Eastern date") +
-        (events.capBound === true ? ", and it was capped before it ran out of window, so it does not reach every name even inside it" : "") + " — so its silence here is a missing row, not evidence about this name.";
-    }
-    return lead + tail;
-  }
-
   function sayStatus(text, link) {
     statusEl.replaceChildren(document.createTextNode(text));
     if (link) statusEl.append(h("a", { href: link[0] }, link[1]));
   }
 
-  async function pendingCard(ticker) {
-    const [long, short, events] = await Promise.all([soft(getJSON("/api/flows/board?side=long")), soft(getJSON("/api/flows/board?side=short")), soft(getJSON("/api/flows/events"))]);
-    const all = boardRows(long, short);
-    const rows = carded(all);
-    const me = all.find((r) => r.t === ticker);
-    let text, state = "unavailable", link = null;
-    if (me && me.card === false) {
-      text = "The board ranks " + ticker + " " + (num(me.r) === null || num(me.of) === null ? "on its " + (me.side === "short" ? "bearish" : "bullish") + " side" : me.r + " of " + me.of + " on the " + (me.side === "short" ? "bearish" : "bullish") + " side") +
-        ", and this run built no card for it. A card costs vendor calls the run spends only on the names furthest from neutral, so most of the board is scored and ranked without one. This is not a lag, and reloading will not produce a card.";
-    } else if (me) {
-      text = "The board published " + ticker + " but its card has not landed yet. Cards are published after the boards, so one can briefly lag its row.";
-      state = "pending";
-    } else {
-      text = sayWhyAbsent(ticker, events, long !== null || short !== null);
-      link = ["/flows/events/", " The earnings calendar and the whole funnel."];
-    }
-    silentHero(ticker, ST(state, text), me ? (me.side === "short" ? "Bearish board" : "Bullish board") : "");
-    sayStatus(text, link);
-    if (rows.length && !(me && me.card !== false)) showPicker(rows.filter((r) => r.t !== ticker), pickerNote(all, rows, "These are the ones you can open today."), false);
+  const WHY = {
+    unknown: ["Unknown", "No listed security answers to this symbol."], gated: ["Gated", "It reports inside the earnings gate, so this session built no card."],
+    retired: ["Retired", "Its card aged out of coverage."], "not-covered": ["Not covered", "Outside this session's coverage, and not in the nightly screen."],
+    store: ["Unavailable", "The store could not be read. Reload to try again."], pending: ["Pending", "Publishes with tonight's run."],
+  };
+  async function absentCard(ticker, card) {
+    const k = card.reason === "store" ? "store" : card.status === "pending" ? "pending" : card.why;
+    const [w, text] = WHY[k] || WHY["not-covered"];
+    silentHero(ticker, ST(k === "pending" ? "pending" : "unavailable", text, w));
+    sayStatus(w + ". " + text);
+    const { all, roster } = await namesFor();
+    const rows = (roster || carded(all)).filter((r) => r.t !== ticker);
+    if (rows.length) showPicker(rows, roster ? ROSTER_NOTE : pickerNote(all, carded(all), "These are the ones you can open today."), false);
   }
 
   async function noTicker() {
     heroEl.hidden = true;
     sayStatus("Choose a name.");
-    const [long, short] = await Promise.all([soft(getJSON("/api/flows/board?side=long")), soft(getJSON("/api/flows/board?side=short"))]);
-    const all = boardRows(long, short);
+    const { all, roster } = await namesFor();
     const rows = carded(all);
+    if (roster) { showPicker(roster, ROSTER_NOTE, true); sayStatus(""); return; }
     if (!rows.length) {
       const text = all.length ? "Today’s board ranks " + NAMES(all.length) + ", and this run built a card for none of them, so there is nothing to open here. The board itself is published." : "No board has been published yet, so there is no name to choose.";
       sayStatus(text);
@@ -2603,11 +2705,12 @@
 
   async function fetchTape(t) {
     const tape = await soft(getJSON("/api/flows/tape?t=" + encodeURIComponent(t)));
-    if (!tape || tape.status === "pending") return false;
+    if (!tape || tape.status) return false;
     const before = STATE.tape && STATE.tape.prem ? STATE.tape.prem.readAt : null;
     STATE.tape = tape;
     return !tape.prem || tape.prem.readAt !== before;
   }
+  const flowOf = (card) => (card.lite ? buildLiteFlow : buildFlow)(card);
 
   function awaitNeuron(t, card, i = 0) {
     const settle = (s) => renderVerdict(card, { ...STATE.neuron, status: s || "unavailable" });
@@ -2634,12 +2737,14 @@
 
   function startLive(t) {
     if (typeof UI.heartbeat !== "function") return;
+    const lite = !!(STATE.card && STATE.card.lite);
     STATE.hb = UI.heartbeat({
-      ticker: t, page: "ticker", nightly: ["card:" + t],
+      ticker: t, page: "ticker", nightly: lite ? [] : ["card:" + t],
       onBeat: ({ body }) => {
         STATE.phase = body && body.phase ? body.phase.phase : null;
+        STATE.lastClosed = body && body.phase ? body.phase.lastClosed : null;
         STATE.beats++;
-        if (STATE.phase === "rth" && STATE.beats % 6 === 0) fetchTape(t).then((moved) => { if (moved && STATE.card) buildFlow(STATE.card); });
+        if (STATE.phase === "rth" && STATE.beats % 6 === 0) fetchTape(t).then((moved) => { if (moved && STATE.card) flowOf(STATE.card); });
       },
       onQuote: (q) => {
         if (!STATE.card) return;
@@ -2647,14 +2752,14 @@
         STATE.quote = q && typeof q === "object" ? q : null;
         paintPrice(STATE.card, false);
         paintFreshness(STATE.card);
-        if (was !== !!liveQuote()) renderHeroChart(STATE.card, STATE.card.panels.pricedMove && STATE.card.panels.pricedMove.status === "ok" ? STATE.card.panels.pricedMove : {});
+        if (!lite && was !== !!liveQuote()) renderHeroChart(STATE.card, STATE.card.panels.pricedMove && STATE.card.panels.pricedMove.status === "ok" ? STATE.card.panels.pricedMove : {});
       },
       onChange: (changed) => {
-        if (!changed.includes("card:" + t)) return;
+        if (lite || !changed.includes("card:" + t)) return;
         Promise.all([soft(getJSON("/api/flows/card?t=" + encodeURIComponent(t))), soft(getJSON("/api/flows/summary?t=" + encodeURIComponent(t))), soft(getJSON("/api/flows/card-x?t=" + encodeURIComponent(t))), soft(getJSON("/api/flows/hist?t=" + encodeURIComponent(t)))])
           .then(([card, neuron, cx, hist]) => {
-            if (!card || card.status === "pending" || !card.panels) return;
-            STATE.card = card; STATE.neuron = neuron || STATE.neuron; STATE.cardX = cx || STATE.cardX; STATE.hist = hist || STATE.hist;
+            if (!card || !card.panels) return;
+            STATE.card = card; STATE.neuron = neuron || STATE.neuron; STATE.cardX = joined(cx, card); STATE.hist = joined(hist, card);
             paintAll();
             if (STATE.neuron && STATE.neuron.status === "pending") awaitNeuron(t, card);
           });
@@ -2670,35 +2775,35 @@
     $("ftHeroT").textContent = ticker;
     const q = (p) => p + "?t=" + encodeURIComponent(ticker);
     const neuronP = soft(getJSON(q("/api/flows/summary")));
-    const cxP = soft(getJSON(q("/api/flows/card-x")));
-    const histP = soft(getJSON(q("/api/flows/hist")));
-    const tapeP = fetchTape(ticker);
     let card;
     try { card = await getJSON(q("/api/flows/card")); } catch {
       const text = "This page could not be loaded. Reload to try again.";
-      silentHero(ticker, ST("unavailable", text));
+      silentHero(ticker, NA(text));
       sayStatus(text);
       return;
     }
     if (!card) return;
-    if (card.status === "pending" || !card.panels) { await pendingCard(ticker); return; }
-    const [neuron, cx, hist] = await Promise.all([neuronP, cxP, histP]);
+    if ((card.status && card.status !== "ok") || !(card.panels || card.lite)) { await absentCard(ticker, card); return; }
+    paintFreshness(card);
+    const [neuron, cx, hist] = await Promise.all([neuronP, soft(getJSON(q("/api/flows/card-x"))), soft(getJSON(q("/api/flows/hist")))]);
     STATE.card = card;
     STATE.neuron = neuron || { status: "unavailable" };
-    STATE.cardX = cx || { status: "pending" };
-    STATE.hist = hist || { status: "pending" };
+    STATE.cardX = joined(cx, card);
+    STATE.hist = joined(hist, card);
     document.title = card.ticker + " · Flows";
-    paintAll();
+    if (card.lite) paintLite(card); else paintAll();
     sayStatus("");
     jumpToHash();
-    tapeP.then((moved) => { if (moved && STATE.card === card) buildFlow(card); });
-    if (STATE.neuron.status === "pending") awaitNeuron(ticker, card);
-    const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1200));
-    idle(() => soft(getJSON("/api/flows/meta")).then((m) => {
-      if (!m || !isoOk(m.sessionDate) || STATE.card !== card) return;
-      STATE.meta = m;
-      renderFlags(card);
-    }), { timeout: 3000 });
+    fetchTape(ticker).then((moved) => { if (moved && STATE.card === card) flowOf(card); });
+    if (!card.lite) {
+      if (STATE.neuron.status === "pending") awaitNeuron(ticker, card);
+      const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1200));
+      idle(() => soft(getJSON("/api/flows/meta")).then((m) => {
+        if (!m || !isoOk(m.sessionDate) || STATE.card !== card) return;
+        STATE.meta = m;
+        renderFlags(card);
+      }), { timeout: 3000 });
+    }
     startLive(ticker);
   }
 
