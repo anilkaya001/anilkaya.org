@@ -4,7 +4,7 @@ import { signSession } from "../shared/session.js";
 import { archiveWriteAction, ARCHIVE_REFUSALS } from "../shared/flows-archive.js";
 import { UA_BANNED_CLAIMS } from "../shared/flows-unusual.js";
 import {
-  startWorker, SESSION_SECRET, FLOWS_PASSWORD, FLOWS_TEST_USER,
+  startWorker, SESSION_SECRET, FLOWS_PASSWORD, FLOWS_TEST_USER, FLOWS_PEPPER,
 } from "./worker-server.mjs";
 
 const INGEST_TOKEN = "test-ingest-token-abcdefghijklmnopqrstuv";
@@ -1099,8 +1099,8 @@ try {
     const dump = await server.d1(
       "SELECT username FROM flows_login_failures"
     );
-    ok(!/floodrow/.test(dump),
-       "THE FIX: five off-roster sign-in attempts wrote zero rows to D1");
+    ok(!/floodrow/.test(dump) && /\*\|192\.0\.2\.77/.test(dump),
+       "THE FIX: guessed names never key a row; the five off-roster attempts share one counter for their address");
     ok(/berkkocak\|203\.0\.113\.10/.test(dump),
        "a genuine failure is still counted, and the key is scoped to the caller");
   }
@@ -1447,9 +1447,105 @@ try {
       const page = await fetch(broken.baseURL + "/flows/", { redirect: "manual" });
       eq(page.status, 200, "the login page still renders on a misconfigured deploy");
       ok(!(await page.text()).includes(BOARD_MARKER), "and still leaks no board");
+
+      const { signFlowsSession } = await import("../shared/flows-auth.js");
+      const legacyCookie = { Cookie: "flows_session=" + await signFlowsSession(FLOWS_TEST_USER, SESSION_SECRET, 600, "1") };
+      eq((await fetch(broken.baseURL + "/api/flows/board", { headers: legacyCookie })).status, 401,
+         "AN UNREADABLE SECRET FAILS CLOSED: even a legacy roster member's live session is refused, so a bad " +
+         "edit can never re-admit a member whose access had ended or been revoked");
+      ok(!(await (await fetch(broken.baseURL + "/flows/", { headers: legacyCookie })).text()).includes(BOARD_MARKER),
+         "and the page shows no board to it");
     } finally {
       await broken.stop();
     }
+  }
+
+  {
+    const { deriveHash, signFlowsSession } = await import("../shared/flows-auth.js");
+    const membersSecret = async (revEpoch) => {
+      const out = {};
+      for (const [name, extra] of Object.entries({
+        [FLOWS_TEST_USER]: null, newbie: null, lapsed: { until: "2026-09-01" },
+        rev: { until: "2099-01-01", epoch: revEpoch },
+      })) {
+        const hash = await deriveHash(name, FLOWS_PASSWORD, FLOWS_PEPPER);
+        out[name] = extra ? { hash, ...extra } : hash;
+      }
+      return JSON.stringify(out);
+    };
+    const withMembers = async (revEpoch, fn) => {
+      const w = await startWorker({ extraVars: [`FLOWS_CREDENTIALS:${await membersSecret(revEpoch)}`] });
+      try { await fn(w); } finally { await w.stop(); }
+    };
+    const signIn = (w, username, password, ip = "198.51.100.1") => fetch(w.baseURL + "/flows/login", {
+      method: "POST", redirect: "manual",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded", Origin: w.baseURL,
+        "Sec-Fetch-Site": "same-origin", "CF-Connecting-IP": ip,
+      },
+      body: new URLSearchParams({ username, password }).toString(),
+    });
+    const tokenOf = (res) => /flows_session=([^;]+)/.exec(res.headers.get("set-cookie") || "")?.[1];
+    const board = (w, token) => fetch(w.baseURL + "/api/flows/board", { headers: { Cookie: "flows_session=" + token } });
+
+    let revToken = null;
+    let legacyToken = null;
+    await withMembers(2, async (w) => {
+      const newbie = await signIn(w, "newbie", FLOWS_PASSWORD);
+      eq(newbie.status, 303, "A NAME ONLY IN FLOWS_CREDENTIALS SIGNS IN: the secret is the allowlist, no deploy");
+      eq((await board(w, tokenOf(newbie))).status, 200, "and its session opens the API");
+
+      const wrong = await signIn(w, "lapsed", "not-the-password", "198.51.100.2");
+      const lapsed = await signIn(w, "lapsed", FLOWS_PASSWORD, "198.51.100.3");
+      const unknown = await signIn(w, "ghost-user", FLOWS_PASSWORD, "198.51.100.4");
+      ok(wrong.status === 401 && lapsed.status === 401 && unknown.status === 401,
+         "AN END DATE IN THE PAST IS REFUSED at sign-in, even with the right password");
+      const [wb, lb, ub] = await Promise.all([wrong, lapsed, unknown].map((r) => r.text()));
+      ok(lb === wb && lb === ub,
+         "with a body byte-identical to a wrong password's and an unknown name's, so it enumerates nothing");
+
+      const lapsedCookie = await signFlowsSession("lapsed", SESSION_SECRET, 600, "1");
+      eq((await board(w, lapsedCookie)).status, 401, "a lapsed member's live session is refused by the API");
+      ok(/action="\/flows\/login"/.test(await (await fetch(w.baseURL + "/flows/",
+        { headers: { Cookie: "flows_session=" + lapsedCookie } })).text()),
+         "and the page offers the sign-in form instead of the board");
+
+      const rev = await signIn(w, "rev", FLOWS_PASSWORD);
+      const legacy = await signIn(w, FLOWS_TEST_USER, FLOWS_PASSWORD);
+      revToken = tokenOf(rev);
+      legacyToken = tokenOf(legacy);
+      ok(rev.status === 303 && legacy.status === 303, "a member at epoch 2 and a legacy member sign in");
+      eq((await board(w, revToken)).status, 200,
+         "THE LOGIN CARRIES THE MEMBER'S EPOCH: the epoch-2 member's fresh session opens the API");
+
+      for (let i = 0; i < 5; i++) await (await signIn(w, "spray" + i, "x", "203.0.113.50")).text();
+      eq((await signIn(w, "newbie", FLOWS_PASSWORD, "203.0.113.50")).status, 303,
+         "a member signs in from an address that is spraying but not yet locked");
+      for (let i = 5; i < 8; i++) await (await signIn(w, "spray" + i, "x", "203.0.113.50")).text();
+      ok(/Too many attempts/.test(await (await signIn(w, "newbie", FLOWS_PASSWORD, "203.0.113.50")).text()),
+         "THAT SUCCESS NEVER RESETS THE SHARED COUNTER: eight failures in the window lock the address, " +
+         "for every non-legacy name alike, members included");
+
+      await w.d1("INSERT INTO flows_login_failures (username, failures, first_at) VALUES ('*|192.0.2.200', 3, 1000)");
+      await (await signIn(w, "ghost-v6", "x", "2001:db8:7:7::1")).text();
+      await (await signIn(w, "ghost-v6", "x", "2001:DB8:7:7:0:0:0:2")).text();
+      const dump = await w.d1("SELECT username, failures FROM flows_login_failures");
+      ok(!/spray|ghost/.test(dump) && /\*\|203\.0\.113\.50/.test(dump),
+         "the throttle rows are keyed by address, never by a guessed name");
+      ok(!/192\.0\.2\.200/.test(dump),
+         "A FAILURE PRUNES THE TABLE: a counter older than the window is deleted, so the rows stay bounded");
+      ok(/\*\|2001:db8:7:7::\/64/.test(dump) && !/2001:db8:7:7::1|0:0:0:2/.test(dump),
+         "and two hosts in one IPv6 /64 share one counter");
+    });
+
+    await withMembers(3, async (w) => {
+      eq((await board(w, revToken)).status, 401,
+         "BUMPING ONE MEMBER'S EPOCH IN THE SECRET REVOKES THAT MEMBER'S LIVE SESSION");
+      eq((await board(w, legacyToken)).status, 200, "AND ONLY THAT MEMBER'S: the legacy member stays signed in");
+      const again = await signIn(w, "rev", FLOWS_PASSWORD);
+      ok(again.status === 303 && (await board(w, tokenOf(again))).status === 200,
+         "and the revoked member can sign in again at the new epoch");
+    });
   }
 
   {
