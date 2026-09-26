@@ -1,4 +1,5 @@
 import { bsmGreeks, normCdf as codyCdf, normPdf as codyPdf } from "./flows-quant-bs.js";
+import { isTradingDay } from "./flows-freshness.js";
 
 export const PUT_TO_DEALER = Object.freeze({ gamma: 1, delta: -1, vanna: -1, charm: -1 });
 
@@ -127,14 +128,13 @@ export function blackScholesGreeks({ spot, strike, days, vol, rate = 0, dividend
   };
 }
 
-export function nextSessionAfter(sessionDate) {
+export function nextSessionAfter(sessionDate, clock = null) {
   const t = dayMs(sessionDate);
   if (!Number.isFinite(t)) return null;
-  for (let h = 1; h <= 7; h++) {
-    const dow = new Date(t + h * DAY_MS).getUTCDay();
-    if (dow !== 0 && dow !== 6) {
-      return { date: new Date(t + h * DAY_MS).toISOString().slice(0, 10), h,
-        rule: "the next weekday; the pipeline holds no holiday calendar" };
+  for (let h = 1; h <= 10; h++) {
+    const date = new Date(t + h * DAY_MS).toISOString().slice(0, 10);
+    if (isTradingDay(date, clock)) {
+      return { date, h, rule: "the next NYSE session, weekends and exchange holidays skipped" };
     }
   }
   return null;

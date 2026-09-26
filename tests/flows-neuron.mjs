@@ -653,6 +653,41 @@ const CARD = {
   const r2 = await askModels(spent, aiChain(env), msgs, {});
   ok(r2.guard === "unreachable:allowance" && r2.failure.why === "allowance" && spent.calls.length === 1,
     "a spent allowance is account-wide, so it is reported and the fallback is NOT asked to fail the same way");
+  for (const [code, why] of [["5007: No such model", "unreachable"], ["5035: model not available on your plan", "plan"]]) {
+    const gone = fake([new Error("AiError: " + code), { response: "Fallback wording.", usage: { prompt_tokens: 900, completion_tokens: 30 } }]);
+    const paid = [];
+    const logged = [];
+    const r = await askModels(gone, aiChain(env), msgs, {}, async (m, u) => { paid.push([m, u && u.completion_tokens]); },
+      { error: (line) => logged.push(JSON.parse(line)) });
+    ok(r.text === "Fallback wording." && r.model === llama && r.guard === null && r.failure === null &&
+       r.attempts.length === 2 && r.attempts[0].failed === why && r.failedOver === true,
+      `A PRIMARY THAT THROWS ${code.slice(0, 4)} FAILS OVER: the fallback answers, the guard is clear and the result says it ` +
+        "failed over — a deprecated or plan-gated primary used to take all four AI surfaces down with the fallback never asked");
+    same(paid, [[llama, 30]], "and the spend is recorded under the model that answered, the only one that consumed tokens");
+    ok(logged.length === 1 && logged[0].message === "ai failover" && logged[0].from === glm && logged[0].to === llama &&
+       logged[0].why === why, "with one structured log line naming both models and the reason");
+    same(fallbackNote(r), { from: glm, stop: "failed:" + why, reasoned: false },
+      "and the fallback note says the primary failed rather than calling it an empty reply");
+  }
+  const bothGone = await askModels(fake([new Error("AiError: 5007: No such model"), new Error("AiError: 3040: capacity")]),
+    aiChain(env), msgs, {}, null, { error() {} });
+  ok(bothGone.text === null && bothGone.guard === "unreachable:capacity" && bothGone.model === llama &&
+     bothGone.failure.why === "capacity" && bothGone.attempts.length === 2 && bothGone.failedOver === true,
+    "when both throw, the last failure is the one reported, because it is why this question went unanswered after the failover");
+  const thenEmpty = await askModels(fake([new Error("AiError: 5007: No such model"), { response: "" }]),
+    aiChain(env), msgs, {}, null, { error() {} });
+  ok(thenEmpty.text === null && thenEmpty.model === llama && thenEmpty.failure.why === "unreachable" &&
+     thenEmpty.attempts[0].failed === "unreachable" && thenEmpty.attempts[1].failed === null &&
+     thenEmpty.attempts[1].text === null && thenEmpty.guard === "unreachable:empty" && thenEmpty.failedOver === true,
+    "THROW, THEN EMPTY: a primary that throws and a fallback that answers with no text returns the primary's failure, " +
+      "attempts in that order with the fallback's empty reply second, the fallback as the model and its stop as the guard, " +
+      "so a caller can say both halves (the ask route's afterEmpty covers only empty-then-throw)");
+  const spentFirst = fake([new Error("AiError: 3036: account limit"), { response: "never" }]);
+  const r36 = await askModels(spentFirst, aiChain(env), msgs, {}, null, { error() { throw new Error("no failover log"); } });
+  ok(r36.guard === "unreachable:allowance" && spentFirst.calls.length === 1 && r36.failedOver === false,
+    "but 3036, the account-wide allowance, never fails over: the fallback would draw on the same exhausted pool");
+  ok(r1.failedOver === false, "and an empty primary rescued by the fallback is a fallback, not a failover");
+
   const busy = fake([reasoningOnly, new Error("AiError: 3040: capacity")]);
   const r3 = await askModels(busy, aiChain(env), msgs, {});
   ok(r3.guard === "unreachable:length" && r3.model === glm && r3.failure.why === "capacity",

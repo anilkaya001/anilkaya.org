@@ -68,6 +68,26 @@ export function nyseHolidays(y) {
   return out;
 }
 
+const EARLY_CACHE = new Map();
+
+export function nyseEarlyCloses(y) {
+  if (EARLY_CACHE.has(y)) return EARLY_CACHE.get(y);
+  const out = new Set();
+  const holidays = nyseHolidays(y);
+  const add = (m, d) => {
+    const w = weekday(y, m, d);
+    const day = isoDay(y, m, d);
+    if (w >= 1 && w <= 5 && !holidays.has(day)) out.add(day);
+  };
+  add(11, nthWeekday(y, 11, 4, 4) + 1);
+  for (const [m, d] of [[7, 3], [12, 24]]) {
+    const w = weekday(y, m, d);
+    if (w >= 1 && w <= 4) add(m, d);
+  }
+  EARLY_CACHE.set(y, out);
+  return out;
+}
+
 export function isSession(day) {
   const p = parseDay(day);
   if (!p) return false;
@@ -104,7 +124,8 @@ function usDst(y, m, d) {
 export function closeUtcMs(day) {
   const p = parseDay(day);
   if (!p) return null;
-  return p.t + (usDst(p.y, p.m, p.d) ? 20 : 21) * 3600000;
+  const closeEt = nyseEarlyCloses(p.y).has(isoDay(p.y, p.m, p.d)) ? 13 : 16;
+  return p.t + (closeEt + (usDst(p.y, p.m, p.d) ? 4 : 5)) * 3600000;
 }
 
 export function yearFraction(asOfMs, expiryDay) {

@@ -38,7 +38,8 @@ const T = (iso) => Date.parse(iso);
     nightly: [0, null, null],
   }, "THE THRESHOLD TABLE is one table in code: quote 5 s (live 20 s, fresh 90 s), tape 60 s (150 s, 10 min), " +
     "market 300 s (11 min, 25 min), breadth 900 s (20 min, 45 min), nightly once per session");
-  eq(FRESH_CLASSES.nightly.graceS, 3 * 3600, "and a nightly session is due three hours after its close");
+  eq(FRESH_CLASSES.nightly.graceS, 5 * 3600, "and a nightly session is due five hours after its close, 21:00 ET, " +
+    "after the 20:08 ET landing measured on 2026-09-24 rather than an hour before it");
   eq(REFRESH_CADENCE_MINUTES, 5, "the cadence the pulse stamp quotes is the Tier 1 clock's");
   for (const [key, spec] of Object.entries(L.LIVE_KEYS)) {
     ok(L.LIVE_KEY_RE.test(key) && spec.cadenceS === FRESH_CLASSES[spec.klass].cadenceS && spec.maxBytes <= 120 * 1024,
@@ -75,7 +76,7 @@ const T = (iso) => Date.parse(iso);
 
   const holiday = { day: "2026-09-23", trading: 0 };
   eq(phaseAt(edt("11:00"), holiday).phase, "closed",
-    "A TAPE-DERIVED HOLIDAY (flows_clock.trading = 0 for today) is closed through the session — the repo holds no calendar");
+    "A TAPE-DERIVED HOLIDAY (flows_clock.trading = 0 for today) is closed through the session, on a day the computed calendar thought traded");
   eq(phaseAt(edt("11:00"), holiday).lastClosed, "2026-09-22", "and its last closed session is the day before");
   const undecided = { day: "2026-09-23", trading: null, earlyClose: null };
   ok(phaseAt(edt("11:00"), undecided).phase === "rth" && phaseAt(edt("11:00"), undecided).trading === true &&
@@ -88,11 +89,13 @@ const T = (iso) => Date.parse(iso);
   const half = { day: "2026-11-27", earlyClose: 1 };
   eq(phaseAt(T("2026-11-27T13:30:00-05:00"), half).phase, "post", "A TAPE-DERIVED EARLY CLOSE ends the session at 13:00");
   eq(new Date(sessionClose("2026-11-27", half)).toISOString(), "2026-11-27T18:00:00.000Z", "13:00 EST is 18:00Z");
-  eq(phaseAt(T("2026-11-27T13:30:00-05:00")).phase, "rth", "without the clock's word it is an ordinary afternoon");
+  eq(phaseAt(T("2026-11-27T13:30:00-05:00")).phase, "post",
+    "and the day after Thanksgiving is a computed early close even before the tape confirms it");
+  eq(phaseAt(T("2026-11-20T13:30:00-05:00")).phase, "rth", "while without the clock's word an ordinary Friday afternoon trades");
 
-  eq(expectedNightlySession(T("2026-09-23T18:59:00-04:00")), "2026-09-22",
-    "the nightly for a session is not due until 19:00 ET (close + 3 h)");
-  eq(expectedNightlySession(T("2026-09-23T19:00:00-04:00")), "2026-09-23", "and is due from then");
+  eq(expectedNightlySession(T("2026-09-23T20:59:00-04:00")), "2026-09-22",
+    "the nightly for a session is not due until 21:00 ET (close + 5 h)");
+  eq(expectedNightlySession(T("2026-09-23T21:00:00-04:00")), "2026-09-23", "and is due from then");
   eq(expectedNightlySession(T("2026-09-26T12:00:00Z")), "2026-09-25", "a weekend expects Friday's");
   eq(expectedNightlySession(T("2026-09-23T20:00:00-04:00"), holiday), "2026-09-22",
     "and a holiday expects the session before it");
@@ -125,9 +128,11 @@ const T = (iso) => Date.parse(iso);
 
   const night = { readAt: "2026-09-22T21:40:00Z", session: "2026-09-22", cadenceS: 0 };
   eq(freshnessState(night, T("2026-09-23T15:00:00Z")).state, "fresh", "last night's session is fresh all day");
-  eq(freshnessState(night, T("2026-09-23T23:00:01Z")).state, "stale",
-    "and stale from 19:00 ET, when tonight's run was due — three hours, not the old 30");
-  eq(freshnessState(night, T("2026-09-23T15:00:00Z")).staleAt, T("2026-09-23T23:00:00Z"),
+  eq(freshnessState(night, T("2026-09-23T23:00:01Z")).state, "fresh",
+    "and still fresh at 19:00 ET, while tonight's run is still landing");
+  eq(freshnessState(night, T("2026-09-24T01:00:01Z")).state, "stale",
+    "and stale from 21:00 ET, when tonight's run was due");
+  eq(freshnessState(night, T("2026-09-23T15:00:00Z")).staleAt, T("2026-09-24T01:00:00Z"),
     "its staleAt is that instant, so the browser compares clocks and holds no threshold");
   eq(freshnessState({ readAt: "2026-09-22T21:40:00Z", cadenceS: 0 }, T("2026-09-23T15:00:00Z")).reason, "unsessioned",
     "a nightly payload with no session cannot be judged fresh");
@@ -911,17 +916,23 @@ const T = (iso) => Date.parse(iso);
   eq(liveWindow(T("2026-09-23T12:00:00Z")).why, "before-open", "the live run exits at once before the open");
   eq(liveWindow(T("2026-09-26T15:00:00Z")).why, "not-trading", "and on a weekend");
   const thanksgiving = easternInstant("2026-11-26", 11 * 60);
-  eq(liveWindow(thanksgiving).why, "session",
-    "THE CALENDAR ALONE CANNOT KNOW A HOLIDAY: without the Worker's clock, Thanksgiving reads as a session");
+  eq(liveWindow(thanksgiving).why, "not-trading",
+    "THE COMPUTED NYSE CALENDAR KNOWS A SCHEDULED HOLIDAY: without the Worker's clock, Thanksgiving is not a session");
   eq(liveWindow(thanksgiving, { day: "2026-11-26", trading: 0, earlyClose: null }).why, "not-trading",
     "so the live window takes the Worker's tape-derived clock, and a day it closed is not a session");
-  eq(liveWindow(thanksgiving, { day: "2026-11-25", trading: 0, earlyClose: null }).why, "session",
+  const tuesday = easternInstant("2026-11-24", 11 * 60);
+  eq(liveWindow(tuesday).why, "session", "an ordinary Tuesday with no clock is a session");
+  eq(liveWindow(tuesday, { day: "2026-11-24", trading: 0, earlyClose: null }).why, "not-trading",
+    "and an unscheduled closure the tape proved today is not");
+  eq(liveWindow(tuesday, { day: "2026-11-23", trading: 0, earlyClose: null }).why, "session",
     "a verdict for another day is never applied to this one");
   const early = { day: "2026-11-27", trading: 1, earlyClose: 1 };
   ok(liveWindow(easternInstant("2026-11-27", 13 * 60 + 25), early).run &&
      liveWindow(easternInstant("2026-11-27", 13 * 60 + 30), early).why === "after-close" &&
-     liveWindow(easternInstant("2026-11-27", 13 * 60 + 30)).run,
-  "AN EARLY CLOSE ends the window at 13:25 (13:00 plus the run-after-close), which the calendar alone would run to 16:25");
+     liveWindow(easternInstant("2026-11-27", 13 * 60 + 30)).why === "after-close" &&
+     liveWindow(easternInstant("2026-11-20", 13 * 60 + 30)).run,
+  "AN EARLY CLOSE ends the window at 13:25 (13:00 plus the run-after-close), from the computed calendar before the tape " +
+    "confirms it, while an ordinary Friday runs on to 16:25");
   const skipped = await runLive({ uw: async () => { throw new Error("no vendor call on a holiday"); },
     publish: async () => {}, readStored: async () => { throw new Error("no store read on a holiday"); },
     now: () => thanksgiving, log: () => {}, clock: { day: "2026-11-26", trading: 0, earlyClose: null } });
@@ -1313,6 +1324,42 @@ const T = (iso) => Date.parse(iso);
         `after it still writes live:market; the 09:46 probe then records trading = 1 (${written.map(([m, w, tr]) =>
           `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")} ${w} ${tr}`).join(", ")})`);
   }
+  {
+    const GF = "2027-03-26";
+    const thread = async (tape) => {
+      const row = { id: 1, day: "2027-03-25", trading: 1, early_close: 0, tape_at: null, tape_moved_at: null };
+      const seen = [];
+      for (let m = 9 * 60 + 31; m <= 10 * 60 + 11; m += 5) {
+        const tickAt = easternInstant(GF, m);
+        const bodies = await tape(tickAt);
+        const t = await run(tickAt, { fetchVendor: async (path) => JSON.parse(bodies[path]), clockRow: { ...row } });
+        for (const patch of t.patches) {
+          const cols = /\(([^)]*)\) VALUES/.exec(patch.sql)[1].split(", ");
+          cols.forEach((c, j) => { row[c] = patch.args[j]; });
+        }
+        seen.push(`${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")} ${t.out.skipped || t.col("tier1_why")} ${row.day} ${row.trading}`);
+      }
+      return { row, seen };
+    };
+    const traded = await thread((tickAt) => tier1Bodies({ session: GF, at: tickAt }));
+    ok(traded.seen[0].endsWith("not-due 2027-03-25 1") && traded.row.day === GF && traded.row.trading === 1 &&
+       traded.seen.slice(3).every((l) => / written /.test(l)),
+      "A COMPUTED HOLIDAY IS PROBED ONCE: on Good Friday the Worker reads the tape in the 09:45 probe window, and a tape " +
+      "that shows the day trading records trading = 1, so a wrong or outdated rule can never silence a live session " +
+      `(${traded.seen.join(", ")})`);
+    const shut = await thread(() => tier1Bodies({ session: "2027-03-25", at: easternInstant("2027-03-25", 16 * 60 + 6) }));
+    ok(shut.row.day === GF && shut.row.trading === 0 && shut.seen.slice(4).every((l) => / holiday /.test(l)) &&
+       shut.seen.filter((l) => / written /.test(l)).length <= 1,
+      "while a tape still on the previous session confirms the holiday at the first probe, and every later tick skips it " +
+      `(${shut.seen.join(", ")})`);
+    ok(!tier1Due(easternInstant(GF, 9 * 60 + 44)) && tier1Due(easternInstant(GF, 9 * 60 + 45)) &&
+       tier1Due(easternInstant(GF, 9 * 60 + 55)) && !tier1Due(easternInstant(GF, 9 * 60 + 56)) &&
+       !tier1Due(easternInstant(GF, 11 * 60)) && !tier1Due(easternInstant("2027-03-27", 9 * 60 + 50)),
+      "the probe window is 09:45 to 09:55 on a weekday computed holiday only: never later, and never on a weekend");
+    ok(!tier1Due(easternInstant(GF, 9 * 60 + 50), { day: GF, trading: 0 }) &&
+       !tier1Due(easternInstant(GF, 9 * 60 + 50), { day: "2027-03-25", closedDays: [GF] }),
+      "and a day the tape already closed is not probed again");
+  }
   const holiday = await run(at, { fetchVendor: vendor, clockRow: { id: 1, day: S, trading: 0 } });
   ok(holiday.out.skipped === "holiday" && holiday.col("tier1_why") === "holiday", "a tape-derived holiday says holiday");
   const off = await run(at, { env: { FLOWS_LIVE_MODE: "off" }, fetchVendor: vendor });
@@ -1397,7 +1444,7 @@ const T = (iso) => Date.parse(iso);
     ok(w.exit === "outside-window" && w.why === "not-trading" && passes === 0, "as does one on a weekend");
   }
   {
-    const TG = "2026-11-26";
+    const TG = "2026-11-24";
     const verdict = easternInstant(TG, 9 * 60 + 46);
     const c = sim(easternInstant(TG, 9 * 60 + 31));
     const passAt = [];
@@ -1409,12 +1456,19 @@ const T = (iso) => Date.parse(iso);
       chain: async () => { throw new Error("never chain on a holiday"); } });
     ok(r.exit === "window-closed" && r.why === "not-trading" && passAt.every((t) => t < verdict) && passAt.length === 4 &&
        reads > passAt.length,
-    "A TAPE-DERIVED HOLIDAY: the loop reads the Worker's clock around every pass, and once Tier 1 has closed the day " +
-      `(09:46 on Thanksgiving) no pass follows and nothing is chained (${passAt.length} passes before the verdict)`);
+    "A TAPE-DERIVED CLOSURE: the loop reads the Worker's clock around every pass, and once Tier 1 has closed the day " +
+      `(09:46 on an unscheduled closure) no pass follows and nothing is chained (${passAt.length} passes before the verdict)`);
     ok(r.waits > 0 && c.now() >= easternInstant(TG, L.VERDICT.provisionalUntilMin - 5) &&
        c.now() < easternInstant(TG, L.VERDICT.provisionalUntilMin),
     `and it waits without a pass until ${L.VERDICT.provisionalUntilMin / 60}:00 ET, while Tier 1 can still reopen the ` +
       `day, before it exits (${r.waits} waits)`);
+    const tg = sim(easternInstant("2026-11-26", 9 * 60 + 31));
+    let tgPasses = 0;
+    const scheduled = await runLiveLoop({ now: tg.now, sleep: tg.sleep, log: () => {},
+      readClock: async () => ({ day: "2026-11-26", trading: null, earlyClose: null }),
+      pass: async () => { tgPasses++; return {}; }, chain: async () => { throw new Error("never chain on a holiday"); } });
+    ok(scheduled.why === "not-trading" && tgPasses === 0,
+      "while a scheduled NYSE holiday (Thanksgiving) is closed by the computed calendar before any pass, with no verdict needed");
   }
   {
     const S2 = "2026-09-24";
@@ -1457,15 +1511,17 @@ const T = (iso) => Date.parse(iso);
       chain: async () => { throw new Error("never chain after an early close"); } });
     ok(r.exit === "window-closed" && r.why === "after-close" && passAt.at(-1) === easternInstant(EC, 13 * 60 + 25),
       `AN EARLY CLOSE: the last pass is at 13:25, not 16:25 (${new Date(passAt.at(-1)).toISOString()})`);
-    const verdict = easternInstant(EC, 13 * 60 + 36);
-    const d = sim(easternInstant(EC, 12 * 60));
+    const UC = "2026-11-20";
+    const verdict = easternInstant(UC, 13 * 60 + 36);
+    const d = sim(easternInstant(UC, 12 * 60));
     const late = [];
     const lr = await runLiveLoop({ now: d.now, sleep: d.sleep, log: () => {},
-      readClock: async () => ({ day: EC, trading: 1, earlyClose: d.now() >= verdict ? 1 : null }),
+      readClock: async () => ({ day: UC, trading: 1, earlyClose: d.now() >= verdict ? 1 : null }),
       pass: async () => { late.push(d.now()); d.advance(40000); return {}; },
       chain: async () => { throw new Error("never chain after an early close"); } });
-    ok(lr.exit === "window-closed" && lr.why === "after-close" && late.at(-1) === easternInstant(EC, 13 * 60 + 35),
-      "and when Tier 1 marks it only at 13:36, as its 30-minute quiet rule does, the loop stops at the next slot " +
+    ok(lr.exit === "window-closed" && lr.why === "after-close" && late.at(-1) === easternInstant(UC, 13 * 60 + 35),
+      "and on an unscheduled early close, which only the tape can reveal, Tier 1 marks it at 13:36, as its 30-minute " +
+        "quiet rule does, and the loop stops at the next slot " +
         `(last pass ${new Date(late.at(-1)).toISOString()})`);
   }
   {

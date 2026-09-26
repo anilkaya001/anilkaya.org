@@ -1218,9 +1218,14 @@ boundary.
   `when` is `null`. A column populated for the first fortnight and blank after
   invites the wrong inference about everything in the blank half.
 - **Sessions are counted as weekdays, holidays not removed**, and the payload
-  says so. This desk holds no holiday calendar and inventing one would be a
-  free parameter; a count right to within about one session a quarter is
-  honest, one that assumes an unpublished calendar is not.
+  says so. This desk's `sdte` (`sessionsToEarnings` in
+  `shared/flows-events.js`) and its gate origin (`nextWeekday` in the
+  pipeline) still count weekdays; the computed NYSE calendar the freshness
+  clock uses (`isTradingDay` in `shared/flows-freshness.js`) is not yet routed
+  here. The market leg's earnings window (`windowTickersOf`, through
+  `sessionsBetween` in `shared/flows-cross.js`) already counts NYSE sessions,
+  which is never more than the weekday count: across a holiday it can reach
+  one session further than this desk, never one session short.
 - **The priced move is a price, not a forecast.** `horizonMove` scales the
   name's 30-day implied volatility by the square root of sessions — no rate,
   no dividend, no distribution. It is what the option market is CHARGING for
@@ -1471,29 +1476,59 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   ./tests/node_modules/.bin/wrangler d1 execute iewt --remote --command \
     "SELECT datetime(tier1_at/1000,'unixepoch') AS began, datetime(tier1_ok_at/1000,'unixepoch') AS wrote, tier1_why FROM flows_clock"
   ```
-- **Holidays and early closes are read from the tape.** From 09:45 ET a tick at
-  which both Tier 1 feeds still carry the same earlier session (the market tide
-  by its date, the sector-ETF snapshot by the weekday after its `prev_date`) is
-  a closed probe; one lagging feed, or two that disagree on which earlier
-  session they carry, is no verdict. A first closed probe is provisional: it is
-  stamped in `flows_clock.closed_probe_at` and `trading` stays NULL. The day is
-  closed (`trading = 0`) only when a second probe at least 15 minutes after the
-  first agrees, and only then does the day join `flows_clock.closed_days` (a
-  JSON array of at most 20 ISO days, newest last, carried across days and
-  served as `clock.closedDays`). Any feed that carries today sets `trading = 1`
-  at once. Until 11:00 ET a closed day is re-probed every third tick (:01, :16,
-  :31, :46, two calls each), and a re-probe that sees today reopens the day,
-  takes it out of `closed_days` and writes `live:market`. The Tier 2 loop reads
-  a closed day before 11:00 ET as a wait, not an exit: it skips its passes and
-  re-reads the clock every slot, so a day the re-probe reopens gets its passes
-  back without waiting for a GitHub starter; from 11:00 ET a closed day ends the
-  loop. On 2026-09-24 a single
+- **One market calendar, with the tape as the last word for today.** Scheduled
+  holidays and 13:00 early closes are computed (`nyseHolidays` and
+  `nyseEarlyCloses` in `shared/flows-quant-time.js`: the exchange's rules,
+  observed-day shifts included; early closes are the day after Thanksgiving and
+  3 July and 24 December when they fall Monday to Thursday). `isTradingDay` in
+  `shared/flows-freshness.js` is the one test every consumer uses: today's tape
+  verdict when `flows_clock` is for that day and `trading` is 0 or 1, else a
+  weekday that is not a computed holiday and not in `flows_clock.closed_days`.
+  The freshness clock, the nightly's expected session, the AI brief's age, the
+  options engine's expiry close, the variation horizon and the cross-section
+  session counts all read it, so the session after a holiday is never called
+  stale and a same-day expiry on an early close has three hours left at 10:00
+  ET, not six. When the NYSE changes its rules,
+  `tests/flows-freshness-contract.mjs` holds the published schedule to compare
+  against.
+- **Anything unscheduled is read from the tape, and a closed verdict takes two
+  probes.** From 09:45 ET a tick at which both Tier 1 feeds still carry the same
+  earlier session (the market tide by its date, the sector-ETF snapshot by the
+  weekday after its `prev_date`) is a closed probe; one lagging feed, or two
+  that disagree on which earlier session they carry, is no verdict. A first
+  closed probe is provisional: it is stamped in `flows_clock.closed_probe_at`
+  and `trading` stays NULL. The day is closed (`trading = 0`) only when a second
+  probe at least 15 minutes after the first agrees, and only then does the day
+  join `flows_clock.closed_days` (a JSON array of at most 20 ISO days, newest
+  last, carried across days and served as `clock.closedDays`). Any feed that
+  carries today sets `trading = 1` at once. Until 11:00 ET a closed day is
+  re-probed every third tick (:01, :16, :31, :46, two calls each), and a
+  re-probe that sees today reopens the day, takes it out of `closed_days` and
+  writes `live:market`. The Tier 2 loop reads a closed day before 11:00 ET as a
+  wait, not an exit: it skips its passes and re-reads the clock every slot, so a
+  day the re-probe reopens gets its passes back without waiting for a GitHub
+  starter; from 11:00 ET a closed day ends the loop. On 2026-09-24 a single
   probe that saw a lagging vendor at 09:45 could have closed a trading day for
   good; `tests/flows-live-contract.mjs` threads a lagging vendor at 09:46 and
   today's data at 09:51 through the clock row and ends with `trading = 1`. A
-  tide stuck at or before 13:05 ET for 30 minutes after 13:30 marks an early
-  close. The migration is `migrations/0012_flows_clock_verdict.sql`; the
+  computed holiday is checked once: Tier 1 reads the tape in the 09:45 to 09:55
+  ET probe window of a weekday holiday, and a tape that shows the day trading
+  records `trading = 1`, so the day becomes a session and the live layer and the
+  nightly dispatch run; a tape still on the previous session leaves the computed
+  calendar in charge and every later tick skips the day. A wrong or outdated
+  holiday rule therefore costs the first quarter hour, never the session. A tide
+  stuck at or before 13:05 ET for 30 minutes after 13:30 marks an unscheduled
+  early close. The migration is `migrations/0012_flows_clock_verdict.sql`; the
   Worker's first-use path adds the three columns to a table that lacks them.
+- **A nightly session is due at 21:00 ET on every session, early closes
+  included**, because the run is scheduled by wall clock: the pipeline cron and
+  the Worker's 17:15 ET dispatch do not move when the market shuts at 13:00.
+  The 2026-09-23 and 09-24 runs started at 23:48 and 23:56 UTC and wrote
+  `meta` at 00:08 UTC, 20:08 ET, so the old three-hour grace called every
+  weekday evening stale for an hour. `/api/flows/now` returns the server's
+  `expected` nightly session, and the page pill dates itself by it; the pill's
+  own weekday fallback uses the same 21:00 ET, and asks the server before it
+  ever shows a stale it computed alone.
 - **An undecided day is a trading day.** The 09:31 tick rolls `flows_clock` to
   the new day with `trading` NULL until the 09:45 probe decides it. Only an
   explicit `0` closes a day. A NULL once read as closed (`Number(null)` is `0`),
@@ -1535,11 +1570,12 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   later one it reads `clock: { day, trading, earlyClose }` with a GET of the
   ingest key `clock` under its live credential (`/api/flows/now` carries the same
   view for signed-in pages). Once Tier 1 has marked the day closed from the tape
-  (from 09:46 ET) the loop makes no further pass and never chains. An early close
-  ends the window at 13:25 ET; Tier 1 marks one only after 13:30, so the loop
-  stops at the first slot after that verdict, about 13:35 to 13:40, instead of
-  running to 16:25. A failed clock read keeps the last verdict; with none, the
-  weekday calendar applies. A pass that throws is logged and recorded as errored
+  (from 09:46 ET) the loop makes no further pass and never chains; a scheduled
+  holiday never starts one. A scheduled early close ends the window at 13:25 ET
+  from the calendar. An unscheduled one Tier 1 marks only after 13:30, so the
+  loop stops at the first slot after that verdict, about 13:35 to 13:40, instead
+  of running to 16:25. A failed clock read keeps the last verdict; with none, the
+  computed NYSE calendar applies. A pass that throws is logged and recorded as errored
   and the loop carries on to the next slot. Each pass starts with a fresh 90 s
   publish/read retry budget, as each separate run had. The job exits non-zero
   only when every pass answered no vendor call or landed no key (or threw), or
