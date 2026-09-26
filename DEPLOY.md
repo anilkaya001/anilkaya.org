@@ -349,9 +349,14 @@ that section 10.2a starts from.
 # 1. Mint the whole set: per-user passwords, a fresh pepper, and the
 #    FLOWS_CREDENTIALS JSON. Printed ONCE; keep the terminal open until both
 #    secrets are pasted below, because none of it can be recovered afterwards.
-#    Without --from it mints the legacy roster; --from members.json mints
-#    every member listed there instead, keeping end dates and epochs.
+#    FIRST TIME ONLY: without --from it mints the legacy roster and creates
+#    members.json. It refuses to run once members.json exists, because that
+#    file is the only copy of the member list.
 node scripts/generate-flows-credentials.mjs --mint --out members.json
+
+#    EVERY LATER RE-MINT (rotating every password): --from mints each member
+#    the file lists, keeping end dates and epochs, and writes it back.
+node scripts/generate-flows-credentials.mjs --mint --from members.json --out members.json
 
 # 2. The ingest token is separate (it authenticates the pipeline, not people).
 INGEST_TOKEN=$(openssl rand -hex 32); printf 'FLOWS_INGEST_TOKEN: %s\n' "$INGEST_TOKEN"
@@ -430,17 +435,25 @@ string the mint prints, or an object:
 - An old plain-string value keeps working unchanged (no end date, epoch 0).
 - An entry the Worker cannot read (a bad name, an impossible date, a
   non-integer epoch, no hash) is ignored on its own: that one person cannot sign
-  in, and everyone else is unaffected. A secret that is not JSON at all makes
-  sign-in answer 503, and live sessions fall back to the legacy roster
-  (`FLOWS_USERNAMES` in `shared/flows-auth.js`) until it is fixed. That constant
-  exists only for this transition: when every member is in the secret it can be
-  emptied, and the secret becomes the only list.
+  in, and everyone else is unaffected.
+- A secret that is missing or not JSON at all (one bad hand edit, such as a
+  trailing comma) fails closed: sign-in answers 503 and **every live session is
+  refused** until the secret is fixed. It never falls back to a built-in list,
+  because a fallback would quietly re-admit members whose access had ended or
+  been revoked. The script only ever writes JSON the Worker reads, so install
+  its output rather than editing the secret by hand. `FLOWS_USERNAMES` in
+  `shared/flows-auth.js` no longer grants anything: it only chooses which names
+  keep a throttle counter of their own, and can be emptied once every member is
+  in the secret.
 - Removing a key is revocation: that member's live session ends at its next
   request.
 - Failures stay uniform: an ended, revoked, unknown or mistyped sign-in all
   get the same 401 page. The throttle keeps a bucket per address for every
   name outside the legacy roster, so a lockout cannot reveal whether a name is
-  a member, and guessed names never add rows to D1.
+  a member. Guessed names never key a row: every name outside the legacy
+  roster shares one counter per address (an IPv6 address counts as its /64),
+  and each failure also deletes the counters older than the 15-minute window,
+  so `flows_login_failures` holds at most one window of failing addresses.
 
 Cloudflare never shows a secret's value again, so keep the current JSON as a
 private `members.json` (outside this public repository, and apart from the

@@ -1,7 +1,7 @@
 import { signSession, verifySession, getCookie, cookie } from "./shared/session.js";
 import {
   FLOWS_COOKIE, FLOWS_SESSION_TTL_SECONDS, LEARN_AUDIENCE, THROTTLE_SHARED_BUCKET,
-  parseCredentials, readMembers, memberOf, throttleBucket, verifyCredential,
+  parseCredentials, readMembers, memberOf, throttleBucket, throttleAddress, staleFailureCutoff, verifyCredential,
   signFlowsSession, verifyFlowsSession, isLearnAudience, isLocked, nextFailureState, sessionEpoch,
 } from "./shared/flows-auth.js";
 import { FLOWS_PAGES, modelName, neuronProvenance } from "./shared/flows-pages.js";
@@ -2022,8 +2022,7 @@ async function ensureFlowsTables(env) {
 }
 
 function flowsThrottleKey(request, username) {
-  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
-  return throttleBucket(username) + "|" + ip;
+  return throttleBucket(username) + "|" + throttleAddress(request.headers.get("CF-Connecting-IP"));
 }
 
 async function flowsLockRecord(env, username) {
@@ -2040,12 +2039,16 @@ async function recordFlowsFailure(env, username, previous) {
 
   if (!username || !env.DB) return;
   await ensureFlowsTables(env);
-  const next = nextFailureState(previous);
+  const now = Date.now();
+  const next = nextFailureState(previous, now);
   try {
-    await env.DB.prepare(
-      "INSERT INTO flows_login_failures (username, failures, first_at) VALUES (?, ?, ?) " +
-      "ON CONFLICT(username) DO UPDATE SET failures = excluded.failures, first_at = excluded.first_at"
-    ).bind(username, next.failures, next.first_at).run();
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM flows_login_failures WHERE first_at < ?").bind(staleFailureCutoff(now)),
+      env.DB.prepare(
+        "INSERT INTO flows_login_failures (username, failures, first_at) VALUES (?, ?, ?) " +
+        "ON CONFLICT(username) DO UPDATE SET failures = excluded.failures, first_at = excluded.first_at"
+      ).bind(username, next.failures, next.first_at),
+    ]);
   } catch {   }
 }
 

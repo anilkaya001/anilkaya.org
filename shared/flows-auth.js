@@ -72,11 +72,13 @@ export function memberRecord(value) {
   return Object.freeze({ hash, until, epoch });
 }
 
-let membersMemo = { raw: undefined, members: null };
+export const NO_MEMBERS = Object.freeze(Object.create(null));
+
+let membersMemo = { raw: undefined, members: NO_MEMBERS };
 
 export function readMembers(raw) {
   if (raw === membersMemo.raw) return membersMemo.members;
-  let members = null;
+  let members = NO_MEMBERS;
   if (raw && typeof raw === "string") {
     let parsed = null;
     try { parsed = JSON.parse(raw); } catch { parsed = null; }
@@ -96,7 +98,7 @@ export function readMembers(raw) {
 
 export function parseCredentials(raw) {
   const members = readMembers(raw);
-  return members && Object.keys(members).length ? members : null;
+  return Object.keys(members).length ? members : null;
 }
 
 export function memberOf(credentials, name) {
@@ -110,6 +112,22 @@ export function memberActive(member, now = Date.now()) {
   if (member.until === null) return true;
   const today = easternDay(now);
   return typeof today === "string" && today <= member.until;
+}
+
+export function throttleAddress(ip) {
+  const s = typeof ip === "string" ? ip.trim().toLowerCase() : "";
+  if (!s || s.length > 64) return "unknown";
+  if (!s.includes(":")) return s;
+  if (s.includes(".")) return s.slice(s.lastIndexOf(":") + 1);
+  const halves = s.split("::");
+  if (halves.length > 2) return s;
+  const head = halves[0] ? halves[0].split(":") : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  const fill = halves.length === 2 ? 8 - head.length - tail.length : 0;
+  if (fill < 0 || (halves.length === 2 && fill < 1)) return s;
+  const groups = [...head, ...Array(fill).fill("0"), ...tail];
+  if (groups.length !== 8 || !groups.every((g) => /^[0-9a-f]{1,4}$/.test(g))) return s;
+  return groups.slice(0, 4).map((g) => parseInt(g, 16).toString(16)).join(":") + "::/64";
 }
 
 export function throttleBucket(username) {
@@ -175,6 +193,10 @@ export function isLocked(record, now = Date.now()) {
   const windowMs = LOCKOUT.windowSeconds * 1000;
   if (!Number.isFinite(record.first_at) || now - record.first_at > windowMs) return false;
   return Number.isFinite(record.failures) && record.failures >= LOCKOUT.maxFailures;
+}
+
+export function staleFailureCutoff(now = Date.now()) {
+  return now - LOCKOUT.windowSeconds * 1000;
 }
 
 export function nextFailureState(record, now = Date.now()) {

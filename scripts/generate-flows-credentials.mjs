@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { createInterface } from "node:readline";
-import { readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { webcrypto } from "node:crypto";
 import {
   FLOWS_USERNAMES, deriveHash, PBKDF2_ITERATIONS, MEMBER_NAME, MEMBER_EPOCH_MAX,
@@ -190,9 +190,16 @@ function installHint(bytes, members) {
   );
 }
 
+function writeMembersFile(json) {
+  try {
+    writeFileSync(opts.out, json + "\n", { mode: 0o600 });
+    chmodSync(opts.out, 0o600);
+  } catch { die(`cannot write ${opts.out}`); }
+}
+
 function emit(json) {
   if (!opts.out) { process.stdout.write(json + "\n"); return; }
-  try { writeFileSync(opts.out, json + "\n", { mode: 0o600 }); } catch { die(`cannot write ${opts.out}`); }
+  writeMembersFile(json);
 }
 
 async function currentMembersText(pepperFirst) {
@@ -272,6 +279,11 @@ if (opts.mode === "add") {
   );
   emit(json);
 } else if (opts.mode === "mint") {
+  if (opts.out && !opts.from && existsSync(opts.out)) {
+    die(`${opts.out} already exists, and without --from --mint would replace it with the legacy roster, ` +
+      "dropping every member added since along with their end dates and epochs. To re-mint the members " +
+      `it lists, run: --mint --from ${shellWord(opts.out)} --out ${shellWord(opts.out)}`);
+  }
   let roster = FLOWS_USERNAMES.map((name) => [name, { until: null, epoch: 0 }]);
   if (opts.from) {
     let text;
@@ -293,9 +305,7 @@ if (opts.mode === "add") {
     members.set(username, memberRecord({ hash: await deriveHash(username, passwords[username], pepper), ...keep }));
   }
   const { json } = encode(members);
-  if (opts.out) {
-    try { writeFileSync(opts.out, json + "\n", { mode: 0o600 }); } catch { die(`cannot write ${opts.out}`); }
-  }
+  if (opts.out) writeMembersFile(json);
 
   process.stderr.write(
     `\nMinted ${roster.length} per-user passwords and derived their hashes at ` +

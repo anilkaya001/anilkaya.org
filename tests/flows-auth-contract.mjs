@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, statSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,7 +11,7 @@ import {
   verifyCredential, signFlowsSession, verifyFlowsSession, isLearnAudience,
   LOCKOUT, isLocked, nextFailureState, sessionEpoch, DEFAULT_SESSION_EPOCH,
   MEMBER_NAME, readMembers, memberRecord, memberOf, memberActive, isMemberDay,
-  throttleBucket, THROTTLE_SHARED_BUCKET,
+  throttleBucket, THROTTLE_SHARED_BUCKET, throttleAddress, staleFailureCutoff, NO_MEMBERS,
 } from "../shared/flows-auth.js";
 
 let checks = 0;
@@ -126,10 +126,17 @@ const PASSWORD = "Ankara06**--";
   ok(readMembers('{"abc":"H"}') === a1, "the same secret value is parsed once and reused");
   ok(readMembers('{"abd":"H"}') !== a1 && memberOf(readMembers('{"abc":"H"}'), "abc").hash === "H",
      "a changed secret value is parsed afresh");
-  ok(readMembers("not json") === null && readMembers(undefined) === null && readMembers("[1]") === null,
-     "an unreadable secret reads as null");
+  for (const raw of ["not json", undefined, "", "[1]", '{"anilkaya":"H",}', "null", "7"]) {
+    const read = readMembers(raw);
+    ok(read === NO_MEMBERS && Object.keys(read).length === 0 && Object.isFrozen(read),
+       `AN UNREADABLE OR MISSING SECRET FAILS CLOSED: ${JSON.stringify(raw)} reads as no members, never null`);
+  }
+  const pristine = await import("../shared/flows-auth.js?pristine-memo");
+  const first = pristine.readMembers(undefined);
+  ok(first === pristine.NO_MEMBERS && Object.keys(first).length === 0,
+     "including the very first read of a fresh isolate, before any secret was ever parsed");
   const empty = readMembers("{}");
-  ok(empty !== null && Object.keys(empty).length === 0, "a readable but empty secret is an empty map, not null");
+  ok(empty !== null && Object.keys(empty).length === 0, "a readable but empty secret is an empty map too");
 }
 
 {
@@ -259,10 +266,17 @@ const PASSWORD = "Ankara06**--";
   const nobody = readMembers("{}");
   ok(await verifyFlowsSession(a0, SECRET, "1", nobody) === null,
      "a readable secret with no members admits no session: the secret is authoritative");
-  ok((await verifyFlowsSession(a0, SECRET, "1", readMembers("broken{"))).username === "anilkaya",
-     "THE TRANSITION FALLBACK: an unreadable secret falls back to the legacy roster for live sessions");
+  ok(await verifyFlowsSession(a0, SECRET, "1", readMembers("broken{")) === null,
+     "NO FALLBACK: an unreadable secret admits no session, not even a legacy roster name's");
+  ok(await verifyFlowsSession(a0, SECRET, "1", readMembers(undefined)) === null,
+     "and neither does a missing one");
+  const revokedLegacy = await signFlowsSession("anilkaya", SECRET, 3600, "1", 0);
+  const lapsedSecret = JSON.stringify({ anilkaya: { hash: "H-A", until: "2026-01-01" } });
+  ok(await verifyFlowsSession(revokedLegacy, SECRET, "1", readMembers(lapsedSecret)) === null &&
+     await verifyFlowsSession(revokedLegacy, SECRET, "1", readMembers(lapsedSecret.slice(0, -1) + ",}")) === null,
+     "THE REVIEW'S CASE: a lapsed legacy member stays out when one bad edit breaks the secret");
   ok(await verifyFlowsSession(fresh, SECRET, "1", readMembers("broken{")) === null,
-     "and that fallback never admits a name beyond the legacy roster");
+     "and a name beyond the legacy roster is refused as before");
 }
 
 {
@@ -274,6 +288,21 @@ const PASSWORD = "Ankara06**--";
   ok(buckets.size === 1, "and unknown names never grow the throttle table by name");
   ok(!MEMBER_NAME.test(THROTTLE_SHARED_BUCKET), "the shared bucket can never collide with a member's name");
   ok(throttleBucket(undefined) === THROTTLE_SHARED_BUCKET, "a missing name is safe");
+
+  ok(throttleAddress("203.0.113.10") === "203.0.113.10", "an IPv4 address is its own counter");
+  ok(throttleAddress("2001:db8:1:2:aaaa:bbbb:cccc:dddd") === "2001:db8:1:2::/64" &&
+     throttleAddress("2001:DB8:1:2::1") === "2001:db8:1:2::/64" &&
+     throttleAddress("2001:0db8:0001:0002:ffff::9") === "2001:db8:1:2::/64",
+     "AN IPv6 ADDRESS COUNTS AS ITS /64, however it is written, so rotating the host half cannot mint counters");
+  ok(throttleAddress("2001:db8::1") === "2001:db8:0:0::/64" && throttleAddress("::1") === "0:0:0:0::/64",
+     "a compressed prefix expands before it is cut");
+  ok(throttleAddress("2001:db8:1:3::1") !== throttleAddress("2001:db8:1:2::1"), "another /64 is another counter");
+  ok(throttleAddress("::ffff:198.51.100.20") === "198.51.100.20",
+     "an IPv4-mapped address counts as its IPv4 address, not as the one all-zero /64");
+  ok(throttleAddress(null) === "unknown" && throttleAddress("") === "unknown" && throttleAddress("x".repeat(65)) === "unknown",
+     "a missing or oversized header shares one bounded key");
+  ok(throttleAddress("1:2:3") === "1:2:3" && throttleAddress("1::2::3") === "1::2::3",
+     "a malformed address is kept as given (bounded), never widened into someone else's /64");
 }
 
 {
@@ -341,6 +370,13 @@ const PASSWORD = "Ankara06**--";
 
   const rolled = nextFailureState({ failures: 7, first_at: stale }, now);
   ok(rolled.failures === 1, "a stale window resets the count");
+
+  const cutoff = staleFailureCutoff(now);
+  ok(!isLocked({ failures: 99, first_at: cutoff - 1 }, now) &&
+     nextFailureState({ failures: 99, first_at: cutoff - 1 }, now).failures === 1,
+     "THE PRUNE IS SAFE: a counter older than the cutoff neither locks nor counts, so deleting it changes nothing");
+  ok(isLocked({ failures: LOCKOUT.maxFailures, first_at: cutoff }, now),
+     "and a counter at the cutoff is still live, so the prune never frees a locked address early");
 }
 
 {
@@ -421,6 +457,29 @@ const PASSWORD = "Ankara06**--";
        "a current map holding an entry the Worker would ignore is named, not silently rewritten");
     const cleaned = run(["--remove", "broken"], JSON.stringify({ anilkaya: "H", broken: { until: "x" } }));
     ok(cleaned.status === 0 && JSON.parse(cleaned.stdout).anilkaya === "H", "and --remove can clear it");
+
+    const kept = readFileSync(file, "utf8");
+    const clobber = run(["--mint", "--out", file]);
+    ok(clobber.status !== 0 && readFileSync(file, "utf8") === kept,
+       "THE MEMBERS FILE IS NEVER CLOBBERED: --mint --out on an existing file without --from refuses and leaves it intact");
+    ok(clobber.stderr.includes("--mint --from " + file + " --out " + file),
+       "and names the command that re-mints the members it lists");
+    const remint = run(["--mint", "--from", file, "--out", file]);
+    ok(remint.status === 0 && Object.keys(readMembers(readFileSync(file, "utf8").trim())).join() === "anilkaya,new.member" &&
+       readMembers(readFileSync(file, "utf8").trim())["new.member"].until === "2099-12-31",
+       "while --mint --from the same file re-mints every member it lists, end dates intact");
+
+    const fresh = path.join(dir, "fresh.json");
+    const firstMint = run(["--mint", "--out", fresh]);
+    ok(firstMint.status === 0 && Object.keys(readMembers(readFileSync(fresh, "utf8").trim())).length === FLOWS_USERNAMES.length,
+       "the first-time --mint --out still creates the file from the legacy roster");
+    if (process.platform !== "win32") {
+      ok((statSync(fresh).mode & 0o777) === 0o600, "a members file the script creates is private to its owner");
+      chmodSync(file, 0o644);
+      const tightened = run(["--set", "anilkaya", "--epoch", "1", "--from", file, "--out", file]);
+      ok(tightened.status === 0 && (statSync(file).mode & 0o777) === 0o600,
+         "and one that already existed world-readable is made private on the next write");
+    }
 
     const crowd = {};
     for (let i = 0; i < 60; i++) crowd["member" + String(i).padStart(3, "0")] = { hash: "x".repeat(44), until: "2099-12-31", epoch: 1 };
