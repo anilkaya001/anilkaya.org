@@ -41,7 +41,7 @@ import { execFileSync, spawnSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { easternOffsetMinutes, easternDay, easternClock } from "../shared/flows-freshness.js";
+import { easternOffsetMinutes, easternDay, easternClock, nextTradingDay } from "../shared/flows-freshness.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -2720,7 +2720,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     ok(dated.some((r) => r.edte !== null && r.edte > 12 && r.edte <= 21),
        `board:${side} holds at least one name reporting just past the gate — the row this ` +
        "column exists for, and proof the branch is reachable");
-    eq(board.gateOrigin, nextWeekday(board.sessionDate),
+    eq(board.gateOrigin, nextTradingDay(board.sessionDate, null),
        `board:${side}'s gate counts from the next session (${board.gateOrigin}), not the ` +
        "machine's date — which made the dry corpus a different corpus every day it ran");
   }

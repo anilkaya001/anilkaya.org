@@ -1307,15 +1307,14 @@ boundary.
   `announce.status` is `"unavailable"` with the reason published, and every
   `when` is `null`. A column populated for the first fortnight and blank after
   invites the wrong inference about everything in the blank half.
-- **Sessions are counted as weekdays, holidays not removed**, and the payload
-  says so. This desk's `sdte` (`sessionsToEarnings` in
-  `shared/flows-events.js`) and its gate origin (`nextWeekday` in the
-  pipeline) still count weekdays; the computed NYSE calendar the freshness
-  clock uses (`isTradingDay` in `shared/flows-freshness.js`) is not yet routed
-  here. The market leg's earnings window (`windowTickersOf`, through
-  `sessionsBetween` in `shared/flows-cross.js`) already counts NYSE sessions,
-  which is never more than the weekday count: across a holiday it can reach
-  one session further than this desk, never one session short.
+- **Sessions are NYSE trading days**, and the payload says so. This desk's
+  `sdte` (`sessionsToEarnings` in `shared/flows-events.js`) and its gate origin
+  (`nextTradingDay` from the pipeline) count on the computed NYSE calendar
+  (`isTradingDay` in `shared/flows-freshness.js`): weekends and scheduled
+  holidays are not sessions, early closes are. The market leg's earnings window
+  (`windowTickersOf`, through `sessionsBetween` in `shared/flows-cross.js`)
+  counts the same way. Only a closure the exchange did not schedule can make a
+  count one session long, until the day has passed.
 - **The priced move is a price, not a forecast.** `horizonMove` scales the
   name's 30-day implied volatility by the square root of sessions — no rate,
   no dividend, no distribution. It is what the option market is CHARGING for

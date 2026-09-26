@@ -1,4 +1,5 @@
 import { horizonMove } from "./flows-features.js";
+import { isTradingDay } from "./flows-freshness.js";
 
 const numOrNull = (v) => {
   if (v === null || v === undefined || v === "") return null;
@@ -30,8 +31,7 @@ export function sessionsToEarnings(earningsDate, origin) {
   if (days < 0) return null;
   let sessions = 0;
   for (let i = 1; i <= days; i++) {
-    const dow = new Date(start + i * 86400000).getUTCDay();
-    if (dow !== 0 && dow !== 6) sessions++;
+    if (isTradingDay(new Date(start + i * 86400000).toISOString().slice(0, 10), null)) sessions++;
   }
   return sessions;
 }
@@ -188,15 +188,15 @@ export const EVENTS_NOTES = Object.freeze({
     "on; it is not a name the board found nothing in.",
   clocks: "Two clocks, and they do not share an origin. Every PRICE here " +
     "describes the last completed session. Every DAY COUNT is measured from the " +
-    "next session after it — the first weekday that follows — which is the origin " +
+    "next session after it — the first NYSE trading day that follows — which is the origin " +
     "the earnings gate itself used. The run lands after the close, so the two " +
     "differ by one to three calendar days, and counting from the session itself " +
     "would draw the window a session early and classify every name against a " +
     "gate that never ran.",
-  sessions: "Sessions are counted as weekdays. Market holidays are not removed: " +
-    "this desk holds no holiday calendar and inventing one would be a free " +
-    "parameter. The count is right to within about one session a quarter, and " +
-    "saying so beats a number that assumes a calendar nobody published.",
+  sessions: "Sessions are NYSE trading days on the exchange's published calendar: " +
+    "weekends and scheduled holidays are not sessions, and early closes are. A " +
+    "closure the exchange did not schedule cannot be known in advance, so a count " +
+    "that spans one is one session long until the day has passed.",
   priced: "The priced move scales the name's 30-day implied volatility to the " +
     "sessions between the run and the report, by the square root of time. No " +
     "rate, no dividend, no distribution. It is not a forecast of what the stock " +
