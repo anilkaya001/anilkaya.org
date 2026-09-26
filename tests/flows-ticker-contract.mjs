@@ -23,7 +23,7 @@ const emitted = (name) => { const f = path.join(EMIT_DIR, name); return fs.exist
 const cards = fs.readdirSync(EMIT_DIR).filter((f) => /^-card-[A-Z][A-Z0-9.\-]*\.json$/.test(f)).map((f) => JSON.parse(fs.readFileSync(path.join(EMIT_DIR, f), "utf8")));
 ok(cards.length >= 5, `the emitter produced ${cards.length} cards to test against`);
 
-const withChain = cards.filter((c) => c.depth !== "index" && TICKER_PANEL_KEYS.every((k) => c.panels && c.panels[k]) &&
+const withChain = cards.filter((c) => c.depth !== "index" && c.depth !== "fund" && TICKER_PANEL_KEYS.every((k) => c.panels && c.panels[k]) &&
   ["ivSurface", "skewTerm", "topContracts", "aggressor"].every((k) => c.panels[k].status === "ok"));
 ok(withChain.length > 0, `at least one emitted card carries all four chain panels (${withChain.length} do)`);
 const engineCards = cards.filter((c) => c.engine && Array.isArray(c.engine.structures) && c.engine.structures.length >= 2 && Array.isArray(c.engine.expiries) && c.engine.expiries.length);

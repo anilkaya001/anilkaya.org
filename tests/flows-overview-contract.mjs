@@ -3156,7 +3156,7 @@ try {
     const ingest = await post("focus", FOCUS_FIXTURE);
     eq(ingest.status, 200, "the Worker accepts the nightly focus key on ingest");
     const nowUrl = await fp.waitForFunction(() => performance.getEntriesByType("resource")
-      .map((e) => e.name).find((n) => /\/api\/flows\/now/.test(n)), null, { timeout: 15000 }).then((j) => j.jsonValue());
+      .map((e) => e.name).find((n) => /\/api\/flows\/now\?(?:[^#]*&)?n=/.test(n)), null, { timeout: 15000 }).then((j) => j.jsonValue());
     ok(/[?&]n=[^&]*\bfocus\b/.test(decodeURIComponent(nowUrl)), `the open page's heartbeat asks after the nightly focus key (${nowUrl})`);
     await fp.waitForTimeout(150);
     await fp.route(/\/api\/flows\/now\?/, async (route) => {
@@ -3205,8 +3205,9 @@ try {
     deep(ndx.leaders.find((r) => r[0] === "NFLX"), ["NFLX", "—", "—", "—", "—"], "a leader the vendor skipped is em dashes");
     ok(/[?&]lead=ndx10\b/.test(fp.url()), `the choice is kept in the address (${fp.url()})`);
     const home = await focusNow("/flows/");
-    deep(home.seg.map((s) => s[1]), ["false", "true"],
-      "and remembered for this viewer, so the plain Home link opens on NDX 10 too");
+    deep(home.seg.map((s) => s[1]), ["true", "false"],
+      "and nowhere else: the plain Home link opens on Mag 7, because Flows pages keep nothing in browser storage " +
+      "(every storage access goes through IEWTStorage, which these pages do not load)");
     const again = await focusNow("/flows/?lead=ndx10");
     deep(again.seg.map((s) => s[1]), ["false", "true"], "so a reload or a shared link opens on the same leaders");
     await fp.focus("#ccLeadSeg .ui-seg-i[aria-selected=true]");
@@ -3216,7 +3217,7 @@ try {
 
     await fp.focus("#ccMetalsWhen .hm-pill");
     const beat = async () => {
-      await Promise.all([fp.waitForResponse(/\/api\/flows\/now/), fp.evaluate(() => window.__hb.now())]);
+      await Promise.all([fp.waitForResponse(/\/api\/flows\/now\?/), fp.evaluate(() => window.__hb.now())]);
       await fp.waitForTimeout(150);
     };
     await fp.evaluate(() => { window.__pill = document.activeElement; });
