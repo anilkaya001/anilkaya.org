@@ -11,6 +11,7 @@ const ROOT = join(HERE, "..");
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.strictEqual(a, b, msg); checks++; };
+const deep = (a, b, msg) => { assert.deepStrictEqual(a, b, msg); checks++; };
 
 const dir = mkdtempSync(join(tmpdir(), "flows-shape-"));
 try {
@@ -810,8 +811,9 @@ assert.deepEqual(missingReport, [],
   ok(cx.length > 0, `the pipeline emits card-x payloads (${cx.length})`);
   for (const c of cx) {
     ok(typeof c.ticker === "string" && c.fresh && !("panels" in c), `card-x:${c.ticker} is its own key, not a card`);
-    ok(c.scope === "index" || ["short", "insiders", "earnings"].some((k) => c[k]),
-       `card-x:${c.ticker} carries at least one ownership part, unless it is an index dossier the vol leg alone writes`);
+    ok(c.scope === "index" || c.scope === "fund" || ["short", "insiders", "earnings"].some((k) => c[k]),
+       `card-x:${c.ticker} carries at least one ownership part, unless it is an index or fund dossier the vol leg alone ` +
+       "writes (ETFs have no insiders or earnings at the vendor)");
     ok(Buffer.byteLength(JSON.stringify(c)) <= 100 * 1024, `card-x:${c.ticker} fits its cap`);
   }
 
@@ -820,6 +822,52 @@ assert.deepEqual(missingReport, [],
     ok(card && card.depth === "index", `card:${t} is an index dossier`);
     ok(card.panels && card.panels.gamma && card.panels.context, `card:${t} carries the card panels`);
   }
+  const { FOCUS_FUNDS, FOCUS_FIELDS, FOCUS_BUDGET_BYTES, FOCUS_METALS } = await import("../shared/flows-focus.js");
+  for (const t of FOCUS_FUNDS) {
+    const card = emitted("card:" + t);
+    ok(card && card.depth === "fund", `card:${t} is a fund dossier`);
+    ok(card.panels && card.panels.gamma && card.panels.context && card.panels.surface, `card:${t} carries the index dossier's panels`);
+    const x = emitted("card-x:" + t);
+    ok(x && x.scope === "fund" && x.cone && x.term && x.skew, `card-x:${t} carries cone, term and skew from the vol leg`);
+  }
+
+  const focus = emitted("focus");
+  ok(focus && focus.v === 1 && focus.status === "ok", "the pipeline emits a readable focus payload");
+  for (const k of ["sessionDate", "generatedAt", "readAt", "fresh", "fields", "groups", "rows", "closes", "missing"]) {
+    ok(k in focus, `focus.${k} is present`);
+  }
+  deep(focus.fields, [...FOCUS_FIELDS], "focus.fields names the row fields in the strip's vocabulary");
+  deep(focus.groups.map((g) => [g.id, g.kind]), [["gold", "metal"], ["silver", "metal"], ["copper", "metal"], ["mag7", "equity"], ["ndx10", "equity"]],
+    "five groups: gold, silver, copper, the Mag 7 and the NDX 10");
+  for (const g of focus.groups.filter((x) => x.kind === "metal")) {
+    const want = FOCUS_METALS.find((m) => m.id === g.id);
+    ok(g.lead === want.lead && g.tickers.join() === want.tickers.join(), `focus group ${g.id} lists its lead and tickers`);
+  }
+  const ndx = focus.groups.find((g) => g.id === "ndx10");
+  ok(ndx.tickers.length === 10 && /^(qqq-holdings:|fallback:)/.test(ndx.source), `the NDX 10 names ten and its source (${ndx.source})`);
+  for (const [t, row] of Object.entries(focus.rows)) {
+    for (const f of FOCUS_FIELDS) {
+      ok(row[f] === null || (typeof row[f] === "number" && Number.isFinite(row[f])), `focus.rows.${t}.${f} is a number or null`);
+    }
+    ok(row.name === undefined || (typeof row.name === "string" && row.name.length <= 40), `focus.rows.${t}.name is trimmed`);
+  }
+  for (const [t, c] of Object.entries(focus.closes)) {
+    ok(Array.isArray(c) && c.length <= 22 && c.length > 0 && c.every((v) => v === null || v > 0), `focus.closes.${t} is up to 22 closes`);
+    ok(Object.hasOwn(focus.rows, t), `focus.closes.${t} belongs to a row`);
+  }
+  ok(focus.fresh.session === focus.sessionDate && focus.fresh.source === "nightly", "focus carries the nightly freshness envelope");
+  ok(Buffer.byteLength(JSON.stringify(focus)) <= FOCUS_BUDGET_BYTES, `focus is inside its ${FOCUS_BUDGET_BYTES / 1024} KB cap`);
+
+  const roster = emitted("roster");
+  const { ROSTER_DEPTHS, ROSTER_BUDGET_BYTES } = await import("../shared/flows-universe.js");
+  ok(roster && roster.v === 1 && roster.sessionDate === focus.sessionDate, "the pipeline emits a roster for the session");
+  ok(Object.values(roster.depth).every((d) => ROSTER_DEPTHS.includes(d)), "every roster depth is board, focus, cross, index or fund");
+  deep(Object.keys(roster.session).sort(), Object.keys(roster.depth).sort(), "roster.session dates exactly the names roster.depth lists");
+  ok(FOCUS_FUNDS.every((t) => roster.depth[t] === "fund") && ["SPY", "QQQ", "IWM"].every((t) => roster.depth[t] === "index"),
+    "the funds and the indices are on the roster at their depths");
+  ok(roster.held && typeof roster.held === "object" && Array.isArray(roster.x["card-x"]) && Array.isArray(roster.x.hist),
+    "and it carries the retire ledger the next run reads");
+  ok(Buffer.byteLength(JSON.stringify(roster)) <= ROSTER_BUDGET_BYTES, `roster is inside its ${ROSTER_BUDGET_BYTES / 1024} KB cap`);
 
   const { LIVE_KEYS } = await import("../shared/flows-live.js");
   const live = (key) => {

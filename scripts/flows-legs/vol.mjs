@@ -11,7 +11,12 @@ export const VOL_DEPTH_READS = Object.freeze({
   deep: Object.freeze(["cone", "vrp", "term", "anomaly", "sentiment", "character", "rr25", "rr10"]),
   carded: Object.freeze(["cone", "vrp"]),
   index: Object.freeze(["cone", "vrp", "term", "anomaly", "sentiment", "character", "ivRank", "rr25", "rr10"]),
+  fund: Object.freeze(["cone", "vrp", "term", "anomaly", "sentiment", "character", "ivRank", "rr25", "rr10"]),
 });
+
+export const VOL_FUND_DEPTHS = Object.freeze(["index", "fund"]);
+
+const isFundDepth = (depth) => VOL_FUND_DEPTHS.includes(depth);
 
 export const VOL_RADAR_KINDS = Object.freeze(["rich", "cheap", "bullish", "bearish"]);
 
@@ -64,7 +69,7 @@ export function yearOfCandles(rows, sessionDate) {
   return list.filter((r) => { const d = candleDay(r); return d !== null && d > cutoff; });
 }
 
-export function volNames({ deep = [], crossSection = [], byTicker = new Map(), index = VOL_INDEX_NAMES } = {}) {
+export function volNames({ deep = [], crossSection = [], byTicker = new Map(), index = VOL_INDEX_NAMES, funds = [] } = {}) {
   const out = [];
   const seen = new Set();
   const add = (ticker, depth, side) => {
@@ -88,6 +93,7 @@ export function volNames({ deep = [], crossSection = [], byTicker = new Map(), i
   }
   for (const t of crossSection) add(t, "carded", null);
   for (const t of index) add(t, "index", null);
+  for (const t of funds) add(t, "fund", null);
   return out;
 }
 
@@ -259,7 +265,7 @@ export async function runVolLeg({
   });
   const entries = [...byTicker.values()];
   const ok = (p) => p && p.status === "ok";
-  const xs = crossSectionPercentiles(entries.filter((e) => e.depth !== "index"), {
+  const xs = crossSectionPercentiles(entries.filter((e) => !isFundDepth(e.depth)), {
     slope30_90: (e) => (ok(e.panels.cone) ? e.panels.cone.slope30_90 : null),
     richCheap: (e) => (ok(e.panels.cone) ? e.panels.cone.richCheap : null),
     rr25: (e) => (ok(e.panels.skew) ? e.panels.skew.rr25 : null),
@@ -280,7 +286,7 @@ export async function runVolLeg({
       bodies[kind] = r.error ? null : r.body;
       stamps.push(r.at);
     }
-    radarSection = buildVolRadar(bodies, { sessionDate, carded: names.filter((n) => n.depth !== "index").map((n) => n.ticker) });
+    radarSection = buildVolRadar(bodies, { sessionDate, carded: names.filter((n) => !isFundDepth(n.depth)).map((n) => n.ticker) });
     radarReadAt = stamps.filter(Boolean).sort()[0] || null;
   }
   return { byTicker, radar: radarSection, radarReadAt, stats, notes, sessionDate };
@@ -298,7 +304,7 @@ export function attachVol(card, leg, ticker, { ivRank = undefined } = {}) {
     return card;
   }
   try {
-    if (ivRank !== undefined && entry.depth !== "index") {
+    if (ivRank !== undefined && !isFundDepth(entry.depth)) {
       let dyn;
       try {
         dyn = ivRank === null

@@ -976,6 +976,32 @@ try {
     eq((await cxr.json()).short.status, "quiet", "and returns the stored parts");
     eq((await get("/api/flows/card-x?t=../x", auth)).status, 400, "an invalid ticker is refused at the read");
     eq((await (await get("/api/flows/card-x?t=NONE", auth)).json()).status, "pending", "and an unpublished one is pending");
+
+    for (const key of ["focus", "roster"]) {
+      eq((await (await get("/api/flows/" + key, auth)).json()).status, "pending", `the ${key} route answers pending before its first publish`);
+      eq((await get("/api/flows/" + key)).status, 401, `and refuses an anonymous reader`);
+      eq((await post(key + ":2026-09-24", "{}", INGEST_TOKEN)).status, 400, `${key} has no dated form`);
+    }
+    const focusBody = { v: 1, status: "ok", sessionDate: "2026-09-24", fields: ["px"], groups: [{ id: "gold", tickers: ["GLD"] }],
+      rows: { GLD: { px: 391.645 } }, closes: {}, missing: [] };
+    eq((await post("focus", JSON.stringify(focusBody), INGEST_TOKEN)).status, 200, "focus is an accepted nightly key");
+    eq((await (await get("/api/flows/focus", auth)).json()).rows.GLD.px, 391.645, "and reads back through its own route unchanged");
+    const rosterBody = { v: 1, sessionDate: "2026-09-24", depth: { GLD: "fund", NVDA: "focus" }, session: { GLD: "2026-09-24", NVDA: "2026-09-24" } };
+    eq((await post("roster", JSON.stringify(rosterBody), INGEST_TOKEN)).status, 200, "roster is an accepted nightly key");
+    eq((await (await get("/api/flows/roster", auth)).json()).depth.GLD, "fund", "and reads back through its own route");
+
+    const del = (key) => fetch(url("/api/flows/ingest?key=" + encodeURIComponent(key)), {
+      method: "DELETE", headers: { Authorization: "Bearer " + INGEST_TOKEN } });
+    eq((await post("card:RETIRE", JSON.stringify({ v: 2, ticker: "RETIRE", sessionDate: "2026-09-17" }), INGEST_TOKEN)).status, 200,
+       "a card to retire is written");
+    eq((await del("card:RETIRE")).status, 200, "the nightly token retires a stale card through the ingest DELETE");
+    eq((await del("card:RETIRE")).status, 404, "and a second retire of the same key is an honest 404, which the run counts as absent");
+    eq((await del("card-x:TEST")).status, 200, "card-x keys retire the same way");
+    eq((await del("hist:NONE")).status, 404, "and hist keys are deletable too");
+    eq((await (await get("/api/flows/card-x?t=TEST", auth)).json()).status, "pending", "a retired key reads as unpublished");
+    for (const key of ["universe", "focus", "roster", "board:long", "card:../etc"]) {
+      eq((await del(key)).status, 400, `${key} stays undeletable: only dated archives and per-ticker keys can be removed`);
+    }
   }
 
   {
@@ -1373,6 +1399,8 @@ try {
         eq((await res.json()).error.code, "live_token_scope", "with its own code");
       }
       eq((await ingest("live:breadth", "DELETE", LIVE_TOKEN)).status, 403, "the live token can delete nothing");
+      eq((await ingest("card:AAPL", "DELETE", LIVE_TOKEN)).status, 403,
+        "not even a card: retiring per-ticker keys is the nightly token's alone");
       eq((await ingest("board:long", "GET", LIVE_TOKEN)).status, 200,
         "it may READ the board it plans the strip from");
       eq((await ingest("card:AAPL", "GET", LIVE_TOKEN)).status, 403, "and nothing else of the nightly store");

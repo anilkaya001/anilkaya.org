@@ -496,7 +496,10 @@ roll back — the legacy allowance in `isLearnAudience()` has regressed.
 | `board:watch` | each run | `/api/flows/board?side=watch` | overwritten daily |
 | `board:<side>:YYYY-MM-DD` | each run, then again after the chain leg | the pipeline's scorer | 126 days, then swept |
 | `record` | each run (the scorer, step 7c') | `/api/flows/record` | overwritten |
-| `card:<TICKER>` | each run, best effort | `/api/flows/card?t=` | overwritten |
+| `card:<TICKER>` | each run, best effort | `/api/flows/card?t=` | overwritten; retired after 3 sessions unrebuilt |
+| `card-x:<TICKER>`, `hist:<TICKER>` | each run (vol, flow, ownership and earnings legs) | `/api/flows/card-x?t=`, `/api/flows/hist?t=` | overwritten; retired after 3 sessions unrebuilt |
+| `focus` | each run | `/api/flows/focus` (the home page's metals, Mag 7 and NDX 10) | overwritten daily |
+| `roster` | each run, after every per-ticker key | `/api/flows/roster` (search, "Open instead", absent-card classification) | overwritten daily; also the retire ledger |
 | `meta` | each run | diagnostics | overwritten |
 
 THE DATED BOARDS ARE WHY A TRACK RECORD EXISTS AT ALL. Until they did, every
@@ -512,8 +515,10 @@ forecast horizon). Steady state is about 270 rows and +3 row writes per run
 against a 100,000/day budget **shared with the live learning app**.
 
 The prune is a `DELETE` on the ingest route, and that route accepts DELETE for
-**dated boards only**. That is a blast-radius limit rather than a privilege
-one: the same bearer can already overwrite the live board, but a sweep with an
+**dated boards, and — for the nightly token only — `card:`, `card-x:` and
+`hist:` keys**. The live token deletes nothing, and no token can delete a
+view key such as `board:long`, `universe`, `focus` or `roster`. That is a
+blast-radius limit rather than a privilege one: the same bearer can already overwrite the live board, but a sweep with an
 off-by-one in its date arithmetic that could name `board:long` would take the
 section down in a way that reads as "the pipeline has never run". A miss
 answers 404 and is an ordinary empty day — the sweep names a fixed skirt of
@@ -539,6 +544,55 @@ If that read count ever becomes the binding constraint, the escape hatch is
 additive and needs no schema change: cache each session's already-scored row
 inside the `record` blob itself and fetch only the dates not yet scored, which
 turns the steady state into ~2 reads per run.
+
+**PER-TICKER KEYS ARE RETIRED, NOT LEFT TO AGE IN PLACE.** Until 2026-09-25 a
+card was overwritten only when its ticker was built again, so a name that left
+coverage (an acquisition, an index change, a market-cap move) kept serving its
+last dossier — on 2026-09-25, 110 of 262 cards were stale, back to 2026-08-24,
+each showing an old price as its headline. The nightly now retires every
+`card:`, `card-x:` and `hist:` key that is **more than three NYSE sessions
+old** (`RETIRE_AFTER_SESSIONS`, holidays excluded) **and was not rebuilt by
+the run**. Index, fund and focus dossiers are exempt: they are rebuilt every
+night by design, and on the night one fails a dated dossier is better than
+none.
+
+The run cannot list the store, so the `roster` key doubles as the ledger:
+besides `depth` and `session` for every card it published, it carries `x`
+(the tickers whose `card-x` and `hist` landed) and `held` (older keys it knows
+exist and has not yet retired, with their session). The next run reads it,
+retires what has aged out, and carries the rest. A roster with no `held`
+(the first run after this change, or one that shed its ledger to fit its
+32 KB cap) triggers a one-time probe: every screened, guaranteed, fund and
+index ticker's `card:` and `card-x:` keys are read through the ingest route
+(and `hist:` wherever either exists), at most 2,400 reads, worker-only. If
+the prior roster cannot be read at all, nothing is retired that night. A
+refused DELETE keeps its key in `held` for the next run.
+
+The roster is read twice: once as the run starts and again at the retire
+step. Only the nightly writes it, so when the late read fails the early copy
+is used and the night still retires. Only when both fail does the night
+retire nothing and write `ledger: "unread"`.
+
+The ledger is trusted only when it is whole and current. The probe runs
+whenever the prior roster's `ledger` is anything but `carried` or `bootstrap`
+(`bootstrap-partial`, `dropped`, `unread` — the roster written on a night that
+could not read its own prior has an empty `held`, so every older key would
+otherwise be forgotten for good), and whenever its `sessionDate` is more than
+one NYSE session before tonight's (a night whose roster write failed after its
+cards landed, or a run killed between the two, leaves an older roster behind,
+and the cards of the lost night are in no ledger). The probe has its own
+20-second retry budget, separate from the 90 seconds the meta and brief
+publishes rely on, and stops after 25 failed reads; either way it marks the
+ledger `bootstrap-partial` so the next night probes again. A roster write that
+fails after the deletes logs how many keys were removed.
+
+What the probe cannot see is a key that only a LOST ledger knew and whose
+ticker is in none of tonight's candidates (the harvest of about 830 names, the
+guarantee, the funds, the indices and the Nasdaq-100 constant): a name that
+left the screen entirely in the same few nights its ledger was lost. Such a
+row stays until its ticker returns to the screen. A Worker-side sweep of
+`card:`, `card-x:` and `hist:` rows by `updated_at` would close it; it is not
+in the Worker today.
 
 ### 10.5 The data pipeline
 
@@ -584,20 +638,97 @@ is the selection's rather than the market's, and every z-score on the board
 inherits it. A pool chosen for extreme tilt makes tilt look ordinary.
 
 The pool is now a **stated universe**: the largest `UNIVERSE.enrichCount` (100)
-names in the gated screen, plus any Nasdaq-100 member the screen returned.
+names in the gated screen, plus every guaranteed name (Nasdaq-100 members, the
+Mag 7 and the focus miners) the screen returned.
 Market cap is the selection axis because it is on the screener row already, is
 stable session to session, and — the property that does the work — **is
 independent of the option flow being scored**, so selecting on it cannot bias
 the cross-section.
 
-Nasdaq-100 membership is a dated repository constant (`NDX_AS_OF`), not a
-measurement: no endpoint on this key returns index membership. It is used
-**additively** — it guarantees inclusion and never excludes — so the failure
-mode of letting the list rot is a slightly different hundred names at the cost
-of five calls, never a wrong reading. Guarantee-first with a cap would let a
-stale list push real large caps off the board, which is the one way a dated
-constant could produce a wrong number; `tests/flows-universe-contract.mjs`
+Nasdaq-100 membership is **read every night** from the vendor's QQQ holdings
+(`/api/etfs/QQQ/holdings`, the stock rows with a positive weight), one call
+before selection that the regime leg then reuses for its implied correlation
+instead of reading it again. The repository constant (`NDX_AS_OF`, `NDX_100`)
+is only the fallback: when the read fails or lists fewer than 90 weighted
+stocks, the constant is unioned with whatever the read returned and the run
+says so in its log and in `meta.warnings`; `meta.warnings` also says when the
+constant is more than 400 days old. The log names the drift between the two
+every night (members the constant lacks, and constant entries no longer
+held). Membership is used **additively** — it guarantees inclusion and never
+excludes — so the failure mode is a slightly different hundred names at the
+cost of five calls, never a wrong reading; `tests/flows-universe-contract.mjs`
 asserts the order.
+
+**Guaranteed names missing from the harvest are read by ticker.** The harvest
+asks the vendor for `min_marketcap` 1e9, so a guaranteed name whose vendor cap
+is wrong (TECK read 505 million on 2026-09-24) or an index member the harvest
+did not return is fetched with one `/api/screener/stocks?ticker=A,B,…` call.
+Focus names (the Mag 7, the NDX 10 and the miners) then skip ONLY the
+market-cap floor in `eligible()`; price, option volume and open interest
+still apply. Funds never enter this path: GDX's vendor market cap reads 52.
+
+**Coverage is chosen before the earnings gate; the gate applies to the score.**
+Until 2026-09-25 only names that passed the 12-day gate were enriched, so a
+name approaching earnings kept whatever card it last had for up to twelve days
+(MU showed 978.50 against a 1,076.60 close four sessions before its report).
+The scored pool is unchanged — the largest hundred of the GATED screen plus the
+guarantee — but every name the same rule would pick from the UNGATED screen is
+now enriched too, and carded for the session with `score: null` and
+`gate: {earnings, dte}`. It is never scored and never on a board. A gated name
+that is not a focus name is enriched only when its screener row's 30-day
+average volume times its close reaches 80% of the $50M card floor: below that
+the candle median would refuse the card anyway, and the five enrichment calls
+would buy nothing. A row with no average volume is enriched rather than
+skipped on a guess.
+
+**Focus names are built deep whatever their rank.** The Mag 7, the NDX 10 and
+the six focus miners (`shared/flows-focus.js`) get the full deep treatment —
+chain, surface, dark pool, OI, term, IV rank, the flow and vol legs, earnings
+and the options engine — in ADDITION to the fifty `DEEP_NAMES`. Their card
+depth is `focus` unless they are among the fifty, in which case it is `board`;
+a focus name that sits on a board carries `dp` like any deep row. The NDX 10
+is the ten largest distinct companies by QQQ weight (GOOG collapses onto
+GOOGL), falling back to the members ranked by market cap and naming the
+fallback in its `source`.
+
+**Funds are dossiers, not coverage.** GLD, IAU, SLV, CPER, COPX, GDX, GDXJ,
+SIL and SILJ are built through the index-dossier path (13 calls each) with
+depth `fund`, and the vol leg reads them like an index (cone, term, skew, IV
+rank), outside the stock cross-section's percentiles. The vendor has no
+earnings or insiders for ETFs, so those modules are hidden for funds exactly
+as for SPY.
+
+**The `focus` key** is one `/api/screener/stocks?ticker=` call for every focus
+ticker and fund: the metal groups, the Mag 7 and the NDX 10 with their source,
+one row per ticker in the live strip's field names and units, up to 22 closes
+where the run already holds candles, and the tickers the vendor did not
+return. It is capped at 24 KB and sheds closes, never rows. When the read
+fails, or does not return a ticker, the row is filled from what the run
+already holds — the harvest's own screener row for a stock, the market leg's
+or a second by-ticker read's row for a fund — and the payload's `backfill`
+names those tickers, when they were read and why. Only a ticker no read holds
+is `missing`, and only a payload with no row at all publishes `unavailable`
+(with the groups still listed). Fund dossiers take their spot row from the
+same chain, so one failed call cannot skip all nine: a fund absent from the
+focus read is read again by ticker, one call, only on the night it is needed.
+
+`shared/flows-focus.js` is a leaf: the focus constants (`FOCUS_METALS`,
+`MAG7`, `FOCUS_FUNDS`, `FOCUS_MINERS`) and the pure functions that need nothing
+else (`ndx10`, `ndxMembership`, `focusTickers`, `focusGroups`, `focusCloses`).
+It imports nothing, so `shared/flows-live.js` can read the constants for the
+live strips without an import cycle. The payload builder needs the strip
+fields from `shared/flows-live.js`, so it lives in the pipeline's legs,
+`scripts/flows-legs/focus.mjs` (`focusRow`, `buildFocusPayload`); the
+universe contract asserts both.
+
+**The Ask indexes every deep name.** Sixty-odd deep cards at about 2 KB of
+facts each do not fit the brief's 120 KB beside its 18 KB of market facts, so
+before any name is dropped the brief LEANS the weakest board names to their
+core readings (standing, gamma and move; `CARD_CORE_FACTS` in
+`shared/flows-ask.js`), weakest first and focus names last. The log names the
+leaned names. A name is shed whole only if every name's core readings cannot
+fit, which the pipeline contract proves does not happen for the largest deep
+set the focus era can produce (73 names modelled).
 
 **The board widened for free; the expensive legs did not.** The board is built
 from data already fetched, so publishing 93 rows instead of 11 costs nothing. A
@@ -632,27 +763,33 @@ band would have answered "show me more names" by measuring more names and
 showing the same few. One rather than zero, so a score of exactly 0 — a real
 outcome — has an unambiguous home on the watch board.
 
-The call count is derived, not estimated:
+The call count is modelled per leg from the 2026-09-24 nightly (3,071 calls
+in 692 s, 4.44 calls/s) and `callModel()` in `scripts/flows-pipeline.mjs`
+reproduces that run from its own shape to within four calls (3,075):
 
 ```
-  1  screener call, x6 market-cap bands (the endpoint caps at ~50 rows
-     and takes no page or offset, so the universe is walked by band) =  6
-     -- which puts the LIVE universe at <=300 names, not the 420 the
-     dry-run fixture carries. Anything sized against 420 is sized
-     against a fixture.
-+ 3  dating probe (AAPL, dated and undated, plus candles)            =  3
-+ 1  SPY candles, to resolve the session date                        =  1
-+ 5  per enriched name x 2 sides x enrichPerSide (30)                = 300
-+ 3  per board name (max-pain, congress, gamma surface)
-        x boardSize (25) x 2                                         = 150
-+ 11 sector ETF candles, one per SPDR sector (XLB XLC XLE XLF XLI XLK
-     XLP XLRE XLU XLV XLY), for the sector momentum panel          =  11
-+ 50 option chains, one per board name (25 x 2 sides), for the
-     implied volatility surface, the skew and term scalars, the
-     day's most-traded contracts and the aggressor ladder        =  50
-+ 2  reads of the live board, for hysteresis (Worker, not vendor)
-                                                                     = 521, plus retries
+setup (session, dating, harvest) + coverage (holdings, missing members)   10
+enrichment        5 per enriched name
+market legs       49 fixed + short/insider batches + 2 per deep name
+                  + 1 earnings history per deep or window name
+sector TRIX       11
+chains            1.4 per deep name (pages and single-expiry reads)
+card reads        7 per deep name
+vol               8 per deep, 2 per cross-section, 10 per dossier, 4 radar
+flow              12.2 per deep, 3 per cross-section, 12 alert pages
+dossiers          13 per index or fund dossier
+focus             1
+misc              67 (pulse, political, news, alerts, congress, treasury)
 ```
+
+The focus-era shape (about 165 enriched, 63 deep, 100 cross-section, 12
+dossiers, 86 earnings names) models to about 3,780 calls, 14 minutes at the
+measured rate. `CALL_BUDGET` is the model at a nominal shape with headroom
+(180 enriched, 72 deep, 110 cross-section, 12 dossiers, 95 earnings: 4,191),
+and the end of every run prints `calls: modelled N for this run's shape`. The
+`BUDGET:` warning prints only when the run spends more than 10% over the model
+for its OWN shape, so it means a real overrun (retries, paging, a vendor
+change), not a stale constant.
 
 THE CHAIN LEG IS THE LAST VENDOR SPEND AND THE FIRST THING DROPPED. It runs
 after both boards, the dated archive, the watch list, the movers band, the
@@ -749,10 +886,23 @@ floor rising 1.5× per 429 and never falling within a run. A 5xx or a transport
 failure backs off but teaches the floor NOTHING — a server error is not a rate
 limit, and 5xx storms are when the run can least afford a permanent slowdown.
 
-The floor's ceiling (750 ms) is deliberately far below the per-call backoff
+The floor's ceiling (400 ms) is deliberately far below the per-call backoff
 ceiling (5 s). One call may sleep five seconds; every call may not, because
-`CALL_BUDGET × 5s` is 79 minutes against the 36-minute deadline — a run that
-publishes nothing at all, which is strictly worse than being rate-limited.
+`CALL_BUDGET × 5s` is about 350 minutes against the 36-minute deadline — a run
+that publishes nothing at all, which is strictly worse than being rate-limited.
+It was 750 ms until 2026-09-25, when the budget was regenerated from measured
+legs (1,613 → 4,191): at 750 ms that budget needs 52 minutes, so the relation
+below had silently stopped holding once the real run passed 2,400 calls. At
+400 ms it needs 27.9 minutes against the 30 the chain reserve leaves. The
+evidence for lowering it is the 2026-09-24 nightly's own floor verdict: "1 of
+3071 calls refused (0.0%), backoff 0.2s against 256.3s of queueing (0% as
+large). The floor is CONSERVATIVE — refusals are under 5%", with the learned
+floor never above 150 ms, so 400 ms is still more than two and a half times
+the highest floor the vendor has ever asked for. The ceiling caps only what
+the delay decays back to between refusals: a refused call still backs off to
+the 5-second per-call ceiling (the pipeline contract asserts both). If a
+future verdict reads "roughly where the vendor wants it" at 400 ms, cut calls
+before raising it.
 `rateFloorSurvivesBudget()` asserts the relation and the contract test holds it
 from both sides, so raising the ceiling without raising the deadline fails the
 build rather than the morning.

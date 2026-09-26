@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { buildFactIndex, selectFacts, numeralsIn, guardAnswer, renderFactsPlain, promptFor,
          tickerCoverage, shedCardFacts, emptySilences, fileSilence, SILENCE_KINDS,
-         promptForSummary, renderSummaryPlain, summaryFingerprint, cardFacts,
+         promptForSummary, renderSummaryPlain, summaryFingerprint, cardFacts, CARD_CORE_FACTS,
          refreshIntradayFacts, briefAge, INTRADAY_SOURCES }
   from "../shared/flows-ask.js";
 import { buildBrief, briefStoreFrom } from "../shared/flows-brief.js";
@@ -1578,6 +1578,32 @@ import { chromium } from "playwright";
   const none = shedCardFacts(all, idx.cardNames, () => -1);
   ok(none.facts.length === all.length && none.namesIndexed.shed === 0 && none.namesIndexed.indexed === 4,
      "and under budget nothing is shed and the count says all four are indexed");
+
+  const kindOf = (f) => String(f.id).split("/").pop();
+  const perNameCount = (facts, t) => facts.filter((f) => f.source === "card:" + t).length;
+  const fullCount = new Map(idx.cardNames.map((t) => [t, perNameCount(all, t)]));
+  const coreOnly = all.filter((f) => CARD_CORE_FACTS.includes(kindOf(f))).length;
+  const last = idx.cardNames[idx.cardNames.length - 1];
+  const lastExtra = all.filter((f) => f.source === "card:" + last && !CARD_CORE_FACTS.includes(kindOf(f))).length;
+  ok(lastExtra > 0, "the least-read name carries a reading beyond its core, so there is something to lean");
+  const lean = shedCardFacts(all, idx.cardNames, (facts) => facts.length - (all.length - lastExtra), { lean: CARD_CORE_FACTS });
+  eq(lean.namesIndexed.shed, 0, "LEAN: a small overrun leans a name instead of shedding one whole");
+  eq(lean.namesIndexed.indexed, 4, "so every name stays indexed");
+  assert.deepEqual(lean.leaned, [last], "and the name leaned is the last in the order, the least read"); checks++;
+  ok(lean.facts.filter((f) => f.source === "card:" + last).every((f) => CARD_CORE_FACTS.includes(kindOf(f))),
+     "it keeps only its core readings: " + CARD_CORE_FACTS.join(", "));
+  ok(idx.cardNames.slice(0, -1).every((t) => perNameCount(lean.facts, t) === fullCount.get(t)),
+     "and every stronger name keeps all of its readings");
+  eq(lean.namesIndexed.lean, 1, "the published count carries how many names were leaned");
+  const deep = shedCardFacts(all, idx.cardNames, (facts) => facts.length - coreOnly, { lean: CARD_CORE_FACTS });
+  ok(deep.namesIndexed.shed === 0 && deep.leaned.length === 4 && deep.facts.length === coreOnly,
+     "a budget that fits only the core readings leans every name, weakest first, and still sheds none");
+  const tight = shedCardFacts(all, idx.cardNames, (facts) => facts.length - 3, { lean: CARD_CORE_FACTS });
+  ok(tight.namesIndexed.shed > 0 && tight.namesIndexed.indexed + tight.namesIndexed.shed === 4 &&
+     tight.leaned.every((t) => idx.cardNames.indexOf(t) < tight.namesIndexed.indexed),
+     "only when the core readings of every name cannot fit does the shed drop names whole, and the lean list never names a shed name");
+  const plainShed = shedCardFacts(all, idx.cardNames, (facts) => facts.length - 12);
+  ok(!Object.hasOwn(plainShed.namesIndexed, "lean"), "without the lean option the shed is unchanged");
 
   let scanned = 0;
   for (const f of all) {

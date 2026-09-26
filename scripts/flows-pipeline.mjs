@@ -44,15 +44,23 @@ import * as QP from "./flows-quant-pipeline.mjs";
 import { marketAggregate, MARKET_NOTES } from "../shared/flows-market.js";
 import {
   capBands, selectCoverage, NDX_100, NDX_AS_OF, SELECTION_EPOCH, UNIVERSE_NOTES,
-  PICK_SIZE, PICK_INDEX,
+  PICK_SIZE, PICK_INDEX, ndxConstantAge, priorLedger, retirePlan, buildRoster, RETIRE_AFTER_SESSIONS,
+  rosterKeyTicker,
 } from "../shared/flows-universe.js";
+import {
+  MAG7 as FOCUS_MAG7, FOCUS_FUNDS, FOCUS_MINERS, ndx10, ndxMembership, focusDeepSet, focusTickers, focusGroups,
+  focusCloses, FOCUS_BUDGET_BYTES,
+} from "../shared/flows-focus.js";
+import { buildFocusPayload } from "./flows-legs/focus.mjs";
 import { runVolLeg, volNames, attachVol, publishVol, yearOfCandles } from "./flows-legs/vol.mjs";
 import { fakeVolVendor } from "./flows-legs/vol-fake.mjs";
-import { harvestScreener, INDEX_TICKERS } from "./flows-legs/universe.mjs";
-import { runMarketLegs, windowTickersOf, totalsHistory, MARKET_LEG_CALLS } from "./flows-legs/market.mjs";
+import {
+  harvestScreener, INDEX_TICKERS, readFocusRows, fetchMissingMembers, readHoldings, withPrefetched,
+} from "./flows-legs/universe.mjs";
+import { runMarketLegs, windowTickersOf, totalsHistory } from "./flows-legs/market.mjs";
 import { makeFakeVendor } from "./flows-legs/fake-vendor.mjs";
 import { makeCardXStore, publishCardX } from "./flows-legs/card-x.mjs";
-import { buildIndexDossiers } from "./flows-legs/index-dossier.mjs";
+import { buildIndexDossiers, dossierRoster } from "./flows-legs/index-dossier.mjs";
 import {
   runLive, runLiveLoop, chainDispatch, dryLiveTicks, readHeldAlerts, readLiveClock, LIVE_READ_PACE_MS,
 } from "./flows-legs/live.mjs";
@@ -129,10 +137,57 @@ export const RATE = {
   startDelayMs: 120, minDelayMs: 60, maxDelayMs: 5000, maxRetries: 4,
   maxRetryAfterMs: 30_000,
 
-  floorCeilingMs: 750,
+  floorCeilingMs: 400,
 };
 
-export const CALL_BUDGET = 1350 + MARKET_LEG_CALLS;
+export const CALL_COST = Object.freeze({
+  setup: 8,
+  coverage: 2,
+  enrich: 5,
+  marketFixed: 1 + 33 + 15,
+  shortBatch: 50,
+  insiderBatch: 25,
+  ownershipPerDeep: 2,
+  earningsPerName: 1,
+  sectorTrix: 11,
+  chainPerDeep: 1.4,
+  readsPerDeep: 7,
+  volPerDeep: 8,
+  volPerCross: 2,
+  volPerDossier: 10,
+  volRadar: 4,
+  flowPerDeep: 12.2,
+  flowPerCross: 3,
+  flowAlertPages: 12,
+  dossier: 13,
+  focus: 1,
+  misc: 67,
+});
+
+export const NOMINAL_SHAPE = Object.freeze({ enriched: 180, deep: 72, cross: 110, dossiers: 12, earnings: 95 });
+
+export function callModel({ enriched = 0, deep = 0, cross = 0, dossiers = 0, earnings = 0 } = {}, cost = CALL_COST) {
+  const carded = deep + cross;
+  const legs = {
+    setup: cost.setup + cost.coverage,
+    enrich: cost.enrich * enriched,
+    market: cost.marketFixed + Math.ceil(carded / cost.shortBatch) + Math.ceil(carded / cost.insiderBatch) +
+      cost.ownershipPerDeep * deep + cost.earningsPerName * earnings,
+    sectorTrix: cost.sectorTrix,
+    chains: Math.ceil(cost.chainPerDeep * deep),
+    cards: cost.readsPerDeep * deep,
+    vol: cost.volPerDeep * deep + cost.volPerCross * cross + cost.volPerDossier * dossiers + cost.volRadar,
+    flow: Math.ceil(cost.flowPerDeep * deep) + cost.flowPerCross * cross + cost.flowAlertPages,
+    dossiers: cost.dossier * dossiers,
+    focus: cost.focus,
+    misc: cost.misc,
+  };
+  return { legs, total: Object.values(legs).reduce((a, b) => a + b, 0) };
+}
+
+export const CALL_BUDGET = callModel(NOMINAL_SHAPE).total;
+
+export const CALL_OVERRUN_MARGIN = 0.10;
 
 export const EARNINGS_GATE_DAYS = 12;
 
@@ -533,7 +588,7 @@ async function uw(path, params = {}, { envelope = false } = {}) {
   throw new Error(`${path} -> exhausted retries`);
 }
 
-function eligible(row) {
+function eligible(row, { skipCap = false } = {}) {
   const price = num(row.close);
   const cap = num(row.marketcap);
   const callVol = num(row.call_volume);
@@ -544,10 +599,26 @@ function eligible(row) {
   if (row.is_index === true) return false;
   if (UNIVERSE.excludeIssueTypes.includes(row.issue_type)) return false;
   if (!(price >= UNIVERSE.minPrice)) return false;
-  if (!(cap >= UNIVERSE.minMarketCap)) return false;
+  if (!skipCap && !(cap >= UNIVERSE.minMarketCap)) return false;
   if (!(callVol + putVol >= UNIVERSE.minOptionVolume)) return false;
   if (!(oi >= UNIVERSE.minOpenInterest)) return false;
   return true;
+}
+
+export const GATED_LIQUIDITY_MARGIN = 0.8;
+
+export function screenerDollarVolume(row) {
+  const px = vendorNum(row && row.close);
+  const adv = vendorNum(row && row.avg30_volume);
+  return px !== null && adv !== null && px > 0 && adv >= 0 ? px * adv : null;
+}
+
+export function gatedWorthEnriching(row, { focus = new Set(), floor = UNIVERSE.minDollarVolume,
+  margin = GATED_LIQUIDITY_MARGIN } = {}) {
+  if (!row || typeof row.ticker !== "string") return false;
+  if (focus.has(row.ticker)) return true;
+  const dv = screenerDollarVolume(row);
+  return dv === null || dv >= floor * margin;
 }
 
 function screenerTilt(row) {
@@ -1741,13 +1812,16 @@ async function readStoredOnce(key) {
   }
 }
 
-async function readStored(key, { retries = READ_RETRIES, pause = sleep } = {}) {
+async function readStored(key, { retries = READ_RETRIES, pause = sleep, budget = null } = {}) {
   if (DRY_RUN) return { payload: null, absent: true, status: 0 };
   let read = await readStoredOnce(key);
   for (let attempt = 0; read.failed && READ_RETRYABLE(read.status); attempt++) {
-    const wait = publishRetryDelay(attempt, { retries, spentMs: publishRetrySpentMs });
+    const wait = budget
+      ? publishRetryDelay(attempt, { retries, spentMs: budget.spentMs, budgetMs: budget.budgetMs })
+      : publishRetryDelay(attempt, { retries, spentMs: publishRetrySpentMs });
     if (wait === null) break;
-    publishRetrySpentMs += wait;
+    if (budget) budget.spentMs += wait;
+    else publishRetrySpentMs += wait;
     console.warn(`  read ${key}: ${read.status ? `HTTP ${read.status}` : read.detail || "no answer"}` +
       ` — waiting ${wait}ms and reading again (retry ${attempt + 1} of ${retries})`);
     await pause(wait);
@@ -2911,6 +2985,62 @@ function mulberry(seed) {
 
 const SECTORS = ["Technology", "Healthcare", "Energy", "Financials", "Consumer Cyclical", "Industrials"];
 
+export const DRY_FOCUS_ROWS = Object.freeze([
+  ["NVDA", 186.2, 4.4e12, "Technology", "NVIDIA Corporation"],
+  ["AAPL", 254.1, 3.8e12, "Technology", "Apple Inc."],
+  ["MSFT", 509.9, 3.7e12, "Technology", "Microsoft Corporation"],
+  ["AMZN", 221.4, 2.4e12, "Consumer Cyclical", "Amazon.com, Inc."],
+  ["GOOGL", 342.48, 2.0e12, "Technology", "Alphabet Inc. Class A"],
+  ["GOOG", 338.97, 1.88e12, "Technology", "Alphabet Inc. Class C"],
+  ["META", 742.3, 1.85e12, "Technology", "Meta Platforms, Inc."],
+  ["TSLA", 438.7, 1.4e12, "Consumer Cyclical", "Tesla, Inc."],
+  ["AVGO", 339.5, 1.6e12, "Technology", "Broadcom Inc."],
+  ["MU", 1076.6, 1.2e12, "Technology", "Micron Technology, Inc.", 5],
+  ["COST", 931.2, 4.1e11, "Consumer Cyclical", "Costco Wholesale Corporation"],
+  ["NFLX", 1210.4, 5.1e11, "Technology", "Netflix, Inc."],
+  ["NEM", 121.285, 1.28e11, "Basic Materials", "Newmont Corporation"],
+  ["AEM", 193.71, 9.69e10, "Basic Materials", "Agnico Eagle Mines Limited"],
+  ["PAAS", 47.505, 5.05e8, "Basic Materials", "Pan American Silver Corp."],
+  ["WPM", 143.99, 6.54e10, "Basic Materials", "Wheaton Precious Metals Corp."],
+  ["FCX", 72.045, 1.03e11, "Basic Materials", "Freeport-McMoRan Inc."],
+  ["SCCO", 201.39, 1.68e11, "Basic Materials", "Southern Copper Corporation"],
+].map((r) => Object.freeze(r)));
+
+function fakeFocusRows() {
+  const gateOrigin = nextWeekday(DRY_SESSION_DATE);
+  const rnd = mulberry(20260925);
+  return DRY_FOCUS_ROWS.map(([ticker, price, cap, sector, name, earnIn]) => {
+    const callVol = Math.round(20000 + rnd() * 900000);
+    const putVol = Math.round(15000 + rnd() * 700000);
+    const bull = rnd() * 6e7;
+    const bear = rnd() * 6e7;
+    const iv = 0.2 + rnd() * 0.35;
+    return {
+      ticker, full_name: name, close: price.toFixed(2), prev_close: (price * (0.97 + rnd() * 0.06)).toFixed(2),
+      marketcap: String(Math.round(cap)), sector, issue_type: "Common Stock", is_index: false,
+      call_volume: callVol, put_volume: putVol,
+      call_open_interest: Math.round(200000 + rnd() * 3e6), put_open_interest: Math.round(180000 + rnd() * 2e6),
+      prev_call_oi: Math.round(200000 + rnd() * 3e6), prev_put_oi: Math.round(180000 + rnd() * 2e6),
+      total_open_interest: Math.round(500000 + rnd() * 5e6),
+      avg_30_day_call_volume: String(Math.round(callVol * (0.5 + rnd()))),
+      avg_30_day_put_volume: String(Math.round(putVol * (0.5 + rnd()))),
+      bullish_premium: String(Math.round(bull)), bearish_premium: String(Math.round(bear)),
+      net_call_premium: String(Math.round((rnd() - 0.5) * 6e7)), net_put_premium: String(Math.round((rnd() - 0.5) * 4e7)),
+      call_premium: String(Math.round(bull + rnd() * 2e7)), put_premium: String(Math.round(bear + rnd() * 2e7)),
+      call_volume_ask_side: Math.round(callVol * (0.3 + rnd() * 0.4)), call_volume_bid_side: Math.round(callVol * (0.3 + rnd() * 0.4)),
+      put_volume_ask_side: Math.round(putVol * (0.3 + rnd() * 0.4)), put_volume_bid_side: Math.round(putVol * (0.3 + rnd() * 0.4)),
+      iv30d: iv.toFixed(4), iv30d_1w: (iv * (0.9 + rnd() * 0.2)).toFixed(4), iv30d_1d: (iv * (0.95 + rnd() * 0.1)).toFixed(4),
+      iv30d_1m: (iv * (0.85 + rnd() * 0.3)).toFixed(4), iv_rank: (rnd() * 100).toFixed(4),
+      implied_move: (price * iv * 0.06).toFixed(4), implied_move_perc: (iv * 0.06).toFixed(6), volatility: iv.toFixed(4),
+      put_call_ratio: (putVol / callVol).toFixed(4), week_52_high: (price * (1.05 + rnd() * 0.3)).toFixed(2),
+      week_52_low: (price * (0.5 + rnd() * 0.3)).toFixed(2), relative_volume: (0.5 + rnd() * 2).toFixed(2),
+      stock_volume: Math.round(5e6 + rnd() * 8e7),
+      next_earnings_date: new Date(Date.parse(gateOrigin + "T00:00:00Z") + (earnIn || 20 + Math.floor(rnd() * 30)) * 86400000)
+        .toISOString().slice(0, 10),
+    };
+  });
+}
+
 function fakeScreener(count) {
 
   const gateOrigin = nextWeekday(DRY_SESSION_DATE);
@@ -3076,6 +3206,14 @@ function fakeNewsHeadlines(tickers) {
     [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
   return { data: shuffled };
+}
+
+export function markGate(card, e) {
+  if (!card || !e || !e.gate) return card;
+  card.score = null;
+  card.conviction = null;
+  card.gate = { earnings: e.gate.earnings, dte: e.gate.dte };
+  return card;
 }
 
 function card0Unusable(row) {
@@ -4013,12 +4151,12 @@ function indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, co
       if (!Array.isArray(rows) || !rows.length) return null;
       return buildChainPanels(rows, { spot, asOf: sessionDate, ticker, complete: false, pages: 1 });
     },
-    card: ({ ticker, row, raw, features, reads, chain }) => {
+    card: ({ ticker, row, raw, features, reads, chain, depth = "index" }) => {
       const card = buildCard({
-        ticker, row: sessionRow(row, features), features,
+        ticker, row: { ...sessionRow(row, features), nm: typeof row.full_name === "string" && row.full_name.trim() ? row.full_name.trim().slice(0, 60) : null }, features,
         strikes: raw.strikes, ticks: raw.ticks, expiries: raw.expiries,
         surface: reads.surface, chain,
-        chainMissing: chain ? null : "the index chain page could not be read this run",
+        chainMissing: chain ? null : `the ${depth === "fund" ? "fund" : "index"} chain page could not be read this run`,
         scoreHistory: null, weights: null,
         maxPain: reads.maxPain, congress: congressRows(ticker, congressState), generatedAt, sessionDate,
         darkpool: reads.darkpool, oiDeltas: reads.oiDeltas, termStructure: reads.termStructure, ivRank: reads.ivRank,
@@ -4029,6 +4167,136 @@ function indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, co
       return card;
     },
   };
+}
+
+export function pickPriorRoster(late, early, { log = () => {} } = {}) {
+  if (!late || !late.failed) return late;
+  if (!early || early.failed) return late;
+  log(`  roster: the prior roster could not be read now (HTTP ${late.status}); using the copy read at the start of ` +
+    "this run, which only this run could have changed");
+  return early;
+}
+
+export const LEDGER_PROBE_MAX = 2400;
+
+export const LEDGER_PROBE_FAIL_MAX = 25;
+
+export const LEDGER_PROBE_RETRY_BUDGET_MS = 20_000;
+
+export async function bootstrapLedger({ tickers = [], landed = new Set(), reader, pool = runPooled, width = 4,
+  deadline = null, limit = LEDGER_PROBE_MAX, failLimit = LEDGER_PROBE_FAIL_MAX } = {}) {
+  const known = new Map();
+  let reads = 0, failed = 0, capped = false;
+  const dayOf = (p) => {
+    const d = p && typeof p === "object" ? (p.sessionDate || String(p.generatedAt || "").slice(0, 10)) : null;
+    return ARCHIVE_DATE_RE.test(String(d || "")) ? d : null;
+  };
+  const probe = async (key) => {
+    if (reads >= limit || failed >= failLimit || (Number.isFinite(deadline) && Date.now() > deadline)) {
+      capped = true;
+      return "skipped";
+    }
+    reads++;
+    const r = await reader(key);
+    if (!r || r.failed) { failed++; return "failed"; }
+    if (r.absent || !r.payload || r.payload.status === "pending") return "absent";
+    known.set(key, dayOf(r.payload));
+    return "present";
+  };
+  const list = [...new Set(tickers)].filter((t) => rosterKeyTicker("card:" + t)).sort();
+  await pool(list, async (t) => {
+    const card = landed.has("card:" + t) ? "landed" : await probe("card:" + t);
+    const x = landed.has("card-x:" + t) ? "landed" : await probe("card-x:" + t);
+    if ((card === "present" || x === "present" || card === "landed" || x === "landed") && !landed.has("hist:" + t)) {
+      await probe("hist:" + t);
+    }
+  }, { width });
+  return { known, reads, failed, capped };
+}
+
+export async function retireAndRoster({
+  sessionDate, generatedAt, depth = new Map(), exempt = new Set(), candidates = [], reader, prior = null,
+  landed = landedKeys, deadline = null, remove = retire, write = publish, log = (line) => console.log(line),
+} = {}) {
+  if (!ARCHIVE_DATE_RE.test(String(sessionDate || ""))) {
+    log("  roster: no session date, so no card can be aged — nothing retired, no roster written");
+    return null;
+  }
+  const priorPayload = prior && prior.payload ? prior.payload : null;
+  let { known, complete, why } = priorLedger(priorPayload, { sessionDate });
+  let ledger = "carried";
+  if (prior && prior.failed) {
+    ledger = "unread";
+    known = new Map();
+    log(`  roster: the prior roster could not be read (HTTP ${prior.status}) — nothing is retired tonight, and the next run probes the store to rebuild the ledger`);
+  } else if (!complete) {
+    const probed = await bootstrapLedger({ tickers: [...new Set([...candidates, ...known.keys()].map((k) => rosterKeyTicker(k) || k))],
+      landed, reader, deadline });
+    for (const [k, v] of probed.known) if (!known.has(k) || v) known.set(k, v);
+    ledger = probed.capped || probed.failed ? "bootstrap-partial" : "bootstrap";
+    log(`  roster: the prior ledger is not complete (${why}), so the store was probed — ${probed.reads} read(s), ` +
+      `${probed.known.size} older key(s) found` + (probed.failed ? `, ${probed.failed} read(s) failed` : "") +
+      (probed.capped ? " — the probe stopped at its cap, its failure limit or the deadline" : ""));
+  }
+  const plan = retirePlan({ sessionDate, known, landed, exempt });
+  let removed = 0, absent = 0, refused = 0, streak = 0, lastStatus = 0;
+  const gone = [];
+  const held = { ...plan.held };
+  for (const key of plan.retire) {
+    if (streak >= 3) { held[key] = known.get(key); refused++; continue; }
+    const r = await remove(key);
+    if (r && r.ok) { removed++; streak = 0; gone.push(key); continue; }
+    if (r && r.status === 404) { absent++; streak = 0; gone.push(key); continue; }
+    refused++; streak++; lastStatus = r ? r.status : 0;
+    held[key] = known.get(key);
+  }
+  log(`  retire: ${plan.retire.length} card/card-x/hist key(s) older than ${RETIRE_AFTER_SESSIONS} sessions and not ` +
+    `rebuilt tonight — ${removed} removed` + (absent ? `, ${absent} already absent` : "") +
+    (refused ? `, ${refused} refused (last HTTP ${lastStatus}), kept for the next run` : "") +
+    `; ${Object.keys(held).length} older key(s) held (${plan.kept.young} within the window, ${plan.kept.exempt} exempt` +
+    (plan.kept.undated ? `, ${plan.kept.undated} undated` : "") + ")");
+  const built = buildRoster({ sessionDate, generatedAt, depth, landed, held, retired: gone, ledger });
+  let written = true;
+  try {
+    if (!built.fits) {
+      log(`  roster: ${built.bytes} bytes, over the cap — the held ledger is dropped so the roster still publishes`);
+      const slim = buildRoster({ sessionDate, generatedAt, depth, landed, held: {}, retired: [], ledger: "dropped" });
+      await write("roster", slim.payload);
+    } else {
+      await write("roster", built.payload);
+    }
+  } catch (error) {
+    written = false;
+    log(`  roster: NOT written (${error.message}) after ${removed} key(s) were removed` +
+      (absent ? ` and ${absent} found already absent` : "") +
+      ` — the stored roster stays at its older session, so the next run finds the gap and probes the store`);
+  }
+  const counts = built.payload.counts;
+  if (written) {
+    log(`  roster: ${Object.keys(built.payload.depth).length} carded name(s) — ` +
+      Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(", ") + `, ${built.bytes} bytes (ledger ${ledger})`);
+  }
+  return { retired: removed, absent, refused, held: Object.keys(held).length, ledger, bytes: built.bytes, written };
+}
+
+export function dryRosterReader(sessionDate) {
+  const back = (n) => {
+    let d = sessionDate;
+    for (let i = 0; i < n;) {
+      d = new Date(Date.parse(d + "T00:00:00Z") - 86400000).toISOString().slice(0, 10);
+      const wd = new Date(d + "T00:00:00Z").getUTCDay();
+      if (wd !== 0 && wd !== 6) i++;
+    }
+    return d;
+  };
+  const prior = {
+    v: 1, sessionDate: back(1), generatedAt: back(1) + "T21:40:00.000Z",
+    depth: { AAPL: "focus", GLD: "fund", SPY: "index" }, session: { AAPL: back(1), GLD: back(1), SPY: back(1) },
+    x: { "card-x": ["AAPL"], hist: ["AAPL"] },
+    held: { "card:ZZRET": back(5), "card-x:ZZRET": back(5), "hist:ZZRET": back(5), "card:ZZHLD": back(2),
+      "card:NVDA": back(6), "card-x:ZZXON": back(4) },
+  };
+  return async (key) => (key === "roster" ? { payload: prior, status: 200 } : { payload: null, absent: true, status: 0 });
 }
 
 async function runLiveMode() {
@@ -4169,8 +4437,10 @@ async function main() {
     if (read.rows.length && !read.truncated && !read.repeated && !read.errors.length) harvest = read;
     else console.warn("  screener harvest: not usable, so the cap-band sweep reads the universe instead");
   }
+  const dryScreener = DRY_RUN ? [...fakeScreener(420), ...fakeFocusRows()] : null;
+  const vendor = DRY_RUN ? makeFakeVendor({ sessionDate, screenerRows: dryScreener }) : uw;
   if (DRY_RUN) {
-    screener = fakeScreener(420);
+    screener = dryScreener.filter((r) => num(r.marketcap) >= UNIVERSE.minMarketCap);
     screenerReadAt = new Date().toISOString();
   } else if (harvest) {
     screener = harvest.rows;
@@ -4224,17 +4494,51 @@ async function main() {
     }
   }
 
-  const universe = screener.filter(eligible);
+  const holdings = await readHoldings(vendor);
+  const membership = ndxMembership(holdings.rows, { fallback: NDX_100 });
+  const ndx = ndx10(holdings.rows, screener, { fallback: NDX_100 });
+  const focusDeep = focusDeepSet(ndx);
+  const coverageNotes = [];
+  console.log(`  nasdaq-100: ${membership.members.length} member(s) from ` +
+    (membership.fallback
+      ? `the ${NDX_AS_OF} constant plus the read — FALLBACK: ${membership.fallback}`
+      : `the vendor's QQQ holdings dated ${membership.asOf || "undated"}`) +
+    (membership.added.length ? `; ${membership.added.length} not in the constant (${membership.added.slice(0, 12).join(", ")})` : "") +
+    (membership.dropped.length ? `; ${membership.dropped.length} in the constant and no longer held (${membership.dropped.slice(0, 12).join(", ")})` : ""));
+  console.log(`  NDX 10: ${ndx.tickers.join(", ") || "none"} (${ndx.source})`);
+  if (membership.fallback) coverageNotes.push(`Nasdaq-100 membership fell back to the ${NDX_AS_OF} constant: ${membership.fallback}.`);
+  if (ndx.source.startsWith("fallback")) coverageNotes.push(`The NDX 10 was ranked by market cap (${ndx.source}).`);
+  const ndxAge = ndxConstantAge(sessionDate);
+  if (ndxAge.stale) {
+    coverageNotes.push(`The Nasdaq-100 fallback constant is ${ndxAge.days} days old (dated ${NDX_AS_OF}); refresh it from the QQQ holdings.`);
+    console.warn(`  nasdaq-100: the fallback constant is ${ndxAge.days} days old (dated ${NDX_AS_OF})`);
+  }
+  const guaranteed = [...new Set([...membership.members, ...FOCUS_MAG7, ...FOCUS_MINERS, ...ndx.tickers])];
+  {
+    const fetched = await fetchMissingMembers(vendor, guaranteed, new Set(screener.map((r) => r && r.ticker)),
+      { date: screenerDate });
+    if (fetched.rows.length) screener = screener.concat(fetched.rows);
+    console.log(`  guaranteed names: ${guaranteed.length}; ${fetched.asked.length} absent from the harvest` +
+      (fetched.calls ? `, read by ticker in ${fetched.calls} call(s): ${fetched.rows.length} returned` +
+        (fetched.missing.length ? `, ${fetched.missing.length} unknown to the screener (${fetched.missing.slice(0, 12).join(", ")})` : "") +
+        (fetched.ok ? "" : ` — the read FAILED (${fetched.error})`) : ""));
+  }
+
+  const eligibleFor = (row) => eligible(row) || (!!row && focusDeep.has(row.ticker) && eligible(row, { skipCap: true }));
+  const universe = screener.filter(eligibleFor);
   console.log(`universe: ${universe.length} eligible of ${screener.length} screened`);
   if (universe.length < 50) throw new Error(`universe too small (${universe.length}) — refusing to publish`);
 
   const screenerByTicker = new Map(universe.map((r) => [r.ticker, r]));
 
   const withTilt = universe.map((row) => ({ row, tilt: screenerTilt(row) }));
-  const tilted = withTilt.filter(({ row }) => {
+  const gateOf = (row) => {
     const dte = daysToEarnings(row, gateOrigin);
-    return dte === null || dte < 0 || dte > EARNINGS_GATE_DAYS;
-  });
+    return dte === null || dte < 0 || dte > EARNINGS_GATE_DAYS ? null
+      : { earnings: String(row.next_earnings_date).slice(0, 10), dte };
+  };
+  const tilted = withTilt.filter(({ row }) => !gateOf(row));
+  const gatedTickers = new Set(withTilt.filter(({ row }) => gateOf(row)).map(({ row }) => row.ticker));
   console.log(`after earnings gate: ${tilted.length}`);
 
   const composite = tilted.map(({ row, tilt }) => ({
@@ -4244,19 +4548,34 @@ async function main() {
            Math.tanh(tilt.surpriseTilt || 0),
   })).sort((a, b) => b.rough - a.rough);
 
-  const tiltByPick = new Map(tilted.map(({ row, tilt }) => [row.ticker, tilt]));
-  const coverage = selectCoverage(tilted.map(({ row }) => row), {
+  const tiltByPick = new Map(withTilt.map(({ row, tilt }) => [row.ticker, tilt]));
+  const scoredCoverage = selectCoverage(tilted.map(({ row }) => row), {
     count: UNIVERSE.enrichCount,
-    guaranteed: NDX_100,
+    guaranteed,
   });
-  const picks = coverage.map(({ row, why }) => ({
-    row, why, tilt: tiltByPick.get(row.ticker) || screenerTilt(row),
+  const scoredPicked = new Set(scoredCoverage.map(({ row }) => row.ticker));
+  const gatedPool = selectCoverage(withTilt.map(({ row }) => row), {
+    count: UNIVERSE.enrichCount,
+    guaranteed,
+  }).filter(({ row }) => !scoredPicked.has(row.ticker) && gatedTickers.has(row.ticker));
+  const gatedCoverage = gatedPool.filter(({ row }) => gatedWorthEnriching(row, { focus: focusDeep }));
+  const gatedThin = gatedPool.filter(({ row }) => !gatedWorthEnriching(row, { focus: focusDeep })).map(({ row }) => row.ticker);
+  const picks = scoredCoverage.concat(gatedCoverage).map(({ row, why }) => ({
+    row, why, tilt: tiltByPick.get(row.ticker) || screenerTilt(row), gate: gateOf(row),
   }));
-  const byIndex = picks.filter((p) => p.why === PICK_INDEX).length;
+  const byIndex = scoredCoverage.filter((p) => p.why === PICK_INDEX).length;
+  const focusMissing = [...focusDeep].filter((t) => !picks.some((p) => p.row.ticker === t));
   console.log(
-    `enriching ${picks.length} names: ${picks.length - byIndex} by market cap ` +
+    `enriching ${picks.length} names: ${scoredCoverage.length - byIndex} by market cap ` +
     `(the largest ${UNIVERSE.enrichCount} of ${tilted.length} gated), ` +
-    `${byIndex} added by Nasdaq-100 membership (list dated ${NDX_AS_OF})`);
+    `${byIndex} added by Nasdaq-100 membership, the Mag 7 and the miners ` +
+    `(${membership.fallback ? `constant dated ${NDX_AS_OF}` : `QQQ holdings ${membership.asOf || "undated"}`}), ` +
+    `${gatedCoverage.length} inside the ${EARNINGS_GATE_DAYS}-day earnings gate carded without a score` +
+    (gatedThin.length ? ` (${gatedThin.length} more gated name(s) skipped before enrichment: their 30-day average ` +
+      `dollar volume is under ${Math.round(GATED_LIQUIDITY_MARGIN * 100)}% of the ` +
+      `$${(UNIVERSE.minDollarVolume / 1e6).toFixed(0)}M card floor — ${gatedThin.slice(0, 12).join(", ")})` : "") + "; " +
+    `${focusDeep.size - focusMissing.length} of ${focusDeep.size} focus name(s) among them` +
+    (focusMissing.length ? ` (not screened or not eligible: ${focusMissing.join(", ")})` : ""));
 
   const enriched = [];
   let failed = 0;
@@ -4285,7 +4604,7 @@ async function main() {
           }
         }
         const features = computeFeatures({ ...raw, ticker, spot, sessionDate, tilt: pick.tilt });
-        return { features, raw, tilt: pick.tilt, row: pick.row };
+        return { features, raw, tilt: pick.tilt, row: pick.row, gate: pick.gate || null };
       } catch (error) {
         console.warn(`  ${ticker}: enrichment failed — ${error.message}`);
         return null;
@@ -4317,13 +4636,25 @@ async function main() {
 
   const MIN_ROWS = 10;
 
-  const liquid = enriched.filter((e) => e.features.dollarVolume >= UNIVERSE.minDollarVolume);
-  const dropped = enriched.length - liquid.length;
+  const scorable = enriched.filter((e) => !e.gate);
+  const gatedEnriched = enriched.filter((e) => e.gate);
+  const liquid = scorable.filter((e) => e.features.dollarVolume >= UNIVERSE.minDollarVolume);
+  const dropped = scorable.length - liquid.length;
   console.log(
-    `liquidity floor: ${liquid.length}/${enriched.length} clear ` +
+    `liquidity floor: ${liquid.length}/${scorable.length} clear ` +
     `$${(UNIVERSE.minDollarVolume / 1e6).toFixed(0)}M median daily dollar volume` +
     (dropped ? ` (${dropped} dropped)` : ""),
   );
+  const byCard = new Map(liquid.map((e) => [e.features.ticker, e]));
+  for (const e of enriched) {
+    const t = e.features.ticker;
+    if (byCard.has(t)) continue;
+    if (focusDeep.has(t) || (e.gate && e.features.dollarVolume >= UNIVERSE.minDollarVolume)) byCard.set(t, e);
+  }
+  const focusCarded = [...focusDeep].filter((t) => byCard.has(t));
+  console.log(`  cards planned: ${byCard.size} name(s) — ${liquid.length} scored, ` +
+    `${[...byCard.values()].filter((e) => e.gate).length} gated, ` +
+    `${focusCarded.length} focus name(s) built deep whatever their board rank`);
   if (liquid.length < 2 * MIN_ROWS) {
     throw new Error(
       `only ${liquid.length} names clear the liquidity floor — publishing nothing ` +
@@ -4331,7 +4662,7 @@ async function main() {
     );
   }
 
-  const variationRun = measureVariationProbes(enriched, sessionDate);
+  const variationRun = measureVariationProbes(scorable, sessionDate);
   for (const line of variationRun.lines) console.log(line);
 
   const { kept: unique, dropped: shareClasses } = collapseShareClasses(liquid);
@@ -4418,6 +4749,10 @@ async function main() {
   }
 
   const deepSet = new Set(deepNames(published).map((d) => d.t));
+  const sideOfRow = new Map();
+  for (const side of ["long", "short"]) for (const r of published[side] || []) if (r && r.t) sideOfRow.set(r.t, side);
+  const deepTickers = [...deepSet, ...focusCarded.filter((t) => !deepSet.has(t))];
+  const deepCarded = new Set(deepTickers);
   const uniqueByTicker = new Map(unique.map((e) => [e.features.ticker, e]));
   const boardVariation = (ticker) => {
     const e = uniqueByTicker.get(ticker);
@@ -4432,7 +4767,7 @@ async function main() {
   };
   for (const side of ["long", "short"]) {
     for (const row of published[side]) {
-      if (deepSet.has(row.t)) row.dp = 1;
+      if (deepCarded.has(row.t)) row.dp = 1;
       row.variation = boardVariation(row.t);
 
       row.skew = null;
@@ -4460,7 +4795,7 @@ async function main() {
         note: boardMemory[side].note,
       },
       universe: universe.length,
-      enriched: enriched.length,
+      enriched: scorable.length,
 
       scored: scored.length,
       dispersion: Number.isFinite(first.dispersion) ? Number(first.dispersion.toFixed(4)) : null,
@@ -4496,6 +4831,8 @@ async function main() {
     console.warn(`  prune: ${error.message}`);
     return null;
   });
+  const earlyRoster = DRY_RUN ? Promise.resolve(null)
+    : readStored("roster", { budget: { spentMs: 0, budgetMs: 5_000 } }).catch(() => null);
 
   try {
     const watchRows = toWatchRows(sides.neutralRows, sessionRowByTicker, tiltByTicker);
@@ -4504,7 +4841,7 @@ async function main() {
       side: "watch", generatedAt, sessionDate,
       rows: watchRows,
       universe: universe.length,
-      enriched: enriched.length,
+      enriched: scorable.length,
       scored: scored.length,
       dispersion: Number.isFinite(first.dispersion) ? Number(first.dispersion.toFixed(4)) : null,
       deadBand: sides.deadBand,
@@ -4588,10 +4925,10 @@ async function main() {
   let marketLegs = null;
   try {
     marketLegs = await runMarketLegs({
-      uw: DRY_RUN ? makeFakeVendor({ sessionDate, screenerRows: screener }) : uw,
-      sessionDate, screenerDate, generatedAt, harvest: harvest || universeSource, filters: screenerFilters, eligible,
-      cardedTickers: liquid.map((e) => e.features.ticker),
-      deepTickers: deepNames(published).map((d) => d.t),
+      uw: withPrefetched(vendor, new Map([[holdings.path, holdings]])),
+      sessionDate, screenerDate, generatedAt, harvest: harvest || universeSource, filters: screenerFilters, eligible: eligibleFor,
+      cardedTickers: [...byCard.keys()],
+      deepTickers,
       windowTickers: windowTickersOf(withTilt.map((w) => w.row), { origin: sessionDate || gateOrigin }),
       deadline: stats.startedAt + DEADLINE_MS, pool: runPooled, width: poolWidth(2).width, stats,
       log: (line) => console.log(line),
@@ -4883,9 +5220,12 @@ async function main() {
   const chainMiss = new Map();
   try {
 
-  const deep = deepNames({ long: payloads.long.rows, short: payloads.short.rows });
-  const boardTickers = [...new Set(deep.map((d) => d.t))];
+  const boardTickers = deepTickers.slice();
   const spotByTicker = new Map();
+  for (const t of focusCarded) {
+    const px = num(byCard.get(t).features.spot) || num(byCard.get(t).row.close);
+    if (px > 0) spotByTicker.set(t, px);
+  }
   for (const side of ["long", "short"]) {
     for (const row of payloads[side].rows) {
       const px = num(row.px);
@@ -4896,8 +5236,8 @@ async function main() {
   let chainReported = false;
 
   let chainProbed = false;
-  const expiriesByTicker = new Map(liquid.map((e) => [e.features.ticker, e.raw.expiries || []]));
-  const spotOfLiquid = new Map(liquid.map((e) => [e.features.ticker, e.features.spot]));
+  const expiriesByTicker = new Map([...byCard.values()].map((e) => [e.features.ticker, e.raw.expiries || []]));
+  const spotOfLiquid = new Map([...byCard.values()].map((e) => [e.features.ticker, e.features.spot]));
 
   if (Date.now() > stats.startedAt + DEADLINE_MS) {
     console.warn(
@@ -5157,7 +5497,7 @@ async function main() {
   }
 
   try {
-    const atrOfLiquid = new Map(liquid.map((e) => [e.features.ticker, e.features.atr]));
+    const atrOfLiquid = new Map([...byCard.values()].map((e) => [e.features.ticker, e.features.atr]));
     const spotOfQuant = (t) => spotOfLiquid.get(t) || spotByTicker.get(t) || null;
     const needTreasury = !QP.PARITY_SYMBOLS.some((sym) => quantRows.has(sym) && spotOfQuant(sym) > 0);
     const treasuryRaw = !needTreasury ? null : DRY_RUN ? fakeTreasury(sessionDate)
@@ -5608,8 +5948,8 @@ async function main() {
   });
 
   const onBoard = new Map();
-  for (const d of deepNames(published)) onBoard.set(d.t, d.side);
-  const byTicker = new Map(liquid.map((e) => [e.features.ticker, e]));
+  for (const t of deepTickers) onBoard.set(t, sideOfRow.get(t) || null);
+  const byTicker = byCard;
   const scoredByTicker = new Map(scored.map((r) => [r.ticker, r]));
 
   const crossSectionTickers = [...byTicker.keys()].filter((t) => !onBoard.has(t));
@@ -5691,7 +6031,7 @@ async function main() {
     oiChange: crossRaws ? crossRaws.oiChange : null,
     darkpool: crossRaws ? crossRaws.darkpool : null,
     limits: { oiChange: MARKET_CROSS_LIMIT, darkpool: MARKET_CROSS_LIMIT },
-    tickers: marketLegs ? cardedTickers.concat(INDEX_TICKERS.filter((t) => marketLegs.indexRows.has(t))) : cardedTickers,
+    tickers: cardedTickers.concat(marketLegs ? INDEX_TICKERS.filter((t) => marketLegs.indexRows.has(t)) : [], FOCUS_FUNDS),
     sessionDate,
   });
   const crossReadDay = crossRaws && crossRaws.readAt ? readDayOf(crossRaws.readAt) : null;
@@ -5722,7 +6062,8 @@ async function main() {
 
   let volLeg = null;
   try {
-    const volRoster = volNames({ deep: [...onBoard.entries()], crossSection: crossSectionTickers, byTicker });
+    const volRoster = volNames({ deep: [...onBoard.entries()], crossSection: crossSectionTickers, byTicker,
+      funds: FOCUS_FUNDS.filter((t) => !INDEX_TICKERS.includes(t)) });
     volLeg = await runVolLeg({
       uw: DRY_RUN ? fakeVolVendor({ sessionDate, names: volRoster }) : uw,
       names: volRoster, sessionDate, repair: repairCandles,
@@ -5849,6 +6190,8 @@ async function main() {
         variation: variationOptions(variationRun),
       });
       card.readPx = readPxOf(e, screenerReadAt);
+      if (!deepSet.has(ticker)) card.depth = "focus";
+      markGate(card, e);
       attachVol(card, volLeg, ticker, { ivRank: rankCut.raw });
       if (card.panels.darkpool && darkpoolRth && darkpoolRth.session) card.panels.darkpool.session = darkpoolRth.session;
 
@@ -6037,6 +6380,7 @@ async function main() {
             variation: variationOptions(variationRun),
           });
           card.readPx = readPxOf(e, screenerReadAt);
+          markGate(card, e);
           attachVol(card, volLeg, ticker);
           const body = JSON.stringify(card);
 
@@ -6082,17 +6426,75 @@ async function main() {
     cardOf: (t) => publishedStore["card:" + t] || null, variation: variationRun,
     width: poolWidth(3).width, log: (line) => console.log(line),
   });
-  if (marketLegs) {
+  const focusAsk = focusTickers({ groups: focusGroups(ndx) });
+  const focusRead = await readFocusRows(vendor, [...new Set([...focusAsk, ...FOCUS_FUNDS])], { date: screenerDate });
+  console.log(`  focus read: ${focusRead.rows.size} of ${focusAsk.length + FOCUS_FUNDS.filter((t) => !focusAsk.includes(t)).length} ` +
+    `row(s) in ${focusRead.calls} call(s)` + (focusRead.missing.length ? `, missing ${focusRead.missing.join(", ")}` : "") +
+    (focusRead.ok ? "" : ` — FAILED (${focusRead.error})`));
+  const fundRows = new Map();
+  for (const t of FOCUS_FUNDS) {
+    const row = focusRead.rows.get(t) || (marketLegs && marketLegs.indexRows.get(t));
+    if (row) fundRows.set(t, row);
+  }
+  {
+    const lost = FOCUS_FUNDS.filter((t) => !fundRows.has(t));
+    if (lost.length && Date.now() < deadline) {
+      const again = await readFocusRows(vendor, lost, { date: screenerDate });
+      for (const [t, row] of again.rows) fundRows.set(t, row);
+      console.log(`  fund rows: ${lost.length} not in the focus read (${lost.join(", ")}), read again in ${again.calls} call(s): ` +
+        `${again.rows.size} returned` + (again.ok ? "" : ` — FAILED (${again.error})`));
+    }
+  }
+  const dossierFeatures = new Map();
+  const dossierBuilt = new Map();
+  {
+    const roster = dossierRoster({ index: INDEX_TICKERS, funds: FOCUS_FUNDS });
+    const rows = new Map(marketLegs ? marketLegs.indexRows : []);
+    for (const [t, row] of fundRows) if (!rows.has(t)) rows.set(t, row);
+    const deps = indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, congressState, marketCross, variationRun, volLeg });
     const dossiers = await buildIndexDossiers({
-      tickers: INDEX_TICKERS, indexRows: marketLegs.indexRows, deadline,
-      ...indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, congressState, marketCross, variationRun, volLeg }),
+      tickers: roster.tickers, depthOf: (t) => roster.depth.get(t), indexRows: rows, deadline,
+      ...deps,
+      features: (raw, ticker, spot, row) => {
+        const f = deps.features(raw, ticker, spot, row);
+        dossierFeatures.set(ticker, f);
+        return f;
+      },
       publish, log: (line) => console.warn(line),
     });
-    console.log(`  index dossiers: ${dossiers.built.length} of ${INDEX_TICKERS.length} built` +
-      (dossiers.built.length ? ` (${dossiers.built.join(", ")})` : "") +
-      (dossiers.failed.length ? `, failed ${dossiers.failed.join(", ")}` : "") +
-      (dossiers.skipped.length ? `, skipped ${dossiers.skipped.join(", ")}` : "") +
+    for (const [t, d] of Object.entries(dossiers.depth)) dossierBuilt.set(t, d);
+    const say = (depth) => {
+      const want = roster.tickers.filter((t) => roster.depth.get(t) === depth);
+      const built = want.filter((t) => dossiers.built.includes(t));
+      const failed = want.filter((t) => dossiers.failed.includes(t));
+      const skipped = want.filter((t) => dossiers.skipped.includes(t));
+      return `${built.length} of ${want.length} ${depth} built` + (built.length ? ` (${built.join(", ")})` : "") +
+        (failed.length ? `, failed ${failed.join(", ")}` : "") + (skipped.length ? `, skipped ${skipped.join(", ")}` : "");
+    };
+    console.log(`  dossiers: ${say("index")}; ${say("fund")}` +
       Object.entries(dossiers.shed).map(([t, keys]) => `; ${t} shed ${keys.join(", ")}`).join(""));
+  }
+  {
+    const featuresFor = new Map(enriched.map((e) => [e.features.ticker, e.features]));
+    for (const [t, f] of dossierFeatures) featuresFor.set(t, f);
+    try {
+      const askSet = new Set(focusAsk);
+      const held = new Map(fundRows);
+      for (const r of screener) if (r && askSet.has(r.ticker) && !held.has(r.ticker)) held.set(r.ticker, r);
+      const focusPayload = buildFocusPayload({
+        ndx, rows: focusRead.rows, read: focusRead, sessionDate, generatedAt, readAt: focusRead.readAt,
+        closesOf: (t) => focusCloses(featuresFor.get(t), sessionDate),
+        backfill: held, backfillFrom: "harvest", backfillReadAt: screenerReadAt,
+      });
+      await publish("focus", focusPayload);
+      console.log(`  focus: ${focusPayload.status}, ${Object.keys(focusPayload.rows).length} row(s) over ` +
+        `${focusPayload.groups.length} group(s), ${Object.keys(focusPayload.closes || {}).length} with closes` +
+        (focusPayload.missing.length ? `, missing ${focusPayload.missing.join(", ")}` : "") +
+        (focusPayload.backfill ? `, ${focusPayload.backfill.tickers.length} filled from the run's own harvest (${focusPayload.backfill.why})` : "") +
+        `, ${focusPayload.bytes || JSON.stringify(focusPayload).length} bytes of ${FOCUS_BUDGET_BYTES}`);
+    } catch (error) {
+      console.warn(`  focus: ${error.message}`);
+    }
   }
   {
     const cx = await publishCardX(cardX, publish, {
@@ -6101,6 +6503,31 @@ async function main() {
     });
     console.log(`  card-x: ${cx.written} written` + (cx.failed ? `, ${cx.failed} failed` : "") +
       (cx.over ? `, ${cx.over} over the cap` : "") + `, largest ${cx.largest} bytes`);
+  }
+
+  let rosterSummary = null;
+  const probeBudget = { spentMs: 0, budgetMs: LEDGER_PROBE_RETRY_BUDGET_MS };
+  try {
+    rosterSummary = await retireAndRoster({
+      sessionDate, generatedAt,
+      depth: new Map([
+        ...crossSectionTickers.map((t) => [t, "cross"]),
+        ...[...onBoard.keys()].map((t) => [t, deepSet.has(t) ? "board" : "focus"]),
+        ...dossierBuilt,
+      ]),
+      exempt: new Set([...INDEX_TICKERS, ...FOCUS_FUNDS, ...focusDeep]),
+      candidates: [...new Set([...screener.map((r) => r && r.ticker).filter(Boolean), ...guaranteed, ...FOCUS_FUNDS,
+        ...INDEX_TICKERS, ...NDX_100])],
+      reader: DRY_RUN ? dryRosterReader(sessionDate)
+        : (key) => readStored(key, { budget: probeBudget }),
+      prior: DRY_RUN ? await dryRosterReader(sessionDate)("roster")
+        : pickPriorRoster(await readStored("roster", { budget: probeBudget }), await earlyRoster,
+          { log: (line) => console.warn(line) }),
+      deadline,
+    });
+  } catch (error) {
+    console.warn(`  roster: ${error.message} — the retire step stopped before the roster was written; the stored ` +
+      "roster stays at its older session, so the next run finds the gap and probes the store");
   }
 
   console.log("  " + (DRY_RUN ? "[dry-run] " : "") + describeGammaRange(gammaProfiles).line +
@@ -6154,6 +6581,17 @@ async function main() {
       crossSectionCards: extraBuilt,
       cardsTotal: cardsBuilt + extraBuilt,
       apiCalls: stats.calls,
+      coverage: {
+        membership: { source: membership.source, asOf: membership.asOf, members: membership.members.length,
+          fallback: membership.fallback, constantAsOf: NDX_AS_OF, constantAgeDays: ndxAge.days },
+        ndx10: { tickers: ndx.tickers, source: ndx.source },
+        focusDeep: focusCarded.length,
+        gatedCarded: [...byCard.values()].filter((e) => e.gate).length,
+        dossiers: Object.fromEntries(["index", "fund"].map((d) => [d, [...dossierBuilt.values()].filter((v) => v === d).length])),
+        retired: rosterSummary ? rosterSummary.retired : null,
+        held: rosterSummary ? rosterSummary.held : null,
+      },
+      warnings: coverageNotes,
 
       schedule: {
         cadence: PIPELINE_CADENCE,
@@ -6193,7 +6631,7 @@ async function main() {
     }
 
     const BRIEF_BYTE_BUDGET = 120 * 1024;
-    const { shedCardFacts } = await import("../shared/flows-ask.js");
+    const { shedCardFacts, CARD_CORE_FACTS } = await import("../shared/flows-ask.js");
     const base = {
       generatedAt, sessionDate,
       ...buildBrief(briefStoreFrom(publishedStore)),
@@ -6204,11 +6642,18 @@ async function main() {
       warningsQuestions: alarm.questions,
     };
     const over = (facts) => JSON.stringify({ ...base, facts }).length - BRIEF_BYTE_BUDGET;
-    const shed = shedCardFacts(index.facts, index.cardNames || [], over);
+    const indexed = index.cardNames || [];
+    const priority = [...focusCarded, ...deepTickers.filter((t) => !focusDeep.has(t))];
+    const briefOrder = [...priority.filter((t) => indexed.includes(t)), ...indexed.filter((t) => !priority.includes(t))];
+    const shed = shedCardFacts(index.facts, briefOrder, over, { lean: CARD_CORE_FACTS });
     const cardCount = shed.facts.filter((f) => typeof f.source === "string" && f.source.startsWith("card:")).length;
     console.log(`  brief: ${shed.facts.length} facts, ${cardCount} of them per-name over ` +
       `${shed.namesIndexed.indexed} of ${shed.namesIndexed.of} carded names` +
-      (shed.namesIndexed.shed ? ` (${shed.namesIndexed.shed} shed to stay under ${BRIEF_BYTE_BUDGET} bytes)` : ""));
+      (shed.leaned.length ? `; ${shed.leaned.length} lean (${CARD_CORE_FACTS.join(", ")} only, to stay under ` +
+        `${BRIEF_BYTE_BUDGET} bytes: the weakest ${shed.leaned.join(", ")}; focus names are leaned last)` : "") +
+      (shed.namesIndexed.shed ? ` (${shed.namesIndexed.shed} shed to stay under ${BRIEF_BYTE_BUDGET} bytes: ` +
+        `the weakest board name(s) ${briefOrder.slice(briefOrder.length - shed.namesIndexed.shed).join(", ")}; ` +
+        "focus names are kept first)" : ""));
     await publish("brief", { ...base, facts: shed.facts, namesIndexed: shed.namesIndexed });
   } catch (error) {
     console.warn(`  brief: ${error.message}`);
@@ -6231,15 +6676,26 @@ async function main() {
   );
   console.log("Record the achieved rate: the vendor documents no limit, so this is how the real one gets discovered.");
 
-  if (stats.calls > CALL_BUDGET) {
-    const over = stats.calls - CALL_BUDGET;
-    console.warn(
-      `BUDGET: ${stats.calls} attempts against a modelled budget of ${CALL_BUDGET} — ` +
-      `${over} over (${((over / CALL_BUDGET) * 100).toFixed(1)}%). ` +
-      `${stats.rateLimited} of those attempts were 429 retries rather than distinct calls. ` +
-      "The budget is what DEADLINE_MS was sized against; a run that exceeds it is " +
-      "spending time the chain and card legs were promised.",
-    );
+  {
+    const shape = {
+      enriched: enriched.length, deep: onBoard.size, cross: crossSectionTickers.length,
+      dossiers: dossierBuilt.size, earnings: marketLegs && marketLegs.earnings ? marketLegs.earnings.size : 0,
+    };
+    const model = callModel(shape);
+    console.log(`calls: modelled ${model.total} for this run's shape (${Object.entries(shape).map(([k, v]) => `${k} ${v}`).join(", ")}) — ` +
+      Object.entries(model.legs).map(([k, v]) => `${k} ${Math.round(v)}`).join(", ") +
+      `; nominal budget ${CALL_BUDGET}` + (DRY_RUN ? `; the dry-run fixtures answered ${vendor.calls.length} market, coverage and focus read(s)` : ""));
+    const ceiling = Math.max(CALL_BUDGET, Math.ceil(model.total * (1 + CALL_OVERRUN_MARGIN)));
+    if (stats.calls > ceiling) {
+      const over = stats.calls - model.total;
+      console.warn(
+        `BUDGET: ${stats.calls} attempts against ${model.total} modelled for this run's shape — ` +
+        `${over} over (${((over / model.total) * 100).toFixed(1)}%). ` +
+        `${stats.rateLimited} of those attempts were 429 retries rather than distinct calls. ` +
+        "The budget is what DEADLINE_MS was sized against; a run that exceeds it is " +
+        "spending time the chain and card legs were promised.",
+      );
+    }
   }
 
   const secs = (ms) => `${(ms / 1000).toFixed(1)}s`;

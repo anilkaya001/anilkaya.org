@@ -20,6 +20,20 @@ const s = (v, d = 4) => (v === null ? null : Number(v).toFixed(d));
 
 export const FAKE_INDEX = Object.freeze({ SPY: 774.26, QQQ: 601.18, IWM: 243.57 });
 
+export const FAKE_FUNDS = Object.freeze({
+  GLD: 391.645, IAU: 80.12, SLV: 43.21, CPER: 40.645, COPX: 55.31, GDX: 92.29, GDXJ: 118.44, SIL: 90.86, SILJ: 27.4,
+});
+
+const FAKE_ETF_NAMES = Object.freeze({
+  SPY: "SPDR S&P 500 ETF Trust", QQQ: "Invesco QQQ Trust", IWM: "iShares Russell 2000 ETF",
+  GLD: "SPDR Gold Shares", IAU: "iShares Gold Trust", SLV: "iShares Silver Trust",
+  CPER: "United States Copper Index Fund", COPX: "Global X Copper Miners ETF",
+  GDX: "VanEck Gold Miners ETF", GDXJ: "VanEck Junior Gold Miners ETF",
+  SIL: "Global X Silver Miners ETF", SILJ: "Amplify Junior Silver Miners ETF",
+});
+
+const fakeEtfPx = (t) => FAKE_INDEX[t] || FAKE_FUNDS[t] || null;
+
 const TENORS = [1, 5, 7, 14, 30, 60, 90, 180, 365];
 
 export function augmentScreenerRow(row, { sessionDate }) {
@@ -77,9 +91,10 @@ export function augmentScreenerRow(row, { sessionDate }) {
 }
 
 export function fakeIndexRow(ticker, { sessionDate }) {
-  const px = FAKE_INDEX[ticker] || 100;
+  const px = fakeEtfPx(ticker) || 100;
   const rnd = prng(hash("idx:" + ticker));
-  const base = ticker === "IWM" ? 0.21 : ticker === "QQQ" ? 0.19 : 0.15;
+  const extra = prng(hash("etf:" + ticker));
+  const base = ticker === "IWM" ? 0.21 : ticker === "QQQ" ? 0.19 : FAKE_FUNDS[ticker] ? 0.24 + extra() * 0.12 : 0.15;
   const row = {
     ticker, date: sessionDate, close: px.toFixed(2), prev_close: (px * (1 - (rnd() - 0.5) * 0.01)).toFixed(2),
     issue_type: "ETF", is_index: false, sector: null, marketcap: null,
@@ -97,6 +112,16 @@ export function fakeIndexRow(ticker, { sessionDate }) {
   }
   row.volatility_30 = base.toFixed(3);
   row.steepness_180_30 = (Number(row.volatility_180) / base).toFixed(4);
+  if (FAKE_FUNDS[ticker]) {
+    Object.assign(row, {
+      marketcap: String(Math.round(1e8 + extra() * 1e11)), full_name: FAKE_ETF_NAMES[ticker],
+      bullish_premium: String(Math.round(extra() * 3e8)), bearish_premium: String(Math.round(extra() * 3e8)),
+      iv_rank: (extra() * 100).toFixed(2), implied_move_perc: (base * 0.06).toFixed(4),
+      relative_volume: (0.6 + extra() * 1.6).toFixed(2), stock_volume: Math.round(2e6 + extra() * 4e7),
+      put_call_ratio: (row.put_volume / row.call_volume).toFixed(4),
+      total_open_interest: Math.round(2e5 + extra() * 5e6),
+    });
+  }
   return row;
 }
 
@@ -146,7 +171,7 @@ export function makeFakeVendor({ sessionDate, screenerRows = [], carded = [] } =
     [/^\/api\/screener\/stocks$/, (p) => {
       if (p.ticker) {
         const want = String(p.ticker).split(",");
-        const idx = want.filter((t) => FAKE_INDEX[t]).map((t) => fakeIndexRow(t, { sessionDate: S }));
+        const idx = want.filter((t) => fakeEtfPx(t)).map((t) => fakeIndexRow(t, { sessionDate: S }));
         return { data: [...idx, ...augmented.filter((r) => want.includes(r.ticker))] };
       }
       const limit = Number(p.limit) || 50;

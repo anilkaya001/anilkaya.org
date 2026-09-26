@@ -15,7 +15,7 @@ import {
   stepRateController, raiseRateFloor, rateFloorSurvivesBudget, RATE, CALL_BUDGET,
   PUBLISH_SPACING_MS,
   DEADLINE_MS, CHAIN_RESERVE_MS, nearestProbeExpiry, describeChainProbe, fakeChain,
-  DEEP_NAMES, deepNames, publishRetryDelay, MARKET_CROSS_LIMIT,
+  DEEP_NAMES, deepNames, publishRetryDelay, MARKET_CROSS_LIMIT, EARNINGS_GATE_DAYS,
   WATCH_ROWS, ARCHIVE_RETENTION_DAYS, ARCHIVE_PRUNE_LOOKBACK_DAYS,
   SECTOR_ETFS, TRIX_SERIES, TRIX_MIN_CANDLES, TRIX_FULL_SCALE_BP,
   trixSeriesBp, scaleTrix, sectorTrix, MOVER_ROWS, moverRow, buildMovers,
@@ -25,12 +25,15 @@ import {
   closedPriceWindow, buildRecordCloses, recordCalendar, resolveBoardMemory, sameSessionGate,
   retireSession, sessionArchiveKeys, sweepScreenerBand, SCREENER_SPLIT_DEPTH, SCREENER_PAGE_ROWS,
   judgeScreenerDate, sessionRows, readDayOf, PIPELINE_CADENCE, SESSION_OPEN_MINUTES,
-  SESSION_CLOSE_MINUTES, MEMORY_ARCHIVE_SESSIONS, READ_RETRIES, readStored, holdersRefusal,
+  SESSION_CLOSE_MINUTES, MEMORY_ARCHIVE_SESSIONS, READ_RETRIES, readStored, holdersRefusal, resetPublishRetryBudget,
+  LEDGER_PROBE_FAIL_MAX, LEDGER_PROBE_RETRY_BUDGET_MS,
   HOLDERS_RETRY_DAYS,
   IV_RANK_PARAMS, fakeIvRank, measureVariationProbes, fakeOiLadder, fakeLadderGreeks,
   fakeLadderChain, vannaProbeSample, featuresVariationInput, boardVariationMeta, congressRows,
-  plainRedispatchSaid,
+  plainRedispatchSaid, retireAndRoster, bootstrapLedger, callModel, CALL_COST, NOMINAL_SHAPE, markGate,
+  screenerDollarVolume, gatedWorthEnriching, GATED_LIQUIDITY_MARGIN, pickPriorRoster,
 } from "../scripts/flows-pipeline.mjs";
+import { FOCUS_FUNDS, MAG7 as FOCUS_MAG7, FOCUS_MINERS } from "../shared/flows-focus.js";
 import { VARIATION_CODES, variationSummary } from "../shared/flows-variation.js";
 import { pinReading, buildCard } from "../shared/flows-card.js";
 import { pearson, horizonMove, HORIZON_SESSIONS, realizedVol } from "../shared/flows-features.js";
@@ -1361,26 +1364,99 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
       const c = JSON.parse(fs.readFileSync(`${prefix}-card-${t}.json`, "utf8"));
       return c.depth;
     };
-    const byDepth = { board: new Set(), "cross-section": new Set(), index: new Set(), other: new Set() };
+    const byDepth = { board: new Set(), focus: new Set(), "cross-section": new Set(), index: new Set(), fund: new Set(), other: new Set() };
     for (const t of emitted) {
       const d = depthOf(t);
       (byDepth[d] || byDepth.other).add(t);
     }
     eq(byDepth.other.size, 0,
-       "every emitted card declares a depth this contract knows — an unrecognised one is a fourth " +
+       "every emitted card declares a depth this contract knows — an unrecognised one is a sixth " +
        "kind of card nobody has priced");
     assert.deepEqual([...byDepth.index].sort(), ["IWM", "QQQ", "SPY"],
       "the index lane writes exactly the three index dossiers, through the same buildCard path, and " +
       "none of them is a board or cross-section name"); checks++;
-    for (const t of byDepth.index) {
-      ok(!claimed.has(t), `${t} is an index dossier and no board row advertises it`);
+    assert.deepEqual([...byDepth.fund].sort(), [...FOCUS_FUNDS].sort(),
+      "the fund lane writes one dossier per focus fund through the same index-dossier path, as depth " +
+      "fund — never through the market-cap coverage path, whose vendor caps are garbage for funds"); checks++;
+    for (const t of [...byDepth.index, ...byDepth.fund]) {
+      ok(!claimed.has(t), `${t} is an index or fund dossier and no board row advertises it`);
     }
     ok(byDepth.board.size <= DEEP_NAMES,
        `the deep lane stayed inside its ${DEEP_NAMES}-name budget (${byDepth.board.size} board-depth ` +
        "cards), however wide the board or the cross-section got");
-    assert.deepEqual([...byDepth.board].sort(), [...claimed].sort(),
-      "the BOARD-depth cards are EXACTLY the rows that advertise one — a row promising a card " +
-      "the pipeline never wrote opens a 404, and a deep card nobody links to is three calls burned"); checks++;
+    const onBoardRows = new Set([...long.rows, ...short.rows].map((r) => r.t));
+    const focusOnBoard = [...byDepth.focus].filter((t) => onBoardRows.has(t));
+    assert.deepEqual([...byDepth.board, ...focusOnBoard].sort(), [...claimed].sort(),
+      "the deep cards a board row advertises are EXACTLY the board-depth cards plus the focus cards of " +
+      "names that sit on a board — a row promising a card the pipeline never wrote opens a 404, and a " +
+      "deep card nobody links to is three calls burned"); checks++;
+    {
+      const focusPayload = read("focus");
+      const ndxGroup = focusPayload.groups.find((g) => g.id === "ndx10");
+      const wanted = new Set([...FOCUS_MAG7, ...ndxGroup.tickers, ...FOCUS_MINERS]);
+      ok(byDepth.focus.size > 0,
+         `the focus lane ran (${byDepth.focus.size} focus-depth cards), so the deep treatment of names ` +
+         "off the deep fifty is a measurement rather than a tautology");
+      for (const t of wanted) {
+        ok(byDepth.board.has(t) || byDepth.focus.has(t),
+           `${t} is a focus name (Mag 7, NDX 10 or a miner) and carries a DEEP card whatever its board ` +
+           "rank — board depth when it is among the fifty, focus depth otherwise");
+      }
+      for (const t of byDepth.focus) {
+        ok(wanted.has(t), `${t} is focus depth only because it is on the focus roster`);
+        const card = JSON.parse(fs.readFileSync(`${prefix}-card-${t}.json`, "utf8"));
+        for (const key of ["surface", "darkpool", "oiDeltas", "topContracts", "skewTerm"]) {
+          const p = card.panels[key];
+          ok(!(p && p.status === "unavailable" && /not on today's board/.test(String(p.reason))),
+             `${t} ${key}: a focus card spends the per-name calls a deep card does, so no panel says ` +
+             "it was never requested");
+        }
+      }
+      const paas = JSON.parse(fs.readFileSync(`${prefix}-card-PAAS.json`, "utf8"));
+      ok(paas.depth === "focus" || paas.depth === "board",
+         "PAAS, whose fixture carries a vendor market cap below the floor (the TECK failure), is still " +
+         "fetched by ticker and built deep: a focus name skips only the market-cap floor");
+    }
+    {
+      const gated = [...emitted].map((t) => JSON.parse(fs.readFileSync(`${prefix}-card-${t}.json`, "utf8")))
+        .filter((c) => c.gate);
+      ok(gated.length > 0, `the dry run carded ${gated.length} name(s) inside the earnings gate`);
+      for (const c of gated) {
+        ok(c.score === null && /^\d{4}-\d{2}-\d{2}$/.test(c.gate.earnings) && Number.isInteger(c.gate.dte) &&
+           c.gate.dte >= 0 && c.gate.dte <= EARNINGS_GATE_DAYS,
+           `${c.ticker}: a gated name is carded for the session with score null and gate {earnings, dte}`);
+        ok(!onBoardRows.has(c.ticker),
+           `${c.ticker}: and it is not on either board, because the gate still keeps it out of the score`);
+      }
+      const roster = read("roster");
+      const depthName = { board: "board", focus: "focus", "cross-section": "cross", index: "index", fund: "fund" };
+      for (const t of emitted) {
+        eq(roster.depth[t], depthName[depthOf(t)], `${t}: the roster lists the card this run published, at its depth`);
+      }
+      eq(Object.keys(roster.depth).length, emitted.size, "and lists nothing the run did not publish");
+      ok(Object.values(roster.session).every((d) => d === read("board-long").sessionDate), "every roster entry is this session's");
+      eq(roster.retired, 4, "the dry run's prior ledger held one name four sessions old (card, card-x, hist) and a card-x-only " +
+        "orphan four sessions old: all four keys are retired");
+      ok(Object.hasOwn(roster.held, "card:ZZHLD") && !Object.hasOwn(roster.held, "card:ZZRET") && !Object.hasOwn(roster.held, "card:NVDA"),
+         "a two-session-old card is held for the next run, the retired ones are gone, and NVDA — old in the prior " +
+         "ledger but rebuilt tonight — is neither");
+      ok(/\[dry-run\] retire card:ZZRET/.test(runLog) && !/\[dry-run\] retire card:NVDA/.test(runLog),
+         "the retire went through the ingest DELETE path, and never touched a card the run rebuilt");
+      ok(Buffer.byteLength(JSON.stringify(roster)) <= 32 * 1024, "the roster is inside its 32 KB cap");
+      const meta = read("meta");
+      ok(meta.coverage && meta.coverage.membership.source === "qqq-holdings" && meta.coverage.focusDeep > 0 &&
+         meta.coverage.dossiers.fund === FOCUS_FUNDS.length && Array.isArray(meta.warnings),
+         "meta states where membership came from, how many focus names went deep, the fund dossiers and its coverage warnings");
+      ok(/calls: modelled \d+ for this run's shape/.test(runLog) && !/^BUDGET:/m.test(runLog),
+         "the run states its modelled call count and prints no BUDGET line when nothing overran");
+      const mu = JSON.parse(fs.readFileSync(`${prefix}-card-MU.json`, "utf8"));
+      ok(mu.gate && mu.score === null && mu.sessionDate === read("board-long").sessionDate,
+         "MU, a Nasdaq-100 name days from earnings in the fixture, still gets a card for THIS session " +
+         "instead of freezing on the last card it had before the gate");
+      const inNdx10 = read("focus").groups.find((g) => g.id === "ndx10").tickers.includes("MU");
+      ok(inNdx10 ? mu.depth === "focus" || mu.depth === "board" : mu.depth === "cross-section",
+         `and its depth follows the focus roster: ${inNdx10 ? "deep, because it is in the NDX 10" : "cross-section, because it is not in the NDX 10"}`);
+    }
     ok(byDepth["cross-section"].size > 0,
        `and the cross-section lane ran (${byDepth["cross-section"].size} cards), so the split above is ` +
        "a measurement rather than a tautology over a run where every card is a board card");
@@ -1870,6 +1946,9 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     for (let i = 0; i < 50; i++) t = stepRateController(t, "limited");
     eq(t.floorMs, RATE.floorCeilingMs,
        "fifty consecutive 429s pin the floor at its ceiling, not at maxDelayMs");
+    eq(t.delayMs, RATE.maxDelayMs,
+       "while the per-call delay under that same sustained refusal sits at the 5s backoff ceiling: the floor's ceiling " +
+       "caps what the delay decays back to between refusals, never how far a refused call backs off");
     ok(RATE.floorCeilingMs < RATE.maxDelayMs,
        "and the floor's ceiling is strictly below the per-call backoff ceiling: a single " +
        "call may sleep 5s, but every call may not");
@@ -2794,17 +2873,60 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "(and inside the 100KB the card shedder targets)");
   }
   {
-    const m = /brief: (\d+) facts, (\d+) of them per-name over (\d+) of (\d+) carded names(?: \((\d+) shed)?/.exec(runLog);
+    const m = /brief: (\d+) facts, (\d+) of them per-name over (\d+) of (\d+) carded names([^\n]*)/.exec(runLog);
     ok(m !== null, "the run log states how many carded names the brief indexed, against how many were carded");
     if (m !== null) {
-      const [, , perName, indexed, of, shed] = m;
+      const [, , perName, indexed, of, tail] = m;
       eq(Number(indexed), Number(of),
-         `every carded name is indexed on this corpus (${indexed} of ${of}); a shed here means ` +
-         "the cards grew past the brief's 120KB and the least-read names lost their readings — " +
-         "raise the ceiling as a decision or trim a fact, but do not let coverage fall in silence");
-      ok(shed === undefined, "and the log prints no shed clause when nothing was shed");
-      ok(Number(perName) >= 4 * Number(of),
-         `at least four readings per carded name reached the brief (${perName} over ${of})`);
+         `every carded name is indexed on this corpus (${indexed} of ${of}); a shed here means the per-name facts ` +
+         "outgrew the brief, and coverage must not fall in silence");
+      ok(!/shed to stay under/.test(tail), "and no name is shed whole: the brief leans the weakest names before it drops one");
+      const brief = JSON.parse(fs.readFileSync(`${prefix}-brief.json`, "utf8"));
+      ok(JSON.stringify(brief).length <= 120 * 1024, "inside the brief's 120 KB budget, under the 128 KB ingest cap");
+      const factsOf = new Map();
+      for (const f of brief.facts) {
+        const hit = /^card:([^/]+)/.exec(String(f.source || ""));
+        if (hit) factsOf.set(hit[1], (factsOf.get(hit[1]) || []).concat(String(f.id).split("/").pop()));
+      }
+      const cardOf = (t) => JSON.parse(fs.readFileSync(`${prefix}-card-${t}.json`, "utf8"));
+      const deepCards = fs.readdirSync(path.dirname(prefix)).map((f) => /-card-([A-Z].*)\.json$/.exec(f)).filter(Boolean)
+        .map((x) => x[1]).filter((t) => ["board", "focus"].includes(cardOf(t).depth));
+      ok(deepCards.length >= 60 && deepCards.every((t) => factsOf.has(t)),
+         `every deep card (board and focus, ${deepCards.length}) reaches the brief`);
+      const focusCards = deepCards.filter((t) => cardOf(t).depth === "focus");
+      const leanSaid = /; (\d+) lean \((?:[a-z]+(?:, )?)+ only, to stay under \d+ bytes: the weakest ([A-Z0-9., -]+); focus names are leaned last\)/.exec(tail);
+      const leaned = leanSaid ? leanSaid[2].split(", ") : [];
+      if (leanSaid) eq(leaned.length, Number(leanSaid[1]), "a lean names exactly as many names as it counts");
+      ok(focusCards.length > 0 && focusCards.every((t) => !leaned.includes(t)),
+         `every focus-depth name keeps its full reading (${focusCards.length}): the owner's watch list is what the Ask ` +
+         "is asked about most, so the lean never reaches it");
+      const boardAbs = new Map([...read("board-long").rows, ...read("board-short").rows].map((r) => [r.t, Math.abs(r.s)]));
+      const ndxGroup = read("focus").groups.find((g) => g.id === "ndx10");
+      const focusSet = new Set([...FOCUS_MAG7, ...ndxGroup.tickers, ...FOCUS_MINERS]);
+      const fullBoard = deepCards.filter((t) => !leaned.includes(t) && boardAbs.has(t) && cardOf(t).depth === "board" && !focusSet.has(t))
+        .map((t) => boardAbs.get(t));
+      for (const t of leaned) {
+        ok(cardOf(t).depth === "board" && !focusSet.has(t) && boardAbs.get(t) <= Math.min(...fullBoard),
+           `${t}: the lean takes the WEAKEST board names first (|score| ${boardAbs.get(t)}), never a focus name ` +
+           "and never a stronger board name than one it kept whole");
+        ok(factsOf.get(t).length >= 2 && factsOf.get(t).every((k) => ["standing", "gamma", "move"].includes(k)),
+           `${t} keeps its core readings (${factsOf.get(t).join(", ")}): standing, gamma and move`);
+      }
+      const cardBytes = brief.facts.filter((f) => /^card:/.test(String(f.source || ""))).reduce((a, f) => a + JSON.stringify(f).length + 1, 0);
+      const coreBytes = brief.facts.filter((f) => /^card:/.test(String(f.source || "")) &&
+        ["standing", "gamma", "move"].includes(String(f.id).split("/").pop())).reduce((a, f) => a + JSON.stringify(f).length + 1, 0);
+      const baseBytes = JSON.stringify(brief).length - cardBytes;
+      const ceilingNames = DEEP_NAMES + FOCUS_MAG7.length + 10 + FOCUS_MINERS.length;
+      const allLean = baseBytes + Math.ceil(ceilingNames * coreBytes / deepCards.length);
+      ok(allLean <= 120 * 1024,
+         `the brief can index every deep name the focus era can produce (${ceilingNames}: ${DEEP_NAMES} board plus every ` +
+         `focus name off the board) at their core readings: ${allLean} bytes modelled against 122880 — past that the ` +
+         "per-name facts grew, which is a decision to take in flows-ask, not here");
+      const leanFacts = brief.facts.filter((f) => leaned.some((t) => f.source === "card:" + t)).length;
+      const fullNames = Number(indexed) - leaned.length;
+      ok(fullNames > 0 && Number(perName) - leanFacts >= 4 * fullNames,
+         `at least four readings per name kept whole reached the brief (${Number(perName) - leanFacts} over ${fullNames}; ` +
+         `the ${leaned.length} lean names carry their core readings, checked above)`);
     }
   }
 }
@@ -3494,6 +3616,18 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     const refused = await readStored("board:long", { pause: async () => {} });
     ok(refused.failed && refused.status === 403 && seen.length === 3,
        "and a store that keeps refusing is asked three times, then reported as failed");
+
+    answers = [403, 403, 403];
+    seen.length = 0;
+    resetPublishRetryBudget();
+    const probeBudget = { spentMs: 0, budgetMs: 4500 };
+    const probeWaits = [];
+    const probed = await readStored("card:OLD", { budget: probeBudget, pause: async (ms) => { probeWaits.push(ms); } });
+    ok(probed.failed && seen.length === 2 && probeWaits.join() === "1000",
+       "a read given its own retry budget stops retrying when THAT budget is spent (1s spent, the 4s retry would pass 4.5s)");
+    eq(probeBudget.spentMs, 1000, "and charges its wait to that budget");
+    eq(resetPublishRetryBudget(), 0,
+       "and not to the run's publish budget, so the ledger probe can never starve the meta and brief publishes of their retries");
   } finally {
     process.env.FLOWS_INGEST_URL = prevUrl;
     process.env.FLOWS_INGEST_TOKEN = prevTok;
@@ -3821,4 +3955,163 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "and a book-read label is the sign of the book's net");
 }
 
-console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, the dated archive key and its bounded prune, the watch board's ranking and vocabulary, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor, sector TRIX and the fixed-clamp scaling that keeps a flat day flat, the movers band's zero-call guarantee and its unranked counts, the rate limiter's floor actually being a floor, the truncated-chain probe's three distinct verdicts, the board's memory refusing a prior board that turns out to be this run's own session, a corpus proven to REACH the change layer's branches rather than merely to satisfy assertions written around them, and a market-wide join whose published coverage is checked against the cards it was measured over rather than against itself, the sector OPTIONS lean proven to be a different quantity from the sector momentum beside it — its ratio comparable across baskets three orders of magnitude apart where the dollar difference is not, its measured zero visible in dollars and undefined as a ratio, a blank vendor string refused before it can become a confident zero, and its row vocabulary disjoint from TRIX's — and the news tape's four counts, its own ordering applied before the cap so the rows kept are the newest and not the first, and an undated row published, counted on both sides of the cap, and never given a manufactured timestamp`);
+{
+  const measured = callModel({ enriched: 149, deep: 50, cross: 99, dossiers: 3, earnings: 73 });
+  ok(Math.abs(measured.total - 3071) / 3071 < 0.01,
+     `the call model reproduces the 2026-09-24 nightly (3,071 calls) from its own shape: ${measured.total}`);
+  eq(measured.legs.vol, 632, "leg by leg: the vol leg's 632 calls exactly (8 deep, 2 cross, 10 per dossier, 4 radar)");
+  eq(measured.legs.enrich, 745, "and the enrichment's 745 (five reads a name)");
+  ok(CALL_BUDGET >= callModel({ enriched: 175, deep: 70, cross: 105, dossiers: 12, earnings: 90 }).total,
+     `the nominal budget (${CALL_BUDGET}) covers the focus-era shape, so the BUDGET line means a real overrun`);
+  ok(CALL_BUDGET === callModel(NOMINAL_SHAPE).total && CALL_COST.dossier === 13,
+     "and the budget is the model at its nominal shape, not a literal that drifts from it");
+
+  const card = { score: 12, conviction: 0.4 };
+  markGate(card, { gate: { earnings: "2026-09-29", dte: 5 } });
+  ok(card.score === null && card.conviction === null && card.gate.earnings === "2026-09-29" && card.gate.dte === 5,
+     "a gated card carries score null and gate {earnings, dte}");
+  const thin = { ticker: "THIN", close: "20", avg30_volume: "1000000" };
+  const deepLiquid = { ticker: "DEEP", close: "20", avg30_volume: "5000000" };
+  eq(screenerDollarVolume(thin), 2e7, "the pre-check reads the screener's 30-day average volume times the close");
+  ok(!gatedWorthEnriching(thin), "a gated name whose $20M average dollar volume is far under the $50M card floor is not enriched: " +
+     "five vendor calls for a card the floor would refuse");
+  ok(gatedWorthEnriching(deepLiquid), "a gated name that clears it is enriched and carded");
+  ok(gatedWorthEnriching({ ticker: "EDGE", close: "10", avg30_volume: "4500000" }),
+     `a name within the ${GATED_LIQUIDITY_MARGIN} margin of the floor is still enriched: the candle median decides, not the proxy`);
+  ok(gatedWorthEnriching(thin, { focus: new Set(["THIN"]) }), "a focus name is enriched whatever its volume");
+  ok(gatedWorthEnriching({ ticker: "NOVOL", close: "20" }), "and a row with no average volume is enriched rather than skipped on a guess");
+  const plain = { score: 3 };
+  markGate(plain, { gate: null });
+  eq(plain.score, 3, "and an ungated one is untouched");
+
+  const S = "2026-09-24";
+  const logs = [];
+  const writes = new Map();
+  const deletes = [];
+  const run = async (over) => {
+    logs.length = 0; writes.clear(); deletes.length = 0;
+    return retireAndRoster({
+      sessionDate: S, generatedAt: "t",
+      depth: new Map([["NVDA", "focus"], ["GLD", "fund"], ["PLD", "board"]]),
+      exempt: new Set(["GLD", "NVDA"]),
+      landed: new Set(["card:NVDA", "card:GLD", "card:PLD", "card-x:NVDA"]),
+      remove: async (key) => { deletes.push(key); return key === "card:STUCK" ? { ok: false, status: 400 } : { ok: true, status: 200 }; },
+      write: async (key, payload) => { writes.set(key, payload); },
+      log: (line) => logs.push(line),
+      ...over,
+    });
+  };
+  const ledger = { payload: { v: 1, sessionDate: "2026-09-23", depth: { NVDA: "focus" }, session: { NVDA: "2026-09-23" },
+    x: { "card-x": [], hist: [] },
+    held: { "card:OLD": "2026-09-17", "hist:OLD": "2026-09-17", "card:NVDA": "2026-09-01", "card:YOUNG": "2026-09-22",
+      "card:STUCK": "2026-09-10", "card:GLD": "2026-09-01" } }, status: 200 };
+  const carried = await run({ prior: ledger, reader: async () => { throw new Error("the carried path must not probe"); } });
+  assert.deepEqual(deletes.sort(), ["card:OLD", "card:STUCK", "hist:OLD"],
+    "the carried ledger retires exactly the unrebuilt keys more than three sessions old"); checks++;
+  const roster = writes.get("roster");
+  ok(roster && roster.depth.NVDA === "focus" && roster.depth.PLD === "board" && roster.depth.GLD === "fund", "the roster is written");
+  ok(Object.hasOwn(roster.held, "card:STUCK") && Object.hasOwn(roster.held, "card:YOUNG") && !Object.hasOwn(roster.held, "card:OLD"),
+     "a refused delete stays in the ledger to be retried; a retired key leaves it");
+  ok(!Object.hasOwn(roster.held, "card:NVDA") && !deletes.includes("card:GLD"),
+     "a rebuilt focus card and an exempt fund card are never deleted");
+  eq(carried.retired, 2, "two keys removed");
+  eq(carried.refused, 1, "one refused");
+
+  const probed = [];
+  const store = new Map([["card:GONE", { sessionDate: "2026-09-16" }], ["card-x:GONE", { sessionDate: "2026-09-16" }],
+    ["card:NEWISH", { sessionDate: "2026-09-23" }], ["card-x:XONLY", { generatedAt: "2026-09-02T21:00:00Z" }]]);
+  const boot = await run({
+    prior: { payload: { v: 1, sessionDate: "2026-09-23", depth: {} }, status: 200 },
+    candidates: ["GONE", "NEWISH", "XONLY", "NEVER", "NVDA"],
+    reader: async (key) => { probed.push(key); return store.has(key) ? { payload: store.get(key), status: 200 } : { payload: null, absent: true, status: 200 }; },
+  });
+  ok(probed.includes("hist:GONE") && !probed.includes("hist:NEVER") && !probed.includes("card:NVDA"),
+     "a roster without a ledger bootstraps by probing the store: hist only where a card or card-x exists, never a key the run just wrote");
+  assert.deepEqual(deletes.sort(), ["card-x:GONE", "card-x:XONLY", "card:GONE"],
+    "the bootstrap retires what it found older than three sessions, card-x-only orphans included"); checks++;
+  eq(boot.ledger, "bootstrap", "and records that the ledger was rebuilt");
+  ok(Object.hasOwn(writes.get("roster").held, "card:NEWISH"), "a young key it found is carried from then on");
+
+  const flaky = await run({
+    prior: { payload: { v: 1, sessionDate: "2026-09-23", depth: {} }, status: 200 },
+    candidates: ["GONE"],
+    reader: async (key) => (key === "card:GONE" ? { failed: true, status: 403 } : { payload: null, absent: true, status: 200 }),
+  });
+  eq(flaky.ledger, "bootstrap-partial", "a probe with a failed read is recorded as partial, so the next run probes again");
+  eq(writes.get("roster").ledger, "bootstrap-partial", "and the roster carries that mark");
+
+  const blind = await run({ prior: { payload: null, failed: true, status: 503 }, reader: async () => ({ failed: true }) });
+  eq(deletes.length, 0, "when the prior roster cannot be read nothing is retired on a guess");
+  eq(blind.ledger, "unread", "and the roster says so");
+
+  {
+    const shelf = new Map([["card:OLD", { sessionDate: "2026-09-21" }], ["card-x:OLD", { sessionDate: "2026-09-21" }],
+      ["card:B", { sessionDate: "2026-09-23" }]]);
+    const rosters = [];
+    const night = async (sessionDate, prior, candidates) => {
+      const nightLogs = [], nightDeletes = [];
+      let roster = null;
+      const out = await retireAndRoster({
+        sessionDate, generatedAt: "t", depth: new Map([["B", "cross-section"]]), landed: new Set(["card:B"]), candidates,
+        prior,
+        reader: async (key) => (shelf.has(key) ? { payload: shelf.get(key), status: 200 } : { payload: null, absent: true, status: 200 }),
+        remove: async (key) => { nightDeletes.push(key); return shelf.delete(key) ? { ok: true, status: 200 } : { ok: false, status: 404 }; },
+        write: async (key, payload) => { roster = payload; rosters.push(payload); },
+        log: (line) => nightLogs.push(line),
+      });
+      shelf.set("card:B", { sessionDate });
+      return { out, roster, deletes: nightDeletes, logs: nightLogs };
+    };
+    const n1 = await night("2026-09-22", { payload: { v: 1, sessionDate: "2026-09-21", depth: {}, held: { "card:OLD": "2026-09-21", "card-x:OLD": "2026-09-21" }, ledger: "carried" }, status: 200 }, ["B"]);
+    ok(n1.out.ledger === "carried" && Object.hasOwn(n1.roster.held, "card:OLD"), "night one carries OLD, still young, in its ledger");
+    const early = { payload: n1.roster, status: 200 };
+    const saidEarly = [];
+    ok(pickPriorRoster({ payload: null, failed: true, status: 403 }, early, { log: (l) => saidEarly.push(l) }) === early &&
+       saidEarly.length === 1,
+       "a roster read that fails at the retire step falls back to the copy the run read at its start, and says so");
+    const lateOk = { payload: n1.roster, status: 200 };
+    ok(pickPriorRoster(lateOk, { failed: true, status: 500 }) === lateOk, "a late read that answered is always preferred");
+    ok(pickPriorRoster({ failed: true, status: 403 }, null).failed, "and with no early copy the failure stands");
+    const n2 = await night("2026-09-23", { payload: null, failed: true, status: 403 }, ["B"]);
+    ok(n2.out.ledger === "unread" && !Object.hasOwn(n2.roster.held, "card:OLD") && n2.deletes.length === 0,
+       "night two cannot read the roster: nothing is retired and the ledger it writes has forgotten OLD");
+    const n3 = await night("2026-09-28", { payload: n2.roster, status: 200 }, ["B", "OLD"]);
+    ok(n3.out.ledger === "bootstrap" && n3.logs.some((l) => /not complete \(ledger-unread\)/.test(l)),
+       "night three reads a ledger marked unread and does NOT trust it: it probes the store");
+    assert.deepEqual(n3.deletes.sort(), ["card-x:OLD", "card:OLD"],
+      "so the key only the older ledger knew is found and retired once it is more than three sessions old"); checks++;
+    const n4 = await night("2026-09-29", { payload: n3.roster, status: 200 }, ["B"]);
+    ok(n4.out.ledger === "carried" && n4.deletes.length === 0, "and the night after, the rebuilt ledger is carried again");
+
+    shelf.set("card:LOST", { sessionDate: "2026-09-25" });
+    const gap = await night("2026-09-30", { payload: n3.roster, status: 200 }, ["B", "LOST"]);
+    ok(gap.out.ledger === "bootstrap" && gap.logs.some((l) => /not complete \(gap-2\)/.test(l)),
+       "a prior roster two sessions behind (a night whose roster write failed, or a run killed after its cards) is not trusted either");
+    ok(Object.hasOwn(gap.roster.held, "card:LOST"),
+       "so a card that landed only on the lost night enters the ledger and is retired in its turn");
+
+    const failing = await retireAndRoster({
+      sessionDate: "2026-09-24", generatedAt: "t", landed: new Set(),
+      prior: { payload: { v: 1, sessionDate: "2026-09-23", depth: {}, held: { "card:GONE": "2026-09-10" } }, status: 200 },
+      reader: async () => ({ payload: null, absent: true }),
+      remove: async () => ({ ok: true, status: 200 }),
+      write: async () => { throw new Error("HTTP 500"); },
+      log: (line) => logs.push(line),
+    });
+    ok(failing.written === false && failing.retired === 1 &&
+       logs.some((l) => /roster: NOT written \(HTTP 500\) after 1 key\(s\) were removed/.test(l)),
+       "a roster write that fails after the deletes says how many were removed, never that nothing was retired");
+
+    let reads = 0;
+    const stuck = await bootstrapLedger({
+      tickers: Array.from({ length: 200 }, (_, i) => "T" + i), reader: async () => { reads++; return { failed: true, status: 403 }; },
+      pool: async (list, fn) => { for (const x of list) await fn(x); },
+    });
+    ok(stuck.capped && reads === LEDGER_PROBE_FAIL_MAX,
+       `a probe against a store that keeps refusing stops after ${LEDGER_PROBE_FAIL_MAX} failed reads and is marked partial, ` +
+       "rather than spending the run on 400 refusals");
+    ok(LEDGER_PROBE_RETRY_BUDGET_MS <= 20_000, "and its retries have their own budget of at most twenty seconds");
+  }
+}
+
+console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, the dated archive key and its bounded prune, the watch board's ranking and vocabulary, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor, sector TRIX and the fixed-clamp scaling that keeps a flat day flat, the movers band's zero-call guarantee and its unranked counts, the rate limiter's floor actually being a floor, the truncated-chain probe's three distinct verdicts, the board's memory refusing a prior board that turns out to be this run's own session, a corpus proven to REACH the change layer's branches rather than merely to satisfy assertions written around them, and a market-wide join whose published coverage is checked against the cards it was measured over rather than against itself, the sector OPTIONS lean proven to be a different quantity from the sector momentum beside it — its ratio comparable across baskets three orders of magnitude apart where the dollar difference is not, its measured zero visible in dollars and undefined as a ratio, a blank vendor string refused before it can become a confident zero, and its row vocabulary disjoint from TRIX's — and the news tape's four counts, its own ordering applied before the cap so the rows kept are the newest and not the first, and an undated row published, counted on both sides of the cap, and never given a manufactured timestamp; and the focus-era coverage — gated names carded without a score, focus names built deep whatever their rank, fund dossiers, a roster that is also the retire ledger, and a call model that reproduces the measured nightly`);

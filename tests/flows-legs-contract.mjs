@@ -21,13 +21,18 @@ import {
   shapeEconomicCalendar, macroTag, parseFdaTarget, shapeFdaCalendar, sessionCloseInstant,
 } from "../shared/flows-catalysts.js";
 import { rowsOf, read } from "../scripts/flows-legs/common.mjs";
-import { harvestScreener, readShortInterest, readInsiders, readIndexRows, harvestBlock } from "../scripts/flows-legs/universe.mjs";
+import {
+  harvestScreener, readShortInterest, readInsiders, readIndexRows, harvestBlock, readHoldings, withPrefetched,
+  fetchMissingMembers, readFocusRows, HOLDINGS_PATH,
+} from "../scripts/flows-legs/universe.mjs";
+import { volNames, VOL_DEPTH_READS, runVolLeg } from "../scripts/flows-legs/vol.mjs";
+import { fakeVolVendor } from "../scripts/flows-legs/vol-fake.mjs";
 import { readRegime, assembleRegime, REGIME_CALLS } from "../scripts/flows-legs/regime.mjs";
 import { ownershipParts } from "../scripts/flows-legs/ownership.mjs";
 import { assembleCatalysts, readCatalysts, calendarPlan, EVENTS_ADDITIONS_BUDGET_BYTES } from "../scripts/flows-legs/events.mjs";
 import { runMarketLegs, windowTickersOf, MARKET_LEG_CALLS } from "../scripts/flows-legs/market.mjs";
 import { makeCardXStore, cardXPayload, composeCardXPayload, publishCardX, CARD_X_BUDGET_BYTES } from "../scripts/flows-legs/card-x.mjs";
-import { buildIndexDossiers, shedToFit } from "../scripts/flows-legs/index-dossier.mjs";
+import { buildIndexDossiers, shedToFit, dossierRoster } from "../scripts/flows-legs/index-dossier.mjs";
 import { makeFakeVendor } from "../scripts/flows-legs/fake-vendor.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -686,6 +691,70 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   });
   deep([hidden.skipped, hidden.failed], [["SPY"], []], "a row whose close is hidden is skipped before any vendor call, never built at spot 0");
   eq(shedToFit({ panels: {} }).dropped.length, 0, "a small card sheds nothing");
+
+  const roster = dossierRoster({ index: ["SPY", "QQQ", "IWM"], funds: ["GLD", "SPY", "COPX"] });
+  deep(roster.tickers, ["SPY", "QQQ", "IWM", "GLD", "COPX"], "the dossier roster is the indices then the funds, each once");
+  const funds = [];
+  const cardDepths = {};
+  const fundOut = await buildIndexDossiers({
+    tickers: roster.tickers, depthOf: (t) => roster.depth.get(t),
+    indexRows: new Map(roster.tickers.map((t) => [t, { close: "100" }])),
+    enrich: async () => ({}), features: () => ({}), perName: async () => ({}), chain: async () => null,
+    card: ({ ticker, depth }) => { cardDepths[ticker] = depth; return { ticker, depth: "board", panels: {} }; },
+    publish: async (key, card) => funds.push([key, card.depth]),
+  });
+  deep(funds, [["card:SPY", "index"], ["card:QQQ", "index"], ["card:IWM", "index"], ["card:GLD", "fund"], ["card:COPX", "fund"]],
+    "fund dossiers go through the same path and are published as depth fund; the indices stay index");
+  deep(fundOut.depth, { SPY: "index", QQQ: "index", IWM: "index", GLD: "fund", COPX: "fund" }, "and the run is told which depth each got");
+  deep(cardDepths, { SPY: "index", QQQ: "index", IWM: "index", GLD: "fund", COPX: "fund" },
+    "the card builder is told the depth too, so a fund's missing-chain reason names a fund chain and not an index one");
+}
+
+{
+  deep([...VOL_DEPTH_READS.fund], [...VOL_DEPTH_READS.index], "a fund's vol reads are an index's: cone, term, skew, IV rank and the rest");
+  const names = volNames({ deep: [["AAA", "long"]], crossSection: ["BBB"], funds: ["GLD", "SPY"] });
+  deep(names.map((n) => [n.ticker, n.depth]), [["AAA", "deep"], ["BBB", "carded"], ["SPY", "index"], ["QQQ", "index"], ["IWM", "index"], ["GLD", "fund"]],
+    "the vol roster adds the funds at depth fund after the indices, and never twice");
+  const leg = await runVolLeg({ uw: fakeVolVendor({ sessionDate: S, names }), names, sessionDate: S, radar: true });
+  const gld = leg.byTicker.get("GLD");
+  ok(gld && gld.panels.term.status === "ok" && gld.panels.skew.status !== undefined && gld.panels.cone.status === "ok",
+     "a fund gets cone, term and skew, so its card-x carries the vol module a stock dossier does");
+  ok(!leg.radar || !leg.radar.carded.includes("GLD"), "and a fund never joins the stock cross-section's radar or percentiles");
+}
+
+{
+  const calls = [];
+  const base = async (p, params, opts) => {
+    calls.push(p);
+    if (p === HOLDINGS_PATH) return { data: [{ ticker: "NVDA", weight: "8", type: "stock", updated: S }] };
+    if (p === "/api/screener/stocks") {
+      const want = String(params.ticker || "").split(",");
+      return want.filter((t) => t !== "GHOST").map((t) => ({ ticker: t, close: "10", marketcap: "5e8" }));
+    }
+    return opts && opts.envelope ? { data: [] } : [];
+  };
+  base.calls = calls;
+  const h = await readHoldings(base);
+  ok(h.ok && h.rows.length === 1 && h.calls === 1, "the QQQ holdings are read once, before selection");
+  const wrapped = withPrefetched(base, new Map([[h.path, h]]));
+  const again = await wrapped(HOLDINGS_PATH, {}, { envelope: true });
+  eq(calls.filter((p) => p === HOLDINGS_PATH).length, 1,
+     "the regime leg's own holdings read is served from that read — the NDX 10 costs no second call");
+  eq(again.data[0].ticker, "NVDA", "with the same body");
+  ok(wrapped.calls === calls, "and the wrapper keeps the vendor's own properties");
+  const failed = withPrefetched(base, new Map([[HOLDINGS_PATH, { ok: false, error: "/api/etfs/QQQ/holdings -> HTTP 403" }]]));
+  const r = await read(failed, HOLDINGS_PATH, {}, { envelope: true });
+  ok(!r.ok && r.gated, "a failed prefetch replays as the same failure, gate included, rather than a silent empty");
+
+  const m = await fetchMissingMembers(base, ["AAA", "PAAS", "GHOST"], new Set(["AAA"]), { date: S });
+  deep(m.asked, ["GHOST", "PAAS"], "only the guaranteed names the harvest did not return are asked for");
+  eq(m.calls, 1, "in one screener call by ticker");
+  deep(m.rows.map((x) => x.ticker), ["PAAS"], "a name the harvest's market-cap filter dropped (the TECK case) comes back by ticker");
+  deep(m.missing, ["GHOST"], "and a name the screener does not know is named, not invented");
+  const none = await fetchMissingMembers(base, ["AAA"], new Set(["AAA"]));
+  eq(none.calls, 0, "nothing missing costs nothing");
+  const f = await readFocusRows(base, ["GLD", "NVDA", "GLD"]);
+  ok(f.rows.size === 2 && f.calls === 1 && typeof f.readAt === "string", "the focus read is one call for every focus ticker, deduped");
 }
 
 {
