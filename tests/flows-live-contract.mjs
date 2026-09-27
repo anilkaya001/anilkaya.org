@@ -913,18 +913,26 @@ const cronMinutes = (cron) => {
   eq(W.cronJob(W.FOCUS_CRON, T("2026-09-26T15:18:00Z")), "focus",
     "by its string on any day: the tick itself decides whether the session is open");
   eq(W.cronJob(W.HOUSEKEEPING_CRON, T("2026-09-23T15:30:00Z")), "housekeeping", "the half-hour cron runs housekeeping");
-  eq(W.cronJob("*/15 * * * *", T("2026-09-23T15:15:00Z")), "rth",
-    "a trigger the deploy left behind still drives Tier 1 inside the session window, off the half hour");
+  eq(W.cronJob(W.SUMMARY_CRON, T("2026-09-23T15:45:00Z")), "summary", "the quarter-past cron runs the board summary");
+  eq(W.SUMMARY_CRON, "15,45 * * * *",
+    "THE SUMMARY IS ITS OWN FIRING: refreshing it parses the 118 KB brief, about 8 ms of a cold isolate's 10 ms, so " +
+    "it no longer shares the housekeeping firing with the market snapshot and the nightly dispatch, whose D1 writes " +
+    "were behind it in the same invocation and died with it when the cap struck");
+  eq(W.cronJob("*/15 * * * *", T("2026-09-23T15:15:00Z")), "summary",
+    "a trigger the deploy left behind runs the summary at the quarter hour, the summary cron's own minutes");
   eq(W.cronJob("*/15 * * * *", T("2026-09-23T15:30:00Z")), "housekeeping", "and keeps the half hour for housekeeping");
-  eq(W.cronJob("*/15 * * * *", T("2026-09-26T15:15:00Z")), "housekeeping", "never on a Saturday");
-  eq(W.cronJob("*/15 * * * *", T("2026-09-23T03:15:00Z")), "housekeeping", "and never outside the 13-21 UTC window");
-  deep(["15:13", "15:18", "15:16", "15:21", "15:30", "16:00"].map((hm) => W.cronJob("* * * * *", T(`2026-09-23T${hm}:00Z`))),
-    ["focus", "focus", "rth", "rth", "housekeeping", "housekeeping"],
-    "WITH THREE CRONS an unknown trigger is routed by its minute: minutes ending in 3 or 8 are the focus tick's, the " +
-    "half hour is housekeeping's and every other minute inside the window is Tier 1's, so a stale or renamed trigger " +
-    "never runs Tier 1 at the focus tick's minutes or the focus read at Tier 1's");
-  deep(["13:03", "21:58", "22:03", "12:58"].map((hm) => W.cronJob("* * * * *", T(`2026-09-25T${hm}:00Z`))),
-    ["focus", "focus", "housekeeping", "housekeeping"], "inside the 13-21 UTC weekday window only");
+  eq(W.cronJob("*/15 * * * *", T("2026-09-26T15:15:00Z")), "summary", "on a Saturday too, as the summary cron fires every day");
+  eq(W.cronJob("*/15 * * * *", T("2026-09-23T03:15:00Z")), "summary", "and outside the 13-21 UTC window");
+  eq(W.cronJob("*/15 * * * *", T("2026-09-26T15:30:00Z")), "housekeeping", "the half hour is housekeeping's on any day");
+  deep(["15:13", "15:18", "15:16", "15:21", "15:30", "16:00", "15:45", "16:15"].map((hm) => W.cronJob("* * * * *", T(`2026-09-23T${hm}:00Z`))),
+    ["focus", "focus", "rth", "rth", "housekeeping", "housekeeping", "summary", "summary"],
+    "WITH FOUR CRONS an unknown trigger is routed by its minute: minutes ending in 3 or 8 are the focus tick's, the " +
+    "half hour is housekeeping's, the quarter hour is the summary's and every other minute inside the window is " +
+    "Tier 1's, so a stale or renamed trigger never runs Tier 1 at the focus tick's minutes or the focus read at Tier 1's");
+  deep(["13:03", "21:58", "22:03", "12:58", "22:15", "12:45", "22:30"].map((hm) => W.cronJob("* * * * *", T(`2026-09-25T${hm}:00Z`))),
+    ["focus", "focus", "housekeeping", "housekeeping", "summary", "summary", "housekeeping"],
+    "inside the 13-21 UTC weekday window only; outside it the quarter hour is still the summary's and every other " +
+    "minute is housekeeping's");
   eq(Array.from({ length: 60 }, (_, m) => m).filter((m) => W.cronJob("x", T("2026-09-23T15:00:00Z") + m * 60000) === "focus").join(),
     W.FOCUS_CRON.split(" ")[0].replace(/^(\d+)-(\d+)\/(\d+)$/, (_, a, b, n) =>
       Array.from({ length: Math.floor((b - a) / n) + 1 }, (__, i) => Number(a) + i * n).join()),
@@ -944,10 +952,14 @@ const cronMinutes = (cron) => {
      /if \(job === "focus"\) \{\s*guard\("flows focus tick failed", \(async \(\) => \{\s*await ensureFlowsTables\(env\);\s*return FLOWS_LIVE\.focusTick\(env, at, \{ fetchVendor: \(p, params\) => uwFetch\(env, p, params\) \}\);/.test(worker),
     "the scheduled handler routes by the job a trigger's instant calls for, not by the trigger's exact string, and " +
     "the focus job reads the vendor through the same uwFetch as Tier 1");
-  ok(toml.includes(`"${W.RTH_CRON}"`) && toml.includes(`"${W.FOCUS_CRON}"`) && toml.includes(`"${W.HOUSEKEEPING_CRON}"`),
-    "the three crons the Worker branches on are the three wrangler.toml registers");
+  ok(/if \(job === "summary"\) \{\s*guard\("flows summary refresh failed", refreshFlowsSummary\(env, at\)\);\s*return;\s*\}/.test(worker) &&
+     !/guard\("flows nightly dispatch failed"[\s\S]*?guard\("flows summary refresh failed"/.test(worker),
+    "the summary job is the summary firing's alone and the housekeeping branch no longer carries it");
+  ok(toml.includes(`"${W.RTH_CRON}"`) && toml.includes(`"${W.FOCUS_CRON}"`) && toml.includes(`"${W.HOUSEKEEPING_CRON}"`) &&
+     toml.includes(`"${W.SUMMARY_CRON}"`),
+    "the four crons the Worker branches on are the four wrangler.toml registers");
   const cronList = (toml.match(/^crons = \[([^\]]*)\]/m) || [null, ""])[1].match(/"[^"]+"/g) || [];
-  eq(cronList.length, 3, "three Worker crons, inside the five Workers Free allows an account");
+  eq(cronList.length, 4, "four Worker crons, inside the five Workers Free allows an account");
   ok(cronList.length >= 2 && cronList.every((c) => { const f = c.slice(1, -1).trim().split(/\s+/); return f.length === 5 && /^(\*|[A-Za-z]{3}(-[A-Za-z]{3})?(,[A-Za-z]{3}(-[A-Za-z]{3})?)*)$/.test(f[4]); }),
     "EVERY WORKER CRON NAMES ITS WEEKDAYS BY NAME: Cloudflare counts 1 = Sunday to 7 = Saturday, so the numeric 1-5 " +
     "this file carried ran Tier 1 Sunday to Thursday and never on a Friday, as 2026-09-25 showed (" + cronList.join(", ") + ")");

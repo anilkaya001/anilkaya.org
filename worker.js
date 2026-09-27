@@ -3489,6 +3489,11 @@ export default {
       })());
       return;
     }
+    if (job === "summary") {
+      guard("flows summary refresh failed", refreshFlowsSummary(env, at));
+      return;
+    }
+
     guard("market refresh failed", refreshMarketSnapshotIfDue(env, at));
 
     guard("flows nightly dispatch failed", (async () => {
@@ -3496,8 +3501,6 @@ export default {
       await FLOWS_LIVE.nightlyTick(env, at);
       if (FLOWS_LIVE.pruneDue(at)) await FLOWS_LIVE.pruneTape(env, at);
     })());
-
-    guard("flows summary refresh failed", refreshFlowsSummary(env, at));
   },
 
   async fetch(request, env, ctx) {

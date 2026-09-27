@@ -61,16 +61,20 @@ export async function upgradeClockColumns(db) {
 export const RTH_CRON = "1-59/5 13-21 * * MON-FRI";
 export const FOCUS_CRON = "3-58/5 13-21 * * MON-FRI";
 export const HOUSEKEEPING_CRON = "*/30 * * * *";
+export const SUMMARY_CRON = "15,45 * * * *";
 
 export function cronJob(cron, at) {
   if (cron === RTH_CRON) return "rth";
   if (cron === FOCUS_CRON) return "focus";
   if (cron === HOUSEKEEPING_CRON) return "housekeeping";
+  if (cron === SUMMARY_CRON) return "summary";
   const d = new Date(Number.isFinite(at) ? at : Date.now());
   const weekday = d.getUTCDay() >= 1 && d.getUTCDay() <= 5;
   const hour = d.getUTCHours();
   const minute = d.getUTCMinutes();
-  if (!(weekday && hour >= 13 && hour <= 21) || minute % 30 === 0) return "housekeeping";
+  if (minute % 30 === 0) return "housekeeping";
+  if (minute % 30 === 15) return "summary";
+  if (!(weekday && hour >= 13 && hour <= 21)) return "housekeeping";
   return minute % 5 === 3 ? "focus" : "rth";
 }
 

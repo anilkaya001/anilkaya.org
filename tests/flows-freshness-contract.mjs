@@ -9,13 +9,14 @@ import { nyseHolidays, nyseEarlyCloses, closeUtcMs, etDayOf } from "../shared/fl
 import { briefAge } from "../shared/flows-ask.js";
 import { sessionsBetween } from "../shared/flows-cross.js";
 import { nextSessionAfter } from "../shared/flows-variation.js";
-import { serveNow, RTH_CRON, FOCUS_CRON } from "../shared/flows-live-worker.js";
+import { serveNow, RTH_CRON, FOCUS_CRON, HOUSEKEEPING_CRON, SUMMARY_CRON } from "../shared/flows-live-worker.js";
 import { LIVE_KEYS } from "../shared/flows-live.js";
 import { MARKET_STALE_MS, MARKET_CRON_STALE_MS, marketRefreshDue } from "../shared/markets.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
+const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
 {
@@ -264,7 +265,15 @@ const NYSE_PUBLISHED = Object.freeze({
     "and live:focus promises the cadence its cron keeps, so its Live pill lapses when a tick is missed, not before");
   ok(start % step !== Number(rth[1]) % step && end - start > 60 - 2 * step,
     `the focus ticks (minute ${start} of every ${step}) fall between Tier 1's (minute ${rth[1]}), on every step of the hour`);
-  ok(crons.includes('"*/30 * * * *"'), "wrangler.toml carries the half-hour housekeeping clock beside them");
+  ok(crons.includes(`"${HOUSEKEEPING_CRON}"`) && crons.includes(`"${SUMMARY_CRON}"`),
+    "wrangler.toml carries the half-hour housekeeping clock and the quarter-hour summary clock beside them");
+  const minutesOf = (cron) => {
+    const field = cron.split(" ")[0];
+    if (/^\*\/\d+$/.test(field)) { const n = Number(field.slice(2)); return Array.from({ length: 60 / n }, (_, i) => i * n); }
+    return field.split(",").map(Number);
+  };
+  deep(minutesOf(HOUSEKEEPING_CRON), [0, 30], "housekeeping fires on the hour and the half hour");
+  deep(minutesOf(SUMMARY_CRON), [15, 45], "the summary on the quarters between, so the two never share a firing");
   const cadenceMs = 30 * 60 * 1000;
   ok(MARKET_CRON_STALE_MS < cadenceMs,
     `the housekeeping cron refreshes a market snapshot older than ${MARKET_CRON_STALE_MS / 60000} minutes: under its own ` +

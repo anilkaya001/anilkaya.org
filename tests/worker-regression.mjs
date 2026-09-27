@@ -7,7 +7,7 @@ import { MARKET_INDICES } from "../shared/markets.js";
 import { applyMastery } from "../shared/mastery.js";
 import { signSession } from "../shared/session.js";
 import { signFlowsSession } from "../shared/flows-auth.js";
-import { HOUSEKEEPING_CRON } from "../shared/flows-live-worker.js";
+import { HOUSEKEEPING_CRON, SUMMARY_CRON } from "../shared/flows-live-worker.js";
 import { REPO_ROOT, SESSION_SECRET, FLOWS_TEST_USER, startWorker } from "./worker-server.mjs";
 
 const quotes = await (async () => {
@@ -195,6 +195,11 @@ try {
   quotes.state.hits = 0;
   await tick(HOUSEKEEPING_CRON, "2026-09-23T14:00:00Z");
   assert(await pollUntil(() => quotes.state.hits >= indexCount, 10000), "INSIDE THE WINDOW every firing refreshes, whatever the age");
+  await seedStale(saturdayNoon - 60 * 60 * 1000);
+  quotes.state.hits = 0;
+  assert.equal(await tick(SUMMARY_CRON, "2026-09-26T12:15:00Z"), 200, "the summary cron fires");
+  await sleep(500);
+  assert.equal(quotes.state.hits, 0, "and never touches the market snapshot: it is the housekeeping firing's job");
 
   const css = await fetch(base + `/assets/css/base.css?v=${assetVersion}`);
   assert.equal(css.headers.get("cache-control"), "public, max-age=31536000, immutable");

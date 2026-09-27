@@ -1820,6 +1820,24 @@ try {
       await tick(HOUSE, "2026-09-23T19:00:00-04:00");
       eq(github.dispatches.length, 4, "never a third time");
 
+      const SUMMARY = "15,45 * * * *";
+      eq((await ingest("brief", "POST", INGEST_TOKEN, {
+        generatedAt: "2026-09-23T00:10:00.000Z", sessionDate: "2026-09-22",
+        today: { facts: [], silences: [] }, yesterday: { facts: [], silences: [] }, next: { facts: [], silences: [], isForecast: false },
+        facts: [{ id: "t/tilt", topic: ["today", "lean"], source: "brief", at: "2026-09-23T00:10:00.000Z",
+          say: "44 names lean bullish and 53 lean bearish out of 100 scored.", n: { bullish: 44, bearish: 53, scored: 100 } }],
+        silences: { pending: [], unreadable: [], quiet: [] },
+      })).status, 200, "a briefing is published");
+      await live.d1("DELETE FROM flows_ai_summary WHERE scope = 'board'");
+      await tick(HOUSE, "2026-09-23T19:30:00-04:00");
+      ok(!/\bboard\b/.test(await live.d1("SELECT scope FROM flows_ai_summary")),
+        "THE HOUSEKEEPING FIRING NO LONGER WRITES THE BOARD SUMMARY: parsing the brief was most of a cold isolate's " +
+          "10 ms, and the market snapshot and the nightly dispatch shared the invocation with it");
+      eq(await tick(SUMMARY, "2026-09-23T19:45:00-04:00"), 200, "the summary cron fires through the real scheduled handler");
+      ok(/\bboard\b/.test(await live.d1("SELECT scope FROM flows_ai_summary")), "and writes the board summary");
+      eq(github.dispatches.length, 4, "dispatching nothing: the nightly dispatch is the housekeeping firing's alone");
+      await live.d1("DELETE FROM flows_payload WHERE id = 'brief'");
+
       const alerts = mergeLiveAlerts(null, [{ body: fakeFlowAlerts({ session: "2026-09-23",
         now: et("2026-09-23T11:00:00-04:00"), count: 20 }), full: false }],
       { at: et("2026-09-23T11:00:00-04:00"), session: "2026-09-23", writer: "flows-live@test" }).write;
