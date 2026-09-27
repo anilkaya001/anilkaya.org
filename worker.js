@@ -2135,13 +2135,20 @@ async function buildStrategyExpiry(env, ticker, expiry, { engine = false } = {})
 }
 
 let flowsSchemaReady = false;
+let flowsSchemaFlight = null;
 async function ensureFlowsTables(env) {
   if (flowsSchemaReady || !env.DB) return;
-  try {
-    await env.DB.batch(FLOWS_SCHEMA_SQL.map((sql) => env.DB.prepare(sql)));
-    await FLOWS_LIVE.upgradeClockColumns(env.DB);
-    flowsSchemaReady = true;
-  } catch {   }
+  if (!flowsSchemaFlight) {
+    flowsSchemaFlight = (async () => {
+      try {
+        await env.DB.batch(FLOWS_SCHEMA_SQL.map((sql) => env.DB.prepare(sql)));
+        await FLOWS_LIVE.upgradeClockColumns(env.DB);
+        flowsSchemaReady = true;
+      } catch {}
+      flowsSchemaFlight = null;
+    })();
+  }
+  await flowsSchemaFlight;
 }
 
 function flowsThrottleKey(request, username) {
