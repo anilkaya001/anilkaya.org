@@ -2424,11 +2424,12 @@ const cronMinutes = (cron) => {
     const edgeCount = Number(/^ {2}edge: (\d+) ingest/.exec(edgeLine)[1]);
     const bracketed = [...edgeLine.slice(edgeLine.indexOf("[")).matchAll(/ (\d+)(?: \(cf-ray [^)]*\))?(?:;|\])/g)]
       .reduce((sum, m) => sum + Number(m[1]), 0);
-    deep([edgeCount, bracketed, run.count, lastGate.failures[0]], [31, 31, 31,
-      "HEALTH: the edge answered 31 ingest request(s) with HTTP 403 and retries spent 48 s of the 90 s budget"],
-    "THE GATE READS THE TALLY AFTER ITS OWN READS: the 403s its clock, live:market and live:heartbeat reads meet are in " +
-      "the count, the count and the bracketed kinds add up to the same total, and the threshold sees what the line shows");
-    ok(/, 48\.0 s of retry budget spent/.test(edgeLine), "and the retry budget in the line is read at the same moment");
+    deep([edgeCount, bracketed, run.count, lastGate.failures[0]], [34, 34, 34,
+      "HEALTH: the edge answered 34 ingest request(s) with HTTP 403 and retries spent 62 s of the 90 s budget"],
+    "THE GATE READS THE TALLY AFTER ITS OWN READS: the 403s its clock, live:market, live:focus and live:heartbeat reads " +
+      "meet are in the count, the count and the bracketed kinds add up to the same total, and the threshold sees what " +
+      "the line shows");
+    ok(/, 62\.0 s of retry budget spent/.test(edgeLine), "and the retry budget in the line is read at the same moment");
   }
   const off = healthChecks({ ...good, clockRead: clockWith({ tier1: { at: null, okAt: null, why: "off" } }),
     heartbeatRead: { payload: null, absent: true }, focusRead: { payload: null, absent: true } });
@@ -2750,6 +2751,7 @@ const cronMinutes = (cron) => {
     clock: { payload: { key: "clock", clock: { ...view, tier1: { at: new Date(at(17, 56)).toISOString(),
       okAt: new Date(at(16, 6)).toISOString(), why: "written" } }, labActiveAt: new Date(at(12, 0)).toISOString() }, status: 200 },
     "live:market": { payload: { fresh: { readAt: new Date(at(16, 6)).toISOString() } }, status: 200 },
+    "live:focus": { payload: { fresh: { readAt: new Date(at(16, 8)).toISOString() } }, status: 200 },
     "live:heartbeat": { payload: { session: S, run: { calls: 39, failedCalls: 0, finishedAt: new Date(at(16, 21)).toISOString() } },
       status: 200 },
   };
