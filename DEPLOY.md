@@ -1617,12 +1617,25 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   Friday 2026-09-25. `tests/flows-live-contract.mjs` refuses a numeric weekday
   in any Worker cron. GitHub Actions schedules use standard cron, where `1-5`
   is Monday to Friday, so the workflow files keep their numbers.
-  `*/30 * * * *` refreshes the market snapshot,
+  `*/30 * * * *` refreshes the landing page's market snapshot,
   dispatches the nightly at or after 17:15 ET (once more after 18:15 ET if meta
   is still behind), refreshes the board summary, and prunes `flows_tape` rows not
   served for a week. It logs `nightly missing` from 21:00 ET (close + 300
   minutes) when meta is still behind: the scheduled nightly lands about 20:00
-  ET, so the old close + 180 fired falsely every weekday evening.
+  ET, so the old close + 180 fired falsely every weekday evening. The snapshot
+  is refreshed on every firing inside the refresh window and, outside it, when
+  the stored one is older than 25 minutes: under the cron's own cadence, so a
+  snapshot the cron wrote is due again at its next firing. Until 2026-09-27 the
+  cron waited for 45 minutes of age, the same threshold `/api/markets` used, so
+  outside market hours the snapshot was stale for about 15 of every 60 minutes
+  and every landing-page visit in that window fetched eight Yahoo quotes
+  inline, two hosts and a 5 s timeout each, before answering (production at
+  19:46 UTC that day: updated 18:46, age 60 minutes). `/api/markets` now serves
+  the stored snapshot at once whenever one exists and refreshes a stale one in
+  `ctx.waitUntil`, single-flight per isolate; only a database with no snapshot
+  fetches inline. The payload's own `updatedAt` is the instant its quotes were
+  fetched, and a failed refresh re-dates the row without touching it, so old
+  quotes are never re-stamped as new.
 - **The focus modules run on the Worker's own clock.** `3-58/5 13-21 * * MON-FRI`,
   the third Worker cron, fires at minutes ending in 3 and 8, between Tier 1's,
   and writes `live:focus` for Home's Metals and Leaders modules. It is due

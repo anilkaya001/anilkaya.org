@@ -15,7 +15,7 @@ import { REVIEW_ITEM_BY_ID } from "./shared/review-manifest.js";
 import { COURSE_STAGE_BY_ID } from "./shared/stage-manifest.js";
 import { SKILL_BY_ID } from "./shared/skill-manifest.js";
 import { PROJECT_BY_ID } from "./shared/project-manifest.js";
-import { MARKET_INDICES, parseIndexQuote, buildSnapshot } from "./shared/markets.js";
+import { MARKET_INDICES, MARKET_STALE_MS, marketRefreshDue, parseIndexQuote, buildSnapshot } from "./shared/markets.js";
 
 import {
   rankChain, RANK_KEYS, crossesEarnings, numOrNull, parseOptionSymbol, ivConvention,
@@ -131,9 +131,8 @@ const FLOWS_SCHEMA_SQL = [
   ...FLOWS_LIVE.LIVE_SCHEMA_SQL,
 ];
 
-const MARKET_STALE_MS = 45 * 60 * 1000;
 const MARKET_FETCH_TIMEOUT_MS = 5000;
-const YAHOO_HOSTS = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"];
+const YAHOO_ORIGINS = ["https://query1.finance.yahoo.com", "https://query2.finance.yahoo.com"];
 
 const setAttr = (name, value) => ({ element: (el) => el.setAttribute(name, value) });
 
@@ -435,15 +434,20 @@ async function marketOp(env, op) {
   }
 }
 
-async function fetchIndexQuote(index) {
-  for (const host of YAHOO_HOSTS) {
+function marketQuoteOrigins(env) {
+  const raw = env && typeof env.MARKET_QUOTE_ORIGIN === "string" ? env.MARKET_QUOTE_ORIGIN.trim().replace(/\/+$/, "") : "";
+  return /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(raw) ? [raw] : YAHOO_ORIGINS;
+}
+
+async function fetchIndexQuote(index, origins) {
+  for (const origin of origins) {
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), MARKET_FETCH_TIMEOUT_MS);
       let response;
       try {
         response = await fetch(
-          "https://" + host + "/v8/finance/chart/" + encodeURIComponent(index.yahoo) + "?range=5d&interval=1d",
+          origin + "/v8/finance/chart/" + encodeURIComponent(index.yahoo) + "?range=5d&interval=1d",
           { signal: controller.signal, headers: { "User-Agent": "Mozilla/5.0 (compatible; anilkaya.org market board)", "Accept": "application/json" } },
         );
       } finally {
@@ -458,7 +462,8 @@ async function fetchIndexQuote(index) {
 }
 
 async function refreshMarketSnapshot(env) {
-  const settled = await Promise.allSettled(MARKET_INDICES.map(fetchIndexQuote));
+  const origins = marketQuoteOrigins(env);
+  const settled = await Promise.allSettled(MARKET_INDICES.map((index) => fetchIndexQuote(index, origins)));
   const quotes = settled.map((r) => (r.status === "fulfilled" ? r.value : null)).filter(Boolean);
   if (!quotes.length) return null;
   const now = Date.now();
@@ -472,37 +477,42 @@ async function refreshMarketSnapshot(env) {
   return payload;
 }
 
-async function refreshMarketSnapshotIfDue(env) {
-  const now = new Date();
-  if (!isRefreshWindow(now)) {
-    let row = null;
-    try {
-      row = await marketOp(env, () => env.DB.prepare(
-        "SELECT updated_at FROM market_snapshot WHERE id=1").first());
-    } catch { row = null; }
-    const age = row ? now.getTime() - Number(row.updated_at) : Infinity;
-    if (age <= MARKET_STALE_MS) return null;
-  }
-  return refreshMarketSnapshot(env);
-}
+let marketRevalidation = null;
 
-async function loadMarketSnapshot(env) {
-  let row = null;
-  try {
-    row = await marketOp(env, () => env.DB.prepare("SELECT payload, updated_at FROM market_snapshot WHERE id=1").first());
-  } catch { row = null; }
-  const age = row ? Date.now() - Number(row.updated_at) : Infinity;
-  if (age > MARKET_STALE_MS) {
-    const refreshed = await refreshMarketSnapshot(env).catch(() => null);
+function revalidateMarketSnapshot(env, held) {
+  if (marketRevalidation) return marketRevalidation;
+  marketRevalidation = refreshMarketSnapshot(env).catch(() => null).then(async (refreshed) => {
     if (refreshed) return refreshed;
-
     const now = Date.now();
-    const payload = row ? row.payload : JSON.stringify({ quotes: [], updatedAt: now });
+    const payload = held ? held.payload : JSON.stringify({ quotes: [], updatedAt: now });
     await marketOp(env, () => env.DB.prepare(
       "INSERT INTO market_snapshot (id, payload, updated_at) VALUES (1, ?, ?) " +
       "ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at",
     ).bind(payload, now).run()).catch(() => {});
     return payload;
+  }).finally(() => { marketRevalidation = null; });
+  return marketRevalidation;
+}
+
+async function readMarketSnapshot(env) {
+  try {
+    return await marketOp(env, () => env.DB.prepare("SELECT payload, updated_at FROM market_snapshot WHERE id=1").first());
+  } catch { return null; }
+}
+
+async function refreshMarketSnapshotIfDue(env, at = Date.now()) {
+  const row = await readMarketSnapshot(env);
+  const age = row ? at - Number(row.updated_at) : Infinity;
+  if (!marketRefreshDue(age, isRefreshWindow(new Date(at)))) return null;
+  return revalidateMarketSnapshot(env, row);
+}
+
+async function loadMarketSnapshot(env, ctx) {
+  const row = await readMarketSnapshot(env);
+  if (!row) return revalidateMarketSnapshot(env, null);
+  if (Date.now() - Number(row.updated_at) > MARKET_STALE_MS) {
+    const refresh = revalidateMarketSnapshot(env, row);
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(refresh);
   }
   return row.payload;
 }
@@ -2403,7 +2413,7 @@ async function route(request, env, url, ctx) {
   if (path === "/api/markets") {
     requireMethod(request, ["GET", "HEAD"]);
 
-    return new Response(await loadMarketSnapshot(env), {
+    return new Response(await loadMarketSnapshot(env, ctx), {
       status: 200,
       headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "public, max-age=300" },
     });
@@ -3479,8 +3489,7 @@ export default {
       })());
       return;
     }
-
-    guard("market refresh failed", refreshMarketSnapshotIfDue(env));
+    guard("market refresh failed", refreshMarketSnapshotIfDue(env, at));
 
     guard("flows nightly dispatch failed", (async () => {
       await ensureFlowsTables(env);

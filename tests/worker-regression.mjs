@@ -1,14 +1,46 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import http from "node:http";
 import path from "node:path";
 import { COURSE_TOPICS, SITE_ORIGIN } from "../shared/course-seo.js";
+import { MARKET_INDICES } from "../shared/markets.js";
 import { applyMastery } from "../shared/mastery.js";
 import { signSession } from "../shared/session.js";
 import { signFlowsSession } from "../shared/flows-auth.js";
+import { HOUSEKEEPING_CRON } from "../shared/flows-live-worker.js";
 import { REPO_ROOT, SESSION_SECRET, FLOWS_TEST_USER, startWorker } from "./worker-server.mjs";
 
-const server = await startWorker();
+const quotes = await (async () => {
+  const state = { hits: 0, mode: "ok", delayMs: 0 };
+  const chart = (symbol) => ({ chart: { result: [{
+    meta: { currency: "USD", symbol, regularMarketPrice: 105, chartPreviousClose: 100, regularMarketTime: 1790380000 },
+    indicators: { quote: [{ close: [100, 101, 102, 103, 105] }] },
+  }], error: null } });
+  const stub = http.createServer((req, res) => {
+    const symbol = /^\/v8\/finance\/chart\/([^?]+)/.exec(req.url);
+    state.hits++;
+    const answer = () => {
+      if (!symbol || state.mode === "fail") { res.writeHead(503, { "Content-Type": "application/json" }); res.end("{}"); return; }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(chart(decodeURIComponent(symbol[1]))));
+    };
+    if (state.delayMs > 0) setTimeout(answer, state.delayMs); else answer();
+  });
+  await new Promise((resolve) => stub.listen(0, "127.0.0.1", resolve));
+  return { state, base: `http://127.0.0.1:${stub.address().port}`, close: () => new Promise((resolve) => stub.close(resolve)) };
+})();
+const server = await startWorker({ extraVars: [`MARKET_QUOTE_ORIGIN:${quotes.base}`] });
 const base = server.baseURL;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function pollUntil(probe, timeoutMs) {
+  const until = Date.now() + timeoutMs;
+  for (;;) {
+    const value = await probe();
+    if (value) return value;
+    if (Date.now() > until) return null;
+    await sleep(100);
+  }
+}
 const assetVersion = (await readFile(path.join(REPO_ROOT, "assets/version.txt"), "utf8")).trim();
 const TEST_SESSION_TTL_MS = 10 * 60 * 1000;
 const securityHeaders = [
@@ -82,6 +114,87 @@ try {
       "each quote must carry label/price/changePct/currency");
   }
   assert.equal((await fetch(base + "/api/markets", { method: "POST" })).status, 405, "/api/markets is read-only");
+
+  const indexCount = MARKET_INDICES.length;
+  assert.equal(marketBody.quotes.length, indexCount,
+    "A DATABASE WITH NO SNAPSHOT fetches inline: the first reader waits for every index and gets all of them");
+  assert.equal(quotes.state.hits, indexCount, "one quote request per index");
+  assert(Date.now() - marketBody.updatedAt < 60000, "stamped when the quotes were fetched");
+  const fresh = await (await fetch(base + "/api/markets")).json();
+  assert.equal(fresh.updatedAt, marketBody.updatedAt, "a fresh snapshot is served as stored");
+  assert.equal(quotes.state.hits, indexCount, "with no quote request");
+
+  const seedStale = (updatedAt) => server.d1(
+    `UPDATE market_snapshot SET payload='${JSON.stringify({ quotes: [], updatedAt })}', updated_at=${updatedAt} WHERE id=1`);
+  const readMarkets = async () => (await fetch(base + "/api/markets")).json();
+  const landed = (staleAt) => pollUntil(async () => {
+    const body = await readMarkets();
+    return body.updatedAt !== staleAt ? body : null;
+  }, 10000);
+
+  const staleAt = Date.now() - 46 * 60 * 1000;
+  await seedStale(staleAt);
+  quotes.state.hits = 0;
+  quotes.state.delayMs = 1500;
+  const t0 = performance.now();
+  const stale = await readMarkets();
+  const waited = performance.now() - t0;
+  assert.equal(stale.updatedAt, staleAt,
+    "A STALE SNAPSHOT IS SERVED AT ONCE, as stored, with the updatedAt of the quotes it holds");
+  assert(waited < 1200, `and the reader never waits for the refresh (${waited.toFixed(0)} ms against a 1500 ms quote answer)`);
+  const refreshed = await landed(staleAt);
+  assert(refreshed, "the refresh lands afterwards, in the background");
+  assert.equal(refreshed.quotes.length, indexCount, "with every index");
+  assert(refreshed.updatedAt > staleAt, "and a newer updatedAt");
+  assert.equal(quotes.state.hits, indexCount,
+    "from one refresh, although every poll read the stale row while it was in flight");
+
+  const staleAgain = Date.now() - 50 * 60 * 1000;
+  await seedStale(staleAgain);
+  quotes.state.hits = 0;
+  const pair = await Promise.all([readMarkets(), readMarkets()]);
+  assert.deepEqual(pair.map((body) => body.updatedAt), [staleAgain, staleAgain],
+    "TWO CONCURRENT STALE READS are both served the stored snapshot");
+  assert(await landed(staleAgain), "and the refresh lands");
+  assert.equal(quotes.state.hits, indexCount, "once: single-flight per isolate, never two refreshes at a time");
+
+  const staleFailing = Date.now() - 47 * 60 * 1000;
+  await seedStale(staleFailing);
+  quotes.state.hits = 0;
+  quotes.state.delayMs = 0;
+  quotes.state.mode = "fail";
+  assert.equal((await readMarkets()).updatedAt, staleFailing, "when the quote source fails the stored snapshot is served");
+  assert(await pollUntil(async () =>
+    !(await server.d1("SELECT updated_at FROM market_snapshot WHERE id=1")).includes(String(staleFailing)), 10000),
+  "the failed attempt re-dates the row so readers stop retrying");
+  assert.equal(quotes.state.hits, indexCount, "after one attempt");
+  assert.equal((await readMarkets()).updatedAt, staleFailing,
+    "while the snapshot keeps the updatedAt of the quotes it holds: a failed refresh never re-stamps old quotes as new");
+  await sleep(300);
+  assert.equal(quotes.state.hits, indexCount, "and the next reader triggers no new attempt");
+  quotes.state.mode = "ok";
+
+  const tick = async (cron, iso) => {
+    const res = await fetch(base + `/cdn-cgi/handler/scheduled?cron=${encodeURIComponent(cron)}&time=${Date.parse(iso)}`);
+    await res.text();
+    return res.status;
+  };
+  const saturdayNoon = Date.parse("2026-09-26T12:00:00Z");
+  await seedStale(saturdayNoon - 20 * 60 * 1000);
+  quotes.state.hits = 0;
+  assert.equal(await tick(HOUSEKEEPING_CRON, "2026-09-26T12:00:00Z"), 200, "the housekeeping cron fires through the real scheduled handler");
+  await sleep(500);
+  assert.equal(quotes.state.hits, 0, "OUTSIDE THE REFRESH WINDOW it leaves a 20-minute-old snapshot alone");
+  await seedStale(saturdayNoon - 26 * 60 * 1000);
+  await tick(HOUSEKEEPING_CRON, "2026-09-26T12:00:00Z");
+  assert(await pollUntil(() => quotes.state.hits >= indexCount, 10000),
+    "and refreshes a 26-minute-old one: older than its own 30-minute cadence can tolerate, so no reader meets one older than 45 minutes");
+  await sleep(300);
+  assert.equal(quotes.state.hits, indexCount, "with one request per index");
+  await seedStale(Date.now());
+  quotes.state.hits = 0;
+  await tick(HOUSEKEEPING_CRON, "2026-09-23T14:00:00Z");
+  assert(await pollUntil(() => quotes.state.hits >= indexCount, 10000), "INSIDE THE WINDOW every firing refreshes, whatever the age");
 
   const css = await fetch(base + `/assets/css/base.css?v=${assetVersion}`);
   assert.equal(css.headers.get("cache-control"), "public, max-age=31536000, immutable");
@@ -860,7 +973,8 @@ try {
   assert.equal(pendingLive.headers.get("x-fresh-state"), "pending", "and says pending in its freshness header");
   assert.equal((await pendingLive.json()).status, "pending");
 
-  console.log("✓ worker: routing, metadata, headers, API validation, D1 union, mastery and placement isolation, generation-fenced reset, derived points, and the Flows clock headers kept off the Lab APIs");
+  console.log("✓ worker: routing, metadata, headers, API validation, D1 union, mastery and placement isolation, generation-fenced reset, derived points, the market snapshot served stale-while-revalidate, and the Flows clock headers kept off the Lab APIs");
 } finally {
   await server.stop();
+  await quotes.close();
 }
