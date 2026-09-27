@@ -15,7 +15,10 @@ import {
   readHeldAlerts, boardPlan, liveWindow, runLive, runLiveLoop, chainDispatch, nextSlot, LIVE_LOOP, readLiveClock,
   sessionClock, liveRunVerdict, passOutcome, focusStripNames, FOCUS_FALLBACK,
 } from "../scripts/flows-legs/live.mjs";
-import { healthChecks, runHealthGate, refusalOf, refusalTally, tallyRefusal, HEALTH } from "../scripts/flows-legs/health.mjs";
+import {
+  healthChecks, runHealthGate, refusalOf, refusalTally, tallyRefusal, HEALTH, LAB_SIGN_IN, SIGN_IN_ADVICE,
+} from "../scripts/flows-legs/health.mjs";
+import * as LAB from "../shared/lab-sign-in.js";
 import {
   shapeNews, liveCredential, liveCredentialSource, LIVE_BEARER_MARGIN_MS, resetPublishRetryBudget, intradayRefusal,
 } from "../scripts/flows-pipeline.mjs";
@@ -1612,10 +1615,10 @@ const T = (iso) => Date.parse(iso);
       "and the ingest clock key, behind the pipeline's credential, adds the Tier 1 telemetry and the last dispatch " +
         "outcome, which the nightly health gate reads");
     const liveSrc = read("shared/flows-live-worker.js");
-    ok(/json\(\{ key: "clock", clock: ingestClockView\(/.test(liveSrc) && /\n    clock: clockView\(clock\),\n/.test(liveSrc),
+    ok(/const body = \{ key: "clock", clock: ingestClockView\(clock\) \};/.test(liveSrc) && /\n    clock: clockView\(clock\),\n/.test(liveSrc),
       "serveIngestClock serves the operations view and serveNow the public one");
     const ingestSrc = read("worker.js");
-    ok(/if \(key === "clock"\) \{\s*requireMethod\(request, \["GET"\]\);\s*await ensureFlowsTables\(env\);\s*return FLOWS_LIVE\.serveIngestClock\(env, \{ json \}\);/
+    ok(/if \(key === "clock"\) \{\s*requireMethod\(request, \["GET"\]\);\s*await ensureFlowsTables\(env\);\s*return FLOWS_LIVE\.serveIngestClock\(env, \{ json, lab: tokenKind === "nightly" \}\);/
       .test(ingestSrc) && ingestSrc.indexOf('if (key === "clock")') > ingestSrc.indexOf('if (!tokenKind) throw new HttpError(401'),
     "the ingest route serves the clock to a verified credential only, and to GET only");
     eq(resetPublishRetryBudget(), 0, "the publish retry budget can be reset, and a fresh process has spent none of it");
@@ -1975,7 +1978,7 @@ const T = (iso) => Date.parse(iso);
     "runHealthGate reads the clock, live:market and live:heartbeat through the ingest route and prints one line");
   const pipeline = read("scripts/flows-pipeline.mjs");
   const tail = pipeline.slice(pipeline.indexOf("async function main()"), pipeline.indexOf("\nexport {\n"));
-  ok(/const health = await runHealthGate\(\{ sessionDate, read: readStored, dry: DRY_RUN,\s*edge403: edgeRefusals\.count, edgeKinds: edgeRefusals\.kinds, worker403: edgeRefusals\.worker,\s*retrySpentMs: publishRetrySpentMs \}\);\s*if \(health\.failures\.length\) process\.exitCode = 1;\s*\}\s*$/
+  ok(/const health = await runHealthGate\(\{ sessionDate, read: readStored, dry: DRY_RUN,\s*edge403: edgeRefusals\.count, edgeKinds: edgeRefusals\.kinds, worker403: edgeRefusals\.worker,\s*retrySpentMs: publishRetrySpentMs, annotate: process\.env\.GITHUB_ACTIONS === "true" \}\);\s*if \(health\.failures\.length\) process\.exitCode = 1;\s*\}\s*$/
     .test(tail), "THE NIGHTLY ENDS WITH THE GATE: its last statement runs it and turns the run red on any failure, after " +
     "every key is published, with the edge 403s counted by kind and the Worker's own 403s kept apart");
   eq((pipeline.match(/refusal = response\.status === 403 \? await noteRefusal\(response\) : null;/g) || []).length, 3,
@@ -2042,6 +2045,162 @@ const T = (iso) => Date.parse(iso);
     "right after the index rows");
   ok(W.NIGHTLY_READ_KEYS.includes("focus") && W.ingestScope("focus", "GET", "live").ok && !W.ingestScope("focus", "POST", "live").ok,
     "the live role may READ the focus key it plans from, and nothing more");
+}
+
+{
+  const DAY = 86400000;
+  const T = (iso) => Date.parse(iso);
+  const tableless = { prepare: () => ({ first: async () => { throw new Error("D1_ERROR: no such table: users: SQLITE_ERROR"); } }) };
+  eq(await LAB.readLabActiveAt(null), null, "no database, no Lab activity");
+  eq(await LAB.readLabActiveAt(tableless), null,
+    "A FRESH DATABASE with no Lab tables reads as no sign-in on record, not as a failed clock read");
+  eq(await LAB.readLabActiveAt({ prepare: () => { throw new Error("boom"); } }), null, "and a prepare that throws is guarded too");
+  const labDb = (values) => ({
+    prepare: (sql) => ({ first: async () => {
+      const hit = Object.entries(values).find(([k]) => sql === k);
+      if (!hit) throw new Error("D1_ERROR: no such column: signed_in_at: SQLITE_ERROR");
+      return { at: hit[1] };
+    } }),
+  });
+  const Q = Object.fromEntries(LAB.LAB_ACTIVITY.map((q) => [q.sql.split(" FROM ")[1] + ":" + q.sql.split("(")[1].split(")")[0], q.sql]));
+  eq(await LAB.readLabActiveAt(labDb({ [Q["users:created_at"]]: T("2026-06-30T12:00:00Z"), [Q["stats:updated_at"]]: T("2026-07-20T12:00:00Z"),
+    [Q["progress:updated_at"]]: null })), "2026-06-30T12:00:00.000Z",
+  "LAB ACTIVITY is the newest instant the Lab's Google sign-in is known to have been used: a first sign-in (users.created_at) " +
+    "counts as itself, while a signed-in write counts thirty days earlier, since the session that made it was issued " +
+    "up to thirty days before; a database whose users table predates signed_in_at still answers");
+  eq(await LAB.readLabActiveAt(labDb({ [Q["users:created_at"]]: T("2026-06-30T12:00:00Z"), [Q["users:signed_in_at"]]: null,
+    [Q["stats:updated_at"]]: null, [Q["progress:updated_at"]]: T("2026-08-15T00:00:00Z") })),
+  new Date(T("2026-08-15T00:00:00Z") - 30 * DAY).toISOString(), "a later write moves it, less the session's thirty days");
+  eq(await LAB.readLabActiveAt(labDb({ [Q["users:created_at"]]: T("2026-06-30T12:00:00Z"), [Q["users:signed_in_at"]]: T("2026-09-27T08:00:00Z"),
+    [Q["stats:updated_at"]]: T("2026-09-01T00:00:00Z"), [Q["progress:updated_at"]]: T("2026-09-01T00:00:00Z") })),
+  "2026-09-27T08:00:00.000Z", "and a returning learner's sign-in (users.signed_in_at) counts exactly");
+  eq(LAB.LAB_SESSION_MS, 30 * DAY, "the session lifetime the lag stands on");
+  const workerSrc = read("worker.js");
+  ok(/exp: Date\.now\(\) \+ LAB_SESSION_MS \}/.test(workerSrc) && /cookie\("session", session, \{ maxAge: LAB_SESSION_MS \/ 1000 \}\)/.test(workerSrc),
+    "and it is the Lab session's own lifetime, cookie and signed expiry alike, so the two cannot drift apart");
+  ok(/await recordSignIn\(env\.DB, user, Date\.now\(\)\);/.test(workerSrc) && !/INSERT INTO users/.test(workerSrc),
+    "EVERY GOOGLE SIGN-IN IS RECORDED: the OAuth callback writes users through recordSignIn and nowhere else, so a " +
+      "returning learner's sign-in moves the count the alarm reads");
+
+  const run = (failAt) => {
+    const sent = [];
+    const db = { prepare: (sql) => {
+      const stmt = { args: [], bind: (...a) => { stmt.args = a; return stmt; }, run: async () => {
+        sent.push(sql);
+        if (failAt.includes(sent.length)) {
+          throw new Error(sql.includes("signed_in_at") && !sql.startsWith("ALTER")
+            ? "D1_ERROR: table users has no column named signed_in_at: SQLITE_ERROR" : "D1_ERROR: no such table: users");
+        }
+        return { success: true, args: stmt.args };
+      } };
+      return stmt;
+    } };
+    return { db, sent };
+  };
+  const learner = { sub: "g_1", email: "a@b.c", name: "A" };
+  {
+    const { db, sent } = run([]);
+    const out = await LAB.recordSignIn(db, learner, 5);
+    deep([sent, out.args], [[LAB.SIGN_IN_SQL], ["g_1", "a@b.c", "A", 5, 5]],
+      "a sign-in is one upsert that stamps created_at on the first and signed_in_at on every one");
+  }
+  {
+    const { db, sent } = run([1]);
+    await LAB.recordSignIn(db, learner, 5);
+    deep(sent, [LAB.SIGN_IN_SQL, LAB.SIGNED_IN_COLUMN_SQL, LAB.SIGN_IN_SQL],
+      "a users table that predates the column gets it on the first sign-in after deploy, and the upsert runs again");
+  }
+  {
+    const { db, sent } = run([1, 3]);
+    const out = await LAB.recordSignIn(db, learner, 5);
+    deep([sent, out.args], [[LAB.SIGN_IN_SQL, LAB.SIGNED_IN_COLUMN_SQL, LAB.SIGN_IN_SQL, LAB.LEGACY_SIGN_IN_SQL], ["g_1", "a@b.c", "A", 5]],
+      "and if the column still cannot be written, the old upsert runs, so the bookkeeping can never break a sign-in");
+  }
+  {
+    const db = { prepare: () => ({ bind: () => ({ run: async () => { throw new Error("D1_ERROR: no such table: users"); } }) }) };
+    let threw = null;
+    try { await LAB.recordSignIn(db, learner, 5); } catch (error) { threw = error; }
+    ok(threw && /no such table: users/.test(threw.message), "while any other failure still fails the sign-in, as before");
+  }
+  const baselineUsers = /CREATE TABLE IF NOT EXISTS users \(([\s\S]*?)\);/.exec(read("migrations/0001_baseline.sql"))[1];
+  const schemaUsers = /CREATE TABLE IF NOT EXISTS users \(([\s\S]*?)\);/.exec(read("schema.sql"))[1];
+  const colsOf = (body) => body.split(",").map((c) => c.trim().split(/\s+/)[0]);
+  deep([colsOf(schemaUsers), read("migrations/0013_users_signed_in_at.sql")],
+    [[...colsOf(baselineUsers), "signed_in_at"], LAB.SIGNED_IN_COLUMN_SQL + ";\n"],
+  "0013 adds exactly the column the Worker adds on first use, and schema.sql declares users with it");
+
+  const liveSrc = read("shared/flows-live-worker.js");
+  const nowSrc = liveSrc.slice(liveSrc.indexOf("export async function serveNow("), liveSrc.indexOf("export function quoteTtlS("));
+  ok(nowSrc.length > 500 && !/labActiveAt|readLabActiveAt|lab-sign-in/.test(nowSrc) && !/labActiveAt/.test(W.clockView.toString()) &&
+     !/labActiveAt/.test(W.ingestClockView.toString()),
+  "THE PUBLIC VIEW NEVER CARRIES IT: /api/flows/now and both clock views are built without the Lab's sign-in age");
+  const clockRow = { id: 1, day: "2026-09-25", trading: 1, tier1_at: T("2026-09-25T21:56:00Z"), dispatch_why: "no-token" };
+  const envOf = (lab) => ({ DB: { prepare: (sql) => ({ first: async () => {
+    if (/flows_clock/.test(sql)) return clockRow;
+    if (sql === Q["users:created_at"]) return { at: lab };
+    throw new Error("D1_ERROR: no such column: signed_in_at");
+  } }) } });
+  const jsonOf = (body) => body;
+  const nightlyView = await W.serveIngestClock(envOf(T("2026-06-30T12:00:00Z")), { json: jsonOf, lab: true });
+  const liveView = await W.serveIngestClock(envOf(T("2026-06-30T12:00:00Z")), { json: jsonOf });
+  deep([nightlyView.labActiveAt, Object.hasOwn(liveView, "labActiveAt"), nightlyView.clock, liveView.clock],
+    ["2026-06-30T12:00:00.000Z", false, W.ingestClockView(W.normalizeClock(clockRow)), W.ingestClockView(W.normalizeClock(clockRow))],
+  "ONLY THE PIPELINE'S CREDENTIAL READS IT: the ingest clock key adds labActiveAt beside the clock for the nightly token, " +
+    "and the live credential's read of the same key carries no such field");
+  deep((await W.serveIngestClock({ DB: tableless }, { json: jsonOf, lab: true })), { key: "clock", clock: null, labActiveAt: null },
+    "and a fresh database answers null for both");
+
+  const S = "2026-09-25";
+  const at = (h, m) => easternInstant(S, h * 60 + m);
+  const now = at(20, 5);
+  const gate = (labActiveAt, over = {}) => healthChecks({ sessionDate: "2026-09-24", now,
+    clockRead: { payload: { key: "clock", clock: null, ...(labActiveAt === undefined ? {} : { labActiveAt }) }, status: 200 }, ...over });
+  const ago = (days) => new Date(now - days * DAY).toISOString();
+  const labLines = (v) => ({ failures: v.failures, warnings: v.warnings, notes: v.notes.filter((n) => n.startsWith("lab:")) });
+  const d119 = labLines(gate(ago(119)));
+  ok(d119.failures.length === 0 && d119.warnings.length === 0 &&
+     d119.notes[0] === `lab: the latest Google sign-in to the Lab on record is ${ago(119).slice(0, 10)}, 119 days ago; the gate ` +
+       `warns from ${new Date(now + DAY).toISOString().slice(0, 10)} and fails from ${new Date(now + 31 * DAY).toISOString().slice(0, 10)}`,
+  "119 DAYS: a note that says when the gate will warn and when it will fail, and nothing more");
+  const d120 = labLines(gate(ago(120)));
+  deep([d120.failures, d120.warnings], [[], [`WARNING: the latest Google sign-in to the Lab on record is ${ago(120).slice(0, 10)}, ` +
+    `120 days ago. ${SIGN_IN_ADVICE} This gate turns the nightly red from ${new Date(now + 30 * DAY).toISOString().slice(0, 10)}.`]],
+  "120 DAYS: a warning that names the sign-in, the six months, the callback and the day the gate turns red, and the run stays green");
+  const d149 = labLines(gate(ago(149)));
+  ok(d149.failures.length === 0 && d149.warnings.length === 1 && /149 days ago/.test(d149.warnings[0]), "149 days still only warns");
+  const d150 = labLines(gate(ago(150)));
+  deep([d150.warnings, d150.failures], [[], [`HEALTH: the latest Google sign-in to the Lab on record is ${ago(150).slice(0, 10)}, ` +
+    `150 days ago. ${SIGN_IN_ADVICE} Google deletes it about ${new Date(now + 30 * DAY).toISOString().slice(0, 10)}.`]],
+  "150 DAYS: the nightly turns red, which emails the owner, a month before Google's six months run out");
+  ok(/^Sign in to the Lab at https:\/\/anilkaya\.org\/lab\/ — Google deletes an OAuth client unused for about six months; keep the callback https:\/\/anilkaya\.org\/auth\/callback registered\.$/
+    .test(SIGN_IN_ADVICE), "the advice is the sign-in URL, the six months and the callback that must stay registered");
+  ok(/Google may already have deleted it: if sign-in fails with deleted_client or invalid_client, create a Web application OAuth client .*wrangler secret put GOOGLE_CLIENT_ID/
+    .test(labLines(gate(ago(LAB_SIGN_IN.goneDays))).failures[0]), "and past six months it also says how to replace a deleted client");
+  deep(labLines(gate(null)), { failures: [], warnings: [], notes: ["lab: no Google sign-in to the Lab is on record (no Lab user, or no " +
+    "Lab tables), so the OAuth client's idle time cannot be told; one sign-in at https://anilkaya.org/lab/ starts the count"] },
+  "NULL (no Lab user, or a fresh database) is a note, not a failure");
+  deep(labLines(gate(undefined)).notes, ["lab: the Worker does not report the Lab's last Google sign-in (a Worker older than this check)"],
+    "and a Worker that predates the field says so rather than guessing");
+  deep(labLines(gate(ago(200), { clockRead: { payload: null, failed: true, status: 503 } })).notes,
+    ["lab: the clock could not be read, so the age of the Lab's last Google sign-in is unknown this run"], "as does an unreadable clock");
+  const idle = gate(ago(160));
+  ok(!idle.applies && idle.failures.length === 1 && /160 days ago/.test(idle.failures[0]),
+    "the sign-in age is checked on every run, like the edge count, not only on the evening of the session");
+  const production = labLines(healthChecks({ sessionDate: null, now: T("2026-09-27T12:00:00Z"),
+    clockRead: { payload: { key: "clock", clock: null, labActiveAt: "2026-06-30T00:00:00.000Z" }, status: 200 } }));
+  deep(production.notes, ["lab: the latest Google sign-in to the Lab on record is 2026-06-30, 89 days ago; the gate warns from " +
+    "2026-10-28 and fails from 2026-11-27"],
+  "WITH PRODUCTION'S NEWEST LAB ROW (2026-06-30) the gate reads 89 days today, warns from 2026-10-28 and fails from 2026-11-27");
+
+  const lines = [];
+  const warnGate = await runHealthGate({ sessionDate: "2026-09-24", now: () => now, annotate: true,
+    read: async (key) => (key === "clock" ? { payload: { key: "clock", clock: null, labActiveAt: ago(130) }, status: 200 }
+      : { payload: null, absent: true }),
+    log: (l) => lines.push(l), warn: (l) => lines.push(l) });
+  ok(warnGate.failures.length === 0 && lines[0] === "health gate: live checks skipped — this run is for 2026-09-24 and today is " +
+     "2026-09-25; the live checks describe today; 0 failure(s), 1 warning(s)" &&
+     lines.some((l) => l.startsWith("::warning title=Lab sign-in::WARNING: the latest Google sign-in to the Lab on record is ")),
+  "in GitHub Actions the warning is an annotation on the run's summary, and the run stays green");
 }
 
 {

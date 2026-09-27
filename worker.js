@@ -22,6 +22,7 @@ import {
 } from "./shared/flows-premium.js";
 import { isRefreshWindow, freshHeaders, phaseAt, easternDay, sessionOpen } from "./shared/flows-freshness.js";
 import * as FLOWS_LIVE from "./shared/flows-live-worker.js";
+import { LAB_SESSION_MS, recordSignIn } from "./shared/lab-sign-in.js";
 import { nightlyFreshMeta, STRIP_FIELDS, stripValues } from "./shared/flows-live.js";
 import { archiveWriteAction, ARCHIVE_REFUSALS } from "./shared/flows-archive.js";
 import { readExpiryBreakdown } from "./shared/flows-positioning.js";
@@ -2357,18 +2358,15 @@ async function route(request, env, url, ctx) {
       if (!info.sub) throw new Error("Google user id missing");
 
       const user = { sub: "g_" + info.sub, email: info.email || "", name: info.name || info.email || "Learner" };
-      await env.DB.prepare(
-        "INSERT INTO users (id, email, name, created_at) VALUES (?, ?, ?, ?) " +
-        "ON CONFLICT(id) DO UPDATE SET email=excluded.email, name=excluded.name"
-      ).bind(user.sub, user.email, user.name, Date.now()).run();
+      await recordSignIn(env.DB, user, Date.now());
 
       const session = await signSession(
         { sub: user.sub, email: user.email, name: user.name, aud: LEARN_AUDIENCE,
-          exp: Date.now() + 1000 * 60 * 60 * 24 * 30 },
+          exp: Date.now() + LAB_SESSION_MS },
         env.SESSION_SECRET
       );
       return redirect(origin + "/lab/?auth=ok", 302, [
-        cookie("session", session, { maxAge: 60 * 60 * 24 * 30 }),
+        cookie("session", session, { maxAge: LAB_SESSION_MS / 1000 }),
         cookie("oauth_state", "", { maxAge: 0 }),
       ]);
     } catch (error) {
@@ -3014,7 +3012,7 @@ async function route(request, env, url, ctx) {
     if (key === "clock") {
       requireMethod(request, ["GET"]);
       await ensureFlowsTables(env);
-      return FLOWS_LIVE.serveIngestClock(env, { json });
+      return FLOWS_LIVE.serveIngestClock(env, { json, lab: tokenKind === "nightly" });
     }
 
     if (key.startsWith("live:")) {

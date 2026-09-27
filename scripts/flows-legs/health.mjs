@@ -183,6 +183,43 @@ function edgeFailures(edge403, kinds, retrySpentMs) {
     ...slots.map(([label, slot]) => edgeRemedy(label, slot))];
 }
 
+export const LAB_SIGN_IN = Object.freeze({ warnDays: 120, failDays: 150, goneDays: 180 });
+export const LAB_URL = "https://anilkaya.org/lab/";
+export const OAUTH_CALLBACK = "https://anilkaya.org/auth/callback";
+export const SIGN_IN_ADVICE = `Sign in to the Lab at ${LAB_URL} — Google deletes an OAuth client unused for about ` +
+  `six months; keep the callback ${OAUTH_CALLBACK} registered.`;
+const DAY_MS = 86400000;
+const utcDay = (ms) => new Date(ms).toISOString().slice(0, 10);
+
+export function labCheck(clockRead, now) {
+  const body = clockRead && !clockRead.failed && !clockRead.absent && clockRead.payload && typeof clockRead.payload === "object"
+    ? clockRead.payload : null;
+  if (!body) return { note: "lab: the clock could not be read, so the age of the Lab's last Google sign-in is unknown this run" };
+  if (!Object.hasOwn(body, "labActiveAt")) {
+    return { note: "lab: the Worker does not report the Lab's last Google sign-in (a Worker older than this check)" };
+  }
+  if (body.labActiveAt === null) {
+    return { note: "lab: no Google sign-in to the Lab is on record (no Lab user, or no Lab tables), so the OAuth " +
+      `client's idle time cannot be told; one sign-in at ${LAB_URL} starts the count` };
+  }
+  const at = timeMs(body.labActiveAt);
+  if (!Number.isFinite(at)) return { note: "lab: the Worker's labActiveAt is unreadable, so the sign-in age is unknown" };
+  const days = Math.max(0, Math.floor((now - at) / DAY_MS));
+  const on = (d) => utcDay(at + d * DAY_MS);
+  const last = `the latest Google sign-in to the Lab on record is ${utcDay(at)}, ${days} day${days === 1 ? "" : "s"} ago`;
+  if (days >= LAB_SIGN_IN.failDays) {
+    return { failure: `HEALTH: ${last}. ${SIGN_IN_ADVICE} ` + (days >= LAB_SIGN_IN.goneDays
+      ? "Google may already have deleted it: if sign-in fails with deleted_client or invalid_client, create a Web " +
+        `application OAuth client (Google Cloud console → APIs & Services → Credentials) with the callback ${OAUTH_CALLBACK}, ` +
+        "then wrangler secret put GOOGLE_CLIENT_ID and wrangler secret put GOOGLE_CLIENT_SECRET."
+      : `Google deletes it about ${on(LAB_SIGN_IN.goneDays)}.`) };
+  }
+  if (days >= LAB_SIGN_IN.warnDays) {
+    return { warning: `WARNING: ${last}. ${SIGN_IN_ADVICE} This gate turns the nightly red from ${on(LAB_SIGN_IN.failDays)}.` };
+  }
+  return { note: `lab: ${last}; the gate warns from ${on(LAB_SIGN_IN.warnDays)} and fails from ${on(LAB_SIGN_IN.failDays)}` };
+}
+
 export function etTime(ms, day = null) {
   if (!Number.isFinite(ms)) return "never";
   const c = easternClock(ms);
@@ -199,20 +236,25 @@ export function healthChecks({ sessionDate, now = Date.now(), clockRead = null, 
   heartbeatRead = null, edge403 = 0, edgeKinds = null, worker403 = null, retrySpentMs = 0 } = {}) {
   const failures = edgeFailures(edge403, edgeKinds, retrySpentMs);
   const notes = [edgeNote(edge403, edgeKinds, worker403, retrySpentMs)];
+  const warnings = [];
+  const lab = labCheck(clockRead, now);
+  if (lab.failure) failures.push(lab.failure);
+  if (lab.warning) warnings.push(lab.warning);
+  if (lab.note) notes.push(lab.note);
   if (typeof sessionDate !== "string" || !DAY_RE.test(sessionDate)) {
-    return { applies: false, why: "no session date", failures, notes };
+    return { applies: false, why: "no session date", failures, warnings, notes };
   }
   const today = easternDay(now);
   if (today !== sessionDate) {
     return { applies: false, why: `this run is for ${sessionDate} and today is ${today}; the live checks describe today`,
-      failures, notes };
+      failures, warnings, notes };
   }
   const body = payloadOf(clockRead);
   const clock = body && body.clock && typeof body.clock === "object" ? body.clock : null;
   const sameDay = !!clock && clock.day === sessionDate;
   const closeMin = closeMinutes(sessionDate, sameDay ? clock : null);
   if (easternClock(now).minutes < closeMin + HEALTH.settleMin) {
-    return { applies: false, why: `the ${sessionDate} session has not closed`, failures, notes };
+    return { applies: false, why: `the ${sessionDate} session has not closed`, failures, warnings, notes };
   }
   const close = easternInstant(sessionDate, closeMin);
   const finalBy = close - HEALTH.finalReadMin * 60000;
@@ -223,7 +265,7 @@ export function healthChecks({ sessionDate, now = Date.now(), clockRead = null, 
     const tier1 = clock.tier1 && typeof clock.tier1 === "object" ? clock.tier1 : null;
     if (tier1 && tier1.why === "off") {
       notes.push("FLOWS_LIVE_MODE is off, so the live layer is not checked");
-      return { applies: true, why: "live-off", failures, notes };
+      return { applies: true, why: "live-off", failures, warnings, notes };
     }
     const at = tier1 ? timeMs(tier1.at) : NaN;
     if (!sameDay) {
@@ -279,14 +321,14 @@ export function healthChecks({ sessionDate, now = Date.now(), clockRead = null, 
         "so Tier 2 stopped before the close");
     }
   }
-  return { applies: true, why: null, failures, notes };
+  return { applies: true, why: null, failures, warnings, notes };
 }
 
 export async function runHealthGate({ sessionDate, read, now = () => Date.now(), edge403 = 0, edgeKinds = null,
-  worker403 = null, retrySpentMs = 0, dry = false, log = console.log, warn = console.warn } = {}) {
+  worker403 = null, retrySpentMs = 0, dry = false, annotate = false, log = console.log, warn = console.warn } = {}) {
   if (dry) {
     log("health gate: skipped in a dry run, which reads no store");
-    return { applies: false, failures: [], notes: [] };
+    return { applies: false, failures: [], warnings: [], notes: [] };
   }
   const safe = async (key) => {
     try { return await read(key); } catch (error) {
@@ -298,8 +340,9 @@ export async function runHealthGate({ sessionDate, read, now = () => Date.now(),
   const verdict = healthChecks({ sessionDate, now: now(), clockRead, marketRead, heartbeatRead, edge403, edgeKinds,
     worker403, retrySpentMs });
   log(`health gate: ${verdict.applies ? "checked" : "live checks skipped — " + verdict.why}; ` +
-    `${verdict.failures.length} failure(s)`);
+    `${verdict.failures.length} failure(s)` + (verdict.warnings.length ? `, ${verdict.warnings.length} warning(s)` : ""));
   for (const n of verdict.notes) log("  " + n);
+  for (const line of verdict.warnings) warn(annotate ? `::warning title=Lab sign-in::${line}` : line);
   for (const line of verdict.failures) warn(line);
   return verdict;
 }

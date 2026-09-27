@@ -368,10 +368,32 @@ it unlocks and what tells you it has lapsed.
    Security → Events for anything else. A budget spent with no 403 at all is
    reported as the Worker or D1 failing, not as the WAF.
 4. **The Google OAuth client.** Google deletes OAuth clients left unused for
-   about six months, and Lab sign-in is rare. Sign in to the Lab every three
-   months, or watch the Google Cloud console (APIs & Services → Credentials)
-   for inactivity notices; the client must keep the callback
-   `https://anilkaya.org/auth/callback`.
+   about six months, and Lab sign-in is rare. Sign in to the Lab at
+   `https://anilkaya.org/lab/` when the nightly asks; the client must keep the
+   callback `https://anilkaya.org/auth/callback`.
+
+   The nightly keeps the count. Under the pipeline's credential (never the
+   live one, and never `/api/flows/now`) the ingest `clock` key carries
+   `labActiveAt`: the newest instant the Lab's Google sign-in is known to have
+   been used. It is the latest of `users.created_at` (a first sign-in),
+   `users.signed_in_at` (every sign-in, stamped by the OAuth callback) and
+   `stats.updated_at` or `progress.updated_at` less 30 days, because a
+   signed-in write proves a sign-in no more than one session (30 days)
+   earlier. A missing table or column counts as nothing; a database with no
+   Lab user answers `null`. Every nightly prints
+   `lab: the latest Google sign-in to the Lab on record is 2026-06-30, 89 days ago; the gate warns from 2026-10-28 and fails from 2026-11-27`.
+   From 120 days it adds a `WARNING:` line, which GitHub also shows as an
+   annotation on the run, and the run stays green. From 150 days it turns
+   the run red, which emails the owner:
+   `HEALTH: the latest Google sign-in to the Lab on record is …, 150 days ago. Sign in to the Lab at https://anilkaya.org/lab/ — Google deletes an OAuth client unused for about six months; keep the callback https://anilkaya.org/auth/callback registered. Google deletes it about ….`
+   One sign-in clears it the next night. From 180 days the line also says how
+   to replace a deleted client: create a Web application OAuth client (Google
+   Cloud console → APIs & Services → Credentials) with that callback, then
+   `wrangler secret put GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+
+   `users.signed_in_at` comes from `migrations/0013_users_signed_in_at.sql`.
+   Applying it is optional: the first sign-in after the deploy adds the
+   column itself, and until then the count reads the other three sources.
 5. **Optional: Workers Paid ($5/month).** It removes the 100,000
    requests-a-day cliff (every static asset passes through the Worker, so the
    cliff would take the Lab and the landing page down with Flows) and the 10 ms

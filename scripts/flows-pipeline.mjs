@@ -6762,7 +6762,7 @@ async function main() {
 
   const health = await runHealthGate({ sessionDate, read: readStored, dry: DRY_RUN,
     edge403: edgeRefusals.count, edgeKinds: edgeRefusals.kinds, worker403: edgeRefusals.worker,
-    retrySpentMs: publishRetrySpentMs });
+    retrySpentMs: publishRetrySpentMs, annotate: process.env.GITHUB_ACTIONS === "true" });
   if (health.failures.length) process.exitCode = 1;
 }
 
