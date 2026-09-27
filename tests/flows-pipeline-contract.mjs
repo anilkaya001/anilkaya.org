@@ -26,7 +26,7 @@ import {
   retireSession, sessionArchiveKeys, sweepScreenerBand, SCREENER_SPLIT_DEPTH, SCREENER_PAGE_ROWS,
   judgeScreenerDate, sessionRows, readDayOf, PIPELINE_CADENCE, SESSION_OPEN_MINUTES,
   SESSION_CLOSE_MINUTES, MEMORY_ARCHIVE_SESSIONS, READ_RETRIES, readStored, holdersRefusal, resetPublishRetryBudget,
-  edgeRefusals, resetEdgeRefusals,
+  edgeRefusals, resetEdgeRefusals, edgeSnapshot,
   LEDGER_PROBE_FAIL_MAX, LEDGER_PROBE_RETRY_BUDGET_MS,
   HOLDERS_RETRY_DAYS,
   IV_RANK_PARAMS, fakeIvRank, measureVariationProbes, fakeOiLadder, fakeLadderGreeks,
@@ -35,6 +35,7 @@ import {
   screenerDollarVolume, gatedWorthEnriching, GATED_LIQUIDITY_MARGIN, pickPriorRoster,
 } from "../scripts/flows-pipeline.mjs";
 import { FOCUS_FUNDS, MAG7 as FOCUS_MAG7, FOCUS_MINERS } from "../shared/flows-focus.js";
+import { runHealthGate, refusalOf, tallyRefusal } from "../scripts/flows-legs/health.mjs";
 import { VARIATION_CODES, variationSummary } from "../shared/flows-variation.js";
 import { pinReading, buildCard } from "../shared/flows-card.js";
 import { pearson, horizonMove, HORIZON_SESSIONS, realizedVol } from "../shared/flows-features.js";
@@ -3796,6 +3797,41 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     "the run's tally holds three edge 403s by kind and the Worker's two apart, which the health gate reads");
     eq(resetEdgeRefusals().count, 3, "and it can be reset, returning what it held");
     eq(edgeRefusals.count, 0, "to an empty tally");
+
+    const LIMITED = { status: 429, headers: { server: "cloudflare", "cf-ray": "8ca1b2c3d4e5f609-IAD", "Content-Type": "text/plain" },
+      body: "error code: 1015" };
+    const DOWN = { status: 503, headers: { server: "cloudflare", "cf-ray": "8ca1b2c3d4e5f60a-IAD", "Content-Type": "application/json" },
+      body: JSON.stringify({ error: { code: "unavailable", message: "D1 is unavailable" } }) };
+    seen.length = 0;
+    answers = [LIMITED, OK];
+    const limited = await readStored("roster", { pause: async () => {} });
+    answers = [DOWN, OK];
+    await publish("roster", { rows: [] });
+    answers = [{ status: 404, headers: {}, body: "" }];
+    await readStored("focus", { pause: async () => {} });
+    ok(limited.recovered === 1 && seen.join() === "GET 429,GET 200,POST 503,POST 200,GET 404" &&
+       JSON.stringify(Object.fromEntries(Object.entries(edgeRefusals.statuses).map(([k, v]) =>
+         [k, [v.n, v.unrayed, v.codes, [...v.rays, ...Object.values(v.codeRays).flat()]]]))) ===
+         JSON.stringify({ 429: [1, 0, { 1015: 1 }, ["8ca1b2c3d4e5f609-IAD"]], 503: [1, 0, {}, ["8ca1b2c3d4e5f60a-IAD"]] }) &&
+       edgeRefusals.count === 0,
+    "A RETRIED 429 OR 5xx IS TALLIED BY STATUS with its Ray ID and any Cloudflare code in its body, on a read and on a " +
+      "write alike, apart from the 403s, while a 404 is an answer and is not");
+
+    resetEdgeRefusals();
+    resetPublishRetryBudget();
+    const challenge = refusalOf({ headers: new Headers(CHALLENGE.headers), text: CHALLENGE.body });
+    for (let i = 0; i < 5; i++) tallyRefusal(edgeRefusals, challenge);
+    seen.length = 0;
+    answers = Array.from({ length: 9 }, () => CHALLENGE);
+    const lines = [];
+    const gate = await runHealthGate({ sessionDate: null, read: (key) => readStored(key, { pause: async () => {} }),
+      edge: edgeSnapshot, log: (l) => lines.push(l), warn: (l) => lines.push(l) });
+    const edgeLine = lines.find((l) => l.startsWith("  edge: ")) || "";
+    ok(seen.length === 9 && edgeRefusals.count === 14 &&
+       edgeLine === "  edge: 14 ingest answer(s) of HTTP 403 [challenge 14 (cf-ray 8ca1b2c3d4e5f607-IAD)], 15.0 s of retry budget spent" &&
+       gate.failures.length === 0,
+    "THE PIPELINE'S GATE READS ITS TALLY LAST: the nine 403s its own three reads meet (three tries each) are in the edge " +
+      "line's count and in its kinds alike, and the 15 s those reads waited are in its retry budget");
   } finally {
     console.warn = realWarn;
     resetPublishRetryBudget();

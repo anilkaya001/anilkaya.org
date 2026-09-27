@@ -363,13 +363,25 @@ it unlocks and what tells you it has lapsed.
    `block` (another `cf-mitigated` value), and `unmarked` (neither; with no
    `cf-ray` it never reached Cloudflare). The Worker's own JSON 403 (a
    credential-scope or one-writer refusal) is not the edge: it is listed
-   after `not counted:`, never retried and never counted. At 24 edge 403s, or
-   60 s of retry budget, before the 90 s budget runs out, the gate turns the
-   run red with one line per kind naming its remedy: the Skip rule for a
-   challenge, a 1020 or a 1010, Bot Fight Mode off for challenges that outlive
-   the rule, the IP Access rule for 1005 to 1009, and the Ray ID to look up in
-   Security → Events for anything else. A budget spent with no 403 at all is
-   reported as the Worker or D1 failing, not as the WAF.
+   after `not counted:`, never retried and never counted. The other answers
+   the pipeline retries (429, 408, 5xx, and a request with no usable answer)
+   are tallied by status with their Ray IDs too, and listed at the end of the
+   same line after `other retried answers:`. The gate reads the tally after
+   its own three reads, so the count, the kinds and the budget in the line
+   are one moment's figures. At 24 edge 403s, or 60 s of retry budget, before
+   the 90 s budget runs out, the gate turns the run red with one line per
+   kind naming its remedy: the Skip rule for a challenge, a 1020 or a 1010,
+   Bot Fight Mode off for challenges that outlive the rule, the IP Access rule
+   for 1005 to 1009, and the Ray ID to look up in Security → Events for
+   anything else. The Worker never answers the ingest route with 429 or 408,
+   so a 429 with a `cf-ray` is named as a Cloudflare rate limiting rule (the
+   Skip rule covers it) and a 408 as the edge's timeout or a Cloudflare rule.
+   An answer whose body carries Cloudflare error 1027 is the Workers Free
+   plan's 100,000 requests a day running out, which no rule lifts (it resets
+   at 00:00 UTC; item 5 removes it). A 5xx is the Worker or D1 failing (error
+   1101: the Worker threw; 1102: it ran over its CPU or memory limit), a
+   request with no answer is the network or a Worker that never answered, and
+   any of them without a `cf-ray` never passed through Cloudflare at all.
 4. **The Google OAuth client.** Google deletes OAuth clients left unused for
    about six months, and Lab sign-in is rare. Sign in to the Lab at
    `https://anilkaya.org/lab/` when the nightly asks; the client must keep the
@@ -383,11 +395,14 @@ it unlocks and what tells you it has lapsed.
    `stats.updated_at` or `progress.updated_at` less 30 days, because a
    signed-in write proves a sign-in no more than one session (30 days)
    earlier. A missing table or column counts as nothing; a database with no
-   Lab user answers `null`. Every nightly prints
-   `lab: the latest Google sign-in to the Lab on record is 2026-06-30, 89 days ago; the gate warns from 2026-10-28 and fails from 2026-11-27`.
-   From 120 days it adds a `WARNING:` line, which GitHub also shows as an
-   annotation on the run, and the run stays green. From 150 days it turns
-   the run red, which emails the owner:
+   Lab user answers `null`. Under 120 days every nightly prints only
+   `lab: the Lab's Google OAuth client was used within the last 120 days; nothing to do`,
+   with no date and no age: this repository is public, so are its Actions
+   logs, and `labActiveAt` is the newest activity of any Lab learner. From
+   120 days it prints a `WARNING:` line with the day and the age, which
+   GitHub also shows as an annotation on the run, names the day the gate
+   turns red, and leaves the run green. From 150 days it turns the run red,
+   which emails the owner:
    `HEALTH: the latest Google sign-in to the Lab on record is …, 150 days ago. Sign in to the Lab at https://anilkaya.org/lab/ — Google deletes an OAuth client unused for about six months; keep the callback https://anilkaya.org/auth/callback registered. Google deletes it about ….`
    One sign-in clears it the next night. From 180 days the line also says how
    to replace a deleted client: create a Web application OAuth client (Google
@@ -397,6 +412,11 @@ it unlocks and what tells you it has lapsed.
    `users.signed_in_at` comes from `migrations/0013_users_signed_in_at.sql`.
    Applying it is optional: the first sign-in after the deploy adds the
    column itself, and until then the count reads the other three sources.
+   It is a single `ALTER TABLE ... ADD COLUMN`, so it is not re-runnable:
+   after the first post-deploy sign-in it fails on the duplicate column and
+   changes nothing. Check with
+   `wrangler d1 execute iewt --remote --command "PRAGMA table_info(users)"`
+   before applying it.
 5. **Optional: Workers Paid ($5/month).** It removes the 100,000
    requests-a-day cliff (every static asset passes through the Worker, so the
    cliff would take the Lab and the landing page down with Flows) and the 10 ms
@@ -407,7 +427,9 @@ Nothing routine is left: a weekly keepalive keeps GitHub from disabling the
 scheduled workflows after 60 days without a commit, a weekly strict probe turns
 red on vendor drift, a weekly regression run catches a fixture the calendar
 overtakes, and the nightly ends with a health gate that turns the run red,
-which emails the owner, whenever the live layer failed that session.
+which emails the owner, whenever the live layer failed that session, the edge
+refused or throttled the ingest route past its threshold (item 3), or the
+Lab's Google sign-in has been idle for 150 days (item 4).
 
 ### 10.1 Apply the schema
 
@@ -1542,10 +1564,15 @@ Four guards sit behind the schedule, all in `scripts/flows-pipeline.mjs`:
   before the close, `live:market` last written before 15:50 ET (12:50 on an
   early close), no Tier 2 pass for the session, a last pass that answered no
   vendor call or finished more than 30 minutes before the close, any 4xx
-  dispatch refusal from GitHub, and, on every run, 24 or more edge 403s on the
-  ingest route or 60 s of retry budget spent. Any failure makes the run exit
-  non-zero after everything is published, and a red scheduled run emails the
-  owner. `FLOWS_LIVE_MODE = "off"` is a deliberate rollback, not a failure.
+  dispatch refusal from GitHub, and, on every run whatever the session, 24 or
+  more edge 403s on the ingest route or 60 s of retry budget spent (counted by
+  kind, each with its remedy; the Worker's own JSON 403s are kept apart and
+  never counted; section 10.0 item 3) and a Lab Google sign-in 150 or more
+  days old (section 10.0 item 4). From 120 days that age is a `WARNING:`
+  line and a GitHub annotation, which leaves the run green. Any failure makes
+  the run exit non-zero after everything is published, and a red scheduled
+  run emails the owner. A missing `GITHUB_DISPATCH_TOKEN` is a note, never a
+  failure. `FLOWS_LIVE_MODE = "off"` is a deliberate rollback, not a failure.
 
 Feeds read without a date (`news`, `pulse`, `flowalerts`, `sector:premium`)
 carry `readDay`, the Eastern day of their own `readAt`, beside `sessionDate`;

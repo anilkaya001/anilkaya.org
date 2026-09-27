@@ -16,7 +16,7 @@ import {
   sessionClock, liveRunVerdict, passOutcome, focusStripNames, FOCUS_FALLBACK,
 } from "../scripts/flows-legs/live.mjs";
 import {
-  healthChecks, runHealthGate, refusalOf, refusalTally, tallyRefusal, HEALTH, LAB_SIGN_IN, SIGN_IN_ADVICE,
+  healthChecks, runHealthGate, refusalOf, refusalTally, tallyRefusal, tallyAnswer, HEALTH, LAB_SIGN_IN, SIGN_IN_ADVICE,
 } from "../scripts/flows-legs/health.mjs";
 import * as LAB from "../shared/lab-sign-in.js";
 import {
@@ -1945,6 +1945,17 @@ const T = (iso) => Date.parse(iso);
       .test(remedyOf(kinds.banned)), "an IP ban names the IP Access rule");
     ok(/no error code, cf-mitigated: block; .*find the Ray ID in Security → Events/.test(remedyOf(kinds.mitigatedBlock)),
       "an unnumbered block sends the owner to the Ray ID");
+    ok(/^HEALTH: 24 were Cloudflare challenges \(a challenge page, no cf-mitigated; Ray ID 8c9d0e1f2a3b4c5e-IAD\), which Bot Fight Mode/
+      .test(remedyOf(kinds.pageOnly)) && !/cf-mitigated: challenge/.test(remedyOf(kinds.pageOnly)),
+    "a challenge known only from its page says so, and never claims a cf-mitigated header Cloudflare did not send");
+    {
+      const mixed = refusalTally();
+      tallyRefusal(mixed, kinds.pageOnly);
+      for (let i = 0; i < 23; i++) tallyRefusal(mixed, kinds.challenge);
+      ok(/^HEALTH: 24 were Cloudflare challenges \(cf-mitigated: challenge; Ray ID 8c9d0e1f2a3b4c5e-IAD, 8c9d0e1f2a3b4c5d-IAD\)/
+        .test(healthChecks({ ...good, edge403: mixed.count, edgeKinds: mixed.kinds }).failures[1]),
+      "and once any challenge in the run carried the header, the line names it");
+    }
     ok(/^HEALTH: 24 were 403s with neither a Cloudflare mitigation marker nor the Worker's JSON error \(server cloudflare; Ray ID/
       .test(remedyOf(kinds.bare)), "an unmarked 403 that passed Cloudflare says so, with its Ray ID");
     ok(/^HEALTH: 24 were 403s with no cf-ray \(server squid\/5\.9\), so never through Cloudflare/.test(remedyOf(kinds.proxy)),
@@ -1954,9 +1965,94 @@ const T = (iso) => Date.parse(iso);
     deep(healthChecks({ ...good, edge403: own.count, edgeKinds: own.kinds, worker403: own.worker }).failures, [],
       "FORTY OF THE WORKER'S OWN 403s are not the edge: they never count toward the threshold");
     deep(fails({ edge403: 0, retrySpentMs: HEALTH.retrySpentMs }), ["HEALTH: ingest retries spent 60 s of the 90 s budget with " +
-      "no edge 403: the ingest route answered 408, 429 or 5xx, or did not answer, so the Worker or D1 was failing; the " +
-      "ingest lines above name each answer"],
-    "and a retry budget spent on 5xx answers with no 403 at all is not blamed on the WAF");
+      "no edge 403: the ingest lines above name each answer; a 429 or 408 with a cf-ray is a Cloudflare rate limiting " +
+      "rule or an edge timeout (the Skip rule for /api/flows/ingest in DEPLOY.md 10.0 item 3), and a 5xx or no answer is " +
+      "the Worker or D1 failing"],
+    "a retry budget spent with no 403 and no answer on record names both causes, and blames neither alone");
+
+    const statusAnswer = (status, headers = {}) => new Response(status === 204 ? null : "", { status, headers });
+    const EDGE = { server: "cloudflare" };
+    const spentOn = (answers, over = {}) => {
+      const t = refusalTally();
+      for (const a of answers) tallyAnswer(t, a);
+      return { t, v: healthChecks({ ...good, edge403: t.count, edgeKinds: t.kinds, edgeStatuses: t.statuses,
+        retrySpentMs: HEALTH.retrySpentMs + 1000, ...over }) };
+    };
+    const rated = spentOn(Array.from({ length: 6 }, (_, i) => statusAnswer(429, { ...EDGE, "cf-ray": `9a0b1c2d3e4f5a6${i}-IAD` })));
+    deep(rated.v.failures, ["HEALTH: ingest retries spent 61 s of the 90 s budget with no edge 403",
+      "HEALTH: 6 were HTTP 429s through Cloudflare (Ray ID 9a0b1c2d3e4f5a60-IAD, 9a0b1c2d3e4f5a61-IAD, 9a0b1c2d3e4f5a62-IAD): " +
+        "the Worker never answers the ingest route with 429, so a Cloudflare rate limiting rule refused the runner: the " +
+        "Skip rule for /api/flows/ingest in DEPLOY.md 10.0 item 3 skips rate limiting rules"],
+    "A BUDGET SPENT ON 429s WITH A cf-ray is a Cloudflare rate limiting rule, since the Worker never answers ingest with " +
+      "429, and its remedy is the Skip rule's rate limiting component, not the Worker or D1");
+    ok(rated.v.failures.every((l) => !/Worker or D1/.test(l)), "and nothing in it blames the Worker or D1");
+    const slow = spentOn([statusAnswer(408, { ...EDGE, "cf-ray": "9a0b1c2d3e4f5a70-ORD" })]);
+    ok(/^HEALTH: 1 was an HTTP 408 through Cloudflare \(Ray ID 9a0b1c2d3e4f5a70-ORD\): the Worker never answers the ingest route with 408, so the edge timed out waiting for the runner's request, or a Cloudflare rule answers 408: the Skip rule .* covers a rate limiting or custom rule/
+      .test(slow.v.failures[1]) && slow.v.failures.length === 2, "a 408 with a cf-ray is the edge's timeout or a Cloudflare rule, not the Worker");
+    const broken = spentOn([statusAnswer(503, { ...EDGE, "cf-ray": "9a0b1c2d3e4f5a80-IAD" }),
+      statusAnswer(503, { ...EDGE, "cf-ray": "9a0b1c2d3e4f5a81-IAD" }), statusAnswer(500, { ...EDGE, "cf-ray": "9a0b1c2d3e4f5a82-IAD" }),
+      null, null]);
+    deep(broken.v.failures.slice(1), [
+      "HEALTH: 3 were HTTP 5xx answers (500 1, 503 2; Ray ID 9a0b1c2d3e4f5a82-IAD, 9a0b1c2d3e4f5a80-IAD, 9a0b1c2d3e4f5a81-IAD): " +
+        "the ingest route itself failed, so the Worker or D1 was failing, not a Cloudflare rule; the ingest lines above " +
+        "name each answer",
+      "HEALTH: 2 were requests with no usable answer (the connection failed or timed out, or the body was not JSON): the " +
+        "network between the runner and the edge, or a Worker that never answered; the ingest lines above name each error"],
+    "A BUDGET SPENT ON 5xx OR ON NO ANSWER is the Worker or D1, or the network, and never the WAF");
+    const bypassed = spentOn([statusAnswer(429, { server: "squid/5.9" }), statusAnswer(502, { server: "squid/5.9" })]);
+    deep(bypassed.v.failures.slice(1), ["HEALTH: 2 answer(s) (HTTP 429 1, HTTP 502 1) carried no cf-ray (server squid/5.9), " +
+      "so they never passed through Cloudflare: something between the runner and the edge answered them"],
+    "and a 429 or 5xx with no cf-ray never reached Cloudflare, so neither a Cloudflare rule nor the Worker is blamed");
+    const tallied = (list) => {
+      const t = refusalTally();
+      for (const [status, headers, text] of list) tallyAnswer(t, new Response(text, { status, headers }), text);
+      return healthChecks({ ...good, edge403: 0, edgeStatuses: t.statuses, retrySpentMs: HEALTH.retrySpentMs }).failures.slice(1);
+    };
+    const capped = tallied([[429, { ...EDGE, "cf-ray": "9a0b1c2d3e4f5aa0-IAD" }, "error code: 1027"],
+      [429, { ...EDGE, "cf-ray": "9a0b1c2d3e4f5aa1-IAD" }, "error code: 1027"], [429, { ...EDGE, "cf-ray": "9a0b1c2d3e4f5aa2-IAD" }, "error code: 1015"]]);
+    deep(capped, ["HEALTH: 2 were answers with Cloudflare error 1027 (HTTP 429 2; Ray ID 9a0b1c2d3e4f5aa0-IAD, 9a0b1c2d3e4f5aa1-IAD): " +
+      "the Workers Free plan's 100,000 requests a day ran out, and every request to the site counts: it resets at 00:00 UTC, " +
+      "and Workers Paid removes the cap (DEPLOY.md 10.0 item 5)",
+      "HEALTH: 1 was an HTTP 429 through Cloudflare (Ray ID 9a0b1c2d3e4f5aa2-IAD): the Worker never answers the ingest route " +
+        "with 429, so a Cloudflare rate limiting rule refused the runner: the Skip rule for /api/flows/ingest in DEPLOY.md " +
+        "10.0 item 3 skips rate limiting rules"],
+    "A 429 CARRYING ERROR 1027 is the Workers Free plan's daily request cap, which no Skip rule lifts, and is named apart " +
+      "from a rate limiting rule's 429, each line with its own Ray IDs");
+    ok(/^HEALTH: 1 was an HTTP 5xx answer \(503 1; Ray ID 9a0b1c2d3e4f5ab0-IAD\): the ingest route itself failed, so the Worker or D1 was failing, not a Cloudflare rule; 1 carried error 1102: the Worker ran over its CPU or memory limit; the ingest lines above/
+      .test(tallied([[503, { ...EDGE, "cf-ray": "9a0b1c2d3e4f5ab0-IAD" }, "<title>Worker exceeded resource limits</title> Error 1102"]])[0]),
+    "and a 5xx carrying error 1102 says the Worker ran over its limit");
+    const both = spentOn([statusAnswer(429, { ...EDGE, "cf-ray": "9a0b1c2d3e4f5a90-IAD" })],
+      { edge403: worst.count, edgeKinds: worst.kinds });
+    ok(both.v.failures.length === 3 && /^HEALTH: the edge answered 24/.test(both.v.failures[0]) &&
+       /^HEALTH: 24 were Cloudflare challenges/.test(both.v.failures[1]) && /^HEALTH: 1 was an HTTP 429 through Cloudflare/.test(both.v.failures[2]),
+    "with 403s and 429s in one run, each kind gets its own line and remedy");
+    const quiet = spentOn([statusAnswer(429, { ...EDGE, "cf-ray": "9a0b1c2d3e4f5a91-IAD" }), statusAnswer(503, EDGE), null,
+      statusAnswer(404, EDGE), statusAnswer(400, EDGE), statusAnswer(200, EDGE)], { retrySpentMs: 6000 });
+    ok(quiet.v.failures.length === 0 &&
+       quiet.v.notes[0].endsWith("6.0 s of retry budget spent; other retried answers: no answer 1, HTTP 429 1 (cf-ray " +
+         "9a0b1c2d3e4f5a91-IAD), HTTP 503 1 (no cf-ray)") && Object.keys(quiet.t.statuses).join() === "0,429,503",
+    "UNDER THE THRESHOLD the edge line names the other retried answers too (429, 408, 5xx and no answer, with their " +
+      "Ray IDs), while a 404, 400 or 200, which are never retried, are not tallied");
+
+    const run = refusalTally();
+    for (let i = 0; i < 22; i++) tallyRefusal(run, kinds.challenge);
+    let spent = 6000;
+    const gateLines = [];
+    const tallying = async (key) => {
+      for (let i = 0; i < 3; i++) { tallyRefusal(run, { ...kinds.challenge, ray: `8c9d0e1f${key.length}${i}-IAD` }); spent += 1000 * (i + 1) ** 2; }
+      return { payload: null, failed: true, status: 403 };
+    };
+    const lastGate = await runHealthGate({ sessionDate: S, now: () => at(20, 5), read: tallying,
+      edge: () => ({ ...structuredClone(run), retrySpentMs: spent }), log: (l) => gateLines.push(l), warn: (l) => gateLines.push(l) });
+    const edgeLine = gateLines.find((l) => l.startsWith("  edge: ")) || "";
+    const edgeCount = Number(/^ {2}edge: (\d+) ingest/.exec(edgeLine)[1]);
+    const bracketed = [...edgeLine.slice(edgeLine.indexOf("[")).matchAll(/ (\d+)(?: \(cf-ray [^)]*\))?(?:;|\])/g)]
+      .reduce((sum, m) => sum + Number(m[1]), 0);
+    deep([edgeCount, bracketed, run.count, lastGate.failures[0]], [31, 31, 31,
+      "HEALTH: the edge answered 31 ingest request(s) with HTTP 403 and retries spent 48 s of the 90 s budget"],
+    "THE GATE READS THE TALLY AFTER ITS OWN READS: the 403s its clock, live:market and live:heartbeat reads meet are in " +
+      "the count, the count and the bracketed kinds add up to the same total, and the threshold sees what the line shows");
+    ok(/, 48\.0 s of retry budget spent/.test(edgeLine), "and the retry budget in the line is read at the same moment");
   }
   const off = healthChecks({ ...good, clockRead: clockWith({ tier1: { at: null, okAt: null, why: "off" } }),
     heartbeatRead: { payload: null, absent: true } });
@@ -1971,16 +2067,26 @@ const T = (iso) => Date.parse(iso);
   ok(early.applies && early.failures.length === 0, "on an early close the checks follow the 13:00 close");
 
   const lines = [];
-  const gate = await runHealthGate({ sessionDate: S, now: () => at(20, 5), edge403: 0,
+  const gate = await runHealthGate({ sessionDate: S, now: () => at(20, 5),
     read: async (key) => ({ clock: good.clockRead, "live:market": good.marketRead, "live:heartbeat": good.heartbeatRead })[key],
     log: (l) => lines.push(l), warn: (l) => lines.push(l) });
   ok(gate.failures.length === 0 && lines[0] === "health gate: checked; 0 failure(s)",
     "runHealthGate reads the clock, live:market and live:heartbeat through the ingest route and prints one line");
   const pipeline = read("scripts/flows-pipeline.mjs");
   const tail = pipeline.slice(pipeline.indexOf("async function main()"), pipeline.indexOf("\nexport {\n"));
-  ok(/const health = await runHealthGate\(\{ sessionDate, read: readStored, dry: DRY_RUN,\s*edge403: edgeRefusals\.count, edgeKinds: edgeRefusals\.kinds, worker403: edgeRefusals\.worker,\s*retrySpentMs: publishRetrySpentMs, annotate: process\.env\.GITHUB_ACTIONS === "true" \}\);\s*if \(health\.failures\.length\) process\.exitCode = 1;\s*\}\s*$/
+  ok(/const health = await runHealthGate\(\{ sessionDate, read: readStored, dry: DRY_RUN, edge: edgeSnapshot,\s*annotate: process\.env\.GITHUB_ACTIONS === "true" \}\);\s*if \(health\.failures\.length\) process\.exitCode = 1;\s*\}\s*$/
     .test(tail), "THE NIGHTLY ENDS WITH THE GATE: its last statement runs it and turns the run red on any failure, after " +
     "every key is published, with the edge 403s counted by kind and the Worker's own 403s kept apart");
+  ok(/export function edgeSnapshot\(\) \{\s*return \{ \.\.\.structuredClone\(edgeRefusals\), retrySpentMs: publishRetrySpentMs \};\s*\}/
+    .test(pipeline), "and it hands the gate a function, so the count, the kinds, the other statuses and the retry budget " +
+    "are copied together, after the gate's own reads");
+  ok(/heard = refusal \|\| await noteAnswer\(response\);/.test(pipeline) && /if \(!refusal\) await noteAnswer\(response\);/.test(pipeline),
+    "the write and the delete tally every retried answer that is not a 403");
+  ok(/if \(!response\.ok\) \{\s*await noteAnswer\(response\);/.test(pipeline) &&
+     (pipeline.match(/await noteAnswer\(null\);\s*return \{ (?:payload: null, failed: true|ok: false), status: 0/g) || []).length === 2,
+  "and so do the read and a request that got no answer at all");
+  ok(/async function noteAnswer\(response\) \{\s*if \(response && !retriedStatus\(response\.status\)\) return null;\s*const text = response \? await response\.text\(\)\.catch\(\(\) => ""\) : "";\s*tallyAnswer\(edgeRefusals, response, text\);/
+    .test(pipeline), "noteAnswer reads the body of a retried answer only, so a Cloudflare code in it is kept");
   eq((pipeline.match(/refusal = response\.status === 403 \? await noteRefusal\(response\) : null;/g) || []).length, 3,
     "and every ingest read, write and delete classifies a 403 into it");
   eq((pipeline.match(/ingestURL\(\) \+ "\?key="/g) || []).length, 3, "which are the pipeline's only three ingest requests");
@@ -2158,10 +2264,12 @@ const T = (iso) => Date.parse(iso);
   const ago = (days) => new Date(now - days * DAY).toISOString();
   const labLines = (v) => ({ failures: v.failures, warnings: v.warnings, notes: v.notes.filter((n) => n.startsWith("lab:")) });
   const d119 = labLines(gate(ago(119)));
-  ok(d119.failures.length === 0 && d119.warnings.length === 0 &&
-     d119.notes[0] === `lab: the latest Google sign-in to the Lab on record is ${ago(119).slice(0, 10)}, 119 days ago; the gate ` +
-       `warns from ${new Date(now + DAY).toISOString().slice(0, 10)} and fails from ${new Date(now + 31 * DAY).toISOString().slice(0, 10)}`,
-  "119 DAYS: a note that says when the gate will warn and when it will fail, and nothing more");
+  deep(d119, { failures: [], warnings: [], notes: ["lab: the Lab's Google OAuth client was used within the last 120 days; nothing to do"] },
+    "119 DAYS: a note that says nothing needs doing, and nothing more");
+  const quietNotes = [0, 1, 30, 89, 119].map((d) => labLines(gate(ago(d))).notes.join("\n"));
+  ok(new Set(quietNotes).size === 1 && quietNotes.every((n) => !/\d{4}-\d{2}-\d{2}|days? ago|\b(?:[0-9]|[1-9][0-9]|11[0-9])\b/.test(n)),
+    "THE LOG IS PUBLIC, SO UNDER 120 DAYS THE NOTE CARRIES NO DATE AND NO AGE: the same words whether the last Lab " +
+      "activity was today or 119 days ago, so a nightly never publishes when a learner last used the Lab");
   const d120 = labLines(gate(ago(120)));
   deep([d120.failures, d120.warnings], [[], [`WARNING: the latest Google sign-in to the Lab on record is ${ago(120).slice(0, 10)}, ` +
     `120 days ago. ${SIGN_IN_ADVICE} This gate turns the nightly red from ${new Date(now + 30 * DAY).toISOString().slice(0, 10)}.`]],
@@ -2188,9 +2296,17 @@ const T = (iso) => Date.parse(iso);
     "the sign-in age is checked on every run, like the edge count, not only on the evening of the session");
   const production = labLines(healthChecks({ sessionDate: null, now: T("2026-09-27T12:00:00Z"),
     clockRead: { payload: { key: "clock", clock: null, labActiveAt: "2026-06-30T00:00:00.000Z" }, status: 200 } }));
-  deep(production.notes, ["lab: the latest Google sign-in to the Lab on record is 2026-06-30, 89 days ago; the gate warns from " +
-    "2026-10-28 and fails from 2026-11-27"],
-  "WITH PRODUCTION'S NEWEST LAB ROW (2026-06-30) the gate reads 89 days today, warns from 2026-10-28 and fails from 2026-11-27");
+  deep(production.notes, ["lab: the Lab's Google OAuth client was used within the last 120 days; nothing to do"],
+    "WITH PRODUCTION'S NEWEST LAB ROW (2026-06-30) today's nightly says only that nothing needs doing");
+  const onDay = (iso) => labLines(healthChecks({ sessionDate: null, now: T(iso),
+    clockRead: { payload: { key: "clock", clock: null, labActiveAt: "2026-06-30T00:00:00.000Z" }, status: 200 } }));
+  ok(onDay("2026-10-27T23:59:59Z").warnings.length === 0 &&
+     /^WARNING: the latest Google sign-in to the Lab on record is 2026-06-30, 120 days ago\. .* This gate turns the nightly red from 2026-11-27\.$/
+       .test(onDay("2026-10-28T00:00:00Z").warnings[0]) && onDay("2026-11-26T23:59:59Z").failures.length === 0 &&
+     /^HEALTH: the latest Google sign-in to the Lab on record is 2026-06-30, 150 days ago\. .* Google deletes it about 2026-12-27\.$/
+       .test(onDay("2026-11-27T00:00:00Z").failures[0]),
+  "and it warns, with the day and the age, from 2026-10-28, and turns red from 2026-11-27, a month before Google's " +
+    "six months end about 2026-12-27");
 
   const lines = [];
   const warnGate = await runHealthGate({ sessionDate: "2026-09-24", now: () => now, annotate: true,
@@ -2229,12 +2345,17 @@ const T = (iso) => Date.parse(iso);
     if (out.dispatch && out.dispatch.why === "no-token") dispatches.push(m);
     apply(db);
   }
+  const nightly = [];
   for (const [h, mi] of [[17, 30], [18, 30]]) {
     const db = tickDb();
     db.batch = async () => [{ results: [{ ...row }] }, { results: [{ session: "2026-09-23" }] }];
-    await W.nightlyTick({ DB: db }, easternInstant(S, h * 60 + mi), { fetchImpl, log });
+    const out = await W.nightlyTick({ DB: db }, easternInstant(S, h * 60 + mi), { fetchImpl, log });
+    nightly.push([`${h}:${mi}`, out.due, out.sent && out.sent.sent, out.sent && out.sent.why]);
     apply(db);
   }
+  deep(nightly, [["17:30", true, false, "no-token"], ["18:30", true, false, "no-token"]],
+    "BOTH NIGHTLY SLOTS ARE DUE AND BOTH TRY: at 17:30 and 18:30 ET the nightly dispatch is due, is attempted, and " +
+      "answers no-token without sending");
   ok(dispatches.length === 28 && github.length === 0 && row.dispatch_why === "no-token" && row.live_dispatched_at === null &&
      !errors.some((e) => /dispatch failed/.test(e)),
   "A SESSION WITH NO GITHUB_DISPATCH_TOKEN, 09:31 to 16:26 and both nightly slots: all 28 due Tier 2 dispatches " +

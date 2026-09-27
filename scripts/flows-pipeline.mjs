@@ -66,7 +66,9 @@ import {
   runLive, runLiveLoop, chainDispatch, dryLiveTicks, readHeldAlerts, readLiveClock, LIVE_READ_PACE_MS,
   passOutcome, liveRunVerdict,
 } from "./flows-legs/live.mjs";
-import { runHealthGate, republishRepair, refusalOf, refusalTally, tallyRefusal, refusalBrief } from "./flows-legs/health.mjs";
+import {
+  runHealthGate, republishRepair, refusalOf, refusalTally, tallyRefusal, tallyAnswer, retriedStatus, refusalBrief,
+} from "./flows-legs/health.mjs";
 import { LIVE_OIDC, actionsIdToken, jwtExpiry } from "../shared/flows-oidc.js";
 
 const ARGS = new Set(process.argv.slice(2));
@@ -1797,9 +1799,20 @@ const READ_RETRYABLE = (status) => status === 0 || PUBLISH_RETRYABLE.has(status)
 export const edgeRefusals = refusalTally();
 
 export function resetEdgeRefusals() {
-  const seen = { count: edgeRefusals.count, kinds: edgeRefusals.kinds, worker: edgeRefusals.worker };
+  const seen = structuredClone(edgeRefusals);
   Object.assign(edgeRefusals, refusalTally());
   return seen;
+}
+
+export function edgeSnapshot() {
+  return { ...structuredClone(edgeRefusals), retrySpentMs: publishRetrySpentMs };
+}
+
+async function noteAnswer(response) {
+  if (response && !retriedStatus(response.status)) return null;
+  const text = response ? await response.text().catch(() => "") : "";
+  tallyAnswer(edgeRefusals, response, text);
+  return { text };
 }
 
 async function noteRefusal(response) {
@@ -1825,7 +1838,10 @@ async function readStoredOnce(key) {
     if (refusal) {
       return { payload: null, failed: true, status: 403, refusal, final: refusal.kind === "worker" };
     }
-    if (!response.ok) return { payload: null, failed: true, status: response.status };
+    if (!response.ok) {
+      await noteAnswer(response);
+      return { payload: null, failed: true, status: response.status };
+    }
     const body = await response.json();
 
     if (body && body.status === "pending") {
@@ -1833,6 +1849,7 @@ async function readStoredOnce(key) {
     }
     return { payload: body, status: response.status };
   } catch (error) {
+    await noteAnswer(null);
     return { payload: null, failed: true, status: 0, detail: error.message };
   }
 }
@@ -2873,8 +2890,10 @@ async function retire(key) {
       },
     );
     const refusal = response.status === 403 ? await noteRefusal(response) : null;
+    if (!refusal) await noteAnswer(response);
     return { ok: response.ok, status: response.status, refusal };
   } catch (error) {
+    await noteAnswer(null);
     return { ok: false, status: 0, message: error.message };
   }
 }
@@ -2946,7 +2965,7 @@ async function publish(key, payload) {
     landedKeys.add(key);
     return;
   }
-  let response, refusal = null, lastDetail = "";
+  let response, refusal = null, heard = null, lastDetail = "";
   for (let attempt = 0; ; attempt++) {
 
   await ingestWrites.acquire();
@@ -2963,11 +2982,12 @@ async function publish(key, payload) {
   );
 
   refusal = response.status === 403 ? await noteRefusal(response) : null;
+  heard = refusal || await noteAnswer(response);
   const wait = PUBLISH_RETRYABLE.has(response.status) && !(refusal && refusal.kind === "worker")
     ? publishRetryDelay(attempt, { spentMs: publishRetrySpentMs })
     : null;
   if (!response.ok && wait !== null) {
-    lastDetail = refusal ? refusal.text : await response.text().catch(() => "");
+    lastDetail = heard ? heard.text : await response.text().catch(() => "");
     publishRetrySpentMs += wait;
     console.warn(
       `  ingest ${key}: HTTP ${response.status}${refusal ? ` (${refusalBrief(refusal)})` : ""} from ` +
@@ -2985,7 +3005,7 @@ async function publish(key, payload) {
 
   if (!response.ok) {
 
-    const detail = (refusal ? refusal.text : await response.text().catch(() => "")) || lastDetail;
+    const detail = (heard ? heard.text : await response.text().catch(() => "")) || lastDetail;
     const ray = response.headers.get("cf-ray") || "none";
     const server = response.headers.get("server") || "unknown";
     const failure = new Error(
@@ -6760,9 +6780,8 @@ async function main() {
   const verdict = describeFloorVerdict(stats);
   if (verdict) console.log("  " + verdict);
 
-  const health = await runHealthGate({ sessionDate, read: readStored, dry: DRY_RUN,
-    edge403: edgeRefusals.count, edgeKinds: edgeRefusals.kinds, worker403: edgeRefusals.worker,
-    retrySpentMs: publishRetrySpentMs, annotate: process.env.GITHUB_ACTIONS === "true" });
+  const health = await runHealthGate({ sessionDate, read: readStored, dry: DRY_RUN, edge: edgeSnapshot,
+    annotate: process.env.GITHUB_ACTIONS === "true" });
   if (health.failures.length) process.exitCode = 1;
 }
 
