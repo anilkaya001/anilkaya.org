@@ -325,7 +325,10 @@ it unlocks and what tells you it has lapsed.
    Any other 4xx refusal turns it red too, with its own remedy: `refused:403`
    (the token lacks Actions write), `refused:404` (the token cannot see this
    repository) and `refused:422` (a bad ref or inputs). Removing the token
-   instead of renewing it records `no-token` and clears the alert.
+   instead of renewing it records `no-token` and clears the alert. With no
+   token at all the nightly stays green: every due dispatch records
+   `no-token`, nothing reaches GitHub, and the gate prints only the note
+   `dispatch: the Worker has no GITHUB_DISPATCH_TOKEN, so GitHub's own schedules start Tier 2 and the nightly; a supported mode, not a failure`.
 2. **`UW_API_KEY` in both places.** The same Unusual Whales key is a GitHub
    repository secret (the nightly, Tier 2 and the weekly probe) and a Worker
    secret (Tier 1, the tape, the quote, the chain and the strategy engine):

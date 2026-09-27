@@ -290,6 +290,9 @@ export function healthChecks({ sessionDate, now = Date.now(), clockRead = null, 
     if (refused) {
       failures.push(`HEALTH: GitHub refused the Worker's dispatch (${clock.dispatchWhy}): ` +
         (DISPATCH_ADVICE[refused[1]] || DISPATCH_ADVICE.other));
+    } else if (clock.dispatchWhy === "no-token") {
+      notes.push("dispatch: the Worker has no GITHUB_DISPATCH_TOKEN, so GitHub's own schedules start Tier 2 and the " +
+        "nightly; a supported mode, not a failure (DEPLOY.md 10.0 item 1)");
     }
   }
 

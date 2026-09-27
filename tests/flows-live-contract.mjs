@@ -2204,6 +2204,70 @@ const T = (iso) => Date.parse(iso);
 }
 
 {
+  const S = "2026-09-24";
+  const row = { id: 1, day: "2026-09-23", trading: 1, early_close: 0, live_dispatched_at: null, dispatch_why: null };
+  const apply = (db) => {
+    for (const st of db.statements.filter((x) => /INSERT INTO flows_clock/.test(x.sql))) {
+      const cols = /\(([^)]*)\) VALUES/.exec(st.sql)[1].split(", ");
+      cols.forEach((c, j) => { row[c] = st.args[j]; });
+    }
+  };
+  const github = [];
+  const errors = [];
+  const fetchImpl = async (u) => { github.push(u); return { status: 204 }; };
+  const log = { error: (l) => errors.push(JSON.parse(l).message) };
+  const dispatches = [];
+  for (let m = 9 * 60 + 31; m <= 16 * 60 + 26; m += 5) {
+    const db = tickDb();
+    db.batch = async (list) => {
+      db.statements.push(...list);
+      return /SELECT \* FROM flows_clock/.test(list[0].sql) ? [{ results: [{ ...row }] }, { results: [] }] : list.map(() => ({ results: [] }));
+    };
+    const texts = await tier1Bodies({ session: S, at: easternInstant(S, m) });
+    const out = await W.rthTick({ DB: db, UW_API_KEY: "k" }, easternInstant(S, m),
+      { fetchVendor: async (p) => JSON.parse(texts[p]), fetchImpl, log });
+    if (out.dispatch && out.dispatch.why === "no-token") dispatches.push(m);
+    apply(db);
+  }
+  for (const [h, mi] of [[17, 30], [18, 30]]) {
+    const db = tickDb();
+    db.batch = async () => [{ results: [{ ...row }] }, { results: [{ session: "2026-09-23" }] }];
+    await W.nightlyTick({ DB: db }, easternInstant(S, h * 60 + mi), { fetchImpl, log });
+    apply(db);
+  }
+  ok(dispatches.length === 28 && github.length === 0 && row.dispatch_why === "no-token" && row.live_dispatched_at === null &&
+     !errors.some((e) => /dispatch failed/.test(e)),
+  "A SESSION WITH NO GITHUB_DISPATCH_TOKEN, 09:31 to 16:26 and both nightly slots: all 28 due Tier 2 dispatches " +
+    "(09:31 to 16:16, every 15 minutes) and the nightly's each record no-token, nothing reaches GitHub, live_dispatched_at stays null and no " +
+    "'dispatch failed' error is logged");
+  const view = W.ingestClockView(W.normalizeClock(row));
+  eq(view.dispatchWhy, "no-token", "and the ingest clock view hands the nightly that outcome");
+  const at = (h, m) => easternInstant(S, h * 60 + m);
+  const reads = {
+    clock: { payload: { key: "clock", clock: { ...view, tier1: { at: new Date(at(17, 56)).toISOString(),
+      okAt: new Date(at(16, 6)).toISOString(), why: "written" } }, labActiveAt: new Date(at(12, 0)).toISOString() }, status: 200 },
+    "live:market": { payload: { fresh: { readAt: new Date(at(16, 6)).toISOString() } }, status: 200 },
+    "live:heartbeat": { payload: { session: S, run: { calls: 39, failedCalls: 0, finishedAt: new Date(at(16, 21)).toISOString() } },
+      status: 200 },
+  };
+  const lines = [];
+  const gate = await runHealthGate({ sessionDate: S, now: () => at(20, 5), read: async (k) => reads[k],
+    log: (l) => lines.push(l), warn: (l) => lines.push("WARN " + l) });
+  ok(gate.applies && gate.failures.length === 0 && gate.warnings.length === 0 && lines[0] === "health gate: checked; 0 failure(s)",
+    "THE NIGHTLY STAYS GREEN WITHOUT THE TOKEN: the gate, reading that clock, finds no failure and no warning");
+  deep(lines.filter((l) => /GITHUB_DISPATCH_TOKEN|dispatch|refused|renew/i.test(l)),
+    ["  dispatch: the Worker has no GITHUB_DISPATCH_TOKEN, so GitHub's own schedules start Tier 2 and the nightly; a " +
+      "supported mode, not a failure (DEPLOY.md 10.0 item 1)"],
+  "and the one line about dispatch is a note that says what the missing token means, never a refusal or a renewal");
+  ok(!lines.some((l) => l.startsWith("WARN ")), "nothing is printed as a warning or a failure");
+  const beforeAny = await runHealthGate({ sessionDate: S, now: () => at(20, 5), log: () => {}, warn: () => {},
+    read: async (k) => (k === "clock" ? { ...reads.clock, payload: { ...reads.clock.payload,
+      clock: { ...reads.clock.payload.clock, dispatchWhy: null } } } : reads[k]) });
+  ok(beforeAny.failures.length === 0 && !beforeAny.notes.some((n) => /dispatch/.test(n)),
+    "and a clock that has never dispatched at all (dispatch_why null) says nothing about dispatch");
+}
+
+{
   const child = (arg) => {
     const out = execFileSync("node", [new URL("tests/live-stubs.mjs", ROOT).pathname, "--tier1-budget", ...arg],
       { encoding: "utf8" });
