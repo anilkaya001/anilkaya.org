@@ -3822,16 +3822,17 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     const challenge = refusalOf({ headers: new Headers(CHALLENGE.headers), text: CHALLENGE.body });
     for (let i = 0; i < 5; i++) tallyRefusal(edgeRefusals, challenge);
     seen.length = 0;
-    answers = Array.from({ length: 9 }, () => CHALLENGE);
+    answers = Array.from({ length: 12 }, () => CHALLENGE);
     const lines = [];
     const gate = await runHealthGate({ sessionDate: null, read: (key) => readStored(key, { pause: async () => {} }),
       edge: edgeSnapshot, log: (l) => lines.push(l), warn: (l) => lines.push(l) });
     const edgeLine = lines.find((l) => l.startsWith("  edge: ")) || "";
-    ok(seen.length === 9 && edgeRefusals.count === 14 &&
-       edgeLine === "  edge: 14 ingest answer(s) of HTTP 403 [challenge 14 (cf-ray 8ca1b2c3d4e5f607-IAD)], 15.0 s of retry budget spent" &&
+    ok(seen.length === 12 && edgeRefusals.count === 17 &&
+       edgeLine === "  edge: 17 ingest answer(s) of HTTP 403 [challenge 17 (cf-ray 8ca1b2c3d4e5f607-IAD)], 20.0 s of retry budget spent" &&
        gate.failures.length === 0,
-    "THE PIPELINE'S GATE READS ITS TALLY LAST: the nine 403s its own three reads meet (three tries each) are in the edge " +
-      "line's count and in its kinds alike, and the 15 s those reads waited are in its retry budget");
+    "THE PIPELINE'S GATE READS ITS TALLY LAST: the twelve 403s its own four reads meet (the clock, live:market, live:focus " +
+      "and live:heartbeat, three tries each) are in the edge line's count and in its kinds alike, and the 20 s those reads " +
+      "waited are in its retry budget");
   } finally {
     console.warn = realWarn;
     resetPublishRetryBudget();
