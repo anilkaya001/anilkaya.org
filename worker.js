@@ -896,18 +896,17 @@ const FLOWS_TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
 
 const DATED_ARCHIVE_KEY_RE = /^(board:(long|short)|scores):\d{4}-\d{2}-\d{2}$/;
 
+const storedFrom = (row) => (row && row.payload
+  ? { payload: row.payload, updatedAt: row.updated_at, fresh: nightlyFreshMeta(row) }
+  : null);
+
 async function readFlowsPayload(env, key, trace) {
 
   if (!env.DB) { if (trace) trace.failed = true; return null; }
   await ensureFlowsTables(env);
-  const row = await env.DB.prepare(
-    "SELECT payload, updated_at, json_extract(payload, '$.sessionDate') AS session, " +
-    "COALESCE(json_extract(payload, '$.readAt'), json_extract(payload, '$.generatedAt')) AS read_iso " +
-    "FROM flows_payload WHERE id = ?"
-  ).bind(key).first().catch(() => { if (trace) trace.failed = true; return null; });
-  return row && row.payload
-    ? { payload: row.payload, updatedAt: row.updated_at, fresh: nightlyFreshMeta(row) }
-    : null;
+  const row = await env.DB.prepare(FLOWS_LIVE.NIGHTLY_ROW_SQL).bind(key).first()
+    .catch(() => { if (trace) trace.failed = true; return null; });
+  return storedFrom(row);
 }
 
 function nightlyFreshHeaders(stored) {
@@ -918,7 +917,10 @@ function nightlyFreshHeaders(stored) {
 const SPLIT_ENGINE_MARK = '"engine":{"status":"split"';
 
 async function readCardWithEngine(env, ticker, trace = {}) {
-  const stored = await readFlowsPayload(env, "card:" + ticker, trace);
+  return cardWithEngine(env, ticker, await readFlowsPayload(env, "card:" + ticker, trace), trace);
+}
+
+async function cardWithEngine(env, ticker, stored, trace = {}) {
   if (stored === null) return { stored: null, card: null, unreadable: false };
   let card;
   try { card = JSON.parse(stored.payload); } catch { return { stored, card: null, unreadable: true }; }
@@ -1239,31 +1241,27 @@ async function readFlowsSummary(env, scope) {
 const NEURON_GENERATING_MS = 90 * 1000;
 const NEURON_RETRY_MS = 5 * 60 * 1000;
 
-async function readNeuron(env, scope) {
-  if (!env.DB) return null;
-  try {
-    const row = await env.DB.prepare(
-      "SELECT version, fingerprint, summary, ideas, llm, model, guard, generated_at FROM flows_neuron WHERE scope = ?",
-    ).bind(scope).first();
-    if (!row) return null;
-    let ideas = [];
-    try { ideas = JSON.parse(typeof row.ideas === "string" ? row.ideas : "[]"); } catch { ideas = []; }
-    const engine = ideas && typeof ideas === "object" && !Array.isArray(ideas) && ideas.v === 3 ? ideas : null;
-    return {
-      version: Number(row.version) || 0,
-      fingerprint: typeof row.fingerprint === "string" ? row.fingerprint : null,
-      summary: typeof row.summary === "string" ? row.summary : "",
-      ideas: engine ? (Array.isArray(engine.ideas) ? engine.ideas : []) : Array.isArray(ideas) ? ideas : [],
-      engine: engine !== null,
-      verdict: engine && typeof engine.verdict === "string" ? engine.verdict : null,
-      claims: engine && Array.isArray(engine.claims) ? engine.claims : [],
-      refused: engine && Array.isArray(engine.refused) ? engine.refused : [],
-      llm: row.llm === 1,
-      model: typeof row.model === "string" ? row.model : null,
-      guard: typeof row.guard === "string" ? row.guard : null,
-      generatedAt: typeof row.generated_at === "string" ? row.generated_at : null,
-    };
-  } catch { return null; }
+const NEURON_ROW_SQL = "SELECT version, fingerprint, summary, ideas, llm, model, guard, generated_at FROM flows_neuron WHERE scope = ?";
+
+function neuronFrom(row) {
+  if (!row) return null;
+  let ideas = [];
+  try { ideas = JSON.parse(typeof row.ideas === "string" ? row.ideas : "[]"); } catch { ideas = []; }
+  const engine = ideas && typeof ideas === "object" && !Array.isArray(ideas) && ideas.v === 3 ? ideas : null;
+  return {
+    version: Number(row.version) || 0,
+    fingerprint: typeof row.fingerprint === "string" ? row.fingerprint : null,
+    summary: typeof row.summary === "string" ? row.summary : "",
+    ideas: engine ? (Array.isArray(engine.ideas) ? engine.ideas : []) : Array.isArray(ideas) ? ideas : [],
+    engine: engine !== null,
+    verdict: engine && typeof engine.verdict === "string" ? engine.verdict : null,
+    claims: engine && Array.isArray(engine.claims) ? engine.claims : [],
+    refused: engine && Array.isArray(engine.refused) ? engine.refused : [],
+    llm: row.llm === 1,
+    model: typeof row.model === "string" ? row.model : null,
+    guard: typeof row.guard === "string" ? row.guard : null,
+    generatedAt: typeof row.generated_at === "string" ? row.generated_at : null,
+  };
 }
 
 async function markNeuronGenerating(env, scope, fingerprint, model) {
@@ -1438,8 +1436,13 @@ async function tickerNeuron(env, ctx, ticker) {
     return json(neuronShape("unavailable", ticker, null, null,
       { note: "No store is bound to this route, so no reading can be read or written." }));
   }
+  await ensureFlowsTables(env);
   const trace = {};
-  const read = await readCardWithEngine(env, ticker, trace);
+  const [c, n] = await env.DB.batch([
+    env.DB.prepare(FLOWS_LIVE.NIGHTLY_ROW_SQL).bind("card:" + ticker),
+    env.DB.prepare(NEURON_ROW_SQL).bind(scope),
+  ]).catch(() => { trace.failed = true; return [null, null]; });
+  const read = await cardWithEngine(env, ticker, storedFrom(firstRow(c)), trace);
   if (trace.failed) return json(neuronShape("unavailable", ticker, null, null, { ...STORE_GONE, note: "The store could not be read." }));
   if (read.stored === null) {
     return json(neuronShape("pending", ticker, null, null,
@@ -1463,7 +1466,7 @@ async function tickerNeuron(env, ctx, ticker) {
         "which is a fact about the card and not about the name." }));
   }
   const fingerprint = FLOWS_NEURON.contextFingerprint(context) + "|" + aiCallSignature(env);
-  const prior = await readNeuron(env, scope);
+  const prior = neuronFrom(firstRow(n));
   const now = Date.now();
   const priorAge = prior && prior.generatedAt ? now - Date.parse(prior.generatedAt) : Infinity;
 
@@ -3337,7 +3340,7 @@ async function route(request, env, url, ctx) {
       if (stored === null) return absentKey(env, ctx, kind, ticker);
       if (!stored.payload.includes(SPLIT_ENGINE_MARK)) return passthrough(stored);
       const trace = {};
-      const merged = await readCardWithEngine(env, ticker, trace);
+      const merged = await cardWithEngine(env, ticker, stored, trace);
       if (trace.failed) throw storeGone();
       if (!merged.card) return passthrough(stored);
       return json(merged.card, 200, { "X-Payload-Updated": String(stored.updatedAt || 0) });

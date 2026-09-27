@@ -262,4 +262,45 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   f.fail(null);
 }
 
+{
+  const f = fakeD1();
+  seed(f);
+  const get = await client(f.D1);
+  await get("/api/flows/meta");
+  const route = async (path) => { const n = f.trips.length; const r = await get(path); return { ...r, trips: f.since(n) }; };
+
+  const card = await route("/api/flows/card?t=NVDA");
+  ok(card.trips.length === 1 && card.body.ticker === "NVDA" && card.body.score === 61, "a published card is one read");
+  const first = await route("/api/flows/summary?t=NVDA");
+  eq(first.body.status, "pending", "THE TICKER READING: its first call finds no prior and starts Neuron");
+  ok(first.trips[0].kind === "batch" && first.trips[0].sqls.length === 2 && /id = \?$/.test(first.trips[0].sqls[0]) && /FROM flows_neuron/.test(first.trips[0].sqls[1]),
+     "reading the card row and the prior reading in one batch (two sequential trips before)");
+  ok(first.trips.length === 2 && first.trips[1].kind === "run" && /INSERT INTO flows_neuron/.test(first.trips[1].sqls[0]),
+     "with the generating claim the only other foreground trip, so the route costs 2 trips where it cost 3");
+  await first.settle();
+  const again = await route("/api/flows/summary?t=NVDA");
+  eq(again.body.status, "ok", "once written, the reading is served");
+  eq(again.trips.length, 1, "from one trip: the card and the prior come back together and the fingerprint matches");
+  ok(typeof again.body.summary === "string" && again.body.summary.includes("NVDA") && again.body.llm === false && again.body.context.ticker === "NVDA",
+     `with the deterministic summary of the card's context (${JSON.stringify(again.body).slice(0, 120)})`);
+  deep(Object.keys(again.body).sort(), ["claims", "context", "engine", "generatedAt", "guard", "ideas", "llm", "model", "provenance", "refused", "scope", "status", "summary", "verdict", "verdictWord"],
+     "and the summary's shape is unchanged");
+
+  const none = await route("/api/flows/summary?t=ZZZZ");
+  ok(none.body.status === "pending" && none.trips.length === 1, "a name with no card is pending after the same single batch");
+  f.fail(/FROM flows_payload WHERE id = \?$/);
+  const gone = await route("/api/flows/summary?t=NVDA");
+  ok(gone.body.status === "unavailable" && gone.body.reason === "store", "and a store that cannot be read says unavailable, never that no card was published");
+  f.fail(null);
+
+  f.put("card-x:SPLIT", { ...NIGHTLY, ticker: "SPLIT", engine: { v: 1, engine: "q1", structures: [] } });
+  f.put("card:SPLIT", { ...NIGHTLY, ticker: "SPLIT", panels: PANELS, engine: { status: "split", key: "card-x:SPLIT", bytes: 1 } });
+  const split = await route("/api/flows/card?t=SPLIT");
+  ok(split.body.engine && split.body.engine.engine === "q1", "A SPLIT ENGINE POINTER is resolved onto the card");
+  eq(split.trips.length, 2, "from the card row already in hand plus the overflow row: the card is no longer read twice");
+  const splitReading = await route("/api/flows/summary?t=SPLIT");
+  ok(splitReading.body.status === "pending" && splitReading.trips.length === 3 && /card-x:SPLIT/.test(JSON.stringify(splitReading.trips[1])) === false,
+     "and the reading of a split card is its batch, the overflow row and the claim");
+}
+
 console.log(`flows-reads-contract: ${checks} checks passed`);
