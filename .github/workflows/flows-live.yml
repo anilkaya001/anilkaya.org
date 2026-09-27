@@ -13,9 +13,30 @@ on:
         required: false
         default: manual
   schedule:
-    - cron: "17 10,11,12 * * 1-5"
-    - cron: "31,46 13,14 * * 1-5"
-    - cron: "3,37 15-20 * * 1-5"
+    - cron: "17 5 * * 1-5"
+    - cron: "17 6 * * 1-5"
+    - cron: "17 7 * * 1-5"
+    - cron: "17 8 * * 1-5"
+    - cron: "17 9 * * 1-5"
+    - cron: "17 10 * * 1-5"
+    - cron: "17 11 * * 1-5"
+    - cron: "17 12 * * 1-5"
+    - cron: "17 13 * * 1-5"
+    - cron: "47 13 * * 1-5"
+    - cron: "17 14 * * 1-5"
+    - cron: "47 14 * * 1-5"
+    - cron: "17 15 * * 1-5"
+    - cron: "47 15 * * 1-5"
+    - cron: "17 16 * * 1-5"
+    - cron: "47 16 * * 1-5"
+    - cron: "17 17 * * 1-5"
+    - cron: "47 17 * * 1-5"
+    - cron: "17 18 * * 1-5"
+    - cron: "47 18 * * 1-5"
+    - cron: "17 19 * * 1-5"
+    - cron: "47 19 * * 1-5"
+    - cron: "17 20 * * 1-5"
+    - cron: "47 20 * * 1-5"
 
 permissions:
   contents: read
@@ -57,9 +78,15 @@ jobs:
           EVENT: ${{ github.event_name }}
           ORIGIN: ${{ inputs.origin || 'schedule' }}
           TICK: ${{ inputs.tick || 'none' }}
+          FIRED: ${{ github.event.schedule }}
         run: |
-          echo "event: $EVENT; origin: $ORIGIN; tick: $TICK"
+          echo "event: $EVENT; origin: $ORIGIN; tick: $TICK; cron that fired: '${FIRED:-none}'"
           echo "Started at $(date -u +%H:%M:%S) UTC, $(TZ=America/New_York date +%H:%M:%S) Eastern."
+          re='^([0-9]+) ([0-9]+) '
+          if [[ "$FIRED" =~ $re ]]; then
+            slot="$(date -u -d "$(date -u +%F) ${BASH_REMATCH[2]}:${BASH_REMATCH[1]}" +%s)"
+            echo "GitHub delivered the ${BASH_REMATCH[2]}:${BASH_REMATCH[1]} UTC starter $(( ($(date -u +%s) - slot + 86400) % 86400 / 60 )) minutes after its slot."
+          fi
 
       - name: Read the live layer
         if: env.LIVE_READY == 'true'

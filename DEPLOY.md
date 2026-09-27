@@ -318,8 +318,9 @@ it unlocks and what tells you it has lapsed.
    :01/:16/:31/:46 through the session, one re-dispatch after 45 minutes of
    stall, and the nightly at 17:15 ET (again at 18:15 ET if it has not
    landed). Without it Tier 2 depends on GitHub's scheduled starters, which
-   delivered about one slot in twenty on 2026-09-23 and 09-24, and the nightly
-   on its own crons (section 10.5h). Put the expiry in a calendar; when it
+   produced 6 runs for 63 slots from 2026-09-23 to 09-25, none before 17:50 UTC
+   (section 10.5i sizes the starters by that), and the nightly on its own crons
+   (section 10.5h). Put the expiry in a calendar; when it
    lapses the nightly turns red with
    `HEALTH: GitHub refused the Worker's dispatch (refused:401): renew GITHUB_DISPATCH_TOKEN`.
    Any other 4xx refusal turns it red too, with its own remedy: `refused:403`
@@ -1654,19 +1655,51 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   ends, the run re-dispatches its own workflow with the job's `GITHUB_TOKEN`
   (`permissions: actions: write`; `workflow_dispatch` is the documented exception
   to that token's no-recursion rule), origin `chain`, on `main`, and exits. The
-  `flows-live` concurrency group keeps it to one loop. The GitHub schedule is only
-  starters: `17 10,11,12 * * 1-5` lands before the open however late GitHub
-  delivers it, and a run that starts up to 200 minutes before 09:31 ET sleeps
-  until then instead of exiting (on Friday 2026-09-25 the first starter GitHub
-  delivered ran in the afternoon, so the morning had no Tier 2); a run started
-  earlier than that exits and leaves the open to the next starter.
-  `31,46 13,14 * * 1-5` starts the loop at the open under EDT and EST and
-  `3,37 15-20 * * 1-5` restarts it in case GitHub drops a starter or a run dies
-  (sixteen slots, because GitHub delivered about one in twenty); a starter
-  that queued behind a running loop starts after the window closed and exits at
-  once without a pass. The first pass of a run still skips when a heartbeat
-  landed under eight minutes ago; the loop's later passes do not. A single pass
-  runs when `FLOWS_LIVE_LOOP` is unset or `FLOWS_LIVE_FORCE=1`. Dry run:
+  `flows-live` concurrency group keeps it to one loop.
+- **The GitHub schedule is only starters, sized by what GitHub delivered.** From
+  2026-09-23 to 09-25 GitHub created 6 scheduled `flows-live` runs for 63 slots
+  written on one or two cron lines a day: 18:59 and 22:13 UTC on Wednesday,
+  17:50 on Thursday, 18:01, 19:12 and 23:12 on Friday. None came before 17:50
+  UTC, so no morning had Tier 2. Those runs cannot be tied to their slots (each
+  line held several, and the job did not log which fired). The nightly's gate
+  does log it: its only cron then, the one-slot line `30 21 * * 1-5`, ran on all
+  three days, at 23:48, 23:56 and 23:59 UTC, 2 h 19 to 2 h 29 late. That reads as
+  about one run per cron line per day, hours late, so every starter is now a line
+  of one slot, 24 in all, and the arithmetic assumes any delay from on time to
+  five hours. `17 5 * * 1-5` to `17 12 * * 1-5` are the pre-open starters: a run
+  that starts up to 240 minutes before 09:31 ET sleeps until then, and one that
+  starts earlier exits at once. 09:31 ET is 13:31 UTC under EDT and 14:31 UTC
+  under EST, so the wait window is 09:31 to 13:31 UTC or 10:31 to 14:31 UTC.
+  Three hours late, the 07:17 to 10:17 starters land in it under EDT and 08:17
+  to 11:17 under EST; five hours late, 05:17 to 08:17 and 06:17 to 09:17; on
+  time, 10:17 to 13:17 and 11:17 to 14:17. For every delay from 0 to 5 h at
+  least four starters are waiting at 09:31, and `tests/flows-live-contract.mjs`
+  checks that minute by minute on EDT and EST days and runs the loop from every
+  slot at eight delays. `17 13` to `47 20`, at :17 and :47 of each hour,
+  restart a loop that died or never started (sixteen slots, as before). Every
+  starter fires 17 minutes past a :00 or :30 mark, away from the top of the
+  hour, where GitHub documents the load peaks that delay and drop schedules. The
+  job logs the cron that fired and how many minutes after its slot GitHub
+  delivered it (`GitHub delivered the 7:17 UTC starter 251 minutes after its
+  slot.`), so each week's runs measure the delay this schedule assumes.
+- **Worst-case idle is 240 minutes of runner a day.** Runs share one concurrency
+  group, so only one waits at a time, and every waiting run waits for the same
+  09:31: however many starters land, the pre-open wait a day adds up to at most
+  `preOpenWaitMs`, 240 minutes. A run that waited that long still passes from
+  09:31 for 99 minutes before it chains (the test keeps at least 60), and the
+  chained run reaches 16:25 without a second chain (100 plus 340 minutes cover
+  the 414 from 09:31 to 16:25; the test keeps that sum at least 414). Beyond
+  that, a starter that lands outside the window costs under a minute of runner,
+  one clock read from the Worker and no vendor call, and on a day Tier 1 closes
+  provisionally from the tape the loop also waits, without passes, until 11:00 ET
+  at the latest. Weekends and computed NYSE holidays never wait. The repository
+  is public, so hosted-runner minutes are not billed. A starter that queued behind a running loop starts when the
+  loop ends: inside 16:25 its one pass skips on the heartbeat and it exits at the
+  next slot, and after that it exits at once without a pass. The first pass of a
+  run still skips when a heartbeat landed under eight minutes ago, and the loop's
+  later passes do not, so a chained run that starts within eight minutes of the
+  last pass skips once and takes the next slot, none doubled or lost. A single
+  pass runs when `FLOWS_LIVE_LOOP` is unset or `FLOWS_LIVE_FORCE=1`. Dry run:
   `--live --dry-run`.
 - **The loop keeps the Worker's clock.** Before its first pass and around every
   later one it reads `clock: { day, trading, earlyClose }` with a GET of the

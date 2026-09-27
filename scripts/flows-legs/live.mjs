@@ -316,7 +316,7 @@ export function liveRunVerdict(loop) {
 export const LIVE_LOOP = Object.freeze({
   slotMs: 5 * 60 * 1000,
   budgetMs: 340 * 60 * 1000,
-  preOpenWaitMs: 200 * 60 * 1000,
+  preOpenWaitMs: 240 * 60 * 1000,
   openLagMs: 60 * 1000,
   workflow: "flows-live.yml",
   ref: "main",
