@@ -839,13 +839,19 @@ export async function refreshTape(env, ticker, now, { fetchVendor, heldText = nu
     readAt: Number.isFinite(readAt) ? readAt : now };
 }
 
+const TAPE_ROW_SQL = "SELECT payload, read_at, session, legs, refreshing_until, last_served FROM flows_tape WHERE ticker = ?";
+const firstOf = (res) => (res && res.results && res.results[0] ? res.results[0] : null);
+
 export async function serveTape(env, ctx, ticker, now, { fetchVendor, json, admit = null }) {
   const db = env.DB;
   const clock = await cachedClock(env, now);
   const phase = phaseAt(now, clock);
-  const read = () => db.prepare(
-    "SELECT payload, read_at, session, legs, refreshing_until, last_served FROM flows_tape WHERE ticker = ?",
-  ).bind(ticker).first().catch(() => null);
+  const read = () => db.prepare(TAPE_ROW_SQL).bind(ticker).first().catch(() => null);
+  const first = async () => {
+    if (!admit || !admit.known) return { row: await read(), known: null };
+    const [a, b] = await db.batch([db.prepare(TAPE_ROW_SQL).bind(ticker), admit.known]).catch(() => [null, null]);
+    return { row: firstOf(a), known: firstOf(b) };
+  };
   const respond = (row, how) => {
     const meta = { readAt: Number(row.read_at), session: row.session, cadenceS: TAPE_SPEC.cadenceS, klass: "tape",
       source: "ondemand" };
@@ -862,12 +868,12 @@ export async function serveTape(env, ctx, ticker, now, { fetchVendor, json, admi
   const pending = (how) => json({ ticker, status: "pending", why: how }, 200,
     { ...pendingHeaders("tape", now, clock), "X-Tape": how });
 
-  const row = await read();
+  const { row, known } = await first();
   const hasPayload = row && typeof row.payload === "string" && row.payload;
   const age = hasPayload ? now - Number(row.read_at) : Infinity;
   if (hasPayload && age <= tapeTtlMs(phase, row)) return respond(row, "fresh");
   const usable = hasPayload && (phase && phase.phase === "rth" ? age <= LIVE_BUDGET.tapeUsableMs : true);
-  if (!hasPayload && typeof admit === "function" && !(await admit(ticker))) {
+  if (!hasPayload && admit && !known && !(await admit.vendor(ticker))) {
     return json({ ticker, status: "absent", why: "unknown" }, 200, { "Cache-Control": "no-store", "X-Tape": "unknown" });
   }
 

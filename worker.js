@@ -970,8 +970,9 @@ const KNOWN_SQL =
 const CLASS_TTL_S = 12 * 3600;
 const parseOr = (text, fallback) => { try { const v = JSON.parse(text); return v && typeof v === "object" ? v : fallback; } catch { return fallback; } };
 
-async function scheduledTonight(env, kind, ticker) {
-  const row = await env.DB.prepare(ROSTER_SQL).bind(ticker).first().catch(() => { throw storeGone(); });
+const firstRow = (res) => (res && res.results && res.results[0] ? res.results[0] : null);
+
+async function scheduledTonight(env, kind, row) {
   if (!row || typeof row.depth !== "string" || typeof row.session !== "string") return false;
   if (kind === "hist" && (row.depth === "index" || row.depth === "fund")) return false;
   const now = Date.now();
@@ -982,10 +983,7 @@ async function scheduledTonight(env, kind, ticker) {
   return !!before && row.session === before.lastClosed;
 }
 
-async function liteCard(env, ticker) {
-  const [uni, gate] = await env.DB.batch([env.DB.prepare(LITE_SQL).bind(ticker), env.DB.prepare(GATE_SQL).bind(ticker)])
-    .catch(() => { throw storeGone(); });
-  const r = uni && uni.results && uni.results[0];
+function liteCard(ticker, r, g) {
   if (!r) return null;
   const units = parseOr(r.units, {}), cols = parseOr(r.cols, {});
   const u = {};
@@ -993,7 +991,6 @@ async function liteCard(env, ticker) {
     const scale = Array.isArray(units[k]) ? Number(units[k][1]) : NaN;
     u[k] = Number.isFinite(v) && Number.isFinite(scale) && scale !== 0 ? v / scale : null;
   }
-  const g = gate && gate.results && gate.results[0];
   const card = {
     v: 1, ticker, status: "ok", lite: true, depth: "universe", sessionDate: r.session, generatedAt: r.generated,
     sector: typeof r.sector === "string" ? r.sector : null, n: Number(r.n) || null, rank: Number(r.i) + 1,
@@ -1037,18 +1034,19 @@ function quoteCard(ticker, row, now) {
 }
 
 async function absentKey(env, ctx, kind, ticker) {
-  if (await scheduledTonight(env, kind, ticker)) return json({ ticker, status: "pending" });
+  const keyed = [env.DB.prepare(ROSTER_SQL).bind(ticker)];
+  if (kind === "card") keyed.push(env.DB.prepare(LITE_SQL).bind(ticker), env.DB.prepare(GATE_SQL).bind(ticker));
+  const [roster, uni, gate] = await env.DB.batch(keyed).catch(() => { throw storeGone(); });
+  if (await scheduledTonight(env, kind, firstRow(roster))) return json({ ticker, status: "pending" });
   if (kind !== "card") return json({ ticker, status: "absent", why: "not-covered" });
-  const lite = await liteCard(env, ticker);
+  const lite = liteCard(ticker, firstRow(uni), firstRow(gate));
   if (lite) return lite;
   const verdict = await classifyTicker(env, ctx, ticker);
   if (verdict && verdict.known) return json(quoteCard(ticker, verdict.row, Date.now()));
   return json({ ticker, status: "absent", why: verdict ? "unknown" : "not-covered" });
 }
 
-async function tapeAdmits(env, ctx, ticker) {
-  const row = await env.DB.prepare(KNOWN_SQL).bind("card:" + ticker, ticker).first().catch(() => null);
-  if (row) return true;
+async function vendorAdmits(env, ctx, ticker) {
   const verdict = await classifyTicker(env, ctx, ticker);
   return !verdict || verdict.known;
 }
@@ -3199,7 +3197,8 @@ async function route(request, env, url, ctx) {
       }
       await ensureFlowsTables(env);
       return FLOWS_LIVE.serveTape(env, ctx, ticker, Date.now(), {
-        json, fetchVendor: (p, params) => uwFetch(env, p, params), admit: (t) => tapeAdmits(env, ctx, t) });
+        json, fetchVendor: (p, params) => uwFetch(env, p, params),
+        admit: { known: env.DB.prepare(KNOWN_SQL).bind("card:" + ticker, ticker), vendor: (t) => vendorAdmits(env, ctx, t) } });
     }
 
     if (path === "/api/flows/political") {

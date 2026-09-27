@@ -25,10 +25,11 @@ function fakeD1() {
     if (reads.test(sql)) return { results: st.all(...args), meta: {} };
     return { results: [], meta: { changes: st.run(...args).changes } };
   };
-  const trip = (kind, sqls, fn) => new Promise((resolve, reject) => setImmediate(() => {
+  const fake = { latencyMs: 1 };
+  const trip = (kind, sqls, fn) => new Promise((resolve, reject) => setTimeout(() => {
     trips.push({ kind, sqls });
     try { resolve(fn()); } catch (error) { reject(error); }
-  }));
+  }, fake.latencyMs));
   const D1 = {
     prepare(sql) {
       const st = { sql, args: [], bind(...a) { st.args = a; return st; },
@@ -45,7 +46,7 @@ function fakeD1() {
   const live = (id, value, readAt, session) => db.prepare(
     "INSERT OR REPLACE INTO flows_live (id, payload, read_at, session, cadence_s, source, writer, updated_at) VALUES (?, ?, ?, ?, 300, 'worker', 'worker@rth', ?)",
   ).run(id, JSON.stringify(value), readAt, session, readAt);
-  return { D1, db, trips, put, live, fail: (re) => { failing = re; },
+  return { D1, db, trips, put, live, fail: (re) => { failing = re; }, latency: (ms) => { fake.latencyMs = ms; },
     since: (n) => trips.slice(n), count: (re, from = 0) => trips.slice(from).filter((t) => t.sqls.some((s) => re.test(s))).length };
 }
 
@@ -114,6 +115,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   const f = fakeD1();
   seed(f);
   f.fail(/^CREATE TABLE IF NOT EXISTS flows_payload/);
+  f.latency(30);
   const get = await client(f.D1);
   const answers = await Promise.all(["/api/flows/board?side=long", "/api/flows/board?side=watch", "/api/flows/market",
     "/api/flows/events", "/api/flows/scoretrack", "/api/flows/news"].map(get));
@@ -129,6 +131,83 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   const ready = f.trips.length;
   await Promise.all([get("/api/flows/meta"), get("/api/flows/market")]);
   eq(f.count(SCHEMA_RE, ready), 0, "until one batch succeeds, after which the schema is ready for good");
+}
+
+{
+  const f = fakeD1();
+  seed(f);
+  const get = await client(f.D1);
+  await get("/api/flows/meta");
+  const route = async (path) => { const n = f.trips.length; const r = await get(path); return { ...r, trips: f.since(n) }; };
+  const keyed = (t) => t.sqls.map((s) => (/id = 'roster'/.test(s) ? "roster" : /id = 'universe'/.test(s) ? "universe" : /id = 'events'/.test(s) ? "events" : s.slice(0, 20)));
+
+  const absent = await route("/api/flows/card?t=ZZZZ");
+  deep(absent.body, { ticker: "ZZZZ", status: "absent", why: "not-covered" }, "a name with no card, no universe row and no vendor key is absent, not covered");
+  eq(absent.trips.length, 2, "ONE BATCH DECIDES AN ABSENT CARD: the card row's own read, then a single batch (three sequential trips before)");
+  ok(absent.trips[1].kind === "batch" && absent.trips[1].sqls.length === 3, "of three keyed statements");
+  deep(keyed(absent.trips[1]), ["roster", "universe", "events"], "the roster's promise, the universe row and the earnings gate, in one trip");
+
+  const lite = await route("/api/flows/card?t=LITE");
+  eq(lite.trips.length, 2, "a universe-only name is answered from the same two trips");
+  ok(lite.body.status === "ok" && lite.body.lite === true && lite.body.depth === "universe" && lite.body.rank === 2 && lite.body.n === 3 &&
+     lite.body.u.px === 72.52 && lite.body.sessionDate === SESSION && lite.body.why === "not-covered",
+     `with the lite card decoded by the universe's units (${JSON.stringify(lite.body).slice(0, 140)})`);
+  eq(lite.res.headers.get("X-Fresh-Class"), "nightly", "dated like the nightly row it came from");
+  const gated = await route("/api/flows/card?t=GATED");
+  ok(gated.body.why === "gated" && gated.body.gate.earnings === "2026-09-29" && gated.body.gate.dte === 5, "and the earnings gate still names the report date");
+
+  const hist = await route("/api/flows/hist?t=IDX");
+  deep(hist.body, { ticker: "IDX", status: "absent", why: "not-covered" }, "an index has no hist");
+  eq(hist.trips.length, 2, "read in two trips");
+  deep(keyed(hist.trips[1]), ["roster"], "where the batch carries only the roster: a companion key never runs the universe scan");
+  const cardX = await route("/api/flows/card-x?t=PEND");
+  ok(cardX.trips.length === 2 && cardX.body.status === "absent", "a stale roster's name reads absent from the same two trips");
+
+  const tape = await route("/api/flows/tape?t=ZZZZ");
+  eq(tape.trips.length, 1, "THE TAPE ADMISSION RIDES THE TAPE READ: one batch, where the row and the known-name check were two trips");
+  ok(tape.trips[0].kind === "batch" && /FROM flows_tape/.test(tape.trips[0].sqls[0]) && /UNION ALL/.test(tape.trips[0].sqls[1]),
+     "the tape row first, the card-or-universe membership second");
+  ok(tape.body.status === "pending" && tape.body.why === "unconfigured", "with no vendor key the name is admitted and the tape says unconfigured, as before");
+  const held = await route("/api/flows/tape?t=NVDA");
+  eq(held.trips.length, 1, "a covered name with no tape row yet costs the same single trip");
+}
+
+{
+  const f = fakeD1();
+  seed(f);
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const u = new URL(input instanceof Request ? input.url : String(input));
+    if (u.origin !== "http://vendor.test") return realFetch(input, init);
+    calls.push({ path: u.pathname, ticker: u.searchParams.get("ticker"), afterTrips: f.trips.length });
+    const data = u.pathname === "/api/screener/stocks" && u.searchParams.get("ticker") === "GLD"
+      ? [{ ticker: "GLD", issue_type: "ETF", full_name: "SPDR Gold Shares", sector: null, close: "391.645", prev_close: "392.88",
+        iv30d: "0.182", iv_rank: "41.5", implied_move_perc: "0.021", put_call_ratio: "0.8", date: "2026-09-24" }] : [];
+    return new Response(JSON.stringify({ data }), { headers: { "Content-Type": "application/json" } });
+  };
+  try {
+    const get = await client(f.D1, { UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test" });
+    await get("/api/flows/meta");
+    const route = async (path) => { const n = f.trips.length; const r = await get(path); return { ...r, trips: f.since(n), at: n }; };
+    const lite = await route("/api/flows/card?t=LITE");
+    ok(lite.body.lite === true && lite.body.depth === "universe" && calls.length === 0,
+       "THE VENDOR IS NEVER ASKED FOR AN ANSWER THE BATCH DECIDED: a universe name costs no screener read");
+    const gld = await route("/api/flows/card?t=GLD");
+    ok(gld.body.status === "ok" && gld.body.depth === "quote" && gld.body.type === "ETF" && gld.body.u.px === 391.645,
+       `a name outside the universe gets its quote card from one screener read (${JSON.stringify(gld.body).slice(0, 120)})`);
+    eq(calls.length, 1, "one screener read");
+    ok(calls[0].afterTrips === gld.at + 2 && gld.trips.length === 2,
+       "made only after the card read and the keyed batch both came back empty, so it never delays an answer the batch already holds");
+    const zz = await route("/api/flows/card?t=ZZZZ");
+    ok(zz.body.status === "absent" && zz.body.why === "unknown" && calls.length === 2, "a name the vendor does not know is unknown");
+    const tape = await route("/api/flows/tape?t=ZZZZ");
+    deep(tape.body, { ticker: "ZZZZ", status: "absent", why: "unknown" }, "the tape refuses an unknown name");
+    ok(tape.trips.length === 1 && calls.length === 3 && calls[2].afterTrips === tape.at + 1,
+       "after its one batch, with the screener asked only because the batch found neither a card nor a universe row");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 }
 
 console.log(`flows-reads-contract: ${checks} checks passed`);
