@@ -15,12 +15,12 @@ import {
   readHeldAlerts, boardPlan, liveWindow, runLive, runLiveLoop, chainDispatch, nextSlot, LIVE_LOOP, readLiveClock,
   sessionClock, liveRunVerdict, passOutcome, focusStripNames, FOCUS_FALLBACK,
 } from "../scripts/flows-legs/live.mjs";
-import { healthChecks, runHealthGate } from "../scripts/flows-legs/health.mjs";
+import { healthChecks, runHealthGate, HEALTH } from "../scripts/flows-legs/health.mjs";
 import {
   shapeNews, liveCredential, liveCredentialSource, LIVE_BEARER_MARGIN_MS, resetPublishRetryBudget, intradayRefusal,
 } from "../scripts/flows-pipeline.mjs";
 import * as O from "../shared/flows-oidc.js";
-import { oidcIssuer, tickDb, tier1Bodies } from "./live-stubs.mjs";
+import { oidcIssuer, tickDb, tier1Bodies, focusDb, focusGroupsSample, productionScreenerBody } from "./live-stubs.mjs";
 
 const ROOT = new URL("../", import.meta.url);
 const read = (p) => readFileSync(new URL(p, ROOT), "utf8");
@@ -45,9 +45,12 @@ const T = (iso) => Date.parse(iso);
     ok(L.LIVE_KEY_RE.test(key) && spec.cadenceS === FRESH_CLASSES[spec.klass].cadenceS && spec.maxBytes <= 120 * 1024,
       `${key} is a live:* key with its class's cadence and a byte cap under the ingest's 128 KB (${spec.maxBytes})`);
   }
-  eq(Object.values(L.LIVE_KEYS).filter((s) => s.writer === "worker").length, 1,
-    "exactly one live key is written by the Worker itself (live:market); every other live key has the Actions run " +
-    "as its single writer");
+  deep(Object.keys(L.LIVE_KEYS).filter((k) => L.LIVE_KEYS[k].writer === "worker"), ["live:market", "live:focus"],
+    "exactly two live keys are written by the Worker itself (live:market from Tier 1, live:focus from the focus " +
+    "cron); every other live key has the Actions run as its single writer");
+  deep([L.LIVE_KEYS["live:focus"].klass, L.LIVE_KEYS["live:focus"].cadenceS, L.LIVE_KEYS["live:focus"].reads],
+    ["market", 300, 1],
+    "live:focus is on the market clock (a five-minute cadence, live for 11 minutes) and costs one vendor call a tick");
   eq(L.TIER1_CALLS.length, L.LIVE_BUDGET.tier1Calls, "Tier 1 spends two vendor calls a tick");
   deep(L.TIER1_CALLS.map((c) => c.feed), ["tide", "sectors"],
     "and they are the five-minute market tide and the sector-ETF snapshot: the three 390-row one-minute feeds " +
@@ -472,6 +475,8 @@ const T = (iso) => Date.parse(iso);
   ok(L.checkLiveWrite("live:breadth", fresh(), { source: "actions" }).ok, "a well-formed Tier 2 payload is accepted");
   eq(L.checkLiveWrite("live:market", fresh({ cadenceS: 300, source: "worker" }), { source: "actions" }).code, "wrong_writer",
     "ONE WRITER PER KEY: the Actions token cannot write the Worker's live:market");
+  eq(L.checkLiveWrite("live:focus", fresh({ cadenceS: 300, source: "worker" }), { source: "actions" }).code, "wrong_writer",
+    "nor its live:focus, even with the envelope the Worker itself writes");
   eq(L.checkLiveWrite("live:breadth", {}, { source: "actions" }).code, "invalid_fresh", "a payload without fresh is refused");
   eq(L.checkLiveWrite("live:breadth", fresh({ cadenceS: 300 }), { source: "actions" }).code, "invalid_fresh",
     "and one promising another key's cadence");
@@ -548,8 +553,12 @@ const T = (iso) => Date.parse(iso);
     deep(importsOf(src("shared/flows-focus.js")), [],
       "shared/flows-focus.js IS A LEAF: it imports nothing, so every module may import its constants without a cycle");
     ok(!importsOf(src("shared/flows-live.js")).some((i) => /flows-focus/.test(i)),
-      "and shared/flows-live.js, which the Worker bundles, never imports it: the focus roster reaches the strip only " +
-        "through the Actions leg (scripts/flows-legs/live.mjs)");
+      "and shared/flows-live.js, the builders both writers share, never imports it: the roster enters through the " +
+        "two planners, the Actions leg (scripts/flows-legs/live.mjs) and the Worker's focus tick");
+    ok(importsOf(src("shared/flows-live-worker.js")).includes("./flows-focus.js") &&
+       importsOf(src("scripts/flows-legs/live.mjs")).includes("../../shared/flows-focus.js"),
+      "and both planners import the one focusStripNames, so the Worker's live:focus and the Actions strip ask for the " +
+        "same names in the same order");
     const rootPath = new URL(".", ROOT).pathname;
     const edges = (file) => importsOf(readFileSync(file, "utf8")).filter((i) => i.startsWith("."))
       .map((i) => new URL(i, "file://" + file).pathname);
@@ -783,17 +792,45 @@ const T = (iso) => Date.parse(iso);
   deep(cols(schema, "flows_clock"), clockCols, "as schema.sql declares it");
   const toml = read("wrangler.toml");
   eq(W.cronJob(W.RTH_CRON, T("2026-09-23T15:16:00Z")), "rth", "the market-hours cron runs the Tier 1 tick");
+  eq(W.cronJob(W.FOCUS_CRON, T("2026-09-23T15:18:00Z")), "focus", "the focus cron runs the focus tick");
+  eq(W.cronJob(W.FOCUS_CRON, T("2026-09-26T15:18:00Z")), "focus",
+    "by its string on any day: the tick itself decides whether the session is open");
   eq(W.cronJob(W.HOUSEKEEPING_CRON, T("2026-09-23T15:30:00Z")), "housekeeping", "the half-hour cron runs housekeeping");
   eq(W.cronJob("*/15 * * * *", T("2026-09-23T15:15:00Z")), "rth",
     "a trigger the deploy left behind still drives Tier 1 inside the session window, off the half hour");
   eq(W.cronJob("*/15 * * * *", T("2026-09-23T15:30:00Z")), "housekeeping", "and keeps the half hour for housekeeping");
   eq(W.cronJob("*/15 * * * *", T("2026-09-26T15:15:00Z")), "housekeeping", "never on a Saturday");
   eq(W.cronJob("*/15 * * * *", T("2026-09-23T03:15:00Z")), "housekeeping", "and never outside the 13-21 UTC window");
-  ok(/FLOWS_LIVE\.cronJob\(event && event\.cron, at\) === "rth"/.test(worker),
-    "the scheduled handler routes by the job a trigger's instant calls for, not by the trigger's exact string");
-  ok(toml.includes(`"${W.RTH_CRON}"`) && toml.includes(`"${W.HOUSEKEEPING_CRON}"`),
-    "the two crons the Worker branches on are the two wrangler.toml registers");
+  deep(["15:13", "15:18", "15:16", "15:21", "15:30", "16:00"].map((hm) => W.cronJob("* * * * *", T(`2026-09-23T${hm}:00Z`))),
+    ["focus", "focus", "rth", "rth", "housekeeping", "housekeeping"],
+    "WITH THREE CRONS an unknown trigger is routed by its minute: minutes ending in 3 or 8 are the focus tick's, the " +
+    "half hour is housekeeping's and every other minute inside the window is Tier 1's, so a stale or renamed trigger " +
+    "never runs Tier 1 at the focus tick's minutes or the focus read at Tier 1's");
+  deep(["13:03", "21:58", "22:03", "12:58"].map((hm) => W.cronJob("* * * * *", T(`2026-09-25T${hm}:00Z`))),
+    ["focus", "focus", "housekeeping", "housekeeping"], "inside the 13-21 UTC weekday window only");
+  eq(Array.from({ length: 60 }, (_, m) => m).filter((m) => W.cronJob("x", T("2026-09-23T15:00:00Z") + m * 60000) === "focus").join(),
+    W.FOCUS_CRON.split(" ")[0].replace(/^(\d+)-(\d+)\/(\d+)$/, (_, a, b, n) =>
+      Array.from({ length: Math.floor((b - a) / n) + 1 }, (__, i) => Number(a) + i * n).join()),
+    "and the minutes the fallback gives the focus tick are exactly the minutes its cron names");
+  {
+    const day = T("2026-09-23T00:00:00Z");
+    const fires = (step, first = 0) => Array.from({ length: 24 * 60 }, (_, m) => m).filter((m) => m % step === first)
+      .map((m) => day + m * 60000);
+    const stale = [...fires(5, 1).map((t) => W.cronJob(W.RTH_CRON, t)), ...fires(30).map((t) => W.cronJob(W.HOUSEKEEPING_CRON, t)),
+      ...fires(15).map((t) => W.cronJob("*/15 * * * *", t))];
+    ok(stale.length === 288 + 48 + 96 && !stale.includes("focus"),
+      "BUT A DEPLOY THAT LEAVES THE PREVIOUS TRIGGERS NEVER RUNS THE FOCUS TICK: under the two exact strings the " +
+        "handler branches on, or the older */15, no firing lands on a minute ending in 3 or 8, so live:focus is simply " +
+        "never written, and the nightly health gate's live:focus check is what says so");
+  }
+  ok(/const job = FLOWS_LIVE\.cronJob\(event && event\.cron, at\);\s*if \(job === "rth"\)/.test(worker) &&
+     /if \(job === "focus"\) \{\s*guard\("flows focus tick failed", \(async \(\) => \{\s*await ensureFlowsTables\(env\);\s*return FLOWS_LIVE\.focusTick\(env, at, \{ fetchVendor: \(p, params\) => uwFetch\(env, p, params\) \}\);/.test(worker),
+    "the scheduled handler routes by the job a trigger's instant calls for, not by the trigger's exact string, and " +
+    "the focus job reads the vendor through the same uwFetch as Tier 1");
+  ok(toml.includes(`"${W.RTH_CRON}"`) && toml.includes(`"${W.FOCUS_CRON}"`) && toml.includes(`"${W.HOUSEKEEPING_CRON}"`),
+    "the three crons the Worker branches on are the three wrangler.toml registers");
   const cronList = (toml.match(/^crons = \[([^\]]*)\]/m) || [null, ""])[1].match(/"[^"]+"/g) || [];
+  eq(cronList.length, 3, "three Worker crons, inside the five Workers Free allows an account");
   ok(cronList.length >= 2 && cronList.every((c) => { const f = c.slice(1, -1).trim().split(/\s+/); return f.length === 5 && /^(\*|[A-Za-z]{3}(-[A-Za-z]{3})?(,[A-Za-z]{3}(-[A-Za-z]{3})?)*)$/.test(f[4]); }),
     "EVERY WORKER CRON NAMES ITS WEEKDAYS BY NAME: Cloudflare counts 1 = Sunday to 7 = Saturday, so the numeric 1-5 " +
     "this file carried ran Tier 1 Sunday to Thursday and never on a Friday, as 2026-09-25 showed (" + cronList.join(", ") + ")");
@@ -808,8 +845,8 @@ const T = (iso) => Date.parse(iso);
       "--emit", join(dir, "p.json")], { encoding: "utf8" });
     const files = readdirSync(dir).sort();
     const keys = files.map((f) => f.replace(/^p-/, "").replace(/\.json$/, "").replace(/^live-/, "live:"));
-    deep(keys.sort(), Object.keys(L.LIVE_KEYS).filter((k) => k !== "live:market").sort(),
-      "--live --dry-run emits every Tier 2 key and nothing else");
+    deep(keys.sort(), Object.keys(L.LIVE_KEYS).filter((k) => L.LIVE_KEYS[k].writer === "actions").sort(),
+      "--live --dry-run emits every Tier 2 key and nothing else: not live:market or live:focus, which the Worker writes");
     for (const f of files) {
       const text = readFileSync(join(dir, f), "utf8");
       const body = JSON.parse(text);
@@ -1816,13 +1853,15 @@ const T = (iso) => Date.parse(iso);
       tier1: { at: new Date(at(17, 56)).toISOString(), okAt: new Date(at(16, 6)).toISOString(), why: "written" },
       dispatchWhy: null } }, status: 200 },
     marketRead: { payload: { fresh: { readAt: new Date(at(16, 6)).toISOString() } }, status: 200 },
+    focusRead: { payload: { key: "live:focus", fresh: { readAt: new Date(at(16, 8)).toISOString() } }, status: 200 },
     heartbeatRead: beat(S, { calls: 39, failedCalls: 0, finishedAt: new Date(at(16, 21)).toISOString() }),
     edge403: 11, retrySpentMs: 6000,
   };
   const H = healthChecks(good);
   ok(H.applies && H.failures.length === 0 && /11 ingest answer\(s\) of HTTP 403/.test(H.notes[0]),
-    "THE HEALTH GATE passes a healthy session: Tier 1 wrote through 16:06, the last Tier 2 pass finished 16:21 and " +
-      "the edge refused eleven ingest requests (the 2026-09-24 count), all absorbed by retries");
+    "THE HEALTH GATE passes a healthy session: Tier 1 wrote through 16:06, the focus cron through 16:08, the last " +
+      "Tier 2 pass finished 16:21 and the edge refused eleven ingest requests (the 2026-09-24 count), all absorbed by " +
+      "retries");
   const fails = (over) => healthChecks({ ...good, ...over }).failures;
   deep(fails({ heartbeatRead: beat("2026-09-23", { calls: 39, failedCalls: 0, finishedAt: new Date(at(16, 21)).toISOString() }) }),
     [`HEALTH: no live pass for ${S}: the last Tier 2 pass was for ${"2026-09-23"}`], "no Tier 2 pass today is one line");
@@ -1834,6 +1873,23 @@ const T = (iso) => Date.parse(iso);
   "a dead last pass and a loop that stopped at noon each say so");
   deep(fails({ marketRead: { payload: { fresh: { readAt: new Date(at(9, 31)).toISOString() } }, status: 200 } }),
     ["HEALTH: Tier 1 last wrote live:market at 09:31 ET, not by 15:50 ET"], "a Tier 1 that died after the open");
+  eq(HEALTH.focusCron, W.FOCUS_CRON, "the gate names the focus cron the Worker registers, character for character");
+  deep(fails({ focusRead: { payload: null, absent: true, status: 200 } }),
+    ["HEALTH: live:focus has never been written (is 3-58/5 13-21 * * MON-FRI registered? wrangler triggers deploy)"],
+  "LIVE:FOCUS NEVER WRITTEN fails the gate and names the cron to register: a deploy that left the previous triggers " +
+    "runs Tier 1 and housekeeping and never the focus tick, and nothing else would say so");
+  deep(fails({ focusRead: { payload: { fresh: { readAt: new Date(at(9, 38)).toISOString() } }, status: 200 } }),
+    ["HEALTH: the focus cron last wrote live:focus at 09:38 ET, not by 15:50 ET (is 3-58/5 13-21 * * MON-FRI " +
+      "registered? its \"live:focus not written\" log lines say why a read was kept)"],
+  "a focus cron that stopped writing after the open fails it too");
+  deep(fails({ focusRead: { payload: { fresh: { readAt: new Date(easternInstant("2026-09-23", 16 * 60 + 8)).toISOString() } },
+    status: 200 } }), ["HEALTH: the focus cron last wrote live:focus at 2026-09-23 16:08 ET, not by 15:50 ET (is " +
+      "3-58/5 13-21 * * MON-FRI registered? its \"live:focus not written\" log lines say why a read was kept)"],
+  "and so does a row held from an earlier session, dated so");
+  deep(fails({ focusRead: { payload: null, failed: true, status: 403 } }), ["HEALTH: live:focus could not be read (HTTP 403)"],
+    "an unreadable live:focus is its own failure");
+  deep(fails({ focusRead: { payload: { fresh: { readAt: new Date(at(15, 58)).toISOString() } }, status: 200 } }), [],
+    "while the last read before the close (15:58) passes: the focus cron's last minutes are 15:58, 16:03 and 16:08");
   const clockWith = (over) => ({ payload: { key: "clock", clock: { ...good.clockRead.payload.clock, ...over } }, status: 200 });
   deep(fails({ clockRead: clockWith({ tier1: { ...good.clockRead.payload.clock.tier1, why: "error:no-key" } }) }),
     ["HEALTH: Tier 1's last tick failed with error:no-key: the Worker has no UW_API_KEY secret (wrangler secret put UW_API_KEY)"],
@@ -1865,23 +1921,28 @@ const T = (iso) => Date.parse(iso);
   deep(fails({ clockRead: { payload: null, failed: true, status: 403 } }), ["HEALTH: the Worker's clock could not be read (HTTP 403)"],
     "an unreadable clock is itself a failure");
   const off = healthChecks({ ...good, clockRead: clockWith({ tier1: { at: null, okAt: null, why: "off" } }),
-    heartbeatRead: { payload: null, absent: true } });
-  ok(off.failures.length === 0 && off.why === "live-off", "FLOWS_LIVE_MODE off is a deliberate rollback, not a failure");
+    heartbeatRead: { payload: null, absent: true }, focusRead: { payload: null, absent: true } });
+  ok(off.failures.length === 0 && off.why === "live-off", "FLOWS_LIVE_MODE off is a deliberate rollback, not a failure, " +
+    "for the focus cron as for Tier 1");
   ok(!healthChecks({ ...good, now: at(15, 30) }).applies && !healthChecks({ ...good, now: easternInstant("2026-09-25", 20 * 60) }).applies &&
      healthChecks({ ...good, now: easternInstant("2026-09-25", 20 * 60), edge403: 40 }).failures.length === 1,
   "the live checks apply only on the evening of the session the run ranked; the edge count applies to every run");
   const early = healthChecks({ ...good, now: at(14, 0),
     clockRead: clockWith({ earlyClose: 1, tier1: { at: new Date(at(13, 56)).toISOString(), okAt: null, why: "written" } }),
     marketRead: { payload: { fresh: { readAt: new Date(at(13, 6)).toISOString() } }, status: 200 },
+    focusRead: { payload: { fresh: { readAt: new Date(at(13, 8)).toISOString() } }, status: 200 },
     heartbeatRead: beat(S, { calls: 39, failedCalls: 0, finishedAt: new Date(at(13, 21)).toISOString() }) });
   ok(early.applies && early.failures.length === 0, "on an early close the checks follow the 13:00 close");
 
   const lines = [];
+  const gateReads = [];
   const gate = await runHealthGate({ sessionDate: S, now: () => at(20, 5), edge403: 0,
-    read: async (key) => ({ clock: good.clockRead, "live:market": good.marketRead, "live:heartbeat": good.heartbeatRead })[key],
+    read: async (key) => (gateReads.push(key), ({ clock: good.clockRead, "live:market": good.marketRead,
+      "live:focus": good.focusRead, "live:heartbeat": good.heartbeatRead })[key]),
     log: (l) => lines.push(l), warn: (l) => lines.push(l) });
-  ok(gate.failures.length === 0 && lines[0] === "health gate: checked; 0 failure(s)",
-    "runHealthGate reads the clock, live:market and live:heartbeat through the ingest route and prints one line");
+  ok(gate.failures.length === 0 && lines[0] === "health gate: checked; 0 failure(s)" &&
+     gateReads.join() === "clock,live:market,live:focus,live:heartbeat",
+    "runHealthGate reads the clock, live:market, live:focus and live:heartbeat through the ingest route and prints one line");
   const pipeline = read("scripts/flows-pipeline.mjs");
   const tail = pipeline.slice(pipeline.indexOf("async function main()"), pipeline.indexOf("\nexport {\n"));
   ok(/const health = await runHealthGate\(\{ sessionDate, read: readStored, dry: DRY_RUN,\s*edge403: edgeRefusals\.count, retrySpentMs: publishRetrySpentMs \}\);\s*if \(health\.failures\.length\) process\.exitCode = 1;\s*\}\s*$/
@@ -1904,11 +1965,12 @@ const T = (iso) => Date.parse(iso);
   }
   {
     const reads = [];
-    const failing = { clock: 1, "live:market": 0, "live:heartbeat": 0 };
+    const failing = { clock: 1, "live:market": 0, "live:focus": 0, "live:heartbeat": 0 };
     const retrying = async (key) => {
       reads.push(key);
       if (failing[key]-- > 0) return { payload: null, failed: true, status: 403 };
-      return ({ clock: good.clockRead, "live:market": good.marketRead, "live:heartbeat": good.heartbeatRead })[key];
+      return ({ clock: good.clockRead, "live:market": good.marketRead, "live:focus": good.focusRead,
+        "live:heartbeat": good.heartbeatRead })[key];
     };
     const g = await runHealthGate({ sessionDate: S, now: () => at(20, 5), read: async (key) => {
       let r = await retrying(key);
@@ -1975,6 +2037,200 @@ const T = (iso) => Date.parse(iso);
     `(median), warm ${warm.median.toFixed(2)} ms median, ${warm.worst.toFixed(2)} ms worst window`);
 }
 
+{
+  const S = "2026-09-23";
+  const at = (hm, day = S) => easternInstant(day, Number(hm.slice(0, 2)) * 60 + Number(hm.slice(3)));
+  deep(["09:28", "09:33", "15:58", "16:08", "16:13"].map((hm) => W.focusDue(at(hm))), [false, true, true, true, false],
+    "THE FOCUS TICK IS DUE while Tier 1 is: from the open to ten minutes past the close, so the session's last read " +
+    "is its final reading");
+  eq(W.focusDue(at("11:08", "2026-09-26")), false, "never on a weekend");
+  const thanks = "2026-11-26";
+  ok(tier1Due(at("09:48", thanks)) && !W.focusDue(at("09:48", thanks)) && !W.focusDue(at("11:08", thanks)),
+    "and never on a computed holiday, not even in the 09:45 probe window where Tier 1 alone reads the tape to test " +
+    "the calendar");
+  ok(W.focusDue(at("11:08", thanks), { day: thanks, trading: 1 }), "unless that probe saw the day trade");
+  ok(!W.focusDue(at("11:08"), { day: S, trading: 0 }), "and never on a day the tape closed");
+  deep(["13:08", "13:13"].map((hm) => W.focusDue(at(hm, "2026-11-27"))), [true, false],
+    "an early close ends it ten minutes after 13:00");
+
+  const groups = focusGroupsSample();
+  const names = ["GLD", "GDX", "NEM", "AEM", "SLV", "SIL", "PAAS", "WPM", "CPER", "COPX", "FCX", "SCCO", "AAPL", "MSFT",
+    "GOOGL", "AMZN", "META", "NVDA", "TSLA", "AVGO", "NFLX", "COST"];
+  deep(W.focusNames(JSON.stringify(groups)), { names, source: "focus" },
+    "THE FOCUS NAMES come from the stored nightly groups: lead first, in order, once each — the metals, the Mag 7 and " +
+    "whatever the nightly derived for the NDX 10, 22 names");
+  deep(W.focusNames(JSON.stringify(groups)), focusStripNames({ groups }),
+    "exactly the names the Actions strip plans from the same payload");
+  deep(W.focusNames(null), { names: [...FOCUS_FALLBACK], source: "constants" },
+    "with no stored payload, the shared/flows-focus.js roster");
+  eq(W.focusNames("{not json").source, "constants", "and so with an unreadable one");
+  eq(W.focusNames(JSON.stringify([{ tickers: Array.from({ length: 60 }, (_, i) => "Q" + i) }])).names.length,
+    L.LIVE_BUDGET.stripFocusMax, "a runaway list is capped at the strip's own focus share");
+
+  const calls = [];
+  const logs = [];
+  const log = { error: (line) => logs.push(JSON.parse(line)) };
+  const vendor = (make) => async (path, params) => { calls.push({ path, params }); return make(params); };
+  const good = (params) => productionScreenerBody(String(params.ticker).split(","), { session: S, readAt: at("10:07") });
+  const writes = (db) => db.statements.filter((x) => /INSERT INTO flows_live/.test(x.sql));
+  const env = (db, extra = {}) => ({ DB: db, UW_API_KEY: "k", ...extra });
+
+  for (const [label, t, clock] of [["before the open", at("09:28"), null], ["on a Saturday", at("11:08", "2026-09-26"), null],
+    ["in a computed holiday's probe window", at("09:48", thanks), null], ["on a day the tape closed", at("11:08"), { day: S, trading: 0 }]]) {
+    const db = focusDb({ groups, clock });
+    const r = await W.focusTick(env(db), t, { fetchVendor: vendor(good), log });
+    ok(r.why === "not-due" && calls.length === 0 && writes(db).length === 0 && logs.length === 0,
+      `${label} the focus tick spends no vendor call and writes nothing`);
+  }
+  {
+    const db = focusDb({ groups });
+    const off = await W.focusTick(env(db, { FLOWS_LIVE_MODE: "off" }), at("10:08"), { fetchVendor: vendor(good), log });
+    const keyless = await W.focusTick({ DB: db }, at("10:08"), { fetchVendor: vendor(good), log });
+    ok(off.skipped === "off" && keyless.why === "no-key" && calls.length === 0 && writes(db).length === 0,
+      "FLOWS_LIVE_MODE = off rolls it back with Tier 1, and without the vendor key it reads nothing");
+  }
+
+  const db = focusDb({ groups });
+  const r = await W.focusTick(env(db), at("10:08"), { fetchVendor: vendor(good), log });
+  eq(calls.length, 1, "ONE VENDOR CALL a tick");
+  deep(calls[0], { path: "/api/screener/stocks", params: { ticker: names.join(","), limit: 500 } },
+    "the screener read the Actions strip makes, for the focus names only");
+  ok(read("scripts/flows-legs/live.mjs").includes(
+    `read("${W.FOCUS_READ.path}", { ticker: plan.names.join(","), limit: ${W.FOCUS_READ.limit} })`),
+  "the same path and parameters as the live leg's strip read, character for character");
+  const w = writes(db);
+  eq(w.length, 1, "one write");
+  const [key, text, readAt, session, cadence, source, writer] = w[0].args;
+  deep([key, readAt, session, cadence, source, writer], ["live:focus", at("10:08"), S, 300, "worker", W.FOCUS_WRITER],
+    "live:focus, stamped with the cron's scheduled instant, today's Eastern session, the market cadence and the " +
+    "Worker as its writer");
+  ok(/WHERE excluded\.read_at >= flows_live\.read_at/.test(w[0].sql), "through the same newer-only upsert as live:market");
+  const p = JSON.parse(text);
+  const strips = L.shapeStrips(good({ ticker: names.join(",") }), { at: at("10:08"), session: S, names });
+  deep(p.rows, strips.rows, "A ROW IS EXACTLY A live:strips ROW: the same stripValues over the same vendor row");
+  deep(Object.keys(p).sort(), Object.keys(strips).sort(), "in the live:strips envelope, so the page reads both with one picker");
+  deep([p.key, p.session, p.status, p.fields.join(), p.fresh.source, p.fresh.cadenceS, p.fresh.readAt, p.fresh.session,
+    p.fresh.writer], ["live:focus", S, "ok", L.STRIP_FIELDS.map(([n]) => n).join(), "worker", 300,
+    new Date(at("10:08")).toISOString(), S, W.FOCUS_WRITER], "its own key and fresh envelope");
+  ok(L.checkLiveWrite("live:focus", p, {}).ok && L.checkLiveWrite("live:focus", p, { source: "actions" }).code === "wrong_writer",
+    "an envelope the registry accepts from its writer and refuses from Actions");
+  deep([r.written, r.why, r.asked, r.hit, r.source], [true, "written", 22, 22, "focus"], "and the tick says what it did");
+  eq(logs.length, 0, "a good tick logs nothing");
+  {
+    const fdb = focusDb({ groups: null });
+    const fr = await W.focusTick(env(fdb), at("10:13"), { fetchVendor: vendor(good), log });
+    ok(fr.written && fr.source === "constants" && calls.at(-1).params.ticker === FOCUS_FALLBACK.join(","),
+      "BEFORE THE NIGHTLY HAS WRITTEN focus the tick reads the constants' roster and still writes");
+  }
+  {
+    const broken = { ...focusDb({ groups }), batch: async () => { throw new Error("D1 unavailable"); } };
+    broken.statements = [];
+    const br = await W.focusTick(env(broken), at("10:18"), { fetchVendor: vendor(good), log });
+    ok(br.written && br.source === "constants", "an unreadable store falls back to the roster and the computed calendar");
+  }
+
+  const other = (n) => productionScreenerBody(Array.from({ length: n }, (_, i) => "ZZ" + i), { session: S, readAt: at("10:07") });
+  const cases = [
+    ["a vendor call that fails", () => { throw new Error("Market data provider returned an error"); }, "vendor-failed"],
+    ["an empty vendor answer", () => ({ data: [] }), "vendor-empty"],
+    ["rows from the previous session", (q) => productionScreenerBody(String(q.ticker).split(","), { session: "2026-09-22",
+      readAt: at("10:07") }), "vendor-prior-session"],
+    ["rows with no price", (q) => ({ data: String(q.ticker).split(",").map((t) => ({ ticker: t, date: S })) }), "none-priced"],
+    ["rows for none of the names asked", () => other(3), "none-priced"],
+    ["a runaway answer over the cap", (q) => ({ data: [...good(q).data, ...other(200).data] }), "over-cap"],
+  ];
+  for (const [label, make, why] of cases) {
+    const cdb = focusDb({ groups });
+    logs.length = 0;
+    const cr = await W.focusTick(env(cdb), at("10:23"), { fetchVendor: vendor(make), log });
+    ok(cr.written === false && cr.why === why && writes(cdb).length === 0,
+      `A FAILED OR EMPTY READ NEVER OVERWRITES THE LAST GOOD VALUE: ${label} writes nothing (${cr.why}), so the held ` +
+      "row keeps its own read time, and nothing is ever written as a zero");
+    ok(logs.length === 1 && logs[0].message === "live:focus not written" && logs[0].why === why,
+      `and logs one JSON error line naming why (${label})`);
+  }
+  {
+    const full = { session: S, read_at: at("10:18"), priced: JSON.stringify(names) };
+    const three = (q) => productionScreenerBody(String(q.ticker).split(",").slice(0, 3), { session: S, readAt: at("10:22") });
+    const unpricedOne = (q) => { const b = good(q); b.data[5].close = null; return b; };
+    const tickWith = async (held, t, make = three) => {
+      const hdb = focusDb({ groups, held });
+      logs.length = 0;
+      const res = await W.focusTick(env(hdb), t, { fetchVendor: vendor(make), log });
+      return { ...res, wrote: writes(hdb).length, said: logs.map((l) => l.why) };
+    };
+    const partial = await tickWith(full, at("10:23"));
+    ok(partial.why === "partial" && partial.written === false && partial.wrote === 0 && partial.hit === 3 &&
+       partial.lost === 19 && partial.said.join() === "partial" && logs[0].lost.join() === names.slice(3, 13).join(),
+    "A PARTIAL READ NEVER REPLACES A FULLER HELD ROW: 3 of 22 names priced while the 10:18 read of all 22 is still " +
+      "live writes nothing, so Home keeps showing every name live, and logs one line naming why and the first names lost");
+    const lost = await tickWith(full, at("10:23"), unpricedOne);
+    ok(lost.why === "partial" && lost.wrote === 0 && lost.hit === 21 && lost.lost === 1, "and so is a read that " +
+      "returns every name but lost one name's price, which the held row had");
+    const still = await tickWith(full, at("10:28"));
+    const aged = await tickWith(full, at("10:33"));
+    ok(still.why === "partial" && aged.written === true && aged.wrote === 1 && aged.lost === 0,
+      "ONCE THE HELD ROW LEAVES ITS 11-MINUTE LIVE WINDOW the partial read is written: a name the vendor stops " +
+        "returning holds the key back for two ticks at most (10:23 and 10:28), never for the rest of the session");
+    const yesterday = await tickWith({ ...full, session: "2026-09-22" }, at("10:23"));
+    ok(yesterday.written === true && yesterday.wrote === 1, "a held row of an earlier session never holds back today's reads");
+    const level = await tickWith({ ...full, priced: JSON.stringify(names.slice(0, 3)) }, at("10:23"));
+    const whole = await tickWith(full, at("10:23"), good);
+    ok(level.written && whole.written && whole.hit === 22 && whole.said.length === 0,
+      "while a read that prices every name the held row priced, or a complete one after a complete one, is written");
+    const before = [...new Set([...FOCUS_FALLBACK, ...names, "SPY", "QQQ"])];
+    const shrunk = await tickWith({ ...full, priced: JSON.stringify(before) }, at("10:23"), good);
+    ok(before.length > names.length && shrunk.written && shrunk.lost === 0 && shrunk.hit === 22,
+      "A ROSTER THAT CHANGED MID-SESSION IS NOT A PARTIAL READ: when the nightly focus key lands and the names asked " +
+        "change, only a name the held row priced AND this tick asked for counts as lost, so a complete read of the new " +
+        "roster is written at once");
+    const unread = await tickWith(null, at("10:23"));
+    const garbled = await tickWith({ ...full, priced: "[not json" }, at("10:23"));
+    ok(unread.written && unread.lost === 0 && garbled.written, "and with no held row, or an unreadable list, the " +
+      "first read of any size is written");
+  }
+  ok(/SELECT session, read_at, \(SELECT json_group_array\(r\.key\) FROM json_each\(payload, '\$\.rows'\)/.test(W.FOCUS_HELD_SQL) &&
+     /f\.value = 'px'/.test(W.FOCUS_HELD_SQL) && /id = 'live:focus' AND json_valid\(payload\)/.test(W.FOCUS_HELD_SQL),
+  "the held row's priced names are listed in D1, in the same batch as the clock and the groups, with px found by the " +
+    "held payload's own field list, so the held rows never reach the isolate");
+  const forty =productionScreenerBody(Array.from({ length: L.LIVE_BUDGET.stripFocusMax }, (_, i) => "F" + i),
+    { session: S, readAt: at("10:07") });
+  const fortyBytes = JSON.stringify(L.shapeStrips(forty, { at: at("10:08"), session: S, key: "live:focus" })).length;
+  ok(fortyBytes <= L.LIVE_KEYS["live:focus"].maxBytes && fortyBytes > 0.4 * L.LIVE_KEYS["live:focus"].maxBytes,
+    `a full ${L.LIVE_BUDGET.stripFocusMax}-name live:focus is ${fortyBytes} bytes, inside its ` +
+    `${L.LIVE_KEYS["live:focus"].maxBytes} and near enough that the cap certifies something`);
+}
+
+{
+  const child = (arg) => {
+    const out = execFileSync("node", [new URL("tests/live-stubs.mjs", ROOT).pathname, "--focus-budget", ...arg],
+      { encoding: "utf8" });
+    return JSON.parse(out.trim().split("\n").pop());
+  };
+  const colds = Array.from({ length: 10 }, () => child(["cold"]));
+  ok(colds.every((c) => c.written && c.hit === 22 && c.asked === 22 && c.lost === 0),
+    "the budget child's cold focus ticks each wrote all 22 focus names, over a held row of the same 22 read five " +
+      "minutes earlier, so every tick runs the partial-read guard as every tick after a session's first does");
+  const coldCpu = colds.reduce((a, c) => a + c.cold, 0) / colds.length;
+  const walls = colds.map((c) => c.coldWall).sort((a, b) => a - b);
+  const coldWall = (walls[4] + walls[5]) / 2;
+  const warm = child([]);
+  ok(warm.rows === 22 && warm.fields >= 202 && warm.bytes / warm.rows > 6000,
+    `the vendor body is production-size: ${warm.rows} screener rows of ${warm.fields} fields each, every field the ` +
+    `probe recorded on the live screener row, ${warm.bytes} bytes of JSON`);
+  ok(coldCpu < 6,
+    `COLD ISOLATE: the first focus tick of a fresh process (lazy compilation and the body's JSON.parse included) ` +
+    `takes ${coldCpu.toFixed(2)} ms of ${colds[0].clock} time, the mean of ten processes, under 6 ms of the 10 ms cap`);
+  ok(coldWall < 8, `its median wall time is ${coldWall.toFixed(2)} ms`);
+  ok(warm.median < 2 && warm.worst < 4,
+    `WARM: ${warm.median.toFixed(2)} ms median over windows of ${warm.window} ticks, ${warm.worst.toFixed(2)} ms in the ` +
+    "costliest window");
+  ok(warm.payloadBytes <= L.LIVE_KEYS["live:focus"].maxBytes, `writing ${warm.payloadBytes} bytes of live:focus`);
+  console.log(`  focus CPU: cold ${coldCpu.toFixed(2)} ms (${colds[0].clock}, mean of 10), cold wall ${coldWall.toFixed(2)} ms ` +
+    `(median), warm ${warm.median.toFixed(2)} ms median, ${warm.worst.toFixed(2)} ms worst window, ${warm.bytes} bytes ` +
+    `read, ${warm.payloadBytes} written`);
+}
+
 console.log(`✓ flows-live: ${checks} assertions — one threshold table in code; phases on the Eastern clock at every ` +
   `boundary under EDT and EST, a tape-derived holiday and early close; states and absolute instants for every class; ` +
   `the Tier 1 and Tier 2 clocks, in-flight dispatch and a once-only nightly retry; probe rows shaped to known answers ` +
@@ -1985,6 +2241,8 @@ console.log(`✓ flows-live: ${checks} assertions — one threshold table in cod
   `--live dry run; buckets sampled at their last row with values under the vendor's pre-filled nulls; Tier 1 in two ` +
   `feeds under the 10 ms CPU cap cold and warm, with D1 telemetry that names every tick's outcome; a holiday verdict ` +
   `that is provisional until two probes fifteen minutes apart agree, re-probed until 11:00, with the closed days kept; ` +
-  `the focus names read ahead of the boards in the one strip call; the nightly health gate and the live job's exit ` +
+  `the focus names read ahead of the boards in the one strip call; live:focus from the Worker's own third cron, one ` +
+  `screener call inside the session window, rows identical to the strip's, never a failed or empty read nor a partial one over a fuller live row, under 6 ms ` +
+  `of CPU cold over a production-size body; the nightly health gate and the live job's exit ` +
   `rule; the self-sustaining ` +
   `Tier 2 session loop, its budget and its chain dispatch; and a client helper that only compares clocks`);

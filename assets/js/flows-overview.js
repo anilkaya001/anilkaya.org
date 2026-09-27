@@ -1708,7 +1708,9 @@
       h("i", { class: "cc-ln-fill", "data-tone": toneOf(r), style: { width: (frac * 50) + "%", left: r < 0 ? (50 - frac * 50) + "%" : "50%" } }));
   }
 
-  const FOCUS = { focus: null, strips: null, series: null, lead: new URLSearchParams(location.search).get("lead"), pills: {} };
+  const FOCUS = { focus: null, strips: null, series: null, live: null, lead: new URLSearchParams(location.search).get("lead"), pills: {} };
+  const readOf = (s) => Date.parse(s.fresh && s.fresh.readAt);
+  const newest = (a, b) => (readOf(b) || 0) - (readOf(a) || 0);
   const FK = ["px", "prev", "chg", "net", "lean", "iv30"];
   const dossier = (t) => "/flows/ticker/?t=" + encodeURIComponent(t);
   const pick = (row, fields, k) => {
@@ -1719,23 +1721,26 @@
 
   function focusRows(ts) {
     const f = FOCUS.focus && FOCUS.focus.status !== "pending" ? FOCUS.focus : null;
-    const s = FOCUS.strips, se = FOCUS.series;
+    const se = FOCUS.series;
     const fday = f && typeof f.sessionDate === "string" ? f.sessionDate : null;
     const nr = (t) => f && f.rows && f.rows[t];
-    const live = s && s.status === "ok" && s.rows && Array.isArray(s.fields) && typeof s.session === "string" &&
-      (!fday || s.session > fday || (s.session === fday && !(Date.parse(s.fresh && s.fresh.readAt) <= Date.parse(f.readAt || f.generatedAt)))) &&
-      ts.every((t) => s.rows[t] || !nr(t));
+    const lv = [FOCUS.live, FOCUS.strips].filter((s) => s && s.status === "ok" && s.rows && Array.isArray(s.fields) && typeof s.session === "string" &&
+      (!fday || s.session > fday || (s.session === fday && !(readOf(s) <= Date.parse(f.readAt || f.generatedAt)))) &&
+      ts.every((t) => s.rows[t] || !nr(t))).sort(newest);
     return ts.map((t) => {
-      const [src, row, fields, day] = live && s.rows[t] ? ["live", s.rows[t], s.fields, s.session]
+      const s = lv.find((x) => x.rows[t]);
+      const [src, row, fields, day] = s ? ["live", s.rows[t], s.fields, s.session]
         : nr(t) ? ["nightly", nr(t), f.fields, fday] : [];
-      const v = { t, src, day, today: 0 };
+      const v = { t, src, day, today: 0, s };
       for (const k of FK) v[k] = pick(row, fields, k);
       if (v.chg === null && v.px !== null && v.prev) v.chg = v.px / v.prev - 1;
       const b = se && se.base ? isNum(se.base[t]) : null;
       const col = se && se.cols && se.cols.px ? se.cols.px[t] : null;
-      if (b !== null && src === "live" && se.session === day && Array.isArray(col)) {
+      const d = s && Array.isArray(se && se.t) ? readOf(s) - Date.parse(se.t.at(-1)) : 0;
+      if (b !== null && src === "live" && se.session === day && Array.isArray(col) && !(d < 0)) {
         const k = isNum(se.scale && se.scale.px) ?? 0.01;
         v.spark = col.map((x) => (isNum(x) === null ? null : b + x * k));
+        if (d >= 1e3 && v.px !== null) v.spark.push(v.px);
         v.intraday = true;
       }
       if (!v.spark || counted(v.spark) < 2) {
@@ -1774,11 +1779,12 @@
     const slot = $(slotId);
     if (!slot) return;
     FOCUS.pills[slotId] = [rows, title];
-    const s = FOCUS.strips, m = UI.freshness.market();
+    const m = UI.freshness.market();
+    const s = rows.map((v) => v.s).filter(Boolean).sort(newest)[0];
     const live = rows.filter((v) => v.src === "live").length;
     const day = rows.map((v) => v.day).filter(Boolean).sort().pop() || null;
-    const readAt = live && s.fresh ? s.fresh.readAt : null;
-    const ff = live && s.__ff ? s.__ff.stateAt() : null;
+    const readAt = s && s.fresh ? s.fresh.readAt : null;
+    const ff = s && s.__ff ? s.__ff.stateAt() : null;
     const state = ff === "live" ? "live" : ff === "stale" || (day && day < m.expected) ? "stale" : "fresh";
     const at = readAt && (state === "live" || ff === "stale") ? clock(readAt) : null;
     const word = state === "live" ? "Live" : day ? F.day(day) : DASH;
@@ -2011,18 +2017,19 @@
   function live(liveVol) {
     if (typeof UI.heartbeat !== "function") return;
     UI.heartbeat({
-      keys: ["market", "breadth", "strips"], nightly: ["pulse", "focus"], page: "overview",
+      keys: ["market", "breadth", "strips", "focus"], nightly: ["pulse", "focus"], page: "overview",
       onBeat() { if (heroTide && heroTide.live) paintPill(heroTide); for (const k in FOCUS.pills) whenPill(k, ...FOCUS.pills[k]); },
       onChange(changed) {
         if (!Array.isArray(changed)) return;
         const has = (re) => changed.some((k) => re.test(String(k)));
-        const st = has(/strips/), fo = has(/focus/);
-        if (st || fo) {
+        const st = has(/strips/), fo = has(/^focus/), lf = has(/:focus/);
+        if (st || fo || lf) {
           Promise.all([fo && loadRegion("/api/flows/focus"), st && loadRegion("/api/flows/lk?k=strips", true),
-            st && loadRegion("/api/flows/lk?k=strips:series", true)]).then(([f, s, se]) => {
+            st && loadRegion("/api/flows/lk?k=strips:series", true), lf && loadRegion("/api/flows/lk?k=focus", true)]).then(([f, s, se, l]) => {
             if (f) FOCUS.focus = f;
             if (s) FOCUS.strips = s;
             if (se) FOCUS.series = se;
+            if (l) FOCUS.live = l;
             paintFocus();
           });
         }
@@ -2056,9 +2063,10 @@
     loadRegion("/api/flows/focus"),
     loadRegion("/api/flows/lk?k=strips", true),
     loadRegion("/api/flows/lk?k=strips:series", true),
-  ]).then(([lng, sht, watch, market, alerts, events, track, lean, news, pulse, regime, liveMkt, liveVol, liveBreadth, focus, strips, series]) => {
+    loadRegion("/api/flows/lk?k=focus", true),
+  ]).then(([lng, sht, watch, market, alerts, events, track, lean, news, pulse, regime, liveMkt, liveVol, liveBreadth, focus, strips, series, fl]) => {
     if (gated) return;
-    Object.assign(FOCUS, { focus, strips, series });
+    Object.assign(FOCUS, { focus, strips, series, live: fl });
     paintFocus();
 
     const bull = ranked(lng && lng.rows);

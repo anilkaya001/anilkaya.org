@@ -154,6 +154,23 @@ export function focusGroups(ndx) {
 
 const DEFAULT_FOCUS = Object.freeze([...new Set([...FOCUS_METALS.flatMap((g) => g.tickers), ...MAG7])]);
 
+export const FOCUS_STRIP_FALLBACK = Object.freeze([...new Set([
+  ...FOCUS_METALS.flatMap((g) => [g.lead, ...g.tickers]), ...MAG7, ...FOCUS_FUNDS, ...FOCUS_MINERS,
+])]);
+
+export function focusStripNames(payload, max) {
+  const groups = payload && typeof payload === "object" && Array.isArray(payload.groups) ? payload.groups : [];
+  const out = [];
+  for (const g of groups) {
+    if (!g || typeof g !== "object") continue;
+    for (const raw of [g.lead, ...(Array.isArray(g.tickers) ? g.tickers : [])]) {
+      const t = tickerOf(raw);
+      if (t && !out.includes(t) && out.length < max) out.push(t);
+    }
+  }
+  return out.length ? { names: out, source: "focus" } : { names: FOCUS_STRIP_FALLBACK.slice(0, max), source: "constants" };
+}
+
 export function focusTickers(focusPayload) {
   const groups = focusPayload && typeof focusPayload === "object" && Array.isArray(focusPayload.groups)
     ? focusPayload.groups : null;

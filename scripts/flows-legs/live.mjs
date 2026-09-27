@@ -1,10 +1,9 @@
 import {
   LIVE_KEYS, LIVE_BUDGET, SECTOR_TIDES, shapeBreadth, shapeStrips, appendStripSeries, shapeVol,
   indexRows, shapeMovers, shapeLiveTape, gexRotation, shapeGexSeries, mergeGex, mergeLiveAlerts, alertsPagePlan,
-  oldestCreated, stripNames, rowsOf, failed, freshEnvelope, timeMs, isoSec, anyAnswered, BREADTH_ETFS, VERDICT, TICKER_RE,
-  upperTicker,
+  oldestCreated, stripNames, rowsOf, failed, freshEnvelope, timeMs, isoSec, anyAnswered, BREADTH_ETFS, VERDICT,
 } from "../../shared/flows-live.js";
-import { FOCUS_METALS, MAG7, FOCUS_FUNDS, FOCUS_MINERS } from "../../shared/flows-focus.js";
+import { FOCUS_STRIP_FALLBACK, focusStripNames as focusNamesOf } from "../../shared/flows-focus.js";
 import { phaseAt, closeMinutes, PHASE_MINUTES, LIVE_CLOCK, easternInstant } from "../../shared/flows-freshness.js";
 import { fakeLiveVendor, fakeBoards } from "./live-fake.mjs";
 
@@ -52,21 +51,10 @@ const rowsOfBoard = (read) => {
 
 const tickerOf = (r) => (r && typeof r.t === "string" ? r.t.trim().toUpperCase() : null);
 
-export const FOCUS_FALLBACK = Object.freeze(Array.from(new Set([
-  ...FOCUS_METALS.flatMap((m) => [m.lead, ...m.tickers]), ...MAG7, ...FOCUS_FUNDS, ...FOCUS_MINERS,
-])));
+export const FOCUS_FALLBACK = FOCUS_STRIP_FALLBACK;
 
 export function focusStripNames(payload, { max = LIVE_BUDGET.stripFocusMax } = {}) {
-  const groups = payload && typeof payload === "object" && Array.isArray(payload.groups) ? payload.groups : [];
-  const out = [];
-  for (const g of groups) {
-    if (!g || typeof g !== "object") continue;
-    for (const t of [g.lead, ...(Array.isArray(g.tickers) ? g.tickers : [])]) {
-      const s = upperTicker(t);
-      if (TICKER_RE.test(s) && !out.includes(s) && out.length < max) out.push(s);
-    }
-  }
-  return out.length ? { names: out, source: "focus" } : { names: FOCUS_FALLBACK.slice(0, max), source: "constants" };
+  return focusNamesOf(payload, max);
 }
 
 export function boardPlan(boards, focusRead = null) {

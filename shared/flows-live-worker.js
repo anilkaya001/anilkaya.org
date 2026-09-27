@@ -1,13 +1,14 @@
 import {
   LIVE_KEYS, LIVE_BUDGET, TIER1_CALLS, TAPE_SPEC, shapeMarketLive, tideSessionState, tideLastAt, checkLiveWrite,
   liveKeyFromParam, shapeTapePrem, shapeTapeGex, assembleTape, nextTapeLeg, pulseWithLive, liveAlertsWin,
-  nightlyFreshMeta, rowsOf, timeMs, anyAnswered, marketFeeds, VERDICT, verdictPatch, parseClosedDays,
+  nightlyFreshMeta, rowsOf, timeMs, anyAnswered, marketFeeds, VERDICT, verdictPatch, parseClosedDays, shapeStrips,
 } from "./flows-live.js";
 import {
   FRESH_CLASSES, PHASE_MINUTES, LIVE_CLOCK, freshHeaders, pendingHeaders, phaseAt, tier1Due, liveDispatchDue,
   liveStalled, nightlyDispatchDue, easternDay, easternInstant, sessionOpen, clockClosed, expectedNightlySession,
 } from "./flows-freshness.js";
 import { LIVE_OIDC, looksLikeJwt, rsaKeys, verifyLiveOidc, claimsBrief } from "./flows-oidc.js";
+import { focusStripNames } from "./flows-focus.js";
 
 export { looksLikeJwt };
 
@@ -57,15 +58,19 @@ export async function upgradeClockColumns(db) {
 }
 
 export const RTH_CRON = "1-59/5 13-21 * * MON-FRI";
+export const FOCUS_CRON = "3-58/5 13-21 * * MON-FRI";
 export const HOUSEKEEPING_CRON = "*/30 * * * *";
 
 export function cronJob(cron, at) {
   if (cron === RTH_CRON) return "rth";
+  if (cron === FOCUS_CRON) return "focus";
   if (cron === HOUSEKEEPING_CRON) return "housekeeping";
   const d = new Date(Number.isFinite(at) ? at : Date.now());
   const weekday = d.getUTCDay() >= 1 && d.getUTCDay() <= 5;
   const hour = d.getUTCHours();
-  return weekday && hour >= 13 && hour <= 21 && d.getUTCMinutes() % 30 !== 0 ? "rth" : "housekeeping";
+  const minute = d.getUTCMinutes();
+  if (!(weekday && hour >= 13 && hour <= 21) || minute % 30 === 0) return "housekeeping";
+  return minute % 5 === 3 ? "focus" : "rth";
 }
 
 export const NIGHTLY_READ_KEYS = Object.freeze(["board:long", "board:short", "board:watch", "meta", "focus"]);
@@ -356,6 +361,71 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
   memoClock({ ...(clock || {}), ...(telemetry ? { tier1At: at } : {}), ...patch }, at);
   out.why = why;
   return out;
+}
+
+export const FOCUS_WRITER = "worker@focus";
+
+export const FOCUS_READ = Object.freeze({ path: "/api/screener/stocks", limit: 500 });
+
+export function focusDue(at, clock = null) {
+  const p = phaseAt(at, clock);
+  return !!p && p.trading && tier1Due(at, clock);
+}
+
+export function focusNames(groupsText) {
+  let groups = null;
+  try { groups = typeof groupsText === "string" ? JSON.parse(groupsText) : null; } catch { groups = null; }
+  return focusStripNames({ groups }, LIVE_BUDGET.stripFocusMax);
+}
+
+export const FOCUS_HELD_SQL = "SELECT session, read_at, (SELECT json_group_array(r.key) FROM json_each(payload, '$.rows') AS r " +
+  "WHERE json_extract(r.value, '$[' || (SELECT f.key FROM json_each(payload, '$.fields') AS f WHERE f.value = 'px') || ']') " +
+  "IS NOT NULL) AS priced FROM flows_live WHERE id = 'live:focus' AND json_valid(payload)";
+
+export async function focusTick(env, at, { fetchVendor, log = console } = {}) {
+  if (!env || !env.DB) return { skipped: "no-db" };
+  if (liveMode(env) === "off") return { skipped: "off" };
+  const read = await env.DB.batch([
+    env.DB.prepare("SELECT * FROM flows_clock WHERE id = 1"),
+    env.DB.prepare("SELECT CASE WHEN json_valid(payload) THEN json_extract(payload, '$.groups') END AS groups " +
+      "FROM flows_payload WHERE id = 'focus'"),
+    env.DB.prepare(FOCUS_HELD_SQL),
+  ]).catch(() => null);
+  const firstRow = (r) => (r && r.results && r.results[0] ? r.results[0] : null);
+  const clock = read ? normalizeClock(firstRow(read[0])) : memoizedClock(at);
+  if (!focusDue(at, clock)) return { due: false, why: "not-due" };
+  if (!env.UW_API_KEY || typeof fetchVendor !== "function") return { due: true, written: false, why: "no-key" };
+  const groups = read && firstRow(read[1]) ? firstRow(read[1]).groups : null;
+  const plan = focusNames(groups);
+  const session = easternDay(at);
+  const raw = await withTimeout(fetchVendor(FOCUS_READ.path, { ticker: plan.names.join(","), limit: FOCUS_READ.limit }),
+    LIVE_BUDGET.tier1TimeoutMs);
+  const payload = shapeStrips(raw, { at, session, names: plan.names, writer: FOCUS_WRITER, key: "live:focus" });
+  const asked = plan.names.length;
+  const px = payload.fields.indexOf("px");
+  const got = plan.names.filter((t) => payload.rows[t] && payload.rows[t][px] !== null);
+  const hit = got.length;
+  const spec = LIVE_KEYS["live:focus"];
+  const held = read ? firstRow(read[2]) : null;
+  let kept = [];
+  if (held && held.session === session && at - Number(held.read_at) < FRESH_CLASSES[spec.klass].liveS * 1000) {
+    try { kept = JSON.parse(held.priced); } catch { kept = []; }
+  }
+  const lost = Array.isArray(kept) ? plan.names.filter((t) => kept.includes(t) && !got.includes(t)) : [];
+  const out = { due: true, source: plan.source, asked, hit, lost: lost.length, status: payload.status };
+  const usable = payload.status === "ok" && hit > 0;
+  const text = usable && !lost.length ? JSON.stringify(payload) : null;
+  const why = !usable ? (payload.status === "ok" ? "none-priced" : payload.reason || payload.status)
+    : text === null ? "partial" : text.length > spec.maxBytes ? "over-cap" : "written";
+  if (why !== "written") {
+    log.error(JSON.stringify({ message: "live:focus not written", why, status: payload.status, asked, hit,
+      lost: lost.slice(0, 10), bytes: text === null ? null : text.length, detail: payload.detail || null }));
+    return { ...out, written: false, why };
+  }
+  await writeLiveStatement(env.DB, "live:focus", text, {
+    readAt: at, session, cadenceS: spec.cadenceS, source: "worker", writer: FOCUS_WRITER,
+  }, at).run();
+  return { ...out, written: true, why, bytes: text.length };
 }
 
 export async function nightlyTick(env, at, { fetchImpl = fetch, log = console } = {}) {

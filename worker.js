@@ -3466,10 +3466,18 @@ export default {
       }));
     }));
 
-    if (FLOWS_LIVE.cronJob(event && event.cron, at) === "rth") {
+    const job = FLOWS_LIVE.cronJob(event && event.cron, at);
+    if (job === "rth") {
       guard("flows rth tick failed", (async () => {
         await ensureFlowsTables(env);
         return FLOWS_LIVE.rthTick(env, at, { fetchVendor: (p, params) => uwFetch(env, p, params) });
+      })());
+      return;
+    }
+    if (job === "focus") {
+      guard("flows focus tick failed", (async () => {
+        await ensureFlowsTables(env);
+        return FLOWS_LIVE.focusTick(env, at, { fetchVendor: (p, params) => uwFetch(env, p, params) });
       })());
       return;
     }

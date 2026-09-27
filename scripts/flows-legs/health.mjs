@@ -2,6 +2,7 @@ import { easternDay, easternClock, easternInstant, closeMinutes, nextWeekdayDay 
 import { timeMs } from "../../shared/flows-live.js";
 
 export const HEALTH = Object.freeze({
+  focusCron: "3-58/5 13-21 * * MON-FRI",
   finalReadMin: 10,
   lastPassMin: 30,
   settleMin: 10,
@@ -43,7 +44,7 @@ const payloadOf = (read) => (read && !read.failed && !read.absent && read.payloa
   ? read.payload : null);
 
 export function healthChecks({ sessionDate, now = Date.now(), clockRead = null, marketRead = null,
-  heartbeatRead = null, edge403 = 0, retrySpentMs = 0 } = {}) {
+  focusRead = null, heartbeatRead = null, edge403 = 0, retrySpentMs = 0 } = {}) {
   const failures = [];
   const notes = [`edge: ${edge403} ingest answer(s) of HTTP 403, ${(retrySpentMs / 1000).toFixed(1)} s of retry budget spent`];
   if (edge403 >= HEALTH.edge403 || retrySpentMs >= HEALTH.retrySpentMs) {
@@ -112,6 +113,18 @@ export function healthChecks({ sessionDate, now = Date.now(), clockRead = null, 
     }
   }
 
+  const focus = payloadOf(focusRead);
+  if (readFailed(focusRead)) failures.push(`HEALTH: live:focus could not be read (${said(focusRead)})`);
+  else if (!focus) {
+    failures.push(`HEALTH: live:focus has never been written (is ${HEALTH.focusCron} registered? wrangler triggers deploy)`);
+  } else {
+    const readAt = timeMs(focus.fresh && focus.fresh.readAt);
+    if (!(readAt >= finalBy)) {
+      failures.push(`HEALTH: the focus cron last wrote live:focus at ${etTime(readAt, sessionDate)}, not by ` +
+        `${etTime(finalBy)} (is ${HEALTH.focusCron} registered? its "live:focus not written" log lines say why a read was kept)`);
+    }
+  }
+
   const beat = payloadOf(heartbeatRead);
   const run = beat && beat.run && typeof beat.run === "object" ? beat.run : null;
   if (readFailed(heartbeatRead)) failures.push(`HEALTH: live:heartbeat could not be read (${said(heartbeatRead)})`);
@@ -144,9 +157,10 @@ export async function runHealthGate({ sessionDate, read, now = () => Date.now(),
       return { payload: null, failed: true, status: 0, detail: error && error.message ? error.message : String(error) };
     }
   };
-  const [clockRead, marketRead, heartbeatRead] = [await safe("clock"), await safe("live:market"),
-    await safe("live:heartbeat")];
-  const verdict = healthChecks({ sessionDate, now: now(), clockRead, marketRead, heartbeatRead, edge403, retrySpentMs });
+  const [clockRead, marketRead, focusRead, heartbeatRead] = [await safe("clock"), await safe("live:market"),
+    await safe("live:focus"), await safe("live:heartbeat")];
+  const verdict = healthChecks({ sessionDate, now: now(), clockRead, marketRead, focusRead, heartbeatRead, edge403,
+    retrySpentMs });
   log(`health gate: ${verdict.applies ? "checked" : "live checks skipped — " + verdict.why}; ` +
     `${verdict.failures.length} failure(s)`);
   for (const n of verdict.notes) log("  " + n);

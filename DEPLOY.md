@@ -319,7 +319,9 @@ it unlocks and what tells you it has lapsed.
    stall, and the nightly at 17:15 ET (again at 18:15 ET if it has not
    landed). Without it Tier 2 depends on GitHub's scheduled starters, which
    delivered about one slot in twenty on 2026-09-23 and 09-24, and the nightly
-   on its own crons (section 10.5h). Put the expiry in a calendar; when it
+   on its own crons (section 10.5h). Home's Metals and Leaders modules do not
+   wait for it: the Worker's focus cron writes `live:focus` itself through the
+   session (section 10.5i). Put the expiry in a calendar; when it
    lapses the nightly turns red with
    `HEALTH: GitHub refused the Worker's dispatch (refused:401): renew GITHUB_DISPATCH_TOKEN`.
    Any other 4xx refusal turns it red too, with its own remedy: `refused:403`
@@ -870,8 +872,11 @@ focus read is read again by ticker, one call, only on the night it is needed.
 `shared/flows-focus.js` is a leaf: the focus constants (`FOCUS_METALS`,
 `MAG7`, `FOCUS_FUNDS`, `FOCUS_MINERS`) and the pure functions that need nothing
 else (`ndx10`, `ndxMembership`, `focusTickers`, `focusGroups`, `focusCloses`).
-It imports nothing, so `shared/flows-live.js` can read the constants for the
-live strips without an import cycle. The payload builder needs the strip
+It imports nothing, so any module can read it without an import cycle. It also
+holds the one strip planner, `focusStripNames` with its `FOCUS_STRIP_FALLBACK`
+roster, which the Actions strip (`scripts/flows-legs/live.mjs`) and the
+Worker's focus tick (`shared/flows-live-worker.js`) both call, so the two ask
+for the same names in the same order. The payload builder needs the strip
 fields from `shared/flows-live.js`, so it lives in the pipeline's legs,
 `scripts/flows-legs/focus.mjs` (`focusRow`, `buildFocusPayload`); the
 universe contract asserts both.
@@ -1488,12 +1493,14 @@ Four guards sit behind the schedule, all in `scripts/flows-pipeline.mjs`:
   `scripts/flows-legs/health.mjs`. On the evening of the session it ranked it
   reads, through the ingest route and with the run's usual retries (so one
   random edge 403 is not a failure), the Worker's `clock` (day, verdict, Tier 1
-  telemetry, last dispatch outcome), `live:market` and `live:heartbeat`, and
-  prints one `HEALTH:` line per failure: a clock that never rolled to the
-  session, a holiday verdict on a day the vendor printed, `tier1_why`
-  `error:<...>` (`error:no-key` names the missing Worker secret), a last tick
-  before the close, `live:market` last written before 15:50 ET (12:50 on an
-  early close), no Tier 2 pass for the session, a last pass that answered no
+  telemetry, last dispatch outcome), `live:market`, `live:focus` and
+  `live:heartbeat`, and prints one `HEALTH:` line per failure: a clock that
+  never rolled to the session, a holiday verdict on a day the vendor printed,
+  `tier1_why` `error:<...>` (`error:no-key` names the missing Worker secret), a
+  last tick before the close, `live:market` last written before 15:50 ET (12:50
+  on an early close), `live:focus` never written (the line names
+  `3-58/5 13-21 * * MON-FRI`, the trigger to register) or last written before
+  15:50 ET, no Tier 2 pass for the session, a last pass that answered no
   vendor call or finished more than 30 minutes before the close, any 4xx
   dispatch refusal from GitHub, and, on every run, 24 or more edge 403s on the
   ingest route or 60 s of retry budget spent. Any failure makes the run exit
@@ -1541,6 +1548,61 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   served for a week. It logs `nightly missing` from 21:00 ET (close + 300
   minutes) when meta is still behind: the scheduled nightly lands about 20:00
   ET, so the old close + 180 fired falsely every weekday evening.
+- **The focus modules run on the Worker's own clock.** `3-58/5 13-21 * * MON-FRI`,
+  the third Worker cron, fires at minutes ending in 3 and 8, between Tier 1's,
+  and writes `live:focus` for Home's Metals and Leaders modules. It is due
+  exactly when Tier 1 is due on a trading day, from the open to ten minutes past
+  the close (13:10 ET on an early close), and never on a weekend, a computed
+  holiday (not even in Tier 1's 09:45 probe window) or a day the tape closed.
+  Each tick reads `flows_clock` and the groups of the nightly `focus` key in one
+  D1 batch (`json_extract`, so the payload's rows and closes never reach the
+  isolate), plans the names with the same `focusStripNames`
+  (`shared/flows-focus.js`) the Actions strip uses (lead first, once each, 40 at
+  most; before the nightly key exists, the 22-name roster), and makes one vendor
+  call: `/api/screener/stocks?ticker=…&limit=500`, the Actions strip's read with
+  the same parameters. Rows come from `stripValues`, so a `live:focus` row is
+  exactly a `live:strips` row, in the `live:strips` envelope under its own key:
+  the session is today's Eastern day, `fresh.readAt` is the cron's scheduled
+  instant and the writer is `worker@focus`. The key is on the market clock
+  (cadence 300 s, live for 11 minutes, fresh for 25) with a 16 KB cap; 22 names
+  are about 4.9 KB and 40 about 8.1 KB. The Worker is its only writer: the
+  ingest refuses it from the Actions credential (`wrong_writer`) and from the
+  nightly token (`nightly_token_scope`). A failed, empty, previous-session or
+  unpriced read, or one over the cap, writes nothing, so the held row keeps its
+  own read time and no value is ever written as zero; the tick logs one
+  `live:focus not written` line with the reason. So does a partial read: one
+  that leaves unpriced a name this tick asked for and the held row of the same
+  session priced, while that row is still live (11 minutes). The same D1 batch
+  lists the held row's priced names in SQL (`json_each`), so the held rows
+  never reach the isolate. Home takes a source for a module only when it has a
+  row for every name, so without this a transient 3-of-22 answer would drop
+  both modules from Live until the next complete tick. A name the held row
+  priced but this tick no longer asks for does not count, so when the nightly
+  `focus` key lands mid-session and the roster changes, a complete read of the
+  new roster is written at once. Once the held row is past its live window a
+  partial read is written: a name the vendor stops returning holds the key
+  back for two ticks at most, never for the rest of the session. `/api/flows/lk?k=focus` serves
+  the key and `/api/flows/now?k=focus` reports it to the Home heartbeat, which
+  re-reads it when its `updatedAt` moves. Home takes, name by name, the newer of
+  the `live:strips` and `live:focus` rows whose session is at least the
+  nightly's, and the module pill reads `Live · h:mm` from the row it shows;
+  otherwise the nightly row and its date chip stand, as before.
+  `tests/flows-live-contract.mjs` times the tick in child processes on the
+  thread CPU clock over a production-size vendor body (22 screener rows carrying
+  all 202 fields the probe recorded on the live screener row, 151,971 bytes of
+  JSON): 3 to 4 ms for the first tick of a cold process (lazy compilation and
+  the body's `JSON.parse` included; the contract holds it under 6 ms) and about
+  1 ms warm, against the 10 ms cap.
+- **Why the focus modules left GitHub Actions.** On Friday 2026-09-25 GitHub
+  delivered three of the eight `flows-live` schedule slots the workflow then
+  carried (`31 13,14` and `3 15-20` UTC), the first at 18:01 UTC against a
+  13:30 UTC open, and from Wednesday to Friday every scheduled run started
+  between 17:50 and 23:12 UTC. Only `GITHUB_DISPATCH_TOKEN` (section 10.0) lets
+  the Worker start Tier 2 itself, and it is not set, so `live:strips` covered
+  the afternoon at best and the focus modules showed the previous night's rows
+  through the morning. `live:focus` needs neither the token nor Actions, only
+  the Worker's `UW_API_KEY`, which Tier 1 already needs. Tier 2 still refreshes
+  `live:strips` whenever it runs, and the page takes whichever read is newer.
 - **Tier 1 fits the Workers Free CPU cap.** Until 2026-09-24 Tier 1 also read the
   0DTE net flow and the SPY and QQQ ETF tides: three 390-row one-minute feeds,
   about 200 KB of JSON a tick. Once the session's rows filled in, a tick needed
@@ -1643,7 +1705,8 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   (the groups of the nightly `focus` payload, which the live role may read;
   before that key exists, the `shared/flows-focus.js` roster: the three metal
   groups, the Mag 7, the metal funds and the miners), then the board names,
-  160 names at most. A full session of `live:strips:series` for 160 names at
+  160 names at most. The Worker's focus tick makes the same call for the focus
+  names alone every five minutes (above), so Home never waits for Tier 2. A full session of `live:strips:series` for 160 names at
   production magnitudes is about 100 KB, so its cap is 112 KB; `live:strips`
   stays at 64 KB (about 29 KB for 160 names).
 - **Tier 2 sustains itself through the session, with no new secret.** The
@@ -1731,24 +1794,44 @@ Out-of-band steps before the first deploy of this layer:
    token's non-secret claims.
 3. `GITHUB_DISPATCH_TOKEN` and the Worker's `UW_API_KEY`: section 10.0, items 1
    and 2.
-4. After deploy, confirm both crons are registered (`wrangler triggers` or the
-   dashboard) and read `live:market` on `/api/flows/lk?k=market` at 09:36 ET.
+4. After deploy, confirm all three crons are registered (`wrangler triggers` or
+   the dashboard) and read `live:market` on `/api/flows/lk?k=market` at 09:36 ET
+   and `live:focus` on `/api/flows/lk?k=focus` at 09:38 ET.
    The tick instants in D1 prove it without dashboard access: `flows_live.read_at`
    for `live:market` is the Tier 1 cron's scheduled time, and only
-   `1-59/5 13-21 * * MON-FRI` produces minutes ending in 1 or 6. On 2026-09-23 the
+   `1-59/5 13-21 * * MON-FRI` produces minutes ending in 1 or 6; for
+   `live:focus` it is the focus cron's, and only `3-58/5 13-21 * * MON-FRI`
+   produces minutes ending in 3 or 8:
+
+   ```bash
+   ./tests/node_modules/.bin/wrangler d1 execute iewt --remote --command \
+     "SELECT id, datetime(read_at/1000,'unixepoch') AS read, writer FROM flows_live WHERE source = 'worker'"
+   ```
+
+   On 2026-09-23 the
    first Workers Builds deploy of this layer ran under the old `*/15 * * * *`
    trigger; by that evening `live:market` was stamped 19:56 and 20:06 UTC, so a
    later production deploy (`npx wrangler deploy`) had registered both crons.
    If a deploy ever leaves stale triggers again, register them with
    `./tests/node_modules/.bin/wrangler triggers deploy` or under the Worker's
-   Settings → Triggers. Until then the handler routes by instant rather than by
-   trigger string (`cronJob` in `shared/flows-live-worker.js`): a stale trigger
-   inside the 13–21 UTC weekday window runs Tier 1 off the half hour and
-   housekeeping on it, so the live layer runs at the stale trigger's cadence
-   instead of not at all.
+   Settings → Triggers. Until then the handler routes an unknown trigger by
+   instant rather than by string (`cronJob` in `shared/flows-live-worker.js`):
+   inside the 13–21 UTC weekday window it runs housekeeping on the half hour,
+   the focus tick at minutes ending in 3 or 8 and Tier 1 at every other minute,
+   so Tier 1 runs at a stale trigger's cadence instead of not at all, and no job
+   ever runs at another's minutes. That fallback does not reach the focus tick.
+   Under the previous two triggers the handler matches both strings exactly, and
+   under the older `*/15 * * * *` every firing lands on a minute ending in 0 or
+   5, so no firing is ever routed to the focus tick. It does not run at all
+   until `3-58/5 13-21 * * MON-FRI` is registered. Home then shows the nightly
+   rows, or `live:strips` when a Tier 2 run lands. The nightly health gate
+   fails that evening with `HEALTH: live:focus has never been written (is
+   3-58/5 13-21 * * MON-FRI registered? wrangler triggers deploy)`, and
+   `tests/flows-live-contract.mjs` proves that no firing of either stale set
+   reaches the focus tick.
 
-`FLOWS_LIVE_MODE = "off"` in `[vars]` is the instant rollback: no Tier 1 read and
-no dispatch; pages fall back to the nightly rows.
+`FLOWS_LIVE_MODE = "off"` in `[vars]` is the instant rollback: no Tier 1 read, no
+focus read and no dispatch; pages fall back to the nightly rows.
 
 ### 10.5j The weekly monitors
 

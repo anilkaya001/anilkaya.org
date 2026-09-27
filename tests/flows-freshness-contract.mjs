@@ -9,7 +9,8 @@ import { nyseHolidays, nyseEarlyCloses, closeUtcMs, etDayOf } from "../shared/fl
 import { briefAge } from "../shared/flows-ask.js";
 import { sessionsBetween } from "../shared/flows-cross.js";
 import { nextSessionAfter } from "../shared/flows-variation.js";
-import { serveNow } from "../shared/flows-live-worker.js";
+import { serveNow, RTH_CRON, FOCUS_CRON } from "../shared/flows-live-worker.js";
+import { LIVE_KEYS } from "../shared/flows-live.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -253,6 +254,15 @@ const NYSE_PUBLISHED = Object.freeze({
   eq(REFRESH_CADENCE_MINUTES, Number(rth[2]),
     "the cadence pages quote matches the wrangler.toml market-hours cron step — a page " +
     "promising 5-minute freshness against a 15-minute clock would be lying politely");
+  const focus = /"(\d+)-(\d+)\/(\d+) 13-21 \* \* MON-FRI"/g;
+  const clocks = [...crons.matchAll(focus)].map((m) => m.slice(1).map(Number));
+  const [start, end, step] = clocks.find(([a]) => a !== Number(rth[1])) || [];
+  ok(crons.includes(`"${RTH_CRON}"`) && crons.includes(`"${FOCUS_CRON}"`) && FOCUS_CRON === `${start}-${end}/${step} 13-21 * * MON-FRI`,
+    `wrangler.toml carries the focus clock beside Tier 1's (${FOCUS_CRON})`);
+  eq(step * 60, LIVE_KEYS["live:focus"].cadenceS,
+    "and live:focus promises the cadence its cron keeps, so its Live pill lapses when a tick is missed, not before");
+  ok(start % step !== Number(rth[1]) % step && end - start > 60 - 2 * step,
+    `the focus ticks (minute ${start} of every ${step}) fall between Tier 1's (minute ${rth[1]}), on every step of the hour`);
 }
 
 {
