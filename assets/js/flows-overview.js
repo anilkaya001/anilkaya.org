@@ -1736,9 +1736,11 @@
       if (v.chg === null && v.px !== null && v.prev) v.chg = v.px / v.prev - 1;
       const b = se && se.base ? isNum(se.base[t]) : null;
       const col = se && se.cols && se.cols.px ? se.cols.px[t] : null;
-      if (b !== null && src === "live" && se.session === day && Array.isArray(col)) {
+      const d = s && Array.isArray(se && se.t) ? readOf(s) - Date.parse(se.t.at(-1)) : 0;
+      if (b !== null && src === "live" && se.session === day && Array.isArray(col) && !(d < 0)) {
         const k = isNum(se.scale && se.scale.px) ?? 0.01;
         v.spark = col.map((x) => (isNum(x) === null ? null : b + x * k));
+        if (d >= 1e3 && v.px !== null) v.spark.push(v.px);
         v.intraday = true;
       }
       if (!v.spark || counted(v.spark) < 2) {
