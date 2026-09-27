@@ -1568,7 +1568,18 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   nightly token (`nightly_token_scope`). A failed, empty, previous-session or
   unpriced read, or one over the cap, writes nothing, so the held row keeps its
   own read time and no value is ever written as zero; the tick logs one
-  `live:focus not written` line with the reason. `/api/flows/lk?k=focus` serves
+  `live:focus not written` line with the reason. So does a partial read: one
+  that leaves unpriced a name this tick asked for and the held row of the same
+  session priced, while that row is still live (11 minutes). The same D1 batch
+  lists the held row's priced names in SQL (`json_each`), so the held rows
+  never reach the isolate. Home takes a source for a module only when it has a
+  row for every name, so without this a transient 3-of-22 answer would drop
+  both modules from Live until the next complete tick. A name the held row
+  priced but this tick no longer asks for does not count, so when the nightly
+  `focus` key lands mid-session and the roster changes, a complete read of the
+  new roster is written at once. Once the held row is past its live window a
+  partial read is written: a name the vendor stops returning holds the key
+  back for two ticks at most, never for the rest of the session. `/api/flows/lk?k=focus` serves
   the key and `/api/flows/now?k=focus` reports it to the Home heartbeat, which
   re-reads it when its `updatedAt` moves. Home takes, name by name, the newer of
   the `live:strips` and `live:focus` rows whose session is at least the

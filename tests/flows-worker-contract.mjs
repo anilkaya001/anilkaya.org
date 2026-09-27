@@ -1558,7 +1558,8 @@ try {
     const et = (iso) => Date.parse(iso);
     const marketNow = { value: et("2026-09-23T10:06:00-04:00") };
     const faults = new Set();
-    const vendor = await startStubVendor({ marketSession: "2026-09-23", marketNow, tapeSession: "2026-09-22", faults });
+    const drop = new Set();
+    const vendor = await startStubVendor({ marketSession: "2026-09-23", marketNow, tapeSession: "2026-09-22", faults, drop });
     const issuer = await oidcIssuer();
     const github = await startStubGithub({ jwks: issuer.jwks });
     const LIVE_TOKEN = "test-live-token-abcdefghijklmnopqrstuv";
@@ -1728,7 +1729,9 @@ try {
       eq(screens()[1].params.ticker, "GLD,GDX,AVGO", "and the next focus tick asks for its groups' names, lead first, once each");
       const heldFocus = await (await lkFocus()).json();
       ok(heldFocus.fresh.readAt === new Date(et("2026-09-23T10:13:00-04:00")).toISOString() &&
-         Object.keys(heldFocus.rows).sort().join() === "AVGO,GDX,GLD", "and writes exactly those rows");
+         Object.keys(heldFocus.rows).sort().join() === "AVGO,GDX,GLD",
+      "and writes exactly those rows five minutes after a read of the whole constants' roster: a roster that changed " +
+        "mid-session is not a partial read, because only a name the held row priced and this tick asked for counts");
       faults.add("/api/screener/stocks");
       eq(await tick(FOCUS, "2026-09-23T10:18:00-04:00"), 200, "a focus tick whose vendor read fails still completes");
       faults.delete("/api/screener/stocks");
@@ -1747,6 +1750,18 @@ try {
         "with its updatedAt, so an open page re-reads it when it moves");
       await tick(FOCUS, "2026-09-26T10:08:00-04:00");
       eq(screens().length, 3, "a Saturday focus tick reads nothing");
+      drop.add("GDX").add("AVGO");
+      eq(await tick(FOCUS, "2026-09-23T10:23:00-04:00"), 200, "a focus tick whose screener answer prices GLD alone completes");
+      eq(screens().length, 4, "after its one call");
+      eq((await (await lkFocus()).json()).fresh.readAt, heldFocus.fresh.readAt,
+        "A PARTIAL READ NEVER REPLACES A FULLER LIVE ROW: the 10:13 read of three names, ten minutes old, stands, " +
+          "so the held row's priced names were listed by D1's own SQL (json_each) in the tick's batch");
+      await tick(FOCUS, "2026-09-23T10:28:00-04:00");
+      const aged = await (await lkFocus()).json();
+      ok(aged.fresh.readAt === new Date(et("2026-09-23T10:28:00-04:00")).toISOString() &&
+         Object.keys(aged.rows).join() === "GLD",
+      "and once that row is past its 11-minute live window, the fresher partial read is written");
+      drop.clear();
 
       eq(github.dispatches.length, 0, "10:06 is not a dispatch tick");
       marketNow.value = et("2026-09-23T10:16:00-04:00");
@@ -1906,7 +1921,7 @@ try {
     }
   }
 
-  console.log(`✓ flows-worker: ${checks} assertions — public login, no-store gating, structural bypass resistance, bidirectional audience isolation, legacy learner tolerance, uniform failures, full sign-in round trip, and the two market-wide keys this wave added served on their own gated routes: the sector option lean beside — never merged into — the sector momentum it shares eleven tickers with, and the news tape whose absent per-ticker form is asserted to stay absent. Plus the retirement of the card dialog: the four board routes serve neither it nor the 151k panel library it was the only caller of, and their own ?t= addresses — pushed into history on every open the modal ever had — are 302'd to /flows/ticker/ with the surface they came from, from a Location that is a pure function of the request URL and reads no payload and no session. Plus the live layer: one writer per key held by credential, table and trigger, live:focus from the Worker's own focus cron in one screener call that a failed read never overwrites, Tier 1 in exactly two vendor calls with its outcome in D1 on a clock table that upgrades itself, read-time overlays that leave the nightly rows byte-identical, the dispatch clock with its in-flight guard and one-shot watchdog, a tape-derived holiday, the tape's single flight, and quote lives that follow the market phase`);
+  console.log(`✓ flows-worker: ${checks} assertions — public login, no-store gating, structural bypass resistance, bidirectional audience isolation, legacy learner tolerance, uniform failures, full sign-in round trip, and the two market-wide keys this wave added served on their own gated routes: the sector option lean beside — never merged into — the sector momentum it shares eleven tickers with, and the news tape whose absent per-ticker form is asserted to stay absent. Plus the retirement of the card dialog: the four board routes serve neither it nor the 151k panel library it was the only caller of, and their own ?t= addresses — pushed into history on every open the modal ever had — are 302'd to /flows/ticker/ with the surface they came from, from a Location that is a pure function of the request URL and reads no payload and no session. Plus the live layer: one writer per key held by credential, table and trigger, live:focus from the Worker's own focus cron in one screener call that a failed read never overwrites, nor a partial one while the fuller row is live, Tier 1 in exactly two vendor calls with its outcome in D1 on a clock table that upgrades itself, read-time overlays that leave the nightly rows byte-identical, the dispatch clock with its in-flight guard and one-shot watchdog, a tape-derived holiday, the tape's single flight, and quote lives that follow the market phase`);
 } finally {
   await server.stop();
 }

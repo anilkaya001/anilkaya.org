@@ -9,7 +9,8 @@ const listen = (server) => new Promise((resolve) => server.listen(0, "127.0.0.1"
 
 const TAPE_ROUTE = /^\/api\/stock\/[^/]+\/(net-prem-ticks|spot-exposures)$/;
 
-export async function startStubVendor({ marketSession, marketNow, tapeSession, tapeNow = null, faults = new Set() } = {}) {
+export async function startStubVendor({ marketSession, marketNow, tapeSession, tapeNow = null, faults = new Set(),
+  drop = new Set() } = {}) {
   const hits = new Map();
   const asked = [];
   const market = fakeLiveVendor({ session: marketSession, now: () => marketNow.value });
@@ -34,7 +35,11 @@ export async function startStubVendor({ marketSession, marketNow, tapeSession, t
     }
     try {
       const pick = TAPE_ROUTE.test(path) || (path === "/api/option-trades/flow-alerts" && params.ticker_symbol) ? tape : market;
-      send(200, await pick(path, params, { envelope: true }));
+      const body = await pick(path, params, { envelope: true });
+      if (path === "/api/screener/stocks" && drop.size && body && Array.isArray(body.data)) {
+        body.data = body.data.filter((r) => !drop.has(r && r.ticker));
+      }
+      send(200, body);
     } catch (error) {
       send(404, { error: String(error && error.message) });
     }
@@ -209,7 +214,7 @@ export function productionScreenerBody(tickers, { session, readAt }) {
   }) };
 }
 
-export function focusDb({ groups = null, clock = null } = {}) {
+export function focusDb({ groups = null, clock = null, held = null } = {}) {
   const statements = [];
   const st = (sql) => {
     const s = { sql, args: [], bind(...a) { s.args = a; return s; }, first: async () => null,
@@ -219,6 +224,7 @@ export function focusDb({ groups = null, clock = null } = {}) {
   const answer = (s) => {
     if (/FROM flows_clock/.test(s.sql)) return { results: clock ? [clock] : [] };
     if (/FROM flows_payload WHERE id = 'focus'/.test(s.sql)) return { results: groups ? [{ groups: JSON.stringify(groups) }] : [] };
+    if (/FROM flows_live WHERE id = 'live:focus'/.test(s.sql)) return { results: held ? [held] : [] };
     return { results: [] };
   };
   return { statements, prepare: st, batch: async (list) => list.map(answer) };
@@ -233,14 +239,16 @@ export async function focusBudget({ windows = 16, perWindow = 5, coldOnly = fals
   const body = JSON.stringify(productionScreenerBody(names, { session, readAt: at - 20000 }));
   const { clock, cpu } = cpuClock();
   const fetchVendor = async () => JSON.parse(body);
-  const env = { DB: focusDb({ groups }), UW_API_KEY: "k" };
+  const held = { session, read_at: at - 300000, priced: JSON.stringify(names) };
+  const env = { DB: focusDb({ groups, held }), UW_API_KEY: "k" };
   const tick = () => W.focusTick(env, at, { fetchVendor, log: { error() {} } });
   const w0 = process.hrtime.bigint();
   const c0 = cpu();
   const first = await tick();
   const cold = cpu() - c0;
   const coldWall = Number(process.hrtime.bigint() - w0) / 1e6;
-  const shape = { written: first.written === true, hit: first.hit, asked: first.asked, payloadBytes: first.bytes ?? null };
+  const shape = { written: first.written === true, hit: first.hit, asked: first.asked, lost: first.lost,
+    payloadBytes: first.bytes ?? null };
   if (coldOnly) return { clock, cold, coldWall, ...shape };
   for (let i = 0; i < 40; i++) await tick();
   const means = [];

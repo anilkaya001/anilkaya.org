@@ -2113,7 +2113,51 @@ const T = (iso) => Date.parse(iso);
     ok(logs.length === 1 && logs[0].message === "live:focus not written" && logs[0].why === why,
       `and logs one JSON error line naming why (${label})`);
   }
-  const forty = productionScreenerBody(Array.from({ length: L.LIVE_BUDGET.stripFocusMax }, (_, i) => "F" + i),
+  {
+    const full = { session: S, read_at: at("10:18"), priced: JSON.stringify(names) };
+    const three = (q) => productionScreenerBody(String(q.ticker).split(",").slice(0, 3), { session: S, readAt: at("10:22") });
+    const unpricedOne = (q) => { const b = good(q); b.data[5].close = null; return b; };
+    const tickWith = async (held, t, make = three) => {
+      const hdb = focusDb({ groups, held });
+      logs.length = 0;
+      const res = await W.focusTick(env(hdb), t, { fetchVendor: vendor(make), log });
+      return { ...res, wrote: writes(hdb).length, said: logs.map((l) => l.why) };
+    };
+    const partial = await tickWith(full, at("10:23"));
+    ok(partial.why === "partial" && partial.written === false && partial.wrote === 0 && partial.hit === 3 &&
+       partial.lost === 19 && partial.said.join() === "partial" && logs[0].lost.join() === names.slice(3, 13).join(),
+    "A PARTIAL READ NEVER REPLACES A FULLER HELD ROW: 3 of 22 names priced while the 10:18 read of all 22 is still " +
+      "live writes nothing, so Home keeps showing every name live, and logs one line naming why and the first names lost");
+    const lost = await tickWith(full, at("10:23"), unpricedOne);
+    ok(lost.why === "partial" && lost.wrote === 0 && lost.hit === 21 && lost.lost === 1, "and so is a read that " +
+      "returns every name but lost one name's price, which the held row had");
+    const still = await tickWith(full, at("10:28"));
+    const aged = await tickWith(full, at("10:33"));
+    ok(still.why === "partial" && aged.written === true && aged.wrote === 1 && aged.lost === 0,
+      "ONCE THE HELD ROW LEAVES ITS 11-MINUTE LIVE WINDOW the partial read is written: a name the vendor stops " +
+        "returning holds the key back for two ticks at most (10:23 and 10:28), never for the rest of the session");
+    const yesterday = await tickWith({ ...full, session: "2026-09-22" }, at("10:23"));
+    ok(yesterday.written === true && yesterday.wrote === 1, "a held row of an earlier session never holds back today's reads");
+    const level = await tickWith({ ...full, priced: JSON.stringify(names.slice(0, 3)) }, at("10:23"));
+    const whole = await tickWith(full, at("10:23"), good);
+    ok(level.written && whole.written && whole.hit === 22 && whole.said.length === 0,
+      "while a read that prices every name the held row priced, or a complete one after a complete one, is written");
+    const before = [...new Set([...FOCUS_FALLBACK, ...names, "SPY", "QQQ"])];
+    const shrunk = await tickWith({ ...full, priced: JSON.stringify(before) }, at("10:23"), good);
+    ok(before.length > names.length && shrunk.written && shrunk.lost === 0 && shrunk.hit === 22,
+      "A ROSTER THAT CHANGED MID-SESSION IS NOT A PARTIAL READ: when the nightly focus key lands and the names asked " +
+        "change, only a name the held row priced AND this tick asked for counts as lost, so a complete read of the new " +
+        "roster is written at once");
+    const unread = await tickWith(null, at("10:23"));
+    const garbled = await tickWith({ ...full, priced: "[not json" }, at("10:23"));
+    ok(unread.written && unread.lost === 0 && garbled.written, "and with no held row, or an unreadable list, the " +
+      "first read of any size is written");
+  }
+  ok(/SELECT session, read_at, \(SELECT json_group_array\(r\.key\) FROM json_each\(payload, '\$\.rows'\)/.test(W.FOCUS_HELD_SQL) &&
+     /f\.value = 'px'/.test(W.FOCUS_HELD_SQL) && /id = 'live:focus' AND json_valid\(payload\)/.test(W.FOCUS_HELD_SQL),
+  "the held row's priced names are listed in D1, in the same batch as the clock and the groups, with px found by the " +
+    "held payload's own field list, so the held rows never reach the isolate");
+  const forty =productionScreenerBody(Array.from({ length: L.LIVE_BUDGET.stripFocusMax }, (_, i) => "F" + i),
     { session: S, readAt: at("10:07") });
   const fortyBytes = JSON.stringify(L.shapeStrips(forty, { at: at("10:08"), session: S, key: "live:focus" })).length;
   ok(fortyBytes <= L.LIVE_KEYS["live:focus"].maxBytes && fortyBytes > 0.4 * L.LIVE_KEYS["live:focus"].maxBytes,
@@ -2128,8 +2172,9 @@ const T = (iso) => Date.parse(iso);
     return JSON.parse(out.trim().split("\n").pop());
   };
   const colds = Array.from({ length: 10 }, () => child(["cold"]));
-  ok(colds.every((c) => c.written && c.hit === 22 && c.asked === 22),
-    "the budget child's cold focus ticks each wrote all 22 focus names");
+  ok(colds.every((c) => c.written && c.hit === 22 && c.asked === 22 && c.lost === 0),
+    "the budget child's cold focus ticks each wrote all 22 focus names, over a held row of the same 22 read five " +
+      "minutes earlier, so every tick runs the partial-read guard as every tick after a session's first does");
   const coldCpu = colds.reduce((a, c) => a + c.cold, 0) / colds.length;
   const walls = colds.map((c) => c.coldWall).sort((a, b) => a - b);
   const coldWall = (walls[4] + walls[5]) / 2;
@@ -2161,7 +2206,7 @@ console.log(`✓ flows-live: ${checks} assertions — one threshold table in cod
   `feeds under the 10 ms CPU cap cold and warm, with D1 telemetry that names every tick's outcome; a holiday verdict ` +
   `that is provisional until two probes fifteen minutes apart agree, re-probed until 11:00, with the closed days kept; ` +
   `the focus names read ahead of the boards in the one strip call; live:focus from the Worker's own third cron, one ` +
-  `screener call inside the session window, rows identical to the strip's, never a failed or empty read, under 6 ms ` +
+  `screener call inside the session window, rows identical to the strip's, never a failed or empty read nor a partial one over a fuller live row, under 6 ms ` +
   `of CPU cold over a production-size body; the nightly health gate and the live job's exit ` +
   `rule; the self-sustaining ` +
   `Tier 2 session loop, its budget and its chain dispatch; and a client helper that only compares clocks`);
