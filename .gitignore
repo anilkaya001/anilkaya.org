@@ -5,6 +5,7 @@ node_modules/
 .DS_Store
 
 _*
+!_headers
 !articles/_template/
 !articles/_template/**
 tests/*_tmp.mjs
