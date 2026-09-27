@@ -3287,6 +3287,41 @@ try {
     await fp.unroute("**/api/flows/lk?k=strips");
     await fp.unroute("**/api/flows/lk?k=strips:series");
 
+    const ALL = GROUPS.flatMap((g) => g.tickers).filter((t, i, a) => a.indexOf(t) === i && FOCUS_FIXTURE.rows[t]);
+    const FOCUS_V = { ...LIVE_V, GLD: vend("GLD", 397, 392.88, 1.4e6, -2e5, 6e7, 3e7, 0.22) };
+    const liveFocus = (session, readAt, state) => (route) => route.fulfill({ status: 200,
+      headers: { "Content-Type": "application/json", "X-Fresh-State": state },
+      body: JSON.stringify({ v: 1, key: "live:focus", status: "ok", session, fresh: { v: 1, readAt, cadenceS: 300, source: "worker", session },
+        fields: STRIP_NAMES, rows: Object.fromEntries(ALL.map((t) => [t, stripValues(FOCUS_V[t])])) }) });
+    const nyClock = (iso) => fp.evaluate((x) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric",
+      minute: "2-digit" }).format(new Date(x)).replace(/\s/g, ""), iso);
+    const bare = (p) => p.text.replace(/\s/g, "");
+    const t1 = new Date(Date.now() - 7 * 60000).toISOString();
+    await fp.route("**/api/flows/lk?k=focus", liveFocus(LIVE_DAY, t0, "live"));
+    const worker = await focusNow();
+    deep([worker.metals[0].px, worker.leaders[0][1]], ["397.00", "336.00"],
+      "WITHOUT ANY ACTIONS RUN the Worker's live:focus takes both modules: the fund's price and every leader's row");
+    deep(worker.src, ["live", "live"], "every row in them is a live row");
+    deep(worker.pills.map(bare), Array(2).fill("Live·" + await nyClock(t0)),
+      "and both modules wear a Live pill with the Worker's read time");
+    await fp.route("**/api/flows/lk?k=strips", liveStrips(LIVE_DAY, t1, "live"));
+    const newer = await focusNow();
+    eq(newer.metals[0].px, "397.00", "A live:focus ROW FRESHER THAN THE STRIP drives the tile value");
+    eq(bare(newer.pills[0]), "Live·" + await nyClock(t0), "and the pill reads the time of the row it shows");
+    await fp.route("**/api/flows/lk?k=focus", liveFocus(LIVE_DAY, t1, "live"));
+    await fp.route("**/api/flows/lk?k=strips", liveStrips(LIVE_DAY, t0, "live"));
+    const older = await focusNow();
+    eq(older.metals[0].px, "395.00", "while an older live:focus row yields to the newer strip");
+    eq(bare(older.pills[0]), "Live·" + await nyClock(t0), "whose read time the pill then shows");
+    await fp.unroute("**/api/flows/lk?k=strips");
+    await fp.route("**/api/flows/lk?k=focus", liveFocus("2026-08-21", t0, "live"));
+    const past = await focusNow();
+    ok(past.metals[0].px === "391.70" && past.src.join() === "nightly,nightly" && past.pills.every((p) => p.text === "Aug 24"),
+      "a live:focus of an older session never replaces the nightly record, nor puts a Live pill over it");
+    await fp.route("**/api/flows/lk?k=focus", liveFocus(SESSION, SESSION + "T17:50:00Z", "closed"));
+    eq((await focusNow()).metals[0].px, "391.70", "and a mid-session read of the nightly's own session yields to the nightly");
+    await fp.unroute("**/api/flows/lk?k=focus");
+
     for (const width of [320, 390, 768]) {
       await fp.setViewportSize({ width, height: 900 });
       await fp.waitForTimeout(250);
@@ -3354,7 +3389,8 @@ try {
     `dash, caveats kept apart from method, a headline tape whose fetch age leads its ` +
     `disclosure and whose vendor strings stay characters, gold, silver and copper each led by ` +
     `its fund with its related names beneath, the Mag 7 and the NDX 10 on one switch the address ` +
-    `and the viewer remember, a live read taking a module only when it is the newer read of every ` +
+    `and the viewer remember, a live read (the Actions strip or the Worker's live:focus, whichever read each name ` +
+    `last) taking a module only when it is the newer read of every ` +
     `name in it so no Live pill sits over a nightly row, date chips that keep keyboard focus through ` +
     `every heartbeat, a focus key that arrives in an open page, every figure a ` +
     `link to its dossier and an em dash where the vendor said nothing, and no visible run of prose longer ` +
