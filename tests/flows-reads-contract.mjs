@@ -105,6 +105,10 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
      "not once each (the investigation counted 17 redundant batches per cold home load)");
   eq(f.count(PRAGMA_RE), 1, "and the clock-column PRAGMA of upgradeClockColumns once");
   ok(!f.trips.some((t) => t.sqls.some((s) => /^ALTER TABLE flows_clock/.test(s))), "with no ALTER on a table that already has every column");
+  eq(f.trips.filter((t) => t.kind === "first" && /^SELECT \* FROM flows_clock/.test(t.sqls[0])).length, 1,
+     "SINGLE-FLIGHT CLOCK: the six routes that read the clock on their own share one cold miss (eight reads before), " +
+     "while the two overlay routes carry it inside their own batch");
+  eq(f.trips.length, 20, "twenty trips for the seventeen requests: one schema batch, one PRAGMA, one clock read and seventeen reads");
   const before = f.trips.length;
   await get("/api/flows/meta");
   eq(f.count(SCHEMA_RE, before), 0, "once ready, a later request runs no schema statement");

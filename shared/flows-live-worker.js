@@ -132,11 +132,15 @@ export function clockDue(now = Date.now()) {
   return !(clockMemo.clock !== undefined && now - clockMemo.at < CLOCK_MEMO_MS && clockMemo.at > 0);
 }
 
+let clockFlight = null;
+
 export async function cachedClock(env, now = Date.now()) {
   if (!clockDue(now)) return clockMemo.clock;
-  const clock = await readClock(env && env.DB);
-  memoClock(clock, now);
-  return clock;
+  if (!clockFlight) {
+    clockFlight = readClock(env && env.DB).then((clock) => { memoClock(clock, now); return clock; })
+      .finally(() => { clockFlight = null; });
+  }
+  return clockFlight;
 }
 
 export function clockPatchStatement(db, patch, now) {
