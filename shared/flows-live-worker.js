@@ -9,6 +9,7 @@ import {
 } from "./flows-freshness.js";
 import { LIVE_OIDC, looksLikeJwt, rsaKeys, verifyLiveOidc, claimsBrief } from "./flows-oidc.js";
 import { focusStripNames } from "./flows-focus.js";
+import { readLabActiveAt } from "./lab-sign-in.js";
 
 export { looksLikeJwt };
 
@@ -631,8 +632,12 @@ export function ingestClockView(clock) {
     dispatchWhy: typeof clock.dispatchWhy === "string" ? clock.dispatchWhy : null } : null;
 }
 
-export async function serveIngestClock(env, { json }) {
-  return json({ key: "clock", clock: ingestClockView(await readClock(env && env.DB)) });
+export async function serveIngestClock(env, { json, lab = false }) {
+  const db = env && env.DB;
+  const [clock, labActiveAt] = await Promise.all([readClock(db), lab ? readLabActiveAt(db) : null]);
+  const body = { key: "clock", clock: ingestClockView(clock) };
+  if (lab) body.labActiveAt = labActiveAt;
+  return json(body);
 }
 
 export async function serveNow(env, url, now, { json, HttpError, quote }) {

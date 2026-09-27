@@ -16,7 +16,10 @@ import {
   readHeldAlerts, boardPlan, liveWindow, runLive, runLiveLoop, chainDispatch, nextSlot, LIVE_LOOP, readLiveClock,
   sessionClock, liveRunVerdict, passOutcome, focusStripNames, FOCUS_FALLBACK,
 } from "../scripts/flows-legs/live.mjs";
-import { healthChecks, runHealthGate, HEALTH } from "../scripts/flows-legs/health.mjs";
+import {
+  healthChecks, runHealthGate, refusalOf, refusalTally, tallyRefusal, tallyAnswer, HEALTH, LAB_SIGN_IN, SIGN_IN_ADVICE,
+} from "../scripts/flows-legs/health.mjs";
+import * as LAB from "../shared/lab-sign-in.js";
 import {
   shapeNews, liveCredential, liveCredentialSource, LIVE_BEARER_MARGIN_MS, resetPublishRetryBudget, intradayRefusal,
 } from "../scripts/flows-pipeline.mjs";
@@ -1969,10 +1972,10 @@ const cronMinutes = (cron) => {
       "and the ingest clock key, behind the pipeline's credential, adds the Tier 1 telemetry and the last dispatch " +
         "outcome, which the nightly health gate reads");
     const liveSrc = read("shared/flows-live-worker.js");
-    ok(/json\(\{ key: "clock", clock: ingestClockView\(/.test(liveSrc) && /\n    clock: clockView\(clock\),\n/.test(liveSrc),
+    ok(/const body = \{ key: "clock", clock: ingestClockView\(clock\) \};/.test(liveSrc) && /\n    clock: clockView\(clock\),\n/.test(liveSrc),
       "serveIngestClock serves the operations view and serveNow the public one");
     const ingestSrc = read("worker.js");
-    ok(/if \(key === "clock"\) \{\s*requireMethod\(request, \["GET"\]\);\s*await ensureFlowsTables\(env\);\s*return FLOWS_LIVE\.serveIngestClock\(env, \{ json \}\);/
+    ok(/if \(key === "clock"\) \{\s*requireMethod\(request, \["GET"\]\);\s*await ensureFlowsTables\(env\);\s*return FLOWS_LIVE\.serveIngestClock\(env, \{ json, lab: tokenKind === "nightly" \}\);/
       .test(ingestSrc) && ingestSrc.indexOf('if (key === "clock")') > ingestSrc.indexOf('if (!tokenKind) throw new HttpError(401'),
     "the ingest route serves the clock to a verified credential only, and to GET only");
     eq(resetPublishRetryBudget(), 0, "the publish retry budget can be reset, and a fresh process has spent none of it");
@@ -2237,9 +2240,196 @@ const cronMinutes = (cron) => {
   deep(["no-token", "sent", "unreachable"].map((w) => fails({ clockRead: clockWith({ dispatchWhy: w }) }).length), [0, 0, 0],
     "while no token, a sent dispatch or one unreachable blip is not a token failure");
   deep(fails({ edge403: 30 }), ["HEALTH: the edge answered 30 ingest request(s) with HTTP 403 and retries spent 6 s of the " +
-    "90 s budget: add the WAF skip rule for /api/flows/ingest (DEPLOY.md 10.0)"], "and an edge refusing ingest more than twice the worst night");
+    "90 s budget: add the WAF skip rule for /api/flows/ingest (DEPLOY.md 10.0 item 3)"], "and an edge refusing ingest more than twice the worst night");
   deep(fails({ clockRead: { payload: null, failed: true, status: 403 } }), ["HEALTH: the Worker's clock could not be read (HTTP 403)"],
     "an unreadable clock is itself a failure");
+  {
+    const answer = async (headers, body) => {
+      const res = new Response(body, { status: 403, headers });
+      return refusalOf({ headers: res.headers, text: await res.text() });
+    };
+    const CHALLENGE_PAGE = "<!DOCTYPE html><html lang=\"en-US\"><head><title>Just a moment...</title></head><body>" +
+      "<script>(function(){window._cf_chl_opt={cvId: '3',cZone: 'anilkaya.org',cType: 'managed'};}());</script></body></html>";
+    const BLOCK_PAGE = "<!DOCTYPE html><title>Attention Required! | Cloudflare</title><div id=\"cf-error-details\">" +
+      "<h1>Sorry, you have been blocked</h1><span class=\"cf-error-code\">1010</span></div>";
+    const WORKER_403 = JSON.stringify({ error: { code: "nightly_token_scope", message: "The nightly token cannot write live:* keys" } });
+    const kinds = {
+      challenge: await answer({ "cf-mitigated": "challenge", server: "cloudflare", "cf-ray": "8c9d0e1f2a3b4c5d-IAD",
+        "content-type": "text/html; charset=UTF-8" }, CHALLENGE_PAGE),
+      pageOnly: await answer({ server: "cloudflare", "cf-ray": "8c9d0e1f2a3b4c5e-IAD", "content-type": "text/html" }, CHALLENGE_PAGE),
+      waf: await answer({ server: "cloudflare", "cf-ray": "8c9d0e1f2a3b4c60-ORD", "content-type": "text/plain; charset=UTF-8" },
+        "error code: 1020"),
+      bic: await answer({ server: "cloudflare", "cf-ray": "8c9d0e1f2a3b4c61-DFW", "content-type": "text/html" }, BLOCK_PAGE),
+      banned: await answer({ server: "cloudflare", "cf-ray": "8c9d0e1f2a3b4c62-SEA" }, "error code: 1006"),
+      mitigatedBlock: await answer({ "cf-mitigated": "block", server: "cloudflare", "cf-ray": "8c9d0e1f2a3b4c63-IAD" }, ""),
+      worker: await answer({ server: "cloudflare", "cf-ray": "8c9d0e1f2a3b4c64-IAD", "content-type": "application/json" }, WORKER_403),
+      workerShapedChallenge: await answer({ "cf-mitigated": "challenge", server: "cloudflare", "cf-ray": "8c9d0e1f2a3b4c65-IAD",
+        "content-type": "application/json" }, WORKER_403),
+      bare: await answer({ server: "cloudflare", "cf-ray": "8c9d0e1f2a3b4c66-SJC", "content-type": "application/json" }, "{}"),
+      proxy: await answer({ server: "squid/5.9", "content-type": "text/html" }, "<h1>Forbidden</h1>"),
+      hostile: await answer({ server: "::add-mask::x", "cf-ray": "::set-env name=A::b", "cf-mitigated": "::warning::" }, ""),
+    };
+    deep(Object.fromEntries(Object.entries(kinds).map(([k, v]) => [k, [v.kind, v.code]])), {
+      challenge: ["challenge", null], pageOnly: ["challenge", null], waf: ["block", "1020"], bic: ["block", "1010"],
+      banned: ["block", "1006"], mitigatedBlock: ["block", null], worker: ["worker", "nightly_token_scope"],
+      workerShapedChallenge: ["challenge", null], bare: ["unmarked", null], proxy: ["unmarked", null], hostile: ["block", null],
+    },
+    "EDGE 403s BY KIND, read from the answer itself since nobody can see Security Events: cf-mitigated: challenge or a " +
+      "challenge page is a challenge; a Cloudflare error code (1020 a WAF rule, 1010 Browser Integrity Check, 1006 an " +
+      "IP ban) or another cf-mitigated value is a block; the Worker's own JSON error is the Worker's, never the edge's, " +
+      "unless Cloudflare marked the answer; a 403 with neither is unmarked");
+    deep([kinds.challenge.ray, kinds.challenge.server, kinds.challenge.mitigated, kinds.challenge.type, kinds.proxy.ray,
+      kinds.proxy.server], ["8c9d0e1f2a3b4c5d-IAD", "cloudflare", "challenge", "text/html", null, "squid/5.9"],
+    "and it keeps what identifies the blocker: cf-mitigated, server, cf-ray and the content type");
+    ok(!/::/.test(JSON.stringify(kinds.hostile)) && kinds.hostile.ray === "set-envnameAb",
+      "every header it keeps is cut to a safe alphabet, so a hostile answer cannot smuggle a workflow command into the log");
+
+    const tally = refusalTally();
+    for (let i = 0; i < 20; i++) tallyRefusal(tally, i % 2 ? kinds.challenge : { ...kinds.challenge, ray: `8c9d0e1f2a3b${i}-IAD` });
+    tallyRefusal(tally, kinds.waf);
+    tallyRefusal(tally, kinds.waf);
+    tallyRefusal(tally, kinds.worker);
+    deep([tally.count, Object.keys(tally.kinds), tally.kinds.challenge.n, tally.kinds.challenge.rays.length, tally.worker],
+      [22, ["challenge", "block 1020"], 20, 3, { nightly_token_scope: 1 }],
+    "the tally counts edge 403s by kind with up to three Ray IDs each, and keeps the Worker's own 403s out of the count");
+    const night = healthChecks({ ...good, edge403: tally.count, edgeKinds: tally.kinds, worker403: tally.worker });
+    ok(night.failures.length === 0 && night.notes[0].startsWith("edge: 22 ingest answer(s) of HTTP 403 [challenge 20 (cf-ray ") &&
+       /; block 1020 2 \(cf-ray 8c9d0e1f2a3b4c60-ORD\)\], 6\.0 s of retry budget spent; not counted: 1 JSON 403\(s\) from the Worker itself \(nightly_token_scope 1\)/
+         .test(night.notes[0]),
+    "THE EDGE LINE SUMMARISES BY KIND: under the threshold it is a note, naming each kind, its count and its Ray IDs, " +
+      "with the Worker's own 403s named apart and not counted");
+    const worst = refusalTally();
+    for (let i = 0; i < 24; i++) tallyRefusal(worst, kinds.challenge);
+    const red = healthChecks({ ...good, edge403: worst.count, edgeKinds: worst.kinds, retrySpentMs: 40000 }).failures;
+    eq(red[0], "HEALTH: the edge answered 24 ingest request(s) with HTTP 403 and retries spent 40 s of the 90 s budget",
+      "at 24 edge 403s the gate turns red with the count");
+    ok(red.length === 2 && /^HEALTH: 24 were Cloudflare challenges \(cf-mitigated: challenge; Ray ID 8c9d0e1f2a3b4c5d-IAD\)/.test(red[1]) &&
+       /Skip rule for \/api\/flows\/ingest in DEPLOY\.md 10\.0 item 3, with Security Level and Browser Integrity Check ticked/.test(red[1]) &&
+       /Bot Fight Mode, which the Free plan cannot skip: turn it off \(Security → Settings → Bot traffic\)$/.test(red[1]),
+    "and a CHALLENGE names its remedy: the Skip rule (item 3) with Security Level ticked, and Bot Fight Mode off if " +
+      "challenges outlive the rule, because the Free plan cannot skip it");
+    const remedyOf = (seen, n = 24) => {
+      const t = refusalTally();
+      for (let i = 0; i < n; i++) tallyRefusal(t, seen);
+      return healthChecks({ ...good, edge403: t.count, edgeKinds: t.kinds }).failures[1];
+    };
+    ok(/^HEALTH: 24 were Cloudflare blocks \(error 1020; Ray ID 8c9d0e1f2a3b4c60-ORD\): a WAF custom rule blocks the route: the Skip rule .* item 3, placed above that rule/
+      .test(remedyOf(kinds.waf)), "a 1020 block names the WAF custom rule and the Skip rule placed above it");
+    ok(/^HEALTH: 24 were Cloudflare blocks \(error 1010; .*Browser Integrity Check blocks the route: tick Browser Integrity Check in the Skip rule/
+      .test(remedyOf(kinds.bic)), "a 1010 block names Browser Integrity Check");
+    ok(/error 1006; .*an IP Access rule bans the runner's address, network or country: remove it \(Security → WAF → Tools\)/
+      .test(remedyOf(kinds.banned)), "an IP ban names the IP Access rule");
+    ok(/no error code, cf-mitigated: block; .*find the Ray ID in Security → Events/.test(remedyOf(kinds.mitigatedBlock)),
+      "an unnumbered block sends the owner to the Ray ID");
+    ok(/^HEALTH: 24 were Cloudflare challenges \(a challenge page, no cf-mitigated; Ray ID 8c9d0e1f2a3b4c5e-IAD\), which Bot Fight Mode/
+      .test(remedyOf(kinds.pageOnly)) && !/cf-mitigated: challenge/.test(remedyOf(kinds.pageOnly)),
+    "a challenge known only from its page says so, and never claims a cf-mitigated header Cloudflare did not send");
+    {
+      const mixed = refusalTally();
+      tallyRefusal(mixed, kinds.pageOnly);
+      for (let i = 0; i < 23; i++) tallyRefusal(mixed, kinds.challenge);
+      ok(/^HEALTH: 24 were Cloudflare challenges \(cf-mitigated: challenge; Ray ID 8c9d0e1f2a3b4c5e-IAD, 8c9d0e1f2a3b4c5d-IAD\)/
+        .test(healthChecks({ ...good, edge403: mixed.count, edgeKinds: mixed.kinds }).failures[1]),
+      "and once any challenge in the run carried the header, the line names it");
+    }
+    ok(/^HEALTH: 24 were 403s with neither a Cloudflare mitigation marker nor the Worker's JSON error \(server cloudflare; Ray ID/
+      .test(remedyOf(kinds.bare)), "an unmarked 403 that passed Cloudflare says so, with its Ray ID");
+    ok(/^HEALTH: 24 were 403s with no cf-ray \(server squid\/5\.9\), so never through Cloudflare/.test(remedyOf(kinds.proxy)),
+      "and one with no cf-ray never reached the edge, so no Cloudflare setting is blamed for it");
+    const own = refusalTally();
+    for (let i = 0; i < 40; i++) tallyRefusal(own, kinds.worker);
+    deep(healthChecks({ ...good, edge403: own.count, edgeKinds: own.kinds, worker403: own.worker }).failures, [],
+      "FORTY OF THE WORKER'S OWN 403s are not the edge: they never count toward the threshold");
+    deep(fails({ edge403: 0, retrySpentMs: HEALTH.retrySpentMs }), ["HEALTH: ingest retries spent 60 s of the 90 s budget with " +
+      "no edge 403: the ingest lines above name each answer; a 429 or 408 with a cf-ray is a Cloudflare rate limiting " +
+      "rule or an edge timeout (the Skip rule for /api/flows/ingest in DEPLOY.md 10.0 item 3), and a 5xx or no answer is " +
+      "the Worker or D1 failing"],
+    "a retry budget spent with no 403 and no answer on record names both causes, and blames neither alone");
+
+    const statusAnswer = (status, headers = {}) => new Response(status === 204 ? null : "", { status, headers });
+    const EDGE = { server: "cloudflare" };
+    const spentOn = (answers, over = {}) => {
+      const t = refusalTally();
+      for (const a of answers) tallyAnswer(t, a);
+      return { t, v: healthChecks({ ...good, edge403: t.count, edgeKinds: t.kinds, edgeStatuses: t.statuses,
+        retrySpentMs: HEALTH.retrySpentMs + 1000, ...over }) };
+    };
+    const rated = spentOn(Array.from({ length: 6 }, (_, i) => statusAnswer(429, { ...EDGE, "cf-ray": `9a0b1c2d3e4f5a6${i}-IAD` })));
+    deep(rated.v.failures, ["HEALTH: ingest retries spent 61 s of the 90 s budget with no edge 403",
+      "HEALTH: 6 were HTTP 429s through Cloudflare (Ray ID 9a0b1c2d3e4f5a60-IAD, 9a0b1c2d3e4f5a61-IAD, 9a0b1c2d3e4f5a62-IAD): " +
+        "the Worker never answers the ingest route with 429, so a Cloudflare rate limiting rule refused the runner: the " +
+        "Skip rule for /api/flows/ingest in DEPLOY.md 10.0 item 3 skips rate limiting rules"],
+    "A BUDGET SPENT ON 429s WITH A cf-ray is a Cloudflare rate limiting rule, since the Worker never answers ingest with " +
+      "429, and its remedy is the Skip rule's rate limiting component, not the Worker or D1");
+    ok(rated.v.failures.every((l) => !/Worker or D1/.test(l)), "and nothing in it blames the Worker or D1");
+    const slow = spentOn([statusAnswer(408, { ...EDGE, "cf-ray": "9a0b1c2d3e4f5a70-ORD" })]);
+    ok(/^HEALTH: 1 was an HTTP 408 through Cloudflare \(Ray ID 9a0b1c2d3e4f5a70-ORD\): the Worker never answers the ingest route with 408, so the edge timed out waiting for the runner's request, or a Cloudflare rule answers 408: the Skip rule .* covers a rate limiting or custom rule/
+      .test(slow.v.failures[1]) && slow.v.failures.length === 2, "a 408 with a cf-ray is the edge's timeout or a Cloudflare rule, not the Worker");
+    const broken = spentOn([statusAnswer(503, { ...EDGE, "cf-ray": "9a0b1c2d3e4f5a80-IAD" }),
+      statusAnswer(503, { ...EDGE, "cf-ray": "9a0b1c2d3e4f5a81-IAD" }), statusAnswer(500, { ...EDGE, "cf-ray": "9a0b1c2d3e4f5a82-IAD" }),
+      null, null]);
+    deep(broken.v.failures.slice(1), [
+      "HEALTH: 3 were HTTP 5xx answers (500 1, 503 2; Ray ID 9a0b1c2d3e4f5a82-IAD, 9a0b1c2d3e4f5a80-IAD, 9a0b1c2d3e4f5a81-IAD): " +
+        "the ingest route itself failed, so the Worker or D1 was failing, not a Cloudflare rule; the ingest lines above " +
+        "name each answer",
+      "HEALTH: 2 were requests with no usable answer (the connection failed or timed out, or the body was not JSON): the " +
+        "network between the runner and the edge, or a Worker that never answered; the ingest lines above name each error"],
+    "A BUDGET SPENT ON 5xx OR ON NO ANSWER is the Worker or D1, or the network, and never the WAF");
+    const bypassed = spentOn([statusAnswer(429, { server: "squid/5.9" }), statusAnswer(502, { server: "squid/5.9" })]);
+    deep(bypassed.v.failures.slice(1), ["HEALTH: 2 answer(s) (HTTP 429 1, HTTP 502 1) carried no cf-ray (server squid/5.9), " +
+      "so they never passed through Cloudflare: something between the runner and the edge answered them"],
+    "and a 429 or 5xx with no cf-ray never reached Cloudflare, so neither a Cloudflare rule nor the Worker is blamed");
+    const tallied = (list) => {
+      const t = refusalTally();
+      for (const [status, headers, text] of list) tallyAnswer(t, new Response(text, { status, headers }), text);
+      return healthChecks({ ...good, edge403: 0, edgeStatuses: t.statuses, retrySpentMs: HEALTH.retrySpentMs }).failures.slice(1);
+    };
+    const capped = tallied([[429, { ...EDGE, "cf-ray": "9a0b1c2d3e4f5aa0-IAD" }, "error code: 1027"],
+      [429, { ...EDGE, "cf-ray": "9a0b1c2d3e4f5aa1-IAD" }, "error code: 1027"], [429, { ...EDGE, "cf-ray": "9a0b1c2d3e4f5aa2-IAD" }, "error code: 1015"]]);
+    deep(capped, ["HEALTH: 2 were answers with Cloudflare error 1027 (HTTP 429 2; Ray ID 9a0b1c2d3e4f5aa0-IAD, 9a0b1c2d3e4f5aa1-IAD): " +
+      "the Workers Free plan's 100,000 requests a day ran out, and every request to the site counts: it resets at 00:00 UTC, " +
+      "and Workers Paid removes the cap (DEPLOY.md 10.0 item 5)",
+      "HEALTH: 1 was an HTTP 429 through Cloudflare (Ray ID 9a0b1c2d3e4f5aa2-IAD): the Worker never answers the ingest route " +
+        "with 429, so a Cloudflare rate limiting rule refused the runner: the Skip rule for /api/flows/ingest in DEPLOY.md " +
+        "10.0 item 3 skips rate limiting rules"],
+    "A 429 CARRYING ERROR 1027 is the Workers Free plan's daily request cap, which no Skip rule lifts, and is named apart " +
+      "from a rate limiting rule's 429, each line with its own Ray IDs");
+    ok(/^HEALTH: 1 was an HTTP 5xx answer \(503 1; Ray ID 9a0b1c2d3e4f5ab0-IAD\): the ingest route itself failed, so the Worker or D1 was failing, not a Cloudflare rule; 1 carried error 1102: the Worker ran over its CPU or memory limit; the ingest lines above/
+      .test(tallied([[503, { ...EDGE, "cf-ray": "9a0b1c2d3e4f5ab0-IAD" }, "<title>Worker exceeded resource limits</title> Error 1102"]])[0]),
+    "and a 5xx carrying error 1102 says the Worker ran over its limit");
+    const both = spentOn([statusAnswer(429, { ...EDGE, "cf-ray": "9a0b1c2d3e4f5a90-IAD" })],
+      { edge403: worst.count, edgeKinds: worst.kinds });
+    ok(both.v.failures.length === 3 && /^HEALTH: the edge answered 24/.test(both.v.failures[0]) &&
+       /^HEALTH: 24 were Cloudflare challenges/.test(both.v.failures[1]) && /^HEALTH: 1 was an HTTP 429 through Cloudflare/.test(both.v.failures[2]),
+    "with 403s and 429s in one run, each kind gets its own line and remedy");
+    const quiet = spentOn([statusAnswer(429, { ...EDGE, "cf-ray": "9a0b1c2d3e4f5a91-IAD" }), statusAnswer(503, EDGE), null,
+      statusAnswer(404, EDGE), statusAnswer(400, EDGE), statusAnswer(200, EDGE)], { retrySpentMs: 6000 });
+    ok(quiet.v.failures.length === 0 &&
+       quiet.v.notes[0].endsWith("6.0 s of retry budget spent; other retried answers: no answer 1, HTTP 429 1 (cf-ray " +
+         "9a0b1c2d3e4f5a91-IAD), HTTP 503 1 (no cf-ray)") && Object.keys(quiet.t.statuses).join() === "0,429,503",
+    "UNDER THE THRESHOLD the edge line names the other retried answers too (429, 408, 5xx and no answer, with their " +
+      "Ray IDs), while a 404, 400 or 200, which are never retried, are not tallied");
+
+    const run = refusalTally();
+    for (let i = 0; i < 22; i++) tallyRefusal(run, kinds.challenge);
+    let spent = 6000;
+    const gateLines = [];
+    const tallying = async (key) => {
+      for (let i = 0; i < 3; i++) { tallyRefusal(run, { ...kinds.challenge, ray: `8c9d0e1f${key.length}${i}-IAD` }); spent += 1000 * (i + 1) ** 2; }
+      return { payload: null, failed: true, status: 403 };
+    };
+    const lastGate = await runHealthGate({ sessionDate: S, now: () => at(20, 5), read: tallying,
+      edge: () => ({ ...structuredClone(run), retrySpentMs: spent }), log: (l) => gateLines.push(l), warn: (l) => gateLines.push(l) });
+    const edgeLine = gateLines.find((l) => l.startsWith("  edge: ")) || "";
+    const edgeCount = Number(/^ {2}edge: (\d+) ingest/.exec(edgeLine)[1]);
+    const bracketed = [...edgeLine.slice(edgeLine.indexOf("[")).matchAll(/ (\d+)(?: \(cf-ray [^)]*\))?(?:;|\])/g)]
+      .reduce((sum, m) => sum + Number(m[1]), 0);
+    deep([edgeCount, bracketed, run.count, lastGate.failures[0]], [31, 31, 31,
+      "HEALTH: the edge answered 31 ingest request(s) with HTTP 403 and retries spent 48 s of the 90 s budget"],
+    "THE GATE READS THE TALLY AFTER ITS OWN READS: the 403s its clock, live:market and live:heartbeat reads meet are in " +
+      "the count, the count and the bracketed kinds add up to the same total, and the threshold sees what the line shows");
+    ok(/, 48\.0 s of retry budget spent/.test(edgeLine), "and the retry budget in the line is read at the same moment");
+  }
   const off = healthChecks({ ...good, clockRead: clockWith({ tier1: { at: null, okAt: null, why: "off" } }),
     heartbeatRead: { payload: null, absent: true }, focusRead: { payload: null, absent: true } });
   ok(off.failures.length === 0 && off.why === "live-off", "FLOWS_LIVE_MODE off is a deliberate rollback, not a failure, " +
@@ -2256,7 +2446,7 @@ const cronMinutes = (cron) => {
 
   const lines = [];
   const gateReads = [];
-  const gate = await runHealthGate({ sessionDate: S, now: () => at(20, 5), edge403: 0,
+  const gate = await runHealthGate({ sessionDate: S, now: () => at(20, 5),
     read: async (key) => (gateReads.push(key), ({ clock: good.clockRead, "live:market": good.marketRead,
       "live:focus": good.focusRead, "live:heartbeat": good.heartbeatRead })[key]),
     log: (l) => lines.push(l), warn: (l) => lines.push(l) });
@@ -2265,11 +2455,24 @@ const cronMinutes = (cron) => {
     "runHealthGate reads the clock, live:market, live:focus and live:heartbeat through the ingest route and prints one line");
   const pipeline = read("scripts/flows-pipeline.mjs");
   const tail = pipeline.slice(pipeline.indexOf("async function main()"), pipeline.indexOf("\nexport {\n"));
-  ok(/const health = await runHealthGate\(\{ sessionDate, read: readStored, dry: DRY_RUN,\s*edge403: edgeRefusals\.count, retrySpentMs: publishRetrySpentMs \}\);\s*if \(health\.failures\.length\) process\.exitCode = 1;\s*\}\s*$/
+  ok(/const health = await runHealthGate\(\{ sessionDate, read: readStored, dry: DRY_RUN, edge: edgeSnapshot,\s*annotate: process\.env\.GITHUB_ACTIONS === "true" \}\);\s*if \(health\.failures\.length\) process\.exitCode = 1;\s*\}\s*$/
     .test(tail), "THE NIGHTLY ENDS WITH THE GATE: its last statement runs it and turns the run red on any failure, after " +
-    "every key is published");
-  eq((pipeline.match(/if \(response\.status === 403\) edgeRefusals\.count\+\+;/g) || []).length, 3,
-    "and every ingest read, write and delete counts an edge 403 into it");
+    "every key is published, with the edge 403s counted by kind and the Worker's own 403s kept apart");
+  ok(/export function edgeSnapshot\(\) \{\s*return \{ \.\.\.structuredClone\(edgeRefusals\), retrySpentMs: publishRetrySpentMs \};\s*\}/
+    .test(pipeline), "and it hands the gate a function, so the count, the kinds, the other statuses and the retry budget " +
+    "are copied together, after the gate's own reads");
+  ok(/heard = refusal \|\| await noteAnswer\(response\);/.test(pipeline) && /if \(!refusal\) await noteAnswer\(response\);/.test(pipeline),
+    "the write and the delete tally every retried answer that is not a 403");
+  ok(/if \(!response\.ok\) \{\s*await noteAnswer\(response\);/.test(pipeline) &&
+     (pipeline.match(/await noteAnswer\(null\);\s*return \{ (?:payload: null, failed: true|ok: false), status: 0/g) || []).length === 2,
+  "and so do the read and a request that got no answer at all");
+  ok(/async function noteAnswer\(response\) \{\s*if \(response && !retriedStatus\(response\.status\)\) return null;\s*const text = response \? await response\.text\(\)\.catch\(\(\) => ""\) : "";\s*tallyAnswer\(edgeRefusals, response, text\);/
+    .test(pipeline), "noteAnswer reads the body of a retried answer only, so a Cloudflare code in it is kept");
+  eq((pipeline.match(/refusal = response\.status === 403 \? await noteRefusal\(response\) : null;/g) || []).length, 3,
+    "and every ingest read, write and delete classifies a 403 into it");
+  eq((pipeline.match(/ingestURL\(\) \+ "\?key="/g) || []).length, 3, "which are the pipeline's only three ingest requests");
+  ok(/async function noteRefusal\(response\) \{\s*const text = await response\.text\(\)\.catch\(\(\) => ""\);\s*const seen = refusalOf\(\{ headers: response\.headers, text \}\);\s*tallyRefusal\(edgeRefusals, seen\);/
+    .test(pipeline), "noteRefusal reads the 403's own headers and body, and tallies what it finds");
   const { republishRepair } = await import("../scripts/flows-legs/health.mjs");
   const repair = republishRepair("2026-09-25");
   ok(/republish_session/.test(repair) && /gh workflow run flows-pipeline\.yml -f republish_session=true/.test(repair) &&
@@ -2330,6 +2533,241 @@ const cronMinutes = (cron) => {
     "right after the index rows");
   ok(W.NIGHTLY_READ_KEYS.includes("focus") && W.ingestScope("focus", "GET", "live").ok && !W.ingestScope("focus", "POST", "live").ok,
     "the live role may READ the focus key it plans from, and nothing more");
+}
+
+{
+  const DAY = 86400000;
+  const T = (iso) => Date.parse(iso);
+  const tableless = { prepare: () => ({ first: async () => { throw new Error("D1_ERROR: no such table: users: SQLITE_ERROR"); } }) };
+  eq(await LAB.readLabActiveAt(null), null, "no database, no Lab activity");
+  eq(await LAB.readLabActiveAt(tableless), null,
+    "A FRESH DATABASE with no Lab tables reads as no sign-in on record, not as a failed clock read");
+  eq(await LAB.readLabActiveAt({ prepare: () => { throw new Error("boom"); } }), null, "and a prepare that throws is guarded too");
+  const labDb = (values) => ({
+    prepare: (sql) => ({ first: async () => {
+      const hit = Object.entries(values).find(([k]) => sql === k);
+      if (!hit) throw new Error("D1_ERROR: no such column: signed_in_at: SQLITE_ERROR");
+      return { at: hit[1] };
+    } }),
+  });
+  const Q = Object.fromEntries(LAB.LAB_ACTIVITY.map((q) => [q.sql.split(" FROM ")[1] + ":" + q.sql.split("(")[1].split(")")[0], q.sql]));
+  eq(await LAB.readLabActiveAt(labDb({ [Q["users:created_at"]]: T("2026-06-30T12:00:00Z"), [Q["stats:updated_at"]]: T("2026-07-20T12:00:00Z"),
+    [Q["progress:updated_at"]]: null })), "2026-06-30T12:00:00.000Z",
+  "LAB ACTIVITY is the newest instant the Lab's Google sign-in is known to have been used: a first sign-in (users.created_at) " +
+    "counts as itself, while a signed-in write counts thirty days earlier, since the session that made it was issued " +
+    "up to thirty days before; a database whose users table predates signed_in_at still answers");
+  eq(await LAB.readLabActiveAt(labDb({ [Q["users:created_at"]]: T("2026-06-30T12:00:00Z"), [Q["users:signed_in_at"]]: null,
+    [Q["stats:updated_at"]]: null, [Q["progress:updated_at"]]: T("2026-08-15T00:00:00Z") })),
+  new Date(T("2026-08-15T00:00:00Z") - 30 * DAY).toISOString(), "a later write moves it, less the session's thirty days");
+  eq(await LAB.readLabActiveAt(labDb({ [Q["users:created_at"]]: T("2026-06-30T12:00:00Z"), [Q["users:signed_in_at"]]: T("2026-09-27T08:00:00Z"),
+    [Q["stats:updated_at"]]: T("2026-09-01T00:00:00Z"), [Q["progress:updated_at"]]: T("2026-09-01T00:00:00Z") })),
+  "2026-09-27T08:00:00.000Z", "and a returning learner's sign-in (users.signed_in_at) counts exactly");
+  eq(LAB.LAB_SESSION_MS, 30 * DAY, "the session lifetime the lag stands on");
+  const workerSrc = read("worker.js");
+  ok(/exp: Date\.now\(\) \+ LAB_SESSION_MS \}/.test(workerSrc) && /cookie\("session", session, \{ maxAge: LAB_SESSION_MS \/ 1000 \}\)/.test(workerSrc),
+    "and it is the Lab session's own lifetime, cookie and signed expiry alike, so the two cannot drift apart");
+  ok(/await recordSignIn\(env\.DB, user, Date\.now\(\)\);/.test(workerSrc) && !/INSERT INTO users/.test(workerSrc),
+    "EVERY GOOGLE SIGN-IN IS RECORDED: the OAuth callback writes users through recordSignIn and nowhere else, so a " +
+      "returning learner's sign-in moves the count the alarm reads");
+
+  const run = (failAt) => {
+    const sent = [];
+    const db = { prepare: (sql) => {
+      const stmt = { args: [], bind: (...a) => { stmt.args = a; return stmt; }, run: async () => {
+        sent.push(sql);
+        if (failAt.includes(sent.length)) {
+          throw new Error(sql.includes("signed_in_at") && !sql.startsWith("ALTER")
+            ? "D1_ERROR: table users has no column named signed_in_at: SQLITE_ERROR" : "D1_ERROR: no such table: users");
+        }
+        return { success: true, args: stmt.args };
+      } };
+      return stmt;
+    } };
+    return { db, sent };
+  };
+  const learner = { sub: "g_1", email: "a@b.c", name: "A" };
+  {
+    const { db, sent } = run([]);
+    const out = await LAB.recordSignIn(db, learner, 5);
+    deep([sent, out.args], [[LAB.SIGN_IN_SQL], ["g_1", "a@b.c", "A", 5, 5]],
+      "a sign-in is one upsert that stamps created_at on the first and signed_in_at on every one");
+  }
+  {
+    const { db, sent } = run([1]);
+    await LAB.recordSignIn(db, learner, 5);
+    deep(sent, [LAB.SIGN_IN_SQL, LAB.SIGNED_IN_COLUMN_SQL, LAB.SIGN_IN_SQL],
+      "a users table that predates the column gets it on the first sign-in after deploy, and the upsert runs again");
+  }
+  {
+    const { db, sent } = run([1, 3]);
+    const out = await LAB.recordSignIn(db, learner, 5);
+    deep([sent, out.args], [[LAB.SIGN_IN_SQL, LAB.SIGNED_IN_COLUMN_SQL, LAB.SIGN_IN_SQL, LAB.LEGACY_SIGN_IN_SQL], ["g_1", "a@b.c", "A", 5]],
+      "and if the column still cannot be written, the old upsert runs, so the bookkeeping can never break a sign-in");
+  }
+  {
+    const db = { prepare: () => ({ bind: () => ({ run: async () => { throw new Error("D1_ERROR: no such table: users"); } }) }) };
+    let threw = null;
+    try { await LAB.recordSignIn(db, learner, 5); } catch (error) { threw = error; }
+    ok(threw && /no such table: users/.test(threw.message), "while any other failure still fails the sign-in, as before");
+  }
+  const baselineUsers = /CREATE TABLE IF NOT EXISTS users \(([\s\S]*?)\);/.exec(read("migrations/0001_baseline.sql"))[1];
+  const schemaUsers = /CREATE TABLE IF NOT EXISTS users \(([\s\S]*?)\);/.exec(read("schema.sql"))[1];
+  const colsOf = (body) => body.split(",").map((c) => c.trim().split(/\s+/)[0]);
+  deep([colsOf(schemaUsers), read("migrations/0013_users_signed_in_at.sql")],
+    [[...colsOf(baselineUsers), "signed_in_at"], LAB.SIGNED_IN_COLUMN_SQL + ";\n"],
+  "0013 adds exactly the column the Worker adds on first use, and schema.sql declares users with it");
+
+  const liveSrc = read("shared/flows-live-worker.js");
+  const nowSrc = liveSrc.slice(liveSrc.indexOf("export async function serveNow("), liveSrc.indexOf("export function quoteTtlS("));
+  ok(nowSrc.length > 500 && !/labActiveAt|readLabActiveAt|lab-sign-in/.test(nowSrc) && !/labActiveAt/.test(W.clockView.toString()) &&
+     !/labActiveAt/.test(W.ingestClockView.toString()),
+  "THE PUBLIC VIEW NEVER CARRIES IT: /api/flows/now and both clock views are built without the Lab's sign-in age");
+  const clockRow = { id: 1, day: "2026-09-25", trading: 1, tier1_at: T("2026-09-25T21:56:00Z"), dispatch_why: "no-token" };
+  const envOf = (lab) => ({ DB: { prepare: (sql) => ({ first: async () => {
+    if (/flows_clock/.test(sql)) return clockRow;
+    if (sql === Q["users:created_at"]) return { at: lab };
+    throw new Error("D1_ERROR: no such column: signed_in_at");
+  } }) } });
+  const jsonOf = (body) => body;
+  const nightlyView = await W.serveIngestClock(envOf(T("2026-06-30T12:00:00Z")), { json: jsonOf, lab: true });
+  const liveView = await W.serveIngestClock(envOf(T("2026-06-30T12:00:00Z")), { json: jsonOf });
+  deep([nightlyView.labActiveAt, Object.hasOwn(liveView, "labActiveAt"), nightlyView.clock, liveView.clock],
+    ["2026-06-30T12:00:00.000Z", false, W.ingestClockView(W.normalizeClock(clockRow)), W.ingestClockView(W.normalizeClock(clockRow))],
+  "ONLY THE PIPELINE'S CREDENTIAL READS IT: the ingest clock key adds labActiveAt beside the clock for the nightly token, " +
+    "and the live credential's read of the same key carries no such field");
+  deep((await W.serveIngestClock({ DB: tableless }, { json: jsonOf, lab: true })), { key: "clock", clock: null, labActiveAt: null },
+    "and a fresh database answers null for both");
+
+  const S = "2026-09-25";
+  const at = (h, m) => easternInstant(S, h * 60 + m);
+  const now = at(20, 5);
+  const gate = (labActiveAt, over = {}) => healthChecks({ sessionDate: "2026-09-24", now,
+    clockRead: { payload: { key: "clock", clock: null, ...(labActiveAt === undefined ? {} : { labActiveAt }) }, status: 200 }, ...over });
+  const ago = (days) => new Date(now - days * DAY).toISOString();
+  const labLines = (v) => ({ failures: v.failures, warnings: v.warnings, notes: v.notes.filter((n) => n.startsWith("lab:")) });
+  const d119 = labLines(gate(ago(119)));
+  deep(d119, { failures: [], warnings: [], notes: ["lab: the Lab's Google OAuth client was used within the last 120 days; nothing to do"] },
+    "119 DAYS: a note that says nothing needs doing, and nothing more");
+  const quietNotes = [0, 1, 30, 89, 119].map((d) => labLines(gate(ago(d))).notes.join("\n"));
+  ok(new Set(quietNotes).size === 1 && quietNotes.every((n) => !/\d{4}-\d{2}-\d{2}|days? ago|\b(?:[0-9]|[1-9][0-9]|11[0-9])\b/.test(n)),
+    "THE LOG IS PUBLIC, SO UNDER 120 DAYS THE NOTE CARRIES NO DATE AND NO AGE: the same words whether the last Lab " +
+      "activity was today or 119 days ago, so a nightly never publishes when a learner last used the Lab");
+  const d120 = labLines(gate(ago(120)));
+  deep([d120.failures, d120.warnings], [[], [`WARNING: the latest Google sign-in to the Lab on record is ${ago(120).slice(0, 10)}, ` +
+    `120 days ago. ${SIGN_IN_ADVICE} This gate turns the nightly red from ${new Date(now + 30 * DAY).toISOString().slice(0, 10)}.`]],
+  "120 DAYS: a warning that names the sign-in, the six months, the callback and the day the gate turns red, and the run stays green");
+  const d149 = labLines(gate(ago(149)));
+  ok(d149.failures.length === 0 && d149.warnings.length === 1 && /149 days ago/.test(d149.warnings[0]), "149 days still only warns");
+  const d150 = labLines(gate(ago(150)));
+  deep([d150.warnings, d150.failures], [[], [`HEALTH: the latest Google sign-in to the Lab on record is ${ago(150).slice(0, 10)}, ` +
+    `150 days ago. ${SIGN_IN_ADVICE} Google deletes it about ${new Date(now + 30 * DAY).toISOString().slice(0, 10)}.`]],
+  "150 DAYS: the nightly turns red, which emails the owner, a month before Google's six months run out");
+  ok(/^Sign in to the Lab at https:\/\/anilkaya\.org\/lab\/ — Google deletes an OAuth client unused for about six months; keep the callback https:\/\/anilkaya\.org\/auth\/callback registered\.$/
+    .test(SIGN_IN_ADVICE), "the advice is the sign-in URL, the six months and the callback that must stay registered");
+  ok(/Google may already have deleted it: if sign-in fails with deleted_client or invalid_client, create a Web application OAuth client .*wrangler secret put GOOGLE_CLIENT_ID/
+    .test(labLines(gate(ago(LAB_SIGN_IN.goneDays))).failures[0]), "and past six months it also says how to replace a deleted client");
+  deep(labLines(gate(null)), { failures: [], warnings: [], notes: ["lab: no Google sign-in to the Lab is on record (no Lab user, or no " +
+    "Lab tables), so the OAuth client's idle time cannot be told; one sign-in at https://anilkaya.org/lab/ starts the count"] },
+  "NULL (no Lab user, or a fresh database) is a note, not a failure");
+  deep(labLines(gate(undefined)).notes, ["lab: the Worker does not report the Lab's last Google sign-in (a Worker older than this check)"],
+    "and a Worker that predates the field says so rather than guessing");
+  deep(labLines(gate(ago(200), { clockRead: { payload: null, failed: true, status: 503 } })).notes,
+    ["lab: the clock could not be read, so the age of the Lab's last Google sign-in is unknown this run"], "as does an unreadable clock");
+  const idle = gate(ago(160));
+  ok(!idle.applies && idle.failures.length === 1 && /160 days ago/.test(idle.failures[0]),
+    "the sign-in age is checked on every run, like the edge count, not only on the evening of the session");
+  const production = labLines(healthChecks({ sessionDate: null, now: T("2026-09-27T12:00:00Z"),
+    clockRead: { payload: { key: "clock", clock: null, labActiveAt: "2026-06-30T00:00:00.000Z" }, status: 200 } }));
+  deep(production.notes, ["lab: the Lab's Google OAuth client was used within the last 120 days; nothing to do"],
+    "WITH PRODUCTION'S NEWEST LAB ROW (2026-06-30) today's nightly says only that nothing needs doing");
+  const onDay = (iso) => labLines(healthChecks({ sessionDate: null, now: T(iso),
+    clockRead: { payload: { key: "clock", clock: null, labActiveAt: "2026-06-30T00:00:00.000Z" }, status: 200 } }));
+  ok(onDay("2026-10-27T23:59:59Z").warnings.length === 0 &&
+     /^WARNING: the latest Google sign-in to the Lab on record is 2026-06-30, 120 days ago\. .* This gate turns the nightly red from 2026-11-27\.$/
+       .test(onDay("2026-10-28T00:00:00Z").warnings[0]) && onDay("2026-11-26T23:59:59Z").failures.length === 0 &&
+     /^HEALTH: the latest Google sign-in to the Lab on record is 2026-06-30, 150 days ago\. .* Google deletes it about 2026-12-27\.$/
+       .test(onDay("2026-11-27T00:00:00Z").failures[0]),
+  "and it warns, with the day and the age, from 2026-10-28, and turns red from 2026-11-27, a month before Google's " +
+    "six months end about 2026-12-27");
+
+  const lines = [];
+  const warnGate = await runHealthGate({ sessionDate: "2026-09-24", now: () => now, annotate: true,
+    read: async (key) => (key === "clock" ? { payload: { key: "clock", clock: null, labActiveAt: ago(130) }, status: 200 }
+      : { payload: null, absent: true }),
+    log: (l) => lines.push(l), warn: (l) => lines.push(l) });
+  ok(warnGate.failures.length === 0 && lines[0] === "health gate: live checks skipped — this run is for 2026-09-24 and today is " +
+     "2026-09-25; the live checks describe today; 0 failure(s), 1 warning(s)" &&
+     lines.some((l) => l.startsWith("::warning title=Lab sign-in::WARNING: the latest Google sign-in to the Lab on record is ")),
+  "in GitHub Actions the warning is an annotation on the run's summary, and the run stays green");
+}
+
+{
+  const S = "2026-09-24";
+  const row = { id: 1, day: "2026-09-23", trading: 1, early_close: 0, live_dispatched_at: null, dispatch_why: null };
+  const apply = (db) => {
+    for (const st of db.statements.filter((x) => /INSERT INTO flows_clock/.test(x.sql))) {
+      const cols = /\(([^)]*)\) VALUES/.exec(st.sql)[1].split(", ");
+      cols.forEach((c, j) => { row[c] = st.args[j]; });
+    }
+  };
+  const github = [];
+  const errors = [];
+  const fetchImpl = async (u) => { github.push(u); return { status: 204 }; };
+  const log = { error: (l) => errors.push(JSON.parse(l).message) };
+  const dispatches = [];
+  for (let m = 9 * 60 + 31; m <= 16 * 60 + 26; m += 5) {
+    const db = tickDb();
+    db.batch = async (list) => {
+      db.statements.push(...list);
+      return /SELECT \* FROM flows_clock/.test(list[0].sql) ? [{ results: [{ ...row }] }, { results: [] }] : list.map(() => ({ results: [] }));
+    };
+    const texts = await tier1Bodies({ session: S, at: easternInstant(S, m) });
+    const out = await W.rthTick({ DB: db, UW_API_KEY: "k" }, easternInstant(S, m),
+      { fetchVendor: async (p) => JSON.parse(texts[p]), fetchImpl, log });
+    if (out.dispatch && out.dispatch.why === "no-token") dispatches.push(m);
+    apply(db);
+  }
+  const nightly = [];
+  for (const [h, mi] of [[17, 30], [18, 30]]) {
+    const db = tickDb();
+    db.batch = async () => [{ results: [{ ...row }] }, { results: [{ session: "2026-09-23" }] }];
+    const out = await W.nightlyTick({ DB: db }, easternInstant(S, h * 60 + mi), { fetchImpl, log });
+    nightly.push([`${h}:${mi}`, out.due, out.sent && out.sent.sent, out.sent && out.sent.why]);
+    apply(db);
+  }
+  deep(nightly, [["17:30", true, false, "no-token"], ["18:30", true, false, "no-token"]],
+    "BOTH NIGHTLY SLOTS ARE DUE AND BOTH TRY: at 17:30 and 18:30 ET the nightly dispatch is due, is attempted, and " +
+      "answers no-token without sending");
+  ok(dispatches.length === 28 && github.length === 0 && row.dispatch_why === "no-token" && row.live_dispatched_at === null &&
+     !errors.some((e) => /dispatch failed/.test(e)),
+  "A SESSION WITH NO GITHUB_DISPATCH_TOKEN, 09:31 to 16:26 and both nightly slots: all 28 due Tier 2 dispatches " +
+    "(09:31 to 16:16, every 15 minutes) and the nightly's each record no-token, nothing reaches GitHub, live_dispatched_at stays null and no " +
+    "'dispatch failed' error is logged");
+  const view = W.ingestClockView(W.normalizeClock(row));
+  eq(view.dispatchWhy, "no-token", "and the ingest clock view hands the nightly that outcome");
+  const at = (h, m) => easternInstant(S, h * 60 + m);
+  const reads = {
+    clock: { payload: { key: "clock", clock: { ...view, tier1: { at: new Date(at(17, 56)).toISOString(),
+      okAt: new Date(at(16, 6)).toISOString(), why: "written" } }, labActiveAt: new Date(at(12, 0)).toISOString() }, status: 200 },
+    "live:market": { payload: { fresh: { readAt: new Date(at(16, 6)).toISOString() } }, status: 200 },
+    "live:heartbeat": { payload: { session: S, run: { calls: 39, failedCalls: 0, finishedAt: new Date(at(16, 21)).toISOString() } },
+      status: 200 },
+  };
+  const lines = [];
+  const gate = await runHealthGate({ sessionDate: S, now: () => at(20, 5), read: async (k) => reads[k],
+    log: (l) => lines.push(l), warn: (l) => lines.push("WARN " + l) });
+  ok(gate.applies && gate.failures.length === 0 && gate.warnings.length === 0 && lines[0] === "health gate: checked; 0 failure(s)",
+    "THE NIGHTLY STAYS GREEN WITHOUT THE TOKEN: the gate, reading that clock, finds no failure and no warning");
+  deep(lines.filter((l) => /GITHUB_DISPATCH_TOKEN|dispatch|refused|renew/i.test(l)),
+    ["  dispatch: the Worker has no GITHUB_DISPATCH_TOKEN, so GitHub's own schedules start Tier 2 and the nightly; a " +
+      "supported mode, not a failure (DEPLOY.md 10.0 item 1)"],
+  "and the one line about dispatch is a note that says what the missing token means, never a refusal or a renewal");
+  ok(!lines.some((l) => l.startsWith("WARN ")), "nothing is printed as a warning or a failure");
+  const beforeAny = await runHealthGate({ sessionDate: S, now: () => at(20, 5), log: () => {}, warn: () => {},
+    read: async (k) => (k === "clock" ? { ...reads.clock, payload: { ...reads.clock.payload,
+      clock: { ...reads.clock.payload.clock, dispatchWhy: null } } } : reads[k]) });
+  ok(beforeAny.failures.length === 0 && !beforeAny.notes.some((n) => /dispatch/.test(n)),
+    "and a clock that has never dispatched at all (dispatch_why null) says nothing about dispatch");
 }
 
 {

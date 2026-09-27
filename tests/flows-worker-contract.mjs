@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { signSession } from "../shared/session.js";
 import { archiveWriteAction, ARCHIVE_REFUSALS } from "../shared/flows-archive.js";
 import { UA_BANNED_CLAIMS } from "../shared/flows-unusual.js";
+import { SIGN_IN_SQL, SIGNED_IN_COLUMN_SQL, LAB_SESSION_MS } from "../shared/lab-sign-in.js";
+import { refusalOf } from "../scripts/flows-legs/health.mjs";
 import {
   startWorker, SESSION_SECRET, FLOWS_PASSWORD, FLOWS_TEST_USER, FLOWS_PEPPER,
 } from "./worker-server.mjs";
@@ -1597,6 +1599,13 @@ try {
         eq(res.status, 403, `LAYER 2 (credential): the live token is refused on ${key}`);
         eq((await res.json()).error.code, "live_token_scope", "with its own code");
       }
+      {
+        const res = await ingest("card:AAPL", "POST", LIVE_TOKEN, board);
+        const seen = refusalOf({ headers: res.headers, text: await res.text() });
+        deep([res.status, seen.kind, seen.code, seen.mitigated], [403, "worker", "live_token_scope", null],
+          "THE WORKER'S OWN 403, as the real route sends it, reads as the Worker's to the pipeline's classifier, so the " +
+            "nightly never counts it as an edge 403");
+      }
       eq((await ingest("live:breadth", "DELETE", LIVE_TOKEN)).status, 403, "the live token can delete nothing");
       eq((await ingest("card:AAPL", "DELETE", LIVE_TOKEN)).status, 403,
         "not even a card: retiring per-ticker keys is the nightly token's alone");
@@ -1842,8 +1851,56 @@ try {
           "route, so it stops on a holiday or at an early close the calendar alone cannot know; that key adds the " +
           "Tier 1 telemetry and the last dispatch outcome");
       const nightlyClock = await ingest("clock", "GET", INGEST_TOKEN);
-      deep(await nightlyClock.json(), { key: "clock", clock: clockNow },
-        "as does the nightly's health gate under the nightly token");
+      deep(await nightlyClock.json(), { key: "clock", clock: clockNow, labActiveAt: null },
+        "as does the nightly's health gate under the nightly token, which alone also reads labActiveAt: null while " +
+          "no Lab user is on record");
+      {
+        const labAt = async () => (await (await ingest("clock", "GET", INGEST_TOKEN)).json()).labActiveAt;
+        const created = Date.parse("2026-06-30T12:00:00Z");
+        const wrote = Date.parse("2026-08-15T00:00:00Z");
+        await live.d1(`INSERT INTO users (id, email, name, created_at) VALUES ('g_lab', 'lab@example.test', 'Lab', ${created})`);
+        eq(await labAt(), "2026-06-30T12:00:00.000Z", "LAB ACTIVITY FROM D1: a first sign-in stamps users.created_at");
+        await live.d1(`INSERT INTO progress (user_id, model_id, done_json, updated_at) VALUES ('g_lab', 'ols', '[0]', ${wrote})`);
+        eq(await labAt(), new Date(wrote - LAB_SESSION_MS).toISOString(),
+          "a signed-in write counts, less the thirty days of the session that made it");
+        const later = Date.parse("2026-09-20T09:00:00Z");
+        const literal = (sql, values) => { const v = [...values]; return sql.replace(/\?/g, () => v.shift()); };
+        await live.d1(literal(SIGN_IN_SQL, ["'g_lab'", "'lab@example.test'", "'Lab'", later, later]));
+        eq(await labAt(), "2026-09-20T09:00:00.000Z",
+          "A RETURNING LEARNER'S SIGN-IN, through the Worker's own upsert on schema.sql's users table, moves it exactly");
+        ok(/\b1782820800000\b/.test(await live.d1("SELECT created_at, signed_in_at FROM users WHERE id = 'g_lab'")),
+          "while the first sign-in's created_at is kept");
+        const now = await (await fetch(L("/api/flows/now?k=market&n=pulse"), { headers: cookie })).text();
+        ok(now.length > 50 && !/labActiveAt/.test(now) && !now.includes("2026-09-20T09:00:00") && !now.includes(String(later)),
+          "THE PUBLIC VIEW NEVER CARRIES IT: /api/flows/now, the subscriber's clock, says nothing about the Lab");
+        ok(!Object.hasOwn(await (await ingest("clock", "GET", LIVE_TOKEN)).json(), "labActiveAt"),
+          "nor does the live credential's read of the clock key: only the pipeline's credential sees it");
+        await live.d1("ALTER TABLE users RENAME TO users_hidden");
+        await live.d1("ALTER TABLE progress RENAME TO progress_hidden");
+        await live.d1("ALTER TABLE stats RENAME TO stats_hidden");
+        try {
+          const bare = await ingest("clock", "GET", INGEST_TOKEN);
+          deep([bare.status, (await bare.json()).labActiveAt], [200, null],
+            "A DATABASE WITHOUT THE LAB TABLES answers null, and the clock still answers");
+        } finally {
+          await live.d1("ALTER TABLE users_hidden RENAME TO users");
+          await live.d1("ALTER TABLE progress_hidden RENAME TO progress");
+          await live.d1("ALTER TABLE stats_hidden RENAME TO stats");
+        }
+        await live.d1("CREATE TABLE users_pre (id TEXT PRIMARY KEY, email TEXT, name TEXT, created_at INTEGER)");
+        let refused = "";
+        try { await live.d1(literal(SIGN_IN_SQL, ["'g_pre'", "'p@example.test'", "'P'", later, later]).replace("INTO users ", "INTO users_pre ")); }
+        catch (error) { refused = error.message; }
+        ok(/\bsigned_in_at\b/.test(refused),
+          "ON A USERS TABLE THAT PREDATES 0013, D1's refusal names signed_in_at, which is what recordSignIn matches before " +
+            "it adds the column");
+        await live.d1(SIGNED_IN_COLUMN_SQL.replace("TABLE users ", "TABLE users_pre "));
+        await live.d1(literal(SIGN_IN_SQL, ["'g_pre'", "'p@example.test'", "'P'", later, later]).replace("INTO users ", "INTO users_pre "));
+        ok(/g_pre/.test(await live.d1("SELECT id, signed_in_at FROM users_pre")), "and once added, the same upsert lands");
+        await live.d1("DROP TABLE users_pre");
+        await live.d1("DELETE FROM progress WHERE user_id = 'g_lab'");
+        await live.d1("DELETE FROM users WHERE id = 'g_lab'");
+      }
       const focusKnown = readFileSync(new URL("../worker.js", import.meta.url), "utf8").includes("|^focus$");
       eq((await ingest("focus", "GET", LIVE_TOKEN)).status, focusKnown ? 200 : 400,
         "the live role may ask for the focus key it plans the strip from (a Worker that does not know the key yet " +

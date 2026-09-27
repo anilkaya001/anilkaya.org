@@ -70,6 +70,7 @@ header readback with this repository after any dashboard rule change.
 | `lab/lesson.html` | Noindexed static fallback for legacy lesson URLs. |
 | `worker.js` | Routing, response policy, OAuth, API, D1 synchronization, SEO rewriting. |
 | `shared/session.js` | Defensive HMAC-SHA256 session sign/verify and cookie helpers. |
+| `shared/lab-sign-in.js` | The Lab session lifetime, the OAuth callback's `users` upsert (`created_at` once, `signed_in_at` on every sign-in, the column added on first use) and `labActiveAt`, the Google OAuth client's last known use that the nightly health gate reads through the ingest `clock` key. |
 | `shared/course-points.js` | Server scoring manifest used to derive points from progress. |
 | `shared/course-seo.js` | Canonical course slugs, metadata, and crawlable module outlines. |
 | `shared/review-manifest.js` | Generated, answer-free Worker allowlist for stable review-item IDs. |

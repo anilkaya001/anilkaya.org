@@ -1,0 +1,1 @@
+ALTER TABLE users ADD COLUMN signed_in_at INTEGER;

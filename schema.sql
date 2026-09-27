@@ -1,8 +1,9 @@
 CREATE TABLE IF NOT EXISTS users (
-  id         TEXT PRIMARY KEY,
-  email      TEXT,
-  name       TEXT,
-  created_at INTEGER
+  id           TEXT PRIMARY KEY,
+  email        TEXT,
+  name         TEXT,
+  created_at   INTEGER,
+  signed_in_at INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS progress (

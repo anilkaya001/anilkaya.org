@@ -26,6 +26,7 @@ import {
   retireSession, sessionArchiveKeys, sweepScreenerBand, SCREENER_SPLIT_DEPTH, SCREENER_PAGE_ROWS,
   judgeScreenerDate, sessionRows, readDayOf, PIPELINE_CADENCE, SESSION_OPEN_MINUTES,
   SESSION_CLOSE_MINUTES, MEMORY_ARCHIVE_SESSIONS, READ_RETRIES, readStored, holdersRefusal, resetPublishRetryBudget,
+  edgeRefusals, resetEdgeRefusals, edgeSnapshot,
   LEDGER_PROBE_FAIL_MAX, LEDGER_PROBE_RETRY_BUDGET_MS,
   HOLDERS_RETRY_DAYS,
   IV_RANK_PARAMS, fakeIvRank, measureVariationProbes, fakeOiLadder, fakeLadderGreeks,
@@ -34,6 +35,7 @@ import {
   screenerDollarVolume, gatedWorthEnriching, GATED_LIQUIDITY_MARGIN, pickPriorRoster,
 } from "../scripts/flows-pipeline.mjs";
 import { FOCUS_FUNDS, MAG7 as FOCUS_MAG7, FOCUS_MINERS } from "../shared/flows-focus.js";
+import { runHealthGate, refusalOf, tallyRefusal } from "../scripts/flows-legs/health.mjs";
 import { VARIATION_CODES, variationSummary } from "../shared/flows-variation.js";
 import { pinReading, buildCard } from "../shared/flows-card.js";
 import { pearson, horizonMove, HORIZON_SESSIONS, realizedVol } from "../shared/flows-features.js";
@@ -3723,6 +3725,116 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     eq(resetPublishRetryBudget(), 0,
        "and not to the run's publish budget, so the ledger probe can never starve the meta and brief publishes of their retries");
   } finally {
+    process.env.FLOWS_INGEST_URL = prevUrl;
+    process.env.FLOWS_INGEST_TOKEN = prevTok;
+    if (prevUrl === undefined) delete process.env.FLOWS_INGEST_URL;
+    if (prevTok === undefined) delete process.env.FLOWS_INGEST_TOKEN;
+    await new Promise((r) => server.close(r));
+  }
+}
+
+{
+  const http = await import("node:http");
+  const CHALLENGE = { status: 403, headers: { "cf-mitigated": "challenge", server: "cloudflare", "cf-ray": "8ca1b2c3d4e5f607-IAD",
+    "Content-Type": "text/html; charset=UTF-8" }, body: "<title>Just a moment...</title><script>window._cf_chl_opt={}</script>" };
+  const WAF = { status: 403, headers: { server: "cloudflare", "cf-ray": "8ca1b2c3d4e5f608-ORD", "Content-Type": "text/plain" },
+    body: "error code: 1020" };
+  const OWN = { status: 403, headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ error: { code: "wrong_writer", message: "live:market has one writer: worker@tier1" } }) };
+  const OK = { status: 200, headers: { "Content-Type": "application/json" }, body: '{"ok":true,"rows":[]}' };
+  let answers = [];
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    req.resume();
+    req.on("end", () => {
+      const a = answers.length ? answers.shift() : OK;
+      seen.push(`${req.method} ${a.status}`);
+      res.writeHead(a.status, a.headers);
+      res.end(a.body);
+    });
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const prevUrl = process.env.FLOWS_INGEST_URL;
+  const prevTok = process.env.FLOWS_INGEST_TOKEN;
+  process.env.FLOWS_INGEST_URL = `http://127.0.0.1:${server.address().port}/api/flows/ingest`;
+  process.env.FLOWS_INGEST_TOKEN = "test-token";
+  const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
+  const warned = [];
+  const realWarn = console.warn;
+  console.warn = (line) => warned.push(String(line));
+  try {
+    resetEdgeRefusals();
+    resetPublishRetryBudget();
+    answers = [CHALLENGE, WAF, OK];
+    const read = await readStored("roster", { pause: async () => {} });
+    ok(read.payload && read.recovered === 2 && seen.join() === "GET 403,GET 403,GET 200",
+      "AN EDGE 403 ON A READ is still retried, whatever kind it is");
+    ok(/read roster: HTTP 403 \(challenge, cf-ray 8ca1b2c3d4e5f607-IAD\) — waiting 1000ms and reading again \(retry 1 of 2\)/
+      .test(warned[0]) && /read roster: HTTP 403 \(block 1020, cf-ray 8ca1b2c3d4e5f608-ORD\) — waiting 4000ms/.test(warned[1]),
+    "and each retry line names the kind and the Ray ID, so the log alone identifies the blocker");
+
+    seen.length = 0;
+    answers = [OWN];
+    const own = await readStored("live:market", { pause: async () => {} });
+    ok(own.failed && own.status === 403 && own.refusal.kind === "worker" && seen.join() === "GET 403",
+      "THE WORKER'S OWN JSON 403 is an answer, not a transient: it is read once and not retried");
+
+    seen.length = 0;
+    answers = [CHALLENGE, OK];
+    await publish("roster", { rows: [] });
+    ok(seen.join() === "POST 403,POST 200" && warned.some((l) => /ingest roster: HTTP 403 \(challenge, cf-ray 8ca1b2c3d4e5f607-IAD\) from cloudflare/.test(l)),
+      "a publish the edge challenges is retried, and its retry line names the challenge and its Ray ID");
+
+    seen.length = 0;
+    answers = [OWN];
+    let threw = null;
+    try { await publish("roster", { rows: [] }); } catch (error) { threw = error; }
+    ok(threw && threw.status === 403 && /wrong_writer/.test(threw.message) && seen.join() === "POST 403",
+      "while a publish the Worker itself refuses fails at once with the Worker's reason, spending none of the retry budget");
+
+    deep([edgeRefusals.count, Object.fromEntries(Object.entries(edgeRefusals.kinds).map(([k, v]) => [k, v.n])), edgeRefusals.worker],
+      [3, { challenge: 2, "block 1020": 1 }, { wrong_writer: 2 }],
+    "the run's tally holds three edge 403s by kind and the Worker's two apart, which the health gate reads");
+    eq(resetEdgeRefusals().count, 3, "and it can be reset, returning what it held");
+    eq(edgeRefusals.count, 0, "to an empty tally");
+
+    const LIMITED = { status: 429, headers: { server: "cloudflare", "cf-ray": "8ca1b2c3d4e5f609-IAD", "Content-Type": "text/plain" },
+      body: "error code: 1015" };
+    const DOWN = { status: 503, headers: { server: "cloudflare", "cf-ray": "8ca1b2c3d4e5f60a-IAD", "Content-Type": "application/json" },
+      body: JSON.stringify({ error: { code: "unavailable", message: "D1 is unavailable" } }) };
+    seen.length = 0;
+    answers = [LIMITED, OK];
+    const limited = await readStored("roster", { pause: async () => {} });
+    answers = [DOWN, OK];
+    await publish("roster", { rows: [] });
+    answers = [{ status: 404, headers: {}, body: "" }];
+    await readStored("focus", { pause: async () => {} });
+    ok(limited.recovered === 1 && seen.join() === "GET 429,GET 200,POST 503,POST 200,GET 404" &&
+       JSON.stringify(Object.fromEntries(Object.entries(edgeRefusals.statuses).map(([k, v]) =>
+         [k, [v.n, v.unrayed, v.codes, [...v.rays, ...Object.values(v.codeRays).flat()]]]))) ===
+         JSON.stringify({ 429: [1, 0, { 1015: 1 }, ["8ca1b2c3d4e5f609-IAD"]], 503: [1, 0, {}, ["8ca1b2c3d4e5f60a-IAD"]] }) &&
+       edgeRefusals.count === 0,
+    "A RETRIED 429 OR 5xx IS TALLIED BY STATUS with its Ray ID and any Cloudflare code in its body, on a read and on a " +
+      "write alike, apart from the 403s, while a 404 is an answer and is not");
+
+    resetEdgeRefusals();
+    resetPublishRetryBudget();
+    const challenge = refusalOf({ headers: new Headers(CHALLENGE.headers), text: CHALLENGE.body });
+    for (let i = 0; i < 5; i++) tallyRefusal(edgeRefusals, challenge);
+    seen.length = 0;
+    answers = Array.from({ length: 9 }, () => CHALLENGE);
+    const lines = [];
+    const gate = await runHealthGate({ sessionDate: null, read: (key) => readStored(key, { pause: async () => {} }),
+      edge: edgeSnapshot, log: (l) => lines.push(l), warn: (l) => lines.push(l) });
+    const edgeLine = lines.find((l) => l.startsWith("  edge: ")) || "";
+    ok(seen.length === 9 && edgeRefusals.count === 14 &&
+       edgeLine === "  edge: 14 ingest answer(s) of HTTP 403 [challenge 14 (cf-ray 8ca1b2c3d4e5f607-IAD)], 15.0 s of retry budget spent" &&
+       gate.failures.length === 0,
+    "THE PIPELINE'S GATE READS ITS TALLY LAST: the nine 403s its own three reads meet (three tries each) are in the edge " +
+      "line's count and in its kinds alike, and the 15 s those reads waited are in its retry budget");
+  } finally {
+    console.warn = realWarn;
+    resetPublishRetryBudget();
     process.env.FLOWS_INGEST_URL = prevUrl;
     process.env.FLOWS_INGEST_TOKEN = prevTok;
     if (prevUrl === undefined) delete process.env.FLOWS_INGEST_URL;
