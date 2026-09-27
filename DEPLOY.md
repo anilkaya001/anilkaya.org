@@ -1657,28 +1657,38 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   to that token's no-recursion rule), origin `chain`, on `main`, and exits. The
   `flows-live` concurrency group keeps it to one loop.
 - **The GitHub schedule is only starters, sized by what GitHub delivered.** From
-  2026-09-23 to 09-25 GitHub created 6 scheduled `flows-live` runs for 63 slots
-  written on one or two cron lines a day: 18:59 and 22:13 UTC on Wednesday,
-  17:50 on Thursday, 18:01, 19:12 and 23:12 on Friday. None came before 17:50
-  UTC, so no morning had Tier 2. Those runs cannot be tied to their slots (each
-  line held several, and the job did not log which fired). The nightly's gate
-  does log it: its only cron then, the one-slot line `30 21 * * 1-5`, ran on all
-  three days, at 23:48, 23:56 and 23:59 UTC, 2 h 19 to 2 h 29 late. That reads as
-  about one run per cron line per day, hours late, so every starter is now a line
-  of one slot, 24 in all, and the arithmetic assumes any delay from on time to
-  five hours. `17 5 * * 1-5` to `17 12 * * 1-5` are the pre-open starters: a run
-  that starts up to 240 minutes before 09:31 ET sleeps until then, and one that
-  starts earlier exits at once. 09:31 ET is 13:31 UTC under EDT and 14:31 UTC
-  under EST, so the wait window is 09:31 to 13:31 UTC or 10:31 to 14:31 UTC.
-  Three hours late, the 07:17 to 10:17 starters land in it under EDT and 08:17
-  to 11:17 under EST; five hours late, 05:17 to 08:17 and 06:17 to 09:17; on
-  time, 10:17 to 13:17 and 11:17 to 14:17. For every delay from 0 to 5 h at
-  least four starters are waiting at 09:31, and `tests/flows-live-contract.mjs`
-  checks that minute by minute on EDT and EST days and runs the loop from every
-  slot at eight delays. `17 13` to `47 20`, at :17 and :47 of each hour,
-  restart a loop that died or never started (sixteen slots, as before). Every
-  starter fires 17 minutes past a :00 or :30 mark, away from the top of the
-  hour, where GitHub documents the load peaks that delay and drop schedules.
+  2026-09-23 to 09-25 GitHub created 6 scheduled `flows-live` runs for 63 slots:
+  18:59 and 22:13 UTC on Wednesday (one cron line), 17:50 on Thursday (one line),
+  18:01, 19:12 and 23:12 on Friday (two lines). None came before 17:50 UTC, so no
+  morning had Tier 2. The runs cannot be tied to their slots: each line held
+  several, and the job did not log which fired. Two readings fit them. Per line,
+  it is 2 runs from 1 line, 1 from 1 and 3 from 2; the nightly's gate, which does
+  log its cron, saw its only line then, the one-slot `30 21 * * 1-5`, run on all
+  three days, at 23:48, 23:56 and 23:59 UTC, 2 h 19 to 2 h 29 late. Per slot, it
+  is 6 of 63, about one in ten. Three days do not settle which, so the schedule
+  serves both: every starter is a line of one slot, and the lines are half an
+  hour apart, 32 in all, at :17 and :47 of every hour from `17 5 * * 1-5` to
+  `47 20 * * 1-5`. The arithmetic assumes any delay from on time to five hours.
+  A run that starts up to 240 minutes before 09:31 ET sleeps until then, and one
+  that starts earlier exits at once. 09:31 ET is 13:31 UTC under EDT and 14:31
+  UTC under EST, so the wait window is 09:31 to 13:31 UTC or 10:31 to 14:31 UTC.
+  On time, the 09:47 to 13:17 starters land in it under EDT and 10:47 to 14:17
+  under EST, eight each; three hours late, 06:47 to 10:17 and 07:47 to 11:17,
+  eight; five hours late, 05:17 to 08:17 (seven, 05:17 being the first line)
+  and 05:47 to 09:17 (eight). So for every delay from 0 to 5 h at least seven
+  starters land in the 240-minute window before 09:31 ET. The first to start
+  waits, and the concurrency group keeps only the newest of the rest pending,
+  cancelling the others, so seven landings are seven chances at one waiter, not
+  seven waiters. Read per slot, at 6 in 63, seven give about an even chance of a
+  pre-open waiter (1 - (57/63)^7 = 0.50), where the four of an hourly schedule
+  gave one in three (0.33); read per line, every day has one.
+  `tests/flows-live-contract.mjs` counts the landings minute by minute on EDT
+  and EST days, runs the loop from every slot at eight delays, and passes each
+  of those days through a model of the concurrency group: exactly one run
+  waits, it passes at 09:31, and the day's pre-open sleep adds up to at most 240
+  minutes. From 13:17 the same lines restart a loop that died or never started.
+  Every starter fires 17 minutes past a :00 or :30 mark, away from the top of
+  the hour, where GitHub documents the load peaks that delay and drop schedules.
 - **Each run logs how late GitHub delivered it.** The first step logs the cron
   that fired and reads the run's own `created_at` from the Actions API with the
   job's token (`gh api repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID`),
@@ -1692,26 +1702,28 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   cancelled while pending, replaced by a newer starter or by a chain, never
   reaches a step and never logs; its `created_at` is only in the Actions API
   (`GET /repos/{owner}/{repo}/actions/workflows/flows-live.yml/runs?event=schedule`).
-  Together they measure the delay the schedule assumes.
-- **Worst-case idle is 240 minutes of runner a day.** Runs share one concurrency
-  group, so only one waits at a time, and every waiting run waits for the same
+  Together they measure the delay the schedule assumes, and which reading of
+  the first three days holds.
+- **Worst-case idle is 240 minutes of waiting a day.** Runs share one concurrency
+  group, so only one runs at a time, and every waiting run waits for the same
   09:31: however many starters land, the pre-open wait a day adds up to at most
   `preOpenWaitMs`, 240 minutes. A run that waited that long still passes from
   09:31 for 99 minutes before it chains (the test keeps at least 60), and the
   chained run reaches 16:25 without a second chain (100 plus 340 minutes cover
   the 414 from 09:31 to 16:25; the test keeps that sum at least 414). Beyond
-  that, a starter that lands outside the window costs under a minute of runner,
-  one clock read from the Worker and no vendor call, and on a day Tier 1 closes
-  provisionally from the tape the loop also waits, without passes, until 11:00 ET
-  at the latest. Weekends and computed NYSE holidays never wait. The repository
-  is public, so hosted-runner minutes are not billed. A starter that queued behind a running loop starts when the
-  loop ends: inside 16:25 its one pass skips on the heartbeat and it exits at the
-  next slot, and after that it exits at once without a pass. The first pass of a
-  run still skips when a heartbeat landed under eight minutes ago, and the loop's
-  later passes do not, so a chained run that starts within eight minutes of the
-  last pass skips once and takes the next slot, none doubled or lost. A single
-  pass runs when `FLOWS_LIVE_LOOP` is unset or `FLOWS_LIVE_FORCE=1`. Dry run:
-  `--live --dry-run`.
+  that, a starter that runs outside the window costs under a minute of runner,
+  one clock read from the Worker and no vendor call, so the 32 lines add under
+  32 minutes a day, and one cancelled while pending costs nothing. On a day
+  Tier 1 closes provisionally from the tape the loop also waits, without passes,
+  until 11:00 ET at the latest. Weekends and computed NYSE holidays never wait.
+  The repository is public, so hosted-runner minutes are not billed. A starter
+  that queued behind a running loop starts when the loop ends: inside 16:25 its
+  one pass skips on the heartbeat and it exits at the next slot, and after that
+  it exits at once without a pass. The first pass of a run still skips when a
+  heartbeat landed under eight minutes ago, and the loop's later passes do not,
+  so a chained run that starts within eight minutes of the last pass skips once
+  and takes the next slot, none doubled or lost. A single pass runs when
+  `FLOWS_LIVE_LOOP` is unset or `FLOWS_LIVE_FORCE=1`. Dry run: `--live --dry-run`.
 - **The loop keeps the Worker's clock.** Before its first pass and around every
   later one it reads `clock: { day, trading, earlyClose }` with a GET of the
   ingest key `clock` under its live credential (`/api/flows/now` carries the same

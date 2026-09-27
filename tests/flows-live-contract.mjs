@@ -750,22 +750,24 @@ const cronMinutes = (cron) => {
   const crons = [...wf.matchAll(/cron: "([^"]+)"/g)].map((m) => m[1]);
   const hourly = (from, to, minutes) => Array.from({ length: to - from + 1 }, (_, i) => from + i)
     .flatMap((h) => minutes.map((m) => `${m} ${h} * * 1-5`));
-  deep(crons, [...hourly(5, 12, [17]), ...hourly(13, 20, [17, 47])],
-    "STARTERS, not a schedule, each a cron line of one slot. From 2026-09-23 to 09-25 GitHub created 6 scheduled " +
-      "live runs for 63 slots on 1 or 2 lines a day, the first at 17:50 UTC, while the nightly's single one-slot " +
-      "line '30 21' ran every day, 2 h 19, 2 h 26 and 2 h 29 late: about one run per line per day, hours late. A " +
-      "starter at S that GitHub delivers d late waits when S + d falls in the 240 minutes before 09:31 ET, which is " +
-      "13:31 UTC under EDT and 14:31 UTC under EST, so the window is 09:31 to 13:31 UTC (EDT) or 10:31 to 14:31 UTC " +
-      "(EST). With a starter at :17 of every hour from 05:17 to 12:17: 3 h late, 07:17 to 10:17 land in it (EDT) " +
-      "and 08:17 to 11:17 (EST); 5 h late, 05:17 to 08:17 (EDT) and 06:17 to 09:17 (EST); on time, 10:17 to 13:17 " +
-      "(EDT) and 11:17 to 14:17 (EST). Four starters for every delay from 0 to 5 h, checked minute by minute below. " +
-      ":17 and :47 from 13:17 to 20:47 restart a loop that died or never started, sixteen slots as before, now " +
-      "sixteen lines");
+  deep(crons, hourly(5, 20, [17, 47]),
+    "STARTERS, not a schedule, each a cron line of one slot, at :17 and :47 of every hour from 05:17 to 20:47 UTC. " +
+      "From 2026-09-23 to 09-25 GitHub created 6 scheduled live runs for 63 slots, the first at 17:50 UTC: 2 from " +
+      "Wednesday's one line, 1 from Thursday's one line and 3 from Friday's two, while the nightly's one-slot line " +
+      "'30 21' ran all three days, 2 h 19 to 2 h 29 late. Read per line that is one or two runs a day, read per slot " +
+      "it is 6 in 63, and three days do not settle which, so the lines are one slot each (a run per line) and half " +
+      "an hour apart (a run per slot). A starter at S that GitHub delivers d late waits when S + d falls in the 240 " +
+      "minutes before 09:31 ET: 09:31 to 13:31 UTC under EDT, 10:31 to 14:31 UTC under EST. On time, 09:47 to 13:17 " +
+      "land in it (EDT) and 10:47 to 14:17 (EST), eight each; 3 h late, 06:47 to 10:17 and 07:47 to 11:17, eight; " +
+      "5 h late, 05:17 to 08:17 (EDT, seven, 05:17 being the first) and 05:47 to 09:17 (EST, eight). At least seven " +
+      "landings for every delay from 0 to 5 h, checked minute by minute below: at 6 in 63 a slot, 1 - (57/63)^7 = " +
+      "0.50 that one of them is delivered, against 0.33 for the four of the hourly lines. From 13:17 the same lines " +
+      "restart a loop that died or never started");
   const slots = crons.flatMap(cronMinutes);
-  ok(crons.every((c) => / \* \* 1-5$/.test(c)) && slots.length === 24 && slots.every((s) => s % 30 === 17),
+  ok(crons.every((c) => / \* \* 1-5$/.test(c)) && slots.length === 32 && slots.every((s) => s % 30 === 17),
     "every starter runs Monday to Friday (GitHub counts weekdays from 0 = Sunday) at 17 minutes past a :00 or :30 " +
       "mark, off the top of the hour, where GitHub's documented load peaks delay and drop schedules");
-  ok(crons.every((c) => /^\d+ \d+ \* \* 1-5$/.test(c)) && new Set(crons).size === 24,
+  ok(crons.every((c) => /^\d+ \d+ \* \* 1-5$/.test(c)) && new Set(crons).size === 32,
     "every starter is a line of its own, so github.event.schedule names exactly one slot and the log can say how " +
       "late GitHub delivered it");
   const waitMs = LIVE_LOOP.preOpenWaitMs;
@@ -783,10 +785,13 @@ const cronMinutes = (cron) => {
     }
     cover[day] = least;
   }
-  ok(Object.values(cover).every(([n]) => n >= 4),
-    `FOUR STARTERS FOR EVERY DELAY: for each delay from 0 to 300 minutes at least four starters land inside the ` +
-      `${waitMs / 60000}-minute wait before 09:31 ET, under EDT (2026-09-28, 2027-03-15) and EST (2026-11-02, ` +
-      `2027-03-12); fewest, at which delay: ${JSON.stringify(cover)}`);
+  deep(Object.fromEntries(Object.entries(cover).map(([day, [n]]) => [day, n])),
+    { "2026-09-28": 7, "2027-03-15": 7, "2026-11-02": 8, "2027-03-12": 8 },
+    `SEVEN LANDINGS FOR EVERY DELAY: for each delay from 0 to 300 minutes at least seven starters land inside the ` +
+      `${waitMs / 60000}-minute wait before 09:31 ET under EDT (2026-09-28, 2027-03-15) and eight under EST ` +
+      `(2026-11-02, 2027-03-12); fewest, at which delay: ${JSON.stringify(cover)}. The first to start waits, and ` +
+      "the flows-live concurrency group keeps only the newest of the rest pending and cancels the others, so seven " +
+      "landings are seven chances at one waiter, not seven waiters");
   const say = wf.slice(wf.indexOf("      - name: Say who dispatched this run"), wf.indexOf("      - name: Read the live layer"));
   ok((wf.match(/\$\{\{ github\.event\.schedule \}\}/g) || []).length === 1 &&
      /FIRED: \$\{\{ github\.event\.schedule \}\}/.test(say) && /cron that fired: '\$\{FIRED:-none\}'/.test(say) &&
@@ -1602,16 +1607,16 @@ const cronMinutes = (cron) => {
       const r = await runLiveLoop({ now: c.now, sleep: c.sleep, log: () => {},
         pass: async () => { passAt.push(c.now()); c.advance(40000); return {}; },
         chain: async () => ({ sent: true, why: "sent", status: 204 }) });
-      return { r, passAt, sleeps: c.sleeps };
+      return { r, passAt, sleeps: c.sleeps, end: c.now() };
     };
     const wrong = [];
-    const waited = {};
+    const landed = {};
     for (const [zone, day] of [["EDT", "2026-09-28"], ["EST", "2026-11-02"]]) {
       const first = easternInstant(day, PHASE_MINUTES.open) + LIVE_LOOP.openLagMs;
       const base = T(day + "T00:00:00Z");
       for (const d of [0, 60, 120, 180, 210, 240, 270, 300]) {
         const key = `${zone} +${d} min`;
-        waited[key] = 0;
+        landed[key] = 0;
         for (const s of slots) {
           const at = base + (s + d) * 60000;
           const { r, passAt, sleeps } = await start(at);
@@ -1621,20 +1626,65 @@ const cronMinutes = (cron) => {
             if (passAt[0] !== at || r.preOpenMs !== 0) wrong.push(label + ": should pass at once");
           } else if (lead >= 0 && lead <= waitMs) {
             if (passAt[0] !== first || r.preOpenMs !== lead || sleeps[0] !== lead) wrong.push(label + ": should wait");
-            else waited[key]++;
+            else landed[key]++;
           } else if (r.exit !== "outside-window" || passAt.length || sleeps.length || r.preOpenMs !== 0) {
             wrong.push(label + ": should exit at once");
           }
         }
       }
     }
-    deep(wrong, [], "THE LOOP DOES WHAT THE SCHEDULE ARITHMETIC SAYS, for every one of the 24 starter slots " +
+    deep(wrong, [], `THE LOOP DOES WHAT THE SCHEDULE ARITHMETIC SAYS, for every one of the ${slots.length} starter slots ` +
       "delivered on time or 1, 2, 3, 3.5, 4, 4.5 or 5 h late, under EDT (2026-09-28) and EST (2026-11-02): a " +
       "starter that lands up to " +
       `${waitMs / 60000} minutes before 09:31 ET sleeps until then and passes at 09:31 exactly, one that lands in the ` +
       "session passes at once, and any other exits at once without a sleep or a pass");
-    ok(Object.values(waited).every((n) => n >= 4),
-      `so at least four starters are waiting at 09:31 ET at every one of those delays (${JSON.stringify(waited)})`);
+    ok(Object.values(landed).every((n) => n >= 7),
+      "so at least seven starters, each run alone, would wait for 09:31 ET at every one of those delays; the " +
+        "concurrency group lets the first of them wait and cancels all but the newest of the rest while it is " +
+        `pending, so these are chances at the one waiting run, not waiting runs (${JSON.stringify(landed)})`);
+    const group = async (landings) => {
+      const ran = [];
+      let busyUntil = -Infinity;
+      let chainedAt = null;
+      let pending = null;
+      const begin = async (at) => {
+        const run = await start(at);
+        ran.push({ at, ...run });
+        busyUntil = run.end;
+        chainedAt = run.r.chained && run.r.chained.sent ? run.end : null;
+      };
+      const drainTo = async (limit) => {
+        while (busyUntil <= limit && (pending !== null || chainedAt !== null)) {
+          const next = chainedAt !== null ? busyUntil : pending;
+          pending = null;
+          chainedAt = null;
+          await begin(Math.max(next, busyUntil));
+        }
+      };
+      for (const at of landings) {
+        await drainTo(at);
+        if (busyUntil > at) pending = at;
+        else await begin(at);
+      }
+      await drainTo(Infinity);
+      return ran;
+    };
+    const queueWrong = [];
+    for (const [zone, day] of [["EDT", "2026-09-28"], ["EST", "2026-11-02"]]) {
+      const first = easternInstant(day, PHASE_MINUTES.open) + LIVE_LOOP.openLagMs;
+      const base = T(day + "T00:00:00Z");
+      for (const d of [0, 60, 120, 180, 210, 240, 270, 300]) {
+        const ran = await group(slots.map((s) => base + (s + d) * 60000).sort((a, b) => a - b));
+        const waiters = ran.filter((x) => x.r.preOpenMs > 0);
+        const idle = ran.reduce((sum, x) => sum + x.r.preOpenMs, 0);
+        if (waiters.length !== 1 || idle > waitMs || waiters[0].passAt[0] !== first) {
+          queueWrong.push(`${zone} +${d} min: ${waiters.length} waiters, ${idle / 60000} min idle`);
+        }
+      }
+    }
+    deep(queueWrong, [], "THROUGH THE CONCURRENCY GROUP (one run, and one pending run that a newer one replaces): at " +
+      "every one of those delays, under EDT and EST, exactly one run waits, it passes at 09:31 ET, and the day's " +
+      `pre-open sleep adds up to at most ${waitMs / 60000} minutes however many starters land`);
 
     for (const [zone, day] of [["EDT", "2026-09-28"], ["EST", "2026-11-02"]]) {
       const first = easternInstant(day, 9 * 60 + 31);
@@ -2257,6 +2307,6 @@ console.log(`✓ flows-live: ${checks} assertions — one threshold table in cod
   `that is provisional until two probes fifteen minutes apart agree, re-probed until 11:00, with the closed days kept; ` +
   `the focus names read ahead of the boards in the one strip call; the nightly health gate and the live job's exit ` +
   `rule; the self-sustaining ` +
-  `Tier 2 session loop, its budget and its chain dispatch; starters that put four waiting runs before 09:31 ET for ` +
-  `every delivery delay up to five hours, under EDT and EST; a delivery log timed from the run's created_at; and a ` +
-  `client helper that only compares clocks`);
+  `Tier 2 session loop, its budget and its chain dispatch; starters that land at least seven times in the wait ` +
+  `before 09:31 ET for every delivery delay up to five hours, under EDT and EST, each a chance at the one run that ` +
+  `waits; a delivery log timed from the run's created_at; and a client helper that only compares clocks`);
