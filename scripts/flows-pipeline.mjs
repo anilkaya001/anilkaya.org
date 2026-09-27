@@ -66,7 +66,7 @@ import {
   runLive, runLiveLoop, chainDispatch, dryLiveTicks, readHeldAlerts, readLiveClock, LIVE_READ_PACE_MS,
   passOutcome, liveRunVerdict,
 } from "./flows-legs/live.mjs";
-import { runHealthGate, republishRepair } from "./flows-legs/health.mjs";
+import { runHealthGate, republishRepair, refusalOf, refusalTally, tallyRefusal, refusalBrief } from "./flows-legs/health.mjs";
 import { LIVE_OIDC, actionsIdToken, jwtExpiry } from "../shared/flows-oidc.js";
 
 const ARGS = new Set(process.argv.slice(2));
@@ -1794,7 +1794,23 @@ export const READ_RETRIES = 2;
 
 const READ_RETRYABLE = (status) => status === 0 || PUBLISH_RETRYABLE.has(status) || status >= 500;
 
-export const edgeRefusals = { count: 0 };
+export const edgeRefusals = refusalTally();
+
+export function resetEdgeRefusals() {
+  const seen = { count: edgeRefusals.count, kinds: edgeRefusals.kinds, worker: edgeRefusals.worker };
+  Object.assign(edgeRefusals, refusalTally());
+  return seen;
+}
+
+async function noteRefusal(response) {
+  const text = await response.text().catch(() => "");
+  const seen = refusalOf({ headers: response.headers, text });
+  tallyRefusal(edgeRefusals, seen);
+  return { ...seen, text };
+}
+
+const readSaid = (read) => (read.status ? `HTTP ${read.status}` : read.detail || "no answer") +
+  (read.refusal ? ` (${refusalBrief(read.refusal)})` : "");
 
 async function readStoredOnce(key) {
   try {
@@ -1805,7 +1821,10 @@ async function readStoredOnce(key) {
         headers: await ingestHeaders(),
       },
     );
-    if (response.status === 403) edgeRefusals.count++;
+    const refusal = response.status === 403 ? await noteRefusal(response) : null;
+    if (refusal) {
+      return { payload: null, failed: true, status: 403, refusal, final: refusal.kind === "worker" };
+    }
     if (!response.ok) return { payload: null, failed: true, status: response.status };
     const body = await response.json();
 
@@ -1821,14 +1840,14 @@ async function readStoredOnce(key) {
 async function readStored(key, { retries = READ_RETRIES, pause = sleep, budget = null } = {}) {
   if (DRY_RUN) return { payload: null, absent: true, status: 0 };
   let read = await readStoredOnce(key);
-  for (let attempt = 0; read.failed && READ_RETRYABLE(read.status); attempt++) {
+  for (let attempt = 0; read.failed && !read.final && READ_RETRYABLE(read.status); attempt++) {
     const wait = budget
       ? publishRetryDelay(attempt, { retries, spentMs: budget.spentMs, budgetMs: budget.budgetMs })
       : publishRetryDelay(attempt, { retries, spentMs: publishRetrySpentMs });
     if (wait === null) break;
     if (budget) budget.spentMs += wait;
     else publishRetrySpentMs += wait;
-    console.warn(`  read ${key}: ${read.status ? `HTTP ${read.status}` : read.detail || "no answer"}` +
+    console.warn(`  read ${key}: ${readSaid(read)}` +
       ` — waiting ${wait}ms and reading again (retry ${attempt + 1} of ${retries})`);
     await pause(wait);
     const again = await readStoredOnce(key);
@@ -2853,8 +2872,8 @@ async function retire(key) {
         headers: await ingestHeaders(),
       },
     );
-    if (response.status === 403) edgeRefusals.count++;
-    return { ok: response.ok, status: response.status };
+    const refusal = response.status === 403 ? await noteRefusal(response) : null;
+    return { ok: response.ok, status: response.status, refusal };
   } catch (error) {
     return { ok: false, status: 0, message: error.message };
   }
@@ -2927,7 +2946,7 @@ async function publish(key, payload) {
     landedKeys.add(key);
     return;
   }
-  let response, lastDetail = "";
+  let response, refusal = null, lastDetail = "";
   for (let attempt = 0; ; attempt++) {
 
   await ingestWrites.acquire();
@@ -2943,15 +2962,15 @@ async function publish(key, payload) {
     },
   );
 
-  if (response.status === 403) edgeRefusals.count++;
-  const wait = PUBLISH_RETRYABLE.has(response.status)
+  refusal = response.status === 403 ? await noteRefusal(response) : null;
+  const wait = PUBLISH_RETRYABLE.has(response.status) && !(refusal && refusal.kind === "worker")
     ? publishRetryDelay(attempt, { spentMs: publishRetrySpentMs })
     : null;
   if (!response.ok && wait !== null) {
-    lastDetail = await response.text().catch(() => "");
+    lastDetail = refusal ? refusal.text : await response.text().catch(() => "");
     publishRetrySpentMs += wait;
     console.warn(
-      `  ingest ${key}: HTTP ${response.status} from ` +
+      `  ingest ${key}: HTTP ${response.status}${refusal ? ` (${refusalBrief(refusal)})` : ""} from ` +
       `${response.headers.get("server") || "unknown"} — waiting ${wait}ms and retrying ` +
       `(retry ${attempt + 1} of ${PUBLISH_RETRIES}; ` +
       `${Math.round(publishRetrySpentMs / 1000)}s of the run's ` +
@@ -2966,7 +2985,7 @@ async function publish(key, payload) {
 
   if (!response.ok) {
 
-    const detail = (await response.text().catch(() => "")) || lastDetail;
+    const detail = (refusal ? refusal.text : await response.text().catch(() => "")) || lastDetail;
     const ray = response.headers.get("cf-ray") || "none";
     const server = response.headers.get("server") || "unknown";
     const failure = new Error(
@@ -6742,7 +6761,8 @@ async function main() {
   if (verdict) console.log("  " + verdict);
 
   const health = await runHealthGate({ sessionDate, read: readStored, dry: DRY_RUN,
-    edge403: edgeRefusals.count, retrySpentMs: publishRetrySpentMs });
+    edge403: edgeRefusals.count, edgeKinds: edgeRefusals.kinds, worker403: edgeRefusals.worker,
+    retrySpentMs: publishRetrySpentMs });
   if (health.failures.length) process.exitCode = 1;
 }
 
@@ -6765,7 +6785,7 @@ export {
   runPooled, poolWidth, describeFloorVerdict, POOL_MAX_WIDTH, POOL_EVIDENCE_MIN,
   POOL_REFUSAL_HALT, POOL_REFUSAL_EASE,
   unusualContractId, markNewContracts, priorNote, fakePriorUnusual,
-  PUBLISH_SPACING_MS, readStored,
+  PUBLISH_SPACING_MS, readStored, noteRefusal,
 };
 
 const invokedDirectly = process.argv[1]

@@ -15,7 +15,7 @@ import {
   readHeldAlerts, boardPlan, liveWindow, runLive, runLiveLoop, chainDispatch, nextSlot, LIVE_LOOP, readLiveClock,
   sessionClock, liveRunVerdict, passOutcome, focusStripNames, FOCUS_FALLBACK,
 } from "../scripts/flows-legs/live.mjs";
-import { healthChecks, runHealthGate } from "../scripts/flows-legs/health.mjs";
+import { healthChecks, runHealthGate, refusalOf, refusalTally, tallyRefusal, HEALTH } from "../scripts/flows-legs/health.mjs";
 import {
   shapeNews, liveCredential, liveCredentialSource, LIVE_BEARER_MARGIN_MS, resetPublishRetryBudget, intradayRefusal,
 } from "../scripts/flows-pipeline.mjs";
@@ -1861,9 +1861,100 @@ const T = (iso) => Date.parse(iso);
   deep(["no-token", "sent", "unreachable"].map((w) => fails({ clockRead: clockWith({ dispatchWhy: w }) }).length), [0, 0, 0],
     "while no token, a sent dispatch or one unreachable blip is not a token failure");
   deep(fails({ edge403: 30 }), ["HEALTH: the edge answered 30 ingest request(s) with HTTP 403 and retries spent 6 s of the " +
-    "90 s budget: add the WAF skip rule for /api/flows/ingest (DEPLOY.md 10.0)"], "and an edge refusing ingest more than twice the worst night");
+    "90 s budget: add the WAF skip rule for /api/flows/ingest (DEPLOY.md 10.0 item 3)"], "and an edge refusing ingest more than twice the worst night");
   deep(fails({ clockRead: { payload: null, failed: true, status: 403 } }), ["HEALTH: the Worker's clock could not be read (HTTP 403)"],
     "an unreadable clock is itself a failure");
+  {
+    const answer = async (headers, body) => {
+      const res = new Response(body, { status: 403, headers });
+      return refusalOf({ headers: res.headers, text: await res.text() });
+    };
+    const CHALLENGE_PAGE = "<!DOCTYPE html><html lang=\"en-US\"><head><title>Just a moment...</title></head><body>" +
+      "<script>(function(){window._cf_chl_opt={cvId: '3',cZone: 'anilkaya.org',cType: 'managed'};}());</script></body></html>";
+    const BLOCK_PAGE = "<!DOCTYPE html><title>Attention Required! | Cloudflare</title><div id=\"cf-error-details\">" +
+      "<h1>Sorry, you have been blocked</h1><span class=\"cf-error-code\">1010</span></div>";
+    const WORKER_403 = JSON.stringify({ error: { code: "nightly_token_scope", message: "The nightly token cannot write live:* keys" } });
+    const kinds = {
+      challenge: await answer({ "cf-mitigated": "challenge", server: "cloudflare", "cf-ray": "8c9d0e1f2a3b4c5d-IAD",
+        "content-type": "text/html; charset=UTF-8" }, CHALLENGE_PAGE),
+      pageOnly: await answer({ server: "cloudflare", "cf-ray": "8c9d0e1f2a3b4c5e-IAD", "content-type": "text/html" }, CHALLENGE_PAGE),
+      waf: await answer({ server: "cloudflare", "cf-ray": "8c9d0e1f2a3b4c60-ORD", "content-type": "text/plain; charset=UTF-8" },
+        "error code: 1020"),
+      bic: await answer({ server: "cloudflare", "cf-ray": "8c9d0e1f2a3b4c61-DFW", "content-type": "text/html" }, BLOCK_PAGE),
+      banned: await answer({ server: "cloudflare", "cf-ray": "8c9d0e1f2a3b4c62-SEA" }, "error code: 1006"),
+      mitigatedBlock: await answer({ "cf-mitigated": "block", server: "cloudflare", "cf-ray": "8c9d0e1f2a3b4c63-IAD" }, ""),
+      worker: await answer({ server: "cloudflare", "cf-ray": "8c9d0e1f2a3b4c64-IAD", "content-type": "application/json" }, WORKER_403),
+      workerShapedChallenge: await answer({ "cf-mitigated": "challenge", server: "cloudflare", "cf-ray": "8c9d0e1f2a3b4c65-IAD",
+        "content-type": "application/json" }, WORKER_403),
+      bare: await answer({ server: "cloudflare", "cf-ray": "8c9d0e1f2a3b4c66-SJC", "content-type": "application/json" }, "{}"),
+      proxy: await answer({ server: "squid/5.9", "content-type": "text/html" }, "<h1>Forbidden</h1>"),
+      hostile: await answer({ server: "::add-mask::x", "cf-ray": "::set-env name=A::b", "cf-mitigated": "::warning::" }, ""),
+    };
+    deep(Object.fromEntries(Object.entries(kinds).map(([k, v]) => [k, [v.kind, v.code]])), {
+      challenge: ["challenge", null], pageOnly: ["challenge", null], waf: ["block", "1020"], bic: ["block", "1010"],
+      banned: ["block", "1006"], mitigatedBlock: ["block", null], worker: ["worker", "nightly_token_scope"],
+      workerShapedChallenge: ["challenge", null], bare: ["unmarked", null], proxy: ["unmarked", null], hostile: ["block", null],
+    },
+    "EDGE 403s BY KIND, read from the answer itself since nobody can see Security Events: cf-mitigated: challenge or a " +
+      "challenge page is a challenge; a Cloudflare error code (1020 a WAF rule, 1010 Browser Integrity Check, 1006 an " +
+      "IP ban) or another cf-mitigated value is a block; the Worker's own JSON error is the Worker's, never the edge's, " +
+      "unless Cloudflare marked the answer; a 403 with neither is unmarked");
+    deep([kinds.challenge.ray, kinds.challenge.server, kinds.challenge.mitigated, kinds.challenge.type, kinds.proxy.ray,
+      kinds.proxy.server], ["8c9d0e1f2a3b4c5d-IAD", "cloudflare", "challenge", "text/html", null, "squid/5.9"],
+    "and it keeps what identifies the blocker: cf-mitigated, server, cf-ray and the content type");
+    ok(!/::/.test(JSON.stringify(kinds.hostile)) && kinds.hostile.ray === "set-envnameAb",
+      "every header it keeps is cut to a safe alphabet, so a hostile answer cannot smuggle a workflow command into the log");
+
+    const tally = refusalTally();
+    for (let i = 0; i < 20; i++) tallyRefusal(tally, i % 2 ? kinds.challenge : { ...kinds.challenge, ray: `8c9d0e1f2a3b${i}-IAD` });
+    tallyRefusal(tally, kinds.waf);
+    tallyRefusal(tally, kinds.waf);
+    tallyRefusal(tally, kinds.worker);
+    deep([tally.count, Object.keys(tally.kinds), tally.kinds.challenge.n, tally.kinds.challenge.rays.length, tally.worker],
+      [22, ["challenge", "block 1020"], 20, 3, { nightly_token_scope: 1 }],
+    "the tally counts edge 403s by kind with up to three Ray IDs each, and keeps the Worker's own 403s out of the count");
+    const night = healthChecks({ ...good, edge403: tally.count, edgeKinds: tally.kinds, worker403: tally.worker });
+    ok(night.failures.length === 0 && night.notes[0].startsWith("edge: 22 ingest answer(s) of HTTP 403 [challenge 20 (cf-ray ") &&
+       /; block 1020 2 \(cf-ray 8c9d0e1f2a3b4c60-ORD\)\], 6\.0 s of retry budget spent; not counted: 1 JSON 403\(s\) from the Worker itself \(nightly_token_scope 1\)/
+         .test(night.notes[0]),
+    "THE EDGE LINE SUMMARISES BY KIND: under the threshold it is a note, naming each kind, its count and its Ray IDs, " +
+      "with the Worker's own 403s named apart and not counted");
+    const worst = refusalTally();
+    for (let i = 0; i < 24; i++) tallyRefusal(worst, kinds.challenge);
+    const red = healthChecks({ ...good, edge403: worst.count, edgeKinds: worst.kinds, retrySpentMs: 40000 }).failures;
+    eq(red[0], "HEALTH: the edge answered 24 ingest request(s) with HTTP 403 and retries spent 40 s of the 90 s budget",
+      "at 24 edge 403s the gate turns red with the count");
+    ok(red.length === 2 && /^HEALTH: 24 were Cloudflare challenges \(cf-mitigated: challenge; Ray ID 8c9d0e1f2a3b4c5d-IAD\)/.test(red[1]) &&
+       /Skip rule for \/api\/flows\/ingest in DEPLOY\.md 10\.0 item 3, with Security Level and Browser Integrity Check ticked/.test(red[1]) &&
+       /Bot Fight Mode, which the Free plan cannot skip: turn it off \(Security → Settings → Bot traffic\)$/.test(red[1]),
+    "and a CHALLENGE names its remedy: the Skip rule (item 3) with Security Level ticked, and Bot Fight Mode off if " +
+      "challenges outlive the rule, because the Free plan cannot skip it");
+    const remedyOf = (seen, n = 24) => {
+      const t = refusalTally();
+      for (let i = 0; i < n; i++) tallyRefusal(t, seen);
+      return healthChecks({ ...good, edge403: t.count, edgeKinds: t.kinds }).failures[1];
+    };
+    ok(/^HEALTH: 24 were Cloudflare blocks \(error 1020; Ray ID 8c9d0e1f2a3b4c60-ORD\): a WAF custom rule blocks the route: the Skip rule .* item 3, placed above that rule/
+      .test(remedyOf(kinds.waf)), "a 1020 block names the WAF custom rule and the Skip rule placed above it");
+    ok(/^HEALTH: 24 were Cloudflare blocks \(error 1010; .*Browser Integrity Check blocks the route: tick Browser Integrity Check in the Skip rule/
+      .test(remedyOf(kinds.bic)), "a 1010 block names Browser Integrity Check");
+    ok(/error 1006; .*an IP Access rule bans the runner's address, network or country: remove it \(Security → WAF → Tools\)/
+      .test(remedyOf(kinds.banned)), "an IP ban names the IP Access rule");
+    ok(/no error code, cf-mitigated: block; .*find the Ray ID in Security → Events/.test(remedyOf(kinds.mitigatedBlock)),
+      "an unnumbered block sends the owner to the Ray ID");
+    ok(/^HEALTH: 24 were 403s with neither a Cloudflare mitigation marker nor the Worker's JSON error \(server cloudflare; Ray ID/
+      .test(remedyOf(kinds.bare)), "an unmarked 403 that passed Cloudflare says so, with its Ray ID");
+    ok(/^HEALTH: 24 were 403s with no cf-ray \(server squid\/5\.9\), so never through Cloudflare/.test(remedyOf(kinds.proxy)),
+      "and one with no cf-ray never reached the edge, so no Cloudflare setting is blamed for it");
+    const own = refusalTally();
+    for (let i = 0; i < 40; i++) tallyRefusal(own, kinds.worker);
+    deep(healthChecks({ ...good, edge403: own.count, edgeKinds: own.kinds, worker403: own.worker }).failures, [],
+      "FORTY OF THE WORKER'S OWN 403s are not the edge: they never count toward the threshold");
+    deep(fails({ edge403: 0, retrySpentMs: HEALTH.retrySpentMs }), ["HEALTH: ingest retries spent 60 s of the 90 s budget with " +
+      "no edge 403: the ingest route answered 408, 429 or 5xx, or did not answer, so the Worker or D1 was failing; the " +
+      "ingest lines above name each answer"],
+    "and a retry budget spent on 5xx answers with no 403 at all is not blamed on the WAF");
+  }
   const off = healthChecks({ ...good, clockRead: clockWith({ tier1: { at: null, okAt: null, why: "off" } }),
     heartbeatRead: { payload: null, absent: true } });
   ok(off.failures.length === 0 && off.why === "live-off", "FLOWS_LIVE_MODE off is a deliberate rollback, not a failure");
@@ -1884,11 +1975,14 @@ const T = (iso) => Date.parse(iso);
     "runHealthGate reads the clock, live:market and live:heartbeat through the ingest route and prints one line");
   const pipeline = read("scripts/flows-pipeline.mjs");
   const tail = pipeline.slice(pipeline.indexOf("async function main()"), pipeline.indexOf("\nexport {\n"));
-  ok(/const health = await runHealthGate\(\{ sessionDate, read: readStored, dry: DRY_RUN,\s*edge403: edgeRefusals\.count, retrySpentMs: publishRetrySpentMs \}\);\s*if \(health\.failures\.length\) process\.exitCode = 1;\s*\}\s*$/
+  ok(/const health = await runHealthGate\(\{ sessionDate, read: readStored, dry: DRY_RUN,\s*edge403: edgeRefusals\.count, edgeKinds: edgeRefusals\.kinds, worker403: edgeRefusals\.worker,\s*retrySpentMs: publishRetrySpentMs \}\);\s*if \(health\.failures\.length\) process\.exitCode = 1;\s*\}\s*$/
     .test(tail), "THE NIGHTLY ENDS WITH THE GATE: its last statement runs it and turns the run red on any failure, after " +
-    "every key is published");
-  eq((pipeline.match(/if \(response\.status === 403\) edgeRefusals\.count\+\+;/g) || []).length, 3,
-    "and every ingest read, write and delete counts an edge 403 into it");
+    "every key is published, with the edge 403s counted by kind and the Worker's own 403s kept apart");
+  eq((pipeline.match(/refusal = response\.status === 403 \? await noteRefusal\(response\) : null;/g) || []).length, 3,
+    "and every ingest read, write and delete classifies a 403 into it");
+  eq((pipeline.match(/ingestURL\(\) \+ "\?key="/g) || []).length, 3, "which are the pipeline's only three ingest requests");
+  ok(/async function noteRefusal\(response\) \{\s*const text = await response\.text\(\)\.catch\(\(\) => ""\);\s*const seen = refusalOf\(\{ headers: response\.headers, text \}\);\s*tallyRefusal\(edgeRefusals, seen\);/
+    .test(pipeline), "noteRefusal reads the 403's own headers and body, and tallies what it finds");
   const { republishRepair } = await import("../scripts/flows-legs/health.mjs");
   const repair = republishRepair("2026-09-25");
   ok(/republish_session/.test(repair) && /gh workflow run flows-pipeline\.yml -f republish_session=true/.test(repair) &&

@@ -338,13 +338,35 @@ it unlocks and what tells you it has lapsed.
    `HEALTH: Tier 1's last tick failed with error:no-key`.
 3. **A WAF skip rule for the ingest route.** Cloudflare's edge sometimes
    answers GitHub runners with a 403 on `/api/flows/ingest` (eleven on
-   2026-09-24, all absorbed by retries). Check Security → Events filtered on
-   that path; then Security → WAF → Custom rules → Create rule, expression
-   `(http.request.uri.path eq "/api/flows/ingest")`, action **Skip** (all
-   remaining custom rules, rate limiting rules and managed rules), placed
-   first. Bot Fight Mode cannot be skipped on the Free plan: if the events name
-   it, turn it off. The nightly counts every edge 403 and turns red at 24 of
-   them, or 60 s of retry budget, before the 90 s budget runs out.
+   2026-09-24 and seventeen on 09-26, all absorbed by retries). Security →
+   WAF → Custom rules → Create rule, expression
+   `(http.request.uri.path eq "/api/flows/ingest")`, action **Skip**: all
+   remaining custom rules, rate limiting rules and managed rules, and under
+   *More components to skip* Security Level and Browser Integrity Check; place
+   it first. Bot Fight Mode cannot be skipped on the Free plan: if challenges
+   go on with the rule in place, turn it off (Security → Settings → Bot
+   traffic).
+
+   The nightly reads each 403 itself, so the blocker is named without Security
+   Events. Every retry line carries the kind and the Ray ID
+   (`read roster: HTTP 403 (challenge, cf-ray 8c…-IAD) — waiting 1000ms…`),
+   and the run's last `edge:` line counts them by kind, with up to three Ray
+   IDs each:
+   `edge: 17 ingest answer(s) of HTTP 403 [challenge 15 (cf-ray …); block 1020 2 (cf-ray …)], 12.0 s of retry budget spent`.
+   The kinds come from the answer alone: `challenge` (a `cf-mitigated:
+   challenge` header or a challenge page, from Bot Fight Mode, a WAF rule or
+   Security Level), `block NNNN` (a Cloudflare error code: 1020 a WAF custom
+   rule, 1010 Browser Integrity Check, 1005 to 1009 an IP Access rule),
+   `block` (another `cf-mitigated` value), and `unmarked` (neither; with no
+   `cf-ray` it never reached Cloudflare). The Worker's own JSON 403 (a
+   credential-scope or one-writer refusal) is not the edge: it is listed
+   after `not counted:`, never retried and never counted. At 24 edge 403s, or
+   60 s of retry budget, before the 90 s budget runs out, the gate turns the
+   run red with one line per kind naming its remedy: the Skip rule for a
+   challenge, a 1020 or a 1010, Bot Fight Mode off for challenges that outlive
+   the rule, the IP Access rule for 1005 to 1009, and the Ray ID to look up in
+   Security → Events for anything else. A budget spent with no 403 at all is
+   reported as the Worker or D1 failing, not as the WAF.
 4. **The Google OAuth client.** Google deletes OAuth clients left unused for
    about six months, and Lab sign-in is rare. Sign in to the Lab every three
    months, or watch the Google Cloud console (APIs & Services → Credentials)

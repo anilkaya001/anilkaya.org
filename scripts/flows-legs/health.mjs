@@ -30,6 +30,159 @@ export const DISPATCH_ADVICE = Object.freeze({
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const pad = (n) => String(n).padStart(2, "0");
 
+const CHALLENGE_RE = /_cf_chl_opt|\/cdn-cgi\/challenge-platform\/|<title>\s*Just a moment/i;
+const BLOCK_RE = /Sorry, you have been blocked|Attention Required! \| Cloudflare|cf-error-details/i;
+const CF_CODE_RES = [
+  /error[\s_-]?code["']?\s*[:=]?\s*["']?(1\d{3})\b/i,
+  /cf-error-code[^>]*>\s*(1\d{3})\b/i,
+  /\bError\s+(1\d{3})\b/,
+];
+const RAYS_KEPT = 3;
+
+const headerOf = (headers, name) => {
+  try { return headers && typeof headers.get === "function" ? headers.get(name) : null; } catch { return null; }
+};
+const cleaned = (value, allowed, max) => {
+  if (typeof value !== "string") return null;
+  const out = value.replace(allowed, "").trim().slice(0, max);
+  return out || null;
+};
+
+function cloudflareCode(text) {
+  for (const re of CF_CODE_RES) {
+    const m = re.exec(text);
+    if (m) return m[1];
+  }
+  return null;
+}
+
+function workerErrorCode(text) {
+  const body = text.trim();
+  if (!body.startsWith("{") || body.length > 16384) return null;
+  let parsed;
+  try { parsed = JSON.parse(body); } catch { return null; }
+  const error = parsed && typeof parsed === "object" ? parsed.error : null;
+  if (!error || typeof error !== "object" || typeof error.code !== "string" || typeof error.message !== "string") return null;
+  return /^[a-z][a-z0-9_]{0,39}$/.test(error.code) ? error.code : "unnamed";
+}
+
+export function refusalOf({ headers = null, text = "" } = {}) {
+  const body = typeof text === "string" ? text : "";
+  const mitigated = cleaned(String(headerOf(headers, "cf-mitigated") || "").toLowerCase(), /[^a-z_-]/g, 24);
+  const seen = {
+    mitigated,
+    ray: cleaned(headerOf(headers, "cf-ray"), /[^A-Za-z0-9-]/g, 40),
+    server: cleaned(headerOf(headers, "server"), /[^A-Za-z0-9 ._/-]/g, 40),
+    type: cleaned(String(headerOf(headers, "content-type") || "").split(";")[0].toLowerCase(), /[^a-z0-9.+/-]/g, 60),
+  };
+  const code = cloudflareCode(body);
+  if (!mitigated && !code) {
+    const own = workerErrorCode(body);
+    if (own) return { kind: "worker", code: own, ...seen };
+  }
+  if (mitigated === "challenge" || CHALLENGE_RE.test(body)) return { kind: "challenge", code: null, ...seen };
+  if (mitigated || code || BLOCK_RE.test(body)) return { kind: "block", code, ...seen };
+  return { kind: "unmarked", code: null, ...seen };
+}
+
+export const refusalLabel = (seen) => (seen.kind === "block" && seen.code ? `block ${seen.code}` : seen.kind);
+
+export function refusalBrief(seen) {
+  if (!seen) return "";
+  if (seen.kind === "worker") return `the Worker's own ${seen.code}`;
+  return refusalLabel(seen) + (seen.ray ? `, cf-ray ${seen.ray}` : ", no cf-ray");
+}
+
+export function refusalTally() {
+  return { count: 0, kinds: {}, worker: {} };
+}
+
+export function tallyRefusal(tally, seen) {
+  if (!tally || !seen) return tally;
+  if (seen.kind === "worker") {
+    tally.worker[seen.code] = (tally.worker[seen.code] || 0) + 1;
+    return tally;
+  }
+  tally.count++;
+  const label = refusalLabel(seen);
+  const slot = tally.kinds[label] || (tally.kinds[label] = { kind: seen.kind, code: seen.code, n: 0, rays: [],
+    server: seen.server, mitigated: seen.mitigated });
+  slot.n++;
+  if (seen.ray && slot.rays.length < RAYS_KEPT && !slot.rays.includes(seen.ray)) slot.rays.push(seen.ray);
+  return tally;
+}
+
+const SKIP_RULE = "the Skip rule for /api/flows/ingest in DEPLOY.md 10.0 item 3";
+const rayNote = (slot) => (slot.rays.length ? `; Ray ID ${slot.rays.join(", ")}` : "; no cf-ray");
+
+function blockRemedy(code) {
+  if (code === "1020") return `a WAF custom rule blocks the route: ${SKIP_RULE}, placed above that rule, lets it through`;
+  if (code === "1010") {
+    return `Browser Integrity Check blocks the route: tick Browser Integrity Check in ${SKIP_RULE}, or turn it off ` +
+      "(Security → Settings)";
+  }
+  if (["1005", "1006", "1007", "1008", "1009"].includes(code)) {
+    return "an IP Access rule bans the runner's address, network or country: remove it (Security → WAF → Tools); " +
+      "GitHub runners change address from run to run";
+  }
+  return `find the Ray ID in Security → Events; ${SKIP_RULE} covers custom rules, rate limiting, managed rules, ` +
+    "Security Level and Browser Integrity Check, and Bot Fight Mode can only be turned off";
+}
+
+const were = (n, one, many) => (n === 1 ? `1 was ${one}` : `${n} were ${many}`);
+
+export function edgeRemedy(label, slot) {
+  const n = slot.n;
+  if (slot.kind === "challenge") {
+    return `HEALTH: ${were(n, "a Cloudflare challenge", "Cloudflare challenges")} (cf-mitigated: challenge${rayNote(slot)}), which Bot ` +
+      `Fight Mode, a WAF rule or Security Level issue: add ${SKIP_RULE}, with Security Level and Browser Integrity ` +
+      "Check ticked; challenges that go on with that rule in place come from Bot Fight Mode, which the Free plan " +
+      "cannot skip: turn it off (Security → Settings → Bot traffic)";
+  }
+  if (slot.kind === "block") {
+    return `HEALTH: ${were(n, "a Cloudflare block", "Cloudflare blocks")} (${slot.code ? "error " + slot.code : "no error code"}` +
+      `${slot.mitigated ? ", cf-mitigated: " + slot.mitigated : ""}${rayNote(slot)}): ${blockRemedy(slot.code)}`;
+  }
+  if (slot.kind === "unmarked" && slot.rays.length) {
+    return `HEALTH: ${were(n, "a 403", "403s")} with neither a Cloudflare mitigation marker nor the Worker's JSON error ` +
+      `(server ${slot.server || "unnamed"}${rayNote(slot)}): find the Ray ID in Security → Events`;
+  }
+  if (slot.kind === "unmarked") {
+    return `HEALTH: ${were(n, "a 403", "403s")} with no cf-ray (server ${slot.server || "unnamed"}), so never through ` +
+      "Cloudflare: something between the runner and the edge refused them";
+  }
+  return `HEALTH: ${were(n, "a 403", "403s")} of an unknown kind (${label}): ${SKIP_RULE}`;
+}
+
+function edgeNote(edge403, kinds, worker403, retrySpentMs) {
+  const slots = Object.entries(kinds || {}).filter(([, s]) => s && s.n > 0).sort((a, b) => b[1].n - a[1].n);
+  const named = slots.reduce((sum, [, s]) => sum + s.n, 0);
+  const parts = slots.map(([label, s]) => `${label} ${s.n}${s.rays.length ? " (cf-ray " + s.rays.join(", ") + ")" : ""}`);
+  if (edge403 > named) parts.push(`unclassified ${edge403 - named}`);
+  const own = Object.entries(worker403 || {}).filter(([, n]) => n > 0);
+  const ownN = own.reduce((sum, [, n]) => sum + n, 0);
+  return `edge: ${edge403} ingest answer(s) of HTTP 403${parts.length ? " [" + parts.join("; ") + "]" : ""}, ` +
+    `${(retrySpentMs / 1000).toFixed(1)} s of retry budget spent` +
+    (ownN ? `; not counted: ${ownN} JSON 403(s) from the Worker itself (${own.map(([c, n]) => `${c} ${n}`).join(", ")}), ` +
+      "refused by the Worker's own rules, not by the edge" : "");
+}
+
+function edgeFailures(edge403, kinds, retrySpentMs) {
+  if (!(edge403 >= HEALTH.edge403 || retrySpentMs >= HEALTH.retrySpentMs)) return [];
+  const spent = `${Math.round(retrySpentMs / 1000)} s of the 90 s budget`;
+  if (!(edge403 > 0)) {
+    return [`HEALTH: ingest retries spent ${spent} with no edge 403: the ingest route answered 408, 429 or 5xx, or ` +
+      "did not answer, so the Worker or D1 was failing; the ingest lines above name each answer"];
+  }
+  const slots = Object.entries(kinds || {}).filter(([, s]) => s && s.n > 0).sort((a, b) => b[1].n - a[1].n);
+  if (!slots.length) {
+    return [`HEALTH: the edge answered ${edge403} ingest request(s) with HTTP 403 and retries spent ${spent}: ` +
+      "add the WAF skip rule for /api/flows/ingest (DEPLOY.md 10.0 item 3)"];
+  }
+  return [`HEALTH: the edge answered ${edge403} ingest request(s) with HTTP 403 and retries spent ${spent}`,
+    ...slots.map(([label, slot]) => edgeRemedy(label, slot))];
+}
+
 export function etTime(ms, day = null) {
   if (!Number.isFinite(ms)) return "never";
   const c = easternClock(ms);
@@ -43,13 +196,9 @@ const payloadOf = (read) => (read && !read.failed && !read.absent && read.payloa
   ? read.payload : null);
 
 export function healthChecks({ sessionDate, now = Date.now(), clockRead = null, marketRead = null,
-  heartbeatRead = null, edge403 = 0, retrySpentMs = 0 } = {}) {
-  const failures = [];
-  const notes = [`edge: ${edge403} ingest answer(s) of HTTP 403, ${(retrySpentMs / 1000).toFixed(1)} s of retry budget spent`];
-  if (edge403 >= HEALTH.edge403 || retrySpentMs >= HEALTH.retrySpentMs) {
-    failures.push(`HEALTH: the edge answered ${edge403} ingest request(s) with HTTP 403 and retries spent ` +
-      `${Math.round(retrySpentMs / 1000)} s of the 90 s budget: add the WAF skip rule for /api/flows/ingest (DEPLOY.md 10.0)`);
-  }
+  heartbeatRead = null, edge403 = 0, edgeKinds = null, worker403 = null, retrySpentMs = 0 } = {}) {
+  const failures = edgeFailures(edge403, edgeKinds, retrySpentMs);
+  const notes = [edgeNote(edge403, edgeKinds, worker403, retrySpentMs)];
   if (typeof sessionDate !== "string" || !DAY_RE.test(sessionDate)) {
     return { applies: false, why: "no session date", failures, notes };
   }
@@ -133,8 +282,8 @@ export function healthChecks({ sessionDate, now = Date.now(), clockRead = null, 
   return { applies: true, why: null, failures, notes };
 }
 
-export async function runHealthGate({ sessionDate, read, now = () => Date.now(), edge403 = 0, retrySpentMs = 0,
-  dry = false, log = console.log, warn = console.warn } = {}) {
+export async function runHealthGate({ sessionDate, read, now = () => Date.now(), edge403 = 0, edgeKinds = null,
+  worker403 = null, retrySpentMs = 0, dry = false, log = console.log, warn = console.warn } = {}) {
   if (dry) {
     log("health gate: skipped in a dry run, which reads no store");
     return { applies: false, failures: [], notes: [] };
@@ -146,7 +295,8 @@ export async function runHealthGate({ sessionDate, read, now = () => Date.now(),
   };
   const [clockRead, marketRead, heartbeatRead] = [await safe("clock"), await safe("live:market"),
     await safe("live:heartbeat")];
-  const verdict = healthChecks({ sessionDate, now: now(), clockRead, marketRead, heartbeatRead, edge403, retrySpentMs });
+  const verdict = healthChecks({ sessionDate, now: now(), clockRead, marketRead, heartbeatRead, edge403, edgeKinds,
+    worker403, retrySpentMs });
   log(`health gate: ${verdict.applies ? "checked" : "live checks skipped — " + verdict.why}; ` +
     `${verdict.failures.length} failure(s)`);
   for (const n of verdict.notes) log("  " + n);
