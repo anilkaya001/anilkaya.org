@@ -210,4 +210,56 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   }
 }
 
+{
+  const f = fakeD1();
+  seed(f);
+  const get = await client(f.D1);
+  await get("/api/flows/meta");
+  W.memoClock({ day: SESSION, closedDays: [] }, Date.now());
+  const route = async (path) => { const n = f.trips.length; const r = await get(path); return { ...r, trips: f.since(n) }; };
+
+  const plainAlerts = await route("/api/flows/flowalerts");
+  ok(plainAlerts.trips.length === 1 && plainAlerts.trips[0].kind === "batch" && plainAlerts.trips[0].sqls.length === 2,
+     "AN OVERLAY ROUTE IS ONE TRIP: with the clock memo warm, flowalerts reads its nightly row and its live row in one batch of two");
+  ok(plainAlerts.body.status === "quiet" && !plainAlerts.res.headers.get("X-Live-Overlay") && plainAlerts.res.headers.get("X-Payload-Updated") === "1790380000000",
+     "and with no live row serves the nightly through, byte for byte, as before");
+  const plainPulse = await route("/api/flows/pulse");
+  ok(plainPulse.trips.length === 1 && plainPulse.body.totals.calls === 1 && !plainPulse.res.headers.get("X-Live-Overlay"),
+     "the pulse likewise");
+
+  const liveAt = Date.parse("2026-09-25T14:10:00.000Z");
+  f.live("live:alerts", { v: 1, key: "live:alerts", rows: [{ id: 1 }], fresh: { readAt: "2026-09-25T14:10:00.000Z" } }, liveAt, "2026-09-25");
+  f.live("live:market", { v: 1, key: "live:market", session: "2026-09-25", fresh: { readAt: "2026-09-25T14:10:00.000Z" },
+    tide: { status: "ok", date: "2026-09-25", t: [liveAt - 60000, liveAt], ncp: [1, 2], npp: [3, 4] } }, liveAt, "2026-09-25");
+  const alerts = await route("/api/flows/flowalerts");
+  eq(alerts.trips.length, 1, "a live union for a later session is served from the same single trip");
+  ok(alerts.res.headers.get("X-Live-Overlay") === "live:alerts" && alerts.body.key === "live:alerts",
+     "as the read-time overlay it was before (two trips: the nightly row, then the live row)");
+  const pulse = await route("/api/flows/pulse");
+  eq(pulse.trips.length, 1, "and the pulse merges today's tide from one trip");
+  ok(pulse.res.headers.get("X-Live-Overlay") === "live:market" && pulse.body.refreshed === "intraday" &&
+     pulse.body.tide.points.length === 2 && pulse.body.totals.calls === 1,
+     "with the live points over the nightly's own feeds");
+
+  W.memoClock(null, 0);
+  const cold = await route("/api/flows/pulse");
+  ok(cold.trips.length === 1 && cold.trips[0].sqls.length === 3 && /FROM flows_clock/.test(cold.trips[0].sqls[2]),
+     "WITH THE CLOCK MEMO STALE the clock row rides the same batch as a third statement, not a trip of its own");
+  ok(!W.clockDue(Date.now()), "and the memo is warm afterwards");
+  const after = await route("/api/flows/lk?k=market");
+  ok(after.trips.length === 1 && !/FROM flows_clock/.test(after.trips[0].sqls[0]), "so the next live read runs no clock read");
+
+  f.fail(/FROM flows_live WHERE/);
+  const liveGone = await route("/api/flows/flowalerts");
+  ok(liveGone.res.status === 200 && liveGone.body.status === "quiet" && !liveGone.res.headers.get("X-Live-Overlay"),
+     "A FAILED BATCH DEGRADES AS THE TWO READS DID: the live side unreadable, the nightly is still served through");
+  ok(liveGone.trips.length === 2 && liveGone.trips[1].kind === "first" && /FROM flows_payload/.test(liveGone.trips[1].sqls[0]),
+     "by a fallback read of the nightly row alone, the one extra trip paid only on that failure");
+  f.fail(/FROM flows_payload WHERE id = \?$/);
+  const nightlyGone = await route("/api/flows/pulse");
+  ok(nightlyGone.res.status === 503 && nightlyGone.body.status === "unavailable" && nightlyGone.body.error.code === "store_unreadable",
+     "while a nightly row that cannot be read is the 503 it always was");
+  f.fail(null);
+}
+
 console.log(`flows-reads-contract: ${checks} checks passed`);

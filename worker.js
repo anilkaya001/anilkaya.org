@@ -1701,21 +1701,26 @@ async function quoteResponse(env, ctx, ticker) {
   }
 }
 
-async function liveOverlay(env, key, stored) {
-  if (!env.DB) return null;
+async function readWithOverlay(env, key) {
+  if (!env.DB) return { stored: null, overlaid: null, failed: true };
+  await ensureFlowsTables(env);
+  const now = Date.now();
+  const rows = await FLOWS_LIVE.readOverlayRows(env.DB, key, key === "pulse" ? "live:market" : "live:alerts", now)
+    .catch(() => null);
+  if (!rows) {
+    const trace = {};
+    const stored = await readFlowsPayload(env, key, trace);
+    return { stored, overlaid: null, failed: !!trace.failed };
+  }
+  const { nightly: stored, live, clock } = rows;
+  if (!live) return { stored, overlaid: null, failed: false };
   try {
-    await ensureFlowsTables(env);
-    const now = Date.now();
-    const clock = await FLOWS_LIVE.cachedClock(env, now);
-    const live = await FLOWS_LIVE.readLive(env.DB, key === "pulse" ? "live:market" : "live:alerts");
-    if (!live) return null;
-    if (key === "flowalerts") {
-      return FLOWS_LIVE.overlayFlowalerts(stored ? { session: stored.fresh && stored.fresh.session } : null,
-        live, now, clock);
-    }
-    return stored ? FLOWS_LIVE.overlayPulse(stored, live, now, clock, { json }) : null;
+    const overlaid = key === "flowalerts"
+      ? FLOWS_LIVE.overlayFlowalerts(stored ? { session: stored.fresh && stored.fresh.session } : null, live, now, clock)
+      : stored ? FLOWS_LIVE.overlayPulse(stored, live, now, clock, { json }) : null;
+    return { stored, overlaid, failed: false };
   } catch {
-    return null;
+    return { stored, overlaid: null, failed: false };
   }
 }
 
@@ -3157,24 +3162,11 @@ async function route(request, env, url, ctx) {
       return passthrough(stored);
     }
 
-    if (path === "/api/flows/flowalerts") {
+    if (path === "/api/flows/flowalerts" || path === "/api/flows/pulse") {
 
-      const trace = {};
-      const stored = await readFlowsPayload(env, "flowalerts", trace);
-      const overlaid = await liveOverlay(env, "flowalerts", stored);
+      const { stored, overlaid, failed } = await readWithOverlay(env, path.slice("/api/flows/".length));
       if (overlaid) return overlaid;
-      if (trace.failed) throw storeGone();
-      if (stored === null) return json({ status: "pending" });
-      return passthrough(stored);
-    }
-
-    if (path === "/api/flows/pulse") {
-
-      const trace = {};
-      const stored = await readFlowsPayload(env, "pulse", trace);
-      const overlaid = await liveOverlay(env, "pulse", stored);
-      if (overlaid) return overlaid;
-      if (trace.failed) throw storeGone();
+      if (failed) throw storeGone();
       if (stored === null) return json({ status: "pending" });
       return passthrough(stored);
     }

@@ -120,14 +120,20 @@ export function normalizeClock(row) {
   return out;
 }
 
+const CLOCK_ROW_SQL = "SELECT * FROM flows_clock WHERE id = 1";
+
 export async function readClock(db) {
   if (!db) return null;
-  const row = await db.prepare("SELECT * FROM flows_clock WHERE id = 1").first().catch(() => null);
+  const row = await db.prepare(CLOCK_ROW_SQL).first().catch(() => null);
   return normalizeClock(row);
 }
 
+export function clockDue(now = Date.now()) {
+  return !(clockMemo.clock !== undefined && now - clockMemo.at < CLOCK_MEMO_MS && clockMemo.at > 0);
+}
+
 export async function cachedClock(env, now = Date.now()) {
-  if (clockMemo.clock !== undefined && now - clockMemo.at < CLOCK_MEMO_MS && clockMemo.at > 0) return clockMemo.clock;
+  if (!clockDue(now)) return clockMemo.clock;
   const clock = await readClock(env && env.DB);
   memoClock(clock, now);
   return clock;
@@ -155,11 +161,11 @@ export function writeLiveStatement(db, key, text, meta, now) {
   ).bind(key, text, meta.readAt, meta.session, meta.cadenceS, meta.source, meta.writer, now);
 }
 
+const LIVE_ROW_SQL = "SELECT payload, read_at, session, cadence_s, source, writer, updated_at FROM flows_live WHERE id = ?";
+
 export async function readLive(db, key) {
   if (!db) return null;
-  const row = await db.prepare(
-    "SELECT payload, read_at, session, cadence_s, source, writer, updated_at FROM flows_live WHERE id = ?",
-  ).bind(key).first().catch(() => null);
+  const row = await db.prepare(LIVE_ROW_SQL).bind(key).first().catch(() => null);
   return row && row.payload ? liveRow(row) : null;
 }
 
@@ -945,21 +951,22 @@ export function overlayPulse(nightly, live, now, clock, { json }) {
     "X-Live-Overlay": "live:market", ...headers });
 }
 
-export async function readOverlayRows(db, nightlyKey, liveKey) {
-  const [a, b] = await db.batch([
-    db.prepare(
-      "SELECT payload, updated_at, json_extract(payload, '$.sessionDate') AS session, " +
-      "COALESCE(json_extract(payload, '$.readAt'), json_extract(payload, '$.generatedAt')) AS read_iso " +
-      "FROM flows_payload WHERE id = ?").bind(nightlyKey),
-    db.prepare("SELECT payload, read_at, session, cadence_s, source, writer, updated_at FROM flows_live WHERE id = ?")
-      .bind(liveKey),
-  ]);
-  const n = a && a.results && a.results[0] ? a.results[0] : null;
-  const l = b && b.results && b.results[0] ? b.results[0] : null;
+export const NIGHTLY_ROW_SQL =
+  "SELECT payload, updated_at, json_extract(payload, '$.sessionDate') AS session, " +
+  "COALESCE(json_extract(payload, '$.readAt'), json_extract(payload, '$.generatedAt')) AS read_iso " +
+  "FROM flows_payload WHERE id = ?";
+
+export async function readOverlayRows(db, nightlyKey, liveKey, now = Date.now()) {
+  const withClock = clockDue(now);
+  const statements = [db.prepare(NIGHTLY_ROW_SQL).bind(nightlyKey), db.prepare(LIVE_ROW_SQL).bind(liveKey)];
+  if (withClock) statements.push(db.prepare(CLOCK_ROW_SQL));
+  const [a, b, c] = await db.batch(statements);
+  if (withClock) memoClock(normalizeClock(firstOf(c)), now);
+  const n = firstOf(a), l = firstOf(b);
   return {
-    nightly: n && n.payload ? { payload: n.payload, updatedAt: Number(n.updated_at),
-      session: typeof n.session === "string" ? n.session.slice(0, 10) : null, readIso: n.read_iso } : null,
+    nightly: n && n.payload ? { payload: n.payload, updatedAt: n.updated_at, fresh: nightlyFreshMeta(n) } : null,
     live: l && l.payload ? liveRow(l) : null,
+    clock: clockMemo.clock,
   };
 }
 
