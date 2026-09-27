@@ -15,7 +15,7 @@ import {
   readHeldAlerts, boardPlan, liveWindow, runLive, runLiveLoop, chainDispatch, nextSlot, LIVE_LOOP, readLiveClock,
   sessionClock, liveRunVerdict, passOutcome, focusStripNames, FOCUS_FALLBACK,
 } from "../scripts/flows-legs/live.mjs";
-import { healthChecks, runHealthGate } from "../scripts/flows-legs/health.mjs";
+import { healthChecks, runHealthGate, HEALTH } from "../scripts/flows-legs/health.mjs";
 import {
   shapeNews, liveCredential, liveCredentialSource, LIVE_BEARER_MARGIN_MS, resetPublishRetryBudget, intradayRefusal,
 } from "../scripts/flows-pipeline.mjs";
@@ -812,6 +812,17 @@ const T = (iso) => Date.parse(iso);
     W.FOCUS_CRON.split(" ")[0].replace(/^(\d+)-(\d+)\/(\d+)$/, (_, a, b, n) =>
       Array.from({ length: Math.floor((b - a) / n) + 1 }, (__, i) => Number(a) + i * n).join()),
     "and the minutes the fallback gives the focus tick are exactly the minutes its cron names");
+  {
+    const day = T("2026-09-23T00:00:00Z");
+    const fires = (step, first = 0) => Array.from({ length: 24 * 60 }, (_, m) => m).filter((m) => m % step === first)
+      .map((m) => day + m * 60000);
+    const stale = [...fires(5, 1).map((t) => W.cronJob(W.RTH_CRON, t)), ...fires(30).map((t) => W.cronJob(W.HOUSEKEEPING_CRON, t)),
+      ...fires(15).map((t) => W.cronJob("*/15 * * * *", t))];
+    ok(stale.length === 288 + 48 + 96 && !stale.includes("focus"),
+      "BUT A DEPLOY THAT LEAVES THE PREVIOUS TRIGGERS NEVER RUNS THE FOCUS TICK: under the two exact strings the " +
+        "handler branches on, or the older */15, no firing lands on a minute ending in 3 or 8, so live:focus is simply " +
+        "never written, and the nightly health gate's live:focus check is what says so");
+  }
   ok(/const job = FLOWS_LIVE\.cronJob\(event && event\.cron, at\);\s*if \(job === "rth"\)/.test(worker) &&
      /if \(job === "focus"\) \{\s*guard\("flows focus tick failed", \(async \(\) => \{\s*await ensureFlowsTables\(env\);\s*return FLOWS_LIVE\.focusTick\(env, at, \{ fetchVendor: \(p, params\) => uwFetch\(env, p, params\) \}\);/.test(worker),
     "the scheduled handler routes by the job a trigger's instant calls for, not by the trigger's exact string, and " +
@@ -1842,13 +1853,15 @@ const T = (iso) => Date.parse(iso);
       tier1: { at: new Date(at(17, 56)).toISOString(), okAt: new Date(at(16, 6)).toISOString(), why: "written" },
       dispatchWhy: null } }, status: 200 },
     marketRead: { payload: { fresh: { readAt: new Date(at(16, 6)).toISOString() } }, status: 200 },
+    focusRead: { payload: { key: "live:focus", fresh: { readAt: new Date(at(16, 8)).toISOString() } }, status: 200 },
     heartbeatRead: beat(S, { calls: 39, failedCalls: 0, finishedAt: new Date(at(16, 21)).toISOString() }),
     edge403: 11, retrySpentMs: 6000,
   };
   const H = healthChecks(good);
   ok(H.applies && H.failures.length === 0 && /11 ingest answer\(s\) of HTTP 403/.test(H.notes[0]),
-    "THE HEALTH GATE passes a healthy session: Tier 1 wrote through 16:06, the last Tier 2 pass finished 16:21 and " +
-      "the edge refused eleven ingest requests (the 2026-09-24 count), all absorbed by retries");
+    "THE HEALTH GATE passes a healthy session: Tier 1 wrote through 16:06, the focus cron through 16:08, the last " +
+      "Tier 2 pass finished 16:21 and the edge refused eleven ingest requests (the 2026-09-24 count), all absorbed by " +
+      "retries");
   const fails = (over) => healthChecks({ ...good, ...over }).failures;
   deep(fails({ heartbeatRead: beat("2026-09-23", { calls: 39, failedCalls: 0, finishedAt: new Date(at(16, 21)).toISOString() }) }),
     [`HEALTH: no live pass for ${S}: the last Tier 2 pass was for ${"2026-09-23"}`], "no Tier 2 pass today is one line");
@@ -1860,6 +1873,23 @@ const T = (iso) => Date.parse(iso);
   "a dead last pass and a loop that stopped at noon each say so");
   deep(fails({ marketRead: { payload: { fresh: { readAt: new Date(at(9, 31)).toISOString() } }, status: 200 } }),
     ["HEALTH: Tier 1 last wrote live:market at 09:31 ET, not by 15:50 ET"], "a Tier 1 that died after the open");
+  eq(HEALTH.focusCron, W.FOCUS_CRON, "the gate names the focus cron the Worker registers, character for character");
+  deep(fails({ focusRead: { payload: null, absent: true, status: 200 } }),
+    ["HEALTH: live:focus has never been written (is 3-58/5 13-21 * * MON-FRI registered? wrangler triggers deploy)"],
+  "LIVE:FOCUS NEVER WRITTEN fails the gate and names the cron to register: a deploy that left the previous triggers " +
+    "runs Tier 1 and housekeeping and never the focus tick, and nothing else would say so");
+  deep(fails({ focusRead: { payload: { fresh: { readAt: new Date(at(9, 38)).toISOString() } }, status: 200 } }),
+    ["HEALTH: the focus cron last wrote live:focus at 09:38 ET, not by 15:50 ET (is 3-58/5 13-21 * * MON-FRI " +
+      "registered? its \"live:focus not written\" log lines say why a read was kept)"],
+  "a focus cron that stopped writing after the open fails it too");
+  deep(fails({ focusRead: { payload: { fresh: { readAt: new Date(easternInstant("2026-09-23", 16 * 60 + 8)).toISOString() } },
+    status: 200 } }), ["HEALTH: the focus cron last wrote live:focus at 2026-09-23 16:08 ET, not by 15:50 ET (is " +
+      "3-58/5 13-21 * * MON-FRI registered? its \"live:focus not written\" log lines say why a read was kept)"],
+  "and so does a row held from an earlier session, dated so");
+  deep(fails({ focusRead: { payload: null, failed: true, status: 403 } }), ["HEALTH: live:focus could not be read (HTTP 403)"],
+    "an unreadable live:focus is its own failure");
+  deep(fails({ focusRead: { payload: { fresh: { readAt: new Date(at(15, 58)).toISOString() } }, status: 200 } }), [],
+    "while the last read before the close (15:58) passes: the focus cron's last minutes are 15:58, 16:03 and 16:08");
   const clockWith = (over) => ({ payload: { key: "clock", clock: { ...good.clockRead.payload.clock, ...over } }, status: 200 });
   deep(fails({ clockRead: clockWith({ tier1: { ...good.clockRead.payload.clock.tier1, why: "error:no-key" } }) }),
     ["HEALTH: Tier 1's last tick failed with error:no-key: the Worker has no UW_API_KEY secret (wrangler secret put UW_API_KEY)"],
@@ -1891,23 +1921,28 @@ const T = (iso) => Date.parse(iso);
   deep(fails({ clockRead: { payload: null, failed: true, status: 403 } }), ["HEALTH: the Worker's clock could not be read (HTTP 403)"],
     "an unreadable clock is itself a failure");
   const off = healthChecks({ ...good, clockRead: clockWith({ tier1: { at: null, okAt: null, why: "off" } }),
-    heartbeatRead: { payload: null, absent: true } });
-  ok(off.failures.length === 0 && off.why === "live-off", "FLOWS_LIVE_MODE off is a deliberate rollback, not a failure");
+    heartbeatRead: { payload: null, absent: true }, focusRead: { payload: null, absent: true } });
+  ok(off.failures.length === 0 && off.why === "live-off", "FLOWS_LIVE_MODE off is a deliberate rollback, not a failure, " +
+    "for the focus cron as for Tier 1");
   ok(!healthChecks({ ...good, now: at(15, 30) }).applies && !healthChecks({ ...good, now: easternInstant("2026-09-25", 20 * 60) }).applies &&
      healthChecks({ ...good, now: easternInstant("2026-09-25", 20 * 60), edge403: 40 }).failures.length === 1,
   "the live checks apply only on the evening of the session the run ranked; the edge count applies to every run");
   const early = healthChecks({ ...good, now: at(14, 0),
     clockRead: clockWith({ earlyClose: 1, tier1: { at: new Date(at(13, 56)).toISOString(), okAt: null, why: "written" } }),
     marketRead: { payload: { fresh: { readAt: new Date(at(13, 6)).toISOString() } }, status: 200 },
+    focusRead: { payload: { fresh: { readAt: new Date(at(13, 8)).toISOString() } }, status: 200 },
     heartbeatRead: beat(S, { calls: 39, failedCalls: 0, finishedAt: new Date(at(13, 21)).toISOString() }) });
   ok(early.applies && early.failures.length === 0, "on an early close the checks follow the 13:00 close");
 
   const lines = [];
+  const gateReads = [];
   const gate = await runHealthGate({ sessionDate: S, now: () => at(20, 5), edge403: 0,
-    read: async (key) => ({ clock: good.clockRead, "live:market": good.marketRead, "live:heartbeat": good.heartbeatRead })[key],
+    read: async (key) => (gateReads.push(key), ({ clock: good.clockRead, "live:market": good.marketRead,
+      "live:focus": good.focusRead, "live:heartbeat": good.heartbeatRead })[key]),
     log: (l) => lines.push(l), warn: (l) => lines.push(l) });
-  ok(gate.failures.length === 0 && lines[0] === "health gate: checked; 0 failure(s)",
-    "runHealthGate reads the clock, live:market and live:heartbeat through the ingest route and prints one line");
+  ok(gate.failures.length === 0 && lines[0] === "health gate: checked; 0 failure(s)" &&
+     gateReads.join() === "clock,live:market,live:focus,live:heartbeat",
+    "runHealthGate reads the clock, live:market, live:focus and live:heartbeat through the ingest route and prints one line");
   const pipeline = read("scripts/flows-pipeline.mjs");
   const tail = pipeline.slice(pipeline.indexOf("async function main()"), pipeline.indexOf("\nexport {\n"));
   ok(/const health = await runHealthGate\(\{ sessionDate, read: readStored, dry: DRY_RUN,\s*edge403: edgeRefusals\.count, retrySpentMs: publishRetrySpentMs \}\);\s*if \(health\.failures\.length\) process\.exitCode = 1;\s*\}\s*$/
@@ -1930,11 +1965,12 @@ const T = (iso) => Date.parse(iso);
   }
   {
     const reads = [];
-    const failing = { clock: 1, "live:market": 0, "live:heartbeat": 0 };
+    const failing = { clock: 1, "live:market": 0, "live:focus": 0, "live:heartbeat": 0 };
     const retrying = async (key) => {
       reads.push(key);
       if (failing[key]-- > 0) return { payload: null, failed: true, status: 403 };
-      return ({ clock: good.clockRead, "live:market": good.marketRead, "live:heartbeat": good.heartbeatRead })[key];
+      return ({ clock: good.clockRead, "live:market": good.marketRead, "live:focus": good.focusRead,
+        "live:heartbeat": good.heartbeatRead })[key];
     };
     const g = await runHealthGate({ sessionDate: S, now: () => at(20, 5), read: async (key) => {
       let r = await retrying(key);

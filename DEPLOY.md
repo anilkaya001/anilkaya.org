@@ -1493,12 +1493,14 @@ Four guards sit behind the schedule, all in `scripts/flows-pipeline.mjs`:
   `scripts/flows-legs/health.mjs`. On the evening of the session it ranked it
   reads, through the ingest route and with the run's usual retries (so one
   random edge 403 is not a failure), the Worker's `clock` (day, verdict, Tier 1
-  telemetry, last dispatch outcome), `live:market` and `live:heartbeat`, and
-  prints one `HEALTH:` line per failure: a clock that never rolled to the
-  session, a holiday verdict on a day the vendor printed, `tier1_why`
-  `error:<...>` (`error:no-key` names the missing Worker secret), a last tick
-  before the close, `live:market` last written before 15:50 ET (12:50 on an
-  early close), no Tier 2 pass for the session, a last pass that answered no
+  telemetry, last dispatch outcome), `live:market`, `live:focus` and
+  `live:heartbeat`, and prints one `HEALTH:` line per failure: a clock that
+  never rolled to the session, a holiday verdict on a day the vendor printed,
+  `tier1_why` `error:<...>` (`error:no-key` names the missing Worker secret), a
+  last tick before the close, `live:market` last written before 15:50 ET (12:50
+  on an early close), `live:focus` never written (the line names
+  `3-58/5 13-21 * * MON-FRI`, the trigger to register) or last written before
+  15:50 ET, no Tier 2 pass for the session, a last pass that answered no
   vendor call or finished more than 30 minutes before the close, any 4xx
   dispatch refusal from GitHub, and, on every run, 24 or more edge 403s on the
   ingest route or 60 s of retry budget spent. Any failure makes the run exit
@@ -1812,12 +1814,21 @@ Out-of-band steps before the first deploy of this layer:
    later production deploy (`npx wrangler deploy`) had registered both crons.
    If a deploy ever leaves stale triggers again, register them with
    `./tests/node_modules/.bin/wrangler triggers deploy` or under the Worker's
-   Settings → Triggers. Until then the handler routes by instant rather than by
-   trigger string (`cronJob` in `shared/flows-live-worker.js`): a stale trigger
-   inside the 13–21 UTC weekday window runs housekeeping on the half hour, the
-   focus tick at minutes ending in 3 or 8 and Tier 1 at every other minute, so
-   the live layer runs at the stale trigger's cadence instead of not at all, and
-   never runs one job at the other's minutes.
+   Settings → Triggers. Until then the handler routes an unknown trigger by
+   instant rather than by string (`cronJob` in `shared/flows-live-worker.js`):
+   inside the 13–21 UTC weekday window it runs housekeeping on the half hour,
+   the focus tick at minutes ending in 3 or 8 and Tier 1 at every other minute,
+   so Tier 1 runs at a stale trigger's cadence instead of not at all, and no job
+   ever runs at another's minutes. That fallback does not reach the focus tick.
+   Under the previous two triggers the handler matches both strings exactly, and
+   under the older `*/15 * * * *` every firing lands on a minute ending in 0 or
+   5, so no firing is ever routed to the focus tick. It does not run at all
+   until `3-58/5 13-21 * * MON-FRI` is registered. Home then shows the nightly
+   rows, or `live:strips` when a Tier 2 run lands. The nightly health gate
+   fails that evening with `HEALTH: live:focus has never been written (is
+   3-58/5 13-21 * * MON-FRI registered? wrangler triggers deploy)`, and
+   `tests/flows-live-contract.mjs` proves that no firing of either stale set
+   reaches the focus tick.
 
 `FLOWS_LIVE_MODE = "off"` in `[vars]` is the instant rollback: no Tier 1 read, no
 focus read and no dispatch; pages fall back to the nightly rows.
