@@ -1,14 +1,18 @@
 import http from "node:http";
+import { readFileSync } from "node:fs";
 import { easternInstant } from "../shared/flows-freshness.js";
-import { fakeLiveVendor } from "../scripts/flows-legs/live-fake.mjs";
+import { fakeLiveVendor, fakeScreenerRows } from "../scripts/flows-legs/live-fake.mjs";
 import { LIVE_OIDC } from "../shared/flows-oidc.js";
+import { FOCUS_METALS, MAG7 } from "../shared/flows-focus.js";
 
 const listen = (server) => new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(server.address().port)));
 
 const TAPE_ROUTE = /^\/api\/stock\/[^/]+\/(net-prem-ticks|spot-exposures)$/;
 
-export async function startStubVendor({ marketSession, marketNow, tapeSession, tapeNow = null } = {}) {
+export async function startStubVendor({ marketSession, marketNow, tapeSession, tapeNow = null, faults = new Set(),
+  drop = new Set() } = {}) {
   const hits = new Map();
+  const asked = [];
   const market = fakeLiveVendor({ session: marketSession, now: () => marketNow.value });
   const tapeAt = tapeNow ?? easternInstant(tapeSession, 16 * 60 + 5);
   const tape = fakeLiveVendor({ session: tapeSession, now: tapeAt });
@@ -17,11 +21,13 @@ export async function startStubVendor({ marketSession, marketNow, tapeSession, t
     const path = url.pathname;
     hits.set(path, (hits.get(path) || 0) + 1);
     const params = Object.fromEntries(url.searchParams.entries());
+    asked.push({ path, params });
     const send = (status, body) => {
       res.writeHead(status, { "Content-Type": "application/json" });
       res.end(JSON.stringify(body));
     };
     if (req.headers.authorization !== "Bearer stub-uw-key") return send(401, { reason: "malformed_token" });
+    if (faults.has(path)) return send(500, { error: "stub fault" });
     const stock = /^\/api\/stock\/([^/]+)\/stock-state$/.exec(path);
     if (stock) {
       return send(200, { data: { close: "101.50", high: "102.00", low: "100.10", open: "100.40", volume: 123456,
@@ -29,14 +35,18 @@ export async function startStubVendor({ marketSession, marketNow, tapeSession, t
     }
     try {
       const pick = TAPE_ROUTE.test(path) || (path === "/api/option-trades/flow-alerts" && params.ticker_symbol) ? tape : market;
-      send(200, await pick(path, params, { envelope: true }));
+      const body = await pick(path, params, { envelope: true });
+      if (path === "/api/screener/stocks" && drop.size && body && Array.isArray(body.data)) {
+        body.data = body.data.filter((r) => !drop.has(r && r.ticker));
+      }
+      send(200, body);
     } catch (error) {
       send(404, { error: String(error && error.message) });
     }
   });
   const port = await listen(server);
   return {
-    base: `http://127.0.0.1:${port}`, hits,
+    base: `http://127.0.0.1:${port}`, hits, asked,
     count: (re) => Array.from(hits.entries()).filter(([p]) => re.test(p)).reduce((a, [, n]) => a + n, 0),
     close: () => new Promise((resolve) => server.close(resolve)),
   };
@@ -121,17 +131,22 @@ export function tickDb() {
   };
 }
 
+const cpuClock = () => {
+  const clock = typeof process.threadCpuUsage === "function" ? "thread-cpu" : "wall";
+  const cpu = () => {
+    if (clock === "thread-cpu") { const c = process.threadCpuUsage(); return (c.user + c.system) / 1000; }
+    return Number(process.hrtime.bigint()) / 1e6;
+  };
+  return { clock, cpu };
+};
+
 export async function tier1Budget({ windows = 16, perWindow = 5, coldOnly = false } = {}) {
   const W = await import("../shared/flows-live-worker.js");
   const session = "2026-09-22";
   const at = easternInstant(session, 16 * 60 + 6);
   const texts = await tier1Bodies({ session, at });
   const bytes = Object.values(texts).reduce((a, t) => a + t.length, 0);
-  const clock = typeof process.threadCpuUsage === "function" ? "thread-cpu" : "wall";
-  const cpu = () => {
-    if (clock === "thread-cpu") { const c = process.threadCpuUsage(); return (c.user + c.system) / 1000; }
-    return Number(process.hrtime.bigint()) / 1e6;
-  };
+  const { clock, cpu } = cpuClock();
   const fetchVendor = async (path) => JSON.parse(texts[path]);
   const env = { DB: tickDb(), UW_API_KEY: "k" };
   const tick = () => W.rthTick(env, at, { fetchVendor, log: { error() {} } });
@@ -155,6 +170,104 @@ export async function tier1Budget({ windows = 16, perWindow = 5, coldOnly = fals
     median: (sorted[windows / 2 - 1] + sorted[windows / 2]) / 2, worst: sorted[sorted.length - 1],
     mean: means.reduce((a, b) => a + b, 0) / means.length,
   };
+}
+
+const PROBE_FIELDS = JSON.parse(readFileSync(new URL("./fixtures-live-probe.json", import.meta.url), "utf8")).screenerLive.fields;
+
+export const NDX10_SAMPLE = Object.freeze(["NVDA", "MSFT", "AAPL", "AMZN", "AVGO", "META", "GOOGL", "TSLA", "NFLX", "COST"]);
+
+export function focusGroupsSample() {
+  return [
+    ...FOCUS_METALS.map((g) => ({ id: g.id, label: g.label, kind: "metal", lead: g.lead, tickers: g.tickers.slice() })),
+    { id: "mag7", label: "Mag 7", kind: "equity", tickers: MAG7.slice() },
+    { id: "ndx10", label: "NDX 10", kind: "equity", tickers: NDX10_SAMPLE.slice(), source: "qqq-holdings:2026-09-21" },
+  ];
+}
+
+export function productionScreenerBody(tickers, { session, readAt }) {
+  let seed = 7;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  const stamp = new Date(readAt).toISOString().replace(/\.(\d{3})Z$/, ".$1000Z");
+  const text = (name, x) => {
+    if (/date/.test(name)) return name === "date" ? session : "2026-10-" + String(1 + Math.floor(x * 28)).padStart(2, "0");
+    return ({ sector: "Basic Materials", industry_type: "Gold", issue_type: "Common Stock", er_time: "postmarket",
+      etf_share_flow: null })[name] ?? null;
+  };
+  return { data: fakeScreenerRows(tickers, { session }).data.map((base) => {
+    const row = {};
+    for (const spec of PROBE_FIELDS) {
+      const at = spec.indexOf(":");
+      const name = spec.slice(0, at);
+      const type = spec.slice(at + 1);
+      const x = rnd();
+      if (type === "str#") {
+        row[name] = /perc|growth|z_score|yield/.test(name) ? (x - 0.4).toFixed(26)
+          : /volatility|iv|implied_move|rank|ratio|steepness|variance/.test(name) ? (x * 0.9).toFixed(4)
+            : /close|high|low|open|week_52|price|dividend/.test(name) ? (20 + x * 800).toFixed(2) : ((x - 0.3) * 4e8).toFixed(4);
+      } else if (type === "num") row[name] = /volume|interest|oi|obv/.test(name) ? Math.round(x * 3e7) : (x - 0.3) * 150;
+      else if (type === "bool") row[name] = name === "has_options";
+      else row[name] = text(name, x);
+    }
+    const px = Number(base.close);
+    return { ...row, ...base, quote_time: stamp, bid: (px - 0.02).toFixed(2), ask: (px + 0.02).toFixed(2),
+      bid_quantity: 300, ask_quantity: 200, full_name: base.ticker + " Holdings Incorporated", etf_share_flow: null };
+  }) };
+}
+
+export function focusDb({ groups = null, clock = null, held = null } = {}) {
+  const statements = [];
+  const st = (sql) => {
+    const s = { sql, args: [], bind(...a) { s.args = a; return s; }, first: async () => null,
+      run: async () => { statements.push(s); return { meta: { changes: 1 } }; }, all: async () => ({ results: [] }) };
+    return s;
+  };
+  const answer = (s) => {
+    if (/FROM flows_clock/.test(s.sql)) return { results: clock ? [clock] : [] };
+    if (/FROM flows_payload WHERE id = 'focus'/.test(s.sql)) return { results: groups ? [{ groups: JSON.stringify(groups) }] : [] };
+    if (/FROM flows_live WHERE id = 'live:focus'/.test(s.sql)) return { results: held ? [held] : [] };
+    return { results: [] };
+  };
+  return { statements, prepare: st, batch: async (list) => list.map(answer) };
+}
+
+export async function focusBudget({ windows = 16, perWindow = 5, coldOnly = false } = {}) {
+  const W = await import("../shared/flows-live-worker.js");
+  const session = "2026-09-22";
+  const at = easternInstant(session, 15 * 60 + 58);
+  const groups = focusGroupsSample();
+  const names = W.focusNames(JSON.stringify(groups)).names;
+  const body = JSON.stringify(productionScreenerBody(names, { session, readAt: at - 20000 }));
+  const { clock, cpu } = cpuClock();
+  const fetchVendor = async () => JSON.parse(body);
+  const held = { session, read_at: at - 300000, priced: JSON.stringify(names) };
+  const env = { DB: focusDb({ groups, held }), UW_API_KEY: "k" };
+  const tick = () => W.focusTick(env, at, { fetchVendor, log: { error() {} } });
+  const w0 = process.hrtime.bigint();
+  const c0 = cpu();
+  const first = await tick();
+  const cold = cpu() - c0;
+  const coldWall = Number(process.hrtime.bigint() - w0) / 1e6;
+  const shape = { written: first.written === true, hit: first.hit, asked: first.asked, lost: first.lost,
+    payloadBytes: first.bytes ?? null };
+  if (coldOnly) return { clock, cold, coldWall, ...shape };
+  for (let i = 0; i < 40; i++) await tick();
+  const means = [];
+  for (let w = 0; w < windows; w++) {
+    const t0 = cpu();
+    for (let i = 0; i < perWindow; i++) await tick();
+    means.push((cpu() - t0) / perWindow);
+  }
+  const sorted = means.slice().sort((a, b) => a - b);
+  const rows = JSON.parse(body).data;
+  return {
+    clock, window: perWindow, bytes: body.length, rows: rows.length, fields: Object.keys(rows[0]).length, ...shape,
+    cold, coldWall, median: (sorted[windows / 2 - 1] + sorted[windows / 2]) / 2, worst: sorted[sorted.length - 1],
+  };
+}
+
+if (process.argv[2] === "--focus-budget") {
+  focusBudget({ coldOnly: process.argv[3] === "cold" }).then((r) => { console.log(JSON.stringify(r)); process.exit(0); },
+    (e) => { console.error(e && e.stack ? e.stack : String(e)); process.exit(1); });
 }
 
 if (process.argv[2] === "--tier1-budget") {

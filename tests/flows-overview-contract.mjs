@@ -3287,6 +3287,101 @@ try {
     await fp.unroute("**/api/flows/lk?k=strips");
     await fp.unroute("**/api/flows/lk?k=strips:series");
 
+    const ALL = GROUPS.flatMap((g) => g.tickers).filter((t, i, a) => a.indexOf(t) === i && FOCUS_FIXTURE.rows[t]);
+    const FOCUS_V = { ...LIVE_V, GLD: vend("GLD", 397, 392.88, 1.4e6, -2e5, 6e7, 3e7, 0.22) };
+    const liveFocus = (session, readAt, state, V = FOCUS_V) => (route) => route.fulfill({ status: 200,
+      headers: { "Content-Type": "application/json", "X-Fresh-State": state },
+      body: JSON.stringify({ v: 1, key: "live:focus", status: "ok", session, fresh: { v: 1, readAt, cadenceS: 300, source: "worker", session },
+        fields: STRIP_NAMES, rows: Object.fromEntries(ALL.map((t) => [t, stripValues(V[t])])) }) });
+    const nyClock = (iso) => fp.evaluate((x) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric",
+      minute: "2-digit" }).format(new Date(x)).replace(/\s/g, ""), iso);
+    const bare = (p) => p.text.replace(/\s/g, "");
+    const t1 = new Date(Date.now() - 7 * 60000).toISOString();
+    await fp.route("**/api/flows/lk?k=focus", liveFocus(LIVE_DAY, t0, "live"));
+    const worker = await focusNow();
+    deep([worker.metals[0].px, worker.leaders[0][1]], ["397.00", "336.00"],
+      "WITHOUT ANY ACTIONS RUN the Worker's live:focus takes both modules: the fund's price and every leader's row");
+    deep(worker.src, ["live", "live"], "every row in them is a live row");
+    deep(worker.pills.map(bare), Array(2).fill("Live·" + await nyClock(t0)),
+      "and both modules wear a Live pill with the Worker's read time");
+    await fp.route("**/api/flows/lk?k=strips", liveStrips(LIVE_DAY, t1, "live"));
+    const newer = await focusNow();
+    eq(newer.metals[0].px, "397.00", "A live:focus ROW FRESHER THAN THE STRIP drives the tile value");
+    eq(bare(newer.pills[0]), "Live·" + await nyClock(t0), "and the pill reads the time of the row it shows");
+    await fp.route("**/api/flows/lk?k=focus", liveFocus(LIVE_DAY, t1, "live"));
+    await fp.route("**/api/flows/lk?k=strips", liveStrips(LIVE_DAY, t0, "live"));
+    const older = await focusNow();
+    eq(older.metals[0].px, "395.00", "while an older live:focus row yields to the newer strip");
+    eq(bare(older.pills[0]), "Live·" + await nyClock(t0), "whose read time the pill then shows");
+    await fp.unroute("**/api/flows/lk?k=strips");
+    await fp.route("**/api/flows/lk?k=focus", liveFocus("2026-08-21", t0, "live"));
+    const past = await focusNow();
+    ok(past.metals[0].px === "391.70" && past.src.join() === "nightly,nightly" && past.pills.every((p) => p.text === "Aug 24"),
+      "a live:focus of an older session never replaces the nightly record, nor puts a Live pill over it");
+    await fp.route("**/api/flows/lk?k=focus", liveFocus(SESSION, SESSION + "T17:50:00Z", "closed"));
+    eq((await focusNow()).metals[0].px, "391.70", "and a mid-session read of the nightly's own session yields to the nightly");
+
+    const SERIES_T = [LIVE_DAY + "T13:45:00Z", LIVE_DAY + "T14:00:00Z", LIVE_DAY + "T14:15:00Z"];
+    await fp.route("**/api/flows/lk?k=strips:series", (route) => route.fulfill({ status: 200, contentType: "application/json",
+      body: JSON.stringify({ v: 1, key: "live:strips:series", session: LIVE_DAY, scale: { px: 0.01 }, base: { GLD: 393.5 },
+        t: SERIES_T, cols: { px: { GLD: [0, 80, 150] } } }) }));
+    const DIP_V = { ...FOCUS_V, GLD: vend("GLD", 394, 392.88, 1.4e6, -2e5, 6e7, 3e7, 0.22) };
+    const sparkEnd = () => fp.evaluate(() => {
+      const svg = document.querySelector("#ccMetals .hm-metal .hm-mspark svg");
+      const d = svg.querySelector("path.ln").getAttribute("d");
+      const line = svg.querySelector("line");
+      return { label: svg.getAttribute("aria-label"), points: (d.match(/C/g) || []).length + 1,
+        first: Number(/^M\s*-?[\d.]+[\s,]+(-?[\d.]+)/.exec(d)[1]), ref: line ? Number(line.getAttribute("y1")) : null,
+        end: Number(svg.querySelector("circle").getAttribute("cy")) };
+    });
+    await fp.route("**/api/flows/lk?k=focus", liveFocus(LIVE_DAY, t0, "live", DIP_V));
+    const dip = await focusNow();
+    const se1 = await sparkEnd();
+    const endPx = 392.88 + (se1.end - se1.ref) * (393.5 - 392.88) / (se1.first - se1.ref);
+    ok(dip.metals[0].px === "394.00" && /GLD today/.test(se1.label) && se1.points === 4 && Math.abs(endPx - 394) < 0.02,
+      "A live:focus ROW NEWER THAN THE ACTIONS SERIES ends the intraday sparkline at the tile's own price: the series' " +
+        `three reads, then the Worker's (${se1.points} points, the last at ${endPx.toFixed(3)} against a tile of ` +
+        `${dip.metals[0].px}), never a line that stops at the last Actions read under a later headline`);
+    await fp.route("**/api/flows/lk?k=focus", liveFocus(LIVE_DAY, LIVE_DAY + "T14:05:00Z", "stale", DIP_V));
+    const behind = await focusNow();
+    const se2 = await sparkEnd();
+    ok(behind.metals[0].px === "394.00" && /^GLD, last 5 closes and today$/.test(se2.label) && se2.points === 6 && se2.ref === null,
+      `and one OLDER than the series' last column never borrows that later line: the tile's price closes the nightly ` +
+        `closes instead (${se2.label}, ${se2.points} points)`);
+    await fp.unroute("**/api/flows/lk?k=strips:series");
+
+    const t2 = new Date(Date.parse(t0) - 30 * 60000).toISOString();
+    let focusReads = 0;
+    let serveFocus = liveFocus(LIVE_DAY, t0, "live");
+    await fp.route("**/api/flows/lk?k=focus", (route) => { focusReads++; return serveFocus(route); });
+    const stamp = { live: 1, nightly: 1 };
+    await fp.route(/\/api\/flows\/now\?/, async (route) => {
+      const res = await route.fetch();
+      const body = await res.json();
+      const k = body.keys || {};
+      body.keys = Object.assign({}, k, { "live:focus": { ...k["live:focus"], updatedAt: stamp.live },
+        focus: { ...k.focus, updatedAt: stamp.nightly } });
+      await route.fulfill({ response: res, body: JSON.stringify(body) });
+    });
+    const open = await focusNow();
+    eq(open.metals[0].px, "397.00", "an open page shows the Worker's read");
+    await beat();
+    const readsBefore = focusReads;
+    stamp.nightly = 2;
+    await Promise.all([fp.waitForResponse((r) => new URL(r.url()).pathname === "/api/flows/focus"), beat()]);
+    eq(focusReads, readsBefore, "a heartbeat on which only the nightly focus key moved re-reads the nightly key and never lk?k=focus");
+    serveFocus = liveFocus(LIVE_DAY, t2, "live", { ...FOCUS_V, GLD: vend("GLD", 399, 392.88, 1.4e6, -2e5, 6e7, 3e7, 0.22) });
+    stamp.live = 2;
+    await Promise.all([fp.waitForResponse((r) => r.url().endsWith("/api/flows/lk?k=focus")), beat()]);
+    await fp.waitForFunction(() => document.querySelector("#ccMetals .hm-mpx-v")?.textContent.trim() === "399.00", null, { timeout: 15000 });
+    const moved = await fp.evaluate(FOCUS_READ);
+    ok(focusReads === readsBefore + 1 && moved.metals[0].px === "399.00" && bare(moved.pills[0]) === "Live·" + await nyClock(t2) &&
+       bare(moved.pills[1]) === "Live·" + await nyClock(t2),
+    "THE HEARTBEAT RE-READS live:focus WHEN ITS updatedAt MOVES: the open page repaints the fund's price and both " +
+      `modules' Live pills at the new read time (${moved.pills[0].text}) without a reload`);
+    await fp.unroute(/\/api\/flows\/now\?/);
+    await fp.unroute("**/api/flows/lk?k=focus");
+
     for (const width of [320, 390, 768]) {
       await fp.setViewportSize({ width, height: 900 });
       await fp.waitForTimeout(250);
@@ -3354,7 +3449,8 @@ try {
     `dash, caveats kept apart from method, a headline tape whose fetch age leads its ` +
     `disclosure and whose vendor strings stay characters, gold, silver and copper each led by ` +
     `its fund with its related names beneath, the Mag 7 and the NDX 10 on one switch the address ` +
-    `and the viewer remember, a live read taking a module only when it is the newer read of every ` +
+    `and the viewer remember, a live read (the Actions strip or the Worker's live:focus, whichever read each name ` +
+    `last) taking a module only when it is the newer read of every ` +
     `name in it so no Live pill sits over a nightly row, date chips that keep keyboard focus through ` +
     `every heartbeat, a focus key that arrives in an open page, every figure a ` +
     `link to its dossier and an em dash where the vendor said nothing, and no visible run of prose longer ` +

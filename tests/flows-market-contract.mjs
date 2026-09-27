@@ -5,7 +5,7 @@ import { signSession } from "../shared/session.js";
 import { startWorker, SESSION_SECRET, FLOWS_TEST_USER } from "./worker-server.mjs";
 import { marketAggregate, MARKET_NOTES } from "../shared/flows-market.js";
 
-import { REFRESH_CADENCE_MINUTES } from "../shared/flows-freshness.js";
+import { REFRESH_CADENCE_MINUTES, expectedNightlySession } from "../shared/flows-freshness.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -319,7 +319,7 @@ try {
 
   const dayStamp = (offsetDays) =>
     new Date(Date.now() - offsetDays * 86400000).toISOString().slice(0, 10);
-  const FRESH_SESSION = dayStamp(1);
+  const FRESH_SESSION = expectedNightlySession(new Date());
 
   const payload = {
     v: 2, generatedAt: new Date().toISOString(), sessionDate: FRESH_SESSION, status: "ok",

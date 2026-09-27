@@ -318,14 +318,20 @@ it unlocks and what tells you it has lapsed.
    :01/:16/:31/:46 through the session, one re-dispatch after 45 minutes of
    stall, and the nightly at 17:15 ET (again at 18:15 ET if it has not
    landed). Without it Tier 2 depends on GitHub's scheduled starters, which
-   delivered about one slot in twenty on 2026-09-23 and 09-24, and the nightly
-   on its own crons (section 10.5h). Put the expiry in a calendar; when it
+   delivered 6 runs for 63 slots from 2026-09-23 to 09-25, none before
+   17:50 UTC (section 10.5i sizes the starters by that), and the nightly on its
+   own crons (section 10.5h). Home's Metals and Leaders modules do not wait for
+   it: the Worker's focus cron writes `live:focus` itself through the session
+   (section 10.5i). Put the expiry in a calendar; when it
    lapses the nightly turns red with
    `HEALTH: GitHub refused the Worker's dispatch (refused:401): renew GITHUB_DISPATCH_TOKEN`.
    Any other 4xx refusal turns it red too, with its own remedy: `refused:403`
    (the token lacks Actions write), `refused:404` (the token cannot see this
    repository) and `refused:422` (a bad ref or inputs). Removing the token
-   instead of renewing it records `no-token` and clears the alert.
+   instead of renewing it records `no-token` and clears the alert. With no
+   token at all the nightly stays green: every due dispatch records
+   `no-token`, nothing reaches GitHub, and the gate prints only the note
+   `dispatch: the Worker has no GITHUB_DISPATCH_TOKEN, so GitHub's own schedules start Tier 2 and the nightly; a supported mode, not a failure`.
 2. **`UW_API_KEY` in both places.** The same Unusual Whales key is a GitHub
    repository secret (the nightly, Tier 2 and the weekly probe) and a Worker
    secret (Tier 1, the tape, the quote, the chain and the strategy engine):
@@ -338,18 +344,82 @@ it unlocks and what tells you it has lapsed.
    `HEALTH: Tier 1's last tick failed with error:no-key`.
 3. **A WAF skip rule for the ingest route.** Cloudflare's edge sometimes
    answers GitHub runners with a 403 on `/api/flows/ingest` (eleven on
-   2026-09-24, all absorbed by retries). Check Security → Events filtered on
-   that path; then Security → WAF → Custom rules → Create rule, expression
-   `(http.request.uri.path eq "/api/flows/ingest")`, action **Skip** (all
-   remaining custom rules, rate limiting rules and managed rules), placed
-   first. Bot Fight Mode cannot be skipped on the Free plan: if the events name
-   it, turn it off. The nightly counts every edge 403 and turns red at 24 of
-   them, or 60 s of retry budget, before the 90 s budget runs out.
+   2026-09-24 and seventeen on 09-26, all absorbed by retries). Security →
+   WAF → Custom rules → Create rule, expression
+   `(http.request.uri.path eq "/api/flows/ingest")`, action **Skip**: all
+   remaining custom rules, rate limiting rules and managed rules, and under
+   *More components to skip* Security Level and Browser Integrity Check; place
+   it first. Bot Fight Mode cannot be skipped on the Free plan: if challenges
+   go on with the rule in place, turn it off (Security → Settings → Bot
+   traffic).
+
+   The nightly reads each 403 itself, so the blocker is named without Security
+   Events. Every retry line carries the kind and the Ray ID
+   (`read roster: HTTP 403 (challenge, cf-ray 8c…-IAD) — waiting 1000ms…`),
+   and the run's last `edge:` line counts them by kind, with up to three Ray
+   IDs each:
+   `edge: 17 ingest answer(s) of HTTP 403 [challenge 15 (cf-ray …); block 1020 2 (cf-ray …)], 12.0 s of retry budget spent`.
+   The kinds come from the answer alone: `challenge` (a `cf-mitigated:
+   challenge` header or a challenge page, from Bot Fight Mode, a WAF rule or
+   Security Level), `block NNNN` (a Cloudflare error code: 1020 a WAF custom
+   rule, 1010 Browser Integrity Check, 1005 to 1009 an IP Access rule),
+   `block` (another `cf-mitigated` value), and `unmarked` (neither; with no
+   `cf-ray` it never reached Cloudflare). The Worker's own JSON 403 (a
+   credential-scope or one-writer refusal) is not the edge: it is listed
+   after `not counted:`, never retried and never counted. The other answers
+   the pipeline retries (429, 408, 5xx, and a request with no usable answer)
+   are tallied by status with their Ray IDs too, and listed at the end of the
+   same line after `other retried answers:`. The gate reads the tally after
+   its own three reads, so the count, the kinds and the budget in the line
+   are one moment's figures. At 24 edge 403s, or 60 s of retry budget, before
+   the 90 s budget runs out, the gate turns the run red with one line per
+   kind naming its remedy: the Skip rule for a challenge, a 1020 or a 1010,
+   Bot Fight Mode off for challenges that outlive the rule, the IP Access rule
+   for 1005 to 1009, and the Ray ID to look up in Security → Events for
+   anything else. The Worker never answers the ingest route with 429 or 408,
+   so a 429 with a `cf-ray` is named as a Cloudflare rate limiting rule (the
+   Skip rule covers it) and a 408 as the edge's timeout or a Cloudflare rule.
+   An answer whose body carries Cloudflare error 1027 is the Workers Free
+   plan's 100,000 requests a day running out, which no rule lifts (it resets
+   at 00:00 UTC; item 5 removes it). A 5xx is the Worker or D1 failing (error
+   1101: the Worker threw; 1102: it ran over its CPU or memory limit), a
+   request with no answer is the network or a Worker that never answered, and
+   any of them without a `cf-ray` never passed through Cloudflare at all.
 4. **The Google OAuth client.** Google deletes OAuth clients left unused for
-   about six months, and Lab sign-in is rare. Sign in to the Lab every three
-   months, or watch the Google Cloud console (APIs & Services → Credentials)
-   for inactivity notices; the client must keep the callback
-   `https://anilkaya.org/auth/callback`.
+   about six months, and Lab sign-in is rare. Sign in to the Lab at
+   `https://anilkaya.org/lab/` when the nightly asks; the client must keep the
+   callback `https://anilkaya.org/auth/callback`.
+
+   The nightly keeps the count. Under the pipeline's credential (never the
+   live one, and never `/api/flows/now`) the ingest `clock` key carries
+   `labActiveAt`: the newest instant the Lab's Google sign-in is known to have
+   been used. It is the latest of `users.created_at` (a first sign-in),
+   `users.signed_in_at` (every sign-in, stamped by the OAuth callback) and
+   `stats.updated_at` or `progress.updated_at` less 30 days, because a
+   signed-in write proves a sign-in no more than one session (30 days)
+   earlier. A missing table or column counts as nothing; a database with no
+   Lab user answers `null`. Under 120 days every nightly prints only
+   `lab: the Lab's Google OAuth client was used within the last 120 days; nothing to do`,
+   with no date and no age: this repository is public, so are its Actions
+   logs, and `labActiveAt` is the newest activity of any Lab learner. From
+   120 days it prints a `WARNING:` line with the day and the age, which
+   GitHub also shows as an annotation on the run, names the day the gate
+   turns red, and leaves the run green. From 150 days it turns the run red,
+   which emails the owner:
+   `HEALTH: the latest Google sign-in to the Lab on record is …, 150 days ago. Sign in to the Lab at https://anilkaya.org/lab/ — Google deletes an OAuth client unused for about six months; keep the callback https://anilkaya.org/auth/callback registered. Google deletes it about ….`
+   One sign-in clears it the next night. From 180 days the line also says how
+   to replace a deleted client: create a Web application OAuth client (Google
+   Cloud console → APIs & Services → Credentials) with that callback, then
+   `wrangler secret put GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+
+   `users.signed_in_at` comes from `migrations/0013_users_signed_in_at.sql`.
+   Applying it is optional: the first sign-in after the deploy adds the
+   column itself, and until then the count reads the other three sources.
+   It is a single `ALTER TABLE ... ADD COLUMN`, so it is not re-runnable:
+   after the first post-deploy sign-in it fails on the duplicate column and
+   changes nothing. Check with
+   `wrangler d1 execute iewt --remote --command "PRAGMA table_info(users)"`
+   before applying it.
 5. **Optional: Workers Paid ($5/month).** It removes the 100,000
    requests-a-day cliff (every static asset passes through the Worker, so the
    cliff would take the Lab and the landing page down with Flows) and the 10 ms
@@ -360,7 +430,9 @@ Nothing routine is left: a weekly keepalive keeps GitHub from disabling the
 scheduled workflows after 60 days without a commit, a weekly strict probe turns
 red on vendor drift, a weekly regression run catches a fixture the calendar
 overtakes, and the nightly ends with a health gate that turns the run red,
-which emails the owner, whenever the live layer failed that session.
+which emails the owner, whenever the live layer failed that session, the edge
+refused or throttled the ingest route past its threshold (item 3), or the
+Lab's Google sign-in has been idle for 150 days (item 4).
 
 ### 10.1 Apply the schema
 
@@ -870,8 +942,11 @@ focus read is read again by ticker, one call, only on the night it is needed.
 `shared/flows-focus.js` is a leaf: the focus constants (`FOCUS_METALS`,
 `MAG7`, `FOCUS_FUNDS`, `FOCUS_MINERS`) and the pure functions that need nothing
 else (`ndx10`, `ndxMembership`, `focusTickers`, `focusGroups`, `focusCloses`).
-It imports nothing, so `shared/flows-live.js` can read the constants for the
-live strips without an import cycle. The payload builder needs the strip
+It imports nothing, so any module can read it without an import cycle. It also
+holds the one strip planner, `focusStripNames` with its `FOCUS_STRIP_FALLBACK`
+roster, which the Actions strip (`scripts/flows-legs/live.mjs`) and the
+Worker's focus tick (`shared/flows-live-worker.js`) both call, so the two ask
+for the same names in the same order. The payload builder needs the strip
 fields from `shared/flows-live.js`, so it lives in the pipeline's legs,
 `scripts/flows-legs/focus.mjs` (`focusRow`, `buildFocusPayload`); the
 universe contract asserts both.
@@ -1488,17 +1563,24 @@ Four guards sit behind the schedule, all in `scripts/flows-pipeline.mjs`:
   `scripts/flows-legs/health.mjs`. On the evening of the session it ranked it
   reads, through the ingest route and with the run's usual retries (so one
   random edge 403 is not a failure), the Worker's `clock` (day, verdict, Tier 1
-  telemetry, last dispatch outcome), `live:market` and `live:heartbeat`, and
-  prints one `HEALTH:` line per failure: a clock that never rolled to the
-  session, a holiday verdict on a day the vendor printed, `tier1_why`
-  `error:<...>` (`error:no-key` names the missing Worker secret), a last tick
-  before the close, `live:market` last written before 15:50 ET (12:50 on an
-  early close), no Tier 2 pass for the session, a last pass that answered no
+  telemetry, last dispatch outcome), `live:market`, `live:focus` and
+  `live:heartbeat`, and prints one `HEALTH:` line per failure: a clock that
+  never rolled to the session, a holiday verdict on a day the vendor printed,
+  `tier1_why` `error:<...>` (`error:no-key` names the missing Worker secret), a
+  last tick before the close, `live:market` last written before 15:50 ET (12:50
+  on an early close), `live:focus` never written (the line names
+  `3-58/5 13-21 * * MON-FRI`, the trigger to register) or last written before
+  15:50 ET, no Tier 2 pass for the session, a last pass that answered no
   vendor call or finished more than 30 minutes before the close, any 4xx
-  dispatch refusal from GitHub, and, on every run, 24 or more edge 403s on the
-  ingest route or 60 s of retry budget spent. Any failure makes the run exit
-  non-zero after everything is published, and a red scheduled run emails the
-  owner. `FLOWS_LIVE_MODE = "off"` is a deliberate rollback, not a failure.
+  dispatch refusal from GitHub, and, on every run whatever the session, 24 or
+  more edge 403s on the ingest route or 60 s of retry budget spent (counted by
+  kind, each with its remedy; the Worker's own JSON 403s are kept apart and
+  never counted; section 10.0 item 3) and a Lab Google sign-in 150 or more
+  days old (section 10.0 item 4). From 120 days that age is a `WARNING:`
+  line and a GitHub annotation, which leaves the run green. Any failure makes
+  the run exit non-zero after everything is published, and a red scheduled
+  run emails the owner. A missing `GITHUB_DISPATCH_TOKEN` is a note, never a
+  failure. `FLOWS_LIVE_MODE = "off"` is a deliberate rollback, not a failure.
 
 Feeds read without a date (`news`, `pulse`, `flowalerts`, `sector:premium`)
 carry `readDay`, the Eastern day of their own `readAt`, beside `sessionDate`;
@@ -1541,6 +1623,61 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   served for a week. It logs `nightly missing` from 21:00 ET (close + 300
   minutes) when meta is still behind: the scheduled nightly lands about 20:00
   ET, so the old close + 180 fired falsely every weekday evening.
+- **The focus modules run on the Worker's own clock.** `3-58/5 13-21 * * MON-FRI`,
+  the third Worker cron, fires at minutes ending in 3 and 8, between Tier 1's,
+  and writes `live:focus` for Home's Metals and Leaders modules. It is due
+  exactly when Tier 1 is due on a trading day, from the open to ten minutes past
+  the close (13:10 ET on an early close), and never on a weekend, a computed
+  holiday (not even in Tier 1's 09:45 probe window) or a day the tape closed.
+  Each tick reads `flows_clock` and the groups of the nightly `focus` key in one
+  D1 batch (`json_extract`, so the payload's rows and closes never reach the
+  isolate), plans the names with the same `focusStripNames`
+  (`shared/flows-focus.js`) the Actions strip uses (lead first, once each, 40 at
+  most; before the nightly key exists, the 22-name roster), and makes one vendor
+  call: `/api/screener/stocks?ticker=…&limit=500`, the Actions strip's read with
+  the same parameters. Rows come from `stripValues`, so a `live:focus` row is
+  exactly a `live:strips` row, in the `live:strips` envelope under its own key:
+  the session is today's Eastern day, `fresh.readAt` is the cron's scheduled
+  instant and the writer is `worker@focus`. The key is on the market clock
+  (cadence 300 s, live for 11 minutes, fresh for 25) with a 16 KB cap; 22 names
+  are about 4.9 KB and 40 about 8.1 KB. The Worker is its only writer: the
+  ingest refuses it from the Actions credential (`wrong_writer`) and from the
+  nightly token (`nightly_token_scope`). A failed, empty, previous-session or
+  unpriced read, or one over the cap, writes nothing, so the held row keeps its
+  own read time and no value is ever written as zero; the tick logs one
+  `live:focus not written` line with the reason. So does a partial read: one
+  that leaves unpriced a name this tick asked for and the held row of the same
+  session priced, while that row is still live (11 minutes). The same D1 batch
+  lists the held row's priced names in SQL (`json_each`), so the held rows
+  never reach the isolate. Home takes a source for a module only when it has a
+  row for every name, so without this a transient 3-of-22 answer would drop
+  both modules from Live until the next complete tick. A name the held row
+  priced but this tick no longer asks for does not count, so when the nightly
+  `focus` key lands mid-session and the roster changes, a complete read of the
+  new roster is written at once. Once the held row is past its live window a
+  partial read is written: a name the vendor stops returning holds the key
+  back for two ticks at most, never for the rest of the session. `/api/flows/lk?k=focus` serves
+  the key and `/api/flows/now?k=focus` reports it to the Home heartbeat, which
+  re-reads it when its `updatedAt` moves. Home takes, name by name, the newer of
+  the `live:strips` and `live:focus` rows whose session is at least the
+  nightly's, and the module pill reads `Live · h:mm` from the row it shows;
+  otherwise the nightly row and its date chip stand, as before.
+  `tests/flows-live-contract.mjs` times the tick in child processes on the
+  thread CPU clock over a production-size vendor body (22 screener rows carrying
+  all 202 fields the probe recorded on the live screener row, 151,971 bytes of
+  JSON): 3 to 4 ms for the first tick of a cold process (lazy compilation and
+  the body's `JSON.parse` included; the contract holds it under 6 ms) and about
+  1 ms warm, against the 10 ms cap.
+- **Why the focus modules left GitHub Actions.** On Friday 2026-09-25 GitHub
+  delivered three of the eight `flows-live` schedule slots the workflow then
+  carried (`31 13,14` and `3 15-20` UTC), the first at 18:01 UTC against a
+  13:30 UTC open, and from Wednesday to Friday every scheduled run started
+  between 17:50 and 23:12 UTC. Only `GITHUB_DISPATCH_TOKEN` (section 10.0) lets
+  the Worker start Tier 2 itself, and it is not set, so `live:strips` covered
+  the afternoon at best and the focus modules showed the previous night's rows
+  through the morning. `live:focus` needs neither the token nor Actions, only
+  the Worker's `UW_API_KEY`, which Tier 1 already needs. Tier 2 still refreshes
+  `live:strips` whenever it runs, and the page takes whichever read is newer.
 - **Tier 1 fits the Workers Free CPU cap.** Until 2026-09-24 Tier 1 also read the
   0DTE net flow and the SPY and QQQ ETF tides: three 390-row one-minute feeds,
   about 200 KB of JSON a tick. Once the session's rows filled in, a tick needed
@@ -1643,7 +1780,8 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   (the groups of the nightly `focus` payload, which the live role may read;
   before that key exists, the `shared/flows-focus.js` roster: the three metal
   groups, the Mag 7, the metal funds and the miners), then the board names,
-  160 names at most. A full session of `live:strips:series` for 160 names at
+  160 names at most. The Worker's focus tick makes the same call for the focus
+  names alone every five minutes (above), so Home never waits for Tier 2. A full session of `live:strips:series` for 160 names at
   production magnitudes is about 100 KB, so its cap is 112 KB; `live:strips`
   stays at 64 KB (about 29 KB for 160 names).
 - **Tier 2 sustains itself through the session, with no new secret.** The
@@ -1654,20 +1792,75 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   ends, the run re-dispatches its own workflow with the job's `GITHUB_TOKEN`
   (`permissions: actions: write`; `workflow_dispatch` is the documented exception
   to that token's no-recursion rule), origin `chain`, on `main`, and exits. The
-  `flows-live` concurrency group keeps it to one loop. The GitHub schedule is only
-  starters: `17 10,11,12 * * 1-5` lands before the open however late GitHub
-  delivers it, and a run that starts up to 200 minutes before 09:31 ET sleeps
-  until then instead of exiting (on Friday 2026-09-25 the first starter GitHub
-  delivered ran in the afternoon, so the morning had no Tier 2); a run started
-  earlier than that exits and leaves the open to the next starter.
-  `31,46 13,14 * * 1-5` starts the loop at the open under EDT and EST and
-  `3,37 15-20 * * 1-5` restarts it in case GitHub drops a starter or a run dies
-  (sixteen slots, because GitHub delivered about one in twenty); a starter
-  that queued behind a running loop starts after the window closed and exits at
-  once without a pass. The first pass of a run still skips when a heartbeat
-  landed under eight minutes ago; the loop's later passes do not. A single pass
-  runs when `FLOWS_LIVE_LOOP` is unset or `FLOWS_LIVE_FORCE=1`. Dry run:
-  `--live --dry-run`.
+  `flows-live` concurrency group keeps it to one loop.
+- **The GitHub schedule is only starters, sized by what GitHub delivered.** From
+  2026-09-23 to 09-25 GitHub created 6 scheduled `flows-live` runs for 63 slots:
+  18:59 and 22:13 UTC on Wednesday (one cron line), 17:50 on Thursday (one line),
+  18:01, 19:12 and 23:12 on Friday (two lines). None came before 17:50 UTC, so no
+  morning had Tier 2. The runs cannot be tied to their slots: each line held
+  several, and the job did not log which fired. Two readings fit them. Per line,
+  it is 2 runs from 1 line, 1 from 1 and 3 from 2; the nightly's gate, which does
+  log its cron, saw its only line then, the one-slot `30 21 * * 1-5`, run on all
+  three days, at 23:48, 23:56 and 23:59 UTC, 2 h 19 to 2 h 29 late. Per slot, it
+  is 6 of 63, about one in ten. Three days do not settle which, so the schedule
+  serves both: every starter is a line of one slot, and the lines are half an
+  hour apart, 32 in all, at :17 and :47 of every hour from `17 5 * * 1-5` to
+  `47 20 * * 1-5`. The arithmetic assumes any delay from on time to five hours.
+  A run that starts up to 240 minutes before 09:31 ET sleeps until then, and one
+  that starts earlier exits at once. 09:31 ET is 13:31 UTC under EDT and 14:31
+  UTC under EST, so the wait window is 09:31 to 13:31 UTC or 10:31 to 14:31 UTC.
+  On time, the 09:47 to 13:17 starters land in it under EDT and 10:47 to 14:17
+  under EST, eight each; three hours late, 06:47 to 10:17 and 07:47 to 11:17,
+  eight; five hours late, 05:17 to 08:17 (seven, 05:17 being the first line)
+  and 05:47 to 09:17 (eight). So for every delay from 0 to 5 h at least seven
+  starters land in the 240-minute window before 09:31 ET. The first to start
+  waits, and the concurrency group keeps only the newest of the rest pending,
+  cancelling the others, so seven landings are seven chances at one waiter, not
+  seven waiters. Read per slot, at 6 in 63, seven give about an even chance of a
+  pre-open waiter (1 - (57/63)^7 = 0.50), where the four of an hourly schedule
+  gave one in three (0.33); read per line, every day has one.
+  `tests/flows-live-contract.mjs` counts the landings minute by minute on EDT
+  and EST days, runs the loop from every slot at eight delays, and passes each
+  of those days through a model of the concurrency group: exactly one run
+  waits, it passes at 09:31, and the day's pre-open sleep adds up to at most 240
+  minutes. From 13:17 the same lines restart a loop that died or never started.
+  Every starter fires 17 minutes past a :00 or :30 mark, away from the top of
+  the hour, where GitHub documents the load peaks that delay and drop schedules.
+- **Each run logs how late GitHub delivered it.** The first step logs the cron
+  that fired and reads the run's own `created_at` from the Actions API with the
+  job's token (`gh api repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID`),
+  because the step's clock also counts the time a run queued for the
+  concurrency group: on 2026-09-25 run 36178225980 was created at 19:12:12 UTC
+  and reached its steps at 20:25:32, when the 18:01 loop ended. The delay is
+  taken from `created_at` and the queue is logged on its own: `GitHub created
+  this run at 11:28:40 UTC, 251 min after its 07:17 UTC slot; this step ran 0 min
+  after that, the time the run queued for the flows-live concurrency group and a
+  runner.` When the API does not answer, the step says so and succeeds. A run
+  cancelled while pending, replaced by a newer starter or by a chain, never
+  reaches a step and never logs; its `created_at` is only in the Actions API
+  (`GET /repos/{owner}/{repo}/actions/workflows/flows-live.yml/runs?event=schedule`).
+  Together they measure the delay the schedule assumes, and which reading of
+  the first three days holds.
+- **Worst-case idle is 240 minutes of waiting a day.** Runs share one concurrency
+  group, so only one runs at a time, and every waiting run waits for the same
+  09:31: however many starters land, the pre-open wait a day adds up to at most
+  `preOpenWaitMs`, 240 minutes. A run that waited that long still passes from
+  09:31 for 99 minutes before it chains (the test keeps at least 60), and the
+  chained run reaches 16:25 without a second chain (100 plus 340 minutes cover
+  the 414 from 09:31 to 16:25; the test keeps that sum at least 414). Beyond
+  that, a starter that runs outside the window costs under a minute of runner,
+  one clock read from the Worker and no vendor call, so the 32 lines add under
+  32 minutes a day, and one cancelled while pending costs nothing. On a day
+  Tier 1 closes provisionally from the tape the loop also waits, without passes,
+  until 11:00 ET at the latest. Weekends and computed NYSE holidays never wait.
+  The repository is public, so hosted-runner minutes are not billed. A starter
+  that queued behind a running loop starts when the loop ends: inside 16:25 its
+  one pass skips on the heartbeat and it exits at the next slot, and after that
+  it exits at once without a pass. The first pass of a run still skips when a
+  heartbeat landed under eight minutes ago, and the loop's later passes do not,
+  so a chained run that starts within eight minutes of the last pass skips once
+  and takes the next slot, none doubled or lost. A single pass runs when
+  `FLOWS_LIVE_LOOP` is unset or `FLOWS_LIVE_FORCE=1`. Dry run: `--live --dry-run`.
 - **The loop keeps the Worker's clock.** Before its first pass and around every
   later one it reads `clock: { day, trading, earlyClose }` with a GET of the
   ingest key `clock` under its live credential (`/api/flows/now` carries the same
@@ -1731,24 +1924,44 @@ Out-of-band steps before the first deploy of this layer:
    token's non-secret claims.
 3. `GITHUB_DISPATCH_TOKEN` and the Worker's `UW_API_KEY`: section 10.0, items 1
    and 2.
-4. After deploy, confirm both crons are registered (`wrangler triggers` or the
-   dashboard) and read `live:market` on `/api/flows/lk?k=market` at 09:36 ET.
+4. After deploy, confirm all three crons are registered (`wrangler triggers` or
+   the dashboard) and read `live:market` on `/api/flows/lk?k=market` at 09:36 ET
+   and `live:focus` on `/api/flows/lk?k=focus` at 09:38 ET.
    The tick instants in D1 prove it without dashboard access: `flows_live.read_at`
    for `live:market` is the Tier 1 cron's scheduled time, and only
-   `1-59/5 13-21 * * MON-FRI` produces minutes ending in 1 or 6. On 2026-09-23 the
+   `1-59/5 13-21 * * MON-FRI` produces minutes ending in 1 or 6; for
+   `live:focus` it is the focus cron's, and only `3-58/5 13-21 * * MON-FRI`
+   produces minutes ending in 3 or 8:
+
+   ```bash
+   ./tests/node_modules/.bin/wrangler d1 execute iewt --remote --command \
+     "SELECT id, datetime(read_at/1000,'unixepoch') AS read, writer FROM flows_live WHERE source = 'worker'"
+   ```
+
+   On 2026-09-23 the
    first Workers Builds deploy of this layer ran under the old `*/15 * * * *`
    trigger; by that evening `live:market` was stamped 19:56 and 20:06 UTC, so a
    later production deploy (`npx wrangler deploy`) had registered both crons.
    If a deploy ever leaves stale triggers again, register them with
    `./tests/node_modules/.bin/wrangler triggers deploy` or under the Worker's
-   Settings → Triggers. Until then the handler routes by instant rather than by
-   trigger string (`cronJob` in `shared/flows-live-worker.js`): a stale trigger
-   inside the 13–21 UTC weekday window runs Tier 1 off the half hour and
-   housekeeping on it, so the live layer runs at the stale trigger's cadence
-   instead of not at all.
+   Settings → Triggers. Until then the handler routes an unknown trigger by
+   instant rather than by string (`cronJob` in `shared/flows-live-worker.js`):
+   inside the 13–21 UTC weekday window it runs housekeeping on the half hour,
+   the focus tick at minutes ending in 3 or 8 and Tier 1 at every other minute,
+   so Tier 1 runs at a stale trigger's cadence instead of not at all, and no job
+   ever runs at another's minutes. That fallback does not reach the focus tick.
+   Under the previous two triggers the handler matches both strings exactly, and
+   under the older `*/15 * * * *` every firing lands on a minute ending in 0 or
+   5, so no firing is ever routed to the focus tick. It does not run at all
+   until `3-58/5 13-21 * * MON-FRI` is registered. Home then shows the nightly
+   rows, or `live:strips` when a Tier 2 run lands. The nightly health gate
+   fails that evening with `HEALTH: live:focus has never been written (is
+   3-58/5 13-21 * * MON-FRI registered? wrangler triggers deploy)`, and
+   `tests/flows-live-contract.mjs` proves that no firing of either stale set
+   reaches the focus tick.
 
-`FLOWS_LIVE_MODE = "off"` in `[vars]` is the instant rollback: no Tier 1 read and
-no dispatch; pages fall back to the nightly rows.
+`FLOWS_LIVE_MODE = "off"` in `[vars]` is the instant rollback: no Tier 1 read, no
+focus read and no dispatch; pages fall back to the nightly rows.
 
 ### 10.5j The weekly monitors
 

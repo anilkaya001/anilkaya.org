@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { signSession } from "../shared/session.js";
 import { archiveWriteAction, ARCHIVE_REFUSALS } from "../shared/flows-archive.js";
 import { UA_BANNED_CLAIMS } from "../shared/flows-unusual.js";
+import { SIGN_IN_SQL, SIGNED_IN_COLUMN_SQL, LAB_SESSION_MS } from "../shared/lab-sign-in.js";
+import { refusalOf } from "../scripts/flows-legs/health.mjs";
 import {
   startWorker, SESSION_SECRET, FLOWS_PASSWORD, FLOWS_TEST_USER, FLOWS_PEPPER,
 } from "./worker-server.mjs";
@@ -1554,9 +1556,12 @@ try {
     const { signFlowsSession } = await import("../shared/flows-auth.js");
     const { fakeFlowAlerts } = await import("../scripts/flows-legs/live-fake.mjs");
     const { startStubVendor, startStubGithub, oidcIssuer } = await import("./live-stubs.mjs");
+    const { FOCUS_STRIP_FALLBACK } = await import("../shared/flows-focus.js");
     const et = (iso) => Date.parse(iso);
     const marketNow = { value: et("2026-09-23T10:06:00-04:00") };
-    const vendor = await startStubVendor({ marketSession: "2026-09-23", marketNow, tapeSession: "2026-09-22" });
+    const faults = new Set();
+    const drop = new Set();
+    const vendor = await startStubVendor({ marketSession: "2026-09-23", marketNow, tapeSession: "2026-09-22", faults, drop });
     const issuer = await oidcIssuer();
     const github = await startStubGithub({ jwks: issuer.jwks });
     const LIVE_TOKEN = "test-live-token-abcdefghijklmnopqrstuv";
@@ -1582,6 +1587,7 @@ try {
       return res.status;
     };
     const RTH = "1-59/5 13-21 * * MON-FRI";
+    const FOCUS = "3-58/5 13-21 * * MON-FRI";
     const HOUSE = "*/30 * * * *";
     const fresh = (key, readAt, session = "2026-09-23") => ({ v: 1, readAt, session, cadenceS: LIVE_KEYS[key].cadenceS,
       source: "actions", writer: "flows-live@test", vendorAt: null });
@@ -1592,6 +1598,13 @@ try {
         const res = await ingest(key, "POST", LIVE_TOKEN, board);
         eq(res.status, 403, `LAYER 2 (credential): the live token is refused on ${key}`);
         eq((await res.json()).error.code, "live_token_scope", "with its own code");
+      }
+      {
+        const res = await ingest("card:AAPL", "POST", LIVE_TOKEN, board);
+        const seen = refusalOf({ headers: res.headers, text: await res.text() });
+        deep([res.status, seen.kind, seen.code, seen.mitigated], [403, "worker", "live_token_scope", null],
+          "THE WORKER'S OWN 403, as the real route sends it, reads as the Worker's to the pipeline's classifier, so the " +
+            "nightly never counts it as an edge 403");
       }
       eq((await ingest("live:breadth", "DELETE", LIVE_TOKEN)).status, 403, "the live token can delete nothing");
       eq((await ingest("card:AAPL", "DELETE", LIVE_TOKEN)).status, 403,
@@ -1695,6 +1708,70 @@ try {
         "stamped intraday on today's read, with the live points");
       deep(sp.totals, pulse.totals, "while every nightly feed beside the tide is the nightly's own");
 
+      const screens = () => vendor.asked.filter((c) => c.path === "/api/screener/stocks");
+      const lkFocus = () => fetch(L("/api/flows/lk?k=focus"), { headers: cookie });
+      const tier1Calls = vendor.count(/^\/api\/(market|net-flow)\//);
+      const unwritten = await lkFocus();
+      deep([unwritten.status, (await unwritten.json()).status, unwritten.headers.get("x-fresh-class")], [200, "pending", "market"],
+        "before the focus cron has run, live:focus is pending on the live read route, in the market class");
+      eq(await tick(FOCUS, "2026-09-23T09:28:00-04:00"), 200, "the focus cron fires before the open");
+      eq(screens().length, 0, "and reads nothing: the session window is not open");
+      eq(await tick(FOCUS, "2026-09-23T10:08:00-04:00"), 200, "THE FOCUS CRON runs the focus tick through the real scheduled handler");
+      eq(screens().length, 1, "one screener call");
+      deep(screens()[0].params, { ticker: FOCUS_STRIP_FALLBACK.join(","), limit: "500" },
+        "with no nightly focus key stored yet, for the constants' roster: the metals, the Mag 7, the funds and the miners");
+      eq(vendor.count(/^\/api\/(market|net-flow)\//), tier1Calls, "and no Tier 1 call: its minute is not Tier 1's");
+      const lf = await lkFocus();
+      eq(lf.status, 200, "live:focus is served on the live read route");
+      const focusLive = await lf.json();
+      deep([focusLive.key, focusLive.status, focusLive.session, focusLive.fresh.source, focusLive.fresh.readAt],
+        ["live:focus", "ok", "2026-09-23", "worker", new Date(et("2026-09-23T10:08:00-04:00")).toISOString()],
+        "written by the Worker, for today's session, at the cron's scheduled instant");
+      ok(FOCUS_STRIP_FALLBACK.every((t) => Array.isArray(focusLive.rows[t]) && focusLive.rows[t].length === focusLive.fields.length &&
+         focusLive.rows[t][focusLive.fields.indexOf("px")] > 0), "with a priced strip row for every name");
+      deep([lf.headers.get("x-fresh-source"), lf.headers.get("x-fresh-cadence"), lf.headers.get("x-fresh-class")],
+        ["worker", "300", "market"], "and X-Fresh-* from the row's columns: the Worker, every five minutes");
+      eq((await ingest("focus", "POST", INGEST_TOKEN, { v: 1, status: "ok", sessionDate: "2026-09-22",
+        generatedAt: "2026-09-22T23:40:00.000Z", groups: [{ id: "gold", kind: "metal", lead: "GLD", tickers: ["GLD", "GDX"] },
+          { id: "ndx10", kind: "equity", tickers: ["AVGO", "GLD"] }], rows: {} })).status, 200, "a nightly focus key lands");
+      await tick(FOCUS, "2026-09-23T10:13:00-04:00");
+      eq(screens()[1].params.ticker, "GLD,GDX,AVGO", "and the next focus tick asks for its groups' names, lead first, once each");
+      const heldFocus = await (await lkFocus()).json();
+      ok(heldFocus.fresh.readAt === new Date(et("2026-09-23T10:13:00-04:00")).toISOString() &&
+         Object.keys(heldFocus.rows).sort().join() === "AVGO,GDX,GLD",
+      "and writes exactly those rows five minutes after a read of the whole constants' roster: a roster that changed " +
+        "mid-session is not a partial read, because only a name the held row priced and this tick asked for counts");
+      faults.add("/api/screener/stocks");
+      eq(await tick(FOCUS, "2026-09-23T10:18:00-04:00"), 200, "a focus tick whose vendor read fails still completes");
+      faults.delete("/api/screener/stocks");
+      eq(screens().length, 3, "after trying the vendor once");
+      eq((await (await lkFocus()).json()).fresh.readAt, heldFocus.fresh.readAt,
+        "A FAILED READ KEEPS THE LAST GOOD VALUE: live:focus still carries the 10:13 read");
+      const fromActions = await ingest("live:focus", "POST", LIVE_TOKEN, heldFocus);
+      eq(fromActions.status, 403, "ONE WRITER PER KEY: the Actions credential cannot write live:focus");
+      eq((await fromActions.json()).error.code, "wrong_writer", "because the Worker is its writer");
+      eq((await ingest("live:focus", "POST", INGEST_TOKEN, heldFocus)).status, 403, "and neither can the nightly token");
+      eq((await (await lkFocus()).json()).fresh.readAt, heldFocus.fresh.readAt, "so the Worker's row stands");
+      const nf = await (await fetch(L("/api/flows/now?k=strips,focus&n=focus"), { headers: cookie })).json();
+      deep([nf.keys["live:focus"].source, nf.keys["live:focus"].cadenceS, nf.keys["live:focus"].readAt, nf.keys["live:focus"].klass],
+        ["worker", 300, heldFocus.fresh.readAt, "market"], "the heartbeat reports live:focus beside the nightly focus key");
+      ok(nf.keys["live:focus"].updatedAt > 0 && nf.keys.focus.session === "2026-09-22" && nf.keys["live:strips"].state === "pending",
+        "with its updatedAt, so an open page re-reads it when it moves");
+      await tick(FOCUS, "2026-09-26T10:08:00-04:00");
+      eq(screens().length, 3, "a Saturday focus tick reads nothing");
+      drop.add("GDX").add("AVGO");
+      eq(await tick(FOCUS, "2026-09-23T10:23:00-04:00"), 200, "a focus tick whose screener answer prices GLD alone completes");
+      eq(screens().length, 4, "after its one call");
+      eq((await (await lkFocus()).json()).fresh.readAt, heldFocus.fresh.readAt,
+        "A PARTIAL READ NEVER REPLACES A FULLER LIVE ROW: the 10:13 read of three names, ten minutes old, stands, " +
+          "so the held row's priced names were listed by D1's own SQL (json_each) in the tick's batch");
+      await tick(FOCUS, "2026-09-23T10:28:00-04:00");
+      const aged = await (await lkFocus()).json();
+      ok(aged.fresh.readAt === new Date(et("2026-09-23T10:28:00-04:00")).toISOString() &&
+         Object.keys(aged.rows).join() === "GLD",
+      "and once that row is past its 11-minute live window, the fresher partial read is written");
+      drop.clear();
+
       eq(github.dispatches.length, 0, "10:06 is not a dispatch tick");
       marketNow.value = et("2026-09-23T10:16:00-04:00");
       await tick(RTH, "2026-09-23T10:16:00-04:00");
@@ -1774,8 +1851,56 @@ try {
           "route, so it stops on a holiday or at an early close the calendar alone cannot know; that key adds the " +
           "Tier 1 telemetry and the last dispatch outcome");
       const nightlyClock = await ingest("clock", "GET", INGEST_TOKEN);
-      deep(await nightlyClock.json(), { key: "clock", clock: clockNow },
-        "as does the nightly's health gate under the nightly token");
+      deep(await nightlyClock.json(), { key: "clock", clock: clockNow, labActiveAt: null },
+        "as does the nightly's health gate under the nightly token, which alone also reads labActiveAt: null while " +
+          "no Lab user is on record");
+      {
+        const labAt = async () => (await (await ingest("clock", "GET", INGEST_TOKEN)).json()).labActiveAt;
+        const created = Date.parse("2026-06-30T12:00:00Z");
+        const wrote = Date.parse("2026-08-15T00:00:00Z");
+        await live.d1(`INSERT INTO users (id, email, name, created_at) VALUES ('g_lab', 'lab@example.test', 'Lab', ${created})`);
+        eq(await labAt(), "2026-06-30T12:00:00.000Z", "LAB ACTIVITY FROM D1: a first sign-in stamps users.created_at");
+        await live.d1(`INSERT INTO progress (user_id, model_id, done_json, updated_at) VALUES ('g_lab', 'ols', '[0]', ${wrote})`);
+        eq(await labAt(), new Date(wrote - LAB_SESSION_MS).toISOString(),
+          "a signed-in write counts, less the thirty days of the session that made it");
+        const later = Date.parse("2026-09-20T09:00:00Z");
+        const literal = (sql, values) => { const v = [...values]; return sql.replace(/\?/g, () => v.shift()); };
+        await live.d1(literal(SIGN_IN_SQL, ["'g_lab'", "'lab@example.test'", "'Lab'", later, later]));
+        eq(await labAt(), "2026-09-20T09:00:00.000Z",
+          "A RETURNING LEARNER'S SIGN-IN, through the Worker's own upsert on schema.sql's users table, moves it exactly");
+        ok(/\b1782820800000\b/.test(await live.d1("SELECT created_at, signed_in_at FROM users WHERE id = 'g_lab'")),
+          "while the first sign-in's created_at is kept");
+        const now = await (await fetch(L("/api/flows/now?k=market&n=pulse"), { headers: cookie })).text();
+        ok(now.length > 50 && !/labActiveAt/.test(now) && !now.includes("2026-09-20T09:00:00") && !now.includes(String(later)),
+          "THE PUBLIC VIEW NEVER CARRIES IT: /api/flows/now, the subscriber's clock, says nothing about the Lab");
+        ok(!Object.hasOwn(await (await ingest("clock", "GET", LIVE_TOKEN)).json(), "labActiveAt"),
+          "nor does the live credential's read of the clock key: only the pipeline's credential sees it");
+        await live.d1("ALTER TABLE users RENAME TO users_hidden");
+        await live.d1("ALTER TABLE progress RENAME TO progress_hidden");
+        await live.d1("ALTER TABLE stats RENAME TO stats_hidden");
+        try {
+          const bare = await ingest("clock", "GET", INGEST_TOKEN);
+          deep([bare.status, (await bare.json()).labActiveAt], [200, null],
+            "A DATABASE WITHOUT THE LAB TABLES answers null, and the clock still answers");
+        } finally {
+          await live.d1("ALTER TABLE users_hidden RENAME TO users");
+          await live.d1("ALTER TABLE progress_hidden RENAME TO progress");
+          await live.d1("ALTER TABLE stats_hidden RENAME TO stats");
+        }
+        await live.d1("CREATE TABLE users_pre (id TEXT PRIMARY KEY, email TEXT, name TEXT, created_at INTEGER)");
+        let refused = "";
+        try { await live.d1(literal(SIGN_IN_SQL, ["'g_pre'", "'p@example.test'", "'P'", later, later]).replace("INTO users ", "INTO users_pre ")); }
+        catch (error) { refused = error.message; }
+        ok(/\bsigned_in_at\b/.test(refused),
+          "ON A USERS TABLE THAT PREDATES 0013, D1's refusal names signed_in_at, which is what recordSignIn matches before " +
+            "it adds the column");
+        await live.d1(SIGNED_IN_COLUMN_SQL.replace("TABLE users ", "TABLE users_pre "));
+        await live.d1(literal(SIGN_IN_SQL, ["'g_pre'", "'p@example.test'", "'P'", later, later]).replace("INTO users ", "INTO users_pre "));
+        ok(/g_pre/.test(await live.d1("SELECT id, signed_in_at FROM users_pre")), "and once added, the same upsert lands");
+        await live.d1("DROP TABLE users_pre");
+        await live.d1("DELETE FROM progress WHERE user_id = 'g_lab'");
+        await live.d1("DELETE FROM users WHERE id = 'g_lab'");
+      }
       const focusKnown = readFileSync(new URL("../worker.js", import.meta.url), "utf8").includes("|^focus$");
       eq((await ingest("focus", "GET", LIVE_TOKEN)).status, focusKnown ? 200 : 400,
         "the live role may ask for the focus key it plans the strip from (a Worker that does not know the key yet " +
@@ -1853,7 +1978,7 @@ try {
     }
   }
 
-  console.log(`✓ flows-worker: ${checks} assertions — public login, no-store gating, structural bypass resistance, bidirectional audience isolation, legacy learner tolerance, uniform failures, full sign-in round trip, and the two market-wide keys this wave added served on their own gated routes: the sector option lean beside — never merged into — the sector momentum it shares eleven tickers with, and the news tape whose absent per-ticker form is asserted to stay absent. Plus the retirement of the card dialog: the four board routes serve neither it nor the 151k panel library it was the only caller of, and their own ?t= addresses — pushed into history on every open the modal ever had — are 302'd to /flows/ticker/ with the surface they came from, from a Location that is a pure function of the request URL and reads no payload and no session. Plus the live layer: one writer per key held by credential, table and trigger, Tier 1 in exactly two vendor calls with its outcome in D1 on a clock table that upgrades itself, read-time overlays that leave the nightly rows byte-identical, the dispatch clock with its in-flight guard and one-shot watchdog, a tape-derived holiday, the tape's single flight, and quote lives that follow the market phase`);
+  console.log(`✓ flows-worker: ${checks} assertions — public login, no-store gating, structural bypass resistance, bidirectional audience isolation, legacy learner tolerance, uniform failures, full sign-in round trip, and the two market-wide keys this wave added served on their own gated routes: the sector option lean beside — never merged into — the sector momentum it shares eleven tickers with, and the news tape whose absent per-ticker form is asserted to stay absent. Plus the retirement of the card dialog: the four board routes serve neither it nor the 151k panel library it was the only caller of, and their own ?t= addresses — pushed into history on every open the modal ever had — are 302'd to /flows/ticker/ with the surface they came from, from a Location that is a pure function of the request URL and reads no payload and no session. Plus the live layer: one writer per key held by credential, table and trigger, live:focus from the Worker's own focus cron in one screener call that a failed read never overwrites, nor a partial one while the fuller row is live, Tier 1 in exactly two vendor calls with its outcome in D1 on a clock table that upgrades itself, read-time overlays that leave the nightly rows byte-identical, the dispatch clock with its in-flight guard and one-shot watchdog, a tape-derived holiday, the tape's single flight, and quote lives that follow the market phase`);
 } finally {
   await server.stop();
 }

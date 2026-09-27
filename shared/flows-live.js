@@ -11,6 +11,7 @@ const spec = (klass, writer, maxBytes, reads) => Object.freeze({
 
 export const LIVE_KEYS = Object.freeze({
   "live:market": spec("market", "worker", 16 * 1024, 2),
+  "live:focus": spec("market", "worker", 16 * 1024, 1),
   "live:breadth": spec("breadth", "actions", 96 * 1024, 17),
   "live:strips": spec("breadth", "actions", 64 * 1024, 1),
   "live:strips:series": spec("breadth", "actions", 112 * 1024, 0),
@@ -620,16 +621,16 @@ export function stripNames({ long = [], short = [], watch = [], focus = [] } = {
   return out;
 }
 
-export function shapeStrips(raw, { at, session, names = [], writer } = {}) {
+export function shapeStrips(raw, { at, session, names = [], writer, key = "live:strips" } = {}) {
   const silent = feedSilence(raw);
   const base = {
-    v: 1, key: "live:strips", session,
+    v: 1, key, session,
     fields: STRIP_FIELDS.map(([n]) => n),
     units: Object.fromEntries(STRIP_FIELDS.map(([n, , u]) => [n, u])),
     basis: "vendor screener, undated read (the vendor's live row); one call for every name",
   };
-  const freshOf = (vendorAt) => freshEnvelope({ readAt: at, vendorAt, source: "actions",
-    cadenceS: LIVE_KEYS["live:strips"].cadenceS, session, writer });
+  const freshOf = (vendorAt) => freshEnvelope({ readAt: at, vendorAt, source: LIVE_KEYS[key].writer,
+    cadenceS: LIVE_KEYS[key].cadenceS, session, writer });
   if (silent) return { ...base, fresh: freshOf(null), ...silent, rows: {}, asked: names.length, missing: names.slice() };
   const rows = {};
   const dates = {};
