@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { readFileSync, mkdtempSync, rmSync, readdirSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import vm from "node:vm";
@@ -787,11 +787,74 @@ const cronMinutes = (cron) => {
     `FOUR STARTERS FOR EVERY DELAY: for each delay from 0 to 300 minutes at least four starters land inside the ` +
       `${waitMs / 60000}-minute wait before 09:31 ET, under EDT (2026-09-28, 2027-03-15) and EST (2026-11-02, ` +
       `2027-03-12); fewest, at which delay: ${JSON.stringify(cover)}`);
+  const say = wf.slice(wf.indexOf("      - name: Say who dispatched this run"), wf.indexOf("      - name: Read the live layer"));
   ok((wf.match(/\$\{\{ github\.event\.schedule \}\}/g) || []).length === 1 &&
-     /FIRED: \$\{\{ github\.event\.schedule \}\}/.test(wf) && /cron that fired: '\$\{FIRED:-none\}'/.test(wf) &&
-     /minutes after its slot\./.test(wf),
-  "the run logs the cron that fired, through env rather than into the script, and how many minutes after its slot " +
-    "GitHub delivered it: the measurement the 2026-09-25 runs could not give");
+     /FIRED: \$\{\{ github\.event\.schedule \}\}/.test(say) && /cron that fired: '\$\{FIRED:-none\}'/.test(say) &&
+     /GH_TOKEN: \$\{\{ github\.token \}\}/.test(say) &&
+     /gh api "repos\/\$GITHUB_REPOSITORY\/actions\/runs\/\$GITHUB_RUN_ID" --jq \.created_at/.test(say),
+  "the run logs the cron that fired, through env rather than into the script, and reads its own created_at from the " +
+    "Actions API with the job's token, the only clock that says when GitHub delivered a run that then queued");
+
+  const stepLines = say.split("\n");
+  const runAt = stepLines.findIndex((line) => /^\s+run: \|$/.test(line));
+  const indent = stepLines[runAt + 1].match(/^ */)[0].length;
+  const stepScript = [];
+  for (const line of stepLines.slice(runAt + 1)) {
+    if (line.trim() && line.match(/^ */)[0].length < indent) break;
+    stepScript.push(line.slice(indent));
+  }
+  const stepDir = mkdtempSync(join(tmpdir(), "flows-live-step-"));
+  try {
+    mkdirSync(join(stepDir, "bin"));
+    writeFileSync(join(stepDir, "step.sh"), stepScript.join("\n"));
+    writeFileSync(join(stepDir, "bin", "gh"), [
+      "#!/bin/sh",
+      'printf \'%s\\n\' "$*" >> "$GH_CALLS"',
+      '[ "$1 $2 $3 $4" = "api repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID --jq .created_at" ] || exit 1',
+      '[ -n "$GH_TOKEN" ] && [ -n "$FAKE_CREATED" ] || exit 1',
+      'printf \'%s\\n\' "$FAKE_CREATED"',
+      "",
+    ].join("\n"), { mode: 0o755 });
+    const calls = join(stepDir, "calls");
+    const step = (env) => {
+      rmSync(calls, { force: true });
+      const r = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", join(stepDir, "step.sh")], {
+        encoding: "utf8",
+        env: { PATH: `${join(stepDir, "bin")}:${process.env.PATH}`, EVENT: "schedule", ORIGIN: "schedule",
+          TICK: "none", GH_TOKEN: "ghs_run_token", GITHUB_REPOSITORY: "anilkaya001/anilkaya.org",
+          GITHUB_RUN_ID: "36178225980", GH_CALLS: calls, ...env },
+      });
+      let made = [];
+      try { made = readFileSync(calls, "utf8").trim().split("\n"); } catch { made = []; }
+      return { status: r.status, out: r.stdout, made };
+    };
+    const createdS = Math.floor(Date.now() / 1000) - 73 * 60 - 20;
+    const slotMin = Math.floor((createdS - 20 * 60) / 60) % 1440;
+    const slotName = `${String(Math.floor(slotMin / 60)).padStart(2, "0")}:${String(slotMin % 60).padStart(2, "0")}`;
+    const created = new Date(createdS * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
+    const queued = step({ FIRED: `${slotMin % 60} ${Math.floor(slotMin / 60)} * * 1-5`, FAKE_CREATED: created });
+    ok(queued.status === 0 && queued.made.length === 1 &&
+       queued.made[0] === "api repos/anilkaya001/anilkaya.org/actions/runs/36178225980 --jq .created_at" &&
+       queued.out.includes(`GitHub created this run at ${created.slice(11, 19)} UTC, 20 min after its ${slotName} ` +
+         "UTC slot; this step ran 73 min after that, the time the run queued for the flows-live concurrency group " +
+         "and a runner."),
+    "THE DELIVERY LOG MEASURES GITHUB, NOT THE QUEUE: a run GitHub created 20 minutes after its slot that then " +
+      "waited 73 minutes behind the running loop (as run 36178225980 waited on 2026-09-25, created 19:12:12, its " +
+      "step at 20:25:32) logs 20 minutes of delivery and 73 of queue, where the step's own clock said 93 of delivery " +
+      `(the step, run under bash with a stub gh, printed: ${JSON.stringify(queued.out.trim().split("\n").at(-1))})`);
+    const blind = step({ FIRED: "17 13 * * 1-5", FAKE_CREATED: "" });
+    ok(blind.status === 0 && blind.made.length === 1 && !/GitHub created this run/.test(blind.out) &&
+       blind.out.includes("The run's created_at could not be read, so how late GitHub delivered the 13:17 UTC " +
+         "starter is left to the Actions API."),
+    "and when the Actions API does not answer it says so and the step still succeeds, so a log line never costs a " +
+      "session's passes");
+    const chained = step({ EVENT: "workflow_dispatch", ORIGIN: "chain", FIRED: "" });
+    ok(chained.status === 0 && chained.made.length === 0 && /cron that fired: 'none'/.test(chained.out) &&
+       !/created this run|created_at/.test(chained.out),
+    "while a dispatched run, which fired no cron, logs its origin and makes no API call");
+  } finally {
+    rmSync(stepDir, { recursive: true, force: true });
+  }
 
   const migration = read("migrations/0010_flows_live.sql");
   const clockMigration = read("migrations/0011_flows_clock_tier1.sql");
@@ -2195,4 +2258,5 @@ console.log(`✓ flows-live: ${checks} assertions — one threshold table in cod
   `the focus names read ahead of the boards in the one strip call; the nightly health gate and the live job's exit ` +
   `rule; the self-sustaining ` +
   `Tier 2 session loop, its budget and its chain dispatch; starters that put four waiting runs before 09:31 ET for ` +
-  `every delivery delay up to five hours, under EDT and EST; and a client helper that only compares clocks`);
+  `every delivery delay up to five hours, under EDT and EST; a delivery log timed from the run's created_at; and a ` +
+  `client helper that only compares clocks`);

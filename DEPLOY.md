@@ -1678,10 +1678,21 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   slot at eight delays. `17 13` to `47 20`, at :17 and :47 of each hour,
   restart a loop that died or never started (sixteen slots, as before). Every
   starter fires 17 minutes past a :00 or :30 mark, away from the top of the
-  hour, where GitHub documents the load peaks that delay and drop schedules. The
-  job logs the cron that fired and how many minutes after its slot GitHub
-  delivered it (`GitHub delivered the 7:17 UTC starter 251 minutes after its
-  slot.`), so each week's runs measure the delay this schedule assumes.
+  hour, where GitHub documents the load peaks that delay and drop schedules.
+- **Each run logs how late GitHub delivered it.** The first step logs the cron
+  that fired and reads the run's own `created_at` from the Actions API with the
+  job's token (`gh api repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID`),
+  because the step's clock also counts the time a run queued for the
+  concurrency group: on 2026-09-25 run 36178225980 was created at 19:12:12 UTC
+  and reached its steps at 20:25:32, when the 18:01 loop ended. The delay is
+  taken from `created_at` and the queue is logged on its own: `GitHub created
+  this run at 11:28:40 UTC, 251 min after its 07:17 UTC slot; this step ran 0 min
+  after that, the time the run queued for the flows-live concurrency group and a
+  runner.` When the API does not answer, the step says so and succeeds. A run
+  cancelled while pending, replaced by a newer starter or by a chain, never
+  reaches a step and never logs; its `created_at` is only in the Actions API
+  (`GET /repos/{owner}/{repo}/actions/workflows/flows-live.yml/runs?event=schedule`).
+  Together they measure the delay the schedule assumes.
 - **Worst-case idle is 240 minutes of runner a day.** Runs share one concurrency
   group, so only one waits at a time, and every waiting run waits for the same
   09:31: however many starters land, the pre-open wait a day adds up to at most
