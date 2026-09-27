@@ -96,8 +96,10 @@ cross-user isolation; do not split this batch into non-transactional writes.
 - Worker name: `anilkaya`
 - Static binding: `ASSETS`
 - D1 binding: `DB` → database `iewt`
-- `run_worker_first = true`
+- `run_worker_first = ["/*", "!/assets/*"]`
 - `html_handling = "auto-trailing-slash"`
+- a root `_headers` file, uploaded with the static bundle and never served,
+  carrying the asset-first `/assets/*` policy
 
 Required secret bindings:
 
@@ -236,9 +238,28 @@ grep -i '^cache-control: public, max-age=31536000, immutable' /tmp/css.headers
 curl -fsSI https://anilkaya.org/ | grep -i '^cache-control: no-cache'
 ```
 
+The versioned stylesheet is served asset-first by the edge, without invoking
+`worker.js`; its headers come from the root `_headers` file. Check that the
+policy reached production, and that no dashboard rule added a CSP to it:
+
+```bash
+grep -i '^x-frame-options: DENY' /tmp/css.headers
+grep -i '^x-content-type-options: nosniff' /tmp/css.headers
+grep -i '^strict-transport-security: max-age=31536000' /tmp/css.headers
+! grep -qi '^content-security-policy' /tmp/css.headers
+```
+
+The asset layer matches by path, so `/assets/css/base.css` without `?v=`
+reports the same immutable policy, and a request for a file that does not
+exist under `/assets/` is answered by the asset layer's `404.html` with its
+path's policy and no CSP. Only the responses `worker.js` still serves
+(`/`, `/robots.txt`, `/sitemap.xml`, the Worker's 404 page) distinguish
+versioned from unversioned URLs and successful from failed status.
+
 Any byte mismatch or decoding error is a release blocker. Do not “fix” it by
-rebuilding an asset response from a plain init dictionary; the finalizer must
-retain `new Response(response.body, response)`.
+rebuilding an asset response from a plain init dictionary; for the responses
+`worker.js` still serves, the finalizer must retain
+`new Response(response.body, response)`.
 
 ### Domain behavior
 
@@ -421,10 +442,11 @@ it unlocks and what tells you it has lapsed.
    `wrangler d1 execute iewt --remote --command "PRAGMA table_info(users)"`
    before applying it.
 5. **Optional: Workers Paid ($5/month).** It removes the 100,000
-   requests-a-day cliff (every static asset passes through the Worker, so the
-   cliff would take the Lab and the landing page down with Flows) and the 10 ms
-   CPU cap, which is what forces Tier 2 onto GitHub Actions. No code change is
-   needed to switch.
+   requests-a-day cliff (HTML, the APIs and the heartbeat still pass through
+   the Worker; `/assets/*` is served asset-first and no longer counts, so the
+   cliff would still take the Lab and the landing page down with Flows, only
+   later) and the 10 ms CPU cap, which is what forces Tier 2 onto GitHub
+   Actions. No code change is needed to switch.
 
 Nothing routine is left: a weekly keepalive keeps GitHub from disabling the
 scheduled workflows after 60 days without a commit, a weekly strict probe turns

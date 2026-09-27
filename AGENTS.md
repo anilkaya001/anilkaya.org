@@ -14,19 +14,33 @@ and power verification.
 ## Architecture
 
 ```text
-Browser ──► Cloudflare Worker (worker.js; runs before assets)
-              ├─ /auth/*  Google OAuth → HMAC-signed session cookie
-              ├─ /api/*   owner-scoped JSON API backed by D1 (SQLite)
-              ├─ /lab/<course-slug>/ → crawlable course HTML via HTMLRewriter
-              └─ everything else → ASSETS binding
+Browser ──► Cloudflare edge
+              ├─ /assets/*  served asset-first from the static bundle, no Worker
+              │             invocation; the root `_headers` file sets its headers
+              └─ everything else ──► Cloudflare Worker (worker.js; runs first)
+                    ├─ /auth/*  Google OAuth → HMAC-signed session cookie
+                    ├─ /api/*   owner-scoped JSON API backed by D1 (SQLite)
+                    ├─ /lab/<course-slug>/ → crawlable course HTML via HTMLRewriter
+                    └─ everything else → ASSETS binding
 ```
 
 - `wrangler.toml` is the Worker source of truth: name `anilkaya`, entrypoint
   `worker.js`, static directory `.`, binding `ASSETS`, and D1 binding `DB` to
   database name `iewt`.
-- `assets.run_worker_first = true` is required. Without it, matching static
-  assets bypass `worker.js`, disabling response headers, cache policy, and
-  course metadata rewriting.
+- `assets.run_worker_first = ["/*", "!/assets/*"]`. Every route except
+  `/assets/*` invokes `worker.js` first, which keeps response headers, cache
+  policy, and course metadata rewriting in the Worker; a plain `true` would
+  put the Worker, its finalizer and an `ASSETS` binding fetch in front of every
+  stylesheet, script, font and image as well. `/assets/*` is served asset-first
+  by the edge, and the root `_headers` file (uploaded with the static bundle,
+  never served) carries its policy: the same seven security headers, one-year
+  immutable for `/assets/css/*`, `/assets/js/*` and `/assets/fonts/*`, one
+  hour for `/assets/img/*`, `/assets/data/*` and `assets/version.txt`. The
+  asset layer matches by path only, so an unversioned `/assets/css/*` request
+  gets the immutable policy too, and a missing file under `/assets/` is
+  answered by the asset layer's `404.html` with its path's policy and no CSP
+  rather than by the Worker. `.gitignore` un-ignores `_headers` (its `_*` rule
+  would drop it from the served tree) and `.assetsignore` must not list it.
 - `assets.html_handling = "auto-trailing-slash"`. Each course has a descriptive
   canonical path such as `/lab/ordinary-least-squares/`. Legacy
   `/lab/course?m=<id>` and `/lab/lesson?m=<id>` forms receive a 308 redirect;
@@ -69,6 +83,7 @@ header readback with this repository after any dashboard rule change.
 | `lab/course.html` | Private routing template rewritten for canonical course-slug pages; loads only the selected course payload. |
 | `lab/lesson.html` | Noindexed static fallback for legacy lesson URLs. |
 | `worker.js` | Routing, response policy, OAuth, API, D1 synchronization, SEO rewriting. |
+| `_headers` | Edge policy for asset-first `/assets/*` responses: the Worker's security headers and by-path `Cache-Control`. |
 | `shared/session.js` | Defensive HMAC-SHA256 session sign/verify and cookie helpers. |
 | `shared/lab-sign-in.js` | The Lab session lifetime, the OAuth callback's `users` upsert (`created_at` once, `signed_in_at` on every sign-in, the column added on first use) and `labActiveAt`, the Google OAuth client's last known use that the nightly health gate reads through the ingest `clock` key. |
 | `shared/course-points.js` | Server scoring manifest used to derive points from progress. |
@@ -267,11 +282,16 @@ GET logout route; that would reintroduce forced-logout CSRF.
    `Content-Encoding` at the edge.
 2. **Every route uses the finalizer**, including auth, API success/errors,
    rewritten HTML, static assets, 404s, and unexpected exceptions.
-3. Full security headers apply to every response. CSP applies only to HTML and
+3. Full security headers apply to every response: `worker.js` sets them on
+   everything it serves and `_headers` repeats them, verbatim, on asset-first
+   `/assets/*` responses. CSP applies only to HTML and
    permits jsDelivr plus eval/WebAssembly evaluation required by Pyodide, and
    the first-party Cloudflare Web Analytics beacon origins.
 4. HTML is `no-cache`; successful/304 versioned assets are immutable for one
    year; other successful/304 assets cache for one hour; API/auth is `no-store`.
+   Under `/assets/*` the same policy is written by path in `_headers` (`css`,
+   `js`, `fonts` immutable; `img`, `data`, `version.txt` one hour), because the
+   asset layer sees neither the query string nor the status.
 5. HTML sends one `Clear-Site-Data: "cache"` repair unless the `cachefix`
    cookie is present. Keep this until the historical encoding incident is no
    longer operationally relevant.
@@ -282,9 +302,9 @@ GET logout route; that would reintroduce forced-logout CSRF.
 7. Malformed, oversized, wrongly signed, or expired sessions fail closed as an
    anonymous user and never throw a request-level 500.
 
-Dashboard Transform Rules can override Worker headers after code runs. A
-post-deploy header smoke test is mandatory; remove or align stale dashboard
-rules if live headers differ from `worker.js`.
+Dashboard Transform Rules can override Worker and `_headers` headers after
+code runs. A post-deploy header smoke test is mandatory; remove or align stale
+dashboard rules if live headers differ from `worker.js` or `_headers`.
 
 ## Asset versioning
 
