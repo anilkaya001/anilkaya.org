@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { readFileSync, mkdtempSync, rmSync, readdirSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import vm from "node:vm";
 import {
   FRESH_CLASSES, REFRESH_CADENCE_MINUTES, PHASE_MINUTES, phaseAt, freshnessState, freshHeaders, expectedNightlySession,
-  easternInstant, tier1Due, liveDispatchDue, liveStalled, nightlyDispatchDue, sessionClose,
+  easternInstant, tier1Due, liveDispatchDue, liveStalled, nightlyDispatchDue, sessionClose, isWeekdayDay, isHoliday,
+  LIVE_CLOCK,
 } from "../shared/flows-freshness.js";
 import * as L from "../shared/flows-live.js";
 import * as W from "../shared/flows-live-worker.js";
@@ -31,6 +32,14 @@ const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 const T = (iso) => Date.parse(iso);
+const cronField = (field) => field.split(",").flatMap((part) => {
+  const [a, b = a] = part.split("-").map(Number);
+  return Array.from({ length: b - a + 1 }, (_, i) => a + i);
+});
+const cronMinutes = (cron) => {
+  const [m, h] = cron.split(" ");
+  return cronField(h).flatMap((hh) => cronField(m).map((mm) => hh * 60 + mm));
+};
 
 {
   deep(Object.fromEntries(Object.entries(FRESH_CLASSES).map(([k, v]) => [k, [v.cadenceS, v.liveS, v.staleS]])), {
@@ -748,13 +757,118 @@ const T = (iso) => Date.parse(iso);
     `one live run at a time (so never more than one loop), ${timeout} minutes at most — under GitHub's six-hour job ` +
     `cap, with the loop's ${LIVE_LOOP.budgetMs / 60000}-minute budget and a pass's overrun inside it`);
   const crons = [...wf.matchAll(/cron: "([^"]+)"/g)].map((m) => m[1]);
-  deep(crons, ["17 10,11,12 * * 1-5", "31,46 13,14 * * 1-5", "3,37 15-20 * * 1-5"],
-    "STARTERS, not a schedule: 10:17, 11:17 and 12:17 UTC land before the open under EDT and EST however late GitHub " +
-    "delivers them, and the loop waits for 09:31 ET; 13:31/13:46 and 14:31/14:46 UTC start it at the open, and :03 " +
-    "and :37 of every hour from 15:03 to 20:37 restart it if GitHub dropped a starter or a run died — sixteen slots, " +
-    "because GitHub delivered about one high-frequency slot in twenty on 2026-09-23 and 09-24 and any one that lands " +
-    "starts a loop that chains itself to the close; a starter that queues behind a running loop exits at once when " +
-    "it finally starts outside the window");
+  const hourly = (from, to, minutes) => Array.from({ length: to - from + 1 }, (_, i) => from + i)
+    .flatMap((h) => minutes.map((m) => `${m} ${h} * * 1-5`));
+  deep(crons, hourly(5, 20, [17, 47]),
+    "STARTERS, not a schedule, each a cron line of one slot, at :17 and :47 of every hour from 05:17 to 20:47 UTC. " +
+      "From 2026-09-23 to 09-25 GitHub created 6 scheduled live runs for 63 slots, the first at 17:50 UTC: 2 from " +
+      "Wednesday's one line, 1 from Thursday's one line and 3 from Friday's two, while the nightly's one-slot line " +
+      "'30 21' ran all three days, 2 h 19 to 2 h 29 late. Read per line that is one or two runs a day, read per slot " +
+      "it is 6 in 63, and three days do not settle which, so the lines are one slot each (a run per line) and half " +
+      "an hour apart (a run per slot). A starter at S that GitHub delivers d late waits when S + d falls in the 240 " +
+      "minutes before 09:31 ET: 09:31 to 13:31 UTC under EDT, 10:31 to 14:31 UTC under EST. On time, 09:47 to 13:17 " +
+      "land in it (EDT) and 10:47 to 14:17 (EST), eight each; 3 h late, 06:47 to 10:17 and 07:47 to 11:17, eight; " +
+      "5 h late, 05:17 to 08:17 (EDT, seven, 05:17 being the first) and 05:47 to 09:17 (EST, eight). At least seven " +
+      "landings for every delay from 0 to 5 h, checked minute by minute below: at 6 in 63 a slot, 1 - (57/63)^7 = " +
+      "0.50 that one of them is delivered, against 0.33 for the four of the hourly lines. From 13:17 the same lines " +
+      "restart a loop that died or never started");
+  const slots = crons.flatMap(cronMinutes);
+  ok(crons.every((c) => / \* \* 1-5$/.test(c)) && slots.length === 32 && slots.every((s) => s % 30 === 17),
+    "every starter runs Monday to Friday (GitHub counts weekdays from 0 = Sunday) at 17 minutes past a :00 or :30 " +
+      "mark, off the top of the hour, where GitHub's documented load peaks delay and drop schedules");
+  ok(crons.every((c) => /^\d+ \d+ \* \* 1-5$/.test(c)) && new Set(crons).size === 32,
+    "every starter is a line of its own, so github.event.schedule names exactly one slot and the log can say how " +
+      "late GitHub delivered it");
+  const waitMs = LIVE_LOOP.preOpenWaitMs;
+  const cover = {};
+  for (const day of ["2026-09-28", "2027-03-15", "2026-11-02", "2027-03-12"]) {
+    const first = easternInstant(day, PHASE_MINUTES.open) + LIVE_LOOP.openLagMs;
+    const base = Date.parse(day + "T00:00:00Z");
+    let least = [Infinity, null];
+    for (let d = 0; d <= 300; d++) {
+      const n = slots.filter((s) => {
+        const lands = base + (s + d) * 60000;
+        return lands <= first && first - lands <= waitMs;
+      }).length;
+      if (n < least[0]) least = [n, d];
+    }
+    cover[day] = least;
+  }
+  deep(Object.fromEntries(Object.entries(cover).map(([day, [n]]) => [day, n])),
+    { "2026-09-28": 7, "2027-03-15": 7, "2026-11-02": 8, "2027-03-12": 8 },
+    `SEVEN LANDINGS FOR EVERY DELAY: for each delay from 0 to 300 minutes at least seven starters land inside the ` +
+      `${waitMs / 60000}-minute wait before 09:31 ET under EDT (2026-09-28, 2027-03-15) and eight under EST ` +
+      `(2026-11-02, 2027-03-12); fewest, at which delay: ${JSON.stringify(cover)}. The first to start waits, and ` +
+      "the flows-live concurrency group keeps only the newest of the rest pending and cancels the others, so seven " +
+      "landings are seven chances at one waiter, not seven waiters");
+  const say = wf.slice(wf.indexOf("      - name: Say who dispatched this run"), wf.indexOf("      - name: Read the live layer"));
+  ok((wf.match(/\$\{\{ github\.event\.schedule \}\}/g) || []).length === 1 &&
+     /FIRED: \$\{\{ github\.event\.schedule \}\}/.test(say) && /cron that fired: '\$\{FIRED:-none\}'/.test(say) &&
+     /GH_TOKEN: \$\{\{ github\.token \}\}/.test(say) &&
+     /gh api "repos\/\$GITHUB_REPOSITORY\/actions\/runs\/\$GITHUB_RUN_ID" --jq \.created_at/.test(say),
+  "the run logs the cron that fired, through env rather than into the script, and reads its own created_at from the " +
+    "Actions API with the job's token, the only clock that says when GitHub delivered a run that then queued");
+
+  const stepLines = say.split("\n");
+  const runAt = stepLines.findIndex((line) => /^\s+run: \|$/.test(line));
+  const indent = stepLines[runAt + 1].match(/^ */)[0].length;
+  const stepScript = [];
+  for (const line of stepLines.slice(runAt + 1)) {
+    if (line.trim() && line.match(/^ */)[0].length < indent) break;
+    stepScript.push(line.slice(indent));
+  }
+  const stepDir = mkdtempSync(join(tmpdir(), "flows-live-step-"));
+  try {
+    mkdirSync(join(stepDir, "bin"));
+    writeFileSync(join(stepDir, "step.sh"), stepScript.join("\n"));
+    writeFileSync(join(stepDir, "bin", "gh"), [
+      "#!/bin/sh",
+      'printf \'%s\\n\' "$*" >> "$GH_CALLS"',
+      '[ "$1 $2 $3 $4" = "api repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID --jq .created_at" ] || exit 1',
+      '[ -n "$GH_TOKEN" ] && [ -n "$FAKE_CREATED" ] || exit 1',
+      'printf \'%s\\n\' "$FAKE_CREATED"',
+      "",
+    ].join("\n"), { mode: 0o755 });
+    const calls = join(stepDir, "calls");
+    const step = (env) => {
+      rmSync(calls, { force: true });
+      const r = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", join(stepDir, "step.sh")], {
+        encoding: "utf8",
+        env: { PATH: `${join(stepDir, "bin")}:${process.env.PATH}`, EVENT: "schedule", ORIGIN: "schedule",
+          TICK: "none", GH_TOKEN: "ghs_run_token", GITHUB_REPOSITORY: "anilkaya001/anilkaya.org",
+          GITHUB_RUN_ID: "36178225980", GH_CALLS: calls, ...env },
+      });
+      let made = [];
+      try { made = readFileSync(calls, "utf8").trim().split("\n"); } catch { made = []; }
+      return { status: r.status, out: r.stdout, made };
+    };
+    const createdS = Math.floor(Date.now() / 1000) - 73 * 60 - 20;
+    const slotMin = Math.floor((createdS - 20 * 60) / 60) % 1440;
+    const slotName = `${String(Math.floor(slotMin / 60)).padStart(2, "0")}:${String(slotMin % 60).padStart(2, "0")}`;
+    const created = new Date(createdS * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
+    const queued = step({ FIRED: `${slotMin % 60} ${Math.floor(slotMin / 60)} * * 1-5`, FAKE_CREATED: created });
+    ok(queued.status === 0 && queued.made.length === 1 &&
+       queued.made[0] === "api repos/anilkaya001/anilkaya.org/actions/runs/36178225980 --jq .created_at" &&
+       queued.out.includes(`GitHub created this run at ${created.slice(11, 19)} UTC, 20 min after its ${slotName} ` +
+         "UTC slot; this step ran 73 min after that, the time the run queued for the flows-live concurrency group " +
+         "and a runner."),
+    "THE DELIVERY LOG MEASURES GITHUB, NOT THE QUEUE: a run GitHub created 20 minutes after its slot that then " +
+      "waited 73 minutes behind the running loop (as run 36178225980 waited on 2026-09-25, created 19:12:12, its " +
+      "step at 20:25:32) logs 20 minutes of delivery and 73 of queue, where the step's own clock said 93 of delivery " +
+      `(the step, run under bash with a stub gh, printed: ${JSON.stringify(queued.out.trim().split("\n").at(-1))})`);
+    const blind = step({ FIRED: "17 13 * * 1-5", FAKE_CREATED: "" });
+    ok(blind.status === 0 && blind.made.length === 1 && !/GitHub created this run/.test(blind.out) &&
+       blind.out.includes("The run's created_at could not be read, so how late GitHub delivered the 13:17 UTC " +
+         "starter is left to the Actions API."),
+    "and when the Actions API does not answer it says so and the step still succeeds, so a log line never costs a " +
+      "session's passes");
+    const chained = step({ EVENT: "workflow_dispatch", ORIGIN: "chain", FIRED: "" });
+    ok(chained.status === 0 && chained.made.length === 0 && /cron that fired: 'none'/.test(chained.out) &&
+       !/created this run|created_at/.test(chained.out),
+    "while a dispatched run, which fired no cron, logs its origin and makes no API call");
+  } finally {
+    rmSync(stepDir, { recursive: true, force: true });
+  }
 
   const migration = read("migrations/0010_flows_live.sql");
   const clockMigration = read("migrations/0011_flows_clock_tier1.sql");
@@ -1513,6 +1627,212 @@ const T = (iso) => Date.parse(iso);
       "a starter on a computed NYSE holiday never waits");
     ok(LIVE_LOOP.preOpenWaitMs + 60 * 60000 <= LIVE_LOOP.budgetMs,
       "and a run that waited the longest still has an hour of passes before it chains");
+    const sessionSpan = (PHASE_MINUTES.close + LIVE_CLOCK.runAfterCloseMin - (PHASE_MINUTES.open + 1)) * 60000;
+    ok(2 * LIVE_LOOP.budgetMs - LIVE_LOOP.preOpenWaitMs >= sessionSpan,
+      `and one chain carries it to 16:25: ${(LIVE_LOOP.budgetMs - LIVE_LOOP.preOpenWaitMs) / 60000} minutes of ` +
+        `passes, then a chained run's ${LIVE_LOOP.budgetMs / 60000}, cover the ${sessionSpan / 60000} minutes from ` +
+        "09:31 to 16:25, so the worst-case wait never costs a second chain");
+  }
+  {
+    const waitMs = LIVE_LOOP.preOpenWaitMs;
+    const slots = [...read(".github/workflows/flows-live.yml").matchAll(/cron: "([^"]+)"/g)]
+      .flatMap((m) => cronMinutes(m[1]));
+    const hhmm = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+    const start = async (at) => {
+      const c = sim(at);
+      const passAt = [];
+      const r = await runLiveLoop({ now: c.now, sleep: c.sleep, log: () => {},
+        pass: async () => { passAt.push(c.now()); c.advance(40000); return {}; },
+        chain: async () => ({ sent: true, why: "sent", status: 204 }) });
+      return { r, passAt, sleeps: c.sleeps, end: c.now() };
+    };
+    const wrong = [];
+    const landed = {};
+    for (const [zone, day] of [["EDT", "2026-09-28"], ["EST", "2026-11-02"]]) {
+      const first = easternInstant(day, PHASE_MINUTES.open) + LIVE_LOOP.openLagMs;
+      const base = T(day + "T00:00:00Z");
+      for (const d of [0, 60, 120, 180, 210, 240, 270, 300]) {
+        const key = `${zone} +${d} min`;
+        landed[key] = 0;
+        for (const s of slots) {
+          const at = base + (s + d) * 60000;
+          const { r, passAt, sleeps } = await start(at);
+          const lead = first - at;
+          const label = `${zone} ${hhmm(s)} UTC starter ${d} min late`;
+          if (liveWindow(at).run) {
+            if (passAt[0] !== at || r.preOpenMs !== 0) wrong.push(label + ": should pass at once");
+          } else if (lead >= 0 && lead <= waitMs) {
+            if (passAt[0] !== first || r.preOpenMs !== lead || sleeps[0] !== lead) wrong.push(label + ": should wait");
+            else landed[key]++;
+          } else if (r.exit !== "outside-window" || passAt.length || sleeps.length || r.preOpenMs !== 0) {
+            wrong.push(label + ": should exit at once");
+          }
+        }
+      }
+    }
+    deep(wrong, [], `THE LOOP DOES WHAT THE SCHEDULE ARITHMETIC SAYS, for every one of the ${slots.length} starter slots ` +
+      "delivered on time or 1, 2, 3, 3.5, 4, 4.5 or 5 h late, under EDT (2026-09-28) and EST (2026-11-02): a " +
+      "starter that lands up to " +
+      `${waitMs / 60000} minutes before 09:31 ET sleeps until then and passes at 09:31 exactly, one that lands in the ` +
+      "session passes at once, and any other exits at once without a sleep or a pass");
+    ok(Object.values(landed).every((n) => n >= 7),
+      "so at least seven starters, each run alone, would wait for 09:31 ET at every one of those delays; the " +
+        "concurrency group lets the first of them wait and cancels all but the newest of the rest while it is " +
+        `pending, so these are chances at the one waiting run, not waiting runs (${JSON.stringify(landed)})`);
+    const group = async (landings) => {
+      const ran = [];
+      let busyUntil = -Infinity;
+      let chainedAt = null;
+      let pending = null;
+      const begin = async (at) => {
+        const run = await start(at);
+        ran.push({ at, ...run });
+        busyUntil = run.end;
+        chainedAt = run.r.chained && run.r.chained.sent ? run.end : null;
+      };
+      const drainTo = async (limit) => {
+        while (busyUntil <= limit && (pending !== null || chainedAt !== null)) {
+          const next = chainedAt !== null ? busyUntil : pending;
+          pending = null;
+          chainedAt = null;
+          await begin(Math.max(next, busyUntil));
+        }
+      };
+      for (const at of landings) {
+        await drainTo(at);
+        if (busyUntil > at) pending = at;
+        else await begin(at);
+      }
+      await drainTo(Infinity);
+      return ran;
+    };
+    const queueWrong = [];
+    for (const [zone, day] of [["EDT", "2026-09-28"], ["EST", "2026-11-02"]]) {
+      const first = easternInstant(day, PHASE_MINUTES.open) + LIVE_LOOP.openLagMs;
+      const base = T(day + "T00:00:00Z");
+      for (const d of [0, 60, 120, 180, 210, 240, 270, 300]) {
+        const ran = await group(slots.map((s) => base + (s + d) * 60000).sort((a, b) => a - b));
+        const waiters = ran.filter((x) => x.r.preOpenMs > 0);
+        const idle = ran.reduce((sum, x) => sum + x.r.preOpenMs, 0);
+        if (waiters.length !== 1 || idle > waitMs || waiters[0].passAt[0] !== first) {
+          queueWrong.push(`${zone} +${d} min: ${waiters.length} waiters, ${idle / 60000} min idle`);
+        }
+      }
+    }
+    deep(queueWrong, [], "THROUGH THE CONCURRENCY GROUP (one run, and one pending run that a newer one replaces): at " +
+      "every one of those delays, under EDT and EST, exactly one run waits, it passes at 09:31 ET, and the day's " +
+      `pre-open sleep adds up to at most ${waitMs / 60000} minutes however many starters land`);
+
+    for (const [zone, day] of [["EDT", "2026-09-28"], ["EST", "2026-11-02"]]) {
+      const first = easternInstant(day, 9 * 60 + 31);
+      const longest = await start(first - waitMs);
+      ok(longest.r.preOpenMs === waitMs && longest.sleeps[0] === waitMs && longest.passAt[0] === first &&
+         longest.r.exit === "budget" && longest.r.chained.sent &&
+         longest.passAt.at(-1) - first >= 60 * 60000 && longest.passAt.at(-1) - first < LIVE_LOOP.budgetMs - waitMs,
+      `THE WORST-CASE IDLE (${zone}): a starter that lands exactly ${waitMs / 60000} minutes before 09:31 ET sleeps ` +
+        `${waitMs / 60000} minutes, the most any run waits, then passes from 09:31 for ` +
+        `${Math.round((longest.passAt.at(-1) - first) / 60000)} minutes before it chains`);
+      const early = await start(first - waitMs - 1000);
+      ok(early.r.exit === "outside-window" && early.r.why === "before-open" && early.passAt.length === 0 &&
+         early.sleeps.length === 0 && early.r.preOpenMs === 0,
+      `A STARTER EARLIER THAN THE WAIT WINDOW EXITS AT ONCE (${zone}): one second more than ${waitMs / 60000} minutes ` +
+        "before 09:31 ET, no sleep and no pass");
+    }
+
+    const holidays = [];
+    for (let t = T("2026-09-28T12:00:00Z"); t < T("2028-01-01T00:00:00Z"); t += 86400000) {
+      const day = new Date(t).toISOString().slice(0, 10);
+      if (isWeekdayDay(day) && isHoliday(day)) holidays.push(day);
+    }
+    deep(holidays, ["2026-11-26", "2026-12-25", "2027-01-01", "2027-01-18", "2027-02-15", "2027-03-26", "2027-05-31",
+      "2027-06-18", "2027-07-05", "2027-09-06", "2027-11-25", "2027-12-24"],
+    "the computed NYSE calendar names every weekday holiday to the end of 2027, Saturday holidays observed on the " +
+      "Friday before (Juneteenth and Christmas 2027) except New Year's Day 2028, and Sunday ones on the Monday after");
+    const idle = [];
+    for (const day of [...holidays, "2026-10-03", "2026-10-04", "2027-03-13", "2027-03-14"]) {
+      const base = T(day + "T00:00:00Z");
+      for (const s of slots) {
+        for (const d of [0, 180, 300]) {
+          const { r, passAt, sleeps } = await start(base + (s + d) * 60000);
+          if (r.exit !== "outside-window" || r.why !== "not-trading" || passAt.length || sleeps.length) {
+            idle.push(`${day} ${hhmm(s)} UTC +${d} min`);
+          }
+        }
+      }
+    }
+    deep(idle, [], `WEEKENDS AND COMPUTED HOLIDAYS NEVER WAIT: every starter slot on each of those ${holidays.length} ` +
+      "holidays and on four weekend days (the DST switch weekend of 2027-03-13 among them), delivered on time or 3 " +
+      "or 5 h late, exits at once with no sleep and no pass");
+  }
+  {
+    const waitMs = LIVE_LOOP.preOpenWaitMs;
+    const day = "2026-09-28";
+    const first = easternInstant(day, 9 * 60 + 31);
+    const boards = FAKE.fakeBoards();
+    let t = first - waitMs;
+    let store = {};
+    const readStored = async (k) => (k.startsWith("board:") ? { payload: boards[k.slice(6)] }
+      : { payload: store[k] || null });
+    const publish = async (k, p) => { store[k] = p; };
+    const uw = FAKE.fakeLiveVendor({ now: () => (t += 250), session: day });
+    const loop = async (origin, extra = {}) => {
+      const real = [];
+      const r = await runLiveLoop({ now: () => t, sleep: async (ms) => { t += Math.max(0, ms); }, log: () => {},
+        ...extra,
+        pass: async ({ first: firstPass, clock }) => {
+          const at = t;
+          const res = await runLive({ uw, publish, readStored, shapeNews, origin, skipRecent: firstPass, clock,
+            now: () => (t += 250), log: () => {}, warn: () => {} });
+          if (!res.skipped) real.push(at);
+          return passOutcome(res);
+        },
+        chain: async ({ at }) => ({ sent: true, why: "sent", status: 204, at }) });
+      return { r, real };
+    };
+    const one = await loop("schedule");
+    const lastOne = one.real.at(-1);
+    const beat = T(store["live:heartbeat"].run.finishedAt);
+    ok(one.r.exit === "budget" && one.r.preOpenMs === waitMs && one.real[0] === first && one.r.chained.sent &&
+       one.r.passes.every((p) => !p.skipped),
+    `THE CHAIN, END TO END (runLive against the fake vendor and one store): the longest waiter passes from 09:31 ET ` +
+      `and chains at ${new Date(one.r.chained.at).toISOString().slice(11, 16)} UTC`);
+    const saved = JSON.parse(JSON.stringify(store));
+    t = one.r.chained.at + 45000;
+    const two = await loop("chain");
+    ok(two.r.passes[0].skipped === "recent" && two.real[0] === lastOne + LIVE_LOOP.slotMs,
+      "the chained run starts 45 s later, and its first pass reads the heartbeat the last pass wrote under eight " +
+        "minutes ago and skips, so the next slot is passed once, by the new run, and none is doubled or lost");
+    const expected = [first];
+    for (let at = easternInstant(day, 9 * 60 + 35); at <= easternInstant(day, 16 * 60 + 25); at += LIVE_LOOP.slotMs) {
+      expected.push(at);
+    }
+    deep([...one.real, ...two.real], expected,
+      "between them the waiter and its one chain pass at 09:31 and on every slot from 09:35 to 16:25, each once");
+    ok(two.r.exit === "window-closed" && !two.r.chained && !liveRunVerdict(two.r).failed,
+      "the chained run ends with the session window, needing no second chain, and its skipped first pass does not " +
+        "fail the job");
+    t += 20000;
+    const queuedAt = t;
+    const queued = await loop("schedule");
+    ok(liveWindow(queuedAt).run && queued.real.length === 0 && queued.r.passes.length === 1 &&
+       queued.r.passes[0].skipped === "recent" && queued.r.exit === "window-closed" && !queued.r.chained,
+    "A STARTER QUEUED BEHIND THE LOOP that GitHub starts 20 s after the loop ends, at " +
+      `${new Date(queuedAt).toISOString().slice(11, 19)} UTC and so still inside the 16:25 window, finds the heartbeat ` +
+      `${Math.round((queuedAt - T(store["live:heartbeat"].run.finishedAt)) / 1000)} s old, skips its one pass and ` +
+      "exits at the next slot without reading the vendor");
+    for (const late of [16 * 60 + 26, 17 * 60, 19 * 60 + 12].map((m) => easternInstant(day, m))) {
+      t = late;
+      const q = await loop("schedule");
+      ok(q.r.exit === "outside-window" && q.r.why === "after-close" && q.r.passes.length === 0 && t === late,
+        `and one that starts after the window, at ${new Date(late).toISOString().slice(11, 16)} UTC, exits at once ` +
+          "without a pass or a sleep");
+    }
+    store = saved;
+    const slowAt = beat + L.LIVE_BUDGET.tier2HeartbeatSkipMs + 1000;
+    t = slowAt;
+    const slow = await loop("chain", { budgetMs: 1 });
+    ok(slow.r.passes.length === 1 && !slow.r.passes[0].skipped && slow.real[0] === slowAt,
+      "while a chained run GitHub starts more than eight minutes after the last heartbeat passes at once");
   }
   {
     const TG = "2026-11-24";
@@ -2245,4 +2565,6 @@ console.log(`✓ flows-live: ${checks} assertions — one threshold table in cod
   `screener call inside the session window, rows identical to the strip's, never a failed or empty read nor a partial one over a fuller live row, under 6 ms ` +
   `of CPU cold over a production-size body; the nightly health gate and the live job's exit ` +
   `rule; the self-sustaining ` +
-  `Tier 2 session loop, its budget and its chain dispatch; and a client helper that only compares clocks`);
+  `Tier 2 session loop, its budget and its chain dispatch; starters that land at least seven times in the wait ` +
+  `before 09:31 ET for every delivery delay up to five hours, under EDT and EST, each a chance at the one run that ` +
+  `waits; a delivery log timed from the run's created_at; and a client helper that only compares clocks`);

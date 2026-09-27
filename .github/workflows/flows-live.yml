@@ -13,9 +13,38 @@ on:
         required: false
         default: manual
   schedule:
-    - cron: "17 10,11,12 * * 1-5"
-    - cron: "31,46 13,14 * * 1-5"
-    - cron: "3,37 15-20 * * 1-5"
+    - cron: "17 5 * * 1-5"
+    - cron: "47 5 * * 1-5"
+    - cron: "17 6 * * 1-5"
+    - cron: "47 6 * * 1-5"
+    - cron: "17 7 * * 1-5"
+    - cron: "47 7 * * 1-5"
+    - cron: "17 8 * * 1-5"
+    - cron: "47 8 * * 1-5"
+    - cron: "17 9 * * 1-5"
+    - cron: "47 9 * * 1-5"
+    - cron: "17 10 * * 1-5"
+    - cron: "47 10 * * 1-5"
+    - cron: "17 11 * * 1-5"
+    - cron: "47 11 * * 1-5"
+    - cron: "17 12 * * 1-5"
+    - cron: "47 12 * * 1-5"
+    - cron: "17 13 * * 1-5"
+    - cron: "47 13 * * 1-5"
+    - cron: "17 14 * * 1-5"
+    - cron: "47 14 * * 1-5"
+    - cron: "17 15 * * 1-5"
+    - cron: "47 15 * * 1-5"
+    - cron: "17 16 * * 1-5"
+    - cron: "47 16 * * 1-5"
+    - cron: "17 17 * * 1-5"
+    - cron: "47 17 * * 1-5"
+    - cron: "17 18 * * 1-5"
+    - cron: "47 18 * * 1-5"
+    - cron: "17 19 * * 1-5"
+    - cron: "47 19 * * 1-5"
+    - cron: "17 20 * * 1-5"
+    - cron: "47 20 * * 1-5"
 
 permissions:
   contents: read
@@ -57,9 +86,22 @@ jobs:
           EVENT: ${{ github.event_name }}
           ORIGIN: ${{ inputs.origin || 'schedule' }}
           TICK: ${{ inputs.tick || 'none' }}
+          FIRED: ${{ github.event.schedule }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          echo "event: $EVENT; origin: $ORIGIN; tick: $TICK"
-          echo "Started at $(date -u +%H:%M:%S) UTC, $(TZ=America/New_York date +%H:%M:%S) Eastern."
+          echo "event: $EVENT; origin: $ORIGIN; tick: $TICK; cron that fired: '${FIRED:-none}'"
+          started="$(date -u +%s)"
+          echo "Started at $(date -u -d "@$started" +%H:%M:%S) UTC, $(TZ=America/New_York date -d "@$started" +%H:%M:%S) Eastern."
+          re='^([0-9]+) ([0-9]+) '
+          if [[ "$FIRED" =~ $re ]]; then
+            printf -v slot '%02d:%02d' "$((10#${BASH_REMATCH[2]}))" "$((10#${BASH_REMATCH[1]}))"
+            created="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)" || created=""
+            if [ -n "$created" ] && at="$(date -u -d "$created" +%s)" && due="$(date -u -d "$(date -u -d "@$at" +%F) $slot" +%s)"; then
+              echo "GitHub created this run at $(date -u -d "@$at" +%H:%M:%S) UTC, $(( (at - due + 86400) % 86400 / 60 )) min after its $slot UTC slot; this step ran $(( (started - at) / 60 )) min after that, the time the run queued for the flows-live concurrency group and a runner."
+            else
+              echo "The run's created_at could not be read, so how late GitHub delivered the $slot UTC starter is left to the Actions API."
+            fi
+          fi
 
       - name: Read the live layer
         if: env.LIVE_READY == 'true'
