@@ -145,7 +145,7 @@ export function settledWithin(promise, ms) {
   });
 }
 
-const CLOCK_WAIT_MS = 2000;
+export const FLIGHT_WAIT_MS = 2000;
 let clockFlight = null;
 
 function startClockFlight(env, now) {
@@ -159,7 +159,7 @@ export async function cachedClock(env, now = Date.now()) {
   for (let attempt = 0; attempt < 2; attempt++) {
     if (!clockDue(now)) return clockMemo.clock;
     const flight = clockFlight || startClockFlight(env, now);
-    if (await settledWithin(flight, CLOCK_WAIT_MS)) return flight;
+    if (await settledWithin(flight, FLIGHT_WAIT_MS)) return flight;
     if (clockFlight === flight) clockFlight = null;
   }
   return memoizedClock(now);
@@ -518,6 +518,8 @@ export function tokenKind(offered, env, equal) {
 export const JWKS_TTL_MS = 60 * 60 * 1000;
 export const JWKS_RETRY_MS = 60 * 1000;
 export const JWKS_COLD_RETRY_MS = 5 * 1000;
+const JWKS_FETCH_TIMEOUT_MS = 4000;
+export const JWKS_WAIT_MS = JWKS_FETCH_TIMEOUT_MS + 1000;
 const emptyMemo = (url) => ({ url, keys: null, at: 0, triedAt: 0, inflight: null });
 let jwksMemo = emptyMemo(null);
 
@@ -537,23 +539,31 @@ export function jwksKeys(env, fetchImpl, now, force) {
   if (!url) return Promise.resolve(null);
   if (jwksMemo.url !== url) jwksMemo = emptyMemo(url);
   const memo = jwksMemo;
-  if (memo.inflight) return memo.inflight;
+  if (memo.inflight) {
+    const joined = memo.inflight;
+    return settledWithin(joined, JWKS_WAIT_MS).then((done) => {
+      if (done) return joined;
+      if (memo.inflight === joined) memo.inflight = null;
+      return memo.keys;
+    });
+  }
   const fresh = !!memo.keys && now - memo.at < JWKS_TTL_MS;
   const wait = memo.keys ? JWKS_RETRY_MS : JWKS_COLD_RETRY_MS;
   if ((fresh && !force) || now - memo.triedAt < wait) return Promise.resolve(memo.keys);
   memo.triedAt = now;
-  memo.inflight = fetchImpl(url, {
-    redirect: "manual", signal: AbortSignal.timeout(4000),
+  const flight = fetchImpl(url, {
+    redirect: "manual", signal: AbortSignal.timeout(JWKS_FETCH_TIMEOUT_MS),
     headers: { Accept: "application/json", "User-Agent": "anilkaya-flows-worker" },
   }).then((res) => (res.ok ? res.json().then(rsaKeys) : [])).catch(() => []).then((keys) => {
     if (keys.length) {
       memo.keys = keys;
       memo.at = now;
     }
-    memo.inflight = null;
+    if (memo.inflight === flight) memo.inflight = null;
     return memo.keys;
   });
-  return memo.inflight;
+  memo.inflight = flight;
+  return flight;
 }
 
 export async function oidcKind(offered, env, { fetchImpl = fetch, now = Date.now(), log = console } = {}) {

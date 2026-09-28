@@ -228,6 +228,20 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
 {
   const f = fakeD1();
   seed(f);
+  f.latency(400);
+  const get = await client(f.D1);
+  const t0 = Date.now();
+  const strategy = await get("/api/flows/strategy?t=AAPL&expiry=2026-10-16&engine=1");
+  const answered = Date.now() - t0;
+  ok(strategy.res.status === 503 && strategy.body.error.code === "chain_unconfigured" && answered < 300,
+     `and so does the strategy route with its engine (${answered} ms of a 400 ms batch)`);
+  await strategy.settle();
+  eq(f.count(SCHEMA_RE), 1, "whose card read is kept alive the same way");
+}
+
+{
+  const f = fakeD1();
+  seed(f);
   const get = await client(f.D1);
   await get("/api/flows/meta");
   const route = async (path) => { const n = f.trips.length; const r = await get(path); return { ...r, trips: f.since(n) }; };

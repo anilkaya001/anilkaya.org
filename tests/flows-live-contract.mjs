@@ -1275,6 +1275,19 @@ const cronMinutes = (cron) => {
     "SINGLE FLIGHT: two writes reaching a cold isolate together both wait on the one key-set fetch");
   eq(hits, 1, "and it is fetched once, not refused to the second while the first is in flight");
 
+  W.resetJwksMemo(); hits = 0;
+  const never = () => new Promise(() => {});
+  W.jwksKeys({}, never, now, false);
+  const t0 = Date.now();
+  const abandoned = await W.oidcKind(token, {}, { fetchImpl: served(keys), now: now + 1000, log });
+  const waited = Date.now() - t0;
+  ok(abandoned.unavailable === true && waited >= W.JWKS_WAIT_MS && waited < W.JWKS_WAIT_MS + 2500,
+    `A KEY-SET FETCH ABANDONED BY THE INGEST THAT STARTED IT (a client gone before the 4 s fetch landed) is waited on for ${W.JWKS_WAIT_MS / 1000} s ` +
+    `and then dropped (${waited} ms): the second write reports the keys unavailable instead of hanging for the life of the isolate`);
+  eq(await kind(token, {}, { fetchImpl: served(keys), now: now + W.JWKS_COLD_RETRY_MS + 1000 }), "live",
+    "and the next write inside the cold retry window fetches the set afresh");
+  eq(hits, 1, "with one fetch, the dead one never counted");
+
   W.resetJwksMemo(); logs.length = 0;
   const down = await W.oidcKind(token, {}, { fetchImpl: async () => { throw new Error("down"); }, now, log });
   deep([down.kind, down.why, down.unavailable], [null, "keys-unavailable", true],
@@ -3063,7 +3076,7 @@ const cronMinutes = (cron) => {
   ]);
   const waited = Date.now() - t0;
   ok(a && a.day === "2026-09-28" && a.trading === 1 && b === a && waited >= 3500 && waited < 6000,
-     `THE CLOCK FLIGHT HAS THE SAME DEADLINE as the schema bootstrap: a cold read that never settles is abandoned after 2 s and read again, ` +
+     `THE CLOCK FLIGHT HAS THE SAME DEADLINE as the schema bootstrap (FLIGHT_WAIT_MS, ${W.FLIGHT_WAIT_MS} ms): a cold read that never settles is abandoned and read again, ` +
      `and both waiters take the read that landed (${waited} ms)`);
   eq(reads, 2, "once, for both waiters: the second's deadline falls while the retry is in the air and it joins the retry rather than starting a third read");
   ok(!W.clockDue(Date.now()), "and the memo is warm from the read that landed");

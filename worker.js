@@ -2161,7 +2161,6 @@ async function buildStrategyExpiry(env, ctx, ticker, expiry, { engine = false } 
   };
 }
 
-const FLOWS_SCHEMA_WAIT_MS = 2000;
 let flowsSchemaReady = false;
 let flowsSchemaFlight = null;
 function startFlowsSchemaFlight(env) {
@@ -2179,7 +2178,7 @@ async function ensureFlowsTables(env) {
   if (flowsSchemaReady || !env.DB) return;
   for (let attempt = 0; attempt < 2 && !flowsSchemaReady; attempt++) {
     const flight = flowsSchemaFlight || startFlowsSchemaFlight(env);
-    if (await FLOWS_LIVE.settledWithin(flight, FLOWS_SCHEMA_WAIT_MS)) return;
+    if (await FLOWS_LIVE.settledWithin(flight, FLOWS_LIVE.FLIGHT_WAIT_MS)) return;
     if (flowsSchemaFlight === flight) flowsSchemaFlight = null;
   }
 }
