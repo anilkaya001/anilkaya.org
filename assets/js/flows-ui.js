@@ -1861,6 +1861,7 @@
   const PAL_G = { focus: ["star", "Focus"], fund: ["stack", "ETF"], index: ["market", "Index"], board: ["boards", "Board"], cross: ["layers", "Card"] };
   async function paletteRows() {
     if (PAL.loading) return PAL.loading;
+    if (GATE.on === "out") return [];
     const get = (u) => (nativeFetch ? nativeFetch(u, { credentials: "same-origin" }).then((r) => (r.ok ? r.json() : null)).catch(() => null) : Promise.resolve(null));
     PAL.loading = Promise.all(["board?side=long", "board?side=short", "board?side=watch", "scoretrack", "roster"].map((k) => get("/api/flows/" + k)))
       .then((all) => {
