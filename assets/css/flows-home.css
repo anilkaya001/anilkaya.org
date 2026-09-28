@@ -78,9 +78,10 @@
 .hm-hero-chart > .ui-silent:only-child { flex: 1; }
 .hm-hero-chips { min-width: 0; min-height: 95px; }
 @container hero (max-width: 599.98px) { .hm-hero-chart { min-height: 214px; } }
+@container hero (min-width: 860px) and (max-width: 1067.7px) { .hm-hero-chart { min-height: 214px; } }
 @container hero (max-width: 420px) { .hm-hero-chips { min-height: 84px; } }
 @container hero (max-width: 300px) { .hm-hero-chips { min-height: 163px; } }
-@container hero (min-width: 1584px) { .hm-hero-chart { min-height: 260px; } }
+@container hero (min-width: 1582px) { .hm-hero-chart { min-height: 260px; } }
 @container hero (min-width: 860px) {
   .hm-hero-in {
     grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
@@ -210,8 +211,12 @@ a.hm-count:hover { color: var(--label-1); background: var(--fill-4); }
 
 #ccMetals { min-height: 820px; }
 #ccLeaders { min-height: 332px; }
+#hmLeaders[data-lead="ndx10"] #ccLeaders { min-height: 464px; }
 @container mod (min-width: 620px) { #ccMetals { min-height: 260px; } }
-@container mod (min-width: 960px) { #ccLeaders { min-height: 200px; } }
+@container mod (min-width: 960px) {
+  #ccLeaders { min-height: 200px; }
+  #hmLeaders[data-lead="ndx10"] #ccLeaders { min-height: 244px; }
+}
 @container mod (max-width: 540px) {
   #hmLeaders .ui-mod-h, #hmLean .ui-mod-h { align-content: start; }
   #hmLeaders .ui-mod-h { min-height: 72px; }

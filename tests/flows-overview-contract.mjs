@@ -2822,6 +2822,29 @@ try {
     eq(live.state, "live", "and the pill says live, off the worker's own freshness header");
     eq(live.legs[2], "+$2.5M", "with the live 0DTE net aligned onto the tide's buckets");
     ok(/0DTE/.test(live.legend), `and the zero-day series keyed on the river (${live.legend})`);
+    const TIDE_FIT = () => {
+      const el = document.getElementById("hmTide");
+      const cs = getComputedStyle(el);
+      const kids = Array.from(el.children);
+      return {
+        min: parseFloat(cs.minHeight) || 0, h: el.offsetHeight, w: el.clientWidth,
+        content: kids.reduce((a, c) => a + c.offsetHeight, 0) + (parseFloat(cs.rowGap) || 0) * Math.max(0, kids.length - 1),
+        svg: +el.querySelector("svg[role=img]").getAttribute("height"), hero: document.querySelector(".hm-hero-in").clientWidth,
+      };
+    };
+    for (const width of [1280, 1440]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await page.waitForFunction(() => {
+        const svg = document.querySelector("#hmTide svg[role=img]");
+        return svg && +svg.getAttribute("width") === document.getElementById("hmTide").clientWidth;
+      });
+      const fit = await page.evaluate(TIDE_FIT);
+      ok(fit.h > 0 && Math.abs(fit.min - fit.content) <= 8,
+        `THE HERO CHART'S RESERVE IS THE CHART'S OWN COLUMN at ${width}px, within 8px either way: the chart picks its height from ` +
+        `its host's width, not the hero's, so a reserve keyed to the wrong width leaves dead space under the legend on a laptop ` +
+        `(hero ${fit.hero}px, host ${fit.w}px, svg ${fit.svg}px, column ${fit.content}px, min-height ${fit.min}px)`);
+    }
+    await page.setViewportSize({ width: 1280, height: 1000 });
     const src = await why(page, "#hmTideState .hm-pill");
     eq(src.facts.Source, "live:market", "and the disclosure names the live key as the source");
     await shut(page);
@@ -3114,7 +3137,7 @@ try {
         for (const m of muts) {
           const id = m.target.id;
           if (m.type === "childList" && m.addedNodes.length && /^cc(Bull|Bear|Metals|Leaders)$/.test(id) && !window.__fill[id]) {
-            window.__fill[id] = { batch, at: Math.round(performance.now()) };
+            window.__fill[id] = { batch, at: Math.round(performance.now()), min: parseFloat(getComputedStyle(m.target).minHeight) || 0 };
           }
         }
       }).observe(document, { childList: true, subtree: true });
@@ -3215,10 +3238,13 @@ try {
       eq(href, "/flows/ticker/?t=" + t, `${t} links to its dossier`);
       ok(/Open the dossier\.$/.test(said || ""), `and says where it goes (${t})`);
     }
-    const RESERVE = () => Object.fromEntries(["ccMetals", "ccLeaders", "ccBull"].map((id) => {
+    const RESERVE = () => Object.fromEntries(["ccMetals", "ccLeaders", "ccBull", "ccBear"].map((id) => {
       const el = document.getElementById(id);
-      return [id, { min: parseFloat(getComputedStyle(el).minHeight) || 0, h: el.offsetHeight, w: el.clientWidth }];
+      const grow = Array.from(el.querySelectorAll(".hm-lrow"), (r) => Math.max(0, r.offsetHeight - 52)).reduce((a, v) => a + v, 0);
+      return [id, { min: parseFloat(getComputedStyle(el).minHeight) || 0, h: el.offsetHeight, w: el.clientWidth, grow }];
     }));
+    const fits = (r) => r.h > 0 && r.min >= r.h - 8 - r.grow;
+    const drawn = (r) => `min-height ${r.min}px for ${r.h}px drawn in ${r.w}px${r.grow ? ` (${r.grow}px of it rows that wrapped their tags)` : ""}`;
     const fill = await fp.evaluate(() => window.__fill);
     ok(fill.ccBull && fill.ccBear && fill.ccMetals && fill.ccLeaders,
       `every board and focus module has a first fill on record (${JSON.stringify(fill)})`);
@@ -3229,8 +3255,7 @@ try {
       `(bull batch ${fill.ccBull.batch} at ${fill.ccBull.at} ms, metals batch ${fill.ccMetals.batch} at ${fill.ccMetals.at} ms)`);
     const wide = await fp.evaluate(RESERVE);
     for (const [id, r] of Object.entries(wide)) {
-      ok(r.h > 0 && r.min >= r.h - 8,
-        `${id} reserves its filled height at 1440 so a late fill shifts nothing: min-height ${r.min}px for ${r.h}px drawn in ${r.w}px`);
+      ok(fits(r), `${id} reserves its filled height at 1440 so a late fill shifts nothing: ${drawn(r)}`);
     }
     const shifted = await fp.evaluate(() => window.__shift.reduce((a, v) => a + v, 0));
     ok(shifted < 0.1, `and the whole fill of the page moves the 1440px viewport by a cumulative layout shift under 0.1 (${shifted.toFixed(4)})`);
@@ -3247,10 +3272,19 @@ try {
       "(every storage access goes through IEWTStorage, which these pages do not load)");
     const again = await focusNow("/flows/?lead=ndx10");
     deep(again.seg.map((s) => s[1]), ["false", "true"], "so a reload or a shared link opens on the same leaders");
+    const tall = await fp.evaluate(RESERVE);
+    const tallFill = await fp.evaluate(() => window.__fill.ccLeaders);
+    ok(fits(tall.ccLeaders) && tall.ccLeaders.min > wide.ccLeaders.min && tallFill && tallFill.min === tall.ccLeaders.min,
+      "A LINK THAT OPENS ON NDX 10 RESERVES THE TEN-ROW GROUP BEFORE THE PAYLOAD ARRIVES: the shell carries the address's choice " +
+      "as a data attribute from script start, so the taller reserve is already in force when the rows land in the deferred task " +
+      `(${drawn(tall.ccLeaders)}, ${tallFill && tallFill.min}px at the first fill; Mag 7 reserves ${wide.ccLeaders.min}px)`);
     await fp.focus("#ccLeadSeg .ui-seg-i[aria-selected=true]");
     await fp.keyboard.press("ArrowLeft");
     await fp.waitForFunction(() => document.querySelector("#ccLeaders a.hm-qrow")?.dataset.ticker === "AAPL");
     ok(true, "the segmented control switches from the keyboard");
+    const backTo = await fp.evaluate(RESERVE);
+    ok(fits(backTo.ccLeaders) && backTo.ccLeaders.min <= backTo.ccLeaders.h + 8,
+      `and the reserve follows the switch back to Mag 7 rather than holding the ten-row height over seven rows (${drawn(backTo.ccLeaders)})`);
 
     await fp.focus("#ccMetalsWhen .hm-pill");
     const beat = async () => {
@@ -3435,14 +3469,15 @@ try {
       ok(fit.over <= 1, `no horizontal overflow at ${width}px with the focus modules drawn (${fit.over}px)`);
       deep(fit.clipped, [], `and no figure spills out of its row at ${width}px`);
       eq(fit.cols, width < 600 ? 1 : 3, `metals ${width < 600 ? "stack" : "sit in three columns"} at ${width}px`);
-      if (width === 390) {
+      if (width === 390 || width === 768) {
         const narrow = await fp.evaluate(RESERVE);
         for (const [id, r] of Object.entries(narrow)) {
-          ok(r.h > 0 && r.min >= r.h - 8,
-            `${id} reserves its filled height at 390 as well: min-height ${r.min}px for ${r.h}px drawn in ${r.w}px`);
+          ok(fits(r), `${id} reserves its filled height at ${width} as well: ${drawn(r)}`);
         }
-        ok(narrow.ccMetals.min > wide.ccMetals.min && narrow.ccLeaders.min > wide.ccLeaders.min,
-          `the reserve follows the layout, taller where the metals stack and the leaders run in one column (${narrow.ccMetals.min}/${wide.ccMetals.min}, ${narrow.ccLeaders.min}/${wide.ccLeaders.min})`);
+        if (width === 390) {
+          ok(narrow.ccMetals.min > wide.ccMetals.min && narrow.ccLeaders.min > wide.ccLeaders.min,
+            `the reserve follows the layout, taller where the metals stack and the leaders run in one column (${narrow.ccMetals.min}/${wide.ccMetals.min}, ${narrow.ccLeaders.min}/${wide.ccLeaders.min})`);
+        }
       }
     }
 

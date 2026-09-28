@@ -1,8 +1,9 @@
 (() => {
   "use strict";
 
-  const statusEl = document.getElementById("flowsStatus");
-  const staleEl = document.getElementById("flowsStale");
+  const $ = (id) => document.getElementById(id);
+  const statusEl = $("flowsStatus");
+  const staleEl = $("flowsStale");
 
   const UI = window.FlowsUI;
   if (!UI) {
@@ -15,7 +16,6 @@
   const { h, F, isNum, DASH, MINUS, fmtSigned, fmtStamp, scoreStrip, glyph } = UI;
   const C = UI.chart;
 
-  const $ = (id) => document.getElementById(id);
   const POP = { "aria-haspopup": "dialog", "aria-controls": "fxPop" };
   const verdictHost = $("ccVerdict");
   if (!statusEl || !verdictHost) return;
@@ -1710,6 +1710,8 @@
   }
 
   const FOCUS = { focus: null, strips: null, series: null, live: null, lead: new URLSearchParams(location.search).get("lead"), pills: {} };
+  const leadOn = () => { const m = $("hmLeaders"); if (m) m.dataset.lead = FOCUS.lead || "mag7"; };
+  leadOn();
   const readOf = (s) => Date.parse(s.fresh && s.fresh.readAt);
   const newest = (a, b) => (readOf(b) || 0) - (readOf(a) || 0);
   const FK = ["px", "prev", "chg", "net", "lean", "iv30"];
@@ -1867,6 +1869,7 @@
       seg.append(UI.segmented("Leaders", groups.map((g) => ({ label: g.label || g.id })), (i) => {
         at = i;
         FOCUS.lead = groups[i].id;
+        leadOn();
         const u = new URL(location.href);
         u.searchParams.set("lead", FOCUS.lead);
         history.replaceState(history.state, "", u);
@@ -2119,7 +2122,7 @@
         continue;
       }
       sideList(into, rows, isNum(payload && payload.deep) !== null, trk, label, evBy);
-      infoInto(id === "ccBull" ? "hmBull" : "hmBear", all + " leaders", () => ({
+      infoInto("hm" + id.slice(2), all + " leaders", () => ({
         title: cap1(all), lead: "Names past the dead band on the " + all + " board, in the board's published rank order.",
         facts: [["Pool", String(poolCount(payload) ?? rows.length)], ["Drawn", String(Math.min(rows.length, ROW_MAX))], ["Strip", trk.label]],
         notes: ["Scores are a ranked attention signal on a fixed −100 to +100 scale, not a return forecast. Names inside the dead band are not published on either side.",
