@@ -226,12 +226,15 @@
   const nextId = (p) => p + (++uid);
   const moving = () => !REDUCED.matches;
 
+  const AH = { "aria-hidden": "true" };
+  const onDoc = (t, f, o) => document.addEventListener(t, f, o);
+  const RAF = (f) => requestAnimationFrame(f);
   function h(tag, attrs, ...kids) {
     const n = document.createElement(tag);
     if (attrs) {
       for (const k in attrs) {
         const v = attrs[k];
-        if (v === null || v === undefined || v === false) continue;
+        if (v == null || v === false) continue;
         if (k === "class") n.className = v;
         else if (k === "text") n.textContent = v;
         else if (k === "style" && typeof v === "object") { for (const p in v) n.style.setProperty(p, v[p]); }
@@ -240,7 +243,7 @@
       }
     }
     for (const c of kids.flat(4)) {
-      if (c === null || c === undefined || c === false) continue;
+      if (c == null || c === false) continue;
       n.append(c instanceof Node ? c : String(c));
     }
     return n;
@@ -251,7 +254,7 @@
     if (attrs) {
       for (const k in attrs) {
         const v = attrs[k];
-        if (v === null || v === undefined) continue;
+        if (v == null) continue;
         if (k === "text") n.textContent = v;
         else if (k === "style" && typeof v === "object") { for (const p in v) n.style.setProperty(p, v[p]); }
         else n.setAttribute(k, v);
@@ -458,14 +461,14 @@
     const pop = $("fxPop");
     if (pop && popOpen()) pop.hidePopover();
   }
-  document.addEventListener("click", (e) => {
+  onDoc("click", (e) => {
     const b = e.target instanceof Element ? e.target.closest("[data-info]") : null;
     if (!b || !INFO.has(b.dataset.info)) return;
     e.preventDefault();
     if (anchor === b && popOpen()) { closeInfo(); return; }
     openInfo(b);
   });
-  document.addEventListener("pointerdown", (e) => {
+  onDoc("pointerdown", (e) => {
     if (!popOpen()) return;
     const pop = $("fxPop");
     const t = e.target instanceof Element ? e.target : null;
@@ -474,7 +477,7 @@
     const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
     if (!inside) closeInfo();
   }, true);
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && popOpen()) { e.preventDefault(); closeInfo(); } });
+  onDoc("keydown", (e) => { if (e.key === "Escape" && popOpen()) { e.preventDefault(); closeInfo(); } });
 
   let liveNode = null;
   const spoken = (node) => [...node.childNodes].map((n) => n.textContent.trim()).filter(Boolean).join(" ");
@@ -501,10 +504,10 @@
         const start = go && from && /\d/.test(from[i]) ? from[i] : go && !from ? String((+ch + 7) % 10) : ch;
         strip.style.setProperty("--d", start);
         strip.style.setProperty("--k", String(k++));
-        el.append(h("span", { class: "ui-roll-d", "aria-hidden": "true" }, strip));
-        if (go && start !== ch) requestAnimationFrame(() => requestAnimationFrame(() => strip.style.setProperty("--d", ch)));
+        el.append(h("span", { class: "ui-roll-d", ...AH }, strip));
+        if (go && start !== ch) RAF(() => RAF(() => strip.style.setProperty("--d", ch)));
       } else {
-        el.append(h("span", { class: "ui-roll-c", "aria-hidden": "true" }, ch));
+        el.append(h("span", { class: "ui-roll-c", ...AH }, ch));
       }
     });
     el.dataset.value = t;
@@ -550,7 +553,7 @@
   function ring(v01, o = {}) {
     const size = o.size || 20;
     const stroke = o.stroke || 3;
-    const n = s("svg", { width: size, height: size, viewBox: "0 0 26 26", class: "ui-gchip-g", "aria-hidden": "true", style: { "--ring-c": paint(o.color || "--label-1") } });
+    const n = s("svg", { width: size, height: size, viewBox: "0 0 26 26", class: "ui-gchip-g", ...AH, style: { "--ring-c": paint(o.color || "--label-1") } });
     s("circle", { ...RING, class: "ui-ring-track", "stroke-width": stroke }, n);
     if (num(v01) !== null) {
       s("circle", {
@@ -563,7 +566,7 @@
   function divRing(v, o = {}) {
     const size = o.size || 20;
     const max = o.max || 100;
-    const n = s("svg", { width: size, height: size, viewBox: "0 0 26 26", class: "ui-gchip-g", "aria-hidden": "true" });
+    const n = s("svg", { width: size, height: size, viewBox: "0 0 26 26", class: "ui-gchip-g", ...AH });
     s("circle", { ...RING, class: "ui-ring-track", "stroke-width": 3 }, n);
     s("line", { x1: 13, y1: 0.8, x2: 13, y2: 5.2, stroke: paint("--label-3"), "stroke-width": 1.2 }, n);
     if (num(v) !== null && v !== 0) {
@@ -591,7 +594,7 @@
 
   function segmented(label, items, onPick, start = 0) {
     const wrap = h("div", { class: "ui-seg is-static", role: "tablist", "aria-label": label });
-    const knob = h("span", { class: "ui-seg-knob", "aria-hidden": "true" });
+    const knob = h("span", { class: "ui-seg-knob", ...AH });
     wrap.append(knob);
     let current = start;
     const btns = items.map((it, i) => {
@@ -628,12 +631,12 @@
         if (document.startViewTransition && moving()) document.startViewTransition(run).ready.catch(() => {}); else run();
       }
     }
-    requestAnimationFrame(() => { place(); requestAnimationFrame(() => wrap.classList.remove("is-static")); });
+    RAF(() => { place(); RAF(() => wrap.classList.remove("is-static")); });
     if (window.ResizeObserver) {
       new ResizeObserver(() => {
         wrap.classList.add("is-static");
         place();
-        requestAnimationFrame(() => wrap.classList.remove("is-static"));
+        RAF(() => wrap.classList.remove("is-static"));
       }).observe(wrap);
     }
     wrap.pick = (i) => pick(i, false);
@@ -649,7 +652,7 @@
     return h("span", { class: "ui-capsule", "data-tone": t, "aria-label": o.label || null }, o.glyph === false ? null : glyph(o.glyph || dirGlyph(t)), text);
   }
   function key(color, shape, label) {
-    const i = h("i", { class: shape ? "is-" + shape : null, "aria-hidden": "true" });
+    const i = h("i", { class: shape ? "is-" + shape : null, ...AH });
     i.style.setProperty("--c", paint(color));
     return h("span", { class: "ui-key" }, i, label);
   }
@@ -689,7 +692,7 @@
     if (o.meter !== undefined && o.meter !== null) {
       const m = h("i", { style: { "--w": (clamp(o.meter, 0, 1) * 100).toFixed(1) + "%", "--i": String(o.index || 0) } });
       if (o.meterColor) m.style.setProperty("--c", paint(o.meterColor));
-      kids.push(h("span", { class: "ui-meter", "aria-hidden": "true" }, m));
+      kids.push(h("span", { class: "ui-meter", ...AH }, m));
     }
     if (o.value !== undefined) kids.push(h("span", { class: "ui-row-v", "data-tone": o.valueTone || null }, o.value));
     if (o.signed !== undefined) kids.push(h("span", { class: "ui-row-v", "data-tone": o.signedTone || tone(o.signedValue) }, o.signed));
@@ -738,7 +741,7 @@
 
   const CHARTS = new Set();
   const RO = window.ResizeObserver ? new ResizeObserver((entries) => {
-    for (const e of entries) { const rec = e.target._fxChart; if (rec) requestAnimationFrame(() => repaint(rec, false)); }
+    for (const e of entries) { const rec = e.target._fxChart; if (rec) RAF(() => repaint(rec, false)); }
   }) : null;
   function repaint(rec, animate, force) {
     if (!rec.host.isConnected) { CHARTS.delete(rec); if (RO) RO.unobserve(rec.host); return; }
@@ -865,7 +868,7 @@
   function scrub(host, svg, o) {
     const xs = o.xs;
     const on = hostSignal(host, "_scrubOff");
-    const readout = h("div", { class: "ui-readout", "aria-hidden": "true" });
+    const readout = h("div", { class: "ui-readout", ...AH });
     host.append(readout);
     const xh = s("line", { class: "xh", y1: o.top, y2: o.bottom, x1: -10, x2: -10, opacity: 0 }, svg);
     const dots = s("g", null, svg);
@@ -899,7 +902,7 @@
     const at = (cx) => { const b = svg.getBoundingClientRect(); return (cx - b.left) * (svg.viewBox.baseVal.width / b.width); };
     host.addEventListener("pointermove", (e) => {
       px = e.clientX;
-      if (!raf) raf = requestAnimationFrame(() => { raf = 0; show(nearest(at(px))); });
+      if (!raf) raf = RAF(() => { raf = 0; show(nearest(at(px))); });
     }, on);
     host.addEventListener("pointerdown", (e) => show(nearest(at(e.clientX))), on);
     host.addEventListener("pointerleave", (e) => { if (e.pointerType !== "touch") hide(); }, on);
@@ -1301,7 +1304,7 @@
       const phase = hc !== null && hc >= 0 && hc < C ? hc % everyX : 0;
       cols.forEach((c, i) => { if (i % everyX === phase) s("text", { x: left + i * cw + cw / 2, y: H - 6, text: cf(c), ...TA, class: i === hc ? "tx-1 tx-b" : null }, svg); });
       const hl = s("rect", { class: "cell-hl", x: 0, y: 0, width: Math.max(0, cw - 1), height: ch - 1, rx: 3, visibility: "hidden" }, svg);
-      const readout = h("div", { class: "ui-readout", "aria-hidden": "true" });
+      const readout = h("div", { class: "ui-readout", ...AH });
       el.append(readout);
       el.tabIndex = 0;
       el.setAttribute("role", "group");
@@ -1330,7 +1333,7 @@
       el.addEventListener("pointermove", (e) => {
         pt = [e.clientX, e.clientY];
         if (raf) return;
-        raf = requestAnimationFrame(() => {
+        raf = RAF(() => {
           raf = 0;
           const b = svg.getBoundingClientRect();
           const c = Math.floor((pt[0] - b.left - left) / cw), r = Math.floor((pt[1] - b.top - top) / ch);
@@ -1380,7 +1383,7 @@
     }
     if (o.text !== false) {
       const t = s("text", {
-        x: cx, y: arc === 180 ? cy - 6 : cy + 11, ...TA, "aria-hidden": "true",
+        x: cx, y: arc === 180 ? cy - 6 : cy + 11, ...TA, ...AH,
         text: o.text ?? (v === null ? DASH : o.diverging ? F.signed(v) : String(Math.round(v))),
         style: { font: size >= 110 ? "var(--t-large)" : "var(--t-headline)", "letter-spacing": "var(--t-large-track)", fill: paint(o.textColor || (o.diverging && v !== null ? (v < 0 ? "--down" : v > 0 ? "--up" : "--label-1") : "--label-1")) },
       }, svg);
@@ -1612,7 +1615,7 @@
     if (!host) {
       const pts = Array.isArray(o.shape) ? o.shape : shapeOf(o.structure);
       const W = 92, Hh = 48;
-      const svg = s("svg", { class: "ui-payoff", width: W, height: Hh, viewBox: `0 0 ${W} ${Hh}`, "aria-hidden": "true" });
+      const svg = s("svg", { class: "ui-payoff", width: W, height: Hh, viewBox: `0 0 ${W} ${Hh}`, ...AH });
       if (!pts) {
         const g = glyph("pending");
         g.setAttribute("x", 34); g.setAttribute("y", 12); g.setAttribute("width", 24); g.setAttribute("height", 24);
@@ -1962,7 +1965,7 @@
         }
       });
       if (scrim) scrim.addEventListener("click", () => closeDrawer(true));
-      document.addEventListener("keydown", (e) => { if (e.key === "Escape" && body.classList.contains("has-side-open")) closeDrawer(true); });
+      onDoc("keydown", (e) => { if (e.key === "Escape" && body.classList.contains("has-side-open")) closeDrawer(true); });
       WIDE.addEventListener("change", () => setDrawer(false));
       syncBtn();
     }
@@ -1991,14 +1994,14 @@
 
     const kbd = bar.querySelector(".fx-search kbd");
     if (kbd && !/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "")) kbd.textContent = "Ctrl K";
-    document.addEventListener("click", (e) => {
+    onDoc("click", (e) => {
       const a = e.target instanceof Element ? e.target.closest("#fxSearch, [data-fx-search]") : null;
       if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.button > 0) return;
       e.preventDefault();
       closeDrawer(false);
       openPalette();
     });
-    document.addEventListener("keydown", (e) => {
+    onDoc("keydown", (e) => {
       if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && String(e.key).toLowerCase() === "k") { e.preventDefault(); closeDrawer(false); openPalette(); }
     });
 
@@ -2048,6 +2051,6 @@
     freshness, shell, chart, depths: PAL_G,
   });
 
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initShell, { once: true });
+  if (document.readyState === "loading") onDoc("DOMContentLoaded", initShell, { once: true });
   else initShell();
 })();
