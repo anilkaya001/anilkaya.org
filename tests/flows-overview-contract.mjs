@@ -2948,11 +2948,17 @@ try {
     await page.unroute("**/api/flows/pulse");
 
     await page.unroute(NEW_KEYS);
-    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    const [unwrittenLk] = await Promise.all([
+      page.waitForResponse((r) => /\/api\/flows\/lk\?k=market,vol,breadth,strips,strips:series,focus$/.test(r.url())),
+      page.goto(url("/flows/"), { waitUntil: "domcontentloaded" }),
+    ]);
     await page.waitForSelector("#ccVol [data-empty]", { timeout: 15000 });
     const unwritten = await silenceOf(page, "#ccVol [data-empty]");
     eq(unwritten.kind, "pending",
       "against the Worker's own routes, a regime and a live layer nobody has written yet leave the module pending");
+    eq(unwrittenLk.headers()["x-fresh-state"], "pending",
+      "and the six-key envelope was the Worker's, not the stub's: it carries the aggregate X-Fresh-State a fixture never writes");
+    eq(unwrittenLk.headers()["x-fresh-reason"], "unpublished", "with the unpublished reason of a live layer nobody has written");
     eq(await page.locator("#hmTideState .hm-pill").getAttribute("data-state"), "stale",
       "while the hero falls back to the pulse it does have");
 

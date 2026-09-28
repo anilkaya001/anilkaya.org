@@ -48,6 +48,7 @@ export async function lkMock(target, { stub = false } = {}) {
       const handler = mocks.get(keys[0]);
       return handler ? handler(route, request) : route.fallback();
     }
+    if (!keys.some((k) => mocks.has(k))) return route.fallback();
     let base = null;
     if (!stub && keys.some((k) => !mocks.has(k))) {
       const real = await route.fetch();
