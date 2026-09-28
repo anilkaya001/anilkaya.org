@@ -280,8 +280,10 @@ GET logout route; that would reintroduce forced-logout CSRF.
    begin with `new Response(response.body, response)`. Rebuilding an existing
    asset response from a status/header dictionary can corrupt
    `Content-Encoding` at the edge.
-2. **Every route uses the finalizer**, including auth, API success/errors,
-   rewritten HTML, static assets, 404s, and unexpected exceptions.
+2. **Every response `worker.js` serves uses the finalizer**: auth, API
+   success/errors, rewritten HTML, the assets it still proxies outside
+   `/assets/*`, 404s, and unexpected exceptions. `/assets/*` never reaches the
+   finalizer; `_headers` is its policy.
 3. Full security headers apply to every response: `worker.js` sets them on
    everything it serves and `_headers` repeats them, verbatim, on asset-first
    `/assets/*` responses. CSP applies only to HTML and
@@ -289,9 +291,18 @@ GET logout route; that would reintroduce forced-logout CSRF.
    the first-party Cloudflare Web Analytics beacon origins.
 4. HTML is `no-cache`; successful/304 versioned assets are immutable for one
    year; other successful/304 assets cache for one hour; API/auth is `no-store`.
-   Under `/assets/*` the same policy is written by path in `_headers` (`css`,
-   `js`, `fonts` immutable; `img`, `data`, `version.txt` one hour), because the
-   asset layer sees neither the query string nor the status.
+   Under `/assets/*` the policy is written by path in `_headers` (`css`, `js`,
+   `fonts` immutable; `img`, `data`, `version.txt` one hour), because the asset
+   layer sees neither the query string nor the status. Three classes therefore
+   differ from what the finalizer computed: `/assets/css|js|fonts/*` is
+   immutable even without `?v=` (was one hour), `/assets/data/*` is one hour
+   even without `?v=` (unversioned JSON such as
+   `/assets/data/projects/provenance.json` was the platform default
+   `public, max-age=0, must-revalidate`), and `/assets/img/*` is one hour even
+   with `?v=` (`atmosphere.svg?v=` was immutable). A missing file under
+   `/assets/css|js|fonts/*` is a 404 under that immutable policy;
+   `tests/worker-regression.mjs` pins it and DEPLOY.md §9 bumps the version on
+   the first forward deploy after a rollback.
 5. HTML sends one `Clear-Site-Data: "cache"` repair unless the `cachefix`
    cookie is present. Keep this until the historical encoding incident is no
    longer operationally relevant.
@@ -317,7 +328,9 @@ value.
 When any file under `assets/css/`, `assets/js/`, or `assets/fonts/` changes:
 
 1. increment `assets/version.txt`;
-2. update every versioned HTML/CSS reference;
+2. update every versioned HTML/CSS reference and `ASSET_VERSION` in
+   `shared/flows-pages.js`, which `tests/flows-features.mjs` holds equal to
+   `assets/version.txt`;
 3. run the contract test.
 
 The contract test compares changed browser assets with `assets/version.txt`,
