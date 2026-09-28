@@ -107,6 +107,7 @@ header readback with this repository after any dashboard rule change.
 | `scripts/flows-legs/focus.mjs`, `health.mjs` | The nightly `focus` and `roster` payload builders; the nightly health gate and its repair messages. |
 | `assets/js/flows-fresh.js` | The client freshness helper (`FlowsUI.freshFrom`, `freshAggregate`, `heartbeat`). |
 | `tests/flows-live-contract.mjs` | Live-layer builders, phases and states, byte ceilings, the one-writer scans, the `--live` dry run and the client helper. |
+| `tests/flows-reads-contract.mjs` | The Worker's D1 round trips per read route, counted on a fake binding: the single-flight schema bootstrap, the absent-card decision, the live overlays and the ticker reading. |
 
 ## Curriculum and stage contracts
 
@@ -306,7 +307,7 @@ so a missing bump fails CI.
 ## Testing and CI
 
 ```bash
-# Requires Node.js 22 or newer.
+# Requires Node.js 22.13 or newer.
 cd tests
 npm ci
 npx playwright install chromium
@@ -408,8 +409,19 @@ flows-positioning-contract
 flows-legs-contract
 flows-live-contract    flows-freshness-contract
 flows-quant-card       flows-track-render
-flows-pipeline-contract
+flows-pipeline-contract  flows-reads-contract
 ```
+
+`flows-reads-contract` was measured on 2026-09-27: under 1 s with no server.
+It imports `worker.js` into Node with a counting fake of the D1 binding over
+`node:sqlite` (one trip per `first`, `all`, `run` or `batch`) and asserts how
+many cross-region round trips each Flows read route costs, cold and warm.
+`node:sqlite` loads without a flag only from Node 22.13.0, so
+`tests/package.json` sets `engines.node` to `>=22.13`; on 22.5 through 22.12
+the suite fails to import with `No such built-in module: node:sqlite`. The
+suite runs under `--disable-warning=ExperimentalWarning`, which on 22.22.2
+silences the SQLite notice and nothing else; the blanket `--no-warnings` would
+also hide a deprecation raised by `worker.js` under Node.
 
 `flows-pipeline-contract` was measured on 2026-09-24: 123 s with no server. It
 was on neither list, so a source scan in it (every ingest call site must

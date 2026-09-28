@@ -896,18 +896,17 @@ const FLOWS_TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
 
 const DATED_ARCHIVE_KEY_RE = /^(board:(long|short)|scores):\d{4}-\d{2}-\d{2}$/;
 
+const storedFrom = (row) => (row && row.payload
+  ? { payload: row.payload, updatedAt: row.updated_at, fresh: nightlyFreshMeta(row) }
+  : null);
+
 async function readFlowsPayload(env, key, trace) {
 
   if (!env.DB) { if (trace) trace.failed = true; return null; }
   await ensureFlowsTables(env);
-  const row = await env.DB.prepare(
-    "SELECT payload, updated_at, json_extract(payload, '$.sessionDate') AS session, " +
-    "COALESCE(json_extract(payload, '$.readAt'), json_extract(payload, '$.generatedAt')) AS read_iso " +
-    "FROM flows_payload WHERE id = ?"
-  ).bind(key).first().catch(() => { if (trace) trace.failed = true; return null; });
-  return row && row.payload
-    ? { payload: row.payload, updatedAt: row.updated_at, fresh: nightlyFreshMeta(row) }
-    : null;
+  const row = await env.DB.prepare(FLOWS_LIVE.NIGHTLY_ROW_SQL).bind(key).first()
+    .catch(() => { if (trace) trace.failed = true; return null; });
+  return storedFrom(row);
 }
 
 function nightlyFreshHeaders(stored) {
@@ -918,7 +917,10 @@ function nightlyFreshHeaders(stored) {
 const SPLIT_ENGINE_MARK = '"engine":{"status":"split"';
 
 async function readCardWithEngine(env, ticker, trace = {}) {
-  const stored = await readFlowsPayload(env, "card:" + ticker, trace);
+  return cardWithEngine(env, ticker, await readFlowsPayload(env, "card:" + ticker, trace), trace);
+}
+
+async function cardWithEngine(env, ticker, stored, trace = {}) {
   if (stored === null) return { stored: null, card: null, unreadable: false };
   let card;
   try { card = JSON.parse(stored.payload); } catch { return { stored, card: null, unreadable: true }; }
@@ -970,8 +972,9 @@ const KNOWN_SQL =
 const CLASS_TTL_S = 12 * 3600;
 const parseOr = (text, fallback) => { try { const v = JSON.parse(text); return v && typeof v === "object" ? v : fallback; } catch { return fallback; } };
 
-async function scheduledTonight(env, kind, ticker) {
-  const row = await env.DB.prepare(ROSTER_SQL).bind(ticker).first().catch(() => { throw storeGone(); });
+const firstRow = (res) => (res && res.results && res.results[0] ? res.results[0] : null);
+
+async function scheduledTonight(env, kind, row) {
   if (!row || typeof row.depth !== "string" || typeof row.session !== "string") return false;
   if (kind === "hist" && (row.depth === "index" || row.depth === "fund")) return false;
   const now = Date.now();
@@ -982,10 +985,7 @@ async function scheduledTonight(env, kind, ticker) {
   return !!before && row.session === before.lastClosed;
 }
 
-async function liteCard(env, ticker) {
-  const [uni, gate] = await env.DB.batch([env.DB.prepare(LITE_SQL).bind(ticker), env.DB.prepare(GATE_SQL).bind(ticker)])
-    .catch(() => { throw storeGone(); });
-  const r = uni && uni.results && uni.results[0];
+function liteCard(ticker, r, g) {
   if (!r) return null;
   const units = parseOr(r.units, {}), cols = parseOr(r.cols, {});
   const u = {};
@@ -993,7 +993,6 @@ async function liteCard(env, ticker) {
     const scale = Array.isArray(units[k]) ? Number(units[k][1]) : NaN;
     u[k] = Number.isFinite(v) && Number.isFinite(scale) && scale !== 0 ? v / scale : null;
   }
-  const g = gate && gate.results && gate.results[0];
   const card = {
     v: 1, ticker, status: "ok", lite: true, depth: "universe", sessionDate: r.session, generatedAt: r.generated,
     sector: typeof r.sector === "string" ? r.sector : null, n: Number(r.n) || null, rank: Number(r.i) + 1,
@@ -1037,18 +1036,19 @@ function quoteCard(ticker, row, now) {
 }
 
 async function absentKey(env, ctx, kind, ticker) {
-  if (await scheduledTonight(env, kind, ticker)) return json({ ticker, status: "pending" });
+  const keyed = [env.DB.prepare(ROSTER_SQL).bind(ticker)];
+  if (kind === "card") keyed.push(env.DB.prepare(LITE_SQL).bind(ticker), env.DB.prepare(GATE_SQL).bind(ticker));
+  const [roster, uni, gate] = await env.DB.batch(keyed).catch(() => { throw storeGone(); });
+  if (await scheduledTonight(env, kind, firstRow(roster))) return json({ ticker, status: "pending" });
   if (kind !== "card") return json({ ticker, status: "absent", why: "not-covered" });
-  const lite = await liteCard(env, ticker);
+  const lite = liteCard(ticker, firstRow(uni), firstRow(gate));
   if (lite) return lite;
   const verdict = await classifyTicker(env, ctx, ticker);
   if (verdict && verdict.known) return json(quoteCard(ticker, verdict.row, Date.now()));
   return json({ ticker, status: "absent", why: verdict ? "unknown" : "not-covered" });
 }
 
-async function tapeAdmits(env, ctx, ticker) {
-  const row = await env.DB.prepare(KNOWN_SQL).bind("card:" + ticker, ticker).first().catch(() => null);
-  if (row) return true;
+async function vendorAdmits(env, ctx, ticker) {
   const verdict = await classifyTicker(env, ctx, ticker);
   return !verdict || verdict.known;
 }
@@ -1241,31 +1241,27 @@ async function readFlowsSummary(env, scope) {
 const NEURON_GENERATING_MS = 90 * 1000;
 const NEURON_RETRY_MS = 5 * 60 * 1000;
 
-async function readNeuron(env, scope) {
-  if (!env.DB) return null;
-  try {
-    const row = await env.DB.prepare(
-      "SELECT version, fingerprint, summary, ideas, llm, model, guard, generated_at FROM flows_neuron WHERE scope = ?",
-    ).bind(scope).first();
-    if (!row) return null;
-    let ideas = [];
-    try { ideas = JSON.parse(typeof row.ideas === "string" ? row.ideas : "[]"); } catch { ideas = []; }
-    const engine = ideas && typeof ideas === "object" && !Array.isArray(ideas) && ideas.v === 3 ? ideas : null;
-    return {
-      version: Number(row.version) || 0,
-      fingerprint: typeof row.fingerprint === "string" ? row.fingerprint : null,
-      summary: typeof row.summary === "string" ? row.summary : "",
-      ideas: engine ? (Array.isArray(engine.ideas) ? engine.ideas : []) : Array.isArray(ideas) ? ideas : [],
-      engine: engine !== null,
-      verdict: engine && typeof engine.verdict === "string" ? engine.verdict : null,
-      claims: engine && Array.isArray(engine.claims) ? engine.claims : [],
-      refused: engine && Array.isArray(engine.refused) ? engine.refused : [],
-      llm: row.llm === 1,
-      model: typeof row.model === "string" ? row.model : null,
-      guard: typeof row.guard === "string" ? row.guard : null,
-      generatedAt: typeof row.generated_at === "string" ? row.generated_at : null,
-    };
-  } catch { return null; }
+const NEURON_ROW_SQL = "SELECT version, fingerprint, summary, ideas, llm, model, guard, generated_at FROM flows_neuron WHERE scope = ?";
+
+function neuronFrom(row) {
+  if (!row) return null;
+  let ideas = [];
+  try { ideas = JSON.parse(typeof row.ideas === "string" ? row.ideas : "[]"); } catch { ideas = []; }
+  const engine = ideas && typeof ideas === "object" && !Array.isArray(ideas) && ideas.v === 3 ? ideas : null;
+  return {
+    version: Number(row.version) || 0,
+    fingerprint: typeof row.fingerprint === "string" ? row.fingerprint : null,
+    summary: typeof row.summary === "string" ? row.summary : "",
+    ideas: engine ? (Array.isArray(engine.ideas) ? engine.ideas : []) : Array.isArray(ideas) ? ideas : [],
+    engine: engine !== null,
+    verdict: engine && typeof engine.verdict === "string" ? engine.verdict : null,
+    claims: engine && Array.isArray(engine.claims) ? engine.claims : [],
+    refused: engine && Array.isArray(engine.refused) ? engine.refused : [],
+    llm: row.llm === 1,
+    model: typeof row.model === "string" ? row.model : null,
+    guard: typeof row.guard === "string" ? row.guard : null,
+    generatedAt: typeof row.generated_at === "string" ? row.generated_at : null,
+  };
 }
 
 async function markNeuronGenerating(env, scope, fingerprint, model) {
@@ -1440,8 +1436,13 @@ async function tickerNeuron(env, ctx, ticker) {
     return json(neuronShape("unavailable", ticker, null, null,
       { note: "No store is bound to this route, so no reading can be read or written." }));
   }
+  await ensureFlowsTables(env);
   const trace = {};
-  const read = await readCardWithEngine(env, ticker, trace);
+  const [c, n] = await env.DB.batch([
+    env.DB.prepare(FLOWS_LIVE.NIGHTLY_ROW_SQL).bind("card:" + ticker),
+    env.DB.prepare(NEURON_ROW_SQL).bind(scope),
+  ]).catch(() => { trace.failed = true; return [null, null]; });
+  const read = await cardWithEngine(env, ticker, storedFrom(firstRow(c)), trace);
   if (trace.failed) return json(neuronShape("unavailable", ticker, null, null, { ...STORE_GONE, note: "The store could not be read." }));
   if (read.stored === null) {
     return json(neuronShape("pending", ticker, null, null,
@@ -1465,7 +1466,7 @@ async function tickerNeuron(env, ctx, ticker) {
         "which is a fact about the card and not about the name." }));
   }
   const fingerprint = FLOWS_NEURON.contextFingerprint(context) + "|" + aiCallSignature(env);
-  const prior = await readNeuron(env, scope);
+  const prior = neuronFrom(firstRow(n));
   const now = Date.now();
   const priorAge = prior && prior.generatedAt ? now - Date.parse(prior.generatedAt) : Infinity;
 
@@ -1703,21 +1704,26 @@ async function quoteResponse(env, ctx, ticker) {
   }
 }
 
-async function liveOverlay(env, key, stored) {
-  if (!env.DB) return null;
+async function readWithOverlay(env, key) {
+  if (!env.DB) return { stored: null, overlaid: null, failed: true };
+  await ensureFlowsTables(env);
+  const now = Date.now();
+  const rows = await FLOWS_LIVE.readOverlayRows(env.DB, key, key === "pulse" ? "live:market" : "live:alerts", now)
+    .catch(() => null);
+  if (!rows) {
+    const trace = {};
+    const stored = await readFlowsPayload(env, key, trace);
+    return { stored, overlaid: null, failed: !!trace.failed };
+  }
+  const { nightly: stored, live, clock } = rows;
+  if (!live) return { stored, overlaid: null, failed: false };
   try {
-    await ensureFlowsTables(env);
-    const now = Date.now();
-    const clock = await FLOWS_LIVE.cachedClock(env, now);
-    const live = await FLOWS_LIVE.readLive(env.DB, key === "pulse" ? "live:market" : "live:alerts");
-    if (!live) return null;
-    if (key === "flowalerts") {
-      return FLOWS_LIVE.overlayFlowalerts(stored ? { session: stored.fresh && stored.fresh.session } : null,
-        live, now, clock);
-    }
-    return stored ? FLOWS_LIVE.overlayPulse(stored, live, now, clock, { json }) : null;
+    const overlaid = key === "flowalerts"
+      ? FLOWS_LIVE.overlayFlowalerts(stored ? { session: stored.fresh && stored.fresh.session } : null, live, now, clock)
+      : stored ? FLOWS_LIVE.overlayPulse(stored, live, now, clock, { json }) : null;
+    return { stored, overlaid, failed: false };
   } catch {
-    return null;
+    return { stored, overlaid: null, failed: false };
   }
 }
 
@@ -2135,13 +2141,19 @@ async function buildStrategyExpiry(env, ticker, expiry, { engine = false } = {})
 }
 
 let flowsSchemaReady = false;
+let flowsSchemaFlight = null;
 async function ensureFlowsTables(env) {
   if (flowsSchemaReady || !env.DB) return;
-  try {
-    await env.DB.batch(FLOWS_SCHEMA_SQL.map((sql) => env.DB.prepare(sql)));
-    await FLOWS_LIVE.upgradeClockColumns(env.DB);
-    flowsSchemaReady = true;
-  } catch {   }
+  if (!flowsSchemaFlight) {
+    flowsSchemaFlight = (async () => {
+      try {
+        await env.DB.batch(FLOWS_SCHEMA_SQL.map((sql) => env.DB.prepare(sql)));
+        await FLOWS_LIVE.upgradeClockColumns(env.DB);
+        flowsSchemaReady = true;
+      } catch {}
+    })().finally(() => { flowsSchemaFlight = null; });
+  }
+  await flowsSchemaFlight;
 }
 
 function flowsThrottleKey(request, username) {
@@ -3152,24 +3164,11 @@ async function route(request, env, url, ctx) {
       return passthrough(stored);
     }
 
-    if (path === "/api/flows/flowalerts") {
+    if (path === "/api/flows/flowalerts" || path === "/api/flows/pulse") {
 
-      const trace = {};
-      const stored = await readFlowsPayload(env, "flowalerts", trace);
-      const overlaid = await liveOverlay(env, "flowalerts", stored);
+      const { stored, overlaid, failed } = await readWithOverlay(env, path.slice("/api/flows/".length));
       if (overlaid) return overlaid;
-      if (trace.failed) throw storeGone();
-      if (stored === null) return json({ status: "pending" });
-      return passthrough(stored);
-    }
-
-    if (path === "/api/flows/pulse") {
-
-      const trace = {};
-      const stored = await readFlowsPayload(env, "pulse", trace);
-      const overlaid = await liveOverlay(env, "pulse", stored);
-      if (overlaid) return overlaid;
-      if (trace.failed) throw storeGone();
+      if (failed) throw storeGone();
       if (stored === null) return json({ status: "pending" });
       return passthrough(stored);
     }
@@ -3192,7 +3191,8 @@ async function route(request, env, url, ctx) {
       }
       await ensureFlowsTables(env);
       return FLOWS_LIVE.serveTape(env, ctx, ticker, Date.now(), {
-        json, fetchVendor: (p, params) => uwFetch(env, p, params), admit: (t) => tapeAdmits(env, ctx, t) });
+        json, fetchVendor: (p, params) => uwFetch(env, p, params),
+        admit: { known: env.DB.prepare(KNOWN_SQL).bind("card:" + ticker, ticker), vendor: (t) => vendorAdmits(env, ctx, t) } });
     }
 
     if (path === "/api/flows/political") {
@@ -3339,7 +3339,7 @@ async function route(request, env, url, ctx) {
       if (stored === null) return absentKey(env, ctx, kind, ticker);
       if (!stored.payload.includes(SPLIT_ENGINE_MARK)) return passthrough(stored);
       const trace = {};
-      const merged = await readCardWithEngine(env, ticker, trace);
+      const merged = await cardWithEngine(env, ticker, stored, trace);
       if (trace.failed) throw storeGone();
       if (!merged.card) return passthrough(stored);
       return json(merged.card, 200, { "X-Payload-Updated": String(stored.updatedAt || 0) });

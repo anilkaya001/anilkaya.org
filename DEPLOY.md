@@ -20,7 +20,7 @@ unreviewed files are present.
 
 ## 2. Install the pinned toolchain and run every gate
 
-Node.js 22 or newer is required by the committed test toolchain.
+Node.js 22.13 or newer is required by the committed test toolchain.
 
 ```bash
 # Regeneration must be a no-op for the committed authoring sources.
