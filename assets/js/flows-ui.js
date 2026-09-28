@@ -1685,18 +1685,19 @@
     return new Date(t).toISOString().slice(0, 10);
   }
   const T0 = Date.now();
-  const SRV = { day: null, at: 0, ph: null, until: 0, busy: 0, asked: 0, local: null, hb: false };
-  function takeNow(b) {
+  const SRV = { day: null, at: 0, ph: null, until: 0, busy: 0, asked: 0, local: null, hbAt: 0 };
+  function takeNow(b, hb) {
     if (!b) return;
     SRV.at = Date.now();
+    if (hb) SRV.hbAt = SRV.at;
     if (isoDay(b.expected)) { SRV.day = b.expected.slice(0, 10); SRV.local = localExpected(nyClock(new Date())); }
     const t = b.phase ? Date.parse(b.phase.endsAt) : NaN;
     if (t > 0) { SRV.ph = b.phase.phase; SRV.until = t; }
   }
-  const pendingNow = () => SRV.hb || SRV.busy > 0 || (!SRV.at && Date.now() - T0 < 2e4 && !!window.FlowsUI.heartbeat);
-  function watchNow(p) {
+  const pendingNow = () => Date.now() - SRV.hbAt < 39e4 || SRV.busy > 0 || (!SRV.at && Date.now() - T0 < 2e4 && !!window.FlowsUI.heartbeat);
+  function watchNow(p, hb) {
     SRV.busy++;
-    p.then((r) => r.ok && r.clone().json()).then(takeNow, () => {}).then(() => { SRV.busy--; paintFresh(); });
+    p.then((r) => r.ok && r.clone().json()).then((b) => takeNow(b, hb), () => {}).then(() => { SRV.busy--; paintFresh(); });
   }
   function confirmExpected() {
     const t = Date.now();
@@ -1841,7 +1842,7 @@
       if (GATE.on === "out") return HANG;
       const p = nativeFetch(input, init);
       if (url.indexOf("/api/flows/meta") >= 0) takeMeta(p);
-      if (url.indexOf("/api/flows/now") >= 0) { if (url.indexOf("?") > 0) SRV.hb = true; watchNow(p); }
+      if (url.indexOf("/api/flows/now") >= 0) watchNow(p, url.indexOf("?") > 0);
       p.then((r) => observe(url, r), () => {});
       return p.then((r) => { try { gate(r); } catch {} return r.status === 401 ? HANG : r; });
     };

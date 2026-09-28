@@ -299,9 +299,10 @@ const NYSE_PUBLISHED = Object.freeze({
         documentElement: { dataset: {}, style: {} }, hidden: false },
       fetch: (url) => {
         asked.push(String(url));
+        const body = typeof answer === "function" ? answer(asked.length - 1) : answer;
         return new Promise((resolve) => {
-          release = () => resolve({ ok: answer !== null, status: answer ? 200 : 503, headers: { get: () => null },
-            clone() { return this; }, json: async () => answer, text: async () => JSON.stringify(answer) });
+          release = () => resolve({ ok: body !== null, status: body ? 200 : 503, headers: { get: () => null },
+            clone() { return this; }, json: async () => body, text: async () => JSON.stringify(body) });
         });
       },
     };
@@ -366,6 +367,50 @@ const NYSE_PUBLISHED = Object.freeze({
     q.UI.freshness({ sessionDate: "2026-09-16", source: "a" });
     q.UI.freshness({ sessionDate: "2026-09-24", source: "b" });
     eq(q.UI.freshness.state(), "fresh", "without a primary the newest session still wins, as before");
+  }
+  {
+    const fresh = readFileSync(new URL("../assets/js/flows-fresh.js", import.meta.url), "utf8");
+    const closed = { phase: "closed", session: "2026-09-28", trading: false, endsAt: "2026-09-29T08:00:00.000Z" };
+    const p = pill("2026-09-28T18:00:00-04:00", (i) => ({ serverNow: Date.now(), expected: i ? "2026-09-28" : "2026-09-25", phase: closed, keys: {} }));
+    vm.runInContext(fresh, p.ctx);
+    const UI = p.ctx.window.FlowsUI;
+    UI.freshness({ sessionDate: "2026-09-25", source: "board", primary: true });
+    const hb = UI.heartbeat({ keys: ["market"], page: "overview" });
+    ok(p.asked.length === 1 && /\/api\/flows\/now\?k=market$/.test(p.asked[0]),
+      "A HEARTBEAT PAGE ACROSS THE NIGHTLY: at 18:00 ET Monday the heartbeat's keyed beat is the only /api/flows/now request");
+    eq(UI.freshness.state(), "closed", "and the pill holds closed while that beat is in flight rather than asking bare beside it");
+    await p.release();
+    eq(UI.freshness.state(), "closed", "the beat says the Friday session is still the expected one, so the Friday readings are current");
+    p.ctx.advance(179 * 60 * 1000);
+    UI.freshness.state();
+    eq(p.asked.length, 1, "for the rest of the evening nothing asks: the heartbeat sleeps through the closed phase and the pill agrees with it");
+    p.ctx.advance(60 * 1000);
+    eq(UI.freshness.state(), "closed", "at 21:00 ET the local calendar moves on to Monday and the pill asks once, holding its verdict while it does");
+    ok(p.asked.length === 2 && /\/api\/flows\/now$/.test(p.asked[1]),
+      "one bare /api/flows/now of its own, because a heartbeat that last answered three hours ago is asleep until pre-open, not running");
+    await p.release();
+    eq(UI.freshness.state(), "stale", "and the answer, expected 2026-09-28, turns the Friday readings stale: the archive landed and this tab is behind it");
+    ok(/Sep 25 session; the last completed session is Sep 28/.test(UI.freshness.details().lead), "which the popover says in words");
+    p.ctx.advance(4.5 * 3600 * 1000);
+    UI.freshness.state();
+    eq(p.asked.length, 2, "and it asks no more all night: the server's answer is the newer session and the local calendar has not moved again");
+    hb.stop();
+  }
+  {
+    const fresh = readFileSync(new URL("../assets/js/flows-fresh.js", import.meta.url), "utf8");
+    const p = pill("2026-09-28T21:30:00-04:00", null);
+    vm.runInContext(fresh, p.ctx);
+    const UI = p.ctx.window.FlowsUI;
+    UI.freshness({ sessionDate: "2026-09-25", source: "board", primary: true });
+    const hb = UI.heartbeat({ keys: ["market"], page: "overview" });
+    await p.release();
+    eq(UI.freshness.state(), "closed", "A HEARTBEAT WHOSE BEATS FAIL: for the first 20 s of the page the pill waits for the beat that never answers");
+    p.ctx.advance(25 * 1000);
+    eq(UI.freshness.state(), "closed", "then it asks for itself, holding its verdict while the request is out");
+    ok(p.asked.length === 2 && /\/api\/flows\/now$/.test(p.asked[1]), "a failed keyed beat is not a running heartbeat, so the pill's own fallback is not suppressed");
+    await p.release();
+    eq(UI.freshness.state(), "stale", "and when that fails too the local calendar's stale stands, as it did before the heartbeat existed");
+    hb.stop();
   }
 }
 
