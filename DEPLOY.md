@@ -828,11 +828,12 @@ besides `depth` and `session` for every card it published, it carries `x`
 exist and has not yet retired, with their session). The next run reads it,
 retires what has aged out, and carries the rest. A roster with no `held`
 (the first run after this change, or one that shed its ledger to fit its
-32 KB cap) triggers a one-time probe: every screened, guaranteed, fund and
-index ticker's `card:` and `card-x:` keys are read through the ingest route
-(and `hist:` wherever either exists), at most 2,400 reads, worker-only. If
-the prior roster cannot be read at all, nothing is retired that night. A
-refused DELETE keeps its key in `held` for the next run.
+32 KB cap) triggers a one-time probe of every screened, guaranteed, fund and
+index ticker through the metadata form described below; the per-key reads of
+`card:` and `card-x:` (and `hist:` wherever either exists) remain as the
+fallback for an older Worker. If the prior roster cannot be read at all,
+nothing is retired that night. A refused DELETE keeps its key in `held` for
+the next run.
 
 The probe asks for dates, not cards. `GET /api/flows/ingest?keys=<comma
 list>` (the nightly token only, GET only, at most 96 keys, each held to the
@@ -849,9 +850,19 @@ snapshot with 733 candidate names and nothing landed (a full rebuild): the
 per-key bootstrap made 1,747 requests and downloaded 21,797,292 bytes to learn
 601 dates; the metadata form made 23 requests of 130,512 bytes in all, each one
 D1 statement, and built the identical 601-key ledger. If the form answers
-anything but 200 — an older Worker — the run falls back to the per-key reads,
-and the log line names the path either way, with the bytes left undownloaded.
-The 2,400 cap, the failure limit and the deadline count keys asked.
+anything but 200 — an older Worker's 400 `invalid_key` — the run falls back
+to the per-key reads; a 400 `too_many_keys` falls back the same way but is
+named in the log as the cap mismatch it is, and
+`tests/flows-pipeline-contract.mjs` holds the pipeline's chunk within the
+Worker's `INGEST_META_KEYS_MAX`. The log line names the path either way, with
+the bytes left undownloaded. The 2,400 cap charges a name's `card:` and
+`card-x:` keys only; its `hist:` rides in the same request uncharged, so the
+metadata path reaches 1,200 names in full (the per-key reads, which charged
+every key including the hist they fetched, reached 800 to 1,200 depending on
+how many were carded, and charging all three kinds would have held the form
+to 800). The failure limit and the deadline count keys asked. `bytes` is
+`length(payload)` of the stored text — characters, as the POST answer's
+`bytes` counts them.
 
 The roster is read twice: once as the run starts and again at the retire
 step. Only the nightly writes it, so when the late read fails the early copy

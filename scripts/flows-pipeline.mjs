@@ -1868,8 +1868,9 @@ async function probeStoredOnce(keys) {
       return { keys: null, failed: true, status: 403, refusal, final: refusal.kind === "worker" };
     }
     if (!response.ok) {
-      await noteAnswer(response);
-      return { keys: null, failed: true, status: response.status };
+      const noted = await noteAnswer(response);
+      const seen = refusalOf({ headers: response.headers, text: noted ? noted.text : await response.text().catch(() => "") });
+      return { keys: null, failed: true, status: response.status, code: seen.kind === "worker" ? seen.code : null };
     }
     const text = await response.text();
     let body = null;
@@ -4280,23 +4281,29 @@ const probeFound = (card, x) => card === "present" || x === "present" || card ==
 
 async function probeLedgerMetadata({ list, landed, probeMany, past, limit, failLimit, chunk }) {
   const asked = [];
-  let capped = false;
+  const chargeOf = (keys) => keys.filter((k) => !k.startsWith("hist:")).length;
+  let capped = false, budget = 0;
   for (const t of list) {
     const keys = ["card:" + t, "card-x:" + t, "hist:" + t].filter((k) => !landed.has(k));
-    if (asked.length + keys.length > limit) { capped = true; break; }
+    if (budget + chargeOf(keys) > limit) { capped = true; break; }
+    budget += chargeOf(keys);
     asked.push(...keys);
   }
   const answers = new Map();
-  let reads = 0, failed = 0, requests = 0, metaBytes = 0;
+  let reads = 0, charged = 0, failed = 0, requests = 0, metaBytes = 0;
   for (let i = 0; i < asked.length; i += chunk) {
     if (failed >= failLimit || past()) { capped = true; break; }
     const batch = asked.slice(i, i + chunk);
     requests++;
     reads += batch.length;
+    charged += chargeOf(batch);
     const r = await probeMany(batch);
     const shaped = !!r && !r.failed && r.status === 200 && !!r.keys && typeof r.keys === "object";
     if (!shaped) {
-      if (requests === 1) return { fallback: { status: r && r.status ? r.status : 0, said: r ? readSaid(r) : "no answer" } };
+      if (requests === 1) {
+        return { fallback: { status: r && r.status ? r.status : 0, said: r ? readSaid(r) : "no answer",
+          code: r && typeof r.code === "string" ? r.code : null } };
+      }
       failed += batch.length;
       continue;
     }
@@ -4322,7 +4329,7 @@ async function probeLedgerMetadata({ list, landed, probeMany, past, limit, failL
     take("card-x:" + t);
     if (probeFound(card, x) && !landed.has("hist:" + t)) take("hist:" + t);
   }
-  return { known, reads, failed, capped, path: "metadata", requests, metaBytes, avoided, fallback: null };
+  return { known, reads, charged, failed, capped, path: "metadata", requests, metaBytes, avoided, fallback: null };
 }
 
 export async function bootstrapLedger({ tickers = [], landed = new Set(), reader, probeMany = null, pool = runPooled, width = 4,
@@ -4356,7 +4363,7 @@ export async function bootstrapLedger({ tickers = [], landed = new Set(), reader
       await probe("hist:" + t);
     }
   }, { width });
-  return { known, reads, failed, capped, path: "per-key", requests: reads, metaBytes: 0, avoided: 0, fallback };
+  return { known, reads, charged: reads, failed, capped, path: "per-key", requests: reads, metaBytes: 0, avoided: 0, fallback };
 }
 
 export function probeSaid(p) {
@@ -4365,10 +4372,13 @@ export function probeSaid(p) {
     (p.capped ? " — the probe stopped at its cap, its failure limit or the deadline" : "");
   if (p.path === "metadata") {
     return `${p.reads} key(s) asked over ${p.requests} metadata request(s) of ${p.metaBytes} bytes, ` +
-      `${p.avoided} bytes of stored payload left undownloaded, ${tail}`;
+      `${p.charged} card and card-x key(s) counted against the cap, ${p.avoided} bytes of stored payload left undownloaded, ${tail}`;
   }
-  return `${p.reads} read(s) key by key` +
-    (p.fallback ? ` (the metadata form answered ${p.fallback.said}, so an older Worker is assumed)` : "") + `, ${tail}`;
+  const why = p.fallback
+    ? ` (the metadata form answered ${p.fallback.said}${p.fallback.code ? " " + p.fallback.code : ""}, so ` +
+      (p.fallback.code === "too_many_keys" ? "the chunk is above this Worker's cap, not an older Worker" : "an older Worker is assumed") + ")"
+    : "";
+  return `${p.reads} read(s) key by key${why}, ${tail}`;
 }
 
 export async function retireAndRoster({

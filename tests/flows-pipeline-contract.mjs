@@ -1446,10 +1446,12 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
          "ledger but rebuilt tonight — is neither");
       ok(/\[dry-run\] retire card:ZZRET/.test(runLog) && !/\[dry-run\] retire card:NVDA/.test(runLog),
          "the retire went through the ingest DELETE path, and never touched a card the run rebuilt");
-      const probeLine = /so the store was probed — (\d+) key\(s\) asked over (\d+) metadata request\(s\) of \d+ bytes, (\d+) bytes of stored payload left undownloaded, (\d+) older key\(s\) found$/m.exec(runLog);
-      ok(probeLine && Number(probeLine[2]) === Math.ceil(Number(probeLine[1]) / LEDGER_PROBE_CHUNK) && Number(probeLine[1]) <= LEDGER_PROBE_MAX,
-         `the dry run's prior ledger is marked partial, so the run probes the store through the metadata form: ${probeLine ? probeLine[0] : "no probe line"}`);
-      ok(probeLine && Number(probeLine[3]) === 2 * (DRY_PROBE_BYTES.card + DRY_PROBE_BYTES["card-x"] + DRY_PROBE_BYTES.hist) && Number(probeLine[4]) === 6,
+      const probeLine = /so the store was probed — (\d+) key\(s\) asked over (\d+) metadata request\(s\) of \d+ bytes, (\d+) card and card-x key\(s\) counted against the cap, (\d+) bytes of stored payload left undownloaded, (\d+) older key\(s\) found$/m.exec(runLog);
+      ok(probeLine && Number(probeLine[2]) === Math.ceil(Number(probeLine[1]) / LEDGER_PROBE_CHUNK) &&
+         Number(probeLine[3]) <= LEDGER_PROBE_MAX && Number(probeLine[3]) < Number(probeLine[1]),
+         `the dry run's prior ledger is marked partial, so the run probes the store through the metadata form, charging the cap for ` +
+         `card and card-x keys only: ${probeLine ? probeLine[0] : "no probe line"}`);
+      ok(probeLine && Number(probeLine[4]) === 2 * (DRY_PROBE_BYTES.card + DRY_PROBE_BYTES["card-x"] + DRY_PROBE_BYTES.hist) && Number(probeLine[5]) === 6,
          "and reports the bytes the per-key path would have downloaded — ZZRET's three keys, ZZHLD's card and the hist only the store " +
          "knew, ZZXON's card-x: two of each kind — while NVDA's held card, rebuilt tonight, is never asked");
       ok(Object.hasOwn(roster.held, "hist:ZZHLD") && roster.ledger === "bootstrap",
@@ -2137,6 +2139,12 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      `four call sites reach the ingest route — read, metadata probe, write and delete (found ${sites.length}). ` +
      "A fifth must join the builder rather than hand-rolling headers");
   eq(src.match(/ingestURL\(\) \+ "\?keys="/g).length, 1, "one of them is the ?keys= metadata form");
+  const workerSrc = readFileSync(new URL("../worker.js", import.meta.url), "utf8");
+  const metaCap = /\bINGEST_META_KEYS_MAX = (\d+);/.exec(workerSrc);
+  ok(metaCap && LEDGER_PROBE_CHUNK <= Number(metaCap[1]),
+     `the pipeline's chunk of ${LEDGER_PROBE_CHUNK} keys is within the Worker's INGEST_META_KEYS_MAX ` +
+     `(${metaCap ? metaCap[1] : "not found in worker.js"}): a chunk above it would have the first request of every nightly ` +
+     "answer 400 too_many_keys and the whole probe fall back to per-key reads for good");
   for (const site of sites) {
     const window = src.slice(site.index, site.index + 900);
     ok(/headers: await ingestHeaders\(/.test(window),
@@ -3753,7 +3761,8 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     const status = answers.length ? answers.shift() : 200;
     seen.push({ status, url: req.url, auth: req.headers.authorization, ua: req.headers["user-agent"] });
     res.writeHead(status, { "Content-Type": "application/json" });
-    res.end(status === 200 ? body : "{}");
+    res.end(status === 200 ? body
+      : status === 400 ? JSON.stringify({ error: { code: "too_many_keys", message: "At most 8 keys per request" } }) : "{}");
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   const prevUrl = process.env.FLOWS_INGEST_URL;
@@ -3775,6 +3784,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     const older = await probeStored(["card:A"], { pause: async () => {} });
     ok(older.failed && older.status === 400 && seen.length === 1,
        "a 400 — an older Worker that knows no ?keys= — is an answer, not a transient: read once and handed to the caller to fall back on");
+    eq(older.code, "too_many_keys", "carrying the Worker's own error code from the body, so the log can tell a cap mismatch from an older Worker");
     answers = [200];
     body = '{"ok":true}';
     seen.length = 0;
@@ -4440,9 +4450,40 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     ok(older.avoided === 0 && older.metaBytes === 0 && older.reads === 5, "with nothing avoided and five reads");
 
     requests.length = 0;
-    const capped = await bootstrapLedger({ tickers: ["A", "B", "C", "D", "E"], probeMany: answerer(), reader: noReader, limit: 10 });
-    ok(capped.capped && capped.reads === 9 && requests.length === 1 && requests[0].length === 9,
-       "THE CAP counts keys asked and keeps whole names: five names are fifteen keys, a cap of ten asks three names' nine and is partial");
+    const capped = await bootstrapLedger({ tickers: ["A", "B", "C", "D", "E"], probeMany: answerer(), reader: noReader, limit: 7 });
+    ok(capped.capped && capped.reads === 9 && capped.charged === 6 && requests.length === 1 && requests[0].length === 9,
+       "THE CAP charges a name's card and card-x keys and keeps whole names: a cap of seven admits three names (six charged), their " +
+       "hist keys ride in the same request uncharged, so nine keys are asked and the probe is partial");
+    const uncapped = await bootstrapLedger({ tickers: ["A", "B", "C", "D", "E"], probeMany: answerer(), reader: noReader, limit: 10 });
+    ok(!uncapped.capped && uncapped.reads === 15 && uncapped.charged === 10, "and a cap of ten, which held three names when every key was charged, holds all five");
+    requests.length = 0;
+    const reach = Math.floor(LEDGER_PROBE_MAX / 2);
+    const full = await bootstrapLedger({ tickers: Array.from({ length: reach }, (_, i) => "R" + i), probeMany: answerer(), reader: noReader });
+    ok(!full.capped && full.charged === LEDGER_PROBE_MAX && full.reads === 3 * reach && full.requests === Math.ceil(3 * reach / LEDGER_PROBE_CHUNK) &&
+       requests.length === full.requests,
+       `THE REACH: ${reach} names are asked in full under the default cap of ${LEDGER_PROBE_MAX} — ${3 * reach} keys over ${full.requests} requests — ` +
+       "where charging every key held the metadata path to 800");
+    requests.length = 0;
+    const past = await bootstrapLedger({ tickers: Array.from({ length: reach + 1 }, (_, i) => "R" + i), probeMany: answerer(), reader: noReader });
+    ok(past.capped && past.charged === LEDGER_PROBE_MAX && past.reads === 3 * reach, "and one name more is partial, to be probed again the next night");
+    {
+      const names = Array.from({ length: 900 }, (_, i) => "N" + String(i).padStart(4, "0"));
+      const carded = new Set(names.filter((_, i) => i % 3 === 0).map((t) => "card:" + t));
+      const cardReader = async (key) => (carded.has(key) ? { payload: { sessionDate: "2026-09-16" }, status: 200 } : { payload: null, absent: true, status: 200 });
+      const cardMany = async (keys) => {
+        const out = {};
+        for (const k of keys) out[k] = carded.has(k) ? { present: true, sessionDate: "2026-09-16", generatedAt: null, updatedAt: 1, bytes: 60000 } : { present: false };
+        return { status: 200, keys: out, bytes: 100 };
+      };
+      const byKey = await bootstrapLedger({ tickers: names, reader: cardReader });
+      const byMeta = await bootstrapLedger({ tickers: names, reader: noReader, probeMany: cardMany });
+      ok(!byKey.capped && byKey.reads === 2100 && byKey.known.size === 300,
+         "REACH PARITY: 900 names, one in three carded — the per-key path reads 2,100 keys under its cap and learns 300 dates");
+      ok(!byMeta.capped && byMeta.charged === 1800 && byMeta.reads === 2700 && byMeta.requests === 29 && byMeta.known.size === 300,
+         `and the metadata path, charged 1,800 for card and card-x alone, reaches every one of them too: 2,700 keys over ${byMeta.requests} requests, ` +
+         "300 dates, where charging all three kinds capped it at 800 names and 267 dates");
+      assert.deepEqual([...byMeta.known].sort(), [...byKey.known].sort(), "with the identical ledger"); checks++;
+    }
     requests.length = 0;
     const second = await bootstrapLedger({ tickers: Array.from({ length: 96 }, (_, i) => "T" + i),
       probeMany: answerer((n) => (n >= 2 ? { failed: true, status: 503 } : null)), reader: noReader });
@@ -4466,8 +4507,8 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     assert.deepEqual(deletes.sort(), ["card-x:GONE", "card-x:XONLY", "card:GONE"],
       "through retireAndRoster the metadata probe retires exactly what the per-key probe retired above"); checks++;
     ok(viaMeta.ledger === "bootstrap" && Object.hasOwn(writes.get("roster").held, "card:NEWISH"), "records the rebuilt ledger and carries the young key");
-    ok(logs.some((l) => /so the store was probed — 13 key\(s\) asked over 1 metadata request\(s\) of 900 bytes, 200000 bytes of stored payload left undownloaded, 4 older key\(s\) found$/.test(l)),
-       `and the log says which path ran and how many bytes it avoided (${logs.find((l) => /store was probed/.test(l))})`);
+    ok(logs.some((l) => /so the store was probed — 13 key\(s\) asked over 1 metadata request\(s\) of 900 bytes, 8 card and card-x key\(s\) counted against the cap, 200000 bytes of stored payload left undownloaded, 4 older key\(s\) found$/.test(l)),
+       `and the log says which path ran, what it charged the cap and how many bytes it avoided (${logs.find((l) => /store was probed/.test(l))})`);
     const fell = await run({
       prior: { payload: { v: 1, sessionDate: "2026-09-23", depth: {} }, status: 200 },
       candidates: ["GONE"],
@@ -4476,6 +4517,22 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     });
     ok(fell.ledger === "bootstrap" && logs.some((l) => /so the store was probed — 3 read\(s\) key by key \(the metadata form answered HTTP 404, so an older Worker is assumed\), 2 older key\(s\) found$/.test(l)),
        `a fallback is not a failure: the ledger is whole and the log names the path (${logs.find((l) => /store was probed/.test(l))})`);
+    const mismatched = await run({
+      prior: { payload: { v: 1, sessionDate: "2026-09-23", depth: {} }, status: 200 },
+      candidates: ["GONE"],
+      probeMany: async () => ({ failed: true, status: 400, code: "too_many_keys" }),
+      reader: async (key) => (store.has(key) ? { payload: store.get(key), status: 200 } : { payload: null, absent: true, status: 200 }),
+    });
+    ok(mismatched.ledger === "bootstrap" && logs.some((l) => /3 read\(s\) key by key \(the metadata form answered HTTP 400 too_many_keys, so the chunk is above this Worker's cap, not an older Worker\), 2 older key\(s\) found$/.test(l)),
+       `a 400 that names too_many_keys is reported as the cap mismatch it is, never as an older Worker (${logs.find((l) => /store was probed/.test(l))})`);
+    const olderWorker = await run({
+      prior: { payload: { v: 1, sessionDate: "2026-09-23", depth: {} }, status: 200 },
+      candidates: ["GONE"],
+      probeMany: async () => ({ failed: true, status: 400, code: "invalid_key" }),
+      reader: async (key) => (store.has(key) ? { payload: store.get(key), status: 200 } : { payload: null, absent: true, status: 200 }),
+    });
+    ok(olderWorker.ledger === "bootstrap" && logs.some((l) => /\(the metadata form answered HTTP 400 invalid_key, so an older Worker is assumed\)/.test(l)),
+       "and the 400 invalid_key an older Worker gives an empty key= is named with its code");
 
     const dry = dryRosterProbe("2026-09-24");
     const dryAnswer = await dry(["card:ZZRET", "hist:ZZHLD", "card:NOPE"]);
