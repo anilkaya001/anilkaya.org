@@ -1911,6 +1911,62 @@ try {
     await page.close();
   }
 
+  {
+    const card = clone(full);
+    const at = Date.parse(card.sessionDate + "T15:30:00Z");
+    const quote = (price, t) => ({ ticker: card.ticker, status: "ok", readAt: t, price, prevClose: 120, changePct: price / 120 - 1, open: 121, high: 124, low: 120.5, volume: 1e6, marketTime: "r", tapeTime: t });
+    const nowOf = (q) => ({ serverNow: at, phase: { phase: "rth", session: card.sessionDate, trading: true, endsAt: new Date(at + 3600e3).toISOString() }, keys: {}, quote: q });
+    const t1 = new Date(at - 150e3).toISOString(), t2 = new Date(at - 30e3).toISOString();
+    let served = quote(123.45, t1);
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, card, { now: nowOf(served), at });
+    await page.waitForFunction(() => document.querySelector("#ftLast .ft-live"), null, { timeout: 8000 });
+    await page.route("**/api/flows/now*", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(nowOf(served)) }));
+    const beat = async () => {
+      const done = page.waitForResponse((r) => r.url().includes("/api/flows/now"));
+      await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+      await done;
+      await page.waitForTimeout(200);
+    };
+    const snap = () => page.evaluate(({ t1, t2 }) => {
+      const w = window;
+      if (!w.__px) {
+        w.__px = { muts: [], nodes: [document.getElementById("ftPxV"), document.querySelector("#ftChg > *"), document.querySelector("#ftLast .ui-info"), document.querySelector("#ftHc svg")] };
+        const mo = new MutationObserver((l) => { for (const m of l) w.__px.muts.push(m.type + ":" + (m.target.id || m.target.nodeName) + (m.attributeName ? "@" + m.attributeName : "")); });
+        for (const id of ["ftPx", "ftLast", "fxFresh"]) mo.observe(document.getElementById(id), { subtree: true, childList: true, attributes: true, characterData: true });
+      }
+      const same = [document.getElementById("ftPxV"), document.querySelector("#ftChg > *"), document.querySelector("#ftLast .ui-info"), document.querySelector("#ftHc svg")].map((n, i) => n === w.__px.nodes[i]);
+      const muts = w.__px.muts.slice();
+      w.__px.muts.length = 0;
+      return { same, muts, px: document.querySelector("#ftPxV .visually-hidden").textContent, chg: document.querySelector("#ftChg > *").textContent, chgLabel: document.querySelector("#ftChg > *").getAttribute("aria-label"),
+        last: document.getElementById("ftLast").innerText.replace(/\s+/g, " ").trim(), pill: document.getElementById("fxFresh").innerText.trim(), F: { chg: window.FlowsUI.F.px(4.56) + "  " + window.FlowsUI.F.pct(0.038, 2), t1: window.FlowsUI.F.time(t1), t2: window.FlowsUI.F.time(t2) } };
+    }, { t1, t2 });
+    const before = await snap();
+    eq(before.px, "123.45", `the first beat's quote is the headline price (${before.px})`);
+    ok(before.last.includes(before.F.t1) && before.pill === "Live", `read at its own time, with the pill Live (${before.last} / ${before.pill})`);
+    await beat();
+    await beat();
+    const quiet = await snap();
+    eq(quiet.muts.length, 0, `two beats that carry the same quote write nothing to the price, the last-read line or the pill (${quiet.muts.slice(0, 6).join(" ")})`);
+    ok(quiet.same.every(Boolean), `and leave the price, the change capsule, the info trigger and the hero chart in place (${quiet.same.join(",")})`);
+    eq(quiet.px + "|" + quiet.chg + "|" + quiet.last, before.px + "|" + before.chg + "|" + before.last, "reading exactly as before");
+    served = quote(124.56, t2);
+    await beat();
+    const moved = await snap();
+    eq(moved.px, "124.56", `a beat whose quote moved rolls the price (${moved.px})`);
+    eq(moved.chg, moved.F.chg, `and rewrites the change capsule's text in place (${moved.chg})`);
+    ok(/124\.56.*3\.80%/.test(moved.chgLabel) || /4\.56/.test(moved.chgLabel), `with its label (${moved.chgLabel})`);
+    ok(moved.last.includes(moved.F.t2) && !moved.last.includes(moved.F.t1), `and the read time (${moved.last})`);
+    ok(moved.same[1] && moved.same[2] && moved.same[3], `keeping the capsule, the info trigger and the hero chart, so an open tooltip stays anchored and no closure is left behind (${moved.same.join(",")})`);
+    ok(moved.muts.length > 0 && !moved.muts.some((m) => /^childList:(ftLast|ftChg)$/.test(m)), `the writes are text and attribute updates, never a rebuild of the last-read line or the capsule (${moved.muts.slice(0, 8).join(" ")})`);
+    const pop = await infoText(page, "#ftLast");
+    ok(/Live price/.test(pop) && /124\.56/.test(pop) && !/123\.45/.test(pop), `the kept trigger's tooltip reads the current quote, not the one it was built with (${(pop || "").replace(/\s+/g, " ").slice(0, 120)})`);
+    eq(errors.length, 0, `the live beats throw nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
 } finally {
   await browser.close();
   fs.rmSync(EMIT_DIR, { recursive: true, force: true });
