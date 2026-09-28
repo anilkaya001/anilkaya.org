@@ -120,11 +120,11 @@ function seed(f) {
   f.put("card:NVDA", { ...NIGHTLY, ticker: "NVDA", panels: PANELS, score: 61, conviction: 70 });
 }
 
+const HOME_LIVE = "/api/flows/lk?k=market,vol,breadth,strips,strips:series,focus";
 const HOME = [
   "/api/flows/board?side=long", "/api/flows/board?side=watch", "/api/flows/market", "/api/flows/flowalerts", "/api/flows/events",
   "/api/flows/scoretrack", "/api/flows/sector-premium", "/api/flows/news", "/api/flows/pulse", "/api/flows/regime",
-  "/api/flows/lk?k=market", "/api/flows/lk?k=vol", "/api/flows/lk?k=breadth", "/api/flows/focus", "/api/flows/lk?k=strips",
-  "/api/flows/lk?k=strips:series", "/api/flows/now?n=board:long,board:short,meta,focus",
+  "/api/flows/focus", HOME_LIVE, "/api/flows/now?n=board:long,board:short,meta,focus",
 ];
 const SCHEMA_RE = /^CREATE TABLE IF NOT EXISTS flows_payload/;
 const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
@@ -135,16 +135,20 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   W.memoClock(null, 0);
   const get = await client(f.D1);
   const answers = await Promise.all(HOME.map(get));
-  ok(answers.every((a) => a.res.status === 200), "a cold isolate answers all seventeen home-page reads at once");
+  ok(answers.every((a) => a.res.status === 200), "a cold isolate answers all thirteen home-page reads at once");
   eq(f.count(SCHEMA_RE), 1,
-     "SINGLE-FLIGHT SCHEMA: seventeen concurrent requests on a cold isolate run the ten-statement schema batch once, " +
-     "not once each (the investigation counted 17 redundant batches per cold home load)");
+     "SINGLE-FLIGHT SCHEMA: thirteen concurrent requests on a cold isolate run the ten-statement schema batch once, " +
+     "not once each (the investigation counted 17 redundant batches per cold home load, when the page made 17 requests)");
   eq(f.count(PRAGMA_RE), 1, "and the clock-column PRAGMA of upgradeClockColumns once");
   ok(!f.trips.some((t) => t.sqls.some((s) => /^ALTER TABLE flows_clock/.test(s))), "with no ALTER on a table that already has every column");
   eq(f.trips.filter((t) => t.kind === "first" && /^SELECT \* FROM flows_clock/.test(t.sqls[0])).length, 1,
-     "SINGLE-FLIGHT CLOCK: the six routes that read the clock on their own share one cold miss (eight reads before), " +
-     "while the two overlay routes carry it inside their own batch");
-  eq(f.trips.length, 20, "twenty trips for the seventeen requests: one schema batch, one PRAGMA, one clock read and seventeen reads");
+     "SINGLE-FLIGHT CLOCK: /api/flows/now, the one route left reading the clock on its own, pays one cold miss " +
+     "(eight reads before), while the two overlay routes and the live envelope carry it inside their own batch");
+  eq(f.trips.length, 16, "sixteen trips for the thirteen requests: one schema batch, one PRAGMA, one clock read and thirteen reads " +
+     "(twenty for seventeen requests before the page's six live keys became one)");
+  const home = f.trips.find((t) => t.kind === "batch" && /FROM flows_live WHERE id IN/.test(t.sqls[0]));
+  ok(home && home.sqls.length === 2 && /FROM flows_clock/.test(home.sqls[1]),
+     "THE HOME PAGE'S LIVE KEYS COST ONE TRIP: one batch of the six-key SELECT and, on a cold isolate, the clock row beside it");
   const before = f.trips.length;
   await get("/api/flows/meta");
   eq(f.count(SCHEMA_RE, before), 0, "once ready, a later request runs no schema statement");
@@ -413,6 +417,33 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   ok(!W.clockDue(Date.now()), "and the memo is warm afterwards");
   const after = await route("/api/flows/lk?k=market");
   ok(after.trips.length === 1 && !/FROM flows_clock/.test(after.trips[0].sqls[0]), "so the next live read runs no clock read");
+
+  const six = ["market", "vol", "breadth", "strips", "strips:series", "focus"];
+  let singles = 0;
+  for (const k of six) singles += (await route("/api/flows/lk?k=" + k)).trips.length;
+  eq(singles, 6, "SIX LIVE KEYS READ ONE BY ONE ARE SIX TRIPS, each a Worker invocation of its own");
+  const many = await route(HOME_LIVE);
+  eq(many.trips.length, 1, "asked together they are ONE TRIP");
+  ok(many.trips[0].kind === "batch" && many.trips[0].sqls.length === 1 &&
+     /^SELECT id, payload, read_at, session, cadence_s, source, writer, updated_at FROM flows_live WHERE id IN \(\?, \?, \?, \?, \?, \?\)$/.test(many.trips[0].sqls[0]),
+     "a batch of one SELECT over flows_live with the six ids bound");
+  deep(many.trips[0].args[0], six.map((k) => "live:" + k), "in the order asked");
+  ok(many.res.status === 200 && many.res.headers.get("Cache-Control") === "no-store" && /^\d{13}$/.test(many.res.headers.get("X-Server-Now")),
+     "no-store like the single-key route, with X-Server-Now");
+  deep(Object.keys(many.body), ["serverNow", "phase", "keys"], "an envelope of serverNow, phase and keys");
+  deep(Object.keys(many.body.keys), six, "keyed by the params as asked");
+  ok(many.body.keys.market.status === "ok" && many.body.keys.market.payload.key === "live:market" && many.body.keys.market.updatedAt === liveAt &&
+     many.body.keys.market.fresh.state && many.body.keys.market.fresh.updatedAt === liveAt,
+     "the held key carries its payload whole, its updatedAt and the heartbeat's fresh entry");
+  deep(many.body.keys.vol, { status: "pending", fresh: { state: "pending", reason: "unpublished", klass: "breadth" } },
+     "an unwritten key is pending in its class");
+  eq(many.res.headers.get("X-Fresh-State"), "pending", "and the aggregate X-Fresh-State is the weakest key's");
+
+  W.memoClock(null, 0);
+  const coldMany = await route(HOME_LIVE);
+  ok(coldMany.trips.length === 1 && coldMany.trips[0].sqls.length === 2 && /FROM flows_clock/.test(coldMany.trips[0].sqls[1]),
+     "WITH THE CLOCK MEMO STALE the clock row rides the envelope's batch as a second statement, still one trip");
+  ok(!W.clockDue(Date.now()), "and the memo is warm afterwards");
 
   f.fail(/FROM flows_live WHERE/);
   const liveGone = await route("/api/flows/flowalerts");

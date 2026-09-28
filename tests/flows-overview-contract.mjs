@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { lkMock } from "./lk-mock.mjs";
 import { readFileSync, readdirSync } from "node:fs";
 import { chromium } from "playwright";
 import { startWorker, FLOWS_PASSWORD, FLOWS_TEST_USER } from "./worker-server.mjs";
@@ -178,8 +179,11 @@ await post("scoretrack", scoretrack(TRACK_DAYS));
 }
 
 const NEW_KEYS = /\/api\/flows\/(regime|universe|now|lk)(\?|$)/;
-const stubNewKeys = (target) => target.route(NEW_KEYS, (route) => route.fulfill({
-  status: 200, contentType: "application/json", body: JSON.stringify({ status: "pending" }) }));
+const stubNewKeys = async (target) => {
+  await target.route(NEW_KEYS, (route) => route.fulfill({
+    status: 200, contentType: "application/json", body: JSON.stringify({ status: "pending" }) }));
+  return lkMock(target, { stub: true });
+};
 
 const POP_READ = `(() => {
   const pop = document.getElementById("fxPop");
@@ -290,7 +294,7 @@ const browser = await chromium.launch();
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
   const errors = [];
-  await stubNewKeys(page);
+  const lk = await stubNewKeys(page);
 
   let allowFetchFailure = false;
   page.on("pageerror", (e) => errors.push(e.message));
@@ -2788,20 +2792,20 @@ try {
         return m ? m.querySelector(".ui-metric-v").textContent.trim() : null;
       });
     };
-    await page.route("**/api/flows/lk?k=breadth", breadthAt(SESSION, 0.052));
+    await lk.set("breadth", breadthAt(SESSION, 0.052));
     eq(await shareNow(), "5%",
       "a live breadth layer as new as the regime supplies the 0DTE share, by the same rule the market page's expiry gauge uses, " +
       "so the two pages never print two shares for one session");
-    await page.unroute("**/api/flows/lk?k=breadth");
-    await page.route("**/api/flows/lk?k=breadth", breadthAt("2026-08-21", 0.052));
+    await lk.unset("breadth");
+    await lk.set("breadth", breadthAt("2026-08-21", 0.052));
     eq(await shareNow(), "41%", "while a breadth layer older than the regime yields to it");
-    await page.unroute("**/api/flows/lk?k=breadth");
+    await lk.unset("breadth");
     await page.unroute("**/api/flows/regime");
 
     const liveAt = new Date().toISOString();
     const t0 = Date.parse(SESSION + "T13:30:00Z");
     const ts = [0, 5, 10, 15].map((m) => new Date(t0 + m * 60000).toISOString());
-    await page.route("**/api/flows/lk?k=market", (route) => route.fulfill({
+    await lk.set("market", (route) => route.fulfill({
       status: 200,
       headers: { "Content-Type": "application/json", "X-Fresh-State": "live" },
       body: JSON.stringify({
@@ -2825,7 +2829,7 @@ try {
     const src = await why(page, "#hmTideState .hm-pill");
     eq(src.facts.Source, "live:market", "and the disclosure names the live key as the source");
     await shut(page);
-    await page.unroute("**/api/flows/lk?k=market");
+    await lk.unset("market");
 
     const heroNow = () => page.evaluate(() => {
       const pill = document.querySelector("#hmTideState .hm-pill");
@@ -2849,7 +2853,7 @@ try {
       return heroNow();
     };
 
-    await page.route("**/api/flows/lk?k=market", liveTide(1, "live"));
+    await lk.set("market", liveTide(1, "live"));
     const opening = await heroAfter();
     eq(opening.value, "+$100.1M",
        "a live tide of one read (the opening minutes) yields to the last session's whole tide rather than to Pending");
@@ -2866,7 +2870,7 @@ try {
     eq(one.note, "First read", "but one quiet word: the river draws from the second read");
     await page.unroute("**/api/flows/pulse");
 
-    await page.route("**/api/flows/lk?k=market", liveTide(4, "stale"));
+    await lk.set("market", liveTide(4, "stale"));
     const late = await heroAfter();
     eq(late.state, "stale", "a live tide past its fresh window is still drawn, marked stale");
     eq(late.svg, 1, "with its river");
@@ -2875,7 +2879,7 @@ try {
 
     {
       const thu = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
-      await stubNewKeys(thu);
+      const thuLk = await stubNewKeys(thu);
       const tp = await thu.newPage();
       tp.on("pageerror", (e) => errors.push("thu: " + e.message));
       await tp.clock.setFixedTime(new Date("2026-09-24T17:00:00Z"));
@@ -2902,7 +2906,7 @@ try {
         });
       };
 
-      await tp.route("**/api/flows/lk?k=market", liveToday({ "X-Fresh-State": "closed", "X-Fresh-Phase": "closed" }));
+      await thuLk.set("market", liveToday({ "X-Fresh-State": "closed", "X-Fresh-Phase": "closed" }));
       const broken = await pillOf();
       eq(broken.title, "Last session", "on a Thursday afternoon the boards of an earlier session are the last session");
       eq(broken.state, "stale",
@@ -2913,12 +2917,12 @@ try {
       eq(broken.note, "One read", "a lone read that was never followed up says one read, not first read, since no second is coming");
       eq(broken.zero, "quiet", "and a 0DTE leg that was never read for a stale tide is quiet, not a pending promise");
 
-      await tp.route("**/api/flows/lk?k=market", liveToday({ "X-Fresh-State": "closed", "X-Fresh-Phase": "post" }));
+      await thuLk.set("market", liveToday({ "X-Fresh-State": "closed", "X-Fresh-Phase": "post" }));
       const early = await pillOf();
       eq(early.state, "closed", "an early close (phase post) is a true closed state and is left alone, not overridden to stale");
       ok(/^Closed\s*·\s*Sep 24$/.test(early.pill), `dated by its session (${early.pill})`);
 
-      await tp.route("**/api/flows/lk?k=market", liveToday({ "X-Fresh-State": "live", "X-Fresh-Phase": "rth" }, 3));
+      await thuLk.set("market", liveToday({ "X-Fresh-State": "live", "X-Fresh-Phase": "rth" }, 3));
       const live = await pillOf();
       eq(live.state, "live", "a live tide of today under yesterday's boards is live");
       ok(/^Live\s*·\s*Sep 24 9:31\s*AM$/.test(live.pill), `and its pill still carries the day (${live.pill})`);
@@ -2926,15 +2930,15 @@ try {
       await thu.close();
     }
 
-    await page.route("**/api/flows/lk?k=breadth", (route) => route.fulfill({ status: 200, contentType: "application/json",
+    await lk.set("breadth", (route) => route.fulfill({ status: 200, contentType: "application/json",
       body: JSON.stringify({ status: "ok", session: SESSION, dte: { zero: { status: "ok", t: ts, net: [0, 1e6, 3e6, 7e6] } } }) }));
-    await page.route("**/api/flows/lk?k=market", liveTide(4, "live",
+    await lk.set("market", liveTide(4, "live",
       { zeroDte: { status: "ok", t: ts, net: [0, 5e5, 1e6, 2.5e6] } }));
     eq((await heroAfter()).zero, "+$7.0M", "the 0DTE leg reads live:breadth.dte.zero before live:market.zeroDte");
-    await page.unroute("**/api/flows/lk?k=breadth");
-    await page.route("**/api/flows/lk?k=market", liveTide(4, "live"));
+    await lk.unset("breadth");
+    await lk.set("market", liveTide(4, "live"));
     eq((await heroAfter()).zero, "\u2014", "and a live tide with no live 0DTE series does not borrow another session's number");
-    await page.unroute("**/api/flows/lk?k=market");
+    await lk.unset("market");
 
     await page.route("**/api/flows/pulse", (route) => route.fulfill({ status: 200, contentType: "application/json",
       body: JSON.stringify({ status: "pending" }) }));
@@ -2944,11 +2948,17 @@ try {
     await page.unroute("**/api/flows/pulse");
 
     await page.unroute(NEW_KEYS);
-    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    const [unwrittenLk] = await Promise.all([
+      page.waitForResponse((r) => /\/api\/flows\/lk\?k=market,vol,breadth,strips,strips:series,focus$/.test(r.url())),
+      page.goto(url("/flows/"), { waitUntil: "domcontentloaded" }),
+    ]);
     await page.waitForSelector("#ccVol [data-empty]", { timeout: 15000 });
     const unwritten = await silenceOf(page, "#ccVol [data-empty]");
     eq(unwritten.kind, "pending",
       "against the Worker's own routes, a regime and a live layer nobody has written yet leave the module pending");
+    eq(unwrittenLk.headers()["x-fresh-state"], "pending",
+      "and the six-key envelope was the Worker's, not the stub's: it carries the aggregate X-Fresh-State a fixture never writes");
+    eq(unwrittenLk.headers()["x-fresh-reason"], "unpublished", "with the unpublished reason of a live layer nobody has written");
     eq(await page.locator("#hmTideState .hm-pill").getAttribute("data-state"), "stale",
       "while the hero falls back to the pulse it does have");
 
@@ -2961,6 +2971,15 @@ try {
     eq(notYet.kind, "pending",
       "and a Worker that predates those routes (404) leaves it pending too, not unreadable — a route that has " +
       "not shipped is a key that has not published");
+    await page.unroute(NEW_KEYS);
+    await page.route(NEW_KEYS, (route) => route.fulfill({ status: 400, contentType: "application/json",
+      body: JSON.stringify({ error: { code: "invalid_key", message: "Unknown live key" } }) }));
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccVol [data-empty]", { timeout: 15000 });
+    const refused = await silenceOf(page, "#ccVol [data-empty]");
+    eq(refused.kind, "unreadable",
+      "but a 400 on those routes is a request the Worker refused, not a key that has not published: the module is " +
+      "unreadable, and the list route is not retried key by key, since the Worker and its assets ship in one bundle");
     await page.unroute(NEW_KEYS);
     await stubNewKeys(page);
     allowFetchFailure = false;
@@ -3086,7 +3105,7 @@ try {
     };
 
     const fx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
-    await stubNewKeys(fx);
+    const fxLk = await stubNewKeys(fx);
     await fx.addInitScript(() => {
       let ui;
       const pref = (name, value) => {
@@ -3241,10 +3260,10 @@ try {
       headers: { "Content-Type": "application/json", "X-Fresh-State": state },
       body: JSON.stringify({ v: 1, key: "live:strips", status: "ok", session, fresh: { readAt, cadenceS: 300 }, fields: STRIP_NAMES,
         rows: Object.fromEntries(names.map((t) => [t, stripValues(LIVE_V[t])])) }) });
-    await fp.route("**/api/flows/lk?k=strips:series", (route) => route.fulfill({ status: 200, contentType: "application/json",
+    await fxLk.set("strips:series", (route) => route.fulfill({ status: 200, contentType: "application/json",
       body: JSON.stringify({ v: 1, key: "live:strips:series", session: LIVE_DAY, scale: { px: 0.01 }, base: { GLD: 393.5 },
         t: [LIVE_DAY + "T13:45:00Z", LIVE_DAY + "T14:00:00Z", LIVE_DAY + "T14:15:00Z"], cols: { px: { GLD: [0, 80, 150] } } }) }));
-    await fp.route("**/api/flows/lk?k=strips", liveStrips(LIVE_DAY, t0, "live", ["GLD"]));
+    await fxLk.set("strips", liveStrips(LIVE_DAY, t0, "live", ["GLD"]));
     const part = await focusNow();
     eq(part.metals[0].px, "391.70", "a live read that covers only some of a module's names does not mix sessions: the fund keeps its nightly row");
     deep(part.pills.map((p) => p.text), ["Aug 24", "Aug 24"], "and the module stays dated by the nightly session it shows");
@@ -3252,7 +3271,7 @@ try {
     ok(part.metals[0].line && part.metals[0].stroke === part.ink["--label-2"],
       `a line of several sessions' closes is drawn neutral, never read as today's direction (${part.metals[0].stroke})`);
 
-    await fp.route("**/api/flows/lk?k=strips", liveStrips(LIVE_DAY, t0, "live"));
+    await fxLk.set("strips", liveStrips(LIVE_DAY, t0, "live"));
     const live = await focusNow();
     eq(live.metals[0].px, "395.00", "a live read of a newer session that covers every name takes the fund's price");
     eq(live.metals[0].flow, "Bullish", "and its flow lean");
@@ -3274,18 +3293,18 @@ try {
     ok(await fp.evaluate(() => document.activeElement === window.__pill && window.__pill.dataset.state === "live"),
       "a heartbeat keeps focus on the Live pill it refreshes");
 
-    await fp.route("**/api/flows/lk?k=strips", liveStrips(LIVE_DAY, t0, "stale"));
+    await fxLk.set("strips", liveStrips(LIVE_DAY, t0, "stale"));
     const lapsed = await focusNow();
     eq(lapsed.pills[0].state, "stale", "a live read past its window is dated stale, never left saying Live");
     ok(/^Aug 25\s*·\s*\d{1,2}:\d\d\s*[AP]M$/.test(lapsed.pills[0].text), `by its day and read time (${lapsed.pills[0].text})`);
 
-    await fp.route("**/api/flows/lk?k=strips", liveStrips(SESSION, SESSION + "T17:50:00Z", "closed"));
+    await fxLk.set("strips", liveStrips(SESSION, SESSION + "T17:50:00Z", "closed"));
     const tie = await focusNow();
     eq(tie.metals[0].px, "391.70", "a mid-session read of the same session yields to the later nightly record");
-    await fp.route("**/api/flows/lk?k=strips", liveStrips("2026-08-21", t0, "live"));
+    await fxLk.set("strips", liveStrips("2026-08-21", t0, "live"));
     eq((await focusNow()).metals[0].px, "391.70", "and an older session's live row never replaces the nightly one");
-    await fp.unroute("**/api/flows/lk?k=strips");
-    await fp.unroute("**/api/flows/lk?k=strips:series");
+    await fxLk.unset("strips");
+    await fxLk.unset("strips:series");
 
     const ALL = GROUPS.flatMap((g) => g.tickers).filter((t, i, a) => a.indexOf(t) === i && FOCUS_FIXTURE.rows[t]);
     const FOCUS_V = { ...LIVE_V, GLD: vend("GLD", 397, 392.88, 1.4e6, -2e5, 6e7, 3e7, 0.22) };
@@ -3297,32 +3316,32 @@ try {
       minute: "2-digit" }).format(new Date(x)).replace(/\s/g, ""), iso);
     const bare = (p) => p.text.replace(/\s/g, "");
     const t1 = new Date(Date.now() - 7 * 60000).toISOString();
-    await fp.route("**/api/flows/lk?k=focus", liveFocus(LIVE_DAY, t0, "live"));
+    await fxLk.set("focus", liveFocus(LIVE_DAY, t0, "live"));
     const worker = await focusNow();
     deep([worker.metals[0].px, worker.leaders[0][1]], ["397.00", "336.00"],
       "WITHOUT ANY ACTIONS RUN the Worker's live:focus takes both modules: the fund's price and every leader's row");
     deep(worker.src, ["live", "live"], "every row in them is a live row");
     deep(worker.pills.map(bare), Array(2).fill("Live·" + await nyClock(t0)),
       "and both modules wear a Live pill with the Worker's read time");
-    await fp.route("**/api/flows/lk?k=strips", liveStrips(LIVE_DAY, t1, "live"));
+    await fxLk.set("strips", liveStrips(LIVE_DAY, t1, "live"));
     const newer = await focusNow();
     eq(newer.metals[0].px, "397.00", "A live:focus ROW FRESHER THAN THE STRIP drives the tile value");
     eq(bare(newer.pills[0]), "Live·" + await nyClock(t0), "and the pill reads the time of the row it shows");
-    await fp.route("**/api/flows/lk?k=focus", liveFocus(LIVE_DAY, t1, "live"));
-    await fp.route("**/api/flows/lk?k=strips", liveStrips(LIVE_DAY, t0, "live"));
+    await fxLk.set("focus", liveFocus(LIVE_DAY, t1, "live"));
+    await fxLk.set("strips", liveStrips(LIVE_DAY, t0, "live"));
     const older = await focusNow();
     eq(older.metals[0].px, "395.00", "while an older live:focus row yields to the newer strip");
     eq(bare(older.pills[0]), "Live·" + await nyClock(t0), "whose read time the pill then shows");
-    await fp.unroute("**/api/flows/lk?k=strips");
-    await fp.route("**/api/flows/lk?k=focus", liveFocus("2026-08-21", t0, "live"));
+    await fxLk.unset("strips");
+    await fxLk.set("focus", liveFocus("2026-08-21", t0, "live"));
     const past = await focusNow();
     ok(past.metals[0].px === "391.70" && past.src.join() === "nightly,nightly" && past.pills.every((p) => p.text === "Aug 24"),
       "a live:focus of an older session never replaces the nightly record, nor puts a Live pill over it");
-    await fp.route("**/api/flows/lk?k=focus", liveFocus(SESSION, SESSION + "T17:50:00Z", "closed"));
+    await fxLk.set("focus", liveFocus(SESSION, SESSION + "T17:50:00Z", "closed"));
     eq((await focusNow()).metals[0].px, "391.70", "and a mid-session read of the nightly's own session yields to the nightly");
 
     const SERIES_T = [LIVE_DAY + "T13:45:00Z", LIVE_DAY + "T14:00:00Z", LIVE_DAY + "T14:15:00Z"];
-    await fp.route("**/api/flows/lk?k=strips:series", (route) => route.fulfill({ status: 200, contentType: "application/json",
+    await fxLk.set("strips:series", (route) => route.fulfill({ status: 200, contentType: "application/json",
       body: JSON.stringify({ v: 1, key: "live:strips:series", session: LIVE_DAY, scale: { px: 0.01 }, base: { GLD: 393.5 },
         t: SERIES_T, cols: { px: { GLD: [0, 80, 150] } } }) }));
     const DIP_V = { ...FOCUS_V, GLD: vend("GLD", 394, 392.88, 1.4e6, -2e5, 6e7, 3e7, 0.22) };
@@ -3334,7 +3353,7 @@ try {
         first: Number(/^M\s*-?[\d.]+[\s,]+(-?[\d.]+)/.exec(d)[1]), ref: line ? Number(line.getAttribute("y1")) : null,
         end: Number(svg.querySelector("circle").getAttribute("cy")) };
     });
-    await fp.route("**/api/flows/lk?k=focus", liveFocus(LIVE_DAY, t0, "live", DIP_V));
+    await fxLk.set("focus", liveFocus(LIVE_DAY, t0, "live", DIP_V));
     const dip = await focusNow();
     const se1 = await sparkEnd();
     const endPx = 392.88 + (se1.end - se1.ref) * (393.5 - 392.88) / (se1.first - se1.ref);
@@ -3342,18 +3361,18 @@ try {
       "A live:focus ROW NEWER THAN THE ACTIONS SERIES ends the intraday sparkline at the tile's own price: the series' " +
         `three reads, then the Worker's (${se1.points} points, the last at ${endPx.toFixed(3)} against a tile of ` +
         `${dip.metals[0].px}), never a line that stops at the last Actions read under a later headline`);
-    await fp.route("**/api/flows/lk?k=focus", liveFocus(LIVE_DAY, LIVE_DAY + "T14:05:00Z", "stale", DIP_V));
+    await fxLk.set("focus", liveFocus(LIVE_DAY, LIVE_DAY + "T14:05:00Z", "stale", DIP_V));
     const behind = await focusNow();
     const se2 = await sparkEnd();
     ok(behind.metals[0].px === "394.00" && /^GLD, last 5 closes and today$/.test(se2.label) && se2.points === 6 && se2.ref === null,
       `and one OLDER than the series' last column never borrows that later line: the tile's price closes the nightly ` +
         `closes instead (${se2.label}, ${se2.points} points)`);
-    await fp.unroute("**/api/flows/lk?k=strips:series");
+    await fxLk.unset("strips:series");
 
     const t2 = new Date(Date.parse(t0) - 30 * 60000).toISOString();
     let focusReads = 0;
     let serveFocus = liveFocus(LIVE_DAY, t0, "live");
-    await fp.route("**/api/flows/lk?k=focus", (route) => { focusReads++; return serveFocus(route); });
+    await fxLk.set("focus", (route) => { focusReads++; return serveFocus(route); });
     const stamp = { live: 1, nightly: 1 };
     await fp.route(/\/api\/flows\/now\?/, async (route) => {
       const res = await route.fetch();
@@ -3380,7 +3399,7 @@ try {
     "THE HEARTBEAT RE-READS live:focus WHEN ITS updatedAt MOVES: the open page repaints the fund's price and both " +
       `modules' Live pills at the new read time (${moved.pills[0].text}) without a reload`);
     await fp.unroute(/\/api\/flows\/now\?/);
-    await fp.unroute("**/api/flows/lk?k=focus");
+    await fxLk.unset("focus");
 
     for (const width of [320, 390, 768]) {
       await fp.setViewportSize({ width, height: 900 });

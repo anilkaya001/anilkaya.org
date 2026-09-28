@@ -1412,8 +1412,16 @@
         return r.json();
       });
   }
+  const unread = (path, error) => ({ __unreadable: true, __path: path, __reason: error && error.message ? error.message : String(error) });
   function optional(path, soon) {
-    return get(path, soon).catch((error) => ({ __unreadable: true, __path: path, __reason: error && error.message ? error.message : String(error) }));
+    return get(path, soon).catch((error) => unread(path, error));
+  }
+  const LK = "/api/flows/lk?k=";
+  function getLive(keys) {
+    if (keys.length === 1) return optional(LK + keys[0], true).then((b) => ({ [keys[0]]: b }));
+    return get(LK + keys.join(","), true)
+      .then((env) => Object.fromEntries(keys.map((k) => [k, env && env.keys ? UI.liveBody ? UI.liveBody(env, k) : null : env])))
+      .catch((error) => Object.fromEntries(keys.map((k) => [k, unread(LK + k, error)])));
   }
 
   function marketSilence(line) {
@@ -1450,12 +1458,11 @@
     optional("/api/flows/board?side=short"),
     optional("/api/flows/regime", true),
     optional("/api/flows/universe", true),
-    optional("/api/flows/lk?k=market", true),
-    optional("/api/flows/lk?k=breadth", true),
-    optional("/api/flows/lk?k=vol", true),
+    getLive(["market", "breadth", "vol"]),
   ]).then((all) => {
-    const [m, sectors, movers, pulse, boardLong, boardShort, regime, universe, liveFirst, breadthFirst, liveVol] = all;
-    let live = liveFirst, breadth = breadthFirst;
+    const [m, sectors, movers, pulse, boardLong, boardShort, regime, universe, lk] = all;
+    let live = lk.market, breadth = lk.breadth;
+    const liveVol = lk.vol;
     if (!m) return;
     if (typeof m === "object") m.__updatedAt = marketUpdatedAt;
     const n = unreadable(m) ? null : isNum(m.n);
@@ -1525,16 +1532,18 @@
       UI.heartbeat({ keys: ["market", "breadth"], nightly: ["pulse"], page: "market",
         onChange(changed) {
           const keys = Array.isArray(changed) ? changed.map(String) : [];
-          for (const k of ["market", "breadth"]) {
-            if (keys.some((c) => c.includes("live:" + k))) optional("/api/flows/lk?k=" + k, true).then((x) => {
-              if (!okFeed(x)) return;
-              if (k === "market") live = x; else breadth = x;
-              paintSectorTides(regime, breadth);
-              paintExpiry(regime, breadth);
-              paintEtfs(regime, live, breadth);
-              paintTide(pulse, live, breadth);
-            }).catch(() => {});
-          }
+          const ask = ["market", "breadth"].filter((k) => keys.some((c) => c.includes("live:" + k)));
+          if (!ask.length) return;
+          getLive(ask).then((lk) => {
+            const m = okFeed(lk.market), b = okFeed(lk.breadth);
+            if (!m && !b) return;
+            if (m) live = m;
+            if (b) breadth = b;
+            paintSectorTides(regime, breadth);
+            paintExpiry(regime, breadth);
+            paintEtfs(regime, live, breadth);
+            paintTide(pulse, live, breadth);
+          }).catch(() => {});
         } });
     }
   }).catch((error) => {
