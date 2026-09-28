@@ -2562,8 +2562,8 @@ const cronMinutes = (cron) => {
   "and so do the read and a request that got no answer at all");
   ok(/async function noteAnswer\(response\) \{\s*if \(response && !retriedStatus\(response\.status\)\) return null;\s*const text = response \? await response\.text\(\)\.catch\(\(\) => ""\) : "";\s*tallyAnswer\(edgeRefusals, response, text\);/
     .test(pipeline), "noteAnswer reads the body of a retried answer only, so a Cloudflare code in it is kept");
-  eq((pipeline.match(/refusal = response\.status === 403 \? await noteRefusal\(response\) : null;/g) || []).length, 3,
-    "and every ingest read, write and delete classifies a 403 into it");
+  eq((pipeline.match(/refusal = response\.status === 403 \? await noteRefusal\(response\) : null;/g) || []).length, 4,
+    "and every ingest read, write and delete classifies a 403 into it, and so does the ledger's metadata probe");
   eq((pipeline.match(/ingestURL\(\) \+ "\?key="/g) || []).length, 3, "which are the pipeline's only three ingest requests");
   ok(/async function noteRefusal\(response\) \{\s*const text = await response\.text\(\)\.catch\(\(\) => ""\);\s*const seen = refusalOf\(\{ headers: response\.headers, text \}\);\s*tallyRefusal\(edgeRefusals, seen\);/
     .test(pipeline), "noteRefusal reads the 403's own headers and body, and tallies what it finds");

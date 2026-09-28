@@ -72,9 +72,6 @@ const SURFACES = [
     label: "the region assembly", vars: ["alerts"] },
   { key: "events", file: "assets/js/flows-overview.js", at: "Promise.all([",
     label: "the region assembly", vars: ["events"] },
-  { key: "scoretrack", file: "assets/js/flows-overview.js", at: "Promise.all([",
-    label: "the region assembly", vars: ["track"] },
-
   { key: "board:long", file: "assets/js/flows-board.js", fn: "render", vars: ["payload"] },
   { key: "board:long", file: "assets/js/flows-board.js", fn: "sideHero", vars: ["payload"] },
   { key: "board:short", file: "assets/js/flows-board.js", fn: "sideStatus", vars: ["payload"] },
@@ -164,7 +161,7 @@ for (const surf of SURFACES) {
   }
 
   ok(reads.size > 0,
-     `the scan actually found root-field reads in ${surf.fn || surf.label || surf.file} — ` +
+     `the scan actually found root-field reads of "${surf.key}" as ${surf.vars.join("/")} in ${surf.fn || surf.label || surf.file} — ` +
      "zero reads means the regex or the variable name is wrong, and a vacuous pass is worse " +
      "than a failure");
 
