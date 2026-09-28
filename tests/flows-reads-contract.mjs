@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { FLOWS_COOKIE, FLOWS_USERNAMES, sessionEpoch, signFlowsSession } from "../shared/flows-auth.js";
 import * as W from "../shared/flows-live-worker.js";
+import { MARKET_INDICES } from "../shared/markets.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -205,6 +206,49 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   const ready = f.trips.length;
   await get("/api/flows/meta");
   eq(f.count(SCHEMA_RE, ready), 0, "after which the schema is ready");
+}
+
+{
+  const f = fakeD1();
+  seed(f);
+  f.hangOnce(SCHEMA_RE);
+  const get = await client(f.D1);
+  const t0 = Date.now();
+  const [first, second] = await Promise.all([
+    get("/api/flows/meta"),
+    new Promise((r) => setTimeout(r, 1900)).then(() => get("/api/flows/market")),
+  ]);
+  const waited = Date.now() - t0;
+  ok(first.res.status === 200 && second.res.status === 200 && waited >= 2000 && waited < 2700,
+     `A LATE JOINER OF A DEAD FLIGHT LEAVES WHEN A SIBLING'S RETRY LANDS: joining at 1.9 s, it answers with the retry at about 2 s (${waited} ms) ` +
+     "instead of sitting out its own deadline at 3.9 s");
+  eq(f.count(SCHEMA_RE), 2, "and starts no batch of its own");
+}
+
+{
+  const f = fakeD1();
+  seed(f);
+  const realFetch = globalThis.fetch;
+  let calls = 0;
+  const dead = MARKET_INDICES.length;
+  globalThis.fetch = () => (++calls <= dead ? new Promise(() => {}) : new Promise((_, reject) => setTimeout(() => reject(new Error("down")), 300)));
+  try {
+    const get = await client(f.D1, { MARKET_QUOTE_ORIGIN: "http://127.0.0.1:9" });
+    const t0 = Date.now();
+    const [a, b] = await Promise.all([
+      get("/api/markets"),
+      new Promise((r) => setTimeout(r, 50)).then(() => get("/api/markets")),
+    ]);
+    const waited = Date.now() - t0;
+    ok(a.res.status === 200 && b.res.status === 200 && Array.isArray(a.body.quotes) && !a.body.quotes.length && Array.isArray(b.body.quotes) && !b.body.quotes.length,
+       "THE MARKET SNAPSHOT'S FLIGHT HAS THE SAME GUARD: with no stored snapshot and a refresh that never settles, both readers answer an empty snapshot");
+    ok(waited >= 12000 && waited < 15000, `after the refresh's own budget of two origins at 5 s (${waited} ms), not never`);
+    eq(calls, 2 * dead, "with the dead refresh and exactly one retry shared by the two readers: the second reader's poll finds the retry in the field and joins it");
+    const again = await get("/api/markets");
+    ok(again.res.status === 200 && calls === 2 * dead, "and a later reader finds the empty snapshot stored and asks the vendor nothing");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 }
 
 {

@@ -3081,8 +3081,20 @@ const cronMinutes = (cron) => {
   eq(reads, 2, "once, for both waiters: the second's deadline falls while the retry is in the air and it joins the retry rather than starting a third read");
   ok(!W.clockDue(Date.now()), "and the memo is warm from the read that landed");
   W.memoClock(null, 0);
-  ok(await W.settledWithin(Promise.resolve(1), 50) === true && await W.settledWithin(Promise.reject(new Error("x")), 50) === true &&
-     await W.settledWithin(new Promise(() => {}), 50) === false, "settledWithin answers true on any settlement and false at the deadline");
+  let late = 0;
+  const env2 = { DB: { prepare: () => ({ first: () => (++late === 1 ? new Promise(() => {}) : Promise.resolve(landed)) }) } };
+  const t1 = Date.now();
+  const [c, d] = await Promise.all([
+    W.cachedClock(env2, t1),
+    new Promise((r) => setTimeout(r, 1900)).then(() => W.cachedClock(env2, Date.now())),
+  ]);
+  const w2 = Date.now() - t1;
+  ok(c && c.day === "2026-09-28" && d === c && w2 >= 2000 && w2 < 2700 && late === 2,
+     `a late joiner leaves the dead flight the moment the retry lands (${w2} ms), not at its own deadline`);
+  W.memoClock(null, 0);
+  ok(await W.settledWithin(Promise.resolve(1), 50) === "settled" && await W.settledWithin(Promise.reject(new Error("x")), 50) === "settled" &&
+     await W.settledWithin(new Promise(() => {}), 50) === false && await W.settledWithin(new Promise(() => {}), 500, () => true) === "moved",
+     "settledWithin says settled on any settlement, moved when the field it watches has moved on, and false at the deadline");
 }
 
 console.log(`✓ flows-live: ${checks} assertions — one threshold table in code; phases on the Eastern clock at every ` +

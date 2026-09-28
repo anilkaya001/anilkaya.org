@@ -445,8 +445,9 @@ flows-quant-card       flows-track-render
 flows-pipeline-contract  flows-reads-contract
 ```
 
-`flows-reads-contract` was measured on 2026-09-28: about 6 s with no server,
-of which two blocks wait out the flights' 2 s deadline and a 1.5 s retry.
+`flows-reads-contract` was measured on 2026-09-28: about 20 s with no server,
+of which three blocks wait out the flights' deadlines (2 s for the schema
+bootstrap and its 1.5 s retry, 12 s for the market snapshot's refresh).
 It imports `worker.js` into Node with a counting fake of the D1 binding over
 `node:sqlite` (one trip per `first`, `all`, `run` or `batch`) and asserts how
 many cross-region round trips each Flows read route costs, cold and warm.

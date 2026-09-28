@@ -477,10 +477,10 @@ async function refreshMarketSnapshot(env) {
   return payload;
 }
 
+const MARKET_FLIGHT_WAIT_MS = 2 * MARKET_FETCH_TIMEOUT_MS + 2000;
 let marketRevalidation = null;
 
-function revalidateMarketSnapshot(env) {
-  if (marketRevalidation) return marketRevalidation;
+function startMarketFlight(env) {
   const flight = refreshMarketSnapshot(env).catch(() => null).then(async (refreshed) => {
     if (refreshed) return refreshed;
     const now = Date.now();
@@ -493,6 +493,17 @@ function revalidateMarketSnapshot(env) {
   }).finally(() => { if (marketRevalidation === flight) marketRevalidation = null; });
   marketRevalidation = flight;
   return flight;
+}
+
+async function revalidateMarketSnapshot(env) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const flight = marketRevalidation || startMarketFlight(env);
+    const how = await FLOWS_LIVE.settledWithin(flight, MARKET_FLIGHT_WAIT_MS, () => marketRevalidation !== flight);
+    if (how === "settled") return flight;
+    if (how === "moved") continue;
+    if (marketRevalidation === flight) marketRevalidation = null;
+  }
+  return JSON.stringify({ quotes: [], updatedAt: Date.now() });
 }
 
 async function readMarketSnapshot(env) {
@@ -2178,7 +2189,7 @@ async function ensureFlowsTables(env) {
   if (flowsSchemaReady || !env.DB) return;
   for (let attempt = 0; attempt < 2 && !flowsSchemaReady; attempt++) {
     const flight = flowsSchemaFlight || startFlowsSchemaFlight(env);
-    if (await FLOWS_LIVE.settledWithin(flight, FLOWS_LIVE.FLIGHT_WAIT_MS)) return;
+    if (await FLOWS_LIVE.settledWithin(flight, FLOWS_LIVE.FLIGHT_WAIT_MS, () => flowsSchemaReady)) return;
     if (flowsSchemaFlight === flight) flowsSchemaFlight = null;
   }
 }

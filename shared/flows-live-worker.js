@@ -137,11 +137,15 @@ export function clockDue(now = Date.now()) {
   return !(clockMemo.clock !== undefined && now - clockMemo.at < CLOCK_MEMO_MS && clockMemo.at > 0);
 }
 
-export function settledWithin(promise, ms) {
+const FLIGHT_POLL_MS = 50;
+
+export function settledWithin(promise, ms, movedOn) {
   return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(false), ms);
-    const done = () => { clearTimeout(timer); resolve(true); };
-    promise.then(done, done);
+    let poll = null;
+    const finish = (value) => { clearTimeout(timer); clearInterval(poll); resolve(value); };
+    const timer = setTimeout(() => finish(false), ms);
+    if (typeof movedOn === "function") poll = setInterval(() => { if (movedOn()) finish("moved"); }, FLIGHT_POLL_MS);
+    promise.then(() => finish("settled"), () => finish("settled"));
   });
 }
 
@@ -159,7 +163,9 @@ export async function cachedClock(env, now = Date.now()) {
   for (let attempt = 0; attempt < 2; attempt++) {
     if (!clockDue(now)) return clockMemo.clock;
     const flight = clockFlight || startClockFlight(env, now);
-    if (await settledWithin(flight, FLIGHT_WAIT_MS)) return flight;
+    const how = await settledWithin(flight, FLIGHT_WAIT_MS, () => !clockDue(now));
+    if (how === "settled") return flight;
+    if (how === "moved") return clockDue(now) ? memoizedClock(now) : clockMemo.clock;
     if (clockFlight === flight) clockFlight = null;
   }
   return memoizedClock(now);
@@ -541,8 +547,9 @@ export function jwksKeys(env, fetchImpl, now, force) {
   const memo = jwksMemo;
   if (memo.inflight) {
     const joined = memo.inflight;
-    return settledWithin(joined, JWKS_WAIT_MS).then((done) => {
-      if (done) return joined;
+    return settledWithin(joined, JWKS_WAIT_MS, () => memo.inflight !== joined).then((how) => {
+      if (how === "settled") return joined;
+      if (how === "moved") return memo.inflight || memo.keys;
       if (memo.inflight === joined) memo.inflight = null;
       return memo.keys;
     });
