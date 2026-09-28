@@ -3482,6 +3482,26 @@ try {
     const reason = await why(off, "#fxGate");
     ok(reason && /challenge/.test(reason.lead), `with the edge's reason one tap away (${reason && reason.lead})`);
     await gate.close();
+
+    const nost = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
+    await nost.addInitScript(() => { Object.defineProperty(window, "sessionStorage", { get() { throw new Error("SecurityError: storage disabled"); } }); });
+    const np = await nost.newPage();
+    np.on("pageerror", (e) => errors.push("no-storage: " + e.message));
+    await signIn(np);
+    const nNavs = [], nApi = [];
+    np.on("framenavigated", (f) => { if (f === np.mainFrame()) nNavs.push(strip(f.url())); });
+    np.on("request", (r) => { if (/\/api\/flows\//.test(r.url())) nApi.push(strip(r.url())); });
+    await np.route(/\/api\/flows\//, (route) => route.fulfill({ status: 401, contentType: "application/json; charset=utf-8",
+      headers: { "Cache-Control": "no-store" }, body: JSON.stringify({ error: { code: "unauthorized", message: "Authentication required" } }) }));
+    await np.goto(url("/flows/market/"), { waitUntil: "domcontentloaded" });
+    await np.waitForSelector("#fxGate", { timeout: 15000 });
+    const nIssued = nApi.length;
+    await np.waitForTimeout(2500);
+    eq(nNavs.length - 1, 1, `with sessionStorage throwing, the bound holds: one reload and then the control (${nNavs.join(" → ")})`);
+    eq(nApi.length, nIssued, `and no further API request (${nApi.length - nIssued} more)`);
+    ok(await np.evaluate(() => /(?:^|; )flows_gate=\d+/.test(document.cookie)),
+      "because the marker also lives in a same-site cookie, which exists wherever the session cookie that made the HTML signed-in does");
+    await nost.close();
   }
 
   eq(errors.length, 0, `no uncaught page error across the whole session (${errors[0] || ""})`);

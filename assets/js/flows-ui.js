@@ -1809,7 +1809,15 @@
     }).catch(() => {});
   }
   const GATE = { on: null };
-  const gateAt = (v) => { try { if (v) sessionStorage.setItem("flows:gate", v); else return +sessionStorage.getItem("flows:gate") || 0; } catch {} return 0; };
+  const gateAt = (v) => {
+    let t = 0;
+    try { if (v) sessionStorage.setItem("flows:gate", v); else t = +sessionStorage.getItem("flows:gate") || 0; } catch {}
+    try {
+      if (v) document.cookie = "flows_gate=" + v + "; Max-Age=600; Path=/flows; SameSite=Lax";
+      else if (!t) t = +(/(?:^|; )flows_gate=(\d+)/.exec(document.cookie) || [0, 0])[1];
+    } catch {}
+    return t;
+  };
   function showGate(kind, why) {
     GATE.on = kind;
     const bar = $("fxBar"), fresh = $("fxFresh"), old = $("fxGate");
