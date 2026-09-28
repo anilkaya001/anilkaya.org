@@ -1937,21 +1937,18 @@
 
   let gated = false;
 
+  const get = (path) => fetch(path, { credentials: "same-origin", signal: AbortSignal.timeout(15000), headers: { Accept: "application/json" } });
+  const read = (r) => r.json().then((body) => stampUpdated(r, body));
+
   function loadBoard(side) {
-    return fetch("/api/flows/board?side=" + side, {
-      credentials: "same-origin", signal: AbortSignal.timeout(15000), headers: { Accept: "application/json" },
-    }).then((r) => {
+    return get("/api/flows/board?side=" + side).then((r) => {
       if (r.status === 401) { gated = true; location.replace("/flows/"); return null; }
-      if (!r.ok) return null;
-      return r.json().then((body) => stampUpdated(r, body));
+      return r.ok ? read(r) : null;
     }).catch(() => null);
   }
 
   function loadRegion(path, soon) {
-    return fetch(path, { credentials: "same-origin", signal: AbortSignal.timeout(15000), headers: { Accept: "application/json" } })
-      .then((r) => (r.ok ? r.json().then((body) => stampUpdated(r, body))
-        : soon && r.status === 404 ? { status: "pending", __route: 404 } : null))
-      .catch(() => null);
+    return get(path).then((r) => (r.ok ? read(r) : soon && r.status === 404 ? { status: "pending", __route: 404 } : null)).catch(() => null);
   }
 
   function neuronComputed(market) {
@@ -2068,7 +2065,7 @@
   ]).then(([lng, sht, watch, market, alerts, events, track, lean, news, pulse, regime, liveMkt, liveVol, liveBreadth, focus, strips, series, fl]) => {
     if (gated) return;
     Object.assign(FOCUS, { focus, strips, series, live: fl });
-    paintFocus();
+    requestAnimationFrame(() => setTimeout(paintFocus));
 
     const bull = ranked(lng && lng.rows);
     const bear = ranked(sht && sht.rows);

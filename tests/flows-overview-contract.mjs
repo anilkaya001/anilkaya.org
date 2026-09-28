@@ -3105,6 +3105,24 @@ try {
         },
       });
     });
+    await fx.addInitScript(() => {
+      window.__fill = {};
+      window.__shift = [];
+      let batch = 0;
+      new MutationObserver((muts) => {
+        batch++;
+        for (const m of muts) {
+          const id = m.target.id;
+          if (m.type === "childList" && m.addedNodes.length && /^cc(Bull|Bear|Metals|Leaders)$/.test(id) && !window.__fill[id]) {
+            window.__fill[id] = { batch, at: Math.round(performance.now()) };
+          }
+        }
+      }).observe(document, { childList: true, subtree: true });
+      try {
+        new PerformanceObserver((l) => { for (const e of l.getEntries()) if (!e.hadRecentInput) window.__shift.push(+e.value.toFixed(4)); })
+          .observe({ type: "layout-shift", buffered: true });
+      } catch {}
+    });
     const fp = await fx.newPage();
     fp.on("pageerror", (e) => errors.push("focus: " + e.message));
     await signIn(fp);
@@ -3197,6 +3215,25 @@ try {
       eq(href, "/flows/ticker/?t=" + t, `${t} links to its dossier`);
       ok(/Open the dossier\.$/.test(said || ""), `and says where it goes (${t})`);
     }
+    const RESERVE = () => Object.fromEntries(["ccMetals", "ccLeaders", "ccBull"].map((id) => {
+      const el = document.getElementById(id);
+      return [id, { min: parseFloat(getComputedStyle(el).minHeight) || 0, h: el.offsetHeight, w: el.clientWidth }];
+    }));
+    const fill = await fp.evaluate(() => window.__fill);
+    ok(fill.ccBull && fill.ccBear && fill.ccMetals && fill.ccLeaders,
+      `every board and focus module has a first fill on record (${JSON.stringify(fill)})`);
+    ok(fill.ccMetals.batch > fill.ccBull.batch && fill.ccLeaders.batch > fill.ccBear.batch &&
+       fill.ccMetals.at >= fill.ccBull.at && fill.ccLeaders.at >= fill.ccBear.at,
+    "THE FOCUS MODULES FILL IN A LATER TASK THAN THE BOARDS: their first nodes arrive in a later mutation batch, so the " +
+      "boards the reader looks at first are painted before the metals and the leaders are even built " +
+      `(bull batch ${fill.ccBull.batch} at ${fill.ccBull.at} ms, metals batch ${fill.ccMetals.batch} at ${fill.ccMetals.at} ms)`);
+    const wide = await fp.evaluate(RESERVE);
+    for (const [id, r] of Object.entries(wide)) {
+      ok(r.h > 0 && r.min >= r.h - 8,
+        `${id} reserves its filled height at 1440 so a late fill shifts nothing: min-height ${r.min}px for ${r.h}px drawn in ${r.w}px`);
+    }
+    const shifted = await fp.evaluate(() => window.__shift.reduce((a, v) => a + v, 0));
+    ok(shifted < 0.1, `and the whole fill of the page moves the 1440px viewport by a cumulative layout shift under 0.1 (${shifted.toFixed(4)})`);
 
     await fp.click("#ccLeadSeg .ui-seg-i:nth-of-type(2)");
     await fp.waitForFunction(() => document.querySelector("#ccLeaders a.hm-qrow")?.dataset.ticker === "NVDA");
@@ -3398,6 +3435,15 @@ try {
       ok(fit.over <= 1, `no horizontal overflow at ${width}px with the focus modules drawn (${fit.over}px)`);
       deep(fit.clipped, [], `and no figure spills out of its row at ${width}px`);
       eq(fit.cols, width < 600 ? 1 : 3, `metals ${width < 600 ? "stack" : "sit in three columns"} at ${width}px`);
+      if (width === 390) {
+        const narrow = await fp.evaluate(RESERVE);
+        for (const [id, r] of Object.entries(narrow)) {
+          ok(r.h > 0 && r.min >= r.h - 8,
+            `${id} reserves its filled height at 390 as well: min-height ${r.min}px for ${r.h}px drawn in ${r.w}px`);
+        }
+        ok(narrow.ccMetals.min > wide.ccMetals.min && narrow.ccLeaders.min > wide.ccLeaders.min,
+          `the reserve follows the layout, taller where the metals stack and the leaders run in one column (${narrow.ccMetals.min}/${wide.ccMetals.min}, ${narrow.ccLeaders.min}/${wide.ccLeaders.min})`);
+      }
     }
 
     await fp.route("**/api/flows/focus", (route) => route.fulfill({ status: 200, contentType: "application/json",
