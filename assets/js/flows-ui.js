@@ -70,7 +70,7 @@
 
   const emptyState = (kind, text) => {
     const p = h("p", { class: "flows-empty" }, text);
-    if (kind) p.dataset.empty = String(kind);
+    if (kind) p.dataset.empty = kind;
     return p;
   };
 
@@ -145,7 +145,7 @@
     });
     if (o.ariaLabel) {
       svg.setAttribute("role", "img");
-      svg.setAttribute("aria-label", String(o.ariaLabel));
+      svg.setAttribute("aria-label", o.ariaLabel);
     } else {
 
       svg.setAttribute("aria-hidden", "true");
@@ -509,10 +509,10 @@
     chars.forEach((ch, i) => {
       if (/\d/.test(ch)) {
         const strip = h("span", { class: "ui-roll-s" });
-        for (let d = 0; d < 10; d++) strip.append(h("span", null, String(d)));
+        for (let d = 0; d < 10; d++) strip.append(h("span", null, d));
         const start = go && from && /\d/.test(from[i]) ? from[i] : go && !from ? String((+ch + 7) % 10) : ch;
         strip.style.setProperty("--d", start);
-        strip.style.setProperty("--k", String(k++));
+        strip.style.setProperty("--k", k++);
         el.append(h("span", { class: "ui-roll-d", ...AH }, strip));
         if (go && start !== ch) RAF(() => RAF(() => strip.style.setProperty("--d", ch)));
       } else {
@@ -599,7 +599,7 @@
     return h("button", attrs, g, h("span", { class: "ui-chip-v", "data-tone": o.tone || null }, o.value), h("span", { class: "ui-chip-l" }, o.label));
   }
   function chips(list, label) {
-    return h("div", { class: "ui-chips-w" }, h("div", { class: "ui-chips", role: "group", "aria-label": label || null, style: { "--n": String(list.length) } }, list));
+    return h("div", { class: "ui-chips-w" }, h("div", { class: "ui-chips", role: "group", "aria-label": label || null, style: { "--n": list.length } }, list));
   }
 
   function segmented(label, items, onPick, start = 0) {
@@ -634,7 +634,7 @@
     function pick(i, user) {
       if (items[i] && items[i].disabled) return;
       current = i;
-      btns.forEach((b, j) => { b.setAttribute("aria-selected", String(i === j)); b.tabIndex = i === j ? 0 : -1; });
+      btns.forEach((b, j) => { b.setAttribute("aria-selected", i === j); b.tabIndex = i === j ? 0 : -1; });
       place();
       if (user && typeof onPick === "function") {
         const run = () => onPick(i);
@@ -695,7 +695,7 @@
     if (o.badge !== undefined) kids.push(h("span", { class: "ui-badge", "data-tone": o.badgeTone || null, "aria-label": o.badgeLabel || null }, o.badge));
     kids.push(h("span", { class: "ui-row-m" }, h("b", null, o.primary), o.secondary ? h("span", null, o.secondary) : null));
     if (o.meter !== undefined && o.meter !== null) {
-      const m = h("i", { style: { "--w": (clamp(o.meter, 0, 1) * 100).toFixed(1) + "%", "--i": String(o.index || 0) } });
+      const m = h("i", { style: { "--w": (clamp(o.meter, 0, 1) * 100).toFixed(1) + "%", "--i": o.index || 0 } });
       if (o.meterColor) m.style.setProperty("--c", paint(o.meterColor));
       kids.push(h("span", { class: "ui-meter", ...AH }, m));
     }
@@ -712,7 +712,7 @@
     const b = h("button", { class: "ui-disclose", type: "button", "aria-expanded": "false" }, h("span", null, "All " + rows.length), glyph("chev"));
     b.addEventListener("click", () => {
       const open = b.getAttribute("aria-expanded") !== "true";
-      b.setAttribute("aria-expanded", String(open));
+      b.setAttribute("aria-expanded", open);
       rows.forEach((r, i) => { if (i >= shown) r.hidden = !open; });
       b.firstChild.textContent = open ? "Fewer" : "All " + rows.length;
     });
@@ -729,7 +729,7 @@
   }
   function split(parts, label) {
     return h("div", { class: "ui-split", role: "img", "aria-label": label || null },
-      parts.map((p, i) => h("i", { style: { "--c": paint(p.color), "--f": String(Math.max(0.02, Math.abs(num(p.value) || 0))), "animation-delay": i * 40 + "ms" } })));
+      parts.map((p, i) => h("i", { style: { "--c": paint(p.color), "--f": Math.max(0.02, Math.abs(num(p.value) || 0)), "animation-delay": i * 40 + "ms" } })));
   }
 
   function moduleCard(o) {
@@ -739,7 +739,7 @@
       o.info ? infoButton(o.infoLabel || String(o.title).toLowerCase(), o.info) : null);
     const card = h("section", {
       class: "ui-card ui-mod" + (o.enter === false ? "" : " ui-enter") + (o.span ? " ui-span-" + o.span : ""),
-      id, "aria-labelledby": id + "-t", style: { "--i": String(o.index || 0) },
+      id, "aria-labelledby": id + "-t", style: { "--i": o.index || 0 },
     }, head, o.body || null);
     return card;
   }
@@ -749,20 +749,20 @@
   const RO = window.ResizeObserver ? new ResizeObserver((entries) => {
     for (const e of entries) {
       const rec = e.target._fxChart;
-      if (!rec.host.isConnected) { drop(rec); continue; }
+      if (!rec.host.isConnected) { if (rec.drawn) drop(rec); continue; }
       const first = !rec.seen;
       rec.seen = true;
       rec.w = Math.round(e.contentRect.width);
-      if (rec.w && rec.w !== rec.drawn) repaint(rec, first, false);
+      if (rec.w && rec.w !== rec.drawn) try { repaint(rec, first, false); } catch (err) { setTimeout(() => { throw err; }); }
     }
   }) : null;
   function repaint(rec, animate, force) {
     const host = rec.host;
-    if (!host.isConnected) { drop(rec); return; }
-    const w = rec.w || (rec.w = Math.round(host.clientWidth));
+    if (!host.isConnected) { if (rec.drawn) drop(rec); return; }
+    const w = (RO && rec.w) || Math.round(host.clientWidth);
     if (!w) { if (force) rec.drawn = 0; return; }
     if (w === rec.drawn && !force) return;
-    rec.drawn = w;
+    rec.w = rec.drawn = w;
     if (rec.probe) host.replaceChildren(rec.probe); else host.replaceChildren();
     rec.draw(host, w, animate && moving());
   }
@@ -1136,7 +1136,7 @@
       vals.forEach((v, i) => {
         if (v === null) { s("circle", { cx: x(i), cy: H - bot, r: 1.6, fill: paint("--label-4") }, svg); return; }
         const hh = Math.max(1.5, y(0) - y(Math.abs(v)));
-        s("rect", { x: x(i) - bw / 2, y: y(0) - hh, width: bw, height: hh, rx: Math.min(4, bw / 2), fill: o.colors ? paint(o.colors[i]) : color, "fill-opacity": o.highlight !== undefined && o.highlight !== i ? 0.55 : 1, class: "grow", style: { "--i": String(i * 3) } }, svg);
+        s("rect", { x: x(i) - bw / 2, y: y(0) - hh, width: bw, height: hh, rx: Math.min(4, bw / 2), fill: o.colors ? paint(o.colors[i]) : color, "fill-opacity": o.highlight !== undefined && o.highlight !== i ? 0.55 : 1, class: "grow", style: { "--i": i * 3 } }, svg);
       });
       const labels = o.labels || [];
       const every = Math.max(1, Math.ceil(N / (phone ? 5 : 9)));
@@ -1218,7 +1218,7 @@
         s("rect", {
           x: cx - bw / 2, y: pos ? mid - hh : mid, width: bw, height: hh, rx: Math.min(3, bw / 2),
           fill: paint(pos ? pal.pos : pal.neg), "fill-opacity": hl.size && !hl.has(X[i]) ? 0.8 : 1,
-          class: "grow", style: { "--i": String(i), "--origin": pos ? "bottom" : "top" },
+          class: "grow", style: { "--i": i, "--origin": pos ? "bottom" : "top" },
         }, svg);
       });
       for (const m of o.markers || []) {
@@ -1502,7 +1502,7 @@
           const v = sm.get(r.d);
           if (v === undefined) { s("circle", { cx: xh(i), cy: sy, r: 1, fill: paint("--label-4") }, svg); return; }
           const hh = Math.max(1.5, (Math.abs(v) / 100) * (stripH / 2));
-          s("rect", { x: xh(i) - bw / 2, y: v >= 0 ? sy - hh : sy, width: bw, height: hh, rx: Math.min(1.5, bw / 2), fill: paint(v >= 0 ? "--up-mark" : "--down-mark"), class: "grow", style: { "--i": String(i), "--origin": v >= 0 ? "bottom" : "top" } }, svg);
+          s("rect", { x: xh(i) - bw / 2, y: v >= 0 ? sy - hh : sy, width: bw, height: hh, rx: Math.min(1.5, bw / 2), fill: paint(v >= 0 ? "--up-mark" : "--down-mark"), class: "grow", style: { "--i": i, "--origin": v >= 0 ? "bottom" : "top" } }, svg);
         });
         s("text", { x: tx, y: sy + 4, text: o.stripLabel || "Score", class: "tx-3" }, svg);
       }

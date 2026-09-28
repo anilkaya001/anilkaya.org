@@ -829,6 +829,7 @@ try {
       route.fulfill({ status: 500, contentType: "application/json", body: "{}" }));
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccBull [data-empty]", { timeout: 15000 });
+    await painted(page);
 
     const bull = await silenceOf(page, "#ccBull [data-empty]");
     eq(bull.kind, "unreadable", "a pole that answered 500 is marked unreadable");
@@ -1429,6 +1430,7 @@ try {
     await post("board:short", board("short", [], SESSION, { deep: 0 }));
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccBear [data-empty]", { timeout: 15000 });
+    await painted(page);
     const empty = await silenceOf(page, "#ccBear [data-empty]");
 
     eq(empty.kind, "empty", "an empty side is a measured emptiness");
@@ -1754,6 +1756,7 @@ try {
     }));
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccBull [data-empty]", { timeout: 15000 });
+    await painted(page);
     eq(await page.evaluate(() => document.querySelector("#ccBull [data-empty]").dataset.empty),
        "pending", "an unpublished pole is pending, which is its own silence");
 
@@ -3146,6 +3149,7 @@ try {
       await fp.goto(url(path), { waitUntil: "domcontentloaded" });
       await fp.waitForSelector("#ccMetals :is(.hm-metal, [data-empty])", { timeout: 15000 });
       await fp.waitForSelector("#ccLeaders :is(.hm-qrow, [data-empty])", { timeout: 15000 });
+      await painted(fp);
       return fp.evaluate(FOCUS_READ);
     };
 
