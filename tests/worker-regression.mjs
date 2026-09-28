@@ -42,6 +42,7 @@ async function pollUntil(probe, timeoutMs) {
   }
 }
 const assetVersion = (await readFile(path.join(REPO_ROOT, "assets/version.txt"), "utf8")).trim();
+const fontsVersion = (await readFile(path.join(REPO_ROOT, "assets/fonts-version.txt"), "utf8")).trim();
 const TEST_SESSION_TTL_MS = 10 * 60 * 1000;
 const securityHeaders = [
   "strict-transport-security", "x-content-type-options", "referrer-policy",
@@ -217,12 +218,27 @@ try {
   assert.equal(unversioned.status, 200);
   assert.equal(unversioned.headers.get("cache-control"), "public, max-age=31536000, immutable",
     "/assets/css|js|fonts/* is served asset-first and _headers matches by path, so the policy is immutable with or without ?v=; " +
-    "that no static document emits an unversioned CSS/JS/font URL is proven in tests/contracts.mjs (every reference must carry ?v=<assets/version.txt>), " +
-    "and Worker-rendered Flows pages go through v() in shared/flows-pages.js");
+    "that no static document emits an unversioned CSS/JS/font URL is proven in tests/contracts.mjs (every CSS/JS reference must carry ?v=<assets/version.txt>, " +
+    "every woff2 reference ?v=<assets/fonts-version.txt>), and Worker-rendered Flows pages go through v() in shared/flows-pages.js");
   assertSecurity(unversioned, false);
-  for (const asset of [`/assets/js/nav.js?v=${assetVersion}`, `/assets/fonts/LM-regular.woff2?v=${assetVersion}`, "/assets/img/og.png"]) {
+  for (const asset of [`/assets/js/nav.js?v=${assetVersion}`, `/assets/fonts/LM-regular.woff2?v=${fontsVersion}`, "/assets/img/og.png"]) {
     const response = await fetch(base + asset);
     assert.equal(response.status, 200, `${asset}: missing`);
+    assertSecurity(response, false);
+  }
+  const font = await fetch(base + `/assets/fonts/Inter-latin.woff2?v=${fontsVersion}`);
+  assert.equal(font.status, 200);
+  assert.equal(font.headers.get("cache-control"), "public, max-age=31536000, immutable",
+    "a woff2 URL carries the fonts token, so an asset bump leaves it, and the year-long cache behind it, untouched");
+  assert.equal((await font.arrayBuffer()).byteLength, (await readFile(path.join(REPO_ROOT, "assets/fonts/Inter-latin.woff2"))).byteLength,
+    "response cloning changed font bytes");
+  for (const [token, file] of [["/assets/version.txt", assetVersion], ["/assets/fonts-version.txt", fontsVersion]]) {
+    const response = await fetch(base + token);
+    assert.equal(response.status, 200, `${token}: missing from the static bundle`);
+    assert.match(response.headers.get("content-type") || "", /^text\/plain\b/, `${token}: served as text`);
+    assert.equal(response.headers.get("cache-control"), "public, max-age=3600",
+      `${token}: a version token is never immutable, whichever tree it versions`);
+    assert.equal((await response.text()).trim(), file, `${token}: the served token differs from the committed one`);
     assertSecurity(response, false);
   }
   const missing = await fetch(base + "/definitely-missing");
@@ -231,14 +247,14 @@ try {
   const missingVersioned = await fetch(base + `/definitely-missing.js?v=${assetVersion}`);
   assert.equal(missingVersioned.status, 404);
   assert.notEqual(missingVersioned.headers.get("cache-control"), "public, max-age=31536000, immutable");
-  for (const missingAsset of [`/assets/js/definitely-missing.js?v=${assetVersion}`, "/assets/css/definitely-missing.css", `/assets/fonts/definitely-missing.woff2?v=${assetVersion}`]) {
+  for (const missingAsset of [`/assets/js/definitely-missing.js?v=${assetVersion}`, "/assets/css/definitely-missing.css", `/assets/fonts/definitely-missing.woff2?v=${fontsVersion}`]) {
     const response = await fetch(base + missingAsset);
     assert.equal(response.status, 404, `${missingAsset}: must be a 404`);
     assertSecurity(response, false);
     assert.match(response.headers.get("content-type") || "", /text\/html/, `${missingAsset}: the asset layer answers with its 404 page, not the Worker`);
     assert.equal(response.headers.get("cache-control"), "public, max-age=31536000, immutable",
       `${missingAsset}: asset-first, so the asset layer answers a missing file with 404.html under the path's _headers policy and no CSP; ` +
-      "DEPLOY.md §9 bumps assets/version.txt on the first forward deploy after a rollback so a URL that once 404'd is never referenced again");
+      "DEPLOY.md §9 bumps assets/version.txt, and assets/fonts-version.txt when a font was involved, on the first forward deploy after a rollback so a URL that once 404'd is never referenced again");
   }
   for (const privatePath of ["/.wrangler/cache/cf.json", "/articles/_template/", "/CNAME"]) {
     assert.equal((await fetch(base + privatePath)).status, 404, `${privatePath} must not be a public asset`);

@@ -84,15 +84,17 @@ To change or add course content:
    `shared/course-points.js` if stage rewards/order changed;
 4. run `node scripts/generate-course-payloads.mjs` and commit the resulting
    JSON payload changes;
-5. increment the integer in `assets/version.txt` and update every local `?v=`
-   reference for browser-asset changes;
+5. increment the integer in `assets/version.txt` and update every local CSS
+   and JavaScript `?v=` reference for browser-asset changes (a font change
+   moves `assets/fonts-version.txt` and the woff2 `?v=` references instead,
+   as "Asset versioning" in AGENTS.md describes);
 6. run the full test suite.
 
 The contract test verifies topic IDs, module/stage counts, every stage schema,
 payload equality/IDs/size, both scoring manifests, local asset existence, and
 cache-version consistency. Always read the asset version from
-`assets/version.txt`; do not maintain a second hardcoded version in scripts or
-documentation.
+`assets/version.txt` and the fonts version from `assets/fonts-version.txt`;
+do not maintain a second hardcoded version in scripts or documentation.
 
 ## Academy experience and learning state
 

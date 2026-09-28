@@ -227,6 +227,8 @@ crawlable-outline checks for all seven course paths when SEO code changes.
 ```bash
 ASSET_VERSION="$(tr -d '[:space:]' < assets/version.txt)"
 case "$ASSET_VERSION" in (*[!0-9]*|'') echo "invalid assets/version.txt" >&2; exit 1;; esac
+FONTS_VERSION="$(tr -d '[:space:]' < assets/fonts-version.txt)"
+case "$FONTS_VERSION" in (*[!0-9]*|'') echo "invalid assets/fonts-version.txt" >&2; exit 1;; esac
 
 curl --compressed --fail --silent --show-error \
   -D /tmp/css.headers \
@@ -236,7 +238,19 @@ cmp /tmp/base.css assets/css/base.css
 grep -i '^cache-control: public, max-age=31536000, immutable' /tmp/css.headers
 
 curl -fsSI https://anilkaya.org/ | grep -i '^cache-control: no-cache'
+
+curl -fsSI "https://anilkaya.org/assets/fonts/Inter-latin.woff2?v=${FONTS_VERSION}" \
+  | grep -i '^cache-control: public, max-age=31536000, immutable'
+curl -fsSI https://anilkaya.org/assets/fonts-version.txt | grep -i '^cache-control: public, max-age=3600'
 ```
+
+The woff2 URLs carry `assets/fonts-version.txt`, not `assets/version.txt`
+("Asset versioning" in AGENTS.md): an asset bump must leave the font URLs
+unchanged, or every returning visitor downloads the fonts again for nothing.
+A blanket `?v=` rewrite, or a merge that brings one in, moves them anyway;
+before deploying, `grep -rn 'woff2?v=' --include=*.html --include=*.css .`
+must show only the fonts token, and `tests/contracts.mjs` must pass and
+report sixteen font references at it.
 
 The versioned stylesheet is served asset-first by the edge, without invoking
 `worker.js`; its headers come from the root `_headers` file. Check that the
@@ -313,8 +327,11 @@ smoke tests. A code rollback does not automatically undo D1 data migrations or
 dashboard Transform Rules; treat those as separate rollback items.
 
 The first forward deploy after any rollback must increment `assets/version.txt`
-(and every `?v=` reference, as in "Asset versioning" in AGENTS.md) before it
-ships, even when no browser asset changed. `/assets/*` is asset-first, and the
+(and every CSS/JS `?v=` reference, as in "Asset versioning" in AGENTS.md)
+before it ships, even when no browser asset changed; when the rolled-back
+version lacked a font the newer HTML asked for, it must also raise
+`assets/fonts-version.txt` (and every woff2 `?v=`), because the font URLs
+carry that token and an asset bump alone leaves the stored font 404 in place. `/assets/*` is asset-first, and the
 asset layer answers a file the rolled-back version does not ship with its
 `404.html` under the path's `_headers` policy: for `/assets/css|js|fonts/*`
 that is `Cache-Control: public, max-age=31536000, immutable` (measured on the
