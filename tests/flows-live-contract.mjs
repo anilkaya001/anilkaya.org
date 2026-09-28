@@ -3051,6 +3051,25 @@ const cronMinutes = (cron) => {
     `read, ${warm.payloadBytes} written`);
 }
 
+{
+  let reads = 0;
+  const env = { DB: { prepare: () => ({ first: () => (++reads === 1 ? new Promise(() => {}) : Promise.resolve(null)) }) } };
+  W.memoClock(null, 0);
+  const t0 = Date.now();
+  const [a, b] = await Promise.all([
+    W.cachedClock(env, t0),
+    new Promise((r) => setTimeout(r, 50)).then(() => W.cachedClock(env, Date.now())),
+  ]);
+  const waited = Date.now() - t0;
+  ok(a === null && b === null && waited >= 2000 && waited < 4000,
+     `THE CLOCK FLIGHT HAS THE SAME DEADLINE as the schema bootstrap: a cold read that never settles is abandoned after 2 s (${waited} ms) and read again`);
+  eq(reads, 2, "once, for both waiters");
+  ok(!W.clockDue(Date.now()), "and the memo is warm from the read that landed");
+  W.memoClock(null, 0);
+  ok(await W.settledWithin(Promise.resolve(1), 50) === true && await W.settledWithin(Promise.reject(new Error("x")), 50) === true &&
+     await W.settledWithin(new Promise(() => {}), 50) === false, "settledWithin answers true on any settlement and false at the deadline");
+}
+
 console.log(`✓ flows-live: ${checks} assertions — one threshold table in code; phases on the Eastern clock at every ` +
   `boundary under EDT and EST, a tape-derived holiday and early close; states and absolute instants for every class; ` +
   `the Tier 1 and Tier 2 clocks, in-flight dispatch and a once-only nightly retry; probe rows shaped to known answers ` +

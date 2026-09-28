@@ -137,15 +137,32 @@ export function clockDue(now = Date.now()) {
   return !(clockMemo.clock !== undefined && now - clockMemo.at < CLOCK_MEMO_MS && clockMemo.at > 0);
 }
 
+export function settledWithin(promise, ms) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), ms);
+    const done = () => { clearTimeout(timer); resolve(true); };
+    promise.then(done, done);
+  });
+}
+
+const CLOCK_WAIT_MS = 2000;
 let clockFlight = null;
 
+function startClockFlight(env, now) {
+  const flight = readClock(env && env.DB).then((clock) => { memoClock(clock, now); return clock; })
+    .finally(() => { if (clockFlight === flight) clockFlight = null; });
+  clockFlight = flight;
+  return flight;
+}
+
 export async function cachedClock(env, now = Date.now()) {
-  if (!clockDue(now)) return clockMemo.clock;
-  if (!clockFlight) {
-    clockFlight = readClock(env && env.DB).then((clock) => { memoClock(clock, now); return clock; })
-      .finally(() => { clockFlight = null; });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (!clockDue(now)) return clockMemo.clock;
+    const flight = clockFlight || startClockFlight(env, now);
+    if (await settledWithin(flight, CLOCK_WAIT_MS)) return flight;
+    if (clockFlight === flight) clockFlight = null;
   }
-  return clockFlight;
+  return memoizedClock(now);
 }
 
 export function clockPatchStatement(db, patch, now) {

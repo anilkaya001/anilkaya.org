@@ -1822,7 +1822,7 @@ async function buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit }) 
     ...(page > 1 ? { page } : {}),
   });
 
-  const [firstPage, candles, state, info, cardRead] = await Promise.all([
+  const [firstPage, candles, state, info, cardRead] = await allOrFirstRejection([
     chainPage(1),
     uwFetch(env, `/api/stock/${t}/ohlc/1d`, { timeframe: "5D" }),
 
@@ -2065,7 +2065,7 @@ async function buildStrategyExpiry(env, ticker, expiry, { engine = false } = {})
     ...(n > 1 ? { page: n } : {}),
   });
 
-  const [callsFirst, putsFirst, liveState, cardRead] = await Promise.all([
+  const [callsFirst, putsFirst, liveState, cardRead] = await allOrFirstRejection([
     page("call", 1), page("put", 1),
     engine ? uwFetch(env, `/api/stock/${t}/stock-state`, {}).catch(() => null) : Promise.resolve(null),
     engine ? readCardWithEngine(env, ticker).catch(() => null) : Promise.resolve(null),
@@ -2161,20 +2161,34 @@ async function buildStrategyExpiry(env, ticker, expiry, { engine = false } = {})
   };
 }
 
+const FLOWS_SCHEMA_WAIT_MS = 2000;
 let flowsSchemaReady = false;
 let flowsSchemaFlight = null;
+function startFlowsSchemaFlight(env) {
+  const flight = (async () => {
+    try {
+      await env.DB.batch(FLOWS_SCHEMA_SQL.map((sql) => env.DB.prepare(sql)));
+      await FLOWS_LIVE.upgradeClockColumns(env.DB);
+      flowsSchemaReady = true;
+    } catch {}
+  })().finally(() => { if (flowsSchemaFlight === flight) flowsSchemaFlight = null; });
+  flowsSchemaFlight = flight;
+  return flight;
+}
 async function ensureFlowsTables(env) {
   if (flowsSchemaReady || !env.DB) return;
-  if (!flowsSchemaFlight) {
-    flowsSchemaFlight = (async () => {
-      try {
-        await env.DB.batch(FLOWS_SCHEMA_SQL.map((sql) => env.DB.prepare(sql)));
-        await FLOWS_LIVE.upgradeClockColumns(env.DB);
-        flowsSchemaReady = true;
-      } catch {}
-    })().finally(() => { flowsSchemaFlight = null; });
+  for (let attempt = 0; attempt < 2 && !flowsSchemaReady; attempt++) {
+    const flight = flowsSchemaFlight || startFlowsSchemaFlight(env);
+    if (await FLOWS_LIVE.settledWithin(flight, FLOWS_SCHEMA_WAIT_MS)) return;
+    if (flowsSchemaFlight === flight) flowsSchemaFlight = null;
   }
-  await flowsSchemaFlight;
+}
+
+async function allOrFirstRejection(list) {
+  const settled = await Promise.allSettled(list);
+  const failed = settled.find((s) => s.status === "rejected");
+  if (failed) throw failed.reason;
+  return settled.map((s) => s.value);
 }
 
 function flowsThrottleKey(request, username) {
