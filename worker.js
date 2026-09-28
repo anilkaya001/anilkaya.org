@@ -2917,6 +2917,14 @@ async function route(request, env, url, ctx) {
     return redirect(new URL("/flows/", url).toString(), 308);
   }
 
+  if (path === "/flows/login/") {
+    requireMethod(request, ["GET", "HEAD"]);
+    return new Response(FLOWS_PAGES.loginPage(), {
+      status: 200,
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  }
+
   if (path === "/flows/login") {
     requireMethod(request, ["POST"]);
     requireSameOrigin(request);

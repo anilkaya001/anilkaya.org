@@ -102,6 +102,7 @@
     unreadable: ["stop", "Unreadable"],
   };
   const disclose = (title, lead, more) => UI.info(() => Object.assign({ title, lead }, more || {}));
+  const rowsOf = (p) => (Array.isArray(p.rows) ? p.rows : []);
 
   function hush(into, kind, text, what, height) {
     const [g, word] = KIND[kind] || KIND.unavailable;
@@ -1101,7 +1102,7 @@
 
   function paintAlerts(into, payload) {
     if (silent(into, payload, "flow alerts feed")) return;
-    const rows = Array.isArray(payload.rows) ? payload.rows : [];
+    const rows = rowsOf(payload);
     if (!rows.length) {
       hush(into, "empty", "The vendor's rules flagged nothing in this read.", "flagged windows");
       return;
@@ -1175,7 +1176,7 @@
 
   function paintEvents(into, payload) {
     if (silent(into, payload, "events calendar")) return;
-    const rows = Array.isArray(payload.rows) ? payload.rows : [];
+    const rows = rowsOf(payload);
     if (!rows.length) {
       hush(into, "empty", "No name in the screened universe reports inside the window.", "reporting soon");
       return;
@@ -1473,7 +1474,7 @@
         "quiet news day.", "headlines", 64);
       return;
     }
-    const rows = Array.isArray(payload.rows) ? payload.rows : [];
+    const rows = rowsOf(payload);
     if (!rows.length) {
       hush(into, "unavailable",
         "This payload carried no headline rows: the key published, and the list this region " +

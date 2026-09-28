@@ -2,22 +2,23 @@
   "use strict";
 
   const UI = window.FlowsUI;
-  const statusEl = document.getElementById("uaStatus");
+  const $ = (id) => document.getElementById(id);
+  const statusEl = $("uaStatus");
   if (!UI || !statusEl) return;
   const { h, s, F, chart: C } = UI;
   const DASH = UI.DASH, MID = UI.MID;
 
   const host = {
-    meta: document.getElementById("uaMeta"),
-    about: document.getElementById("uaAboutSlot"),
-    chips: document.getElementById("uaChips"),
-    filters: document.getElementById("uaFilters"),
-    note: document.getElementById("uaFilterNote"),
-    timeline: document.getElementById("uaTimeline"),
-    names: document.getElementById("uaNames"),
-    urgency: document.getElementById("uaUrgency"),
-    feed: document.getElementById("uaFeed"),
-    surprise: document.getElementById("uaSurprise"),
+    meta: $("uaMeta"),
+    about: $("uaAboutSlot"),
+    chips: $("uaChips"),
+    filters: $("uaFilters"),
+    note: $("uaFilterNote"),
+    timeline: $("uaTimeline"),
+    names: $("uaNames"),
+    urgency: $("uaUrgency"),
+    feed: $("uaFeed"),
+    surprise: $("uaSurprise"),
   };
 
   const n = (v) => {
@@ -811,7 +812,7 @@
 
   function wireInfos() {
     if (host.about && !host.about.firstChild) {
-      const src = document.getElementById("uaAbout");
+      const src = $("uaAbout");
       host.about.append(UI.infoButton("this page", () => ({
         title: "Unusual activity",
         node: src ? h("div", { class: "fd-about-pop" }, [...src.children].map((x) => x.cloneNode(true))) : null,
