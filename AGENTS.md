@@ -347,6 +347,17 @@ When any file under `assets/css/`, `assets/js/`, or `assets/data/` changes:
    `assets/version.txt`;
 3. run the contract test.
 
+A blanket rewrite of `?v=<old>` to `?v=<new>` also catches the sixteen woff2
+references (eight `@font-face` URLs in `base.css`, one Inter preload in each
+of the eight pages that preload it), and a merge takes such a rewrite from
+another branch silently, because this branch's font lines are unchanged.
+The contract test fails on the first moved font reference, naming the file
+and the expected token. After a bump and after any merge, run
+`grep -rn 'woff2?v=' --include=*.html --include=*.css .` from the repository
+root and set every hit back to the integer in `assets/fonts-version.txt`;
+the contract test's summary line then reports sixteen font references at
+that token.
+
 When a font under `assets/fonts/` changes:
 
 1. set `assets/fonts-version.txt` to the new `assets/version.txt` value (the

@@ -899,7 +899,7 @@ for (const file of ["assets/css/base.css", "assets/js/nav.js", "assets/data/revi
   assert(isBrowserAsset(file) && !isFontAsset(file), `${file} is versioned by assets/version.txt`);
 }
 for (const file of ["assets/fonts/Inter-latin.woff2", "assets/fonts/LM-regular.woff2"]) {
-  assert(isFontAsset(file) && !isBrowserAsset(file), `${file} is versioned by assets/fonts-version.txt, so a font change never forces an asset bump and an asset bump never re-downloads a font`);
+  assert(isFontAsset(file) && !isBrowserAsset(file), `${file} is versioned by assets/fonts-version.txt: an asset bump never re-downloads a font, and a font bump is tracked by its own token (the asset bump it also causes comes from base.css's rewritten @font-face URLs)`);
 }
 for (const file of ["assets/version.txt", "assets/fonts-version.txt", "assets/fonts/NOTICE.md", "assets/fonts/JBM-OFL.txt", "assets/img/og.png"]) {
   assert(!isBrowserAsset(file) && !isFontAsset(file), `${file} is not a versioned browser asset: no bump rule applies to it`);
@@ -1148,4 +1148,4 @@ assert(cookie("session", "a.b", { maxAge: 10 }).includes("Max-Age=10"), "cookie 
     "and their COMMENTS are served with them. " + stray.slice(0, 2).join(" | "));
 }
 
-console.log(`✓ contracts: ${topicIds.length} curricula, ${referenceCount} versioned assets, session hardening`);
+console.log(`✓ contracts: ${topicIds.length} curricula, ${referenceCount} versioned assets at ?v=${version}, ${fontReferenceCount} font references at ?v=${fontsVersion}, session hardening`);

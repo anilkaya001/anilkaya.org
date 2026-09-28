@@ -247,6 +247,10 @@ curl -fsSI https://anilkaya.org/assets/fonts-version.txt | grep -i '^cache-contr
 The woff2 URLs carry `assets/fonts-version.txt`, not `assets/version.txt`
 ("Asset versioning" in AGENTS.md): an asset bump must leave the font URLs
 unchanged, or every returning visitor downloads the fonts again for nothing.
+A blanket `?v=` rewrite, or a merge that brings one in, moves them anyway;
+before deploying, `grep -rn 'woff2?v=' --include=*.html --include=*.css .`
+must show only the fonts token, and `tests/contracts.mjs` must pass and
+report sixteen font references at it.
 
 The versioned stylesheet is served asset-first by the edge, without invoking
 `worker.js`; its headers come from the root `_headers` file. Check that the
