@@ -834,6 +834,25 @@ index ticker's `card:` and `card-x:` keys are read through the ingest route
 the prior roster cannot be read at all, nothing is retired that night. A
 refused DELETE keeps its key in `held` for the next run.
 
+The probe asks for dates, not cards. `GET /api/flows/ingest?keys=<comma
+list>` (the nightly token only, GET only, at most 96 keys, each held to the
+single-key allowlist, `live:*` refused) answers
+`{ keys: { "<key>": { present, sessionDate, generatedAt, updatedAt, bytes } } }`
+from one prepared statement over `length(payload)` and two `json_extract`s,
+with a stored row whose payload says `status: "pending"` reported `present:
+false`, exactly as the pipeline reads the single-key answer. The nightly builds
+the list from every candidate's `card:`, `card-x:` and `hist:` keys at once,
+sends it in chunks of 96, and applies the same rule to the answers (hist counts
+only where a card or card-x is present or landed), so the ledger it builds is
+the one the per-key path built. Measured against the 2026-09-24 production
+snapshot with 733 candidate names and nothing landed (a full rebuild): the
+per-key bootstrap made 1,747 requests and downloaded 21,797,292 bytes to learn
+601 dates; the metadata form made 23 requests of 130,512 bytes in all, each one
+D1 statement, and built the identical 601-key ledger. If the form answers
+anything but 200 — an older Worker — the run falls back to the per-key reads,
+and the log line names the path either way, with the bytes left undownloaded.
+The 2,400 cap, the failure limit and the deadline count keys asked.
+
 The roster is read twice: once as the run starts and again at the retire
 step. Only the nightly writes it, so when the late read fails the early copy
 is used and the night still retires. Only when both fail does the night

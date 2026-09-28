@@ -33,6 +33,7 @@ import {
   fakeLadderChain, vannaProbeSample, featuresVariationInput, boardVariationMeta, congressRows,
   plainRedispatchSaid, retireAndRoster, bootstrapLedger, callModel, CALL_COST, NOMINAL_SHAPE, markGate,
   screenerDollarVolume, gatedWorthEnriching, GATED_LIQUIDITY_MARGIN, pickPriorRoster,
+  probeStored, LEDGER_PROBE_CHUNK, LEDGER_PROBE_MAX, dryRosterProbe, DRY_PROBE_BYTES,
 } from "../scripts/flows-pipeline.mjs";
 import { FOCUS_FUNDS, MAG7 as FOCUS_MAG7, FOCUS_MINERS } from "../shared/flows-focus.js";
 import { runHealthGate, refusalOf, tallyRefusal } from "../scripts/flows-legs/health.mjs";
@@ -1445,6 +1446,14 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
          "ledger but rebuilt tonight — is neither");
       ok(/\[dry-run\] retire card:ZZRET/.test(runLog) && !/\[dry-run\] retire card:NVDA/.test(runLog),
          "the retire went through the ingest DELETE path, and never touched a card the run rebuilt");
+      const probeLine = /so the store was probed — (\d+) key\(s\) asked over (\d+) metadata request\(s\) of \d+ bytes, (\d+) bytes of stored payload left undownloaded, (\d+) older key\(s\) found$/m.exec(runLog);
+      ok(probeLine && Number(probeLine[2]) === Math.ceil(Number(probeLine[1]) / LEDGER_PROBE_CHUNK) && Number(probeLine[1]) <= LEDGER_PROBE_MAX,
+         `the dry run's prior ledger is marked partial, so the run probes the store through the metadata form: ${probeLine ? probeLine[0] : "no probe line"}`);
+      ok(probeLine && Number(probeLine[3]) === 2 * (DRY_PROBE_BYTES.card + DRY_PROBE_BYTES["card-x"] + DRY_PROBE_BYTES.hist) && Number(probeLine[4]) === 6,
+         "and reports the bytes the per-key path would have downloaded — ZZRET's three keys, ZZHLD's card and the hist only the store " +
+         "knew, ZZXON's card-x: two of each kind — while NVDA's held card, rebuilt tonight, is never asked");
+      ok(Object.hasOwn(roster.held, "hist:ZZHLD") && roster.ledger === "bootstrap",
+         "a key only the store knew — hist:ZZHLD, two sessions young — is found by the probe and held, and the ledger is whole");
       ok(Buffer.byteLength(JSON.stringify(roster)) <= 32 * 1024, "the roster is inside its 32 KB cap");
       const meta = read("meta");
       ok(meta.coverage && meta.coverage.membership.source === "qqq-holdings" && meta.coverage.focusDeep > 0 &&
@@ -2123,10 +2132,11 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(/function ingestHeaders\(/.test(src),
      "and it is reached through a single builder every call site shares");
 
-  const sites = [...src.matchAll(/ingestURL\(\) \+ "\?key="/g)];
-  eq(sites.length, 3,
-     `three call sites reach the ingest route — read, write and delete (found ${sites.length}). ` +
-     "A fourth must join the builder rather than hand-rolling headers");
+  const sites = [...src.matchAll(/ingestURL\(\) \+ "\?keys?="/g)];
+  eq(sites.length, 4,
+     `four call sites reach the ingest route — read, metadata probe, write and delete (found ${sites.length}). ` +
+     "A fifth must join the builder rather than hand-rolling headers");
+  eq(src.match(/ingestURL\(\) \+ "\?keys="/g).length, 1, "one of them is the ?keys= metadata form");
   for (const site of sites) {
     const window = src.slice(site.index, site.index + 900);
     ok(/headers: await ingestHeaders\(/.test(window),
@@ -3735,6 +3745,53 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
 {
   const http = await import("node:http");
+  let answers = [503, 200];
+  let body = JSON.stringify({ keys: { "card:A": { present: true, sessionDate: "2026-09-18", generatedAt: null, updatedAt: 5, bytes: 70000 },
+    "card-x:A": { present: false } } });
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    const status = answers.length ? answers.shift() : 200;
+    seen.push({ status, url: req.url, auth: req.headers.authorization, ua: req.headers["user-agent"] });
+    res.writeHead(status, { "Content-Type": "application/json" });
+    res.end(status === 200 ? body : "{}");
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const prevUrl = process.env.FLOWS_INGEST_URL;
+  const prevTok = process.env.FLOWS_INGEST_TOKEN;
+  process.env.FLOWS_INGEST_URL = `http://127.0.0.1:${server.address().port}/api/flows/ingest`;
+  process.env.FLOWS_INGEST_TOKEN = "test-token";
+  try {
+    const waits = [];
+    const probed = await probeStored(["card:A", "card-x:A"], { pause: async (ms) => { waits.push(ms); } });
+    ok(probed.keys && probed.keys["card:A"].present === true && probed.keys["card-x:A"].present === false && probed.recovered === 1 &&
+       probed.bytes === body.length && probed.status === 200,
+       "PROBESTORED: the metadata read retries a 503 like the single-key read, then hands back the keys and the answer's size");
+    assert.deepEqual(waits, [1000], "on the same backoff"); checks++;
+    ok(seen.length === 2 && seen.every((s) => s.url === "/api/flows/ingest?keys=card%3AA%2Ccard-x%3AA" && s.auth === "Bearer test-token" &&
+       /anilkaya-flows-pipeline\/1/.test(s.ua)),
+       "sent as one ?keys= request carrying the nightly bearer and the pipeline's User-Agent, through the shared header builder");
+    answers = [400];
+    seen.length = 0;
+    const older = await probeStored(["card:A"], { pause: async () => {} });
+    ok(older.failed && older.status === 400 && seen.length === 1,
+       "a 400 — an older Worker that knows no ?keys= — is an answer, not a transient: read once and handed to the caller to fall back on");
+    answers = [200];
+    body = '{"ok":true}';
+    seen.length = 0;
+    const unshaped = await probeStored(["card:A"], { pause: async () => {} });
+    ok(unshaped.failed && unshaped.status === 200 && /no keys/.test(unshaped.detail),
+       "and a 200 that carries no keys is failed rather than read as every key absent, which would retire nothing and forget everything");
+  } finally {
+    process.env.FLOWS_INGEST_URL = prevUrl;
+    process.env.FLOWS_INGEST_TOKEN = prevTok;
+    if (prevUrl === undefined) delete process.env.FLOWS_INGEST_URL;
+    if (prevTok === undefined) delete process.env.FLOWS_INGEST_TOKEN;
+    await new Promise((r) => server.close(r));
+  }
+}
+
+{
+  const http = await import("node:http");
   const CHALLENGE = { status: 403, headers: { "cf-mitigated": "challenge", server: "cloudflare", "cf-ray": "8ca1b2c3d4e5f607-IAD",
     "Content-Type": "text/html; charset=UTF-8" }, body: "<title>Just a moment...</title><script>window._cf_chl_opt={}</script>" };
   const WAF = { status: 403, headers: { server: "cloudflare", "cf-ray": "8ca1b2c3d4e5f608-ORD", "Content-Type": "text/plain" },
@@ -4318,6 +4375,113 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        `a probe against a store that keeps refusing stops after ${LEDGER_PROBE_FAIL_MAX} failed reads and is marked partial, ` +
        "rather than spending the run on 400 refusals");
     ok(LEDGER_PROBE_RETRY_BUDGET_MS <= 20_000, "and its retries have their own budget of at most twenty seconds");
+  }
+
+  {
+    const shelf = new Map([
+      ["card:GONE", { sessionDate: "2026-09-16", bytes: 90000 }], ["card-x:GONE", { sessionDate: "2026-09-16", bytes: 40000 }],
+      ["hist:GONE", { sessionDate: "2026-09-16", bytes: 11000 }], ["card:NEWISH", { sessionDate: "2026-09-23", bytes: 70000 }],
+      ["card-x:XONLY", { generatedAt: "2026-09-02T21:00:00Z", bytes: 30000 }], ["hist:ORPHAN", { sessionDate: "2026-09-01", bytes: 9000 }],
+      ["hist:LANDED", { sessionDate: "2026-09-10", bytes: 9500 }],
+    ]);
+    const requests = [];
+    const answerer = (refuse = () => null) => async (keys) => {
+      requests.push(keys);
+      const refused = refuse(requests.length);
+      if (refused) return refused;
+      const out = {};
+      for (const k of keys) {
+        const s = shelf.get(k);
+        out[k] = s ? { present: true, sessionDate: s.sessionDate || null, generatedAt: s.generatedAt || null, updatedAt: 1, bytes: s.bytes }
+          : { present: false };
+      }
+      return { status: 200, keys: out, bytes: JSON.stringify({ keys: out }).length };
+    };
+    const noReader = async () => { throw new Error("with the metadata form answering, nothing is read key by key"); };
+    const perKey = async (key) => { probed.push(key); const s = shelf.get(key); return s ? { payload: s, status: 200 } : { payload: null, absent: true, status: 200 }; };
+    const probed = [];
+
+    const meta = await bootstrapLedger({
+      tickers: ["GONE", "NEWISH", "XONLY", "NEVER", "ORPHAN", "LANDED", "NVDA"],
+      landed: new Set(["card:LANDED", "card:NVDA", "card-x:NVDA", "hist:NVDA"]), probeMany: answerer(), reader: noReader,
+    });
+    eq(meta.path, "metadata", "THE METADATA PROBE: given a probeMany reader the bootstrap asks the store for dates, not cards");
+    eq(requests.length, 1, "seven names are seventeen keys, under the chunk, so one request");
+    assert.deepEqual(requests[0], ["card:GONE", "card-x:GONE", "hist:GONE", "card-x:LANDED", "hist:LANDED", "card:NEVER", "card-x:NEVER",
+      "hist:NEVER", "card:NEWISH", "card-x:NEWISH", "hist:NEWISH", "card:ORPHAN", "card-x:ORPHAN", "hist:ORPHAN", "card:XONLY",
+      "card-x:XONLY", "hist:XONLY"],
+      "built from all three key kinds at once, in name order, never a key the run just wrote"); checks++;
+    eq(meta.reads, 17, "and every key asked counts as a read against the cap");
+    assert.deepEqual([...meta.known.keys()].sort(), ["card-x:GONE", "card-x:XONLY", "card:GONE", "card:NEWISH", "hist:GONE", "hist:LANDED"],
+      "card and card-x wherever present, hist where a card or card-x is present or landed, and never an orphan hist — the per-key " +
+      "path never asked for one, and the two paths must build the same ledger"); checks++;
+    eq(meta.known.get("card-x:XONLY"), "2026-09-02", "dated from generatedAt where sessionDate is missing, as a downloaded card was");
+    eq(meta.avoided, 90000 + 40000 + 11000 + 70000 + 30000 + 9500,
+       "the bytes avoided are exactly the stored bytes the per-key path would have downloaded");
+    ok(meta.metaBytes > 0 && meta.metaBytes < 2000 && meta.requests === 1 && meta.failed === 0 && !meta.capped,
+       `against a metadata answer under 2 KB (${meta.metaBytes} bytes)`);
+
+    requests.length = 0;
+    const many = await bootstrapLedger({ tickers: Array.from({ length: 200 }, (_, i) => "T" + i), probeMany: answerer(), reader: noReader });
+    eq(requests.length, 7, `six hundred keys travel in seven requests of at most ${LEDGER_PROBE_CHUNK}`);
+    ok(requests.slice(0, 6).every((b) => b.length === LEDGER_PROBE_CHUNK) && requests[6].length === 24 && many.reads === 600 && many.requests === 7,
+       "six full chunks and the remainder");
+    ok(requests.every((b) => b.every((k) => typeof k === "string")) && new Set(requests.flat()).size === 600, "every key exactly once");
+
+    requests.length = 0;
+    probed.length = 0;
+    const older = await bootstrapLedger({ tickers: ["GONE", "NEVER"], probeMany: answerer(() => ({ failed: true, status: 400 })), reader: perKey });
+    eq(older.path, "per-key", "FALLBACK: a Worker that answers the form with anything but 200 — an older deploy — is probed key by key as before");
+    eq(older.fallback.status, 400, "and the answer is recorded");
+    eq(requests.length, 1, "after one metadata request, not one per chunk");
+    assert.deepEqual(probed.sort(), ["card-x:GONE", "card-x:NEVER", "card:GONE", "card:NEVER", "hist:GONE"],
+      "the per-key path asks what it always asked"); checks++;
+    assert.deepEqual([...older.known.keys()].sort(), ["card-x:GONE", "card:GONE", "hist:GONE"], "and finds what the metadata path finds"); checks++;
+    ok(older.avoided === 0 && older.metaBytes === 0 && older.reads === 5, "with nothing avoided and five reads");
+
+    requests.length = 0;
+    const capped = await bootstrapLedger({ tickers: ["A", "B", "C", "D", "E"], probeMany: answerer(), reader: noReader, limit: 10 });
+    ok(capped.capped && capped.reads === 9 && requests.length === 1 && requests[0].length === 9,
+       "THE CAP counts keys asked and keeps whole names: five names are fifteen keys, a cap of ten asks three names' nine and is partial");
+    requests.length = 0;
+    const second = await bootstrapLedger({ tickers: Array.from({ length: 96 }, (_, i) => "T" + i),
+      probeMany: answerer((n) => (n >= 2 ? { failed: true, status: 503 } : null)), reader: noReader });
+    ok(second.path === "metadata" && requests.length === 2 && second.failed === LEDGER_PROBE_CHUNK && second.capped && second.reads === 2 * LEDGER_PROBE_CHUNK,
+       "THE FAILURE LIMIT: a later request that fails once the form is known to work is not a fallback — its keys count as asked and " +
+       "unanswered, 96 unanswered passes the limit of 25, so the third chunk is never asked and the probe is partial for the next night to retry");
+    requests.length = 0;
+    const late = await bootstrapLedger({ tickers: ["A"], probeMany: answerer(), reader: noReader, deadline: Date.now() - 1 });
+    ok(late.capped && requests.length === 0 && late.reads === 0, "THE DEADLINE: past it no request is made");
+
+    const viaMeta = await run({
+      prior: { payload: { v: 1, sessionDate: "2026-09-23", depth: {} }, status: 200 },
+      candidates: ["GONE", "NEWISH", "XONLY", "NEVER", "NVDA"],
+      reader: noReader,
+      probeMany: async (keys) => {
+        const out = {};
+        for (const k of keys) { const s = store.get(k); out[k] = s ? { present: true, sessionDate: s.sessionDate || null, generatedAt: s.generatedAt || null, updatedAt: 1, bytes: 50000 } : { present: false }; }
+        return { status: 200, keys: out, bytes: 900 };
+      },
+    });
+    assert.deepEqual(deletes.sort(), ["card-x:GONE", "card-x:XONLY", "card:GONE"],
+      "through retireAndRoster the metadata probe retires exactly what the per-key probe retired above"); checks++;
+    ok(viaMeta.ledger === "bootstrap" && Object.hasOwn(writes.get("roster").held, "card:NEWISH"), "records the rebuilt ledger and carries the young key");
+    ok(logs.some((l) => /so the store was probed — 13 key\(s\) asked over 1 metadata request\(s\) of 900 bytes, 200000 bytes of stored payload left undownloaded, 4 older key\(s\) found$/.test(l)),
+       `and the log says which path ran and how many bytes it avoided (${logs.find((l) => /store was probed/.test(l))})`);
+    const fell = await run({
+      prior: { payload: { v: 1, sessionDate: "2026-09-23", depth: {} }, status: 200 },
+      candidates: ["GONE"],
+      probeMany: async () => ({ failed: true, status: 404 }),
+      reader: async (key) => (store.has(key) ? { payload: store.get(key), status: 200 } : { payload: null, absent: true, status: 200 }),
+    });
+    ok(fell.ledger === "bootstrap" && logs.some((l) => /so the store was probed — 3 read\(s\) key by key \(the metadata form answered HTTP 404, so an older Worker is assumed\), 2 older key\(s\) found$/.test(l)),
+       `a fallback is not a failure: the ledger is whole and the log names the path (${logs.find((l) => /store was probed/.test(l))})`);
+
+    const dry = dryRosterProbe("2026-09-24");
+    const dryAnswer = await dry(["card:ZZRET", "hist:ZZHLD", "card:NOPE"]);
+    ok(dryAnswer.status === 200 && dryAnswer.keys["card:ZZRET"].present === true && dryAnswer.keys["card:ZZRET"].bytes === DRY_PROBE_BYTES.card &&
+       dryAnswer.keys["hist:ZZHLD"].present === true && dryAnswer.keys["card:NOPE"].present === false && dryAnswer.bytes > 0,
+       "the dry run's fake answers in the Worker's shape, so the dry run exercises the same parser the nightly does");
   }
 }
 

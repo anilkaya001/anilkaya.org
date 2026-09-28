@@ -89,6 +89,21 @@ async function client(D1, extra = {}) {
   };
 }
 
+const INGEST_TOKEN = "reads-ingest-token-abcdefghijklmnopqrstuvwxyz";
+async function ingestClient(D1) {
+  const env = { DB: D1, SESSION_SECRET, FLOWS_INGEST_TOKEN: INGEST_TOKEN,
+    FLOWS_CREDENTIALS: JSON.stringify({ [FLOWS_USERNAMES[0]]: "x".repeat(43) }) };
+  const worker = (await import("../worker.js?reads=" + (++instance))).default;
+  return async (route) => {
+    const req = new Request("https://anilkaya.org" + route, { headers: { Authorization: "Bearer " + INGEST_TOKEN } });
+    const res = await worker.fetch(req, env, { waitUntil() {} });
+    const text = await res.text();
+    let body = null;
+    try { body = JSON.parse(text); } catch { body = null; }
+    return { res, body, text };
+  };
+}
+
 const SESSION = "2026-09-24";
 const NIGHTLY = { v: 1, sessionDate: SESSION, generatedAt: "2026-09-25T00:10:00.000Z" };
 const PANELS = { pricedMove: { status: "ok", impliedMove: 0.05, realizedMove: 0.04, sessions: 10, iv30: 0.31, rv30: 0.25 } };
@@ -453,6 +468,31 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
      splitReading.trips[1].kind === "first" && /FROM flows_payload WHERE id = \?$/.test(splitReading.trips[1].sqls[0]) &&
      splitReading.trips[1].args[0][0] === "card-x:SPLIT" && splitReading.trips[2].kind === "run",
      "and the reading of a split card is its batch, the overflow row read by its card-x key, and the claim");
+}
+
+{
+  const f = fakeD1();
+  seed(f);
+  f.put("card:PEND", { ...NIGHTLY, status: "pending" });
+  const get = await ingestClient(f.D1);
+  await get("/api/flows/ingest?keys=meta");
+  const n = f.trips.length;
+  const asked = ["card:NVDA", "card-x:NVDA", "hist:NVDA", "card:PEND", "card:ZZZZ", "roster"];
+  const r = await get("/api/flows/ingest?keys=" + asked.join(","));
+  eq(r.res.status, 200, "the ingest metadata form answers the nightly bearer");
+  eq(f.trips.length - n, 1, "THE METADATA PROBE IS ONE TRIP however many keys it names, where the per-key read the nightly " +
+     "ran before was one passthrough trip per key, each carrying the whole card");
+  ok(f.trips[n].kind === "all" && /^SELECT id, updated_at, length\(payload\) AS bytes, json_extract\(payload, '\$\.sessionDate'\)/.test(f.trips[n].sqls[0]) &&
+     f.trips[n].args[0].length === asked.length,
+     "one prepared statement, binding every key asked and selecting the payload's length and dates, never the payload");
+  const card = r.body.keys["card:NVDA"];
+  const cardBytes = JSON.stringify({ ...NIGHTLY, ticker: "NVDA", panels: PANELS, score: 61, conviction: 70 }).length;
+  ok(card.present === true && card.sessionDate === SESSION && card.generatedAt === NIGHTLY.generatedAt && card.bytes === cardBytes &&
+     card.updatedAt === 1790380000000, `a present card answers its dates, its stored size and its write time (${JSON.stringify(card)})`);
+  deep(r.body.keys["card-x:NVDA"], { present: false }, "a key never written is absent");
+  deep(r.body.keys["card:PEND"], { present: false }, "and a stored row that says pending is absent, as the single-key read reports it");
+  ok(r.body.keys.roster.present === true && r.body.keys.roster.sessionDate === "2020-01-02", "a view key is answered by the same statement");
+  eq(Object.keys(r.body.keys).length, asked.length, "every key asked is answered");
 }
 
 console.log(`flows-reads-contract: ${checks} checks passed`);
