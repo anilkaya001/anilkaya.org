@@ -10,6 +10,7 @@
   const MID = "·";
 
   let uid = 0;
+  const $ = (id) => document.getElementById(id);
 
   const isNum = (v) => {
     if (typeof v === "number") return Number.isFinite(v) ? v : null;
@@ -17,21 +18,6 @@
     if (v.trim() === "") return null;
     const n = Number(v);
     return Number.isFinite(n) ? n : null;
-  };
-
-  const el = (tag, cls, text) => {
-    const n = document.createElement(tag);
-    if (cls) n.className = cls;
-    if (text !== undefined && text !== null) n.textContent = String(text);
-    return n;
-  };
-
-  const svgEl = (tag, attrs) => {
-    const n = document.createElementNS(SVG_NS, tag);
-    for (const k in attrs) {
-      if (attrs[k] !== null && attrs[k] !== undefined) n.setAttribute(k, attrs[k]);
-    }
-    return n;
   };
 
   const fmtSigned = (v, dp) => {
@@ -42,8 +28,6 @@
 
   const STALE_WRITE_MS = 30 * 60 * 60 * 1000;
   const STALE_SESSION_MS = 4 * 24 * 60 * 60 * 1000;
-
-  const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
   function staleness(payload, now, opts) {
     const o = opts || {};
@@ -67,7 +51,7 @@
     }
 
     let session = null;
-    if (ISO_DAY.test(String(payload.sessionDate || ""))) {
+    if (isoDay(payload.sessionDate)) {
       const parsed = Date.parse(String(payload.sessionDate) + "T21:00:00Z");
       if (Number.isFinite(parsed)) session = parsed;
     }
@@ -85,7 +69,7 @@
   }
 
   const emptyState = (kind, text) => {
-    const p = el("p", "flows-empty", text);
+    const p = h("p", { class: "flows-empty" }, text);
     if (kind) p.dataset.empty = String(kind);
     return p;
   };
@@ -155,7 +139,7 @@
     if (hi - lo < 1e-9) { lo -= 1; hi += 1; }
     const y = (v) => padY + (1 - (v - lo) / (hi - lo)) * plotH;
 
-    const svg = svgEl("svg", {
+    const svg = s("svg", {
       class: prefix + "-strip", viewBox: `0 0 ${W} ${H}`, width: W, height: H,
       preserveAspectRatio: "xMidYMid meet",
     });
@@ -170,40 +154,40 @@
 
     for (const run of markerRuns(o.markers)) {
       if (run.from >= count) continue;
-      svg.append(svgEl("rect", {
+      s("rect", {
         class: run.cls || (prefix + "-wash"),
         x: g.xEdge(run.from).toFixed(2), y: 0,
         width: (g.colW * (Math.min(run.to, count - 1) - run.from + 1)).toFixed(2), height: H,
-      }));
+      }, svg);
     }
 
     if (db !== null && db > 0) {
       const top = y(db);
-      svg.append(svgEl("rect", {
+      s("rect", {
         class: prefix + "-band", x: 0, y: top.toFixed(2),
         width: W, height: Math.max(0.5, y(-db) - top).toFixed(2),
-      }));
+      }, svg);
     }
 
     const zy = y(0).toFixed(2);
-    svg.append(svgEl("line", { class: prefix + "-zero", x1: 0, x2: W, y1: zy, y2: zy }));
+    s("line", { class: prefix + "-zero", x1: 0, x2: W, y1: zy, y2: zy }, svg);
 
     for (const r of (Array.isArray(o.rules) ? o.rules : [])) {
       const at = isNum(r && r.at);
       if (at === null || at < 0 || at > count) continue;
       const x = g.xEdge(at).toFixed(2);
-      svg.append(svgEl("line", {
+      s("line", {
         class: (r && r.cls) || (prefix + "-rule"), x1: x, x2: x, y1: 0, y2: H,
-      }));
+      }, svg);
     }
 
     for (let i = 0; i + 1 < count; i++) {
       if (pts[i] === null || pts[i + 1] === null) continue;
-      svg.append(svgEl("line", {
+      s("line", {
         class: prefix + "-line",
         x1: g.xMid(i).toFixed(2), y1: y(pts[i]).toFixed(2),
         x2: g.xMid(i + 1).toFixed(2), y2: y(pts[i + 1]).toFixed(2),
-      }));
+      }, svg);
     }
 
     let lastMeasured = -1;
@@ -217,11 +201,11 @@
       const cls = prefix + "-dot" + (isLast
         ? " is-last" + (pts[i] > 0 ? " is-pos" : pts[i] < 0 ? " is-neg" : " is-zero")
         : "");
-      svg.append(svgEl("circle", {
+      s("circle", {
         class: cls,
         cx: g.xMid(i).toFixed(2), cy: y(pts[i]).toFixed(2),
         r: isLast ? Math.max(r0, Math.min(2, g.colW / 2)).toFixed(2) : r0.toFixed(2),
-      }));
+      }, svg);
     }
 
     host.append(svg);
@@ -340,6 +324,7 @@
   const dirGlyph = (t) => (t === "down" ? "down" : t === "up" ? "up" : "flat");
   const cap = (t) => (typeof t === "string" && t ? t[0].toUpperCase() + t.slice(1) + (/[.!?]$/.test(t) ? "" : ".") : t);
 
+  const POP = { "aria-haspopup": "dialog", "aria-controls": "fxPop" };
   const STATES = Object.freeze({
     live: { g: "live", word: "Live" },
     fresh: { g: "clock", word: "Current session" },
@@ -393,8 +378,7 @@
   function infoButton(label, build, o = {}) {
     return h("button", {
       class: "ui-info" + (o.small ? " ui-info--sm" : ""), type: "button",
-      "aria-label": "About " + label, "aria-haspopup": "dialog", "aria-expanded": "false",
-      "aria-controls": "fxPop", "data-info": info(build),
+      "aria-label": "About " + label, ...POP, "aria-expanded": "false", "data-info": info(build),
     }, glyph("info"));
   }
   function stateButton(st, label) {
@@ -402,7 +386,7 @@
     const def = STATES[st.state] || STATES.unavailable;
     return h("button", {
       class: "ui-state", type: "button", "data-state": st.state, title: def.word,
-      "aria-label": def.word + (label ? ": " + label : ""), "aria-haspopup": "dialog", "aria-controls": "fxPop",
+      "aria-label": def.word + (label ? ": " + label : ""), ...POP,
       "data-info": info(() => ({ title: label || def.word, state: st.state, lead: st.reason })),
     }, glyph(def.g));
   }
@@ -412,7 +396,7 @@
   }
 
   function ensurePop() {
-    let pop = document.getElementById("fxPop");
+    let pop = $("fxPop");
     if (pop) return pop;
     pop = h("div", { class: "ui-pop", id: "fxPop", popover: "manual", role: "dialog", "aria-modal": "false", "aria-labelledby": "fxPopT", tabindex: "-1" },
       h("div", { class: "ui-pop-h" },
@@ -433,10 +417,10 @@
     });
     return pop;
   }
-  const popOpen = () => { const p = document.getElementById("fxPop"); return !!(p && p.matches(":popover-open")); };
+  const popOpen = () => { const p = $("fxPop"); return !!(p && p.matches(":popover-open")); };
   function fillPop(d) {
-    const body = document.getElementById("fxPopB");
-    document.getElementById("fxPopT").textContent = d.title || "";
+    const body = $("fxPopB");
+    $("fxPopT").textContent = d.title || "";
     body.replaceChildren();
     const sub = h("div", { class: "ui-pop-sub" }, d.state ? statePill(d.state) : null, d.asOf ? h("span", { class: "ui-pill" }, glyph("cal"), d.asOf) : null);
     if (sub.childNodes.length) body.append(sub);
@@ -471,7 +455,7 @@
     try { pop.focus({ preventScroll: true }); } catch { pop.focus(); }
   }
   function closeInfo() {
-    const pop = document.getElementById("fxPop");
+    const pop = $("fxPop");
     if (pop && popOpen()) pop.hidePopover();
   }
   document.addEventListener("click", (e) => {
@@ -483,7 +467,7 @@
   });
   document.addEventListener("pointerdown", (e) => {
     if (!popOpen()) return;
-    const pop = document.getElementById("fxPop");
+    const pop = $("fxPop");
     const t = e.target instanceof Element ? e.target : null;
     if (t && t.closest("[data-info]")) return;
     const r = pop.getBoundingClientRect();
@@ -496,7 +480,7 @@
   const spoken = (node) => [...node.childNodes].map((n) => n.textContent.trim()).filter(Boolean).join(" ");
   function announce(text) {
     if (!liveNode) {
-      liveNode = document.getElementById("fxLive") || h("div", { id: "fxLive", class: "visually-hidden", "aria-live": "polite" });
+      liveNode = $("fxLive") || h("div", { id: "fxLive", class: "visually-hidden", "aria-live": "polite" });
       if (!liveNode.isConnected) document.body.append(liveNode);
     }
     liveNode.textContent = text;
@@ -562,14 +546,15 @@
     return h("div", { class: "ui-metrics", style: o.min ? { "--metric-min": o.min + "px" } : null }, list);
   }
 
+  const RING = { cx: 13, cy: 13, r: 10.5, fill: "none" };
   function ring(v01, o = {}) {
     const size = o.size || 20;
     const stroke = o.stroke || 3;
     const n = s("svg", { width: size, height: size, viewBox: "0 0 26 26", class: "ui-gchip-g", "aria-hidden": "true", style: { "--ring-c": paint(o.color || "--label-1") } });
-    s("circle", { cx: 13, cy: 13, r: 10.5, fill: "none", class: "ui-ring-track", "stroke-width": stroke }, n);
+    s("circle", { ...RING, class: "ui-ring-track", "stroke-width": stroke }, n);
     if (num(v01) !== null) {
       s("circle", {
-        cx: 13, cy: 13, r: 10.5, fill: "none", class: "ui-ring-v", stroke: paint(o.color || "--label-1"), "stroke-width": stroke,
+        ...RING, class: "ui-ring-v", stroke: paint(o.color || "--label-1"), "stroke-width": stroke,
         "stroke-linecap": "round", pathLength: 100, "stroke-dasharray": `${clamp(v01, 0, 1) * 100} 100`, transform: "rotate(-90 13 13)",
       }, n);
     }
@@ -579,12 +564,12 @@
     const size = o.size || 20;
     const max = o.max || 100;
     const n = s("svg", { width: size, height: size, viewBox: "0 0 26 26", class: "ui-gchip-g", "aria-hidden": "true" });
-    s("circle", { cx: 13, cy: 13, r: 10.5, fill: "none", class: "ui-ring-track", "stroke-width": 3 }, n);
+    s("circle", { ...RING, class: "ui-ring-track", "stroke-width": 3 }, n);
     s("line", { x1: 13, y1: 0.8, x2: 13, y2: 5.2, stroke: paint("--label-3"), "stroke-width": 1.2 }, n);
     if (num(v) !== null && v !== 0) {
       const a = clamp(Math.abs(v) / max, 0, 1) * 100;
       s("circle", {
-        cx: 13, cy: 13, r: 10.5, fill: "none", class: "ui-ring-v", stroke: paint(v < 0 ? "--down-mark" : "--up-mark"), "stroke-width": 3,
+        ...RING, class: "ui-ring-v", stroke: paint(v < 0 ? "--down-mark" : "--up-mark"), "stroke-width": 3,
         "stroke-linecap": "round", pathLength: 100, "stroke-dasharray": `${a} 100`,
         transform: v < 0 ? "rotate(-90 13 13) scale(1 -1) translate(0 -26)" : "rotate(-90 13 13)",
       }, n);
@@ -596,7 +581,7 @@
   }
   function gaugeChip(o) {
     const g = o.g || (o.ring !== undefined ? ring(o.ring, { color: o.color }) : o.diverging !== undefined ? divRing(o.diverging, { max: o.max }) : iconChip(o.icon || "info", o.color));
-    const attrs = { class: "ui-gchip", type: "button", "aria-haspopup": "dialog", "aria-controls": "fxPop" };
+    const attrs = { class: "ui-gchip", type: "button", ...POP };
     if (o.info) attrs["data-info"] = info(o.info);
     return h("button", attrs, g, h("span", { class: "ui-chip-v", "data-tone": o.tone || null }, o.value), h("span", { class: "ui-chip-l" }, o.label));
   }
@@ -688,7 +673,7 @@
     },
     glyph(def.g),
     h("div", { class: "ui-silent-t" }, word),
-    h("button", { type: "button", "aria-haspopup": "dialog", "aria-controls": "fxPop", "data-info": info(() => ({ title: label, state, lead: st && st.reason })) }, "Why"));
+    h("button", { type: "button", ...POP, "data-info": info(() => ({ title: label, state, lead: st && st.reason })) }, "Why"));
   }
   function dash(st, label) {
     return h("span", { class: "ui-dash" }, DASH, st ? stateButton(st, label) : null);
@@ -763,6 +748,9 @@
     rec.host.replaceChildren();
     rec.draw(rec.host, w, animate && moving());
   }
+  const fade = (d) => ({ class: "fade", style: { "--delay": d } });
+  const TA = { "text-anchor": "middle" };
+  const gone = (el, o, why, label, H) => { el.append(silent({ state: "unavailable", reason: o.empty || why }, o.label || label, H)); };
   function mount(host, draw) {
     if (host._fxChart) { CHARTS.delete(host._fxChart); if (RO) RO.unobserve(host); }
     releaseHost(host);
@@ -961,7 +949,7 @@
     const right = o.gutter ?? (phone ? 54 : 62);
     const isDate = o.xType ? o.xType === "date" : X.length > 0 && xDate(X[0]);
     const isNumX = o.xType === "number";
-    if (!N || !series.length) { host.append(silent({ state: "unavailable", reason: o.empty || "Nothing to draw." }, o.label || "Chart", H)); return; }
+    if (!N || !series.length) return gone(host, o, "Nothing to draw.", "Chart", H);
     const xMin = isNumX ? Math.min(...X) : 0, xMax = isNumX ? Math.max(...X) : N - 1;
     const tf = isNumX && o.xScale === "sqrt" ? (v) => Math.sqrt(Math.max(0, v)) : isNumX && o.xScale === "log" ? (v) => Math.log(Math.max(1e-9, v)) : (v) => v;
     const xs0 = lin(tf(xMin), xMax === xMin ? tf(xMin) + 1 : tf(xMax), left, w - right);
@@ -1015,7 +1003,7 @@
         if (sr.area) {
           const base = o.baseline !== undefined ? y(o.baseline) : y0 < 0 && y1 > 0 ? y(0) : H - bot;
           const ar = d + `L${fx1(seg[seg.length - 1][0])} ${fx1(base)}L${fx1(seg[0][0])} ${fx1(base)}Z`;
-          s("path", { d: ar, fill: vGrad(svg, color, sr.fill ?? 0.18, 0), class: "fade", style: { "--delay": "250ms" } }, g);
+          s("path", { d: ar, fill: vGrad(svg, color, sr.fill ?? 0.18, 0), ...fade("250ms") }, g);
         }
         s("path", {
           d, class: "ln draw", stroke: color, pathLength: 1, "stroke-width": sr.width || null,
@@ -1035,7 +1023,7 @@
     const yt = niceTicks(y0, y1, 2).filter((v) => y(v) > top + 6 && y(v) < H - bot - 4);
     const tx = w - right + 8;
     spread(tags, 16, top, H - bot);
-    const tg = s("g", { class: "fade", style: { "--delay": "650ms" } }, svg);
+    const tg = s("g", fade("650ms"), svg);
     for (const t of tags) {
       if (Math.abs(t.y - t.y0) > 2) s("path", { d: `M${fx1(t.x0 + 5)} ${fx1(t.y0)}L${fx1(tx - 3)} ${fx1(t.y)}`, stroke: paint("--label-4"), "stroke-width": 1, fill: "none" }, tg);
       s("text", { x: tx, y: t.y + 3.8, text: t.text, class: "tx-1 tx-b" }, tg);
@@ -1118,7 +1106,7 @@
       const phone = w < 600;
       const H = heightFor(o.height, w, [200, 220, 240]);
       const top = 22, bot = 24, left = 4, right = o.cumulative ? 44 : 8;
-      if (!N) { el.append(silent({ state: "unavailable", reason: o.empty || "Nothing to draw." }, o.label || "Chart", H)); return; }
+      if (!N) return gone(el, o, "Nothing to draw.", "Chart", H);
       const band = (w - left - right) / N;
       const x = (i) => left + band * (i + 0.5);
       const max = o.max ?? Math.max(...vals.filter((v) => v !== null).map(Math.abs), 1e-9);
@@ -1134,7 +1122,7 @@
       });
       const labels = o.labels || [];
       const every = Math.max(1, Math.ceil(N / (phone ? 5 : 9)));
-      labels.forEach((l, i) => { if (i % every === 0 && l !== undefined) s("text", { x: x(i), y: H - 7, text: l, "text-anchor": "middle" }, svg); });
+      labels.forEach((l, i) => { if (i % every === 0 && l !== undefined) s("text", { x: x(i), y: H - 7, text: l, ...TA }, svg); });
       let cumY = null;
       if (Array.isArray(o.cumulative)) {
         const cy = lin(0, 1, H - bot, top);
@@ -1182,7 +1170,7 @@
       const isNumX = o.xType === "number" || (Array.isArray(o.x) && o.x.length && typeof o.x[0] === "number" && o.xType !== "index");
       const X = Array.isArray(o.x) ? o.x : vals.map((_, i) => i);
       const top = num(o.spot) !== null ? 34 : 18, bot = 24 + (o.baseMarkers ? 10 : 0), left = 8, right = o.endLabel ? 60 : 8;
-      if (!N) { el.append(silent({ state: "unavailable", reason: o.empty || "Nothing to draw." }, o.label || "Chart", H)); return; }
+      if (!N) return gone(el, o, "Nothing to draw.", "Chart", H);
       const pal = PALETTES[o.palette || "direction"] || PALETTES.direction;
       let lo = isNumX ? Math.min(...X) : 0, hi = isNumX ? Math.max(...X) : N - 1;
       if (isNumX && o.domain) { lo = o.domain[0]; hi = o.domain[1]; }
@@ -1238,12 +1226,12 @@
         if (pill && ly - 10 < top - 8 && lx + lw / 2 + 3 > pill.x0 && lx - lw / 2 - 3 < pill.x0 + pill.pw) {
           lx = lx >= pill.sx ? pill.x0 + pill.pw + lw / 2 + 3 : pill.x0 - lw / 2 - 3;
         }
-        s("text", { x: clamp(lx, lw / 2, w - lw / 2), y: ly, text: l.text, "text-anchor": "middle", class: "tx-1 tx-b" }, svg);
+        s("text", { x: clamp(lx, lw / 2, w - lw / 2), y: ly, text: l.text, ...TA, class: "tx-1 tx-b" }, svg);
       }
       if (pill) {
         s("line", { x1: pill.sx, x2: pill.sx, y1: top - 10, y2: H - bot, stroke: paint("--label-1"), "stroke-width": 1.25 }, svg);
         s("rect", { x: pill.x0, y: top - 28, width: pill.pw, height: 18, rx: 9, fill: paint("--label-1") }, svg);
-        s("text", { x: pill.x0 + pill.pw / 2, y: top - 15.5, text: pill.text, "text-anchor": "middle", class: "tx-b tx-ink" }, svg);
+        s("text", { x: pill.x0 + pill.pw / 2, y: top - 15.5, text: pill.text, ...TA, class: "tx-b tx-ink" }, svg);
       }
       if (o.endLabel) {
         let li = -1;
@@ -1255,12 +1243,12 @@
       }
       const xf = o.xFormat || ((v) => (typeof v === "string" && isoDay(v) ? F.day(v) : String(v)));
       if (isNumX) {
-        for (const t of niceTicks(lo, hi, phone ? 4 : 7)) s("text", { x: xs(t), y: H - 4, text: xf(t), "text-anchor": "middle" }, svg);
+        for (const t of niceTicks(lo, hi, phone ? 4 : 7)) s("text", { x: xs(t), y: H - 4, text: xf(t), ...TA }, svg);
       } else if (typeof X[0] === "string" && isoDay(X[0])) {
-        for (const t of dateTicks(X, xAt, 5, left, w - right, phone)) s("text", { x: xAt(t.i), y: H - 4, text: t.text, "text-anchor": "middle" }, svg);
+        for (const t of dateTicks(X, xAt, 5, left, w - right, phone)) s("text", { x: xAt(t.i), y: H - 4, text: t.text, ...TA }, svg);
       } else {
         const every = Math.max(1, Math.ceil(N / (phone ? 5 : 9)));
-        X.forEach((v, i) => { if (i % every === 0) s("text", { x: xAt(i), y: H - 4, text: xf(v), "text-anchor": "middle" }, svg); });
+        X.forEach((v, i) => { if (i % every === 0) s("text", { x: xAt(i), y: H - 4, text: xf(v), ...TA }, svg); });
       }
       const fmt = o.format || ((v) => F.num(v, true));
       const order = X.map((_, i) => i).sort((a, b) => xAt(a) - xAt(b));
@@ -1283,7 +1271,7 @@
     return mount(host, (el, w, animate) => {
       const rows = o.rows || [], cols = o.cols || [], grid = o.grid || [];
       const R = rows.length, C = cols.length;
-      if (!R || !C) { el.append(silent({ state: "unavailable", reason: o.empty || "No grid." }, o.label || "Grid", 200)); return; }
+      if (!R || !C) return gone(el, o, "No grid.", "Grid", 200);
       const phone = w < 600;
       const left = o.left ?? 48, top = 6, bottom = 22;
       const cw = (w - left) / C;
@@ -1302,7 +1290,7 @@
           const xx = left + c * cw;
           if (v === null || v === 0) { s("rect", { x: xx + 1, y: yy + 1, width: Math.max(0, cw - 2), height: ch - 2, rx: 2.5, fill: paint("--fill-4") }, svg); continue; }
           const a = clamp(Math.sqrt(Math.abs(v) / cap), 0.08, 1);
-          s("rect", { x: xx + 1, y: yy + 1, width: Math.max(0, cw - 2), height: ch - 2, rx: 2.5, fill: paint(v > 0 ? pal.pos : pal.neg), "fill-opacity": a.toFixed(3), class: "fade", style: { "--delay": c * 40 + "ms" } }, svg);
+          s("rect", { x: xx + 1, y: yy + 1, width: Math.max(0, cw - 2), height: ch - 2, rx: 2.5, fill: paint(v > 0 ? pal.pos : pal.neg), "fill-opacity": a.toFixed(3), ...fade(c * 40 + "ms") }, svg);
         }
         if (r % every === 0 || r === o.highlightRow) s("text", { x: left - 8, y: yy + ch / 2 + 3.5, text: rf(rows[r]), "text-anchor": "end", class: r === o.highlightRow ? "tx-1 tx-b" : null }, svg);
       }
@@ -1311,7 +1299,7 @@
       const hc = num(o.highlightCol);
       if (hc !== null && hc >= 0 && hc < C) s("rect", { x: left + hc * cw + 0.5, y: top - 0.5, width: Math.max(0, cw - 1), height: R * ch + 1, rx: 3.5, fill: "none", stroke: paint("--accent"), "stroke-width": 1.25 }, svg);
       const phase = hc !== null && hc >= 0 && hc < C ? hc % everyX : 0;
-      cols.forEach((c, i) => { if (i % everyX === phase) s("text", { x: left + i * cw + cw / 2, y: H - 6, text: cf(c), "text-anchor": "middle", class: i === hc ? "tx-1 tx-b" : null }, svg); });
+      cols.forEach((c, i) => { if (i % everyX === phase) s("text", { x: left + i * cw + cw / 2, y: H - 6, text: cf(c), ...TA, class: i === hc ? "tx-1 tx-b" : null }, svg); });
       const hl = s("rect", { class: "cell-hl", x: 0, y: 0, width: Math.max(0, cw - 1), height: ch - 1, rx: 3, visibility: "hidden" }, svg);
       const readout = h("div", { class: "ui-readout", "aria-hidden": "true" });
       el.append(readout);
@@ -1392,12 +1380,12 @@
     }
     if (o.text !== false) {
       const t = s("text", {
-        x: cx, y: arc === 180 ? cy - 6 : cy + 11, "text-anchor": "middle", "aria-hidden": "true",
+        x: cx, y: arc === 180 ? cy - 6 : cy + 11, ...TA, "aria-hidden": "true",
         text: o.text ?? (v === null ? DASH : o.diverging ? F.signed(v) : String(Math.round(v))),
         style: { font: size >= 110 ? "var(--t-large)" : "var(--t-headline)", "letter-spacing": "var(--t-large-track)", fill: paint(o.textColor || (o.diverging && v !== null ? (v < 0 ? "--down" : v > 0 ? "--up" : "--label-1") : "--label-1")) },
       }, svg);
       t.setAttribute("data-gauge", "value");
-      if (o.caption) s("text", { x: cx, y: (arc === 180 ? cy - 6 : cy + 11) + 18, "text-anchor": "middle", text: o.caption, class: "tx-3" }, svg);
+      if (o.caption) s("text", { x: cx, y: (arc === 180 ? cy - 6 : cy + 11) + 18, ...TA, text: o.caption, class: "tx-3" }, svg);
     }
     return svg;
   }
@@ -1415,7 +1403,7 @@
       const S = num(o.spot) ?? (hist.length ? hist[hist.length - 1].c : null);
       const phone = w < 600;
       const H = heightFor(o.height, w, [260, 300, 330]);
-      if (!hist.length || S === null) { el.append(silent({ state: "unavailable", reason: o.empty || "No price history." }, o.label || "Price", H)); return; }
+      if (!hist.length || S === null) return gone(el, o, "No price history.", "Price", H);
       const N = hist.length;
       const Hs = num(o.horizon) || 10;
       const gutter = phone ? 58 : 66;
@@ -1444,7 +1432,7 @@
       const lineC = paint(last >= first ? "--up" : "--down");
       const pts = hist.map((r, i) => [xh(i), y(r.c)]);
       pts.push([xNow, y(S)]);
-      s("path", { d: pathOf(pts) + `L${fx1(xNow)} ${fx1(plotB)}L${fx1(pts[0][0])} ${fx1(plotB)}Z`, fill: vGrad(svg, lineC, 0.13, 0), class: "fade", style: { "--delay": "250ms" } }, svg);
+      s("path", { d: pathOf(pts) + `L${fx1(xNow)} ${fx1(plotB)}L${fx1(pts[0][0])} ${fx1(plotB)}Z`, fill: vGrad(svg, lineC, 0.13, 0), ...fade("250ms") }, svg);
       s("line", { x1: xNow, x2: xNow, y1: top - 6, y2: H - axisH, class: "hair" }, svg);
       const accent = paint("--accent");
       if (band) {
@@ -1455,14 +1443,14 @@
         const lg = s("linearGradient", { id: gid, x1: 0, y1: 0, x2: 1, y2: 0 }, defs);
         s("stop", { offset: 0, "stop-color": accent, "stop-opacity": 0.34 }, lg);
         s("stop", { offset: 1, "stop-color": accent, "stop-opacity": 0.12 }, lg);
-        s("path", { d: pathOf(up) + dn.slice().reverse().map((p) => "L" + fx1(p[0]) + " " + fx1(p[1])).join("") + "Z", fill: `url(#${gid})`, class: "fade", style: { "--delay": "420ms" } }, svg);
+        s("path", { d: pathOf(up) + dn.slice().reverse().map((p) => "L" + fx1(p[0]) + " " + fx1(p[1])).join("") + "Z", fill: `url(#${gid})`, ...fade("420ms") }, svg);
         s("path", { d: pathOf(up), class: "ln draw", stroke: accent, "stroke-opacity": 0.7, "stroke-width": 1, pathLength: 1, style: { "--delay": "520ms" } }, svg);
         s("path", { d: pathOf(dn), class: "ln draw", stroke: accent, "stroke-opacity": 0.7, "stroke-width": 1, pathLength: 1, style: { "--delay": "520ms" } }, svg);
       }
       if (o.realized && num(o.realized.hi) !== null && num(o.realized.lo) !== null) {
-        s("rect", { x: xf(Hs) - 1, y: y(o.realized.hi), width: 4, height: Math.max(2, y(o.realized.lo) - y(o.realized.hi)), rx: 2, fill: paint("--s-gray"), class: "fade", style: { "--delay": "650ms" } }, svg);
+        s("rect", { x: xf(Hs) - 1, y: y(o.realized.hi), width: 4, height: Math.max(2, y(o.realized.lo) - y(o.realized.hi)), rx: 2, fill: paint("--s-gray"), ...fade("650ms") }, svg);
       }
-      const lvG = s("g", { class: "fade", style: { "--delay": "600ms" } }, svg);
+      const lvG = s("g", fade("600ms"), svg);
       for (const l of lv) s("line", { x1: xNow, x2: xf(Hs), y1: y(l.px), y2: y(l.px), stroke: paint(LEVELS[l.kind].color), "stroke-width": 1, "stroke-opacity": 0.75 }, lvG);
       s("path", { d: pathOf(pts), class: "ln draw", stroke: lineC, pathLength: 1 }, svg);
       if (o.live) s("circle", { cx: xNow, cy: y(S), r: 4, fill: lineC, class: "pulse" }, svg);
@@ -1471,7 +1459,7 @@
       if (band) { tags.push({ y: y(hiEnd), y0: y(hiEnd), text: F.px(hiEnd), kind: "band" }); tags.push({ y: y(loEnd), y0: y(loEnd), text: F.px(loEnd), kind: "band" }); }
       for (const l of lv) tags.push({ y: y(l.px), y0: y(l.px), text: F.px(l.px), kind: l.kind });
       spread(tags, 17, top, plotB);
-      const tg = s("g", { class: "fade", style: { "--delay": "700ms" } }, svg);
+      const tg = s("g", fade("700ms"), svg);
       const tx = plotW + 8;
       for (const t of tags) {
         if (Math.abs(t.y - t.y0) > 2) s("path", { d: `M${fx1(xf(Hs) + 3)} ${fx1(t.y0)}L${fx1(tx - 3)} ${fx1(t.y)}`, stroke: paint("--label-4"), "stroke-width": 1, fill: "none" }, tg);
@@ -1503,8 +1491,8 @@
         });
         s("text", { x: tx, y: sy + 4, text: o.stripLabel || "Score", class: "tx-3" }, svg);
       }
-      for (const t of dateTicks(hist.map((r) => r.d), xh, 5, 0, xNow, phone)) s("text", { x: xh(t.i), y: H - 5, text: t.text, "text-anchor": "middle" }, svg);
-      s("text", { x: xf(Hs), y: H - 5, text: "+" + Hs + "d", "text-anchor": "middle" }, svg);
+      for (const t of dateTicks(hist.map((r) => r.d), xh, 5, 0, xNow, phone)) s("text", { x: xh(t.i), y: H - 5, text: t.text, ...TA }, svg);
+      s("text", { x: xf(Hs), y: H - 5, text: "+" + Hs + "d", ...TA }, svg);
       const xs = hist.map((_, i) => xh(i));
       for (let t = 1; t <= Hs; t++) xs.push(xf(t));
       scrub(el, svg, {
@@ -1533,7 +1521,7 @@
       const S = num(o.spot);
       const lv = (o.levels || []).filter((l) => l && num(l.px) !== null && LEVELS[l.kind]);
       const H = o.height || 74;
-      if (S === null) { el.append(silent({ state: "unavailable", reason: o.empty || "No spot price." }, o.label || "Levels", H)); return; }
+      if (S === null) return gone(el, o, "No spot price.", "Levels", H);
       const all = lv.map((l) => l.px).concat([S]);
       let lo = o.domain ? o.domain[0] : Math.min(...all), hi = o.domain ? o.domain[1] : Math.max(...all);
       const pad = (hi - lo) * 0.12 || S * 0.02;
@@ -1562,13 +1550,13 @@
           const px0 = clamp(t.y - pw / 2, 0, w - pw);
           const py = above ? ay - 30 : ay + 12;
           s("rect", { x: px0, y: py, width: pw, height: 18, rx: 9, fill: ink }, g);
-          s("text", { x: px0 + pw / 2, y: py + 12.5, text: st, "text-anchor": "middle", class: "tx-b tx-ink" }, g);
+          s("text", { x: px0 + pw / 2, y: py + 12.5, text: st, ...TA, class: "tx-b tx-ink" }, g);
           return;
         }
         const d = LEVELS[t.l.kind];
         const v = F.px(t.l.px), k = d.label + " " + F.pct(t.l.px / S - 1, 1, true);
-        s("text", { x: clamp(t.y, half(v), w - half(v)), y: above ? ay - 14 : ay + 24, text: v, "text-anchor": "middle", class: "tx-1 tx-b" }, g);
-        s("text", { x: clamp(t.y, half(k), w - half(k)), y: above ? ay - 26 : ay + 36, text: k, "text-anchor": "middle", class: "tx-3" }, g);
+        s("text", { x: clamp(t.y, half(v), w - half(v)), y: above ? ay - 14 : ay + 24, text: v, ...TA, class: "tx-1 tx-b" }, g);
+        s("text", { x: clamp(t.y, half(k), w - half(k)), y: above ? ay - 26 : ay + 36, text: k, ...TA, class: "tx-3" }, g);
       });
       s("rect", { x: sx - 1.25, y: ay - 8, width: 2.5, height: 16, rx: 1.25, fill: ink }, g);
       const edge = paint("--mat-opaque");
@@ -1669,13 +1657,13 @@
       if (num(o.spot) !== null) {
         const sx = x(o.spot);
         s("line", { x1: sx, x2: sx, y1: top - 6, y2: H - bot, stroke: paint("--label-2"), "stroke-width": 1, "stroke-dasharray": "2 3" }, svg);
-        s("text", { x: sx, y: top - 8, text: F.px(o.spot), "text-anchor": "middle", class: "tx-1 tx-b" }, svg);
+        s("text", { x: sx, y: top - 8, text: F.px(o.spot), ...TA, class: "tx-1 tx-b" }, svg);
       }
       const fmt = o.format || ((v) => F.money(v, true));
       const mx = Math.max(...vs), mn = Math.min(...vs);
       s("text", { x: w - right + 8, y: y(mx) + 4, text: o.maxLabel || fmt(mx), class: "tx-1 tx-b" }, svg);
       s("text", { x: w - right + 8, y: y(mn) + 4, text: o.minLabel || fmt(mn), class: "tx-1 tx-b" }, svg);
-      for (const t of niceTicks(Math.min(...xs), Math.max(...xs), w < 600 ? 4 : 6)) s("text", { x: x(t), y: H - 6, text: String(t), "text-anchor": "middle" }, svg);
+      for (const t of niceTicks(Math.min(...xs), Math.max(...xs), w < 600 ? 4 : 6)) s("text", { x: x(t), y: H - 6, text: String(t), ...TA }, svg);
       scrub(el, svg, {
         xs: P.map((p) => p[0]), top, bottom: H - bot, label: o.label,
         onMove: (i) => ({ dots: [{ x: P[i][0], y: P[i][1], color: P0[i][1] >= 0 ? "--up" : "--down" }], parts: [part("At " + F.px(P0[i][0]), "k"), h("b", { "data-tone": tone(P0[i][1]) }, fmt(P0[i][1]))] }),
@@ -1756,7 +1744,7 @@
     };
   }
   function paintFresh() {
-    const b = document.getElementById("fxFresh");
+    const b = $("fxFresh");
     if (!b) return;
     const { state, market: m, S } = freshState();
     const def = STATES[state] || STATES.pending;
@@ -1852,7 +1840,7 @@
   let paletteSource = null;
   let drawerClose = null;
   function ensurePalette() {
-    let d = document.getElementById("fxPal");
+    let d = $("fxPal");
     if (d) return d;
     d = h("dialog", { class: "ui-pal", id: "fxPal", "aria-label": "Find a name" },
       h("div", { class: "ui-pal-in" }, glyph("search"),
@@ -1865,7 +1853,7 @@
   }
   function openPalette() {
     const d = ensurePalette();
-    const q = document.getElementById("fxPalQ"), L = document.getElementById("fxPalL");
+    const q = $("fxPalQ"), L = $("fxPalL");
     let sel = 0, shown = [];
     const go = (t) => { d.close(); location.href = "/flows/ticker/?t=" + encodeURIComponent(t); };
     const render = (rows) => {
@@ -1890,7 +1878,7 @@
     const paintSel = () => {
       [...L.children].forEach((n, i) => n.setAttribute && n.classList.contains("ui-pal-opt") && n.setAttribute("aria-selected", String(i === sel)));
       q.setAttribute("aria-activedescendant", shown.length ? "fxPo" + sel : "");
-      const n = document.getElementById("fxPo" + sel);
+      const n = $("fxPo" + sel);
       if (n) n.scrollIntoView({ block: "nearest" });
     };
     let rows = [], loaded = false;
@@ -1909,17 +1897,17 @@
   }
   function initShell() {
     const body = document.body;
-    const bar = document.getElementById("fxBar");
+    const bar = $("fxBar");
     if (!body || !bar) return;
-    const side = document.getElementById("fxSide");
-    const btn = document.getElementById("fxSideBtn");
-    const scrim = document.getElementById("fxScrim");
+    const side = $("fxSide");
+    const btn = $("fxSideBtn");
+    const scrim = $("fxScrim");
     const syncBtn = () => {
       if (!btn) return;
       const shown = WIDE.matches ? !body.classList.contains("is-side-collapsed") : body.classList.contains("has-side-open");
       btn.setAttribute("aria-expanded", String(shown));
     };
-    const behind = ["fxBar", "flowsMain", "fxTabs", "askDock"].map((id) => document.getElementById(id)).filter(Boolean);
+    const behind = ["fxBar", "flowsMain", "fxTabs", "askDock"].map($).filter(Boolean);
     const setDrawer = (open) => {
       body.classList.toggle("has-side-open", open);
       for (const n of behind) n.inert = open;
@@ -1947,7 +1935,7 @@
       syncBtn();
     }
 
-    const title = document.getElementById("fxBarT");
+    const title = $("fxBarT");
     const heroes = [...document.querySelectorAll("[data-fx-hero]")];
     if (heroes.length && window.IntersectionObserver) {
       bar.classList.add("has-hero");
@@ -1982,7 +1970,7 @@
       if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && String(e.key).toLowerCase() === "k") { e.preventDefault(); closeDrawer(false); openPalette(); }
     });
 
-    const fresh = document.getElementById("fxFresh");
+    const fresh = $("fxFresh");
     if (fresh) {
       fresh.setAttribute("aria-controls", "fxPop");
       fresh.addEventListener("click", (e) => {
@@ -2001,26 +1989,26 @@
     init: initShell,
     openPalette,
     paletteSource: (fn) => { paletteSource = typeof fn === "function" ? fn : null; },
-    title: (text) => { const t = document.getElementById("fxBarT"); if (t && text) t.textContent = String(text); },
+    title: (text) => { const t = $("fxBarT"); if (t && text) t.textContent = String(text); },
     closeSidebar: () => { if (drawerClose) drawerClose(false); },
   });
 
   const chart = Object.freeze({
     mount, svgRoot, lin, niceTicks, pathOf, monoPath, vGrad, clipRect, spread, marker, scrub, part,
     line, area, sparkline, bars, diverging, heatmap, gauge, cone, levels, payoff,
-    LEVELS, PALETTES, shapeOf,
+    LEVELS, shapeOf,
   });
 
   window.FlowsUI = Object.freeze({
     MINUS, DASH, MID,
-    isNum, el, svgEl,
+    isNum,
     fmtSigned, fmtStamp,
     emptyState,
     staleness,
-    stripGeometry, scoreStrip,
+    scoreStrip,
     h, s, glyph, cssVar, num, clamp, F, tone, cap, reduced: () => REDUCED.matches,
     STATES, stateOf, worst, partial,
-    info, infoButton, stateButton, statePill, openInfo, closeInfo, announce,
+    info, infoButton, stateButton, openInfo, closeInfo, announce,
     roll, metric, updateMetric, metrics,
     ring, divRing, iconChip, gaugeChip, chips,
     segmented, tag, capsule, key, legend, robustness,
