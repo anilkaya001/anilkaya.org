@@ -547,7 +547,7 @@ export function jwksKeys(env, fetchImpl, now, force) {
   const memo = jwksMemo;
   if (memo.inflight) {
     const joined = memo.inflight;
-    return settledWithin(joined, JWKS_WAIT_MS, () => memo.inflight !== joined).then((how) => {
+    return settledWithin(joined, JWKS_WAIT_MS, () => memo.inflight !== null && memo.inflight !== joined).then((how) => {
       if (how === "settled") return joined;
       if (how === "moved") return memo.inflight || memo.keys;
       if (memo.inflight === joined) memo.inflight = null;

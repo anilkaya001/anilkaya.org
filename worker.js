@@ -498,7 +498,7 @@ function startMarketFlight(env) {
 async function revalidateMarketSnapshot(env) {
   for (let attempt = 0; attempt < 3; attempt++) {
     const flight = marketRevalidation || startMarketFlight(env);
-    const how = await FLOWS_LIVE.settledWithin(flight, MARKET_FLIGHT_WAIT_MS, () => marketRevalidation !== flight);
+    const how = await FLOWS_LIVE.settledWithin(flight, MARKET_FLIGHT_WAIT_MS, () => marketRevalidation !== null && marketRevalidation !== flight);
     if (how === "settled") return flight;
     if (how === "moved") continue;
     if (marketRevalidation === flight) marketRevalidation = null;
