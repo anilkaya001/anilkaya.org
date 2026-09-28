@@ -252,7 +252,9 @@ grep -i '^strict-transport-security: max-age=31536000' /tmp/css.headers
 The asset layer matches by path, so `/assets/css/base.css` without `?v=`
 reports the same immutable policy, and a request for a file that does not
 exist under `/assets/` is answered by the asset layer's `404.html` with its
-path's policy and no CSP. Only the responses `worker.js` still serves
+path's policy and no CSP, which under `/assets/css|js|fonts/*` is an
+immutable 404 (§9 says why the first deploy after a rollback bumps the
+version). Only the responses `worker.js` still serves
 (`/`, `/robots.txt`, `/sitemap.xml`, the Worker's 404 page) distinguish
 versioned from unversioned URLs and successful from failed status.
 
@@ -309,6 +311,19 @@ List versions and roll back to the last verified version:
 After rollback, rerun the API, course metadata, cache, encoding, auth, and D1
 smoke tests. A code rollback does not automatically undo D1 data migrations or
 dashboard Transform Rules; treat those as separate rollback items.
+
+The first forward deploy after any rollback must increment `assets/version.txt`
+(and every `?v=` reference, as in "Asset versioning" in AGENTS.md) before it
+ships, even when no browser asset changed. `/assets/*` is asset-first, and the
+asset layer answers a file the rolled-back version does not ship with its
+`404.html` under the path's `_headers` policy: for `/assets/css|js|fonts/*`
+that is `Cache-Control: public, max-age=31536000, immutable` (measured on the
+pinned wrangler dev, 2026-09-28: `/assets/js/definitely-missing.js?v=229`
+→ 404, `text/html`, immutable; `tests/worker-regression.mjs` pins it). A tab
+still holding the newer HTML that requests such a file stores that 404 for a
+year at that exact URL, and a roll-forward that keeps the same `?v=` never
+repairs that browser; the bump changes every URL, so the stored 404 is never
+asked for again.
 
 ---
 

@@ -113,6 +113,15 @@ try {
   const missingVersioned = await fetch(base + `/definitely-missing.js?v=${assetVersion}`);
   assert.equal(missingVersioned.status, 404);
   assert.notEqual(missingVersioned.headers.get("cache-control"), "public, max-age=31536000, immutable");
+  for (const missingAsset of [`/assets/js/definitely-missing.js?v=${assetVersion}`, "/assets/css/definitely-missing.css", `/assets/fonts/definitely-missing.woff2?v=${assetVersion}`]) {
+    const response = await fetch(base + missingAsset);
+    assert.equal(response.status, 404, `${missingAsset}: must be a 404`);
+    assertSecurity(response, false);
+    assert.match(response.headers.get("content-type") || "", /text\/html/, `${missingAsset}: the asset layer answers with its 404 page, not the Worker`);
+    assert.equal(response.headers.get("cache-control"), "public, max-age=31536000, immutable",
+      `${missingAsset}: asset-first, so the asset layer answers a missing file with 404.html under the path's _headers policy and no CSP; ` +
+      "DEPLOY.md §9 bumps assets/version.txt on the first forward deploy after a rollback so a URL that once 404'd is never referenced again");
+  }
   for (const privatePath of ["/.wrangler/cache/cf.json", "/articles/_template/", "/CNAME"]) {
     assert.equal((await fetch(base + privatePath)).status, 404, `${privatePath} must not be a public asset`);
   }
