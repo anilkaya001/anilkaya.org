@@ -16,7 +16,6 @@ import { MARKET_STALE_MS, MARKET_CRON_STALE_MS, marketRefreshDue } from "../shar
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
-const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
 {
@@ -272,8 +271,8 @@ const NYSE_PUBLISHED = Object.freeze({
     if (/^\*\/\d+$/.test(field)) { const n = Number(field.slice(2)); return Array.from({ length: 60 / n }, (_, i) => i * n); }
     return field.split(",").map(Number);
   };
-  deep(minutesOf(HOUSEKEEPING_CRON), [0, 30], "housekeeping fires on the hour and the half hour");
-  deep(minutesOf(SUMMARY_CRON), [15, 45], "the summary on the quarters between, so the two never share a firing");
+  same(minutesOf(HOUSEKEEPING_CRON), [0, 30], "housekeeping fires on the hour and the half hour");
+  same(minutesOf(SUMMARY_CRON), [15, 45], "the summary on the quarters between, so the two never share a firing");
   const cadenceMs = 30 * 60 * 1000;
   ok(MARKET_CRON_STALE_MS < cadenceMs,
     `the housekeeping cron refreshes a market snapshot older than ${MARKET_CRON_STALE_MS / 60000} minutes: under its own ` +
