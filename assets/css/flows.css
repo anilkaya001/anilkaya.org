@@ -8,7 +8,7 @@
   --font-ui: var(--font-figure);
 
   --ground-base: #07090e;
-  --ground-sky: url("/assets/img/atmosphere.svg?v=229") center / cover no-repeat;
+  --ground-sky: url("/assets/img/atmosphere.svg?v=230") center / cover no-repeat;
   --ground:
     linear-gradient(180deg, rgba(6, 8, 12, 0.50) 0%, rgba(6, 8, 12, 0.70) 26%, rgba(7, 8, 10, 0.88) 42%, rgba(8, 8, 9, 0.94) 60%, rgba(7, 7, 8, 0.97) 100%),
     radial-gradient(70% 50% at 12% 0%, rgba(64, 132, 230, 0.10), transparent 70%),
@@ -1750,7 +1750,9 @@ td.c-num { white-space: nowrap; }
 .ui-fresh[data-state="live"] .ui-g { color: var(--up); }
 .ui-fresh[data-state="stale"] .ui-g { color: var(--warn); }
 .ui-fresh[data-state="pending"] .ui-g { color: var(--label-3); animation: ui-spin 6s linear infinite; }
-@media (max-width: 380px) { .ui-fresh .fx-fresh-l { display: none; } }
+.ui-fresh[data-state="out"] .ui-g, .ui-fresh[data-state="off"] .ui-g { color: var(--warn); }
+a.ui-fresh { text-decoration: none; }
+@media (max-width: 380px) { .ui-fresh:not([data-state="out"]) .fx-fresh-l { display: none; } }
 
 .fx-tabs { display: none; }
 @media (max-width: 767.98px) {

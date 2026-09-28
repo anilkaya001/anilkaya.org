@@ -3425,6 +3425,95 @@ try {
     await touch.close();
   }
 
+  {
+    const gate = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
+    const gp = await gate.newPage();
+    gp.on("pageerror", (e) => errors.push("gate: " + e.message));
+    await signIn(gp);
+    const strip = (u) => u.replace(/^https?:\/\/[^/]+/, "");
+    const nowsOf = () => gp.evaluate(() => performance.getEntriesByType("resource").map((e) => e.name.replace(/^https?:\/\/[^/]+/, ""))
+      .filter((u) => /^\/api\/flows\/now(\?|$)/.test(u)));
+    await gp.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await gp.waitForFunction(() => performance.getEntriesByType("resource").some((e) => /\/api\/flows\/now(\?|$)/.test(e.name)), null, { timeout: 15000 });
+    await gp.waitForTimeout(1500);
+    const nows = await nowsOf();
+    eq(nows.length, 1, `exactly one /api/flows/now request on load when a heartbeat runs, counted from this document's own resource timeline (${nows.join(" | ")})`);
+    ok(/[?&]k=/.test(nows[0]), `and it is the heartbeat's own keyed beat, whose body carries expected, so the pill asks nothing bare of its own (${nows[0]})`);
+
+    const navs = [];
+    gp.on("framenavigated", (f) => { if (f === gp.mainFrame()) navs.push(strip(f.url())); });
+    const api = [];
+    gp.on("request", (r) => { if (/\/api\/flows\//.test(r.url())) api.push(strip(r.url())); });
+    await gp.route(/\/api\/flows\//, (route) => route.fulfill({ status: 401, contentType: "application/json; charset=utf-8",
+      headers: { "Cache-Control": "no-store" }, body: JSON.stringify({ error: { code: "unauthorized", message: "Authentication required" } }) }));
+    await gp.goto(url("/flows/market/"), { waitUntil: "domcontentloaded" });
+    await gp.waitForSelector("#fxGate", { timeout: 15000 });
+    const issued = api.length;
+    await gp.waitForTimeout(2500);
+    eq(navs.length - 1, 1, `a 401 from /api/flows/* while the HTML was served signed-in reloads exactly once, never in a loop (${navs.join(" → ")})`);
+    eq(navs[1], "/flows/", "to the home route, which serves the sign-in form once the session is really gone");
+    eq(api.length, issued, `and once the signed-out state is shown the page issues no further API request (${api.length - issued} more)`);
+    const ctl = await gp.evaluate(() => {
+      const g = document.getElementById("fxGate"), f = document.getElementById("fxFresh"), r = g.getBoundingClientRect();
+      return { tag: g.tagName, href: g.getAttribute("href"), text: g.textContent.replace(/\s+/g, " ").trim(), visible: r.width > 0 && r.height > 0, freshHidden: !!f && f.hidden };
+    });
+    eq(ctl.tag, "A", "the shell shows a sign-in control");
+    eq(ctl.href, "/flows/login/", "linking to /flows/login/");
+    ok(/^Signed out/.test(ctl.text) && /sign in/i.test(ctl.text), `reading Signed out · sign in (${ctl.text})`);
+    ok(ctl.visible, "visible in the top bar");
+    ok(ctl.freshHidden, "in place of the freshness pill, which can say nothing about a session it cannot read");
+    await gp.setViewportSize({ width: 320, height: 640 });
+    const phone = await gp.evaluate(() => {
+      const g = document.getElementById("fxGate"), l = g.querySelector(".fx-fresh-l"), r = g.getBoundingClientRect();
+      return { name: g.getAttribute("aria-label"), label: getComputedStyle(l).display, right: r.right, over: document.documentElement.scrollWidth > innerWidth };
+    });
+    ok(/^Signed out/.test(phone.name || "") && /sign in/i.test(phone.name || ""), `at 320px the control keeps an accessible name (${phone.name})`);
+    ok(phone.label !== "none", "and its label stays visible where the freshness pill's label is hidden, so it is never a bare stop glyph");
+    ok(!phone.over && phone.right <= 320, `without overflowing the top bar (right edge ${phone.right})`);
+    await gp.setViewportSize({ width: 1280, height: 1000 });
+    await gp.unroute(/\/api\/flows\//);
+    await Promise.all([gp.waitForNavigation({ waitUntil: "domcontentloaded" }), gp.click("#fxGate")]);
+    ok(/\/flows\/login\/$/.test(gp.url()), `the control lands on the sign-in page (${gp.url()})`);
+    ok(await gp.$("form.flows-form"), "which carries the sign-in form");
+
+    const off = await gate.newPage();
+    off.on("pageerror", (e) => errors.push("edge: " + e.message));
+    const offNavs = [];
+    off.on("framenavigated", (f) => { if (f === off.mainFrame()) offNavs.push(strip(f.url())); });
+    await off.route(/\/api\/flows\//, (route) => route.fulfill({ status: 403, contentType: "text/html; charset=utf-8",
+      headers: { "cf-mitigated": "challenge" }, body: "<!doctype html><title>Just a moment</title><h1>Attention required</h1>" }));
+    await off.goto(url("/flows/market/"), { waitUntil: "domcontentloaded" });
+    await off.waitForSelector("#fxGate[data-state=off]", { timeout: 15000 });
+    await off.waitForTimeout(2500);
+    eq(offNavs.length, 1, `a 403 from the edge, an HTML body under cf-mitigated, reloads nothing (${offNavs.join(" → ")})`);
+    const said = await off.evaluate(() => document.getElementById("fxGate").textContent.replace(/\s+/g, " ").trim());
+    eq(said, "Unavailable", "and the shell shows a calm unavailable state");
+    const reason = await why(off, "#fxGate");
+    ok(reason && /challenge/.test(reason.lead), `with the edge's reason one tap away (${reason && reason.lead})`);
+    eq(await off.evaluate(() => document.getElementById("fxGate").getAttribute("aria-label")), "Unavailable", "named for assistive technology as well");
+    await gate.close();
+
+    const nost = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
+    await nost.addInitScript(() => { Object.defineProperty(window, "sessionStorage", { get() { throw new Error("SecurityError: storage disabled"); } }); });
+    const np = await nost.newPage();
+    np.on("pageerror", (e) => errors.push("no-storage: " + e.message));
+    await signIn(np);
+    const nNavs = [], nApi = [];
+    np.on("framenavigated", (f) => { if (f === np.mainFrame()) nNavs.push(strip(f.url())); });
+    np.on("request", (r) => { if (/\/api\/flows\//.test(r.url())) nApi.push(strip(r.url())); });
+    await np.route(/\/api\/flows\//, (route) => route.fulfill({ status: 401, contentType: "application/json; charset=utf-8",
+      headers: { "Cache-Control": "no-store" }, body: JSON.stringify({ error: { code: "unauthorized", message: "Authentication required" } }) }));
+    await np.goto(url("/flows/market/"), { waitUntil: "domcontentloaded" });
+    await np.waitForSelector("#fxGate", { timeout: 15000 });
+    const nIssued = nApi.length;
+    await np.waitForTimeout(2500);
+    eq(nNavs.length - 1, 1, `with sessionStorage throwing, the bound holds: one reload and then the control (${nNavs.join(" → ")})`);
+    eq(nApi.length, nIssued, `and no further API request (${nApi.length - nIssued} more)`);
+    ok(await np.evaluate(() => /(?:^|; )flows_gate=\d+/.test(document.cookie)),
+      "because the marker also lives in a same-site cookie, which exists wherever the session cookie that made the HTML signed-in does");
+    await nost.close();
+  }
+
   eq(errors.length, 0, `no uncaught page error across the whole session (${errors[0] || ""})`);
 
   console.log(`✓ flows-overview: ${checks} assertions — a one-glance cockpit that leads on the ` +

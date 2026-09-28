@@ -9,8 +9,9 @@ import { nyseHolidays, nyseEarlyCloses, closeUtcMs, etDayOf } from "../shared/fl
 import { briefAge } from "../shared/flows-ask.js";
 import { sessionsBetween } from "../shared/flows-cross.js";
 import { nextSessionAfter } from "../shared/flows-variation.js";
-import { serveNow, RTH_CRON, FOCUS_CRON } from "../shared/flows-live-worker.js";
+import { serveNow, RTH_CRON, FOCUS_CRON, HOUSEKEEPING_CRON, SUMMARY_CRON } from "../shared/flows-live-worker.js";
 import { LIVE_KEYS } from "../shared/flows-live.js";
+import { MARKET_STALE_MS, MARKET_CRON_STALE_MS, marketRefreshDue } from "../shared/markets.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -263,6 +264,30 @@ const NYSE_PUBLISHED = Object.freeze({
     "and live:focus promises the cadence its cron keeps, so its Live pill lapses when a tick is missed, not before");
   ok(start % step !== Number(rth[1]) % step && end - start > 60 - 2 * step,
     `the focus ticks (minute ${start} of every ${step}) fall between Tier 1's (minute ${rth[1]}), on every step of the hour`);
+  ok(crons.includes(`"${HOUSEKEEPING_CRON}"`) && crons.includes(`"${SUMMARY_CRON}"`),
+    "wrangler.toml carries the half-hour housekeeping clock and the quarter-hour summary clock beside them");
+  const minutesOf = (cron) => {
+    const field = cron.split(" ")[0];
+    if (/^\*\/\d+$/.test(field)) { const n = Number(field.slice(2)); return Array.from({ length: 60 / n }, (_, i) => i * n); }
+    return field.split(",").map(Number);
+  };
+  same(minutesOf(HOUSEKEEPING_CRON), [0, 30], "housekeeping fires on the hour and the half hour");
+  same(minutesOf(SUMMARY_CRON), [15, 45], "the summary on the quarters between, so the two never share a firing");
+  const cadenceMs = 30 * 60 * 1000;
+  ok(MARKET_CRON_STALE_MS < cadenceMs,
+    `the housekeeping cron refreshes a market snapshot older than ${MARKET_CRON_STALE_MS / 60000} minutes: under its own ` +
+    "30-minute cadence, so a snapshot it wrote is due again at its next firing even when that firing is early by a few seconds");
+  ok(MARKET_CRON_STALE_MS < MARKET_STALE_MS && MARKET_STALE_MS === 45 * 60 * 1000,
+    `and under the reader's ${MARKET_STALE_MS / 60000}-minute staleness, so the cron, not a reader, keeps the snapshot fresh: ` +
+    "before this the cron waited for 45 minutes of age and a reader in the window between found a stale snapshot and " +
+    "fetched eight Yahoo quotes inline");
+  eq(marketRefreshDue(26 * 60 * 1000, false), true, "outside the refresh window a 26-minute-old snapshot is refreshed");
+  eq(marketRefreshDue(25 * 60 * 1000, false), false, "a 25-minute-old one is not");
+  eq(marketRefreshDue(44 * 60 * 1000, true), true, "inside the window every firing refreshes");
+  eq(marketRefreshDue(0, true), true, "whatever the age");
+  eq(marketRefreshDue(Infinity, false), true, "a database with no snapshot is refreshed");
+  eq(marketRefreshDue(NaN, false), true, "and so is one whose age cannot be read");
+  eq(marketRefreshDue(-60 * 1000, false), false, "a snapshot stamped in the future counts as fresh");
 }
 
 {
@@ -299,9 +324,10 @@ const NYSE_PUBLISHED = Object.freeze({
         documentElement: { dataset: {}, style: {} }, hidden: false },
       fetch: (url) => {
         asked.push(String(url));
+        const body = typeof answer === "function" ? answer(asked.length - 1) : answer;
         return new Promise((resolve) => {
-          release = () => resolve({ ok: answer !== null, status: answer ? 200 : 503, headers: { get: () => null },
-            clone() { return this; }, json: async () => answer, text: async () => JSON.stringify(answer) });
+          release = () => resolve({ ok: body !== null, status: body ? 200 : 503, headers: { get: () => null },
+            clone() { return this; }, json: async () => body, text: async () => JSON.stringify(body) });
         });
       },
     };
@@ -366,6 +392,50 @@ const NYSE_PUBLISHED = Object.freeze({
     q.UI.freshness({ sessionDate: "2026-09-16", source: "a" });
     q.UI.freshness({ sessionDate: "2026-09-24", source: "b" });
     eq(q.UI.freshness.state(), "fresh", "without a primary the newest session still wins, as before");
+  }
+  {
+    const fresh = readFileSync(new URL("../assets/js/flows-fresh.js", import.meta.url), "utf8");
+    const closed = { phase: "closed", session: "2026-09-28", trading: false, endsAt: "2026-09-29T08:00:00.000Z" };
+    const p = pill("2026-09-28T18:00:00-04:00", (i) => ({ serverNow: Date.now(), expected: i ? "2026-09-28" : "2026-09-25", phase: closed, keys: {} }));
+    vm.runInContext(fresh, p.ctx);
+    const UI = p.ctx.window.FlowsUI;
+    UI.freshness({ sessionDate: "2026-09-25", source: "board", primary: true });
+    const hb = UI.heartbeat({ keys: ["market"], page: "overview" });
+    ok(p.asked.length === 1 && /\/api\/flows\/now\?k=market$/.test(p.asked[0]),
+      "A HEARTBEAT PAGE ACROSS THE NIGHTLY: at 18:00 ET Monday the heartbeat's keyed beat is the only /api/flows/now request");
+    eq(UI.freshness.state(), "closed", "and the pill holds closed while that beat is in flight rather than asking bare beside it");
+    await p.release();
+    eq(UI.freshness.state(), "closed", "the beat says the Friday session is still the expected one, so the Friday readings are current");
+    p.ctx.advance(179 * 60 * 1000);
+    UI.freshness.state();
+    eq(p.asked.length, 1, "for the rest of the evening nothing asks: the heartbeat sleeps through the closed phase and the pill agrees with it");
+    p.ctx.advance(60 * 1000);
+    eq(UI.freshness.state(), "closed", "at 21:00 ET the local calendar moves on to Monday and the pill asks once, holding its verdict while it does");
+    ok(p.asked.length === 2 && /\/api\/flows\/now$/.test(p.asked[1]),
+      "one bare /api/flows/now of its own, because a heartbeat that last answered three hours ago is asleep until pre-open, not running");
+    await p.release();
+    eq(UI.freshness.state(), "stale", "and the answer, expected 2026-09-28, turns the Friday readings stale: the archive landed and this tab is behind it");
+    ok(/Sep 25 session; the last completed session is Sep 28/.test(UI.freshness.details().lead), "which the popover says in words");
+    p.ctx.advance(4.5 * 3600 * 1000);
+    UI.freshness.state();
+    eq(p.asked.length, 2, "and it asks no more all night: the server's answer is the newer session and the local calendar has not moved again");
+    hb.stop();
+  }
+  {
+    const fresh = readFileSync(new URL("../assets/js/flows-fresh.js", import.meta.url), "utf8");
+    const p = pill("2026-09-28T21:30:00-04:00", null);
+    vm.runInContext(fresh, p.ctx);
+    const UI = p.ctx.window.FlowsUI;
+    UI.freshness({ sessionDate: "2026-09-25", source: "board", primary: true });
+    const hb = UI.heartbeat({ keys: ["market"], page: "overview" });
+    await p.release();
+    eq(UI.freshness.state(), "closed", "A HEARTBEAT WHOSE BEATS FAIL: for the first 20 s of the page the pill waits for the beat that never answers");
+    p.ctx.advance(25 * 1000);
+    eq(UI.freshness.state(), "closed", "then it asks for itself, holding its verdict while the request is out");
+    ok(p.asked.length === 2 && /\/api\/flows\/now$/.test(p.asked[1]), "a failed keyed beat is not a running heartbeat, so the pill's own fallback is not suppressed");
+    await p.release();
+    eq(UI.freshness.state(), "stale", "and when that fails too the local calendar's stale stands, as it did before the heartbeat existed");
+    hb.stop();
   }
 }
 

@@ -270,6 +270,9 @@ try {
     page.on("pageerror", (e) => errors.push(String(e)));
     await mount(page, full);
     eq(errors.length, 0, `${width}px: the ticker page paints a real engine card without throwing (${errors.join("; ")})`);
+    const nows = page._requested.filter((u) => /^now(\?|$)/.test(u));
+    eq(nows.length, 1, `${width}px: exactly one /api/flows/now request on load, the heartbeat's own (${nows.join(" | ")})`);
+    ok(/[?&]t=/.test(nows[0]), `${width}px: and it carries the ticker, so the first beat brings the quote (${nows[0]})`);
     const got = await page.evaluate(sweep);
     eq(got.mods.map((m) => m.id).join(" "), MODULES.join(" "), `${width}px: every module is mounted, in reading order`);
     for (const m of got.mods) {

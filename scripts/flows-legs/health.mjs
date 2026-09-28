@@ -3,6 +3,8 @@ import { timeMs } from "../../shared/flows-live.js";
 
 export const HEALTH = Object.freeze({
   focusCron: "3-58/5 13-21 * * MON-FRI",
+  summaryCron: "15,45 * * * *",
+  summaryStaleMin: 75,
   finalReadMin: 10,
   lastPassMin: 30,
   settleMin: 10,
@@ -365,6 +367,19 @@ export function healthChecks({ sessionDate, now = Date.now(), clockRead = null, 
     failures.push(`HEALTH: the Worker's clock could not be read (${readFailed(clockRead) ? said(clockRead) : "no clock"})`);
   } else {
     const tier1 = clock.tier1 && typeof clock.tier1 === "object" ? clock.tier1 : null;
+    if (!Object.hasOwn(clock, "summaryAt")) {
+      notes.push("the Worker's clock carries no summary telemetry (a Worker older than this check)");
+    } else {
+      const summaryAt = timeMs(clock.summaryAt);
+      if (!Number.isFinite(summaryAt)) {
+        failures.push(`HEALTH: the summary cron has never completed a firing (is ${HEALTH.summaryCron} registered? ` +
+          "wrangler triggers deploy)");
+      } else if (now - summaryAt > HEALTH.summaryStaleMin * 60000) {
+        failures.push(`HEALTH: the summary cron last completed a firing at ${etTime(summaryAt, sessionDate)}, more than ` +
+          `${HEALTH.summaryStaleMin} minutes before this check (is ${HEALTH.summaryCron} registered? if it is, its firings ` +
+          "are dying: the Worker's logs say)");
+      }
+    }
     if (tier1 && tier1.why === "off") {
       notes.push("FLOWS_LIVE_MODE is off, so the live layer is not checked");
       return { applies: true, why: "live-off", failures, warnings, notes };

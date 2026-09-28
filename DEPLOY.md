@@ -20,7 +20,7 @@ unreviewed files are present.
 
 ## 2. Install the pinned toolchain and run every gate
 
-Node.js 22 or newer is required by the committed test toolchain.
+Node.js 22.13 or newer is required by the committed test toolchain.
 
 ```bash
 # Regeneration must be a no-op for the committed authoring sources.
@@ -96,8 +96,10 @@ cross-user isolation; do not split this batch into non-transactional writes.
 - Worker name: `anilkaya`
 - Static binding: `ASSETS`
 - D1 binding: `DB` → database `iewt`
-- `run_worker_first = true`
+- `run_worker_first = ["/*", "!/assets/*"]`
 - `html_handling = "auto-trailing-slash"`
+- a root `_headers` file, uploaded with the static bundle and never served,
+  carrying the asset-first `/assets/*` policy
 
 Required secret bindings:
 
@@ -236,9 +238,30 @@ grep -i '^cache-control: public, max-age=31536000, immutable' /tmp/css.headers
 curl -fsSI https://anilkaya.org/ | grep -i '^cache-control: no-cache'
 ```
 
+The versioned stylesheet is served asset-first by the edge, without invoking
+`worker.js`; its headers come from the root `_headers` file. Check that the
+policy reached production, and that no dashboard rule added a CSP to it:
+
+```bash
+grep -i '^x-frame-options: DENY' /tmp/css.headers
+grep -i '^x-content-type-options: nosniff' /tmp/css.headers
+grep -i '^strict-transport-security: max-age=31536000' /tmp/css.headers
+! grep -qi '^content-security-policy' /tmp/css.headers
+```
+
+The asset layer matches by path, so `/assets/css/base.css` without `?v=`
+reports the same immutable policy, and a request for a file that does not
+exist under `/assets/` is answered by the asset layer's `404.html` with its
+path's policy and no CSP, which under `/assets/css|js|fonts/*` is an
+immutable 404 (§9 says why the first deploy after a rollback bumps the
+version). Only the responses `worker.js` still serves
+(`/`, `/robots.txt`, `/sitemap.xml`, the Worker's 404 page) distinguish
+versioned from unversioned URLs and successful from failed status.
+
 Any byte mismatch or decoding error is a release blocker. Do not “fix” it by
-rebuilding an asset response from a plain init dictionary; the finalizer must
-retain `new Response(response.body, response)`.
+rebuilding an asset response from a plain init dictionary; for the responses
+`worker.js` still serves, the finalizer must retain
+`new Response(response.body, response)`.
 
 ### Domain behavior
 
@@ -288,6 +311,19 @@ List versions and roll back to the last verified version:
 After rollback, rerun the API, course metadata, cache, encoding, auth, and D1
 smoke tests. A code rollback does not automatically undo D1 data migrations or
 dashboard Transform Rules; treat those as separate rollback items.
+
+The first forward deploy after any rollback must increment `assets/version.txt`
+(and every `?v=` reference, as in "Asset versioning" in AGENTS.md) before it
+ships, even when no browser asset changed. `/assets/*` is asset-first, and the
+asset layer answers a file the rolled-back version does not ship with its
+`404.html` under the path's `_headers` policy: for `/assets/css|js|fonts/*`
+that is `Cache-Control: public, max-age=31536000, immutable` (measured on the
+pinned wrangler dev, 2026-09-28: `/assets/js/definitely-missing.js?v=229`
+→ 404, `text/html`, immutable; `tests/worker-regression.mjs` pins it). A tab
+still holding the newer HTML that requests such a file stores that 404 for a
+year at that exact URL, and a roll-forward that keeps the same `?v=` never
+repairs that browser; the bump changes every URL, so the stored 404 is never
+asked for again.
 
 ---
 
@@ -421,10 +457,13 @@ it unlocks and what tells you it has lapsed.
    `wrangler d1 execute iewt --remote --command "PRAGMA table_info(users)"`
    before applying it.
 5. **Optional: Workers Paid ($5/month).** It removes the 100,000
-   requests-a-day cliff (every static asset passes through the Worker, so the
-   cliff would take the Lab and the landing page down with Flows) and the 10 ms
-   CPU cap, which is what forces Tier 2 onto GitHub Actions. No code change is
-   needed to switch.
+   requests-a-day cliff (HTML, the APIs and the heartbeat still pass through
+   the Worker; `/assets/*` is served asset-first and no longer counts, so the
+   cliff would still take the Lab and the landing page down with Flows, only
+   later) and the 10 ms CPU cap, which is what forces Tier 2 onto GitHub
+   Actions and is why the board summary refresh has a Worker cron of its own
+   (`15,45 * * * *`, section 10.5i): four of the five crons the Free plan
+   allows an account are registered. No code change is needed to switch.
 
 Nothing routine is left: a weekly keepalive keeps GitHub from disabling the
 scheduled workflows after 60 days without a commit, a weekly strict probe turns
@@ -1617,12 +1656,61 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   Friday 2026-09-25. `tests/flows-live-contract.mjs` refuses a numeric weekday
   in any Worker cron. GitHub Actions schedules use standard cron, where `1-5`
   is Monday to Friday, so the workflow files keep their numbers.
-  `*/30 * * * *` refreshes the market snapshot,
+  `*/30 * * * *` refreshes the landing page's market snapshot,
   dispatches the nightly at or after 17:15 ET (once more after 18:15 ET if meta
-  is still behind), refreshes the board summary, and prunes `flows_tape` rows not
+  is still behind), and prunes `flows_tape` rows not
   served for a week. It logs `nightly missing` from 21:00 ET (close + 300
   minutes) when meta is still behind: the scheduled nightly lands about 20:00
-  ET, so the old close + 180 fired falsely every weekday evening.
+  ET, so the old close + 180 fired falsely every weekday evening. The snapshot
+  is refreshed on every firing inside the refresh window, without reading the
+  stored row first, and, outside it, when the stored one is older than 25
+  minutes: under the cron's own cadence, so a
+  snapshot the cron wrote is due again at its next firing. Until 2026-09-27 the
+  cron waited for 45 minutes of age, the same threshold `/api/markets` used, so
+  outside market hours the snapshot was stale for about 15 of every 60 minutes
+  and every landing-page visit in that window fetched eight Yahoo quotes
+  inline, two hosts and a 5 s timeout each, before answering (production at
+  19:46 UTC that day: updated 18:46, age 60 minutes). `/api/markets` now serves
+  the stored snapshot at once whenever one exists and refreshes a stale one in
+  `ctx.waitUntil`, single-flight per isolate; only a database with no snapshot
+  fetches inline. The payload's own `updatedAt` is the instant its quotes were
+  fetched, and a failed refresh re-dates the row without touching it, so old
+  quotes are never re-stamped as new.
+- **The board summary is its own firing.** `15,45 * * * *`, the fourth Worker
+  cron, runs `refreshFlowsSummary` and nothing else, on the quarter hours
+  between the housekeeping firings. It shared the housekeeping firing until
+  2026-09-27: refreshing the summary parses the 118 KB brief, and a harness in
+  the thread CPU clock over the production mirror (the brief, `live:alerts`
+  and `live:market` as of 2026-09-25, D1 as an in-process SQLite whose own CPU
+  is subtracted, twenty fresh processes each) put that firing's first run at
+  14.5 ms mean (11.4 to 19.2) against the Free plan's 10 ms cap. When the cap
+  struck, the market refresh and the nightly dispatch, whose D1 writes were
+  queued behind the summary's parse in the same invocation, died with it. Split,
+  the housekeeping firing's first run measures 7.6 ms mean (3.7 to 10.4) and the
+  summary's 10.5 ms mean (8.7 to 12.8); warm, 2.9 ms and 1.4 ms. A summary
+  firing the cap kills loses only that refresh, which its own stamp logic
+  retries at the next quarter hour. The summary's own due logic is unchanged,
+  but a firing with nothing to do no longer fetches the payload: it reads the
+  stamp's four inputs (the brief row's `updated_at`, the two live rows' stamps,
+  the prior summary and the clock) in one D1 batch and reaches for the 118 KB
+  payload only when the stamp says work is due. With the D1 client's JSON
+  round trip modelled in the same harness, that firing's first run fell from
+  7.5 ms mean (5.5 to 10.2) to 5.4 ms (3.7 to 8.2) and its warm run from
+  3.1 ms to 0.9 ms: the 118 KB row's deserialisation, 48 times a day, was the
+  firing's whole cost. Every completed summary firing then stamps
+  `flows_clock.summary_at` with its scheduled instant, after
+  `refreshFlowsSummary` resolves and never inside it, so a firing the cap
+  kills leaves the stamp where it was. The nightly health gate reads it
+  through the ingest clock key (`summaryAt`) and fails with `HEALTH: the
+  summary cron has never completed a firing (is 15,45 * * * * registered?
+  wrangler triggers deploy)` while it is null, or names the last completed
+  firing once it is more than 75 minutes old, two firings lost in a row on
+  the 30-minute cadence; `migrations/0014_flows_clock_summary.sql` adds the
+  column and the Worker's first-use path adds it to a table that lacks it.
+  The housekeeping firing carries no safety net for a missing summary cron on
+  purpose: one that stamped `summary_at` would hide the gate's signal, and one
+  that did not would re-couple the summary's parse to the housekeeping firing
+  for as long as the cron was missing, the coupling the split removed.
 - **The focus modules run on the Worker's own clock.** `3-58/5 13-21 * * MON-FRI`,
   the third Worker cron, fires at minutes ending in 3 and 8, between Tier 1's,
   and writes `live:focus` for Home's Metals and Leaders modules. It is due
@@ -1889,9 +1977,12 @@ Out-of-band steps before the first deploy of this layer:
    `./tests/node_modules/.bin/wrangler d1 execute iewt --remote --file=./migrations/0010_flows_live.sql`
    The Tier 1 telemetry columns come from `migrations/0011_flows_clock_tier1.sql`
    (three `ALTER TABLE ... ADD COLUMN`, so not re-runnable: a second run fails on
-   the duplicate column and changes nothing). The Worker's first-use path adds
-   any of the three the production table lacks and tolerates a duplicate column,
-   so the table upgrades itself on the first request after deploy.
+   the duplicate column and changes nothing), the verdict columns from
+   `migrations/0012_flows_clock_verdict.sql` and the summary firing's stamp,
+   `summary_at`, from `migrations/0014_flows_clock_summary.sql`. The Worker's
+   first-use path adds any of the seven the production table lacks and
+   tolerates a duplicate column, so the table upgrades itself on the first
+   request after deploy.
 2. Nothing to mint. The live workflow holds no shared secret: it runs with
    `permissions: id-token: write`, asks the runner for a GitHub OIDC token with
    the audience `https://anilkaya.org/api/flows/ingest#live`, and the Worker
@@ -1924,8 +2015,9 @@ Out-of-band steps before the first deploy of this layer:
    token's non-secret claims.
 3. `GITHUB_DISPATCH_TOKEN` and the Worker's `UW_API_KEY`: section 10.0, items 1
    and 2.
-4. After deploy, confirm all three crons are registered (`wrangler triggers` or
-   the dashboard) and read `live:market` on `/api/flows/lk?k=market` at 09:36 ET
+4. After deploy, confirm all four crons are registered (`wrangler triggers` or
+   the dashboard: Tier 1, the focus tick, `*/30 * * * *` and `15,45 * * * *`)
+   and read `live:market` on `/api/flows/lk?k=market` at 09:36 ET
    and `live:focus` on `/api/flows/lk?k=focus` at 09:38 ET.
    The tick instants in D1 prove it without dashboard access: `flows_live.read_at`
    for `live:market` is the Tier 1 cron's scheduled time, and only
@@ -1946,19 +2038,26 @@ Out-of-band steps before the first deploy of this layer:
    `./tests/node_modules/.bin/wrangler triggers deploy` or under the Worker's
    Settings → Triggers. Until then the handler routes an unknown trigger by
    instant rather than by string (`cronJob` in `shared/flows-live-worker.js`):
-   inside the 13–21 UTC weekday window it runs housekeeping on the half hour,
-   the focus tick at minutes ending in 3 or 8 and Tier 1 at every other minute,
-   so Tier 1 runs at a stale trigger's cadence instead of not at all, and no job
-   ever runs at another's minutes. That fallback does not reach the focus tick.
-   Under the previous two triggers the handler matches both strings exactly, and
-   under the older `*/15 * * * *` every firing lands on a minute ending in 0 or
-   5, so no firing is ever routed to the focus tick. It does not run at all
-   until `3-58/5 13-21 * * MON-FRI` is registered. Home then shows the nightly
-   rows, or `live:strips` when a Tier 2 run lands. The nightly health gate
-   fails that evening with `HEALTH: live:focus has never been written (is
-   3-58/5 13-21 * * MON-FRI registered? wrangler triggers deploy)`, and
+   the half hour is housekeeping's and the quarter hour the summary's on any
+   day; inside the 13–21 UTC weekday window it runs the focus tick at minutes
+   ending in 3 or 8 and Tier 1 at every other minute, and outside it every
+   other minute is housekeeping's, so no job ever runs at another's minutes.
+   What a stale set actually runs follows from its minutes. The three strings
+   registered before the summary cron match exactly, so Tier 1, the focus tick
+   and housekeeping run and the summary never does: housekeeping no longer
+   carries it. Under the older `*/15 * * * *` every firing lands on the hour,
+   the half hour or a quarter hour, so it runs housekeeping and the summary and
+   never Tier 1 or the focus tick. Each of the four runs only once its own cron
+   is registered, and the nightly health gate says which is missing that
+   evening: `HEALTH: Tier 1 never ticked on <date>` for Tier 1, `HEALTH:
+   live:focus has never been written (is 3-58/5 13-21 * * MON-FRI registered?
+   wrangler triggers deploy)` for the focus tick, and `HEALTH: the summary cron
+   has never completed a firing (is 15,45 * * * * registered? wrangler triggers
+   deploy)` for the summary, read from `flows_clock.summary_at` through the
+   ingest clock key. Home shows the nightly rows, or `live:strips` when a
+   Tier 2 run lands, until the focus cron is registered, and
    `tests/flows-live-contract.mjs` proves that no firing of either stale set
-   reaches the focus tick.
+   reaches the focus tick and that the gate names each missing cron.
 
 `FLOWS_LIVE_MODE = "off"` in `[vars]` is the instant rollback: no Tier 1 read, no
 focus read and no dispatch; pages fall back to the nightly rows.

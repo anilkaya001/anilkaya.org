@@ -23,7 +23,7 @@ export const LIVE_SCHEMA_SQL = Object.freeze([
     "early_close INTEGER, tape_at INTEGER, tape_moved_at INTEGER, live_dispatched_at INTEGER, live_done_at INTEGER, " +
     "live_redispatched_at INTEGER, nightly_day TEXT, nightly_dispatched_at INTEGER, nightly_redispatched_at INTEGER, " +
     "summary_stamp TEXT, updated_at INTEGER, tier1_at INTEGER, tier1_ok_at INTEGER, tier1_why TEXT, " +
-    "closed_probe_at INTEGER, closed_days TEXT, dispatch_why TEXT)",
+    "closed_probe_at INTEGER, closed_days TEXT, dispatch_why TEXT, summary_at INTEGER)",
   "CREATE TRIGGER IF NOT EXISTS flows_archive_immutable BEFORE UPDATE ON flows_payload " +
     "WHEN OLD.id GLOB 'board:*:[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' " +
     "OR OLD.id GLOB 'scores:[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' " +
@@ -33,6 +33,7 @@ export const LIVE_SCHEMA_SQL = Object.freeze([
 export const CLOCK_ADDED_COLUMNS = Object.freeze([
   Object.freeze(["tier1_at", "INTEGER"]), Object.freeze(["tier1_ok_at", "INTEGER"]), Object.freeze(["tier1_why", "TEXT"]),
   Object.freeze(["closed_probe_at", "INTEGER"]), Object.freeze(["closed_days", "TEXT"]), Object.freeze(["dispatch_why", "TEXT"]),
+  Object.freeze(["summary_at", "INTEGER"]),
 ]);
 
 export async function upgradeClockColumns(db) {
@@ -61,16 +62,20 @@ export async function upgradeClockColumns(db) {
 export const RTH_CRON = "1-59/5 13-21 * * MON-FRI";
 export const FOCUS_CRON = "3-58/5 13-21 * * MON-FRI";
 export const HOUSEKEEPING_CRON = "*/30 * * * *";
+export const SUMMARY_CRON = "15,45 * * * *";
 
 export function cronJob(cron, at) {
   if (cron === RTH_CRON) return "rth";
   if (cron === FOCUS_CRON) return "focus";
   if (cron === HOUSEKEEPING_CRON) return "housekeeping";
+  if (cron === SUMMARY_CRON) return "summary";
   const d = new Date(Number.isFinite(at) ? at : Date.now());
   const weekday = d.getUTCDay() >= 1 && d.getUTCDay() <= 5;
   const hour = d.getUTCHours();
   const minute = d.getUTCMinutes();
-  if (!(weekday && hour >= 13 && hour <= 21) || minute % 30 === 0) return "housekeeping";
+  if (minute % 30 === 0) return "housekeeping";
+  if (minute % 30 === 15) return "summary";
+  if (!(weekday && hour >= 13 && hour <= 21)) return "housekeeping";
   return minute % 5 === 3 ? "focus" : "rth";
 }
 
@@ -89,7 +94,7 @@ const CLOCK_COLUMNS = Object.freeze({
   nightlyDay: "nightly_day", nightlyDispatchedAt: "nightly_dispatched_at",
   nightlyRedispatchedAt: "nightly_redispatched_at", summaryStamp: "summary_stamp",
   tier1At: "tier1_at", tier1OkAt: "tier1_ok_at", tier1Why: "tier1_why",
-  closedProbeAt: "closed_probe_at", closedDays: "closed_days", dispatchWhy: "dispatch_why",
+  closedProbeAt: "closed_probe_at", closedDays: "closed_days", dispatchWhy: "dispatch_why", summaryAt: "summary_at",
 });
 
 export function tier1Why(value) {
@@ -120,17 +125,50 @@ export function normalizeClock(row) {
   return out;
 }
 
+const CLOCK_ROW_SQL = "SELECT * FROM flows_clock WHERE id = 1";
+
 export async function readClock(db) {
   if (!db) return null;
-  const row = await db.prepare("SELECT * FROM flows_clock WHERE id = 1").first().catch(() => null);
+  const row = await db.prepare(CLOCK_ROW_SQL).first().catch(() => null);
   return normalizeClock(row);
 }
 
+export function clockDue(now = Date.now()) {
+  return !(clockMemo.clock !== undefined && now - clockMemo.at < CLOCK_MEMO_MS && clockMemo.at > 0);
+}
+
+const FLIGHT_POLL_MS = 50;
+
+export function settledWithin(promise, ms, movedOn) {
+  return new Promise((resolve) => {
+    let poll = null;
+    const finish = (value) => { clearTimeout(timer); clearInterval(poll); resolve(value); };
+    const timer = setTimeout(() => finish(false), ms);
+    if (typeof movedOn === "function") poll = setInterval(() => { if (movedOn()) finish("moved"); }, FLIGHT_POLL_MS);
+    promise.then(() => finish("settled"), () => finish("settled"));
+  });
+}
+
+export const FLIGHT_WAIT_MS = 2000;
+let clockFlight = null;
+
+function startClockFlight(env, now) {
+  const flight = readClock(env && env.DB).then((clock) => { memoClock(clock, now); return clock; })
+    .finally(() => { if (clockFlight === flight) clockFlight = null; });
+  clockFlight = flight;
+  return flight;
+}
+
 export async function cachedClock(env, now = Date.now()) {
-  if (clockMemo.clock !== undefined && now - clockMemo.at < CLOCK_MEMO_MS && clockMemo.at > 0) return clockMemo.clock;
-  const clock = await readClock(env && env.DB);
-  memoClock(clock, now);
-  return clock;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (!clockDue(now)) return clockMemo.clock;
+    const flight = clockFlight || startClockFlight(env, now);
+    const how = await settledWithin(flight, FLIGHT_WAIT_MS, () => !clockDue(now));
+    if (how === "settled") return flight;
+    if (how === "moved") return clockDue(now) ? memoizedClock(now) : clockMemo.clock;
+    if (clockFlight === flight) clockFlight = null;
+  }
+  return memoizedClock(now);
 }
 
 export function clockPatchStatement(db, patch, now) {
@@ -155,11 +193,11 @@ export function writeLiveStatement(db, key, text, meta, now) {
   ).bind(key, text, meta.readAt, meta.session, meta.cadenceS, meta.source, meta.writer, now);
 }
 
+const LIVE_ROW_SQL = "SELECT payload, read_at, session, cadence_s, source, writer, updated_at FROM flows_live WHERE id = ?";
+
 export async function readLive(db, key) {
   if (!db) return null;
-  const row = await db.prepare(
-    "SELECT payload, read_at, session, cadence_s, source, writer, updated_at FROM flows_live WHERE id = ?",
-  ).bind(key).first().catch(() => null);
+  const row = await db.prepare(LIVE_ROW_SQL).bind(key).first().catch(() => null);
   return row && row.payload ? liveRow(row) : null;
 }
 
@@ -486,6 +524,8 @@ export function tokenKind(offered, env, equal) {
 export const JWKS_TTL_MS = 60 * 60 * 1000;
 export const JWKS_RETRY_MS = 60 * 1000;
 export const JWKS_COLD_RETRY_MS = 5 * 1000;
+const JWKS_FETCH_TIMEOUT_MS = 4000;
+export const JWKS_WAIT_MS = JWKS_FETCH_TIMEOUT_MS + 1000;
 const emptyMemo = (url) => ({ url, keys: null, at: 0, triedAt: 0, inflight: null });
 let jwksMemo = emptyMemo(null);
 
@@ -505,23 +545,32 @@ export function jwksKeys(env, fetchImpl, now, force) {
   if (!url) return Promise.resolve(null);
   if (jwksMemo.url !== url) jwksMemo = emptyMemo(url);
   const memo = jwksMemo;
-  if (memo.inflight) return memo.inflight;
+  if (memo.inflight) {
+    const joined = memo.inflight;
+    return settledWithin(joined, JWKS_WAIT_MS, () => memo.inflight !== null && memo.inflight !== joined).then((how) => {
+      if (how === "settled") return joined;
+      if (how === "moved") return memo.inflight || memo.keys;
+      if (memo.inflight === joined) memo.inflight = null;
+      return memo.keys;
+    });
+  }
   const fresh = !!memo.keys && now - memo.at < JWKS_TTL_MS;
   const wait = memo.keys ? JWKS_RETRY_MS : JWKS_COLD_RETRY_MS;
   if ((fresh && !force) || now - memo.triedAt < wait) return Promise.resolve(memo.keys);
   memo.triedAt = now;
-  memo.inflight = fetchImpl(url, {
-    redirect: "manual", signal: AbortSignal.timeout(4000),
+  const flight = fetchImpl(url, {
+    redirect: "manual", signal: AbortSignal.timeout(JWKS_FETCH_TIMEOUT_MS),
     headers: { Accept: "application/json", "User-Agent": "anilkaya-flows-worker" },
   }).then((res) => (res.ok ? res.json().then(rsaKeys) : [])).catch(() => []).then((keys) => {
     if (keys.length) {
       memo.keys = keys;
       memo.at = now;
     }
-    memo.inflight = null;
+    if (memo.inflight === flight) memo.inflight = null;
     return memo.keys;
   });
-  return memo.inflight;
+  memo.inflight = flight;
+  return flight;
 }
 
 export async function oidcKind(offered, env, { fetchImpl = fetch, now = Date.now(), log = console } = {}) {
@@ -629,7 +678,7 @@ export function clockView(clock) {
 export function ingestClockView(clock) {
   const view = clockView(clock);
   return view ? { ...view, tier1: tier1View(clock),
-    dispatchWhy: typeof clock.dispatchWhy === "string" ? clock.dispatchWhy : null } : null;
+    dispatchWhy: typeof clock.dispatchWhy === "string" ? clock.dispatchWhy : null, summaryAt: isoOf(clock.summaryAt) } : null;
 }
 
 export async function serveIngestClock(env, { json, lab = false }) {
@@ -839,13 +888,19 @@ export async function refreshTape(env, ticker, now, { fetchVendor, heldText = nu
     readAt: Number.isFinite(readAt) ? readAt : now };
 }
 
+const TAPE_ROW_SQL = "SELECT payload, read_at, session, legs, refreshing_until, last_served FROM flows_tape WHERE ticker = ?";
+const firstOf = (res) => (res && res.results && res.results[0] ? res.results[0] : null);
+
 export async function serveTape(env, ctx, ticker, now, { fetchVendor, json, admit = null }) {
   const db = env.DB;
   const clock = await cachedClock(env, now);
   const phase = phaseAt(now, clock);
-  const read = () => db.prepare(
-    "SELECT payload, read_at, session, legs, refreshing_until, last_served FROM flows_tape WHERE ticker = ?",
-  ).bind(ticker).first().catch(() => null);
+  const read = () => db.prepare(TAPE_ROW_SQL).bind(ticker).first().catch(() => null);
+  const first = async () => {
+    if (!admit || !admit.known) return { row: await read(), known: null };
+    const [a, b] = await db.batch([db.prepare(TAPE_ROW_SQL).bind(ticker), admit.known]).catch(() => [null, null]);
+    return { row: firstOf(a), known: firstOf(b) };
+  };
   const respond = (row, how) => {
     const meta = { readAt: Number(row.read_at), session: row.session, cadenceS: TAPE_SPEC.cadenceS, klass: "tape",
       source: "ondemand" };
@@ -862,12 +917,12 @@ export async function serveTape(env, ctx, ticker, now, { fetchVendor, json, admi
   const pending = (how) => json({ ticker, status: "pending", why: how }, 200,
     { ...pendingHeaders("tape", now, clock), "X-Tape": how });
 
-  const row = await read();
+  const { row, known } = await first();
   const hasPayload = row && typeof row.payload === "string" && row.payload;
   const age = hasPayload ? now - Number(row.read_at) : Infinity;
   if (hasPayload && age <= tapeTtlMs(phase, row)) return respond(row, "fresh");
   const usable = hasPayload && (phase && phase.phase === "rth" ? age <= LIVE_BUDGET.tapeUsableMs : true);
-  if (!hasPayload && typeof admit === "function" && !(await admit(ticker))) {
+  if (!hasPayload && admit && !known && !(await admit.vendor(ticker))) {
     return json({ ticker, status: "absent", why: "unknown" }, 200, { "Cache-Control": "no-store", "X-Tape": "unknown" });
   }
 
@@ -939,21 +994,22 @@ export function overlayPulse(nightly, live, now, clock, { json }) {
     "X-Live-Overlay": "live:market", ...headers });
 }
 
-export async function readOverlayRows(db, nightlyKey, liveKey) {
-  const [a, b] = await db.batch([
-    db.prepare(
-      "SELECT payload, updated_at, json_extract(payload, '$.sessionDate') AS session, " +
-      "COALESCE(json_extract(payload, '$.readAt'), json_extract(payload, '$.generatedAt')) AS read_iso " +
-      "FROM flows_payload WHERE id = ?").bind(nightlyKey),
-    db.prepare("SELECT payload, read_at, session, cadence_s, source, writer, updated_at FROM flows_live WHERE id = ?")
-      .bind(liveKey),
-  ]);
-  const n = a && a.results && a.results[0] ? a.results[0] : null;
-  const l = b && b.results && b.results[0] ? b.results[0] : null;
+export const NIGHTLY_ROW_SQL =
+  "SELECT payload, updated_at, json_extract(payload, '$.sessionDate') AS session, " +
+  "COALESCE(json_extract(payload, '$.readAt'), json_extract(payload, '$.generatedAt')) AS read_iso " +
+  "FROM flows_payload WHERE id = ?";
+
+export async function readOverlayRows(db, nightlyKey, liveKey, now = Date.now()) {
+  const withClock = clockDue(now);
+  const statements = [db.prepare(NIGHTLY_ROW_SQL).bind(nightlyKey), db.prepare(LIVE_ROW_SQL).bind(liveKey)];
+  if (withClock) statements.push(db.prepare(CLOCK_ROW_SQL));
+  const [a, b, c] = await db.batch(statements);
+  if (withClock) memoClock(normalizeClock(firstOf(c)), now);
+  const n = firstOf(a), l = firstOf(b);
   return {
-    nightly: n && n.payload ? { payload: n.payload, updatedAt: Number(n.updated_at),
-      session: typeof n.session === "string" ? n.session.slice(0, 10) : null, readIso: n.read_iso } : null,
+    nightly: n && n.payload ? { payload: n.payload, updatedAt: n.updated_at, fresh: nightlyFreshMeta(n) } : null,
     live: l && l.payload ? liveRow(l) : null,
+    clock: clockMemo.clock,
   };
 }
 
@@ -980,10 +1036,8 @@ export async function liveBriefFeeds(db) {
   return feeds;
 }
 
-export async function liveBriefStamp(db) {
-  const res = await db.prepare(
-    "SELECT id, updated_at FROM flows_live WHERE id IN ('live:market', 'live:alerts')",
-  ).all().catch(() => null);
-  const rows = res && res.results ? res.results : [];
-  return rows.map((r) => `${r.id}@${r.updated_at}`).sort().join(",");
+export const LIVE_BRIEF_STAMP_SQL = "SELECT id, updated_at FROM flows_live WHERE id IN ('live:market', 'live:alerts')";
+
+export function liveBriefStampOf(rows) {
+  return (Array.isArray(rows) ? rows : []).map((r) => `${r.id}@${r.updated_at}`).sort().join(",");
 }

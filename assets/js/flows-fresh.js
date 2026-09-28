@@ -114,9 +114,11 @@
     var stopped = false;
     var phase = null;
     var phaseEndsAt = null;
+    var n = 0;
     var query = [];
     if (o.keys && o.keys.length) query.push("k=" + encodeURIComponent(o.keys.join(",")));
     if (o.nightly && o.nightly.length) query.push("n=" + encodeURIComponent(o.nightly.join(",")));
+    var noQuote = "/api/flows/now" + (query.length ? "?" + query.join("&") : "");
     if (o.ticker) query.push("t=" + encodeURIComponent(o.ticker));
     var url = "/api/flows/now" + (query.length ? "?" + query.join("&") : "");
 
@@ -130,9 +132,11 @@
       if (wait !== null) timer = setTimeout(beat, wait);
     }
 
-    function beat() {
+    function beat(asked) {
       if (stopped) return;
-      fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" } })
+      var quote = asked === true || phase !== "rth" || n % 2 === 0;
+      n++;
+      fetch(quote ? url : noQuote, { credentials: "same-origin", headers: { Accept: "application/json" } })
         .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
         .then(function (body) {
           backoff = 0;
@@ -158,7 +162,7 @@
 
     function onVisibility() {
       if (stopped) return;
-      if (document.hidden) { clearTimeout(timer); timer = null; } else beat();
+      if (document.hidden) { clearTimeout(timer); timer = null; } else beat(true);
     }
     document.addEventListener("visibilitychange", onVisibility);
     beat();

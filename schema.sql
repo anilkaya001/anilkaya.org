@@ -187,7 +187,8 @@ CREATE TABLE IF NOT EXISTS flows_clock (
   tier1_why               TEXT,
   closed_probe_at         INTEGER,
   closed_days             TEXT,
-  dispatch_why            TEXT
+  dispatch_why            TEXT,
+  summary_at              INTEGER
 );
 
 CREATE TRIGGER IF NOT EXISTS flows_archive_immutable

@@ -15,7 +15,7 @@ import { REVIEW_ITEM_BY_ID } from "./shared/review-manifest.js";
 import { COURSE_STAGE_BY_ID } from "./shared/stage-manifest.js";
 import { SKILL_BY_ID } from "./shared/skill-manifest.js";
 import { PROJECT_BY_ID } from "./shared/project-manifest.js";
-import { MARKET_INDICES, parseIndexQuote, buildSnapshot } from "./shared/markets.js";
+import { MARKET_INDICES, MARKET_STALE_MS, marketRefreshDue, parseIndexQuote, buildSnapshot } from "./shared/markets.js";
 
 import {
   rankChain, RANK_KEYS, crossesEarnings, numOrNull, parseOptionSymbol, ivConvention,
@@ -131,9 +131,8 @@ const FLOWS_SCHEMA_SQL = [
   ...FLOWS_LIVE.LIVE_SCHEMA_SQL,
 ];
 
-const MARKET_STALE_MS = 45 * 60 * 1000;
 const MARKET_FETCH_TIMEOUT_MS = 5000;
-const YAHOO_HOSTS = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"];
+const YAHOO_ORIGINS = ["https://query1.finance.yahoo.com", "https://query2.finance.yahoo.com"];
 
 const setAttr = (name, value) => ({ element: (el) => el.setAttribute(name, value) });
 
@@ -435,15 +434,20 @@ async function marketOp(env, op) {
   }
 }
 
-async function fetchIndexQuote(index) {
-  for (const host of YAHOO_HOSTS) {
+function marketQuoteOrigins(env) {
+  const raw = env && typeof env.MARKET_QUOTE_ORIGIN === "string" ? env.MARKET_QUOTE_ORIGIN.trim().replace(/\/+$/, "") : "";
+  return /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(raw) ? [raw] : YAHOO_ORIGINS;
+}
+
+async function fetchIndexQuote(index, origins) {
+  for (const origin of origins) {
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), MARKET_FETCH_TIMEOUT_MS);
       let response;
       try {
         response = await fetch(
-          "https://" + host + "/v8/finance/chart/" + encodeURIComponent(index.yahoo) + "?range=5d&interval=1d",
+          origin + "/v8/finance/chart/" + encodeURIComponent(index.yahoo) + "?range=5d&interval=1d",
           { signal: controller.signal, headers: { "User-Agent": "Mozilla/5.0 (compatible; anilkaya.org market board)", "Accept": "application/json" } },
         );
       } finally {
@@ -458,7 +462,8 @@ async function fetchIndexQuote(index) {
 }
 
 async function refreshMarketSnapshot(env) {
-  const settled = await Promise.allSettled(MARKET_INDICES.map(fetchIndexQuote));
+  const origins = marketQuoteOrigins(env);
+  const settled = await Promise.allSettled(MARKET_INDICES.map((index) => fetchIndexQuote(index, origins)));
   const quotes = settled.map((r) => (r.status === "fulfilled" ? r.value : null)).filter(Boolean);
   if (!quotes.length) return null;
   const now = Date.now();
@@ -472,38 +477,53 @@ async function refreshMarketSnapshot(env) {
   return payload;
 }
 
-async function refreshMarketSnapshotIfDue(env) {
-  const now = new Date();
-  if (!isRefreshWindow(now)) {
-    let row = null;
-    try {
-      row = await marketOp(env, () => env.DB.prepare(
-        "SELECT updated_at FROM market_snapshot WHERE id=1").first());
-    } catch { row = null; }
-    const age = row ? now.getTime() - Number(row.updated_at) : Infinity;
-    if (age <= MARKET_STALE_MS) return null;
-  }
-  return refreshMarketSnapshot(env);
-}
+const MARKET_FLIGHT_WAIT_MS = 2 * MARKET_FETCH_TIMEOUT_MS + 2000;
+let marketRevalidation = null;
 
-async function loadMarketSnapshot(env) {
-  let row = null;
-  try {
-    row = await marketOp(env, () => env.DB.prepare("SELECT payload, updated_at FROM market_snapshot WHERE id=1").first());
-  } catch { row = null; }
-  const age = row ? Date.now() - Number(row.updated_at) : Infinity;
-  if (age > MARKET_STALE_MS) {
-    const refreshed = await refreshMarketSnapshot(env).catch(() => null);
+function startMarketFlight(env) {
+  const flight = refreshMarketSnapshot(env).catch(() => null).then(async (refreshed) => {
     if (refreshed) return refreshed;
-
     const now = Date.now();
-    const payload = row ? row.payload : JSON.stringify({ quotes: [], updatedAt: now });
+    const payload = JSON.stringify({ quotes: [], updatedAt: now });
     await marketOp(env, () => env.DB.prepare(
       "INSERT INTO market_snapshot (id, payload, updated_at) VALUES (1, ?, ?) " +
       "ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at",
     ).bind(payload, now).run()).catch(() => {});
     return payload;
+  }).finally(() => { if (marketRevalidation === flight) marketRevalidation = null; });
+  marketRevalidation = flight;
+  return flight;
+}
+
+async function revalidateMarketSnapshot(env) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const flight = marketRevalidation || startMarketFlight(env);
+    const how = await FLOWS_LIVE.settledWithin(flight, MARKET_FLIGHT_WAIT_MS, () => marketRevalidation !== null && marketRevalidation !== flight);
+    if (how === "settled") return flight;
+    if (how === "moved") continue;
+    if (marketRevalidation === flight) marketRevalidation = null;
   }
+  return JSON.stringify({ quotes: [], updatedAt: Date.now() });
+}
+
+async function readMarketSnapshot(env) {
+  try {
+    return await marketOp(env, () => env.DB.prepare("SELECT payload, updated_at FROM market_snapshot WHERE id=1").first());
+  } catch { return null; }
+}
+
+async function refreshMarketSnapshotIfDue(env, at = Date.now()) {
+  const inWindow = isRefreshWindow(new Date(at));
+  const row = inWindow ? null : await readMarketSnapshot(env);
+  const age = row ? at - Number(row.updated_at) : Infinity;
+  if (!marketRefreshDue(age, inWindow)) return null;
+  return revalidateMarketSnapshot(env);
+}
+
+async function loadMarketSnapshot(env, ctx) {
+  const row = await readMarketSnapshot(env);
+  if (!row) return keepAlive(ctx, revalidateMarketSnapshot(env));
+  if (Date.now() - Number(row.updated_at) > MARKET_STALE_MS) keepAlive(ctx, revalidateMarketSnapshot(env));
   return row.payload;
 }
 
@@ -896,18 +916,17 @@ const FLOWS_TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
 
 const DATED_ARCHIVE_KEY_RE = /^(board:(long|short)|scores):\d{4}-\d{2}-\d{2}$/;
 
+const storedFrom = (row) => (row && row.payload
+  ? { payload: row.payload, updatedAt: row.updated_at, fresh: nightlyFreshMeta(row) }
+  : null);
+
 async function readFlowsPayload(env, key, trace) {
 
   if (!env.DB) { if (trace) trace.failed = true; return null; }
   await ensureFlowsTables(env);
-  const row = await env.DB.prepare(
-    "SELECT payload, updated_at, json_extract(payload, '$.sessionDate') AS session, " +
-    "COALESCE(json_extract(payload, '$.readAt'), json_extract(payload, '$.generatedAt')) AS read_iso " +
-    "FROM flows_payload WHERE id = ?"
-  ).bind(key).first().catch(() => { if (trace) trace.failed = true; return null; });
-  return row && row.payload
-    ? { payload: row.payload, updatedAt: row.updated_at, fresh: nightlyFreshMeta(row) }
-    : null;
+  const row = await env.DB.prepare(FLOWS_LIVE.NIGHTLY_ROW_SQL).bind(key).first()
+    .catch(() => { if (trace) trace.failed = true; return null; });
+  return storedFrom(row);
 }
 
 function nightlyFreshHeaders(stored) {
@@ -918,7 +937,10 @@ function nightlyFreshHeaders(stored) {
 const SPLIT_ENGINE_MARK = '"engine":{"status":"split"';
 
 async function readCardWithEngine(env, ticker, trace = {}) {
-  const stored = await readFlowsPayload(env, "card:" + ticker, trace);
+  return cardWithEngine(env, ticker, await readFlowsPayload(env, "card:" + ticker, trace), trace);
+}
+
+async function cardWithEngine(env, ticker, stored, trace = {}) {
   if (stored === null) return { stored: null, card: null, unreadable: false };
   let card;
   try { card = JSON.parse(stored.payload); } catch { return { stored, card: null, unreadable: true }; }
@@ -970,8 +992,9 @@ const KNOWN_SQL =
 const CLASS_TTL_S = 12 * 3600;
 const parseOr = (text, fallback) => { try { const v = JSON.parse(text); return v && typeof v === "object" ? v : fallback; } catch { return fallback; } };
 
-async function scheduledTonight(env, kind, ticker) {
-  const row = await env.DB.prepare(ROSTER_SQL).bind(ticker).first().catch(() => { throw storeGone(); });
+const firstRow = (res) => (res && res.results && res.results[0] ? res.results[0] : null);
+
+async function scheduledTonight(env, kind, row) {
   if (!row || typeof row.depth !== "string" || typeof row.session !== "string") return false;
   if (kind === "hist" && (row.depth === "index" || row.depth === "fund")) return false;
   const now = Date.now();
@@ -982,10 +1005,7 @@ async function scheduledTonight(env, kind, ticker) {
   return !!before && row.session === before.lastClosed;
 }
 
-async function liteCard(env, ticker) {
-  const [uni, gate] = await env.DB.batch([env.DB.prepare(LITE_SQL).bind(ticker), env.DB.prepare(GATE_SQL).bind(ticker)])
-    .catch(() => { throw storeGone(); });
-  const r = uni && uni.results && uni.results[0];
+function liteCard(ticker, r, g) {
   if (!r) return null;
   const units = parseOr(r.units, {}), cols = parseOr(r.cols, {});
   const u = {};
@@ -993,7 +1013,6 @@ async function liteCard(env, ticker) {
     const scale = Array.isArray(units[k]) ? Number(units[k][1]) : NaN;
     u[k] = Number.isFinite(v) && Number.isFinite(scale) && scale !== 0 ? v / scale : null;
   }
-  const g = gate && gate.results && gate.results[0];
   const card = {
     v: 1, ticker, status: "ok", lite: true, depth: "universe", sessionDate: r.session, generatedAt: r.generated,
     sector: typeof r.sector === "string" ? r.sector : null, n: Number(r.n) || null, rank: Number(r.i) + 1,
@@ -1037,18 +1056,19 @@ function quoteCard(ticker, row, now) {
 }
 
 async function absentKey(env, ctx, kind, ticker) {
-  if (await scheduledTonight(env, kind, ticker)) return json({ ticker, status: "pending" });
+  const keyed = [env.DB.prepare(ROSTER_SQL).bind(ticker)];
+  if (kind === "card") keyed.push(env.DB.prepare(LITE_SQL).bind(ticker), env.DB.prepare(GATE_SQL).bind(ticker));
+  const [roster, uni, gate] = await env.DB.batch(keyed).catch(() => { throw storeGone(); });
+  if (await scheduledTonight(env, kind, firstRow(roster))) return json({ ticker, status: "pending" });
   if (kind !== "card") return json({ ticker, status: "absent", why: "not-covered" });
-  const lite = await liteCard(env, ticker);
+  const lite = liteCard(ticker, firstRow(uni), firstRow(gate));
   if (lite) return lite;
   const verdict = await classifyTicker(env, ctx, ticker);
   if (verdict && verdict.known) return json(quoteCard(ticker, verdict.row, Date.now()));
   return json({ ticker, status: "absent", why: verdict ? "unknown" : "not-covered" });
 }
 
-async function tapeAdmits(env, ctx, ticker) {
-  const row = await env.DB.prepare(KNOWN_SQL).bind("card:" + ticker, ticker).first().catch(() => null);
-  if (row) return true;
+async function vendorAdmits(env, ctx, ticker) {
   const verdict = await classifyTicker(env, ctx, ticker);
   return !verdict || verdict.known;
 }
@@ -1142,24 +1162,29 @@ async function refreshFlowsSummary(env, at = Date.now()) {
   if (!env.DB) return;
   await ensureFlowsTables(env);
 
-  const stored = await readFlowsPayload(env, "brief");
+  const [briefRes, liveRes, priorRes, clockRes] = await env.DB.batch([
+    env.DB.prepare("SELECT updated_at FROM flows_payload WHERE id = 'brief'"),
+    env.DB.prepare(FLOWS_LIVE.LIVE_BRIEF_STAMP_SQL),
+    env.DB.prepare("SELECT fingerprint, llm, guard, generated_at FROM flows_ai_summary WHERE scope = ?").bind("board"),
+    env.DB.prepare("SELECT * FROM flows_clock WHERE id = 1"),
+  ]).catch(() => []);
+  const rowOf = (res) => (res && Array.isArray(res.results) && res.results.length ? res.results[0] : null);
+  const brief = rowOf(briefRes);
 
-  if (stored === null) return;
+  if (!brief) return;
 
   const signature = aiCallSignature(env);
-  const stamp = String(stored.updatedAt || 0) + "|" + (await FLOWS_LIVE.liveBriefStamp(env.DB)) + "|" + signature;
-  const [prior, clock] = await Promise.all([
-    env.DB.prepare(
-      "SELECT fingerprint, llm, guard, generated_at FROM flows_ai_summary WHERE scope = ?",
-    ).bind("board").first().catch(() => null),
-    FLOWS_LIVE.readClock(env.DB),
-  ]);
+  const stamp = String(brief.updated_at || 0) + "|" + FLOWS_LIVE.liveBriefStampOf(liveRes && liveRes.results) + "|" + signature;
+  const prior = rowOf(priorRes);
+  const clock = FLOWS_LIVE.normalizeClock(rowOf(clockRes));
   if (prior && clock && clock.summaryStamp === stamp) {
     const priorAge = typeof prior.generated_at === "string" ? at - Date.parse(prior.generated_at) : Infinity;
     if (!retryableGuard(prior.guard, priorAge)) return;
   }
   const markStamp = () => FLOWS_LIVE.clockPatchStatement(env.DB, { summaryStamp: stamp }, at).run().catch(() => {});
 
+  const stored = await readFlowsPayload(env, "brief");
+  if (stored === null) return;
   let index;
   try { index = JSON.parse(stored.payload); } catch { return; }
   index = (await briefWithLive(env, index)).index;
@@ -1219,6 +1244,11 @@ async function refreshFlowsSummary(env, at = Date.now()) {
   await write(said.text, true, said.model, null).catch(() => {});
 }
 
+async function summaryFiring(env, at) {
+  await refreshFlowsSummary(env, at);
+  if (env.DB) await FLOWS_LIVE.clockPatchStatement(env.DB, { summaryAt: at }, at).run();
+}
+
 async function readFlowsSummary(env, scope) {
   if (!env.DB) return null;
   try {
@@ -1241,31 +1271,27 @@ async function readFlowsSummary(env, scope) {
 const NEURON_GENERATING_MS = 90 * 1000;
 const NEURON_RETRY_MS = 5 * 60 * 1000;
 
-async function readNeuron(env, scope) {
-  if (!env.DB) return null;
-  try {
-    const row = await env.DB.prepare(
-      "SELECT version, fingerprint, summary, ideas, llm, model, guard, generated_at FROM flows_neuron WHERE scope = ?",
-    ).bind(scope).first();
-    if (!row) return null;
-    let ideas = [];
-    try { ideas = JSON.parse(typeof row.ideas === "string" ? row.ideas : "[]"); } catch { ideas = []; }
-    const engine = ideas && typeof ideas === "object" && !Array.isArray(ideas) && ideas.v === 3 ? ideas : null;
-    return {
-      version: Number(row.version) || 0,
-      fingerprint: typeof row.fingerprint === "string" ? row.fingerprint : null,
-      summary: typeof row.summary === "string" ? row.summary : "",
-      ideas: engine ? (Array.isArray(engine.ideas) ? engine.ideas : []) : Array.isArray(ideas) ? ideas : [],
-      engine: engine !== null,
-      verdict: engine && typeof engine.verdict === "string" ? engine.verdict : null,
-      claims: engine && Array.isArray(engine.claims) ? engine.claims : [],
-      refused: engine && Array.isArray(engine.refused) ? engine.refused : [],
-      llm: row.llm === 1,
-      model: typeof row.model === "string" ? row.model : null,
-      guard: typeof row.guard === "string" ? row.guard : null,
-      generatedAt: typeof row.generated_at === "string" ? row.generated_at : null,
-    };
-  } catch { return null; }
+const NEURON_ROW_SQL = "SELECT version, fingerprint, summary, ideas, llm, model, guard, generated_at FROM flows_neuron WHERE scope = ?";
+
+function neuronFrom(row) {
+  if (!row) return null;
+  let ideas = [];
+  try { ideas = JSON.parse(typeof row.ideas === "string" ? row.ideas : "[]"); } catch { ideas = []; }
+  const engine = ideas && typeof ideas === "object" && !Array.isArray(ideas) && ideas.v === 3 ? ideas : null;
+  return {
+    version: Number(row.version) || 0,
+    fingerprint: typeof row.fingerprint === "string" ? row.fingerprint : null,
+    summary: typeof row.summary === "string" ? row.summary : "",
+    ideas: engine ? (Array.isArray(engine.ideas) ? engine.ideas : []) : Array.isArray(ideas) ? ideas : [],
+    engine: engine !== null,
+    verdict: engine && typeof engine.verdict === "string" ? engine.verdict : null,
+    claims: engine && Array.isArray(engine.claims) ? engine.claims : [],
+    refused: engine && Array.isArray(engine.refused) ? engine.refused : [],
+    llm: row.llm === 1,
+    model: typeof row.model === "string" ? row.model : null,
+    guard: typeof row.guard === "string" ? row.guard : null,
+    generatedAt: typeof row.generated_at === "string" ? row.generated_at : null,
+  };
 }
 
 async function markNeuronGenerating(env, scope, fingerprint, model) {
@@ -1440,8 +1466,13 @@ async function tickerNeuron(env, ctx, ticker) {
     return json(neuronShape("unavailable", ticker, null, null,
       { note: "No store is bound to this route, so no reading can be read or written." }));
   }
+  await ensureFlowsTables(env);
   const trace = {};
-  const read = await readCardWithEngine(env, ticker, trace);
+  const [c, n] = await env.DB.batch([
+    env.DB.prepare(FLOWS_LIVE.NIGHTLY_ROW_SQL).bind("card:" + ticker),
+    env.DB.prepare(NEURON_ROW_SQL).bind(scope),
+  ]).catch(() => { trace.failed = true; return [null, null]; });
+  const read = await cardWithEngine(env, ticker, storedFrom(firstRow(c)), trace);
   if (trace.failed) return json(neuronShape("unavailable", ticker, null, null, { ...STORE_GONE, note: "The store could not be read." }));
   if (read.stored === null) {
     return json(neuronShape("pending", ticker, null, null,
@@ -1465,7 +1496,7 @@ async function tickerNeuron(env, ctx, ticker) {
         "which is a fact about the card and not about the name." }));
   }
   const fingerprint = FLOWS_NEURON.contextFingerprint(context) + "|" + aiCallSignature(env);
-  const prior = await readNeuron(env, scope);
+  const prior = neuronFrom(firstRow(n));
   const now = Date.now();
   const priorAge = prior && prior.generatedAt ? now - Date.parse(prior.generatedAt) : Infinity;
 
@@ -1703,21 +1734,26 @@ async function quoteResponse(env, ctx, ticker) {
   }
 }
 
-async function liveOverlay(env, key, stored) {
-  if (!env.DB) return null;
+async function readWithOverlay(env, key) {
+  if (!env.DB) return { stored: null, overlaid: null, failed: true };
+  await ensureFlowsTables(env);
+  const now = Date.now();
+  const rows = await FLOWS_LIVE.readOverlayRows(env.DB, key, key === "pulse" ? "live:market" : "live:alerts", now)
+    .catch(() => null);
+  if (!rows) {
+    const trace = {};
+    const stored = await readFlowsPayload(env, key, trace);
+    return { stored, overlaid: null, failed: !!trace.failed };
+  }
+  const { nightly: stored, live, clock } = rows;
+  if (!live) return { stored, overlaid: null, failed: false };
   try {
-    await ensureFlowsTables(env);
-    const now = Date.now();
-    const clock = await FLOWS_LIVE.cachedClock(env, now);
-    const live = await FLOWS_LIVE.readLive(env.DB, key === "pulse" ? "live:market" : "live:alerts");
-    if (!live) return null;
-    if (key === "flowalerts") {
-      return FLOWS_LIVE.overlayFlowalerts(stored ? { session: stored.fresh && stored.fresh.session } : null,
-        live, now, clock);
-    }
-    return stored ? FLOWS_LIVE.overlayPulse(stored, live, now, clock, { json }) : null;
+    const overlaid = key === "flowalerts"
+      ? FLOWS_LIVE.overlayFlowalerts(stored ? { session: stored.fresh && stored.fresh.session } : null, live, now, clock)
+      : stored ? FLOWS_LIVE.overlayPulse(stored, live, now, clock, { json }) : null;
+    return { stored, overlaid, failed: false };
   } catch {
-    return null;
+    return { stored, overlaid: null, failed: false };
   }
 }
 
@@ -1795,6 +1831,7 @@ async function buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit }) 
     ...(page > 1 ? { page } : {}),
   });
 
+  const cardPending = keepAlive(ctx, readCardWithEngine(env, ticker).catch(() => null));
   const [firstPage, candles, state, info, cardRead] = await Promise.all([
     chainPage(1),
     uwFetch(env, `/api/stock/${t}/ohlc/1d`, { timeframe: "5D" }),
@@ -1802,7 +1839,7 @@ async function buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit }) 
     uwFetch(env, `/api/stock/${t}/stock-state`, {}).catch(() => null),
 
     cachedTickerInfo(env, ctx, ticker),
-    readCardWithEngine(env, ticker).catch(() => null),
+    cardPending,
   ]);
 
   const unwrap = (r) => (Array.isArray(r) ? r : (r && r.data) || []);
@@ -2028,7 +2065,7 @@ function strategyEngine({ ticker, expiry, calls, puts, spot, card, nowMs }) {
   };
 }
 
-async function buildStrategyExpiry(env, ticker, expiry, { engine = false } = {}) {
+async function buildStrategyExpiry(env, ctx, ticker, expiry, { engine = false } = {}) {
   const t = encodeURIComponent(ticker);
   const page = (optionType, n) => uwFetch(env, `/api/stock/${t}/option-contracts`, {
 
@@ -2038,10 +2075,11 @@ async function buildStrategyExpiry(env, ticker, expiry, { engine = false } = {})
     ...(n > 1 ? { page: n } : {}),
   });
 
+  const cardPending = engine ? keepAlive(ctx, readCardWithEngine(env, ticker).catch(() => null)) : Promise.resolve(null);
   const [callsFirst, putsFirst, liveState, cardRead] = await Promise.all([
     page("call", 1), page("put", 1),
     engine ? uwFetch(env, `/api/stock/${t}/stock-state`, {}).catch(() => null) : Promise.resolve(null),
-    engine ? readCardWithEngine(env, ticker).catch(() => null) : Promise.resolve(null),
+    cardPending,
   ]);
 
   const gather = async (optionType, first) => {
@@ -2135,13 +2173,30 @@ async function buildStrategyExpiry(env, ticker, expiry, { engine = false } = {})
 }
 
 let flowsSchemaReady = false;
+let flowsSchemaFlight = null;
+function startFlowsSchemaFlight(env) {
+  const flight = (async () => {
+    try {
+      await env.DB.batch(FLOWS_SCHEMA_SQL.map((sql) => env.DB.prepare(sql)));
+      await FLOWS_LIVE.upgradeClockColumns(env.DB);
+      flowsSchemaReady = true;
+    } catch {}
+  })().finally(() => { if (flowsSchemaFlight === flight) flowsSchemaFlight = null; });
+  flowsSchemaFlight = flight;
+  return flight;
+}
 async function ensureFlowsTables(env) {
   if (flowsSchemaReady || !env.DB) return;
-  try {
-    await env.DB.batch(FLOWS_SCHEMA_SQL.map((sql) => env.DB.prepare(sql)));
-    await FLOWS_LIVE.upgradeClockColumns(env.DB);
-    flowsSchemaReady = true;
-  } catch {   }
+  for (let attempt = 0; attempt < 2 && !flowsSchemaReady; attempt++) {
+    const flight = flowsSchemaFlight || startFlowsSchemaFlight(env);
+    if (await FLOWS_LIVE.settledWithin(flight, FLOWS_LIVE.FLIGHT_WAIT_MS, () => flowsSchemaReady)) return;
+    if (flowsSchemaFlight === flight) flowsSchemaFlight = null;
+  }
+}
+
+function keepAlive(ctx, promise) {
+  if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(promise);
+  return promise;
 }
 
 function flowsThrottleKey(request, username) {
@@ -2403,7 +2458,7 @@ async function route(request, env, url, ctx) {
   if (path === "/api/markets") {
     requireMethod(request, ["GET", "HEAD"]);
 
-    return new Response(await loadMarketSnapshot(env), {
+    return new Response(await loadMarketSnapshot(env, ctx), {
       status: 200,
       headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "public, max-age=300" },
     });
@@ -2884,6 +2939,14 @@ async function route(request, env, url, ctx) {
     return redirect(new URL("/flows/", url).toString(), 308);
   }
 
+  if (path === "/flows/login/") {
+    requireMethod(request, ["GET", "HEAD"]);
+    return new Response(FLOWS_PAGES.loginPage(), {
+      status: 200,
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  }
+
   if (path === "/flows/login") {
     requireMethod(request, ["POST"]);
     requireSameOrigin(request);
@@ -3152,24 +3215,11 @@ async function route(request, env, url, ctx) {
       return passthrough(stored);
     }
 
-    if (path === "/api/flows/flowalerts") {
+    if (path === "/api/flows/flowalerts" || path === "/api/flows/pulse") {
 
-      const trace = {};
-      const stored = await readFlowsPayload(env, "flowalerts", trace);
-      const overlaid = await liveOverlay(env, "flowalerts", stored);
+      const { stored, overlaid, failed } = await readWithOverlay(env, path.slice("/api/flows/".length));
       if (overlaid) return overlaid;
-      if (trace.failed) throw storeGone();
-      if (stored === null) return json({ status: "pending" });
-      return passthrough(stored);
-    }
-
-    if (path === "/api/flows/pulse") {
-
-      const trace = {};
-      const stored = await readFlowsPayload(env, "pulse", trace);
-      const overlaid = await liveOverlay(env, "pulse", stored);
-      if (overlaid) return overlaid;
-      if (trace.failed) throw storeGone();
+      if (failed) throw storeGone();
       if (stored === null) return json({ status: "pending" });
       return passthrough(stored);
     }
@@ -3192,7 +3242,8 @@ async function route(request, env, url, ctx) {
       }
       await ensureFlowsTables(env);
       return FLOWS_LIVE.serveTape(env, ctx, ticker, Date.now(), {
-        json, fetchVendor: (p, params) => uwFetch(env, p, params), admit: (t) => tapeAdmits(env, ctx, t) });
+        json, fetchVendor: (p, params) => uwFetch(env, p, params),
+        admit: { known: env.DB.prepare(KNOWN_SQL).bind("card:" + ticker, ticker), vendor: (t) => vendorAdmits(env, ctx, t) } });
     }
 
     if (path === "/api/flows/political") {
@@ -3339,7 +3390,7 @@ async function route(request, env, url, ctx) {
       if (stored === null) return absentKey(env, ctx, kind, ticker);
       if (!stored.payload.includes(SPLIT_ENGINE_MARK)) return passthrough(stored);
       const trace = {};
-      const merged = await readCardWithEngine(env, ticker, trace);
+      const merged = await cardWithEngine(env, ticker, stored, trace);
       if (trace.failed) throw storeGone();
       if (!merged.card) return passthrough(stored);
       return json(merged.card, 200, { "X-Payload-Updated": String(stored.updatedAt || 0) });
@@ -3387,7 +3438,7 @@ async function route(request, env, url, ctx) {
           { method: "GET" }),
         wantsRefresh: url.searchParams.get("refresh") === "1",
         build: () => (expiry
-          ? buildStrategyExpiry(env, ticker, expiry, { engine })
+          ? buildStrategyExpiry(env, ctx, ticker, expiry, { engine })
           : buildStrategyContext(env, ctx, ticker)),
       });
     }
@@ -3479,16 +3530,18 @@ export default {
       })());
       return;
     }
+    if (job === "summary") {
+      guard("flows summary refresh failed", summaryFiring(env, at));
+      return;
+    }
 
-    guard("market refresh failed", refreshMarketSnapshotIfDue(env));
+    guard("market refresh failed", refreshMarketSnapshotIfDue(env, at));
 
     guard("flows nightly dispatch failed", (async () => {
       await ensureFlowsTables(env);
       await FLOWS_LIVE.nightlyTick(env, at);
       if (FLOWS_LIVE.pruneDue(at)) await FLOWS_LIVE.pruneTape(env, at);
     })());
-
-    guard("flows summary refresh failed", refreshFlowsSummary(env, at));
   },
 
   async fetch(request, env, ctx) {
