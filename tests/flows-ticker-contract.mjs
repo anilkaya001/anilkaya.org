@@ -77,8 +77,11 @@ async function mount(page, card, o = {}) {
     if (u.pathname.startsWith("/api/flows/")) {
       const key = u.pathname.slice("/api/flows/".length);
       requested.push(key + u.search);
+      if (o.trace) o.trace.push([key, "asked", performance.now()]);
+      if (o.delay && o.delay[key]) await new Promise((r) => setTimeout(r, o.delay[key]));
       let body = key === "board" ? (o.boards && o.boards[u.searchParams.get("side")]) || { status: "pending", rows: [] } : api[key];
       if (body === undefined) body = { status: "pending" };
+      if (o.trace) o.trace.push([key, "answered", performance.now()]);
       return route.fulfill({ status: (o.codes && o.codes[key]) || 200, contentType: "application/json", body: JSON.stringify(body) });
     }
     if (u.pathname.startsWith("/flows/ticker")) return route.fulfill({ contentType: "text/html; charset=utf-8", body: o.html || PAGE_HTML });
@@ -1865,6 +1868,116 @@ try {
     const last = await page.evaluate(() => ({ read: document.getElementById("ftVerdict").dataset.read, cov: !!document.getElementById("ftNeuronCov") }));
     ok(last.read === "card" && last.cov, "when the poll ends without wording, the card read stays and drops its promise");
     eq(errors.length, 0, `the polled verdicts throw nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  {
+    const trace = [];
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, full, { trace, delay: { card: 300, "card-x": 900, hist: 900 } });
+    const when = (k, ph) => { const e = trace.find((x) => x[0] === k && x[1] === ph); return e ? e[2] : Infinity; };
+    ok(["card", "card-x", "hist", "summary", "tape"].every((k) => when(k, "asked") < Infinity), `the full page asks for the card, its two companions, the Neuron summary and the tape (${trace.map((x) => x[0] + ":" + x[1]).join(" ")})`);
+    ok(when("card-x", "asked") < when("card", "answered") && when("hist", "asked") < when("card", "answered") && when("summary", "asked") < when("card", "answered"),
+       "card-x, hist and the summary are asked before the card answers: the companions are read in parallel with the card, not after it");
+    ok(when("tape", "asked") > when("card", "answered"), "the tape is asked only once the card has answered, so a name with no card never costs an on-demand tape read");
+    ok(when("tape", "asked") < when("card-x", "answered") && when("tape", "asked") < when("hist", "answered"), "but before the companions answer: it waits on neither them nor the paint");
+    const got = await page.evaluate(() => ({ mods: [...document.querySelectorAll("#ftGrid > section")].map((m) => m.id), px: document.querySelector("#ftPxV .visually-hidden").textContent, flows: document.querySelectorAll("#m-flow").length }));
+    eq(got.mods.join(" "), MODULES.join(" "), "and every module is mounted once the slow companions land");
+    eq(got.flows, 1, "with one Flow module, not one per tape arrival");
+    eq(errors.length, 0, `the parallel read throws nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  {
+    const session = full.sessionDate;
+    const at = Date.parse(session + "T23:00:00Z");
+    const tape = { v: 1, key: "tape", ticker: "LITE", session, units: { nd: "delta", net: "USD" },
+      prem: { status: "ok", readAt: new Date(at).toISOString(), t: ["13:35", "14:00", "15:00", "16:00"].map((x) => session + "T" + x + ":00Z"), nd: [0, 1200, 3400, 2100], net: [0, 2e5, 5.5e5, 4e5], ncp: [0, 3e5, 7e5, 6e5], npp: [0, 1e5, 1.5e5, 2e5] } };
+    const lite = { v: 1, ticker: "LITE", status: "ok", lite: true, depth: "universe", sessionDate: session, generatedAt: full.generatedAt, sector: "Basic Materials", n: 695, rank: 115,
+      u: { px: 72.52, chg: -0.0009, iv30: 0.47, ivp: 39, rsi: 51 }, pct: { iv30: 40 }, why: "not-covered", gate: null };
+    const trace = [];
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, lite, { neuron: { status: "unavailable" }, cardX: { status: "absent" }, hist: { status: "absent" }, tape, at, trace, delay: { "card-x": 600, hist: 600 } });
+    const when = (k, ph) => { const e = trace.find((x) => x[0] === k && x[1] === ph); return e ? e[2] : Infinity; };
+    ok(when("tape", "asked") > when("card", "answered") && when("tape", "answered") < when("card-x", "answered"), "on a lite card the tape is asked after the card and answers before the companions do");
+    const got = await page.evaluate(() => ({ mods: [...document.querySelectorAll("#ftGrid > section")].map((m) => m.id), flows: document.querySelectorAll("#m-flow").length }));
+    eq(got.mods.join(" "), "m-screen m-flow", `so the lite paint itself draws the Flow module from the tape that landed first (${got.mods.join(" ")})`);
+    eq(got.flows, 1, "exactly once");
+    eq(errors.length, 0, `the early lite tape throws nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  {
+    const card = clone(full);
+    const at = Date.parse(card.sessionDate + "T15:30:00Z");
+    const quote = (price, t) => ({ ticker: card.ticker, status: "ok", readAt: t, price, prevClose: 120, changePct: price / 120 - 1, open: 121, high: 124, low: 120.5, volume: 1e6, marketTime: "r", tapeTime: t });
+    let now = at;
+    const nowOf = (q) => ({ serverNow: now, phase: { phase: "rth", session: card.sessionDate, trading: true, endsAt: new Date(now + 3600e3).toISOString() }, keys: {}, quote: q });
+    const t1 = new Date(at - 150e3).toISOString(), t2 = new Date(at - 30e3).toISOString();
+    let served = quote(123.45, t1);
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, card, { now: nowOf(served), at });
+    await page.waitForFunction(() => document.querySelector("#ftLast .ft-live"), null, { timeout: 8000 });
+    await page.route("**/api/flows/now*", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(nowOf(served)) }));
+    const beat = async () => {
+      const done = page.waitForResponse((r) => r.url().includes("/api/flows/now"));
+      await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+      await done;
+      await page.waitForTimeout(200);
+    };
+    const snap = () => page.evaluate(({ t1, t2 }) => {
+      const w = window;
+      if (!w.__px) {
+        w.__px = { muts: [], nodes: [document.getElementById("ftPxV"), document.querySelector("#ftChg > *"), document.querySelector("#ftLast .ui-info"), document.querySelector("#ftHc svg")] };
+        const mo = new MutationObserver((l) => { for (const m of l) w.__px.muts.push(m.type + ":" + (m.target.id || m.target.nodeName) + (m.attributeName ? "@" + m.attributeName : "")); });
+        for (const id of ["ftPx", "ftLast", "fxFresh"]) mo.observe(document.getElementById(id), { subtree: true, childList: true, attributes: true, characterData: true });
+      }
+      const same = [document.getElementById("ftPxV"), document.querySelector("#ftChg > *"), document.querySelector("#ftLast .ui-info"), document.querySelector("#ftHc svg")].map((n, i) => n === w.__px.nodes[i]);
+      const muts = w.__px.muts.slice();
+      w.__px.muts.length = 0;
+      return { same, muts, px: document.querySelector("#ftPxV .visually-hidden").textContent, chg: document.querySelector("#ftChg > *").textContent, chgLabel: document.querySelector("#ftChg > *").getAttribute("aria-label"),
+        last: document.getElementById("ftLast").innerText.replace(/\s+/g, " ").trim(), pill: document.getElementById("fxFresh").innerText.trim(), F: { chg: window.FlowsUI.F.px(4.56) + "  " + window.FlowsUI.F.pct(0.038, 2), label: "Change against the previous close " + window.FlowsUI.F.px(4.56) + ", " + window.FlowsUI.F.pct(0.038, 2, true), t1: window.FlowsUI.F.time(t1), t2: window.FlowsUI.F.time(t2) } };
+    }, { t1, t2 });
+    const before = await snap();
+    eq(before.px, "123.45", `the first beat's quote is the headline price (${before.px})`);
+    ok(before.last.includes(before.F.t1) && before.pill === "Live", `read at its own time, with the pill Live (${before.last} / ${before.pill})`);
+    await beat();
+    await beat();
+    const quiet = await snap();
+    eq(quiet.muts.length, 0, `two beats that carry the same quote write nothing to the price, the last-read line or the pill (${quiet.muts.slice(0, 6).join(" ")})`);
+    ok(quiet.same.every(Boolean), `and leave the price, the change capsule, the info trigger and the hero chart in place (${quiet.same.join(",")})`);
+    eq(quiet.px + "|" + quiet.chg + "|" + quiet.last, before.px + "|" + before.chg + "|" + before.last, "reading exactly as before");
+    served = quote(124.56, t2);
+    await beat();
+    const moved = await snap();
+    eq(moved.px, "124.56", `a beat whose quote moved rolls the price (${moved.px})`);
+    eq(moved.chg, moved.F.chg, `and rewrites the change capsule's text in place (${moved.chg})`);
+    eq(moved.chgLabel, moved.F.label, "with its exact label");
+    ok(moved.last.includes(moved.F.t2) && !moved.last.includes(moved.F.t1), `and the read time (${moved.last})`);
+    ok(moved.same[1] && moved.same[2] && moved.same[3], `keeping the capsule, the info trigger and the hero chart, so an open tooltip stays anchored and no closure is left behind (${moved.same.join(",")})`);
+    ok(moved.muts.length > 0 && !moved.muts.some((m) => /^childList:(ftLast|ftChg)$/.test(m)), `the writes are text and attribute updates, never a rebuild of the last-read line or the capsule (${moved.muts.slice(0, 8).join(" ")})`);
+    const pop = await infoText(page, "#ftLast");
+    ok(/Live price/.test(pop) && /124\.56/.test(pop) && !/123\.45/.test(pop), `the kept trigger's tooltip reads the current quote, not the one it was built with (${(pop || "").replace(/\s+/g, " ").slice(0, 120)})`);
+    await page.click("#ftLast .ui-info");
+    const opened = await page.evaluate(() => { const p = document.getElementById("fxPop"); return { open: p.matches(":popover-open"), anchored: !!document.querySelector('#ftLast [aria-expanded="true"]'), focusIn: p.contains(document.activeElement), text: p.innerText.replace(/\s+/g, " ").slice(0, 40) }; });
+    ok(opened.open && opened.anchored && opened.focusIn && /Live price/.test(opened.text), `a click on the live trigger opens its tooltip on the line and focuses it (${JSON.stringify(opened)})`);
+    now = at + 6 * 60e3;
+    await page.clock.setFixedTime(new Date(now));
+    await beat();
+    const flipped = await page.evaluate(() => { const p = document.getElementById("fxPop"), b = document.querySelector("#ftLast .ui-info"); return { open: p.matches(":popover-open"), live: !!document.querySelector("#ftLast .ft-live"), cells: document.querySelectorAll("#ftLast [data-c]").length, expanded: document.querySelectorAll('[data-info][aria-expanded="true"]').length, focused: !!b && document.activeElement === b, text: document.getElementById("ftLast").innerText.replace(/\s+/g, " ").trim() }; });
+    ok(!flipped.live && flipped.cells === 3, `six minutes on, the same quote is past the live window and the line flips to last-read mode (${flipped.text})`);
+    ok(!flipped.open, "the tooltip that was open on the live trigger closes with it, instead of staying open on a button the rebuild detached");
+    eq(flipped.expanded, 0, "no info trigger on the page claims to be expanded");
+    ok(flipped.focused, "and focus, which was inside the tooltip, returns to the line's new trigger as closing the tooltip returns it to the old one");
+    const pop2 = await infoText(page, "#ftLast");
+    ok(/Last read/.test(pop2) && !/Live price/.test(pop2), `the new trigger's tooltip describes the mode the line now shows (${(pop2 || "").replace(/\s+/g, " ").slice(0, 60)})`);
+    eq(errors.length, 0, `the live beats throw nothing (${errors.join("; ")})`);
     await page.close();
   }
 
