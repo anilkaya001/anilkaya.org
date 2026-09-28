@@ -1681,20 +1681,25 @@
     do { t -= 864e5; } while ([0, 6].includes(new Date(t).getUTCDay()));
     return new Date(t).toISOString().slice(0, 10);
   }
-  const SRV = { day: null, at: 0, ph: null, until: 0, busy: false, asked: 0, local: null };
+  const T0 = Date.now();
+  const SRV = { day: null, at: 0, ph: null, until: 0, busy: 0, asked: 0, local: null, hb: false };
   function takeNow(b) {
     if (!b) return;
-    if (isoDay(b.expected)) { SRV.day = b.expected.slice(0, 10); SRV.at = Date.now(); SRV.local = localExpected(nyClock(new Date())); }
+    SRV.at = Date.now();
+    if (isoDay(b.expected)) { SRV.day = b.expected.slice(0, 10); SRV.local = localExpected(nyClock(new Date())); }
     const t = b.phase ? Date.parse(b.phase.endsAt) : NaN;
     if (t > 0) { SRV.ph = b.phase.phase; SRV.until = t; }
   }
+  const pendingNow = () => SRV.hb || SRV.busy > 0 || (!SRV.at && Date.now() - T0 < 2e4 && !!window.FlowsUI.heartbeat);
+  function watchNow(p) {
+    SRV.busy++;
+    p.then((r) => r.ok && r.clone().json()).then(takeNow, () => {}).then(() => { SRV.busy--; paintFresh(); });
+  }
   function confirmExpected() {
     const t = Date.now();
-    if (!nativeFetch || SRV.busy || t - SRV.asked < 6e4 || t - SRV.at < 6e4) return;
-    SRV.busy = true;
+    if (!nativeFetch || pendingNow() || t - SRV.asked < 6e4 || t - SRV.at < 6e4) return;
     SRV.asked = t;
-    nativeFetch("/api/flows/now", { credentials: "same-origin" }).then((r) => r.ok && r.json()).then(takeNow, () => {})
-      .then(() => { SRV.busy = false; paintFresh(); });
+    watchNow(nativeFetch("/api/flows/now", { credentials: "same-origin" }));
   }
   function market(now) {
     const at = now || new Date(), n = nyClock(at);
@@ -1711,7 +1716,7 @@
     const S = FRESH.primary || FRESH.sessionDate || FRESH.nightly;
     const liveNow = FRESH.live && FRESH.readAt && Date.now() - Date.parse(FRESH.readAt) < 3 * 60 * 1000 && m.open;
     let behind = !!S && S < m.expected;
-    if (behind && m.source === "local") { confirmExpected(); behind = !SRV.busy; }
+    if (behind && m.source === "local") { confirmExpected(); behind = !pendingNow(); }
     let state;
     if (!S) state = FRESH.settled ? (m.open ? "fresh" : "closed") : "pending";
     else if (behind) state = "stale";
@@ -1805,7 +1810,7 @@
       try {
         const url = typeof input === "string" ? input : input && input.url;
         if (url && url.indexOf("/api/flows/meta") >= 0) takeMeta(p);
-        if (url && url.indexOf("/api/flows/now") >= 0) p.then((r) => r.ok && r.clone().json()).then((j) => { takeNow(j); paintFresh(); }, () => {});
+        if (url && url.indexOf("/api/flows/now") >= 0) { if (url.indexOf("?") > 0) SRV.hb = true; watchNow(p); }
         if (url && url.indexOf("/api/flows/") >= 0) p.then((r) => observe(url, r), () => {});
       } catch { return p; }
       return p;

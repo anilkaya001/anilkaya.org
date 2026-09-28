@@ -3425,6 +3425,23 @@ try {
     await touch.close();
   }
 
+  {
+    const gate = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
+    const gp = await gate.newPage();
+    gp.on("pageerror", (e) => errors.push("gate: " + e.message));
+    await signIn(gp);
+    const nowsOf = () => gp.evaluate(() => performance.getEntriesByType("resource").map((e) => e.name.replace(/^https?:\/\/[^/]+/, ""))
+      .filter((u) => /^\/api\/flows\/now(\?|$)/.test(u)));
+    await gp.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await gp.waitForFunction(() => performance.getEntriesByType("resource").some((e) => /\/api\/flows\/now(\?|$)/.test(e.name)), null, { timeout: 15000 });
+    await gp.waitForTimeout(1500);
+    const nows = await nowsOf();
+    eq(nows.length, 1, `exactly one /api/flows/now request on load when a heartbeat runs, counted from this document's own resource timeline (${nows.join(" | ")})`);
+    ok(/[?&]k=/.test(nows[0]), `and it is the heartbeat's own keyed beat, whose body carries expected, so the pill asks nothing bare of its own (${nows[0]})`);
+
+    await gate.close();
+  }
+
   eq(errors.length, 0, `no uncaught page error across the whole session (${errors[0] || ""})`);
 
   console.log(`✓ flows-overview: ${checks} assertions — a one-glance cockpit that leads on the ` +
