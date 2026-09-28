@@ -752,7 +752,51 @@ async function waitFor(predicate, message) {
 for (const file of ["lab/index.html", "lab/course.html", "lab/placement/index.html", "assets/js/lab-ui.js", "assets/js/lesson-redirect.js", "sitemap.xml"]) {
   assert(!read(file).includes("/lab/course.html"), `${file}: use canonical /lab/course URLs`);
 }
-assert(read("wrangler.toml").includes("run_worker_first = true"), "Worker must run before assets");
+assert(read("wrangler.toml").includes('run_worker_first = ["/*", "!/assets/*"]'),
+  "the Worker must run before every route except /assets/*, which the edge serves asset-first");
+{
+  const headersFile = read("_headers");
+  assert(!read(".assetsignore").split(/\r?\n/).some((line) => line === "_headers" || line === "_*"),
+    ".assetsignore must not exclude _headers: the edge reads the asset policy from the static directory");
+  assert(read(".gitignore").split(/\r?\n/).includes("!_headers"),
+    ".gitignore must un-ignore _headers, which its _* rule would otherwise drop from the served tree");
+  const rules = new Map();
+  let current = null;
+  for (const line of headersFile.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    if (!/^\s/.test(line)) {
+      current = new Map();
+      rules.set(line.trim(), current);
+      continue;
+    }
+    assert(current, "_headers: a header line precedes any path");
+    const [name, ...rest] = line.trim().split(":");
+    current.set(name.trim(), rest.join(":").trim());
+  }
+  const securityHeaders = Object.fromEntries([...read("worker.js").match(/const SECURITY_HEADERS = \{([^}]*)\}/)[1]
+    .matchAll(/"([^"]+)":\s*"([^"]*)"/g)].map((match) => [match[1], match[2]]));
+  assert(Object.keys(securityHeaders).length >= 7, "worker.js SECURITY_HEADERS could not be read");
+  assert.deepEqual(Object.fromEntries(rules.get("/assets/*") || []), securityHeaders,
+    "_headers must put exactly the Worker's security headers on every asset-first response");
+  const immutable = "public, max-age=31536000, immutable";
+  const hour = "public, max-age=3600";
+  const policy = {
+    "/assets/css/*": immutable, "/assets/js/*": immutable, "/assets/fonts/*": immutable,
+    "/assets/img/*": hour, "/assets/data/*": hour, "/assets/version.txt": hour,
+  };
+  for (const [pattern, value] of Object.entries(policy)) {
+    assert.deepEqual(Object.fromEntries(rules.get(pattern) || []), { "Cache-Control": value },
+      `_headers ${pattern} must carry exactly Cache-Control: ${value}`);
+  }
+  assert.deepEqual([...rules.keys()].sort(), ["/assets/*", ...Object.keys(policy)].sort(),
+    "_headers holds exactly the asset rules; any other response policy belongs in worker.js");
+  const children = readdirSync(path.join(ROOT, "assets"))
+    .map((name) => statSync(path.join(ROOT, "assets", name)).isDirectory() ? `/assets/${name}/*` : `/assets/${name}`).sort();
+  assert.deepEqual(children, Object.keys(policy).sort(), "every entry under assets/ needs its own Cache-Control rule in _headers");
+  assert(!/content-security-policy/i.test(headersFile), "_headers must not set a CSP: nothing under /assets/ is HTML");
+  for (const line of headersFile.split(/\r?\n/)) assert(line.length <= 2000, "_headers lines are capped at 2,000 characters");
+  assert(rules.size <= 100, "_headers is capped at 100 rules");
+}
 assert(read("wrangler.toml").includes('html_handling = "auto-trailing-slash"'), "HTML handling must be explicit");
 {
   const ANCHORED = Object.freeze({
