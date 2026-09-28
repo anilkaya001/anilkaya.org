@@ -35,7 +35,8 @@ Browser ──► Cloudflare edge
   by the edge, and the root `_headers` file (uploaded with the static bundle,
   never served) carries its policy: the same seven security headers, one-year
   immutable for `/assets/css/*`, `/assets/js/*` and `/assets/fonts/*`, one
-  hour for `/assets/img/*`, `/assets/data/*` and `assets/version.txt`. The
+  hour for `/assets/img/*`, `/assets/data/*` and the two version tokens
+  `assets/version.txt` and `assets/fonts-version.txt`. The
   asset layer matches by path only, so an unversioned `/assets/css/*` request
   gets the immutable policy too, and a missing file under `/assets/` is
   answered by the asset layer's `404.html` with its path's policy and no CSP
@@ -109,7 +110,8 @@ header readback with this repository after any dashboard rule change.
 | `assets/js/placement.js` | Placement-bank loading, five accessible question renderers, deterministic scoring/routes, and minimal result persistence. |
 | `assets/js/lab-ui.js`, `lab-fx.js` | Academy command-center/path/search/reset UI and visual feedback. |
 | `assets/css/base.css`, `lab.css`, `review.css`, `placement.css` | Design system and Lab/course/review/placement UI. |
-| `assets/version.txt` | Canonical browser-asset cache version. |
+| `assets/version.txt` | Canonical cache version of `assets/css`, `assets/js` and `assets/data`: the `?v=` on every CSS and JavaScript reference. |
+| `assets/fonts-version.txt` | Canonical cache version of the woff2 files under `assets/fonts/`: the `?v=` on every `@font-face` URL and font preload, untouched by an asset bump. |
 | `tests/contracts.mjs` | Curriculum/payload/scoring/storage/asset/session contracts. |
 | `tests/placement-contract.mjs` | Placement bank, scoring boundaries, route, privacy, no-JS, keyboard, and responsive runtime contracts. |
 | `tests/worker-regression.mjs` | Real local Wrangler routing, headers, API, and D1 tests. |
@@ -293,7 +295,8 @@ GET logout route; that would reintroduce forced-logout CSRF.
 4. HTML is `no-cache`; successful/304 versioned assets are immutable for one
    year; other successful/304 assets cache for one hour; API/auth is `no-store`.
    Under `/assets/*` the policy is written by path in `_headers` (`css`, `js`,
-   `fonts` immutable; `img`, `data`, `version.txt` one hour), because the asset
+   `fonts` immutable; `img`, `data` and the two version tokens one hour),
+   because the asset
    layer sees neither the query string nor the status. Three classes therefore
    differ from what the finalizer computed: `/assets/css|js|fonts/*` is
    immutable even without `?v=` (was one hour), `/assets/data/*` is one hour
@@ -320,22 +323,43 @@ dashboard rules if live headers differ from `worker.js` or `_headers`.
 
 ## Asset versioning
 
-The browser-asset version is always the integer read from `assets/version.txt`.
-Do not copy a current value into documentation or automation. Every local CSS,
-JavaScript, and font reference in HTML, the course shell's
-`data-asset-version`, and every `@font-face` URL must use that exact `?v=`
-value.
+Two integer tokens version the browser assets. `assets/version.txt` is the
+asset version: every local CSS and JavaScript reference in HTML, the course
+shell's `data-asset-version` and `ASSET_VERSION` in `shared/flows-pages.js`
+carry it as `?v=`. `assets/fonts-version.txt` is the fonts version: every
+`@font-face` URL in `base.css` and every font preload in HTML carry it
+instead, so an asset bump changes no woff2 URL and a returning visitor keeps
+the fonts cached for the year `_headers` promises. Do not copy a current
+value of either into documentation or automation.
 
-When any file under `assets/css/`, `assets/js/`, or `assets/fonts/` changes:
+The fonts token sits beside `assets/version.txt`, not under `assets/fonts/`:
+`_headers` makes `/assets/fonts/*` immutable, and a second rule matching the
+same path joins its `Cache-Control` onto the first with a comma rather than
+replacing it, so a token in that directory would need the detach syntax to
+stay revalidatable. `/assets/fonts-version.txt` gets the same one-hour rule as
+`/assets/version.txt`, and neither token is fetched by any page.
+
+When any file under `assets/css/`, `assets/js/`, or `assets/data/` changes:
 
 1. increment `assets/version.txt`;
-2. update every versioned HTML/CSS reference and `ASSET_VERSION` in
+2. update every versioned CSS/JS reference and `ASSET_VERSION` in
    `shared/flows-pages.js`, which `tests/flows-features.mjs` holds equal to
    `assets/version.txt`;
 3. run the contract test.
 
-The contract test compares changed browser assets with `assets/version.txt`,
-so a missing bump fails CI.
+When a font under `assets/fonts/` changes:
+
+1. set `assets/fonts-version.txt` to the new `assets/version.txt` value (the
+   `@font-face` URLs change, so `base.css` changes and the asset version
+   increments with it);
+2. update every woff2 `?v=` in `base.css` and the HTML preloads;
+3. run the contract test.
+
+The fonts token is therefore the asset version at which a font last changed
+and never runs ahead of `assets/version.txt`. The contract test compares
+changed files under `assets/css|js|data/` with `assets/version.txt` and
+changed fonts with `assets/fonts-version.txt`, so a missing bump of either
+fails CI.
 
 ## Testing and CI
 

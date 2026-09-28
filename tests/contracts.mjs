@@ -265,22 +265,34 @@ assert.equal(website?.name, "Anıl Kaya", "homepage WebSite name drifted");
 
 const version = read("assets/version.txt").trim();
 assert.match(version, /^\d+$/, "asset version must be an integer");
+const fontsVersion = read("assets/fonts-version.txt").trim();
+assert.match(fontsVersion, /^\d+$/, "fonts version must be an integer");
+assert(Number(fontsVersion) <= Number(version),
+  "assets/fonts-version.txt is the asset version at which a font last changed, so it never runs ahead of assets/version.txt");
+for (const token of ["assets/version.txt", "assets/fonts-version.txt"]) {
+  assert(!read(".assetsignore").split(/\r?\n/).some((line) => line === token || line === "*.txt" || line === "assets/*.txt"),
+    `.assetsignore must treat ${token} like the other version token: both ship in the static bundle under a one-hour _headers rule`);
+}
 assert.equal(labCourse.match(/<html[^>]+data-asset-version="(\d+)"/)?.[1], version, "course payload version must match asset version");
 assert.equal(labReview.match(/<html[^>]+data-asset-version="(\d+)"/)?.[1], version, "review payload version must match asset version");
 assert.equal(labPlacement.match(/<html[^>]+data-asset-version="(\d+)"/)?.[1], version, "placement payload version must match asset version");
 const documents = [...filesUnder("articles", (file) => file.endsWith(".html")), ...filesUnder("lab", (file) => file.endsWith(".html")), "index.html", "404.html"];
 const referenceFiles = [...documents, "assets/css/base.css"];
 let referenceCount = 0;
+let fontReferenceCount = 0;
 for (const file of referenceFiles) {
   const source = read(file);
   const assetPattern = /["'(](\/assets\/[^"')?#]+\.(?:css|js|woff2))(?:\?v=(\d+))?/g;
   for (const match of source.matchAll(assetPattern)) {
-    referenceCount++;
-    assert.equal(match[2], version, `${file}: ${match[1]} must use ?v=${version}`);
+    const font = match[1].endsWith(".woff2");
+    const expected = font ? fontsVersion : version;
+    if (font) fontReferenceCount++; else referenceCount++;
+    assert.equal(match[2], expected, `${file}: ${match[1]} must use ?v=${expected} (${font ? "assets/fonts-version.txt" : "assets/version.txt"})`);
     assert(existsSync(path.join(ROOT, match[1].slice(1))), `${file}: missing ${match[1]}`);
   }
 }
 assert(referenceCount >= 40, "too few versioned asset references were checked");
+assert(fontReferenceCount >= 16, "too few versioned font references were checked: eight @font-face URLs and the Inter preloads");
 
 for (const file of filesUnder("assets/js", (name) => name.endsWith(".js"))) {
 
@@ -782,7 +794,7 @@ assert(read("wrangler.toml").includes('run_worker_first = ["/*", "!/assets/*"]')
   const hour = "public, max-age=3600";
   const policy = {
     "/assets/css/*": immutable, "/assets/js/*": immutable, "/assets/fonts/*": immutable,
-    "/assets/img/*": hour, "/assets/data/*": hour, "/assets/version.txt": hour,
+    "/assets/img/*": hour, "/assets/data/*": hour, "/assets/version.txt": hour, "/assets/fonts-version.txt": hour,
   };
   for (const [pattern, value] of Object.entries(policy)) {
     assert.deepEqual(Object.fromEntries(rules.get(pattern) || []), { "Cache-Control": value },
@@ -854,11 +866,15 @@ if (/^0+$/.test(diffBase)) {
   try { diffBase = execFileSync("git", ["rev-parse", "HEAD^"], { cwd: ROOT, encoding: "utf8" }).trim(); } catch { diffBase = ""; }
 }
 
+function tokenAt(revision, file) {
+  return Number(execFileSync("git", ["show", `${revision}:${file}`], {
+    cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+  }).trim());
+}
+
 function assetVersionAt(revision) {
   try {
-    return Number(execFileSync("git", ["show", `${revision}:assets/version.txt`], {
-      cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
-    }).trim());
+    return tokenAt(revision, "assets/version.txt");
   } catch {
     try {
       const names = execFileSync("git", ["ls-tree", "-r", "--name-only", revision], { cwd: ROOT, encoding: "utf8" })
@@ -873,16 +889,36 @@ function assetVersionAt(revision) {
   }
 }
 
+function fontsVersionAt(revision) {
+  try { return tokenAt(revision, "assets/fonts-version.txt"); } catch { return assetVersionAt(revision); }
+}
+
+const isBrowserAsset = (file) => /^assets\/(?:css|js|data)\//.test(file);
+const isFontAsset = (file) => /^assets\/fonts\/(?!.*\.(?:md|txt)$)/.test(file);
+for (const file of ["assets/css/base.css", "assets/js/nav.js", "assets/data/review-bank.json"]) {
+  assert(isBrowserAsset(file) && !isFontAsset(file), `${file} is versioned by assets/version.txt`);
+}
+for (const file of ["assets/fonts/Inter-latin.woff2", "assets/fonts/LM-regular.woff2"]) {
+  assert(isFontAsset(file) && !isBrowserAsset(file), `${file} is versioned by assets/fonts-version.txt, so a font change never forces an asset bump and an asset bump never re-downloads a font`);
+}
+for (const file of ["assets/version.txt", "assets/fonts-version.txt", "assets/fonts/NOTICE.md", "assets/fonts/JBM-OFL.txt", "assets/img/og.png"]) {
+  assert(!isBrowserAsset(file) && !isFontAsset(file), `${file} is not a versioned browser asset: no bump rule applies to it`);
+}
+
 if (diffBase) {
   const tracked = execFileSync("git", ["diff", "--name-only", diffBase, "--"], { cwd: ROOT, encoding: "utf8" });
   const untracked = execFileSync("git", ["ls-files", "--others", "--exclude-standard"], { cwd: ROOT, encoding: "utf8" });
   const changed = [...new Set((tracked + untracked).trim().split("\n").filter(Boolean))];
 
-  const browserAssetChanged = changed.some((file) => /^assets\/(?:css|js|fonts|data)\//.test(file));
-  if (browserAssetChanged) {
+  if (changed.some(isBrowserAsset)) {
     const previous = assetVersionAt(diffBase);
     assert(Number.isInteger(previous), `could not verify asset version at ${diffBase}`);
     assert(Number(version) > previous, `browser assets changed without increasing version ${previous}`);
+  }
+  if (changed.some(isFontAsset)) {
+    const previous = fontsVersionAt(diffBase);
+    assert(Number.isInteger(previous), `could not verify fonts version at ${diffBase}`);
+    assert(Number(fontsVersion) > previous, `fonts changed without increasing assets/fonts-version.txt from ${previous}`);
   }
 }
 

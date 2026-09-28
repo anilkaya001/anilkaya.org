@@ -24,3 +24,6 @@
 
 /assets/version.txt
   Cache-Control: public, max-age=3600
+
+/assets/fonts-version.txt
+  Cache-Control: public, max-age=3600
