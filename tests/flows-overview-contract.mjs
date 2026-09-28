@@ -2972,6 +2972,15 @@ try {
       "and a Worker that predates those routes (404) leaves it pending too, not unreadable — a route that has " +
       "not shipped is a key that has not published");
     await page.unroute(NEW_KEYS);
+    await page.route(NEW_KEYS, (route) => route.fulfill({ status: 400, contentType: "application/json",
+      body: JSON.stringify({ error: { code: "invalid_key", message: "Unknown live key" } }) }));
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccVol [data-empty]", { timeout: 15000 });
+    const refused = await silenceOf(page, "#ccVol [data-empty]");
+    eq(refused.kind, "unreadable",
+      "but a 400 on those routes is a request the Worker refused, not a key that has not published: the module is " +
+      "unreadable, and the list route is not retried key by key, since the Worker and its assets ship in one bundle");
+    await page.unroute(NEW_KEYS);
     await stubNewKeys(page);
     allowFetchFailure = false;
   }
