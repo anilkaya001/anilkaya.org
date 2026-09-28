@@ -1824,11 +1824,12 @@
     if (old) old.remove();
     if (fresh) fresh.hidden = !!kind;
     if (!bar || !kind) return;
-    const label = h("span", { class: "fx-fresh-l" }, kind === "out" ? "Signed out " + MID + " sign in" : "Unavailable");
-    bar.append(kind === "out"
-      ? h("a", { class: "ui-fresh", id: "fxGate", "data-state": kind, href: "/flows/login/" }, glyph("stop"), label)
-      : h("button", { class: "ui-fresh", id: "fxGate", "data-state": kind, type: "button", ...POP,
-        "data-info": info({ title: "Unavailable", state: "unavailable", lead: why }) }, glyph("unavailable"), label));
+    const out = kind === "out", name = out ? "Signed out, sign in" : "Unavailable";
+    const A = { class: "ui-fresh", id: "fxGate", "data-state": kind, "aria-label": name, title: name };
+    const label = h("span", { class: "fx-fresh-l" }, out ? "Signed out " + MID + " sign in" : name);
+    bar.append(out
+      ? h("a", { ...A, href: "/flows/login/" }, glyph("stop"), label)
+      : h("button", { ...A, type: "button", ...POP, "data-info": info({ title: name, state: "unavailable", lead: why }) }, glyph("unavailable"), label));
   }
   function gate(r) {
     if (r.status === 401) {

@@ -1752,7 +1752,7 @@ td.c-num { white-space: nowrap; }
 .ui-fresh[data-state="pending"] .ui-g { color: var(--label-3); animation: ui-spin 6s linear infinite; }
 .ui-fresh[data-state="out"] .ui-g, .ui-fresh[data-state="off"] .ui-g { color: var(--warn); }
 a.ui-fresh { text-decoration: none; }
-@media (max-width: 380px) { .ui-fresh .fx-fresh-l { display: none; } }
+@media (max-width: 380px) { .ui-fresh:not([data-state="out"]) .fx-fresh-l { display: none; } }
 
 .fx-tabs { display: none; }
 @media (max-width: 767.98px) {

@@ -3462,6 +3462,15 @@ try {
     ok(/^Signed out/.test(ctl.text) && /sign in/i.test(ctl.text), `reading Signed out · sign in (${ctl.text})`);
     ok(ctl.visible, "visible in the top bar");
     ok(ctl.freshHidden, "in place of the freshness pill, which can say nothing about a session it cannot read");
+    await gp.setViewportSize({ width: 320, height: 640 });
+    const phone = await gp.evaluate(() => {
+      const g = document.getElementById("fxGate"), l = g.querySelector(".fx-fresh-l"), r = g.getBoundingClientRect();
+      return { name: g.getAttribute("aria-label"), label: getComputedStyle(l).display, right: r.right, over: document.documentElement.scrollWidth > innerWidth };
+    });
+    ok(/^Signed out/.test(phone.name || "") && /sign in/i.test(phone.name || ""), `at 320px the control keeps an accessible name (${phone.name})`);
+    ok(phone.label !== "none", "and its label stays visible where the freshness pill's label is hidden, so it is never a bare stop glyph");
+    ok(!phone.over && phone.right <= 320, `without overflowing the top bar (right edge ${phone.right})`);
+    await gp.setViewportSize({ width: 1280, height: 1000 });
     await gp.unroute(/\/api\/flows\//);
     await Promise.all([gp.waitForNavigation({ waitUntil: "domcontentloaded" }), gp.click("#fxGate")]);
     ok(/\/flows\/login\/$/.test(gp.url()), `the control lands on the sign-in page (${gp.url()})`);
@@ -3481,6 +3490,7 @@ try {
     eq(said, "Unavailable", "and the shell shows a calm unavailable state");
     const reason = await why(off, "#fxGate");
     ok(reason && /challenge/.test(reason.lead), `with the edge's reason one tap away (${reason && reason.lead})`);
+    eq(await off.evaluate(() => document.getElementById("fxGate").getAttribute("aria-label")), "Unavailable", "named for assistive technology as well");
     await gate.close();
 
     const nost = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
