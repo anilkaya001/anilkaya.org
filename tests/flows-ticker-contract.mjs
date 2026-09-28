@@ -1915,7 +1915,8 @@ try {
     const card = clone(full);
     const at = Date.parse(card.sessionDate + "T15:30:00Z");
     const quote = (price, t) => ({ ticker: card.ticker, status: "ok", readAt: t, price, prevClose: 120, changePct: price / 120 - 1, open: 121, high: 124, low: 120.5, volume: 1e6, marketTime: "r", tapeTime: t });
-    const nowOf = (q) => ({ serverNow: at, phase: { phase: "rth", session: card.sessionDate, trading: true, endsAt: new Date(at + 3600e3).toISOString() }, keys: {}, quote: q });
+    let now = at;
+    const nowOf = (q) => ({ serverNow: now, phase: { phase: "rth", session: card.sessionDate, trading: true, endsAt: new Date(now + 3600e3).toISOString() }, keys: {}, quote: q });
     const t1 = new Date(at - 150e3).toISOString(), t2 = new Date(at - 30e3).toISOString();
     let served = quote(123.45, t1);
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
@@ -1941,7 +1942,7 @@ try {
       const muts = w.__px.muts.slice();
       w.__px.muts.length = 0;
       return { same, muts, px: document.querySelector("#ftPxV .visually-hidden").textContent, chg: document.querySelector("#ftChg > *").textContent, chgLabel: document.querySelector("#ftChg > *").getAttribute("aria-label"),
-        last: document.getElementById("ftLast").innerText.replace(/\s+/g, " ").trim(), pill: document.getElementById("fxFresh").innerText.trim(), F: { chg: window.FlowsUI.F.px(4.56) + "  " + window.FlowsUI.F.pct(0.038, 2), t1: window.FlowsUI.F.time(t1), t2: window.FlowsUI.F.time(t2) } };
+        last: document.getElementById("ftLast").innerText.replace(/\s+/g, " ").trim(), pill: document.getElementById("fxFresh").innerText.trim(), F: { chg: window.FlowsUI.F.px(4.56) + "  " + window.FlowsUI.F.pct(0.038, 2), label: "Change against the previous close " + window.FlowsUI.F.px(4.56) + ", " + window.FlowsUI.F.pct(0.038, 2, true), t1: window.FlowsUI.F.time(t1), t2: window.FlowsUI.F.time(t2) } };
     }, { t1, t2 });
     const before = await snap();
     eq(before.px, "123.45", `the first beat's quote is the headline price (${before.px})`);
@@ -1957,12 +1958,25 @@ try {
     const moved = await snap();
     eq(moved.px, "124.56", `a beat whose quote moved rolls the price (${moved.px})`);
     eq(moved.chg, moved.F.chg, `and rewrites the change capsule's text in place (${moved.chg})`);
-    ok(/124\.56.*3\.80%/.test(moved.chgLabel) || /4\.56/.test(moved.chgLabel), `with its label (${moved.chgLabel})`);
+    eq(moved.chgLabel, moved.F.label, "with its exact label");
     ok(moved.last.includes(moved.F.t2) && !moved.last.includes(moved.F.t1), `and the read time (${moved.last})`);
     ok(moved.same[1] && moved.same[2] && moved.same[3], `keeping the capsule, the info trigger and the hero chart, so an open tooltip stays anchored and no closure is left behind (${moved.same.join(",")})`);
     ok(moved.muts.length > 0 && !moved.muts.some((m) => /^childList:(ftLast|ftChg)$/.test(m)), `the writes are text and attribute updates, never a rebuild of the last-read line or the capsule (${moved.muts.slice(0, 8).join(" ")})`);
     const pop = await infoText(page, "#ftLast");
     ok(/Live price/.test(pop) && /124\.56/.test(pop) && !/123\.45/.test(pop), `the kept trigger's tooltip reads the current quote, not the one it was built with (${(pop || "").replace(/\s+/g, " ").slice(0, 120)})`);
+    await page.click("#ftLast .ui-info");
+    const opened = await page.evaluate(() => { const p = document.getElementById("fxPop"); return { open: p.matches(":popover-open"), anchored: !!document.querySelector('#ftLast [aria-expanded="true"]'), focusIn: p.contains(document.activeElement), text: p.innerText.replace(/\s+/g, " ").slice(0, 40) }; });
+    ok(opened.open && opened.anchored && opened.focusIn && /Live price/.test(opened.text), `a click on the live trigger opens its tooltip on the line and focuses it (${JSON.stringify(opened)})`);
+    now = at + 6 * 60e3;
+    await page.clock.setFixedTime(new Date(now));
+    await beat();
+    const flipped = await page.evaluate(() => { const p = document.getElementById("fxPop"), b = document.querySelector("#ftLast .ui-info"); return { open: p.matches(":popover-open"), live: !!document.querySelector("#ftLast .ft-live"), cells: document.querySelectorAll("#ftLast [data-c]").length, expanded: document.querySelectorAll('[data-info][aria-expanded="true"]').length, focused: !!b && document.activeElement === b, text: document.getElementById("ftLast").innerText.replace(/\s+/g, " ").trim() }; });
+    ok(!flipped.live && flipped.cells === 3, `six minutes on, the same quote is past the live window and the line flips to last-read mode (${flipped.text})`);
+    ok(!flipped.open, "the tooltip that was open on the live trigger closes with it, instead of staying open on a button the rebuild detached");
+    eq(flipped.expanded, 0, "no info trigger on the page claims to be expanded");
+    ok(flipped.focused, "and focus, which was inside the tooltip, returns to the line's new trigger as closing the tooltip returns it to the old one");
+    const pop2 = await infoText(page, "#ftLast");
+    ok(/Last read/.test(pop2) && !/Live price/.test(pop2), `the new trigger's tooltip describes the mode the line now shows (${(pop2 || "").replace(/\s+/g, " ").slice(0, 60)})`);
     eq(errors.length, 0, `the live beats throw nothing (${errors.join("; ")})`);
     await page.close();
   }

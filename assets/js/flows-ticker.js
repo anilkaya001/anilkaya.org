@@ -449,7 +449,14 @@
     else chgEl.replaceChildren(UI.capsule(chgText, { tone: t, label: chgLabel }));
     const last = $("ftLast");
     if (last.hidden !== (mode === "none")) last.hidden = mode === "none";
-    if (mode !== PX.mode) { PX.mode = mode; last.replaceChildren(...LAST[mode]()); }
+    if (mode !== PX.mode) {
+      const open = last.querySelector('[aria-expanded="true"]'), f = document.activeElement;
+      if (open) UI.closeInfo();
+      PX.mode = mode;
+      last.replaceChildren(...LAST[mode]());
+      const b = open && (!f || f === document.body || $("fxPop").contains(f)) ? last.querySelector(".ui-info") : null;
+      if (b) b.focus({ preventScroll: true });
+    }
     const slots = last.querySelectorAll("[data-c]");
     cells.forEach((c, i) => put(slots[i], c));
     if (mode === "read" && slots[1].dataset.tone !== dTone) slots[1].dataset.tone = dTone;
