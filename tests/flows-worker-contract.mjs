@@ -1761,6 +1761,42 @@ try {
         ["worker", 300, heldFocus.fresh.readAt, "market"], "the heartbeat reports live:focus beside the nightly focus key");
       ok(nf.keys["live:focus"].updatedAt > 0 && nf.keys.focus.session === "2026-09-22" && nf.keys["live:strips"].state === "pending",
         "with its updatedAt, so an open page re-reads it when it moves");
+      {
+        const lkText = async (k) => (await fetch(L("/api/flows/lk?k=" + k), { headers: cookie })).text();
+        const mkOne = await fetch(L("/api/flows/lk?k=market"), { headers: cookie });
+        const mkText = await mkOne.text();
+        const focusText = await lkText("focus");
+        const many = await fetch(L("/api/flows/lk?k=market,focus,vol"), { headers: cookie });
+        eq(many.status, 200, "ONE RESPONSE FOR A PAGE'S LIVE KEYS: /api/flows/lk?k=market,focus,vol answers");
+        const envl = await many.json();
+        deep(Object.keys(envl), ["serverNow", "phase", "keys"], "with an envelope of serverNow, phase and keys");
+        deep(Object.keys(envl.keys), ["market", "focus", "vol"], "keyed by the params as asked");
+        deep([envl.keys.market.status, envl.keys.market.payload, envl.keys.focus.status, envl.keys.focus.payload],
+          ["ok", JSON.parse(mkText), "ok", JSON.parse(focusText)],
+          "each held key's payload whole, exactly what its single-key route serves");
+        deep(envl.keys.vol, { status: "pending", fresh: { state: "pending", reason: "unpublished", klass: "breadth" } },
+          "and a key nothing has written yet pending in its class");
+        const nowBody = await (await fetch(L("/api/flows/now?k=market,focus,vol"), { headers: cookie })).json();
+        const stable = (e) => [e.state, e.klass, e.cadenceS, e.source, e.session, e.readAt, e.updatedAt];
+        deep([stable(envl.keys.market.fresh), stable(envl.keys.focus.fresh), envl.phase.phase],
+          [stable(nowBody.keys["live:market"]), stable(nowBody.keys["live:focus"]), nowBody.phase.phase],
+          "each fresh entry is the heartbeat's own entry for that key, and the phase the heartbeat's phase");
+        eq(envl.keys.market.updatedAt, Number(mkOne.headers.get("x-payload-updated")), "updatedAt is the single route's X-Payload-Updated");
+        deep([many.headers.get("cache-control"), many.headers.get("content-type"), /^\d{13}$/.test(many.headers.get("x-server-now")),
+          Number(many.headers.get("x-server-now")) === envl.serverNow],
+          ["no-store", "application/json; charset=utf-8", true, true], "no-store like the single-key route, with X-Server-Now the body's serverNow");
+        deep([many.headers.get("x-fresh-state"), many.headers.get("x-fresh-class"), many.headers.get("x-fresh-reason")],
+          ["pending", "breadth", "unpublished"], "the aggregate X-Fresh-* are the tightest reading: the weakest key (vol, pending) sets the state and class");
+        eq(many.headers.get("x-fresh-read-at"), mkOne.headers.get("x-fresh-read-at"),
+          "and X-Fresh-Read-At is the oldest read among the keys, the 10:06 market read before the 10:13 focus read");
+        eq((await fetch(L("/api/flows/lk?k=market,focus"))).status, 401, "the envelope is gated like the single key");
+        eq(await lkText("market,board:long"), mkText,
+          "an unknown key in a list is dropped, and a list that leaves one key is that key's raw body, byte for byte");
+        eq((await fetch(L("/api/flows/lk?k=board:long,meta"), { headers: cookie })).status, 400, "a list with no live key is a 400");
+        const nine = await (await fetch(L("/api/flows/lk?k=market,focus,breadth,strips,strips:series,alerts,gex,vol,tape"), { headers: cookie })).json();
+        deep(Object.keys(nine.keys), ["market", "focus", "breadth", "strips", "strips:series", "alerts", "gex", "vol"],
+          "and a list is capped at eight keys, the ninth dropped");
+      }
       await tick(FOCUS, "2026-09-26T10:08:00-04:00");
       eq(screens().length, 3, "a Saturday focus tick reads nothing");
       drop.add("GDX").add("AVGO");

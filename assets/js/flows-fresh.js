@@ -24,23 +24,24 @@
   }
 
   function fromHeaders(src) {
-    var state = header(src, "X-Fresh-State");
+    var fx = function (n) { return header(src, "X-Fresh-" + n); };
+    var state = fx("State");
     if (!state) return null;
     var serverNow = header(src, "X-Server-Now");
     return {
       state: STATES.indexOf(state) >= 0 ? state : "stale",
-      reason: header(src, "X-Fresh-Reason"),
-      klass: header(src, "X-Fresh-Class"),
-      readAt: ms(header(src, "X-Fresh-Read-At")),
-      source: header(src, "X-Fresh-Source"),
-      cadenceS: Number(header(src, "X-Fresh-Cadence")) || 0,
-      session: header(src, "X-Fresh-Session"),
-      liveUntil: ms(header(src, "X-Fresh-Live-Until")),
-      staleAt: ms(header(src, "X-Fresh-Stale-At")),
-      phase: header(src, "X-Fresh-Phase"),
-      phaseEndsAt: ms(header(src, "X-Fresh-Phase-Ends")),
+      reason: fx("Reason"),
+      klass: fx("Class"),
+      readAt: ms(fx("Read-At")),
+      source: fx("Source"),
+      cadenceS: Number(fx("Cadence")) || 0,
+      session: fx("Session"),
+      liveUntil: ms(fx("Live-Until")),
+      staleAt: ms(fx("Stale-At")),
+      phase: fx("Phase"),
+      phaseEndsAt: ms(fx("Phase-Ends")),
       serverNow: serverNow === null ? null : ms(Number(serverNow)),
-      throttled: header(src, "X-Fresh-Throttled") === "1",
+      throttled: fx("Throttled") === "1",
       overlay: header(src, "X-Live-Overlay"),
     };
   }
@@ -88,6 +89,15 @@
     return wrap(fromHeaders(src));
   };
 
+  api.liveBody = function (env, k) {
+    var e = env && env.keys ? env.keys[k] : null;
+    if (!e) return null;
+    var body = e.status === "ok" && e.payload && typeof e.payload === "object" ? e.payload : { status: "pending" };
+    body.__updatedAt = e.updatedAt > 0 ? e.updatedAt : null;
+    body.__ff = wrap(fromEntry(e.fresh, env.serverNow, env.phase));
+    return body;
+  };
+
   api.freshAggregate = function (list, phase) {
     var states = (list || []).filter(Boolean).map(function (f) { return typeof f === "string" ? f : f.stateAt(); });
     if (!states.length) return "pending";
@@ -116,11 +126,13 @@
     var phaseEndsAt = null;
     var n = 0;
     var query = [];
-    if (o.keys && o.keys.length) query.push("k=" + encodeURIComponent(o.keys.join(",")));
-    if (o.nightly && o.nightly.length) query.push("n=" + encodeURIComponent(o.nightly.join(",")));
-    var noQuote = "/api/flows/now" + (query.length ? "?" + query.join("&") : "");
-    if (o.ticker) query.push("t=" + encodeURIComponent(o.ticker));
-    var url = "/api/flows/now" + (query.length ? "?" + query.join("&") : "");
+    var part = function (name, v) { if (v && v.length) query.push(name + "=" + encodeURIComponent(v.join ? v.join(",") : v)); };
+    var at = function () { return "/api/flows/now" + (query.length ? "?" + query.join("&") : ""); };
+    part("k", o.keys);
+    part("n", o.nightly);
+    var noQuote = at();
+    part("t", o.ticker);
+    var url = at();
 
     function schedule() {
       if (stopped) return;

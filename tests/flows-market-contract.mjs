@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { lkMock } from "./lk-mock.mjs";
 import { readFileSync } from "node:fs";
 import { chromium } from "playwright";
 import { signSession } from "../shared/session.js";
@@ -190,7 +191,11 @@ async function openMarket({ stub = true, routes = [], viewport, at } = {}) {
     await page.route(NEW_KEYS, (route) => route.fulfill({
       status: 200, contentType: "application/json", body: JSON.stringify({ status: "pending" }) }));
   }
-  for (const [pattern, handler] of routes) await page.route(pattern, handler);
+  const lk = await lkMock(page, { stub });
+  for (const [pattern, handler] of routes) {
+    const key = /^\*\*\/api\/flows\/lk\?k=([a-z:]+)$/.exec(pattern);
+    if (key) lk.set(key[1], handler); else await page.route(pattern, handler);
+  }
   await page.goto(url("/flows/market/"), { waitUntil: "networkidle" });
   await page.waitForFunction(() => {
     const s = document.getElementById("mktStatus");
