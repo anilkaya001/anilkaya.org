@@ -1,8 +1,9 @@
 (() => {
   "use strict";
 
-  const statusEl = document.getElementById("flowsStatus");
-  const staleEl = document.getElementById("flowsStale");
+  const $ = (id) => document.getElementById(id);
+  const statusEl = $("flowsStatus");
+  const staleEl = $("flowsStale");
 
   const UI = window.FlowsUI;
   if (!UI) {
@@ -15,7 +16,6 @@
   const { h, F, isNum, DASH, MINUS, fmtSigned, fmtStamp, scoreStrip, glyph } = UI;
   const C = UI.chart;
 
-  const $ = (id) => document.getElementById(id);
   const ans = (p) => (p && p.status !== "pending" ? p : null);
   const POP = { "aria-haspopup": "dialog", "aria-controls": "fxPop" };
   const verdictHost = $("ccVerdict");
@@ -1711,6 +1711,8 @@
   }
 
   const FOCUS = { focus: null, strips: null, series: null, live: null, lead: new URLSearchParams(location.search).get("lead"), pills: {} };
+  const leadOn = () => { const m = $("hmLeaders"); if (m) m.dataset.lead = FOCUS.lead || "mag7"; };
+  leadOn();
   const readOf = (s) => Date.parse(s.fresh && s.fresh.readAt);
   const newest = (a, b) => (readOf(b) || 0) - (readOf(a) || 0);
   const FK = ["px", "prev", "chg", "net", "lean", "iv30"];
@@ -1868,6 +1870,7 @@
       seg.append(UI.segmented("Leaders", groups.map((g) => ({ label: g.label || g.id })), (i) => {
         at = i;
         FOCUS.lead = groups[i].id;
+        leadOn();
         const u = new URL(location.href);
         u.searchParams.set("lead", FOCUS.lead);
         history.replaceState(history.state, "", u);
@@ -1940,18 +1943,18 @@
   const OPTS = () => ({ credentials: "same-origin", signal: AbortSignal.timeout(15000), headers: { Accept: "application/json" } });
   const LK = "/api/flows/lk?k=";
 
+  const read = (r) => r.json().then((body) => stampUpdated(r, body));
+
   function loadBoard(side) {
     return fetch("/api/flows/board?side=" + side, OPTS()).then((r) => {
       if (r.status === 401) { gated = true; location.replace("/flows/"); return null; }
-      if (!r.ok) return null;
-      return r.json().then((body) => stampUpdated(r, body));
+      return r.ok ? read(r) : null;
     }).catch(() => null);
   }
 
   function loadRegion(path, soon) {
     return fetch(path, OPTS())
-      .then((r) => (r.ok ? r.json().then((body) => stampUpdated(r, body))
-        : soon && r.status === 404 ? { status: "pending", __route: 404 } : null))
+      .then((r) => (r.ok ? read(r) : soon && r.status === 404 ? { status: "pending", __route: 404 } : null))
       .catch(() => null);
   }
 
@@ -2067,7 +2070,7 @@
     if (gated) return;
     const liveMkt = lk.market, liveVol = lk.vol, liveBreadth = lk.breadth;
     Object.assign(FOCUS, { focus, strips: lk.strips, series: lk["strips:series"], live: lk.focus });
-    paintFocus();
+    requestAnimationFrame(() => setTimeout(paintFocus));
 
     const bull = ranked(lng && lng.rows);
     const bear = ranked(sht && sht.rows);
@@ -2120,7 +2123,7 @@
         continue;
       }
       sideList(into, rows, isNum(payload && payload.deep) !== null, trk, label, evBy);
-      infoInto(id === "ccBull" ? "hmBull" : "hmBear", all + " leaders", () => ({
+      infoInto("hm" + id.slice(2), all + " leaders", () => ({
         title: cap1(all), lead: "Names past the dead band on the " + all + " board, in the board's published rank order.",
         facts: [["Pool", String(poolCount(payload) ?? rows.length)], ["Drawn", String(Math.min(rows.length, ROW_MAX))], ["Strip", trk.label]],
         notes: ["Scores are a ranked attention signal on a fixed −100 to +100 scale, not a return forecast. Names inside the dead band are not published on either side.",
