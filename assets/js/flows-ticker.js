@@ -2591,6 +2591,7 @@
     gridEl.replaceChildren();
     buildScreen(card);
     if (STATE.cardX && STATE.cardX.earnings) buildEvents(card);
+    if (STATE.tape) buildLiteFlow(card);
     paintFreshness(card);
     STATE.first = false;
   }
@@ -2775,6 +2776,8 @@
     $("ftHeroT").textContent = ticker;
     const q = (p) => p + "?t=" + encodeURIComponent(ticker);
     const neuronP = soft(getJSON(q("/api/flows/summary")));
+    const cxP = soft(getJSON(q("/api/flows/card-x")));
+    const histP = soft(getJSON(q("/api/flows/hist")));
     let card;
     try { card = await getJSON(q("/api/flows/card")); } catch {
       const text = "This page could not be loaded. Reload to try again.";
@@ -2784,8 +2787,9 @@
     }
     if (!card) return;
     if ((card.status && card.status !== "ok") || !(card.panels || card.lite)) { await absentCard(ticker, card); return; }
+    fetchTape(ticker).then((moved) => { if (moved && STATE.card === card) flowOf(card); });
     paintFreshness(card);
-    const [neuron, cx, hist] = await Promise.all([neuronP, soft(getJSON(q("/api/flows/card-x"))), soft(getJSON(q("/api/flows/hist")))]);
+    const [neuron, cx, hist] = await Promise.all([neuronP, cxP, histP]);
     STATE.card = card;
     STATE.neuron = neuron || { status: "unavailable" };
     STATE.cardX = joined(cx, card);
@@ -2794,7 +2798,6 @@
     if (card.lite) paintLite(card); else paintAll();
     sayStatus("");
     jumpToHash();
-    fetchTape(ticker).then((moved) => { if (moved && STATE.card === card) flowOf(card); });
     if (!card.lite) {
       if (STATE.neuron.status === "pending") awaitNeuron(ticker, card);
       const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1200));

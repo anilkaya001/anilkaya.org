@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "230";
+export const ASSET_VERSION = "231";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 

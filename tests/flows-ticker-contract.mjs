@@ -77,8 +77,11 @@ async function mount(page, card, o = {}) {
     if (u.pathname.startsWith("/api/flows/")) {
       const key = u.pathname.slice("/api/flows/".length);
       requested.push(key + u.search);
+      if (o.trace) o.trace.push([key, "asked", performance.now()]);
+      if (o.delay && o.delay[key]) await new Promise((r) => setTimeout(r, o.delay[key]));
       let body = key === "board" ? (o.boards && o.boards[u.searchParams.get("side")]) || { status: "pending", rows: [] } : api[key];
       if (body === undefined) body = { status: "pending" };
+      if (o.trace) o.trace.push([key, "answered", performance.now()]);
       return route.fulfill({ status: (o.codes && o.codes[key]) || 200, contentType: "application/json", body: JSON.stringify(body) });
     }
     if (u.pathname.startsWith("/flows/ticker")) return route.fulfill({ contentType: "text/html; charset=utf-8", body: o.html || PAGE_HTML });
@@ -1865,6 +1868,46 @@ try {
     const last = await page.evaluate(() => ({ read: document.getElementById("ftVerdict").dataset.read, cov: !!document.getElementById("ftNeuronCov") }));
     ok(last.read === "card" && last.cov, "when the poll ends without wording, the card read stays and drops its promise");
     eq(errors.length, 0, `the polled verdicts throw nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  {
+    const trace = [];
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, full, { trace, delay: { card: 300, "card-x": 900, hist: 900 } });
+    const when = (k, ph) => { const e = trace.find((x) => x[0] === k && x[1] === ph); return e ? e[2] : Infinity; };
+    ok(["card", "card-x", "hist", "summary", "tape"].every((k) => when(k, "asked") < Infinity), `the full page asks for the card, its two companions, the Neuron summary and the tape (${trace.map((x) => x[0] + ":" + x[1]).join(" ")})`);
+    ok(when("card-x", "asked") < when("card", "answered") && when("hist", "asked") < when("card", "answered") && when("summary", "asked") < when("card", "answered"),
+       "card-x, hist and the summary are asked before the card answers: the companions are read in parallel with the card, not after it");
+    ok(when("tape", "asked") > when("card", "answered"), "the tape is asked only once the card has answered, so a name with no card never costs an on-demand tape read");
+    ok(when("tape", "asked") < when("card-x", "answered") && when("tape", "asked") < when("hist", "answered"), "but before the companions answer: it waits on neither them nor the paint");
+    const got = await page.evaluate(() => ({ mods: [...document.querySelectorAll("#ftGrid > section")].map((m) => m.id), px: document.querySelector("#ftPxV .visually-hidden").textContent, flows: document.querySelectorAll("#m-flow").length }));
+    eq(got.mods.join(" "), MODULES.join(" "), "and every module is mounted once the slow companions land");
+    eq(got.flows, 1, "with one Flow module, not one per tape arrival");
+    eq(errors.length, 0, `the parallel read throws nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  {
+    const session = full.sessionDate;
+    const at = Date.parse(session + "T23:00:00Z");
+    const tape = { v: 1, key: "tape", ticker: "LITE", session, units: { nd: "delta", net: "USD" },
+      prem: { status: "ok", readAt: new Date(at).toISOString(), t: ["13:35", "14:00", "15:00", "16:00"].map((x) => session + "T" + x + ":00Z"), nd: [0, 1200, 3400, 2100], net: [0, 2e5, 5.5e5, 4e5], ncp: [0, 3e5, 7e5, 6e5], npp: [0, 1e5, 1.5e5, 2e5] } };
+    const lite = { v: 1, ticker: "LITE", status: "ok", lite: true, depth: "universe", sessionDate: session, generatedAt: full.generatedAt, sector: "Basic Materials", n: 695, rank: 115,
+      u: { px: 72.52, chg: -0.0009, iv30: 0.47, ivp: 39, rsi: 51 }, pct: { iv30: 40 }, why: "not-covered", gate: null };
+    const trace = [];
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, lite, { neuron: { status: "unavailable" }, cardX: { status: "absent" }, hist: { status: "absent" }, tape, at, trace, delay: { "card-x": 600, hist: 600 } });
+    const when = (k, ph) => { const e = trace.find((x) => x[0] === k && x[1] === ph); return e ? e[2] : Infinity; };
+    ok(when("tape", "asked") > when("card", "answered") && when("tape", "answered") < when("card-x", "answered"), "on a lite card the tape is asked after the card and answers before the companions do");
+    const got = await page.evaluate(() => ({ mods: [...document.querySelectorAll("#ftGrid > section")].map((m) => m.id), flows: document.querySelectorAll("#m-flow").length }));
+    eq(got.mods.join(" "), "m-screen m-flow", `so the lite paint itself draws the Flow module from the tape that landed first (${got.mods.join(" ")})`);
+    eq(got.flows, 1, "exactly once");
+    eq(errors.length, 0, `the early lite tape throws nothing (${errors.join("; ")})`);
     await page.close();
   }
 
