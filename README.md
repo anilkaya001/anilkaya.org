@@ -129,7 +129,7 @@ headers on reads are also rejected. Sign-out is an owner-bound same-origin
 
 ## Local development
 
-Production-equivalent development requires Node.js 22 or newer and uses the
+Production-equivalent development requires Node.js 22.13 or newer and uses the
 pinned Wrangler version:
 
 ```bash
