@@ -204,6 +204,7 @@ async function openMarket({ stub = true, routes = [], viewport, at } = {}) {
   }, null, { timeout: 15000 });
   return page;
 }
+const painted = (p) => p.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))));
 
 const POP_READ = `(() => {
   const pop = document.getElementById("fxPop");
@@ -1751,6 +1752,7 @@ try {
       ["**/api/flows/lk?k=market", json(LIVE, { "X-Fresh-State": "live" })],
     ] });
     await deepPage.waitForSelector("#mkVol .ui-metric");
+    await painted(deepPage);
     const depth = await deepPage.evaluate(() => {
       const metrics = (id) => Object.fromEntries([...document.querySelectorAll("#" + id + " .ui-metric")].map((m) =>
         [m.querySelector(".ui-metric-l").textContent.trim(), m.querySelector(".ui-metric-v").textContent.trim()]));
