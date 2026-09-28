@@ -9,8 +9,9 @@ import { nyseHolidays, nyseEarlyCloses, closeUtcMs, etDayOf } from "../shared/fl
 import { briefAge } from "../shared/flows-ask.js";
 import { sessionsBetween } from "../shared/flows-cross.js";
 import { nextSessionAfter } from "../shared/flows-variation.js";
-import { serveNow, RTH_CRON, FOCUS_CRON } from "../shared/flows-live-worker.js";
+import { serveNow, RTH_CRON, FOCUS_CRON, HOUSEKEEPING_CRON, SUMMARY_CRON } from "../shared/flows-live-worker.js";
 import { LIVE_KEYS } from "../shared/flows-live.js";
+import { MARKET_STALE_MS, MARKET_CRON_STALE_MS, marketRefreshDue } from "../shared/markets.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -263,6 +264,30 @@ const NYSE_PUBLISHED = Object.freeze({
     "and live:focus promises the cadence its cron keeps, so its Live pill lapses when a tick is missed, not before");
   ok(start % step !== Number(rth[1]) % step && end - start > 60 - 2 * step,
     `the focus ticks (minute ${start} of every ${step}) fall between Tier 1's (minute ${rth[1]}), on every step of the hour`);
+  ok(crons.includes(`"${HOUSEKEEPING_CRON}"`) && crons.includes(`"${SUMMARY_CRON}"`),
+    "wrangler.toml carries the half-hour housekeeping clock and the quarter-hour summary clock beside them");
+  const minutesOf = (cron) => {
+    const field = cron.split(" ")[0];
+    if (/^\*\/\d+$/.test(field)) { const n = Number(field.slice(2)); return Array.from({ length: 60 / n }, (_, i) => i * n); }
+    return field.split(",").map(Number);
+  };
+  same(minutesOf(HOUSEKEEPING_CRON), [0, 30], "housekeeping fires on the hour and the half hour");
+  same(minutesOf(SUMMARY_CRON), [15, 45], "the summary on the quarters between, so the two never share a firing");
+  const cadenceMs = 30 * 60 * 1000;
+  ok(MARKET_CRON_STALE_MS < cadenceMs,
+    `the housekeeping cron refreshes a market snapshot older than ${MARKET_CRON_STALE_MS / 60000} minutes: under its own ` +
+    "30-minute cadence, so a snapshot it wrote is due again at its next firing even when that firing is early by a few seconds");
+  ok(MARKET_CRON_STALE_MS < MARKET_STALE_MS && MARKET_STALE_MS === 45 * 60 * 1000,
+    `and under the reader's ${MARKET_STALE_MS / 60000}-minute staleness, so the cron, not a reader, keeps the snapshot fresh: ` +
+    "before this the cron waited for 45 minutes of age and a reader in the window between found a stale snapshot and " +
+    "fetched eight Yahoo quotes inline");
+  eq(marketRefreshDue(26 * 60 * 1000, false), true, "outside the refresh window a 26-minute-old snapshot is refreshed");
+  eq(marketRefreshDue(25 * 60 * 1000, false), false, "a 25-minute-old one is not");
+  eq(marketRefreshDue(44 * 60 * 1000, true), true, "inside the window every firing refreshes");
+  eq(marketRefreshDue(0, true), true, "whatever the age");
+  eq(marketRefreshDue(Infinity, false), true, "a database with no snapshot is refreshed");
+  eq(marketRefreshDue(NaN, false), true, "and so is one whose age cannot be read");
+  eq(marketRefreshDue(-60 * 1000, false), false, "a snapshot stamped in the future counts as fresh");
 }
 
 {

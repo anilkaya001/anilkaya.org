@@ -42,3 +42,11 @@ export function buildSnapshot(quotes, now) {
   const ordered = MARKET_INDICES.map((index) => byKey.get(index.key)).filter(Boolean);
   return { quotes: ordered, updatedAt: now };
 }
+
+export const MARKET_STALE_MS = 45 * 60 * 1000;
+export const MARKET_CRON_STALE_MS = 25 * 60 * 1000;
+
+export function marketRefreshDue(ageMs, inWindow) {
+  if (inWindow) return true;
+  return !(typeof ageMs === "number" && Number.isFinite(ageMs) && ageMs <= MARKET_CRON_STALE_MS);
+}
