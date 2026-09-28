@@ -227,6 +227,8 @@ crawlable-outline checks for all seven course paths when SEO code changes.
 ```bash
 ASSET_VERSION="$(tr -d '[:space:]' < assets/version.txt)"
 case "$ASSET_VERSION" in (*[!0-9]*|'') echo "invalid assets/version.txt" >&2; exit 1;; esac
+FONTS_VERSION="$(tr -d '[:space:]' < assets/fonts-version.txt)"
+case "$FONTS_VERSION" in (*[!0-9]*|'') echo "invalid assets/fonts-version.txt" >&2; exit 1;; esac
 
 curl --compressed --fail --silent --show-error \
   -D /tmp/css.headers \
@@ -236,7 +238,19 @@ cmp /tmp/base.css assets/css/base.css
 grep -i '^cache-control: public, max-age=31536000, immutable' /tmp/css.headers
 
 curl -fsSI https://anilkaya.org/ | grep -i '^cache-control: no-cache'
+
+curl -fsSI "https://anilkaya.org/assets/fonts/Inter-latin.woff2?v=${FONTS_VERSION}" \
+  | grep -i '^cache-control: public, max-age=31536000, immutable'
+curl -fsSI https://anilkaya.org/assets/fonts-version.txt | grep -i '^cache-control: public, max-age=3600'
 ```
+
+The woff2 URLs carry `assets/fonts-version.txt`, not `assets/version.txt`
+("Asset versioning" in AGENTS.md): an asset bump must leave the font URLs
+unchanged, or every returning visitor downloads the fonts again for nothing.
+A blanket `?v=` rewrite, or a merge that brings one in, moves them anyway;
+before deploying, `grep -rn 'woff2?v=' --include=*.html --include=*.css .`
+must show only the fonts token, and `tests/contracts.mjs` must pass and
+report sixteen font references at it.
 
 The versioned stylesheet is served asset-first by the edge, without invoking
 `worker.js`; its headers come from the root `_headers` file. Check that the
@@ -313,8 +327,11 @@ smoke tests. A code rollback does not automatically undo D1 data migrations or
 dashboard Transform Rules; treat those as separate rollback items.
 
 The first forward deploy after any rollback must increment `assets/version.txt`
-(and every `?v=` reference, as in "Asset versioning" in AGENTS.md) before it
-ships, even when no browser asset changed. `/assets/*` is asset-first, and the
+(and every CSS/JS `?v=` reference, as in "Asset versioning" in AGENTS.md)
+before it ships, even when no browser asset changed; when the rolled-back
+version lacked a font the newer HTML asked for, it must also raise
+`assets/fonts-version.txt` (and every woff2 `?v=`), because the font URLs
+carry that token and an asset bump alone leaves the stored font 404 in place. `/assets/*` is asset-first, and the
 asset layer answers a file the rolled-back version does not ship with its
 `404.html` under the path's `_headers` policy: for `/assets/css|js|fonts/*`
 that is `Cache-Control: public, max-age=31536000, immutable` (measured on the
@@ -828,11 +845,41 @@ besides `depth` and `session` for every card it published, it carries `x`
 exist and has not yet retired, with their session). The next run reads it,
 retires what has aged out, and carries the rest. A roster with no `held`
 (the first run after this change, or one that shed its ledger to fit its
-32 KB cap) triggers a one-time probe: every screened, guaranteed, fund and
-index ticker's `card:` and `card-x:` keys are read through the ingest route
-(and `hist:` wherever either exists), at most 2,400 reads, worker-only. If
-the prior roster cannot be read at all, nothing is retired that night. A
-refused DELETE keeps its key in `held` for the next run.
+32 KB cap) triggers a one-time probe of every screened, guaranteed, fund and
+index ticker through the metadata form described below; the per-key reads of
+`card:` and `card-x:` (and `hist:` wherever either exists) remain as the
+fallback for an older Worker. If the prior roster cannot be read at all,
+nothing is retired that night. A refused DELETE keeps its key in `held` for
+the next run.
+
+The probe asks for dates, not cards. `GET /api/flows/ingest?keys=<comma
+list>` (the nightly token only, GET only, at most 96 keys, each held to the
+single-key allowlist, `live:*` refused) answers
+`{ keys: { "<key>": { present, sessionDate, generatedAt, updatedAt, bytes } } }`
+from one prepared statement over `length(payload)` and two `json_extract`s,
+with a stored row whose payload says `status: "pending"` reported `present:
+false`, exactly as the pipeline reads the single-key answer. The nightly builds
+the list from every candidate's `card:`, `card-x:` and `hist:` keys at once,
+sends it in chunks of 96, and applies the same rule to the answers (hist counts
+only where a card or card-x is present or landed), so the ledger it builds is
+the one the per-key path built. Measured against the 2026-09-24 production
+snapshot with 733 candidate names and nothing landed (a full rebuild): the
+per-key bootstrap made 1,747 requests and downloaded 21,797,292 bytes to learn
+601 dates; the metadata form made 23 requests of 130,512 bytes in all, each one
+D1 statement, and built the identical 601-key ledger. If the form answers
+anything but 200 — an older Worker's 400 `invalid_key` — the run falls back
+to the per-key reads; a 400 `too_many_keys` falls back the same way but is
+named in the log as the cap mismatch it is, and
+`tests/flows-pipeline-contract.mjs` holds the pipeline's chunk within the
+Worker's `INGEST_META_KEYS_MAX`. The log line names the path either way, with
+the bytes left undownloaded. The 2,400 cap charges a name's `card:` and
+`card-x:` keys only; its `hist:` rides in the same request uncharged, so the
+metadata path reaches 1,200 names in full (the per-key reads, which charged
+every key including the hist they fetched, reached 800 to 1,200 depending on
+how many were carded, and charging all three kinds would have held the form
+to 800). The failure limit and the deadline count keys asked. `bytes` is
+`length(payload)` of the stored text — characters, as the POST answer's
+`bytes` counts them.
 
 The roster is read twice: once as the run starts and again at the retire
 step. Only the nightly writes it, so when the late read fails the early copy

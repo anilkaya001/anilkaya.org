@@ -1,8 +1,9 @@
 (() => {
   "use strict";
 
-  const statusEl = document.getElementById("flowsStatus");
-  const staleEl = document.getElementById("flowsStale");
+  const $ = (id) => document.getElementById(id);
+  const statusEl = $("flowsStatus");
+  const staleEl = $("flowsStale");
 
   const UI = window.FlowsUI;
   if (!UI) {
@@ -15,7 +16,7 @@
   const { h, F, isNum, DASH, MINUS, fmtSigned, fmtStamp, scoreStrip, glyph } = UI;
   const C = UI.chart;
 
-  const $ = (id) => document.getElementById(id);
+  const ans = (p) => (p && p.status !== "pending" ? p : null);
   const POP = { "aria-haspopup": "dialog", "aria-controls": "fxPop" };
   const verdictHost = $("ccVerdict");
   if (!statusEl || !verdictHost) return;
@@ -167,7 +168,7 @@
   }
 
   const rowCount = (payload) =>
-    payload && payload.status !== "pending" && Array.isArray(payload.rows)
+    ans(payload) && Array.isArray(payload.rows)
       ? payload.rows.length : null;
 
   const poolCount = (payload) => {
@@ -760,7 +761,7 @@
   }
 
   function boardsRead(long, short) {
-    const answered = [long, short].filter((p) => p && p.status !== "pending");
+    const answered = [long, short].filter(ans);
     const longDate = answered.includes(long) ? long.sessionDate : null;
     const shortDate = answered.includes(short) ? short.sessionDate : null;
     const date = (typeof longDate === "string" && longDate) ||
@@ -839,7 +840,7 @@
   }
 
   function pulseSeries(pulse) {
-    const pt = pulse && pulse.status !== "pending" && pulse.tide;
+    const pt = ans(pulse) && pulse.tide;
     if (!pt || pt.status !== "ok" || !Array.isArray(pt.points) || !pt.points.length) return null;
     const pts = pt.points;
     const call = pts.map((p) => isNum(p && p.callPrem)), put = pts.map((p) => isNum(p && p.putPrem));
@@ -851,9 +852,9 @@
   }
 
   function zeroOf(tide, S) {
-    const lb = S.liveBreadth && S.liveBreadth.status !== "pending" && S.liveBreadth.dte ? S.liveBreadth.dte.zero : null;
-    const lm = S.liveMkt && S.liveMkt.status !== "pending" ? S.liveMkt.zeroDte : null;
-    const reg = S.regime && S.regime.status !== "pending" && S.regime.zeroDte && S.regime.zeroDte.status === "ok" ? S.regime.zeroDte : null;
+    const lb = ans(S.liveBreadth) && S.liveBreadth.dte ? S.liveBreadth.dte.zero : null;
+    const lm = ans(S.liveMkt) ? S.liveMkt.zeroDte : null;
+    const reg = ans(S.regime) && S.regime.zeroDte && S.regime.zeroDte.status === "ok" ? S.regime.zeroDte : null;
     const same = (d) => !d || !tide.session || d === tide.session;
     if (tide.live) {
       for (const z of [lb, lm]) {
@@ -867,8 +868,8 @@
 
   function tideOf(S) {
     const p = pulseSeries(S.pulse);
-    const pulseDay = S.pulse && S.pulse.status !== "pending" ? S.pulse.sessionDate || null : null;
-    const lm = S.liveMkt && S.liveMkt.status !== "pending" ? S.liveMkt : null;
+    const pulseDay = ans(S.pulse) ? S.pulse.sessionDate || null : null;
+    const lm = ans(S.liveMkt);
     const l = lm && (!pulseDay || !lm.session || lm.session >= pulseDay)
       ? liveSeries(lm.tide, lm.session, lm.__ff, lm.fresh && lm.fresh.readAt) : null;
     const tide = [l, p].find((x) => x && x.t.length >= 2) || [l, p].find(Boolean) || null;
@@ -998,7 +999,7 @@
   }
 
   function zeroShareOf(reg, breadth) {
-    const lb = breadth && breadth.status !== "pending" && breadth.dte && breadth.dte.share ? breadth : null;
+    const lb = ans(breadth) && breadth.dte && breadth.dte.share ? breadth : null;
     const z = reg && reg.zeroDte && reg.zeroDte.status === "ok" ? reg.zeroDte : null;
     if (lb && isNum(lb.dte.share.value) !== null && (!reg || !reg.sessionDate || (lb.session && lb.session >= reg.sessionDate))) {
       return { share: isNum(lb.dte.share.value), src: "live:breadth" };
@@ -1011,9 +1012,9 @@
     if (!into) return;
     into.replaceChildren();
     headMark("hmVol", null);
-    const reg = regime && regime.status !== "pending" ? regime : null;
+    const reg = ans(regime);
     const curve = reg && reg.volCurve && reg.volCurve.byIndex ? reg.volCurve.byIndex : null;
-    const lv = liveVol && liveVol.status !== "pending" && liveVol.index ? liveVol : null;
+    const lv = ans(liveVol) && liveVol.index ? liveVol : null;
     const useLive = lv && (!reg || !reg.sessionDate || (lv.session && lv.session >= reg.sessionDate));
     const TEN = [1, 5, 7, 14, 30, 60, 90, 180, 365];
     const idx = {};
@@ -1068,7 +1069,7 @@
       readout: (i) => [C.part(TEN[i] + "d", "k")].concat(names.map((k) => C.part(k + " " + F.pct(idx[k].iv[i], 1), null))),
     });
     into.append(UI.legend(names.map((k) => [COL[k], "ln", k])));
-    const radar = reg && reg.volRadar && reg.volRadar.status !== "pending" ? reg.volRadar : null;
+    const radar = ans(reg && reg.volRadar);
     const side = (s) => (radar && radar[s] && Array.isArray(radar[s].rows) ? radar[s].rows.slice(0, 4) : []);
     const tagRow = (word, rows, tone) => h("div", { class: "hm-radar-r" }, h("span", { class: "hm-radar-k" }, word),
       rows.length ? rows.map((r) => (r.carded
@@ -1710,6 +1711,8 @@
   }
 
   const FOCUS = { focus: null, strips: null, series: null, live: null, lead: new URLSearchParams(location.search).get("lead"), pills: {} };
+  const leadOn = () => { const m = $("hmLeaders"); if (m) m.dataset.lead = FOCUS.lead || "mag7"; };
+  leadOn();
   const readOf = (s) => Date.parse(s.fresh && s.fresh.readAt);
   const newest = (a, b) => (readOf(b) || 0) - (readOf(a) || 0);
   const FK = ["px", "prev", "chg", "net", "lean", "iv30"];
@@ -1721,7 +1724,7 @@
   const counted = (a) => a.filter((x) => x !== null).length;
 
   function focusRows(ts) {
-    const f = FOCUS.focus && FOCUS.focus.status !== "pending" ? FOCUS.focus : null;
+    const f = ans(FOCUS.focus);
     const se = FOCUS.series;
     const fday = f && typeof f.sessionDate === "string" ? f.sessionDate : null;
     const nr = (t) => f && f.rows && f.rows[t];
@@ -1867,6 +1870,7 @@
       seg.append(UI.segmented("Leaders", groups.map((g) => ({ label: g.label || g.id })), (i) => {
         at = i;
         FOCUS.lead = groups[i].id;
+        leadOn();
         const u = new URL(location.href);
         u.searchParams.set("lead", FOCUS.lead);
         history.replaceState(history.state, "", u);
@@ -1880,7 +1884,7 @@
     const q = a && a.closest && a.closest("#hmMetals, #hmLeaders") &&
       (a.dataset.ticker ? '[data-ticker="' + a.dataset.ticker + '"]' : a.closest("#ccLeadSeg") && "[aria-selected=true]");
     const f = FOCUS.focus;
-    const groups = f && f.status !== "pending" && Array.isArray(f.groups)
+    const groups = ans(f) && Array.isArray(f.groups)
       ? f.groups.filter((g) => g && Array.isArray(g.tickers) && g.tickers.length) : [];
     paintMetals(groups.filter((g) => g.kind === "metal"));
     paintLeaders(groups.filter((g) => g.kind !== "metal"));
@@ -1936,22 +1940,29 @@
   }
 
   let gated = false;
+  const OPTS = () => ({ credentials: "same-origin", signal: AbortSignal.timeout(15000), headers: { Accept: "application/json" } });
+  const LK = "/api/flows/lk?k=";
+
+  const read = (r) => r.json().then((body) => stampUpdated(r, body));
 
   function loadBoard(side) {
-    return fetch("/api/flows/board?side=" + side, {
-      credentials: "same-origin", signal: AbortSignal.timeout(15000), headers: { Accept: "application/json" },
-    }).then((r) => {
+    return fetch("/api/flows/board?side=" + side, OPTS()).then((r) => {
       if (r.status === 401) { gated = true; location.replace("/flows/"); return null; }
-      if (!r.ok) return null;
-      return r.json().then((body) => stampUpdated(r, body));
+      return r.ok ? read(r) : null;
     }).catch(() => null);
   }
 
   function loadRegion(path, soon) {
-    return fetch(path, { credentials: "same-origin", signal: AbortSignal.timeout(15000), headers: { Accept: "application/json" } })
-      .then((r) => (r.ok ? r.json().then((body) => stampUpdated(r, body))
-        : soon && r.status === 404 ? { status: "pending", __route: 404 } : null))
+    return fetch(path, OPTS())
+      .then((r) => (r.ok ? read(r) : soon && r.status === 404 ? { status: "pending", __route: 404 } : null))
       .catch(() => null);
+  }
+
+  function loadLive(keys) {
+    if (keys.length === 1) return loadRegion(LK + keys[0], true).then((b) => ({ [keys[0]]: b }));
+    return fetch(LK + keys.join(","), OPTS()).then((r) => (r.ok ? r.json() : r.status === 404 ? { status: "pending" } : null))
+      .catch(() => null)
+      .then((env) => Object.fromEntries(keys.map((k) => [k, env && env.keys ? UI.liveBody ? UI.liveBody(env, k) : null : env])));
   }
 
   function neuronComputed(market) {
@@ -2023,24 +2034,19 @@
       onChange(changed) {
         if (!Array.isArray(changed)) return;
         const has = (re) => changed.some((k) => re.test(String(k)));
-        const st = has(/strips/), fo = has(/^focus/), lf = has(/:focus/);
-        if (st || fo || lf) {
-          Promise.all([fo && loadRegion("/api/flows/focus"), st && loadRegion("/api/flows/lk?k=strips", true),
-            st && loadRegion("/api/flows/lk?k=strips:series", true), lf && loadRegion("/api/flows/lk?k=focus", true)]).then(([f, s, se, l]) => {
-            if (f) FOCUS.focus = f;
-            if (s) FOCUS.strips = s;
-            if (se) FOCUS.series = se;
-            if (l) FOCUS.live = l;
-            paintFocus();
-          });
-        }
-        const mk = has(/market/), br = has(/breadth/), pu = has(/pulse/);
-        Promise.all([mk && loadRegion("/api/flows/lk?k=market", true), br && loadRegion("/api/flows/lk?k=breadth", true),
-          pu && loadRegion("/api/flows/pulse")]).then(([m, b, p]) => {
-          if (m) S.liveMkt = m;
-          if (b) { S.liveBreadth = b; paintVol(S.regime, liveVol, b); }
+        const st = has(/strips/), fo = has(/^focus/), lf = has(/:focus/), mk = has(/market/), br = has(/breadth/), pu = has(/pulse/);
+        const keys = [mk && "market", br && "breadth", st && "strips", st && "strips:series", lf && "focus"].filter(Boolean);
+        Promise.all([fo && loadRegion("/api/flows/focus"), pu && loadRegion("/api/flows/pulse"), keys.length && loadLive(keys)]).then(([f, p, lk]) => {
+          const l = lk || {};
+          if (f) FOCUS.focus = f;
+          if (l.strips) FOCUS.strips = l.strips;
+          if (l["strips:series"]) FOCUS.series = l["strips:series"];
+          if (l.focus) FOCUS.live = l.focus;
+          if (st || fo || lf) paintFocus();
+          if (l.market) S.liveMkt = l.market;
+          if (l.breadth) { S.liveBreadth = l.breadth; paintVol(S.regime, liveVol, l.breadth); }
           if (p) S.pulse = p;
-          if (m || b || p) hero();
+          if (l.market || l.breadth || p) hero();
         });
       },
     });
@@ -2058,23 +2064,19 @@
     loadRegion("/api/flows/news"),
     loadRegion("/api/flows/pulse"),
     loadRegion("/api/flows/regime", true),
-    loadRegion("/api/flows/lk?k=market", true),
-    loadRegion("/api/flows/lk?k=vol", true),
-    loadRegion("/api/flows/lk?k=breadth", true),
     loadRegion("/api/flows/focus"),
-    loadRegion("/api/flows/lk?k=strips", true),
-    loadRegion("/api/flows/lk?k=strips:series", true),
-    loadRegion("/api/flows/lk?k=focus", true),
-  ]).then(([lng, sht, watch, market, alerts, events, track, lean, news, pulse, regime, liveMkt, liveVol, liveBreadth, focus, strips, series, fl]) => {
+    loadLive(["market", "vol", "breadth", "strips", "strips:series", "focus"]),
+  ]).then(([lng, sht, watch, market, alerts, events, track, lean, news, pulse, regime, focus, lk]) => {
     if (gated) return;
-    Object.assign(FOCUS, { focus, strips, series, live: fl });
-    paintFocus();
+    const liveMkt = lk.market, liveVol = lk.vol, liveBreadth = lk.breadth;
+    Object.assign(FOCUS, { focus, strips: lk.strips, series: lk["strips:series"], live: lk.focus });
+    requestAnimationFrame(() => setTimeout(paintFocus));
 
     const bull = ranked(lng && lng.rows);
     const bear = ranked(sht && sht.rows);
 
     const evBy = new Map();
-    if (events && events.status !== "pending" && Array.isArray(events.rows)) {
+    if (ans(events) && Array.isArray(events.rows)) {
       for (const row of events.rows) if (row && row.t) evBy.set(String(row.t), row);
     }
     const boardBy = new Map();
@@ -2089,20 +2091,19 @@
       }
     }
 
-    const answered = (p) => (p && p.status !== "pending" ? p : null);
-    const meta = answered(lng) || answered(sht) || lng || sht || {};
+    const meta = ans(lng) || ans(sht) || lng || sht || {};
     if (typeof meta.sessionDate === "string") {
       UI.freshness({ sessionDate: meta.sessionDate, generatedAt: meta.generatedAt, updatedAt: meta.__updatedAt, source: "boards" });
     }
 
     paintMeta($("ccMetaDate"), $("ccMetaScreened"), [lng, sht], market);
     paintVerdict(verdictHost, lng, sht, market, alerts, pulse);
-    neuronComputed(market && market.status !== "pending" ? market : null);
+    neuronComputed(ans(market));
     Object.assign(S, { pulse, regime, liveMkt, liveBreadth, boardsDay: boardsRead(lng, sht).date });
     hero();
     paintVol(regime, liveVol, liveBreadth);
 
-    const trk = readTrack(track && track.status !== "pending" ? track : null);
+    const trk = readTrack(ans(track));
 
     for (const [id, subId, payload, rows, label, all, route] of [
       ["ccBull", "ccBullSub", lng, bull, "Bullish candidates, ranked", "bullish", "long"],
@@ -2122,7 +2123,7 @@
         continue;
       }
       sideList(into, rows, isNum(payload && payload.deep) !== null, trk, label, evBy);
-      infoInto(id === "ccBull" ? "hmBull" : "hmBear", all + " leaders", () => ({
+      infoInto("hm" + id.slice(2), all + " leaders", () => ({
         title: cap1(all), lead: "Names past the dead band on the " + all + " board, in the board's published rank order.",
         facts: [["Pool", String(poolCount(payload) ?? rows.length)], ["Drawn", String(Math.min(rows.length, ROW_MAX))], ["Strip", trk.label]],
         notes: ["Scores are a ranked attention signal on a fixed −100 to +100 scale, not a return forecast. Names inside the dead band are not published on either side.",
@@ -2148,7 +2149,7 @@
     if (alr) { alr.replaceChildren(); paintAlerts(alr, alerts); }
     const alrSub = $("ccAlertsSub");
     if (alrSub) {
-      const alrRows = alerts && alerts.status !== "pending" && Array.isArray(alerts.rows) ? alerts.rows : null;
+      const alrRows = ans(alerts) && Array.isArray(alerts.rows) ? alerts.rows : null;
       if (alrRows) {
         const seen = isNum(alerts.seen);
         const shown = Math.min(alrRows.length, LIST_MAX);
@@ -2163,7 +2164,7 @@
     if (evr) { evr.replaceChildren(); paintEvents(evr, events); }
     const evSub = $("ccEventsSub");
     if (evSub) {
-      const evRows = events && events.status !== "pending" && Array.isArray(events.rows) ? events.rows : null;
+      const evRows = ans(events) && Array.isArray(events.rows) ? events.rows : null;
       const inWindow = isNum(events && events.inWindow);
       const evShown = evRows === null ? 0 : Math.min(evRows.length, LIST_MAX);
       const evOf = evRows === null ? 0 : inWindow === null ? evRows.length : inWindow;
@@ -2219,7 +2220,7 @@
     setRailCount("long", poolCount(lng));
     setRailCount("short", poolCount(sht));
     setRailCount("watch", rowCount(watch));
-    setRailCount("events", events && events.status !== "pending" ? isNum(events.inWindow) : null);
+    setRailCount("events", ans(events) ? isNum(events.inWindow) : null);
     live(liveVol);
   }).catch((error) => {
     statusEl.textContent = "The session could not be loaded. Refresh to try again." + (error && error.message ? " (" + error.message + ")" : "");

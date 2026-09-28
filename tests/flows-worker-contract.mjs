@@ -809,6 +809,45 @@ try {
     eq(absent.status, 200, "an unwritten key is not an error");
     eq((await absent.json()).status, "pending", "it reports pending");
 
+    {
+      const meta = (keys, init) => fetch(url("/api/flows/ingest?keys=" + encodeURIComponent(keys)), {
+        redirect: "manual", headers: { Authorization: "Bearer " + INGEST_TOKEN }, ...init,
+      });
+      eq((await get("/api/flows/ingest?keys=board:long")).status, 401,
+         "THE METADATA FORM: without the bearer it is refused like the single-key read");
+      const two = await meta("board:long,card:NOTHERE,board:long");
+      eq(two.status, 200, "an authenticated ?keys= read answers");
+      const body = await two.json();
+      deep(Object.keys(body.keys), ["board:long", "card:NOTHERE"], "one entry per distinct key asked, in the order asked");
+      const present = body.keys["board:long"];
+      ok(present.present === true && present.bytes === payload.length && typeof present.generatedAt === "string" &&
+         present.sessionDate === null && Number.isInteger(present.updatedAt) && present.updatedAt > 0,
+         `a stored key answers its size, its dates and its write time (${JSON.stringify(present)})`);
+      deep(body.keys["card:NOTHERE"], { present: false }, "an unwritten key is absent, with nothing else said about it");
+      ok(!two.headers.get("x-payload-updated") && !JSON.stringify(body).includes('"rows"'),
+         "and no payload rides along: the form exists so the nightly can learn a card's date without downloading the card");
+      eq((await meta("board:long", { method: "POST", body: "{}" })).status, 405, "the form is GET only");
+      eq((await meta("board:long,live:market")).status, 400, "a live:* key in the list refuses the whole request");
+      eq((await meta("board:long,../../etc/passwd")).status, 400, "as does a key outside the allowlist");
+      eq((await meta("board:sideways")).status, 400, "or an unknown board side, by the rule the single-key form applies");
+      eq((await meta("clock")).status, 400, "and the clock, which is not a payload row");
+      eq((await meta("")).status, 400, "and an empty list");
+      const many = (n) => Array.from({ length: n }, (_, i) => "card:M" + i).join(",");
+      const full = await meta(many(96));
+      eq(full.status, 200, "ninety-six keys are answered in one request");
+      eq(Object.keys((await full.json()).keys).length, 96, "all of them");
+      const over = await meta(many(97));
+      eq(over.status, 400, "ninety-seven are refused");
+      eq((await over.json()).error.code, "too_many_keys", "with their own code, so the pipeline can tell the cap from a bad key");
+      eq((await post("card:PENDN", JSON.stringify({ status: "pending", ticker: "PENDN" }), INGEST_TOKEN)).status, 200,
+         "a stored payload may itself say pending");
+      deep((await (await meta("card:PENDN")).json()).keys["card:PENDN"], { present: false },
+        "and the metadata form reports it absent, exactly as the pipeline reads the single-key answer");
+      eq((await (await fetch(url("/api/flows/ingest?key=card:PENDN"),
+        { headers: { Authorization: "Bearer " + INGEST_TOKEN } })).json()).status, "pending",
+         "which the single-key read reports as pending too");
+    }
+
     eq((await fetch(url("/api/flows/ingest?key=board:long:2026-01-02"), { method: "DELETE" })).status, 401,
        "DELETE without the bearer is refused like every other verb");
 
@@ -1616,6 +1655,10 @@ try {
       eq((await ingest("board:long", "GET", LIVE_TOKEN)).status, 200,
         "it may READ the board it plans the strip from");
       eq((await ingest("card:AAPL", "GET", LIVE_TOKEN)).status, 403, "and nothing else of the nightly store");
+      const liveMeta = await fetch(L("/api/flows/ingest?keys=board:long,card:AAPL"),
+        { redirect: "manual", headers: { Authorization: "Bearer " + LIVE_TOKEN } });
+      eq(liveMeta.status, 403, "nor the metadata form, even over the keys it may read one at a time");
+      eq((await liveMeta.json()).error.code, "live_token_scope", "with the live scope's code");
       const nightlyOnLive = await ingest("live:market", "POST", INGEST_TOKEN, {});
       eq(nightlyOnLive.status, 403, "the nightly token is refused on live:market");
       eq((await nightlyOnLive.json()).error.code, "nightly_token_scope", "so the nightly run cannot corrupt a live row");
@@ -1761,6 +1804,42 @@ try {
         ["worker", 300, heldFocus.fresh.readAt, "market"], "the heartbeat reports live:focus beside the nightly focus key");
       ok(nf.keys["live:focus"].updatedAt > 0 && nf.keys.focus.session === "2026-09-22" && nf.keys["live:strips"].state === "pending",
         "with its updatedAt, so an open page re-reads it when it moves");
+      {
+        const lkText = async (k) => (await fetch(L("/api/flows/lk?k=" + k), { headers: cookie })).text();
+        const mkOne = await fetch(L("/api/flows/lk?k=market"), { headers: cookie });
+        const mkText = await mkOne.text();
+        const focusText = await lkText("focus");
+        const many = await fetch(L("/api/flows/lk?k=market,focus,vol"), { headers: cookie });
+        eq(many.status, 200, "ONE RESPONSE FOR A PAGE'S LIVE KEYS: /api/flows/lk?k=market,focus,vol answers");
+        const envl = await many.json();
+        deep(Object.keys(envl), ["serverNow", "phase", "keys"], "with an envelope of serverNow, phase and keys");
+        deep(Object.keys(envl.keys), ["market", "focus", "vol"], "keyed by the params as asked");
+        deep([envl.keys.market.status, envl.keys.market.payload, envl.keys.focus.status, envl.keys.focus.payload],
+          ["ok", JSON.parse(mkText), "ok", JSON.parse(focusText)],
+          "each held key's payload whole, exactly what its single-key route serves");
+        deep(envl.keys.vol, { status: "pending", fresh: { state: "pending", reason: "unpublished", klass: "breadth" } },
+          "and a key nothing has written yet pending in its class");
+        const nowBody = await (await fetch(L("/api/flows/now?k=market,focus,vol"), { headers: cookie })).json();
+        const stable = (e) => [e.state, e.klass, e.cadenceS, e.source, e.session, e.readAt, e.updatedAt];
+        deep([stable(envl.keys.market.fresh), stable(envl.keys.focus.fresh), envl.phase.phase],
+          [stable(nowBody.keys["live:market"]), stable(nowBody.keys["live:focus"]), nowBody.phase.phase],
+          "each fresh entry is the heartbeat's own entry for that key, and the phase the heartbeat's phase");
+        eq(envl.keys.market.updatedAt, Number(mkOne.headers.get("x-payload-updated")), "updatedAt is the single route's X-Payload-Updated");
+        deep([many.headers.get("cache-control"), many.headers.get("content-type"), /^\d{13}$/.test(many.headers.get("x-server-now")),
+          Number(many.headers.get("x-server-now")) === envl.serverNow],
+          ["no-store", "application/json; charset=utf-8", true, true], "no-store like the single-key route, with X-Server-Now the body's serverNow");
+        deep([many.headers.get("x-fresh-state"), many.headers.get("x-fresh-class"), many.headers.get("x-fresh-reason")],
+          ["pending", "breadth", "unpublished"], "the aggregate X-Fresh-* are the tightest reading: the weakest key (vol, pending) sets the state and class");
+        eq(many.headers.get("x-fresh-read-at"), mkOne.headers.get("x-fresh-read-at"),
+          "and X-Fresh-Read-At is the oldest read among the keys, the 10:06 market read before the 10:13 focus read");
+        eq((await fetch(L("/api/flows/lk?k=market,focus"))).status, 401, "the envelope is gated like the single key");
+        eq(await lkText("market,board:long"), mkText,
+          "an unknown key in a list is dropped, and a list that leaves one key is that key's raw body, byte for byte");
+        eq((await fetch(L("/api/flows/lk?k=board:long,meta"), { headers: cookie })).status, 400, "a list with no live key is a 400");
+        const nine = await (await fetch(L("/api/flows/lk?k=market,focus,breadth,strips,strips:series,alerts,gex,vol,tape"), { headers: cookie })).json();
+        deep(Object.keys(nine.keys), ["market", "focus", "breadth", "strips", "strips:series", "alerts", "gex", "vol"],
+          "and a list is capped at eight keys, the ninth dropped");
+      }
       await tick(FOCUS, "2026-09-26T10:08:00-04:00");
       eq(screens().length, 3, "a Saturday focus tick reads nothing");
       drop.add("GDX").add("AVGO");

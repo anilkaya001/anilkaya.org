@@ -210,6 +210,27 @@ export function liveMeta(row) {
   return { readAt: row.readAt, session: row.session, cadenceS: row.cadenceS, source: row.source };
 }
 
+const entryIso = (v) => (v === null ? null : new Date(v).toISOString());
+
+const entryOf = (f, source, updatedAt) => ({
+  state: f.state, reason: f.reason, klass: f.klass, cadenceS: f.cadenceS, source,
+  session: f.session, updatedAt: updatedAt || null,
+  readAt: entryIso(f.readAt), liveUntil: entryIso(f.liveUntil), staleAt: entryIso(f.staleAt),
+});
+
+export function liveEntry(meta, updatedAt, now, clock) {
+  return entryOf(freshHeaders(meta, now, clock).fresh, meta.source, updatedAt);
+}
+
+export function pendingEntry(klass) {
+  return { state: "pending", reason: "unpublished", klass };
+}
+
+export function phaseView(phase) {
+  return phase ? { phase: phase.phase, session: phase.session, trading: phase.trading,
+    endsAt: Number.isFinite(phase.endsAt) ? new Date(phase.endsAt).toISOString() : null } : null;
+}
+
 const withTimeout = (promise, ms) => new Promise((resolve) => {
   const timer = setTimeout(() => resolve({ __failed: "timeout after " + ms + " ms" }), ms);
   promise.then((v) => { clearTimeout(timer); resolve(v); },
@@ -639,15 +660,73 @@ export function liveResponse(row, now, clock, extra = {}) {
   } });
 }
 
-export async function serveLiveKey(env, url, now, { json, HttpError }) {
-  const key = liveKeyFromParam(url.searchParams.get("k"));
-  if (!key) throw new HttpError(400, "invalid_key", "Unknown live key");
-  const clock = await cachedClock(env, now);
-  const row = await readLive(env.DB, key);
-  if (!row) {
-    return json({ key, status: "pending" }, 200, pendingHeaders(LIVE_KEYS[key].klass, now, clock));
+export const LK_MAX_KEYS = 8;
+
+export function liveParams(raw) {
+  return parseList(raw, (k) => liveKeyFromParam(k) !== null, LK_MAX_KEYS);
+}
+
+const LIVE_ROWS_SQL = "SELECT id, payload, read_at, session, cadence_s, source, writer, updated_at FROM flows_live WHERE id IN (";
+
+export async function readLiveRows(db, ids, now = Date.now()) {
+  const withClock = clockDue(now);
+  const statements = [db.prepare(LIVE_ROWS_SQL + ids.map(() => "?").join(", ") + ")").bind(...ids)];
+  if (withClock) statements.push(db.prepare(CLOCK_ROW_SQL));
+  const results = await db.batch(statements).catch(() => null);
+  if (!results) return null;
+  if (withClock) memoClock(normalizeClock(firstOf(results[1])), now);
+  return { rows: (results[0] && results[0].results) || [], clock: clockMemo.clock };
+}
+
+const FRESH_RANK = Object.freeze({ live: 0, fresh: 1, closed: 2, stale: 3, pending: 4 });
+const earliest = (a, b) => (!a ? b : !b ? a : a < b ? a : b);
+
+export function liveEnvelope(params, rows, now, clock) {
+  const parts = [];
+  let worst = null, readAt = "", liveUntil = "", staleAt = "", updated = 0;
+  for (const p of params) {
+    const id = liveKeyFromParam(p);
+    const r = rows.find((x) => x && x.id === id);
+    let headers;
+    if (r && r.payload) {
+      const row = liveRow(r);
+      const { headers: h, fresh } = freshHeaders(liveMeta(row), now, clock);
+      headers = h;
+      updated = Math.max(updated, row.updatedAt || 0);
+      const entry = entryOf(fresh, row.source, row.updatedAt);
+      parts.push(`${JSON.stringify(p)}:{"status":"ok","payload":${r.payload},"updatedAt":${JSON.stringify(entry.updatedAt)},` +
+        `"fresh":${JSON.stringify(entry)}}`);
+    } else {
+      const klass = LIVE_KEYS[id].klass;
+      headers = pendingHeaders(klass, now, clock);
+      parts.push(`${JSON.stringify(p)}:{"status":"pending","fresh":${JSON.stringify(pendingEntry(klass))}}`);
+    }
+    readAt = earliest(readAt, headers["X-Fresh-Read-At"]);
+    liveUntil = earliest(liveUntil, headers["X-Fresh-Live-Until"]);
+    staleAt = earliest(staleAt, headers["X-Fresh-Stale-At"]);
+    if (!worst || FRESH_RANK[headers["X-Fresh-State"]] > FRESH_RANK[worst["X-Fresh-State"]]) worst = headers;
   }
-  return liveResponse(row, now, clock);
+  const body = `{"serverNow":${now},"phase":${JSON.stringify(phaseView(phaseAt(now, clock)))},"keys":{${parts.join(",")}}}`;
+  return { body, headers: { ...worst, "X-Fresh-Read-At": readAt, "X-Fresh-Live-Until": liveUntil, "X-Fresh-Stale-At": staleAt,
+    "X-Payload-Updated": String(updated) } };
+}
+
+export async function serveLiveKey(env, url, now, { json, HttpError }) {
+  const params = liveParams(url.searchParams.get("k"));
+  if (!params.length) throw new HttpError(400, "invalid_key", "Unknown live key");
+  if (params.length === 1) {
+    const key = liveKeyFromParam(params[0]);
+    const clock = await cachedClock(env, now);
+    const row = await readLive(env.DB, key);
+    if (!row) {
+      return json({ key, status: "pending" }, 200, pendingHeaders(LIVE_KEYS[key].klass, now, clock));
+    }
+    return liveResponse(row, now, clock);
+  }
+  const read = await readLiveRows(env.DB, [...new Set(params.map(liveKeyFromParam))], now);
+  if (!read) throw new HttpError(503, "store_unreadable", "The store could not be read");
+  const { body, headers } = liveEnvelope(params, read.rows, now, read.clock);
+  return new Response(body, { status: 200, headers: { "Content-Type": "application/json; charset=utf-8", ...headers } });
 }
 
 export function parseList(raw, allow, max = 16) {
@@ -696,16 +775,7 @@ export async function serveNow(env, url, now, { json, HttpError, quote }) {
   const clock = await cachedClock(env, now);
   const phase = phaseAt(now, clock);
   const keys = {};
-  const place = (id, meta, updatedAt) => {
-    const f = freshHeaders(meta, now, clock).fresh;
-    keys[id] = {
-      state: f.state, reason: f.reason, klass: f.klass, cadenceS: f.cadenceS, source: meta.source,
-      session: f.session, updatedAt: updatedAt || null,
-      readAt: f.readAt === null ? null : new Date(f.readAt).toISOString(),
-      liveUntil: f.liveUntil === null ? null : new Date(f.liveUntil).toISOString(),
-      staleAt: f.staleAt === null ? null : new Date(f.staleAt).toISOString(),
-    };
-  };
+  const place = (id, meta, updatedAt) => { keys[id] = liveEntry(meta, updatedAt, now, clock); };
   const statements = [];
   if (liveKeys.length) {
     statements.push(env.DB.prepare(
@@ -726,7 +796,7 @@ export async function serveNow(env, url, now, { json, HttpError, quote }) {
     const rows = results[i++].results || [];
     for (const k of liveKeys) {
       const r = rows.find((x) => x.id === k);
-      if (!r) { keys[k] = { state: "pending", reason: "unpublished", klass: LIVE_KEYS[k].klass }; continue; }
+      if (!r) { keys[k] = pendingEntry(LIVE_KEYS[k].klass); continue; }
       place(k, { readAt: Number(r.read_at), session: r.session, cadenceS: Number(r.cadence_s), source: r.source },
         Number(r.updated_at));
     }
@@ -746,8 +816,7 @@ export async function serveNow(env, url, now, { json, HttpError, quote }) {
       why: clock && typeof clock.tier1Why === "string" ? clock.tier1Why : null },
     clock: clockView(clock),
     expected: expectedNightlySession(now, clock),
-    phase: phase ? { phase: phase.phase, session: phase.session, trading: phase.trading,
-      endsAt: Number.isFinite(phase.endsAt) ? new Date(phase.endsAt).toISOString() : null } : null,
+    phase: phaseView(phase),
     keys,
   };
   const t = String(url.searchParams.get("t") || "").trim().toUpperCase();

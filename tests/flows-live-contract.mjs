@@ -1166,6 +1166,27 @@ const cronMinutes = (cron) => {
   ok(noClock.skewMs === 0 && noClock.stateAt(at + 30 * 60000) === "stale",
     "A RESPONSE WITHOUT X-Server-Now leaves the skew at zero and the page's own clock in charge — Number(null) is 0, " +
     "and a server clock of the epoch would pin every glyph at live for good");
+  {
+    const row = { id: "live:market", payload: JSON.stringify({ key: "live:market", tide: { n: 3 } }), read_at: at - 60000,
+      session: "2026-09-23", cadence_s: 300, source: "worker", writer: "worker", updated_at: at - 59000 };
+    const env = JSON.parse(W.liveEnvelope(["market", "vol"], [row], at, null).body);
+    const mk = UI.liveBody(env, "market");
+    deep([mk.key, mk.tide.n, mk.__updatedAt, mk.__ff.stateAt(at - mk.__ff.skewMs), mk.__ff.source, mk.__ff.phase, mk.__ff.serverNow],
+      ["live:market", 3, at - 59000, "live", "worker", env.phase.phase, at],
+    "liveBody unpacks a held key of the envelope into the body the single-key route produced: the payload itself, " +
+      "__updatedAt from the entry, __ff from its fresh entry at the envelope's clock and phase");
+    const single = UI.freshFrom(new Headers(W.liveEnvelope(["market"], [row], at, null).headers));
+    const view = (f) => [f.state, f.reason, f.klass, f.readAt, f.liveUntil, f.staleAt, f.session, f.source, f.cadenceS, f.phase, f.phaseEndsAt, f.serverNow];
+    deep(view(mk.__ff), view(single), "and that __ff reads the same as the one the single key's X-Fresh-* headers give, field for field");
+    const vol = UI.liveBody(env, "vol");
+    deep([vol.status, vol.__updatedAt, vol.__ff.state, vol.__ff.klass, vol.__ff.stateAt()], ["pending", null, "pending", "breadth", "pending"],
+      "a pending key is the { status: \"pending\" } body the soon 404 path produced, with a pending __ff");
+    deep([UI.liveBody(env, "strips"), UI.liveBody({ status: "pending" }, "market"), UI.liveBody(null, "market")], [null, null, null],
+      "a key the envelope does not carry, a body with no keys, and no body are null, as a failed single read was");
+    const bareEntry = UI.liveBody({ keys: { market: { status: "ok", payload: { a: 1 } } } }, "market");
+    deep([bareEntry.a, bareEntry.__updatedAt, bareEntry.__ff], [1, null, null],
+      "an entry without a fresh object stamps __ff null, as a response without X-Fresh-State did");
+  }
   eq(UI.freshAggregate(["live", "fresh"], "rth"), "live", "page aggregate: live if any module is live");
   eq(UI.freshAggregate(["live", "stale"], "rth"), "stale", "stale if any is stale");
   eq(UI.freshAggregate(["fresh", "closed"], "post"), "closed", "closed outside the session when nothing is live");
@@ -2541,8 +2562,8 @@ const cronMinutes = (cron) => {
   "and so do the read and a request that got no answer at all");
   ok(/async function noteAnswer\(response\) \{\s*if \(response && !retriedStatus\(response\.status\)\) return null;\s*const text = response \? await response\.text\(\)\.catch\(\(\) => ""\) : "";\s*tallyAnswer\(edgeRefusals, response, text\);/
     .test(pipeline), "noteAnswer reads the body of a retried answer only, so a Cloudflare code in it is kept");
-  eq((pipeline.match(/refusal = response\.status === 403 \? await noteRefusal\(response\) : null;/g) || []).length, 3,
-    "and every ingest read, write and delete classifies a 403 into it");
+  eq((pipeline.match(/refusal = response\.status === 403 \? await noteRefusal\(response\) : null;/g) || []).length, 4,
+    "and every ingest read, write and delete classifies a 403 into it, and so does the ledger's metadata probe");
   eq((pipeline.match(/ingestURL\(\) \+ "\?key="/g) || []).length, 3, "which are the pipeline's only three ingest requests");
   ok(/async function noteRefusal\(response\) \{\s*const text = await response\.text\(\)\.catch\(\(\) => ""\);\s*const seen = refusalOf\(\{ headers: response\.headers, text \}\);\s*tallyRefusal\(edgeRefusals, seen\);/
     .test(pipeline), "noteRefusal reads the 403's own headers and body, and tallies what it finds");
@@ -2710,6 +2731,109 @@ const cronMinutes = (cron) => {
     "and the live credential's read of the same key carries no such field");
   deep((await W.serveIngestClock({ DB: tableless }, { json: jsonOf, lab: true })), { key: "clock", clock: null, labActiveAt: null },
     "and a fresh database answers null for both");
+
+  {
+    const S = "2026-09-25";
+    const at = Date.parse("2026-09-25T14:10:00Z");
+    const clock = { day: S, trading: 1, closedDays: [] };
+    const clockRow = { id: 1, day: S, trading: 1, closed_days: "[]" };
+    const rowOf = (id, payload, readAt, klass, source, updatedAt) => ({ id, payload: JSON.stringify(payload), read_at: readAt, session: S,
+      cadence_s: FRESH_CLASSES[klass].cadenceS, source, writer: source, updated_at: updatedAt });
+    const rows = [
+      rowOf("live:market", { key: "live:market", tide: { n: 2 }, fresh: { readAt: new Date(at - 60_000).toISOString() } }, at - 60_000, "market", "worker", at - 59_000),
+      rowOf("live:strips", { key: "live:strips", rows: { GLD: [1] } }, at - 120_000, "breadth", "actions", at - 118_000),
+    ];
+    const metaOf = (r) => ({ readAt: r.read_at, session: r.session, cadenceS: r.cadence_s, source: r.source });
+    const fakeDb = () => {
+      const seen = [];
+      const answer = (sql, args) => (/flows_clock/.test(sql) ? [clockRow]
+        : /flows_live WHERE id IN/.test(sql) ? rows.filter((r) => args.includes(r.id)) : rows.filter((r) => r.id === args[0]));
+      const st = (sql) => { const x = { sql, args: [], bind(...a) { x.args = a; return x; },
+        first: async () => { seen.push({ kind: "first", sql, args: x.args }); return answer(sql, x.args)[0] || null; },
+        all: async () => ({ results: answer(sql, x.args) }) }; return x; };
+      return { seen, prepare: st, batch: async (list) => { seen.push({ kind: "batch", sqls: list.map((x) => x.sql), args: list.map((x) => x.args) });
+        return list.map((x) => ({ results: answer(x.sql, x.args) })); } };
+    };
+    const jsonOf = (body, status = 200, headers = {}) => new Response(JSON.stringify(body), { status, headers });
+    class HttpError extends Error { constructor(status, code, message) { super(message); this.status = status; this.code = code; } }
+    const lk = (k) => new URL("https://anilkaya.org/api/flows/lk?k=" + k);
+
+    deep(W.liveParams(" market, vol,board:long,market,live:strips:series,MARKET"), ["market", "vol", "live:strips:series", "MARKET"],
+      "liveParams keeps the params as asked, trimmed, once each, in order, with an unknown key dropped as parseList drops it");
+    deep([W.LK_MAX_KEYS, W.liveParams(Object.keys(L.LIVE_KEYS).map((k) => k.slice(5)).join(",")).length], [8, 8],
+      "and caps a list at eight keys of the twelve");
+    deep(W.liveParams(""), [], "an empty k is no key");
+
+    const { body, headers } = W.liveEnvelope(["market", "vol", "strips"], rows, at, clock);
+    const env = JSON.parse(body);
+    deep(Object.keys(env), ["serverNow", "phase", "keys"], "THE ENVELOPE: serverNow, phase and keys");
+    deep([env.serverNow, env.phase], [at, W.phaseView(phaseAt(at, clock))], "stamped with the instant and the phase view /api/flows/now serves");
+    deep(Object.keys(env.keys), ["market", "vol", "strips"], "keyed by the params as asked");
+    deep(env.keys.market, { status: "ok", payload: JSON.parse(rows[0].payload), updatedAt: at - 59_000,
+      fresh: W.liveEntry(metaOf(rows[0]), at - 59_000, at, clock) },
+    "a held key: ok, the row's payload spliced in whole, its updatedAt, and the fresh entry serveNow's place() builds");
+    deep(env.keys.vol, { status: "pending", fresh: W.pendingEntry("breadth") }, "an unwritten key: pending, in its class");
+    deep(env.keys.vol.fresh, { state: "pending", reason: "unpublished", klass: "breadth" }, "as serveNow says it");
+    deep([env.keys.market.fresh.state, env.keys.strips.fresh.state], ["live", "live"],
+      "a market read a minute ago and a breadth read two minutes ago are both live inside the session");
+    const mk = freshHeaders(metaOf(rows[0]), at, clock).headers, st = freshHeaders(metaOf(rows[1]), at, clock).headers;
+    deep([headers["X-Fresh-State"], headers["X-Fresh-Reason"], headers["X-Fresh-Class"], headers["X-Fresh-Source"], headers["X-Fresh-Cadence"]],
+      ["pending", "unpublished", "breadth", "actions", "900"],
+    "THE AGGREGATE HEADERS ARE THE TIGHTEST READING: X-Fresh-State is the weakest key's (live < fresh < closed < stale < pending), " +
+      "and Reason, Class, Source and Cadence are that key's");
+    deep([headers["X-Fresh-Read-At"], headers["X-Fresh-Live-Until"], headers["X-Fresh-Stale-At"]],
+      [st["X-Fresh-Read-At"], mk["X-Fresh-Live-Until"], mk["X-Fresh-Stale-At"]],
+    "Read-At is the oldest read (the strip's), Live-Until and Stale-At the earliest instants at which any key leaves its state (the market's)");
+    deep([headers["X-Fresh-Phase"], headers["X-Fresh-Phase-Ends"], headers["X-Server-Now"], headers["X-Payload-Updated"]],
+      [mk["X-Fresh-Phase"], mk["X-Fresh-Phase-Ends"], String(at), String(at - 59_000)],
+    "Phase, Phase-Ends and Server-Now are the instant's, X-Payload-Updated the newest key's");
+    const two = W.liveEnvelope(["strips", "market"], rows, at, clock).headers;
+    deep([two["X-Fresh-State"], two["X-Fresh-Class"], two["X-Fresh-Source"]], ["live", "breadth", "actions"],
+      "with no weaker key, equal states tie to the first param asked");
+    ok(!body.includes("\n") && JSON.parse(body).keys.strips.payload.rows.GLD[0] === 1,
+      "the body is assembled by splicing each row's stored JSON text, never parsed and re-serialized");
+
+    const nowDb = fakeDb();
+    const now = await (await W.serveNow({ DB: nowDb }, new URL("https://anilkaya.org/api/flows/now?k=market,vol,strips"), at, { json: jsonOf, HttpError })).json();
+    deep([now.keys["live:market"], now.keys["live:vol"], now.phase], [env.keys.market.fresh, env.keys.vol.fresh, env.phase],
+      "serveNow's entries for the same rows are the envelope's fresh entries, field for field, and its phase the envelope's");
+
+    W.memoClock(clock, at);
+    const oneDb = fakeDb();
+    const one = await W.serveLiveKey({ DB: oneDb }, lk("market"), at, { json: jsonOf, HttpError });
+    const raw = W.liveResponse({ ...metaOf(rows[0]), payload: rows[0].payload, updatedAt: rows[0].updated_at }, at, clock);
+    eq(await one.text(), rows[0].payload, "A SINGLE KEY IS UNCHANGED: the raw payload body, byte for byte");
+    deep(Object.fromEntries(one.headers), Object.fromEntries(raw.headers), "under the same headers as before");
+    deep(oneDb.seen.map((t) => t.kind), ["first"], "read as it always was");
+    const dropped = await W.serveLiveKey({ DB: fakeDb() }, lk("market,board:long,"), at, { json: jsonOf, HttpError });
+    eq(await dropped.text(), rows[0].payload, "a list that leaves one key after the unknown is dropped is that key's raw body");
+    const pend = await W.serveLiveKey({ DB: fakeDb() }, lk("vol"), at, { json: jsonOf, HttpError });
+    deep([await pend.json(), pend.headers.get("X-Fresh-State")], [{ key: "live:vol", status: "pending" }, "pending"], "and a pending single key its pending body");
+
+    const manyDb = fakeDb();
+    const many = await W.serveLiveKey({ DB: manyDb }, lk("market,vol,strips"), at, { json: jsonOf, HttpError });
+    deep([many.status, many.headers.get("Content-Type"), await many.json()], [200, "application/json; charset=utf-8", env],
+      "TWO OR MORE KEYS ARE THE ENVELOPE");
+    deep(Object.fromEntries(many.headers), Object.fromEntries(new Headers({ "Content-Type": "application/json; charset=utf-8", ...headers })),
+      "under the aggregate headers");
+    deep(manyDb.seen, [{ kind: "batch", sqls: ["SELECT id, payload, read_at, session, cadence_s, source, writer, updated_at FROM flows_live WHERE id IN (?, ?, ?)"],
+      args: [["live:market", "live:vol", "live:strips"]] }], "from one batch of one SELECT with the ids bound in order, the clock memo warm");
+    W.memoClock(null, 0);
+    const coldDb = fakeDb();
+    await W.serveLiveKey({ DB: coldDb }, lk("market,vol"), at, { json: jsonOf, HttpError });
+    ok(coldDb.seen.length === 1 && coldDb.seen[0].sqls.length === 2 && /FROM flows_clock/.test(coldDb.seen[0].sqls[1]) && !W.clockDue(at),
+      "with the memo stale, the clock row rides the same batch and warms it");
+    const dup = await (await W.serveLiveKey({ DB: fakeDb() }, lk("market,live:market"), at, { json: jsonOf, HttpError })).json();
+    deep([Object.keys(dup.keys), dup.keys["live:market"]], [["market", "live:market"], dup.keys.market], "two params for one key are two entries of one row");
+    let refused = null;
+    try { await W.serveLiveKey({ DB: fakeDb() }, lk("board:long,meta"), at, { json: jsonOf, HttpError }); } catch (error) { refused = error; }
+    deep([refused && refused.status, refused && refused.code], [400, "invalid_key"], "a list with no live key is the 400 an unknown key always was");
+    const broken = { ...fakeDb(), batch: async () => { throw new Error("D1 unavailable"); } };
+    let gone = null;
+    try { await W.serveLiveKey({ DB: broken }, lk("market,vol"), at, { json: jsonOf, HttpError }); } catch (error) { gone = error; }
+    deep([gone && gone.status, gone && gone.code], [503, "store_unreadable"], "and a batch that fails is the 503 /api/flows/now answers");
+    W.memoClock(null, 0);
+  }
 
   const S = "2026-09-25";
   const at = (h, m) => easternInstant(S, h * 60 + m);

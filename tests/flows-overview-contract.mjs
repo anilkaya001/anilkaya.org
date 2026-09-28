@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { lkMock } from "./lk-mock.mjs";
 import { readFileSync, readdirSync } from "node:fs";
 import { chromium } from "playwright";
 import { startWorker, FLOWS_PASSWORD, FLOWS_TEST_USER } from "./worker-server.mjs";
@@ -12,6 +13,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 const TOKEN = "overview-token-aaaaaaaaaaaaaaaa";
 const server = await startWorker({ extraVars: [`FLOWS_INGEST_TOKEN:${TOKEN}`] });
 const url = (p) => server.baseURL + p;
+const painted = (p) => p.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))));
 
 const post = (key, body) => fetch(url("/api/flows/ingest?key=" + encodeURIComponent(key)), {
   method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + TOKEN },
@@ -178,8 +180,11 @@ await post("scoretrack", scoretrack(TRACK_DAYS));
 }
 
 const NEW_KEYS = /\/api\/flows\/(regime|universe|now|lk)(\?|$)/;
-const stubNewKeys = (target) => target.route(NEW_KEYS, (route) => route.fulfill({
-  status: 200, contentType: "application/json", body: JSON.stringify({ status: "pending" }) }));
+const stubNewKeys = async (target) => {
+  await target.route(NEW_KEYS, (route) => route.fulfill({
+    status: 200, contentType: "application/json", body: JSON.stringify({ status: "pending" }) }));
+  return lkMock(target, { stub: true });
+};
 
 const POP_READ = `(() => {
   const pop = document.getElementById("fxPop");
@@ -290,7 +295,7 @@ const browser = await chromium.launch();
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
   const errors = [];
-  await stubNewKeys(page);
+  const lk = await stubNewKeys(page);
 
   let allowFetchFailure = false;
   page.on("pageerror", (e) => errors.push(e.message));
@@ -828,6 +833,7 @@ try {
       route.fulfill({ status: 500, contentType: "application/json", body: "{}" }));
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccBull [data-empty]", { timeout: 15000 });
+    await painted(page);
 
     const bull = await silenceOf(page, "#ccBull [data-empty]");
     eq(bull.kind, "unreadable", "a pole that answered 500 is marked unreadable");
@@ -1428,6 +1434,7 @@ try {
     await post("board:short", board("short", [], SESSION, { deep: 0 }));
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccBear [data-empty]", { timeout: 15000 });
+    await painted(page);
     const empty = await silenceOf(page, "#ccBear [data-empty]");
 
     eq(empty.kind, "empty", "an empty side is a measured emptiness");
@@ -1753,6 +1760,7 @@ try {
     }));
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccBull [data-empty]", { timeout: 15000 });
+    await painted(page);
     eq(await page.evaluate(() => document.querySelector("#ccBull [data-empty]").dataset.empty),
        "pending", "an unpublished pole is pending, which is its own silence");
 
@@ -2751,6 +2759,7 @@ try {
       status: 200, contentType: "application/json", body: JSON.stringify(REGIME) }));
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccVol .ui-metric", { timeout: 15000 });
+    await painted(page);
     const vol = await page.evaluate(() => ({
       m: Object.fromEntries(Array.from(document.querySelectorAll("#ccVol .ui-metric"), (m) => [
         m.querySelector(".ui-metric-l").textContent.trim(),
@@ -2788,20 +2797,20 @@ try {
         return m ? m.querySelector(".ui-metric-v").textContent.trim() : null;
       });
     };
-    await page.route("**/api/flows/lk?k=breadth", breadthAt(SESSION, 0.052));
+    await lk.set("breadth", breadthAt(SESSION, 0.052));
     eq(await shareNow(), "5%",
       "a live breadth layer as new as the regime supplies the 0DTE share, by the same rule the market page's expiry gauge uses, " +
       "so the two pages never print two shares for one session");
-    await page.unroute("**/api/flows/lk?k=breadth");
-    await page.route("**/api/flows/lk?k=breadth", breadthAt("2026-08-21", 0.052));
+    await lk.unset("breadth");
+    await lk.set("breadth", breadthAt("2026-08-21", 0.052));
     eq(await shareNow(), "41%", "while a breadth layer older than the regime yields to it");
-    await page.unroute("**/api/flows/lk?k=breadth");
+    await lk.unset("breadth");
     await page.unroute("**/api/flows/regime");
 
     const liveAt = new Date().toISOString();
     const t0 = Date.parse(SESSION + "T13:30:00Z");
     const ts = [0, 5, 10, 15].map((m) => new Date(t0 + m * 60000).toISOString());
-    await page.route("**/api/flows/lk?k=market", (route) => route.fulfill({
+    await lk.set("market", (route) => route.fulfill({
       status: 200,
       headers: { "Content-Type": "application/json", "X-Fresh-State": "live" },
       body: JSON.stringify({
@@ -2822,12 +2831,35 @@ try {
     eq(live.state, "live", "and the pill says live, off the worker's own freshness header");
     eq(live.legs[2], "+$2.5M", "with the live 0DTE net aligned onto the tide's buckets");
     ok(/0DTE/.test(live.legend), `and the zero-day series keyed on the river (${live.legend})`);
+    const TIDE_FIT = () => {
+      const el = document.getElementById("hmTide");
+      const cs = getComputedStyle(el);
+      const kids = Array.from(el.children);
+      return {
+        min: parseFloat(cs.minHeight) || 0, h: el.offsetHeight, w: el.clientWidth,
+        content: kids.reduce((a, c) => a + c.offsetHeight, 0) + (parseFloat(cs.rowGap) || 0) * Math.max(0, kids.length - 1),
+        svg: +el.querySelector("svg[role=img]").getAttribute("height"), hero: document.querySelector(".hm-hero-in").clientWidth,
+      };
+    };
+    for (const width of [1280, 1440]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await page.waitForFunction(() => {
+        const svg = document.querySelector("#hmTide svg[role=img]");
+        return svg && +svg.getAttribute("width") === document.getElementById("hmTide").clientWidth;
+      });
+      const fit = await page.evaluate(TIDE_FIT);
+      ok(fit.h > 0 && Math.abs(fit.min - fit.content) <= 8,
+        `THE HERO CHART'S RESERVE IS THE CHART'S OWN COLUMN at ${width}px, within 8px either way: the chart picks its height from ` +
+        `its host's width, not the hero's, so a reserve keyed to the wrong width leaves dead space under the legend on a laptop ` +
+        `(hero ${fit.hero}px, host ${fit.w}px, svg ${fit.svg}px, column ${fit.content}px, min-height ${fit.min}px)`);
+    }
+    await page.setViewportSize({ width: 1280, height: 1000 });
     const src = await why(page, "#hmTideState .hm-pill");
     eq(src.facts.Source, "live:market", "and the disclosure names the live key as the source");
     await shut(page);
-    await page.unroute("**/api/flows/lk?k=market");
+    await lk.unset("market");
 
-    const heroNow = () => page.evaluate(() => {
+    const heroNow = async () => { await painted(page); return page.evaluate(() => {
       const pill = document.querySelector("#hmTideState .hm-pill");
       return {
         value: document.getElementById("hmTideV").dataset.value || document.getElementById("hmTideV").textContent.trim(),
@@ -2837,7 +2869,7 @@ try {
         note: (document.querySelector("#hmTide .ui-silent-t") || {}).textContent || null,
         zero: Array.from(document.querySelectorAll("#hmTideLegs .ui-metric-v"), (v) => v.textContent.trim())[2],
       };
-    });
+    }); };
     const liveTide = (n, fresh, extra = {}) => (route) => route.fulfill({
       status: 200, headers: { "Content-Type": "application/json", "X-Fresh-State": fresh },
       body: JSON.stringify({ status: "ok", session: SESSION, fresh: { readAt: liveAt },
@@ -2849,7 +2881,7 @@ try {
       return heroNow();
     };
 
-    await page.route("**/api/flows/lk?k=market", liveTide(1, "live"));
+    await lk.set("market", liveTide(1, "live"));
     const opening = await heroAfter();
     eq(opening.value, "+$100.1M",
        "a live tide of one read (the opening minutes) yields to the last session's whole tide rather than to Pending");
@@ -2866,7 +2898,7 @@ try {
     eq(one.note, "First read", "but one quiet word: the river draws from the second read");
     await page.unroute("**/api/flows/pulse");
 
-    await page.route("**/api/flows/lk?k=market", liveTide(4, "stale"));
+    await lk.set("market", liveTide(4, "stale"));
     const late = await heroAfter();
     eq(late.state, "stale", "a live tide past its fresh window is still drawn, marked stale");
     eq(late.svg, 1, "with its river");
@@ -2875,7 +2907,7 @@ try {
 
     {
       const thu = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
-      await stubNewKeys(thu);
+      const thuLk = await stubNewKeys(thu);
       const tp = await thu.newPage();
       tp.on("pageerror", (e) => errors.push("thu: " + e.message));
       await tp.clock.setFixedTime(new Date("2026-09-24T17:00:00Z"));
@@ -2902,7 +2934,7 @@ try {
         });
       };
 
-      await tp.route("**/api/flows/lk?k=market", liveToday({ "X-Fresh-State": "closed", "X-Fresh-Phase": "closed" }));
+      await thuLk.set("market", liveToday({ "X-Fresh-State": "closed", "X-Fresh-Phase": "closed" }));
       const broken = await pillOf();
       eq(broken.title, "Last session", "on a Thursday afternoon the boards of an earlier session are the last session");
       eq(broken.state, "stale",
@@ -2913,12 +2945,12 @@ try {
       eq(broken.note, "One read", "a lone read that was never followed up says one read, not first read, since no second is coming");
       eq(broken.zero, "quiet", "and a 0DTE leg that was never read for a stale tide is quiet, not a pending promise");
 
-      await tp.route("**/api/flows/lk?k=market", liveToday({ "X-Fresh-State": "closed", "X-Fresh-Phase": "post" }));
+      await thuLk.set("market", liveToday({ "X-Fresh-State": "closed", "X-Fresh-Phase": "post" }));
       const early = await pillOf();
       eq(early.state, "closed", "an early close (phase post) is a true closed state and is left alone, not overridden to stale");
       ok(/^Closed\s*·\s*Sep 24$/.test(early.pill), `dated by its session (${early.pill})`);
 
-      await tp.route("**/api/flows/lk?k=market", liveToday({ "X-Fresh-State": "live", "X-Fresh-Phase": "rth" }, 3));
+      await thuLk.set("market", liveToday({ "X-Fresh-State": "live", "X-Fresh-Phase": "rth" }, 3));
       const live = await pillOf();
       eq(live.state, "live", "a live tide of today under yesterday's boards is live");
       ok(/^Live\s*·\s*Sep 24 9:31\s*AM$/.test(live.pill), `and its pill still carries the day (${live.pill})`);
@@ -2926,15 +2958,15 @@ try {
       await thu.close();
     }
 
-    await page.route("**/api/flows/lk?k=breadth", (route) => route.fulfill({ status: 200, contentType: "application/json",
+    await lk.set("breadth", (route) => route.fulfill({ status: 200, contentType: "application/json",
       body: JSON.stringify({ status: "ok", session: SESSION, dte: { zero: { status: "ok", t: ts, net: [0, 1e6, 3e6, 7e6] } } }) }));
-    await page.route("**/api/flows/lk?k=market", liveTide(4, "live",
+    await lk.set("market", liveTide(4, "live",
       { zeroDte: { status: "ok", t: ts, net: [0, 5e5, 1e6, 2.5e6] } }));
     eq((await heroAfter()).zero, "+$7.0M", "the 0DTE leg reads live:breadth.dte.zero before live:market.zeroDte");
-    await page.unroute("**/api/flows/lk?k=breadth");
-    await page.route("**/api/flows/lk?k=market", liveTide(4, "live"));
+    await lk.unset("breadth");
+    await lk.set("market", liveTide(4, "live"));
     eq((await heroAfter()).zero, "\u2014", "and a live tide with no live 0DTE series does not borrow another session's number");
-    await page.unroute("**/api/flows/lk?k=market");
+    await lk.unset("market");
 
     await page.route("**/api/flows/pulse", (route) => route.fulfill({ status: 200, contentType: "application/json",
       body: JSON.stringify({ status: "pending" }) }));
@@ -2944,11 +2976,17 @@ try {
     await page.unroute("**/api/flows/pulse");
 
     await page.unroute(NEW_KEYS);
-    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    const [unwrittenLk] = await Promise.all([
+      page.waitForResponse((r) => /\/api\/flows\/lk\?k=market,vol,breadth,strips,strips:series,focus$/.test(r.url())),
+      page.goto(url("/flows/"), { waitUntil: "domcontentloaded" }),
+    ]);
     await page.waitForSelector("#ccVol [data-empty]", { timeout: 15000 });
     const unwritten = await silenceOf(page, "#ccVol [data-empty]");
     eq(unwritten.kind, "pending",
       "against the Worker's own routes, a regime and a live layer nobody has written yet leave the module pending");
+    eq(unwrittenLk.headers()["x-fresh-state"], "pending",
+      "and the six-key envelope was the Worker's, not the stub's: it carries the aggregate X-Fresh-State a fixture never writes");
+    eq(unwrittenLk.headers()["x-fresh-reason"], "unpublished", "with the unpublished reason of a live layer nobody has written");
     eq(await page.locator("#hmTideState .hm-pill").getAttribute("data-state"), "stale",
       "while the hero falls back to the pulse it does have");
 
@@ -2961,6 +2999,15 @@ try {
     eq(notYet.kind, "pending",
       "and a Worker that predates those routes (404) leaves it pending too, not unreadable — a route that has " +
       "not shipped is a key that has not published");
+    await page.unroute(NEW_KEYS);
+    await page.route(NEW_KEYS, (route) => route.fulfill({ status: 400, contentType: "application/json",
+      body: JSON.stringify({ error: { code: "invalid_key", message: "Unknown live key" } }) }));
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccVol [data-empty]", { timeout: 15000 });
+    const refused = await silenceOf(page, "#ccVol [data-empty]");
+    eq(refused.kind, "unreadable",
+      "but a 400 on those routes is a request the Worker refused, not a key that has not published: the module is " +
+      "unreadable, and the list route is not retried key by key, since the Worker and its assets ship in one bundle");
     await page.unroute(NEW_KEYS);
     await stubNewKeys(page);
     allowFetchFailure = false;
@@ -3086,7 +3133,7 @@ try {
     };
 
     const fx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
-    await stubNewKeys(fx);
+    const fxLk = await stubNewKeys(fx);
     await fx.addInitScript(() => {
       let ui;
       const pref = (name, value) => {
@@ -3104,6 +3151,24 @@ try {
           ui = Object.freeze(Object.assign({}, v, add));
         },
       });
+    });
+    await fx.addInitScript(() => {
+      window.__fill = {};
+      window.__shift = [];
+      let batch = 0;
+      new MutationObserver((muts) => {
+        batch++;
+        for (const m of muts) {
+          const id = m.target.id;
+          if (m.type === "childList" && m.addedNodes.length && /^cc(Bull|Bear|Metals|Leaders)$/.test(id) && !window.__fill[id]) {
+            window.__fill[id] = { batch, at: Math.round(performance.now()), min: parseFloat(getComputedStyle(m.target).minHeight) || 0 };
+          }
+        }
+      }).observe(document, { childList: true, subtree: true });
+      try {
+        new PerformanceObserver((l) => { for (const e of l.getEntries()) if (!e.hadRecentInput) window.__shift.push(+e.value.toFixed(4)); })
+          .observe({ type: "layout-shift", buffered: true });
+      } catch {}
     });
     const fp = await fx.newPage();
     fp.on("pageerror", (e) => errors.push("focus: " + e.message));
@@ -3144,6 +3209,7 @@ try {
       await fp.goto(url(path), { waitUntil: "domcontentloaded" });
       await fp.waitForSelector("#ccMetals :is(.hm-metal, [data-empty])", { timeout: 15000 });
       await fp.waitForSelector("#ccLeaders :is(.hm-qrow, [data-empty])", { timeout: 15000 });
+      await painted(fp);
       return fp.evaluate(FOCUS_READ);
     };
 
@@ -3197,6 +3263,27 @@ try {
       eq(href, "/flows/ticker/?t=" + t, `${t} links to its dossier`);
       ok(/Open the dossier\.$/.test(said || ""), `and says where it goes (${t})`);
     }
+    const RESERVE = () => Object.fromEntries(["ccMetals", "ccLeaders", "ccBull", "ccBear"].map((id) => {
+      const el = document.getElementById(id);
+      const grow = Array.from(el.querySelectorAll(".hm-lrow"), (r) => Math.max(0, r.offsetHeight - 52)).reduce((a, v) => a + v, 0);
+      return [id, { min: parseFloat(getComputedStyle(el).minHeight) || 0, h: el.offsetHeight, w: el.clientWidth, grow }];
+    }));
+    const fits = (r) => r.h > 0 && r.min >= r.h - 8 - r.grow;
+    const drawn = (r) => `min-height ${r.min}px for ${r.h}px drawn in ${r.w}px${r.grow ? ` (${r.grow}px of it rows that wrapped their tags)` : ""}`;
+    const fill = await fp.evaluate(() => window.__fill);
+    ok(fill.ccBull && fill.ccBear && fill.ccMetals && fill.ccLeaders,
+      `every board and focus module has a first fill on record (${JSON.stringify(fill)})`);
+    ok(fill.ccMetals.batch > fill.ccBull.batch && fill.ccLeaders.batch > fill.ccBear.batch &&
+       fill.ccMetals.at >= fill.ccBull.at && fill.ccLeaders.at >= fill.ccBear.at,
+    "THE FOCUS MODULES FILL IN A LATER TASK THAN THE BOARDS: their first nodes arrive in a later mutation batch, so the " +
+      "boards the reader looks at first are painted before the metals and the leaders are even built " +
+      `(bull batch ${fill.ccBull.batch} at ${fill.ccBull.at} ms, metals batch ${fill.ccMetals.batch} at ${fill.ccMetals.at} ms)`);
+    const wide = await fp.evaluate(RESERVE);
+    for (const [id, r] of Object.entries(wide)) {
+      ok(fits(r), `${id} reserves its filled height at 1440 so a late fill shifts nothing: ${drawn(r)}`);
+    }
+    const shifted = await fp.evaluate(() => window.__shift.reduce((a, v) => a + v, 0));
+    ok(shifted < 0.1, `and the whole fill of the page moves the 1440px viewport by a cumulative layout shift under 0.1 (${shifted.toFixed(4)})`);
 
     await fp.click("#ccLeadSeg .ui-seg-i:nth-of-type(2)");
     await fp.waitForFunction(() => document.querySelector("#ccLeaders a.hm-qrow")?.dataset.ticker === "NVDA");
@@ -3210,10 +3297,19 @@ try {
       "(every storage access goes through IEWTStorage, which these pages do not load)");
     const again = await focusNow("/flows/?lead=ndx10");
     deep(again.seg.map((s) => s[1]), ["false", "true"], "so a reload or a shared link opens on the same leaders");
+    const tall = await fp.evaluate(RESERVE);
+    const tallFill = await fp.evaluate(() => window.__fill.ccLeaders);
+    ok(fits(tall.ccLeaders) && tall.ccLeaders.min > wide.ccLeaders.min && tallFill && tallFill.min === tall.ccLeaders.min,
+      "A LINK THAT OPENS ON NDX 10 RESERVES THE TEN-ROW GROUP BEFORE THE PAYLOAD ARRIVES: the shell carries the address's choice " +
+      "as a data attribute from script start, so the taller reserve is already in force when the rows land in the deferred task " +
+      `(${drawn(tall.ccLeaders)}, ${tallFill && tallFill.min}px at the first fill; Mag 7 reserves ${wide.ccLeaders.min}px)`);
     await fp.focus("#ccLeadSeg .ui-seg-i[aria-selected=true]");
     await fp.keyboard.press("ArrowLeft");
     await fp.waitForFunction(() => document.querySelector("#ccLeaders a.hm-qrow")?.dataset.ticker === "AAPL");
     ok(true, "the segmented control switches from the keyboard");
+    const backTo = await fp.evaluate(RESERVE);
+    ok(fits(backTo.ccLeaders) && backTo.ccLeaders.min <= backTo.ccLeaders.h + 8,
+      `and the reserve follows the switch back to Mag 7 rather than holding the ten-row height over seven rows (${drawn(backTo.ccLeaders)})`);
 
     await fp.focus("#ccMetalsWhen .hm-pill");
     const beat = async () => {
@@ -3241,10 +3337,10 @@ try {
       headers: { "Content-Type": "application/json", "X-Fresh-State": state },
       body: JSON.stringify({ v: 1, key: "live:strips", status: "ok", session, fresh: { readAt, cadenceS: 300 }, fields: STRIP_NAMES,
         rows: Object.fromEntries(names.map((t) => [t, stripValues(LIVE_V[t])])) }) });
-    await fp.route("**/api/flows/lk?k=strips:series", (route) => route.fulfill({ status: 200, contentType: "application/json",
+    await fxLk.set("strips:series", (route) => route.fulfill({ status: 200, contentType: "application/json",
       body: JSON.stringify({ v: 1, key: "live:strips:series", session: LIVE_DAY, scale: { px: 0.01 }, base: { GLD: 393.5 },
         t: [LIVE_DAY + "T13:45:00Z", LIVE_DAY + "T14:00:00Z", LIVE_DAY + "T14:15:00Z"], cols: { px: { GLD: [0, 80, 150] } } }) }));
-    await fp.route("**/api/flows/lk?k=strips", liveStrips(LIVE_DAY, t0, "live", ["GLD"]));
+    await fxLk.set("strips", liveStrips(LIVE_DAY, t0, "live", ["GLD"]));
     const part = await focusNow();
     eq(part.metals[0].px, "391.70", "a live read that covers only some of a module's names does not mix sessions: the fund keeps its nightly row");
     deep(part.pills.map((p) => p.text), ["Aug 24", "Aug 24"], "and the module stays dated by the nightly session it shows");
@@ -3252,7 +3348,7 @@ try {
     ok(part.metals[0].line && part.metals[0].stroke === part.ink["--label-2"],
       `a line of several sessions' closes is drawn neutral, never read as today's direction (${part.metals[0].stroke})`);
 
-    await fp.route("**/api/flows/lk?k=strips", liveStrips(LIVE_DAY, t0, "live"));
+    await fxLk.set("strips", liveStrips(LIVE_DAY, t0, "live"));
     const live = await focusNow();
     eq(live.metals[0].px, "395.00", "a live read of a newer session that covers every name takes the fund's price");
     eq(live.metals[0].flow, "Bullish", "and its flow lean");
@@ -3274,18 +3370,18 @@ try {
     ok(await fp.evaluate(() => document.activeElement === window.__pill && window.__pill.dataset.state === "live"),
       "a heartbeat keeps focus on the Live pill it refreshes");
 
-    await fp.route("**/api/flows/lk?k=strips", liveStrips(LIVE_DAY, t0, "stale"));
+    await fxLk.set("strips", liveStrips(LIVE_DAY, t0, "stale"));
     const lapsed = await focusNow();
     eq(lapsed.pills[0].state, "stale", "a live read past its window is dated stale, never left saying Live");
     ok(/^Aug 25\s*·\s*\d{1,2}:\d\d\s*[AP]M$/.test(lapsed.pills[0].text), `by its day and read time (${lapsed.pills[0].text})`);
 
-    await fp.route("**/api/flows/lk?k=strips", liveStrips(SESSION, SESSION + "T17:50:00Z", "closed"));
+    await fxLk.set("strips", liveStrips(SESSION, SESSION + "T17:50:00Z", "closed"));
     const tie = await focusNow();
     eq(tie.metals[0].px, "391.70", "a mid-session read of the same session yields to the later nightly record");
-    await fp.route("**/api/flows/lk?k=strips", liveStrips("2026-08-21", t0, "live"));
+    await fxLk.set("strips", liveStrips("2026-08-21", t0, "live"));
     eq((await focusNow()).metals[0].px, "391.70", "and an older session's live row never replaces the nightly one");
-    await fp.unroute("**/api/flows/lk?k=strips");
-    await fp.unroute("**/api/flows/lk?k=strips:series");
+    await fxLk.unset("strips");
+    await fxLk.unset("strips:series");
 
     const ALL = GROUPS.flatMap((g) => g.tickers).filter((t, i, a) => a.indexOf(t) === i && FOCUS_FIXTURE.rows[t]);
     const FOCUS_V = { ...LIVE_V, GLD: vend("GLD", 397, 392.88, 1.4e6, -2e5, 6e7, 3e7, 0.22) };
@@ -3297,32 +3393,32 @@ try {
       minute: "2-digit" }).format(new Date(x)).replace(/\s/g, ""), iso);
     const bare = (p) => p.text.replace(/\s/g, "");
     const t1 = new Date(Date.now() - 7 * 60000).toISOString();
-    await fp.route("**/api/flows/lk?k=focus", liveFocus(LIVE_DAY, t0, "live"));
+    await fxLk.set("focus", liveFocus(LIVE_DAY, t0, "live"));
     const worker = await focusNow();
     deep([worker.metals[0].px, worker.leaders[0][1]], ["397.00", "336.00"],
       "WITHOUT ANY ACTIONS RUN the Worker's live:focus takes both modules: the fund's price and every leader's row");
     deep(worker.src, ["live", "live"], "every row in them is a live row");
     deep(worker.pills.map(bare), Array(2).fill("Live·" + await nyClock(t0)),
       "and both modules wear a Live pill with the Worker's read time");
-    await fp.route("**/api/flows/lk?k=strips", liveStrips(LIVE_DAY, t1, "live"));
+    await fxLk.set("strips", liveStrips(LIVE_DAY, t1, "live"));
     const newer = await focusNow();
     eq(newer.metals[0].px, "397.00", "A live:focus ROW FRESHER THAN THE STRIP drives the tile value");
     eq(bare(newer.pills[0]), "Live·" + await nyClock(t0), "and the pill reads the time of the row it shows");
-    await fp.route("**/api/flows/lk?k=focus", liveFocus(LIVE_DAY, t1, "live"));
-    await fp.route("**/api/flows/lk?k=strips", liveStrips(LIVE_DAY, t0, "live"));
+    await fxLk.set("focus", liveFocus(LIVE_DAY, t1, "live"));
+    await fxLk.set("strips", liveStrips(LIVE_DAY, t0, "live"));
     const older = await focusNow();
     eq(older.metals[0].px, "395.00", "while an older live:focus row yields to the newer strip");
     eq(bare(older.pills[0]), "Live·" + await nyClock(t0), "whose read time the pill then shows");
-    await fp.unroute("**/api/flows/lk?k=strips");
-    await fp.route("**/api/flows/lk?k=focus", liveFocus("2026-08-21", t0, "live"));
+    await fxLk.unset("strips");
+    await fxLk.set("focus", liveFocus("2026-08-21", t0, "live"));
     const past = await focusNow();
     ok(past.metals[0].px === "391.70" && past.src.join() === "nightly,nightly" && past.pills.every((p) => p.text === "Aug 24"),
       "a live:focus of an older session never replaces the nightly record, nor puts a Live pill over it");
-    await fp.route("**/api/flows/lk?k=focus", liveFocus(SESSION, SESSION + "T17:50:00Z", "closed"));
+    await fxLk.set("focus", liveFocus(SESSION, SESSION + "T17:50:00Z", "closed"));
     eq((await focusNow()).metals[0].px, "391.70", "and a mid-session read of the nightly's own session yields to the nightly");
 
     const SERIES_T = [LIVE_DAY + "T13:45:00Z", LIVE_DAY + "T14:00:00Z", LIVE_DAY + "T14:15:00Z"];
-    await fp.route("**/api/flows/lk?k=strips:series", (route) => route.fulfill({ status: 200, contentType: "application/json",
+    await fxLk.set("strips:series", (route) => route.fulfill({ status: 200, contentType: "application/json",
       body: JSON.stringify({ v: 1, key: "live:strips:series", session: LIVE_DAY, scale: { px: 0.01 }, base: { GLD: 393.5 },
         t: SERIES_T, cols: { px: { GLD: [0, 80, 150] } } }) }));
     const DIP_V = { ...FOCUS_V, GLD: vend("GLD", 394, 392.88, 1.4e6, -2e5, 6e7, 3e7, 0.22) };
@@ -3334,7 +3430,7 @@ try {
         first: Number(/^M\s*-?[\d.]+[\s,]+(-?[\d.]+)/.exec(d)[1]), ref: line ? Number(line.getAttribute("y1")) : null,
         end: Number(svg.querySelector("circle").getAttribute("cy")) };
     });
-    await fp.route("**/api/flows/lk?k=focus", liveFocus(LIVE_DAY, t0, "live", DIP_V));
+    await fxLk.set("focus", liveFocus(LIVE_DAY, t0, "live", DIP_V));
     const dip = await focusNow();
     const se1 = await sparkEnd();
     const endPx = 392.88 + (se1.end - se1.ref) * (393.5 - 392.88) / (se1.first - se1.ref);
@@ -3342,18 +3438,18 @@ try {
       "A live:focus ROW NEWER THAN THE ACTIONS SERIES ends the intraday sparkline at the tile's own price: the series' " +
         `three reads, then the Worker's (${se1.points} points, the last at ${endPx.toFixed(3)} against a tile of ` +
         `${dip.metals[0].px}), never a line that stops at the last Actions read under a later headline`);
-    await fp.route("**/api/flows/lk?k=focus", liveFocus(LIVE_DAY, LIVE_DAY + "T14:05:00Z", "stale", DIP_V));
+    await fxLk.set("focus", liveFocus(LIVE_DAY, LIVE_DAY + "T14:05:00Z", "stale", DIP_V));
     const behind = await focusNow();
     const se2 = await sparkEnd();
     ok(behind.metals[0].px === "394.00" && /^GLD, last 5 closes and today$/.test(se2.label) && se2.points === 6 && se2.ref === null,
       `and one OLDER than the series' last column never borrows that later line: the tile's price closes the nightly ` +
         `closes instead (${se2.label}, ${se2.points} points)`);
-    await fp.unroute("**/api/flows/lk?k=strips:series");
+    await fxLk.unset("strips:series");
 
     const t2 = new Date(Date.parse(t0) - 30 * 60000).toISOString();
     let focusReads = 0;
     let serveFocus = liveFocus(LIVE_DAY, t0, "live");
-    await fp.route("**/api/flows/lk?k=focus", (route) => { focusReads++; return serveFocus(route); });
+    await fxLk.set("focus", (route) => { focusReads++; return serveFocus(route); });
     const stamp = { live: 1, nightly: 1 };
     await fp.route(/\/api\/flows\/now\?/, async (route) => {
       const res = await route.fetch();
@@ -3380,7 +3476,7 @@ try {
     "THE HEARTBEAT RE-READS live:focus WHEN ITS updatedAt MOVES: the open page repaints the fund's price and both " +
       `modules' Live pills at the new read time (${moved.pills[0].text}) without a reload`);
     await fp.unroute(/\/api\/flows\/now\?/);
-    await fp.unroute("**/api/flows/lk?k=focus");
+    await fxLk.unset("focus");
 
     for (const width of [320, 390, 768]) {
       await fp.setViewportSize({ width, height: 900 });
@@ -3398,6 +3494,16 @@ try {
       ok(fit.over <= 1, `no horizontal overflow at ${width}px with the focus modules drawn (${fit.over}px)`);
       deep(fit.clipped, [], `and no figure spills out of its row at ${width}px`);
       eq(fit.cols, width < 600 ? 1 : 3, `metals ${width < 600 ? "stack" : "sit in three columns"} at ${width}px`);
+      if (width === 390 || width === 768) {
+        const narrow = await fp.evaluate(RESERVE);
+        for (const [id, r] of Object.entries(narrow)) {
+          ok(fits(r), `${id} reserves its filled height at ${width} as well: ${drawn(r)}`);
+        }
+        if (width === 390) {
+          ok(narrow.ccMetals.min > wide.ccMetals.min && narrow.ccLeaders.min > wide.ccLeaders.min,
+            `the reserve follows the layout, taller where the metals stack and the leaders run in one column (${narrow.ccMetals.min}/${wide.ccMetals.min}, ${narrow.ccLeaders.min}/${wide.ccLeaders.min})`);
+        }
+      }
     }
 
     await fp.route("**/api/flows/focus", (route) => route.fulfill({ status: 200, contentType: "application/json",

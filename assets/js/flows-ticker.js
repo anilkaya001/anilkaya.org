@@ -57,6 +57,7 @@
   const slot = (l, v) => h("div", { class: "ft-slot" }, h("span", { class: "ft-slot-l" }, l), v);
   const offIndex = (card, sec) => isIndex(card) && sec == null;
   const stOf = (p, what) => UI.stateOf(p, what);
+  const okOf = (p) => (p && p.status === "ok" ? p : null);
   const PRE = {};
   for (const [w, ks] of [["option chain leg", "ivSurface skewTerm topContracts aggressor"], ["per-name deep feeds", "darkpool oiDeltas volContext"], ["market-wide join", "marketRank"],
     ["hedging stage", "variation"], ["score overlay", "scoreOverlay premiumTrack"], ["congress read", "congress"], ["gamma roll-off", "calendar"], ["gamma surface", "surface"],
@@ -362,7 +363,7 @@
     heroEl.hidden = false;
     heroEl.classList.remove("is-loading");
     const P = card.panels || {};
-    const pm = P.pricedMove && P.pricedMove.status === "ok" ? P.pricedMove : {};
+    const pm = okOf(P.pricedMove) || {};
     $("ftHeroT").textContent = card.ticker;
     const sub = $("ftHeroSub");
     sub.replaceChildren(...[card.nm || card.sector || "", kindTag(card)].filter(Boolean));
@@ -393,52 +394,72 @@
       })));
   }
 
+  const PX = { key: null, mode: null };
+  const put = (n, text) => { if (n.textContent !== text) n.textContent = text; };
+  const liveInfo = () => ({ title: "Live price", state: "live", asOf: F.time(PX.pp.readAt),
+    lead: "Re-read from the vendor's live quote while the session is open. Every other reading on this page is the session's, as the card published it.",
+    facts: [["Last", F.px(PX.q.price)], ["Previous close", F.px(PX.q.prevClose)], ["Session open", F.px(PX.q.open)], ["High", F.px(PX.q.high)], ["Low", F.px(PX.q.low)], ["Tape time", PX.q.tapeTime ? F.time(PX.q.tapeTime) : null], ["Card close", F.px(PX.S)]] });
+  const closeInfo = () => ({ title: "Close", asOf: F.time(PX.pp.readAt), lead: "The vendor's last price. Every other figure on this page is from the session of " + PX.card.sessionDate + ".",
+    facts: [["Last", F.px(PX.q.price)], ["Previous close", F.px(PX.q.prevClose)], ["Card close", F.px(PX.S)]] });
+  const readInfo = () => ({ title: "Last read", asOf: F.time(PX.at),
+    lead: PX.q ? "The vendor's quote as last read; the market is not in its regular session, so the dossier stays on the session close." : PX.rp.note,
+    facts: [["Last read", F.px(PX.lastPx)], ["Session close", F.px(PX.S)], ["Source", PX.q ? "live quote" : PX.rp.source], ["Basis", PX.q ? null : PX.rp.spotBasis], ["Previous close", PX.q ? F.px(PX.q.prevClose) : null]] });
+  const cell = (tag) => h(tag, { "data-c": "" });
+  const LAST = {
+    live: () => [h("span", { class: "ft-live" }, glyph("live")), cell("span"), info("the live price", liveInfo)],
+    close: () => [glyph("closed"), h("span", null, "Close"), cell("b"), info("the close", closeInfo)],
+    close0: () => [glyph("closed"), h("span", null, "Close"), info("the close", closeInfo)],
+    read: () => [glyph("closed"), cell("b"), cell("span"), cell("span"), info("the last read price", readInfo)],
+    none: () => [],
+  };
+
   function paintPrice(card, first) {
     const pp = pricePoint(card);
-    const host = $("ftPx");
     const text = F.px(pp.px);
-    if (!host.firstChild || STATE.pxShown === null) {
-      host.replaceChildren(h("span", { class: "ft-pxv", id: "ftPxV" }), h("span", { id: "ftChg" }));
+    const chg = pp.px !== null && pp.prev !== null ? pp.px - pp.prev : null;
+    const pct = chg !== null && pp.prev ? chg / pp.prev : null;
+    const t = pct === null ? "flat" : tone(pct);
+    const S = spotOf(card);
+    const q = quoteOf();
+    const rp = card.readPx && num(card.readPx.px) !== null ? card.readPx : null;
+    const mode = pp.live ? "live" : pp.close ? (pp.day ? "close" : "close0") : (q || rp) && S !== null ? "read" : "none";
+    const lastPx = mode === "read" ? (q ? q.price : rp.px) : null;
+    const at = mode === "read" ? (q ? q.readAt : rp.readAt) : pp.readAt;
+    const d = mode === "read" ? lastPx / S - 1 : null;
+    const dTone = tone(d, 0.00005);
+    const chgText = chg === null ? null : F.px(Math.abs(chg)) + "  " + F.pct(Math.abs(pct), 2);
+    const chgLabel = chg === null ? null : (pp.live ? "Change against the previous close " : "Session change ") + F.px(chg) + ", " + F.pct(pct, 2, true);
+    const cells = mode === "live" ? [F.time(at)] : mode === "close" ? [day(pp.day)] : mode === "read" ? [F.px(lastPx), F.pct(d, 2, true), F.time(at)] : [];
+    const key = [text, mode, t, chgText, chgLabel, dTone, ...cells].join("\n");
+    Object.assign(PX, { card, pp, q, S, rp, lastPx, at });
+    const fresh = !$("ftPxV") || STATE.pxShown === null;
+    if (!fresh && key === PX.key) return;
+    PX.key = key;
+    if (fresh) {
+      $("ftPx").replaceChildren(h("span", { class: "ft-pxv", id: "ftPxV" }), h("span", { id: "ftChg" }));
       UI.roll($("ftPxV"), text, pp.prev !== null && first && STATE.first ? F.px(pp.prev) : null, first && STATE.first);
+      PX.mode = null;
     } else if (STATE.pxShown !== text) {
       UI.roll($("ftPxV"), text, STATE.pxShown, true);
     }
     STATE.pxShown = text;
-    const chg = pp.px !== null && pp.prev !== null ? pp.px - pp.prev : null;
-    const pct = chg !== null && pp.prev ? chg / pp.prev : null;
-    const t = pct === null ? "flat" : tone(pct);
-    $("ftChg").replaceChildren(chg === null ? UI.dash(ST("unavailable", "The card carries no previous close to measure a change against."), "Change")
-      : UI.capsule(F.px(Math.abs(chg)) + "  " + F.pct(Math.abs(pct), 2), { tone: t, label: (pp.live ? "Change against the previous close " : "Session change ") + F.px(chg) + ", " + F.pct(pct, 2, true) }));
+    const chgEl = $("ftChg"), cap = chgEl.firstElementChild;
+    if (chg === null) { if (!cap || !cap.classList.contains("ui-dash")) chgEl.replaceChildren(UI.dash(ST("unavailable", "The card carries no previous close to measure a change against."), "Change")); }
+    else if (cap && cap.classList.contains("ui-capsule") && cap.dataset.tone === t) { put(cap.lastChild, chgText); if (cap.getAttribute("aria-label") !== chgLabel) cap.setAttribute("aria-label", chgLabel); }
+    else chgEl.replaceChildren(UI.capsule(chgText, { tone: t, label: chgLabel }));
     const last = $("ftLast");
-    const S = spotOf(card);
-    const q = STATE.quote && STATE.quote.status === "ok" && num(STATE.quote.price) !== null ? STATE.quote : null;
-    const rp = card.readPx && num(card.readPx.px) !== null ? card.readPx : null;
-    last.replaceChildren();
-    if (pp.live) {
-      last.hidden = false;
-      last.append(h("span", { class: "ft-live" }, glyph("live")), h("span", null, F.time(pp.readAt)),
-        info("the live price", () => ({ title: "Live price", state: "live", asOf: F.time(pp.readAt),
-          lead: "Re-read from the vendor's live quote while the session is open. Every other reading on this page is the session's, as the card published it.",
-          facts: [["Last", F.px(q.price)], ["Previous close", F.px(q.prevClose)], ["Session open", F.px(q.open)], ["High", F.px(q.high)], ["Low", F.px(q.low)], ["Tape time", q.tapeTime ? F.time(q.tapeTime) : null], ["Card close", F.px(S)]] })));
-      return;
+    if (last.hidden !== (mode === "none")) last.hidden = mode === "none";
+    if (mode !== PX.mode) {
+      const open = last.querySelector('[aria-expanded="true"]'), f = document.activeElement;
+      if (open) UI.closeInfo();
+      PX.mode = mode;
+      last.replaceChildren(...LAST[mode]());
+      const b = open && (!f || f === document.body || $("fxPop").contains(f)) ? last.querySelector(".ui-info") : null;
+      if (b) b.focus({ preventScroll: true });
     }
-    if (pp.close) {
-      last.hidden = false;
-      last.append(glyph("closed"), h("span", null, "Close"), pp.day ? h("b", null, day(pp.day)) : "",
-        info("the close", () => ({ title: "Close", asOf: F.time(pp.readAt), lead: "The vendor's last price. Every other figure on this page is from the session of " + card.sessionDate + ".",
-          facts: [["Last", F.px(q.price)], ["Previous close", F.px(q.prevClose)], ["Card close", F.px(S)]] })));
-      return;
-    }
-    const src = q || rp;
-    if (!src || S === null) { last.hidden = true; return; }
-    const lastPx = q ? q.price : rp.px;
-    const at = q ? q.readAt : rp.readAt;
-    const d = lastPx / S - 1;
-    last.hidden = false;
-    last.append(glyph("closed"), h("b", null, F.px(lastPx)), h("span", { "data-tone": tone(d, 0.00005) }, F.pct(d, 2, true)), h("span", null, F.time(at)),
-      info("the last read price", () => ({ title: "Last read", asOf: F.time(at),
-        lead: q ? "The vendor's quote as last read; the market is not in its regular session, so the dossier stays on the session close." : rp.note,
-        facts: [["Last read", F.px(lastPx)], ["Session close", F.px(S)], ["Source", q ? "live quote" : rp.source], ["Basis", q ? null : rp.spotBasis], ["Previous close", q ? F.px(q.prevClose) : null]] })));
+    const slots = last.querySelectorAll("[data-c]");
+    cells.forEach((c, i) => put(slots[i], c));
+    if (mode === "read" && slots[1].dataset.tone !== dTone) slots[1].dataset.tone = dTone;
   }
 
   function renderChips(card, pm) {
@@ -447,7 +468,7 @@
     const score = num(card.score);
     const ivr = ivRankOf(card);
     const im = num(pm.impliedMove);
-    const cx = STATE.cardX && STATE.cardX.gex && STATE.cardX.gex.status === "ok" ? STATE.cardX.gex : null;
+    const cx = STATE.cardX && okOf(STATE.cardX.gex);
     const gate = score === null && card.gate && isoOk(card.gate.earnings) ? card.gate : null;
     const chipList = [
       gate ? UI.gaugeChip({ icon: "cal", color: "--lvl-flip", value: day(gate.earnings), label: "Earnings", info: () => ({ title: "Earnings gate", lead: card.ticker + " reports " + gate.earnings + ", inside the earnings gate, so this session carries no score." }) }) :
@@ -1025,7 +1046,7 @@
     const sec = UI.moduleCard({ id: o.id, title: o.title, state: o.st && o.st.state !== "ok" ? o.st : null, robustness: o.robustness, seg: o.seg || null,
       info, infoLabel: o.infoLabel || String(o.title).toLowerCase(), body: o.body, index: o.index || 0, enter: STATE.first });
     sec.classList.add("ft-m", "ft-lg" + o.span[1], "ft-md" + o.span[0]);
-    const old = document.getElementById(o.id);
+    const old = $(o.id);
     if (old && old.parentNode === gridEl) old.replaceWith(sec); else gridEl.append(sec);
     return sec;
   }
@@ -1573,7 +1594,7 @@
     const reg = card.regime || {};
     const gl = reg.label === "short" ? "short" : reg.label === "long" ? "long" : null;
     const X = STATE.cardX || {};
-    const vl = X.gexLevels && X.gexLevels.status === "ok" ? X.gexLevels : null;
+    const vl = okOf(X.gexLevels);
     const gx = X.gex && (X.gex.status === "ok" || X.gex.status === "stale") ? X.gex : null;
     const prof = P.levels && P.levels.zeroGamma && P.levels.zeroGamma.profile && Array.isArray(P.levels.zeroGamma.profile.x) ? P.levels.zeroGamma.profile : null;
     const stT = panelSt(card, "gamma", "gamma ladder"), stS = panelSt(card, "surface", "gamma grid"), stC = panelSt(card, "calendar", "roll-off");
@@ -1603,7 +1624,7 @@
         const bars = P.gamma.bars.filter((b) => num(b.k) !== null && num(b.g) !== null && b.k >= lo && b.k <= hi).sort((a, b) => a.k - b.k);
         if (!bars.length) { host.append(UI.silent(ST("quiet", "No strike carried flow gamma inside the drawn window."), "Gamma by strike", 240)); return {}; }
         const xs = bars.map((b) => b.k);
-        const disp = P.displacement && P.displacement.status === "ok" ? P.displacement : null;
+        const disp = okOf(P.displacement);
         const cents = disp ? [num(disp.oiCentroid) !== null ? { x: disp.oiCentroid, shape: "ring", color: "--label-1", row: "base", r: 4.5 } : null, num(disp.volCentroid) !== null ? { x: disp.volCentroid, shape: "dot", color: "--label-1", row: "base", r: 3.5 } : null].filter(Boolean) : [];
         return { handle: C.diverging(host, { x: xs, values: bars.map((b) => b.g), xType: "number", palette: "gamma", spot: S, height: [220, 250, 270], domain: [lo, hi],
           markers: ourMarks(true).concat(cents), labels: wallLabels(xs), label: card.ticker + " gamma dealers added today, by strike", format: (v) => F.num(v, true) + " Γ", xFormat: (v) => K(v),
@@ -1716,7 +1737,7 @@
     const V = P.variation;
     const stV = panelSt(card, "variation", "hedging panel");
     const X = STATE.cardX || {};
-    const gp = X.gexPath && X.gexPath.status === "ok" ? X.gexPath : null;
+    const gp = okOf(X.gexPath);
     const stClock = gp ? OK : xSt(X.gexPath, "session gamma clock");
     const gk = ["vanna", "charm", "deltaExposure"].map((k) => [k, P[k], panelSt(card, k, k === "deltaExposure" ? "delta ladder" : k + " ladder")]);
     const stG = UI.worst(gk.map((x) => x[2]));
@@ -1861,21 +1882,21 @@
 
   function buildVol(card) {
     const P = card.panels || {};
-    const pm = P.pricedMove && P.pricedMove.status === "ok" ? P.pricedMove : {};
+    const pm = okOf(P.pricedMove) || {};
     const X = STATE.cardX || {};
-    const cone = X.cone && X.cone.status === "ok" ? X.cone : null, rv = X.rv && X.rv.status === "ok" ? X.rv : null;
-    const term = X.term && X.term.status === "ok" ? X.term : null, skew = X.skew && X.skew.status === "ok" ? X.skew : null;
-    const vrp = X.vrp && X.vrp.status === "ok" ? X.vrp : null;
-    const vc = P.volContext && P.volContext.status === "ok" ? P.volContext : null;
-    const sk = P.skewTerm && P.skewTerm.status === "ok" ? P.skewTerm : null;
-    const g = P.context && P.context.garch && P.context.garch.status === "ok" ? P.context.garch : null;
+    const cone = okOf(X.cone), rv = okOf(X.rv);
+    const term = okOf(X.term), skew = okOf(X.skew);
+    const vrp = okOf(X.vrp);
+    const vc = okOf(P.volContext);
+    const sk = okOf(P.skewTerm);
+    const g = P.context && okOf(P.context.garch);
     const termRows = term ? term.expiries.filter((r) => num(r.dte) !== null && num(r.iv) !== null && r.dte > 0).map((r) => ({ d: r.dte, v: r.iv, e: r.expiry, f: num(r.fwd), ev: r.eventFirst || r.event, kink: r.kink, pct: r.pct }))
       : vc && vc.term && vc.term.status === "ok" ? vc.term.rows.filter((r) => num(r.dte) !== null && num(r.vol) !== null && r.dte > 0).map((r) => ({ d: r.dte, v: r.vol, e: r.expiry, f: null, m: r.impliedMovePerc }))
         : sk && Array.isArray(sk.points) ? sk.points.filter((p) => num(p.atmIv) !== null && p.days > 0).map((p) => ({ d: p.days, v: p.atmIv, e: p.expiry, f: null })) : [];
     termRows.sort((a, b) => a.d - b.d);
     const smile = smileSeries(card);
     const ivRows = vc && vc.ivRank && vc.ivRank.status === "ok" ? vc.ivRank.rows.filter((r) => isoOk(r.date) && num(r.vol) !== null).sort((a, b) => (a.date < b.date ? -1 : 1)) : [];
-    const sf = P.ivSurface && P.ivSurface.status === "ok" ? P.ivSurface : null;
+    const sf = okOf(P.ivSurface);
     const views = [
       { label: "Cone", st: cone ? OK : xSt(X.cone, "implied-volatility cone"), name: "Volatility cone", draw: (host) => ({ handle: coneChart(host, card, cone, rv),
         legend: [keyOf("--accent", "dot", "Today"), keyOf("--fill-1", "", "Year's middle"), keyOf("--s-gray", "", "Realized cone")] }) },
@@ -1973,7 +1994,7 @@
 
   function garchFacts(card) {
     const ctx = (card.panels || {}).context;
-    const g = ctx && ctx.garch && ctx.garch.status === "ok" ? ctx.garch : null;
+    const g = ctx && okOf(ctx.garch);
     if (!g) return [];
     const skewt = g.dist === "skewt";
     const pctv = (v) => (num(v) === null ? null : v.toFixed(1) + "%");
@@ -2040,15 +2061,15 @@
     const P = card.panels || {};
     const X = STATE.cardX || {};
     const tp = STATE.tape && STATE.tape.prem && STATE.tape.prem.status === "ok" && Array.isArray(STATE.tape.prem.t) && STATE.tape.prem.t.length > 1 ? STATE.tape.prem : null;
-    const path = P.path && P.path.status === "ok" ? P.path : null;
+    const path = okOf(P.path);
     const legs = pathLegs(card);
     const stSession = legs && legs.d.some((v) => num(v) !== null) ? OK : panelSt(card, "path", "session flow");
-    const fe = X.flowExpiry && X.flowExpiry.status === "ok" ? X.flowExpiry : null;
-    const fs = X.flowStrike && X.flowStrike.status === "ok" ? X.flowStrike : null;
-    const ag = P.aggressor && P.aggressor.status === "ok" ? P.aggressor : null;
+    const fe = okOf(X.flowExpiry);
+    const fs = okOf(X.flowStrike);
+    const ag = okOf(P.aggressor);
     const axis = histAxis(STATE.hist);
     const npY = axis && STATE.hist.volume ? unpack(STATE.hist.volume.np, axis.length) : null;
-    const pt = P.premiumTrack && P.premiumTrack.status === "ok" ? P.premiumTrack : null;
+    const pt = okOf(P.premiumTrack);
     const npOk = npY && npY.some((v) => v !== null);
     const S = spotOf(card);
     const views = [
@@ -2089,10 +2110,10 @@
     const st = vwSt(vw);
     const net = tp ? tp.net[tp.net.length - 1] : path ? path.netPremium : null;
     const nd = tp && Array.isArray(tp.nd) ? tp.nd[tp.nd.length - 1] : path ? path.netDelta : null;
-    const nope = X.nope && X.nope.status === "ok" ? X.nope : null;
+    const nope = okOf(X.nope);
     const agNet = ag && Array.isArray(ag.bars) ? ag.bars.reduce((a, b) => a + (num(b.net) || 0), 0) : null;
-    const al = X.alerts && X.alerts.status === "ok" ? X.alerts : null;
-    const ml = X.multiLeg && X.multiLeg.status === "ok" ? X.multiLeg : null;
+    const al = okOf(X.alerts);
+    const ml = okOf(X.multiLeg);
     const meter = (label, v, c) => h("div", { class: "ft-meter" }, h("span", null, label), h("span", { class: "ui-meter" }, h("i", { style: { "--w": (clamp(num(v) || 0, 0, 1) * 100).toFixed(1) + "%", "--c": cssVar(c) } })), h("b", null, F.pct(v, 0)));
     const tileList = [
       offIndex(card, X.alerts) ? null : UI.tile({ title: "Alerts", value: al ? String(al.n) : DASH, unit: al ? F.money(al.prem) : null, state: al ? null : xSt(X.alerts, "alert tape"),
@@ -2128,10 +2149,10 @@
   function buildPositioning(card) {
     const X = STATE.cardX || {};
     if (offIndex(card, X.short) && (isIndex(card) || offIndex(card, X.insiders))) return;
-    const sh = X.short && X.short.status === "ok" ? X.short : null;
+    const sh = okOf(X.short);
     const si = sh && sh.interest && num(sh.interest.si) !== null ? sh.interest : null;
-    const bo = sh && sh.borrow && sh.borrow.status === "ok" ? sh.borrow : null;
-    const sv = sh && sh.volume && sh.volume.status === "ok" ? sh.volume : null;
+    const bo = sh && okOf(sh.borrow);
+    const sv = sh && okOf(sh.volume);
     const ins = X.insiders && (X.insiders.status === "ok" || X.insiders.status === "quiet") ? X.insiders : null;
     const stShort = sh ? OK : xSt(X.short, "short interest read");
     const insRead = !!ins && ins.status === "ok" && num(ins.net90) !== null;
@@ -2211,7 +2232,7 @@
     const E = X.earnings && (X.earnings.status === "ok" || X.earnings.status === "thin") ? X.earnings : null;
     const stE = E ? OK : xSt(X.earnings, "earnings history");
     const next = E && E.next ? E.next : null;
-    const term = X.term && X.term.status === "ok" ? X.term : null;
+    const term = okOf(X.term);
     const implied = E && E.impliedNext && num(E.impliedNext.em) !== null ? E.impliedNext.em : term && term.eventMove && num(term.eventMove.sd) !== null ? term.eventMove.sd : null;
     const cols = E && Array.isArray(E.eventCols) ? E.eventCols : [];
     const ev = E && Array.isArray(E.events) ? E.events : [];
@@ -2348,7 +2369,7 @@
     const P = card.panels || {};
     const X = STATE.cardX || {};
     const tc = P.topContracts, oi = P.oiDeltas, dp = P.darkpool;
-    const dl = X.dpLevels && X.dpLevels.status === "ok" ? X.dpLevels : null;
+    const dl = okOf(X.dpLevels);
     const al = X.alerts && X.alerts.status === "ok" && Array.isArray(X.alerts.dots) && X.alerts.dots.length ? X.alerts : null;
     const list = (kind, label) => (host) => { host.classList.add("ft-tape"); host.append(tapeHead(kind), UI.list(tapeRows(kind, card), { visible: 8, label })); return {}; };
     const views = [
@@ -2455,7 +2476,7 @@
 
   function buildContext(card) {
     const P = card.panels || {};
-    const ctx = P.context && P.context.status === "ok" ? P.context : {};
+    const ctx = okOf(P.context) || {};
     const Cn = candlesOf(card);
     const S = spotOf(card);
     const yr = Cn.slice(-252);
@@ -2591,6 +2612,7 @@
     gridEl.replaceChildren();
     buildScreen(card);
     if (STATE.cardX && STATE.cardX.earnings) buildEvents(card);
+    if (STATE.tape) buildLiteFlow(card);
     paintFreshness(card);
     STATE.first = false;
   }
@@ -2603,6 +2625,7 @@
     return r.json();
   }
   const soft = (p) => p.then((v) => v, () => null);
+  const api = (p, t) => "/api/flows/" + p + "?t=" + encodeURIComponent(t);
 
   function readTicker() {
     let raw = null;
@@ -2704,7 +2727,7 @@
   }
 
   async function fetchTape(t) {
-    const tape = await soft(getJSON("/api/flows/tape?t=" + encodeURIComponent(t)));
+    const tape = await soft(getJSON(api("tape", t)));
     if (!tape || tape.status) return false;
     const before = STATE.tape && STATE.tape.prem ? STATE.tape.prem.readAt : null;
     STATE.tape = tape;
@@ -2716,7 +2739,7 @@
     const settle = (s) => renderVerdict(card, { ...STATE.neuron, status: s || "unavailable" });
     if (STATE.card !== card) return;
     if (i > 6) return settle();
-    setTimeout(() => soft(getJSON("/api/flows/summary?t=" + encodeURIComponent(t))).then((nr) => {
+    setTimeout(() => soft(getJSON(api("summary", t))).then((nr) => {
       if (STATE.card !== card) return;
       const s = nr && nr.status;
       if (s === "ok") { STATE.neuron = nr; renderVerdict(card, nr); buildWorlds(card); }
@@ -2728,8 +2751,8 @@
   function jumpToHash() {
     const m = /^#(?:panel-|ftg-|m-)?([A-Za-z_]\w*)$/.exec(String(location.hash || ""));
     if (!m) return;
-    const id = PANEL_MOD[m[1]] || (document.getElementById("m-" + m[1]) ? "m-" + m[1] : null);
-    const target = id && document.getElementById(id);
+    const id = PANEL_MOD[m[1]] || ($("m-" + m[1]) ? "m-" + m[1] : null);
+    const target = id && $(id);
     if (!target) return;
     target.setAttribute("tabindex", "-1");
     requestAnimationFrame(() => { target.scrollIntoView({ block: "start", behavior: "instant" }); try { target.focus({ preventScroll: true }); } catch { target.focus(); } });
@@ -2752,11 +2775,11 @@
         STATE.quote = q && typeof q === "object" ? q : null;
         paintPrice(STATE.card, false);
         paintFreshness(STATE.card);
-        if (!lite && was !== !!liveQuote()) renderHeroChart(STATE.card, STATE.card.panels.pricedMove && STATE.card.panels.pricedMove.status === "ok" ? STATE.card.panels.pricedMove : {});
+        if (!lite && was !== !!liveQuote()) renderHeroChart(STATE.card, okOf(STATE.card.panels.pricedMove) || {});
       },
       onChange: (changed) => {
         if (lite || !changed.includes("card:" + t)) return;
-        Promise.all([soft(getJSON("/api/flows/card?t=" + encodeURIComponent(t))), soft(getJSON("/api/flows/summary?t=" + encodeURIComponent(t))), soft(getJSON("/api/flows/card-x?t=" + encodeURIComponent(t))), soft(getJSON("/api/flows/hist?t=" + encodeURIComponent(t)))])
+        Promise.all(["card", "summary", "card-x", "hist"].map((p) => soft(getJSON(api(p, t)))))
           .then(([card, neuron, cx, hist]) => {
             if (!card || !card.panels) return;
             STATE.card = card; STATE.neuron = neuron || STATE.neuron; STATE.cardX = joined(cx, card); STATE.hist = joined(hist, card);
@@ -2773,10 +2796,9 @@
     if (!ticker) { await noTicker(); return; }
     heroEl.classList.add("is-loading");
     $("ftHeroT").textContent = ticker;
-    const q = (p) => p + "?t=" + encodeURIComponent(ticker);
-    const neuronP = soft(getJSON(q("/api/flows/summary")));
+    const [neuronP, cxP, histP] = ["summary", "card-x", "hist"].map((p) => soft(getJSON(api(p, ticker))));
     let card;
-    try { card = await getJSON(q("/api/flows/card")); } catch {
+    try { card = await getJSON(api("card", ticker)); } catch {
       const text = "This page could not be loaded. Reload to try again.";
       silentHero(ticker, NA(text));
       sayStatus(text);
@@ -2784,8 +2806,9 @@
     }
     if (!card) return;
     if ((card.status && card.status !== "ok") || !(card.panels || card.lite)) { await absentCard(ticker, card); return; }
+    fetchTape(ticker).then((moved) => { if (moved && STATE.card === card) flowOf(card); });
     paintFreshness(card);
-    const [neuron, cx, hist] = await Promise.all([neuronP, soft(getJSON(q("/api/flows/card-x"))), soft(getJSON(q("/api/flows/hist")))]);
+    const [neuron, cx, hist] = await Promise.all([neuronP, cxP, histP]);
     STATE.card = card;
     STATE.neuron = neuron || { status: "unavailable" };
     STATE.cardX = joined(cx, card);
@@ -2794,7 +2817,6 @@
     if (card.lite) paintLite(card); else paintAll();
     sayStatus("");
     jumpToHash();
-    fetchTape(ticker).then((moved) => { if (moved && STATE.card === card) flowOf(card); });
     if (!card.lite) {
       if (STATE.neuron.status === "pending") awaitNeuron(ticker, card);
       const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1200));

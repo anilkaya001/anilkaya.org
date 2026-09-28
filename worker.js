@@ -916,6 +916,35 @@ const FLOWS_TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
 
 const DATED_ARCHIVE_KEY_RE = /^(board:(long|short)|scores):\d{4}-\d{2}-\d{2}$/;
 
+const INGEST_VIEW_KEY_RE = /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^flowalerts$|^pulse$|^political$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^sector:premium$|^news$|^brief$|^meta$|^universe$|^regime$|^ideas$|^focus$|^roster$/;
+
+function ingestKeyParts(key) {
+  const tickerKey = /^(card|card-x|hist):/.exec(key);
+  const card = tickerKey ? key.slice(tickerKey[0].length) : null;
+  return { tickerKey, valid: card !== null ? FLOWS_TICKER_RE.test(card) : INGEST_VIEW_KEY_RE.test(key) };
+}
+
+const INGEST_META_KEYS_MAX = 96;
+
+const INGEST_META_SQL =
+  "SELECT id, updated_at, length(payload) AS bytes, json_extract(payload, '$.sessionDate') AS session, " +
+  "json_extract(payload, '$.generatedAt') AS generated, json_extract(payload, '$.status') AS status " +
+  "FROM flows_payload WHERE id IN (";
+
+function ingestMetadata(asked, rows) {
+  const byId = new Map((rows || []).map((r) => [r.id, r]));
+  const keys = {};
+  for (const key of asked) {
+    const r = byId.get(key);
+    keys[key] = r && r.status !== "pending"
+      ? { present: true, sessionDate: typeof r.session === "string" ? r.session : null,
+          generatedAt: typeof r.generated === "string" ? r.generated : null,
+          updatedAt: Number(r.updated_at) || 0, bytes: Number(r.bytes) || 0 }
+      : { present: false };
+  }
+  return keys;
+}
+
 const storedFrom = (row) => (row && row.payload
   ? { payload: row.payload, updatedAt: row.updated_at, fresh: nightlyFreshMeta(row) }
   : null);
@@ -3070,6 +3099,25 @@ async function route(request, env, url, ctx) {
     }
     if (!tokenKind) throw new HttpError(401, "unauthorized", "Authentication required");
 
+    if (url.searchParams.has("keys")) {
+      requireMethod(request, ["GET"]);
+      if (tokenKind !== "nightly") {
+        throw new HttpError(403, "live_token_scope", "The live token reads one key at a time");
+      }
+      const asked = [...new Set(url.searchParams.get("keys").split(",").map((k) => k.trim()).filter(Boolean))];
+      if (!asked.length) throw new HttpError(400, "invalid_key", "Unknown payload key");
+      if (asked.length > INGEST_META_KEYS_MAX) {
+        throw new HttpError(400, "too_many_keys", `At most ${INGEST_META_KEYS_MAX} keys per request`);
+      }
+      if (asked.some((k) => !ingestKeyParts(k).valid)) throw new HttpError(400, "invalid_key", "Unknown payload key");
+      if (!env.DB) throw storeGone();
+      await ensureFlowsTables(env);
+      const rows = await env.DB.prepare(INGEST_META_SQL + asked.map(() => "?").join(", ") + ")").bind(...asked).all()
+        .catch(() => null);
+      if (!rows) throw storeGone();
+      return json({ keys: ingestMetadata(asked, rows.results) });
+    }
+
     const key = url.searchParams.get("key") || "";
 
     if (key === "clock") {
@@ -3088,12 +3136,7 @@ async function route(request, env, url, ctx) {
       return FLOWS_LIVE.ingestLive(env, key, request.method, text, Date.now(), { json });
     }
 
-    const tickerKey = /^(card|card-x|hist):/.exec(key);
-    const card = tickerKey ? key.slice(tickerKey[0].length) : null;
-
-    const validKey = card !== null
-      ? FLOWS_TICKER_RE.test(card)
-      : /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^flowalerts$|^pulse$|^political$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^sector:premium$|^news$|^brief$|^meta$|^universe$|^regime$|^ideas$|^focus$|^roster$/.test(key);
+    const { tickerKey, valid: validKey } = ingestKeyParts(key);
     if (!validKey) {
       throw new HttpError(400, "invalid_key", "Unknown payload key");
     }

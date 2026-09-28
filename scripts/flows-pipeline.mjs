@@ -1854,9 +1854,39 @@ async function readStoredOnce(key) {
   }
 }
 
-async function readStored(key, { retries = READ_RETRIES, pause = sleep, budget = null } = {}) {
-  if (DRY_RUN) return { payload: null, absent: true, status: 0 };
-  let read = await readStoredOnce(key);
+async function probeStoredOnce(keys) {
+  try {
+    const response = await fetch(
+      ingestURL() + "?keys=" + encodeURIComponent(keys.join(",")),
+      {
+        redirect: "error",
+        headers: await ingestHeaders(),
+      },
+    );
+    const refusal = response.status === 403 ? await noteRefusal(response) : null;
+    if (refusal) {
+      return { keys: null, failed: true, status: 403, refusal, final: refusal.kind === "worker" };
+    }
+    if (!response.ok) {
+      const noted = await noteAnswer(response);
+      const seen = refusalOf({ headers: response.headers, text: noted ? noted.text : await response.text().catch(() => "") });
+      return { keys: null, failed: true, status: response.status, code: seen.kind === "worker" ? seen.code : null };
+    }
+    const text = await response.text();
+    let body = null;
+    try { body = JSON.parse(text); } catch { body = null; }
+    if (!body || !body.keys || typeof body.keys !== "object") {
+      return { keys: null, failed: true, status: response.status, detail: "the answer carried no keys" };
+    }
+    return { keys: body.keys, bytes: text.length, status: response.status };
+  } catch (error) {
+    await noteAnswer(null);
+    return { keys: null, failed: true, status: 0, detail: error.message };
+  }
+}
+
+async function readWithRetries(once, said, { retries = READ_RETRIES, pause = sleep, budget = null } = {}) {
+  let read = await once();
   for (let attempt = 0; read.failed && !read.final && READ_RETRYABLE(read.status); attempt++) {
     const wait = budget
       ? publishRetryDelay(attempt, { retries, spentMs: budget.spentMs, budgetMs: budget.budgetMs })
@@ -1864,13 +1894,23 @@ async function readStored(key, { retries = READ_RETRIES, pause = sleep, budget =
     if (wait === null) break;
     if (budget) budget.spentMs += wait;
     else publishRetrySpentMs += wait;
-    console.warn(`  read ${key}: ${readSaid(read)}` +
+    console.warn(`  read ${said}: ${readSaid(read)}` +
       ` — waiting ${wait}ms and reading again (retry ${attempt + 1} of ${retries})`);
     await pause(wait);
-    const again = await readStoredOnce(key);
+    const again = await once();
     read = again.failed ? again : { ...again, recovered: attempt + 1 };
   }
   return read;
+}
+
+async function readStored(key, options = {}) {
+  if (DRY_RUN) return { payload: null, absent: true, status: 0 };
+  return readWithRetries(() => readStoredOnce(key), key, options);
+}
+
+export async function probeStored(keys, options = {}) {
+  if (DRY_RUN) return { keys: null, failed: true, status: 0, detail: "dry run" };
+  return readWithRetries(() => probeStoredOnce(keys), `${keys.length} key(s) at once`, options);
 }
 
 const RECORD_HORIZONS = [1, 5, 10, 21];
@@ -4230,16 +4270,82 @@ export const LEDGER_PROBE_FAIL_MAX = 25;
 
 export const LEDGER_PROBE_RETRY_BUDGET_MS = 20_000;
 
-export async function bootstrapLedger({ tickers = [], landed = new Set(), reader, pool = runPooled, width = 4,
-  deadline = null, limit = LEDGER_PROBE_MAX, failLimit = LEDGER_PROBE_FAIL_MAX } = {}) {
+export const LEDGER_PROBE_CHUNK = 96;
+
+const probeDayOf = (p) => {
+  const d = p && typeof p === "object" ? (p.sessionDate || String(p.generatedAt || "").slice(0, 10)) : null;
+  return ARCHIVE_DATE_RE.test(String(d || "")) ? d : null;
+};
+
+const probeFound = (card, x) => card === "present" || x === "present" || card === "landed" || x === "landed";
+
+async function probeLedgerMetadata({ list, landed, probeMany, past, limit, failLimit, chunk }) {
+  const asked = [];
+  const chargeOf = (keys) => keys.filter((k) => !k.startsWith("hist:")).length;
+  let capped = false, budget = 0;
+  for (const t of list) {
+    const keys = ["card:" + t, "card-x:" + t, "hist:" + t].filter((k) => !landed.has(k));
+    if (budget + chargeOf(keys) > limit) { capped = true; break; }
+    budget += chargeOf(keys);
+    asked.push(...keys);
+  }
+  const answers = new Map();
+  let reads = 0, charged = 0, failed = 0, requests = 0, metaBytes = 0;
+  for (let i = 0; i < asked.length; i += chunk) {
+    if (failed >= failLimit || past()) { capped = true; break; }
+    const batch = asked.slice(i, i + chunk);
+    requests++;
+    reads += batch.length;
+    charged += chargeOf(batch);
+    const r = await probeMany(batch);
+    const shaped = !!r && !r.failed && r.status === 200 && !!r.keys && typeof r.keys === "object";
+    if (!shaped) {
+      if (requests === 1) {
+        return { fallback: { status: r && r.status ? r.status : 0, said: r ? readSaid(r) : "no answer",
+          code: r && typeof r.code === "string" ? r.code : null } };
+      }
+      failed += batch.length;
+      continue;
+    }
+    metaBytes += Number(r.bytes) || 0;
+    for (const key of batch) {
+      const a = r.keys[key];
+      if (!a || typeof a !== "object") { failed++; continue; }
+      answers.set(key, a.present === true ? a : null);
+    }
+  }
+  const known = new Map();
+  let avoided = 0;
+  const state = (key) => (landed.has(key) ? "landed" : !answers.has(key) ? "unknown" : answers.get(key) ? "present" : "absent");
+  const take = (key) => {
+    const a = answers.get(key);
+    if (!a) return;
+    known.set(key, probeDayOf(a));
+    avoided += Number(a.bytes) || 0;
+  };
+  for (const t of list) {
+    const card = state("card:" + t), x = state("card-x:" + t);
+    take("card:" + t);
+    take("card-x:" + t);
+    if (probeFound(card, x) && !landed.has("hist:" + t)) take("hist:" + t);
+  }
+  return { known, reads, charged, failed, capped, path: "metadata", requests, metaBytes, avoided, fallback: null };
+}
+
+export async function bootstrapLedger({ tickers = [], landed = new Set(), reader, probeMany = null, pool = runPooled, width = 4,
+  deadline = null, limit = LEDGER_PROBE_MAX, failLimit = LEDGER_PROBE_FAIL_MAX, chunk = LEDGER_PROBE_CHUNK } = {}) {
+  const list = [...new Set(tickers)].filter((t) => rosterKeyTicker("card:" + t)).sort();
+  const past = () => Number.isFinite(deadline) && Date.now() > deadline;
+  let fallback = null;
+  if (probeMany) {
+    const meta = await probeLedgerMetadata({ list, landed, probeMany, past, limit, failLimit, chunk });
+    if (!meta.fallback) return meta;
+    fallback = meta.fallback;
+  }
   const known = new Map();
   let reads = 0, failed = 0, capped = false;
-  const dayOf = (p) => {
-    const d = p && typeof p === "object" ? (p.sessionDate || String(p.generatedAt || "").slice(0, 10)) : null;
-    return ARCHIVE_DATE_RE.test(String(d || "")) ? d : null;
-  };
   const probe = async (key) => {
-    if (reads >= limit || failed >= failLimit || (Number.isFinite(deadline) && Date.now() > deadline)) {
+    if (reads >= limit || failed >= failLimit || past()) {
       capped = true;
       return "skipped";
     }
@@ -4247,22 +4353,36 @@ export async function bootstrapLedger({ tickers = [], landed = new Set(), reader
     const r = await reader(key);
     if (!r || r.failed) { failed++; return "failed"; }
     if (r.absent || !r.payload || r.payload.status === "pending") return "absent";
-    known.set(key, dayOf(r.payload));
+    known.set(key, probeDayOf(r.payload));
     return "present";
   };
-  const list = [...new Set(tickers)].filter((t) => rosterKeyTicker("card:" + t)).sort();
   await pool(list, async (t) => {
     const card = landed.has("card:" + t) ? "landed" : await probe("card:" + t);
     const x = landed.has("card-x:" + t) ? "landed" : await probe("card-x:" + t);
-    if ((card === "present" || x === "present" || card === "landed" || x === "landed") && !landed.has("hist:" + t)) {
+    if (probeFound(card, x) && !landed.has("hist:" + t)) {
       await probe("hist:" + t);
     }
   }, { width });
-  return { known, reads, failed, capped };
+  return { known, reads, charged: reads, failed, capped, path: "per-key", requests: reads, metaBytes: 0, avoided: 0, fallback };
+}
+
+export function probeSaid(p) {
+  const tail = `${p.known.size} older key(s) found` +
+    (p.failed ? `, ${p.failed} ${p.path === "metadata" ? "key(s) unanswered" : "read(s) failed"}` : "") +
+    (p.capped ? " — the probe stopped at its cap, its failure limit or the deadline" : "");
+  if (p.path === "metadata") {
+    return `${p.reads} key(s) asked over ${p.requests} metadata request(s) of ${p.metaBytes} bytes, ` +
+      `${p.charged} card and card-x key(s) counted against the cap, ${p.avoided} bytes of stored payload left undownloaded, ${tail}`;
+  }
+  const why = p.fallback
+    ? ` (the metadata form answered ${p.fallback.said}${p.fallback.code ? " " + p.fallback.code : ""}, so ` +
+      (p.fallback.code === "too_many_keys" ? "the chunk is above this Worker's cap, not an older Worker" : "an older Worker is assumed") + ")"
+    : "";
+  return `${p.reads} read(s) key by key${why}, ${tail}`;
 }
 
 export async function retireAndRoster({
-  sessionDate, generatedAt, depth = new Map(), exempt = new Set(), candidates = [], reader, prior = null,
+  sessionDate, generatedAt, depth = new Map(), exempt = new Set(), candidates = [], reader, probeMany = null, prior = null,
   landed = landedKeys, deadline = null, remove = retire, write = publish, log = (line) => console.log(line),
 } = {}) {
   if (!ARCHIVE_DATE_RE.test(String(sessionDate || ""))) {
@@ -4278,12 +4398,10 @@ export async function retireAndRoster({
     log(`  roster: the prior roster could not be read (HTTP ${prior.status}) — nothing is retired tonight, and the next run probes the store to rebuild the ledger`);
   } else if (!complete) {
     const probed = await bootstrapLedger({ tickers: [...new Set([...candidates, ...known.keys()].map((k) => rosterKeyTicker(k) || k))],
-      landed, reader, deadline });
+      landed, reader, probeMany, deadline });
     for (const [k, v] of probed.known) if (!known.has(k) || v) known.set(k, v);
     ledger = probed.capped || probed.failed ? "bootstrap-partial" : "bootstrap";
-    log(`  roster: the prior ledger is not complete (${why}), so the store was probed — ${probed.reads} read(s), ` +
-      `${probed.known.size} older key(s) found` + (probed.failed ? `, ${probed.failed} read(s) failed` : "") +
-      (probed.capped ? " — the probe stopped at its cap, its failure limit or the deadline" : ""));
+    log(`  roster: the prior ledger is not complete (${why}), so the store was probed — ${probeSaid(probed)}`);
   }
   const plan = retirePlan({ sessionDate, known, landed, exempt });
   let removed = 0, absent = 0, refused = 0, streak = 0, lastStatus = 0;
@@ -4326,7 +4444,7 @@ export async function retireAndRoster({
   return { retired: removed, absent, refused, held: Object.keys(held).length, ledger, bytes: built.bytes, written };
 }
 
-export function dryRosterReader(sessionDate) {
+function dryPriorRoster(sessionDate) {
   const back = (n) => {
     let d = sessionDate;
     for (let i = 0; i < n;) {
@@ -4336,14 +4454,36 @@ export function dryRosterReader(sessionDate) {
     }
     return d;
   };
-  const prior = {
-    v: 1, sessionDate: back(1), generatedAt: back(1) + "T21:40:00.000Z",
+  return {
+    v: 1, sessionDate: back(1), generatedAt: back(1) + "T21:40:00.000Z", ledger: "bootstrap-partial",
     depth: { AAPL: "focus", GLD: "fund", SPY: "index" }, session: { AAPL: back(1), GLD: back(1), SPY: back(1) },
     x: { "card-x": ["AAPL"], hist: ["AAPL"] },
     held: { "card:ZZRET": back(5), "card-x:ZZRET": back(5), "hist:ZZRET": back(5), "card:ZZHLD": back(2),
       "card:NVDA": back(6), "card-x:ZZXON": back(4) },
   };
+}
+
+export function dryRosterReader(sessionDate) {
+  const prior = dryPriorRoster(sessionDate);
   return async (key) => (key === "roster" ? { payload: prior, status: 200 } : { payload: null, absent: true, status: 0 });
+}
+
+export const DRY_PROBE_BYTES = Object.freeze({ card: 61440, "card-x": 20480, hist: 10240 });
+
+export function dryRosterProbe(sessionDate) {
+  const prior = dryPriorRoster(sessionDate);
+  const stored = { ...prior.held, "hist:ZZHLD": prior.held["card:ZZHLD"] };
+  return async (keys) => {
+    const out = {};
+    for (const key of keys) {
+      const day = stored[key];
+      out[key] = day
+        ? { present: true, sessionDate: day, generatedAt: day + "T21:40:00.000Z", updatedAt: Date.parse(day + "T21:40:00Z"),
+            bytes: DRY_PROBE_BYTES[key.split(":")[0]] }
+        : { present: false };
+    }
+    return { keys: out, status: 200, bytes: JSON.stringify({ keys: out }).length };
+  };
 }
 
 async function runLiveMode() {
@@ -6572,6 +6712,8 @@ async function main() {
         ...INDEX_TICKERS, ...NDX_100])],
       reader: DRY_RUN ? dryRosterReader(sessionDate)
         : (key) => readStored(key, { budget: probeBudget }),
+      probeMany: DRY_RUN ? dryRosterProbe(sessionDate)
+        : (keys) => probeStored(keys, { budget: probeBudget }),
       prior: DRY_RUN ? await dryRosterReader(sessionDate)("roster")
         : pickPriorRoster(await readStored("roster", { budget: probeBudget }), await earlyRoster,
           { log: (line) => console.warn(line) }),
