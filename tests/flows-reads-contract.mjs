@@ -20,6 +20,7 @@ function fakeD1() {
   let failing = null;
   let thrown = null;
   let hang = null;
+  let slow = null;
   const reads = /^\s*(SELECT|PRAGMA|WITH)/i;
   const exec = (sql, args) => {
     if (failing && failing.test(sql)) throw new Error("fake D1 refused " + sql.slice(0, 40));
@@ -51,6 +52,11 @@ function fakeD1() {
         trips.push({ kind: "batch", sqls, args });
         return new Promise(() => {});
       }
+      if (slow && sqls.some((sql) => slow.re.test(sql))) {
+        const ms = slow.ms;
+        slow = null;
+        return new Promise((resolve, reject) => setTimeout(() => trip("batch", sqls, args, () => list.map((s) => exec(s.sql, s.args))).then(resolve, reject), ms));
+      }
       return trip("batch", sqls, args, () => list.map((s) => exec(s.sql, s.args)));
     },
   };
@@ -60,7 +66,7 @@ function fakeD1() {
   const live = (id, value, readAt, session) => db.prepare(
     "INSERT OR REPLACE INTO flows_live (id, payload, read_at, session, cadence_s, source, writer, updated_at) VALUES (?, ?, ?, ?, 300, 'worker', 'worker@rth', ?)",
   ).run(id, JSON.stringify(value), readAt, session, readAt);
-  return { D1, db, trips, put, live, fail: (re) => { failing = re; }, throwSync: (re) => { thrown = re; }, hangOnce: (re) => { hang = re; }, latency: (ms) => { fake.latencyMs = ms; },
+  return { D1, db, trips, put, live, fail: (re) => { failing = re; }, throwSync: (re) => { thrown = re; }, hangOnce: (re) => { hang = re; }, slowOnce: (re, ms) => { slow = { re, ms }; }, latency: (ms) => { fake.latencyMs = ms; },
     since: (n) => trips.slice(n), count: (re, from = 0) => trips.slice(from).filter((t) => t.sqls.some((s) => re.test(s))).length };
 }
 
@@ -179,6 +185,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   const f = fakeD1();
   seed(f);
   f.hangOnce(SCHEMA_RE);
+  f.slowOnce(SCHEMA_RE, 1500);
   const get = await client(f.D1);
   const t0 = Date.now();
   const [first, second] = await Promise.all([
@@ -191,11 +198,31 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
      "and when that request answers before the batch lands (the chain route's vendor call rejects at once with no key while its card " +
      "read has just started the bootstrap) the promise never settles; every later request awaited it for the life of the isolate " +
      "(flows-chain-contract's bare worker, 300 s to undici's headers timeout, on CI and in the sandbox). Both waiters answer");
-  ok(waited >= 2000 && waited < 4000, `after the 2 s deadline (${waited} ms), not never`);
-  eq(f.count(SCHEMA_RE), 2, "with the hung batch and exactly one retry shared by the two waiters, not one retry each");
+  ok(waited >= 3500 && waited < 6000, `after the 2 s deadline and the 1.5 s retry (${waited} ms), not never`);
+  eq(f.count(SCHEMA_RE), 2,
+     "with the hung batch and exactly one retry shared by the two waiters: the second waiter's own deadline falls while the first " +
+     "waiter's retry is still in the air, and it joins that retry because the field no longer holds the flight it timed out on");
   const ready = f.trips.length;
   await get("/api/flows/meta");
   eq(f.count(SCHEMA_RE, ready), 0, "after which the schema is ready");
+}
+
+{
+  const f = fakeD1();
+  seed(f);
+  f.latency(400);
+  const get = await client(f.D1);
+  const t0 = Date.now();
+  const chain = await get("/api/flows/chain?t=AAPL");
+  const answered = Date.now() - t0;
+  ok(chain.res.status === 503 && chain.body.error.code === "chain_unconfigured" && answered < 300,
+     `THE CHAIN ROUTE STILL FAILS FAST: with no vendor key it answers before the schema batch it started has landed (${answered} ms of a 400 ms batch)`);
+  await chain.settle();
+  eq(f.count(SCHEMA_RE), 1, "the batch the card read started beside the vendor call is kept alive through ctx.waitUntil until it lands, so the answer never abandons it");
+  f.latency(1);
+  const later = f.trips.length;
+  const meta = await get("/api/flows/meta");
+  ok(meta.res.status === 200 && f.count(SCHEMA_RE, later) === 0, "so the next request finds the schema ready and runs no batch of its own");
 }
 
 {

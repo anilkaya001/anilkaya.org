@@ -481,7 +481,7 @@ let marketRevalidation = null;
 
 function revalidateMarketSnapshot(env) {
   if (marketRevalidation) return marketRevalidation;
-  marketRevalidation = refreshMarketSnapshot(env).catch(() => null).then(async (refreshed) => {
+  const flight = refreshMarketSnapshot(env).catch(() => null).then(async (refreshed) => {
     if (refreshed) return refreshed;
     const now = Date.now();
     const payload = JSON.stringify({ quotes: [], updatedAt: now });
@@ -490,8 +490,9 @@ function revalidateMarketSnapshot(env) {
       "ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at",
     ).bind(payload, now).run()).catch(() => {});
     return payload;
-  }).finally(() => { marketRevalidation = null; });
-  return marketRevalidation;
+  }).finally(() => { if (marketRevalidation === flight) marketRevalidation = null; });
+  marketRevalidation = flight;
+  return flight;
 }
 
 async function readMarketSnapshot(env) {
@@ -510,11 +511,8 @@ async function refreshMarketSnapshotIfDue(env, at = Date.now()) {
 
 async function loadMarketSnapshot(env, ctx) {
   const row = await readMarketSnapshot(env);
-  if (!row) return revalidateMarketSnapshot(env);
-  if (Date.now() - Number(row.updated_at) > MARKET_STALE_MS) {
-    const refresh = revalidateMarketSnapshot(env);
-    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(refresh);
-  }
+  if (!row) return keepAlive(ctx, revalidateMarketSnapshot(env));
+  if (Date.now() - Number(row.updated_at) > MARKET_STALE_MS) keepAlive(ctx, revalidateMarketSnapshot(env));
   return row.payload;
 }
 
@@ -1822,14 +1820,15 @@ async function buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit }) 
     ...(page > 1 ? { page } : {}),
   });
 
-  const [firstPage, candles, state, info, cardRead] = await allOrFirstRejection([
+  const cardPending = keepAlive(ctx, readCardWithEngine(env, ticker).catch(() => null));
+  const [firstPage, candles, state, info, cardRead] = await Promise.all([
     chainPage(1),
     uwFetch(env, `/api/stock/${t}/ohlc/1d`, { timeframe: "5D" }),
 
     uwFetch(env, `/api/stock/${t}/stock-state`, {}).catch(() => null),
 
     cachedTickerInfo(env, ctx, ticker),
-    readCardWithEngine(env, ticker).catch(() => null),
+    cardPending,
   ]);
 
   const unwrap = (r) => (Array.isArray(r) ? r : (r && r.data) || []);
@@ -2055,7 +2054,7 @@ function strategyEngine({ ticker, expiry, calls, puts, spot, card, nowMs }) {
   };
 }
 
-async function buildStrategyExpiry(env, ticker, expiry, { engine = false } = {}) {
+async function buildStrategyExpiry(env, ctx, ticker, expiry, { engine = false } = {}) {
   const t = encodeURIComponent(ticker);
   const page = (optionType, n) => uwFetch(env, `/api/stock/${t}/option-contracts`, {
 
@@ -2065,10 +2064,11 @@ async function buildStrategyExpiry(env, ticker, expiry, { engine = false } = {})
     ...(n > 1 ? { page: n } : {}),
   });
 
-  const [callsFirst, putsFirst, liveState, cardRead] = await allOrFirstRejection([
+  const cardPending = engine ? keepAlive(ctx, readCardWithEngine(env, ticker).catch(() => null)) : Promise.resolve(null);
+  const [callsFirst, putsFirst, liveState, cardRead] = await Promise.all([
     page("call", 1), page("put", 1),
     engine ? uwFetch(env, `/api/stock/${t}/stock-state`, {}).catch(() => null) : Promise.resolve(null),
-    engine ? readCardWithEngine(env, ticker).catch(() => null) : Promise.resolve(null),
+    cardPending,
   ]);
 
   const gather = async (optionType, first) => {
@@ -2184,11 +2184,9 @@ async function ensureFlowsTables(env) {
   }
 }
 
-async function allOrFirstRejection(list) {
-  const settled = await Promise.allSettled(list);
-  const failed = settled.find((s) => s.status === "rejected");
-  if (failed) throw failed.reason;
-  return settled.map((s) => s.value);
+function keepAlive(ctx, promise) {
+  if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(promise);
+  return promise;
 }
 
 function flowsThrottleKey(request, username) {
@@ -3430,7 +3428,7 @@ async function route(request, env, url, ctx) {
           { method: "GET" }),
         wantsRefresh: url.searchParams.get("refresh") === "1",
         build: () => (expiry
-          ? buildStrategyExpiry(env, ticker, expiry, { engine })
+          ? buildStrategyExpiry(env, ctx, ticker, expiry, { engine })
           : buildStrategyContext(env, ctx, ticker)),
       });
     }

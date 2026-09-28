@@ -3053,7 +3053,8 @@ const cronMinutes = (cron) => {
 
 {
   let reads = 0;
-  const env = { DB: { prepare: () => ({ first: () => (++reads === 1 ? new Promise(() => {}) : Promise.resolve(null)) }) } };
+  const landed = { id: 1, day: "2026-09-28", trading: 1 };
+  const env = { DB: { prepare: () => ({ first: () => (++reads === 1 ? new Promise(() => {}) : new Promise((r) => setTimeout(() => r(landed), 1500))) }) } };
   W.memoClock(null, 0);
   const t0 = Date.now();
   const [a, b] = await Promise.all([
@@ -3061,9 +3062,10 @@ const cronMinutes = (cron) => {
     new Promise((r) => setTimeout(r, 50)).then(() => W.cachedClock(env, Date.now())),
   ]);
   const waited = Date.now() - t0;
-  ok(a === null && b === null && waited >= 2000 && waited < 4000,
-     `THE CLOCK FLIGHT HAS THE SAME DEADLINE as the schema bootstrap: a cold read that never settles is abandoned after 2 s (${waited} ms) and read again`);
-  eq(reads, 2, "once, for both waiters");
+  ok(a && a.day === "2026-09-28" && a.trading === 1 && b === a && waited >= 3500 && waited < 6000,
+     `THE CLOCK FLIGHT HAS THE SAME DEADLINE as the schema bootstrap: a cold read that never settles is abandoned after 2 s and read again, ` +
+     `and both waiters take the read that landed (${waited} ms)`);
+  eq(reads, 2, "once, for both waiters: the second's deadline falls while the retry is in the air and it joins the retry rather than starting a third read");
   ok(!W.clockDue(Date.now()), "and the memo is warm from the read that landed");
   W.memoClock(null, 0);
   ok(await W.settledWithin(Promise.resolve(1), 50) === true && await W.settledWithin(Promise.reject(new Error("x")), 50) === true &&
