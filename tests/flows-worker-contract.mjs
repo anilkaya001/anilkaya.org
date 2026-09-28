@@ -1836,6 +1836,20 @@ try {
       eq(await tick(SUMMARY, "2026-09-23T19:45:00-04:00"), 200, "the summary cron fires through the real scheduled handler");
       ok(/\bboard\b/.test(await live.d1("SELECT scope FROM flows_ai_summary")), "and writes the board summary");
       eq(github.dispatches.length, 4, "dispatching nothing: the nightly dispatch is the housekeeping firing's alone");
+      const summaryAt = async () => await live.d1("SELECT summary_at FROM flows_clock WHERE id = 1");
+      ok((await summaryAt()).includes(String(et("2026-09-23T19:45:00-04:00"))),
+        "and stamps flows_clock.summary_at with its scheduled instant when the refresh completes");
+      await tick(HOUSE, "2026-09-23T20:00:00-04:00");
+      const afterHouse = await summaryAt();
+      ok(afterHouse.includes(String(et("2026-09-23T19:45:00-04:00"))) && !afterHouse.includes(String(et("2026-09-23T20:00:00-04:00"))),
+        "THE HOUSEKEEPING FIRING NEVER MOVES THAT STAMP: only a completed summary firing does, so a trigger set that lost " +
+          "15,45 * * * * reads as a stamp that stopped, which is what the nightly health gate fails on");
+      eq(github.dispatches.length, 4, "and the 20:00 housekeeping firing dispatches nothing new");
+      eq((await (await ingest("clock", "GET", INGEST_TOKEN)).json()).clock.summaryAt, new Date(et("2026-09-23T19:45:00-04:00")).toISOString(),
+        "the ingest clock key hands the gate that instant as ISO");
+      await tick(SUMMARY, "2026-09-23T20:15:00-04:00");
+      ok((await summaryAt()).includes(String(et("2026-09-23T20:15:00-04:00"))),
+        "and a summary firing with nothing to do (the stamp already matches) still moves it: the stamp is liveness, not work");
       await live.d1("DELETE FROM flows_payload WHERE id = 'brief'");
 
       const alerts = mergeLiveAlerts(null, [{ body: fakeFlowAlerts({ session: "2026-09-23",
@@ -1862,12 +1876,12 @@ try {
         "THE SESSION CLOCK: /now carries the tape-derived day verdict and the closed day on record, on a table the Worker " +
           "upgraded from 0010's columns — and no operations string (Tier 1 reasons, dispatch outcomes) for a subscriber");
       const clockNow = { day: "2026-09-24", trading: 0, earlyClose: null, closedDays: ["2026-09-24"], tier1: nb.tier1,
-        dispatchWhy: "sent" };
+        dispatchWhy: "sent", summaryAt: new Date(et("2026-09-23T20:15:00-04:00")).toISOString() };
       const ic = await ingest("clock", "GET", LIVE_TOKEN);
       deep([ic.status, await ic.json()], [200, { key: "clock", clock: clockNow }],
         "the Actions loop reads the same verdict from the ingest route under its live credential, not a signed-in " +
           "route, so it stops on a holiday or at an early close the calendar alone cannot know; that key adds the " +
-          "Tier 1 telemetry and the last dispatch outcome");
+          "Tier 1 telemetry, the last dispatch outcome and the summary cron's last completed firing");
       const nightlyClock = await ingest("clock", "GET", INGEST_TOKEN);
       deep(await nightlyClock.json(), { key: "clock", clock: clockNow, labActiveAt: null },
         "as does the nightly's health gate under the nightly token, which alone also reads labActiveAt: null while " +

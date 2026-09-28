@@ -1652,7 +1652,28 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   the housekeeping firing's first run measures 7.6 ms mean (3.7 to 10.4) and the
   summary's 10.5 ms mean (8.7 to 12.8); warm, 2.9 ms and 1.4 ms. A summary
   firing the cap kills loses only that refresh, which its own stamp logic
-  retries at the next quarter hour. The summary's own due logic is unchanged.
+  retries at the next quarter hour. The summary's own due logic is unchanged,
+  but a firing with nothing to do no longer fetches the payload: it reads the
+  stamp's four inputs (the brief row's `updated_at`, the two live rows' stamps,
+  the prior summary and the clock) in one D1 batch and reaches for the 118 KB
+  payload only when the stamp says work is due. With the D1 client's JSON
+  round trip modelled in the same harness, that firing's first run fell from
+  7.5 ms mean (5.5 to 10.2) to 5.4 ms (3.7 to 8.2) and its warm run from
+  3.1 ms to 0.9 ms: the 118 KB row's deserialisation, 48 times a day, was the
+  firing's whole cost. Every completed summary firing then stamps
+  `flows_clock.summary_at` with its scheduled instant, after
+  `refreshFlowsSummary` resolves and never inside it, so a firing the cap
+  kills leaves the stamp where it was. The nightly health gate reads it
+  through the ingest clock key (`summaryAt`) and fails with `HEALTH: the
+  summary cron has never completed a firing (is 15,45 * * * * registered?
+  wrangler triggers deploy)` while it is null, or names the last completed
+  firing once it is more than 75 minutes old, two firings lost in a row on
+  the 30-minute cadence; `migrations/0014_flows_clock_summary.sql` adds the
+  column and the Worker's first-use path adds it to a table that lacks it.
+  The housekeeping firing carries no safety net for a missing summary cron on
+  purpose: one that stamped `summary_at` would hide the gate's signal, and one
+  that did not would re-couple the summary's parse to the housekeeping firing
+  for as long as the cron was missing, the coupling the split removed.
 - **The focus modules run on the Worker's own clock.** `3-58/5 13-21 * * MON-FRI`,
   the third Worker cron, fires at minutes ending in 3 and 8, between Tier 1's,
   and writes `live:focus` for Home's Metals and Leaders modules. It is due
@@ -1919,9 +1940,12 @@ Out-of-band steps before the first deploy of this layer:
    `./tests/node_modules/.bin/wrangler d1 execute iewt --remote --file=./migrations/0010_flows_live.sql`
    The Tier 1 telemetry columns come from `migrations/0011_flows_clock_tier1.sql`
    (three `ALTER TABLE ... ADD COLUMN`, so not re-runnable: a second run fails on
-   the duplicate column and changes nothing). The Worker's first-use path adds
-   any of the three the production table lacks and tolerates a duplicate column,
-   so the table upgrades itself on the first request after deploy.
+   the duplicate column and changes nothing), the verdict columns from
+   `migrations/0012_flows_clock_verdict.sql` and the summary firing's stamp,
+   `summary_at`, from `migrations/0014_flows_clock_summary.sql`. The Worker's
+   first-use path adds any of the seven the production table lacks and
+   tolerates a duplicate column, so the table upgrades itself on the first
+   request after deploy.
 2. Nothing to mint. The live workflow holds no shared secret: it runs with
    `permissions: id-token: write`, asks the runner for a GitHub OIDC token with
    the audience `https://anilkaya.org/api/flows/ingest#live`, and the Worker
@@ -1980,18 +2004,23 @@ Out-of-band steps before the first deploy of this layer:
    the half hour is housekeeping's and the quarter hour the summary's on any
    day; inside the 13–21 UTC weekday window it runs the focus tick at minutes
    ending in 3 or 8 and Tier 1 at every other minute, and outside it every
-   other minute is housekeeping's, so Tier 1 runs at a stale trigger's cadence
-   instead of not at all, and no job ever runs at another's minutes. That
-   fallback does not reach the focus tick. Under the previous exact strings the
-   handler matches each one, and under the older `*/15 * * * *` every firing
-   lands on the hour, the half hour or a quarter hour, so no firing is ever
-   routed to the focus tick. It does not run at all
-   until `3-58/5 13-21 * * MON-FRI` is registered. Home then shows the nightly
-   rows, or `live:strips` when a Tier 2 run lands. The nightly health gate
-   fails that evening with `HEALTH: live:focus has never been written (is
-   3-58/5 13-21 * * MON-FRI registered? wrangler triggers deploy)`, and
+   other minute is housekeeping's, so no job ever runs at another's minutes.
+   What a stale set actually runs follows from its minutes. The three strings
+   registered before the summary cron match exactly, so Tier 1, the focus tick
+   and housekeeping run and the summary never does: housekeeping no longer
+   carries it. Under the older `*/15 * * * *` every firing lands on the hour,
+   the half hour or a quarter hour, so it runs housekeeping and the summary and
+   never Tier 1 or the focus tick. Each of the four runs only once its own cron
+   is registered, and the nightly health gate says which is missing that
+   evening: `HEALTH: Tier 1 never ticked on <date>` for Tier 1, `HEALTH:
+   live:focus has never been written (is 3-58/5 13-21 * * MON-FRI registered?
+   wrangler triggers deploy)` for the focus tick, and `HEALTH: the summary cron
+   has never completed a firing (is 15,45 * * * * registered? wrangler triggers
+   deploy)` for the summary, read from `flows_clock.summary_at` through the
+   ingest clock key. Home shows the nightly rows, or `live:strips` when a
+   Tier 2 run lands, until the focus cron is registered, and
    `tests/flows-live-contract.mjs` proves that no firing of either stale set
-   reaches the focus tick.
+   reaches the focus tick and that the gate names each missing cron.
 
 `FLOWS_LIVE_MODE = "off"` in `[vars]` is the instant rollback: no Tier 1 read, no
 focus read and no dispatch; pages fall back to the nightly rows.

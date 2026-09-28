@@ -23,7 +23,7 @@ export const LIVE_SCHEMA_SQL = Object.freeze([
     "early_close INTEGER, tape_at INTEGER, tape_moved_at INTEGER, live_dispatched_at INTEGER, live_done_at INTEGER, " +
     "live_redispatched_at INTEGER, nightly_day TEXT, nightly_dispatched_at INTEGER, nightly_redispatched_at INTEGER, " +
     "summary_stamp TEXT, updated_at INTEGER, tier1_at INTEGER, tier1_ok_at INTEGER, tier1_why TEXT, " +
-    "closed_probe_at INTEGER, closed_days TEXT, dispatch_why TEXT)",
+    "closed_probe_at INTEGER, closed_days TEXT, dispatch_why TEXT, summary_at INTEGER)",
   "CREATE TRIGGER IF NOT EXISTS flows_archive_immutable BEFORE UPDATE ON flows_payload " +
     "WHEN OLD.id GLOB 'board:*:[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' " +
     "OR OLD.id GLOB 'scores:[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' " +
@@ -33,6 +33,7 @@ export const LIVE_SCHEMA_SQL = Object.freeze([
 export const CLOCK_ADDED_COLUMNS = Object.freeze([
   Object.freeze(["tier1_at", "INTEGER"]), Object.freeze(["tier1_ok_at", "INTEGER"]), Object.freeze(["tier1_why", "TEXT"]),
   Object.freeze(["closed_probe_at", "INTEGER"]), Object.freeze(["closed_days", "TEXT"]), Object.freeze(["dispatch_why", "TEXT"]),
+  Object.freeze(["summary_at", "INTEGER"]),
 ]);
 
 export async function upgradeClockColumns(db) {
@@ -93,7 +94,7 @@ const CLOCK_COLUMNS = Object.freeze({
   nightlyDay: "nightly_day", nightlyDispatchedAt: "nightly_dispatched_at",
   nightlyRedispatchedAt: "nightly_redispatched_at", summaryStamp: "summary_stamp",
   tier1At: "tier1_at", tier1OkAt: "tier1_ok_at", tier1Why: "tier1_why",
-  closedProbeAt: "closed_probe_at", closedDays: "closed_days", dispatchWhy: "dispatch_why",
+  closedProbeAt: "closed_probe_at", closedDays: "closed_days", dispatchWhy: "dispatch_why", summaryAt: "summary_at",
 });
 
 export function tier1Why(value) {
@@ -633,7 +634,7 @@ export function clockView(clock) {
 export function ingestClockView(clock) {
   const view = clockView(clock);
   return view ? { ...view, tier1: tier1View(clock),
-    dispatchWhy: typeof clock.dispatchWhy === "string" ? clock.dispatchWhy : null } : null;
+    dispatchWhy: typeof clock.dispatchWhy === "string" ? clock.dispatchWhy : null, summaryAt: isoOf(clock.summaryAt) } : null;
 }
 
 export async function serveIngestClock(env, { json, lab = false }) {
@@ -984,10 +985,8 @@ export async function liveBriefFeeds(db) {
   return feeds;
 }
 
-export async function liveBriefStamp(db) {
-  const res = await db.prepare(
-    "SELECT id, updated_at FROM flows_live WHERE id IN ('live:market', 'live:alerts')",
-  ).all().catch(() => null);
-  const rows = res && res.results ? res.results : [];
-  return rows.map((r) => `${r.id}@${r.updated_at}`).sort().join(",");
+export const LIVE_BRIEF_STAMP_SQL = "SELECT id, updated_at FROM flows_live WHERE id IN ('live:market', 'live:alerts')";
+
+export function liveBriefStampOf(rows) {
+  return (Array.isArray(rows) ? rows : []).map((r) => `${r.id}@${r.updated_at}`).sort().join(",");
 }

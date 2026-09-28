@@ -876,6 +876,7 @@ const cronMinutes = (cron) => {
   const migration = read("migrations/0010_flows_live.sql");
   const clockMigration = read("migrations/0011_flows_clock_tier1.sql");
   const verdictMigration = read("migrations/0012_flows_clock_verdict.sql");
+  const summaryMigration = read("migrations/0014_flows_clock_summary.sql");
   const schema = read("schema.sql");
   const clockBlock = /CREATE TABLE IF NOT EXISTS flows_clock \([\s\S]*?\n\);\n/;
   ok(schema.includes(migration.replace(clockBlock, "").trim().split("\n\n")[0].trim()) &&
@@ -887,13 +888,14 @@ const cronMinutes = (cron) => {
     "and a trigger makes the dated archive immutable at the storage layer");
   ok(!/ALTER TABLE/.test(migration), "every statement is IF NOT EXISTS, so applying it twice is safe");
   const alters = (sql) => [...sql.matchAll(/ALTER TABLE flows_clock ADD COLUMN (\w+) (\w+);/g)].map((m) => [m[1], m[2]]);
-  const added = [...alters(clockMigration), ...alters(verdictMigration)];
+  const added = [...alters(clockMigration), ...alters(verdictMigration), ...alters(summaryMigration)];
   deep(added, W.CLOCK_ADDED_COLUMNS.map((c) => [...c]),
-    "TIER 1 TELEMETRY AND THE VERDICT: 0011 adds tier1_at, tier1_ok_at and tier1_why, 0012 adds closed_probe_at, " +
-    "closed_days and dispatch_why, and the Worker's first-use path adds exactly those columns to a production table " +
-    "that predates them");
+    "TIER 1 TELEMETRY, THE VERDICT AND THE SUMMARY FIRING: 0011 adds tier1_at, tier1_ok_at and tier1_why, 0012 adds " +
+    "closed_probe_at, closed_days and dispatch_why, 0014 adds summary_at, and the Worker's first-use path adds exactly " +
+    "those columns to a production table that predates them");
   eq(clockMigration.trim().split("\n").length, alters(clockMigration).length, "and 0011 does nothing else");
   eq(verdictMigration.trim().split("\n").length, alters(verdictMigration).length, "nor does 0012");
+  eq(summaryMigration.trim().split("\n").length, alters(summaryMigration).length, "nor does 0014");
   const cols = (sql, table) => {
     const body = new RegExp(`CREATE TABLE IF NOT EXISTS ${table} \\(([\\s\\S]*?)\\)(?:;|")`).exec(sql);
     return body ? body[1].split(",").map((c) => c.trim().split(/\s+/)[0]).filter((c) => /^[a-z_0-9]+$/.test(c)) : [];
@@ -905,7 +907,7 @@ const cronMinutes = (cron) => {
   }
   const clockCols = [...cols(migration, "flows_clock"), ...added.map(([c]) => c)];
   deep(cols(workerDdl, "flows_clock"), clockCols,
-    "and flows_clock with 0010's columns plus 0011's and 0012's, in the order an upgraded production table has them");
+    "and flows_clock with 0010's columns plus 0011's, 0012's and 0014's, in the order an upgraded production table has them");
   deep(cols(schema, "flows_clock"), clockCols, "as schema.sql declares it");
   const toml = read("wrangler.toml");
   eq(W.cronJob(W.RTH_CRON, T("2026-09-23T15:16:00Z")), "rth", "the market-hours cron runs the Tier 1 tick");
@@ -952,9 +954,23 @@ const cronMinutes = (cron) => {
      /if \(job === "focus"\) \{\s*guard\("flows focus tick failed", \(async \(\) => \{\s*await ensureFlowsTables\(env\);\s*return FLOWS_LIVE\.focusTick\(env, at, \{ fetchVendor: \(p, params\) => uwFetch\(env, p, params\) \}\);/.test(worker),
     "the scheduled handler routes by the job a trigger's instant calls for, not by the trigger's exact string, and " +
     "the focus job reads the vendor through the same uwFetch as Tier 1");
-  ok(/if \(job === "summary"\) \{\s*guard\("flows summary refresh failed", refreshFlowsSummary\(env, at\)\);\s*return;\s*\}/.test(worker) &&
+  ok(/if \(job === "summary"\) \{\s*guard\("flows summary refresh failed", summaryFiring\(env, at\)\);\s*return;\s*\}/.test(worker) &&
      !/guard\("flows nightly dispatch failed"[\s\S]*?guard\("flows summary refresh failed"/.test(worker),
     "the summary job is the summary firing's alone and the housekeeping branch no longer carries it");
+  const summaryBody = worker.slice(worker.indexOf("async function refreshFlowsSummary("), worker.indexOf("async function summaryFiring("));
+  ok(/async function summaryFiring\(env, at\) \{\s*await refreshFlowsSummary\(env, at\);\s*if \(env\.DB\) await FLOWS_LIVE\.clockPatchStatement\(env\.DB, \{ summaryAt: at \}, at\)\.run\(\);\s*\}/.test(worker) &&
+     summaryBody.length > 1000 && !/summaryAt/.test(summaryBody),
+    "THE FIRING STAMPS summary_at ONLY WHEN THE REFRESH COMPLETED: the scheduled instant is written after refreshFlowsSummary " +
+    "resolves and nowhere inside it, so a firing the CPU cap kills or a refresh that throws leaves the stamp where it was, " +
+    "and the nightly health gate can tell a cron that never fires from one whose firings die");
+  ok(/const \[briefRes, liveRes, priorRes, clockRes\] = await env\.DB\.batch\(\[\s*env\.DB\.prepare\("SELECT updated_at FROM flows_payload WHERE id = 'brief'"\),\s*env\.DB\.prepare\(FLOWS_LIVE\.LIVE_BRIEF_STAMP_SQL\),/.test(summaryBody) &&
+     summaryBody.indexOf('const stored = await readFlowsPayload(env, "brief");') > summaryBody.indexOf("if (!retryableGuard(prior.guard, priorAge)) return;") &&
+     summaryBody.indexOf("if (!retryableGuard(prior.guard, priorAge)) return;") > 0,
+    "and a firing with nothing to do reads the stamp's inputs in one D1 batch, updated_at alone from the brief row, and " +
+    "reaches for the 118 KB payload only after the stamp says work is due");
+  eq(W.liveBriefStampOf([{ id: "live:market", updated_at: 7 }, { id: "live:alerts", updated_at: 5 }]), "live:alerts@5,live:market@7",
+    "the live half of the summary stamp is a pure reduction of the two rows, sorted, so that batch can carry its query");
+  eq(W.liveBriefStampOf(null), "", "and no rows is the empty stamp");
   ok(toml.includes(`"${W.RTH_CRON}"`) && toml.includes(`"${W.FOCUS_CRON}"`) && toml.includes(`"${W.HOUSEKEEPING_CRON}"`) &&
      toml.includes(`"${W.SUMMARY_CRON}"`),
     "the four crons the Worker branches on are the four wrangler.toml registers");
@@ -1549,12 +1565,13 @@ const cronMinutes = (cron) => {
       };
     },
   });
-  const later = ["closed_probe_at", "closed_days", "dispatch_why"];
+  const later = ["closed_probe_at", "closed_days", "dispatch_why", "summary_at"];
   deep(await W.upgradeClockColumns(fakeDb(["id", "day", "tier1_at", "closed_days"])),
-    ["tier1_ok_at", "tier1_why", "closed_probe_at", "dispatch_why"],
+    ["tier1_ok_at", "tier1_why", "closed_probe_at", "dispatch_why", "summary_at"],
     "THE PRODUCTION TABLE UPGRADES ITSELF: the first-use path adds only the columns flows_clock lacks");
   deep(upgrades, ["ALTER TABLE flows_clock ADD COLUMN tier1_ok_at INTEGER", "ALTER TABLE flows_clock ADD COLUMN tier1_why TEXT",
-    "ALTER TABLE flows_clock ADD COLUMN closed_probe_at INTEGER", "ALTER TABLE flows_clock ADD COLUMN dispatch_why TEXT"],
+    "ALTER TABLE flows_clock ADD COLUMN closed_probe_at INTEGER", "ALTER TABLE flows_clock ADD COLUMN dispatch_why TEXT",
+    "ALTER TABLE flows_clock ADD COLUMN summary_at INTEGER"],
   "with one ALTER TABLE ADD COLUMN each");
   deep(await W.upgradeClockColumns(fakeDb(["id"], ["tier1_at", "duplicate column name: tier1_at"])),
     ["tier1_ok_at", "tier1_why", ...later], "a racing isolate that added a column first is tolerated (duplicate column)");
@@ -1974,15 +1991,15 @@ const cronMinutes = (cron) => {
       earlyClose: 7 } })], [null, { day: S, trading: null, earlyClose: null }],
     "a malformed day is no clock, and a flag that is not exactly 0 or 1 is unknown, never a verdict");
     const rowClock = { day: S, trading: null, earlyClose: "1", tier1At: 5, closedDays: "[\"2026-09-07\"]",
-      dispatchWhy: "refused:401", liveDoneAt: 9 };
+      dispatchWhy: "refused:401", liveDoneAt: 9, summaryAt: 7 };
     deep(W.clockView(rowClock), { day: S, trading: null, earlyClose: 1, closedDays: ["2026-09-07"] },
       "the Worker's public view of its clock is the day, its two verdicts (NULL kept as undecided) and the closed days " +
         "the tape proved — what /api/flows/now serves and the calendar reads, with no operations string in it");
     deep(W.ingestClockView(rowClock),
       { day: S, trading: null, earlyClose: 1, closedDays: ["2026-09-07"], tier1: { at: new Date(5).toISOString(), okAt: null,
-        why: null }, dispatchWhy: "refused:401" },
-      "and the ingest clock key, behind the pipeline's credential, adds the Tier 1 telemetry and the last dispatch " +
-        "outcome, which the nightly health gate reads");
+        why: null }, dispatchWhy: "refused:401", summaryAt: new Date(7).toISOString() },
+      "and the ingest clock key, behind the pipeline's credential, adds the Tier 1 telemetry, the last dispatch " +
+        "outcome and the summary cron's last completed firing, which the nightly health gate reads");
     const liveSrc = read("shared/flows-live-worker.js");
     ok(/const body = \{ key: "clock", clock: ingestClockView\(clock\) \};/.test(liveSrc) && /\n    clock: clockView\(clock\),\n/.test(liveSrc),
       "serveIngestClock serves the operations view and serveNow the public one");
@@ -2186,7 +2203,7 @@ const cronMinutes = (cron) => {
     sessionDate: S, now: at(20, 5),
     clockRead: { payload: { key: "clock", clock: { day: S, trading: 1, earlyClose: null, closedDays: [],
       tier1: { at: new Date(at(17, 56)).toISOString(), okAt: new Date(at(16, 6)).toISOString(), why: "written" },
-      dispatchWhy: null } }, status: 200 },
+      dispatchWhy: null, summaryAt: new Date(at(19, 45)).toISOString() } }, status: 200 },
     marketRead: { payload: { fresh: { readAt: new Date(at(16, 6)).toISOString() } }, status: 200 },
     focusRead: { payload: { key: "live:focus", fresh: { readAt: new Date(at(16, 8)).toISOString() } }, status: 200 },
     heartbeatRead: beat(S, { calls: 39, failedCalls: 0, finishedAt: new Date(at(16, 21)).toISOString() }),
@@ -2226,6 +2243,35 @@ const cronMinutes = (cron) => {
   deep(fails({ focusRead: { payload: { fresh: { readAt: new Date(at(15, 58)).toISOString() } }, status: 200 } }), [],
     "while the last read before the close (15:58) passes: the focus cron's last minutes are 15:58, 16:03 and 16:08");
   const clockWith = (over) => ({ payload: { key: "clock", clock: { ...good.clockRead.payload.clock, ...over } }, status: 200 });
+  eq(HEALTH.summaryCron, W.SUMMARY_CRON, "the gate names the summary cron the Worker registers, character for character");
+  deep(fails({ clockRead: clockWith({ summaryAt: null }) }),
+    ["HEALTH: the summary cron has never completed a firing (is 15,45 * * * * registered? wrangler triggers deploy)"],
+  "A SUMMARY CRON THAT NEVER FIRED fails the gate and names the cron to register: the board summary moved off the " +
+    "housekeeping firing onto 15,45 * * * *, so a deploy that leaves the previous trigger set runs housekeeping every " +
+    "half hour and never refreshes the summary, and until this line nothing said so");
+  deep(fails({ clockRead: clockWith({ summaryAt: new Date(at(18, 49)).toISOString() }) }),
+    ["HEALTH: the summary cron last completed a firing at 18:49 ET, more than 75 minutes before this check (is 15,45 * * * * " +
+      "registered? if it is, its firings are dying: the Worker's logs say)"],
+  "and one whose last completed firing is 76 minutes old fails it too: on a 30-minute cadence that is two firings " +
+    "lost in a row, so the summary is no longer refreshing");
+  deep(fails({ clockRead: clockWith({ summaryAt: new Date(at(18, 50)).toISOString() }) }), [],
+    "while 75 minutes passes: one firing killed at the cap is retried by the next and is not a failure");
+  deep(fails({ clockRead: clockWith({ summaryAt: new Date(easternInstant("2026-09-23", 19 * 60 + 45)).toISOString() }) }),
+    ["HEALTH: the summary cron last completed a firing at 2026-09-23 19:45 ET, more than 75 minutes before this check (is " +
+      "15,45 * * * * registered? if it is, its firings are dying: the Worker's logs say)"],
+  "a stamp from an earlier day is dated so");
+  {
+    const { summaryAt, ...older } = good.clockRead.payload.clock;
+    const H = healthChecks({ ...good, clockRead: { payload: { key: "clock", clock: older }, status: 200 } });
+    ok(summaryAt && H.failures.length === 0 &&
+       H.notes.includes("the Worker's clock carries no summary telemetry (a Worker older than this check)"),
+      "and a clock with no summaryAt field at all (a Worker older than this check) is a note, not a failure");
+  }
+  const offNoSummary = healthChecks({ ...good, clockRead: clockWith({ summaryAt: null, tier1: { at: null, okAt: null, why: "off" } }),
+    heartbeatRead: { payload: null, absent: true }, focusRead: { payload: null, absent: true } });
+  ok(offNoSummary.why === "live-off" && offNoSummary.failures.length === 1 && /summary cron has never/.test(offNoSummary.failures[0]),
+    "and the summary check runs before the live-off return: FLOWS_LIVE_MODE off stops Tier 1, the focus tick and the " +
+    "dispatch, never the summary cron, so a missing summary cron is reported under the rollback too");
   deep(fails({ clockRead: clockWith({ tier1: { ...good.clockRead.payload.clock.tier1, why: "error:no-key" } }) }),
     ["HEALTH: Tier 1's last tick failed with error:no-key: the Worker has no UW_API_KEY secret (wrangler secret put UW_API_KEY)"],
   "tier1_why error:no-key names the missing Worker secret");
@@ -2451,7 +2497,8 @@ const cronMinutes = (cron) => {
      healthChecks({ ...good, now: easternInstant("2026-09-25", 20 * 60), edge403: 40 }).failures.length === 1,
   "the live checks apply only on the evening of the session the run ranked; the edge count applies to every run");
   const early = healthChecks({ ...good, now: at(14, 0),
-    clockRead: clockWith({ earlyClose: 1, tier1: { at: new Date(at(13, 56)).toISOString(), okAt: null, why: "written" } }),
+    clockRead: clockWith({ earlyClose: 1, tier1: { at: new Date(at(13, 56)).toISOString(), okAt: null, why: "written" },
+      summaryAt: new Date(at(13, 45)).toISOString() }),
     marketRead: { payload: { fresh: { readAt: new Date(at(13, 6)).toISOString() } }, status: 200 },
     focusRead: { payload: { fresh: { readAt: new Date(at(13, 8)).toISOString() } }, status: 200 },
     heartbeatRead: beat(S, { calls: 39, failedCalls: 0, finishedAt: new Date(at(13, 21)).toISOString() }) });
@@ -2761,7 +2808,8 @@ const cronMinutes = (cron) => {
   const at = (h, m) => easternInstant(S, h * 60 + m);
   const reads = {
     clock: { payload: { key: "clock", clock: { ...view, tier1: { at: new Date(at(17, 56)).toISOString(),
-      okAt: new Date(at(16, 6)).toISOString(), why: "written" } }, labActiveAt: new Date(at(12, 0)).toISOString() }, status: 200 },
+      okAt: new Date(at(16, 6)).toISOString(), why: "written" }, summaryAt: new Date(at(19, 45)).toISOString() },
+      labActiveAt: new Date(at(12, 0)).toISOString() }, status: 200 },
     "live:market": { payload: { fresh: { readAt: new Date(at(16, 6)).toISOString() } }, status: 200 },
     "live:focus": { payload: { fresh: { readAt: new Date(at(16, 8)).toISOString() } }, status: 200 },
     "live:heartbeat": { payload: { session: S, run: { calls: 39, failedCalls: 0, finishedAt: new Date(at(16, 21)).toISOString() } },

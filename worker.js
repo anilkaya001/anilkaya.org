@@ -1153,24 +1153,29 @@ async function refreshFlowsSummary(env, at = Date.now()) {
   if (!env.DB) return;
   await ensureFlowsTables(env);
 
-  const stored = await readFlowsPayload(env, "brief");
+  const [briefRes, liveRes, priorRes, clockRes] = await env.DB.batch([
+    env.DB.prepare("SELECT updated_at FROM flows_payload WHERE id = 'brief'"),
+    env.DB.prepare(FLOWS_LIVE.LIVE_BRIEF_STAMP_SQL),
+    env.DB.prepare("SELECT fingerprint, llm, guard, generated_at FROM flows_ai_summary WHERE scope = ?").bind("board"),
+    env.DB.prepare("SELECT * FROM flows_clock WHERE id = 1"),
+  ]).catch(() => []);
+  const rowOf = (res) => (res && Array.isArray(res.results) && res.results.length ? res.results[0] : null);
+  const brief = rowOf(briefRes);
 
-  if (stored === null) return;
+  if (!brief) return;
 
   const signature = aiCallSignature(env);
-  const stamp = String(stored.updatedAt || 0) + "|" + (await FLOWS_LIVE.liveBriefStamp(env.DB)) + "|" + signature;
-  const [prior, clock] = await Promise.all([
-    env.DB.prepare(
-      "SELECT fingerprint, llm, guard, generated_at FROM flows_ai_summary WHERE scope = ?",
-    ).bind("board").first().catch(() => null),
-    FLOWS_LIVE.readClock(env.DB),
-  ]);
+  const stamp = String(brief.updated_at || 0) + "|" + FLOWS_LIVE.liveBriefStampOf(liveRes && liveRes.results) + "|" + signature;
+  const prior = rowOf(priorRes);
+  const clock = FLOWS_LIVE.normalizeClock(rowOf(clockRes));
   if (prior && clock && clock.summaryStamp === stamp) {
     const priorAge = typeof prior.generated_at === "string" ? at - Date.parse(prior.generated_at) : Infinity;
     if (!retryableGuard(prior.guard, priorAge)) return;
   }
   const markStamp = () => FLOWS_LIVE.clockPatchStatement(env.DB, { summaryStamp: stamp }, at).run().catch(() => {});
 
+  const stored = await readFlowsPayload(env, "brief");
+  if (stored === null) return;
   let index;
   try { index = JSON.parse(stored.payload); } catch { return; }
   index = (await briefWithLive(env, index)).index;
@@ -1228,6 +1233,11 @@ async function refreshFlowsSummary(env, at = Date.now()) {
     return;
   }
   await write(said.text, true, said.model, null).catch(() => {});
+}
+
+async function summaryFiring(env, at) {
+  await refreshFlowsSummary(env, at);
+  if (env.DB) await FLOWS_LIVE.clockPatchStatement(env.DB, { summaryAt: at }, at).run();
 }
 
 async function readFlowsSummary(env, scope) {
@@ -3491,7 +3501,7 @@ export default {
       return;
     }
     if (job === "summary") {
-      guard("flows summary refresh failed", refreshFlowsSummary(env, at));
+      guard("flows summary refresh failed", summaryFiring(env, at));
       return;
     }
 
