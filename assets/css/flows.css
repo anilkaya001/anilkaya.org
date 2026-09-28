@@ -8,7 +8,7 @@
   --font-ui: var(--font-figure);
 
   --ground-base: #07090e;
-  --ground-sky: url("/assets/img/atmosphere.svg?v=230") center / cover no-repeat;
+  --ground-sky: url("/assets/img/atmosphere.svg?v=231") center / cover no-repeat;
   --ground:
     linear-gradient(180deg, rgba(6, 8, 12, 0.50) 0%, rgba(6, 8, 12, 0.70) 26%, rgba(7, 8, 10, 0.88) 42%, rgba(8, 8, 9, 0.94) 60%, rgba(7, 7, 8, 0.97) 100%),
     radial-gradient(70% 50% at 12% 0%, rgba(64, 132, 230, 0.10), transparent 70%),
@@ -2330,6 +2330,7 @@ a.ui-row:hover { background: var(--fill-4); }
 .ui-chart { position: relative; width: 100%; min-width: 0; touch-action: pan-y; }
 .ui-chart:focus-visible { outline-offset: 4px; border-radius: var(--r-sm); }
 .ui-chart > svg { display: block; width: 100%; height: auto; overflow: visible; }
+.ui-chart > .ui-chart-w { position: absolute; inset: 0 0 auto; height: 0; visibility: hidden; pointer-events: none; }
 .ui-chart text, .ui-svg text { fill: var(--label-2); font: var(--t-caption2); letter-spacing: var(--t-caption2-track); }
 .ui-chart .tx-1, .ui-svg .tx-1 { fill: var(--label-1); }
 .ui-chart .tx-3, .ui-svg .tx-3 { fill: var(--label-3); }

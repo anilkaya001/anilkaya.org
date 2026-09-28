@@ -12,6 +12,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 const TOKEN = "overview-token-aaaaaaaaaaaaaaaa";
 const server = await startWorker({ extraVars: [`FLOWS_INGEST_TOKEN:${TOKEN}`] });
 const url = (p) => server.baseURL + p;
+const painted = (p) => p.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))));
 
 const post = (key, body) => fetch(url("/api/flows/ingest?key=" + encodeURIComponent(key)), {
   method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + TOKEN },
@@ -2751,6 +2752,7 @@ try {
       status: 200, contentType: "application/json", body: JSON.stringify(REGIME) }));
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccVol .ui-metric", { timeout: 15000 });
+    await painted(page);
     const vol = await page.evaluate(() => ({
       m: Object.fromEntries(Array.from(document.querySelectorAll("#ccVol .ui-metric"), (m) => [
         m.querySelector(".ui-metric-l").textContent.trim(),
@@ -2827,7 +2829,7 @@ try {
     await shut(page);
     await page.unroute("**/api/flows/lk?k=market");
 
-    const heroNow = () => page.evaluate(() => {
+    const heroNow = async () => { await painted(page); return page.evaluate(() => {
       const pill = document.querySelector("#hmTideState .hm-pill");
       return {
         value: document.getElementById("hmTideV").dataset.value || document.getElementById("hmTideV").textContent.trim(),
@@ -2837,7 +2839,7 @@ try {
         note: (document.querySelector("#hmTide .ui-silent-t") || {}).textContent || null,
         zero: Array.from(document.querySelectorAll("#hmTideLegs .ui-metric-v"), (v) => v.textContent.trim())[2],
       };
-    });
+    }); };
     const liveTide = (n, fresh, extra = {}) => (route) => route.fulfill({
       status: 200, headers: { "Content-Type": "application/json", "X-Fresh-State": fresh },
       body: JSON.stringify({ status: "ok", session: SESSION, fresh: { readAt: liveAt },

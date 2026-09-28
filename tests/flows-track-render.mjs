@@ -41,6 +41,7 @@ let trackBody = TRACK;
 async function open(query = "", viewport = { width: 1440, height: 900 }) {
   const page = await browser.newPage({ viewport });
   page.on("pageerror", (e) => errors.push(e.message));
+  await page.addInitScript(() => { window.__winErrors = []; addEventListener("error", (e) => window.__winErrors.push(String(e.message))); });
   await page.route("**/*", async (route) => {
     const u = new URL(route.request().url());
     const json = (b) => route.fulfill({ contentType: "application/json", body: JSON.stringify(b) });
@@ -197,7 +198,8 @@ const popOf = (page, sel) => page.evaluate((sel) => {
 
 {
   const page = await open();
-  const got = await page.evaluate(() => {
+  const got = await page.evaluate(async () => {
+    const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
     const orig = EventTarget.prototype.addEventListener;
     const recs = [];
     EventTarget.prototype.addEventListener = function (type, fn, opts) {
@@ -223,8 +225,11 @@ const popOf = (page, sel) => page.evaluate((sel) => {
     const lineGone = live("line", SCRUB);
     const swap = mk("swap");
     C.line(swap, lineOpts);
+    await frame();
+    const swapBefore = live("swap", ["pointerdown"])[0];
     C.heatmap(swap, grid);
-    const swapped = [live("swap", ["pointerdown"])[0], live("swap", ["pointermove"])[0]];
+    await frame();
+    const swapped = [swapBefore, live("swap", ["pointerdown"])[0], live("swap", ["pointermove"])[0]];
     EventTarget.prototype.addEventListener = orig;
     return { heatAfter, heatGone, lineAfter, lineGone, swapped };
   });
@@ -287,9 +292,149 @@ const popOf = (page, sel) => page.evaluate((sel) => {
      "transition rejects (\"Transition was aborted because of timeout in DOM update\"). Left unhandled, the CI runner's " +
      "Chromium reports it as an uncaught page error, and that failed the market suite on a busy runner");
   eq(errors.length - before, 0, "so no page error follows from it: " + errors.slice(before).join(" | "));
-  eq(got.swapped.join(","), "0,1",
-     "a host that changes chart kind drops the old kind's listeners: a heatmap mounted where a line was keeps no " +
+  eq(got.swapped.join(","), "1,0,1",
+     "a host that changes chart kind drops the old kind's listeners: a heatmap mounted where a line was drawn keeps no " +
      "scrub pointerdown, and one pointermove of its own");
+  await page.close();
+}
+
+{
+  const page = await open();
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Performance.enable", { timeDomain: "timeTicks" });
+  const count = async (name) => (await cdp.send("Performance.getMetrics")).metrics.find((m) => m.name === name).value;
+  const layout0 = await count("LayoutCount");
+  const mounted = await page.evaluate(() => new Promise((done) => {
+    const C = window.FlowsUI.chart;
+    const hosts = [];
+    for (let i = 0; i < 12; i++) {
+      const box = document.createElement("div");
+      box.style.width = 400 + i * 20 + "px";
+      document.body.append(box);
+      const d = document.createElement("div");
+      box.append(d);
+      hosts.push(d);
+      C.line(d, { x: ["2026-09-01", "2026-09-02", "2026-09-03"], series: [{ values: [1, 2 + i, 3] }], label: "L" + i });
+    }
+    window.__hosts = hosts;
+    const drawn = () => hosts.filter((d) => d.querySelector("svg")).length;
+    const sync = drawn();
+    requestAnimationFrame(() => {
+      const atRaf = drawn();
+      setTimeout(() => done({
+        sync, atRaf, afterFrame: drawn(),
+        widths: hosts.map((d) => [Math.round(d.clientWidth), Number(d.querySelector("svg").getAttribute("width"))]),
+        probes: hosts.map((d) => { const p = d.querySelector(".ui-chart-w"); const r = p ? p.getBoundingClientRect() : null; return r ? [Math.round(r.width), r.height] : null; }),
+        loops: window.__winErrors.filter((m) => /ResizeObserver/.test(m)).length,
+      }), 0);
+    });
+  }));
+  const layout1 = await count("LayoutCount");
+  eq(mounted.sync, 0,
+     "MOUNT: twelve charts mounted in one task draw nothing synchronously, so the task that builds a page reads no " +
+     "layout for them — each mount used to read host.clientWidth on a tree its own previous writes had dirtied, " +
+     "which is one forced synchronous layout per chart");
+  ok(layout1 - layout0 < 6,
+     `and the twelve mounts plus the frame that draws them cost the page fewer than six layouts (${layout1 - layout0}); ` +
+     "the old mount cost one per chart, twelve here, before that frame");
+  eq(mounted.atRaf + "/" + mounted.afterFrame, "0/12",
+     "the first draw runs inside the frame that follows the mount, after layout and before paint: absent at that " +
+     "frame's animation callbacks, present in the task after it, so the first paint carries the charts and a later " +
+     "frame does not shift the page down by their height");
+  ok(mounted.widths.every(([host, svg]) => host === svg),
+     `each chart is drawn at its host's own width without reading it (${mounted.widths.map((w) => w.join("=")).join(" ")})`);
+  ok(mounted.probes.every((p) => p && p[0] > 0 && p[1] === 0),
+     "the width the observer reports comes from a zero-height probe inside the host, so drawing the chart changes " +
+     `no observed box (${mounted.probes.map((p) => p && p.join("x")).join(" ")})`);
+  eq(mounted.loops, 0,
+     "and the window saw no \"ResizeObserver loop completed with undelivered notifications\" error, which drawing into " +
+     "the observed host itself raises on every page load, in every DevTools console, unseen by Playwright's pageerror");
+  const resized = await page.evaluate(() => new Promise((done) => {
+    const d = window.__hosts[0];
+    const before = Number(d.querySelector("svg").getAttribute("width"));
+    d.parentNode.style.width = "300px";
+    requestAnimationFrame(() => {
+      const atRaf = Number(d.querySelector("svg").getAttribute("width"));
+      setTimeout(() => done({ before, atRaf, after: Number(d.querySelector("svg").getAttribute("width")), loops: window.__winErrors.filter((m) => /ResizeObserver/.test(m)).length }), 0);
+    });
+  }));
+  eq([resized.before, resized.atRaf, resized.after].join(" "), "400 400 300",
+     "a resize redraws in the same frame the observer reports it, not one animation frame later");
+  eq(resized.loops, 0, "and a resize redraw raises no observer loop error either");
+  const edge = await page.evaluate(() => new Promise((done) => {
+    const C = window.FlowsUI.chart;
+    const opts = { x: ["2026-09-01", "2026-09-02", "2026-09-03"], series: [{ values: [1, 2, 3] }], label: "E" };
+    const box = document.createElement("div");
+    box.style.width = "500px";
+    document.body.append(box);
+    const mk = () => { const d = document.createElement("div"); box.append(d); return d; };
+    const gone = mk();
+    C.line(gone, opts).destroy();
+    const detached = document.createElement("div");
+    const late = C.line(detached, opts);
+    const twice = mk();
+    C.line(twice, opts);
+    const second = C.heatmap(twice, { rows: ["A"], cols: ["x", "y"], grid: [[1, -1]], label: "H" });
+    const hidden = mk();
+    const hid = C.line(hidden, opts);
+    const explicit = document.createElement("div");
+    const strip = window.FlowsUI.scoreStrip(explicit, { values: [1, -1, 2], width: 300, height: 20 });
+    requestAnimationFrame(() => setTimeout(() => {
+      const r1 = { gone: gone.childElementCount, goneRec: gone._fxChart, twice: [twice.querySelectorAll("svg").length, twice.querySelectorAll(".ui-chart-w").length, twice._fxChart === second.el._fxChart && !!twice.querySelector(".cell-hl")],
+        hiddenDrawn: !!hidden.querySelector("svg"), strip: strip && strip.getAttribute("width"), stripSync: explicit.firstChild === strip };
+      hidden.style.display = "none";
+      requestAnimationFrame(() => setTimeout(() => {
+        hid.set((el, w) => { el.append(Object.assign(document.createElement("b"), { textContent: "W" + w })); });
+        const setHidden = !!hidden.querySelector("b");
+        hidden.style.display = "";
+        requestAnimationFrame(() => setTimeout(() => {
+          const shown = hidden.querySelector("b");
+          box.append(detached);
+          late.redraw(false);
+          done({ ...r1, setHidden, shown: shown ? shown.textContent : null, late: !!detached.querySelector("svg"), loops: window.__winErrors.filter((m) => /ResizeObserver/.test(m)).length });
+        }, 0));
+      }, 0));
+    }, 0));
+  }));
+  eq(edge.gone + "/" + String(edge.goneRec), "0/null", "a chart destroyed in the task that mounted it leaves its host empty and unclaimed when the observer fires");
+  eq(edge.twice.join(","), "1,1,true", "a host mounted twice in one task draws the second chart once, with one probe, and the second record owns the host");
+  ok(edge.hiddenDrawn, "a visible host draws");
+  ok(!edge.setHidden && edge.shown === "W500",
+     "a set() on a host hidden at the time draws nothing then, and draws the new content at the host's width when it is shown again " +
+     `(${edge.shown}); the old code kept the stale drawing because the shown width matched the one it had drawn at`);
+  ok(edge.late, "a host detached when the observer first fires is not observed, and its redraw() after attachment still draws it");
+  eq(edge.strip + "/" + edge.stripSync, "300/true", "a score strip with an explicit width draws synchronously at that width without a host to measure");
+  eq(edge.loops, 0, "none of which raised an observer loop error");
+  eq(errors.length, 0, "and none threw: " + errors.join(" | "));
+  await page.close();
+}
+
+{
+  const page = await open();
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Performance.enable", { timeDomain: "timeTicks" });
+  const count = async (name) => (await cdp.send("Performance.getMetrics")).metrics.find((m) => m.name === name).value;
+  const style0 = await count("RecalcStyleCount");
+  const vars = await page.evaluate(() => {
+    const names = new Set();
+    const walk = (rules) => { for (const r of rules) { if (r.cssRules) walk(r.cssRules); if (r.selectorText === ":root") for (const p of r.style) if (p.startsWith("--")) names.add(p); } };
+    for (const sh of document.styleSheets) { try { walk(sh.cssRules); } catch {} }
+    const list = [...names].filter((n) => /^--(s-|up|down|label|fill|sep|accent|lvl|g-|sect)/.test(n)).slice(0, 40);
+    const out = [];
+    for (const n of list) {
+      document.body.append(document.createElement("i"));
+      out.push([n, window.FlowsUI.cssVar(n)]);
+    }
+    return { total: names.size, read: out.length, empty: out.filter(([, v]) => !v).length, fallback: out.filter(([, v]) => v === "#888").length, unknown: window.FlowsUI.cssVar("--no-such-token-here") };
+  });
+  const style1 = await count("RecalcStyleCount");
+  ok(vars.total >= 150 && vars.read >= 30, `the page declares ${vars.total} custom properties on :root and the probe read ${vars.read} of them`);
+  eq(vars.empty + vars.fallback, 0, "every one resolved to its declared value");
+  ok(style1 - style0 <= 3,
+     `TOKENS: reading ${vars.read} tokens for the first time, each on a tree dirtied since the last, costs at most three style ` +
+     `recalculations (${style1 - style0}): the first cssVar call reads every :root token from one computed style, so the ` +
+     "old cost of one recalc per token per page is gone");
+  eq(vars.unknown, "#888", "a token no stylesheet declares still falls back to #888");
   await page.close();
 }
 
@@ -301,4 +446,6 @@ console.log(`✓ flows-track-render: ${checks} assertions — a score track that
   `page that opens on today's strongest reading and on any linked name, calls scored against ` +
   `the closes that followed them at 1, 5 and 10 sessions with open calls left open, a name ` +
   `without closes drawn unavailable rather than empty, and the gap-is-not-zero sentence one tap ` +
-  `from the title; and chart hosts that hold one set of listeners across repaints, remounts and destroy`);
+  `from the title; chart hosts that hold one set of listeners across repaints, remounts and destroy, ` +
+  `that draw at the width the observer reports, after layout and before paint, with no forced layout ` +
+  `at mount and no observer loop error, and root tokens read from one computed style`);
