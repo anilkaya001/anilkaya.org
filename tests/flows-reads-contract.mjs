@@ -18,6 +18,7 @@ function fakeD1() {
   db.exec(SCHEMA);
   const trips = [];
   let failing = null;
+  let thrown = null;
   const reads = /^\s*(SELECT|PRAGMA|WITH)/i;
   const exec = (sql, args) => {
     if (failing && failing.test(sql)) throw new Error("fake D1 refused " + sql.slice(0, 40));
@@ -26,19 +27,26 @@ function fakeD1() {
     return { results: [], meta: { changes: st.run(...args).changes } };
   };
   const fake = { latencyMs: 1 };
-  const trip = (kind, sqls, fn) => new Promise((resolve, reject) => setTimeout(() => {
-    trips.push({ kind, sqls });
+  const trip = (kind, sqls, args, fn) => new Promise((resolve, reject) => setTimeout(() => {
+    trips.push({ kind, sqls, args });
     try { resolve(fn()); } catch (error) { reject(error); }
   }, fake.latencyMs));
   const D1 = {
     prepare(sql) {
       const st = { sql, args: [], bind(...a) { st.args = a; return st; },
-        first: () => trip("first", [sql], () => exec(sql, st.args).results[0] ?? null),
-        all: () => trip("all", [sql], () => exec(sql, st.args)),
-        run: () => trip("run", [sql], () => exec(sql, st.args)) };
+        first: () => trip("first", [sql], [st.args], () => exec(sql, st.args).results[0] ?? null),
+        all: () => trip("all", [sql], [st.args], () => exec(sql, st.args)),
+        run: () => trip("run", [sql], [st.args], () => exec(sql, st.args)) };
       return st;
     },
-    batch: (list) => trip("batch", list.map((s) => s.sql), () => list.map((s) => exec(s.sql, s.args))),
+    batch: (list) => {
+      const sqls = list.map((s) => s.sql), args = list.map((s) => s.args);
+      if (thrown && sqls.some((sql) => thrown.test(sql))) {
+        trips.push({ kind: "batch", sqls, args });
+        throw new Error("fake D1 threw before suspending on " + sqls[0].slice(0, 40));
+      }
+      return trip("batch", sqls, args, () => list.map((s) => exec(s.sql, s.args)));
+    },
   };
   const put = (id, value, at = 1790380000000) => db.prepare(
     "INSERT OR REPLACE INTO flows_payload (id, payload, updated_at) VALUES (?, ?, ?)",
@@ -46,7 +54,7 @@ function fakeD1() {
   const live = (id, value, readAt, session) => db.prepare(
     "INSERT OR REPLACE INTO flows_live (id, payload, read_at, session, cadence_s, source, writer, updated_at) VALUES (?, ?, ?, ?, 300, 'worker', 'worker@rth', ?)",
   ).run(id, JSON.stringify(value), readAt, session, readAt);
-  return { D1, db, trips, put, live, fail: (re) => { failing = re; }, latency: (ms) => { fake.latencyMs = ms; },
+  return { D1, db, trips, put, live, fail: (re) => { failing = re; }, throwSync: (re) => { thrown = re; }, latency: (ms) => { fake.latencyMs = ms; },
     since: (n) => trips.slice(n), count: (re, from = 0) => trips.slice(from).filter((t) => t.sqls.some((s) => re.test(s))).length };
 }
 
@@ -128,13 +136,37 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   const retry = f.trips.length;
   await get("/api/flows/meta");
   eq(f.count(SCHEMA_RE, retry), 1, "the failure clears the flight, so the next request retries the batch");
+  const still = f.trips.length;
+  await get("/api/flows/meta");
+  eq(f.count(SCHEMA_RE, still), 1, "and retries again while it keeps failing");
   f.fail(null);
   const healed = f.trips.length;
   await get("/api/flows/meta");
-  eq(f.count(SCHEMA_RE, healed), 1, "and retries again while it keeps failing");
+  eq(f.count(SCHEMA_RE, healed), 1, "until one batch succeeds");
   const ready = f.trips.length;
   await Promise.all([get("/api/flows/meta"), get("/api/flows/market")]);
-  eq(f.count(SCHEMA_RE, ready), 0, "until one batch succeeds, after which the schema is ready for good");
+  eq(f.count(SCHEMA_RE, ready), 0, "after which the schema is ready for good");
+}
+
+{
+  const f = fakeD1();
+  seed(f);
+  f.throwSync(SCHEMA_RE);
+  const get = await client(f.D1);
+  const first = await get("/api/flows/meta");
+  ok(first.res.status === 200 && f.count(SCHEMA_RE) === 1, "A BATCH THAT THROWS BEFORE SUSPENDING is attempted once and its caller still answers");
+  const retry = f.trips.length;
+  await get("/api/flows/meta");
+  eq(f.count(SCHEMA_RE, retry), 1,
+     "THE FLIGHT CLEARS ON SETTLEMENT, NOT INSIDE ITS BODY: a throw with nothing yet awaited once nulled the field before the " +
+     "flight was assigned, leaving a settled promise that every later call awaited and no request ever retried; the second request retries it");
+  f.throwSync(null);
+  const healed = f.trips.length;
+  await get("/api/flows/meta");
+  eq(f.count(SCHEMA_RE, healed), 1, "until the batch runs through");
+  const ready = f.trips.length;
+  await get("/api/flows/market");
+  eq(f.count(SCHEMA_RE, ready), 0, "after which the schema is ready");
 }
 
 {
@@ -303,8 +335,10 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   ok(split.body.engine && split.body.engine.engine === "q1", "A SPLIT ENGINE POINTER is resolved onto the card");
   eq(split.trips.length, 2, "from the card row already in hand plus the overflow row: the card is no longer read twice");
   const splitReading = await route("/api/flows/summary?t=SPLIT");
-  ok(splitReading.body.status === "pending" && splitReading.trips.length === 3 && /card-x:SPLIT/.test(JSON.stringify(splitReading.trips[1])) === false,
-     "and the reading of a split card is its batch, the overflow row and the claim");
+  ok(splitReading.body.status === "pending" && splitReading.trips.length === 3 && splitReading.trips[0].kind === "batch" &&
+     splitReading.trips[1].kind === "first" && /FROM flows_payload WHERE id = \?$/.test(splitReading.trips[1].sqls[0]) &&
+     splitReading.trips[1].args[0][0] === "card-x:SPLIT" && splitReading.trips[2].kind === "run",
+     "and the reading of a split card is its batch, the overflow row read by its card-x key, and the claim");
 }
 
 console.log(`flows-reads-contract: ${checks} checks passed`);

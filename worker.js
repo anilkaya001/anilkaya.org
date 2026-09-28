@@ -2151,8 +2151,7 @@ async function ensureFlowsTables(env) {
         await FLOWS_LIVE.upgradeClockColumns(env.DB);
         flowsSchemaReady = true;
       } catch {}
-      flowsSchemaFlight = null;
-    })();
+    })().finally(() => { flowsSchemaFlight = null; });
   }
   await flowsSchemaFlight;
 }
