@@ -96,7 +96,11 @@ try {
   assertSecurity(revalidatedCSS, false);
 
   const unversioned = await fetch(base + "/assets/css/base.css");
-  assert.equal(unversioned.headers.get("cache-control"), "public, max-age=3600");
+  assert.equal(unversioned.status, 200);
+  assert.equal(unversioned.headers.get("cache-control"), "public, max-age=31536000, immutable",
+    "/assets/css|js|fonts/* is served asset-first and _headers matches by path, so the policy is immutable with or without ?v=; " +
+    "that no static document emits an unversioned CSS/JS/font URL is proven in tests/contracts.mjs (every reference must carry ?v=<assets/version.txt>), " +
+    "and Worker-rendered Flows pages go through v() in shared/flows-pages.js");
   assertSecurity(unversioned, false);
   for (const asset of [`/assets/js/nav.js?v=${assetVersion}`, `/assets/fonts/LM-regular.woff2?v=${assetVersion}`, "/assets/img/og.png"]) {
     const response = await fetch(base + asset);
