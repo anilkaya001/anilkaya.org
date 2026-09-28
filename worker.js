@@ -479,12 +479,12 @@ async function refreshMarketSnapshot(env) {
 
 let marketRevalidation = null;
 
-function revalidateMarketSnapshot(env, held) {
+function revalidateMarketSnapshot(env) {
   if (marketRevalidation) return marketRevalidation;
   marketRevalidation = refreshMarketSnapshot(env).catch(() => null).then(async (refreshed) => {
     if (refreshed) return refreshed;
     const now = Date.now();
-    const payload = held ? held.payload : JSON.stringify({ quotes: [], updatedAt: now });
+    const payload = JSON.stringify({ quotes: [], updatedAt: now });
     await marketOp(env, () => env.DB.prepare(
       "INSERT INTO market_snapshot (id, payload, updated_at) VALUES (1, ?, ?) " +
       "ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at",
@@ -501,17 +501,18 @@ async function readMarketSnapshot(env) {
 }
 
 async function refreshMarketSnapshotIfDue(env, at = Date.now()) {
-  const row = await readMarketSnapshot(env);
+  const inWindow = isRefreshWindow(new Date(at));
+  const row = inWindow ? null : await readMarketSnapshot(env);
   const age = row ? at - Number(row.updated_at) : Infinity;
-  if (!marketRefreshDue(age, isRefreshWindow(new Date(at)))) return null;
-  return revalidateMarketSnapshot(env, row);
+  if (!marketRefreshDue(age, inWindow)) return null;
+  return revalidateMarketSnapshot(env);
 }
 
 async function loadMarketSnapshot(env, ctx) {
   const row = await readMarketSnapshot(env);
-  if (!row) return revalidateMarketSnapshot(env, null);
+  if (!row) return revalidateMarketSnapshot(env);
   if (Date.now() - Number(row.updated_at) > MARKET_STALE_MS) {
-    const refresh = revalidateMarketSnapshot(env, row);
+    const refresh = revalidateMarketSnapshot(env);
     if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(refresh);
   }
   return row.payload;

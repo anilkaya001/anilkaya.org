@@ -1625,8 +1625,9 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   served for a week. It logs `nightly missing` from 21:00 ET (close + 300
   minutes) when meta is still behind: the scheduled nightly lands about 20:00
   ET, so the old close + 180 fired falsely every weekday evening. The snapshot
-  is refreshed on every firing inside the refresh window and, outside it, when
-  the stored one is older than 25 minutes: under the cron's own cadence, so a
+  is refreshed on every firing inside the refresh window, without reading the
+  stored row first, and, outside it, when the stored one is older than 25
+  minutes: under the cron's own cadence, so a
   snapshot the cron wrote is due again at its next firing. Until 2026-09-27 the
   cron waited for 45 minutes of age, the same threshold `/api/markets` used, so
   outside market hours the snapshot was stale for about 15 of every 60 minutes
