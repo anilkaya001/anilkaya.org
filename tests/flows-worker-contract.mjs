@@ -48,6 +48,10 @@ try {
 
     const out = await get("/flows/logout");
     eq(out.status, 405, "GET /flows/logout is refused (no CSRF sign-out)");
+
+    const form = await get("/flows/login/");
+    eq(form.status, 200, "GET /flows/login/ renders the sign-in form, the target of the shell's signed-out control");
+    ok((await form.text()).includes('action="/flows/login"'), "with the form that posts to /flows/login");
   }
 
   {

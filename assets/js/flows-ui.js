@@ -1697,7 +1697,7 @@
   }
   function confirmExpected() {
     const t = Date.now();
-    if (!nativeFetch || pendingNow() || t - SRV.asked < 6e4 || t - SRV.at < 6e4) return;
+    if (!nativeFetch || GATE.on || pendingNow() || t - SRV.asked < 6e4 || t - SRV.at < 6e4) return;
     SRV.asked = t;
     watchNow(nativeFetch("/api/flows/now", { credentials: "same-origin" }));
   }
@@ -1804,16 +1804,43 @@
       if (j && isoDay(j.sessionDate)) { FRESH.nightly = j.sessionDate.slice(0, 10); FRESH.settled = true; paintFresh(); }
     }).catch(() => {});
   }
+  const GATE = { on: null };
+  const gateAt = (v) => { try { if (v) sessionStorage.setItem("flows:gate", v); else return +sessionStorage.getItem("flows:gate") || 0; } catch {} return 0; };
+  function showGate(kind, why) {
+    GATE.on = kind;
+    const bar = $("fxBar"), fresh = $("fxFresh"), old = $("fxGate");
+    if (old) old.remove();
+    if (fresh) fresh.hidden = !!kind;
+    if (!bar || !kind) return;
+    const label = h("span", { class: "fx-fresh-l" }, kind === "out" ? "Signed out " + MID + " sign in" : "Unavailable");
+    bar.append(kind === "out"
+      ? h("a", { class: "ui-fresh", id: "fxGate", "data-state": kind, href: "/flows/login/" }, glyph("stop"), label)
+      : h("button", { class: "ui-fresh", id: "fxGate", "data-state": kind, type: "button", ...POP,
+        "data-info": info({ title: "Unavailable", state: "unavailable", lead: why }) }, glyph("unavailable"), label));
+  }
+  function gate(r) {
+    if (r.status === 401) {
+      if (GATE.on === "out") return;
+      const t = Date.now();
+      if (t - gateAt() < 6e5) { showGate("out"); return; }
+      gateAt(t);
+      location.replace("/flows/");
+    } else if (r.status === 403 && !GATE.on) {
+      const m = r.headers.get("cf-mitigated");
+      if (m || !/json/.test(r.headers.get("content-type") || "")) showGate("off", "The network edge refused this page’s requests" + (m ? " (" + m + ")" : "") + ". The readings are unchanged; try again in a minute.");
+    } else if (r.ok && GATE.on === "off") showGate(null);
+  }
+  const HANG = new Promise(() => {});
   if (nativeFetch) {
     window.fetch = function (input, init) {
+      const url = String((input && input.url) || input || "");
+      if (url.indexOf("/api/flows/") < 0) return nativeFetch(input, init);
+      if (GATE.on === "out") return HANG;
       const p = nativeFetch(input, init);
-      try {
-        const url = typeof input === "string" ? input : input && input.url;
-        if (url && url.indexOf("/api/flows/meta") >= 0) takeMeta(p);
-        if (url && url.indexOf("/api/flows/now") >= 0) { if (url.indexOf("?") > 0) SRV.hb = true; watchNow(p); }
-        if (url && url.indexOf("/api/flows/") >= 0) p.then((r) => observe(url, r), () => {});
-      } catch { return p; }
-      return p;
+      if (url.indexOf("/api/flows/meta") >= 0) takeMeta(p);
+      if (url.indexOf("/api/flows/now") >= 0) { if (url.indexOf("?") > 0) SRV.hb = true; watchNow(p); }
+      p.then((r) => observe(url, r), () => {});
+      return p.then((r) => { try { gate(r); } catch {} return r.status === 401 ? HANG : r; });
     };
   }
 
@@ -1983,7 +2010,7 @@
         if (anchor === fresh && popOpen()) { closeInfo(); return; }
         openInfo(fresh, freshDetails());
       });
-      setTimeout(() => { if (!FRESH.meta && !FRESH.sessionDate && nativeFetch) takeMeta(nativeFetch("/api/flows/meta", { credentials: "same-origin" })); }, 800);
+      setTimeout(() => { if (!FRESH.meta && !FRESH.sessionDate && nativeFetch && !GATE.on) takeMeta(nativeFetch("/api/flows/meta", { credentials: "same-origin" })); }, 800);
       setTimeout(() => { FRESH.settled = true; paintFresh(); }, 6000);
       setInterval(paintFresh, 30000);
       paintFresh();
