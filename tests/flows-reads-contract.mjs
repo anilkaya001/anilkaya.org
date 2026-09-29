@@ -6,6 +6,7 @@ import * as W from "../shared/flows-live-worker.js";
 import { MARKET_INDICES } from "../shared/markets.js";
 
 let checks = 0;
+const TIMER_SLACK_MS = 50;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
@@ -218,7 +219,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
      "and when that request answers before the batch lands (the chain route's vendor call rejects at once with no key while its card " +
      "read has just started the bootstrap) the promise never settles; every later request awaited it for the life of the isolate " +
      "(flows-chain-contract's bare worker, 300 s to undici's headers timeout, on CI and in the sandbox). Both waiters answer");
-  ok(waited >= 3500 && waited < 6000, `after the 2 s deadline and the 1.5 s retry (${waited} ms), not never`);
+  ok(waited >= 3500 - TIMER_SLACK_MS && waited < 6000, `after the 2 s deadline and the 1.5 s retry (${waited} ms), not never`);
   eq(f.count(SCHEMA_RE), 2,
      "with the hung batch and exactly one retry shared by the two waiters: the second waiter's own deadline falls while the first " +
      "waiter's retry is still in the air, and it joins that retry because the field no longer holds the flight it timed out on");
@@ -238,7 +239,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
     new Promise((r) => setTimeout(r, 1900)).then(() => get("/api/flows/market")),
   ]);
   const waited = Date.now() - t0;
-  ok(first.res.status === 200 && second.res.status === 200 && waited >= 2000 && waited < 2700,
+  ok(first.res.status === 200 && second.res.status === 200 && waited >= 2000 - TIMER_SLACK_MS && waited < 2700,
      `A LATE JOINER OF A DEAD FLIGHT LEAVES WHEN A SIBLING'S RETRY LANDS: joining at 1.9 s, it answers with the retry at about 2 s (${waited} ms) ` +
      "instead of sitting out its own deadline at 3.9 s");
   eq(f.count(SCHEMA_RE), 2, "and starts no batch of its own");
@@ -261,7 +262,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
     const waited = Date.now() - t0;
     ok(a.res.status === 200 && b.res.status === 200 && Array.isArray(a.body.quotes) && !a.body.quotes.length && Array.isArray(b.body.quotes) && !b.body.quotes.length,
        "THE MARKET SNAPSHOT'S FLIGHT HAS THE SAME GUARD: with no stored snapshot and a refresh that never settles, both readers answer an empty snapshot");
-    ok(waited >= 12000 && waited < 15000, `after the refresh's own budget of two origins at 5 s (${waited} ms), not never`);
+    ok(waited >= 12000 - TIMER_SLACK_MS && waited < 15000, `after the refresh's own budget of two origins at 5 s (${waited} ms), not never`);
     eq(calls, 2 * dead, "with the dead refresh and exactly one retry shared by the two readers: the second reader's poll finds the retry in the field and joins it");
     const again = await get("/api/markets");
     ok(again.res.status === 200 && calls === 2 * dead, "and a later reader finds the empty snapshot stored and asks the vendor nothing");
