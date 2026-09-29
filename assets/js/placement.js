@@ -795,6 +795,7 @@
   function init() {
 
     renderIntro("", { focus: false });
+    if (!readSavedResult()) loadBank().catch(() => {});
     document.addEventListener("iewt:auth-ready", () => {
       if (!session) renderIntro(introMessage, { focus: false });
     });

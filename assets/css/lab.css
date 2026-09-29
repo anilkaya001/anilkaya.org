@@ -295,7 +295,7 @@
 .course-related a:hover { color: var(--gold-harvest); border-color: color-mix(in srgb, var(--gold-harvest) 45%, transparent); }
 
 @media (max-width: 900px) {
-  .course { grid-template-columns: 1fr; }
+  .course { grid-template-columns: 1fr; min-height: 100svh; align-content: start; }
   .course-nav { position: static; top: auto; flex-direction: row; flex-wrap: wrap; }
   .course-nav__title { width: 100%; }
   .course-nav__mod { width: auto; flex: 1 1 auto; }
@@ -1381,9 +1381,27 @@
 }
 .stage__kicker { color: var(--gold-harvest); font-weight: 700; }
 .course-foot {
+  position: relative;
   min-height: 4rem;
   margin-top: 2rem;
 }
+.course-turn {
+  position: absolute;
+  bottom: calc(100% + 0.75rem);
+  left: 50%;
+  margin: 0;
+  padding: 0.45rem 0.95rem;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--bg-elev);
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translateX(-50%);
+  transition: opacity 0.2s var(--ease);
+}
+.course-turn:empty { opacity: 0; }
 
 :where(.lab input, .lab textarea, .lab select, .reset-dialog input, .reset-dialog textarea, .reset-dialog select):focus-visible {
   outline: 2px solid var(--gold-harvest);
@@ -1505,6 +1523,7 @@
   .reset-dialog[open] { animation: none !important; }
   .path-card,
   .course-explorer .model-card,
+  .course-turn,
   .progress__bar { transition: none; }
   .path-card:hover,
   .course-explorer .model-card:hover { transform: none; }
@@ -1610,4 +1629,19 @@
   .lab--wide .course-progress { grid-area: progress; align-self: center; margin: 0; padding: 0; }
   .lab--wide .course-brief { grid-area: guide; align-self: center; margin: 0; border: 0; }
   .lab--wide .course-brief summary { min-height: 2.75rem; padding: 0 0.25rem; }
+}
+
+@media (scripting: enabled) {
+  .today[aria-busy="true"] .dashboard-grid:empty { min-height: 10.4rem; }
+  .today[aria-busy="true"] .dashboard-focus:empty { display: grid; min-height: 3.9rem; }
+}
+@media (scripting: enabled) and (max-width: 900px) {
+  .today[aria-busy="true"] .dashboard-grid:empty { min-height: 16.4rem; }
+}
+@media (scripting: enabled) and (max-width: 620px) {
+  .today[aria-busy="true"] .dashboard-grid:empty { min-height: 6.1rem; }
+  .today[aria-busy="true"] .dashboard-focus:empty { min-height: 4.25rem; }
+}
+@media (scripting: enabled) and (max-width: 359px) {
+  .today[aria-busy="true"] .dashboard-grid:empty { min-height: 10.25rem; }
 }

@@ -249,12 +249,18 @@ try {
     const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
     await context.addInitScript(() => {
       window.__pythonLoads = Number(sessionStorage.getItem("academy:test-python-loads") || 0);
-      window.loadPyodide = async () => {
+      window.__pythonBoots = []; window.__pythonPackageLoads = []; window.__pythonRuns = [];
+      window.loadPyodide = async (config = {}) => {
         window.__pythonLoads++;
         sessionStorage.setItem("academy:test-python-loads", String(window.__pythonLoads));
+        const loadedPackages = {};
+        for (const name of config.packages || []) loadedPackages[name] = "default channel";
+        window.__pythonBoots.push(Array.from(config.packages || []));
         return {
-          loadPackage: async () => {}, setStdout: () => {}, setStderr: () => {},
-          runPythonAsync: async (code) => code === "_grab_figs()" ? { toJs: () => [], destroy: () => {} } : undefined,
+          loadedPackages,
+          loadPackage: async (names) => { const list = Array.from([].concat(names)); window.__pythonPackageLoads.push(list); for (const name of list) loadedPackages[name] = "default channel"; },
+          setStdout: () => {}, setStderr: () => {},
+          runPythonAsync: async (code) => { window.__pythonRuns.push(code); return code === "_grab_figs()" ? { toJs: () => [], destroy: () => {} } : undefined; },
         };
       };
     });
@@ -279,6 +285,23 @@ try {
     await page.locator(".cell__run").click();
     await page.locator(".quiz__feedback.ok").waitFor();
     assert.equal(await page.evaluate(() => window.__pythonLoads), 1, "code challenge did not use one lazy Python runtime");
+    assert.deepEqual(await page.evaluate(() => window.__pythonBoots), [["numpy"]], "a NumPy-only challenge did not boot Python with NumPy alone");
+    assert.deepEqual(await page.evaluate(() => window.__pythonPackageLoads), [], "a NumPy-only challenge loaded packages in a second round");
+    assert(!(await page.evaluate(() => window.__pythonRuns.some((code) => code.includes("matplotlib") || code.includes("pandas") || code === "_grab_figs()"))), "a NumPy-only challenge set up Matplotlib or pandas");
+    await page.locator("#cPrev").click();
+    await waitForCourse(page, "3 / 32");
+    await page.locator("#cPrev").click();
+    await waitForCourse(page, "2 / 32");
+    await page.locator(".cell--interactive .cell__run").click();
+    await page.waitForFunction(() => document.querySelector(".cell--interactive .cell__run")?.textContent.includes("Re-run"));
+    assert.equal(await page.evaluate(() => window.__pythonLoads), 1, "the second stage booted another Python runtime");
+    assert.deepEqual(await page.evaluate(() => window.__pythonPackageLoads), [["scipy", "matplotlib"]], "the interactive lab did not load its missing packages in one call");
+    const labRuns = await page.evaluate(() => window.__pythonRuns);
+    const setupAt = labRuns.findIndex((code) => code.includes('matplotlib.use("AGG")'));
+    const templateAt = labRuns.findIndex((code) => code.includes("import scipy") || code.includes("from scipy"));
+    assert(setupAt >= 0 && templateAt > setupAt, "the Matplotlib theme was not applied before the lab ran");
+    assert.equal(labRuns.filter((code) => code.includes('matplotlib.use("AGG")')).length, 1, "the Matplotlib theme was applied more than once");
+    assert.equal(labRuns.at(-1), "_grab_figs()", "figures were not captured once Matplotlib was loaded");
 
     await page.goto(BASE + stageRoute("foundations", 4, "native-case"));
     await waitForCourse(page, "5 / 32");
@@ -451,6 +474,46 @@ try {
     assert.equal((await page.locator("#dailyReviewCount").textContent()).trim(), "1 skill due now");
     clean();
     await context.close();
+  }
+
+  {
+    const topBefore = async (route, width, script, selector) => {
+      const context = await browser.newContext({ viewport: { width, height: 844 } });
+      const page = await context.newPage();
+      if (script) await page.route(`**/assets/js/${script}*`, (request) => request.fulfill({ status: 200, contentType: "text/javascript", body: "" }));
+      await page.goto(BASE + route, { waitUntil: "load" });
+      await page.evaluate(() => document.fonts.ready);
+      const top = await page.evaluate((target) => document.querySelector(target).getBoundingClientRect().top, selector);
+      await context.close();
+      return top;
+    };
+    const topAfter = async (route, width, ready, selector) => {
+      const context = await browser.newContext({ viewport: { width, height: 844 } });
+      const page = await context.newPage();
+      const clean = watch(page);
+      await page.goto(BASE + route, { waitUntil: "load" });
+      await page.waitForFunction(ready);
+      await page.evaluate(() => document.fonts.ready);
+      const top = await page.evaluate((target) => document.querySelector(target).getBoundingClientRect().top, selector);
+      clean();
+      await context.close();
+      return top;
+    };
+    const academyReady = () => document.querySelector("#academyDashboard")?.getAttribute("aria-busy") === "false";
+    for (const width of [320, 390, 1440]) {
+      const held = await topBefore("/lab/", width, "lab-ui.js", ".today__bar");
+      const rendered = await topAfter("/lab/", width, academyReady, ".today__bar");
+      assert(Math.abs(rendered - held) <= 4, `the Lab command center moved the bar ${Math.round(rendered - held)} px when it rendered at ${width} px`);
+    }
+    const reviewReady = () => document.querySelector("#reviewApp")?.getAttribute("aria-busy") === "false" && !document.querySelector("#reviewLive")?.hidden;
+    const heldReview = await topBefore("/lab/review/", 390, "lab-review.js", "#reviewApp");
+    const revealedReview = await topAfter("/lab/review/", 390, reviewReady, "#reviewApp");
+    assert(Math.abs(revealedReview - heldReview) <= 4, `the Daily Review moved ${Math.round(revealedReview - heldReview)} px when it revealed at 390 px`);
+    const challenge = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const challengePage = await challenge.newPage();
+    await challengePage.goto(BASE + "/lab/challenge/", { waitUntil: "load" });
+    assert.notEqual(await challengePage.locator(".review-brief").evaluate((node) => getComputedStyle(node).display), "none", "the challenge page lost its brief to the Daily Review's phone collapse");
+    await challenge.close();
   }
 
   {
@@ -849,6 +912,401 @@ try {
     }
     assert(!requested.some((path) => /^\/assets\/data\/courses\/(?!ols\/)/.test(path)), "course downloaded another topic payload");
     assert(!requested.some((path) => /^\/assets\/data\/courses\/ols\/(?!manifest\.json$|ols-line\.json$)/.test(path)), "course downloaded an unrelated module payload");
+    const firstModule = await page.evaluate(() => ({
+      version: document.documentElement.dataset.assetVersion,
+      entries: performance.getEntriesByType("resource")
+        .filter((entry) => new URL(entry.name).pathname === "/assets/data/courses/ols/ols-line.json")
+        .map((entry) => ({ initiator: entry.initiatorType, search: new URL(entry.name).search })),
+    }));
+    assert.deepEqual(firstModule.entries, [{ initiator: "link", search: "?v=" + firstModule.version }], "first module was not served by the head preload");
+    clean();
+    await context.close();
+  }
+
+  {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const page = await context.newPage();
+    let releaseModule;
+    const moduleGate = new Promise((resolve) => { releaseModule = resolve; });
+    await page.route("**/assets/data/courses/ols/ols-line.json*", async (route) => {
+      await moduleGate;
+      await route.continue();
+    });
+    const clean = watch(page);
+    await page.goto(BASE + courseRoute("ols"), { waitUntil: "domcontentloaded" });
+    await page.locator("#cStage").waitFor({ state: "attached" });
+    const skeleton = await page.evaluate(async () => {
+      await document.fonts.ready;
+      return {
+        stage: document.querySelector("#cStage").childElementCount,
+        modules: document.querySelectorAll("#cNav .course-nav__mod").length,
+        current: document.querySelector('#cNav .course-nav__mod[aria-current="step"]')?.dataset.mi ?? null,
+        top: Math.round(document.querySelector(".course-main").getBoundingClientRect().top),
+      };
+    });
+    releaseModule();
+    await waitForCourse(page, "1 / 20");
+    const top = await page.evaluate(() => Math.round(document.querySelector(".course-main").getBoundingClientRect().top));
+    assert.deepEqual(skeleton, { stage: 0, modules: 4, current: "0", top }, "the module nav filled after the skeleton painted and pushed the first stage down");
+    clean();
+    await context.close();
+  }
+
+  {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const page = await context.newPage();
+    let releaseModule;
+    const moduleGate = new Promise((resolve) => { releaseModule = resolve; });
+    await page.route("**/assets/data/courses/ols/ols-math.json*", async (route) => {
+      await moduleGate;
+      await route.continue();
+    });
+    const clean = watch(page);
+    await page.goto(BASE + stageRoute("ols", 4, "module-crossing"), { waitUntil: "load" });
+    await waitForCourse(page, "5 / 20");
+    const crossing = await page.evaluate(() => new Promise((resolve) => {
+      const stage = document.querySelector("#cStage");
+      const left = stage.querySelector(".stage__kicker").textContent;
+      const frames = [];
+      const started = performance.now();
+      document.querySelector("#cNext").click();
+      const tick = () => {
+        const elapsed = performance.now() - started;
+        frames.push({ elapsed, old: stage.querySelector(".stage__kicker")?.textContent === left, opacity: Number(getComputedStyle(stage).opacity), status: document.querySelector("#cTurn")?.textContent });
+        if (elapsed < 900) requestAnimationFrame(tick);
+        else resolve({
+          left,
+          pos: document.querySelector("#cPos").textContent.trim(),
+          reshown: Math.max(0, ...frames.filter((frame) => frame.old && frame.elapsed > 450).map((frame) => frame.opacity)),
+          early: frames.filter((frame) => frame.elapsed < 600 && frame.status).length,
+        });
+      };
+      requestAnimationFrame(tick);
+    }));
+    assert.equal(crossing.pos, "5 / 20", "the next module resolved while it was held");
+    assert(crossing.reshown < 0.05, `the stage just left faded back in to opacity ${crossing.reshown} while the next module loaded`);
+    assert.equal(crossing.early, 0, "the loading status showed before the crossing had waited");
+    await page.waitForFunction(() => document.querySelector("#cTurn")?.textContent === "Loading module…");
+    const held = await page.evaluate(() => {
+      const stage = document.querySelector("#cStage");
+      const button = stage.querySelector("button");
+      button.scrollIntoView({ block: "center", behavior: "instant" });
+      const box = button.getBoundingClientRect();
+      return {
+        inert: stage.inert,
+        busy: stage.getAttribute("aria-busy"),
+        role: document.querySelector("#cTurn")?.getAttribute("role"),
+        hittable: button.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)),
+      };
+    });
+    assert.deepEqual(held, { inert: true, busy: "true", role: "status", hittable: false }, "the stage just left stayed interactive and unannounced while the next module loaded");
+    releaseModule();
+    await waitForCourse(page, "6 / 20");
+    await page.waitForFunction(() => getComputedStyle(document.querySelector("#cStage")).opacity === "1");
+    assert.notEqual(await page.locator("#cStage .stage__kicker").textContent(), crossing.left);
+    assert.deepEqual(await page.evaluate(() => ({
+      inert: document.querySelector("#cStage").inert,
+      busy: document.querySelector("#cStage").getAttribute("aria-busy"),
+      status: document.querySelector("#cTurn")?.textContent,
+    })), { inert: false, busy: null, status: "" }, "the stage stayed busy after the next module arrived");
+    clean();
+    await context.close();
+  }
+
+  {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    let releaseModule;
+    const moduleGate = new Promise((resolve) => { releaseModule = resolve; });
+    await page.route("**/assets/data/courses/ols/ols-math.json*", async (route) => {
+      await moduleGate;
+      await route.continue();
+    });
+    const clean = watch(page);
+    await page.goto(BASE + stageRoute("ols", 4, "module-crossing-back"), { waitUntil: "load" });
+    await waitForCourse(page, "5 / 20");
+    const left = await page.locator("#cStage .stage__kicker").textContent();
+    await page.click("#cNext");
+    await page.waitForTimeout(400);
+    await page.click("#cPrev");
+    await page.waitForFunction(() => getComputedStyle(document.querySelector("#cStage")).opacity === "1");
+    const reading = await page.evaluate(() => {
+      const control = [...document.querySelectorAll("#cStage button, #cStage input, #cStage textarea, #cStage select")].find((node) => !node.disabled);
+      control.dataset.reading = "1";
+      control.focus();
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" });
+      return { focused: document.activeElement === control, y: Math.round(scrollY) };
+    });
+    assert(reading.focused && reading.y > 0, "the returned-to stage had no control to focus below the fold");
+    await page.evaluate(() => {
+      window.__stageOpacity = [];
+      const stage = document.querySelector("#cStage");
+      const tick = () => { window.__stageOpacity.push(Number(getComputedStyle(stage).opacity)); requestAnimationFrame(tick); };
+      requestAnimationFrame(tick);
+    });
+    const arrived = page.waitForResponse((response) => new URL(response.url()).pathname === "/assets/data/courses/ols/ols-math.json");
+    releaseModule();
+    await (await arrived).finished();
+    await page.waitForTimeout(600);
+    assert.deepEqual({
+      pos: (await page.locator("#cPos").textContent()).trim(),
+      kicker: await page.locator("#cStage .stage__kicker").textContent(),
+      hash: new URL(page.url()).hash,
+      dimmed: await page.evaluate(() => Math.min(...window.__stageOpacity) < 0.99),
+      focused: await page.evaluate(() => document.activeElement?.dataset.reading === "1"),
+      y: await page.evaluate(() => Math.round(scrollY)),
+    }, { pos: "5 / 20", kicker: left, hash: "#s4", dimmed: false, focused: true, y: reading.y }, "a module that arrived after the reader turned back replaced, re-faded, refocused or scrolled the stage they returned to");
+    clean();
+    await context.close();
+  }
+
+  {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await page.route("**/assets/data/courses/ols/ols-math.json*", (route) => route.abort());
+    const clean = watch(page, (text) => text.includes("/assets/data/courses/ols/ols-math.json") || text === "Failed to load resource: net::ERR_FAILED");
+    await page.goto(BASE + stageRoute("ols", 4, "module-crossing-failed"), { waitUntil: "load" });
+    await waitForCourse(page, "5 / 20");
+    await page.click("#cNext");
+    await page.waitForFunction(() => document.querySelector("#cStage").style.opacity === "1" && getComputedStyle(document.querySelector("#cStage")).opacity === "1");
+    assert.equal((await page.locator("#cPos").textContent()).trim(), "5 / 20", "a failed module crossing moved the reader");
+    assert.equal(await page.locator("#cStage .stage__guide").count(), 1, "a failed module crossing left the stage empty");
+    clean();
+    await context.close();
+  }
+
+  {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    let releaseModule;
+    const moduleGate = new Promise((resolve) => { releaseModule = resolve; });
+    await page.route("**/assets/data/courses/ols/ols-math.json*", async (route) => {
+      await moduleGate;
+      await route.continue();
+    });
+    const clean = watch(page);
+    await page.goto(BASE + stageRoute("ols", 4, "module-crossing-held-input"), { waitUntil: "load" });
+    await waitForCourse(page, "5 / 20");
+    await page.click("#cNext");
+    await page.waitForFunction(() => document.querySelector("#cTurn")?.textContent === "Loading module…");
+    assert.equal(await page.evaluate(() => {
+      document.dispatchEvent(new Event("iewt:synced"));
+      return document.querySelector('#cNav .course-nav__mod[aria-current="step"]')?.dataset.mi ?? null;
+    }), "0", "a synchronisation during a pending module crossing highlighted the module the reader had not reached");
+    await page.click("#cNext");
+    await page.keyboard.press("Alt+ArrowRight");
+    await page.waitForTimeout(300);
+    releaseModule();
+    await page.waitForFunction(() => {
+      const stage = document.querySelector("#cStage");
+      return !stage.inert && getComputedStyle(stage).opacity === "1" && document.querySelector("#cPos").textContent.trim() !== "5 / 20";
+    });
+    assert.deepEqual(await page.evaluate(() => ({
+      pos: document.querySelector("#cPos").textContent.trim(),
+      hash: location.hash,
+      progress: window.IEWTStorage.progress(),
+    })), { pos: "6 / 20", hash: "#s5", progress: {} }, "Next or Alt+ArrowRight during a pending module crossing skipped or completed the stage the reader had not seen");
+    clean();
+    await context.close();
+  }
+
+  {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    let fail = true;
+    await page.route("**/assets/data/courses/ols/ols-math.json*", (route) => fail ? route.abort() : route.continue());
+    const clean = watch(page, (text) => text.includes("/assets/data/courses/ols/ols-math.json") || text === "Failed to load resource: net::ERR_FAILED");
+    await page.goto(BASE + stageRoute("ols", 4, "module-crossing-retry"), { waitUntil: "load" });
+    await waitForCourse(page, "5 / 20");
+    const next = (await page.locator("#cNext").textContent()).trim();
+    await page.evaluate(() => {
+      const control = document.querySelector("#cStage button:not([disabled])");
+      control.dataset.reading = "1";
+      control.focus();
+    });
+    await page.keyboard.press("Alt+ArrowRight");
+    await page.waitForFunction(() => document.querySelector(".toast")?.textContent.includes("could not load"));
+    await page.waitForFunction(() => !document.querySelector("#cStage").inert && getComputedStyle(document.querySelector("#cStage")).opacity === "1");
+    assert.deepEqual(await page.evaluate(() => ({
+      pos: document.querySelector("#cPos").textContent.trim(),
+      hash: location.hash,
+      next: document.querySelector("#cNext").textContent.trim(),
+      focused: document.activeElement?.dataset.reading === "1",
+    })), { pos: "5 / 20", hash: "#s4", next, focused: true }, "a failed module crossing left the URL on the stage that never showed or dropped the reader's focus");
+    fail = false;
+    await page.click("#cNext");
+    await page.waitForFunction(() => {
+      const stage = document.querySelector("#cStage");
+      return !stage.inert && getComputedStyle(stage).opacity === "1" && document.querySelector("#cPos").textContent.trim() !== "5 / 20";
+    });
+    assert.deepEqual(await page.evaluate(() => ({
+      pos: document.querySelector("#cPos").textContent.trim(),
+      hash: location.hash,
+      progress: window.IEWTStorage.progress(),
+    })), { pos: "6 / 20", hash: "#s5", progress: {} }, "retrying after a failed module crossing landed past the stage that never showed");
+    clean();
+    await context.close();
+  }
+
+  {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    let releaseModule;
+    const moduleGate = new Promise((resolve) => { releaseModule = resolve; });
+    await page.route("**/assets/data/courses/ols/ols-line.json*", async (route) => {
+      await moduleGate;
+      await route.continue();
+    });
+    const clean = watch(page);
+    await page.goto(BASE + courseRoute("ols"), { waitUntil: "domcontentloaded" });
+    await page.locator("#cNav .course-nav__mod").nth(2).waitFor();
+    await page.click("#cNext");
+    await page.locator("#cNav .course-nav__mod").nth(2).click();
+    await page.keyboard.press("Alt+ArrowRight");
+    await page.waitForTimeout(400);
+    releaseModule();
+    await waitForCourse(page);
+    await page.waitForFunction(() => getComputedStyle(document.querySelector("#cStage")).opacity === "1");
+    await page.waitForTimeout(400);
+    assert.deepEqual(await page.evaluate(() => ({
+      pos: document.querySelector("#cPos").textContent.trim(),
+      hash: location.hash,
+      progress: window.IEWTStorage.progress(),
+    })), { pos: "1 / 20", hash: "", progress: {} }, "a control pressed before the first stage painted moved or completed the course");
+    clean();
+    await context.close();
+  }
+
+  {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const clean = watch(page);
+    const prefetched = page.waitForResponse((response) => new URL(response.url()).pathname === "/assets/data/courses/ols/ols-math.json");
+    await page.goto(BASE + stageRoute("ols", 4, "module-rapid-next"), { waitUntil: "load" });
+    await waitForCourse(page, "5 / 20");
+    await (await prefetched).finished();
+    await page.waitForTimeout(300);
+    await page.evaluate(() => {
+      const next = document.querySelector("#cNext");
+      next.click();
+      next.click();
+    });
+    await page.waitForFunction(() => {
+      const stage = document.querySelector("#cStage");
+      return !stage.inert && getComputedStyle(stage).opacity === "1" && document.querySelector("#cPos").textContent.trim() === "7 / 20";
+    });
+    assert.deepEqual(await page.evaluate(() => window.IEWTStorage.progress()), {}, "a rapid second Next completed a reading the reader never saw");
+    clean();
+    await context.close();
+  }
+
+  {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    await context.addInitScript(() => {
+      window.__shift = 0;
+      new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) if (!entry.hadRecentInput) window.__shift += entry.value;
+      }).observe({ type: "layout-shift", buffered: true });
+    });
+    const page = await context.newPage();
+    let releaseModule;
+    const moduleGate = new Promise((resolve) => { releaseModule = resolve; });
+    await page.route("**/assets/data/courses/ols/manifest.json*", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      await route.continue();
+    });
+    await page.route("**/assets/data/courses/ols/ols-line.json*", async (route) => {
+      await moduleGate;
+      await route.continue();
+    });
+    const clean = watch(page);
+    await page.goto(BASE + courseRoute("ols"), { waitUntil: "domcontentloaded" });
+    await page.locator("#cNav .course-nav__mod").nth(3).waitFor();
+    await page.evaluate(() => document.fonts.ready);
+    await page.waitForTimeout(400);
+    releaseModule();
+    await waitForCourse(page, "1 / 20");
+    await page.waitForTimeout(600);
+    const shift = await page.evaluate(() => window.__shift);
+    assert(shift < 0.05, `the course page shifted ${shift.toFixed(3)} while the first stage loaded on a 390 px viewport`);
+    clean();
+    await context.close();
+  }
+
+  {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await page.clock.install();
+    let releaseModule;
+    const moduleGate = new Promise((resolve) => { releaseModule = resolve; });
+    await page.route("**/assets/data/courses/ols/ols-math.json*", async (route) => {
+      await moduleGate;
+      await route.continue().catch(() => {});
+    });
+    const clean = watch(page, (text) => text.includes("/assets/data/courses/ols/ols-math.json"));
+    await page.goto(BASE + stageRoute("ols", 4, "module-crossing-stalled"), { waitUntil: "load" });
+    await waitForCourse(page, "5 / 20");
+    const left = await page.locator("#cStage .stage__kicker").textContent();
+    await page.click("#cNext");
+    await page.waitForFunction(() => document.querySelector("#cTurn")?.textContent === "Loading module…");
+    await page.clock.fastForward(15000);
+    await page.waitForFunction(() => !document.querySelector("#cStage").inert && getComputedStyle(document.querySelector("#cStage")).opacity === "1");
+    assert.deepEqual(await page.evaluate(() => ({
+      pos: document.querySelector("#cPos").textContent.trim(),
+      kicker: document.querySelector("#cStage .stage__kicker").textContent,
+      busy: document.querySelector("#cStage").getAttribute("aria-busy"),
+      status: document.querySelector("#cTurn")?.textContent,
+      toast: document.querySelector(".toast")?.textContent,
+    })), { pos: "5 / 20", kicker: left, busy: null, status: "", toast: "This module could not load. Your progress is safe." }, "a stalled module request never gave the reader their stage back");
+    releaseModule();
+    clean();
+    await context.close();
+  }
+
+  {
+    const context = await browser.newContext();
+    await context.addInitScript(() => { delete AbortSignal.timeout; });
+    const page = await context.newPage();
+    const clean = watch(page);
+    await page.goto(BASE + stageRoute("ols", 4, "module-no-timeout"), { waitUntil: "load" });
+    await waitForCourse(page, "5 / 20");
+    await page.click("#cNext");
+    await waitForCourse(page, "6 / 20");
+    clean();
+    await context.close();
+  }
+
+  {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await page.route("**/assets/data/courses/ols/ols-line.json*", (route) => route.abort());
+    const clean = watch(page, (text) => text.includes("/assets/data/courses/ols/ols-line.json") || text === "Failed to load resource: net::ERR_FAILED");
+    await page.goto(BASE + courseRoute("ols"), { waitUntil: "load" });
+    await page.locator("#courseRetry").waitFor();
+    assert.equal(await page.locator("#course h1").textContent(), "The course could not load");
+    assert.equal(await page.locator("#course").getAttribute("aria-busy"), "false");
+    clean();
+    await context.close();
+  }
+
+  {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const requested = [];
+    page.on("request", (request) => requested.push(new URL(request.url()).pathname));
+    const clean = watch(page);
+    await page.goto(BASE + stageRoute("ols", 3, "module-prefetch"), { waitUntil: "load" });
+    await waitForCourse(page, "4 / 20");
+    await page.waitForTimeout(1600);
+    assert(!requested.includes("/assets/data/courses/ols/ols-math.json"), "a stage inside a module prefetched the next module");
+    const prefetch = page.waitForRequest((request) => new URL(request.url()).pathname === "/assets/data/courses/ols/ols-math.json", { timeout: 5000 });
+    await page.click("#cNext");
+    await waitForCourse(page, "5 / 20");
+    await (await prefetch).response();
+    await page.click("#cNext");
+    await waitForCourse(page, "6 / 20");
+    assert.equal(requested.filter((path) => path === "/assets/data/courses/ols/ols-math.json").length, 1, "the module crossing refetched the prefetched module");
+    assert(!requested.some((path) => /^\/assets\/data\/courses\/ols\/ols-(inference|assumptions)\.json$/.test(path)), "the last stage of a module prefetched more than the next module");
     clean();
     await context.close();
   }
@@ -1115,6 +1573,213 @@ try {
     await boot.waitFor();
     assert.equal(await boot.getAttribute("role"), "status");
     assert((await boot.textContent()).trim().length > 0, "boot status text missing");
+    assert.equal((await boot.textContent()).trim(), "Loading Python · NumPy · pandas · SciPy · statsmodels · Matplotlib…", "boot status does not name the packages being loaded");
+    await page.goto(BASE + stageRoute("ols", 2), { waitUntil: "load" });
+    await waitForCourse(page, "3 / 20");
+    const launch = page.locator(".cell--interactive .cell__run");
+    await launch.click();
+    await page.waitForFunction(() => document.querySelector(".cell--interactive .cell__run")?.textContent === "Running…");
+    assert.equal(await launch.getAttribute("aria-busy"), "true", "Launch shows no busy state while Python loads");
+    assert(await launch.isDisabled(), "Launch stays clickable while Python loads");
+    clean();
+    await context.close();
+  }
+
+  {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+    await context.addInitScript(() => {
+      window.__pythonBoots = []; window.__pythonPackageLoads = []; window.__pythonRuns = [];
+      window.loadPyodide = async (config = {}) => {
+        const loadedPackages = {};
+        for (const name of config.packages || []) loadedPackages[name] = "default channel";
+        window.__pythonBoots.push(Array.from(config.packages || []));
+        const ran = (fragment) => window.__pythonRuns.some((code) => code.includes(fragment));
+        return {
+          loadedPackages,
+          loadPackage: async (names) => { const list = Array.from([].concat(names)); window.__pythonPackageLoads.push(list); for (const name of list) loadedPackages[name] = "default channel"; },
+          setStdout: () => {}, setStderr: () => {},
+          pyimport: (name) => {
+            if (name !== "pyodide.code") throw new Error("No module named '" + name + "'");
+            return {
+              find_imports: (code) => {
+                const found = [];
+                for (const line of code.replace(/\\\n/g, " ").split("\n")) {
+                  const m = line.match(/^\s*import\s+(.+)$/);
+                  if (m) for (const part of m[1].split(",")) found.push(part.trim().split(/[\s.]/)[0]);
+                }
+                return { toJs: () => found, destroy: () => {} };
+              },
+              destroy: () => {},
+            };
+          },
+          runPythonAsync: async (code) => {
+            window.__pythonRuns.push(code);
+            if (code === "_grab_figs()") return { toJs: () => [], destroy: () => {} };
+            const fail = (text) => { throw new Error("Traceback (most recent call last):\n  File \"<exec>\", line 1, in <module>\n" + text + "\n"); };
+            if (code.includes("scipy.stats as st") && !loadedPackages.scipy) fail("ModuleNotFoundError: No module named 'scipy'");
+            if (code.includes("statsmodels.api as sm") && !loadedPackages.statsmodels) fail("ModuleNotFoundError: No module named 'statsmodels'");
+            if (code.includes("value = pd") && !ran("import pandas as pd")) fail("NameError: name 'pd' is not defined");
+            if (code.includes(".plot()") && !loadedPackages.matplotlib) fail('ImportError: matplotlib is required for plotting when the default backend "matplotlib" is selected.');
+            if (code.includes("rank_corr()") && !loadedPackages.scipy) fail("ImportError: Missing optional dependency 'scipy'.  Use pip or conda to install scipy.");
+            if (code.includes("import sklearn")) fail("ModuleNotFoundError: No module named 'sklearn'");
+            if (code.includes("stubborn()")) fail("ModuleNotFoundError: No module named 'patsy'");
+            return undefined;
+          },
+        };
+      };
+    });
+    const page = await context.newPage();
+    const clean = watch(page);
+    await page.goto(BASE + stageRoute("ols", 1, "lazy-statsmodels"), { waitUntil: "load" });
+    await waitForCourse(page, "2 / 20");
+    await page.locator(".stage__work .cell__run").click();
+    await page.waitForFunction(() => { const b = document.querySelector(".stage__work .cell__run"); return !b.disabled && b.textContent.includes("Run") && !b.textContent.includes("Running"); });
+    assert.deepEqual(await page.evaluate(() => window.__pythonBoots), [["numpy", "pandas", "scipy", "statsmodels", "matplotlib"]], "a statsmodels stage did not resolve its whole package set at boot");
+    assert.deepEqual(await page.evaluate(() => window.__pythonPackageLoads), [], "a statsmodels stage loaded packages in a second round");
+    assert.equal(await page.evaluate(() => window.__pythonRuns.at(-1)), "_grab_figs()", "the statsmodels stage did not capture its figures");
+
+    await page.goto(BASE + stageRoute("foundations", 2, "lazy-retry"), { waitUntil: "load" });
+    await waitForCourse(page, "3 / 32");
+    const cell = page.locator(".stage__work .cell");
+    const runEdited = async (code) => {
+      await cell.locator(".cell__editor").fill(code);
+      const before = await page.evaluate(() => window.__pythonRuns.length);
+      await cell.locator(".cell__run").click();
+      await page.waitForFunction(() => { const b = document.querySelector(".stage__work .cell__run"); return !b.disabled && !b.textContent.includes("Running"); });
+      return {
+        runs: await page.evaluate((from) => window.__pythonRuns.slice(from), before),
+        error: await cell.locator(".cell__out .err").count() ? await cell.locator(".cell__out .err").textContent() : null,
+      };
+    };
+    const count = (runs, code) => runs.filter((ran) => ran === code).length;
+
+    let result = await runEdited("value = pd");
+    assert.deepEqual(await page.evaluate(() => window.__pythonBoots), [["numpy"]], "a run without imports booted more than NumPy");
+    assert.equal(result.error, null, "a bare pd reference was not retried after loading pandas");
+    assert.equal(count(result.runs, "value = pd"), 2, "a NameError for a PREAMBLE global did not retry exactly once");
+    assert.deepEqual(await page.evaluate(() => window.__pythonPackageLoads), [["pandas"]], "pandas was not loaded for the retry");
+
+    result = await runEdited("s = pd.Series([1.0, 2.0])\ns.plot()");
+    assert.equal(result.error, null, "an indirect Matplotlib use was not retried");
+    assert.equal(count(result.runs, "s = pd.Series([1.0, 2.0])\ns.plot()"), 2, "the plotting retry did not run exactly twice");
+    assert(result.runs.findIndex((code) => code.includes('matplotlib.use("AGG")')) > 0, "the Matplotlib theme was not applied before the retry");
+    assert.equal(result.runs.at(-1), "_grab_figs()", "the retried plot was not captured");
+
+    result = await runEdited("rank_corr()");
+    assert.equal(result.error, null, "a missing optional dependency was not loaded and retried");
+    assert.equal(count(result.runs, "rank_corr()"), 2);
+
+    result = await runEdited("import sklearn");
+    assert.match(result.error || "", /No module named 'sklearn'/, "an unknown module error was hidden");
+    assert.equal(count(result.runs, "import sklearn"), 1, "an unknown module was retried");
+
+    result = await runEdited("stubborn()");
+    assert.match(result.error || "", /No module named 'patsy'/, "a failed retry did not surface its error");
+    assert.equal(count(result.runs, "stubborn()"), 2, "a failing retry looped");
+    assert.deepEqual(await page.evaluate(() => window.__pythonPackageLoads), [["pandas"], ["matplotlib"], ["scipy"], ["patsy"]], "each retry must load exactly the one missing package");
+    assert.equal((await page.locator("#labBoot .boot__txt").textContent()).trim().length > 0, true, "boot status text emptied");
+
+    await page.goto(BASE + stageRoute("foundations", 2, "lazy-semicolon"), { waitUntil: "load" });
+    await waitForCourse(page, "3 / 32");
+    result = await runEdited("import numpy as np; import scipy.stats as st\nprint('ok')");
+    assert.equal(result.error, null, "a second import after a semicolon failed");
+    assert.deepEqual(await page.evaluate(() => window.__pythonBoots), [["numpy", "scipy"]], "an import after a semicolon was not part of the boot set");
+    assert.equal(count(result.runs, "import numpy as np; import scipy.stats as st\nprint('ok')"), 1, "an import after a semicolon needed a retry");
+
+    await page.goto(BASE + stageRoute("foundations", 2, "lazy-continuation"), { waitUntil: "load" });
+    await waitForCourse(page, "3 / 32");
+    const spread = "import numpy as np, \\\n    scipy.stats as st, \\\n    statsmodels.api as sm\nprint('ok')";
+    result = await runEdited(spread);
+    assert.equal(result.error, null, "two packages the scan missed were not both recovered by the one retry");
+    assert.deepEqual(await page.evaluate(() => window.__pythonBoots), [["numpy"]], "the scan should have missed the continued imports");
+    assert.equal(count(result.runs, spread), 2, "the retry for two missing packages did not run exactly twice");
+    assert.deepEqual(await page.evaluate(() => window.__pythonPackageLoads), [["pandas", "scipy", "statsmodels"]], "the retry did not load every package the code imports in one call");
+    clean();
+    await context.close();
+  }
+
+  {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+    await context.addInitScript(() => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      window.__status = () => {
+        const b = document.getElementById("labBoot");
+        return !b ? "(none)" : b.classList.contains("show") ? b.querySelector(".boot__txt").textContent.trim() : "(hidden)";
+      };
+      window.__loadStatus = []; window.__runStatus = [];
+      window.loadPyodide = async (config = {}) => {
+        await wait(300);
+        const loadedPackages = {};
+        for (const name of config.packages || []) loadedPackages[name] = "default channel";
+        return {
+          loadedPackages,
+          loadPackage: async (names) => {
+            const list = Array.from([].concat(names));
+            window.__loadStatus.push([list.join("+"), "start", window.__status()]);
+            await wait(500);
+            window.__loadStatus.push([list.join("+"), "end", window.__status()]);
+            for (const name of list) loadedPackages[name] = "default channel";
+          },
+          setStdout: () => {}, setStderr: () => {},
+          runPythonAsync: async (code) => {
+            window.__runStatus.push([code, window.__status()]);
+            if (code.includes("slow()")) await wait(600);
+            return code === "_grab_figs()" ? { toJs: () => [], destroy: () => {} } : undefined;
+          },
+        };
+      };
+    });
+    const page = await context.newPage();
+    const clean = watch(page);
+    await page.goto(BASE + stageRoute("foundations", 2, "overlap"), { waitUntil: "load" });
+    await waitForCourse(page, "3 / 32");
+
+    const first = await page.evaluate(async () => {
+      const cell = () => ({ out: document.createElement("div") });
+      const early = window.Lab.run("print(1)", cell());
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const late = window.Lab.run("import scipy.stats as st", cell());
+      const okEarly = await early;
+      const whileLateLoads = window.__status();
+      const okLate = await late;
+      return { okEarly, okLate, whileLateLoads, after: window.__status(), loads: window.__loadStatus };
+    });
+    assert(first.okEarly && first.okLate, "overlapping runs failed");
+    assert.equal(first.whileLateLoads, "Loading SciPy…", "the first run's end replaced or hid the status while the second run was still downloading");
+    assert.deepEqual(first.loads, [["scipy", "start", "Loading SciPy…"], ["scipy", "end", "Loading SciPy…"]], "the status changed while SciPy was downloading");
+    assert.equal(first.after, "(hidden)", "the status stayed up after every run finished");
+
+    const second = await page.evaluate(async () => {
+      const cell = () => ({ out: document.createElement("div") });
+      const slow = window.Lab.run("import patsy\nslow()", cell());
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const quick = window.Lab.run("import statsmodels.api as sm", cell());
+      await quick;
+      const whileSlowRuns = window.__status();
+      await slow;
+      return { whileSlowRuns, after: window.__status(), runs: window.__runStatus.filter(([code]) => code.includes("patsy") || code.includes("statsmodels")) };
+    });
+    assert.deepEqual(second.runs, [
+      ["import patsy\nslow()", "Loading pandas · statsmodels…"],
+      ["import statsmodels.api as sm", "Running…"],
+    ], "Running… replaced a package download that was still in flight");
+    assert.equal(second.whileSlowRuns, "Running…", "a finished run hid the status while another run was still executing");
+    assert.equal(second.after, "(hidden)", "the status stayed up after every run finished");
+
+    await page.goto(BASE + stageRoute("foundations", 1, "focus"), { waitUntil: "load" });
+    await waitForCourse(page, "2 / 32");
+    const launchButton = page.locator(".cell--interactive .cell__run");
+    await launchButton.focus();
+    await page.keyboard.press("Enter");
+    await page.waitForFunction(() => document.querySelector(".cell--interactive .cell__run")?.textContent.includes("Re-run"));
+    assert.equal(await page.evaluate(() => document.activeElement === document.querySelector(".cell--interactive .cell__run")), true, "keyboard focus was lost when Launch ran");
+
+    await page.goto(BASE + stageRoute("foundations", 2, "focus-cell"), { waitUntil: "load" });
+    await waitForCourse(page, "3 / 32");
+    await page.locator(".stage__work .cell__run").focus();
+    await page.keyboard.press("Enter");
+    await page.waitForFunction(() => { const b = document.querySelector(".stage__work .cell__run"); return !b.disabled && !b.textContent.includes("Running"); });
+    assert.equal(await page.evaluate(() => document.activeElement === document.querySelector(".stage__work .cell__run")), true, "keyboard focus was lost when Run finished");
     clean();
     await context.close();
   }
