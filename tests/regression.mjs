@@ -1163,10 +1163,26 @@ try {
           loadedPackages,
           loadPackage: async (names) => { const list = Array.from([].concat(names)); window.__pythonPackageLoads.push(list); for (const name of list) loadedPackages[name] = "default channel"; },
           setStdout: () => {}, setStderr: () => {},
+          pyimport: (name) => {
+            if (name !== "pyodide.code") throw new Error("No module named '" + name + "'");
+            return {
+              find_imports: (code) => {
+                const found = [];
+                for (const line of code.replace(/\\\n/g, " ").split("\n")) {
+                  const m = line.match(/^\s*import\s+(.+)$/);
+                  if (m) for (const part of m[1].split(",")) found.push(part.trim().split(/[\s.]/)[0]);
+                }
+                return { toJs: () => found, destroy: () => {} };
+              },
+              destroy: () => {},
+            };
+          },
           runPythonAsync: async (code) => {
             window.__pythonRuns.push(code);
             if (code === "_grab_figs()") return { toJs: () => [], destroy: () => {} };
             const fail = (text) => { throw new Error("Traceback (most recent call last):\n  File \"<exec>\", line 1, in <module>\n" + text + "\n"); };
+            if (code.includes("scipy.stats as st") && !loadedPackages.scipy) fail("ModuleNotFoundError: No module named 'scipy'");
+            if (code.includes("statsmodels.api as sm") && !loadedPackages.statsmodels) fail("ModuleNotFoundError: No module named 'statsmodels'");
             if (code.includes("value = pd") && !ran("import pandas as pd")) fail("NameError: name 'pd' is not defined");
             if (code.includes(".plot()") && !loadedPackages.matplotlib) fail('ImportError: matplotlib is required for plotting when the default backend "matplotlib" is selected.');
             if (code.includes("rank_corr()") && !loadedPackages.scipy) fail("ImportError: Missing optional dependency 'scipy'.  Use pip or conda to install scipy.");
@@ -1227,6 +1243,108 @@ try {
     assert.equal(count(result.runs, "stubborn()"), 2, "a failing retry looped");
     assert.deepEqual(await page.evaluate(() => window.__pythonPackageLoads), [["pandas"], ["matplotlib"], ["scipy"], ["patsy"]], "each retry must load exactly the one missing package");
     assert.equal((await page.locator("#labBoot .boot__txt").textContent()).trim().length > 0, true, "boot status text emptied");
+
+    await page.goto(BASE + stageRoute("foundations", 2, "lazy-semicolon"), { waitUntil: "load" });
+    await waitForCourse(page, "3 / 32");
+    result = await runEdited("import numpy as np; import scipy.stats as st\nprint('ok')");
+    assert.equal(result.error, null, "a second import after a semicolon failed");
+    assert.deepEqual(await page.evaluate(() => window.__pythonBoots), [["numpy", "scipy"]], "an import after a semicolon was not part of the boot set");
+    assert.equal(count(result.runs, "import numpy as np; import scipy.stats as st\nprint('ok')"), 1, "an import after a semicolon needed a retry");
+
+    await page.goto(BASE + stageRoute("foundations", 2, "lazy-continuation"), { waitUntil: "load" });
+    await waitForCourse(page, "3 / 32");
+    const spread = "import numpy as np, \\\n    scipy.stats as st, \\\n    statsmodels.api as sm\nprint('ok')";
+    result = await runEdited(spread);
+    assert.equal(result.error, null, "two packages the scan missed were not both recovered by the one retry");
+    assert.deepEqual(await page.evaluate(() => window.__pythonBoots), [["numpy"]], "the scan should have missed the continued imports");
+    assert.equal(count(result.runs, spread), 2, "the retry for two missing packages did not run exactly twice");
+    assert.deepEqual(await page.evaluate(() => window.__pythonPackageLoads), [["pandas", "scipy", "statsmodels"]], "the retry did not load every package the code imports in one call");
+    clean();
+    await context.close();
+  }
+
+  {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+    await context.addInitScript(() => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      window.__status = () => {
+        const b = document.getElementById("labBoot");
+        return !b ? "(none)" : b.classList.contains("show") ? b.querySelector(".boot__txt").textContent.trim() : "(hidden)";
+      };
+      window.__loadStatus = []; window.__runStatus = [];
+      window.loadPyodide = async (config = {}) => {
+        await wait(300);
+        const loadedPackages = {};
+        for (const name of config.packages || []) loadedPackages[name] = "default channel";
+        return {
+          loadedPackages,
+          loadPackage: async (names) => {
+            const list = Array.from([].concat(names));
+            window.__loadStatus.push([list.join("+"), "start", window.__status()]);
+            await wait(500);
+            window.__loadStatus.push([list.join("+"), "end", window.__status()]);
+            for (const name of list) loadedPackages[name] = "default channel";
+          },
+          setStdout: () => {}, setStderr: () => {},
+          runPythonAsync: async (code) => {
+            window.__runStatus.push([code, window.__status()]);
+            if (code.includes("slow()")) await wait(600);
+            return code === "_grab_figs()" ? { toJs: () => [], destroy: () => {} } : undefined;
+          },
+        };
+      };
+    });
+    const page = await context.newPage();
+    const clean = watch(page);
+    await page.goto(BASE + stageRoute("foundations", 2, "overlap"), { waitUntil: "load" });
+    await waitForCourse(page, "3 / 32");
+
+    const first = await page.evaluate(async () => {
+      const cell = () => ({ out: document.createElement("div") });
+      const early = window.Lab.run("print(1)", cell());
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const late = window.Lab.run("import scipy.stats as st", cell());
+      const okEarly = await early;
+      const whileLateLoads = window.__status();
+      const okLate = await late;
+      return { okEarly, okLate, whileLateLoads, after: window.__status(), loads: window.__loadStatus };
+    });
+    assert(first.okEarly && first.okLate, "overlapping runs failed");
+    assert.equal(first.whileLateLoads, "Loading SciPy…", "the first run's end replaced or hid the status while the second run was still downloading");
+    assert.deepEqual(first.loads, [["scipy", "start", "Loading SciPy…"], ["scipy", "end", "Loading SciPy…"]], "the status changed while SciPy was downloading");
+    assert.equal(first.after, "(hidden)", "the status stayed up after every run finished");
+
+    const second = await page.evaluate(async () => {
+      const cell = () => ({ out: document.createElement("div") });
+      const slow = window.Lab.run("import patsy\nslow()", cell());
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const quick = window.Lab.run("import statsmodels.api as sm", cell());
+      await quick;
+      const whileSlowRuns = window.__status();
+      await slow;
+      return { whileSlowRuns, after: window.__status(), runs: window.__runStatus.filter(([code]) => code.includes("patsy") || code.includes("statsmodels")) };
+    });
+    assert.deepEqual(second.runs, [
+      ["import patsy\nslow()", "Loading pandas · statsmodels…"],
+      ["import statsmodels.api as sm", "Running…"],
+    ], "Running… replaced a package download that was still in flight");
+    assert.equal(second.whileSlowRuns, "Running…", "a finished run hid the status while another run was still executing");
+    assert.equal(second.after, "(hidden)", "the status stayed up after every run finished");
+
+    await page.goto(BASE + stageRoute("foundations", 1, "focus"), { waitUntil: "load" });
+    await waitForCourse(page, "2 / 32");
+    const launchButton = page.locator(".cell--interactive .cell__run");
+    await launchButton.focus();
+    await page.keyboard.press("Enter");
+    await page.waitForFunction(() => document.querySelector(".cell--interactive .cell__run")?.textContent.includes("Re-run"));
+    assert.equal(await page.evaluate(() => document.activeElement === document.querySelector(".cell--interactive .cell__run")), true, "keyboard focus was lost when Launch ran");
+
+    await page.goto(BASE + stageRoute("foundations", 2, "focus-cell"), { waitUntil: "load" });
+    await waitForCourse(page, "3 / 32");
+    await page.locator(".stage__work .cell__run").focus();
+    await page.keyboard.press("Enter");
+    await page.waitForFunction(() => { const b = document.querySelector(".stage__work .cell__run"); return !b.disabled && !b.textContent.includes("Running"); });
+    assert.equal(await page.evaluate(() => document.activeElement === document.querySelector(".stage__work .cell__run")), true, "keyboard focus was lost when Run finished");
     clean();
     await context.close();
   }

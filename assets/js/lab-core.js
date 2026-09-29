@@ -47,19 +47,23 @@ def _grab_figs():
   const MODULES = { numpy: "numpy", pandas: "pandas", scipy: "scipy", statsmodels: "statsmodels", patsy: "patsy", matplotlib: "matplotlib", mpl_toolkits: "matplotlib", pylab: "matplotlib" };
   const GLOBALS = { np: "numpy", pd: "pandas", plt: "matplotlib", matplotlib: "matplotlib" };
 
+  function withDeps(want) {
+    if (want.has("statsmodels")) { want.add("scipy"); want.add("pandas"); }
+    return PACKAGES.filter((name) => want.has(name));
+  }
+
   function packagesFor(code) {
     const want = new Set(["numpy"]);
-    for (const m of code.matchAll(/^[ \t]*(?:import[ \t]+([^\n#;]+)|from[ \t]+([A-Za-z_]\w*)[\w.]*[ \t]+import\b)/gm)) {
+    for (const m of code.replace(/#[^\n]*/g, "").matchAll(/(?:^|[;:])[ \t]*(?:import[ \t]+([^\n;]+)|from[ \t]+([A-Za-z_]\w*)[\w.]*[ \t]+import\b)/gm)) {
       for (const name of m[1] ? m[1].split(",").map((part) => part.trim().split(/[\s.]/)[0]) : [m[2]]) if (MODULES[name]) want.add(MODULES[name]);
     }
     for (const m of code.matchAll(/(?:^|[^\w.])(np|pd|plt|matplotlib)\./gm)) want.add(GLOBALS[m[1]]);
-    if (want.has("statsmodels")) { want.add("scipy"); want.add("pandas"); }
-    return PACKAGES.filter((name) => want.has(name));
+    return withDeps(want);
   }
   const label = (names) => names.map((name) => LABELS[name]).join(" · ");
 
   let pyodide = null, booting = null;
-  const ready = new Set();
+  const ready = new Set(), settingUp = new Map();
 
   const escHtml = (s) => s.replace(/[&<>]/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[m]));
 
@@ -127,40 +131,85 @@ def _grab_figs():
     return b;
   }
   const boot = (m) => { const b = bootEl(); b.querySelector(".boot__txt").textContent = m; b.classList.add("show"); };
-  const bootDone = () => bootEl().classList.remove("show");
+  const bootDone = () => { const b = document.getElementById("labBoot"); if (b) b.classList.remove("show"); };
+
+  const loads = new Map();
+  let running = 0;
+  function show() {
+    const last = Array.from(loads.values()).pop();
+    if (last) boot(last);
+    else if (running) boot("Running…");
+    else bootDone();
+  }
+  function track() {
+    const token = {};
+    return {
+      say(text) { loads.delete(token); loads.set(token, text); show(); },
+      end() { loads.delete(token); },
+    };
+  }
 
   function loadScript(src) {
     return new Promise((res, rej) => { const s = document.createElement("script"); s.src = src; s.onload = res; s.onerror = () => rej(new Error("load " + src)); document.head.appendChild(s); });
   }
 
-  async function getPyodide(packages = ["numpy"]) {
+  async function getPyodide(packages = ["numpy"], t) {
     if (pyodide) return pyodide;
-    if (booting) return booting;
-    booting = (async () => {
-      try {
-        boot("Loading Python · " + label(packages) + "…");
-        if (!window.loadPyodide) await loadScript(CDN + "pyodide.js");
-        pyodide = await window.loadPyodide({ indexURL: CDN, packages });
-        return pyodide;
-      } catch (e) { boot("Could not load the Python runtime — check your connection."); setTimeout(bootDone, 4000); booting = null; throw e; }
-    })();
-    return booting;
+    const own = !t;
+    if (own) t = track();
+    t.say("Loading Python · " + label(packages) + "…");
+    try {
+      if (!booting) {
+        booting = (async () => {
+          try {
+            if (!window.loadPyodide) await loadScript(CDN + "pyodide.js");
+            pyodide = await window.loadPyodide({ indexURL: CDN, packages });
+            return pyodide;
+          } catch (e) { boot("Could not load the Python runtime — check your connection."); setTimeout(show, 4000); booting = null; throw e; }
+        })();
+      }
+      return await booting;
+    } finally {
+      if (own) { t.end(); if (pyodide) show(); }
+    }
   }
 
-  async function prepare(py, packages) {
+  function setUp(py, name) {
+    if (!settingUp.has(name)) {
+      settingUp.set(name, py.runPythonAsync(SETUP[name]).then(() => { ready.add(name); }, (e) => { settingUp.delete(name); throw e; }));
+    }
+    return settingUp.get(name);
+  }
+
+  async function prepare(py, packages, say) {
     const missing = packages.filter((name) => !(name in py.loadedPackages));
-    if (missing.length) { boot("Loading " + label(missing) + "…"); await py.loadPackage(missing); }
+    if (missing.length) { say("Loading " + label(missing) + "…"); await py.loadPackage(missing); }
     const setup = packages.filter((name) => SETUP[name] && !ready.has(name));
-    if (setup.length) boot("Warming up " + label(setup) + "…");
-    for (const name of setup) { await py.runPythonAsync(SETUP[name]); ready.add(name); }
+    if (setup.length) say("Warming up " + label(setup) + "…");
+    for (const name of setup) await setUp(py, name);
     return missing.length > 0 || setup.length > 0;
   }
 
-  function neededBy(error, py) {
+  const unset = (name, py) => !(name in py.loadedPackages) || (SETUP[name] && !ready.has(name));
+
+  function imported(py, code) {
+    try {
+      const finder = py.pyimport("pyodide.code");
+      try {
+        const found = finder.find_imports(code);
+        try { return Array.from(found.toJs()); } finally { found.destroy(); }
+      } finally { finder.destroy(); }
+    } catch { return []; }
+  }
+
+  function neededBy(error, code, py) {
     const text = String((error && error.message) || error);
     const m = text.match(/No module named '([A-Za-z_]\w*)|Missing optional dependency '([A-Za-z_]\w*)'|\b(matplotlib) is required for plotting|NameError: name '(np|pd|plt|matplotlib)' is not defined/);
-    const name = m && (MODULES[m[1] || m[2] || m[3]] || GLOBALS[m[4]]);
-    return name && (!(name in py.loadedPackages) || (SETUP[name] && !ready.has(name))) ? name : null;
+    const first = m && (MODULES[m[1] || m[2] || m[3]] || GLOBALS[m[4]]);
+    if (!first || !unset(first, py)) return [];
+    const want = new Set([first]);
+    for (const name of imported(py, code)) if (MODULES[name]) want.add(MODULES[name]);
+    return withDeps(want).filter((name) => unset(name, py));
   }
 
   async function run(code, els) {
@@ -171,21 +220,26 @@ def _grab_figs():
     const write = (s) => { buf += s; stream.textContent = buf; out.scrollTop = out.scrollHeight; };
     const fail = (text) => { const er = document.createElement("span"); er.className = "err"; er.textContent = text; out.appendChild(er); return false; };
     const packages = packagesFor(code);
+    const t = track();
+    let holding = false;
+    const hold = () => { if (!holding) { holding = true; running++; } };
 
-    let py, busy;
-    try { py = await getPyodide(packages); }
-    catch { return fail("The Python runtime failed to load. Please retry."); }
-    try { busy = await prepare(py, packages); }
-    catch { bootDone(); return fail("The Python packages failed to load. Please retry."); }
-    if (busy) boot("Running…");
+    let py, busy = false, failure = "";
+    try { py = await getPyodide(packages, t); }
+    catch { t.end(); return fail("The Python runtime failed to load. Please retry."); }
+    try { busy = await prepare(py, packages, t.say); }
+    catch { failure = "The Python packages failed to load. Please retry."; }
+    if (busy) hold();
+    t.end(); show();
+    if (failure) return fail(failure);
 
     py.setStdout({ batched: write }); py.setStderr({ batched: write });
     try {
       try { await py.runPythonAsync(code); }
       catch (e) {
-        const name = neededBy(e, py);
-        if (!name) throw e;
-        busy = true; await prepare(py, [name]); boot("Running…");
+        const names = neededBy(e, code, py);
+        if (!names.length) throw e;
+        hold(); await prepare(py, names, t.say); t.end(); show();
         if (ready.has("matplotlib")) await py.runPythonAsync('__import__("matplotlib.pyplot").pyplot.close("all")');
         buf = ""; stream.textContent = "";
         await py.runPythonAsync(code);
@@ -202,7 +256,7 @@ def _grab_figs():
       stream.innerHTML = colorize(buf);
       if (window.FX && window.FX.ignite) window.FX.ignite(stream);
       return fail((buf ? "\n" : "") + (e && e.message ? e.message : String(e)));
-    } finally { py.setStdout(); py.setStderr(); if (busy) bootDone(); }
+    } finally { py.setStdout(); py.setStderr(); t.end(); if (holding) { running--; show(); } }
   }
 
   function renderFigs(figs, arr) {
@@ -248,6 +302,7 @@ def _grab_figs():
     const resetBtn = bar.querySelector(".cell__reset");
     async function doRun() {
       if (runBtn.disabled) return;
+      const refocus = document.activeElement === runBtn;
       runBtn.disabled = true; const label = runBtn.textContent; runBtn.textContent = "Running…";
       if (window.FX && window.FX.runState) window.FX.runState(runBtn, "busy");
       const submitted = editor.value;
@@ -255,6 +310,7 @@ def _grab_figs():
       const ok = await run(executable, { out, figs });
       if (window.FX && window.FX.runState) window.FX.runState(runBtn, "done");
       runBtn.textContent = label; runBtn.disabled = false;
+      if (refocus && document.activeElement === document.body) runBtn.focus();
       if (ok) {
         if (window.FX && window.FX.landed) window.FX.landed((figs && figs.children && figs.children.length) ? figs : out);
         if (typeof onRun === "function") onRun(runBtn);
