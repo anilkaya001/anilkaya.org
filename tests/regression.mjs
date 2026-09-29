@@ -249,12 +249,18 @@ try {
     const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
     await context.addInitScript(() => {
       window.__pythonLoads = Number(sessionStorage.getItem("academy:test-python-loads") || 0);
-      window.loadPyodide = async () => {
+      window.__pythonBoots = []; window.__pythonPackageLoads = []; window.__pythonRuns = [];
+      window.loadPyodide = async (config = {}) => {
         window.__pythonLoads++;
         sessionStorage.setItem("academy:test-python-loads", String(window.__pythonLoads));
+        const loadedPackages = {};
+        for (const name of config.packages || []) loadedPackages[name] = "default channel";
+        window.__pythonBoots.push(Array.from(config.packages || []));
         return {
-          loadPackage: async () => {}, setStdout: () => {}, setStderr: () => {},
-          runPythonAsync: async (code) => code === "_grab_figs()" ? { toJs: () => [], destroy: () => {} } : undefined,
+          loadedPackages,
+          loadPackage: async (names) => { const list = Array.from([].concat(names)); window.__pythonPackageLoads.push(list); for (const name of list) loadedPackages[name] = "default channel"; },
+          setStdout: () => {}, setStderr: () => {},
+          runPythonAsync: async (code) => { window.__pythonRuns.push(code); return code === "_grab_figs()" ? { toJs: () => [], destroy: () => {} } : undefined; },
         };
       };
     });
@@ -279,6 +285,23 @@ try {
     await page.locator(".cell__run").click();
     await page.locator(".quiz__feedback.ok").waitFor();
     assert.equal(await page.evaluate(() => window.__pythonLoads), 1, "code challenge did not use one lazy Python runtime");
+    assert.deepEqual(await page.evaluate(() => window.__pythonBoots), [["numpy"]], "a NumPy-only challenge did not boot Python with NumPy alone");
+    assert.deepEqual(await page.evaluate(() => window.__pythonPackageLoads), [], "a NumPy-only challenge loaded packages in a second round");
+    assert(!(await page.evaluate(() => window.__pythonRuns.some((code) => code.includes("matplotlib") || code.includes("pandas") || code === "_grab_figs()"))), "a NumPy-only challenge set up Matplotlib or pandas");
+    await page.locator("#cPrev").click();
+    await waitForCourse(page, "3 / 32");
+    await page.locator("#cPrev").click();
+    await waitForCourse(page, "2 / 32");
+    await page.locator(".cell--interactive .cell__run").click();
+    await page.waitForFunction(() => document.querySelector(".cell--interactive .cell__run")?.textContent.includes("Re-run"));
+    assert.equal(await page.evaluate(() => window.__pythonLoads), 1, "the second stage booted another Python runtime");
+    assert.deepEqual(await page.evaluate(() => window.__pythonPackageLoads), [["scipy", "matplotlib"]], "the interactive lab did not load its missing packages in one call");
+    const labRuns = await page.evaluate(() => window.__pythonRuns);
+    const setupAt = labRuns.findIndex((code) => code.includes('matplotlib.use("AGG")'));
+    const templateAt = labRuns.findIndex((code) => code.includes("import scipy") || code.includes("from scipy"));
+    assert(setupAt >= 0 && templateAt > setupAt, "the Matplotlib theme was not applied before the lab ran");
+    assert.equal(labRuns.filter((code) => code.includes('matplotlib.use("AGG")')).length, 1, "the Matplotlib theme was applied more than once");
+    assert.equal(labRuns.at(-1), "_grab_figs()", "figures were not captured once Matplotlib was loaded");
 
     await page.goto(BASE + stageRoute("foundations", 4, "native-case"));
     await waitForCourse(page, "5 / 32");
@@ -1115,6 +1138,95 @@ try {
     await boot.waitFor();
     assert.equal(await boot.getAttribute("role"), "status");
     assert((await boot.textContent()).trim().length > 0, "boot status text missing");
+    assert.equal((await boot.textContent()).trim(), "Loading Python · NumPy · pandas · SciPy · statsmodels · Matplotlib…", "boot status does not name the packages being loaded");
+    await page.goto(BASE + stageRoute("ols", 2), { waitUntil: "load" });
+    await waitForCourse(page, "3 / 20");
+    const launch = page.locator(".cell--interactive .cell__run");
+    await launch.click();
+    await page.waitForFunction(() => document.querySelector(".cell--interactive .cell__run")?.textContent === "Running…");
+    assert.equal(await launch.getAttribute("aria-busy"), "true", "Launch shows no busy state while Python loads");
+    assert(await launch.isDisabled(), "Launch stays clickable while Python loads");
+    clean();
+    await context.close();
+  }
+
+  {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+    await context.addInitScript(() => {
+      window.__pythonBoots = []; window.__pythonPackageLoads = []; window.__pythonRuns = [];
+      window.loadPyodide = async (config = {}) => {
+        const loadedPackages = {};
+        for (const name of config.packages || []) loadedPackages[name] = "default channel";
+        window.__pythonBoots.push(Array.from(config.packages || []));
+        const ran = (fragment) => window.__pythonRuns.some((code) => code.includes(fragment));
+        return {
+          loadedPackages,
+          loadPackage: async (names) => { const list = Array.from([].concat(names)); window.__pythonPackageLoads.push(list); for (const name of list) loadedPackages[name] = "default channel"; },
+          setStdout: () => {}, setStderr: () => {},
+          runPythonAsync: async (code) => {
+            window.__pythonRuns.push(code);
+            if (code === "_grab_figs()") return { toJs: () => [], destroy: () => {} };
+            const fail = (text) => { throw new Error("Traceback (most recent call last):\n  File \"<exec>\", line 1, in <module>\n" + text + "\n"); };
+            if (code.includes("value = pd") && !ran("import pandas as pd")) fail("NameError: name 'pd' is not defined");
+            if (code.includes(".plot()") && !loadedPackages.matplotlib) fail('ImportError: matplotlib is required for plotting when the default backend "matplotlib" is selected.');
+            if (code.includes("rank_corr()") && !loadedPackages.scipy) fail("ImportError: Missing optional dependency 'scipy'.  Use pip or conda to install scipy.");
+            if (code.includes("import sklearn")) fail("ModuleNotFoundError: No module named 'sklearn'");
+            if (code.includes("stubborn()")) fail("ModuleNotFoundError: No module named 'patsy'");
+            return undefined;
+          },
+        };
+      };
+    });
+    const page = await context.newPage();
+    const clean = watch(page);
+    await page.goto(BASE + stageRoute("ols", 1, "lazy-statsmodels"), { waitUntil: "load" });
+    await waitForCourse(page, "2 / 20");
+    await page.locator(".stage__work .cell__run").click();
+    await page.waitForFunction(() => { const b = document.querySelector(".stage__work .cell__run"); return !b.disabled && b.textContent.includes("Run") && !b.textContent.includes("Running"); });
+    assert.deepEqual(await page.evaluate(() => window.__pythonBoots), [["numpy", "pandas", "scipy", "statsmodels", "matplotlib"]], "a statsmodels stage did not resolve its whole package set at boot");
+    assert.deepEqual(await page.evaluate(() => window.__pythonPackageLoads), [], "a statsmodels stage loaded packages in a second round");
+    assert.equal(await page.evaluate(() => window.__pythonRuns.at(-1)), "_grab_figs()", "the statsmodels stage did not capture its figures");
+
+    await page.goto(BASE + stageRoute("foundations", 2, "lazy-retry"), { waitUntil: "load" });
+    await waitForCourse(page, "3 / 32");
+    const cell = page.locator(".stage__work .cell");
+    const runEdited = async (code) => {
+      await cell.locator(".cell__editor").fill(code);
+      const before = await page.evaluate(() => window.__pythonRuns.length);
+      await cell.locator(".cell__run").click();
+      await page.waitForFunction(() => { const b = document.querySelector(".stage__work .cell__run"); return !b.disabled && !b.textContent.includes("Running"); });
+      return {
+        runs: await page.evaluate((from) => window.__pythonRuns.slice(from), before),
+        error: await cell.locator(".cell__out .err").count() ? await cell.locator(".cell__out .err").textContent() : null,
+      };
+    };
+    const count = (runs, code) => runs.filter((ran) => ran === code).length;
+
+    let result = await runEdited("value = pd");
+    assert.deepEqual(await page.evaluate(() => window.__pythonBoots), [["numpy"]], "a run without imports booted more than NumPy");
+    assert.equal(result.error, null, "a bare pd reference was not retried after loading pandas");
+    assert.equal(count(result.runs, "value = pd"), 2, "a NameError for a PREAMBLE global did not retry exactly once");
+    assert.deepEqual(await page.evaluate(() => window.__pythonPackageLoads), [["pandas"]], "pandas was not loaded for the retry");
+
+    result = await runEdited("s = pd.Series([1.0, 2.0])\ns.plot()");
+    assert.equal(result.error, null, "an indirect Matplotlib use was not retried");
+    assert.equal(count(result.runs, "s = pd.Series([1.0, 2.0])\ns.plot()"), 2, "the plotting retry did not run exactly twice");
+    assert(result.runs.findIndex((code) => code.includes('matplotlib.use("AGG")')) > 0, "the Matplotlib theme was not applied before the retry");
+    assert.equal(result.runs.at(-1), "_grab_figs()", "the retried plot was not captured");
+
+    result = await runEdited("rank_corr()");
+    assert.equal(result.error, null, "a missing optional dependency was not loaded and retried");
+    assert.equal(count(result.runs, "rank_corr()"), 2);
+
+    result = await runEdited("import sklearn");
+    assert.match(result.error || "", /No module named 'sklearn'/, "an unknown module error was hidden");
+    assert.equal(count(result.runs, "import sklearn"), 1, "an unknown module was retried");
+
+    result = await runEdited("stubborn()");
+    assert.match(result.error || "", /No module named 'patsy'/, "a failed retry did not surface its error");
+    assert.equal(count(result.runs, "stubborn()"), 2, "a failing retry looped");
+    assert.deepEqual(await page.evaluate(() => window.__pythonPackageLoads), [["pandas"], ["matplotlib"], ["scipy"], ["patsy"]], "each retry must load exactly the one missing package");
+    assert.equal((await page.locator("#labBoot .boot__txt").textContent()).trim().length > 0, true, "boot status text emptied");
     clean();
     await context.close();
   }

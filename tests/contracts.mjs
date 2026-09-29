@@ -150,6 +150,51 @@ for (const meta of context.window.TOPIC_META) {
   }
 }
 assert.equal(context.window.TOPIC_META.reduce((sum, topic) => sum + topic.stages, 0), 365, "academy must contain 365 stages");
+
+{
+  const lab = { window: {} };
+  vm.createContext(lab);
+  for (const file of ["assets/js/lab-core.js", "assets/js/project-catalog.js"]) vm.runInContext(read(file), lab, { filename: file });
+  const packagesFor = (code) => Array.from(lab.window.Lab.packagesFor(code));
+  const imported = (code) => code.split("\n").flatMap((line) => {
+    const text = line.trim();
+    if (text.startsWith("import ")) return text.slice(7).split(",").map((part) => part.trim().split(/\s+/)[0].split(".")[0]);
+    const from = text.match(/^from\s+([A-Za-z_][\w.]*)\s+import\b/);
+    return from ? [from[1].split(".")[0]] : [];
+  });
+  const executables = [];
+  for (const meta of context.window.TOPIC_META) {
+    for (const module of JSON.parse(read(`assets/data/courses/${meta.id}/manifest.json`)).modules) {
+      for (const stage of JSON.parse(read(`assets/data/courses/${meta.id}/${module.id}.json`)).module.stages) {
+        if (stage.type === "code") executables.push([stage.id, stage.code]);
+        if (stage.type === "interactive") executables.push([stage.id, stage.template.replace(/\{\{(\w+)\}\}/g, (_, name) => String(stage.params.find((param) => param.name === name).value))]);
+        if (stage.type === "codechallenge") executables.push([stage.id, `${stage.starter}\n\n# Deterministic local grader\n${stage.tests}`]);
+      }
+    }
+  }
+  for (const project of lab.window.PROJECT_CATALOG) executables.push([project.id, project.code]);
+  assert.equal(executables.length, 139, `the lazy-loader scan found ${executables.length} executable cells, not the 136 stages and 3 projects`);
+  const sets = new Map();
+  for (const [id, code] of executables) {
+    const need = packagesFor(code);
+    assert.equal(need[0], "numpy", `${id}: NumPy must load before every run`);
+    for (const name of imported(code)) {
+      if (name === "pyodide" || name === "numpy") continue;
+      const mapped = packagesFor(`import ${name}`);
+      assert(mapped.length > 1, `${id}: imports ${name}, which the lazy Python loader does not map to a Pyodide package`);
+      assert(mapped.every((pkg) => need.includes(pkg)), `${id}: imports ${name}, but ${mapped.join("+")} is not loaded before the run`);
+    }
+    if (/(^|[^\w.])pd\./m.test(code)) assert(need.includes("pandas"), `${id}: uses pd without loading pandas`);
+    if (/(^|[^\w.])plt\./m.test(code)) assert(need.includes("matplotlib"), `${id}: uses plt without loading Matplotlib`);
+    sets.set(need.join("+"), (sets.get(need.join("+")) || 0) + 1);
+  }
+  assert.equal(sets.get("numpy"), 51, "the NumPy-only cells no longer boot NumPy alone");
+  assert.deepEqual(packagesFor("x = pd.Series([1])\nplt.plot(x)"), ["numpy", "pandas", "matplotlib"], "PREAMBLE globals must still load their packages");
+  assert.deepEqual(packagesFor("def f():\n    import statsmodels.formula.api as smf"), ["numpy", "pandas", "scipy", "statsmodels"], "an indented statsmodels import must name the pandas and SciPy it installs");
+  assert.deepEqual(packagesFor("from scipy import stats"), ["numpy", "scipy"], "from-imports must resolve");
+  assert.deepEqual(packagesFor("from mpl_toolkits.mplot3d import Axes3D\nmy_pd.x = obj.plt.y"), ["numpy", "matplotlib"], "only bare globals count");
+  assert.deepEqual(packagesFor("print(1)"), ["numpy"], "a plain run must boot NumPy only");
+}
 assert.equal(context.window.SKILL_CATALOG.length, 84, "academy must contain 84 durable skills");
 assert.equal(new Set(context.window.SKILL_CATALOG.map((skill) => skill.id)).size, 84, "skill ids must be unique");
 const stableMap = JSON.parse(read("assets/data/stage-id-map-v2.json"));
