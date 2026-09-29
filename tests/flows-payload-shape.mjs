@@ -796,6 +796,9 @@ assert.deepEqual(missingReport, [],
     ok(e[k] && typeof e[k] === "object", `events gains ${k}`);
   }
   ok(Array.isArray(e.rows), "and keeps its rows, which the events renderer reads");
+  const digests = Object.values(e.history).filter((d) => d && d.status === "ok");
+  ok(digests.length > 0 && digests.every((d) => typeof d.mv === "number" && "em" in d),
+    `every ok history digest (${digests.length}) carries mv and em, so the earnings lane paints from this payload with no card-x read per name`);
   ok(Buffer.byteLength(JSON.stringify(e)) <= 100 * 1024, "events stays well inside the ingest cap with its additions");
 
   const p = emitted("pulse");
