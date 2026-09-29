@@ -317,7 +317,7 @@ const NYSE_PUBLISHED = Object.freeze({
     const asked = [];
     let release = null;
     const ctx = {
-      console, setTimeout, clearTimeout, setInterval, clearInterval, URL,
+      console, setTimeout, clearTimeout, setInterval, clearInterval, URL, AbortController,
       location: { href: "https://x.test/flows/" },
       matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
       document: { addEventListener() {}, removeEventListener() {}, getElementById: () => null, querySelector: () => null,
