@@ -788,11 +788,15 @@ async function openEvents(browser, payload, opts = {}) {
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.route("**/*", (route) => route.fulfill({ contentType: "text/html", body: HTML }));
-  await page.addInitScript(([pl, mode, updatedAt]) => {
+  await page.addInitScript(([pl, mode, updatedAt, cx]) => {
     const answer = (o) => ({ ...o, clone: () => ({ text: () => Promise.resolve("") }) });
+    window.__asked = [];
     window.fetch = (url) => {
       if (String(url).indexOf("/api/flows/events") < 0) {
-        return Promise.resolve(answer({ ok: true, status: 200, headers: { get: () => null }, json: () => Promise.resolve({ status: "pending" }) }));
+        window.__asked.push(String(url));
+        const t = /card-x\?t=([^&]+)/.exec(String(url));
+        const body = t && cx && cx[decodeURIComponent(t[1])] ? cx[decodeURIComponent(t[1])] : { status: "pending" };
+        return Promise.resolve(answer({ ok: true, status: 200, headers: { get: () => null }, json: () => Promise.resolve(JSON.parse(JSON.stringify(body))) }));
       }
       if (mode === "http") {
         return Promise.resolve(answer({ ok: false, status: 503, headers: { get: () => null }, json: () => Promise.resolve({}) }));
@@ -805,7 +809,7 @@ async function openEvents(browser, payload, opts = {}) {
           : Promise.resolve(JSON.parse(JSON.stringify(pl)))),
       }));
     };
-  }, [payload, opts.mode || "", opts.updatedAt || Date.now()]);
+  }, [payload, opts.mode || "", opts.updatedAt || Date.now(), opts.cx || null]);
   await page.goto("https://x.test/flows/events/", { waitUntil: "domcontentloaded" });
   if (opts.css) for (const sheet of SHEETS) await page.addStyleTag({ path: path.join(ROOT, sheet) });
   await page.addScriptTag({ path: path.join(ROOT, "assets/js/flows-ui.js") });
@@ -1106,6 +1110,74 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
     eq(wide.stale && wide.stale.hidden, true, "while a fresh payload raises no pill");
     ok(!/that run's, not today's/.test(wide.status.text),
        "and adds no qualifier, so the day counts are stated flat only when they ARE today's");
+  } finally {
+    await browser.close();
+  }
+}
+
+
+{
+  const CAL = buildEvents([
+    nameAt("NEWA", plusDays(GATE_ORIGIN, 1)),
+    nameAt("NEWB", plusDays(GATE_ORIGIN, 2)),
+    nameAt("OLDC", plusDays(GATE_ORIGIN, 3)),
+    nameAt("THIN", plusDays(GATE_ORIGIN, 4)),
+  ], { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE });
+  const digest = (mv, em) => ({ status: "ok", n: 8, r: 1.2, beat: 0.5, hit: 0.625, drift: 0.01, mv, em });
+  CAL.history = {
+    NEWA: digest(0.0432, 0.0611),
+    NEWB: digest(0.0226, null),
+    OLDC: { status: "ok", n: 8, r: 0.9, beat: 0.25, hit: 0.375, drift: null },
+    THIN: { status: "thin", reason: "few", n: 2 },
+  };
+  const cx = { OLDC: { ticker: "OLDC", earnings: { status: "ok", medianAbsMove: 0.0178, ls1dHit: 0.375, impliedNext: { em: 0.0733 } } } };
+  const browser = await chromium.launch();
+  try {
+    const read = async (payload) => {
+      const { page, errors } = await openEvents(browser, payload, { width: 1440, css: true, cx });
+      await page.waitForFunction(() => {
+        const r = document.querySelector('#evEarn .fe-erow[data-t="OLDC"]');
+        return r && r.dataset.realized !== "pending";
+      }, null, { timeout: 15000 }).catch(() => {});
+      await page.waitForTimeout(100);
+      const out = await page.evaluate(() => {
+        const rows = {};
+        for (const r of document.querySelectorAll("#evEarn .fe-erow:not(.fu-head)")) {
+          const v = r.querySelectorAll(".fu-v");
+          rows[r.dataset.t] = { realized: r.dataset.realized, implied: v[0] ? v[0].textContent : null, typical: v[1] ? v[1].textContent : null,
+            hit: v[2] ? v[2].textContent : null, real: !!r.querySelector(".fe-pair .is-real") };
+        }
+        return { rows, asked: window.__asked.slice() };
+      });
+      await page.close();
+      return { ...out, errors };
+    };
+    const got = await read(CAL);
+    deep(got.errors, [], `the lane renders from the payload's digest without throwing (${got.errors[0] || "clean"})`);
+    deep(got.asked.filter((u) => /card-x/.test(u)), ["/api/flows/card-x?t=OLDC"],
+      `the page asks card-x only for the one ok name whose digest predates the median and implied fields ` +
+      `(${got.asked.join(", ") || "none"}); the two names the digest already carries cost no request, and the thin name none`);
+    eq(got.rows.NEWA.realized, "ok", "a digest carrying mv paints the typical move as measured, not pending");
+    eq(got.rows.NEWA.typical, "\u00b14.3%", "the typical move is the digest's median absolute move");
+    eq(got.rows.NEWA.implied, "\u00b16.1%",
+      "and the implied move is the digest's em, ahead of the row's own implied move to the next expiry (5.0%)");
+    eq(got.rows.NEWA.hit, "63%", "the hit share rides on the same digest");
+    ok(got.rows.NEWA.real, "and the gray bar is drawn");
+    eq(got.rows.NEWB.typical, "\u00b12.3%", "a digest with a median but no implied move still paints the median");
+    eq(got.rows.NEWB.implied, "\u00b15.0%", "and falls back to the row's implied move, as the card-x read did when impliedNext was absent");
+    eq(got.rows.OLDC.realized, "ok", "an old digest without the fields still fills from the per-name read");
+    eq(got.rows.OLDC.typical, "\u00b11.8%", "with the card's median move");
+    eq(got.rows.OLDC.implied, "\u00b17.3%", "and the card's implied move");
+    eq(got.rows.THIN.realized, "quiet", "a thin digest stays quiet, with no request");
+
+    const old = JSON.parse(JSON.stringify(CAL));
+    for (const t of ["NEWA", "NEWB"]) { delete old.history[t].mv; delete old.history[t].em; }
+    const back = await read(old);
+    deep(back.asked.filter((u) => /card-x/.test(u)).sort(),
+      ["/api/flows/card-x?t=NEWA", "/api/flows/card-x?t=NEWB", "/api/flows/card-x?t=OLDC"],
+      "a payload written before the fields existed falls back to one read per ok name, as before");
+    eq(back.rows.NEWA.realized, "pending", "and a name whose card has not been published reads pending, not a zero");
+    eq(back.rows.OLDC.typical, "\u00b11.8%", "while a name whose card answers fills from it");
   } finally {
     await browser.close();
   }

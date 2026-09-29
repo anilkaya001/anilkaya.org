@@ -418,6 +418,11 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(earningsHistory([{ report_date: "2026-01-01", expected_move_perc: "5" , post_earnings_move_1d: "3" }], { sessionDate: S }).reason,
     SILENCE.unit, "an expected move above 1 means the unit is not the fraction the probe saw");
   eq(historyDigest(h).n, 8, "the digest keeps the count");
+  eq(historyDigest(h).mv, 0.0625, "and the median absolute one-day move, (0.025 + 0.1) / 2, which the events lane draws as the typical move");
+  eq(historyDigest(h).em, null, "with no implied move when the calendar carried none for the name");
+  eq(historyDigest({ ...h, impliedNext: { em: 0.0612345, d: "2026-10-29", when: "postmarket" } }).em, 0.0612,
+    "and the calendar's implied move to four places when it did, so the events page needs no per-name card-x read");
+  ok(!("mv" in historyDigest(recent)) && !("em" in historyDigest(recent)), "a thin digest carries neither: its lane reads quiet");
 
   const kbh = shapeEarningsCalendar([probe("earnings-afterhours")], { sessionDate: S });
   near(kbh.rows[0].em, 0.08223296974686149, 1e-15, "calendar expected move is a fraction");
@@ -590,6 +595,16 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     ok(k in legs.eventsAdditions, `events gains ${k}`);
   }
   ok(legs.earnings.size >= 10, "every deep name gets an earnings history read");
+  {
+    const hist = Object.entries(legs.eventsAdditions.history);
+    const okd = hist.filter(([, d]) => d && d.status === "ok");
+    ok(okd.length > 0 && okd.every(([t, d]) => d.mv === Number(legs.earnings.get(t).medianAbsMove.toFixed(4))),
+      `every ok digest on the events payload (${okd.length} of ${hist.length}) carries the median absolute move its card-x earnings block carries`);
+    const priced = okd.filter(([t]) => legs.earnings.get(t).impliedNext);
+    ok(priced.length > 0 && okd.length > priced.length, `and the fixture has names with (${priced.length}) and without an implied move`);
+    ok(okd.every(([t, d]) => d.em === (legs.earnings.get(t).impliedNext ? Number(legs.earnings.get(t).impliedNext.em.toFixed(4)) : null)),
+      "and each digest's em is the card-x block's impliedNext.em, or null where the calendar priced none: the events lane reads both from the payload");
+  }
   ok(MARKET_LEG_CALLS > 0 && MARKET_LEG_CALLS < 400, `the modelled leg cost is ${MARKET_LEG_CALLS} calls`);
   eq(calendarPlan(S).length, 13, "the calendar reads two reaction days, tonight and ten upcoming routes");
 

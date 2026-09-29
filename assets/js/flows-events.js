@@ -116,9 +116,16 @@
     return out;
   }
 
+  const digestOf = (t) => {
+    const hist = S.payload && S.payload.history && typeof S.payload.history === "object" ? S.payload.history : null;
+    const d = hist ? hist[t] : null;
+    return d && d.status === "ok" && n(d.mv) !== null ? d : null;
+  };
+
   const impliedOf = (r, cal) => {
     const cx = S.cx.get(r.t);
-    const e = cx && cx.earnings && cx.earnings.impliedNext ? n(cx.earnings.impliedNext.em) : null;
+    const dg = digestOf(r.t);
+    const e = cx && cx.earnings && cx.earnings.impliedNext ? n(cx.earnings.impliedNext.em) : dg ? n(dg.em) : null;
     const c = cal ? n(cal.em) : null;
     if (c !== null) return { v: Math.abs(c), src: "the vendor's expected earnings move" };
     if (e !== null) return { v: Math.abs(e), src: "the vendor's expected earnings move" };
@@ -135,6 +142,7 @@
     if (!digest) return { st: { state: "unavailable", reason: "This name is outside the history window: only names reporting within ten sessions carry their past reports." } };
     if (digest.status === "thin") return { st: { state: "quiet", reason: "Fewer reports than the statistic needs (" + (n(digest.n) ?? 0) + ")." }, digest };
     if (digest.status !== "ok") return { st: blockState(digest, "earnings history"), digest };
+    if (digestOf(t)) return { st: { state: "ok" }, earnings: { medianAbsMove: n(digest.mv), ls1dHit: n(digest.hit) }, digest };
     return { st: { state: "pending", reason: "Reading this name's past reports." }, digest };
   }
 
@@ -288,7 +296,8 @@
     const hist = payload.history && typeof payload.history === "object" ? payload.history : null;
     if (!hist) return;
     S.asked = true;
-    const names = (payload.rows || []).map((r) => r.t).filter((t) => hist[t] && hist[t].status === "ok").slice(0, 40);
+    const names = (payload.rows || []).map((r) => r.t).filter((t) => hist[t] && hist[t].status === "ok" && !digestOf(t)).slice(0, 40);
+    if (!names.length) return;
     const one = async (t) => {
       try {
         const res = await fetch("/api/flows/card-x?t=" + encodeURIComponent(cardKey(t)), { credentials: "same-origin", headers: { Accept: "application/json" } });
