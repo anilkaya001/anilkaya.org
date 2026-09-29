@@ -36,7 +36,7 @@ import {
   probeStored, LEDGER_PROBE_CHUNK, LEDGER_PROBE_MAX, dryRosterProbe, DRY_PROBE_BYTES,
 } from "../scripts/flows-pipeline.mjs";
 import { FOCUS_FUNDS, MAG7 as FOCUS_MAG7, FOCUS_MINERS } from "../shared/flows-focus.js";
-import { runHealthGate, refusalOf, tallyRefusal } from "../scripts/flows-legs/health.mjs";
+import { runHealthGate, refusalOf, tallyRefusal, QUOTA_WAIT } from "../scripts/flows-legs/health.mjs";
 import { VARIATION_CODES, variationSummary } from "../shared/flows-variation.js";
 import { pinReading, buildCard } from "../shared/flows-card.js";
 import { pearson, horizonMove, HORIZON_SESSIONS, realizedVol } from "../shared/flows-features.js";
@@ -313,11 +313,17 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 {
   const http = await import("node:http");
   const received = [];
+  let quotaAnswers = 0;
   const server = http.createServer((req, res) => {
     let body = "";
     req.on("data", (c) => { body += c; });
     req.on("end", () => {
       received.push({ url: req.url, auth: req.headers.authorization, body });
+      if (body.includes("QUOTAKEY") && ++quotaAnswers <= 2) {
+        res.writeHead(503, { "Content-Type": "application/json", "Retry-After": "1" });
+        res.end('{"error":{"code":"store_quota","message":"The store\'s daily quota is spent; it resets at 00:00 UTC"}}');
+        return;
+      }
       res.writeHead(body.includes("FAILME") ? 500 : 200, { "Content-Type": "application/json" });
       res.end('{"ok":true}');
     });
@@ -347,6 +353,21 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     try { await publish("card:FAILME", { ticker: "FAILME" }); }
     catch (error) { threw = error; }
     ok(threw && /HTTP 500/.test(threw.message), "a failed ingest throws with its status");
+
+    const quotaMargin = QUOTA_WAIT.marginMs;
+    QUOTA_WAIT.marginMs = 0;
+    const quotaFrom = Date.now();
+    const quotaSeen = received.length;
+    const quotaWarn = console.warn;
+    const quotaLines = [];
+    console.warn = (line) => quotaLines.push(String(line));
+    try { await publish("card:QUOTAKEY", { ticker: "QUOTAKEY" }); } finally { console.warn = quotaWarn; QUOTA_WAIT.marginMs = quotaMargin; }
+    const quotaMs = Date.now() - quotaFrom;
+    eq(received.length - quotaSeen, 3, "A store_quota ANSWER IS WAITED OUT, not failed: two 503s with Retry-After: 1 and the third request lands, " +
+      "where the ordinary schedule would have given up on a cap that lasts until 00:00 UTC");
+    ok(quotaMs >= 2000 - 50, `after waiting the two seconds the Worker asked for (${quotaMs} ms)`);
+    ok(quotaLines.length === 2 && quotaLines.every((l) => /store_quota — the store's daily quota is spent and resets at 00:00 UTC; waiting 1s/.test(l)),
+      "each wait logged, naming the cause");
 
     eq(summarize({ rows: [1, 2, 3] }), "3 rows", "a board is described by its row count");
     eq(summarize({ ticker: "AAPL" }), "no rows", "a card is described honestly, not by a crash");

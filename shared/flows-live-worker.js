@@ -10,6 +10,10 @@ import {
 import { LIVE_OIDC, looksLikeJwt, rsaKeys, verifyLiveOidc, claimsBrief } from "./flows-oidc.js";
 import { focusStripNames } from "./flows-focus.js";
 import { readLabActiveAt } from "./lab-sign-in.js";
+import {
+  LEDGER_SCHEMA_SQL, LEDGER_ROWS_SQL, tickWindow, ledgerTickStatement, ledgerOutcomeStatement, ledgerFocusStatement,
+  ledgerPassStatement, ledgerNightlyStatement, ledgerView, ledgerPruneCutoff, worstStale,
+} from "./flows-ledger.js";
 
 export { looksLikeJwt };
 
@@ -24,6 +28,7 @@ export const LIVE_SCHEMA_SQL = Object.freeze([
     "live_redispatched_at INTEGER, nightly_day TEXT, nightly_dispatched_at INTEGER, nightly_redispatched_at INTEGER, " +
     "summary_stamp TEXT, updated_at INTEGER, tier1_at INTEGER, tier1_ok_at INTEGER, tier1_why TEXT, " +
     "closed_probe_at INTEGER, closed_days TEXT, dispatch_why TEXT, summary_at INTEGER)",
+  LEDGER_SCHEMA_SQL,
   "CREATE TRIGGER IF NOT EXISTS flows_archive_immutable BEFORE UPDATE ON flows_payload " +
     "WHEN OLD.id GLOB 'board:*:[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' " +
     "OR OLD.id GLOB 'scores:[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' " +
@@ -208,6 +213,16 @@ export function clockPatchStatement(db, patch, now) {
   ).bind(...values);
 }
 
+export async function batchWithLedger(db, core, extra) {
+  if (!extra) return db.batch(core);
+  try {
+    return await db.batch([...core, extra]);
+  } catch (error) {
+    console.warn(JSON.stringify({ message: "ledger statement refused", error: error instanceof Error ? error.message : String(error) }));
+    return core.length === 1 ? core[0].run() : db.batch(core);
+  }
+}
+
 export function writeLiveStatement(db, key, text, meta, now) {
   return db.prepare(
     "INSERT INTO flows_live (id, payload, read_at, session, cadence_s, source, writer, updated_at) " +
@@ -268,6 +283,9 @@ export async function tier1Reads(fetchVendor, { timeoutMs = LIVE_BUDGET.tier1Tim
   TIER1_CALLS.forEach((c, i) => { raws[c.feed] = results[i]; });
   return raws;
 }
+
+const LIVE_AGES_SQL = "SELECT id, read_at, session, cadence_s, source FROM flows_live";
+const TIER1_FAILURES = /^(error:|no-feed-answered$|over-cap$)/;
 
 const clockFlag = (v) => (v === null || v === undefined || v === "" ? null : Number(v) === 1 ? 1 : Number(v) === 0 ? 0 : null);
 
@@ -350,20 +368,24 @@ export function liveMode(env) {
 export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = console } = {}) {
   const out = { tier1: null, dispatch: null, watchdog: null };
   if (!env || !env.DB) return { ...out, skipped: "no-db" };
-  const telemetry = await clockPatchStatement(env.DB, { tier1At: at }, at).run().then(() => true, () => false);
+  const today = easternDay(at);
+  const beat = clockPatchStatement(env.DB, { tier1At: at }, at);
+  const telemetry = await (today
+    ? batchWithLedger(env.DB, [beat], ledgerTickStatement(env.DB, { day: today, at, ...tickWindow(today, memoizedClock(at)) }))
+    : beat.run()).then(() => true, () => false);
   out.telemetry = telemetry;
   if (liveMode(env) === "off") {
     if (telemetry) await clockPatchStatement(env.DB, { tier1Why: "off" }, at).run().catch(() => {});
     return { ...out, skipped: "off" };
   }
-  const today = easternDay(at);
-  const [clockRes, breadthRes] = await env.DB.batch([
+  const [clockRes, liveRes] = await env.DB.batch([
     env.DB.prepare("SELECT * FROM flows_clock WHERE id = 1"),
-    env.DB.prepare("SELECT read_at FROM flows_live WHERE id = 'live:breadth'"),
+    env.DB.prepare(LIVE_AGES_SQL),
   ]).catch(() => [null, null]);
   const clock = normalizeClock(clockRes && clockRes.results ? clockRes.results[0] : null);
-  const breadthReadAt = breadthRes && breadthRes.results && breadthRes.results[0]
-    ? Number(breadthRes.results[0].read_at) : null;
+  const liveRows = liveRes && Array.isArray(liveRes.results) ? liveRes.results : [];
+  const breadthRow = liveRows.find((r) => r && r.id === "live:breadth");
+  const breadthReadAt = breadthRow ? Number(breadthRow.read_at) : null;
   const closedToday = !!clock && clock.day === today && clockClosed(clock.trading);
   const reprobe = closedToday && verdictReprobeDue(at, clock);
   if (closedToday && !reprobe) {
@@ -415,6 +437,10 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
   else if (why !== "not-due") patch.tier1Why = tier1Why(why);
 
   const merged = { ...(clock || {}), ...patch };
+  const ledgerStatement = telemetry && today && why !== "not-due"
+    ? ledgerOutcomeStatement(env.DB, { day: today, at, ...tickWindow(today, merged), ok: why === "written",
+      failed: TIER1_FAILURES.test(why), stale: worstStale(liveRows, at, merged) })
+    : null;
   const due = liveDispatchDue(at, merged);
   if (due.due) {
     const sent = await dispatchWorkflow(env, env.FLOWS_LIVE_WORKFLOW || "flows-live.yml",
@@ -442,7 +468,7 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
   }
 
   if (Object.keys(patch).length) statements.push(clockPatchStatement(env.DB, patch, at));
-  if (statements.length) await env.DB.batch(statements);
+  if (statements.length) await batchWithLedger(env.DB, statements, ledgerStatement);
   memoClock({ ...(clock || {}), ...(telemetry ? { tier1At: at } : {}), ...patch }, at);
   out.why = why;
   return out;
@@ -502,14 +528,16 @@ export async function focusTick(env, at, { fetchVendor, log = console } = {}) {
   const text = usable && !lost.length ? JSON.stringify(payload) : null;
   const why = !usable ? (payload.status === "ok" ? "none-priced" : payload.reason || payload.status)
     : text === null ? "partial" : text.length > spec.maxBytes ? "over-cap" : "written";
+  const tally = (ok, partial, failed) => ledgerFocusStatement(env.DB, { day: session, at, ...tickWindow(session, clock), ok, partial, failed });
   if (why !== "written") {
     log.error(JSON.stringify({ message: "live:focus not written", why, status: payload.status, asked, hit,
       lost: lost.slice(0, 10), bytes: text === null ? null : text.length, detail: payload.detail || null }));
+    await tally(false, why === "partial", why !== "partial").run().catch(() => {});
     return { ...out, written: false, why };
   }
-  await writeLiveStatement(env.DB, "live:focus", text, {
+  await batchWithLedger(env.DB, [writeLiveStatement(env.DB, "live:focus", text, {
     readAt: at, session, cadenceS: spec.cadenceS, source: "worker", writer: FOCUS_WRITER,
-  }, at).run();
+  }, at)], tally(true, false, false));
   return { ...out, written: true, why, bytes: text.length };
 }
 
@@ -676,9 +704,17 @@ export async function ingestLive(env, key, method, text, now, { json }) {
   if (!verdict.ok) return json({ error: { code: verdict.code, message: verdict.message } }, verdict.status);
   const statements = [writeLiveStatement(env.DB, key, text, verdict.meta, now)];
   if (key === "live:heartbeat") statements.push(clockPatchStatement(env.DB, { liveDoneAt: now }, now));
-  const results = await env.DB.batch(statements);
+  const pass = key === "live:heartbeat" ? heartbeatLedger(env.DB, body, verdict.meta) : null;
+  const results = await batchWithLedger(env.DB, statements, pass);
   const changed = results && results[0] && results[0].meta ? Number(results[0].meta.changes) || 0 : 0;
   return json({ ok: true, key, bytes: text.length, stored: changed ? "written" : "older-than-held" });
+}
+
+export function heartbeatLedger(db, body, meta) {
+  const day = meta && typeof meta.session === "string" ? meta.session : null;
+  if (!day || !Number.isFinite(Number(meta.readAt))) return null;
+  const run = body && typeof body.run === "object" && body.run ? body.run : {};
+  return ledgerPassStatement(db, { day, at: meta.readAt, calls: run.calls, failedCalls: run.failedCalls });
 }
 
 export function liveResponse(row, now, clock, extra = {}) {
@@ -786,12 +822,40 @@ export function ingestClockView(clock) {
     dispatchWhy: typeof clock.dispatchWhy === "string" ? clock.dispatchWhy : null, summaryAt: isoOf(clock.summaryAt) } : null;
 }
 
+export async function readLedgerRows(db) {
+  if (!db) return null;
+  try {
+    const res = await db.prepare(LEDGER_ROWS_SQL).all();
+    return res && Array.isArray(res.results) ? res.results : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function serveIngestClock(env, { json, lab = false }) {
   const db = env && env.DB;
-  const [clock, labActiveAt] = await Promise.all([readClock(db), lab ? readLabActiveAt(db) : null]);
+  const [clock, labActiveAt, ledgerRows] = await Promise.all([readClock(db), lab ? readLabActiveAt(db) : null,
+    lab ? readLedgerRows(db) : null]);
   const body = { key: "clock", clock: ingestClockView(clock) };
-  if (lab) body.labActiveAt = labActiveAt;
+  if (lab) {
+    body.labActiveAt = labActiveAt;
+    if (ledgerRows) body.ledger = ledgerView(ledgerRows);
+  }
   return json(body);
+}
+
+export function nightlyLedger(db, payload, at) {
+  const day = payload && typeof payload.sessionDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(payload.sessionDate)
+    ? payload.sessionDate : null;
+  return day ? ledgerNightlyStatement(db, { day, at }) : null;
+}
+
+export async function pruneLedger(env, now) {
+  if (!env || !env.DB) return 0;
+  const cutoff = ledgerPruneCutoff(easternDay(now));
+  if (!cutoff) return 0;
+  const res = await env.DB.prepare("DELETE FROM flows_ledger WHERE day <= ?").bind(cutoff).run().catch(() => null);
+  return res && res.meta ? Number(res.meta.changes) || 0 : 0;
 }
 
 export async function serveNow(env, url, now, { json, HttpError, quote }) {

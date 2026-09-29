@@ -2337,7 +2337,7 @@ const cronMinutes = (cron) => {
     db.batch = async (list) => {
       db.statements.push(...list);
       if (/SELECT \* FROM flows_clock/.test(list[0].sql)) {
-        return [{ results: [clockRow] }, { results: [{ read_at: easternInstant(S, 10 * 60 + 10) }] }];
+        return [{ results: [clockRow] }, { results: [{ id: "live:breadth", read_at: easternInstant(S, 10 * 60 + 10), session: S, cadence_s: 900, source: "actions" }] }];
       }
       return list.map(() => ({ results: [] }));
     };
@@ -2688,7 +2688,7 @@ const cronMinutes = (cron) => {
     "runHealthGate reads the clock, live:market, live:focus and live:heartbeat through the ingest route and prints one line");
   const pipeline = read("scripts/flows-pipeline.mjs");
   const tail = pipeline.slice(pipeline.indexOf("async function main()"), pipeline.indexOf("\nexport {\n"));
-  ok(/const health = await runHealthGate\(\{ sessionDate, read: readStored, dry: DRY_RUN, edge: edgeSnapshot,\s*annotate: process\.env\.GITHUB_ACTIONS === "true" \}\);\s*if \(health\.failures\.length\) process\.exitCode = 1;\s*\}\s*$/
+  ok(/const health = await runHealthGate\(\{ sessionDate, read: readStored, dry: DRY_RUN, edge: edgeSnapshot,\s*annotate: process\.env\.GITHUB_ACTIONS === "true",\s*night: \{[^}]*\} \}\);\s*if \(health\.failures\.length\) process\.exitCode = 1;\s*\}\s*$/
     .test(tail), "THE NIGHTLY ENDS WITH THE GATE: its last statement runs it and turns the run red on any failure, after " +
     "every key is published, with the edge 403s counted by kind and the Worker's own 403s kept apart");
   ok(/export function edgeSnapshot\(\) \{\s*return \{ \.\.\.structuredClone\(edgeRefusals\), retrySpentMs: publishRetrySpentMs \};\s*\}/

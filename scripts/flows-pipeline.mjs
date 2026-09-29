@@ -67,7 +67,7 @@ import {
   passOutcome, liveRunVerdict,
 } from "./flows-legs/live.mjs";
 import {
-  runHealthGate, republishRepair, refusalOf, refusalTally, tallyRefusal, tallyAnswer, retriedStatus, refusalBrief,
+  runHealthGate, republishRepair, refusalOf, refusalTally, tallyRefusal, tallyAnswer, retriedStatus, refusalBrief, storeQuotaWait, QUOTA_WAIT,
 } from "./flows-legs/health.mjs";
 import { LIVE_OIDC, actionsIdToken, jwtExpiry } from "../shared/flows-oidc.js";
 
@@ -2977,6 +2977,8 @@ export function resetPublishRetryBudget() {
 
 const PUBLISH_RETRYABLE = new Set([403, 408, 429, 500, 502, 503, 504]);
 
+let quotaFirstAt = 0;
+
 export function publishRetryDelay(attempt, {
   retries = PUBLISH_RETRIES, budgetMs = PUBLISH_RETRY_BUDGET_MS, spentMs = 0,
 } = {}) {
@@ -3023,6 +3025,19 @@ async function publish(key, payload) {
 
   refusal = response.status === 403 ? await noteRefusal(response) : null;
   heard = refusal || await noteAnswer(response);
+  const quotaWait = !response.ok && heard ? storeQuotaWait(response, heard.text, { firstAt: quotaFirstAt }) : null;
+  if (quotaWait !== null) {
+    quotaFirstAt = quotaFirstAt || Date.now();
+    lastDetail = heard.text;
+    console.warn(
+      `  ingest ${key}: HTTP ${response.status} store_quota — the store's daily quota is spent and resets at 00:00 UTC; ` +
+      `waiting ${Math.round(quotaWait / 1000)}s for it (a wait of at most ${Math.round(QUOTA_WAIT.maxMs / 60000)} min a run, ` +
+      "not counted against the retry budget)");
+    ingestWrites.defer(quotaWait);
+    await sleep(quotaWait);
+    attempt--;
+    continue;
+  }
   const wait = PUBLISH_RETRYABLE.has(response.status) && !(refusal && refusal.kind === "worker")
     ? publishRetryDelay(attempt, { spentMs: publishRetrySpentMs })
     : null;
@@ -4441,7 +4456,8 @@ export async function retireAndRoster({
     log(`  roster: ${Object.keys(built.payload.depth).length} carded name(s) — ` +
       Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(", ") + `, ${built.bytes} bytes (ledger ${ledger})`);
   }
-  return { retired: removed, absent, refused, held: Object.keys(held).length, ledger, bytes: built.bytes, written };
+  return { retired: removed, absent, refused, held: Object.keys(held).length, ledger, bytes: built.bytes, written,
+    rostered: Object.keys(built.payload.depth).length };
 }
 
 function dryPriorRoster(sessionDate) {
@@ -6698,6 +6714,7 @@ async function main() {
   }
 
   let rosterSummary = null;
+  let rosterThrew = false;
   const probeBudget = { spentMs: 0, budgetMs: LEDGER_PROBE_RETRY_BUDGET_MS };
   try {
     rosterSummary = await retireAndRoster({
@@ -6720,6 +6737,7 @@ async function main() {
       deadline,
     });
   } catch (error) {
+    rosterThrew = true;
     console.warn(`  roster: ${error.message} — the retire step stopped before the roster was written; the stored ` +
       "roster stays at its older session, so the next run finds the gap and probes the store");
   }
@@ -6923,7 +6941,12 @@ async function main() {
   if (verdict) console.log("  " + verdict);
 
   const health = await runHealthGate({ sessionDate, read: readStored, dry: DRY_RUN, edge: edgeSnapshot,
-    annotate: process.env.GITHUB_ACTIONS === "true" });
+    annotate: process.env.GITHUB_ACTIONS === "true",
+    night: {
+      cardsFailed: cardsFailed + extraFailed, deadlineSkipped: deadlineSkipped + extraSkipped,
+      planned: byCard.size + dossierBuilt.size, rostered: rosterSummary ? rosterSummary.rostered : null,
+      rosterWritten: rosterSummary ? rosterSummary.written : (rosterThrew ? false : undefined), enriched: enriched.length,
+    } });
   if (health.failures.length) process.exitCode = 1;
 }
 

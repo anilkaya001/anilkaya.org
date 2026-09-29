@@ -995,6 +995,11 @@ async function cardWithEngine(env, ticker, stored, trace = {}) {
   return { stored, card, unreadable: false };
 }
 
+const STORE_QUOTA_RE = /exceeded D1's|free tier daily row|D1_ERROR[\s\S]*\b7500\b/i;
+const isStoreQuota = (error) => STORE_QUOTA_RE.test(error instanceof Error ? error.message : String(error));
+const secondsToUtcMidnight = (now) => Math.max(60, Math.ceil((Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(),
+  new Date(now).getUTCDate() + 1) - now) / 1000));
+
 const STORE_GONE = Object.freeze({ status: "unavailable", reason: "store" });
 const storeGone = () => new HttpError(503, "store_unreadable", "The store could not be read", { "Retry-After": "30" }, STORE_GONE);
 
@@ -3217,10 +3222,14 @@ async function route(request, env, url, ctx) {
       return json({ ok: true, key, bytes: payload.length, stored: "created" });
     }
 
-    await env.DB.prepare(
+    const wroteAt = Date.now();
+    const upsert = env.DB.prepare(
       "INSERT INTO flows_payload (id, payload, updated_at) VALUES (?, ?, ?) " +
       "ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at"
-    ).bind(key, payload, Date.now()).run();
+    ).bind(key, payload, wroteAt);
+    const landing = key === "meta" ? FLOWS_LIVE.nightlyLedger(env.DB, JSON.parse(payload), wroteAt) : null;
+    if (landing) await FLOWS_LIVE.batchWithLedger(env.DB, [upsert], landing);
+    else await upsert.run();
 
     return json({ ok: true, key, bytes: payload.length });
   }
@@ -3599,7 +3608,10 @@ export default {
     guard("flows nightly dispatch failed", (async () => {
       await ensureFlowsTables(env);
       await FLOWS_LIVE.nightlyTick(env, at);
-      if (FLOWS_LIVE.pruneDue(at)) await FLOWS_LIVE.pruneTape(env, at);
+      if (FLOWS_LIVE.pruneDue(at)) {
+        await FLOWS_LIVE.pruneTape(env, at);
+        await FLOWS_LIVE.pruneLedger(env, at);
+      }
     })());
   },
 
@@ -3617,6 +3629,10 @@ export default {
         path: url.pathname,
         error: error instanceof Error ? error.message : String(error),
       }));
+      if (isStoreQuota(error)) {
+        return finalize(apiError(503, "store_quota", "The store's daily quota is spent; it resets at 00:00 UTC",
+          { "Retry-After": String(secondsToUtcMidnight(Date.now())) }), request, url);
+      }
       return finalize(apiError(500, "internal_error", "Internal server error"), request, url);
     }
   },

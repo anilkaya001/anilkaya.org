@@ -1,5 +1,9 @@
-import { easternDay, easternClock, easternInstant, closeMinutes, nextWeekdayDay } from "../../shared/flows-freshness.js";
+import {
+  easternDay, easternClock, easternInstant, closeMinutes, nextWeekdayDay, prevTradingDay, PHASE_MINUTES, LIVE_CLOCK,
+} from "../../shared/flows-freshness.js";
 import { timeMs } from "../../shared/flows-live.js";
+import { LEDGER_LIMITS } from "../../shared/flows-ledger.js";
+import { LIVE_LOOP } from "./live.mjs";
 
 export const HEALTH = Object.freeze({
   focusCron: "3-58/5 13-21 * * MON-FRI",
@@ -10,6 +14,8 @@ export const HEALTH = Object.freeze({
   settleMin: 10,
   edge403: 24,
   retrySpentMs: 60_000,
+  burst5xx: 5,
+  coverage: 0.7,
 });
 
 export function republishRepair(sessionDate) {
@@ -108,10 +114,15 @@ export function tallyAnswer(tally, response, text = "") {
   const headers = response ? response.headers : null;
   const ray = cleaned(headerOf(headers, "cf-ray"), /[^A-Za-z0-9-]/g, 40);
   const code = cloudflareCode(typeof text === "string" ? text : "");
+  const own = status >= 500 ? workerErrorCode(typeof text === "string" ? text : "") : null;
   const statuses = tally.statuses || (tally.statuses = {});
   const slot = statuses[status] || (statuses[status] = { n: 0, unrayed: 0, rays: [], codes: {}, codeRays: {},
     server: cleaned(headerOf(headers, "server"), /[^A-Za-z0-9 ._/-]/g, 40) });
   slot.n++;
+  if (own) {
+    slot.worker = slot.worker || {};
+    slot.worker[own] = (slot.worker[own] || 0) + 1;
+  }
   if (!ray) slot.unrayed++;
   const keep = (list) => { if (ray && list.length < RAYS_KEPT && !list.includes(ray)) list.push(ray); };
   if (code) {
@@ -141,6 +152,9 @@ export function tallyRefusal(tally, seen) {
 const SKIP_RULE = "the Skip rule for /api/flows/ingest in DEPLOY.md 10.0 item 3";
 const DAILY_LIMIT = "the Workers Free plan's 100,000 requests a day ran out, and every request to the site counts: " +
   "it resets at 00:00 UTC, and Workers Paid removes the cap (DEPLOY.md 10.0 item 5)";
+export const D1_QUOTA = "Cloudflare D1's Free-plan daily cap is spent (100,000 rows written or 5,000,000 rows read a day): " +
+  "every read and write of the store fails until it resets at 00:00 UTC, and Workers Paid removes it (DEPLOY.md 10.0 item 5); " +
+  "the row-read ceilings in tests/flows-reads-contract.mjs are what keeps the Worker itself under the read cap";
 const WORKER_CODES = Object.freeze({ 1101: "the Worker threw", 1102: "the Worker ran over its CPU or memory limit" });
 const rayNote = (slot) => (slot.rays.length ? `; Ray ID ${slot.rays.join(", ")}` : "; no cf-ray");
 
@@ -241,6 +255,10 @@ function statusRemedies(statuses) {
       `Cloudflare rule answers 408: ${SKIP_RULE} covers a rate limiting or custom rule, and a timeout is the network ` +
       "between GitHub and Cloudflare, which the retries absorb");
   }
+  const quota = slots.filter(([s]) => s >= 500).reduce((sum, [, slot]) => sum + ((slot.worker && slot.worker.store_quota) || 0), 0);
+  if (quota) {
+    lines.push(`HEALTH: ${were(quota, "an ingest answer", "ingest answers")} carried the Worker's own store_quota: ${D1_QUOTA}`);
+  }
   const failing = through((s) => s >= 500, (slot) => codeN(slot, "1027"));
   if (failing.length) {
     const glosses = Object.entries(WORKER_CODES).map(([code, gloss]) => [code, gloss,
@@ -268,12 +286,29 @@ function statusRemedies(statuses) {
   return lines;
 }
 
+export const QUOTA_WAIT = { maxMs: 20 * 60 * 1000, marginMs: 30 * 1000 };
+
+export function storeQuotaWait(response, text, { now = Date.now(), firstAt = 0 } = {}) {
+  if (!response || response.status !== 503) return null;
+  if (workerErrorCode(typeof text === "string" ? text : "") !== "store_quota") return null;
+  const seconds = Number(headerOf(response.headers, "retry-after"));
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  const wait = Math.ceil(seconds * 1000) + QUOTA_WAIT.marginMs;
+  const started = firstAt > 0 ? firstAt : now;
+  return now + wait - started <= QUOTA_WAIT.maxMs ? wait : null;
+}
+
+export const burst5xx = (statuses) => statusSlots(statuses).filter(([status]) => status >= 500).reduce((sum, [, slot]) => sum + slot.n, 0);
+
 function edgeFailures(edge403, kinds, retrySpentMs, statuses) {
-  if (!(edge403 >= HEALTH.edge403 || retrySpentMs >= HEALTH.retrySpentMs)) return [];
+  const burst = burst5xx(statuses);
+  if (!(edge403 >= HEALTH.edge403 || retrySpentMs >= HEALTH.retrySpentMs || burst >= HEALTH.burst5xx)) return [];
   const spent = `${Math.round(retrySpentMs / 1000)} s of the 90 s budget`;
   const others = statusRemedies(statuses);
   if (!(edge403 > 0)) {
-    const head = `HEALTH: ingest retries spent ${spent} with no edge 403`;
+    const head = burst >= HEALTH.burst5xx && retrySpentMs < HEALTH.retrySpentMs
+      ? `HEALTH: ${burst} ingest answers were HTTP 5xx (a burst of ${HEALTH.burst5xx} or more; retries spent ${spent})`
+      : `HEALTH: ingest retries spent ${spent} with no edge 403`;
     if (others.length) return [head, ...others];
     return [`${head}: the ingest lines above name each answer; a 429 or 408 with a cf-ray is a Cloudflare rate ` +
       `limiting rule or an edge timeout (${SKIP_RULE}), and a 5xx or no answer is the Worker or D1 failing`];
@@ -336,11 +371,121 @@ const said = (read) => (read && read.status ? `HTTP ${read.status}` : "no answer
 const payloadOf = (read) => (read && !read.failed && !read.absent && read.payload && typeof read.payload === "object"
   ? read.payload : null);
 
+const minutesOf = (ms) => Math.round(ms / 60000);
+const isoMs = (iso) => timeMs(iso);
+const spanOf = (endIso, gapMs, day) => {
+  const end = isoMs(endIso);
+  return Number.isFinite(end) ? `${etTime(end - gapMs, day)} to ${etTime(end, day)}` : "an unrecorded interval";
+};
+
+export function ledgerOf(clockRead) {
+  const body = payloadOf(clockRead);
+  const ledger = body && body.ledger && typeof body.ledger === "object" ? body.ledger : null;
+  return ledger && Array.isArray(ledger.days) ? ledger : null;
+}
+
+export function runChecks(run) {
+  if (!run || typeof run !== "object") return [];
+  const n = (v) => (Number.isFinite(Number(v)) ? Math.max(0, Number(v)) : 0);
+  const out = [];
+  if (n(run.cardsFailed) > 0) {
+    out.push(`HEALTH: ${n(run.cardsFailed)} card(s) failed to build or publish tonight; the run's "cards:" and ` +
+      "\"cross-section cards:\" lines name each, and those tickers keep the previous dossier under a Stale chip until the next nightly");
+  }
+  if (n(run.deadlineSkipped) > 0) {
+    out.push(`HEALTH: ${n(run.deadlineSkipped)} card(s) were skipped past the run's deadline: the nightly ran out of time before ` +
+      "building them, so those names keep the previous dossier (a slow vendor, or a nightly slower than the deadline was sized for)");
+  }
+  if (run.rosterWritten === false) {
+    out.push("HEALTH: the roster was not written, so the next run cannot age or retire cards and probes the store to rebuild " +
+      "its ledger; the stored roster stays at its older session");
+  } else if (Number.isFinite(Number(run.planned)) && Number.isFinite(Number(run.rostered)) && Number(run.rostered) < Number(run.planned)) {
+    const enriched = Number.isFinite(Number(run.enriched)) ? ` (${Number(run.enriched)} enriched)` : "";
+    out.push(`HEALTH: the roster lists ${Number(run.rostered)} of the ${Number(run.planned)} names planned a card tonight${enriched}: ` +
+      `${Number(run.planned) - Number(run.rostered)} card(s) never landed, and the ticker page serves those names an older dossier or a quote card`);
+  }
+  return out;
+}
+
+export function ledgerChecks({ ledger, sessionDate, clock = null } = {}) {
+  const failures = [], warnings = [], notes = [];
+  const days = ledger && Array.isArray(ledger.days) ? ledger.days : null;
+  if (!days) {
+    notes.push("the Worker's clock carries no session ledger (a Worker older than this check)");
+    return { failures, warnings, notes };
+  }
+  if (!days.length) {
+    notes.push("the session ledger is empty: it starts with the first Tier 1 tick after the Worker that keeps it was deployed");
+    return { failures, warnings, notes };
+  }
+  const row = days.find((d) => d && d.day === sessionDate);
+  if (!row) {
+    failures.push(`HEALTH: the session ledger holds ${days.length} day(s) but none for ${sessionDate}: not one Worker tick was ` +
+      "recorded that day (is 1-59/5 13-21 * * MON-FRI registered? wrangler triggers deploy)");
+    return { failures, warnings, notes };
+  }
+  const lenient = days.length === 1;
+  const flag = (line) => (lenient ? warnings.push(`WARNING: ${line.replace(/^HEALTH: /, "")} (the ledger began this session, so its first interval may predate it)`)
+    : failures.push(line));
+  const t1 = row.tier1 || {}, focus = row.focus || {}, t2 = row.tier2 || {}, stale = row.stale || {};
+  const limits = { t1: LEDGER_LIMITS.tier1Ms, focus: LEDGER_LIMITS.focusMs, t2: LEDGER_LIMITS.tier2Ms };
+  const closeMin = closeMinutes(sessionDate, clock);
+  if (t1.gapMs > limits.t1) {
+    flag(`HEALTH: the Worker's rth cron did not tick for ${minutesOf(t1.gapMs)} min inside ${sessionDate}'s session ` +
+      `(${spanOf(t1.gapEndAt, t1.gapMs, sessionDate)}), so live:market and every pill on it crossed the ${minutesOf(limits.t1)} min ` +
+      "stale line (is 1-59/5 13-21 * * MON-FRI registered? Cloudflare's own status says whether its scheduler dropped firings)");
+  } else if (t1.okGapMs > limits.t1) {
+    flag(`HEALTH: Tier 1 went ${minutesOf(t1.okGapMs)} min without writing live:market (${spanOf(t1.okGapEndAt, t1.okGapMs, sessionDate)}) ` +
+      `although the cron kept ticking (${t1.fail} tick(s) failed), past the ${minutesOf(limits.t1)} min stale line; the Worker's ` +
+      "\"tier 1 read failed\" and \"live:market not written\" log lines say why");
+  }
+  if (focus.gapMs > limits.focus) {
+    flag(`HEALTH: the focus cron went ${minutesOf(focus.gapMs)} min without writing live:focus (${spanOf(focus.gapEndAt, focus.gapMs, sessionDate)}), ` +
+      `past its ${minutesOf(limits.focus)} min stale line (${focus.partial} tick(s) were partial, ${focus.fail} failed; its ` +
+      "\"live:focus not written\" log lines say why a read was kept)");
+  }
+  if (t2.passes === 0) {
+    flag(`HEALTH: no Tier 2 pass was recorded for ${sessionDate}: the live loop never ran, so every Actions-written key was ` +
+      "stale from the open (DEPLOY.md 10.0 item 1 sets the token that lets the Worker start it)");
+  } else if (t2.gapMs > limits.t2) {
+    const opening = isoMs(t2.gapEndAt) - t2.gapMs <= easternInstant(sessionDate, PHASE_MINUTES.open) + 1000;
+    flag(`HEALTH: Tier 2 went ${minutesOf(t2.gapMs)} min without a pass ${opening ? "from the open " : ""}(${spanOf(t2.gapEndAt, t2.gapMs, sessionDate)}), ` +
+      `past the ${minutesOf(limits.t2)} min stale line: every Actions-written key read stale for ${minutesOf(t2.gapMs - limits.t2)}+ min of it ` +
+      "(GitHub's scheduler starts the loop unless GITHUB_DISPATCH_TOKEN lets the Worker do it)");
+  }
+  const slot = LIVE_LOOP.slotMs / 60000;
+  const expected = Math.floor((closeMin + LIVE_CLOCK.runAfterCloseMin - PHASE_MINUTES.open) / slot);
+  if (t2.passes > 0 && t2.passes < HEALTH.coverage * expected) {
+    warnings.push(`WARNING: Tier 2 made ${t2.passes} pass(es) in ${sessionDate}'s session against about ${expected} at one every ` +
+      `${slot} min; the first came at ${etTime(isoMs(t2.firstAt), sessionDate)}`);
+  }
+  if (Number.isFinite(stale.overS) && stale.overS > 0) {
+    warnings.push(`WARNING: ${stale.key || "a live key"} was ${minutesOf(stale.overS * 1000)} min past its stale line at the Worker's worst ` +
+      `check (${stale.ticks} check(s) saw a lapse); the pill and the ticker said stale for that time`);
+  }
+  const at = (iso) => (iso ? etTime(isoMs(iso), sessionDate) : "never");
+  notes.push(`ledger ${sessionDate}: ${row.ticks} tick(s); Tier 1 ${t1.ok} ok / ${t1.fail} failed, longest silence ` +
+    `${minutesOf(t1.okGapMs)} min; focus ${focus.ok} ok / ${focus.partial} partial / ${focus.fail} failed, longest silence ` +
+    `${minutesOf(focus.gapMs)} min; Tier 2 ${t2.passes} pass(es) from ${at(t2.firstAt)}, longest gap ${minutesOf(t2.gapMs)} min, ` +
+    `${t2.failedCalls} of ${t2.calls} vendor call(s) failed; worst lapse ${stale.overS > 0 ? stale.key + " " + minutesOf(stale.overS * 1000) + " min" : "none"}`);
+  const previous = prevTradingDay(sessionDate, clock);
+  const before = previous ? days.find((d) => d && d.day === previous) : null;
+  const born = previous ? days.some((d) => d && d.day < previous) : false;
+  if (before && born && before.ticks > 0 && !(before.nightly && before.nightly.at)) {
+    failures.push(`HEALTH: no nightly landed for ${previous}: the ledger saw the Worker tick ${before.ticks} time(s) that day and no ` +
+      `meta write followed, so scores:${previous}, the dated boards, the record and the score track hold no ${previous} session and ` +
+      "cannot be republished now that a later session has opened; every nightly-class key read behind until this run");
+  }
+  return { failures, warnings, notes, row };
+}
+
 export function healthChecks({ sessionDate, now = Date.now(), clockRead = null, marketRead = null,
-  focusRead = null, heartbeatRead = null, edge403 = 0, edgeKinds = null, worker403 = null, edgeStatuses = null, retrySpentMs = 0 } = {}) {
+  focusRead = null, heartbeatRead = null, edge403 = 0, edgeKinds = null, worker403 = null, edgeStatuses = null, retrySpentMs = 0,
+  night = null } = {}) {
   const failures = edgeFailures(edge403, edgeKinds, retrySpentMs, edgeStatuses);
   const notes = [edgeNote(edge403, edgeKinds, worker403, retrySpentMs, edgeStatuses)];
   const warnings = [];
+  failures.push(...runChecks(night));
   const lab = labCheck(clockRead, now);
   if (lab.failure) failures.push(lab.failure);
   if (lab.warning) warnings.push(lab.warning);
@@ -349,12 +494,19 @@ export function healthChecks({ sessionDate, now = Date.now(), clockRead = null, 
     return { applies: false, why: "no session date", failures, warnings, notes };
   }
   const today = easternDay(now);
+  const body = payloadOf(clockRead);
+  const clock = body && body.clock && typeof body.clock === "object" ? body.clock : null;
   if (today !== sessionDate) {
+    const held = ledgerOf(clockRead);
+    if (held && !(clock && clock.tier1 && clock.tier1.why === "off")) {
+      const late = ledgerChecks({ ledger: held, sessionDate });
+      failures.push(...late.failures);
+      warnings.push(...late.warnings);
+      notes.push(...late.notes);
+    }
     return { applies: false, why: `this run is for ${sessionDate} and today is ${today}; the live checks describe today`,
       failures, warnings, notes };
   }
-  const body = payloadOf(clockRead);
-  const clock = body && body.clock && typeof body.clock === "object" ? body.clock : null;
   const sameDay = !!clock && clock.day === sessionDate;
   const closeMin = closeMinutes(sessionDate, sameDay ? clock : null);
   if (easternClock(now).minutes < closeMin + HEALTH.settleMin) {
@@ -384,6 +536,10 @@ export function healthChecks({ sessionDate, now = Date.now(), clockRead = null, 
       notes.push("FLOWS_LIVE_MODE is off, so the live layer is not checked");
       return { applies: true, why: "live-off", failures, warnings, notes };
     }
+    const kept = ledgerChecks({ ledger: ledgerOf(clockRead), sessionDate, clock: sameDay ? clock : null });
+    failures.push(...kept.failures);
+    warnings.push(...kept.warnings);
+    notes.push(...kept.notes);
     const at = tier1 ? timeMs(tier1.at) : NaN;
     if (!sameDay) {
       failures.push(at >= close
@@ -457,7 +613,7 @@ export function healthChecks({ sessionDate, now = Date.now(), clockRead = null, 
 }
 
 export async function runHealthGate({ sessionDate, read, now = () => Date.now(), edge = null, dry = false,
-  annotate = false, log = console.log, warn = console.warn } = {}) {
+  annotate = false, night = null, log = console.log, warn = console.warn } = {}) {
   if (dry) {
     log("health gate: skipped in a dry run, which reads no store");
     return { applies: false, failures: [], warnings: [], notes: [] };
@@ -471,7 +627,7 @@ export async function runHealthGate({ sessionDate, read, now = () => Date.now(),
     await safe("live:focus"), await safe("live:heartbeat")];
   const seen = { ...refusalTally(), retrySpentMs: 0, ...(typeof edge === "function" ? edge() : edge) };
   const verdict = healthChecks({ sessionDate, now: now(), clockRead, marketRead, focusRead, heartbeatRead, edge403: seen.count,
-    edgeKinds: seen.kinds, worker403: seen.worker, edgeStatuses: seen.statuses, retrySpentMs: seen.retrySpentMs });
+    edgeKinds: seen.kinds, worker403: seen.worker, edgeStatuses: seen.statuses, retrySpentMs: seen.retrySpentMs, night });
   log(`health gate: ${verdict.applies ? "checked" : "live checks skipped — " + verdict.why}; ` +
     `${verdict.failures.length} failure(s)` + (verdict.warnings.length ? `, ${verdict.warnings.length} warning(s)` : ""));
   for (const n of verdict.notes) log("  " + n);

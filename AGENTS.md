@@ -117,6 +117,7 @@ header readback with this repository after any dashboard rule change.
 | `tests/worker-regression.mjs` | Real local Wrangler routing, headers, API, and D1 tests. |
 | `tests/regression.mjs` | Full Playwright browser regression suite. |
 | `shared/flows-freshness.js` | The Eastern clock (arithmetic, proven equal to the IANA zone), market phases, the freshness threshold table, `X-Fresh-*` headers, and the live clock's due-tests. |
+| `shared/flows-ledger.js` | The per-day session ledger: the `flows_ledger` DDL, the statement builders the Tier 1 tick, the focus tick, the heartbeat write and the nightly's `meta` write append to a batch they already issue, the gap limits (the stale lines of `FRESH_CLASSES`), the view served as `ledger` on the ingest `clock` key, and the worst-key lapse the Tier 1 tick reads from the live rows. |
 | `shared/flows-live.js`, `shared/flows-live-worker.js` | The live layer's key registry and pure builders; the Worker's Tier 1 tick, dispatch, watchdog, live ingest, `/api/flows/lk`, `/now`, `/tape` and read-time overlays. |
 | `shared/flows-oidc.js` | The live credential: the GitHub OIDC claim policy (this repository by id, `flows-live.yml` on main), the pure JWT verifier the Worker runs, and the runner-side token request the `--live` leg uses. No shared secret. |
 | `scripts/flows-legs/live.mjs`, `live-fake.mjs` | The Actions `--live` leg (Tier 2, `live:*` keys only) and its fake vendor for `--dry-run`. |
@@ -124,6 +125,7 @@ header readback with this repository after any dashboard rule change.
 | `scripts/flows-legs/focus.mjs`, `health.mjs` | The nightly `focus` and `roster` payload builders; the nightly health gate and its repair messages. |
 | `assets/js/flows-fresh.js` | The client freshness helper (`FlowsUI.freshFrom`, `freshAggregate`, `heartbeat`). |
 | `tests/flows-live-contract.mjs` | Live-layer builders, phases and states, byte ceilings, the one-writer scans, the `--live` dry run and the client helper. |
+| `tests/flows-ledger-contract.mjs` | The ledger's SQL over a real SQLite (gaps clipped to the session, ok and failed ticks, partial focus reads, passes, the nightly's landing, retention), its zero-extra-round-trip and never-blocks-the-tick properties on the real tick functions, its ingest view, and the health gate's reading of it: gap lines at the stale lines, a nightly that never landed, cards failed or skipped, the roster shortfall and the 5xx burst. |
 | `tests/flows-reads-contract.mjs` | The Worker's D1 round trips per read route, counted on a fake binding: the single-flight schema bootstrap, the absent-card decision, the live overlays and the ticker reading. |
 
 ## Curriculum and stage contracts
@@ -478,7 +480,7 @@ flows-positioning-contract
 flows-legs-contract
 flows-live-contract    flows-freshness-contract
 flows-quant-card       flows-track-render
-flows-pipeline-contract  flows-reads-contract
+flows-pipeline-contract  flows-reads-contract  flows-ledger-contract
 ```
 
 `flows-reads-contract` was measured on 2026-09-28: about 20 s with no server,
@@ -493,6 +495,11 @@ the suite fails to import with `No such built-in module: node:sqlite`. The
 suite runs under `--disable-warning=ExperimentalWarning`, which on 22.22.2
 silences the SQLite notice and nothing else; the blanket `--no-warnings` would
 also hide a deprecation raised by `worker.js` under Node.
+
+`flows-ledger-contract` was measured on 2026-09-29: under one second with no
+server. It drives the ledger's SQL and the real Tier 1, focus and heartbeat
+functions over a `node:sqlite` binding, so it needs Node 22.13 or newer and
+runs under `--disable-warning=ExperimentalWarning` like the reads suite.
 
 `flows-pipeline-contract` was measured on 2026-09-24: 123 s with no server. It
 was on neither list, so a source scan in it (every ingest call site must

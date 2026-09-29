@@ -1966,9 +1966,17 @@ try {
           "route, so it stops on a holiday or at an early close the calendar alone cannot know; that key adds the " +
           "Tier 1 telemetry, the last dispatch outcome and the summary cron's last completed firing");
       const nightlyClock = await ingest("clock", "GET", INGEST_TOKEN);
-      deep(await nightlyClock.json(), { key: "clock", clock: clockNow, labActiveAt: null },
+      const { ledger, ...nightlyRest } = await nightlyClock.json();
+      deep(nightlyRest, { key: "clock", clock: clockNow, labActiveAt: null },
         "as does the nightly's health gate under the nightly token, which alone also reads labActiveAt: null while " +
           "no Lab user is on record");
+      const ledgerDay = ledger && ledger.days.find((d) => d.day === "2026-09-24");
+      ok(ledger && ledger.retainDays === 30 && ledgerDay && ledgerDay.ticks >= 3 && ledgerDay.tier1.lastAt === nb.tier1.at &&
+         ledgerDay.tier1.ok >= 1 && ledgerDay.tier1.gapMs > 0,
+        "THE SESSION LEDGER FROM REAL D1: the same nightly credential's read of the clock carries the ledger the ticks above " +
+          "wrote through wrangler's own SQLite, with the day's tick count, last tick and the gap between them");
+      ok(!Object.hasOwn(await (await ingest("clock", "GET", LIVE_TOKEN)).json(), "ledger"),
+        "and the live credential's every-pass read of the clock carries none");
       {
         const labAt = async () => (await (await ingest("clock", "GET", INGEST_TOKEN)).json()).labActiveAt;
         const created = Date.parse("2026-06-30T12:00:00Z");
