@@ -230,20 +230,25 @@
     el.classList.toggle("fx-lit", state === "lit" && !reduce());
   }
 
+  const turns = new WeakMap();
   function pageTurn(el, dir, swapFn) {
     if (!el) return;
     if (reduce()) { swapFn(); return; }
     const d = dir < 0 ? -1 : 1;
+    const turn = {};
+    turns.set(el, turn);
     el.style.transition = "transform 0.2s var(--ease), opacity 0.2s var(--ease)";
     el.style.transform = "translateY(" + d * 16 + "px)"; el.style.opacity = "0";
     setTimeout(() => {
-      swapFn();
-      el.style.transition = "none";
-      el.style.transform = "translateY(" + -d * 18 + "px)"; el.style.opacity = "0";
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        el.style.transition = "transform 0.3s var(--ease), opacity 0.3s var(--ease)";
-        el.style.transform = "none"; el.style.opacity = "1";
-      }));
+      Promise.resolve(swapFn()).finally(() => {
+        if (turns.get(el) !== turn) return;
+        el.style.transition = "none";
+        el.style.transform = "translateY(" + -d * 18 + "px)"; el.style.opacity = "0";
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          el.style.transition = "transform 0.3s var(--ease), opacity 0.3s var(--ease)";
+          el.style.transform = "none"; el.style.opacity = "1";
+        }));
+      });
     }, 200);
   }
 

@@ -307,7 +307,7 @@ writeFileSync(path.join(ROOT, "shared/course-points.js"), `export const COURSE_S
 const imageById = Object.fromEntries(topics.map((topic) => [topic.id, ["ols", "iv2sls", "did", "var", "panel", "logit", "gmm"].includes(topic.id) ? `/assets/img/og-${topic.id}.png` : "/assets/img/og.png"]));
 const seoRows = courses.map((course) => {
   const meta = metadataById.get(course.id);
-  return { id: course.id, slug: meta.slug, number: meta.num, name: meta.title, pageTitle: `${meta.title} — Econometrics Lab`, description: meta.blurb, image: imageById[course.id], level: meta.level, modules: course.modules.map(({ title, summary }) => ({ title, summary })) };
+  return { id: course.id, slug: meta.slug, number: meta.num, name: meta.title, pageTitle: `${meta.title} — Econometrics Lab`, description: meta.blurb, image: imageById[course.id], level: meta.level, modules: course.modules.map(({ id, title, summary }) => ({ id, title, summary })) };
 });
 writeFileSync(path.join(ROOT, "shared/course-seo.js"), `export const SITE_ORIGIN = "https://anilkaya.org";\nconst freezeTopic=(topic)=>Object.freeze({...topic,path:\`/lab/\${topic.slug}/\`,modules:Object.freeze(topic.modules.map((module)=>Object.freeze(module)))});\nexport const COURSE_TOPICS=Object.freeze(${JSON.stringify(seoRows)}.map(freezeTopic));\nexport const COURSE_BY_ID=Object.freeze(Object.fromEntries(COURSE_TOPICS.map((topic)=>[topic.id,topic])));\nexport const COURSE_BY_SLUG=Object.freeze(Object.fromEntries(COURSE_TOPICS.map((topic)=>[topic.slug,topic])));\n`);
 

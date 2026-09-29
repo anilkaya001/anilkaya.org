@@ -2370,7 +2370,9 @@ async function renderCourse(request, env, url, meta, ctx) {
     .on("html", { element: (el) => { assetVersion = el.getAttribute("data-asset-version") || ""; } })
     .on("head", { element: (el) => {
       const query = assetVersion ? "?v=" + encodeURIComponent(assetVersion) : "";
-      el.prepend('<link rel="preload" as="fetch" crossorigin="anonymous" href="/assets/data/courses/' + meta.id + "/manifest.json" + query + '">', { html: true });
+      const base = "/assets/data/courses/" + encodeURIComponent(meta.id) + "/";
+      el.prepend('<link rel="preload" as="fetch" crossorigin="anonymous" href="' + base + "manifest.json" + query + '">' +
+        '<link rel="preload" as="fetch" crossorigin="anonymous" href="' + base + encodeURIComponent(meta.modules[0].id) + ".json" + query + '">', { html: true });
     } })
     .on("title", { element: (el) => el.setInnerContent(meta.pageTitle) })
     .on('meta[name="description"]', setAttr("content", meta.description))

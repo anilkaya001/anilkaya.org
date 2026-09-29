@@ -15,6 +15,15 @@
     return;
   }
 
+  function failCourse() {
+    root.setAttribute("aria-busy", "false");
+    root.innerHTML =
+      '<div class="course-empty"><a class="lesson-head__back" href="/lab/">&larr; Econometrics Lab</a>' +
+      '<h1>The course could not load</h1><p>Your saved progress is safe. Check your connection and try again.</p>' +
+      '<button class="btn btn--gold" id="courseRetry" type="button">Try again</button></div>';
+    root.querySelector("#courseRetry").addEventListener("click", () => location.reload());
+  }
+
   root.setAttribute("aria-busy", "true");
   root.innerHTML = '<div class="course-loading" role="status"><span class="course-loading__mark" aria-hidden="true">β</span><p>Loading the course workspace…</p></div>';
   let topic;
@@ -35,12 +44,7 @@
     if (!topic || ![1, 2].includes(topic.schemaVersion) || topic.id !== topicId || !Array.isArray(topic.modules) || !topic.modules.length ||
         topic.modules.some((module) => !module || !Array.isArray(module.stages))) throw new Error("invalid-course-payload");
   } catch {
-    root.setAttribute("aria-busy", "false");
-    root.innerHTML =
-      '<div class="course-empty"><a class="lesson-head__back" href="/lab/">&larr; Econometrics Lab</a>' +
-      '<h1>The course could not load</h1><p>Your saved progress is safe. Check your connection and try again.</p>' +
-      '<button class="btn btn--gold" id="courseRetry" type="button">Try again</button></div>';
-    root.querySelector("#courseRetry").addEventListener("click", () => location.reload());
+    failCourse();
     return;
   }
   root.setAttribute("aria-busy", "false");
@@ -57,7 +61,7 @@
     const promise = (async () => {
       const version = document.documentElement.dataset.assetVersion;
       const moduleId = topic.modules[mi].id;
-      const response = await fetch(`/assets/data/courses/${encodeURIComponent(topicId)}/${encodeURIComponent(moduleId)}.json${version ? `?v=${encodeURIComponent(version)}` : ""}`, { headers: { Accept: "application/json" } });
+      const response = await fetch(`/assets/data/courses/${encodeURIComponent(topicId)}/${encodeURIComponent(moduleId)}.json${version ? `?v=${encodeURIComponent(version)}` : ""}`, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout?.(15000) });
       if (!response.ok) throw new Error(`module-payload-${response.status}`);
       const payload = await response.json();
       if (!payload || payload.schemaVersion !== 2 || payload.courseId !== topicId || !payload.module || payload.module.id !== moduleId || !Array.isArray(payload.module.stages)) throw new Error("invalid-module-payload");
@@ -131,6 +135,7 @@
       '<div class="course-foot">' +
         '<button class="btn btn--ghost" id="cPrev" type="button">&larr; Back</button>' +
         '<span class="course-foot__pos" id="cPos"></span>' +
+        '<p class="course-turn" id="cTurn" role="status"></p>' +
         '<button class="btn btn--gold" id="cNext" type="button">Next &rarr;</button>' +
       "</div>" +
     "</section>";
@@ -139,6 +144,7 @@
   const stageEl = root.querySelector("#cStage");
   const prevBtn = root.querySelector("#cPrev");
   const nextBtn = root.querySelector("#cNext");
+  const turnEl = root.querySelector("#cTurn");
 
   function paintProgress() {
     const percent = pct();
@@ -478,19 +484,29 @@
   }
 
   let cur = 0;
+  let shown = -1;
+  let returnTo = null;
+  const ready = (mi) => !modular || Boolean(topic.modules[mi]._loaded);
+  const advanceable = () => shown >= 0 && (cur === shown || ready(stages[cur].mi));
+  let prefetchTimer = 0;
+  let renderSeq = 0;
+  let turnSeq = 0;
   function paintNext() {
-    const st = stages[cur];
+    const st = stages[shown];
     if (!st) return;
-    const readPending = st.type === "read" && !doneSet().has(cur);
+    const readPending = st.type === "read" && !doneSet().has(shown);
     const remaining = N - doneSet().size - (readPending ? 1 : 0);
-    nextBtn.textContent = cur === N - 1
+    nextBtn.textContent = shown === N - 1
       ? (remaining > 0
         ? (readPending ? "Complete & next unfinished →" : "Next unfinished · " + remaining + " left →")
         : (readPending ? "Complete & finish ✓" : "Finish ✓"))
       : (readPending ? "Complete & next →" : "Next →");
   }
   async function render(i) {
+    const seq = ++renderSeq;
+    clearTimeout(prefetchTimer);
     await ensureModule(stages[i].mi);
+    if (seq !== renderSeq) return false;
     cur = i;
     const st = stages[i];
 
@@ -516,14 +532,19 @@
       wireResize(body, handle);
     }
     stageEl.appendChild(body);
+    shown = i;
 
     prevBtn.disabled = i === 0;
     paintNext();
     root.querySelector("#cPos").textContent = (i + 1) + " / " + N;
     renderNav(i);
+    const following = stages[i + 1];
+    if (following && following.mi !== st.mi) prefetchTimer = setTimeout(() => { ensureModule(following.mi).catch(() => {}); }, 1000);
+    return true;
   }
 
   async function go(i) {
+    if (shown < 0) return;
     if (i < 0 || i >= N) {
       if (i >= N) {
         const done = doneSet();
@@ -540,12 +561,36 @@
       return;
     }
     const dir = i >= cur ? 1 : -1;
+    if (stageEl.contains(document.activeElement)) returnTo = document.activeElement;
     cur = i;
 
     history.replaceState(null, "", "#s" + i);
+    const turn = ++turnSeq;
+    stageEl.inert = true;
+    stageEl.setAttribute("aria-busy", "true");
     const swap = async () => {
-      try { await render(i); }
-      catch { if (window.toast) window.toast("This module could not load. Your progress is safe."); return; }
+      const waiting = setTimeout(() => { if (turn === turnSeq) turnEl.textContent = "Loading module…"; }, 500);
+      let painted = false;
+      try { painted = await render(i); }
+      catch { if (turn === turnSeq && window.toast) window.toast("This module could not load. Your progress is safe."); }
+      finally {
+        clearTimeout(waiting);
+        if (turn === turnSeq) {
+          stageEl.inert = false;
+          stageEl.removeAttribute("aria-busy");
+          turnEl.textContent = "";
+        }
+      }
+      if (!painted) {
+        if (turn === turnSeq) {
+          cur = shown;
+          history.replaceState(null, "", "#s" + shown);
+          if (returnTo && returnTo.isConnected) returnTo.focus({ preventScroll: true });
+          returnTo = null;
+        }
+        return;
+      }
+      returnTo = null;
       stageEl.scrollIntoView({ block: "start", behavior: "auto" });
       const h = stageEl.querySelector(".stage__guide h2, .stage__guide h1, .stage__kicker");
       if (h) { h.setAttribute("tabindex", "-1"); h.focus({ preventScroll: true }); }
@@ -556,13 +601,14 @@
 
   prevBtn.addEventListener("click", () => go(cur - 1));
   nextBtn.addEventListener("click", () => {
-    if (stages[cur].type === "read") mark(cur, nextBtn);
+    if (!advanceable()) return;
+    if (stages[shown].type === "read") mark(shown, nextBtn);
     go(cur + 1);
   });
   document.addEventListener("keydown", (e) => {
     if (e.target.matches("input, textarea, select")) return;
     if (!e.altKey) return;
-    if (e.key === "ArrowRight") { e.preventDefault(); go(cur + 1); }
+    if (e.key === "ArrowRight") { e.preventDefault(); if (advanceable()) go(cur + 1); }
     if (e.key === "ArrowLeft") { e.preventDefault(); go(cur - 1); }
   });
 
@@ -570,8 +616,13 @@
   const firstOpen = stages.findIndex((_, index) => !doneSet().has(index));
   const requestedStart = hashMatch ? Number(hashMatch[1]) : (firstOpen >= 0 ? firstOpen : 0);
   const start = Math.max(0, Math.min(N - 1, Number.isInteger(requestedStart) ? requestedStart : 0));
-  await render(start);
+  renderNav(start);
+  try { await render(start); }
+  catch {
+    failCourse();
+    return;
+  }
   if (window.Gamify) window.Gamify.paint();
-  document.addEventListener("iewt:synced", () => { paintProgress(); renderNav(cur); if (window.Gamify) window.Gamify.paint(); });
-  document.addEventListener("iewt:progress-reset", () => { paintProgress(); renderNav(cur); if (window.Gamify) window.Gamify.paint(); });
+  document.addEventListener("iewt:synced", () => { paintProgress(); renderNav(shown); if (window.Gamify) window.Gamify.paint(); });
+  document.addEventListener("iewt:progress-reset", () => { paintProgress(); renderNav(shown); if (window.Gamify) window.Gamify.paint(); });
 })();
