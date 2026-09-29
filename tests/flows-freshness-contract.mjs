@@ -220,7 +220,7 @@ const NYSE_PUBLISHED = Object.freeze({
 }
 
 {
-  const env = { DB: { prepare: () => ({ first: async () => null, bind() { return this; } }) } };
+  const env = { DB: { prepare: () => ({ first: async () => null, bind() { return this; } }), batch: async (list) => list.map(() => ({ results: [] })) } };
   const body = await serveNow(env, new URL("https://x.test/api/flows/now"), easternInstant("2026-11-27", 12 * 60),
     { json: (b) => b, HttpError: Error });
   eq(body.expected, "2026-11-25",

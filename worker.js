@@ -496,13 +496,19 @@ function startMarketFlight(env) {
 }
 
 async function revalidateMarketSnapshot(env) {
+  const since = Date.now();
+  let abandoned = 0;
   for (let attempt = 0; attempt < 3; attempt++) {
     const flight = marketRevalidation || startMarketFlight(env);
     const how = await FLOWS_LIVE.settledWithin(flight, MARKET_FLIGHT_WAIT_MS, () => marketRevalidation !== null && marketRevalidation !== flight);
-    if (how === "settled") return flight;
+    if (how === "settled") {
+      if (abandoned) FLOWS_LIVE.flightAbandoned("market", since, abandoned, true);
+      return flight;
+    }
     if (how === "moved") continue;
-    if (marketRevalidation === flight) marketRevalidation = null;
+    if (marketRevalidation === flight) { marketRevalidation = null; abandoned++; }
   }
+  if (abandoned) FLOWS_LIVE.flightAbandoned("market", since, abandoned, false);
   return JSON.stringify({ quotes: [], updatedAt: Date.now() });
 }
 
@@ -1023,11 +1029,9 @@ const parseOr = (text, fallback) => { try { const v = JSON.parse(text); return v
 
 const firstRow = (res) => (res && res.results && res.results[0] ? res.results[0] : null);
 
-async function scheduledTonight(env, kind, row) {
+function scheduledTonight(kind, row, now, clock) {
   if (!row || typeof row.depth !== "string" || typeof row.session !== "string") return false;
   if (kind === "hist" && (row.depth === "index" || row.depth === "fund")) return false;
-  const now = Date.now();
-  const clock = await FLOWS_LIVE.cachedClock(env, now);
   const phase = phaseAt(now, clock);
   if (!phase || (phase.phase !== "post" && phase.phase !== "closed") || phase.day !== phase.lastClosed) return false;
   const before = phaseAt(sessionOpen(phase.lastClosed), clock);
@@ -1087,8 +1091,11 @@ function quoteCard(ticker, row, now) {
 async function absentKey(env, ctx, kind, ticker) {
   const keyed = [env.DB.prepare(ROSTER_SQL).bind(ticker)];
   if (kind === "card") keyed.push(env.DB.prepare(LITE_SQL).bind(ticker), env.DB.prepare(GATE_SQL).bind(ticker));
-  const [roster, uni, gate] = await env.DB.batch(keyed).catch(() => { throw storeGone(); });
-  if (await scheduledTonight(env, kind, firstRow(roster))) return json({ ticker, status: "pending" });
+  const now = Date.now();
+  const { results, clock } = await FLOWS_LIVE.batchWithClock(env.DB, keyed, now);
+  if (!results) throw storeGone();
+  const [roster, uni, gate] = results;
+  if (scheduledTonight(kind, firstRow(roster), now, clock)) return json({ ticker, status: "pending" });
   if (kind !== "card") return json({ ticker, status: "absent", why: "not-covered" });
   const lite = liteCard(ticker, firstRow(uni), firstRow(gate));
   if (lite) return lite;
@@ -2206,21 +2213,27 @@ let flowsSchemaFlight = null;
 function startFlowsSchemaFlight(env) {
   const flight = (async () => {
     try {
-      await env.DB.batch(FLOWS_SCHEMA_SQL.map((sql) => env.DB.prepare(sql)));
-      await FLOWS_LIVE.upgradeClockColumns(env.DB);
+      const results = await env.DB.batch([...FLOWS_SCHEMA_SQL, FLOWS_LIVE.CLOCK_COLUMNS_SQL].map((sql) => env.DB.prepare(sql)));
+      await FLOWS_LIVE.upgradeClockColumns(env.DB, results && results[FLOWS_SCHEMA_SQL.length]);
       flowsSchemaReady = true;
-    } catch {}
+    } catch (error) {
+      console.warn(JSON.stringify({ message: "flows schema bootstrap failed",
+        error: error instanceof Error ? error.message : String(error) }));
+    }
   })().finally(() => { if (flowsSchemaFlight === flight) flowsSchemaFlight = null; });
   flowsSchemaFlight = flight;
   return flight;
 }
 async function ensureFlowsTables(env) {
   if (flowsSchemaReady || !env.DB) return;
+  const since = Date.now();
+  let abandoned = 0;
   for (let attempt = 0; attempt < 2 && !flowsSchemaReady; attempt++) {
     const flight = flowsSchemaFlight || startFlowsSchemaFlight(env);
-    if (await FLOWS_LIVE.settledWithin(flight, FLOWS_LIVE.FLIGHT_WAIT_MS, () => flowsSchemaReady)) return;
-    if (flowsSchemaFlight === flight) flowsSchemaFlight = null;
+    if (await FLOWS_LIVE.settledWithin(flight, FLOWS_LIVE.FLIGHT_WAIT_MS, () => flowsSchemaReady)) break;
+    if (flowsSchemaFlight === flight) { flowsSchemaFlight = null; abandoned++; }
   }
+  if (abandoned) FLOWS_LIVE.flightAbandoned("schema", since, abandoned, flowsSchemaReady);
 }
 
 function keepAlive(ctx, promise) {

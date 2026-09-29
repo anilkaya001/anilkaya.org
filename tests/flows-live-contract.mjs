@@ -32,6 +32,12 @@ const FX = JSON.parse(read("tests/fixtures-live-probe.json"));
 
 let checks = 0;
 const TIMER_SLACK_MS = 50;
+const captureWarn = () => {
+  const lines = [];
+  const real = console.warn;
+  console.warn = (text) => { try { lines.push(JSON.parse(text)); } catch { lines.push(String(text)); } };
+  return { lines, stop: () => { console.warn = real; } };
+};
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
@@ -1301,8 +1307,13 @@ const cronMinutes = (cron) => {
   const never = () => new Promise(() => {});
   W.jwksKeys({}, never, now, false);
   const t0 = Date.now();
-  const abandoned = await W.oidcKind(token, {}, { fetchImpl: served(keys), now: now + 1000, log });
+  const jwksWarn = captureWarn();
+  const abandoned = await W.oidcKind(token, {}, { fetchImpl: served(keys), now: now + 1000, log }).finally(jwksWarn.stop);
   const waited = Date.now() - t0;
+  eq(jwksWarn.lines.length, 1, `AN ABANDONED KEY-SET FLIGHT LEAVES ONE LOG LINE (${JSON.stringify(jwksWarn.lines)})`);
+  ok(jwksWarn.lines[0].message === "flight abandoned" && jwksWarn.lines[0].flight === "jwks" && jwksWarn.lines[0].abandoned === 1 &&
+     jwksWarn.lines[0].recovered === false && jwksWarn.lines[0].waitMs >= W.JWKS_WAIT_MS - TIMER_SLACK_MS,
+     "naming the flight, the wait it cost and that no key set was held to fall back on");
   ok(abandoned.unavailable === true && waited >= W.JWKS_WAIT_MS - TIMER_SLACK_MS && waited < W.JWKS_WAIT_MS + 2500,
     `A KEY-SET FETCH ABANDONED BY THE INGEST THAT STARTED IT (a client gone before the 4 s fetch landed) is waited on for ${W.JWKS_WAIT_MS / 1000} s ` +
     `and then dropped (${waited} ms): the second write reports the keys unavailable instead of hanging for the life of the isolate`);
@@ -1613,8 +1624,24 @@ const cronMinutes = (cron) => {
   let threw = false;
   try { await W.upgradeClockColumns(fakeDb(["id"], ["tier1_at", "database is locked"])); } catch { threw = true; }
   ok(threw, "while any other failure surfaces, so the schema is not marked ready and the next request retries");
-  ok(/await FLOWS_LIVE\.upgradeClockColumns\(env\.DB\);\s*flowsSchemaReady = true;/.test(read("worker.js")),
+  ok(/await FLOWS_LIVE\.upgradeClockColumns\(env\.DB, results && results\[FLOWS_SCHEMA_SQL\.length\]\);\s*flowsSchemaReady = true;/.test(read("worker.js")),
     "and ensureFlowsTables marks the schema ready only after the upgrade");
+  ok(/env\.DB\.batch\(\[\.\.\.FLOWS_SCHEMA_SQL, FLOWS_LIVE\.CLOCK_COLUMNS_SQL\]/.test(read("worker.js")) && W.CLOCK_COLUMNS_SQL === "PRAGMA table_info(flows_clock)",
+    "whose column list is read by the PRAGMA riding the schema batch as its last statement, after the CREATE that makes the table");
+  let pragmas = 0;
+  upgrades.length = 0;
+  const counted = (have) => ({ prepare(sql) { return { all: async () => { pragmas++; return { results: have.map((name) => ({ name })) }; },
+    run: async () => { upgrades.push(sql); return {}; } }; } });
+  const full = ["id", "day", ...W.CLOCK_ADDED_COLUMNS.map(([c]) => c)];
+  deep(await W.upgradeClockColumns(counted(full), { results: full.map((name) => ({ name })) }), [],
+    "A COLUMN LIST HANDED IN FROM THE SCHEMA BATCH IS TRUSTED: a complete table adds nothing");
+  ok(pragmas === 0 && upgrades.length === 0, "and costs no PRAGMA trip of its own and no ALTER");
+  deep(await W.upgradeClockColumns(counted(full), { results: [{ name: "id" }, { name: "day" }] }), W.CLOCK_ADDED_COLUMNS.map(([c]) => c),
+    "an old table named by the handed-in list still gets every missing column");
+  eq(pragmas, 0, "from the list it was handed");
+  deep(await W.upgradeClockColumns(counted(["id"]), undefined), W.CLOCK_ADDED_COLUMNS.map(([c]) => c),
+    "and with no list handed in the function reads the PRAGMA itself, as before");
+  eq(pragmas, 1, "in one trip");
 }
 
 {
@@ -2805,7 +2832,15 @@ const cronMinutes = (cron) => {
     const raw = W.liveResponse({ ...metaOf(rows[0]), payload: rows[0].payload, updatedAt: rows[0].updated_at }, at, clock);
     eq(await one.text(), rows[0].payload, "A SINGLE KEY IS UNCHANGED: the raw payload body, byte for byte");
     deep(Object.fromEntries(one.headers), Object.fromEntries(raw.headers), "under the same headers as before");
-    deep(oneDb.seen.map((t) => t.kind), ["first"], "read as it always was");
+    ok(oneDb.seen.length === 1 && oneDb.seen[0].kind === "batch" && oneDb.seen[0].sqls.length === 1 && /FROM flows_live WHERE id = \?$/.test(oneDb.seen[0].sqls[0]),
+      "read in one trip, a batch of the one row's SELECT with the clock memo warm");
+    W.memoClock(null, 0);
+    const oneColdDb = fakeDb();
+    const oneCold = await W.serveLiveKey({ DB: oneColdDb }, lk("market"), at, { json: jsonOf, HttpError });
+    ok(oneColdDb.seen.length === 1 && oneColdDb.seen[0].sqls.length === 2 && /FROM flows_clock/.test(oneColdDb.seen[0].sqls[1]) && !W.clockDue(at),
+      "A SINGLE KEY WITH THE MEMO STALE carries the clock row in the same batch and warms the memo: one trip where the clock read made it two");
+    eq(await oneCold.text(), rows[0].payload, "and serves the same raw body");
+    W.memoClock(clock, at);
     const dropped = await W.serveLiveKey({ DB: fakeDb() }, lk("market,board:long,"), at, { json: jsonOf, HttpError });
     eq(await dropped.text(), rows[0].payload, "a list that leaves one key after the unknown is dropped is that key's raw body");
     const pend = await W.serveLiveKey({ DB: fakeDb() }, lk("vol"), at, { json: jsonOf, HttpError });
@@ -3195,11 +3230,17 @@ const cronMinutes = (cron) => {
   const env = { DB: { prepare: () => ({ first: () => (++reads === 1 ? new Promise(() => {}) : new Promise((r) => setTimeout(() => r(landed), 1500))) }) } };
   W.memoClock(null, 0);
   const t0 = Date.now();
+  const clockWarn = captureWarn();
   const [a, b] = await Promise.all([
     W.cachedClock(env, t0),
     new Promise((r) => setTimeout(r, 50)).then(() => W.cachedClock(env, Date.now())),
-  ]);
+  ]).finally(clockWarn.stop);
   const waited = Date.now() - t0;
+  eq(clockWarn.lines.length, 1,
+     `AN ABANDONED CLOCK FLIGHT LEAVES ONE LOG LINE, from the waiter that dropped it, not one per waiter (${JSON.stringify(clockWarn.lines)})`);
+  ok(clockWarn.lines[0].message === "flight abandoned" && clockWarn.lines[0].flight === "clock" && clockWarn.lines[0].abandoned === 1 &&
+     clockWarn.lines[0].recovered === true && clockWarn.lines[0].waitMs >= 3500 - TIMER_SLACK_MS,
+     "naming the flight, the whole wait and that the retry recovered");
   ok(a && a.day === "2026-09-28" && a.trading === 1 && b === a && waited >= 3500 - TIMER_SLACK_MS && waited < 6000,
      `THE CLOCK FLIGHT HAS THE SAME DEADLINE as the schema bootstrap (FLIGHT_WAIT_MS, ${W.FLIGHT_WAIT_MS} ms): a cold read that never settles is abandoned and read again, ` +
      `and both waiters take the read that landed (${waited} ms)`);
@@ -3209,11 +3250,14 @@ const cronMinutes = (cron) => {
   let late = 0;
   const env2 = { DB: { prepare: () => ({ first: () => (++late === 1 ? new Promise(() => {}) : Promise.resolve(landed)) }) } };
   const t1 = Date.now();
+  const lateWarn = captureWarn();
   const [c, d] = await Promise.all([
     W.cachedClock(env2, t1),
     new Promise((r) => setTimeout(r, 1900)).then(() => W.cachedClock(env2, Date.now())),
-  ]);
+  ]).finally(lateWarn.stop);
   const w2 = Date.now() - t1;
+  ok(lateWarn.lines.length === 1 && lateWarn.lines[0].flight === "clock" && lateWarn.lines[0].recovered === true,
+     `and a late joiner that leaves when the retry lands logs nothing of its own (${JSON.stringify(lateWarn.lines)})`);
   ok(c && c.day === "2026-09-28" && d === c && w2 >= 2000 - TIMER_SLACK_MS && w2 < 2700 && late === 2,
      `a late joiner leaves the dead flight the moment the retry lands (${w2} ms), not at its own deadline`);
   W.memoClock(null, 0);

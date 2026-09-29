@@ -7,6 +7,12 @@ import { MARKET_INDICES } from "../shared/markets.js";
 
 let checks = 0;
 const TIMER_SLACK_MS = 50;
+const captureWarn = () => {
+  const lines = [];
+  const real = console.warn;
+  console.warn = (text) => { try { lines.push(JSON.parse(text)); } catch { lines.push(String(text)); } };
+  return { lines, stop: () => { console.warn = real; } };
+};
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
@@ -141,12 +147,19 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
      "SINGLE-FLIGHT SCHEMA: thirteen concurrent requests on a cold isolate run the ten-statement schema batch once, " +
      "not once each (the investigation counted 17 redundant batches per cold home load, when the page made 17 requests)");
   eq(f.count(PRAGMA_RE), 1, "and the clock-column PRAGMA of upgradeClockColumns once");
+  const schema = f.trips.find((t) => t.sqls.some((s) => SCHEMA_RE.test(s)));
+  ok(schema.kind === "batch" && PRAGMA_RE.test(schema.sqls[schema.sqls.length - 1]) && schema.sqls.length === 11 &&
+     !f.trips.some((t) => t.kind === "all" && PRAGMA_RE.test(t.sqls[0])),
+     "THE PRAGMA RIDES THE SCHEMA BATCH as its last statement, after the CREATE of flows_clock, not a trip of its own after it " +
+     "(two sequential trips before any read on a cold isolate before, one now)");
   ok(!f.trips.some((t) => t.sqls.some((s) => /^ALTER TABLE flows_clock/.test(s))), "with no ALTER on a table that already has every column");
-  eq(f.trips.filter((t) => t.kind === "first" && /^SELECT \* FROM flows_clock/.test(t.sqls[0])).length, 1,
-     "SINGLE-FLIGHT CLOCK: /api/flows/now, the one route left reading the clock on its own, pays one cold miss " +
-     "(eight reads before), while the two overlay routes and the live envelope carry it inside their own batch");
-  eq(f.trips.length, 16, "sixteen trips for the thirteen requests: one schema batch, one PRAGMA, one clock read and thirteen reads " +
-     "(twenty for seventeen requests before the page's six live keys became one)");
+  eq(f.trips.filter((t) => t.kind === "first" && /^SELECT \* FROM flows_clock/.test(t.sqls[0])).length, 0,
+     "NO ROUTE READS THE CLOCK ON ITS OWN: /api/flows/now carries it inside its batch as the two overlay routes and the live envelope do " +
+     "(one sequential clock read before its batch until now)");
+  const nowTrip = f.trips.find((t) => t.kind === "batch" && t.sqls.some((s) => /FROM flows_payload WHERE id IN/.test(s)));
+  ok(nowTrip && /FROM flows_clock/.test(nowTrip.sqls[nowTrip.sqls.length - 1]), "the clock row is the last statement of the heartbeat's batch");
+  eq(f.trips.length, 14, "fourteen trips for the thirteen requests: one schema batch and thirteen reads " +
+     "(sixteen before: the PRAGMA and the heartbeat's clock read were trips of their own; twenty for seventeen requests before the page's six live keys became one)");
   const home = f.trips.find((t) => t.kind === "batch" && /FROM flows_live WHERE id IN/.test(t.sqls[0]));
   ok(home && home.sqls.length === 2 && /FROM flows_clock/.test(home.sqls[1]),
      "THE HOME PAGE'S LIVE KEYS COST ONE TRIP: one batch of the six-key SELECT and, on a cold isolate, the clock row beside it");
@@ -162,9 +175,13 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   f.fail(/^CREATE TABLE IF NOT EXISTS flows_payload/);
   f.latency(30);
   const get = await client(f.D1);
+  const failWarn = captureWarn();
   const answers = await Promise.all(["/api/flows/board?side=long", "/api/flows/board?side=watch", "/api/flows/market",
-    "/api/flows/events", "/api/flows/scoretrack", "/api/flows/news"].map(get));
+    "/api/flows/events", "/api/flows/scoretrack", "/api/flows/news"].map(get)).finally(failWarn.stop);
   eq(f.count(SCHEMA_RE), 1, "A FAILING SCHEMA BATCH is attempted once for six concurrent callers");
+  eq(failWarn.lines.length, 1, `and leaves one log line, not one per caller and not none (${JSON.stringify(failWarn.lines)})`);
+  ok(failWarn.lines[0].message === "flows schema bootstrap failed" && /fake D1 refused/.test(failWarn.lines[0].error),
+     "naming the bootstrap and the store's own error");
   ok(answers.every((a) => a.res.status === 200), "who all still answer, as they did when each ran its own batch");
   const retry = f.trips.length;
   await get("/api/flows/meta");
@@ -209,11 +226,17 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   f.slowOnce(SCHEMA_RE, 1500);
   const get = await client(f.D1);
   const t0 = Date.now();
+  const hangWarn = captureWarn();
   const [first, second] = await Promise.all([
     get("/api/flows/meta"),
     new Promise((r) => setTimeout(r, 50)).then(() => get("/api/flows/market")),
-  ]);
+  ]).finally(hangWarn.stop);
   const waited = Date.now() - t0;
+  eq(hangWarn.lines.length, 1,
+     `A DEAD FLIGHT LEAVES ONE LOG LINE, from the waiter that dropped it; the waiter that joined the retry adds none (${JSON.stringify(hangWarn.lines)})`);
+  ok(hangWarn.lines[0].message === "flight abandoned" && hangWarn.lines[0].flight === "schema" && hangWarn.lines[0].abandoned === 1 &&
+     hangWarn.lines[0].recovered === true && hangWarn.lines[0].waitMs >= 3500 - TIMER_SLACK_MS,
+     `naming the flight, the whole wait and that the retry recovered (${JSON.stringify(hangWarn.lines[0])})`);
   ok(first.res.status === 200 && second.res.status === 200,
      "A FLIGHT THAT NEVER SETTLES DOES NOT TAKE THE ISOLATE WITH IT: in workerd a D1 batch belongs to the request that started it, " +
      "and when that request answers before the batch lands (the chain route's vendor call rejects at once with no key while its card " +
@@ -234,11 +257,14 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   f.hangOnce(SCHEMA_RE);
   const get = await client(f.D1);
   const t0 = Date.now();
+  const lateWarn = captureWarn();
   const [first, second] = await Promise.all([
     get("/api/flows/meta"),
     new Promise((r) => setTimeout(r, 1900)).then(() => get("/api/flows/market")),
-  ]);
+  ]).finally(lateWarn.stop);
   const waited = Date.now() - t0;
+  ok(lateWarn.lines.length === 1 && lateWarn.lines[0].flight === "schema" && lateWarn.lines[0].recovered === true,
+     `one line again when a late joiner leaves on the sibling's retry (${JSON.stringify(lateWarn.lines)})`);
   ok(first.res.status === 200 && second.res.status === 200 && waited >= 2000 - TIMER_SLACK_MS && waited < 2700,
      `A LATE JOINER OF A DEAD FLIGHT LEAVES WHEN A SIBLING'S RETRY LANDS: joining at 1.9 s, it answers with the retry at about 2 s (${waited} ms) ` +
      "instead of sitting out its own deadline at 3.9 s");
@@ -255,11 +281,15 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   try {
     const get = await client(f.D1, { MARKET_QUOTE_ORIGIN: "http://127.0.0.1:9" });
     const t0 = Date.now();
+    const marketWarn = captureWarn();
     const [a, b] = await Promise.all([
       get("/api/markets"),
       new Promise((r) => setTimeout(r, 50)).then(() => get("/api/markets")),
-    ]);
+    ]).finally(marketWarn.stop);
     const waited = Date.now() - t0;
+    ok(marketWarn.lines.length === 1 && marketWarn.lines[0].message === "flight abandoned" && marketWarn.lines[0].flight === "market" &&
+       marketWarn.lines[0].abandoned === 1 && marketWarn.lines[0].recovered === true && marketWarn.lines[0].waitMs >= 12000 - TIMER_SLACK_MS,
+       `THE DEAD SNAPSHOT REFRESH LEAVES ONE LOG LINE, from the reader that dropped it, and says the retry settled (${JSON.stringify(marketWarn.lines)})`);
     ok(a.res.status === 200 && b.res.status === 200 && Array.isArray(a.body.quotes) && !a.body.quotes.length && Array.isArray(b.body.quotes) && !b.body.quotes.length,
        "THE MARKET SNAPSHOT'S FLIGHT HAS THE SAME GUARD: with no stored snapshot and a refresh that never settles, both readers answer an empty snapshot");
     ok(waited >= 12000 - TIMER_SLACK_MS && waited < 15000, `after the refresh's own budget of two origins at 5 s (${waited} ms), not never`);
@@ -308,6 +338,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   seed(f);
   const get = await client(f.D1);
   await get("/api/flows/meta");
+  W.memoClock(null, Date.now());
   const route = async (path) => { const n = f.trips.length; const r = await get(path); return { ...r, trips: f.since(n) }; };
   const keyed = (t) => t.sqls.map((s) => (/id = 'roster'/.test(s) ? "roster" : /id = 'universe'/.test(s) ? "universe" : /id = 'events'/.test(s) ? "events" : s.slice(0, 20)));
 
@@ -340,6 +371,46 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   ok(tape.body.status === "pending" && tape.body.why === "unconfigured", "with no vendor key the name is admitted and the tape says unconfigured, as before");
   const held = await route("/api/flows/tape?t=NVDA");
   eq(held.trips.length, 1, "a covered name with no tape row yet costs the same single trip");
+}
+
+{
+  const f = fakeD1();
+  seed(f);
+  const get = await client(f.D1);
+  await get("/api/flows/meta");
+  const route = async (path) => { const n = f.trips.length; const r = await get(path); return { ...r, trips: f.since(n) }; };
+  const clockLast = (t) => t.kind === "batch" && /^SELECT \* FROM flows_clock/.test(t.sqls[t.sqls.length - 1]);
+  const stale = [
+    ["/api/flows/now?n=board:long,board:short,meta,focus", 1, 2, 1],
+    ["/api/flows/now?n=card:NVDA&t=NVDA", 1, 2, 1],
+    ["/api/flows/now", 1, 1, 0],
+    ["/api/flows/tape?t=NVDA", 1, 2, 1],
+    ["/api/flows/lk?k=strips", 1, 2, 1],
+    ["/api/flows/card?t=PEND", 2, 3, 2],
+  ];
+  for (const [path, after, before, warmTrips] of stale) {
+    W.memoClock(null, 0);
+    const cold = await route(path);
+    eq(cold.res.status, 200, `${path} answers with the clock memo stale`);
+    eq(cold.trips.length, after,
+       `WITH THE CLOCK MEMO STALE ${path} costs ${after} trip${after > 1 ? "s" : ""}${before > after ? ", not " + before : ""}: the clock row rides the route's own batch ` +
+       `(${cold.trips.map((t) => t.kind + "(" + t.sqls.length + ")").join(", ")})`);
+    ok(clockLast(cold.trips[cold.trips.length - 1]) && !cold.trips.some((t) => t.kind === "first" && /FROM flows_clock/.test(t.sqls[0])),
+       "as the batch's last statement, never a read of its own");
+    ok(!W.clockDue(Date.now()), "and the memo is warm afterwards");
+    const warm = await route(path);
+    ok(warm.trips.length === warmTrips && !warm.trips.some((t) => t.sqls.some((q) => /FROM flows_clock/.test(q))),
+       `so the next ${path} carries no clock statement at all`);
+  }
+  const phased = await route("/api/flows/now?n=meta");
+  ok(phased.body.phase && typeof phased.body.phase.phase === "string" && "clock" in phased.body && "expected" in phased.body,
+     "and the heartbeat still answers its phase, clock and expected session from the clock its batch read");
+  W.memoClock(null, 0);
+  f.fail(/FROM flows_payload WHERE id IN/);
+  const gone = await route("/api/flows/now?n=meta");
+  ok(gone.res.status === 503 && gone.trips.length === 1 && W.clockDue(Date.now()),
+     "A FAILED HEARTBEAT BATCH is the 503 it was, and memoizes no clock it never read");
+  f.fail(null);
 }
 
 {
