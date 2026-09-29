@@ -106,10 +106,10 @@ export function tier1Why(value) {
 }
 
 const CLOCK_MEMO_MS = 60 * 1000;
-let clockMemo = { at: 0, clock: null };
+let clockMemo = { at: 0, clock: null, read: true };
 
-export function memoClock(clock, now = Date.now()) {
-  clockMemo = { at: now, clock };
+export function memoClock(clock, now = Date.now(), read = true) {
+  clockMemo = { at: now, clock, read };
 }
 
 export function memoizedClock(now = Date.now()) {
@@ -155,7 +155,9 @@ export const FLIGHT_WAIT_MS = 2000;
 let clockFlight = null;
 
 function startClockFlight(env, now) {
-  const flight = readClock(env && env.DB).then((clock) => { memoClock(clock, now); return clock; })
+  const db = env && env.DB;
+  const read = db ? (async () => db.prepare(CLOCK_ROW_SQL).first())().then((row) => [normalizeClock(row), true], () => [null, false]) : Promise.resolve([null, false]);
+  const flight = read.then(([clock, ok]) => { memoClock(clock, now, ok); return clock; })
     .finally(() => { if (clockFlight === flight) clockFlight = null; });
   clockFlight = flight;
   return flight;
@@ -181,7 +183,7 @@ export async function cachedClock(env, now = Date.now()) {
   const since = Date.now();
   const trace = { abandoned: 0 };
   const clock = await joinClock(env, now, trace);
-  if (trace.abandoned) flightAbandoned("clock", since, trace.abandoned, !clockDue(now));
+  if (trace.abandoned) flightAbandoned("clock", since, trace.abandoned, !clockDue(now) && clockMemo.read);
   return clock;
 }
 

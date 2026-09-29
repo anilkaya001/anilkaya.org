@@ -288,14 +288,43 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
     ]).finally(marketWarn.stop);
     const waited = Date.now() - t0;
     ok(marketWarn.lines.length === 1 && marketWarn.lines[0].message === "flight abandoned" && marketWarn.lines[0].flight === "market" &&
-       marketWarn.lines[0].abandoned === 1 && marketWarn.lines[0].recovered === true && marketWarn.lines[0].waitMs >= 12000 - TIMER_SLACK_MS,
-       `THE DEAD SNAPSHOT REFRESH LEAVES ONE LOG LINE, from the reader that dropped it, and says the retry settled (${JSON.stringify(marketWarn.lines)})`);
+       marketWarn.lines[0].abandoned === 1 && marketWarn.lines[0].recovered === false && marketWarn.lines[0].waitMs >= 12000 - TIMER_SLACK_MS,
+       `THE DEAD SNAPSHOT REFRESH LEAVES ONE LOG LINE, from the reader that dropped it, and says the retry did not recover: it settled on the empty fallback (${JSON.stringify(marketWarn.lines)})`);
     ok(a.res.status === 200 && b.res.status === 200 && Array.isArray(a.body.quotes) && !a.body.quotes.length && Array.isArray(b.body.quotes) && !b.body.quotes.length,
        "THE MARKET SNAPSHOT'S FLIGHT HAS THE SAME GUARD: with no stored snapshot and a refresh that never settles, both readers answer an empty snapshot");
     ok(waited >= 12000 - TIMER_SLACK_MS && waited < 15000, `after the refresh's own budget of two origins at 5 s (${waited} ms), not never`);
     eq(calls, 2 * dead, "with the dead refresh and exactly one retry shared by the two readers: the second reader's poll finds the retry in the field and joins it");
     const again = await get("/api/markets");
     ok(again.res.status === 200 && calls === 2 * dead, "and a later reader finds the empty snapshot stored and asks the vendor nothing");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
+{
+  const f = fakeD1();
+  seed(f);
+  const realFetch = globalThis.fetch;
+  let calls = 0;
+  const dead = MARKET_INDICES.length;
+  const chart = (symbol) => ({ chart: { result: [{
+    meta: { currency: "USD", symbol, regularMarketPrice: 105, chartPreviousClose: 100, regularMarketTime: 1790380000 },
+    indicators: { quote: [{ close: [100, 101, 102, 103, 105] }] },
+  }], error: null } });
+  globalThis.fetch = (input) => {
+    if (++calls <= dead) return new Promise(() => {});
+    const symbol = decodeURIComponent(/\/v8\/finance\/chart\/([^?]+)/.exec(String(input))[1]);
+    return Promise.resolve(new Response(JSON.stringify(chart(symbol)), { headers: { "Content-Type": "application/json" } }));
+  };
+  try {
+    const get = await client(f.D1, { MARKET_QUOTE_ORIGIN: "http://127.0.0.1:9" });
+    const marketWarn = captureWarn();
+    const got = await get("/api/markets").finally(marketWarn.stop);
+    ok(got.res.status === 200 && got.body.quotes.length === dead && calls === 2 * dead,
+       `a dead refresh whose retry reaches the vendor answers the retry's quotes (${got.body.quotes.length} of ${dead})`);
+    ok(marketWarn.lines.length === 1 && marketWarn.lines[0].flight === "market" && marketWarn.lines[0].abandoned === 1 &&
+       marketWarn.lines[0].recovered === true,
+       `and its one log line says the retry recovered, because the refresh itself succeeded (${JSON.stringify(marketWarn.lines)})`);
   } finally {
     globalThis.fetch = realFetch;
   }

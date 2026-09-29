@@ -479,10 +479,11 @@ async function refreshMarketSnapshot(env) {
 
 const MARKET_FLIGHT_WAIT_MS = 2 * MARKET_FETCH_TIMEOUT_MS + 2000;
 let marketRevalidation = null;
+const refreshedMarketFlights = new WeakSet();
 
 function startMarketFlight(env) {
   const flight = refreshMarketSnapshot(env).catch(() => null).then(async (refreshed) => {
-    if (refreshed) return refreshed;
+    if (refreshed) { refreshedMarketFlights.add(flight); return refreshed; }
     const now = Date.now();
     const payload = JSON.stringify({ quotes: [], updatedAt: now });
     await marketOp(env, () => env.DB.prepare(
@@ -502,7 +503,7 @@ async function revalidateMarketSnapshot(env) {
     const flight = marketRevalidation || startMarketFlight(env);
     const how = await FLOWS_LIVE.settledWithin(flight, MARKET_FLIGHT_WAIT_MS, () => marketRevalidation !== null && marketRevalidation !== flight);
     if (how === "settled") {
-      if (abandoned) FLOWS_LIVE.flightAbandoned("market", since, abandoned, true);
+      if (abandoned) FLOWS_LIVE.flightAbandoned("market", since, abandoned, refreshedMarketFlights.has(flight));
       return flight;
     }
     if (how === "moved") continue;

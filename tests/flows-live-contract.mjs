@@ -3261,6 +3261,21 @@ const cronMinutes = (cron) => {
   ok(c && c.day === "2026-09-28" && d === c && w2 >= 2000 - TIMER_SLACK_MS && w2 < 2700 && late === 2,
      `a late joiner leaves the dead flight the moment the retry lands (${w2} ms), not at its own deadline`);
   W.memoClock(null, 0);
+  let failing = 0;
+  const env3 = { DB: { prepare: () => ({ first: () => (++failing === 1 ? new Promise(() => {}) : Promise.reject(new Error("D1 down"))) }) } };
+  const failWarn = captureWarn();
+  const e = await W.cachedClock(env3, Date.now()).finally(failWarn.stop);
+  ok(e === null && failing === 2 && failWarn.lines.length === 1 && failWarn.lines[0].flight === "clock" &&
+     failWarn.lines[0].abandoned === 1 && failWarn.lines[0].recovered === false,
+     `a retry whose read fails logs recovered false, though it memoizes the null it answers (${JSON.stringify(failWarn.lines)})`);
+  W.memoClock(null, 0);
+  let absent = 0;
+  const env4 = { DB: { prepare: () => ({ first: () => (++absent === 1 ? new Promise(() => {}) : Promise.resolve(null)) }) } };
+  const absentWarn = captureWarn();
+  const g = await W.cachedClock(env4, Date.now()).finally(absentWarn.stop);
+  ok(g === null && absentWarn.lines.length === 1 && absentWarn.lines[0].recovered === true,
+     `while a retry that reads a database with no clock row yet did recover: the read succeeded (${JSON.stringify(absentWarn.lines)})`);
+  W.memoClock(null, 0);
   ok(await W.settledWithin(Promise.resolve(1), 50) === "settled" && await W.settledWithin(Promise.reject(new Error("x")), 50) === "settled" &&
      await W.settledWithin(new Promise(() => {}), 50) === false && await W.settledWithin(new Promise(() => {}), 500, () => true) === "moved",
      "settledWithin says settled on any settlement, moved when the field it watches has moved on, and false at the deadline");
