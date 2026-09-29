@@ -295,7 +295,7 @@
 .course-related a:hover { color: var(--gold-harvest); border-color: color-mix(in srgb, var(--gold-harvest) 45%, transparent); }
 
 @media (max-width: 900px) {
-  .course { grid-template-columns: 1fr; }
+  .course { grid-template-columns: 1fr; min-height: 100svh; align-content: start; }
   .course-nav { position: static; top: auto; flex-direction: row; flex-wrap: wrap; }
   .course-nav__title { width: 100%; }
   .course-nav__mod { width: auto; flex: 1 1 auto; }

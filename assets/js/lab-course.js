@@ -484,15 +484,19 @@
   }
 
   let cur = 0;
+  let shown = -1;
+  let returnTo = null;
+  const ready = (mi) => !modular || Boolean(topic.modules[mi]._loaded);
+  const advanceable = () => shown >= 0 && (cur === shown || ready(stages[cur].mi));
   let prefetchTimer = 0;
   let renderSeq = 0;
   let turnSeq = 0;
   function paintNext() {
-    const st = stages[cur];
+    const st = stages[shown];
     if (!st) return;
-    const readPending = st.type === "read" && !doneSet().has(cur);
+    const readPending = st.type === "read" && !doneSet().has(shown);
     const remaining = N - doneSet().size - (readPending ? 1 : 0);
-    nextBtn.textContent = cur === N - 1
+    nextBtn.textContent = shown === N - 1
       ? (remaining > 0
         ? (readPending ? "Complete & next unfinished →" : "Next unfinished · " + remaining + " left →")
         : (readPending ? "Complete & finish ✓" : "Finish ✓"))
@@ -528,6 +532,7 @@
       wireResize(body, handle);
     }
     stageEl.appendChild(body);
+    shown = i;
 
     prevBtn.disabled = i === 0;
     paintNext();
@@ -539,6 +544,7 @@
   }
 
   async function go(i) {
+    if (shown < 0) return;
     if (i < 0 || i >= N) {
       if (i >= N) {
         const done = doneSet();
@@ -555,6 +561,7 @@
       return;
     }
     const dir = i >= cur ? 1 : -1;
+    if (stageEl.contains(document.activeElement)) returnTo = document.activeElement;
     cur = i;
 
     history.replaceState(null, "", "#s" + i);
@@ -574,7 +581,16 @@
           turnEl.textContent = "";
         }
       }
-      if (!painted) return;
+      if (!painted) {
+        if (turn === turnSeq) {
+          cur = shown;
+          history.replaceState(null, "", "#s" + shown);
+          if (returnTo && returnTo.isConnected) returnTo.focus({ preventScroll: true });
+          returnTo = null;
+        }
+        return;
+      }
+      returnTo = null;
       stageEl.scrollIntoView({ block: "start", behavior: "auto" });
       const h = stageEl.querySelector(".stage__guide h2, .stage__guide h1, .stage__kicker");
       if (h) { h.setAttribute("tabindex", "-1"); h.focus({ preventScroll: true }); }
@@ -585,13 +601,14 @@
 
   prevBtn.addEventListener("click", () => go(cur - 1));
   nextBtn.addEventListener("click", () => {
-    if (stages[cur].type === "read") mark(cur, nextBtn);
+    if (!advanceable()) return;
+    if (stages[shown].type === "read") mark(shown, nextBtn);
     go(cur + 1);
   });
   document.addEventListener("keydown", (e) => {
     if (e.target.matches("input, textarea, select")) return;
     if (!e.altKey) return;
-    if (e.key === "ArrowRight") { e.preventDefault(); go(cur + 1); }
+    if (e.key === "ArrowRight") { e.preventDefault(); if (advanceable()) go(cur + 1); }
     if (e.key === "ArrowLeft") { e.preventDefault(); go(cur - 1); }
   });
 
@@ -602,12 +619,10 @@
   renderNav(start);
   try { await render(start); }
   catch {
-    if (!turnSeq) {
-      failCourse();
-      return;
-    }
+    failCourse();
+    return;
   }
   if (window.Gamify) window.Gamify.paint();
-  document.addEventListener("iewt:synced", () => { paintProgress(); renderNav(cur); if (window.Gamify) window.Gamify.paint(); });
-  document.addEventListener("iewt:progress-reset", () => { paintProgress(); renderNav(cur); if (window.Gamify) window.Gamify.paint(); });
+  document.addEventListener("iewt:synced", () => { paintProgress(); renderNav(shown); if (window.Gamify) window.Gamify.paint(); });
+  document.addEventListener("iewt:progress-reset", () => { paintProgress(); renderNav(shown); if (window.Gamify) window.Gamify.paint(); });
 })();
