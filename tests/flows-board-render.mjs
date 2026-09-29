@@ -916,7 +916,27 @@ for (const view of [SHIFT_VIEWS[0], SHIFT_VIEWS[2], SHIFT_VIEWS[3]]) {
   ok(shot.cls < 0.02, `and its layout shift is ${shot.cls.toFixed(4)} at ${at}`);
 }
 await put("board:long", board("long", true));
-
+for (const view of [SHIFT_VIEWS[0], SHIFT_VIEWS[2], SHIFT_VIEWS[3]]) {
+  const at = `${view.width}px`;
+  const shot = await boardShift(browser, { baseURL: server.baseURL, cookie: token, route: "/flows/long/", ...view, fail: true, settled: '.bd-silent[data-empty="unreadable"]' });
+  eq(moved(shot, ["bdHero", "bdModT", "bdMod"]).join("; "), "",
+     `a board that could not be read fits the same reserve at ${at}: the failed fetch empties the hero to its skeleton and the silence takes the table's place without moving the module`);
+  ok(shot.cls < 0.02, `and its layout shift is ${shot.cls.toFixed(4)} at ${at} ` +
+     `(${shot.shifts.map((x) => x.v.toFixed(4) + " " + x.src).join(", ") || "no shift"})`);
+  eq(shot.busyBefore, "hidden", `the footer waits unseen while the failing read is busy at ${at}`);
+  eq(shot.footAfter, "visible", `and the failure path's finally clears aria-busy, so the footer shows again at ${at}`);
+}
+for (const [width, css, said] of [
+  [440, ":root { --gutter: 0px; }", "a 440 px viewport with no gutter"],
+  [350, ":root { --gutter: 0px; }", "a 350 px viewport with no gutter"],
+  [1440, ".flows-body .flows-main > * { max-width: 300px; }", "a 300 px column at 1440 px"],
+]) {
+  const shot = await boardShift(browser, { baseURL: server.baseURL, cookie: token, route: "/flows/long/", width, height: 900, settled: ROWS, css });
+  eq(moved(shot, ["bdHero", "bdModT", "bdMod", "bdTools", "bdTable"]).join("; "), "",
+     `the hero reserve follows the chips' own column, not the viewport: in ${said} the rows still never move`);
+  ok(shot.cls < 0.02, `and the layout shift there is ${shot.cls.toFixed(4)} ` +
+     `(${shot.shifts.map((x) => x.v.toFixed(4) + " " + x.src).join(", ") || "no shift"})`);
+}
 eq(errors.length, 0,
    "no page error and no console error across both board routes: " + errors.join(" | "));
 

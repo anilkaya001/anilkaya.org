@@ -337,6 +337,17 @@ try {
        `and its layout shift through the fill is ${shot.cls.toFixed(4)} at ${at} ` +
        `(${shot.shifts.map((x) => x.v.toFixed(4) + " " + x.src).join(", ") || "no shift"})`);
   }
+  await put("board:watch", { rows: [], generatedAt: null, status: "pending" });
+  for (const [view, fail] of [[SHIFT_VIEWS[0], false], [SHIFT_VIEWS[3], false], [SHIFT_VIEWS[0], true], [SHIFT_VIEWS[2], true], [SHIFT_VIEWS[3], true]]) {
+    const at = `${view.width}px ${fail ? "failed read" : "pending"}`;
+    const shot = await boardShift(browser, { baseURL: server.baseURL, cookie: token, route: "/flows/watch/", ...view, fail,
+      settled: fail ? '.bd-silent[data-empty="unreadable"]' : ".bd-silent[data-empty]" });
+    eq(moved(shot, ["bdHero", "bdModT", "bdMod"]).join("; "), "",
+       `a silent watch list fits the same reserve (${at}): the hero keeps its skeleton's height and the module does not move`);
+    ok(shot.cls < 0.02, `and its layout shift is ${shot.cls.toFixed(4)} (${at})`);
+    eq(shot.footAfter, "visible", `and the footer shows once the list settles (${at})`);
+  }
+  await put("board:watch", WATCH);
 } finally {
   await browser.close();
   await server.stop();

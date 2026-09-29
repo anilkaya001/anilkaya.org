@@ -28,13 +28,11 @@
 .bd-sides a[aria-current="page"] { color: var(--label-1); background: var(--fill-1); }
 @media (max-width: 1024.98px) { .flows-body .flows-main > .bd-sides { display: grid; } }
 
-.bd-hero { margin-bottom: var(--sp-5); min-height: 95px; }
-@media (max-width: 452px) { .bd-hero { min-height: 84px; } }
-@media (max-width: 362px) { .bd-hero { min-height: 82px; } }
+.bd-hero { margin-bottom: var(--sp-5); }
+.bd-hero-sk { visibility: hidden; }
 .bd-hero .ui-chip-v { font-variant-numeric: tabular-nums; }
 @container chips (max-width: 330px) { .bd-hero .ui-gchip { padding-inline: 1px; } .bd-hero .ui-chip-v { font-size: 13px; letter-spacing: -0.02em; } }
 @media (min-width: 768px) {
-  .bd-hero { min-height: 103px; }
   .bd-hero .ui-gchip { padding: 12px 14px 11px; }
   .bd-hero .ui-chip-v { font: var(--t-title2); letter-spacing: var(--t-title2-track); font-variant-numeric: tabular-nums; }
 }

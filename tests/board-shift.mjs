@@ -9,7 +9,7 @@ export const SHIFT_VIEWS = [
 
 const IDS = ["bdHero", "bdModT", "bdMod", "bdTools", "bdTable"];
 
-export async function boardShift(browser, { baseURL, cookie, route, width, height, coarse = false, settled }) {
+export async function boardShift(browser, { baseURL, cookie, route, width, height, coarse = false, settled, fail = false, css = null }) {
   const ctx = await browser.newContext({ viewport: { width, height }, hasTouch: coarse });
   await ctx.addCookies([{ name: "flows_session", value: cookie, url: baseURL }]);
   const page = await ctx.newPage();
@@ -24,7 +24,11 @@ export async function boardShift(browser, { baseURL, cookie, route, width, heigh
   });
   let release;
   const gate = new Promise((r) => { release = r; });
-  await page.route(/\/api\/flows\/board\?/, async (r) => { await gate; await r.continue(); });
+  await page.route(/\/api\/flows\/board\?/, async (r) => {
+    await gate;
+    if (fail) await r.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: { code: "internal", message: "Internal error" } }) });
+    else await r.continue();
+  });
   const tops = () => page.evaluate((ids) => Object.fromEntries(ids.map((id) => {
     const e = document.getElementById(id);
     const r = e && e.getBoundingClientRect();
@@ -34,6 +38,11 @@ export async function boardShift(browser, { baseURL, cookie, route, width, heigh
     await page.goto(baseURL + route, { waitUntil: "domcontentloaded" });
     await page.evaluate(() => document.fonts.ready);
     await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    if (css) {
+      await page.addStyleTag({ content: css });
+      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+      await page.evaluate(() => { window.__shifts = []; });
+    }
     const before = await tops();
     const busyBefore = await page.evaluate(() => {
       const f = document.querySelector(".bd-foot");
