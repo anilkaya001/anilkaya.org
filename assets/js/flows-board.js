@@ -873,8 +873,7 @@
   function paintHero() {
     if (!hero) return;
     const p = st.payload;
-    if (!p || !st.rows.length) { hero.replaceChildren(); hero.hidden = true; return; }
-    hero.hidden = false;
+    if (!p || !st.rows.length) { hero.replaceChildren(); return; }
     hero.replaceChildren(UI.chips(WATCH ? watchHero(p, st.rows) : sideHero(p, st.rows), "Summary"));
   }
 
@@ -1224,7 +1223,7 @@
     if (mapHost) mapHost.hidden = true;
     tools.hidden = true;
     if (seg) seg.hidden = true;
-    if (hero) { hero.replaceChildren(); hero.hidden = true; }
+    if (hero) hero.replaceChildren();
   }
 
   function clearSilence() {

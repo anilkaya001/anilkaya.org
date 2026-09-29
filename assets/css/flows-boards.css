@@ -28,22 +28,29 @@
 .bd-sides a[aria-current="page"] { color: var(--label-1); background: var(--fill-1); }
 @media (max-width: 1024.98px) { .flows-body .flows-main > .bd-sides { display: grid; } }
 
-.bd-hero { margin-bottom: var(--sp-5); }
+.bd-hero { margin-bottom: var(--sp-5); min-height: 95px; }
+@media (max-width: 452px) { .bd-hero { min-height: 84px; } }
+@media (max-width: 362px) { .bd-hero { min-height: 82px; } }
 .bd-hero .ui-chip-v { font-variant-numeric: tabular-nums; }
 @container chips (max-width: 330px) { .bd-hero .ui-gchip { padding-inline: 1px; } .bd-hero .ui-chip-v { font-size: 13px; letter-spacing: -0.02em; } }
 @media (min-width: 768px) {
+  .bd-hero { min-height: 103px; }
   .bd-hero .ui-gchip { padding: 12px 14px 11px; }
   .bd-hero .ui-chip-v { font: var(--t-title2); letter-spacing: var(--t-title2-track); font-variant-numeric: tabular-nums; }
 }
 
 .bd-mod { gap: var(--sp-4); }
 .bd-mod .ui-mod-h { min-height: 36px; }
+@container mod (max-width: 540px) { .bd-mod:has(> .bd-map) > .ui-mod-h { align-content: start; min-height: 69px; } }
+@media (pointer: coarse) { @container mod (max-width: 540px) { .bd-mod:has(> .bd-map) > .ui-mod-h { min-height: 73px; } } }
 
 .bd-tools {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  align-content: flex-start;
   gap: var(--sp-3);
+  min-height: 36px;
 }
 .bd-tools[hidden] { display: none; }
 .bd-tools-sp { flex: 1 1 0; }
@@ -62,6 +69,8 @@
   cursor: text;
 }
 .bd-search .ui-g { flex: none; font-size: 15px; }
+@container mod (max-width: 340px) { .bd-search { flex-basis: 100px; } }
+@container mod (max-width: 290px) { .bd-tools { min-height: 80px; } .bd-search { flex-basis: 100%; max-width: none; } }
 .bd-q-in {
   flex: 1 1 auto;
   min-width: 0;
@@ -447,6 +456,7 @@
 .bd-silent .ui-silent-t small { display: block; margin-top: 2px; color: var(--label-3); font: var(--t-caption); font-variant-numeric: tabular-nums; }
 
 .flows-foot.bd-foot { display: flex; justify-content: flex-end; margin-top: var(--sp-4); padding: 0; border: 0; }
+.bd-mod:has([aria-busy="true"]) + .bd-foot { visibility: hidden; }
 .bd-foot a {
   display: inline-flex;
   align-items: center;

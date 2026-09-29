@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "231";
+export const ASSET_VERSION = "232";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -428,7 +428,7 @@ const BOARD_SIDES = [
 const boardBody = (key, { status, body, label }) => `
   <nav class="bd-sides" aria-label="Boards">${BOARD_SIDES.map((b) =>
     `<a href="${b.href}"${b.key === key ? ' aria-current="page"' : ""}>${glyph(b.glyph)}<span>${b.label}</span></a>`).join("")}</nav>
-  <div class="bd-hero" id="bdHero" hidden></div>
+  <div class="bd-hero" id="bdHero"></div>
   <section class="ui-card ui-mod bd-mod" id="bdMod" aria-labelledby="bdModT">
     ${SECTOR_SPRITE}
     <p class="visually-hidden" id="${status}" role="status">Loading the latest session\u2026</p>

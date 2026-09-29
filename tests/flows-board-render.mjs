@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { signSession } from "../shared/session.js";
 import { startWorker, SESSION_SECRET, FLOWS_TEST_USER } from "./worker-server.mjs";
+import { boardShift, moved, SHIFT_VIEWS } from "./board-shift.mjs";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -892,6 +893,30 @@ ok(!/all of them|inside the band|±/.test(quietBare),
   await page.setViewportSize({ width: 1280, height: 1000 });
 }
 
+await put("board:long", board("long", true));
+for (const view of SHIFT_VIEWS) {
+  const at = `${view.width}px ${view.coarse ? "coarse" : "fine"}`;
+  const shot = await boardShift(browser, { baseURL: server.baseURL, cookie: token, route: "/flows/long/", ...view, settled: ROWS });
+  eq(shot.pointer, view.coarse ? "coarse" : "fine", `the ${at} context really matches the pointer it is named for`);
+  eq(moved(shot, ["bdHero", "bdModT", "bdMod", "bdTools", "bdTable"]).join("; "), "",
+     `THE ROWS NEVER MOVE at ${at}: the hero, the module title, the tools row and the table sit where the shell ` +
+     "drew them before the board answered, because each reserves the height it fills to");
+  ok(shot.cls < 0.02,
+     `and the page's layout shift through the whole fill is ${shot.cls.toFixed(4)} at ${at}, under 0.02 ` +
+     `(${shot.shifts.map((x) => x.v.toFixed(4) + " " + x.src).join(", ") || "no shift"})`);
+  eq(shot.busyBefore, "hidden", `the footer waits unseen while the table is busy at ${at}, so it is not dragged down the viewport by the rows`);
+  eq(shot.footAfter, "visible", `and it shows once the rows land at ${at}`);
+}
+await put("board:long", { side: "long", rows: [], generatedAt: null, status: "pending" });
+for (const view of [SHIFT_VIEWS[0], SHIFT_VIEWS[2], SHIFT_VIEWS[3]]) {
+  const at = `${view.width}px`;
+  const shot = await boardShift(browser, { baseURL: server.baseURL, cookie: token, route: "/flows/long/", ...view, settled: ".bd-silent[data-empty]" });
+  eq(moved(shot, ["bdHero", "bdModT", "bdMod"]).join("; "), "",
+     `a pending board fits the same reserve at ${at}: the hero keeps its height empty and the silence takes the table's place without moving the module`);
+  ok(shot.cls < 0.02, `and its layout shift is ${shot.cls.toFixed(4)} at ${at}`);
+}
+await put("board:long", board("long", true));
+
 eq(errors.length, 0,
    "no page error and no console error across both board routes: " + errors.join(" | "));
 
@@ -906,7 +931,7 @@ console.log(`✓ flows-board-render: ${checks} assertions — the control row ex
   `glyph that names its session, a five-session strip drawn to a linear scale with gaps as dots and zero ` +
   `as neither side, flags that are whole or out of sight on a phone, a rail badge that is silent on a pending board, prints its measured zero on a quiet one ` +
   `and its whole POOL on a board the length cap truncated — the same number the sentence and the ` +
-  `summary track reconcile against — no overflow at 320px, four silences that are four glyphs in ` +
+  `summary track reconcile against — no overflow at 320px, rows that never move while the board answers at four widths and both pointers, pending or filled, four silences that are four glyphs in ` +
   `greyscale with their sentences one tap away and the Worker's failed read told apart from a ` +
   `never-published side, a priced move that prints its absence, a gamma regime no hue calls ` +
   `bearish, a dispersion that carries its unit, one statement of a cold memory, a quiet sentence ` +
