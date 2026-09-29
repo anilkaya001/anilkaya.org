@@ -1813,6 +1813,77 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   through the morning. `live:focus` needs neither the token nor Actions, only
   the Worker's `UW_API_KEY`, which Tier 1 already needs. Tier 2 still refreshes
   `live:strips` whenever it runs, and the page takes whichever read is newer.
+- **A live change is always against a dated close, and every live price says how old its quote is.**
+  On 2026-09-29 the vendor's `prev_close` was null on 59 of 122 strip rows and 11 of the 22
+  focus rows (the same eleven names on every read, from both writers, after the close as
+  well as during it), so those rows had no change and `live:movers` ranked 62 of 119
+  names. `priorCloseBase` (`shared/flows-live.js`) reads the base from what the writers
+  already hold: the last element of each name's `closes` in the nightly `focus` payload,
+  then the `px` of the nightly boards. The Actions leg has both payloads in hand; the
+  Worker's focus tick takes the last close of each name from D1 in the statement that
+  already read the groups (`FOCUS_NIGHTLY_SQL`, `json_group_object` over `$.closes` with
+  `$[#-1]`, about 300 bytes back), so the base costs no round trip. A payload is used
+  only when its `sessionDate` is the trading day before the live session, by the same
+  calendar the clocks use (weekends, computed holidays and the days the tape closed), so
+  a nightly that missed a session is a base for nothing. It is dropped wholesale when the
+  vendor's own `prev_close` differs from it by more than 0.05% on more than one in ten of
+  five or more names that carry both (57 of 57 agreed on 2026-09-29). The vendor's own
+  `prev_close` is never replaced. What was filled is stated in the payload:
+  `prevFill: { date, n, from: { "focus": k, "board:long": k, ... }, agree: [agreed, checked],
+  tickers }`, or `declined: "disagrees"`. SPY, QQQ and IWM have no nightly close to
+  read and keep a null change where the vendor gives none. `live:movers` ranks every
+  name that has a base and counts the rest as `unranked`. The boards' live overlay
+  (`takeLive`) takes the live row's change or shows a dash; it no longer keeps the
+  nightly change beside a live price.
+  The nightly `focus` payload now prices each name at the session close it already
+  carries (`px` is the last of `closes`, `prev` the one before, `chg` their ratio), not
+  at the screener's post-close print, so Home shows the boards' number for the same
+  name; `basis.read` lists any name still on the read price.
+  Every strip row ends in `qa`: the vendor's `quote_time` (epoch milliseconds or
+  seconds, or an ISO string) as whole seconds behind the read, null when absent or
+  more than a minute after it. `fresh.vendorAt` is the newest quote time, held to the
+  read instant. A row the vendor still dates before the session, in a strip that is
+  otherwise the session's, is held out and listed in `off` (`{ n, dates }`, at most 20
+  names) so a reader falls back to the nightly value; a strip that is mostly the
+  previous session's stays `prior`. The Actions leg adds `lag: { n, p50, p90, max }` to
+  `live:strips`, keeps the same three numbers per 15-minute column in
+  `live:strips:series.lag`, and writes the spread and the fill into the heartbeat's
+  `run.quoteLag`, `run.prevFill` and notes (`quote lag: ...`, `day change: ...`).
+  `live:gex` names carry `lagS` and the key a `vendorAt`; a per-name tape leg carries
+  `lagS`. Measured on the same input: `live:strips` for 122 names 22,478 to 24,122
+  bytes of 65,536 (759 for `qa` and the spread, 885 for the filled values and their
+  label), `live:focus` for 22 names 4,836 to 5,497 of 16,384, the series +456 over a
+  session and `live:gex` about +12 bytes a name. The focus tick's first run in a cold
+  isolate costs 0.2 to 0.3 ms more CPU and a warm one less (`stripValues` now fills a
+  flat array instead of a keyed object: 167 to 95 µs for 22 production-size rows),
+  against the 10 ms cap.
+  **The frozen-feed detector is not built.** It needs the lag distribution first, and
+  nothing stored it: what the first sessions must answer is the size of `qa` for a
+  liquid name in the regular session (a stamp that is the last trade reads minutes
+  behind on a quiet name, a batch snapshot reads seconds), how it behaves before 09:30
+  and after 16:00, and whether a quote time ever runs ahead of the read. The run
+  record and the job log carry it from the next session; `live:strips:series.lag`
+  keeps the day's 15-minute spread until the series resets at the next session's
+  first read, so something must copy it out before then (the nightly, or the health
+  gate). The rule to test against that history is an aggregate one, never per name: in the regular session,
+  the median `qa` (or the newest `vendorAt`) more than about ten minutes behind the
+  read for two passes running counts the read as unanswered, through the same
+  `answered: false` path a failed vendor call already takes, and the Worker's focus
+  tick skips its write.
+- **The landing ticker measures against the previous session.** `parseIndexQuote`
+  (`shared/markets.js`) pairs each bar's timestamp with its close before it drops
+  nulls, dates a bar by the exchange's own calendar (`meta.gmtoffset`), and takes as the
+  base the last close dated before the quote's own day (`regularMarketTime`). With
+  `range=5d`, Yahoo's `chartPreviousClose` is the close before the first bar, five
+  sessions back: on 2026-09-29 the S&P 500 showed -1.27% against a true -0.26%, and
+  BIST -7.25%. It is no longer read. Without timestamps the second-to-last close is
+  used when the last is the quote's own; otherwise `previousClose`; otherwise the
+  change is null and the strip prints a dash. Each quote keeps `asOf`, `asOfDay`,
+  `prevClose` and `prevDay`. The strip prints each quote's own İstanbul time (a close
+  from an earlier day reads `Close Fri`, or `Close Sep 25` past a week) and no single
+  fetch-time stamp; a quote stored before this change lacks `asOfDay` and prints a
+  dash, so the snapshot cannot show the old percentage in the up to 30 minutes before
+  the next firing replaces it.
 - **Tier 1 fits the Workers Free CPU cap.** Until 2026-09-24 Tier 1 also read the
   0DTE net flow and the SPY and QQQ ETF tides: three 390-row one-minute feeds,
   about 200 KB of JSON a tick. Once the session's rows filled in, a tick needed

@@ -116,8 +116,10 @@ header readback with this repository after any dashboard rule change.
 | `tests/placement-contract.mjs` | Placement bank, scoring boundaries, route, privacy, no-JS, keyboard, and responsive runtime contracts. |
 | `tests/worker-regression.mjs` | Real local Wrangler routing, headers, API, and D1 tests. |
 | `tests/regression.mjs` | Full Playwright browser regression suite. |
+| `shared/markets.js`, `assets/js/market-ticker.js` | The landing index ticker: the Worker's Yahoo parse (the change is against the previous session's close taken from the same response's dated bars, never `chartPreviousClose`; each quote keeps its own `asOf`, `asOfDay`, `prevClose` and `prevDay`) and the strip that prints each quote's own İstanbul time, `Close <weekday>` for a closed market, and a dash for a quote with no base. |
+| `tests/markets-contract.mjs`, `tests/market-ticker-render.mjs` | The Yahoo parse against dated five-day responses (weekend, Tokyo morning, null trailing bar, no timestamps) and the strip rendered in Chromium with a fixed clock; neither starts a server. |
 | `shared/flows-freshness.js` | The Eastern clock (arithmetic, proven equal to the IANA zone), market phases, the freshness threshold table, `X-Fresh-*` headers, and the live clock's due-tests. |
-| `shared/flows-live.js`, `shared/flows-live-worker.js` | The live layer's key registry and pure builders; the Worker's Tier 1 tick, dispatch, watchdog, live ingest, `/api/flows/lk`, `/now`, `/tape` and read-time overlays. |
+| `shared/flows-live.js`, `shared/flows-live-worker.js` | The live layer's key registry and pure builders; the Worker's Tier 1 tick, dispatch, watchdog, live ingest, `/api/flows/lk`, `/now`, `/tape` and read-time overlays. A strip row ends in `qa`, the vendor's `quote_time` as seconds behind the read; `priorCloseBase` and `shapeStrips` fill a null `prev_close` from the last dated nightly close and say so in `prevFill` (DEPLOY.md 10.5i). |
 | `shared/flows-oidc.js` | The live credential: the GitHub OIDC claim policy (this repository by id, `flows-live.yml` on main), the pure JWT verifier the Worker runs, and the runner-side token request the `--live` leg uses. No shared secret. |
 | `scripts/flows-legs/live.mjs`, `live-fake.mjs` | The Actions `--live` leg (Tier 2, `live:*` keys only) and its fake vendor for `--dry-run`. |
 | `shared/flows-focus.js` | The home page's focus roster (Gold, Silver and Copper groups, the Mag 7, the metal funds and miners) and the NASDAQ-10 derivation from QQQ holdings. A leaf module: it imports nothing, so the Worker, the pipeline and the live leg can all read it without a cycle. |
@@ -479,7 +481,13 @@ flows-legs-contract
 flows-live-contract    flows-freshness-contract
 flows-quant-card       flows-track-render
 flows-pipeline-contract  flows-reads-contract
+markets-contract
 ```
+
+`market-ticker-render` needs Playwright's Chromium but no server: it serves the
+landing script and a snapshot from `page.route` on a fake origin and fixes
+`Date.now` in the page. Run it with `PLAYWRIGHT_BROWSERS_PATH` set like the
+other browser suites.
 
 `flows-reads-contract` was measured on 2026-09-28: about 20 s with no server,
 of which three blocks wait out the flights' deadlines (2 s for the schema
