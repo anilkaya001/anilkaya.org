@@ -14,6 +14,7 @@ const TOKEN = "overview-token-aaaaaaaaaaaaaaaa";
 const server = await startWorker({ extraVars: [`FLOWS_INGEST_TOKEN:${TOKEN}`] });
 const url = (p) => server.baseURL + p;
 const painted = (p) => p.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))));
+const settled = async (p) => { await p.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {}); await painted(p); };
 
 const post = (key, body) => fetch(url("/api/flows/ingest?key=" + encodeURIComponent(key)), {
   method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + TOKEN },
@@ -264,7 +265,7 @@ const CHIPS = `Object.fromEntries(Array.from(document.querySelectorAll("#ccVerdi
     tag: c.tagName, info: Boolean(c.dataset.info),
   }];
 }))`;
-const chipsOf = (pg) => pg.evaluate(CHIPS);
+const chipsOf = async (pg) => { await settled(pg); return pg.evaluate(CHIPS); };
 const chipWhy = (pg, key) => why(pg, `#ccVerdict [data-chip="${key}"]`);
 
 const LEADERS = `((id) => Array.from(document.querySelectorAll("#" + id + " .hm-lrow"), (r) => ({
@@ -308,6 +309,7 @@ try {
 
   await signIn(page);
   await page.waitForSelector("#ccBull .hm-lrow", { timeout: 15000 });
+  await settled(page);
 
   {
     const seat = await page.evaluate(() => {
@@ -1392,6 +1394,7 @@ try {
       { deep: 4, cleared: 9, shed: 5 }));
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccBull .hm-lrow", { timeout: 15000 });
+    await settled(page);
     const pooled = await page.evaluate(() => {
       const out = {};
       for (const el of document.querySelectorAll("[data-rail-count]")) {
@@ -1458,6 +1461,7 @@ try {
     await post("board:short", board("short", bearRows, SESSION, { deep: 4 }));
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccBull .hm-lrow", { timeout: 15000 });
+    await settled(page);
   }
 
   {
@@ -1656,6 +1660,7 @@ try {
       premium: { ...market.premium, tilt: -0.0300 } });
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccBull .hm-lrow", { timeout: 15000 });
+    await settled(page);
     const tiles = await chipsOf(page);
     eq(tiles["Flow bias"]?.v, "−3.0%", "the dollar weighting is the chip's value");
     const d = await chipWhy(page, "Flow bias");
@@ -1693,6 +1698,7 @@ try {
       route.fulfill({ status: 500, contentType: "application/json", body: "{}" }));
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccBull .hm-lrow", { timeout: 15000 });
+    await settled(page);
     let tiles = await readTiles();
     for (const k of [...TILTS, "Breadth"]) {
       eq(tiles[k]?.v, k === "Breadth" ? "— / —" : "—",
@@ -1727,6 +1733,7 @@ try {
       body: JSON.stringify({ status: "pending", rows: [] }) }));
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccBull .hm-lrow", { timeout: 15000 });
+    await settled(page);
     tiles = await readTiles();
     for (const k of TILTS) {
       eq(tiles[k]?.v, "—", `${k} is an em dash on an unpublished market key`);
@@ -1743,6 +1750,7 @@ try {
       breadth: { bull: 9, bear: 12, flat: 0, unpriced: 3 }, premium: { net: -18400000 } });
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccBull .hm-lrow", { timeout: 15000 });
+    await settled(page);
     tiles = await readTiles();
     for (const k of TILTS) {
       eq(tiles[k]?.v, "—", `${k} is an em dash when the payload carries no tilt`);
@@ -1764,6 +1772,7 @@ try {
                  tilt: null, topShare: null } });
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccBull .hm-lrow", { timeout: 15000 });
+    await settled(page);
     tiles = await readTiles();
 
     eq(tiles["Flow bias"]?.kind, "empty", "the dollar weighting over a zero gross is measured-empty");
@@ -1830,6 +1839,7 @@ try {
       body: JSON.stringify({ side: "short", rows: [], generatedAt: null, status: "pending" }) }));
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccBull .hm-lrow", { timeout: 15000 });
+    await settled(page);
     tiles = await readTiles();
     const metaGap = await page.evaluate(() => {
       const el = document.getElementById("ccMetaDate");
@@ -1854,7 +1864,7 @@ try {
     }));
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccBull [data-empty]", { timeout: 15000 });
-    await painted(page);
+    await settled(page);
     eq(await page.evaluate(() => document.querySelector("#ccBull [data-empty]").dataset.empty),
        "pending", "an unpublished pole is pending, which is its own silence");
 
@@ -2179,6 +2189,7 @@ try {
     await serve(today, Date.now() - 5 * 60 * 1000);
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccBull .hm-lrow", { timeout: 15000 });
+    await settled(page);
     let s = await read();
     eq(s.hidden, true, "a fresh session raises no staleness warning");
     eq(s.body, false, "and leaves the document unmarked");
