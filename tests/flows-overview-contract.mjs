@@ -827,6 +827,100 @@ try {
   }
 
   {
+    const HOLD_MS = 2000;
+    let released = 0;
+    const hold = async (route) => {
+      await new Promise((r) => setTimeout(r, HOLD_MS));
+      released = Date.now();
+      await route.continue();
+    };
+    await page.route("**/api/flows/news*", hold);
+    await page.route("**/api/flows/sector-premium*", hold);
+    const t0 = Date.now();
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccBull .hm-lrow", { timeout: 15000 });
+    const filled = Date.now() - t0;
+    const early = await page.evaluate(() => ({
+      news: document.getElementById("ccNews").childElementCount,
+      lean: document.getElementById("ccLean").childElementCount,
+      bear: document.querySelectorAll("#ccBear .hm-lrow").length,
+      status: document.getElementById("flowsStatus").textContent.trim(),
+    }));
+    eq(released, 0,
+       `with Headlines and Sectors held ${HOLD_MS} ms, the boards filled at ${filled} ms, before either answered`);
+    eq(early.news, 0, "and Headlines had not painted yet");
+    eq(early.lean, 0, "nor Sectors");
+    ok(early.bear > 0, `both boards filled together (${early.bear} bearish rows)`);
+    ok(!/^Loading/.test(early.status), `and the status line already reads the boards (${early.status})`);
+    await page.waitForSelector("#ccVerdict [data-chip]", { timeout: 1000 });
+    eq(released, 0, "the verdict chips, whose inputs had all answered, painted without waiting for them either");
+    await page.waitForSelector("#ccNews > *", { timeout: 15000 });
+    await page.waitForSelector("#ccLean > *", { timeout: 15000 });
+    ok(released > 0, "and the held modules still painted once they answered");
+    await page.unroute("**/api/flows/news*", hold);
+    await page.unroute("**/api/flows/sector-premium*", hold);
+  }
+
+  {
+    const tally = () => page.evaluate(() => ({
+      cross: document.querySelectorAll("#ccBull .cc-cross, #ccBear .cc-cross").length,
+      ern: document.querySelectorAll("#ccBull .cc-ern, #ccBear .cc-ern").length,
+      strips: document.querySelectorAll("#ccBull .hm-trk svg, #ccBear .hm-trk svg").length,
+      dashes: Array.from(document.querySelectorAll("#ccBull .hm-trk, #ccBear .hm-trk"), (c) => c.textContent.trim()).filter((x) => x === "\u2014").length,
+    }));
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#spinePlot svg", { timeout: 15000 });
+    await page.waitForSelector("#ccEvents > *", { timeout: 15000 });
+    const whole = await tally();
+
+    const HOLD_MS = 2000;
+    let released = 0;
+    const hold = async (route) => {
+      await new Promise((r) => setTimeout(r, HOLD_MS));
+      released = Date.now();
+      await route.continue();
+    };
+    await page.route("**/api/flows/scoretrack*", hold);
+    await page.route("**/api/flows/events*", hold);
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccBull a.hm-lrow", { timeout: 15000 });
+    const early = await page.evaluate(() => {
+      const cells = Array.from(document.querySelectorAll("#ccBull .hm-trk, #ccBear .hm-trk"));
+      const row = document.querySelector("#ccBull a.hm-lrow");
+      row.focus();
+      window.__held = row;
+      return {
+        cells: cells.length,
+        busy: cells.filter((c) => c.getAttribute("aria-busy") === "true").length,
+        text: cells.map((c) => c.textContent).join(""),
+        focused: document.activeElement === row,
+      };
+    });
+    eq(released, 0, "with the score track and events held, the boards filled before either answered");
+    ok(early.cells > 0 && early.busy === early.cells,
+       `every strip cell waits marked busy (${early.busy} of ${early.cells})`);
+    eq(early.text, "", "and none shows the dash that means no archived series, because nothing has been read yet");
+    ok(early.focused, "a ranked row takes keyboard focus while the track is out");
+
+    await page.waitForSelector("#spinePlot svg", { timeout: 15000 });
+    await page.waitForSelector("#ccEvents > *", { timeout: 15000 });
+    await page.waitForFunction(() => !document.querySelector("#ccBull [aria-busy], #ccBear [aria-busy]"), null, { timeout: 5000 });
+    ok(released > 0, "and the held reads did answer");
+    const late = await tally();
+    const kept = await page.evaluate(() => ({
+      same: document.querySelector("#ccBull a.hm-lrow") === window.__held && window.__held.isConnected,
+      focused: document.activeElement === window.__held,
+    }));
+    ok(kept.same, "the rows were filled in place, not rebuilt");
+    ok(kept.focused, "so the focused row kept keyboard focus when the track and events landed");
+    ok(whole.strips > 0, `the unheld page draws strips (${whole.strips})`);
+    eq(JSON.stringify(late), JSON.stringify(whole),
+       `and the late fill reaches the same strips, dashes, crossings and earnings marks as a page whose reads answered together (${JSON.stringify(whole)})`);
+    await page.unroute("**/api/flows/scoretrack*", hold);
+    await page.unroute("**/api/flows/events*", hold);
+  }
+
+  {
 
     allowFetchFailure = true;
     await page.route("**/api/flows/board?side=long", (route) =>
@@ -2131,6 +2225,34 @@ try {
        `and says the pipeline has not published, not that the market was quiet (${s.text})`);
     ok(!/different sessions/.test(s.text),
        "in words that are not the mismatched-halves sentence");
+
+    {
+      const HOLD_MS = 2000;
+      let released = 0;
+      const hold = async (route) => {
+        await new Promise((r) => setTimeout(r, HOLD_MS));
+        released = Date.now();
+        await route.continue();
+      };
+      await page.route("**/api/flows/market*", hold);
+      await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+      await page.waitForSelector("#ccBull .hm-lrow", { timeout: 15000 });
+      const pillAt = () => page.evaluate(() => {
+        const p = document.querySelector("#hmStale .hm-pill");
+        return p ? Math.round(p.getBoundingClientRect().left) : null;
+      });
+      s = await read();
+      const date = await page.evaluate(() => document.getElementById("ccMetaDate").textContent.trim());
+      const x0 = await pillAt();
+      eq(released, 0, "with the market read held, the boards filled before it answered");
+      eq(s.body, true, "and the document was already marked stale when they did");
+      eq(s.pill, true, "with the stale pill beside them");
+      ok(date.length > 0 && !/unavailable/.test(date), `and the session date, which reads only the boards (${date})`);
+      await page.waitForFunction(() => document.getElementById("ccMetaScreened").textContent.trim() !== "", null, { timeout: 15000 });
+      ok(released > 0, "the screened count arrived with the market read");
+      eq(await pillAt(), x0, "and did not move the stale pill when it did");
+      await page.unroute("**/api/flows/market*", hold);
+    }
     await stop();
 
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });

@@ -64,13 +64,13 @@ const SURFACES = [
 
   { key: "board:long", file: "assets/js/flows-overview.js", fn: "renderSpine", vars: ["payload"] },
 
-  { key: "board:long", file: "assets/js/flows-overview.js", at: "Promise.all([",
+  { key: "board:long", file: "assets/js/flows-overview.js", at: "const when = (keys, fn)",
     label: "the region assembly", vars: ["lng", "payload", "meta"] },
-  { key: "board:short", file: "assets/js/flows-overview.js", at: "Promise.all([",
+  { key: "board:short", file: "assets/js/flows-overview.js", at: "const when = (keys, fn)",
     label: "the region assembly", vars: ["sht"] },
-  { key: "flowalerts", file: "assets/js/flows-overview.js", at: "Promise.all([",
+  { key: "flowalerts", file: "assets/js/flows-overview.js", at: "const when = (keys, fn)",
     label: "the region assembly", vars: ["alerts"] },
-  { key: "events", file: "assets/js/flows-overview.js", at: "Promise.all([",
+  { key: "events", file: "assets/js/flows-overview.js", at: "const when = (keys, fn)",
     label: "the region assembly", vars: ["events"] },
   { key: "board:long", file: "assets/js/flows-board.js", fn: "render", vars: ["payload"] },
   { key: "board:long", file: "assets/js/flows-board.js", fn: "sideHero", vars: ["payload"] },
