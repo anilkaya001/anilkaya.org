@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { signSession } from "../shared/session.js";
 import { startWorker, SESSION_SECRET, FLOWS_TEST_USER } from "./worker-server.mjs";
+import { boardShift, moved, SHIFT_VIEWS } from "./board-shift.mjs";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -326,6 +327,27 @@ try {
     }
     await put("board:watch", WATCH);
   }
+
+  for (const view of SHIFT_VIEWS) {
+    const at = `${view.width}px ${view.coarse ? "coarse" : "fine"}`;
+    const shot = await boardShift(browser, { baseURL: server.baseURL, cookie: token, route: "/flows/watch/", ...view, settled: ROW });
+    eq(moved(shot, ["bdHero", "bdModT", "bdMod", "bdTools", "bdTable"]).join("; "), "",
+       `the watch list's hero, title, tools and table sit where the shell drew them at ${at}: the four watch chips fill the same reserve as a board's`);
+    ok(shot.cls < 0.02,
+       `and its layout shift through the fill is ${shot.cls.toFixed(4)} at ${at} ` +
+       `(${shot.shifts.map((x) => x.v.toFixed(4) + " " + x.src).join(", ") || "no shift"})`);
+  }
+  await put("board:watch", { rows: [], generatedAt: null, status: "pending" });
+  for (const [view, fail] of [[SHIFT_VIEWS[0], false], [SHIFT_VIEWS[3], false], [SHIFT_VIEWS[0], true], [SHIFT_VIEWS[2], true], [SHIFT_VIEWS[3], true]]) {
+    const at = `${view.width}px ${fail ? "failed read" : "pending"}`;
+    const shot = await boardShift(browser, { baseURL: server.baseURL, cookie: token, route: "/flows/watch/", ...view, fail,
+      settled: fail ? '.bd-silent[data-empty="unreadable"]' : ".bd-silent[data-empty]" });
+    eq(moved(shot, ["bdHero", "bdModT", "bdMod"]).join("; "), "",
+       `a silent watch list fits the same reserve (${at}): the hero keeps its skeleton's height and the module does not move`);
+    ok(shot.cls < 0.02, `and its layout shift is ${shot.cls.toFixed(4)} (${at})`);
+    eq(shot.footAfter, "visible", `and the footer shows once the list settles (${at})`);
+  }
+  await put("board:watch", WATCH);
 } finally {
   await browser.close();
   await server.stop();
@@ -336,4 +358,5 @@ console.log(`✓ flows-watch-render: ${checks} assertions — two names at an id
   `than by hue, a rate that never appears without the sessions it was divided by, a ` +
   `projection withheld on a five-session average and on an absent residual alike, a crossing ` +
   `that came back through the edge marked and counted, a trace failure that says so instead ` +
-  `of reading as stillness, and a row that still has exactly as many cells as the head`);
+  `of reading as stillness, and a row that still has exactly as many cells as the head, ` +
+  `drawn where the shell reserved it at four widths and both pointers`);

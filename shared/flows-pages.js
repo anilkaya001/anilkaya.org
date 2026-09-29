@@ -428,7 +428,7 @@ const BOARD_SIDES = [
 const boardBody = (key, { status, body, label }) => `
   <nav class="bd-sides" aria-label="Boards">${BOARD_SIDES.map((b) =>
     `<a href="${b.href}"${b.key === key ? ' aria-current="page"' : ""}>${glyph(b.glyph)}<span>${b.label}</span></a>`).join("")}</nav>
-  <div class="bd-hero" id="bdHero" hidden></div>
+  <div class="bd-hero" id="bdHero"><div class="ui-chips-w bd-hero-sk" aria-hidden="true"><div class="ui-chips"><span class="ui-gchip"><span class="ui-gchip-g"></span><span class="ui-chip-v">\u00a0</span><span class="ui-chip-l">\u00a0</span></span></div></div></div>
   <section class="ui-card ui-mod bd-mod" id="bdMod" aria-labelledby="bdModT">
     ${SECTOR_SPRITE}
     <p class="visually-hidden" id="${status}" role="status">Loading the latest session\u2026</p>
