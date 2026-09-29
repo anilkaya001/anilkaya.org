@@ -937,6 +937,29 @@ for (const [width, css, said] of [
   ok(shot.cls < 0.02, `and the layout shift there is ${shot.cls.toFixed(4)} ` +
      `(${shot.shifts.map((x) => x.v.toFixed(4) + " " + x.src).join(", ") || "no shift"})`);
 }
+{
+  await put("board:long", board("long", true));
+  const liveStrips = { key: "live:strips", status: "ok", session: "2026-09-04", fields: ["px", "prev", "chg"],
+    rows: { NVDA: [131.5, null, null], NVAX: [102, 100, 0.02] }, fresh: { v: 1, readAt: new Date().toISOString(), cadenceS: 300 } };
+  const livePage = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+  await livePage.context().addCookies([{ name: "flows_session", value: token, url: server.baseURL }]);
+  await livePage.route((u) => u.pathname === "/api/flows/lk" && u.searchParams.get("k") === "strips", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(liveStrips) }));
+  await livePage.goto(url("/flows/long/"), { waitUntil: "networkidle" });
+  await livePage.waitForSelector(".bd-px.is-live");
+  const priced = await livePage.$$eval(ROWS, (rows) => Object.fromEntries(rows.map((r) => [
+    ((r.querySelector('[data-col="t"] .bd-open, [data-col="t"]') || {}).textContent || "").slice(0, 4),
+    { px: r.querySelector(".bd-px").textContent, chg: r.querySelector(".bd-chg").textContent, live: !!r.querySelector(".bd-px.is-live") }])));
+  eq(priced.NVDA.px, "131.50", "THE LIVE PRICE REPLACES THE NIGHTLY ONE on a name the live strip prices");
+  eq(priced.NVDA.chg, "\u2014",
+     "and where the live row has no base (prev and chg null) the change is a dash, never the nightly +1.00% that belongs to the previous " +
+     "session: a live-marked price is not printed beside a change from another day");
+  eq(priced.NVAX.chg, "+2.00%", "while a live row that carries its change replaces the nightly one");
+  ok(priced.NVDA.live && priced.NVAX.live, "both rows are marked live");
+  ok(!priced.AAPL.live && priced.AAPL.px === "102.00" && priced.AAPL.chg === "+1.00%",
+     "and a name the live strip does not carry keeps its nightly price and change together, unmarked");
+  await livePage.close();
+}
 eq(errors.length, 0,
    "no page error and no console error across both board routes: " + errors.join(" | "));
 
@@ -958,4 +981,4 @@ console.log(`✓ flows-board-render: ${checks} assertions — the control row ex
   `that counts and passes no verdict, every row one anchor to that name's reader across its whole ` +
   `width, and a map that tiles every name at its own pixel size, never prints two sector headers alike, ` +
   `points each against-the-board triangle the way its premium leans, reads by keyboard in rank order ` +
-  `and follows the filter`);
+  `and follows the filter, and a live price that is never printed beside the previous session's change`);
