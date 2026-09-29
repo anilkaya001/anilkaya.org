@@ -909,18 +909,43 @@ try {
       document.querySelector("#cNext").click();
       const tick = () => {
         const elapsed = performance.now() - started;
-        frames.push({ elapsed, old: stage.querySelector(".stage__kicker")?.textContent === left, opacity: Number(getComputedStyle(stage).opacity) });
+        frames.push({ elapsed, old: stage.querySelector(".stage__kicker")?.textContent === left, opacity: Number(getComputedStyle(stage).opacity), status: document.querySelector("#cTurn")?.textContent });
         if (elapsed < 900) requestAnimationFrame(tick);
-        else resolve({ left, pos: document.querySelector("#cPos").textContent.trim(), reshown: Math.max(0, ...frames.filter((frame) => frame.old && frame.elapsed > 450).map((frame) => frame.opacity)) });
+        else resolve({
+          left,
+          pos: document.querySelector("#cPos").textContent.trim(),
+          reshown: Math.max(0, ...frames.filter((frame) => frame.old && frame.elapsed > 450).map((frame) => frame.opacity)),
+          early: frames.filter((frame) => frame.elapsed < 600 && frame.status).length,
+        });
       };
       requestAnimationFrame(tick);
     }));
     assert.equal(crossing.pos, "5 / 20", "the next module resolved while it was held");
     assert(crossing.reshown < 0.05, `the stage just left faded back in to opacity ${crossing.reshown} while the next module loaded`);
+    assert.equal(crossing.early, 0, "the loading status showed before the crossing had waited");
+    await page.waitForFunction(() => document.querySelector("#cTurn")?.textContent === "Loading module…");
+    const held = await page.evaluate(() => {
+      const stage = document.querySelector("#cStage");
+      const button = stage.querySelector("button");
+      button.scrollIntoView({ block: "center", behavior: "instant" });
+      const box = button.getBoundingClientRect();
+      return {
+        inert: stage.inert,
+        busy: stage.getAttribute("aria-busy"),
+        role: document.querySelector("#cTurn")?.getAttribute("role"),
+        hittable: button.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)),
+      };
+    });
+    assert.deepEqual(held, { inert: true, busy: "true", role: "status", hittable: false }, "the stage just left stayed interactive and unannounced while the next module loaded");
     releaseModule();
     await waitForCourse(page, "6 / 20");
     await page.waitForFunction(() => getComputedStyle(document.querySelector("#cStage")).opacity === "1");
     assert.notEqual(await page.locator("#cStage .stage__kicker").textContent(), crossing.left);
+    assert.deepEqual(await page.evaluate(() => ({
+      inert: document.querySelector("#cStage").inert,
+      busy: document.querySelector("#cStage").getAttribute("aria-busy"),
+      status: document.querySelector("#cTurn")?.textContent,
+    })), { inert: false, busy: null, status: "" }, "the stage stayed busy after the next module arrived");
     clean();
     await context.close();
   }
@@ -942,6 +967,14 @@ try {
     await page.waitForTimeout(400);
     await page.click("#cPrev");
     await page.waitForFunction(() => getComputedStyle(document.querySelector("#cStage")).opacity === "1");
+    const reading = await page.evaluate(() => {
+      const control = [...document.querySelectorAll("#cStage button, #cStage input, #cStage textarea, #cStage select")].find((node) => !node.disabled);
+      control.dataset.reading = "1";
+      control.focus();
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" });
+      return { focused: document.activeElement === control, y: Math.round(scrollY) };
+    });
+    assert(reading.focused && reading.y > 0, "the returned-to stage had no control to focus below the fold");
     await page.evaluate(() => {
       window.__stageOpacity = [];
       const stage = document.querySelector("#cStage");
@@ -957,7 +990,9 @@ try {
       kicker: await page.locator("#cStage .stage__kicker").textContent(),
       hash: new URL(page.url()).hash,
       dimmed: await page.evaluate(() => Math.min(...window.__stageOpacity) < 0.99),
-    }, { pos: "5 / 20", kicker: left, hash: "#s4", dimmed: false }, "a module that arrived after the reader turned back replaced or re-faded the stage they returned to");
+      focused: await page.evaluate(() => document.activeElement?.dataset.reading === "1"),
+      y: await page.evaluate(() => Math.round(scrollY)),
+    }, { pos: "5 / 20", kicker: left, hash: "#s4", dimmed: false, focused: true, y: reading.y }, "a module that arrived after the reader turned back replaced, re-faded, refocused or scrolled the stage they returned to");
     clean();
     await context.close();
   }
@@ -973,6 +1008,62 @@ try {
     await page.waitForFunction(() => document.querySelector("#cStage").style.opacity === "1" && getComputedStyle(document.querySelector("#cStage")).opacity === "1");
     assert.equal((await page.locator("#cPos").textContent()).trim(), "5 / 20", "a failed module crossing moved the reader");
     assert.equal(await page.locator("#cStage .stage__guide").count(), 1, "a failed module crossing left the stage empty");
+    clean();
+    await context.close();
+  }
+
+  {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await page.clock.install();
+    let releaseModule;
+    const moduleGate = new Promise((resolve) => { releaseModule = resolve; });
+    await page.route("**/assets/data/courses/ols/ols-math.json*", async (route) => {
+      await moduleGate;
+      await route.continue().catch(() => {});
+    });
+    const clean = watch(page, (text) => text.includes("/assets/data/courses/ols/ols-math.json"));
+    await page.goto(BASE + stageRoute("ols", 4, "module-crossing-stalled"), { waitUntil: "load" });
+    await waitForCourse(page, "5 / 20");
+    const left = await page.locator("#cStage .stage__kicker").textContent();
+    await page.click("#cNext");
+    await page.waitForFunction(() => document.querySelector("#cTurn")?.textContent === "Loading module…");
+    await page.clock.fastForward(15000);
+    await page.waitForFunction(() => !document.querySelector("#cStage").inert && getComputedStyle(document.querySelector("#cStage")).opacity === "1");
+    assert.deepEqual(await page.evaluate(() => ({
+      pos: document.querySelector("#cPos").textContent.trim(),
+      kicker: document.querySelector("#cStage .stage__kicker").textContent,
+      busy: document.querySelector("#cStage").getAttribute("aria-busy"),
+      status: document.querySelector("#cTurn")?.textContent,
+      toast: document.querySelector(".toast")?.textContent,
+    })), { pos: "5 / 20", kicker: left, busy: null, status: "", toast: "This module could not load. Your progress is safe." }, "a stalled module request never gave the reader their stage back");
+    releaseModule();
+    clean();
+    await context.close();
+  }
+
+  {
+    const context = await browser.newContext();
+    await context.addInitScript(() => { delete AbortSignal.timeout; });
+    const page = await context.newPage();
+    const clean = watch(page);
+    await page.goto(BASE + stageRoute("ols", 4, "module-no-timeout"), { waitUntil: "load" });
+    await waitForCourse(page, "5 / 20");
+    await page.click("#cNext");
+    await waitForCourse(page, "6 / 20");
+    clean();
+    await context.close();
+  }
+
+  {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await page.route("**/assets/data/courses/ols/ols-line.json*", (route) => route.abort());
+    const clean = watch(page, (text) => text.includes("/assets/data/courses/ols/ols-line.json") || text === "Failed to load resource: net::ERR_FAILED");
+    await page.goto(BASE + courseRoute("ols"), { waitUntil: "load" });
+    await page.locator("#courseRetry").waitFor();
+    assert.equal(await page.locator("#course h1").textContent(), "The course could not load");
+    assert.equal(await page.locator("#course").getAttribute("aria-busy"), "false");
     clean();
     await context.close();
   }
