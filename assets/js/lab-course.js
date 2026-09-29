@@ -478,6 +478,8 @@
   }
 
   let cur = 0;
+  let prefetchTimer = 0;
+  let renderSeq = 0;
   function paintNext() {
     const st = stages[cur];
     if (!st) return;
@@ -490,7 +492,10 @@
       : (readPending ? "Complete & next →" : "Next →");
   }
   async function render(i) {
+    const seq = ++renderSeq;
+    clearTimeout(prefetchTimer);
     await ensureModule(stages[i].mi);
+    if (seq !== renderSeq) return;
     cur = i;
     const st = stages[i];
 
@@ -521,6 +526,8 @@
     paintNext();
     root.querySelector("#cPos").textContent = (i + 1) + " / " + N;
     renderNav(i);
+    const following = stages[i + 1];
+    if (following && following.mi !== st.mi) prefetchTimer = setTimeout(() => { ensureModule(following.mi).catch(() => {}); }, 1000);
   }
 
   async function go(i) {
@@ -570,6 +577,7 @@
   const firstOpen = stages.findIndex((_, index) => !doneSet().has(index));
   const requestedStart = hashMatch ? Number(hashMatch[1]) : (firstOpen >= 0 ? firstOpen : 0);
   const start = Math.max(0, Math.min(N - 1, Number.isInteger(requestedStart) ? requestedStart : 0));
+  renderNav(start);
   await render(start);
   if (window.Gamify) window.Gamify.paint();
   document.addEventListener("iewt:synced", () => { paintProgress(); renderNav(cur); if (window.Gamify) window.Gamify.paint(); });
