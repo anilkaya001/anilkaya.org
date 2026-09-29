@@ -1981,6 +1981,33 @@ try {
     await page.close();
   }
 
+  {
+    const card = clone(full);
+    const at = Date.parse(card.sessionDate + "T15:30:00Z");
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    page._clocked = true;
+    await page.clock.install({ time: new Date(at) });
+    const phase = { phase: "rth", session: card.sessionDate, trading: true, endsAt: new Date(at + 6 * 3600e3).toISOString() };
+    const quote = { ticker: card.ticker, status: "ok", readAt: new Date(at).toISOString(), price: 123.45, prevClose: 120, changePct: 0.02875,
+      open: 121, high: 124, low: 120.5, volume: 1e6, marketTime: "r", tapeTime: new Date(at).toISOString() };
+    await mount(page, card, { now: { serverNow: at, phase, keys: {}, quote }, at });
+    const count = () => {
+      const r = page._requested;
+      return { now: r.filter((u) => /^now(\?|$)/.test(u)), tape: r.filter((u) => /^tape(\?|$)/.test(u)).length };
+    };
+    const base = count();
+    eq(base.now.length, 1, "A TICKER IN SESSION: the page opens with one beat");
+    for (let i = 0; i < 60; i++) { await page.clock.runFor(10000); await page.waitForTimeout(40); }
+    const ten = count();
+    eq(ten.now.length - base.now.length, 30, `and beats every 20 s after it: 30 more /api/flows/now requests in ten minutes, where the 10 s beat sent 60 (${ten.now.length - base.now.length})`);
+    ok(ten.now.every((u) => /[?&]t=/.test(u)), "each carrying the quote, so the price refreshes every 20 s as it did when every other 10 s beat asked for it");
+    eq(ten.tape - base.tape, 10, `the tape is re-read every third beat, once a minute as before (${ten.tape - base.tape} reads in ten minutes)`);
+    eq(errors.length, 0, `the 20 s beats throw nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
 } finally {
   await browser.close();
   fs.rmSync(EMIT_DIR, { recursive: true, force: true });
