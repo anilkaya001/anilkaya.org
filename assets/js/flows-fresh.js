@@ -5,7 +5,8 @@
   var api = {};
 
   var STATES = ["live", "fresh", "closed", "stale", "pending"];
-  var HEARTBEAT_MS = { ticker: 10000, other: 30000, extended: 60000 };
+  var HEARTBEAT_MS = { ticker: 20000, other: 30000, extended: 60000 };
+  var BEAT_DEADLINE_MS = 8000;
   var BACKOFF_MAX_MS = 5 * 60 * 1000;
 
   function ms(v) {
@@ -124,15 +125,12 @@
     var stopped = false;
     var phase = null;
     var phaseEndsAt = null;
-    var n = 0;
     var query = [];
     var part = function (name, v) { if (v && v.length) query.push(name + "=" + encodeURIComponent(v.join ? v.join(",") : v)); };
-    var at = function () { return "/api/flows/now" + (query.length ? "?" + query.join("&") : ""); };
     part("k", o.keys);
     part("n", o.nightly);
-    var noQuote = at();
     part("t", o.ticker);
-    var url = at();
+    var url = "/api/flows/now" + (query.length ? "?" + query.join("&") : "");
 
     function schedule() {
       if (stopped) return;
@@ -140,16 +138,17 @@
       timer = null;
       var wait = api.heartbeatInterval(phase, o.page, document.hidden);
       if (backoff) wait = Math.min(BACKOFF_MAX_MS, Math.max(wait || HEARTBEAT_MS.other, backoff));
+      else if (wait && phaseEndsAt > Date.now()) wait = Math.min(wait, phaseEndsAt - Date.now() + 1000);
       if (wait === null && phaseEndsAt !== null && !document.hidden) wait = Math.max(1000, phaseEndsAt - Date.now());
       if (wait !== null) timer = setTimeout(beat, wait);
     }
 
-    function beat(asked) {
+    function beat() {
       if (stopped) return;
-      var quote = asked === true || phase !== "rth" || n % 2 === 0;
-      n++;
-      fetch(quote ? url : noQuote, { credentials: "same-origin", headers: { Accept: "application/json" } })
-        .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      var ctl = new AbortController();
+      var guard = setTimeout(function () { ctl.abort(); }, BEAT_DEADLINE_MS);
+      fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" }, signal: ctl.signal })
+        .then(function (r) { if (!r.ok) throw Error(r.status); return r.json(); })
         .then(function (body) {
           backoff = 0;
           phase = body.phase ? body.phase.phase : null;
@@ -164,17 +163,17 @@
             if (!first && seen[k] !== e.updatedAt) changed.push(k);
             seen[k] = e.updatedAt;
           });
-          if (typeof o.onBeat === "function") o.onBeat({ body: body, fresh: fresh, changed: changed });
-          if (changed.length && typeof o.onChange === "function") o.onChange(changed, fresh, body);
-          if (body.quote && typeof o.onQuote === "function") o.onQuote(body.quote);
+          if (o.onBeat) o.onBeat({ body: body, fresh: fresh, changed: changed });
+          if (changed.length && o.onChange) o.onChange(changed, fresh, body);
+          if (body.quote && o.onQuote) o.onQuote(body.quote);
         })
-        .catch(function () { backoff = backoff ? backoff * 2 : 2 * (api.heartbeatInterval(phase, o.page, false) || HEARTBEAT_MS.other); })
-        .then(schedule);
+        .catch(function () { backoff = backoff * 2 || 2 * (api.heartbeatInterval(phase, o.page, false) || HEARTBEAT_MS.other); })
+        .then(function () { clearTimeout(guard); schedule(); });
     }
 
     function onVisibility() {
       if (stopped) return;
-      if (document.hidden) { clearTimeout(timer); timer = null; } else beat(true);
+      if (document.hidden) { clearTimeout(timer); timer = null; } else beat();
     }
     document.addEventListener("visibilitychange", onVisibility);
     beat();

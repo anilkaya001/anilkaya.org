@@ -18,6 +18,7 @@
   const table = document.getElementById("bdTable");
   const tools = document.getElementById("bdTools");
   const hero = document.getElementById("bdHero");
+  const heroSk = hero ? [...hero.children] : [];
   const mapHost = document.getElementById("bdMap");
   const emptyHost = document.getElementById("bdEmpty");
   const modHead = mod.querySelector(".ui-mod-h");
@@ -873,8 +874,7 @@
   function paintHero() {
     if (!hero) return;
     const p = st.payload;
-    if (!p || !st.rows.length) { hero.replaceChildren(); hero.hidden = true; return; }
-    hero.hidden = false;
+    if (!p || !st.rows.length) { hero.replaceChildren(...heroSk); return; }
     hero.replaceChildren(UI.chips(WATCH ? watchHero(p, st.rows) : sideHero(p, st.rows), "Summary"));
   }
 
@@ -1224,7 +1224,7 @@
     if (mapHost) mapHost.hidden = true;
     tools.hidden = true;
     if (seg) seg.hidden = true;
-    if (hero) { hero.replaceChildren(); hero.hidden = true; }
+    if (hero) hero.replaceChildren(...heroSk);
   }
 
   function clearSilence() {

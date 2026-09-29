@@ -31,6 +31,13 @@ const read = (p) => readFileSync(new URL(p, ROOT), "utf8");
 const FX = JSON.parse(read("tests/fixtures-live-probe.json"));
 
 let checks = 0;
+const TIMER_SLACK_MS = 50;
+const captureWarn = () => {
+  const lines = [];
+  const real = console.warn;
+  console.warn = (text) => { try { lines.push(JSON.parse(text)); } catch { lines.push(String(text)); } };
+  return { lines, stop: () => { console.warn = real; } };
+};
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
@@ -1192,8 +1199,119 @@ const cronMinutes = (cron) => {
   eq(UI.freshAggregate(["fresh", "closed"], "post"), "closed", "closed outside the session when nothing is live");
   eq(UI.freshAggregate([], "rth"), "pending", "and pending before any payload");
   deep([UI.heartbeatInterval("rth", "ticker"), UI.heartbeatInterval("rth", "market"), UI.heartbeatInterval("pre", "x"),
-    UI.heartbeatInterval("closed", "x"), UI.heartbeatInterval("rth", "ticker", true)], [10000, 30000, 60000, null, null],
-  "one heartbeat per page: 10 s on a ticker in session, 30 s elsewhere, 60 s pre/post, none closed or hidden");
+    UI.heartbeatInterval("closed", "x"), UI.heartbeatInterval("rth", "ticker", true)], [20000, 30000, 60000, null, null],
+  "one heartbeat per page: 20 s on a ticker in session, 30 s elsewhere, 60 s pre/post, none closed or hidden");
+  {
+    let clock = 0;
+    let seq = 0;
+    const timers = new Map();
+    const fakeSet = (f, ms) => { const id = ++seq; timers.set(id, { at: clock + (ms || 0), f }); return id; };
+    const fakeClear = (id) => { timers.delete(id); };
+    const flush = async () => { for (let i = 0; i < 8; i++) await new Promise((r) => setImmediate(r)); };
+    const tick = async (ms) => {
+      const end = clock + ms;
+      for (;;) {
+        await flush();
+        let next = null;
+        for (const [id, t] of timers) if (t.at <= end && (!next || t.at < next[1].at)) next = [id, t];
+        if (!next) break;
+        timers.delete(next[0]);
+        clock = next[1].at;
+        next[1].f();
+      }
+      clock = end;
+      await flush();
+    };
+    const rth = { phase: "rth", session: "2026-09-29", trading: true, endsAt: "2026-09-29T20:00:00.000Z" };
+    const run = (answer) => {
+      const asked = [];
+      const vis = [];
+      const hctx = {
+        window: { FlowsUI: {} }, isFinite, Number, String, Math, AbortController, setTimeout: fakeSet, clearTimeout: fakeClear,
+        Date: class extends Date { static now() { return Date.parse("2026-09-29T15:00:00Z") + clock; } },
+        document: { hidden: false, addEventListener: (t, f) => vis.push(f), removeEventListener() {} },
+        fetch: (url, init) => {
+          const i = asked.length;
+          asked.push({ url: String(url), at: clock, signal: !!(init && init.signal) });
+          return new Promise((resolve, reject) => {
+            if (init && init.signal) init.signal.addEventListener("abort", () => reject(new Error("AbortError")));
+            const body = answer(i);
+            if (body) resolve({ ok: true, status: 200, json: async () => body });
+          });
+        },
+      };
+      vm.createContext(hctx);
+      vm.runInContext(src, hctx);
+      return { asked, hb: hctx.window.FlowsUI.heartbeat({ ticker: "NVDA", nightly: ["card:NVDA"], page: "ticker" }), vis };
+    };
+    const ok200 = () => ({ serverNow: 0, phase: rth, keys: {}, quote: { status: "ok" } });
+    {
+      clock = 0; timers.clear();
+      const r = run(ok200);
+      await tick(10 * 60 * 1000);
+      const at = r.asked.map((a) => a.at);
+      eq(r.asked.length, 31, "A TICKER IN SESSION beats every 20 s: 31 /api/flows/now requests in ten minutes, where the 10 s beat sent 61");
+      ok(at.slice(1).every((t, i) => t - at[i] === 20000), `each 20 s after the last (${at.slice(0, 5).join(", ")} ms)`);
+      ok(r.asked.every((a) => /[?&]t=NVDA(&|$)/.test(a.url) && /[?&]n=card%3ANVDA(&|$)/.test(a.url)),
+        "and every one of them carries the quote beside the card's key, so the price is asked every 20 s as before and no beat " +
+          "is spent on a nightly row that cannot move in session");
+      r.vis[0]();
+      await flush();
+      ok(r.asked.length === 32 && /[?&]t=NVDA/.test(r.asked[31].url), "a tab brought back to view beats at once, with the quote");
+      r.hb.stop();
+    }
+    {
+      clock = 0; timers.clear();
+      const r = run((i) => (i === 1 ? null : ok200()));
+      await tick(20000);
+      eq(r.asked.length, 2, "A STALLED BEAT: the second beat goes out at 20 s and its response never arrives");
+      ok(r.asked.every((a) => a.signal), "every beat's fetch carries a deadline signal");
+      await tick(7999);
+      eq(r.asked.length, 2, "for 8 s the heartbeat waits on it");
+      await tick(1);
+      await tick(40000 - 1);
+      eq(r.asked.length, 2, "then the deadline aborts it and it counts as a failed beat: the backoff waits twice the beat, 40 s");
+      await tick(1);
+      eq(r.asked.length, 3, "and the next beat fires, 48 s after the stalled one went out, rather than never");
+      await tick(20000);
+      eq(r.asked.length, 4, "that beat answers, the backoff clears, and the 20 s cadence resumes");
+      r.hb.stop();
+    }
+    ok(!/AbortSignal\.timeout/.test(src), "the deadline is an AbortController and a timer, not AbortSignal.timeout, which Safari lacks before 16 " +
+      "while every Flows page already runs from 13.1 (flows-ui.js uses ??), so no supported browser keeps a stalled beat as its last");
+    {
+      clock = 0; timers.clear();
+      const r = run((i) => (i === 1 ? null : ok200()));
+      await tick(20000);
+      await tick(8000);
+      eq(timers.size, 1, "an aborted beat leaves one timer armed, the backoff's, and no stray deadline");
+      await tick(40000);
+      eq(r.asked.length, 3, "THE DEADLINE NEEDS ONLY AbortController (Safari 12.1 on; no AbortSignal.timeout in this context): " +
+        "the stalled beat is aborted at 8 s and the next fires 48 s after it");
+      r.hb.stop();
+    }
+    {
+      clock = 0; timers.clear();
+      const r = run(ok200);
+      await tick(20000);
+      eq(timers.size, 1, "a beat that answers clears its deadline: only the next beat's timer is armed");
+      r.hb.stop();
+    }
+    {
+      clock = 0; timers.clear();
+      const closing = { ...rth, endsAt: "2026-09-29T15:00:05.000Z" };
+      const closed = { phase: "closed", session: "2026-09-29", trading: false, endsAt: null };
+      const r = run((i) => ({ serverNow: 0, phase: i === 0 ? closing : i === 1 ? closing : closed, keys: {}, quote: { status: "ok" } }));
+      await tick(5999);
+      eq(r.asked.length, 1, "A SESSION ENDING IN 5 S: no beat before the boundary");
+      await tick(1);
+      eq(r.asked.length, 2, "the next beat lands 1 s after the bell (6 s), not a full 20 s beat later, so the close is learned at once");
+      await tick(60000);
+      eq(r.asked.length, 3, "a phase whose end has passed is not chased: the server still says rth and the next beat keeps the 20 s cadence, 26 s");
+      eq(r.asked[2].at, 26000, `at 26 s (${r.asked[2].at} ms), and once closed nothing is scheduled`);
+      r.hb.stop();
+    }
+  }
   ok(!/localStorage|sessionStorage/.test(src), "and it touches no browser storage");
 }
 
@@ -1300,9 +1418,14 @@ const cronMinutes = (cron) => {
   const never = () => new Promise(() => {});
   W.jwksKeys({}, never, now, false);
   const t0 = Date.now();
-  const abandoned = await W.oidcKind(token, {}, { fetchImpl: served(keys), now: now + 1000, log });
+  const jwksWarn = captureWarn();
+  const abandoned = await W.oidcKind(token, {}, { fetchImpl: served(keys), now: now + 1000, log }).finally(jwksWarn.stop);
   const waited = Date.now() - t0;
-  ok(abandoned.unavailable === true && waited >= W.JWKS_WAIT_MS && waited < W.JWKS_WAIT_MS + 2500,
+  eq(jwksWarn.lines.length, 1, `AN ABANDONED KEY-SET FLIGHT LEAVES ONE LOG LINE (${JSON.stringify(jwksWarn.lines)})`);
+  ok(jwksWarn.lines[0].message === "flight abandoned" && jwksWarn.lines[0].flight === "jwks" && jwksWarn.lines[0].abandoned === 1 &&
+     jwksWarn.lines[0].recovered === false && jwksWarn.lines[0].waitMs >= W.JWKS_WAIT_MS - TIMER_SLACK_MS,
+     "naming the flight, the wait it cost and that no key set was held to fall back on");
+  ok(abandoned.unavailable === true && waited >= W.JWKS_WAIT_MS - TIMER_SLACK_MS && waited < W.JWKS_WAIT_MS + 2500,
     `A KEY-SET FETCH ABANDONED BY THE INGEST THAT STARTED IT (a client gone before the 4 s fetch landed) is waited on for ${W.JWKS_WAIT_MS / 1000} s ` +
     `and then dropped (${waited} ms): the second write reports the keys unavailable instead of hanging for the life of the isolate`);
   eq(await kind(token, {}, { fetchImpl: served(keys), now: now + W.JWKS_COLD_RETRY_MS + 1000 }), "live",
@@ -1612,8 +1735,24 @@ const cronMinutes = (cron) => {
   let threw = false;
   try { await W.upgradeClockColumns(fakeDb(["id"], ["tier1_at", "database is locked"])); } catch { threw = true; }
   ok(threw, "while any other failure surfaces, so the schema is not marked ready and the next request retries");
-  ok(/await FLOWS_LIVE\.upgradeClockColumns\(env\.DB\);\s*flowsSchemaReady = true;/.test(read("worker.js")),
+  ok(/await FLOWS_LIVE\.upgradeClockColumns\(env\.DB, results && results\[FLOWS_SCHEMA_SQL\.length\]\);\s*flowsSchemaReady = true;/.test(read("worker.js")),
     "and ensureFlowsTables marks the schema ready only after the upgrade");
+  ok(/env\.DB\.batch\(\[\.\.\.FLOWS_SCHEMA_SQL, FLOWS_LIVE\.CLOCK_COLUMNS_SQL\]/.test(read("worker.js")) && W.CLOCK_COLUMNS_SQL === "PRAGMA table_info(flows_clock)",
+    "whose column list is read by the PRAGMA riding the schema batch as its last statement, after the CREATE that makes the table");
+  let pragmas = 0;
+  upgrades.length = 0;
+  const counted = (have) => ({ prepare(sql) { return { all: async () => { pragmas++; return { results: have.map((name) => ({ name })) }; },
+    run: async () => { upgrades.push(sql); return {}; } }; } });
+  const full = ["id", "day", ...W.CLOCK_ADDED_COLUMNS.map(([c]) => c)];
+  deep(await W.upgradeClockColumns(counted(full), { results: full.map((name) => ({ name })) }), [],
+    "A COLUMN LIST HANDED IN FROM THE SCHEMA BATCH IS TRUSTED: a complete table adds nothing");
+  ok(pragmas === 0 && upgrades.length === 0, "and costs no PRAGMA trip of its own and no ALTER");
+  deep(await W.upgradeClockColumns(counted(full), { results: [{ name: "id" }, { name: "day" }] }), W.CLOCK_ADDED_COLUMNS.map(([c]) => c),
+    "an old table named by the handed-in list still gets every missing column");
+  eq(pragmas, 0, "from the list it was handed");
+  deep(await W.upgradeClockColumns(counted(["id"]), undefined), W.CLOCK_ADDED_COLUMNS.map(([c]) => c),
+    "and with no list handed in the function reads the PRAGMA itself, as before");
+  eq(pragmas, 1, "in one trip");
 }
 
 {
@@ -2804,7 +2943,15 @@ const cronMinutes = (cron) => {
     const raw = W.liveResponse({ ...metaOf(rows[0]), payload: rows[0].payload, updatedAt: rows[0].updated_at }, at, clock);
     eq(await one.text(), rows[0].payload, "A SINGLE KEY IS UNCHANGED: the raw payload body, byte for byte");
     deep(Object.fromEntries(one.headers), Object.fromEntries(raw.headers), "under the same headers as before");
-    deep(oneDb.seen.map((t) => t.kind), ["first"], "read as it always was");
+    ok(oneDb.seen.length === 1 && oneDb.seen[0].kind === "batch" && oneDb.seen[0].sqls.length === 1 && /FROM flows_live WHERE id = \?$/.test(oneDb.seen[0].sqls[0]),
+      "read in one trip, a batch of the one row's SELECT with the clock memo warm");
+    W.memoClock(null, 0);
+    const oneColdDb = fakeDb();
+    const oneCold = await W.serveLiveKey({ DB: oneColdDb }, lk("market"), at, { json: jsonOf, HttpError });
+    ok(oneColdDb.seen.length === 1 && oneColdDb.seen[0].sqls.length === 2 && /FROM flows_clock/.test(oneColdDb.seen[0].sqls[1]) && !W.clockDue(at),
+      "A SINGLE KEY WITH THE MEMO STALE carries the clock row in the same batch and warms the memo: one trip where the clock read made it two");
+    eq(await oneCold.text(), rows[0].payload, "and serves the same raw body");
+    W.memoClock(clock, at);
     const dropped = await W.serveLiveKey({ DB: fakeDb() }, lk("market,board:long,"), at, { json: jsonOf, HttpError });
     eq(await dropped.text(), rows[0].payload, "a list that leaves one key after the unknown is dropped is that key's raw body");
     const pend = await W.serveLiveKey({ DB: fakeDb() }, lk("vol"), at, { json: jsonOf, HttpError });
@@ -3194,12 +3341,18 @@ const cronMinutes = (cron) => {
   const env = { DB: { prepare: () => ({ first: () => (++reads === 1 ? new Promise(() => {}) : new Promise((r) => setTimeout(() => r(landed), 1500))) }) } };
   W.memoClock(null, 0);
   const t0 = Date.now();
+  const clockWarn = captureWarn();
   const [a, b] = await Promise.all([
     W.cachedClock(env, t0),
     new Promise((r) => setTimeout(r, 50)).then(() => W.cachedClock(env, Date.now())),
-  ]);
+  ]).finally(clockWarn.stop);
   const waited = Date.now() - t0;
-  ok(a && a.day === "2026-09-28" && a.trading === 1 && b === a && waited >= 3500 && waited < 6000,
+  eq(clockWarn.lines.length, 1,
+     `AN ABANDONED CLOCK FLIGHT LEAVES ONE LOG LINE, from the waiter that dropped it, not one per waiter (${JSON.stringify(clockWarn.lines)})`);
+  ok(clockWarn.lines[0].message === "flight abandoned" && clockWarn.lines[0].flight === "clock" && clockWarn.lines[0].abandoned === 1 &&
+     clockWarn.lines[0].recovered === true && clockWarn.lines[0].waitMs >= 3500 - TIMER_SLACK_MS,
+     "naming the flight, the whole wait and that the retry recovered");
+  ok(a && a.day === "2026-09-28" && a.trading === 1 && b === a && waited >= 3500 - TIMER_SLACK_MS && waited < 6000,
      `THE CLOCK FLIGHT HAS THE SAME DEADLINE as the schema bootstrap (FLIGHT_WAIT_MS, ${W.FLIGHT_WAIT_MS} ms): a cold read that never settles is abandoned and read again, ` +
      `and both waiters take the read that landed (${waited} ms)`);
   eq(reads, 2, "once, for both waiters: the second's deadline falls while the retry is in the air and it joins the retry rather than starting a third read");
@@ -3208,13 +3361,31 @@ const cronMinutes = (cron) => {
   let late = 0;
   const env2 = { DB: { prepare: () => ({ first: () => (++late === 1 ? new Promise(() => {}) : Promise.resolve(landed)) }) } };
   const t1 = Date.now();
+  const lateWarn = captureWarn();
   const [c, d] = await Promise.all([
     W.cachedClock(env2, t1),
     new Promise((r) => setTimeout(r, 1900)).then(() => W.cachedClock(env2, Date.now())),
-  ]);
+  ]).finally(lateWarn.stop);
   const w2 = Date.now() - t1;
-  ok(c && c.day === "2026-09-28" && d === c && w2 >= 2000 && w2 < 2700 && late === 2,
+  ok(lateWarn.lines.length === 1 && lateWarn.lines[0].flight === "clock" && lateWarn.lines[0].recovered === true,
+     `and a late joiner that leaves when the retry lands logs nothing of its own (${JSON.stringify(lateWarn.lines)})`);
+  ok(c && c.day === "2026-09-28" && d === c && w2 >= 2000 - TIMER_SLACK_MS && w2 < 2700 && late === 2,
      `a late joiner leaves the dead flight the moment the retry lands (${w2} ms), not at its own deadline`);
+  W.memoClock(null, 0);
+  let failing = 0;
+  const env3 = { DB: { prepare: () => ({ first: () => (++failing === 1 ? new Promise(() => {}) : Promise.reject(new Error("D1 down"))) }) } };
+  const failWarn = captureWarn();
+  const e = await W.cachedClock(env3, Date.now()).finally(failWarn.stop);
+  ok(e === null && failing === 2 && failWarn.lines.length === 1 && failWarn.lines[0].flight === "clock" &&
+     failWarn.lines[0].abandoned === 1 && failWarn.lines[0].recovered === false,
+     `a retry whose read fails logs recovered false, though it memoizes the null it answers (${JSON.stringify(failWarn.lines)})`);
+  W.memoClock(null, 0);
+  let absent = 0;
+  const env4 = { DB: { prepare: () => ({ first: () => (++absent === 1 ? new Promise(() => {}) : Promise.resolve(null)) }) } };
+  const absentWarn = captureWarn();
+  const g = await W.cachedClock(env4, Date.now()).finally(absentWarn.stop);
+  ok(g === null && absentWarn.lines.length === 1 && absentWarn.lines[0].recovered === true,
+     `while a retry that reads a database with no clock row yet did recover: the read succeeded (${JSON.stringify(absentWarn.lines)})`);
   W.memoClock(null, 0);
   ok(await W.settledWithin(Promise.resolve(1), 50) === "settled" && await W.settledWithin(Promise.reject(new Error("x")), 50) === "settled" &&
      await W.settledWithin(new Promise(() => {}), 50) === false && await W.settledWithin(new Promise(() => {}), 500, () => true) === "moved",

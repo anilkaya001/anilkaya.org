@@ -36,11 +36,13 @@ export const CLOCK_ADDED_COLUMNS = Object.freeze([
   Object.freeze(["summary_at", "INTEGER"]),
 ]);
 
-export async function upgradeClockColumns(db) {
+export const CLOCK_COLUMNS_SQL = "PRAGMA table_info(flows_clock)";
+
+export async function upgradeClockColumns(db, known = null) {
   if (!db) return [];
   let have = new Set();
   try {
-    const info = await db.prepare("PRAGMA table_info(flows_clock)").all();
+    const info = known && Array.isArray(known.results) ? known : await db.prepare(CLOCK_COLUMNS_SQL).all();
     have = new Set(((info && info.results) || []).map((r) => r && r.name));
   } catch {
     have = new Set();
@@ -104,10 +106,10 @@ export function tier1Why(value) {
 }
 
 const CLOCK_MEMO_MS = 60 * 1000;
-let clockMemo = { at: 0, clock: null };
+let clockMemo = { at: 0, clock: null, read: true };
 
-export function memoClock(clock, now = Date.now()) {
-  clockMemo = { at: now, clock };
+export function memoClock(clock, now = Date.now(), read = true) {
+  clockMemo = { at: now, clock, read };
 }
 
 export function memoizedClock(now = Date.now()) {
@@ -153,22 +155,45 @@ export const FLIGHT_WAIT_MS = 2000;
 let clockFlight = null;
 
 function startClockFlight(env, now) {
-  const flight = readClock(env && env.DB).then((clock) => { memoClock(clock, now); return clock; })
+  const db = env && env.DB;
+  const read = db ? (async () => db.prepare(CLOCK_ROW_SQL).first())().then((row) => [normalizeClock(row), true], () => [null, false]) : Promise.resolve([null, false]);
+  const flight = read.then(([clock, ok]) => { memoClock(clock, now, ok); return clock; })
     .finally(() => { if (clockFlight === flight) clockFlight = null; });
   clockFlight = flight;
   return flight;
 }
 
-export async function cachedClock(env, now = Date.now()) {
+export function flightAbandoned(flight, since, abandoned, recovered) {
+  console.warn(JSON.stringify({ message: "flight abandoned", flight, waitMs: Date.now() - since, abandoned, recovered }));
+}
+
+async function joinClock(env, now, trace) {
   for (let attempt = 0; attempt < 2; attempt++) {
     if (!clockDue(now)) return clockMemo.clock;
     const flight = clockFlight || startClockFlight(env, now);
     const how = await settledWithin(flight, FLIGHT_WAIT_MS, () => !clockDue(now));
     if (how === "settled") return flight;
     if (how === "moved") return clockDue(now) ? memoizedClock(now) : clockMemo.clock;
-    if (clockFlight === flight) clockFlight = null;
+    if (clockFlight === flight) { clockFlight = null; trace.abandoned++; }
   }
   return memoizedClock(now);
+}
+
+export async function cachedClock(env, now = Date.now()) {
+  const since = Date.now();
+  const trace = { abandoned: 0 };
+  const clock = await joinClock(env, now, trace);
+  if (trace.abandoned) flightAbandoned("clock", since, trace.abandoned, !clockDue(now) && clockMemo.read);
+  return clock;
+}
+
+export async function batchWithClock(db, statements, now = Date.now()) {
+  const withClock = clockDue(now);
+  const all = withClock ? [...statements, db.prepare(CLOCK_ROW_SQL)] : statements;
+  const results = all.length ? await db.batch(all).catch(() => null) : [];
+  if (!results) return { results: null, clock: withClock ? memoizedClock(now) : clockMemo.clock };
+  if (withClock) memoClock(normalizeClock(firstOf(results[statements.length])), now);
+  return { results: results.slice(0, statements.length), clock: clockMemo.clock };
 }
 
 export function clockPatchStatement(db, patch, now) {
@@ -568,10 +593,14 @@ export function jwksKeys(env, fetchImpl, now, force) {
   const memo = jwksMemo;
   if (memo.inflight) {
     const joined = memo.inflight;
+    const since = Date.now();
     return settledWithin(joined, JWKS_WAIT_MS, () => memo.inflight !== null && memo.inflight !== joined).then((how) => {
       if (how === "settled") return joined;
       if (how === "moved") return memo.inflight || memo.keys;
-      if (memo.inflight === joined) memo.inflight = null;
+      if (memo.inflight === joined) {
+        memo.inflight = null;
+        flightAbandoned("jwks", since, 1, !!memo.keys);
+      }
       return memo.keys;
     });
   }
@@ -669,13 +698,9 @@ export function liveParams(raw) {
 const LIVE_ROWS_SQL = "SELECT id, payload, read_at, session, cadence_s, source, writer, updated_at FROM flows_live WHERE id IN (";
 
 export async function readLiveRows(db, ids, now = Date.now()) {
-  const withClock = clockDue(now);
-  const statements = [db.prepare(LIVE_ROWS_SQL + ids.map(() => "?").join(", ") + ")").bind(...ids)];
-  if (withClock) statements.push(db.prepare(CLOCK_ROW_SQL));
-  const results = await db.batch(statements).catch(() => null);
+  const { results, clock } = await batchWithClock(db, [db.prepare(LIVE_ROWS_SQL + ids.map(() => "?").join(", ") + ")").bind(...ids)], now);
   if (!results) return null;
-  if (withClock) memoClock(normalizeClock(firstOf(results[1])), now);
-  return { rows: (results[0] && results[0].results) || [], clock: clockMemo.clock };
+  return { rows: (results[0] && results[0].results) || [], clock };
 }
 
 const FRESH_RANK = Object.freeze({ live: 0, fresh: 1, closed: 2, stale: 3, pending: 4 });
@@ -716,8 +741,9 @@ export async function serveLiveKey(env, url, now, { json, HttpError }) {
   if (!params.length) throw new HttpError(400, "invalid_key", "Unknown live key");
   if (params.length === 1) {
     const key = liveKeyFromParam(params[0]);
-    const clock = await cachedClock(env, now);
-    const row = await readLive(env.DB, key);
+    const { results, clock } = await batchWithClock(env.DB, [env.DB.prepare(LIVE_ROW_SQL).bind(key)], now);
+    const raw = results ? firstOf(results[0]) : null;
+    const row = raw && raw.payload ? liveRow(raw) : null;
     if (!row) {
       return json({ key, status: "pending" }, 200, pendingHeaders(LIVE_KEYS[key].klass, now, clock));
     }
@@ -772,10 +798,7 @@ export async function serveNow(env, url, now, { json, HttpError, quote }) {
   const liveKeys = parseList(url.searchParams.get("k"), (k) => liveKeyFromParam(k) !== null).map(liveKeyFromParam);
   const nightly = parseList(url.searchParams.get("n"),
     (k) => NOW_NIGHTLY_KEYS.includes(k) || /^card:[A-Z][A-Z0-9.-]{0,9}$/.test(k));
-  const clock = await cachedClock(env, now);
-  const phase = phaseAt(now, clock);
   const keys = {};
-  const place = (id, meta, updatedAt) => { keys[id] = liveEntry(meta, updatedAt, now, clock); };
   const statements = [];
   if (liveKeys.length) {
     statements.push(env.DB.prepare(
@@ -789,8 +812,10 @@ export async function serveNow(env, url, now, { json, HttpError, quote }) {
       `FROM flows_payload WHERE id IN (${nightly.map(() => "?").join(", ")})`,
     ).bind(...nightly));
   }
-  const results = statements.length ? await env.DB.batch(statements).catch(() => null) : [];
+  const { results, clock } = await batchWithClock(env.DB, statements, now);
   if (results === null) throw new HttpError(503, "store_unreadable", "The store could not be read");
+  const phase = phaseAt(now, clock);
+  const place = (id, meta, updatedAt) => { keys[id] = liveEntry(meta, updatedAt, now, clock); };
   let i = 0;
   if (liveKeys.length) {
     const rows = results[i++].results || [];
@@ -962,14 +987,12 @@ const firstOf = (res) => (res && res.results && res.results[0] ? res.results[0] 
 
 export async function serveTape(env, ctx, ticker, now, { fetchVendor, json, admit = null }) {
   const db = env.DB;
-  const clock = await cachedClock(env, now);
-  const phase = phaseAt(now, clock);
   const read = () => db.prepare(TAPE_ROW_SQL).bind(ticker).first().catch(() => null);
-  const first = async () => {
-    if (!admit || !admit.known) return { row: await read(), known: null };
-    const [a, b] = await db.batch([db.prepare(TAPE_ROW_SQL).bind(ticker), admit.known]).catch(() => [null, null]);
-    return { row: firstOf(a), known: firstOf(b) };
-  };
+  const keyed = [db.prepare(TAPE_ROW_SQL).bind(ticker)];
+  if (admit && admit.known) keyed.push(admit.known);
+  const { results, clock } = await batchWithClock(db, keyed, now);
+  const [a, b] = results || [null, null];
+  const phase = phaseAt(now, clock);
   const respond = (row, how) => {
     const meta = { readAt: Number(row.read_at), session: row.session, cadenceS: TAPE_SPEC.cadenceS, klass: "tape",
       source: "ondemand" };
@@ -986,7 +1009,7 @@ export async function serveTape(env, ctx, ticker, now, { fetchVendor, json, admi
   const pending = (how) => json({ ticker, status: "pending", why: how }, 200,
     { ...pendingHeaders("tape", now, clock), "X-Tape": how });
 
-  const { row, known } = await first();
+  const row = firstOf(a), known = admit && admit.known ? firstOf(b) : null;
   const hasPayload = row && typeof row.payload === "string" && row.payload;
   const age = hasPayload ? now - Number(row.read_at) : Infinity;
   if (hasPayload && age <= tapeTtlMs(phase, row)) return respond(row, "fresh");

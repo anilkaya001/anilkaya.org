@@ -2767,7 +2767,7 @@
         STATE.phase = body && body.phase ? body.phase.phase : null;
         STATE.lastClosed = body && body.phase ? body.phase.lastClosed : null;
         STATE.beats++;
-        if (STATE.phase === "rth" && STATE.beats % 6 === 0) fetchTape(t).then((moved) => { if (moved && STATE.card) flowOf(STATE.card); });
+        if (STATE.phase === "rth" && STATE.beats % 3 === 0) fetchTape(t).then((moved) => { if (moved && STATE.card) flowOf(STATE.card); });
       },
       onQuote: (q) => {
         if (!STATE.card) return;

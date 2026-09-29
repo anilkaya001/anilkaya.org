@@ -150,7 +150,7 @@ export function assembleCatalysts(raw, {
       macro, fda, earningsCalendar: calendar,
       catalysts: reportCatalysts || { status: "unavailable", reason: SILENCE.unread },
       history,
-      historyRule: "r = median |1d move| / expected move over the last reports; beat = share above 1; hit = share of long 1d straddles that paid; drift = median continuation",
+      historyRule: "r = median |1d move| / expected move over the last reports; beat = share above 1; hit = share of long 1d straddles that paid; drift = median continuation; mv = median |1d move|; em = the calendar's expected move for the next report, null where none was priced",
     }), { budgetBytes }),
     earnings,
   };

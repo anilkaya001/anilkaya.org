@@ -64,13 +64,13 @@ const SURFACES = [
 
   { key: "board:long", file: "assets/js/flows-overview.js", fn: "renderSpine", vars: ["payload"] },
 
-  { key: "board:long", file: "assets/js/flows-overview.js", at: "Promise.all([",
+  { key: "board:long", file: "assets/js/flows-overview.js", at: "const when = (keys, fn)",
     label: "the region assembly", vars: ["lng", "payload", "meta"] },
-  { key: "board:short", file: "assets/js/flows-overview.js", at: "Promise.all([",
+  { key: "board:short", file: "assets/js/flows-overview.js", at: "const when = (keys, fn)",
     label: "the region assembly", vars: ["sht"] },
-  { key: "flowalerts", file: "assets/js/flows-overview.js", at: "Promise.all([",
+  { key: "flowalerts", file: "assets/js/flows-overview.js", at: "const when = (keys, fn)",
     label: "the region assembly", vars: ["alerts"] },
-  { key: "events", file: "assets/js/flows-overview.js", at: "Promise.all([",
+  { key: "events", file: "assets/js/flows-overview.js", at: "const when = (keys, fn)",
     label: "the region assembly", vars: ["events"] },
   { key: "board:long", file: "assets/js/flows-board.js", fn: "render", vars: ["payload"] },
   { key: "board:long", file: "assets/js/flows-board.js", fn: "sideHero", vars: ["payload"] },
@@ -796,6 +796,9 @@ assert.deepEqual(missingReport, [],
     ok(e[k] && typeof e[k] === "object", `events gains ${k}`);
   }
   ok(Array.isArray(e.rows), "and keeps its rows, which the events renderer reads");
+  const digests = Object.values(e.history).filter((d) => d && d.status === "ok");
+  ok(digests.length > 0 && digests.every((d) => typeof d.mv === "number" && "em" in d),
+    `every ok history digest (${digests.length}) carries mv and em, so the earnings lane paints from this payload with no card-x read per name`);
   ok(Buffer.byteLength(JSON.stringify(e)) <= 100 * 1024, "events stays well inside the ingest cap with its additions");
 
   const p = emitted("pulse");
