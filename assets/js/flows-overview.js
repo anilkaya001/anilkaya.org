@@ -51,6 +51,7 @@
     return n !== null && n > 0 ? "+" + usd(n) : usd(n);
   };
 
+  const NY = "America/New_York";
   const etTime = (at) => {
     if (typeof at !== "string" || !/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(at.trim())) {
       return null;
@@ -59,12 +60,12 @@
     if (Number.isNaN(d.getTime())) return null;
     try {
       return new Intl.DateTimeFormat("en-GB", {
-        timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: false,
+        timeZone: NY, hour: "2-digit", minute: "2-digit", hour12: false,
       }).format(d);
     } catch { return null; }
   };
-  const NY_CLOCK = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
-  const NY_PARTS = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "numeric", hourCycle: "h23" });
+  const NY_CLOCK = new Intl.DateTimeFormat("en-US", { timeZone: NY, hour: "numeric", minute: "2-digit" });
+  const NY_PARTS = new Intl.DateTimeFormat("en-US", { timeZone: NY, hour: "numeric", minute: "numeric", hourCycle: "h23" });
   const clock = (at) => {
     const t = Date.parse(at);
     return Number.isFinite(t) ? NY_CLOCK.format(new Date(t)) : DASH;
@@ -1140,9 +1141,10 @@
           : h("span", { class: "ui-meter hm-side", title: sideSaid(s) }, h("i", { style: { "--w": (s * 100).toFixed(1) + "%", "--i": String(i), "--c": UI.cssVar(s >= 0.5 ? "--label-2" : "--label-3") } })),
         h("span", { class: "ui-row-v" }, usd(row.prem)));
     });
-    into.append(UI.list(list, { visible: SHOW, label: "Flagged option windows, largest premium first" }),
+    const label = "Flagged option windows, largest premium first";
+    into.append(UI.list(list, { visible: SHOW, label }),
       UI.legend([["--label-2", "", "Share at the ask"]]));
-    const detail = table("Flagged option windows, largest premium first", [
+    const detail = table(label, [
       ["Time · ET", false, "When the vendor's flagged window opened, in Eastern time."],
       ["Name", false], ["Contract", false], ["Premium", true],
       ["Side", true, "The share of premium the vendor attributed to the ask or the bid: a side of the quote, never proof of a buyer."],
@@ -1175,6 +1177,11 @@
     }));
   }
 
+  const moveSaid = (v) => {
+    const im = isNum(v);
+    return im === null ? DASH : "±" + (Math.abs(im) * 100).toFixed(1) + "%";
+  };
+
   function paintEvents(into, payload) {
     if (silent(into, payload, "events calendar")) return;
     const rows = rowsOf(payload);
@@ -1193,27 +1200,26 @@
           "opinion on " + (opinionless === 1 ? "it" : "them") + " going into the print."
         : ", so every name here can be read against the ranking above.");
     const list = drawn.map((row) => {
-      const im = isNum(row.im);
       const sd = isNum(row.sdte);
       return UI.listRow({
         primary: row.t || DASH,
         secondary: (row.d ? F.day(row.d) : DASH) + (sd === null ? "" : sd === 0 ? " · next session" : " · in " + sd + "s"),
-        value: im === null ? DASH : "±" + (Math.abs(im) * 100).toFixed(1) + "%",
+        value: moveSaid(row.im),
         signed: isNum(row.s) === null ? h("span", { class: "hm-tag", title: row.st === "gated" ? "The board was forbidden from holding an opinion on this name." : "No score was published for this name." }, row.st === "gated" ? "gated" : "unscored") : fmtSigned(row.s),
         signedValue: isNum(row.s), signedTone: isNum(row.s) === null ? "silent" : undefined,
         cols: "minmax(0,1fr) 60px 58px",
       });
     });
-    into.append(UI.list(list, { visible: SHOW, label: "Names reporting inside the window" }));
-    const detail = table("Names reporting inside the window", [
+    const label = "Names reporting inside the window";
+    into.append(UI.list(list, { visible: SHOW, label }));
+    const detail = table(label, [
       ["Name", false], ["Date", false], ["In · sessions", true], ["Priced move", true], ["Score", true],
       ["Stage", false, "Where this name stopped in the run's funnel. \"gated\" means the board was forbidden from holding an opinion on it, not that it had none."],
     ], drawn.map((row) => {
-      const im = isNum(row.im);
       return {
         cells: [[row.t || DASH, "cc-t"], [row.d || DASH, "cc-date"],
           [isNum(row.sdte) === null ? DASH : row.sdte + "s", "c-num"],
-          [im === null ? DASH : "±" + (Math.abs(im) * 100).toFixed(1) + "%", "c-num"],
+          [moveSaid(row.im), "c-num"],
           [fmtSigned(row.s), "c-num"], [row.st || DASH, "cc-dim"]],
       };
     }));
@@ -1242,10 +1248,7 @@
       return value === null ? null : (value > 0 ? 1 : value < 0 ? -1 : 0);
     };
     const sides = drawn.map(sideOf);
-    const above = sides.filter((one) => one === 1).length;
-    const below = sides.filter((one) => one === -1).length;
-    const onRule = sides.filter((one) => one === 0).length;
-    const unplaced = sides.filter((one) => one === null).length;
+    const [above, below, onRule, unplaced] = [1, -1, 0, null].map((v) => sides.filter((one) => one === v).length);
     const nearest = drawn.length + " name" + (drawn.length === 1 ? "" : "s") + " nearest the edge";
     const lede = above + below + onRule === 0
       ? "None of the " + nearest + " published a number to place against the zero rule, so " +
@@ -2052,35 +2055,35 @@
     });
   }
 
-  Promise.all([
-    loadBoard("long"),
-    loadBoard("short"),
-    loadRegion("/api/flows/board?side=watch"),
-    loadRegion("/api/flows/market"),
-    loadRegion("/api/flows/flowalerts"),
-    loadRegion("/api/flows/events"),
-    loadRegion("/api/flows/scoretrack"),
-    loadRegion("/api/flows/sector-premium"),
-    loadRegion("/api/flows/news"),
-    loadRegion("/api/flows/pulse"),
-    loadRegion("/api/flows/regime", true),
-    loadRegion("/api/flows/focus"),
-    loadLive(["market", "vol", "breadth", "strips", "strips:series", "focus"]),
-  ]).then(([lng, sht, watch, market, alerts, events, track, lean, news, pulse, regime, focus, lk]) => {
-    if (gated) return;
-    const liveMkt = lk.market, liveVol = lk.vol, liveBreadth = lk.breadth;
-    Object.assign(FOCUS, { focus, strips: lk.strips, series: lk["strips:series"], live: lk.focus });
-    requestAnimationFrame(() => setTimeout(paintFocus));
+  const R = {};
+  const P = { lng: loadBoard("long"), sht: loadBoard("short"), lk: loadLive(["market", "vol", "breadth", "strips", "strips:series", "focus"]) };
+  for (const [k, path, soon] of [["watch", "board?side=watch"], ["market", "market"], ["alerts", "flowalerts"], ["events", "events"], ["track", "scoretrack"],
+    ["lean", "sector-premium"], ["news", "news"], ["pulse", "pulse"], ["regime", "regime", true], ["focus", "focus"]]) P[k] = loadRegion("/api/flows/" + path, soon);
+  for (const k in P) P[k] = P[k].then((v) => (R[k] = v));
 
-    const bull = ranked(lng && lng.rows);
-    const bear = ranked(sht && sht.rows);
+  const fail = (error) => {
+    statusEl.textContent = "The session could not be loaded. Refresh to try again." + (error && error.message ? " (" + error.message + ")" : "");
+  };
+  const when = (keys, fn) => Promise.all(["lng", "sht", ...keys].map((k) => P[k])).then(() => { if (!gated) fn(R); }).catch(fail);
 
+  const fill = (id, paint, ...args) => {
+    const el = $(id);
+    if (el) { el.replaceChildren(); paint(el, ...args); }
+  };
+  const subSaid = (el, text, label) => {
+    if (!el) return;
+    el.textContent = text;
+    if (label) el.setAttribute("aria-label", label);
+    else el.removeAttribute("aria-label");
+  };
+
+  function index({ lng, sht, events }) {
+    const bull = ranked(lng && lng.rows), bear = ranked(sht && sht.rows);
     const evBy = new Map();
     if (ans(events) && Array.isArray(events.rows)) {
       for (const row of events.rows) if (row && row.t) evBy.set(String(row.t), row);
     }
-    const boardBy = new Map();
-    const cards = new Set();
+    const boardBy = new Map(), cards = new Set();
     for (const [payload, rows] of [[lng, bull], [sht, bear]]) {
       const knows = isNum(payload && payload.deep) !== null;
       for (const row of rows) {
@@ -2090,21 +2093,18 @@
         if (!knows || row.dp === 1) cards.add(t);
       }
     }
-
     const meta = ans(lng) || ans(sht) || lng || sht || {};
-    if (typeof meta.sessionDate === "string") {
-      UI.freshness({ sessionDate: meta.sessionDate, generatedAt: meta.generatedAt, updatedAt: meta.__updatedAt, source: "boards" });
-    }
+    return { bull, bear, evBy, boardBy, cards, meta };
+  }
 
-    paintMeta($("ccMetaDate"), $("ccMetaScreened"), [lng, sht], market);
-    paintVerdict(verdictHost, lng, sht, market, alerts, pulse);
-    neuronComputed(ans(market));
-    Object.assign(S, { pulse, regime, liveMkt, liveBreadth, boardsDay: boardsRead(lng, sht).date });
-    hero();
-    paintVol(regime, liveVol, liveBreadth);
-
+  let listed = false;
+  function lists() {
+    if (listed) return;
+    listed = "track" in R && "events" in R;
+    const { lng, sht, track } = R;
+    const { bull, bear, evBy } = index(R);
     const trk = readTrack(ans(track));
-
+    strips.length = 0;
     for (const [id, subId, payload, rows, label, all, route] of [
       ["ccBull", "ccBullSub", lng, bull, "Bullish candidates, ranked", "bullish", "long"],
       ["ccBear", "ccBearSub", sht, bear, "Bearish candidates, ranked", "bearish", "short"],
@@ -2112,6 +2112,7 @@
       const into = $(id);
       const sub = $(subId);
       if (!into) continue;
+      const open = into.querySelector('.ui-disclose[aria-expanded="true"]');
       into.replaceChildren();
       if (silent(into, payload, all + " board", 240)) {
         if (sub) { sub.textContent = ""; sub.hidden = true; }
@@ -2123,6 +2124,7 @@
         continue;
       }
       sideList(into, rows, isNum(payload && payload.deep) !== null, trk, label, evBy);
+      if (open) into.querySelector(".ui-disclose")?.click();
       infoInto("hm" + id.slice(2), all + " leaders", () => ({
         title: cap1(all), lead: "Names past the dead band on the " + all + " board, in the board's published rank order.",
         facts: [["Pool", String(poolCount(payload) ?? rows.length)], ["Drawn", String(Math.min(rows.length, ROW_MAX))], ["Strip", trk.label]],
@@ -2134,66 +2136,44 @@
       if (sub) {
         const pool = poolCount(payload) ?? rows.length;
         const shown = Math.min(rows.length, ROW_MAX);
+        const said = shown < pool ? "top " + shown + " of " + pool : "all " + pool;
         sub.textContent = String(pool);
-        sub.setAttribute("aria-label", (shown < pool ? "top " + shown + " of " + pool : "all " + pool) + " — open the " + route + " board");
-        sub.dataset.said = shown < pool ? "top " + shown + " of " + pool : "all " + pool;
+        sub.setAttribute("aria-label", said + " — open the " + route + " board");
+        sub.dataset.said = said;
         sub.hidden = false;
       }
     }
     drawStrips();
+  }
 
-    const chg = $("ccChgNote");
-    if (chg) { chg.replaceChildren(); paintChanged(chg, track, cards, evBy, boardBy); }
-
-    const alr = $("ccAlerts");
-    if (alr) { alr.replaceChildren(); paintAlerts(alr, alerts); }
-    const alrSub = $("ccAlertsSub");
-    if (alrSub) {
-      const alrRows = ans(alerts) && Array.isArray(alerts.rows) ? alerts.rows : null;
-      if (alrRows) {
-        const seen = isNum(alerts.seen);
-        const shown = Math.min(alrRows.length, LIST_MAX);
-        const of = seen === null ? alrRows.length : seen;
-        const floor = alerts.vendorTruncated === true || alerts.readTruncated === true;
-        alrSub.textContent = floor ? shown + " of ≥" + of : countSaid(shown, of);
-        alrSub.setAttribute("aria-label", (floor ? shown + " of at least " + of : capSaid(shown, of)) + " flagged windows — open the unusual flow page");
-      } else { alrSub.textContent = ""; alrSub.removeAttribute("aria-label"); }
+  when([], ({ lng, sht }) => {
+    const { meta } = index(R);
+    if (typeof meta.sessionDate === "string") {
+      UI.freshness({ sessionDate: meta.sessionDate, generatedAt: meta.generatedAt, updatedAt: meta.__updatedAt, source: "boards" });
     }
+    lists();
 
-    const evr = $("ccEvents");
-    if (evr) { evr.replaceChildren(); paintEvents(evr, events); }
-    const evSub = $("ccEventsSub");
-    if (evSub) {
-      const evRows = ans(events) && Array.isArray(events.rows) ? events.rows : null;
-      const inWindow = isNum(events && events.inWindow);
-      const evShown = evRows === null ? 0 : Math.min(evRows.length, LIST_MAX);
-      const evOf = evRows === null ? 0 : inWindow === null ? evRows.length : inWindow;
-      evSub.textContent = evRows === null ? "" : countSaid(evShown, evOf);
-      if (evRows === null) evSub.removeAttribute("aria-label");
-      else evSub.setAttribute("aria-label", capSaid(evShown, evOf) + " in the window — open the events page");
-    }
+    neuronWire(lng, sht);
 
-    const drawnAt = Date.now();
-    const lea = $("ccLean");
-    if (lea) { lea.replaceChildren(); paintLean(lea, lean, $("ccLeanSeg")); }
-    const nws = $("ccNews");
-    if (nws) { nws.replaceChildren(); paintNews(nws, news, cards, drawnAt); }
+    const scored = isNum(meta.scored), neutral = isNum(meta.neutral);
+    const sideSaid = (word, rows, pool) => word + " " + (rows === null ? DASH : pool !== null && pool > rows ? rows + " of " + pool : rows);
+    const parts = [sideSaid("Bullish", rowCount(lng), poolCount(lng)), sideSaid("Bearish", rowCount(sht), poolCount(sht))];
+    if (scored !== null && neutral) parts.push("Band " + neutral + " of " + scored);
+    const unread = [lng ? null : "bullish", sht ? null : "bearish"].filter(Boolean);
+    statusEl.textContent = parts.join(" · ") + "." + (unread.length
+      ? " The " + unread.join(" and ") + " board" + (unread.length > 1 ? "s" : "") + " could not be read. Refresh to try again." : "");
 
-    const wtc = $("ccWatch");
-    if (wtc) { wtc.replaceChildren(); paintWatch(wtc, watch); }
-    const wtcSub = $("ccWatchSub");
-    if (wtcSub) {
-      const n = rowCount(watch);
-      wtcSub.textContent = n === null ? "" : countSaid(Math.min(n, LIST_MAX), n);
-      if (n === null) wtcSub.removeAttribute("aria-label");
-      else wtcSub.setAttribute("aria-label", capSaid(Math.min(n, LIST_MAX), n) + " inside the dead band — open the watch board");
-    }
+    setRailCount("long", poolCount(lng));
+    setRailCount("short", poolCount(sht));
+  });
 
-    meta.__bull = bull;
-    meta.__bear = bear;
-    meta.__moves = new Map(Object.entries(trk.moveBy));
-    renderSpine(meta);
+  when(["focus", "lk"], ({ focus, lk }) => {
+    Object.assign(FOCUS, { focus, strips: lk.strips, series: lk["strips:series"], live: lk.focus });
+    requestAnimationFrame(() => setTimeout(paintFocus));
+  });
 
+  when(["market"], ({ lng, sht, market }) => {
+    paintMeta($("ccMetaDate"), $("ccMetaScreened"), [lng, sht], market);
     const notes = [];
     const ld = lng && lng.sessionDate, sd = sht && sht.sessionDate;
     if (ld && sd && ld !== sd) {
@@ -2207,22 +2187,58 @@
       if (message && !seenMsg.has(message)) { seenMsg.add(message); notes.push(message); }
     }
     setStale(notes);
-    neuronWire(lng, sht);
-
-    const scored = isNum(meta.scored), neutral = isNum(meta.neutral);
-    const sideSaid = (word, rows, pool) => word + " " + (rows === null ? DASH : pool !== null && pool > rows ? rows + " of " + pool : rows);
-    const parts = [sideSaid("Bullish", rowCount(lng), poolCount(lng)), sideSaid("Bearish", rowCount(sht), poolCount(sht))];
-    if (scored !== null && neutral) parts.push("Band " + neutral + " of " + scored);
-    const unread = [lng ? null : "bullish", sht ? null : "bearish"].filter(Boolean);
-    statusEl.textContent = parts.join(" · ") + "." + (unread.length
-      ? " The " + unread.join(" and ") + " board" + (unread.length > 1 ? "s" : "") + " could not be read. Refresh to try again." : "");
-
-    setRailCount("long", poolCount(lng));
-    setRailCount("short", poolCount(sht));
-    setRailCount("watch", rowCount(watch));
-    setRailCount("events", ans(events) ? isNum(events.inWindow) : null);
-    live(liveVol);
-  }).catch((error) => {
-    statusEl.textContent = "The session could not be loaded. Refresh to try again." + (error && error.message ? " (" + error.message + ")" : "");
+    neuronComputed(ans(market));
   });
+  when(["market", "alerts", "pulse"], ({ lng, sht, market, alerts, pulse }) => paintVerdict(verdictHost, lng, sht, market, alerts, pulse));
+  when(["pulse", "regime", "lk"], ({ lng, sht, pulse, regime, lk }) => {
+    Object.assign(S, { pulse, regime, liveMkt: lk.market, liveBreadth: lk.breadth, boardsDay: boardsRead(lng, sht).date });
+    hero();
+    paintVol(regime, lk.vol, lk.breadth);
+  });
+
+  when(["track", "events"], ({ track }) => {
+    lists();
+    const { cards, evBy, boardBy } = index(R);
+    fill("ccChgNote", paintChanged, track, cards, evBy, boardBy);
+  });
+  when(["track"], ({ track }) => {
+    const { bull, bear, meta } = index(R);
+    meta.__bull = bull;
+    meta.__bear = bear;
+    meta.__moves = new Map(Object.entries(readTrack(ans(track)).moveBy));
+    renderSpine(meta);
+  });
+
+  when(["alerts"], ({ alerts }) => {
+    fill("ccAlerts", paintAlerts, alerts);
+    const rows = ans(alerts) && Array.isArray(alerts.rows) ? alerts.rows : null;
+    const seen = rows && isNum(alerts.seen);
+    const shown = rows && Math.min(rows.length, LIST_MAX);
+    const of = seen === null ? rows && rows.length : seen;
+    const floor = rows && (alerts.vendorTruncated === true || alerts.readTruncated === true);
+    subSaid($("ccAlertsSub"), rows ? floor ? shown + " of ≥" + of : countSaid(shown, of) : "",
+      rows && (floor ? shown + " of at least " + of : capSaid(shown, of)) + " flagged windows — open the unusual flow page");
+  });
+
+  when(["events"], ({ events }) => {
+    fill("ccEvents", paintEvents, events);
+    const rows = ans(events) && Array.isArray(events.rows) ? events.rows : null;
+    const inWindow = isNum(events && events.inWindow);
+    const shown = rows && Math.min(rows.length, LIST_MAX);
+    const of = rows && (inWindow === null ? rows.length : inWindow);
+    subSaid($("ccEventsSub"), rows ? countSaid(shown, of) : "", rows && capSaid(shown, of) + " in the window — open the events page");
+    setRailCount("events", ans(events) ? inWindow : null);
+  });
+
+  when(["lean"], ({ lean }) => fill("ccLean", paintLean, lean, $("ccLeanSeg")));
+  when(["news"], ({ news }) => fill("ccNews", paintNews, news, index(R).cards, Date.now()));
+
+  when(["watch"], ({ watch }) => {
+    fill("ccWatch", paintWatch, watch);
+    const n = rowCount(watch), k = Math.min(n, LIST_MAX);
+    subSaid($("ccWatchSub"), n === null ? "" : countSaid(k, n), n !== null && capSaid(k, n) + " inside the dead band — open the watch board");
+    setRailCount("watch", n);
+  });
+
+  when(Object.keys(P), ({ lk }) => live(lk.vol));
 })();

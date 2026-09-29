@@ -827,6 +827,41 @@ try {
   }
 
   {
+    const HOLD_MS = 2000;
+    let released = 0;
+    const hold = async (route) => {
+      await new Promise((r) => setTimeout(r, HOLD_MS));
+      released = Date.now();
+      await route.continue();
+    };
+    await page.route("**/api/flows/news*", hold);
+    await page.route("**/api/flows/sector-premium*", hold);
+    const t0 = Date.now();
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccBull .hm-lrow", { timeout: 15000 });
+    const filled = Date.now() - t0;
+    const early = await page.evaluate(() => ({
+      news: document.getElementById("ccNews").childElementCount,
+      lean: document.getElementById("ccLean").childElementCount,
+      bear: document.querySelectorAll("#ccBear .hm-lrow").length,
+      status: document.getElementById("flowsStatus").textContent.trim(),
+    }));
+    eq(released, 0,
+       `with Headlines and Sectors held ${HOLD_MS} ms, the boards filled at ${filled} ms, before either answered`);
+    eq(early.news, 0, "and Headlines had not painted yet");
+    eq(early.lean, 0, "nor Sectors");
+    ok(early.bear > 0, `both boards filled together (${early.bear} bearish rows)`);
+    ok(!/^Loading/.test(early.status), `and the status line already reads the boards (${early.status})`);
+    await page.waitForSelector("#ccVerdict [data-chip]", { timeout: 1000 });
+    eq(released, 0, "the verdict chips, whose inputs had all answered, painted without waiting for them either");
+    await page.waitForSelector("#ccNews > *", { timeout: 15000 });
+    await page.waitForSelector("#ccLean > *", { timeout: 15000 });
+    ok(released > 0, "and the held modules still painted once they answered");
+    await page.unroute("**/api/flows/news*", hold);
+    await page.unroute("**/api/flows/sector-premium*", hold);
+  }
+
+  {
 
     allowFetchFailure = true;
     await page.route("**/api/flows/board?side=long", (route) =>
