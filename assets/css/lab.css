@@ -1611,3 +1611,18 @@
   .lab--wide .course-brief { grid-area: guide; align-self: center; margin: 0; border: 0; }
   .lab--wide .course-brief summary { min-height: 2.75rem; padding: 0 0.25rem; }
 }
+
+@media (scripting: enabled) {
+  .today[aria-busy="true"] .dashboard-grid:empty { min-height: 10.4rem; }
+  .today[aria-busy="true"] .dashboard-focus:empty { display: grid; min-height: 3.9rem; }
+}
+@media (scripting: enabled) and (max-width: 900px) {
+  .today[aria-busy="true"] .dashboard-grid:empty { min-height: 16.4rem; }
+}
+@media (scripting: enabled) and (max-width: 620px) {
+  .today[aria-busy="true"] .dashboard-grid:empty { min-height: 6.1rem; }
+  .today[aria-busy="true"] .dashboard-focus:empty { min-height: 4.25rem; }
+}
+@media (scripting: enabled) and (max-width: 359px) {
+  .today[aria-busy="true"] .dashboard-grid:empty { min-height: 10.25rem; }
+}

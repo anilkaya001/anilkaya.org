@@ -189,6 +189,8 @@ try {
   const startBox = await page.locator(".placement-intro__actions .placement-primary").boundingBox();
   assert(startBox && startBox.height >= 44, "mobile placement start control is not touch-safe");
   assert((await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)) <= 1, "placement intro overflows at 390px");
+  await page.waitForFunction(() => performance.getEntriesByType("resource").some((entry) => entry.name.includes("/assets/data/placement-bank.json")), null, { timeout: 10000 }).catch(() => {});
+  assert(requests.includes("/assets/data/placement-bank.json"), "placement bank was not fetched before the reader pressed Start");
 
   await page.locator(".placement-intro__actions .placement-primary").click();
   await page.getByRole("heading", { name: "Question 1", exact: true }).waitFor();

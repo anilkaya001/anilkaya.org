@@ -454,6 +454,46 @@ try {
   }
 
   {
+    const topBefore = async (route, width, script, selector) => {
+      const context = await browser.newContext({ viewport: { width, height: 844 } });
+      const page = await context.newPage();
+      if (script) await page.route(`**/assets/js/${script}*`, (request) => request.fulfill({ status: 200, contentType: "text/javascript", body: "" }));
+      await page.goto(BASE + route, { waitUntil: "load" });
+      await page.evaluate(() => document.fonts.ready);
+      const top = await page.evaluate((target) => document.querySelector(target).getBoundingClientRect().top, selector);
+      await context.close();
+      return top;
+    };
+    const topAfter = async (route, width, ready, selector) => {
+      const context = await browser.newContext({ viewport: { width, height: 844 } });
+      const page = await context.newPage();
+      const clean = watch(page);
+      await page.goto(BASE + route, { waitUntil: "load" });
+      await page.waitForFunction(ready);
+      await page.evaluate(() => document.fonts.ready);
+      const top = await page.evaluate((target) => document.querySelector(target).getBoundingClientRect().top, selector);
+      clean();
+      await context.close();
+      return top;
+    };
+    const academyReady = () => document.querySelector("#academyDashboard")?.getAttribute("aria-busy") === "false";
+    for (const width of [320, 390, 1440]) {
+      const held = await topBefore("/lab/", width, "lab-ui.js", ".today__bar");
+      const rendered = await topAfter("/lab/", width, academyReady, ".today__bar");
+      assert(Math.abs(rendered - held) <= 4, `the Lab command center moved the bar ${Math.round(rendered - held)} px when it rendered at ${width} px`);
+    }
+    const reviewReady = () => document.querySelector("#reviewApp")?.getAttribute("aria-busy") === "false" && !document.querySelector("#reviewLive")?.hidden;
+    const heldReview = await topBefore("/lab/review/", 390, "lab-review.js", "#reviewApp");
+    const revealedReview = await topAfter("/lab/review/", 390, reviewReady, "#reviewApp");
+    assert(Math.abs(revealedReview - heldReview) <= 4, `the Daily Review moved ${Math.round(revealedReview - heldReview)} px when it revealed at 390 px`);
+    const challenge = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const challengePage = await challenge.newPage();
+    await challengePage.goto(BASE + "/lab/challenge/", { waitUntil: "load" });
+    assert.notEqual(await challengePage.locator(".review-brief").evaluate((node) => getComputedStyle(node).display), "none", "the challenge page lost its brief to the Daily Review's phone collapse");
+    await challenge.close();
+  }
+
+  {
     const reviewItems = [
       {
         id: "ols:review-test-01", courseId: "ols", courseTitle: "Ordinary Least Squares",

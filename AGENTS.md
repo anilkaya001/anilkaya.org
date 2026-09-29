@@ -307,9 +307,10 @@ GET logout route; that would reintroduce forced-logout CSRF.
    `/assets/css|js|fonts/*` is a 404 under that immutable policy;
    `tests/worker-regression.mjs` pins it and DEPLOY.md §9 bumps the version on
    the first forward deploy after a rollback.
-5. HTML sends one `Clear-Site-Data: "cache"` repair unless the `cachefix`
-   cookie is present. Keep this until the historical encoding incident is no
-   longer operationally relevant.
+5. HTML sends no `Clear-Site-Data`. The one-time `"cache"` repair for the
+   2026-07 encoding incident was retired in #116, and
+   `tests/worker-regression.mjs` asserts the header is absent. Do not bring it
+   back: it empties every returning reader's cache of the immutable assets.
 6. Every `/lab/<valid-course-slug>/` receives an apex-domain canonical, exact
    title/description, Open Graph/Twitter fields, visible H1 and four-module
    outline, related course links, and one parseable Course + Breadcrumb JSON-LD

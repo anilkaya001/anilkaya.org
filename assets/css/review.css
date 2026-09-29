@@ -524,6 +524,13 @@
   .review-form__actions .btn { flex: 1 1 100%; }
 }
 
+@media (max-width: 560px) and (scripting: enabled) {
+  .review-page:has(#reviewLive) .review-hero { margin-bottom: 1.1rem; }
+  .review-page:has(#reviewLive) .review-hero h1 { font-size: clamp(1.9rem, 1.2rem + 4vw, 2.65rem); }
+  .review-page:has(#reviewLive) .review-hero__copy > p:last-child,
+  .review-page:has(#reviewLive) .review-brief { display: none; }
+}
+
 @media (pointer: coarse) {
   .review-option,
   .review-form__actions .btn,
