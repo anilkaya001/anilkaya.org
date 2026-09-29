@@ -12,8 +12,10 @@ import { REPO_ROOT, SESSION_SECRET, FLOWS_TEST_USER, startWorker } from "./worke
 
 const quotes = await (async () => {
   const state = { hits: 0, mode: "ok", delayMs: 0 };
+  const bar = (day) => Date.UTC(2026, 8, day, 13, 30) / 1000;
   const chart = (symbol) => ({ chart: { result: [{
-    meta: { currency: "USD", symbol, regularMarketPrice: 105, chartPreviousClose: 100, regularMarketTime: 1790380000 },
+    meta: { currency: "USD", symbol, gmtoffset: -14400, regularMarketPrice: 105, chartPreviousClose: 90, regularMarketTime: Date.UTC(2026, 8, 25, 20, 0) / 1000 },
+    timestamp: [21, 22, 23, 24, 25].map(bar),
     indicators: { quote: [{ close: [100, 101, 102, 103, 105] }] },
   }], error: null } });
   const stub = http.createServer((req, res) => {
@@ -113,6 +115,14 @@ try {
   for (const quote of marketBody.quotes) {
     assert(typeof quote.label === "string" && Number.isFinite(quote.price) && Number.isFinite(quote.changePct) && typeof quote.currency === "string",
       "each quote must carry label/price/changePct/currency");
+  }
+  for (const quote of marketBody.quotes) {
+    assert(Math.abs(quote.changePct - (105 / 103 - 1) * 100) < 1e-9,
+      "the day change is against the previous session's close (103) from the same response, never chartPreviousClose (90), the close before the range");
+    assert.equal(quote.prevClose, 103, "each quote carries the base its change was measured against");
+    assert.equal(quote.prevDay, "2026-09-24", "and the session that base closed");
+    assert.equal(quote.asOfDay, "2026-09-25", "and the session its own price belongs to");
+    assert.equal(quote.asOf, Date.UTC(2026, 8, 25, 20, 0), "and its own instant, not the snapshot's fetch time");
   }
   assert.equal((await fetch(base + "/api/markets", { method: "POST" })).status, 405, "/api/markets is read-only");
 
