@@ -849,6 +849,13 @@ try {
     }
     assert(!requested.some((path) => /^\/assets\/data\/courses\/(?!ols\/)/.test(path)), "course downloaded another topic payload");
     assert(!requested.some((path) => /^\/assets\/data\/courses\/ols\/(?!manifest\.json$|ols-line\.json$)/.test(path)), "course downloaded an unrelated module payload");
+    const firstModule = await page.evaluate(() => ({
+      version: document.documentElement.dataset.assetVersion,
+      entries: performance.getEntriesByType("resource")
+        .filter((entry) => new URL(entry.name).pathname === "/assets/data/courses/ols/ols-line.json")
+        .map((entry) => ({ initiator: entry.initiatorType, search: new URL(entry.name).search })),
+    }));
+    assert.deepEqual(firstModule.entries, [{ initiator: "link", search: "?v=" + firstModule.version }], "first module was not served by the head preload");
     clean();
     await context.close();
   }

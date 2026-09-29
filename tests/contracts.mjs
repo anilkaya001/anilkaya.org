@@ -144,6 +144,7 @@ for (const meta of context.window.TOPIC_META) {
   }
   const manifest = JSON.parse(read(`assets/data/courses/${meta.id}/manifest.json`));
   assert.equal(manifest.totalStages, meta.stages, `${meta.id}: module manifest stage count drifted`);
+  assert.deepEqual(seoById[meta.id].modules.map((module) => module.id), manifest.modules.map((module) => module.id), `${meta.id}: Worker module ids drifted from the manifest the page fetches`);
   for (const module of manifest.modules) {
     const moduleSource = read(`assets/data/courses/${meta.id}/${module.id}.json`);
     assert(gzipSync(moduleSource).byteLength <= 6_144, `${meta.id}/${module.id}: module exceeds 6 KB gzip budget`);

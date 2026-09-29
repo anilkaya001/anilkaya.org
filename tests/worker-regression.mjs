@@ -354,6 +354,19 @@ try {
     assert.match(html, new RegExp(`<h1>${topic.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/&/g, "&amp;")}</h1>`), `${topic.id}: raw HTML H1`);
 
     assert.match(html, new RegExp(`<link[^>]+rel="preload"[^>]+crossorigin="anonymous"[^>]+href="/assets/data/courses/${topic.id}/manifest\\.json\\?v=${assetVersion}"`), `${topic.id}: manifest preload missing, mis-versioned, or not CORS-matched`);
+    const courseManifest = JSON.parse(await readFile(path.join(REPO_ROOT, `assets/data/courses/${topic.id}/manifest.json`), "utf8"));
+    const firstModuleHref = `/assets/data/courses/${topic.id}/${courseManifest.modules[0].id}.json?v=${assetVersion}`;
+    const field = (tag, name) => tag.match(new RegExp(`\\s${name}="([^"]*)"`))?.[1] ?? null;
+    const preloads = [...html.matchAll(/<link\b[^>]*\srel="preload"[^>]*>/g)].map(([tag]) => ({
+      as: field(tag, "as"), crossorigin: field(tag, "crossorigin"), href: field(tag, "href"),
+    })).filter((link) => link.href && link.href.startsWith("/assets/data/courses/"));
+    assert.deepEqual(preloads, [
+      { as: "fetch", crossorigin: "anonymous", href: `/assets/data/courses/${topic.id}/manifest.json?v=${assetVersion}` },
+      { as: "fetch", crossorigin: "anonymous", href: firstModuleHref },
+    ], `${topic.id}: the head must preload the manifest and the first module exactly as lab-course.js fetches them`);
+    const firstModule = await fetch(base + firstModuleHref);
+    assert.equal(firstModule.status, 200, `${topic.id}: preloaded first module is missing`);
+    assert.equal((await firstModule.json()).module.id, courseManifest.modules[0].id, `${topic.id}: preloaded first module is not the manifest's first module`);
     for (const module of topic.modules) assert(pageText.includes(module.title), `${topic.id}: missing crawlable module ${module.title}`);
     for (const related of COURSE_TOPICS.filter((item) => item.id !== topic.id)) {
       assert(html.includes(`href="${related.path}"`), `${topic.id}: missing related link to ${related.id}`);
