@@ -325,7 +325,12 @@
     async function exec() {
       clearTimeout(schedule._t);
       running = true;
+      const first = !launched, fx = window.FX && window.FX.runState;
+      const refocus = first && document.activeElement === runBtn;
+      if (first) { runBtn.disabled = true; runBtn.textContent = "Running…"; if (fx) fx(runBtn, "busy"); }
       const ok = await window.Lab.run(render(), { out, figs });
+      if (first) { runBtn.disabled = false; runBtn.textContent = "▶ Launch"; if (fx) fx(runBtn, "done"); }
+      if (refocus && document.activeElement === document.body) runBtn.focus();
       running = false;
       if (ok && !launched) { launched = true; runBtn.textContent = "↻ Re-run"; mark(i, runBtn); }
       if (pending) { pending = false; exec(); }
