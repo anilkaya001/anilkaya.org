@@ -287,6 +287,23 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(fat.bytes <= 8000 && fat.shed && fat.shed.closes.length > 0 && Object.keys(fat.rows).length === listed.length,
      "over its cap the payload sheds closes, never rows");
   ok(FOCUS_BUDGET_BYTES === 24 * 1024, "the focus cap is 24 KB");
+
+  const aapl = { ticker: "AAPL", close: "340.10", prev_close: "338.40", net_call_premium: "500", net_put_premium: "100", issue_type: "Common Stock" };
+  const nvda = { ticker: "NVDA", close: "229.42", prev_close: "224.50" };
+  const gld = { ticker: "GLD", close: "391.645", prev_close: "392.88" };
+  const tails = { AAPL: [335, 338.4, 339], NVDA: [223, 224.5, null], GLD: [393.1, 392.88, 391.2] };
+  const sc = buildFocusPayload({ ndx, rows: new Map([["AAPL", aapl], ["NVDA", nvda], ["GLD", gld]]), read: { ok: true },
+    sessionDate: "2026-09-28", closesOf: (t) => tails[t] || null });
+  eq(sc.rows.AAPL.px, 339, "THE NIGHTLY ROW'S PRICE IS THE SESSION'S CLOSE, the last of the dated closes it carries, not the after-hours print the screener answered with (340.10)");
+  eq(sc.rows.AAPL.prev, 338.4, "its base is the close before that");
+  eq(sc.rows.AAPL.chg, Math.round((339 / 338.4 - 1) * 1e6) / 1e6, "and the change is close over prior close, the number the boards print for the same name");
+  eq(sc.rows.AAPL.net, 400, "every other field is the read's own");
+  eq(sc.rows.NVDA.px, 229.42, "a name whose last dated close is missing keeps the raw read, priced as it was read");
+  eq(sc.rows.GLD.px, 391.2, "an ETF is reconciled the same way");
+  assert.deepEqual(sc.basis.read, ["NVDA"], "and the payload names the rows still on the read price, so no reader takes them for closes"); checks++;
+  ok(/session-close/.test(sc.basis.px), "with the basis of the rest stated");
+  const one = buildFocusPayload({ ndx, rows: new Map([["AAPL", aapl]]), read: { ok: true }, sessionDate: "2026-09-28", closesOf: () => [339] });
+  eq(one.rows.AAPL.px, 340.1, "a single close has no prior close to pair with, so the row stays as read");
 }
 
 {
