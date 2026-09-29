@@ -1217,11 +1217,11 @@ const cronMinutes = (cron) => {
       await flush();
     };
     const rth = { phase: "rth", session: "2026-09-29", trading: true, endsAt: "2026-09-29T20:00:00.000Z" };
-    const run = (answer, withTimeout = true) => {
+    const run = (answer) => {
       const asked = [];
       const vis = [];
       const hctx = {
-        window: { FlowsUI: {} }, isFinite, Number, String, Math, setTimeout: fakeSet, clearTimeout: fakeClear,
+        window: { FlowsUI: {} }, isFinite, Number, String, Math, AbortController, setTimeout: fakeSet, clearTimeout: fakeClear,
         Date: class extends Date { static now() { return Date.parse("2026-09-29T15:00:00Z") + clock; } },
         document: { hidden: false, addEventListener: (t, f) => vis.push(f), removeEventListener() {} },
         fetch: (url, init) => {
@@ -1234,13 +1234,6 @@ const cronMinutes = (cron) => {
           });
         },
       };
-      if (withTimeout) {
-        hctx.AbortSignal = { timeout: (ms) => {
-          const fns = [];
-          fakeSet(() => fns.forEach((f) => f()), ms);
-          return { addEventListener: (t, f) => fns.push(f) };
-        } };
-      }
       vm.createContext(hctx);
       vm.runInContext(src, hctx);
       return { asked, hb: hctx.window.FlowsUI.heartbeat({ ticker: "NVDA", nightly: ["card:NVDA"], page: "ticker" }), vis };
@@ -1278,11 +1271,38 @@ const cronMinutes = (cron) => {
       eq(r.asked.length, 4, "that beat answers, the backoff clears, and the 20 s cadence resumes");
       r.hb.stop();
     }
+    ok(!/AbortSignal\.timeout/.test(src), "the deadline is an AbortController and a timer, not AbortSignal.timeout, which Safari lacks before 16 " +
+      "while every Flows page already runs from 13.1 (flows-ui.js uses ??), so no supported browser keeps a stalled beat as its last");
     {
       clock = 0; timers.clear();
-      const r = run((i) => (i === 1 ? null : ok200()), false);
-      await tick(5 * 60 * 1000);
-      eq(r.asked.length, 2, "without a deadline (a browser with no AbortSignal.timeout) the same stall is the page's last beat, which is what the deadline repairs");
+      const r = run((i) => (i === 1 ? null : ok200()));
+      await tick(20000);
+      await tick(8000);
+      eq(timers.size, 1, "an aborted beat leaves one timer armed, the backoff's, and no stray deadline");
+      await tick(40000);
+      eq(r.asked.length, 3, "THE DEADLINE NEEDS ONLY AbortController (Safari 12.1 on; no AbortSignal.timeout in this context): " +
+        "the stalled beat is aborted at 8 s and the next fires 48 s after it");
+      r.hb.stop();
+    }
+    {
+      clock = 0; timers.clear();
+      const r = run(ok200);
+      await tick(20000);
+      eq(timers.size, 1, "a beat that answers clears its deadline: only the next beat's timer is armed");
+      r.hb.stop();
+    }
+    {
+      clock = 0; timers.clear();
+      const closing = { ...rth, endsAt: "2026-09-29T15:00:05.000Z" };
+      const closed = { phase: "closed", session: "2026-09-29", trading: false, endsAt: null };
+      const r = run((i) => ({ serverNow: 0, phase: i === 0 ? closing : i === 1 ? closing : closed, keys: {}, quote: { status: "ok" } }));
+      await tick(5999);
+      eq(r.asked.length, 1, "A SESSION ENDING IN 5 S: no beat before the boundary");
+      await tick(1);
+      eq(r.asked.length, 2, "the next beat lands 1 s after the bell (6 s), not a full 20 s beat later, so the close is learned at once");
+      await tick(60000);
+      eq(r.asked.length, 3, "a phase whose end has passed is not chased: the server still says rth and the next beat keeps the 20 s cadence, 26 s");
+      eq(r.asked[2].at, 26000, `at 26 s (${r.asked[2].at} ms), and once closed nothing is scheduled`);
       r.hb.stop();
     }
   }
