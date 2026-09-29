@@ -104,7 +104,8 @@
     unreadable: ["stop", "Unreadable"],
   };
   const disclose = (title, lead, more) => UI.info(() => Object.assign({ title, lead }, more || {}));
-  const rowsOf = (p) => (Array.isArray(p.rows) ? p.rows : []);
+  const arr = (x) => (Array.isArray(x) ? x : []);
+  const rowsOf = (p) => arr(p.rows);
 
   function hush(into, kind, text, what, height) {
     const [g, word] = KIND[kind] || KIND.unavailable;
@@ -178,7 +179,7 @@
   };
 
   function ranked(rows) {
-    const list = (Array.isArray(rows) ? rows : []).slice();
+    const list = arr(rows).slice();
     const published = list.length > 0 && list.every((r) => isNum(r && r.r) !== null);
     if (published) { list.sort((a, b) => isNum(a.r) - isNum(b.r)); return list; }
 
@@ -244,31 +245,34 @@
     }
   }
 
-  function sideList(into, rows, knowsDeep, track, label, evBy) {
+  const drawn = [];
+  function trackInto({ t, trk, name }, track) {
+    trk.removeAttribute("aria-busy");
+    const series = track.byName[t];
+    const measured = (series || []).filter((v) => isNum(v) !== null).length;
+    if (series && measured) strips.push({ cell: trk, series, track, t, measured, w: 0 });
+    else trk.textContent = DASH;
+    const mv = track.moveBy[t];
+    const cross = mv && mv.current && typeof mv.d1.cross === "string" ? mv.d1.cross : null;
+    if (cross) name.firstChild.after(h("span", { class: "hm-tag cc-cross", "data-cross": cross, title: CROSS_SAID[cross] || null }, CROSS_WORDS[cross]));
+  }
+
+  function sideList(into, rows, knowsDeep, label) {
     const list = [];
     const shown = rows.slice(0, ROW_MAX);
     for (const row of shown) {
       const t = String((row && row.t) || "");
       const deep = !knowsDeep || (row && row.dp === 1);
       const card = Boolean(t) && deep;
-      const mv = track.moveBy[t] || null;
-      const cross = mv && mv.current && typeof mv.d1.cross === "string" ? mv.d1.cross : null;
-
-      const name = h("span", { class: "hm-name cc-t" },
-        h("b", { class: "hm-t" }, t || DASH),
-        cross ? h("span", { class: "hm-tag cc-cross", "data-cross": cross, title: CROSS_SAID[cross] || null }, CROSS_WORDS[cross]) : null,
-        earningsMark(row, evBy.get(t)));
+      const name = h("span", { class: "hm-name cc-t" }, h("b", { class: "hm-t" }, t || DASH));
       const conv = isNum(row.cnv);
       const sub = h("span", { class: "hm-sub" },
         h("span", { class: "hm-prem", "data-tone": toneOf(row.netPrem) }, usdS(row.netPrem)),
         h("span", { class: "hm-conv", title: "Conviction measures agreement in the published inputs, not a probability of profit." },
           "conv " + (conv === null ? DASH : String(Math.round(conv)))));
 
-      const trk = h("span", { class: "hm-trk cc-trk" });
-      const series = track.byName[t];
-      const measured = (series || []).filter((v) => isNum(v) !== null).length;
-      if (series && measured) strips.push({ cell: trk, series, track, t, measured, w: 0 });
-      else trk.textContent = DASH;
+      const trk = h("span", { class: "hm-trk cc-trk", "aria-busy": "true" });
+      drawn.push({ t, row, name, trk });
 
       const score = isNum(row.s);
       const kids = [
@@ -290,13 +294,13 @@
   function readTrack(payload) {
     const byName = Object.create(null);
     const moveBy = Object.create(null);
-    const sessionRows = payload && Array.isArray(payload.sessions) ? payload.sessions : [];
+    const sessionRows = arr(payload && payload.sessions);
     const lastIndex = sessionRows.length - 1;
     let lo = 0, hi = 0, sessions = 0;
     if (payload && Array.isArray(payload.names)) {
       for (const name of payload.names) {
         if (!name || !name.t) continue;
-        const series = Array.isArray(name.s) ? name.s : [];
+        const series = arr(name.s);
         byName[name.t] = series;
         if (name.d1) {
           const at = isNum(name.lastAt);
@@ -428,8 +432,8 @@
     if (tiles) tiles.replaceChildren();
     if (silent(into, payload, "score track")) return;
 
-    const names = Array.isArray(payload.names) ? payload.names : [];
-    const sessionRows = Array.isArray(payload.sessions) ? payload.sessions : [];
+    const names = arr(payload.names);
+    const sessionRows = arr(payload.sessions);
     const change = payload.change && typeof payload.change === "object" ? payload.change : null;
     const notes = payload.notes && typeof payload.notes === "object" ? payload.notes : {};
     const band = isNum(payload.deadBand);
@@ -1307,7 +1311,7 @@
         "on the wire and the ones this pipeline expects have parted company.", "sector lean");
       return;
     }
-    const sectors = Array.isArray(payload.sectors) ? payload.sectors : [];
+    const sectors = arr(payload.sectors);
     if (!sectors.length) {
       hush(into, "unavailable",
         "This payload carried no sector rows, so the page cannot say where any basket " +
@@ -1555,7 +1559,7 @@
       h("ul", { class: "cc-nw" }, rows.slice(0, LIST_MAX).map((row) => {
         const at = isNum(row && row.createdAtMs);
         const age = at === null ? null : agoSaid(at, now);
-        const tickers = (Array.isArray(row && row.tickers) ? row.tickers : [])
+        const tickers = arr(row && row.tickers)
           .map((raw) => (typeof raw === "string" ? raw.trim().toUpperCase() : "")).filter(Boolean);
         return h("li", { class: "cc-nw-row" },
           h("p", { class: "cc-nw-h" }, typeof row.headline === "string" && row.headline ? row.headline : DASH),
@@ -2097,14 +2101,9 @@
     return { bull, bear, evBy, boardBy, cards, meta };
   }
 
-  let listed = false;
   function lists() {
-    if (listed) return;
-    listed = "track" in R && "events" in R;
-    const { lng, sht, track } = R;
-    const { bull, bear, evBy } = index(R);
-    const trk = readTrack(ans(track));
-    strips.length = 0;
+    const { lng, sht } = R;
+    const { bull, bear } = index(R);
     for (const [id, subId, payload, rows, label, all, route] of [
       ["ccBull", "ccBullSub", lng, bull, "Bullish candidates, ranked", "bullish", "long"],
       ["ccBear", "ccBearSub", sht, bear, "Bearish candidates, ranked", "bearish", "short"],
@@ -2112,7 +2111,6 @@
       const into = $(id);
       const sub = $(subId);
       if (!into) continue;
-      const open = into.querySelector('.ui-disclose[aria-expanded="true"]');
       into.replaceChildren();
       if (silent(into, payload, all + " board", 240)) {
         if (sub) { sub.textContent = ""; sub.hidden = true; }
@@ -2123,11 +2121,10 @@
         if (sub) { sub.textContent = "0"; sub.setAttribute("aria-label", "0 ranked"); sub.hidden = false; }
         continue;
       }
-      sideList(into, rows, isNum(payload && payload.deep) !== null, trk, label, evBy);
-      if (open) into.querySelector(".ui-disclose")?.click();
+      sideList(into, rows, isNum(payload && payload.deep) !== null, label);
       infoInto("hm" + id.slice(2), all + " leaders", () => ({
         title: cap1(all), lead: "Names past the dead band on the " + all + " board, in the board's published rank order.",
-        facts: [["Pool", String(poolCount(payload) ?? rows.length)], ["Drawn", String(Math.min(rows.length, ROW_MAX))], ["Strip", trk.label]],
+        facts: [["Pool", String(poolCount(payload) ?? rows.length)], ["Drawn", String(Math.min(rows.length, ROW_MAX))], ["Strip", readTrack(ans(R.track)).label]],
         notes: ["Scores are a ranked attention signal on a fixed −100 to +100 scale, not a return forecast. Names inside the dead band are not published on either side.",
           "Each strip draws the name's score by archived session on one scale shared by both sides, against an always-drawn zero rule.",
           "The percentage is the session's price return: close over the prior close. It is not the score move.",
@@ -2146,7 +2143,7 @@
     drawStrips();
   }
 
-  when([], ({ lng, sht }) => {
+  P.b = when([], ({ lng, sht }) => {
     const { meta } = index(R);
     if (typeof meta.sessionDate === "string") {
       UI.freshness({ sessionDate: meta.sessionDate, generatedAt: meta.generatedAt, updatedAt: meta.__updatedAt, source: "boards" });
@@ -2165,15 +2162,8 @@
 
     setRailCount("long", poolCount(lng));
     setRailCount("short", poolCount(sht));
-  });
 
-  when(["focus", "lk"], ({ focus, lk }) => {
-    Object.assign(FOCUS, { focus, strips: lk.strips, series: lk["strips:series"], live: lk.focus });
-    requestAnimationFrame(() => setTimeout(paintFocus));
-  });
-
-  when(["market"], ({ lng, sht, market }) => {
-    paintMeta($("ccMetaDate"), $("ccMetaScreened"), [lng, sht], market);
+    paintMeta($("ccMetaDate"), null, [lng, sht]);
     const notes = [];
     const ld = lng && lng.sessionDate, sd = sht && sht.sessionDate;
     if (ld && sd && ld !== sd) {
@@ -2187,6 +2177,15 @@
       if (message && !seenMsg.has(message)) { seenMsg.add(message); notes.push(message); }
     }
     setStale(notes);
+  });
+
+  when(["focus", "lk"], ({ focus, lk }) => {
+    Object.assign(FOCUS, { focus, strips: lk.strips, series: lk["strips:series"], live: lk.focus });
+    requestAnimationFrame(() => setTimeout(paintFocus));
+  });
+
+  when(["market"], ({ lng, sht, market }) => {
+    paintMeta(null, $("ccMetaScreened"), [lng, sht], market);
     neuronComputed(ans(market));
   });
   when(["market", "alerts", "pulse"], ({ lng, sht, market, alerts, pulse }) => paintVerdict(verdictHost, lng, sht, market, alerts, pulse));
@@ -2197,15 +2196,17 @@
   });
 
   when(["track", "events"], ({ track }) => {
-    lists();
     const { cards, evBy, boardBy } = index(R);
     fill("ccChgNote", paintChanged, track, cards, evBy, boardBy);
   });
-  when(["track"], ({ track }) => {
+  when(["b", "track"], ({ track }) => {
+    const trk = readTrack(ans(track));
+    for (const d of drawn) trackInto(d, trk);
+    drawStrips();
     const { bull, bear, meta } = index(R);
     meta.__bull = bull;
     meta.__bear = bear;
-    meta.__moves = new Map(Object.entries(readTrack(ans(track)).moveBy));
+    meta.__moves = new Map(Object.entries(trk.moveBy));
     renderSpine(meta);
   });
 
@@ -2220,7 +2221,9 @@
       rows && (floor ? shown + " of at least " + of : capSaid(shown, of)) + " flagged windows — open the unusual flow page");
   });
 
-  when(["events"], ({ events }) => {
+  when(["b", "events"], ({ events }) => {
+    const { evBy } = index(R);
+    for (const { t, row, name } of drawn) name.append(earningsMark(row, evBy.get(t)) || "");
     fill("ccEvents", paintEvents, events);
     const rows = ans(events) && Array.isArray(events.rows) ? events.rows : null;
     const inWindow = isNum(events && events.inWindow);

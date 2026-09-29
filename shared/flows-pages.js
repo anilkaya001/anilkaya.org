@@ -361,7 +361,7 @@ export function overviewPage({ username = "", summary = null } = {}) {
 ${shell("Session", "overview", username, `
   <header class="flows-head hm-head" data-fx-hero>
     <h1 id="fxTitle">Session</h1>
-    <p class="hm-meta"><time id="ccMetaDate"></time><span id="ccMetaScreened" hidden></span><span id="hmStale"></span></p>
+    <p class="hm-meta"><time id="ccMetaDate"></time><span id="hmStale"></span><span id="ccMetaScreened" hidden></span></p>
   </header>
   <p class="visually-hidden" id="flowsStatus" role="status">Loading the latest session…</p>
   <p class="visually-hidden" id="flowsStale" role="status" hidden></p>
