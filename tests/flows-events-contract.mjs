@@ -13,6 +13,7 @@ import { eventsPage } from "../shared/flows-pages.js";
 import { horizonMove, TRADING_YEAR } from "../shared/flows-features.js";
 import { EARNINGS_GATE_DAYS, daysToEarnings, screenerTilt } from "../scripts/flows-pipeline.mjs";
 import { nextTradingDay } from "../shared/flows-freshness.js";
+import { historyDigest } from "../shared/flows-catalysts.js";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 let checks = 0;
@@ -1122,6 +1123,7 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
     nameAt("NEWB", plusDays(GATE_ORIGIN, 2)),
     nameAt("OLDC", plusDays(GATE_ORIGIN, 3)),
     nameAt("THIN", plusDays(GATE_ORIGIN, 4)),
+    nameAt("EDGE", plusDays(GATE_ORIGIN, 5)),
   ], { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE });
   const digest = (mv, em) => ({ status: "ok", n: 8, r: 1.2, beat: 0.5, hit: 0.625, drift: 0.01, mv, em });
   CAL.history = {
@@ -1129,6 +1131,8 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
     NEWB: digest(0.0226, null),
     OLDC: { status: "ok", n: 8, r: 0.9, beat: 0.25, hit: 0.375, drift: null },
     THIN: { status: "thin", reason: "few", n: 2 },
+    EDGE: historyDigest({ status: "ok", n: 8, medianRatio: 1.1, beat: 0.5, ls1dHit: 0.5, drift: 0.01,
+      medianAbsMove: 0.0234513, impliedNext: { em: 0.0755275 } }),
   };
   const cx = { OLDC: { ticker: "OLDC", earnings: { status: "ok", medianAbsMove: 0.0178, ls1dHit: 0.375, impliedNext: { em: 0.0733 } } } };
   const browser = await chromium.launch();
@@ -1169,6 +1173,10 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
     eq(got.rows.OLDC.typical, "\u00b11.8%", "with the card's median move");
     eq(got.rows.OLDC.implied, "\u00b17.3%", "and the card's implied move");
     eq(got.rows.THIN.realized, "quiet", "a thin digest stays quiet, with no request");
+    eq(got.rows.EDGE.typical, "\u00b12.3%",
+      "a median of 0.0234513 read through the real digest paints \u00b12.3%, the tenth the unrounded card-x value gives, not the \u00b12.4% a four-place digest showed");
+    eq(got.rows.EDGE.implied, "\u00b17.6%",
+      "and an implied move of 0.0755275 paints \u00b17.6%, not the \u00b17.5% a four-place 0.0755 showed");
 
     const old = JSON.parse(JSON.stringify(CAL));
     for (const t of ["NEWA", "NEWB"]) { delete old.history[t].mv; delete old.history[t].em; }

@@ -420,8 +420,10 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(historyDigest(h).n, 8, "the digest keeps the count");
   eq(historyDigest(h).mv, 0.0625, "and the median absolute one-day move, (0.025 + 0.1) / 2, which the events lane draws as the typical move");
   eq(historyDigest(h).em, null, "with no implied move when the calendar carried none for the name");
-  eq(historyDigest({ ...h, impliedNext: { em: 0.0612345, d: "2026-10-29", when: "postmarket" } }).em, 0.0612,
-    "and the calendar's implied move to four places when it did, so the events page needs no per-name card-x read");
+  eq(historyDigest({ ...h, impliedNext: { em: 0.06123456, d: "2026-10-29", when: "postmarket" } }).em, 0.0612346,
+    "and the calendar's implied move to six significant figures when it did, the precision compactNumbers gives the card-x block, so the events page needs no per-name card-x read and paints the tenth of a point the ticker dossier paints");
+  eq(historyDigest({ ...h, medianAbsMove: 0.0234513 }).mv, 0.0234513,
+    "a median on a display boundary survives the digest unrounded: four places made it 0.0235, which paints \u00b12.4% where the card reads \u00b12.3%");
   ok(!("mv" in historyDigest(recent)) && !("em" in historyDigest(recent)), "a thin digest carries neither: its lane reads quiet");
 
   const kbh = shapeEarningsCalendar([probe("earnings-afterhours")], { sessionDate: S });
@@ -598,11 +600,11 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   {
     const hist = Object.entries(legs.eventsAdditions.history);
     const okd = hist.filter(([, d]) => d && d.status === "ok");
-    ok(okd.length > 0 && okd.every(([t, d]) => d.mv === Number(legs.earnings.get(t).medianAbsMove.toFixed(4))),
-      `every ok digest on the events payload (${okd.length} of ${hist.length}) carries the median absolute move its card-x earnings block carries`);
+    ok(okd.length > 0 && okd.every(([t, d]) => d.mv === Number(legs.earnings.get(t).medianAbsMove.toPrecision(6))),
+      `every ok digest on the events payload (${okd.length} of ${hist.length}) carries the median absolute move its card-x earnings block carries, to the six significant figures compactNumbers gives the card itself`);
     const priced = okd.filter(([t]) => legs.earnings.get(t).impliedNext);
     ok(priced.length > 0 && okd.length > priced.length, `and the fixture has names with (${priced.length}) and without an implied move`);
-    ok(okd.every(([t, d]) => d.em === (legs.earnings.get(t).impliedNext ? Number(legs.earnings.get(t).impliedNext.em.toFixed(4)) : null)),
+    ok(okd.every(([t, d]) => d.em === (legs.earnings.get(t).impliedNext ? Number(legs.earnings.get(t).impliedNext.em.toPrecision(6)) : null)),
       "and each digest's em is the card-x block's impliedNext.em, or null where the calendar priced none: the events lane reads both from the payload");
   }
   ok(MARKET_LEG_CALLS > 0 && MARKET_LEG_CALLS < 400, `the modelled leg cost is ${MARKET_LEG_CALLS} calls`);

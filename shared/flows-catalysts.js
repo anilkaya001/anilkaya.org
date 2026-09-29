@@ -130,9 +130,9 @@ export function earningsHistory(rows, {
 export function historyDigest(h) {
   if (!h || h.status !== "ok") return h ? { status: h.status, reason: h.reason || null, n: h.n || 0 } : null;
   const r3 = (v) => (v === null || v === undefined ? null : Number(v.toFixed(3)));
-  const r4 = (v) => (typeof v === "number" && Number.isFinite(v) ? Number(v.toFixed(4)) : null);
+  const r6 = (v) => (typeof v === "number" && Number.isFinite(v) ? Number(v.toPrecision(6)) : null);
   return { status: "ok", n: h.n, r: r3(h.medianRatio), beat: r3(h.beat), hit: r3(h.ls1dHit), drift: r3(h.drift),
-    mv: r4(h.medianAbsMove), em: r4(h.impliedNext ? h.impliedNext.em : null) };
+    mv: r6(h.medianAbsMove), em: r6(h.impliedNext ? h.impliedNext.em : null) };
 }
 
 export function shapeEarningsCalendar(rows, { cap = CALENDAR_ROWS_PER_DAY, sessionDate = null } = {}) {
