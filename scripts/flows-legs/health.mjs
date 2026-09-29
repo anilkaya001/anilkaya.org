@@ -336,8 +336,13 @@ const said = (read) => (read && read.status ? `HTTP ${read.status}` : "no answer
 const payloadOf = (read) => (read && !read.failed && !read.absent && read.payload && typeof read.payload === "object"
   ? read.payload : null);
 
+const spread = (values, pick) => {
+  const xs = (Array.isArray(values) ? values : []).filter((x) => typeof x === "number" && Number.isFinite(x)).sort((a, b) => a - b);
+  return xs.length ? pick(xs) : null;
+};
+
 export function healthChecks({ sessionDate, now = Date.now(), clockRead = null, marketRead = null,
-  focusRead = null, heartbeatRead = null, edge403 = 0, edgeKinds = null, worker403 = null, edgeStatuses = null, retrySpentMs = 0 } = {}) {
+  focusRead = null, heartbeatRead = null, seriesRead = null, edge403 = 0, edgeKinds = null, worker403 = null, edgeStatuses = null, retrySpentMs = 0 } = {}) {
   const failures = edgeFailures(edge403, edgeKinds, retrySpentMs, edgeStatuses);
   const notes = [edgeNote(edge403, edgeKinds, worker403, retrySpentMs, edgeStatuses)];
   const warnings = [];
@@ -452,6 +457,21 @@ export function healthChecks({ sessionDate, now = Date.now(), clockRead = null, 
       failures.push(`HEALTH: the last live pass for ${sessionDate} finished at ${etTime(finished, sessionDate)}, ` +
         "so Tier 2 stopped before the close");
     }
+    const fill = run.prevFill && typeof run.prevFill === "object" ? run.prevFill : null;
+    if (fill) {
+      notes.push(fill.declined ? `day change: the last pass declined the ${fill.date} close (${fill.declined}), so rows without a vendor prev_close have no change`
+        : `day change: the last pass filled ${fill.n} null prev_close row(s) from the ${fill.date} close`);
+    }
+  }
+  const series = payloadOf(seriesRead);
+  const lag = series && series.session === sessionDate && series.lag && typeof series.lag === "object" ? series.lag : null;
+  const columns = lag ? Math.max(0, ...["p50", "p90", "max"].map((k) => (Array.isArray(lag[k]) ? lag[k].filter((x) => typeof x === "number").length : 0))) : 0;
+  if (columns) {
+    const middle = (xs) => xs[Math.floor((xs.length - 1) / 2)];
+    const top = (xs) => xs[xs.length - 1];
+    notes.push(`live quote lag on ${sessionDate} over ${columns} fifteen-minute column(s): median of the medians ` +
+      `${spread(lag.p50, middle)} s, worst 90th percentile ${spread(lag.p90, top)} s, worst ${spread(lag.max, top)} s ` +
+      "(the distribution a frozen-feed rule is set against; none is enforced)");
   }
   return { applies: true, why: null, failures, warnings, notes };
 }
@@ -467,10 +487,10 @@ export async function runHealthGate({ sessionDate, read, now = () => Date.now(),
       return { payload: null, failed: true, status: 0, detail: error && error.message ? error.message : String(error) };
     }
   };
-  const [clockRead, marketRead, focusRead, heartbeatRead] = [await safe("clock"), await safe("live:market"),
-    await safe("live:focus"), await safe("live:heartbeat")];
+  const [clockRead, marketRead, focusRead, heartbeatRead, seriesRead] = [await safe("clock"), await safe("live:market"),
+    await safe("live:focus"), await safe("live:heartbeat"), await safe("live:strips:series")];
   const seen = { ...refusalTally(), retrySpentMs: 0, ...(typeof edge === "function" ? edge() : edge) };
-  const verdict = healthChecks({ sessionDate, now: now(), clockRead, marketRead, focusRead, heartbeatRead, edge403: seen.count,
+  const verdict = healthChecks({ sessionDate, now: now(), clockRead, marketRead, focusRead, heartbeatRead, seriesRead, edge403: seen.count,
     edgeKinds: seen.kinds, worker403: seen.worker, edgeStatuses: seen.statuses, retrySpentMs: seen.retrySpentMs });
   log(`health gate: ${verdict.applies ? "checked" : "live checks skipped — " + verdict.why}; ` +
     `${verdict.failures.length} failure(s)` + (verdict.warnings.length ? `, ${verdict.warnings.length} warning(s)` : ""));

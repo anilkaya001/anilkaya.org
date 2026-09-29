@@ -1,6 +1,6 @@
 import http from "node:http";
 import { readFileSync } from "node:fs";
-import { easternInstant } from "../shared/flows-freshness.js";
+import { easternInstant, prevTradingDay } from "../shared/flows-freshness.js";
 import { fakeLiveVendor, fakeScreenerRows } from "../scripts/flows-legs/live-fake.mjs";
 import { LIVE_OIDC } from "../shared/flows-oidc.js";
 import { FOCUS_METALS, MAG7 } from "../shared/flows-focus.js";
@@ -214,7 +214,7 @@ export function productionScreenerBody(tickers, { session, readAt }) {
   }) };
 }
 
-export function focusDb({ groups = null, clock = null, held = null } = {}) {
+export function focusDb({ groups = null, clock = null, held = null, nightly = null } = {}) {
   const statements = [];
   const st = (sql) => {
     const s = { sql, args: [], bind(...a) { s.args = a; return s; }, first: async () => null,
@@ -223,7 +223,10 @@ export function focusDb({ groups = null, clock = null, held = null } = {}) {
   };
   const answer = (s) => {
     if (/FROM flows_clock/.test(s.sql)) return { results: clock ? [clock] : [] };
-    if (/FROM flows_payload WHERE id = 'focus'/.test(s.sql)) return { results: groups ? [{ groups: JSON.stringify(groups) }] : [] };
+    if (/FROM flows_payload WHERE id = 'focus'/.test(s.sql)) {
+      return { results: groups ? [{ groups: JSON.stringify(groups), session: nightly ? nightly.session : null,
+        closes: nightly ? JSON.stringify(nightly.closes) : null }] : [] };
+    }
     if (/FROM flows_live WHERE id = 'live:focus'/.test(s.sql)) return { results: held ? [held] : [] };
     return { results: [] };
   };
@@ -236,11 +239,15 @@ export async function focusBudget({ windows = 16, perWindow = 5, coldOnly = fals
   const at = easternInstant(session, 15 * 60 + 58);
   const groups = focusGroupsSample();
   const names = W.focusNames(JSON.stringify(groups)).names;
-  const body = JSON.stringify(productionScreenerBody(names, { session, readAt: at - 20000 }));
+  const screener = productionScreenerBody(names, { session, readAt: at - 20000 });
+  const closes = Object.fromEntries(screener.data.map((r) => [r.ticker, Number(r.prev_close)]));
+  screener.data.forEach((r, i) => { if (i % 2) r.prev_close = null; });
+  const body = JSON.stringify(screener);
   const { clock, cpu } = cpuClock();
   const fetchVendor = async () => JSON.parse(body);
   const held = { session, read_at: at - 300000, priced: JSON.stringify(names) };
-  const env = { DB: focusDb({ groups, held }), UW_API_KEY: "k" };
+  const nightly = { session: prevTradingDay(session, null), closes };
+  const env = { DB: focusDb({ groups, held, nightly }), UW_API_KEY: "k" };
   const tick = () => W.focusTick(env, at, { fetchVendor, log: { error() {} } });
   const w0 = process.hrtime.bigint();
   const c0 = cpu();

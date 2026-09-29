@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { FLOWS_COOKIE, FLOWS_USERNAMES, sessionEpoch, signFlowsSession } from "../shared/flows-auth.js";
 import * as W from "../shared/flows-live-worker.js";
 import { MARKET_INDICES } from "../shared/markets.js";
+import { easternInstant } from "../shared/flows-freshness.js";
 
 let checks = 0;
 const TIMER_SLACK_MS = 50;
@@ -307,8 +308,10 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   const realFetch = globalThis.fetch;
   let calls = 0;
   const dead = MARKET_INDICES.length;
+  const bar = (day) => Date.UTC(2026, 8, day, 13, 30) / 1000;
   const chart = (symbol) => ({ chart: { result: [{
-    meta: { currency: "USD", symbol, regularMarketPrice: 105, chartPreviousClose: 100, regularMarketTime: 1790380000 },
+    meta: { currency: "USD", symbol, gmtoffset: -14400, regularMarketPrice: 105, chartPreviousClose: 90, regularMarketTime: Date.UTC(2026, 8, 25, 20, 0) / 1000 },
+    timestamp: [21, 22, 23, 24, 25].map(bar),
     indicators: { quote: [{ close: [100, 101, 102, 103, 105] }] },
   }], error: null } });
   globalThis.fetch = (input) => {
@@ -625,6 +628,33 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   deep(r.body.keys["card:PEND"], { present: false }, "and a stored row that says pending is absent, as the single-key read reports it");
   ok(r.body.keys.roster.present === true && r.body.keys.roster.sessionDate === "2020-01-02", "a view key is answered by the same statement");
   eq(Object.keys(r.body.keys).length, asked.length, "every key asked is answered");
+}
+
+{
+  const f = fakeD1();
+  const groups = [{ id: "x", label: "X", kind: "equity", tickers: ["AAA", "BBB", "CCC", "DDD"] }];
+  f.put("focus", { sessionDate: "2026-09-22", groups, closes: { AAA: [98, 100], BBB: [1, 2, 200], CCC: [5, null], DDD: [1] } });
+  const at = easternInstant("2026-09-23", 10 * 60 + 8);
+  const row = (ticker, close, prev) => ({ ticker, date: "2026-09-23", close, prev_close: prev, quote_time: at - 40000 });
+  const fetchVendor = async () => ({ data: [row("AAA", "110", null), row("BBB", "220", "199.5"), row("CCC", "50", null), row("DDD", "3", null)] });
+  const n = f.trips.length;
+  const done = await W.focusTick({ DB: f.D1, UW_API_KEY: "k" }, at, { fetchVendor, log: { error() {} } });
+  ok(done.written === true, "the focus tick writes against a real SQLite payload table");
+  const trips = f.since(n);
+  eq(trips.length, 2, "THE DAY-CHANGE BASE COSTS NO ROUND TRIP: the tick is one batch (the clock, the nightly focus row with its groups, session and last closes, and the held live row) and one write");
+  ok(trips[0].kind === "batch" && trips[0].sqls.length === 3 && trips[0].sqls[1] === W.FOCUS_NIGHTLY_SQL && trips[1].kind === "run" &&
+     /INSERT INTO flows_live/.test(trips[1].sqls[0]), "in the order the tick has always made them");
+  const nightly = f.db.prepare(W.FOCUS_NIGHTLY_SQL).get();
+  deep([nightly.session, JSON.parse(nightly.closes)], ["2026-09-22", { AAA: 100, BBB: 200, CCC: null, DDD: 1 }],
+    "the statement returns the payload's session and the LAST element of each name's closes, as SQLite computes them (a null last close is null, a single close is itself)");
+  ok(Buffer.byteLength(nightly.closes) < 400 * 4 && !/\[/.test(nightly.closes), "and only those, never the arrays");
+  const live = JSON.parse(f.db.prepare("SELECT payload FROM flows_live WHERE id = 'live:focus'").get().payload);
+  const ix = (name) => live.fields.indexOf(name);
+  deep(["AAA", "BBB", "CCC", "DDD"].map((t) => [live.rows[t][ix("prev")], live.rows[t][ix("chg")]]),
+    [[100, 0.1], [199.5, 0.102757], [null, null], [1, 2]],
+    "and the written live:focus has AAA and DDD filled from the closes, BBB on the vendor's own prev_close, and CCC (no last close) with a dash");
+  deep([live.prevFill.n, live.prevFill.tickers, live.prevFill.date], [2, ["AAA", "DDD"], "2026-09-22"], "with the fill labelled");
+  eq(live.fresh.vendorAt, new Date(at - 40000).toISOString().slice(0, 19) + "Z", "and the vendor's newest quote time as the key's vendorAt");
 }
 
 console.log(`flows-reads-contract: ${checks} checks passed`);

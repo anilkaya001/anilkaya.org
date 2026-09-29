@@ -130,7 +130,7 @@ export function fakeSectorEtfs({ session } = {}) {
   }) };
 }
 
-export function fakeScreenerRows(tickers, { session, dated = false } = {}) {
+export function fakeScreenerRows(tickers, { session, dated = false, now = NaN, nullPrev = false } = {}) {
   return { data: tickers.map((ticker) => {
     const rand = mulberry(seedOf("scr-" + ticker + session));
     const prev = 20 + rand() * 400;
@@ -161,6 +161,10 @@ export function fakeScreenerRows(tickers, { session, dated = false } = {}) {
       etf_share_flow: null, is_index: INDEX_NAMES.includes(ticker), has_options: true,
       cum_dir_delta: (rand() - 0.5) * 1e6, cum_dir_gamma: (rand() - 0.5) * 1e4, cum_dir_vega: (rand() - 0.5) * 1e6,
     };
+    const lagDraw = rand();
+    const nullDraw = rand();
+    if (Number.isFinite(now)) row.quote_time = Math.round(now) - Math.floor(lagDraw * 240) * 1000;
+    if (nullPrev && nullDraw < 0.5) row.prev_close = null;
     if (!dated) row.intraday_change = money(close - prev);
     return row;
   }) };
@@ -294,18 +298,24 @@ export function fakeNews({ session, now, tickers = [] } = {}) {
   return { data: rows };
 }
 
-export function fakeBoards({ n = 40 } = {}) {
-  const make = (prefix, sign) => Array.from({ length: n }, (_, i) => ({
-    t: `${prefix}${String(i + 1).padStart(3, "0")}`, s: sign * (95 - i),
-  }));
+export function fakeBoards({ n = 40, sessionDate = null, session = null } = {}) {
+  const priced = (t) => (sessionDate && session ? { px: Number(fakeScreenerRows([t], { session }).data[0].prev_close) } : {});
+  const make = (prefix, sign) => Array.from({ length: n }, (_, i) => {
+    const t = `${prefix}${String(i + 1).padStart(3, "0")}`;
+    return { t, s: sign * (95 - i), ...priced(t) };
+  });
+  const dated = sessionDate ? { sessionDate } : {};
   return {
-    long: { rows: make("SYL", 1) },
-    short: { rows: make("SYS", -1) },
-    watch: { rows: Array.from({ length: 12 }, (_, i) => ({ t: `SYW${String(i + 1).padStart(3, "0")}`, s: 10 - i })) },
+    long: { ...dated, rows: make("SYL", 1) },
+    short: { ...dated, rows: make("SYS", -1) },
+    watch: { ...dated, rows: Array.from({ length: 12 }, (_, i) => {
+      const t = `SYW${String(i + 1).padStart(3, "0")}`;
+      return { t, s: 10 - i, ...priced(t) };
+    }) },
   };
 }
 
-export function fakeLiveVendor({ now, session }) {
+export function fakeLiveVendor({ now, session, nullPrev = false }) {
   const calls = [];
   const clock = typeof now === "function" ? now : () => now;
   async function fakeUw(path, params = {}, { envelope = false } = {}) {
@@ -320,7 +330,7 @@ export function fakeLiveVendor({ now, session }) {
     else if (path === "/api/market/sector-etfs") body = fakeSectorEtfs({ session });
     else if (path === "/api/screener/stocks") {
       const list = String(params.ticker || "").split(",").filter(Boolean);
-      body = fakeScreenerRows(list.filter((t) => !/^SYW012$/.test(t)), { session, dated: !!params.date });
+      body = fakeScreenerRows(list.filter((t) => !/^SYW012$/.test(t)), { session, dated: !!params.date, now: at, nullPrev });
     } else if (path === "/api/option-trades/flow-alerts") {
       const tickers = params.ticker_symbol ? String(params.ticker_symbol).split(",") : [];
       const count = params.older_than ? 40 : Math.min(Number(params.limit) || 200, tickers.length ? 30 : 200);
