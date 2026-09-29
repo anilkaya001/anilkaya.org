@@ -12,6 +12,10 @@ on:
         type: string
         required: false
         default: manual
+      drill:
+        description: "Open one witness issue and close it at once, to prove the alert channel, and do nothing else"
+        type: boolean
+        default: false
   schedule:
     - cron: "17 5 * * 1-5"
     - cron: "47 5 * * 1-5"
@@ -50,9 +54,10 @@ permissions:
   contents: read
   id-token: write
   actions: write
+  issues: write
 
 concurrency:
-  group: flows-live
+  group: ${{ inputs.drill && 'flows-live-drill' || 'flows-live' }}
   cancel-in-progress: false
 
 jobs:
@@ -110,5 +115,7 @@ jobs:
           FLOWS_INGEST_URL: ${{ secrets.FLOWS_INGEST_URL }}
           FLOWS_LIVE_ORIGIN: ${{ github.event_name == 'schedule' && 'schedule' || inputs.origin || 'manual' }}
           FLOWS_LIVE_LOOP: "1"
+          FLOWS_LIVE_KEEP: "1"
+          FLOWS_LIVE_DRILL: ${{ github.event_name == 'workflow_dispatch' && inputs.drill && '1' || '' }}
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/flows-pipeline.mjs --live

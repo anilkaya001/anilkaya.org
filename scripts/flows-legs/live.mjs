@@ -35,12 +35,19 @@ export function sessionClock(body) {
   return { day: c.day, trading: clockFlag(c.trading), earlyClose: clockFlag(c.earlyClose) };
 }
 
-export async function readLiveClock(readOnce) {
+export async function readLiveClock(readOnce, { seen = null } = {}) {
+  let body = null;
   try {
     const read = await readOnce("clock");
-    return sessionClock(read && read.payload);
+    body = read && read.payload ? read.payload : null;
+    return sessionClock(body);
   } catch {
+    body = null;
     return null;
+  } finally {
+    if (seen) {
+      try { seen(body); } catch { }
+    }
   }
 }
 
@@ -292,13 +299,19 @@ export function liveRunVerdict(loop) {
   const passes = loop && Array.isArray(loop.passes) ? loop.passes : [];
   const ran = passes.filter((p) => p && !p.skipped);
   const dead = (p) => !!p.threw || !(p.answered > 0) || !(p.landed > 0);
+  const why = [];
   if (ran.length && ran.every(dead)) {
-    return { failed: true, why: `every one of ${ran.length} pass(es) answered no vendor call or landed no key` };
+    why.push(`every one of ${ran.length} pass(es) answered no vendor call or landed no key`);
   }
   if (loop && loop.exit === "budget" && !(loop.chained && loop.chained.sent)) {
-    return { failed: true, why: "the session was still open when the budget ran out and the chain dispatch was refused" };
+    why.push("the time budget ran out and the chain dispatch was refused, so nothing keeps the loop going until a " +
+      "GitHub starter arrives");
   }
-  return { failed: false, why: null };
+  const breached = loop && loop.watch && Array.isArray(loop.watch.breached) ? loop.watch.breached : [];
+  if (breached.length) {
+    why.push(`the witness confirmed ${breached.length === 1 ? "a lapse" : "lapses"} in ${breached.join(", ")}`);
+  }
+  return why.length ? { failed: true, why: why.join("; ") } : { failed: false, why: null };
 }
 
 export const LIVE_LOOP = Object.freeze({
@@ -306,6 +319,9 @@ export const LIVE_LOOP = Object.freeze({
   budgetMs: 340 * 60 * 1000,
   preOpenWaitMs: 240 * 60 * 1000,
   openLagMs: 60 * 1000,
+  idleMs: 15 * 60 * 1000,
+  chainRetryMs: Object.freeze([15 * 1000, 45 * 1000]),
+  githubTimeoutMs: 15 * 1000,
   workflow: "flows-live.yml",
   ref: "main",
 });
@@ -314,22 +330,35 @@ export function nextSlot(at, slotMs = LIVE_LOOP.slotMs) {
   return (Math.floor(at / slotMs) + 1) * slotMs;
 }
 
-export async function chainDispatch({ env = {}, fetchImpl = fetch, at = Date.now(), workflow = LIVE_LOOP.workflow,
-  ref = LIVE_LOOP.ref } = {}) {
+export function githubTarget(env = {}) {
   const token = typeof env.GITHUB_TOKEN === "string" ? env.GITHUB_TOKEN.trim() : "";
-  if (!token) return { sent: false, why: "no-token" };
+  if (!token) return { ok: false, why: "no-token" };
   const repo = env.GITHUB_REPOSITORY || "";
-  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) return { sent: false, why: "bad-repo" };
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) return { ok: false, why: "bad-repo" };
   const api = String(env.GITHUB_API_URL || "https://api.github.com").replace(/\/+$/, "");
-  if (!/^https:\/\/api\.github\.com$|^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(api)) return { sent: false, why: "bad-base" };
+  if (!/^https:\/\/api\.github\.com$|^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(api)) return { ok: false, why: "bad-base" };
+  return { ok: true, token, repo, api };
+}
+
+export function githubHeaders(token) {
+  return {
+    Authorization: "Bearer " + token, Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "anilkaya-flows-live", "Content-Type": "application/json",
+  };
+}
+
+export const githubSignal = (ms = LIVE_LOOP.githubTimeoutMs) => AbortSignal.timeout(ms);
+
+export async function chainDispatch({ env = {}, fetchImpl = fetch, at = Date.now(), workflow = LIVE_LOOP.workflow,
+  ref = LIVE_LOOP.ref, inputs = null } = {}) {
+  const target = githubTarget(env);
+  if (!target.ok) return { sent: false, why: target.why };
   try {
-    const res = await fetchImpl(`${api}/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/dispatches`, {
+    const res = await fetchImpl(`${target.api}/repos/${target.repo}/actions/workflows/${encodeURIComponent(workflow)}/dispatches`, {
       method: "POST",
-      headers: {
-        Authorization: "Bearer " + token, Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "anilkaya-flows-live", "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ ref, inputs: { tick: new Date(at).toISOString(), origin: "chain" } }),
+      headers: githubHeaders(target.token),
+      body: JSON.stringify({ ref, inputs: inputs || { tick: new Date(at).toISOString(), origin: "chain" } }),
+      signal: githubSignal(),
     });
     return { sent: res.status === 204, status: res.status, why: res.status === 204 ? "sent" : "refused" };
   } catch (error) {
@@ -337,11 +366,82 @@ export async function chainDispatch({ env = {}, fetchImpl = fetch, at = Date.now
   }
 }
 
+export async function chainWithRetry(send, { sleep = null, delays = LIVE_LOOP.chainRetryMs } = {}) {
+  const wait = sleep || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  let last = await send();
+  const tries = [last];
+  for (const ms of delays) {
+    if (last.sent || last.why === "no-token" || last.why === "bad-repo" || last.why === "bad-base") break;
+    await wait(ms);
+    last = await send();
+    tries.push(last);
+  }
+  return { ...last, attempts: tries.length };
+}
+
 const realSleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+
+const nextOpenAt = (at, clock) => {
+  const p = phaseAt(at, clock);
+  const open = p && p.phase !== "rth" ? p.nextOpen : NaN;
+  return Number.isFinite(open) ? open + LIVE_LOOP.openLagMs : NaN;
+};
+
+async function keepLoop({ startedAt, refresh, current, pass, chain, now, sleep, window, slotMs, budgetMs, idleMs, watch,
+  log, warn }) {
+  const passes = [];
+  let waits = 0;
+  let ticks = 0;
+  for (;;) {
+    await refresh();
+    const clock = current();
+    const here = window(now(), clock);
+    if (here.run) {
+      const index = passes.length;
+      try {
+        passes.push(await pass({ first: index === 0, index, clock }));
+      } catch (error) {
+        const threw = error instanceof Error ? error.message : String(error);
+        warn(`live loop: pass ${index + 1} threw — ${threw.slice(0, 300)}; the loop carries on to the next slot`);
+        passes.push({ errored: true, threw: threw.slice(0, 300) });
+      }
+    } else if (here.wait) {
+      waits++;
+      log(`live loop: Tier 1 has closed ${here.phase.day} before ` +
+        `${Math.floor(VERDICT.provisionalUntilMin / 60)}:00 ET, when a late vendor can still reopen it — no pass, ` +
+        "waiting for the next slot");
+    }
+    let beat = {};
+    try {
+      beat = (await watch.tick({ at: now(), clock, first: ticks === 0, inSession: !!here.run, passes })) || {};
+    } catch (error) {
+      warn(`live loop: the watch threw — ${(error instanceof Error ? error.message : String(error)).slice(0, 300)}; ` +
+        "the loop carries on");
+    }
+    ticks++;
+    const t = now();
+    const busy = !!(here.run || here.wait || beat.busy);
+    let wake = nextSlot(t, busy ? slotMs : idleMs);
+    const open = nextOpenAt(t, clock);
+    if (Number.isFinite(open) && open > t && wake >= open - LIVE_LOOP.openLagMs) wake = open;
+    if (Number.isFinite(beat.wakeAt) && beat.wakeAt > t) wake = Math.min(wake, beat.wakeAt);
+    if (wake - startedAt > budgetMs) {
+      const chained = await chain({ at: now() });
+      log(`live loop: time budget spent after ${passes.length} pass(es) and ${ticks} watch tick(s) — ` +
+        `re-dispatched: ${chained.why}${chained.status ? " (" + chained.status + ")" : ""}`);
+      if (!chained.sent && typeof watch.chainFailed === "function") {
+        try { await watch.chainFailed({ at: now(), chained }); } catch { }
+      }
+      return { exit: "budget", why: "budget", passes, waits, ticks, chained, clock, preOpenMs: 0, keep: true,
+        watch: typeof watch.summary === "function" ? watch.summary() : null };
+    }
+    await sleep(wake - now());
+  }
+}
 
 export async function runLiveLoop({ pass, chain, now = () => Date.now(), sleep = realSleep, window = liveWindow,
   readClock = async () => null, slotMs = LIVE_LOOP.slotMs, budgetMs = LIVE_LOOP.budgetMs, log = console.log,
-  warn = console.warn } = {}) {
+  warn = console.warn, watch = null, idleMs = LIVE_LOOP.idleMs } = {}) {
   const startedAt = now();
   const passes = [];
   let clock = null;
@@ -351,6 +451,10 @@ export async function runLiveLoop({ pass, chain, now = () => Date.now(), sleep =
     if (read) clock = read;
     return clock;
   };
+  if (watch) {
+    return keepLoop({ startedAt, refresh, current: () => clock, pass, chain, now, sleep, window, slotMs, budgetMs, idleMs,
+      watch, log, warn });
+  }
   await refresh();
   let opening = window(startedAt, clock);
   let preOpenMs = 0;

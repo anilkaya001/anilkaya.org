@@ -747,9 +747,10 @@ const cronMinutes = (cron) => {
     "and neither the live credential nor its source ever falls back to the nightly token");
   const wf = read(".github/workflows/flows-live.yml");
   ok(!/FLOWS_INGEST_TOKEN|FLOWS_LIVE_TOKEN|GITHUB_DISPATCH_TOKEN/.test(wf) &&
-     /permissions:\s*\n\s*contents: read\s*\n\s*id-token: write\s*\n\s*actions: write\s*\n\s*\n/.test(wf),
+     /permissions:\s*\n\s*contents: read\s*\n\s*id-token: write\s*\n\s*actions: write\s*\n\s*issues: write\s*\n\s*\n/.test(wf),
     "and the live workflow holds no shared secret at all: it proves itself with a GitHub OIDC token minted per run, " +
-    "and its only other grant is actions: write, which lets the run's own GITHUB_TOKEN re-dispatch the loop");
+    "and its only other grants are actions: write, which lets the run's own GITHUB_TOKEN re-dispatch the loop and " +
+    "dispatch the nightly, and issues: write, which lets the witness open and close its issues");
   ok(/GITHUB_TOKEN: \$\{\{ github\.token \}\}/.test(wf) && /FLOWS_LIVE_LOOP: "1"/.test(wf),
     "the read step runs the session loop and hands it the run's own token for the chain dispatch — no new secret");
   ok(/LIVE_READY: \$\{\{ secrets\.UW_API_KEY != '' \}\}/.test(wf), "so the vendor key is the only secret it waits for");
@@ -762,7 +763,7 @@ const cronMinutes = (cron) => {
     "the live credential, so no step may run code a moved tag could swap");
   const timeout = Number((/timeout-minutes: (\d+)/.exec(wf) || [])[1]);
   const { LIVE_LOOP } = await import("../scripts/flows-legs/live.mjs");
-  ok(/concurrency:\s*\n\s*group: flows-live\s*\n\s*cancel-in-progress: false/.test(wf) && timeout < 360 &&
+  ok(/concurrency:\s*\n\s*group: \$\{\{ inputs\.drill && 'flows-live-drill' \|\| 'flows-live' \}\}\s*\n\s*cancel-in-progress: false/.test(wf) && timeout < 360 &&
      LIVE_LOOP.budgetMs + 10 * 60000 <= timeout * 60000,
     `one live run at a time (so never more than one loop), ${timeout} minutes at most — under GitHub's six-hour job ` +
     `cap, with the loop's ${LIVE_LOOP.budgetMs / 60000}-minute budget and a pass's overrun inside it`);
@@ -2207,7 +2208,8 @@ const cronMinutes = (cron) => {
   ok(/pass: async \(\{ first, clock \}\) => \{\s*resetPublishRetryBudget\(\);/.test(pipeline),
     "EACH PASS HAS ITS OWN RETRY BUDGET: the loop resets the 90 s publish/read retry budget at the start of every " +
       "pass, as each separate run had, so a blip at 10:00 cannot leave the 15:00 pass with no retries");
-  ok(/readClock = \(\) => readLiveClock\(readStoredOnce\)/.test(pipeline) && /runLiveLoop\(\{\s*readClock,/.test(pipeline) &&
+  ok(/readClock = \(\) => readLiveClock\(readStoredOnce, \{ seen: \(body\) => \{ clockBody = body; \} \}\)/.test(pipeline) &&
+     /runLiveLoop\(\{\s*readClock,/.test(pipeline) &&
      /const clock = force \? null : await readClock\(\);/.test(pipeline),
   "and --live gates both the loop and a single pass on the Worker's clock");
   ok(/runLive\(\{ uw, publish, readStored, shapeNews, origin, skipRecent: first, clock \}\)/.test(pipeline) &&
@@ -3105,8 +3107,8 @@ const cronMinutes = (cron) => {
   ok(gate.applies && gate.failures.length === 0 && gate.warnings.length === 0 && lines[0] === "health gate: checked; 0 failure(s)",
     "THE NIGHTLY STAYS GREEN WITHOUT THE TOKEN: the gate, reading that clock, finds no failure and no warning");
   deep(lines.filter((l) => /GITHUB_DISPATCH_TOKEN|dispatch|refused|renew/i.test(l)),
-    ["  dispatch: the Worker has no GITHUB_DISPATCH_TOKEN, so GitHub's own schedules start Tier 2 and the nightly; a " +
-      "supported mode, not a failure (DEPLOY.md 10.0 item 1)"],
+    ["  dispatch: the Worker has no GITHUB_DISPATCH_TOKEN, so the Tier 2 loop chains itself and dispatches the nightly " +
+      "with its own job token, GitHub's schedules being the backup; a supported mode, not a failure (DEPLOY.md 10.0 item 1 and 10.5k)"],
   "and the one line about dispatch is a note that says what the missing token means, never a refusal or a renewal");
   ok(!lines.some((l) => l.startsWith("WARN ")), "nothing is printed as a warning or a failure");
   const beforeAny = await runHealthGate({ sessionDate: S, now: () => at(20, 5), log: () => {}, warn: () => {},
