@@ -14,16 +14,18 @@ const MIME = { ".js": "text/javascript", ".css": "text/css", ".woff2": "font/wof
 const TUE_1330 = Date.parse("2026-09-29T13:30:00-04:00");
 const RTH = { phase: "rth", session: "2026-09-29", trading: true, lastClosed: "2026-09-28", endsAt: "2026-09-29T20:00:00.000Z" };
 const iso = (ms) => new Date(ms).toISOString();
+let NOW = TUE_1330;
 
 const fresh = (klass, state, reason, readAt, staleAt, session = "2026-09-29", cadence = 900) => ({
   "X-Fresh-State": state, "X-Fresh-Reason": reason, "X-Fresh-Class": klass, "X-Fresh-Read-At": iso(readAt), "X-Fresh-Source": "actions",
   "X-Fresh-Cadence": String(cadence), "X-Fresh-Session": session, "X-Fresh-Live-Until": iso(readAt + 1200000), "X-Fresh-Stale-At": iso(staleAt),
-  "X-Fresh-Phase": "rth", "X-Fresh-Phase-Ends": RTH.endsAt, "X-Server-Now": String(readAt),
+  "X-Fresh-Phase": "rth", "X-Fresh-Phase-Ends": RTH.endsAt,
 });
 
 async function mount(page, { html, url, answer, at = TUE_1330 }) {
   const asked = [];
   page._asked = asked;
+  NOW = at;
   await page.route("**/*", async (route) => {
     const u = new URL(route.request().url());
     if (u.pathname.startsWith("/assets/")) {
@@ -36,7 +38,7 @@ async function mount(page, { html, url, answer, at = TUE_1330 }) {
       asked.push(key);
       const got = answer(key, u);
       const a = got || { body: { status: "pending" } };
-      return route.fulfill({ status: a.status || 200, contentType: "application/json", headers: a.headers || {}, body: JSON.stringify(a.body) });
+      return route.fulfill({ status: a.status || 200, contentType: "application/json", headers: { "X-Server-Now": String(NOW), ...(a.headers || {}) }, body: JSON.stringify(a.body) });
     }
     if (u.pathname.startsWith("/flows/")) return route.fulfill({ contentType: "text/html; charset=utf-8", body: html });
     return route.fulfill({ status: 404, body: "" });
@@ -56,7 +58,7 @@ const settle = async (page) => {
   for (let i = 0; i < 200 && page._inflight > 0; i++) await page.waitForTimeout(50);
   await page.waitForTimeout(150);
 };
-const tick = async (page, ms) => { await page.clock.runFor(ms); await settle(page); };
+const tick = async (page, ms) => { NOW += ms; await page.clock.runFor(ms); await settle(page); };
 const pill = (page) => page.evaluate(() => { const b = document.getElementById("fxFresh"); return b ? { state: b.dataset.state, label: b.dataset.label } : null; });
 
 const browser = await chromium.launch();
@@ -143,6 +145,70 @@ try {
     await tick(page, 60000);
     eq(polls() - before, 2, "THE NEXT POLL LANDS JUST AFTER THE STALE LINE (13:49), not a whole cadence later at 14:00, so a dot never outlives the server's own verdict by minutes");
     eq((await dots()).join(), "false,false", "and the dots are gone though that answer's own header still says fresh: its stale line passed on the clock");
+    eq(errors.length, 0, `nothing threw (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  {
+    const TICKERS = ["NVDA", "AMD"];
+    const board = {
+      side: "long", generatedAt: "2026-09-28T21:30:00.000Z", sessionDate: "2026-09-28", status: "ok", universe: 264, enriched: 60,
+      rows: TICKERS.map((t, i) => ({ t, r: i + 1, s: 90 - i * 7, cnv: 80, px: 100 + i, chg: 0.01, purity: 0.02, sector: "Technology",
+        gRegime: "long", gFlipDist: -0.1, netPrem: 1e7, fam: { F: 10, P: 20, D: 30, V: 40, O: 50 }, edte: 20 })),
+    };
+    const serverAt = TUE_1330;
+    const readAt = serverAt - 60000;
+    const ahead = 50 * 60000;
+    const stripsBody = { v: 1, key: "live:strips", status: "ok", session: "2026-09-29", fields: ["px", "chg"], rows: { NVDA: [200, 0.05], AMD: [201, 0.06] },
+      fresh: { readAt: iso(readAt), session: "2026-09-29", cadenceS: 900, source: "actions", writer: "flows-live" } };
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, {
+      html: PAGES.sidePage({ username: "test", side: "long" }), url: "/flows/long/", at: serverAt + ahead,
+      answer: (key) => (key.startsWith("board?side=long") ? { body: board }
+        : key.startsWith("lk?k=strips") ? { headers: { ...fresh("breadth", "live", "cadence", readAt, readAt + 2700000), "X-Server-Now": String(NOW - ahead) }, body: stripsBody } : null),
+    });
+    const dots = () => page.evaluate(() => [...document.querySelectorAll("#flowsBody .bd-px")].map((n) => n.classList.contains("is-live")));
+    const polls = () => page._asked.filter((k) => k.startsWith("lk?k=strips")).length;
+    eq((await dots()).join(), "true,true",
+      "A BROWSER CLOCK 50 MINUTES AHEAD OF THE SERVER: a read the server calls live for another 44 minutes keeps its dots (the board compared its own clock with the server's absolute stale line and dropped them at once)");
+    const before = polls();
+    await tick(page, 3 * 60000);
+    eq(polls() - before, 0, "and is not asked again every minute as if it had lapsed");
+    await tick(page, 12 * 60000 + 1000);
+    eq(polls() - before, 1, "but at the 15 minute cadence, the server's clock deciding how much of the window is left");
+    eq((await dots()).join(), "true,true", "with the dots still on");
+    eq(errors.length, 0, `nothing threw (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  {
+    const stamp = () => ({ readAt: iso(NOW - 60000), session: "2026-09-29", cadenceS: 900, liveUntil: iso(NOW + 1140000), staleAt: iso(NOW + 2640000), source: "actions", updatedAt: 1 });
+    const nightly = { state: "fresh", reason: "session", klass: "nightly", readAt: iso(TUE_1330 - 7 * 3600000), session: "2026-09-28", cadenceS: 0,
+      staleAt: iso(TUE_1330 + 20 * 3600000), source: "nightly", updatedAt: 1 };
+    const beat = () => ({ body: { serverNow: NOW, expected: "2026-09-28", phase: RTH, keys: {
+      "live:market": { state: "live", reason: "cadence", klass: "market", ...stamp() }, "live:breadth": { state: "live", reason: "cadence", klass: "breadth", ...stamp() },
+      "live:strips": { state: "live", reason: "cadence", klass: "breadth", ...stamp() }, "live:focus": { state: "live", reason: "cadence", klass: "market", ...stamp() },
+      "live:news": { state: "live", reason: "cadence", klass: "breadth", ...stamp() }, pulse: nightly, focus: nightly } } });
+    const alertsAt = TUE_1330 - 60000;
+    const alerts = { headers: { ...fresh("breadth", "live", "cadence", alertsAt, alertsAt + 2700000), "X-Live-Overlay": "live:alerts" },
+      body: { status: "ok", sessionDate: "2026-09-29", generatedAt: iso(alertsAt), rows: [] } };
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, {
+      html: PAGES.overviewPage({ username: "test" }), url: "/flows/",
+      answer: (key) => (key.startsWith("now") ? beat() : key.startsWith("flowalerts") ? alerts : null),
+    });
+    ok(page._asked.some((k) => k.startsWith("flowalerts")), "the home page reads the flow alerts, served from the live overlay");
+    ok(["live", "fresh"].includes((await pill(page)).state), `and opens on a current pill (${JSON.stringify(await pill(page))})`);
+    for (const min of [10, 20, 30, 40, 50, 60]) {
+      await tick(page, 10 * 60000);
+      const now = await pill(page);
+      ok(now.state !== "stale", `AN HOUR INTO THE SESSION on a healthy live layer the pill is not stale at +${min} minutes, though the alerts were read once at load and their 45 minute window has passed (${JSON.stringify(now)})`);
+    }
+    ok(page._asked.filter((k) => k.startsWith("flowalerts")).length === 1, "with the alerts region fetched once, as the page has always done");
     eq(errors.length, 0, `nothing threw (${errors.join("; ")})`);
     await page.close();
   }

@@ -2028,6 +2028,18 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   breadth-class `X-Fresh-*` headers. `/api/flows/news` serves `live:news` in
   place of the nightly row while it is newer than that row, under its own
   freshness headers, as pulse and the flow alerts are served.
+- **What the pill judges.** It is the worst case over the sources that carry a
+  server verdict: every key a heartbeat reads, and on the home page every
+  region the loader reads except an overlay response (`X-Live-Overlay`), whose
+  age belongs to its heartbeat key. `live:alerts` is written only when a pass
+  finds a new alert, so on a quiet afternoon its own stale line passes with the
+  live layer healthy; registering the flow-alerts response read once at load
+  turned the home page Stale about 45 minutes into every session. Sources that
+  register only a session date are judged by the newest date among them, so
+  they can never turn the pill stale on their own; the popover names the older
+  ones ("2 of 5 payloads are older: Regime Sep 22, Events Sep 15"). The board's
+  live dots and their next poll are timed against the server's clock
+  (`X-Server-Now`), not the browser's.
 
 Out-of-band steps before the first deploy of this layer:
 

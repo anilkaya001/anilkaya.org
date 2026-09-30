@@ -1324,7 +1324,7 @@
         return r.text().then(() => { throw e; }, () => { throw e; });
       }
       const updatedAt = Number(r.headers.get("X-Payload-Updated")) || null;
-      const verdict = [r.headers.get("X-Fresh-State"), Date.parse(r.headers.get("X-Fresh-Stale-At"))];
+      const now = Date.now(), verdict = [r.headers.get("X-Fresh-State"), Date.parse(r.headers.get("X-Fresh-Stale-At")), (Number(r.headers.get("X-Server-Now")) || now) - now];
       return r.json().then((b) => { if (b && typeof b === "object") { b.__updatedAt = updatedAt; b.__verdict = verdict; } return b; });
     });
 
@@ -1403,8 +1403,8 @@
     if (!session || !p.sessionDate || session <= p.sessionDate) return;
     const ix = { px: live.fields.indexOf("px"), chg: live.fields.indexOf("chg") };
     if (ix.px < 0) return;
-    const [state, staleAt] = live.__verdict || [];
-    const lapsed = () => state === "stale" || Date.now() >= staleAt;
+    const [state, staleAt, skew] = live.__verdict || [];
+    const lapsed = () => state === "stale" || Date.now() + skew >= staleAt;
     UI.freshness({ ff: { stateAt: () => (lapsed() ? "stale" : "live") }, source: "strips" });
     if (lapsed()) {
       for (const [row, was] of held) Object.assign(row, was);
@@ -1414,7 +1414,8 @@
       return;
     }
     let wait = Math.max(60, num(live.fresh && live.fresh.cadenceS) || 300) * 1000;
-    if (staleAt - Date.now() < wait) wait = staleAt - Date.now() + 1e3;
+    const left = staleAt - Date.now() - skew;
+    if (left < wait) wait = left + 1e3;
     let hit = 0;
     for (const row of st.rows) {
       const v = live.rows[String(row.t || "").toUpperCase()];

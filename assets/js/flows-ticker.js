@@ -1473,7 +1473,7 @@
     if (!L) return [];
     const P = L.panel;
     const hasP = L.p.some((v) => num(v) !== null && v !== 0);
-    const out = [L.src === "tape" && STATE.tapeLive ? "Drawn from this session's live tape; the path signature below is the card's, from the session it describes." : null,
+    const out = [L.src === "tape" ? "Drawn from this session's " + (STATE.tapeLive ? "live tape" : "tape, read " + tapeSub("", tapePrem())) + "; the path signature below is the card's, from the session it describes." : null,
       "Each leg is scaled to its own extreme, so both reach full height: net delta in " + (L.dUnit || (L.src === "tape" ? "a unit the live tape does not state" : "the unit the card publishes")) + (hasP ? ", net premium in " + (L.pUnit || "dollars") + "." : "."),
       hasP ? null : "The session carried no net premium in either direction, so only the delta leg is drawn."];
     if (P && num(P.persistence) === null && !("persistence" in P)) out.push("This card was built before the path signature was published, so persistence, concentration and the mean minute are not stated, and no mean-minute rule is drawn.");
@@ -2146,7 +2146,7 @@
           ["Tenor", fe ? "conviction " + fx(fe.convictionDte, 1) + " days, bucket " + fe.convictionBucket + ", OTM share " + F.pct(fe.otmShare, 0) : null],
           ["Centroid", fs ? F.px(fs.centroid) + " (" + F.signed(fs.centroidSigma, 2) + " SD from spot)" : null], ["Wall share", fs ? F.pct(fs.wallShare, 1) + " of in-band flow at the walls" : null]]),
         sections: [{ title: "Aggressor", lines: [leadOf(P.aggressor) || reasonOf(panelSt(card, "aggressor", "aggressor ladder")), P.aggressor && P.aggressor.relation] },
-          { title: "Session", lines: [tp && STATE.tapeLive ? "Read from the live tape at " + F.time(tp.readAt) + "." : null].concat(pathNotes(card, legs)) },
+          { title: "Session", lines: [tp ? "Read from the " + (STATE.tapeLive ? "live " : "") + "tape at " + F.time(tp.readAt) + "." : null].concat(pathNotes(card, legs)) },
           { title: "Days", lines: [npY ? "Net premium per session over the year from the vendor's options-volume history; a dot is a session with no reading, not a zero." : pt ? pt.unit : reasonOf(panelSt(card, "premiumTrack", "premium history"))] }],
       }) });
     vw.start();

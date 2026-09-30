@@ -324,6 +324,36 @@ const screenerRow = (ticker, seed, dated = false) => {
 {
   const f = fakeD1();
   const get = await client(f.D1);
+  const json = { "Content-Type": "application/json" };
+  const failures = [
+    ["IEF", "a 500", () => new Response("boom", { status: 500 })],
+    ["AGG", "a body with no rows", () => new Response(JSON.stringify({ data: "nope" }), { status: 200, headers: json })],
+    ["LQD", "a rate limit", () => new Response("{}", { status: 429, headers: json })],
+    ["EMB", "a dropped connection", () => { throw new TypeError("network"); }],
+  ];
+  for (const [t, what, answer] of failures) {
+    caches_.clear();
+    let asked = 0;
+    globalThis.fetch = async (url) => {
+      if (new URL(String(url)).pathname === "/api/screener/stocks") { asked++; return answer(); }
+      return new Response("{}", { status: 404, headers: json });
+    };
+    at(ET(TUE, 10, 0));
+    caches_.set("https://flows-class.internal/" + t, { text: JSON.stringify({ known: true, row: screenerRow(t, "e"), readAt: ET(TUE, 10, 0) }),
+      headers: [["content-type", "application/json"]], exp: ET(TUE, 22, 0) });
+    at(ET(TUE, 11, 0));
+    const held = await get("/api/flows/card?t=" + t);
+    eq(asked, 1, `THE VENDOR FAILS (${what}): the row older than 15 minutes is asked for once`);
+    eq(held.res.status, 200, "and the reader still gets the card rather than an error");
+    eq(held.body.depth, "quote", "the held row, not an empty page");
+    eq(held.body.generatedAt, new Date(ET(TUE, 10, 0)).toISOString(), "under its TRUE read time, an hour old, not the failed attempt's");
+    eq(held.res.headers.get("X-Fresh-State"), "stale", "which the header calls stale rather than live");
+  }
+}
+
+{
+  const f = fakeD1();
+  const get = await client(f.D1);
   const seen = vendor((t) => screenerRow(t, "c"));
   caches_.clear();
   at(ET(TUE, 21, 0));

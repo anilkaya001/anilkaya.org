@@ -2040,6 +2040,7 @@ try {
       const { page, errors } = await open(tapeOf(session, "20:00"), verdict("live", "cadence"));
       const got = await flow(page);
       ok(got && /Net premium.*live.*Net delta.*live tape/.test(got.text), `T10: a tape the server calls live is labelled live (${got && got.text.slice(0, 90)})`);
+      ok(got && /Drawn from this session's live tape/.test(got.info), `and its disclosure says the path is the live tape (${got && got.info.slice(0, 160)})`);
       eq(errors.length, 0, "and throws nothing");
       await page.close();
     }
@@ -2054,6 +2055,27 @@ try {
       const got = await flow(page);
       ok(got && /to 4:00 PM/.test(got.text) && !/\blive\b/.test(got.text),
         `A TAPE THAT HAS CLOSED IS NOT 'LIVE': it says how far it runs (${got && got.text.slice(0, 120)})`);
+      ok(got && /Drawn from this session's tape, read to 4:00 PM/.test(got.info) && !/live tape/.test(got.info),
+        `and the disclosure still says the drawn path is the tape's, with how far it was read, instead of going silent once the tape is final (${got && got.info.slice(0, 200)})`);
+      await page.close();
+    }
+    {
+      const card = clone(full);
+      const tape = tapeOf(session, "20:00");
+      tape.ticker = card.ticker;
+      const { page } = await open(tape, verdict("closed", "session-final"), { card });
+      const got = await flow(page);
+      ok(got && /Read from the tape at/.test(got.info) && !/live tape/.test(got.info),
+        `a full card's Session section says where the drawn path was read from once the tape is final (${got && got.info.slice(0, 240)})`);
+      await page.close();
+    }
+    {
+      const card = clone(full);
+      const tape = tapeOf(session, "20:00");
+      tape.ticker = card.ticker;
+      const { page } = await open(tape, verdict("live", "cadence"), { card });
+      const got = await flow(page);
+      ok(got && /Read from the live tape at/.test(got.info), `and a live tape keeps its old wording (${got && got.info.slice(0, 240)})`);
       await page.close();
     }
     {

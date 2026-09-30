@@ -1943,7 +1943,7 @@
     if (body && typeof body === "object") {
       body.__updatedAt = at !== null && at > 0 ? at : null;
       body.__ff = typeof UI.freshFrom === "function" ? UI.freshFrom(response) : null;
-      if (body.__ff) UI.freshness({ ff: body.__ff, source: response.url.replace(/^.*flows\//, "") });
+      if (body.__ff && !body.__ff.overlay) UI.freshness({ ff: body.__ff, source: response.url.replace(/^.*flows\//, "") });
     }
     return body;
   }

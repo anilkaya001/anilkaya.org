@@ -30,42 +30,23 @@
   const STALE_SESSION_MS = 4 * 24 * 60 * 60 * 1000;
 
   function staleness(payload, now, opts) {
-    const o = opts || {};
     const at = isNum(now) ?? Date.now();
     if (!payload || typeof payload !== "object") return { kind: "unknown", message: null };
-
     const stamped = isNum(payload.__updatedAt);
     const written = stamped !== null && stamped > 0 ? stamped : null;
     if (written !== null && at - written > STALE_WRITE_MS) {
-      const hours = Math.floor((at - written) / 3600000);
-      const days = Math.floor(hours / 24);
-
-      const age = days >= 1
-        ? days + (days === 1 ? " day" : " days")
-        : hours + (hours === 1 ? " hour" : " hours");
-      return {
-        kind: "write",
-        message: (o.subject || "This page") + " was last written " + age +
-          " ago. The pipeline has not published since — check the Actions tab.",
-      };
+      const hours = Math.floor((at - written) / 3600000), days = Math.floor(hours / 24);
+      const age = days >= 1 ? days + (days === 1 ? " day" : " days") : hours + (hours === 1 ? " hour" : " hours");
+      return { kind: "write", message: ((opts || {}).subject || "This page") + " was last written " + age +
+        " ago. The pipeline has not published since — check the Actions tab." };
     }
-
-    let session = null;
-    if (isoDay(payload.sessionDate)) {
-      const parsed = Date.parse(String(payload.sessionDate) + "T21:00:00Z");
-      if (Number.isFinite(parsed)) session = parsed;
-    }
+    const parsed = isoDay(payload.sessionDate) ? Date.parse(String(payload.sessionDate) + "T21:00:00Z") : NaN;
+    const session = Number.isFinite(parsed) ? parsed : null;
     if (session !== null && at - session > STALE_SESSION_MS) {
-      return {
-        kind: "session",
-        message: "These numbers describe the " + payload.sessionDate + " session, " +
-          "which is more than four days old. The pipeline is running but its " +
-          "data is not advancing.",
-      };
+      return { kind: "session", message: "These numbers describe the " + payload.sessionDate + " session, " +
+        "which is more than four days old. The pipeline is running but its data is not advancing." };
     }
-
-    if (written === null && session === null) return { kind: "unknown", message: null };
-    return { kind: "fresh", message: null };
+    return written === null && session === null ? { kind: "unknown", message: null } : { kind: "fresh", message: null };
   }
 
   const emptyState = (kind, text) => {
@@ -75,20 +56,12 @@
   };
 
   function stripGeometry(count, width) {
-    const n = Math.max(1, Math.floor(isNum(count) ?? 1));
-    const w = Math.max(1, isNum(width) ?? 1);
-    const colW = w / n;
-    return {
-      count: n,
-      width: w,
-      colW,
-      xEdge: (i) => i * colW,
-      xMid: (i) => (i + 0.5) * colW,
-    };
+    const n = Math.max(1, Math.floor(isNum(count) ?? 1)), w = Math.max(1, isNum(width) ?? 1), colW = w / n;
+    return { count: n, width: w, colW, xEdge: (i) => i * colW, xMid: (i) => (i + 0.5) * colW };
   }
 
   function markerRuns(markers) {
-    const byCls = new Map();
+    const byCls = new Map(), runs = [];
     for (const m of (Array.isArray(markers) ? markers : [])) {
       const i = isNum(m && m.i);
       if (i === null) continue;
@@ -96,14 +69,12 @@
       if (!byCls.has(cls)) byCls.set(cls, []);
       byCls.get(cls).push(i);
     }
-    const runs = [];
     for (const [cls, list] of byCls) {
       list.sort((a, b) => a - b);
       let start = null, prev = null;
       for (const i of list) {
-        if (start === null) { start = prev = i; continue; }
-        if (i === prev + 1) { prev = i; continue; }
-        runs.push({ cls, from: start, to: prev });
+        if (start !== null && i === prev + 1) { prev = i; continue; }
+        if (start !== null) runs.push({ cls, from: start, to: prev });
         start = prev = i;
       }
       if (start !== null) runs.push({ cls, from: start, to: prev });
@@ -117,79 +88,41 @@
     const prefix = o.prefix || "fui";
     const pts = o.values.map((v) => isNum(v));
     const count = pts.length;
-
     const W = Math.max(24, Math.min(1600, Math.round(isNum(o.width) ?? host.clientWidth) || 240));
     const H = Math.max(12, Math.round(isNum(o.height) ?? 24));
     const g = stripGeometry(count || 1, W);
-    const padY = 2.5;
-    const plotH = H - padY * 2;
-
-    let lo = 0, hi = 0;
-    if (o.domain) {
-      lo = isNum(o.domain.lo) ?? 0;
-      hi = isNum(o.domain.hi) ?? 0;
-    }
+    const padY = 2.5, plotH = H - padY * 2;
+    let lo = o.domain ? isNum(o.domain.lo) ?? 0 : 0, hi = o.domain ? isNum(o.domain.hi) ?? 0 : 0;
     const db = isNum(o.deadBand);
     if (db !== null) { lo = Math.min(lo, -db); hi = Math.max(hi, db); }
-    for (const v of pts) {
-      if (v === null) continue;
-      if (v < lo) lo = v;
-      if (v > hi) hi = v;
-    }
+    for (const v of pts) if (v !== null) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
     if (hi - lo < 1e-9) { lo -= 1; hi += 1; }
     const y = (v) => padY + (1 - (v - lo) / (hi - lo)) * plotH;
-
-    const svg = s("svg", {
-      class: prefix + "-strip", viewBox: `0 0 ${W} ${H}`, width: W, height: H,
-      preserveAspectRatio: "xMidYMid meet",
-    });
-    if (o.ariaLabel) {
-      svg.setAttribute("role", "img");
-      svg.setAttribute("aria-label", o.ariaLabel);
-    } else {
-
-      svg.setAttribute("aria-hidden", "true");
-      svg.setAttribute("focusable", "false");
-    }
-
+    const svg = s("svg", { class: prefix + "-strip", viewBox: `0 0 ${W} ${H}`, width: W, height: H, preserveAspectRatio: "xMidYMid meet" });
+    if (o.ariaLabel) { svg.setAttribute("role", "img"); svg.setAttribute("aria-label", o.ariaLabel); }
+    else { svg.setAttribute("aria-hidden", "true"); svg.setAttribute("focusable", "false"); }
     for (const run of markerRuns(o.markers)) {
       if (run.from >= count) continue;
-      s("rect", {
-        class: run.cls || (prefix + "-wash"),
-        x: g.xEdge(run.from).toFixed(2), y: 0,
-        width: (g.colW * (Math.min(run.to, count - 1) - run.from + 1)).toFixed(2), height: H,
-      }, svg);
+      s("rect", { class: run.cls || (prefix + "-wash"), x: g.xEdge(run.from).toFixed(2), y: 0,
+        width: (g.colW * (Math.min(run.to, count - 1) - run.from + 1)).toFixed(2), height: H }, svg);
     }
-
     if (db !== null && db > 0) {
       const top = y(db);
-      s("rect", {
-        class: prefix + "-band", x: 0, y: top.toFixed(2),
-        width: W, height: Math.max(0.5, y(-db) - top).toFixed(2),
-      }, svg);
+      s("rect", { class: prefix + "-band", x: 0, y: top.toFixed(2), width: W, height: Math.max(0.5, y(-db) - top).toFixed(2) }, svg);
     }
-
     const zy = y(0).toFixed(2);
     s("line", { class: prefix + "-zero", x1: 0, x2: W, y1: zy, y2: zy }, svg);
-
     for (const r of (Array.isArray(o.rules) ? o.rules : [])) {
       const at = isNum(r && r.at);
       if (at === null || at < 0 || at > count) continue;
       const x = g.xEdge(at).toFixed(2);
-      s("line", {
-        class: (r && r.cls) || (prefix + "-rule"), x1: x, x2: x, y1: 0, y2: H,
-      }, svg);
+      s("line", { class: (r && r.cls) || (prefix + "-rule"), x1: x, x2: x, y1: 0, y2: H }, svg);
     }
-
     for (let i = 0; i + 1 < count; i++) {
       if (pts[i] === null || pts[i + 1] === null) continue;
-      s("line", {
-        class: prefix + "-line",
-        x1: g.xMid(i).toFixed(2), y1: y(pts[i]).toFixed(2),
-        x2: g.xMid(i + 1).toFixed(2), y2: y(pts[i + 1]).toFixed(2),
-      }, svg);
+      s("line", { class: prefix + "-line", x1: g.xMid(i).toFixed(2), y1: y(pts[i]).toFixed(2),
+        x2: g.xMid(i + 1).toFixed(2), y2: y(pts[i + 1]).toFixed(2) }, svg);
     }
-
     let lastMeasured = -1;
     for (let i = 0; i < count; i++) if (pts[i] !== null) lastMeasured = i;
     const r0 = Math.max(1.1, Math.min(1.6, g.colW / 2.4));
@@ -198,16 +131,10 @@
       const edge = (i === 0 || pts[i - 1] === null) || (i === count - 1 || pts[i + 1] === null);
       if (!edge && i !== lastMeasured) continue;
       const isLast = i === lastMeasured;
-      const cls = prefix + "-dot" + (isLast
-        ? " is-last" + (pts[i] > 0 ? " is-pos" : pts[i] < 0 ? " is-neg" : " is-zero")
-        : "");
-      s("circle", {
-        class: cls,
+      s("circle", { class: prefix + "-dot" + (isLast ? " is-last" + (pts[i] > 0 ? " is-pos" : pts[i] < 0 ? " is-neg" : " is-zero") : ""),
         cx: g.xMid(i).toFixed(2), cy: y(pts[i]).toFixed(2),
-        r: isLast ? Math.max(r0, Math.min(2, g.colW / 2)).toFixed(2) : r0.toFixed(2),
-      }, svg);
+        r: isLast ? Math.max(r0, Math.min(2, g.colW / 2)).toFixed(2) : r0.toFixed(2) }, svg);
     }
-
     host.append(svg);
     return svg;
   }
@@ -1727,7 +1654,8 @@
   }
 
   const FRESH = { sessionDate: null, primary: null, nightly: null, meta: false, generatedAt: null, updatedAt: null, readAt: null, live: false, sources: new Map(), ffs: new Map(), explicit: false, settled: false };
-  const up = (k) => k[0].toUpperCase() + k.slice(1);
+  const NAMES = { strips: "Live prices", news: "Headlines", flowalerts: "Flow alerts" };
+  const named = (k) => { k = k.replace(/^(?:lk\?k=|live:)|\?.*/g, ""); return NAMES[k] || k[0].toUpperCase() + k.slice(1); };
   function freshAggregate(list, phase) {
     const s = (list || []).filter(Boolean).map((f) => (f.stateAt ? f.stateAt() : f)), has = (x) => s.includes(x);
     return !s.length ? "pending" : has("stale") ? "stale" : has("live") ? "live"
@@ -1750,15 +1678,16 @@
   function freshDetails() {
     const { state, market: m, S, behind: late } = freshState();
     const which = S === m.today ? "today\u2019s session." : "the last completed session, " + F.day(S) + ".";
-    const lapsed = [...FRESH.ffs].filter(([, f]) => f.stateAt() === "stale").map(([k]) => up(k));
-    const lead = state === "stale" ? (late ? `These readings are the ${F.day(S)} session; the last completed session is ${F.day(m.expected)}.`
-      : "Past the server\u2019s stale line: " + lapsed.join(", ") + ".")
-      : state === "live" ? "The market is open and the last price was read moments ago. Everything else is the last completed session."
-        : !S ? (state === "pending" ? "No payload on this page has reported its session yet." : "No session is published yet.")
-          : (m.open ? "The market is open. " : "The market is closed. ") + "These readings are " + which;
+    const out = [...FRESH.ffs].filter(([, f]) => f.stateAt() === "stale"), lapsed = [...new Set(out.map(([k]) => named(k)))];
     const sources = [...FRESH.sources.entries()];
     const behind = sources.filter(([, v]) => v !== S);
-    const total = sources.length + FRESH.ffs.size, bad = behind.length + lapsed.length;
+    const total = sources.length + FRESH.ffs.size, bad = behind.length + out.length;
+    const lag = behind.length ? " " + bad + " of " + total + " payloads are older: " + behind.map(([k, v]) => named(k) + " " + F.day(v)).join(", ") + "." : "";
+    const lead = state === "stale" ? (late ? `These readings are the ${F.day(S)} session; the last completed session is ${F.day(m.expected)}.`
+      : "Past the server\u2019s stale line: " + lapsed.join(", ") + ".")
+      : state === "live" ? "The market is open and the last price was read moments ago." + (lag || " Everything else is the last completed session.")
+        : !S ? (state === "pending" ? "No payload on this page has reported its session yet." : "No session is published yet.")
+          : (m.open ? "The market is open. " : "The market is closed. ") + "These readings are " + which + lag;
     const facts = [
       ["Expected", S !== m.expected ? F.day(m.expected) : null],
       ["Market", m.open ? "Open" : "Closed"],
@@ -1766,7 +1695,7 @@
       ["Written", FRESH.updatedAt ? F.time(new Date(FRESH.updatedAt).toISOString()) : null],
       ["Price read", FRESH.readAt ? F.time(FRESH.readAt) : null],
       ["Payloads", total ? (bad ? total - bad + " of " + total + " current" : total + " current") : null],
-      ...behind.map(([k, v]) => [up(k), F.day(v)]),
+      ...behind.map(([k, v]) => [named(k), F.day(v)]),
     ];
     return {
       title: "Freshness", state, asOf: S ? "Session " + F.day(S) : null, lead, facts,
