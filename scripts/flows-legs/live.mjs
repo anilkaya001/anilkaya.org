@@ -5,7 +5,7 @@ import {
   nightlySources, priorCloseBase,
 } from "../../shared/flows-live.js";
 import { FOCUS_STRIP_FALLBACK, focusStripNames as focusNamesOf } from "../../shared/flows-focus.js";
-import { phaseAt, closeMinutes, PHASE_MINUTES, LIVE_CLOCK, easternInstant, prevTradingDay } from "../../shared/flows-freshness.js";
+import { phaseAt, closeMinutes, inferredEarlyClose, PHASE_MINUTES, LIVE_CLOCK, easternInstant, prevTradingDay } from "../../shared/flows-freshness.js";
 import { fakeLiveVendor, fakeBoards } from "./live-fake.mjs";
 
 export const LIVE_READ_PACE_MS = LIVE_BUDGET.tier2PaceMs;
@@ -16,14 +16,18 @@ export function liveWindow(at, clock = null) {
   const p = phaseAt(at, clock);
   if (!p) return { run: false, why: "no-clock", phase: null };
   if (!p.trading) {
-    const reopenable = !!clock && clock.day === p.day && clock.trading === 0 && p.minutes < VERDICT.provisionalUntilMin &&
+    const reopenable = !!clock && clock.day === p.day && clock.trading === 0 && p.minutes < VERDICT.unscheduledUntilMin &&
       phaseAt(at, null).trading;
     return reopenable ? { run: false, wait: true, why: "provisional-closed", phase: p }
       : { run: false, why: "not-trading", phase: p };
   }
   const closeMin = closeMinutes(p.day, clock);
   if (p.minutes < PHASE_MINUTES.open) return { run: false, why: "before-open", phase: p };
-  if (p.minutes > closeMin + LIVE_CLOCK.runAfterCloseMin) return { run: false, why: "after-close", phase: p };
+  if (p.minutes > closeMin + LIVE_CLOCK.runAfterCloseMin) {
+    return inferredEarlyClose(p.day, clock) && p.minutes <= PHASE_MINUTES.close + LIVE_CLOCK.runAfterCloseMin
+      ? { run: false, wait: true, why: "provisional-early-close", phase: p }
+      : { run: false, why: "after-close", phase: p };
+  }
   return { run: true, why: "session", phase: p };
 }
 
@@ -522,9 +526,12 @@ export async function runLiveLoop({ pass, chain, now = () => Date.now(), sleep =
       }
     } else {
       waits++;
-      log(`live loop: Tier 1 has closed ${here.phase.day} before ` +
-        `${Math.floor(VERDICT.provisionalUntilMin / 60)}:00 ET, when a late vendor can still reopen it — no pass, ` +
-        "waiting for the next slot");
+      log(here.why === "provisional-early-close"
+        ? `live loop: Tier 1 has marked ${here.phase.day} an early close the calendar does not list, and takes the mark back ` +
+          "if the tide moves again — no pass, waiting for the next slot"
+        : `live loop: Tier 1 has closed ${here.phase.day} before ` +
+          `${Math.floor(VERDICT.unscheduledUntilMin / 60)}:${String(VERDICT.unscheduledUntilMin % 60).padStart(2, "0")} ET, when a ` +
+          "late vendor can still reopen it — no pass, waiting for the next slot");
     }
     await refresh();
     const next = nextSlot(now(), slotMs);

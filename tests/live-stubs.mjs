@@ -117,7 +117,7 @@ export async function tier1Bodies({ session, at }) {
   return { "/api/market/market-tide": JSON.stringify(tide), "/api/market/sector-etfs": JSON.stringify(sectors) };
 }
 
-export function tickDb() {
+export function tickDb(rows) {
   const statements = [];
   const st = (sql) => {
     const s = { sql, args: [], bind(...a) { s.args = a; return s; }, first: async () => null,
@@ -127,8 +127,15 @@ export function tickDb() {
   return {
     statements,
     prepare: st,
-    batch: async (list) => { statements.push(...list); return list.map(() => ({ results: [] })); },
+    batch: async (list) => {
+      statements.push(...list);
+      return list.map((x) => ({ results: /FROM flows_live/.test(x.sql) ? liveAges(rows) : [] }));
+    },
   };
+}
+
+export function liveAges(rows) {
+  return rows === undefined ? [] : rows;
 }
 
 const cpuClock = () => {
@@ -148,7 +155,9 @@ export async function tier1Budget({ windows = 16, perWindow = 5, coldOnly = fals
   const bytes = Object.values(texts).reduce((a, t) => a + t.length, 0);
   const { clock, cpu } = cpuClock();
   const fetchVendor = async (path) => JSON.parse(texts[path]);
-  const env = { DB: tickDb(), UW_API_KEY: "k" };
+  const { LIVE_KEYS } = await import("../shared/flows-live.js");
+  const held = Object.keys(LIVE_KEYS).map((id) => ({ id, read_at: at - 240000, session, cadence_s: 300, source: "actions" }));
+  const env = { DB: tickDb(held), UW_API_KEY: "k" };
   const tick = () => W.rthTick(env, at, { fetchVendor, log: { error() {} } });
   const w0 = process.hrtime.bigint();
   const c0 = cpu();
@@ -230,7 +239,10 @@ export function focusDb({ groups = null, clock = null, held = null, nightly = nu
     if (/FROM flows_live WHERE id = 'live:focus'/.test(s.sql)) return { results: held ? [held] : [] };
     return { results: [] };
   };
-  return { statements, prepare: st, batch: async (list) => list.map(answer) };
+  return { statements, prepare: st, batch: async (list) => {
+    for (const x of list) if (/^\s*(INSERT|UPDATE|DELETE)/i.test(x.sql)) statements.push(x);
+    return list.map(answer);
+  } };
 }
 
 export async function focusBudget({ windows = 16, perWindow = 5, coldOnly = false } = {}) {

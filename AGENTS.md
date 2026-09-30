@@ -54,6 +54,24 @@ Browser ──► Cloudflare edge
   `GOOGLE_CLIENT_SECRET`, and `SESSION_SECRET`.
 - Invocation observability is enabled in `wrangler.toml`; application code
   emits structured logs only for unexpected failures and OAuth callback errors.
+- D1 on Workers Free has two daily caps, both reset at 00:00 UTC and both
+  shared by everything on the account, the audit's own queries included:
+  **100,000 rows written and 5,000,000 rows read**. The write cap is priced
+  in DEPLOY.md section 10.4b; the read cap was found exceeded on 2026-09-29
+  (an audit `SELECT` at about 21:36 UTC failed with error 7500). Who spent it,
+  and whether the Worker's own reads and writes were refused, are unverified
+  until `live:alerts.record.reads` continuity across that evening and the D1
+  dashboard's rows read by hour are read. The Worker turns that error into
+  `503 store_quota` with `Retry-After` to 00:00 UTC, serves the last good
+  copy of a nightly Flows key (kept in `caches.default` for 24 hours, stamped
+  `X-Fresh-State: stale`, `X-Fresh-Reason: store`) instead of a bare 503, and
+  `tests/flows-reads-contract.mjs` holds a rows-read ceiling per read route.
+  The copy lives only in a data centre that served the key within 24 hours
+  and can be evicted earlier, so it softens a quota day for the colos readers
+  use and guarantees nothing; it is proven on local workerd and a Cache API
+  fake, not on the production edge. Budget any new query in rows, not only in
+  round trips, and never scan a payload table or expand a `json_each` over a
+  large array on a polled route.
 
 ### External deployment state
 
@@ -119,6 +137,7 @@ header readback with this repository after any dashboard rule change.
 | `shared/markets.js`, `assets/js/market-ticker.js` | The landing index ticker: the Worker's Yahoo parse (the change is against the previous session's close taken from the same response's dated bars, never `chartPreviousClose`; each quote keeps its own `asOf`, `asOfDay`, `prevClose`, `prevDay` and, when the response names the session of the quote's own day, `sessionEnd`) and the strip that prints each quote's own İstanbul time, `Close <weekday>` for a closed market (a close is a quote struck within five minutes of the exchange's `sessionEnd`; the lag of the quote behind the fetch decides only where there is none), and a dash for a quote with no base. |
 | `tests/markets-contract.mjs`, `tests/market-ticker-render.mjs` | The Yahoo parse against dated five-day responses (weekend, Tokyo morning, null trailing bar, no timestamps) and the strip rendered in Chromium with a fixed clock; neither starts a server. |
 | `shared/flows-freshness.js` | The Eastern clock (arithmetic, proven equal to the IANA zone), market phases, the freshness threshold table, `X-Fresh-*` headers, and the live clock's due-tests. |
+| `shared/flows-ledger.js` | The per-day session ledger: the `flows_ledger` DDL, the statement builders the Tier 1 tick, the focus tick, the heartbeat write and the nightly's `meta` write append to a batch they already issue, the gap limits (the stale lines of `FRESH_CLASSES`), the view served as `ledger` on the ingest `clock` key, and the worst-key lapse the Tier 1 tick reads from the live rows. |
 | `shared/flows-live.js`, `shared/flows-live-worker.js` | The live layer's key registry and pure builders; the Worker's Tier 1 tick, dispatch, watchdog, live ingest, `/api/flows/lk`, `/now`, `/tape` and read-time overlays. A strip row ends in `qa`, the vendor's `quote_time` as seconds behind the read, and the key's `ahead { n, maxS }` counts the stamps that run later than the read; `priorCloseBase` and `shapeStrips` fill a null `prev_close` from the last dated nightly close and say so in `prevFill`, and hold out a row the vendor dates before the session as an all-null row (DEPLOY.md 10.5i). |
 | `shared/flows-oidc.js` | The live credential: the GitHub OIDC claim policy (this repository by id, `flows-live.yml` on main), the pure JWT verifier the Worker runs, and the runner-side token request the `--live` leg uses. No shared secret. |
 | `scripts/flows-legs/live.mjs`, `live-fake.mjs` | The Actions `--live` leg (Tier 2, `live:*` keys only) and its fake vendor for `--dry-run`. `runLiveLoop` keeps the loop alive between sessions when handed a `watch`, and `chainDispatch` sends any workflow_dispatch with the job's own token. |
@@ -129,7 +148,9 @@ header readback with this repository after any dashboard rule change.
 | `assets/js/flows-fresh.js` | The client freshness helper (`FlowsUI.freshFrom`, `freshAggregate`, `heartbeat`). |
 | `tests/flows-live-contract.mjs` | Live-layer builders, phases and states, byte ceilings, the one-writer scans, the `--live` dry run and the client helper. |
 | `tests/flows-starts-contract.mjs` | The starts and the witness: the live workflow's grants and drill input, the nightly dispatch, the witness's lines, debounce, dedupe, three-tick recovery and reopen, the kept-alive loop through the night, the weekend and the hop, the cron starters through the concurrency group, a whole weekday's request cost, and the vendor client's deadline. |
-| `tests/flows-reads-contract.mjs` | The Worker's D1 round trips per read route, counted on a fake binding: the single-flight schema bootstrap, the absent-card decision, the live overlays and the ticker reading. |
+| `tests/flows-ledger-contract.mjs` | The ledger's SQL over a real SQLite (gaps clipped to the session, ok and failed ticks, partial focus reads, passes, the nightly's landing, retention), its zero-extra-round-trip and never-blocks-the-tick properties on the real tick functions, its ingest view, and the health gate's reading of it: gap lines at the stale lines, a nightly that never landed, cards failed or skipped, the roster shortfall and the 5xx burst. |
+| `tests/flows-verdict-contract.mjs` | The two reversible verdicts, swept over a real SQLite clock and the real Tier 1 tick: a vendor that lags and recovers at every five-minute mark, a real closure's cost, a calendar holiday, a stalled tide with and without recovery, and the Tier 2 loop's waits. |
+| `tests/flows-reads-contract.mjs` | The Worker's D1 round trips and rows read per read route, counted on a fake binding (the rows-read ceilings, the last good copy served while the store is unreadable): the single-flight schema bootstrap, the absent-card decision, the live overlays and the ticker reading. |
 
 ## Curriculum and stage contracts
 
@@ -484,7 +505,8 @@ flows-legs-contract
 flows-live-contract    flows-freshness-contract
 flows-starts-contract
 flows-quant-card       flows-track-render
-flows-pipeline-contract  flows-reads-contract
+flows-pipeline-contract  flows-reads-contract  flows-ledger-contract
+flows-verdict-contract
 markets-contract
 ```
 
@@ -500,7 +522,9 @@ a virtual clock.
 
 `flows-reads-contract` was measured on 2026-09-28: about 20 s with no server,
 of which three blocks wait out the flights' deadlines (2 s for the schema
-bootstrap and its 1.5 s retry, 12 s for the market snapshot's refresh).
+bootstrap and its 1.5 s retry, 12 s for the market snapshot's refresh); on
+2026-09-30, with the rows-read ceilings and the last-good copy, 33 s of wall
+time and about 1 s of CPU.
 It imports `worker.js` into Node with a counting fake of the D1 binding over
 `node:sqlite` (one trip per `first`, `all`, `run` or `batch`) and asserts how
 many cross-region round trips each Flows read route costs, cold and warm.
@@ -510,6 +534,16 @@ the suite fails to import with `No such built-in module: node:sqlite`. The
 suite runs under `--disable-warning=ExperimentalWarning`, which on 22.22.2
 silences the SQLite notice and nothing else; the blanket `--no-warnings` would
 also hide a deprecation raised by `worker.js` under Node.
+
+`flows-verdict-contract` was measured on 2026-09-30: 15 s with no server, and
+about 800 checks. It drives the real `rthTick` over a `node:sqlite` database
+with the real schema, one Tier 1 tick per five-minute mark for a session, so it
+needs Node 22.13 or newer like the ledger and reads suites.
+
+`flows-ledger-contract` was measured on 2026-09-29: under one second with no
+server. It drives the ledger's SQL and the real Tier 1, focus and heartbeat
+functions over a `node:sqlite` binding, so it needs Node 22.13 or newer and
+runs under `--disable-warning=ExperimentalWarning` like the reads suite.
 
 `flows-pipeline-contract` was measured on 2026-09-24: 123 s with no server. It
 was on neither list, so a source scan in it (every ingest call site must

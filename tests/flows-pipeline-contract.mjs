@@ -36,7 +36,7 @@ import {
   probeStored, LEDGER_PROBE_CHUNK, LEDGER_PROBE_MAX, dryRosterProbe, DRY_PROBE_BYTES,
 } from "../scripts/flows-pipeline.mjs";
 import { FOCUS_FUNDS, MAG7 as FOCUS_MAG7, FOCUS_MINERS } from "../shared/flows-focus.js";
-import { runHealthGate, refusalOf, tallyRefusal } from "../scripts/flows-legs/health.mjs";
+import { runHealthGate, refusalOf, tallyRefusal, QUOTA_WAIT } from "../scripts/flows-legs/health.mjs";
 import { VARIATION_CODES, variationSummary } from "../shared/flows-variation.js";
 import { pinReading, buildCard } from "../shared/flows-card.js";
 import { pearson, horizonMove, HORIZON_SESSIONS, realizedVol } from "../shared/flows-features.js";
@@ -313,11 +313,23 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 {
   const http = await import("node:http");
   const received = [];
+  let quotaAnswers = 0;
+  let lagAnswers = 0;
   const server = http.createServer((req, res) => {
     let body = "";
     req.on("data", (c) => { body += c; });
     req.on("end", () => {
       received.push({ url: req.url, auth: req.headers.authorization, body });
+      if (body.includes("QUOTAKEY") && ++quotaAnswers <= 2) {
+        res.writeHead(503, { "Content-Type": "application/json", "Retry-After": "1" });
+        res.end('{"error":{"code":"store_quota","message":"The store\'s daily quota is spent; it resets at 00:00 UTC"}}');
+        return;
+      }
+      if (body.includes("QUOTALAG") && ++lagAnswers <= 3) {
+        res.writeHead(503, { "Content-Type": "application/json", "Retry-After": lagAnswers === 1 ? "1" : "86355" });
+        res.end('{"error":{"code":"store_quota","message":"The store\'s daily quota is spent; it resets at 00:00 UTC"}}');
+        return;
+      }
       res.writeHead(body.includes("FAILME") ? 500 : 200, { "Content-Type": "application/json" });
       res.end('{"ok":true}');
     });
@@ -347,6 +359,50 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     try { await publish("card:FAILME", { ticker: "FAILME" }); }
     catch (error) { threw = error; }
     ok(threw && /HTTP 500/.test(threw.message), "a failed ingest throws with its status");
+
+    const quotaMargin = QUOTA_WAIT.marginMs;
+    QUOTA_WAIT.marginMs = 0;
+    const quotaFrom = Date.now();
+    const quotaSeen = received.length;
+    const quotaWarn = console.warn;
+    const quotaLines = [];
+    console.warn = (line) => quotaLines.push(String(line));
+    try { await publish("card:QUOTAKEY", { ticker: "QUOTAKEY" }); } finally { console.warn = quotaWarn; QUOTA_WAIT.marginMs = quotaMargin; }
+    const quotaMs = Date.now() - quotaFrom;
+    eq(received.length - quotaSeen, 3, "A store_quota ANSWER IS WAITED OUT, not failed: two 503s with Retry-After: 1 and the third request lands, " +
+      "where the ordinary schedule would have given up on a cap that lasts until 00:00 UTC");
+    ok(quotaMs >= 2000 - 50, `after waiting the two seconds the Worker asked for (${quotaMs} ms)`);
+    ok(quotaLines.length === 2 && quotaLines.every((l) => /store_quota — the store's daily quota is spent and resets at 00:00 UTC; waiting 1s/.test(l)),
+      "each wait logged, naming the cause");
+
+    resetPublishRetryBudget();
+    const lagRealNow = Date.now;
+    const lagClock = QUOTA_WAIT.now;
+    const lagStep = QUOTA_WAIT.lagStepMs;
+    const lagMargin = QUOTA_WAIT.marginMs;
+    const midnight = (Math.floor(lagRealNow() / 86400000) + 1) * 86400000;
+    const lagShift = midnight + 20000 - lagRealNow();
+    const lagSeen = received.length;
+    const lagLines = [];
+    const lagWarn = console.warn;
+    console.warn = (line) => lagLines.push(String(line));
+    QUOTA_WAIT.marginMs = 0;
+    QUOTA_WAIT.lagStepMs = 1000;
+    QUOTA_WAIT.now = () => lagRealNow() + lagShift;
+    const lagFrom = lagRealNow();
+    try { await publish("card:QUOTALAG", { ticker: "QUOTALAG" }); } finally {
+      QUOTA_WAIT.now = lagClock;
+      console.warn = lagWarn;
+      QUOTA_WAIT.marginMs = lagMargin;
+      QUOTA_WAIT.lagStepMs = lagStep;
+    }
+    const lagMs = lagRealNow() - lagFrom;
+    eq(received.length - lagSeen, 4, "A RESET THAT LANDS LATE IS WAITED OUT TOO: at 00:00:20 UTC a 503 whose Retry-After is a day away (the counter has not reset yet) " +
+      "is retried on a short step, and the fourth request lands");
+    ok(lagLines.length === 3 && lagLines.every((l) => /store_quota — the store's daily quota is spent and resets at 00:00 UTC; waiting 1s/.test(l)),
+      "each of the three waits logged as a quota wait, none spent on the generic schedule");
+    ok(lagMs >= 3000 - 50 && lagMs < 3000 + 2500, `for the three steps of a second the test sets, not the 1 s, 4 s, 9 s of the generic schedule (${lagMs} ms)`);
+    resetPublishRetryBudget();
 
     eq(summarize({ rows: [1, 2, 3] }), "3 rows", "a board is described by its row count");
     eq(summarize({ ticker: "AAPL" }), "no rows", "a card is described honestly, not by a crash");
@@ -1327,6 +1383,19 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(run.status, 0, "the dry run exits clean");
   const runLog = run.stdout + run.stderr;
 
+  {
+    const facts = /run facts: (\d+) planned, (\d+) rostered, (\d+) failed, (\d+) skipped; (\d+) failure\(s\)/.exec(runLog);
+    const cardsPlanned = /cards planned: (\d+) name\(s\)/.exec(runLog);
+    const dossiers = /dossiers: (\d+) of \d+ index built.*?; (\d+) of \d+ fund built/.exec(runLog);
+    const rostered = /roster: (\d+) carded name\(s\)/.exec(runLog);
+    ok(facts && cardsPlanned && dossiers && rostered, "the dry run reports the facts it hands the health gate, beside the plan, the dossiers and the roster it prints");
+    eq(Number(facts[1]), Number(cardsPlanned[1]) + Number(dossiers[1]) + Number(dossiers[2]),
+      "THE GATE IS HANDED THE PLAN AS THE RUN PRINTS IT: the names planned a card plus the index and fund dossiers built");
+    eq(Number(facts[2]), Number(rostered[1]), "and the roster as the run prints it");
+    eq(Number(facts[2]), Number(facts[1]), "so a healthy run's roster is exactly its plan, and the roster-shortfall check can neither miss a name nor fire on a healthy night");
+    ok(facts[3] === "0" && facts[4] === "0" && facts[5] === "0", "with no card failed, none skipped, and no failure line from the run's own checks");
+  }
+
   const probeLines = runLog.split("\n").filter((l) => l.includes("chain probe"));
   eq(probeLines.length, 1,
      "exactly one truncation probe is spent per run, however many names truncate");
@@ -1439,8 +1508,12 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
       }
       eq(Object.keys(roster.depth).length, emitted.size, "and lists nothing the run did not publish");
       ok(Object.values(roster.session).every((d) => d === read("board-long").sessionDate), "every roster entry is this session's");
-      eq(roster.retired, 4, "the dry run's prior ledger held one name four sessions old (card, card-x, hist) and a card-x-only " +
-        "orphan four sessions old: all four keys are retired");
+      eq(roster.retired, 5, "the dry run's prior ledger held one name four sessions old (card, card-x, hist) and a card-x-only " +
+        "orphan four sessions old, and the store's own listing knew one more card the ledger never had (ZZORF, the orphan the " +
+        "birth probe missed): all five keys are retired");
+      ok(/\[dry-run\] retire card:ZZORF/.test(runLog) && /roster: the store lists \d+ card, card-x and hist key\(s\), 1 the ledger did not know/.test(runLog),
+         "THE LISTING SELF-REPAIRS THE LEDGER: a key in the store that no ledger names is aged with the rest and, being more than " +
+         "three sessions old, retired the same night, whatever the ledger says");
       ok(Object.hasOwn(roster.held, "card:ZZHLD") && !Object.hasOwn(roster.held, "card:ZZRET") && !Object.hasOwn(roster.held, "card:NVDA"),
          "a two-session-old card is held for the next run, the retired ones are gone, and NVDA — old in the prior " +
          "ledger but rebuilt tonight — is neither");
@@ -2134,10 +2207,11 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(/function ingestHeaders\(/.test(src),
      "and it is reached through a single builder every call site shares");
 
-  const sites = [...src.matchAll(/ingestURL\(\) \+ "\?keys?="/g)];
-  eq(sites.length, 4,
-     `four call sites reach the ingest route — read, metadata probe, write and delete (found ${sites.length}). ` +
-     "A fifth must join the builder rather than hand-rolling headers");
+  const sites = [...src.matchAll(/ingestURL\(\) \+ "\?(?:keys?|list)="/g)];
+  eq(sites.length, 5,
+     `five call sites reach the ingest route — read, metadata probe, key listing, write and delete (found ${sites.length}). ` +
+     "A sixth must join the builder rather than hand-rolling headers");
+  eq(src.match(/ingestURL\(\) \+ "\?list="/g).length, 1, "one of them is the ?list= listing the retire step ages the store's keys with");
   eq(src.match(/ingestURL\(\) \+ "\?keys="/g).length, 1, "one of them is the ?keys= metadata form");
   const workerSrc = readFileSync(new URL("../worker.js", import.meta.url), "utf8");
   const metaCap = /\bINGEST_META_KEYS_MAX = (\d+);/.exec(workerSrc);
@@ -4317,6 +4391,51 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   const blind = await run({ prior: { payload: null, failed: true, status: 503 }, reader: async () => ({ failed: true }) });
   eq(deletes.length, 0, "when the prior roster cannot be read nothing is retired on a guess");
   eq(blind.ledger, "unread", "and the roster says so");
+
+  {
+    let asked = 0;
+    const store = { keys: {
+      "card:PRU": { present: true, sessionDate: "2026-08-25", generatedAt: "2026-08-25T21:00:00Z" },
+      "card-x:LEVI": { present: true, sessionDate: null, generatedAt: "2026-09-10T21:00:00Z" },
+      "hist:CB": { present: true, sessionDate: "2026-09-23" },
+      "card:ODD": { present: true, sessionDate: null, generatedAt: null },
+      "card:PEND": { present: false },
+      "card:NVDA": { present: true, sessionDate: "2026-08-01" },
+      "card-x:NVDA": { present: true, sessionDate: "2026-09-24" },
+      "card:OLD": { present: true, sessionDate: "2026-09-17" },
+      "card:bad name": { present: true, sessionDate: "2026-08-01" },
+    }, status: 200, truncated: false };
+    const listed = await run({ prior: ledger, reader: async () => { throw new Error("the carried path must not probe"); },
+      lister: async () => { asked++; return store; } });
+    assert.deepEqual(deletes.sort(), ["card-x:LEVI", "card:OLD", "card:PRU", "card:STUCK", "hist:OLD"],
+      "THE LISTING RETIRES ORPHANS THE LEDGER NEVER KNEW: a card 35 days old and a card-x dated only by its generatedAt go with the " +
+      "ledger's own, though the ledger is complete and carried"); checks++;
+    const r = writes.get("roster");
+    ok(asked === 1 && listed.ledger === "carried" && Object.hasOwn(r.held, "hist:CB") && Object.hasOwn(r.held, "card:ODD") &&
+       !Object.hasOwn(r.held, "card:PRU") && !Object.hasOwn(r.held, "card:NVDA") && !Object.hasOwn(r.held, "card:PEND") &&
+       !Object.hasOwn(r.held, "card:bad name") && !deletes.includes("card:NVDA") && !deletes.includes("card:PEND"),
+       "a listed key inside the window is held from then on, an undated one is held and never retired on a guess, a name the store " +
+       "reports pending is not a key, a key rebuilt tonight is left to the run, and a malformed id is ignored");
+    ok(logs.some((l) => /roster: the store lists 7 card, card-x and hist key\(s\), 4 the ledger did not know — aged with the rest/.test(l)),
+       "and the run says how many keys the store listed and how many the ledger did not know, not counting a key the run itself wrote tonight");
+
+    await run({ prior: ledger, lister: async () => ({ failed: true, status: 403 }),
+      reader: async () => { throw new Error("no probe"); } });
+    assert.deepEqual(deletes.sort(), ["card:OLD", "card:STUCK", "hist:OLD"],
+      "a listing that fails changes nothing: the ledger retires what it retired before"); checks++;
+    ok(logs.some((l) => /the store's key listing could not be read \(HTTP 403\)/.test(l)), "and says it could not be read");
+    await run({ prior: ledger, lister: async () => { throw new Error("socket closed"); } });
+    ok(deletes.length === 3 && logs.some((l) => /listing could not be read \(no answer, socket closed\)/.test(l)),
+       "a listing that throws is the same");
+    asked = 0;
+    await run({ prior: { payload: null, failed: true, status: 503 }, reader: async () => ({ failed: true }),
+      lister: async () => { asked++; return store; } });
+    ok(asked === 0 && deletes.length === 0, "an unreadable prior roster retires nothing on the strength of a listing either");
+    ok(Object.hasOwn(store.keys, "card:PRU"), "(the listing itself is data, not a command)");
+    const cut = await run({ prior: ledger, lister: async () => ({ ...store, truncated: true }) });
+    ok(cut.retired === 4 && logs.some((l) => /the listing was cut at its cap/.test(l)),
+       "a listing cut at its cap still retires what it showed, and says it was cut");
+  }
 
   {
     const shelf = new Map([["card:OLD", { sessionDate: "2026-09-21" }], ["card-x:OLD", { sessionDate: "2026-09-21" }],

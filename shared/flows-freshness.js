@@ -181,6 +181,11 @@ export function isTradingDay(day, clock) {
   return !(closed && closed.includes(day));
 }
 
+export function inferredEarlyClose(day, clock) {
+  const c = clockFor(clock, day);
+  return !!c && Number(c.earlyClose ?? c.early_close) === 1 && !isEarlyCloseDay(day);
+}
+
 export function closeMinutes(day, clock) {
   const c = clockFor(clock, day);
   if (c && Number(c.earlyClose ?? c.early_close) === 1) return PHASE_MINUTES.earlyClose;
@@ -375,7 +380,7 @@ export function tier1Due(at, clock = null) {
   const p = phaseAt(at, clock);
   if (!p) return false;
   if (!p.trading) return holidayProbeDue(p, clock);
-  const closeMin = closeMinutes(p.day, clock);
+  const closeMin = inferredEarlyClose(p.day, clock) ? PHASE_MINUTES.close : closeMinutes(p.day, clock);
   return p.minutes >= PHASE_MINUTES.open && p.minutes <= closeMin + LIVE_CLOCK.tier1AfterCloseMin;
 }
 

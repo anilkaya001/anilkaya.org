@@ -1117,8 +1117,10 @@ const cronMinutes = (cron) => {
     "so the live window takes the Worker's tape-derived clock, and a day it closed is not a session");
   const tuesday = easternInstant("2026-11-24", 11 * 60);
   eq(liveWindow(tuesday).why, "session", "an ordinary Tuesday with no clock is a session");
-  eq(liveWindow(tuesday, { day: "2026-11-24", trading: 0, earlyClose: null }).why, "not-trading",
-    "and an unscheduled closure the tape proved today is not");
+  eq(liveWindow(tuesday, { day: "2026-11-24", trading: 0, earlyClose: null }).why, "provisional-closed",
+    "and an unscheduled closure the tape proved today is a wait, not a session: a vendor that lags can still reopen it");
+  eq(liveWindow(easternInstant("2026-11-24", 15 * 60 + 45), { day: "2026-11-24", trading: 0, earlyClose: null }).why, "not-trading",
+    "until 15:45 ET, when Tier 1 stops re-probing");
   eq(liveWindow(tuesday, { day: "2026-11-23", trading: 0, earlyClose: null }).why, "session",
     "a verdict for another day is never applied to this one");
   const early = { day: "2026-11-27", trading: 1, earlyClose: 1 };
@@ -2046,7 +2048,7 @@ const cronMinutes = (cron) => {
     const c = sim(easternInstant(TG, 9 * 60 + 31));
     const passAt = [];
     let reads = 0;
-    const r = await runLiveLoop({ now: c.now, sleep: c.sleep, log: () => {},
+    const r = await runLiveLoop({ now: c.now, sleep: c.sleep, log: () => {}, budgetMs: 24 * 3600 * 1000,
       readClock: async () => { reads++; return c.now() >= verdict ? { day: TG, trading: 0, earlyClose: null } : { day: TG,
         trading: null, earlyClose: null }; },
       pass: async () => { passAt.push(c.now()); c.advance(40000); return {}; },
@@ -2055,10 +2057,19 @@ const cronMinutes = (cron) => {
        reads > passAt.length,
     "A TAPE-DERIVED CLOSURE: the loop reads the Worker's clock around every pass, and once Tier 1 has closed the day " +
       `(09:46 on an unscheduled closure) no pass follows and nothing is chained (${passAt.length} passes before the verdict)`);
-    ok(r.waits > 0 && c.now() >= easternInstant(TG, L.VERDICT.provisionalUntilMin - 5) &&
-       c.now() < easternInstant(TG, L.VERDICT.provisionalUntilMin),
-    `and it waits without a pass until ${L.VERDICT.provisionalUntilMin / 60}:00 ET, while Tier 1 can still reopen the ` +
+    ok(r.waits > 0 && c.now() >= easternInstant(TG, L.VERDICT.unscheduledUntilMin - 5) &&
+       c.now() < easternInstant(TG, L.VERDICT.unscheduledUntilMin),
+    `and it waits without a pass until ${Math.floor(L.VERDICT.unscheduledUntilMin / 60)}:${L.VERDICT.unscheduledUntilMin % 60} ET, while Tier 1 can still reopen the ` +
       `day, before it exits (${r.waits} waits)`);
+    const cb = sim(easternInstant(TG, 9 * 60 + 31));
+    let chainedAt = null;
+    const spent = await runLiveLoop({ now: cb.now, sleep: cb.sleep, log: () => {}, budgetMs: 120 * 60 * 1000,
+      readClock: async () => (cb.now() >= verdict ? { day: TG, trading: 0, earlyClose: null } : { day: TG, trading: null, earlyClose: null }),
+      pass: async () => { cb.advance(40000); return {}; },
+      chain: async ({ at }) => { chainedAt = at; return { sent: true, status: 204, why: "sent" }; } });
+    ok(spent.exit === "budget" && chainedAt !== null && chainedAt < easternInstant(TG, L.VERDICT.unscheduledUntilMin - 60),
+      "and a loop whose time budget runs out while the closure is still provisional hands the wait on to a chained run, so " +
+        "a vendor that comes back at 14:00 still finds a loop to restart the passes");
     const tg = sim(easternInstant("2026-11-26", 9 * 60 + 31));
     let tgPasses = 0;
     const scheduled = await runLiveLoop({ now: tg.now, sleep: tg.sleep, log: () => {},
@@ -2093,8 +2104,12 @@ const cronMinutes = (cron) => {
       "and a starter that lands while the day is provisionally closed waits for the reopening rather than exiting");
     eq(liveWindow(easternInstant(S2, 10 * 60 + 30), { day: S2, trading: 0, earlyClose: null }).why, "provisional-closed",
       "a closed verdict before 11:00 ET is a wait");
-    eq(liveWindow(easternInstant(S2, 11 * 60), { day: S2, trading: 0, earlyClose: null }).why, "not-trading",
-      "and final from 11:00 ET, when Tier 1 stops re-probing");
+    eq(liveWindow(easternInstant(S2, 11 * 60), { day: S2, trading: 0, earlyClose: null }).why, "provisional-closed",
+      "and still a wait at 11:00 ET, which used to be final: Tier 1 now re-probes a closure the calendar does not list to 15:45 ET");
+    eq(liveWindow(easternInstant(S2, 15 * 60 + 44), { day: S2, trading: 0, earlyClose: null }).why, "provisional-closed",
+      "through the last re-probe");
+    eq(liveWindow(easternInstant(S2, 15 * 60 + 45), { day: S2, trading: 0, earlyClose: null }).why, "not-trading",
+      "and final from 15:45 ET");
     eq(liveWindow(T("2026-09-26T14:00:00Z"), { day: "2026-09-26", trading: 0, earlyClose: null }).why, "not-trading",
       "a weekend is never a wait");
   }
@@ -2116,10 +2131,10 @@ const cronMinutes = (cron) => {
       readClock: async () => ({ day: UC, trading: 1, earlyClose: d.now() >= verdict ? 1 : null }),
       pass: async () => { late.push(d.now()); d.advance(40000); return {}; },
       chain: async () => { throw new Error("never chain after an early close"); } });
-    ok(lr.exit === "window-closed" && lr.why === "after-close" && late.at(-1) === easternInstant(UC, 13 * 60 + 35),
+    ok(lr.exit === "window-closed" && lr.why === "after-close" && late.at(-1) === easternInstant(UC, 13 * 60 + 35) && lr.waits > 0,
       "and on an unscheduled early close, which only the tape can reveal, Tier 1 marks it at 13:36, as its 30-minute " +
-        "quiet rule does, and the loop stops at the next slot " +
-        `(last pass ${new Date(late.at(-1)).toISOString()})`);
+        "quiet rule does, and the loop passes no more but waits out the day, since the mark can be taken back " +
+        `(last pass ${new Date(late.at(-1)).toISOString()}, ${lr.waits} waits)`);
   }
   {
     const c = sim(et(12 * 60));
@@ -2293,15 +2308,18 @@ const cronMinutes = (cron) => {
     { m: 9 * 60 + 46, day: TG, feeds: T0 }, { m: 9 * 60 + 51, day: TG, feeds: T0 }, { m: 9 * 60 + 56, day: TG, feeds: T0 },
     { m: 10 * 60 + 1, day: TG, feeds: T0 }, { m: 10 * 60 + 6, day: TG, feeds: T0, calls: 0 },
     { m: 10 * 60 + 16, day: TG, feeds: T0, calls: 2 }, { m: 10 * 60 + 21, day: TG, feeds: T0, calls: 0 },
-    { m: 11 * 60 + 1, day: TG, feeds: T0, calls: 0 },
+    { m: 11 * 60 + 1, day: TG, feeds: T0, calls: 2 }, { m: 11 * 60 + 6, day: TG, feeds: T0, calls: 0 },
+    { m: 15 * 60 + 31, day: TG, feeds: T0, calls: 2 }, { m: 15 * 60 + 46, day: TG, feeds: T0, calls: 0 },
+    { m: 16 * 60 + 1, day: TG, feeds: T0, calls: 0 },
   ]);
   deep(holLog.slice(0, 4).map((t) => t.trading), [null, null, null, 0],
     "AN UNSCHEDULED CLOSURE (a day the calendar thought traded): the 09:46 probe is provisional, 09:51 and 09:56 are too close to it to agree, and at 10:01 the " +
       "second agreeing probe fifteen minutes on makes it final");
   deep(JSON.parse(hol.closed_days), [TG], "and only then does the day join closed_days");
   ok(holLog[4].why === "holiday" && holLog[5].why === "holiday" && !holLog[5].wrote && holLog[6].why === "holiday" &&
-     holLog[7].why === "holiday",
-  "after it, ticks skip with no vendor call, except a re-probe every third tick until 11:00 (two calls, no write)");
+     holLog[7].why === "holiday" && !holLog[7].wrote && holLog[9].why === "holiday" && holLog.slice(10).every((t) => t.why === "holiday" && !t.wrote),
+  "after it, ticks skip with no vendor call, except a re-probe every third tick (two calls, no write) that now runs on to 15:31, " +
+    "the last before 15:45 ET, where it used to stop at 11:00");
 
   const late = { id: 1, day: T0, trading: 1, early_close: 0, closed_days: null };
   const lateLog = await thread(late, [
@@ -2339,7 +2357,7 @@ const cronMinutes = (cron) => {
     db.batch = async (list) => {
       db.statements.push(...list);
       if (/SELECT \* FROM flows_clock/.test(list[0].sql)) {
-        return [{ results: [clockRow] }, { results: [{ read_at: easternInstant(S, 10 * 60 + 10) }] }];
+        return [{ results: [clockRow] }, { results: [{ id: "live:breadth", read_at: easternInstant(S, 10 * 60 + 10), session: S, cadence_s: 900, source: "actions" }] }];
       }
       return list.map(() => ({ results: [] }));
     };
@@ -2716,7 +2734,7 @@ const cronMinutes = (cron) => {
     "runHealthGate reads the clock, live:market, live:focus, live:heartbeat and the strips series (for its quote-lag note) through the ingest route and prints one line");
   const pipeline = read("scripts/flows-pipeline.mjs");
   const tail = pipeline.slice(pipeline.indexOf("async function main()"), pipeline.indexOf("\nexport {\n"));
-  ok(/const health = await runHealthGate\(\{ sessionDate, read: readStored, dry: DRY_RUN, edge: edgeSnapshot,\s*annotate: process\.env\.GITHUB_ACTIONS === "true" \}\);\s*if \(health\.failures\.length\) process\.exitCode = 1;\s*\}\s*$/
+  ok(/const health = await runHealthGate\(\{ sessionDate, read: readStored, dry: DRY_RUN, edge: edgeSnapshot,\s*annotate: process\.env\.GITHUB_ACTIONS === "true",\s*night: \{[^}]*\} \}\);\s*if \(health\.failures\.length\) process\.exitCode = 1;\s*\}\s*$/
     .test(tail), "THE NIGHTLY ENDS WITH THE GATE: its last statement runs it and turns the run red on any failure, after " +
     "every key is published, with the edge 403s counted by kind and the Worker's own 403s kept apart");
   ok(/export function edgeSnapshot\(\) \{\s*return \{ \.\.\.structuredClone\(edgeRefusals\), retrySpentMs: publishRetrySpentMs \};\s*\}/
