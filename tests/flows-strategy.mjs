@@ -33,8 +33,12 @@ const monthlies = (() => {
   }
   return out;
 })();
-const NEAR = monthlies.find((d) => DAYS(SESSION_DAY, d) >= 21);
-const BROKEN = monthlies[monthlies.indexOf(NEAR) + 1];
+const NEAR = monthlies.find((d) => DAYS(SESSION_DAY, d) >= 21 && DAYS(SESSION_DAY, d) <= 44) || (() => {
+  let d = shiftDay(SESSION_DAY, 28);
+  while (new Date(d + "T00:00:00Z").getUTCDay() !== 5 || !isTradingDay(d)) d = shiftDay(d, 1);
+  return d;
+})();
+const BROKEN = monthlies.find((d) => d > NEAR);
 const FAR = monthlies.find((d) => DAYS(SESSION_DAY, d) >= 84 && d > BROKEN);
 const NEAR_DTE = DAYS(SESSION_DAY, NEAR);
 const OCC = (d) => d.slice(2).replace(/-/g, "");

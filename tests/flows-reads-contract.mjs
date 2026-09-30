@@ -679,9 +679,10 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   const done = await W.focusTick({ DB: f.D1, UW_API_KEY: "k" }, at, { fetchVendor, log: { error() {} } });
   ok(done.written === true, "the focus tick writes against a real SQLite payload table");
   const trips = f.since(n);
-  eq(trips.length, 2, "THE DAY-CHANGE BASE COSTS NO ROUND TRIP: the tick is one batch (the clock, the nightly focus row with its groups, session and last closes, and the held live row) and one write");
-  ok(trips[0].kind === "batch" && trips[0].sqls.length === 3 && trips[0].sqls[1] === W.FOCUS_NIGHTLY_SQL && trips[1].kind === "run" &&
-     /INSERT INTO flows_live/.test(trips[1].sqls[0]), "in the order the tick has always made them");
+  eq(trips.length, 2, "THE DAY-CHANGE BASE COSTS NO ROUND TRIP: the tick is one batch (the clock, the nightly focus row with its groups, session and last closes, and the held live row) and one write batch");
+  ok(trips[0].kind === "batch" && trips[0].sqls.length === 3 && trips[0].sqls[1] === W.FOCUS_NIGHTLY_SQL && trips[1].kind === "batch" &&
+     trips[1].sqls.length === 2 && /INSERT INTO flows_live/.test(trips[1].sqls[0]) && /INSERT INTO flows_ledger/.test(trips[1].sqls[1]),
+     "in the order the tick has always made them, its one write carrying the day's ledger row beside the live row");
   const nightly = f.db.prepare(W.FOCUS_NIGHTLY_SQL).get();
   deep([nightly.session, JSON.parse(nightly.closes)], ["2026-09-22", { AAA: 100, BBB: 200, CCC: null, DDD: 1 }],
     "the statement returns the payload's session and the LAST element of each name's closes, as SQLite computes them (a null last close is null, a single close is itself)");
@@ -731,7 +732,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   };
   const CEILING = [
     ["/api/flows/board?side=long", 1], ["/api/flows/board?side=watch", 1], ["/api/flows/market", 1], ["/api/flows/flowalerts", 3],
-    ["/api/flows/events", 1], ["/api/flows/scoretrack", 1], ["/api/flows/sector-premium", 1], ["/api/flows/news", 1],
+    ["/api/flows/events", 1], ["/api/flows/scoretrack", 1], ["/api/flows/sector-premium", 1], ["/api/flows/news", 2],
     ["/api/flows/pulse", 3], ["/api/flows/regime", 1], ["/api/flows/focus", 1], [HOME_LIVE, 6],
     ["/api/flows/now?n=board:long,board:short,meta,focus", 4], ["/api/flows/lk?k=market", 1],
     ["/api/flows/card?t=NVDA", 2], ["/api/flows/hist?t=IDX", 3], ["/api/flows/summary?t=NVDA", 3],
