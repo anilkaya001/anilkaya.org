@@ -498,7 +498,7 @@ also hide a deprecation raised by `worker.js` under Node.
 
 `flows-readers-contract` was measured on 2026-09-30: under 1 s with no server,
 on the same counting D1 fake and `node:sqlite` as `flows-reads-contract`, so it
-takes the same Node floor. `flows-readers-render` about 7 s: Chromium against
+takes the same Node floor. `flows-readers-render` about 10 s: Chromium against
 stubbed `/api/flows/*` routes, a fake clock and `page.clock.runFor`, no workerd.
 
 `flows-pipeline-contract` was measured on 2026-09-24: 123 s with no server. It
