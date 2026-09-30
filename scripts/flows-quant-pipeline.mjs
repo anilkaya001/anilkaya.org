@@ -1,6 +1,6 @@
 import { fitGarch } from "../shared/flows-garch.js";
-import { simulateGjr, binnedLawsFromSimulation, seedKey, ewmaVol, WORLD_LINES } from "../shared/flows-quant-world.js";
-import { binnedFromLognormal } from "../shared/flows-quant-density.js";
+import { simulateGjrQmc, binnedLawsFromSimulation, seedKey, ewmaVol, WORLD_LINES } from "../shared/flows-quant-world.js";
+import { binnedFromLognormal, garchAggregatedSd } from "../shared/flows-quant-density.js";
 import { openInterestGammaBook } from "../shared/flows-features.js";
 import {
   chainRowsByExpiry, buildSlices, zeroGammaOf, parityRate, treasuryRate, chooseRate, bookLevels,
@@ -129,8 +129,8 @@ export function garchLaw({ garch, ticker, sessionDate, closes, rate = 0.04, path
   }
   const sigma2Next = fin(g.sigma2Next) ? g.sigma2Next : Math.pow(g.nextVol / 100, 2) / 252;
   const params = { omega: g.omega / 1e4, alpha: g.alpha, beta: g.beta, gamma: 0, nu: g.nu, lambda: g.lambda, sigma2Next };
-  const sim = simulateGjr(params, { seed: seedKey(ticker, sessionDate), horizons, paths });
-  const laws = binnedLawsFromSimulation(sim, forwards);
+  const sim = simulateGjrQmc(params, { seed: seedKey(ticker, sessionDate), horizons, paths });
+  const laws = binnedLawsFromSimulation(sim, forwards, { sd: (h) => garchAggregatedSd(params, h) });
   return {
     model: "garch", grade, why: Array.isArray(g.why) ? g.why.slice() : [],
     knots: horizons.filter((h) => laws[h]).map((h) => ({ h, edges: laws[h].edges, means: laws[h].means })),

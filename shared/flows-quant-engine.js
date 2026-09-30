@@ -2,13 +2,13 @@ import { black76, impliedVolB76, bsmGreeks, forwardOf, parityForward, touchProba
 import { asSlice, sliceVolK, sliceTotalVariance, sliceSkewSlope, prepareQuotes, fitSlice, skewMetrics } from "./flows-quant-smile.js";
 import {
   lawFromSlice, lawLognormal, lawBinned, lawPdf, lawHinge, lawMean, lawQuantile, lawProb,
-  interpolateBinned, overlayJumps, driftNeutralBinned, binnedFromLognormal, gaussLegendre,
+  binsAtHorizon, overlayJumps, binnedFromLognormal, gaussLegendre, MIN_HORIZON_SESSIONS,
 } from "./flows-quant-density.js";
 import {
   STRUCTURE_BY_ID, DELTA_TARGETS, BUCKET_LINES, scoreFamilies, eventBucket, eventAffinity, eventVeto, listedStrikes,
   buildLegs, legGate, liquidityTier, forwardDeltaOnSlice, statePreference,
 } from "./flows-quant-structures.js";
-import { yearFraction, sessionsBetween, calendarDays, isMonthly, etDayOf } from "./flows-quant-time.js";
+import { yearFraction, sessionsBetween, remainingSessions, calendarDays, isMonthly, etDayOf } from "./flows-quant-time.js";
 
 export const ENGINE_VERSION = "q1";
 export const LOT = 100;
@@ -17,7 +17,7 @@ export const ENGINE_LINES = Object.freeze({
   GRID_Z: Object.freeze([-2, -1, -0.5, 0, 0.5, 1, 2]), GRID_VOL: Object.freeze([-0.05, 0, 0.05]),
   UNDEFINED_CAP: 2, STALE_CAP: 1, TOP_IDEAS: 3, RATE_FALLBACK: 0.04, REG_T_BASE: 0.2, REG_T_FLOOR: 0.1,
   EDGE_COST_MULTIPLE: 2, FIT_CLEAN_IN_SPREAD: 0.8, FIT_FAIR_IN_SPREAD: 0.6, FIT_RMSE_PTS: 1, EVENT_MODE_MAX_DTE: 60,
-  FWD_CAL_TOL: 1e-11, FWD_CAL_STEP: 0.01,
+  FWD_CAL_TOL: 1e-11, FWD_CAL_STEP: 0.01, MIN_HORIZON_SESSIONS, FIT_FLAT_MAX_SPREAD: 0.1, FIT_FLAT_MAX_Z: 1, FIT_FLAT_MAX_IV_REL_WIDTH: 0.15,
 });
 
 const fin = (v) => typeof v === "number" && Number.isFinite(v);
@@ -29,7 +29,7 @@ export function normaliseLeg(l) {
 }
 
 export function legPayoff(l, x) {
-  if (l.type === "S") return x;
+  if (l.type === "S") return x + (l.div || 0);
   return l.type === "C" ? Math.max(0, x - l.K) : Math.max(0, l.K - x);
 }
 
@@ -44,7 +44,7 @@ export function payoffPieces(legs) {
   const h = new Map();
   for (const l of legs) {
     const q = l.side * l.qty;
-    if (l.type === "S") { B += q; continue; }
+    if (l.type === "S") { B += q; A += q * (l.div || 0); continue; }
     h.set(l.K, (h.get(l.K) || 0) + q);
     if (l.type === "P") { A += q * l.K; B -= q; }
   }
@@ -187,7 +187,7 @@ export function structureValue(legs, ctx, x, t, shift) {
   const r = ctx.r, qc = ctx.q, dv = shift || 0;
   for (const l of legs) {
     const qty = l.side * l.qty;
-    if (l.type === "S") { v += qty * x; continue; }
+    if (l.type === "S") { v += qty * (x + (l.div || 0) * (l.T > 0 ? Math.min(1, Math.max(0, t / l.T)) : 1)); continue; }
     const tau = l.T - t;
     if (!(tau > 1e-10)) { v += qty * legPayoff(l, x); continue; }
     const own = ctx.sliceOf(l);
@@ -303,7 +303,7 @@ export function structureMetrics(input) {
   for (const T of Ts) { const s = sliceForT(input, T, S, r, q); if (s) slices.set(T, s); }
   const sliceOf = (l) => slices.get(l.T);
   const priced = legs.map((l) => {
-    if (l.type === "S") return { ...l, price: fin(l.price) ? l.price : S };
+    if (l.type === "S") return { ...l, price: fin(l.price) ? l.price : S, div: fin(l.div) ? l.div : fin(input.S) && fin(l.T) ? S * Math.exp(r * l.T) - forwardOf(S, r, q, l.T) : 0 };
     if (input.priceAt === "given" || fin(l.price)) return l;
     const s = sliceOf(l);
     const vol = sliceVolK(s, Math.log(l.K / s.F));
@@ -391,6 +391,15 @@ const rIntervals = (xs) => xs.map(([a, b]) => [rp(a), b === null ? null : rp(b)]
 export function fitGrade(slice, dependsOnWings) {
   if (!slice) return { g: 0, why: "fit.none" };
   const fis = slice.fitInSpread, rmse = slice.rmseIvPts;
+  if (slice.origin === "contract" || slice.origin === "card-shape") {
+    const c = slice.contract || {};
+    const widthOk = c.ivWidth === undefined || c.ivWidth === null || (fin(c.ivWidth) && fin(c.iv) && c.ivWidth <= ENGINE_LINES.FIT_FLAT_MAX_IV_REL_WIDTH * c.iv);
+    const tight = fin(c.spreadRel) && c.spreadRel <= ENGINE_LINES.FIT_FLAT_MAX_SPREAD && widthOk;
+    if (slice.origin === "card-shape") return tight ? { g: 2, why: "fit.card-shape" } : { g: 1, why: "fit.contract-iv.wide" };
+    const near = fin(c.z) && c.z <= ENGINE_LINES.FIT_FLAT_MAX_Z;
+    if (tight && near) return { g: 2, why: "fit.contract-iv" };
+    return { g: 1, why: tight ? "fit.contract-iv.far" : "fit.contract-iv.wide" };
+  }
   if (slice.method === "flat") return dependsOnWings ? { g: 1, why: "fit.flat" } : { g: 2, why: "fit.flat" };
   if (slice.method === "svi") {
     if ((fis === null || fis >= ENGINE_LINES.FIT_CLEAN_IN_SPREAD) && (rmse === null || rmse <= ENGINE_LINES.FIT_RMSE_PTS) && !slice.why) return { g: 3, why: null };
@@ -413,7 +422,7 @@ export function edgeGrade(evs, costGap) {
 
 export function eventGrade(ev, sliceMethod, moves) {
   if (!ev || !ev.inside) return { g: 3, why: null };
-  if (moves >= 6 && sliceMethod === "mixture") return { g: 3, why: null };
+  if (moves >= 6) return sliceMethod === "mixture" ? { g: 3, why: null } : { g: 2, why: "event.smooth-slice" };
   if (moves >= 3) return { g: 2, why: "event.few-moves" };
   return { g: 1, why: "event.q-equals-p" };
 }
@@ -480,27 +489,15 @@ function legDollarGreeks(l, S, r, qc, sigma) {
   };
 }
 
-function lawsFor(ctx, T, sessions, expiry, F, S) {
+function lawsFor(ctx, T, hSessions, expiry, F, S) {
   const p = ctx.pLaw;
   if (!p) return { main: null, alts: [], grade: 0, why: "model.none" };
   const fwd = F / S;
-  const h = Math.max(1, sessions);
-  const sdOf = (x) => (p.params && fin(p.params.sigma2Next) ? aggregatedSdLocal(p.params, x) : Math.sqrt(x));
-  let bins = null;
-  if (Array.isArray(p.knots) && p.knots.length) {
-    const ks = p.knots.slice().sort((a, b) => a.h - b.h);
-    let lower = ks[0], upper = ks[ks.length - 1];
-    for (const k of ks) { if (k.h <= h) lower = k; if (k.h >= h && upper.h >= k.h) upper = k; }
-    if (h <= ks[0].h) { lower = ks[0]; upper = ks[0]; }
-    if (h >= ks[ks.length - 1].h) { lower = ks[ks.length - 1]; upper = lower; }
-    if (lower.h === upper.h) {
-      const scale = sdOf(h) / sdOf(lower.h);
-      const re = (v) => (v === null ? null : v === 0 ? 0 : Math.exp(Math.log(v) * scale));
-      bins = driftNeutralBinned({ edges: lower.edges.map(re), means: lower.means.map(re) }, fwd);
-    } else bins = interpolateBinned({ lower, upper, h, sd: sdOf, forwardOverSpot: fwd });
-  }
+  const h = Math.max(ENGINE_LINES.MIN_HORIZON_SESSIONS, hSessions);
+  const bins = binsAtHorizon(p, h, fwd);
   const ev = ctx.eventFor(expiry);
   const jumps = ev.inside ? ctx.jumps : null;
+  if (ctx.crossesEarnings === true && !(jumps && jumps.length)) return { main: null, alts: [], grade: 0, why: "world.event-missing" };
   const withJumps = (b) => (jumps && jumps.length ? overlayJumps({ bins: b, jumps, forwardOverSpot: fwd }) : b);
   const lnBins = (vol) => binnedFromLognormal({ sigma: vol, T: h / 252, forwardOverSpot: fwd });
   const lognormalOrBinned = (vol) => {
@@ -513,15 +510,6 @@ function lawsFor(ctx, T, sessions, expiry, F, S) {
   else if (fin(p.vol)) main = lognormalOrBinned(p.vol);
   const alts = [lognormalOrBinned(p.ewmaVol), lognormalOrBinned(p.coneMedianVol)].filter(Boolean);
   return { main, alts, grade: fin(p.grade) ? p.grade : main ? 1 : 0, why: Array.isArray(p.why) && p.why.length ? p.why[0] : p.model === "ewma" ? "model.ewma" : null };
-}
-
-function aggregatedSdLocal(params, h) {
-  const persistence = params.alpha + (params.gamma || 0) / 2 + params.beta;
-  const longRun = persistence < 1 ? params.omega / (1 - persistence) : params.sigma2Next;
-  let avg;
-  if (Math.abs(1 - persistence) < 1e-9) avg = params.sigma2Next;
-  else avg = longRun + (params.sigma2Next - longRun) * (1 - Math.pow(persistence, h)) / (h * (1 - persistence));
-  return Math.sqrt(Math.max(avg, 0) * h);
 }
 
 function curveGrid(qLaw, legs, breakevens) {
@@ -541,7 +529,7 @@ function priceCandidate(cand, ctx) {
   const legs = cand.legs.map((l) => {
     const e = ctx.expiries.get(l.expiry || cand.expiry);
     const T = e.T;
-    if (l.type === "S") return { ...l, T, expiry: e.expiry, bid: S, ask: S, mid: S, model: S, oi: null, vol: null };
+    if (l.type === "S") return { ...l, T, expiry: e.expiry, bid: S, ask: S, mid: S, model: S, oi: null, vol: null, div: S / e.slice.D - e.slice.F };
     const qt = e.quoteOf(l.type, l.K);
     const k = Math.log(l.K / e.slice.F);
     const iv = sliceVolK(e.slice, k);
@@ -616,25 +604,27 @@ function priceCandidate(cand, ctx) {
   else if (gates.every((g) => g.tight)) liq = { g: 3, why: null };
   else liq = { g: 2, why: "liq.not-tight" };
   const dependsOnWings = !(cand.family === "long-straddle");
-  const fitG = Math.min(...[...new Set(legs.filter((l) => l.type !== "S").map((l) => l.expiry))]
-    .map((ex) => fitGrade(ctx.expiries.get(ex).slice, dependsOnWings).g));
-  const fitWhy = [...new Set(legs.filter((l) => l.type !== "S").map((l) => fitGrade(ctx.expiries.get(l.expiry).slice, dependsOnWings).why).filter(Boolean))][0] || null;
+  const fitParts = [...new Set(legs.filter((l) => l.type !== "S").map((l) => l.expiry))].map((ex) => fitGrade(ctx.expiries.get(ex).slice, dependsOnWings));
+  const fitG = Math.min(...fitParts.map((f) => f.g));
+  const fitWhy = (fitParts.find((f) => f.g === fitG && f.why) || {}).why || null;
   const evB = ctx.eventFor(front.expiry);
   const parts = {
     fit: { g: fitG, why: fitWhy },
     liquidity: liq,
-    model: { g: laws.main ? laws.grade : 0, why: laws.main ? laws.why : "model.none" },
+    model: { g: laws.main ? laws.grade : 0, why: laws.main ? laws.why : laws.why === "world.event-missing" ? laws.why : "model.none" },
     edge: edgeGrade(edges.map((e, i) => ({ edge: e, evP: evPs[i] })).filter((x) => x.edge !== null), Math.abs(natural - fill) * LOT),
     event: eventGrade(evB, front.slice.method, ctx.eventMoves),
   };
   const g = combineGrade(parts, { undefinedRisk: fam.risk === "undefined", stale: !!ctx.stale });
   const out = {
-    family: cand.family, risk: fam.risk, dir: cand.dir || fam.dir, expiry: exp.expiry, dte: exp.dte, sessions: exp.sessions, T: rv(exp.T),
+    family: cand.family, risk: fam.risk, dir: cand.dir || fam.dir, expiry: exp.expiry, dte: exp.dte, sessions: exp.sessions, hSessions: rp(exp.hSessions), T: rv(exp.T),
     legs: legs.map((l) => ({
       sym: l.sym || null, type: l.type, k: l.type === "S" ? null : l.K, expiry: l.expiry, side: l.side, qty: l.qty,
       bid: rp(l.bid), ask: rp(l.ask), mid: rp(l.mid), model: rp(l.model), iv: l.type === "S" ? null : rv(l.iv),
       ivBid: rv(l.ivBid), ivAsk: rv(l.ivAsk), delta: l.type === "S" ? 1 : rpr(l.delta), oi: fin(l.oi) ? l.oi : null,
       vol: fin(l.vol) ? l.vol : null, spreadRel: rpr(l.spreadRel),
+      intrinsic: l.type === "S" ? null : rp(Math.max(0, l.type === "C" ? S - l.K : l.K - S)),
+      timeValue: l.type === "S" || !fin(l.bid) ? null : rp((l.side > 0 ? l.ask : l.bid) - Math.max(0, l.type === "C" ? S - l.K : l.K - S)),
       snapped: (cand.snapped || []).filter((s) => s.K === l.K).map((s) => s.rule)[0] || null,
     })),
     price: { mid: rp(mid), natural: rp(natural), fill: rp(fill), model: rp(model) },
@@ -644,6 +634,11 @@ function priceCandidate(cand, ctx) {
     maxProfitAt: rIntervals(prof.maxProfitAt), maxLossAt: rIntervals(prof.maxLossAt),
     breakevens: prof.breakevens.map(rp),
     capital: { kind: capital.kind, value: r$(capital.value) },
+    carry: {
+      r: rv(front.r), q: rv(front.qImpl), rateMethod: front.forward.rateMethod || null, forward: front.forward.method,
+      dividend: legs.some((l) => l.type === "S") ? rp(legs.find((l) => l.type === "S").div) : null,
+    },
+    world: { drift: "forward", premium: 0, exercise: "european", why: laws.main ? null : laws.why || "model.none" },
     greeks: Object.fromEntries(Object.keys(greeks).map((k) => [k, r$(greeks[k])])),
     prob: {
       popQ: rpr(popQ), popP: rpr(popP),
@@ -733,23 +728,27 @@ export function buildExpiry(input) {
   const clean = (rows || []).filter((r) => r && fin(r.K) && (r.type === "C" || r.type === "P")).slice()
     .sort((a, b) => a.K - b.K || (a.type < b.type ? -1 : a.type > b.type ? 1 : 0));
   const r0 = fin(rate) ? rate : ENGINE_LINES.RATE_FALLBACK;
+  const rateMethod = typeof input.rateMethod === "string" ? input.rateMethod : fin(rate) ? "given" : "fallback";
   const sigmaSeed = seedVol(clean, S);
   const pin = parityInput(clean, S, T);
   let fwd = parityForward({ ...pin, sigmaSeed, D: Math.exp(-r0 * T) });
-  if (!fwd) fwd = { F: forwardOf(S, r0, 0, T), D: Math.exp(-r0 * T), r: r0, q: 0, pairs: 0, method: "rate-only" };
-  const q = fwd.q;
+  if (!fwd) {
+    const carry = fin(input.q) ? input.q : 0;
+    fwd = { F: forwardOf(S, r0, carry, T), D: Math.exp(-r0 * T), r: r0, q: carry, pairs: 0, method: "rate-only", carry: fin(input.q) ? "card" : "none" };
+  }
+  fwd = { ...fwd, rateMethod };
   const prepared = prepareQuotes({ F: fwd.F, D: fwd.D, T, rows: clean });
   const slice = fitSlice({ F: fwd.F, D: fwd.D, T, points: prepared.points, prev: prev || null, event: input.event || null });
   if (!slice) return null;
   return expiryFromFit({
-    expiry, T, dte: calendarDays(asOfDay, expiry), sessions: sessionsBetween(asOfDay, expiry), monthly: isMonthly(expiry),
-    forward: fwd, slice, points: prepared.points, rows: clean,
+    expiry, T, dte: calendarDays(asOfDay, expiry), sessions: sessionsBetween(asOfDay, expiry), hSessions: remainingSessions(asOfMs, expiry),
+    monthly: isMonthly(expiry), forward: fwd, slice, points: prepared.points, rows: clean,
   });
 }
 
 export function expiryFit(e) {
   return {
-    expiry: e.expiry, T: e.T, dte: e.dte, sessions: e.sessions, monthly: e.monthly, forward: e.forward, slice: e.slice,
+    expiry: e.expiry, T: e.T, dte: e.dte, sessions: e.sessions, hSessions: e.hSessions, monthly: e.monthly, forward: e.forward, slice: e.slice,
     points: e.points.length,
   };
 }
@@ -761,7 +760,7 @@ export function expiryFromFit(input) {
   const book = quoteBook(clean);
   const quoteCache = new Map();
   return {
-    expiry, T, dte: input.dte, sessions: input.sessions, monthly: input.monthly,
+    expiry, T, dte: input.dte, sessions: input.sessions, hSessions: fin(input.hSessions) ? input.hSessions : input.sessions, monthly: input.monthly,
     F: fwd.F, D: fwd.D, r: fwd.r, qImpl: fwd.q, forward: fwd, slice,
     points: Array.isArray(input.points) ? input.points : { length: fin(input.points) ? input.points : 0 }, rows: clean,
     callStrikes: listedStrikes(clean, "C"), putStrikes: listedStrikes(clean, "P"),
@@ -881,15 +880,15 @@ export function setupEngine(input, list) {
   const qtabs = new Map();
   const ctx = {
     spot: S, expiries, pLaw: input.pLaw || null, levels: input.levels || null, stale: !!input.stale, curves: !!input.curves,
-    eventFor, jumps, eventMoves, event: evIn, eventMode: !!evIn,
+    eventFor, jumps, eventMoves, event: evIn, eventMode: !!evIn, crossesEarnings: input.crossesEarnings === true ? true : input.crossesEarnings === false ? false : null,
     sessionsTo: (d) => sessionsBetween(asOfDay, d),
     qtab: (law, key) => { if (!qtabs.has(key)) qtabs.set(key, quantileTable(law, ENGINE_LINES.VAR_POINTS)); return qtabs.get(key); },
   };
   const lc = input.lawCache;
   const lawCache = lc && typeof lc.get === "function" && typeof lc.set === "function" && typeof lc.has === "function" ? lc : new Map();
   ctx.lawsOf = (front, spot) => {
-    const key = front.expiry + "|" + front.T + "|" + front.sessions + "|" + front.slice.F + "|" + spot;
-    if (!lawCache.has(key)) lawCache.set(key, lawsFor(ctx, front.T, front.sessions, front.expiry, front.slice.F, spot));
+    const key = front.expiry + "|" + front.T + "|" + front.hSessions + "|" + front.slice.F + "|" + spot + (ctx.crossesEarnings === true ? "|E" : "");
+    if (!lawCache.has(key)) lawCache.set(key, lawsFor(ctx, front.T, front.hSessions, front.expiry, front.slice.F, spot));
     return lawCache.get(key);
   };
   const putSkewPct = facts["skew.rr25.30.pct"] && fin(facts["skew.rr25.30.pct"].v) ? facts["skew.rr25.30.pct"].v : null;
@@ -927,6 +926,12 @@ export function structureLegs(setup, familyId, variant, expiry, back) {
   });
 }
 
+export function cardCarry(facts) {
+  if (!facts) return null;
+  const f = Array.isArray(facts) ? facts.find((x) => x && x.id === "carry.implied") : facts["carry.implied"];
+  return f && fin(f.v) ? f.v : null;
+}
+
 export function runEngine(input) {
   const asOfMs = typeof input.asOf === "number" ? input.asOf : Date.parse(input.asOf);
   const S = input.spot;
@@ -938,7 +943,7 @@ export function runEngine(input) {
   if (evIn) firstAfter = raw.find((e) => e.expiry >= evIn.date) || null;
   for (const e of raw) {
     const ex = buildExpiry({
-      expiry: e.expiry, rows: e.rows, spot: S, asOfMs, rate: input.rate, prev,
+      expiry: e.expiry, rows: e.rows, spot: S, asOfMs, rate: input.rate, rateMethod: input.rateMethod, q: cardCarry(input.facts), prev,
       event: evIn && firstAfter && firstAfter.expiry === e.expiry ? { firstAfter: true, sigmaD: null } : null,
     });
     if (!ex) continue;
@@ -1004,7 +1009,7 @@ export function runEngine(input) {
     engine: ENGINE_VERSION, ticker: input.ticker || null, asOf: asOfDay, spot: S,
     liquidity: { tier: tier.tier, medianRelSpread: rpr(tier.median) },
     expiries: list.map((e) => ({
-      expiry: e.expiry, dte: e.dte, sessions: e.sessions, T: rv(e.T),
+      expiry: e.expiry, dte: e.dte, sessions: e.sessions, hSessions: rp(e.hSessions), T: rv(e.T),
       forward: { F: rp(e.F), D: roundTo(e.D, 8), r: rv(e.r), qImpl: rv(e.qImpl), pairs: e.forward.pairs, method: e.forward.method },
       smile: smileSummary(e.slice),
     })),

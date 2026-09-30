@@ -200,7 +200,8 @@ const CLOSES = (() => { const c = [100]; const rng = WORLD.xoshiro128ss("closes"
 
 {
   const law = QP.garchLaw({ garch: GARCH, ticker: "SYN", sessionDate: SESSION, closes: CLOSES, rate: R, paths: 2048 });
-  ok(law.model === "garch" && law.grade === 3 && law.knots.length === 6, "a graded GARCH fit is simulated into six horizons");
+  eq(law.knots.map((k) => k.h), [1, 2, 3, 5, 10, 21, 42, 63, 126], "a graded GARCH fit is simulated into nine horizons, with knots at 1, 2 and 3 sessions so a weekly is never a power-scaled copy of the 5-session law");
+  ok(law.model === "garch" && law.grade === 3, "and is graded");
   for (const k of law.knots) {
     near(DENSITY.lawMean(DENSITY.lawBinned({ S: 1, edges: k.edges, means: k.means })), Math.exp(R * k.h / 252), 1e-9,
       `the ${k.h}-session law is drift-neutral to the risk-free forward`);
@@ -326,7 +327,7 @@ const FACT_INPUT = () => ({
   const levels = { callWall: 105, putWall: 95, magnet: 100, flip: 99, maxPain: 100, atr: 2 };
   const input = { ticker: "SYN", asOfMs: AS_OF_MS, spot: SPOT, rate: RATE, expiries: slices.input, facts, state, pLaw: law, levels, event: null, atr: 2 };
   const block = QC.runCardEngine(input);
-  const direct = ENGINE.runEngine({ ticker: "SYN", asOf: AS_OF_MS, spot: SPOT, rate: R, expiries: slices.input, facts: QC.factMap(facts),
+  const direct = ENGINE.runEngine({ ticker: "SYN", asOf: AS_OF_MS, spot: SPOT, rate: R, rateMethod: RATE.method, expiries: slices.input, facts: QC.factMap(facts),
     state: QC.engineState(state), pLaw: law, levels, curves: false });
   const byId = new Map(direct.structures.map((s) => [s.id, s]));
   ok(block.structures.length >= 1 && block.structures.length <= QC.QUANT_CARD_LINES.PUBLISH_STRUCTURES,
@@ -336,7 +337,7 @@ const FACT_INPUT = () => ({
   eq(block.ideas, direct.ideas, "with the engine's ranking");
   ok(block.ideas.every((id) => block.structures.some((s) => s.id === id)), "and every idea id resolves to a published structure");
   eq(JSON.stringify(QC.runCardEngine(input)), JSON.stringify(block), "the block is byte-identical on a rerun");
-  ok(block.pLaw && block.pLaw.knots.length === 6 && QC.runCardEngine({ ...input, publishLaw: false }).pLaw === null,
+  ok(block.pLaw && block.pLaw.knots.length === 9 && QC.runCardEngine({ ...input, publishLaw: false }).pLaw === null,
      "the law rides the card and is left off when the caller already holds it");
 
   const idea = block.structures.find((s) => new Set(s.legs.map((l) => l.expiry)).size === 1);
@@ -462,7 +463,14 @@ const FACT_INPUT = () => ({
   const flatSet = FQ.labSetup({ ...labIn, books: [{ fit: flat, rows: rows.filter((r) => r.type === "P" && r.K === 95) }] });
   const sp = FQ.priceStructure(flatSet, { family: "short-put", expiry: EXP, legs: [{ type: "P", K: 95, side: -1, qty: 1 }], basis: "mid" });
   near(sp.legs[0].model, sp.legs[0].mid, 1e-4, "a desk line priced on its own contract's implied vol reproduces its mid");
-  ok(sp.gradeParts.fit === 1 && sp.prob.popQ > 0.5 && sp.prob.popP !== null, "on a flat slice graded 1, with a risk-neutral and a real-world chance of profit");
+  {
+    const q95 = rows.find((r) => r.type === "P" && r.K === 95);
+    const spreadRel = (q95.ask - q95.bid) / ((q95.ask + q95.bid) / 2);
+    const z = Math.abs(Math.log(95 / flat.forward.F)) / (flat.slice.params.sigma * Math.sqrt(flat.T));
+    ok(spreadRel <= 0.1 && z <= 1, `the 95 put is a tight quote (${(100 * spreadRel).toFixed(1)}% wide) ${z.toFixed(2)} standard deviations from the forward`);
+    ok(sp.gradeParts.fit === 2 && sp.prob.popQ > 0.5 && sp.prob.popP !== null,
+       "so a flat slice on it grades 2, not the 1 every desk line used to carry, with a risk-neutral and a real-world chance of profit");
+  }
   const shared = new Map();
   let lines = 0, sameLines = 0;
   for (const r of rows.filter((x) => x.type === "P" && x.bid > 0)) {

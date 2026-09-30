@@ -48,6 +48,10 @@ function observed(y, m, d, saturdayRule) {
 
 const HOLIDAY_CACHE = new Map();
 
+const SPECIAL_CLOSURES = Object.freeze([
+  "2001-09-11", "2001-09-12", "2001-09-13", "2001-09-14", "2004-06-11", "2007-01-02", "2012-10-29", "2012-10-30", "2018-12-05", "2025-01-09",
+]);
+
 export function nyseHolidays(y) {
   if (HOLIDAY_CACHE.has(y)) return HOLIDAY_CACHE.get(y);
   const out = new Set();
@@ -64,6 +68,7 @@ export function nyseHolidays(y) {
   add(isoDay(y, 9, nthWeekday(y, 9, 1, 1)));
   add(isoDay(y, 11, nthWeekday(y, 11, 4, 4)));
   add(observed(y, 12, 25, true));
+  for (const day of SPECIAL_CLOSURES) if (day.startsWith(y + "-")) out.add(day);
   HOLIDAY_CACHE.set(y, out);
   return out;
 }
@@ -126,6 +131,26 @@ export function closeUtcMs(day) {
   if (!p) return null;
   const closeEt = nyseEarlyCloses(p.y).has(isoDay(p.y, p.m, p.d)) ? 13 : 16;
   return p.t + (closeEt + (usDst(p.y, p.m, p.d) ? 4 : 5)) * 3600000;
+}
+
+export function openUtcMs(day) {
+  const p = parseDay(day);
+  if (!p) return null;
+  return p.t + (9.5 + (usDst(p.y, p.m, p.d) ? 4 : 5)) * 3600000;
+}
+
+export function sessionFractionLeft(asOfMs, day) {
+  const p = parseDay(day);
+  if (!p || !isSession(day) || typeof asOfMs !== "number" || !Number.isFinite(asOfMs)) return 0;
+  const open = openUtcMs(day), close = closeUtcMs(day);
+  return Math.min(1, Math.max(0, (close - asOfMs) / (close - open)));
+}
+
+export function remainingSessions(asOfMs, expiryDay) {
+  if (typeof asOfMs !== "number" || !Number.isFinite(asOfMs) || !parseDay(expiryDay)) return null;
+  const today = etDayOf(asOfMs);
+  if (expiryDay < today) return 0;
+  return sessionFractionLeft(asOfMs, today) + sessionsBetween(today, expiryDay);
 }
 
 export function yearFraction(asOfMs, expiryDay) {
