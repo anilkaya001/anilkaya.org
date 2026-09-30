@@ -961,6 +961,9 @@ function guardLevels(card) {
   const L = levelsOf(card);
   const out = L.list.map((l) => ({ kind: l.kind, px: l.px }));
   if (L.spot !== null) out.push({ kind: "spot", px: L.spot });
+  const top = (kind, px) => { if (num(px) !== null && !out.some((l) => l.kind === kind)) out.push({ kind, px: num(px) }); };
+  top("strike_sum_crossing", card.strikeSumCrossing);
+  top("zero_gamma", card.zeroGamma);
   return out;
 }
 

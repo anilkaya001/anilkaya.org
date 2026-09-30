@@ -492,6 +492,13 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
   eq(g("The put wall 70.00 is 0.15 ATR below spot 70.22, and 60% of the ladder sits under spot.").ok, true, "percentages, ATR multiples and counts are not prices");
   eq(g("The flip at 68.32 and the flip at 66.10 both count.").ok, true, "a bare 'flip' may be either the strike-sum crossing or the zero-gamma level");
   eq(g("The gamma flip at 67.00 is close.").mislabeled, true, "but not the call wall's price");
+  {
+    const raw = [{ kind: "zero_gamma", px: 66.1234 }, { kind: "call_wall", px: 67 }, { kind: "strike_sum_crossing", px: 68.3214 }];
+    const rawFacts = [{ say: "Zero gamma 66.12, call wall 67.00, crossing 68.32." }];
+    const r = (text) => guardAnswer(text, rawFacts, { smallIntegers: false, levels: raw });
+    eq(r("The zero-gamma level at 66.12 and the strike-sum crossing at 68.32 bracket it.").ok, true, "a level held at four decimals is quoted at the two the card prints, and the comparison is to the cent");
+    eq(r("The call wall at 66.12 is close.").mislabeled, true, "and its rounded price is still the zero-gamma level's, not the call wall's");
+  }
   eq(levelMislabels("The call wall at 70.00.", []).length, 0, "with no levels on the card there is nothing to attribute against");
   eq(levelMislabels("The call wall at 70.00.", null).length, 0, "and a missing list is the same");
   eq(guardAnswer("The call wall at 70.00.", facts, { smallIntegers: false }).ok, true, "the check only runs for a caller that passes the card's levels");

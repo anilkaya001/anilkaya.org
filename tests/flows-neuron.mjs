@@ -1209,6 +1209,8 @@ const CARD = {
   eq(guardOptions(ctx).modals, true, "Neuron's guard asks for the modal check and the card's levels");
   ok(guardOptions(ctx).levels.some((l) => l.kind === "put_wall" && l.px === 70) && guardOptions(ctx).levels.some((l) => l.kind === "spot" && l.px === 70.22),
      "with every level and the spot");
+  ok(guardOptions(ctx).levels.some((l) => l.kind === "strike_sum_crossing" && l.px === 68.32),
+     "and the strike-sum crossing the card carries at its top level when the levels panel does not list it");
   const mis = vetIdeas([{ ...idea, thesis: "The call wall at 70.00 sits 0.3% below spot 70.22 and dealer gamma is short." }], ctx);
   ok(mis.ideas.length === 0 && /level it does not belong to/.test(mis.refused[0]),
      `N-F5: 'call wall at 70.00' is refused when 70.00 is the put wall, a figure the card carries and the numeral check passed (${mis.refused[0]})`);

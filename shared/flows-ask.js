@@ -50,7 +50,8 @@ export function levelMislabels(text, levels) {
   if (typeof text !== "string" || !list.length) return [];
   const pxOf = (kind) => list.filter((l) => l.kind === kind).map((l) => l.px);
   const allowed = (kind) => (kind === "flip" ? [...pxOf("zero_gamma"), ...pxOf("strike_sum_crossing")] : pxOf(kind));
-  const isPx = (v) => list.some((l) => Math.abs(l.px - v) < 1e-9);
+  const sameCents = (x, v) => Math.abs(x - v) <= 0.005 + 1e-9;
+  const isPx = (v) => list.some((l) => sameCents(l.px, v));
   const t = text.replace(/−/g, "-");
   const marks = [...t.matchAll(LEVEL_MARK)].map((m) => ({ at: m.index, end: m.index + m[0].length, said: m[0], kind: LEVEL_KIND_OF(m[0]) }));
   const out = [];
@@ -63,7 +64,7 @@ export function levelMislabels(text, levels) {
     const g = LEVEL_LINK.exec(t.slice(m.end));
     if (!g) continue;
     const v = Number(g[1].replace(/,/g, ""));
-    if (!allowed(m.kind).some((x) => Math.abs(x - v) < 1e-9)) say(m.kind, m.said, g[1]);
+    if (!allowed(m.kind).some((x) => sameCents(x, v))) say(m.kind, m.said, g[1]);
   }
   const PRICE = new RegExp("(?<![\\d.])-?\\d+(?:,\\d+)*\\.\\d{2}" + LEVEL_UNIT, "g");
   for (const n of t.matchAll(PRICE)) {
@@ -75,7 +76,7 @@ export function levelMislabels(text, levels) {
     const start = n.index - window.length;
     let near = null;
     for (const m of marks) if (m.end <= n.index && m.at >= start) near = m;
-    if (near && !allowed(near.kind).some((x) => Math.abs(x - v) < 1e-9)) say(near.kind, near.said, n[0]);
+    if (near && !allowed(near.kind).some((x) => sameCents(x, v))) say(near.kind, near.said, n[0]);
   }
   return out;
 }
