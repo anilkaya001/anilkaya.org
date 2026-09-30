@@ -3,7 +3,7 @@ import { guardAnswer, numeralsIn } from "./flows-ask.js";
 import { VARIATION_VOTES, VARIATION_LINES } from "./flows-variation.js";
 import { STRUCTURE_BY_ID, AFFINITY } from "./flows-quant-structures.js";
 
-export const NEURON_CONTEXT_VERSION = 3;
+export const NEURON_CONTEXT_VERSION = 4;
 export const NEURON_MAX_IDEAS = 3;
 
 const article = (noun, capital) => (/^[aeiou]/i.test(noun) ? (capital ? "An " : "an ") : (capital ? "A " : "a ")) + noun;
@@ -943,7 +943,8 @@ export const VERDICT_WORD = Object.freeze({
   "term-roll": "Term roll", "stand-aside": "Stand aside",
 });
 export const CLAIM_RELS = Object.freeze(["gt", "lt", "near", "between", "rising", "falling", "rich", "cheap"]);
-export const VET_CODES = Object.freeze(["schema", "digit", "unknown-id", "avoid", "verdict-false", "claim-false", "withheld", "undefined-first", "dup"]);
+export const VET_CODES = Object.freeze(["schema", "digit", "unknown-id", "avoid", "verdict-false", "claim-false", "withheld", "undefined-first", "dup",
+  "not-ranked", "off-rules"]);
 export const ENGINE_LINES = Object.freeze({
   VRP_RICH: 0.10, VRP_CHEAP: -0.10, IV_LOW: 0.25, IV_MID_HIGH: 0.75, IV_HIGH: 0.70, EVENT_OVER: 1.25, EVENT_UNDER: 0.80,
   SKEW_STEEP: 0.8, SKEW_FLAT: 0.2, FRONT_BID: 0.08, NEAR_ATR: 0.5, NEAR_VOL: 0.01, NEAR_FRAC: 0.02, MAX_IDEAS: 3, MAX_STRUCTURES: 5,
@@ -1066,7 +1067,7 @@ export function verdictHolds(code, st, eng) {
       return !!st && skewPct !== null && skewPct <= L.SKEW_FLAT && ["collar", "put-debit-spread"].includes(st.family);
     case "term-roll":
       return !!st && front !== null && front >= L.FRONT_BID && ["long-calendar", "diagonal"].includes(st.family);
-    case "stand-aside": return !!eng.noTrade || !eng.ideas.length;
+    case "stand-aside": return !!eng.noTrade;
     default: return false;
   }
 }
@@ -1137,10 +1138,8 @@ function digitOutsideIds(reply) {
   });
 }
 
-function becauseOf(st, eng) {
+function weighedRules(st, eng) {
   const m = factIndex(eng);
-  const out = [];
-  const add = (id) => { const f = m.get(id); if (f && f.v !== null && f.g > 0 && !out.includes(id)) out.push(id); };
   const gradeOf = (id) => { const f = m.get(id); return f && f.v !== null ? f.g : 0; };
   const aff = AFFINITY[st.family] || null;
   const weighed = [];
@@ -1155,7 +1154,18 @@ function becauseOf(st, eng) {
     }
   });
   weighed.sort((a, b) => b.c - a.c || a.i - b.i);
-  for (const w of weighed) for (const id of w.ids) add(id);
+  return weighed;
+}
+
+function ruleFactIds(st, eng) {
+  return new Set(weighedRules(st, eng).flatMap((w) => w.ids));
+}
+
+function becauseOf(st, eng) {
+  const m = factIndex(eng);
+  const out = [];
+  const add = (id) => { const f = m.get(id); if (f && f.v !== null && f.g > 0 && !out.includes(id)) out.push(id); };
+  for (const w of weighedRules(st, eng)) for (const id of w.ids) add(id);
   for (const id of ["vrp.rel.21", "iv.pct.30", "level.flip", "gex.book", "iv.cm.30"]) { if (out.length >= 2) break; add(id); }
   return out.slice(0, 2);
 }
@@ -1173,7 +1183,7 @@ export function engineFallback(context) {
     const gs = because.map((f) => m.get(f).g);
     ideas.push({ structure: id, verdict, because, grade: Math.min(num(st.grade) === null ? 0 : st.grade, ...(gs.length ? gs : [0])), from: "engine" });
   }
-  const verdict = ideas.length ? ideas[0].verdict : verdictHolds("stand-aside", null, eng) ? "stand-aside" : null;
+  const verdict = ideas.length ? ideas[0].verdict : eng.noTrade || !eng.ideas.length ? "stand-aside" : null;
   return { verdict, claims: [], ideas, refused: [] };
 }
 
@@ -1232,6 +1242,7 @@ export function vetEngineReply(reply, context) {
   const avoid = eng.state && Array.isArray(eng.state.avoid) ? eng.state.avoid : [];
   const kept = [];
   const seen = new Set();
+  const families = new Set();
   const definedListed = eng.structures.some((x) => x.risk === "defined" && num(x.grade) !== null && x.grade >= 1);
   for (const [i, idea] of (reply.ideas || []).entries()) {
     const at = "ideas." + i;
@@ -1248,7 +1259,11 @@ export function vetEngineReply(reply, context) {
     if (because.some((id) => m.get(id).g === 0 || m.get(id).v === null)) { refuse("withheld", at); continue; }
     if (idea.verdict && !verdictHolds(idea.verdict, st, eng)) { refuse("verdict-false", at); continue; }
     if (!kept.length && st.risk !== "defined" && definedListed) { refuse("undefined-first", at); continue; }
+    if (!eng.ideas.includes(st.id)) { refuse("not-ranked", at); continue; }
+    if (families.has(st.family)) { refuse("dup", at); continue; }
+    if (!because.some((id) => ruleFactIds(st, eng).has(id))) { refuse("off-rules", at); continue; }
     seen.add(st.id);
+    families.add(st.family);
     const grade = Math.min(num(st.grade) === null ? 0 : st.grade, ...because.map((id) => m.get(id).g));
     kept.push({ structure: st.id, verdict: idea.verdict || null, because, grade, from: "model" });
     if (kept.length >= ENGINE_LINES.MAX_IDEAS) break;
@@ -1256,11 +1271,12 @@ export function vetEngineReply(reply, context) {
   let verdict = typeof reply.verdict === "string" ? reply.verdict : null;
   if (verdict !== null && !VERDICTS.includes(verdict)) { refuse("schema", "verdict"); verdict = null; }
   if (verdict !== null) {
-    const holds = verdict === "stand-aside" ? verdictHolds(verdict, null, eng) || !kept.length
+    const holds = verdict === "stand-aside" ? verdictHolds(verdict, null, eng) && !kept.length
       : kept.some((k) => verdictHolds(verdict, structureAt(eng, k.structure), eng)) ||
         (["event-overpriced", "event-underpriced"].includes(verdict) && verdictHolds(verdict, null, eng));
     if (!holds) { refuse("verdict-false", "verdict"); verdict = null; }
   }
+  if (!kept.length && verdict !== "stand-aside") verdict = null;
   return { ok: kept.length > 0 || verdict === "stand-aside", verdict, claims, ideas: kept, refused };
 }
 

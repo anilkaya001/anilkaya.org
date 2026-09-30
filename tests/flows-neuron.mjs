@@ -123,7 +123,7 @@ const CARD = {
   ok(stale.features.find((f) => f.key === "gamma").why.includes("capped"), "with the cap named in the reason");
 
   const fp = contextFingerprint(ctx);
-  ok(/^n3\./.test(fp), "the fingerprint carries the protocol version, now 3 for the engine facts and structures");
+  ok(/^n4\./.test(fp), "the fingerprint carries the protocol version, now 4: the vet accepts only the engine's ranked ideas, so a row stored under 3 may hold a promoted structure and is read again once");
   ok(fp !== contextFingerprint(stale), "and moves when the cap changes the grades");
   ok(fp === contextFingerprint(buildContext(JSON.parse(JSON.stringify(CARD)), { expectedSession: "2026-09-15" })),
      "and is stable across a deep copy of the same card");
@@ -800,7 +800,7 @@ const CARD = {
 }
 
 {
-  eq(NEURON_CONTEXT_VERSION, 3, "the context protocol is version 3: numbered engine facts and priced structures");
+  eq(NEURON_CONTEXT_VERSION, 4, "the context protocol is version 4: numbered engine facts and priced structures, vetted against the engine's own ranking");
   const leg = (type, k, side, qty = 1) => ({ type, k, side, qty });
   const st = (id, family, risk, dir, legs, grade, rules, prob, ev, maxProfit, maxLoss) => ({
     id, family, risk, dir, expiry: "2026-10-16", dte: 30, sessions: 22, legs, grade, gradeWhy: grade < 3 ? ["fit.in-spread"] : [],
@@ -818,6 +818,7 @@ const CARD = {
       { id: "vrp.var.21", v: 0.0295, u: "var", g: 3 },
       { id: "skew.rr25.30.pct", v: 0.9, u: "frac", g: 2, x: true },
       { id: "term.front.7_30", v: 0.02, u: "frac", g: 2 },
+      { id: "term.slope.30_90.exEvent", v: 0.05, u: "frac", g: 2 },
       { id: "level.putWall", v: 95, u: "px", g: 3, atr: -2 },
       { id: "level.callWall", v: 105, u: "px", g: 3, atr: 2 },
       { id: "level.flip", v: 97, u: "px", g: 3, atr: -1.2 },
@@ -950,6 +951,56 @@ const CARD = {
   const af = engineFallback(buildContext(aside, { expectedSession: "2026-09-15" }));
   ok(af.verdict === "stand-aside" && af.ideas.length === 0, "an engine that stands aside falls back to stand-aside with no ideas");
   ok(Object.keys(VERDICT_WORD).length === VERDICTS.length, "every verdict code has a word for the page");
+
+  {
+    const codes = (reply, context = ectx) => vetEngineReply(reply, context).refused.map((r) => r.code);
+    const standAside = vetEngineReply({ verdict: "stand-aside", ideas: [] }, ectx);
+    ok(!standAside.ok && standAside.verdict === null && codes({ verdict: "stand-aside", ideas: [] }).join() === "verdict-false",
+       "N-F2: a model that stands aside while the engine ranks three ideas is refused, and its verdict is dropped, where it was accepted whole with an empty list " +
+       "(the page then drew the 'Stand aside' tag beside the engine's own three cards)");
+    const mixed = vetEngineReply({ verdict: "stand-aside", ideas: [{ structure: "S1", because: ["vrp.rel.21", "iv.pct.30"] }] }, ectx);
+    ok(mixed.ok && mixed.verdict === null && mixed.ideas.length === 1 && mixed.refused.some((r) => r.code === "verdict-false"),
+       "and stand-aside beside a kept idea is a contradiction the vet resolves in the idea's favour");
+    const asideCtx = buildContext(aside, { expectedSession: "2026-09-15" });
+    const legit = vetEngineReply({ verdict: "stand-aside", ideas: [] }, asideCtx);
+    ok(legit.ok && legit.verdict === "stand-aside" && legit.refused.length === 0,
+       "while the same words are accepted when the engine itself set noTrade");
+    ok(!verdictHolds("stand-aside", null, ectx.engine) && verdictHolds("stand-aside", null, asideCtx.engine),
+       "the precondition of stand-aside is the engine's own noTrade, not the model's empty list");
+    const cleared = vetEngineReply({ verdict: "harvest-rich-premium", ideas: [] }, ectx);
+    ok(!cleared.ok && cleared.verdict === null, "an empty idea list clears whatever verdict came with it");
+    const eventOnly = vetEngineReply({ verdict: "stand-aside", claims: [{ a: "vrp.rel.21", rel: "rich" }] }, ectx);
+    ok(!eventOnly.ok && eventOnly.verdict === null && eventOnly.claims.length === 1, "and true claims survive on their own without a verdict");
+
+    same(codes({ ideas: [{ structure: "S1", because: ["vrp.rel.21", "iv.pct.30"] }, { structure: "S3", because: ["vrp.rel.21", "iv.pct.30"] }] }), ["not-ranked"],
+         "N-F3: a structure with positive EV and a passing grade that the engine did not rank (S3, not among its ideas) is refused as not-ranked");
+    const promoted = JSON.parse(JSON.stringify(ecard));
+    promoted.engine.structures.splice(2, 1, st("S6", "broken-wing-butterfly", "defined", "neutral", [leg("P", 100, 1), leg("P", 95, -2), leg("P", 88, 1)], 2, ["state.pinned"], [0.3, 0.25], [-80, -120], 300, -400));
+    const pctx = buildContext(promoted, { expectedSession: "2026-09-15" });
+    same(codes({ ideas: [{ structure: "S1", because: ["vrp.rel.21", "iv.pct.30"] }, { structure: "S6", because: ["vrp.rel.21", "iv.pct.30"] }] }, pctx), ["not-ranked"],
+         "including one whose real-world EV is −120, which the vet used to keep after the engine had refused it");
+    same(vetEngineReply({ ideas: [{ structure: "S1", because: ["vrp.rel.21", "iv.pct.30"] }, { structure: "S2", because: ["level.magnet", "gex.book"] },
+      { structure: "S5", because: ["term.slope.30_90.exEvent", "vrp.rel.21"] }] }, ectx).ideas.map((i) => i.structure), ["S1", "S2", "S5"],
+         "while the engine's own three ideas, in any order the model likes, are all kept");
+    same(vetEngineReply({ ideas: [{ structure: "S5", because: ["term.slope.30_90.exEvent", "vrp.rel.21"] }, { structure: "S1", because: ["vrp.rel.21", "iv.pct.30"] }] }, ectx).ideas.map((i) => i.structure), ["S5", "S1"],
+         "so the model may re-order, and may not add");
+    const twin = JSON.parse(JSON.stringify(ecard));
+    twin.engine.structures.splice(3, 1, st("S7", "put-credit-spread", "defined", "bull", [leg("P", 93, -1), leg("P", 88, 1)], 2, ["state.pinned", "vrp.rich"], [0.7, 0.75], [-2, 15], 120, -380));
+    twin.engine.ideas = ["S1", "S7", "S2"];
+    same(codes({ ideas: [{ structure: "S1", because: ["vrp.rel.21", "iv.pct.30"] }, { structure: "S7", because: ["vrp.rel.21", "iv.pct.30"] }] }, buildContext(twin, { expectedSession: "2026-09-15" })), ["dup"],
+         "and two structures of one family are never kept together, the engine's own one-per-family rule");
+
+    same(codes({ ideas: [{ structure: "S2", because: ["iv.cm.90", "garch.avg.21"] }] }), ["off-rules"],
+         "N-F4: an iron condor 'because' the 90-day implied vol and the GARCH average, which none of its rules names, is refused as off-rules, where any two graded facts were accepted");
+    ok(vetEngineReply({ ideas: [{ structure: "S2", because: ["iv.cm.90", "vrp.rel.21"] }] }, ectx).ideas.length === 1,
+       "while naming one fact its rules rest on is enough to keep it, the other may be context");
+    same(codes({ ideas: [{ structure: "S4", because: ["vrp.rel.21", "iv.pct.30"] }] }), ["avoid"], "and the avoid list is still read first");
+    same(codes({ ideas: [{ structure: "S5", because: ["level.putWall", "level.callWall"] }] }), ["off-rules"],
+         "a calendar's 'because' is the term structure, not the walls it does not use");
+    const fb = engineFallback(ectx);
+    ok(fb.ideas.every((i) => vetEngineReply({ ideas: [{ structure: i.structure, because: i.because }] }, ectx).ideas.length === 1),
+       "and every idea the engine's own fallback writes passes the rule it now applies to the model");
+  }
 }
 
 {

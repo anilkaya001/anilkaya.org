@@ -825,8 +825,10 @@ function chooseExpiry(fam, list, ctx) {
   return { front: inWin[0] };
 }
 
+const holdsUnderEveryLaw = (s) => !Array.isArray(s.ev.pBand) || (fin(s.ev.pBand[0]) && s.ev.pBand[0] > 0);
+
 export function rankStructures(structs, state) {
-  const eligible = structs.filter((s) => s.grade >= 1 && fin(s.ev.p) && s.ev.p > 0 && fin(s.score));
+  const eligible = structs.filter((s) => s.grade >= 1 && fin(s.ev.p) && s.ev.p > 0 && holdsUnderEveryLaw(s) && fin(s.score));
   const cmp = (a, b) => b.score - a.score || b.grade - a.grade || (b.prob.popP || 0) - (a.prob.popP || 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   eligible.sort(cmp);
   const ideas = [];
@@ -844,7 +846,7 @@ export function rankStructures(structs, state) {
   const all = structs.filter((s) => fin(s.score)).sort(cmp);
   const code = !structs.length ? "candidates.none" : structs.every((s) => !fin(s.ev.p)) ? "model.none"
     : eligible.length ? "risk.undefined-only"
-      : structs.some((s) => fin(s.ev.p) && s.ev.p > 0) ? "grade.none" : "ev.none-positive";
+      : structs.some((s) => fin(s.ev.p) && s.ev.p > 0 && holdsUnderEveryLaw(s)) ? "grade.none" : "ev.none-positive";
   return { ideas: [], noTrade: { code, closest: all.length ? all[0].id : null } };
 }
 
