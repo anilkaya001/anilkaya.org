@@ -796,6 +796,33 @@ export function tickerPage({ username = "" } = {}) {
   <section class="ui-card ft-verdict" id="ftVerdict" aria-labelledby="ftVerdictT" hidden></section>
   <div class="ft-grid" id="ftGrid" hidden></div>
   <section class="ft-picker" id="ftPicker" aria-labelledby="ftPickerT" hidden></section>
+  <div id="ftCopy" hidden>
+    <p data-k="fc-unread">The run did not request this read for the name.</p>
+    <p data-k="fc-failed">The vendor call failed, so nothing was measured.</p>
+    <p data-k="fc-refused">The vendor refused the call for this plan.</p>
+    <p data-k="fc-malformed">The vendor answered with a body that is not the confirmed shape.</p>
+    <p data-k="fc-empty">The vendor answered with no rows: measured and empty.</p>
+    <p data-k="fc-not-session">The vendor dated these rows to a different session.</p>
+    <p data-k="fc-short-history">Fewer sessions of history than the statistic needs.</p>
+    <p data-k="fc-deadline">The run passed its deadline before reaching this name.</p>
+    <p data-k="fc-shed">Dropped to keep the payload under its byte cap.</p>
+    <p data-k="fc-outside-band">No level fell inside the band around spot.</p>
+    <p data-k="fc-no-contracts">No contract gained open interest to follow.</p>
+    <p data-k="fc-truncated">The read hit the vendor&#39;s row ceiling before reaching the session open.</p>
+    <p data-k="fc-not_read">This run did not spend the call for this name.</p>
+    <p data-k="fc-absent">The vendor row did not carry this field.</p>
+    <p data-k="fc-too_few">Not enough observations for the statistic.</p>
+    <p data-k="fc-plan_gated">The vendor refused the route for this plan.</p>
+    <p data-k="fc-unreadable">The read failed or came back malformed.</p>
+    <p data-k="fc-stale">The value is older than its freshness limit.</p>
+    <p data-k="wh-unknown" data-w="Unknown">No listed security answers to this symbol.</p>
+    <p data-k="wh-gated" data-w="Gated">It reports inside the earnings gate, so this session built no card.</p>
+    <p data-k="wh-retired" data-w="Retired">Its card aged out of coverage.</p>
+    <p data-k="wh-not-covered" data-w="Not covered">Outside this session&#39;s coverage, and not in the nightly screen.</p>
+    <p data-k="wh-store" data-w="Unavailable">The store could not be read. Reload to try again.</p>
+    <p data-k="wh-pending" data-w="Pending">Publishes with tonight&#39;s run.</p>
+    <p data-k="legacy-vo">This card was built before the volatility and quality readings became gauges, so they are withheld rather than redrawn under a meaning they did not have.</p>
+  </div>
 `,
   });
 }
