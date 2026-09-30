@@ -210,10 +210,11 @@
   }
 
   const R_SPENT = "The free daily allowance for the model is spent, and it resets at 00:00 UTC.";
+  const R_BUDGET = "The model budget this site allows itself for one day is spent, and it resets at 00:00 UTC.";
   const R_BUSY = "The model had no capacity for this question just now, and nothing of today's allowance went on it.";
   const R_PLAN = "The model this site asks for is not available on the plan it runs on, which is a configuration fault here rather than a limit anyone hit.";
   const LLM_REASONS = {
-    allowance: R_SPENT, "3036": R_SPENT, capacity: R_BUSY, "3040": R_BUSY, plan: R_PLAN, "5035": R_PLAN,
+    allowance: R_SPENT, "3036": R_SPENT, budget: R_BUDGET, capacity: R_BUSY, "3040": R_BUSY, plan: R_PLAN, "5035": R_PLAN,
     unreachable: "The model was unreachable for this question.",
     off: "The model is switched off for this route, so every answer here is assembled from the published facts.",
   };

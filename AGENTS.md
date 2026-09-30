@@ -73,6 +73,17 @@ Browser ──► Cloudflare edge
   round trips, and never scan a payload table or expand a `json_each` over a
   large array on a polled route.
 
+- Workers AI is billed on the Paid plan beyond the 10,000 free neurons a day,
+  and Cloudflare no longer refuses the call that would exceed it, so the Worker
+  does: every model call goes through `cappedAi` (`shared/flows-ai.js`), which
+  reads the day's recorded spend from `flows_ai_usage*` first and refuses at
+  `FLOWS_AI_DAILY_CAP_NEURONS` (30,000, about $0.22 a day) or
+  `FLOWS_AI_DAILY_CAP_CALLS` (2,500), or when the spend cannot be read. The
+  refusal is the failure reason `budget`; the deterministic reading stands and
+  the reader is told the site's own budget is spent. A model with no configured
+  rate is priced at the dearest model on the plan. `tests/flows-neuron.mjs`
+  scans `worker.js` so no call site can run the binding itself.
+
 ### External deployment state
 
 Repository files cannot prove Workers Builds branch mapping, dashboard secrets,

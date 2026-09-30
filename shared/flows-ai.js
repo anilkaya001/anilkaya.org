@@ -44,6 +44,11 @@ export function aiText(out) {
 
 export function askFailure(error) {
   const text = error && error.message ? String(error.message) : "";
+  if (text.startsWith(AI_BUDGET_MARK)) {
+    return { why: "budget",
+      say: "The model budget this site allows itself for one day is spent. It resets at " +
+        "00:00 UTC. The readings below were measured by the pipeline and are unaffected." };
+  }
   const code = /\b(3036|3040|5035|5006)\b/.exec(text);
   switch (code && code[1]) {
     case "3036": return { why: "allowance",
@@ -99,6 +104,65 @@ export function primaryRates(env) {
 }
 
 export const AI_DAILY_NEURONS = 10000;
+
+export const AI_BUDGET_MARK = "FLOWS_AI_BUDGET_SPENT";
+export const AI_CAP_DEFAULT_NEURONS = 30000;
+export const AI_CAP_DEFAULT_CALLS = 2500;
+export const AI_WORST_RATES = Object.freeze({ inPerM: 26668, outPerM: 204805 });
+
+const wholeOr = (raw, fallback) => {
+  if (raw === undefined || raw === null || String(raw).trim() === "") return fallback;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : fallback;
+};
+
+export const aiCapNeurons = (env) => wholeOr(env && env.FLOWS_AI_DAILY_CAP_NEURONS, AI_CAP_DEFAULT_NEURONS);
+export const aiCapCalls = (env) => wholeOr(env && env.FLOWS_AI_DAILY_CAP_CALLS, AI_CAP_DEFAULT_CALLS);
+
+export function neuronsSpent(spend) {
+  if (!spend || typeof spend !== "object") return 0;
+  if (Number.isFinite(spend.neurons)) return spend.neurons;
+  const tin = Math.max(0, Number(spend.tokensIn) || 0);
+  const tout = Math.max(0, Number(spend.tokensOut) || 0);
+  return Math.ceil((tin * AI_WORST_RATES.inPerM + tout * AI_WORST_RATES.outPerM) / 1e6);
+}
+
+export function budgetVerdict(env, spend) {
+  const neuronCap = aiCapNeurons(env);
+  const callCap = aiCapCalls(env);
+  if (neuronCap === 0 || callCap === 0) {
+    return { spent: true, reason: "the daily budget is set to zero", neurons: null, calls: null, neuronCap, callCap };
+  }
+  if (spend === undefined) {
+    return { spent: true, reason: "the day's spend could not be read", neurons: null, calls: null, neuronCap, callCap };
+  }
+  if (spend === null) return { spent: false, reason: null, neurons: null, calls: null, neuronCap, callCap };
+  const neurons = neuronsSpent(spend);
+  const calls = Math.max(0, Number(spend.calls) || 0);
+  if (neurons >= neuronCap) {
+    return { spent: true, reason: neurons + " of " + neuronCap + " neurons", neurons, calls, neuronCap, callCap };
+  }
+  if (calls >= callCap) {
+    return { spent: true, reason: calls + " of " + callCap + " calls", neurons, calls, neuronCap, callCap };
+  }
+  return { spent: false, reason: null, neurons, calls, neuronCap, callCap };
+}
+
+export function cappedAi(env, readSpend) {
+  const ai = env && env.AI;
+  if (!ai || typeof ai.run !== "function") return ai;
+  return {
+    async run(model, input, options) {
+      let spend = null;
+      if (typeof readSpend === "function") {
+        try { spend = await readSpend(); } catch { spend = undefined; }
+      }
+      const verdict = budgetVerdict(env, spend);
+      if (verdict.spent) throw new Error(AI_BUDGET_MARK + ": " + verdict.reason);
+      return ai.run(model, input, options);
+    },
+  };
+}
 
 export function spendShape(env, day, calls, tokensIn, tokensOut, byModel) {
   const base = primaryRates(env);
@@ -169,7 +233,7 @@ export async function askModels(ai, chain, messages, opts, onUsage, log = consol
       failure = askFailure(error);
       failedModel = model;
       attempts.push({ model, text: null, finish: null, reasoned: false, failed: failure.why });
-      if (failure.why === "allowance") break;
+      if (failure.why === "allowance" || failure.why === "budget") break;
       const next = models[models.indexOf(model) + 1];
       if (next && log && typeof log.error === "function") {
         log.error(JSON.stringify({ message: "ai failover", from: model, to: next, why: failure.why,
@@ -188,7 +252,7 @@ export async function askModels(ai, chain, messages, opts, onUsage, log = consol
   }
   const replied = attempts.filter((a) => a.failed === null);
   if (failure) {
-    if (replied.length && failure.why !== "allowance") {
+    if (replied.length && failure.why !== "allowance" && failure.why !== "budget") {
       return { text: null, model: replied[0].model, attempts, failure, guard: stopGuard(replied), failedOver: failedOver(attempts) };
     }
     return { text: null, model: failedModel, attempts, failure, guard: "unreachable:" + failure.why, failedOver: failedOver(attempts) };
