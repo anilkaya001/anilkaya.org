@@ -902,10 +902,27 @@ fails after the deletes logs how many keys were removed.
 What the probe cannot see is a key that only a LOST ledger knew and whose
 ticker is in none of tonight's candidates (the harvest of about 830 names, the
 guarantee, the funds, the indices and the Nasdaq-100 constant): a name that
-left the screen entirely in the same few nights its ledger was lost. Such a
-row stays until its ticker returns to the screen. A Worker-side sweep of
-`card:`, `card-x:` and `hist:` rows by `updated_at` would close it; it is not
-in the Worker today.
+left the screen entirely in the same few nights its ledger was lost. On
+2026-09-29 eleven such rows were in the store (card PRU, SYK, CNQ, COO, CB and
+TD, card-x CB, LEVI and TD, hist CB and TD; PRU 35 days old and in that day's
+universe), served forever because the ledger, once `carried`, never probes
+again, and a reader typing `/flows/ticker/?t=PRU` got the 2026-08-25 dossier
+under a Stale chip.
+
+The nightly now asks the store what it holds. `GET /api/flows/ingest?list=card,card-x,hist`
+(nightly credential only) answers every non-pending row of those three prefixes
+with its session, generation instant and write time and never its payload,
+from the primary key's three prefix ranges (about 580 rows read, no scan, cut
+at 2,000 with `truncated`). `retireAndRoster` unions every listed key the
+ledger and tonight's landed set do not name into `known` before it ages the
+ledger, so anything more than three sessions old is retired the same night and
+anything younger is held from then on: the ledger repairs itself every night and
+no orphan can outlive one. A listing that fails changes nothing (the ledger is
+used as it stands, with one log line), and a night whose prior roster could not
+be read still retires nothing. The eleven rows go the first night after this
+deploys; the owner's fallback, if a Worker older than the listing is answering,
+is `DELETE FROM flows_payload WHERE id IN ('card:PRU', ...)` through
+`wrangler d1 execute`, eleven row writes.
 
 ### 10.4c The D1 free-tier budget: rows written and rows read
 

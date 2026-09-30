@@ -938,6 +938,27 @@ const INGEST_META_SQL =
   "json_extract(payload, '$.generatedAt') AS generated, json_extract(payload, '$.status') AS status " +
   "FROM flows_payload WHERE id IN (";
 
+const INGEST_LIST_KINDS = Object.freeze(["card", "card-x", "hist"]);
+const INGEST_LIST_MAX = 2000;
+
+function ingestListSql(kinds) {
+  return "SELECT id, updated_at, json_extract(payload, '$.sessionDate') AS session, json_extract(payload, '$.generatedAt') AS generated, " +
+    "json_extract(payload, '$.status') AS status FROM flows_payload WHERE " +
+    kinds.map((k) => `(id >= '${k}:' AND id < '${k};')`).join(" OR ") + ` LIMIT ${INGEST_LIST_MAX + 1}`;
+}
+
+function ingestListing(rows) {
+  const keys = {};
+  let n = 0;
+  for (const r of rows.slice(0, INGEST_LIST_MAX)) {
+    if (!ingestKeyParts(r.id).valid || r.status === "pending") continue;
+    keys[r.id] = { present: true, sessionDate: typeof r.session === "string" ? r.session : null,
+      generatedAt: typeof r.generated === "string" ? r.generated : null, updatedAt: Number(r.updated_at) || 0 };
+    n++;
+  }
+  return { keys, listed: n, truncated: rows.length > INGEST_LIST_MAX };
+}
+
 function ingestMetadata(asked, rows) {
   const byId = new Map((rows || []).map((r) => [r.id, r]));
   const keys = {};
@@ -3180,6 +3201,20 @@ async function route(request, env, url, ctx) {
       tokenKind = check.kind;
     }
     if (!tokenKind) throw new HttpError(401, "unauthorized", "Authentication required");
+
+    if (url.searchParams.has("list")) {
+      requireMethod(request, ["GET"]);
+      if (tokenKind !== "nightly") {
+        throw new HttpError(403, "live_token_scope", "The live token reads one key at a time");
+      }
+      const kinds = [...new Set(url.searchParams.get("list").split(",").map((k) => k.trim()).filter(Boolean))];
+      if (!kinds.length || kinds.some((k) => !INGEST_LIST_KINDS.includes(k))) throw new HttpError(400, "invalid_key", "Unknown payload key");
+      if (!env.DB) throw storeGone();
+      await ensureFlowsTables(env);
+      const rows = await env.DB.prepare(ingestListSql(kinds)).all().catch(() => null);
+      if (!rows) throw storeGone();
+      return json(ingestListing(rows.results || []));
+    }
 
     if (url.searchParams.has("keys")) {
       requireMethod(request, ["GET"]);

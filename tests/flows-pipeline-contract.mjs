@@ -1460,8 +1460,12 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
       }
       eq(Object.keys(roster.depth).length, emitted.size, "and lists nothing the run did not publish");
       ok(Object.values(roster.session).every((d) => d === read("board-long").sessionDate), "every roster entry is this session's");
-      eq(roster.retired, 4, "the dry run's prior ledger held one name four sessions old (card, card-x, hist) and a card-x-only " +
-        "orphan four sessions old: all four keys are retired");
+      eq(roster.retired, 5, "the dry run's prior ledger held one name four sessions old (card, card-x, hist) and a card-x-only " +
+        "orphan four sessions old, and the store's own listing knew one more card the ledger never had (ZZORF, the orphan the " +
+        "birth probe missed): all five keys are retired");
+      ok(/\[dry-run\] retire card:ZZORF/.test(runLog) && /roster: the store lists \d+ card, card-x and hist key\(s\), 1 the ledger did not know/.test(runLog),
+         "THE LISTING SELF-REPAIRS THE LEDGER: a key in the store that no ledger names is aged with the rest and, being more than " +
+         "three sessions old, retired the same night, whatever the ledger says");
       ok(Object.hasOwn(roster.held, "card:ZZHLD") && !Object.hasOwn(roster.held, "card:ZZRET") && !Object.hasOwn(roster.held, "card:NVDA"),
          "a two-session-old card is held for the next run, the retired ones are gone, and NVDA — old in the prior " +
          "ledger but rebuilt tonight — is neither");
@@ -2155,10 +2159,11 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(/function ingestHeaders\(/.test(src),
      "and it is reached through a single builder every call site shares");
 
-  const sites = [...src.matchAll(/ingestURL\(\) \+ "\?keys?="/g)];
-  eq(sites.length, 4,
-     `four call sites reach the ingest route — read, metadata probe, write and delete (found ${sites.length}). ` +
-     "A fifth must join the builder rather than hand-rolling headers");
+  const sites = [...src.matchAll(/ingestURL\(\) \+ "\?(?:keys?|list)="/g)];
+  eq(sites.length, 5,
+     `five call sites reach the ingest route — read, metadata probe, key listing, write and delete (found ${sites.length}). ` +
+     "A sixth must join the builder rather than hand-rolling headers");
+  eq(src.match(/ingestURL\(\) \+ "\?list="/g).length, 1, "one of them is the ?list= listing the retire step ages the store's keys with");
   eq(src.match(/ingestURL\(\) \+ "\?keys="/g).length, 1, "one of them is the ?keys= metadata form");
   const workerSrc = readFileSync(new URL("../worker.js", import.meta.url), "utf8");
   const metaCap = /\bINGEST_META_KEYS_MAX = (\d+);/.exec(workerSrc);
@@ -4338,6 +4343,51 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   const blind = await run({ prior: { payload: null, failed: true, status: 503 }, reader: async () => ({ failed: true }) });
   eq(deletes.length, 0, "when the prior roster cannot be read nothing is retired on a guess");
   eq(blind.ledger, "unread", "and the roster says so");
+
+  {
+    let asked = 0;
+    const store = { keys: {
+      "card:PRU": { present: true, sessionDate: "2026-08-25", generatedAt: "2026-08-25T21:00:00Z" },
+      "card-x:LEVI": { present: true, sessionDate: null, generatedAt: "2026-09-10T21:00:00Z" },
+      "hist:CB": { present: true, sessionDate: "2026-09-23" },
+      "card:ODD": { present: true, sessionDate: null, generatedAt: null },
+      "card:PEND": { present: false },
+      "card:NVDA": { present: true, sessionDate: "2026-08-01" },
+      "card-x:NVDA": { present: true, sessionDate: "2026-09-24" },
+      "card:OLD": { present: true, sessionDate: "2026-09-17" },
+      "card:bad name": { present: true, sessionDate: "2026-08-01" },
+    }, status: 200, truncated: false };
+    const listed = await run({ prior: ledger, reader: async () => { throw new Error("the carried path must not probe"); },
+      lister: async () => { asked++; return store; } });
+    assert.deepEqual(deletes.sort(), ["card-x:LEVI", "card:OLD", "card:PRU", "card:STUCK", "hist:OLD"],
+      "THE LISTING RETIRES ORPHANS THE LEDGER NEVER KNEW: a card 35 days old and a card-x dated only by its generatedAt go with the " +
+      "ledger's own, though the ledger is complete and carried"); checks++;
+    const r = writes.get("roster");
+    ok(asked === 1 && listed.ledger === "carried" && Object.hasOwn(r.held, "hist:CB") && Object.hasOwn(r.held, "card:ODD") &&
+       !Object.hasOwn(r.held, "card:PRU") && !Object.hasOwn(r.held, "card:NVDA") && !Object.hasOwn(r.held, "card:PEND") &&
+       !Object.hasOwn(r.held, "card:bad name") && !deletes.includes("card:NVDA") && !deletes.includes("card:PEND"),
+       "a listed key inside the window is held from then on, an undated one is held and never retired on a guess, a name the store " +
+       "reports pending is not a key, a key rebuilt tonight is left to the run, and a malformed id is ignored");
+    ok(logs.some((l) => /roster: the store lists 7 card, card-x and hist key\(s\), 4 the ledger did not know — aged with the rest/.test(l)),
+       "and the run says how many keys the store listed and how many the ledger did not know, not counting a key the run itself wrote tonight");
+
+    await run({ prior: ledger, lister: async () => ({ failed: true, status: 403 }),
+      reader: async () => { throw new Error("no probe"); } });
+    assert.deepEqual(deletes.sort(), ["card:OLD", "card:STUCK", "hist:OLD"],
+      "a listing that fails changes nothing: the ledger retires what it retired before"); checks++;
+    ok(logs.some((l) => /the store's key listing could not be read \(HTTP 403\)/.test(l)), "and says it could not be read");
+    await run({ prior: ledger, lister: async () => { throw new Error("socket closed"); } });
+    ok(deletes.length === 3 && logs.some((l) => /listing could not be read \(no answer, socket closed\)/.test(l)),
+       "a listing that throws is the same");
+    asked = 0;
+    await run({ prior: { payload: null, failed: true, status: 503 }, reader: async () => ({ failed: true }),
+      lister: async () => { asked++; return store; } });
+    ok(asked === 0 && deletes.length === 0, "an unreadable prior roster retires nothing on the strength of a listing either");
+    ok(Object.hasOwn(store.keys, "card:PRU"), "(the listing itself is data, not a command)");
+    const cut = await run({ prior: ledger, lister: async () => ({ ...store, truncated: true }) });
+    ok(cut.retired === 4 && logs.some((l) => /the listing was cut at its cap/.test(l)),
+       "a listing cut at its cap still retires what it showed, and says it was cut");
+  }
 
   {
     const shelf = new Map([["card:OLD", { sessionDate: "2026-09-21" }], ["card-x:OLD", { sessionDate: "2026-09-21" }],

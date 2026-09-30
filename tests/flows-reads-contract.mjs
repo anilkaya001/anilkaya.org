@@ -813,4 +813,46 @@ class FakeCache {
 }
 
 
+{
+  const f = fakeD1();
+  seed(f);
+  f.put("card:PEND", { ...NIGHTLY, status: "pending" });
+  f.put("card:PRU", { ...NIGHTLY, ticker: "PRU", sessionDate: "2026-08-25", generatedAt: "2026-08-25T21:00:00.000Z" });
+  f.put("card-x:LEVI", { generatedAt: "2026-09-10T21:00:00.000Z", ticker: "LEVI" });
+  f.put("hist:CB", { ...NIGHTLY, ticker: "CB" });
+  for (let i = 0; i < 1500; i++) f.put("scores:2020-01-" + String(i).padStart(4, "0"), { rows: [] });
+  const get = await ingestClient(f.D1);
+  await get("/api/flows/ingest?keys=meta");
+  const table = f.db.prepare("SELECT count(*) AS n FROM flows_payload").get().n;
+  const n = f.trips.length;
+  const listed = await get("/api/flows/ingest?list=card,card-x,hist");
+  eq(listed.res.status, 200, "THE STORE'S KEY LISTING answers the nightly bearer");
+  eq(f.trips.length - n, 1, "in one trip");
+  ok(/MULTI-INDEX OR|SEARCH/.test(f.db.prepare("EXPLAIN QUERY PLAN " + f.trips[n].sqls[0]).all().map((r) => r.detail).join(" ")) &&
+     !f.db.prepare("EXPLAIN QUERY PLAN " + f.trips[n].sqls[0]).all().some((r) => /^SCAN flows_payload/.test(r.detail)),
+     "that walks the primary key's three prefix ranges and never scans the table");
+  ok(f.rowsRead(n) < 30 && table > 1500, `so it reads ${f.rowsRead(n)} rows of a ${table}-row table: the keys it lists, not the archive around them`);
+  deep(Object.keys(listed.body.keys).sort(), ["card-x:LEVI", "card:NVDA", "card:PRU", "hist:CB"],
+    "every card, card-x and hist row that is not a pending stub, and no other kind");
+  deep(listed.body.keys["card:PRU"], { present: true, sessionDate: "2026-08-25", generatedAt: "2026-08-25T21:00:00.000Z", updatedAt: 1790380000000 },
+    "each with its session, its generation instant and its write time, and never its payload");
+  ok(listed.body.keys["card-x:LEVI"].sessionDate === null && listed.body.keys["card-x:LEVI"].generatedAt === "2026-09-10T21:00:00.000Z" &&
+     listed.body.listed === 4 && listed.body.truncated === false, "a row with no session says so and keeps its generation date");
+  const one = await get("/api/flows/ingest?list=hist");
+  deep(Object.keys(one.body.keys), ["hist:CB"], "one kind may be asked alone");
+  eq((await get("/api/flows/ingest?list=board")).res.status, 400, "a kind that is not a ticker key is refused");
+  eq((await get("/api/flows/ingest?list=")).res.status, 400, "and an empty list");
+  const live = await (async () => {
+    const env = { DB: f.D1, SESSION_SECRET, FLOWS_LIVE_TOKEN: "reads-live-token-abcdefghijklmnopqrstuvwxyz",
+      FLOWS_CREDENTIALS: JSON.stringify({ [FLOWS_USERNAMES[0]]: "x".repeat(43) }) };
+    const worker = (await import("../worker.js?reads=" + (++instance))).default;
+    return worker.fetch(new Request("https://anilkaya.org/api/flows/ingest?list=card", { headers: { Authorization: "Bearer " + env.FLOWS_LIVE_TOKEN } }), env, { waitUntil() {} });
+  })();
+  eq(live.status, 403, "the live credential may not list the nightly's keys");
+  f.fail(/FROM flows_payload WHERE \(id >=/);
+  const gone = await get("/api/flows/ingest?list=card");
+  ok(gone.res.status === 503 && gone.body.error.code === "store_unreadable", "an unreadable store is the 503 the metadata form gives");
+  f.fail(null);
+}
+
 console.log(`flows-reads-contract: ${checks} checks passed`);
