@@ -2,6 +2,7 @@ import {
   LIVE_KEYS, LIVE_BUDGET, TIER1_CALLS, TAPE_SPEC, shapeMarketLive, tideSessionState, tideLastAt, checkLiveWrite,
   liveKeyFromParam, shapeTapePrem, shapeTapeGex, assembleTape, nextTapeLeg, pulseWithLive, liveAlertsWin,
   nightlyFreshMeta, rowsOf, timeMs, anyAnswered, marketFeeds, VERDICT, verdictPatch, parseClosedDays, shapeStrips,
+  liveNewsWins, newsWithLive,
 } from "./flows-live.js";
 import {
   FRESH_CLASSES, PHASE_MINUTES, LIVE_CLOCK, freshHeaders, pendingHeaders, phaseAt, tier1Due, liveDispatchDue,
@@ -1090,6 +1091,16 @@ export function overlayPulse(nightly, live, now, clock, { json }) {
   const { headers } = freshHeaders(liveMeta(live), now, clock);
   return json(merged, 200, { "X-Payload-Updated": String(Math.max(nightly.updatedAt || 0, live.updatedAt || 0)),
     "X-Live-Overlay": "live:market", ...headers });
+}
+
+export function overlayNews(nightly, live, now, clock, { json }) {
+  if (!live || !liveNewsWins(nightly && nightly.fresh, live.session, live.readAt)) return null;
+  let news;
+  try { news = JSON.parse(live.payload); } catch { return null; }
+  const merged = newsWithLive(news, live);
+  if (!merged) return null;
+  const { headers } = freshHeaders(liveMeta(live), now, clock);
+  return json(merged, 200, { "X-Payload-Updated": String(live.updatedAt || 0), "X-Live-Overlay": "live:news", ...headers });
 }
 
 export const NIGHTLY_ROW_SQL =

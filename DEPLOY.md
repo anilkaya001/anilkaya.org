@@ -2014,9 +2014,20 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   credential (`persist-credentials: false`); only the chain dispatch holds the
   job token, through `env`.
 - **Tier 3** is on demand: `/api/flows/tape?t=` (a D1 stale-while-revalidate cache
-  with a 20-second single-flight lease, one leg per refresh) and the quote on
+  with a 20-second single-flight lease, one leg per refresh in session) and the quote on
   `/api/flows/live?t=` (5 s in session, 30 s pre/post, 6 h closed), both behind
-  the `UW_ONDEMAND` rate-limit binding.
+  the `UW_ONDEMAND` rate-limit binding. A tape is final only when its read
+  covers the last close (the classifier's own test: read at or after the close
+  less one cadence); outside the session a row that does not is refreshed, the
+  older leg on each view, so a complete row is final after at most two views
+  and three vendor calls, and the ticker page asks again five seconds after an
+  answer the server calls stale. A name outside the roster and the universe is a quote card
+  built from one screener read: that row is cached 15 minutes in session and,
+  outside it, only while it covers the close (the known/unknown verdict keeps
+  its 12 hours), and the card carries the row's own read time and the
+  breadth-class `X-Fresh-*` headers. `/api/flows/news` serves `live:news` in
+  place of the nightly row while it is newer than that row, under its own
+  freshness headers, as pulse and the flow alerts are served.
 
 Out-of-band steps before the first deploy of this layer:
 

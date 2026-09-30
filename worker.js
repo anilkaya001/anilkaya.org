@@ -1056,20 +1056,36 @@ function liteCard(ticker, r, g) {
   return json(card, 200, nightlyFreshHeaders({ fresh: nightlyFreshMeta(r) }));
 }
 
+const CLASS_RTH_MS = 15 * 60 * 1000;
+const rowMeta = (at) => ({ readAt: at, session: easternDay(at), klass: "breadth", source: "ondemand" });
+
+function rowCurrent(verdict, now, clock) {
+  const at = Number(verdict.readAt);
+  if (!(at > 0)) return false;
+  const phase = phaseAt(now, clock);
+  if (phase && phase.phase === "rth") return now - at <= CLASS_RTH_MS;
+  return freshHeaders(rowMeta(at), now, clock).fresh.state !== "stale";
+}
+
 async function classifyTicker(env, ctx, ticker) {
   const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
   const key = new Request(`https://flows-class.internal/${ticker}`, { method: "GET" });
   const hit = cache ? await cache.match(key).catch(() => null) : null;
+  const now = Date.now();
+  let held = null;
   if (hit) {
     const body = await hit.json().catch(() => null);
-    if (body && typeof body.known === "boolean") return body;
+    if (body && typeof body.known === "boolean") {
+      if (!body.known || rowCurrent(body, now, FLOWS_LIVE.memoizedClock(now))) return body;
+      held = body.row && Number(body.readAt) > 0 ? body : null;
+    }
   }
-  if (!env.UW_API_KEY || !(await FLOWS_LIVE.ondemandAllowed(env))) return null;
+  if (!env.UW_API_KEY || !(await FLOWS_LIVE.ondemandAllowed(env))) return held;
   const raw = await uwFetch(env, "/api/screener/stocks", { ticker }).catch(() => null);
   const rows = raw && Array.isArray(raw.data) ? raw.data : Array.isArray(raw) ? raw : null;
-  if (!rows) return null;
+  if (!rows) return held;
   const row = rows.find((x) => x && typeof x.ticker === "string" && x.ticker.trim().toUpperCase() === ticker) || null;
-  const verdict = row ? { known: true, row } : { known: false };
+  const verdict = row ? { known: true, row, readAt: now } : { known: false };
   if (cache) {
     const store = new Response(JSON.stringify(verdict), { headers: {
       "Content-Type": "application/json; charset=utf-8", "Cache-Control": `max-age=${CLASS_TTL_S}` } });
@@ -1101,7 +1117,9 @@ async function absentKey(env, ctx, kind, ticker) {
   const lite = liteCard(ticker, firstRow(uni), firstRow(gate));
   if (lite) return lite;
   const verdict = await classifyTicker(env, ctx, ticker);
-  if (verdict && verdict.known) return json(quoteCard(ticker, verdict.row, Date.now()));
+  if (verdict && verdict.known) {
+    return json(quoteCard(ticker, verdict.row, verdict.readAt), 200, freshHeaders(rowMeta(verdict.readAt), now, clock).headers);
+  }
   return json({ ticker, status: "absent", why: verdict ? "unknown" : "not-covered" });
 }
 
@@ -1771,12 +1789,13 @@ async function quoteResponse(env, ctx, ticker) {
   }
 }
 
+const OVERLAID = Object.freeze({ pulse: "live:market", flowalerts: "live:alerts", news: "live:news" });
+
 async function readWithOverlay(env, key) {
   if (!env.DB) return { stored: null, overlaid: null, failed: true };
   await ensureFlowsTables(env);
   const now = Date.now();
-  const rows = await FLOWS_LIVE.readOverlayRows(env.DB, key, key === "pulse" ? "live:market" : "live:alerts", now)
-    .catch(() => null);
+  const rows = await FLOWS_LIVE.readOverlayRows(env.DB, key, OVERLAID[key], now).catch(() => null);
   if (!rows) {
     const trace = {};
     const stored = await readFlowsPayload(env, key, trace);
@@ -1787,7 +1806,8 @@ async function readWithOverlay(env, key) {
   try {
     const overlaid = key === "flowalerts"
       ? FLOWS_LIVE.overlayFlowalerts(stored ? { session: stored.fresh && stored.fresh.session } : null, live, now, clock)
-      : stored ? FLOWS_LIVE.overlayPulse(stored, live, now, clock, { json }) : null;
+      : key === "news" ? FLOWS_LIVE.overlayNews(stored, live, now, clock, { json })
+        : stored ? FLOWS_LIVE.overlayPulse(stored, live, now, clock, { json }) : null;
     return { stored, overlaid, failed: false };
   } catch {
     return { stored, overlaid: null, failed: false };
@@ -3274,12 +3294,12 @@ async function route(request, env, url, ctx) {
       return passthrough(stored);
     }
 
-    if (path === "/api/flows/flowalerts" || path === "/api/flows/pulse") {
+    if (path === "/api/flows/flowalerts" || path === "/api/flows/pulse" || path === "/api/flows/news") {
 
       const { stored, overlaid, failed } = await readWithOverlay(env, path.slice("/api/flows/".length));
       if (overlaid) return overlaid;
       if (failed) throw storeGone();
-      if (stored === null) return json({ status: "pending" });
+      if (stored === null) return json(path.endsWith("/news") ? { status: "pending", rows: [] } : { status: "pending" });
       return passthrough(stored);
     }
 
@@ -3339,13 +3359,6 @@ async function route(request, env, url, ctx) {
       const key = path.slice("/api/flows/".length);
       const stored = await readServed(env, key);
       if (stored === null) return json({ status: "pending" });
-      return passthrough(stored);
-    }
-
-    if (path === "/api/flows/news") {
-
-      const stored = await readServed(env, "news");
-      if (stored === null) return json({ status: "pending", rows: [] });
       return passthrough(stored);
     }
 

@@ -208,4 +208,264 @@ async function viewTape(f, ticker, now, calls) {
 }
 
 
+const clockNow = { value: ET(TUE, 9, 35) };
+const realNow = Date.now;
+Date.now = () => clockNow.value;
+const at = (ms) => { clockNow.value = ms; W.memoClock(null, ms); };
+
+const caches_ = new Map();
+globalThis.caches = { default: {
+  async match(req) {
+    const e = caches_.get(req.url);
+    if (!e) return undefined;
+    if (clockNow.value > e.exp) { caches_.delete(req.url); return undefined; }
+    return new Response(e.text, { headers: e.headers });
+  },
+  async put(req, res) {
+    const m = /max-age=(\d+)/.exec(res.headers.get("Cache-Control") || "");
+    caches_.set(req.url, { text: await res.text(), headers: [...res.headers], exp: clockNow.value + (m ? Number(m[1]) * 1000 : 0) });
+  },
+} };
+
+let instance = 0;
+async function client(D1, extra = {}) {
+  const env = { DB: D1, SESSION_SECRET, UW_API_KEY: "k", UW_BASE: "http://uw.test",
+    FLOWS_CREDENTIALS: JSON.stringify({ [FLOWS_USERNAMES[0]]: "x".repeat(43) }), ...extra };
+  const worker = (await import("../worker.js?readers=" + (++instance))).default;
+  return async (route) => {
+    const token = await signFlowsSession(FLOWS_USERNAMES[0], env.SESSION_SECRET, 3600, sessionEpoch(env));
+    const background = [];
+    const ctx = { waitUntil: (p) => background.push(Promise.resolve(p).catch(() => {})) };
+    const req = new Request("https://anilkaya.org" + route,
+      { headers: { cookie: FLOWS_COOKIE + "=" + token, "Sec-Fetch-Site": "same-origin" } });
+    const res = await worker.fetch(req, env, ctx);
+    const text = await res.text();
+    await Promise.all(background);
+    let body = null;
+    try { body = JSON.parse(text); } catch { body = null; }
+    return { res, body, text };
+  };
+}
+
+const realFetch = globalThis.fetch;
+function vendor(rowFor) {
+  const seen = { screener: 0, other: 0 };
+  globalThis.fetch = async (url) => {
+    const u = new URL(String(url));
+    if (u.pathname === "/api/screener/stocks") {
+      seen.screener++;
+      const t = u.searchParams.get("ticker");
+      const row = rowFor(t);
+      return new Response(JSON.stringify({ data: row ? [row] : [] }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    seen.other++;
+    return new Response("{}", { status: 404 });
+  };
+  return seen;
+}
+const screenerRow = (ticker, seed, dated = false) => {
+  const row = FAKE.fakeScreenerRows([ticker], { session: TUE + seed }).data[0];
+  if (!dated) delete row.date;
+  return { ...row, full_name: ticker + " test fund", issue_type: "ETF", sector: null };
+};
+
+{
+  const f = fakeD1();
+  W.memoClock(null, clockNow.value);
+  const get = await client(f.D1);
+  const seen = vendor((t) => screenerRow(t, "a"));
+  at(ET(TUE, 9, 35));
+  const first = await get("/api/flows/card?t=TLT");
+  eq(first.res.status, 200, "an out-of-universe name opens as a quote card");
+  eq(first.body.depth, "quote", "of depth quote");
+  eq(seen.screener, 1, "read once from the vendor's screener");
+  eq(first.body.generatedAt, new Date(ET(TUE, 9, 35)).toISOString(), "stamped with the moment the row was read");
+  eq(first.body.sessionDate, TUE, "and dated by that moment, not by a later one");
+  eq(first.res.headers.get("X-Fresh-Class"), "breadth", "IT NOW CARRIES ITS OWN FRESHNESS: the row is a screener read, the breadth class's age rules");
+  eq(first.res.headers.get("X-Fresh-State"), "live", "live while it is minutes old");
+  eq(first.res.headers.get("X-Fresh-Read-At"), first.body.generatedAt, "and the header names the read instant, not the request's");
+  eq(first.res.headers.get("X-Fresh-Source"), "ondemand", "of an on-demand read");
+
+  at(ET(TUE, 9, 45));
+  const second = await get("/api/flows/card?t=TLT");
+  eq(seen.screener, 1, "ten minutes later the cached row is served without a vendor call");
+  eq(second.body.generatedAt, first.body.generatedAt,
+    "AND KEEPS ITS OWN READ TIME: the card was rebuilt with 'generated now' on every view before, so a 09:35 row read as built at 09:45");
+  eq(second.res.headers.get("X-Fresh-State"), "live", "still live at ten minutes");
+
+  at(ET(TUE, 10, 0));
+  const third = await get("/api/flows/card?t=TLT");
+  eq(seen.screener, 2, "IN SESSION A ROW OLDER THAN 15 MINUTES IS READ AGAIN (it was kept twelve hours, all session)");
+  eq(third.body.generatedAt, new Date(ET(TUE, 10, 0)).toISOString(), "and the new card carries the new read time");
+
+  at(ET(TUE, 10, 5));
+  const cached = await get("/api/flows/card?t=TLT");
+  eq(seen.screener, 2, "five minutes after a re-read it is a cache hit again");
+  ok(cached.body.generatedAt === third.body.generatedAt, "with the read time unchanged");
+}
+
+{
+  const f = fakeD1();
+  const limited = { limit: async () => ({ success: false }) };
+  const get = await client(f.D1, { UW_ONDEMAND: limited });
+  const seen = vendor((t) => screenerRow(t, "b"));
+  caches_.clear();
+  at(ET(TUE, 10, 0));
+  caches_.set("https://flows-class.internal/HYG", { text: JSON.stringify({ known: true, row: screenerRow("HYG", "b"), readAt: ET(TUE, 10, 0) }),
+    headers: [["content-type", "application/json"]], exp: ET(TUE, 22, 0) });
+  at(ET(TUE, 11, 0));
+  const held = await get("/api/flows/card?t=HYG");
+  eq(seen.screener, 0, "with the on-demand limiter refusing, no vendor call is made");
+  eq(held.body.depth, "quote", "and the held row is still served rather than an empty page");
+  eq(held.body.generatedAt, new Date(ET(TUE, 10, 0)).toISOString(), "under its TRUE read time, an hour old");
+  eq(held.res.headers.get("X-Fresh-State"), "stale", "which the header calls stale, not live");
+}
+
+{
+  const f = fakeD1();
+  const get = await client(f.D1);
+  const seen = vendor((t) => screenerRow(t, "c"));
+  caches_.clear();
+  at(ET(TUE, 21, 0));
+  caches_.set("https://flows-class.internal/SMH", { text: JSON.stringify({ known: true, row: screenerRow("SMH", "c"), readAt: ET(TUE, 15, 50) }),
+    headers: [["content-type", "application/json"]], exp: ET(WED, 3, 0) });
+  const covered = await get("/api/flows/card?t=SMH");
+  eq(seen.screener, 0, "AFTER THE CLOSE a row read at 15:50 ET covers the close and is served from the cache");
+  eq(covered.res.headers.get("X-Fresh-State"), "closed", "as a closed row");
+  eq(covered.res.headers.get("X-Fresh-Reason"), "session-final", "that is final for the session");
+
+  caches_.set("https://flows-class.internal/SOXX", { text: JSON.stringify({ known: true, row: screenerRow("SOXX", "c"), readAt: ET(TUE, 14, 0) }),
+    headers: [["content-type", "application/json"]], exp: ET(WED, 3, 0) });
+  const behind = await get("/api/flows/card?t=SOXX");
+  eq(seen.screener, 1, "but a row read at 14:00 ET stops two hours short of it: it is read once more, at 21:00");
+  eq(behind.body.generatedAt, new Date(ET(TUE, 21, 0)).toISOString(), "and is dated by that read");
+  eq(behind.res.headers.get("X-Fresh-State"), "closed", "final from then on");
+  const again = await get("/api/flows/card?t=SOXX");
+  eq(seen.screener, 1, "with no further vendor call");
+  ok(again.body.generatedAt === behind.body.generatedAt, "and the same stamp");
+
+  caches_.set("https://flows-class.internal/EWZ", { text: JSON.stringify({ known: true, row: screenerRow("EWZ", "c") }),
+    headers: [["content-type", "application/json"]], exp: ET(WED, 3, 0) });
+  const legacy = await get("/api/flows/card?t=EWZ");
+  eq(seen.screener, 2, "A CACHED VERDICT WITH NO READ TIME IS A MISS: the entries written before this change carry a row of unknown age and would keep the old label for twelve hours");
+  ok(legacy.body.generatedAt === new Date(ET(TUE, 21, 0)).toISOString(), "and are replaced by a dated one");
+}
+
+{
+  const f = fakeD1();
+  const get = await client(f.D1);
+  const seen = vendor(() => null);
+  caches_.clear();
+  at(ET(TUE, 9, 40));
+  const unknown = await get("/api/flows/card?t=ZZZQ");
+  eq(unknown.body.status, "absent", "a name the vendor does not know stays absent");
+  at(ET(TUE, 15, 40));
+  await get("/api/flows/card?t=ZZZQ");
+  eq(seen.screener, 1, "and that verdict keeps its twelve hours: only a row's numbers age, not the fact that a name is unknown");
+}
+
+
+const newsRows = (n, from, stepMin) => Array.from({ length: n }, (_, i) => {
+  const ms = from - i * stepMin * 60000;
+  return { headline: "headline " + i + " at " + new Date(ms).toISOString(), source: "wire", createdAt: new Date(ms).toISOString(), createdAtMs: ms,
+    major: false, sentiment: "neutral", tickers: ["SPY"], tags: [] };
+});
+const liveNews = (session, readAt, extra = {}) => ({
+  v: 1, key: "live:news", session,
+  fresh: { v: 1, readAt: new Date(readAt).toISOString(), session, cadenceS: 900, source: "actions", writer: "flows-live" },
+  rows: newsRows(5, readAt - 120000, 3), requested: 100, returned: 100, kept: 5, cap: 60, capped: false, shed: 0, atVendorLimit: true,
+  unusable: 0, undatedKept: 0, undatedSeen: 0, newest: new Date(readAt - 120000).toISOString(), oldest: new Date(readAt - 132000).toISOString(),
+  ordered: true, orderedBy: "createdAt", orderedDesc: true, status: "ok", reason: null, ...extra,
+});
+const nightlyNews = (session, readAt) => ({
+  v: 1, generatedAt: new Date(readAt).toISOString(), sessionDate: session, readAt: new Date(readAt).toISOString(), readDay: session,
+  refreshed: "nightly", cadence: "once each weekday after the close", staleBy: "the next weekday's close",
+  rows: newsRows(3, readAt - 60000, 7), requested: 100, returned: 100, kept: 3, cap: 60, capped: false, shed: 0, atVendorLimit: true,
+  unusable: 0, undatedKept: 0, undatedSeen: 0, status: "ok", reason: null,
+});
+
+{
+  const f = fakeD1();
+  const get = await client(f.D1);
+  at(ET(TUE, 11, 5));
+  f.put("news", nightlyNews(MON, ET(TUE, 6, 10)), ET(TUE, 6, 10));
+  f.live("live:news", liveNews(TUE, ET(TUE, 11, 0)), ET(TUE, 11, 0), TUE);
+  const cold = await get("/api/flows/news");
+  const trips = f.trips.length;
+  const r = await get("/api/flows/news");
+  eq(f.trips.length - trips, 1, "THE OVERLAY COSTS NO EXTRA ROUND TRIP: the nightly row and its live twin ride one batch, as the plain read was one trip");
+  eq(r.res.headers.get("X-Live-Overlay"), "live:news", "IN SESSION the five-minute-old live headlines replace the nightly's from 06:10 ET");
+  eq(r.body.readAt, new Date(ET(TUE, 11, 0)).toISOString(), "with the LIVE read time as readAt, where the live envelope keeps it under fresh.readAt");
+  eq(r.body.sessionDate, TUE, "and the live session as sessionDate");
+  eq(r.body.refreshed, "intraday", "named intraday, as the pulse overlay names itself");
+  eq(r.body.cadenceMinutes, 15, "with its cadence stated in minutes");
+  ok(r.body.cadence === undefined && r.body.staleBy === undefined, "and none of the nightly's 'once a day' cadence or stale-by text");
+  ok(r.body.rows.length === 5 && r.body.rows.every((x) => /^headline/.test(x.headline)) && r.body.kept === 5, "the live rows and their counts, shaped as the nightly's");
+  eq(r.res.headers.get("X-Fresh-Class"), "breadth", "the freshness headers are the LIVE key's, the breadth class");
+  eq(r.res.headers.get("X-Fresh-State"), "live", "live at five minutes");
+  eq(r.res.headers.get("X-Fresh-Read-At"), r.body.readAt, "from the read instant");
+  eq(r.res.headers.get("X-Payload-Updated"), String(ET(TUE, 11, 0)), "and the update stamp is the live row's, so a change is noticed");
+  eq(cold.body.readAt, r.body.readAt, "a cold isolate answers the same");
+
+  at(ET(TUE, 15, 0));
+  const dead = await get("/api/flows/news");
+  eq(dead.res.headers.get("X-Live-Overlay"), "live:news", "IF THE LOOP DIES the newer live headlines still beat the older nightly");
+  eq(dead.res.headers.get("X-Fresh-State"), "stale", "but wear their own verdict, stale after 45 minutes, where the nightly's row would have said fresh");
+  eq(dead.body.readAt, r.body.readAt, "and their true read time");
+
+  at(ET(TUE, 21, 40));
+  f.put("news", nightlyNews(TUE, ET(TUE, 21, 30)), ET(TUE, 21, 30));
+  const landed = await get("/api/flows/news");
+  ok(!landed.res.headers.get("X-Live-Overlay"), "once the nightly of the same session lands after the last live read, the nightly is served");
+  eq(landed.body.cadence, "once each weekday after the close", "with its own cadence text");
+  eq(landed.res.headers.get("X-Fresh-Class"), "nightly", "and its own class");
+
+  at(ET(WED, 6, 10));
+  f.put("news", nightlyNews(TUE, ET(WED, 6, 10)), ET(WED, 6, 10));
+  const morning = await get("/api/flows/news");
+  ok(!morning.res.headers.get("X-Live-Overlay"), "and the 06:10 ET refresh of the next morning beats yesterday's last live read");
+
+  at(ET(WED, 20, 30));
+  f.live("live:news", liveNews(WED, ET(WED, 16, 20)), ET(WED, 16, 20), WED);
+  const evening = await get("/api/flows/news");
+  eq(evening.res.headers.get("X-Live-Overlay"), "live:news", "before the night's nightly lands, the session's own 16:20 ET headlines beat the morning's");
+  eq(evening.res.headers.get("X-Fresh-State"), "closed", "as a closed row that covers the close");
+
+  f.live("live:news", liveNews(WED, ET(WED, 16, 20), { status: "unavailable", reason: "vendor-failed", rows: [] }), ET(WED, 16, 25), WED);
+  const failed = await get("/api/flows/news");
+  ok(!failed.res.headers.get("X-Live-Overlay") && failed.body.rows.length === 3,
+    "A LIVE READ THAT FAILED (status unavailable, no rows) never replaces headlines that exist");
+  f.live("live:news", liveNews(TUE, ET(TUE, 11, 0)), ET(TUE, 11, 0), TUE);
+  const old = await get("/api/flows/news");
+  ok(!old.res.headers.get("X-Live-Overlay"), "and a live row of an EARLIER session than the nightly's never does either");
+}
+
+{
+  const f = fakeD1();
+  const get = await client(f.D1);
+  at(ET(TUE, 11, 5));
+  const none = await get("/api/flows/news");
+  deep(none.body, { status: "pending", rows: [] }, "with neither row published the route still answers pending with an empty list, its old shape");
+  f.live("live:news", liveNews(TUE, ET(TUE, 11, 0)), ET(TUE, 11, 0), TUE);
+  const liveOnly = await get("/api/flows/news");
+  eq(liveOnly.res.headers.get("X-Live-Overlay"), "live:news", "and with only the live row published the live headlines are served");
+}
+
+{
+  const nightly = { session: MON, readAt: new Date(ET(TUE, 6, 10)).toISOString() };
+  ok(L.liveNewsWins(nightly, TUE, ET(TUE, 11, 0)), "a later session wins");
+  ok(!L.liveNewsWins(nightly, SUN, ET(TUE, 11, 0)), "an earlier one does not");
+  ok(L.liveNewsWins({ session: TUE, readAt: nightly.readAt }, TUE, ET(TUE, 11, 0)), "the same session, read later, wins");
+  ok(!L.liveNewsWins({ session: TUE, readAt: nightly.readAt }, TUE, ET(TUE, 6, 10)), "read at the same instant, the nightly keeps it");
+  ok(!L.liveNewsWins({ session: TUE, readAt: nightly.readAt }, TUE, ET(TUE, 5, 0)), "and read earlier, it does too");
+  ok(L.liveNewsWins(null, TUE, ET(TUE, 11, 0)), "with no nightly the live row is all there is");
+  ok(L.liveNewsWins({ session: TUE, readAt: null }, TUE, ET(TUE, 11, 0)), "a nightly with no stated read time cannot beat a dated one");
+  ok(!L.liveNewsWins(nightly, "yesterday", ET(TUE, 11, 0)) && !L.liveNewsWins(nightly, TUE, NaN), "an undated or malformed live row wins nothing");
+  eq(L.newsWithLive({ status: "unavailable", rows: [] }, { session: TUE, readAt: 1, cadenceS: 900 }), null, "an unavailable live read merges into nothing");
+  eq(L.newsWithLive({ status: "ok", rows: [] }, { session: TUE, readAt: 1, cadenceS: 900 }), null, "and an empty one merges into nothing");
+}
+
+Date.now = realNow;
+globalThis.fetch = realFetch;
+
 console.log(`flows-readers-contract: ${checks} checks passed`);
