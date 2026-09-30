@@ -1965,8 +1965,9 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   serves both: every starter is a line of one slot, and the lines are half an
   hour apart, 32 in all, at :17 and :47 of every hour from `17 5 * * 1-5` to
   `47 20 * * 1-5`. The arithmetic assumes any delay from on time to five hours.
-  A run that starts up to 240 minutes before 09:31 ET sleeps until then, and one
-  that starts earlier exits at once. 09:31 ET is 13:31 UTC under EDT and 14:31
+  Without `FLOWS_LIVE_KEEP` (the loop this section describes, and the one
+  `FLOWS_LIVE_LOOP=1` alone still gives), a run that starts up to 240 minutes
+  before 09:31 ET sleeps until then, and one that starts earlier exits at once. 09:31 ET is 13:31 UTC under EDT and 14:31
   UTC under EST, so the wait window is 09:31 to 13:31 UTC or 10:31 to 14:31 UTC.
   On time, the 09:47 to 13:17 starters land in it under EDT and 10:47 to 14:17
   under EST, eight each; three hours late, 06:47 to 10:17 and 07:47 to 11:17,
@@ -1985,6 +1986,20 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   minutes. From 13:17 the same lines restart a loop that died or never started.
   Every starter fires 17 minutes past a :00 or :30 mark, away from the top of
   the hour, where GitHub documents the load peaks that delay and drop schedules.
+  With `FLOWS_LIVE_KEEP=1`, which production sets, none of the wait arithmetic
+  applies: a starter that lands while a loop runs is the single pending run of the
+  `flows-live` group, and the hop the running loop dispatches at its 340-minute
+  budget replaces it (a newer pending run cancels the older), so the starters
+  never run while the chain holds. A starter that lands when no loop runs, the
+  chain having broken, starts a full loop at once, with no pre-open sleep and no
+  early exit. `tests/flows-starts-contract.mjs` models that group over nine days
+  at delivery lags from none to eight hours: one cron-started run in all, every
+  hop 30 seconds after the last; a hop that fails on a weekday is followed at
+  once by the starter pending behind it (eleven lines land in any 340 minutes),
+  and one that fails on a Saturday by the first starter of Monday. The model
+  delivers every line; GitHub has delivered between one in ten and six in ten, so
+  that is the best case the backup can offer, not a promise, and it is why a
+  failed hop opens the `chain` issue at once instead of trusting the backup.
 - **Each run logs how late GitHub delivered it.** The first step logs the cron
   that fired and reads the run's own `created_at` from the Actions API with the
   job's token (`gh api repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID`),
@@ -2000,7 +2015,7 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   (`GET /repos/{owner}/{repo}/actions/workflows/flows-live.yml/runs?event=schedule`).
   Together they measure the delay the schedule assumes, and which reading of
   the first three days holds.
-- **Worst-case idle is 240 minutes of waiting a day.** Runs share one concurrency
+- **Without `FLOWS_LIVE_KEEP`, worst-case idle is 240 minutes of waiting a day.** Runs share one concurrency
   group, so only one runs at a time, and every waiting run waits for the same
   09:31: however many starters land, the pre-open wait a day adds up to at most
   `preOpenWaitMs`, 240 minutes. A run that waited that long still passes from
@@ -2020,12 +2035,19 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   so a chained run that starts within eight minutes of the last pass skips once
   and takes the next slot, none doubled or lost. A single pass runs when
   `FLOWS_LIVE_LOOP` is unset or `FLOWS_LIVE_FORCE=1`. Dry run: `--live --dry-run`.
+  Under `FLOWS_LIVE_KEEP=1` the accounting changes: a starter that runs while
+  no loop holds the group costs a whole 340-minute loop rather than under a
+  minute, weekends and holidays chain too (with a clock read every 15 minutes and
+  no pass), there is no pre-open wait (the loop is already ticking, and wakes at
+  09:31 sharp), and the runner-minutes are the price of removing the lottery;
+  section 10.5k has the cost and the switch that returns to the numbers above.
 - **The loop keeps the Worker's clock.** Before its first pass and around every
   later one it reads `clock: { day, trading, earlyClose }` with a GET of the
   ingest key `clock` under its live credential (`/api/flows/now` carries the same
   view for signed-in pages). Once Tier 1 has marked the day closed from the tape
-  (from 09:46 ET) the loop makes no further pass and never chains; a scheduled
-  holiday never starts one. A scheduled early close ends the window at 13:25 ET
+  (from 09:46 ET) the loop makes no further pass and, without
+  `FLOWS_LIVE_KEEP`, never chains (with it, the loop keeps its 15-minute clock
+  ticks and its chain); a scheduled holiday never starts one. A scheduled early close ends the window at 13:25 ET
   from the calendar. An unscheduled one Tier 1 marks only after 13:30, so the
   loop stops at the first slot after that verdict, about 13:35 to 13:40, instead
   of running to 16:25. A failed clock read keeps the last verdict; with none, the
@@ -2165,7 +2187,7 @@ turns the session loop of section 10.5i into a loop that is never done:
 | 09:31 to 16:25 on a session | A Tier 2 pass on every five-minute slot, as before, and a tick after each. From the open to ten minutes past the close the tick also reads `live:market` and `live:focus`. |
 | 16:25 to 17:30 | Ticks every 15 minutes. |
 | 17:30 | `POST /repos/<repo>/actions/workflows/flows-pipeline.yml/dispatches` with `{ "ref": "main", "inputs": { "origin": "live-loop" } }` and the job's own `GITHUB_TOKEN`, when `meta` still holds the last session. A refused dispatch is tried again on the next slot, three times in all. |
-| From 17:30 until `meta` lands | Ticks every five minutes, each reading `meta`. At 18:15, if the first dispatch was sent and `meta` is still behind, one more dispatch (30 minutes after the first at the earliest). Never a third; a fourth only when the first three were refused. |
+| From 17:30 until `meta` lands | Ticks every five minutes, each reading `meta`. At 18:15, if the first dispatch was sent and `meta` is still behind, one more dispatch (30 minutes after the first at the earliest). Never a third. A refusal that is permanent (HTTP 401, 403, 404, 422: the token, the grant or the file) is capped at four calls in all. A refusal that is transient (HTTP 5xx, 429, 408 or no answer at all) is retried every 30 minutes from 18:15 until 20:30 ET, at most six more calls, so a GitHub outage of two hours still ends in a landed nightly before 21:00. The same cap applies to the repeat after a send. |
 | 21:00 | The nightly check of the witness (below). |
 | Every 340 minutes | The run re-dispatches `flows-live.yml` (origin `chain`, retried after 15 and 45 seconds if refused) and exits. The `timeout-minutes: 355` leaves 15 minutes of slack. |
 
@@ -2197,33 +2219,53 @@ chain costs nothing in money and one runner all the time: five hops a day, seven
 days a week. That is the price of removing the morning lottery, and it is a
 choice you can revoke: delete the `FLOWS_LIVE_KEEP` line from the workflow and
 the loop is the session-only loop of section 10.5i again, with the 32 cron lines
-as its only starters. Measured on the fake Worker (`tests/flows-starts-contract.mjs`
-runs it), a weekday costs the Worker 329 ingest reads on top of the passes' own
-writes (158 clock, 81 `live:market`, 81 `live:focus`, 9 `meta`), 0.33% of the Free
-plan's 100,000 requests a day, and GitHub 10 calls (an open-issue listing and a chain
-dispatch per run, and the nightly); a weekend day costs 105 reads (the clock every
-quarter hour) and 9 GitHub calls. Before, a weekday cost about 170 clock reads and
-a weekend day none. The Worker's CPU per request
-is unchanged: no Worker file changed, and the new reads are the ingest GETs the
-passes already make.
+as its only starters. It is also the part most exposed to GitHub's terms: a
+standing runner that idles through nights and weekends is not what Actions is
+meant for, and GitHub may throttle or disable Actions for a repository whose
+usage it judges abusive. The idle ticks (a clock read every 15 minutes) are the
+smallest share of the hours, but they are the share a reviewer would point to; the
+fallback is that one deleted line, and the witness names a broken chain the day it
+breaks. Measured on the fake Worker (`tests/flows-starts-contract.mjs`
+runs it), a weekday costs the Worker 404 ingest reads on top of the passes' own
+writes (158 clock, 81 `live:market`, 81 `live:focus`, 75 `live:breadth`, 9 `meta`),
+0.40% of the Free plan's 100,000 requests a day (329 before the Tier 2 check,
+whose 75 reads run from 10:15 to 16:25 ET), and GitHub 10 calls (an open-issue
+listing and a chain dispatch per run, and the nightly); a weekend day costs 105
+reads (the clock every quarter hour) and 9 GitHub calls. Before this section, a
+weekday cost about 170 clock reads and a weekend day none. The Worker's CPU per
+request is unchanged: no Worker file changed, and the new reads are the ingest GETs
+the passes already make, each one D1 row.
 
 **The witness.** Every tick evaluates, from the same reads, what a reader would
-see, and tells the owner when it is wrong. Four checks:
+see, and tells the owner when it is wrong. Five checks:
 
-| Id | Breach | Confirmed after | Cleared when |
+| Id | Breach | Confirmed after | Cleared after |
 |---|---|---|---|
-| `tier1` | From the open to ten minutes past the close, Tier 1's last tick, `live:market` or `live:focus` is more than 25 minutes old (the readers' stale line for the market class; a key not yet written today counts from the open). A Worker with `FLOWS_LIVE_MODE = "off"` is skipped. | Two consecutive ticks (about ten minutes) | Every one of the three has been written today and is inside the line |
-| `nightly` | At or after 21:00 ET (close plus the five-hour grace) `meta.sessionDate` is older than `expectedNightlySession`, so a missed Friday stays a breach through the weekend | The first tick | `meta` holds the expected session or a later one |
+| `tier1` | From the open to ten minutes past the close, Tier 1's last tick, `live:market` or `live:focus` is more than 25 minutes old (the readers' stale line for the market class; a key not yet written today counts from the open). A Worker with `FLOWS_LIVE_MODE = "off"` is skipped. | Two consecutive ticks (about ten minutes) | Three consecutive ticks on which every one of the three has been written today and is inside the line |
+| `tier2` | From 45 minutes after the open to 25 minutes past the close, `live:breadth` is more than 45 minutes old (the readers' stale line for the breadth class, and the line the Worker's own `liveStalled` watchdog draws, which the tests hold equal minute by minute). The loop is the writer, so this catches passes that run and publish nothing. | Two consecutive ticks | Three consecutive healthy ticks |
+| `nightly` | At or after 21:00 ET (close plus the five-hour grace) `meta.sessionDate` is older than `expectedNightlySession`, so a missed Friday stays a breach through the weekend | The first tick when `meta` is readable and stale; two consecutive ticks when the store answered `pending` (the Worker answers `pending` for a missing row and for a failed D1 read alike, so one such answer proves nothing) | `meta` holds the expected session or a later one |
 | `chain` | The run reached its budget and could not dispatch its successor after three tries | At once | The next loop's first tick |
-| `probe` | Three consecutive ticks read nothing through the ingest route (403, 5xx, no answer) | Three ticks | Any tick that reads something |
+| `probe` | Three consecutive ticks read nothing through the ingest route (403, 5xx, no answer) | Three ticks | Three consecutive ticks that read something |
 
 A failed read is never a verdict: a 403 or a timeout is `inconclusive`, changes
-nothing, and only feeds `probe`. Each breach opens one GitHub Issue titled
+nothing, and only feeds `probe`; the one answer that can mean either (`pending`)
+needs to repeat. Each breach opens one GitHub Issue titled
 `[flows-witness:<id>] ...`, whose body mentions `@anilkaya001` (a mention
 notifies you under GitHub's default notification settings, watching or not), states the numbers and the
 repair, and links the run. A persisting breach adds one reminder comment per six
-hours; recovery adds a recovery comment and closes the issue; a loop that finds
-an issue a previous run left open adopts it instead of opening a second. The run
+hours. Recovery is declared only after the check has been healthy for the number
+of ticks in the last column (about 15 minutes for the live checks), and adds a
+recovery comment and closes the issue. A check that breaches again within six hours of the close it
+got in the same run reopens that issue with a new comment instead of opening a
+new one, so an intermittent feed (30 minutes down in every hour) is one thread
+rather than one issue per outage; across a hop the memory is lost and the
+first re-breach opens a new issue. A loop only adopts an open issue that
+`github-actions[bot]` wrote (the repository is public, and anyone can open one
+titled `[flows-witness:nightly] ...`); a loop that finds an issue a previous run
+left open adopts it instead of opening a second, closes any further open issue for the same check as a
+duplicate of the newest, and closes them all on recovery. An open whose answer never
+arrives (GitHub made the issue, the 15-second deadline fired first) is not
+retried blind: the retry lists the open issues first and adopts what it finds. The run
 itself also turns red when it confirmed a lapse or its chain failed, and every
 confirmed breach writes a `::error` annotation on the run's page, so a repository
 whose Issues cannot be written still gets a red run and an explanation. To prove the
@@ -2238,19 +2280,29 @@ the token. The pieces that still speak in that case are the readers' Stale pill,
 the Worker's `live layer stalled` log line, the nightly health gate (`HEALTH: the
 last live pass ... so Tier 2 stopped before the close`, red on the cron-started
 run that carries the owner as its actor) and the 32 starters, which restart a
-loop within a few hours. Tier 2 vendor loss is not a witness check: the run
-turns red only when every pass answered nothing, as before.
+loop within a few hours. Tier 2 vendor loss reaches the witness only as
+`live:breadth` going 45 minutes old (the `tier2` check); the run also turns red
+when every pass answered nothing, as before.
 
 **The storage-level probe.** The OIDC live credential reads `clock`, any `live:*`
 key and `board:long`, `board:short`, `board:watch`, `meta` and `focus`, one key
 per request. The witness is that probe: it recomputes each verdict from the
-stored row (the readers' 25-minute line, `expectedNightlySession`) rather than
-trusting `X-Fresh-State`, reads the Worker's own telemetry from the clock, and
-treats an unreadable answer as no answer. It does not see the roster's cards or
-the archive (the `keys=` route is the nightly token's), so completeness of the
-nightly, per-name `sessionDate` and the archive stay with the nightly's health
-gate. A `ledger` object, when the Worker's clock carries one, is passed through
-to the issue text and otherwise ignored.
+stored row (the readers' 25-minute and 45-minute lines, `expectedNightlySession`)
+rather than trusting `X-Fresh-State`, reads the Worker's own telemetry from the
+clock, and treats an unreadable answer as no answer. It reads four rows and the
+clock: `live:market` and `live:focus` (Tier 1), `live:breadth` (Tier 2, the key
+the Worker's own watchdog reads) and `meta` (the nightly). It is deliberately
+limited to those. It does not read the other Tier 2 keys, so a pass that lands
+`live:breadth` but not `live:gex` goes unseen here (readers see that key's own
+Stale pill); it does not read `board:long`, `board:short`, `focus` or the roster
+against `meta.sessionDate`, so a `meta` that landed beside boards from an earlier
+session goes unseen here; and it does not see the roster's cards or the archive
+(the `keys=` route is the nightly token's). Completeness of the nightly, per-name
+`sessionDate` and the archive stay with the nightly's health gate. Adding any of
+them is one more read in the same tick and one more entry in `WITNESS_CHECKS`; the
+cost, at one read per five-minute tick, is 75 requests a day (0.075% of the Free
+plan). A `ledger` object, when the Worker's clock carries one, is parsed into the
+witness's view and is not yet used: nothing reads it, and it reaches no issue text.
 
 **The public-header probe: designed, blocked.** A probe that reads the site as a
 reader does would catch what no storage read can: a Cloudflare Transform Rule
@@ -2282,7 +2334,11 @@ call. In `--live` mode each try now has a 20 second deadline
 (`AbortSignal.timeout`), a timed-out try is retried once, and the pass log names
 how many requests timed out. `FLOWS_UW_TIMEOUT_MS` (100 to 60000) overrides the
 20 seconds, which the tests use. The nightly's client is unchanged, and so are
-the ingest reads and writes, which still carry no deadline of their own.
+the ingest writes, which still carry no deadline of their own. The loop's own
+clock read, made before every tick, has the same 10 second deadline as each of
+the watch's reads: a stalled ingest connection costs one tick, where Node's
+default would have held the loop, and with it the witness's cadence, for its
+300 second headers timeout.
 
 **What only a real run can prove.** None of this could be executed on GitHub
 from the sandbox; the fakes exercise every branch, and these are the facts they
@@ -2306,3 +2362,16 @@ cannot. Check them after the first deploy:
 5. No `[flows-witness:...]` issue is open after a healthy week. One that opens
    for a lapse Tier 1 really had is the witness working; one that opens without
    a lapse is a false positive to report with the run's log.
+6. The drill's issue shows `github-actions[bot]` as its author. The witness
+   adopts and closes only issues with that login, so a different one would make
+   every hop blind to the issues its predecessor opened.
+7. A `[flows-witness:tier2]` issue that opens on a day the readers saw
+   `live:breadth` as Live is a false positive: compare its `readAt` with the
+   issue's numbers. The check draws the same line as the Worker's watchdog, so
+   the watchdog's `live layer stalled` log line should appear beside a true one.
+8. The reopen path (`PATCH state: open, state_reason: reopened`) and the
+   duplicate close (`state_reason: not_planned`) are accepted by the API. Both
+   are new and the drill does not reach them; the first flap of a real week does.
+9. A transient dispatch failure cannot be summoned on demand. What the tests
+   prove is the cadence given the answer; the answer itself (503, 429, no reply)
+   is GitHub's.

@@ -2,16 +2,20 @@ import {
   FRESH_CLASSES, LIVE_CLOCK, phaseAt, expectedNightlySession, nextWeekdayDay, easternDay,
 } from "../../shared/flows-freshness.js";
 import { timeMs } from "../../shared/flows-live.js";
-import { githubTarget, githubHeaders, githubSignal } from "./live.mjs";
+import { githubTarget, githubHeaders, githubSignal, transientRefusal } from "./live.mjs";
 import { etTime } from "./health.mjs";
 
 export const WITNESS = Object.freeze({
   tier1StaleMs: FRESH_CLASSES.market.staleS * 1000,
-  confirm: Object.freeze({ tier1: 2, nightly: 1, chain: 1, probe: 3 }),
+  tier2StaleMs: FRESH_CLASSES.breadth.staleS * 1000,
+  confirm: Object.freeze({ tier1: 2, tier2: 2, nightly: 1, nightlyPending: 2, chain: 1, probe: 3 }),
+  recover: Object.freeze({ tier1: 3, tier2: 3, nightly: 1, chain: 1, probe: 3 }),
   renotifyMs: 6 * 60 * 60 * 1000,
+  reopenWithinMs: 6 * 60 * 60 * 1000,
   retryOpenMs: 15 * 60 * 1000,
   readDeadlineMs: 10 * 1000,
   issuesListMax: 100,
+  author: "github-actions[bot]",
 });
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -30,12 +34,21 @@ export const WITNESS_CHECKS = Object.freeze({
       "A vendor outage looks the same from here; the issue closes itself when the keys advance again. DEPLOY.md section 10.5i.",
     ],
   }),
+  tier2: Object.freeze({
+    title: "Tier 2 is stale: live:breadth stopped advancing while the loop runs",
+    remedy: [
+      "Readers see the Stale pill on breadth, strips, gex, vol, movers, tape and news once they are 45 minutes old.",
+      "Look at this run's log for `live: N key(s) not published` and `vendor request(s) timed out`: a vendor outage or a rate limit stops a pass from writing.",
+      "Tier 1 (live:market, live:focus) is written by the Worker and can be healthy while this is open. DEPLOY.md section 10.5i.",
+    ],
+  }),
   nightly: Object.freeze({
     title: "The nightly has not landed by 21:00 ET",
     remedy: [
       "Every nightly-class key (boards, cards, scores, brief, roster, focus) is behind for readers from 21:00 ET.",
       "Look at GitHub, Actions, flows-pipeline: a run that never started, or one that failed before it published meta.",
       "Dispatch it by hand: gh workflow run flows-pipeline.yml (or Run workflow in the Actions tab).",
+      "If the detail says the store answered pending, the nightly may have landed: the Worker reports a failed D1 read (the daily row-read quota, an outage) the same way as a missing row, so look at the site's Flows pages before dispatching.",
     ],
   }),
   chain: Object.freeze({
@@ -132,6 +145,31 @@ export function evaluateTier1({ at, view, market = null, focus = null }) {
   return { id, status: "pending", why: "not every Tier 1 key has been written since the open yet" };
 }
 
+export function evaluateTier2({ at, view, breadth = null }) {
+  const id = "tier2";
+  if (!view) return { id, status: "inconclusive", why: "the Worker's clock could not be read" };
+  if (view.tier1 && view.tier1.why === "off") return { id, status: "skip", why: "FLOWS_LIVE_MODE is off" };
+  const p = phaseAt(at, view.clock);
+  if (!p || !p.trading) return { id, status: "skip", why: "not a trading day" };
+  if (at - p.open < WITNESS.tier2StaleMs || at > p.close + LIVE_CLOCK.runAfterCloseMin * 60000) {
+    return { id, status: "skip", why: "outside Tier 2's window" };
+  }
+  if (!breadth || breadth.failed) return { id, status: "inconclusive", why: "live:breadth could not be read" };
+  const t = breadth.pending ? NaN : readAtOf(breadth.payload);
+  const from = Math.max(Number.isFinite(t) ? t : -Infinity, p.open);
+  if (at - from <= WITNESS.tier2StaleMs) {
+    return Number.isFinite(t) && t >= p.open ? { id, status: "ok" }
+      : { id, status: "pending", why: "live:breadth has not been written since the open yet" };
+  }
+  return {
+    id, status: "breach",
+    detail: `live:breadth: ${Number.isFinite(t) && t >= p.open ? `${etTime(t, p.day)}, ${minutes(at - t)} min before this check`
+      : `nothing since the ${etTime(p.open)} open`}; readers see Stale from ${minutes(WITNESS.tier2StaleMs)} minutes, ` +
+      "and this loop is the writer",
+    evidence: [{ name: "live:breadth", at: Number.isFinite(t) ? new Date(t).toISOString() : null, ageMin: minutes(at - from) }],
+  };
+}
+
 export function evaluateNightly({ at, view, meta = null }) {
   const id = "nightly";
   if (!meta || meta.failed) return { id, status: "inconclusive", why: "meta could not be read" };
@@ -140,9 +178,13 @@ export function evaluateNightly({ at, view, meta = null }) {
   const session = meta.pending ? null : sessionOf(meta.payload);
   if (session && session >= expected) return { id, status: "ok", expected, session };
   const next = nextWeekdayDay(expected);
+  const holds = meta.pending
+    ? "the store answered pending for meta (no row, or a failed D1 read, which the Worker reports the same way)"
+    : `meta holds ${session ? "the " + session + " session" : "no session"}`;
   return {
     id, status: "breach", expected, session,
-    detail: `meta holds ${session ? "the " + session + " session" : "no session"}, and the ${expected} session was due ` +
+    ...(meta.pending ? { confirm: WITNESS.confirm.nightlyPending } : {}),
+    detail: `${holds}, and the ${expected} session was due ` +
       `by 21:00 ET (the close plus the ${FRESH_CLASSES.nightly.graceS / 3600}-hour grace)` +
       (next ? `; dispatch it before 09:30 ET on ${next}, because from that open the pipeline refuses an in-progress ` +
         `session and after that close it ranks the newer one, so ${expected}'s archive can no longer be written` : ""),
@@ -174,7 +216,8 @@ export function createIssueReporter({ env = process.env, fetchImpl = fetch } = {
       if (!r.ok || !Array.isArray(r.json)) return { ok: false, why: r.why };
       const issues = [];
       for (const it of r.json) {
-        const m = it && typeof it.title === "string" && !it.pull_request ? TITLE_RE.exec(it.title) : null;
+        const ours = !!it && !!it.user && it.user.login === WITNESS.author;
+        const m = ours && typeof it.title === "string" && !it.pull_request ? TITLE_RE.exec(it.title) : null;
         if (m && Number.isInteger(it.number)) {
           issues.push({ number: it.number, id: m[1], updatedAt: timeMs(it.updated_at) || 0 });
         }
@@ -189,8 +232,12 @@ export function createIssueReporter({ env = process.env, fetchImpl = fetch } = {
       const r = await call("POST", `/issues/${number}/comments`, { body });
       return { ok: r.ok, why: r.why };
     },
-    async close(number) {
-      const r = await call("PATCH", `/issues/${number}`, { state: "closed", state_reason: "completed" });
+    async close(number, reason = "completed") {
+      const r = await call("PATCH", `/issues/${number}`, { state: "closed", state_reason: reason });
+      return { ok: r.ok, why: r.why };
+    },
+    async reopen(number) {
+      const r = await call("PATCH", `/issues/${number}`, { state: "open", state_reason: "reopened" });
       return { ok: r.ok, why: r.why };
     },
   };
@@ -228,14 +275,17 @@ export function issueBody(id, result, { at, since, env = {}, dispatches = null }
   }
   if (dispatches && dispatches.length) {
     lines.push("The loop's nightly dispatches today", ...dispatches.map((d) =>
-      `- ${etTime(d.at)}: ${d.sent ? "sent" : "refused"}${d.status ? " (HTTP " + d.status + ")" : ""}`), "");
+      `- ${etTime(d.at)}: ${d.sent ? "sent" : d.why === "unreachable" ? "unreachable" : "refused"}${d.status ? " (HTTP " + d.status + ")" : ""}`), "");
   }
   const refused = dispatches && dispatches.length && !dispatches.some((d) => d.sent);
   if (spec) {
     lines.push("What to check", ...spec.remedy.map((r) => `- ${r}`));
     if (id === "nightly" && refused) {
-      lines.push("- Every dispatch above was refused by GitHub: check Settings, Actions, General, Workflow permissions, " +
-        "and that flows-live.yml still grants actions: write.");
+      lines.push(dispatches.every(transientRefusal)
+        ? "- Every dispatch above failed on GitHub's side (HTTP 5xx, 429 or no answer) for the whole retry window: " +
+          "check githubstatus.com; nothing here needs changing, and the manual dispatch above still works once GitHub answers."
+        : "- Every dispatch above was refused by GitHub: check Settings, Actions, General, Workflow permissions, " +
+          "and that flows-live.yml still grants actions: write.");
     }
     lines.push("");
   }
@@ -247,53 +297,126 @@ export function createWitness({ reporter = null, env = {}, log = console.log, wa
   const states = new Map();
   const breached = new Set();
   let seeded = false;
+  const live = () => !!reporter && reporter.enabled;
   const stateOf = (id) => {
-    if (!states.has(id)) states.set(id, { streak: 0, since: null, issue: null, notifiedAt: 0, triedAt: -Infinity, raised: false });
+    if (!states.has(id)) {
+      states.set(id, { streak: 0, okStreak: 0, since: null, issue: null, extras: [], notifiedAt: 0, triedAt: -Infinity,
+        raised: false, lastClosed: null, uncertain: false, recoveryNoted: false });
+    }
     return states.get(id);
   };
-  const confirmOf = (id) => WITNESS.confirm[id] || 1;
+  const confirmOf = (r) => (Number.isInteger(r.confirm) && r.confirm > 0 ? r.confirm : WITNESS.confirm[r.id] || 1);
+  const recoverOf = (id) => WITNESS.recover[id] || 1;
+
+  const adopt = (issues, only = null) => {
+    const byId = new Map();
+    for (const it of issues) {
+      if (!WITNESS_CHECKS[it.id] || (only && it.id !== only)) continue;
+      if (!byId.has(it.id)) byId.set(it.id, []);
+      byId.get(it.id).push(it);
+    }
+    for (const [id, list] of byId) {
+      const s = stateOf(id);
+      const numbers = [...new Set([...list.map((it) => it.number), ...(s.issue ? [s.issue.number] : [])])].sort((a, b) => b - a);
+      const kept = list.find((it) => it.number === numbers[0]);
+      s.issue = { number: numbers[0] };
+      s.extras = numbers.slice(1);
+      if (kept) s.notifiedAt = Math.max(s.notifiedAt, kept.updatedAt);
+    }
+  };
 
   const seed = async () => {
-    if (seeded || !reporter || !reporter.enabled) return;
+    if (seeded || !live()) return;
     const listed = await reporter.list();
     if (!listed.ok) {
       warn(annotation("warning", "Witness", `could not list the open witness issues (${listed.why}); a repeat issue is possible`));
       return;
     }
     seeded = true;
-    for (const it of listed.issues) {
-      if (!WITNESS_CHECKS[it.id]) continue;
-      const s = stateOf(it.id);
-      s.issue = { number: it.number };
-      s.notifiedAt = it.updatedAt;
+    adopt(listed.issues);
+  };
+
+  const refresh = async (id) => {
+    const listed = await reporter.list();
+    if (listed.ok) adopt(listed.issues, id);
+    return listed.ok;
+  };
+
+  const closeExtras = async (id, s) => {
+    if (!s.extras.length || !live() || !s.issue) return;
+    const left = [];
+    const done = [];
+    for (const number of s.extras) {
+      const shut = await reporter.close(number, "not_planned");
+      if (shut.ok) done.push(number);
+      else {
+        left.push(number);
+        warn(annotation("warning", "Witness", `could not close the duplicate issue #${number} (${shut.why})`));
+      }
+    }
+    s.extras = left;
+    if (done.length) {
+      log(`witness: closed duplicate issue(s) ${done.map((n) => "#" + n).join(", ")} for ${id}`);
+      await reporter.comment(s.issue.number, `Closed ${done.map((n) => "#" + n).join(", ")} as ${done.length > 1 ? "duplicates" : "a duplicate"} of this issue.`);
     }
   };
 
   const notify = async (id, result, ctx, s) => {
-    if (!reporter || !reporter.enabled) return;
+    if (!live()) return;
     await seed();
     const body = issueBody(id, result, { at: ctx.at, since: s.since, env, dispatches: ctx.dispatches });
     if (!s.issue) {
       if (ctx.at - s.triedAt < WITNESS.retryOpenMs) return;
       s.triedAt = ctx.at;
+      if (s.uncertain) {
+        await refresh(id);
+        if (s.issue) {
+          s.uncertain = false;
+          log(`witness: found issue #${s.issue.number} for ${id} (an open whose answer never arrived may have created it); adopting it`);
+          await closeExtras(id, s);
+          return;
+        }
+      }
+      const back = s.lastClosed && ctx.at - s.lastClosed.at < WITNESS.reopenWithinMs ? s.lastClosed : null;
+      if (back) {
+        const again = await reporter.reopen(back.number);
+        if (again.ok) {
+          s.issue = { number: back.number };
+          s.notifiedAt = ctx.at;
+          s.lastClosed = null;
+          log(`witness: ${id} breached again — reopened issue #${back.number}`);
+          const said = await reporter.comment(back.number, body);
+          if (!said.ok) warn(annotation("warning", "Witness", `could not comment on issue #${back.number} (${said.why})`));
+          return;
+        }
+        warn(annotation("warning", "Witness", `could not reopen issue #${back.number} (${again.why}); opening a new one`));
+      }
       const made = await reporter.open({ title: issueTitle(id), body });
       if (made.ok) {
         s.issue = { number: made.number };
         s.notifiedAt = ctx.at;
+        s.uncertain = false;
         log(`witness: opened issue #${made.number} for ${id}`);
-      } else warn(annotation("warning", "Witness", `could not open the ${id} issue (${made.why})`));
-    } else if (ctx.at - s.notifiedAt >= WITNESS.renotifyMs) {
-      const said = await reporter.comment(s.issue.number, body);
-      if (said.ok) {
-        s.notifiedAt = ctx.at;
-        log(`witness: still breached — commented on issue #${s.issue.number} for ${id}`);
-      } else warn(annotation("warning", "Witness", `could not comment on issue #${s.issue.number} (${said.why})`));
+      } else {
+        s.uncertain = true;
+        warn(annotation("warning", "Witness", `could not open the ${id} issue (${made.why})`));
+      }
+    } else {
+      await closeExtras(id, s);
+      if (ctx.at - s.notifiedAt >= WITNESS.renotifyMs) {
+        const said = await reporter.comment(s.issue.number, body);
+        if (said.ok) {
+          s.notifiedAt = ctx.at;
+          log(`witness: still breached — commented on issue #${s.issue.number} for ${id}`);
+        } else warn(annotation("warning", "Witness", `could not comment on issue #${s.issue.number} (${said.why})`));
+      }
     }
   };
 
   const raise = async (id, result, ctx) => {
     const s = stateOf(id);
     s.recoveryNoted = false;
+    s.okStreak = 0;
     if (!s.raised) {
       s.raised = true;
       breached.add(id);
@@ -306,12 +429,14 @@ export function createWitness({ reporter = null, env = {}, log = console.log, wa
     const s = stateOf(id);
     const had = s.raised || !!s.issue;
     s.streak = 0;
+    s.okStreak = 0;
     s.since = null;
     s.raised = false;
     if (!had) return;
     log(`witness: ${id} recovered at ${etTime(ctx.at)}`);
-    if (!s.issue || !reporter || !reporter.enabled) {
+    if (!s.issue || !live()) {
       s.issue = null;
+      s.extras = [];
       return;
     }
     const number = s.issue.number;
@@ -319,11 +444,25 @@ export function createWitness({ reporter = null, env = {}, log = console.log, wa
       s.recoveryNoted = true;
       await reporter.comment(number, `Recovered at ${etTime(ctx.at)}: the check passes again, so the loop is closing this issue.`);
     }
+    await closeExtras(id, s);
     const shut = await reporter.close(number);
     if (shut.ok) {
+      s.lastClosed = { number, at: ctx.at };
       s.issue = null;
       s.recoveryNoted = false;
     } else warn(annotation("warning", "Witness", `could not close issue #${number} (${shut.why})`));
+  };
+
+  const settle = async (id, ctx) => {
+    const s = stateOf(id);
+    s.streak = 0;
+    if (!(s.raised || s.issue)) {
+      s.since = null;
+      s.okStreak = 0;
+      return;
+    }
+    s.okStreak++;
+    if (s.okStreak >= recoverOf(id) || s.recoveryNoted) await recover(id, ctx);
   };
 
   return {
@@ -335,13 +474,15 @@ export function createWitness({ reporter = null, env = {}, log = console.log, wa
         if (!r || !r.id) continue;
         const s = stateOf(r.id);
         if (r.status === "breach") {
+          s.okStreak = 0;
           s.streak++;
           if (s.streak === 1) s.since = ctx.at;
-          if (s.raised || s.streak >= confirmOf(r.id)) await raise(r.id, r, ctx);
+          if (s.raised || s.streak >= confirmOf(r)) await raise(r.id, r, ctx);
         } else if (r.status === "ok") {
-          await recover(r.id, ctx);
+          await settle(r.id, ctx);
         } else if (r.status === "skip" || r.status === "pending") {
           s.streak = 0;
+          s.okStreak = 0;
         }
       }
     },

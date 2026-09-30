@@ -4,16 +4,16 @@ import { createServer } from "node:http";
 import { readFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FRESH_CLASSES, easternInstant } from "../shared/flows-freshness.js";
+import { FRESH_CLASSES, easternInstant, liveStalled } from "../shared/flows-freshness.js";
 import {
-  runLiveLoop, chainDispatch, chainWithRetry, githubTarget, readLiveClock, liveRunVerdict, LIVE_LOOP,
+  runLiveLoop, chainDispatch, chainWithRetry, githubTarget, readLiveClock, liveRunVerdict, transientRefusal, LIVE_LOOP,
 } from "../scripts/flows-legs/live.mjs";
 import {
-  WITNESS, WITNESS_CHECKS, annotation, witnessView, evaluateTier1, evaluateNightly, createWitness, createIssueReporter, issueTitle,
-  issueBody, ownerHandle, runUrl,
+  WITNESS, WITNESS_CHECKS, annotation, witnessView, evaluateTier1, evaluateTier2, evaluateNightly, createWitness, createIssueReporter,
+  issueTitle, issueBody, ownerHandle, runUrl,
 } from "../scripts/flows-legs/witness.mjs";
 import { NIGHTLY, nightlyStartDue, createNightlyStart } from "../scripts/flows-legs/starts.mjs";
-import { createWatch, normalizeRead, tier1Window, witnessDrill } from "../scripts/flows-legs/watch.mjs";
+import { createWatch, normalizeRead, tier1Window, tier2Window, witnessDrill } from "../scripts/flows-legs/watch.mjs";
 import { fakeWorld, fakeGithub } from "../scripts/flows-legs/live-world-fake.mjs";
 import { DRY_SCENARIOS, DRY_DAY, DRY_WEEKEND, dryLiveDay } from "../scripts/flows-legs/live-day.mjs";
 import { LIVE_VENDOR } from "../scripts/flows-pipeline.mjs";
@@ -143,13 +143,56 @@ const MIN = 60 * 1000;
     "and the same wall time holds under standard time (22:30 UTC)");
   eq(nightlyStartDue({ at: at(S, 3, 0), metaSession: P }).why, "before-window", "overnight it is not due");
 
+  const refusedWith = (h, m, status, why = "refused") => ({ at: at(S, h, m), sent: false, status, why });
+  deep([transientRefusal(refusedWith(17, 30, 503)), transientRefusal(refusedWith(17, 30, 500)), transientRefusal(refusedWith(17, 30, 429)),
+    transientRefusal(refusedWith(17, 30, 408)), transientRefusal(refusedWith(17, 30, null, "unreachable")),
+    transientRefusal(refusedWith(17, 30, 403)), transientRefusal(refusedWith(17, 30, 404)), transientRefusal(refusedWith(17, 30, 422)),
+    transientRefusal(refusedWith(17, 30, 401)), transientRefusal(refusedWith(17, 30, undefined)), transientRefusal({ at: 1, sent: true, status: 204 }),
+    transientRefusal(null)],
+  [true, true, true, true, true, false, false, false, false, false, false, false],
+  "A REFUSAL IS TRANSIENT when GitHub failed (5xx), asked to slow down (429), timed out (408) or did not answer, and permanent for a 401, 403, " +
+    "404 or 422 (the token, the grant or the file), or when nothing is known");
+  const drive = (answer, { landsAfter = Infinity, from = [17, 30], until = [22, 0] } = {}) => {
+    const attempts = [];
+    let landed = null;
+    for (let x = at(S, ...from); x <= at(S, ...until); x += 5 * MIN) {
+      const meta = landed !== null && x >= landed ? S : P;
+      const d = nightlyStartDue({ at: x, metaSession: meta, attempts });
+      if (!d.due) continue;
+      const status = answer(x);
+      attempts.push({ at: x, sent: status === 204, status: status === 0 ? null : status, why: status === 204 ? "sent" : status === 0 ? "unreachable" : "refused" });
+      if (status === 204 && landed === null && Number.isFinite(landsAfter)) landed = x + landsAfter;
+    }
+    return attempts;
+  };
+  const et = (list) => list.map((a) => Math.floor(((a.at - easternInstant(S, 0)) / MIN) / 60) + ":" + String(Math.round((a.at - easternInstant(S, 0)) / MIN) % 60).padStart(2, "0") + (a.sent ? "+" : "-")).join(" ");
+  eq(et(drive(() => 403)), "17:30- 17:35- 17:40- 18:15-", "A PERMANENT REFUSAL stays capped at four calls a day: three on the next slots and the 18:15 retry");
+  const down = drive(() => 503);
+  eq(et(down), "17:30- 17:35- 17:40- 18:15- 18:45- 19:15- 19:45- 20:15-",
+    "A TRANSIENT REFUSAL is tried every half hour after 18:15 until 20:30 ET, so a GitHub outage of two hours is ridden out");
+  ok(down.length <= NIGHTLY.firstTries + 1 + NIGHTLY.softRetries && down.every((a) => a.at <= at(S, 20, 30)), "at most nine calls in all, none after 20:30");
+  eq(et(drive((x) => (x < at(S, 19, 30) ? 503 : 204), { landsAfter: 15 * MIN })), "17:30- 17:35- 17:40- 18:15- 18:45- 19:15- 19:45+",
+    "and the first answer that sends ends it when the nightly lands: 503 until 19:30 ET sends at 19:45 and the nightly lands at 20:00, before the 21:00 line");
+  eq(et(drive((x) => (x < at(S, 19, 30) ? 503 : 204))), "17:30- 17:35- 17:40- 18:15- 18:45- 19:15- 19:45+ 20:15+",
+    "and a send that does not land is repeated once, 30 minutes on, as before");
+  eq(et(drive((x) => (x < at(S, 18, 20) ? 0 : x < at(S, 19, 20) ? 429 : 204), { landsAfter: 15 * MIN })), "17:30- 17:35- 17:40- 18:15- 18:45- 19:15- 19:45+",
+    "an unreachable API and a 429 are transient too");
+  eq(et(drive((x) => (x === at(S, 17, 35) ? 503 : 403))), "17:30- 17:35- 17:40- 18:15-", "and the class that counts is the last answer: one 503 among refusals does not open the door");
+  eq(et(drive((x) => (x < at(S, 18, 0) ? 204 : 403))), "17:30+ 18:15-", "A SEND THAT WAS FOLLOWED BY A REFUSED REPEAT is not tried again (the old rule called it due on every slot until the nightly landed)");
+  eq(et(drive((x) => (x < at(S, 18, 0) ? 204 : 503))), "17:30+ 18:15- 18:45- 19:15- 19:45- 20:15-",
+    "unless the refusal is transient, when the repeat is retried on the same half-hour cadence");
+
   const log = [];
   const gh = fakeGithub({ now: () => at(S, 17, 30) });
   const start = createNightlyStart({ env: { GITHUB_TOKEN: "t", GITHUB_REPOSITORY: "a/b" }, fetchImpl: gh.fetchImpl,
     log: (l) => log.push(l), warn: (l) => log.push(l) });
   const early = await start.step({ at: at(S, 16, 0), clock: null, metaSession: P });
-  ok(!early.dispatched && early.busy === false && early.wakeAt === at(S, 17, 30),
-    "THE STEP asks the loop to wake at 17:30 sharp while it is idle before then");
+  ok(!early.dispatched && early.busy === false && !("wakeAt" in early),
+    "THE STEP stays idle before 17:30 and asks for no special wake: 17:30 ET is on the idle tick's own grid");
+  ok((NIGHTLY.atMin * MIN) % LIVE_LOOP.idleMs === 0 && (NIGHTLY.atMin * MIN) % LIVE_LOOP.slotMs === 0 &&
+     (NIGHTLY.retryMin * MIN) % LIVE_LOOP.slotMs === 0,
+  "which the arithmetic keeps true: 17:30 and 18:15 ET are multiples of both the 15-minute idle tick and the 5-minute slot, " +
+    "in any zone with a whole-quarter-hour offset, so a loop ticking on the epoch grid lands on them exactly");
   const go = await start.step({ at: at(S, 17, 30), clock: null, metaSession: P });
   ok(go.dispatched && go.dispatched.sent && go.busy === true && gh.record.dispatches.length === 1, "dispatches at 17:30 and turns busy");
   const again = await start.step({ at: at(S, 17, 35), clock: null, metaSession: P });
@@ -222,6 +265,46 @@ const MIN = 60 * 1000;
      b.detail.includes("before 09:30 ET on 2026-09-30"), "the breach names what meta holds, what was due and the repair deadline");
   eq(nightly(at(S, 21, 5), null).status, "breach", "an absent meta is a breach");
   eq(nightly(at(S, 21, 5), "failed").status, "inconclusive", "an unreadable meta is not");
+  const pendingMeta = nightly(at(S, 21, 5), null);
+  ok(pendingMeta.confirm === WITNESS.confirm.nightlyPending && /answered pending for meta/.test(pendingMeta.detail) && /failed D1 read/.test(pendingMeta.detail),
+    "but a PENDING meta asks for a second look before it is a verdict, and says why: the Worker answers pending for a missing row and for a failed D1 read alike");
+  ok(!("confirm" in nightly(at(S, 21, 5), P)) && !("confirm" in nightly(at(S, 21, 5), "2026-09-25")),
+    "while a meta that is readable and stale is a verdict on the first tick");
+  ok(WITNESS_CHECKS.nightly.remedy.some((l) => /answered pending/.test(l) && /D1/.test(l)), "and the issue's remedy tells the owner to look at the site before dispatching");
+
+  const breadthRead = (t) => ({ ok: true, payload: { fresh: { readAt: new Date(t).toISOString() } } });
+  const t2 = (now, read, over = {}) => evaluateTier2({ at: now, view: view(), breadth: read, ...over });
+  const line = WITNESS.tier2StaleMs;
+  eq(line, FRESH_CLASSES.breadth.staleS * 1000, "TIER 2: the line is the readers' stale line for the breadth class, 45 minutes");
+  deep([t2(at(S, 11, 0), breadthRead(at(S, 10, 57))).status, t2(at(S, 11, 0), breadthRead(at(S, 11, 0) - line)).status,
+    t2(at(S, 11, 0), breadthRead(at(S, 11, 0) - line - 1000)).status], ["ok", "ok", "breach"],
+  "a pass three minutes ago is healthy, exactly 45:00 old is healthy and 45:01 is a breach");
+  const b2 = t2(at(S, 11, 30), breadthRead(at(S, 10, 40)));
+  ok(b2.status === "breach" && /live:breadth: 10:40 ET, 50 min before this check/.test(b2.detail) && /this loop is the writer/.test(b2.detail) &&
+     b2.evidence.length === 1 && b2.evidence[0].name === "live:breadth", "the breach names the key, when it was last written and that this loop writes it");
+  const never = t2(at(S, 11, 0), { pending: true });
+  ok(never.status === "breach" && /nothing since the 09:30 ET open/.test(never.detail) && never.evidence[0].at === null,
+    "nothing written since the open is a breach once 45 minutes have passed; yesterday's value counts as nothing");
+  eq(t2(at(S, 11, 0), breadthRead(at(S, 16, 0) - 24 * HOUR)).status, "breach", "yesterday's last pass is not today's");
+  deep([t2(at(S, 10, 14, 59), { pending: true }).status, t2(at(S, 10, 15), { pending: true }).status, t2(at(S, 10, 15, 1), { pending: true }).status,
+    t2(at(S, 16, 25), breadthRead(at(S, 16, 20))).status, t2(at(S, 16, 25, 1), { pending: true }).status],
+  ["skip", "pending", "breach", "ok", "skip"], "the check runs from 45 minutes after the open (nothing can be older) to 25 minutes past the close, when the last pass runs");
+  deep([t2(at(S, 11, 0), { failed: true, status: 403 }).status, t2(at(S, 11, 0), null).status, evaluateTier2({ at: at(S, 11, 0), view: null, breadth: breadthRead(at(S, 10, 59)) }).status,
+    t2(at(S, 11, 0), { pending: true }, { view: view({ tier1: { at: null, okAt: null, why: "off" } }) }).status,
+    evaluateTier2({ at: at("2026-10-03", 11, 0), view: witnessView({ clock: { day: "2026-10-03", trading: null } }), breadth: { pending: true } }).status],
+  ["inconclusive", "inconclusive", "inconclusive", "skip", "skip"], "an unreadable key or clock is no verdict, and a rollback or a weekend is not a lapse");
+  let disagree = 0;
+  for (let m = 10 * 60 + 16; m < 16 * 60; m += 1) {
+    for (let lag = 0; lag <= 60; lag += 1) {
+      const now = easternInstant(S, m);
+      const late = evaluateTier2({ at: now, view: view(), breadth: breadthRead(now - lag * MIN) }).status === "breach";
+      if (late !== liveStalled(now, now - lag * MIN, view().clock)) disagree++;
+    }
+  }
+  eq(disagree, 0, "and it agrees with the Worker's own watchdog, liveStalled, on every minute of the session from 10:16 and every lag to an hour: the witness says aloud what the Worker can only log");
+  deep([tier2Window(at(S, 11, 0), view()), tier2Window(at(S, 10, 0), view()), tier2Window(at(S, 16, 24), view()), tier2Window(at(S, 16, 26), view()),
+    tier2Window(at(S, 11, 0), null), tier2Window(at("2026-10-03", 11, 0), witnessView({ clock: { day: "2026-10-03", trading: null } }))],
+  [true, false, true, false, false, false], "the watch reads live:breadth only inside that window");
   const fri = "2026-10-02";
   deep([evaluateNightly({ at: at("2026-10-03", 12, 0), view: witnessView({ clock: { day: "2026-10-03", trading: null } }),
     meta: { ok: true, payload: { sessionDate: "2026-10-01" } } }).status,
@@ -252,21 +335,40 @@ const MIN = 60 * 1000;
 }
 
 {
-  const makeReporter = ({ seed = [], failOpen = 0, failClose = 0 } = {}) => {
+  const makeReporter = ({ seed = [], failOpen = 0, failClose = 0, failReopen = 0, ghostOpens = 0 } = {}) => {
     const calls = [];
+    const open = seed.map((it) => ({ ...it }));
     let n = 700;
     let opens = failOpen;
     let closes = failClose;
+    let reopens = failReopen;
+    let ghosts = ghostOpens;
     return {
       enabled: true, calls,
-      list: async () => { calls.push(["list"]); return { ok: true, issues: seed }; },
+      list: async () => { calls.push(["list"]); return { ok: true, issues: open.map((it) => ({ ...it })) }; },
       open: async ({ title, body }) => {
         calls.push(["open", title, body]);
         if (opens-- > 0) return { ok: false, why: "HTTP 500" };
-        return { ok: true, number: n++ };
+        const number = n++;
+        const id = /^\[flows-witness:([a-z0-9-]+)\]/.exec(title)[1];
+        open.push({ number, id, updatedAt: 0 });
+        if (ghosts-- > 0) return { ok: false, why: "unreachable" };
+        return { ok: true, number };
       },
       comment: async (number, body) => { calls.push(["comment", number, body]); return { ok: true }; },
-      close: async (number) => { calls.push(["close", number]); return closes-- > 0 ? { ok: false, why: "HTTP 500" } : { ok: true }; },
+      close: async (number, reason = "completed") => {
+        calls.push(["close", number, reason]);
+        if (closes-- > 0) return { ok: false, why: "HTTP 500" };
+        const at = open.findIndex((it) => it.number === number);
+        if (at >= 0) open.splice(at, 1);
+        return { ok: true };
+      },
+      reopen: async (number) => {
+        calls.push(["reopen", number]);
+        if (reopens-- > 0) return { ok: false, why: "HTTP 500" };
+        open.push({ number, id: "tier1", updatedAt: 0 });
+        return { ok: true };
+      },
     };
   };
   const kinds = (r) => r.calls.map((c) => c[0]);
@@ -300,11 +402,39 @@ const MIN = 60 * 1000;
   eq(kinds(rep).length, 3, "not another until six more");
   ok(w.isOpen("tier1") && w.summary().breached.join() === "tier1" && w.summary().open.join() === "tier1", "the summary lists it open and confirmed");
   await w.apply([good("tier1")], { at: t += 5 * MIN });
-  deep(kinds(rep).slice(3), ["comment", "close"], "RECOVERY comments and closes the issue");
+  await w.apply([good("tier1")], { at: t += 5 * MIN });
+  await w.apply([breach("tier1")], { at: t += 5 * MIN });
+  await w.apply([good("tier1")], { at: t += 5 * MIN });
+  await w.apply([{ id: "tier1", status: "skip" }], { at: t += 5 * MIN });
+  await w.apply([good("tier1")], { at: t += 5 * MIN });
+  await w.apply([good("tier1")], { at: t += 5 * MIN });
+  deep(kinds(rep).slice(3), [], "RECOVERY IS NOT DECLARED ON ONE HEALTHY TICK: two, a breach, one, a skip and two more are no three in a row, " +
+    "so the issue stays open and nothing is said");
+  ok(w.isOpen("tier1") && w.summary().open.join() === "tier1", "still open");
+  await w.apply([good("tier1")], { at: t += 5 * MIN });
+  deep(kinds(rep).slice(3), ["comment", "close"], "the third consecutive healthy tick comments and closes the issue");
   ok(!w.isOpen("tier1") && w.summary().open.length === 0 && w.summary().breached.join() === "tier1",
     "and the summary still remembers the run saw a lapse, which is what turns the run red");
   await w.apply([good("tier1")], { at: t += 5 * MIN });
   eq(kinds(rep).length, 5, "a healthy tick after that costs no call");
+  deep([WITNESS.recover.tier1, WITNESS.recover.tier2, WITNESS.recover.probe, WITNESS.recover.nightly, WITNESS.recover.chain], [3, 3, 3, 1, 1],
+    "the hysteresis: a live key or the ingest route must be healthy for three ticks, while the nightly (it lands once) and the chain close on the first proof");
+  await w.apply([breach("tier1")], { at: t += 20 * MIN });
+  await w.apply([breach("tier1")], { at: t += 5 * MIN });
+  deep(kinds(rep).slice(5), ["reopen", "comment"], "A FLAP REOPENS THE SAME ISSUE: a breach confirmed within six hours of the close reopens it and says so, " +
+    "instead of opening a second one");
+  ok(rep.calls[5][0] === "reopen" && rep.calls[5][1] === 700 && rep.calls[6][1] === 700 && rep.calls[6][2].startsWith("@anilkaya001\n"),
+    "by its number, with the owner mentioned so the reopening notifies");
+  eq(w.summary().issues.tier1, 700, "and the summary points at it");
+  for (let i = 0; i < 3; i++) await w.apply([good("tier1")], { at: t += 5 * MIN });
+  await w.apply([breach("tier1")], { at: t += 6 * HOUR + MIN });
+  await w.apply([breach("tier1")], { at: t += 5 * MIN });
+  deep(kinds(rep).slice(7), ["comment", "close", "open"], "but six hours after the close it is a new incident and gets a new issue");
+  rep = makeReporter({ failReopen: 1 });
+  w = mk(rep);
+  t = at(D, 11, 0);
+  for (const step of [breach, breach, good, good, good, breach, breach]) await w.apply([step("tier1")], { at: t += 5 * MIN });
+  deep(kinds(rep), ["list", "open", "comment", "close", "reopen", "open"], "and a reopen GitHub refuses falls back to a new issue");
 
   rep = makeReporter({ seed: [{ number: 55, id: "nightly", updatedAt: t - HOUR }, { number: 56, id: "tier1", updatedAt: t - 8 * HOUR }] });
   w = mk(rep);
@@ -315,7 +445,7 @@ const MIN = 60 * 1000;
   deep(kinds(rep), ["list", "comment"], "one that has been quiet for eight hours gets its reminder");
   await w.apply([good("nightly")], { at: t + 5 * MIN });
   deep(kinds(rep).slice(2), ["comment", "close"], "and a healthy tick closes the one this run never raised");
-  deep(rep.calls[3], ["close", 55], "by its number");
+  deep(rep.calls[3], ["close", 55, "completed"], "by its number, as completed");
 
   rep = makeReporter({ seed: [{ number: 60, id: "chain", updatedAt: t }] });
   w = mk(rep);
@@ -325,13 +455,42 @@ const MIN = 60 * 1000;
   await w.clear("chain", { at: t });
   eq(rep.calls.length, 3, "and only once");
 
+  rep = makeReporter({ seed: [{ number: 5, id: "nightly", updatedAt: t - 9 * HOUR }, { number: 7, id: "nightly", updatedAt: t - HOUR },
+    { number: 6, id: "tier1", updatedAt: t - HOUR }] });
+  w = mk(rep);
+  await w.start();
+  deep(w.summary().issues, { nightly: 7, tier1: 6 }, "TWO OPEN ISSUES FOR ONE CHECK are both found: the newest is the one the loop keeps");
+  await w.apply([breach("nightly")], { at: t });
+  deep(rep.calls.slice(1).map((c) => [c[0], c[1], c[2]]).filter((c) => c[0] === "close" || c[0] === "comment"),
+    [["close", 5, "not_planned"], ["comment", 7, "Closed #5 as a duplicate of this issue."]],
+    "a duplicate is closed as not planned the first time the check is raised, with a note on the one that stays");
+  await w.apply([good("nightly")], { at: t + 5 * MIN });
+  deep(rep.calls.slice(-2).map((c) => c[0] + c[1]), ["comment7", "close7"], "and recovery closes the one that stayed");
+  rep = makeReporter({ seed: [{ number: 5, id: "nightly", updatedAt: t - 9 * HOUR }, { number: 7, id: "nightly", updatedAt: t - HOUR }] });
+  w = mk(rep);
+  await w.start();
+  await w.apply([good("nightly")], { at: t });
+  deep(rep.calls.slice(1).map((c) => c[0] + c[1]), ["comment7", "close5", "comment7", "close7"],
+    "a healthy tick with two left open by earlier runs closes both, so none is left open for ever");
+
+  rep = makeReporter({ ghostOpens: 1 });
+  w = mk(rep);
+  t = at(D, 21, 0);
+  await w.apply([breach("nightly")], { at: t });
+  await w.apply([breach("nightly")], { at: t + 5 * MIN });
+  await w.apply([breach("nightly")], { at: t + 15 * MIN });
+  deep(kinds(rep), ["list", "open", "list"], "AN OPEN WHOSE ANSWER NEVER CAME may have created the issue: the retry looks before it opens another");
+  eq(w.summary().issues.nightly, 700, "and adopts what it finds");
+  deep(kinds(rep).filter((k) => k === "open").length, 1, "so one issue exists where a blind retry would have made two");
+
   rep = makeReporter({ failOpen: 1 });
   w = mk(rep);
   t = at(D, 21, 0);
   await w.apply([breach("nightly")], { at: t });
   await w.apply([breach("nightly")], { at: t + 5 * MIN });
   await w.apply([breach("nightly")], { at: t + 15 * MIN });
-  deep(kinds(rep), ["list", "open", "open"], "AN ISSUE THAT COULD NOT BE OPENED is tried again after 15 minutes, not every tick");
+  deep(kinds(rep), ["list", "open", "list", "open"], "AN ISSUE THAT COULD NOT BE OPENED is tried again after 15 minutes, not every tick, " +
+    "and the retry first looks for the issue the failed call may have created");
   ok(lines.some((l) => /could not open the nightly issue \(HTTP 500\)/.test(l)) && lines.some((l) => /^::error title=/.test(l)),
     "and the run says so on its own page (an annotation), so the red run is explained even when the issue is not");
   rep = makeReporter({ failClose: 1 });
@@ -352,13 +511,36 @@ const MIN = 60 * 1000;
   w = mk(rep);
   await w.raiseNow("chain", breach("chain"), { at: t });
   deep(kinds(rep), ["list", "open"], "a chain failure opens at once: it has no second look coming");
-  deep([WITNESS.confirm.tier1, WITNESS.confirm.nightly, WITNESS.confirm.chain, WITNESS.confirm.probe], [2, 1, 1, 3],
-    "THE DEBOUNCE: Tier 1 two ticks (ten minutes), the nightly and the chain none (a deadline and a dead end), a blind probe three");
+  rep = makeReporter();
+  w = mk(rep);
+  t = at(D, 21, 0);
+  const pendingBreach = { id: "nightly", status: "breach", detail: "the store answered pending for meta", confirm: WITNESS.confirm.nightlyPending };
+  await w.apply([pendingBreach], { at: t });
+  deep([kinds(rep), w.isOpen("nightly"), w.summary().breached], [[], true, []],
+    "A PENDING META ALONE opens nothing and asks to be read again (the check stays open for the loop's next tick)");
+  await w.apply([good("nightly")], { at: t += 5 * MIN });
+  await w.apply([pendingBreach], { at: t += 5 * MIN });
+  deep([kinds(rep), w.isOpen("nightly")], [[], true], "a readable meta in between clears it");
+  await w.apply([pendingBreach], { at: t += 5 * MIN });
+  deep(kinds(rep), ["list", "open"], "two pending reads in a row are a lapse");
+  rep = makeReporter();
+  w = mk(rep);
+  await w.apply([breach("nightly")], { at: t });
+  deep(kinds(rep), ["list", "open"], "while a readable, stale meta needs no second look");
+  rep = makeReporter();
+  w = mk(rep);
+  await w.apply([pendingBreach], { at: t });
+  await w.apply([breach("nightly")], { at: t + 5 * MIN });
+  deep(kinds(rep), ["list", "open"], "and a pending read followed by a stale one counts as the two");
+  deep([WITNESS.confirm.tier1, WITNESS.confirm.tier2, WITNESS.confirm.nightly, WITNESS.confirm.nightlyPending, WITNESS.confirm.chain,
+    WITNESS.confirm.probe], [2, 2, 1, 2, 1, 3],
+  "THE DEBOUNCE: Tier 1 and Tier 2 two ticks (ten minutes), the nightly none when meta is readable and two when the store answered " +
+    "pending (a failed D1 read looks the same), the chain none (a dead end), a blind probe three");
   eq(annotation("error", "Tier 1: stale, 100%", "line one\nline two: 5%"), "::error title=Tier 1%3A stale%2C 100%25::line one%0Aline two: 5%25",
     "ANNOTATIONS are escaped as the runner reads them (a colon or comma in a title and a newline in a message would otherwise end the command early)");
   ok(lines.filter((l) => l.startsWith("::error")).every((l) => /^::error title=[^:,]*::/.test(l)),
     "so every annotation the witness wrote parses");
-  deep(Object.keys(WITNESS_CHECKS).sort(), ["chain", "drill", "nightly", "probe", "tier1"], "four checks and the drill in all");
+  deep(Object.keys(WITNESS_CHECKS).sort(), ["chain", "drill", "nightly", "probe", "tier1", "tier2"], "five checks and the drill in all");
   eq(ownerHandle({ GITHUB_REPOSITORY_OWNER: "not valid!" , GITHUB_REPOSITORY: "anilkaya001/x" }), "anilkaya001", "the owner handle is validated before it is mentioned");
   eq(runUrl({ GITHUB_REPOSITORY: "a/b", GITHUB_RUN_ID: "9x" }), null, "and a run URL needs a numeric run id");
   ok(!/\/\/(?!github\.com)/.test(issueBody("tier1", { detail: "x" }, { at: t, env: {} }).replace(/https:\/\/\S+/g, "")), "and an issue body carries no secret");
@@ -370,10 +552,14 @@ const MIN = 60 * 1000;
   const fetchImpl = async (url, init) => {
     sent.push({ url, init });
     if (init.method === "GET") {
+      const bot = { login: "github-actions[bot]", type: "Bot" };
       return reply(200, [
-        { number: 3, title: "[flows-witness:nightly] The nightly has not landed", updated_at: "2026-09-29T21:05:00Z" },
-        { number: 4, title: "[flows-witness:tier1] x", updated_at: "2026-09-29T15:00:00Z", pull_request: {} },
-        { number: 5, title: "An ordinary issue", updated_at: "2026-09-29T15:00:00Z" },
+        { number: 3, title: "[flows-witness:nightly] The nightly has not landed", updated_at: "2026-09-29T21:05:00Z", user: bot },
+        { number: 4, title: "[flows-witness:tier1] x", updated_at: "2026-09-29T15:00:00Z", pull_request: {}, user: bot },
+        { number: 5, title: "An ordinary issue", updated_at: "2026-09-29T15:00:00Z", user: bot },
+        { number: 9, title: "[flows-witness:nightly] The nightly has not landed", updated_at: "2026-09-29T21:30:00Z",
+          user: { login: "someone-else", type: "User" } },
+        { number: 10, title: "[flows-witness:chain] x", updated_at: "2026-09-29T21:30:00Z" },
       ]);
     }
     return reply(201, { number: 8 });
@@ -382,7 +568,8 @@ const MIN = 60 * 1000;
   const r = createIssueReporter({ env, fetchImpl });
   const listed = await r.list();
   deep(listed, { ok: true, issues: [{ number: 3, id: "nightly", updatedAt: Date.parse("2026-09-29T21:05:00Z") }] },
-    "THE REPORTER lists only open witness issues, not pull requests or other people's issues");
+    "THE REPORTER lists only open witness issues, not pull requests or other people's issues, and not a look-alike title " +
+      "that a stranger opened (the repository is public) or one with no author: only what the job's own token wrote");
   ok(sent[0].url === "https://api.github.com/repos/anilkaya001/anilkaya.org/issues?state=open&sort=updated&direction=desc&per_page=100" &&
      sent[0].init.headers.Authorization === "Bearer ghs_job" && sent[0].init.signal instanceof AbortSignal && !("body" in sent[0].init),
   "with the job's token, a deadline and no body on a GET");
@@ -392,6 +579,11 @@ const MIN = 60 * 1000;
   eq(sent[2].url.endsWith("/issues/8/comments") && sent[2].init.method === "POST", true, "comments on its number");
   await r.close(8);
   deep([sent[3].init.method, JSON.parse(sent[3].init.body)], ["PATCH", { state: "closed", state_reason: "completed" }], "closes as completed");
+  await r.close(9, "not_planned");
+  deep(JSON.parse(sent[4].init.body), { state: "closed", state_reason: "not_planned" }, "or as not planned for a duplicate");
+  await r.reopen(8);
+  deep([sent[5].url.endsWith("/issues/8"), sent[5].init.method, JSON.parse(sent[5].init.body)], [true, "PATCH", { state: "open", state_reason: "reopened" }],
+    "and reopens with the reason GitHub records");
   const none = createIssueReporter({ env: {}, fetchImpl });
   deep([none.enabled, none.why, (await none.list()).ok], [false, "no-token", false], "with no token it is off and says why");
   const down = createIssueReporter({ env, fetchImpl: async () => { throw new Error("offline"); } });
@@ -420,6 +612,16 @@ const MIN = 60 * 1000;
     "a nightly that never lands is dispatched twice and reported once");
   ok(by("refuses").nightlyDispatches.length === 4 && by("chain dispatch").issues.length === 1 && by("ingest route").closed === 1,
     "and a refusal, a broken chain and a dark ingest route each say so");
+  const outage = by("fails the nightly dispatch");
+  ok(outage.nightlyDispatches.length === 7 && outage.issues.length === 0 && !outage.failed && outage.githubCalls <= 7 + 2 + 3,
+    `A GITHUB OUTAGE OF TWO HOURS is ridden out: ${outage.nightlyDispatches.length} dispatches on a half-hour cadence, the seventh sent, no issue, a green run`);
+  const flapping = by("intermittent feed");
+  ok(flapping.issues.length === 1 && flapping.closed >= 4 && flapping.failed,
+    `AN INTERMITTENT FEED is one issue, reopened on each flap (${flapping.closed} closes, ${flapping.comments} comments), and still turns the run red`);
+  ok(by("Tier 2 stops").issues.length === 1 && by("Tier 2 stops").closed === 1 && by("Tier 2 stops").failed,
+    "A TIER 2 THAT PASSES BUT DOES NOT PUBLISH is one issue, closed on recovery");
+  ok(by("one pending answer").issues.length === 1 && by("one pending answer").closed === 1 && !by("after midnight").problems.length &&
+     by("after midnight").closed === 1, "a pending answer from meta is a lapse only when it repeats, and a nightly that lands after midnight closes its issue");
   const src = read("scripts/flows-pipeline.mjs");
   ok(/if \(DRY_RUN\) \{\s*const ticks = await dryLiveTicks\(\{ publish, store: publishedStore, shapeNews \}\);\s*const day = await dryLiveDay\(\{\}\);/.test(src) &&
      /if \(day\.problems\.length\) \{[\s\S]*?process\.exitCode = 1;/.test(src),
@@ -495,6 +697,50 @@ const MIN = 60 * 1000;
      carried.notes.some((l) => /dispatch of flows-pipeline\.yml \(first\)/.test(l)),
   "A HOP BETWEEN THE DISPATCH AND THE LANDING costs one duplicate dispatch, which the nightly's concurrency group turns into a refresh");
 
+  const blip = fakeWorld({ day: S, start: at(S, 10, 2), metaPending: [[at(S, 10, 0), at(S, 10, 4)]] });
+  r = await drive(blip, { budgetMs: 40 * MIN });
+  ok(issues(blip).length === 0 && blip.github.record.closed.length === 0 && r.loop.watch.breached.length === 0 && !liveRunVerdict(r.loop).failed &&
+     blip.stat.reads.filter((x) => x.key === "meta").length >= 2 && blip.stat.reads.find((x) => x.key === "meta").at < at(S, 10, 4),
+  "A SINGLE PENDING ANSWER on a hop's first tick (meta is always read there) opens no issue and leaves the run green: the loop reads meta again on the next tick and finds it");
+  const dark = fakeWorld({ day: S, start: at(S, 10, 2), metaPending: [[at(S, 10, 0), at(S, 11, 0)]] });
+  r = await drive(dark, { budgetMs: 90 * MIN });
+  ok(issues(dark).length === 1 && /answered pending for meta/.test(issues(dark)[0].body) && /failed D1 read/.test(issues(dark)[0].body) &&
+     issues(dark)[0].at >= at(S, 10, 4) && issues(dark)[0].at <= at(S, 10, 10) && dark.github.record.closed.length === 1 && dark.github.record.closed[0].at >= at(S, 11, 0),
+  "but a meta that stays pending for an hour is reported after two reads, in words that say the Worker answers the same for a failed D1 read, and closes when it is readable");
+
+  const strangers = fakeWorld({ day: S, start: at(S, 21, 30), landOnDispatch: Infinity, github: {
+    seed: [{ number: 9, title: "[flows-witness:nightly] The nightly has not landed by 21:00 ET", updatedAt: at(S, 21, 20), author: "someone-else" }] } });
+  r = await drive(strangers, { budgetMs: 40 * MIN });
+  ok(issues(strangers).length === 1 && strangers.github.record.comments.length === 0 && strangers.github.record.closed.length === 0,
+    "A LOOK-ALIKE ISSUE A STRANGER OPENED under the witness's title is not adopted, commented on or closed: the witness opens its own");
+
+  const lost = fakeWorld({ day: S, start: at(S, 21, 30), landOnDispatch: Infinity, github: { loseCreates: 1 } });
+  r = await drive(lost, { budgetMs: 90 * MIN });
+  ok(issues(lost).length === 1 && lost.github.record.comments.length === 0 && r.loop.watch.issues.nightly === 100 &&
+     r.notes.some((l) => /could not open the nightly issue/.test(l)) && r.notes.some((l) => /found issue #100 for nightly/.test(l)),
+  "AN ISSUE WHOSE CREATION ANSWER WAS LOST (GitHub made it, the 15 s deadline fired first) is found again 15 minutes later, not made twice");
+
+  const stuck = fakeWorld({ day: S, start: at(S, 21, 30), landOnDispatch: Infinity, landAt: at(S, 24, 20) });
+  r = await drive(stuck, { budgetMs: 4 * HOUR });
+  ok(issues(stuck).length === 1 && stuck.github.record.closed.length === 1 && stuck.github.record.closed[0].at >= at(S, 24, 20) &&
+     stuck.github.record.closed[0].at <= at(S, 24, 40),
+  "A NIGHTLY THAT LANDS AFTER MIDNIGHT closes its issue within a 15-minute tick of the landing: an open nightly issue keeps meta being read overnight and through a weekend");
+  const overnightReads = stuck.stat.reads.filter((x) => x.key === "meta" && x.at > at(S, 24, 0));
+  ok(overnightReads.length >= 1 && overnightReads.length <= 3, `at the cost of ${overnightReads.length} meta read(s) between midnight and the landing`);
+
+  const tier2 = fakeWorld({ day: S, start: at(S, 9, 20), breadthDown: [[at(S, 10, 50), at(S, 12, 30)]] });
+  r = await drive(tier2, { budgetMs: 4.5 * HOUR });
+  ok(issues(tier2).length === 1 && /^\[flows-witness:tier2\]/.test(issues(tier2)[0].title) && /live:breadth: 10:46 ET/.test(issues(tier2)[0].body) &&
+     issues(tier2)[0].at >= at(S, 11, 31) && issues(tier2)[0].at <= at(S, 11, 45) && tier2.github.record.closed.length === 1 &&
+     tier2.github.record.closed[0].at >= at(S, 12, 30) && liveRunVerdict(r.loop).failed && /tier2/.test(liveRunVerdict(r.loop).why),
+  "A TIER 2 THAT STOPS PUBLISHING while its passes run (breadth last written 10:46) is reported about 45 minutes on, two ticks after the line, closes three healthy ticks after it returns, and turns the run red");
+  const brief = fakeWorld({ day: S, start: at(S, 9, 20), breadthDown: [[at(S, 10, 50), at(S, 11, 20)]] });
+  await drive(brief, { budgetMs: 3 * HOUR });
+  eq(issues(brief).length, 0, "while a half-hour gap inside the 45-minute line raises nothing");
+  const sourceKinds = new Set(tier2.stat.reads.map((x) => x.key));
+  ok(sourceKinds.has("live:breadth") && tier2.stat.reads.filter((x) => x.key === "live:breadth").every((x) => x.at >= at(S, 10, 15) && x.at <= at(S, 16, 25)),
+    "and live:breadth is read only from 10:15 ET, not before");
+
   const thrower = await drive(fakeWorld({ day: S, start: at(S, 15, 50) }), { budgetMs: HOUR, watchOver: { readOnce: async () => { throw new Error("boom"); } } });
   ok(thrower.loop.exit === "budget" && thrower.loop.passes.length > 5, "A READ THAT THROWS costs a tick, not the loop");
   eq(WITNESS.readDeadlineMs, 10000, "a watch read has a ten-second deadline");
@@ -505,6 +751,21 @@ const MIN = 60 * 1000;
   ]);
   clearTimeout(giveUp);
   ok(hung !== "hung" && hung.loop.exit === "budget", "and a read that never answers is given up on when the deadline falls, so the tick ends and the loop goes on");
+
+  eq(LIVE_LOOP.clockDeadlineMs, 10000, "The loop's own clock read has a ten-second deadline like the watch's");
+  const quiet = { tick: async () => ({ busy: false }), summary: () => ({ breached: [], open: [] }) };
+  for (const [name, watching] of [["kept-alive", quiet], ["legacy", null]]) {
+    const world = fakeWorld({ day: S, start: at(S, 11, 0) });
+    let timer = null;
+    const done = await Promise.race([
+      runLiveLoop({ now: world.now, sleep: world.sleep, budgetMs: 12 * MIN, log() {}, warn() {}, watch: watching, clockDeadlineMs: 60,
+        readClock: () => new Promise(() => {}), pass: async () => ({ skipped: null, answered: 1, landed: 1 }),
+        chain: async () => ({ sent: true, why: "sent", status: 204 }) }),
+      new Promise((resolve) => { timer = setTimeout(() => resolve("hung"), 20000); }),
+    ]);
+    clearTimeout(timer);
+    ok(done !== "hung" && done.exit === "budget", `and a clock read that never answers cannot hold the ${name} loop past it: the tick is skipped and the loop goes on`);
+  }
 
   const errored = fakeWorld({ day: S, start: at(S, 15, 50) });
   const seenFirst = [];
@@ -544,10 +805,14 @@ const MIN = 60 * 1000;
   eq(weekday.runs.reduce((n, r) => n + r.passes, 0), 85, "with a Tier 2 pass on every slot from 09:31 to 16:25 ET (85, the count of 2026-09-28)");
   const kinds = {};
   for (const r of weekday.reads) kinds[r.key] = (kinds[r.key] || 0) + 1;
-  ok(weekday.reads.length <= 340 && kinds["live:market"] === kinds["live:focus"] && kinds["live:market"] <= 82 && kinds.meta <= 10,
-    `and it costs the Worker ${weekday.reads.length} ingest reads (${JSON.stringify(kinds)}), 0.34% of the Free plan's 100,000 requests a day`);
+  ok(weekday.reads.length <= 410 && kinds["live:market"] === kinds["live:focus"] && kinds["live:market"] <= 82 && kinds.meta <= 10 &&
+     kinds["live:breadth"] >= 70 && kinds["live:breadth"] <= 76,
+  `and it costs the Worker ${weekday.reads.length} ingest reads (${JSON.stringify(kinds)}), ${(weekday.reads.length / 1000).toFixed(2)}% of the Free plan's 100,000 requests a day, ` +
+    "of which the breadth read is one a tick from 10:15 (45 minutes after the open) to 16:25 ET");
   ok(weekday.calls.length <= 12, `and GitHub ${weekday.calls.length} calls (an issue listing and a chain dispatch per run, and the nightly)`);
-  eq(weekday.world.github.record.dispatches.filter((d) => d.workflow === "flows-pipeline.yml").length, 1, "with the nightly dispatched exactly once");
+  const nightlySends = weekday.world.github.record.dispatches.filter((d) => d.workflow === "flows-pipeline.yml");
+  ok(nightlySends.length === 1 && nightlySends[0].at === at(D, 17, 30),
+    "with the nightly dispatched exactly once, at 17:30:00 ET sharp: the loop is idle from 16:25 and its 15-minute tick lands on the minute, with no special wake");
   eq(weekday.world.github.record.created.length, 0, "and nothing to report");
   const weekend = await wholeDay(DRY_WEEKEND);
   const wk = {};
@@ -555,6 +820,72 @@ const MIN = 60 * 1000;
   ok(weekend.reads.length <= 110 && Object.keys(wk).sort().join() === "clock,meta" && weekend.runs.every((r) => r.passes === 0) &&
      weekend.calls.length <= 12 && weekend.world.github.record.dispatches.every((d) => d.workflow === "flows-live.yml"),
   `A SATURDAY costs ${weekend.reads.length} reads (${JSON.stringify(wk)}), no pass and no nightly, and only the chain calls GitHub`);
+}
+
+{
+  const HOP = LIVE_LOOP.budgetMs;
+  const LATENCY = 30 * 1000;
+  const lines = [];
+  for (let h = 5; h <= 20; h++) for (const m of [17, 47]) lines.push(h * 60 + m);
+  const monday = Date.UTC(2026, 8, 28);
+  const week = (lagMin, refuseHop = -1) => {
+    const landings = [];
+    for (let w = 0; w < 2; w++) for (let d = 0; d < 5; d++) for (const s of lines) landings.push(monday + (w * 7 + d) * 86400000 + (s + lagMin) * 60000);
+    landings.sort((a, b) => a - b);
+    const runs = [];
+    let running = null;
+    let pending = false;
+    let i = 0;
+    const limit = monday + 9 * 86400000;
+    for (;;) {
+      const landing = i < landings.length ? landings[i] : Infinity;
+      const ending = running ? running.end : Infinity;
+      const t = Math.min(landing, ending);
+      if (t === Infinity || t > limit) break;
+      if (ending <= landing) {
+        const hopped = runs.length - 1 !== refuseHop;
+        const queued = hopped ? "chain" : pending ? "cron" : null;
+        running = null;
+        pending = false;
+        if (queued) {
+          running = { start: t + (queued === "chain" ? LATENCY : 0), by: queued };
+          running.end = running.start + HOP;
+          runs.push(running);
+        }
+      } else {
+        i++;
+        if (!running) {
+          running = { start: t, end: t + HOP, by: "cron" };
+          runs.push(running);
+        } else pending = true;
+      }
+    }
+    return runs;
+  };
+  const gaps = (runs) => runs.slice(1).map((r, k) => r.start - runs[k].end);
+  const wrong = [];
+  for (const lag of [0, 120, 300, 480]) {
+    const runs = week(lag);
+    if (runs.filter((r) => r.by === "cron").length !== 1) wrong.push(`+${lag} min: ${runs.filter((r) => r.by === "cron").length} cron-started runs`);
+    if (gaps(runs).some((g) => g !== LATENCY)) wrong.push(`+${lag} min: a gap of ${Math.max(...gaps(runs)) / 1000} s`);
+    if (runs.length < 25) wrong.push(`+${lag} min: only ${runs.length} runs in nine days`);
+  }
+  deep(wrong, [], "UNDER KEEP THE 32 CRON LINES START ONE LOOP AND THEN NEVER RUN: through the concurrency group (one running, one pending that a newer one replaces) " +
+    "only the first starter of the week starts a run, every later one is replaced by the loop's own hop, and the hops follow each other by the 30 s a dispatch takes, at every delivery lag from none to eight hours");
+  const broken = [];
+  for (const lag of [0, 300]) {
+    for (const hop of [1, 6]) {
+      const runs = week(lag, hop);
+      if (runs[hop + 1].by !== "cron" || runs[hop + 1].start !== runs[hop].end) broken.push(`+${lag} min, hop ${hop}: the successor was ${runs[hop + 1].by} after ${(runs[hop + 1].start - runs[hop].end) / 60000} min`);
+    }
+  }
+  deep(broken, [], "and a hop that fails on a weekday is covered by the starter pending behind it: in any 340 minutes at least ten lines are delivered, so the pending one starts the moment " +
+    "the loop ends, with no gap");
+  const whole = week(0);
+  const saturday = whole.findIndex((r) => new Date(r.end).getUTCDay() === 6);
+  const weekend = week(0, saturday);
+  ok(saturday > 0 && weekend[saturday + 1] && weekend[saturday + 1].by === "cron" && weekend[saturday + 1].start - weekend[saturday].end > 24 * 3600 * 1000,
+    "while a hop that fails on a Saturday waits for the first starter of the next weekday, more than a day: the lines are Monday to Friday, which is why the witness raises the chain issue at once");
 }
 
 {
@@ -699,6 +1030,7 @@ const MIN = 60 * 1000;
 }
 
 console.log(`✓ flows-starts: ${checks} assertions — the live workflow's grants, the nightly dispatched at 17:30 ET with the job's own token ` +
-  `(origin live-loop, no undeclared input), retried and capped; the witness's Tier 1 and nightly lines at 25 minutes and 21:00 ET with ` +
-  `their debounce, dedupe, reminder and recovery; the issue reporter against a fake GitHub; the loop kept alive through the night, the ` +
-  `weekend and the hop; eight dry days; the vendor client's 20 s deadline`);
+  `(origin live-loop, no undeclared input), capped for a permanent refusal and ridden through a two-hour GitHub outage; the witness's Tier 1, ` +
+  `Tier 2 and nightly lines at 25 minutes, 45 minutes and 21:00 ET with their debounce, three-tick recovery, reopen, dedupe, author check, ` +
+  `reminder and duplicate cleanup; the issue reporter against a fake GitHub; the loop kept alive through the night, the weekend and the hop, ` +
+  `and its cron starters through the concurrency group; ${DRY_SCENARIOS.length} dry days; the vendor client's 20 s deadline`);

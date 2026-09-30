@@ -1,13 +1,15 @@
 import { easternInstant, closeMinutes, PHASE_MINUTES, LIVE_CLOCK, prevTradingDay } from "../../shared/flows-freshness.js";
 
 const iso = (ms) => new Date(ms).toISOString();
+const BOT = "github-actions[bot]";
 const inside = (t, spans) => spans.some(([from, to]) => t >= from && t < to);
 
 export function fakeGithub({ now = () => Date.now(), dispatchStatus = 204, chainStatus = 204, writeStatus = 201, listStatus = 200,
-  seed = [] } = {}) {
-  const record = { dispatches: [], created: [], comments: [], closed: [], calls: [] };
-  const issues = seed.map((it) => ({ state: "open", ...it }));
+  seed = [], loseCreates = 0 } = {}) {
+  const record = { dispatches: [], created: [], comments: [], closed: [], reopened: [], calls: [] };
+  const issues = seed.map((it) => ({ state: "open", author: BOT, ...it }));
   let next = 100 + issues.length;
+  let lost = loseCreates;
   const reply = (status, body) => ({ status, ok: status >= 200 && status < 300, json: async () => body });
   const fetchImpl = async (url, init = {}) => {
     const u = new URL(url);
@@ -17,20 +19,27 @@ export function fakeGithub({ now = () => Date.now(), dispatchStatus = 204, chain
     const dispatch = /\/actions\/workflows\/([^/]+)\/dispatches$/.exec(u.pathname);
     if (dispatch && method === "POST") {
       const entry = { workflow: dispatch[1], inputs: body && body.inputs, ref: body && body.ref, at: now() };
-      const status = dispatch[1] === "flows-live.yml" ? chainStatus : dispatchStatus;
+      const wanted = dispatch[1] === "flows-live.yml" ? chainStatus : dispatchStatus;
+      const status = typeof wanted === "function" ? wanted(entry.at) : wanted;
       record.dispatches.push({ ...entry, status });
+      if (status === 0) throw new Error("fetch failed");
       return reply(status, null);
     }
     if (/\/issues$/.test(u.pathname) && method === "GET") {
       return reply(listStatus, issues.filter((it) => it.state === "open")
         .map((it) => ({ number: it.number, title: it.title, updated_at: iso(it.updatedAt), state: "open",
+          user: { login: it.author, type: it.author.endsWith("[bot]") ? "Bot" : "User" },
           ...(it.pull_request ? { pull_request: {} } : {}) })));
     }
     if (/\/issues$/.test(u.pathname) && method === "POST") {
       if (writeStatus >= 300) return reply(writeStatus, { message: "refused" });
-      const made = { number: next++, title: body.title, body: body.body, state: "open", updatedAt: now() };
+      const made = { number: next++, title: body.title, body: body.body, state: "open", updatedAt: now(), author: BOT };
       issues.push(made);
       record.created.push({ number: made.number, title: made.title, body: made.body, at: now() });
+      if (lost > 0) {
+        lost--;
+        throw new Error("The operation was aborted");
+      }
       return reply(201, { number: made.number });
     }
     const comment = /\/issues\/(\d+)\/comments$/.exec(u.pathname);
@@ -47,7 +56,8 @@ export function fakeGithub({ now = () => Date.now(), dispatchStatus = 204, chain
       if (writeStatus >= 300 || !found) return reply(writeStatus >= 300 ? writeStatus : 404, { message: "refused" });
       found.state = body.state;
       found.updatedAt = now();
-      if (body.state === "closed") record.closed.push({ number: found.number, at: now() });
+      if (body.state === "closed") record.closed.push({ number: found.number, at: now(), reason: body.state_reason });
+      if (body.state === "open") record.reopened.push({ number: found.number, at: now() });
       return reply(200, { number: found.number, state: found.state });
     }
     return reply(404, { message: "unrouted " + method + " " + u.pathname });
@@ -56,7 +66,7 @@ export function fakeGithub({ now = () => Date.now(), dispatchStatus = 204, chain
 }
 
 export function fakeWorld({ day, start, landOnDispatch = 15 * 60 * 1000, landAt = null, tier1Down = [], marketDown = [],
-  focusDown = [], readFail = [], summaryAgeMs = 10 * 60 * 1000, github = {} } = {}) {
+  focusDown = [], breadthDown = [], metaPending = [], readFail = [], summaryAgeMs = 10 * 60 * 1000, github = {} } = {}) {
   let t = start;
   const prev = prevTradingDay(day, null);
   const open = easternInstant(day, PHASE_MINUTES.open);
@@ -72,6 +82,8 @@ export function fakeWorld({ day, start, landOnDispatch = 15 * 60 * 1000, landAt 
   };
   const tier1Ticks = ticks(1);
   const focusTicks = ticks(3);
+  const breadthTicks = [];
+  for (let x = open + 60000; x <= close + LIVE_CLOCK.runAfterCloseMin * 60000; x += 5 * 60000) breadthTicks.push(x);
   const priorFinal = easternInstant(prev, closeMinutes(prev, null)) + 6 * 60000;
   const lastUp = (list, down, at) => {
     for (let i = list.length - 1; i >= 0; i--) if (list[i] <= at && !inside(list[i], down)) return list[i];
@@ -80,6 +92,7 @@ export function fakeWorld({ day, start, landOnDispatch = 15 * 60 * 1000, landAt 
   const tickAt = (at) => lastUp(tier1Ticks, tier1Down, at);
   const marketAt = (at) => lastUp(tier1Ticks, [...tier1Down, ...marketDown], at);
   const focusAt = (at) => lastUp(focusTicks, [...tier1Down, ...focusDown], at);
+  const breadthAt = (at) => lastUp(breadthTicks, breadthDown, at);
 
   const dispatchedAt = () => {
     const sent = gh.record.dispatches.find((d) => d.workflow === "flows-pipeline.yml" && d.status === 204);
@@ -110,7 +123,11 @@ export function fakeWorld({ day, start, landOnDispatch = 15 * 60 * 1000, landAt 
     if (key === "clock") return { payload: clockBody(), status: 200 };
     if (key === "live:market") return { payload: { key, fresh: { readAt: iso(marketAt(t)) } }, status: 200 };
     if (key === "live:focus") return { payload: { key, fresh: { readAt: iso(focusAt(t)) } }, status: 200 };
-    if (key === "meta") return { payload: { sessionDate: metaSession(), generatedAt: iso(t) }, status: 200 };
+    if (key === "live:breadth") return { payload: { key, fresh: { readAt: iso(breadthAt(t)) } }, status: 200 };
+    if (key === "meta") {
+      if (inside(t, metaPending)) return { payload: null, absent: true, status: 200 };
+      return { payload: { sessionDate: metaSession(), generatedAt: iso(t) }, status: 200 };
+    }
     return { payload: null, absent: true, status: 200 };
   };
 

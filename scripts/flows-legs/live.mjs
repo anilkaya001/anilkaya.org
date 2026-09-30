@@ -322,6 +322,7 @@ export const LIVE_LOOP = Object.freeze({
   idleMs: 15 * 60 * 1000,
   chainRetryMs: Object.freeze([15 * 1000, 45 * 1000]),
   githubTimeoutMs: 15 * 1000,
+  clockDeadlineMs: 10 * 1000,
   workflow: "flows-live.yml",
   ref: "main",
 });
@@ -348,6 +349,15 @@ export function githubHeaders(token) {
 }
 
 export const githubSignal = (ms = LIVE_LOOP.githubTimeoutMs) => AbortSignal.timeout(ms);
+
+export const transientRefusal = (r) => !!r && !r.sent &&
+  (r.why === "unreachable" || r.status === 408 || r.status === 429 || (Number.isInteger(r.status) && r.status >= 500));
+
+export const withDeadline = (promise, ms) => new Promise((resolve) => {
+  const timer = setTimeout(() => resolve({ failed: true, status: 0, detail: "timeout" }), ms);
+  promise.then((value) => { clearTimeout(timer); resolve(value); },
+    (error) => { clearTimeout(timer); resolve({ failed: true, status: 0, detail: error && error.message ? error.message : String(error) }); });
+});
 
 export async function chainDispatch({ env = {}, fetchImpl = fetch, at = Date.now(), workflow = LIVE_LOOP.workflow,
   ref = LIVE_LOOP.ref, inputs = null } = {}) {
@@ -424,7 +434,6 @@ async function keepLoop({ startedAt, refresh, current, pass, chain, now, sleep, 
     let wake = nextSlot(t, busy ? slotMs : idleMs);
     const open = nextOpenAt(t, clock);
     if (Number.isFinite(open) && open > t && wake >= open - LIVE_LOOP.openLagMs) wake = open;
-    if (Number.isFinite(beat.wakeAt) && beat.wakeAt > t) wake = Math.min(wake, beat.wakeAt);
     if (wake - startedAt > budgetMs) {
       const chained = await chain({ at: now() });
       log(`live loop: time budget spent after ${passes.length} pass(es) and ${ticks} watch tick(s) — ` +
@@ -441,14 +450,13 @@ async function keepLoop({ startedAt, refresh, current, pass, chain, now, sleep, 
 
 export async function runLiveLoop({ pass, chain, now = () => Date.now(), sleep = realSleep, window = liveWindow,
   readClock = async () => null, slotMs = LIVE_LOOP.slotMs, budgetMs = LIVE_LOOP.budgetMs, log = console.log,
-  warn = console.warn, watch = null, idleMs = LIVE_LOOP.idleMs } = {}) {
+  warn = console.warn, watch = null, idleMs = LIVE_LOOP.idleMs, clockDeadlineMs = LIVE_LOOP.clockDeadlineMs } = {}) {
   const startedAt = now();
   const passes = [];
   let clock = null;
   const refresh = async () => {
-    let read = null;
-    try { read = await readClock(); } catch { read = null; }
-    if (read) clock = read;
+    const read = await withDeadline(Promise.resolve().then(readClock), clockDeadlineMs);
+    if (read && !read.failed) clock = read;
     return clock;
   };
   if (watch) {

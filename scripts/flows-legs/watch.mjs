@@ -1,15 +1,10 @@
 import { phaseAt, LIVE_CLOCK } from "../../shared/flows-freshness.js";
 import {
-  WITNESS, witnessView, evaluateTier1, evaluateNightly, createWitness, createIssueReporter, sessionOf,
+  WITNESS, witnessView, evaluateTier1, evaluateTier2, evaluateNightly, createWitness, createIssueReporter, sessionOf,
 } from "./witness.mjs";
 import { createNightlyStart, NIGHTLY } from "./starts.mjs";
+import { withDeadline } from "./live.mjs";
 import { etTime } from "./health.mjs";
-
-const withDeadline = (promise, ms) => new Promise((resolve) => {
-  const timer = setTimeout(() => resolve({ failed: true, status: 0, detail: "timeout" }), ms);
-  promise.then((value) => { clearTimeout(timer); resolve(value); },
-    (error) => { clearTimeout(timer); resolve({ failed: true, status: 0, detail: error && error.message ? error.message : String(error) }); });
-});
 
 export function normalizeRead(read) {
   if (!read || read.failed) return { failed: true, status: read && read.status ? read.status : 0, detail: read && read.detail ? read.detail : null };
@@ -21,6 +16,12 @@ export function tier1Window(at, view) {
   if (!view || (view.tier1 && view.tier1.why === "off")) return false;
   const p = phaseAt(at, view.clock);
   return !!p && p.trading && at >= p.open && at <= p.close + LIVE_CLOCK.tier1AfterCloseMin * 60000;
+}
+
+export function tier2Window(at, view) {
+  if (!view || (view.tier1 && view.tier1.why === "off")) return false;
+  const p = phaseAt(at, view.clock);
+  return !!p && p.trading && at - p.open >= WITNESS.tier2StaleMs && at <= p.close + LIVE_CLOCK.runAfterCloseMin * 60000;
 }
 
 export function createWatch({ readOnce, latestClock, env = process.env, fetchImpl = fetch, reporter = null,
@@ -40,12 +41,14 @@ export function createWatch({ readOnce, latestClock, env = process.env, fetchImp
       const wclock = view ? view.clock : clock;
       const p = phaseAt(at, wclock);
       const inTier1 = tier1Window(at, view);
+      const inTier2 = tier2Window(at, view);
       const landedToday = !!p && !!state.landed && state.landed.day === p.day;
       const wantMeta = first || witness.isOpen("nightly") ||
         (!!p && p.trading && p.minutes >= NIGHTLY.atMin && !landedToday);
-      const [market, focus, meta] = await Promise.all([
+      const [market, focus, breadth, meta] = await Promise.all([
         inTier1 ? read("live:market") : null,
         inTier1 ? read("live:focus") : null,
+        inTier2 ? read("live:breadth") : null,
         wantMeta ? read("meta") : null,
       ]);
       let metaSession = meta && meta.ok ? sessionOf(meta.payload) : meta && meta.pending ? null : undefined;
@@ -54,8 +57,9 @@ export function createWatch({ readOnce, latestClock, env = process.env, fetchImp
       const step = await nightly.step({ at, clock: wclock, metaSession });
       const results = [];
       if (inTier1) results.push(evaluateTier1({ at, view, market, focus }));
+      if (inTier2) results.push(evaluateTier2({ at, view, breadth }));
       if (meta) results.push(evaluateNightly({ at, view, meta }));
-      const reads = [market, focus, meta].filter(Boolean);
+      const reads = [market, focus, breadth, meta].filter(Boolean);
       const seen = !!view || reads.some((r) => !r.failed);
       results.push({
         id: "probe", status: seen ? "ok" : "breach",
@@ -63,7 +67,7 @@ export function createWatch({ readOnce, latestClock, env = process.env, fetchImp
           `${reads.map((r) => (r.failed ? (r.status ? "HTTP " + r.status : r.detail || "no answer") : "answered")).join(", ") || "the clock read failed"}`,
       });
       await witness.apply(results, { at, dispatches: nightly.attempts() });
-      return { busy: step.busy, wakeAt: step.wakeAt, results, step };
+      return { busy: step.busy, results, step };
     },
     async chainFailed({ at, chained }) {
       await witness.raiseNow("chain", {

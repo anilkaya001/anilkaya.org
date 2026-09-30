@@ -110,6 +110,23 @@ export const DRY_SCENARIOS = Object.freeze([
     },
   },
   {
+    name: "GitHub fails the nightly dispatch for two hours (503, then no answer): it is retried every half hour and lands before 21:00 ET",
+    world: () => fakeWorld({ day: DRY_DAY, start: at(17, 0), github: {
+      dispatchStatus: (when) => (when < at(18, 30) ? 503 : when < at(19, 30) ? 0 : 204) } }),
+    budgetMs: 5 * HOUR,
+    expect: (r, w) => {
+      const problems = [];
+      const sends = pipelineSends(w);
+      const seen = sends.map((s) => s.status).join();
+      if (seen !== "503,503,503,503,0,0,204") problems.push(`the dispatch answers were ${seen}, not 503 x4, then no answer x2, then 204`);
+      if (w.landedAt() === null || w.landedAt() >= at(21, 0)) problems.push("the nightly did not land before 21:00 ET");
+      if (sends.some((s) => s.at > at(20, 30))) problems.push("a dispatch went out after 20:30 ET");
+      if (w.github.record.created.length) problems.push("a nightly that landed at 20:00 ET opened an issue");
+      if (r.verdict.failed) problems.push(`the run was red: ${r.verdict.why}`);
+      return problems;
+    },
+  },
+  {
     name: "the chain dispatch is refused: three tries, then an issue that says nothing keeps the loop alive",
     world: () => fakeWorld({ day: DRY_DAY, start: at(12, 0), github: { chainStatus: 403 } }),
     budgetMs: 30 * 60 * 1000,
@@ -131,6 +148,66 @@ export const DRY_SCENARIOS = Object.freeze([
       if (!made) return ["no probe issue was opened"];
       if (issueOf(w, "tier1") || issueOf(w, "nightly")) problems.push("a read failure was taken for a freshness verdict");
       if (!w.github.record.closed.length) problems.push("the probe issue was not closed when reads returned");
+      return problems;
+    },
+  },
+  {
+    name: "an intermittent feed (live:focus down half of every hour): one issue, reopened on each flap rather than one issue per flap",
+    world: () => fakeWorld({ day: DRY_DAY, start: at(9, 20), focusDown: [10, 11, 12, 13, 14].map((h) => [at(h, 0), at(h, 30)]) }),
+    budgetMs: 6.5 * HOUR,
+    expect: (r, w) => {
+      const problems = [];
+      const record = w.github.record;
+      if (record.created.length !== 1) problems.push(`${record.created.length} issues were opened, not one`);
+      if (record.reopened.length < 3) problems.push(`the issue was reopened ${record.reopened.length} time(s), not on each flap`);
+      if (record.closed.length < 4) problems.push(`the issue was closed ${record.closed.length} time(s), not after each outage`);
+      if (record.closed.some((c) => record.reopened.some((o) => o.at > c.at && o.at - c.at < 15 * 60 * 1000))) {
+        problems.push("an issue was reopened within 15 minutes of its close");
+      }
+      if (!r.verdict.failed) problems.push("the run stayed green through confirmed lapses");
+      return problems;
+    },
+  },
+  {
+    name: "Tier 2 stops publishing while its passes run: breadth goes 45 minutes old, one issue, closed once it returns",
+    world: () => fakeWorld({ day: DRY_DAY, start: at(9, 20), breadthDown: [[at(10, 50), at(12, 30)]] }),
+    budgetMs: 4.5 * HOUR,
+    expect: (r, w) => {
+      const problems = [];
+      const made = issueOf(w, "tier2");
+      if (!made) return ["no tier2 issue was opened"];
+      if (w.github.record.created.length !== 1) problems.push(`expected one issue, saw ${w.github.record.created.length}`);
+      if (made.at < at(11, 31) || made.at > at(11, 45)) problems.push(`the issue opened at ${etTime(made.at)}, not within 45 to 60 minutes of the last write`);
+      const closed = w.github.record.closed.find((c) => c.number === made.number);
+      if (!closed || closed.at < at(12, 30)) problems.push("the issue was not closed after breadth returned");
+      if (!r.verdict.failed) problems.push("the run stayed green through a confirmed lapse");
+      return problems;
+    },
+  },
+  {
+    name: "one pending answer from meta on a hop's first tick, and a meta that stays pending for an hour of the evening",
+    world: () => fakeWorld({ day: DRY_DAY, start: at(10, 2), metaPending: [[at(10, 0), at(10, 4)], [at(17, 40), at(18, 40)]] }),
+    budgetMs: 9 * HOUR,
+    expect: (r, w) => {
+      const problems = [];
+      const made = w.github.record.created.filter((c) => c.title.startsWith("[flows-witness:nightly]"));
+      if (made.length !== 1) return [`${made.length} nightly issues opened, not one (the first pending answer must open none, the hour-long one exactly one)`];
+      if (made[0].at < at(17, 40)) problems.push("the single pending answer at 10:02 ET opened an issue");
+      if (!/answered pending/.test(made[0].body)) problems.push("the issue does not say the store answered pending");
+      if (!w.github.record.closed.length) problems.push("the issue was not closed when meta was readable again");
+      return problems;
+    },
+  },
+  {
+    name: "the nightly lands after midnight: the issue opened at 21:00 ET is closed within a tick of it",
+    world: () => fakeWorld({ day: DRY_DAY, start: at(21, 30), landOnDispatch: Infinity, landAt: at(24, 20) }),
+    budgetMs: 4 * HOUR,
+    expect: (r, w) => {
+      const problems = [];
+      if (!issueOf(w, "nightly")) return ["no nightly issue was opened"];
+      const closed = w.github.record.closed[0];
+      if (!closed) problems.push("the issue stayed open after the nightly landed at 00:20 ET");
+      else if (closed.at < at(24, 20) || closed.at > at(24, 40)) problems.push(`the issue closed at ${etTime(closed.at)}, not within a tick of 00:20 ET`);
       return problems;
     },
   },
