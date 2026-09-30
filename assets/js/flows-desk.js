@@ -246,8 +246,6 @@
     render();
   }
 
-  const ET_HOUR = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", hourCycle: "h23" });
-
   function quoteMs(p) {
     const tape = p.tapeTime ? Date.parse(String(p.tapeTime).replace(" ", "T")) : NaN;
     if (Number.isFinite(tape)) return tape;
@@ -256,8 +254,6 @@
     if (!Number.isFinite(close)) return read || Date.now();
     return Number.isFinite(read) ? Math.min(close, read) : close;
   }
-
-  const shareIntrinsic = (r, S) => { const k = isNum(r.strike); return S === null || k === null ? 0 : Math.max(0, r.strategy === "csp" ? k - S : r.strategy === "cc" ? S - k : 0); };
 
   function price(sym, p) {
     const eng = p.engine && p.engine.status === "ok" ? p.engine : null;
