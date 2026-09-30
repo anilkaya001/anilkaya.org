@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "234";
+export const ASSET_VERSION = "235";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -240,6 +240,7 @@ export function neuronProvenance(summary) {
     const why = guard.slice("unreachable:reparse:".length);
     return "Deterministic reading: the model\u2019s reply carried no usable summary, and asking it again " +
       (why === "allowance" ? "found the day\u2019s free model allowance spent, resetting 00:00 UTC"
+        : why === "budget" ? "found the day\u2019s model budget for this site spent, resetting 00:00 UTC"
         : why === "capacity" ? "found no capacity"
           : why === "plan" ? "found the configured model not available on this plan"
             : "failed") + ".";
@@ -248,6 +249,7 @@ export function neuronProvenance(summary) {
     const why = guard.slice("unreachable:".length);
     const said = why === "allowance" || why === "3036"
       ? "the day\u2019s free model allowance is spent, resetting 00:00 UTC"
+      : why === "budget" ? "the day\u2019s model budget for this site is spent, resetting 00:00 UTC"
       : why === "capacity" || why === "3040" ? "the model had no capacity, and nothing was spent"
         : why === "plan" || why === "5035" ? "the configured model is not available on this plan"
           : why === "empty" ? "the model answered with nothing"

@@ -14,7 +14,9 @@ import { aggressorGamma } from "../shared/flows-features.js";
 import { buildCard } from "../shared/flows-card.js";
 import fs from "node:fs";
 import { aiText, modelInput, askModels, aiChain, aiCallSignature, retryableGuard, repliedGuard, modelRates,
-         spendShape, fallbackNote, emptyNote, thrownThenEmptyNote, intradayFloorMs, AI_LENGTH_RETRY_MS, AI_INTRADAY_REFRESH_MS } from "../shared/flows-ai.js";
+         spendShape, fallbackNote, emptyNote, thrownThenEmptyNote, intradayFloorMs, AI_LENGTH_RETRY_MS, AI_INTRADAY_REFRESH_MS,
+         askFailure, budgetVerdict, cappedAi, neuronsSpent, aiCapNeurons, aiCapCalls, AI_BUDGET_MARK, AI_CAP_DEFAULT_NEURONS,
+         AI_CAP_DEFAULT_CALLS, AI_WORST_RATES } from "../shared/flows-ai.js";
 import { readFileSync } from "node:fs";
 
 let checks = 0;
@@ -771,7 +773,7 @@ const CARD = {
   const worker = readFileSync(new URL("../worker.js", import.meta.url), "utf8");
   eq((worker.match(/env\.AI\.run\(/g) || []).length, 0,
     "no call site reaches the binding directly: all three go through askModels, so none can drop the thinking switch or the fallback");
-  eq((worker.match(/askModels\(env\.AI/g) || []).length, 4, "and all four call sites (summary, Neuron, Neuron over the engine, Ask) use it");
+  eq((worker.match(/askModels\(meteredAi\(env\)/g) || []).length, 4, "and all four call sites (summary, Neuron, Neuron over the engine, Ask) use it, each through the metered binding");
   ok(!/max_tokens/.test(worker), "the worker no longer carries a max_tokens literal of its own");
   ok(/if \(attempt > 0\) \{\s*if \(said\.failure\) refused = "unreachable:reparse:" \+ said\.failure\.why;\s*break;/.test(worker) &&
      /verdict\.ok \? "ideas:unparsable" : refused \|\| "ideas:unparsable"/.test(worker) &&
@@ -948,6 +950,70 @@ const CARD = {
   const af = engineFallback(buildContext(aside, { expectedSession: "2026-09-15" }));
   ok(af.verdict === "stand-aside" && af.ideas.length === 0, "an engine that stands aside falls back to stand-aside with no ideas");
   ok(Object.keys(VERDICT_WORD).length === VERDICTS.length, "every verdict code has a word for the page");
+}
+
+{
+  const capEnv = (extra) => ({ AI: null, ...extra });
+  eq(aiCapNeurons(capEnv({})), AI_CAP_DEFAULT_NEURONS, "THE DAILY MODEL BUDGET has a default the day cannot exceed without a decision");
+  eq(aiCapNeurons(capEnv({ FLOWS_AI_DAILY_CAP_NEURONS: "1200" })), 1200, "and reads the configured cap");
+  eq(aiCapNeurons(capEnv({ FLOWS_AI_DAILY_CAP_NEURONS: "12.5" })), AI_CAP_DEFAULT_NEURONS, "a fractional value is not a budget, so the default stands");
+  eq(aiCapNeurons(capEnv({ FLOWS_AI_DAILY_CAP_NEURONS: "-4" })), AI_CAP_DEFAULT_NEURONS, "nor is a negative one");
+  eq(aiCapNeurons(capEnv({ FLOWS_AI_DAILY_CAP_NEURONS: "abc" })), AI_CAP_DEFAULT_NEURONS, "nor text");
+  eq(aiCapCalls(capEnv({})), AI_CAP_DEFAULT_CALLS, "and the call ceiling has its default too");
+
+  const under = { neurons: 29999, calls: 10, tokensIn: 0, tokensOut: 0 };
+  eq(budgetVerdict(capEnv({}), under).spent, false, "one neuron under the cap may still be spent");
+  const atCap = budgetVerdict(capEnv({}), { ...under, neurons: 30000 });
+  eq(atCap.spent, true, "AT the cap the next call is refused, so the cap is a ceiling and not a warning");
+  ok(/30000 of 30000 neurons/.test(atCap.reason), "and says how much of what was spent");
+  const callCap = budgetVerdict(capEnv({ FLOWS_AI_DAILY_CAP_CALLS: "50" }), { neurons: 10, calls: 50, tokensIn: 0, tokensOut: 0 });
+  eq(callCap.spent, true, "the call ceiling refuses on its own when the neurons are small");
+  eq(budgetVerdict(capEnv({ FLOWS_AI_DAILY_CAP_NEURONS: "0" }), null).spent, true, "a cap of zero switches the model off, whatever the spend");
+  eq(budgetVerdict(capEnv({}), undefined).spent, true, "a day's spend that cannot be read is refused, never assumed to be zero");
+  eq(budgetVerdict(capEnv({}), null).spent, false, "while a route with no store to meter against is not blocked by a meter it cannot have");
+
+  const unknownRates = { neurons: null, calls: 3, tokensIn: 1e6, tokensOut: 1e6 };
+  eq(neuronsSpent(unknownRates), Math.ceil((AI_WORST_RATES.inPerM + AI_WORST_RATES.outPerM)), "with no rate known for a model the spend is priced at the dearest model on the plan, never at nothing");
+  eq(budgetVerdict(capEnv({ FLOWS_AI_DAILY_CAP_NEURONS: "200000" }), unknownRates).spent, true, "so a model that is missing from the rate table cannot walk past the cap");
+
+  const raw = { calls: 0, run: async () => { raw.calls++; return { response: "Said." }; } };
+  const gate = (spend) => cappedAi({ AI: raw }, async () => spend);
+  raw.calls = 0;
+  const refused = await gate({ neurons: 30000, calls: 1, tokensIn: 0, tokensOut: 0 }).run("m", {}).then(() => null, (e) => e);
+  ok(refused && refused.message.startsWith(AI_BUDGET_MARK), "AT THE CAP the wrapper throws the budget mark");
+  eq(raw.calls, 0, "before the model is ever asked, so nothing is billed");
+  eq(askFailure(refused).why, "budget", "and the failure is named for what it is, not as an unreachable model");
+  ok(/budget this site allows itself/.test(askFailure(refused).say), "in words that say it is this site's own limit");
+  eq(askFailure(new Error("AiError: 3036: allowance")).why, "allowance", "while Cloudflare's own allowance stop keeps its name");
+
+  const passed = await gate({ neurons: 5, calls: 1, tokensIn: 0, tokensOut: 0 }).run("m", { x: 1 });
+  eq(passed.response, "Said.", "under the cap the call goes through");
+  eq(raw.calls, 1, "exactly once");
+  const unreadable = cappedAi({ AI: raw }, async () => { throw new Error("D1 gone"); });
+  raw.calls = 0;
+  const gone = await unreadable.run("m", {}).then(() => null, (e) => e);
+  ok(gone && gone.message.startsWith(AI_BUDGET_MARK) && raw.calls === 0, "a meter that cannot be read refuses the call");
+  raw.calls = 0;
+  eq((await cappedAi({ AI: raw }, null).run("m", {})).response, "Said.", "with no meter at all (a bench without a store) the binding is used as it is");
+  eq(cappedAi({ AI: null }, async () => null), null, "and with no binding there is nothing to wrap");
+
+  const chainEnv = { FLOWS_ASK_MODEL: "@cf/zai-org/glm-4.7-flash", FLOWS_ASK_FALLBACK_MODEL: "@cf/meta/llama-3.3-70b-instruct-fp8-fast" };
+  raw.calls = 0;
+  const said = await askModels(gate({ neurons: 30000, calls: 1, tokensIn: 0, tokensOut: 0 }), aiChain(chainEnv), [{ role: "user", content: "x" }], {});
+  eq(said.text, null, "asked through the wrapper at the cap, no text comes back");
+  eq(said.guard, "unreachable:budget", "the stored guard names the budget, so a reader is told why");
+  eq(said.attempts.length, 1, "and the fallback model is not tried after a spent budget, since it would spend the same budget dearer");
+  eq(raw.calls, 0, "with the model never called");
+  eq(retryableGuard("unreachable:budget", 0), true, "the reading is retried when the day turns over, like any unreachable reading");
+
+  const worker = readFileSync(new URL("../worker.js", import.meta.url), "utf8");
+  eq((worker.match(/\benv\.AI\.run\(/g) || []).length, 0, "EVERY MODEL CALL GOES THROUGH THE METER: no call site in the Worker runs the binding itself");
+  const sites = (worker.match(/askModels\(/g) || []).length;
+  const metered = (worker.match(/askModels\(meteredAi\(env\),/g) || []).length;
+  ok(sites >= 4 && sites === metered, `and all ${sites} askModels call sites are handed the metered binding (${metered})`);
+  const toml = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
+  ok(/FLOWS_AI_DAILY_CAP_NEURONS\s*=\s*"\d+"/.test(toml) && /FLOWS_AI_DAILY_CAP_CALLS\s*=\s*"\d+"/.test(toml),
+    "and the cap is written down in wrangler.toml, where a deploy shows it");
 }
 
 console.log(`✓ flows-neuron: ${checks} assertions — a context that carries every registry panel plus the ` +

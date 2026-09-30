@@ -8,7 +8,7 @@ import { FLOWS_PAGES, modelName, neuronProvenance } from "./shared/flows-pages.j
 import * as FLOWS_ASK from "./shared/flows-ask.js";
 import * as FLOWS_NEURON from "./shared/flows-neuron.js";
 import { bookRows, runCardEngine, engineState, engineStale, QUANT_CARD_VERSION } from "./shared/flows-quant-card.js";
-import { aiChain, aiCallSignature, askModels, emptyNote, fallbackNote, intradayFloorMs, repliedGuard, retryableGuard, spendShape, thrownThenEmptyNote } from "./shared/flows-ai.js";
+import { aiChain, aiCallSignature, askModels, cappedAi, emptyNote, fallbackNote, intradayFloorMs, repliedGuard, retryableGuard, spendShape, thrownThenEmptyNote } from "./shared/flows-ai.js";
 import { COURSE_STAGE_POINTS } from "./shared/course-points.js";
 import { COURSE_BY_ID, COURSE_BY_SLUG, COURSE_TOPICS, SITE_ORIGIN } from "./shared/course-seo.js";
 import { REVIEW_ITEM_BY_ID } from "./shared/review-manifest.js";
@@ -1232,6 +1232,7 @@ const ASK_QUESTION_MAX = 400;
 
 const FALLBACK_FAILED = Object.freeze({
   allowance: "found the day's free model allowance spent, which resets at 00:00 UTC",
+  budget: "found the day's model budget for this site spent, which resets at 00:00 UTC",
   capacity: "had no capacity just now, and asking again shortly may work",
   plan: "is not available on this site's plan, which is a configuration fault here",
   unreachable: "could not be reached and did not say why",
@@ -1261,6 +1262,25 @@ async function askSpend(env) {
     : null;
   return spendShape(env, day, calls, tokensIn, tokensOut, byModel);
 }
+
+async function askSpendStrict(env) {
+  if (!env.DB) return null;
+  await ensureFlowsTables(env);
+  const day = aiDay();
+  const [row, split] = await env.DB.batch([
+    env.DB.prepare("SELECT calls, tokens_in, tokens_out FROM flows_ai_usage WHERE day = ?").bind(day),
+    env.DB.prepare("SELECT model, calls, tokens_in, tokens_out FROM flows_ai_usage_model WHERE day = ? ORDER BY model").bind(day),
+  ]);
+  const one = row && Array.isArray(row.results) ? row.results[0] : null;
+  const byModel = split && Array.isArray(split.results)
+    ? split.results.map((r) => ({ model: String(r.model), calls: Number(r.calls) || 0,
+        tokensIn: Number(r.tokens_in) || 0, tokensOut: Number(r.tokens_out) || 0 }))
+    : [];
+  return spendShape(env, day, one ? Number(one.calls) || 0 : 0, one ? Number(one.tokens_in) || 0 : 0,
+    one ? Number(one.tokens_out) || 0 : 0, byModel);
+}
+
+const meteredAi = (env) => cappedAi(env, env.DB ? () => askSpendStrict(env) : null);
 
 async function askRecordSpend(env, usage, model) {
   if (!env.DB || !usage) return null;
@@ -1368,7 +1388,7 @@ async function refreshFlowsSummary(env, at = Date.now()) {
   }
 
   const { system, user } = FLOWS_ASK.promptForSummary(facts, age);
-  const said = await askModels(env.AI, chain,
+  const said = await askModels(meteredAi(env), chain,
     [{ role: "system", content: system }, { role: "user", content: user }],
     { maxTokens: 1024, temperature: 0.2 },
     (billed, usage) => askRecordSpend(env, usage, billed));
@@ -1536,7 +1556,7 @@ async function generateEngineNeuron(env, scope, ctx, fingerprint, plain, chain) 
     { v: 3, verdict: res.verdict, claims: res.claims, ideas: res.ideas, refused: res.refused }, llm, model, guard).catch(() => {});
   if (!env.AI || !chain.length) { await store(fallback, false, null, null); return; }
   const { system, user } = FLOWS_NEURON.promptForEngine(ctx);
-  const said = await askModels(env.AI, chain, [{ role: "system", content: system }, { role: "user", content: user }],
+  const said = await askModels(meteredAi(env), chain, [{ role: "system", content: system }, { role: "user", content: user }],
     { maxTokens: 500, temperature: 0.1 }, (billed, usage) => askRecordSpend(env, usage, billed));
   if (!said.text) { await store(fallback, false, said.model, said.guard); return; }
   const parsed = FLOWS_NEURON.parseEngineOutput(said.text);
@@ -1565,7 +1585,7 @@ async function generateNeuron(env, ticker, ctx, fingerprint) {
   let model = chain[0];
   let refused = null;
   for (let attempt = 0; attempt < 2 && (parsed === null || parsed.summary === null); attempt++) {
-    const said = await askModels(env.AI, attempt === 0 ? chain : [model], messages,
+    const said = await askModels(meteredAi(env), attempt === 0 ? chain : [model], messages,
       { maxTokens: 1400, temperature: attempt === 0 ? 0.2 : 0.05 },
       (billed, usage) => askRecordSpend(env, usage, billed));
     if (!said.text) {
@@ -1737,7 +1757,7 @@ async function askAnswer(question, env, index, updatedAt, subject) {
 
   const { system, user } = FLOWS_ASK.promptFor(picked, framed, age);
   let afterCall = null;
-  const said = await askModels(env.AI, chain,
+  const said = await askModels(meteredAi(env), chain,
     [{ role: "system", content: system }, { role: "user", content: user }],
     { maxTokens: 1024, temperature: 0.2 },
     async (billed, usage) => { afterCall = (await askRecordSpend(env, usage, billed)) || afterCall; });
