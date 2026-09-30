@@ -1843,17 +1843,28 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   seconds, or an ISO string) as whole seconds behind the read, null when absent or
   more than a minute after it. `fresh.vendorAt` is the newest quote time, held to the
   read instant. A row the vendor still dates before the session, in a strip that is
-  otherwise the session's, is held out and listed in `off` (`{ n, dates }`, at most 20
-  names) so a reader falls back to the nightly value; a strip that is mostly the
-  previous session's stays `prior`. The Actions leg adds `lag: { n, p50, p90, max }` to
+  otherwise the session's, is held out: listed in `off` (`{ n, dates }`, at most 20
+  names) and in `missing`, and, when the read asked for that name, present in `rows` as
+  an all-null row (143 bytes) so a module that asks for it still finds a live row for
+  every name and keeps its other names live while the reader prints a dash for that
+  one (an absent row would make the overview discard the whole payload for the module
+  and fall back to the previous session's numbers for all of it); `returned` counts
+  only rows with data. A strip that is mostly the previous session's stays `prior`. The Actions leg adds `lag: { n, p50, p90, max }` to
   `live:strips`, keeps the same three numbers per 15-minute column in
   `live:strips:series.lag`, and writes the spread and the fill into the heartbeat's
   `run.quoteLag`, `run.prevFill` and notes (`quote lag: ...`, `day change: ...`).
+  The ticker quote card built from a screener row outside the universe carries the same
+  `qa`, measured to the moment the card was built, so a row served from the verdict
+  cache reads its real age and a null means only that the vendor sent no stamp.
   `live:gex` names carry `lagS` and the key a `vendorAt`; a per-name tape leg carries
   `lagS`. Measured on the same input: `live:strips` for 122 names 22,478 to 24,122
   bytes of 65,536 (759 for `qa` and the spread, 885 for the filled values and their
   label), `live:focus` for 22 names 4,836 to 5,497 of 16,384, the series +456 over a
-  session and `live:gex` about +12 bytes a name. The focus tick's first run in a cold
+  session and `live:gex` about +12 bytes a name (the ahead count and the held-out row
+  above add 64 bytes to a strip, 143 for each held-out name the read asked for, and 187 to
+  the series at 26 columns; measured on synthetic 22 and 122-row reads, before and after
+  the held-out row, and no change in `shapeStrips` time: 45 and 229 microseconds either
+  way). The focus tick's first run in a cold
   isolate costs 0.2 to 0.3 ms more CPU and a warm one less (`stripValues` now fills a
   flat array instead of a keyed object: 167 to 95 µs for 22 production-size rows),
   against the 10 ms cap.
@@ -1861,7 +1872,15 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   nothing stored it: what the first sessions must answer is the size of `qa` for a
   liquid name in the regular session (a stamp that is the last trade reads minutes
   behind on a quiet name, a batch snapshot reads seconds), how it behaves before 09:30
-  and after 16:00, and whether a quote time ever runs ahead of the read. The run
+  and after 16:00, and whether a quote time ever runs ahead of the read. `qa` cannot
+  answer the last one, since a stamp within a minute after the read is stored as 0 and
+  one further ahead as null, the same as no stamp; so `shapeStrips` also counts the
+  rows whose stamp parses and lies more than that minute after the read:
+  `ahead: { n, maxS }` in `live:strips` and `live:focus` (25 bytes), `lag.ahead` per
+  15-minute column in the series (about 190 bytes over a session), `run.quoteAhead`
+  in the heartbeat, a clause of the leg's `quote lag` note, and a clause of the
+  nightly gate's note (`rows stamped ahead of the read in N column(s), most M in one`,
+  or `no row stamped ahead of the read`). The run
   record and the job log carry it from the next session; `live:strips:series.lag`
   keeps the day's 15-minute spread until the series resets at the next session's
   first read, so something must copy it out before then (the nightly, or the health
@@ -1884,6 +1903,23 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   fetch-time stamp; a quote stored before this change lacks `asOfDay` and prints a
   dash, so the snapshot cannot show the old percentage in the up to 30 minutes before
   the next firing replaces it.
+  Whether a quote reads as a close comes from the exchange's own session, not from how
+  far the quote lags the fetch. `parseIndexQuote` keeps `meta.currentTradingPeriod.regular.end`
+  as `sessionEnd` (milliseconds) only when that instant falls on the quote's own
+  exchange-local day, so a response whose trading period is the next session's says
+  nothing and the quote carries `null`. With a `sessionEnd`, the strip reads a quote as a
+  close when it was struck no earlier than five minutes before it: the S&P 500 stamped
+  20:38 UTC for a 20:00 UTC end is the close, a market that closed forty minutes ago is
+  a close although the fetch came five minutes after it, and a live session whose feed
+  runs forty minutes behind is a quote at its own time, never a close. A mid-session
+  print that no later snapshot replaced keeps its own time and is not promoted to a
+  close. Without a `sessionEnd` (a snapshot stored before this, or a response that
+  lacks the block) the old reading applies: a close when the quote is more than 25
+  minutes behind the fetch or an hour behind the viewer's clock. The field is
+  expected in Yahoo's chart `meta` (an undocumented API), but no response could be read
+  from this sandbox (Yahoo is blocked here), so the first production snapshot after the deploy must be
+  read for `sessionEnd` on each of the eight quotes: a `null` on any of them is the
+  fallback at work and says the block is absent or names another day for that market.
 - **Tier 1 fits the Workers Free CPU cap.** Until 2026-09-24 Tier 1 also read the
   0DTE net flow and the SPY and QQQ ETF tides: three 390-row one-minute feeds,
   about 200 KB of JSON a tick. Once the session's rows filled in, a tick needed
