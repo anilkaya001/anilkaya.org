@@ -331,6 +331,11 @@ const iv30Of = (r) => firstPositive(r.volatility_30, r.iv30d, r.volatility);
 
 const iv30dOf = (r) => firstPositive(r.iv30d, r.volatility_30);
 
+export function impliedMoveOf(v) {
+  const n = vnum(v);
+  return n !== null && n >= 0 ? n : null;
+}
+
 export function shortIntOf(row) {
   const v = vnum(row && row.short_int);
   return v !== null && v > 0 ? v : null;
@@ -403,6 +408,16 @@ export const UNIVERSE_COLUMNS = Object.freeze([
       const sector = ctx.sectorTilts ? ctx.sectorTilts.get(vstr(r.sector)) : undefined;
       return own === null || !sector || sector.tilt === null || sector.n < 3 ? null : own - sector.tilt;
     } },
+  { key: "dex", unit: "fraction", scale: 100, prio: 2,
+    get: (r) => gexPerAdv(r.gex_delta_per_one_percent_move_oi, r.avg30_volume, r.close) },
+  { key: "vanna", unit: "fraction", scale: 1e4, prio: 3,
+    get: (r) => gexPerAdv(r.gex_vanna_per_one_percent_move_oi, r.avg30_volume, r.close) },
+  { key: "charm", unit: "fraction", scale: 10, prio: 4,
+    get: (r) => gexPerAdv(r.gex_charm_per_one_percent_move_oi, r.avg30_volume, r.close) },
+  { key: "im5", unit: "fraction", scale: 1e3, prio: 3,
+    get: (r) => impliedMoveOf(r.implied_move_perc_5) },
+  { key: "im30", unit: "fraction", scale: 1e3, prio: 2,
+    get: (r) => impliedMoveOf(r.implied_move_perc_30) },
 ]);
 
 export const UNIVERSE_PERCENTILES = Object.freeze(["iv30", "ts", "vrp", "gexAdv", "si"]);

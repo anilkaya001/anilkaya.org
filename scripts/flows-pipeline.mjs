@@ -41,6 +41,7 @@ import {
 import { parseOptionSymbol } from "../shared/flows-premium.js";
 import { black76 } from "../shared/flows-quant-bs.js";
 import { regimeState } from "../shared/flows-neuron.js";
+import { neuronCoverage, cardTier } from "../shared/flows-neuron-coverage.js";
 import * as QP from "./flows-quant-pipeline.mjs";
 import { marketAggregate, MARKET_NOTES } from "../shared/flows-market.js";
 import {
@@ -4529,7 +4530,7 @@ export async function retireAndRoster({
     log(`  roster: ${Object.keys(built.payload.depth).length} carded name(s) — ` +
       Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(", ") + `, ${built.bytes} bytes (ledger ${ledger})`);
   }
-  return { retired: removed, absent, refused, held: Object.keys(held).length, ledger, bytes: built.bytes, written,
+  return { retired: removed, absent, refused, held: Object.keys(held).length, heldKeys: held, ledger, bytes: built.bytes, written,
     rostered: Object.keys(built.payload.depth).length };
 }
 
@@ -6409,6 +6410,7 @@ async function main() {
   const deadline = stats.startedAt + DEADLINE_MS;
   const cardTickers = [...onBoard.keys()];
   const quantStats = { built: 0, withIdeas: 0, split: 0, failed: 0, bytes: [] };
+  const neuronTiers = new Map();
   const cardLane = poolWidth(2);
   const ideaByTicker = new Map();
   console.log(`  cards: ${cardTickers.length} name(s), ${cardLane.width} in flight — ${cardLane.why}`);
@@ -6556,6 +6558,7 @@ async function main() {
           `${dropped.length} panel(s), still over the ingest cap`);
       }
       let engineOut = { card, extra: null, split: false };
+      let engineBlock = null;
       if (quantPrep) {
         try {
           const closes = Array.isArray(e.features.candles) ? e.features.candles.map((c) => c && c[4]) : e.features.closes;
@@ -6567,6 +6570,7 @@ async function main() {
             crossSection: quantPass.crossSection.get(ticker) || null,
           });
           engineOut = QP.attachEngine(card, block);
+          engineBlock = block;
           const idea = QP.leadIdea(block);
           if (idea) ideaByTicker.set(ticker, idea);
           quantStats.built++;
@@ -6580,6 +6584,7 @@ async function main() {
       }
       if (engineOut.extra) await publish("card-x:" + ticker, engineOut.extra);
       await publish("card:" + ticker, engineOut.card);
+      neuronTiers.set(ticker, cardTier(engineBlock ? { ...card, engine: engineBlock } : card));
 
       return {
         status: "built",
@@ -6717,6 +6722,7 @@ async function main() {
             throw new Error(`cross-section card is ${(body.length / 1024).toFixed(0)}KB, over the ingest cap`);
           }
           await publish("card:" + ticker, card);
+          neuronTiers.set(ticker, cardTier(card));
           return { status: "built" };
         } catch (error) {
           console.warn(`  cross-section card ${ticker}: ${error.message}`);
@@ -6906,6 +6912,18 @@ async function main() {
     }
   }
 
+  let neuronLedger = null;
+  try {
+    neuronLedger = neuronCoverage({ universe: marketLegs ? marketLegs.universe : null, eligible: universe.length, cards: neuronTiers,
+      held: rosterSummary ? rosterSummary.heldKeys : {}, sessionDate });
+    const L = neuronLedger;
+    console.log(`  neuron coverage: ${L.universe} universe name(s) — priced ${L.priced}, stand-aside ${L.standAside}, family ${L.family}, screen ${L.screen}` +
+      `, unpriceable ${L.unpriceable}, expired ${L.expired}, stale ${L.stale}, missing ${L.missing}; screen ideas: ${L.screenIdeas.family} family, ${L.screenIdeas.none} No position` +
+      `; engine ${L.engine.built} of ${L.engine.expected} deep card(s)` + (L.absentInputs.length ? `; inputs absent from the payload: ${L.absentInputs.join(", ")}` : ""));
+  } catch (error) {
+    console.warn(`  neuron coverage: ${error.message} — the ledger is not published this run`);
+  }
+
   try {
     await publish("meta", {
       generatedAt, sessionDate,
@@ -6913,6 +6931,7 @@ async function main() {
       enriched: enriched.length,
       liquid: liquid.length,
       cardsBuilt, cardsFailed, cardsSkipped,
+      ...(neuronLedger ? { neuron: neuronLedger } : {}),
 
       crossSectionCards: extraBuilt,
       cardsTotal: cardsBuilt + extraBuilt,
@@ -7069,6 +7088,7 @@ async function main() {
       cardsFailed: cardsFailed + extraFailed, deadlineSkipped: deadlineSkipped + extraSkipped,
       planned: byCard.size + dossierBuilt.size, rostered: rosterSummary ? rosterSummary.rostered : null,
       rosterWritten: rosterSummary ? rosterSummary.written : (rosterThrew ? false : undefined), enriched: enriched.length,
+      neuron: neuronLedger,
     } });
   if (health.failures.length) process.exitCode = 1;
 }

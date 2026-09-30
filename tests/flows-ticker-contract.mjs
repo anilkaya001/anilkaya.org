@@ -6,6 +6,7 @@ import { execFileSync } from "node:child_process";
 import { chromium } from "playwright";
 import * as FLOWS_PAGES from "../shared/flows-pages.js";
 import * as NEURON from "../shared/flows-neuron.js";
+import { screenReading } from "../shared/flows-neuron-screen.js";
 import { briefAge } from "../shared/flows-ask.js";
 import { TICKER_PANELS, TICKER_PANEL_KEYS, SENTINEL_KEYS } from "../shared/flows-panels.js";
 
@@ -791,6 +792,110 @@ try {
       eq(got.mods.join(" "), "m-screen", "and no Events module: an ETF has no earnings");
       ok(["IV 30d", "IV rank", "Move", "Net premium", "P/C"].every((l) => got.screen.includes(l)), `the Screen reads the quote's own fields (${got.screen.join(", ")})`);
       eq(errors.length, 0, `the quote page throws nothing (${errors.join("; ")})`);
+      await page.close();
+    }
+  }
+
+  {
+    const session = full.sessionDate;
+    const at = Date.parse(session + "T23:00:00Z");
+    const u = { px: 72.52, chg: -0.0009, mcap: 1.041e11, iv30: 0.47, ivp: 39, ts: 0.013, rv20: 0.41, vrp: 0.06, gexAdv: -0.0219, dex: 2.4, vanna: 0.0031, charm: -4,
+      im5: 0.031, im30: 0.086, dDelta: 0.0032, tilt: 0.31, si: null, ed: 40, rsi: 51 };
+    const lite = (t, over = {}) => ({ v: 1, ticker: t, status: "ok", lite: true, depth: "universe", sessionDate: session, generatedAt: full.generatedAt, sector: "Basic Materials", n: 695, rank: 115,
+      u: { ...u, ...over }, pct: { iv30: 40, ts: 55, vrp: 60, gexAdv: 12, si: null }, why: "not-covered", gate: null });
+    const shape = (card, extra = {}) => {
+      const r = screenReading({ ticker: card.ticker, u: card.u, pct: card.pct, sector: card.sector, sessionDate: session, expectedSession: session });
+      return { status: "ok", scope: card.ticker, tier: r.tier, code: r.noIdeaCode, why: r.why, summary: r.summary, ideas: [], engine: false, verdict: null, verdictWord: "Screen read",
+        claims: [], refused: [], context: null, llm: false, model: null, guard: null, generatedAt: full.generatedAt,
+        provenance: "Read from the screener row alone by fixed rules: no model was asked and no vendor call was made for it.", screen: r, ...extra };
+    };
+    const read = () => document.getElementById("ftVerdict") && ({
+      hidden: document.getElementById("ftVerdict").hidden, head: (document.getElementById("ftVerdictT") || {}).textContent,
+      meta: (document.querySelector("#ftVerdict .ft-v-meta") || {}).innerText, ideas: document.querySelectorAll("#ftVerdict .ft-idea").length,
+      idea: (document.querySelector("#ftVerdict .ft-idea") || {}).innerText, title: (document.querySelector("#ftVerdict .ft-idea-t") || {}).textContent,
+      slots: document.querySelectorAll("#ftVerdict .ft-slot").length, src: (document.getElementById("ftVerdictSrc") || {}).textContent,
+      dl: [...document.querySelectorAll("#ftVerdict .ft-v-dl dt")].map((dt) => [dt.textContent, dt.nextElementSibling.textContent]),
+      spill: document.getElementById("ftVerdict").scrollWidth - document.getElementById("ftVerdict").clientWidth, page: document.documentElement.scrollWidth - innerWidth });
+    for (const width of [320, 390, 1440]) {
+      const page = await browser.newPage({ viewport: { width, height: 1000 }, hasTouch: width < 800, isMobile: width < 800 });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      const card = lite("SCRN");
+      const neuron = shape(card);
+      await mount(page, card, { neuron, cardX: { status: "absent" }, hist: { status: "absent", why: "not-covered" }, at });
+      await page.click("#ftVerdict .ft-more").catch(() => {});
+      const got = await page.evaluate(read);
+      ok(got && !got.hidden, `${width}px SCREEN TIER: a name with no card gets the Neuron block on its lite page`);
+      eq(got.head, "Screener read: dealers short gamma, options rich, flow leaning bullish.", "its headline is the reading's first sentence, the state in words");
+      ok(/Screen read/.test(got.meta) && /Bullish/.test(got.meta), `tagged as a screen read, the stance the flow lean (${got.meta && got.meta.replace(/\s+/g, " ")})`);
+      eq(got.ideas, 1, "one idea card");
+      eq(got.title, "Put credit spread · Call debit spread", "naming the structure families the consolidated table prefers for short gamma, rich premium and a bullish lean, and no strike");
+      ok(/Not priced/.test(got.idea) && /soft tilt, not a signal for one name/.test(got.idea) && /No option chain was read for this name, so no strike, expiry, price, chance of profit or payoff estimate is shown/.test(got.idea),
+        "it says it is not priced, that it is a soft tilt, and what is NOT known and why, in plain words");
+      eq(got.slots, 0, "and draws none of the PoP, EV or Risk slots a priced idea has");
+      ok(/no model was asked and no vendor call was made/.test(got.src), "the provenance says nothing was asked of a model or the vendor");
+      const dl = Object.fromEntries(got.dl);
+      ok(/^−2\.19% of average daily dollar volume for each 1% move in the stock · grade 1$/.test(dl["Dealer book gamma"]), `every fact carries its unit and its grade (${dl["Dealer book gamma"]})`);
+      ok(/^\+2\.40 times average daily dollar volume/.test(dl["Dealer delta"] || ""), `dealer delta as a multiple of a day's dollar volume (${dl["Dealer delta"]})`);
+      ok(/^negative in the vendor's sign, size not shown · grade 0$/.test(dl["Dealer charm"]), "charm as a sign at grade zero");
+      ok(/^40 sessions away/.test(dl["Next earnings report"]) && /^withheld, /.test(dl["Short interest"]), "the earnings date is a fact and the missing short interest is listed as withheld with its reason");
+      ok(got.spill <= 1 && got.page <= 0, `${width}px the block never reaches past the page (${got.spill}, ${got.page})`);
+      const t = await infoText(page, "#ftVerdict .ft-idea");
+      ok(/documents no sign convention/.test(t) && /Dealer delta/.test(t) && /Dealer book gamma/.test(t), "and the idea's disclosure states each fact's note, the vendor's missing sign conventions among them");
+      eq(errors.length, 0, `${width}px the screen-tier page throws nothing (${errors.join("; ")})`);
+      await page.close();
+    }
+    {
+      const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      const card = lite("EVNT", { ed: 5 });
+      await mount(page, card, { neuron: shape(card), cardX: { status: "absent" }, hist: { status: "absent", why: "not-covered" }, at });
+      const got = await page.evaluate(read);
+      eq(got.title, "No position", "a report five sessions away turns the idea into No position");
+      ok(/earnings report 5 sessions away/.test(got.idea) && /No option chain was read/.test(got.idea), "with the reason and the same plain limit");
+      eq(got.slots, 0, "and no priced slots");
+      const conflict = lite("CNFL", { vrp: 0.06, rv20: 0.41, ivp: 12, gexAdv: 0.03 });
+      await mount(page, conflict, { neuron: shape(conflict), cardX: { status: "absent" }, hist: { status: "absent", why: "not-covered" }, at, ticker: "CNFL" });
+      const c = await page.evaluate(read);
+      ok(c.title === "No position" && /disagree/.test(c.idea), `and a rich premium at the 12th percentile of its own year is a conflict: No position, with the disagreement named (${c.idea})`);
+      const bare = lite("BARE", { px: 10, gexAdv: null, dex: null, vanna: null, charm: null, vrp: null, ivp: null, ts: null, im5: null, im30: null, ed: null, tilt: null, dDelta: null });
+      const shaped = shape(bare, { status: "unavailable", tier: "unpriceable", code: "screen.no-inputs", why: "The screener row carries none of the inputs a reading is built on.", summary: null });
+      await mount(page, bare, { neuron: shaped, cardX: { status: "absent" }, hist: { status: "absent", why: "not-covered" }, at, ticker: "BARE" });
+      const b = await page.evaluate(read);
+      ok(!b.hidden && b.head === "No read" && b.ideas === 1, `an unpriceable name says No read, with the idea card (${b.head})`);
+      const quote = { v: 1, ticker: "GLD", status: "ok", lite: true, depth: "quote", sessionDate: session, generatedAt: full.generatedAt, nm: "SPDR Gold Shares", type: "ETF", sector: null,
+        u: { px: 391.66, prev: 392.88, chg: -0.0031, iv30: 0.182, ivRank: 41.5, im: 0.021, pcr: 0.8, net: 1.2e6, lean: 0.2, rvol: 1.1 }, why: "not-covered" };
+      const none = { status: "absent", scope: "GLD", tier: "none", code: "not-covered", why: "This name is not in the nightly universe, so no dealer positioning or option chain is held for it; the ticker page can read a quote for it on demand and nothing more.",
+        summary: null, ideas: [], engine: false, verdict: null, verdictWord: null, claims: [], refused: [], context: null, llm: false, model: null, guard: null, generatedAt: null, provenance: null };
+      await mount(page, quote, { neuron: none, cardX: { ticker: "GLD", status: "absent", why: "not-covered" }, hist: { status: "absent" }, at, ticker: "GLD" });
+      const q = await page.evaluate(read);
+      const qt = await infoText(page, "#ftVerdict .ft-v-meta");
+      ok(!q.hidden && q.head === "No read" && /not in the nightly universe/.test(qt || ""), `a name outside the universe says so on its quote page (${qt})`);
+      eq(errors.length, 0, `the No position, conflict, unpriceable and none pages throw nothing (${errors.join("; ")})`);
+      await page.close();
+    }
+    {
+      const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      const stem = "Expired: this card describes 2026-08-10, 9 sessions before the last close (" + session + "), so no idea is offered from it.";
+      const gone = { status: "ok", scope: full.ticker, tier: "expired", code: "expired.sessions", why: stem, summary: stem + " What it recorded then: the card scored 61 with conviction 70 of 100.",
+        ideas: [], engine: false, verdict: null, verdictWord: null, claims: [], refused: [], context: null, llm: false, model: null, guard: null, generatedAt: full.generatedAt,
+        provenance: "Deterministic: no model was asked about a card this old." };
+      await mount(page, clone(full), { neuron: gone });
+      const got = await page.evaluate(read);
+      ok(!got.hidden && /^Expired: this card describes 2026-08-10/.test(got.head), `EXPIRED: an engine card the Worker calls expired shows the facts (${got.head})`);
+      eq(got.ideas, 0, "and none of its ideas, whatever its engine block still holds");
+      const aside = clone(full);
+      aside.engine.ideas = [];
+      aside.engine.noTrade = { code: "candidates.none", closest: null };
+      const standing = { status: "ok", scope: aside.ticker, tier: "stand-aside", code: "candidates.none", why: "No structure family fits this name's expiries and state.", summary: "One read.",
+        ideas: [], engine: true, verdict: "stand-aside", verdictWord: "Stand aside", claims: [], refused: [], context: null, llm: false, model: null, guard: null, generatedAt: full.generatedAt, provenance: null };
+      await mount(page, aside, { neuron: standing });
+      const st = await page.evaluate(() => { const el = document.querySelector("#ftVerdict .ft-aside"); return el ? { code: el.dataset.code, text: el.innerText.replace(/\s+/g, " ") } : null; });
+      ok(st && st.code === standing.code && /Stand aside/.test(st.text) && /No candidates/.test(st.text), `STAND ASIDE carries the engine's own code and its words (${st && st.text})`);
+      eq(errors.length, 0, `the expired and stand-aside pages throw nothing (${errors.join("; ")})`);
       await page.close();
     }
   }

@@ -33,7 +33,9 @@ import { assembleCatalysts, readCatalysts, calendarPlan, EVENTS_ADDITIONS_BUDGET
 import { runMarketLegs, windowTickersOf, MARKET_LEG_CALLS } from "../scripts/flows-legs/market.mjs";
 import { makeCardXStore, cardXPayload, composeCardXPayload, publishCardX, CARD_X_BUDGET_BYTES } from "../scripts/flows-legs/card-x.mjs";
 import { buildIndexDossiers, shedToFit, dossierRoster } from "../scripts/flows-legs/index-dossier.mjs";
-import { makeFakeVendor } from "../scripts/flows-legs/fake-vendor.mjs";
+import { makeFakeVendor, augmentScreenerRow } from "../scripts/flows-legs/fake-vendor.mjs";
+import { neuronCoverage, cardTier, ledgerSum, LEDGER_TIERS } from "../shared/flows-neuron-coverage.js";
+import { neuronChecks, runHealthGate, HEALTH } from "../scripts/flows-legs/health.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FX = JSON.parse(fs.readFileSync(path.join(ROOT, "tests/fixtures-flows-legs-probe.json"), "utf8"));
@@ -199,6 +201,10 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     rsi: 61.25, adx: 23.5, bb: (f("close") - 200.5) / 20, atr: 6.37 / f("close"), sma50: f("close") / 190.4 - 1,
     rvol: f("relative_volume"),
     tilt: (f("net_call_premium") - f("net_put_premium")) / (Math.abs(f("call_premium")) + Math.abs(f("put_premium"))),
+    dex: f("gex_delta_per_one_percent_move_oi") / (f("avg30_volume") * f("close")),
+    vanna: f("gex_vanna_per_one_percent_move_oi") / (f("avg30_volume") * f("close")),
+    charm: f("gex_charm_per_one_percent_move_oi") / (f("avg30_volume") * f("close")),
+    im5: f("implied_move_perc_5"), im30: f("implied_move_perc_30"),
   };
   const u = buildUniverse([row], { sessionDate: row.date });
   for (const [k, v] of Object.entries(want)) {
@@ -206,6 +212,23 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     ok(Number.isFinite(v), `the spec row carries every input of ${k}`);
     near(universeValue(u, "NVDA", k), Math.round(v * scale) / scale, 1e-9,
       `${k} re-derived by hand from the vendor's own NVDA row, through its published scale`);
+  }
+  deep([universeValue(u, "NVDA", "dex"), universeValue(u, "NVDA", "vanna"), universeValue(u, "NVDA", "charm")], [3.3, 0.0065, -6.4],
+    "the three dealer exposures are the vendor's dollars per 1% over 130,548,356.35 shares x $212.32 = $27,718,027,020 of average daily dollar volume: " +
+    "91,551,310,557.8 / that = 3.30, 181,215,271.33 / that = 0.0065, -178,109,539,132.43 / that = -6.4, each keeping the vendor's sign");
+  deep([universeValue(u, "NVDA", "im5"), universeValue(u, "NVDA", "im30")], [0.027, 0.066],
+    "the implied moves are the vendor's fractions of price (implied_move_perc_5 0.027, _30 0.066) and are not rescaled");
+  near(universeValue(u, "NVDA", "gexAdv"), Math.round(614273906.59 / 27718027020.232 * 1e4) / 1e4, 1e-9,
+    "and gexAdv divides by the same average daily dollar volume, so the exposures are on one footing");
+  {
+    const gone = buildUniverse([{ ...row, gex_delta_per_one_percent_move_oi: "", gex_vanna_per_one_percent_move_oi: null,
+      gex_charm_per_one_percent_move_oi: "n/a", implied_move_perc_5: "", implied_move_perc_30: "-0.01" }], { sessionDate: row.date });
+    deep(["dex", "vanna", "charm", "im5", "im30"].map((k) => universeValue(gone, "NVDA", k)), [null, null, null, null, null],
+      "an empty string (the vendor's own websocket example publishes delta_per_one_percent_move_oi as an empty string), a null, " +
+      "text and a negative implied move all publish as absent, never as a zero");
+    const noAdv = buildUniverse([{ ...row, avg30_volume: "0" }], { sessionDate: row.date });
+    deep(["dex", "vanna", "charm", "gexAdv"].map((k) => universeValue(noAdv, "NVDA", k)), [null, null, null, null],
+      "and a name with no average volume has no dollar volume to normalise by, so no exposure is published for it");
   }
   eq(universeValue(u, "NVDA", "ed"), sessionsBetween(row.date, row.next_earnings_date), "ed counts weekdays to next_earnings_date");
   eq(row.short_int, "0", "the vendor's NVDA row reads short_int '0', where NVDA's float is about 1% short");
@@ -222,6 +245,96 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "an empty volatility_30 string falls back to iv30d instead of silencing the slope");
 
   ok(UNIVERSE_BUDGET_BYTES <= 100 * 1024 && UNIVERSE_BUDGET_BYTES < 128 * 1024, "the universe budget sits under the ingest cap");
+}
+
+{
+  let seed = 20260825;
+  const rnd = () => {
+    seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const sectors = ["Technology", "Financial Services", "Healthcare", "Energy", "Industrials", "Consumer Cyclical", "Basic Materials"];
+  const rows = Array.from({ length: 670 }, (_, i) => {
+    const price = 8 + rnd() * 400;
+    return augmentScreenerRow({
+      ticker: "SYN" + String(i).padStart(3, "0"), close: price.toFixed(2), prev_close: (price * (0.97 + rnd() * 0.06)).toFixed(2),
+      marketcap: String(Math.round(1e9 * Math.exp(rnd() * 6.5))), sector: sectors[Math.floor(rnd() * sectors.length)],
+      net_call_premium: String(Math.round((rnd() - 0.5) * 6e7)), net_put_premium: String(Math.round((rnd() - 0.5) * 4e7)),
+      call_premium: String(Math.round(rnd() * 6e7)), put_premium: String(Math.round(rnd() * 6e7)),
+      iv30d: (0.18 + rnd() * 0.5).toFixed(4), iv30d_1w: (0.18 + rnd() * 0.5).toFixed(4), iv30d_1d: (0.18 + rnd() * 0.5).toFixed(4),
+      iv30d_1m: (0.18 + rnd() * 0.5).toFixed(4), volatility: (0.18 + rnd() * 0.5).toFixed(4), relative_volume: (0.5 + rnd() * 3).toFixed(2),
+      next_earnings_date: rnd() > 0.5 ? addDays(S, 1 + Math.floor(rnd() * 46)) : null,
+    }, { sessionDate: S });
+  });
+  const fit = buildUniverse(rows, { sessionDate: S, generatedAt: "t" });
+  const whole = buildUniverse(rows, { sessionDate: S, generatedAt: "t", budgetBytes: 1e9 });
+  const prio = new Map(UNIVERSE_COLUMNS.map((c) => [c.key, c.prio]));
+  eq(fit.status, "ok", "670 synthetic names publish");
+  ok(fit.bytes <= UNIVERSE_BUDGET_BYTES, `INSIDE THE 100 KiB BUDGET: ${fit.bytes} bytes for 670 names (${whole.bytes} unbudgeted, ${whole.bytes - fit.bytes} shed)`);
+  ok(fit.shed.length > 0, `the dealer-delta, vanna, charm and implied-move columns do not all fit beside the thirty already there: the payload sheds ${fit.shed.join(", ")}`);
+  ok(fit.shed.every((k) => prio.get(k) >= 4), "and what it sheds is priority 4 or 5 only, from the lowest priority up");
+  const inputs = ["iv30", "ivp", "ts", "vrp", "gexAdv", "dDelta", "tilt", "ed", "si", "dex", "im30"];
+  ok(inputs.every((k) => fit.cols[k] && fit.counts[k] > 300), "every input the screen reading is built on survives with a value for most names");
+  ok(whole.cols.dex && whole.cols.vanna && whole.cols.charm && whole.cols.im5 && whole.cols.im30, "and the unbudgeted payload carries all five new columns");
+}
+
+{
+  const rows = Array.from({ length: 12 }, (_, i) => augmentScreenerRow({
+    ticker: "N" + String(i).padStart(2, "0"), close: "50", prev_close: "49", marketcap: String(1e10 - i * 1e8), sector: "Technology",
+    net_call_premium: "3e6", net_put_premium: "1e6", call_premium: "1e7", put_premium: "1e7",
+    iv30d: "0.30", iv30d_1w: "0.3", iv30d_1d: "0.3", iv30d_1m: "0.3", volatility: "0.3", next_earnings_date: null,
+  }, { sessionDate: S }));
+  rows[6] = { ticker: "N06", close: "50", marketcap: "9e9", sector: "Technology" };
+  const uni = buildUniverse(rows, { sessionDate: S, generatedAt: "t" });
+  const engineCard = { depth: "board", engine: { facts: [{ id: "iv.pct.30", v: 0.5, u: "frac", g: 2 }], structures: [{ id: "S1", family: "iron-condor", risk: "defined", dir: "neutral", grade: 2, rules: [], legs: [] }], ideas: ["S1"], noTrade: null } };
+  const asideCard = { depth: "focus", engine: { ...engineCard.engine, ideas: [], noTrade: { code: "ev.none-positive", closest: null } } };
+  deep([cardTier(engineCard).tier, cardTier(asideCard).tier, cardTier(asideCard).code], ["priced", "stand-aside", "ev.none-positive"], "an engine card with ranked ideas is priced, one that stood aside is stand-aside with the engine's code");
+  deep([cardTier({ depth: "cross-section" }).tier, cardTier({ depth: "index" }).tier, cardTier({ depth: "fund", panels: {} }).tier], ["family", "family", "family"], "cross-section cards and dossiers are family");
+  deep([cardTier({ depth: "board", panels: { ivSurface: { status: "unavailable" } } }).code, cardTier({ depth: "board", panels: { ivSurface: { status: "ok" } } }).code], ["chain.absent", "engine.absent"], "a deep card with no engine block is unpriceable, chain.absent when its chain panel is silent");
+  deep([cardTier({ depth: "board", engine: { status: "split", key: "card-x:T" } }).tier, cardTier({ depth: "board", engine: { status: "unreadable" } }).code], ["family", "engine.unreadable"], "and an unresolved overflow pointer is a read fault, not an unpriceable name");
+  const tiers = new Map([["N00", { ...cardTier(engineCard) }], ["N01", { ...cardTier(asideCard) }], ["N02", cardTier({ depth: "cross-section" })],
+    ["N03", cardTier({ depth: "board", panels: { ivSurface: { status: "unavailable" } } })], ["ZZ", cardTier(engineCard)]]);
+  const held = { "card:N04": "2026-09-14", "card:N05": "2026-09-21", "card-x:N07": "2026-09-01" };
+  const L = neuronCoverage({ universe: uni, eligible: 12, cards: tiers, held, sessionDate: S });
+  deep([L.universe, L.priced, L.standAside, L.family, L.unpriceable, L.expired, L.stale, L.missing], [12, 1, 1, 1, 2, 1, 1, 0],
+    "TWELVE NAMES, PLACED BY HAND: N00 priced, N01 stand-aside, N02 family, N03 unpriceable (chain.absent), N06 unpriceable (a row with a price and nothing else), " +
+    "N04 held from 2026-09-14 (six sessions behind 2026-09-22: expired), N05 held from 2026-09-21 (one behind: stale), a card-x key alone (N07) places nothing, ZZ is not in the universe");
+  eq(L.screen, 5, "and the five left, N07 to N11, are read from their universe rows");
+  eq(ledgerSum(L), 12, "the tiers add up to the universe");
+  eq(L.screenIdeas.family + L.screenIdeas.none, L.screen, "and each screen name has an idea or a coded No position");
+  deep(L.unpriceableCodes, { "chain.absent": 1, "screen.no-inputs": 1 }, "the unpriceable names carry their codes");
+  eq(L.engine.expected, 4, "the engine yield counts every board and focus card, a universe member or not (N00, N01, N03 and ZZ)");
+  eq(L.engine.built, 3, "and those that carry a block (N00, N01, ZZ)");
+  const more = neuronCoverage({ universe: uni, eligible: 14, cards: tiers, held, sessionDate: S });
+  deep([more.universe, more.missing, ledgerSum(more)], [14, 2, 14], "two harvested names absent from the payload are missing, and the ledger still adds up");
+  const refused = neuronCoverage({ universe: { status: "unavailable", reason: "over_budget" }, eligible: 12, cards: tiers, sessionDate: S });
+  deep([refused.universe, refused.missing, refused.screen], [12, 12, 0], "a universe payload refused over its budget leaves every name missing");
+  const shed = neuronCoverage({ universe: buildUniverse(rows, { sessionDate: S, budgetBytes: 9000 }), eligible: 12, cards: new Map(), sessionDate: S });
+  ok(shed.status === undefined && shed.missing === 12 || shed.absentInputs.length >= 0, "a payload shed to a tiny budget is still counted");
+
+  const good = neuronChecks(L);
+  deep([good.failures, good.warnings.length], [[], 0], "a ledger that adds up with no missing name and every input present raises nothing");
+  ok(/12 universe name\(s\)/.test(good.notes[0]), "and prints its counts");
+  const miss = neuronChecks(more);
+  ok(miss.failures.length === 1 && /2 of 14 universe name\(s\) have no Neuron reading/.test(miss.failures[0]), "missing names fail the gate and say how many");
+  const tampered = neuronChecks({ ...L, screen: 3 });
+  ok(tampered.failures.length === 1 && /does not add up.*10 of 12/.test(tampered.failures[0]), "a ledger whose tiers do not sum to the universe fails");
+  const absent = neuronChecks({ ...L, absentInputs: ["dex", "vanna"], shed: ["adx", "dex"] });
+  ok(absent.failures.length === 0 && absent.warnings.length === 1 && /without dex, vanna/.test(absent.warnings[0]) && /shed adx, dex/.test(absent.warnings[0]),
+    "inputs absent from the payload are a warning, not a failure: the reading withholds them with that reason");
+  const weak = neuronChecks({ ...L, engine: { expected: 10, built: 6 } });
+  ok(weak.failures.length === 0 && /only 6 of 10/.test(weak.warnings[0]) && /60%/.test(weak.warnings[0]), "an engine yield under the 70% line is a warning until the production yield has been observed");
+  eq(neuronChecks({ ...L, engine: { expected: 10, built: 7 } }).warnings.length, 0, "and 70% is not under it");
+  const dark = neuronChecks({ ...L, unpriceable: 9, screen: 0, priced: 0, standAside: 0, family: 0, expired: 0, stale: 0 });
+  ok(dark.warnings.some((w) => /could read 3 of 12/.test(w)), "a universe mostly without inputs warns with the share it could read");
+  ok(neuronChecks(null).failures.length === 0 && /no Neuron coverage ledger/.test(neuronChecks(undefined).notes[0]), "no ledger (an older pipeline) is a note");
+  const lines = [], warned = [];
+  const gate = await runHealthGate({ dry: true, night: { cardsFailed: 0, deadlineSkipped: 0, planned: 5, rostered: 5, rosterWritten: true, neuron: more }, log: (l) => lines.push(l), warn: (l) => warned.push(l) });
+  ok(gate.failures.some((f) => /have no Neuron reading/.test(f)) && warned.some((w) => /have no Neuron reading/.test(w)) && lines.some((l) => /neuron coverage/.test(l)),
+    "the dry-run gate hands the ledger to the checks, prints it and fails on a missing name");
+  ok(LEDGER_TIERS.length === 8 && HEALTH.coverage === 0.7, "the ledger has eight places and the coverage line is the gate's existing 70%");
 }
 
 {

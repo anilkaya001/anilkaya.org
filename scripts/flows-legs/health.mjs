@@ -3,6 +3,7 @@ import {
 } from "../../shared/flows-freshness.js";
 import { timeMs } from "../../shared/flows-live.js";
 import { LEDGER_LIMITS } from "../../shared/flows-ledger.js";
+import { ledgerSum, LEDGER_TIERS } from "../../shared/flows-neuron-coverage.js";
 import { LIVE_LOOP } from "./live.mjs";
 
 export const HEALTH = Object.freeze({
@@ -414,6 +415,44 @@ export function runChecks(run) {
   return out;
 }
 
+export function neuronChecks(ledger) {
+  const failures = [], warnings = [], notes = [];
+  if (!ledger || typeof ledger !== "object" || !Number.isFinite(Number(ledger.universe))) {
+    notes.push("the run carries no Neuron coverage ledger (a pipeline older than this check)");
+    return { failures, warnings, notes };
+  }
+  const n = (v) => (Number.isFinite(Number(v)) ? Math.max(0, Number(v)) : 0);
+  const universe = n(ledger.universe);
+  const parts = LEDGER_TIERS.filter((k) => n(ledger[k]) > 0).map((k) => `${k} ${n(ledger[k])}`).join(", ");
+  notes.push(`neuron coverage ${ledger.sessionDate || ""}: ${universe} universe name(s) — ${parts || "none placed"}` +
+    (ledger.screenIdeas ? `; the screen tier offers a family for ${n(ledger.screenIdeas.family)} and No position for ${n(ledger.screenIdeas.none)}` : ""));
+  if (ledgerSum(ledger) !== universe) {
+    failures.push(`HEALTH: the Neuron coverage ledger does not add up: its tiers place ${ledgerSum(ledger)} of ${universe} universe name(s), so some name ` +
+      "has no reading and no reason (the ledger and the universe payload disagree about who is in the universe)");
+  }
+  if (n(ledger.missing) > 0) {
+    failures.push(`HEALTH: ${n(ledger.missing)} of ${universe} universe name(s) have no Neuron reading tonight: the published universe payload carries ` +
+      `${universe - n(ledger.missing)} of them (a payload refused over its byte budget or unreadable carries none), so the ticker page can say nothing about the rest; ` +
+      "the run's \"universe:\" line and shed list say why");
+  }
+  const absent = Array.isArray(ledger.absentInputs) ? ledger.absentInputs : [];
+  if (absent.length) {
+    warnings.push(`WARNING: Neuron's screen tier read ${universe} name(s) without ${absent.join(", ")}: the universe payload carries no such column tonight` +
+      (Array.isArray(ledger.shed) && ledger.shed.length ? ` (it shed ${ledger.shed.join(", ")} to fit its byte budget)` : "") + ", so those facts are withheld with that reason");
+  }
+  const readable = universe - n(ledger.unpriceable) - n(ledger.missing);
+  if (universe > 0 && readable / universe < HEALTH.coverage) {
+    warnings.push(`WARNING: Neuron could read ${readable} of ${universe} universe name(s) (${Math.round(readable / universe * 100)}%), under the ` +
+      `${Math.round(HEALTH.coverage * 100)}% line: ${n(ledger.unpriceable)} carry no screener input at all`);
+  }
+  const eng = ledger.engine && typeof ledger.engine === "object" ? ledger.engine : null;
+  if (eng && n(eng.expected) > 0 && n(eng.built) / n(eng.expected) < HEALTH.coverage) {
+    warnings.push(`WARNING: Neuron: only ${n(eng.built)} of ${n(eng.expected)} board and focus card(s) carry an engine block ` +
+      `(${Math.round(n(eng.built) / n(eng.expected) * 100)}%, under the ${Math.round(HEALTH.coverage * 100)}% line), so the rest read as unpriceable or family`);
+  }
+  return { failures, warnings, notes };
+}
+
 export function ledgerChecks({ ledger, sessionDate, clock = null } = {}) {
   const failures = [], warnings = [], notes = [];
   const days = ledger && Array.isArray(ledger.days) ? ledger.days : null;
@@ -493,6 +532,10 @@ export function healthChecks({ sessionDate, now = Date.now(), clockRead = null, 
   const notes = [edgeNote(edge403, edgeKinds, worker403, retrySpentMs, edgeStatuses)];
   const warnings = [];
   failures.push(...runChecks(night));
+  const neuron = neuronChecks(night && night.neuron);
+  failures.push(...neuron.failures);
+  warnings.push(...neuron.warnings);
+  notes.push(...neuron.notes);
   const lab = labCheck(clockRead, now);
   if (lab.failure) failures.push(lab.failure);
   if (lab.warning) warnings.push(lab.warning);
@@ -644,10 +687,13 @@ export async function runHealthGate({ sessionDate, read, now = () => Date.now(),
   annotate = false, night = null, log = console.log, warn = console.warn } = {}) {
   if (dry) {
     log("health gate: skipped in a dry run, which reads no store");
-    const failures = runChecks(night);
+    const neuron = neuronChecks(night && night.neuron);
+    const failures = [...runChecks(night), ...neuron.failures];
     if (night) log(`  run facts: ${night.planned} planned, ${night.rostered} rostered, ${night.cardsFailed} failed, ${night.deadlineSkipped} skipped; ${failures.length} failure(s)`);
+    if (night && night.neuron) for (const line of neuron.notes) log("  " + line);
+    for (const line of neuron.warnings) warn(line);
     for (const line of failures) warn(line);
-    return { applies: false, failures, warnings: [], notes: [] };
+    return { applies: false, failures, warnings: neuron.warnings, notes: neuron.notes };
   }
   const safe = async (key) => {
     try { return await read(key); } catch (error) {
@@ -662,7 +708,7 @@ export async function runHealthGate({ sessionDate, read, now = () => Date.now(),
   log(`health gate: ${verdict.applies ? "checked" : "live checks skipped — " + verdict.why}; ` +
     `${verdict.failures.length} failure(s)` + (verdict.warnings.length ? `, ${verdict.warnings.length} warning(s)` : ""));
   for (const n of verdict.notes) log("  " + n);
-  for (const line of verdict.warnings) warn(annotate ? `::warning title=Lab sign-in::${line}` : line);
+  for (const line of verdict.warnings) warn(annotate ? `::warning title=${/^WARNING: Neuron/.test(line) ? "Neuron coverage" : "Lab sign-in"}::${line}` : line);
   for (const line of verdict.failures) warn(line);
   return verdict;
 }

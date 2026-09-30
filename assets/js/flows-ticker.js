@@ -85,17 +85,8 @@
     if (sec.status === "pending") return ST("pending", sentence(said) || "Not computed yet.");
     return ST("unavailable", sentence(said) || "Not measured this run.");
   };
-  const FLOW_CODES = {
-    unread: "The run did not request this read for the name.", failed: "The vendor call failed, so nothing was measured.",
-    refused: "The vendor refused the call for this plan.", malformed: "The vendor answered with a body that is not the confirmed shape.",
-    empty: "The vendor answered with no rows: measured and empty.", "not-session": "The vendor dated these rows to a different session.",
-    "short-history": "Fewer sessions of history than the statistic needs.", deadline: "The run passed its deadline before reaching this name.",
-    shed: "Dropped to keep the payload under its byte cap.", "outside-band": "No level fell inside the band around spot.",
-    "no-contracts": "No contract gained open interest to follow.", truncated: "The read hit the vendor's row ceiling before reaching the session open.",
-    not_read: "This run did not spend the call for this name.", absent: "The vendor row did not carry this field.",
-    too_few: "Not enough observations for the statistic.", plan_gated: "The vendor refused the route for this plan.",
-    unreadable: "The read failed or came back malformed.", stale: "The value is older than its freshness limit.",
-  };
+  const T = (k) => { const n = document.querySelector('#ftCopy [data-k="' + k + '"]'); return n ? n.textContent.replace(/\s+/g, " ").trim() : ""; };
+  const FLOW_CODES = new Proxy({}, { get: (_, k) => T("fc-" + k) || undefined });
 
   const numOr = (...vs) => { for (const v of vs) if (num(v) !== null) return v; return null; };
   function candlesOf(card) {
@@ -256,7 +247,6 @@
   }
 
   const FAMS = [["F", "Flow", true], ["P", "Positioning", true], ["D", "Path", true], ["V", "Volatility", false], ["O", "Quality", false]];
-  const LEGACY_VO = "This card was built before the volatility and quality readings became gauges, so they are withheld rather than redrawn under a meaning they did not have.";
   const legacyFam = (card, k) => (k === "V" || k === "O") && (num(card.v) === null ? 1 : card.v) < 2;
   const famOf = (card, k) => (legacyFam(card, k) ? null : num((card.fam || {})[k]));
   const famFacts = (card) => FAMS.map(([k, l, sg]) => [l, legacyFam(card, k) ? "withheld on a card built before it was a gauge" : famOf(card, k) === null ? "no reading" : F.num(card.fam[k], sg)]);
@@ -923,7 +913,7 @@
   function stanceOf(card, neuron) {
     const eng = engineOf(card);
     const ctx = neuron && neuron.context && neuron.context.state ? neuron.context.state : null;
-    const d = (eng && eng.state && eng.state.direction) || (ctx && ctx.direction) || null;
+    const d = (eng && eng.state && eng.state.direction) || (ctx && ctx.direction) || (neuron && neuron.screen && neuron.screen.lean) || null;
     if (d) return dirTone(d);
     const ideas = neuron && Array.isArray(neuron.ideas) ? neuron.ideas.map((i) => i.direction).filter(Boolean) : [];
     if (ideas.length) return dirTone(ideas[0]);
@@ -963,6 +953,16 @@
     return sc === null ? null : { text: card.ticker + " scores " + F.signed(sc) + " of ±100" + (num(card.conviction) === null ? "" : ", conviction " + card.conviction) + ".", st: null };
   }
 
+  const screenMeta = (s) => s.facts.map((f) => [f.label, f.display + SEP + "grade " + f.grade]).concat(s.withheld.map((w) => [w.label, "withheld, " + w.reason]));
+  function screenIdea(s) {
+    const i = s.idea, tn = dirTone(i.direction);
+    return h("article", { class: "ft-idea is-legacy is-wide ui-enter", role: "listitem", "data-dir": tn },
+      h("div", { class: "ft-idea-h" }, h("span", { class: "ft-dir", "data-tone": tn, "aria-label": dirWord(tn) }, glyph(tn === "down" ? "down" : tn === "up" ? "up" : "flat")),
+        h("span", { class: "ft-idea-t" }, i.kind === "none" ? "No position" : s.families.map(famWord).join(SEP)), tag("Not priced"),
+        info("this reading", () => ({ title: "Screen read", lead: s.limits, facts: s.facts.map((f) => [f.label, f.display]), notes: s.facts.map((f) => f.label + ": " + f.note) }))),
+      h("p", { class: "ft-v-src" }, i.text), i.kind === "none" ? h("p", { class: "ft-v-src" }, s.limits) : null);
+  }
+
   function renderVerdict(card, neuron) {
     verdictEl.hidden = false;
     verdictEl.replaceChildren();
@@ -973,7 +973,8 @@
     const tn = stanceOf(card, n);
     const head = h("div", { class: "ft-v-h" }, h("span", { class: "ft-neuron", "aria-hidden": "true" }, glyph("neuron")));
     const mid = h("div", { class: "ft-v-m" });
-    const entries = ideaEntries(card, n);
+    const gone = n.tier === "expired";
+    const entries = gone ? [] : ideaEntries(card, n);
     verdictEl.dataset.read = ok ? "neuron" : own ? "card" : "none";
     if (ok || own) {
       const said = ok ? n.summary.trim() : own.text;
@@ -992,7 +993,7 @@
         ok && n.generatedAt ? h("span", { class: "ui-key" }, glyph("clock"), F.time(n.generatedAt)) : null));
       const rest = cap(body.slice(cut).trim());
       const xid = "ftVerdictX";
-      const meta = st ? stateMeta(st) : [];
+      const meta = st ? stateMeta(st) : n.screen ? screenMeta(n.screen) : [];
       const src = ok ? (n.provenance || (n.llm ? "Worded by " + String(n.model || "the model").replace(/^@cf\//, "") : "Deterministic read, no model wording"))
         : "Read from the card, no model wording." + (n.status === "pending" ? " The Neuron's wording replaces it when it lands." : "");
       const x = h("div", { class: "ft-v-x", id: xid }, h("div", null,
@@ -1009,7 +1010,7 @@
       verdictEl.append(head, x);
     } else {
       const status = typeof n.status === "string" ? n.status : "unavailable";
-      const reason = status === "pending" ? "Not published yet." : status === "quiet" ? "This card carries no reading to summarise." : "No read could be fetched for this name.";
+      const reason = n.why || (status === "pending" ? "Not published yet." : status === "quiet" ? "This card carries no reading to summarise." : "No read could be fetched for this name.");
       const st = ST(status === "pending" ? "pending" : status === "quiet" ? "quiet" : "unavailable", reason);
       mid.append(h("h2", { class: "ft-v-line is-empty", id: "ftVerdictT" }, "No read"));
       mid.append(h("div", { class: "ft-v-meta" }, UI.capsule(dirWord(tn), { tone: tn }), UI.stateButton(st, "Neuron")));
@@ -1019,6 +1020,10 @@
     const row = h("div", { class: "ft-ideas", role: "list", "aria-label": "Trade ideas" });
     if (entries.length) {
       entries.forEach((e, i) => row.append(e.kind === "engine" ? engineIdeaCard(e, card, i, eng) : legacyIdeaCard(e.idea, card, i)));
+    } else if (n.screen) {
+      row.append(screenIdea(n.screen));
+    } else if (gone) {
+      return;
     } else if (eng && eng.noTrade) {
       row.append(standAside(eng));
     } else if (!eng && !isIndex(card) && isDeep(card)) {
@@ -2458,7 +2463,7 @@
         tr.append(signed ? h("span", { class: "ft-fam-f", style: { "--c": val < 0 ? "var(--down-mark)" : "var(--up-mark)", left: val < 0 ? 50 - pct * 50 + "%" : "50%", width: pct * 50 + "%", "transform-origin": val < 0 ? "right" : "left", "--i": String(i) } })
           : h("span", { class: "ft-fam-f", style: { "--c": "var(--label-2)", left: "0", width: pct * 100 + "%", "--i": String(i) } }));
       }
-      row.append(tr, val === null ? h("span", { class: "ft-fam-v", "data-tone": "silent" }, UI.dash(legacyFam(card, k) ? ST("withheld", LEGACY_VO) : ST("quiet", "No " + lab.toLowerCase() + " reading entered this session's score."), lab))
+      row.append(tr, val === null ? h("span", { class: "ft-fam-v", "data-tone": "silent" }, UI.dash(legacyFam(card, k) ? ST("withheld", T("legacy-vo")) : ST("quiet", "No " + lab.toLowerCase() + " reading entered this session's score."), lab))
         : h("span", { class: "ft-fam-v", "data-tone": signed ? tone(val) : null }, F.num(val, signed)));
       box.append(row);
     });
@@ -2620,6 +2625,7 @@
     buildScreen(card);
     if (STATE.cardX && STATE.cardX.earnings) buildEvents(card);
     if (STATE.tape) buildLiteFlow(card);
+    if (STATE.neuron && STATE.neuron.tier) renderVerdict(card, STATE.neuron);
     paintFreshness(card);
     STATE.first = false;
   }
@@ -2702,11 +2708,7 @@
     if (link) statusEl.append(h("a", { href: link[0] }, link[1]));
   }
 
-  const WHY = {
-    unknown: ["Unknown", "No listed security answers to this symbol."], gated: ["Gated", "It reports inside the earnings gate, so this session built no card."],
-    retired: ["Retired", "Its card aged out of coverage."], "not-covered": ["Not covered", "Outside this session's coverage, and not in the nightly screen."],
-    store: ["Unavailable", "The store could not be read. Reload to try again."], pending: ["Pending", "Publishes with tonight's run."],
-  };
+  const WHY = new Proxy({}, { get: (_, k) => { const n = document.querySelector('#ftCopy [data-k="wh-' + k + '"]'); return n ? [n.dataset.w, T("wh-" + k)] : undefined; } });
   async function absentCard(ticker, card) {
     const k = card.reason === "store" ? "store" : card.status === "pending" ? "pending" : card.why;
     const [w, text] = WHY[k] || WHY["not-covered"];

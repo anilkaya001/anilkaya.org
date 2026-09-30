@@ -4,7 +4,8 @@ import { buildContext, contextLines, contextFacts, promptForNeuron, parseNeuronO
          regimeState, stateIdea, stateSentence, stateChip, STATES, STATE_STRUCTURES, STATE_LINES, STATE_WORD,
          NEURON_CONTEXT_VERSION, NEURON_MAX_IDEAS, NEURON_STRUCTURES,
          engineContext, engineFallback, promptForEngine, parseEngineOutput, vetEngineReply, verdictHolds, claimHolds,
-         VERDICTS, VERDICT_WORD, CLAIM_RELS, VET_CODES, ENGINE_LINES, STATE_CONFIDENCE_MAX, guardOptions, proseIssue, cleanLabel, NEURON_PROSE_CAPS, applyStaleCap, STALE_NOTE } from "../shared/flows-neuron.js";
+         VERDICTS, VERDICT_WORD, CLAIM_RELS, VET_CODES, ENGINE_LINES, STATE_CONFIDENCE_MAX, guardOptions, proseIssue, cleanLabel, NEURON_PROSE_CAPS, applyStaleCap, STALE_NOTE,
+         neuronTier, abstentionIdea, structuresForState, NEURON_TIERS, TIER_WHY } from "../shared/flows-neuron.js";
 import { TICKER_PANELS, SENTINEL_KEYS } from "../shared/flows-panels.js";
 import { BUCKET_LINES } from "../shared/flows-quant-structures.js";
 import { guardAnswer, selectFacts, buildFactIndex } from "../shared/flows-ask.js";
@@ -62,8 +63,8 @@ const CARD = {
   const ctx = buildContext(CARD, { expectedSession: "2026-09-15" });
   const panelKeys = TICKER_PANELS.filter((p) => !SENTINEL_KEYS.has(p.key)).map((p) => p.key);
   eq(ctx.version, NEURON_CONTEXT_VERSION, "the context carries its protocol version");
-  eq(ctx.features.length, panelKeys.length + 3,
-     "one feature per registry panel plus the standing, the volatility model and the implied state, so nothing on the card is outside Neuron's view");
+  eq(ctx.features.length, panelKeys.length + 4,
+     "one feature per registry panel plus the standing, the volatility model, the dealer exposures and the implied state, so nothing on the card is outside Neuron's view");
   eq(ctx.features[ctx.features.length - 1].key, "state", "and the implied state is the last line, read after every feature it is computed from");
   for (const k of panelKeys) ok(ctx.features.some((f) => f.key === k), `feature ${k} is present whatever its status`);
   eq(ctx.stale, false, "the card describes the last closed session, so it is not stale");
@@ -124,7 +125,7 @@ const CARD = {
   ok(stale.features.find((f) => f.key === "gamma").why.includes("capped"), "with the cap named in the reason");
 
   const fp = contextFingerprint(ctx);
-  ok(/^n5\./.test(fp), "the fingerprint carries the protocol version, now 5: the vet accepts only the engine's ranked ideas and the state's thresholds are one table, so a row stored under 3 or 4 is read again once");
+  ok(/^n6\./.test(fp), "the fingerprint carries the protocol version, now 6: the vet accepts only the engine's ranked ideas and the state's thresholds are one table, so a row stored under 3, 4 or 5 is read again once, the dealer exposures being a new feature");
   ok(fp === contextFingerprint(stale),
      "N-F6: and does NOT move when the next session closes and the cap lands on every grade: the same card gave n3.37jodr.25.e5 while fresh and n3.1bg51xk.25.e5 " +
      "once the close had passed, so each viewed name was regenerated at 16:00 and again when the nightly landed");
@@ -830,7 +831,7 @@ const CARD = {
 }
 
 {
-  eq(NEURON_CONTEXT_VERSION, 5, "the context protocol is version 5: numbered engine facts and priced structures, vetted against the engine's own ranking, over one table of thresholds");
+  eq(NEURON_CONTEXT_VERSION, 6, "the context protocol is version 6, the dealer exposures added to version 5: numbered engine facts and priced structures, vetted against the engine's own ranking, over one table of thresholds");
   const leg = (type, k, side, qty = 1) => ({ type, k, side, qty });
   const st = (id, family, risk, dir, legs, grade, rules, prob, ev, maxProfit, maxLoss) => ({
     id, family, risk, dir, expiry: "2026-10-16", dte: 30, sessions: 22, legs, grade, gradeWhy: grade < 3 ? ["fit.in-spread"] : [],
@@ -1385,6 +1386,129 @@ const CARD = {
   ok(!/soft tilt/.test(regimeState(fair, { expectedSession: "2026-09-15" }).drivers.find((d) => d.key === "pricedMove" && !d.sub).reading), "and a fair one has nothing to hedge");
   ok(guardAnswer(stateSentence(rr, "SYN1"), guardFacts(buildContext(rich, { expectedSession: "2026-09-15" })), guardOptions(buildContext(rich, { expectedSession: "2026-09-15" }))).ok,
      "the sentence still passes the guard it is quoted through");
+}
+
+{
+  const engineOf = (over = {}) => ({
+    facts: [{ id: "iv.pct.30", v: 0.5, u: "frac", g: 2 }, { id: "vrp.rel.21", v: 0.15, u: "frac", g: 2 }],
+    structures: [{ id: "S1", family: "iron-condor", risk: "defined", dir: "neutral", grade: 2, rules: [], legs: [] }],
+    ideas: ["S1"], noTrade: null, ...over });
+  const tierOf = (card) => neuronTier(card, { engine: engineContext(card) });
+  same(tierOf({ depth: "board", engine: engineOf() }), { tier: "priced", code: null, why: TIER_WHY.priced }, "TIERS: an engine block with ranked ideas is the priced tier");
+  same(tierOf({ depth: "focus", engine: engineOf({ ideas: [], noTrade: { code: "grade.none", closest: "S1" } }) }),
+    { tier: "stand-aside", code: "grade.none", why: TIER_WHY["grade.none"] }, "a block that stood aside is stand-aside, carrying the engine's own code and its words");
+  same(tierOf({ depth: "board", engine: engineOf({ ideas: [] }) }).code, "ideas.none", "and a block with no ideas and no code says ideas.none rather than nothing");
+  same(tierOf({ depth: "board", panels: { ivSurface: { status: "unavailable", reason: "x" } } }), { tier: "unpriceable", code: "chain.absent", why: TIER_WHY["chain.absent"] },
+    "a board card with no engine and a silent chain panel is unpriceable, chain.absent");
+  eq(tierOf({ depth: "focus", panels: { ivSurface: { status: "ok" } } }).code, "engine.absent", "with the chain read but no block, engine.absent");
+  same([tierOf({ depth: "cross-section" }), tierOf({ depth: "index" }), tierOf({ depth: "fund" }), tierOf({})].map((t) => t.tier), ["family", "family", "family", "family"],
+    "cross-section cards, dossiers and cards of unknown depth are the family tier");
+  same(tierOf({ depth: "board", engine: { status: "split", key: "card-x:T" } }), { tier: "family", code: "engine.unreadable", why: TIER_WHY["engine.unreadable"] },
+    "an unresolved overflow pointer is a read fault named engine.unreadable, never an unpriceable name");
+  ok(NEURON_TIERS.length === 7 && ["priced", "stand-aside", "family", "screen", "unpriceable", "expired", "none"].every((t) => NEURON_TIERS.includes(t)), "seven tiers");
+  const words = Object.values(TIER_WHY);
+  ok(words.length === 11 && words.every((w) => !/\b(will|should|expect\w*|likely|going to|forecast\w*|predict\w*|anticipat\w*|poised|target\w*|odds|would|could|might|may)\b/i.test(w)),
+    "every tier sentence is free of forecast and modal words");
+  ok(words.every((w) => guardAnswer(w, [{ say: w }], { smallIntegers: false, modals: true }).ok), "and passes the guard it would be quoted through");
+
+  const blind = JSON.parse(JSON.stringify(CARD));
+  blind.panels.gamma = { status: "unavailable", reason: "no ladder" };
+  blind.regime = { label: "short", crossings: 0 };
+  const bctx = buildContext(blind, { expectedSession: "2026-09-15" });
+  same(abstentionIdea(bctx), stateIdea(bctx), "ABSTENTION: an undetermined state's abstention is the state's own No position idea");
+  const weak = { ...bctx, state: { ...bctx.state, state: "pinned", confidence: 0, drivers: [], invalidation: null, horizon: null } };
+  eq(stateIdea(weak), null, "a determined state at confidence 0 still writes no idea of its own");
+  const ab = abstentionIdea(weak);
+  ok(ab && ab.structure === "no position" && ab.fromState === true && ab.title === "No position" && /^The greeks imply a pinned state for SYN1, but at a confidence too low to rest an idea on/.test(ab.thesis) && !/\d/.test(ab.thesis.replace("SYN1", "")),
+    `but it now abstains in words instead of leaving the reader nothing: ${ab && ab.thesis}`);
+  const kept = vetIdeas([ab], weak);
+  ok(kept.ideas.length === 1 && kept.refused.length === 0 && kept.ideas[0].title === "No position", `and the abstention passes the same vetting (${kept.refused.join("; ")})`);
+  ok(/no level that ends it/.test(abstentionIdea({ ...weak, state: { ...weak.state, confidence: 2 } }).thesis) &&
+     /no horizon/.test(abstentionIdea({ ...weak, state: { ...weak.state, confidence: 2, invalidation: { px: 1, label: "x", kind: "k" } } }).thesis),
+    "with a different reason when the confidence is fine and a level or a horizon is what is missing");
+  eq(abstentionIdea({ features: [] }), null, "and no state at all writes nothing to abstain from");
+  same(structuresForState("pinned", null, "rich"), STATE_STRUCTURES.pinned.rich, "structuresForState is the table selection regimeState uses: pinned takes its own row");
+  same(structuresForState("amplifying", "bearish", "cheap"), STATE_STRUCTURES.bear.cheap, "amplifying with a bearish lean takes the bear row");
+  same(structuresForState("amplifying", null, "fair"), STATE_STRUCTURES.shortNoSide.fair, "and with no lean the no-side row");
+  same(structuresForState("premium-rich", "bullish", "rich"), STATE_STRUCTURES["premium-rich"], "premium states take their own row whatever the lean");
+}
+
+{
+  const panel = (over = {}) => ({
+    status: "ok", asOf: "2026-09-15", robustness: { r: 2, why: "graded by the hedging model" },
+    inputs: { spot: 100, adv: 180000000, deltaDollars: 350070000, gammaBook: -43740000, vannaNet: 1, charmNet: -1 },
+    channels: { gamma: { perSigma: -1, pctAdv: -0.01, source: "book", perPct: -43740000 }, flow: null,
+      vanna: { perPoint: 1250000, pctAdvPerPoint: 0.0069, perSigma: 2000000, pctAdvPerSigma: 0.011 },
+      charm: { perSession: -2500000, pctAdv: -0.0139, hedge: 2500000 } },
+    conventions: { putToDealer: { gamma: 1, delta: -1, vanna: -1, charm: -1 }, vannaScale: { status: "agree" } },
+    silences: [], variance: null, ...over });
+  const withPanel = (over, regime = { bookGamma: -43740000 }) => {
+    const c = JSON.parse(JSON.stringify(CARD));
+    c.regime = { ...c.regime, ...regime };
+    c.panels.variation = panel(over);
+    return c;
+  };
+  const ctxOf = (card) => buildContext(card, { expectedSession: "2026-09-15" });
+  const feat = (ctx) => ctx.features.find((f) => f.key === "exposure");
+
+  const ctx = ctxOf(withPanel());
+  const f = feat(ctx);
+  ok(f && f.status === "ok" && f.group === "convexity", "EXPOSURES: the context carries a dealer-exposure feature beside the hedging panel");
+  same(ctx.exposure.facts.map((x) => x.key), ["gamma", "dex", "vanna", "charm"], "with gamma, delta, vanna and charm as separate facts");
+  const by = Object.fromEntries(ctx.exposure.facts.map((x) => [x.key, x]));
+  eq(by.gamma.value, -43740000, "book gamma is the card's dollar figure, per 1% move");
+  eq(by.gamma.sign, "short", "and short on the book's own sign");
+  eq(by.dex.value, 350070000, "dealer delta is the panel's dollar delta");
+  eq(by.dex.timesAdv, 1.94, "and 350,070,000 over a typical 180,000,000 day is 1.94 times a day's dollar volume, worked by hand");
+  eq(by.vanna.value, 1250000, "vanna is dollars of delta per volatility point");
+  eq(by.charm.value, -2500000, "charm is dollars of delta over the next session");
+  same([by.gamma.grade, by.dex.grade, by.vanna.grade, by.charm.grade], [2, 1, 2, 1],
+    "graded 2 for the book (a convention), 1 for delta and charm (an assumed put sign, an approximate scale) and the panel's own grade, at most 2, for the checked vanna");
+  eq(f.robustness, 1, "the feature takes its weakest fact");
+  ok(by.gamma.unit === "dollars per 1% move" && /dollars of stock-equivalent delta/.test(by.dex.unit) && /per volatility point/.test(by.vanna.unit) && /over the next session/.test(by.charm.unit),
+    "every fact names its unit");
+  ok(/positive by construction/.test(by.dex.note) && /not which way dealers lean/.test(by.dex.note) && /multiplier -1 on the put leg/.test(by.dex.note),
+    "dealer delta says its sign is fixed by the convention, that it measures size, and which put multiplier it used");
+  ok(/multiplier -1/.test(by.vanna.note) && /uniform sign flip/.test(by.vanna.note) && /approximate/.test(by.charm.note) && /documents no unit/.test(by.charm.note),
+    "vanna and charm state the put sign they assume and the limit of their scale");
+  ok(/convention and not an observed position/.test(by.gamma.note), "and the dealer sign is called a convention");
+  ok(f.say.includes("−$43.74M per 1% move") && f.say.includes("+$350.07M of stock, 1.9 times a typical day's dollar volume") &&
+     f.say.includes("+$1.25M of delta per volatility point") && f.say.includes("−$2.50M of delta over the session"),
+    `the sentence quotes each figure with its unit (${f.say})`);
+  ok(!/\b(will|should|expect\w*|likely|forecast\w*|predict\w*|would|could|might|may)\b/i.test(f.say), "and claims no direction of any hedge");
+  const lines = contextLines(ctx);
+  ok(lines.some((l) => l.startsWith("[exposure] Dealer exposures")), "the prose sees it: the feature is one of the model's lines");
+  ok(guardAnswer(f.say, guardFacts(ctx), guardOptions(ctx)).ok, "and the sentence passes the guard it would be quoted through");
+  ok(contextFacts(ctx).some((x) => x.id === "neuron:SYN1/exposure"), "the assistant can quote it for the page's own name");
+  same(publicContext(ctx).exposure.facts.map((x) => x.key), ["gamma", "dex", "vanna", "charm"], "and the public context carries the structured facts");
+  ok(!/e\d+$/.test(contextFingerprint(ctx)) && /^n6\./.test(contextFingerprint(ctx)), "the fingerprint moved with the protocol version");
+
+  const bare = ctxOf(JSON.parse(JSON.stringify(CARD)));
+  const fb = feat(bare);
+  ok(fb && fb.status === "unavailable" && fb.robustness === 0 && fb.say === null, "a card with no hedging panel and no dollar book reads unavailable, not zero");
+  same(bare.exposure.withheld.map((w) => w.key), ["gamma", "dex", "vanna", "charm"], "with every fact listed as withheld");
+  ok(bare.exposure.withheld.find((w) => w.key === "gamma").reason === "the card carries the book's sign and not its dollar size" &&
+     bare.exposure.withheld.find((w) => w.key === "dex").reason === "the hedging panel is not on this card", "and its reason");
+  const half = ctxOf(withPanel({ channels: { ...panel().channels, vanna: null }, inputs: { ...panel().inputs, deltaDollars: null },
+    silences: [{ channel: "vanna", kind: "unavailable", code: "vanna-unchecked", reason: "the vendor's vanna scale was not checked against a chain this run" }] }));
+  same(half.exposure.facts.map((x) => x.key), ["gamma", "charm"], "a panel that read only some channels publishes only those");
+  eq(half.exposure.withheld.find((w) => w.key === "vanna").reason, "the vendor's vanna scale was not checked against a chain this run", "and carries the panel's own reason for each silence");
+  ok(/Not read: dex \(/.test(feat(half).say) && /vanna \(the vendor's vanna scale/.test(feat(half).say), "and the sentence names what it did not read");
+  const staleCtx = buildContext(withPanel(), { expectedSession: "2026-09-16" });
+  ok(feat(staleCtx).robustness <= 1, "a card behind the last closed session is capped like every feature");
+
+  const A = withPanel(), B = withPanel({ inputs: { ...panel().inputs, deltaDollars: -9e9 }, channels: { ...panel().channels, vanna: { ...panel().channels.vanna, perPoint: -7e6 } } });
+  same(regimeState(A, { expectedSession: "2026-09-15" }).preferred, regimeState(B, { expectedSession: "2026-09-15" }).preferred, "NOT WIRED INTO RANKING: reversing dealer delta and vanna moves the state's preferred structures not at all");
+  eq(regimeState(A, { expectedSession: "2026-09-15" }).state, regimeState(B, { expectedSession: "2026-09-15" }).state, "or its state");
+  const ecard = JSON.parse(JSON.stringify(withPanel()));
+  ecard.engine = { facts: [{ id: "iv.pct.30", v: 0.5, u: "frac", g: 2 }, { id: "vrp.rel.21", v: 0.15, u: "frac", g: 2 }],
+    structures: [{ id: "S1", family: "iron-condor", risk: "defined", dir: "neutral", grade: 2, rules: ["vrp.rich"], legs: [] }], ideas: ["S1"], noTrade: null, state: null };
+  const eng = ctxOf(ecard);
+  ok(!promptForEngine(eng).system.includes("exposure") && !promptForEngine(eng).user.includes("Dealer exposures"), "the engine prompt, where the ranking is voted, does not see the exposures");
+  const ecard2 = JSON.parse(JSON.stringify(ecard));
+  ecard2.panels.variation = panel({ inputs: { ...panel().inputs, deltaDollars: -1 } });
+  same(engineFallback(ctxOf(ecard)), engineFallback(ctxOf(ecard2)), "and the engine's own ranking is the same with a different delta");
+  ok(!/\b(dex|exposure|deltaDollars|dealerExposure)\b/.test(fs.readFileSync(new URL("../shared/flows-quant-structures.js", import.meta.url), "utf8")), "no affinity row or veto in the engine names an exposure");
 }
 
 console.log(`✓ flows-neuron: ${checks} assertions — a context that carries every registry panel plus the ` +

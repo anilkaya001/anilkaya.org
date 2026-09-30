@@ -1423,6 +1423,35 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   const trix = read("sector-trix");
 
   {
+    const meta = read("meta"), uni = read("universe"), L = meta.neuron;
+    ok(L && typeof L === "object", "THE NIGHT KNOWS ITS OWN NEURON COVERAGE: the meta key carries a ledger");
+    const cardOf = (t) => (fs.existsSync(`${prefix}-card-${t}.json`) ? JSON.parse(fs.readFileSync(`${prefix}-card-${t}.json`, "utf8")) : null);
+    const recount = { priced: 0, standAside: 0, family: 0, screen: 0, unpriceable: 0 };
+    const hasScreenInput = (i) => ["gexAdv", "vrp", "iv30", "ivp", "ts", "im30", "tilt", "dDelta", "ed", "si", "dex"].some((k) => uni.cols[k] && uni.cols[k][i] !== null);
+    uni.t.forEach((t, i) => {
+      const c = cardOf(t);
+      if (!c) { recount[hasScreenInput(i) ? "screen" : "unpriceable"]++; return; }
+      const eng = c.engine && Array.isArray(c.engine.structures) ? c.engine : null;
+      if (eng) recount[eng.ideas.length && !eng.noTrade ? "priced" : "standAside"]++;
+      else if (c.depth === "board" || c.depth === "focus") recount.unpriceable++;
+      else recount.family++;
+    });
+    eq(L.universe, uni.n, "the ledger's universe is the published universe's name count");
+    for (const k of Object.keys(recount)) eq(L[k], recount[k], `${k}: ${L[k]} names, re-counted from the emitted cards and the emitted universe columns`);
+    eq(L.expired + L.stale + L.missing, 0, "a healthy dry night has no expired, stale or missing name");
+    eq(L.priced + L.standAside + L.family + L.screen + L.unpriceable + L.expired + L.stale + L.missing, L.universe,
+      "and the tiers add up to the universe, name for name");
+    ok(L.priced > 0 && L.standAside > 0 && L.family > 0 && L.screen > 100, `the fixture exercises every tier (${JSON.stringify({ p: L.priced, s: L.standAside, f: L.family, sc: L.screen })})`);
+    eq(L.screenIdeas.family + L.screenIdeas.none, L.screen, "every screen name has an idea or a No position, none neither");
+    ok(L.screenIdeas.none === Object.values(L.screenIdeas.codes).reduce((a, b) => a + b, 0), "and every No position carries a code");
+    assert.deepEqual(L.absentInputs, [], "no screen input is missing from the payload on the fixture"); checks++;
+    const emittedNames = fs.readdirSync(path.dirname(prefix)).map((f) => /-card-([A-Z].*)\.json$/.exec(f)).filter(Boolean).map((m) => m[1]);
+    const cards = emittedNames.map(cardOf).filter((c) => c && (c.depth === "board" || c.depth === "focus" || c.depth === "cross-section") && uni.t.includes(c.ticker));
+    eq(L.engine.expected, cards.filter((c) => c.depth !== "cross-section").length, "the engine yield is over the board and focus cards");
+    ok(/neuron coverage: \d+ universe name\(s\) — priced \d+, stand-aside \d+, family \d+, screen \d+/.test(runLog), "and the run prints the ledger line");
+  }
+
+  {
     const emitted = new Set(fs.readdirSync(path.dirname(prefix))
       .map((f) => /-card-([A-Z].*)\.json$/.exec(f))
       .filter(Boolean).map((m) => m[1]));

@@ -5,6 +5,7 @@ import { archiveWriteAction, ARCHIVE_REFUSALS } from "../shared/flows-archive.js
 import { UA_BANNED_CLAIMS } from "../shared/flows-unusual.js";
 import { SIGN_IN_SQL, SIGNED_IN_COLUMN_SQL, LAB_SESSION_MS } from "../shared/lab-sign-in.js";
 import { refusalOf } from "../scripts/flows-legs/health.mjs";
+import { expectedNightlySession } from "../shared/flows-freshness.js";
 import {
   startWorker, SESSION_SECRET, FLOWS_PASSWORD, FLOWS_TEST_USER, FLOWS_PEPPER,
 } from "./worker-server.mjs";
@@ -541,9 +542,11 @@ try {
       const perName = await get("/api/flows/summary?t=AAPL", { headers: auth });
       eq(perName.status, 200, "and an authenticated reader is served it on a GET");
       const perNameBody = await perName.json();
-      eq(perNameBody.status, "pending",
-         "with no card published for the name the answer is PENDING, never quiet: nothing " +
-         "has been measured, so nothing is claimed");
+      eq(perNameBody.status, "absent",
+         "with no card published and no universe row the answer is ABSENT, never quiet and no longer a pending that will never " +
+         "resolve: nothing has been measured, so nothing is claimed");
+      eq(perNameBody.tier, "none", "in the tier that says the name is outside the universe");
+      eq(perNameBody.code, "not-covered", "with its code");
       eq(perNameBody.scope, "AAPL", "and the payload names the scope it was asked for");
       eq(perNameBody.summary, null, "carrying no text a page could mistake for a reading");
       eq((await get("/api/flows/summary?t=not-a-symbol", { headers: auth })).status, 400,
@@ -1409,9 +1412,9 @@ try {
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + INGEST_TOKEN },
       body: JSON.stringify(body),
     });
-    const sessionDate = "2026-09-22";
+    const sessionDate = expectedNightlySession(new Date());
     const at = new Date().toISOString();
-    const block = { v: 1, engine: "q1", asOf: "2026-09-22T20:00:00.000Z", spot: 420.5, atr: 8,
+    const block = { v: 1, engine: "q1", asOf: sessionDate + "T20:00:00.000Z", spot: 420.5, atr: 8,
       facts: [{ id: "iv.cm.30", v: 0.31, u: "vol", g: 3 }, { id: "iv.pct.30", v: 0.8, u: "frac", g: 2 },
         { id: "vrp.rel.21", v: 0.2, u: "frac", g: 3 }],
       state: { state: "premium-rich", direction: null, confidence: 2, preferred: ["put credit spread"], avoid: ["long straddle"] },

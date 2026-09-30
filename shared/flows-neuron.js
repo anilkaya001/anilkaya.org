@@ -3,7 +3,7 @@ import { guardAnswer, numeralsIn } from "./flows-ask.js";
 import { VARIATION_VOTES, VARIATION_LINES } from "./flows-variation.js";
 import { STRUCTURE_BY_ID, AFFINITY, BUCKET_LINES } from "./flows-quant-structures.js";
 
-export const NEURON_CONTEXT_VERSION = 5;
+export const NEURON_CONTEXT_VERSION = 6;
 export const NEURON_MAX_IDEAS = 3;
 
 const article = (noun, capital) => (/^[aeiou]/i.test(noun) ? (capital ? "An " : "an ") : (capital ? "A " : "a ")) + noun;
@@ -56,6 +56,13 @@ export const STATE_STRUCTURES = Object.freeze({
   "premium-cheap": { preferred: ["long straddle", "long strangle", "calendar spread"], avoid: ["iron condor"] },
   undetermined: { preferred: ["no position"], avoid: [] },
 });
+
+export function structuresForState(state, direction, prem) {
+  return state === "pinned" ? STATE_STRUCTURES.pinned[prem]
+    : state === "squeeze" || state === "amplifying"
+      ? (direction === "bullish" ? STATE_STRUCTURES.bull[prem] : direction === "bearish" ? STATE_STRUCTURES.bear[prem] : STATE_STRUCTURES.shortNoSide[prem])
+      : state === "transitional" ? STATE_STRUCTURES.transitional[prem] : STATE_STRUCTURES[state];
+}
 
 const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const str = (v) => (typeof v === "string" && v.trim() ? v.trim() : null);
@@ -720,10 +727,7 @@ export function regimeState(card, extras) {
   if (stale) confidence = Math.min(confidence, 1);
   confidence = Math.max(0, Math.min(STATE_CONFIDENCE_MAX, confidence));
   if (state === "undetermined") confidence = 0;
-  const table = state === "pinned" ? STATE_STRUCTURES.pinned[prem]
-    : state === "squeeze" || state === "amplifying"
-      ? (direction === "bullish" ? STATE_STRUCTURES.bull[prem] : direction === "bearish" ? STATE_STRUCTURES.bear[prem] : STATE_STRUCTURES.shortNoSide[prem])
-      : state === "transitional" ? STATE_STRUCTURES.transitional[prem] : STATE_STRUCTURES[state];
+  const table = structuresForState(state, direction, prem);
   const pinnedOut = premium.pinned ? ["long straddle", "long strangle"] : [];
   const preferred = table.preferred.filter((x) => !(direction && state === "transitional" && x === "no position") && !pinnedOut.includes(x));
   if (state === "transitional" && direction) preferred.push(direction === "bullish" ? "call debit spread" : "put debit spread");
@@ -748,6 +752,24 @@ function noPositionIdea(ctx, s) {
     thesis: "The greeks imply no state for " + (ctx.ticker || "this name") + ": " + (s.notes[0] || "no reading") +
       ". No position is the reading until gamma positioning or premium can be read.",
     rests_on: known, invalidation: "the greeks implying a state", horizon: "the next card", fromState: true,
+  };
+}
+
+export function abstentionIdea(context) {
+  const ctx = context && typeof context === "object" ? context : {};
+  const s = ctx.state && typeof ctx.state === "object" ? ctx.state : null;
+  if (!s) return null;
+  if (s.state === "undetermined") return noPositionIdea(ctx, s);
+  const why = s.confidence < 1 ? "at a confidence too low to rest an idea on"
+    : !s.invalidation ? "it names no level that ends it"
+      : !s.horizon ? "it names no horizon" : "too few readings agree on it";
+  const known = (ctx.features || []).filter((f) => f.key !== "state" && f.status === "ok" && f.robustness >= 1)
+    .sort((a, b) => b.robustness - a.robustness).slice(0, 2).map((f) => f.key);
+  return {
+    title: "No position", structure: "no position", direction: "neutral",
+    thesis: "The greeks imply " + article((STATE_WORD[s.state] || s.state).toLowerCase() + " state") + " for " + (ctx.ticker || "this name") + ", but " + why +
+      ". No position is the reading until the state firms.",
+    rests_on: known, invalidation: "the state gaining confidence", horizon: "the next card", fromState: true,
   };
 }
 
@@ -796,6 +818,109 @@ export function stateIdea(context) {
     horizon: s.horizon.kind === "priced_sessions" ? s.horizon.value + " sessions" : String(s.horizon.value),
     fromState: true,
   };
+}
+
+export const NEURON_TIERS = Object.freeze(["priced", "stand-aside", "family", "screen", "unpriceable", "expired", "none"]);
+
+export const TIER_WHY = Object.freeze({
+  priced: "Priced by the options engine on this name's own option chain.",
+  family: "State and structure family only: no option chain was priced for this name.",
+  "chain.absent": "No option chain was read for this name tonight, so nothing was priced for it.",
+  "engine.absent": "The options engine produced no block for this card, so nothing was priced for it.",
+  "engine.unreadable": "The engine's block for this name was unreadable from the store just now, so the reading is the state and its structure family.",
+  "ev.none-positive": "The engine priced this name's structures and none has a positive real-world payoff.",
+  "grade.none": "The structures with a positive real-world payoff all grade below one.",
+  "risk.undefined-only": "Every structure that cleared the bar carries undefined risk, and the first idea must be defined-risk.",
+  "model.none": "The engine priced no structure on this name's chain.",
+  "candidates.none": "No structure family fits this name's expiries and state.",
+  "ideas.none": "The engine ranked no structure for this name.",
+});
+
+export function neuronTier(card, context) {
+  const c = card && typeof card === "object" ? card : {};
+  const eng = context && context.engine ? context.engine : null;
+  if (eng) {
+    if (eng.noTrade || !eng.ideas.length) {
+      const code = eng.noTrade && eng.noTrade.code ? eng.noTrade.code : "ideas.none";
+      return { tier: "stand-aside", code, why: TIER_WHY[code] || TIER_WHY["ideas.none"] };
+    }
+    return { tier: "priced", code: null, why: TIER_WHY.priced };
+  }
+  const block = c.engine && typeof c.engine === "object" ? c.engine : null;
+  if (block && (block.status === "unreadable" || block.status === "unavailable" || block.status === "split")) {
+    return { tier: "family", code: "engine.unreadable", why: TIER_WHY["engine.unreadable"] };
+  }
+  if (c.depth === "board" || c.depth === "focus") {
+    const iv = c.panels && c.panels.ivSurface;
+    const code = iv && iv.status !== "ok" ? "chain.absent" : "engine.absent";
+    return { tier: "unpriceable", code, why: TIER_WHY[code] };
+  }
+  return { tier: "family", code: null, why: TIER_WHY.family };
+}
+
+
+const EXPOSURE_CONVENTION = "the vendor's convention that dealers hold every call long and every put short, a convention and not an observed position";
+
+export function dealerExposure(card) {
+  const c = card && typeof card === "object" ? card : {};
+  const P = c.panels && typeof c.panels === "object" ? c.panels : {};
+  const V = okPanel(P.variation) ? P.variation : null;
+  const inp = V && V.inputs && typeof V.inputs === "object" ? V.inputs : {};
+  const ch = V && V.channels && typeof V.channels === "object" ? V.channels : {};
+  const conv = V && V.conventions && typeof V.conventions === "object" ? V.conventions : {};
+  const put = conv.putToDealer && typeof conv.putToDealer === "object" ? conv.putToDealer : {};
+  const grade = V ? Math.max(1, Math.min(2, panelRobustness("variation", "convexity", V, c).r)) : 1;
+  const read = gammaReading(c);
+  const facts = [];
+  const withheld = [];
+  const silent = (channel) => {
+    const list = V && Array.isArray(V.silences) ? V.silences : [];
+    const hit = list.find((x) => x && x.channel === channel && str(x.reason));
+    return hit ? cleanReason(hit.reason) : V ? "the hedging panel published none" : "the hedging panel is not on this card";
+  };
+  if (read.from === "book" && read.value !== null) {
+    facts.push({ key: "gamma", label: "Dealer book gamma", value: read.value, unit: "dollars per 1% move", grade: 2, sign: read.label,
+      note: "Open-interest gamma in dollars per 1% move, on " + EXPOSURE_CONVENTION + "." });
+  } else {
+    withheld.push({ key: "gamma", reason: read.from === "book" ? "the card carries the book's sign and not its dollar size"
+      : read.from === "flow" ? "only today's flow is on the card, and flow is not the book" : "the open-interest book is not on this card" });
+  }
+  const dd = num(inp.deltaDollars), adv = num(inp.adv);
+  if (dd !== null) {
+    facts.push({ key: "dex", label: "Dealer delta", value: dd, unit: "dollars of stock-equivalent delta across the live expiries",
+      timesAdv: adv !== null && adv > 0 ? Number((dd / adv).toFixed(2)) : null, grade: 1,
+      note: "Call delta less the put delta as the vendor signs it (multiplier " + (num(put.delta) === null ? "not settled" : num(put.delta)) + " on the put leg, an assumption the run cannot probe). On the dealer convention this is positive by construction and measures the size of the hedge book, not which way dealers lean." });
+  } else {
+    withheld.push({ key: "dex", reason: silent("deltaLegs") });
+  }
+  if (ch.vanna && num(ch.vanna.perPoint) !== null) {
+    facts.push({ key: "vanna", label: "Dealer vanna", value: ch.vanna.perPoint, unit: "dollars of delta per volatility point", grade,
+      note: "Call less put net across the live expiries, the put leg signed with multiplier " + (num(put.vanna) === null ? "not settled" : num(put.vanna)) +
+        ", an assumption a uniform sign flip would leave the run's relative-sign probe unable to see. The scale was checked against the chain." });
+  } else {
+    withheld.push({ key: "vanna", reason: silent("vanna") });
+  }
+  if (ch.charm && num(ch.charm.perSession) !== null) {
+    facts.push({ key: "charm", label: "Dealer charm", value: ch.charm.perSession, unit: "dollars of delta over the next session", grade: 1,
+      note: "Call less put net across the expiries that outlive the session. Its scale is estimated from the vendor's vanna at zero rates, so its size is approximate; the vendor documents no unit for it." });
+  } else {
+    withheld.push({ key: "charm", reason: silent("charm") });
+  }
+  if (!facts.length) return { facts, withheld, say: null, grade: 0 };
+  const money = (v) => signedMoney(v);
+  const parts = [];
+  const g = facts.find((f) => f.key === "gamma");
+  const d = facts.find((f) => f.key === "dex");
+  const v = facts.find((f) => f.key === "vanna");
+  const m = facts.find((f) => f.key === "charm");
+  if (g) parts.push("net gamma across the open-interest book is " + g.sign + ", " + money(g.value) + " per 1% move");
+  if (d) parts.push("net delta across the live expiries is " + money(d.value) + " of stock" + (d.timesAdv === null ? "" : ", " + d.timesAdv.toFixed(1) + " times a typical day's dollar volume") +
+    ", which measures the size of the hedge book and not which way dealers lean");
+  if (v) parts.push("net vanna is " + money(v.value) + " of delta per volatility point, the put leg signed by assumption");
+  if (m) parts.push("net charm is " + money(m.value) + " of delta over the session, on an approximate scale");
+  const say = "Dealer exposures on " + EXPOSURE_CONVENTION + ": " + parts.join("; ") + "." +
+    (withheld.length ? " Not read: " + withheld.map((w) => w.key + " (" + w.reason + ")").join("; ") + "." : "");
+  return { facts, withheld, say, grade: Math.min(...facts.map((f) => f.grade)) };
 }
 
 export function buildContext(card, extras) {
@@ -902,6 +1027,17 @@ export function buildContext(card, extras) {
     });
   }
 
+  const exposure = dealerExposure(c);
+  push({
+    key: "exposure", title: "Dealer exposures", group: "convexity",
+    status: exposure.facts.length ? "ok" : "unavailable", robustness: exposure.grade,
+    why: exposure.facts.length ? "graded per fact, the weakest " + exposure.grade + " of 3: the dealer sign is a convention and the put-leg signs of delta, vanna and charm are assumed"
+      : "no dealer exposure is on this card",
+    say: exposure.say,
+    figures: Object.fromEntries(exposure.facts.flatMap((f) => [[f.key, f.value], ...(f.timesAdv === undefined || f.timesAdv === null ? [] : [[f.key + "TimesAdv", f.timesAdv]])])),
+    reason: exposure.facts.length ? null : exposure.withheld.map((w) => w.key + ": " + w.reason).join("; "),
+  });
+
   const state = regimeState(c, { expectedSession: expected });
   {
     const named = state.drivers.filter((d) => d.robustness > 0 && (d.axis === "positioning" || (d.axis === "flow" && d.vote !== 0))).map((d) => d.key);
@@ -953,6 +1089,7 @@ export function buildContext(card, extras) {
     coverage,
     state,
     levels: guardLevels(c),
+    exposure: { facts: exposure.facts, withheld: exposure.withheld },
     engine: engineContext(c, { stale: stale === true }),
   };
 }
@@ -1552,6 +1689,8 @@ export function publicContext(context) {
   return {
     version: ctx.version, ticker: ctx.ticker, sessionDate: ctx.sessionDate, expectedSession: ctx.expectedSession,
     stale: ctx.stale, depth: ctx.depth, coverage: ctx.coverage,
+    exposure: ctx.exposure && typeof ctx.exposure === "object"
+      ? { facts: (ctx.exposure.facts || []).map(({ note, ...rest }) => rest), withheld: ctx.exposure.withheld } : null,
     state: ctx.state && typeof ctx.state === "object" ? {
       version: ctx.state.version, state: ctx.state.state, word: STATE_WORD[ctx.state.state] || ctx.state.state,
       direction: ctx.state.direction, flow: ctx.state.flow, confidence: ctx.state.confidence, premium: ctx.state.premium,
