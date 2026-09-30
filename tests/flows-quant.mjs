@@ -685,6 +685,21 @@ const OUT = ENGINE.runEngine(BASE);
   const lone = ENGINE.rankStructures([{ id: "S1", family: "short-strangle", risk: "undefined", grade: 2, ev: { p: 5 }, score: 0.1, prob: { popP: 0.8 } }], { preferred: [] });
   ok(lone.ideas.length === 0 && lone.noTrade.code === "risk.undefined-only" && lone.noTrade.closest === "S1",
     "when only undefined-risk structures qualify the engine stands aside and says so, rather than blaming the grades");
+  {
+    const mk = (id, family, evP, band, grade = 2) => ({ id, family, risk: "defined", grade, ev: { p: evP, pBand: band }, score: 0.1, prob: { popP: 0.6 } });
+    const split = mk("S1", "put-credit-spread", 6, [-3, 6, 9]);
+    const steady = mk("S2", "iron-condor", 4, [1, 4, 8]);
+    const both = ENGINE.rankStructures([split, steady], { preferred: [] });
+    eq(both.ideas, ["S2"], "N-F16: a structure whose EV is positive under the GARCH law but negative under the EWMA or cone law is not ranked; the one positive under all three is");
+    const only = ENGINE.rankStructures([split], { preferred: [] });
+    ok(only.ideas.length === 0 && only.noTrade.code === "ev.none-positive" && only.noTrade.closest === "S1",
+       "and when the band straddles zero on every candidate the engine stands aside as ev.none-positive, naming the closest, rather than as grade.none (its grade clears the bar)");
+    const graded = ENGINE.rankStructures([mk("S3", "iron-condor", 4, [1, 4, 8], 0)], { preferred: [] });
+    eq(graded.noTrade.code, "grade.none", "while a structure that is positive under every law but graded below 1 still reads grade.none");
+    ok(ENGINE.rankStructures([{ id: "S4", family: "iron-condor", risk: "defined", grade: 2, ev: { p: 3 }, score: 0.1, prob: { popP: 0.6 } }], { preferred: [] }).ideas.length === 1,
+       "and a structure with no band published (one law only) is judged on its one EV");
+    ok(ENGINE.rankStructures([mk("S5", "iron-condor", 4, [0, 4, 8])], { preferred: [] }).ideas.length === 0, "a band that touches zero is not positive");
+  }
   const desk = vetoed({ desk: true, topFamilies: 12 });
   const cc = desk.structures.filter((s) => s.family === "covered-call");
   ok(cc.length > 0 && cc.every((s) => Math.abs(s.greeks.deltaAdj$ - s.greeks.delta$) < 0.1 * 100 * 100),

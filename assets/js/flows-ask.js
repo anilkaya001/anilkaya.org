@@ -103,7 +103,7 @@
       const seen = isNum(n.seen), reads = isNum(n.reads);
       return { ...out, value: F.int(seen === null ? n.flagged : seen), label: "Flagged windows", sub: [seen === null ? null : F.int(n.flagged) + " held", reads === null ? null : reads + (reads === 1 ? " read" : " reads")].filter(Boolean).join(" " + MID + " ") || null };
     }
-    if (b === "flip") return { ...out, value: isNum(n.distance) === null ? DASH : F.pct(n.distance, 2), label: "To gamma flip" };
+    if (b === "flip") return { ...out, value: isNum(n.distance) === null ? DASH : F.pct(n.distance, 2), label: "To strike-sum crossing" };
     if (b === "reporting") return { ...out, value: isNum(n.count) === null ? DASH : String(n.count), label: "Report next", tags: Array.isArray(n.tickers) ? n.tickers.filter((x) => typeof x === "string") : null };
     if (b === "gate") return { ...out, value: isNum(n.count) === null ? DASH : String(n.count), label: "Earnings gate", sub: isNum(n.gateDays) === null ? null : n.gateDays + "-day gate" };
     if (/^neuron:/.test(id)) {
@@ -119,7 +119,7 @@
         surface: () => ({ value: isNum(n.strikesShown) === null || isNum(n.expiriesShown) === null ? DASH : n.strikesShown + " × " + n.expiriesShown, sub: "strikes × expiries" }),
         aggressor: () => ({ value: isNum(n.shown) === null ? DASH : n.shown + (isNum(n.measuredStrikes) === null ? "" : " of " + n.measuredStrikes), sub: "strikes drawn" }),
         topContracts: () => ({ value: isNum(n.shown) === null ? DASH : n.shown + (isNum(n.total) === null ? "" : " of " + F.int(n.total)), sub: "contracts listed" }),
-        levels: () => ({ value: text(n.gammaFlip) || DASH, label: text(n.gammaFlip) ? "Gamma flip" : "Levels", sub: "call " + (text(n.callWall) || DASH) + " · put " + (text(n.putWall) || DASH) }),
+        levels: () => ({ value: text(n.zeroGamma) || text(n.strikeSumCrossing) || DASH, label: text(n.zeroGamma) ? "Zero gamma" : text(n.strikeSumCrossing) ? "Strike-sum crossing" : "Levels", sub: "call " + (text(n.callWall) || DASH) + " · put " + (text(n.putWall) || DASH) }),
         displacement: () => ({ value: isNum(n.gapAtr) === null ? DASH : sgn(n.gapAtr, 2) + " ATR", sub: isNum(n.volCentroid) === null ? null : "flow at " + F.px(n.volCentroid) }),
         pricedMove: () => ({ value: isNum(n.impliedMove) === null ? DASH : "±" + F.pct(n.impliedMove, 1), sub: isNum(n.impliedLow) === null ? null : F.px(n.impliedLow) + " – " + F.px(n.impliedHigh) }),
         path: () => ({ value: F.money(n.netPremium, true), tone: UI.tone(n.netPremium), sub: isNum(n.persistence) === null ? null : "persistence " + F.pct(n.persistence, 0) }),

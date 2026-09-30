@@ -16,7 +16,7 @@ import {
   VARIATION_CODES,
 } from "../shared/flows-variation.js";
 import {
-  buildCard, SURFACE_EXPIRIES, indexMarketCross, CROSS_FEEDS,
+  buildCard, SURFACE_EXPIRIES, indexMarketCross, CROSS_FEEDS, SPOT_EXPOSURE_PAGE,
 } from "../shared/flows-card.js";
 import { tradingCalendar, scoreSessions, icTable, RECORD_NOTES } from "../shared/flows-record.js";
 import { makePermitQueue } from "../shared/flows-permits.js";
@@ -882,7 +882,7 @@ async function enrich(ticker, spot, sessionDate, dating = { date: true, endDate:
   const [greekFlow, ticks, strikes, expiries, ohlc] = await Promise.all([
     uw(`/api/stock/${ticker}/greek-flow`, dated).catch(() => []),
     uw(`/api/stock/${ticker}/net-prem-ticks`, dated).catch(() => []),
-    uw(`/api/stock/${ticker}/spot-exposures/strike`, { ...band, ...dated, limit: 500 }).catch(() => []),
+    uw(`/api/stock/${ticker}/spot-exposures/strike`, { ...band, ...dated, limit: SPOT_EXPOSURE_PAGE }).catch(() => []),
     uw(`/api/stock/${ticker}/greek-exposure/expiry`, dated).catch(() => []),
 
     uw(`/api/stock/${ticker}/ohlc/1d`, {
@@ -5835,6 +5835,7 @@ async function main() {
     quantPass = QP.preparePass({
       rowsByTicker: quantRows, sessionDate, rate: quantRate, spotOf: spotOfQuant,
       atrOf: (t) => atrOfLiquid.get(t) || null, expiriesOf: (t) => expiriesByTicker.get(t) || [],
+      gammaUnit: variationRun.unit.used,
     });
     const zeros = [...quantPass.preps.values()].filter((p) => p.zero && p.zero.px !== null).length;
     const slices = [...quantPass.preps.values()].reduce((a, p) => a + p.built.length, 0);

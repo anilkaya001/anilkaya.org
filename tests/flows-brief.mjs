@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { buildBrief, briefToday, briefYesterday, briefNext, briefAlertsFact, silenceOf, num }
   from "../shared/flows-brief.js";
 
@@ -360,6 +361,15 @@ const REAL = { long: LONG, short: SHORT, watch: WATCH, events: EVENTS, alerts: A
   eq(briefAlertsFact({ ...ALERTS, seen: 2 }).say, nightly.say, "while a page that holds every window read keeps the short sentence");
   eq(briefAlertsFact({ status: "quiet", rows: [] }), null, "a quiet feed states no count");
   eq(briefAlertsFact({ status: "pending" }), null, "and neither does an unpublished one");
+}
+
+{
+  const n = briefNext(REAL);
+  const flip = n.facts.find((f) => f.id === "flip");
+  ok(flip && /strike-sum crossing of its flow ladder/.test(flip.say) && !/gamma flip/i.test(flip.say),
+     `UW-F8: gFlipDist is the distance to the strike-sum crossing of the day's flow ladder, and the brief says so instead of calling it a gamma flip (${flip && flip.say})`);
+  ok(fs.readFileSync(new URL("../assets/js/flows-ask.js", import.meta.url), "utf8").indexOf("To gamma flip") < 0,
+     "and the ask page's tile is no longer labelled 'To gamma flip'");
 }
 
 console.log(`✓ flows-brief: ${checks} assertions — a briefing whose every figure is quoted from a ` +

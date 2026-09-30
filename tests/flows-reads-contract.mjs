@@ -936,4 +936,141 @@ class FakeCache {
   ok(whole.body.truncated === false && whole.body.listed === 0, "while a listing under the ceiling says it is whole");
 }
 
+{
+  const AI_ENV = { FLOWS_ASK_MODEL: "@cf/zai-org/glm-4.7-flash", FLOWS_ASK_FALLBACK_MODEL: "", FLOWS_ASK_NEURONS: "5500,36400" };
+  const answer = JSON.stringify({ summary: "NVDA scored 61 this session with conviction 70 of 100.", ideas: [] });
+  const rig = (script) => {
+    const calls = [];
+    return { calls, run: async () => { calls.push(1); return script ? script() : { response: answer, usage: { prompt_tokens: 100, completion_tokens: 40 } }; } };
+  };
+  const neuronRow = (f) => f.db.prepare("SELECT scope, fingerprint, guard, generated_at, summary FROM flows_neuron WHERE scope = 'ticker:NVDA'").get();
+  const plant = (f, fingerprint, guard, generatedAt, summary = "") => f.db.prepare(
+    "INSERT OR REPLACE INTO flows_neuron (scope, version, fingerprint, summary, ideas, llm, model, guard, generated_at) VALUES ('ticker:NVDA', 4, ?, ?, '[]', 0, NULL, ?, ?)",
+  ).run(fingerprint, summary, guard, generatedAt);
+
+  {
+    const f = fakeD1();
+    seed(f);
+    const ai = rig();
+    const get = await client(f.D1, { ...AI_ENV, AI: ai });
+    await get("/api/flows/meta");
+    f.fail(/INSERT INTO flows_neuron/);
+    const gone = await get("/api/flows/summary?t=NVDA");
+    await gone.settle();
+    ok(gone.body.status === "unavailable" && gone.body.reason === "store" && /none was started/.test(gone.body.note),
+       "N-F7: a generating marker that cannot be written answers unavailable, and says none was started");
+    eq(ai.calls.length, 0, "and the model is never called: the marker used to fail OPEN, so every request during a store fault paid for a generation nothing could cache");
+    f.fail(null);
+  }
+
+  {
+    const f = fakeD1();
+    seed(f);
+    const ai = rig();
+    const get = await client(f.D1, { ...AI_ENV, AI: ai });
+    await get("/api/flows/meta");
+    plant(f, "n4.other|ai", "generating", new Date(Date.now() - 20 * 1000).toISOString());
+    const live = await get("/api/flows/summary?t=NVDA");
+    await live.settle();
+    ok(live.body.status === "pending" && ai.calls.length === 0 && neuronRow(f).fingerprint === "n4.other|ai" && neuronRow(f).guard === "generating",
+       "N-F9: a live generating marker of ANOTHER fingerprint is not taken over: the reader waits, the model is not called, the row is untouched");
+    plant(f, "n4.other|ai", "generating", new Date(Date.now() - 200 * 1000).toISOString());
+    const dead = await get("/api/flows/summary?t=NVDA");
+    await dead.settle();
+    ok(ai.calls.length === 1 && neuronRow(f).guard !== "generating" && neuronRow(f).fingerprint !== "n4.other|ai",
+       "while a marker past its 90 seconds is a dead generator's and is taken over");
+  }
+
+  {
+    const f = fakeD1();
+    seed(f);
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const ai = rig(async () => { await gate; return { response: answer, usage: { prompt_tokens: 100, completion_tokens: 40 } }; });
+    const get = await client(f.D1, { ...AI_ENV, AI: ai });
+    await get("/api/flows/meta");
+    const first = await get("/api/flows/summary?t=NVDA");
+    ok(first.body.status === "pending" && neuronRow(f).guard === "generating", "N-F9: a generation is in flight, its marker on the row");
+    const mine = neuronRow(f).fingerprint;
+    const later = new Date(Date.now() + 5000).toISOString();
+    plant(f, "n4.fresher|ai", "generating", later);
+    release();
+    await first.settle();
+    const row = neuronRow(f);
+    ok(row.fingerprint === "n4.fresher|ai" && row.guard === "generating" && row.generated_at === later && row.fingerprint !== mine,
+       "and when it finishes after a FRESHER generation has claimed the row its result is dropped, the fresher marker left standing: compare-and-set, not last writer wins");
+    plant(f, "n4.older|ai", "unreachable:capacity", new Date(Date.now() - 3600 * 1000).toISOString(), "old");
+    const ai2 = rig();
+    const get2 = await client(f.D1, { ...AI_ENV, AI: ai2 });
+    const third = await get2("/api/flows/summary?t=NVDA");
+    await third.settle();
+    ok(neuronRow(f).summary.startsWith("NVDA scored 61") && neuronRow(f).fingerprint !== "n4.older|ai",
+       "while a finished row older than the generation is replaced by it");
+  }
+
+  {
+    const f = fakeD1();
+    seed(f);
+    const ai = rig();
+    const get = await client(f.D1, { ...AI_ENV, AI: ai });
+    await get("/api/flows/meta");
+    const first = await get("/api/flows/summary?t=NVDA");
+    await first.settle();
+    const read = await get("/api/flows/summary?t=NVDA");
+    ok(read.body.status === "ok" && read.body.llm === true && ai.calls.length === 1, "a reading written once is served with no second model call");
+    f.put("card:NVDA", { ...NIGHTLY, generatedAt: "2026-09-25T00:40:00.000Z", ticker: "NVDA", panels: PANELS, score: 61, conviction: 70 });
+    const again = await get("/api/flows/summary?t=NVDA");
+    await again.settle();
+    ok(ai.calls.length === 2, "and a card published again (a new generatedAt) is read again");
+  }
+}
+
+{
+  const AI_ENV = { FLOWS_ASK_MODEL: "@cf/zai-org/glm-4.7-flash", FLOWS_ASK_FALLBACK_MODEL: "", FLOWS_ASK_NEURONS: "5500,36400" };
+  const block = (ideas, noTrade) => ({
+    v: 1, engine: "q1", asOf: "2026-09-24T20:00:00.000Z", spot: 100, atr: 2.5,
+    facts: [{ id: "vrp.rel.21", v: 0.18, u: "frac", g: 3 }, { id: "iv.pct.30", v: 0.82, u: "frac", g: 2 }, { id: "level.magnet", v: 100.5, u: "px", g: 2 },
+      { id: "gex.book", v: 1.2e6, u: "usdPer1pct", g: 2 }],
+    state: { state: "pinned", direction: null, confidence: 2, preferred: ["iron condor"], avoid: ["long straddle"] }, levels: {},
+    structures: [{ id: "S1", family: "put-credit-spread", risk: "defined", dir: "bull", expiry: "2026-10-16", dte: 30, sessions: 22,
+      legs: [{ type: "P", k: 95, side: -1, qty: 1 }, { type: "P", k: 90, side: 1, qty: 1 }], grade: 3, gradeWhy: [], rules: ["state.pinned", "vrp.rich", "iv.high"],
+      prob: { popQ: 0.7, popP: 0.78 }, ev: { q: -3, p: 21, edge: 24 }, maxProfit: 140, maxLoss: -360 }],
+    ideas, noTrade,
+  });
+  const reading = async (engine, reply) => {
+    const f = fakeD1();
+    seed(f);
+    f.put("card:NVDA", { ...NIGHTLY, ticker: "NVDA", panels: PANELS, score: 61, conviction: 70, engine });
+    const ai = reply === null ? {} : { AI: { run: async () => ({ response: JSON.stringify(reply), usage: { prompt_tokens: 100, completion_tokens: 20 } }) } };
+    const get = await client(f.D1, { ...AI_ENV, ...ai });
+    await get("/api/flows/meta");
+    const first = await get("/api/flows/summary?t=NVDA");
+    await first.settle();
+    return (await get("/api/flows/summary?t=NVDA")).body;
+  };
+
+  const ranked = await reading(block(["S1"], null), { verdict: "stand-aside", ideas: [] });
+  ok(ranked.status === "ok" && ranked.engine === true && ranked.ideas.length === 1 && ranked.ideas[0].structure === "S1" && ranked.ideas[0].from === "engine" &&
+     ranked.verdict !== "stand-aside" && ranked.guard === "engine:refused" && ranked.llm === false,
+     `N-F2, end to end: a model that answers stand-aside while the engine ranks S1 is refused, and the reader gets the engine's idea and no Stand aside tag (${ranked.verdict}, ${ranked.guard})`);
+  ok(/every answer the model gave was refused \(verdict-false\)/.test(ranked.provenance), `and is told so (${ranked.provenance})`);
+
+  const aside = await reading(block([], { code: "candidates.none", closest: null }), { verdict: "stand-aside", ideas: [] });
+  ok(aside.status === "ok" && aside.ideas.length === 0 && aside.verdict === "stand-aside" && aside.llm === true && aside.verdictWord === "Stand aside",
+     "while the same words are accepted when the engine itself stood aside");
+  ok(/was asked and agreed: the engine’s own verdict is that no structure it priced clears its bar/.test(aside.provenance) && !/no model was asked/.test(aside.provenance),
+     `and the provenance says a model was asked, where an empty idea list read as 'no model was asked' (${aside.provenance})`);
+
+  const bare = await reading(block([], { code: "candidates.none", closest: null }), null);
+  ok(bare.verdict === "stand-aside" && bare.llm === false && /The engine stands aside: no structure it priced clears its bar/.test(bare.provenance) && !/engine’s own ranking/.test(bare.provenance),
+     `and with no model the provenance says the engine stands aside instead of calling an empty list its own ranking (${bare.provenance})`);
+
+  const promoted = await reading(block(["S1"], null), { verdict: "harvest-rich-premium", ideas: [{ structure: "S1", verdict: "harvest-rich-premium", because: ["vrp.rel.21", "iv.pct.30"] }] });
+  ok(promoted.llm === true && promoted.ideas.length === 1 && promoted.ideas[0].from === "model" && promoted.ideas[0].structure === "S1" && promoted.verdict === "harvest-rich-premium",
+     "and a model that agrees with the engine's ranking, naming facts the structure's rules rest on, is kept");
+  const offRules = await reading(block(["S1"], null), { verdict: "harvest-rich-premium", ideas: [{ structure: "S1", verdict: "harvest-rich-premium", because: ["level.magnet", "gex.book"] }] });
+  ok(offRules.llm === true && offRules.ideas.length === 1,
+     "level.magnet and gex.book are named by the state rule, so that pair is kept too");
+}
+
 console.log(`flows-reads-contract: ${checks} checks passed`);

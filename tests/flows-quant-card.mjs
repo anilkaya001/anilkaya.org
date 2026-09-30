@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import * as BS from "../shared/flows-quant-bs.js";
 import * as SMILE from "../shared/flows-quant-smile.js";
 import * as DENSITY from "../shared/flows-quant-density.js";
@@ -112,6 +113,9 @@ function vendorChain({ ticker = "SYN", expiries = ["2026-10-02", "2026-10-16", "
   ok(mixed.putSign === "mixed" && mixed.magnet === null && mixed.gex === null,
      "a book whose put leg carries both signs publishes no magnet and no net rather than a guess");
   eq(QC.bookLevels([], { spot: 43.23 }), null, "an empty book is no levels at all");
+  eq(QC.bookLevels([{ price: "43.23", call_gamma_oi: "1e6", put_gamma_oi: "-1e6" }], { spot: 43.23 }), null,
+     "UW-F14: a row carrying only `price`, the underlying's, is not a strike: it would stack the whole book on the spot as both walls");
+  eq(QC.bookLevels(rowsB.map((r) => ({ ...r, price: "43.23" })), { spot: 43.23 }).callWall, b.callWall, "while the strike is what places a row that has both");
 }
 
 const RATE = { r: R, method: "constant", n: 0 };
@@ -140,6 +144,41 @@ const slices = QC.buildSlices(vchain.expiries, { spot: SPOT, asOfMs: AS_OF_MS, r
   ok(covered.coverage < 0.5 && covered.g === 1 && covered.why === "flip.coverage",
      "and against a book far larger than the fetched contracts the level is graded weak");
   eq(covered.profile.x.length, covered.profile.g.length, "the published profile pairs each spot with its gamma");
+}
+
+{
+  const rows = vendorChain();
+  const expiryRows = [...new Set(rows.map((r) => QC.parseSymbol(r.option_symbol).expiry))].map((expiry) => {
+    const T = TIME.yearFraction(AS_OF_MS, expiry);
+    const scale = Math.sqrt(T / (32 / 365));
+    let c = 0, p = 0;
+    for (const r of rows) {
+      const q = QC.parseSymbol(r.option_symbol);
+      if (q.expiry !== expiry) continue;
+      const F = SPOT * Math.exp(R * T);
+      const vol = Math.sqrt(SMILE.sviW({ ...SVI, a: SVI.a * scale * scale, b: SVI.b * scale * scale }, Math.log(q.strike / F)) / T);
+      const g = BS.bsmGreeks({ S: SPOT, K: q.strike, r: R, q: 0, sigma: vol, T, type: q.type }).gamma * r.open_interest * 100;
+      if (q.type === "C") c += g; else p += g;
+    }
+    return { expiry, dte: Math.round(T * 365), call_gex: String(c), put_gex: String(-p) };
+  });
+  const dollars = expiryRows.map((e) => ({ ...e, call_gex: String(Number(e.call_gex) * SPOT * SPOT / 100), put_gex: String(Number(e.put_gex) * SPOT * SPOT / 100) }));
+  const pass = (subset, gammaUnit, vendor) => QP.preparePass({ rowsByTicker: new Map([["SYN", subset]]), sessionDate: SESSION, rate: RATE, spotOf: () => SPOT,
+    atrOf: () => 2, expiriesOf: () => vendor, ...(gammaUnit ? { gammaUnit } : {}) }).preps.get("SYN").zero;
+  const whole = pass(rows, null, expiryRows);
+  ok(whole.coverage > 0.85 && whole.coverage < 1.15 && whole.g === 3,
+     `UW-F2: a complete chain measures coverage ${whole.coverage} against the vendor's share-gamma book once both are in dollars per 1%`);
+  const quarter = pass(rows.filter((_, i) => i % 4 === 0), null, expiryRows);
+  ok(quarter.coverage > 0.15 && quarter.coverage < 0.4 && quarter.g === 1 && quarter.why === "flip.coverage",
+     `and a quarter of the contracts measures ${quarter.coverage} and grades the zero-gamma level weak, where dollars divided by shares published ` +
+     "27.15 and grade 3 (the coverage control could not fire for any spot above ten)");
+  const inDollars = pass(rows.filter((_, i) => i % 4 === 0), "pct$", dollars);
+  near(inDollars.coverage, quarter.coverage, 1e-9, "the same chain against a vendor book already in dollars per 1% (unit pct$) reads the same coverage: the conversion follows the resolved unit");
+  ok(QP.vendorGrossPer1pct(1000, 100, "share") === 1e5 && QP.vendorGrossPer1pct(1000, 100, "pct$") === 1000 &&
+     QP.vendorGrossPer1pct(1000, null, "share") === null && QP.vendorGrossPer1pct(null, 100, "share") === null && QP.vendorGrossPer1pct(0, 100, "share") === null,
+     "and a book with no spot or no gross measures no coverage rather than a wrong one");
+  const worker = fs.readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  ok(/gammaUnit: variationRun\.unit\.used/.test(worker), "the nightly hands the pass the unit the variation probe resolved");
 }
 
 {
@@ -202,7 +241,7 @@ const CLOSES = (() => { const c = [100]; const rng = WORLD.xoshiro128ss("closes"
 const FACT_INPUT = () => ({
   built: slices.built, spot: SPOT, atr: 2, asOfDay: SESSION,
   card: {
-    strikeSumCrossing: 101.5, regime: { bookGammaRaw: 2e6, flowGamma: -4e5 },
+    strikeSumCrossing: 101.5, regime: { bookGammaRaw: 2e4, bookGamma: 2e6, flowGamma: -4e5 },
     panels: {
       pricedMove: { status: "ok", ivRank: 0.62, rv30: 0.21 },
       levels: { status: "ok", levels: [{ kind: "max_pain", px: 100 }] },
@@ -246,6 +285,34 @@ const FACT_INPUT = () => ({
   eq(by["level.strikeSumCrossing"].v, 101.5, "and the strike-sum crossing rides under its own id beside level.flip");
   ok(by["skew.rr25.30.pct"].x === true, "a cross-sectional percentile is tagged x");
   ok(by["move.event"].v > 0 && by["move.event.ratio"].v > 0, "an event between two fitted slices yields an implied jump and its ratio to history");
+  eq([by["gex.book"].v, by["gex.book"].u, by["gex.book"].g], [2e6, "usdPer1pct", 2],
+     "gex.book is the card's dollar book per 1%, the figure the ticker tile prints, graded fair at most: the dealer sign it rests on is a convention (UW-F5)");
+  {
+    const rawOnly = FACT_INPUT();
+    rawOnly.card.regime = { bookGammaRaw: 2e4, flowGamma: -4e5 };
+    const gb = QC.engineFacts(rawOnly).find((f) => f.id === "gex.book");
+    ok(gb.v === null && gb.g === 0 && gb.why === "book.no-spot",
+       "UW-F3: with no dollar book (no spot) gex.book is withheld as book.no-spot, where it published the raw share-gamma under the usdPer1pct unit");
+    const none = FACT_INPUT();
+    none.card.regime = { flowGamma: -4e5 };
+    ok(QC.engineFacts(none).find((f) => f.id === "gex.book").why === "book.absent", "and a card with no book at all stays book.absent");
+  }
+  {
+    const input = FACT_INPUT();
+    const at = input.zero.atSpot;
+    ok(Number.isFinite(at) && at !== 0, `the profile publishes its dealer gamma at spot (${at})`);
+    const agree = QC.engineFacts({ ...input, card: { ...input.card, regime: { ...input.card.regime, bookGamma: Math.sign(at) * 2e6 } } }).find((f) => f.id === "level.flip");
+    const clash = QC.engineFacts({ ...input, card: { ...input.card, regime: { ...input.card.regime, bookGamma: -Math.sign(at) * 2e6 } } });
+    const cf = clash.find((f) => f.id === "level.flip");
+    ok(agree.g === input.zero.g && agree.why === (input.zero.why || undefined), "a book whose sign agrees with the profile at spot leaves the flip's grade as the coverage set it");
+    ok(cf.g === 1 && cf.why === "flip.sign-at-spot" && clash.find((f) => f.id === "level.flip.count").g <= 1,
+       `UW-F9: a book the opposite sign of our own profile at spot caps the flip at grade 1 and says flip.sign-at-spot (g ${cf.g}, ${cf.why})`);
+    const painThin = FACT_INPUT();
+    painThin.card.panels.levels.levels = [{ kind: "max_pain", px: 100, expiry: "2026-09-25", share: 0.05, thin: true, line: 0.25 }];
+    const pf = QC.engineFacts(painThin).find((f) => f.id === "level.maxPain");
+    ok(pf.g === 1 && pf.why === "pain.thin-expiry" && by["level.maxPain"].g === 2,
+       "UW-F13: max pain read off an expiry that holds a sliver of the book is graded 1 with pain.thin-expiry, where a full one stays 2");
+  }
   const degenerate = QC.engineFacts({ ...FACT_INPUT(), garch: { ...GARCH, grade: 2, why: ["garch.alpha-degenerate"] } });
   const dg = Object.fromEntries(degenerate.map((f) => [f.id, f]));
   ok(dg["garch.avg.21"].g === 2 && dg["garch.avg.21"].why === "garch.alpha-degenerate" && dg["vrp.rel.21"].g <= 2,
