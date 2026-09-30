@@ -288,6 +288,7 @@ const b76 = (F, D, K, sig, T, type) => {
   const shape = { atm: 0.3, rho: -0.3, b: 0.02, sigma: 0.15, q, r, spreadRel: 0.01, floor: 0.01 };
   const expiries = ["2026-10-16", "2026-11-20"].map((expiry) => ({ expiry, rows: skewedRows({ ...shape, asOfMs: closeMs, expiry }).rows }));
   const { built } = QC.buildSlices(expiries, { spot: S0, asOfMs: closeMs, rate: r });
+  ok(built.length === 2 && built.every((e) => e.hSessions === e.sessions && Number.isInteger(e.sessions)), "a chain struck at the close carries whole-session horizons, so the nightly card is priced exactly as it was");
   const facts = QC.engineFacts({ built, spot: S0, asOfDay: "2026-09-30" });
   const carry = facts.find((f) => f.id === "carry.implied");
   near(carry.v, q, 0.002, `the card measures the chain's dividend yield from parity: ${carry.v} against the ${q} the chain was priced with`);
@@ -397,6 +398,9 @@ const b76 = (F, D, K, sig, T, type) => {
   ok(worstFar < 0.006, `and a card that lists a neighbouring expiry instead still does to ${(100 * worstFar).toFixed(2)}pp, the shape carried over in standardised moneyness`);
   ok(worstEv < 1.5, `with risk-neutral EV within $${worstEv.toFixed(2)} a contract of the lab's`);
   const row225 = lab.rows.find((x) => x.K === 225 && x.type === "P");
+  const slim = card.expiries.map((e) => ({ expiry: e.expiry, T: e.T, smile: { method: e.smile.method, params: e.smile.params } }));
+  eq(QC.contractFit({ expiry, asOfMs, spot: S0, rate: r, row: row225, expiries: slim }).slice.params, QC.contractFit({ expiry, asOfMs, spot: S0, rate: r, row: row225, expiries: card.expiries }).slice.params,
+    `the desk needs only {expiry, T, smile: {method, params}} from the card (${JSON.stringify(slim).length} bytes for this expiry), not the whole expiry summary`);
   eq(ENGINE.fitGrade(QC.contractFit({ expiry, asOfMs, spot: S0, rate: r, row: row225, expiries: card.expiries }).slice, true), { g: 2, why: "fit.card-shape" }, "a line on the card's shape with a tight quote grades 2");
   eq(ENGINE.fitGrade(QC.contractFit({ expiry, asOfMs, spot: S0, rate: r, row: { ...row225, bid: 0.3, ask: 0.9 }, expiries: card.expiries }).slice, true), { g: 1, why: "fit.contract-iv.wide" }, "and with a wide one grades 1, because the volatility the shape is levelled to is uncertain");
   eq(QC.contractFit({ expiry, asOfMs, spot: S0, rate: r, row: row225, expiries: card.expiries.map((e) => ({ ...e, expiry: "2026-10-02", T: e.T * 10 })) }).slice.origin, "contract", "a card whose nearest expiry is ten times further out gives no shape to carry, so the line falls back to the flat fit");
