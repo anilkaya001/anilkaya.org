@@ -1,6 +1,58 @@
 (() => {
   "use strict";
 
+  const MAX_BUYING_POWER = 1e11;
+  const LOT = 100;
+  const TENORS = [["All", 0, 1e9], ["≤ 2w", 0, 14], ["2–6w", 15, 42], ["> 6w", 43, 1e9]];
+
+  const isNum = (v) => {
+    if (v === null || v === undefined || v === "") return null;
+    const n = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  function parseBuyingPower(raw) {
+    const text = String(raw === null || raw === undefined ? "" : raw).trim().toLowerCase().replace(/^\$\s*/, "");
+    const m = /^((?:\d{1,3}(?:[, _]\d{3})+|\d+)?(?:\.\d+)?)\s*([kmb])?$/.exec(text);
+    if (!m || !/\d/.test(m[1])) return null;
+    const v = Math.round(Number(m[1].replace(/[, _]/g, "")) * (m[2] === "b" ? 1e9 : m[2] === "m" ? 1e6 : m[2] === "k" ? 1e3 : 1) * 100) / 100;
+    return v > 0 && v <= MAX_BUYING_POWER ? v : null;
+  }
+
+  function sizeRow(row, bp) {
+    const collateral = isNum(row && row.collateral), premium = isNum(row && row.premium);
+    if (bp === null || !(bp > 0) || collateral === null || !(collateral > 0) || premium === null || !(premium > 0)) return null;
+    const cents = Math.round(collateral * 100);
+    if (!(cents > 0)) return null;
+    const total = Math.round(bp * 100), contracts = Math.floor(total / cents);
+    const deployed = contracts * cents / 100;
+    return { contracts, affordable: contracts > 0, collectible: contracts * premium, deployed, idle: (total - contracts * cents) / 100, yieldOnDeployed: deployed > 0 ? (contracts * premium) / deployed : null };
+  }
+
+  function netDelta(e) {
+    if (!e || !Array.isArray(e.legs) || !e.legs.length) return null;
+    let d = 0;
+    for (const l of e.legs) {
+      const x = isNum(l.delta);
+      if (x === null) return null;
+      d += l.side * (l.qty || 1) * x;
+    }
+    return d;
+  }
+
+  function frontierOf(pts, chance) {
+    const dir = chance ? -1 : 1;
+    const out = [];
+    let best = -Infinity;
+    for (const p of pts.slice().sort((a, b) => dir * (a.x - b.x) || b.y - a.y)) if (p.y > best + 1e-12) { out.push(p); best = p.y; }
+    return chance ? out.reverse() : out;
+  }
+
+  if (typeof document === "undefined") {
+    globalThis.__FlowsDeskTest = Object.freeze({ TENORS, parseBuyingPower, sizeRow, netDelta, frontierOf });
+    return;
+  }
+
   const UI = window.FlowsUI;
   if (!UI) return;
   const Q = window.FlowsQuant || null;
@@ -14,31 +66,24 @@
   if (!entry || !input || !list || !grid) return;
   const T = (k, o) => { const n = document.querySelector('#dkCopy [data-k="' + k + '"]'); const t = n ? n.textContent.replace(/\s+/g, " ").trim() : ""; return o ? t.replace(/\{(\w+)\}/g, (m, x) => (x in o ? o[x] : m)) : t; };
 
-  const MAX_BUYING_POWER = 1e11;
   const MAX_SYMBOLS = 20;
   const CONCURRENCY = 3;
   const AGE_TICK_MS = 30000;
   const QUOTE_STALE_SECONDS = 300;
-  const LOT = 100;
   const SHOWN = 12;
   const TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
   const SIDES = ["csp", "cc", "both"];
   const RANKS = [["annualized", "Annualised yield"], ["premium", "Premium received"], ["yieldOnCollateral", "Yield on collateral"], ["cushionSigmas", "Cushion"], ["collectible", "Premium collectible"], ["edge", "EV real world"]];
-  const TENORS = [["All", 0, 1e9], ["≤ 2w", 0, 14], ["2–6w", 15, 45], ["> 6w", 46, 1e9]];
   const SERIES = ["--s-blue", "--s-orange", "--s-purple", "--s-teal", "--s-yellow"];
+  const WIN_Q = "Win % (implied)", WIN_P = "Win % (real-world)";
 
   const book = new Map();
   let inflight = 0;
   let statusOwned = true;
-  let buyingPower = null;
+  let buyingPower = null, bpBad = false;
   let side = "both", rank = "annualized", tenor = 0, axis = 0, surfaceSymbol = null;
   const say = (text) => { statusEl.textContent = text; statusEl.classList.remove("visually-hidden"); statusOwned = false; };
 
-  const isNum = (v) => {
-    if (v === null || v === undefined || v === "") return null;
-    const n = typeof v === "number" ? v : Number(v);
-    return Number.isFinite(n) ? n : null;
-  };
   const fmt2 = (v) => { const n = isNum(v); return n === null ? DASH : n.toFixed(2); };
   const fmtMoney = (v) => { const n = isNum(v); return n === null ? DASH : (n < 0 ? MINUS : "") + "$" + Math.round(Math.abs(n)).toLocaleString("en-US"); };
   const fmtPct = (v, d = 1) => { const n = isNum(v); return n === null ? DASH : (n < 0 ? MINUS : "") + (Math.abs(n) * 100).toFixed(d) + "%"; };
@@ -50,26 +95,7 @@
   const fmtAge = (sec) => { const n = isNum(sec); if (n === null) return ""; if (n < 45) return "just now"; if (n < 5400) return Math.round(n / 60) + "m ago"; return Math.round(n / 3600) + "h ago"; };
   const ageOf = (p) => { if (!p) return null; const b = isNum(p.__age); if (b === null) return null; const at = isNum(p.__at); return at === null ? b : b + Math.max(0, (Date.now() - at) / 1000); };
 
-  function parseBuyingPower(raw) {
-    const text = String(raw === null || raw === undefined ? "" : raw).trim().toLowerCase().replace(/[$,\s_]/g, "");
-    if (!text) return null;
-    const m = /^(\d*\.?\d+)([kmb])?$/.exec(text);
-    if (!m) return null;
-    const base = Number(m[1]);
-    if (!Number.isFinite(base) || base <= 0) return null;
-    const v = base * (m[2] === "b" ? 1e9 : m[2] === "m" ? 1e6 : m[2] === "k" ? 1e3 : 1);
-    return v > 0 && v <= MAX_BUYING_POWER ? v : null;
-  }
-  const formatBuyingPower = (v) => (isNum(v) === null ? "" : Math.round(v).toLocaleString("en-US"));
-
-  function sizeRow(row, bp) {
-    if (bp === null || !(bp > 0)) return null;
-    const collateral = isNum(row && row.collateral), premium = isNum(row && row.premium);
-    if (collateral === null || !(collateral > 0) || premium === null || !(premium > 0)) return null;
-    const contracts = Math.floor(bp / collateral);
-    const deployed = contracts * collateral;
-    return { contracts, affordable: contracts > 0, collectible: contracts * premium, deployed, idle: bp - deployed, yieldOnDeployed: deployed > 0 ? (contracts * premium) / deployed : null };
-  }
+  const formatBuyingPower = (v) => (isNum(v) === null ? "" : v.toLocaleString("en-US", { maximumFractionDigits: 2 }));
 
   const normalise = (raw) => {
     const out = [];
@@ -104,11 +130,15 @@
       if (syms.length) url.searchParams.set("t", syms.join(",")); else url.searchParams.delete("t");
       url.searchParams.set("strategy", side);
       url.searchParams.set("rank", rank);
-      if (buyingPower !== null) url.searchParams.set("bp", String(Math.round(buyingPower))); else url.searchParams.delete("bp");
+      if (buyingPower !== null) url.searchParams.set("bp", String(buyingPower)); else url.searchParams.delete("bp");
       if (surfaceSymbol !== null && book.has(surfaceSymbol)) url.searchParams.set("surface", surfaceSymbol); else url.searchParams.delete("surface");
       history.replaceState(null, "", url);
     } catch { return; }
   }
+
+  const basisOf = (p) => (p && p.basis && typeof p.basis === "object" ? p.basis : null);
+  const mismatched = (p) => { const b = basisOf(p); return !!b && b.status === "mismatch"; };
+  const spotOf = (p) => { const b = basisOf(p); return b && b.status !== "mismatch" && isNum(b.spot) !== null ? Number(b.spot) : p.spot; };
 
   function noteFor(e) {
     if (!e) return "";
@@ -117,9 +147,9 @@
     const p = e.payload;
     if (!p) return "";
     const parts = [];
-    if (isNum(p.spot) !== null) parts.push("$" + fmt2(p.spot) + (p.spotSource === "daily-close" ? " close" : ""));
+    if (isNum(spotOf(p)) !== null) parts.push("$" + fmt2(spotOf(p)) + (p.spotSource === "daily-close" ? " close" : "") + (basisOf(p) && basisOf(p).status === "rebased" ? " rebased" : ""));
     const shown = (p.rows || []).length, priced = isNum(p.priced);
-    parts.push((priced !== null && shown < priced ? fmtInt(shown) + " of " + fmtInt(priced) : fmtInt(priced)) + " sellable" + (p.truncated ? " of a partial chain" : ""));
+    parts.push(mismatched(p) ? "quotes disagree with the price" : (priced !== null && shown < priced ? fmtInt(shown) + " of " + fmtInt(priced) : fmtInt(priced)) + " sellable" + (p.truncated ? " of a partial chain" : ""));
     const sec = ageOf(p);
     parts.push(sec === null ? "age not stated" : fmtAge(sec));
     return parts.join(" · ");
@@ -140,7 +170,7 @@
       },
       h("i", { class: "dk-dot", style: { "--c": UI.cssVar(colorOf(sym)) }, "aria-hidden": "true" }),
       h("b", { class: "desk-chip__sym" }, sym),
-      e.state === "ok" && p ? h("span", { class: "dk-chip-px" }, fmt2(p.spot)) : null,
+      e.state === "ok" && p ? h("span", { class: "dk-chip-px" }, fmt2(spotOf(p))) : null,
       e.state === "loading" ? h("span", { class: "dk-chip-px" }, glyph("pending")) : null,
       e.state === "error" ? h("span", { class: "dk-chip-px" }, glyph("unavailable")) : null,
       e.state === "ok" && p ? glyph(live ? "live" : "closed", "dk-src") : null, note);
@@ -216,31 +246,38 @@
     render();
   }
 
+  const ET_HOUR = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", hourCycle: "h23" });
+
   function quoteMs(p) {
     const tape = p.tapeTime ? Date.parse(String(p.tapeTime).replace(" ", "T")) : NaN;
     if (Number.isFinite(tape)) return tape;
-    const close = /^\d{4}-\d{2}-\d{2}$/.test(String(p.asOf || "")) ? Date.parse(p.asOf + "T20:00:00Z") : NaN;
-    if (Number.isFinite(close)) return close;
-    return Date.parse(p.generatedAt) || Date.now();
+    const read = Date.parse(p.generatedAt);
+    const guess = /^\d{4}-\d{2}-\d{2}$/.test(String(p.asOf || "")) ? Date.parse(p.asOf + "T20:00:00Z") : NaN;
+    if (!Number.isFinite(guess)) return read || Date.now();
+    const close = guess + (16 - Number(ET_HOUR.format(guess))) * 3600000;
+    return Number.isFinite(read) ? Math.min(close, read) : close;
   }
+
+  const shareIntrinsic = (r, S) => { const k = isNum(r.strike); return S === null || k === null ? 0 : Math.max(0, r.strategy === "csp" ? k - S : r.strategy === "cc" ? S - k : 0); };
 
   function price(sym, p) {
     const eng = p.engine && p.engine.status === "ok" ? p.engine : null;
     const asOfMs = quoteMs(p);
+    const spot = spotOf(p);
     const laws = new Map();
     for (const r of p.rows || []) {
       r.__eng = null;
-      if (!Q) { r.__why = "The engine bundle did not load."; continue; }
+      if (!Q) { r.__why = T("why-q"); continue; }
       const type = r.type === "P" ? "P" : "C";
       const row = { K: r.strike, type, bid: isNum(r.bid), ask: isNum(r.ask), oi: isNum(r.oi), volume: isNum(r.volume), sym: r.symbol, ivSeed: isNum(r.iv) };
       try {
-        const fit = Q.contractFit({ expiry: r.expiry, asOfMs, spot: p.spot, rate: eng && eng.rate ? eng.rate.r : null, row });
-        if (!fit) { r.__why = "No implied volatility inverts from this contract's mid."; continue; }
-        const setup = Q.labSetup({ asOfMs, spot: p.spot, facts: eng ? eng.facts : [], state: eng ? eng.state : null, pLaw: eng ? eng.pLaw : null, event: eng ? eng.event : null, stale: eng ? eng.stale : false, books: [{ fit, rows: [row] }], lawCache: laws });
+        const fit = Q.contractFit({ expiry: r.expiry, asOfMs, spot, rate: eng && eng.rate ? eng.rate.r : null, row });
+        if (!fit) { r.__why = T(shareIntrinsic(r, isNum(spot)) > (isNum(r.mid) === null ? Infinity : r.mid) ? "why-int" : "why-fit"); continue; }
+        const setup = Q.labSetup({ asOfMs, spot, facts: eng ? eng.facts : [], state: eng ? eng.state : null, pLaw: eng ? eng.pLaw : null, event: eng ? eng.event : null, stale: eng ? eng.stale : false, books: [{ fit, rows: [row] }], lawCache: laws });
         const legs = r.strategy === "cc" ? [{ type: "S", side: 1, qty: 1 }, { type: "C", K: r.strike, side: -1, qty: 1 }] : [{ type: "P", K: r.strike, side: -1, qty: 1 }];
         r.__eng = Q.priceStructure(setup, { family: r.strategy === "cc" ? "covered-call" : "short-put", expiry: r.expiry, legs, basis: "natural" });
-        if (!r.__eng) r.__why = "The engine could not price this line.";
-      } catch { r.__eng = null; r.__why = "The engine could not price this line."; }
+        if (!r.__eng) r.__why = T("why-eng");
+      } catch { r.__eng = null; r.__why = T("why-eng"); }
       r.__law = eng && eng.pLaw ? null : eng ? "this name's card publishes no real-world law" : "no card is published for " + sym + ", so there is no real-world law";
     }
   }
@@ -262,12 +299,9 @@
     await Promise.all(workers);
   }
 
-  const shortDelta = (r) => {
-    const e = r.__eng;
-    if (!e) return null;
-    const leg = e.legs.find((l) => l.type !== "S");
-    return leg && isNum(leg.delta) !== null ? Math.abs(leg.delta) : null;
-  };
+  const shortLeg = (r) => (r.__eng ? r.__eng.legs.find((l) => l.type !== "S") : null);
+  const shortDelta = (r) => { const leg = shortLeg(r); return leg && isNum(leg.delta) !== null ? Math.abs(leg.delta) : null; };
+  const netOf = (r) => netDelta(r.__eng);
   const popQ = (r) => (r.__eng ? r.__eng.prob.popQ : null);
   const popP = (r) => (r.__eng ? r.__eng.prob.popP : null);
   const evP = (r) => (r.__eng ? r.__eng.ev.p : null);
@@ -280,6 +314,7 @@
       const e = book.get(sym);
       if (!e || e.state !== "ok" || !e.payload) continue;
       const p = e.payload;
+      if (mismatched(p)) continue;
       const kept = (p.rows || []).length, sc = isNum(p.screened), sell = isNum(p.priced);
       if (sc === null || sell === null) uncounted.push(sym);
       else {
@@ -287,7 +322,7 @@
         for (const [k, n] of Object.entries(p.gated || {})) gated[k] = (gated[k] || 0) + (isNum(n) || 0);
       }
       if (sell !== null && kept < sell) slices.push({ sym, kept, sell, rankedBy: p.rankedBy || null });
-      for (const r of p.rows || []) rows.push(Object.assign(r, { __spot: p.spot, __sym: sym }));
+      for (const r of p.rows || []) rows.push(Object.assign(r, { __spot: spotOf(p), __sym: sym }));
     }
     for (const r of rows) r.__sizing = sizeRow(r, buyingPower);
     const key = rank === "collectible" ? (r) => (r.__sizing ? r.__sizing.collectible : null) : rank === "edge" ? evP : (r) => r[rank];
@@ -311,7 +346,7 @@
     mods.tenorSeg = UI.segmented("Days to expiry", TENORS.map(([l]) => ({ label: l })), (i) => { tenor = i; render(); }, tenor);
     mods.tenorSeg.id = "dkTenor";
     filters.prepend(mods.sideSeg, mods.tenorSeg);
-    mods.axisSeg = UI.segmented("Risk axis", [{ label: "Delta" }, { label: "Chance" }], (i) => { axis = i; drawScatter(); }, axis);
+    mods.axisSeg = UI.segmented("Risk axis", [{ label: "Net delta" }, { label: WIN_Q }], (i) => { axis = i; drawScatter(); }, axis);
     mods.scatter = h("div", { class: "dk-scatter", id: "dkScatter" });
     mods.legend = h("div", { class: "tl-legend" });
     const frontier = UI.moduleCard({ id: "dkFrontierM", title: "Frontier", span: 8, index: 0, seg: mods.axisSeg, info: frontierInfo, body: [mods.scatter, mods.legend] });
@@ -350,9 +385,11 @@
     ensureModules();
     v.shown = v.rows.filter(inTenor);
     foot.textContent = footText(v, chosen);
-    renderPlan(v.rows);
-    if (!v.rows.length && priceable.length && v.screened > 0) {
-      mods.empty = "Nothing on " + priceable.join(", ") + " clears the liquidity gates right now. " + v.screened + " quoted contracts were screened.";
+    renderPlan(v.shown);
+    const off = basisLines(priceable.filter((s0) => mismatched(book.get(s0).payload)), true);
+    if (!v.rows.length && off.length) mods.empty = off.join(" ");
+    else if (!v.rows.length && priceable.length && v.screened > 0) {
+      mods.empty = T("e-gate", { who: priceable.join(", "), n: v.screened });
     } else mods.empty = null;
     renderList();
     drawScatter();
@@ -365,27 +402,32 @@
     if (!v.rows.length) return "";
     const dropped = Object.entries(v.gated).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).map(([k, n]) => n + " " + reasonWord(k));
     const cut = chosen.filter((s0) => { const p = (book.get(s0) || {}).payload; return p && p.truncated; });
-    const universe = cut.length ? v.priced + " of at least " + v.screened + " quoted contracts are sellable" : v.priced + " of " + v.screened + " quoted contracts are sellable";
-    const unc = v.uncounted.length ? " " + v.uncounted.join(", ") + " " + (v.uncounted.length === 1 ? "is" : "are") + " outside those two numbers: " + (v.uncounted.length === 1 ? "that payload" : "those payloads") + " did not say how many contracts were screened or how many are sellable, and a count this page never received is not a count of nought." : "";
+    const one = (n, a, b) => (n === 1 ? a : b);
     const below = v.slices.reduce((t, c) => t + (c.sell - c.kept), 0);
-    const slice = v.slices.length ? " This list is a slice: " + v.slices.map((c) => c.sym + " shows its top " + fmtInt(c.kept) + " of " + fmtInt(c.sell) + " sellable lines, ranked by " + rankWord(c.rankedBy)).join("; ") +
-      " — " + fmtInt(below) + (below === 1 ? " line" : " lines") + " below the cut " + (below === 1 ? "is" : "are") + " not on this list, and re-sorting the ones that are cannot bring them back — so changing the ranking refetches " + (v.slices.length === 1 ? "this name" : "these names") + " rather than reordering what is already here." : "";
-    return universe + (dropped.length ? ". The rest fail a gate: " + dropped.join(", ") + " — each counted once, under the first gate it failed." : ".") + unc + slice +
-      (cut.length ? " " + cut.join(", ") + " " + (cut.length === 1 ? "has" : "have") + " more contracts than this desk fetches, so " + (cut.length === 1 ? "its" : "their") + " ranking is taken over a partial chain." : "");
+    return T("f-uni", { p: v.priced, s: v.screened, least: cut.length ? "at least " : "" }) + (dropped.length ? ". " + T("f-gate", { list: dropped.join(", ") }) : ".") +
+      (v.uncounted.length ? " " + T("f-unc", { who: v.uncounted.join(", "), is: one(v.uncounted.length, "is", "are"), that: one(v.uncounted.length, "that payload", "those payloads") }) : "") +
+      (v.slices.length ? " " + T("f-slice", { parts: v.slices.map((c) => T("f-part", { sym: c.sym, kept: fmtInt(c.kept), sell: fmtInt(c.sell), by: rankWord(c.rankedBy) })).join("; "), n: fmtInt(below), lines: one(below, "line", "lines"), is: one(below, "is", "are"), names: one(v.slices.length, "this name", "these names") }) : "") +
+      (cut.length ? " " + T("f-cut", { who: cut.join(", "), has: one(cut.length, "has", "have"), its: one(cut.length, "its", "their") }) : "");
   }
 
   function rankWord(k) {
     const r = RANKS.find(([x]) => x === k);
-    return k === null || k === undefined ? "an ordering the payload did not name" : r ? r[1].toLowerCase().replace("annualised", "annualised") : String(k);
+    return k === null || k === undefined ? "an ordering the payload did not name" : r ? r[1].toLowerCase() : String(k);
   }
   function reasonWord(r) {
-    return { spread: "too wide", openInterest: "too thin", premium: "paying too little", expiry: "outside the tenor window", strategy: "on the other side", unpriceable: "with no quotable bid" }[r] || r;
+    return { spread: "too wide", openInterest: "too thin", premium: "paying too little", expiry: "outside the tenor window", strategy: "on the other side", unpriceable: "with no quotable bid", offMarket: "with an ask below intrinsic value" }[r] || r;
   }
-  const intrinsicOf = (r) => {
-    const S = isNum(r.__spot), k = isNum(r.strike);
-    if (S === null || k === null) return 0;
-    return Math.max(0, r.strategy === "csp" ? k - S : r.strategy === "cc" ? S - k : 0) * LOT;
-  };
+  const intrinsicOf = (r) => shareIntrinsic(r, isNum(r.__spot)) * LOT;
+
+  function basisLines(syms, mismatchOnly) {
+    const out = [];
+    for (const sym of syms) {
+      const b = basisOf((book.get(sym) || {}).payload);
+      if (!b || (b.status !== "mismatch" && (mismatchOnly || b.status !== "rebased"))) continue;
+      out.push(T(b.status === "rebased" ? "basis-rebased" : "basis-mismatch", { sym, spot: fmt2(b.spot), print: fmt2(b.printSpot), note: b.printNote ? " (" + String(b.printNote).replace(/\.$/, "") + ")" : "" }));
+    }
+    return out;
+  }
 
   function renderPlan(rows) {
     const plan = mods.plan;
@@ -393,7 +435,7 @@
     if (buyingPower === null || !rows.length) {
       plan.hidden = true;
       plan.replaceChildren();
-      mods.best.append(h("p", { class: "dk-hint" }, buyingPower === null ? "Enter a balance to size every line." : ""));
+      mods.best.append(h("p", { class: "dk-hint" }, buyingPower === null ? T(bpBad ? "bp-bad" : "bp-ask") : ""));
       return;
     }
     let best = null, affordable = 0;
@@ -408,16 +450,13 @@
     if (!best) {
       let cheapest = null;
       for (const r of rows) { const c = isNum(r.collateral); if (c !== null && (cheapest === null || c < cheapest)) cheapest = c; }
-      sentence = fmtMoney(buyingPower) + " does not cover a single contract here." + (cheapest === null ? "" : " The cheapest line ties up " + fmtMoney(cheapest) + ".");
+      sentence = T("plan-no", { bp: fmtMoney(buyingPower) }) + (cheapest === null ? "" : " " + T("plan-min", { c: fmtMoney(cheapest) }));
       plan.className = "dk-plan is-empty";
       plan.replaceChildren(UI.metrics([UI.metric("Best line", DASH, { state: { state: "quiet", reason: sentence } })]));
     } else {
       const z = best.__sizing;
-      const sideWord = best.strategy === "cc" ? "covered call" : "cash-secured put";
-      sentence = fmtMoney(buyingPower) + " buying power · " + affordable + " of " + rows.length + " lines affordable · best single deployment: " + z.contracts + "× " +
-        (best.ticker || "?") + " " + fmt2(best.strike) + " " + sideWord + " expiring " + (best.expiry || "?") + " collects " + fmtMoney(z.collectible) + ", deploying " +
-        fmtMoney(z.deployed) + " and leaving " + fmtMoney(z.idle) + " idle (" + fmtPct(z.yieldOnDeployed, 2) + " on capital committed). Best means the largest gross premium one line collects — not annualised and not risk-adjusted, so it favours the longest tenor" +
-        (intrinsicOf(best) > 0 ? " and, here, an in-the-money strike whose premium is partly intrinsic value" : "") + "; the list ranks by " + rankWord(rank) + ".";
+      const sideWord = best.strategy === "cc" ? "buy-write covered call" : "cash-secured put";
+      sentence = T("plan", { bp: fmtMoney(buyingPower), a: affordable, m: rows.length, n: z.contracts, t: best.ticker || "?", k: fmt2(best.strike), w: sideWord, e: best.expiry || "?", c: fmtMoney(z.collectible), d: fmtMoney(z.deployed), i: fmtMoney(z.idle), y: fmtPct(z.yieldOnDeployed, 2), itm: intrinsicOf(best) > 0 ? " " + T("plan-itm") : "", by: rankWord(rank) });
       plan.className = "dk-plan";
       plan.replaceChildren(
         h("div", { class: "dk-plan-h" }, h("span", null, "Best deployment"), UI.infoButton("the best deployment", () => ({ title: "Best deployment", lead: sentence }), { small: true })),
@@ -441,13 +480,13 @@
     const box = mods.list;
     box.replaceChildren();
     if (!rows.length) {
-      box.append(UI.silent(mods.empty ? { state: "quiet", reason: mods.empty } : inflight ? { state: "pending", reason: "Pricing…" } : { state: "quiet", reason: view.rows.length ? "No line on the desk expires inside this window." : book.size ? "Select a symbol to price it." : "Add a symbol to price its option sales." }, "Lines", 120));
+      box.append(UI.silent(inflight && !mods.empty ? { state: "pending", reason: "Pricing…" } : { state: "quiet", reason: mods.empty || T(view.rows.length ? "e-win" : book.size ? "e-sel" : "e-add") }, "Lines", 120));
       mods.more.hidden = true;
       return;
     }
     const limit = mods.open ? rows.length : SHOWN;
     box.classList.toggle("has-col", buyingPower !== null);
-    box.append(h("div", { class: "dk-head", "aria-hidden": "true" }, ["", "Line", "Ann.", "Premium", "Implied", "Real world", "EV", buyingPower === null ? null : "Collect", ""].filter((x) => x !== null).map((x) => h("span", null, x))));
+    box.append(h("div", { class: "dk-head", "aria-hidden": "true" }, ["", "Line", "Ann.", "Premium", WIN_Q, WIN_P, "EV", buyingPower === null ? null : "Collect", ""].filter((x) => x !== null).map((x) => h("span", null, x))));
     rows.forEach((r, i) => { const n = rowFor(r, i); if (i >= limit) n.hidden = true; box.append(n); });
     mods.more.hidden = rows.length <= SHOWN;
     mods.more.setAttribute("aria-expanded", String(!!mods.open));
@@ -469,9 +508,10 @@
     const z = r.__sizing;
     const cell = (cls, label, text, tone, title) => h("span", { class: "dk-c " + cls, "data-tone": tone || null, title: title || null }, h("small", null, label), text);
     const pq = popQ(r), pp = popP(r), ev = evP(r);
-    const collect = buyingPower === null ? null : !z ? cell("dk-col", "Collect", DASH, null, "This line has no quotable collateral or premium to size against.")
-      : !z.affordable ? cell("dk-col is-unaffordable", "Collect", "$0", "silent", "One contract ties up " + fmtMoney(r.collateral) + ", which is more than " + fmtMoney(buyingPower) + ". Nothing to collect here.")
-        : cell("dk-col", "Collect", fmtMoney(z.collectible) + " (" + z.contracts + "×)", "up", z.contracts + " contract" + (z.contracts === 1 ? "" : "s") + " at " + fmtMoney(r.premium) + " each. Deploys " + fmtMoney(z.deployed) + " of " + fmtMoney(buyingPower) + ", leaving " + fmtMoney(z.idle) + " idle — a return of " + fmtPct(z.yieldOnDeployed, 2) + " on the capital actually committed.");
+    const noEng = r.__eng ? null : r.__why || T("why-eng"), noLaw = r.__eng && pp === null ? lawNote(r) : null;
+    const collect = buyingPower === null ? null : !z ? cell("dk-col", "Collect", DASH, null, T("col-none"))
+      : !z.affordable ? cell("dk-col is-unaffordable", "Collect", "$0", "silent", T("col-no", { c: fmtMoney(r.collateral), b: fmtMoney(buyingPower) }))
+        : cell("dk-col", "Collect", fmtMoney(z.collectible) + " (" + z.contracts + "×)", "up", T("col-ok", { n: z.contracts, s: z.contracts === 1 ? "" : "s", p: fmtMoney(r.premium), d: fmtMoney(z.deployed), b: fmtMoney(buyingPower), i: fmtMoney(z.idle), y: fmtPct(z.yieldOnDeployed, 2) }) + (r.strategy === "cc" ? " " + T("cc-size") : ""));
     const itm = intrinsicOf(r) > 0;
     return h("div", {
       class: "dk-row" + (itm ? " is-itm" : ""), role: "listitem", "data-t": r.ticker, "data-strike": String(r.strike), "data-strategy": r.strategy, "data-expiry": r.expiry,
@@ -480,51 +520,56 @@
     },
     h("span", { class: "ui-badge", "data-tone": r.strategy === "cc" ? "up" : "down", "aria-label": r.strategy === "cc" ? "Covered call" : "Cash-secured put" }, r.strategy === "cc" ? "C" : "P"),
     h("span", { class: "dk-main" },
-      h("a", { class: "dk-t", href: "/flows/ticker/?t=" + encodeURIComponent(r.ticker), title: "Open " + r.ticker + " on the analysis page. Cards are built only for the names on today's board; if this one is not among them the page says so." }, r.ticker),
-      h("a", { class: "dk-k", href: labHref(r), "aria-label": "Open the " + r.ticker + " " + kf(r.strike) + " " + (r.strategy === "cc" ? "covered call" : "cash-secured put") + " expiring " + r.expiry + " in the strategy lab" },
+      h("a", { class: "dk-t", href: "/flows/ticker/?t=" + encodeURIComponent(r.ticker), title: T("t-link", { t: r.ticker }) }, r.ticker),
+      h("a", { class: "dk-k", href: labHref(r), "aria-label": T("lab-a", { t: r.ticker, k: kf(r.strike), w: r.strategy === "cc" ? "covered call" : "cash-secured put", e: r.expiry }) },
         h("b", null, kf(r.strike)), h("span", null, r.strategy === "cc" ? "call" : "put")),
-      earn === "crosses" ? h("span", { class: "dk-earn", role: "img", "aria-label": "Expires after the next earnings report: the cushion on this line is a diffusion number priced against a jump.", title: "Expires after the next earnings report. The cushion on this line is a diffusion number priced against a jump." }, glyph("cal")) : null,
-      earn === "unknown" ? h("span", { class: "dk-earn is-unknown", role: "img", "aria-label": "Whether this contract outlives the next earnings report could not be determined. Treat the cushion with that in mind.", title: "Whether this contract outlives the next earnings report could not be determined." }, glyph("pending")) : null,
+      earn === "clear" ? null : h("span", { class: "dk-earn" + (earn === "unknown" ? " is-unknown" : ""), role: "img", "aria-label": T("earn-" + earn), title: T("earn-" + earn) }, glyph(earn === "crosses" ? "cal" : "pending")),
       h("span", { class: "dk-meta" }, F.day(r.expiry) + " · " + r.days + "d" + (away ? " · " + away : ""))),
     h("span", { class: "dk-cells" },
-      cell("dk-ann", "Ann.", fmtPct(r.annualized, 0), itm ? "silent" : null),
+      cell("dk-ann", "Ann.", fmtPct(r.annualized, 0), null, T("t-ann")),
       h("span", { class: "dk-c dk-prem" }, h("small", null, "Premium"), fmtMoney(r.premium), h("em", { class: "dk-sub" }, "on " + fmtMoney(r.collateral))),
-      cell("dk-pq", "Implied", pq === null ? DASH : fmtPct(pq, 0)),
-      cell("dk-pp", "Real world", pp === null ? DASH : fmtPct(pp, 0)),
-      cell("dk-ev", "EV", ev === null ? DASH : usd(ev), ev === null ? "silent" : ev > 0 ? "up" : ev < 0 ? "down" : null),
+      cell("dk-pq", WIN_Q, pq === null ? DASH : fmtPct(pq, 0), null, noEng || T("t-pq")),
+      cell("dk-pp", WIN_P, pp === null ? DASH : fmtPct(pp, 0), null, noEng || noLaw || T("t-pp")),
+      cell("dk-ev", "EV", ev === null ? DASH : usd(ev), ev === null ? "silent" : ev > 0 ? "up" : ev < 0 ? "down" : null, noEng || noLaw || T("t-ev")),
       collect),
     UI.infoButton(r.ticker + " " + kf(r.strike) + " " + (r.strategy === "cc" ? "call" : "put"), () => rowInfo(r), { small: true }));
   }
 
+  const lawNote = (r) => (r.__law ? "No real-world figure: " + r.__law + "." : null);
+
   function rowInfo(r) {
-    const e = r.__eng;
+    const e = r.__eng, leg = shortLeg(r);
     const m = isNum(r.moneyness), S = isNum(r.__spot);
     const otm = m === null ? null : r.strategy === "csp" ? m < 0 : m > 0;
-    const called = r.strategy === "cc" ? fmtPct(r.assignedReturn, 1) : DASH;
+    const cc = r.strategy === "cc", cap = isNum(r.capSigmas);
     const oi = isNum(r.oi), ch = isNum(r.oiChange);
-    const intr = intrinsicOf(r);
+    const intr = intrinsicOf(r), prem = isNum(r.premium) || 0;
+    const wk = isNum(r.annualized) === null ? null : r.annualized * 7 / 365;
+    const legIv = leg ? isNum(leg.iv) : null, rowIv = isNum(r.iv);
     return {
-      title: r.ticker + " " + kf(r.strike) + " " + (r.strategy === "cc" ? "covered call" : "cash-secured put"), asOf: F.day(r.expiry) + " · " + r.days + "d",
+      title: r.ticker + " " + kf(r.strike) + " " + (cc ? "covered call" : "cash-secured put"), asOf: F.day(r.expiry) + " · " + r.days + "d",
       lead: T("engine"),
       facts: [
         ["Premium", fmtMoney(r.premium) + " at the " + fmt2(r.bid) + " bid"],
-        ["Yield", fmtPct(r.yieldOnCollateral, 2) + " on " + fmtMoney(r.collateral) + (r.strategy === "cc" ? " of shares you already own" : " of cash reserved")],
-        ["Annualised", fmtPct(r.annualized, 0) + " — a convention"],
+        ["Yield", fmtPct(r.yieldOnCollateral, 2) + " on " + fmtMoney(r.collateral) + (cc ? " of stock bought with the option (100 shares, a buy-write)" : " of cash reserved (cash-secured)")],
+        ["Annualised", fmtPct(r.annualized, 0) + " on time value — a convention"],
+        ["Gross annualised", isNum(r.annualizedGross) === null ? null : fmtPct(r.annualizedGross, 0) + " on the whole premium, intrinsic value included"],
+        ["Per week", wk === null ? null : fmtPct(wk, 2) + " of time value, scaled to seven days"],
         ["Distance", m === null ? DASH : Math.abs(m) < 5e-5 ? "at the money" : fmtPct(Math.abs(m), 1) + " " + (m < 0 ? "below" : "above") + " spot" + (S === null ? "" : " of " + fmt2(S)) + ", " + (otm ? "out of" : "in") + " the money"],
-        ["Cushion", fmtSd(r.cushionSigmas) + (r.ivTraded === false ? " · this contract has not traded today, so its implied volatility is the last transaction's, of unknown age" : "")],
+        ["Cushion", fmtSd(r.cushionSigmas) + (rowIv === null ? "" : " on " + fmtPct(rowIv, 1) + " volatility") + (r.ivTraded === false ? " · " + T("iv-old") : "")],
+        ["Volatility", legIv === null ? null : fmtPct(legIv, 1) + " inverted from the mid, for delta, win % and EV" + (rowIv !== null && Math.abs(rowIv - legIv) > 0.005 ? " · " + fmtPct(rowIv, 1) + " on the row, for the cushion" : "")],
         ["Breakeven", fmt2(r.breakeven)],
-        ["If called", r.strategy === "cc" ? called + (isNum(r.capSigmas) !== null ? " · the market has to run " + fmtSd(r.capSigmas) + " to get there" : "") : DASH + " · a cash-secured put has no upside cap; its best case is keeping the premium"],
+        ["If called", cc ? fmtPct(r.assignedReturn, 1) + (cap === null ? "" : cap < 0 ? " · already through the strike" : " · the market has to run " + fmtSd(cap) + " to get there") : DASH + " · " + T("no-cap")],
         ["Spread", fmtPct(r.spread, 1) + " of the mid"],
         ["Open interest", oi === null ? DASH : fmtInt(oi) + (ch ? " (" + sg(ch) + fmtInt(Math.abs(ch)) + ")" : "")],
         ["Earnings", r.crossesEarnings === true ? "Expires after the next report" : r.crossesEarnings === null ? "Not determined" : "No report before expiry"],
         ["Chance of profit", e ? fmtPct(e.prob.popQ, 1) + " implied · " + (e.prob.popP === null ? DASH : fmtPct(e.prob.popP, 1)) + " real world" : DASH],
-        ["Expected value", e ? usd(e.ev.q) + " implied · " + (e.ev.p === null ? DASH : usd(e.ev.p)) + " real world" : DASH],
-        ["Delta", e ? fmt2(shortDelta(r)) : DASH],
-        ["Capital", e ? fmtMoney(e.capital.value) + " · " + e.capital.kind : DASH],
+        ["Expected value", e ? usd(e.ev.q) + " implied · " + (e.ev.p === null ? DASH : usd(e.ev.p)) + " real world, per contract at the bid" : DASH],
+        ["Delta", e ? fmt2(shortDelta(r)) + " on the short option · " + fmt2(netOf(r)) + " net exposure to the stock" : DASH],
         ["Grade", e ? e.grade + " of 3" + (e.gradeWhy.length ? " · " + e.gradeWhy.join(", ") : "") : DASH],
       ],
-      notes: [intr > 0 ? "Includes " + fmtMoney(intr) + " of intrinsic value, which assignment returns rather than keeps; the time value is " + fmtMoney(Math.max(0, (isNum(r.premium) || 0) - intr)) + "." : null,
-        e ? null : r.__why || null, e && e.prob.popP === null && r.__law ? "No real-world figure: " + r.__law + "." : null, T("annualized"), T("cushion")],
+      notes: [intr > 0 ? T(prem + 1 < intr ? "int-below" : "int-in", { i: fmtMoney(intr), t: fmtMoney(Math.max(0, prem - intr)) }) : null,
+        e ? null : r.__why || null, e && e.prob.popP === null ? lawNote(r) : null, T("annualized"), T("cushion")],
     };
   }
 
@@ -532,22 +577,13 @@
   function focusPoint(r) { focused = r; drawScatter(true); }
   function drawScatter(quick) { if (mods.chart) { mods.quick = !!quick; mods.chart.redraw(false); } }
 
-  function frontierOf(pts) {
-    const sorted = pts.slice().sort((a, b) => a.x - b.x || b.y - a.y);
-    const out = [];
-    let best = -Infinity;
-    if (axis === 0) { for (const p of sorted) if (p.y > best + 1e-12) { out.push(p); best = p.y; } }
-    else { for (let i = sorted.length - 1; i >= 0; i--) if (sorted[i].y > best + 1e-12) { out.unshift(sorted[i]); best = sorted[i].y; } }
-    return out;
-  }
-
   function drawScatterInto(host, w, animate) {
     const rows = (view.shown || []).filter((r) => r.__eng);
     const phone = w < 600;
     const H = phone ? 240 : 300;
     mods.legend.replaceChildren();
-    if (!rows.length) { host.append(UI.silent(inflight ? { state: "pending", reason: "Pricing the desk…" } : { state: "quiet", reason: view.rows.length ? "No line on the desk expires inside this window." : book.size ? "Select a symbol to see its lines." : "Add a symbol to see its option sales on the frontier." }, "Frontier", book.size ? H : 180)); return; }
-    const xOf = axis === 0 ? shortDelta : popQ;
+    if (!rows.length) { host.append(UI.silent(inflight && !mods.empty ? { state: "pending", reason: "Pricing the desk…" } : { state: "quiet", reason: mods.empty || T(view.rows.length ? "e-win" : book.size ? "e-sel" : "e-add") }, "Frontier", book.size ? H : 180)); return; }
+    const xOf = axis === 0 ? netOf : popQ;
     const pts = rows.map((r) => ({ r, x: xOf(r), y: isNum(r.annualized) })).filter((p) => p.x !== null && p.y !== null);
     if (!pts.length) { host.append(UI.silent({ state: "withheld", reason: "No line carries both a risk reading and a yield." }, "Frontier", H)); return; }
     const ys = pts.map((p) => p.y).sort((a, b) => a - b);
@@ -559,21 +595,21 @@
     const y = (v) => yl(Math.sqrt(Math.max(0, v)));
     const box = h("div", { class: "tl-scrub" });
     host.append(box);
-    const svg = C.svgRoot(box, w, H, animate && !mods.quick, "Annualised yield against " + (axis === 0 ? "delta" : "the implied chance of profit") + " for " + pts.length + " lines");
+    const svg = C.svgRoot(box, w, H, animate && !mods.quick, "Annualised yield, square-root scale, against " + (axis === 0 ? "net delta" : "the implied chance of profit") + " for " + pts.length + " lines");
     s("line", { x1: left, x2: w - right, y1: H - bottom, y2: H - bottom, class: "base" }, svg);
     let lastY = Infinity;
-    for (const t of [0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32]) {
+    for (const t of [0, 0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32]) {
       if (t > cap || lastY - y(t) < 40) continue;
       lastY = y(t);
       s("text", { x: left - 8, y: y(t) + 4, text: Math.round(t * 100) + "%", "text-anchor": "end" }, svg);
     }
-    s("text", { x: 2, y: 11, text: "Ann. yield", class: "tx-3" }, svg);
+    s("text", { x: 2, y: 11, text: "Ann. yield, square-root scale", class: "tx-3" }, svg);
     for (const t of C.niceTicks(x0, x1, phone ? 4 : 6)) {
       if (x(t) < left + 8 || x(t) > w - right - 8) continue;
       s("text", { x: x(t), y: H - 7, text: axis === 0 ? t.toFixed(2).replace(/^0/, "") : Math.round(t * 100) + "%", "text-anchor": "middle" }, svg);
     }
-    s("text", { x: w - right, y: H - bottom - 6, text: axis === 0 ? "Delta" : "Chance", "text-anchor": "end", class: "tx-3" }, svg);
-    const fr = frontierOf(pts);
+    s("text", { x: w - right, y: H - bottom - 6, text: axis === 0 ? "Net delta" : WIN_Q, "text-anchor": "end", class: "tx-3" }, svg);
+    const fr = frontierOf(pts, axis === 1);
     const frSet = new Set(fr);
     if (fr.length > 1) {
       const P = fr.map((p) => [x(p.x), y(Math.min(p.y, cap))]);
@@ -604,7 +640,7 @@
       if (!p) { readout.classList.remove("is-on"); return; }
       const r = p.r;
       readout.replaceChildren(C.part(r.ticker + " " + kf(r.strike) + (r.strategy === "cc" ? " call" : " put"), null), C.part(F.day(r.expiry), "k"),
-        h("b", null, fmtPct(r.annualized, 0)), C.part(axis === 0 ? "Δ " + fmt2(p.x) : fmtPct(p.x, 0), "k"),
+        h("b", null, fmtPct(r.annualized, 0)), C.part(axis === 0 ? "Net Δ " + fmt2(p.x) : fmtPct(p.x, 0), "k"),
         popP(r) === null ? null : C.part("Real " + fmtPct(popP(r), 0), "k"));
       readout.classList.add("is-on");
       const rw = readout.offsetWidth;
@@ -628,7 +664,7 @@
       show(fr[idx], true);
     });
     if (focused) { const p = pts.find((q) => q.r === focused); if (p) show(p); }
-    mods.legend.replaceChildren(UI.legend([...syms.map((sym) => [colorOf(sym), "dot", sym]), ["--label-2", "dot", "Put"], ["--label-2", "dia", "Call"], ["--label-1", "ln", "Frontier"]]));
+    mods.legend.replaceChildren(UI.legend([...syms.map((sym) => [colorOf(sym), "dot", sym]), ["--label-2", "dot", "Put"], ["--label-2", "dia", "Call"], ["--label-1", "ln", "Frontier"]]), ...(view.shown.length > pts.length ? [h("p", { class: "dk-hint" }, T("unplotted", { n: view.shown.length - pts.length }))] : []));
     mods.quick = false;
   }
 
@@ -691,7 +727,7 @@
       const x = labelW + j * colW + colW / 2;
       const crosses = earn.has(e.expiry) ? earn.get(e.expiry) : undefined;
       const g = s("g", { class: "ivs-colhead" }, svg);
-      s("title", { text: e.expiry + (e.days === null ? "" : ", " + e.days + " days") + ". " + (crosses === true ? "Contracts on this expiry outlive the next earnings report — the level here is priced against a jump, not a diffusion." : crosses === false ? "No earnings report falls before this expiry." : "Whether this expiry outlives the next earnings report is not determined: no contract on it survived the sale gates, so nothing on this column was dated.") }, g);
+      s("title", { text: e.expiry + (e.days === null ? "" : ", " + e.days + " days") + ". " + T(crosses === true ? "sm-ex" : crosses === false ? "sm-ex0" : "sm-exu") }, g);
       s("text", { class: "ivs-exp" + (crosses === true ? " crosses-earnings" : ""), x, y: padT - 18, "text-anchor": "middle", text: F.day(e.expiry) + (crosses === true ? " ⚠" : "") }, g);
       s("text", { class: "ivs-days", x, y: padT - 6, "text-anchor": "middle", text: e.days === null ? DASH : e.days + "d" }, g);
     });
@@ -746,7 +782,7 @@
       const x = labelW + j * colW + colW / 2;
       const v = levels[j];
       const g = s("g", { class: "ivs-levelgroup" }, svg);
-      s("title", { text: v === null ? e.expiry + " has no at-the-money level: " + (e.atmReason || "not measurable") + "." : e.expiry + " at the money: " + fmtVol(v) + "% implied, from the " + e.atmStrike + " " + (e.atmType === "P" ? "put" : "call") + " — " + fmtM(e.atmM) + " from spot and traded today." }, g);
+      s("title", { text: v === null ? T("sm-lv0", { e: e.expiry, r: e.atmReason || "not measurable" }) : T("sm-lv", { e: e.expiry, v: fmtVol(v), k: e.atmStrike, w: e.atmType === "P" ? "put" : "call", m: fmtM(e.atmM) }) }, g);
       s("text", { class: "ivs-level" + (v === null ? " is-missing" : ""), x, y: termT + bandH + 19, "text-anchor": "middle", text: v === null ? DASH : fmtVol(v) }, g);
       if (v === null) return;
       s("circle", { class: "ivs-dot", cx: x, cy: yOf(v), r: 3 }, svg);
@@ -756,20 +792,20 @@
   }
 
   function cellTitle(cell, e, sf) {
-    const parts = [cell.strike + " " + (cell.type === "P" ? "put" : "call") + " " + cell.expiry + " · " + fmtM(cell.m) + " from the money · " + fmtVol(cell.iv) + "% implied"];
+    const parts = [cell.strike + " " + (cell.type === "P" ? "put" : "call") + " " + cell.expiry + " · " + fmtM(cell.m) + " from the money · " + fmtVol(cell.iv) + "% vendor volatility"];
     parts.push(isNum(cell.skew) !== null ? fmtSkew(cell.skew) + " vol points against this expiry's at-the-money " + fmtVol(e.atmIv) + "%" : "No skew: " + (e.atmReason || "this expiry has no at-the-money level"));
     if (cell.traded === false) parts.push(T("sm-untraded"));
     else if (cell.traded === null) parts.push(T("sm-novol"));
     else parts.push("Traded " + fmtInt(cell.volume) + " today" + (cell.oi === null ? "" : ", open interest " + fmtInt(cell.oi)) + ".");
     if (cell.crowd > 1) parts.push(cell.crowd + " " + T("sm-crowd"));
-    if (isNum(cell.skew) !== null && isNum(sf.skewCap) !== null && Math.abs(cell.skew) > sf.skewCap) parts.push("Past the shade cap of " + fmtSkew(sf.skewCap) + " vol points, so the shade understates it. Marked with a slash.");
+    if (isNum(cell.skew) !== null && isNum(sf.skewCap) !== null && Math.abs(cell.skew) > sf.skewCap) parts.push(T("sm-past", { c: fmtSkew(sf.skewCap) }));
     return parts.join(". ").replace(/\.\./g, ".");
   }
 
   function surfaceAria(sf, p) {
     const levels = sf.expiries.map((e) => F.day(e.expiry) + " " + (isNum(e.atmIv) === null ? "no level" : fmtVol(e.atmIv) + " percent"));
     return "Implied volatility surface for " + (p && p.ticker ? p.ticker : surfaceSymbol) + ": " + sf.expiriesShown + " expiries by " + sf.rowsShown +
-      " moneyness bands. At-the-money implied volatility by expiry — " + levels.join(", ") + ". Shade is each contract's implied volatility against its own expiry's at-the-money quote.";
+      " moneyness bands. At-the-money implied volatility by expiry — " + levels.join(", ") + ". Shade is each contract's implied volatility against its own expiry's at-the-money quote. Every volatility here is the vendor's last-transaction figure.";
   }
 
   function surfaceNotes(sf, p) {
@@ -777,7 +813,7 @@
     bits.push("Rows are log-moneyness, ln(strike ÷ spot), in bands " + (sf.step * 100).toFixed(1) + "% wide; columns are expiries, nearest first.");
     bits.push((smileNumbers ? T("sm-num") : T("sm-narrow")) + " " +
       T("sm-shade"));
-    bits.push("At the money: " + sf.expiries.map((e) => F.day(e.expiry) + " " + (isNum(e.atmIv) === null ? DASH : fmtVol(e.atmIv) + "%")).join(", ") + ".");
+    bits.push("At the money, on the vendor's last-transaction volatility: " + sf.expiries.map((e) => F.day(e.expiry) + " " + (isNum(e.atmIv) === null ? DASH : fmtVol(e.atmIv) + "%")).join(", ") + ".");
     const noLevel = sf.expiries.filter((e) => isNum(e.atmIv) === null);
     if (noLevel.length) bits.push(noLevel.map((e) => F.day(e.expiry) + " has no level — " + e.atmReason).join("; ") + ". " + T("sm-nolevel"));
     const aged = [];
@@ -785,8 +821,8 @@
     if (sf.unknownAge > 0) aged.push(sf.unknownAge + " carr" + (sf.unknownAge === 1 ? "ies" : "y") + " no volume at all");
     bits.push(T("sm-last") + " " + sf.fresh + " of " + sf.placed + " cells traded today" +
       (aged.length === 0 ? " — " + T("sm-fresh") : "; " + aged.join(" and ") + ", " + T("sm-aged")));
-    if (sf.crowded > 0) bits.push(sf.crowded === 1 ? "One contract shares a row with another; the cell shows one quoted contract and is never an average of two." : sf.crowded + " contracts share a row with another; each cell shows one quoted contract and is never an average of two.");
-    if (sf.clipped > 0) bits.push("The shade is capped at " + fmtSkew(sf.skewCap) + " vol points; " + sf.clipped + " cell" + (sf.clipped === 1 ? " runs" : "s run") + " past it and " + (sf.clipped === 1 ? "is" : "are") + " marked with a slash.");
+    if (sf.crowded > 0) bits.push(T(sf.crowded === 1 ? "sm-c1" : "sm-cn", { n: sf.crowded }));
+    if (sf.clipped > 0) bits.push(T("sm-cap", { c: fmtSkew(sf.skewCap), n: sf.clipped, s: sf.clipped === 1 ? " runs" : "s run", is: sf.clipped === 1 ? "is" : "are" }));
     const win = [];
     if (sf.expiriesShown < sf.expiriesTotal) win.push(sf.expiriesShown + " of " + sf.expiriesTotal + " expiries");
     if (sf.rowsShown < sf.rowsTotal) win.push(sf.rowsShown + " of " + sf.rowsTotal + " moneyness bands");
@@ -829,8 +865,8 @@
       if (oldest === null || a > oldest) oldest = a;
     }
     const age = oldest === null ? "" : " · quotes " + fmtAge(oldest);
-    const unagedNote = unaged ? " · " + (unaged === 1 ? "one symbol's quote age was not stated by the route" : unaged + " symbols' quote ages were not stated by the route") : "";
-    const staleQuotes = oldest !== null && oldest > QUOTE_STALE_SECONDS ? "Quotes are older than this desk will call a price, so treat the list as a record of the market rather than one you can trade; Refresh requotes it." : "";
+    const unagedNote = unaged ? " · " + T(unaged === 1 ? "unaged1" : "unagedN", { n: unaged }) : "";
+    const staleQuotes = oldest !== null && oldest > QUOTE_STALE_SECONDS ? T("stale-q") : "";
     const sessions = new Set(), stale = [], earnBits = [];
     for (const sym of chosen) {
       const p = (book.get(sym) || {}).payload;
@@ -844,11 +880,12 @@
         earnBits.push(sym + (etf ? " has no earnings (" + e.issueType + ")" : " has no known earnings date"));
       } else earnBits.push(sym + " reports " + String(e.date).slice(5) + " — " + (crossing ? crossing + " of " + (p.rows || []).length + " lines expire after it" : "no line expires after it"));
     }
+    const basis = basisLines(chosen);
     const session = sessions.size === 1 ? " · " + [...sessions][0] + " session" : "";
     const staleNote = stale.length ? " · " + stale.join(", ") + " priced off the last close, not a live print" : "";
-    const lines = [(failed.length ? chosen.length - failed.length + " of " + chosen.length + " symbols priced · " + failed.join(", ") + " unavailable" : chosen.length + " symbol" + (chosen.length === 1 ? "" : "s") + " priced") + session + age + unagedNote + staleNote, staleQuotes, earnBits.join(" · ")];
+    const lines = [(failed.length ? chosen.length - failed.length + " of " + chosen.length + " symbols priced · " + failed.join(", ") + " unavailable" : chosen.length + " symbol" + (chosen.length === 1 ? "" : "s") + " priced") + session + age + unagedNote + staleNote, ...basis, staleQuotes, earnBits.join(" · ")];
     statusEl.replaceChildren(...lines.filter(Boolean).map((t) => h("span", { class: "flows-status-l" }, t)));
-    statusEl.classList.toggle("visually-hidden", !(failed.length || staleQuotes || stale.length));
+    statusEl.classList.toggle("visually-hidden", !(failed.length || staleQuotes || stale.length || basis.length));
   }
 
   function tickAges() {
@@ -888,7 +925,7 @@
     if (!need.length) say(wanted.length === 1 ? wanted[0] + " is already on the desk." : "Already on the desk.");
     else if (added.length < need.length) {
       const dropped = need.filter((w) => !book.has(w));
-      say("The desk holds " + MAX_SYMBOLS + " symbols; each one is a live lookup. " + (dropped.length ? "Not added: " + dropped.join(", ") + ". " : "") + "Remove one to add another.");
+      say(T("full", { n: MAX_SYMBOLS, dropped: dropped.length ? "Not added: " + dropped.join(", ") + ". " : "" }));
     }
   });
 
@@ -917,14 +954,15 @@
 
   function applyBuyingPower(raw) {
     const next = parseBuyingPower(raw);
-    const changed = next !== buyingPower;
+    const dirty = String(raw || "").trim().length > 0, bad = dirty && next === null;
+    const changed = next !== buyingPower || bad !== bpBad;
     buyingPower = next;
+    bpBad = bad;
     const bp = mods.bp;
-    if (mods.bpClear) mods.bpClear.hidden = !String(raw || "").trim();
+    if (mods.bpClear) mods.bpClear.hidden = !dirty;
     if (bp) {
-      const dirty = String(raw || "").trim().length > 0;
-      bp.classList.toggle("is-invalid", dirty && next === null);
-      bp.setAttribute("aria-invalid", dirty && next === null ? "true" : "false");
+      bp.classList.toggle("is-invalid", bad);
+      bp.setAttribute("aria-invalid", bad ? "true" : "false");
     }
     if (buyingPower === null && rank === "collectible") { rank = "annualized"; if (mods.rankSel) mods.rankSel.value = rank; }
     if (changed) { writeURL(); render(); }
