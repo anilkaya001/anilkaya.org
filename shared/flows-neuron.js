@@ -57,6 +57,13 @@ export const STATE_STRUCTURES = Object.freeze({
   undetermined: { preferred: ["no position"], avoid: [] },
 });
 
+export function structuresForState(state, direction, prem) {
+  return state === "pinned" ? STATE_STRUCTURES.pinned[prem]
+    : state === "squeeze" || state === "amplifying"
+      ? (direction === "bullish" ? STATE_STRUCTURES.bull[prem] : direction === "bearish" ? STATE_STRUCTURES.bear[prem] : STATE_STRUCTURES.shortNoSide[prem])
+      : state === "transitional" ? STATE_STRUCTURES.transitional[prem] : STATE_STRUCTURES[state];
+}
+
 const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const str = (v) => (typeof v === "string" && v.trim() ? v.trim() : null);
 const r2 = (v) => (v === null ? null : Number(v.toFixed(2)));
@@ -720,10 +727,7 @@ export function regimeState(card, extras) {
   if (stale) confidence = Math.min(confidence, 1);
   confidence = Math.max(0, Math.min(STATE_CONFIDENCE_MAX, confidence));
   if (state === "undetermined") confidence = 0;
-  const table = state === "pinned" ? STATE_STRUCTURES.pinned[prem]
-    : state === "squeeze" || state === "amplifying"
-      ? (direction === "bullish" ? STATE_STRUCTURES.bull[prem] : direction === "bearish" ? STATE_STRUCTURES.bear[prem] : STATE_STRUCTURES.shortNoSide[prem])
-      : state === "transitional" ? STATE_STRUCTURES.transitional[prem] : STATE_STRUCTURES[state];
+  const table = structuresForState(state, direction, prem);
   const pinnedOut = premium.pinned ? ["long straddle", "long strangle"] : [];
   const preferred = table.preferred.filter((x) => !(direction && state === "transitional" && x === "no position") && !pinnedOut.includes(x));
   if (state === "transitional" && direction) preferred.push(direction === "bullish" ? "call debit spread" : "put debit spread");
