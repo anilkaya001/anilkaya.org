@@ -5,7 +5,7 @@ import {
 } from "./flows-live.js";
 import {
   FRESH_CLASSES, PHASE_MINUTES, LIVE_CLOCK, freshHeaders, pendingHeaders, phaseAt, tier1Due, liveDispatchDue,
-  liveStalled, nightlyDispatchDue, easternDay, easternInstant, sessionOpen, clockClosed, expectedNightlySession,
+  liveStalled, nightlyDispatchDue, easternDay, easternInstant, sessionOpen, sessionClose, clockClosed, expectedNightlySession,
 } from "./flows-freshness.js";
 import { LIVE_OIDC, looksLikeJwt, rsaKeys, verifyLiveOidc, claimsBrief } from "./flows-oidc.js";
 import { focusStripNames } from "./flows-focus.js";
@@ -915,10 +915,16 @@ export async function serveQuote(env, ctx, ticker, now, { build, json }) {
 export const TAPE_LEG_BITS = Object.freeze({ prem: 1, gex: 2 });
 const TAPE_COMPLETE = TAPE_LEG_BITS.prem | TAPE_LEG_BITS.gex;
 
-function tapeTtlMs(phase, row) {
+function tapeCoversClose(phase, readAt, clock) {
+  const close = phase && phase.lastClosed ? sessionClose(phase.lastClosed, clock) : NaN;
+  return Number.isFinite(close) && Number(readAt) >= close - FRESH_CLASSES.tape.cadenceS * 1000;
+}
+
+export function tapeTtlMs(phase, row, clock = null) {
   if (!phase) return 0;
   if (Number(row && row.legs) !== TAPE_COMPLETE) return 0;
   if (phase.phase === "rth") return FRESH_CLASSES.tape.cadenceS * 1000;
+  if (!tapeCoversClose(phase, row && row.read_at, clock)) return 0;
   if (phase.phase === "pre" || phase.phase === "post") return LIVE_BUDGET.tapePreTtlMs;
   const current = row && typeof row.session === "string" && phase.lastClosed && row.session >= phase.lastClosed;
   return current ? Infinity : 0;
@@ -953,16 +959,16 @@ export async function refreshTape(env, ticker, now, { fetchVendor, heldText = nu
   const t = encodeURIComponent(ticker);
   const clock = await cachedClock(env, now);
   const phase = phaseAt(now, clock);
-  const day = phase && phase.session ? phase.session : easternDay(now);
-  const plan = tapeLegFor(heldText, heldLegs, { session: day, rth: !!phase && phase.phase === "rth" });
+  const day = phase && phase.phase !== "rth" && phase.lastClosed ? phase.lastClosed
+    : phase && phase.session ? phase.session : easternDay(now);
+  const plan = tapeLegFor(heldText, heldLegs, { session: day, rth: true });
   let legs;
   let session;
   if (plan.leg === "prem") {
-    const since = phase && phase.phase === "pre" && phase.lastClosed ? phase.lastClosed : day;
     const [ticks, alerts] = await Promise.all([
       withTimeout(fetchVendor(`/api/stock/${t}/net-prem-ticks`, {}), LIVE_BUDGET.tier1TimeoutMs),
       withTimeout(fetchVendor("/api/option-trades/flow-alerts",
-        { ticker_symbol: ticker, newer_than: since, limit: LIVE_BUDGET.alertsPerTape * 2 }), LIVE_BUDGET.tier1TimeoutMs),
+        { ticker_symbol: ticker, newer_than: day, limit: LIVE_BUDGET.alertsPerTape * 2 }), LIVE_BUDGET.tier1TimeoutMs),
     ]);
     session = tapeSession({ ticks }, day);
     legs = shapeTapePrem({ ticks, alerts }, { at: now, session, now });
@@ -1012,7 +1018,7 @@ export async function serveTape(env, ctx, ticker, now, { fetchVendor, json, admi
   const row = firstOf(a), known = admit && admit.known ? firstOf(b) : null;
   const hasPayload = row && typeof row.payload === "string" && row.payload;
   const age = hasPayload ? now - Number(row.read_at) : Infinity;
-  if (hasPayload && age <= tapeTtlMs(phase, row)) return respond(row, "fresh");
+  if (hasPayload && age <= tapeTtlMs(phase, row, clock)) return respond(row, "fresh");
   const usable = hasPayload && (phase && phase.phase === "rth" ? age <= LIVE_BUDGET.tapeUsableMs : true);
   if (!hasPayload && admit && !known && !(await admit.vendor(ticker))) {
     return json({ ticker, status: "absent", why: "unknown" }, 200, { "Cache-Control": "no-store", "X-Tape": "unknown" });
