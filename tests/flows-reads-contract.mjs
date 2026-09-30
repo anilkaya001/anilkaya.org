@@ -121,11 +121,11 @@ async function client(D1, extra = {}) {
   const env = { DB: D1, SESSION_SECRET, FLOWS_CREDENTIALS: JSON.stringify({ [FLOWS_USERNAMES[0]]: "x".repeat(43) }), ...extra };
   const token = await signFlowsSession(FLOWS_USERNAMES[0], env.SESSION_SECRET, 3600, sessionEpoch(env));
   const worker = (await import("../worker.js?reads=" + (++instance))).default;
-  return async (route) => {
+  return async (route, init = {}) => {
     const background = [];
     const ctx = { waitUntil: (p) => background.push(Promise.resolve(p).catch(() => {})) };
     const req = new Request("https://anilkaya.org" + route,
-      { headers: { cookie: FLOWS_COOKIE + "=" + token, "Sec-Fetch-Site": "same-origin" } });
+      { ...init, headers: { cookie: FLOWS_COOKIE + "=" + token, "Sec-Fetch-Site": "same-origin", ...(init.headers || {}) } });
     const res = await worker.fetch(req, env, ctx);
     const text = await res.text();
     let body = null;
@@ -684,9 +684,20 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   const get = await client(f.D1);
   await get("/api/flows/meta");
   W.memoClock({ day: SESSION, closedDays: [] }, Date.now());
-  const cost = async (path) => {
+  for (const key of ["ideas", "movers", "political", "unusual", "record", "sector:trix"]) f.put(key, { ...NIGHTLY, rows: [] });
+  f.put("card-x:NVDA", { ...NIGHTLY, ticker: "NVDA", engine: { v: 1 } });
+  f.put("brief", { v: 1, ...NIGHTLY, facts: [], silences: { pending: [], unreadable: [], quiet: [], unavailable: [] } });
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const u = new URL(input instanceof Request ? input.url : String(input));
+    if (u.origin !== "http://vendor.test") return realFetch(input, init);
+    return new Response(JSON.stringify({ data: [] }), { headers: { "Content-Type": "application/json" } });
+  };
+  const getVendor = await client(f.D1, { UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test" });
+  const ASK = (body) => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const cost = async (path, { init, vendor = false } = {}) => {
     const n = f.trips.length;
-    const r = await get(path);
+    const r = await (vendor ? getVendor : get)(path, init);
     return { rows: f.rowsRead(n), trips: f.trips.length - n, status: r.res.status };
   };
   const CEILING = [
@@ -695,11 +706,20 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
     ["/api/flows/pulse", 3], ["/api/flows/regime", 1], ["/api/flows/focus", 1], [HOME_LIVE, 6],
     ["/api/flows/now?n=board:long,board:short,meta,focus", 4], ["/api/flows/lk?k=market", 1],
     ["/api/flows/card?t=NVDA", 2], ["/api/flows/hist?t=IDX", 3], ["/api/flows/summary?t=NVDA", 3],
+    ["/api/flows/meta", 1], ["/api/flows/universe", 1], ["/api/flows/roster", 1], ["/api/flows/ideas", 3], ["/api/flows/movers", 1],
+    ["/api/flows/sectors", 1], ["/api/flows/political", 1], ["/api/flows/unusual", 1], ["/api/flows/record", 1],
+    ["/api/flows/card-x?t=NVDA", 2], ["/api/flows/card-x?t=ZZZZ", 3], ["/api/flows/brief", 7], ["/api/flows/ai-usage", 3],
+    ["/api/flows/ask", 9, { init: ASK({ question: "what is the market doing" }) }],
+    ["/api/flows/ask", 10, { init: ASK({ question: "what about NVDA", subject: "NVDA" }) }],
+    ["/api/flows/live?t=NVDA", 2, { vendor: true }],
+    ["/api/flows/chain?t=NVDA", 3, { vendor: true, status: 404 }],
+    ["/api/flows/strategy?t=NVDA", 3, { vendor: true, status: 502 }],
+    ["/api/flows/strategy?t=NVDA&expiry=2026-10-16", 3, { vendor: true }],
   ];
   let home = 0;
-  for (const [path, ceiling] of CEILING) {
-    const got = await cost(path);
-    ok(got.status === 200, `${path} answers`);
+  for (const [path, ceiling, opts = {}] of CEILING) {
+    const got = await cost(path, opts);
+    ok(got.status === (opts.status || 200), `${path} answers ${opts.status || 200} (${got.status})`);
     ok(got.rows <= ceiling,
       `ROWS READ, ${path}: ${got.rows} in ${got.trips} trip${got.trips > 1 ? "s" : ""}, ceiling ${ceiling} (the fake counts an index search as the rows it returns and a scan ` +
       "as the whole table, so a route that stopped using its primary key shows at once)");
@@ -717,6 +737,14 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
     `and the tape's admission check ${tape.rows}, an upper bound: its UNION ALL stops at the card row, so a covered name reads one row`);
   const worstPage = lite.rows + tape.rows + 20;
   ok(5e6 / worstPage > 1500, `a cold ticker page of the costliest kind (${worstPage} rows) can be opened ${Math.floor(5e6 / worstPage)} times a day before the read cap`);
+
+  globalThis.fetch = realFetch;
+  const routed = new Set(CEILING.map(([path]) => path.split("?")[0]));
+  const source = readFileSync(new URL("../worker.js", import.meta.url), "utf8");
+  const declared = [...new Set([...source.matchAll(/path === "(\/api\/flows\/[a-z-]+)"/g)].map((m) => m[1]))]
+    .filter((path) => !["/api/flows/ingest", "/api/flows/tape"].includes(path));
+  const unpriced = declared.filter((path) => !routed.has(path) && !HOME.some((h) => h.startsWith(path)));
+  deep(unpriced, [], "EVERY FLOWS READ ROUTE THE WORKER DECLARES HAS A ROWS-READ CEILING: a new route that is not priced here fails, so the read cap can never be spent by a route nobody counted");
 
   f.db.prepare("DELETE FROM flows_live").run();
   const bare = await cost(HOME_LIVE);
@@ -853,6 +881,29 @@ class FakeCache {
   const gone = await get("/api/flows/ingest?list=card");
   ok(gone.res.status === 503 && gone.body.error.code === "store_unreadable", "an unreadable store is the 503 the metadata form gives");
   f.fail(null);
+}
+
+{
+  const f = fakeD1();
+  seed(f);
+  f.put("card:PEND", { ...NIGHTLY, status: "pending" });
+  const many = 2100;
+  f.db.exec("BEGIN");
+  for (let i = 0; i < many; i++) f.put("card:PAD" + String(i).padStart(4, "0"), { ...NIGHTLY, ticker: "PAD" + i });
+  f.db.exec("COMMIT");
+  const get = await ingestClient(f.D1);
+  await get("/api/flows/ingest?keys=meta");
+  const n = f.trips.length;
+  const cut = await get("/api/flows/ingest?list=card");
+  eq(cut.res.status, 200, "A STORE THAT HOLDS MORE THAN THE LISTING'S CEILING still answers");
+  eq(f.trips.length - n, 1, "in one trip");
+  eq(Object.keys(cut.body.keys).length, 2000, "with the first 2,000 keys of the 2,100 it holds, never more than the ceiling");
+  eq(cut.body.truncated, true, "and says it was cut, so the nightly never mistakes a partial listing for the whole store");
+  eq(cut.body.listed, 2000, "counting what it lists");
+  ok(f.rowsRead(n) <= 2001 && f.rowsRead(n) >= 2000, `at a cost of ${f.rowsRead(n)} rows read: the ceiling plus the one row that proves the cut, once a night`);
+  ok(!("card:PEND" in cut.body.keys), "and a pending stub inside the cut is still not a key");
+  const whole = await get("/api/flows/ingest?list=hist");
+  ok(whole.body.truncated === false && whole.body.listed === 0, "while a listing under the ceiling says it is whole");
 }
 
 console.log(`flows-reads-contract: ${checks} checks passed`);

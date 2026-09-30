@@ -57,15 +57,21 @@ Browser ──► Cloudflare edge
 - D1 on Workers Free has two daily caps, both reset at 00:00 UTC and both
   shared by everything on the account, the audit's own queries included:
   **100,000 rows written and 5,000,000 rows read**. The write cap is priced
-  in DEPLOY.md section 10.4b; the read cap was hit on 2026-09-29, when D1
-  answered every read and write with error 7500 until midnight. The Worker
-  turns that into `503 store_quota` with `Retry-After` to 00:00 UTC, serves
-  the last good copy of a nightly Flows key (kept in `caches.default` for 24
-  hours, stamped `X-Fresh-State: stale`, `X-Fresh-Reason: store`) instead of
-  a bare 503, and `tests/flows-reads-contract.mjs` holds a rows-read ceiling
-  per read route. Budget any new query in rows, not only in round trips, and
-  never scan a payload table or expand a `json_each` over a large array on a
-  polled route.
+  in DEPLOY.md section 10.4b; the read cap was found exceeded on 2026-09-29
+  (an audit `SELECT` at about 21:36 UTC failed with error 7500). Who spent it,
+  and whether the Worker's own reads and writes were refused, are unverified
+  until `live:alerts.record.reads` continuity across that evening and the D1
+  dashboard's rows read by hour are read. The Worker turns that error into
+  `503 store_quota` with `Retry-After` to 00:00 UTC, serves the last good
+  copy of a nightly Flows key (kept in `caches.default` for 24 hours, stamped
+  `X-Fresh-State: stale`, `X-Fresh-Reason: store`) instead of a bare 503, and
+  `tests/flows-reads-contract.mjs` holds a rows-read ceiling per read route.
+  The copy lives only in a data centre that served the key within 24 hours
+  and can be evicted earlier, so it softens a quota day for the colos readers
+  use and guarantees nothing; it is proven on local workerd and a Cache API
+  fake, not on the production edge. Budget any new query in rows, not only in
+  round trips, and never scan a payload table or expand a `json_each` over a
+  large array on a polled route.
 
 ### External deployment state
 
@@ -499,7 +505,9 @@ flows-verdict-contract
 
 `flows-reads-contract` was measured on 2026-09-28: about 20 s with no server,
 of which three blocks wait out the flights' deadlines (2 s for the schema
-bootstrap and its 1.5 s retry, 12 s for the market snapshot's refresh).
+bootstrap and its 1.5 s retry, 12 s for the market snapshot's refresh); on
+2026-09-30, with the rows-read ceilings and the last-good copy, 33 s of wall
+time and about 1 s of CPU.
 It imports `worker.js` into Node with a counting fake of the D1 binding over
 `node:sqlite` (one trip per `first`, `all`, `run` or `batch`) and asserts how
 many cross-region round trips each Flows read route costs, cold and warm.

@@ -930,9 +930,12 @@ The Workers Free plan gives one D1 database two daily row caps, both reset at
 00:00 UTC and both shared by everything on the account: **100,000 rows
 written** and **5,000,000 rows read**. Only the write cap was ever modelled
 (section 10.4b prices the archive, the cards and the scorer against it). The
-read cap is the one that was hit: on 2026-09-29 an audit session's own
-queries exhausted it, and D1 answered every later read and write with error
-7500 until 00:00 UTC.
+read cap is the one that was found exceeded: on 2026-09-29 an audit `SELECT`
+at about 21:36 UTC failed with error 7500. Who spent it (the audit's own
+thousands of queries are the leading suspect, unproven) and whether the
+Worker's own reads and writes were refused that evening are unverified until
+`live:alerts.record.reads` is read for continuity across it and the D1
+dashboard's rows read by hour is read, which only the owner can do.
 
 What the ledger adds is written down so the write budget stays a sum: each
 weekday the Tier 1 tick writes two ledger rows (its stamp and its outcome, on
@@ -951,7 +954,8 @@ fits its fake D1 with `EXPLAIN QUERY PLAN`: an index search costs the rows it
 returns, a scan costs the whole table, and a `json_each` over a payload costs
 the elements of that array (D1 was seen to count them: a first audit `SELECT`
 over the universe's names reported 666 rows read). Every read route has a
-ceiling against a table of 1,216 rows: the thirteen home reads together cost 23
+ceiling against a table of 1,216 rows, and a route the Worker declares that has
+none fails the suite: the thirteen home reads together cost 23
 rows, so the cap holds about 217,000 cold home loads a day; a lite card or an
 absent name reads the universe's name list and its sector column (1,466 rows,
 an upper bound because SQLite stops at the first match) and, with the tape's
@@ -973,10 +977,23 @@ fault) the Worker returns that copy with `X-Fresh-State: stale`,
 kept, where it used to return a bare 503 `store_unreadable`. The body is the
 stored row, so its own `sessionDate` and `generatedAt` still say what day it
 describes; a copy older than 24 hours, a key never kept, the live keys
-(`/lk`, `/now`), the brief (its age label is computed at serve time) and a
-request without a session are the 503 they were. It costs no D1 rows, one
-Cache API write per key per ten minutes per isolate and no CPU worth naming on
-the path that serves a stored row; the alternative is Workers Paid.
+(`/lk`, `/now`) and the brief (its age label is computed at serve time) are the
+503 they were, and a request without a session is the 401 it always was. It
+costs no D1 rows, one Cache API write per key per ten minutes per isolate and
+no CPU worth naming on the path that serves a stored row; the alternative is
+Workers Paid.
+
+**What the last good copy does not promise.** `caches.default` is local to the
+data centre that wrote it and is neither replicated nor pinned: the copy exists
+only where that key was served within the last 24 hours and can be evicted
+earlier, so a data centre that did not serve the key still answers the bare
+503. It softens a quota day for the colo the owner and most readers use; it is
+not a guarantee. The behaviour is proven on local workerd and a Cache API
+fake, and is **unverified on the production edge**: nothing in a healthy day
+shows the stamp, and the store cannot be made unreadable on purpose in
+production, so the first real quota or D1 outage is the check (read
+`X-Fresh-Last-Good` on the response). The Cache API does nothing on a
+`workers.dev` hostname, so a preview there proves nothing either way.
 
 ### 10.5 The data pipeline
 
@@ -1768,7 +1785,10 @@ Four guards sit behind the schedule, all in `scripts/flows-pipeline.mjs`:
   the night itself; it is skipped when that session is the ledger's oldest day,
   which may predate the ledger); and, from the run's own facts, on cards that
   failed or were skipped past the deadline and on a roster shorter than the
-  names planned a card. It warns, without failing, on Tier 2 coverage under 70%
+  names planned a card (a dry run evaluates these run facts too, prints them
+  as `run facts:` and exits red on a failure, and the pipeline contract holds
+  the plan handed to the gate equal to the plan the run prints, so a healthy
+  night can neither trip the roster check nor hide a missing name from it). It warns, without failing, on Tier 2 coverage under 70%
   of the passes a five-minute loop makes and on a key lapse the Worker saw at
   its own five-minute check; the first evening of the ledger downgrades the
   gaps to warnings, since the session may have begun before the Worker that
@@ -1793,7 +1813,11 @@ Four guards sit behind the schedule, all in `scripts/flows-pipeline.mjs`:
   until midnight: when the reset is within twenty minutes of the run's first
   quota answer it sleeps to the reset plus thirty seconds, defers every other
   writer with it and spends none of its retries or of its 90 s retry budget;
-  a reset farther away fails at once as before. That is cheap and safe because a
+  a reset farther away fails at once as before. D1's counter need not clear at
+  exactly 00:00:00 UTC, and an answer that arrives after midnight carries a
+  `Retry-After` of a day, so a run that has already waited once steps every
+  60 s while the clock reads within ten minutes after 00:00 UTC, inside the
+  same twenty-minute bound, instead of giving up on the day-long value. That is cheap and safe because a
   publish is an idempotent upsert (the dated archive is insert-if-absent), the
   wait is bounded per run and Actions minutes on a public repository are free;
   it cannot outlive a nightly that starts hours before the reset, which stays
