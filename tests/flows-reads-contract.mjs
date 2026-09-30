@@ -30,16 +30,53 @@ function fakeD1() {
   let hang = null;
   let slow = null;
   const reads = /^\s*(SELECT|PRAGMA|WITH)/i;
+  let current = null;
+  const cardinality = (name) => {
+    try { return db.prepare(`SELECT count(*) AS n FROM ${name}`).get().n; } catch { return 0; }
+  };
+  const scanned = (sql, args, returned) => {
+    let plan;
+    try { plan = db.prepare("EXPLAIN QUERY PLAN " + sql).all(...args); } catch { return returned; }
+    const aliases = new Map();
+    for (const m of sql.matchAll(/\b(?:FROM|JOIN)\s+(\w+)(?:\s+(?:AS\s+)?(?!WHERE\b|LIMIT\b|ORDER\b|UNION\b|JOIN\b|ON\b|GROUP\b|LEFT\b)(\w+))?/gi)) {
+      if (m[2]) aliases.set(m[2], m[1]);
+    }
+    const paths = new Map();
+    for (const m of sql.matchAll(/json_each\(\s*\w+\.payload\s*,\s*'([^']+)'\s*\)\s+(\w+)/gi)) paths.set(m[2], m[1]);
+    let rows = 0, searches = 0;
+    for (const { detail } of plan) {
+      const m = /^(SCAN|SEARCH)\s+(\w+)/.exec(detail);
+      if (!m) continue;
+      if (/VIRTUAL TABLE/.test(detail)) {
+        if (paths.has(m[2])) rows += elements(paths.get(m[2]));
+        continue;
+      }
+      if (m[1] === "SCAN") rows += cardinality(aliases.get(m[2]) || m[2]);
+      else searches++;
+    }
+    return rows + (searches ? Math.max(searches, returned) : 0);
+  };
+  const elements = (path) => {
+    try {
+      return db.prepare("SELECT max(n) AS n FROM (SELECT (SELECT count(*) FROM json_each(p.payload, ?)) AS n FROM flows_payload p WHERE json_valid(p.payload))").get(path).n || 0;
+    } catch { return 0; }
+  };
   const exec = (sql, args) => {
     if (failing && failing.test(sql)) throw new Error("fake D1 refused " + sql.slice(0, 40));
     const st = db.prepare(sql);
-    if (reads.test(sql)) return { results: st.all(...args), meta: {} };
+    if (reads.test(sql)) {
+      const results = st.all(...args);
+      if (current && /^\s*(SELECT|WITH)/i.test(sql)) current.rows += scanned(sql, args, results.length);
+      return { results, meta: {} };
+    }
     return { results: [], meta: { changes: st.run(...args).changes } };
   };
   const fake = { latencyMs: 1 };
   const trip = (kind, sqls, args, fn) => new Promise((resolve, reject) => setTimeout(() => {
-    trips.push({ kind, sqls, args });
-    try { resolve(fn()); } catch (error) { reject(error); }
+    const entry = { kind, sqls, args, rows: 0 };
+    trips.push(entry);
+    current = entry;
+    try { resolve(fn()); } catch (error) { reject(error); } finally { current = null; }
   }, fake.latencyMs));
   const D1 = {
     prepare(sql) {
@@ -74,7 +111,8 @@ function fakeD1() {
   const live = (id, value, readAt, session) => db.prepare(
     "INSERT OR REPLACE INTO flows_live (id, payload, read_at, session, cadence_s, source, writer, updated_at) VALUES (?, ?, ?, ?, 300, 'worker', 'worker@rth', ?)",
   ).run(id, JSON.stringify(value), readAt, session, readAt);
-  return { D1, db, trips, put, live, fail: (re) => { failing = re; }, throwSync: (re) => { thrown = re; }, hangOnce: (re) => { hang = re; }, slowOnce: (re, ms) => { slow = { re, ms }; }, latency: (ms) => { fake.latencyMs = ms; },
+  const rowsRead = (from = 0) => trips.slice(from).reduce((sum, t) => sum + (t.rows || 0), 0);
+  return { D1, db, trips, put, live, rowsRead, fail: (re) => { failing = re; }, throwSync: (re) => { thrown = re; }, hangOnce: (re) => { hang = re; }, slowOnce: (re, ms) => { slow = { re, ms }; }, latency: (ms) => { fake.latencyMs = ms; },
     since: (n) => trips.slice(n), count: (re, from = 0) => trips.slice(from).filter((t) => t.sqls.some((s) => re.test(s))).length };
 }
 
@@ -626,5 +664,153 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   ok(r.body.keys.roster.present === true && r.body.keys.roster.sessionDate === "2020-01-02", "a view key is answered by the same statement");
   eq(Object.keys(r.body.keys).length, asked.length, "every key asked is answered");
 }
+
+
+{
+  const f = fakeD1();
+  seed(f);
+  const names = Array.from({ length: 670 }, (_, i) => "T" + String(i).padStart(3, "0"));
+  names[0] = "NVDA";
+  names[1] = "LITE";
+  f.put("universe", { ...NIGHTLY, n: names.length, t: names, sectors: ["Technology"], sec: names.map(() => 0),
+    units: { px: ["usd", 100] }, cols: { px: names.map(() => 10000) }, pct: { px: names.map(() => 50) } });
+  f.put("events", { ...NIGHTLY, rows: Array.from({ length: 120 }, (_, i) => ({ t: "E" + i, d: "2026-09-29", dte: 5, st: i ? "quiet" : "gated" })) });
+  for (let i = 0; i < 1200; i++) f.put("card:PAD" + i, { ...NIGHTLY, ticker: "PAD" + i });
+  for (const k of ["market", "vol", "breadth", "strips", "strips:series", "focus"]) {
+    f.live("live:" + k, { v: 1, key: "live:" + k, fresh: { readAt: "2026-09-25T14:10:00.000Z" } }, Date.parse("2026-09-25T14:10:00.000Z"), "2026-09-25");
+  }
+  const table = f.db.prepare("SELECT count(*) AS n FROM flows_payload").get().n;
+  ok(table > 1000, `the table under test holds ${table} rows, so a route that scanned it would show`);
+  const get = await client(f.D1);
+  await get("/api/flows/meta");
+  W.memoClock({ day: SESSION, closedDays: [] }, Date.now());
+  const cost = async (path) => {
+    const n = f.trips.length;
+    const r = await get(path);
+    return { rows: f.rowsRead(n), trips: f.trips.length - n, status: r.res.status };
+  };
+  const CEILING = [
+    ["/api/flows/board?side=long", 1], ["/api/flows/board?side=watch", 1], ["/api/flows/market", 1], ["/api/flows/flowalerts", 3],
+    ["/api/flows/events", 1], ["/api/flows/scoretrack", 1], ["/api/flows/sector-premium", 1], ["/api/flows/news", 1],
+    ["/api/flows/pulse", 3], ["/api/flows/regime", 1], ["/api/flows/focus", 1], [HOME_LIVE, 6],
+    ["/api/flows/now?n=board:long,board:short,meta,focus", 4], ["/api/flows/lk?k=market", 1],
+    ["/api/flows/card?t=NVDA", 2], ["/api/flows/hist?t=IDX", 3], ["/api/flows/summary?t=NVDA", 3],
+  ];
+  let home = 0;
+  for (const [path, ceiling] of CEILING) {
+    const got = await cost(path);
+    ok(got.status === 200, `${path} answers`);
+    ok(got.rows <= ceiling,
+      `ROWS READ, ${path}: ${got.rows} in ${got.trips} trip${got.trips > 1 ? "s" : ""}, ceiling ${ceiling} (the fake counts an index search as the rows it returns and a scan ` +
+      "as the whole table, so a route that stopped using its primary key shows at once)");
+    if (HOME.includes(path)) home += got.rows;
+  }
+  ok(home <= 30, `THE THIRTEEN HOME READS TOGETHER cost ${home} rows, so the 5,000,000-row daily cap holds ${Math.floor(5e6 / home)} cold home loads`);
+  const universeScan = names.length * 2 + 130;
+  const lite = await cost("/api/flows/card?t=LITE");
+  const absent = await cost("/api/flows/card?t=ZZZZ");
+  const tape = await cost("/api/flows/tape?t=NVDA");
+  ok(lite.rows <= universeScan + 120 && absent.rows <= universeScan + 120,
+    `the two routes that read the universe name list are the costly ones: a lite card ${lite.rows} rows and an absent one ${absent.rows} ` +
+    `(json_each over the ${names.length} names, the sector column and the ${120} event rows; an upper bound, since SQLite stops at the first match)`);
+  ok(tape.rows <= names.length + 10,
+    `and the tape's admission check ${tape.rows}, an upper bound: its UNION ALL stops at the card row, so a covered name reads one row`);
+  const worstPage = lite.rows + tape.rows + 20;
+  ok(5e6 / worstPage > 1500, `a cold ticker page of the costliest kind (${worstPage} rows) can be opened ${Math.floor(5e6 / worstPage)} times a day before the read cap`);
+
+  f.db.prepare("DELETE FROM flows_live").run();
+  const bare = await cost(HOME_LIVE);
+  ok(bare.rows <= 6 && bare.trips === 1, "with the live rows gone the six-key read is still one search, not a scan");
+}
+
+class FakeCache {
+  constructor() { this.entries = new Map(); this.puts = []; }
+  async match(req) {
+    const e = this.entries.get(req.url);
+    return e ? new Response(e.body, { status: e.status, headers: e.headers }) : undefined;
+  }
+  async put(req, res) {
+    this.puts.push(req.url);
+    this.entries.set(req.url, { body: await res.text(), status: res.status, headers: [...res.headers] });
+  }
+}
+
+{
+  const f = fakeD1();
+  seed(f);
+  f.put("board:long", { ...NIGHTLY, side: "long", rows: [{ t: "NVDA", px: 1 }] });
+  const cache = new FakeCache();
+  globalThis.caches = { default: cache };
+  try {
+    const get = await client(f.D1);
+    const board = await get("/api/flows/board?side=long");
+    await board.settle();
+    const key = "https://flows-lastgood.internal/api/flows/board?side=long";
+    ok(board.res.status === 200 && cache.puts.length === 1 && cache.puts[0] === key,
+      "A SERVED NIGHTLY ROW IS KEPT as the last good copy under a key of its own, off the request's cookie and query");
+    const kept = cache.entries.get(key);
+    const headerOf = (name) => (kept.headers.find(([k]) => k.toLowerCase() === name) || [])[1];
+    ok(headerOf("cache-control") === "public, max-age=86400" && /^\d{13}$/.test(headerOf("x-last-good-at")) && kept.body === board.text,
+      "for twenty-four hours, stamped with the instant it was kept, byte for byte");
+    await (await get("/api/flows/board?side=long")).settle();
+    eq(cache.puts.length, 1, "and once per ten minutes per isolate and key, not on every read: the cache is written by an isolate once, not by a poll");
+
+    f.db.prepare("DELETE FROM flows_payload WHERE id = 'events'").run();
+    const pending = await get("/api/flows/events");
+    await pending.settle();
+    ok(pending.body.status === "pending" && cache.puts.length === 1,
+      "a pending answer is never kept: only a response served from a stored row (X-Payload-Updated) is a copy worth serving later");
+    const market = await get("/api/flows/market");
+    await market.settle();
+    eq(cache.puts.length, 2, "while another nightly key is kept the same way");
+    f.put("brief", { v: 1, ...NIGHTLY, facts: [], silences: { pending: [], unreadable: [], quiet: [], unavailable: [] } });
+    const servedBrief = await get("/api/flows/brief");
+    await servedBrief.settle();
+    ok(servedBrief.res.status === 200 && Number(servedBrief.res.headers.get("X-Payload-Updated")) > 0 && cache.puts.length === 2,
+      "the brief is served from a stored row and still not kept: its age label is computed at serve time, and a copy would call itself fresh");
+
+    f.fail(/FROM flows_payload/);
+    const down = await get("/api/flows/board?side=long");
+    ok(down.res.status === 200 && down.text === board.text && down.res.headers.get("X-Fresh-State") === "stale" &&
+       down.res.headers.get("X-Fresh-Reason") === "store" && down.res.headers.get("Cache-Control") === "no-store" &&
+       /^\d{4}-\d\d-\d\dT/.test(down.res.headers.get("X-Fresh-Last-Good")) && !down.res.headers.has("X-Last-Good-At"),
+      "AN UNREADABLE STORE serves the last good copy, whole, stamped stale with reason store and the instant it was kept, and never cached downstream");
+    const marketDown = await get("/api/flows/market");
+    ok(marketDown.res.status === 200 && marketDown.res.headers.get("X-Fresh-Reason") === "store" && marketDown.text === market.text,
+      "and the market row the same");
+    const cold = await get("/api/flows/regime");
+    ok(cold.res.status === 503 && cold.body.error.code === "store_unreadable" && cold.res.headers.get("Retry-After") === "30",
+      "a key never kept is the 503 it always was");
+    const shortSide = await get("/api/flows/board?side=short");
+    ok(shortSide.res.status === 200 && shortSide.body.status === "pending" && shortSide.body.reason === "read-failed" &&
+       !shortSide.res.headers.has("X-Fresh-Last-Good"),
+      "and a board side never kept says read-failed as before, never another side's copy");
+    const brief = await get("/api/flows/brief");
+    ok(brief.res.status === 503 && !brief.res.headers.has("X-Fresh-Last-Good"), "so with the store gone it is the 503 it was, not a copy");
+
+    const env = { DB: f.D1, SESSION_SECRET, FLOWS_CREDENTIALS: JSON.stringify({ [FLOWS_USERNAMES[0]]: "x".repeat(43) }) };
+    const worker = (await import("../worker.js?reads=" + (++instance))).default;
+    const anon = await worker.fetch(new Request("https://anilkaya.org/api/flows/board?side=long"), env, { waitUntil() {} });
+    eq(anon.status, 401, "THE COPY NEVER BYPASSES THE SESSION: a request without one is refused before the store is read");
+
+    const entry = cache.entries.get(key);
+    const at = entry.headers.findIndex(([k]) => k.toLowerCase() === "x-last-good-at");
+    entry.headers[at] = ["x-last-good-at", String(Date.now() - 25 * 3600 * 1000)];
+    const old = await get("/api/flows/board?side=long");
+    ok(old.res.status === 200 && old.body.status === "pending" && old.body.reason === "read-failed",
+      "a copy older than twenty-four hours is not served");
+    f.fail(null);
+    const back = await get("/api/flows/board?side=long");
+    ok(back.res.status === 200 && !back.res.headers.has("X-Fresh-Last-Good") && back.text === board.text,
+      "and a readable store answers itself again");
+  } finally {
+    delete globalThis.caches;
+  }
+  const bare = await client(f.D1);
+  const plain = await bare("/api/flows/board?side=long");
+  await plain.settle();
+  ok(plain.res.status === 200, "with no Cache API at all (a test bench, a local runtime) nothing is kept and nothing fails");
+}
+
 
 console.log(`flows-reads-contract: ${checks} checks passed`);

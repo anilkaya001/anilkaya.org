@@ -929,6 +929,38 @@ A quota error is answered by the Worker as `503 store_quota` with
 `Retry-After` to 00:00 UTC (section 10.5h), so the gate and the nightly can
 tell it from a Worker or a network fault.
 
+**Reads are guarded in rows, not only in trips.** `tests/flows-reads-contract.mjs`
+fits its fake D1 with `EXPLAIN QUERY PLAN`: an index search costs the rows it
+returns, a scan costs the whole table, and a `json_each` over a payload costs
+the elements of that array (D1 was seen to count them: a first audit `SELECT`
+over the universe's names reported 666 rows read). Every read route has a
+ceiling against a table of 1,216 rows: the thirteen home reads together cost 23
+rows, so the cap holds about 217,000 cold home loads a day; a lite card or an
+absent name reads the universe's name list and its sector column (1,466 rows,
+an upper bound because SQLite stops at the first match) and, with the tape's
+admission check (673, the same bound), is the costliest page, about 2,300 cold
+ticker pages a day. The model is an upper
+bound and only ever a ceiling; the number that matters is the D1 dashboard's
+rows read by hour, which only the owner can see.
+
+**When the store cannot be read, a reader gets the last good copy.** The
+Worker keeps each nightly Flows key it serves (`board`, `market`, `events`,
+`scoretrack`, `meta`, `flowalerts`, `pulse`, `political`, `unusual`, `movers`,
+`sectors`, `sector-premium`, `universe`, `regime`, `ideas`, `focus`, `roster`,
+`news`, `record`, and a card, card-x or hist by ticker) in `caches.default`
+under an internal URL, once per ten minutes per isolate, for 24 hours, and only
+a response served from a stored row (`X-Payload-Updated`) is kept, never a
+pending answer. When D1 answers an error (the 7500 quota above, or any other
+fault) the Worker returns that copy with `X-Fresh-State: stale`,
+`X-Fresh-Reason: store` and `X-Fresh-Last-Good` naming the instant it was
+kept, where it used to return a bare 503 `store_unreadable`. The body is the
+stored row, so its own `sessionDate` and `generatedAt` still say what day it
+describes; a copy older than 24 hours, a key never kept, the live keys
+(`/lk`, `/now`), the brief (its age label is computed at serve time) and a
+request without a session are the 503 they were. It costs no D1 rows, one
+Cache API write per key per ten minutes per isolate and no CPU worth naming on
+the path that serves a stored row; the alternative is Workers Paid.
+
 ### 10.5 The data pipeline
 
 Compute runs in GitHub Actions, never on Cloudflare: the Workers free plan

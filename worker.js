@@ -1003,6 +1003,67 @@ const secondsToUtcMidnight = (now) => Math.max(60, Math.ceil((Date.UTC(new Date(
 const STORE_GONE = Object.freeze({ status: "unavailable", reason: "store" });
 const storeGone = () => new HttpError(503, "store_unreadable", "The store could not be read", { "Retry-After": "30" }, STORE_GONE);
 
+const LAST_GOOD_TTL_MS = 24 * 3600 * 1000;
+const LAST_GOOD_REFRESH_MS = 10 * 60 * 1000;
+const LAST_GOOD_MAX_KEYS = 256;
+const LAST_GOOD_PATHS = new Set(["board", "market", "events", "scoretrack", "meta", "flowalerts", "pulse", "political", "unusual",
+  "movers", "sectors", "sector-premium", "universe", "regime", "ideas", "focus", "roster", "news", "record", "card", "card-x",
+  "hist"].map((name) => "/api/flows/" + name));
+const lastGoodStamped = new Map();
+
+function lastGoodKey(request, url) {
+  if (request.method !== "GET" || !LAST_GOOD_PATHS.has(url.pathname)) return null;
+  let tail = "";
+  if (url.pathname === "/api/flows/board") {
+    const side = url.searchParams.get("side");
+    tail = "?side=" + (side === "short" || side === "watch" ? side : "long");
+  } else if (url.pathname === "/api/flows/card" || url.pathname === "/api/flows/card-x" || url.pathname === "/api/flows/hist") {
+    const ticker = String(url.searchParams.get("t") || "").trim().toUpperCase();
+    if (!FLOWS_TICKER_RE.test(ticker)) return null;
+    tail = "?t=" + ticker;
+  }
+  return new Request("https://flows-lastgood.internal" + url.pathname + tail, { method: "GET" });
+}
+
+function lastGoodCache() {
+  return typeof caches !== "undefined" && caches.default ? caches.default : null;
+}
+
+function rememberLastGood(request, url, response, ctx, now = Date.now()) {
+  const cache = lastGoodCache();
+  if (!cache || response.status !== 200 || !Number(response.headers.get("X-Payload-Updated")) || response.headers.has("X-Fresh-Last-Good")) return;
+  const key = lastGoodKey(request, url);
+  if (!key || !ctx || typeof ctx.waitUntil !== "function") return;
+  const seen = lastGoodStamped.get(key.url);
+  if (seen !== undefined && now - seen < LAST_GOOD_REFRESH_MS) return;
+  if (seen === undefined && lastGoodStamped.size >= LAST_GOOD_MAX_KEYS) lastGoodStamped.delete(lastGoodStamped.keys().next().value);
+  lastGoodStamped.set(key.url, now);
+  try {
+    const kept = new Response(response.clone().body, { status: 200, headers: response.headers });
+    kept.headers.set("Cache-Control", "public, max-age=" + LAST_GOOD_TTL_MS / 1000);
+    kept.headers.set("X-Last-Good-At", String(now));
+    ctx.waitUntil(cache.put(key, kept).catch(() => lastGoodStamped.delete(key.url)));
+  } catch {
+    lastGoodStamped.delete(key.url);
+  }
+}
+
+async function recallLastGood(request, url, now = Date.now()) {
+  const cache = lastGoodCache();
+  const key = cache ? lastGoodKey(request, url) : null;
+  if (!key) return null;
+  const hit = await cache.match(key).catch(() => null);
+  const storedAt = hit ? Number(hit.headers.get("X-Last-Good-At")) : NaN;
+  if (!hit || !Number.isFinite(storedAt) || now - storedAt > LAST_GOOD_TTL_MS) return null;
+  const out = new Response(hit.body, { status: 200, headers: hit.headers });
+  out.headers.delete("X-Last-Good-At");
+  out.headers.delete("X-Server-Now");
+  out.headers.set("X-Fresh-State", "stale");
+  out.headers.set("X-Fresh-Reason", "store");
+  out.headers.set("X-Fresh-Last-Good", new Date(storedAt).toISOString());
+  return out;
+}
+
 async function readServed(env, key) {
   const trace = {};
   const stored = await readFlowsPayload(env, key, trace);
@@ -3248,6 +3309,8 @@ async function route(request, env, url, ctx) {
       const trace = {};
       const stored = await readFlowsPayload(env, "board:" + side, trace);
       if (stored === null) {
+        const kept = trace.failed ? await recallLastGood(request, url) : null;
+        if (kept) return kept;
         return json(trace.failed
           ? { side, rows: [], generatedAt: null, status: "pending", reason: "read-failed" }
           : { side, rows: [], generatedAt: null, status: "pending" });
@@ -3618,9 +3681,13 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     try {
-      return finalize(await route(request, env, url, ctx), request, url);
+      const response = await route(request, env, url, ctx);
+      rememberLastGood(request, url, response, ctx);
+      return finalize(response, request, url);
     } catch (error) {
       if (error instanceof HttpError) {
+        const kept = error.code === "store_unreadable" ? await recallLastGood(request, url) : null;
+        if (kept) return finalize(kept, request, url);
         return finalize(apiError(error.status, error.code, error.message, error.headers, error.details), request, url);
       }
       console.error(JSON.stringify({

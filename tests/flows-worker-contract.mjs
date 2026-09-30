@@ -1321,16 +1321,35 @@ try {
       eq((await st("card-x", "PEND")).status, "absent", "and absent once the roster is current: nothing is coming");
     }
 
+    const served = await (await get("/api/flows/card?t=AAPL", { headers: cookie })).text();
+    const deadline = Date.now() + 5000;
+    let kept = false;
+    while (!kept && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 100));
+      await server.d1("ALTER TABLE flows_payload RENAME COLUMN payload TO payload_hidden");
+      const probe = await get("/api/flows/card?t=AAPL", { headers: cookie });
+      await probe.text();
+      await server.d1("ALTER TABLE flows_payload RENAME COLUMN payload_hidden TO payload");
+      kept = probe.status === 200;
+    }
+    ok(kept, "THE LAST GOOD COPY IS KEPT by the real Cache API: a card the Worker served is in caches.default within seconds");
     await server.d1("ALTER TABLE flows_payload RENAME COLUMN payload TO payload_hidden");
     const gone = await get("/api/flows/card?t=AAPL", { headers: cookie });
-    const goneBody = await gone.json();
+    const goneText = await gone.text();
+    const never = await get("/api/flows/card?t=ZZNEVER", { headers: cookie });
+    const neverBody = await never.json();
     const goneMarket = await get("/api/flows/market", { headers: cookie });
     const goneMarketBody = await goneMarket.json();
     const goneNeuron = await (await get("/api/flows/summary?t=AAPL", { headers: cookie })).json();
     await server.d1("ALTER TABLE flows_payload RENAME COLUMN payload_hidden TO payload");
-    ok(gone.status === 503 && goneBody.status === "unavailable" && goneBody.reason === "store" && goneBody.error.code === "store_unreadable",
-       `OPS-14: a store that cannot be read answers 503 unavailable, never pending (${gone.status} ${JSON.stringify(goneBody)})`);
-    ok(goneMarket.status === 503 && goneMarketBody.status === "unavailable", "and the page payload routes answer the same way");
+    ok(gone.status === 200 && goneText === served && gone.headers.get("x-fresh-state") === "stale" &&
+       gone.headers.get("x-fresh-reason") === "store" && /^\d{4}-\d\d-\d\dT/.test(gone.headers.get("x-fresh-last-good") || "") &&
+       gone.headers.get("cache-control") === "no-store",
+       `OPS-14: a store that cannot be read serves the last good copy of a card it had served, byte for byte, stamped stale with reason store, never pending and never fresh (${gone.status} ${goneText.slice(0, 120)})`);
+    ok(never.status === 503 && neverBody.status === "unavailable" && neverBody.reason === "store" && neverBody.error.code === "store_unreadable" &&
+       !never.headers.has("x-fresh-last-good"),
+       `and a key it never served, with no copy to give, answers 503 unavailable, never pending (${never.status} ${JSON.stringify(neverBody)})`);
+    ok(goneMarket.status === 503 && goneMarketBody.status === "unavailable", "and so does a page payload route whose row was never served");
     ok(goneNeuron.status === "unavailable" && goneNeuron.reason === "store", `and the name's reading says unavailable, not that no card was published (${JSON.stringify(goneNeuron).slice(0, 120)})`);
     eq((await get("/api/flows/card?t=AAPL", { headers: cookie })).status, 200, "with the store back the card reads again");
 

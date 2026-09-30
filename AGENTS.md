@@ -54,6 +54,18 @@ Browser ──► Cloudflare edge
   `GOOGLE_CLIENT_SECRET`, and `SESSION_SECRET`.
 - Invocation observability is enabled in `wrangler.toml`; application code
   emits structured logs only for unexpected failures and OAuth callback errors.
+- D1 on Workers Free has two daily caps, both reset at 00:00 UTC and both
+  shared by everything on the account, the audit's own queries included:
+  **100,000 rows written and 5,000,000 rows read**. The write cap is priced
+  in DEPLOY.md section 10.4b; the read cap was hit on 2026-09-29, when D1
+  answered every read and write with error 7500 until midnight. The Worker
+  turns that into `503 store_quota` with `Retry-After` to 00:00 UTC, serves
+  the last good copy of a nightly Flows key (kept in `caches.default` for 24
+  hours, stamped `X-Fresh-State: stale`, `X-Fresh-Reason: store`) instead of
+  a bare 503, and `tests/flows-reads-contract.mjs` holds a rows-read ceiling
+  per read route. Budget any new query in rows, not only in round trips, and
+  never scan a payload table or expand a `json_each` over a large array on a
+  polled route.
 
 ### External deployment state
 
@@ -126,7 +138,7 @@ header readback with this repository after any dashboard rule change.
 | `assets/js/flows-fresh.js` | The client freshness helper (`FlowsUI.freshFrom`, `freshAggregate`, `heartbeat`). |
 | `tests/flows-live-contract.mjs` | Live-layer builders, phases and states, byte ceilings, the one-writer scans, the `--live` dry run and the client helper. |
 | `tests/flows-ledger-contract.mjs` | The ledger's SQL over a real SQLite (gaps clipped to the session, ok and failed ticks, partial focus reads, passes, the nightly's landing, retention), its zero-extra-round-trip and never-blocks-the-tick properties on the real tick functions, its ingest view, and the health gate's reading of it: gap lines at the stale lines, a nightly that never landed, cards failed or skipped, the roster shortfall and the 5xx burst. |
-| `tests/flows-reads-contract.mjs` | The Worker's D1 round trips per read route, counted on a fake binding: the single-flight schema bootstrap, the absent-card decision, the live overlays and the ticker reading. |
+| `tests/flows-reads-contract.mjs` | The Worker's D1 round trips and rows read per read route, counted on a fake binding (the rows-read ceilings, the last good copy served while the store is unreadable): the single-flight schema bootstrap, the absent-card decision, the live overlays and the ticker reading. |
 
 ## Curriculum and stage contracts
 
