@@ -15,7 +15,7 @@ export const SMILE_LINES = Object.freeze({
   MIXTURE_FIT_IN_SPREAD: 0.7,
   REPAIR_LAMBDA: 1e4,
   G_FLOOR: -1e-9,
-  LEE_BOUND: 4,
+  LEE_BOUND: 2,
   CHECK_POINTS: 601,
   CHECK_PAD: 0.5,
   SIGMA_FLOOR: 0.005,
@@ -414,8 +414,8 @@ function innerSolve(ks, ws, W, m, s, aMax) {
     Sw += wi * v; Syw += wy * v; Szw += wz * v; Sww += wi * v * v;
   }
   const h00 = S0, h01 = Sy, h02 = Sz, h11 = Syy, h12 = Syz, h22 = Szz, g0 = Sw, g1 = Syw, g2 = Szw;
-  CB[0] = 0; CB[1] = -aMax; CB[2] = 0; CB[3] = 0; CB[4] = -4 * s; CB[5] = -4 * s;
-  const tol = 1e-12 * Math.max(1, aMax, 4 * s);
+  CB[0] = 0; CB[1] = -aMax; CB[2] = 0; CB[3] = 0; CB[4] = -SMILE_LINES.LEE_BOUND * s; CB[5] = -SMILE_LINES.LEE_BOUND * s;
+  const tol = 1e-12 * Math.max(1, aMax, SMILE_LINES.LEE_BOUND * s);
   const c00 = h11 * h22 - h12 * h12, c01 = h02 * h12 - h01 * h22, c02 = h01 * h12 - h02 * h11;
   const det = h00 * c00 + h01 * c01 + h02 * c02;
   if (Math.abs(det) > 1e-300) {

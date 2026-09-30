@@ -813,6 +813,33 @@ const OUT = ENGINE.runEngine(BASE);
 }
 
 {
+  const wing = (b, rho) => SMILE.sviWingCheck({ b, rho });
+  ok(wing(1.25, 0.6).ok, "b(1+|rho|) = 2 is the boundary and passes");
+  near(wing(1.25, 0.6).value, 2, 1e-12, "and reads 2");
+  ok(!wing(1.25, 0.65).ok && !wing(2.5 / 1.5, 0.5).ok && !wing(2.5, 0.0).ok, "b(1+|rho|) above 2 fails, 2.5 among them (Lee 2004: limsup w(k)/|k| <= 2)");
+  ok(SMILE.SMILE_LINES.LEE_BOUND === 2, "the wing bound is 2, not 4");
+  const slope25 = { a: 0.01, b: 2.5 / 1.25, rho: 0.25, m: 0, sigma: 0.1 };
+  const slope10 = { a: 0.01, b: 0.8, rho: 0.25, m: 0, sigma: 0.1 };
+  ok(Math.abs(slope25.b * 1.25 - 2.5) < 1e-12 && Math.abs(slope10.b * 1.25 - 1.0) < 1e-12, "the two probe smiles have right-wing slope 2.5 and 1.0");
+  const T = 0.5, F = 100;
+  const far = (p) => SMILE.sliceCallU({ method: "svi", T, F, D: 1, params: p }, F * Math.exp(40)) / F;
+  ok(far(slope25) > 0.5, `a wing slope of 2.5 leaves a call struck at 40 log-units worth ${far(slope25).toFixed(3)} F: the risk-neutral mean leaks (d1 -> +inf, N(d1) -> 1)`);
+  ok(far(slope10) < 1e-2, `a wing slope of 1.0 does not (${far(slope10).toExponential(2)} F)`);
+  ok(!SMILE.sliceChecks(slope25, T, -0.3, 0.3, null).lee.ok, "and sliceChecks rejects the first on the wing bound");
+  ok(SMILE.sliceChecks(slope10, T, -0.3, 0.3, null).lee.ok, "and accepts the second");
+  for (const [label, svi] of [["slope 2.4", { a: 0.001, b: 1.6, rho: 0.5, m: 0, sigma: 0.05 }], ["slope 3.6", { a: 0.001, b: 2.4, rho: -0.5, m: 0, sigma: 0.05 }]]) {
+    const pts = [];
+    for (let k = -0.35; k <= 0.351; k += 0.025) {
+      const iv = Math.sqrt(SMILE.sviW(svi, k) / 1);
+      pts.push({ k, iv, ivBid: iv - 0.004, ivAsk: iv + 0.004, weight: 1 / Math.pow(0.013, 2) });
+    }
+    const fit = SMILE.fitSvi({ T: 1, points: pts, space: "iv", xtol: 1e-8 });
+    ok(fit.params.b * (1 + Math.abs(fit.params.rho)) <= 2 + 1e-9,
+      `an SVI fitted to quotes drawn from a ${label} smile is held to b(1+|rho|) <= 2 (got ${(fit.params.b * (1 + Math.abs(fit.params.rho))).toFixed(6)})`);
+  }
+}
+
+{
   for (const f of fs.readdirSync(path.join(ROOT, "shared")).filter((x) => x.startsWith("flows-quant-"))) {
     const src = fs.readFileSync(path.join(ROOT, "shared", f), "utf8");
     const norm = (t) => t.split("\n").map((l) => l.replace(/[ \t]+$/, "")).join("\n").replace(/\n{3,}/g, "\n\n");
