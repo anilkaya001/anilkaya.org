@@ -147,6 +147,7 @@ header readback with this repository after any dashboard rule change.
 | `tests/regression.mjs` | Full Playwright browser regression suite. |
 | `shared/markets.js`, `assets/js/market-ticker.js` | The landing index ticker: the Worker's Yahoo parse (the change is against the previous session's close taken from the same response's dated bars, never `chartPreviousClose`; each quote keeps its own `asOf`, `asOfDay`, `prevClose`, `prevDay` and, when the response names the session of the quote's own day, `sessionEnd`) and the strip that prints each quote's own İstanbul time, `Close <weekday>` for a closed market (a close is a quote struck within five minutes of the exchange's `sessionEnd`; the lag of the quote behind the fetch decides only where there is none), and a dash for a quote with no base. |
 | `tests/flows-desk-client.mjs`, `tests/desk-fixtures.mjs` | The Premium desk's client alone: its pure functions (the frontier against a brute-force Pareto set, balance parsing, tenor buckets, cent sizing, net delta) in a Node `vm`, and the page in Chromium against payload fixtures built to the chain contract (basis, time-value yield, tooltips, banners); no server. |
+| `tests/flows-desk-wiring.mjs`, `tests/fixtures-desk-lab.json`, `tests/gen-desk-lab.py` | The desk's Win % (implied) against an independent reference: `gen-desk-lab.py` (mpmath at 40 digits) prices skewed SVI chains and takes the risk-neutral probability of profit by Breeden-Litzenberger, and the suite proves the page, given the card's smile expiries, lands within 0.5pp of it and of the strategy lab on every line, while the flat fit it replaced misses by 2.5pp; the carry and the smile each line was priced on are read back from its disclosure. Chromium against `page.route` stubs, no server. |
 | `tests/markets-contract.mjs`, `tests/market-ticker-render.mjs` | The Yahoo parse against dated five-day responses (weekend, Tokyo morning, null trailing bar, no timestamps) and the strip rendered in Chromium with a fixed clock; neither starts a server. |
 | `shared/flows-freshness.js` | The Eastern clock (arithmetic, proven equal to the IANA zone), market phases, the freshness threshold table, `X-Fresh-*` headers, and the live clock's due-tests. |
 | `shared/flows-ledger.js` | The per-day session ledger: the `flows_ledger` DDL, the statement builders the Tier 1 tick, the focus tick, the heartbeat write and the nightly's `meta` write append to a batch they already issue, the gap limits (the stale lines of `FRESH_CLASSES`), the view served as `ledger` on the ingest `clock` key, and the worst-key lapse the Tier 1 tick reads from the live rows. |
@@ -525,7 +526,7 @@ flows-pipeline-contract  flows-reads-contract  flows-ledger-contract
 flows-verdict-contract
 flows-readers-contract   flows-readers-render
 markets-contract         flows-desk-client
-flows-basis-contract
+flows-basis-contract     flows-desk-wiring
 ```
 
 `market-ticker-render` needs Playwright's Chromium but no server: it serves the
@@ -537,7 +538,8 @@ other browser suites.
 assets from disk and the chain payloads from `page.route`, so the Premium desk runs against
 fixtures built to the chain payload contract rather than against workerd. Its Node half runs
 `assets/js/flows-desk.js` in a `vm` with no `document`, which is the only context that exposes
-the desk's pure functions as `__FlowsDeskTest`.
+the desk's pure functions as `__FlowsDeskTest`. `flows-desk-wiring` is the same shape (Chromium, `page.route`,
+no server); measured on 2026-09-30 at about 12 s, against 31 s for `flows-desk-client`.
 
 `flows-starts-contract` was measured on 2026-09-29: about 4 s with no server. It
 spawns the pipeline a handful of times as a child process, against loopback HTTP
