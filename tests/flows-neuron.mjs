@@ -1070,6 +1070,54 @@ const CARD = {
     "and a dollar figure whose sign contradicts the card's label is not printed either: the sentence never asserts a number it disagrees with");
 }
 
+{
+  const pinned = JSON.parse(JSON.stringify(CARD));
+  pinned.regime = { label: "long", crossings: 1, spotGammaShare: 0.6, labelFrom: "book", bookGamma: 1.2e8, bookGammaRaw: 4.1e5, bookShare: 0.6 };
+  pinned.panels.levels.levels = [
+    { kind: "max_pain", label: "Max pain", px: 70.5, distAtr: 0.19, expiry: "2026-09-18", share: 0.4, thin: false, line: 0.25 },
+    { kind: "zero_gamma", label: "Zero-gamma level", px: 66.1, distAtr: -2.78 },
+    { kind: "call_wall", label: "Call wall", px: 72, distAtr: 1.2 },
+  ];
+  pinned.panels.levels.zeroGamma = { px: 66.1, count: 1, nearby: [], coverage: 0.95, g: 3, why: null, atSpot: 4e7, profile: null };
+  const agree = buildContext(pinned, { expectedSession: "2026-09-15" });
+  const levelsOf = (ctx) => ctx.features.find((f) => f.key === "levels");
+  eq(levelsOf(agree).robustness, 2, "a zero-gamma profile that is long at spot beside a long book keeps the levels feature fair");
+  ok(agree.state.state === "pinned" && agree.state.target && agree.state.target.kind === "max_pain" &&
+     agree.state.drivers.some((d) => d.sub === "max_pain" && /the 2026-09-18 expiry, 40% of the book’s gamma/.test(d.reading)),
+     "UW-F13: a pin at max pain names the expiry it belongs to and the share of the book that expiry holds");
+
+  const clash = JSON.parse(JSON.stringify(pinned));
+  clash.panels.levels.zeroGamma.atSpot = -3e7;
+  const cx = buildContext(clash, { expectedSession: "2026-09-15" });
+  eq(levelsOf(cx).robustness, 1, "UW-F9: a profile that is short at spot beside a long book grades the levels feature weak");
+  ok(/disagree in sign/.test(levelsOf(cx).why), `and says why (${levelsOf(cx).why})`);
+  ok(cx.state.confidence < agree.state.confidence && cx.state.confidence <= 1,
+     `so the state cannot claim 'pinned, long gamma, invalidated at the flip' at fair confidence while its own profile says short (${agree.state.confidence} to ${cx.state.confidence})`);
+  ok(cx.state.drivers.some((d) => d.key === "levels" && /disagree in sign/.test(d.reading)), "and the levels driver says so in the state sentence");
+  const shortBook = JSON.parse(JSON.stringify(clash));
+  shortBook.regime = { ...shortBook.regime, label: "short", bookGamma: -1.2e8, bookGammaRaw: -4.1e5, bookShare: -0.6 };
+  ok(levelsOf(buildContext(shortBook, { expectedSession: "2026-09-15" })).robustness === 2,
+     "while a short profile beside a short book agrees, whichever sign it is");
+  const flowOnly = JSON.parse(JSON.stringify(clash));
+  flowOnly.regime = { label: "long", labelFrom: "flow", labelValue: 2e6, flowGamma: 2e6 };
+  ok(levelsOf(buildContext(flowOnly, { expectedSession: "2026-09-15" })).robustness === 2,
+     "and the check compares against the book only: a label read from the day's flow is a different quantity");
+
+  const thin = JSON.parse(JSON.stringify(pinned));
+  thin.panels.levels.levels[0] = { kind: "max_pain", label: "Max pain", px: 70.5, distAtr: 0.19, expiry: "2026-09-18", share: 0.08, thin: true, line: 0.25 };
+  const tx = buildContext(thin, { expectedSession: "2026-09-15" });
+  ok(tx.state.state === "pinned" && tx.state.target === null && tx.state.notes.some((n) => /holds 8% of the book’s gamma, under the 25% line, so it is not read as a pin/.test(n)),
+     "UW-F13: a max pain whose expiry holds 8% of the book is inside the band but is not a pin target, and the note says why");
+  ok(!/max pain/.test(tx.state.chip), "and the chip does not name it");
+
+  const full = JSON.parse(JSON.stringify(pinned));
+  full.panels.gamma.truncated = true;
+  const fx = buildContext(full, { expectedSession: "2026-09-15" });
+  ok(fx.features.find((f) => f.key === "gamma").robustness === 1 && /500-row page/.test(fx.features.find((f) => f.key === "gamma").why) &&
+     levelsOf(fx).robustness === 1,
+     "UW-F12: a strike ladder that filled the vendor's 500-row page grades the gamma and levels features weak and says the window ended it");
+}
+
 console.log(`✓ flows-neuron: ${checks} assertions — a context that carries every registry panel plus the ` +
   "standing and the volatility model, each graded 0 to 3 from the card's own coverage and quality fields " +
   "and capped at weak when the card is behind the last closed session; one line per feature so the model " +

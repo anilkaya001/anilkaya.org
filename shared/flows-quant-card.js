@@ -259,7 +259,7 @@ export function bookLevels(strikeRows, { spot } = {}) {
   const rows = [];
   let pos = 0, neg = 0;
   for (const r of strikeRows || []) {
-    const k = num(r && (r.strike ?? r.price));
+    const k = num(r && r.strike);
     const c = num(r && r.call_gamma_oi), p = num(r && r.put_gamma_oi);
     if (k === null || !(k > 0) || (c === null && p === null)) continue;
     if (p !== null && p > 0) pos++;
@@ -415,17 +415,21 @@ export function engineFacts(input) {
   lvl("level.callWall", book ? book.callWall : null, book ? 3 : 0, book ? null : "book.absent");
   lvl("level.putWall", book ? book.putWall : null, book ? 3 : 0, book ? null : "book.absent");
   lvl("level.magnet", book ? book.magnet : null, book && book.putSign !== "mixed" ? 3 : 0, book ? (book.putSign === "mixed" ? "book.put-sign" : null) : "book.absent");
-  lvl("level.flip", zero ? zero.px : null, zero ? zero.g : 0, zero ? zero.why : "flip.no-chain");
-  add("level.flip.count", zero ? zero.count : null, "count", zero ? zero.g : 0, zero ? {} : { why: "flip.no-chain" });
+  const regime = card && card.regime && typeof card.regime === "object" ? card.regime : {};
+  const clash = zero && fin(zero.atSpot) && zero.atSpot !== 0 && fin(regime.bookGamma) && regime.bookGamma !== 0 &&
+    Math.sign(zero.atSpot) !== Math.sign(regime.bookGamma);
+  const flipG = zero ? (clash ? Math.min(zero.g, 1) : zero.g) : 0;
+  lvl("level.flip", zero ? zero.px : null, flipG, zero ? (clash ? "flip.sign-at-spot" : zero.why) : "flip.no-chain");
+  add("level.flip.count", zero ? zero.count : null, "count", flipG, zero ? {} : { why: "flip.no-chain" });
   const cross = card && fin(card.strikeSumCrossing) ? card.strikeSumCrossing : null;
   lvl("level.strikeSumCrossing", cross, 2, cross === null ? "crossing.none" : null);
   const lv = ok(panels.levels) && Array.isArray(panels.levels.levels) ? panels.levels.levels : [];
   const pain = lv.find((x) => x && x.kind === "max_pain") || null;
-  lvl("level.maxPain", pain ? pain.px : null, pain ? 2 : 0, pain ? null : "pain.absent");
+  lvl("level.maxPain", pain ? pain.px : null, pain ? (pain.thin === true ? 1 : 2) : 0, pain ? (pain.thin === true ? "pain.thin-expiry" : null) : "pain.absent");
   const gp = ok(panels.gamma) ? panels.gamma : null;
   lvl("level.flowPeakLong", gp ? gp.flowPeakLong : null, gp ? 1 : 0, gp ? null : "flow.absent");
   lvl("level.flowPeakShort", gp ? gp.flowPeakShort : null, gp ? 1 : 0, gp ? null : "flow.absent");
-  const reg = card && card.regime && typeof card.regime === "object" ? card.regime : {};
+  const reg = regime;
   add("gex.book", fin(reg.bookGamma) ? sig(reg.bookGamma) : null, "usdPer1pct", 3,
     fin(reg.bookGamma) ? {} : { why: fin(reg.bookGammaRaw) ? "book.no-spot" : "book.absent" });
   add("gex.flow", fin(reg.flowGamma) ? sig(reg.flowGamma) : null, "usdPer1pct", 1, fin(reg.flowGamma) ? {} : { why: "flow.absent" });

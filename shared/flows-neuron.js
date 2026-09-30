@@ -113,6 +113,20 @@ function levelFigures(p) {
   return out;
 }
 
+const TRUNCATED_LADDER = "the strike ladder filled the vendor's 500-row page, so strikes beyond it are missing and its sums and crossing depend on where the window ended";
+
+function zeroGammaClash(card) {
+  const lv = card && card.panels && card.panels.levels;
+  const zg = okPanel(lv) && lv.zeroGamma && typeof lv.zeroGamma === "object" ? lv.zeroGamma : null;
+  const at = zg ? num(zg.atSpot) : null;
+  if (at === null || at === 0) return null;
+  const read = gammaReading(card);
+  if (read.from !== "book" || (read.label !== "long" && read.label !== "short")) return null;
+  return (at > 0) === (read.label === "long") ? null
+    : "total dealer gamma re-evaluated at spot reads " + (at > 0 ? "long" : "short") + " while the open-interest book reads " + read.label +
+      ", so the two disagree in sign and the zero-gamma level is graded weak";
+}
+
 function panelRobustness(key, group, p, card) {
   if (!p || typeof p !== "object") return { r: 0, why: "not published on this card" };
   if (p.status !== "ok") {
@@ -123,11 +137,15 @@ function panelRobustness(key, group, p, card) {
   const conv = card.conv && typeof card.conv === "object" ? card.conv : {};
   switch (key) {
     case "gamma":
+      if (p.truncated === true) return { r: 1, why: TRUNCATED_LADDER };
       return num(p.strikes) !== null && num(p.strikes) < 20
         ? { r: 1, why: "the ladder of gamma dealers added today rests on fewer than 20 strikes" }
         : { r: 2, why: "gamma dealers added today: one session's directionalized volume by strike, not the standing open-interest book" };
     case "levels": {
       const g = card.panels && card.panels.gamma && card.panels.gamma.status === "ok" ? card.panels.gamma : null;
+      const clash = zeroGammaClash(card);
+      if (clash) return { r: 1, why: clash };
+      if (g && g.truncated === true) return { r: 1, why: TRUNCATED_LADDER };
       return g && num(g.strikes) !== null && num(g.strikes) < 20
         ? { r: 1, why: "the flow ladder beside the levels rests on fewer than 20 strikes" }
         : { r: 2, why: "the walls read off the open-interest book on their own side of spot, zero gamma off total gamma re-evaluated at hypothetical spots, the strike-sum crossing off today's flow ladder, max pain off the open-interest snapshot" };
@@ -284,7 +302,7 @@ function levelsOf(card) {
   for (const lv of p.levels) {
     const kind = str(lv && lv.kind), px = num(lv && lv.px), distAtr = num(lv && lv.distAtr);
     if (!kind || px === null) continue;
-    const row = { kind, label: str(lv.label) || kind, px, distAtr };
+    const row = { kind, label: str(lv.label) || kind, px, distAtr, expiry: str(lv.expiry), share: num(lv.share), thin: lv.thin === true, line: num(lv.line) };
     by[kind] = row;
     list.push(row);
   }
@@ -573,7 +591,8 @@ export function regimeState(card, extras) {
     if (levelsOk && flip && flipAtr !== null) {
       drivers.push({ key: "levels", robustness: levelsR.r, weight: levelsR.r, axis: "positioning",
         reading: "total dealer gamma, re-evaluated at hypothetical spots, changes sign at " + f2(flip.px) + ", " + Math.abs(flipAtr).toFixed(2) + " ATR " + (flipAtr >= 0 ? "above" : "below") + " spot " + f2(L.spot) +
-          (onFlip ? " (inside " + T.FLIP_ON_ATR + " ATR: spot sits on the crossing)" : nearFlip ? " (inside " + T.FLIP_NEAR_ATR + " ATR)" : "") });
+          (onFlip ? " (inside " + T.FLIP_ON_ATR + " ATR: spot sits on the crossing)" : nearFlip ? " (inside " + T.FLIP_NEAR_ATR + " ATR)" : "") +
+          (zeroGammaClash(c) ? "; " + zeroGammaClash(c) : "") });
     } else if (levelsOk && num(regime.bandMin) !== null && num(regime.bandMax) !== null) {
       drivers.push({ key: "levels", robustness: levelsR.r, weight: levelsR.r, axis: "positioning",
         reading: "no zero-gamma level was resolved on this card; the flow ladder read over " + f2(num(regime.bandMin)) + " to " + f2(num(regime.bandMax)) +
@@ -591,7 +610,12 @@ export function regimeState(card, extras) {
       direction = null;
       confidence = base - (strong ? 0 : 1) - (nearFlip ? 1 : 0);
       const pain = L.by.max_pain || null;
-      target = pain && pain.distAtr !== null && Math.abs(pain.distAtr) <= T.PAIN_NEAR_ATR ? { kind: "max_pain", px: pain.px, label: "Max pain", distAtr: pain.distAtr } : null;
+      const painNear = pain && pain.distAtr !== null && Math.abs(pain.distAtr) <= T.PAIN_NEAR_ATR;
+      target = painNear && !pain.thin ? { kind: "max_pain", px: pain.px, label: "Max pain", distAtr: pain.distAtr } : null;
+      if (painNear && pain.thin) {
+        notes.push("max pain at " + f2(pain.px) + " lies inside the pin band, but its expiry" + (pain.expiry ? " " + pain.expiry : "") + " holds " +
+          Math.round(pain.share * 100) + "% of the book\u2019s gamma" + (pain.line === null ? "" : ", under the " + Math.round(pain.line * 100) + "% line") + ", so it is not read as a pin");
+      }
       const wall = L.list.filter((l) => l.kind === "call_wall" || l.kind === "put_wall").sort((a, b) => Math.abs(a.distAtr) - Math.abs(b.distAtr))[0] || null;
       invalidation = flip ? { kind: "zero_gamma", px: flip.px, label: "Zero-gamma level" } : wall ? { kind: wall.kind, px: wall.px, label: wall.label } : null;
       horizon = cal && num(cal.frontLoad) !== null && cal.frontLoad >= T.FRONT_LOAD && front
@@ -599,7 +623,8 @@ export function regimeState(card, extras) {
         : cal && str(cal.halfLifeExpiry) ? { kind: "half_life_expiry", value: cal.halfLifeExpiry, days: num(cal.halfLifeDays) } : pricedHorizon;
       if (target) {
         drivers.push({ key: "levels", sub: "max_pain", robustness: levelsR.r, weight: levelsR.r, axis: "positioning",
-          reading: "max pain at " + f2(pain.px) + " sits " + Math.abs(pain.distAtr).toFixed(2) + " ATR " + (pain.distAtr >= 0 ? "above" : "below") + " spot, inside the " + T.PAIN_NEAR_ATR + " ATR pin band" });
+          reading: "max pain at " + f2(pain.px) + (pain.expiry ? " (the " + pain.expiry + " expiry" + (pain.share === null ? "" : ", " + Math.round(pain.share * 100) + "% of the book\u2019s gamma") + ")" : "") +
+            " sits " + Math.abs(pain.distAtr).toFixed(2) + " ATR " + (pain.distAtr >= 0 ? "above" : "below") + " spot, inside the " + T.PAIN_NEAR_ATR + " ATR pin band" });
       }
     } else {
       const d = votes.direction;

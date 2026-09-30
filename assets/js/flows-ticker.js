@@ -1666,7 +1666,7 @@
     const clash = num(reg.bookGamma) === null && bookV !== null && ((gl === "short" && bookV > 0) || (gl === "long" && bookV < 0));
     mod({ id: "m-gamma", title: "Gamma", span: [12, 7], st, seg: vw.seg, views: vw.views, index: 4, body: [
       mets([
-        metric("Dealer γ", clash ? (gl === "short" ? "Short" : "Long") : F.money(bookV, true), { tone: gl, unit: clash ? null : "/1%", sub: clash ? "today " + F.money(bookV, true) + "/1%" : gl ? (gl === "short" ? "Short" : "Long") + (reg.labelFrom === "book" ? SEP + "book" : SEP + "flow") + (gx && num(gx.persist) !== null ? SEP + gx.persist + "d" : "") : null,
+        metric("Dealer γ", clash ? (gl === "short" ? "Short" : "Long") : F.money(bookV, true), { tone: gl, unit: clash ? null : "/1%", sub: clash ? "today " + F.money(bookV, true) + "/1%" : gl ? (gl === "short" ? "Short" : "Long") + (reg.labelFrom === "book" ? SEP + "book" : SEP + "flow") + (gx && num(gx.persist) !== null && gx.regime === gl ? SEP + gx.persist + "d" : "") : null,
           state: bookV === null ? ST("unavailable", "No regime reading on the card.") : null }),
         metric("Flip", lv.gamma_flip ? F.px(lv.gamma_flip.px) : DASH, { key: keyOf("--lvl-flip", "dia", ""), sub: dist("gamma_flip"), state: lvSt("gamma_flip", "gamma flip"), id: "ftFlip" }),
         metric("Call wall", lv.call_wall ? F.px(lv.call_wall.px) : DASH, { key: keyOf("--lvl-call", "dot", ""), sub: dist("call_wall"), state: lvSt("call_wall", "call wall") }),
@@ -1677,7 +1677,8 @@
         title: "Gamma", state: st.state === "ok" ? null : st.state, asOf: (P.surface && P.surface.asOf) || null, lead: leadOf(P.levels),
         facts: [["Book γ per 1%", F.money(reg.bookGamma, true)], ["Added today per 1%", F.money(numOr(reg.flowGamma, reg.netGamma), true)], ["Regime", reg.label || null], ["Read from", reg.labelFrom || null],
           ["Zero crossings", num(reg.crossings) === null ? null : String(reg.crossings)], ["Strike band", num(reg.bandMin) === null ? null : F.px(reg.bandMin, 0) + " – " + F.px(reg.bandMax, 0)], ["ATR", F.px(atrOf(card))],
-          ["1Y z of the book", gx && num(gx.z) !== null ? F.signed(gx.z, 2) : null], ["1Y percentile", gx ? F.pct(gx.pct, 0) : null], ["Share of ADV", gx ? F.pct(gx.adv, 1) : null], ["Sign flips in a year", gx && num(gx.flips) !== null ? String(gx.flips) : null],
+          ["1Y z of the daily series", gx && num(gx.z) !== null ? F.signed(gx.z, 2) : null], ["1Y percentile of the daily series", gx ? F.pct(gx.pct, 0) : null], ["Daily series per 1% as a share of ADV", gx ? F.pct(gx.adv, 1) : null], ["Sign flips in the daily series", gx && num(gx.flips) !== null ? String(gx.flips) : null],
+          ["Daily series counts", gx ? "contracts expiring that day; the book above does not" : null],
           ...keyStats(card).filter(([k]) => /wall|pain|crossing|gamma|flip|strike/i.test(k)),
           ["Vendor flip", vl && num(vl.flip) !== null ? F.px(vl.flip) + " (" + (vl.flipAgree ? "agrees" : "differs by " + fx(vl.flipGap, 2, true) + " ATR") + ")" : null],
           ["Vendor call wall", vl && num(vl.callWall) !== null ? F.px(vl.callWall) + (vl.callWallAgree ? " (agrees)" : " (differs)") : null],

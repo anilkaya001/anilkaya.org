@@ -860,6 +860,31 @@ try {
   }
 
   {
+    const card = clone(full);
+    const label = card.regime && card.regime.label === "short" ? "short" : "long";
+    card.regime = { ...card.regime, label, labelFrom: "book", bookGamma: label === "long" ? 4.2e7 : -4.2e7, bookGammaRaw: label === "long" ? 1.3e5 : -1.3e5 };
+    const other = label === "long" ? "short" : "long";
+    const read = async (regime) => {
+      const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, card, { cardX: { ...(cardXOf(card.ticker) || {}), gex: { status: "ok", asOf: card.sessionDate, persist: 7, regime, z: 1.1, pct: 0.8, adv: 0.02, flips: 3 } },
+        hist: histOf(card.ticker) || { status: "absent" } });
+      await page.waitForSelector("#m-gamma .ui-metric", { timeout: 5000 });
+      const got = await page.evaluate(() => {
+        const m = [...document.querySelectorAll("#m-gamma .ui-metric")].find((n) => /Dealer/.test(n.textContent));
+        return { text: m ? m.textContent : "" };
+      });
+      eq(errors.length, 0, `the tile page throws nothing (${errors.join("; ")})`);
+      await page.close();
+      return got.text;
+    };
+    ok(/7d/.test(await read(label)), "UW-F16: the tile keeps the run of sessions the daily series reports when that series reads the same sign as the book beside it");
+    ok(!/7d/.test(await read(other)),
+       "and drops it when the series' last day reads the other sign, because the series counts contracts expiring that day and the book above it does not: one tile, one definition of the book");
+  }
+
+  {
     const base = clone(withChain.find((c) => c.engine) || withChain[0]);
     const old = { ...base, sessionDate: "2026-09-16" };
     const sat = Date.parse("2026-09-26T15:00:00Z");
