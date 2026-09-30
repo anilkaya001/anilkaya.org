@@ -1,9 +1,9 @@
 import { TICKER_PANELS, SENTINEL_KEYS } from "./flows-panels.js";
 import { guardAnswer, numeralsIn } from "./flows-ask.js";
 import { VARIATION_VOTES, VARIATION_LINES } from "./flows-variation.js";
-import { STRUCTURE_BY_ID, AFFINITY } from "./flows-quant-structures.js";
+import { STRUCTURE_BY_ID, AFFINITY, BUCKET_LINES } from "./flows-quant-structures.js";
 
-export const NEURON_CONTEXT_VERSION = 4;
+export const NEURON_CONTEXT_VERSION = 5;
 export const NEURON_MAX_IDEAS = 3;
 
 const article = (noun, capital) => (/^[aeiou]/i.test(noun) ? (capital ? "An " : "an ") : (capital ? "A " : "a ")) + noun;
@@ -22,36 +22,37 @@ export const STATE_WORD = Object.freeze({
   pinned: "Pinned", amplifying: "Amplifying", squeeze: "Squeeze", transitional: "On the flip",
   "premium-rich": "Premium rich", "premium-cheap": "Premium cheap", undetermined: "Undetermined",
 });
+export const STATE_CONFIDENCE_MAX = 2;
 export const STATE_LINES = Object.freeze({
   SHARE_MARGINAL: 0.2, FLIP_ON_ATR: 0.5, FLIP_NEAR_ATR: 1.5, WALL_NEAR_ATR: 1.5, PAIN_NEAR_ATR: 0.5,
-  PATH_ONE_SIDED: 0.65, AGGRESSOR_SHARE: 0.25, OI_SIDE_RATIO: 2, DISPLACEMENT_ATR: 0.5,
+  PATH_ONE_SIDED: 0.65, AGGRESSOR_SHARE: 0.25, OI_SIDE_RATIO: 2,
   SCORE_DEAD_BAND: 1, CONVICTION_FAIR: 50, SPLIT_MINORITY: 1 / 3,
-  VRP_RELATIVE: 0.1, IV_RANK_HIGH: 0.7, IV_RANK_LOW: 0.2, IV_MOMENTUM_REL: 0.1,
+  VRP_RELATIVE: BUCKET_LINES.VRP_RICH, IV_RANK_HIGH: BUCKET_LINES.IV_HIGH, IV_RANK_LOW: BUCKET_LINES.IV_LOW, IV_MOMENTUM_REL: 0.1,
   TERM_FRONT_BID_REL: 0.08, GARCH_GAP_REL: 0.12, FRONT_LOAD: 0.25, DRIFT_SD: VARIATION_LINES.DRIFT_SD,
 });
 const BY_PREMIUM = (rich, cheap, fair) => Object.freeze({ rich, cheap, fair });
 export const STATE_STRUCTURES = Object.freeze({
   pinned: BY_PREMIUM(
-    { preferred: ["iron condor", "call credit spread", "put credit spread", "covered call"], avoid: ["long straddle", "long strangle", "long call", "long put"] },
-    { preferred: ["calendar spread", "covered call", "collar"], avoid: ["long straddle", "long strangle", "long call", "long put"] },
-    { preferred: ["iron condor", "covered call", "call credit spread", "put credit spread"], avoid: ["long straddle", "long strangle", "long call", "long put"] }),
+    { preferred: ["iron condor", "call credit spread", "put credit spread"], avoid: ["long straddle", "long strangle", "long call", "long put"] },
+    { preferred: ["calendar spread"], avoid: ["long straddle", "long strangle", "long call", "long put"] },
+    { preferred: ["iron condor", "call credit spread", "put credit spread"], avoid: ["long straddle", "long strangle", "long call", "long put"] }),
   bull: BY_PREMIUM(
     { preferred: ["put credit spread", "call debit spread"], avoid: ["iron condor", "call credit spread", "covered call", "long put", "put debit spread"] },
-    { preferred: ["long call", "call debit spread", "put credit spread"], avoid: ["iron condor", "call credit spread", "covered call", "long put", "put debit spread"] },
+    { preferred: ["long call", "call debit spread"], avoid: ["iron condor", "call credit spread", "covered call", "long put", "put debit spread"] },
     { preferred: ["call debit spread", "put credit spread"], avoid: ["iron condor", "call credit spread", "covered call", "long put", "put debit spread"] }),
   bear: BY_PREMIUM(
     { preferred: ["call credit spread", "put debit spread"], avoid: ["iron condor", "put credit spread", "long call", "call debit spread", "covered call"] },
-    { preferred: ["long put", "put debit spread", "call credit spread"], avoid: ["iron condor", "put credit spread", "long call", "call debit spread", "covered call"] },
+    { preferred: ["long put", "put debit spread"], avoid: ["iron condor", "put credit spread", "long call", "call debit spread", "covered call"] },
     { preferred: ["put debit spread", "call credit spread"], avoid: ["iron condor", "put credit spread", "long call", "call debit spread", "covered call"] }),
   shortNoSide: BY_PREMIUM(
-    { preferred: ["no position", "long strangle"], avoid: ["iron condor", "covered call"] },
+    { preferred: ["no position"], avoid: ["iron condor", "covered call", "long straddle", "long strangle"] },
     { preferred: ["long straddle", "long strangle"], avoid: ["iron condor", "covered call"] },
     { preferred: ["long strangle", "no position"], avoid: ["iron condor", "covered call"] }),
   transitional: BY_PREMIUM(
     { preferred: ["calendar spread", "no position"], avoid: ["iron condor"] },
     { preferred: ["long straddle", "long strangle"], avoid: ["iron condor"] },
     { preferred: ["long strangle", "calendar spread", "no position"], avoid: ["iron condor"] }),
-  "premium-rich": { preferred: ["iron condor", "call credit spread", "put credit spread", "covered call"], avoid: ["long straddle", "long strangle"] },
+  "premium-rich": { preferred: ["iron condor", "call credit spread", "put credit spread"], avoid: ["long straddle", "long strangle"] },
   "premium-cheap": { preferred: ["long straddle", "long strangle", "calendar spread"], avoid: ["iron condor"] },
   undetermined: { preferred: ["no position"], avoid: [] },
 });
@@ -432,6 +433,8 @@ function directionVotes(card) {
   return { votes, direction, split: total > 0 && minority >= T.SPLIT_MINORITY, minority };
 }
 
+const SOFT_TILT = " (a soft tilt and not a signal for one name: the band is narrower than the noise in 21 sessions of realised volatility)";
+
 function premiumAxis(card) {
   const P = card.panels || {};
   const T = STATE_LINES;
@@ -463,16 +466,18 @@ function premiumAxis(card) {
       base = forward ? Math.min(r, fwdGrade === null ? r : fwdGrade) : Math.min(r, 1);
       drivers.push({ key: "pricedMove", robustness: base, weight: base, axis: "premium", vote: reading === "rich" ? 1 : reading === "cheap" ? -1 : 0,
         reading: forward
-          ? pct1(iv) + "% implied against a GARCH forecast of " + pct1(rf) + "% realised over the next 21 sessions, a forward premium of " +
+          ? pct1(iv) + "% implied against a GARCH estimate of " + pct1(rf) + "% realised over the next 21 sessions, a forward premium of " +
             (gap >= 0 ? "+" : "\u2212") + Math.abs(gap * 100).toFixed(1) + " points, " + (num(pm.vrpForwardVar) !== null ? (pm.vrpForwardVar >= 0 ? "+" : "\u2212") + Math.abs(pm.vrpForwardVar).toFixed(4) + " in variance, " : "") +
-            (rel >= 0 ? "+" : "\u2212") + Math.abs(rel * 100).toFixed(0) + "% of the forecast; the line is \u00b1" + Math.round(T.VRP_RELATIVE * 100) + "%" +
+            (rel >= 0 ? "+" : "\u2212") + Math.abs(rel * 100).toFixed(0) + "% of the estimate; the line is \u00b1" + Math.round(T.VRP_RELATIVE * 100) + "%" +
+            (reading === "fair" ? "" : SOFT_TILT) +
             (trailing !== null && rv !== null ? " (against the trailing 21 sessions' " + pct1(rv) + "% the gap is " + (trailing >= 0 ? "+" : "\u2212") + Math.abs(trailing * 100).toFixed(1) + " points, shown and not voted)" : "")
           : pct1(iv) + "% implied against " + pct1(rv) + "% realised over the trailing 21 sessions, a backward-looking premium of " +
             (gap >= 0 ? "+" : "\u2212") + Math.abs(gap * 100).toFixed(1) + " points (" + (rel >= 0 ? "+" : "\u2212") + Math.abs(rel * 100).toFixed(0) +
-            "% of realised; the line is \u00b1" + Math.round(T.VRP_RELATIVE * 100) + "%): no graded forward forecast was available, so it votes weakly" });
+            "% of realised; the line is \u00b1" + Math.round(T.VRP_RELATIVE * 100) + "%" + (reading === "fair" ? "" : SOFT_TILT) +
+            "): no graded forward estimate was available, so it votes weakly" });
       const rank = num(pm.ivRank);
       if (rank !== null) {
-        const v = rank >= T.IV_RANK_HIGH ? 1 : rank <= T.IV_RANK_LOW ? -1 : 0;
+        const v = rank > T.IV_RANK_HIGH ? 1 : rank < T.IV_RANK_LOW ? -1 : 0;
         drivers.push({ key: "pricedMove", sub: "ivRank", robustness: r, weight: v === 0 ? 0 : 1, axis: "premium", vote: v,
           reading: "IV rank " + Math.round(rank * 100) + "% of its own year" + (v > 0 ? ", in the top band" : v < 0 ? ", in the bottom band" : ", mid-range") });
       }
@@ -526,7 +531,7 @@ function stateBrief(s, ticker) {
   if (s.state === "undetermined") return "The greeks imply no state for " + t + ": " + (s.notes[0] || "no reading") + ".";
   const pos = s.drivers.filter((d) => d.axis === "positioning" && !d.sub).map((d) => d.reading);
   const head = "The greeks imply " + (s.state === "transitional" ? "a transitional state on the flip" : "a" + (/^[aeiou]/.test(s.state) ? "n " : " ") + s.state.replace("-", " ") + " state") +
-    " for " + t + (s.flow ? " with flow " + s.flow : "") + " (confidence " + s.confidence + " of 3)";
+    " for " + t + (s.flow ? " with flow " + s.flow : "") + " (confidence " + s.confidence + " of " + STATE_CONFIDENCE_MAX + ")";
   return head + (pos.length ? ": " + pos.join("; ") : "") + ". Preferred structures: " + s.preferred.join(", ") +
     (s.invalidation ? "; the state ends past the " + s.invalidation.label.toLowerCase() + " at " + f2(s.invalidation.px) : "") + ".";
 }
@@ -539,7 +544,7 @@ export function stateSentence(s, ticker) {
   const pos = pick("positioning"), dir = pick("flow", (d) => d.vote !== 0), abst = pick("flow", (d) => d.vote === 0);
   const prem = pick("premium", (d) => d.weight > 0), hz = pick("horizon");
   parts.push("IMPLIED STATE for " + t + ": " + STATE_WORD[s.state].toLowerCase() + (s.flow ? ", flow " + s.flow : "") +
-    " (confidence " + s.confidence + " of 3" + (s.stale ? ", capped: the card is behind the last closed session" : "") + ").");
+    " (confidence " + s.confidence + " of " + STATE_CONFIDENCE_MAX + (s.stale ? ", capped: the card is behind the last closed session" : "") + ").");
   if (pos.length) parts.push("Positioning: " + pos.join("; ") + ".");
   if (dir.length) parts.push("Flow: " + dir.join("; ") + ".");
   if (abst.length) parts.push("Abstaining: " + abst.join("; ") + ".");
@@ -594,7 +599,7 @@ export function regimeState(card, extras) {
   const read = gammaReading(c);
   const label = read.label;
   const share = num(regime.spotGammaShare);
-  const gammaDriverR = read.from === "book" ? 3 : read.from === "flow" ? 1 : read.from === "label" ? 1 : 0;
+  const gammaDriverR = read.from === "book" ? 2 : read.from === "flow" ? 1 : read.from === "label" ? 1 : 0;
   const gammaOk = gammaDriverR > 0 && (read.from === "book" || (okPanel(P.gamma) && gammaR.r > 0)) &&
     (label === "long" || label === "short");
   const levelsOk = okPanel(P.levels) && levelsR.r > 0;
@@ -713,7 +718,7 @@ export function regimeState(card, extras) {
   }
   for (const d of hedgeDrivers(c)) drivers.push(d);
   if (stale) confidence = Math.min(confidence, 1);
-  confidence = Math.max(0, Math.min(3, confidence));
+  confidence = Math.max(0, Math.min(STATE_CONFIDENCE_MAX, confidence));
   if (state === "undetermined") confidence = 0;
   const table = state === "pinned" ? STATE_STRUCTURES.pinned[prem]
     : state === "squeeze" || state === "amplifying"
@@ -735,10 +740,22 @@ export function regimeState(card, extras) {
   return out;
 }
 
+function noPositionIdea(ctx, s) {
+  const known = (ctx.features || []).filter((f) => f.key !== "state" && f.status === "ok" && f.robustness >= 1)
+    .sort((a, b) => b.robustness - a.robustness).slice(0, 2).map((f) => f.key);
+  return {
+    title: "No position", structure: "no position", direction: "neutral",
+    thesis: "The greeks imply no state for " + (ctx.ticker || "this name") + ": " + (s.notes[0] || "no reading") +
+      ". No position is the reading until gamma positioning or premium can be read.",
+    rests_on: known, invalidation: "the greeks implying a state", horizon: "the next card", fromState: true,
+  };
+}
+
 export function stateIdea(context) {
   const ctx = context && typeof context === "object" ? context : {};
   const s = ctx.state && typeof ctx.state === "object" ? ctx.state : null;
-  if (!s || s.state === "undetermined" || s.confidence < 1 || !s.invalidation || !s.horizon) return null;
+  if (s && s.state === "undetermined") return noPositionIdea(ctx, s);
+  if (!s || s.confidence < 1 || !s.invalidation || !s.horizon) return null;
   const voting = s.drivers.filter((d) => d.robustness >= 1 && d.axis === "flow" && d.vote !== 0);
   const flowKeys = voting.filter((d) => d.key !== "standing" || voting.length === 1).map((d) => d.key);
   const rests = ["state", ...new Set([
@@ -893,7 +910,7 @@ export function buildContext(card, extras) {
       key: "state", title: "Implied state", group: "signal",
       status: on ? "ok" : "unavailable", robustness: state.confidence,
       why: !on ? (state.notes[0] || "no state is implied")
-        : "confidence " + state.confidence + " of 3, read from " + [...new Set(named)].join(", ") +
+        : "confidence " + state.confidence + " of " + STATE_CONFIDENCE_MAX + ", read from " + [...new Set(named)].join(", ") +
           (state.stale ? ", capped: the card is behind the last closed session" : ""),
       say: on ? stateSentence(state, tk) : null,
       figures: on ? {
@@ -988,8 +1005,10 @@ export const CLAIM_RELS = Object.freeze(["gt", "lt", "near", "between", "rising"
 export const VET_CODES = Object.freeze(["schema", "digit", "unknown-id", "avoid", "verdict-false", "claim-false", "withheld", "undefined-first", "dup",
   "not-ranked", "off-rules"]);
 export const ENGINE_LINES = Object.freeze({
-  VRP_RICH: 0.10, VRP_CHEAP: -0.10, IV_LOW: 0.25, IV_MID_HIGH: 0.75, IV_HIGH: 0.70, EVENT_OVER: 1.25, EVENT_UNDER: 0.80,
-  SKEW_STEEP: 0.8, SKEW_FLAT: 0.2, FRONT_BID: 0.08, NEAR_ATR: 0.5, NEAR_VOL: 0.01, NEAR_FRAC: 0.02, MAX_IDEAS: 3, MAX_STRUCTURES: 5,
+  VRP_RICH: BUCKET_LINES.VRP_RICH, VRP_CHEAP: BUCKET_LINES.VRP_CHEAP, IV_LOW: BUCKET_LINES.IV_LOW, IV_HIGH: BUCKET_LINES.IV_HIGH,
+  EVENT_OVER: BUCKET_LINES.EVENT_OVER, EVENT_UNDER: BUCKET_LINES.EVENT_UNDER,
+  SKEW_STEEP: BUCKET_LINES.SKEW_STEEP, SKEW_FLAT: BUCKET_LINES.SKEW_FLAT, FRONT_BID: 0.08, NEAR_ATR: 0.5, NEAR_VOL: 0.01, NEAR_FRAC: 0.02,
+  MAX_IDEAS: 3, MAX_STRUCTURES: 5,
 });
 const RULE_FACT = Object.freeze({ iv: "iv.pct.30", vrp: "vrp.rel.21", term: "term.slope.30_90.exEvent", skew: "skew.rr25.30.pct", event: "move.event.ratio" });
 
@@ -1082,10 +1101,11 @@ export function verdictHolds(code, st, eng) {
   const longPrem = st && st.vol === "long";
   switch (code) {
     case "harvest-rich-premium":
-      return !!st && shortPrem && ((vrp !== null && vrp >= L.VRP_RICH && g("vrp.rel.21") >= 2 && ivp !== null && ivp >= L.IV_LOW) || (ivp !== null && ivp >= L.IV_HIGH));
+      return !!st && shortPrem && vrp !== null && vrp > 0 &&
+        ((vrp >= L.VRP_RICH && g("vrp.rel.21") >= 2 && ivp !== null && ivp >= L.IV_LOW) || (ivp !== null && ivp > L.IV_HIGH));
     case "buy-cheap-convexity":
-      return !!st && longPrem && ((vrp !== null && vrp <= L.VRP_CHEAP && g("vrp.rel.21") >= 2 && ivp !== null && ivp <= L.IV_MID_HIGH) ||
-        (ivp !== null && ivp <= L.IV_LOW && vrp !== null && vrp <= L.VRP_RICH));
+      return !!st && longPrem && vrp !== null && vrp < 0 &&
+        ((vrp <= L.VRP_CHEAP && g("vrp.rel.21") >= 2 && ivp !== null && ivp <= L.IV_HIGH) || (ivp !== null && ivp < L.IV_LOW));
     case "pin-at-level":
       return !!st && state.state === "pinned" && nearLevel(eng, st, ["level.magnet", "level.maxPain"]);
     case "ride-short-gamma":
@@ -1153,7 +1173,7 @@ export function claimHolds(claim, eng) {
     case "rich": case "cheap": {
       const rich = claim.rel === "rich";
       if (/^vrp\./.test(a.id)) return { ok: rich ? a.v >= (a.id === "vrp.rel.21" ? L.VRP_RICH : 0) : a.v <= (a.id === "vrp.rel.21" ? L.VRP_CHEAP : 0), code: "claim-false" };
-      if (/\.pct\b|\.pct\.|\.rank\./.test(a.id)) return { ok: rich ? a.v >= L.IV_MID_HIGH : a.v <= L.IV_LOW, code: "claim-false" };
+      if (/\.pct\b|\.pct\.|\.rank\./.test(a.id)) return { ok: rich ? a.v > L.IV_HIGH : a.v < L.IV_LOW, code: "claim-false" };
       if (a.id === "move.event.ratio") return { ok: rich ? a.v >= L.EVENT_OVER : a.v <= L.EVENT_UNDER, code: "claim-false" };
       return { ok: false, code: "claim-false" };
     }
@@ -1476,8 +1496,9 @@ export function vetIdeas(rawIdeas, context) {
       refused.push(title + ": " + article(structure) + " is on the implied state\u2019s avoid list (" + st.chip + ")"); continue;
     }
     const feats = rests.map((k) => byKey.get(k)).filter(Boolean);
-    if (feats.length < 2 || feats.length !== rests.length) { refused.push(title + ": rests on fewer than two known features"); continue; }
-    const robustness = Math.min(...feats.map((f) => f.robustness));
+    const abstains = idea.fromState === true && structure === "no position";
+    if ((!abstains && feats.length < 2) || feats.length !== rests.length) { refused.push(title + ": rests on fewer than two known features"); continue; }
+    const robustness = feats.length ? Math.min(...feats.map((f) => f.robustness)) : 1;
     if (robustness < 1) { refused.push(title + ": rests on a withheld feature"); continue; }
     const text = [title, thesis, invalidation, horizon].join(". ");
     const verdict = guardAnswer(text, facts, guardOptions(ctx));

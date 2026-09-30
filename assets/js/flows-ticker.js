@@ -957,7 +957,7 @@
     const sc = num(card.score);
     if (st) {
       const sp = st.state.replace("-", " "), fl = st.state === "transitional", c = num(st.confidence), flow = str(st.flow) || str(st.direction);
-      return { text: str(st.brief) || "The greeks imply " + (fl ? "a transitional state on the flip" : (/^[aeiou]/.test(sp) ? "an " : "a ") + sp + " state") + " for " + card.ticker + (flow ? " with flow " + flow : "") + (c === null ? "" : " (confidence " + c + " of 3)") + ".",
+      return { text: str(st.brief) || "The greeks imply " + (fl ? "a transitional state on the flip" : (/^[aeiou]/.test(sp) ? "an " : "a ") + sp + " state") + " for " + card.ticker + (flow ? " with flow " + flow : "") + (c === null ? "" : " (confidence " + c + " of 2)") + ".",
         st, word: str(st.word) || (fl ? "On the flip" : cap(sp)), stale: st.stale };
     }
     return sc === null ? null : { text: card.ticker + " scores " + F.signed(sc) + " of ±100" + (num(card.conviction) === null ? "" : ", conviction " + card.conviction) + ".", st: null };

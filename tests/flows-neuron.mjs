@@ -4,8 +4,9 @@ import { buildContext, contextLines, contextFacts, promptForNeuron, parseNeuronO
          regimeState, stateIdea, stateSentence, stateChip, STATES, STATE_STRUCTURES, STATE_LINES, STATE_WORD,
          NEURON_CONTEXT_VERSION, NEURON_MAX_IDEAS, NEURON_STRUCTURES,
          engineContext, engineFallback, promptForEngine, parseEngineOutput, vetEngineReply, verdictHolds, claimHolds,
-         VERDICTS, VERDICT_WORD, CLAIM_RELS, VET_CODES, guardOptions, proseIssue, cleanLabel, NEURON_PROSE_CAPS, applyStaleCap, STALE_NOTE } from "../shared/flows-neuron.js";
+         VERDICTS, VERDICT_WORD, CLAIM_RELS, VET_CODES, ENGINE_LINES, STATE_CONFIDENCE_MAX, guardOptions, proseIssue, cleanLabel, NEURON_PROSE_CAPS, applyStaleCap, STALE_NOTE } from "../shared/flows-neuron.js";
 import { TICKER_PANELS, SENTINEL_KEYS } from "../shared/flows-panels.js";
+import { BUCKET_LINES } from "../shared/flows-quant-structures.js";
 import { guardAnswer, selectFacts, buildFactIndex } from "../shared/flows-ask.js";
 import { modelName, neuronProvenance } from "../shared/flows-pages.js";
 import { variation, cardVariationInput } from "../shared/flows-variation.js";
@@ -123,7 +124,7 @@ const CARD = {
   ok(stale.features.find((f) => f.key === "gamma").why.includes("capped"), "with the cap named in the reason");
 
   const fp = contextFingerprint(ctx);
-  ok(/^n4\./.test(fp), "the fingerprint carries the protocol version, now 4: the vet accepts only the engine's ranked ideas, so a row stored under 3 may hold a promoted structure and is read again once");
+  ok(/^n5\./.test(fp), "the fingerprint carries the protocol version, now 5: the vet accepts only the engine's ranked ideas and the state's thresholds are one table, so a row stored under 3 or 4 is read again once");
   ok(fp === contextFingerprint(stale),
      "N-F6: and does NOT move when the next session closes and the cap lands on every grade: the same card gave n3.37jodr.25.e5 while fresh and n3.1bg51xk.25.e5 " +
      "once the close had passed, so each viewed name was regenerated at 16:00 and again when the nightly landed");
@@ -255,7 +256,7 @@ const CARD = {
   const feat = ctx.features.find((f) => f.key === "state");
   ok(feat && feat.status === "ok" && feat.robustness === 2 && /read from gamma, levels, path, standing/.test(feat.why),
      "the state is a feature graded by its confidence, its reason naming the drivers");
-  ok(/^IMPLIED STATE for SYN1: squeeze, flow bearish \(confidence 2 of 3\)\./.test(feat.say) && /Avoid: iron condor/.test(feat.say),
+  ok(/^IMPLIED STATE for SYN1: squeeze, flow bearish \(confidence 2 of 2\)\./.test(feat.say) && /Avoid: iron condor/.test(feat.say),
      "its reading opens with the state and closes with the structures it prefers and rules out");
   eq(feat.say, stateSentence(st, "SYN1"), "and is the state sentence itself");
   eq(st.chip, stateChip(st), "the chip is derived from the same object");
@@ -409,7 +410,21 @@ const CARD = {
   const un = regimeState(blind, { expectedSession: "2026-09-15" });
   ok(un.state === "undetermined" && un.confidence === 0 && /gamma positioning is unavailable and premium is unreadable/.test(un.notes[0]),
      "no gamma and no readable premium implies no state, and the note says which silence it is");
-  ok(stateIdea(buildContext(blind, { expectedSession: "2026-09-15" })) === null, "and an undetermined state writes no idea");
+  {
+    const bctx = buildContext(blind, { expectedSession: "2026-09-15" });
+    const np = stateIdea(bctx);
+    ok(np && np.structure === "no position" && np.direction === "neutral" && np.fromState === true && /gamma positioning is unavailable and premium is unreadable/.test(np.thesis),
+       "N-F14: an undetermined state writes an explicit 'no position' idea that says why, where it wrote none and the page had nothing to show exactly when abstaining is the right answer");
+    const vetted = vetIdeas([np], bctx);
+    ok(vetted.ideas.length === 1 && vetted.refused.length === 0 && vetted.ideas[0].title === "No position",
+       `and it passes the same vetting (${vetted.refused.join("; ")})`);
+    ok(np.rests_on.length <= 2 && !np.rests_on.includes("state") && np.rests_on.every((k) => bctx.features.some((f) => f.key === k && f.status === "ok" && f.robustness >= 1)),
+       "resting on whatever features did read, never on the silent state itself");
+    ok(vetIdeas([{ ...np, rests_on: [] }], bctx).ideas.length === 1 && vetIdeas([{ ...np, rests_on: [], fromState: false }], bctx).ideas.length === 0,
+       "while the waiver of the two-feature rule belongs to the state's own abstention, not to a model's");
+    ok(vetIdeas([{ ...np, thesis: np.thesis + " The desk expects a break." }], bctx).ideas.length === 0, "and a forecast in it is still refused");
+    ok(stateIdea({ state: { ...bctx.state, state: "pinned", confidence: 0 } }) === null, "a state at confidence 0 that is not undetermined still writes none");
+  }
   blind.panels.pricedMove = { ...blind.panels.pricedMove, iv30: 0.5, rv30: 0.36, rvForward: 0.36, rvForwardGrade: 3, richnessFrom: "forward", vrpTrailing: 0.14, ivRank: 0.8 };
   const rich = regimeState(blind, { expectedSession: "2026-09-15" });
   ok(rich.state === "premium-rich" && rich.premium === "rich" && rich.confidence >= 1 && /positioning withheld/.test(rich.chip),
@@ -815,7 +830,7 @@ const CARD = {
 }
 
 {
-  eq(NEURON_CONTEXT_VERSION, 4, "the context protocol is version 4: numbered engine facts and priced structures, vetted against the engine's own ranking");
+  eq(NEURON_CONTEXT_VERSION, 5, "the context protocol is version 5: numbered engine facts and priced structures, vetted against the engine's own ranking, over one table of thresholds");
   const leg = (type, k, side, qty = 1) => ({ type, k, side, qty });
   const st = (id, family, risk, dir, legs, grade, rules, prob, ev, maxProfit, maxLoss) => ({
     id, family, risk, dir, expiry: "2026-10-16", dte: 30, sessions: 22, legs, grade, gradeWhy: grade < 3 ? ["fit.in-spread"] : [],
@@ -1271,6 +1286,101 @@ const CARD = {
      "where the header read 1 beside an engine block still reading 3");
   ok(contextFingerprint(fresh) !== contextFingerprint(buildContext({ ...withEngine, engine: { ...withEngine.engine, asOf: "2026-09-16T20:00:00.000Z" } }, { expectedSession: "2026-09-15" })),
      "and a new engine as-of is a new reading");
+}
+
+{
+  ok(STATE_LINES.IV_RANK_HIGH === BUCKET_LINES.IV_HIGH && STATE_LINES.IV_RANK_LOW === BUCKET_LINES.IV_LOW && STATE_LINES.VRP_RELATIVE === BUCKET_LINES.VRP_RICH &&
+     -STATE_LINES.VRP_RELATIVE === BUCKET_LINES.VRP_CHEAP,
+     "N-F11: the state's IV-rank and premium lines are the engine's bucket lines (0.25 and 0.75, ±10%), not their own 0.2 and 0.7");
+  ok(ENGINE_LINES.IV_LOW === BUCKET_LINES.IV_LOW && ENGINE_LINES.IV_HIGH === BUCKET_LINES.IV_HIGH && ENGINE_LINES.VRP_RICH === BUCKET_LINES.VRP_RICH &&
+     ENGINE_LINES.VRP_CHEAP === BUCKET_LINES.VRP_CHEAP && ENGINE_LINES.EVENT_OVER === BUCKET_LINES.EVENT_OVER && ENGINE_LINES.EVENT_UNDER === BUCKET_LINES.EVENT_UNDER &&
+     ENGINE_LINES.SKEW_STEEP === BUCKET_LINES.SKEW_STEEP && ENGINE_LINES.SKEW_FLAT === BUCKET_LINES.SKEW_FLAT && !("IV_MID_HIGH" in ENGINE_LINES),
+     "and so are the verdict lines, where 'high' was 0.75 in one place, 0.70 in another and 0.7 in a third");
+  ok(!("DISPLACEMENT_ATR" in STATE_LINES), "the displacement line that no branch read is gone: the displacement casts no vote");
+  const src = readFileSync(new URL("../shared/flows-neuron.js", import.meta.url), "utf8");
+  ok(!/\b0\.7\b|\b0\.70\b/.test(src.slice(src.indexOf("export const STATE_LINES"), src.indexOf("const BY_PREMIUM"))),
+     "and no literal 0.7 remains among the state's lines");
+
+  const eng = (facts, over = {}) => ({ spot: 100, atr: 2, facts: facts.map(([id, v, g = 3]) => ({ id, v, u: "frac", g })), structures: [], ideas: [], noTrade: null, state: { state: "pinned" }, ...over });
+  const condor = { id: "S1", family: "iron-condor", vol: "short", premium: "credit", short: [] };
+  const straddle = { id: "S2", family: "long-straddle", vol: "long", premium: "debit", short: [] };
+  ok(!verdictHolds("harvest-rich-premium", condor, eng([["vrp.rel.21", -0.15], ["iv.pct.30", 0.72, 2]])),
+     "N-F11: at VRP −15% and IV rank 0.72 selling premium is not 'harvesting rich premium': the audit's fixture held it, on an IV line of 0.70");
+  ok(!verdictHolds("harvest-rich-premium", condor, eng([["vrp.rel.21", -0.15], ["iv.pct.30", 0.9, 2]])),
+     "nor at IV rank 0.9 with a negative variance risk premium: any harvest needs the premium's sign");
+  ok(!verdictHolds("harvest-rich-premium", condor, eng([["iv.pct.30", 0.9, 2]])), "nor with no premium read at all");
+  ok(verdictHolds("harvest-rich-premium", condor, eng([["vrp.rel.21", 0.03], ["iv.pct.30", 0.9, 2]])), "while a positive premium with IV rank in the top quartile holds it, at any size");
+  ok(!verdictHolds("harvest-rich-premium", condor, eng([["vrp.rel.21", 0.03], ["iv.pct.30", 0.72, 2]])), "but not at 0.72, which is inside the mid band on the one line");
+  ok(verdictHolds("harvest-rich-premium", condor, eng([["vrp.rel.21", 0.12], ["iv.pct.30", 0.5, 2]])), "and a premium past +10% at a mid IV rank does");
+  ok(!verdictHolds("buy-cheap-convexity", straddle, eng([["vrp.rel.21", 0.09], ["iv.pct.30", 0.2, 2]])),
+     "at VRP +9% and IV rank 0.20 buying a straddle is not 'buying cheap convexity': the premium is positive, so it is not cheap");
+  ok(verdictHolds("buy-cheap-convexity", straddle, eng([["vrp.rel.21", -0.03], ["iv.pct.30", 0.2, 2]])), "a negative premium at a bottom-quartile IV rank is");
+  ok(verdictHolds("buy-cheap-convexity", straddle, eng([["vrp.rel.21", -0.12], ["iv.pct.30", 0.6, 2]])), "and one past −10% at a mid IV rank");
+  ok(!verdictHolds("buy-cheap-convexity", straddle, eng([["vrp.rel.21", -0.12], ["iv.pct.30", 0.8, 2]])), "but not with IV rank in the top quartile");
+  ok(claimHolds({ a: "iv.pct.30", rel: "rich" }, eng([["iv.pct.30", 0.76, 2]])).ok && !claimHolds({ a: "iv.pct.30", rel: "rich" }, eng([["iv.pct.30", 0.72, 2]])).ok &&
+     claimHolds({ a: "iv.pct.30", rel: "cheap" }, eng([["iv.pct.30", 0.2, 2]])).ok && !claimHolds({ a: "iv.pct.30", rel: "cheap" }, eng([["iv.pct.30", 0.25, 2]])).ok,
+     "and the claims 'rich' and 'cheap' on an IV percentile read the same two lines, strictly, as the engine's buckets do");
+
+  const at = (rank) => {
+    const c = JSON.parse(JSON.stringify(CARD));
+    c.panels.pricedMove = { ...c.panels.pricedMove, iv30: 0.3, rv30: 0.3, rvForward: 0.3, rvForwardGrade: 3, richnessFrom: "forward", vrpTrailing: 0, ivRank: rank };
+    return regimeState(c, { expectedSession: "2026-09-15" }).drivers.find((d) => d.sub === "ivRank");
+  };
+  ok(at(0.72).vote === 0 && at(0.76).vote === 1 && at(0.22).vote === -1 && at(0.24).vote === -1 && at(0.2).vote === -1 && at(0.75).vote === 0 && at(0.25).vote === 0,
+     "the state's IV-rank vote fires above 0.75 and below 0.25 and not on the lines, as the engine's buckets cut them");
+
+  for (const [name, cell] of Object.entries(STATE_STRUCTURES)) {
+    for (const table of name === "premium-rich" || name === "premium-cheap" || name === "undetermined" ? [cell] : [cell.rich, cell.cheap, cell.fair]) {
+      ok(!table.preferred.some((x) => x === "covered call" || x === "collar"),
+         `N-F12: ${name} prefers no desk-only family (covered call, collar): the engine vetoes them on every card`);
+      ok(!table.preferred.some((x) => table.avoid.includes(x)), `and ${name} prefers nothing it avoids`);
+    }
+  }
+  const short = new Set(["iron condor", "call credit spread", "put credit spread"]);
+  const long = new Set(["long straddle", "long strangle", "long call", "long put"]);
+  for (const name of ["bull", "bear", "shortNoSide", "transitional", "pinned"]) {
+    ok(!STATE_STRUCTURES[name].rich.preferred.some((x) => long.has(x)), `${name}: rich premium prefers no long straddle, strangle, call or put`);
+    ok(!STATE_STRUCTURES[name].cheap.preferred.some((x) => short.has(x)), `${name}: cheap premium prefers no credit structure`);
+  }
+  same(STATE_STRUCTURES.shortNoSide.rich.preferred, ["no position"], "short gamma with no side and rich premium prefers standing aside, where it preferred a long strangle");
+  ok(STATE_STRUCTURES.shortNoSide.rich.avoid.includes("long strangle") && STATE_STRUCTURES.shortNoSide.rich.avoid.includes("long straddle"),
+     "and rules the long-volatility structures out");
+  ok(STATE_STRUCTURES.bull.cheap.preferred[0] === "long call" && !STATE_STRUCTURES.bull.cheap.preferred.includes("put credit spread") &&
+     STATE_STRUCTURES.bear.cheap.preferred[0] === "long put" && !STATE_STRUCTURES.bear.cheap.preferred.includes("call credit spread"),
+     "and a bull or bear with cheap premium no longer prefers the credit spread that sells it");
+  same(STATE_STRUCTURES.pinned.cheap.preferred, ["calendar spread"], "a pinned name with cheap premium prefers the calendar, the one desk-free structure that buys the back month");
+
+  ok(STATE_CONFIDENCE_MAX === 2, "U-F6: the state's confidence tops out at 2 today (fair): the walls and the zero-crossing read off one session's flow ladder and the dealer sign is an assumption");
+  const pinnedBook = JSON.parse(JSON.stringify(CARD));
+  pinnedBook.regime = { label: "long", crossings: 1, spotGammaShare: 0.6, labelFrom: "book", bookGamma: 1.2e8, bookShare: 0.6 };
+  pinnedBook.panels.levels.levels = [{ kind: "max_pain", label: "Max pain", px: 70.5, distAtr: 0.19 }, { kind: "zero_gamma", label: "Zero-gamma level", px: 66.1, distAtr: -2.78 }];
+  const pb = regimeState(pinnedBook, { expectedSession: "2026-09-15" });
+  const gd = pb.drivers.find((d) => d.key === "gamma");
+  ok(gd && gd.robustness === 2 && pb.confidence === 2 && /confidence 2 of 2/.test(stateSentence(pb, "SYN1")) && /confidence 2 of 2/.test(pb.brief),
+     `U-F5: a book-driven gamma reading is graded 2 at most (the sign is a convention, dealers long calls and short puts), and the state prints 'confidence 2 of 2' (${gd && gd.robustness})`);
+  ok(!/of 3/.test(stateSentence(pb, "SYN1") + pb.brief + buildContext(pinnedBook, { expectedSession: "2026-09-15" }).features.find((f) => f.key === "state").why),
+     "and no copy of the state says 'of 3' any more");
+  const fuzz = [];
+  for (let i = 0; i < 300; i++) {
+    const c = JSON.parse(JSON.stringify(CARD));
+    c.regime = { label: i % 2 ? "long" : "short", labelFrom: "book", bookGamma: (i % 2 ? 1 : -1) * 1e8, bookShare: 0.1 + (i % 9) / 10, crossings: i % 3, spotGammaShare: (i % 7) / 10 };
+    c.panels.levels.levels = [{ kind: "zero_gamma", label: "Zero-gamma level", px: 70.2 + (i % 11) / 10, distAtr: (i % 11) / 5 - 1 }, { kind: "max_pain", label: "Max pain", px: 70, distAtr: -0.1 },
+      { kind: "call_wall", label: "Call wall", px: 72, distAtr: 1.2 }, { kind: "put_wall", label: "Put wall", px: 68, distAtr: -1.5 }];
+    fuzz.push(regimeState(c, { expectedSession: "2026-09-15" }).confidence);
+  }
+  ok(Math.max(...fuzz) <= 2 && Math.max(...fuzz) >= 1, `and across 300 constructed books no state reads above 2 (max ${Math.max(...fuzz)})`);
+
+  const rich = JSON.parse(JSON.stringify(CARD));
+  rich.panels.pricedMove = { ...rich.panels.pricedMove, iv30: 0.5, rv30: 0.36, rvForward: 0.36, rvForwardGrade: 3, richnessFrom: "forward", vrpTrailing: 0.14 };
+  const rr = regimeState(rich, { expectedSession: "2026-09-15" });
+  const pr = rr.drivers.find((d) => d.key === "pricedMove" && !d.sub);
+  ok(rr.premium === "rich" && /a soft tilt and not a signal for one name: the band is narrower than the noise in 21 sessions of realised volatility/.test(pr.reading),
+     "N-F11: a rich or cheap premium says it is a soft tilt, since the ±10% band is smaller than the noise in 21 sessions of realised volatility (with the forecast exactly right the realised figure still lands outside it about half the time)");
+  const fair = JSON.parse(JSON.stringify(CARD));
+  fair.panels.pricedMove = { ...fair.panels.pricedMove, iv30: 0.3, rv30: 0.29, rvForward: 0.29, rvForwardGrade: 3, richnessFrom: "forward", vrpTrailing: 0.01 };
+  ok(!/soft tilt/.test(regimeState(fair, { expectedSession: "2026-09-15" }).drivers.find((d) => d.key === "pricedMove" && !d.sub).reading), "and a fair one has nothing to hedge");
+  ok(guardAnswer(stateSentence(rr, "SYN1"), guardFacts(buildContext(rich, { expectedSession: "2026-09-15" })), guardOptions(buildContext(rich, { expectedSession: "2026-09-15" }))).ok,
+     "the sentence still passes the guard it is quoted through");
 }
 
 console.log(`✓ flows-neuron: ${checks} assertions — a context that carries every registry panel plus the ` +

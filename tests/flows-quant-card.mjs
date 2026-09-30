@@ -285,8 +285,8 @@ const FACT_INPUT = () => ({
   eq(by["level.strikeSumCrossing"].v, 101.5, "and the strike-sum crossing rides under its own id beside level.flip");
   ok(by["skew.rr25.30.pct"].x === true, "a cross-sectional percentile is tagged x");
   ok(by["move.event"].v > 0 && by["move.event.ratio"].v > 0, "an event between two fitted slices yields an implied jump and its ratio to history");
-  eq([by["gex.book"].v, by["gex.book"].u, by["gex.book"].g], [2e6, "usdPer1pct", 3],
-     "gex.book is the card's dollar book per 1%, the figure the ticker tile prints");
+  eq([by["gex.book"].v, by["gex.book"].u, by["gex.book"].g], [2e6, "usdPer1pct", 2],
+     "gex.book is the card's dollar book per 1%, the figure the ticker tile prints, graded fair at most: the dealer sign it rests on is a convention (UW-F5)");
   {
     const rawOnly = FACT_INPUT();
     rawOnly.card.regime = { bookGammaRaw: 2e4, flowGamma: -4e5 };
