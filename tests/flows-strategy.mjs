@@ -133,14 +133,27 @@ const upstream = http.createServer((req, res) => {
 
   if (url.pathname.endsWith("/stock-state")) {
     if (ticker === "SPY") {
-      return send(200, { close: "600.00", prev_close: "598.00",
-        market_time: "regular", tape_time: SESSION_DAY + " 18:06:00+00:00" });
+      return send(200, { data: { close: "600.00", prev_close: "598.00",
+        market_time: "regular", tape_time: SESSION_DAY + " 18:06:00+00:00" } });
     }
-    return send(200, { close: "102.00", prev_close: "100.00",
-      market_time: "regular", tape_time: SESSION_DAY + " 18:06:00+00:00" });
+    if (ticker === "AFT") {
+      return send(200, { data: { close: "104.00", prev_close: "100.00",
+        market_time: "postmarket", tape_time: SESSION_DAY + "T21:30:00Z" } });
+    }
+    const state = { close: "102.00", prev_close: "100.00",
+      market_time: "regular", tape_time: SESSION_DAY + " 18:06:00+00:00" };
+    return send(200, ticker === "BAR" ? state : { data: state });
   }
 
   if (url.pathname.includes("/ohlc/")) {
+    if (ticker === "AFT") {
+      return send(200, { data: [
+        { date: SESSION_DAY, market_time: "po", close: "104.00" },
+        { date: SESSION_DAY, market_time: "r", close: "101.50" },
+        { date: SESSION_DAY, market_time: "pr", close: "99.00" },
+        { date: PREV_DAY, market_time: "r", close: "100.00" },
+      ] });
+    }
     return send(200, { data: [{ date: PREV_DAY, close: "100.00" }] });
   }
 
@@ -420,6 +433,24 @@ try {
     ok(e && e.lawFrom === null && e.pLaw === null, "and with no card published for the name, no real-world law is invented for it");
     const plain = await (await fetch(server.baseURL + "/api/flows/strategy?t=AAA&expiry=" + NEAR, { headers: cookie })).json();
     ok(!("engine" in plain), "without engine=1 the payload is the vendor read it always was");
+  }
+
+  {
+    const cookie = { Cookie: "flows_session=" + token };
+    const read = async (t) => (await fetch(server.baseURL + "/api/flows/strategy?t=" + t, { headers: cookie })).json();
+    const enveloped = await read("AAA");
+    ok(enveloped.spotSource === "stock-state" && enveloped.spot === 102 && enveloped.tapeTime !== null && enveloped.marketTime === "regular",
+       "the context reads the vendor's real {data:{...}} stock-state envelope as the live print it holds, with its tape time and session");
+    eq(enveloped.asOf, SESSION_DAY, "and dates the session by the print's New York day");
+    eq(enveloped.basis.status, "unchecked", "there is no chain in a context read, so its basis says it was not checked");
+    eq(enveloped.basis.printSource, "stock-state", "and says what the print is");
+    const bare = await read("BAR");
+    ok(bare.spotSource === "stock-state" && bare.spot === 102, "a bare body, the shape earlier fixtures used, still reads");
+    const after = await read("AFT");
+    eq(after.spot, 101.5, "after hours the lab's spot is the regular close, not the 104.00 print");
+    eq(after.spotSource, "daily-close", "labelled a close");
+    eq(after.basis.printSource, "regular-close", "and named as a regular close in the basis");
+    eq(after.asOf, SESSION_DAY, "of the session it belongs to");
   }
 
   {
