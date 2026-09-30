@@ -86,6 +86,13 @@ export function augmentScreenerRow(row, { sessionDate }) {
     er_time: rnd() > 0.5 ? "postmarket" : "premarket",
     z_score: ((rnd() - 0.5) * 3).toFixed(4),
   });
+  const own = prng(hash("expo:" + row.ticker));
+  const notional = adv * close;
+  Object.assign(out, {
+    gex_delta_per_one_percent_move_oi: String(Math.round((0.2 + own() * 5.8) * notional)),
+    gex_vanna_per_one_percent_move_oi: String(Math.round((own() - 0.45) * 0.03 * notional)),
+    gex_charm_per_one_percent_move_oi: String(Math.round((own() - 0.55) * 24 * notional)),
+  });
   if (out.sector === "Financials") out.sector = "Financial Services";
   return out;
 }
