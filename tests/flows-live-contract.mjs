@@ -1141,7 +1141,7 @@ const cronMinutes = (cron) => {
   vm.createContext(ctx);
   vm.runInContext(src, ctx);
   const UI = ctx.window.FlowsUI;
-  ok(typeof UI.freshFrom === "function" && typeof UI.heartbeat === "function" && typeof UI.freshAggregate === "function",
+  ok(typeof UI.freshFrom === "function" && typeof UI.heartbeat === "function",
     "the client helper attaches to FlowsUI and adds no global of its own");
   {
     const frozenCtx = { window: {}, document: ctx.document, Date, isFinite, Number, String, Math, setTimeout, clearTimeout };
@@ -1194,10 +1194,6 @@ const cronMinutes = (cron) => {
     deep([bareEntry.a, bareEntry.__updatedAt, bareEntry.__ff], [1, null, null],
       "an entry without a fresh object stamps __ff null, as a response without X-Fresh-State did");
   }
-  eq(UI.freshAggregate(["live", "fresh"], "rth"), "live", "page aggregate: live if any module is live");
-  eq(UI.freshAggregate(["live", "stale"], "rth"), "stale", "stale if any is stale");
-  eq(UI.freshAggregate(["fresh", "closed"], "post"), "closed", "closed outside the session when nothing is live");
-  eq(UI.freshAggregate([], "rth"), "pending", "and pending before any payload");
   deep([UI.heartbeatInterval("rth", "ticker"), UI.heartbeatInterval("rth", "market"), UI.heartbeatInterval("pre", "x"),
     UI.heartbeatInterval("closed", "x"), UI.heartbeatInterval("rth", "ticker", true)], [20000, 30000, 60000, null, null],
   "one heartbeat per page: 20 s on a ticker in session, 30 s elsewhere, 60 s pre/post, none closed or hidden");

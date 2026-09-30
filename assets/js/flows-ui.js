@@ -1726,7 +1726,13 @@
     return { open, weekday, today: n.date, expected: SRV.day || local, source: SRV.day ? "server" : "local" };
   }
 
-  const FRESH = { sessionDate: null, primary: null, nightly: null, meta: false, generatedAt: null, updatedAt: null, readAt: null, live: false, sources: new Map(), explicit: false, settled: false };
+  const FRESH = { sessionDate: null, primary: null, nightly: null, meta: false, generatedAt: null, updatedAt: null, readAt: null, live: false, sources: new Map(), ffs: new Map(), explicit: false, settled: false };
+  const up = (k) => k[0].toUpperCase() + k.slice(1);
+  function freshAggregate(list, phase) {
+    const s = (list || []).filter(Boolean).map((f) => (f.stateAt ? f.stateAt() : f)), has = (x) => s.includes(x);
+    return !s.length ? "pending" : has("stale") ? "stale" : has("live") ? "live"
+      : (phase && phase !== "rth") || s.every((x) => x === "closed") ? "closed" : has("fresh") ? "fresh" : s[0];
+  }
   function freshState() {
     const m = market(new Date());
     const S = FRESH.primary || FRESH.sessionDate || FRESH.nightly;
@@ -1734,30 +1740,33 @@
     let behind = !!S && S < m.expected;
     if (behind && m.source === "local") { confirmExpected(); behind = !pendingNow(); }
     let state;
-    if (!S) state = FRESH.settled ? (m.open ? "fresh" : "closed") : "pending";
-    else if (behind) state = "stale";
+    if (behind || freshAggregate([...FRESH.ffs.values()]) === "stale") state = "stale";
+    else if (!S) state = FRESH.settled ? (m.open ? "fresh" : "closed") : "pending";
     else if (liveNow) state = "live";
     else if (m.open) state = "fresh";
     else state = "closed";
-    return { state, market: m, S };
+    return { state, market: m, S, behind };
   }
   function freshDetails() {
-    const { state, market: m, S } = freshState();
+    const { state, market: m, S, behind: late } = freshState();
     const which = S === m.today ? "today\u2019s session." : "the last completed session, " + F.day(S) + ".";
-    const lead = state === "stale" ? `These readings are the ${F.day(S)} session; the last completed session is ${F.day(m.expected)}.`
+    const lapsed = [...FRESH.ffs].filter(([, f]) => f.stateAt() === "stale").map(([k]) => up(k));
+    const lead = state === "stale" ? (late ? `These readings are the ${F.day(S)} session; the last completed session is ${F.day(m.expected)}.`
+      : "Past the server\u2019s stale line: " + lapsed.join(", ") + ".")
       : state === "live" ? "The market is open and the last price was read moments ago. Everything else is the last completed session."
         : !S ? (state === "pending" ? "No payload on this page has reported its session yet." : "No session is published yet.")
           : (m.open ? "The market is open. " : "The market is closed. ") + "These readings are " + which;
     const sources = [...FRESH.sources.entries()];
     const behind = sources.filter(([, v]) => v !== S);
+    const total = sources.length + FRESH.ffs.size, bad = behind.length + lapsed.length;
     const facts = [
       ["Expected", S !== m.expected ? F.day(m.expected) : null],
       ["Market", m.open ? "Open" : "Closed"],
       ["Built", FRESH.generatedAt ? F.time(FRESH.generatedAt) : null],
       ["Written", FRESH.updatedAt ? F.time(new Date(FRESH.updatedAt).toISOString()) : null],
       ["Price read", FRESH.readAt ? F.time(FRESH.readAt) : null],
-      ["Payloads", sources.length ? (behind.length ? sources.length - behind.length + " of " + sources.length + " current" : sources.length + " current") : null],
-      ...behind.map(([k, v]) => [k.charAt(0).toUpperCase() + k.slice(1), F.day(v)]),
+      ["Payloads", total ? (bad ? total - bad + " of " + total + " current" : total + " current") : null],
+      ...behind.map(([k, v]) => [up(k), F.day(v)]),
     ];
     return {
       title: "Freshness", state, asOf: S ? "Session " + F.day(S) : null, lead, facts,
@@ -1767,9 +1776,9 @@
   function paintFresh() {
     const b = $("fxFresh");
     if (!b) return;
-    const { state, market: m, S } = freshState();
+    const { state, market: m, S, behind } = freshState();
     const def = STATES[state] || STATES.pending;
-    const label = state === "live" ? "Live" : S ? (S === m.today ? "Today" : F.day(S)) : state === "pending" ? "Session" : state === "closed" ? "Closed" : "Open";
+    const label = state === "live" ? "Live" : state === "stale" && !behind ? "Stale" : S ? (S === m.today ? "Today" : F.day(S)) : state === "pending" ? "Session" : state === "closed" ? "Closed" : "Open";
     if (b.dataset.state === state && b.dataset.label === label) return;
     b.dataset.state = state;
     b.dataset.label = label;
@@ -1777,7 +1786,8 @@
     b.setAttribute("aria-label", "Freshness: " + def.word + (S ? ", session " + S : ""));
   }
   function freshness(o = {}) {
-    if (o.explicit !== false) FRESH.explicit = true;
+    if (o.explicit !== false && !o.ff) FRESH.explicit = true;
+    if (o.ff) FRESH.ffs.set(o.source || "page", o.ff);
     if (isoDay(o.sessionDate)) {
       const d = o.sessionDate.slice(0, 10);
       if (o.primary === true) FRESH.primary = d;
@@ -2071,7 +2081,7 @@
     ring, divRing, iconChip, gaugeChip, chips,
     segmented, tag, capsule, key, legend, robustness,
     silent, dash, listRow, list, tile, split, moduleCard,
-    freshness, shell, chart, depths: PAL_G,
+    freshness, freshAggregate, shell, chart, depths: PAL_G,
   });
 
   if (document.readyState === "loading") onDoc("DOMContentLoaded", initShell, { once: true });

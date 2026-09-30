@@ -122,9 +122,10 @@ header readback with this repository after any dashboard rule change.
 | `scripts/flows-legs/live.mjs`, `live-fake.mjs` | The Actions `--live` leg (Tier 2, `live:*` keys only) and its fake vendor for `--dry-run`. |
 | `shared/flows-focus.js` | The home page's focus roster (Gold, Silver and Copper groups, the Mag 7, the metal funds and miners) and the NASDAQ-10 derivation from QQQ holdings. A leaf module: it imports nothing, so the Worker, the pipeline and the live leg can all read it without a cycle. |
 | `scripts/flows-legs/focus.mjs`, `health.mjs` | The nightly `focus` and `roster` payload builders; the nightly health gate and its repair messages. |
-| `assets/js/flows-fresh.js` | The client freshness helper (`FlowsUI.freshFrom`, `freshAggregate`, `heartbeat`). |
+| `assets/js/flows-fresh.js` | The client freshness helper (`FlowsUI.freshFrom`, `heartbeat`); every key a heartbeat reads registers its server verdict with the pill, which is the worst case over its sources (`FlowsUI.freshAggregate`, in `flows-ui.js`), so a page needs no line per region. |
 | `tests/flows-live-contract.mjs` | Live-layer builders, phases and states, byte ceilings, the one-writer scans, the `--live` dry run and the client helper. |
 | `tests/flows-reads-contract.mjs` | The Worker's D1 round trips per read route, counted on a fake binding: the single-flight schema bootstrap, the absent-card decision, the live overlays and the ticker reading. |
+| `tests/flows-readers-contract.mjs`, `tests/flows-readers-render.mjs` | What a reader is told about age: the tape's TTL against the close, the quote card's own read time, the news overlay; and the boards' live dots, the home page's pill and news card, driven with stubbed routes. The ticker's tape labels are in `tests/flows-ticker-contract.mjs`. |
 
 ## Curriculum and stage contracts
 
@@ -479,6 +480,7 @@ flows-legs-contract
 flows-live-contract    flows-freshness-contract
 flows-quant-card       flows-track-render
 flows-pipeline-contract  flows-reads-contract
+flows-readers-contract   flows-readers-render
 ```
 
 `flows-reads-contract` was measured on 2026-09-28: about 20 s with no server,
@@ -493,6 +495,11 @@ the suite fails to import with `No such built-in module: node:sqlite`. The
 suite runs under `--disable-warning=ExperimentalWarning`, which on 22.22.2
 silences the SQLite notice and nothing else; the blanket `--no-warnings` would
 also hide a deprecation raised by `worker.js` under Node.
+
+`flows-readers-contract` was measured on 2026-09-30: under 1 s with no server,
+on the same counting D1 fake and `node:sqlite` as `flows-reads-contract`, so it
+takes the same Node floor. `flows-readers-render` about 7 s: Chromium against
+stubbed `/api/flows/*` routes, a fake clock and `page.clock.runFor`, no workerd.
 
 `flows-pipeline-contract` was measured on 2026-09-24: 123 s with no server. It
 was on neither list, so a source scan in it (every ingest call site must

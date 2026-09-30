@@ -80,9 +80,11 @@ async function mount(page, card, o = {}) {
       if (o.trace) o.trace.push([key, "asked", performance.now()]);
       if (o.delay && o.delay[key]) await new Promise((r) => setTimeout(r, o.delay[key]));
       let body = key === "board" ? (o.boards && o.boards[u.searchParams.get("side")]) || { status: "pending", rows: [] } : api[key];
+      let headers = o.headers && o.headers[key];
+      if (typeof body === "function") ({ body, headers } = body(requested.filter((k) => k.split("?")[0] === key).length));
       if (body === undefined) body = { status: "pending" };
       if (o.trace) o.trace.push([key, "answered", performance.now()]);
-      return route.fulfill({ status: (o.codes && o.codes[key]) || 200, contentType: "application/json", body: JSON.stringify(body) });
+      return route.fulfill({ status: (o.codes && o.codes[key]) || 200, contentType: "application/json", headers, body: JSON.stringify(body) });
     }
     if (u.pathname.startsWith("/flows/ticker")) return route.fulfill({ contentType: "text/html; charset=utf-8", body: o.html || PAGE_HTML });
     return route.fulfill({ status: 404, body: "" });
@@ -2006,6 +2008,116 @@ try {
     eq(ten.tape - base.tape, 10, `the tape is re-read every third beat, once a minute as before (${ten.tape - base.tape} reads in ten minutes)`);
     eq(errors.length, 0, `the 20 s beats throw nothing (${errors.join("; ")})`);
     await page.close();
+  }
+
+  {
+    const session = full.sessionDate;
+    const at = Date.parse(session + "T23:00:00Z");
+    const back = new Date(Date.parse(session + "T12:00:00Z") - 5 * 86400e3).toISOString().slice(0, 10);
+    const tapeOf = (day, last, read = at) => ({ v: 1, key: "tape", ticker: "LITE", session: day, units: { nd: "delta", net: "USD" },
+      prem: { status: "ok", readAt: new Date(read).toISOString(), t: ["13:35", "14:00", "14:58", "16:00", "18:00", "20:00"].filter((x) => x <= last).map((x) => day + "T" + x + ":00Z"),
+        nd: [0, 1200, 3400, 2100, 5200, 6100].slice(0, ["13:35", "14:00", "14:58", "16:00", "18:00", "20:00"].filter((x) => x <= last).length),
+        net: [0, 2e5, 5.5e5, 4e5, 8e5, 9.1e5].slice(0, ["13:35", "14:00", "14:58", "16:00", "18:00", "20:00"].filter((x) => x <= last).length),
+        ncp: [0, 3e5, 7e5, 6e5, 1.1e6, 1.3e6].slice(0, ["13:35", "14:00", "14:58", "16:00", "18:00", "20:00"].filter((x) => x <= last).length),
+        npp: [0, 1e5, 1.5e5, 2e5, 3e5, 3.9e5].slice(0, ["13:35", "14:00", "14:58", "16:00", "18:00", "20:00"].filter((x) => x <= last).length) } });
+    const verdict = (state, reason, day = session) => ({ "X-Fresh-State": state, "X-Fresh-Reason": reason, "X-Fresh-Class": "tape", "X-Fresh-Read-At": new Date(at).toISOString(), "X-Fresh-Session": day,
+      "X-Fresh-Phase": "closed", "X-Server-Now": String(at) });
+    const lite = { v: 1, ticker: "LITE", status: "ok", lite: true, depth: "universe", sessionDate: session, generatedAt: full.generatedAt, sector: "Basic Materials", n: 695, rank: 115,
+      u: { px: 72.52, chg: -0.0009, mcap: 1.041e11, iv30: 0.47, ivp: 39, ts: 0.013, fs: -0.026, dIv1w: 0.019, rv20: 0.41, vrp: 0.06, gexAdv: 0.0219, gexRatio: 0.64, dDelta: -0.0232,
+        si: null, ed: 20, rsi: 51, adx: 13, bb: 0.46, atr: 0.039, sma50: 0.046, rvol: 0.7 },
+      pct: { iv30: 40, ts: 55, vrp: 60, gexAdv: 70, si: null }, why: "not-covered", gate: null };
+    const now = { serverNow: at, expected: session, phase: { phase: "closed", session, lastClosed: session, trading: false, endsAt: null }, keys: {} };
+    const flow = (page) => page.evaluate(() => { const m = document.getElementById("m-flow"); return m ? { text: m.innerText.replace(/\s+/g, " "), info: (m.querySelector(".ui-mod-h .ui-info") ? (window.FlowsUI.openInfo(m.querySelector(".ui-mod-h .ui-info")), document.getElementById("fxPop").innerText) : "") } : null; });
+    const open = async (tape, headers, extra = {}) => {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, extra.card || lite, { neuron: { status: "unavailable" }, cardX: { status: "absent" }, hist: { status: "absent", why: "not-covered" }, tape, headers: { tape: headers }, now, at });
+      return { page, errors };
+    };
+
+    {
+      const { page, errors } = await open(tapeOf(session, "20:00"), verdict("live", "cadence"));
+      const got = await flow(page);
+      ok(got && /Net premium.*live.*Net delta.*live tape/.test(got.text), `T10: a tape the server calls live is labelled live (${got && got.text.slice(0, 90)})`);
+      eq(errors.length, 0, "and throws nothing");
+      await page.close();
+    }
+    {
+      const { page } = await open(tapeOf(session, "20:00"), null);
+      const got = await flow(page);
+      ok(got && /Net premium.*live.*Net delta.*live tape/.test(got.text), "with no freshness headers at all the label is what it always was");
+      await page.close();
+    }
+    {
+      const { page } = await open(tapeOf(session, "20:00"), verdict("closed", "session-final"));
+      const got = await flow(page);
+      ok(got && /to 4:00 PM/.test(got.text) && !/\blive\b/.test(got.text),
+        `A TAPE THAT HAS CLOSED IS NOT 'LIVE': it says how far it runs (${got && got.text.slice(0, 120)})`);
+      await page.close();
+    }
+    {
+      const calls = [];
+      const tape = (n) => { calls.push(n); return n === 1 ? { body: tapeOf(session, "14:58"), headers: verdict("stale", "missed-close") } : { body: tapeOf(session, "20:00", at + 5000), headers: verdict("closed", "session-final") }; };
+      const { page, errors } = await open(tape, undefined);
+      const first = await flow(page);
+      ok(first && /to 10:58 AM/.test(first.text) && !/\blive\b/.test(first.text),
+        `A TAPE THE SERVER CALLS STALE IS NEVER LABELLED LIVE: a complete row read at 10:58 ET and shown at 19:00 ET said 'live tape' (${first && first.text.slice(0, 120)})`);
+      ok(first && !/live tape/.test(first.info), "and its disclosure does not claim to be the live tape");
+      eq(page._requested.filter((u) => /^tape/.test(u)).length, 1, "it is asked for once on load");
+      await page.waitForFunction(() => /to 4:00 PM/.test((document.getElementById("m-flow") || {}).innerText || ""), null, { timeout: 12000 }).catch(() => {});
+      const healed = await flow(page);
+      eq(page._requested.filter((u) => /^tape/.test(u)).length, 2, "A STALE ANSWER IS ASKED AGAIN ONCE THE SERVER HAS HAD TIME TO REFRESH (about 5 s), with no reload and outside the session too, where no beat re-reads the tape");
+      ok(healed && /to 4:00 PM/.test(healed.text), `and the module redraws from the refreshed tape (${healed && healed.text.slice(0, 100)})`);
+      eq(page._requested.filter((u) => /^tape/.test(u)).length, 2, "which is final, so it is not asked for a third time");
+      eq(errors.length, 0, `the retry throws nothing (${errors.join("; ")})`);
+      await page.close();
+    }
+    {
+      const card = clone(full);
+      const rthAt = Date.parse(card.sessionDate + "T15:30:00Z");
+      const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      page._clocked = true;
+      await page.clock.install({ time: new Date(rthAt) });
+      const rthPhase = { phase: "rth", session: card.sessionDate, trading: true, endsAt: new Date(rthAt + 6 * 3600e3).toISOString() };
+      let phase = rthPhase;
+      const beat = () => ({ body: { serverNow: rthAt, phase, keys: {} } });
+      await mount(page, card, { now: beat, at: rthAt, tape: tapeOf(card.sessionDate, "20:00") });
+      const tapes = () => page._requested.filter((u) => /^tape(\?|$)/.test(u)).length;
+      const base = tapes();
+      phase = { phase: "post", session: card.sessionDate, trading: true, endsAt: new Date(rthAt + 12 * 3600e3).toISOString() };
+      await page.clock.runFor(21000);
+      await page.waitForTimeout(150);
+      eq(tapes() - base, 1, "THE SESSION ENDS UNDER AN OPEN TAB: the first beat that reports the close reads the tape at once, so the final tape replaces the last minute-old one without a reload");
+      await page.clock.runFor(5 * 60000);
+      await page.waitForTimeout(150);
+      eq(tapes() - base, 1, "and the beats after it, outside the session, read it no more (only the beats in session did, every third)");
+      eq(errors.length, 0, `the close throws nothing (${errors.join("; ")})`);
+      await page.close();
+    }
+
+    {
+      const { page } = await open(tapeOf(back, "20:00"), verdict("stale", "behind", back));
+      const got = await flow(page);
+      ok(!got, `A PREVIOUS SESSION'S TAPE IS NOT DRAWN AS THIS ONE'S: a name last opened five days ago showed that day's premium path under 'live tape' (${got && got.text.slice(0, 100)})`);
+      await page.close();
+    }
+    {
+      const card = clone(full);
+      const tape = tapeOf(back, "20:00");
+      tape.ticker = card.ticker;
+      const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, card, { tape, headers: { tape: verdict("stale", "behind", back) }, now: { ...now, expected: card.sessionDate }, at });
+      const got = await flow(page);
+      ok(got && !/live tape/.test(got.text) && !/live tape/.test(got.info) && !/to 4:00 PM/.test(got.text),
+        `a full card falls back to its own session path rather than the old tape (${got && got.text.slice(0, 140)})`);
+      eq(errors.length, 0, "without throwing");
+      await page.close();
+    }
   }
 
 } finally {
