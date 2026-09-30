@@ -1,10 +1,10 @@
 import {
   LIVE_KEYS, LIVE_BUDGET, TIER1_CALLS, TAPE_SPEC, shapeMarketLive, tideSessionState, tideLastAt, checkLiveWrite,
   liveKeyFromParam, shapeTapePrem, shapeTapeGex, assembleTape, nextTapeLeg, pulseWithLive, liveAlertsWin,
-  nightlyFreshMeta, rowsOf, timeMs, anyAnswered, marketFeeds, VERDICT, verdictPatch, parseClosedDays, shapeStrips,
+  nightlyFreshMeta, rowsOf, timeMs, anyAnswered, marketFeeds, VERDICT, verdictReprobeUntilMin, verdictPatch, parseClosedDays, shapeStrips,
 } from "./flows-live.js";
 import {
-  FRESH_CLASSES, PHASE_MINUTES, LIVE_CLOCK, freshHeaders, pendingHeaders, phaseAt, tier1Due, liveDispatchDue,
+  FRESH_CLASSES, PHASE_MINUTES, LIVE_CLOCK, freshHeaders, pendingHeaders, phaseAt, tier1Due, inferredEarlyClose, liveDispatchDue,
   liveStalled, nightlyDispatchDue, easternDay, easternInstant, sessionOpen, clockClosed, expectedNightlySession,
 } from "./flows-freshness.js";
 import { LIVE_OIDC, looksLikeJwt, rsaKeys, verifyLiveOidc, claimsBrief } from "./flows-oidc.js";
@@ -291,7 +291,7 @@ const clockFlag = (v) => (v === null || v === undefined || v === "" ? null : Num
 
 export function verdictReprobeDue(at, clock) {
   const wall = phaseAt(at, clock);
-  return !!wall && wall.minutes >= PHASE_MINUTES.sessionProbe && wall.minutes < VERDICT.provisionalUntilMin &&
+  return !!wall && wall.minutes >= PHASE_MINUTES.sessionProbe && wall.minutes < verdictReprobeUntilMin(wall.day) &&
     wall.minutes % VERDICT.reprobeEveryMin < 5;
 }
 
@@ -303,7 +303,7 @@ export function sessionStatePatch(clock, raws, at, today) {
     closedProbeAt: null });
   const trading = same ? clockFlag(clock.trading) : null;
   if (wall && wall.minutes >= PHASE_MINUTES.sessionProbe &&
-      (trading === null || (trading === 0 && wall.minutes < VERDICT.provisionalUntilMin))) {
+      (trading === null || (trading === 0 && wall.minutes < verdictReprobeUntilMin(today)))) {
     Object.assign(patch, verdictPatch({
       seen: tideSessionState(raws, { today, afterProbe: true }), trading,
       closedProbeAt: same ? clock.closedProbeAt : null, closedDays: clock ? clock.closedDays : [], at, today,
@@ -316,7 +316,9 @@ export function sessionStatePatch(clock, raws, at, today) {
     const movedAt = Object.hasOwn(patch, "tapeMovedAt") ? patch.tapeMovedAt : Number(same ? clock.tapeMovedAt : NaN);
     const tradingNow = Object.hasOwn(patch, "trading") ? patch.trading : trading;
     const early = easternInstant(today, PHASE_MINUTES.earlyClose + 5);
-    if (Number(tradingNow) === 1 && !(same && Number(clock.earlyClose) === 1) &&
+    const inferred = same && inferredEarlyClose(today, clock);
+    if (inferred && last > early) patch.earlyClose = null;
+    else if (Number(tradingNow) === 1 && !(same && Number(clock.earlyClose) === 1) &&
         wall && wall.minutes >= PHASE_MINUTES.earlyClose + 30 && last <= early &&
         Number.isFinite(movedAt) && at - movedAt >= LIVE_CLOCK.earlyCloseQuietMs) {
       patch.earlyClose = 1;

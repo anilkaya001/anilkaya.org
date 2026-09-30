@@ -138,6 +138,7 @@ header readback with this repository after any dashboard rule change.
 | `assets/js/flows-fresh.js` | The client freshness helper (`FlowsUI.freshFrom`, `freshAggregate`, `heartbeat`). |
 | `tests/flows-live-contract.mjs` | Live-layer builders, phases and states, byte ceilings, the one-writer scans, the `--live` dry run and the client helper. |
 | `tests/flows-ledger-contract.mjs` | The ledger's SQL over a real SQLite (gaps clipped to the session, ok and failed ticks, partial focus reads, passes, the nightly's landing, retention), its zero-extra-round-trip and never-blocks-the-tick properties on the real tick functions, its ingest view, and the health gate's reading of it: gap lines at the stale lines, a nightly that never landed, cards failed or skipped, the roster shortfall and the 5xx burst. |
+| `tests/flows-verdict-contract.mjs` | The two reversible verdicts, swept over a real SQLite clock and the real Tier 1 tick: a vendor that lags and recovers at every five-minute mark, a real closure's cost, a calendar holiday, a stalled tide with and without recovery, and the Tier 2 loop's waits. |
 | `tests/flows-reads-contract.mjs` | The Worker's D1 round trips and rows read per read route, counted on a fake binding (the rows-read ceilings, the last good copy served while the store is unreadable): the single-flight schema bootstrap, the absent-card decision, the live overlays and the ticker reading. |
 
 ## Curriculum and stage contracts
@@ -493,6 +494,7 @@ flows-legs-contract
 flows-live-contract    flows-freshness-contract
 flows-quant-card       flows-track-render
 flows-pipeline-contract  flows-reads-contract  flows-ledger-contract
+flows-verdict-contract
 ```
 
 `flows-reads-contract` was measured on 2026-09-28: about 20 s with no server,
@@ -507,6 +509,11 @@ the suite fails to import with `No such built-in module: node:sqlite`. The
 suite runs under `--disable-warning=ExperimentalWarning`, which on 22.22.2
 silences the SQLite notice and nothing else; the blanket `--no-warnings` would
 also hide a deprecation raised by `worker.js` under Node.
+
+`flows-verdict-contract` was measured on 2026-09-30: 15 s with no server, and
+about 800 checks. It drives the real `rthTick` over a `node:sqlite` database
+with the real schema, one Tier 1 tick per five-minute mark for a session, so it
+needs Node 22.13 or newer like the ledger and reads suites.
 
 `flows-ledger-contract` was measured on 2026-09-29: under one second with no
 server. It drives the ledger's SQL and the real Tier 1, focus and heartbeat

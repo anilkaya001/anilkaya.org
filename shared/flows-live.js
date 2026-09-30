@@ -456,10 +456,13 @@ export function tideSessionState(raws, { today, afterProbe }) {
 
 export const VERDICT = Object.freeze({
   provisionalUntilMin: 11 * 60,
+  unscheduledUntilMin: 15 * 60 + 45,
   agreeMs: 15 * 60 * 1000,
   reprobeEveryMin: 15,
   closedDaysMax: 20,
 });
+
+export const verdictReprobeUntilMin = (day) => (isTradingDay(day, null) ? VERDICT.unscheduledUntilMin : VERDICT.provisionalUntilMin);
 
 export function parseClosedDays(value) {
   let list = value;

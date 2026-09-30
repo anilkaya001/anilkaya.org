@@ -1998,13 +1998,24 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   probe at least 15 minutes after the first agrees, and only then does the day
   join `flows_clock.closed_days` (a JSON array of at most 20 ISO days, newest
   last, carried across days and served as `clock.closedDays`). Any feed that
-  carries today sets `trading = 1` at once. Until 11:00 ET a closed day is
-  re-probed every third tick (:01, :16, :31, :46, two calls each), and a
-  re-probe that sees today reopens the day, takes it out of `closed_days` and
-  writes `live:market`. The Tier 2 loop reads a closed day before 11:00 ET as a
-  wait, not an exit: it skips its passes and re-reads the clock every slot, so a
-  day the re-probe reopens gets its passes back without waiting for a GitHub
-  starter; from 11:00 ET a closed day ends the loop. On 2026-09-24 a single
+  carries today sets `trading = 1` at once. A closed day the calendar lists as
+  trading is re-probed every third tick (:01, :16, :31, :46, two calls each)
+  until 15:45 ET (`VERDICT.unscheduledUntilMin`; it was 11:00 ET, which made a
+  vendor that lagged past 11:00 a lost day, called "Closed" and not "stale" until
+  the nightly noticed), and a computed holiday until 11:00 ET
+  (`VERDICT.provisionalUntilMin`), where the calendar and the tape already
+  agree. A re-probe that sees today reopens the day, takes it out of
+  `closed_days` and writes `live:market`. The Tier 2 loop reads a closed day
+  before that deadline as a wait, not an exit: it skips its passes and re-reads
+  the clock every slot, so a day the re-probe reopens gets its passes back
+  without waiting for a GitHub starter; from 15:45 ET a closed day ends the
+  loop. A real unscheduled closure costs 29 probes (the seven ticks that make the
+  verdict and 22 quarter-hourly re-probes), 58 vendor calls where it cost 20, and,
+  when the loop's 340-minute budget runs out first, one chained run that keeps
+  waiting.
+  `tests/flows-verdict-contract.mjs` sweeps a vendor that recovers at every
+  five-minute mark from 09:31 to 15:55 and holds that Tier 1 reopens the day
+  within one re-probe of it. On 2026-09-24 a single
   probe that saw a lagging vendor at 09:45 could have closed a trading day for
   good; `tests/flows-live-contract.mjs` threads a lagging vendor at 09:46 and
   today's data at 09:51 through the clock row and ends with `trading = 1`. A
@@ -2018,7 +2029,17 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   know. A wrong or outdated
   holiday rule therefore costs the first quarter hour, never the session. A tide
   stuck at or before 13:05 ET for 30 minutes after 13:30 marks an unscheduled
-  early close. The migration is `migrations/0012_flows_clock_verdict.sql`; the
+  early close (`flows_clock.early_close = 1`), and the mark is provisional like
+  the closed verdict: on a day the calendar does not list as an early close Tier 1
+  keeps ticking to 16:10 ET (`inferredEarlyClose`), the phase clock still reads
+  13:00 as the close while the mark stands, and the first read that shows a tide
+  bar later than 13:05 ET takes the mark back and writes `live:market` in the
+  same tick. The Tier 2 loop waits, without passes, from 13:25 to 16:25 ET on
+  such a day and passes again from the first slot after the mark goes. Until
+  2026-09-30 the mark was final for the day: a tide that answered 200 with rows
+  frozen for half an hour after 13:05 closed the whole live layer, and every pill
+  read "closed, session final", until the next morning's roll; no test drove a
+  stalled tide into the mark or out of it. The migration is `migrations/0012_flows_clock_verdict.sql`; the
   Worker's first-use path adds the three columns to a table that lacks them.
 - **A nightly session is due at 21:00 ET on every session, early closes
   included**, because the run is scheduled by wall clock: the pipeline cron and
@@ -2118,7 +2139,9 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   one clock read from the Worker and no vendor call, so the 32 lines add under
   32 minutes a day, and one cancelled while pending costs nothing. On a day
   Tier 1 closes provisionally from the tape the loop also waits, without passes,
-  until 11:00 ET at the latest. Weekends and computed NYSE holidays never wait.
+  until 15:45 ET at the latest (and from 13:25 to 16:25 ET on an unscheduled
+  early close Tier 1 has inferred). Weekends and computed NYSE holidays never
+  wait.
   The repository is public, so hosted-runner minutes are not billed. A starter
   that queued behind a running loop starts when the loop ends: inside 16:25 its
   one pass skips on the heartbeat and it exits at the next slot, and after that
@@ -2134,8 +2157,8 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   (from 09:46 ET) the loop makes no further pass and never chains; a scheduled
   holiday never starts one. A scheduled early close ends the window at 13:25 ET
   from the calendar. An unscheduled one Tier 1 marks only after 13:30, so the
-  loop stops at the first slot after that verdict, about 13:35 to 13:40, instead
-  of running to 16:25. A failed clock read keeps the last verdict; with none, the
+  loop makes no pass after that verdict, about 13:35 to 13:40, but waits for the
+  mark to be taken back until 16:25 instead of leaving. A failed clock read keeps the last verdict; with none, the
   computed NYSE calendar applies. A pass that throws is logged and recorded as errored
   and the loop carries on to the next slot. Each pass starts with a fresh 90 s
   publish/read retry budget, as each separate run had. The job exits non-zero
