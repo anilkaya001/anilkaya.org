@@ -63,9 +63,11 @@ import { makeFakeVendor } from "./flows-legs/fake-vendor.mjs";
 import { makeCardXStore, publishCardX } from "./flows-legs/card-x.mjs";
 import { buildIndexDossiers, dossierRoster } from "./flows-legs/index-dossier.mjs";
 import {
-  runLive, runLiveLoop, chainDispatch, dryLiveTicks, readHeldAlerts, readLiveClock, LIVE_READ_PACE_MS,
+  runLive, runLiveLoop, chainDispatch, chainWithRetry, dryLiveTicks, readHeldAlerts, readLiveClock, LIVE_READ_PACE_MS,
   passOutcome, liveRunVerdict,
 } from "./flows-legs/live.mjs";
+import { createWatch, witnessDrill } from "./flows-legs/watch.mjs";
+import { dryLiveDay } from "./flows-legs/live-day.mjs";
 import {
   runHealthGate, republishRepair, refusalOf, refusalTally, tallyRefusal, tallyAnswer, retriedStatus, refusalBrief,
 } from "./flows-legs/health.mjs";
@@ -352,7 +354,7 @@ const CHAIN_RESERVE_MS = 6 * 60 * 1000;
 const PUBLISH_SPACING_MS = 400;
 
 const stats = {
-  calls: 0, retries: 0, rateLimited: 0, failures: 0, startedAt: Date.now(),
+  calls: 0, retries: 0, rateLimited: 0, failures: 0, timedOut: 0, startedAt: Date.now(),
 
   permitWaitMs: 0, networkMs: 0, rateLimitWaitMs: 0, rateLimitQueueMs: 0,
 };
@@ -517,7 +519,17 @@ function describeFloorVerdict(meter) {
     "down one step at a time, re-reading this line each morning.";
 }
 
-async function uw(path, params = {}, { envelope = false } = {}) {
+export const LIVE_VENDOR = Object.freeze({ timeoutMs: 20_000, timeoutRetries: 1 });
+
+function vendorTimeoutMs() {
+  if (!LIVE_MODE) return 0;
+  const set = Number(process.env.FLOWS_UW_TIMEOUT_MS);
+  return Number.isFinite(set) && set >= 100 && set <= 60_000 ? set : LIVE_VENDOR.timeoutMs;
+}
+
+const isTimeout = (error) => !!error && (error.name === "TimeoutError" || error.name === "AbortError");
+
+export async function uw(path, params = {}, { envelope = false } = {}) {
   const url = new URL(BASE + path);
   for (const [k, v] of Object.entries(params)) {
     if (v === undefined || v === null || v === "") continue;
@@ -531,6 +543,8 @@ async function uw(path, params = {}, { envelope = false } = {}) {
     url.searchParams.set(k, String(v));
   }
 
+  const limitMs = vendorTimeoutMs();
+  let timeouts = 0;
   for (let attempt = 0; attempt <= RATE.maxRetries; attempt++) {
 
     stats.permitWaitMs += await permits.acquire();
@@ -544,6 +558,7 @@ async function uw(path, params = {}, { envelope = false } = {}) {
           Authorization: "Bearer " + process.env.UW_API_KEY,
           Accept: "application/json",
         },
+        ...(limitMs ? { signal: AbortSignal.timeout(limitMs) } : {}),
       });
     } catch (error) {
       stats.networkMs += Date.now() - wireStarted;
@@ -551,7 +566,12 @@ async function uw(path, params = {}, { envelope = false } = {}) {
       stats.retries++;
       ({ delayMs, floorMs: delayFloorMs } = stepRateController(
         { delayMs, floorMs: delayFloorMs }, "error"));
-      if (attempt === RATE.maxRetries) throw error;
+      const timedOut = !!limitMs && isTimeout(error);
+      if (timedOut) {
+        stats.timedOut++;
+        timeouts++;
+      }
+      if (attempt === RATE.maxRetries || (timedOut && timeouts > LIVE_VENDOR.timeoutRetries)) throw error;
       continue;
     }
     stats.networkMs += Date.now() - wireStarted;
@@ -586,7 +606,13 @@ async function uw(path, params = {}, { envelope = false } = {}) {
 
     ({ delayMs, floorMs: delayFloorMs } = stepRateController(
       { delayMs, floorMs: delayFloorMs }, "ok"));
-    const body = await response.json();
+    let body;
+    try {
+      body = await response.json();
+    } catch (error) {
+      if (limitMs && isTimeout(error)) stats.timedOut++;
+      throw error;
+    }
     if (envelope) return body;
     return Array.isArray(body) ? body : (body && body.data) || [];
   }
@@ -4486,7 +4512,19 @@ export function dryRosterProbe(sessionDate) {
   };
 }
 
+async function runWitnessDrill() {
+  console.log("Flows live layer — witness drill (opens one issue and closes it, nothing else)");
+  const drilled = await witnessDrill({ env: process.env });
+  if (drilled.ok) console.log(`witness drill: issue #${drilled.number} opened and closed — the alert channel works`);
+  else {
+    console.warn(`witness drill: FAILED — ${drilled.why}`);
+    process.exitCode = 1;
+  }
+  return drilled;
+}
+
 async function runLiveMode() {
+  if (process.env.FLOWS_LIVE_DRILL === "1" && !DRY_RUN) return runWitnessDrill();
   console.log(DRY_RUN ? "Flows live layer — DRY RUN (synthetic, no network)" : "Flows live layer — live");
   if (!DRY_RUN) {
     const missing = ["UW_API_KEY"].filter((k) => !process.env[k]);
@@ -4500,7 +4538,15 @@ async function runLiveMode() {
   }
   delayFloorMs = Math.max(delayFloorMs, LIVE_READ_PACE_MS);
   delayMs = Math.max(delayMs, LIVE_READ_PACE_MS);
-  if (DRY_RUN) return dryLiveTicks({ publish, store: publishedStore, shapeNews });
+  if (DRY_RUN) {
+    const ticks = await dryLiveTicks({ publish, store: publishedStore, shapeNews });
+    const day = await dryLiveDay({});
+    if (day.problems.length) {
+      console.warn(`live day (dry run): FAILED — ${day.problems.length} problem(s)`);
+      process.exitCode = 1;
+    }
+    return ticks;
+  }
   const origin = process.env.FLOWS_LIVE_ORIGIN || null;
   const force = process.env.FLOWS_LIVE_FORCE === "1";
   const reportErrors = (result) => {
@@ -4508,9 +4554,14 @@ async function runLiveMode() {
     if (errors.length) console.warn(`live: ${errors.length} key(s) not published — ${errors.join("; ")}`);
     return passOutcome(result);
   };
-  const readClock = () => readLiveClock(readStoredOnce);
+  let clockBody = null;
+  const readClock = () => readLiveClock(readStoredOnce, { seen: (body) => { clockBody = body; } });
   const settle = (loop) => {
     const verdict = liveRunVerdict(loop);
+    if (loop && loop.watch) {
+      console.log(`live: witness — confirmed lapses: ${loop.watch.breached.join(", ") || "none"}; issues still open: ` +
+        `${loop.watch.open.join(", ") || "none"}`);
+    }
     if (verdict.failed) {
       console.warn(`live: FAILED — ${verdict.why}`);
       process.exitCode = 1;
@@ -4523,14 +4574,24 @@ async function runLiveMode() {
     settle({ passes: [reportErrors(result)] });
     return result;
   }
+  const keep = process.env.FLOWS_LIVE_KEEP === "1";
+  const watch = keep
+    ? createWatch({ readOnce: readStoredOnce, latestClock: () => clockBody, env: process.env })
+    : null;
   const loop = await runLiveLoop({
-    readClock,
+    readClock, watch,
     pass: async ({ first, clock }) => {
       resetPublishRetryBudget();
+      const timedOutBefore = stats.timedOut;
       const result = await runLive({ uw, publish, readStored, shapeNews, origin, skipRecent: first, clock });
-      return reportErrors(result);
+      const outcome = reportErrors(result);
+      const timedOut = stats.timedOut - timedOutBefore;
+      if (timedOut) console.warn(`live: ${timedOut} vendor request(s) timed out after ${vendorTimeoutMs() / 1000} s`);
+      return timedOut ? { ...outcome, timedOut } : outcome;
     },
-    chain: ({ at }) => chainDispatch({ env: process.env, at }),
+    chain: ({ at }) => (keep
+      ? chainWithRetry(() => chainDispatch({ env: process.env, at }))
+      : chainDispatch({ env: process.env, at })),
   });
   return settle(loop);
 }

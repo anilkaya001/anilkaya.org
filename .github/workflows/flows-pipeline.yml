@@ -21,7 +21,7 @@ on:
         type: boolean
         default: false
       origin:
-        description: "Who dispatched the run: worker (the post-close clock) or manual"
+        description: "Who dispatched the run: worker (the post-close clock), live-loop (the Tier 2 loop's own token) or manual"
         type: string
         required: false
         default: manual
