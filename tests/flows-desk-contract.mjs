@@ -6,7 +6,6 @@ import { sizeToBuyingPower } from "../shared/flows-premium.js";
 import { startWorker, SESSION_SECRET, FLOWS_TEST_USER } from "./worker-server.mjs";
 import * as WORLD from "../shared/flows-quant-world.js";
 import * as QC from "../shared/flows-quant-card.js";
-import * as ENG from "../shared/flows-quant-engine.js";
 import * as QP from "../scripts/flows-quant-pipeline.mjs";
 import { STATE_STRUCTURES } from "../shared/flows-neuron.js";
 import { NODE_Q } from "./desk-fixtures.mjs";

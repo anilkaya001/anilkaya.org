@@ -891,13 +891,15 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
     { expiry: "2026-09-18", T: 0.0658, dte: 24, forward: { F: 100 }, smile: { method: "svi", n: 12, atmIv: 0.4, params: svi(0.0055), checks: { ok: true } } },
     { expiry: "2026-10-16", T: 0.1425, smile: { method: "svi-repaired", params: svi(0.008) } },
     { expiry: "2026-11-20", T: 0.2384, smile: { method: "mixture", params: { w: 0.5 } } },
+    { expiry: "2027-04-16", T: 0.55, smile: { method: "mixture", params: svi(0.02) } },
+    { expiry: "2027-05-21", T: 0.65, smile: { method: "flat", params: svi(0.02) } },
     { expiry: "2026-12-18", T: 0.315, smile: { method: "flat", params: { sigma: 0.4 } } },
     { expiry: "2027-01-15", T: 0.39, smile: { method: "svi", params: { a: 0.01, b: 0.05 } } },
     { expiry: "2027-02-19", T: 0, smile: { method: "svi", params: svi(0.01) } },
     { expiry: "2027-03-19", T: "0.5", smile: { method: "svi", params: { ...svi(0.01), rho: "-0.3" } } },
     null, { expiry: "x" },
   ]);
-  same(smiles.map((e) => e.expiry), ["2026-09-18", "2026-10-16", "2027-03-19"], "of a card's expiries only the ones whose smile is an SVI with all five parameters and a positive year fraction go to the desk");
+  same(smiles.map((e) => e.expiry), ["2026-09-18", "2026-10-16", "2027-03-19"], "of a card's expiries only the ones whose smile is an SVI with all five parameters and a positive year fraction go to the desk, and a mixture or a flat slice is left out even when it carries five parameters of its own");
   same(smiles[0], { expiry: "2026-09-18", T: 0.0658, smile: { method: "svi", params: svi(0.0055) } }, "cut to the expiry, its year fraction, the method and the five parameters");
   ok(smiles[2].T === 0.5 && smiles[2].smile.params.rho === -0.3, "numbers that arrived as text are numbers when they leave");
   same(deskSmiles(undefined), [], "and a card with no expiries sends none");
