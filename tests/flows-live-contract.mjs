@@ -747,9 +747,10 @@ const cronMinutes = (cron) => {
     "and neither the live credential nor its source ever falls back to the nightly token");
   const wf = read(".github/workflows/flows-live.yml");
   ok(!/FLOWS_INGEST_TOKEN|FLOWS_LIVE_TOKEN|GITHUB_DISPATCH_TOKEN/.test(wf) &&
-     /permissions:\s*\n\s*contents: read\s*\n\s*id-token: write\s*\n\s*actions: write\s*\n\s*\n/.test(wf),
+     /permissions:\s*\n\s*contents: read\s*\n\s*id-token: write\s*\n\s*actions: write\s*\n\s*issues: write\s*\n\s*\n/.test(wf),
     "and the live workflow holds no shared secret at all: it proves itself with a GitHub OIDC token minted per run, " +
-    "and its only other grant is actions: write, which lets the run's own GITHUB_TOKEN re-dispatch the loop");
+    "and its only other grants are actions: write, which lets the run's own GITHUB_TOKEN re-dispatch the loop and " +
+    "dispatch the nightly, and issues: write, which lets the witness open and close its issues");
   ok(/GITHUB_TOKEN: \$\{\{ github\.token \}\}/.test(wf) && /FLOWS_LIVE_LOOP: "1"/.test(wf),
     "the read step runs the session loop and hands it the run's own token for the chain dispatch — no new secret");
   ok(/LIVE_READY: \$\{\{ secrets\.UW_API_KEY != '' \}\}/.test(wf), "so the vendor key is the only secret it waits for");
@@ -762,7 +763,7 @@ const cronMinutes = (cron) => {
     "the live credential, so no step may run code a moved tag could swap");
   const timeout = Number((/timeout-minutes: (\d+)/.exec(wf) || [])[1]);
   const { LIVE_LOOP } = await import("../scripts/flows-legs/live.mjs");
-  ok(/concurrency:\s*\n\s*group: flows-live\s*\n\s*cancel-in-progress: false/.test(wf) && timeout < 360 &&
+  ok(/concurrency:\s*\n\s*group: \$\{\{ inputs\.drill && 'flows-live-drill' \|\| 'flows-live' \}\}\s*\n\s*cancel-in-progress: false/.test(wf) && timeout < 360 &&
      LIVE_LOOP.budgetMs + 10 * 60000 <= timeout * 60000,
     `one live run at a time (so never more than one loop), ${timeout} minutes at most — under GitHub's six-hour job ` +
     `cap, with the loop's ${LIVE_LOOP.budgetMs / 60000}-minute budget and a pass's overrun inside it`);
@@ -1116,8 +1117,10 @@ const cronMinutes = (cron) => {
     "so the live window takes the Worker's tape-derived clock, and a day it closed is not a session");
   const tuesday = easternInstant("2026-11-24", 11 * 60);
   eq(liveWindow(tuesday).why, "session", "an ordinary Tuesday with no clock is a session");
-  eq(liveWindow(tuesday, { day: "2026-11-24", trading: 0, earlyClose: null }).why, "not-trading",
-    "and an unscheduled closure the tape proved today is not");
+  eq(liveWindow(tuesday, { day: "2026-11-24", trading: 0, earlyClose: null }).why, "provisional-closed",
+    "and an unscheduled closure the tape proved today is a wait, not a session: a vendor that lags can still reopen it");
+  eq(liveWindow(easternInstant("2026-11-24", 15 * 60 + 45), { day: "2026-11-24", trading: 0, earlyClose: null }).why, "not-trading",
+    "until 15:45 ET, when Tier 1 stops re-probing");
   eq(liveWindow(tuesday, { day: "2026-11-23", trading: 0, earlyClose: null }).why, "session",
     "a verdict for another day is never applied to this one");
   const early = { day: "2026-11-27", trading: 1, earlyClose: 1 };
@@ -1141,7 +1144,7 @@ const cronMinutes = (cron) => {
   vm.createContext(ctx);
   vm.runInContext(src, ctx);
   const UI = ctx.window.FlowsUI;
-  ok(typeof UI.freshFrom === "function" && typeof UI.heartbeat === "function" && typeof UI.freshAggregate === "function",
+  ok(typeof UI.freshFrom === "function" && typeof UI.heartbeat === "function",
     "the client helper attaches to FlowsUI and adds no global of its own");
   {
     const frozenCtx = { window: {}, document: ctx.document, Date, isFinite, Number, String, Math, setTimeout, clearTimeout };
@@ -1194,10 +1197,6 @@ const cronMinutes = (cron) => {
     deep([bareEntry.a, bareEntry.__updatedAt, bareEntry.__ff], [1, null, null],
       "an entry without a fresh object stamps __ff null, as a response without X-Fresh-State did");
   }
-  eq(UI.freshAggregate(["live", "fresh"], "rth"), "live", "page aggregate: live if any module is live");
-  eq(UI.freshAggregate(["live", "stale"], "rth"), "stale", "stale if any is stale");
-  eq(UI.freshAggregate(["fresh", "closed"], "post"), "closed", "closed outside the session when nothing is live");
-  eq(UI.freshAggregate([], "rth"), "pending", "and pending before any payload");
   deep([UI.heartbeatInterval("rth", "ticker"), UI.heartbeatInterval("rth", "market"), UI.heartbeatInterval("pre", "x"),
     UI.heartbeatInterval("closed", "x"), UI.heartbeatInterval("rth", "ticker", true)], [20000, 30000, 60000, null, null],
   "one heartbeat per page: 20 s on a ticker in session, 30 s elsewhere, 60 s pre/post, none closed or hidden");
@@ -2045,7 +2044,7 @@ const cronMinutes = (cron) => {
     const c = sim(easternInstant(TG, 9 * 60 + 31));
     const passAt = [];
     let reads = 0;
-    const r = await runLiveLoop({ now: c.now, sleep: c.sleep, log: () => {},
+    const r = await runLiveLoop({ now: c.now, sleep: c.sleep, log: () => {}, budgetMs: 24 * 3600 * 1000,
       readClock: async () => { reads++; return c.now() >= verdict ? { day: TG, trading: 0, earlyClose: null } : { day: TG,
         trading: null, earlyClose: null }; },
       pass: async () => { passAt.push(c.now()); c.advance(40000); return {}; },
@@ -2054,10 +2053,19 @@ const cronMinutes = (cron) => {
        reads > passAt.length,
     "A TAPE-DERIVED CLOSURE: the loop reads the Worker's clock around every pass, and once Tier 1 has closed the day " +
       `(09:46 on an unscheduled closure) no pass follows and nothing is chained (${passAt.length} passes before the verdict)`);
-    ok(r.waits > 0 && c.now() >= easternInstant(TG, L.VERDICT.provisionalUntilMin - 5) &&
-       c.now() < easternInstant(TG, L.VERDICT.provisionalUntilMin),
-    `and it waits without a pass until ${L.VERDICT.provisionalUntilMin / 60}:00 ET, while Tier 1 can still reopen the ` +
+    ok(r.waits > 0 && c.now() >= easternInstant(TG, L.VERDICT.unscheduledUntilMin - 5) &&
+       c.now() < easternInstant(TG, L.VERDICT.unscheduledUntilMin),
+    `and it waits without a pass until ${Math.floor(L.VERDICT.unscheduledUntilMin / 60)}:${L.VERDICT.unscheduledUntilMin % 60} ET, while Tier 1 can still reopen the ` +
       `day, before it exits (${r.waits} waits)`);
+    const cb = sim(easternInstant(TG, 9 * 60 + 31));
+    let chainedAt = null;
+    const spent = await runLiveLoop({ now: cb.now, sleep: cb.sleep, log: () => {}, budgetMs: 120 * 60 * 1000,
+      readClock: async () => (cb.now() >= verdict ? { day: TG, trading: 0, earlyClose: null } : { day: TG, trading: null, earlyClose: null }),
+      pass: async () => { cb.advance(40000); return {}; },
+      chain: async ({ at }) => { chainedAt = at; return { sent: true, status: 204, why: "sent" }; } });
+    ok(spent.exit === "budget" && chainedAt !== null && chainedAt < easternInstant(TG, L.VERDICT.unscheduledUntilMin - 60),
+      "and a loop whose time budget runs out while the closure is still provisional hands the wait on to a chained run, so " +
+        "a vendor that comes back at 14:00 still finds a loop to restart the passes");
     const tg = sim(easternInstant("2026-11-26", 9 * 60 + 31));
     let tgPasses = 0;
     const scheduled = await runLiveLoop({ now: tg.now, sleep: tg.sleep, log: () => {},
@@ -2092,8 +2100,12 @@ const cronMinutes = (cron) => {
       "and a starter that lands while the day is provisionally closed waits for the reopening rather than exiting");
     eq(liveWindow(easternInstant(S2, 10 * 60 + 30), { day: S2, trading: 0, earlyClose: null }).why, "provisional-closed",
       "a closed verdict before 11:00 ET is a wait");
-    eq(liveWindow(easternInstant(S2, 11 * 60), { day: S2, trading: 0, earlyClose: null }).why, "not-trading",
-      "and final from 11:00 ET, when Tier 1 stops re-probing");
+    eq(liveWindow(easternInstant(S2, 11 * 60), { day: S2, trading: 0, earlyClose: null }).why, "provisional-closed",
+      "and still a wait at 11:00 ET, which used to be final: Tier 1 now re-probes a closure the calendar does not list to 15:45 ET");
+    eq(liveWindow(easternInstant(S2, 15 * 60 + 44), { day: S2, trading: 0, earlyClose: null }).why, "provisional-closed",
+      "through the last re-probe");
+    eq(liveWindow(easternInstant(S2, 15 * 60 + 45), { day: S2, trading: 0, earlyClose: null }).why, "not-trading",
+      "and final from 15:45 ET");
     eq(liveWindow(T("2026-09-26T14:00:00Z"), { day: "2026-09-26", trading: 0, earlyClose: null }).why, "not-trading",
       "a weekend is never a wait");
   }
@@ -2115,10 +2127,10 @@ const cronMinutes = (cron) => {
       readClock: async () => ({ day: UC, trading: 1, earlyClose: d.now() >= verdict ? 1 : null }),
       pass: async () => { late.push(d.now()); d.advance(40000); return {}; },
       chain: async () => { throw new Error("never chain after an early close"); } });
-    ok(lr.exit === "window-closed" && lr.why === "after-close" && late.at(-1) === easternInstant(UC, 13 * 60 + 35),
+    ok(lr.exit === "window-closed" && lr.why === "after-close" && late.at(-1) === easternInstant(UC, 13 * 60 + 35) && lr.waits > 0,
       "and on an unscheduled early close, which only the tape can reveal, Tier 1 marks it at 13:36, as its 30-minute " +
-        "quiet rule does, and the loop stops at the next slot " +
-        `(last pass ${new Date(late.at(-1)).toISOString()})`);
+        "quiet rule does, and the loop passes no more but waits out the day, since the mark can be taken back " +
+        `(last pass ${new Date(late.at(-1)).toISOString()}, ${lr.waits} waits)`);
   }
   {
     const c = sim(et(12 * 60));
@@ -2207,7 +2219,8 @@ const cronMinutes = (cron) => {
   ok(/pass: async \(\{ first, clock \}\) => \{\s*resetPublishRetryBudget\(\);/.test(pipeline),
     "EACH PASS HAS ITS OWN RETRY BUDGET: the loop resets the 90 s publish/read retry budget at the start of every " +
       "pass, as each separate run had, so a blip at 10:00 cannot leave the 15:00 pass with no retries");
-  ok(/readClock = \(\) => readLiveClock\(readStoredOnce\)/.test(pipeline) && /runLiveLoop\(\{\s*readClock,/.test(pipeline) &&
+  ok(/readClock = \(\) => readLiveClock\(readStoredOnce, \{ seen: \(body\) => \{ clockBody = body; \} \}\)/.test(pipeline) &&
+     /runLiveLoop\(\{\s*readClock,/.test(pipeline) &&
      /const clock = force \? null : await readClock\(\);/.test(pipeline),
   "and --live gates both the loop and a single pass on the Worker's clock");
   ok(/runLive\(\{ uw, publish, readStored, shapeNews, origin, skipRecent: first, clock \}\)/.test(pipeline) &&
@@ -2291,15 +2304,18 @@ const cronMinutes = (cron) => {
     { m: 9 * 60 + 46, day: TG, feeds: T0 }, { m: 9 * 60 + 51, day: TG, feeds: T0 }, { m: 9 * 60 + 56, day: TG, feeds: T0 },
     { m: 10 * 60 + 1, day: TG, feeds: T0 }, { m: 10 * 60 + 6, day: TG, feeds: T0, calls: 0 },
     { m: 10 * 60 + 16, day: TG, feeds: T0, calls: 2 }, { m: 10 * 60 + 21, day: TG, feeds: T0, calls: 0 },
-    { m: 11 * 60 + 1, day: TG, feeds: T0, calls: 0 },
+    { m: 11 * 60 + 1, day: TG, feeds: T0, calls: 2 }, { m: 11 * 60 + 6, day: TG, feeds: T0, calls: 0 },
+    { m: 15 * 60 + 31, day: TG, feeds: T0, calls: 2 }, { m: 15 * 60 + 46, day: TG, feeds: T0, calls: 0 },
+    { m: 16 * 60 + 1, day: TG, feeds: T0, calls: 0 },
   ]);
   deep(holLog.slice(0, 4).map((t) => t.trading), [null, null, null, 0],
     "AN UNSCHEDULED CLOSURE (a day the calendar thought traded): the 09:46 probe is provisional, 09:51 and 09:56 are too close to it to agree, and at 10:01 the " +
       "second agreeing probe fifteen minutes on makes it final");
   deep(JSON.parse(hol.closed_days), [TG], "and only then does the day join closed_days");
   ok(holLog[4].why === "holiday" && holLog[5].why === "holiday" && !holLog[5].wrote && holLog[6].why === "holiday" &&
-     holLog[7].why === "holiday",
-  "after it, ticks skip with no vendor call, except a re-probe every third tick until 11:00 (two calls, no write)");
+     holLog[7].why === "holiday" && !holLog[7].wrote && holLog[9].why === "holiday" && holLog.slice(10).every((t) => t.why === "holiday" && !t.wrote),
+  "after it, ticks skip with no vendor call, except a re-probe every third tick (two calls, no write) that now runs on to 15:31, " +
+    "the last before 15:45 ET, where it used to stop at 11:00");
 
   const late = { id: 1, day: T0, trading: 1, early_close: 0, closed_days: null };
   const lateLog = await thread(late, [
@@ -2337,7 +2353,7 @@ const cronMinutes = (cron) => {
     db.batch = async (list) => {
       db.statements.push(...list);
       if (/SELECT \* FROM flows_clock/.test(list[0].sql)) {
-        return [{ results: [clockRow] }, { results: [{ read_at: easternInstant(S, 10 * 60 + 10) }] }];
+        return [{ results: [clockRow] }, { results: [{ id: "live:breadth", read_at: easternInstant(S, 10 * 60 + 10), session: S, cadence_s: 900, source: "actions" }] }];
       }
       return list.map(() => ({ results: [] }));
     };
@@ -2388,6 +2404,32 @@ const cronMinutes = (cron) => {
       "Tier 2 pass finished 16:21 and the edge refused eleven ingest requests (the 2026-09-24 count), all absorbed by " +
       "retries");
   const fails = (over) => healthChecks({ ...good, ...over }).failures;
+  {
+    const run = { calls: 39, failedCalls: 0, finishedAt: new Date(at(16, 21)).toISOString() };
+    const series = (session, lag) => ({ payload: { key: "live:strips:series", session, t: [], lag }, status: 200 });
+    const lag = { p50: [30, 45, null, 60], p90: [100, 210, null, 150], max: [120, 400, null, 200] };
+    const filled = healthChecks({ ...good, heartbeatRead: beat(S, { ...run, prevFill: { date: "2026-09-23", n: 46, declined: null } }),
+      seriesRead: series(S, lag) });
+    ok(filled.failures.length === 0 && filled.warnings.length === 0 &&
+       filled.notes.includes("day change: the last pass filled 46 null prev_close row(s) from the 2026-09-23 close") &&
+       filled.notes.includes(`live quote lag on ${S} over 3 fifteen-minute column(s): median of the medians 45 s, worst 90th percentile 210 s, ` +
+         "worst 400 s (the distribution a frozen-feed rule is set against; none is enforced)"),
+    "THE NIGHTLY LOG KEEPS THE DAY'S QUOTE-LAG SPREAD AND THE FILL as notes, never as a failure or a warning: the median of the " +
+      "per-column medians, the worst 90th percentile and the worst maximum, so the distribution a frozen-feed rule must be set " +
+      "against accumulates in the log of every nightly, and the run's fill count");
+    const aheadNote = (ahead) => healthChecks({ ...good, seriesRead: series(S, { ...lag, ahead }) }).notes.find((n) => /quote lag/.test(n)) || "";
+    ok(/, rows stamped ahead of the read in 2 column\(s\), most 7 in one \(the distribution/.test(aheadNote([0, 7, null, 3])) &&
+       /, no row stamped ahead of the read \(the distribution/.test(aheadNote([0, 0, null, 0])) &&
+       !/ahead/.test(aheadNote([null, null, null, null])) && !/ahead/.test(aheadNote(undefined)),
+    "THE LOG SAYS WHETHER A QUOTE TIME EVER RAN AHEAD OF THE READ, the question a clamped quote age cannot answer: how many columns had such rows and the most in one, 'no row' when the columns hold zeros, and nothing for a series written before the count existed");
+    const declined = healthChecks({ ...good, heartbeatRead: beat(S, { ...run, prevFill: { date: "2026-09-23", n: 0, declined: "disagrees" } }) });
+    ok(declined.failures.length === 0 && declined.notes.some((n) => /declined the 2026-09-23 close \(disagrees\)/.test(n)),
+      "and a base the vendor contradicted is named");
+    ok(!healthChecks({ ...good, seriesRead: series("2026-09-23", lag) }).notes.some((n) => /quote lag/.test(n)) &&
+       !healthChecks(good).notes.some((n) => /quote lag|day change/.test(n)) &&
+       !healthChecks({ ...good, seriesRead: series(S, { p50: [null], p90: [null], max: [null] }) }).notes.some((n) => /quote lag/.test(n)),
+    "while another session's series, a series with no spread and a pass with no fill print nothing");
+  }
   deep(fails({ heartbeatRead: beat("2026-09-23", { calls: 39, failedCalls: 0, finishedAt: new Date(at(16, 21)).toISOString() }) }),
     [`HEALTH: no live pass for ${S}: the last Tier 2 pass was for ${"2026-09-23"}`], "no Tier 2 pass today is one line");
   deep(fails({ heartbeatRead: { payload: null, absent: true, status: 200 } }),
@@ -2655,12 +2697,12 @@ const cronMinutes = (cron) => {
     const edgeCount = Number(/^ {2}edge: (\d+) ingest/.exec(edgeLine)[1]);
     const bracketed = [...edgeLine.slice(edgeLine.indexOf("[")).matchAll(/ (\d+)(?: \(cf-ray [^)]*\))?(?:;|\])/g)]
       .reduce((sum, m) => sum + Number(m[1]), 0);
-    deep([edgeCount, bracketed, run.count, lastGate.failures[0]], [34, 34, 34,
-      "HEALTH: the edge answered 34 ingest request(s) with HTTP 403 and retries spent 62 s of the 90 s budget"],
-    "THE GATE READS THE TALLY AFTER ITS OWN READS: the 403s its clock, live:market, live:focus and live:heartbeat reads " +
-      "meet are in the count, the count and the bracketed kinds add up to the same total, and the threshold sees what " +
+    deep([edgeCount, bracketed, run.count, lastGate.failures[0]], [37, 37, 37,
+      "HEALTH: the edge answered 37 ingest request(s) with HTTP 403 and retries spent 76 s of the 90 s budget"],
+    "THE GATE READS THE TALLY AFTER ITS OWN READS: the 403s its clock, live:market, live:focus, live:heartbeat and " +
+      "live:strips:series reads meet are in the count, the count and the bracketed kinds add up to the same total, and the threshold sees what " +
       "the line shows");
-    ok(/, 62\.0 s of retry budget spent/.test(edgeLine), "and the retry budget in the line is read at the same moment");
+    ok(/, 76\.0 s of retry budget spent/.test(edgeLine), "and the retry budget in the line is read at the same moment");
   }
   const off = healthChecks({ ...good, clockRead: clockWith({ tier1: { at: null, okAt: null, why: "off" } }),
     heartbeatRead: { payload: null, absent: true }, focusRead: { payload: null, absent: true } });
@@ -2684,11 +2726,11 @@ const cronMinutes = (cron) => {
       "live:focus": good.focusRead, "live:heartbeat": good.heartbeatRead })[key]),
     log: (l) => lines.push(l), warn: (l) => lines.push(l) });
   ok(gate.failures.length === 0 && lines[0] === "health gate: checked; 0 failure(s)" &&
-     gateReads.join() === "clock,live:market,live:focus,live:heartbeat",
-    "runHealthGate reads the clock, live:market, live:focus and live:heartbeat through the ingest route and prints one line");
+     gateReads.join() === "clock,live:market,live:focus,live:heartbeat,live:strips:series",
+    "runHealthGate reads the clock, live:market, live:focus, live:heartbeat and the strips series (for its quote-lag note) through the ingest route and prints one line");
   const pipeline = read("scripts/flows-pipeline.mjs");
   const tail = pipeline.slice(pipeline.indexOf("async function main()"), pipeline.indexOf("\nexport {\n"));
-  ok(/const health = await runHealthGate\(\{ sessionDate, read: readStored, dry: DRY_RUN, edge: edgeSnapshot,\s*annotate: process\.env\.GITHUB_ACTIONS === "true" \}\);\s*if \(health\.failures\.length\) process\.exitCode = 1;\s*\}\s*$/
+  ok(/const health = await runHealthGate\(\{ sessionDate, read: readStored, dry: DRY_RUN, edge: edgeSnapshot,\s*annotate: process\.env\.GITHUB_ACTIONS === "true",\s*night: \{[^}]*\} \}\);\s*if \(health\.failures\.length\) process\.exitCode = 1;\s*\}\s*$/
     .test(tail), "THE NIGHTLY ENDS WITH THE GATE: its last statement runs it and turns the run red on any failure, after " +
     "every key is published, with the edge 403s counted by kind and the Worker's own 403s kept apart");
   ok(/export function edgeSnapshot\(\) \{\s*return \{ \.\.\.structuredClone\(edgeRefusals\), retrySpentMs: publishRetrySpentMs \};\s*\}/
@@ -3105,8 +3147,8 @@ const cronMinutes = (cron) => {
   ok(gate.applies && gate.failures.length === 0 && gate.warnings.length === 0 && lines[0] === "health gate: checked; 0 failure(s)",
     "THE NIGHTLY STAYS GREEN WITHOUT THE TOKEN: the gate, reading that clock, finds no failure and no warning");
   deep(lines.filter((l) => /GITHUB_DISPATCH_TOKEN|dispatch|refused|renew/i.test(l)),
-    ["  dispatch: the Worker has no GITHUB_DISPATCH_TOKEN, so GitHub's own schedules start Tier 2 and the nightly; a " +
-      "supported mode, not a failure (DEPLOY.md 10.0 item 1)"],
+    ["  dispatch: the Worker has no GITHUB_DISPATCH_TOKEN, so the Tier 2 loop chains itself and dispatches the nightly " +
+      "with its own job token, GitHub's schedules being the backup; a supported mode, not a failure (DEPLOY.md 10.0 item 1 and 10.5k)"],
   "and the one line about dispatch is a note that says what the missing token means, never a refusal or a renewal");
   ok(!lines.some((l) => l.startsWith("WARN ")), "nothing is printed as a warning or a failure");
   const beforeAny = await runHealthGate({ sessionDate: S, now: () => at(20, 5), log: () => {}, warn: () => {},
@@ -3392,6 +3434,271 @@ const cronMinutes = (cron) => {
      "settledWithin says settled on any settlement, moved when the field it watches has moved on, and false at the deadline");
 }
 
+{
+  const S = "2026-09-23";
+  const P = "2026-09-22";
+  const at0 = T("2026-09-23T15:00:00Z");
+  const src = (name, sessionDate, close) => ({ name, sessionDate, close });
+
+  const base = L.priorCloseBase([
+    src("focus", P, { NVDA: 229.5, MSFT: 0, TSLA: null, AAPL: "338.4" }),
+    src("board:long", P, { NVDA: 230, AMD: 607.87 }),
+    src("board:short", "2026-09-19", { ZZZ: 1 }),
+    src("board:watch", S, { YYY: 2 }),
+  ], S, null);
+  deep(base.close, { NVDA: 229.5, AAPL: 338.4, AMD: 607.87 },
+    "THE PRIOR CLOSE comes from the nightly payloads dated the session before, the focus closes ahead of the boards, a zero or a null skipped, a string read as a number");
+  deep(base.from, { NVDA: "focus", AAPL: "focus", AMD: "board:long" }, "each name carrying the payload it was read from");
+  deep(base.other, [["board:short", "2026-09-19"], ["board:watch", S]],
+    "and a payload dated any other day is not used and is named: a nightly that missed a session is a base for nothing, and one dated the live session itself is that session's close, not its prior close");
+  eq(base.date, P, "the base is dated");
+  eq(L.priorCloseBase([], "2026-09-28", null).date, "2026-09-25", "a Monday's base is Friday's close");
+  eq(L.priorCloseBase([], "2026-09-08", null).date, "2026-09-04", "the Tuesday after Labor Day looks back past the holiday to the Friday");
+  eq(L.priorCloseBase([], S, { closedDays: [P] }).date, "2026-09-21", "and past a day the tape itself closed");
+  ok(L.priorCloseBase([], "not a day", null) === null && L.priorCloseBase(null, null) === null, "no session, no base");
+
+  const nightly = L.nightlySources({
+    boards: { long: { sessionDate: P, rows: [{ t: " nvda ", px: 230 }, { t: "AMD", px: 607.87 }, { t: "NVDA", px: 1 }] }, short: null },
+    focus: { sessionDate: P + "T00:00", closes: { AAPL: [330, 338.4], SLV: 66.2, GLD: [] } },
+  });
+  deep(nightly.map((x) => [x.name, x.sessionDate]), [["focus", P], ["board:long", P], ["board:short", null], ["board:watch", null]],
+    "the payloads are normalised in one place, dates cut to the day");
+  deep(nightly[0].close, { AAPL: 338.4, SLV: 66.2, GLD: undefined }, "the focus closes contribute their LAST element, a scalar as it is");
+  deep(nightly[1].close, { NVDA: 230, AMD: 607.87 }, "and a board row its px, tickers upper-cased and the first of a duplicate kept");
+
+  const rowOf = (t, o = {}) => ({ ticker: t, date: S, close: "110", prev_close: "100", quote_time: at0 - 30000, ...o });
+  const vend = (list) => ({ data: list });
+  const names = ["A", "B", "C", "D", "E", "F", "G", "H", "SPY"];
+  const rows = [...["A", "B", "C", "D", "E", "F"].map((t) => rowOf(t)), rowOf("G", { prev_close: null }), rowOf("H", { prev_close: "" }),
+    rowOf("SPY", { prev_close: null })];
+  const bBase = { date: P, close: { A: 100.02, B: 100, C: 100, D: 100, E: 100, F: 100, G: 200, H: 50 },
+    from: { A: "focus", B: "board:long", C: "board:long", D: "board:long", E: "board:long", F: "board:long", G: "board:long", H: "board:short" } };
+  const filled = L.shapeStrips(vend(rows), { at: at0, session: S, names, base: bBase });
+  const f = (t, n) => filled.rows[t][filled.fields.indexOf(n)];
+  deep([f("G", "prev"), f("G", "chg"), f("H", "prev"), f("H", "chg")], [200, -0.45, 50, 1.2],
+    "A NULL prev_close IS FILLED from the dated prior close and the change follows from it: 110 over 200 is −45%, 110 over 50 is +120%");
+  deep([f("SPY", "prev"), f("SPY", "chg")], [null, null], "while a name with no dated base keeps a null change, never a zero");
+  deep([f("A", "prev"), f("A", "chg")], [100, 0.1], "and the vendor's own prev_close is never replaced, even by a base that differs by two basis points");
+  deep(filled.prevFill, { date: P, n: 2, from: { "board:long": 1, "board:short": 1 }, agree: [6, 6], tickers: ["G", "H"] },
+    "THE BASIS IS LABELLED in the payload: which date, how many rows, from which nightly payload, which names, and that the vendor's own prev_close agreed with the base on 6 of 6 names that had both");
+  eq(L.shapeStrips(vend(rows), { at: at0, session: S, names }).prevFill, null, "no base offered, no fill claimed");
+  ok(L.shapeStrips(vend(rows), { at: at0, session: S, names }).rows.G[filled.fields.indexOf("chg")] === null,
+    "and without one the row stays null, as before");
+
+  const wrong = L.shapeStrips(vend(rows), { at: at0, session: S, names,
+    base: { ...bBase, close: { ...bBase.close, A: 130, B: 130, C: 130, D: 130, E: 130, F: 130 } } });
+  deep([wrong.prevFill.declined, wrong.prevFill.agree, wrong.rows.G[wrong.fields.indexOf("prev")]], ["disagrees", [0, 6], null],
+    "A BASE THE VENDOR CONTRADICTS IS NOT USED: when the vendor's prev_close disagrees with the nightly close on 6 of the 6 names that carry both, nothing is filled — a nightly on the wrong basis would put a wrong number where a dash belongs");
+  const few = L.shapeStrips(vend(rows.slice(0, 3).concat(rows.slice(6))), { at: at0, session: S, names,
+    base: { ...bBase, close: { A: 130, B: 130, C: 130, G: 200, H: 50 } } });
+  eq(few.rows.G[few.fields.indexOf("prev")], 200, "while fewer than five names to compare is too little to overrule the calendar check");
+
+  const dated = (n, prior) => [...Array.from({ length: n }, (_, i) => rowOf("N" + i)),
+    ...Array.from({ length: prior }, (_, i) => rowOf("P" + i, { date: P }))];
+  const askedAll = [...Array.from({ length: 8 }, (_, i) => "N" + i), "P0", "P1"];
+  const partial = L.shapeStrips(vend(dated(8, 2)), { at: at0, session: S, names: askedAll });
+  deep([partial.status, partial.returned, partial.off.n, Object.keys(partial.off.dates), partial.missing],
+    ["ok", 8, 2, ["P0", "P1"], ["P0", "P1"]],
+    "A ROW THE VENDOR STILL DATES BEFORE THE SESSION is held out of a strip that is otherwise today's, listed with its date, and reported missing, so a previous session's price is never shown as live");
+  deep(partial.off.dates, { P0: P, P1: P }, "each with the date it carries");
+  deep([partial.rows.P0, partial.rows.P1, Object.keys(partial.rows).length],
+    [Array(partial.fields.length).fill(null), Array(partial.fields.length).fill(null), 10],
+    "AND STANDS IN THE ROWS AS AN ALL-NULL ROW, so a module that asks for it still finds a live row for every name and its other names stay live; the reader prints the held-out name as a dash, never a previous session's price");
+  deep([partial.asked, partial.returned + partial.missing.length], [10, 10], "asked is still returned plus missing: an all-null row is not a returned one");
+  const unasked = L.shapeStrips(vend(dated(8, 2)), { at: at0, session: S, names: askedAll.slice(0, 8) });
+  deep([unasked.off.n, Object.keys(unasked.rows).length, unasked.returned, unasked.missing], [2, 8, 8, []],
+    "while a held-out row nobody asked for adds no bytes: it is counted and listed in off and not carried");
+  const allHeld = L.shapeStrips(vend(dated(0, 3)), { at: at0, session: S, names: ["P0", "P1", "P2"] });
+  deep([allHeld.status, allHeld.returned], ["prior", 3], "and a strip whose every row is the previous session's is a prior strip with its rows, not a set of dashes");
+  const mostly = L.shapeStrips(vend(dated(3, 7)), { at: at0, session: S, names: [] });
+  deep([mostly.status, mostly.returned, mostly.off.n], ["prior", 10, 0],
+    "while a strip that is mostly the previous session's stays a prior strip with every row kept, as before");
+  const many = L.shapeStrips(vend(dated(40, 30).slice(0, 40).concat(Array.from({ length: 30 }, (_, i) => rowOf("Q" + i, { date: P })))),
+    { at: at0, session: S, names: [] });
+  deep([many.off.n, Object.keys(many.off.dates).length], [30, L.OFF_ROWS_KEPT], "and the list of held-out names is capped, the count is not");
+
+  const stamped = L.shapeStrips(vend([
+    rowOf("A", { quote_time: at0 - 30000 }), rowOf("B", { quote_time: at0 - 90000 }), rowOf("C", { quote_time: new Date(at0 - 300000).toISOString() }),
+    rowOf("D", { quote_time: null }), rowOf("E", { quote_time: at0 + 30000 }), rowOf("F", { quote_time: at0 + 300000 }),
+    rowOf("G", { quote_time: Math.round((at0 - 60000) / 1000) }),
+  ]), { at: at0, session: S, names: [], lag: true });
+  const qa = (t) => stamped.rows[t][stamped.fields.indexOf("qa")];
+  deep(["A", "B", "C", "D", "E", "F", "G"].map(qa), [30, 90, 300, null, 0, null, 60],
+    "EVERY ROW CARRIES ITS OWN QUOTE AGE in seconds: a millisecond epoch, an ISO string and a seconds epoch all read, a missing stamp is null, a stamp within a minute after the read is 0, and one five minutes after it is not believed");
+  eq(stamped.fresh.vendorAt, "2026-09-23T15:00:00Z",
+    "THE KEY'S vendorAt IS THE NEWEST QUOTE the vendor stamped, held to the read instant when the vendor's clock runs a few seconds ahead of ours (the row stamped 15:00:30 reads as 15:00:00)");
+  eq(L.shapeStrips(vend([rowOf("A", { quote_time: at0 - 30000 }), rowOf("B", { quote_time: at0 - 90000 })]), { at: at0, session: S, names: [] }).fresh.vendorAt,
+    "2026-09-23T14:59:30Z", "and otherwise the newest stamp itself, not null and not our read time");
+  deep(stamped.lag, { n: 5, p50: 60, p90: 300, max: 300 },
+    "and the spread of the row ages is published (5 rows: 0, 30, 60, 90, 300), median, 90th percentile and largest");
+  eq(L.shapeStrips(vend([rowOf("A")]), { at: at0, session: S, names: [] }).lag, null, "the spread is computed only where asked, so the Worker's tick does not pay for it");
+  deep(stamped.ahead, { n: 1, maxS: 300 },
+    "AND A STAMP AHEAD OF THE READ IS COUNTED, not folded into 'no stamp': the row struck 30 s after the read is within the skew allowance and is not, the one struck five minutes after it is, with how far ahead it ran");
+  deep(L.shapeStrips(vend([rowOf("A", { quote_time: null }), rowOf("B", { quote_time: "not a time" })]), { at: at0, session: S, names: [] }).ahead,
+    { n: 0, maxS: 0 }, "while a row with no stamp, or one that does not parse, is not ahead of anything");
+  deep(L.shapeStrips(vend([rowOf("A", { quote_time: at0 + 120000 }), rowOf("B", { quote_time: at0 + 900000 }), rowOf("C")]),
+    { at: at0, session: S, names: [] }).ahead, { n: 2, maxS: 900 }, "and the count and the largest lead come from the same rows, on the Worker's path as on the leg's (no lag asked)");
+  eq(L.shapeStrips(vend([rowOf("A", { quote_time: null })]), { at: at0, session: S, names: [], lag: true }).fresh.vendorAt, null,
+    "a strip with no stamped row has no vendorAt, and no lag");
+  ok(L.STRIP_FIELDS[L.STRIP_FIELDS.length - 1][0] === "qa" && /seconds/.test(L.STRIP_FIELDS[L.STRIP_FIELDS.length - 1][2]),
+    "the age is the LAST strip field, so every reader that indexes by position or by name keeps working, and it names its unit");
+
+  const mv = L.shapeMovers({ status: "ok", fields: filled.fields, rows: { ...filled.rows, X: filled.rows.SPY } }, { at: at0, session: S });
+  deep([mv.ranked, mv.unranked, mv.up[0].t, mv.up[0].chg], [8, 1, "H", 1.2],
+    "LIVE:MOVERS RANKS EVERY NAME IT HAS A BASE FOR: the two filled names are ranked (H at +120% first), the one with no base is counted unranked");
+
+  const key = { ...stamped, fields: stamped.fields };
+  const s1 = L.appendStripSeries(null, { status: "ok", fields: key.fields, rows: { A: key.rows.A }, lag: { p50: 90, p90: 300, max: 300 },
+    ahead: { n: 2, maxS: 400 } }, { at: at0, session: S });
+  deep(s1.lag, { p50: [90], p90: [300], max: [300], ahead: [2] }, "THE LAG SPREAD IS KEPT PER COLUMN of the day's series, with how many rows were stamped ahead of the read");
+  const s2 = L.appendStripSeries(s1, { status: "ok", fields: key.fields, rows: { A: key.rows.A }, lag: { p50: 45, p90: 100, max: 120 } },
+    { at: at0 + 15 * 60000, session: S });
+  deep(s2.lag.p50, [90, 45], "one entry a column");
+  const s3 = L.appendStripSeries(s2, { status: "ok", fields: key.fields, rows: { A: key.rows.A }, lag: { p50: 50, p90: 110, max: 130 } },
+    { at: at0 + 16 * 60000, session: S });
+  deep([s3.t.length, s3.lag.p50], [2, [90, 50]], "a re-run inside the slot replaces its column's entry");
+  const old = { ...s1, lag: undefined };
+  delete old.lag;
+  const s4 = L.appendStripSeries(old, { status: "ok", fields: key.fields, rows: { A: key.rows.A }, lag: { p50: 7, p90: 8, max: 9 } },
+    { at: at0 + 15 * 60000, session: S });
+  deep([s4.lag.p50, s4.lag.ahead], [[null, 7], [null, null]], "a held series written before the spread existed is padded with nulls, so its columns stay aligned");
+  const pre = { ...s1, lag: { p50: [90], p90: [300], max: [300] } };
+  deep(L.appendStripSeries(pre, { status: "ok", fields: key.fields, rows: { A: key.rows.A }, lag: { p50: 1, p90: 2, max: 3 }, ahead: { n: 0, maxS: 0 } },
+    { at: at0 + 15 * 60000, session: S }).lag.ahead, [null, 0], "and one written before the ahead count existed is padded the same way, a read with none ahead recording a zero");
+  const s5 = L.appendStripSeries(s2, { status: "ok", fields: key.fields, rows: { A: key.rows.A }, lag: { p50: 1, p90: 2, max: 3 } },
+    { at: at0 + 30 * 60000, session: S, max: 2 });
+  deep([s5.t.length, s5.lag.p50.length, s5.lag.p50], [2, 2, [45, 1]], "and trimming the oldest column trims its spread with it");
+  const s6 = L.appendStripSeries(s2, { status: "ok", fields: key.fields, rows: { A: key.rows.A } }, { at: at0 + 30 * 60000, session: S });
+  deep([s6.lag.p50, s6.lag.ahead], [[90, 45, null], [2, null, null]],
+    "a column read with no stamped row records null, never a zero");
+
+  const series = { status: "ok", t: ["2026-09-23T14:55:00Z"], px: [100], gOi: [5], gVol: [1], gDir: [0], flowFilled: true,
+    last: { at: "2026-09-23T14:55:00Z", px: 100, gOi: 5, gVol: 1, gDir: 0 } };
+  const g = L.mergeGex(null, { A: series, B: { ...series, last: { ...series.last, at: "2026-09-23T14:50:00Z" } } },
+    { at: at0, session: S, rotation: { fixed: ["A"], rotating: ["B"] } });
+  deep([g.names.A.lagS, g.names.B.lagS, g.fresh.vendorAt], [300, 600, "2026-09-23T14:55:00Z"],
+    "GEX: each name carries the lag between its read and the vendor's newest row for it, and the key's vendorAt is the newest of them");
+  const g2 = L.mergeGex(g, { A: series }, { at: at0 + 15 * 60000, session: S, rotation: { fixed: ["A"], rotating: [] } });
+  deep([g2.names.B.lagS, g2.names.B.readAt === g.names.B.readAt], [600, true],
+    "and a name carried from an earlier pass keeps the lag of its own read under its own read time");
+
+  const legs = L.shapeTapePrem({ ticks: { data: [FX.netPremTicks.row] }, alerts: { data: [] } }, { at: T("2026-09-22T20:00:00Z"), session: "2026-09-22" });
+  eq(legs.prem.lagS, Math.round((T("2026-09-22T20:00:00Z") - T(legs.prem.lastAt)) / 1000),
+    "TAPE: the premium leg carries the lag between its read and the vendor's newest tick");
+  const gexLeg = L.shapeTapeGex({ spot: { data: [] } }, { at: T("2026-09-22T20:00:00Z"), session: "2026-09-22" });
+  eq(gexLeg.gex.lagS, null, "and a leg with no rows has no lag, not zero");
+}
+
+{
+  const S = "2026-09-23";
+  const P = "2026-09-22";
+  const at = (hhmm) => easternInstant(S, Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3)));
+  const groups = focusGroupsSample();
+  const names = W.focusNames(JSON.stringify(groups)).names;
+  const half = (q, due = 0) => {
+    const b = productionScreenerBody(String(q.ticker).split(","), { session: S, readAt: at("10:07") });
+    b.data.forEach((r, i) => { if (i % 2 === due) r.prev_close = null; });
+    return b;
+  };
+  const whole = productionScreenerBody(names, { session: S, readAt: at("10:07") });
+  const closes = Object.fromEntries(whole.data.map((r) => [r.ticker, Number(r.prev_close)]));
+  const run = async (nightly, make = half) => {
+    const db = focusDb({ groups, nightly });
+    const logs = [];
+    const res = await W.focusTick({ DB: db, UW_API_KEY: "k" }, at("10:08"), { fetchVendor: async (p, params) => make(params), log: { error: (l) => logs.push(l) } });
+    const w = db.statements.filter((x) => /INSERT INTO flows_live/.test(x.sql));
+    return { res, payload: w.length ? JSON.parse(w[0].args[1]) : null, logs };
+  };
+  const fillIx = (p, n) => p.fields.indexOf(n);
+  const nulls = names.filter((_, i) => i % 2 === 0);
+
+  const filled = await run({ session: P, closes });
+  ok(filled.res.written && filled.payload, "the focus tick writes with a nightly focus payload to read closes from");
+  const chgAt = fillIx(filled.payload, "chg");
+  ok(names.every((t) => typeof filled.payload.rows[t][chgAt] === "number"),
+    "THE WORKER'S LIVE:FOCUS HAS A DAY CHANGE ON EVERY NAME: the eleven whose vendor row lacks prev_close take the last dated close of the nightly focus payload (22 of 22, where production showed 11 of 22)");
+  deep([filled.payload.prevFill.n, filled.payload.prevFill.date, filled.payload.prevFill.from, filled.payload.prevFill.tickers],
+    [nulls.length, P, { focus: nulls.length }, nulls], "and labels which names, from what, dated when");
+  const pxAt = fillIx(filled.payload, "px");
+  const t0 = nulls[0];
+  eq(filled.payload.rows[t0][chgAt], Math.round((filled.payload.rows[t0][pxAt] / closes[t0] - 1) * 1e6) / 1e6, "the change is the live price over that close");
+  deep(filled.payload.prevFill.agree, [names.length - nulls.length, names.length - nulls.length],
+    "and the vendor's own prev_close agrees with the nightly close on every name that has both");
+  const contradicted = await run({ session: P, closes: Object.fromEntries(names.map((t) => [t, 100])) });
+  ok(contradicted.payload.prevFill.declined === "disagrees" && nulls.every((t) => contradicted.payload.rows[t][chgAt] === null),
+    "A NIGHTLY THE VENDOR CONTRADICTS IS NOT USED in the Worker either: closes that disagree with the vendor's prev_close on all eleven names that carry both fill nothing");
+
+  const stale = await run({ session: "2026-09-21", closes });
+  ok(stale.payload && names.every((t, i) => (i % 2 === 0 ? stale.payload.rows[t][chgAt] === null : stale.payload.rows[t][chgAt] !== null)) &&
+     stale.payload.prevFill.n === 0,
+  "A NIGHTLY THAT IS NOT THE PRIOR SESSION IS NOT A BASE: closes dated two sessions back fill nothing, and the rows keep a null change (a dash) rather than a multi-day one");
+  const none = await run(null);
+  ok(none.payload && none.payload.prevFill.n === 0 && none.payload.prevFill.date === P && nulls.every((t) => none.payload.rows[t][chgAt] === null),
+    "and with no nightly focus payload at all the payload records that the prior session was sought and nothing was filled");
+  const broken = await run({ session: P, closes: "not json" });
+  ok(broken.res.written && broken.payload.prevFill.n === 0, "a closes column that will not parse is no base, and the tick still writes");
+  const nullLast = await run({ session: P, closes: { ...closes, [t0]: null } });
+  ok(nullLast.payload.rows[t0][chgAt] === null && nullLast.payload.prevFill.n === nulls.length - 1,
+    "a name whose last nightly close is missing stays null while the others fill");
+  ok(/json_group_object\(c\.key, json_extract\(c\.value, '\$\[#-1\]'\)\)/.test(W.FOCUS_NIGHTLY_SQL) &&
+     /json_extract\(payload, '\$\.sessionDate'\)/.test(W.FOCUS_NIGHTLY_SQL) && /FROM flows_payload WHERE id = 'focus'/.test(W.FOCUS_NIGHTLY_SQL),
+  "the closes come in the SAME statement as the groups, the last close of each name found in D1, so the base costs no extra round trip and the 4 KB of closes never reach the isolate");
+  ok(names.every((t) => filled.payload.rows[t][fillIx(filled.payload, "qa")] !== null) && filled.payload.fresh.vendorAt !== null && filled.payload.lag === null,
+    "the Worker's rows carry their quote age and the key its vendorAt, without the spread the leg computes");
+  deep(filled.payload.ahead, { n: 0, maxS: 0 }, "and the count of stamps ahead of the read, which costs a comparison only on a row whose age is null");
+}
+
+{
+  const P = "2026-09-22";
+  const S = "2026-09-23";
+  const at = easternInstant(S, 11 * 60 + 7);
+  const runFill = async (boardDate, extra = {}) => {
+    let clock = at;
+    const uw = FAKE.fakeLiveVendor({ now: () => (clock += 250), session: S, nullPrev: true, ...extra });
+    const boards = FAKE.fakeBoards({ sessionDate: boardDate, session: S });
+    const published = {};
+    const result = await runLive({ uw, now: () => (clock += 250), log: () => {}, warn: () => {}, force: true, shapeNews,
+      publish: async (k, p) => { published[k] = p; },
+      readStored: async (k) => (k.startsWith("board:") ? { payload: boards[k.slice(6)] } : { payload: null }) });
+    return { published, result };
+  };
+  const withBase = await runFill(P);
+  const without = await runFill("2026-09-18");
+  const skewed = await runFill(P, { aheadS: 300 });
+  const strips = withBase.published["live:strips"];
+  const chg = strips.fields.indexOf("chg");
+  const prev = strips.fields.indexOf("prev");
+  const bare = (p) => Object.values(p.rows).filter((r) => r[chg] === null).length;
+  ok(strips.prevFill && strips.prevFill.n > 30 && strips.prevFill.date === P && strips.prevFill.agree[0] === strips.prevFill.agree[1],
+    `THE ACTIONS STRIP IS FILLED FROM THE BOARDS: ${strips.prevFill.n} null prev_close rows take the board's session close, and the vendor agrees with it on every name that has both`);
+  ok(bare(strips) < bare(without.published["live:strips"]) && without.published["live:strips"].prevFill.n === 0,
+    `${bare(strips)} rows keep a null change against ${bare(without.published["live:strips"])} when the boards are three sessions old`);
+  const movers = withBase.published["live:movers"];
+  const moversBare = without.published["live:movers"];
+  ok(movers.ranked > moversBare.ranked && movers.ranked + movers.unranked === moversBare.ranked + moversBare.unranked,
+    `and live:movers ranks ${movers.ranked} names where it ranked ${moversBare.ranked} without the fill (${movers.unranked} left unranked)`);
+  const notes = withBase.result.run.notes.join(" | ");
+  ok(/day change: \d+ null prev_close filled from the 2026-09-22 close/.test(notes) && /quote lag: \d+ row\(s\) stamped, p50/.test(notes),
+    "the heartbeat's notes say how many rows were filled from what, and the lag the vendor's stamps show");
+  ok(/not used: board:long 2026-09-18/.test(without.result.run.notes.join(" | ")), "and name a nightly they refused because it was not the prior session");
+  const run = withBase.result.run;
+  ok(run.quoteLag && run.quoteLag.n > 100 && run.quoteLag.p50 >= 0 && run.quoteLag.max <= 260 && run.prevFill.n === strips.prevFill.n &&
+     withBase.published["live:heartbeat"].run.quoteLag.n === run.quoteLag.n,
+  "the run record keeps the lag spread and the fill count, so the next pass and the owner can read them");
+  deep([run.quoteAhead, strips.ahead, withBase.published["live:strips:series"].lag.ahead], [{ n: 0, maxS: 0 }, { n: 0, maxS: 0 }, [0]],
+    "and the count of rows stamped ahead of the read, none from the fake vendor, in the key, the series column and the run record");
+  const drift = skewed.published["live:strips"].ahead;
+  ok(drift.n > 3 && drift.maxS > 250 && drift.maxS <= 300 && skewed.result.run.quoteAhead.n === drift.n &&
+     skewed.published["live:strips:series"].lag.ahead[0] === drift.n &&
+     skewed.result.run.notes.some((n) => new RegExp(`quote lag: .*; ${drift.n} row\\(s\\) stamped ahead of the read, by up to ${drift.maxS} s`).test(n)),
+  `and a vendor whose stamps run five minutes ahead of the read is counted (${drift.n} rows, ${drift.maxS} s) in the key, the series column, the run record and the job's notes, and those rows' ages read null`);
+  ok(strips.fresh.vendorAt && Date.parse(strips.fresh.vendorAt) <= Date.parse(strips.fresh.readAt) && strips.lag.max <= 260,
+    "live:strips has its vendorAt and the spread of its rows' ages");
+  const series = withBase.published["live:strips:series"];
+  ok(series.lag && series.lag.p50.length === series.t.length && series.lag.p50[0] !== null, "and its series keeps the spread of the first column");
+  ok(strips.rows.SYL001 && strips.rows.SYL001[prev] !== null, "a board name has a prev in either case");
+}
+
 console.log(`✓ flows-live: ${checks} assertions — one threshold table in code; phases on the Eastern clock at every ` +
   `boundary under EDT and EST, a tape-derived holiday and early close; states and absolute instants for every class; ` +
   `the Tier 1 and Tier 2 clocks, in-flight dispatch and a once-only nightly retry; probe rows shaped to known answers ` +
@@ -3408,4 +3715,9 @@ console.log(`✓ flows-live: ${checks} assertions — one threshold table in cod
   `rule; the self-sustaining ` +
   `Tier 2 session loop, its budget and its chain dispatch; starters that land at least seven times in the wait ` +
   `before 09:31 ET for every delivery delay up to five hours, under EDT and EST, each a chance at the one run that ` +
-  `waits; a delivery log timed from the run's created_at; and a client helper that only compares clocks`);
+  `waits; a delivery log timed from the run's created_at; a day change against the last dated close wherever the ` +
+  `vendor sent none (from the boards and the nightly focus closes, only when they are the prior session's and the vendor's own ` +
+  `prev_close agrees), every strip row with its own quote age, the newest quote as vendorAt and the spread of the ages per ` +
+  `column, the count of stamps that run ahead of the read, a row dated before the session standing as an all-null row ` +
+  `instead of taking its module off the live read, the nightly gate's note of that spread; and a client helper that ` +
+  `only compares clocks`);

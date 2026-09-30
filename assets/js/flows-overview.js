@@ -1502,7 +1502,8 @@
       said.push("Fetched at " + (fmtStamp(payload.readAt) || DASH) +
         (readAge === null ? ", which is ahead of this browser's clock, so no age can be stated" : ", " + readAge) + ".");
     }
-    if (typeof payload.cadence === "string" && payload.cadence) {
+    if (payload.live) said.push("This feed is re-read every " + payload.cadenceMinutes + " minutes while the market is open.");
+    else if (typeof payload.cadence === "string" && payload.cadence) {
       said.push("This feed is fetched " + payload.cadence +
         (typeof payload.staleBy === "string" && payload.staleBy ? " and is stale by " + payload.staleBy : "") +
         ", so it is a once-a-day read and never a live tape.");
@@ -1546,7 +1547,7 @@
       said.push(unflagged + (unflagged === 1 ? " stored row carried" : " of the stored rows carried") +
         " no major/minor flag at all, which is not the same as having been flagged not-major.");
     }
-    const cadence = typeof payload.cadence !== "string" ? "Snapshot; cadence not specified"
+    const cadence = payload.live ? "Intraday snapshot" : typeof payload.cadence !== "string" ? "Snapshot; cadence not specified"
       : /after the close/i.test(payload.cadence) ? "After-close snapshot"
         : /morning/i.test(payload.cadence) ? "Morning snapshot" : "Snapshot; cadence not specified";
     const coverage = [readAge ? "Fetched " + readAge : "Fetch age unknown", cadence];
@@ -1942,6 +1943,7 @@
     if (body && typeof body === "object") {
       body.__updatedAt = at !== null && at > 0 ? at : null;
       body.__ff = typeof UI.freshFrom === "function" ? UI.freshFrom(response) : null;
+      if (body.__ff && !body.__ff.overlay) UI.freshness({ ff: body.__ff, source: response.url.replace(/^.*flows\//, "") });
     }
     return body;
   }
@@ -2036,15 +2038,16 @@
   function live(liveVol) {
     if (typeof UI.heartbeat !== "function") return;
     UI.heartbeat({
-      keys: ["market", "breadth", "strips", "focus"], nightly: ["pulse", "focus"], page: "overview",
+      keys: ["market", "breadth", "strips", "focus", "news"], nightly: ["pulse", "focus"], page: "overview",
       onBeat() { if (heroTide && heroTide.live) paintPill(heroTide); for (const k in FOCUS.pills) whenPill(k, ...FOCUS.pills[k]); },
       onChange(changed) {
         if (!Array.isArray(changed)) return;
         const has = (re) => changed.some((k) => re.test(String(k)));
-        const st = has(/strips/), fo = has(/^focus/), lf = has(/:focus/), mk = has(/market/), br = has(/breadth/), pu = has(/pulse/);
+        const st = has(/strips/), fo = has(/^focus/), lf = has(/:focus/), mk = has(/market/), br = has(/breadth/), pu = has(/pulse/), nw = has(/news/);
         const keys = [mk && "market", br && "breadth", st && "strips", st && "strips:series", lf && "focus"].filter(Boolean);
-        Promise.all([fo && loadRegion("/api/flows/focus"), pu && loadRegion("/api/flows/pulse"), keys.length && loadLive(keys)]).then(([f, p, lk]) => {
+        Promise.all([fo && loadRegion("/api/flows/focus"), pu && loadRegion("/api/flows/pulse"), keys.length && loadLive(keys), nw && loadRegion("/api/flows/news")]).then(([f, p, lk, n]) => {
           const l = lk || {};
+          if (n) fill("ccNews", paintNews, R.news = n, index(R).cards, Date.now());
           if (f) FOCUS.focus = f;
           if (l.strips) FOCUS.strips = l.strips;
           if (l["strips:series"]) FOCUS.series = l["strips:series"];

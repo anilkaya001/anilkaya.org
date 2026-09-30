@@ -1400,8 +1400,14 @@
     ];
   }
 
+  function tapePrem() {
+    const p = STATE.tape && STATE.tape.prem;
+    return p && p.status === "ok" && Array.isArray(p.t) && p.t.length > 1 ? p : null;
+  }
+  const tapeSub = (word, p) => (STATE.tapeLive ? word : "to " + F.time(p.t[p.t.length - 1]));
+
   function pathLegs(card) {
-    const tp = STATE.tape && STATE.tape.prem && STATE.tape.prem.status === "ok" && Array.isArray(STATE.tape.prem.t) && STATE.tape.prem.t.length > 1 ? STATE.tape.prem : null;
+    const tp = tapePrem();
     if (tp) {
       const d = Array.isArray(tp.nd) ? tp.nd.map((v) => num(v)) : tp.t.map(() => null);
       const u = STATE.tape.units || {};
@@ -1467,7 +1473,7 @@
     if (!L) return [];
     const P = L.panel;
     const hasP = L.p.some((v) => num(v) !== null && v !== 0);
-    const out = [L.src === "tape" ? "Drawn from this session's live tape; the path signature below is the card's, from the session it describes." : null,
+    const out = [L.src === "tape" ? "Drawn from this session's " + (STATE.tapeLive ? "live tape" : "tape, read " + tapeSub("", tapePrem())) + "; the path signature below is the card's, from the session it describes." : null,
       "Each leg is scaled to its own extreme, so both reach full height: net delta in " + (L.dUnit || (L.src === "tape" ? "a unit the live tape does not state" : "the unit the card publishes")) + (hasP ? ", net premium in " + (L.pUnit || "dollars") + "." : "."),
       hasP ? null : "The session carried no net premium in either direction, so only the delta leg is drawn."];
     if (P && num(P.persistence) === null && !("persistence" in P)) out.push("This card was built before the path signature was published, so persistence, concentration and the mean minute are not stated, and no mean-minute rule is drawn.");
@@ -2060,7 +2066,7 @@
   function buildFlow(card) {
     const P = card.panels || {};
     const X = STATE.cardX || {};
-    const tp = STATE.tape && STATE.tape.prem && STATE.tape.prem.status === "ok" && Array.isArray(STATE.tape.prem.t) && STATE.tape.prem.t.length > 1 ? STATE.tape.prem : null;
+    const tp = tapePrem();
     const path = okOf(P.path);
     const legs = pathLegs(card);
     const stSession = legs && legs.d.some((v) => num(v) !== null) ? OK : panelSt(card, "path", "session flow");
@@ -2129,8 +2135,8 @@
     const tiles = tileList.length ? h("div", { class: "ui-tiles ft-tiles" }, tileList) : null;
     mod({ id: "m-flow", title: "Flow", span: [12, 6], st, seg: vw.seg, views: vw.views, index: 7, body: [
       mets([
-        metric("Net premium", moneyPx(net), { tone: tone(net), sub: tp ? "live" : path && num(path.minutes) ? Math.round(path.minutes / 6) / 10 + "h session" : null, state: num(net) === null ? stSession : null }),
-        metric("Net delta", F.num(nd, true), { tone: tone(nd), sub: tp ? "live tape" : "session", state: num(nd) === null ? stSession : null }),
+        metric("Net premium", moneyPx(net), { tone: tone(net), sub: tp ? tapeSub("live", tp) : path && num(path.minutes) ? Math.round(path.minutes / 6) / 10 + "h session" : null, state: num(net) === null ? stSession : null }),
+        metric("Net delta", F.num(nd, true), { tone: tone(nd), sub: tp ? tapeSub("live tape", tp) : "session", state: num(nd) === null ? stSession : null }),
         offIndex(card, X.nope) ? null : metric("NOPE", nope ? F.pct(nope.close, 1, true) : DASH, { tone: nope ? tone(nope.close) : null, sub: nope && num(nope.z) !== null ? "z " + F.signed(nope.z, 1) : nope ? "no history" : null, state: nope ? null : xSt(X.nope, "NOPE read") }),
         metric("Aggressor", F.num(agNet, true), { tone: tone(agNet), sub: agNet === null ? null : agNet < 0 ? "to puts" : "to calls", state: agNet === null ? panelSt(card, "aggressor", "aggressor ladder") : null }),
       ], { min: 96 }), vw.box, vw.leg, tiles],
@@ -2140,7 +2146,7 @@
           ["Tenor", fe ? "conviction " + fx(fe.convictionDte, 1) + " days, bucket " + fe.convictionBucket + ", OTM share " + F.pct(fe.otmShare, 0) : null],
           ["Centroid", fs ? F.px(fs.centroid) + " (" + F.signed(fs.centroidSigma, 2) + " SD from spot)" : null], ["Wall share", fs ? F.pct(fs.wallShare, 1) + " of in-band flow at the walls" : null]]),
         sections: [{ title: "Aggressor", lines: [leadOf(P.aggressor) || reasonOf(panelSt(card, "aggressor", "aggressor ladder")), P.aggressor && P.aggressor.relation] },
-          { title: "Session", lines: [tp ? "Read from the live tape at " + F.time(tp.readAt) + "." : null].concat(pathNotes(card, legs)) },
+          { title: "Session", lines: [tp ? "Read from the " + (STATE.tapeLive ? "live " : "") + "tape at " + F.time(tp.readAt) + "." : null].concat(pathNotes(card, legs)) },
           { title: "Days", lines: [npY ? "Net premium per session over the year from the vendor's options-volume history; a dot is a session with no reading, not a zero." : pt ? pt.unit : reasonOf(panelSt(card, "premiumTrack", "premium history"))] }],
       }) });
     vw.start();
@@ -2582,7 +2588,7 @@
     if (!groups.length) return;
     mod({ id: "m-screen", title: "Screen", span: [12, 12], index: 2,
       body: groups.map(([g, l]) => h("div", { class: "ft-scr" }, h("h3", null, g), mets(l.map(([k, lab, f]) => metric(lab, liteV(u[k], f), { tone: /[svt$]/.test(f) ? tone(u[k]) : null })), { min: 96 }))),
-      info: () => ({ title: "Screen", asOf: card.sessionDate, lead: card.depth === "quote" ? "One read of the vendor's screener row for " + card.ticker + "." : "The nightly screen's row for " + card.ticker + ". No card was built for it this session, so this is its whole dossier.",
+      info: () => ({ title: "Screen", asOf: card.sessionDate, lead: card.depth === "quote" ? "One read of the vendor's screener row for " + card.ticker + ", taken at " + F.time(card.generatedAt) + "." : "The nightly screen's row for " + card.ticker + ". No card was built for it this session, so this is its whole dossier.",
         facts: [["No card because", card.why === "gated" ? "the earnings gate" : "outside tonight's coverage"]] }) });
   }
 
@@ -2590,9 +2596,9 @@
     const L = pathLegs(card);
     if (!L || !L.d.some((v) => num(v) !== null)) return;
     const view = h("div", { class: "ft-view" }), leg = h("div", { class: "ft-leg-row" });
-    const p = L.p[L.p.length - 1], d = L.d[L.d.length - 1];
-    mod({ id: "m-flow", title: "Flow", span: [12, 6], index: 7, body: [mets([metric("Net premium", moneyPx(p), { tone: tone(p), sub: "live" }), metric("Net delta", F.num(d, true), { tone: tone(d), sub: "live tape" })], { min: 96 }), h("div", { class: "ft-cbox" }, view), leg],
-      info: () => ({ title: "Flow", lead: "This session's live tape for " + card.ticker + ".", sections: [{ title: "Session", lines: pathNotes(card, L) }] }) });
+    const p = L.p[L.p.length - 1], d = L.d[L.d.length - 1], tp = tapePrem();
+    mod({ id: "m-flow", title: "Flow", span: [12, 6], index: 7, body: [mets([metric("Net premium", moneyPx(p), { tone: tone(p), sub: tapeSub("live", tp) }), metric("Net delta", F.num(d, true), { tone: tone(d), sub: tapeSub("live tape", tp) })], { min: 96 }), h("div", { class: "ft-cbox" }, view), leg],
+      info: () => ({ title: "Flow", lead: "The session's tape for " + card.ticker + ".", sections: [{ title: "Session", lines: pathNotes(card, L) }] }) });
     const r = pathChart(view, card, L);
     if (r.legend) leg.append(legend(r.legend));
   }
@@ -2617,11 +2623,12 @@
     STATE.first = false;
   }
 
-  async function getJSON(url) {
+  async function getJSON(url, on) {
     const r = await fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" } });
     if (r.status === 401) { location.replace("/flows/"); return null; }
     if (r.status === 503) { const b = await r.json().catch(() => null); if (b && b.status) return b; }
     if (!r.ok) throw new Error("HTTP " + r.status);
+    if (on) on(r);
     return r.json();
   }
   const soft = (p) => p.then((v) => v, () => null);
@@ -2726,12 +2733,17 @@
     sayStatus("");
   }
 
-  async function fetchTape(t) {
-    const tape = await soft(getJSON(api("tape", t)));
-    if (!tape || tape.status) return false;
-    const before = STATE.tape && STATE.tape.prem ? STATE.tape.prem.readAt : null;
+  async function fetchTape(t, again = 3) {
+    let ff = null;
+    const tape = await soft(getJSON(api("tape", t), (r) => { ff = UI.freshFrom(r); }));
+    if (!tape || tape.status) return;
+    const m = UI.freshness.market(), state = ff ? ff.state : "live";
+    if (state === "stale" && again && STATE.phase !== "rth") setTimeout(() => fetchTape(t, again - 1), 5000);
+    if (tape.session < (m.open ? m.today : m.expected)) return;
+    const before = STATE.tape && STATE.tape.prem ? STATE.tape.prem.readAt : null, was = STATE.tapeLive;
     STATE.tape = tape;
-    return !tape.prem || tape.prem.readAt !== before;
+    STATE.tapeLive = state === "live" || state === "fresh";
+    if ((!tape.prem || tape.prem.readAt !== before || STATE.tapeLive !== was) && STATE.card) flowOf(STATE.card);
   }
   const flowOf = (card) => (card.lite ? buildLiteFlow : buildFlow)(card);
 
@@ -2764,10 +2776,11 @@
     STATE.hb = UI.heartbeat({
       ticker: t, page: "ticker", nightly: lite ? [] : ["card:" + t],
       onBeat: ({ body }) => {
+        const was = STATE.phase;
         STATE.phase = body && body.phase ? body.phase.phase : null;
         STATE.lastClosed = body && body.phase ? body.phase.lastClosed : null;
         STATE.beats++;
-        if (STATE.phase === "rth" && STATE.beats % 3 === 0) fetchTape(t).then((moved) => { if (moved && STATE.card) flowOf(STATE.card); });
+        if (STATE.phase === "rth" ? STATE.beats % 3 === 0 : was === "rth") fetchTape(t);
       },
       onQuote: (q) => {
         if (!STATE.card) return;
@@ -2806,7 +2819,7 @@
     }
     if (!card) return;
     if ((card.status && card.status !== "ok") || !(card.panels || card.lite)) { await absentCard(ticker, card); return; }
-    fetchTape(ticker).then((moved) => { if (moved && STATE.card === card) flowOf(card); });
+    fetchTape(ticker);
     paintFreshness(card);
     const [neuron, cx, hist] = await Promise.all([neuronP, cxP, histP]);
     STATE.card = card;

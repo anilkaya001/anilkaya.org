@@ -384,7 +384,21 @@ it unlocks and what tells you it has lapsed.
    instead of renewing it records `no-token` and clears the alert. With no
    token at all the nightly stays green: every due dispatch records
    `no-token`, nothing reaches GitHub, and the gate prints only the note
-   `dispatch: the Worker has no GITHUB_DISPATCH_TOKEN, so GitHub's own schedules start Tier 2 and the nightly; a supported mode, not a failure`.
+   `dispatch: the Worker has no GITHUB_DISPATCH_TOKEN, so the Tier 2 loop chains itself and dispatches the nightly with its own job token, GitHub's schedules being the backup; a supported mode, not a failure (DEPLOY.md 10.0 item 1 and 10.5k)`.
+
+   Setting the token is still the best fix: the Worker's cron is the one clock
+   in the system that does not depend on GitHub's queue, and it dispatches
+   whether or not a live loop is alive. Without it, section 10.5k is the path
+   that needs no secret: the Tier 2 loop stays up between sessions, chains
+   itself through the night and the weekend, dispatches the nightly at 17:30 ET
+   with its own `GITHUB_TOKEN`, and opens a GitHub Issue when Tier 1 or the
+   nightly lapses. Set both and they cooperate: whichever dispatches first
+   wins, and the second dispatch is the nightly's one-minute same-session
+   refresh (the `flows-pipeline` concurrency group queues it, the gate finds
+   the session archived). Runs started by a job's `GITHUB_TOKEN` have
+   `github-actions[bot]` as their actor, and GitHub emails the actor of a failed
+   run, so a bot's failure has no inbox to reach; that is why the loop has its
+   own alert channel, and a token you create makes the actor you.
 2. **`UW_API_KEY` in both places.** The same Unusual Whales key is a GitHub
    repository secret (the nightly, Tier 2 and the weekly probe) and a Worker
    secret (Tier 1, the tape, the quote, the chain and the strategy engine):
@@ -902,10 +916,98 @@ fails after the deletes logs how many keys were removed.
 What the probe cannot see is a key that only a LOST ledger knew and whose
 ticker is in none of tonight's candidates (the harvest of about 830 names, the
 guarantee, the funds, the indices and the Nasdaq-100 constant): a name that
-left the screen entirely in the same few nights its ledger was lost. Such a
-row stays until its ticker returns to the screen. A Worker-side sweep of
-`card:`, `card-x:` and `hist:` rows by `updated_at` would close it; it is not
-in the Worker today.
+left the screen entirely in the same few nights its ledger was lost. On
+2026-09-29 eleven such rows were in the store (card PRU, SYK, CNQ, COO, CB and
+TD, card-x CB, LEVI and TD, hist CB and TD; PRU 35 days old and in that day's
+universe), served forever because the ledger, once `carried`, never probes
+again, and a reader typing `/flows/ticker/?t=PRU` got the 2026-08-25 dossier
+under a Stale chip.
+
+The nightly now asks the store what it holds. `GET /api/flows/ingest?list=card,card-x,hist`
+(nightly credential only) answers every non-pending row of those three prefixes
+with its session, generation instant and write time and never its payload,
+from the primary key's three prefix ranges (about 580 rows read, no scan, cut
+at 2,000 with `truncated`). `retireAndRoster` unions every listed key the
+ledger and tonight's landed set do not name into `known` before it ages the
+ledger, so anything more than three sessions old is retired the same night and
+anything younger is held from then on: the ledger repairs itself every night and
+no orphan can outlive one. A listing that fails changes nothing (the ledger is
+used as it stands, with one log line), and a night whose prior roster could not
+be read still retires nothing. The eleven rows go the first night after this
+deploys; the owner's fallback, if a Worker older than the listing is answering,
+is `DELETE FROM flows_payload WHERE id IN ('card:PRU', ...)` through
+`wrangler d1 execute`, eleven row writes.
+
+### 10.4c The D1 free-tier budget: rows written and rows read
+
+The Workers Free plan gives one D1 database two daily row caps, both reset at
+00:00 UTC and both shared by everything on the account: **100,000 rows
+written** and **5,000,000 rows read**. Only the write cap was ever modelled
+(section 10.4b prices the archive, the cards and the scorer against it). The
+read cap is the one that was found exceeded: on 2026-09-29 an audit `SELECT`
+at about 21:36 UTC failed with error 7500. Who spent it (the audit's own
+thousands of queries are the leading suspect, unproven) and whether the
+Worker's own reads and writes were refused that evening are unverified until
+`live:alerts.record.reads` is read for continuity across it and the D1
+dashboard's rows read by hour is read, which only the owner can do.
+
+What the ledger adds is written down so the write budget stays a sum: each
+weekday the Tier 1 tick writes two ledger rows (its stamp and its outcome, on
+about 108 firings, of which about 80 are due), the focus tick one (about 80),
+each Tier 2 heartbeat one (about 85) and the nightly one, in all about 350
+row writes a day against 100,000, on the batches those writers already
+issue. The Tier 1 tick's read batch now selects the twelve live rows'
+ages (12 rows read where it read 1), about 1,200 more rows read a day.
+
+A quota error is answered by the Worker as `503 store_quota` with
+`Retry-After` to 00:00 UTC (section 10.5h), so the gate and the nightly can
+tell it from a Worker or a network fault.
+
+**Reads are guarded in rows, not only in trips.** `tests/flows-reads-contract.mjs`
+fits its fake D1 with `EXPLAIN QUERY PLAN`: an index search costs the rows it
+returns, a scan costs the whole table, and a `json_each` over a payload costs
+the elements of that array (D1 was seen to count them: a first audit `SELECT`
+over the universe's names reported 666 rows read). Every read route has a
+ceiling against a table of 1,216 rows, and a route the Worker declares that has
+none fails the suite: the thirteen home reads together cost 23
+rows, so the cap holds about 217,000 cold home loads a day; a lite card or an
+absent name reads the universe's name list and its sector column (1,466 rows,
+an upper bound because SQLite stops at the first match) and, with the tape's
+admission check (673, the same bound), is the costliest page, about 2,300 cold
+ticker pages a day. The model is an upper
+bound and only ever a ceiling; the number that matters is the D1 dashboard's
+rows read by hour, which only the owner can see.
+
+**When the store cannot be read, a reader gets the last good copy.** The
+Worker keeps each nightly Flows key it serves (`board`, `market`, `events`,
+`scoretrack`, `meta`, `flowalerts`, `pulse`, `political`, `unusual`, `movers`,
+`sectors`, `sector-premium`, `universe`, `regime`, `ideas`, `focus`, `roster`,
+`news`, `record`, and a card, card-x or hist by ticker) in `caches.default`
+under an internal URL, once per ten minutes per isolate, for 24 hours, and only
+a response served from a stored row (`X-Payload-Updated`) is kept, never a
+pending answer. When D1 answers an error (the 7500 quota above, or any other
+fault) the Worker returns that copy with `X-Fresh-State: stale`,
+`X-Fresh-Reason: store` and `X-Fresh-Last-Good` naming the instant it was
+kept, where it used to return a bare 503 `store_unreadable`. The body is the
+stored row, so its own `sessionDate` and `generatedAt` still say what day it
+describes; a copy older than 24 hours, a key never kept, the live keys
+(`/lk`, `/now`) and the brief (its age label is computed at serve time) are the
+503 they were, and a request without a session is the 401 it always was. It
+costs no D1 rows, one Cache API write per key per ten minutes per isolate and
+no CPU worth naming on the path that serves a stored row; the alternative is
+Workers Paid.
+
+**What the last good copy does not promise.** `caches.default` is local to the
+data centre that wrote it and is neither replicated nor pinned: the copy exists
+only where that key was served within the last 24 hours and can be evicted
+earlier, so a data centre that did not serve the key still answers the bare
+503. It softens a quota day for the colo the owner and most readers use; it is
+not a guarantee. The behaviour is proven on local workerd and a Cache API
+fake, and is **unverified on the production edge**: nothing in a healthy day
+shows the stamp, and the store cannot be made unreadable on purpose in
+production, so the first real quota or D1 outage is the check (read
+`X-Fresh-Last-Good` on the response). The Cache API does nothing on a
+`workers.dev` hostname, so a preview there proves nothing either way.
 
 ### 10.5 The data pipeline
 
@@ -1576,6 +1678,11 @@ not from the spec. Wave B has landed and the probes are retired; the last one,
 
 ### 10.5h The schedule, and the session each run reads
 
+Since 2026-09-29 the Tier 2 loop dispatches this workflow at 17:30 ET with its
+own job token (section 10.5k), and the crons below are the backup: a cron firing
+that arrives after the loop's run is the same-session refresh described under
+"The same-session gate".
+
 The workflow has four crons. `30 21 * * 1-5` and `30 22 * * 1-5` are the
 primaries: 17:30 Eastern under EDT and under EST respectively. The gate step
 admits each only in its own zone, keyed on the cron string that fired rather
@@ -1667,6 +1774,73 @@ Four guards sit behind the schedule, all in `scripts/flows-pipeline.mjs`:
   the run exit non-zero after everything is published, and a red scheduled
   run emails the owner. A missing `GITHUB_DISPATCH_TOKEN` is a note, never a
   failure. `FLOWS_LIVE_MODE = "off"` is a deliberate rollback, not a failure.
+- **The gate judges the whole day, from the session ledger.** Until the
+  ledger the gate saw four single cells (the clock, `live:market`,
+  `live:focus`, `live:heartbeat`) and tested only that each was written
+  recently, so a Tier 1 that was dead from 10:00 to 15:00 ET and written again
+  at 15:50 passed, a Tier 2 that began at 14:01 ET on 25 September passed with
+  31 of about 84 passes, and a nightly that never ran raised nothing, because
+  the gate is that nightly's last step. `flows_ledger` (`migrations/0015_flows_ledger.sql`,
+  one row per Eastern day, thirty kept, pruned by the 03:00 ET housekeeping
+  firing) records the day as it happens, at no extra D1 round trip: the Tier 1
+  tick's first statement becomes a batch of the clock stamp and the ledger's
+  tick row (ticks, the longest gap between ticks), the write batch carries the
+  outcome (ok or failed, the longest gap between successful writes, and the
+  worst key the Worker saw past its stale line, read from the live rows the
+  same tick already selected), the focus tick's write batch carries its ok,
+  partial and failed counts and its write gap, every Tier 2 heartbeat write
+  carries the pass (count, first and last instant, longest gap, vendor calls
+  and failures), and the nightly's `meta` write stamps the session's landing.
+  A statement the ledger adds is dropped, with one warning, if the table cannot
+  be written: the tick, the write and the heartbeat never depend on it. The
+  nightly token's read of the ingest `clock` key returns it as `ledger`
+  (`{ retainDays, days: [...] }`, newest first; the live credential's every-pass
+  read does not carry it). The gate turns red on any Tier 1, focus or Tier 2
+  interval longer than that class's stale line (25 min for the Worker's, 45 min
+  for the Actions class, read from `FRESH_CLASSES`, so the line the gate draws
+  is the line the reader's pill draws), naming the interval; on a session with
+  no Tier 2 pass; on a nightly that never landed for the previous trading
+  session (checked from the next session's run, since no run means no gate on
+  the night itself; it is skipped when that session is the ledger's oldest day,
+  which may predate the ledger); and, from the run's own facts, on cards that
+  failed or were skipped past the deadline and on a roster shorter than the
+  names planned a card (a dry run evaluates these run facts too, prints them
+  as `run facts:` and exits red on a failure, and the pipeline contract holds
+  the plan handed to the gate equal to the plan the run prints, so a healthy
+  night can neither trip the roster check nor hide a missing name from it). It warns, without failing, on Tier 2 coverage under 70%
+  of the passes a five-minute loop makes and on a key lapse the Worker saw at
+  its own five-minute check; the first evening of the ledger downgrades the
+  gaps to warnings, since the session may have begun before the Worker that
+  keeps it was deployed. Because the ledger describes the session and not
+  today's rows, a nightly that starts after midnight ET is still judged for
+  gaps, landings and cards, where it used to skip every live check. What it
+  cannot do is speak on a night with no run: that is the Actions-clock witness
+  (section 10.0 item 1 sets the token that lets the Worker start the nightly
+  itself).
+
+- **Ingest 5xx bursts have their own red line, and a spent D1 quota is named.**
+  The gate used to speak about 5xx answers only after 24 edge 403s or 60 s of
+  retry budget, so five 503s the retries absorbed scrolled past in a green run.
+  Five or more HTTP 5xx answers on the ingest route in one run (`HEALTH.burst5xx`)
+  now turn the run red with the answers' Ray IDs. A D1 error that says the
+  account's free-tier daily quota is spent (error 7500, "exceeded D1's free tier
+  daily row read limit") is answered by the Worker as its own `503 store_quota`
+  with `Retry-After` set to the seconds until 00:00 UTC, where it was an
+  anonymous 500; the gate counts those answers apart and names the cap (100,000
+  rows written or 5,000,000 rows read a day; section 10.4c). The nightly's write
+  loop waits such an answer out instead of retrying it into a cap that lasts
+  until midnight: when the reset is within twenty minutes of the run's first
+  quota answer it sleeps to the reset plus thirty seconds, defers every other
+  writer with it and spends none of its retries or of its 90 s retry budget;
+  a reset farther away fails at once as before. D1's counter need not clear at
+  exactly 00:00:00 UTC, and an answer that arrives after midnight carries a
+  `Retry-After` of a day, so a run that has already waited once steps every
+  60 s while the clock reads within ten minutes after 00:00 UTC, inside the
+  same twenty-minute bound, instead of giving up on the day-long value. That is cheap and safe because a
+  publish is an idempotent upsert (the dated archive is insert-if-absent), the
+  wait is bounded per run and Actions minutes on a public repository are free;
+  it cannot outlive a nightly that starts hours before the reset, which stays
+  red and republishable until 09:30 ET the next weekday.
 
 Feeds read without a date (`news`, `pulse`, `flowalerts`, `sector:premium`)
 carry `readDay`, the Eastern day of their own `readAt`, beside `sessionDate`;
@@ -1813,6 +1987,113 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   through the morning. `live:focus` needs neither the token nor Actions, only
   the Worker's `UW_API_KEY`, which Tier 1 already needs. Tier 2 still refreshes
   `live:strips` whenever it runs, and the page takes whichever read is newer.
+- **A live change is always against a dated close, and every live price says how old its quote is.**
+  On 2026-09-29 the vendor's `prev_close` was null on 59 of 122 strip rows and 11 of the 22
+  focus rows (the same eleven names on every read, from both writers, after the close as
+  well as during it), so those rows had no change and `live:movers` ranked 62 of 119
+  names. `priorCloseBase` (`shared/flows-live.js`) reads the base from what the writers
+  already hold: the last element of each name's `closes` in the nightly `focus` payload,
+  then the `px` of the nightly boards. The Actions leg has both payloads in hand; the
+  Worker's focus tick takes the last close of each name from D1 in the statement that
+  already read the groups (`FOCUS_NIGHTLY_SQL`, `json_group_object` over `$.closes` with
+  `$[#-1]`, about 300 bytes back), so the base costs no round trip. A payload is used
+  only when its `sessionDate` is the trading day before the live session, by the same
+  calendar the clocks use (weekends, computed holidays and the days the tape closed), so
+  a nightly that missed a session is a base for nothing. It is dropped wholesale when the
+  vendor's own `prev_close` differs from it by more than 0.05% on more than one in ten of
+  five or more names that carry both (57 of 57 agreed on 2026-09-29). The vendor's own
+  `prev_close` is never replaced. What was filled is stated in the payload:
+  `prevFill: { date, n, from: { "focus": k, "board:long": k, ... }, agree: [agreed, checked],
+  tickers }`, or `declined: "disagrees"`. SPY, QQQ and IWM have no nightly close to
+  read and keep a null change where the vendor gives none. `live:movers` ranks every
+  name that has a base and counts the rest as `unranked`. The boards' live overlay
+  (`takeLive`) takes the live row's change or shows a dash; it no longer keeps the
+  nightly change beside a live price.
+  The nightly `focus` payload now prices each name at the session close it already
+  carries (`px` is the last of `closes`, `prev` the one before, `chg` their ratio), not
+  at the screener's post-close print, so Home shows the boards' number for the same
+  name; `basis.read` lists any name still on the read price.
+  Every strip row ends in `qa`: the vendor's `quote_time` (epoch milliseconds or
+  seconds, or an ISO string) as whole seconds behind the read, null when absent or
+  more than a minute after it. `fresh.vendorAt` is the newest quote time, held to the
+  read instant. A row the vendor still dates before the session, in a strip that is
+  otherwise the session's, is held out: listed in `off` (`{ n, dates }`, at most 20
+  names) and in `missing`, and, when the read asked for that name, present in `rows` as
+  an all-null row (143 bytes) so a module that asks for it still finds a live row for
+  every name and keeps its other names live while the reader prints a dash for that
+  one (an absent row would make the overview discard the whole payload for the module
+  and fall back to the previous session's numbers for all of it); `returned` counts
+  only rows with data. A strip that is mostly the previous session's stays `prior`. The Actions leg adds `lag: { n, p50, p90, max }` to
+  `live:strips`, keeps the same three numbers per 15-minute column in
+  `live:strips:series.lag`, and writes the spread and the fill into the heartbeat's
+  `run.quoteLag`, `run.prevFill` and notes (`quote lag: ...`, `day change: ...`).
+  The ticker quote card built from a screener row outside the universe carries the same
+  `qa`, measured to the moment the card was built, so a row served from the verdict
+  cache reads its real age and a null means only that the vendor sent no stamp.
+  `live:gex` names carry `lagS` and the key a `vendorAt`; a per-name tape leg carries
+  `lagS`. Measured on the same input: `live:strips` for 122 names 22,478 to 24,122
+  bytes of 65,536 (759 for `qa` and the spread, 885 for the filled values and their
+  label), `live:focus` for 22 names 4,836 to 5,497 of 16,384, the series +456 over a
+  session and `live:gex` about +12 bytes a name (the ahead count and the held-out row
+  above add 64 bytes to a strip, 143 for each held-out name the read asked for, and 187 to
+  the series at 26 columns; measured on synthetic 22 and 122-row reads, before and after
+  the held-out row, and no change in `shapeStrips` time: 45 and 229 microseconds either
+  way). The focus tick's first run in a cold
+  isolate costs 0.2 to 0.3 ms more CPU and a warm one less (`stripValues` now fills a
+  flat array instead of a keyed object: 167 to 95 µs for 22 production-size rows),
+  against the 10 ms cap.
+  **The frozen-feed detector is not built.** It needs the lag distribution first, and
+  nothing stored it: what the first sessions must answer is the size of `qa` for a
+  liquid name in the regular session (a stamp that is the last trade reads minutes
+  behind on a quiet name, a batch snapshot reads seconds), how it behaves before 09:30
+  and after 16:00, and whether a quote time ever runs ahead of the read. `qa` cannot
+  answer the last one, since a stamp within a minute after the read is stored as 0 and
+  one further ahead as null, the same as no stamp; so `shapeStrips` also counts the
+  rows whose stamp parses and lies more than that minute after the read:
+  `ahead: { n, maxS }` in `live:strips` and `live:focus` (25 bytes), `lag.ahead` per
+  15-minute column in the series (about 190 bytes over a session), `run.quoteAhead`
+  in the heartbeat, a clause of the leg's `quote lag` note, and a clause of the
+  nightly gate's note (`rows stamped ahead of the read in N column(s), most M in one`,
+  or `no row stamped ahead of the read`). The run
+  record and the job log carry it from the next session; `live:strips:series.lag`
+  keeps the day's 15-minute spread until the series resets at the next session's
+  first read, so something must copy it out before then (the nightly, or the health
+  gate). The rule to test against that history is an aggregate one, never per name: in the regular session,
+  the median `qa` (or the newest `vendorAt`) more than about ten minutes behind the
+  read for two passes running counts the read as unanswered, through the same
+  `answered: false` path a failed vendor call already takes, and the Worker's focus
+  tick skips its write.
+- **The landing ticker measures against the previous session.** `parseIndexQuote`
+  (`shared/markets.js`) pairs each bar's timestamp with its close before it drops
+  nulls, dates a bar by the exchange's own calendar (`meta.gmtoffset`), and takes as the
+  base the last close dated before the quote's own day (`regularMarketTime`). With
+  `range=5d`, Yahoo's `chartPreviousClose` is the close before the first bar, five
+  sessions back: on 2026-09-29 the S&P 500 showed -1.27% against a true -0.26%, and
+  BIST -7.25%. It is no longer read. Without timestamps the second-to-last close is
+  used when the last is the quote's own; otherwise `previousClose`; otherwise the
+  change is null and the strip prints a dash. Each quote keeps `asOf`, `asOfDay`,
+  `prevClose` and `prevDay`. The strip prints each quote's own İstanbul time (a close
+  from an earlier day reads `Close Fri`, or `Close Sep 25` past a week) and no single
+  fetch-time stamp; a quote stored before this change lacks `asOfDay` and prints a
+  dash, so the snapshot cannot show the old percentage in the up to 30 minutes before
+  the next firing replaces it.
+  Whether a quote reads as a close comes from the exchange's own session, not from how
+  far the quote lags the fetch. `parseIndexQuote` keeps `meta.currentTradingPeriod.regular.end`
+  as `sessionEnd` (milliseconds) only when that instant falls on the quote's own
+  exchange-local day, so a response whose trading period is the next session's says
+  nothing and the quote carries `null`. With a `sessionEnd`, the strip reads a quote as a
+  close when it was struck no earlier than five minutes before it: the S&P 500 stamped
+  20:38 UTC for a 20:00 UTC end is the close, a market that closed forty minutes ago is
+  a close although the fetch came five minutes after it, and a live session whose feed
+  runs forty minutes behind is a quote at its own time, never a close. A mid-session
+  print that no later snapshot replaced keeps its own time and is not promoted to a
+  close. Without a `sessionEnd` (a snapshot stored before this, or a response that
+  lacks the block) the old reading applies: a close when the quote is more than 25
+  minutes behind the fetch or an hour behind the viewer's clock. The field is
+  expected in Yahoo's chart `meta` (an undocumented API), but no response could be read
+  from this sandbox (Yahoo is blocked here), so the first production snapshot after the deploy must be
+  read for `sessionEnd` on each of the eight quotes: a `null` on any of them is the
+  fallback at work and says the block is absent or names another day for that market.
 - **Tier 1 fits the Workers Free CPU cap.** Until 2026-09-24 Tier 1 also read the
   0DTE net flow and the SPY and QQQ ETF tides: three 390-row one-minute feeds,
   about 200 KB of JSON a tick. Once the session's rows filled in, a tick needed
@@ -1867,13 +2148,24 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   probe at least 15 minutes after the first agrees, and only then does the day
   join `flows_clock.closed_days` (a JSON array of at most 20 ISO days, newest
   last, carried across days and served as `clock.closedDays`). Any feed that
-  carries today sets `trading = 1` at once. Until 11:00 ET a closed day is
-  re-probed every third tick (:01, :16, :31, :46, two calls each), and a
-  re-probe that sees today reopens the day, takes it out of `closed_days` and
-  writes `live:market`. The Tier 2 loop reads a closed day before 11:00 ET as a
-  wait, not an exit: it skips its passes and re-reads the clock every slot, so a
-  day the re-probe reopens gets its passes back without waiting for a GitHub
-  starter; from 11:00 ET a closed day ends the loop. On 2026-09-24 a single
+  carries today sets `trading = 1` at once. A closed day the calendar lists as
+  trading is re-probed every third tick (:01, :16, :31, :46, two calls each)
+  until 15:45 ET (`VERDICT.unscheduledUntilMin`; it was 11:00 ET, which made a
+  vendor that lagged past 11:00 a lost day, called "Closed" and not "stale" until
+  the nightly noticed), and a computed holiday until 11:00 ET
+  (`VERDICT.provisionalUntilMin`), where the calendar and the tape already
+  agree. A re-probe that sees today reopens the day, takes it out of
+  `closed_days` and writes `live:market`. The Tier 2 loop reads a closed day
+  before that deadline as a wait, not an exit: it skips its passes and re-reads
+  the clock every slot, so a day the re-probe reopens gets its passes back
+  without waiting for a GitHub starter; from 15:45 ET a closed day ends the
+  loop. A real unscheduled closure costs 29 probes (the seven ticks that make the
+  verdict and 22 quarter-hourly re-probes), 58 vendor calls where it cost 20, and,
+  when the loop's 340-minute budget runs out first, one chained run that keeps
+  waiting.
+  `tests/flows-verdict-contract.mjs` sweeps a vendor that recovers at every
+  five-minute mark from 09:31 to 15:55 and holds that Tier 1 reopens the day
+  within one re-probe of it. On 2026-09-24 a single
   probe that saw a lagging vendor at 09:45 could have closed a trading day for
   good; `tests/flows-live-contract.mjs` threads a lagging vendor at 09:46 and
   today's data at 09:51 through the clock row and ends with `trading = 1`. A
@@ -1887,7 +2179,17 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   know. A wrong or outdated
   holiday rule therefore costs the first quarter hour, never the session. A tide
   stuck at or before 13:05 ET for 30 minutes after 13:30 marks an unscheduled
-  early close. The migration is `migrations/0012_flows_clock_verdict.sql`; the
+  early close (`flows_clock.early_close = 1`), and the mark is provisional like
+  the closed verdict: on a day the calendar does not list as an early close Tier 1
+  keeps ticking to 16:10 ET (`inferredEarlyClose`), the phase clock still reads
+  13:00 as the close while the mark stands, and the first read that shows a tide
+  bar later than 13:05 ET takes the mark back and writes `live:market` in the
+  same tick. The Tier 2 loop waits, without passes, from 13:25 to 16:25 ET on
+  such a day and passes again from the first slot after the mark goes. Until
+  2026-09-30 the mark was final for the day: a tide that answered 200 with rows
+  frozen for half an hour after 13:05 closed the whole live layer, and every pill
+  read "closed, session final", until the next morning's roll; no test drove a
+  stalled tide into the mark or out of it. The migration is `migrations/0012_flows_clock_verdict.sql`; the
   Worker's first-use path adds the three columns to a table that lacks them.
 - **A nightly session is due at 21:00 ET on every session, early closes
   included**, because the run is scheduled by wall clock: the pipeline cron and
@@ -1927,8 +2229,13 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   ends, the run re-dispatches its own workflow with the job's `GITHUB_TOKEN`
   (`permissions: actions: write`; `workflow_dispatch` is the documented exception
   to that token's no-recursion rule), origin `chain`, on `main`, and exits. The
-  `flows-live` concurrency group keeps it to one loop.
-- **The GitHub schedule is only starters, sized by what GitHub delivered.** From
+  `flows-live` concurrency group keeps it to one loop. With `FLOWS_LIVE_KEEP=1`
+  (the workflow sets it) the loop does not exit at the close, the night or the
+  weekend either: it keeps ticking, chains at every budget, and dispatches the
+  nightly; section 10.5k.
+- **The GitHub schedule is only starters, sized by what GitHub delivered.** With
+  the loop kept alive (section 10.5k) they are the backup that restarts a chain
+  that broke; the sizing below is what that backup can be trusted for. From
   2026-09-23 to 09-25 GitHub created 6 scheduled `flows-live` runs for 63 slots:
   18:59 and 22:13 UTC on Wednesday (one cron line), 17:50 on Thursday (one line),
   18:01, 19:12 and 23:12 on Friday (two lines). None came before 17:50 UTC, so no
@@ -1941,8 +2248,9 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   serves both: every starter is a line of one slot, and the lines are half an
   hour apart, 32 in all, at :17 and :47 of every hour from `17 5 * * 1-5` to
   `47 20 * * 1-5`. The arithmetic assumes any delay from on time to five hours.
-  A run that starts up to 240 minutes before 09:31 ET sleeps until then, and one
-  that starts earlier exits at once. 09:31 ET is 13:31 UTC under EDT and 14:31
+  Without `FLOWS_LIVE_KEEP` (the loop this section describes, and the one
+  `FLOWS_LIVE_LOOP=1` alone still gives), a run that starts up to 240 minutes
+  before 09:31 ET sleeps until then, and one that starts earlier exits at once. 09:31 ET is 13:31 UTC under EDT and 14:31
   UTC under EST, so the wait window is 09:31 to 13:31 UTC or 10:31 to 14:31 UTC.
   On time, the 09:47 to 13:17 starters land in it under EDT and 10:47 to 14:17
   under EST, eight each; three hours late, 06:47 to 10:17 and 07:47 to 11:17,
@@ -1961,6 +2269,20 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   minutes. From 13:17 the same lines restart a loop that died or never started.
   Every starter fires 17 minutes past a :00 or :30 mark, away from the top of
   the hour, where GitHub documents the load peaks that delay and drop schedules.
+  With `FLOWS_LIVE_KEEP=1`, which production sets, none of the wait arithmetic
+  applies: a starter that lands while a loop runs is the single pending run of the
+  `flows-live` group, and the hop the running loop dispatches at its 340-minute
+  budget replaces it (a newer pending run cancels the older), so the starters
+  never run while the chain holds. A starter that lands when no loop runs, the
+  chain having broken, starts a full loop at once, with no pre-open sleep and no
+  early exit. `tests/flows-starts-contract.mjs` models that group over nine days
+  at delivery lags from none to eight hours: one cron-started run in all, every
+  hop 30 seconds after the last; a hop that fails on a weekday is followed at
+  once by the starter pending behind it (eleven lines land in any 340 minutes),
+  and one that fails on a Saturday by the first starter of Monday. The model
+  delivers every line; GitHub has delivered between one in ten and six in ten, so
+  that is the best case the backup can offer, not a promise, and it is why a
+  failed hop opens the `chain` issue at once instead of trusting the backup.
 - **Each run logs how late GitHub delivered it.** The first step logs the cron
   that fired and reads the run's own `created_at` from the Actions API with the
   job's token (`gh api repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID`),
@@ -1976,7 +2298,7 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   (`GET /repos/{owner}/{repo}/actions/workflows/flows-live.yml/runs?event=schedule`).
   Together they measure the delay the schedule assumes, and which reading of
   the first three days holds.
-- **Worst-case idle is 240 minutes of waiting a day.** Runs share one concurrency
+- **Without `FLOWS_LIVE_KEEP`, worst-case idle is 240 minutes of waiting a day.** Runs share one concurrency
   group, so only one runs at a time, and every waiting run waits for the same
   09:31: however many starters land, the pre-open wait a day adds up to at most
   `preOpenWaitMs`, 240 minutes. A run that waited that long still passes from
@@ -1987,7 +2309,9 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   one clock read from the Worker and no vendor call, so the 32 lines add under
   32 minutes a day, and one cancelled while pending costs nothing. On a day
   Tier 1 closes provisionally from the tape the loop also waits, without passes,
-  until 11:00 ET at the latest. Weekends and computed NYSE holidays never wait.
+  until 15:45 ET at the latest (and from 13:25 to 16:25 ET on an unscheduled
+  early close Tier 1 has inferred). Weekends and computed NYSE holidays never
+  wait.
   The repository is public, so hosted-runner minutes are not billed. A starter
   that queued behind a running loop starts when the loop ends: inside 16:25 its
   one pass skips on the heartbeat and it exits at the next slot, and after that
@@ -1996,15 +2320,22 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   so a chained run that starts within eight minutes of the last pass skips once
   and takes the next slot, none doubled or lost. A single pass runs when
   `FLOWS_LIVE_LOOP` is unset or `FLOWS_LIVE_FORCE=1`. Dry run: `--live --dry-run`.
+  Under `FLOWS_LIVE_KEEP=1` the accounting changes: a starter that runs while
+  no loop holds the group costs a whole 340-minute loop rather than under a
+  minute, weekends and holidays chain too (with a clock read every 15 minutes and
+  no pass), there is no pre-open wait (the loop is already ticking, and wakes at
+  09:31 sharp), and the runner-minutes are the price of removing the lottery;
+  section 10.5k has the cost and the switch that returns to the numbers above.
 - **The loop keeps the Worker's clock.** Before its first pass and around every
   later one it reads `clock: { day, trading, earlyClose }` with a GET of the
   ingest key `clock` under its live credential (`/api/flows/now` carries the same
   view for signed-in pages). Once Tier 1 has marked the day closed from the tape
-  (from 09:46 ET) the loop makes no further pass and never chains; a scheduled
-  holiday never starts one. A scheduled early close ends the window at 13:25 ET
+  (from 09:46 ET) the loop makes no further pass and, without
+  `FLOWS_LIVE_KEEP`, never chains (with it, the loop keeps its 15-minute clock
+  ticks and its chain); a scheduled holiday never starts one. A scheduled early close ends the window at 13:25 ET
   from the calendar. An unscheduled one Tier 1 marks only after 13:30, so the
-  loop stops at the first slot after that verdict, about 13:35 to 13:40, instead
-  of running to 16:25. A failed clock read keeps the last verdict; with none, the
+  loop makes no pass after that verdict, about 13:35 to 13:40, but waits for the
+  mark to be taken back until 16:25 instead of leaving. A failed clock read keeps the last verdict; with none, the
   computed NYSE calendar applies. A pass that throws is logged and recorded as errored
   and the loop carries on to the next slot. Each pass starts with a fresh 90 s
   publish/read retry budget, as each separate run had. The job exits non-zero
@@ -2014,9 +2345,32 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   credential (`persist-credentials: false`); only the chain dispatch holds the
   job token, through `env`.
 - **Tier 3** is on demand: `/api/flows/tape?t=` (a D1 stale-while-revalidate cache
-  with a 20-second single-flight lease, one leg per refresh) and the quote on
+  with a 20-second single-flight lease, one leg per refresh in session) and the quote on
   `/api/flows/live?t=` (5 s in session, 30 s pre/post, 6 h closed), both behind
-  the `UW_ONDEMAND` rate-limit binding.
+  the `UW_ONDEMAND` rate-limit binding. A tape is final only when its read
+  covers the last close (the classifier's own test: read at or after the close
+  less one cadence); outside the session a row that does not is refreshed, the
+  older leg on each view, so a complete row is final after at most two views
+  and three vendor calls, and the ticker page asks again five seconds after an
+  answer the server calls stale. A name outside the roster and the universe is a quote card
+  built from one screener read: that row is cached 15 minutes in session and,
+  outside it, only while it covers the close (the known/unknown verdict keeps
+  its 12 hours), and the card carries the row's own read time and the
+  breadth-class `X-Fresh-*` headers. `/api/flows/news` serves `live:news` in
+  place of the nightly row while it is newer than that row, under its own
+  freshness headers, as pulse and the flow alerts are served.
+- **What the pill judges.** It is the worst case over the sources that carry a
+  server verdict: every key a heartbeat reads, and on the home page every
+  region the loader reads except an overlay response (`X-Live-Overlay`), whose
+  age belongs to its heartbeat key. `live:alerts` is written only when a pass
+  finds a new alert, so on a quiet afternoon its own stale line passes with the
+  live layer healthy; registering the flow-alerts response read once at load
+  turned the home page Stale about 45 minutes into every session. Sources that
+  register only a session date are judged by the newest date among them, so
+  they can never turn the pill stale on their own; the popover names the older
+  ones ("2 of 5 payloads are older: Regime Sep 22, Events Sep 15"). The board's
+  live dots and their next poll are timed against the server's clock
+  (`X-Server-Now`), not the browser's.
 
 Out-of-band steps before the first deploy of this layer:
 
@@ -2029,7 +2383,9 @@ Out-of-band steps before the first deploy of this layer:
    `summary_at`, from `migrations/0014_flows_clock_summary.sql`. The Worker's
    first-use path adds any of the seven the production table lacks and
    tolerates a duplicate column, so the table upgrades itself on the first
-   request after deploy.
+   request after deploy. The session ledger's table, `flows_ledger`, comes
+   from `migrations/0015_flows_ledger.sql` (`CREATE TABLE IF NOT EXISTS`, so
+   re-runnable) and is created by the same first-use path.
 2. Nothing to mint. The live workflow holds no shared secret: it runs with
    `permissions: id-token: write`, asks the runner for a GitHub OIDC token with
    the audience `https://anilkaya.org/api/flows/ingest#live`, and the Worker
@@ -2122,3 +2478,210 @@ focus read and no dispatch; pages fall back to the nightly rows.
 - **The regression suite** (`regression.yml`) also runs every Monday at 06:17
   UTC, so a fixture date that the real clock overtakes fails within a week,
   not on the next unrelated push.
+
+### 10.5k Starts that do not wait for GitHub's schedule, and the witness that says when they fail
+
+**Why.** GitHub delivered the nightly's `30 21` cron 139 to 216 minutes late on
+the four nights measured and its backups 342 and 382 minutes late; it delivered
+the first Tier 2 starter of a morning 3.8 to 8.5 hours behind its slot. The
+Worker could start both itself (item 1 of section 10.0), but the token is the
+owner's to create, and until it exists `flows_clock.dispatch_why` reads
+`no-token` and every start is a lottery ticket. The path below needs no secret.
+
+**What runs.** `.github/workflows/flows-live.yml` sets `FLOWS_LIVE_KEEP=1`, which
+turns the session loop of section 10.5i into a loop that is never done:
+
+| Wall clock (ET) | The loop does |
+|---|---|
+| Overnight, weekends, holidays | A tick every 15 minutes: one read of the Worker's clock through the OIDC ingest door, nothing else. It wakes at 09:31 sharp on the next session's morning rather than on the quarter hour. |
+| 09:31 to 16:25 on a session | A Tier 2 pass on every five-minute slot, as before, and a tick after each. From the open to ten minutes past the close the tick also reads `live:market` and `live:focus`. |
+| 16:25 to 17:30 | Ticks every 15 minutes. |
+| 17:30 | `POST /repos/<repo>/actions/workflows/flows-pipeline.yml/dispatches` with `{ "ref": "main", "inputs": { "origin": "live-loop" } }` and the job's own `GITHUB_TOKEN`, when `meta` still holds the last session. A refused dispatch is tried again on the next slot, three times in all. |
+| From 17:30 until `meta` lands | Ticks every five minutes, each reading `meta`. At 18:15, if the first dispatch was sent and `meta` is still behind, one more dispatch (30 minutes after the first at the earliest). Never a third. A refusal that is permanent (HTTP 401, 403, 404, 422: the token, the grant or the file) is capped at four calls in all. A refusal that is transient (HTTP 5xx, 429, 408 or no answer at all) is retried every 30 minutes from 18:15 until 20:30 ET, at most six more calls, so a GitHub outage of two hours still ends in a landed nightly before 21:00. The same cap applies to the repeat after a send. |
+| 21:00 | The nightly check of the witness (below). |
+| Every 340 minutes | The run re-dispatches `flows-live.yml` (origin `chain`, retried after 15 and 45 seconds if refused) and exits. The `timeout-minutes: 355` leaves 15 minutes of slack. |
+
+The `flows-pipeline.yml` gate proceeds for any event that is not a schedule
+("Dispatched by: live-loop"), so the workflow needed no change beyond the
+description of its `origin` input. The nightly then lands about 17:45 ET instead
+of the 20:00 to 21:20 ET the crons produced. The late cron firing that GitHub
+delivers hours afterwards finds the session archived and is the one-minute
+refresh of `pulse`, `sector:premium` and `news`. 17:30 ET is the cron's own
+nominal time and the earliest start measured (the 2026-09-23 manual dispatch at
+17:36 ET landed at 17:47); the Worker's 17:15 ET dispatch, if the token is ever
+set, goes first and this one becomes a refresh. One duplicate is possible and
+harmless: a run that hands over between the dispatch and the landing dispatches
+again, and the `flows-pipeline` concurrency group queues the second behind the
+first.
+
+**GitHub token semantics this rests on.** A run started by `GITHUB_TOKEN` does
+not trigger other workflows, with two documented exceptions: `workflow_dispatch`
+and `repository_dispatch`. The chain has proved the exception in this
+repository: runs 36457410543 and 36601841007 of `flows-live` are
+`workflow_dispatch` runs whose actor is `github-actions[bot]`. Dispatching the
+other workflow is the same call with `actions: write`, which the live workflow
+already holds. What the token gains: `issues: write`, for the witness. Every
+action in the job is still pinned to a commit SHA, and the workflow still holds
+no secret beyond the vendor key and the ingest URL.
+
+**Cost.** Hosted-runner minutes are not billed on a public repository, so the
+chain costs nothing in money and one runner all the time: five hops a day, seven
+days a week. That is the price of removing the morning lottery, and it is a
+choice you can revoke: delete the `FLOWS_LIVE_KEEP` line from the workflow and
+the loop is the session-only loop of section 10.5i again, with the 32 cron lines
+as its only starters. It is also the part most exposed to GitHub's terms: a
+standing runner that idles through nights and weekends is not what Actions is
+meant for, and GitHub may throttle or disable Actions for a repository whose
+usage it judges abusive. The idle ticks (a clock read every 15 minutes) are the
+smallest share of the hours, but they are the share a reviewer would point to; the
+fallback is that one deleted line, and the witness names a broken chain the day it
+breaks. Measured on the fake Worker (`tests/flows-starts-contract.mjs`
+runs it), a weekday costs the Worker 404 ingest reads on top of the passes' own
+writes (158 clock, 81 `live:market`, 81 `live:focus`, 75 `live:breadth`, 9 `meta`),
+0.40% of the Free plan's 100,000 requests a day (329 before the Tier 2 check,
+whose 75 reads run from 10:15 to 16:25 ET), and GitHub 10 calls (an open-issue
+listing and a chain dispatch per run, and the nightly); a weekend day costs 105
+reads (the clock every quarter hour) and 9 GitHub calls. Before this section, a
+weekday cost about 170 clock reads and a weekend day none. The Worker's CPU per
+request is unchanged: no Worker file changed, and the new reads are the ingest GETs
+the passes already make, each one D1 row.
+
+**The witness.** Every tick evaluates, from the same reads, what a reader would
+see, and tells the owner when it is wrong. Five checks:
+
+| Id | Breach | Confirmed after | Cleared after |
+|---|---|---|---|
+| `tier1` | From the open to ten minutes past the close, Tier 1's last tick, `live:market` or `live:focus` is more than 25 minutes old (the readers' stale line for the market class; a key not yet written today counts from the open). A Worker with `FLOWS_LIVE_MODE = "off"` is skipped. | Two consecutive ticks (about ten minutes) | Three consecutive ticks on which every one of the three has been written today and is inside the line |
+| `tier2` | From 45 minutes after the open to 25 minutes past the close, `live:breadth` is more than 45 minutes old (the readers' stale line for the breadth class, and the line the Worker's own `liveStalled` watchdog draws, which the tests hold equal minute by minute). The loop is the writer, so this catches passes that run and publish nothing. | Two consecutive ticks | Three consecutive healthy ticks |
+| `nightly` | At or after 21:00 ET (close plus the five-hour grace) `meta.sessionDate` is older than `expectedNightlySession`, so a missed Friday stays a breach through the weekend | The first tick when `meta` is readable and stale; two consecutive ticks when the store answered `pending` (the Worker answers `pending` for a missing row and for a failed D1 read alike, so one such answer proves nothing) | `meta` holds the expected session or a later one |
+| `chain` | The run reached its budget and could not dispatch its successor after three tries | At once | The next loop's first tick |
+| `probe` | Three consecutive ticks read nothing through the ingest route (403, 5xx, no answer) | Three ticks | Three consecutive ticks that read something |
+
+A failed read is never a verdict: a 403 or a timeout is `inconclusive`, changes
+nothing, and only feeds `probe`; the one answer that can mean either (`pending`)
+needs to repeat. Each breach opens one GitHub Issue titled
+`[flows-witness:<id>] ...`, whose body mentions `@anilkaya001` (a mention
+notifies you under GitHub's default notification settings, watching or not), states the numbers and the
+repair, and links the run. A persisting breach adds one reminder comment per six
+hours. Recovery is declared only after the check has been healthy for the number
+of ticks in the last column (about 15 minutes for the live checks), and adds a
+recovery comment and closes the issue. A check that breaches again within six hours of the close it
+got in the same run reopens that issue with a new comment instead of opening a
+new one, so an intermittent feed (30 minutes down in every hour) is one thread
+rather than one issue per outage; across a hop the memory is lost and the
+first re-breach opens a new issue. A loop only adopts an open issue that
+`github-actions[bot]` wrote (the repository is public, and anyone can open one
+titled `[flows-witness:nightly] ...`); a loop that finds an issue a previous run
+left open adopts it instead of opening a second, closes any further open issue for the same check as a
+duplicate of the newest, and closes them all on recovery. An open whose answer never
+arrives (GitHub made the issue, the 15-second deadline fired first) is not
+retried blind: the retry lists the open issues first and adopts what it finds. The run
+itself also turns red when it confirmed a lapse or its chain failed, and every
+confirmed breach writes a `::error` annotation on the run's page, so a repository
+whose Issues cannot be written still gets a red run and an explanation. To prove the
+channel without waiting for a fault, dispatch the live workflow with `drill`
+ticked (`gh workflow run flows-live.yml -f drill=true`): it opens one issue,
+comments, closes it and does nothing else, in a concurrency group of its own so
+it does not queue behind the loop; it turns red if any step fails.
+
+What the witness cannot see: its own death. A loop that stops and is not
+restarted leaves no one to say so, and the Worker cannot notify anyone without
+the token. The pieces that still speak in that case are the readers' Stale pill,
+the Worker's `live layer stalled` log line, the nightly health gate (`HEALTH: the
+last live pass ... so Tier 2 stopped before the close`, red on the cron-started
+run that carries the owner as its actor) and the 32 starters, which restart a
+loop within a few hours. Tier 2 vendor loss reaches the witness only as
+`live:breadth` going 45 minutes old (the `tier2` check); the run also turns red
+when every pass answered nothing, as before.
+
+**The storage-level probe.** The OIDC live credential reads `clock`, any `live:*`
+key and `board:long`, `board:short`, `board:watch`, `meta` and `focus`, one key
+per request. The witness is that probe: it recomputes each verdict from the
+stored row (the readers' 25-minute and 45-minute lines, `expectedNightlySession`)
+rather than trusting `X-Fresh-State`, reads the Worker's own telemetry from the
+clock, and treats an unreadable answer as no answer. It reads four rows and the
+clock: `live:market` and `live:focus` (Tier 1), `live:breadth` (Tier 2, the key
+the Worker's own watchdog reads) and `meta` (the nightly). It is deliberately
+limited to those. It does not read the other Tier 2 keys, so a pass that lands
+`live:breadth` but not `live:gex` goes unseen here (readers see that key's own
+Stale pill); it does not read `board:long`, `board:short`, `focus` or the roster
+against `meta.sessionDate`, so a `meta` that landed beside boards from an earlier
+session goes unseen here; and it does not see the roster's cards or the archive
+(the `keys=` route is the nightly token's). Completeness of the nightly, per-name
+`sessionDate` and the archive stay with the nightly's health gate. Adding any of
+them is one more read in the same tick and one more entry in `WITNESS_CHECKS`; the
+cost, at one read per five-minute tick, is 75 requests a day (0.075% of the Free
+plan). A `ledger` object, when the Worker's clock carries one, is parsed into the
+witness's view and is not yet used: nothing reads it, and it reaches no issue text.
+
+**The public-header probe: designed, blocked.** A probe that reads the site as a
+reader does would catch what no storage read can: a Cloudflare Transform Rule
+overwriting `Cache-Control` or the CSP, an HTML page whose `?v=` does not match
+`/assets/version.txt`, a landing snapshot whose `payload.updatedAt` is stale
+while its row is not. The design, ready to build: a pure `evaluate(input, asOf)`
+in `shared/` plus a thin transport in `scripts/`, run every 30 minutes from the
+loop's tick, checking that `GET /` answers 200 with `Cache-Control: no-cache` and
+a CSP; that every `?v=N` in it equals `/assets/version.txt` (and the fonts against
+`/assets/fonts-version.txt`); that one stylesheet and one script carry the seven
+`_headers` security headers and the one-year immutable policy; that
+`/api/markets` has `payload.updatedAt` (never the row's age, which a failed Yahoo
+refresh bumps) inside 45 minutes in the 09:15 to 16:15 window and 26 hours
+outside it; and that `/api/flows/now` answers a JSON 401 to a stranger. It is
+blocked by two facts, not by effort. First, every `/api/flows/*` read needs a
+Flows session, so the freshness headers as a reader sees them cannot be read
+anonymously: it needs either a Flows member credential kept as an Actions secret
+(a read-only member in `FLOWS_CREDENTIALS`) or a public route that returns the
+per-key states without payloads, which is a Worker change. Second, Cloudflare
+challenges GitHub's runners on paths the ingest skip rule does not cover (Bot
+Fight Mode cannot be skipped on the Free plan), so an anonymous probe from a
+runner can be served a challenge page and would need the same retry-and-inconclusive
+treatment before it could be trusted; the sandbox cannot reach the site to
+measure how often. Until then the header smoke test of section 7 stays manual.
+
+**The vendor client's deadline.** `uw()` used to have none, and Node waits 300
+seconds for a stalled response (measured 300.9 s on 2026-09-29), five tries per
+call. In `--live` mode each try now has a 20 second deadline
+(`AbortSignal.timeout`), a timed-out try is retried once, and the pass log names
+how many requests timed out. `FLOWS_UW_TIMEOUT_MS` (100 to 60000) overrides the
+20 seconds, which the tests use. The nightly's client is unchanged, and so are
+the ingest writes, which still carry no deadline of their own. The loop's own
+clock read, made before every tick, has the same 10 second deadline as each of
+the watch's reads: a stalled ingest connection costs one tick, where Node's
+default would have held the loop, and with it the witness's cadence, for its
+300 second headers timeout.
+
+**What only a real run can prove.** None of this could be executed on GitHub
+from the sandbox; the fakes exercise every branch, and these are the facts they
+cannot. Check them after the first deploy:
+
+1. `gh workflow run flows-live.yml -f drill=true` ends green, and the issue it
+   opened and closed appears in the repository's Issues with your mention.
+   (Proves `issues: write`, that Issues are enabled, that the mention notifies.)
+2. On the next session's evening, the live run's log has `starts: dispatch of
+   flows-pipeline.yml (first) at 17:30 ET — sent (HTTP 204)`, a `flows-pipeline`
+   run with event `workflow_dispatch` and actor `github-actions[bot]` follows,
+   its gate step says `Dispatched by: live-loop`, and `meta` lands about 17:45 ET
+   (`starts: the ... nightly has landed`). The cron firings that arrive later log
+   `session gate: archived` and finish in about a minute.
+3. Each live run ends with `re-dispatched: sent (204)` and the next run appears
+   within a minute; over a weekend the runs show no passes. If a hop ever fails,
+   a `[flows-witness:chain]` issue opens and the next starter closes it.
+4. To watch the weekend nightly dispatch without a session,
+   `gh workflow run flows-pipeline.yml -f origin=live-loop` on a Saturday is a
+   same-session refresh.
+5. No `[flows-witness:...]` issue is open after a healthy week. One that opens
+   for a lapse Tier 1 really had is the witness working; one that opens without
+   a lapse is a false positive to report with the run's log.
+6. The drill's issue shows `github-actions[bot]` as its author. The witness
+   adopts and closes only issues with that login, so a different one would make
+   every hop blind to the issues its predecessor opened.
+7. A `[flows-witness:tier2]` issue that opens on a day the readers saw
+   `live:breadth` as Live is a false positive: compare its `readAt` with the
+   issue's numbers. The check draws the same line as the Worker's watchdog, so
+   the watchdog's `live layer stalled` log line should appear beside a true one.
+8. The reopen path (`PATCH state: open, state_reason: reopened`) and the
+   duplicate close (`state_reason: not_planned`) are accepted by the API. Both
+   are new and the drill does not reach them; the first flap of a real week does.
+9. A transient dispatch failure cannot be summoned on demand. What the tests
+   prove is the cadence given the answer; the answer itself (503, 429, no reply)
+   is GitHub's.

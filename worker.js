@@ -938,6 +938,27 @@ const INGEST_META_SQL =
   "json_extract(payload, '$.generatedAt') AS generated, json_extract(payload, '$.status') AS status " +
   "FROM flows_payload WHERE id IN (";
 
+const INGEST_LIST_KINDS = Object.freeze(["card", "card-x", "hist"]);
+const INGEST_LIST_MAX = 2000;
+
+function ingestListSql(kinds) {
+  return "SELECT id, updated_at, json_extract(payload, '$.sessionDate') AS session, json_extract(payload, '$.generatedAt') AS generated, " +
+    "json_extract(payload, '$.status') AS status FROM flows_payload WHERE " +
+    kinds.map((k) => `(id >= '${k}:' AND id < '${k};')`).join(" OR ") + ` LIMIT ${INGEST_LIST_MAX + 1}`;
+}
+
+function ingestListing(rows) {
+  const keys = {};
+  let n = 0;
+  for (const r of rows.slice(0, INGEST_LIST_MAX)) {
+    if (!ingestKeyParts(r.id).valid || r.status === "pending") continue;
+    keys[r.id] = { present: true, sessionDate: typeof r.session === "string" ? r.session : null,
+      generatedAt: typeof r.generated === "string" ? r.generated : null, updatedAt: Number(r.updated_at) || 0 };
+    n++;
+  }
+  return { keys, listed: n, truncated: rows.length > INGEST_LIST_MAX };
+}
+
 function ingestMetadata(asked, rows) {
   const byId = new Map((rows || []).map((r) => [r.id, r]));
   const keys = {};
@@ -995,8 +1016,74 @@ async function cardWithEngine(env, ticker, stored, trace = {}) {
   return { stored, card, unreadable: false };
 }
 
+const STORE_QUOTA_RE = /exceeded D1's|free tier daily row|D1_ERROR[\s\S]*\b7500\b/i;
+const isStoreQuota = (error) => STORE_QUOTA_RE.test(error instanceof Error ? error.message : String(error));
+const secondsToUtcMidnight = (now) => Math.max(60, Math.ceil((Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(),
+  new Date(now).getUTCDate() + 1) - now) / 1000));
+
 const STORE_GONE = Object.freeze({ status: "unavailable", reason: "store" });
 const storeGone = () => new HttpError(503, "store_unreadable", "The store could not be read", { "Retry-After": "30" }, STORE_GONE);
+
+const LAST_GOOD_TTL_MS = 24 * 3600 * 1000;
+const LAST_GOOD_REFRESH_MS = 10 * 60 * 1000;
+const LAST_GOOD_MAX_KEYS = 256;
+const LAST_GOOD_PATHS = new Set(["board", "market", "events", "scoretrack", "meta", "flowalerts", "pulse", "political", "unusual",
+  "movers", "sectors", "sector-premium", "universe", "regime", "ideas", "focus", "roster", "news", "record", "card", "card-x",
+  "hist"].map((name) => "/api/flows/" + name));
+const lastGoodStamped = new Map();
+
+function lastGoodKey(request, url) {
+  if (request.method !== "GET" || !LAST_GOOD_PATHS.has(url.pathname)) return null;
+  let tail = "";
+  if (url.pathname === "/api/flows/board") {
+    const side = url.searchParams.get("side");
+    tail = "?side=" + (side === "short" || side === "watch" ? side : "long");
+  } else if (url.pathname === "/api/flows/card" || url.pathname === "/api/flows/card-x" || url.pathname === "/api/flows/hist") {
+    const ticker = String(url.searchParams.get("t") || "").trim().toUpperCase();
+    if (!FLOWS_TICKER_RE.test(ticker)) return null;
+    tail = "?t=" + ticker;
+  }
+  return new Request("https://flows-lastgood.internal" + url.pathname + tail, { method: "GET" });
+}
+
+function lastGoodCache() {
+  return typeof caches !== "undefined" && caches.default ? caches.default : null;
+}
+
+function rememberLastGood(request, url, response, ctx, now = Date.now()) {
+  const cache = lastGoodCache();
+  if (!cache || response.status !== 200 || !Number(response.headers.get("X-Payload-Updated")) || response.headers.has("X-Fresh-Last-Good")) return;
+  const key = lastGoodKey(request, url);
+  if (!key || !ctx || typeof ctx.waitUntil !== "function") return;
+  const seen = lastGoodStamped.get(key.url);
+  if (seen !== undefined && now - seen < LAST_GOOD_REFRESH_MS) return;
+  if (seen === undefined && lastGoodStamped.size >= LAST_GOOD_MAX_KEYS) lastGoodStamped.delete(lastGoodStamped.keys().next().value);
+  lastGoodStamped.set(key.url, now);
+  try {
+    const kept = new Response(response.clone().body, { status: 200, headers: response.headers });
+    kept.headers.set("Cache-Control", "public, max-age=" + LAST_GOOD_TTL_MS / 1000);
+    kept.headers.set("X-Last-Good-At", String(now));
+    ctx.waitUntil(cache.put(key, kept).catch(() => lastGoodStamped.delete(key.url)));
+  } catch {
+    lastGoodStamped.delete(key.url);
+  }
+}
+
+async function recallLastGood(request, url, now = Date.now()) {
+  const cache = lastGoodCache();
+  const key = cache ? lastGoodKey(request, url) : null;
+  if (!key) return null;
+  const hit = await cache.match(key).catch(() => null);
+  const storedAt = hit ? Number(hit.headers.get("X-Last-Good-At")) : NaN;
+  if (!hit || !Number.isFinite(storedAt) || now - storedAt > LAST_GOOD_TTL_MS) return null;
+  const out = new Response(hit.body, { status: 200, headers: hit.headers });
+  out.headers.delete("X-Last-Good-At");
+  out.headers.delete("X-Server-Now");
+  out.headers.set("X-Fresh-State", "stale");
+  out.headers.set("X-Fresh-Reason", "store");
+  out.headers.set("X-Fresh-Last-Good", new Date(storedAt).toISOString());
+  return out;
+}
 
 async function readServed(env, key) {
   const trace = {};
@@ -1056,20 +1143,36 @@ function liteCard(ticker, r, g) {
   return json(card, 200, nightlyFreshHeaders({ fresh: nightlyFreshMeta(r) }));
 }
 
+const CLASS_RTH_MS = 15 * 60 * 1000;
+const rowMeta = (at) => ({ readAt: at, session: easternDay(at), klass: "breadth", source: "ondemand" });
+
+function rowCurrent(verdict, now, clock) {
+  const at = Number(verdict.readAt);
+  if (!(at > 0)) return false;
+  const phase = phaseAt(now, clock);
+  if (phase && phase.phase === "rth") return now - at <= CLASS_RTH_MS;
+  return freshHeaders(rowMeta(at), now, clock).fresh.state !== "stale";
+}
+
 async function classifyTicker(env, ctx, ticker) {
   const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
   const key = new Request(`https://flows-class.internal/${ticker}`, { method: "GET" });
   const hit = cache ? await cache.match(key).catch(() => null) : null;
+  const now = Date.now();
+  let held = null;
   if (hit) {
     const body = await hit.json().catch(() => null);
-    if (body && typeof body.known === "boolean") return body;
+    if (body && typeof body.known === "boolean") {
+      if (!body.known || rowCurrent(body, now, FLOWS_LIVE.memoizedClock(now))) return body;
+      held = body.row && Number(body.readAt) > 0 ? body : null;
+    }
   }
-  if (!env.UW_API_KEY || !(await FLOWS_LIVE.ondemandAllowed(env))) return null;
+  if (!env.UW_API_KEY || !(await FLOWS_LIVE.ondemandAllowed(env))) return held;
   const raw = await uwFetch(env, "/api/screener/stocks", { ticker }).catch(() => null);
   const rows = raw && Array.isArray(raw.data) ? raw.data : Array.isArray(raw) ? raw : null;
-  if (!rows) return null;
+  if (!rows) return held;
   const row = rows.find((x) => x && typeof x.ticker === "string" && x.ticker.trim().toUpperCase() === ticker) || null;
-  const verdict = row ? { known: true, row } : { known: false };
+  const verdict = row ? { known: true, row, readAt: now } : { known: false };
   if (cache) {
     const store = new Response(JSON.stringify(verdict), { headers: {
       "Content-Type": "application/json; charset=utf-8", "Cache-Control": `max-age=${CLASS_TTL_S}` } });
@@ -1080,7 +1183,7 @@ async function classifyTicker(env, ctx, ticker) {
 }
 
 function quoteCard(ticker, row, now) {
-  const vals = stripValues(row);
+  const vals = stripValues(row, { at: now });
   const u = {};
   STRIP_FIELDS.forEach(([name], i) => { u[name] = vals[i]; });
   const text = (v, n) => (typeof v === "string" && v.trim() ? v.trim().slice(0, n) : null);
@@ -1101,7 +1204,9 @@ async function absentKey(env, ctx, kind, ticker) {
   const lite = liteCard(ticker, firstRow(uni), firstRow(gate));
   if (lite) return lite;
   const verdict = await classifyTicker(env, ctx, ticker);
-  if (verdict && verdict.known) return json(quoteCard(ticker, verdict.row, Date.now()));
+  if (verdict && verdict.known) {
+    return json(quoteCard(ticker, verdict.row, verdict.readAt), 200, freshHeaders(rowMeta(verdict.readAt), now, clock).headers);
+  }
   return json({ ticker, status: "absent", why: verdict ? "unknown" : "not-covered" });
 }
 
@@ -1771,12 +1876,13 @@ async function quoteResponse(env, ctx, ticker) {
   }
 }
 
+const OVERLAID = Object.freeze({ pulse: "live:market", flowalerts: "live:alerts", news: "live:news" });
+
 async function readWithOverlay(env, key) {
   if (!env.DB) return { stored: null, overlaid: null, failed: true };
   await ensureFlowsTables(env);
   const now = Date.now();
-  const rows = await FLOWS_LIVE.readOverlayRows(env.DB, key, key === "pulse" ? "live:market" : "live:alerts", now)
-    .catch(() => null);
+  const rows = await FLOWS_LIVE.readOverlayRows(env.DB, key, OVERLAID[key], now).catch(() => null);
   if (!rows) {
     const trace = {};
     const stored = await readFlowsPayload(env, key, trace);
@@ -1787,7 +1893,8 @@ async function readWithOverlay(env, key) {
   try {
     const overlaid = key === "flowalerts"
       ? FLOWS_LIVE.overlayFlowalerts(stored ? { session: stored.fresh && stored.fresh.session } : null, live, now, clock)
-      : stored ? FLOWS_LIVE.overlayPulse(stored, live, now, clock, { json }) : null;
+      : key === "news" ? FLOWS_LIVE.overlayNews(stored, live, now, clock, { json })
+        : stored ? FLOWS_LIVE.overlayPulse(stored, live, now, clock, { json }) : null;
     return { stored, overlaid, failed: false };
   } catch {
     return { stored, overlaid: null, failed: false };
@@ -3115,6 +3222,20 @@ async function route(request, env, url, ctx) {
     }
     if (!tokenKind) throw new HttpError(401, "unauthorized", "Authentication required");
 
+    if (url.searchParams.has("list")) {
+      requireMethod(request, ["GET"]);
+      if (tokenKind !== "nightly") {
+        throw new HttpError(403, "live_token_scope", "The live token reads one key at a time");
+      }
+      const kinds = [...new Set(url.searchParams.get("list").split(",").map((k) => k.trim()).filter(Boolean))];
+      if (!kinds.length || kinds.some((k) => !INGEST_LIST_KINDS.includes(k))) throw new HttpError(400, "invalid_key", "Unknown payload key");
+      if (!env.DB) throw storeGone();
+      await ensureFlowsTables(env);
+      const rows = await env.DB.prepare(ingestListSql(kinds)).all().catch(() => null);
+      if (!rows) throw storeGone();
+      return json(ingestListing(rows.results || []));
+    }
+
     if (url.searchParams.has("keys")) {
       requireMethod(request, ["GET"]);
       if (tokenKind !== "nightly") {
@@ -3217,10 +3338,14 @@ async function route(request, env, url, ctx) {
       return json({ ok: true, key, bytes: payload.length, stored: "created" });
     }
 
-    await env.DB.prepare(
+    const wroteAt = Date.now();
+    const upsert = env.DB.prepare(
       "INSERT INTO flows_payload (id, payload, updated_at) VALUES (?, ?, ?) " +
       "ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at"
-    ).bind(key, payload, Date.now()).run();
+    ).bind(key, payload, wroteAt);
+    const landing = key === "meta" ? FLOWS_LIVE.nightlyLedger(env.DB, JSON.parse(payload), wroteAt) : null;
+    if (landing) await FLOWS_LIVE.batchWithLedger(env.DB, [upsert], landing);
+    else await upsert.run();
 
     return json({ ok: true, key, bytes: payload.length });
   }
@@ -3239,6 +3364,8 @@ async function route(request, env, url, ctx) {
       const trace = {};
       const stored = await readFlowsPayload(env, "board:" + side, trace);
       if (stored === null) {
+        const kept = trace.failed ? await recallLastGood(request, url) : null;
+        if (kept) return kept;
         return json(trace.failed
           ? { side, rows: [], generatedAt: null, status: "pending", reason: "read-failed" }
           : { side, rows: [], generatedAt: null, status: "pending" });
@@ -3274,12 +3401,12 @@ async function route(request, env, url, ctx) {
       return passthrough(stored);
     }
 
-    if (path === "/api/flows/flowalerts" || path === "/api/flows/pulse") {
+    if (path === "/api/flows/flowalerts" || path === "/api/flows/pulse" || path === "/api/flows/news") {
 
       const { stored, overlaid, failed } = await readWithOverlay(env, path.slice("/api/flows/".length));
       if (overlaid) return overlaid;
       if (failed) throw storeGone();
-      if (stored === null) return json({ status: "pending" });
+      if (stored === null) return json(path.endsWith("/news") ? { status: "pending", rows: [] } : { status: "pending" });
       return passthrough(stored);
     }
 
@@ -3339,13 +3466,6 @@ async function route(request, env, url, ctx) {
       const key = path.slice("/api/flows/".length);
       const stored = await readServed(env, key);
       if (stored === null) return json({ status: "pending" });
-      return passthrough(stored);
-    }
-
-    if (path === "/api/flows/news") {
-
-      const stored = await readServed(env, "news");
-      if (stored === null) return json({ status: "pending", rows: [] });
       return passthrough(stored);
     }
 
@@ -3599,16 +3719,23 @@ export default {
     guard("flows nightly dispatch failed", (async () => {
       await ensureFlowsTables(env);
       await FLOWS_LIVE.nightlyTick(env, at);
-      if (FLOWS_LIVE.pruneDue(at)) await FLOWS_LIVE.pruneTape(env, at);
+      if (FLOWS_LIVE.pruneDue(at)) {
+        await FLOWS_LIVE.pruneTape(env, at);
+        await FLOWS_LIVE.pruneLedger(env, at);
+      }
     })());
   },
 
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     try {
-      return finalize(await route(request, env, url, ctx), request, url);
+      const response = await route(request, env, url, ctx);
+      rememberLastGood(request, url, response, ctx);
+      return finalize(response, request, url);
     } catch (error) {
       if (error instanceof HttpError) {
+        const kept = error.code === "store_unreadable" ? await recallLastGood(request, url) : null;
+        if (kept) return finalize(kept, request, url);
         return finalize(apiError(error.status, error.code, error.message, error.headers, error.details), request, url);
       }
       console.error(JSON.stringify({
@@ -3617,6 +3744,10 @@ export default {
         path: url.pathname,
         error: error instanceof Error ? error.message : String(error),
       }));
+      if (isStoreQuota(error)) {
+        return finalize(apiError(503, "store_quota", "The store's daily quota is spent; it resets at 00:00 UTC",
+          { "Retry-After": String(secondsToUtcMidnight(Date.now())) }), request, url);
+      }
       return finalize(apiError(500, "internal_error", "Internal server error"), request, url);
     }
   },

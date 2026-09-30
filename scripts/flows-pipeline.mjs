@@ -63,11 +63,13 @@ import { makeFakeVendor } from "./flows-legs/fake-vendor.mjs";
 import { makeCardXStore, publishCardX } from "./flows-legs/card-x.mjs";
 import { buildIndexDossiers, dossierRoster } from "./flows-legs/index-dossier.mjs";
 import {
-  runLive, runLiveLoop, chainDispatch, dryLiveTicks, readHeldAlerts, readLiveClock, LIVE_READ_PACE_MS,
+  runLive, runLiveLoop, chainDispatch, chainWithRetry, dryLiveTicks, readHeldAlerts, readLiveClock, LIVE_READ_PACE_MS,
   passOutcome, liveRunVerdict,
 } from "./flows-legs/live.mjs";
+import { createWatch, witnessDrill } from "./flows-legs/watch.mjs";
+import { dryLiveDay } from "./flows-legs/live-day.mjs";
 import {
-  runHealthGate, republishRepair, refusalOf, refusalTally, tallyRefusal, tallyAnswer, retriedStatus, refusalBrief,
+  runHealthGate, republishRepair, refusalOf, refusalTally, tallyRefusal, tallyAnswer, retriedStatus, refusalBrief, storeQuotaWait, QUOTA_WAIT,
 } from "./flows-legs/health.mjs";
 import { LIVE_OIDC, actionsIdToken, jwtExpiry } from "../shared/flows-oidc.js";
 
@@ -352,7 +354,7 @@ const CHAIN_RESERVE_MS = 6 * 60 * 1000;
 const PUBLISH_SPACING_MS = 400;
 
 const stats = {
-  calls: 0, retries: 0, rateLimited: 0, failures: 0, startedAt: Date.now(),
+  calls: 0, retries: 0, rateLimited: 0, failures: 0, timedOut: 0, startedAt: Date.now(),
 
   permitWaitMs: 0, networkMs: 0, rateLimitWaitMs: 0, rateLimitQueueMs: 0,
 };
@@ -517,7 +519,17 @@ function describeFloorVerdict(meter) {
     "down one step at a time, re-reading this line each morning.";
 }
 
-async function uw(path, params = {}, { envelope = false } = {}) {
+export const LIVE_VENDOR = Object.freeze({ timeoutMs: 20_000, timeoutRetries: 1 });
+
+function vendorTimeoutMs() {
+  if (!LIVE_MODE) return 0;
+  const set = Number(process.env.FLOWS_UW_TIMEOUT_MS);
+  return Number.isFinite(set) && set >= 100 && set <= 60_000 ? set : LIVE_VENDOR.timeoutMs;
+}
+
+const isTimeout = (error) => !!error && (error.name === "TimeoutError" || error.name === "AbortError");
+
+export async function uw(path, params = {}, { envelope = false } = {}) {
   const url = new URL(BASE + path);
   for (const [k, v] of Object.entries(params)) {
     if (v === undefined || v === null || v === "") continue;
@@ -531,6 +543,8 @@ async function uw(path, params = {}, { envelope = false } = {}) {
     url.searchParams.set(k, String(v));
   }
 
+  const limitMs = vendorTimeoutMs();
+  let timeouts = 0;
   for (let attempt = 0; attempt <= RATE.maxRetries; attempt++) {
 
     stats.permitWaitMs += await permits.acquire();
@@ -544,6 +558,7 @@ async function uw(path, params = {}, { envelope = false } = {}) {
           Authorization: "Bearer " + process.env.UW_API_KEY,
           Accept: "application/json",
         },
+        ...(limitMs ? { signal: AbortSignal.timeout(limitMs) } : {}),
       });
     } catch (error) {
       stats.networkMs += Date.now() - wireStarted;
@@ -551,7 +566,12 @@ async function uw(path, params = {}, { envelope = false } = {}) {
       stats.retries++;
       ({ delayMs, floorMs: delayFloorMs } = stepRateController(
         { delayMs, floorMs: delayFloorMs }, "error"));
-      if (attempt === RATE.maxRetries) throw error;
+      const timedOut = !!limitMs && isTimeout(error);
+      if (timedOut) {
+        stats.timedOut++;
+        timeouts++;
+      }
+      if (attempt === RATE.maxRetries || (timedOut && timeouts > LIVE_VENDOR.timeoutRetries)) throw error;
       continue;
     }
     stats.networkMs += Date.now() - wireStarted;
@@ -586,7 +606,13 @@ async function uw(path, params = {}, { envelope = false } = {}) {
 
     ({ delayMs, floorMs: delayFloorMs } = stepRateController(
       { delayMs, floorMs: delayFloorMs }, "ok"));
-    const body = await response.json();
+    let body;
+    try {
+      body = await response.json();
+    } catch (error) {
+      if (limitMs && isTimeout(error)) stats.timedOut++;
+      throw error;
+    }
     if (envelope) return body;
     return Array.isArray(body) ? body : (body && body.data) || [];
   }
@@ -1854,6 +1880,25 @@ async function readStoredOnce(key) {
   }
 }
 
+async function keysAnswer(response) {
+  const refusal = response.status === 403 ? await noteRefusal(response) : null;
+  if (refusal) {
+    return { keys: null, failed: true, status: 403, refusal, final: refusal.kind === "worker" };
+  }
+  if (!response.ok) {
+    const noted = await noteAnswer(response);
+    const seen = refusalOf({ headers: response.headers, text: noted ? noted.text : await response.text().catch(() => "") });
+    return { keys: null, failed: true, status: response.status, code: seen.kind === "worker" ? seen.code : null };
+  }
+  const text = await response.text();
+  let body = null;
+  try { body = JSON.parse(text); } catch { body = null; }
+  if (!body || !body.keys || typeof body.keys !== "object") {
+    return { keys: null, failed: true, status: response.status, detail: "the answer carried no keys" };
+  }
+  return { keys: body.keys, bytes: text.length, status: response.status, truncated: body.truncated === true };
+}
+
 async function probeStoredOnce(keys) {
   try {
     const response = await fetch(
@@ -1863,22 +1908,23 @@ async function probeStoredOnce(keys) {
         headers: await ingestHeaders(),
       },
     );
-    const refusal = response.status === 403 ? await noteRefusal(response) : null;
-    if (refusal) {
-      return { keys: null, failed: true, status: 403, refusal, final: refusal.kind === "worker" };
-    }
-    if (!response.ok) {
-      const noted = await noteAnswer(response);
-      const seen = refusalOf({ headers: response.headers, text: noted ? noted.text : await response.text().catch(() => "") });
-      return { keys: null, failed: true, status: response.status, code: seen.kind === "worker" ? seen.code : null };
-    }
-    const text = await response.text();
-    let body = null;
-    try { body = JSON.parse(text); } catch { body = null; }
-    if (!body || !body.keys || typeof body.keys !== "object") {
-      return { keys: null, failed: true, status: response.status, detail: "the answer carried no keys" };
-    }
-    return { keys: body.keys, bytes: text.length, status: response.status };
+    return await keysAnswer(response);
+  } catch (error) {
+    await noteAnswer(null);
+    return { keys: null, failed: true, status: 0, detail: error.message };
+  }
+}
+
+async function listStoredOnce(kinds) {
+  try {
+    const response = await fetch(
+      ingestURL() + "?list=" + encodeURIComponent(kinds.join(",")),
+      {
+        redirect: "error",
+        headers: await ingestHeaders(),
+      },
+    );
+    return await keysAnswer(response);
   } catch (error) {
     await noteAnswer(null);
     return { keys: null, failed: true, status: 0, detail: error.message };
@@ -1911,6 +1957,13 @@ async function readStored(key, options = {}) {
 export async function probeStored(keys, options = {}) {
   if (DRY_RUN) return { keys: null, failed: true, status: 0, detail: "dry run" };
   return readWithRetries(() => probeStoredOnce(keys), `${keys.length} key(s) at once`, options);
+}
+
+export const LEDGER_LIST_KINDS = Object.freeze(["card", "card-x", "hist"]);
+
+export async function listStored(kinds = LEDGER_LIST_KINDS, options = {}) {
+  if (DRY_RUN) return { keys: null, failed: true, status: 0, detail: "dry run" };
+  return readWithRetries(() => listStoredOnce(kinds), `the ${kinds.join(", ")} listing`, options);
 }
 
 const RECORD_HORIZONS = [1, 5, 10, 21];
@@ -2969,9 +3022,12 @@ const PUBLISH_RETRIES = 3;
 const PUBLISH_RETRY_BUDGET_MS = 90_000;
 let publishRetrySpentMs = 0;
 
+let quotaFirstAt = 0;
+
 export function resetPublishRetryBudget() {
   const spent = publishRetrySpentMs;
   publishRetrySpentMs = 0;
+  quotaFirstAt = 0;
   return spent;
 }
 
@@ -3023,6 +3079,19 @@ async function publish(key, payload) {
 
   refusal = response.status === 403 ? await noteRefusal(response) : null;
   heard = refusal || await noteAnswer(response);
+  const quotaWait = !response.ok && heard ? storeQuotaWait(response, heard.text, { firstAt: quotaFirstAt }) : null;
+  if (quotaWait !== null) {
+    quotaFirstAt = quotaFirstAt || QUOTA_WAIT.now();
+    lastDetail = heard.text;
+    console.warn(
+      `  ingest ${key}: HTTP ${response.status} store_quota — the store's daily quota is spent and resets at 00:00 UTC; ` +
+      `waiting ${Math.round(quotaWait / 1000)}s for it (a wait of at most ${Math.round(QUOTA_WAIT.maxMs / 60000)} min a run, ` +
+      "not counted against the retry budget)");
+    ingestWrites.defer(quotaWait);
+    await sleep(quotaWait);
+    attempt--;
+    continue;
+  }
   const wait = PUBLISH_RETRYABLE.has(response.status) && !(refusal && refusal.kind === "worker")
     ? publishRetryDelay(attempt, { spentMs: publishRetrySpentMs })
     : null;
@@ -4382,8 +4451,8 @@ export function probeSaid(p) {
 }
 
 export async function retireAndRoster({
-  sessionDate, generatedAt, depth = new Map(), exempt = new Set(), candidates = [], reader, probeMany = null, prior = null,
-  landed = landedKeys, deadline = null, remove = retire, write = publish, log = (line) => console.log(line),
+  sessionDate, generatedAt, depth = new Map(), exempt = new Set(), candidates = [], reader, probeMany = null, lister = null,
+  prior = null, landed = landedKeys, deadline = null, remove = retire, write = publish, log = (line) => console.log(line),
 } = {}) {
   if (!ARCHIVE_DATE_RE.test(String(sessionDate || ""))) {
     log("  roster: no session date, so no card can be aged — nothing retired, no roster written");
@@ -4402,6 +4471,25 @@ export async function retireAndRoster({
     for (const [k, v] of probed.known) if (!known.has(k) || v) known.set(k, v);
     ledger = probed.capped || probed.failed ? "bootstrap-partial" : "bootstrap";
     log(`  roster: the prior ledger is not complete (${why}), so the store was probed — ${probeSaid(probed)}`);
+  }
+  if (lister && !(prior && prior.failed)) {
+    const listed = await lister().catch((error) => ({ failed: true, status: 0, detail: error.message }));
+    if (listed && !listed.failed && listed.keys && typeof listed.keys === "object") {
+      let seen = 0, unknown = 0;
+      for (const [key, a] of Object.entries(listed.keys)) {
+        if (!rosterKeyTicker(key) || !a || a.present !== true) continue;
+        seen++;
+        if (known.has(key) || landed.has(key)) continue;
+        known.set(key, probeDayOf(a));
+        unknown++;
+      }
+      log(`  roster: the store lists ${seen} card, card-x and hist key(s), ${unknown} the ledger did not know` +
+        (unknown ? " — aged with the rest, so any older than " + RETIRE_AFTER_SESSIONS + " sessions is retired tonight" : "") +
+        (listed.truncated ? " (the listing was cut at its cap)" : ""));
+    } else {
+      log(`  roster: the store's key listing could not be read (${listed && listed.status ? "HTTP " + listed.status : "no answer"}` +
+        `${listed && listed.detail ? ", " + listed.detail : ""}) — the ledger is used as it stands`);
+    }
   }
   const plan = retirePlan({ sessionDate, known, landed, exempt });
   let removed = 0, absent = 0, refused = 0, streak = 0, lastStatus = 0;
@@ -4441,7 +4529,8 @@ export async function retireAndRoster({
     log(`  roster: ${Object.keys(built.payload.depth).length} carded name(s) — ` +
       Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(", ") + `, ${built.bytes} bytes (ledger ${ledger})`);
   }
-  return { retired: removed, absent, refused, held: Object.keys(held).length, ledger, bytes: built.bytes, written };
+  return { retired: removed, absent, refused, held: Object.keys(held).length, ledger, bytes: built.bytes, written,
+    rostered: Object.keys(built.payload.depth).length };
 }
 
 function dryPriorRoster(sessionDate) {
@@ -4486,7 +4575,31 @@ export function dryRosterProbe(sessionDate) {
   };
 }
 
+async function runWitnessDrill() {
+  console.log("Flows live layer — witness drill (opens one issue and closes it, nothing else)");
+  const drilled = await witnessDrill({ env: process.env });
+  if (drilled.ok) console.log(`witness drill: issue #${drilled.number} opened and closed — the alert channel works`);
+  else {
+    console.warn(`witness drill: FAILED — ${drilled.why}`);
+    process.exitCode = 1;
+  }
+  return drilled;
+}
+
+export function dryRosterList(sessionDate) {
+  const prior = dryPriorRoster(sessionDate);
+  const stored = { ...prior.held, "hist:ZZHLD": prior.held["card:ZZHLD"], "card:ZZORF": prior.held["card:ZZRET"] };
+  return async () => {
+    const keys = {};
+    for (const [key, day] of Object.entries(stored)) {
+      keys[key] = { present: true, sessionDate: day, generatedAt: day + "T21:40:00.000Z", updatedAt: Date.parse(day + "T21:40:00Z") };
+    }
+    return { keys, status: 200, bytes: JSON.stringify({ keys }).length, truncated: false };
+  };
+}
+
 async function runLiveMode() {
+  if (process.env.FLOWS_LIVE_DRILL === "1" && !DRY_RUN) return runWitnessDrill();
   console.log(DRY_RUN ? "Flows live layer — DRY RUN (synthetic, no network)" : "Flows live layer — live");
   if (!DRY_RUN) {
     const missing = ["UW_API_KEY"].filter((k) => !process.env[k]);
@@ -4500,7 +4613,15 @@ async function runLiveMode() {
   }
   delayFloorMs = Math.max(delayFloorMs, LIVE_READ_PACE_MS);
   delayMs = Math.max(delayMs, LIVE_READ_PACE_MS);
-  if (DRY_RUN) return dryLiveTicks({ publish, store: publishedStore, shapeNews });
+  if (DRY_RUN) {
+    const ticks = await dryLiveTicks({ publish, store: publishedStore, shapeNews });
+    const day = await dryLiveDay({});
+    if (day.problems.length) {
+      console.warn(`live day (dry run): FAILED — ${day.problems.length} problem(s)`);
+      process.exitCode = 1;
+    }
+    return ticks;
+  }
   const origin = process.env.FLOWS_LIVE_ORIGIN || null;
   const force = process.env.FLOWS_LIVE_FORCE === "1";
   const reportErrors = (result) => {
@@ -4508,9 +4629,14 @@ async function runLiveMode() {
     if (errors.length) console.warn(`live: ${errors.length} key(s) not published — ${errors.join("; ")}`);
     return passOutcome(result);
   };
-  const readClock = () => readLiveClock(readStoredOnce);
+  let clockBody = null;
+  const readClock = () => readLiveClock(readStoredOnce, { seen: (body) => { clockBody = body; } });
   const settle = (loop) => {
     const verdict = liveRunVerdict(loop);
+    if (loop && loop.watch) {
+      console.log(`live: witness — confirmed lapses: ${loop.watch.breached.join(", ") || "none"}; issues still open: ` +
+        `${loop.watch.open.join(", ") || "none"}`);
+    }
     if (verdict.failed) {
       console.warn(`live: FAILED — ${verdict.why}`);
       process.exitCode = 1;
@@ -4523,14 +4649,24 @@ async function runLiveMode() {
     settle({ passes: [reportErrors(result)] });
     return result;
   }
+  const keep = process.env.FLOWS_LIVE_KEEP === "1";
+  const watch = keep
+    ? createWatch({ readOnce: readStoredOnce, latestClock: () => clockBody, env: process.env })
+    : null;
   const loop = await runLiveLoop({
-    readClock,
+    readClock, watch,
     pass: async ({ first, clock }) => {
       resetPublishRetryBudget();
+      const timedOutBefore = stats.timedOut;
       const result = await runLive({ uw, publish, readStored, shapeNews, origin, skipRecent: first, clock });
-      return reportErrors(result);
+      const outcome = reportErrors(result);
+      const timedOut = stats.timedOut - timedOutBefore;
+      if (timedOut) console.warn(`live: ${timedOut} vendor request(s) timed out after ${vendorTimeoutMs() / 1000} s`);
+      return timedOut ? { ...outcome, timedOut } : outcome;
     },
-    chain: ({ at }) => chainDispatch({ env: process.env, at }),
+    chain: ({ at }) => (keep
+      ? chainWithRetry(() => chainDispatch({ env: process.env, at }))
+      : chainDispatch({ env: process.env, at })),
   });
   return settle(loop);
 }
@@ -6698,6 +6834,7 @@ async function main() {
   }
 
   let rosterSummary = null;
+  let rosterThrew = false;
   const probeBudget = { spentMs: 0, budgetMs: LEDGER_PROBE_RETRY_BUDGET_MS };
   try {
     rosterSummary = await retireAndRoster({
@@ -6714,12 +6851,15 @@ async function main() {
         : (key) => readStored(key, { budget: probeBudget }),
       probeMany: DRY_RUN ? dryRosterProbe(sessionDate)
         : (keys) => probeStored(keys, { budget: probeBudget }),
+      lister: DRY_RUN ? dryRosterList(sessionDate)
+        : () => listStored(LEDGER_LIST_KINDS, { budget: probeBudget }),
       prior: DRY_RUN ? await dryRosterReader(sessionDate)("roster")
         : pickPriorRoster(await readStored("roster", { budget: probeBudget }), await earlyRoster,
           { log: (line) => console.warn(line) }),
       deadline,
     });
   } catch (error) {
+    rosterThrew = true;
     console.warn(`  roster: ${error.message} — the retire step stopped before the roster was written; the stored ` +
       "roster stays at its older session, so the next run finds the gap and probes the store");
   }
@@ -6923,7 +7063,12 @@ async function main() {
   if (verdict) console.log("  " + verdict);
 
   const health = await runHealthGate({ sessionDate, read: readStored, dry: DRY_RUN, edge: edgeSnapshot,
-    annotate: process.env.GITHUB_ACTIONS === "true" });
+    annotate: process.env.GITHUB_ACTIONS === "true",
+    night: {
+      cardsFailed: cardsFailed + extraFailed, deadlineSkipped: deadlineSkipped + extraSkipped,
+      planned: byCard.size + dossierBuilt.size, rostered: rosterSummary ? rosterSummary.rostered : null,
+      rosterWritten: rosterSummary ? rosterSummary.written : (rosterThrew ? false : undefined), enriched: enriched.length,
+    } });
   if (health.failures.length) process.exitCode = 1;
 }
 

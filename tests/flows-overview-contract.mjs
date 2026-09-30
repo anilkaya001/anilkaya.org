@@ -3240,7 +3240,7 @@ try {
       vend("TSLA", 377.93, 380.12, -1.83e7, -8.17e6, 8e7, 9e7, 0.441), vend("AVGO", 350.47, 354.99, -2.1e7, -6.87e6, 4e7, 5e7, 0.348),
       vend("COST", 896.82, 904.7, -1.52e7, -4.34e5, 1e7, 2.4e7, 0.235),
     ];
-    const { STRIP_FIELDS, stripValues } = await import("../shared/flows-live.js");
+    const { STRIP_FIELDS, stripValues, shapeStrips } = await import("../shared/flows-live.js");
     const STRIP_NAMES = STRIP_FIELDS.map(([n]) => n);
     const FOCUS_FIELDS = ["px", "prev", "chg", "ncp", "npp", "net", "bull", "bear", "lean", "cv", "pv", "iv30", "ivRank", "im", "pcr", "rvol", "vol"];
     const asRow = (v) => {
@@ -3502,6 +3502,19 @@ try {
     await beat();
     ok(await fp.evaluate(() => document.activeElement === window.__pill && window.__pill.dataset.state === "live"),
       "a heartbeat keeps focus on the Live pill it refreshes");
+
+    const heldStrips = (held) => (route) => route.fulfill({ status: 200,
+      headers: { "Content-Type": "application/json", "X-Fresh-State": "live" },
+      body: JSON.stringify(shapeStrips({ data: METALS.map((t) => ({ ...LIVE_V[t], date: held.includes(t) ? SESSION : LIVE_DAY,
+        quote_time: Date.parse(t0) - 20000 })) }, { at: Date.parse(t0), session: LIVE_DAY, names: METALS, writer: "test" })) });
+    await fxLk.set("strips", heldStrips(["GDX"]));
+    const heldOut = await focusNow();
+    const rowOf = (t) => heldOut.metals[0].rel.find((r) => r[0] === t);
+    eq(heldOut.metals[0].px, "395.00", "A NAME THE VENDOR STILL DATES BEFORE THE SESSION does not take its module off the live read: the fund keeps its live price");
+    deep(rowOf("GDX").slice(1), ["—", "—"], "the held-out name prints dashes, never the previous session's price or change");
+    ok(rowOf("NEM")[1] !== "—" && rowOf("NEM")[2] !== "—", "while its module-mates keep their live change and flow");
+    deep(heldOut.src, ["live", "nightly"], "and the module is still a live one");
+    eq(heldOut.pills[0].state, "live", "wearing its Live pill");
 
     await fxLk.set("strips", liveStrips(LIVE_DAY, t0, "stale"));
     const lapsed = await focusNow();

@@ -1,15 +1,20 @@
 import {
   LIVE_KEYS, LIVE_BUDGET, TIER1_CALLS, TAPE_SPEC, shapeMarketLive, tideSessionState, tideLastAt, checkLiveWrite,
   liveKeyFromParam, shapeTapePrem, shapeTapeGex, assembleTape, nextTapeLeg, pulseWithLive, liveAlertsWin,
-  nightlyFreshMeta, rowsOf, timeMs, anyAnswered, marketFeeds, VERDICT, verdictPatch, parseClosedDays, shapeStrips,
+  nightlyFreshMeta, rowsOf, timeMs, anyAnswered, marketFeeds, VERDICT, verdictReprobeUntilMin, verdictPatch, parseClosedDays, shapeStrips,
+  priorCloseBase, liveNewsWins, newsWithLive,
 } from "./flows-live.js";
 import {
-  FRESH_CLASSES, PHASE_MINUTES, LIVE_CLOCK, freshHeaders, pendingHeaders, phaseAt, tier1Due, liveDispatchDue,
-  liveStalled, nightlyDispatchDue, easternDay, easternInstant, sessionOpen, clockClosed, expectedNightlySession,
+  FRESH_CLASSES, PHASE_MINUTES, LIVE_CLOCK, freshHeaders, pendingHeaders, phaseAt, tier1Due, inferredEarlyClose, liveDispatchDue,
+  liveStalled, nightlyDispatchDue, easternDay, easternInstant, sessionOpen, sessionClose, clockClosed, expectedNightlySession,
 } from "./flows-freshness.js";
 import { LIVE_OIDC, looksLikeJwt, rsaKeys, verifyLiveOidc, claimsBrief } from "./flows-oidc.js";
 import { focusStripNames } from "./flows-focus.js";
 import { readLabActiveAt } from "./lab-sign-in.js";
+import {
+  LEDGER_SCHEMA_SQL, LEDGER_ROWS_SQL, tickWindow, ledgerTickStatement, ledgerOutcomeStatement, ledgerFocusStatement,
+  ledgerPassStatement, ledgerNightlyStatement, ledgerView, ledgerPruneCutoff, worstStale,
+} from "./flows-ledger.js";
 
 export { looksLikeJwt };
 
@@ -24,6 +29,7 @@ export const LIVE_SCHEMA_SQL = Object.freeze([
     "live_redispatched_at INTEGER, nightly_day TEXT, nightly_dispatched_at INTEGER, nightly_redispatched_at INTEGER, " +
     "summary_stamp TEXT, updated_at INTEGER, tier1_at INTEGER, tier1_ok_at INTEGER, tier1_why TEXT, " +
     "closed_probe_at INTEGER, closed_days TEXT, dispatch_why TEXT, summary_at INTEGER)",
+  LEDGER_SCHEMA_SQL,
   "CREATE TRIGGER IF NOT EXISTS flows_archive_immutable BEFORE UPDATE ON flows_payload " +
     "WHEN OLD.id GLOB 'board:*:[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' " +
     "OR OLD.id GLOB 'scores:[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' " +
@@ -208,6 +214,16 @@ export function clockPatchStatement(db, patch, now) {
   ).bind(...values);
 }
 
+export async function batchWithLedger(db, core, extra) {
+  if (!extra) return db.batch(core);
+  try {
+    return await db.batch([...core, extra]);
+  } catch (error) {
+    console.warn(JSON.stringify({ message: "ledger statement refused", error: error instanceof Error ? error.message : String(error) }));
+    return core.length === 1 ? core[0].run() : db.batch(core);
+  }
+}
+
 export function writeLiveStatement(db, key, text, meta, now) {
   return db.prepare(
     "INSERT INTO flows_live (id, payload, read_at, session, cadence_s, source, writer, updated_at) " +
@@ -269,11 +285,14 @@ export async function tier1Reads(fetchVendor, { timeoutMs = LIVE_BUDGET.tier1Tim
   return raws;
 }
 
+const LIVE_AGES_SQL = "SELECT id, read_at, session, cadence_s, source FROM flows_live";
+const TIER1_FAILURES = /^(error:|no-feed-answered$|over-cap$)/;
+
 const clockFlag = (v) => (v === null || v === undefined || v === "" ? null : Number(v) === 1 ? 1 : Number(v) === 0 ? 0 : null);
 
 export function verdictReprobeDue(at, clock) {
   const wall = phaseAt(at, clock);
-  return !!wall && wall.minutes >= PHASE_MINUTES.sessionProbe && wall.minutes < VERDICT.provisionalUntilMin &&
+  return !!wall && wall.minutes >= PHASE_MINUTES.sessionProbe && wall.minutes < verdictReprobeUntilMin(wall.day) &&
     wall.minutes % VERDICT.reprobeEveryMin < 5;
 }
 
@@ -285,7 +304,7 @@ export function sessionStatePatch(clock, raws, at, today) {
     closedProbeAt: null });
   const trading = same ? clockFlag(clock.trading) : null;
   if (wall && wall.minutes >= PHASE_MINUTES.sessionProbe &&
-      (trading === null || (trading === 0 && wall.minutes < VERDICT.provisionalUntilMin))) {
+      (trading === null || (trading === 0 && wall.minutes < verdictReprobeUntilMin(today)))) {
     Object.assign(patch, verdictPatch({
       seen: tideSessionState(raws, { today, afterProbe: true }), trading,
       closedProbeAt: same ? clock.closedProbeAt : null, closedDays: clock ? clock.closedDays : [], at, today,
@@ -298,7 +317,9 @@ export function sessionStatePatch(clock, raws, at, today) {
     const movedAt = Object.hasOwn(patch, "tapeMovedAt") ? patch.tapeMovedAt : Number(same ? clock.tapeMovedAt : NaN);
     const tradingNow = Object.hasOwn(patch, "trading") ? patch.trading : trading;
     const early = easternInstant(today, PHASE_MINUTES.earlyClose + 5);
-    if (Number(tradingNow) === 1 && !(same && Number(clock.earlyClose) === 1) &&
+    const inferred = same && inferredEarlyClose(today, clock);
+    if (inferred && last > early) patch.earlyClose = null;
+    else if (Number(tradingNow) === 1 && !(same && Number(clock.earlyClose) === 1) &&
         wall && wall.minutes >= PHASE_MINUTES.earlyClose + 30 && last <= early &&
         Number.isFinite(movedAt) && at - movedAt >= LIVE_CLOCK.earlyCloseQuietMs) {
       patch.earlyClose = 1;
@@ -350,20 +371,24 @@ export function liveMode(env) {
 export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = console } = {}) {
   const out = { tier1: null, dispatch: null, watchdog: null };
   if (!env || !env.DB) return { ...out, skipped: "no-db" };
-  const telemetry = await clockPatchStatement(env.DB, { tier1At: at }, at).run().then(() => true, () => false);
+  const today = easternDay(at);
+  const beat = clockPatchStatement(env.DB, { tier1At: at }, at);
+  const telemetry = await (today
+    ? batchWithLedger(env.DB, [beat], ledgerTickStatement(env.DB, { day: today, at, ...tickWindow(today, memoizedClock(at)) }))
+    : beat.run()).then(() => true, () => false);
   out.telemetry = telemetry;
   if (liveMode(env) === "off") {
     if (telemetry) await clockPatchStatement(env.DB, { tier1Why: "off" }, at).run().catch(() => {});
     return { ...out, skipped: "off" };
   }
-  const today = easternDay(at);
-  const [clockRes, breadthRes] = await env.DB.batch([
+  const [clockRes, liveRes] = await env.DB.batch([
     env.DB.prepare("SELECT * FROM flows_clock WHERE id = 1"),
-    env.DB.prepare("SELECT read_at FROM flows_live WHERE id = 'live:breadth'"),
+    env.DB.prepare(LIVE_AGES_SQL),
   ]).catch(() => [null, null]);
   const clock = normalizeClock(clockRes && clockRes.results ? clockRes.results[0] : null);
-  const breadthReadAt = breadthRes && breadthRes.results && breadthRes.results[0]
-    ? Number(breadthRes.results[0].read_at) : null;
+  const liveRows = liveRes && Array.isArray(liveRes.results) ? liveRes.results : [];
+  const breadthRow = liveRows.find((r) => r && r.id === "live:breadth");
+  const breadthReadAt = breadthRow ? Number(breadthRow.read_at) : null;
   const closedToday = !!clock && clock.day === today && clockClosed(clock.trading);
   const reprobe = closedToday && verdictReprobeDue(at, clock);
   if (closedToday && !reprobe) {
@@ -415,6 +440,10 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
   else if (why !== "not-due") patch.tier1Why = tier1Why(why);
 
   const merged = { ...(clock || {}), ...patch };
+  const ledgerStatement = telemetry && today && why !== "not-due"
+    ? ledgerOutcomeStatement(env.DB, { day: today, at, ...tickWindow(today, merged), ok: why === "written",
+      failed: TIER1_FAILURES.test(why), stale: worstStale(liveRows, at, merged) })
+    : null;
   const due = liveDispatchDue(at, merged);
   if (due.due) {
     const sent = await dispatchWorkflow(env, env.FLOWS_LIVE_WORKFLOW || "flows-live.yml",
@@ -442,7 +471,7 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
   }
 
   if (Object.keys(patch).length) statements.push(clockPatchStatement(env.DB, patch, at));
-  if (statements.length) await env.DB.batch(statements);
+  if (statements.length) await batchWithLedger(env.DB, statements, ledgerStatement);
   memoClock({ ...(clock || {}), ...(telemetry ? { tier1At: at } : {}), ...patch }, at);
   out.why = why;
   return out;
@@ -463,6 +492,11 @@ export function focusNames(groupsText) {
   return focusStripNames({ groups }, LIVE_BUDGET.stripFocusMax);
 }
 
+export const FOCUS_NIGHTLY_SQL = "SELECT CASE WHEN json_valid(payload) THEN json_extract(payload, '$.groups') END AS groups, " +
+  "CASE WHEN json_valid(payload) THEN json_extract(payload, '$.sessionDate') END AS session, " +
+  "CASE WHEN json_valid(payload) THEN (SELECT json_group_object(c.key, json_extract(c.value, '$[#-1]')) " +
+  "FROM json_each(payload, '$.closes') AS c) END AS closes FROM flows_payload WHERE id = 'focus'";
+
 export const FOCUS_HELD_SQL = "SELECT session, read_at, (SELECT json_group_array(r.key) FROM json_each(payload, '$.rows') AS r " +
   "WHERE json_extract(r.value, '$[' || (SELECT f.key FROM json_each(payload, '$.fields') AS f WHERE f.value = 'px') || ']') " +
   "IS NOT NULL) AS priced FROM flows_live WHERE id = 'live:focus' AND json_valid(payload)";
@@ -472,20 +506,22 @@ export async function focusTick(env, at, { fetchVendor, log = console } = {}) {
   if (liveMode(env) === "off") return { skipped: "off" };
   const read = await env.DB.batch([
     env.DB.prepare("SELECT * FROM flows_clock WHERE id = 1"),
-    env.DB.prepare("SELECT CASE WHEN json_valid(payload) THEN json_extract(payload, '$.groups') END AS groups " +
-      "FROM flows_payload WHERE id = 'focus'"),
+    env.DB.prepare(FOCUS_NIGHTLY_SQL),
     env.DB.prepare(FOCUS_HELD_SQL),
   ]).catch(() => null);
   const firstRow = (r) => (r && r.results && r.results[0] ? r.results[0] : null);
   const clock = read ? normalizeClock(firstRow(read[0])) : memoizedClock(at);
   if (!focusDue(at, clock)) return { due: false, why: "not-due" };
   if (!env.UW_API_KEY || typeof fetchVendor !== "function") return { due: true, written: false, why: "no-key" };
-  const groups = read && firstRow(read[1]) ? firstRow(read[1]).groups : null;
-  const plan = focusNames(groups);
+  const nightly = read ? firstRow(read[1]) : null;
+  const plan = focusNames(nightly ? nightly.groups : null);
   const session = easternDay(at);
   const raw = await withTimeout(fetchVendor(FOCUS_READ.path, { ticker: plan.names.join(","), limit: FOCUS_READ.limit }),
     LIVE_BUDGET.tier1TimeoutMs);
-  const payload = shapeStrips(raw, { at, session, names: plan.names, writer: FOCUS_WRITER, key: "live:focus" });
+  let closes = null;
+  try { closes = nightly && typeof nightly.closes === "string" ? JSON.parse(nightly.closes) : null; } catch { closes = null; }
+  const base = priorCloseBase([{ name: "focus", sessionDate: nightly && nightly.session, close: closes }], session, clock);
+  const payload = shapeStrips(raw, { at, session, names: plan.names, writer: FOCUS_WRITER, key: "live:focus", base });
   const asked = plan.names.length;
   const px = payload.fields.indexOf("px");
   const got = plan.names.filter((t) => payload.rows[t] && payload.rows[t][px] !== null);
@@ -502,14 +538,16 @@ export async function focusTick(env, at, { fetchVendor, log = console } = {}) {
   const text = usable && !lost.length ? JSON.stringify(payload) : null;
   const why = !usable ? (payload.status === "ok" ? "none-priced" : payload.reason || payload.status)
     : text === null ? "partial" : text.length > spec.maxBytes ? "over-cap" : "written";
+  const tally = (ok, partial, failed) => ledgerFocusStatement(env.DB, { day: session, at, ...tickWindow(session, clock), ok, partial, failed });
   if (why !== "written") {
     log.error(JSON.stringify({ message: "live:focus not written", why, status: payload.status, asked, hit,
       lost: lost.slice(0, 10), bytes: text === null ? null : text.length, detail: payload.detail || null }));
+    await tally(false, why === "partial", why !== "partial").run().catch(() => {});
     return { ...out, written: false, why };
   }
-  await writeLiveStatement(env.DB, "live:focus", text, {
+  await batchWithLedger(env.DB, [writeLiveStatement(env.DB, "live:focus", text, {
     readAt: at, session, cadenceS: spec.cadenceS, source: "worker", writer: FOCUS_WRITER,
-  }, at).run();
+  }, at)], tally(true, false, false));
   return { ...out, written: true, why, bytes: text.length };
 }
 
@@ -676,9 +714,17 @@ export async function ingestLive(env, key, method, text, now, { json }) {
   if (!verdict.ok) return json({ error: { code: verdict.code, message: verdict.message } }, verdict.status);
   const statements = [writeLiveStatement(env.DB, key, text, verdict.meta, now)];
   if (key === "live:heartbeat") statements.push(clockPatchStatement(env.DB, { liveDoneAt: now }, now));
-  const results = await env.DB.batch(statements);
+  const pass = key === "live:heartbeat" ? heartbeatLedger(env.DB, body, verdict.meta) : null;
+  const results = await batchWithLedger(env.DB, statements, pass);
   const changed = results && results[0] && results[0].meta ? Number(results[0].meta.changes) || 0 : 0;
   return json({ ok: true, key, bytes: text.length, stored: changed ? "written" : "older-than-held" });
+}
+
+export function heartbeatLedger(db, body, meta) {
+  const day = meta && typeof meta.session === "string" ? meta.session : null;
+  if (!day || !Number.isFinite(Number(meta.readAt))) return null;
+  const run = body && typeof body.run === "object" && body.run ? body.run : {};
+  return ledgerPassStatement(db, { day, at: meta.readAt, calls: run.calls, failedCalls: run.failedCalls });
 }
 
 export function liveResponse(row, now, clock, extra = {}) {
@@ -786,12 +832,40 @@ export function ingestClockView(clock) {
     dispatchWhy: typeof clock.dispatchWhy === "string" ? clock.dispatchWhy : null, summaryAt: isoOf(clock.summaryAt) } : null;
 }
 
+export async function readLedgerRows(db) {
+  if (!db) return null;
+  try {
+    const res = await db.prepare(LEDGER_ROWS_SQL).all();
+    return res && Array.isArray(res.results) ? res.results : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function serveIngestClock(env, { json, lab = false }) {
   const db = env && env.DB;
-  const [clock, labActiveAt] = await Promise.all([readClock(db), lab ? readLabActiveAt(db) : null]);
+  const [clock, labActiveAt, ledgerRows] = await Promise.all([readClock(db), lab ? readLabActiveAt(db) : null,
+    lab ? readLedgerRows(db) : null]);
   const body = { key: "clock", clock: ingestClockView(clock) };
-  if (lab) body.labActiveAt = labActiveAt;
+  if (lab) {
+    body.labActiveAt = labActiveAt;
+    if (ledgerRows) body.ledger = ledgerView(ledgerRows);
+  }
   return json(body);
+}
+
+export function nightlyLedger(db, payload, at) {
+  const day = payload && typeof payload.sessionDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(payload.sessionDate)
+    ? payload.sessionDate : null;
+  return day ? ledgerNightlyStatement(db, { day, at }) : null;
+}
+
+export async function pruneLedger(env, now) {
+  if (!env || !env.DB) return 0;
+  const cutoff = ledgerPruneCutoff(easternDay(now));
+  if (!cutoff) return 0;
+  const res = await env.DB.prepare("DELETE FROM flows_ledger WHERE day <= ?").bind(cutoff).run().catch(() => null);
+  return res && res.meta ? Number(res.meta.changes) || 0 : 0;
 }
 
 export async function serveNow(env, url, now, { json, HttpError, quote }) {
@@ -915,10 +989,16 @@ export async function serveQuote(env, ctx, ticker, now, { build, json }) {
 export const TAPE_LEG_BITS = Object.freeze({ prem: 1, gex: 2 });
 const TAPE_COMPLETE = TAPE_LEG_BITS.prem | TAPE_LEG_BITS.gex;
 
-function tapeTtlMs(phase, row) {
+function tapeCoversClose(phase, readAt, clock) {
+  const close = phase && phase.lastClosed ? sessionClose(phase.lastClosed, clock) : NaN;
+  return Number.isFinite(close) && Number(readAt) >= close - FRESH_CLASSES.tape.cadenceS * 1000;
+}
+
+export function tapeTtlMs(phase, row, clock = null) {
   if (!phase) return 0;
   if (Number(row && row.legs) !== TAPE_COMPLETE) return 0;
   if (phase.phase === "rth") return FRESH_CLASSES.tape.cadenceS * 1000;
+  if (!tapeCoversClose(phase, row && row.read_at, clock)) return 0;
   if (phase.phase === "pre" || phase.phase === "post") return LIVE_BUDGET.tapePreTtlMs;
   const current = row && typeof row.session === "string" && phase.lastClosed && row.session >= phase.lastClosed;
   return current ? Infinity : 0;
@@ -953,16 +1033,16 @@ export async function refreshTape(env, ticker, now, { fetchVendor, heldText = nu
   const t = encodeURIComponent(ticker);
   const clock = await cachedClock(env, now);
   const phase = phaseAt(now, clock);
-  const day = phase && phase.session ? phase.session : easternDay(now);
-  const plan = tapeLegFor(heldText, heldLegs, { session: day, rth: !!phase && phase.phase === "rth" });
+  const day = phase && phase.phase !== "rth" && phase.lastClosed ? phase.lastClosed
+    : phase && phase.session ? phase.session : easternDay(now);
+  const plan = tapeLegFor(heldText, heldLegs, { session: day, rth: true });
   let legs;
   let session;
   if (plan.leg === "prem") {
-    const since = phase && phase.phase === "pre" && phase.lastClosed ? phase.lastClosed : day;
     const [ticks, alerts] = await Promise.all([
       withTimeout(fetchVendor(`/api/stock/${t}/net-prem-ticks`, {}), LIVE_BUDGET.tier1TimeoutMs),
       withTimeout(fetchVendor("/api/option-trades/flow-alerts",
-        { ticker_symbol: ticker, newer_than: since, limit: LIVE_BUDGET.alertsPerTape * 2 }), LIVE_BUDGET.tier1TimeoutMs),
+        { ticker_symbol: ticker, newer_than: day, limit: LIVE_BUDGET.alertsPerTape * 2 }), LIVE_BUDGET.tier1TimeoutMs),
     ]);
     session = tapeSession({ ticks }, day);
     legs = shapeTapePrem({ ticks, alerts }, { at: now, session, now });
@@ -1012,7 +1092,7 @@ export async function serveTape(env, ctx, ticker, now, { fetchVendor, json, admi
   const row = firstOf(a), known = admit && admit.known ? firstOf(b) : null;
   const hasPayload = row && typeof row.payload === "string" && row.payload;
   const age = hasPayload ? now - Number(row.read_at) : Infinity;
-  if (hasPayload && age <= tapeTtlMs(phase, row)) return respond(row, "fresh");
+  if (hasPayload && age <= tapeTtlMs(phase, row, clock)) return respond(row, "fresh");
   const usable = hasPayload && (phase && phase.phase === "rth" ? age <= LIVE_BUDGET.tapeUsableMs : true);
   if (!hasPayload && admit && !known && !(await admit.vendor(ticker))) {
     return json({ ticker, status: "absent", why: "unknown" }, 200, { "Cache-Control": "no-store", "X-Tape": "unknown" });
@@ -1084,6 +1164,16 @@ export function overlayPulse(nightly, live, now, clock, { json }) {
   const { headers } = freshHeaders(liveMeta(live), now, clock);
   return json(merged, 200, { "X-Payload-Updated": String(Math.max(nightly.updatedAt || 0, live.updatedAt || 0)),
     "X-Live-Overlay": "live:market", ...headers });
+}
+
+export function overlayNews(nightly, live, now, clock, { json }) {
+  if (!live || !liveNewsWins(nightly && nightly.fresh, live.session, live.readAt)) return null;
+  let news;
+  try { news = JSON.parse(live.payload); } catch { return null; }
+  const merged = newsWithLive(news, live);
+  if (!merged) return null;
+  const { headers } = freshHeaders(liveMeta(live), now, clock);
+  return json(merged, 200, { "X-Payload-Updated": String(live.updatedAt || 0), "X-Live-Overlay": "live:news", ...headers });
 }
 
 export const NIGHTLY_ROW_SQL =

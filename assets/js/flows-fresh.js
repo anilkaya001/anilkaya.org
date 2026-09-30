@@ -99,17 +99,6 @@
     return body;
   };
 
-  api.freshAggregate = function (list, phase) {
-    var states = (list || []).filter(Boolean).map(function (f) { return typeof f === "string" ? f : f.stateAt(); });
-    if (!states.length) return "pending";
-    if (states.indexOf("stale") >= 0) return "stale";
-    var live = states.indexOf("live") >= 0;
-    if (phase && phase !== "rth" && !live) return "closed";
-    if (live) return "live";
-    if (states.every(function (s) { return s === "closed"; })) return "closed";
-    return states.indexOf("fresh") >= 0 ? "fresh" : states[0];
-  };
-
   api.heartbeatInterval = function (phase, page, hidden) {
     if (hidden) return null;
     if (phase === "rth") return page === "ticker" ? HEARTBEAT_MS.ticker : HEARTBEAT_MS.other;
@@ -160,6 +149,7 @@
           Object.keys(body.keys || {}).forEach(function (k) {
             var e = body.keys[k];
             fresh[k] = api.freshFrom(e, { serverNow: body.serverNow, phase: body.phase });
+            if (fresh[k] && UI.freshness) UI.freshness({ ff: fresh[k], source: k });
             if (!first && seen[k] !== e.updatedAt) changed.push(k);
             seen[k] = e.updatedAt;
           });

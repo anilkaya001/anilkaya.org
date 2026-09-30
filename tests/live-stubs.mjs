@@ -1,6 +1,6 @@
 import http from "node:http";
 import { readFileSync } from "node:fs";
-import { easternInstant } from "../shared/flows-freshness.js";
+import { easternInstant, prevTradingDay } from "../shared/flows-freshness.js";
 import { fakeLiveVendor, fakeScreenerRows } from "../scripts/flows-legs/live-fake.mjs";
 import { LIVE_OIDC } from "../shared/flows-oidc.js";
 import { FOCUS_METALS, MAG7 } from "../shared/flows-focus.js";
@@ -117,7 +117,7 @@ export async function tier1Bodies({ session, at }) {
   return { "/api/market/market-tide": JSON.stringify(tide), "/api/market/sector-etfs": JSON.stringify(sectors) };
 }
 
-export function tickDb() {
+export function tickDb(rows) {
   const statements = [];
   const st = (sql) => {
     const s = { sql, args: [], bind(...a) { s.args = a; return s; }, first: async () => null,
@@ -127,8 +127,15 @@ export function tickDb() {
   return {
     statements,
     prepare: st,
-    batch: async (list) => { statements.push(...list); return list.map(() => ({ results: [] })); },
+    batch: async (list) => {
+      statements.push(...list);
+      return list.map((x) => ({ results: /FROM flows_live/.test(x.sql) ? liveAges(rows) : [] }));
+    },
   };
+}
+
+export function liveAges(rows) {
+  return rows === undefined ? [] : rows;
 }
 
 const cpuClock = () => {
@@ -148,7 +155,9 @@ export async function tier1Budget({ windows = 16, perWindow = 5, coldOnly = fals
   const bytes = Object.values(texts).reduce((a, t) => a + t.length, 0);
   const { clock, cpu } = cpuClock();
   const fetchVendor = async (path) => JSON.parse(texts[path]);
-  const env = { DB: tickDb(), UW_API_KEY: "k" };
+  const { LIVE_KEYS } = await import("../shared/flows-live.js");
+  const held = Object.keys(LIVE_KEYS).map((id) => ({ id, read_at: at - 240000, session, cadence_s: 300, source: "actions" }));
+  const env = { DB: tickDb(held), UW_API_KEY: "k" };
   const tick = () => W.rthTick(env, at, { fetchVendor, log: { error() {} } });
   const w0 = process.hrtime.bigint();
   const c0 = cpu();
@@ -214,7 +223,7 @@ export function productionScreenerBody(tickers, { session, readAt }) {
   }) };
 }
 
-export function focusDb({ groups = null, clock = null, held = null } = {}) {
+export function focusDb({ groups = null, clock = null, held = null, nightly = null } = {}) {
   const statements = [];
   const st = (sql) => {
     const s = { sql, args: [], bind(...a) { s.args = a; return s; }, first: async () => null,
@@ -223,11 +232,17 @@ export function focusDb({ groups = null, clock = null, held = null } = {}) {
   };
   const answer = (s) => {
     if (/FROM flows_clock/.test(s.sql)) return { results: clock ? [clock] : [] };
-    if (/FROM flows_payload WHERE id = 'focus'/.test(s.sql)) return { results: groups ? [{ groups: JSON.stringify(groups) }] : [] };
+    if (/FROM flows_payload WHERE id = 'focus'/.test(s.sql)) {
+      return { results: groups ? [{ groups: JSON.stringify(groups), session: nightly ? nightly.session : null,
+        closes: nightly ? JSON.stringify(nightly.closes) : null }] : [] };
+    }
     if (/FROM flows_live WHERE id = 'live:focus'/.test(s.sql)) return { results: held ? [held] : [] };
     return { results: [] };
   };
-  return { statements, prepare: st, batch: async (list) => list.map(answer) };
+  return { statements, prepare: st, batch: async (list) => {
+    for (const x of list) if (/^\s*(INSERT|UPDATE|DELETE)/i.test(x.sql)) statements.push(x);
+    return list.map(answer);
+  } };
 }
 
 export async function focusBudget({ windows = 16, perWindow = 5, coldOnly = false } = {}) {
@@ -236,11 +251,15 @@ export async function focusBudget({ windows = 16, perWindow = 5, coldOnly = fals
   const at = easternInstant(session, 15 * 60 + 58);
   const groups = focusGroupsSample();
   const names = W.focusNames(JSON.stringify(groups)).names;
-  const body = JSON.stringify(productionScreenerBody(names, { session, readAt: at - 20000 }));
+  const screener = productionScreenerBody(names, { session, readAt: at - 20000 });
+  const closes = Object.fromEntries(screener.data.map((r) => [r.ticker, Number(r.prev_close)]));
+  screener.data.forEach((r, i) => { if (i % 2) r.prev_close = null; });
+  const body = JSON.stringify(screener);
   const { clock, cpu } = cpuClock();
   const fetchVendor = async () => JSON.parse(body);
   const held = { session, read_at: at - 300000, priced: JSON.stringify(names) };
-  const env = { DB: focusDb({ groups, held }), UW_API_KEY: "k" };
+  const nightly = { session: prevTradingDay(session, null), closes };
+  const env = { DB: focusDb({ groups, held, nightly }), UW_API_KEY: "k" };
   const tick = () => W.focusTick(env, at, { fetchVendor, log: { error() {} } });
   const w0 = process.hrtime.bigint();
   const c0 = cpu();

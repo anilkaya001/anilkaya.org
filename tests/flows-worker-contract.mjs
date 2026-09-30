@@ -1321,16 +1321,35 @@ try {
       eq((await st("card-x", "PEND")).status, "absent", "and absent once the roster is current: nothing is coming");
     }
 
+    const served = await (await get("/api/flows/card?t=AAPL", { headers: cookie })).text();
+    const deadline = Date.now() + 5000;
+    let kept = false;
+    while (!kept && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 100));
+      await server.d1("ALTER TABLE flows_payload RENAME COLUMN payload TO payload_hidden");
+      const probe = await get("/api/flows/card?t=AAPL", { headers: cookie });
+      await probe.text();
+      await server.d1("ALTER TABLE flows_payload RENAME COLUMN payload_hidden TO payload");
+      kept = probe.status === 200;
+    }
+    ok(kept, "THE LAST GOOD COPY IS KEPT by the real Cache API: a card the Worker served is in caches.default within seconds");
     await server.d1("ALTER TABLE flows_payload RENAME COLUMN payload TO payload_hidden");
     const gone = await get("/api/flows/card?t=AAPL", { headers: cookie });
-    const goneBody = await gone.json();
+    const goneText = await gone.text();
+    const never = await get("/api/flows/card?t=ZZNEVER", { headers: cookie });
+    const neverBody = await never.json();
     const goneMarket = await get("/api/flows/market", { headers: cookie });
     const goneMarketBody = await goneMarket.json();
     const goneNeuron = await (await get("/api/flows/summary?t=AAPL", { headers: cookie })).json();
     await server.d1("ALTER TABLE flows_payload RENAME COLUMN payload_hidden TO payload");
-    ok(gone.status === 503 && goneBody.status === "unavailable" && goneBody.reason === "store" && goneBody.error.code === "store_unreadable",
-       `OPS-14: a store that cannot be read answers 503 unavailable, never pending (${gone.status} ${JSON.stringify(goneBody)})`);
-    ok(goneMarket.status === 503 && goneMarketBody.status === "unavailable", "and the page payload routes answer the same way");
+    ok(gone.status === 200 && goneText === served && gone.headers.get("x-fresh-state") === "stale" &&
+       gone.headers.get("x-fresh-reason") === "store" && /^\d{4}-\d\d-\d\dT/.test(gone.headers.get("x-fresh-last-good") || "") &&
+       gone.headers.get("cache-control") === "no-store",
+       `OPS-14: a store that cannot be read serves the last good copy of a card it had served, byte for byte, stamped stale with reason store, never pending and never fresh (${gone.status} ${goneText.slice(0, 120)})`);
+    ok(never.status === 503 && neverBody.status === "unavailable" && neverBody.reason === "store" && neverBody.error.code === "store_unreadable" &&
+       !never.headers.has("x-fresh-last-good"),
+       `and a key it never served, with no copy to give, answers 503 unavailable, never pending (${never.status} ${JSON.stringify(neverBody)})`);
+    ok(goneMarket.status === 503 && goneMarketBody.status === "unavailable", "and so does a page payload route whose row was never served");
     ok(goneNeuron.status === "unavailable" && goneNeuron.reason === "store", `and the name's reading says unavailable, not that no card was published (${JSON.stringify(goneNeuron).slice(0, 120)})`);
     eq((await get("/api/flows/card?t=AAPL", { headers: cookie })).status, 200, "with the store back the card reads again");
 
@@ -1343,7 +1362,7 @@ try {
         const t = u.searchParams.get("ticker");
         const data = u.pathname === "/api/screener/stocks" && t === "GLD" ? [{ ticker: "GLD", issue_type: "ETF", full_name: "SPDR Gold Shares",
           sector: null, close: "391.645", prev_close: "392.88", iv30d: "0.182", iv_rank: "41.5", implied_move_perc: "0.021", put_call_ratio: "0.8",
-          date: "2026-09-24" }] : [];
+          date: "2026-09-24", quote_time: Date.now() - 90000 }] : [];
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ data }));
       });
@@ -1357,6 +1376,8 @@ try {
            `T7: a symbol outside the universe is classified by ONE screener read; an ETF gets a quote page (${JSON.stringify(gld).slice(0, 160)})`);
         ok(gld.u.px === 391.645 && gld.u.prev === 392.88 && gld.u.ivRank === 41.5 && gld.u.iv30 === 0.182 && gld.sessionDate === "2026-09-24",
            "with the screener's own values, in the strip's names and units");
+        ok(Number.isInteger(gld.u.qa) && gld.u.qa >= 89 && gld.u.qa < 900,
+           `and the quote's own age, from the vendor's quote_time to the moment the card was built, so a null qa means the vendor sent no stamp and nothing else (${gld.u.qa})`);
         eq((await (await C("/api/flows/card?t=ZZZZ")).json()).why, "unknown", "a symbol the vendor does not know is unknown");
         const reads = asked.filter((a) => a.startsWith("/api/screener/stocks")).length;
         eq(reads, 2, "one screener read per symbol");
@@ -1966,9 +1987,17 @@ try {
           "route, so it stops on a holiday or at an early close the calendar alone cannot know; that key adds the " +
           "Tier 1 telemetry, the last dispatch outcome and the summary cron's last completed firing");
       const nightlyClock = await ingest("clock", "GET", INGEST_TOKEN);
-      deep(await nightlyClock.json(), { key: "clock", clock: clockNow, labActiveAt: null },
+      const { ledger, ...nightlyRest } = await nightlyClock.json();
+      deep(nightlyRest, { key: "clock", clock: clockNow, labActiveAt: null },
         "as does the nightly's health gate under the nightly token, which alone also reads labActiveAt: null while " +
           "no Lab user is on record");
+      const ledgerDay = ledger && ledger.days.find((d) => d.day === "2026-09-24");
+      ok(ledger && ledger.retainDays === 30 && ledgerDay && ledgerDay.ticks >= 3 && ledgerDay.tier1.lastAt === nb.tier1.at &&
+         ledgerDay.tier1.ok >= 1 && ledgerDay.tier1.gapMs > 0,
+        "THE SESSION LEDGER FROM REAL D1: the same nightly credential's read of the clock carries the ledger the ticks above " +
+          "wrote through wrangler's own SQLite, with the day's tick count, last tick and the gap between them");
+      ok(!Object.hasOwn(await (await ingest("clock", "GET", LIVE_TOKEN)).json(), "ledger"),
+        "and the live credential's every-pass read of the clock carries none");
       {
         const labAt = async () => (await (await ingest("clock", "GET", INGEST_TOKEN)).json()).labActiveAt;
         const created = Date.parse("2026-06-30T12:00:00Z");

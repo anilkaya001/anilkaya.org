@@ -1324,7 +1324,8 @@
         return r.text().then(() => { throw e; }, () => { throw e; });
       }
       const updatedAt = Number(r.headers.get("X-Payload-Updated")) || null;
-      return r.json().then((b) => { if (b && typeof b === "object") b.__updatedAt = updatedAt; return b; });
+      const now = Date.now(), verdict = [r.headers.get("X-Fresh-State"), Date.parse(r.headers.get("X-Fresh-Stale-At")), (Number(r.headers.get("X-Server-Now")) || now) - now];
+      return r.json().then((b) => { if (b && typeof b === "object") { b.__updatedAt = updatedAt; b.__verdict = verdict; } return b; });
     });
 
   function takeTrack(track) {
@@ -1393,6 +1394,8 @@
     }, ms);
   }
 
+  const held = new Map();
+
   function takeLive(live) {
     const p = st.payload;
     if (!live || live.status !== "ok" || !Array.isArray(live.fields) || !live.rows || !p) return;
@@ -1400,20 +1403,33 @@
     if (!session || !p.sessionDate || session <= p.sessionDate) return;
     const ix = { px: live.fields.indexOf("px"), chg: live.fields.indexOf("chg") };
     if (ix.px < 0) return;
+    const [state, staleAt, skew] = live.__verdict || [];
+    const lapsed = () => state === "stale" || Date.now() + skew >= staleAt;
+    UI.freshness({ ff: { stateAt: () => (lapsed() ? "stale" : "live") }, source: "strips" });
+    if (lapsed()) {
+      for (const [row, was] of held) Object.assign(row, was);
+      held.clear();
+      pollLive(6e4);
+      refresh(["t", "px"], true);
+      return;
+    }
+    let wait = Math.max(60, num(live.fresh && live.fresh.cadenceS) || 300) * 1000;
+    const left = staleAt - Date.now() - skew;
+    if (left < wait) wait = left + 1e3;
     let hit = 0;
     for (const row of st.rows) {
       const v = live.rows[String(row.t || "").toUpperCase()];
       if (!Array.isArray(v)) continue;
       const px = num(v[ix.px]);
       if (px === null) continue;
+      if (!held.has(row)) held.set(row, { px: row.px, chg: row.chg, __live: false });
       row.px = px;
-      if (ix.chg >= 0 && num(v[ix.chg]) !== null) row.chg = num(v[ix.chg]);
+      row.chg = ix.chg >= 0 ? num(v[ix.chg]) : null;
       row.__live = true;
       hit++;
     }
     if (!hit) return;
-    pollLive(Math.max(60, num(live.fresh && live.fresh.cadenceS) || 300) * 1000);
-    table.dataset.live = "1";
+    pollLive(wait);
     if (live.fresh && typeof live.fresh.readAt === "string") UI.freshness({ readAt: live.fresh.readAt, live: true, source: "strips" });
     refresh(["t", "px"], true);
   }

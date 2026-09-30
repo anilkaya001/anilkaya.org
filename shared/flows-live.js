@@ -1,5 +1,6 @@
 import {
   FRESH_CLASSES, easternDay, sessionOpen, easternInstant, easternOffsetMinutes, PHASE_MINUTES, nextWeekdayDay, isTradingDay,
+  prevTradingDay,
 } from "./flows-freshness.js";
 import { buildFlowAlerts, mergeAlerts } from "./flows-alerts.js";
 
@@ -456,10 +457,13 @@ export function tideSessionState(raws, { today, afterProbe }) {
 
 export const VERDICT = Object.freeze({
   provisionalUntilMin: 11 * 60,
+  unscheduledUntilMin: 15 * 60 + 45,
   agreeMs: 15 * 60 * 1000,
   reprobeEveryMin: 15,
   closedDaysMax: 20,
 });
+
+export const verdictReprobeUntilMin = (day) => (isTradingDay(day, null) ? VERDICT.unscheduledUntilMin : VERDICT.provisionalUntilMin);
 
 export function parseClosedDays(value) {
   let list = value;
@@ -582,23 +586,41 @@ export const STRIP_FIELDS = Object.freeze([
   ["gDir", "gex_gamma_per_one_percent_move_dir", "USD per 1% move"],
   ["pcr", "put_call_ratio", "ratio"], ["rvol", "relative_volume", "ratio"],
   ["vol", "stock_volume", "shares"],
+  ["qa", null, "seconds, the read instant minus the vendor's quote_time; null when the row has no stamp or one after the read"],
 ].map((x) => Object.freeze(x)));
 
 const STRIP_DP = Object.freeze({ px: 4, prev: 4, chg: 6, lean: 6, iv30: 4, ivRank: 2, im: 4, pcr: 4, rvol: 4 });
 
-export function stripValues(row) {
-  const v = {};
-  for (const [name, field] of STRIP_FIELDS) if (field) v[name] = vnum(row[field]);
-  v.chg = v.px !== null && v.prev !== null && v.prev !== 0 ? v.px / v.prev - 1 : null;
-  v.net = v.ncp !== null && v.npp !== null ? v.ncp - v.npp : null;
-  const gross = v.bull !== null && v.bear !== null ? v.bull + v.bear : null;
-  v.lean = gross !== null && gross !== 0 ? (v.bull - v.bear) / gross : null;
-  const out = [];
-  for (const [name] of STRIP_FIELDS) {
-    const d = Object.hasOwn(STRIP_DP, name) ? STRIP_DP[name] : 0;
-    out.push(round(v[name], d));
-  }
-  return out;
+export const QUOTE_SKEW_MS = 60 * 1000;
+
+export function lagSeconds(readAtMs, stamp) {
+  const q = timeMs(stamp);
+  if (!Number.isFinite(q) || !Number.isFinite(readAtMs)) return null;
+  const d = readAtMs - q;
+  return d < -QUOTE_SKEW_MS ? null : Math.max(0, Math.round(d / 1000));
+}
+
+const stripAt = (name) => STRIP_FIELDS.findIndex(([n]) => n === name);
+
+const QA_AT = STRIP_FIELDS.length - 1;
+
+const STRIP_SOURCE = STRIP_FIELDS.map(([, field]) => field);
+
+const STRIP_PLACES = STRIP_FIELDS.map(([n]) => (Object.hasOwn(STRIP_DP, n) ? STRIP_DP[n] : 0));
+
+const [PX, PREV, CHG, NCP, NPP, NET, BULL, BEAR, LEAN] = ["px", "prev", "chg", "ncp", "npp", "net", "bull", "bear", "lean"].map(stripAt);
+
+export function stripValues(row, { at = NaN, fill = null } = {}) {
+  const v = new Array(STRIP_FIELDS.length).fill(null);
+  for (let i = 0; i < v.length; i++) if (STRIP_SOURCE[i]) v[i] = vnum(row[STRIP_SOURCE[i]]);
+  if (v[PREV] === null && fill > 0) v[PREV] = fill;
+  v[CHG] = v[PX] !== null && v[PREV] !== null && v[PREV] !== 0 ? v[PX] / v[PREV] - 1 : null;
+  v[QA_AT] = lagSeconds(at, row.quote_time);
+  v[NET] = v[NCP] !== null && v[NPP] !== null ? v[NCP] - v[NPP] : null;
+  const gross = v[BULL] !== null && v[BEAR] !== null ? v[BULL] + v[BEAR] : null;
+  v[LEAN] = gross !== null && gross !== 0 ? (v[BULL] - v[BEAR]) / gross : null;
+  for (let i = 0; i < v.length; i++) v[i] = round(v[i], STRIP_PLACES[i]);
+  return v;
 }
 
 export const TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
@@ -621,41 +643,161 @@ export function stripNames({ long = [], short = [], watch = [], focus = [] } = {
   return out;
 }
 
-export function shapeStrips(raw, { at, session, names = [], writer, key = "live:strips" } = {}) {
+export const FILL_AGREE = Object.freeze({ tol: 0.0005, minChecked: 5, share: 0.9 });
+
+export const OFF_ROWS_KEPT = 20;
+
+export function nightlySources({ boards = {}, focus = null } = {}) {
+  const day = (v) => (typeof v === "string" && DAY_RE.test(v.slice(0, 10)) ? v.slice(0, 10) : null);
+  const out = [];
+  if (focus && typeof focus === "object") {
+    const close = {};
+    const held = focus.closes && typeof focus.closes === "object" ? focus.closes : {};
+    for (const [t, c] of Object.entries(held)) close[t] = Array.isArray(c) ? c[c.length - 1] : c;
+    out.push({ name: "focus", sessionDate: day(focus.sessionDate), close });
+  }
+  for (const side of ["long", "short", "watch"]) {
+    const b = boards && boards[side] && typeof boards[side] === "object" ? boards[side] : null;
+    const close = {};
+    for (const r of b && Array.isArray(b.rows) ? b.rows : []) {
+      const t = r && typeof r.t === "string" ? r.t.trim().toUpperCase() : "";
+      if (t && !Object.hasOwn(close, t)) close[t] = r.px;
+    }
+    out.push({ name: "board:" + side, sessionDate: b ? day(b.sessionDate) : null, close });
+  }
+  return out;
+}
+
+export function priorCloseBase(sources, session, clock = null) {
+  const want = typeof session === "string" && DAY_RE.test(session) ? prevTradingDay(session, clock) : null;
+  if (!want) return null;
+  const close = {};
+  const from = {};
+  const other = [];
+  for (const s of Array.isArray(sources) ? sources : []) {
+    if (!s || typeof s.name !== "string") continue;
+    if (s.sessionDate !== want) { if (s.sessionDate) other.push([s.name, s.sessionDate]); continue; }
+    for (const [t, v] of Object.entries(s.close && typeof s.close === "object" ? s.close : {})) {
+      const x = vnum(v);
+      if (x === null || !(x > 0) || Object.hasOwn(close, t)) continue;
+      close[t] = x;
+      from[t] = s.name;
+    }
+  }
+  return { date: want, close, from, other };
+}
+
+function quantile(sorted, p) {
+  return sorted.length ? sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(p * sorted.length) - 1))] : null;
+}
+
+export function lagSummary(values) {
+  const xs = values.filter((x) => typeof x === "number" && Number.isFinite(x)).sort((a, b) => a - b);
+  return xs.length ? { n: xs.length, p50: quantile(xs, 0.5), p90: quantile(xs, 0.9), max: xs[xs.length - 1] } : null;
+}
+
+export function shapeStrips(raw, { at, session, names = [], writer, key = "live:strips", base = null, lag = false } = {}) {
   const silent = feedSilence(raw);
-  const base = {
+  const shape = {
     v: 1, key, session,
     fields: STRIP_FIELDS.map(([n]) => n),
     units: Object.fromEntries(STRIP_FIELDS.map(([n, , u]) => [n, u])),
-    basis: "vendor screener, undated read (the vendor's live row); one call for every name",
+    basis: "vendor screener, one call for every name; a null prev_close is filled from the last dated nightly close " +
+      "(prevFill); a row the vendor dated before the session is held out (off, missing) and stands as an all-null row",
   };
+  const atMs = typeof at === "number" ? at : timeMs(at);
   const freshOf = (vendorAt) => freshEnvelope({ readAt: at, vendorAt, source: LIVE_KEYS[key].writer,
     cadenceS: LIVE_KEYS[key].cadenceS, session, writer });
-  if (silent) return { ...base, fresh: freshOf(null), ...silent, rows: {}, asked: names.length, missing: names.slice() };
-  const rows = {};
+  if (silent) return { ...shape, fresh: freshOf(null), ...silent, rows: {}, asked: names.length, missing: names.slice(), ahead: { n: 0, maxS: 0 } };
+  const seen = new Set();
+  const parsed = [];
   const dates = {};
-  for (const r of rowsOf(raw)) {
+  const list = rowsOf(raw);
+  for (let i = 0; i < list.length; i++) {
+    const r = list[i];
     const t = r && typeof r.ticker === "string" ? r.ticker.trim().toUpperCase() : "";
-    if (!t || Object.hasOwn(rows, t)) continue;
-    rows[t] = stripValues(r);
+    if (!t || seen.has(t)) continue;
+    seen.add(t);
     const d = typeof r.date === "string" && DAY_RE.test(r.date) ? r.date : null;
     if (d) dates[d] = (dates[d] || 0) + 1;
+    parsed.push({ t, r, d });
   }
   const rowDate = Object.entries(dates).sort((a, b) => b[1] - a[1])[0];
-  const missing = names.filter((t) => !Object.hasOwn(rows, t));
-  const shaped = Object.keys(rows).length;
   const prior = rowDate && typeof session === "string" && rowDate[0] < session;
+  const cut = !prior && typeof session === "string" ? session : null;
+  const close = base && base.close && typeof base.close === "object" ? base.close : {};
+  let checked = 0;
+  let agreed = 0;
+  for (let i = 0; base && i < parsed.length; i++) {
+    const e = parsed[i];
+    const vp = vnum(e.r.prev_close);
+    if (vp === null || !(vp > 0) || !Object.hasOwn(close, e.t) || (cut && e.d && e.d < cut)) continue;
+    checked++;
+    if (Math.abs(vp / close[e.t] - 1) <= FILL_AGREE.tol) agreed++;
+  }
+  const declined = checked >= FILL_AGREE.minChecked && agreed < FILL_AGREE.share * checked;
+  const rows = {};
+  const offDates = {};
+  const filled = [];
+  const from = {};
+  const held = new Set();
+  let wanted = null;
+  let offN = 0;
+  let newest = NaN;
+  let aheadN = 0;
+  let aheadMax = 0;
+  for (let i = 0; i < parsed.length; i++) {
+    const e = parsed[i];
+    if (cut && e.d && e.d < cut) {
+      offN++;
+      if (offN <= OFF_ROWS_KEPT) offDates[e.t] = e.d;
+      if (!wanted) wanted = new Set(names);
+      if (wanted.has(e.t)) {
+        rows[e.t] = new Array(STRIP_FIELDS.length).fill(null);
+        held.add(e.t);
+      }
+      continue;
+    }
+    const usable = base && !declined && Object.hasOwn(close, e.t) && vnum(e.r.prev_close) === null;
+    const values = stripValues(e.r, { at: atMs, fill: usable ? close[e.t] : null });
+    rows[e.t] = values;
+    if (usable) {
+      filled.push(e.t);
+      from[base.from[e.t]] = (from[base.from[e.t]] || 0) + 1;
+    }
+    if (values[QA_AT] !== null) {
+      const q = timeMs(e.r.quote_time);
+      if (!(q <= newest)) newest = q;
+    } else if (Number.isFinite(atMs)) {
+      const q = timeMs(e.r.quote_time);
+      if (q > atMs) {
+        aheadN++;
+        aheadMax = Math.max(aheadMax, Math.round((q - atMs) / 1000));
+      }
+    }
+  }
+  const missing = names.filter((t) => !Object.hasOwn(rows, t) || held.has(t));
+  const shaped = Object.keys(rows).length - held.size;
   return {
-    ...base, fresh: freshOf(null),
+    ...shape, fresh: freshOf(Number.isFinite(newest) ? Math.min(newest, atMs) : null),
     status: !shaped ? "unreadable" : prior ? "prior" : "ok",
     reason: !shaped ? SILENCE.unshaped : prior ? SILENCE.prior : null,
     rowDate: rowDate ? rowDate[0] : null,
     asked: names.length, returned: shaped, missing,
+    lag: lag ? lagSummary(Object.values(rows).map((v) => v[QA_AT])) : null,
+    ahead: { n: aheadN, maxS: aheadMax },
+    off: { n: offN, dates: offDates },
+    prevFill: base ? (declined ? { date: base.date, declined: "disagrees", agree: [agreed, checked] }
+      : { date: base.date, n: filled.length, from, agree: [agreed, checked], tickers: filled }) : null,
     rows,
   };
 }
 
 export const SERIES_SCALE = Object.freeze({ px: 0.01, net: 1000, gex: 10000, iv: 0.0001 });
+
+const LAG_COLS = Object.freeze(["p50", "p90", "max", "ahead"]);
+
+const lagValue = (strips, c) => (c === "ahead" ? (strips.ahead ? strips.ahead.n : null) : strips.lag ? strips.lag[c] : null);
 
 export function appendStripSeries(prev, strips, { at, session, writer, max = LIVE_BUDGET.seriesPoints,
   maxBytes = LIVE_KEYS["live:strips:series"].maxBytes } = {}) {
@@ -671,10 +813,13 @@ export function appendStripSeries(prev, strips, { at, session, writer, max = LIV
       px: "integer x 0.01 USD, relative to base[T] (the first read of the session)",
       net: "integer x 1000 USD, ncp - npp", gex: "integer x 10000 USD per 1% move (gamma, OI)",
       iv: "integer x 0.0001, iv30d fraction", t: "ISO-8601 UTC read instant of each column",
+      lag: "seconds, the median (p50), 90th percentile (p90) and largest (max) of read instant minus the rows' quote_time, per column; " +
+        "ahead: how many rows carried a quote_time later than the read by more than the skew allowance, per column",
     },
     reset: same ? null : (prev ? "session-boundary" : "cold"),
     t: same ? prev.t.slice() : [],
     base: same && prev.base ? { ...prev.base } : {},
+    lag: Object.fromEntries(LAG_COLS.map((c) => [c, same && prev.lag && Array.isArray(prev.lag[c]) ? prev.lag[c].slice() : []])),
     cols: {},
   };
   for (const c of ["px", "net", "gex", "iv"]) {
@@ -691,6 +836,13 @@ export function appendStripSeries(prev, strips, { at, session, writer, max = LIV
   else out.t.push(stamp);
   const width = out.t.length;
   const at_ = width - 1;
+  for (const c of LAG_COLS) {
+    const held = out.lag[c];
+    while (held.length < width) held.push(null);
+    held.length = width;
+    const value = lagValue(strips, c);
+    held[at_] = Number.isFinite(value) ? value : null;
+  }
   const names = new Set([...Object.keys(strips.rows), ...Object.keys(out.cols.px)]);
   for (const t of names) {
     const row = strips.rows[t] || null;
@@ -712,6 +864,7 @@ export function appendStripSeries(prev, strips, { at, session, writer, max = LIV
   }
   const dropOldest = (drop) => {
     out.t = out.t.slice(drop);
+    for (const c of LAG_COLS) out.lag[c] = out.lag[c].slice(drop);
     for (const c of Object.keys(out.cols)) {
       for (const t of Object.keys(out.cols[c])) out.cols[c][t] = out.cols[c][t].slice(drop);
     }
@@ -774,7 +927,8 @@ export function shapeMovers(strips, { at, session, writer, n = 8 } = {}) {
   const base = {
     v: 1, key: "live:movers", session,
     fresh: freshEnvelope({ readAt: at, source: "actions", cadenceS: LIVE_KEYS["live:movers"].cadenceS, session, writer }),
-    basis: "the names in live:strips (focus, board and watch), ranked by the session change; not the whole market",
+    basis: "the names in live:strips (focus, board and watch), ranked by the session change against the prior close " +
+      "(the vendor's, else the last dated nightly close); a name with neither is unranked; not the whole market",
     units: { chg: "ratio", px: "USD", rvol: "ratio", net: "USD, ncp - npp" },
   };
   if (!strips || strips.status !== "ok") {
@@ -790,7 +944,7 @@ export function shapeMovers(strips, { at, session, writer, n = 8 } = {}) {
   const byVol = rows.filter((r) => r.rvol !== null).sort((a, b) => b.rvol - a.rvol || (a.t < b.t ? -1 : 1));
   return {
     ...base, status: rows.length ? "ok" : "quiet", reason: rows.length ? null : SILENCE.empty,
-    ranked: byChg.length,
+    ranked: byChg.length, unranked: rows.length - byChg.length,
     up: byChg.filter((r) => r.chg > 0).slice(0, n),
     down: byChg.filter((r) => r.chg < 0).reverse().slice(0, n),
     active: byVol.slice(0, n),
@@ -905,9 +1059,10 @@ export function mergeGex(prev, reads, { at, session, writer, rotation, keepMs = 
       if (!held || !held.last || !Number.isFinite(timeMs(held.readAt))) continue;
       if (now - timeMs(held.readAt) > keepMs) continue;
       names[t] = { readAt: held.readAt, status: held.status, reason: SILENCE.rotated, last: held.last,
-        flowFilled: held.flowFilled ?? null };
+        flowFilled: held.flowFilled ?? null, lagS: held.lagS ?? null };
     }
   }
+  let newest = NaN;
   for (const [t, s] of Object.entries(reads || {})) {
     const readAt = new Date(now).toISOString();
     if (s.status !== "ok") {
@@ -915,16 +1070,20 @@ export function mergeGex(prev, reads, { at, session, writer, rotation, keepMs = 
         : { readAt, status: s.status, reason: s.reason, last: null };
       continue;
     }
-    names[t] = { readAt, status: "ok", reason: null, flowFilled: s.flowFilled, last: s.last,
+    const stamped = timeMs(s.last && s.last.at);
+    if (Number.isFinite(stamped) && !(stamped <= newest)) newest = stamped;
+    names[t] = { readAt, status: "ok", reason: null, flowFilled: s.flowFilled, last: s.last, lagS: lagSeconds(now, s.last && s.last.at),
       t: s.t, px: s.px, gOi: s.gOi, gVol: s.gVol, gDir: s.gDir };
   }
   const out = {
     v: 1, key: "live:gex", session,
-    fresh: freshEnvelope({ readAt: now, source: "actions", cadenceS: LIVE_KEYS["live:gex"].cadenceS, session, writer }),
+    fresh: freshEnvelope({ readAt: now, vendorAt: Number.isFinite(newest) ? Math.min(newest, now) : null, source: "actions",
+      cadenceS: LIVE_KEYS["live:gex"].cadenceS, session, writer }),
     units: {
       gOi: "USD of dealer gamma per 1% move, open-interest book (put legs arrive negative; net = call + put)",
       gVol: "USD per 1% move, today's volume book", gDir: "USD per 1% move, directionalised book",
       px: "USD", t: "ISO-8601 UTC, 5-minute buckets inside the regular session",
+      lagS: "seconds, this name's read instant minus the vendor's newest row for it; a carried name keeps the lag of its own read",
     },
     rotation: rotation || null,
     reset: same ? null : (prev ? "session-boundary" : "cold"),
@@ -1053,13 +1212,15 @@ export function shapeTapePrem(raws, { at, session, now = null, alertsCap = LIVE_
     alerts = { status, reason: status === "ok" ? null : (!inSession.length ? SILENCE.otherSession : SILENCE.unshaped),
       rows: built.rows, seen: built.seen, shed: built.shed, outside, coverage: built.coverage };
   }
-  const readAt = new Date(typeof at === "number" ? at : timeMs(at)).toISOString();
-  return { prem: { ...prem, readAt }, alerts: { ...alerts, readAt } };
+  const atMs = typeof at === "number" ? at : timeMs(at);
+  const readAt = new Date(atMs).toISOString();
+  return { prem: { ...prem, readAt, lagS: lagSeconds(atMs, prem.lastAt) }, alerts: { ...alerts, readAt } };
 }
 
 export function shapeTapeGex(raws, { at, session, now = null } = {}) {
   const gex = shapeGexSeries((raws || {}).spot, { session, now: Number.isFinite(now) ? now : null });
-  return { gex: { ...gex, readAt: new Date(typeof at === "number" ? at : timeMs(at)).toISOString() } };
+  const atMs = typeof at === "number" ? at : timeMs(at);
+  return { gex: { ...gex, readAt: new Date(atMs).toISOString(), lagS: lagSeconds(atMs, gex.lastAt) } };
 }
 
 export function nextTapeLeg(held) {
@@ -1136,6 +1297,21 @@ export function liveAlertsWin(nightlySession, liveSession) {
   if (typeof liveSession !== "string" || !DAY_RE.test(liveSession)) return false;
   if (typeof nightlySession !== "string" || !DAY_RE.test(nightlySession)) return true;
   return liveSession > nightlySession;
+}
+
+export function liveNewsWins(nightly, liveSession, liveReadAt) {
+  if (typeof liveSession !== "string" || !DAY_RE.test(liveSession) || !Number.isFinite(liveReadAt)) return false;
+  const day = nightly && typeof nightly.session === "string" && DAY_RE.test(nightly.session) ? nightly.session : null;
+  if (!day || liveSession !== day) return !day || liveSession > day;
+  const read = timeMs(nightly.readAt);
+  return !Number.isFinite(read) || liveReadAt > read;
+}
+
+export function newsWithLive(news, { session, readAt, cadenceS }) {
+  if (!news || typeof news !== "object" || news.status !== "ok" || !Array.isArray(news.rows) || !news.rows.length) return null;
+  const at = new Date(readAt).toISOString();
+  return { ...news, sessionDate: session, generatedAt: at, readAt: at, readDay: easternDay(readAt), refreshed: "intraday",
+    cadenceMinutes: cadenceS / 60, live: { key: "live:news", session } };
 }
 
 export function liveFeedsForBrief({ pulse = null, market = null, alerts = null, alertsSession = null,

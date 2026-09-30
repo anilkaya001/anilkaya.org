@@ -18,6 +18,17 @@ export function focusRow(row) {
   return out;
 }
 
+const FIELD_DP = Object.freeze({ px: 4, prev: 4, chg: 6 });
+
+const rounded = (v, dp) => Math.round(v * 10 ** dp) / 10 ** dp;
+
+export function sessionClose(row, closes) {
+  const tail = Array.isArray(closes) ? closes.slice(-2) : [];
+  const [prev, px] = tail.length === 2 ? tail : [null, null];
+  if (!(typeof px === "number" && px > 0 && typeof prev === "number" && prev > 0)) return row;
+  return { ...row, px: rounded(px, FIELD_DP.px), prev: rounded(prev, FIELD_DP.prev), chg: rounded(px / prev - 1, FIELD_DP.chg) };
+}
+
 export function buildFocusPayload({
   ndx = null, rows = null, read = null, closesOf = () => null, sessionDate = null, generatedAt = null,
   readAt = null, fresh = null, budgetBytes = FOCUS_BUDGET_BYTES, backfill = null, backfillFrom = "harvest",
@@ -42,15 +53,19 @@ export function buildFocusPayload({
   const closes = {};
   const missing = [];
   const filled = [];
+  const onRead = [];
   for (const t of asked) {
     const row = primary.get(t) || spare.get(t);
     if (!row) { missing.push(t); continue; }
     if (!primary.has(t)) filled.push(t);
-    out[t] = focusRow(row);
     const c = closesOf(t);
     if (Array.isArray(c) && c.length) closes[t] = c;
+    const shaped = focusRow(row);
+    out[t] = closes[t] ? sessionClose(shaped, closes[t]) : shaped;
+    if (out[t] === shaped) onRead.push(t);
   }
-  const payload = { ...base, status: Object.keys(out).length ? "ok" : "unavailable", rows: out, closes, missing };
+  const payload = { ...base, status: Object.keys(out).length ? "ok" : "unavailable", rows: out, closes, missing,
+    basis: { px: "session-close, with prev and chg from the two closes at the end of closes", read: onRead } };
   if (filled.length) {
     payload.backfill = { from: backfillFrom, readAt: backfillReadAt, tickers: filled,
       why: read && read.ok === false ? (read.gated ? "plan_gated" : "unreadable") : "not_returned" };
