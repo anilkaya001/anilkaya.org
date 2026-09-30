@@ -159,6 +159,9 @@ header readback with this repository after any dashboard rule change.
 | `shared/flows-basis.js`, `tests/flows-basis-contract.mjs` | The premium desk's basis: the vendor's `{data:{...}}` stock-state envelope, a spot that is only a regular-session price (`printOf`: the live print in the regular session, else the newest regular close), and the coherence gate between that spot and the chain (`coherence`: impossible asks, the strike bracket the `maybe_otm_only` request guarantees, one underlying fitted to the nearest expiries, a rebase past 0.25% or a refusal when the fit is too thin). The contract runs the Worker route in Node against a stubbed vendor. The desk's `asOf` is the New York date of the READ and `days` count from it; `UW_NOW` (an ISO instant, honoured only while `UW_BASE` redirects the vendor away from production) pins that read clock so the workerd suites' dated fixtures stay valid. |
 | `shared/flows-focus.js` | The home page's focus roster (Gold, Silver and Copper groups, the Mag 7, the metal funds and miners) and the NASDAQ-10 derivation from QQQ holdings. A leaf module: it imports nothing, so the Worker, the pipeline and the live leg can all read it without a cycle. |
 | `scripts/flows-legs/focus.mjs`, `health.mjs` | The nightly `focus` and `roster` payload builders; the nightly health gate and its repair messages. |
+| `shared/flows-neuron-screen.js`, `tests/flows-neuron-screen.mjs` | `screenReading`: a Neuron reading from a universe row alone, for a name with no card. A leaf that imports the consolidated state table (`STATE_LINES`, `structuresForState` in `flows-neuron.js`), `BUCKET_LINES` and `sessionsBetween`, and is imported by no module that imports it back. Facts are graded 0 or 1 and each prints its unit; a null input is withheld under its own key with its reason; dealer delta and vanna are the vendor's numbers with no direction claimed, charm a sign only at grade 0. The test compares 27 synthetic states with `regimeState` and runs every emitted sentence through the ask guard. |
+| `shared/flows-neuron-coverage.js` | The nightly's Neuron coverage ledger `{universe, priced, standAside, family, screen, unpriceable, expired, stale, missing}` (published in `meta.neuron`, checked by `neuronChecks` in `health.mjs`), built from each card's tier as the Worker would name it and the screen reading of every universe name that has no card. |
+| `shared/flows-cross.js` | The `universe` payload's column store (`UNIVERSE_COLUMNS`, one integer column per key, decoded by `units`) and its 100 KiB budget, shed by column priority when over. The nightly's dealer columns are dollars per 1% move over average daily dollar volume (`gexAdv`, `dex`, `vanna`, `charm`) and keep the vendor's sign; `im5` and `im30` are the vendor's implied-move fractions. On 670 synthetic names the payload is 96,158 bytes without them, 108,249 with them unbudgeted, and 100,505 after the shedder drops `adx`, `dGamma` and `gexRatio`; the run's `shed` list is the measurement that counts. |
 | `assets/js/flows-fresh.js` | The client freshness helper (`FlowsUI.freshFrom`, `heartbeat`); every key a heartbeat reads registers its server verdict with the pill, which is the worst case over its sources (`FlowsUI.freshAggregate`, in `flows-ui.js`), so a page needs no line per region. |
 | `tests/flows-live-contract.mjs` | Live-layer builders, phases and states, byte ceilings, the one-writer scans, the `--live` dry run and the client helper. |
 | `tests/flows-starts-contract.mjs` | The starts and the witness: the live workflow's grants and drill input, the nightly dispatch, the witness's lines, debounce, dedupe, three-tick recovery and reopen, the kept-alive loop through the night, the weekend and the hop, the cron starters through the concurrency group, a whole weekday's request cost, and the vendor client's deadline. |
@@ -318,6 +321,40 @@ Sign-out is `POST /auth/logout`, not a link or GET. It is same-origin protected,
 requires the verified owner's `X-IEWT-Owner` when a valid session exists, clears
 the session cookie only after those checks, and returns JSON. Do not restore a
 GET logout route; that would reintroduce forced-logout CSRF.
+
+## Flows Neuron reading
+
+`GET /api/flows/summary?t=<ticker>` (behind the Flows session) answers for every
+ticker, and the answer says which kind of reading it is. Old clients read
+`status`, `summary`, `ideas` and `context`; these fields are added and none is
+removed:
+
+- `tier`: `priced` (the engine ranked ideas), `stand-aside` (the engine ran and
+  no structure cleared; `code` is its `noTrade` code), `family` (a card with no
+  engine block: the implied state and its structure family, unpriced),
+  `screen` (no card, read from the universe row alone, no model and no vendor
+  call), `unpriceable` (a board or focus card with no engine block, `code`
+  `chain.absent` or `engine.absent`; or a universe row with no usable input,
+  `screen.no-inputs`), `expired` (the card or row is two or more sessions
+  behind the last close: the facts, no idea, no model, no spend) and `none` (not
+  in the universe, `status: "absent"`). `tier` is `null` only while a name's
+  card is pending, unreadable, or the store cannot be read.
+- `code` and `why`: the machine code and the plain sentence for the tier. For
+  `screen` a `code` is set only when the idea is No position (`event.window`,
+  `premium.conflict`, `table.no-side`, `state.undetermined`).
+- `screen` (screen and expired-row tiers only): the whole reading. Its `facts`
+  each carry `label`, `display` (value and unit), `grade` (0 or 1) and `note`
+  (the sign convention or the limit); `withheld` lists the inputs that were
+  null or not in tonight's universe payload, each with its reason; `idea` is a
+  family lean or No position; `limits` says what was not read.
+- `verdictWord` is the tag beside the headline for the screen tiers.
+
+The screen reading is computed at read time from the universe row (one batch
+for the roster promise and the row, about `n + 40` rows read), kept in the Cache
+API for five minutes, and never calls a model. A card one session behind the
+last close keeps its tier with grades capped at 1; two or more behind, it is `expired`.
+A family-tier card whose state is read but too weak for an idea abstains in
+words (`abstentionIdea`) instead of leaving the reader nothing.
 
 ## Worker invariants
 
@@ -527,6 +564,7 @@ flows-verdict-contract
 flows-readers-contract   flows-readers-render
 markets-contract         flows-desk-client
 flows-basis-contract     flows-desk-wiring
+flows-neuron-screen
 ```
 
 `market-ticker-render` needs Playwright's Chromium but no server: it serves the
@@ -540,6 +578,14 @@ fixtures built to the chain payload contract rather than against workerd. Its No
 `assets/js/flows-desk.js` in a `vm` with no `document`, which is the only context that exposes
 the desk's pure functions as `__FlowsDeskTest`. `flows-desk-wiring` is the same shape (Chromium, `page.route`,
 no server); measured on 2026-09-30 at about 12 s, against 31 s for `flows-desk-client`.
+
+`flows-neuron-screen` was measured on 2026-09-30: 0.3 s with no server and 18,474 assertions. It runs
+`screenReading` alone: the sign and size of book gamma worked by hand against the implied daily move, each
+threshold from both sides, every input null or unpublished, 27 synthetic states compared with `regimeState`,
+the vendor's own NVDA row through `buildUniverse` and the reading, and every sentence of 147 readings through
+the ask guard with modals on. `flows-reads-contract` shifts the clock (`shiftClock`) to 2026-09-25 13:00 UTC for
+the blocks that read a card dated 2026-09-24, because a card two sessions behind the real date is now tier
+`expired`; a new fixture with a fixed session needs the same.
 
 `flows-starts-contract` was measured on 2026-09-29: about 4 s with no server. It
 spawns the pipeline a handful of times as a child process, against loopback HTTP
