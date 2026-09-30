@@ -246,40 +246,36 @@
     render();
   }
 
-  const ET_HOUR = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", hourCycle: "h23" });
-
   function quoteMs(p) {
     const tape = p.tapeTime ? Date.parse(String(p.tapeTime).replace(" ", "T")) : NaN;
     if (Number.isFinite(tape)) return tape;
-    const read = Date.parse(p.generatedAt);
-    const day = String(p.sessionDate || p.asOf || "");
-    const guess = /^\d{4}-\d{2}-\d{2}$/.test(day) ? Date.parse(day + "T20:00:00Z") : NaN;
-    if (!Number.isFinite(guess)) return read || Date.now();
-    const close = guess + (16 - Number(ET_HOUR.format(guess))) * 3600000;
+    const read = Date.parse(p.generatedAt), day = String(p.sessionDate || p.asOf || "");
+    const close = /^\d{4}-\d{2}-\d{2}$/.test(day) ? Q.closeUtcMs(day) : null;
+    if (!Number.isFinite(close)) return read || Date.now();
     return Number.isFinite(read) ? Math.min(close, read) : close;
   }
 
-  const shareIntrinsic = (r, S) => { const k = isNum(r.strike); return S === null || k === null ? 0 : Math.max(0, r.strategy === "csp" ? k - S : r.strategy === "cc" ? S - k : 0); };
-
   function price(sym, p) {
     const eng = p.engine && p.engine.status === "ok" ? p.engine : null;
-    const asOfMs = quoteMs(p);
-    const spot = spotOf(p);
-    const laws = new Map();
+    const rate = eng && eng.rate ? eng.rate : null;
+    const spot = spotOf(p), laws = new Map();
+    const asOfMs = Q ? quoteMs(p) : null;
     for (const r of p.rows || []) {
-      r.__eng = null;
+      r.__eng = r.__fit = r.__code = null;
       if (!Q) { r.__why = T("why-q"); continue; }
       const type = r.type === "P" ? "P" : "C";
-      const row = { K: r.strike, type, bid: isNum(r.bid), ask: isNum(r.ask), oi: isNum(r.oi), volume: isNum(r.volume), sym: r.symbol, ivSeed: isNum(r.iv) };
+      const row = { K: r.strike, type, bid: isNum(r.bid), ask: isNum(r.ask), oi: isNum(r.oi), volume: isNum(r.volume), sym: r.symbol, ivSeed: isNum(r.iv), opposite: r.opposite };
+      const input = { expiry: r.expiry, asOfMs, spot, rate: rate ? rate.r : null, rateMethod: rate ? rate.method : null, facts: eng ? eng.facts : [], expiries: eng ? eng.expiries : null, row };
       try {
-        const fit = Q.contractFit({ expiry: r.expiry, asOfMs, spot, rate: eng && eng.rate ? eng.rate.r : null, row });
-        if (!fit) { r.__why = T(shareIntrinsic(r, isNum(spot)) > (isNum(r.mid) === null ? Infinity : r.mid) ? "why-int" : "why-fit"); continue; }
-        const setup = Q.labSetup({ asOfMs, spot, facts: eng ? eng.facts : [], state: eng ? eng.state : null, pLaw: eng ? eng.pLaw : null, event: eng ? eng.event : null, stale: eng ? eng.stale : false, books: [{ fit, rows: [row] }], lawCache: laws });
+        const fit = Q.contractFit(input);
+        if (!fit) { const d = Q.contractDiagnosis(input); r.__why = d.text || T("why-fit"); r.__code = d.code; continue; }
+        r.__fit = fit.slice;
+        const setup = Q.labSetup({ asOfMs, spot, facts: eng ? eng.facts : [], state: eng ? eng.state : null, pLaw: eng ? eng.pLaw : null, event: eng ? eng.event : null, stale: eng ? eng.stale : false, crossesEarnings: r.crossesEarnings, books: [{ fit, rows: [row] }], lawCache: laws });
         const legs = r.strategy === "cc" ? [{ type: "S", side: 1, qty: 1 }, { type: "C", K: r.strike, side: -1, qty: 1 }] : [{ type: "P", K: r.strike, side: -1, qty: 1 }];
         r.__eng = Q.priceStructure(setup, { family: r.strategy === "cc" ? "covered-call" : "short-put", expiry: r.expiry, legs, basis: "natural" });
         if (!r.__eng) r.__why = T("why-eng");
       } catch { r.__eng = null; r.__why = T("why-eng"); }
-      r.__law = eng && eng.pLaw ? null : eng ? "this name's card publishes no real-world law" : "no card is published for " + sym + ", so there is no real-world law";
+      r.__law = eng && eng.pLaw ? null : eng ? T("law-none") : T("law-card", { sym });
     }
   }
 
@@ -418,7 +414,7 @@
   function reasonWord(r) {
     return { spread: "too wide", openInterest: "too thin", premium: "paying too little", expiry: "outside the tenor window", strategy: "on the other side", unpriceable: "with no quotable bid", offMarket: "with an ask below intrinsic value", nonStandard: "on a non-standard contract" }[r] || r;
   }
-  const intrinsicOf = (r) => shareIntrinsic(r, isNum(r.__spot)) * LOT;
+  const isItm = (r) => { const m = isNum(r.moneyness); return m !== null && (r.strategy === "csp" ? m > 0 : m < 0); };
 
   function basisLines(syms, mismatchOnly) {
     const out = [];
@@ -457,7 +453,7 @@
     } else {
       const z = best.__sizing;
       const sideWord = best.strategy === "cc" ? "buy-write covered call" : "cash-secured put";
-      sentence = T("plan", { bp: fmtMoney(buyingPower), a: affordable, m: rows.length, n: z.contracts, t: best.ticker || "?", k: fmt2(best.strike), w: sideWord, e: best.expiry || "?", c: fmtMoney(z.collectible), d: fmtMoney(z.deployed), i: fmtMoney(z.idle), y: fmtPct(z.yieldOnDeployed, 2), itm: intrinsicOf(best) > 0 ? " " + T("plan-itm") : "", by: rankWord(rank) });
+      sentence = T("plan", { bp: fmtMoney(buyingPower), a: affordable, m: rows.length, n: z.contracts, t: best.ticker || "?", k: fmt2(best.strike), w: sideWord, e: best.expiry || "?", c: fmtMoney(z.collectible), d: fmtMoney(z.deployed), i: fmtMoney(z.idle), y: fmtPct(z.yieldOnDeployed, 2), itm: isItm(best) ? " " + T("plan-itm") : "", by: rankWord(rank) });
       plan.className = "dk-plan";
       plan.replaceChildren(
         h("div", { class: "dk-plan-h" }, h("span", null, "Best deployment"), UI.infoButton("the best deployment", () => ({ title: "Best deployment", lead: sentence }), { small: true })),
@@ -513,9 +509,8 @@
     const collect = buyingPower === null ? null : !z ? cell("dk-col", "Collect", DASH, null, T("col-none"))
       : !z.affordable ? cell("dk-col is-unaffordable", "Collect", "$0", "silent", T("col-no", { c: fmtMoney(r.collateral), b: fmtMoney(buyingPower) }))
         : cell("dk-col", "Collect", fmtMoney(z.collectible) + " (" + z.contracts + "×)", "up", T("col-ok", { n: z.contracts, s: z.contracts === 1 ? "" : "s", p: fmtMoney(r.premium), d: fmtMoney(z.deployed), b: fmtMoney(buyingPower), i: fmtMoney(z.idle), y: fmtPct(z.yieldOnDeployed, 2) }) + (r.strategy === "cc" ? " " + T("cc-size") : ""));
-    const itm = intrinsicOf(r) > 0;
     return h("div", {
-      class: "dk-row" + (itm ? " is-itm" : ""), role: "listitem", "data-t": r.ticker, "data-strike": String(r.strike), "data-strategy": r.strategy, "data-expiry": r.expiry,
+      class: "dk-row" + (isItm(r) ? " is-itm" : ""), role: "listitem", "data-why": e ? (pp === null ? e.world.why : null) : r.__code || "engine", "data-t": r.ticker, "data-strike": String(r.strike), "data-strategy": r.strategy, "data-expiry": r.expiry,
       "data-earn": earn, "data-stale-iv": r.ivTraded === false ? "" : null, "data-away": away, "data-collateral": "on " + fmtMoney(r.collateral), "data-days": String(r.days), "data-i": String(i),
       onpointerenter: () => focusPoint(r), onpointerleave: () => focusPoint(null),
     },
@@ -536,40 +531,48 @@
     UI.infoButton(r.ticker + " " + kf(r.strike) + " " + (r.strategy === "cc" ? "call" : "put"), () => rowInfo(r), { small: true }));
   }
 
-  const lawNote = (r) => (r.__law ? "No real-world figure: " + r.__law + "." : null);
+  const lawNote = (r) => {
+    const why = r.__eng && r.__eng.world.why === "world.event-missing" ? Q.codeText("world.event-missing") : r.__law ? r.__law + "." : null;
+    return why ? T("nrf", { why }) : null;
+  };
+
+  const rateHow = (m) => { const k = String(m || "fallback"), i = k.indexOf(":"); return T("rm-" + (i < 0 ? k : k.slice(0, i)), { x: k.slice(i + 1) }) || k; };
+  const whyText = (c) => T("c-" + c) || Q.codeText(c) || c;
 
   function rowInfo(r) {
-    const e = r.__eng, leg = shortLeg(r);
+    const e = r.__eng, leg = shortLeg(r), fit = r.__fit;
     const m = isNum(r.moneyness), S = isNum(r.__spot);
     const otm = m === null ? null : r.strategy === "csp" ? m < 0 : m > 0;
     const cc = r.strategy === "cc", cap = isNum(r.capSigmas);
     const oi = isNum(r.oi), ch = isNum(r.oiChange);
-    const intr = intrinsicOf(r), prem = isNum(r.premium) || 0;
+    const sh = leg && isNum(leg.intrinsic) !== null ? leg : { intrinsic: isNum(r.intrinsic) || 0, timeValue: (isNum(r.bid) || 0) - (isNum(r.intrinsic) || 0) };
     const wk = isNum(r.annualized) === null ? null : r.annualized * 7 / 365;
-    const legIv = leg ? isNum(leg.iv) : null, rowIv = isNum(r.iv);
+    const legIv = leg ? isNum(leg.iv) : null, cIv = isNum(r.ivMid === undefined ? r.iv : r.ivMid);
     return {
       title: r.ticker + " " + kf(r.strike) + " " + (cc ? "covered call" : "cash-secured put"), asOf: F.day(r.expiry) + " · " + r.days + "d",
       lead: T("engine"),
       facts: [
         ["Premium", fmtMoney(r.premium) + " at the " + fmt2(r.bid) + " bid"],
-        ["Yield", fmtPct(r.yieldOnCollateral, 2) + " on " + fmtMoney(r.collateral) + (cc ? " of stock bought with the option (100 shares, a buy-write)" : " of cash reserved (cash-secured)")],
+        ["Yield", fmtPct(r.yieldOnCollateral, 2) + " on " + fmtMoney(r.collateral) + " " + T(cc ? "y-cc" : "y-csp")],
         ["Annualised", fmtPct(r.annualized, 0) + " on time value — a convention"],
-        ["Gross annualised", isNum(r.annualizedGross) === null ? null : fmtPct(r.annualizedGross, 0) + " on the whole premium, intrinsic value included"],
-        ["Per week", wk === null ? null : fmtPct(wk, 2) + " of time value, scaled to seven days"],
+        ["Gross annualised", isNum(r.annualizedGross) === null ? null : fmtPct(r.annualizedGross, 0) + " " + T("f-gross")],
+        ["Per week", wk === null ? null : fmtPct(wk, 2) + " " + T("f-week")],
         ["Distance", m === null ? DASH : Math.abs(m) < 5e-5 ? "at the money" : fmtPct(Math.abs(m), 1) + " " + (m < 0 ? "below" : "above") + " spot" + (S === null ? "" : " of " + fmt2(S)) + ", " + (otm ? "out of" : "in") + " the money"],
-        ["Cushion", fmtSd(r.cushionSigmas) + (rowIv === null ? "" : " on " + fmtPct(rowIv, 1) + " volatility") + (r.ivTraded === false ? " · " + T("iv-old") : "")],
-        ["Volatility", legIv === null ? null : fmtPct(legIv, 1) + " inverted from the mid, for delta, win % and EV" + (rowIv !== null && Math.abs(rowIv - legIv) > 0.005 ? " · " + fmtPct(rowIv, 1) + " on the row, for the cushion" : "")],
+        ["Cushion", fmtSd(r.cushionSigmas) + (cIv === null ? "" : " on " + fmtPct(cIv, 1) + " volatility") + (r.ivMid === undefined && r.ivTraded === false ? " · " + T("iv-old") : "")],
+        ["Volatility", legIv === null ? null : fmtPct(legIv, 1) + " " + T("f-vol") + (cIv !== null && Math.abs(cIv - legIv) > 0.005 ? " · " + fmtPct(cIv, 1) + " " + T("f-vol-c") : "")],
+        ["Smile", fit ? T(fit.origin === "card-shape" ? "fit-shape" : "fit-flat", { from: fit.shapeFrom }) + (fit.contract && fit.contract.via === "opposite" ? " " + T("fit-via", { side: r.type === "P" ? "call" : "put" }) : "") : null],
+        ["Carry", e ? T("carry", { r: fmtPct(e.carry.r, 2), how: rateHow(e.carry.rateMethod), q: fmtPct(e.carry.q, 2) }) + (cc && e.carry.dividend > 0 ? " " + T("carry-div", { d: "$" + fmt2(e.carry.dividend) }) : "") : null],
         ["Breakeven", fmt2(r.breakeven)],
-        ["If called", cc ? fmtPct(r.assignedReturn, 1) + (cap === null ? "" : cap < 0 ? " · already through the strike" : " · the market has to run " + fmtSd(cap) + " to get there") : DASH + " · " + T("no-cap")],
+        ["If called", cc ? fmtPct(r.assignedReturn, 1) + (m !== null && m < 0 ? " · already through the strike" : cap === null ? "" : " · the market has to run " + fmtSd(cap) + " to get there") : DASH + " · " + T("no-cap")],
         ["Spread", fmtPct(r.spread, 1) + " of the mid"],
         ["Open interest", oi === null ? DASH : fmtInt(oi) + (ch ? " (" + sg(ch) + fmtInt(Math.abs(ch)) + ")" : "")],
         ["Earnings", r.crossesEarnings === true ? "Expires after the next report" : r.crossesEarnings === null ? "Not determined" : "No report before expiry"],
         ["Chance of profit", e ? fmtPct(e.prob.popQ, 1) + " implied · " + (e.prob.popP === null ? DASH : fmtPct(e.prob.popP, 1)) + " real world" : DASH],
         ["Expected value", e ? usd(e.ev.q) + " implied · " + (e.ev.p === null ? DASH : usd(e.ev.p)) + " real world, per contract at the bid" : DASH],
         ["Delta", e ? fmt2(shortDelta(r)) + " on the short option · " + fmt2(netOf(r)) + " net exposure to the stock" : DASH],
-        ["Grade", e ? e.grade + " of 3" + (e.gradeWhy.length ? " · " + e.gradeWhy.join(", ") : "") : DASH],
+        ["Grade", e ? e.grade + " of 3" + (e.gradeWhy.length ? " · " + e.gradeWhy.map(whyText).join(" ") : "") : DASH],
       ],
-      notes: [intr > 0 ? T(prem + 1 < intr ? "int-below" : "int-in", { i: fmtMoney(intr), t: fmtMoney(Math.max(0, prem - intr)) }) : null,
+      notes: [sh.intrinsic > 0 ? (sh.timeValue >= 0 ? T("int-in", { i: fmtMoney(sh.intrinsic * LOT), t: fmtMoney(sh.timeValue * LOT) }) : T("int-below")) : null,
         e ? null : r.__why || null, e && e.prob.popP === null ? lawNote(r) : null, T("annualized"), T("cushion")],
     };
   }
@@ -586,7 +589,7 @@
     if (!rows.length) { host.append(UI.silent(inflight && !mods.empty ? { state: "pending", reason: "Pricing the desk…" } : { state: "quiet", reason: mods.empty || T(view.rows.length ? "e-win" : book.size ? "e-sel" : "e-add") }, "Frontier", book.size ? H : 180)); return; }
     const xOf = axis === 0 ? netOf : popQ;
     const pts = rows.map((r) => ({ r, x: xOf(r), y: isNum(r.annualized) })).filter((p) => p.x !== null && p.y !== null);
-    if (!pts.length) { host.append(UI.silent({ state: "withheld", reason: "No line carries both a risk reading and a yield." }, "Frontier", H)); return; }
+    if (!pts.length) { host.append(UI.silent({ state: "withheld", reason: T("fr-none") }, "Frontier", H)); return; }
     const ys = pts.map((p) => p.y).sort((a, b) => a - b);
     const p95 = ys[Math.min(ys.length - 1, Math.floor(ys.length * 0.95))];
     const cap = Math.max(0.05, Math.min(ys[ys.length - 1], p95 * 8) * 1.04);
@@ -596,7 +599,7 @@
     const y = (v) => yl(Math.sqrt(Math.max(0, v)));
     const box = h("div", { class: "tl-scrub" });
     host.append(box);
-    const svg = C.svgRoot(box, w, H, animate && !mods.quick, "Annualised yield, square-root scale, against " + (axis === 0 ? "net delta" : "the implied chance of profit") + " for " + pts.length + " lines");
+    const svg = C.svgRoot(box, w, H, animate && !mods.quick, T("fr-aria", { x: axis === 0 ? "net delta" : "the implied chance of profit", n: pts.length }));
     s("line", { x1: left, x2: w - right, y1: H - bottom, y2: H - bottom, class: "base" }, svg);
     let lastY = Infinity;
     for (const t of [0, 0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32]) {
@@ -636,7 +639,7 @@
     box.tabIndex = 0;
     box.setAttribute("role", "group");
     box.setAttribute("aria-roledescription", "chart");
-    box.setAttribute("aria-label", "Frontier. Use the arrow keys to step along the frontier.");
+    box.setAttribute("aria-label", T("fr-key"));
     const show = (p, speak) => {
       if (!p) { readout.classList.remove("is-on"); return; }
       const r = p.r;
@@ -805,16 +808,15 @@
 
   function surfaceAria(sf, p) {
     const levels = sf.expiries.map((e) => F.day(e.expiry) + " " + (isNum(e.atmIv) === null ? "no level" : fmtVol(e.atmIv) + " percent"));
-    return "Implied volatility surface for " + (p && p.ticker ? p.ticker : surfaceSymbol) + ": " + sf.expiriesShown + " expiries by " + sf.rowsShown +
-      " moneyness bands. At-the-money implied volatility by expiry — " + levels.join(", ") + ". Shade is each contract's implied volatility against its own expiry's at-the-money quote. Every volatility here is the vendor's last-transaction figure.";
+    return T("sm-aria", { t: p && p.ticker ? p.ticker : surfaceSymbol, e: sf.expiriesShown, r: sf.rowsShown, l: levels.join(", ") });
   }
 
   function surfaceNotes(sf, p) {
     const bits = [];
-    bits.push("Rows are log-moneyness, ln(strike ÷ spot), in bands " + (sf.step * 100).toFixed(1) + "% wide; columns are expiries, nearest first.");
+    bits.push(T("sm-rows", { w: (sf.step * 100).toFixed(1) }));
     bits.push((smileNumbers ? T("sm-num") : T("sm-narrow")) + " " +
       T("sm-shade"));
-    bits.push("At the money, on the vendor's last-transaction volatility: " + sf.expiries.map((e) => F.day(e.expiry) + " " + (isNum(e.atmIv) === null ? DASH : fmtVol(e.atmIv) + "%")).join(", ") + ".");
+    bits.push(T("sm-atm", { l: sf.expiries.map((e) => F.day(e.expiry) + " " + (isNum(e.atmIv) === null ? DASH : fmtVol(e.atmIv) + "%")).join(", ") }));
     const noLevel = sf.expiries.filter((e) => isNum(e.atmIv) === null);
     if (noLevel.length) bits.push(noLevel.map((e) => F.day(e.expiry) + " has no level — " + e.atmReason).join("; ") + ". " + T("sm-nolevel"));
     const aged = [];
@@ -829,7 +831,7 @@
     if (sf.rowsShown < sf.rowsTotal) win.push(sf.rowsShown + " of " + sf.rowsTotal + " moneyness bands");
     if (win.length) bits.push("Showing " + win.join(" and ") + ".");
     bits.push(T("sm-built") + (p && p.truncated ? " " + T("sm-cut") : ""));
-    if (sf.ivBasis) bits.push("Volatility units resolved once for the whole chain: " + sf.ivBasis + ".");
+    if (sf.ivBasis) bits.push(T("sm-units", { b: sf.ivBasis }));
     bits.push(T("sm-quoted"));
     return bits;
   }
@@ -919,7 +921,7 @@
   entry.addEventListener("submit", (ev) => {
     ev.preventDefault();
     const wanted = normalise(String(input.value || "").split(/[,\s]+/));
-    if (!wanted.length) { say("That is not a symbol this desk can price."); return; }
+    if (!wanted.length) { say(T("sym-bad")); return; }
     const need = wanted.filter((w) => !book.has(w));
     const added = add(wanted);
     input.value = "";
@@ -996,7 +998,7 @@
     const sel = mods.rankSel;
     if (sel.value === "collectible" && buyingPower === null) {
       sel.value = rank;
-      say("Enter a buying power to rank by premium collectible.");
+      say(T("rank-bp"));
       mods.bp.focus();
       mods.bp.select();
       return;

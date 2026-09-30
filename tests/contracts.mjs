@@ -871,8 +871,9 @@ assert(read("wrangler.toml").includes('run_worker_first = ["/*", "!/assets/*"]')
 assert(read("wrangler.toml").includes('html_handling = "auto-trailing-slash"'), "HTML handling must be explicit");
 {
   const ANCHORED = Object.freeze({
-    "flows-desk-contract.mjs": { reason: "desk quotes are timed by the fixture's own asOf (quoteMs), never by the wall clock",
-      dates: ["2026-10-16", "2026-11-05"] },
+    "flows-desk-contract.mjs": { reason: "desk quotes are timed by the fixture's own asOf (quoteMs), never by the wall clock, and the " +
+      "expiries a stored card lists are copied through to the page as labels and never compared with today",
+      dates: ["2026-10-16", "2026-11-05", "2026-11-20", "2026-12-18"] },
     "flows-market-contract.mjs": { reason: "OI-change rows are published fixture fields the page prints, dated against the payload session",
       dates: ["2026-10-16", "2026-10-30"] },
     "flows-overview-contract.mjs": { reason: "a stored alert row's expiry is printed, not priced against today",
