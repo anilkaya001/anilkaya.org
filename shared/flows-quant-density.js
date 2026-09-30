@@ -2,6 +2,7 @@ import { normCdf, normPdf, normInv, black76 } from "./flows-quant-bs.js";
 import { asSlice, sliceSvi, sviW, sviW1, sviW2, gatheralG, mixtureComponents, sliceCallU, slicePutU, sliceVol } from "./flows-quant-smile.js";
 
 export const LAW_BINS = 64;
+export const MIN_HORIZON_SESSIONS = 1 / 390;
 export const ONE_SIGMA_LOW = normCdf(-1);
 export const ONE_SIGMA_HIGH = normCdf(1);
 

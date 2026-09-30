@@ -260,7 +260,7 @@ const FACT_INPUT = () => ({
   const levels = { callWall: 105, putWall: 95, magnet: 100, flip: 99, maxPain: 100, atr: 2 };
   const input = { ticker: "SYN", asOfMs: AS_OF_MS, spot: SPOT, rate: RATE, expiries: slices.input, facts, state, pLaw: law, levels, event: null, atr: 2 };
   const block = QC.runCardEngine(input);
-  const direct = ENGINE.runEngine({ ticker: "SYN", asOf: AS_OF_MS, spot: SPOT, rate: R, expiries: slices.input, facts: QC.factMap(facts),
+  const direct = ENGINE.runEngine({ ticker: "SYN", asOf: AS_OF_MS, spot: SPOT, rate: R, rateMethod: RATE.method, expiries: slices.input, facts: QC.factMap(facts),
     state: QC.engineState(state), pLaw: law, levels, curves: false });
   const byId = new Map(direct.structures.map((s) => [s.id, s]));
   ok(block.structures.length >= 1 && block.structures.length <= QC.QUANT_CARD_LINES.PUBLISH_STRUCTURES,
@@ -396,7 +396,14 @@ const FACT_INPUT = () => ({
   const flatSet = FQ.labSetup({ ...labIn, books: [{ fit: flat, rows: rows.filter((r) => r.type === "P" && r.K === 95) }] });
   const sp = FQ.priceStructure(flatSet, { family: "short-put", expiry: EXP, legs: [{ type: "P", K: 95, side: -1, qty: 1 }], basis: "mid" });
   near(sp.legs[0].model, sp.legs[0].mid, 1e-4, "a desk line priced on its own contract's implied vol reproduces its mid");
-  ok(sp.gradeParts.fit === 1 && sp.prob.popQ > 0.5 && sp.prob.popP !== null, "on a flat slice graded 1, with a risk-neutral and a real-world chance of profit");
+  {
+    const q95 = rows.find((r) => r.type === "P" && r.K === 95);
+    const spreadRel = (q95.ask - q95.bid) / ((q95.ask + q95.bid) / 2);
+    const z = Math.abs(Math.log(95 / flat.forward.F)) / (flat.slice.params.sigma * Math.sqrt(flat.T));
+    ok(spreadRel <= 0.1 && z <= 1, `the 95 put is a tight quote (${(100 * spreadRel).toFixed(1)}% wide) ${z.toFixed(2)} standard deviations from the forward`);
+    ok(sp.gradeParts.fit === 2 && sp.prob.popQ > 0.5 && sp.prob.popP !== null,
+       "so a flat slice on it grades 2, not the 1 every desk line used to carry, with a risk-neutral and a real-world chance of profit");
+  }
   const shared = new Map();
   let lines = 0, sameLines = 0;
   for (const r of rows.filter((x) => x.type === "P" && x.bid > 0)) {

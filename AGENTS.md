@@ -151,6 +151,7 @@ header readback with this repository after any dashboard rule change.
 | `tests/flows-ledger-contract.mjs` | The ledger's SQL over a real SQLite (gaps clipped to the session, ok and failed ticks, partial focus reads, passes, the nightly's landing, retention), its zero-extra-round-trip and never-blocks-the-tick properties on the real tick functions, its ingest view, and the health gate's reading of it: gap lines at the stale lines, a nightly that never landed, cards failed or skipped, the roster shortfall and the 5xx burst. |
 | `tests/flows-verdict-contract.mjs` | The two reversible verdicts, swept over a real SQLite clock and the real Tier 1 tick: a vendor that lags and recovers at every five-minute mark, a real closure's cost, a calendar holiday, a stalled tide with and without recovery, and the Tier 2 loop's waits. |
 | `tests/flows-reads-contract.mjs` | The Worker's D1 round trips and rows read per read route, counted on a fake binding (the rows-read ceilings, the last good copy served while the store is unreadable): the single-flight schema bootstrap, the absent-card decision, the live overlays and the ticker reading. |
+| `tests/flows-quant-audit.mjs`, `tests/fixtures-quant-audit.json` | The options engine against independent references: the horizon of a real-world law priced intraday, its 2,000,000-path scipy simulation at nine horizons, the Student t and Hansen skew-t quantiles and the Sobol net the pipeline draws through, dividends on the stock leg, the desk's carry, smile shape and in-the-money quotes, the earnings gate and the grades. The fixture's provenance string names the scipy version, the path count and the seed. |
 | `tests/flows-readers-contract.mjs`, `tests/flows-readers-render.mjs` | What a reader is told about age: the tape's TTL against the close, the quote card's own read time, the news overlay; and the boards' live dots, the home page's pill and news card, driven with stubbed routes. The ticker's tape labels are in `tests/flows-ticker-contract.mjs`. |
 
 ## Curriculum and stage contracts
@@ -506,6 +507,7 @@ flows-legs-contract
 flows-live-contract    flows-freshness-contract
 flows-starts-contract
 flows-quant-card       flows-track-render
+flows-quant-audit
 flows-pipeline-contract  flows-reads-contract  flows-ledger-contract
 flows-verdict-contract
 flows-readers-contract   flows-readers-render
@@ -566,7 +568,14 @@ CPU time is what the Workers limit meters and a loaded machine inflates wall
 time several-fold. That clock ticks at the kernel's resolution (4 ms in the
 sandbox), so runs are timed in windows of five and the budget is read from
 the window means. The child warms the engine first, so it does not measure a
-cold isolate's first requests.
+cold isolate's first requests. Since 2026-09-30 it also times a fixed
+reference workload in the same windows, and the budget is held as a ratio to
+its median (worst case under 1.2, costliest window under 2.0): the absolute
+median moved from 4.6 to 6.4 ms between runs of the same code on a shared
+machine while the ratio held.
+`flows-quant-audit` was measured on 2026-09-30: under 6 s with no server. It
+builds three GARCH laws through the pipeline's 32,768-path draws and runs a
+1.5M-draw JavaScript reference for the earnings overlay.
 `flows-quant-card` was measured the same day: under 2 s with no server. It
 rebuilds the `FlowsQuant` bundle in memory and fails when the committed file
 differs, then runs the bundle in a bare `vm` context against the modules.
