@@ -1,12 +1,12 @@
 import { parityForward, black76, bsmGreeks, impliedVolB76, normPdf } from "./flows-quant-bs.js";
-import { asSlice, sliceVolK, sliceTotalVariance, skewMetrics, eventVariance } from "./flows-quant-smile.js";
-import { impliedMove, lawFromSlice, lawBinned, interpolateBinned, driftNeutralBinned } from "./flows-quant-density.js";
+import { asSlice, sliceVolK, sliceTotalVariance, skewMetrics, eventVariance, sviW, sviG, SMILE_LINES } from "./flows-quant-smile.js";
+import { impliedMove, lawFromSlice, lawBinned, binsAtHorizon, MIN_HORIZON_SESSIONS } from "./flows-quant-density.js";
 import {
   runEngine, buildExpiry, ENGINE_VERSION, ENGINE_LINES, expiryProfile, normaliseLeg, lawIntervalsProb, lawExpect,
-  expiryFromFit, setupEngine,
+  expiryFromFit, setupEngine, cardCarry,
 } from "./flows-quant-engine.js";
 import { gammaProfile } from "./flows-quant-structures.js";
-import { etDayOf, calendarDays, yearFraction, sessionsBetween, isMonthly } from "./flows-quant-time.js";
+import { etDayOf, calendarDays, yearFraction, sessionsBetween, remainingSessions, isMonthly } from "./flows-quant-time.js";
 
 export const QUANT_CARD_VERSION = 1;
 export const QUANT_CARD_LINES = Object.freeze({
@@ -111,9 +111,12 @@ function seedNear(rows, S) {
 
 export const QUOTE_IV_BASIS = "NBBO mid inverted on Black-76 against a put-call parity forward; the vendor's own IV only seeds the solver and is never the reading";
 
-export function quoteImpliedVols(priced, { spot, rate = ENGINE_LINES.RATE_FALLBACK } = {}) {
+export function quoteImpliedVols(priced, { spot, rate, q = 0, asOfMs = null } = {}) {
   const list = Array.isArray(priced) ? priced : [];
-  if (!(spot > 0)) return list.map((p) => ({ ...p, ivVendor: p.iv, iv: null, ivQuote: "no-spot" }));
+  const r = fin(rate) ? rate : ENGINE_LINES.RATE_FALLBACK;
+  const carry = fin(q) ? q : 0;
+  const ivRate = { r, method: fin(rate) ? "given" : "fallback" };
+  if (!(spot > 0)) return list.map((p) => ({ ...p, ivVendor: p.iv, iv: null, ivQuote: "no-spot", ivRate }));
   const TICK = 0.05;
   const byExpiry = new Map();
   for (const p of list) {
@@ -124,12 +127,13 @@ export function quoteImpliedVols(priced, { spot, rate = ENGINE_LINES.RATE_FALLBA
   const out = new Map();
   for (const [expiry, group] of [...byExpiry.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
     const days = group.find((p) => fin(p.days)) ? group.find((p) => fin(p.days)).days : null;
-    const T = fin(days) ? days / 365 : null;
+    const exact = fin(asOfMs) ? yearFraction(asOfMs, expiry) : null;
+    const T = exact !== null ? exact : fin(days) ? days / 365 : null;
     if (!(T > 0)) { for (const p of group) out.set(p, { iv: null, why: "expired" }); continue; }
-    const D = Math.exp(-rate * T);
+    const D = Math.exp(-r * T);
     const rows = group.map((p) => ({ K: p.strike, type: p.type, bid: p.bid, ask: p.ask, ivSeed: p.iv }));
     const f = parityForward({ S: spot, T, chain: pairsOf(rows), sigmaSeed: seedNear(rows, spot), D });
-    const F = f ? f.F : spot / D;
+    const F = f ? f.F : spot * Math.exp((r - carry) * T);
     let atmSeed = null, best = Infinity;
     for (const r of rows) if (fin(r.ivSeed) && r.ivSeed > 0 && Math.abs(Math.log(r.K / F)) < best) { best = Math.abs(Math.log(r.K / F)); atmSeed = r.ivSeed; }
     const sq = Math.sqrt(T);
@@ -152,7 +156,7 @@ export function quoteImpliedVols(priced, { spot, rate = ENGINE_LINES.RATE_FALLBA
   }
   return list.map((p) => {
     const q = out.get(p) || { iv: null, why: "unparsed" };
-    return { ...p, ivVendor: p.iv, iv: q.iv, ivQuote: q.why };
+    return { ...p, ivVendor: p.iv, iv: q.iv, ivQuote: q.why, ivRate };
   });
 }
 
@@ -259,7 +263,7 @@ export function bookLevels(strikeRows, { spot } = {}) {
   const rows = [];
   let pos = 0, neg = 0;
   for (const r of strikeRows || []) {
-    const k = num(r && (r.strike ?? r.price));
+    const k = num(r && r.strike);
     const c = num(r && r.call_gamma_oi), p = num(r && r.put_gamma_oi);
     if (k === null || !(k > 0) || (c === null && p === null)) continue;
     if (p !== null && p > 0) pos++;
@@ -415,19 +419,23 @@ export function engineFacts(input) {
   lvl("level.callWall", book ? book.callWall : null, book ? 3 : 0, book ? null : "book.absent");
   lvl("level.putWall", book ? book.putWall : null, book ? 3 : 0, book ? null : "book.absent");
   lvl("level.magnet", book ? book.magnet : null, book && book.putSign !== "mixed" ? 3 : 0, book ? (book.putSign === "mixed" ? "book.put-sign" : null) : "book.absent");
-  lvl("level.flip", zero ? zero.px : null, zero ? zero.g : 0, zero ? zero.why : "flip.no-chain");
-  add("level.flip.count", zero ? zero.count : null, "count", zero ? zero.g : 0, zero ? {} : { why: "flip.no-chain" });
+  const regime = card && card.regime && typeof card.regime === "object" ? card.regime : {};
+  const clash = zero && fin(zero.atSpot) && zero.atSpot !== 0 && fin(regime.bookGamma) && regime.bookGamma !== 0 &&
+    Math.sign(zero.atSpot) !== Math.sign(regime.bookGamma);
+  const flipG = zero ? (clash ? Math.min(zero.g, 1) : zero.g) : 0;
+  lvl("level.flip", zero ? zero.px : null, flipG, zero ? (clash ? "flip.sign-at-spot" : zero.why) : "flip.no-chain");
+  add("level.flip.count", zero ? zero.count : null, "count", flipG, zero ? {} : { why: "flip.no-chain" });
   const cross = card && fin(card.strikeSumCrossing) ? card.strikeSumCrossing : null;
   lvl("level.strikeSumCrossing", cross, 2, cross === null ? "crossing.none" : null);
   const lv = ok(panels.levels) && Array.isArray(panels.levels.levels) ? panels.levels.levels : [];
   const pain = lv.find((x) => x && x.kind === "max_pain") || null;
-  lvl("level.maxPain", pain ? pain.px : null, pain ? 2 : 0, pain ? null : "pain.absent");
+  lvl("level.maxPain", pain ? pain.px : null, pain ? (pain.thin === true ? 1 : 2) : 0, pain ? (pain.thin === true ? "pain.thin-expiry" : null) : "pain.absent");
   const gp = ok(panels.gamma) ? panels.gamma : null;
   lvl("level.flowPeakLong", gp ? gp.flowPeakLong : null, gp ? 1 : 0, gp ? null : "flow.absent");
   lvl("level.flowPeakShort", gp ? gp.flowPeakShort : null, gp ? 1 : 0, gp ? null : "flow.absent");
-  const reg = card && card.regime && typeof card.regime === "object" ? card.regime : {};
-  add("gex.book", fin(reg.bookGamma) ? sig(reg.bookGamma) : fin(reg.bookGammaRaw) ? sig(reg.bookGammaRaw) : null, "usdPer1pct", 3,
-    fin(reg.bookGamma) || fin(reg.bookGammaRaw) ? {} : { why: "book.absent" });
+  const reg = regime;
+  add("gex.book", fin(reg.bookGamma) ? sig(reg.bookGamma) : null, "usdPer1pct", 2,
+    fin(reg.bookGamma) ? {} : { why: fin(reg.bookGammaRaw) ? "book.no-spot" : "book.absent" });
   add("gex.flow", fin(reg.flowGamma) ? sig(reg.flowGamma) : null, "usdPer1pct", 1, fin(reg.flowGamma) ? {} : { why: "flow.absent" });
   add("event.days", evDays !== null && evDays >= 0 ? evDays : null, "days", event ? (event.confirmed ? 3 : 2) : 0,
     event ? (event.confirmed ? {} : { why: "event.estimated" }) : { why: "event.none-listed" });
@@ -480,7 +488,7 @@ export function engineEvent(event, jump, facts) {
 export function compactLaw(law) {
   if (!law) return null;
   return {
-    model: law.model || null, grade: fin(law.grade) ? law.grade : null, why: Array.isArray(law.why) ? law.why.slice() : [],
+    model: law.model || null, drift: "forward", grade: fin(law.grade) ? law.grade : null, why: Array.isArray(law.why) ? law.why.slice() : [],
     knots: (law.knots || []).map((k) => ({ h: k.h, edges: k.edges.map((e) => (e === null ? null : sig(e))), means: k.means.map((m) => sig(m)) })),
     params: law.params ? Object.fromEntries(Object.keys(law.params).sort().map((key) => [key, sig(law.params[key], 8)])) : null,
     ewmaVol: sig(law.ewmaVol, 4), coneMedianVol: sig(law.coneMedianVol, 4), vol: sig(law.vol, 4),
@@ -501,6 +509,7 @@ export function compactEngine(out, extra = {}) {
     v: QUANT_CARD_VERSION, engine: ENGINE_VERSION, asOf: out.asOf, spot: out.spot,
     atr: fin(extra.atr) ? dp(extra.atr, 4) : null,
     rate: extra.rate ? { r: extra.rate.r, method: extra.rate.method, n: extra.rate.n || 0 } : null,
+    assumptions: { exercise: "european", carry: "continuous", drift: "forward", equityPremium: 0, intraday: "time-uniform" },
     liquidity: out.liquidity, expiries: out.expiries,
     facts: extra.facts || [], state: extra.state || null, levels: extra.levels || null, event: extra.event || null,
     zeroGamma: extra.zeroGamma || null, pLaw: extra.pLaw || null,
@@ -521,6 +530,7 @@ export function runCardEngine(input) {
   const asOfMs = fin(input.asOfMs) ? input.asOfMs : Date.parse(input.asOf);
   const out = runEngine({
     ticker: input.ticker || null, asOf: asOfMs, spot: input.spot, rate: input.rate ? input.rate.r : ENGINE_LINES.RATE_FALLBACK,
+    rateMethod: input.rate && typeof input.rate.method === "string" ? input.rate.method : "fallback",
     expiries: input.expiries, facts: factMap(input.facts), state: engineState(input.state), pLaw: input.pLaw || null,
     levels: input.levels || null, event: input.event || null, stale: !!input.stale, curves: false,
     topFamilies: input.topFamilies, fits: !!input.fits,
@@ -555,22 +565,144 @@ export function bookRows(calls, puts, ticker) {
   return out.sort((a, b) => a.K - b.K || (a.type < b.type ? -1 : a.type > b.type ? 1 : 0));
 }
 
-export function contractFit(input) {
+function transferredSlice({ entry, T, F, D, K, iv }) {
+  const smile = entry && entry.smile;
+  if (!smile || (smile.method !== "svi" && smile.method !== "svi-repaired") || !smile.params) return null;
+  const p = smile.params;
+  if (!["a", "b", "rho", "m", "sigma"].every((key) => fin(p[key]))) return null;
+  const k = Math.log(K / F);
+  const target = iv * iv * T;
+  const at = (s) => s * s * sviW(p, k / s);
+  let lo = 0.05, hi = 20;
+  if (!(at(lo) < target && at(hi) > target)) return null;
+  for (let i = 0; i < 80; i++) {
+    const mid = Math.sqrt(lo * hi);
+    if (at(mid) < target) lo = mid; else hi = mid;
+    if (hi / lo - 1 < 1e-13) break;
+  }
+  const s = Math.sqrt(lo * hi);
+  if (!(s >= 0.25 && s <= 4)) return null;
+  const params = { a: s * s * p.a, b: s * p.b, rho: p.rho, m: s * p.m, sigma: s * p.sigma };
+  for (let i = -30; i <= 30; i++) if (!(sviG(params, k + i * 0.01) >= 0)) return null;
+  return { method: "svi", T, F, D, params, n: 1, fitInSpread: null, rmseIvPts: null, why: "fit.card-shape", origin: "card-shape", shapeFrom: entry.expiry, scale: s };
+}
+
+export const QUANT_CODE_TEXT = Object.freeze({
+  "world.event-missing": "An earnings report falls inside this expiry and the card holds no report move to weigh it, so a real-world figure would leave it out and read too high. None is shown.",
+  "quote.one-sided": "No two-sided quote (the bid is zero or missing), so no implied volatility can be read.",
+  "iv.below-intrinsic": "The bid is below the option's discounted intrinsic value, so no volatility fits it and none of the premium is time value.",
+  "iv.no-time-value": "The mid is within half a tick of the discounted intrinsic value, so the volatility it implies is not identified.",
+  "iv.unbounded-below": "The bid sits on the intrinsic floor, so the quote bounds the volatility only from above.",
+  "expired": "The contract has expired.",
+  "spot.missing": "There is no spot price to price against.",
+  "fit.contract-iv": "A lognormal at this contract's own volatility: a tight quote near the money, where skew changes the odds little.",
+  "fit.contract-iv.wide": "A lognormal at this contract's own volatility, from a wide quote, so that volatility is uncertain.",
+  "fit.contract-iv.far": "A lognormal at this contract's own volatility, but the strike is over a standard deviation out, where skew moves the odds.",
+  "fit.card-shape": "The smile shape from the nightly card, re-levelled to this contract's volatility.",
+});
+
+export function codeText(code) {
+  return typeof code === "string" && Object.prototype.hasOwnProperty.call(QUANT_CODE_TEXT, code) ? QUANT_CODE_TEXT[code] : null;
+}
+
+function contractFrame(input) {
   const { expiry, asOfMs, spot: S, row } = input;
   const r = fin(input.rate) ? input.rate : ENGINE_LINES.RATE_FALLBACK;
+  const rateMethod = typeof input.rateMethod === "string" ? input.rateMethod : fin(input.rate) ? "given" : "fallback";
+  const q = fin(input.q) ? input.q : cardCarry(input.facts);
   const T = yearFraction(asOfMs, expiry);
-  if (!(T > 0) || !(S > 0) || !row || !fin(row.K)) return null;
-  const F = S * Math.exp(r * T), D = Math.exp(-r * T);
-  const mid = fin(row.bid) && fin(row.ask) && row.bid > 0 && row.ask >= row.bid ? (row.bid + row.ask) / 2 : null;
-  const iv = mid === null ? null : impliedVolB76(F, D, row.K, T, mid, row.type, fin(row.ivSeed) && row.ivSeed > 0 ? row.ivSeed : null);
+  if (!(T > 0) || !(S > 0) || !row || !fin(row.K)) return { bad: !(T > 0) ? "expired" : !(S > 0) ? "spot.missing" : "quote.one-sided" };
+  const carry = q === null ? 0 : q;
+  return { T, S, r, rateMethod, q, carry, F: S * Math.exp((r - carry) * T), D: Math.exp(-r * T) };
+}
+
+function oppositeQuote(input) {
+  const { row } = input;
+  const two = (x) => x && fin(x.bid) && fin(x.ask) && x.bid > 0 && x.ask >= x.bid;
+  return two(row.opposite) ? { K: row.K, type: row.type === "C" ? "P" : "C", bid: row.opposite.bid, ask: row.opposite.ask } : null;
+}
+
+function nearestSmile(expiries, expiry, T) {
+  if (!Array.isArray(expiries)) return null;
+  let best = null, gap = Infinity;
+  for (const e of expiries) {
+    if (!e || !fin(e.T) || !(e.T > 0) || !e.smile || (e.smile.method !== "svi" && e.smile.method !== "svi-repaired")) continue;
+    const d = e.expiry === expiry ? 0 : Math.abs(Math.log(e.T / T));
+    if (d < gap) { gap = d; best = e; }
+  }
+  return best !== null && gap <= Math.log(4) ? best : null;
+}
+
+export function contractDiagnosis(input) {
+  const f = contractFrame(input);
+  const { row } = input;
+  if (f.bad) return { code: f.bad, text: codeText(f.bad) };
+  const call = row.type === "C";
+  const intrinsic = Math.max(0, call ? f.S - row.K : row.K - f.S);
+  const floor = f.D * Math.max(0, call ? f.F - row.K : row.K - f.F);
+  const two = fin(row.bid) && fin(row.ask) && row.bid > 0 && row.ask >= row.bid;
+  const out = { code: null, text: null, intrinsic, floor, mid: null, timeValue: null, bid: fin(row.bid) ? row.bid : null, ask: fin(row.ask) ? row.ask : null };
+  if (!two) return { ...out, code: "quote.one-sided", text: codeText("quote.one-sided") };
+  const mid = (row.bid + row.ask) / 2, tick = SMILE_LINES.TICK;
+  out.mid = mid;
+  out.timeValue = mid - intrinsic;
+  if (!(floor > 0)) return out;
+  const usd = (v) => "$" + v.toFixed(2);
+  if (row.bid < floor - 1e-9) {
+    return { ...out, code: "iv.below-intrinsic", text: `The bid (${usd(row.bid)}) is below the option's discounted intrinsic value (${usd(floor)}), so no volatility is consistent with it and none of the premium is time value.` };
+  }
+  if (mid - floor < 0.5 * tick - 1e-12) {
+    return { ...out, code: "iv.no-time-value", text: `The mid (${usd(mid)}) is within half a tick of the option's discounted intrinsic value (${usd(floor)}), so almost none of it is time value and the volatility it implies is not identified.` };
+  }
+  if (row.bid - floor < 0.5 * tick - 1e-12) {
+    return { ...out, code: "iv.unbounded-below", text: `The bid (${usd(row.bid)}) sits on the option's intrinsic floor (${usd(floor)}), so the quote bounds the volatility only from above.` };
+  }
+  return out;
+}
+
+function pricedVol(f, K, type, bid, ask, seed) {
+  const mid = (bid + ask) / 2;
+  const iv = impliedVolB76(f.F, f.D, K, f.T, mid, type, seed);
   if (!fin(iv) || !(iv > 0)) return null;
+  const lo = impliedVolB76(f.F, f.D, K, f.T, bid, type, iv), hi = impliedVolB76(f.F, f.D, K, f.T, ask, type, iv);
+  return { iv, width: lo === null || hi === null ? Infinity : hi - lo, spreadRel: (ask - bid) / mid };
+}
+
+export function contractFit(input) {
+  const { expiry, asOfMs, row } = input;
+  const f = contractFrame(input);
+  if (f.bad) return null;
+  const { S, T, F, D, r, rateMethod, q, carry } = f;
+  const seed = fin(row.ivSeed) && row.ivSeed > 0 ? row.ivSeed : null;
+  const own = fin(row.bid) && fin(row.ask) && row.bid > 0 && row.ask >= row.bid;
+  if (!own) return null;
+  const diag = contractDiagnosis(input);
+  let read = null, via = "own";
+  if (diag.code !== null) {
+    const opp = oppositeQuote(input);
+    if (!opp) return null;
+    read = pricedVol(f, opp.K, opp.type, opp.bid, opp.ask, seed);
+    via = "opposite";
+  } else {
+    const otm = row.type === "P" ? row.K < F : row.K >= F;
+    const opp = otm ? null : oppositeQuote(input);
+    read = opp ? pricedVol(f, opp.K, opp.type, opp.bid, opp.ask, seed) : null;
+    if (read) via = "opposite";
+    else read = pricedVol(f, row.K, row.type, row.bid, row.ask, seed);
+  }
+  if (!read) return null;
+  const iv = read.iv;
   const day = etDayOf(asOfMs);
-  return {
-    expiry, T, dte: calendarDays(day, expiry), sessions: sessionsBetween(day, expiry), monthly: isMonthly(expiry),
-    forward: { F, D, r, q: 0, pairs: 0, method: "rate-only" },
-    slice: { method: "flat", T, F, D, params: { sigma: iv }, n: 1, fitInSpread: null, rmseIvPts: null, why: "fit.contract-iv" },
+  const head = {
+    expiry, T, dte: calendarDays(day, expiry), sessions: sessionsBetween(day, expiry), hSessions: remainingSessions(asOfMs, expiry), monthly: isMonthly(expiry),
+    forward: { F, D, r, q: carry, pairs: 0, method: "rate-only", rateMethod, carry: q === null ? "none" : "card" },
     points: 1,
   };
+  const contract = { spreadRel: (row.ask - row.bid) / ((row.ask + row.bid) / 2), z: Math.abs(Math.log(row.K / F)) / (iv * Math.sqrt(T)), ivWidth: read.width, iv, via };
+  const entry = nearestSmile(input.expiries, expiry, T);
+  const shaped = entry ? transferredSlice({ entry, T, F, D, K: row.K, iv }) : null;
+  if (shaped) return { ...head, slice: { ...shaped, contract } };
+  return { ...head, slice: { method: "flat", T, F, D, params: { sigma: iv }, n: 1, fitInSpread: null, rmseIvPts: null, why: "fit.contract-iv", origin: "contract", contract } };
 }
 
 export function labSetup(input) {
@@ -580,7 +712,7 @@ export function labSetup(input) {
     .sort((a, b) => (a.expiry < b.expiry ? -1 : a.expiry > b.expiry ? 1 : 0));
   return setupEngine({
     asOf: input.asOfMs, spot: input.spot, facts: factMap(input.facts), state: engineState(input.state), pLaw: input.pLaw || null,
-    levels: input.levels || null, event: input.event || null, stale: !!input.stale, lawCache: input.lawCache,
+    levels: input.levels || null, event: input.event || null, stale: !!input.stale, lawCache: input.lawCache, crossesEarnings: input.crossesEarnings,
   }, list);
 }
 
@@ -590,33 +722,10 @@ export function sliceFromSummary(e) {
   return asSlice({ method: e.smile.method, T: e.T, F: e.forward.F, D: e.forward.D, params });
 }
 
-function aggregatedSd(params, h) {
-  if (!params || !fin(params.sigma2Next)) return Math.sqrt(h);
-  const persistence = (params.alpha || 0) + (params.gamma || 0) / 2 + (params.beta || 0);
-  const longRun = persistence < 1 && fin(params.omega) ? params.omega / (1 - persistence) : params.sigma2Next;
-  const avg = Math.abs(1 - persistence) < 1e-9 ? params.sigma2Next
-    : longRun + (params.sigma2Next - longRun) * (1 - Math.pow(persistence, h)) / (h * (1 - persistence));
-  return Math.sqrt(Math.max(avg, 0) * h);
-}
-
-export function lawAtSessions(pLaw, { sessions, forwardOverSpot = 1, S }) {
-  if (!pLaw || !Array.isArray(pLaw.knots) || !pLaw.knots.length || !(S > 0)) return null;
-  const h = Math.max(1, sessions || 1);
-  const ks = pLaw.knots.slice().sort((a, b) => a.h - b.h);
-  let lower = ks[0], upper = ks[ks.length - 1];
-  for (const k of ks) { if (k.h <= h) lower = k; }
-  for (let i = ks.length - 1; i >= 0; i--) { if (ks[i].h >= h) upper = ks[i]; }
-  if (h <= ks[0].h) { lower = ks[0]; upper = ks[0]; }
-  if (h >= ks[ks.length - 1].h) { lower = ks[ks.length - 1]; upper = lower; }
-  const sd = (x) => aggregatedSd(pLaw.params, x);
-  let bins;
-  if (lower.h === upper.h) {
-    const scale = sd(h) / sd(lower.h);
-    const re = (v) => (v === null ? null : v === 0 ? 0 : Math.exp(Math.log(v) * scale));
-    bins = driftNeutralBinned({ edges: lower.edges.map(re), means: lower.means.map(re) }, forwardOverSpot);
-  } else {
-    bins = interpolateBinned({ lower, upper, h, sd, forwardOverSpot });
-  }
+export function lawAtSessions(pLaw, { sessions, hSessions, forwardOverSpot = 1, S }) {
+  if (!pLaw || !(S > 0)) return null;
+  const h = fin(hSessions) ? Math.max(MIN_HORIZON_SESSIONS, hSessions) : Math.max(1, sessions || 1);
+  const bins = binsAtHorizon(pLaw, h, forwardOverSpot);
   return bins ? lawBinned({ S, edges: bins.edges, means: bins.means }) : null;
 }
 
@@ -630,7 +739,7 @@ export function repriceStructure(input) {
   const S = fin(input.spot) ? input.spot : block.spot;
   const legs = legsIn.map((l) => normaliseLeg({ type: l.type, K: fin(l.K) ? l.K : l.k, side: l.side, qty: l.qty }));
   const priced = legs.map((l) => {
-    if (l.type === "S") return { ...l, model: S, iv: null };
+    if (l.type === "S") return { ...l, model: S, iv: null, div: S / slice.D - slice.F };
     const iv = sliceVolK(slice, Math.log(l.K / slice.F));
     return { ...l, iv, model: iv === null ? null : black76(slice.F, slice.D, l.K, iv, slice.T, l.type) };
   });
@@ -640,7 +749,7 @@ export function repriceStructure(input) {
   const prof = expiryProfile(priced, cost);
   const qLaw = lawFromSlice(slice);
   const eq = lawExpect(qLaw, prof.pieces);
-  const pLaw = lawAtSessions(block.pLaw, { sessions: exp.sessions, forwardOverSpot: slice.F / S, S });
+  const pLaw = lawAtSessions(block.pLaw, { sessions: exp.sessions, hSessions: exp.hSessions, forwardOverSpot: slice.F / S, S });
   const ep = pLaw ? lawExpect(pLaw, prof.pieces) : null;
   const lot = 100;
   return {

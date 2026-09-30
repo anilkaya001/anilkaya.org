@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { buildFactIndex, selectFacts, numeralsIn, guardAnswer, renderFactsPlain, promptFor,
          tickerCoverage, shedCardFacts, emptySilences, fileSilence, SILENCE_KINDS,
          promptForSummary, renderSummaryPlain, summaryFingerprint, cardFacts, CARD_CORE_FACTS,
-         refreshIntradayFacts, briefAge, INTRADAY_SOURCES }
+         refreshIntradayFacts, briefAge, INTRADAY_SOURCES, levelMislabels }
   from "../shared/flows-ask.js";
 import { buildBrief, briefStoreFrom } from "../shared/flows-brief.js";
 
@@ -453,11 +453,55 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
   eq(guardAnswer("It is likely to continue.", picked).ok, false, "and 'likely'");
   eq(guardAnswer("The tape is going to turn.", picked).ok, false, "and 'going to'");
 
-  const FORECAST = /\b(will|should|expect(?:ed)?|likely|going to|forecast|predict)\b/i;
+  const FORECAST = /\b(?:will|should|expect\w*|likely|going to|forecast\w*|predict\w*|anticipat\w*|poised|target\w*|odds)\b/i;
   for (const f of INDEX.facts) {
     ok(!FORECAST.test(f.say),
        `no fact in the index claims the future — "${f.say.slice(0, 55)}"`);
   }
+}
+
+{
+  const picked = [byId("market/breadth")];
+  for (const said of ["It expects to rally.", "The desk predicts a move.", "Spot is poised to gap up.", "A price target of 100 is anticipated.",
+    "The odds favour a break.", "Forecasts differ.", "Premium is expectation-driven.", "It anticipates a squeeze."]) {
+    eq(guardAnswer(said, picked).ok, false, `N-F5: "${said}" claims the future and is refused by the stem, where the exact-word list let it through`);
+  }
+  for (const said of ["Would it rally?", "It could break the wall.", "Price may reach the wall.", "Volume might fade."]) {
+    eq(guardAnswer(said, picked).ok, true, `"${said}" is a modal, left alone where the site's own deterministic answers say "could not be read" and "may be missing"`);
+    eq(guardAnswer(said, picked, { modals: true }).ok, false, `and refused for the prose a model writes about a name, which asks for the modal check`);
+  }
+  eq(guardAnswer("The aggressor split could not be read.", picked, { modals: true }).ok, true, "a modal used to say something could NOT be read is a statement about the data, not the market");
+  eq(guardAnswer("The name reports in May and again in June.", picked, { modals: true }).ok, true, "and the month May is not the modal: only the lowercase word is");
+  eq(guardAnswer("The cap is 5 names.", picked, { modals: true, smallIntegers: true }).ok, true, "a plain sentence still passes with the modal check on");
+}
+
+{
+  const levels = [{ kind: "call_wall", px: 67 }, { kind: "put_wall", px: 70 }, { kind: "max_pain", px: 72.5 }, { kind: "zero_gamma", px: 66.1 },
+    { kind: "strike_sum_crossing", px: 68.32 }, { kind: "spot", px: 70.22 }];
+  const facts = [{ say: "The call wall is at 67.00 and the put wall at 70.00, max pain 72.50, zero gamma 66.10, crossing 68.32, spot 70.22, 0.15 ATR, 60%." }];
+  const g = (text) => guardAnswer(text, facts, { smallIntegers: false, levels });
+  eq(g("The call wall at 67.00 and the put wall at 70.00 bracket spot 70.22.").ok, true, "N-F5: prices beside their own labels pass");
+  eq(g("Max pain at 72.50 sits above the zero-gamma level at 66.10.").ok, true, "including max pain and the zero-gamma level");
+  const wrongCall = g("The call wall at 70.00 caps the move.");
+  ok(!wrongCall.ok && wrongCall.mislabeled === true && wrongCall.invented === false && wrongCall.rejected.includes("call wall 70.00"),
+     "70.00 is a real figure of the card, so the numeral check passes it, but it is the PUT wall: a call wall at 70.00 is refused as a mislabelled level");
+  eq(g("The put wall at 67.00 holds.").mislabeled, true, "and the put wall at the call wall's price is refused too");
+  eq(g("The max pain at 66.10 pulls it back.").mislabeled, true, "max pain at the flip's price");
+  eq(g("Spot 72.50 is above the wall.").mislabeled, true, "and a spot that is really the max-pain price");
+  eq(g("A close above the call wall. Then 70.00 matters.").ok, true, "a price a full sentence away from a label is not attached to it");
+  eq(g("The put wall 70.00 is 0.15 ATR below spot 70.22, and 60% of the ladder sits under spot.").ok, true, "percentages, ATR multiples and counts are not prices");
+  eq(g("The flip at 68.32 and the flip at 66.10 both count.").ok, true, "a bare 'flip' may be either the strike-sum crossing or the zero-gamma level");
+  eq(g("The gamma flip at 67.00 is close.").mislabeled, true, "but not the call wall's price");
+  {
+    const raw = [{ kind: "zero_gamma", px: 66.1234 }, { kind: "call_wall", px: 67 }, { kind: "strike_sum_crossing", px: 68.3214 }];
+    const rawFacts = [{ say: "Zero gamma 66.12, call wall 67.00, crossing 68.32." }];
+    const r = (text) => guardAnswer(text, rawFacts, { smallIntegers: false, levels: raw });
+    eq(r("The zero-gamma level at 66.12 and the strike-sum crossing at 68.32 bracket it.").ok, true, "a level held at four decimals is quoted at the two the card prints, and the comparison is to the cent");
+    eq(r("The call wall at 66.12 is close.").mislabeled, true, "and its rounded price is still the zero-gamma level's, not the call wall's");
+  }
+  eq(levelMislabels("The call wall at 70.00.", []).length, 0, "with no levels on the card there is nothing to attribute against");
+  eq(levelMislabels("The call wall at 70.00.", null).length, 0, "and a missing list is the same");
+  eq(guardAnswer("The call wall at 70.00.", facts, { smallIntegers: false }).ok, true, "the check only runs for a caller that passes the card's levels");
 }
 
 {

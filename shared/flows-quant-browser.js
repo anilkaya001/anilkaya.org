@@ -7,4 +7,6 @@ export {
 export { STRUCTURES, DELTA_TARGETS, familyDirection } from "./flows-quant-structures.js";
 export {
   QUANT_CARD_VERSION, repriceStructure, sliceFromSummary, lawAtSessions, structureLegsText, bookRows, contractFit, labSetup,
+  contractDiagnosis, codeText, QUANT_CODE_TEXT,
 } from "./flows-quant-card.js";
+export { closeUtcMs, remainingSessions, etDayOf } from "./flows-quant-time.js";

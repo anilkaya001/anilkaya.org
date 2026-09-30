@@ -777,7 +777,7 @@
   {
    "id": "svi.lee-wing-bound",
    "group": "no-arbitrage",
-   "what": "Roger Lee's moment bound on the wings of total variance: b (1 + |rho|) <= 4",
+   "what": "Roger Lee's moment formula bounds the wing slope of TOTAL variance, limsup w(k)/|k| = psi(p) = 2 - 4(sqrt(p^2 + p) - p) <= 2 for p >= 0 (Lee 2004, Thm 3.2), which for raw SVI is b (1 + |rho|) <= 2 (Gatheral-Jacquier 2014 write the same bound as theta phi (1 + |rho|) < 4 with b = theta phi / 2)",
    "fn": "sviWingCheck",
    "inputs": {
     "cases": [
@@ -792,6 +792,18 @@
      {
       "b": 2.0,
       "rho": 1.0
+     },
+     {
+      "b": 1.25,
+      "rho": 0.6
+     },
+     {
+      "b": 1.0,
+      "rho": 1.0
+     },
+     {
+      "b": 1.6,
+      "rho": -0.5
      }
     ]
    },
@@ -799,12 +811,18 @@
     "ok": [
      false,
      true,
-     true
+     false,
+     true,
+     true,
+     false
     ],
     "value": [
      4.2,
      1.9,
-     4.0
+     4.0,
+     2.0,
+     2.0,
+     2.4
     ]
    },
    "tol": {

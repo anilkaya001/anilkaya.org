@@ -6,7 +6,7 @@ import {
   indexMarketCross, indexCrossFeed, readCrossFeed, buildMarketCross,
   measureOrder, measureOiBasis, CROSS_NOTES,
   numOrNull, polarityOf, POLARITY, pickMaxPain, pickMaxPainRow, CARD_SCHEMA_VERSION,
-  HORIZON_SESSIONS, RICHNESS_LINE, lastRangeOf,
+  HORIZON_SESSIONS, RICHNESS_LINE, lastRangeOf, expiryGammaShare, MAX_PAIN_MIN_SHARE, SPOT_EXPOSURE_PAGE,
 } from "../shared/flows-card.js";
 import { STATE_LINES } from "../shared/flows-neuron.js";
 import { readFileSync } from "node:fs";
@@ -1475,6 +1475,50 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(vc.term.rows[0].dte, 4, "and counts days from the session, as the greeks on the same card do, not the vendor's 3");
   ok(vc.ivRank.rows.every((r) => r.date <= session) && vc.ivRank.afterSession === 1,
      "the implied-volatility history drops the row dated after the session and counts it");
+}
+
+{
+  const row = (i) => ({ strike: String(50 + i), call_gamma_ask: "6e5", call_gamma_bid: "4e5", put_gamma_ask: "-1e5", put_gamma_bid: "-1e5" });
+  const page = (n) => Array.from({ length: n }, (_, i) => row(i));
+  eq(SPOT_EXPOSURE_PAGE, 500, "the strike-ladder page is 500 rows, the limit the nightly asks for");
+  ok(buildGammaProfile(page(SPOT_EXPOSURE_PAGE), { spot: 200 }).truncated === true,
+     "UW-F12: a ladder that fills the vendor's 500-row page is flagged truncated, since strikes beyond it were never read and its sums depend on the window");
+  ok(buildGammaProfile(page(SPOT_EXPOSURE_PAGE - 1), { spot: 200 }).truncated === false, "and one row short of a full page is not");
+  const pipe = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  ok(/spot-exposures\/strike`, \{ \.\.\.band, \.\.\.dated, limit: SPOT_EXPOSURE_PAGE \}/.test(pipe),
+     "and the nightly asks for exactly that page through the same constant");
+
+  const priceOnly = [{ price: "100", call_gamma_ask: "1e8", call_gamma_bid: "1e8", put_gamma_ask: "-1e8", put_gamma_bid: "-1e8", call_gamma_oi: "1e9", put_gamma_oi: "-1e9" }];
+  eq(buildGammaProfile(priceOnly, { spot: 100 }).status, "unavailable",
+     "UW-F14: a by-strike row that carries only `price` (the underlying's, not a strike) is not a strike: its gamma is not stacked on the spot");
+  eq(buildSurface([{ price: "100", expiry: "2026-09-18", call_gamma_ask: "1e8", call_gamma_bid: "1e8", put_gamma_ask: "-1e8", put_gamma_bid: "-1e8" }], { spot: 100 }).status,
+     "unavailable", "and neither is the surface's");
+  eq(buildGammaProfile([{ strike: "95", price: "100.4", call_gamma_ask: "1e8", call_gamma_bid: "1e8", put_gamma_ask: "0", put_gamma_bid: "0" }], { spot: 100 }).bars[0].k, 95,
+     "while a row with both keeps the strike");
+}
+
+{
+  const exp = (expiry, c, p) => ({ expiry, call_gex: String(c), put_gex: String(p) });
+  const rows = [exp("2026-09-18", 1e5, -1e5), exp("2026-10-16", 3e5, -2e5), exp("2026-11-20", 5e5, -4e5), exp("2026-09-15", 9e9, -9e9)];
+  near(expiryGammaShare(rows, "2026-09-18", { asOf: "2026-09-15" }), 2e5 / (2e5 + 5e5 + 9e5), 1e-4,
+       "UW-F13: an expiry's share is its gross gamma over the live book's, with the contracts that expired at the close left out");
+  eq(expiryGammaShare(rows, "2026-09-15", { asOf: "2026-09-15" }), 0, "so an expiry that has already closed holds none of it");
+  eq(expiryGammaShare([], "2026-09-18", { asOf: "2026-09-15" }), null, "an empty book has no share to state");
+  eq(expiryGammaShare(rows, null, { asOf: "2026-09-15" }), null, "and no expiry has none");
+  const lv = buildLevels({ spot: 100, atr: 2, maxPain: 101, maxPainExpiry: "2026-09-18", maxPainShare: 0.1, callWall: 110, putWall: 90 });
+  const pain = lv.levels.find((x) => x.kind === "max_pain");
+  ok(pain.expiry === "2026-09-18" && pain.share === 0.1 && pain.thin === true && pain.line === MAX_PAIN_MIN_SHARE,
+     "the max-pain level carries its expiry, its share of the book and whether that share is under the line");
+  ok(buildLevels({ spot: 100, atr: 2, maxPain: 101, maxPainExpiry: "2026-09-18", maxPainShare: 0.4 }).levels[0].thin === false,
+     "a share over the line is not thin");
+  ok(!("expiry" in buildLevels({ spot: 100, atr: 2, maxPain: 101 }).levels[0]), "and a level with no expiry given carries none");
+  const complete = buildCard({
+    ticker: "ZZZ", row: { close: "100" }, features: { spot: 100, atr: 2 }, strikes: [], ticks: [], sessionDate: "2026-09-15",
+    expiries: rows, maxPain: [{ expiry: "2026-09-18", max_pain: "101" }, { expiry: "2026-10-16", max_pain: "99" }],
+  });
+  const cp = complete.panels.levels.levels.find((x) => x.kind === "max_pain");
+  ok(cp && cp.expiry === "2026-09-18" && cp.thin === true && cp.share < MAX_PAIN_MIN_SHARE,
+     `and the card publishes it: the nearest expiry holds ${cp && cp.share} of a book whose other expiries dwarf it`);
 }
 
 console.log(`✓ flows-card: ${checks} assertions — numOrNull discipline, field polarity, ATR-normalised levels, dealer-signed gamma, cumulated path, dated gross roll-off, a priced band that is never a forecast, a full source-ablation sweep, wave-2 panels holding the three-silences boundary, a cohort panel that finally names the cross-section the score was neutralised against, and a market-wide join whose ordering and unit are MEASURED rather than assumed, whose absences are quiet with the cut they missed, and whose rank never claims the session it was not read in`);

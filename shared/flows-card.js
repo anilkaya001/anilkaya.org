@@ -116,7 +116,26 @@ export const LEVEL_KINDS = Object.freeze({
   call_wall: "Call wall", put_wall: "Put wall",
 });
 
-export function buildLevels({ spot, atr, zeroGamma = null, strikeSumCrossing = null, maxPain, callWall, putWall, band = null }) {
+export const SPOT_EXPOSURE_PAGE = 500;
+export const MAX_PAIN_MIN_SHARE = 0.25;
+
+export function expiryGammaShare(expiryRows, expiry, { asOf = null } = {}) {
+  const want = typeof expiry === "string" && expiry ? expiry.slice(0, 10) : null;
+  if (!want) return null;
+  let total = 0, mine = 0;
+  for (const r of expiryRows || []) {
+    if (!r || !liveExpiry(r.expiry, asOf)) continue;
+    const c = numOrNull(callGammaLeg(r)), p = numOrNull(putGammaLeg(r));
+    if (c === null && p === null) continue;
+    const g = Math.abs(c ?? 0) + Math.abs(p ?? 0);
+    if (!(g > 0)) continue;
+    total += g;
+    if (String(r.expiry).slice(0, 10) === want) mine += g;
+  }
+  return total > 0 ? Number((mine / total).toFixed(4)) : null;
+}
+
+export function buildLevels({ spot, atr, zeroGamma = null, strikeSumCrossing = null, maxPain, maxPainExpiry = null, maxPainShare = null, callWall, putWall, band = null }) {
   const s = numOrNull(spot);
   const a = numOrNull(atr);
   if (s === null || !(s > 0)) return unavailable("no spot price");
@@ -125,7 +144,7 @@ export function buildLevels({ spot, atr, zeroGamma = null, strikeSumCrossing = n
   const hi = band ? numOrNull(band.max) : null;
   const atEdge = (px) => (lo !== null && Math.abs(px - lo) < 1e-9) || (hi !== null && Math.abs(px - hi) < 1e-9);
 
-  const measure = (kind, label, raw) => {
+  const measure = (kind, label, raw, extra = null) => {
     const px = numOrNull(raw);
     if (px === null || !(px > 0)) return null;
     const edge = (kind === "call_wall" || kind === "put_wall") && atEdge(px);
@@ -137,14 +156,19 @@ export function buildLevels({ spot, atr, zeroGamma = null, strikeSumCrossing = n
 
       distAtr: a !== null && a > 0 ? (px - s) / a : null,
       ...(edge ? { edge: "window", note: WALL_EDGE_NOTE } : {}),
+      ...(extra || {}),
     };
   };
+  const pain = typeof maxPainExpiry === "string" && maxPainExpiry
+    ? { expiry: maxPainExpiry.slice(0, 10), share: numOrNull(maxPainShare), line: MAX_PAIN_MIN_SHARE,
+      thin: numOrNull(maxPainShare) !== null && numOrNull(maxPainShare) < MAX_PAIN_MIN_SHARE }
+    : null;
 
   const cw = numOrNull(callWall), pw = numOrNull(putWall);
   const levels = [
     measure("zero_gamma", LEVEL_KINDS.zero_gamma, zeroGamma),
     measure("strike_sum_crossing", LEVEL_KINDS.strike_sum_crossing, strikeSumCrossing),
-    measure("max_pain", LEVEL_KINDS.max_pain, maxPain),
+    measure("max_pain", LEVEL_KINDS.max_pain, maxPain, pain),
     measure("call_wall", LEVEL_KINDS.call_wall, cw !== null && cw >= s ? callWall : null),
     measure("put_wall", LEVEL_KINDS.put_wall, pw !== null && pw <= s ? putWall : null),
   ].filter(Boolean);
@@ -173,12 +197,12 @@ export function buildLevels({ spot, atr, zeroGamma = null, strikeSumCrossing = n
 }
 
 export function buildGammaProfile(strikeRows, { spot, maxBars = 60 } = {}) {
-
+  const fetched = Array.isArray(strikeRows) ? strikeRows.length : 0;
   const rows = (strikeRows || []).map((r) => {
     const legs = [r.call_gamma_ask, r.call_gamma_bid, r.put_gamma_ask, r.put_gamma_bid];
     const present = legs.some((v) => numOrNull(v) !== null);
     return {
-      strike: numOrNull(r.strike ?? r.price),
+      strike: numOrNull(r.strike),
 
       gamma: present ? legs.reduce((a, v) => a + (numOrNull(v) ?? 0), 0) : null,
     };
@@ -206,6 +230,7 @@ export function buildGammaProfile(strikeRows, { spot, maxBars = 60 } = {}) {
     spot: numOrNull(spot),
     strikes: rows.length,
     bucketed: step > 1,
+    truncated: fetched >= SPOT_EXPOSURE_PAGE,
 
     bandMin: rows[0].strike,
     bandMax: rows[rows.length - 1].strike,
@@ -1623,6 +1648,8 @@ export function buildCard({
         strikeSumCrossing: features && features.gammaFlip,
 
         maxPain: painRow ? painRow.px : null,
+        maxPainExpiry: painRow ? painRow.expiry : null,
+        maxPainShare: painRow ? expiryGammaShare(expiries, painRow.expiry, { asOf: sessionDate }) : null,
         callWall: book ? book.callWall : null,
         putWall: book ? book.putWall : null,
         band: book ? { min: book.bandMin, max: book.bandMax } : null,
@@ -1683,7 +1710,7 @@ export function buildCard({
   if (zero && card.panels.levels.status === "ok") {
     card.panels.levels.zeroGamma = {
       px: numOrNull(zero.px), count: numOrNull(zero.count), nearby: Array.isArray(zero.nearby) ? zero.nearby : [],
-      coverage: numOrNull(zero.coverage), g: numOrNull(zero.g), why: zero.why || null,
+      coverage: numOrNull(zero.coverage), g: numOrNull(zero.g), why: zero.why || null, atSpot: numOrNull(zero.atSpot),
       profile: zero.profile && Array.isArray(zero.profile.x) ? zero.profile : null,
     };
   }
@@ -1857,7 +1884,7 @@ export function buildSurface(rows, {
   const expirySeen = new Map();
 
   for (const r of list) {
-    const strike = numOrNull(r.strike ?? r.price);
+    const strike = numOrNull(r.strike);
     const expiry = r.expiry ? String(r.expiry).slice(0, 10) : null;
     if (strike === null || !expiry) continue;
     const legs = [r.call_gamma_ask, r.call_gamma_bid, r.put_gamma_ask, r.put_gamma_bid];

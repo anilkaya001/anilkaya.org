@@ -1,6 +1,6 @@
 import { fitGarch } from "../shared/flows-garch.js";
-import { simulateGjr, binnedLawsFromSimulation, seedKey, ewmaVol, WORLD_LINES } from "../shared/flows-quant-world.js";
-import { binnedFromLognormal } from "../shared/flows-quant-density.js";
+import { simulateGjrQmc, binnedLawsFromSimulation, seedKey, ewmaVol, WORLD_LINES } from "../shared/flows-quant-world.js";
+import { binnedFromLognormal, garchAggregatedSd } from "../shared/flows-quant-density.js";
 import { openInterestGammaBook } from "../shared/flows-features.js";
 import {
   chainRowsByExpiry, buildSlices, zeroGammaOf, parityRate, treasuryRate, chooseRate, bookLevels,
@@ -129,8 +129,8 @@ export function garchLaw({ garch, ticker, sessionDate, closes, rate = 0.04, path
   }
   const sigma2Next = fin(g.sigma2Next) ? g.sigma2Next : Math.pow(g.nextVol / 100, 2) / 252;
   const params = { omega: g.omega / 1e4, alpha: g.alpha, beta: g.beta, gamma: 0, nu: g.nu, lambda: g.lambda, sigma2Next };
-  const sim = simulateGjr(params, { seed: seedKey(ticker, sessionDate), horizons, paths });
-  const laws = binnedLawsFromSimulation(sim, forwards);
+  const sim = simulateGjrQmc(params, { seed: seedKey(ticker, sessionDate), horizons, paths });
+  const laws = binnedLawsFromSimulation(sim, forwards, { sd: (h) => garchAggregatedSd(params, h) });
   return {
     model: "garch", grade, why: Array.isArray(g.why) ? g.why.slice() : [],
     knots: horizons.filter((h) => laws[h]).map((h) => ({ h, edges: laws[h].edges, means: laws[h].means })),
@@ -151,7 +151,13 @@ export function rateFromRuns({ rowsByTicker, spotOf, sessionDate, treasuryRaw = 
   return chooseRate({ treasury: treasuryRate(treasuryRaw) });
 }
 
-export function preparePass({ rowsByTicker, sessionDate, rate, spotOf, atrOf, expiriesOf, eventOf = () => null } = {}) {
+export function vendorGrossPer1pct(gross, spot, unit) {
+  if (!fin(gross) || !(gross > 0)) return null;
+  if (unit === "pct$") return gross;
+  return fin(spot) && spot > 0 ? gross * spot * spot / 100 : null;
+}
+
+export function preparePass({ rowsByTicker, sessionDate, rate, spotOf, atrOf, expiriesOf, eventOf = () => null, gammaUnit = "share" } = {}) {
   const asOfMs = closeUtcMs(sessionDate);
   const preps = new Map();
   for (const ticker of [...rowsByTicker.keys()].sort()) {
@@ -163,7 +169,7 @@ export function preparePass({ rowsByTicker, sessionDate, rate, spotOf, atrOf, ex
     const { built, input } = buildSlices(chain.expiries, { spot, asOfMs, rate: rate.r, event });
     if (!built.length) continue;
     const book = openInterestGammaBook(expiriesOf(ticker) || [], { asOf: sessionDate });
-    const zero = zeroGammaOf(built, { spot, atr: atrOf(ticker), vendorGross: book.gross });
+    const zero = zeroGammaOf(built, { spot, atr: atrOf(ticker), vendorGross: vendorGrossPer1pct(book.gross, spot, gammaUnit) });
     const near30 = built.slice().sort((a, b) => Math.abs(a.dte - 30) - Math.abs(b.dte - 30) || a.T - b.T)[0];
     const sk = near30 && near30.slice.method !== "mixture" && near30.slice.method !== "flat" ? skewMetrics(near30.slice) : null;
     preps.set(ticker, { ticker, spot, asOfMs, chain, input, built, zero, rr25: sk ? sk.rr25 : null, contracts: chain.contracts });

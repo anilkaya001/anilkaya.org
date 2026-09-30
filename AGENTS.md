@@ -146,6 +146,7 @@ header readback with this repository after any dashboard rule change.
 | `tests/worker-regression.mjs` | Real local Wrangler routing, headers, API, and D1 tests. |
 | `tests/regression.mjs` | Full Playwright browser regression suite. |
 | `shared/markets.js`, `assets/js/market-ticker.js` | The landing index ticker: the Worker's Yahoo parse (the change is against the previous session's close taken from the same response's dated bars, never `chartPreviousClose`; each quote keeps its own `asOf`, `asOfDay`, `prevClose`, `prevDay` and, when the response names the session of the quote's own day, `sessionEnd`) and the strip that prints each quote's own İstanbul time, `Close <weekday>` for a closed market (a close is a quote struck within five minutes of the exchange's `sessionEnd`; the lag of the quote behind the fetch decides only where there is none), and a dash for a quote with no base. |
+| `tests/flows-desk-client.mjs`, `tests/desk-fixtures.mjs` | The Premium desk's client alone: its pure functions (the frontier against a brute-force Pareto set, balance parsing, tenor buckets, cent sizing, net delta) in a Node `vm`, and the page in Chromium against payload fixtures built to the chain contract (basis, time-value yield, tooltips, banners); no server. |
 | `tests/markets-contract.mjs`, `tests/market-ticker-render.mjs` | The Yahoo parse against dated five-day responses (weekend, Tokyo morning, null trailing bar, no timestamps) and the strip rendered in Chromium with a fixed clock; neither starts a server. |
 | `shared/flows-freshness.js` | The Eastern clock (arithmetic, proven equal to the IANA zone), market phases, the freshness threshold table, `X-Fresh-*` headers, and the live clock's due-tests. |
 | `shared/flows-ledger.js` | The per-day session ledger: the `flows_ledger` DDL, the statement builders the Tier 1 tick, the focus tick, the heartbeat write and the nightly's `meta` write append to a batch they already issue, the gap limits (the stale lines of `FRESH_CLASSES`), the view served as `ledger` on the ingest `clock` key, and the worst-key lapse the Tier 1 tick reads from the live rows. |
@@ -154,6 +155,7 @@ header readback with this repository after any dashboard rule change.
 | `scripts/flows-legs/live.mjs`, `live-fake.mjs` | The Actions `--live` leg (Tier 2, `live:*` keys only) and its fake vendor for `--dry-run`. `runLiveLoop` keeps the loop alive between sessions when handed a `watch`, and `chainDispatch` sends any workflow_dispatch with the job's own token. |
 | `scripts/flows-legs/witness.mjs`, `starts.mjs`, `watch.mjs` | The loop's mutual witness (Tier 1 older than 25 minutes, `live:breadth` older than 45, the nightly not landed by 21:00 ET, a broken chain, a blind ingest door; one deduplicated GitHub Issue per check, written and adopted only as `github-actions[bot]`, closed after three healthy ticks and reopened on a flap), the 17:30 ET nightly dispatch with the job's own token (a permanent refusal capped at four calls, a transient one retried every half hour to 20:30 ET), and the per-tick composition of the two over the OIDC ingest door. |
 | `scripts/flows-legs/live-world-fake.mjs`, `live-day.mjs` | A fake GitHub API and a fake Worker world on a virtual clock, and the eight dry days `--live --dry-run` runs through them. |
+| `shared/flows-basis.js`, `tests/flows-basis-contract.mjs` | The premium desk's basis: the vendor's `{data:{...}}` stock-state envelope, a spot that is only a regular-session price (`printOf`: the live print in the regular session, else the newest regular close), and the coherence gate between that spot and the chain (`coherence`: impossible asks, the strike bracket the `maybe_otm_only` request guarantees, one underlying fitted to the nearest expiries, a rebase past 0.25% or a refusal when the fit is too thin). The contract runs the Worker route in Node against a stubbed vendor. The desk's `asOf` is the New York date of the READ and `days` count from it; `UW_NOW` (an ISO instant, honoured only while `UW_BASE` redirects the vendor away from production) pins that read clock so the workerd suites' dated fixtures stay valid. |
 | `shared/flows-focus.js` | The home page's focus roster (Gold, Silver and Copper groups, the Mag 7, the metal funds and miners) and the NASDAQ-10 derivation from QQQ holdings. A leaf module: it imports nothing, so the Worker, the pipeline and the live leg can all read it without a cycle. |
 | `scripts/flows-legs/focus.mjs`, `health.mjs` | The nightly `focus` and `roster` payload builders; the nightly health gate and its repair messages. |
 | `assets/js/flows-fresh.js` | The client freshness helper (`FlowsUI.freshFrom`, `heartbeat`); every key a heartbeat reads registers its server verdict with the pill, which is the worst case over its sources (`FlowsUI.freshAggregate`, in `flows-ui.js`), so a page needs no line per region. |
@@ -162,6 +164,7 @@ header readback with this repository after any dashboard rule change.
 | `tests/flows-ledger-contract.mjs` | The ledger's SQL over a real SQLite (gaps clipped to the session, ok and failed ticks, partial focus reads, passes, the nightly's landing, retention), its zero-extra-round-trip and never-blocks-the-tick properties on the real tick functions, its ingest view, and the health gate's reading of it: gap lines at the stale lines, a nightly that never landed, cards failed or skipped, the roster shortfall and the 5xx burst. |
 | `tests/flows-verdict-contract.mjs` | The two reversible verdicts, swept over a real SQLite clock and the real Tier 1 tick: a vendor that lags and recovers at every five-minute mark, a real closure's cost, a calendar holiday, a stalled tide with and without recovery, and the Tier 2 loop's waits. |
 | `tests/flows-reads-contract.mjs` | The Worker's D1 round trips and rows read per read route, counted on a fake binding (the rows-read ceilings, the last good copy served while the store is unreadable): the single-flight schema bootstrap, the absent-card decision, the live overlays and the ticker reading. |
+| `tests/flows-quant-audit.mjs`, `tests/fixtures-quant-audit.json` | The options engine against independent references: the horizon of a real-world law priced intraday, its 2,000,000-path scipy simulation at nine horizons, the Student t and Hansen skew-t quantiles and the Sobol net the pipeline draws through, dividends on the stock leg, the desk's carry, smile shape and in-the-money quotes, the earnings gate and the grades. The fixture's provenance string names the scipy version, the path count and the seed. |
 | `tests/flows-readers-contract.mjs`, `tests/flows-readers-render.mjs` | What a reader is told about age: the tape's TTL against the close, the quote card's own read time, the news overlay; and the boards' live dots, the home page's pill and news card, driven with stubbed routes. The ticker's tape labels are in `tests/flows-ticker-contract.mjs`. |
 
 ## Curriculum and stage contracts
@@ -517,16 +520,24 @@ flows-legs-contract
 flows-live-contract    flows-freshness-contract
 flows-starts-contract
 flows-quant-card       flows-track-render
+flows-quant-audit
 flows-pipeline-contract  flows-reads-contract  flows-ledger-contract
 flows-verdict-contract
 flows-readers-contract   flows-readers-render
-markets-contract
+markets-contract         flows-desk-client
+flows-basis-contract
 ```
 
 `market-ticker-render` needs Playwright's Chromium but no server: it serves the
 landing script and a snapshot from `page.route` on a fake origin and fixes
 `Date.now` in the page. Run it with `PLAYWRIGHT_BROWSERS_PATH` set like the
 other browser suites.
+
+`flows-desk-client` needs Chromium and no server either: `tests/desk-fixtures.mjs` serves the
+assets from disk and the chain payloads from `page.route`, so the Premium desk runs against
+fixtures built to the chain payload contract rather than against workerd. Its Node half runs
+`assets/js/flows-desk.js` in a `vm` with no `document`, which is the only context that exposes
+the desk's pure functions as `__FlowsDeskTest`.
 
 `flows-starts-contract` was measured on 2026-09-29: about 4 s with no server. It
 spawns the pipeline a handful of times as a child process, against loopback HTTP
@@ -577,7 +588,14 @@ CPU time is what the Workers limit meters and a loaded machine inflates wall
 time several-fold. That clock ticks at the kernel's resolution (4 ms in the
 sandbox), so runs are timed in windows of five and the budget is read from
 the window means. The child warms the engine first, so it does not measure a
-cold isolate's first requests.
+cold isolate's first requests. Since 2026-09-30 it also times a fixed
+reference workload in the same windows, and the budget is held as a ratio to
+its median (worst case under 1.2, costliest window under 2.0): the absolute
+median moved from 4.6 to 6.4 ms between runs of the same code on a shared
+machine while the ratio held.
+`flows-quant-audit` was measured on 2026-09-30: under 6 s with no server. It
+builds three GARCH laws through the pipeline's 32,768-path draws and runs a
+1.5M-draw JavaScript reference for the earnings overlay.
 `flows-quant-card` was measured the same day: under 2 s with no server. It
 rebuilds the `FlowsQuant` bundle in memory and fails when the committed file
 differs, then runs the bundle in a bare `vm` context against the modules.

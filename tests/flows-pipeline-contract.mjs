@@ -1870,8 +1870,8 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(card.v, 3, "the schema version is 3, where walls, flow peaks, the crossing, zero gamma and the VRP were renamed; these chain panels are additions to it, not redefinitions");
   ok(card.engine && Array.isArray(card.engine.facts) && Array.isArray(card.engine.structures) && card.engine.engine === "q1",
      "a deep dry-run card carries the engine block, built from Black-Scholes fixture quotes");
-  ok(card.engine.pLaw && card.engine.pLaw.knots.length === 6 && card.engine.pLaw.knots.every((k) => k.edges.length === 65 && k.means.length === 64),
-     "with a 64-bin real-world law at six horizons");
+  ok(card.engine.pLaw && card.engine.pLaw.knots.map((k) => k.h).join() === "1,2,3,5,10,21,42,63,126" && card.engine.pLaw.knots.every((k) => k.edges.length === 65 && k.means.length === 64),
+     "with a 64-bin real-world law at nine horizons, 1, 2 and 3 sessions among them");
   ok(card.engine.ideas.every((id) => card.engine.structures.some((st) => st.id === id)), "and every ranked idea resolves to a published structure");
   ok(card.engine.expiries.every((e) => e.forward && e.smile && e.smile.method), "and every fitted expiry names its forward and its smile method");
   for (const key of ["ivSurface", "skewTerm", "topContracts", "aggressor"]) {
@@ -2183,10 +2183,13 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "BOTH the truncated refusal and the path that publishes scalars, in one session");
   }
 
-  const cardBytes = JSON.stringify(card).length;
+  const cardBytes = JSON.stringify({ ...card, engine: undefined }).length;
   ok(cardBytes < 100 * 1024,
-     `a card with all four chain panels is ${(cardBytes / 1024).toFixed(1)}KB, inside the ` +
+     `a card with all four chain panels is ${(cardBytes / 1024).toFixed(1)}KB before its engine block, inside the ` +
      "100KB self-check the builder enforces");
+  const wholeBytes = JSON.stringify(card).length;
+  ok(wholeBytes <= 128 * 1024 || (card.engine && card.engine.status === "split"),
+     `and with the engine block attached it is ${(wholeBytes / 1024).toFixed(1)}KB, inside the 128KB ingest cap or split to card-x`);
   for (const [key, payload] of [["movers", movers], ["sector:trix", trix], ["record", record]]) {
     const bytes = JSON.stringify(payload).length;
     ok(bytes < 32 * 1024,

@@ -18,8 +18,11 @@ import { PROJECT_BY_ID } from "./shared/project-manifest.js";
 import { MARKET_INDICES, MARKET_STALE_MS, marketRefreshDue, parseIndexQuote, buildSnapshot } from "./shared/markets.js";
 
 import {
-  rankChain, RANK_KEYS, crossesEarnings, numOrNull, parseOptionSymbol, ivConvention,
+  rankChain, RANK_KEYS, crossesEarnings, numOrNull, parseOptionSymbol, ivConvention, ivSurface,
+  hasNoEarnings, optionRoot, PRICING_RATE, DEFAULT_GATES,
 } from "./shared/flows-premium.js";
+import { stateOf, printOf, coherence } from "./shared/flows-basis.js";
+import { etDayOf } from "./shared/flows-quant-time.js";
 import { isRefreshWindow, freshHeaders, phaseAt, easternDay, sessionOpen } from "./shared/flows-freshness.js";
 import * as FLOWS_LIVE from "./shared/flows-live-worker.js";
 import { LAB_SESSION_MS, recordSignIn } from "./shared/lab-sign-in.js";
@@ -1458,6 +1461,7 @@ function neuronFrom(row) {
 
 async function markNeuronGenerating(env, scope, fingerprint, model) {
   const now = new Date();
+  const startedAt = now.toISOString();
   const cutoff = new Date(now.getTime() - NEURON_GENERATING_MS).toISOString();
   try {
     const res = await env.DB.prepare(
@@ -1465,24 +1469,25 @@ async function markNeuronGenerating(env, scope, fingerprint, model) {
       "VALUES (?, ?, ?, '', '[]', 0, ?, 'generating', ?) ON CONFLICT(scope) DO UPDATE SET " +
       "version=excluded.version, fingerprint=excluded.fingerprint, summary='', ideas='[]', llm=0, " +
       "model=excluded.model, guard='generating', generated_at=excluded.generated_at " +
-      "WHERE flows_neuron.guard IS NOT 'generating' OR flows_neuron.fingerprint != excluded.fingerprint " +
-      "OR flows_neuron.generated_at < ?",
-    ).bind(scope, FLOWS_NEURON.NEURON_CONTEXT_VERSION, fingerprint, model, now.toISOString(), cutoff).run();
-    return !(res && res.meta && typeof res.meta.changes === "number") || res.meta.changes > 0;
+      "WHERE flows_neuron.guard IS NOT 'generating' OR flows_neuron.generated_at < ?",
+    ).bind(scope, FLOWS_NEURON.NEURON_CONTEXT_VERSION, fingerprint, model, startedAt, cutoff).run();
+    const mine = !(res && res.meta && typeof res.meta.changes === "number") || res.meta.changes > 0;
+    return { startedAt: mine ? startedAt : null, failed: false };
   } catch {
-    return true;
+    return { startedAt: null, failed: true };
   }
 }
 
-async function writeNeuron(env, scope, fingerprint, summary, ideas, llm, model, guard) {
+async function writeNeuron(env, scope, fingerprint, summary, ideas, llm, model, guard, startedAt) {
   return env.DB.prepare(
     "INSERT INTO flows_neuron (scope, version, fingerprint, summary, ideas, llm, model, guard, generated_at) " +
     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(scope) DO UPDATE SET " +
     "version=excluded.version, fingerprint=excluded.fingerprint, summary=excluded.summary, " +
     "ideas=excluded.ideas, llm=excluded.llm, model=excluded.model, guard=excluded.guard, " +
-    "generated_at=excluded.generated_at",
+    "generated_at=excluded.generated_at " +
+    "WHERE flows_neuron.fingerprint = excluded.fingerprint OR flows_neuron.generated_at < excluded.generated_at",
   ).bind(scope, FLOWS_NEURON.NEURON_CONTEXT_VERSION, fingerprint, summary, JSON.stringify(ideas || []),
-    llm ? 1 : 0, model, guard, new Date().toISOString()).run();
+    llm ? 1 : 0, model, guard, startedAt || new Date().toISOString()).run();
 }
 
 function ideaProvenance(r) {
@@ -1503,7 +1508,12 @@ function engineProvenance(r) {
     ? refused.length + " of its answer" + (refused.length === 1 ? " was" : "s were") + " refused (" + codes.join(", ") + ")"
     : "";
   const head = "Figures, facts and structures computed by the engine; the summary is deterministic.";
-  if (!ideas.length && r.verdict !== "stand-aside") return head + " The engine ranked no structure worth showing.";
+  if (!ideas.length) {
+    if (r.verdict !== "stand-aside") return head + " The engine ranked no structure worth showing.";
+    return head + (r.llm === true && r.model
+      ? " " + modelName(r.model) + " was asked and agreed: the engine\u2019s own verdict is that no structure it priced clears its bar."
+      : " The engine stands aside: no structure it priced clears its bar.");
+  }
   if (ideas.some((i) => i && i.from === "model")) {
     return head + " " + modelName(r.model) + " chose the ideas as structure ids and verdict codes, each checked against " +
       "the facts" + (refusedSaid ? "; " + refusedSaid : "") + ".";
@@ -1550,10 +1560,10 @@ function neuronContextFor(card) {
   return FLOWS_NEURON.buildContext(card, { expectedSession: age.expected });
 }
 
-async function generateEngineNeuron(env, scope, ctx, fingerprint, plain, chain) {
+async function generateEngineNeuron(env, scope, ctx, fingerprint, plain, chain, startedAt) {
   const fallback = FLOWS_NEURON.engineFallback(ctx);
   const store = (res, llm, model, guard) => writeNeuron(env, scope, fingerprint, plain,
-    { v: 3, verdict: res.verdict, claims: res.claims, ideas: res.ideas, refused: res.refused }, llm, model, guard).catch(() => {});
+    { v: 3, verdict: res.verdict, claims: res.claims, ideas: res.ideas, refused: res.refused }, llm, model, guard, startedAt).catch(() => {});
   if (!env.AI || !chain.length) { await store(fallback, false, null, null); return; }
   const { system, user } = FLOWS_NEURON.promptForEngine(ctx);
   const said = await askModels(meteredAi(env), chain, [{ role: "system", content: system }, { role: "user", content: user }],
@@ -1566,19 +1576,20 @@ async function generateEngineNeuron(env, scope, ctx, fingerprint, plain, chain) 
   await store(vet, true, said.model, vet.refused.length ? "ideas:" + vet.refused.length + " refused" : null);
 }
 
-async function generateNeuron(env, ticker, ctx, fingerprint) {
+async function generateNeuron(env, ticker, ctx, fingerprint, startedAt) {
   const scope = "ticker:" + ticker;
   const chain = aiChain(env);
   const plain = FLOWS_NEURON.deterministicSummary(ctx);
-  if (ctx.engine) return generateEngineNeuron(env, scope, ctx, fingerprint, plain, chain);
+  if (ctx.engine) return generateEngineNeuron(env, scope, ctx, fingerprint, plain, chain, startedAt);
   const stateIdea = FLOWS_NEURON.stateIdea(ctx);
   const own = FLOWS_NEURON.vetIdeas(stateIdea ? [stateIdea] : [], ctx).ideas;
   if (!env.AI || !chain.length) {
-    await writeNeuron(env, scope, fingerprint, plain, own, false, null, null).catch(() => {});
+    await writeNeuron(env, scope, fingerprint, plain, own, false, null, null, startedAt).catch(() => {});
     return;
   }
   const { system, user } = FLOWS_NEURON.promptForNeuron(ctx);
   const facts = FLOWS_NEURON.guardFacts(ctx);
+  const guardOpts = FLOWS_NEURON.guardOptions(ctx);
   const messages = [{ role: "system", content: system }, { role: "user", content: user }];
   let parsed = null;
   let lastText = null;
@@ -1593,7 +1604,7 @@ async function generateNeuron(env, ticker, ctx, fingerprint) {
         if (said.failure) refused = "unreachable:reparse:" + said.failure.why;
         break;
       }
-      await writeNeuron(env, scope, fingerprint, plain, own, false, said.model, said.guard).catch(() => {});
+      await writeNeuron(env, scope, fingerprint, plain, own, false, said.model, said.guard, startedAt).catch(() => {});
       return;
     }
     model = said.model;
@@ -1602,24 +1613,25 @@ async function generateNeuron(env, ticker, ctx, fingerprint) {
   }
   if (parsed === null) {
     const prose = typeof lastText === "string" && !/[{}[\]]|"summary"|"ideas"/.test(lastText);
-    const verdict = prose ? FLOWS_ASK.guardAnswer(lastText, facts, { smallIntegers: false }) : { ok: false };
+    const verdict = prose && FLOWS_NEURON.proseIssue(lastText, "summary") === null ? FLOWS_ASK.guardAnswer(lastText, facts, guardOpts) : { ok: false };
     await writeNeuron(env, scope, fingerprint, verdict.ok ? lastText : plain, own, verdict.ok, model,
-      verdict.ok ? "ideas:unparsable" : refused || "ideas:unparsable").catch(() => {});
+      verdict.ok ? "ideas:unparsable" : refused || "ideas:unparsable", startedAt).catch(() => {});
     return;
   }
   let summary = plain;
   let llm = false;
   let guard = null;
   if (parsed.summary) {
-    const verdict = FLOWS_ASK.guardAnswer(parsed.summary, facts, { smallIntegers: false });
+    const unsafe = FLOWS_NEURON.proseIssue(parsed.summary, "summary") !== null;
+    const verdict = unsafe ? { ok: false } : FLOWS_ASK.guardAnswer(parsed.summary, facts, guardOpts);
     if (verdict.ok) { summary = parsed.summary; llm = true; }
-    else guard = verdict.invented ? "invented" : "forecast";
+    else guard = unsafe ? "unsafe" : verdict.invented ? "invented" : verdict.mislabeled ? "mislabeled" : "forecast";
   } else {
     guard = refused || "summary:empty";
   }
   const vetted = FLOWS_NEURON.vetIdeas((stateIdea ? [stateIdea] : []).concat(parsed.ideas), ctx);
   if (guard === null && vetted.refused.length) guard = "ideas:" + vetted.refused.length + " refused";
-  await writeNeuron(env, scope, fingerprint, summary, vetted.ideas, llm, model, guard).catch(() => {});
+  await writeNeuron(env, scope, fingerprint, summary, vetted.ideas, llm, model, guard, startedAt).catch(() => {});
 }
 
 async function tickerNeuron(env, ctx, ticker) {
@@ -1670,15 +1682,19 @@ async function tickerNeuron(env, ctx, ticker) {
       }
     } else if (prior.summary) {
       const retryable = retryableGuard(prior.guard, priorAge) && priorAge > NEURON_RETRY_MS;
-      if (!retryable) return json(neuronShape("ok", ticker, context, prior));
+      if (!retryable) return json(neuronShape("ok", ticker, context, FLOWS_NEURON.applyStaleCap(prior, context)));
     }
   }
 
-  const mine = await markNeuronGenerating(env, scope, fingerprint, askModel(env));
-  if (!mine) {
+  const { startedAt, failed } = await markNeuronGenerating(env, scope, fingerprint, askModel(env));
+  if (failed) {
+    return json(neuronShape("unavailable", ticker, context, null,
+      { ...STORE_GONE, note: "The store could not record that a reading was started, so none was started." }));
+  }
+  if (!startedAt) {
     return json(neuronShape("pending", ticker, context, null, { note: "Neuron is reading this card now." }));
   }
-  const work = generateNeuron(env, ticker, context, fingerprint).catch((error) => {
+  const work = generateNeuron(env, ticker, context, fingerprint, startedAt).catch((error) => {
     console.error(JSON.stringify({ message: "neuron failed", ticker,
       error: error instanceof Error ? error.message : String(error) }));
   });
@@ -1985,6 +2001,33 @@ async function serveCachedVendorRead({ ctx, cacheKey, wantsRefresh, build, ttlSe
   return json(payload, 200, { "Cache-Control": "no-store", "X-Chain-Cache": "miss", "X-Chain-Age": "0" });
 }
 
+function chainReadMs(env) {
+  if (env.UW_BASE && env.UW_NOW) {
+    const pinned = Date.parse(env.UW_NOW);
+    if (Number.isFinite(pinned)) return pinned;
+  }
+  return Date.now();
+}
+
+function offMarketChain(list, ivBasis, rankBy) {
+  return {
+    rows: [],
+    gated: {
+      unpriceable: 0, nonStandard: 0, offMarket: list.length, spread: 0, openInterest: 0,
+      premium: 0, expiry: 0, strategy: 0,
+    },
+    screened: list.length,
+    priced: 0,
+    ivBasis,
+    rankedBy: rankBy,
+    gates: DEFAULT_GATES,
+    ivSurface: {
+      ...ivSurface([], { ivBasis }),
+      reason: "the chain and the underlying's price do not belong to the same moment, so no smile is drawn",
+    },
+  };
+}
+
 async function buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit }) {
   const t = encodeURIComponent(ticker);
   const chainPage = (page) => uwFetch(env, `/api/stock/${t}/option-contracts`, {
@@ -2005,6 +2048,7 @@ async function buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit }) 
     cachedTickerInfo(env, ctx, ticker),
     cardPending,
   ]);
+  const readMs = chainReadMs(env);
 
   const unwrap = (r) => (Array.isArray(r) ? r : (r && r.data) || []);
   const rows = unwrap(firstPage);
@@ -2019,51 +2063,66 @@ async function buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit }) 
     truncated = second.length >= CHAIN_PAGE_SIZE;
   }
 
-  let dailyClose = null, dailyDate = null;
-  for (const b of bars) {
-    const close = Number(b && (b.close ?? b.c));
-    const date = b && (b.date || b.start_time || b.timestamp);
-    if (!Number.isFinite(close) || close <= 0 || !date) continue;
-    const day = String(date).slice(0, 10);
-    if (dailyDate === null || day > dailyDate) { dailyDate = day; dailyClose = close; }
+  const print = printOf({ state, bars, readMs });
+  if (print === null) throw new HttpError(502, "chain_no_spot", "No regular-session price for that symbol");
+
+  const asOf = etDayOf(readMs);
+  const live = stateOf(state);
+
+  const engineRate = cardRead && cardRead.card && cardRead.card.engine && cardRead.card.engine.rate &&
+    Number.isFinite(cardRead.card.engine.rate.r) ? cardRead.card.engine.rate.r : PRICING_RATE;
+  let found;
+  try {
+    found = coherence({
+      rows, spot: print.spot, asOf, printSource: print.source, readMs, rate: engineRate, ticker,
+    });
+  } catch (error) {
+    console.warn(JSON.stringify({ message: "chain coherence check failed", ticker,
+      error: error instanceof Error ? error.message : String(error) }));
+    found = { status: "unchecked", spot: print.spot, printSpot: print.spot, impliedSpot: null, offMarket: [] };
   }
+  const spot = found.spot;
 
-  const live = state && !Array.isArray(state) ? state : (state && state.data) || null;
-  const liveClose = live ? Number(live.close) : NaN;
-  const useLive = Number.isFinite(liveClose) && liveClose > 0;
-
-  const spot = useLive ? liveClose : dailyClose;
-  const spotSource = useLive ? "stock-state" : "daily-close";
-  if (!(spot > 0)) throw new HttpError(502, "chain_no_spot", "No usable price for that symbol");
-
-  const tapeTime = live && live.tape_time ? String(live.tape_time) : null;
-  const tapeDay = tapeTime && /^\d{4}-\d{2}-\d{2}/.test(tapeTime) ? tapeTime.slice(0, 10) : null;
-  const asOf = tapeDay || dailyDate;
-  if (!asOf) throw new HttpError(502, "chain_no_spot", "No usable session date for that symbol");
-
-  const ranked = rankChain(rows, { spot, asOf, strategy, rankBy, limit, ticker });
+  const ranked = found.status === "mismatch"
+    ? offMarketChain(rows, "not read: the quotes and the price disagree", rankBy)
+    : rankChain(rows, { spot, asOf, strategy, rankBy, limit, ticker, readMs, rate: engineRate });
 
   const earnDate = info ? info.nextEarningsDate : null;
+  const noEarnings = info ? earnDate === null && hasNoEarnings(info.issueType) : false;
   for (const row of ranked.rows) {
-    row.crossesEarnings = info ? crossesEarnings(row.expiry, earnDate, info.announceTime) : null;
+    row.crossesEarnings = !info ? null
+      : noEarnings ? false
+        : crossesEarnings(row.expiry, earnDate, info.announceTime, { asOf });
   }
   return {
     ticker, spot, asOf,
-    spotSource,
+    sessionDate: print.sessionDate,
+    spotSource: print.source === "stock-state" ? "stock-state" : "daily-close",
 
-    marketTime: live && live.market_time ? String(live.market_time) : null,
-    tapeTime,
-    prevClose: live && Number(live.prev_close) > 0 ? Number(live.prev_close) : dailyClose,
+    basis: {
+      status: found.status,
+      spot,
+      printSpot: found.printSpot,
+      printSource: print.source,
+      printNote: print.note,
+      impliedSpot: found.impliedSpot,
+      offMarket: found.offMarket.length,
+    },
+
+    marketTime: print.marketTime,
+    tapeTime: print.tapeTime,
+    prevClose: numOrNull(live && live.prev_close) > 0 ? numOrNull(live.prev_close) : print.spot,
     strategy, ...ranked,
 
     truncated,
     pageSize: CHAIN_PAGE_SIZE,
 
     earnings: info
-      ? { date: earnDate, announceTime: info.announceTime, issueType: info.issueType }
+      ? { date: earnDate, announceTime: info.announceTime, issueType: info.issueType,
+        past: earnDate !== null && earnDate < asOf }
       : null,
     engine: deskEngine(cardRead && cardRead.card, Date.now()),
-    generatedAt: new Date().toISOString(),
+    generatedAt: new Date(readMs).toISOString(),
   };
 }
 
@@ -2127,28 +2186,13 @@ async function buildStrategyContext(env, ctx, ticker) {
     uwFetch(env, `/api/stock/${t}/stock-state`, {}).catch(() => null),
     cachedTickerInfo(env, ctx, ticker),
   ]);
+  const readMs = chainReadMs(env);
 
-  const bars = unwrapRows(candles);
-  let dailyClose = null, dailyDate = null;
-  for (const b of bars) {
-    const close = numOrNull(b && (b.close ?? b.c));
-    const date = b && (b.date || b.start_time || b.timestamp);
-    if (close === null || close <= 0 || !date) continue;
-    const day = String(date).slice(0, 10);
-    if (dailyDate === null || day > dailyDate) { dailyDate = day; dailyClose = close; }
-  }
-
-  const live = state && !Array.isArray(state) ? state : (state && state.data) || null;
-  const liveClose = numOrNull(live && live.close);
-  const useLive = liveClose !== null && liveClose > 0;
-  const spot = useLive ? liveClose : dailyClose;
-
-  if (!(spot > 0)) throw new HttpError(502, "chain_no_spot", "No usable price for that symbol");
-
-  const tapeTime = live && live.tape_time ? String(live.tape_time) : null;
-  const tapeDay = tapeTime && /^\d{4}-\d{2}-\d{2}/.test(tapeTime) ? tapeTime.slice(0, 10) : null;
-
-  const asOf = tapeDay || dailyDate;
+  const print = printOf({ state, bars: unwrapRows(candles), readMs });
+  if (print === null) throw new HttpError(502, "chain_no_spot", "No regular-session price for that symbol");
+  const spot = print.spot;
+  const live = stateOf(state);
+  const asOf = print.sessionDate;
   if (!asOf) throw new HttpError(502, "chain_no_spot", "No usable session date for that symbol");
 
   const readExpiries = (raw) => readExpiryBreakdown(unwrapRows(raw));
@@ -2182,10 +2226,14 @@ async function buildStrategyContext(env, ctx, ticker) {
   return {
     mode: "context",
     ticker, spot, asOf,
-    spotSource: useLive ? "stock-state" : "daily-close",
-    marketTime: live && live.market_time ? String(live.market_time) : null,
-    tapeTime,
-    prevClose: numOrNull(live && live.prev_close) ?? dailyClose,
+    spotSource: print.source === "stock-state" ? "stock-state" : "daily-close",
+    basis: {
+      status: "unchecked", spot, printSpot: spot, printSource: print.source, printNote: print.note,
+      impliedSpot: null, offMarket: 0,
+    },
+    marketTime: print.marketTime,
+    tapeTime: print.tapeTime,
+    prevClose: numOrNull(live && live.prev_close) ?? print.spot,
 
     expiries,
     expiryStatus: breakdown === null ? "unreadable" : (expiries.length ? "ok" : "quiet"),
@@ -2206,7 +2254,7 @@ async function buildStrategyContext(env, ctx, ticker) {
 
 function strategyEngine({ ticker, expiry, calls, puts, spot, card, nowMs }) {
   const block = card && card.engine && typeof card.engine === "object" && Array.isArray(card.engine.facts) ? card.engine : null;
-  const book = bookRows(calls, puts, ticker);
+  const book = bookRows(calls, puts, optionRoot(ticker));
   const rows = book.length ? [{ expiry, rows: book }] : [];
   if (!rows.length) return { status: "unavailable", reason: "no contract on this expiry parsed as the ticker's own" };
   if (!(spot > 0)) return { status: "unavailable", reason: "no live spot to price against" };

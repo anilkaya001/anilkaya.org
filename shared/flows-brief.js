@@ -337,7 +337,7 @@ export function briefNext(store, options) {
     const pctSaid = (Math.abs(f.d) * 100).toFixed(1);
     const away = pctSaid + "% " + (f.d > 0 ? "above" : "below") + " spot";
     facts.push(fact("flip",
-      f.t + " sits closest to its gamma flip, which is " + (f.d === 0 ? "at spot" : away) + ".",
+      f.t + " sits closest to the strike-sum crossing of its flow ladder, which is " + (f.d === 0 ? "at spot" : away) + ".",
       { ticker: f.t, distance: f.d, distancePct: Number(pctSaid) }));
   }
 
