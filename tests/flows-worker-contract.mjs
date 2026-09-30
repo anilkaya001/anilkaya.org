@@ -1343,7 +1343,7 @@ try {
         const t = u.searchParams.get("ticker");
         const data = u.pathname === "/api/screener/stocks" && t === "GLD" ? [{ ticker: "GLD", issue_type: "ETF", full_name: "SPDR Gold Shares",
           sector: null, close: "391.645", prev_close: "392.88", iv30d: "0.182", iv_rank: "41.5", implied_move_perc: "0.021", put_call_ratio: "0.8",
-          date: "2026-09-24" }] : [];
+          date: "2026-09-24", quote_time: Date.now() - 90000 }] : [];
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ data }));
       });
@@ -1357,6 +1357,8 @@ try {
            `T7: a symbol outside the universe is classified by ONE screener read; an ETF gets a quote page (${JSON.stringify(gld).slice(0, 160)})`);
         ok(gld.u.px === 391.645 && gld.u.prev === 392.88 && gld.u.ivRank === 41.5 && gld.u.iv30 === 0.182 && gld.sessionDate === "2026-09-24",
            "with the screener's own values, in the strip's names and units");
+        ok(Number.isInteger(gld.u.qa) && gld.u.qa >= 89 && gld.u.qa < 900,
+           `and the quote's own age, from the vendor's quote_time to the moment the card was built, so a null qa means the vendor sent no stamp and nothing else (${gld.u.qa})`);
         eq((await (await C("/api/flows/card?t=ZZZZ")).json()).why, "unknown", "a symbol the vendor does not know is unknown");
         const reads = asked.filter((a) => a.startsWith("/api/screener/stocks")).length;
         eq(reads, 2, "one screener read per symbol");
